@@ -1,0 +1,657 @@
+/* ============================================================
+   CSS 自定义变量 - 每主题一套
+   ============================================================ */
+:root {
+  /* 默认变量（浅色，确保无 data-theme 时也正常） */
+  --color-bg-primary: #f5f7fa;
+  --color-bg-secondary: #ffffff;
+  --color-bg-card: #ffffff;
+  --color-bg-hover: #eef2f7;
+  --color-bg-input: #ffffff;
+
+  --color-blue-primary: #2E86AB;
+  --color-blue-dark: #1E3A5F;
+  --color-blue-light: #1a6e8e;
+
+  --color-text-primary: #1a1d27;
+  --color-text-secondary: #4a5270;
+  --color-text-muted: #8a93a8;
+
+  --color-success: #389e0d;
+  --color-warning: #d48806;
+  --color-error: #cf1322;
+  --color-purple: #7b2d8b;
+  --color-orange: #c25f0a;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+
+  --shadow-card: 0 2px 12px rgba(0, 0, 0, 0.08);
+  --shadow-modal: 0 8px 32px rgba(0, 0, 0, 0.15);
+
+  --transition-fast: 150ms ease;
+  --transition-normal: 250ms ease;
+
+  --border-color: #e0e5ed;
+  --border-color-hover: #b0bac9;
+}
+
+[data-theme="dark"] {
+  --color-bg-primary: #0f1117;
+  --color-bg-secondary: #1a1d27;
+  --color-bg-card: #1e2235;
+  --color-bg-hover: #252840;
+  --color-bg-input: #252840;
+
+  --color-blue-primary: #2E86AB;
+  --color-blue-dark: #1E3A5F;
+  --color-blue-light: #4da8d4;
+
+  --color-text-primary: #e8eaed;
+  --color-text-secondary: #9aa0b2;
+  --color-text-muted: #5c6378;
+
+  --color-success: #52c41a;
+  --color-warning: #faad14;
+  --color-error: #ff4d4f;
+  --color-purple: #9b59b6;
+  --color-orange: #e67e22;
+
+  --shadow-card: 0 2px 12px rgba(0, 0, 0, 0.3);
+  --shadow-modal: 0 8px 32px rgba(0, 0, 0, 0.5);
+
+  --border-color: rgba(255, 255, 255, 0.08);
+  --border-color-hover: rgba(255, 255, 255, 0.18);
+}
+
+[data-theme="light"] {
+  --color-bg-primary: #f5f7fa;
+  --color-bg-secondary: #ffffff;
+  --color-bg-card: #ffffff;
+  --color-bg-hover: #eef2f7;
+  --color-bg-input: #ffffff;
+
+  --color-blue-primary: #2E86AB;
+  --color-blue-dark: #1E3A5F;
+  --color-blue-light: #1a6e8e;
+
+  --color-text-primary: #1a1d27;
+  --color-text-secondary: #4a5270;
+  --color-text-muted: #8a93a8;
+
+  --color-success: #389e0d;
+  --color-warning: #d48806;
+  --color-error: #cf1322;
+  --color-purple: #7b2d8b;
+  --color-orange: #c25f0a;
+
+  --shadow-card: 0 2px 12px rgba(0, 0, 0, 0.08);
+  --shadow-modal: 0 8px 32px rgba(0, 0, 0, 0.15);
+
+  --border-color: #e0e5ed;
+  --border-color-hover: #b0bac9;
+}
+
+[data-theme="soft"] {
+  --color-bg-primary: #f4f0eb;
+  --color-bg-secondary: #ece8e1;
+  --color-bg-card: #faf7f4;
+  --color-bg-hover: #e4ddd4;
+  --color-bg-input: #faf7f4;
+
+  --color-blue-primary: #6b8f71;
+  --color-blue-dark: #4a6b50;
+  --color-blue-light: #8aab8f;
+
+  --color-text-primary: #2d2520;
+  --color-text-secondary: #6b5e52;
+  --color-text-muted: #9b8a7a;
+
+  --color-success: #4a7c59;
+  --color-warning: #b5860d;
+  --color-error: #b5341e;
+  --color-purple: #7a5c8a;
+  --color-orange: #b5601e;
+
+  --shadow-card: 0 2px 12px rgba(120, 80, 40, 0.1);
+  --shadow-modal: 0 8px 32px rgba(120, 80, 40, 0.18);
+
+  --border-color: #d4c9be;
+  --border-color-hover: #b8a898;
+}
+
+/* ============================================================
+   基础重置
+   ============================================================ */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+/* ============================================================
+   自定义滚动条
+   ============================================================ */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-text-muted); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-text-secondary); }
+
+/* ============================================================
+   动画
+   ============================================================ */
+@keyframes cursor-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.streaming-cursor::after {
+  content: '▌';
+  animation: cursor-blink 0.8s step-end infinite;
+  color: var(--color-blue-light);
+}
+
+@keyframes ripple {
+  0% { transform: scale(0.8); opacity: 1; }
+  100% { transform: scale(2); opacity: 0; }
+}
+.loading-ripple {
+  position: relative;
+  display: inline-block;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: var(--color-blue-primary);
+}
+.loading-ripple::before, .loading-ripple::after {
+  content: '';
+  position: absolute; inset: 0;
+  border-radius: 50%;
+  background: var(--color-blue-primary);
+  animation: ripple 1.4s ease-out infinite;
+}
+.loading-ripple::after { animation-delay: 0.7s; }
+
+/* ============================================================
+   Ant Design —— 深色主题覆盖
+   ============================================================ */
+html[data-theme="dark"] .ant-layout,
+html[data-theme="dark"] .ant-layout-sider {
+  background: var(--color-bg-secondary) !important;
+}
+html[data-theme="dark"] .ant-menu.ant-menu-dark,
+html[data-theme="dark"] .ant-menu-dark {
+  background: transparent !important;
+}
+html[data-theme="dark"] .ant-card {
+  background: var(--color-bg-card) !important;
+  border-color: var(--border-color) !important;
+}
+html[data-theme="dark"] .ant-modal-content {
+  background: var(--color-bg-secondary) !important;
+  border: 1px solid var(--border-color);
+}
+html[data-theme="dark"] .ant-modal-header {
+  background: var(--color-bg-secondary) !important;
+}
+html[data-theme="dark"] .ant-drawer-content,
+html[data-theme="dark"] .ant-drawer-header {
+  background: var(--color-bg-secondary) !important;
+  border-color: var(--border-color) !important;
+}
+html[data-theme="dark"] .ant-collapse {
+  background: transparent !important;
+  border-color: var(--border-color) !important;
+}
+html[data-theme="dark"] .ant-collapse-content {
+  background: transparent !important;
+  border-color: var(--border-color) !important;
+}
+html[data-theme="dark"] .ant-tabs-content-holder {
+  background: transparent !important;
+}
+html[data-theme="dark"] .ant-input,
+html[data-theme="dark"] .ant-input-affix-wrapper,
+html[data-theme="dark"] .ant-input-number-input,
+html[data-theme="dark"] .ant-input-number {
+  background: var(--color-bg-input) !important;
+  border-color: rgba(255,255,255,0.12) !important;
+  color: var(--color-text-primary) !important;
+}
+html[data-theme="dark"] .ant-select-selector {
+  background: var(--color-bg-input) !important;
+  border-color: rgba(255,255,255,0.12) !important;
+}
+html[data-theme="dark"] .ant-select-selection-item,
+html[data-theme="dark"] .ant-select-selection-placeholder,
+html[data-theme="dark"] .ant-select-arrow {
+  color: var(--color-text-primary) !important;
+}
+html[data-theme="dark"] .ant-dropdown-menu,
+html[data-theme="dark"] .ant-dropdown-menu-item {
+  background: var(--color-bg-card) !important;
+}
+html[data-theme="dark"] .ant-table-wrapper .ant-table {
+  background: var(--color-bg-card) !important;
+}
+html[data-theme="dark"] .ant-slider-track { background: var(--color-blue-primary) !important; }
+html[data-theme="dark"] .ant-form-item-label > label { color: var(--color-text-secondary) !important; }
+
+/* ============================================================
+   Ant Design —— 浅色主题覆盖
+   ============================================================ */
+html[data-theme="light"] body,
+html[data-theme="light"] #root {
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+}
+html[data-theme="light"] .ant-layout {
+  background: var(--color-bg-primary) !important;
+}
+html[data-theme="light"] .ant-layout-sider {
+  background: var(--color-bg-secondary) !important;
+}
+html[data-theme="light"] .ant-layout-content {
+  background: var(--color-bg-primary) !important;
+}
+html[data-theme="light"] .ant-menu {
+  background: transparent !important;
+  color: var(--color-text-primary) !important;
+}
+html[data-theme="light"] .ant-menu-item {
+  color: var(--color-text-secondary) !important;
+}
+html[data-theme="light"] .ant-menu-item:hover {
+  color: var(--color-blue-primary) !important;
+}
+html[data-theme="light"] .ant-menu-item-selected {
+  color: var(--color-blue-primary) !important;
+  background: rgba(46,134,171,0.1) !important;
+}
+html[data-theme="light"] .ant-card {
+  background: var(--color-bg-card) !important;
+  border-color: var(--border-color) !important;
+  color: var(--color-text-primary) !important;
+}
+html[data-theme="light"] .ant-card-body {
+  background: var(--color-bg-card) !important;
+  color: var(--color-text-primary) !important;
+}
+html[data-theme="light"] .ant-input,
+html[data-theme="light"] .ant-input-number-input {
+  background: var(--color-bg-input) !important;
+  border-color: var(--border-color) !important;
+  color: var(--color-text-primary) !important;
+}
+html[data-theme="light"] .ant-input-affix-wrapper {
+  background: var(--color-bg-input) !important;
+  border-color: var(--border-color) !important;
+  color: var(--color-text-primary) !important;
+}
+html[data-theme="light"] .ant-input-affix-wrapper .ant-input {
+  background: transparent !important;
+}
+html[data-theme="light"] .ant-input::placeholder,
+html[data-theme="light"] .ant-input-affix-wrapper input::placeholder {
+  color: var(--color-text-muted) !important;
+}
+html[data-theme="light"] .ant-select-selector {
+  background: var(--color-bg-input) !important;
+  border-color: var(--border-color) !important;
+  color: var(--color-text-primary) !important;
+}
+html[data-theme="light"] .ant-select-selection-item,
+html[data-theme="light"] .ant-select-selection-placeholder {
+  color: var(--color-text-primary) !important;
+}
+html[data-theme="light"] .ant-select-arrow,
+html[data-theme="light"] .ant-select-clear {
+  color: var(--color-text-muted) !important;
+}
+html[data-theme="light"] .ant-select-dropdown {
+  background: var(--color-bg-card) !important;
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-card);
+}
+html[data-theme="light"] .ant-select-item {
+  color: var(--color-text-primary) !important;
+}
+html[data-theme="light"] .ant-select-item-option-selected {
+  background: rgba(46,134,171,0.1) !important;
+}
+html[data-theme="light"] .ant-btn-default {
+  background: var(--color-bg-input) !important;
+  border-color: var(--border-color) !important;
+  color: var(--color-text-primary) !important;
+}
+html[data-theme="light"] .ant-btn-default:hover {
+  border-color: var(--color-blue-primary) !important;
+  color: var(--color-blue-primary) !important;
+}
+html[data-theme="light"] .ant-btn-dashed {
+  background: var(--color-bg-input) !important;
+  border-color: var(--border-color) !important;
+  color: var(--color-text-secondary) !important;
+}
+html[data-theme="light"] .ant-btn-text {
+  color: var(--color-text-secondary) !important;
+}
+html[data-theme="light"] .ant-btn-text:hover {
+  background: var(--color-bg-hover) !important;
+  color: var(--color-text-primary) !important;
+}
+html[data-theme="light"] .ant-modal-content {
+  background: var(--color-bg-card) !important;
+  color: var(--color-text-primary) !important;
+  box-shadow: var(--shadow-modal);
+  border: 1px solid var(--border-color);
+}
+html[data-theme="light"] .ant-modal-header {
+  background: var(--color-bg-card) !important;
+  border-bottom: 1px solid var(--border-color) !important;
+}
+html[data-theme="light"] .ant-modal-title {
+  color: var(--color-text-primary) !important;
+}
+html[data-theme="light"] .ant-modal-footer {
+  border-top: 1px solid var(--border-color) !important;
+}
+html[data-theme="light"] .ant-drawer-content {
+  background: var(--color-bg-card) !important;
+  color: var(--color-text-primary) !important;
+}
+html[data-theme="light"] .ant-drawer-header {
+  background: var(--color-bg-card) !important;
+  border-bottom: 1px solid var(--border-color) !important;
+}
+html[data-theme="light"] .ant-drawer-title {
+  color: var(--color-text-primary) !important;
+}
+html[data-theme="light"] .ant-collapse {
+  background: transparent !important;
+  border-color: var(--border-color) !important;
+}
+html[data-theme="light"] .ant-collapse-header {
+  color: var(--color-text-primary) !important;
+  background: var(--color-bg-hover) !important;
+}
+html[data-theme="light"] .ant-collapse-content {
+  background: var(--color-bg-card) !important;
+  border-color: var(--border-color) !important;
+  color: var(--color-text-primary) !important;
+}
+html[data-theme="light"] .ant-tabs-tab {
+  color: var(--color-text-secondary) !important;
+}
+html[data-theme="light"] .ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: var(--color-blue-primary) !important;
+}
+html[data-theme="light"] .ant-tabs-content-holder {
+  background: transparent !important;
+  color: var(--color-text-primary) !important;
+}
+html[data-theme="light"] .ant-form-item-label > label {
+  color: var(--color-text-secondary) !important;
+}
+html[data-theme="light"] .ant-form-item-explain-error {
+  color: var(--color-error) !important;
+}
+html[data-theme="light"] .ant-dropdown-menu {
+  background: var(--color-bg-card) !important;
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-card);
+}
+html[data-theme="light"] .ant-dropdown-menu-item {
+  color: var(--color-text-primary) !important;
+}
+html[data-theme="light"] .ant-dropdown-menu-item:hover {
+  background: var(--color-bg-hover) !important;
+}
+html[data-theme="light"] .ant-dropdown-menu-item-danger {
+  color: var(--color-error) !important;
+}
+html[data-theme="light"] .ant-tooltip-inner {
+  background: #333 !important;
+  color: #fff !important;
+}
+html[data-theme="light"] .ant-tree {
+  background: transparent !important;
+  color: var(--color-text-primary) !important;
+}
+html[data-theme="light"] .ant-tree-node-content-wrapper:hover {
+  background: var(--color-bg-hover) !important;
+}
+html[data-theme="light"] .ant-tree-node-selected {
+  background: rgba(46,134,171,0.1) !important;
+}
+html[data-theme="light"] .ant-steps-item-title {
+  color: var(--color-text-secondary) !important;
+}
+html[data-theme="light"] .ant-steps-item-finish .ant-steps-item-title,
+html[data-theme="light"] .ant-steps-item-process .ant-steps-item-title {
+  color: var(--color-text-primary) !important;
+}
+html[data-theme="light"] .ant-radio-wrapper {
+  color: var(--color-text-primary) !important;
+}
+html[data-theme="light"] .ant-slider-rail {
+  background: var(--border-color) !important;
+}
+html[data-theme="light"] .ant-slider-track {
+  background: var(--color-blue-primary) !important;
+}
+html[data-theme="light"] .ant-table-wrapper .ant-table {
+  background: var(--color-bg-card) !important;
+  color: var(--color-text-primary) !important;
+}
+html[data-theme="light"] .ant-table-thead > tr > th {
+  background: var(--color-bg-hover) !important;
+  color: var(--color-text-primary) !important;
+  border-color: var(--border-color) !important;
+}
+html[data-theme="light"] .ant-tag {
+  color: var(--color-text-secondary) !important;
+  border-color: var(--border-color) !important;
+  background: var(--color-bg-hover) !important;
+}
+html[data-theme="light"] .ant-empty-description {
+  color: var(--color-text-muted) !important;
+}
+html[data-theme="light"] .ant-progress-text {
+  color: var(--color-text-primary) !important;
+}
+
+/* ============================================================
+   Ant Design —— 柔和主题覆盖
+   ============================================================ */
+html[data-theme="soft"] body,
+html[data-theme="soft"] #root {
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+}
+html[data-theme="soft"] .ant-layout {
+  background: var(--color-bg-primary) !important;
+}
+html[data-theme="soft"] .ant-layout-sider {
+  background: var(--color-bg-secondary) !important;
+}
+html[data-theme="soft"] .ant-menu {
+  background: transparent !important;
+  color: var(--color-text-primary) !important;
+}
+html[data-theme="soft"] .ant-menu-item { color: var(--color-text-secondary) !important; }
+html[data-theme="soft"] .ant-menu-item:hover { color: var(--color-blue-primary) !important; }
+html[data-theme="soft"] .ant-menu-item-selected {
+  color: var(--color-blue-primary) !important;
+  background: rgba(107,143,113,0.12) !important;
+}
+html[data-theme="soft"] .ant-card {
+  background: var(--color-bg-card) !important;
+  border-color: var(--border-color) !important;
+  color: var(--color-text-primary) !important;
+}
+html[data-theme="soft"] .ant-input,
+html[data-theme="soft"] .ant-input-number-input {
+  background: var(--color-bg-input) !important;
+  border-color: var(--border-color) !important;
+  color: var(--color-text-primary) !important;
+}
+html[data-theme="soft"] .ant-input-affix-wrapper {
+  background: var(--color-bg-input) !important;
+  border-color: var(--border-color) !important;
+}
+html[data-theme="soft"] .ant-select-selector {
+  background: var(--color-bg-input) !important;
+  border-color: var(--border-color) !important;
+  color: var(--color-text-primary) !important;
+}
+html[data-theme="soft"] .ant-select-selection-item,
+html[data-theme="soft"] .ant-select-selection-placeholder {
+  color: var(--color-text-primary) !important;
+}
+html[data-theme="soft"] .ant-btn-default {
+  background: var(--color-bg-input) !important;
+  border-color: var(--border-color) !important;
+  color: var(--color-text-primary) !important;
+}
+html[data-theme="soft"] .ant-modal-content {
+  background: var(--color-bg-card) !important;
+  border: 1px solid var(--border-color);
+}
+html[data-theme="soft"] .ant-modal-header {
+  background: var(--color-bg-card) !important;
+}
+html[data-theme="soft"] .ant-modal-title { color: var(--color-text-primary) !important; }
+html[data-theme="soft"] .ant-drawer-content,
+html[data-theme="soft"] .ant-drawer-header {
+  background: var(--color-bg-card) !important;
+}
+html[data-theme="soft"] .ant-collapse {
+  background: transparent !important;
+  border-color: var(--border-color) !important;
+}
+html[data-theme="soft"] .ant-collapse-header {
+  color: var(--color-text-primary) !important;
+  background: var(--color-bg-hover) !important;
+}
+html[data-theme="soft"] .ant-collapse-content {
+  background: var(--color-bg-card) !important;
+  border-color: var(--border-color) !important;
+  color: var(--color-text-primary) !important;
+}
+html[data-theme="soft"] .ant-form-item-label > label {
+  color: var(--color-text-secondary) !important;
+}
+html[data-theme="soft"] .ant-dropdown-menu {
+  background: var(--color-bg-card) !important;
+  border: 1px solid var(--border-color);
+}
+html[data-theme="soft"] .ant-dropdown-menu-item {
+  color: var(--color-text-primary) !important;
+}
+html[data-theme="soft"] .ant-select-dropdown {
+  background: var(--color-bg-card) !important;
+  border: 1px solid var(--border-color);
+}
+html[data-theme="soft"] .ant-select-item { color: var(--color-text-primary) !important; }
+html[data-theme="soft"] .ant-tree {
+  background: transparent !important;
+  color: var(--color-text-primary) !important;
+}
+html[data-theme="soft"] .ant-empty-description {
+  color: var(--color-text-muted) !important;
+}
+
+/* ============================================================
+   Ant Design Card 操作栏 —— 各主题覆盖（TemplateManager 等）
+   ============================================================ */
+html[data-theme="light"] .ant-card-actions,
+html[data-theme="soft"] .ant-card-actions {
+  background: var(--color-bg-hover) !important;
+  border-top: 1px solid var(--border-color) !important;
+}
+html[data-theme="light"] .ant-card-actions > li,
+html[data-theme="soft"] .ant-card-actions > li {
+  border-right: 1px solid var(--border-color) !important;
+  margin: 0 !important;
+}
+html[data-theme="light"] .ant-card-actions > li > span,
+html[data-theme="soft"] .ant-card-actions > li > span {
+  color: var(--color-text-secondary) !important;
+}
+html[data-theme="light"] .ant-card-actions .ant-btn,
+html[data-theme="soft"] .ant-card-actions .ant-btn {
+  color: var(--color-text-secondary) !important;
+}
+html[data-theme="light"] .ant-card-actions .ant-btn:hover,
+html[data-theme="soft"] .ant-card-actions .ant-btn:hover {
+  color: var(--color-blue-primary) !important;
+}
+html[data-theme="light"] .ant-card-actions .ant-btn-dangerous,
+html[data-theme="soft"] .ant-card-actions .ant-btn-dangerous {
+  color: var(--color-error) !important;
+}
+/* Badge, Switch, Checkbox in light/soft */
+html[data-theme="light"] .ant-switch-checked,
+html[data-theme="soft"] .ant-switch-checked {
+  background: var(--color-blue-primary) !important;
+}
+html[data-theme="light"] .ant-badge-count,
+html[data-theme="soft"] .ant-badge-count {
+  background: var(--color-error) !important;
+}
+/* Input TextArea monospace inside Modal */
+html[data-theme="light"] .ant-modal-body textarea,
+html[data-theme="soft"] .ant-modal-body textarea {
+  background: var(--color-bg-input) !important;
+  color: var(--color-text-primary) !important;
+  border-color: var(--border-color) !important;
+}
+/* Popover */
+html[data-theme="light"] .ant-popover-inner,
+html[data-theme="soft"] .ant-popover-inner {
+  background: var(--color-bg-card) !important;
+  border: 1px solid var(--border-color);
+}
+html[data-theme="light"] .ant-popover-title,
+html[data-theme="soft"] .ant-popover-title {
+  color: var(--color-text-primary) !important;
+  border-bottom: 1px solid var(--border-color) !important;
+}
+/* Spin */
+html[data-theme="light"] .ant-spin-text,
+html[data-theme="soft"] .ant-spin-text {
+  color: var(--color-text-muted) !important;
+}
+/* Dark card actions override */
+html[data-theme="dark"] .ant-card-actions {
+  background: var(--color-bg-hover) !important;
+  border-top: 1px solid var(--border-color) !important;
+}
+html[data-theme="dark"] .ant-card-actions > li {
+  border-right: 1px solid var(--border-color) !important;
+}
+
+/* ============================================================
+   状态颜色（全局）
+   ============================================================ */
+.status-draft { color: var(--color-text-muted); }
+.status-writing { color: var(--color-blue-primary); }
+.status-completed { color: var(--color-success); }
+.status-archived { color: var(--color-text-muted); opacity: 0.5; }
+
+.chapter-status-outline { color: var(--color-text-muted); }
+.chapter-status-writing { color: var(--color-blue-light); }
+.chapter-status-draft { color: var(--color-warning); }
+.chapter-status-reviewing { color: var(--color-orange); }
+.chapter-status-final { color: var(--color-success); }
