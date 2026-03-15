@@ -128,13 +128,15 @@ export function protagonistPrompt(params: {
   novelSynopsis: string
   genre: string
   worldSummary: string
+  storyCore: string
   gender: string
   surnameHint?: string
 }): string {
-  return `为小说《${params.novelTitle}》创建主角。要求：人物有弧度、有矛盾、有独特性，避免"天选之人"模板。
+  return `为小说《${params.novelTitle}》创建主角。要求：人物必须复杂、矛盾、可理解，避免“完美主角”“爽文模板主角”。
 
 小说背景：${params.novelSynopsis}
 题材：${params.genre}，世界观：${params.worldSummary}
+故事核心：${params.storyCore}
 性别：${params.gender}
 ${params.surnameHint ? `姓名方向：${params.surnameHint}` : ''}
 
@@ -144,13 +146,16 @@ ${params.surnameHint ? `姓名方向：${params.surnameHint}` : ''}
 - 名字2字为主，符合题材文化背景，有内在含义，避免生僻字堆砌
 
 人物设计注意：
-- 性格缺陷是推动故事的核心，不是装饰
-- 外貌特征要有辨识度，不是"英俊/漂亮+高挑"的标配
-- 背景经历对现在有具体影响
-- 初次印象要让读者有好奇心
+- 性格缺陷、欲望、恐惧、秘密、道德底线必须能解释他为什么会做出关键选择
+- 角色不能只有“好人”面，也不能只有“坏人”面；要同时具备让人喜欢、让人不安、让人心疼的部分
+- 外貌特征要有辨识度，不是“英俊/漂亮+高挑”的模板
+- 背景经历必须对现在造成具体影响
+- 初次印象要让读者产生好奇心，同时保留复杂性
+- 必须体现人物的内在矛盾、认知偏差、软肋与可能的成长弧线
+- 所有信息要和小说背景、世界规则、故事核心保持一致，不能另起一套人物设定
 
 JSON输出（只输出JSON）：
-{"surname":"","given_name":"","full_name":"","gender":"","age":0,"appearance":"外貌3~4句，重点突出有辨识度的细节，避免堆砌","personality_traits":["特点1","特点2","特点3"],"flaws":["真实的性格缺陷1（具体，不是'有时候会生气'这种）","缺陷2"],"habits":["习惯/口头禅1"],"background":"分阶段经历，150字以内，写转折点不写流水账","goals":"在故事中的真实追求，不只是打败坏人","first_impression":"读者初遇时的感受，1句话","occupation":""}`
+{"surname":"","given_name":"","full_name":"","gender":"","age":0,"occupation":"","appearance":"外貌3~4句，突出有辨识度的细节","background":"分阶段经历，180字以内，写关键转折和留下的后遗症","personality_traits":["特点1","特点2","特点3"],"flaws":["真实缺陷1","真实缺陷2"],"habits":["习惯/口头禅1"],"goals":"当前显性追求","surface_desire":"角色眼下最想得到的东西","deep_need":"角色真正缺失、却不愿承认的需要","core_fear":"最害怕失去或面对的东西","inner_conflict":"拉扯角色行动的核心矛盾","hidden_secret":"不愿轻易暴露的秘密","moral_line":"角色绝不会轻易跨过的底线","self_deception":"角色对自己撒的谎或认知偏差","trauma":"仍在影响现在的旧伤/创伤","contradiction":"最能体现人物复杂度的反差点","relationship_tension":"角色在亲密/权力/信任关系里的张力来源","resonance_point":"最容易让读者共情的一点","character_arc":"角色后续可能的变化方向","first_impression":"读者初遇时会记住他的什么"}`
 }
 
 // ============================================================
@@ -163,6 +168,7 @@ export function batchCharacterPrompt(params: {
   existingNames: string
   genre: string
   worldSummary: string
+  storyCore: string
   count: number
   genderRatio: string
   specialRequirements: string
@@ -170,6 +176,7 @@ export function batchCharacterPrompt(params: {
   return `为小说《${params.novelTitle}》批量生成${params.count}个配角。
 
 背景：${params.novelSynopsis}
+故事核心：${params.storyCore}
 主角：${params.protagonistSummary}
 已有人物（不能重名）：${params.existingNames}
 题材：${params.genre}，世界观：${params.worldSummary}
@@ -180,10 +187,61 @@ export function batchCharacterPrompt(params: {
 - 每个配角在故事中有明确功能定位（不是工具人）
 - 与主角关系有层次（不只是"支持者"或"对立者"）
 - 性格特点影响行事方式，不是贴标签
-- 登场阶段合理分布
+- 不能把人物写成纯好人或纯坏人，至少要有一处反差、一处软肋、一处让读者能理解他的点
+- 人物的秘密、欲望、恐惧或关系张力至少体现其一
+- 登场阶段和人物功能要和主线推进有关，不是随意凑数
 
 输出JSON数组（只输出数组，无其他文字）：
-[{"name":"","gender":"","age":数字,"role_type":"major/minor/antagonist/supporting","function":"在故事中的功能定位一句话","personality":"2~3个具体性格词","relation_to_protagonist":"关系类型+1句描述","appear_stage":"early/mid/late/throughout","appearance":"外貌1~2句，有辨识度的特征"}]`
+[{"full_name":"","gender":"","age":0,"role_type":"major/minor/antagonist/supporting","occupation":"","background":"80~120字的关键经历与现状","personality_traits":["特点1","特点2"],"flaws":["缺陷1","缺陷2"],"habits":["习惯1"],"goals":"当前追求","surface_desire":"表层欲望","deep_need":"深层需要","core_fear":"核心恐惧","inner_conflict":"内在矛盾","hidden_secret":"隐藏秘密","moral_line":"道德底线","self_deception":"自我欺骗","trauma":"旧伤/创伤","contradiction":"人物反差点","relationship_tension":"与主角或关键人物的张力","resonance_point":"读者共情点","character_arc":"后续变化方向","relation_to_protagonist":"与主角的关系与拉扯","first_impression":"读者初见印象","appearance":"外貌1~2句，有辨识度的特征","appear_chapter":1}]`
+}
+
+// ============================================================
+// 重新生成人物
+// ============================================================
+export function regenerateCharacterPrompt(params: {
+  novelTitle: string
+  novelSynopsis: string
+  genre: string
+  worldSummary: string
+  storyCore: string
+  protagonistRule: string
+  lockedName: string
+  lockedRoleType: string
+  currentProfile: string
+  relatedCharacters: string
+  relationSummary: string
+}): string {
+  return `请根据小说的最新设定，重写并深化已有角色档案。
+
+小说：${params.novelTitle}
+背景：${params.novelSynopsis}
+题材：${params.genre}
+世界规则：${params.worldSummary || '（暂无补充）'}
+故事核心：${params.storyCore}
+主角规则：${params.protagonistRule}
+
+【锁定信息】
+- 角色姓名必须保持：${params.lockedName}
+- 角色类型必须保持：${params.lockedRoleType}
+
+【当前人物旧档案】
+${params.currentProfile}
+
+【当前关键人物】
+${params.relatedCharacters || '（暂无）'}
+
+【当前关系信息】
+${params.relationSummary || '（暂无）'}
+
+重写要求：
+- 这不是新建角色，而是基于最新上下文覆盖更新同一个人物
+- 必须保留姓名和角色类型，不得改名，不得更换身份定位
+- 人物必须体现复杂度：欲望、恐惧、秘密、底线、矛盾、关系张力至少都要有明确内容
+- 人物既不能被写成纯善，也不能被写成纯恶；必须能解释读者为什么会理解他、警惕他或心疼他
+- 所有内容必须服务现有背景、世界规则、主线冲突和已有人物关系，不能另起一套设定
+
+只输出 JSON：
+{"full_name":"${params.lockedName}","role_type":"${params.lockedRoleType}","gender":"","age":0,"occupation":"","appearance":"外貌3~4句，突出辨识度","background":"180字以内，交代关键经历和其后遗症","personality_traits":["特点1","特点2","特点3"],"flaws":["缺陷1","缺陷2"],"habits":["习惯1"],"goals":"当前追求","surface_desire":"表层欲望","deep_need":"深层需要","core_fear":"核心恐惧","inner_conflict":"内在矛盾","hidden_secret":"隐藏秘密","moral_line":"道德底线","self_deception":"自我欺骗","trauma":"旧伤/创伤","contradiction":"最能体现复杂度的反差点","relationship_tension":"与关键人物/关系中的张力","resonance_point":"最容易让读者共情的一点","character_arc":"后续变化方向","first_impression":"读者初见印象","appear_chapter":1}`
 }
 
 // ============================================================

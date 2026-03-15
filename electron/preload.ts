@@ -31,6 +31,7 @@ const api = {
     create: (novelId: number, data: unknown) => ipcRenderer.invoke('character:create', novelId, data),
     update: (id: number, data: unknown) => ipcRenderer.invoke('character:update', id, data),
     delete: (id: number) => ipcRenderer.invoke('character:delete', id),
+    regenerate: (id: number) => ipcRenderer.invoke('character:regenerate', id),
     batchGenerate: (novelId: number, opts: unknown) => ipcRenderer.invoke('character:batchGenerate', novelId, opts),
     generateProtagonist: (novelId: number, opts: unknown) => ipcRenderer.invoke('character:generateProtagonist', novelId, opts),
     getRelations: (novelId: number) => ipcRenderer.invoke('character:getRelations', novelId),

@@ -82,6 +82,7 @@ function runMigrations(sqlite: Database.Database) {
       word_count INTEGER DEFAULT 0,
       summary TEXT,
       next_chapter_seed TEXT,
+      continuity_state_json TEXT,
       status TEXT DEFAULT 'outline',
       ai_score_json TEXT,
       arc_id INTEGER,
@@ -120,6 +121,18 @@ function runMigrations(sqlite: Database.Database) {
       habits_json TEXT,
       goals TEXT,
       first_impression TEXT,
+      surface_desire TEXT,
+      deep_need TEXT,
+      core_fear TEXT,
+      inner_conflict TEXT,
+      hidden_secret TEXT,
+      moral_line TEXT,
+      self_deception TEXT,
+      trauma TEXT,
+      contradiction TEXT,
+      relationship_tension TEXT,
+      resonance_point TEXT,
+      character_arc TEXT,
       parent_ids_json TEXT,
       appearance_json TEXT,
       abilities_json TEXT,
@@ -197,6 +210,32 @@ function runMigrations(sqlite: Database.Database) {
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
   `)
+
+  ensureColumn(sqlite, 'chapters', 'continuity_state_json', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'surface_desire', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'deep_need', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'core_fear', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'inner_conflict', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'hidden_secret', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'moral_line', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'self_deception', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'trauma', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'contradiction', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'relationship_tension', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'resonance_point', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'character_arc', 'TEXT')
+}
+
+function ensureColumn(
+  sqlite: Database.Database,
+  tableName: string,
+  columnName: string,
+  columnDefinition: string,
+) {
+  const columns = sqlite.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>
+  if (columns.some((column) => column.name === columnName)) return
+
+  sqlite.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnDefinition};`)
 }
 
 function seedBuiltinData(db: ReturnType<typeof drizzle>) {

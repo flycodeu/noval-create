@@ -1,14 +1,34 @@
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import {
-  Button, Modal, Form, Input, Select, Tabs, Tag, Avatar, Empty,
-  message, Spin, Slider, Drawer, Badge
+  Avatar,
+  Button,
+  Drawer,
+  Empty,
+  Form,
+  Input,
+  Modal,
+  Select,
+  Slider,
+  Spin,
+  Tabs,
+  Tag,
+  message,
 } from 'antd'
 import {
-  PlusOutlined, DeleteOutlined, SaveOutlined, UserOutlined,
-  ApartmentOutlined, ReloadOutlined
+  ApartmentOutlined,
+  DeleteOutlined,
+  PlusOutlined,
+  ReloadOutlined,
+  SaveOutlined,
+  UserOutlined,
 } from '@ant-design/icons'
 import ReactFlow, {
-  Node, Edge, Background, Controls, MarkerType, ReactFlowProvider
+  Background,
+  Controls,
+  Edge,
+  MarkerType,
+  Node,
+  ReactFlowProvider,
 } from 'reactflow'
 import 'reactflow/dist/style.css'
 import { Character, CharacterRelation } from '../../../types'
@@ -43,7 +63,30 @@ const APPEAR_STAGE_OPTIONS = [
   { value: 'throughout', label: '贯穿全程' },
 ]
 
-// 判断人物登场阶段（根据 appearChapter）
+function parseStringArrayJson(raw?: string): string[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean)
+      : []
+  } catch {
+    return []
+  }
+}
+
+function parseAppearance(raw?: string): string {
+  if (!raw) return ''
+  try {
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' && typeof parsed.description === 'string'
+      ? parsed.description
+      : ''
+  } catch {
+    return ''
+  }
+}
+
 function getAppearStage(char: Character, totalChapters: number): string {
   if (!char.appearChapter) return 'throughout'
   const ratio = char.appearChapter / Math.max(totalChapters, 1)
@@ -51,6 +94,21 @@ function getAppearStage(char: Character, totalChapters: number): string {
   if (ratio < 0.5) return 'mid'
   if (ratio < 0.8) return 'late'
   return 'late'
+}
+
+function buildCharacterFormValues(char: Character | null) {
+  if (!char) return {}
+  return {
+    ...char,
+    personalityTraits: parseStringArrayJson(char.personalityTraitsJson),
+    flaws: parseStringArrayJson(char.flawsJson),
+    habits: parseStringArrayJson(char.habitsJson),
+    appearance: parseAppearance(char.appearanceJson),
+  }
+}
+
+function getCharacterPreview(char: Character): string {
+  return char.innerConflict || char.resonancePoint || char.firstImpression || ''
 }
 
 export default function Characters({ novelId }: Props) {
@@ -61,6 +119,7 @@ export default function Characters({ novelId }: Props) {
   const [detailOpen, setDetailOpen] = useState(false)
   const [batchOpen, setBatchOpen] = useState(false)
   const [batchLoading, setBatchLoading] = useState(false)
+  const [regenerating, setRegenerating] = useState(false)
   const [viewMode, setViewMode] = useState<'list' | 'graph'>('list')
   const [detailForm] = Form.useForm()
   const [batchForm] = Form.useForm()
@@ -70,30 +129,35 @@ export default function Characters({ novelId }: Props) {
   const [saving, setSaving] = useState(false)
   const [totalChapters, setTotalChapters] = useState(50)
 
+  const applyCharacterToForm = useCallback((char: Character | null) => {
+    setSelectedChar(char)
+    if (char) {
+      detailForm.setFieldsValue(buildCharacterFormValues(char))
+    } else {
+      detailForm.resetFields()
+    }
+  }, [detailForm])
+
   const loadData = useCallback(async () => {
     setLoading(true)
-    const [chars, rels, chapterList] = await Promise.all([
-      window.electron.character.list(novelId),
-      window.electron.character.getRelations(novelId),
-      window.electron.chapter.list(novelId),
-    ])
-    setCharacters(chars)
-    setRelations(rels)
-    setTotalChapters(chapterList.length || 50)
-    setLoading(false)
+    try {
+      const [chars, rels, chapterList] = await Promise.all([
+        window.electron.character.list(novelId),
+        window.electron.character.getRelations(novelId),
+        window.electron.chapter.list(novelId),
+      ])
+      setCharacters(chars)
+      setRelations(rels)
+      setTotalChapters(chapterList.length || 50)
+    } finally {
+      setLoading(false)
+    }
   }, [novelId, setCharacters])
 
   useEffect(() => { loadData() }, [loadData])
 
   const handleSelectChar = (char: Character) => {
-    setSelectedChar(char)
-    detailForm.setFieldsValue({
-      ...char,
-      personalityTraits: char.personalityTraitsJson ? JSON.parse(char.personalityTraitsJson) : [],
-      flaws: char.flawsJson ? JSON.parse(char.flawsJson) : [],
-      habits: char.habitsJson ? JSON.parse(char.habitsJson) : [],
-      appearance: char.appearanceJson ? JSON.parse(char.appearanceJson).description : '',
-    })
+    applyCharacterToForm(char)
     setDetailOpen(true)
   }
 
@@ -107,16 +171,19 @@ export default function Characters({ novelId }: Props) {
         personalityTraitsJson: JSON.stringify(values.personalityTraits || []),
         flawsJson: JSON.stringify(values.flaws || []),
         habitsJson: JSON.stringify(values.habits || []),
-        appearanceJson: JSON.stringify({ description: values.appearance }),
+        appearanceJson: JSON.stringify({ description: values.appearance || '' }),
       }
+
       if (selectedChar?.id) {
         await window.electron.character.update(selectedChar.id, data)
       } else {
         await window.electron.character.create(novelId, data)
       }
+
       message.success('已保存')
       setDetailOpen(false)
-      loadData()
+      applyCharacterToForm(null)
+      await loadData()
     } catch {
       message.error('保存失败')
     } finally {
@@ -127,22 +194,47 @@ export default function Characters({ novelId }: Props) {
   const handleDelete = async (char: Character) => {
     Modal.confirm({
       title: `确认删除「${char.fullName}」？`,
+      content: '该人物的关联关系也会一并移除。',
       okType: 'danger',
+      okText: '删除',
       onOk: async () => {
         await window.electron.character.delete(char.id)
-        loadData()
+        if (selectedChar?.id === char.id) {
+          setDetailOpen(false)
+          applyCharacterToForm(null)
+        }
+        await loadData()
+        message.success('人物已删除')
       },
     })
+  }
+
+  const handleRegenerateChar = async () => {
+    if (!selectedChar?.id) return
+
+    setRegenerating(true)
+    try {
+      const updated = await window.electron.character.regenerate(selectedChar.id)
+      await loadData()
+      if (updated) {
+        applyCharacterToForm(updated)
+      }
+      message.success('人物已根据最新设定刷新')
+    } catch (error: unknown) {
+      message.error(`更新失败：${error instanceof Error ? error.message : '未知错误'}`)
+    } finally {
+      setRegenerating(false)
+    }
   }
 
   const handleGenerateProtagonist = async () => {
     setBatchLoading(true)
     try {
       await window.electron.character.generateProtagonist(novelId, { gender: '不限' })
-      loadData()
+      await loadData()
       message.success('主角生成完成')
-    } catch (e: unknown) {
-      message.error(`生成失败：${e instanceof Error ? e.message : '未知错误'}`)
+    } catch (error: unknown) {
+      message.error(`生成失败：${error instanceof Error ? error.message : '未知错误'}`)
     } finally {
       setBatchLoading(false)
     }
@@ -161,10 +253,10 @@ export default function Characters({ novelId }: Props) {
       })
       setBatchOpen(false)
       batchForm.resetFields()
-      loadData()
+      await loadData()
       message.success('人物批量生成完成')
-    } catch (e: unknown) {
-      message.error(`生成失败：${e instanceof Error ? e.message : ''}`)
+    } catch (error: unknown) {
+      message.error(`生成失败：${error instanceof Error ? error.message : ''}`)
     } finally {
       setBatchLoading(false)
     }
@@ -174,30 +266,29 @@ export default function Characters({ novelId }: Props) {
     setBatchLoading(true)
     try {
       await window.electron.character.generateRelations(novelId)
-      loadData()
+      await loadData()
       message.success('关系网络已生成')
-    } catch (e: unknown) {
-      message.error(`生成失败：${e instanceof Error ? e.message : ''}`)
+    } catch (error: unknown) {
+      message.error(`生成失败：${error instanceof Error ? error.message : ''}`)
     } finally {
       setBatchLoading(false)
     }
   }
 
-  const filteredChars = characters.filter(c => {
-    if (filterRole !== 'all' && c.roleType !== filterRole) return false
-    if (filterGender !== 'all' && c.gender !== filterGender) return false
-    if (filterStage !== 'all' && getAppearStage(c, totalChapters) !== filterStage) return false
+  const filteredChars = characters.filter((char) => {
+    if (filterRole !== 'all' && char.roleType !== filterRole) return false
+    if (filterGender !== 'all' && char.gender !== filterGender) return false
+    if (filterStage !== 'all' && getAppearStage(char, totalChapters) !== filterStage) return false
     return true
   })
 
-  // 构建关系图数据（全部）
   const buildGraphData = (charList: Character[], relList: CharacterRelation[]) => {
-    const nodes: Node[] = charList.map((char, i) => ({
+    const nodes: Node[] = charList.map((char, index) => ({
       id: String(char.id),
       type: 'default',
       position: {
-        x: (i % 5) * 200 + 50,
-        y: Math.floor(i / 5) * 150 + 50,
+        x: (index % 5) * 200 + 50,
+        y: Math.floor(index / 5) * 150 + 50,
       },
       data: {
         label: (
@@ -218,16 +309,16 @@ export default function Characters({ novelId }: Props) {
       },
     }))
 
-    const charIds = new Set(charList.map(c => String(c.id)))
+    const charIds = new Set(charList.map((char) => String(char.id)))
     const edges: Edge[] = relList
-      .filter(rel => charIds.has(String(rel.charAId)) && charIds.has(String(rel.charBId)))
-      .map(rel => ({
-        id: `${rel.charAId}-${rel.charBId}`,
-        source: String(rel.charAId),
-        target: String(rel.charBId),
-        label: rel.relationLabel || rel.relationType,
-        style: { stroke: RELATION_COLORS[rel.relationType || ''] || '#5c6378' },
-        markerEnd: rel.bilateral === 0 ? { type: MarkerType.ArrowClosed } : undefined,
+      .filter((relation) => charIds.has(String(relation.charAId)) && charIds.has(String(relation.charBId)))
+      .map((relation) => ({
+        id: `${relation.charAId}-${relation.charBId}`,
+        source: String(relation.charAId),
+        target: String(relation.charBId),
+        label: relation.relationLabel || relation.relationType,
+        style: { stroke: RELATION_COLORS[relation.relationType || ''] || '#5c6378' },
+        markerEnd: relation.bilateral === 0 ? { type: MarkerType.ArrowClosed } : undefined,
         labelStyle: { fill: 'var(--color-text-secondary)', fontSize: 10 },
       }))
 
@@ -236,22 +327,19 @@ export default function Characters({ novelId }: Props) {
 
   const { nodes, edges } = buildGraphData(characters, relations)
 
-  // 为单个人物构建关系子图
   const buildCharRelationGraph = (char: Character) => {
-    const relatedRelations = relations.filter(r => r.charAId === char.id || r.charBId === char.id)
-    const relatedCharIds = new Set<number>()
-    relatedCharIds.add(char.id)
-    relatedRelations.forEach(r => {
-      relatedCharIds.add(r.charAId)
-      relatedCharIds.add(r.charBId)
+    const relatedRelations = relations.filter((relation) => relation.charAId === char.id || relation.charBId === char.id)
+    const relatedCharIds = new Set<number>([char.id])
+    relatedRelations.forEach((relation) => {
+      relatedCharIds.add(relation.charAId)
+      relatedCharIds.add(relation.charBId)
     })
-    const relatedChars = characters.filter(c => relatedCharIds.has(c.id))
+    const relatedChars = characters.filter((character) => relatedCharIds.has(character.id))
     return buildGraphData(relatedChars, relatedRelations)
   }
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      {/* 顶部操作栏 */}
       <div style={{
         padding: '12px 20px',
         borderBottom: '1px solid var(--border-color)',
@@ -308,13 +396,16 @@ export default function Characters({ novelId }: Props) {
         <Button
           type="primary"
           icon={<PlusOutlined />}
-          onClick={() => { setSelectedChar(null); detailForm.resetFields(); setDetailOpen(true) }}
+          onClick={() => {
+            applyCharacterToForm(null)
+            detailForm.resetFields()
+            setDetailOpen(true)
+          }}
         >
           新建人物
         </Button>
       </div>
 
-      {/* 主体内容 */}
       <div style={{ flex: 1, overflow: 'auto' }}>
         {loading ? (
           <div style={{ textAlign: 'center', padding: 80 }}><Spin /></div>
@@ -323,8 +414,8 @@ export default function Characters({ novelId }: Props) {
             {filteredChars.length === 0 ? (
               <Empty description="暂无人物，点击「生成主角」或「批量生成」开始" />
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
-                {filteredChars.map(char => (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 12 }}>
+                {filteredChars.map((char) => (
                   <CharacterCard
                     key={char.id}
                     char={char}
@@ -350,16 +441,30 @@ export default function Characters({ novelId }: Props) {
         )}
       </div>
 
-      {/* 人物详情 Drawer */}
       <Drawer
         title={selectedChar ? `编辑：${selectedChar.fullName}` : '新建人物'}
         open={detailOpen}
-        onClose={() => setDetailOpen(false)}
-        width={580}
+        onClose={() => {
+          setDetailOpen(false)
+          applyCharacterToForm(null)
+        }}
+        width={720}
         extra={
-          <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={handleSaveChar}>
-            保存
-          </Button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {selectedChar && (
+              <>
+                <Button danger icon={<DeleteOutlined />} onClick={() => handleDelete(selectedChar)}>
+                  删除
+                </Button>
+                <Button icon={<ReloadOutlined />} loading={regenerating} onClick={handleRegenerateChar}>
+                  按最新设定重试
+                </Button>
+              </>
+            )}
+            <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={handleSaveChar}>
+              保存
+            </Button>
+          </div>
         }
       >
         <Form form={detailForm} layout="vertical">
@@ -374,7 +479,7 @@ export default function Characters({ novelId }: Props) {
                   </Form.Item>
                   <div style={{ display: 'flex', gap: 12 }}>
                     <Form.Item name="roleType" label="角色类型" style={{ flex: 1 }}>
-                      <Select options={Object.entries(ROLE_TYPE_LABELS).map(([k, v]) => ({ value: k, label: v.label }))} />
+                      <Select options={Object.entries(ROLE_TYPE_LABELS).map(([key, value]) => ({ value: key, label: value.label }))} />
                     </Form.Item>
                     <Form.Item name="gender" label="性别" style={{ flex: 1 }}>
                       <Select options={[{ value: 'male', label: '男' }, { value: 'female', label: '女' }, { value: 'other', label: '其他' }]} />
@@ -404,10 +509,10 @@ export default function Characters({ novelId }: Props) {
                     <Input />
                   </Form.Item>
                   <Form.Item name="goals" label="核心追求">
-                    <Input.TextArea rows={5} />
+                    <Input.TextArea rows={4} />
                   </Form.Item>
                   <Form.Item name="firstImpression" label="初次印象">
-                    <Input.TextArea rows={5} />
+                    <Input.TextArea rows={4} />
                   </Form.Item>
                 </>
               ),
@@ -430,13 +535,57 @@ export default function Characters({ novelId }: Props) {
               ),
             },
             {
+              key: 'depth',
+              label: '深度档案',
+              children: (
+                <>
+                  <Form.Item name="surfaceDesire" label="表层欲望">
+                    <Input.TextArea rows={3} />
+                  </Form.Item>
+                  <Form.Item name="deepNeed" label="深层需要">
+                    <Input.TextArea rows={3} />
+                  </Form.Item>
+                  <Form.Item name="coreFear" label="核心恐惧">
+                    <Input.TextArea rows={3} />
+                  </Form.Item>
+                  <Form.Item name="innerConflict" label="内在矛盾">
+                    <Input.TextArea rows={3} />
+                  </Form.Item>
+                  <Form.Item name="hiddenSecret" label="隐藏秘密">
+                    <Input.TextArea rows={3} />
+                  </Form.Item>
+                  <Form.Item name="moralLine" label="道德底线">
+                    <Input.TextArea rows={3} />
+                  </Form.Item>
+                  <Form.Item name="selfDeception" label="自我欺骗">
+                    <Input.TextArea rows={3} />
+                  </Form.Item>
+                  <Form.Item name="trauma" label="旧伤/创伤">
+                    <Input.TextArea rows={3} />
+                  </Form.Item>
+                  <Form.Item name="contradiction" label="反差点">
+                    <Input.TextArea rows={3} />
+                  </Form.Item>
+                  <Form.Item name="relationshipTension" label="关系张力">
+                    <Input.TextArea rows={3} />
+                  </Form.Item>
+                  <Form.Item name="resonancePoint" label="共鸣点">
+                    <Input.TextArea rows={3} />
+                  </Form.Item>
+                  <Form.Item name="characterArc" label="人物弧光">
+                    <Input.TextArea rows={3} />
+                  </Form.Item>
+                </>
+              ),
+            },
+            {
               key: 'relations',
               label: '关系网络',
               children: selectedChar ? (
                 <CharRelationGraph
                   char={selectedChar}
                   graphData={buildCharRelationGraph(selectedChar)}
-                  relations={relations.filter(r => r.charAId === selectedChar.id || r.charBId === selectedChar.id)}
+                  relations={relations.filter((relation) => relation.charAId === selectedChar.id || relation.charBId === selectedChar.id)}
                   characters={characters}
                 />
               ) : (
@@ -449,7 +598,6 @@ export default function Characters({ novelId }: Props) {
         </Form>
       </Drawer>
 
-      {/* 批量生成 Modal */}
       <Modal
         title="批量生成人物"
         open={batchOpen}
@@ -460,19 +608,19 @@ export default function Characters({ novelId }: Props) {
       >
         <Form form={batchForm} layout="vertical">
           <Form.Item name="majorCount" label="主要人物数量" initialValue={3}>
-            <Select options={[1,2,3,4,5].map(n => ({ value: n, label: `${n} 人` }))} />
+            <Select options={[1, 2, 3, 4, 5].map((count) => ({ value: count, label: `${count} 人` }))} />
           </Form.Item>
           <Form.Item name="minorCount" label="次要人物数量" initialValue={5}>
-            <Select options={[3,5,8,10].map(n => ({ value: n, label: `${n} 人` }))} />
+            <Select options={[3, 5, 8, 10].map((count) => ({ value: count, label: `${count} 人` }))} />
           </Form.Item>
           <Form.Item name="maleRatio" label="男性比例" initialValue={50}>
             <Slider min={0} max={100} marks={{ 0: '0%', 50: '50%', 100: '100%' }} />
           </Form.Item>
           <Form.Item name="batchSize" label="每批生成数量" initialValue={5}>
-            <Select options={[3,5,10].map(n => ({ value: n, label: `${n} 人/批` }))} />
+            <Select options={[3, 5, 10].map((count) => ({ value: count, label: `${count} 人/批` }))} />
           </Form.Item>
           <Form.Item name="requirements" label="特殊要求">
-            <Input.TextArea rows={4} placeholder="例如：需要一个反派师父、需要一个搞笑担当" />
+            <Input.TextArea rows={4} placeholder="例如：需要一个反派师父、需要一个搞笑担当、人物要更灰度" />
           </Form.Item>
         </Form>
       </Modal>
@@ -480,7 +628,6 @@ export default function Characters({ novelId }: Props) {
   )
 }
 
-// 人物关系子图
 function CharRelationGraph({
   char,
   graphData,
@@ -517,21 +664,24 @@ function CharRelationGraph({
         </ReactFlowProvider>
       </div>
       <div style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
-        {relations.map(rel => {
-          const other = characters.find(c => c.id === (rel.charAId === char.id ? rel.charBId : rel.charAId))
+        {relations.map((relation) => {
+          const other = characters.find((character) => character.id === (relation.charAId === char.id ? relation.charBId : relation.charAId))
           return other ? (
-            <div key={rel.id} style={{
-              padding: '4px 8px',
-              marginBottom: 4,
-              background: 'rgba(255,255,255,0.03)',
-              borderRadius: 4,
-              display: 'flex',
-              gap: 8,
-              alignItems: 'center',
-            }}>
+            <div
+              key={relation.id}
+              style={{
+                padding: '4px 8px',
+                marginBottom: 4,
+                background: 'rgba(255,255,255,0.03)',
+                borderRadius: 4,
+                display: 'flex',
+                gap: 8,
+                alignItems: 'center',
+              }}
+            >
               <span style={{ color: 'var(--color-text-primary)' }}>{other.fullName}</span>
-              <Tag style={{ fontSize: 10, padding: '0 4px' }}>{rel.relationLabel || rel.relationType}</Tag>
-              {rel.description && <span style={{ color: 'var(--color-text-muted)' }}>{rel.description}</span>}
+              <Tag style={{ fontSize: 10, padding: '0 4px' }}>{relation.relationLabel || relation.relationType}</Tag>
+              {relation.description && <span style={{ color: 'var(--color-text-muted)' }}>{relation.description}</span>}
             </div>
           ) : null
         })}
@@ -540,7 +690,6 @@ function CharRelationGraph({
   )
 }
 
-// 人物卡片
 function CharacterCard({
   char,
   onClick,
@@ -558,21 +707,35 @@ function CharacterCard({
     minor: '#5c6378',
     supporting: '#7f8c8d',
   }
+  const preview = getCharacterPreview(char)
 
   return (
     <div
       style={{
+        position: 'relative',
         background: 'var(--color-bg-card)',
         border: '1px solid var(--border-color)',
         borderRadius: 'var(--radius-md)',
         padding: 14,
         cursor: 'pointer',
         transition: 'border-color var(--transition-fast)',
+        minHeight: 164,
       }}
       onClick={onClick}
-      onMouseEnter={e => (e.currentTarget.style.borderColor = 'rgba(46,134,171,0.4)')}
-      onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--border-color)')}
+      onMouseEnter={(event) => { event.currentTarget.style.borderColor = 'rgba(46,134,171,0.4)' }}
+      onMouseLeave={(event) => { event.currentTarget.style.borderColor = 'var(--border-color)' }}
     >
+      <Button
+        type="text"
+        danger
+        size="small"
+        icon={<DeleteOutlined />}
+        onClick={(event) => {
+          event.stopPropagation()
+          onDelete()
+        }}
+        style={{ position: 'absolute', top: 6, right: 6 }}
+      />
       <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
         <Avatar
           size={40}
@@ -580,7 +743,7 @@ function CharacterCard({
         >
           {char.fullName[0]}
         </Avatar>
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ flex: 1, minWidth: 0, paddingRight: 24 }}>
           <div style={{ fontWeight: 600, marginBottom: 4 }}>{char.fullName}</div>
           <Tag style={{
             background: 'transparent',
@@ -597,18 +760,31 @@ function CharacterCard({
           )}
         </div>
       </div>
-      {char.firstImpression && (
+      {preview && (
         <div style={{
-          marginTop: 8,
+          marginTop: 10,
           color: 'var(--color-text-secondary)',
           fontSize: 12,
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           display: '-webkit-box',
-          WebkitLineClamp: 2,
+          WebkitLineClamp: 3,
           WebkitBoxOrient: 'vertical',
+          lineHeight: 1.65,
         }}>
-          {char.firstImpression}
+          {preview}
+        </div>
+      )}
+      {char.relationshipTension && (
+        <div style={{
+          marginTop: 8,
+          color: 'var(--color-text-muted)',
+          fontSize: 11,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}>
+          关系张力：{char.relationshipTension}
         </div>
       )}
     </div>

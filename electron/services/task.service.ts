@@ -1,11 +1,23 @@
 import { WebContents } from 'electron'
+import { eq } from 'drizzle-orm'
 import { getDb } from '../database/db'
 import { tasks } from '../database/schema'
-import { eq } from 'drizzle-orm'
-import { getDefaultAdapter, getAdapterById } from './model.service'
 import { Message, ChatOptions } from '../adapters/base.adapter'
+import { getAdapterById, getDefaultAdapter } from './model.service'
 
-type TaskType = 'init' | 'character_gen' | 'chapter_outline' | 'chapter_write' | 'summary' | 'review' | 'ai_check' | 'expand_background' | 'generate_relations' | 'generate_map' | 'generate_arcs'
+export type TaskType =
+  | 'init'
+  | 'character_gen'
+  | 'chapter_outline'
+  | 'chapter_write'
+  | 'summary'
+  | 'continuity'
+  | 'review'
+  | 'ai_check'
+  | 'expand_background'
+  | 'generate_relations'
+  | 'generate_map'
+  | 'generate_arcs'
 
 interface CreateTaskOptions {
   type: TaskType
@@ -20,6 +32,7 @@ interface RunStreamTaskOptions extends CreateTaskOptions {
   messages: Message[]
   chatOpts?: Partial<ChatOptions>
   sender?: WebContents
+  onSuccess?: (outputText: string, taskId: number) => Promise<unknown> | unknown
 }
 
 const abortControllers = new Map<number, AbortController>()
@@ -42,21 +55,21 @@ export async function createTask(opts: CreateTaskOptions): Promise<number> {
 export async function runStreamTask(opts: RunStreamTaskOptions): Promise<number> {
   const db = getDb()
   const taskId = await createTask(opts)
-
   const controller = new AbortController()
   abortControllers.set(taskId, controller)
 
-  // 更新为运行中
-  db.update(tasks).set({ status: 'running', updatedAt: new Date().toISOString() }).where(eq(tasks.id, taskId)).run()
+  db.update(tasks).set({
+    status: 'running',
+    updatedAt: new Date().toISOString(),
+  }).where(eq(tasks.id, taskId)).run()
 
-  if (opts.sender) {
+  if (opts.sender && !opts.sender.isDestroyed()) {
     opts.sender.send('task:status-change', { taskId, status: 'running' })
   }
 
   const startTime = Date.now()
   let fullOutput = ''
 
-  // 异步执行，不阻塞
   ;(async () => {
     try {
       const adapter = opts.modelConfigId
@@ -74,6 +87,7 @@ export async function runStreamTask(opts: RunStreamTaskOptions): Promise<number>
         },
       })
 
+      const result = opts.onSuccess ? await opts.onSuccess(fullOutput, taskId) : undefined
       const durationMs = Date.now() - startTime
       const tokensUsed = adapter.countTokens(fullOutput)
 
@@ -86,12 +100,17 @@ export async function runStreamTask(opts: RunStreamTaskOptions): Promise<number>
       }).where(eq(tasks.id, taskId)).run()
 
       if (opts.sender && !opts.sender.isDestroyed()) {
-        opts.sender.send('task:complete', { taskId, status: 'success', output: fullOutput })
+        opts.sender.send('task:complete', {
+          taskId,
+          status: 'success',
+          output: fullOutput,
+          result,
+        })
       }
-    } catch (e: unknown) {
-      const isAbort = e instanceof Error && e.name === 'AbortError'
+    } catch (error: unknown) {
+      const isAbort = error instanceof Error && error.name === 'AbortError'
       const status = isAbort ? 'cancelled' : 'failed'
-      const errorMessage = e instanceof Error ? e.message : '未知错误'
+      const errorMessage = error instanceof Error ? error.message : '未知错误'
 
       db.update(tasks).set({
         status,
@@ -102,7 +121,11 @@ export async function runStreamTask(opts: RunStreamTaskOptions): Promise<number>
       }).where(eq(tasks.id, taskId)).run()
 
       if (opts.sender && !opts.sender.isDestroyed()) {
-        opts.sender.send('task:complete', { taskId, status, error: errorMessage })
+        opts.sender.send('task:complete', {
+          taskId,
+          status,
+          error: errorMessage,
+        })
       }
     } finally {
       abortControllers.delete(taskId)
@@ -116,7 +139,10 @@ export async function runChatTask(opts: RunStreamTaskOptions): Promise<string> {
   const db = getDb()
   const taskId = await createTask(opts)
 
-  db.update(tasks).set({ status: 'running', updatedAt: new Date().toISOString() }).where(eq(tasks.id, taskId)).run()
+  db.update(tasks).set({
+    status: 'running',
+    updatedAt: new Date().toISOString(),
+  }).where(eq(tasks.id, taskId)).run()
 
   const startTime = Date.now()
 
@@ -129,45 +155,42 @@ export async function runChatTask(opts: RunStreamTaskOptions): Promise<string> {
       ...opts.chatOpts,
     })
 
-    const durationMs = Date.now() - startTime
-    const tokensUsed = adapter.countTokens(result)
-
     db.update(tasks).set({
       status: 'success',
       outputText: result,
-      durationMs,
-      tokensUsed,
+      durationMs: Date.now() - startTime,
+      tokensUsed: adapter.countTokens(result),
       updatedAt: new Date().toISOString(),
     }).where(eq(tasks.id, taskId)).run()
 
     return result
-  } catch (e: unknown) {
-    const errorMessage = e instanceof Error ? e.message : '未知错误'
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : '未知错误'
+
     db.update(tasks).set({
       status: 'failed',
       errorMessage,
       durationMs: Date.now() - startTime,
       updatedAt: new Date().toISOString(),
     }).where(eq(tasks.id, taskId)).run()
-    throw e
+
+    throw error
   }
 }
 
 export function cancelTask(taskId: number): boolean {
   const controller = abortControllers.get(taskId)
-  if (controller) {
-    controller.abort()
-    return true
-  }
-  return false
+  if (!controller) return false
+
+  controller.abort()
+  return true
 }
 
 export async function retryTask(taskId: number, sender?: WebContents): Promise<number> {
   const db = getDb()
-  const taskRows = db.select().from(tasks).where(eq(tasks.id, taskId)).all()
-  if (taskRows.length === 0) throw new Error(`Task ${taskId} not found`)
+  const task = db.select().from(tasks).where(eq(tasks.id, taskId)).all()[0]
+  if (!task) throw new Error(`Task ${taskId} not found`)
 
-  const task = taskRows[0]
   const messages = task.inputJson ? JSON.parse(task.inputJson) : []
 
   return runStreamTask({

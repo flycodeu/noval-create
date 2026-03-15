@@ -1,18 +1,53 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  Button, Select, Tag, Collapse, Spin, Empty, message, Tooltip,
-  Modal, Input, Progress
+  Button,
+  Collapse,
+  Empty,
+  Input,
+  message,
+  Modal,
+  Progress,
+  Select,
+  Spin,
+  Tag,
 } from 'antd'
 import {
-  RobotOutlined, CheckOutlined, LoadingOutlined,
-  SaveOutlined, FileSearchOutlined, BulbOutlined,
-  PlusOutlined, DeleteOutlined
+  BulbOutlined,
+  CheckOutlined,
+  DeleteOutlined,
+  FileSearchOutlined,
+  LoadingOutlined,
+  PlusOutlined,
+  RobotOutlined,
 } from '@ant-design/icons'
-import { Chapter } from '../../../types'
+import type { Chapter } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
 import { useTaskStore } from '../../../stores/task.store'
 
-interface Props { novelId: number }
+interface Props {
+  novelId: number
+}
+
+interface AiCheckIssue {
+  type: string
+  location: string
+  suggestion: string
+}
+
+interface AiCheckPayload {
+  score: number
+  issues: AiCheckIssue[]
+  overall_feedback: string
+}
+
+interface ContinuityPayload {
+  plot_progress?: string[]
+  character_state_changes?: string[]
+  world_state_changes?: string[]
+  open_loops?: string[]
+  continuity_notes?: string[]
+  arc_progress?: string
+}
 
 const STATUS_OPTIONS = [
   { value: 'outline', label: '待写' },
@@ -30,123 +65,169 @@ const STATUS_COLORS: Record<string, string> = {
   final: '#52c41a',
 }
 
+function countWords(text: string): number {
+  const chinese = (text.match(/[\u4e00-\u9fa5]/g) || []).length
+  const english = (text.match(/\b[a-zA-Z]+\b/g) || []).length
+  return chinese + english
+}
+
+function parseContinuity(raw?: string): ContinuityPayload | null {
+  if (!raw) return null
+  try {
+    return JSON.parse(raw) as ContinuityPayload
+  } catch {
+    return null
+  }
+}
+
 export default function Writing({ novelId }: Props) {
-  const { chapters, setChapters, currentChapterId, setCurrentChapterId, currentNovel } = useNovelStore()
-  const { streams } = useTaskStore()
+  const {
+    chapters,
+    currentChapterId,
+    currentNovel,
+    setChapters,
+    setCurrentChapterId,
+    updateChapter,
+  } = useNovelStore()
+  const { streams, clearStream } = useTaskStore()
+
   const [currentChapter, setCurrentChapter] = useState<Chapter | null>(null)
   const [content, setContent] = useState('')
-  const [aiResult, setAiResult] = useState<unknown>(null)
+  const [wordCount, setWordCount] = useState(0)
   const [generating, setGenerating] = useState(false)
   const [generatingTaskId, setGeneratingTaskId] = useState<number | null>(null)
+  const [aiResult, setAiResult] = useState<AiCheckPayload | null>(null)
   const [savingTimer, setSavingTimer] = useState<ReturnType<typeof setTimeout> | null>(null)
-  const [wordCount, setWordCount] = useState(0)
   const [hoverChapterId, setHoverChapterId] = useState<number | null>(null)
-  const editorRef = useRef<HTMLDivElement>(null)
-
-  // 选中文本浮现工具栏
   const [selection, setSelection] = useState<{ text: string; range: Range } | null>(null)
   const [toolbarPos, setToolbarPos] = useState({ x: 0, y: 0 })
   const [rewriteOpen, setRewriteOpen] = useState(false)
   const [rewriteReq, setRewriteReq] = useState('')
   const [rewriting, setRewriting] = useState(false)
 
+  const editorRef = useRef<HTMLDivElement>(null)
+
+  const refreshChapter = useCallback(async (chapterId: number) => {
+    const full = await window.electron.chapter.get(chapterId)
+    if (!full) return
+
+    setCurrentChapter(full)
+    setContent(full.content || '')
+    setWordCount(countWords(full.content || ''))
+    updateChapter(chapterId, full)
+
+    if (editorRef.current) {
+      editorRef.current.innerHTML = (full.content || '').replace(/\n/g, '<br>')
+    }
+  }, [updateChapter])
+
   const loadChapters = useCallback(async () => {
     const list = await window.electron.chapter.list(novelId)
     setChapters(list)
-    if (list.length > 0 && !currentChapterId) {
-      selectChapter(list[0])
+
+    if (!currentChapterId && list.length > 0) {
+      const firstChapter = list[0]
+      setCurrentChapterId(firstChapter.id)
+      await refreshChapter(firstChapter.id)
     }
-  }, [novelId, setChapters, currentChapterId])
+  }, [currentChapterId, novelId, refreshChapter, setChapters, setCurrentChapterId])
 
-  useEffect(() => { loadChapters() }, [loadChapters])
-
-  // 监听流式输出
   useEffect(() => {
-    if (generatingTaskId && streams[generatingTaskId]) {
-      const stream = streams[generatingTaskId]
-      if (stream.status === 'completed') {
-        const generatedContent = stream.content
-        setContent(generatedContent)
-        if (editorRef.current) {
-          editorRef.current.innerHTML = generatedContent.replace(/\n/g, '<br>')
+    void loadChapters()
+  }, [loadChapters])
+
+  useEffect(() => {
+    if (!generatingTaskId) return
+    const stream = streams[generatingTaskId]
+    if (!stream) return
+
+    if (stream.status === 'completed') {
+      const chapterId = currentChapter?.id
+      setGenerating(false)
+      setGeneratingTaskId(null)
+      clearStream(stream.taskId)
+      void (async () => {
+        await loadChapters()
+        if (chapterId) {
+          await refreshChapter(chapterId)
         }
-        if (currentChapter) {
-          autoSave(currentChapter.id, generatedContent)
-        }
-        setGenerating(false)
-        setGeneratingTaskId(null)
-        message.success('正文生成完成')
-      } else if (stream.status === 'failed') {
-        setGenerating(false)
-        setGeneratingTaskId(null)
-        message.error('生成失败')
-      }
+        message.success('正文生成完成，已自动更新摘要和连续性记忆')
+      })()
+    } else if (stream.status === 'failed') {
+      setGenerating(false)
+      setGeneratingTaskId(null)
+      clearStream(stream.taskId)
+      message.error('生成失败')
     }
-  }, [streams, generatingTaskId])
+  }, [streams, generatingTaskId, currentChapter, clearStream, loadChapters, refreshChapter])
 
-  const selectChapter = async (chapter: Chapter) => {
+  useEffect(() => () => {
+    if (savingTimer) clearTimeout(savingTimer)
+  }, [savingTimer])
+
+  const selectChapter = useCallback(async (chapter: Chapter) => {
     setCurrentChapterId(chapter.id)
-    const full = await window.electron.chapter.get(chapter.id)
-    setCurrentChapter(full)
-    setContent(full?.content || '')
-    setWordCount(countWords(full?.content || ''))
+    await refreshChapter(chapter.id)
     setAiResult(null)
-  }
-
-  const countWords = (text: string) => {
-    const chinese = (text.match(/[\u4e00-\u9fa5]/g) || []).length
-    const english = (text.match(/\b[a-zA-Z]+\b/g) || []).length
-    return chinese + english
-  }
+  }, [refreshChapter, setCurrentChapterId])
 
   const autoSave = useCallback(async (chapterId: number, text: string) => {
     await window.electron.chapter.update(chapterId, {
       content: text,
       wordCount: countWords(text),
     })
-  }, [])
+    updateChapter(chapterId, {
+      content: text,
+      wordCount: countWords(text),
+    })
+  }, [updateChapter])
 
-  const handleContentChange = (e: React.FormEvent<HTMLDivElement>) => {
-    const text = e.currentTarget.innerText || ''
+  const handleContentChange = (event: React.FormEvent<HTMLDivElement>) => {
+    const text = event.currentTarget.innerText || ''
     setContent(text)
     setWordCount(countWords(text))
 
     if (savingTimer) clearTimeout(savingTimer)
-    if (currentChapter) {
-      const timer = setTimeout(() => {
-        autoSave(currentChapter.id, text)
-      }, 1500)
-      setSavingTimer(timer)
-    }
+    if (!currentChapter) return
+
+    const timer = setTimeout(() => {
+      void autoSave(currentChapter.id, text)
+    }, 1500)
+    setSavingTimer(timer)
   }
 
   const handleGenerateContent = async () => {
-    if (!currentChapter) { message.warning('请先选择章节'); return }
+    if (!currentChapter) {
+      message.warning('请先选择章节')
+      return
+    }
+
     setGenerating(true)
     try {
       const taskId = await window.electron.chapter.generateContent(currentChapter.id)
       setGeneratingTaskId(taskId)
-    } catch (e: unknown) {
-      message.error(`${e instanceof Error ? e.message : '请先配置 AI 模型'}`)
+    } catch (error: unknown) {
       setGenerating(false)
+      message.error(error instanceof Error ? error.message : '请先配置 AI 模型')
     }
   }
 
   const handleCancelGenerate = async () => {
-    if (generatingTaskId) {
-      await window.electron.task.cancel(generatingTaskId)
-      setGenerating(false)
-      setGeneratingTaskId(null)
-    }
+    if (!generatingTaskId) return
+    await window.electron.task.cancel(generatingTaskId)
+    setGenerating(false)
+    setGeneratingTaskId(null)
+    clearStream(generatingTaskId)
   }
 
   const handleGenerateSummary = async () => {
     if (!currentChapter) return
     try {
       await window.electron.chapter.generateSummary(currentChapter.id)
-      message.success('摘要已生成')
-    } catch (e: unknown) {
-      message.error(`生成失败：${e instanceof Error ? e.message : ''}`)
+      await Promise.all([loadChapters(), refreshChapter(currentChapter.id)])
+      message.success('摘要和连续性记忆已更新')
+    } catch (error: unknown) {
+      message.error(`生成失败：${error instanceof Error ? error.message : ''}`)
     }
   }
 
@@ -154,20 +235,20 @@ export default function Writing({ novelId }: Props) {
     if (!currentChapter) return
     try {
       const result = await window.electron.chapter.aiCheck(currentChapter.id)
-      setAiResult(result)
-    } catch (e: unknown) {
-      message.error(`检测失败：${e instanceof Error ? e.message : ''}`)
+      setAiResult(result as AiCheckPayload)
+    } catch (error: unknown) {
+      message.error(`检测失败：${error instanceof Error ? error.message : ''}`)
     }
   }
 
   const handleStatusChange = async (status: string) => {
     if (!currentChapter) return
-    await window.electron.chapter.update(currentChapter.id, { status })
-    setCurrentChapter({ ...currentChapter, status: status as Chapter['status'] })
+    await window.electron.chapter.update(currentChapter.id, { status: status as Chapter['status'] })
+    await Promise.all([loadChapters(), refreshChapter(currentChapter.id)])
   }
 
   const handleAddChapter = async () => {
-    const nextNum = chapters.length > 0 ? Math.max(...chapters.map(c => c.chapterNum)) + 1 : 1
+    const nextNum = chapters.length > 0 ? Math.max(...chapters.map((chapter) => chapter.chapterNum)) + 1 : 1
     await window.electron.chapter.create(novelId, {
       chapterNum: nextNum,
       title: `第${nextNum}章`,
@@ -177,35 +258,48 @@ export default function Writing({ novelId }: Props) {
     message.success('已新建章节')
   }
 
-  const handleDeleteChapter = async (chapterId: number, e: React.MouseEvent) => {
-    e.stopPropagation()
+  const handleDeleteChapter = async (chapterId: number, event: React.MouseEvent) => {
+    event.stopPropagation()
     Modal.confirm({
       title: '确认删除该章节？',
-      content: '删除后章节内容将无法恢复',
+      content: '删除后章节内容无法恢复。',
       okType: 'danger',
       okText: '删除',
       onOk: async () => {
         await window.electron.chapter.delete(chapterId)
         if (currentChapterId === chapterId) {
-          setCurrentChapterId(undefined as unknown as number)
+          setCurrentChapterId(null)
           setCurrentChapter(null)
+          setContent('')
+          setWordCount(0)
         }
         await loadChapters()
       },
     })
   }
 
-  // 文本选中处理
   const handleMouseUp = () => {
-    const sel = window.getSelection()
-    if (sel && sel.toString().trim().length > 10) {
-      const range = sel.getRangeAt(0)
-      const rect = range.getBoundingClientRect()
-      setToolbarPos({ x: rect.left + rect.width / 2, y: rect.top - 40 })
-      setSelection({ text: sel.toString(), range })
-    } else {
+    const browserSelection = window.getSelection()
+    if (!browserSelection || browserSelection.toString().trim().length <= 10 || browserSelection.rangeCount === 0) {
       setSelection(null)
+      return
     }
+
+    const range = browserSelection.getRangeAt(0)
+    const rect = range.getBoundingClientRect()
+    setToolbarPos({ x: rect.left + rect.width / 2, y: rect.top - 40 })
+    setSelection({ text: browserSelection.toString(), range })
+  }
+
+  const replaceSelectedText = (nextText: string) => {
+    if (!selection) return
+    const browserSelection = window.getSelection()
+    if (!browserSelection) return
+
+    browserSelection.removeAllRanges()
+    browserSelection.addRange(selection.range)
+    document.execCommand('insertText', false, nextText)
+    setSelection(null)
   }
 
   const handleRewrite = async () => {
@@ -217,14 +311,9 @@ export default function Writing({ novelId }: Props) {
         contextBefore: '',
         specificRequirements: rewriteReq,
       })
-      const sel = window.getSelection()
-      if (sel && selection.range) {
-        sel.removeAllRanges()
-        sel.addRange(selection.range)
-        document.execCommand('insertText', false, result)
-      }
+      replaceSelectedText(result)
       setRewriteOpen(false)
-      setSelection(null)
+      setRewriteReq('')
     } catch {
       message.error('重写失败')
     } finally {
@@ -232,81 +321,118 @@ export default function Writing({ novelId }: Props) {
     }
   }
 
-  // 提取世界规则摘要
+  const runQuickRewrite = async (specificRequirements: string) => {
+    if (!selection) return
+    try {
+      const result = await window.electron.ai.rewriteParagraph({
+        originalParagraph: selection.text,
+        contextBefore: '',
+        specificRequirements,
+      })
+      replaceSelectedText(result)
+    } catch {
+      message.error('处理失败')
+    }
+  }
+
   const getWorldRulesSummary = () => {
     if (!currentNovel?.worldRulesJson) return null
+
     try {
-      const rules = JSON.parse(currentNovel.worldRulesJson)
-      const items: string[] = []
-      if (rules.power_system?.name) items.push(`力量体系：${rules.power_system.name}`)
-      if (rules.social_structure) items.push(`社会结构：${rules.social_structure}`)
-      if (rules.forbidden_elements?.length) items.push(`禁止元素：${rules.forbidden_elements.slice(0, 3).join('、')}`)
-      if (rules.unique_features?.length) items.push(`特色元素：${rules.unique_features.slice(0, 3).join('、')}`)
-      return items.length > 0 ? items : null
+      const rules = JSON.parse(currentNovel.worldRulesJson) as Record<string, unknown>
+      const lines: string[] = []
+
+      if (rules.power_system && typeof rules.power_system === 'object') {
+        const powerSystem = rules.power_system as Record<string, unknown>
+        if (typeof powerSystem.name === 'string' && powerSystem.name.trim()) {
+          lines.push(`力量体系：${powerSystem.name.trim()}`)
+        }
+      }
+
+      if (typeof rules.social_structure === 'string' && rules.social_structure.trim()) {
+        lines.push(`社会结构：${rules.social_structure.trim()}`)
+      }
+
+      if (Array.isArray(rules.forbidden_elements) && rules.forbidden_elements.length > 0) {
+        lines.push(`禁止元素：${rules.forbidden_elements.slice(0, 3).join('、')}`)
+      }
+
+      return lines.length > 0 ? lines : null
     } catch {
       return null
     }
   }
 
+  const continuity = parseContinuity(currentChapter?.continuityStateJson)
+  const continuityItems = continuity ? [
+    continuity.plot_progress?.length ? `剧情推进：${continuity.plot_progress.join('；')}` : '',
+    continuity.character_state_changes?.length ? `人物变化：${continuity.character_state_changes.join('；')}` : '',
+    continuity.world_state_changes?.length ? `世界变化：${continuity.world_state_changes.join('；')}` : '',
+    continuity.open_loops?.length ? `未回收事项：${continuity.open_loops.join('；')}` : '',
+    continuity.continuity_notes?.length ? `承接提示：${continuity.continuity_notes.join('；')}` : '',
+    continuity.arc_progress ? `故事弧推进：${continuity.arc_progress}` : '',
+  ].filter(Boolean) : []
+
+  const streamContent = generatingTaskId ? streams[generatingTaskId]?.content : ''
   const worldRulesSummary = getWorldRulesSummary()
-  const streamContent = generatingTaskId ? streams[generatingTaskId]?.content : null
 
   return (
     <div style={{ display: 'flex', height: '100%' }}>
-      {/* 左栏：章节列表 */}
-      <div style={{
-        width: 200,
-        borderRight: '1px solid var(--border-color)',
-        background: 'var(--color-bg-secondary)',
-        display: 'flex',
-        flexDirection: 'column',
-      }}>
+      <div
+        style={{
+          width: 220,
+          borderRight: '1px solid var(--border-color)',
+          background: 'var(--color-bg-secondary)',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
         <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--border-color)' }}>
           <div style={{ fontWeight: 600, marginBottom: 4 }}>章节列表</div>
           <div style={{ color: 'var(--color-text-muted)', fontSize: 11 }}>
-            共 {chapters.length} 章 · {(chapters.reduce((s, c) => s + c.wordCount, 0) / 10000).toFixed(1)} 万字
+            共 {chapters.length} 章
           </div>
         </div>
 
         <div style={{ flex: 1, overflow: 'auto' }}>
-          {chapters.map(ch => (
+          {chapters.map((chapter) => (
             <div
-              key={ch.id}
-              onClick={() => selectChapter(ch)}
-              onMouseEnter={() => setHoverChapterId(ch.id)}
+              key={chapter.id}
+              onClick={() => void selectChapter(chapter)}
+              onMouseEnter={() => setHoverChapterId(chapter.id)}
               onMouseLeave={() => setHoverChapterId(null)}
               style={{
                 padding: '8px 12px',
                 cursor: 'pointer',
-                background: currentChapterId === ch.id ? 'rgba(46,134,171,0.15)' : 'transparent',
-                borderLeft: currentChapterId === ch.id ? '3px solid #2E86AB' : '3px solid transparent',
-                transition: 'background var(--transition-fast)',
-                position: 'relative',
+                background: currentChapterId === chapter.id ? 'rgba(46,134,171,0.15)' : 'transparent',
+                borderLeft: currentChapterId === chapter.id ? '3px solid #2E86AB' : '3px solid transparent',
                 display: 'flex',
                 alignItems: 'center',
               }}
             >
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>第{ch.chapterNum}章</div>
-                <div style={{
-                  fontSize: 13,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}>
-                  {ch.title || `第${ch.chapterNum}章`}
+                <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>第{chapter.chapterNum}章</div>
+                <div
+                  style={{
+                    fontSize: 13,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {chapter.title || `第${chapter.chapterNum}章`}
                 </div>
-                <div style={{ fontSize: 11, color: STATUS_COLORS[ch.status] || '#5c6378', marginTop: 2 }}>
-                  {ch.wordCount} 字
+                <div style={{ fontSize: 11, color: STATUS_COLORS[chapter.status] || '#5c6378', marginTop: 2 }}>
+                  {chapter.wordCount} 字
                 </div>
               </div>
-              {hoverChapterId === ch.id && (
+              {hoverChapterId === chapter.id && (
                 <Button
                   type="text"
                   size="small"
                   danger
                   icon={<DeleteOutlined style={{ fontSize: 11 }} />}
-                  onClick={e => handleDeleteChapter(ch.id, e)}
+                  onClick={(event) => handleDeleteChapter(chapter.id, event)}
                   style={{ padding: '0 2px', height: 20, flexShrink: 0 }}
                 />
               )}
@@ -314,13 +440,12 @@ export default function Writing({ novelId }: Props) {
           ))}
         </div>
 
-        {/* 新建章节按钮 */}
         <div style={{ padding: '8px 12px', borderTop: '1px solid var(--border-color)' }}>
           <Button
             type="dashed"
             size="small"
             icon={<PlusOutlined />}
-            onClick={handleAddChapter}
+            onClick={() => void handleAddChapter()}
             style={{ width: '100%' }}
           >
             新建章节
@@ -328,32 +453,32 @@ export default function Writing({ novelId }: Props) {
         </div>
       </div>
 
-      {/* 中栏：编辑器 */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         {currentChapter ? (
           <>
-            {/* 顶部工具栏 */}
-            <div style={{
-              padding: '8px 16px',
-              borderBottom: '1px solid var(--border-color)',
-            }}>
+            <div
+              style={{
+                padding: '8px 16px',
+                borderBottom: '1px solid var(--border-color)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+              }}
+            >
               <span style={{ fontWeight: 600 }}>
                 第{currentChapter.chapterNum}章 {currentChapter.title}
               </span>
               <Select
                 value={currentChapter.status}
-                onChange={handleStatusChange}
+                onChange={(value) => void handleStatusChange(value)}
                 size="small"
                 style={{ width: 100 }}
                 options={STATUS_OPTIONS}
               />
               <div style={{ flex: 1 }} />
-              <span style={{ color: 'var(--color-text-muted)', fontSize: 12 }}>
-                {wordCount} 字
-              </span>
+              <span style={{ color: 'var(--color-text-muted)', fontSize: 12 }}>{wordCount} 字</span>
             </div>
 
-            {/* 编辑区 */}
             <div style={{ flex: 1, overflow: 'auto', position: 'relative' }}>
               {generating ? (
                 <div style={{ padding: 24 }}>
@@ -396,102 +521,86 @@ export default function Writing({ novelId }: Props) {
               )}
             </div>
 
-            {/* 底部操作栏 */}
-            <div style={{
-              padding: '8px 16px',
-              borderTop: '1px solid var(--border-color)',
-            }}>
+            <div
+              style={{
+                padding: '8px 16px',
+                borderTop: '1px solid var(--border-color)',
+                display: 'flex',
+                gap: 8,
+                alignItems: 'center',
+              }}
+            >
               {generating ? (
-                <Button danger icon={<LoadingOutlined />} onClick={handleCancelGenerate}>
+                <Button danger icon={<LoadingOutlined />} onClick={() => void handleCancelGenerate()}>
                   取消生成
                 </Button>
               ) : (
-                <Button
-                  type="primary"
-                  icon={<RobotOutlined />}
-                  onClick={handleGenerateContent}
-                >
+                <Button type="primary" icon={<RobotOutlined />} onClick={() => void handleGenerateContent()}>
                   AI 生成本章
                 </Button>
               )}
-              <Button icon={<FileSearchOutlined />} onClick={handleAiCheck}>AI 检测</Button>
-              <Button icon={<BulbOutlined />} onClick={handleGenerateSummary}>生成摘要</Button>
-              <Button
-                icon={<CheckOutlined />}
-                onClick={() => handleStatusChange('final')}
-                style={{ marginLeft: 'auto' }}
-              >
+              <Button icon={<FileSearchOutlined />} onClick={() => void handleAiCheck()}>
+                AI 检测
+              </Button>
+              <Button icon={<BulbOutlined />} onClick={() => void handleGenerateSummary()}>
+                更新摘要
+              </Button>
+              <Button icon={<CheckOutlined />} onClick={() => void handleStatusChange('final')} style={{ marginLeft: 'auto' }}>
                 标记完成
               </Button>
             </div>
           </>
         ) : (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-            <Empty description="请从左侧选择章节" />
+            <Empty description="请先从左侧选择章节" />
           </div>
         )}
 
-        {/* 选中文本工具栏 */}
         {selection && (
-          <div style={{
-            position: 'fixed',
-            left: toolbarPos.x - 80,
-            top: toolbarPos.y,
-            background: 'var(--color-bg-card)',
-            border: '1px solid var(--border-color-hover)',
-            borderRadius: 6,
-            padding: '4px 8px',
-            display: 'flex',
-            gap: 4,
-            zIndex: 999,
-            boxShadow: 'var(--shadow-modal)',
-          }}>
+          <div
+            style={{
+              position: 'fixed',
+              left: toolbarPos.x - 90,
+              top: toolbarPos.y,
+              background: 'var(--color-bg-card)',
+              border: '1px solid var(--border-color-hover)',
+              borderRadius: 6,
+              padding: '4px 8px',
+              display: 'flex',
+              gap: 4,
+              zIndex: 999,
+              boxShadow: 'var(--shadow-modal)',
+            }}
+          >
             <Button size="small" onClick={() => setRewriteOpen(true)}>重写</Button>
-            <Button size="small" onClick={() => {
-              window.electron.ai.rewriteParagraph({
-                originalParagraph: selection.text,
-                contextBefore: '',
-                specificRequirements: '在保留原意的基础上扩充内容，增加细节描写，使段落更丰富',
-              }).then(result => {
-                const sel = window.getSelection()
-                if (sel) {
-                  sel.removeAllRanges()
-                  sel.addRange(selection.range)
-                  document.execCommand('insertText', false, result)
-                }
-                setSelection(null)
-              })
-            }}>扩写</Button>
-            <Button size="small" onClick={() => {
-              window.electron.ai.rewriteParagraph({
-                originalParagraph: selection.text,
-                contextBefore: '',
-                specificRequirements: '压缩段落，保留核心内容，去掉冗余描写，使文字更精炼',
-              }).then(result => {
-                const sel = window.getSelection()
-                if (sel) {
-                  sel.removeAllRanges()
-                  sel.addRange(selection.range)
-                  document.execCommand('insertText', false, result)
-                }
-                setSelection(null)
-              })
-            }}>压缩</Button>
+            <Button
+              size="small"
+              onClick={() => void runQuickRewrite('在保留原意的基础上扩充细节，让段落更丰富。')}
+            >
+              扩写
+            </Button>
+            <Button
+              size="small"
+              onClick={() => void runQuickRewrite('压缩段落，保留核心信息，去掉冗余描写。')}
+            >
+              压缩
+            </Button>
           </div>
         )}
       </div>
 
-      {/* 右栏：参考信息 */}
-      <div style={{
-        width: 280,
-        borderLeft: '1px solid var(--border-color)',
-        background: 'var(--color-bg-secondary)',
-        overflow: 'auto',
-        padding: 12,
-      }}>
+      <div
+        style={{
+          width: 300,
+          borderLeft: '1px solid var(--border-color)',
+          background: 'var(--color-bg-secondary)',
+          overflow: 'auto',
+          padding: 12,
+        }}
+      >
         <Collapse
           size="small"
-          defaultActiveKey={['outline', 'aicheck']}
+          defaultActiveKey={['outline', 'continuity', 'aicheck']}
           items={[
             {
               key: 'outline',
@@ -505,12 +614,38 @@ export default function Writing({ novelId }: Props) {
               ),
             },
             {
+              key: 'continuity',
+              label: '连续性记忆',
+              children: continuityItems.length > 0 ? (
+                <div>
+                  {continuityItems.map((item, index) => (
+                    <div
+                      key={index}
+                      style={{
+                        fontSize: 12,
+                        color: 'var(--color-text-secondary)',
+                        lineHeight: 1.8,
+                        padding: '4px 0',
+                        borderBottom: index < continuityItems.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none',
+                      }}
+                    >
+                      {item}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ color: 'var(--color-text-muted)', fontSize: 12 }}>
+                  还没有连续性记忆，生成正文或点击“更新摘要”后会自动写入。
+                </div>
+              ),
+            },
+            {
               key: 'aicheck',
               label: 'AI 检测结果',
               children: aiResult ? (
-                <AiCheckResult result={aiResult as { score: number; issues: { type: string; location: string; suggestion: string }[]; overall_feedback: string }} />
+                <AiCheckResult result={aiResult} />
               ) : (
-                <div style={{ color: 'var(--color-text-muted)', fontSize: 12 }}>点击底部「AI 检测」查看结果</div>
+                <div style={{ color: 'var(--color-text-muted)', fontSize: 12 }}>点击底部“AI 检测”查看结果。</div>
               ),
             },
             {
@@ -518,21 +653,24 @@ export default function Writing({ novelId }: Props) {
               label: '世界规则摘要',
               children: worldRulesSummary ? (
                 <div>
-                  {worldRulesSummary.map((item, i) => (
-                    <div key={i} style={{
-                      fontSize: 12,
-                      color: 'var(--color-text-secondary)',
-                      lineHeight: 1.8,
-                      padding: '2px 0',
-                      borderBottom: i < worldRulesSummary.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none',
-                    }}>
+                  {worldRulesSummary.map((item, index) => (
+                    <div
+                      key={index}
+                      style={{
+                        fontSize: 12,
+                        color: 'var(--color-text-secondary)',
+                        lineHeight: 1.8,
+                        padding: '2px 0',
+                        borderBottom: index < worldRulesSummary.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none',
+                      }}
+                    >
                       {item}
                     </div>
                   ))}
                 </div>
               ) : (
                 <div style={{ color: 'var(--color-text-muted)', fontSize: 12 }}>
-                  {currentNovel?.worldRulesJson ? '世界规则暂无结构化数据' : '尚未配置世界规则'}
+                  {currentNovel?.worldRulesJson ? '世界规则暂无结构化数据。' : '尚未配置世界规则。'}
                 </div>
               ),
             },
@@ -540,32 +678,33 @@ export default function Writing({ novelId }: Props) {
         />
       </div>
 
-      {/* 重写对话框 */}
       <Modal
         title="重写段落"
         open={rewriteOpen}
         onCancel={() => setRewriteOpen(false)}
-        onOk={handleRewrite}
+        onOk={() => void handleRewrite()}
         confirmLoading={rewriting}
         okText="开始重写"
       >
         <div style={{ marginBottom: 12 }}>
           <div style={{ color: 'var(--color-text-muted)', fontSize: 12, marginBottom: 8 }}>选中文本：</div>
-          <div style={{
-            background: 'var(--color-bg-card)',
-            padding: 8,
-            borderRadius: 4,
-            fontSize: 12,
-            maxHeight: 80,
-            overflow: 'auto',
-          }}>
+          <div
+            style={{
+              background: 'var(--color-bg-card)',
+              padding: 8,
+              borderRadius: 4,
+              fontSize: 12,
+              maxHeight: 80,
+              overflow: 'auto',
+            }}
+          >
             {selection?.text}
           </div>
         </div>
         <Input.TextArea
           value={rewriteReq}
-          onChange={e => setRewriteReq(e.target.value)}
-          placeholder="改写要求（可选）：例如「语气更凌厉」「减少心理描写」"
+          onChange={(event) => setRewriteReq(event.target.value)}
+          placeholder="改写要求，例如：语气更凌厉、减少心理描写、增加动作细节"
           rows={5}
         />
       </Modal>
@@ -573,9 +712,7 @@ export default function Writing({ novelId }: Props) {
   )
 }
 
-function AiCheckResult({ result }: {
-  result: { score: number; issues: { type: string; location: string; suggestion: string }[]; overall_feedback: string }
-}) {
+function AiCheckResult({ result }: { result: AiCheckPayload }) {
   const scoreColor = result.score >= 80 ? '#52c41a' : result.score >= 60 ? '#faad14' : '#ff4d4f'
 
   return (
@@ -587,25 +724,31 @@ function AiCheckResult({ result }: {
           size={80}
           strokeColor={scoreColor}
           trailColor="rgba(255,255,255,0.08)"
-          format={p => (
-            <span style={{ color: scoreColor, fontSize: 18, fontWeight: 700 }}>{p}</span>
+          format={(percent) => (
+            <span style={{ color: scoreColor, fontSize: 18, fontWeight: 700 }}>{percent}</span>
           )}
         />
         <div style={{ color: 'var(--color-text-secondary)', fontSize: 11, marginTop: 8 }}>
           {result.overall_feedback}
         </div>
       </div>
-      {result.issues.map((issue, i) => (
-        <div key={i} style={{
-          marginBottom: 8,
-          padding: '6px 8px',
-          background: 'rgba(255,77,79,0.1)',
-          borderRadius: 4,
-          borderLeft: '2px solid #ff4d4f',
-        }}>
+
+      {result.issues.map((issue, index) => (
+        <div
+          key={`${issue.type}-${index}`}
+          style={{
+            marginBottom: 8,
+            padding: '6px 8px',
+            background: 'rgba(255,77,79,0.1)',
+            borderRadius: 4,
+            borderLeft: '2px solid #ff4d4f',
+          }}
+        >
           <div style={{ fontSize: 11, color: '#ff4d4f' }}>{issue.type}</div>
-          <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>「{issue.location}」</div>
-          <div style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginTop: 2 }}>→ {issue.suggestion}</div>
+          <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>{issue.location}</div>
+          <div style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginTop: 2 }}>
+            {issue.suggestion}
+          </div>
         </div>
       ))}
     </div>

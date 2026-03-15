@@ -12,7 +12,7 @@ import { useAIDraftStore } from '../../../stores/aiDraft.store'
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import AIScorePanel from '../../../components/AIScorePanel'
 import { parseSections } from '../../../utils/text'
-import type { AIScoreResult } from '../../../types'
+import type { AIScoreResult, Character } from '../../../types'
 
 interface Props { novelId: number }
 
@@ -38,6 +38,7 @@ export default function CoreSettings({ novelId }: Props) {
   const [subPlots, setSubPlots] = useState<SubPlot[]>([])
   const [aiConfig, setAIConfig] = useState<AIConfig>({ drawCount: 1, requirements: '' })
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [protagonistName, setProtagonistName] = useState('')
 
   // 检查是否有待填充的草稿
   const draftPrefix = `novel:${novelId}:coresettings`
@@ -55,6 +56,92 @@ export default function CoreSettings({ novelId }: Props) {
       } catch {}
     }
   }, [currentNovel, form])
+
+  useEffect(() => {
+    let active = true
+
+    window.electron.character.list(novelId)
+      .then((characters: Character[]) => {
+        if (!active) return
+        const protagonist = characters.find((character) =>
+          character.roleType === 'protagonist' && character.fullName?.trim())
+        setProtagonistName(protagonist?.fullName?.trim() || '')
+      })
+      .catch(() => {
+        if (active) setProtagonistName('')
+      })
+
+    return () => {
+      active = false
+    }
+  }, [novelId])
+
+  const protagonistReference = protagonistName || '主角'
+  const protagonistRule = protagonistName
+    ? `当前主角已创建，唯一合法姓名为「${protagonistName}」。若输入中出现“主角”或其他旧名字，都视为同一人，并在输出中统一改写为「${protagonistName}」；禁止新增、替换或变体化主角姓名。`
+    : '当前尚未创建主角。若涉及核心人物，只能使用「主角」指代；禁止出现任何具体姓名、化名、代号；若输入里已经出现姓名，也必须在输出中统一改写为「主角」。'
+
+  const buildRelatedSettingsContext = useCallback((fieldName?: string) => {
+    const values = form.getFieldsValue(['story_goal', 'core_conflict', 'main_plot', 'ending'])
+    const relatedLines = [
+      fieldName !== 'story_goal' && values.story_goal ? `【故事核心目标】${values.story_goal}` : '',
+      fieldName !== 'core_conflict' && values.core_conflict ? `【核心冲突】${values.core_conflict}` : '',
+      fieldName !== 'main_plot' && values.main_plot ? `【主线剧情】${values.main_plot}` : '',
+      fieldName !== 'ending' && values.ending ? `【结局方向】${values.ending}` : '',
+    ].filter(Boolean)
+
+    if (subPlots.length > 0) {
+      const subplotSummary = subPlots
+        .slice(0, 3)
+        .map((sub, index) => {
+          const parts = [sub.name, sub.conflict, sub.mainlineLink].filter(Boolean)
+          return parts.length > 0 ? `${index + 1}. ${parts.join(' / ')}` : ''
+        })
+        .filter(Boolean)
+        .join('\n')
+
+      if (subplotSummary) {
+        relatedLines.push(`【支线摘要】\n${subplotSummary}`)
+      }
+    }
+
+    return relatedLines.join('\n')
+  }, [form, subPlots])
+
+  const buildOptimizationMessages = useCallback((
+    fieldName: string | undefined,
+    label: string,
+    content: string,
+    result: AIScoreResult,
+    extraReqs: string,
+  ) => {
+    const sorted = [...result.dimensions].sort((a, b) => a.score - b.score)
+    const dimSuggestions = sorted.slice(0, 3)
+      .filter(d => d.suggestion)
+      .map(d => `${d.name}（当前${d.score}分）：${d.suggestion}`)
+      .join('\n')
+    const topFixes = result.top_fixes.map((fix, index) => `${index + 1}. ${fix}`).join('\n')
+    const relatedContext = buildRelatedSettingsContext(fieldName)
+
+    return [{
+      role: 'user' as const,
+      content: `你是专业的中文小说策划师，请根据 AI 评分反馈，优化【${label}】。
+【当前内容】${content}
+【小说背景】${novelBackground || '（暂无补充背景）'}
+【题材】${genreContext}
+【当前主角指代】${protagonistReference}
+【主角称谓规则】${protagonistRule}
+${relatedContext ? `【已确定的关联设定】\n${relatedContext}\n` : ''}【优先修复问题】${topFixes}
+【重点改进方向】${dimSuggestions || '请优先修正最弱维度，并补足具体细节。'}
+${extraReqs ? `【追加要求】${extraReqs}` : ''}
+
+优化要求：
+- 只能在当前背景、题材和已确定设定上润色，禁止改写成另一套故事
+- 若上下文中出现旧名字、占位名或彼此冲突的人名，统一按主角称谓规则处理
+- 与其他字段的人物关系、事件因果、情绪走向保持一致，不得自相矛盾
+- 直接输出优化后的纯文本内容，不要解释，不要使用 Markdown。`,
+    }]
+  }, [buildRelatedSettingsContext, genreContext, novelBackground, protagonistReference, protagonistRule])
 
   const handleSave = async () => {
     setSaving(true)
@@ -140,6 +227,115 @@ ${aiConfig.requirements ? `【额外要求】${aiConfig.requirements}` : ''}
     setSubPlots(prev => prev.filter((_, i) => i !== index))
   }
 
+  const buildContextAwareExpandMessages = useCallback((fieldName: string, label: string) => {
+    const current = form.getFieldValue(fieldName) || ''
+    const relatedContext = buildRelatedSettingsContext(fieldName)
+    const prompt = `你是专业的中文小说策划师。请围绕【${label}】进行专业扩充和润色。
+【小说背景】${novelBackground || '（暂无补充背景）'}
+【题材】${genreContext}
+【当前主角指代】${protagonistReference}
+【主角称谓规则】${protagonistRule}
+${relatedContext ? `【已确定的关联设定】\n${relatedContext}\n` : ''}【当前字段内容】${current || '（暂无，请根据背景和已确定设定生成合适内容）'}
+${aiConfig.requirements ? `【额外要求】${aiConfig.requirements}` : ''}
+
+扩充原则：
+- 只允许在当前背景、题材和已确定设定上深化，禁止改写成另一套故事
+- 若上下文中出现旧名字、占位名或彼此冲突的人名，统一按主角称谓规则处理
+- 与其他字段中的人物关系、事件因果、核心矛盾保持前后一致，不得漂移
+- 保留原有思路，在其基础上补足动机、推进关系和关键细节
+- 语言简洁有力，避免空话和套路化描述
+
+输出格式：
+- 直接输出润色后的纯文本内容，不要解释
+- 不要使用 Markdown、标题、列表或字段标签
+- 段落之间可以空一行`
+
+    return [{ role: 'user' as const, content: prompt }]
+  }, [aiConfig.requirements, buildRelatedSettingsContext, form, genreContext, novelBackground, protagonistReference, protagonistRule])
+
+  const buildContextAwareSubplotMessages = useCallback((index: number) => {
+    const sub = subPlots[index]
+    const mainPlot = form.getFieldValue('main_plot') || ''
+    const relatedContext = buildRelatedSettingsContext('sub_plots_list')
+    const prompt = `请完善这一条支线剧情设定。
+【小说背景】${novelBackground || '（暂无补充背景）'}
+【题材】${genreContext}
+【当前主角指代】${protagonistReference}
+【主角称谓规则】${protagonistRule}
+${relatedContext ? `【已确定的关联设定】\n${relatedContext}\n` : ''}【主线剧情】${mainPlot || '（暂未填写）'}
+【当前支线基础信息】
+- 名称：${sub?.name || '（未命名）'}
+- 涉及人物：${sub?.characters || '（暂未填写）'}
+- 核心冲突：${sub?.conflict || '（暂未填写）'}
+- 与主线关联：${sub?.mainlineLink || '（暂未填写）'}
+- 预计收束章节：第${sub?.endChapter || 'X'}章
+${aiConfig.requirements ? `【额外要求】${aiConfig.requirements}` : ''}
+
+完善要求：
+- 支线必须服务主线，与已确定设定保持同一故事版本
+- 若涉及主角，必须严格遵守主角称谓规则
+- 角色行为要有动机，支线推进要能解释其与主线的呼应或反衬
+- 直接输出润色后的完整支线设定，不要解释，不要使用 Markdown。`
+
+    return [{ role: 'user' as const, content: prompt }]
+  }, [aiConfig.requirements, buildRelatedSettingsContext, form, genreContext, novelBackground, protagonistReference, protagonistRule, subPlots])
+
+  const buildSubplotFrameworkMessages = useCallback(() => {
+    const mainPlot = form.getFieldValue('main_plot') || ''
+    const relatedContext = buildRelatedSettingsContext('sub_plots_list')
+    const prompt = `请为小说生成一条新的支线剧情框架。
+【小说背景】${novelBackground || '（暂无补充背景）'}
+【题材】${genreContext}
+【当前主角指代】${protagonistReference}
+【主角称谓规则】${protagonistRule}
+${relatedContext ? `【已确定的关联设定】\n${relatedContext}\n` : ''}【主线剧情】${mainPlot || '（暂未填写）'}
+【已有支线数量】${subPlots.length}
+${aiConfig.requirements ? `【额外要求】${aiConfig.requirements}` : ''}
+
+生成要求：
+- 支线必须与主线形成呼应、反衬或推进关系，不能自成孤岛
+- 若涉及主角，characters 字段中只能写「${protagonistReference}」，禁止发明新名字
+- 输出 JSON，且只输出 JSON：
+{"name":"支线名称","characters":"涉及人物，逗号分隔","conflict":"核心冲突，50字内","mainlineLink":"与主线的关联方式，50字内","endChapter":"预计收束章节（数字）"}`
+
+    return [{ role: 'user' as const, content: prompt }]
+  }, [aiConfig.requirements, buildRelatedSettingsContext, form, genreContext, novelBackground, protagonistReference, protagonistRule, subPlots.length])
+
+  const buildStoryCoreOptimizationMessages = useCallback((
+    content: string,
+    result: AIScoreResult,
+    extraReqs: string,
+  ) => {
+    const sorted = [...result.dimensions].sort((a, b) => a.score - b.score)
+    const dimSuggestions = sorted.slice(0, 3)
+      .filter(d => d.suggestion)
+      .map(d => `${d.name}（当前${d.score}分）：${d.suggestion}`)
+      .join('\n')
+    const topFixes = result.top_fixes.map((fix, index) => `${index + 1}. ${fix}`).join('\n')
+    const relatedContext = buildRelatedSettingsContext()
+
+    return [{
+      role: 'user' as const,
+      content: `请根据 AI 评分反馈，分别优化「故事核心目标」和「核心冲突」两个字段。
+【当前内容】${content}
+【小说背景】${novelBackground || '（暂无补充背景）'}
+【题材】${genreContext}
+【当前主角指代】${protagonistReference}
+【主角称谓规则】${protagonistRule}
+${relatedContext ? `【已确定的关联设定】\n${relatedContext}\n` : ''}【评分问题】${topFixes}
+【改进方向】${dimSuggestions || '请优先修正评分最低的维度，并补足具体细节。'}
+${extraReqs ? `【追加要求】${extraReqs}` : ''}
+
+优化要求：
+- 两个字段内容都要独立完整，但必须属于同一套故事设定
+- 若出现旧名字、占位名或彼此冲突的人名，统一按主角称谓规则处理
+- 不要使用 Markdown
+- 严格按以下格式输出：
+【故事核心目标】此处输出优化后的故事核心目标
+【核心冲突】此处输出优化后的核心冲突`,
+    }]
+  }, [buildRelatedSettingsContext, genreContext, novelBackground, protagonistReference, protagonistRule])
+
   // 高级设置 Popover 内容
   const advancedSettingsContent = (
     <div style={{ width: 280 }}>
@@ -194,7 +390,7 @@ ${aiConfig.requirements ? `【额外要求】${aiConfig.requirements}` : ''}
                   label="AI"
                   size="small"
                   type="text"
-                  buildMessages={() => buildExpandMessages('story_goal', '故事核心目标')}
+                  buildMessages={() => buildContextAwareExpandMessages('story_goal', '故事核心目标')}
                   drawCount={aiConfig.drawCount}
                   onResult={v => applyAndSaveDraft('story_goal', v, '故事核心目标')}
                 />
@@ -212,7 +408,7 @@ ${aiConfig.requirements ? `【额外要求】${aiConfig.requirements}` : ''}
                   label="AI"
                   size="small"
                   type="text"
-                  buildMessages={() => buildExpandMessages('core_conflict', '核心冲突')}
+                  buildMessages={() => buildContextAwareExpandMessages('core_conflict', '核心冲突')}
                   drawCount={aiConfig.drawCount}
                   onResult={v => applyAndSaveDraft('core_conflict', v, '核心冲突')}
                 />
@@ -231,38 +427,7 @@ ${aiConfig.requirements ? `【额外要求】${aiConfig.requirements}` : ''}
             genreContext={genreContext}
             drawCount={aiConfig.drawCount}
             customIsJson={false}
-            buildCustomRegenMessages={(content, result, extraReqs) => {
-              const sorted = [...result.dimensions].sort((a, b) => a.score - b.score)
-              const dimSuggestions = sorted.slice(0, 3)
-                .filter(d => d.suggestion)
-                .map(d => `${d.name}（${d.score}分）：${d.suggestion}`)
-                .join('\n')
-              const topFixes = result.top_fixes.map((f, i) => `${i + 1}. ${f}`).join('\n')
-              return [{
-                role: 'user' as const,
-                content: `请根据AI评分反馈，分别优化「故事核心目标」和「核心冲突」两个字段。
-
-【当前内容】
-${content}
-
-【评分问题】${topFixes}
-【改进方向】${dimSuggestions}
-${extraReqs ? `【追加要求】${extraReqs}` : ''}
-
-优化要求：
-- 两个字段内容独立完整，主题聚焦，不拆分同一句话
-- 禁止使用任何 Markdown 格式（** 加粗、## 标题、- 列表等）
-- 直接输出纯文本，段落用空行分隔
-
-严格按照以下格式输出（保留标记行，不要增删）：
-
-【故事核心目标】
-此处输出优化后的「故事核心目标」内容
-
-【核心冲突】
-此处输出优化后的「核心冲突」内容`,
-              }]
-            }}
+            buildCustomRegenMessages={buildStoryCoreOptimizationMessages}
             onRegenerate={v => {
               // 用标记解析，每个字段内容独立完整
               const sections = parseSections(v, '故事核心目标', '核心冲突')
@@ -289,7 +454,7 @@ ${extraReqs ? `【追加要求】${extraReqs}` : ''}
           <AIGenerateButton
             label="AI 扩展"
             drawCount={aiConfig.drawCount}
-            buildMessages={() => buildExpandMessages('main_plot', '主线剧情概述')}
+            buildMessages={() => buildContextAwareExpandMessages('main_plot', '主线剧情概述')}
             onResult={v => applyAndSaveDraft('main_plot', v, '主线剧情')}
           />
         </div>
@@ -305,6 +470,8 @@ ${extraReqs ? `【追加要求】${extraReqs}` : ''}
             novelBackground={novelBackground}
             genreContext={genreContext}
             drawCount={aiConfig.drawCount}
+            buildCustomRegenMessages={(content, result, extraReqs) =>
+              buildOptimizationMessages('main_plot', '主线剧情', content, result, extraReqs)}
             onRegenerate={v => applyAndSaveDraft('main_plot', v, '主线剧情（优化版）')}
           />
         </>
@@ -319,20 +486,7 @@ ${extraReqs ? `【追加要求】${extraReqs}` : ''}
             <AIGenerateButton
               label="AI 生成支线"
               drawCount={aiConfig.drawCount}
-              buildMessages={() => {
-                const mainPlot = form.getFieldValue('main_plot') || ''
-                const prompt = `为小说生成一条新的支线剧情框架。
-
-【主线概述】${mainPlot}
-【题材】${genreContext}
-【背景】${novelBackground}
-${aiConfig.requirements ? `【要求】${aiConfig.requirements}` : ''}
-已有支线数量：${subPlots.length}条
-
-请设计一条与主线形成对照的支线，输出JSON：
-{"name":"支线名称","characters":"涉及人物（角色名，逗号分隔）","conflict":"核心矛盾（30字内）","mainlineLink":"与主线的关联方式（20字内）","endChapter":"预计收束章节（数字）"}`
-                return [{ role: 'user' as const, content: prompt }]
-              }}
+              buildMessages={buildSubplotFrameworkMessages}
               onResult={v => {
                 try {
                   const parsed = JSON.parse(v.replace(/```json|```/g, '').trim())
@@ -383,7 +537,7 @@ ${aiConfig.requirements ? `【要求】${aiConfig.requirements}` : ''}
                       size="small"
                       type="text"
                       drawCount={aiConfig.drawCount}
-                      buildMessages={() => buildSubplotMessages(index)}
+                      buildMessages={() => buildContextAwareSubplotMessages(index)}
                       onResult={v => {
                         updateSubPlot(index, 'conflict', v)
                         saveDraft(`${draftPrefix}:subplot:${index}`, v, `支线${index + 1}完善内容`)
@@ -463,6 +617,8 @@ ${aiConfig.requirements ? `【要求】${aiConfig.requirements}` : ''}
                   novelBackground={novelBackground}
                   genreContext={genreContext}
                   drawCount={aiConfig.drawCount}
+                  buildCustomRegenMessages={(content, result, extraReqs) =>
+                    buildOptimizationMessages('sub_plots_list', `支线剧情：${sub.name || '未命名'}`, content, result, extraReqs)}
                   onRegenerate={v => {
                     updateSubPlot(index, 'conflict', v)
                     saveDraft(`${draftPrefix}:subplot:${index}:optimized`, v, `支线${index + 1}优化内容`)
@@ -521,7 +677,7 @@ ${aiConfig.requirements ? `【要求】${aiConfig.requirements}` : ''}
           <AIGenerateButton
             label="AI 扩展"
             drawCount={aiConfig.drawCount}
-            buildMessages={() => buildExpandMessages('ending', '结局内容')}
+            buildMessages={() => buildContextAwareExpandMessages('ending', '结局内容')}
             onResult={v => applyAndSaveDraft('ending', v, '结局设定')}
           />
         </div>
@@ -546,7 +702,7 @@ ${aiConfig.requirements ? `【要求】${aiConfig.requirements}` : ''}
                   label="AI"
                   size="small"
                   type="text"
-                  buildMessages={() => buildExpandMessages('ending', '故事结局内容')}
+                  buildMessages={() => buildContextAwareExpandMessages('ending', '故事结局内容')}
                   drawCount={aiConfig.drawCount}
                   onResult={v => applyAndSaveDraft('ending', v, '结局内容')}
                 />
@@ -561,6 +717,8 @@ ${aiConfig.requirements ? `【要求】${aiConfig.requirements}` : ''}
             novelBackground={novelBackground}
             genreContext={genreContext}
             drawCount={aiConfig.drawCount}
+            buildCustomRegenMessages={(content, result, extraReqs) =>
+              buildOptimizationMessages('ending', '结局设定', content, result, extraReqs)}
             onRegenerate={v => applyAndSaveDraft('ending', v, '结局设定（优化版）')}
           />
         </>

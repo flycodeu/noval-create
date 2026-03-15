@@ -30,6 +30,7 @@ export interface Chapter {
   wordCount: number
   summary?: string
   nextChapterSeed?: string
+  continuityStateJson?: string
   status: 'outline' | 'writing' | 'draft' | 'reviewing' | 'final'
   aiScoreJson?: string
   arcId?: number
@@ -56,6 +57,18 @@ export interface Character {
   habitsJson?: string
   goals?: string
   firstImpression?: string
+  surfaceDesire?: string
+  deepNeed?: string
+  coreFear?: string
+  innerConflict?: string
+  hiddenSecret?: string
+  moralLine?: string
+  selfDeception?: string
+  trauma?: string
+  contradiction?: string
+  relationshipTension?: string
+  resonancePoint?: string
+  characterArc?: string
   appearanceJson?: string
   abilitiesJson?: string
   appearChapter?: number
@@ -196,6 +209,7 @@ declare global {
         create: (novelId: number, data: Partial<Character>) => Promise<number>
         update: (id: number, data: Partial<Character>) => Promise<void>
         delete: (id: number) => Promise<void>
+        regenerate: (id: number) => Promise<Character | null>
         batchGenerate: (novelId: number, opts: unknown) => Promise<number[]>
         generateProtagonist: (novelId: number, opts: unknown) => Promise<number>
         getRelations: (novelId: number) => Promise<CharacterRelation[]>
