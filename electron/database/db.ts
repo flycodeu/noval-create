@@ -2,8 +2,8 @@ import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { app } from 'electron'
 import path from 'path'
-import fs from 'fs'
 import * as schema from './schema'
+import { normalizeWorldRules, stringifyWorldRules, type GenreWorldRules } from '../../src/shared/genre-system'
 
 let _db: ReturnType<typeof drizzle> | null = null
 let _sqlite: Database.Database | null = null
@@ -78,11 +78,13 @@ function runMigrations(sqlite: Database.Database) {
       chapter_num INTEGER NOT NULL,
       title TEXT,
       outline TEXT,
+      scene_plan_json TEXT,
       content TEXT,
       word_count INTEGER DEFAULT 0,
       summary TEXT,
       next_chapter_seed TEXT,
       continuity_state_json TEXT,
+      review_notes_json TEXT,
       status TEXT DEFAULT 'outline',
       ai_score_json TEXT,
       arc_id INTEGER,
@@ -107,6 +109,8 @@ function runMigrations(sqlite: Database.Database) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
       role_type TEXT DEFAULT 'minor',
+      entity_type TEXT DEFAULT 'human',
+      species TEXT,
       surname TEXT,
       given_name TEXT,
       full_name TEXT NOT NULL,
@@ -115,10 +119,15 @@ function runMigrations(sqlite: Database.Database) {
       birthplace TEXT,
       active_regions_json TEXT,
       occupation TEXT,
+      rank_level TEXT,
+      social_identity TEXT,
       background TEXT,
       personality_traits_json TEXT,
       flaws_json TEXT,
       habits_json TEXT,
+      camp_faction_ids_json TEXT,
+      power_system_refs_json TEXT,
+      context_hooks_json TEXT,
       goals TEXT,
       first_impression TEXT,
       surface_desire TEXT,
@@ -160,12 +169,79 @@ function runMigrations(sqlite: Database.Database) {
       parent_id INTEGER,
       name TEXT NOT NULL,
       location_type TEXT,
+      node_type TEXT,
+      structure_role TEXT,
+      parent_rule_type TEXT,
       description TEXT,
       atmosphere TEXT,
       plot_relevance TEXT,
       key_events_json TEXT,
       related_characters_json TEXT,
+      tags_json TEXT,
+      affiliated_faction_ids_json TEXT,
+      danger_level TEXT,
       sort_order INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS timeline_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+      sort_order INTEGER DEFAULT 0,
+      event_title TEXT NOT NULL,
+      event_summary TEXT,
+      time_mode TEXT DEFAULT 'custom-era',
+      time_label TEXT NOT NULL,
+      time_sort_value REAL DEFAULT 0,
+      time_precision TEXT,
+      is_major_event INTEGER DEFAULT 1,
+      event_type TEXT,
+      arc_id INTEGER REFERENCES story_arcs(id) ON DELETE SET NULL,
+      chapter_start_id INTEGER REFERENCES chapters(id) ON DELETE SET NULL,
+      chapter_end_id INTEGER REFERENCES chapters(id) ON DELETE SET NULL,
+      location_map_id INTEGER REFERENCES world_map(id) ON DELETE SET NULL,
+      present_character_ids_json TEXT,
+      affected_character_ids_json TEXT,
+      protagonist_present INTEGER DEFAULT 0,
+      protagonist_action TEXT,
+      event_cause TEXT,
+      event_process TEXT,
+      event_result TEXT,
+      linked_item_ids_json TEXT,
+      direct_consequences_json TEXT,
+      open_threads_json TEXT,
+      notes TEXT,
+      status TEXT DEFAULT 'planned',
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS story_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+      item_kind TEXT DEFAULT 'instance',
+      parent_item_id INTEGER,
+      item_name TEXT NOT NULL,
+      genre_family TEXT,
+      category TEXT,
+      sub_type TEXT,
+      rarity TEXT,
+      owner_character_id INTEGER REFERENCES characters(id) ON DELETE SET NULL,
+      location_map_id INTEGER REFERENCES world_map(id) ON DELETE SET NULL,
+      status TEXT DEFAULT 'available',
+      summary TEXT,
+      acquisition_method TEXT,
+      usage_method TEXT,
+      cost TEXT,
+      risk TEXT,
+      plot_function TEXT,
+      appearance TEXT,
+      faction_hint TEXT,
+      linked_character_ids_json TEXT,
+      linked_timeline_event_ids_json TEXT,
+      tags_json TEXT,
+      sort_order INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS model_configs (
@@ -209,9 +285,16 @@ function runMigrations(sqlite: Database.Database) {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE INDEX IF NOT EXISTS idx_timeline_events_novel_sort
+    ON timeline_events (novel_id, time_sort_value, sort_order, id);
   `)
 
   ensureColumn(sqlite, 'chapters', 'continuity_state_json', 'TEXT')
+  ensureColumn(sqlite, 'chapters', 'scene_plan_json', 'TEXT')
+  ensureColumn(sqlite, 'chapters', 'review_notes_json', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'entity_type', "TEXT DEFAULT 'human'")
+  ensureColumn(sqlite, 'characters', 'species', 'TEXT')
   ensureColumn(sqlite, 'characters', 'surface_desire', 'TEXT')
   ensureColumn(sqlite, 'characters', 'deep_need', 'TEXT')
   ensureColumn(sqlite, 'characters', 'core_fear', 'TEXT')
@@ -224,6 +307,23 @@ function runMigrations(sqlite: Database.Database) {
   ensureColumn(sqlite, 'characters', 'relationship_tension', 'TEXT')
   ensureColumn(sqlite, 'characters', 'resonance_point', 'TEXT')
   ensureColumn(sqlite, 'characters', 'character_arc', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'rank_level', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'social_identity', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'camp_faction_ids_json', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'power_system_refs_json', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'context_hooks_json', 'TEXT')
+  ensureColumn(sqlite, 'world_map', 'node_type', 'TEXT')
+  ensureColumn(sqlite, 'world_map', 'structure_role', 'TEXT')
+  ensureColumn(sqlite, 'world_map', 'parent_rule_type', 'TEXT')
+  ensureColumn(sqlite, 'world_map', 'tags_json', 'TEXT')
+  ensureColumn(sqlite, 'world_map', 'affiliated_faction_ids_json', 'TEXT')
+  ensureColumn(sqlite, 'world_map', 'danger_level', 'TEXT')
+  ensureColumn(sqlite, 'timeline_events', 'linked_item_ids_json', 'TEXT')
+
+  migrateWorldRules(sqlite)
+  backfillCharacterTaxonomy(sqlite)
+  backfillMapTaxonomy(sqlite)
+  backfillStoryItems(sqlite)
 }
 
 function ensureColumn(
@@ -236,6 +336,92 @@ function ensureColumn(
   if (columns.some((column) => column.name === columnName)) return
 
   sqlite.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnDefinition};`)
+}
+
+function getGenreNameMap(sqlite: Database.Database): Map<number, string> {
+  const rows = sqlite.prepare('SELECT id, name FROM genres').all() as Array<{ id: number; name: string }>
+  return new Map(rows.map((row) => [row.id, row.name]))
+}
+
+function parseWorldRulesForMigration(raw?: string | null): unknown {
+  if (!raw) return {}
+  try {
+    return JSON.parse(raw) as unknown
+  } catch {
+    return {}
+  }
+}
+
+function migrateWorldRules(sqlite: Database.Database) {
+  const genreMap = getGenreNameMap(sqlite)
+  const rows = sqlite.prepare('SELECT id, genre_id, world_rules_json FROM novels').all() as Array<{
+    id: number
+    genre_id?: number | null
+    world_rules_json?: string | null
+  }>
+  const update = sqlite.prepare('UPDATE novels SET world_rules_json = ? WHERE id = ?')
+
+  for (const row of rows) {
+    const genreName = typeof row.genre_id === 'number' ? genreMap.get(row.genre_id) : undefined
+    const normalized = normalizeWorldRules(parseWorldRulesForMigration(row.world_rules_json), genreName)
+    update.run(stringifyWorldRules(normalized as GenreWorldRules), row.id)
+  }
+}
+
+function backfillCharacterTaxonomy(sqlite: Database.Database) {
+  sqlite.exec(`
+    UPDATE characters
+    SET entity_type = COALESCE(NULLIF(entity_type, ''), 'human')
+  `)
+
+  sqlite.exec(`
+    UPDATE characters
+    SET species = CASE
+      WHEN species IS NOT NULL AND species <> '' THEN species
+      WHEN entity_type = 'human' THEN '人类'
+      ELSE species
+    END
+  `)
+
+  sqlite.exec(`
+    UPDATE characters
+    SET camp_faction_ids_json = COALESCE(camp_faction_ids_json, '[]'),
+        power_system_refs_json = COALESCE(power_system_refs_json, '[]'),
+        context_hooks_json = COALESCE(context_hooks_json, '[]')
+  `)
+}
+
+function backfillMapTaxonomy(sqlite: Database.Database) {
+  sqlite.exec(`
+    UPDATE world_map
+    SET node_type = CASE
+      WHEN node_type IS NOT NULL AND node_type <> '' THEN node_type
+      WHEN level = 1 THEN '区域'
+      WHEN level = 2 THEN '子区域'
+      ELSE COALESCE(location_type, '地点')
+    END,
+        structure_role = COALESCE(structure_role, ''),
+        parent_rule_type = COALESCE(parent_rule_type, ''),
+        tags_json = COALESCE(tags_json, '[]'),
+        affiliated_faction_ids_json = COALESCE(affiliated_faction_ids_json, '[]'),
+        danger_level = COALESCE(danger_level, '')
+  `)
+}
+
+function backfillStoryItems(sqlite: Database.Database) {
+  sqlite.exec(`
+    UPDATE story_items
+    SET item_kind = COALESCE(NULLIF(item_kind, ''), 'instance'),
+        status = COALESCE(NULLIF(status, ''), 'available'),
+        linked_character_ids_json = COALESCE(linked_character_ids_json, '[]'),
+        linked_timeline_event_ids_json = COALESCE(linked_timeline_event_ids_json, '[]'),
+        tags_json = COALESCE(tags_json, '[]')
+  `)
+
+  sqlite.exec(`
+    UPDATE timeline_events
+    SET linked_item_ids_json = COALESCE(linked_item_ids_json, '[]')
+  `)
 }
 
 function seedBuiltinData(db: ReturnType<typeof drizzle>) {

@@ -8,7 +8,10 @@ import { getAdapterById, getDefaultAdapter } from './model.service'
 export type TaskType =
   | 'init'
   | 'character_gen'
+  | 'chapter_scene_plan'
+  | 'chapter_draft'
   | 'chapter_outline'
+  | 'chapter_review'
   | 'chapter_write'
   | 'summary'
   | 'continuity'
@@ -18,6 +21,10 @@ export type TaskType =
   | 'generate_relations'
   | 'generate_map'
   | 'generate_arcs'
+  | 'generate_items'
+  | 'generate_timeline'
+  | 'subplot_framework'
+  | 'core_settings_generate'
 
 interface CreateTaskOptions {
   type: TaskType

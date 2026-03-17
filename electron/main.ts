@@ -2,6 +2,8 @@ import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import { desc, eq } from 'drizzle-orm'
+import type { CoreSettingsGenerationRequest } from '../src/shared/core-settings-generation'
+import type { SubplotGenerationRequest } from '../src/shared/subplot-framework'
 import { closeDb, getDb, initDb } from './database/db'
 import {
   chapters,
@@ -14,12 +16,18 @@ import {
 } from './database/schema'
 import * as chapterService from './services/chapter.service'
 import * as characterService from './services/character.service'
+import * as consistencyService from './services/consistency.service'
+import * as coreSettingsService from './services/core-settings.service'
 import { buildOutlineGenerationContext, buildStoryProfile } from './services/context.service'
 import * as exportService from './services/export.service'
+import * as itemService from './services/item.service'
 import * as mapService from './services/map.service'
 import * as modelService from './services/model.service'
 import { encryptApiKey } from './services/model.service'
 import * as novelService from './services/novel.service'
+import * as subplotService from './services/subplot.service'
+import * as timelineService from './services/timeline.service'
+import * as storyMemoryService from './services/story-memory.service'
 import {
   contentScoringPrompt,
   expandBackgroundPrompt,
@@ -129,8 +137,12 @@ function toStringArray(value: unknown): string[] {
 }
 
 function formatGeneratedOutline(outline: Record<string, unknown>): string {
+  const characters = toStringArray(outline.characters)
+
   return [
     typeof outline.goal === 'string' && outline.goal.trim() ? `目标：${outline.goal.trim()}` : '',
+    characters.length > 0 ? `人物：${characters.join('、')}` : '',
+    typeof outline.location === 'string' && outline.location.trim() ? `场景：${outline.location.trim()}` : '',
     ...toStringArray(outline.plot_points).map((item) => `- ${item}`),
     typeof outline.bridge_in === 'string' && outline.bridge_in.trim() ? `承接：${outline.bridge_in.trim()}` : '',
     typeof outline.bridge_out === 'string' && outline.bridge_out.trim() ? `转出：${outline.bridge_out.trim()}` : '',
@@ -160,6 +172,8 @@ function registerIpcHandlers() {
   ipcMain.handle('novel:delete', (_, id) => novelService.deleteNovel(id))
   ipcMain.handle('novel:export', (_, id, format) => exportService.exportNovel(id, format))
   ipcMain.handle('novel:stats', (_, id) => novelService.getNovelStats(id))
+  ipcMain.handle('novel:runConsistencyCheck', (_, id) => consistencyService.buildNovelConsistencyReport(id))
+  ipcMain.handle('novel:getStoryMemory', (_, id) => storyMemoryService.buildStoryMemorySnapshot(id))
 
   ipcMain.handle('chapter:list', (_, novelId) => chapterService.listChapters(novelId))
   ipcMain.handle('chapter:get', (_, id) => chapterService.getChapter(id))
@@ -194,6 +208,21 @@ function registerIpcHandlers() {
   ipcMain.handle('map:delete', (_, id) => mapService.deleteMapItem(id))
   ipcMain.handle('map:batchGenerate', (_, novelId, structure) =>
     mapService.batchGenerateMap(novelId, structure))
+
+  ipcMain.handle('timeline:list', (_, novelId) => timelineService.listTimelineEvents(novelId))
+  ipcMain.handle('timeline:get', (_, id) => timelineService.getTimelineEvent(id))
+  ipcMain.handle('timeline:create', (_, novelId, data) => timelineService.createTimelineEvent(novelId, data))
+  ipcMain.handle('timeline:update', (_, id, data) => timelineService.updateTimelineEvent(id, data))
+  ipcMain.handle('timeline:delete', (_, id) => timelineService.deleteTimelineEvent(id))
+  ipcMain.handle('timeline:generate', (_, novelId, options) =>
+    timelineService.generateTimelineEvents(novelId, options))
+
+  ipcMain.handle('item:list', (_, novelId) => itemService.listStoryItems(novelId))
+  ipcMain.handle('item:get', (_, id) => itemService.getStoryItem(id))
+  ipcMain.handle('item:create', (_, novelId, data) => itemService.createStoryItem(novelId, data))
+  ipcMain.handle('item:update', (_, id, data) => itemService.updateStoryItem(id, data))
+  ipcMain.handle('item:delete', (_, id) => itemService.deleteStoryItem(id))
+  ipcMain.handle('item:generate', (_, novelId, options) => itemService.generateStoryItems(novelId, options))
 
   ipcMain.handle('outline:getArcs', (_, novelId) => {
     const db = getDb()
@@ -426,6 +455,10 @@ function registerIpcHandlers() {
       return chapterService.generateChapterContent(task.relatedEntityId, event.sender)
     }
 
+    if (task.type === 'subplot_framework') {
+      return subplotService.retrySubplotBatch(id)
+    }
+
     return taskService.retryTask(id, event.sender)
   })
 
@@ -463,6 +496,9 @@ function registerIpcHandlers() {
     return safeParseJson(result)
   })
 
+  ipcMain.handle('ai:generateCoreSettings', (event, data: CoreSettingsGenerationRequest) =>
+    coreSettingsService.generateCoreSettings(data, event.sender))
+
   ipcMain.handle('ai:generateCharacter', (_, novelId, opts) =>
     characterService.generateProtagonist(novelId, opts))
   ipcMain.handle('ai:generateRelations', (_, novelId) =>
@@ -488,6 +524,10 @@ function registerIpcHandlers() {
     })
 
     return result
+  })
+
+  ipcMain.handle('ai:generateSubplotBatch', async (_, data: SubplotGenerationRequest) => {
+    return subplotService.generateSubplotBatch(data)
   })
 
   ipcMain.handle('ai:runPrompt', async (_, data: {

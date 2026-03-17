@@ -5,15 +5,23 @@ import { characters, characterRelations, novels } from '../database/schema'
 import { safeParseJson } from '../utils/json'
 import { buildStoryProfile } from './context.service'
 import {
+  buildCharacterEcologySummary,
+  getFactionNameOptions,
+  getSpeciesNameOptions,
+  parseWorldRulesJson,
+  buildMapBlueprintSummary,
+} from '../../src/shared/genre-system'
+import {
   batchCharacterPrompt,
   characterRelationsPrompt,
   protagonistPrompt,
   regenerateCharacterPrompt,
 } from './prompts'
 import { runChatTask } from './task.service'
+import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/utils/text'
 
 function asText(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : ''
+  return typeof value === 'string' ? cleanAiFieldText(value) : ''
 }
 
 function asNumber(value: unknown): number | undefined {
@@ -26,15 +34,15 @@ function asNumber(value: unknown): number | undefined {
 
 function toStringArray(value: unknown): string[] {
   if (Array.isArray(value)) {
-    return value
+    return cleanAiStringArray(value
       .filter((item): item is string => typeof item === 'string')
       .map((item) => item.trim())
-      .filter(Boolean)
+      .filter(Boolean))
   }
 
   const text = asText(value)
   if (!text) return []
-  return [text]
+  return cleanAiStringArray(text.split(/[\n,，、]/))
 }
 
 function parseJsonArray(raw?: string | null): string[] {
@@ -59,10 +67,44 @@ function parseAppearanceDescription(raw?: string | null): string {
   }
 }
 
+function inferEntityType(species: string): string {
+  if (!species || species === '人类' || species === '幸存者' || species === '人族' || species === '人族修士') {
+    return 'human'
+  }
+  if (/丧尸|感染者|尸/u.test(species)) return 'undead'
+  if (/兽|猫|狗|灵兽|魔兽/u.test(species)) return 'beast'
+  if (/精灵|异族/u.test(species)) return 'nonhuman'
+  if (/仙|神/u.test(species)) return 'immortal'
+  return 'nonhuman'
+}
+
+function jsonStringifyArray(value: string[]): string {
+  return JSON.stringify(cleanAiStringArray(value))
+}
+
 function roleOrder(roleType?: string | null): number {
   const priority = ['protagonist', 'major', 'antagonist', 'supporting', 'minor']
   const index = priority.indexOf(roleType || 'minor')
   return index === -1 ? priority.length : index
+}
+
+function normalizeRoleType(value: string): 'major' | 'minor' | 'antagonist' | 'supporting' {
+  if (value === 'major' || value === 'antagonist' || value === 'supporting') return value
+  return 'minor'
+}
+
+function buildRoleQueue(opts: {
+  majorCount: number
+  minorCount: number
+  antagonistCount?: number
+  supportingCount?: number
+}): Array<'major' | 'minor' | 'antagonist' | 'supporting'> {
+  return [
+    ...Array.from({ length: Math.max(0, opts.majorCount) }, () => 'major' as const),
+    ...Array.from({ length: Math.max(0, opts.antagonistCount || 0) }, () => 'antagonist' as const),
+    ...Array.from({ length: Math.max(0, opts.supportingCount || 0) }, () => 'supporting' as const),
+    ...Array.from({ length: Math.max(0, opts.minorCount) }, () => 'minor' as const),
+  ]
 }
 
 function buildStoryCoreSummary(profile: Awaited<ReturnType<typeof buildStoryProfile>>): string {
@@ -75,11 +117,19 @@ function buildStoryCoreSummary(profile: Awaited<ReturnType<typeof buildStoryProf
   ].join('\n')
 }
 
+function buildOptionSummary(label: string, values: string[]): string {
+  return values.length > 0 ? `${label}：${values.join('、')}` : ''
+}
+
 function buildCharacterSummary(character: typeof characters.$inferSelect): string {
   const traits = parseJsonArray(character.personalityTraitsJson).slice(0, 3).join('、')
   const flaws = parseJsonArray(character.flawsJson).slice(0, 2).join('、')
   const parts = [
+    character.entityType ? `实体：${character.entityType}` : '',
+    character.species ? `种族：${character.species}` : '',
     character.occupation ? `身份：${character.occupation}` : '',
+    character.rankLevel ? `等级：${character.rankLevel}` : '',
+    character.socialIdentity ? `社会身份：${character.socialIdentity}` : '',
     character.background ? `经历：${character.background.slice(0, 60)}` : '',
     traits ? `特点：${traits}` : '',
     flaws ? `缺陷：${flaws}` : '',
@@ -96,12 +146,22 @@ function buildCurrentProfileSummary(character: typeof characters.$inferSelect): 
   const traits = parseJsonArray(character.personalityTraitsJson).join('、')
   const flaws = parseJsonArray(character.flawsJson).join('、')
   const habits = parseJsonArray(character.habitsJson).join('、')
+  const factions = parseJsonArray(character.campFactionIdsJson).join('、')
+  const powerSystems = parseJsonArray(character.powerSystemRefsJson).join('、')
+  const contextHooks = parseJsonArray(character.contextHooksJson).join('、')
   return [
     `姓名：${character.fullName}`,
     `角色类型：${character.roleType || 'minor'}`,
+    character.entityType ? `实体类型：${character.entityType}` : '',
+    character.species ? `种族：${character.species}` : '',
     character.gender ? `性别：${character.gender}` : '',
     character.age ? `年龄：${character.age}` : '',
     character.occupation ? `职业/身份：${character.occupation}` : '',
+    character.rankLevel ? `等级/境界：${character.rankLevel}` : '',
+    character.socialIdentity ? `社会身份：${character.socialIdentity}` : '',
+    factions ? `所属势力：${factions}` : '',
+    powerSystems ? `适用体系：${powerSystems}` : '',
+    contextHooks ? `上下文钩子：${contextHooks}` : '',
     character.background ? `背景经历：${character.background}` : '',
     traits ? `性格特点：${traits}` : '',
     flaws ? `性格缺陷：${flaws}` : '',
@@ -132,52 +192,75 @@ function buildCharacterPayload(
     existing?: typeof characters.$inferSelect | null
   } = {},
 ): Partial<typeof characters.$inferInsert> {
-  const appearance = asText(parsed.appearance) || parseAppearanceDescription(fallback.existing?.appearanceJson)
-  const fullName = asText(parsed.full_name) || asText(parsed.name) || fallback.fullName || fallback.existing?.fullName || '未命名'
-  const roleType = asText(parsed.role_type) || fallback.roleType || fallback.existing?.roleType || 'minor'
-  const personalityTraits = toStringArray(parsed.personality_traits).length > 0
-    ? toStringArray(parsed.personality_traits)
-    : toStringArray(parsed.personality_keywords).length > 0
-      ? toStringArray(parsed.personality_keywords)
-      : toStringArray(parsed.personality).length > 0
-        ? toStringArray(parsed.personality)
+  const sanitized = cleanAiValue(parsed)
+  const appearance = asText(sanitized.appearance) || parseAppearanceDescription(fallback.existing?.appearanceJson)
+  const fullName = asText(sanitized.full_name) || asText(sanitized.name) || fallback.fullName || fallback.existing?.fullName || '未命名'
+  const roleType = asText(sanitized.role_type) || fallback.roleType || fallback.existing?.roleType || 'minor'
+  const personalityTraits = toStringArray(sanitized.personality_traits).length > 0
+    ? toStringArray(sanitized.personality_traits)
+    : toStringArray(sanitized.personality_keywords).length > 0
+      ? toStringArray(sanitized.personality_keywords)
+      : toStringArray(sanitized.personality).length > 0
+        ? toStringArray(sanitized.personality)
         : parseJsonArray(fallback.existing?.personalityTraitsJson)
-  const flaws = toStringArray(parsed.flaws).length > 0
-    ? toStringArray(parsed.flaws)
+  const flaws = toStringArray(sanitized.flaws).length > 0
+    ? toStringArray(sanitized.flaws)
     : parseJsonArray(fallback.existing?.flawsJson)
-  const habits = toStringArray(parsed.habits).length > 0
-    ? toStringArray(parsed.habits)
+  const habits = toStringArray(sanitized.habits).length > 0
+    ? toStringArray(sanitized.habits)
     : parseJsonArray(fallback.existing?.habitsJson)
+  const species = asText(sanitized.species) || fallback.existing?.species || ''
+  const entityType = asText(sanitized.entity_type) || fallback.existing?.entityType || inferEntityType(species)
+  const factionNames = toStringArray(sanitized.faction_names).length > 0
+    ? toStringArray(sanitized.faction_names)
+    : toStringArray(sanitized.factions).length > 0
+      ? toStringArray(sanitized.factions)
+      : parseJsonArray(fallback.existing?.campFactionIdsJson)
+  const powerSystemNames = toStringArray(sanitized.power_system_names).length > 0
+    ? toStringArray(sanitized.power_system_names)
+    : toStringArray(sanitized.power_system_refs).length > 0
+      ? toStringArray(sanitized.power_system_refs)
+      : parseJsonArray(fallback.existing?.powerSystemRefsJson)
+  const contextHooks = toStringArray(sanitized.context_hooks).length > 0
+    ? toStringArray(sanitized.context_hooks)
+    : parseJsonArray(fallback.existing?.contextHooksJson)
 
   return {
     roleType,
-    surname: asText(parsed.surname) || fallback.existing?.surname || '',
-    givenName: asText(parsed.given_name) || fallback.existing?.givenName || '',
+    entityType,
+    species,
+    surname: asText(sanitized.surname) || fallback.existing?.surname || '',
+    givenName: asText(sanitized.given_name) || fallback.existing?.givenName || '',
     fullName,
-    gender: asText(parsed.gender) || fallback.existing?.gender || '',
-    age: asNumber(parsed.age) ?? fallback.existing?.age,
-    birthplace: asText(parsed.birthplace) || fallback.existing?.birthplace || '',
-    occupation: asText(parsed.occupation) || fallback.existing?.occupation || '',
-    background: asText(parsed.background) || fallback.existing?.background || '',
-    personalityTraitsJson: JSON.stringify(personalityTraits),
-    flawsJson: JSON.stringify(flaws),
-    habitsJson: JSON.stringify(habits),
-    goals: asText(parsed.goals) || fallback.existing?.goals || '',
-    firstImpression: asText(parsed.first_impression) || fallback.existing?.firstImpression || '',
-    surfaceDesire: asText(parsed.surface_desire) || fallback.existing?.surfaceDesire || '',
-    deepNeed: asText(parsed.deep_need) || fallback.existing?.deepNeed || '',
-    coreFear: asText(parsed.core_fear) || fallback.existing?.coreFear || '',
-    innerConflict: asText(parsed.inner_conflict) || fallback.existing?.innerConflict || '',
-    hiddenSecret: asText(parsed.hidden_secret) || fallback.existing?.hiddenSecret || '',
-    moralLine: asText(parsed.moral_line) || fallback.existing?.moralLine || '',
-    selfDeception: asText(parsed.self_deception) || fallback.existing?.selfDeception || '',
-    trauma: asText(parsed.trauma) || fallback.existing?.trauma || '',
-    contradiction: asText(parsed.contradiction) || fallback.existing?.contradiction || '',
-    relationshipTension: asText(parsed.relationship_tension) || fallback.existing?.relationshipTension || asText(parsed.relation_to_protagonist) || '',
-    resonancePoint: asText(parsed.resonance_point) || fallback.existing?.resonancePoint || '',
-    characterArc: asText(parsed.character_arc) || fallback.existing?.characterArc || '',
+    gender: asText(sanitized.gender) || fallback.existing?.gender || '',
+    age: asNumber(sanitized.age) ?? fallback.existing?.age,
+    birthplace: asText(sanitized.birthplace) || fallback.existing?.birthplace || '',
+    occupation: asText(sanitized.occupation) || fallback.existing?.occupation || '',
+    rankLevel: asText(sanitized.rank_level) || fallback.existing?.rankLevel || '',
+    socialIdentity: asText(sanitized.social_identity) || fallback.existing?.socialIdentity || '',
+    background: asText(sanitized.background) || fallback.existing?.background || '',
+    personalityTraitsJson: jsonStringifyArray(personalityTraits),
+    flawsJson: jsonStringifyArray(flaws),
+    habitsJson: jsonStringifyArray(habits),
+    campFactionIdsJson: jsonStringifyArray(factionNames),
+    powerSystemRefsJson: jsonStringifyArray(powerSystemNames),
+    contextHooksJson: jsonStringifyArray(contextHooks),
+    goals: asText(sanitized.goals) || fallback.existing?.goals || '',
+    firstImpression: asText(sanitized.first_impression) || fallback.existing?.firstImpression || '',
+    surfaceDesire: asText(sanitized.surface_desire) || fallback.existing?.surfaceDesire || '',
+    deepNeed: asText(sanitized.deep_need) || fallback.existing?.deepNeed || '',
+    coreFear: asText(sanitized.core_fear) || fallback.existing?.coreFear || '',
+    innerConflict: asText(sanitized.inner_conflict) || fallback.existing?.innerConflict || '',
+    hiddenSecret: asText(sanitized.hidden_secret) || fallback.existing?.hiddenSecret || '',
+    moralLine: asText(sanitized.moral_line) || fallback.existing?.moralLine || '',
+    selfDeception: asText(sanitized.self_deception) || fallback.existing?.selfDeception || '',
+    trauma: asText(sanitized.trauma) || fallback.existing?.trauma || '',
+    contradiction: asText(sanitized.contradiction) || fallback.existing?.contradiction || '',
+    relationshipTension: asText(sanitized.relationship_tension) || fallback.existing?.relationshipTension || asText(sanitized.relation_to_protagonist) || '',
+    resonancePoint: asText(sanitized.resonance_point) || fallback.existing?.resonancePoint || '',
+    characterArc: asText(sanitized.character_arc) || fallback.existing?.characterArc || '',
     appearanceJson: JSON.stringify({ description: appearance }),
-    appearChapter: asNumber(parsed.appear_chapter) ?? fallback.existing?.appearChapter,
+    appearChapter: asNumber(sanitized.appear_chapter) ?? fallback.existing?.appearChapter,
   }
 }
 
@@ -194,37 +277,7 @@ export function getCharacter(id: number) {
   return db.select().from(characters).where(eq(characters.id, id)).all()[0] || null
 }
 
-export function createCharacter(novelId: number, data: Partial<{
-  roleType: string
-  surname: string
-  givenName: string
-  fullName: string
-  gender: string
-  age: number
-  occupation: string
-  birthplace: string
-  background: string
-  personalityTraitsJson: string
-  flawsJson: string
-  habitsJson: string
-  goals: string
-  firstImpression: string
-  surfaceDesire: string
-  deepNeed: string
-  coreFear: string
-  innerConflict: string
-  hiddenSecret: string
-  moralLine: string
-  selfDeception: string
-  trauma: string
-  contradiction: string
-  relationshipTension: string
-  resonancePoint: string
-  characterArc: string
-  appearanceJson: string
-  abilitiesJson: string
-  appearChapter: number
-}>) {
+export function createCharacter(novelId: number, data: Partial<typeof characters.$inferInsert>) {
   const db = getDb()
   const result = db.insert(characters).values({ novelId, fullName: data.fullName || '未命名', ...data }).run()
   return Number(result.lastInsertRowid)
@@ -267,12 +320,18 @@ export async function generateProtagonist(novelId: number, opts: {
   if (!novel) throw new Error('小说不存在')
 
   const profile = await buildStoryProfile(novelId)
+  const rules = parseWorldRulesJson(novel.worldRulesJson, profile.genre)
   const prompt = protagonistPrompt({
     novelTitle: novel.title,
     novelSynopsis: profile.background,
     genre: profile.genre,
     worldSummary: profile.worldRulesSummary,
     storyCore: buildStoryCoreSummary(profile),
+    speciesSummary: buildOptionSummary('可用种族', getSpeciesNameOptions(rules)),
+    factionSummary: buildOptionSummary('核心势力', getFactionNameOptions(rules)),
+    ecologySummary: buildCharacterEcologySummary(rules),
+    mapSummary: buildMapBlueprintSummary(rules),
+    writingConstraints: rules.writingConstraints.extraRules.join('；'),
     gender: opts.gender || '不限',
     surnameHint: opts.surnameHint,
   })
@@ -284,7 +343,7 @@ export async function generateProtagonist(novelId: number, opts: {
     modelConfigId: novel.modelConfigId || undefined,
   })
 
-  const parsed = safeParseJson<Record<string, unknown>>(result)
+  const parsed = cleanAiValue(safeParseJson<Record<string, unknown>>(result))
   const charId = createCharacter(novelId, buildCharacterPayload(parsed, { roleType: 'protagonist' }))
   return charId
 }
@@ -292,7 +351,12 @@ export async function generateProtagonist(novelId: number, opts: {
 export async function batchGenerateCharacters(novelId: number, opts: {
   majorCount: number
   minorCount: number
+  antagonistCount?: number
+  supportingCount?: number
   genderRatio: string
+  preferredSpecies?: string[]
+  factionBias?: string[]
+  helperRoles?: string[]
   specialRequirements: string
   batchSize: number
 }, sender?: WebContents): Promise<number[]> {
@@ -301,12 +365,24 @@ export async function batchGenerateCharacters(novelId: number, opts: {
   if (!novel) throw new Error('小说不存在')
 
   const profile = await buildStoryProfile(novelId)
+  const rules = parseWorldRulesJson(novel.worldRulesJson, profile.genre)
   const existingChars = db.select().from(characters).where(eq(characters.novelId, novelId)).all()
   const reservedNames = existingChars.map((character) => character.fullName).filter(Boolean)
   const protagonist = existingChars.find(c => c.roleType === 'protagonist')
   const protagonistSummary = protagonist ? buildCharacterSummary(protagonist) : '主角未设定'
 
-  const totalCount = opts.majorCount + opts.minorCount
+  const roleQueue = buildRoleQueue(opts)
+  const specialRequirements = [
+    opts.specialRequirements,
+    `角色配额：主要人物 ${opts.majorCount}，反派 ${opts.antagonistCount || 0}，功能角色 ${opts.supportingCount || 0}，次要人物 ${opts.minorCount}。`,
+    opts.preferredSpecies && opts.preferredSpecies.length > 0 ? `优先种族或实体：${opts.preferredSpecies.join('、')}。` : '',
+    opts.factionBias && opts.factionBias.length > 0 ? `优先势力来源：${opts.factionBias.join('、')}。` : '',
+    opts.helperRoles && opts.helperRoles.length > 0 ? `优先补齐这些角色功能位：${opts.helperRoles.join('、')}。` : '',
+    '角色必须和题材、背景、地图结构、势力关系与主线冲突直接相关。',
+  ].filter(Boolean).join('\n')
+
+  const totalCount = roleQueue.length
+  if (totalCount <= 0) return []
   const batches = Math.ceil(totalCount / opts.batchSize)
   const newIds: number[] = []
 
@@ -320,9 +396,14 @@ export async function batchGenerateCharacters(novelId: number, opts: {
       genre: profile.genre,
       worldSummary: profile.worldRulesSummary,
       storyCore: buildStoryCoreSummary(profile),
+      speciesSummary: buildOptionSummary('可用种族', getSpeciesNameOptions(rules)),
+      factionSummary: buildOptionSummary('核心势力', getFactionNameOptions(rules)),
+      ecologySummary: buildCharacterEcologySummary(rules),
+      mapSummary: buildMapBlueprintSummary(rules),
+      writingConstraints: rules.writingConstraints.extraRules.join('；'),
       count: batchCount,
       genderRatio: opts.genderRatio,
-      specialRequirements: opts.specialRequirements,
+      specialRequirements,
     })
 
     const result = await runChatTask({
@@ -333,10 +414,11 @@ export async function batchGenerateCharacters(novelId: number, opts: {
     })
 
     try {
-      const parsed = safeParseJson<Array<Record<string, unknown>>>(result)
+      const parsed = cleanAiValue(safeParseJson<Array<Record<string, unknown>>>(result))
       for (const char of parsed) {
+        const fallbackRole = roleQueue[newIds.length] || 'minor'
         const payload = buildCharacterPayload(char, {
-          roleType: asText(char.role_type) || 'minor',
+          roleType: normalizeRoleType(asText(char.role_type) || fallbackRole),
         })
         const id = createCharacter(novelId, payload)
         reservedNames.push(typeof payload.fullName === 'string' ? payload.fullName : '')
@@ -363,6 +445,7 @@ export async function regenerateCharacter(id: number): Promise<typeof characters
   if (!novel) throw new Error('小说不存在')
 
   const profile = await buildStoryProfile(current.novelId)
+  const rules = parseWorldRulesJson(novel.worldRulesJson, profile.genre)
   const allCharacters = db.select().from(characters).where(eq(characters.novelId, current.novelId)).all()
   const relationRows = db.select().from(characterRelations).where(eq(characterRelations.novelId, current.novelId)).all()
     .filter((relation) => relation.charAId === current.id || relation.charBId === current.id)
@@ -402,6 +485,10 @@ export async function regenerateCharacter(id: number): Promise<typeof characters
     genre: profile.genre,
     worldSummary: profile.worldRulesSummary,
     storyCore: buildStoryCoreSummary(profile),
+    speciesSummary: buildOptionSummary('可用种族', getSpeciesNameOptions(rules)),
+    factionSummary: buildOptionSummary('核心势力', getFactionNameOptions(rules)),
+    ecologySummary: buildCharacterEcologySummary(rules),
+    writingConstraints: rules.writingConstraints.extraRules.join('；'),
     protagonistRule: profile.protagonistRule,
     lockedName: current.fullName,
     lockedRoleType: current.roleType || 'minor',
@@ -419,7 +506,7 @@ export async function regenerateCharacter(id: number): Promise<typeof characters
     modelConfigId: novel.modelConfigId || undefined,
   })
 
-  const parsed = safeParseJson<Record<string, unknown>>(result)
+  const parsed = cleanAiValue(safeParseJson<Record<string, unknown>>(result))
   const payload = buildCharacterPayload(parsed, {
     existing: current,
     fullName: current.fullName,

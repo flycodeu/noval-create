@@ -1,6 +1,8 @@
 import { asc, eq } from 'drizzle-orm'
 import { getDb } from '../database/db'
-import { chapters, characters, genres, novels, storyArcs, templates } from '../database/schema'
+import { chapters, characters, genres, novels, storyArcs, storyItems, templates, timelineEvents, worldMap } from '../database/schema'
+import { buildWorldRulesSummary, parseWorldRulesJson } from '../../src/shared/genre-system'
+import { buildStoryMemoryPromptSummary } from './story-memory.service'
 
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 1.5)
@@ -81,6 +83,7 @@ export interface ChapterContext {
   currentArc: string
   worldRules: string
   characterStates: string
+  itemSummary: string
   previousSummaries: string
   lastChapterEnding: string
   styleTemplate: string
@@ -88,6 +91,9 @@ export interface ChapterContext {
   continuitySummary: string
   openLoops: string
   continuityNotes: string
+  timelineSummary: string
+  timelineOpenThreads: string
+  longTermMemory: string
 }
 
 interface ChapterWithContinuity {
@@ -100,6 +106,12 @@ interface ChapterWithContinuity {
 
 function asText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
+}
+
+function asLooseText(value: unknown): string {
+  if (typeof value === 'string') return value.trim()
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  return ''
 }
 
 function asNumber(value: unknown): number | undefined {
@@ -120,6 +132,28 @@ function parseJsonRecord(raw?: string | null): Record<string, unknown> {
       : {}
   } catch {
     return {}
+  }
+}
+
+function parseJsonStringArray(raw?: string | null): string[] {
+  if (!raw) return []
+  try {
+    return toStringArray(JSON.parse(raw))
+  } catch {
+    return []
+  }
+}
+
+function parseJsonNumberArray(raw?: string | null): number[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .map((item) => asNumber(item))
+      .filter((item): item is number => typeof item === 'number')
+  } catch {
+    return []
   }
 }
 
@@ -186,7 +220,7 @@ function parseSubPlots(value: unknown): StorySubPlot[] {
         characters: asText(subplot.characters),
         conflict: asText(subplot.conflict),
         mainlineLink: asText(subplot.mainlineLink),
-        endChapter: asText(subplot.endChapter),
+        endChapter: asLooseText(subplot.endChapter),
       }
     })
     .filter((subplot) => Object.values(subplot).some(Boolean))
@@ -214,6 +248,7 @@ function formatSubPlots(settings: StorySettings): string {
       .map((subplot, index) => {
         const parts = [
           subplot.name ? `名称：${subplot.name}` : '',
+          subplot.characters ? `人物：${subplot.characters}` : '',
           subplot.conflict ? `冲突：${subplot.conflict}` : '',
           subplot.mainlineLink ? `关联：${subplot.mainlineLink}` : '',
           subplot.endChapter ? `收束章节：${subplot.endChapter}` : '',
@@ -237,53 +272,7 @@ function formatRhythmSummary(settings: StorySettings): string {
 }
 
 function formatWorldRulesSummary(raw?: string | null): string {
-  if (!raw) return ''
-
-  const rules = parseJsonRecord(raw)
-  if (Object.keys(rules).length === 0) return raw
-
-  const lines: string[] = []
-  const powerSystem = rules.power_system && typeof rules.power_system === 'object'
-    ? rules.power_system as Record<string, unknown>
-    : undefined
-
-  if (powerSystem) {
-    const powerName = asText(powerSystem.name)
-    const powerRules = asText(powerSystem.rules)
-    const levels = toStringArray(powerSystem.levels)
-    const schools = toStringArray(powerSystem.schools)
-    if (powerName) lines.push(`力量体系：${powerName}`)
-    if (powerRules) lines.push(`核心规则：${powerRules}`)
-    if (levels.length > 0) lines.push(`境界层级：${levels.slice(0, 8).join(' / ')}`)
-    if (schools.length > 0) lines.push(`体系分支：${schools.slice(0, 8).join(' / ')}`)
-  }
-
-  const simpleFields: Array<[string, string]> = [
-    ['social_structure', '社会结构'],
-    ['time_period', '时间背景'],
-    ['technology_level', '技术水平'],
-    ['virus_rules', '感染规则'],
-    ['special_rules', '特殊规则'],
-    ['disaster_type', '灾变类型'],
-  ]
-
-  for (const [key, label] of simpleFields) {
-    const value = asText(rules[key])
-    if (value) lines.push(`${label}：${value}`)
-  }
-
-  const listFields: Array<[string, string]> = [
-    ['forbidden_elements', '禁止元素'],
-    ['common_elements', '常见元素'],
-    ['unique_features', '独特元素'],
-  ]
-
-  for (const [key, label] of listFields) {
-    const items = toStringArray(rules[key])
-    if (items.length > 0) lines.push(`${label}：${items.slice(0, 6).join('、')}`)
-  }
-
-  return lines.join('\n')
+  return buildWorldRulesSummary(parseWorldRulesJson(raw))
 }
 
 function formatStyleTemplateSummary(contentJson?: string | null): string {
@@ -381,7 +370,11 @@ function buildCharacterStates(
   const staticLines = getImportantCharacters(allCharacters).map((character) => {
     const traits = character.personalityTraitsJson ? toStringArray(parseJsonRecord(`{"items":${character.personalityTraitsJson}}`).items).slice(0, 2).join('、') : ''
     const summary = [
+      character.entityType ? `实体=${character.entityType}` : '',
+      character.species ? `种族=${character.species}` : '',
       character.occupation || '',
+      character.rankLevel || '',
+      character.socialIdentity || '',
       traits || '',
       character.goals || '',
       character.innerConflict || '',
@@ -451,6 +444,120 @@ function collectOpenLoops(chapterRows: ChapterWithContinuity[]): string {
 function collectContinuityNotes(chapterRows: ChapterWithContinuity[]): string {
   const values = dedupe(chapterRows.flatMap((chapter) => chapter.continuityState.continuityNotes), 8)
   return values.join('\n')
+}
+
+function buildTimelineEventLine(
+  event: typeof timelineEvents.$inferSelect,
+  arcNameMap: Map<number, string>,
+  chapterNumMap: Map<number, number>,
+  characterNameMap: Map<number, string>,
+  locationNameMap: Map<number, string>,
+): string {
+  const presentCharacters = parseJsonNumberArray(event.presentCharacterIdsJson)
+    .map((id) => characterNameMap.get(id))
+    .filter((item): item is string => Boolean(item))
+  const result = event.eventResult || event.eventSummary || event.notes || ''
+  const chapterStart = event.chapterStartId ? chapterNumMap.get(event.chapterStartId) : undefined
+  const chapterEnd = event.chapterEndId ? chapterNumMap.get(event.chapterEndId) : undefined
+
+  const parts = [
+    `${event.timeLabel || '时间待定'}｜${event.eventTitle}`,
+    event.eventType ? `类型=${event.eventType}` : '',
+    event.arcId ? `故事弧=${arcNameMap.get(event.arcId) || ''}` : '',
+    chapterStart ? `起始章节=第${chapterStart}章` : '',
+    chapterEnd ? `结束章节=第${chapterEnd}章` : '',
+    event.locationMapId ? `地点=${locationNameMap.get(event.locationMapId) || ''}` : '',
+    presentCharacters.length > 0 ? `在场=${presentCharacters.join('、')}` : '',
+    event.protagonistPresent ? `主角行动=${event.protagonistAction || '主角在场'}` : '',
+    result ? `结果=${result}` : '',
+  ].filter(Boolean)
+
+  return parts.join('｜')
+}
+
+function buildTimelineContext(
+  novelId: number,
+  chapterNum: number,
+  currentArcId: number | null | undefined,
+  chapterRows: Array<typeof chapters.$inferSelect>,
+  characterRows: Array<typeof characters.$inferSelect>,
+): { timelineSummary: string; timelineOpenThreads: string } {
+  const db = getDb()
+  const eventRows = db.select().from(timelineEvents)
+    .where(eq(timelineEvents.novelId, novelId))
+    .orderBy(asc(timelineEvents.timeSortValue), asc(timelineEvents.sortOrder), asc(timelineEvents.id))
+    .all()
+  if (eventRows.length === 0) {
+    return { timelineSummary: '', timelineOpenThreads: '' }
+  }
+
+  const arcRows = db.select().from(storyArcs).where(eq(storyArcs.novelId, novelId)).all()
+  const mapRows = db.select().from(worldMap).where(eq(worldMap.novelId, novelId)).all()
+  const chapterNumMap = new Map(chapterRows.map((row) => [row.id, row.chapterNum]))
+  const arcNameMap = new Map(arcRows.map((row) => [row.id, row.arcName]))
+  const characterNameMap = new Map(characterRows.map((row) => [row.id, row.fullName]))
+  const locationNameMap = new Map(mapRows.map((row) => [row.id, row.name]))
+
+  const hasHappened = (event: typeof timelineEvents.$inferSelect) => {
+    const end = event.chapterEndId ? chapterNumMap.get(event.chapterEndId) : undefined
+    const start = event.chapterStartId ? chapterNumMap.get(event.chapterStartId) : undefined
+    if (typeof end === 'number') return end < chapterNum
+    if (typeof start === 'number') return start < chapterNum
+    return event.status === 'written' || event.status === 'resolved'
+  }
+
+  const isNearFuture = (event: typeof timelineEvents.$inferSelect) => {
+    const start = event.chapterStartId ? chapterNumMap.get(event.chapterStartId) : undefined
+    if (typeof start === 'number') {
+      return start >= chapterNum && start <= chapterNum + 3
+    }
+    return event.status === 'planned' || event.status === 'seeded'
+  }
+
+  const selectedIds = new Set<number>()
+  eventRows.filter(hasHappened).slice(-4).forEach((event) => selectedIds.add(event.id))
+  eventRows.filter((event) => event.arcId && event.arcId === currentArcId).slice(-3).forEach((event) => selectedIds.add(event.id))
+  eventRows.filter(isNearFuture).slice(0, 3).forEach((event) => selectedIds.add(event.id))
+
+  const selectedRows = eventRows
+    .filter((event) => selectedIds.has(event.id))
+    .slice(-6)
+
+  const timelineSummary = selectedRows
+    .map((event) => buildTimelineEventLine(event, arcNameMap, chapterNumMap, characterNameMap, locationNameMap))
+    .join('\n')
+
+  const timelineOpenThreads = dedupe(
+    selectedRows.flatMap((event) => parseJsonStringArray(event.openThreadsJson)),
+    10,
+  ).join('\n')
+
+  return { timelineSummary, timelineOpenThreads }
+}
+
+function buildItemSummary(novelId: number): string {
+  const db = getDb()
+  const rows = db.select().from(storyItems)
+    .where(eq(storyItems.novelId, novelId))
+    .orderBy(asc(storyItems.sortOrder), asc(storyItems.id))
+    .all()
+    .filter((item) => item.itemKind === 'instance')
+
+  if (rows.length === 0) return ''
+
+  return rows
+    .slice(0, 10)
+    .map((item) => {
+      const parts = [
+        item.category || '',
+        item.status || '',
+        item.ownerCharacterId ? `角色#${item.ownerCharacterId}` : '',
+        item.locationMapId ? `地点#${item.locationMapId}` : '',
+        item.plotFunction || item.summary || '',
+      ].filter(Boolean)
+      return `${item.itemName}${parts.length > 0 ? `：${parts.join('｜')}` : ''}`
+    })
+    .join('\n')
 }
 
 function resolveArcForChapter(
@@ -569,6 +676,15 @@ export async function buildChapterContext(
   const recentChapters = previousRows.slice(-5).map(toChapterWithContinuity)
   const continuityChapters = recentChapters.filter((chapter) => hasContinuityContent(chapter.continuityState))
   const allCharacters = db.select().from(characters).where(eq(characters.novelId, novelId)).all()
+  const timelineContext = buildTimelineContext(
+    novelId,
+    chapterNum,
+    currentArc?.id,
+    chapterRows,
+    allCharacters,
+  )
+  const longTermMemory = buildStoryMemoryPromptSummary(novelId)
+  const itemSummary = buildItemSummary(novelId)
 
   const previousSummaries = recentChapters
     .filter((chapter) => chapter.summary)
@@ -593,11 +709,15 @@ export async function buildChapterContext(
     { priority: 1, label: 'continuityNotes', content: collectContinuityNotes(continuityChapters) },
     { priority: 1, label: 'lastChapterEnding', content: lastChapterEnding },
     { priority: 1, label: 'openLoops', content: collectOpenLoops(continuityChapters) },
-    { priority: 2, label: 'continuitySummary', content: continuityChapters.map(formatContinuityEntry).join('\n') },
+    { priority: 1, label: 'timelineOpenThreads', content: timelineContext.timelineOpenThreads },
+    { priority: 1, label: 'worldRules', content: profile.worldRulesSummary },
+    { priority: 1, label: 'itemSummary', content: itemSummary },
     { priority: 2, label: 'characterStates', content: buildCharacterStates(allCharacters, recentChapters) },
-    { priority: 2, label: 'previousSummaries', content: previousSummaries },
-    { priority: 3, label: 'worldRules', content: profile.worldRulesSummary },
-    { priority: 3, label: 'styleTemplate', content: profile.styleTemplateSummary },
+    { priority: 2, label: 'continuitySummary', content: continuityChapters.map(formatContinuityEntry).join('\n') },
+    { priority: 2, label: 'timelineSummary', content: timelineContext.timelineSummary },
+    { priority: 2, label: 'longTermMemory', content: longTermMemory },
+    { priority: 2, label: 'styleTemplate', content: profile.styleTemplateSummary },
+    { priority: 3, label: 'previousSummaries', content: previousSummaries },
   ]
 
   const allocated = allocateTokens(parts, contextBudget)
@@ -607,6 +727,7 @@ export async function buildChapterContext(
     currentArc: allocated.currentArc || '',
     worldRules: allocated.worldRules || '',
     characterStates: allocated.characterStates || '',
+    itemSummary: allocated.itemSummary || '',
     previousSummaries: allocated.previousSummaries || '',
     lastChapterEnding: allocated.lastChapterEnding || '',
     styleTemplate: allocated.styleTemplate || '',
@@ -614,5 +735,8 @@ export async function buildChapterContext(
     continuitySummary: allocated.continuitySummary || '',
     openLoops: allocated.openLoops || '',
     continuityNotes: allocated.continuityNotes || '',
+    timelineSummary: allocated.timelineSummary || '',
+    timelineOpenThreads: allocated.timelineOpenThreads || '',
+    longTermMemory: allocated.longTermMemory || '',
   }
 }

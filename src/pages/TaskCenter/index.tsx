@@ -29,6 +29,19 @@ const TYPE_LABELS: Record<string, string> = {
   generate_relations: '生成关系',
   generate_map: '生成地图',
   generate_arcs: '生成故事弧',
+  generate_timeline: '生成时间轴',
+  subplot_framework: '生成支线',
+  core_settings_generate: '生成核心设定',
+}
+
+function formatTaskPayload(raw?: string): string {
+  if (!raw) return ''
+
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2)
+  } catch {
+    return raw
+  }
 }
 
 export default function TaskCenter() {
@@ -133,9 +146,11 @@ export default function TaskCenter() {
 
           {task.errorMessage && (
             <div style={{
-              color: '#ff4d4f',
+              color: task.status === 'success' ? '#faad14' : '#ff4d4f',
               fontSize: 12,
-              background: 'rgba(255,77,79,0.1)',
+              background: task.status === 'success'
+                ? 'rgba(250,173,20,0.12)'
+                : 'rgba(255,77,79,0.1)',
               padding: '4px 8px',
               borderRadius: 4,
               marginBottom: 6,
@@ -169,12 +184,14 @@ export default function TaskCenter() {
           )}
 
           {/* 已完成任务的输出 */}
-          {task.status === 'success' && task.outputText && !stream && (
+          {task.outputText && !stream && (
             <Collapse
               size="small"
               items={[{
                 key: 'output',
-                label: `输出内容（${task.outputText.length} 字）`,
+                label: task.status === 'success'
+                  ? `输出内容（${task.outputText.length} 字）`
+                  : `原始返回（${task.outputText.length} 字）`,
                 children: (
                   <div style={{
                     whiteSpace: 'pre-wrap',
@@ -185,6 +202,27 @@ export default function TaskCenter() {
                   }}>
                     {task.outputText.slice(0, 2000)}
                     {task.outputText.length > 2000 && '...（截断显示）'}
+                  </div>
+                ),
+              }]}
+            />
+          )}
+
+          {task.inputJson && (
+            <Collapse
+              size="small"
+              items={[{
+                key: 'input',
+                label: '请求上下文',
+                children: (
+                  <div style={{
+                    whiteSpace: 'pre-wrap',
+                    fontSize: 12,
+                    color: 'var(--color-text-secondary)',
+                    maxHeight: 220,
+                    overflow: 'auto',
+                  }}>
+                    {formatTaskPayload(task.inputJson)}
                   </div>
                 ),
               }]}

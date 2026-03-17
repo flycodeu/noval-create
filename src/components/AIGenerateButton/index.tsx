@@ -1,17 +1,23 @@
 import React, { useState } from 'react'
 import { Button, Modal, message } from 'antd'
 import { RobotOutlined, CheckOutlined } from '@ant-design/icons'
-import { stripMarkdown, stripQuoteEmphasis } from '../../utils/text'
+import { cleanAiFieldText } from '../../utils/text'
 
 /** 后处理：去除 Markdown 格式 + 引号着重，返回纯净文本 */
 function cleanAIOutput(text: string): string {
-  return stripQuoteEmphasis(stripMarkdown(text))
+  return cleanAiFieldText(text)
 }
 
 interface Props {
   label?: string
   /** 构建消息的函数，调用时生成提示词 */
   buildMessages: () => { role: 'user' | 'assistant'; content: string }[]
+  /** 自定义生成执行器，返回抽卡候选结果；未提供时默认调用 ai.runPrompt */
+  runGeneration?: (input: {
+    messages: { role: 'user' | 'assistant'; content: string }[]
+    count: number
+    modelConfigId?: number
+  }) => Promise<string[]>
   drawCount?: number
   onResult: (content: string) => void
   modelConfigId?: number
@@ -25,6 +31,7 @@ interface Props {
 export default function AIGenerateButton({
   label = 'AI 生成',
   buildMessages,
+  runGeneration,
   drawCount = 1,
   onResult,
   modelConfigId,
@@ -43,7 +50,9 @@ export default function AIGenerateButton({
     try {
       const messages = buildMessages()
       const count = Math.max(1, Math.min(drawCount, 3))
-      const rawOutputs = await window.electron.ai.runPrompt({ messages, count, modelConfigId })
+      const rawOutputs = runGeneration
+        ? await runGeneration({ messages, count, modelConfigId })
+        : await window.electron.ai.runPrompt({ messages, count, modelConfigId })
       // 去除 Markdown 格式 + 引号着重（JSON 内容跳过清理）
       const outputs = isJson ? rawOutputs : rawOutputs.map(cleanAIOutput)
 

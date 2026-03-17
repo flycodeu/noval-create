@@ -29,7 +29,7 @@ export class AnthropicAdapter extends BaseAdapter {
       throw new Error(`Anthropic API Error ${response.status}: ${err}`)
     }
 
-    const data = await response.json()
+    const data = await response.json() as Record<string, any>
     return data.content[0]?.text || ''
   }
 

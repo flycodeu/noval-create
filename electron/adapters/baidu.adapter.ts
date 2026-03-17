@@ -33,7 +33,7 @@ export class BaiduAdapter extends BaseAdapter {
       throw new Error('百度 Token 获取失败')
     }
 
-    const data = await response.json()
+    const data = await response.json() as Record<string, any>
     this.accessToken = data.access_token
     this.tokenExpiry = Date.now() + (data.expires_in - 60) * 1000
     return this.accessToken!
@@ -64,7 +64,7 @@ export class BaiduAdapter extends BaseAdapter {
       throw new Error(`百度文心 API Error ${response.status}: ${err}`)
     }
 
-    const data = await response.json()
+    const data = await response.json() as Record<string, any>
     if (data.error_code) {
       throw new Error(`百度文心错误: ${data.error_msg}`)
     }

@@ -1,6 +1,7 @@
 import { getDb } from '../database/db'
-import { novels, genres, chapters, characters, characterRelations, worldMap, storyArcs, tasks } from '../database/schema'
-import { eq, desc, like, and } from 'drizzle-orm'
+import { novels, genres, chapters, characters } from '../database/schema'
+import { eq, desc } from 'drizzle-orm'
+import { normalizeWorldRules, stringifyWorldRules, getBuiltinGenreRules } from '../../src/shared/genre-system'
 
 export function listNovels(filters?: { status?: string; genreId?: number; search?: string }) {
   const db = getDb()
@@ -26,7 +27,31 @@ export function listNovels(filters?: { status?: string; genreId?: number; search
 
 export function getNovel(id: number) {
   const db = getDb()
-  const rows = db.select().from(novels).where(eq(novels.id, id)).all()
+  const rows = db.select({
+    id: novels.id,
+    title: novels.title,
+    synopsis: novels.synopsis,
+    genreId: novels.genreId,
+    status: novels.status,
+    totalWords: novels.totalWords,
+    targetWords: novels.targetWords,
+    coverImage: novels.coverImage,
+    userBackground: novels.userBackground,
+    expandedBackground: novels.expandedBackground,
+    settingsJson: novels.settingsJson,
+    worldRulesJson: novels.worldRulesJson,
+    styleTemplateId: novels.styleTemplateId,
+    worldTemplateId: novels.worldTemplateId,
+    modelConfigId: novels.modelConfigId,
+    createdAt: novels.createdAt,
+    updatedAt: novels.updatedAt,
+    genreName: genres.name,
+    genreColorTag: genres.colorTag,
+  })
+    .from(novels)
+    .leftJoin(genres, eq(novels.genreId, genres.id))
+    .where(eq(novels.id, id))
+    .all()
   return rows[0] || null
 }
 
@@ -42,10 +67,14 @@ export function createNovel(data: {
   modelConfigId?: number
 }) {
   const db = getDb()
+  const genre = data.genreId
+    ? db.select().from(genres).where(eq(genres.id, data.genreId)).all()[0]
+    : null
   const result = db.insert(novels).values({
     ...data,
     status: 'draft',
     totalWords: 0,
+    worldRulesJson: stringifyWorldRules(getBuiltinGenreRules(genre?.name)),
   }).run()
   return Number(result.lastInsertRowid)
 }
@@ -64,8 +93,21 @@ export function updateNovel(id: number, data: Partial<{
   worldTemplateId: number
 }>) {
   const db = getDb()
+  let normalizedWorldRules = data.worldRulesJson
+  if (typeof data.worldRulesJson === 'string') {
+    const current = db.select().from(novels).where(eq(novels.id, id)).all()[0]
+    const genre = current?.genreId
+      ? db.select().from(genres).where(eq(genres.id, current.genreId)).all()[0]
+      : null
+    try {
+      normalizedWorldRules = stringifyWorldRules(normalizeWorldRules(JSON.parse(data.worldRulesJson) as unknown, genre?.name))
+    } catch {
+      normalizedWorldRules = data.worldRulesJson
+    }
+  }
   db.update(novels).set({
     ...data,
+    worldRulesJson: normalizedWorldRules,
     updatedAt: new Date().toISOString(),
   }).where(eq(novels.id, id)).run()
 }

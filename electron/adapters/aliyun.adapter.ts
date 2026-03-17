@@ -31,7 +31,7 @@ export class AliyunAdapter extends BaseAdapter {
       throw new Error(`通义千问 API Error ${response.status}: ${err}`)
     }
 
-    const data = await response.json()
+    const data = await response.json() as Record<string, any>
     if (data.code) {
       throw new Error(`通义错误: ${data.message}`)
     }

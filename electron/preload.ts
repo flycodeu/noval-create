@@ -1,4 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { CoreSettingsGenerationRequest } from '../src/shared/core-settings-generation'
+import type { SubplotGenerationRequest } from '../src/shared/subplot-framework'
 
 const api = {
   // 小说管理
@@ -10,6 +12,8 @@ const api = {
     delete: (id: number) => ipcRenderer.invoke('novel:delete', id),
     export: (id: number, format: string) => ipcRenderer.invoke('novel:export', id, format),
     stats: (id: number) => ipcRenderer.invoke('novel:stats', id),
+    runConsistencyCheck: (id: number) => ipcRenderer.invoke('novel:runConsistencyCheck', id),
+    getStoryMemory: (id: number) => ipcRenderer.invoke('novel:getStoryMemory', id),
   },
 
   // 章节管理
@@ -46,6 +50,24 @@ const api = {
     update: (id: number, data: unknown) => ipcRenderer.invoke('map:update', id, data),
     delete: (id: number) => ipcRenderer.invoke('map:delete', id),
     batchGenerate: (novelId: number, structure: unknown) => ipcRenderer.invoke('map:batchGenerate', novelId, structure),
+  },
+
+  timeline: {
+    list: (novelId: number) => ipcRenderer.invoke('timeline:list', novelId),
+    get: (id: number) => ipcRenderer.invoke('timeline:get', id),
+    create: (novelId: number, data: unknown) => ipcRenderer.invoke('timeline:create', novelId, data),
+    update: (id: number, data: unknown) => ipcRenderer.invoke('timeline:update', id, data),
+    delete: (id: number) => ipcRenderer.invoke('timeline:delete', id),
+    generate: (novelId: number, options?: unknown) => ipcRenderer.invoke('timeline:generate', novelId, options),
+  },
+
+  item: {
+    list: (novelId: number) => ipcRenderer.invoke('item:list', novelId),
+    get: (id: number) => ipcRenderer.invoke('item:get', id),
+    create: (novelId: number, data: unknown) => ipcRenderer.invoke('item:create', novelId, data),
+    update: (id: number, data: unknown) => ipcRenderer.invoke('item:update', id, data),
+    delete: (id: number) => ipcRenderer.invoke('item:delete', id),
+    generate: (novelId: number, options?: unknown) => ipcRenderer.invoke('item:generate', novelId, options),
   },
 
   // 大纲管理
@@ -87,8 +109,10 @@ const api = {
   // AI 功能
   ai: {
     expandBackground: (input: unknown) => ipcRenderer.invoke('ai:expandBackground', input),
+    generateCoreSettings: (data: CoreSettingsGenerationRequest) => ipcRenderer.invoke('ai:generateCoreSettings', data),
     generateCharacter: (novelId: number, opts: unknown) => ipcRenderer.invoke('ai:generateCharacter', novelId, opts),
     generateRelations: (novelId: number) => ipcRenderer.invoke('ai:generateRelations', novelId),
+    generateSubplotBatch: (data: SubplotGenerationRequest) => ipcRenderer.invoke('ai:generateSubplotBatch', data),
     rewriteParagraph: (data: unknown) => ipcRenderer.invoke('ai:rewriteParagraph', data),
     // 抽卡：批量运行提示词
     runPrompt: (data: { messages: unknown[]; count?: number; modelConfigId?: number }) =>
@@ -110,6 +134,8 @@ const api = {
       'task:status-change',
       'task:complete',
       'character:batch-progress',
+      'ai:core-settings-progress',
+      'chapter:generation-progress',
     ]
     if (validChannels.includes(channel)) {
       const subscription = (_event: Electron.IpcRendererEvent, ...args: unknown[]) => callback(...args)

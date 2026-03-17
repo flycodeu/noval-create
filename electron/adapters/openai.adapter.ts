@@ -31,7 +31,7 @@ export class OpenAIAdapter extends BaseAdapter {
       throw new Error(`OpenAI API Error ${response.status}: ${err}`)
     }
 
-    const data = await response.json()
+    const data = await response.json() as Record<string, any>
     return data.choices[0]?.message?.content || ''
   }
 

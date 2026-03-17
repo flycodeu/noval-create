@@ -5,6 +5,11 @@ import { AIScoreResult } from '../../types'
 import AIGenerateButton from '../AIGenerateButton'
 
 type Message = { role: 'user' | 'assistant'; content: string }
+type RunGenerationInput = {
+  messages: Message[]
+  count: number
+  modelConfigId?: number
+}
 
 interface Props {
   /** 调用时获取最新内容 */
@@ -13,6 +18,7 @@ interface Props {
   novelBackground?: string
   genreContext?: string
   modelConfigId?: number
+  disabled?: boolean
   /** 重新生成后的回调，将新内容（已去除 Markdown）应用到字段 */
   onRegenerate?: (newContent: string) => void
   /** 抽卡次数（传给重生成按钮） */
@@ -29,6 +35,8 @@ interface Props {
   ) => Message[]
   /** 使用自定义消息时是否输出 JSON（默认 false，即自动 strip markdown） */
   customIsJson?: boolean
+  /** 自定义生成执行器，优先于默认 ai.runPrompt */
+  customRunGeneration?: (input: RunGenerationInput) => Promise<string[]>
 }
 
 const scoreColor = (s: number) => s >= 80 ? '#52c41a' : s >= 60 ? '#faad14' : '#ff4d4f'
@@ -41,10 +49,12 @@ export default function AIScorePanel({
   novelBackground = '',
   genreContext = '',
   modelConfigId,
+  disabled = false,
   onRegenerate,
   drawCount = 1,
   buildCustomRegenMessages,
   customIsJson = false,
+  customRunGeneration,
 }: Props) {
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<AIScoreResult | null>(null)
@@ -52,6 +62,7 @@ export default function AIScorePanel({
   const [showRegen, setShowRegen] = useState(false)
 
   const handleScore = async () => {
+    if (disabled) return
     const content = getContent()
     if (!content?.trim()) {
       message.warning('请先填写内容再进行评分')
@@ -117,6 +128,8 @@ ${extraReqs ? `\n【用户追加要求】${extraReqs}` : ''}
 - 保留原内容的核心设定和关键信息
 - 减少AI写作痕迹（禁止"不禁/不由得/忍不住/此刻"等引导词）
 - 增加具体细节，用具体事物代替抽象描述
+- 修正主谓宾搭配和对象类别错配，例如把“电网的死亡”改成“电网瘫痪/崩溃”等准确表达
+- 用常规的人类语言重写，不要保留生硬、悬浮或不成立的句子
 - 结合${genreContext}题材的特点
 
 格式要求：
@@ -141,6 +154,7 @@ ${extraReqs ? `\n【用户追加要求】${extraReqs}` : ''}
           icon={loading ? <LoadingOutlined /> : <BarChartOutlined />}
           loading={loading}
           onClick={handleScore}
+          disabled={disabled}
           style={{ color: 'var(--color-text-muted)', fontSize: 12, paddingLeft: 0 }}
         >
           AI 评分
@@ -165,6 +179,7 @@ ${extraReqs ? `\n【用户追加要求】${extraReqs}` : ''}
                 type="text"
                 icon={<SyncOutlined />}
                 onClick={() => setShowRegen(v => !v)}
+                disabled={disabled}
                 style={{ color: 'var(--color-blue-light)', fontSize: 12 }}
               >
                 按评分优化重生成
@@ -294,8 +309,10 @@ ${extraReqs ? `\n【用户追加要求】${extraReqs}` : ''}
             <AIGenerateButton
               label="AI 优化重生成"
               buildMessages={buildRegenMessages}
+              runGeneration={customRunGeneration}
               drawCount={drawCount}
               isJson={!!buildCustomRegenMessages && customIsJson}
+              disabled={disabled}
               onResult={content => {
                 onRegenerate(content)
                 setShowRegen(false)
