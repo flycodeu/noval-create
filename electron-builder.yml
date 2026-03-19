@@ -1,44 +1,59 @@
 appId: com.novelforge.app
 productName: NovelForge
-copyright: Copyright © 2024 NovelForge
+copyright: Copyright (c) 2024 NovelForge
+
+electronDist: node_modules/electron/dist
+npmRebuild: false
 
 directories:
   output: release
-  buildResources: resources
+  buildResources: build
 
 files:
-  - dist/**/*
-  - dist-electron/**/*
-  - "!node_modules/**"
+  - out/**/*
+  - package.json
+  - "!out/**/*.map"
+  - "!dist-electron{,/**/*}"
+  - "!src{,/**/*}"
+  - "!electron{,/**/*}"
+  - "!release{,/**/*}"
+  - "!.agents{,/**/*}"
+  - "!.claude{,/**/*}"
+  - "!.idea{,/**/*}"
+  - "!*.tsbuildinfo"
+  - "!drizzle.config.ts"
+  - "!electron.vite.config.ts"
+  - "!tsconfig*.json"
+  - "!index.html"
+  - "!package-lock.json"
 
-extraResources:
-  - from: resources/
-    to: resources/
-    filter:
-      - "**/*"
+asarUnpack:
+  - "**/*.node"
+
+icon: build/icon.ico
 
 mac:
   target:
     - target: dmg
       arch: [x64, arm64]
-  icon: resources/icon.icns
 
 win:
+  signAndEditExecutable: false
+  icon: build/icon.ico
   target:
     - target: nsis
       arch: [x64]
     - target: portable
       arch: [x64]
-  icon: resources/icon.ico
 
 linux:
   target: [AppImage, deb]
-  icon: resources/icon.png
 
 nsis:
+  installerIcon: build/installerIcon.ico
+  uninstallerIcon: build/uninstallerIcon.ico
   oneClick: false
   allowToChangeInstallationDirectory: true
   installerLanguages:
     - zh_CN
     - en_US
-  license: resources/license.txt

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Form, Input, InputNumber, Progress, Space, Tag, message } from 'antd'
+import { Alert, Button, Form, Input, InputNumber, Progress, Space, message } from 'antd'
 import {
   BarsOutlined,
   ClockCircleOutlined,
@@ -255,7 +255,9 @@ export default function Overview({ novelId }: Props) {
 
   return (
     <WorkspacePage
+      className="novel-overview-page"
       eyebrow="小说总控台"
+      layout="wide"
       title={currentNovel?.title || '创作概览'}
       description="先把基础资料、主冲突和结构缺口放在同一个视图里看清，再决定下一步补什么。这里保存的每个字段，都会直接成为后续 AI 生成的上游上下文。"
       actions={(
@@ -322,7 +324,7 @@ export default function Overview({ novelId }: Props) {
         />
       ) : null}
 
-      <div className="novel-grid novel-grid--2">
+      <div className="novel-grid novel-grid--2 novel-overview-grid novel-overview-grid--primary">
         <WorkspacePanel
           title="基础资料编辑台"
           description="保存后，核心设定、世界规则、人物、时间轴和正文写作都会读取这里的最新信息。"
@@ -330,20 +332,30 @@ export default function Overview({ novelId }: Props) {
         >
           <div className="novel-overview-studio__layout">
             <Form form={form} layout="vertical" className="novel-overview-studio__form">
-              <Form.Item
-                label="小说标题"
-                name="title"
-                rules={[{ required: true, message: '请先填写标题' }]}
-              >
-                <Input maxLength={80} placeholder="先给这本书一个能代表气质的标题" />
-              </Form.Item>
+              <div className="novel-overview-studio__title-row">
+                <Form.Item
+                  label="小说标题"
+                  name="title"
+                  rules={[{ required: true, message: '请先填写标题' }]}
+                >
+                  <Input size="large" maxLength={80} placeholder="先给这本书一个能代表气质的标题" />
+                </Form.Item>
+
+                <Form.Item
+                  label="目标字数"
+                  name="targetWords"
+                  rules={[{ required: true, message: '请填写目标字数' }]}
+                >
+                  <InputNumber size="large" min={10000} max={5000000} step={10000} style={{ width: '100%' }} />
+                </Form.Item>
+              </div>
 
               <Form.Item
                 label="一句话简介"
                 name="synopsis"
                 rules={[{ required: true, message: '请填写简介' }]}
               >
-                <Input.TextArea rows={4} maxLength={300} placeholder="写清主角处境、目标和最硬的阻力，不要只写氛围词。" />
+                <Input.TextArea rows={5} maxLength={300} placeholder="写清主角处境、目标和最硬的阻力，不要只写氛围词。" />
               </Form.Item>
 
               <Form.Item
@@ -351,50 +363,16 @@ export default function Overview({ novelId }: Props) {
                 name="userBackground"
                 rules={[{ required: true, message: '请填写原始背景' }]}
               >
-                <Input.TextArea rows={6} maxLength={1600} placeholder="这里写你脑海里的原始设想：时代、题材、关键处境、危险来源、人物困局。" />
+                <Input.TextArea rows={7} maxLength={1600} placeholder="这里写你脑海里的原始设想：时代、题材、关键处境、危险来源、人物困局。" />
               </Form.Item>
 
               <Form.Item
                 label="扩展背景"
                 name="expandedBackground"
               >
-                <Input.TextArea rows={8} maxLength={4000} placeholder="把环境压力、组织秩序、资源条件、敌我关系、制度代价写实。这里越清楚，后面越不容易生成空话。" />
-              </Form.Item>
-
-              <Form.Item
-                label="目标字数"
-                name="targetWords"
-                rules={[{ required: true, message: '请填写目标字数' }]}
-              >
-                <InputNumber min={10000} max={5000000} step={10000} style={{ width: '100%' }} />
+                <Input.TextArea rows={9} maxLength={4000} placeholder="把环境压力、组织秩序、资源条件、敌我关系、制度代价写实。这里越清楚，后面越不容易生成空话。" />
               </Form.Item>
             </Form>
-
-            <div className="novel-overview-studio__impact">
-              <div className="novel-overview-impact-card novel-overview-impact-card--warm">
-                <div className="novel-kicker">生成链继承</div>
-                <strong>最新基础信息会直接进入后续提示词</strong>
-                <span>不需要重新建书。只要这里保存成功，后续生成就按新背景继续走。</span>
-              </div>
-
-              <div className="novel-overview-impact-card">
-                <div className="novel-kicker">主角与人物</div>
-                <strong>先写人，再写正确答案</strong>
-                <span>后续核心设定会优先强调风险、代价、误判、底线和果断决策，而不是悬浮价值口号。</span>
-              </div>
-
-              <div className="novel-overview-impact-card">
-                <div className="novel-kicker">高风险题材提示</div>
-                <strong>末世、感染、围困、生存类题材要先写制度压力</strong>
-                <span>例如筛查、隔离、资源分配、谎报伤情、组织纪律、救人与防扩散的代价冲突。</span>
-              </div>
-
-              <div className="novel-overview-impact-card novel-overview-impact-card--cool">
-                <div className="novel-kicker">建议顺序</div>
-                <strong>基础资料 → 核心设定 → 世界规则</strong>
-                <span>不要在背景还模糊时就直接批量生成一整套人物和事件，那样最容易“AI味”变重。</span>
-              </div>
-            </div>
           </div>
         </WorkspacePanel>
 
@@ -420,7 +398,7 @@ export default function Overview({ novelId }: Props) {
         </WorkspacePanel>
       </div>
 
-      <div className="novel-grid novel-grid--2">
+      <div className="novel-grid novel-grid--2 novel-overview-grid">
         <WorkspacePanel title="背景压力快照" description="背景不是装饰，它决定人物为什么必须这样做。">
           <div className="novel-grid">
             <div className="novel-overview-signal-card">

@@ -252,30 +252,35 @@ export default function CoreSettings({ novelId }: Props) {
 
     return [{
       role: 'user' as const,
-      content: `你是专业的中文小说策划师，请根据 AI 评分反馈，优化【${label}】。
-【字段职责】${guidance.duty}
+      content: `你在返修小说策划案里的【${label}】。请只修这一项，让它更适合继续往人物、大纲和正文推进。
+【本项职责】${guidance.duty}
 【当前内容】${content}
 【小说背景】${novelBackground || '（暂无补充背景）'}
 【题材】${genreContext}
 【当前主角指代】${protagonistReference}
 【主角称谓规则】${protagonistRule}
-${relatedContext ? `【已确定的关联设定】\n${relatedContext}\n` : ''}【优先修复问题】${topFixes}
+${relatedContext ? `【已确定的关联设定】
+${relatedContext}
+` : ''}【优先修复问题】${topFixes}
 【重点改进方向】${dimSuggestions || '请优先修正最弱维度，并补足具体细节。'}
 ${extraReqs ? `【追加要求】${extraReqs}` : ''}
 【语言要求】
 ${buildHumanLanguageRules([
   '重点修复主谓宾搭配错误、对象类别错配和抽象概念堆砌。',
-  '如果出现“电网的死亡”这类表达，必须改成“电网瘫痪”“电力系统崩溃”等准确说法。',
+  '贴近当前题材常见的叙述气质和策划口径，不模仿具体作者。',
 ])}
 
-优化要求：
+返修原则：
 - ${guidance.requirements.join('\n- ')}
-- 只能在当前背景、题材和已确定设定上润色，禁止改写成另一套故事
-- 若上下文中出现旧名字、占位名或彼此冲突的人名，统一按主角称谓规则处理
-- 与其他字段的人物关系、事件因果、情绪走向保持一致，不得自相矛盾
+- 只在当前背景、题材和已确定设定内返修，不改写成另一套故事
+- 先补因果、动机、结果落点，再处理气质和文气
+- 本轮只处理【${label}】，不要越界替其他字段下结论
+- 若上下文出现旧名字、占位名或彼此冲突的人名，统一按主角称谓规则处理
+- 与其他字段的人物关系、事件因果和情绪走向保持一致，不得自相矛盾
+- 不要写成宣传语、百科说明或空洞主题口号
 - 禁止事项：
 - ${guidance.avoid.join('\n- ')}
-- 直接输出优化后的纯文本内容，不要解释，不要使用 Markdown。`,
+- 直接输出返修后的纯文本内容，不要解释，不要使用 Markdown。`,
     }]
   }, [buildRelatedSettingsContext, genreContext, novelBackground, protagonistReference, protagonistRule])
 
@@ -554,34 +559,36 @@ ${buildHumanLanguageRules([
     const guidance = getFieldPromptGuidance(fieldName, label)
     const current = form.getFieldValue(fieldName) || ''
     const relatedContext = buildRelatedSettingsContext(fieldName)
-    const prompt = `你是专业的中文小说策划师。请围绕【${label}】进行专业扩充和润色。
-【字段职责】${guidance.duty}
+    const prompt = `你在为长篇小说的策划案补【${label}】这一项，请只完成这一项。
+【本项职责】${guidance.duty}
 【小说背景】${novelBackground || '（暂无补充背景）'}
 【题材】${genreContext}
 【当前主角指代】${protagonistReference}
 【主角称谓规则】${protagonistRule}
-${relatedContext ? `【已确定的关联设定】\n${relatedContext}\n` : ''}【当前字段内容】${current || '（暂无，请根据背景和已确定设定生成合适内容）'}
+${relatedContext ? `【已确定的关联设定】
+${relatedContext}
+` : ''}【当前字段内容】${current || '（暂无，请根据背景和已确定设定生成合适内容）'}
 ${aiConfig.requirements ? `【额外要求】${aiConfig.requirements}` : ''}
 【语言要求】
 ${buildHumanLanguageRules([
   '输出前自行检查搭配是否准确，不要保留物体被写成人或生物的表达。',
-  '优先采用常规小说语言，不写概念口号和硬凹文学腔。',
+  '贴近当前题材常见的叙述气质和策划口径，不模仿具体作者。',
 ])}
 
-扩充原则：
+本次处理原则：
 - ${guidance.requirements.join('\n- ')}
 - 只允许在当前背景、题材和已确定设定上深化，禁止改写成另一套故事
+- 先补足人物动机、因果关系和结果落点，再考虑气质和文气
+- 本轮只处理【${label}】，不要越界代写其他字段
 - 若上下文中出现旧名字、占位名或彼此冲突的人名，统一按主角称谓规则处理
-- 与其他字段中的人物关系、事件因果、核心矛盾保持前后一致，不得漂移
-- 保留原有思路，在其基础上补足动机、推进关系和关键细节
-- 语言简洁有力，避免空话和套路化描述
+- 与其他字段中的人物关系、事件因果和核心矛盾保持前后一致，不得漂移
+- 如果原内容可用，保留它的核心方向，只补足缺口和逻辑
 - 禁止事项：
 - ${guidance.avoid.join('\n- ')}
 
-输出格式：
-- 直接输出润色后的纯文本内容，不要解释
-- 不要使用 Markdown、标题、列表或字段标签
-- 段落之间可以空一行`
+输出要求：
+- 直接输出可落进表单的纯文本
+- 不要使用 Markdown、标题、列表或字段标签`
 
     return [{ role: 'user' as const, content: prompt }]
   }, [aiConfig.requirements, buildRelatedSettingsContext, form, genreContext, novelBackground, protagonistReference, protagonistRule])
@@ -594,12 +601,14 @@ ${buildHumanLanguageRules([
     const sub = subPlots[index]
     const mainPlot = form.getFieldValue('main_plot') || ''
     const relatedContext = buildRelatedSettingsContext('sub_plots_list')
-    const prompt = `请根据最新上下文，刷新这一条支线剧情框架。
+    const prompt = `你在刷新一条支线框架。目标是让它和主线互相加压，而不是平行长出另一条小故事。
 【小说背景】${novelBackground || '（暂无补充背景）'}
 【题材】${genreContext}
 【当前主角指代】${protagonistReference}
 【主角称谓规则】${protagonistRule}
-${relatedContext ? `【已确定的关联设定】\n${relatedContext}\n` : ''}【主线剧情】${mainPlot || '（暂未填写）'}
+${relatedContext ? `【已确定的关联设定】
+${relatedContext}
+` : ''}【主线剧情】${mainPlot || '（暂未填写）'}
 【当前支线基础信息】
 - 名称：${sub?.name || '（未命名）'}
 - 涉及人物：${sub?.characters || '（暂未填写）'}
@@ -613,12 +622,13 @@ ${optimization.extraReqs ? `【追加要求】${optimization.extraReqs}` : ''}` 
 【语言要求】
 ${buildHumanLanguageRules([
   'conflict 和 mainlineLink 必须是常规中文句子，不要写成抽象标签。',
-  '若存在搭配错误或表达生硬，优先改成最常见、最准确的说法。',
+  '贴近当前题材常见的支线设计方式，不靠概念包装制造“高级感”。',
 ])}
 
-刷新要求：
+刷新原则：
 - 支线必须与主题核心、故事核心目标、核心冲突或主线推进形成明确关联，不能是独立小故事
-- 这条支线至少承担以下一种作用：推进主线、揭示主题或世界真相、推动人物成长或关系变化、制造阶段性反转
+- 至少承担一种明确职能：推进主线、揭示世界或主题、推动人物成长或关系变化、制造阶段性反转或伏笔回收
+- 本轮只写这条支线的起爆矛盾、主线作用和收束位置，不展开成长篇情节
 - 若旧版本与最新上下文冲突，优先按最新上下文重写；若旧版本仍有效，可以保留其核心方向
 - 若涉及主角，characters 字段中只能写「${protagonistReference}」
 - characters 只写人物称谓，用逗号分隔
@@ -635,25 +645,30 @@ ${buildHumanLanguageRules([
     const mainPlot = form.getFieldValue('main_plot') || ''
     const relatedContext = buildRelatedSettingsContext('sub_plots_list')
     const existingSummary = getSubplotSummary(existingSubplots, SUBPLOT_SUMMARY_LIMIT)
-    const prompt = `请为小说分批生成新的支线剧情框架，本次只生成 ${batchCount} 条。
+    const prompt = `请为小说分批补支线框架，本批只做 ${batchCount} 条。
 【小说背景】${novelBackground || '（暂无补充背景）'}
 【题材】${genreContext}
 【当前主角指代】${protagonistReference}
 【主角称谓规则】${protagonistRule}
-${relatedContext ? `【已确定的关联设定】\n${relatedContext}\n` : ''}【主线剧情】${mainPlot || '（暂未填写）'}
+${relatedContext ? `【已确定的关联设定】
+${relatedContext}
+` : ''}【主线剧情】${mainPlot || '（暂未填写）'}
 【生成进度】第 ${batchIndex} / ${totalBatches} 批
 【当前已有支线数量】${existingSubplots.length}
-${existingSummary ? `【当前已有支线摘要】\n${existingSummary}\n` : ''}【本批生成数量】${batchCount}
+${existingSummary ? `【当前已有支线摘要】
+${existingSummary}
+` : ''}【本批生成数量】${batchCount}
 ${aiConfig.requirements ? `【额外要求】${aiConfig.requirements}` : ''}
 【语言要求】
 ${buildHumanLanguageRules([
   '每条支线都要写得准确、直接，不能为了显得高级而写不自然的句子。',
-  '重点避免冲突描述和主线关联中的对象类别错配。',
+  '贴近当前题材常见的支线设计方案，不靠空洞概念堆砌存在感。',
 ])}
 
-生成要求：
+本批要求：
 - 本次只生成 ${batchCount} 条不同支线，输出 JSON array，数组长度必须等于 ${batchCount}
 - 每条支线都必须与主题核心、故事核心目标、核心冲突或主线推进形成明确因果关联
+- 每条支线只保留最能驱动主线、人物关系或主题的那根线，不要把一条支线写成完整副本剧情
 - 从整轮已生成支线来看，要尽量覆盖不同功能；若当前类型单一，本批优先补足推进主线、揭示世界或主题、推动人物成长、放大人物关系、制造反转或伏笔回收等未覆盖方向
 - 不要与当前已有支线在名称、核心冲突或主线作用上重复
 - 若涉及主角，characters 字段中只能写「${protagonistReference}」，禁止发明新名字
@@ -834,30 +849,34 @@ ${buildHumanLanguageRules([
 
     return [{
       role: 'user' as const,
-      content: `请根据 AI 评分反馈，分别优化「故事核心目标」和「核心冲突」两个字段。
+      content: `请根据 AI 评分反馈，分别返修「故事核心目标」和「核心冲突」。
 【当前内容】${content}
 【小说背景】${novelBackground || '（暂无补充背景）'}
 【题材】${genreContext}
 【当前主角指代】${protagonistReference}
 【主角称谓规则】${protagonistRule}
-${relatedContext ? `【已确定的关联设定】\n${relatedContext}\n` : ''}【评分问题】${topFixes}
+${relatedContext ? `【已确定的关联设定】
+${relatedContext}
+` : ''}【评分问题】${topFixes}
 【改进方向】${dimSuggestions || '请优先修正评分最低的维度，并补足具体细节。'}
 ${extraReqs ? `【追加要求】${extraReqs}` : ''}
 【语言要求】
 ${buildHumanLanguageRules([
   '重点修正目标和冲突里的语义重复、搭配错误和抽象化表达。',
-  '两个字段都要能被普通读者直接读懂，不要写成策划黑话。',
+  '两个字段都要让普通读者直接读懂，像成熟小说策划案里的定稿字段。',
 ])}
 
-优化要求：
+返修原则：
 - 「故事核心目标」只回答故事最终要抵达什么状态、目标或命题，不写过程和阻碍
 - 「核心冲突」只回答阻止目标实现的核心对立、代价与张力，不写完整剧情流程
+- 先消除语义重复，再补足因果、代价和结果落点
 - 两个字段内容都要独立完整，但必须属于同一套故事设定，且不能互相改写成近义句
 - 若出现旧名字、占位名或彼此冲突的人名，统一按主角称谓规则处理
+- 贴近当前题材常见的叙述气质和策划口径，不模仿具体作者
 - 不要使用 Markdown
 - 严格按以下格式输出：
-【故事核心目标】此处输出优化后的故事核心目标
-【核心冲突】此处输出优化后的核心冲突`,
+【故事核心目标】此处输出返修后的故事核心目标
+【核心冲突】此处输出返修后的核心冲突`,
     }]
   }, [buildRelatedSettingsContext, genreContext, novelBackground, protagonistReference, protagonistRule])
 
@@ -886,7 +905,7 @@ ${buildHumanLanguageRules([
           className="novel-core-settings__popover-textarea"
           value={aiConfig.requirements}
           onChange={e => setAIConfig(c => ({ ...c, requirements: e.target.value }))}
-          placeholder="例如：风格更黑暗、避免主角开挂、增加反转..."
+          placeholder="例如：悬疑感更强、人物说话更克制、减少设定讲解、冲突更紧。"
           rows={3}
         />
         <div className="novel-core-settings__popover-help">
@@ -930,7 +949,7 @@ ${buildHumanLanguageRules([
               </span>
             }
           >
-            <Input.TextArea rows={5} placeholder="只写故事最终要抵达的目标、终局状态或核心命题" />
+            <Input.TextArea rows={6} placeholder="只写故事最终要抵达的目标、终局状态或核心命题" />
           </Form.Item>
           <Form.Item
             name="core_conflict"
@@ -950,7 +969,7 @@ ${buildHumanLanguageRules([
               </span>
             }
           >
-            <Input.TextArea rows={5} placeholder="只写阻碍目标实现的最核心对立、代价与矛盾张力" />
+            <Input.TextArea rows={6} placeholder="只写阻碍目标实现的最核心对立、代价与矛盾张力" />
           </Form.Item>
           <AIScorePanel
             getContent={() => {
@@ -1003,7 +1022,7 @@ ${buildHumanLanguageRules([
             label="主线概述"
             extra="只写围绕目标与冲突展开的关键事件链，重点体现因果推进、升级和转折。"
           >
-            <Input.TextArea rows={6} placeholder="只写围绕目标与冲突展开的关键事件链和推进节点" />
+            <Input.TextArea rows={7} placeholder="只写围绕目标与冲突展开的关键事件链和推进节点" />
           </Form.Item>
           <AIScorePanel
             getContent={() => form.getFieldValue('main_plot') || ''}
@@ -1148,7 +1167,7 @@ ${buildHumanLanguageRules([
                       <div className="novel-core-settings__subplot-field-label">核心矛盾</div>
                       <Input.TextArea
                         size="small"
-                        rows={4}
+                        rows={5}
                         disabled={isAnyAIActionRunning}
                         value={sub.conflict}
                         onChange={e => updateSubPlot(index, 'conflict', e.target.value)}
@@ -1298,7 +1317,7 @@ ${buildHumanLanguageRules([
               </span>
             }
           >
-            <Input.TextArea rows={5} placeholder="故事如何结束，主要矛盾如何收束" />
+            <Input.TextArea rows={6} placeholder="故事如何结束，主要矛盾如何收束" />
           </Form.Item>
           <AIScorePanel
             getContent={() => form.getFieldValue('ending') || ''}
@@ -1321,17 +1340,71 @@ ${buildHumanLanguageRules([
   const rhythmReady = [rhythmSetupValue, rhythmConflictValue, rhythmEndingValue]
     .every((item) => typeof item === 'number' && item > 0)
   const isGuided = mode === 'guided'
+  const workflowPhaseLabel = storyAnchorCount < 4
+    ? '先定骨架'
+    : subPlots.length === 0
+      ? '补支线'
+      : rhythmReady
+        ? '联调收束'
+        : '校节奏'
+  const currentEditingFocus = storyAnchorCount < 4
+    ? '先把目标、冲突、主线、结局四个锚点定稳'
+    : subPlots.length === 0
+      ? '补出能反向推动主线的支线框架'
+      : rhythmReady
+        ? '检查支线、节奏和结局是否彼此回扣'
+        : '用节奏比例确认前中后段的推进重心'
+  const currentEditingNote = storyAnchorCount < 4
+    ? '四个锚点成立后，后面的人物、大纲和正文才不会飘。'
+    : subPlots.length === 0
+      ? '支线只补对主线、人物关系或主题有用的那部分。'
+      : rhythmReady
+        ? '最后一轮重点看因果闭环、收束位置和余波是否合理。'
+        : '节奏比例不求死板，但要能看出铺垫、加压和收束的主次。'
+  const workflowPhaseNote = storyAnchorCount < 4
+    ? '四个锚点没有定稳前，先别急着堆太多设定枝叶。'
+    : subPlots.length === 0
+      ? '支线只补会反向推动主线、人物关系或主题的那一部分。'
+      : rhythmReady
+        ? '这一轮主要核对因果闭环、收束位置和余波。'
+        : '用前中后段占比确认铺垫、加压和收束的主次。'
+  const anchorProgressSummary = storyAnchorCount === 4
+    ? '四个故事锚点已齐，可以继续检查支线与节奏。'
+    : '已定 ' + storyAnchorCount + '/4 个锚点，先把目标、冲突、主线、结局补完整。'
+  const saveStateSummary = hasDraft
+    ? '表单里有待确认的 AI 草稿，保存前建议先通读一遍。'
+    : '当前表单与已保存设定保持同步。'
+  const aiModeSummary = aiConfig.requirements.trim()
+    ? aiConfig.requirements.trim()
+    : '默认口径 · 单字段抽卡 ' + aiConfig.drawCount + ' 次'
   const collapseDefaultKeys = isGuided
     ? ['core', 'plot', 'ending']
     : ['core', 'plot', 'subplot', 'rhythm', 'ending']
   const heroContextSummary = (
     <div className="novel-core-settings__hero-context-clean">
+      <section className="novel-core-settings__focus-strip">
+        <div className="novel-core-settings__focus-card novel-core-settings__focus-card--accent">
+          <span className="novel-kicker">当前重点</span>
+          <strong>{currentEditingFocus}</strong>
+          <small>{currentEditingNote}</small>
+        </div>
+        <div className="novel-core-settings__focus-card">
+          <span className="novel-kicker">推进阶段</span>
+          <strong>{workflowPhaseLabel}</strong>
+          <small>{workflowPhaseNote}</small>
+          <div className="novel-core-settings__focus-meta">{anchorProgressSummary}</div>
+        </div>
+        <div className="novel-core-settings__focus-card">
+          <span className="novel-kicker">AI 口径</span>
+          <strong>{aiConfig.requirements.trim() ? '已附加全局要求' : '使用默认口径'}</strong>
+          <small>{aiModeSummary}</small>
+        </div>
+      </section>
       <WorkspaceContextSummary
         items={[
-          { label: '工作模式', value: isGuided ? '小白模式' : '专业模式' },
           { label: '题材', value: genreContext },
-          { label: '主角称谓规则', value: '涉及主角时统一使用“主角”，避免混用旧名、代号或占位名。' },
-          { label: '当前模式', value: hasDraft ? '已有 AI 草稿待保存' : '纯编辑状态' },
+          { label: '工作模式', value: isGuided ? '小白模式' : '专业模式' },
+          { label: '保存状态', value: hasDraft ? '有待确认草稿' : '纯编辑状态' },
         ]}
       />
       <section className="novel-core-settings__background-strip">
@@ -1341,7 +1414,7 @@ ${buildHumanLanguageRules([
             <button
               type="button"
               className="novel-core-settings__background-toggle"
-              onClick={() => setIsBackgroundExpanded(value => !value)}
+              onClick={() => setIsBackgroundExpanded((value) => !value)}
               aria-expanded={isBackgroundExpanded}
             >
               {isBackgroundExpanded ? '收起' : '展开全文'}
@@ -1360,76 +1433,86 @@ ${buildHumanLanguageRules([
     </div>
   )
 
+
   return (
     <WorkspacePage
       className={`novel-core-settings novel-core-settings--${mode}`}
+      layout="wide"
       heroVariant="compact"
       eyebrow={isGuided ? '核心设定' : '故事引擎'}
       title="核心设定"
       description="把题材、背景、故事目标、核心冲突、主线推进、支线和结局先锁成一个可写的故事引擎。后续的人物、物品、时间轴和大纲都会沿用这里的叙事口径。"
       actions={(
-        <div className="novel-core-settings__actions">
-          <Button
-            icon={<RobotOutlined />}
-            loading={isGeneratingCoreSettings}
-            disabled={isGeneratingSubplots}
-            onClick={() => void handleGenerateCoreSettings()}
-          >
-            {isGeneratingCoreSettings ? '整页生成中' : 'AI 一键生成'}
-          </Button>
-          <Popover
-            title={<span className="novel-core-settings__popover-title">AI 高级设置</span>}
-            content={advancedSettingsContent}
-            trigger="click"
-            open={settingsOpen}
-            onOpenChange={setSettingsOpen}
-            placement="bottomRight"
-          >
-            <Badge dot={aiConfig.drawCount > 1 || !!aiConfig.requirements} color="var(--color-blue-primary)">
-              <Button icon={<SettingOutlined />} size="small" disabled={isGeneratingCoreSettings}>
-                高级设置{aiConfig.drawCount > 1 ? ` (抽卡×${aiConfig.drawCount})` : ''}
-              </Button>
-            </Badge>
-          </Popover>
-          <Button danger icon={<DeleteOutlined />} disabled={isAnyAIActionRunning || saving} onClick={handleClearCurrentFlow}>
-            清空当前流程
-          </Button>
-          <Button type="primary" icon={<SaveOutlined />} loading={saving} disabled={isGeneratingCoreSettings} onClick={handleSave}>
-            保存设定
-          </Button>
+        <div className="novel-core-settings__hero-actions">
+          <div className="novel-core-settings__action-cluster novel-core-settings__action-cluster--primary">
+            <Button
+              icon={<RobotOutlined />}
+              loading={isGeneratingCoreSettings}
+              disabled={isGeneratingSubplots}
+              onClick={() => void handleGenerateCoreSettings()}
+            >
+              {isGeneratingCoreSettings ? '整页生成中' : 'AI 一键生成'}
+            </Button>
+            <Button type="primary" icon={<SaveOutlined />} loading={saving} disabled={isGeneratingCoreSettings} onClick={handleSave}>
+              保存设定
+            </Button>
+          </div>
+          <div className="novel-core-settings__action-cluster">
+            <Popover
+              title={<span className="novel-core-settings__popover-title">AI 高级设置</span>}
+              content={advancedSettingsContent}
+              trigger="click"
+              open={settingsOpen}
+              onOpenChange={setSettingsOpen}
+              placement="bottomRight"
+            >
+              <Badge dot={aiConfig.drawCount > 1 || !!aiConfig.requirements} color="var(--color-blue-primary)">
+                <Button icon={<SettingOutlined />} size="small" disabled={isGeneratingCoreSettings}>
+                  AI 选项{aiConfig.drawCount > 1 ? ` (抽卡×${aiConfig.drawCount})` : ''}
+                </Button>
+              </Badge>
+            </Popover>
+            <Button danger icon={<DeleteOutlined />} disabled={isAnyAIActionRunning || saving} onClick={handleClearCurrentFlow}>
+              清空当前流程
+            </Button>
+          </div>
         </div>
       )}
       metrics={(
         <>
-          <WorkspaceMetric label="故事锚点" value={`${storyAnchorCount}/4`} tone="warm" hint="目标、冲突、主线、结局" />
-          <WorkspaceMetric label="支线数量" value={subPlots.length} hint={subplotGenerationProgress ? `当前生成 ${subplotGenerationProgress.completed}/${subplotGenerationProgress.total}` : '建议控制在主线能承载的范围内'} />
-          <WorkspaceMetric label="叙事节奏" value={rhythmReady ? '已设定' : '待补齐'} tone="cool" hint={rhythmReady ? `${rhythmSetupValue}% / ${rhythmConflictValue}% / ${rhythmEndingValue}%` : '前中后段占比还未明确'} />
-          <WorkspaceMetric label="AI 附加要求" value={aiConfig.requirements.trim() ? '已启用' : '未启用'} hint={`抽卡 ${aiConfig.drawCount} 次`} />
+          <WorkspaceMetric label="故事锚点" value={storyAnchorCount + '/4'} tone="warm" hint="目标、冲突、主线、结局" />
+          <WorkspaceMetric label="支线数量" value={subPlots.length} hint={subplotGenerationProgress ? '当前生成 ' + subplotGenerationProgress.completed + '/' + subplotGenerationProgress.total : '建议控制在主线能承载的范围内'} />
+          <WorkspaceMetric label="叙事节奏" value={rhythmReady ? '已设定' : '待补齐'} tone="cool" hint={rhythmReady ? rhythmSetupValue + '% / ' + rhythmConflictValue + '% / ' + rhythmEndingValue + '%' : '前中后段占比还未明确'} />
+          <WorkspaceMetric label="保存状态" value={hasDraft ? '待确认' : '已同步'} hint={saveStateSummary} />
         </>
       )}
-      contextSummary={(
-        <WorkspaceContextSummary
-          items={[
-            { label: '工作模式', value: isGuided ? '小白模式' : '专业模式' },
-            { label: '题材', value: genreContext },
-            { label: '背景依据', value: novelBackground || '尚未补充背景，建议先写清世界处境' },
-            { label: '主角称谓规则', value: '涉及主角时统一使用“主角”，避免混用旧名、代号或占位名。' },
-            { label: '当前模式', value: hasDraft ? '已有 AI 草稿待保存' : '纯编辑状态' },
-          ]}
-        />
-      )}
+      contextSummary={null}
       aside={(
         <>
-
-          <WorkspacePanel title="生成状态" description="这里统一看当前 AI 工作状态">
-            <div className="novel-note-list">
-              <div className="novel-note-list__item">整页生成：{isGeneratingCoreSettings ? '进行中' : '空闲'}</div>
-              <div className="novel-note-list__item">支线批量生成：{isGeneratingSubplots ? '进行中' : '空闲'}</div>
-              <div className="novel-note-list__item">抽卡次数：{aiConfig.drawCount}</div>
-              <div className="novel-note-list__item">附加要求：{aiConfig.requirements.trim() || '未设置'}</div>
+          <WorkspacePanel title="生成状态" description="这里只保留当前真正会影响产出的 AI 状态。">
+            <div className="novel-core-settings__status-board">
+              <div className="novel-core-settings__status-card">
+                <span>整页生成</span>
+                <strong>{isGeneratingCoreSettings ? '进行中' : '空闲'}</strong>
+                <small>{coreSettingsProgress?.label || '当前没有整页生成任务。'}</small>
+              </div>
+              <div className="novel-core-settings__status-card">
+                <span>支线批量</span>
+                <strong>{isGeneratingSubplots ? '进行中' : '空闲'}</strong>
+                <small>{subplotGenerationProgress ? '已完成 ' + subplotGenerationProgress.completed + '/' + subplotGenerationProgress.total : '按主线承载量补支线。'}</small>
+              </div>
+              <div className="novel-core-settings__status-card">
+                <span>抽卡次数</span>
+                <strong>{aiConfig.drawCount} 次</strong>
+                <small>{'当前字段默认返回 ' + aiConfig.drawCount + ' 个版本供筛选。'}</small>
+              </div>
+              <div className="novel-core-settings__status-card">
+                <span>草稿 / 保存</span>
+                <strong>{hasDraft ? '待确认' : '已同步'}</strong>
+                <small>{saveStateSummary}</small>
+              </div>
             </div>
           </WorkspacePanel>
-
         </>
       )}
     >
@@ -1470,7 +1553,7 @@ ${buildHumanLanguageRules([
 
       <WorkspacePanel
         title="故事引擎编辑台"
-        description="先锁定故事目标、核心冲突和主线，再处理支线、节奏与结局。整页生成只是起点，最后仍然建议你用人类语言再收一遍。"
+        description="先把四个故事锚点定稳，再补支线、节奏与结局。整页生成只是起点，最后仍然建议你像编辑一样再收一遍。"
       >
         <Form form={form} layout="vertical">
           <Collapse

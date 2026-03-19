@@ -300,6 +300,39 @@ export default function CharactersPage({ novelId }: Props) {
     + batchPreset.antagonistCount
     + batchPreset.supportingCount
     + batchPreset.minorCount
+  const selectedRoleMeta = selectedCharacter ? ROLE_META[selectedCharacter.roleType] : null
+  const selectedFactionNames = selectedCharacter ? parseStringArray(selectedCharacter.campFactionIdsJson) : []
+  const selectedPowerSystemNames = selectedCharacter ? parseStringArray(selectedCharacter.powerSystemRefsJson) : []
+  const selectedContextBindingCount = selectedFactionNames.length + selectedPowerSystemNames.length
+  const selectedCharacterLead = selectedCharacter
+    ? selectedCharacter.innerConflict || selectedCharacter.goals || selectedCharacter.firstImpression || selectedCharacter.background || '先补这个角色眼下最强的目标和拉扯。'
+    : creating
+      ? '新人物先定身份、当前目标和与主线的挂点，后面再补细节。'
+      : '左侧选人后，这里会显示能直接服务写作的人物档案。'
+  const rosterNextLabel = selectedCharacter
+    ? '继续细修当前人物'
+    : creating
+      ? '先把骨架补齐'
+      : filteredCharacters.length > 0
+        ? '先选中一个角色'
+        : '先铺第一版人物网'
+  const recommendedNextAction = selectedCharacter
+    ? selectedCharacter.goals?.trim()
+      ? '右侧继续补关系张力和后续弧光，让这个人真正挂到主线上。'
+      : '先把当前目标和内在拉扯写清，再扩展关系链。'
+    : creating
+      ? '先定身份、当前目标和与主线的挂点。'
+      : filteredCharacters.length > 0
+        ? '先在左侧选中一个角色，再补可写档案。'
+        : '先批量生成一版人物网络，再逐个细修。'
+  const editorTagValues = [
+    selectedRoleMeta?.label,
+    selectedEntityLabel !== '未设定' ? selectedEntityLabel : '',
+    selectedCharacter?.species || '',
+    selectedCharacter?.occupation || '',
+    selectedFactionNames[0] || '',
+  ].filter(Boolean)
+
 
   const handleSelect = (character: Character) => {
     setSelectedId(character.id)
@@ -432,30 +465,36 @@ export default function CharactersPage({ novelId }: Props) {
 
   return (
     <WorkspacePage
+      className="novel-characters-page"
+      layout="wide"
       eyebrow="人物系统"
       title="人物系统"
-      description="先定清人物配额、实体类型和种族口径，再让角色自动继承题材、势力、地图和物品上下文。这里保留的字段都直接服务后续写作，不再堆无效设定。"
+      description="先定清人物配额、实体类型和种族口径，再让角色自动继承题材、势力、地图和物品上下文。这里留下来的字段，只保留后续写作会反复回查的那部分。"
       actions={(
-        <Space wrap>
-          <Button icon={<ReloadOutlined />} onClick={() => loadData()}>
-            刷新
-          </Button>
-          <Button icon={<UserAddOutlined />} onClick={handleNew}>
-            新建人物
-          </Button>
-          <Button icon={<RobotOutlined />} loading={generating} onClick={handleGenerateProtagonist}>
-            AI 补主角
-          </Button>
-          <Button icon={<ApartmentOutlined />} loading={generating} onClick={handleGenerateRelations}>
-            AI 生成关系
-          </Button>
-          <Button type="primary" icon={<TeamOutlined />} loading={generating} onClick={() => setBatchOpen(true)}>
-            AI 批量生成
-          </Button>
-          <Button danger icon={<DeleteOutlined />} loading={generating} onClick={() => void handleClear()}>
-            清空人物
-          </Button>
-        </Space>
+        <div className="novel-characters__hero-actions">
+          <div className="novel-characters__hero-actions-group novel-characters__hero-actions-group--primary">
+            <Button type="primary" icon={<TeamOutlined />} loading={generating} onClick={() => setBatchOpen(true)}>
+              AI 批量生成
+            </Button>
+            <Button icon={<RobotOutlined />} loading={generating} onClick={handleGenerateProtagonist}>
+              AI 补主角
+            </Button>
+            <Button icon={<ApartmentOutlined />} loading={generating} onClick={handleGenerateRelations}>
+              AI 生成关系
+            </Button>
+          </div>
+          <div className="novel-characters__hero-actions-group">
+            <Button icon={<UserAddOutlined />} onClick={handleNew}>
+              新建人物
+            </Button>
+            <Button icon={<ReloadOutlined />} onClick={() => loadData()}>
+              刷新
+            </Button>
+            <Button danger icon={<DeleteOutlined />} loading={generating} onClick={() => void handleClear()}>
+              清空人物
+            </Button>
+          </div>
+        </div>
       )}
       contextSummary={(
         <WorkspaceContextSummary
@@ -517,7 +556,7 @@ export default function CharactersPage({ novelId }: Props) {
       <div className="novel-split novel-split--sidebar">
         <WorkspacePanel
           title="人物列表"
-          description="先在左侧锁定角色层级和种族口径，再去右侧补人物档案。"
+          description="左侧先完成筛选和选人，右侧再把真正会进入剧情的人物档案补扎实。"
           extra={(
             <div className="novel-filter-bar">
               <div className="novel-filter-bar__row">
@@ -536,11 +575,29 @@ export default function CharactersPage({ novelId }: Props) {
                 />
               </div>
               <div className="novel-filter-bar__summary">
-                当前筛出 {filteredCharacters.length} 人。建议先检查主角、反派和功能角色之间是否已经形成可写的关系链。
+                当前筛出 {filteredCharacters.length} 人。先让主角、反派和功能位形成可写关系链，再补次要人物。
               </div>
             </div>
           )}
         >
+          <div className="novel-characters__roster-summary">
+            <div className="novel-characters__roster-card">
+              <span>当前列表</span>
+              <strong>{filteredCharacters.length} 人</strong>
+              <small>筛选只负责聚焦，不改变原始人物网络。</small>
+            </div>
+            <div className="novel-characters__roster-card">
+              <span>当前焦点</span>
+              <strong>{selectedCharacter ? selectedCharacter.fullName : creating ? '新建人物' : '未选中人物'}</strong>
+              <small>{selectedCharacter ? '右侧继续补目标、关系和弧光。' : '先选一个角色，或新建一位。'}</small>
+            </div>
+            <div className="novel-characters__roster-card novel-characters__roster-card--accent">
+              <span>下一步</span>
+              <strong>{rosterNextLabel}</strong>
+              <small>{recommendedNextAction}</small>
+            </div>
+          </div>
+
           {loading ? (
             <div className="novel-empty"><Spin /></div>
           ) : filteredCharacters.length === 0 ? (
@@ -574,7 +631,7 @@ export default function CharactersPage({ novelId }: Props) {
 
         <WorkspacePanel
           title={selectedCharacter ? `编辑：${selectedCharacter.fullName}` : creating ? '新建人物' : '人物档案'}
-          description="先写清身份和当前动机，再补人物与主线、势力和关系网的绑定。"
+          description="先写清身份和当前动机，再补人物与主线、势力和关系网的绑定。右侧只保留后续写戏会反复调用的字段。"
           extra={(
             <Space>
               {selectedCharacter ? (
@@ -594,6 +651,37 @@ export default function CharactersPage({ novelId }: Props) {
             </div>
           ) : (
             <>
+              <div className="novel-characters__editor-intro">
+                <div className="novel-characters__editor-intro-copy">
+                  <div className="novel-kicker">{selectedCharacter ? '当前人物' : '新建档案'}</div>
+                  <strong>{selectedCharacter ? selectedCharacter.fullName : '从身份与动机开始补'}</strong>
+                  <span>{selectedCharacterLead}</span>
+                  {editorTagValues.length > 0 ? (
+                    <div className="novel-characters__editor-tags">
+                      {editorTagValues.map((item) => (
+                        <Tag key={item} bordered={false}>
+                          {item}
+                        </Tag>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+                <div className="novel-characters__editor-stats">
+                  <div>
+                    <label>角色定位</label>
+                    <strong>{selectedRoleMeta?.label || '待定'}</strong>
+                  </div>
+                  <div>
+                    <label>关系挂点</label>
+                    <strong>{selectedCharacter ? relatedRelations.length : 0}</strong>
+                  </div>
+                  <div>
+                    <label>阵营 / 体系</label>
+                    <strong>{selectedCharacter ? selectedContextBindingCount : 0}</strong>
+                  </div>
+                </div>
+              </div>
+
               <Form form={form} layout="vertical">
                 <div className="novel-form-section">
                   <div className="novel-form-section__header">
@@ -669,7 +757,7 @@ export default function CharactersPage({ novelId }: Props) {
                   </Form.Item>
                   <Form.Item name="background" label="背景经历">
                     <Input.TextArea
-                      rows={4}
+                      rows={5}
                       placeholder="只写会影响当前判断和选择的经历。背景不是传记，而是写作时要反复调用的前史。"
                     />
                   </Form.Item>
@@ -682,18 +770,18 @@ export default function CharactersPage({ novelId }: Props) {
                   </div>
                   <div className="novel-grid novel-grid--2">
                     <Form.Item name="goals" label="当前目标">
-                      <Input.TextArea rows={3} placeholder="写眼下最直接的诉求，不要写成空泛口号。" />
+                      <Input.TextArea rows={4} placeholder="写眼下最直接的诉求，不要写成空泛口号。" />
                     </Form.Item>
                     <Form.Item name="firstImpression" label="第一印象">
-                      <Input.TextArea rows={3} placeholder="第一次出场时，读者最容易记住他什么。" />
+                      <Input.TextArea rows={4} placeholder="第一次出场时，读者最容易记住他什么。" />
                     </Form.Item>
                   </div>
                   <div className="novel-grid novel-grid--2">
                     <Form.Item name="innerConflict" label="内在矛盾">
-                      <Input.TextArea rows={3} placeholder="写他明知道该怎么做，却做不到的地方。" />
+                      <Input.TextArea rows={4} placeholder="写他明知道该怎么做，却做不到的地方。" />
                     </Form.Item>
                     <Form.Item name="relationshipTension" label="关系张力">
-                      <Input.TextArea rows={3} placeholder="写他和谁最容易拉扯、对立或彼此拖累。" />
+                      <Input.TextArea rows={4} placeholder="写他和谁最容易拉扯、对立或彼此拖累。" />
                     </Form.Item>
                   </div>
                 </div>
@@ -705,14 +793,14 @@ export default function CharactersPage({ novelId }: Props) {
                   </div>
                   <div className="novel-grid novel-grid--2">
                     <Form.Item name="resonancePoint" label="读者共情点">
-                      <Input.TextArea rows={3} placeholder="写读者最容易理解、心疼或认同他的地方。" />
+                      <Input.TextArea rows={4} placeholder="写读者最容易理解、心疼或认同他的地方。" />
                     </Form.Item>
                     <Form.Item name="characterArc" label="后续弧光">
-                      <Input.TextArea rows={3} placeholder="写这个角色会朝哪个方向变化，不必一口气写满。" />
+                      <Input.TextArea rows={4} placeholder="写这个角色会朝哪个方向变化，不必一口气写满。" />
                     </Form.Item>
                   </div>
                   <Form.Item name="appearance" label="可识别外观">
-                    <Input.TextArea rows={3} placeholder="只写辨识度，不要堆满形容词。" />
+                    <Input.TextArea rows={4} placeholder="只写辨识度，不要堆满形容词。" />
                   </Form.Item>
                 </div>
               </Form>
@@ -758,32 +846,45 @@ export default function CharactersPage({ novelId }: Props) {
         okText="开始生成"
       >
         <Form form={batchForm} layout="vertical">
-          <div className="novel-note-list" style={{ marginBottom: 16 }}>
-            <div className="novel-note-list__item">这一轮会按你填写的配额补齐主要人物、次要人物、反派和功能角色；如果主角缺失，建议先单独补主角。</div>
-            <div className="novel-note-list__item">种族、实体和势力偏好只是先定方向，不必在这一步把每个角色写死。</div>
-            <div className="novel-note-list__item">其余种族不单独拆步骤，先在这里给偏好，生成后再回到单人档案细修即可。</div>
+          <div className="novel-characters__batch-intro">
+            <div className="novel-kicker">首轮人物网络</div>
+            <div className="novel-characters__batch-intro-copy">先把功能位、阵营来源和人物关系入口铺开，再回到单人档案细修。这里先定结构，不在这一步把每个人写死。</div>
           </div>
 
-          <div className="novel-grid novel-grid--2">
+          <div className="novel-note-list novel-characters__batch-notes" style={{ marginBottom: 16 }}>
+            <div className="novel-note-list__item">这一轮会按你填写的配额补齐主要人物、次要人物、反派和功能角色；如果主角缺失，建议先单独补主角。</div>
+            <div className="novel-note-list__item">种族、实体和势力偏好只负责定方向，先保证题材生态和人物功能完整。</div>
+            <div className="novel-note-list__item">其余细节统一回到右侧单人档案补，不要试图在批量步骤里把人物一次写满。</div>
+          </div>
+
+          <div className="novel-characters__batch-section">
+            <div className="novel-characters__batch-section-title">角色配额</div>
+            <div className="novel-grid novel-grid--2">
             <Form.Item name="majorCount" label="主要人物数量">
               <Select options={[2, 3, 4, 5, 6].map((value) => ({ value, label: `${value} 人` }))} />
             </Form.Item>
             <Form.Item name="minorCount" label="次要人物数量">
               <Select options={[3, 5, 6, 8, 10].map((value) => ({ value, label: `${value} 人` }))} />
             </Form.Item>
+            </div>
           </div>
 
-          <div className="novel-grid novel-grid--2">
-            <Form.Item name="antagonistCount" label="反派数量">
+          <div className="novel-characters__batch-section">
+            <div className="novel-grid novel-grid--2">
+              <Form.Item name="antagonistCount" label="反派数量">
               <Select options={[0, 1, 2, 3].map((value) => ({ value, label: `${value} 人` }))} />
             </Form.Item>
             <Form.Item name="supportingCount" label="功能角色数量">
               <Select options={[0, 1, 2, 3, 4].map((value) => ({ value, label: `${value} 人` }))} />
             </Form.Item>
+            </div>
           </div>
 
-          <Form.Item name="genderRatio" label="性别与年龄建议">
-            <Input.TextArea rows={2} placeholder="例如：男女比例自然分布，保留一位年龄明显偏大的权威角色。" />
+          <div className="novel-characters__batch-section">
+            <div className="novel-characters__batch-section-title">口径与补充要求</div>
+
+            <Form.Item name="genderRatio" label="性别与年龄建议">
+            <Input.TextArea rows={3} placeholder="例如：男女比例自然分布，保留一位年龄明显偏大的权威角色。" />
           </Form.Item>
 
           <Form.Item name="preferredSpecies" label="优先种族 / 实体">
@@ -816,10 +917,11 @@ export default function CharactersPage({ novelId }: Props) {
 
           <Form.Item name="specialRequirements" label="额外要求">
             <Input.TextArea
-              rows={4}
+              rows={5}
               placeholder="例如：需要一位掌握关键药品的队医，一位和主角有旧债的敌对角色。"
             />
           </Form.Item>
+          </div>
         </Form>
       </Modal>
     </WorkspacePage>

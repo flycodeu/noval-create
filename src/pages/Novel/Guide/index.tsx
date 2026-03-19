@@ -6,7 +6,6 @@ import {
   CompassOutlined,
   EditOutlined,
   GlobalOutlined,
-  RightOutlined,
   ShoppingOutlined,
   TeamOutlined,
   ThunderboltOutlined,
@@ -449,10 +448,23 @@ export default function GuidePage({ novelId }: Props) {
   ]
 
   const nextStep = steps.find((step) => !step.ready) || null
+  const pendingSteps = steps.filter((step) => !step.ready)
+  const queuedSteps = pendingSteps.slice(1, 4)
+  const nextStepNarrative = nextStep
+    ? nextStep.support
+    : '首批结构资产已经齐备，可以转去正文写作，也可以继续细修人物、地图、时间轴和大纲。'
+  const flowDigest = nextStep
+    ? queuedSteps.length > 0
+      ? '这一环补稳后，顺着继续推进 ' + queuedSteps.map((step) => step.title).join('、') + '。'
+      : '这一环完成后，就已经具备直接转入正文写作的条件。'
+    : '七步骨架都已就绪，已经具备直接开写的条件。'
+
+
 
   return (
     <WorkspacePage
       className={`novel-guide novel-guide--${mode}`}
+      layout="wide"
       eyebrow={mode === 'guided' ? '分步创作' : '创作工作流'}
       title="创作向导"
       description={
@@ -564,9 +576,31 @@ export default function GuidePage({ novelId }: Props) {
 
       <WorkspacePanel
         title="推荐推进顺序"
-        description="每一步都说明它的作用、当前状态，以及为什么值得现在处理。"
-        extra={<div className="novel-pill">{nextStep ? `下一步建议：${nextStep.title}` : '结构资产已齐备'}</div>}
+        description="把主流程先压成一条清晰链路，只保留当前最值得推进的动作。"
+        extra={<div className="novel-pill">{nextStep ? `下一步：${nextStep.title}` : '可进入正文'}</div>}
       >
+        <div className="novel-guide__flow-head">
+          <div className="novel-guide__flow-lead">
+            <div className="novel-kicker">{nextStep ? '当前建议' : '流程状态'}</div>
+            <strong>{nextStep ? nextStep.title : '结构骨架已铺好'}</strong>
+            <div className="novel-guide__flow-queue">
+              <span className="novel-guide__flow-chip">{'已就绪 ' + structureReadyCount + '/7'}</span>
+              {queuedSteps.length > 0
+                ? queuedSteps.map((step) => (
+                  <span key={step.key} className="novel-guide__flow-chip novel-guide__flow-chip--muted">
+                    {step.title}
+                  </span>
+                ))
+                : (
+                  <span className="novel-guide__flow-chip novel-guide__flow-chip--muted">可转入正文写作</span>
+                )}
+            </div>
+          </div>
+          <div className="novel-guide__flow-note">
+            <div>{nextStepNarrative}</div>
+            <div className="novel-guide__flow-subnote">{flowDigest}</div>
+          </div>
+        </div>
         <div className="novel-stage-grid">
           {steps.map((step, index) => (
             <div key={step.key} className={`novel-stage-card ${step.ready ? 'novel-stage-card--ready' : ''}`}>
@@ -584,12 +618,11 @@ export default function GuidePage({ novelId }: Props) {
                 </div>
               </div>
               <div className="novel-stage-card__desc">{step.desc}</div>
-              <div className="novel-stage-card__support">{step.support}</div>
+              {nextStep?.key === step.key ? (
+                <div className="novel-stage-card__focus">{step.support}</div>
+              ) : null}
               <div className="novel-stage-card__actions">
                 {step.action}
-                <Button type="text" icon={<RightOutlined />} onClick={() => navigate(`/novels/${novelId}/${step.pageKey}`)}>
-                  查看页面
-                </Button>
               </div>
             </div>
           ))}

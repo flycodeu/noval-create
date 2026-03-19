@@ -309,13 +309,13 @@ function placeholder(key: string): string {
 }
 
 export const HUMAN_LANGUAGE_RULE_LINES = [
-  '使用常规中文表达和稳定的小说语感，句子要顺，不硬凹文学腔。',
+  '使用自然、可读的小说中文，先保证句子顺和意思准。',
+  '先写清事实、动作、关系和后果，再让情绪与分量自然露出来。',
   '检查主语、谓语、宾语是否搭配准确，动作、状态和后果要符合对象类别。',
   '人或生物才能“死亡、呼吸、哭泣、思考”；电网、系统、组织、设施等非生物应改写为“瘫痪、崩溃、中断、停摆、瓦解”等准确说法。',
-  '除非上下文明确需要修辞且不会造成歧义，否则不要让物体承担人的情绪、感官、命运或生理反应。',
-  '少用抽象口号和假深刻表达，多写具体事实、行动、关系和后果。',
+  '少用模板化引导词、抽象口号和假深刻表达，多写具体处境、判断依据和行为代价。',
   '普通概念、职业、情绪和判断不要随意加引号；只有称号、制度名、功法名、专有名词才保留引号。',
-  '不要写“所谓”“某种意义上”“命运般”“这一刻”“无法言说”这类常见 AI 腔连接词。',
+  '贴近当前题材常见的叙述气质、节奏和措辞密度，不模仿具体作者。',
   '一旦出现不自然搭配，优先改成读者最熟悉、最直白、最准确的常规说法。',
 ] as const
 
@@ -328,17 +328,18 @@ export function buildHumanLanguageRules(extraLines: string[] = []): string {
 export const GLOBAL_WRITING_RULES = `你现在写的是可直接入稿的中文小说正文。
 
 基本要求：
-1. 先写发生了什么，再让读者自己感受到意义，不替读者总结。
-2. 情绪尽量落在动作、反应、对话和细节里，少用抽象判断句。
-3. 对话要像人会说的话，允许停顿、岔开、答非所问，不要每句都补说话方式。
+1. 先把事情写清，再让情绪和分量自然露出来，不替读者抢结论。
+2. 情绪尽量落在动作、反应、对话、停顿和细节里，少用抽象判断句。
+3. 对话要像人会说的话，允许绕开、停顿、答非所问，不要每句都补说话方式。
 4. 句子自然，不摆写作腔，不堆对称句、排比句和故作深沉的收尾。
 5. 一切服从当前章节任务、人物状态、世界规则和连续性。
 6. 主谓宾搭配必须准确，动作和状态要符合对象本身；不要把非生物写成会死亡、呼吸、哭泣或思考。
+7. 贴近当前题材常见的叙述气质和节奏；如果给了文风参考，只借语气、视角和句子密度，不模仿具体作者。
 
 高风险表达，尽量不要出现：
-- 不禁、不由得、忍不住、此刻、顿时、瞬间、莫名、说不清
-- 深吸一口气、攥紧拳头、微微一愣、瞪大眼睛、心头一紧
-- 所谓的、命运、希望、成长 这类被刻意强调的抽象词
+- 不禁、不由得、忍不住、此刻、顿时、瞬间、莫名、说不清这类万能引导词
+- 深吸一口气、攥紧拳头、微微一愣、瞪大眼睛、心头一紧这类过度模板动作
+- 靠反复强调命运、希望、成长来制造分量，而不是写具体处境和代价
 - 普通概念随意加中文引号或书名号，例如“人类筛选”“真正的成长”“命运齿轮”
 - 用破折号解释、顿悟、硬造停顿
 - 为了显得深刻而造词，尤其任何“XX之感 / 之际 / 之意”式表达
@@ -354,26 +355,26 @@ export function expandBackgroundPrompt(params: {
   worldTemplateSummary: string
 }): string {
   return renderPrompt([
-    '把一段小说初始设想扩成可以继续开发的开篇设定。只补足世界底色、时代气息、人物处境和冲突起点，不要替用户把后续完整剧情写完。',
+    '你在补一份小说立项用的背景设定。只把开局底盘垫稳：世界处境、时代气味、人物起点和首轮冲突，不要把中后期剧情一次写完。',
     sectionLines('现有信息', [
-      `用户背景：${params.userBackground}`,
-      `题材：${params.genre}`,
-      params.worldTemplateSummary ? `世界观参考：${params.worldTemplateSummary}` : '',
+      '用户背景：' + params.userBackground,
+      '题材：' + params.genre,
+      params.worldTemplateSummary ? '世界观参考：' + params.worldTemplateSummary : '',
     ]),
     section('任务', [
-      '1. 写一段 300 到 500 字的扩充背景。重点补世界规则、生活质感、矛盾起点和人物当下处境。',
-      '2. 给 3 个标题。分别偏人物、偏主题、偏悬念，风格要拉开。',
-      '3. 写一段 150 到 200 字的简介。站在读者视角勾起兴趣，但不要泄露关键转折和结局。',
+      '1. 写一段 300 到 500 字的扩展背景，只补当前可写的世界处境、日常规则、危险来源和人物起步位置。',
+      '2. 给 3 个标题，分别偏人物、偏悬念、偏题材气质，名字要像正经小说，不要像宣传语。',
+      '3. 写一段 150 到 220 字的简介，直接点明这本书开局最抓人的矛盾和阅读钩子。',
     ].join('\n')),
     section('写法要求', [
-      '优先沿用用户已有设定，不另起一套世界观。',
-      '语言自然，不写百科，不写广告腔，不堆抽象大词。',
-      '不要用“本文讲述了”“这是一个关于”这类介绍腔。',
-      '背景只负责打底，不提前写完人物成长线或大结局。',
+      '先沿用用户已有设想，再补缺口，不要另起一套世界观。',
+      '背景只负责把开局写扎实，不提前剧透关键反转和结局。',
+      '优先写具体处境、规则、限制、代价和冲突来源，少写宏大口号。',
+      '标题和简介都要贴题材，避免万能热词和平台套路文案。',
     ].join('\n')),
     section('语言要求', buildHumanLanguageRules([
-      '背景和简介都要像正常小说文案，不要写成概念拼贴或伪诗句。',
-      '如果一句话有更自然的常规说法，优先使用常规说法。',
+      '背景、标题和简介都要像编辑会留下来的成稿，不要写成概念清单或广告文案。',
+      '如果一句话可以更短、更直白，就不要故意写得玄。',
     ])),
     '只输出 JSON：{"expanded_background":"...","titles":["A","B","C"],"synopsis":"..."}',
   ])
@@ -381,125 +382,127 @@ export function expandBackgroundPrompt(params: {
 
 export function protagonistPrompt(params: ProtagonistPromptInput): string {
   return renderPrompt([
-    '为这部小说确定主角档案。这个人物后面会直接进入故事弧、章节细纲和正文写作，所以信息必须能拿来用，不能只停在概念层。',
+    '为这部小说确定主角档案。这个角色后面会直接进入故事弧、章节细纲和正文，所以信息必须能拿来写戏，不能只停在概念层。',
     sectionLines('小说信息', [
-      `书名：${params.novelTitle}`,
-      `背景：${params.novelSynopsis}`,
-      `题材：${params.genre}`,
-      params.worldSummary ? `世界规则：${params.worldSummary}` : '',
-      params.storyCore ? `故事核心：${params.storyCore}` : '',
-      params.speciesSummary ? `种族生态：${params.speciesSummary}` : '',
-      params.factionSummary ? `势力结构：${params.factionSummary}` : '',
-      params.ecologySummary ? `角色生态：${params.ecologySummary}` : '',
-      params.mapSummary ? `地图蓝图：${params.mapSummary}` : '',
-      params.writingConstraints ? `语言约束：${params.writingConstraints}` : '',
-      `性别：${params.gender}`,
-      params.surnameHint ? `姓名方向：${params.surnameHint}` : '',
+      '书名：' + params.novelTitle,
+      '背景：' + params.novelSynopsis,
+      '题材：' + params.genre,
+      params.worldSummary ? '世界规则：' + params.worldSummary : '',
+      params.storyCore ? '故事核心：' + params.storyCore : '',
+      params.speciesSummary ? '种族生态：' + params.speciesSummary : '',
+      params.factionSummary ? '势力结构：' + params.factionSummary : '',
+      params.ecologySummary ? '角色生态：' + params.ecologySummary : '',
+      params.mapSummary ? '地图蓝图：' + params.mapSummary : '',
+      params.writingConstraints ? '语言约束：' + params.writingConstraints : '',
+      '性别：' + params.gender,
+      params.surnameHint ? '姓名方向：' + params.surnameHint : '',
     ]),
     section('命名要求', [
-      '姓氏从以下范围选择：赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦尤许何吕施张孔曹严华金魏陶姜戚谢邹喻柏水窦章云苏潘葛奚范彭郎。',
-      '复姓可选：诸葛、司马、欧阳、上官、百里、令狐。',
-      '名字以两字为主，符合题材和时代背景，避免生僻字堆砌。',
-    ].join('\n')),
+      '姓名要贴题材、时代和社会环境，优先顺口、可记、可读。',
+      params.surnameHint ? '如果给了姓名方向，优先沿用，不要故意逆着来。' : '',
+      '避免堆生僻字、堆设定词，名字一眼要能读出来。',
+    ].filter(Boolean).join('\n')),
     section('人物要求', [
-      '人物要复杂，但不是为了复杂而反差。要能解释他为什么会做出关键选择。',
-      '背景经历必须落到现在的判断、习惯、伤口、关系或欲望上。',
-      '外貌写可识别细节，不要“高挑、好看、气质出众”这种空描写。',
-      '既要有人会喜欢他的地方，也要有人会警惕他、误解他或替他难受的地方。',
-      '主角的实体类型、种族、等级/身份、势力归属必须贴合题材规则，不默认只能是普通人。',
-      '所有信息必须和现有背景、世界规则、故事核心一致，不得另起一套设定。',
+      '先写清主角眼下想要什么、缺什么、怕什么，再决定他会怎么做。',
+      '背景经历必须落实到现在的判断、习惯、伤口、关系或行动方式里。',
+      '这个人要能解释为什么能卷进主线、为什么会撑到后续关键选择。',
+      '外貌只写辨识度和气质来源，不写空泛形容词堆砌。',
+      '优点、缺点、秘密、软肋和关系张力都要能互相咬合，别把角色写成完美设定包。',
+      '实体类型、种族、身份、势力归属和力量体系必须贴合现有规则，不默认只有普通人模板。',
     ].join('\n')),
     section('语言要求', buildHumanLanguageRules([
-      '档案字段要能直接落到人物设定中，不写空泛评语和概念包装。',
-      '不要给普通概念、情绪或关系加引号，不要写成“人类筛选”“真正成长”这类 AI 腔。',
+      '档案要像编辑可直接交给作者继续写戏的人物卡，不要写悬浮鸡汤和伪深刻结论。',
+      '贴近当前题材常见角色写法，但不要模仿具体作者。',
     ])),
-    '只输出 JSON：{"surname":"","given_name":"","full_name":"","entity_type":"human/undead/beast/immortal/nonhuman","species":"角色种族","gender":"","age":0,"occupation":"","rank_level":"当前等级/境界/身份阶位","social_identity":"社会身份或阵营位置","faction_names":["势力1"],"power_system_names":["体系1"],"context_hooks":["与主题/背景/主线的关联1"],"appearance":"外貌3~4句，写能认出来的细节","background":"180字以内，写关键经历以及它留下的影响","personality_traits":["特点1","特点2","特点3"],"flaws":["缺陷1","缺陷2"],"habits":["习惯1"],"goals":"当前追求","surface_desire":"眼下最想得到的东西","deep_need":"真正缺失、却不愿承认的需要","core_fear":"最怕失去或面对的东西","inner_conflict":"最核心的拉扯","hidden_secret":"不愿公开的秘密","moral_line":"轻易不会跨过的底线","self_deception":"对自己说过的谎","trauma":"仍在影响现在的旧伤","contradiction":"最能体现复杂度的反差点","relationship_tension":"在亲密或权力关系里的张力来源","resonance_point":"读者最容易共情的一点","character_arc":"后续可能的变化方向","first_impression":"第一次出场最抓人的地方"}',
+    '只输出 JSON：{"surname":"","given_name":"","full_name":"","entity_type":"human/undead/beast/immortal/nonhuman","species":"角色种族","gender":"","age":0,"occupation":"","rank_level":"当前等级/境界/身份阶位","social_identity":"社会身份或阵营位置","faction_names":["势力1"],"power_system_names":["体系1"],"context_hooks":["与主线/背景/主题的关联"],"appearance":"外貌3到4句，只写能认出来的细节","background":"180字以内，写关键经历以及它留下的影响","personality_traits":["特点1","特点2","特点3"],"flaws":["缺点1","缺点2"],"habits":["习惯1"],"goals":"当前追求","surface_desire":"表层最想得到的东西","deep_need":"真正缺失却不愿承认的需要","core_fear":"最怕失去或面对的东西","inner_conflict":"最核心的内在拉扯","hidden_secret":"不愿公开的秘密","moral_line":"轻易不会跨过的底线","self_deception":"一直拿来自我说服的谎话","trauma":"仍在影响现在的旧伤","contradiction":"最能体现复杂度的反差点","relationship_tension":"在亲密或权力关系里的张力来源","resonance_point":"读者最容易共情的一点","character_arc":"后续可能的变化方向","first_impression":"第一次出场最抓人的地方"}',
   ])
 }
 
 export function batchCharacterPrompt(params: BatchCharacterPromptInput): string {
   return renderPrompt([
-    `为小说《${params.novelTitle}》补出 ${params.count} 个配角。每个人都要能在后续剧情里承担明确作用，不是凑数。`,
+    '为小说《' + params.novelTitle + '》补出 ' + params.count + ' 个配角。每个人都要在后续剧情里承担明确作用，不能只是凑人头。',
     sectionLines('现有信息', [
-      `小说背景：${params.novelSynopsis}`,
-      params.storyCore ? `故事核心：${params.storyCore}` : '',
-      `主角摘要：${params.protagonistSummary}`,
-      `已有人物：${params.existingNames || '无'}`,
-      `题材：${params.genre}`,
-      params.worldSummary ? `世界规则：${params.worldSummary}` : '',
-      params.speciesSummary ? `种族生态：${params.speciesSummary}` : '',
-      params.factionSummary ? `势力结构：${params.factionSummary}` : '',
-      params.ecologySummary ? `角色生态：${params.ecologySummary}` : '',
-      params.mapSummary ? `地图蓝图：${params.mapSummary}` : '',
-      params.writingConstraints ? `语言约束：${params.writingConstraints}` : '',
-      `性别比例：${params.genderRatio}`,
-      params.specialRequirements ? `特殊要求：${params.specialRequirements}` : '',
+      '小说背景：' + params.novelSynopsis,
+      params.storyCore ? '故事核心：' + params.storyCore : '',
+      '主角摘要：' + params.protagonistSummary,
+      '已有人物：' + (params.existingNames || '无'),
+      '题材：' + params.genre,
+      params.worldSummary ? '世界规则：' + params.worldSummary : '',
+      params.speciesSummary ? '种族生态：' + params.speciesSummary : '',
+      params.factionSummary ? '势力结构：' + params.factionSummary : '',
+      params.ecologySummary ? '角色生态：' + params.ecologySummary : '',
+      params.mapSummary ? '地图蓝图：' + params.mapSummary : '',
+      params.writingConstraints ? '语言约束：' + params.writingConstraints : '',
+      '性别比例：' + params.genderRatio,
+      params.specialRequirements ? '特殊要求：' + params.specialRequirements : '',
     ]),
     section('生成要求', [
-      '每个配角都要有明确功能定位，且这个定位和主线推进有关。',
-      '与主角的关系要有层次，不要只写“支持者”或“对立者”。',
-      '至少体现出欲望、恐惧、秘密、软肋、关系张力中的一部分。',
-      '人物类型要覆盖题材所需的角色生态，不默认全部都是人类。',
-      '人物行为要像这个人会做的事，不是为了推动剧情硬安排。',
-      '不得与已有背景、世界规则、主角设定冲突，也不得重名。',
+      '先把人物网补完整：主线推进位、对立位、辅助位、搅局位、情感或利益牵引位。',
+      '每个人都要写清与主角、主线或某条支线的实际关系，不要只给一个空标签。',
+      '人物之间要有层次差异：有人强势、有人实用、有人隐忍、有人会制造额外麻烦，不要一批人一个腔调。',
+      '至少让一部分角色携带秘密、旧债、错位立场或利益冲突，这样后面才有戏。',
+      '遵守现有世界规则、势力结构、地图和题材生态，不重名，不撞设定。',
+      '贴近当前题材常见群像写法，但不要直接模仿具体作者。',
     ].join('\n')),
     section('语言要求', buildHumanLanguageRules([
-      '人物描述要像编辑会采用的角色档案，不要写成悬浮文案。',
-      '禁止把普通概念加引号，不要写成“希望载体”“真正人类”这类空洞标签。',
+      '人物描述要像编辑会采纳的角色档案，不要写成悬浮文案。',
+      '少用万能热词，多写这个人具体能做什么、会卡住谁、会被什么反噬。',
     ])),
-    '只输出 JSON 数组：[{"full_name":"","entity_type":"human/undead/beast/immortal/nonhuman","species":"角色种族","gender":"","age":0,"role_type":"major/minor/antagonist/supporting","occupation":"","rank_level":"当前等级/阶位","social_identity":"社会身份","faction_names":["势力1"],"power_system_names":["体系1"],"context_hooks":["与主线或主题的关联"],"background":"80~120字，写关键经历和现状","personality_traits":["特点1","特点2"],"flaws":["缺陷1","缺陷2"],"habits":["习惯1"],"goals":"当前追求","surface_desire":"表层欲望","deep_need":"深层需要","core_fear":"核心恐惧","inner_conflict":"内在矛盾","hidden_secret":"隐藏秘密","moral_line":"道德底线","self_deception":"自我欺骗","trauma":"旧伤或创伤","contradiction":"人物反差点","relationship_tension":"与主角或关键人物的张力","resonance_point":"读者共情点","character_arc":"后续变化方向","relation_to_protagonist":"与主角的关系与拉扯","first_impression":"第一次出场的印象","appearance":"外貌1~2句，写辨识度","appear_chapter":1}]',
+    '只输出 JSON 数组：[{"full_name":"","entity_type":"human/undead/beast/immortal/nonhuman","species":"角色种族","gender":"","age":0,"role_type":"major/minor/antagonist/supporting","occupation":"","rank_level":"当前等级/阶位","social_identity":"社会身份","faction_names":["势力1"],"power_system_names":["体系1"],"context_hooks":["与主线或主题的关联"],"background":"80到120字，写关键经历和现状","personality_traits":["特点1","特点2"],"flaws":["缺点1","缺点2"],"habits":["习惯1"],"goals":"当前追求","surface_desire":"表层欲望","deep_need":"深层需要","core_fear":"核心恐惧","inner_conflict":"内在矛盾","hidden_secret":"隐藏秘密","moral_line":"道德底线","self_deception":"自我欺骗","trauma":"旧伤或创伤","contradiction":"人物反差点","relationship_tension":"与主角或关键人物的张力","resonance_point":"读者共情点","character_arc":"后续变化方向","relation_to_protagonist":"与主角的关系与拉扯","first_impression":"第一次出场的印象","appearance":"外貌1到2句，只写辨识度","appear_chapter":1}]',
   ])
 }
 
 export function regenerateCharacterPrompt(params: RegenerateCharacterPromptInput): string {
   return renderPrompt([
-    '根据最新上下文，重写并深化同一个角色的档案。注意，这是更新，不是重新发明一个新人。',
+    '根据最新上下文重写并深化同一个角色的档案。注意，这是返修，不是重新发明一个新人。',
     sectionLines('锁定条件', [
-      `小说：${params.novelTitle}`,
-      `背景：${params.novelSynopsis}`,
-      `题材：${params.genre}`,
-      params.worldSummary ? `世界规则：${params.worldSummary}` : '',
-      params.storyCore ? `故事核心：${params.storyCore}` : '',
-      params.speciesSummary ? `种族生态：${params.speciesSummary}` : '',
-      params.factionSummary ? `势力结构：${params.factionSummary}` : '',
-      params.ecologySummary ? `角色生态：${params.ecologySummary}` : '',
-      params.writingConstraints ? `语言约束：${params.writingConstraints}` : '',
-      `主角命名规则：${params.protagonistRule}`,
-      `角色姓名必须保留：${params.lockedName}`,
-      `角色类型必须保留：${params.lockedRoleType}`,
+      '小说：' + params.novelTitle,
+      '背景：' + params.novelSynopsis,
+      '题材：' + params.genre,
+      params.worldSummary ? '世界规则：' + params.worldSummary : '',
+      params.storyCore ? '故事核心：' + params.storyCore : '',
+      params.speciesSummary ? '种族生态：' + params.speciesSummary : '',
+      params.factionSummary ? '势力结构：' + params.factionSummary : '',
+      params.ecologySummary ? '角色生态：' + params.ecologySummary : '',
+      params.writingConstraints ? '语言约束：' + params.writingConstraints : '',
+      '主角命名规则：' + params.protagonistRule,
+      '角色姓名必须保留：' + params.lockedName,
+      '角色类型必须保留：' + params.lockedRoleType,
     ]),
     section('当前人物旧档案', params.currentProfile),
     section('相关人物', params.relatedCharacters || '暂无'),
     section('现有关系信息', params.relationSummary || '暂无'),
-    section('重写要求', [
+    section('返修要求', [
       '保留同一个人的身份、姓名和角色功能，不得改名换壳。',
-      '新档案要能解释这个人现在为什么这样想、这样做、这样处理关系。',
-      '人物不能写成纯善或纯恶，必须让读者能理解他、提防他或替他难受。',
-      '所有内容必须服务现有背景、世界规则、主线冲突和关系网络，不能另起一套。',
+      '优先修正旧档案里不贴合主线、不贴合关系网、或和世界规则脱节的部分。',
+      '新档案要能解释这个人现在为什么会这么想、这么做、这么处理关系。',
+      '如果一个设定很酷但和主线没有关系，宁可收住，也不要继续往上堆。',
+      '让优点、缺点、秘密、软肋和利益立场彼此咬合，避免空转的复杂。',
     ].join('\n')),
     section('语言要求', buildHumanLanguageRules([
-      '所有字段都要写成清楚、可落地的角色信息，不要写成空洞总结。',
-      '不要制造概念引号或伪深刻口号。',
+      '所有字段都要写成清楚、可落地的人物信息，不要写成总结式空话。',
+      '减少概念包装，优先写行为依据、关系拉扯和代价。',
     ])),
-    `只输出 JSON：{"full_name":"${params.lockedName}","role_type":"${params.lockedRoleType}","entity_type":"human/undead/beast/immortal/nonhuman","species":"角色种族","gender":"","age":0,"occupation":"","rank_level":"当前等级/阶位","social_identity":"社会身份","faction_names":["势力1"],"power_system_names":["体系1"],"context_hooks":["与主线或主题的关联"],"appearance":"外貌3~4句，突出辨识度","background":"180字以内，写关键经历和留下的影响","personality_traits":["特点1","特点2","特点3"],"flaws":["缺陷1","缺陷2"],"habits":["习惯1"],"goals":"当前追求","surface_desire":"表层欲望","deep_need":"深层需要","core_fear":"核心恐惧","inner_conflict":"内在矛盾","hidden_secret":"隐藏秘密","moral_line":"道德底线","self_deception":"自我欺骗","trauma":"旧伤或创伤","contradiction":"最能体现复杂度的反差点","relationship_tension":"与关键人物关系里的张力","resonance_point":"读者最容易共情的一点","character_arc":"后续变化方向","first_impression":"第一次出场印象","appear_chapter":1}`,
+    '只输出 JSON：{"full_name":"' + params.lockedName + '","role_type":"' + params.lockedRoleType + '","entity_type":"human/undead/beast/immortal/nonhuman","species":"角色种族","gender":"","age":0,"occupation":"","rank_level":"当前等级/阶位","social_identity":"社会身份","faction_names":["势力1"],"power_system_names":["体系1"],"context_hooks":["与主线或主题的关联"],"appearance":"外貌3到4句，突出辨识度","background":"180字以内，写关键经历和留下的影响","personality_traits":["特点1","特点2","特点3"],"flaws":["缺点1","缺点2"],"habits":["习惯1"],"goals":"当前追求","surface_desire":"表层欲望","deep_need":"深层需要","core_fear":"核心恐惧","inner_conflict":"内在矛盾","hidden_secret":"隐藏秘密","moral_line":"道德底线","self_deception":"自我欺骗","trauma":"旧伤或创伤","contradiction":"最能体现复杂度的反差点","relationship_tension":"与关键人物关系里的张力","resonance_point":"读者最容易共情的一点","character_arc":"后续变化方向","first_impression":"第一次出场印象","appear_chapter":1}',
   ])
 }
 
 export function characterRelationsPrompt(params: CharacterRelationsPromptInput): string {
   return renderPrompt([
-    '为小说整理一张能直接服务剧情的人物关系网。',
+    '为小说整理一张能直接服务剧情的人物关系网。重点不是关系名词，而是谁会拉扯谁、利用谁、亏欠谁、护着谁。',
     sectionLines('输入信息', [
-      `小说背景：${params.novelSynopsis}`,
-      `人物列表：\n${params.characterList}`,
+      '小说背景：' + params.novelSynopsis,
+      '人物列表：\n' + params.characterList,
     ]),
     section('关系要求', [
-      '关系要具体，能看出拉扯，不要只写同事、朋友这种空标签。',
-      '不是所有人都必须认识，关系疏密要合理。',
-      '区分双向关系和单向关系，尤其是利用、暗恋、仇视这类关系。',
-      '关系描述优先写可见事实和相处方式，不写空泛判断。',
+      '关系要具体，能看出历史、利益、情感或权力位置，不要只写朋友、同事这种空标签。',
+      '不是所有人都必须互相认识，关系疏密要合理。',
+      '要区分双向和单向，尤其是利用、暗恋、仇视、提防这类不对称关系。',
+      'description 直接写可见互动方式或真实拉扯，不写抽象判断。',
+      '优先保留会影响剧情推进的关系，别把无关社交都塞进去。',
     ].join('\n')),
     section('语言要求', buildHumanLanguageRules([
-      '关系描述要像真实人物之间会发生的拉扯，不要写成概念句。',
+      '关系描述要像真实人物之间会发生的拉扯，不要写成概念句或价值判断。',
     ])),
     '关系类型只从这些里选：friend / enemy / lover / parent_child / colleague / rival / mentor_student / acquaintance',
     '只输出 JSON 数组：[{"char_a":"","char_b":"","type":"","label":"关系简称","description":"20字内，写清具体拉扯","bilateral":true}]',
@@ -539,35 +542,35 @@ export function mapGenerationPrompt(params: MapGenerationPromptInput): string {
 
 export function buildStoryArcPlanningPrompt(params: StoryArcPromptInput): string {
   return renderPrompt([
-    '把这部小说拆成一组连续推进的故事弧。每个故事弧都要对主线有明确作用，不能只是把剧情切成几段。',
+    '把这部小说拆成一组连续推进的故事弧。你现在做的是长篇结构规划，不是写宣传提纲。',
     sectionLines('项目背景', [
-      `书名：${params.novelTitle}`,
-      `题材：${params.genre || '未知题材'}`,
-      params.background ? `故事背景：${params.background}` : '',
-      `主角称呼：${params.protagonistReference}`,
-      `主角命名规则：${params.protagonistRule}`,
+      '书名：' + params.novelTitle,
+      '题材：' + (params.genre || '未知题材'),
+      params.background ? '故事背景：' + params.background : '',
+      '主角称呼：' + params.protagonistReference,
+      '主角命名规则：' + params.protagonistRule,
     ]),
     sectionLines('核心约束', [
-      `故事核心目标：${params.storyGoal || '未提供'}`,
-      `核心冲突：${params.coreConflict || '未提供'}`,
-      `主线剧情：${params.mainPlot || '未提供'}`,
-      `支线剧情：${params.subPlots || '暂无'}`,
-      `结局方向：${params.ending || '未提供'}`,
-      `节奏比例：${params.rhythmSummary || '未配置'}`,
-      `预计总章节：${params.totalChapters}章`,
+      '故事核心目标：' + (params.storyGoal || '未提供'),
+      '核心冲突：' + (params.coreConflict || '未提供'),
+      '主线剧情：' + (params.mainPlot || '未提供'),
+      '支线剧情：' + (params.subPlots || '暂无'),
+      '结局方向：' + (params.ending || '未提供'),
+      '节奏比例：' + (params.rhythmSummary || '未配置'),
+      '预计总章节：' + params.totalChapters + '章',
     ]),
     section('规划要求', [
       '规划 3 到 5 个故事弧，章节范围必须连续、无重叠、无空档。',
-      '每个故事弧都要写清楚这一段到底完成了什么推进，而不是只写阶段名称。',
-      'key_turns 必须写具体事件或决定，不能写“矛盾升级”“剧情推进”这种空话。',
-      'subplot_links 要明确支线在哪个弧进入、加压、回收。',
-      '最后一个故事弧必须负责主线和主要支线的收束。',
-      '如果出现主角姓名冲突，统一按主角命名规则处理。',
+      '每个故事弧都要回答：这一段推进了什么、加压了什么、把什么交给下一段。',
+      'key_turns 只写会改变量势的具体事件或决定，不写“矛盾升级”“命运转折”这种空话。',
+      'subplot_links 要明确哪条支线在这里进入、发酵、反咬或回收。',
+      '先保证主线因果顺，再安排支线落位；不要为了平均分配章节硬拆结构。',
+      '最后一个故事弧必须负责主线收束，并给主要支线留出回扣空间。',
     ].join('\n')),
     section('语言要求', buildHumanLanguageRules([
-      'summary、arc_goal 和 key_turns 都要写成常规中文，不要写成策划黑话。',
+      'summary、arc_goal 和 key_turns 都写成普通编辑能直接接手的结构说明，不要写策划黑话。',
     ])),
-    '只输出 JSON 数组：[{"arc_name":"","stage":"铺垫/升级/高潮/收束","chapter_start":1,"chapter_end":10,"arc_goal":"本弧必须完成的推进","key_turns":["具体转折1","具体转折2"],"subplot_links":["某条支线如何介入/推进/回收"],"pacing":"快/中/慢","summary":"40到60字，写清这一弧发生了什么"}]',
+    '只输出 JSON 数组：[{"arc_name":"","stage":"铺垫/升级/高潮/收束","chapter_start":1,"chapter_end":10,"arc_goal":"本弧必须完成的推进","key_turns":["具体转折1","具体转折2"],"subplot_links":["某条支线如何介入/推进/回收"],"pacing":"快/中/慢","summary":"40到80字，写清这一弧到底发生了什么"}]',
   ])
 }
 
@@ -575,40 +578,40 @@ export function buildChapterOutlinePlanningPrompt(params: ChapterOutlinePromptIn
   return renderPrompt([
     '为当前故事弧拆分章节大纲。每一章都要能回答三个问题：这一章完成什么、承接什么、把什么递给下一章。',
     sectionLines('项目信息', [
-      `书名：${params.novelTitle}`,
-      `题材：${params.genre || '未知题材'}`,
-      `主角称呼：${params.protagonistReference}`,
-      `主角命名规则：${params.protagonistRule}`,
+      '书名：' + params.novelTitle,
+      '题材：' + (params.genre || '未知题材'),
+      '主角称呼：' + params.protagonistReference,
+      '主角命名规则：' + params.protagonistRule,
     ]),
     sectionLines('主线约束', [
-      `故事核心目标：${params.storyGoal || '未提供'}`,
-      `核心冲突：${params.coreConflict || '未提供'}`,
-      `主线剧情：${params.mainPlot || '未提供'}`,
+      '故事核心目标：' + (params.storyGoal || '未提供'),
+      '核心冲突：' + (params.coreConflict || '未提供'),
+      '主线剧情：' + (params.mainPlot || '未提供'),
     ]),
     sectionLines('当前故事弧', [
-      `名称：${params.arcName}`,
-      `目标：${params.arcGoal || '未提供'}`,
-      `概述：${params.arcSummary || '未提供'}`,
-      `章节范围：第${params.chapterStart}章到第${params.chapterEnd}章`,
+      '名称：' + params.arcName,
+      '目标：' + (params.arcGoal || '未提供'),
+      '概述：' + (params.arcSummary || '未提供'),
+      '章节范围：第' + params.chapterStart + '章到第' + params.chapterEnd + '章',
     ]),
     sectionLines('连续性上下文', [
-      params.previousSummary ? `前情摘要：\n${params.previousSummary}` : '',
-      params.continuitySummary ? `连续性记忆：\n${params.continuitySummary}` : '',
-      params.openLoops ? `未回收事项：\n${params.openLoops}` : '',
-      params.characterStates ? `关键人物状态：\n${params.characterStates}` : '',
-      params.worldRulesSummary ? `世界规则：\n${params.worldRulesSummary}` : '',
+      params.previousSummary ? '前情摘要：\n' + params.previousSummary : '',
+      params.continuitySummary ? '连续性记忆：\n' + params.continuitySummary : '',
+      params.openLoops ? '未回收事项：\n' + params.openLoops : '',
+      params.characterStates ? '关键人物状态：\n' + params.characterStates : '',
+      params.worldRulesSummary ? '世界规则：\n' + params.worldRulesSummary : '',
     ]),
     section('生成要求', [
       '每章 goal 必须服务本弧目标，合起来能看出主线持续推进。',
-      'plot_points 按发生顺序写具体事件，不写“制造冲突”“推进剧情”。',
-      'bridge_in 要点明这章接住了什么，bridge_out 要点明这章把什么递出去了。',
-      '至少回应一部分前文伏笔，或者继续压实某个未回收事项。',
-      '如果出现主角姓名冲突，统一按主角命名规则处理。',
+      'plot_points 按发生顺序写具体事件，不写“制造冲突”“推进剧情”这种空话。',
+      'bridge_in 写清这章接住了什么，bridge_out 写清这章把什么递给下一章。',
+      '章节之间要有轻重起伏，不能每章都像同一个节奏模板。',
+      '优先安排真正需要上场的人物和地点，别把所有线索都塞进每一章。',
     ].join('\n')),
     section('语言要求', buildHumanLanguageRules([
       '章节标题、目标和事件点都要写得清楚直接，避免抽象套话。',
     ])),
-    `只输出 JSON 数组：[{"chapter_num":${params.chapterStart},"title":"","goal":"本章要完成的推进","plot_points":["事件1","事件2","事件3"],"characters":["登场人物A","登场人物B"],"location":"主要场景","emotion_tone":"情绪基调","bridge_in":"这章承接了什么","bridge_out":"这章给下章留下什么"}]`,
+    '只输出 JSON 数组：[{"chapter_num":' + params.chapterStart + ',"title":"","goal":"本章要完成的推进","plot_points":["事件1","事件2","事件3"],"characters":["登场人物A","登场人物B"],"location":"主要场景","emotion_tone":"情绪基调","bridge_in":"这章承接了什么","bridge_out":"这章给下章留下什么"}]',
   ])
 }
 
@@ -656,14 +659,14 @@ export function buildTimelineEventsPrompt(params: TimelineEventPromptInput): str
 
 export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
   return renderPrompt([
-    '先为这一章做场景计划，再进入正文写作。场景计划必须为正文服务，不要写成策划空话。',
+    '先为这一章做场景计划，再进入正文写作。场景计划是写作施工单，不是悬浮策划文案。',
     sectionLines('章节信息', [
-      `小说：${params.novelTitle}`,
-      `章节：第${params.chapterNum}章 ${params.chapterTitle}`,
-      `主角称呼：${params.protagonistReference}`,
-      `主角命名规则：${params.protagonistRule}`,
-      `目标字数：${params.targetWords} 字左右`,
-      params.emotionTone ? `情绪基调：${params.emotionTone}` : '',
+      '小说：' + params.novelTitle,
+      '章节：第' + params.chapterNum + '章 ' + params.chapterTitle,
+      '主角称呼：' + params.protagonistReference,
+      '主角命名规则：' + params.protagonistRule,
+      '目标字数：' + params.targetWords + ' 字左右',
+      params.emotionTone ? '情绪基调：' + params.emotionTone : '',
     ]),
     section('本章目标', params.chapterGoal),
     section('本章细纲', params.plotPoints),
@@ -682,16 +685,16 @@ export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
     section('长文压缩记忆', params.longTermMemory),
     section('当前结构体检提醒', params.consistencyNotes),
     section('计划要求', [
-      '拆成 4 到 7 个场景或连续段落，每个场景都要能直接落成正文。',
-      '每个场景写清：场景目标、冲突、谁在场、可能牵涉的关键物品、该段必须交代的事实、收尾钩子。',
+      '拆成 4 到 7 个场景或连续段落，每一段都要能直接落成正文。',
+      '每个场景写清：这一段要完成什么、当前冲突是什么、谁在场、会用到什么关键物品、必须交代什么。',
       '场景顺序必须连贯，前一段的结果要自然推动后一段。',
-      '不要发明脱离当前背景的新设定，不要把普通概念乱加引号。',
-      '输出给写手看的工作计划，不要写宣传口吻。',
+      '优先处理章节任务和因果推进，不要为了花样强行加戏。',
+      'exit_hook 只写最自然的收尾钩子，不要故作玄虚。',
     ].join('\n')),
     section('语言要求', buildHumanLanguageRules([
-      '场景目标和冲突都要写成具体事实，不要写“命运转折”“真正成长”这类空话。',
+      '场景目标和冲突都写具体事实，不写“命运转折”“真正成长”这种空话。',
     ])),
-    '只输出 JSON 数组：[{"scene_order":1,"scene_title":"场景名","purpose":"这一段必须完成什么","location":"地点或空间","time_anchor":"时间标签","present_characters":["人物A"],"key_items":["物品A"],"conflict":"这段最直接的冲突","beat":"这一段发生的关键动作","must_cover":["必须交代1","必须交代2"],"exit_hook":"如何推到下一段"}]',
+    '只输出 JSON 数组：[{"scene_order":1,"scene_title":"场景名","purpose":"这一段必须完成什么","location":"地点或空间","time_anchor":"时间标签","present_characters":["人物A"],"key_items":["物品A"],"conflict":"这一段最直接的冲突","beat":"这一段发生的关键动作","must_cover":["必须交代1","必须交代2"],"exit_hook":"如何推到下一段"}]',
   ])
 }
 
@@ -700,12 +703,12 @@ export function buildChapterWritingPrompt(params: ChapterWritingPromptInput): st
     GLOBAL_WRITING_RULES,
     '下面是这一章的任务卡。先吃透任务，再直接写正文。',
     sectionLines('章节信息', [
-      `小说：${params.novelTitle}`,
-      `章节：第${params.chapterNum}章 ${params.chapterTitle}`,
-      `主角称呼：${params.protagonistReference}`,
-      `主角命名规则：${params.protagonistRule}`,
-      `目标字数：${params.targetWords} 字左右`,
-      params.emotionTone ? `情绪基调：${params.emotionTone}` : '',
+      '小说：' + params.novelTitle,
+      '章节：第' + params.chapterNum + '章 ' + params.chapterTitle,
+      '主角称呼：' + params.protagonistReference,
+      '主角命名规则：' + params.protagonistRule,
+      '目标字数：' + params.targetWords + ' 字左右',
+      params.emotionTone ? '情绪基调：' + params.emotionTone : '',
     ]),
     section('本章必须完成', params.chapterGoal || '按已定大纲执行'),
     section('已定章节大纲', params.plotPoints),
@@ -722,11 +725,12 @@ export function buildChapterWritingPrompt(params: ChapterWritingPromptInput): st
     section('连续性记忆', params.continuitySummary),
     section('文风参考', params.styleTemplate),
     section('写作要求', [
-      '正文必须沿用既有设定和称呼，尤其不要擅自改主角名字或关系状态。',
-      '先把场景和动作写出来，再让情绪自然露出来，不要空讲道理。',
-      '如果制造新悬念，必须和主线、当前故事弧或现有支线直接相关。',
-      '遇到不准确的搭配，优先改成日常中文里最自然的表达，不写“电网的死亡”这类句子。',
-      '只输出正文，直接开写，不要解释。',
+      '先把事件链、动作链和后果链写顺，再让情绪自然浮出来。',
+      '人物说话要像这个人当下会说的话，别让所有角色一个语气。',
+      '只写和本章任务有关的场景，不要为了凑字数平铺日常。',
+      '如果给了文风参考，只借叙述气质、视角和句子密度，不模仿具体作者。',
+      '遇到不准确搭配，优先改成读者最熟悉、最准确的常规说法。',
+      '只输出正文，不要解释。',
     ].join('\n')),
   ])
 }
@@ -736,12 +740,12 @@ export function buildChapterDraftPrompt(params: ChapterRewritePromptInput): stri
     GLOBAL_WRITING_RULES,
     '先根据场景计划写出一版完整初稿。重点是把事情写顺、把承接写准，先不要追求花哨修辞。',
     sectionLines('章节信息', [
-      `小说：${params.novelTitle}`,
-      `章节：第${params.chapterNum}章 ${params.chapterTitle}`,
-      `主角称呼：${params.protagonistReference}`,
-      `主角命名规则：${params.protagonistRule}`,
-      `目标字数：${params.targetWords} 字左右`,
-      params.emotionTone ? `情绪基调：${params.emotionTone}` : '',
+      '小说：' + params.novelTitle,
+      '章节：第' + params.chapterNum + '章 ' + params.chapterTitle,
+      '主角称呼：' + params.protagonistReference,
+      '主角命名规则：' + params.protagonistRule,
+      '目标字数：' + params.targetWords + ' 字左右',
+      params.emotionTone ? '情绪基调：' + params.emotionTone : '',
     ]),
     section('场景计划', params.scenePlan),
     section('本章目标', params.chapterGoal),
@@ -760,9 +764,10 @@ export function buildChapterDraftPrompt(params: ChapterRewritePromptInput): stri
     section('长文压缩记忆', params.longTermMemory),
     section('结构体检提醒', params.consistencyNotes),
     section('初稿要求', [
-      '只按场景计划推进，不要跳场景，不要漏掉 must_cover。',
-      '先把行动链、对话链、后果链写清，再让情绪自然露出来。',
-      '把人物、物品、地点、事件顺序写准，避免后续审校时再大改结构。',
+      '只按场景计划推进，不跳场景，不漏 must_cover。',
+      '先把行为、对话、信息交接和后果写清，再处理气氛。',
+      '人物状态、物品去向、地点变换和事件顺序必须写准，避免后面大修。',
+      '如果某段只有情绪没有动作或结果，补上能落地的外部承载。',
       '只输出初稿正文，不要解释。',
     ].join('\n')),
   ])
@@ -770,12 +775,12 @@ export function buildChapterDraftPrompt(params: ChapterRewritePromptInput): stri
 
 export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): string {
   return renderPrompt([
-    '你是小说统稿编辑。请只找会影响后续长文稳定性的真实问题：结构断裂、人物/物品/时间轴冲突、承接缺失、语言 AI 味、信息漏写。',
+    '你是小说统稿编辑。请只找会影响后续长文稳定性的真实问题：结构断裂、承接缺失、人物/物品/时间轴冲突、语言 AI 味、信息漏写。',
     sectionLines('章节信息', [
-      `小说：${params.novelTitle}`,
-      `章节：第${params.chapterNum}章 ${params.chapterTitle}`,
-      `主角称呼：${params.protagonistReference}`,
-      `主角命名规则：${params.protagonistRule}`,
+      '小说：' + params.novelTitle,
+      '章节：第' + params.chapterNum + '章 ' + params.chapterTitle,
+      '主角称呼：' + params.protagonistReference,
+      '主角命名规则：' + params.protagonistRule,
     ]),
     section('本章目标', params.chapterGoal),
     section('场景计划', params.scenePlan),
@@ -792,11 +797,12 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
     section('待审校初稿', params.draftContent),
     section('输出要求', [
       '只保留真正需要修改的问题，不要泛泛而谈。',
-      'critical_fixes 最多 5 条，写能直接执行的修改动作。',
+      'critical_fixes 最多 5 条，写成能直接执行的修改动作。',
       'continuity_risks 只写承接、伏笔、人物状态、物品去向、时间顺序的风险。',
-      'language_risks 只写 AI 味、引号滥用、抽象口号、错误搭配。',
-      'missing_payoffs 只写该章已经提出但没落地的关键信息。',
-      'revision_brief 用 60 到 120 字概括修订方向。',
+      'language_risks 只写 AI 味、抽象空话、搭配错误、无效抒情或不自然口吻。',
+      'missing_payoffs 只写本章已经提出、但没有落地的关键信息。',
+      'strengths 也要具体，说明这章已经成立的部分，避免误改。',
+      'revision_brief 用 60 到 120 字概括返修方向。',
     ].join('\n')),
     '只输出 JSON：{"summary":"本章初稿整体情况","critical_fixes":["修改动作1"],"continuity_risks":["风险1"],"language_risks":["风险1"],"missing_payoffs":["缺口1"],"strengths":["优点1"],"revision_brief":"修订说明"}',
   ])
@@ -807,12 +813,12 @@ export function buildChapterRewritePrompt(params: ChapterRewritePromptInput): st
     GLOBAL_WRITING_RULES,
     '根据初稿和审校意见重写这一章，输出可直接入稿的版本。修订时优先保证承接、人物状态、事件顺序和物品去向准确。',
     sectionLines('章节信息', [
-      `小说：${params.novelTitle}`,
-      `章节：第${params.chapterNum}章 ${params.chapterTitle}`,
-      `主角称呼：${params.protagonistReference}`,
-      `主角命名规则：${params.protagonistRule}`,
-      `目标字数：${params.targetWords} 字左右`,
-      params.emotionTone ? `情绪基调：${params.emotionTone}` : '',
+      '小说：' + params.novelTitle,
+      '章节：第' + params.chapterNum + '章 ' + params.chapterTitle,
+      '主角称呼：' + params.protagonistReference,
+      '主角命名规则：' + params.protagonistRule,
+      '目标字数：' + params.targetWords + ' 字左右',
+      params.emotionTone ? '情绪基调：' + params.emotionTone : '',
     ]),
     section('场景计划', params.scenePlan),
     section('初稿正文', params.draftContent),
@@ -833,9 +839,10 @@ export function buildChapterRewritePrompt(params: ChapterRewritePromptInput): st
     section('长文压缩记忆', params.longTermMemory),
     section('结构体检提醒', params.consistencyNotes),
     section('修订要求', [
-      '保留初稿中已经成立的有效段落，但要修掉所有 critical_fixes。',
+      '保留初稿里已经成立的有效段落，但要修掉真正影响成稿质量的问题。',
       '如果初稿遗漏场景计划里的 must_cover，必须补齐。',
-      '让人物说话和行动更像人，不要保留抽象口号、概念引号和生硬排比。',
+      '优先修因果、指代、节奏和人物反应，再修文气。',
+      '删掉空转抒情、模板句和解释性旁白，让情绪落在动作、对话和细节里。',
       '只输出最终正文，不要解释。',
     ].join('\n')),
   ])
@@ -1016,44 +1023,49 @@ export function rewriteParagraphPrompt(params: RewriteParagraphPromptInput): str
 
 export function genericExpandPrompt(params: GenericExpandPromptInput): string {
   return renderPrompt([
-    `扩写并整理【${params.contentType}】。要求是在原有想法上补足细节，而不是另起一套。`,
+    '扩写并整理【' + params.contentType + '】。要求是在原有想法上补足细节，而不是另起一套。',
     sectionLines('现有信息', [
-      `小说背景：${params.novelContext}`,
-      `题材：${params.genreContext}`,
-      `已有内容：${params.existingContent || '暂无'}`,
-      params.requirements ? `额外要求：${params.requirements}` : '',
+      '小说背景：' + params.novelContext,
+      '题材：' + params.genreContext,
+      '已有内容：' + (params.existingContent || '暂无'),
+      params.requirements ? '额外要求：' + params.requirements : '',
     ]),
     section('扩写要求', [
-      '保留原始意图，优先补足具体细节和可落地的信息。',
-      '少写空洞概念，多写人物处境、事件条件、使用场景或判断依据。',
-      '语言简洁，不写百科，不写广告腔，不用字段标签堆砌。',
+      '保留原始意图，优先补足能直接写进后续流程的细节。',
+      '先补事实、条件、关系、限制、用途和代价，再谈气质或意义。',
+      '如果原内容已经成立，就顺着往下补，不要推翻重来。',
+      '语言紧一点，少写套话和百科说明。',
       '只输出纯文本，不要 Markdown，不要前言。',
     ].join('\n')),
-    section('语言要求', buildHumanLanguageRules()),
+    section('语言要求', buildHumanLanguageRules([
+      '贴近当前题材常见写法，但不要模仿具体作者。',
+    ])),
   ])
 }
 
 export function subplotExpandPrompt(params: SubplotExpandPromptInput): string {
   return renderPrompt([
-    `完善小说《${params.novelTitle}》里的一条支线。支线要能反过来影响主线，而不是独立小故事。`,
+    '完善小说《' + params.novelTitle + '》里的一条支线。支线必须反过来影响主线、人物关系或主题推进，不能写成独立番外。',
     sectionLines('现有信息', [
-      `题材：${params.genreContext}`,
-      `主线概述：${params.mainPlot}`,
-      `支线名称：${params.subplot.name || '未命名'}`,
-      `涉及人物：${params.subplot.characters}`,
-      `核心冲突：${params.subplot.conflict}`,
-      `与主线关联：${params.subplot.mainlineLink}`,
-      `预计收束章节：第${params.subplot.endChapter || 'X'}章`,
-      params.requirements ? `额外要求：${params.requirements}` : '',
+      '题材：' + params.genreContext,
+      '主线概述：' + params.mainPlot,
+      '支线名称：' + (params.subplot.name || '未命名'),
+      '涉及人物：' + params.subplot.characters,
+      '核心冲突：' + params.subplot.conflict,
+      '与主线关联：' + params.subplot.mainlineLink,
+      '预计收束章节：第' + (params.subplot.endChapter || 'X') + '章',
+      params.requirements ? '额外要求：' + params.requirements : '',
     ]),
     section('输出内容', [
-      '写清支线的引爆点、发展节点、与主线交织的方式、收束方式、角色变化。',
-      '每一部分都写具体事件，不要只写方向。',
-      '人物行为必须符合已有性格和处境，不能为了推进支线硬转。',
+      '写清支线的引爆点、推进节点、转折、与主线交织的位置、收束方式和留下的余波。',
+      '每一部分都写具体事件，不要只写方向或主题口号。',
+      '人物行为必须符合现有性格、立场和处境，不能为了让支线成立硬拧。',
+      '支线最好至少改变一层关系、一次判断或一项局势，不然就不值得保留。',
       '直接输出纯文本支线设定，不要解释。',
     ].join('\n')),
     section('语言要求', buildHumanLanguageRules([
       '支线描述优先写清具体矛盾和作用，不写抽象口号。',
+      '贴近当前题材常见写法，但不要模仿具体作者。',
     ])),
   ])
 }

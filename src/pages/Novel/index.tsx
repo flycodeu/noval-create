@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { Button, Spin, Tag } from 'antd'
+import { Button, Spin } from 'antd'
 import {
   AppstoreOutlined,
   ArrowLeftOutlined,
@@ -93,25 +93,6 @@ const MODE_COPY: Record<WorkspaceMode, { label: string; description: string }> =
   },
 }
 
-function getStatusLabel(status?: string) {
-  switch (status) {
-    case 'writing':
-      return '写作中'
-    case 'completed':
-      return '已完成'
-    case 'archived':
-      return '已归档'
-    default:
-      return '草稿中'
-  }
-}
-
-function getTargetWordsLabel(targetWords?: number) {
-  if (!targetWords || targetWords <= 0) return '未设置'
-  if (targetWords >= 10000) return `${Math.round(targetWords / 1000) / 10} 万字`
-  return `${targetWords} 字`
-}
-
 export default function NovelRouter() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -153,6 +134,8 @@ export default function NovelRouter() {
       : null,
     [flatItems, recommendedPageKey],
   )
+  const sidebarSynopsis = currentNovel?.synopsis?.trim()
+    || '先补一条一句话简介，让整本书的气质、主角处境和核心冲突先定下来。'
 
   const navigateToPage = (pageKey: WorkspaceKey) => {
     navigate(`/novels/${novelId}/${pageKey}`)
@@ -226,17 +209,9 @@ export default function NovelRouter() {
         </div>
 
         <div className="novel-sidebar__summary">
-          <div className="novel-sidebar__eyebrow">小说编辑台</div>
+          <div className="novel-sidebar__eyebrow">当前小说</div>
           <h1 className="novel-sidebar__title">{currentNovel?.title || '未命名小说'}</h1>
-          <div className="novel-sidebar__meta">
-            <Tag color="gold">{currentNovel?.genreName || '未设置题材'}</Tag>
-            <Tag color="blue">{getStatusLabel(currentNovel?.status)}</Tag>
-          </div>
-          <div className="novel-sidebar__target">目标字数：{getTargetWordsLabel(currentNovel?.targetWords)}</div>
-          <div className="novel-sidebar__focus">
-            {currentPageMeta?.label || '创作向导'}
-            <span>{currentPageMeta?.summary || '围绕同一套背景、类型和主题，推进整本书的写作工作流。'}</span>
-          </div>
+          <p className="novel-sidebar__summary-copy">{sidebarSynopsis}</p>
         </div>
 
         <section className="novel-sidebar__assist novel-sidebar__assist--hidden" aria-hidden="true">
@@ -280,49 +255,45 @@ export default function NovelRouter() {
 
       <main className="novel-route-shell__content">
         <div className="novel-route-shell__content-frame">
-          <div className="novel-route-shell__content-topbar">
-            <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/novels')}>
-              返回主页
-            </Button>
-            <div className="novel-route-shell__content-breadcrumb">
-              <strong>{currentNovel?.title || '当前小说'}</strong>
-              <span>{currentPageMeta?.label || '创作向导'}</span>
-            </div>
-          </div>
-          <div className="novel-route-shell__flowbar">
-            <div className="novel-route-shell__flowbar-header">
-              <div className="novel-route-shell__flowbar-summary">
-                <div className="novel-route-shell__flowbar-kicker">当前页面</div>
-                <strong>{currentPageMeta?.label || '创作向导'}</strong>
+          <div className="novel-route-shell__header">
+            <div className="novel-route-shell__header-main">
+              <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/novels')}>
+                返回主页
+              </Button>
+              <div className="novel-route-shell__header-copy">
+                <div className="novel-route-shell__header-kicker">
+                  当前页面 · {currentPageMeta?.label || '创作向导'}
+                </div>
+                <strong>{currentNovel?.title || '当前小说'}</strong>
                 <span>{currentPageMeta?.summary || '围绕同一套背景、类型和主题，推进整本书的写作工作流。'}</span>
               </div>
-              <div className="novel-route-shell__flowbar-actions">
-                <button
-                  type="button"
-                  className="novel-route-shell__next-step"
-                  onClick={() => recommendedPageMeta && navigateToPage(recommendedPageMeta.key)}
-                  disabled={!recommendedPageMeta}
-                  title={recommendedPageMeta?.summary || '正在读取当前小说的完成状态。'}
-                >
-                  <span className="novel-route-shell__next-step-kicker">
-                    {recommendedPageMeta?.key === currentPage ? '当前建议' : '下一步建议'}
-                  </span>
-                  <strong>{recommendedPageMeta?.label || '正在分析流程'}</strong>
-                </button>
-                <div className="novel-route-shell__flowbar-mode" title={MODE_COPY[mode].description}>
-                  <span className="novel-route-shell__flowbar-mode-label">{MODE_COPY[mode].label}</span>
-                  <div className="novel-mode-switch novel-mode-switch--compact" role="tablist" aria-label="工作台模式">
-                    {(['guided', 'pro'] as WorkspaceMode[]).map((value) => (
-                      <button
-                        key={value}
-                        type="button"
-                        className={`novel-mode-switch__button ${mode === value ? 'novel-mode-switch__button--active' : ''}`}
-                        onClick={() => setMode(value)}
-                      >
-                        {MODE_COPY[value].label}
-                      </button>
-                    ))}
-                  </div>
+            </div>
+            <div className="novel-route-shell__header-actions">
+              <button
+                type="button"
+                className="novel-route-shell__next-step"
+                onClick={() => recommendedPageMeta && navigateToPage(recommendedPageMeta.key)}
+                disabled={!recommendedPageMeta}
+                title={recommendedPageMeta?.summary || '正在读取当前小说的完成状态。'}
+              >
+                <span className="novel-route-shell__next-step-kicker">
+                  {recommendedPageMeta?.key === currentPage ? '当前建议' : '下一步建议'}
+                </span>
+                <strong>{recommendedPageMeta?.label || '正在分析流程'}</strong>
+              </button>
+              <div className="novel-route-shell__header-mode" title={MODE_COPY[mode].description}>
+                <span className="novel-route-shell__header-mode-label">{MODE_COPY[mode].label}</span>
+                <div className="novel-mode-switch novel-mode-switch--compact" role="tablist" aria-label="工作台模式">
+                  {(['guided', 'pro'] as WorkspaceMode[]).map((value) => (
+                    <button
+                      key={value}
+                      type="button"
+                      className={`novel-mode-switch__button ${mode === value ? 'novel-mode-switch__button--active' : ''}`}
+                      onClick={() => setMode(value)}
+                    >
+                      {MODE_COPY[value].label}
+                    </button>
+                  ))}
                 </div>
               </div>
             </div>

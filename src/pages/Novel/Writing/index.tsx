@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Empty, Input, Modal, Progress, Select, Spin, Tag, message } from 'antd'
+import { Button, Empty, Modal, Progress, Select, Spin, Tag, message } from 'antd'
 import {
   BulbOutlined,
   CheckOutlined,
@@ -272,6 +272,19 @@ export default function Writing({ novelId }: Props) {
     continuity?.arc_progress ? `故事弧推进：${continuity.arc_progress}` : '',
   ].filter(Boolean)
 
+  const relatedInsightItems = [
+    ...relatedEvents.map((event) => `${event.timeLabel || '时间未标注'} · ${event.eventTitle}`),
+    ...relatedItems.map((item) => `道具 / 线索：${item.itemName}${item.plotFunction ? ` · ${item.plotFunction}` : ''}`),
+  ]
+
+  const reviewInsightItems = [
+    reviewNotes?.summary ? `摘要回看：${reviewNotes.summary}` : '',
+    reviewNotes?.revision_brief ? `修订摘要：${reviewNotes.revision_brief}` : '',
+    ...(reviewNotes?.critical_fixes || []).map((item) => `关键修订：${item}`),
+    ...(reviewNotes?.continuity_risks || []).map((item) => `连续性风险：${item}`),
+    ...(reviewNotes?.language_risks || []).map((item) => `语言提示：${item}`),
+  ].filter((item): item is string => Boolean(item))
+
   const pipelineStatus = PIPELINE_STAGES.map((stage, index) => {
     const running = generationProgress?.status === 'running' && generationProgress.stage === stage.key
     const failed = generationProgress?.status === 'failed' && generationProgress.stage === stage.key
@@ -285,10 +298,16 @@ export default function Writing({ novelId }: Props) {
 
   const currentStatusLabel = currentChapter ? getStatusLabel(currentChapter.status) : '未选择章节'
   const streamContent = generatingTaskId ? streams[generatingTaskId]?.content || '' : ''
+  const editorEyebrow = currentChapter ? `第 ${String(currentChapter.chapterNum).padStart(2, '0')} 章` : '写作编辑器'
+  const editorTitle = currentChapter ? currentChapter.title || `第${currentChapter.chapterNum}章` : '请选择一个章节'
+  const editorSubtitle = currentChapter
+    ? `当前状态：${currentStatusLabel} · 文稿会在停止输入后自动保存。`
+    : '从左侧选择章节后即可直接编辑，右侧同步查看本章链路与体检建议。'
 
   return (
     <WorkspacePage
       className={`novel-writing-page novel-writing-page--${mode}`}
+      layout="wide"
       eyebrow={mode === 'guided' ? '写作台' : '章节流水线'}
       title="正文写作"
       description={mode === 'guided' ? '在同一个写作台里完成章节生成、场景计划、审校修订、长文记忆和一致性检查。' : '正文页直接打通章节四阶段流水线、全书一致性报告、时间轴联动和长文压缩记忆。'}
@@ -356,37 +375,43 @@ export default function Writing({ novelId }: Props) {
 
           <section className="novel-writing-shell__editor">
             <div className="novel-writing-shell__editor-header">
-              <div className="novel-writing-shell__editor-title">{currentChapter ? `第${currentChapter.chapterNum}章 ${currentChapter.title || ''}` : '请选择章节'}</div>
-              {currentChapter ? <Select value={currentChapter.status} onChange={(value) => void handleStatusChange(value)} size="small" style={{ width: 128 }} options={STATUS_OPTIONS} /> : null}
-              <div className="novel-writing-shell__editor-meta">{wordCount} 字</div>
+              <div className="novel-writing-shell__editor-title-block">
+                <div className="novel-writing-shell__editor-kicker">{editorEyebrow}</div>
+                <div className="novel-writing-shell__editor-title">{editorTitle}</div>
+                <div className="novel-writing-shell__editor-subtitle">{editorSubtitle}</div>
+              </div>
+              <div className="novel-writing-shell__editor-tools">
+                {currentChapter ? <Select value={currentChapter.status} onChange={(value) => void handleStatusChange(value)} className="novel-writing-shell__editor-select" size="small" style={{ width: 156 }} options={STATUS_OPTIONS} /> : null}
+                <div className="novel-writing-shell__editor-meta"><span className="novel-writing-shell__editor-meta-label">正文体量</span><strong>{wordCount} 字</strong></div>
+              </div>
             </div>
             <div className="novel-writing-shell__editor-stage">
               {currentChapter ? (
-                <>
+                <div className="novel-writing-shell__editor-stage-inner">
                   <div className="novel-writing-shell__pipeline">
                     {pipelineStatus.map((stage) => (
                       <div key={stage.key} className={`novel-pipeline-stage novel-pipeline-stage--${stage.status}`}>
-                        <div className="novel-pipeline-stage__eyebrow">{`步骤 ${String(stage.index + 1).padStart(2, '0')}`}</div>
+                        <div className="novel-pipeline-stage__eyebrow">{`阶段 ${String(stage.index + 1).padStart(2, '0')}`}</div>
                         <div className="novel-pipeline-stage__title">{stage.title}</div>
                         <div className="novel-pipeline-stage__summary">{stage.summary}</div>
                       </div>
                     ))}
                   </div>
-                  {generationProgress ? <div className={`novel-writing-shell__generation-note novel-writing-shell__generation-note--${generationProgress.status}`}><strong>{generationProgress.label}</strong><span>{generationProgress.detail || '正在处理章节流水线。'}</span></div> : null}
+                  {generationProgress ? <div className={`novel-writing-shell__generation-note novel-writing-shell__generation-note--${generationProgress.status}`}><strong>{generationProgress.label}</strong><span>{generationProgress.detail || '正在同步最新阶段进度。'}</span></div> : null}
                   {generating ? (
                     <div className="novel-writing-shell__editor-sheet novel-writing-shell__editor-sheet--streaming">
-                      <div className="novel-writing-shell__editor-stream-head">AI 正在执行章节流水线 <Spin size="small" /></div>
+                      <div className="novel-writing-shell__editor-stream-head">AI 正在续写本章 <Spin size="small" /></div>
                       <div className="novel-writing-shell__editor-stream">{streamContent}<span className="streaming-cursor" /></div>
                     </div>
                   ) : (
                     <div ref={editorRef} contentEditable suppressContentEditableWarning onInput={handleContentChange} className="novel-writing-shell__editor-sheet" dangerouslySetInnerHTML={{ __html: content.replace(/\n/g, '<br>') }} />
                   )}
-                </>
-              ) : <div className="novel-empty novel-empty--writing">先从左侧选择一个章节，再开始写作或运行章节流水线。</div>}
+                </div>
+              ) : <div className="novel-empty novel-empty--writing">请选择左侧章节，或先创建一个新章节开始写作。</div>}
             </div>
             <div className="novel-writing-shell__editor-footer">
-              <Button icon={<BulbOutlined />} disabled={!currentChapter} onClick={() => void handleGenerateSummary()}>更新记忆</Button>
-              <Button icon={<FileSearchOutlined />} disabled={!currentChapter} onClick={() => void handleAiCheck()}>AI 检测</Button>
+              <Button icon={<BulbOutlined />} disabled={!currentChapter} onClick={() => void handleGenerateSummary()}>更新摘要</Button>
+              <Button icon={<FileSearchOutlined />} disabled={!currentChapter} onClick={() => void handleAiCheck()}>AI 体检</Button>
               <Button icon={<CheckOutlined />} disabled={!currentChapter} onClick={() => void handleStatusChange('final')} style={{ marginLeft: 'auto' }}>标记完成</Button>
             </div>
           </section>
@@ -402,29 +427,43 @@ export default function Writing({ novelId }: Props) {
 
             {insightTab === 'chapter' ? (
               <>
-                <InsightCard title="本章摘要与承接"><StringList items={[currentChapter?.summary ? `本章摘要：${currentChapter.summary}` : '', currentChapter?.nextChapterSeed ? `下章种子：${currentChapter.nextChapterSeed}` : '', ...continuityItems.slice(0, mode === 'guided' ? 5 : continuityItems.length)].filter(Boolean)} empty="还没有摘要和连续性记忆。运行流水线或点击“更新记忆”后会自动补齐。" /></InsightCard>
-                <InsightCard title="场景计划">{scenePlan.length > 0 ? <div className="novel-scene-list">{scenePlan.map((scene) => <div key={`${scene.scene_order}-${scene.scene_title}`} className="novel-scene-card"><div className="novel-scene-card__header"><span>{`场景 ${String(scene.scene_order).padStart(2, '0')}`}</span><strong>{scene.scene_title}</strong></div><div className="novel-scene-card__body"><div>{scene.purpose}</div>{scene.location ? <div>地点：{scene.location}</div> : null}{scene.time_anchor ? <div>时间：{scene.time_anchor}</div> : null}{scene.present_characters?.length ? <div>人物：{scene.present_characters.join('、')}</div> : null}{scene.key_items?.length ? <div>物品：{scene.key_items.join('、')}</div> : null}{scene.must_cover?.length ? <div>必须覆盖：{scene.must_cover.join('；')}</div> : null}</div></div>)}</div> : <div className="novel-copy-block">当前章节还没有生成场景计划。</div>}</InsightCard>
-                <InsightCard title="章内联动"><StringList items={[...relatedEvents.map((event) => `${event.timeLabel || '时间未定'} · ${event.eventTitle}`), ...relatedItems.map((item) => `物品联动：${item.itemName}${item.plotFunction ? ` · ${item.plotFunction}` : ''}`)].slice(0, mode === 'guided' ? 6 : 12)} empty="这一章还没有挂到时间轴事件或物品实例上。建议先完善时间轴和物品联动。" /></InsightCard>
-                <InsightCard title="审校与修订"><StringList items={[reviewNotes?.summary ? `审校结论：${reviewNotes.summary}` : '', reviewNotes?.revision_brief ? `修订摘要：${reviewNotes.revision_brief}` : '', ...(reviewNotes?.critical_fixes || []).map((item) => `必须修：${item}`), ...(reviewNotes?.continuity_risks || []).map((item) => `连续性风险：${item}`), ...(reviewNotes?.language_risks || []).map((item) => `语言风险：${item}`)].filter(Boolean)} empty="当前章节还没有审校记录。运行章节流水线后会自动生成。" /></InsightCard>
-                <InsightCard title="世界规则摘要"><StringList items={worldRulesSummary} empty={currentNovel?.worldRulesJson ? '已配置世界规则，但当前没有可直接引用的结构摘要。' : '尚未配置世界规则。'} /></InsightCard>
+                <div className="novel-writing-shell__insight-spotlight">
+                  <ChapterFocusCard
+                    summary={currentChapter?.summary}
+                    nextChapterSeed={currentChapter?.nextChapterSeed}
+                    continuityItems={continuityItems.slice(0, mode === 'guided' ? 5 : continuityItems.length)}
+                  />
+                  <InsightCard title="场景拆解" eyebrow="执行顺序">
+                    {scenePlan.length > 0 ? <div className="novel-scene-list">{scenePlan.map((scene) => <div key={`${scene.scene_order}-${scene.scene_title}`} className="novel-scene-card"><div className="novel-scene-card__header"><span>{`场景 ${String(scene.scene_order).padStart(2, '0')}`}</span><strong>{scene.scene_title}</strong></div><div className="novel-scene-card__body"><div>{scene.purpose}</div>{scene.location ? <div>地点：{scene.location}</div> : null}{scene.time_anchor ? <div>时间：{scene.time_anchor}</div> : null}{scene.present_characters?.length ? <div>人物：{scene.present_characters.join('、')}</div> : null}{scene.key_items?.length ? <div>道具：{scene.key_items.join('、')}</div> : null}{scene.must_cover?.length ? <div>必须覆盖：{scene.must_cover.join('、')}</div> : null}</div></div>)}</div> : <div className="novel-copy-block">先运行章节流水线后，这里会整理本章场景计划。</div>}
+                  </InsightCard>
+                </div>
+                <div className="novel-writing-shell__insight-stack">
+                  <InsightCard title="关联线索" eyebrow="时间轴 / 道具" tone="soft"><StringList items={relatedInsightItems.slice(0, mode === 'guided' ? 6 : 12)} empty="当前章节暂未关联时间轴事件或关键道具。" /></InsightCard>
+                  <InsightCard title="修订提示" eyebrow="复盘重点" tone="soft"><StringList items={reviewInsightItems} empty="运行审校或摘要更新后，这里会汇总需要回看的修订点。" /></InsightCard>
+                  <InsightCard title="世界规则" eyebrow="写作边界" tone="soft"><StringList items={worldRulesSummary} empty={currentNovel?.worldRulesJson ? '当前世界规则已录入，但还没有提炼出本章相关边界。' : '先完善世界规则，这里会同步展示写作边界。'} /></InsightCard>
+                </div>
               </>
             ) : null}
 
             {insightTab === 'memory' ? (
-              <>
-                <InsightCard title="长文压缩记忆"><StringList items={storyMemory ? storyMemory.plotMilestones.slice(0, mode === 'guided' ? 6 : 12) : []} empty="还没有可用的长文压缩记忆。" /></InsightCard>
-                <InsightCard title="仍在延续的线索"><StringList items={storyMemory ? storyMemory.activeThreads.slice(0, mode === 'guided' ? 6 : 12) : []} empty="暂时没有未回收线索。" /></InsightCard>
-                <InsightCard title="时间轴锚点"><StringList items={storyMemory ? storyMemory.timelineAnchors.slice(0, mode === 'guided' ? 6 : 10) : []} empty="还没有被压缩入长记忆的关键时间轴锚点。" /></InsightCard>
-                <InsightCard title="关键物品去向"><StringList items={storyMemory ? storyMemory.itemLedger.slice(0, mode === 'guided' ? 6 : 10) : []} empty="还没有进入长记忆的关键物品记录。" /></InsightCard>
-              </>
+              <div className="novel-writing-shell__insight-stack">
+                <InsightCard title="剧情里程碑" eyebrow="压缩摘要"><StringList items={storyMemory ? storyMemory.plotMilestones.slice(0, mode === 'guided' ? 6 : 12) : []} empty="长文记忆尚未生成。" /></InsightCard>
+                <InsightCard title="活跃线程" eyebrow="待持续追踪" tone="soft"><StringList items={storyMemory ? storyMemory.activeThreads.slice(0, mode === 'guided' ? 6 : 12) : []} empty="当前没有需要持续追踪的活跃线程。" /></InsightCard>
+                <InsightCard title="时间锚点" eyebrow="时序参照" tone="soft"><StringList items={storyMemory ? storyMemory.timelineAnchors.slice(0, mode === 'guided' ? 6 : 10) : []} empty="时间轴锚点会在这里同步展示。" /></InsightCard>
+                <InsightCard title="道具账本" eyebrow="状态同步" tone="soft"><StringList items={storyMemory ? storyMemory.itemLedger.slice(0, mode === 'guided' ? 6 : 10) : []} empty="关键道具与线索的状态变化会记录在这里。" /></InsightCard>
+              </div>
             ) : null}
 
             {insightTab === 'health' ? (
               <>
-                <InsightCard title="全书一致性体检">{consistencyReport ? <div className="novel-health-board"><div className="novel-health-score"><strong>{consistencyReport.readinessScore}</strong><span>{getHealthLabel(consistencyReport.readinessScore)}</span></div><div className="novel-health-breakdown"><div><strong>{consistencyReport.highCount}</strong><span>高优先</span></div><div><strong>{consistencyReport.mediumCount}</strong><span>中优先</span></div><div><strong>{consistencyReport.lowCount}</strong><span>低优先</span></div></div></div> : <div className="novel-copy-block">正在分析全书结构。</div>}</InsightCard>
-                <InsightCard title="当前章相关问题">{chapterIssues.length > 0 ? <div className="novel-issue-list">{chapterIssues.slice(0, mode === 'guided' ? 4 : 8).map((issue) => <div key={issue.id} className="novel-issue-item"><div className="novel-issue-item__head"><Tag color={getIssueColor(issue.severity)}>{getIssueLabel(issue.severity)}</Tag><strong>{issue.title}</strong></div><div className="novel-issue-item__desc">{issue.description}</div><div className="novel-issue-item__suggestion">建议：{issue.suggestion}</div></div>)}</div> : <div className="novel-copy-block">当前章节暂时没有命中的结构风险。</div>}</InsightCard>
-                <InsightCard title="AI 检测结果">{aiResult ? <AiCheckResult result={aiResult} /> : <div className="novel-copy-block">点击顶部“AI 检测”可以检查本章的语言质量和结构问题。</div>}</InsightCard>
-                <InsightCard title="重点关注区域"><StringList items={consistencyReport?.focusAreas || []} empty="当前没有额外聚焦建议。" /></InsightCard>
+                <div className="novel-writing-shell__insight-spotlight">
+                  <InsightCard title="全书健康度" eyebrow="结构体检" tone="hero">{consistencyReport ? <div className="novel-health-board"><div className="novel-health-score"><strong>{consistencyReport.readinessScore}</strong><span>{getHealthLabel(consistencyReport.readinessScore)}</span></div><div className="novel-health-breakdown"><div><strong>{consistencyReport.highCount}</strong><span>高危</span></div><div><strong>{consistencyReport.mediumCount}</strong><span>中危</span></div><div><strong>{consistencyReport.lowCount}</strong><span>低危</span></div></div></div> : <div className="novel-copy-block">正在分析全书结构健康度。</div>}</InsightCard>
+                  <InsightCard title="本章风险" eyebrow="优先修复">{chapterIssues.length > 0 ? <div className="novel-issue-list">{chapterIssues.slice(0, mode === 'guided' ? 4 : 8).map((issue) => <div key={issue.id} className="novel-issue-item"><div className="novel-issue-item__head"><Tag color={getIssueColor(issue.severity)}>{getIssueLabel(issue.severity)}</Tag><strong>{issue.title}</strong></div><div className="novel-issue-item__desc">{issue.description}</div><div className="novel-issue-item__suggestion">建议：{issue.suggestion}</div></div>)}</div> : <div className="novel-copy-block">当前章节没有被结构体检命中的明显风险。</div>}</InsightCard>
+                </div>
+                <div className="novel-writing-shell__insight-stack">
+                  <InsightCard title="AI 复检" eyebrow="局部诊断" tone="soft">{aiResult ? <AiCheckResult result={aiResult} /> : <div className="novel-copy-block">点击上方 AI 体检后，这里会展示语义与表达层面的复检结果。</div>}</InsightCard>
+                  <InsightCard title="建议优先处理" eyebrow="下一步" tone="soft"><StringList items={consistencyReport?.focusAreas || []} empty="当前没有额外的优先处理建议。" /></InsightCard>
+                </div>
               </>
             ) : null}
           </aside>
@@ -434,8 +473,52 @@ export default function Writing({ novelId }: Props) {
   )
 }
 
-function InsightCard({ title, children }: { title: string; children: React.ReactNode }) {
-  return <section className="novel-writing-shell__insight-card"><div className="novel-writing-shell__insight-card-header">{title}</div><div className="novel-writing-shell__insight-card-body">{children}</div></section>
+function InsightCard({
+  title,
+  eyebrow,
+  tone = 'default',
+  children,
+}: {
+  title: string
+  eyebrow?: string
+  tone?: 'default' | 'hero' | 'soft'
+  children: React.ReactNode
+}) {
+  return (
+    <section className={`novel-writing-shell__insight-card novel-writing-shell__insight-card--${tone}`}>
+      <div className="novel-writing-shell__insight-card-header">
+        {eyebrow ? <div className="novel-writing-shell__insight-card-eyebrow">{eyebrow}</div> : null}
+        <div className="novel-writing-shell__insight-card-title">{title}</div>
+      </div>
+      <div className="novel-writing-shell__insight-card-body">{children}</div>
+    </section>
+  )
+}
+
+function ChapterFocusCard({
+  summary,
+  nextChapterSeed,
+  continuityItems,
+}: {
+  summary?: string | null
+  nextChapterSeed?: string | null
+  continuityItems: string[]
+}) {
+  const hasSummary = Boolean(summary?.trim())
+  const hasNextChapterSeed = Boolean(nextChapterSeed?.trim())
+  const hasContinuity = continuityItems.length > 0
+
+  return (
+    <InsightCard title="本章聚焦" eyebrow="主线锚点" tone="hero">
+      {hasSummary || hasNextChapterSeed || hasContinuity ? (
+        <div className="novel-writing-shell__focus-card">
+          {hasSummary ? <section className="novel-writing-shell__focus-block"><div className="novel-writing-shell__focus-label">一句话摘要</div><div className="novel-writing-shell__focus-copy">{summary}</div></section> : null}
+          {hasNextChapterSeed ? <section className="novel-writing-shell__focus-block novel-writing-shell__focus-block--accent"><div className="novel-writing-shell__focus-label">下一章引子</div><div className="novel-writing-shell__focus-copy">{nextChapterSeed}</div></section> : null}
+          {hasContinuity ? <section className="novel-writing-shell__focus-notes"><div className="novel-writing-shell__focus-label">连续性提醒</div><div className="novel-insight-list">{continuityItems.map((item, index) => <div key={`${item}-${index}`} className="novel-insight-list__item novel-insight-list__item--compact">{item}</div>)}</div></section> : null}
+        </div>
+      ) : <div className="novel-copy-block">章节流水线完成后，这里会自动汇总本章摘要、承接提醒与下一章引子。</div>}
+    </InsightCard>
+  )
 }
 
 function StringList({ items, empty }: { items: string[]; empty: string }) {

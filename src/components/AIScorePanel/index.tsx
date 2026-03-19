@@ -91,54 +91,57 @@ export default function AIScorePanel({
     if (!result) return []
     const content = getContent()
 
-    // 使用自定义消息构建器（当需要 JSON 结构输出时）
     if (buildCustomRegenMessages) {
       return buildCustomRegenMessages(content, result, extraReqs)
     }
 
-    // 找出得分最低的维度，重点改进
     const sorted = [...result.dimensions].sort((a, b) => a.score - b.score)
     const weakDims = sorted.slice(0, 3)
 
     const dimSuggestions = weakDims
-      .filter(d => d.suggestion)
-      .map(d => `${d.name}（当前${d.score}分）：${d.suggestion}`)
+      .filter((dimension) => dimension.suggestion)
+      .map((dimension) => dimension.name + '（当前 ' + dimension.score + ' 分）：' + dimension.suggestion)
       .join('\n')
 
     const topFixes = result.top_fixes
-      .map((f, i) => `${i + 1}. ${f}`)
+      .slice(0, 3)
+      .map((fix, index) => (index + 1) + '. ' + fix)
       .join('\n')
 
-    const prompt = `你是专业的中文小说策划师和内容优化专家。请根据AI评分反馈，对以下【${contentType}】进行针对性优化重写。
-
-【当前内容】
-${content}
-
-【综合评价】${result.overall_feedback}（综合得分：${result.overall_score}/100，AI味：${result.ai_like_rate}%）
-
-【优先解决的问题】
-${topFixes}
-
-【需要重点改进的维度】
-${dimSuggestions}
-${extraReqs ? `\n【用户追加要求】${extraReqs}` : ''}
-
-优化要求：
-- 重点改进评分最低的维度，不是每处都改
-- 保留原内容的核心设定和关键信息
-- 减少AI写作痕迹（禁止"不禁/不由得/忍不住/此刻"等引导词）
-- 增加具体细节，用具体事物代替抽象描述
-- 修正主谓宾搭配和对象类别错配，例如把“电网的死亡”改成“电网瘫痪/崩溃”等准确表达
-- 用常规的人类语言重写，不要保留生硬、悬浮或不成立的句子
-- 结合${genreContext}题材的特点
-
-格式要求：
-- 直接输出纯文本，不要任何解释
-- 禁止使用任何 Markdown 格式（**加粗**、## 标题、- 列表、> 引用等）
-- 段落之间用空行分隔`
+    const prompt = [
+      '你在返修一段小说相关内容。请只处理最影响成稿质量的那几处，不要整段推翻重写。',
+      '',
+      '【内容类型】' + contentType,
+      '【当前内容】',
+      content,
+      '',
+      '【综合判断】' + result.overall_feedback + '（综合 ' + result.overall_score + '/100，AI 味 ' + result.ai_like_rate + '%）',
+      '',
+      '【优先处理的问题】',
+      topFixes || '1. 先修逻辑和语言里最明显的问题。',
+      '',
+      '【需要重点补强的维度】',
+      dimSuggestions || '优先修因果、指代、搭配和表达自然度。',
+      extraReqs ? '' : '',
+      extraReqs ? '【用户追加要求】' + extraReqs : '',
+      extraReqs ? '' : '',
+      '返修原则：',
+      '- 只修分数最低的 2 到 3 个维度，不要把每一句都改掉',
+      '- 保留原内容里已经成立的设定、事件和关键信息',
+      '- 先修逻辑、指代、因果、搭配，再修语气和文气',
+      '- 少用模板连接词、空泛总结句和假深刻表达',
+      '- 多用具体事实、动作、关系和代价代替抽象判断',
+      '- 贴近' + (genreContext || '当前题材') + '常见写法，但不要模仿具体作者',
+      '',
+      '输出要求：',
+      '- 直接输出返修后的纯文本，不要解释',
+      '- 不要使用 Markdown',
+      '- 段落之间空一行',
+    ].filter(Boolean).join('\n')
 
     return [{ role: 'user' as const, content: prompt }]
   }
+
 
   return (
     <div style={{
