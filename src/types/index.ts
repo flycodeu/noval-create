@@ -8,12 +8,22 @@ import type {
   CoreSettingsGenerationRequest,
   CoreSettingsGenerationResult,
 } from '../shared/core-settings-generation'
+import type {
+  WorldRulesGenerationProgressEvent,
+  WorldRulesGenerationRequest,
+  WorldRulesGenerationResult,
+} from '../shared/world-rules-generation'
 
 export type {
   CoreSettingsGenerationProgressEvent,
   CoreSettingsGenerationRequest,
   CoreSettingsGenerationResult,
 } from '../shared/core-settings-generation'
+export type {
+  WorldRulesGenerationProgressEvent,
+  WorldRulesGenerationRequest,
+  WorldRulesGenerationResult,
+} from '../shared/world-rules-generation'
 
 export interface Novel {
   id: number
@@ -132,6 +142,24 @@ export interface WorldMapItem {
   dangerLevel?: string
   sortOrder: number
   children?: WorldMapItem[]
+}
+
+export interface MapBatchGenerateOptions {
+  layerCounts?: number[] | Array<{ depth: number; count: number }>
+  namedPlaces?: string
+  parentBatchSize?: number
+}
+
+export interface MapBatchGenerationResult {
+  stage: 'root' | 'children' | 'completed'
+  targetDepth: number | null
+  generatedNodeCount: number
+  processedParentCount: number
+  pendingParentCount: number
+  processedParentNames: string[]
+  completed: boolean
+  message: string
+  nextDepth: number | null
 }
 
 export interface TimelineEvent {
@@ -256,6 +284,18 @@ export interface StoryArc {
   arcSummary?: string
 }
 
+export interface OutlineChapterBatchGenerateOptions {
+  batchSize?: number
+}
+
+export interface OutlineChapterBatchGenerationResult {
+  generatedCount: number
+  completed: boolean
+  batchStart: number | null
+  batchEnd: number | null
+  message: string
+}
+
 export interface ConsistencyIssue {
   id: string
   severity: 'high' | 'medium' | 'low'
@@ -359,13 +399,15 @@ declare global {
         getRelations: (novelId: number) => Promise<CharacterRelation[]>
         generateRelations: (novelId: number) => Promise<void>
         upsertRelation: (data: unknown) => Promise<void>
+        clear: (novelId: number) => Promise<void>
       }
       map: {
         getTree: (novelId: number) => Promise<WorldMapItem[]>
         create: (novelId: number, data: unknown) => Promise<number>
         update: (id: number, data: unknown) => Promise<void>
         delete: (id: number) => Promise<void>
-        batchGenerate: (novelId: number, structure: unknown) => Promise<void>
+        batchGenerate: (novelId: number, structure: MapBatchGenerateOptions) => Promise<MapBatchGenerationResult>
+        clear: (novelId: number) => Promise<void>
       }
       timeline: {
         list: (novelId: number) => Promise<TimelineEvent[]>
@@ -374,6 +416,7 @@ declare global {
         update: (id: number, data: Partial<TimelineEvent>) => Promise<void>
         delete: (id: number) => Promise<void>
         generate: (novelId: number, options?: unknown) => Promise<number[]>
+        clear: (novelId: number) => Promise<void>
       }
       item: {
         list: (novelId: number) => Promise<StoryItem[]>
@@ -382,6 +425,7 @@ declare global {
         update: (id: number, data: Partial<StoryItem>) => Promise<void>
         delete: (id: number) => Promise<void>
         generate: (novelId: number, options?: unknown) => Promise<number[]>
+        clear: (novelId: number) => Promise<void>
       }
       outline: {
         getArcs: (novelId: number) => Promise<StoryArc[]>
@@ -389,7 +433,8 @@ declare global {
         updateArc: (id: number, data: unknown) => Promise<void>
         deleteArc: (id: number) => Promise<void>
         generateArcs: (novelId: number) => Promise<StoryArc[]>
-        generateChapterOutlines: (arcId: number) => Promise<unknown[]>
+        generateChapterOutlines: (arcId: number, options?: OutlineChapterBatchGenerateOptions) => Promise<OutlineChapterBatchGenerationResult>
+        clear: (novelId: number) => Promise<void>
       }
       model: {
         list: () => Promise<ModelConfig[]>
@@ -414,6 +459,7 @@ declare global {
       ai: {
         expandBackground: (input: unknown) => Promise<{ expanded_background: string; titles: string[]; synopsis: string }>
         generateCoreSettings: (data: CoreSettingsGenerationRequest) => Promise<CoreSettingsGenerationResult>
+        generateWorldRules: (data: WorldRulesGenerationRequest) => Promise<WorldRulesGenerationResult>
         generateCharacter: (novelId: number, opts: unknown) => Promise<number>
         generateRelations: (novelId: number) => Promise<void>
         generateSubplotBatch: (data: SubplotGenerationRequest) => Promise<SubplotGenerationResult>

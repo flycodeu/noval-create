@@ -24,6 +24,7 @@ type TimelineStatus = 'planned' | 'seeded' | 'written' | 'resolved'
 
 interface TimelineGenerateOptions {
   count?: number
+  batchSize?: number
   focus?: string
 }
 
@@ -403,6 +404,20 @@ export function deleteTimelineEvent(id: number) {
   db.delete(timelineEvents).where(eq(timelineEvents.id, id)).run()
 }
 
+export function clearTimelineByNovel(novelId: number) {
+  const db = getDb()
+  const itemRows = db.select().from(storyItems).where(eq(storyItems.novelId, novelId)).all()
+
+  itemRows.forEach((item) => {
+    db.update(storyItems).set({
+      linkedTimelineEventIdsJson: JSON.stringify([]),
+      updatedAt: new Date().toISOString(),
+    }).where(eq(storyItems.id, item.id)).run()
+  })
+
+  db.delete(timelineEvents).where(eq(timelineEvents.novelId, novelId)).run()
+}
+
 export async function generateTimelineEvents(
   novelId: number,
   options: TimelineGenerateOptions = {},
@@ -418,59 +433,68 @@ export async function generateTimelineEvents(
   const characterRows = db.select().from(characters).where(eq(characters.novelId, novelId)).all()
   const itemRows = db.select().from(storyItems).where(eq(storyItems.novelId, novelId)).all()
   const mapRows = db.select().from(worldMap).where(eq(worldMap.novelId, novelId)).all()
-  const existingEvents = listTimelineEvents(novelId)
-
-  const prompt = buildTimelineEventsPrompt({
-    novelTitle: novel.title,
-    genre: profile.genre,
-    background: `${profile.background}${options.focus ? `\n额外聚焦：${options.focus}` : ''}`,
-    storyGoal: profile.storyGoal,
-    coreConflict: profile.coreConflict,
-    mainPlot: profile.mainPlot,
-    subPlots: profile.subPlots,
-    ending: profile.ending,
-    worldRulesSummary: `${profile.worldRulesSummary}\n\n${buildStoryCoreSummary(profile)}`,
-    timelineRules: buildTimelineConfigSummary(rules),
-    arcSummary: buildArcSummary(arcRows),
-    characterSummary: buildCharacterSummary(characterRows),
-    locationSummary: buildLocationSummary(mapRows),
-    itemSummary: buildItemSummary(itemRows),
-    existingEvents: buildExistingEventSummary(existingEvents),
-    count: Math.min(Math.max(options.count || 10, 6), 16),
-    protagonistReference: profile.protagonistReference,
-    protagonistRule: profile.protagonistRule,
-  })
-
-  const result = await runChatTask({
-    type: 'generate_timeline',
-    novelId,
-    messages: [{ role: 'user', content: prompt }],
-    modelConfigId: novel.modelConfigId || undefined,
-  })
-
-  const parsed = cleanAiValue(safeParseJson<GeneratedTimelineEvent[]>(result))
-  if (!Array.isArray(parsed)) {
-    throw new Error('时间轴生成结果不是有效数组')
-  }
-
   const defaultPrecision = rules.timelineConfig.precisionOptions[0] || '阶段'
   const createdIds: number[] = []
-  const startSortOrder = getNextSortOrder(novelId)
+  const totalCount = Math.min(Math.max(options.count || 10, 4), 24)
+  const batchSize = Math.max(1, Math.min(totalCount, options.batchSize || Math.min(totalCount, 4), 6))
 
-  parsed.forEach((raw, index) => {
-    const payload = buildGeneratedPayload(raw, {
-      defaultTimeMode: rules.timelineConfig.calendarType,
-      defaultPrecision,
-      sortOrder: startSortOrder + index,
-      arcRows,
-      chapterRows,
-      characterRows,
-      itemRows,
-      mapRows,
+  for (let generatedCount = 0; generatedCount < totalCount; generatedCount += batchSize) {
+    const currentBatchCount = Math.min(batchSize, totalCount - generatedCount)
+    const existingEvents = listTimelineEvents(novelId)
+    const prompt = buildTimelineEventsPrompt({
+      novelTitle: novel.title,
+      genre: profile.genre,
+      background: [
+        profile.background,
+        options.focus ? `额外聚焦：${options.focus}` : '',
+        `本批要求：只补 ${currentBatchCount} 个新事件，避免复述已有时间轴。`,
+      ].filter(Boolean).join('\n'),
+      storyGoal: profile.storyGoal,
+      coreConflict: profile.coreConflict,
+      mainPlot: profile.mainPlot,
+      subPlots: profile.subPlots,
+      ending: profile.ending,
+      worldRulesSummary: `${profile.worldRulesSummary}\n\n${buildStoryCoreSummary(profile)}`,
+      timelineRules: buildTimelineConfigSummary(rules),
+      arcSummary: buildArcSummary(arcRows),
+      characterSummary: buildCharacterSummary(characterRows),
+      locationSummary: buildLocationSummary(mapRows),
+      itemSummary: buildItemSummary(itemRows),
+      existingEvents: buildExistingEventSummary(existingEvents),
+      count: currentBatchCount,
+      protagonistReference: profile.protagonistReference,
+      protagonistRule: profile.protagonistRule,
     })
-    if (!payload) return
-    createdIds.push(createTimelineEvent(novelId, payload))
-  })
+
+    const result = await runChatTask({
+      type: 'generate_timeline',
+      novelId,
+      messages: [{ role: 'user', content: prompt }],
+      modelConfigId: novel.modelConfigId || undefined,
+    })
+
+    const parsed = cleanAiValue(safeParseJson<GeneratedTimelineEvent[]>(result))
+    if (!Array.isArray(parsed)) {
+      throw new Error('时间轴生成结果不是有效数组')
+    }
+
+    const startSortOrder = getNextSortOrder(novelId)
+
+    parsed.forEach((raw, index) => {
+      const payload = buildGeneratedPayload(raw, {
+        defaultTimeMode: rules.timelineConfig.calendarType,
+        defaultPrecision,
+        sortOrder: startSortOrder + index,
+        arcRows,
+        chapterRows,
+        characterRows,
+        itemRows,
+        mapRows,
+      })
+      if (!payload) return
+      createdIds.push(createTimelineEvent(novelId, payload))
+    })
+  }
 
   return createdIds
 }

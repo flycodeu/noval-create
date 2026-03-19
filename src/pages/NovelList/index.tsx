@@ -47,6 +47,11 @@ const TARGET_WORDS_OPTIONS = [
   { label: '超长篇 100 万字', value: 1000000 },
 ]
 
+function formatWordCount(value: number) {
+  if (value >= 10000) return `${(value / 10000).toFixed(1)} 万字`
+  return `${value.toLocaleString()} 字`
+}
+
 const GENRE_DESCRIPTIONS: Record<number, string> = {
   1: '都市生活与现代情感',
   2: '古典爱情与宫廷风云',
@@ -291,7 +296,7 @@ export default function NovelList() {
         onCancel={() => { setWizardOpen(false); setWizardStep(0); wizardForm.resetFields(); setSelectedGenreId(null) }}
         footer={null}
         width={800}
-        destroyOnClose
+        destroyOnHidden
       >
         <Steps
           current={wizardStep}
@@ -490,6 +495,10 @@ function NovelCard({
     ? Math.min(100, Math.round((novel.totalWords / novel.targetWords) * 100))
     : 0
   const gradient = GENRE_GRADIENTS[novel.genreName || ''] || 'linear-gradient(135deg, #1a1d27, #252840)'
+  const synopsis = novel.synopsis?.trim()
+    || novel.expandedBackground?.trim()
+    || novel.userBackground?.trim()
+    || '还没有补充简介，进入工作台后可以继续完善背景、设定和结构。'
 
   const menuItems = [
     {
@@ -528,8 +537,9 @@ function NovelCard({
 
   return (
     <Card
+      className="novel-home-card"
       hoverable
-      bodyStyle={{ padding: 0 }}
+      styles={{ body: { padding: 0 } }}
       style={{
         background: 'var(--color-bg-card)',
         border: '1px solid var(--border-color)',
@@ -540,8 +550,8 @@ function NovelCard({
       onClick={onClick}
     >
       {/* 封面 */}
-      <div style={{
-        height: 120,
+      <div className="novel-home-card__cover" style={{
+        height: 156,
         background: gradient,
         display: 'flex',
         alignItems: 'center',
@@ -571,15 +581,12 @@ function NovelCard({
       </div>
 
       {/* 卡片内容 */}
-      <div style={{ padding: '12px 14px' }}>
-        <div style={{
-          fontWeight: 600, fontSize: 15, marginBottom: 4,
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>
+      <div className="novel-home-card__body">
+        <div className="novel-home-card__title">
           {novel.title}
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <div className="novel-home-card__meta">
           <Tag
             style={{
               background: 'transparent',
@@ -591,24 +598,34 @@ function NovelCard({
           >
             {status.label}
           </Tag>
-          <span style={{ color: 'var(--color-text-muted)', fontSize: 11 }}>
-            {(novel.totalWords / 10000).toFixed(1)} 万字
+          <span className="novel-home-card__meta-copy">
+            {formatWordCount(novel.totalWords)}
           </span>
           <span style={{ flex: 1 }} />
-          <span style={{ color: 'var(--color-text-muted)', fontSize: 10 }}>
+          <span className="novel-home-card__meta-copy">
             {dayjs(novel.updatedAt).fromNow()}
           </span>
         </div>
 
-        <Tooltip title={`${novel.totalWords.toLocaleString()} / ${novel.targetWords.toLocaleString()} 字`}>
-          <Progress
-            percent={progress}
-            size="small"
-            strokeColor="var(--color-blue-primary)"
-            trailColor="rgba(255,255,255,0.08)"
-            showInfo={false}
-          />
-        </Tooltip>
+        <div className="novel-home-card__synopsis">
+          {synopsis}
+        </div>
+
+        <div className="novel-home-card__progress">
+          <Tooltip title={`${novel.totalWords.toLocaleString()} / ${novel.targetWords.toLocaleString()} 字`}>
+            <Progress
+              percent={progress}
+              size="small"
+              strokeColor="var(--color-blue-primary)"
+              trailColor="rgba(255,255,255,0.08)"
+              showInfo={false}
+            />
+          </Tooltip>
+          <div className="novel-home-card__progress-meta">
+            <span>目标 {formatWordCount(novel.targetWords)}</span>
+            <strong>{progress}%</strong>
+          </div>
+        </div>
       </div>
     </Card>
   )

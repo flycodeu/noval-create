@@ -32,6 +32,12 @@ const DEFAULT_RHYTHM = {
   rhythm_ending: 20,
 }
 
+const DECISION_REALISM_HINT = [
+  '角色必须像真实的人，不是道德口号或完美圣人。',
+  '角色可以犯错，但必须在当前资源、风险、时间压力下做出合理决策。',
+  '冲突要落到谁承担代价、谁承担风险、谁必须现在做选择。',
+].join('\n')
+
 interface StoryContext {
   novelId: number
   modelConfigId?: number
@@ -405,6 +411,262 @@ function buildEndingPrompt(
   ])
 }
 
+function buildBaseContextV2(context: StoryContext): string {
+  return [
+    `小说：${context.novelTitle}`,
+    `题材：${context.genre}`,
+    context.background ? `故事背景：${context.background}` : '',
+    context.worldRulesSummary ? `世界规则：${context.worldRulesSummary}` : '',
+    `主角称呼：${context.protagonistReference}`,
+    `主角命名规则：${context.protagonistRule}`,
+  ].filter(Boolean).join('\n')
+}
+
+function buildUserRequirementSectionV2(requirements: string): string {
+  return requirements ? `【额外要求】\n${requirements}` : ''
+}
+
+function buildDecisionConstraintSectionV2(context: StoryContext): string {
+  return section('人物与决策约束', [
+    DECISION_REALISM_HINT,
+    '角色不是道德符号。不要把主角或其他人物写成无条件接纳所有人、永远正确、永远愿意承担全部代价的圣母。',
+    '角色可以不完美、可以误判、可以害怕，但必须根据当前信息、资源和风险做出当下最合理的选择。',
+    '如果设定涉及感染、灾变、围困、生存压力、组织治理或秩序崩塌，必须明确筛查、隔离、隐瞒伤情、资源分配、纪律处罚、救人与防扩散之间的冲突。',
+    `涉及主角时，只能使用「${context.protagonistReference}」称呼，不能擅自补实名。`,
+  ].join('\n'))
+}
+
+async function polishPlainTextV2(
+  context: StoryContext,
+  label: string,
+  content: string,
+  relatedContext: string,
+): Promise<string> {
+  const prompt = renderPrompt([
+    `请只润色「${label}」的中文表达，不改动事实方向、设定关系和核心信息。`,
+    section('基础背景', buildBaseContextV2(context)),
+    buildDecisionConstraintSectionV2(context),
+    relatedContext ? section('关联上下文', relatedContext) : '',
+    section('待润色文本', content),
+    section('润色要求', buildHumanLanguageRules([
+      '只修语言，不补新设定，不改剧情走向，不改人物关系。',
+      '重点修复对象错配、词语搭配生硬、空泛悬浮、像说明书或口号的句子。',
+      '人物要像真实的人，不要把果断、残酷、犹豫、误判这些真实反应抹平。',
+      '如果文本里出现无条件拯救所有人、零代价维持秩序、所有人都立刻达成一致等表达，要改成更符合处境和代价的写法。',
+    ])),
+    '只输出润色后的纯文本，不要解释，不要 Markdown。',
+  ])
+
+  const result = await runPromptTask(context.novelId, context.modelConfigId, prompt)
+  return cleanPlainText(result) || cleanPlainText(content)
+}
+
+function buildStoryGoalPromptV2(context: StoryContext): string {
+  return renderPrompt([
+    '你是资深中文小说策划。现在只生成「故事核心目标」。',
+    section('基础背景', buildBaseContextV2(context)),
+    buildUserRequirementSectionV2(context.requirements),
+    buildDecisionConstraintSectionV2(context),
+    section('字段职责', '只回答故事最后要抵达什么状态、结果或根本性改变，不写过程，不写冲突本身。'),
+    section('生成要求', [
+      '目标要具体、稳定，能够成为整部小说的最终落点。',
+      '可以带出主题方向，但必须落到可感知的结果或终局变化上。',
+      '不要把阶段任务、敌人、危机或过程误写成目标。',
+      buildHumanLanguageRules([
+        '用常规中文表达，不要写成概念口号、海报文案或悬浮金句。',
+      ]),
+    ].join('\n')),
+    '直接输出纯文本，不要标题，不要解释，不要 Markdown。',
+  ])
+}
+
+function buildCoreConflictPromptV2(context: StoryContext, storyGoal: string): string {
+  return renderPrompt([
+    '你是资深中文小说策划。现在只生成「核心冲突」。',
+    section('基础背景', buildBaseContextV2(context)),
+    buildUserRequirementSectionV2(context.requirements),
+    buildDecisionConstraintSectionV2(context),
+    section('已确定目标', storyGoal),
+    section('字段职责', '只回答为什么这个目标难以实现，明确写出对立双方、风险来源、不可兼得之处和持续代价。'),
+    section('生成要求', [
+      '必须写清冲突双方、风险来源、必须牺牲什么，或者为什么无论怎么选都会付出代价。',
+      '冲突要能长期驱动主线，而不是一场局部争执。',
+      '不要把目标改写成近义句，也不要把主线事件提前写成流水账。',
+      '不要把“善良、接纳、守护所有人”直接写成无条件正确答案。',
+      '如果背景涉及感染、筛查、隔离、幸存者接纳、伤情隐瞒、纪律维持等问题，必须把这些现实压力写进冲突。',
+      buildHumanLanguageRules([
+        '冲突描述要说人话，直接写谁和谁冲突、为什么冲突、代价落在哪里，不要堆抽象词。',
+      ]),
+    ].join('\n')),
+    '直接输出纯文本，不要标题，不要解释，不要 Markdown。',
+  ])
+}
+
+function buildMainPlotPromptV2(
+  context: StoryContext,
+  storyGoal: string,
+  coreConflict: string,
+): string {
+  return renderPrompt([
+    '你是资深中文小说策划。现在只生成「主线剧情」。',
+    section('基础背景', buildBaseContextV2(context)),
+    buildUserRequirementSectionV2(context.requirements),
+    buildDecisionConstraintSectionV2(context),
+    section('故事核心目标', storyGoal),
+    section('核心冲突', coreConflict),
+    section('字段职责', '只写围绕目标与冲突展开的关键事件链，强调因果推进、升级、转折和逼近结局。'),
+    section('生成要求', [
+      '主线要写出起点、关键升级、重大转折和收束前的逼近过程。',
+      '每个阶段都要与核心目标、核心冲突直接相关。',
+      '重点写人物在压力下做了什么、为什么那样做、造成了什么后果。',
+      '不要只列场景或情绪，要能看出事件之间的因果关系。',
+      buildHumanLanguageRules([
+        '优先写清发生了什么和为什么会这样，不要写抽象的“命运改变”“世界回响”。',
+      ]),
+    ].join('\n')),
+    '直接输出纯文本，不要标题，不要解释，不要 Markdown。',
+  ])
+}
+
+function buildSubplotPromptV2(
+  context: StoryContext,
+  storyGoal: string,
+  coreConflict: string,
+  mainPlot: string,
+  batchCount: number,
+  existingSubplots: SubPlotDraft[],
+  batchIndex: number,
+  totalBatches: number,
+  maxConflictLength: number = 90,
+): string {
+  const existingSummary = existingSubplots
+    .map((subplot, index) => `${index + 1}. ${[subplot.name, subplot.conflict, subplot.mainlineLink].filter(Boolean).join(' / ')}`)
+    .filter(Boolean)
+    .join('\n')
+
+  return renderPrompt([
+    `请为这部小说生成 ${batchCount} 条新的支线剧情框架。`,
+    section('基础背景', buildBaseContextV2(context)),
+    buildUserRequirementSectionV2(context.requirements),
+    buildDecisionConstraintSectionV2(context),
+    sectionLines('主线约束', [
+      `故事核心目标：${storyGoal}`,
+      `核心冲突：${coreConflict}`,
+      `主线剧情：${mainPlot}`,
+    ]),
+    sectionLines('当前批次', [
+      `批次：第 ${batchIndex}/${totalBatches} 批`,
+      `本批数量：${batchCount}`,
+      `已有支线数量：${existingSubplots.length}`,
+    ]),
+    existingSummary ? section('已有支线摘要', existingSummary) : '',
+    section('生成要求', [
+      '每条支线都必须与主线推进、主题揭示、人物成长或关键关系变化形成明确因果关联。',
+      '不同支线要承担不同功能，避免名称、核心冲突或主线作用重复。',
+      'characters 只写人物称谓，用逗号分隔；涉及主角时只能写当前主角称呼。',
+      `conflict 用 1 到 2 句话写清支线核心矛盾，不超过 ${maxConflictLength} 字。`,
+      'mainlineLink 用一句话写清它如何推动主线、人物或主题，不超过 60 字。',
+      '如果支线涉及生存、感染、秩序或资源问题，冲突必须写出谁承担风险、谁承担代价。',
+      'endChapter 输出数字。',
+      buildHumanLanguageRules([
+        '冲突和主线关联都要写得准确直接，不要出现对象错配和空话。',
+        '宁可短，也不要扩写成长段剧情；一句话写清矛盾即可。',
+      ]),
+    ].join('\n')),
+    '只输出 JSON array，且数组长度必须等于本批数量。',
+    '[{"name":"支线名称","characters":"涉及人物1,涉及人物2","conflict":"支线核心冲突","mainlineLink":"与主线或主题的具体关联","endChapter":15}]',
+  ])
+}
+
+function buildSubplotPolishPromptV2(
+  context: StoryContext,
+  storyGoal: string,
+  coreConflict: string,
+  mainPlot: string,
+  subplots: SubPlotDraft[],
+): string {
+  return renderPrompt([
+    '请只润色下面这组支线框架的中文表达，不改动条目数量、名称方向、主线作用和收束章节。',
+    section('基础背景', buildBaseContextV2(context)),
+    buildUserRequirementSectionV2(context.requirements),
+    buildDecisionConstraintSectionV2(context),
+    sectionLines('主线约束', [
+      `故事核心目标：${storyGoal}`,
+      `核心冲突：${coreConflict}`,
+      `主线剧情：${mainPlot}`,
+    ]),
+    section('待润色支线', JSON.stringify(subplots, null, 2)),
+    section('润色重点', buildHumanLanguageRules([
+      '重点润色 conflict 和 mainlineLink 的表达，不要改成另一条支线。',
+      '把空泛、悬浮或对象错配的表达改成自然准确的中文。',
+      '保留 characters 和 endChapter 的原意，不新增设定。',
+    ])),
+    '只输出润色后的 JSON array，不要解释，不要 Markdown。',
+  ])
+}
+
+function buildRhythmPromptV2(
+  context: StoryContext,
+  storyGoal: string,
+  coreConflict: string,
+  mainPlot: string,
+  subplots: SubPlotDraft[],
+): string {
+  return renderPrompt([
+    '请根据当前小说设定，给出三段式叙事节奏建议。',
+    section('基础背景', buildBaseContextV2(context)),
+    buildUserRequirementSectionV2(context.requirements),
+    buildDecisionConstraintSectionV2(context),
+    sectionLines('核心设定', [
+      `故事核心目标：${storyGoal}`,
+      `核心冲突：${coreConflict}`,
+      `主线剧情：${mainPlot}`,
+      `支线概况：${subplots.length > 0 ? subplots.map((sub) => `${sub.name}：${sub.mainlineLink}`).join('；') : '暂无支线'}`,
+    ]),
+    section('要求', [
+      '输出前期铺垫、中期冲突、后期收束三个百分比。',
+      '三个数字合计必须等于 100。',
+      '前期铺垫控制在 10 到 60，中期冲突控制在 20 到 70，后期收束控制在 5 到 40。',
+      'reason 用一句话解释为什么采用这个比例。',
+    ].join('\n')),
+    '只输出 JSON，例如 {"rhythm_setup":30,"rhythm_conflict":50,"rhythm_ending":20,"reason":"一句话说明"}',
+  ])
+}
+
+function buildEndingPromptV2(
+  context: StoryContext,
+  storyGoal: string,
+  coreConflict: string,
+  mainPlot: string,
+  subplots: SubPlotDraft[],
+  rhythmSummary: string,
+): string {
+  return renderPrompt([
+    '你是资深中文小说策划。现在生成「结局设定」。',
+    section('基础背景', buildBaseContextV2(context)),
+    buildUserRequirementSectionV2(context.requirements),
+    buildDecisionConstraintSectionV2(context),
+    sectionLines('既定约束', [
+      `故事核心目标：${storyGoal}`,
+      `核心冲突：${coreConflict}`,
+      `主线剧情：${mainPlot}`,
+      `支线概况：${subplots.length > 0 ? subplots.map((sub) => `${sub.name}：${sub.mainlineLink}`).join('；') : '暂无支线'}`,
+      `叙事节奏：${rhythmSummary}`,
+    ]),
+    section('生成要求', [
+      '结局必须回应核心目标、核心冲突和主线推进结果。',
+      '要交代主要矛盾如何收束，以及结局之后留下的余波。',
+      '如果结局代价很重，要写清谁失去了什么，而不是只给价值判断。',
+      'ending_type 只能从 HE / BE / open / multi / HE_BE 中选择一个。',
+      'ending 写成一段完整、自然的中文，不要重新铺陈中段剧情。',
+      buildHumanLanguageRules([
+        '结局要像小说结尾，不要像总结汇报或口号收尾。',
+      ]),
+    ].join('\n')),
+    '只输出 JSON，例如 {"ending_type":"HE","ending":"结局内容"}',
+  ])
+}
+
 async function loadStoryContext(request: CoreSettingsGenerationRequest): Promise<StoryContext> {
   const profile = await buildStoryProfile(request.novelId)
   const db = getDb()
@@ -439,7 +701,7 @@ async function runPlainTextStep(
     throw new Error(`${label}生成结果为空`)
   }
 
-  return polishPlainText(context, label, cleaned, relatedContext)
+  return polishPlainTextV2(context, label, cleaned, relatedContext)
 }
 
 async function tryGenerateSubplotBatch(
@@ -457,7 +719,7 @@ async function tryGenerateSubplotBatch(
   const runBatch = async (maxConflictLength: number) => {
     const messages: PromptMessage[] = [{
       role: 'user',
-      content: buildSubplotPrompt(
+      content: buildSubplotPromptV2(
         context,
         storyGoal,
         coreConflict,
@@ -590,7 +852,7 @@ async function generateSubplots(
       const polishedRaw = await runPromptTask(
         context.novelId,
         context.modelConfigId,
-        buildSubplotPolishPrompt(context, storyGoal, coreConflict, mainPlot, accumulated),
+        buildSubplotPolishPromptV2(context, storyGoal, coreConflict, mainPlot, accumulated),
       )
       const polished = parseSubPlotFrameworkResponse(polishedRaw)
       const validation = validateGeneratedSubplots(polished, {
@@ -708,7 +970,7 @@ export async function generateCoreSettings(
   const storyGoal = await runStep('story_goal', '故事核心目标', '', async () => ({
     value: await runPlainTextStep(
       context,
-      buildStoryGoalPrompt(context),
+      buildStoryGoalPromptV2(context),
       '故事核心目标',
       '',
     ),
@@ -717,7 +979,7 @@ export async function generateCoreSettings(
   const coreConflict = await runStep('core_conflict', '核心冲突', '', async () => ({
     value: await runPlainTextStep(
       context,
-      buildCoreConflictPrompt(context, storyGoal),
+      buildCoreConflictPromptV2(context, storyGoal),
       '核心冲突',
       `【故事核心目标】${storyGoal}`,
     ),
@@ -726,7 +988,7 @@ export async function generateCoreSettings(
   const mainPlot = await runStep('main_plot', '主线剧情', '', async () => ({
     value: await runPlainTextStep(
       context,
-      buildMainPlotPrompt(context, storyGoal, coreConflict),
+      buildMainPlotPromptV2(context, storyGoal, coreConflict),
       '主线剧情',
       `【故事核心目标】${storyGoal}\n【核心冲突】${coreConflict}`,
     ),
@@ -761,7 +1023,7 @@ export async function generateCoreSettings(
     const raw = await runPromptTask(
       context.novelId,
       context.modelConfigId,
-      buildRhythmPrompt(context, storyGoal, coreConflict, mainPlot, subplotsResult),
+      buildRhythmPromptV2(context, storyGoal, coreConflict, mainPlot, subplotsResult),
     )
     let parsed: Record<string, unknown>
     try {
@@ -781,7 +1043,7 @@ export async function generateCoreSettings(
     const raw = await runPromptTask(
       context.novelId,
       context.modelConfigId,
-      buildEndingPrompt(context, storyGoal, coreConflict, mainPlot, subplotsResult, rhythmSummary),
+      buildEndingPromptV2(context, storyGoal, coreConflict, mainPlot, subplotsResult, rhythmSummary),
     )
 
     let parsed: Record<string, unknown> | null = null
@@ -795,7 +1057,7 @@ export async function generateCoreSettings(
       ? parsed.ending.trim()
       : cleanPlainText(raw)
     const polishedEnding = rawEnding
-      ? await polishPlainText(
+      ? await polishPlainTextV2(
         context,
         '结局设定',
         rawEnding,

@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { CoreSettingsGenerationRequest } from '../src/shared/core-settings-generation'
+import type { WorldRulesGenerationRequest } from '../src/shared/world-rules-generation'
 import type { SubplotGenerationRequest } from '../src/shared/subplot-framework'
 
 const api = {
@@ -41,6 +42,7 @@ const api = {
     getRelations: (novelId: number) => ipcRenderer.invoke('character:getRelations', novelId),
     generateRelations: (novelId: number) => ipcRenderer.invoke('character:generateRelations', novelId),
     upsertRelation: (data: unknown) => ipcRenderer.invoke('character:upsertRelation', data),
+    clear: (novelId: number) => ipcRenderer.invoke('character:clear', novelId),
   },
 
   // 地图管理
@@ -50,6 +52,7 @@ const api = {
     update: (id: number, data: unknown) => ipcRenderer.invoke('map:update', id, data),
     delete: (id: number) => ipcRenderer.invoke('map:delete', id),
     batchGenerate: (novelId: number, structure: unknown) => ipcRenderer.invoke('map:batchGenerate', novelId, structure),
+    clear: (novelId: number) => ipcRenderer.invoke('map:clear', novelId),
   },
 
   timeline: {
@@ -59,6 +62,7 @@ const api = {
     update: (id: number, data: unknown) => ipcRenderer.invoke('timeline:update', id, data),
     delete: (id: number) => ipcRenderer.invoke('timeline:delete', id),
     generate: (novelId: number, options?: unknown) => ipcRenderer.invoke('timeline:generate', novelId, options),
+    clear: (novelId: number) => ipcRenderer.invoke('timeline:clear', novelId),
   },
 
   item: {
@@ -68,6 +72,7 @@ const api = {
     update: (id: number, data: unknown) => ipcRenderer.invoke('item:update', id, data),
     delete: (id: number) => ipcRenderer.invoke('item:delete', id),
     generate: (novelId: number, options?: unknown) => ipcRenderer.invoke('item:generate', novelId, options),
+    clear: (novelId: number) => ipcRenderer.invoke('item:clear', novelId),
   },
 
   // 大纲管理
@@ -77,7 +82,8 @@ const api = {
     updateArc: (id: number, data: unknown) => ipcRenderer.invoke('outline:updateArc', id, data),
     deleteArc: (id: number) => ipcRenderer.invoke('outline:deleteArc', id),
     generateArcs: (novelId: number) => ipcRenderer.invoke('outline:generateArcs', novelId),
-    generateChapterOutlines: (arcId: number) => ipcRenderer.invoke('outline:generateChapterOutlines', arcId),
+    generateChapterOutlines: (arcId: number, options?: unknown) => ipcRenderer.invoke('outline:generateChapterOutlines', arcId, options),
+    clear: (novelId: number) => ipcRenderer.invoke('outline:clear', novelId),
   },
 
   // 模型管理
@@ -110,6 +116,7 @@ const api = {
   ai: {
     expandBackground: (input: unknown) => ipcRenderer.invoke('ai:expandBackground', input),
     generateCoreSettings: (data: CoreSettingsGenerationRequest) => ipcRenderer.invoke('ai:generateCoreSettings', data),
+    generateWorldRules: (data: WorldRulesGenerationRequest) => ipcRenderer.invoke('ai:generateWorldRules', data),
     generateCharacter: (novelId: number, opts: unknown) => ipcRenderer.invoke('ai:generateCharacter', novelId, opts),
     generateRelations: (novelId: number) => ipcRenderer.invoke('ai:generateRelations', novelId),
     generateSubplotBatch: (data: SubplotGenerationRequest) => ipcRenderer.invoke('ai:generateSubplotBatch', data),
@@ -135,6 +142,7 @@ const api = {
       'task:complete',
       'character:batch-progress',
       'ai:core-settings-progress',
+      'ai:world-rules-progress',
       'chapter:generation-progress',
     ]
     if (validChannels.includes(channel)) {

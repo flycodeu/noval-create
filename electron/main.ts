@@ -3,6 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import { desc, eq } from 'drizzle-orm'
 import type { CoreSettingsGenerationRequest } from '../src/shared/core-settings-generation'
+import type { WorldRulesGenerationRequest } from '../src/shared/world-rules-generation'
 import type { SubplotGenerationRequest } from '../src/shared/subplot-framework'
 import { closeDb, getDb, initDb } from './database/db'
 import {
@@ -19,6 +20,7 @@ import * as characterService from './services/character.service'
 import * as consistencyService from './services/consistency.service'
 import * as coreSettingsService from './services/core-settings.service'
 import { buildOutlineGenerationContext, buildStoryProfile } from './services/context.service'
+import * as worldRulesService from './services/world-rules.service'
 import * as exportService from './services/export.service'
 import * as itemService from './services/item.service'
 import * as mapService from './services/map.service'
@@ -201,6 +203,7 @@ function registerIpcHandlers() {
   ipcMain.handle('character:generateRelations', (_, novelId) =>
     characterService.generateCharacterRelations(novelId))
   ipcMain.handle('character:upsertRelation', (_, data) => characterService.upsertRelation(data))
+  ipcMain.handle('character:clear', (_, novelId) => characterService.clearCharactersByNovel(novelId))
 
   ipcMain.handle('map:getTree', (_, novelId) => mapService.getMapTree(novelId))
   ipcMain.handle('map:create', (_, novelId, data) => mapService.createMapItem(novelId, data))
@@ -208,6 +211,7 @@ function registerIpcHandlers() {
   ipcMain.handle('map:delete', (_, id) => mapService.deleteMapItem(id))
   ipcMain.handle('map:batchGenerate', (_, novelId, structure) =>
     mapService.batchGenerateMap(novelId, structure))
+  ipcMain.handle('map:clear', (_, novelId) => mapService.clearMapByNovel(novelId))
 
   ipcMain.handle('timeline:list', (_, novelId) => timelineService.listTimelineEvents(novelId))
   ipcMain.handle('timeline:get', (_, id) => timelineService.getTimelineEvent(id))
@@ -216,6 +220,7 @@ function registerIpcHandlers() {
   ipcMain.handle('timeline:delete', (_, id) => timelineService.deleteTimelineEvent(id))
   ipcMain.handle('timeline:generate', (_, novelId, options) =>
     timelineService.generateTimelineEvents(novelId, options))
+  ipcMain.handle('timeline:clear', (_, novelId) => timelineService.clearTimelineByNovel(novelId))
 
   ipcMain.handle('item:list', (_, novelId) => itemService.listStoryItems(novelId))
   ipcMain.handle('item:get', (_, id) => itemService.getStoryItem(id))
@@ -223,6 +228,7 @@ function registerIpcHandlers() {
   ipcMain.handle('item:update', (_, id, data) => itemService.updateStoryItem(id, data))
   ipcMain.handle('item:delete', (_, id) => itemService.deleteStoryItem(id))
   ipcMain.handle('item:generate', (_, novelId, options) => itemService.generateStoryItems(novelId, options))
+  ipcMain.handle('item:clear', (_, novelId) => itemService.clearStoryItemsByNovel(novelId))
 
   ipcMain.handle('outline:getArcs', (_, novelId) => {
     const db = getDb()
@@ -243,6 +249,17 @@ function registerIpcHandlers() {
   ipcMain.handle('outline:deleteArc', (_, id) => {
     const db = getDb()
     db.delete(storyArcs).where(eq(storyArcs.id, id)).run()
+  })
+
+  ipcMain.handle('outline:clear', (_, novelId) => {
+    const db = getDb()
+    db.delete(storyArcs).where(eq(storyArcs.novelId, novelId)).run()
+    db.update(chapters).set({
+      arcId: null,
+      outline: null,
+      emotionTone: null,
+      updatedAt: new Date().toISOString(),
+    }).where(eq(chapters.novelId, novelId)).run()
   })
 
   ipcMain.handle('outline:generateArcs', async (_, novelId) => {
@@ -290,13 +307,51 @@ function registerIpcHandlers() {
     return arcs
   })
 
-  ipcMain.handle('outline:generateChapterOutlines', async (_, arcId) => {
+  ipcMain.handle('outline:generateChapterOutlines', async (_, arcId, options?: { batchSize?: number }) => {
     const db = getDb()
     const arc = db.select().from(storyArcs).where(eq(storyArcs.id, arcId)).all()[0]
     if (!arc) throw new Error('故事弧不存在')
 
     const novel = db.select().from(novelsTable).where(eq(novelsTable.id, arc.novelId)).all()[0]
     if (!novel) throw new Error('小说不存在')
+
+    const chapterStart = arc.chapterStart || 1
+    const chapterEnd = arc.chapterEnd || Math.max(chapterStart, chapterStart + 9)
+    const batchSize = Math.max(1, Math.min(Number(options?.batchSize || 4), 6))
+    const chapterRows = db.select().from(chapters).where(eq(chapters.novelId, arc.novelId)).all()
+    const outlinedNums = new Set(
+      chapterRows
+        .filter((chapter) => chapter.chapterNum >= chapterStart && chapter.chapterNum <= chapterEnd)
+        .filter((chapter) => typeof chapter.outline === 'string' && chapter.outline.trim())
+        .map((chapter) => chapter.chapterNum),
+    )
+
+    let batchStart: number | null = null
+    for (let chapterNum = chapterStart; chapterNum <= chapterEnd; chapterNum += 1) {
+      if (!outlinedNums.has(chapterNum)) {
+        batchStart = chapterNum
+        break
+      }
+    }
+
+    if (!batchStart) {
+      return {
+        generatedCount: 0,
+        completed: true,
+        batchStart: null,
+        batchEnd: null,
+        message: '当前故事弧的章节细纲已补齐。',
+      }
+    }
+
+    let batchEnd = batchStart
+    let slotCount = 1
+    while (batchEnd < chapterEnd && slotCount < batchSize) {
+      const nextChapterNum = batchEnd + 1
+      if (outlinedNums.has(nextChapterNum)) break
+      batchEnd = nextChapterNum
+      slotCount += 1
+    }
 
     const context = await buildOutlineGenerationContext(arcId)
     const result = await taskService.runChatTask({
@@ -313,8 +368,8 @@ function registerIpcHandlers() {
           arcName: arc.arcName,
           arcGoal: arc.arcGoal || '',
           arcSummary: arc.arcSummary || '',
-          chapterStart: arc.chapterStart || 1,
-          chapterEnd: arc.chapterEnd || 10,
+          chapterStart: batchStart,
+          chapterEnd: batchEnd,
           previousSummary: context.previousSummary,
           characterStates: context.characterStates,
           continuitySummary: context.continuitySummary,
@@ -328,21 +383,19 @@ function registerIpcHandlers() {
     })
 
     const outlines = safeParseJson<Record<string, unknown>[]>(result)
+    let generatedCount = 0
+
     for (const outline of outlines) {
       const chapterNum = typeof outline.chapter_num === 'number'
         ? outline.chapter_num
         : typeof outline.num === 'number'
           ? outline.num
           : 0
-      if (!chapterNum) continue
+      if (!chapterNum || chapterNum < batchStart || chapterNum > batchEnd) continue
 
-      const existing = db.select().from(chapters)
-        .where(eq(chapters.novelId, arc.novelId))
-        .all()
-        .find((chapter) => chapter.chapterNum === chapterNum)
-
+      const existing = chapterRows.find((chapter) => chapter.chapterNum === chapterNum)
       const outlineText = formatGeneratedOutline(outline)
-      const title = typeof outline.title === 'string' ? outline.title : `第${chapterNum}章`
+      const title = typeof outline.title === 'string' ? outline.title : '第' + chapterNum + '章'
       const emotionTone = typeof outline.emotion_tone === 'string' ? outline.emotion_tone : ''
 
       if (existing) {
@@ -361,11 +414,31 @@ function registerIpcHandlers() {
           emotionTone,
           arcId,
           status: 'outline',
+          targetWords: 3000,
         }).run()
       }
+      generatedCount += 1
     }
 
-    return outlines
+    const refreshedChapters = db.select().from(chapters).where(eq(chapters.novelId, arc.novelId)).all()
+    const refreshedOutlinedNums = new Set(
+      refreshedChapters
+        .filter((chapter) => chapter.chapterNum >= chapterStart && chapter.chapterNum <= chapterEnd)
+        .filter((chapter) => typeof chapter.outline === 'string' && chapter.outline.trim())
+        .map((chapter) => chapter.chapterNum),
+    )
+    const completed = Array.from({ length: chapterEnd - chapterStart + 1 }, (_, index) => chapterStart + index)
+      .every((chapterNum) => refreshedOutlinedNums.has(chapterNum))
+
+    return {
+      generatedCount,
+      completed,
+      batchStart,
+      batchEnd,
+      message: completed
+        ? '第' + batchStart + '至第' + batchEnd + '章细纲已生成，当前故事弧已补齐。'
+        : '第' + batchStart + '至第' + batchEnd + '章细纲已生成，可继续生成下一批。',
+    }
   })
 
   ipcMain.handle('model:list', () => {
@@ -498,6 +571,8 @@ function registerIpcHandlers() {
 
   ipcMain.handle('ai:generateCoreSettings', (event, data: CoreSettingsGenerationRequest) =>
     coreSettingsService.generateCoreSettings(data, event.sender))
+  ipcMain.handle('ai:generateWorldRules', (event, data: WorldRulesGenerationRequest) =>
+    worldRulesService.generateWorldRules(data, event.sender))
 
   ipcMain.handle('ai:generateCharacter', (_, novelId, opts) =>
     characterService.generateProtagonist(novelId, opts))

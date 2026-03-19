@@ -13,7 +13,7 @@ import type { Chapter, NovelConsistencyReport, StoryItem, StoryMemorySnapshot, T
 import { useNovelStore } from '../../../stores/novel.store'
 import { useTaskStore } from '../../../stores/task.store'
 import { useWorkspaceStore } from '../../../stores/workspace.store'
-import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspaceTip } from '../components/WorkspaceShell'
+import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage } from '../components/WorkspaceShell'
 
 interface Props { novelId: number }
 interface AiCheckPayload { score: number; issues: Array<{ type: string; location: string; suggestion: string }>; overall_feedback: string }
@@ -51,6 +51,7 @@ const parseReviewNotes = (raw?: string) => { try { return raw ? JSON.parse(raw) 
 const countWords = (text: string) => ((text.match(/[\u4e00-\u9fa5]/g) || []).length + (text.match(/\b[a-zA-Z]+\b/g) || []).length)
 const getStatusLabel = (status?: Chapter['status']) => STATUS_OPTIONS.find((item) => item.value === status)?.label || '未设置'
 const getIssueColor = (severity: 'high' | 'medium' | 'low') => severity === 'high' ? 'error' : severity === 'medium' ? 'warning' : 'default'
+const getIssueLabel = (severity: 'high' | 'medium' | 'low') => severity === 'high' ? '高优先' : severity === 'medium' ? '中优先' : '低优先'
 const getHealthLabel = (score: number) => (score >= 80 ? '结构稳定' : score >= 60 ? '可继续推进' : '建议先修问题')
 const getWorldRulesSummary = (raw?: string) => {
   if (!raw) return []
@@ -288,7 +289,7 @@ export default function Writing({ novelId }: Props) {
   return (
     <WorkspacePage
       className={`novel-writing-page novel-writing-page--${mode}`}
-      eyebrow={mode === 'guided' ? 'Writing Room' : 'Chapter Pipeline'}
+      eyebrow={mode === 'guided' ? '写作台' : '章节流水线'}
       title="正文写作"
       description={mode === 'guided' ? '在同一个写作台里完成章节生成、场景计划、审校修订、长文记忆和一致性检查。' : '正文页直接打通章节四阶段流水线、全书一致性报告、时间轴联动和长文压缩记忆。'}
       heroVariant="compact"
@@ -321,13 +322,6 @@ export default function Writing({ novelId }: Props) {
         />
       )}
     >
-      {mode === 'guided' && (
-        <WorkspaceTip title="小白模式推荐这样使用">
-          <div>先选章节，再点“运行四阶段写作”，系统会先做场景计划，再出初稿，再审校，再修订。</div>
-          <div>每次手动改完正文后，记得点“更新记忆”，这样后续章节才能继承最新状态。</div>
-        </WorkspaceTip>
-      )}
-
       {loading ? (
         <div className="novel-empty novel-empty--writing"><Spin /></div>
       ) : (
@@ -372,7 +366,7 @@ export default function Writing({ novelId }: Props) {
                   <div className="novel-writing-shell__pipeline">
                     {pipelineStatus.map((stage) => (
                       <div key={stage.key} className={`novel-pipeline-stage novel-pipeline-stage--${stage.status}`}>
-                        <div className="novel-pipeline-stage__eyebrow">{`Step ${String(stage.index + 1).padStart(2, '0')}`}</div>
+                        <div className="novel-pipeline-stage__eyebrow">{`步骤 ${String(stage.index + 1).padStart(2, '0')}`}</div>
                         <div className="novel-pipeline-stage__title">{stage.title}</div>
                         <div className="novel-pipeline-stage__summary">{stage.summary}</div>
                       </div>
@@ -409,7 +403,7 @@ export default function Writing({ novelId }: Props) {
             {insightTab === 'chapter' ? (
               <>
                 <InsightCard title="本章摘要与承接"><StringList items={[currentChapter?.summary ? `本章摘要：${currentChapter.summary}` : '', currentChapter?.nextChapterSeed ? `下章种子：${currentChapter.nextChapterSeed}` : '', ...continuityItems.slice(0, mode === 'guided' ? 5 : continuityItems.length)].filter(Boolean)} empty="还没有摘要和连续性记忆。运行流水线或点击“更新记忆”后会自动补齐。" /></InsightCard>
-                <InsightCard title="场景计划">{scenePlan.length > 0 ? <div className="novel-scene-list">{scenePlan.map((scene) => <div key={`${scene.scene_order}-${scene.scene_title}`} className="novel-scene-card"><div className="novel-scene-card__header"><span>{`Scene ${String(scene.scene_order).padStart(2, '0')}`}</span><strong>{scene.scene_title}</strong></div><div className="novel-scene-card__body"><div>{scene.purpose}</div>{scene.location ? <div>地点：{scene.location}</div> : null}{scene.time_anchor ? <div>时间：{scene.time_anchor}</div> : null}{scene.present_characters?.length ? <div>人物：{scene.present_characters.join('、')}</div> : null}{scene.key_items?.length ? <div>物品：{scene.key_items.join('、')}</div> : null}{scene.must_cover?.length ? <div>必须覆盖：{scene.must_cover.join('；')}</div> : null}</div></div>)}</div> : <div className="novel-copy-block">当前章节还没有生成场景计划。</div>}</InsightCard>
+                <InsightCard title="场景计划">{scenePlan.length > 0 ? <div className="novel-scene-list">{scenePlan.map((scene) => <div key={`${scene.scene_order}-${scene.scene_title}`} className="novel-scene-card"><div className="novel-scene-card__header"><span>{`场景 ${String(scene.scene_order).padStart(2, '0')}`}</span><strong>{scene.scene_title}</strong></div><div className="novel-scene-card__body"><div>{scene.purpose}</div>{scene.location ? <div>地点：{scene.location}</div> : null}{scene.time_anchor ? <div>时间：{scene.time_anchor}</div> : null}{scene.present_characters?.length ? <div>人物：{scene.present_characters.join('、')}</div> : null}{scene.key_items?.length ? <div>物品：{scene.key_items.join('、')}</div> : null}{scene.must_cover?.length ? <div>必须覆盖：{scene.must_cover.join('；')}</div> : null}</div></div>)}</div> : <div className="novel-copy-block">当前章节还没有生成场景计划。</div>}</InsightCard>
                 <InsightCard title="章内联动"><StringList items={[...relatedEvents.map((event) => `${event.timeLabel || '时间未定'} · ${event.eventTitle}`), ...relatedItems.map((item) => `物品联动：${item.itemName}${item.plotFunction ? ` · ${item.plotFunction}` : ''}`)].slice(0, mode === 'guided' ? 6 : 12)} empty="这一章还没有挂到时间轴事件或物品实例上。建议先完善时间轴和物品联动。" /></InsightCard>
                 <InsightCard title="审校与修订"><StringList items={[reviewNotes?.summary ? `审校结论：${reviewNotes.summary}` : '', reviewNotes?.revision_brief ? `修订摘要：${reviewNotes.revision_brief}` : '', ...(reviewNotes?.critical_fixes || []).map((item) => `必须修：${item}`), ...(reviewNotes?.continuity_risks || []).map((item) => `连续性风险：${item}`), ...(reviewNotes?.language_risks || []).map((item) => `语言风险：${item}`)].filter(Boolean)} empty="当前章节还没有审校记录。运行章节流水线后会自动生成。" /></InsightCard>
                 <InsightCard title="世界规则摘要"><StringList items={worldRulesSummary} empty={currentNovel?.worldRulesJson ? '已配置世界规则，但当前没有可直接引用的结构摘要。' : '尚未配置世界规则。'} /></InsightCard>
@@ -428,7 +422,7 @@ export default function Writing({ novelId }: Props) {
             {insightTab === 'health' ? (
               <>
                 <InsightCard title="全书一致性体检">{consistencyReport ? <div className="novel-health-board"><div className="novel-health-score"><strong>{consistencyReport.readinessScore}</strong><span>{getHealthLabel(consistencyReport.readinessScore)}</span></div><div className="novel-health-breakdown"><div><strong>{consistencyReport.highCount}</strong><span>高优先</span></div><div><strong>{consistencyReport.mediumCount}</strong><span>中优先</span></div><div><strong>{consistencyReport.lowCount}</strong><span>低优先</span></div></div></div> : <div className="novel-copy-block">正在分析全书结构。</div>}</InsightCard>
-                <InsightCard title="当前章相关问题">{chapterIssues.length > 0 ? <div className="novel-issue-list">{chapterIssues.slice(0, mode === 'guided' ? 4 : 8).map((issue) => <div key={issue.id} className="novel-issue-item"><div className="novel-issue-item__head"><Tag color={getIssueColor(issue.severity)}>{issue.severity}</Tag><strong>{issue.title}</strong></div><div className="novel-issue-item__desc">{issue.description}</div><div className="novel-issue-item__suggestion">建议：{issue.suggestion}</div></div>)}</div> : <div className="novel-copy-block">当前章节暂时没有命中的结构风险。</div>}</InsightCard>
+                <InsightCard title="当前章相关问题">{chapterIssues.length > 0 ? <div className="novel-issue-list">{chapterIssues.slice(0, mode === 'guided' ? 4 : 8).map((issue) => <div key={issue.id} className="novel-issue-item"><div className="novel-issue-item__head"><Tag color={getIssueColor(issue.severity)}>{getIssueLabel(issue.severity)}</Tag><strong>{issue.title}</strong></div><div className="novel-issue-item__desc">{issue.description}</div><div className="novel-issue-item__suggestion">建议：{issue.suggestion}</div></div>)}</div> : <div className="novel-copy-block">当前章节暂时没有命中的结构风险。</div>}</InsightCard>
                 <InsightCard title="AI 检测结果">{aiResult ? <AiCheckResult result={aiResult} /> : <div className="novel-copy-block">点击顶部“AI 检测”可以检查本章的语言质量和结构问题。</div>}</InsightCard>
                 <InsightCard title="重点关注区域"><StringList items={consistencyReport?.focusAreas || []} empty="当前没有额外聚焦建议。" /></InsightCard>
               </>

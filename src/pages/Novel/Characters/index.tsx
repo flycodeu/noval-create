@@ -413,9 +413,26 @@ export default function CharactersPage({ novelId }: Props) {
     }
   }
 
+  const handleClear = async () => {
+    Modal.confirm({
+      title: '清空人物系统？',
+      content: '会删除当前小说下全部人物档案与关系数据，此操作不可撤销。',
+      okType: 'danger',
+      okText: '确认清空',
+      onOk: async () => {
+        await window.electron.character.clear(novelId)
+        form.resetFields()
+        setSelectedId(null)
+        setCreating(false)
+        await loadData(null)
+        message.success('人物系统已清空')
+      },
+    })
+  }
+
   return (
     <WorkspacePage
-      eyebrow="Character Forge"
+      eyebrow="人物系统"
       title="人物系统"
       description="先定清人物配额、实体类型和种族口径，再让角色自动继承题材、势力、地图和物品上下文。这里保留的字段都直接服务后续写作，不再堆无效设定。"
       actions={(
@@ -427,13 +444,16 @@ export default function CharactersPage({ novelId }: Props) {
             新建人物
           </Button>
           <Button icon={<RobotOutlined />} loading={generating} onClick={handleGenerateProtagonist}>
-            一键补主角
+            AI 补主角
           </Button>
           <Button icon={<ApartmentOutlined />} loading={generating} onClick={handleGenerateRelations}>
-            生成关系
+            AI 生成关系
           </Button>
           <Button type="primary" icon={<TeamOutlined />} loading={generating} onClick={() => setBatchOpen(true)}>
-            批量生成
+            AI 批量生成
+          </Button>
+          <Button danger icon={<DeleteOutlined />} loading={generating} onClick={() => void handleClear()}>
+            清空人物
           </Button>
         </Space>
       )}
@@ -480,11 +500,6 @@ export default function CharactersPage({ novelId }: Props) {
       )}
       aside={(
         <>
-          <WorkspaceTip title="批量生成怎么填">
-            <div>主要人物、次要人物、反派和功能角色先填数量，不需要一开始就手动给每个人命名。</div>
-            <div>其余种族不用单独拆页，先在批量弹窗里给出“优先种族 / 实体”偏好，生成后再回到单人档案细修。</div>
-            <div>如果是丧尸、玄幻、仙侠这类题材，优先把势力、等级口径和功能位补齐，人物会更稳。</div>
-          </WorkspaceTip>
 
           <WorkspacePanel title="当前题材的人物生态" description={worldRules.characterEcology.overview}>
             <div className="novel-note-list">

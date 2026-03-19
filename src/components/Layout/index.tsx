@@ -1,5 +1,5 @@
 import React from 'react'
-import { Layout, Menu, Tooltip, Button } from 'antd'
+import { Layout, Menu, Tooltip } from 'antd'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
   BookOutlined,
@@ -57,9 +57,11 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const { theme, setTheme } = useThemeStore()
 
   const selectedKey = menuItems.find(item => location.pathname.startsWith(item.key))?.key || '/novels'
+  const hideAppSidebar = location.pathname.startsWith('/novels/') && location.pathname !== '/novels'
 
   return (
     <Layout style={{ height: '100vh', background: 'var(--color-bg-primary)' }}>
+      {!hideAppSidebar ? (
       <Sider
         width={180}
         style={{
@@ -144,6 +146,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
           </div>
         </div>
       </Sider>
+      ) : null}
 
       <Content style={{
         background: 'var(--color-bg-primary)',

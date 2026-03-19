@@ -1,7 +1,7 @@
 import { WebContents } from 'electron'
 import { asc, eq } from 'drizzle-orm'
 import { getDb } from '../database/db'
-import { characters, characterRelations, novels } from '../database/schema'
+import { characters, characterRelations, novels, storyItems, timelineEvents } from '../database/schema'
 import { safeParseJson } from '../utils/json'
 import { buildStoryProfile } from './context.service'
 import {
@@ -53,6 +53,23 @@ function parseJsonArray(raw?: string | null): string[] {
   } catch {
     return []
   }
+}
+
+function parseNumberArray(raw?: string | null): number[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .map((item) => (typeof item === 'number' && Number.isFinite(item) ? item : Number(item)))
+      .filter((item) => Number.isFinite(item))
+  } catch {
+    return []
+  }
+}
+
+function stringifyNumberArray(values: number[]): string {
+  return JSON.stringify([...new Set(values.filter((item) => Number.isFinite(item)))])
 }
 
 function parseAppearanceDescription(raw?: string | null): string {
@@ -291,6 +308,35 @@ export function updateCharacter(id: number, data: Partial<typeof characters.$inf
 export function deleteCharacter(id: number) {
   const db = getDb()
   db.delete(characters).where(eq(characters.id, id)).run()
+}
+
+export function clearCharactersByNovel(novelId: number) {
+  const db = getDb()
+
+  const itemRows = db.select().from(storyItems).where(eq(storyItems.novelId, novelId)).all()
+  itemRows.forEach((item) => {
+    db.update(storyItems).set({
+      ownerCharacterId: null,
+      linkedCharacterIdsJson: stringifyNumberArray([]),
+      updatedAt: new Date().toISOString(),
+    }).where(eq(storyItems.id, item.id)).run()
+  })
+
+  const eventRows = db.select().from(timelineEvents).where(eq(timelineEvents.novelId, novelId)).all()
+  eventRows.forEach((event) => {
+    const presentIds = parseNumberArray(event.presentCharacterIdsJson)
+    const affectedIds = parseNumberArray(event.affectedCharacterIdsJson)
+    if (presentIds.length === 0 && affectedIds.length === 0 && !event.protagonistAction) return
+    db.update(timelineEvents).set({
+      presentCharacterIdsJson: stringifyNumberArray([]),
+      affectedCharacterIdsJson: stringifyNumberArray([]),
+      protagonistAction: event.protagonistAction || null,
+      updatedAt: new Date().toISOString(),
+    }).where(eq(timelineEvents.id, event.id)).run()
+  })
+
+  db.delete(characterRelations).where(eq(characterRelations.novelId, novelId)).run()
+  db.delete(characters).where(eq(characters.novelId, novelId)).run()
 }
 
 export function getCharacterRelations(novelId: number) {

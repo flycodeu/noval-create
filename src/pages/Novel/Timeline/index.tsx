@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+﻿import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Button,
   Form,
@@ -27,7 +27,6 @@ import {
   WorkspaceMetric,
   WorkspacePage,
   WorkspacePanel,
-  WorkspaceTip,
 } from '../components/WorkspaceShell'
 
 interface Props {
@@ -59,6 +58,12 @@ interface TimelineFormValues {
   openThreads: string[]
   notes?: string
   status: 'planned' | 'seeded' | 'written' | 'resolved'
+}
+
+interface TimelineGenerateFormValues {
+  count: number
+  batchSize: number
+  focus?: string
 }
 
 function parseStringArray(raw?: string | null): string[] {
@@ -210,6 +215,7 @@ function buildDefaultValues(
 export default function TimelinePage({ novelId }: Props) {
   const { currentNovel } = useNovelStore()
   const [form] = Form.useForm<TimelineFormValues>()
+  const [generateForm] = Form.useForm<TimelineGenerateFormValues>()
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [generating, setGenerating] = useState(false)
@@ -221,6 +227,7 @@ export default function TimelinePage({ novelId }: Props) {
   const [items, setItems] = useState<StoryItem[]>([])
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [creating, setCreating] = useState(false)
+  const [generateOpen, setGenerateOpen] = useState(false)
   const [statusFilter, setStatusFilter] = useState<'all' | TimelineEvent['status']>('all')
   const [typeFilter, setTypeFilter] = useState('all')
 
@@ -274,6 +281,14 @@ export default function TimelinePage({ novelId }: Props) {
   useEffect(() => {
     void loadData()
   }, [loadData])
+
+  useEffect(() => {
+    generateForm.setFieldsValue({
+      count: 12,
+      batchSize: 4,
+      focus: '',
+    })
+  }, [generateForm])
 
   const eventTypeOptions = Array.from(new Set(defaultEventTypes.concat(events.map((item) => item.eventType || '').filter(Boolean))))
   const filteredEvents = events.filter((event) => {
@@ -334,14 +349,17 @@ export default function TimelinePage({ novelId }: Props) {
   }
 
   const handleGenerate = async () => {
+    const values = generateForm.getFieldsValue()
     setGenerating(true)
     try {
       await window.electron.timeline.generate(novelId, {
-        count: 12,
-        focus: '把主角、关键地点、关键物品和主线冲突串成完整时间链，同时补上后果与未回收线索。',
+        count: values.count || 12,
+        batchSize: values.batchSize || 4,
+        focus: values.focus || '把主角、关键地点、关键物品和主线冲突串成完整时间链，同时补上后果与未回收线索。',
       })
+      setGenerateOpen(false)
       await loadData()
-      message.success('时间轴首版已生成。')
+      message.success('时间轴首批事件已补齐，可继续追加下一批。')
     } catch (error) {
       console.error(error)
       message.error('生成失败，请稍后再试。')
@@ -350,9 +368,26 @@ export default function TimelinePage({ novelId }: Props) {
     }
   }
 
+  const handleClear = async () => {
+    Modal.confirm({
+      title: '清空事件时间轴？',
+      content: '会删除当前小说下全部时间轴事件，但不会删除章节正文。',
+      okType: 'danger',
+      okText: '确认清空',
+      onOk: async () => {
+        await window.electron.timeline.clear(novelId)
+        form.resetFields()
+        setSelectedId(null)
+        setCreating(false)
+        await loadData(null)
+        message.success('事件时间轴已清空')
+      },
+    })
+  }
+
   return (
     <WorkspacePage
-      eyebrow="Event Chain"
+      eyebrow="时间轴"
       title="事件时间轴"
       description="把时间点、人物、地点和关键物品记成一条线。后面写章节时，就不会再忘记谁在场、谁拿着什么、结果有没有回收。"
       actions={(
@@ -363,8 +398,11 @@ export default function TimelinePage({ novelId }: Props) {
           <Button icon={<PlusOutlined />} onClick={handleNew}>
             新建事件
           </Button>
-          <Button type="primary" icon={<ThunderboltOutlined />} loading={generating} onClick={handleGenerate}>
-            一键生成
+          <Button type="primary" icon={<ThunderboltOutlined />} loading={generating} onClick={() => setGenerateOpen(true)}>
+            AI 分批生成
+          </Button>
+          <Button danger icon={<DeleteOutlined />} loading={generating} onClick={() => void handleClear()}>
+            清空时间轴
           </Button>
         </Space>
       )}
@@ -378,7 +416,7 @@ export default function TimelinePage({ novelId }: Props) {
               label: '当前焦点',
               value: selectedEvent
                 ? `${selectedEvent.timeLabel} · ${selectedEvent.eventTitle}`
-                : '先选一个事件，或一键补出首版时间链',
+                : '先选一个事件，或分批补出首版时间链',
             },
           ]}
         />
@@ -389,23 +427,6 @@ export default function TimelinePage({ novelId }: Props) {
           <WorkspaceMetric label="关键事件" value={events.filter((item) => item.isMajorEvent).length} tone="cool" hint="建议后续优先和大纲对齐" />
           <WorkspaceMetric label="已回收" value={events.filter((item) => item.status === 'resolved').length} hint="已经在正文或后续事件中完成回收" />
           <WorkspaceMetric label="待回收线" value={openThreadCount} hint="仍挂在时间轴上的问题与伏笔" />
-        </>
-      )}
-      aside={(
-        <>
-          <WorkspaceTip title="当前时间制说明">
-            <div>{selectedTimeModeLabel}</div>
-            <div>{TIME_MODE_EXAMPLES[selectedTimeMode] || '时间标签要能让你一眼看懂先后顺序。'}</div>
-            <div>{worldRules.timelineConfig.displayPattern || '建议统一口径填写，方便后续排序与回查。'}</div>
-          </WorkspaceTip>
-
-          <WorkspacePanel title="这页怎么写最省力" description="先补先后顺序，再补因果和回收项。">
-            <div className="novel-note-list">
-              <div className="novel-note-list__item">先写时间标签和排序值，保证整条线不会乱序。</div>
-              <div className="novel-note-list__item">再补谁在场、主角做了什么、结果是什么，这样最容易和章节对应。</div>
-              <div className="novel-note-list__item">最后用“待回收问题”记住还没解决的线，避免后续写丢。</div>
-            </div>
-          </WorkspacePanel>
         </>
       )}
     >
@@ -446,7 +467,7 @@ export default function TimelinePage({ novelId }: Props) {
             <div className="novel-empty"><Spin /></div>
           ) : filteredEvents.length === 0 ? (
             <div className="novel-empty">
-              当前筛选下还没有事件，可以放宽筛选，或直接一键生成首版时间轴。
+              当前筛选下还没有事件，可以放宽筛选，或直接 AI 分批生成首版时间轴。
             </div>
           ) : (
             <div className="novel-grid">
@@ -672,16 +693,39 @@ export default function TimelinePage({ novelId }: Props) {
         </WorkspacePanel>
       </div>
 
-      <div className="novel-support-grid">
-        <WorkspaceTip title="时间轴和大纲怎么配合">
-          <div>大纲负责“故事要怎么推进”，时间轴负责“这些事先后怎么发生”。</div>
-          <div>一个故事弧里通常会对应数个事件节点，写章节时优先回查关键节点和未回收线索。</div>
-        </WorkspaceTip>
-        <WorkspaceTip title="给零基础用户的填写顺序">
-          <div>先写时间标签和事件标题，再补在场人物、主角动作和结果。</div>
-          <div>最后用“直接后果”和“待回收问题”串起后续章节，这样最不容易写乱。</div>
-        </WorkspaceTip>
-      </div>
+      <Modal
+        title="AI 分批生成时间轴"
+        open={generateOpen}
+        onCancel={() => setGenerateOpen(false)}
+        onOk={handleGenerate}
+        confirmLoading={generating}
+        okText="生成下一批"
+      >
+        <Form form={generateForm} layout="vertical">
+          <div className="novel-note-list" style={{ marginBottom: 16 }}>
+            <div className="novel-note-list__item">长篇建议先补关键事件骨架，再逐轮追加人物后果、伏笔和回收节点。</div>
+            <div className="novel-note-list__item">每批数量越小，越容易避免时间顺序断裂或重复生成。</div>
+            <div className="novel-note-list__item">已有事件会被带入上下文，系统优先补缺口，不整段重写。</div>
+          </div>
+
+          <Form.Item name="count" label="本轮目标事件数">
+            <Select options={[8, 10, 12, 16, 20].map((count) => ({ value: count, label: count + ' 个' }))} />
+          </Form.Item>
+
+          <Form.Item name="batchSize" label="每批生成数量">
+            <Select options={[2, 3, 4, 5, 6].map((count) => ({ value: count, label: count + ' 个 / 批' }))} />
+          </Form.Item>
+
+          <Form.Item name="focus" label="额外聚焦">
+            <Input.TextArea
+              rows={3}
+              placeholder="例如：主角行动线、政变前后节点、物品回收或感情线转折。"
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+
     </WorkspacePage>
   )
 }
+

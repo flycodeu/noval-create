@@ -508,28 +508,32 @@ export function characterRelationsPrompt(params: CharacterRelationsPromptInput):
 
 export function mapGenerationPrompt(params: MapGenerationPromptInput): string {
   return renderPrompt([
-    `为小说《${params.novelTitle}》补一套能支撑剧情的地图结构。`,
-    sectionLines('现有信息', [
-      `世界观：${params.worldSummary}`,
-      `题材：${params.genre}`,
-      `地图结构要求：${params.mapStructure}`,
-      params.factionSummary ? `势力结构：${params.factionSummary}` : '',
-      params.mapSummary ? `蓝图补充：${params.mapSummary}` : '',
-      params.writingConstraints ? `语言约束：${params.writingConstraints}` : '',
-      params.namedPlaces ? `用户指定地点：${params.namedPlaces}` : '',
+    `\u4e3a\u5c0f\u8bf4\u300a${params.novelTitle}\u300b\u8865\u4e00\u5957\u80fd\u652f\u6491\u5267\u60c5\u7684\u5730\u56fe\u7ed3\u6784\u3002`,
+    sectionLines('\u73b0\u6709\u4fe1\u606f', [
+      `\u4e16\u754c\u89c2\uff1a${params.worldSummary}`,
+      `\u9898\u6750\uff1a${params.genre}`,
+      `\u5730\u56fe\u7ed3\u6784\u8981\u6c42\uff1a${params.mapStructure}`,
+      params.factionSummary ? `\u52bf\u529b\u7ed3\u6784\uff1a${params.factionSummary}` : '',
+      params.mapSummary ? `\u84dd\u56fe\u8865\u5145\uff1a${params.mapSummary}` : '',
+      params.writingConstraints ? `\u8bed\u8a00\u7ea6\u675f\uff1a${params.writingConstraints}` : '',
+      params.namedPlaces ? `\u7528\u6237\u6307\u5b9a\u5730\u70b9\uff1a${params.namedPlaces}` : '',
     ]),
-    section('生成要求', [
-      '命名要贴合题材和文化背景，不要串味。',
-      '每个地点既要有氛围，也要有存在价值，最好能看出会承载什么事件。',
-      '地点之间要有基本地理逻辑和父子层级逻辑，不要像随机抽卡。',
-      '地图层级严格服从题材蓝图，不要把丧尸题材写成宗门结构，也不要把仙侠地图写成现代行政区模板。',
-      '剧情关联要写具体事件或用途，不写“重要地点”这种空话。',
+    section('\u751f\u6210\u8981\u6c42', [
+      '\u547d\u540d\u8981\u8d34\u5408\u9898\u6750\u548c\u6587\u5316\u80cc\u666f\uff0c\u4e0d\u8981\u4e32\u5473\u3002',
+      '\u6bcf\u4e2a\u5730\u70b9\u65e2\u8981\u6709\u6c1b\u56f4\uff0c\u4e5f\u8981\u6709\u5b58\u5728\u4ef7\u503c\uff0c\u6700\u597d\u80fd\u770b\u51fa\u4f1a\u627f\u8f7d\u4ec0\u4e48\u4e8b\u4ef6\u3002',
+      '\u5730\u70b9\u4e4b\u95f4\u8981\u6709\u57fa\u672c\u5730\u7406\u903b\u8f91\u548c\u7236\u5b50\u5c42\u7ea7\u903b\u8f91\uff0c\u4e0d\u8981\u50cf\u968f\u673a\u62bd\u5361\u3002',
+      '\u5730\u56fe\u5c42\u7ea7\u4e25\u683c\u670d\u4ece\u9898\u6750\u84dd\u56fe\uff0c\u4e0d\u8981\u628a\u4e27\u5c38\u9898\u6750\u5199\u6210\u5b97\u95e8\u7ed3\u6784\uff0c\u4e5f\u4e0d\u8981\u628a\u4ed9\u4fa0\u5730\u56fe\u5199\u6210\u73b0\u4ee3\u884c\u653f\u533a\u6a21\u677f\u3002',
+      '\u7b2c\u4e00\u5c42\u6570\u91cf\u662f\u6839\u8282\u70b9\u603b\u6570\uff0c\u5fc5\u987b\u4e25\u683c\u7b49\u4e8e\u8981\u6c42\u3002',
+      '\u4ece\u7b2c\u4e8c\u5c42\u5f00\u59cb\uff0c\u6570\u91cf\u8981\u6c42\u8868\u793a\u201c\u6bcf\u4e2a\u7236\u8282\u70b9\u90fd\u8981\u751f\u6210\u591a\u5c11\u4e2a\u76f4\u5c5e\u5b50\u8282\u70b9\u201d\uff0c\u4e0d\u662f\u6574\u5f20\u5730\u56fe\u5171\u4eab\u4e00\u4e2a\u603b\u6570\u3002',
+      '\u5982\u679c\u8981\u6c42\u662f\u201c2 \u4e2a\u56fd\u5bb6 / \u6bcf\u56fd 3 \u4e2a\u533a\u57df / \u6bcf\u533a\u57df 4 \u4e2a\u5730\u70b9\u201d\uff0c\u5c31\u5fc5\u987b\u8f93\u51fa 2 -> 3 -> 4 \u7684\u7236\u5b50\u6276\u51fa\u7ed3\u6784\u3002',
+      '\u5267\u60c5\u5173\u8054\u8981\u5199\u5177\u4f53\u4e8b\u4ef6\u6216\u7528\u9014\uff0c\u4e0d\u5199\u201c\u91cd\u8981\u5730\u70b9\u201d\u8fd9\u79cd\u7a7a\u8bdd\u3002',
+      'children \u53ea\u80fd\u653e\u76f4\u5c5e\u4e0b\u4e00\u5c42\u8282\u70b9\uff0c\u4e0d\u80fd\u8df3\u5c42\u3002',
     ].join('\n')),
-    section('语言要求', buildHumanLanguageRules([
-      '地点描述要具体，不要堆砌形容词或写成旅游宣传语。',
-      '普通地点性质不要加引号，不要写成“真正禁区”“希望之地”这类概念包装。',
+    section('\u8bed\u8a00\u8981\u6c42', buildHumanLanguageRules([
+      '\u5730\u70b9\u63cf\u8ff0\u8981\u5177\u4f53\uff0c\u4e0d\u8981\u5806\u780c\u5f62\u5bb9\u8bcd\u6216\u5199\u6210\u65c5\u6e38\u5ba3\u4f20\u8bed\u3002',
+      '\u666e\u901a\u5730\u70b9\u6027\u8d28\u4e0d\u8981\u52a0\u5f15\u53f7\uff0c\u4e0d\u8981\u5199\u6210\u201c\u771f\u6b63\u7981\u533a\u201d\u201c\u5e0c\u671b\u4e4b\u5730\u201d\u8fd9\u7c7b\u6982\u5ff5\u5305\u88c5\u3002',
     ])),
-    '只输出递归 JSON：{"nodes":[{"name":"","node_type":"国家/宗门/基地/城市/秘境/设施等","structure_role":"该节点在蓝图中的职责","description":"","atmosphere":"","plot_relevance":"","tags":["标签1"],"affiliated_factions":["势力1"],"children":[{"name":"","node_type":"","structure_role":"","description":"","atmosphere":"","plot_relevance":"","tags":["标签1"],"affiliated_factions":["势力1"],"children":[]}]}]}',
+    '\u53ea\u8f93\u51fa\u9012\u5f52 JSON\uff1a{"nodes":[{"name":"","node_type":"\u56fd\u5bb6/\u5b97\u95e8/\u57fa\u5730/\u57ce\u5e02/\u79d8\u5883/\u8bbe\u65bd\u7b49","structure_role":"\u8be5\u8282\u70b9\u5728\u84dd\u56fe\u4e2d\u7684\u804c\u8d23","description":"","atmosphere":"","plot_relevance":"","tags":["\u6807\u7b7e1"],"affiliated_factions":["\u52bf\u529b1"],"children":[{"name":"","node_type":"","structure_role":"","description":"","atmosphere":"","plot_relevance":"","tags":["\u6807\u7b7e1"],"affiliated_factions":["\u52bf\u529b1"],"children":[]}]}]}',
   ])
 }
 

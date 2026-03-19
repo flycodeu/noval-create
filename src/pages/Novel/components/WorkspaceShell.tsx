@@ -14,6 +14,8 @@ export function WorkspacePage({
   aside,
   footerBar,
   heroVariant = 'default',
+  layout = 'wide',
+  asidePlacement = 'below',
   bodyClassName,
   className,
   children,
@@ -27,12 +29,14 @@ export function WorkspacePage({
   aside?: React.ReactNode
   footerBar?: React.ReactNode
   heroVariant?: 'default' | 'compact'
+  layout?: 'standard' | 'wide'
+  asidePlacement?: 'side' | 'below'
   bodyClassName?: string
   className?: string
   children: React.ReactNode
 }) {
   return (
-    <div className={joinClassNames('novel-workspace', className)}>
+    <div className={joinClassNames('novel-workspace', `novel-workspace--${layout}`, className)}>
       <section className={joinClassNames('novel-hero', heroVariant === 'compact' && 'novel-hero--compact')}>
         <div className="novel-hero__copy">
           {eyebrow ? <div className="novel-hero__eyebrow">{eyebrow}</div> : null}
@@ -48,6 +52,7 @@ export function WorkspacePage({
         className={joinClassNames(
           'novel-workspace__body',
           aside && 'novel-workspace__body--with-aside',
+          aside && `novel-workspace__body--aside-${asidePlacement}`,
           bodyClassName,
         )}
       >

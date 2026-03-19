@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+﻿import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Button,
   Form,
@@ -26,7 +26,6 @@ import {
   WorkspaceMetric,
   WorkspacePage,
   WorkspacePanel,
-  WorkspaceTip,
 } from '../components/WorkspaceShell'
 
 interface Props {
@@ -60,6 +59,7 @@ interface GenerateFormValues {
   templateOnly: boolean
   refreshTemplates: boolean
   count: number
+  batchSize: number
   focus?: string
 }
 
@@ -202,6 +202,7 @@ export default function ItemsPage({ novelId }: Props) {
   useEffect(() => {
     generateForm.setFieldsValue({
       count: profile.defaultBatch,
+      batchSize: 4,
       templateOnly: false,
       refreshTemplates: true,
       focus: '',
@@ -298,7 +299,7 @@ export default function ItemsPage({ novelId }: Props) {
       await window.electron.item.generate(novelId, values)
       setGenerateOpen(false)
       await loadData()
-      message.success(values.templateOnly ? '题材模板已生成。' : '模板和实例已补齐首版。')
+      message.success(values.templateOnly ? '题材模板已生成。' : '模板和实例首批已补齐，可继续生成下一批。')
     } catch (error) {
       console.error(error)
       message.error('生成失败，请稍后再试。')
@@ -307,9 +308,26 @@ export default function ItemsPage({ novelId }: Props) {
     }
   }
 
+  const handleClear = async () => {
+    Modal.confirm({
+      title: '清空物品系统？',
+      content: '会删除当前小说下全部物品模板与实例，此操作不可撤销。',
+      okType: 'danger',
+      okText: '确认清空',
+      onOk: async () => {
+        await window.electron.item.clear(novelId)
+        form.resetFields()
+        setSelectedId(null)
+        setCreating(false)
+        await loadData(null)
+        message.success('物品系统已清空')
+      },
+    })
+  }
+
   return (
     <WorkspacePage
-      eyebrow="Item Forge"
+      eyebrow="物品系统"
       title="物品与装备系统"
       description="先搭好符合题材的物品模板，再让具体实例落到人物、地点和事件上。模板负责结构，实例负责落地，这样后面写作时不会总是临时补道具。"
       actions={(
@@ -324,7 +342,10 @@ export default function ItemsPage({ novelId }: Props) {
             新建实例
           </Button>
           <Button type="primary" icon={<ThunderboltOutlined />} onClick={() => setGenerateOpen(true)}>
-            一键生成
+            AI 分批生成
+          </Button>
+          <Button danger icon={<DeleteOutlined />} onClick={() => void handleClear()}>
+            清空物品
           </Button>
         </Space>
       )}
@@ -338,7 +359,7 @@ export default function ItemsPage({ novelId }: Props) {
               label: '当前焦点',
               value: selectedItem
                 ? `${selectedItem.itemName} · ${selectedItem.itemKind === 'template' ? '模板' : '实例'}`
-                : '先选一条记录，或一键补出首版模板',
+                : '先选一条记录，或分批补出首版模板',
             },
           ]}
         />
@@ -352,11 +373,6 @@ export default function ItemsPage({ novelId }: Props) {
         </>
       )}
     >
-      <WorkspaceTip title="新手怎么用这一页">
-        <div>先点一次「一键生成」，拿到按题材整理好的模板。</div>
-        <div>模板看的是“这个题材常见什么物品”，实例看的是“具体哪件东西落在谁手里、出现在什么场景”。</div>
-        <div>右侧优先补四项：持有者、获取方式、使用方式、剧情作用。剩下的都是辅助你防止遗忘。</div>
-      </WorkspaceTip>
 
       <div className="novel-split novel-split--sidebar">
         <WorkspacePanel
@@ -395,7 +411,7 @@ export default function ItemsPage({ novelId }: Props) {
             <div className="novel-empty"><Spin /></div>
           ) : visibleItems.length === 0 ? (
             <div className="novel-empty">
-              当前筛选下还没有{currentModeLabel}记录，可以放宽筛选，或直接一键生成首版。
+              当前筛选下还没有{currentModeLabel}记录，可以放宽筛选，或直接 AI 分批生成首版。
             </div>
           ) : (
             <div className="novel-grid">
@@ -627,20 +643,19 @@ export default function ItemsPage({ novelId }: Props) {
           ))}
         </div>
       </WorkspacePanel>
-
       <Modal
-        title="一键生成物品"
+        title="AI 分批生成物品"
         open={generateOpen}
         onCancel={() => setGenerateOpen(false)}
         onOk={handleGenerate}
         confirmLoading={generating}
-        okText="开始生成"
+        okText="生成下一批"
       >
         <Form form={generateForm} layout="vertical">
           <div className="novel-note-list" style={{ marginBottom: 16 }}>
-            <div className="novel-note-list__item">建议先刷新模板，再补实例。模板负责题材结构，实例负责人物和事件挂点。</div>
-            <div className="novel-note-list__item">如果你已经手动整理过模板，可以关闭“刷新模板”，只补缺失实例。</div>
-            <div className="novel-note-list__item">额外聚焦可以告诉系统这轮优先补哪条线，例如主角求生装备、门派功法、恋爱线证物等。</div>
+            <div className="novel-note-list__item">建议先刷新模板，再补实例。</div>
+            <div className="novel-note-list__item">长篇建议把每批数量控制在 3 到 5 条。</div>
+            <div className="novel-note-list__item">额外聚焦用来指定本轮优先补哪条线。</div>
           </div>
 
           <Form.Item name="templateOnly" label="生成模式">
@@ -661,14 +676,18 @@ export default function ItemsPage({ novelId }: Props) {
             />
           </Form.Item>
 
-          <Form.Item name="count" label="实例数量">
-            <Select options={[8, 10, 12, 14, 18].map((count) => ({ value: count, label: `${count} 条` }))} />
+          <Form.Item name="count" label="本轮目标实例数">
+            <Select options={[8, 10, 12, 14, 18].map((count) => ({ value: count, label: count + ' 条' }))} />
+          </Form.Item>
+
+          <Form.Item name="batchSize" label="每批生成数量">
+            <Select options={[2, 3, 4, 5, 6].map((count) => ({ value: count, label: count + ' 条 / 批' }))} />
           </Form.Item>
 
           <Form.Item name="focus" label="额外聚焦">
             <Input.TextArea
               rows={3}
-              placeholder="例如：主角团的求生装备、宗门内斗的信物与功法、恋爱线里的误会证物。"
+              placeholder="例如：主角团的求生装备、宗门功法或恋爱线证物。"
             />
           </Form.Item>
         </Form>
@@ -676,3 +695,4 @@ export default function ItemsPage({ novelId }: Props) {
     </WorkspacePage>
   )
 }
+

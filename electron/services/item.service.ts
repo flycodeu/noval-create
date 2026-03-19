@@ -17,6 +17,7 @@ type StoryItemStatus = 'available' | 'consumed' | 'hidden' | 'destroyed'
 
 interface StoryItemGenerateOptions {
   count?: number
+  batchSize?: number
   focus?: string
   templateOnly?: boolean
   refreshTemplates?: boolean
@@ -178,6 +179,19 @@ function buildEventSummary(rows: Array<typeof timelineEvents.$inferSelect>): str
     .join('\n')
 }
 
+function buildExistingItemSummary(rows: Array<typeof storyItems.$inferSelect>): string {
+  return rows
+    .filter((row) => row.itemKind === 'instance')
+    .slice(0, 12)
+    .map((row) => {
+      const parts = [row.category, row.locationMapId ? '\u5df2\u7ed1\u5b9a\u5730\u70b9' : '', row.ownerCharacterId ? '\u5df2\u7ed1\u5b9a\u6301\u6709\u8005' : '']
+        .filter(Boolean)
+        .join(' / ')
+      return `- ${row.itemName}${parts ? `\uFF1A${parts}` : ''}`
+    })
+    .join('\n')
+}
+
 function buildPrompt(input: {
   novelTitle: string
   genre: string
@@ -190,6 +204,7 @@ function buildPrompt(input: {
   factionSummary: string
   arcSummary: string
   eventSummary: string
+  existingItemSummary: string
   focus?: string
   count: number
 }) {
@@ -221,6 +236,9 @@ function buildPrompt(input: {
     '',
     '【时间轴】',
     input.eventSummary || '暂无时间轴事件',
+    '',
+    '【已有物品实例】',
+    input.existingItemSummary || '暂无已有实例',
     '',
     '【生成要求】',
     `1. 生成 ${input.count} 个具体物品实例，不要只给分类。`,
@@ -398,6 +416,20 @@ export function deleteStoryItem(id: number) {
   db.delete(storyItems).where(eq(storyItems.id, id)).run()
 }
 
+export function clearStoryItemsByNovel(novelId: number) {
+  const db = getDb()
+  const eventRows = db.select().from(timelineEvents).where(eq(timelineEvents.novelId, novelId)).all()
+
+  eventRows.forEach((event) => {
+    db.update(timelineEvents).set({
+      linkedItemIdsJson: JSON.stringify([]),
+      updatedAt: new Date().toISOString(),
+    }).where(eq(timelineEvents.id, event.id)).run()
+  })
+
+  db.delete(storyItems).where(eq(storyItems.novelId, novelId)).run()
+}
+
 export async function generateStoryItems(
   novelId: number,
   options: StoryItemGenerateOptions = {},
@@ -422,56 +454,64 @@ export async function generateStoryItems(
   const mapRows = db.select().from(worldMap).where(eq(worldMap.novelId, novelId)).all()
   const eventRows = db.select().from(timelineEvents).where(eq(timelineEvents.novelId, novelId)).all()
   const arcRows = db.select().from(storyArcs).where(eq(storyArcs.novelId, novelId)).all()
-
-  const prompt = buildPrompt({
-    novelTitle: novel.title,
-    genre: profile.genre,
-    background: profile.background,
-    worldSummary: profile.worldRulesSummary,
-    storyCore: [
-      `故事目标：${profile.storyGoal || '未补充'}`,
-      `核心冲突：${profile.coreConflict || '未补充'}`,
-      `主线剧情：${profile.mainPlot || '未补充'}`,
-      `结局方向：${profile.ending || '未补充'}`,
-    ].join('\n'),
-    templateSummary: buildItemTemplateSummary(itemProfile),
-    characterSummary: buildCharacterSummary(characterRows),
-    locationSummary: buildLocationSummary(mapRows),
-    factionSummary: getFactionNameOptions(rules).join('、'),
-    arcSummary: buildArcSummary(arcRows),
-    eventSummary: buildEventSummary(eventRows),
-    focus: options.focus,
-    count: Math.min(Math.max(options.count || itemProfile.defaultBatch, 6), 24),
-  })
-
-  const result = await runChatTask({
-    type: 'generate_items',
-    novelId,
-    messages: [{ role: 'user', content: prompt }],
-    modelConfigId: novel.modelConfigId || undefined,
-  })
-
-  const parsed = cleanAiValue(safeParseJson<GeneratedStoryItem[]>(result))
-  if (!Array.isArray(parsed)) {
-    throw new Error('物品生成结果不是有效数组')
-  }
+  const totalCount = Math.min(Math.max(options.count || itemProfile.defaultBatch, 4), 24)
+  const batchSize = Math.max(1, Math.min(totalCount, options.batchSize || Math.min(totalCount, 4)))
 
   const createdIds: number[] = []
   let nextSort = getNextSortOrder(novelId)
 
-  for (const rawItem of parsed) {
-    const payload = buildGeneratedPayload(rawItem, {
-      genreFamily: resolveGenreFamily(profile.genre),
-      templateRows,
-      characterRows,
-      mapRows,
-      eventRows,
-      sortOrder: nextSort,
+  for (let generatedCount = 0; generatedCount < totalCount; generatedCount += batchSize) {
+    const currentBatchCount = Math.min(batchSize, totalCount - generatedCount)
+    const currentItems = db.select().from(storyItems).where(eq(storyItems.novelId, novelId)).all()
+
+    const prompt = buildPrompt({
+      novelTitle: novel.title,
+      genre: profile.genre,
+      background: profile.background,
+      worldSummary: profile.worldRulesSummary,
+      storyCore: [
+        `Story goal: ${profile.storyGoal || 'not provided'}`,
+        `Core conflict: ${profile.coreConflict || 'not provided'}`,
+        `Main plot: ${profile.mainPlot || 'not provided'}`,
+        `Ending direction: ${profile.ending || 'not provided'}`,
+      ].join('\n'),
+      templateSummary: buildItemTemplateSummary(itemProfile),
+      characterSummary: buildCharacterSummary(characterRows),
+      locationSummary: buildLocationSummary(mapRows),
+      factionSummary: getFactionNameOptions(rules).join(', '),
+      arcSummary: buildArcSummary(arcRows),
+      eventSummary: buildEventSummary(eventRows),
+      existingItemSummary: buildExistingItemSummary(currentItems),
+      focus: [options.focus, `\u7b2c${Math.floor(generatedCount / batchSize) + 1}\u6279\uff1a\u53ea\u8865 ${currentBatchCount} \u4e2a\u65b0\u7684\u7269\u54c1\u5b9e\u4f8b\uff0c\u907f\u514d\u91cd\u590d\u5df2\u6709\u7269\u54c1\u3002`].filter(Boolean).join('\n'),
+      count: currentBatchCount,
     })
-    if (!payload) continue
-    const id = createStoryItem(novelId, payload)
-    createdIds.push(id)
-    nextSort += 1
+
+    const result = await runChatTask({
+      type: 'generate_items',
+      novelId,
+      messages: [{ role: 'user', content: prompt }],
+      modelConfigId: novel.modelConfigId || undefined,
+    })
+
+    const parsed = cleanAiValue(safeParseJson<GeneratedStoryItem[]>(result))
+    if (!Array.isArray(parsed)) {
+      throw new Error('Item generation result is not a valid array')
+    }
+
+    for (const rawItem of parsed) {
+      const payload = buildGeneratedPayload(rawItem, {
+        genreFamily: resolveGenreFamily(profile.genre),
+        templateRows,
+        characterRows,
+        mapRows,
+        eventRows,
+        sortOrder: nextSort,
+      })
+      if (!payload) continue
+      const id = createStoryItem(novelId, payload)
+      createdIds.push(id)
+      nextSort += 1
+    }
   }
 
   return createdIds

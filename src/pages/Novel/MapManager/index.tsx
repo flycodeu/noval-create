@@ -7,6 +7,7 @@ import {
   InputNumber,
   Modal,
   Select,
+  Space,
   Spin,
   Tree,
   message,
@@ -30,7 +31,7 @@ import ReactFlow, {
 } from 'reactflow'
 import 'reactflow/dist/style.css'
 import { useNovelStore } from '../../../stores/novel.store'
-import { WorldMapItem } from '../../../types'
+import type { MapBatchGenerationResult, WorldMapItem } from '../../../types'
 import {
   getBlueprintLevelByDepth,
   getMapBlueprintDepth,
@@ -39,13 +40,109 @@ import {
   parseWorldRulesJson,
 } from '../../../shared/genre-system'
 import {
+  WorkspaceContextSummary,
   WorkspaceMetric,
   WorkspacePage,
   WorkspacePanel,
-  WorkspaceTip,
 } from '../components/WorkspaceShell'
 
 interface Props { novelId: number }
+
+interface MapGenerationStatus {
+  completed: boolean
+  nextDepth: number | null
+  nextLabel: string
+  pendingParentCount: number
+  pendingNodeCount: number
+}
+
+const COPY = {
+  eyebrow: '地图结构',
+  title: '地图结构',
+  description: '先把国家、区域、地点的父子结构搭稳，再把剧情用途、氛围和势力归属补齐。地图是故事空间骨架，不再只是地点清单。',
+  treeView: '树形编辑',
+  graphView: '图谱总览',
+  generate: '按层级生成',
+  addRoot: '添加根节点',
+  theme: '题材',
+  blueprintDepth: '蓝图层级',
+  structurePath: '结构口径',
+  currentSelection: '当前选中',
+  selectHint: '先选一个节点再编辑',
+  rootMetric: '根节点',
+  rootHint: '国家 / 大区 / 界域等顶层结构',
+  secondMetric: '第二层区域',
+  secondHint: '每个根节点下的直属区域',
+  leafMetric: '最末层地点',
+  leafHint: '当前最深层承载剧情的地点数',
+  totalMetric: '总节点数',
+  panelTitle: '地图结构编辑台',
+  panelDescription: '顶栏只保留层级规则和数量语义。第二层开始的数量表示每个父节点各自拥有多少个直属子节点。',
+  treeModePill: '当前为树形编辑模式',
+  graphModePill: '当前为图谱总览模式',
+  rootCountEyebrow: '根层总数',
+  perParentEyebrow: '每个父节点的直属数量',
+  typePrefix: '节点类型：',
+  treeTitle: '结构树',
+  treeCopy: '左侧只看父子层级，右侧集中编辑节点信息。',
+  generatedCountPrefix: '已生成',
+  generatedCountSuffix: '个节点',
+  emptyMap: '还没有地图结构，先按层级生成一版',
+  detailFallbackTitle: '节点详情',
+  detailEmpty: '从左侧选择节点后，在这里集中编辑名称、结构职责、剧情用途和势力归属。',
+  addChild: '添加子节点',
+  delete: '删除',
+  save: '保存',
+  basicTitle: '基础信息',
+  basicDesc: '先定义它叫什么、属于哪一层、表面上是什么地方。',
+  name: '名称',
+  nodeType: '节点类型',
+  dangerLevel: '风险等级',
+  dangerPlaceholder: '例如：低 / 中 / 高 / 禁入',
+  locationType: '地点细分',
+  locationPlaceholder: '例如：都城、边境区、港口、实验设施、洞府',
+  structureRole: '结构职责',
+  rolePlaceholder: '例如：国家首都、区域枢纽、冲突爆发点、补给节点',
+  atmosphereTitle: '空间气质',
+  atmosphereDesc: '让这个地方既有外观感，也有可写的氛围基调。',
+  descriptionLabel: '空间描述',
+  descriptionPlaceholder: '写清楚地貌、建筑、秩序和活动方式。',
+  atmosphereLabel: '氛围基调',
+  atmospherePlaceholder: '例如：繁华但高压、封锁死寂、灵气浓郁、军管森严',
+  storyTitle: '剧情用途与关联',
+  storyDesc: '这部分直接决定后续时间轴、人物和物品怎么挂靠到这里。',
+  plotRelevance: '剧情用途',
+  plotPlaceholder: '写这里会承载什么事件、冲突、伏笔或回收。',
+  tags: '地点标签',
+  tagsPlaceholder: '例如：主角起点、势力核心、补给点、禁区、秘境入口',
+  factions: '关联势力',
+  noSelection: '选择一个节点后，这里会展开完整编辑表单。',
+  graphEmpty: '还没有地图结构，先生成一版国家 → 区域 → 地点层级。',
+  modalTitle: '按层级生成地图',
+  modalOk: '生成下一批',
+  batchSizeLabel: '每批父节点数',
+  batchSizeExtra: '长篇建议先用 1，稳定后再提高到 2 或 3。',
+  progressTitle: '当前分批进度',
+  progressDone: '当前按这组数量配置，地图蓝图已经补齐。',
+  progressPendingPrefix: '下一批将补',
+  progressParentsSuffix: '个父节点',
+  actionStart: '开始分批生成',
+  actionContinue: '继续生成下一批',
+  rootCountExtra: '这是根层总数。',
+  perParentExtra: '这里表示每个上一级节点各自拥有多少个直属子节点。',
+  namedPlaces: '已知地点名称（每行一个，可留空）',
+  namedPlacesPlaceholder: '例如：帝都\\n南境要塞\\n九曜秘境',
+  saveSuccess: '地图节点已保存',
+  saveError: '保存失败',
+  deleteContent: '会同时删除它下面的全部子节点。',
+  maxDepthWarning: '当前题材蓝图已经到最深层级了',
+  generateSuccess: '地图结构已生成',
+  generateError: '地图生成失败',
+  emptyNodeName: '新节点',
+  regionFallback: '区域',
+  placeFallback: '地点',
+  placeholderUnknown: '未设置',
+} as const
 
 function parseStringArrayJson(raw?: string): string[] {
   if (!raw) return []
@@ -63,62 +160,142 @@ function countTreeNodes(items: WorldMapItem[]): number {
   return items.reduce((total, item) => total + 1 + countTreeNodes(item.children || []), 0)
 }
 
+function countNodesByDepth(items: WorldMapItem[], depth: number): number {
+  return items.reduce((total, item) => {
+    const current = item.level === depth ? 1 : 0
+    return total + current + countNodesByDepth(item.children || [], depth)
+  }, 0)
+}
+
+function flattenMapItems(items: WorldMapItem[]): WorldMapItem[] {
+  return items.flatMap((item) => [item, ...flattenMapItems(item.children || [])])
+}
+
+function getMapGenerationStatus(
+  items: WorldMapItem[],
+  requestedCounts: Map<number, number>,
+  blueprintLevels: Array<{ depth: number; label: string }>,
+): MapGenerationStatus {
+  if (blueprintLevels.length === 0) {
+    return {
+      completed: true,
+      nextDepth: null,
+      nextLabel: '蓝图未设置',
+      pendingParentCount: 0,
+      pendingNodeCount: 0,
+    }
+  }
+
+  const rootLevel = blueprintLevels[0]
+  const rootTarget = requestedCounts.get(rootLevel.depth) || 1
+  if (items.length < rootTarget) {
+    return {
+      completed: false,
+      nextDepth: rootLevel.depth,
+      nextLabel: rootLevel.label,
+      pendingParentCount: rootTarget - items.length,
+      pendingNodeCount: rootTarget - items.length,
+    }
+  }
+
+  const flatItems = flattenMapItems(items)
+  for (let index = 1; index < blueprintLevels.length; index += 1) {
+    const level = blueprintLevels[index]
+    const parentDepth = level.depth - 1
+    const requiredCount = requestedCounts.get(level.depth) || 1
+    const parents = flatItems.filter((item) => item.level === parentDepth)
+    const pendingParents = parents.filter((parent) => (parent.children || []).length < requiredCount)
+    if (pendingParents.length > 0) {
+      const pendingNodeCount = pendingParents.reduce((total, parent) => total + Math.max(requiredCount - (parent.children || []).length, 0), 0)
+      return {
+        completed: false,
+        nextDepth: level.depth,
+        nextLabel: level.label,
+        pendingParentCount: pendingParents.length,
+        pendingNodeCount,
+      }
+    }
+  }
+
+  return {
+    completed: true,
+    nextDepth: null,
+    nextLabel: blueprintLevels[blueprintLevels.length - 1]?.label || '地图层级',
+    pendingParentCount: 0,
+    pendingNodeCount: 0,
+  }
+}
+
+function getLevelSymbol(level: number): string {
+  switch (level) {
+    case 1:
+      return '国'
+    case 2:
+      return '区'
+    case 3:
+      return '点'
+    default:
+      return '层'
+  }
+}
+
 function mapToTreeData(items: WorldMapItem[]): DataNode[] {
   return items.map((item) => ({
     key: item.id,
     title: (
-      <span>
-        {item.level === 1 ? '⛰' : item.level === 2 ? '◈' : '•'} {item.name}
-        <span style={{ color: 'var(--color-text-muted)', fontSize: 11, marginLeft: 6 }}>
-          {item.nodeType || item.locationType || `第 ${item.level} 层`}
-        </span>
+      <span className="novel-map-tree__title-row">
+        <span className="novel-map-tree__symbol">{getLevelSymbol(item.level)}</span>
+        <span className="novel-map-tree__label">{item.name}</span>
+        <span className="novel-map-tree__meta">{item.nodeType || item.locationType || `第${item.level}层`}</span>
       </span>
     ),
     children: item.children ? mapToTreeData(item.children) : [],
   }))
 }
 
+function getSubtreeWidth(item: WorldMapItem): number {
+  if (!item.children || item.children.length === 0) return 1
+  return item.children.reduce((total, child) => total + getSubtreeWidth(child), 0)
+}
+
 function buildFlowGraph(items: WorldMapItem[]): { nodes: Node[]; edges: Edge[] } {
   const nodes: Node[] = []
   const edges: Edge[] = []
-
   const levelColors: Record<number, string> = {
-    1: '#2E86AB',
-    2: '#9b59b6',
-    3: '#e67e22',
-    4: '#16a085',
+    1: '#8f6330',
+    2: '#2E86AB',
+    3: '#4f8b64',
+    4: '#c86b3c',
   }
+  const horizontalGap = 260
+  const verticalGap = 190
 
   function traverse(list: WorldMapItem[], parentId: number | null, depth: number, offsetX: number) {
-    let xCursor = offsetX
+    let cursor = offsetX
     for (const item of list) {
-      const x = xCursor
-      const y = depth * 170 + 40
+      const subtreeWidth = getSubtreeWidth(item)
+      const x = cursor + ((subtreeWidth - 1) * horizontalGap) / 2
+      const y = depth * verticalGap + 40
+
       nodes.push({
         id: String(item.id),
         position: { x, y },
         data: {
           label: (
-            <div style={{ textAlign: 'center', fontSize: 12 }}>
-              <div style={{ fontWeight: 600, fontSize: 11 }}>{item.name}</div>
-              <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10, marginTop: 4 }}>
-                {item.nodeType || item.locationType || `第 ${item.level} 层`}
-              </div>
-              {item.structureRole && (
-                <div style={{ color: 'rgba(255,255,255,0.45)', fontSize: 10, marginTop: 2 }}>
-                  {item.structureRole}
-                </div>
-              )}
+            <div className="novel-map-graph-node">
+              <div className="novel-map-graph-node__title">{item.name}</div>
+              <div className="novel-map-graph-node__meta">{item.nodeType || item.locationType || `第${item.level}层`}</div>
+              {item.structureRole ? <div className="novel-map-graph-node__role">{item.structureRole}</div> : null}
             </div>
           ),
         },
         style: {
-          background: 'var(--color-bg-card)',
+          width: 220,
+          padding: 14,
+          borderRadius: 18,
           border: `2px solid ${levelColors[item.level] || '#5c6378'}`,
-          borderRadius: 8,
-          color: 'var(--color-text-primary)',
-          width: 140,
-          padding: 8,
+          background: 'rgba(255, 252, 246, 0.98)',
+          boxShadow: '0 18px 32px rgba(37, 31, 24, 0.12)',
         },
       })
 
@@ -128,20 +305,19 @@ function buildFlowGraph(items: WorldMapItem[]): { nodes: Node[]; edges: Edge[] }
           source: String(parentId),
           target: String(item.id),
           markerEnd: { type: MarkerType.ArrowClosed },
-          style: { stroke: levelColors[item.level] || '#5c6378' },
+          style: { stroke: levelColors[item.level] || '#5c6378', strokeWidth: 1.6 },
         })
       }
 
       if (item.children && item.children.length > 0) {
-        traverse(item.children, item.id, depth + 1, xCursor)
-        xCursor += Math.max(item.children.length, 1) * 180
-      } else {
-        xCursor += 180
+        traverse(item.children, item.id, depth + 1, cursor)
       }
+
+      cursor += subtreeWidth * horizontalGap
     }
   }
 
-  traverse(items, null, 0, 50)
+  traverse(items, null, 0, 40)
   return { nodes, edges }
 }
 
@@ -185,8 +361,13 @@ export default function MapManager({ novelId }: Props) {
     for (const level of blueprintLevels) {
       initialValues[`layer_${level.depth}`] = level.suggestedCount
     }
+    initialValues.parentBatchSize = 1
     batchForm.setFieldsValue(initialValues)
   }, [batchForm, blueprintLevels])
+  const batchPreviewValues = Form.useWatch([], batchForm) as Record<string, number> | undefined
+  const requestedLayerCounts = useMemo(() => new Map(
+    blueprintLevels.map((level) => [level.depth, batchPreviewValues?.[`layer_${level.depth}`] || level.suggestedCount]),
+  ), [batchPreviewValues, blueprintLevels])
 
   const findItem = (items: WorldMapItem[], id: number): WorldMapItem | null => {
     for (const item of items) {
@@ -206,22 +387,22 @@ export default function MapManager({ novelId }: Props) {
     }
 
     const item = findItem(treeData, Number(keys[0]))
-    if (item) {
-      setSelected(item)
-      detailForm.setFieldsValue({
-        name: item.name,
-        locationType: item.locationType,
-        nodeType: item.nodeType,
-        structureRole: item.structureRole,
-        parentRuleType: item.parentRuleType,
-        description: item.description,
-        atmosphere: item.atmosphere,
-        plotRelevance: item.plotRelevance,
-        dangerLevel: item.dangerLevel,
-        tags: parseStringArrayJson(item.tagsJson),
-        affiliatedFactions: parseStringArrayJson(item.affiliatedFactionIdsJson),
-      })
-    }
+    if (!item) return
+
+    setSelected(item)
+    detailForm.setFieldsValue({
+      name: item.name,
+      locationType: item.locationType,
+      nodeType: item.nodeType,
+      structureRole: item.structureRole,
+      parentRuleType: item.parentRuleType,
+      description: item.description,
+      atmosphere: item.atmosphere,
+      plotRelevance: item.plotRelevance,
+      dangerLevel: item.dangerLevel,
+      tags: parseStringArrayJson(item.tagsJson),
+      affiliatedFactions: parseStringArrayJson(item.affiliatedFactionIdsJson),
+    })
   }
 
   const handleSaveDetail = async () => {
@@ -235,10 +416,10 @@ export default function MapManager({ novelId }: Props) {
         tagsJson: JSON.stringify(tags || []),
         affiliatedFactionIdsJson: JSON.stringify(affiliatedFactions || []),
       })
-      message.success('地图节点已保存')
+      message.success(COPY.saveSuccess)
       await loadTree()
     } catch {
-      message.error('保存失败')
+      message.error(COPY.saveError)
     } finally {
       setSaving(false)
     }
@@ -248,7 +429,7 @@ export default function MapManager({ novelId }: Props) {
     if (!selected) return
     Modal.confirm({
       title: `确认删除「${selected.name}」？`,
-      content: '会同时删除所有子节点。',
+      content: COPY.deleteContent,
       okType: 'danger',
       onOk: async () => {
         await window.electron.map.delete(selected.id)
@@ -262,8 +443,8 @@ export default function MapManager({ novelId }: Props) {
     const rootLevel = blueprintLevels[0]
     await window.electron.map.create(novelId, {
       level: 1,
-      name: rootLevel?.examples?.[0] || '新区域',
-      nodeType: rootLevel?.nodeTypes?.[0] || '区域',
+      name: rootLevel?.examples?.[0] || `新${rootLevel?.label || COPY.emptyNodeName}`,
+      nodeType: rootLevel?.nodeTypes?.[0] || COPY.regionFallback,
       structureRole: rootLevel?.relationHint || '',
     })
     await loadTree()
@@ -272,7 +453,7 @@ export default function MapManager({ novelId }: Props) {
   const handleAddChild = async (parentItem: WorldMapItem) => {
     const newLevel = parentItem.level + 1
     if (newLevel > maxDepth) {
-      message.warning('当前题材蓝图下已经是最深层级')
+      message.warning(COPY.maxDepthWarning)
       return
     }
 
@@ -280,141 +461,184 @@ export default function MapManager({ novelId }: Props) {
     await window.electron.map.create(novelId, {
       level: newLevel,
       parentId: parentItem.id,
-      name: levelRule?.examples?.[0] || `新${levelRule?.label || '地点'}`,
-      nodeType: levelRule?.nodeTypes?.[0] || '地点',
+      name: levelRule?.examples?.[0] || `新${levelRule?.label || COPY.placeFallback}`,
+      nodeType: levelRule?.nodeTypes?.[0] || COPY.placeFallback,
       parentRuleType: parentItem.nodeType || parentItem.locationType || '',
       structureRole: levelRule?.relationHint || '',
     })
     await loadTree()
   }
 
+  const buildLayerFieldLabel = useCallback((depth: number) => {
+    const current = blueprintLevels.find((level) => level.depth === depth)
+    if (!current) return `第${depth}层数量`
+    if (depth === 1) return `${current.label}数量`
+    const parent = blueprintLevels.find((level) => level.depth === depth - 1)
+    return `每个${parent?.label || `第${depth - 1}层`}下的${current.label}数量`
+  }, [blueprintLevels])
+
   const handleBatchGenerate = async () => {
     setBatchLoading(true)
     try {
       const values = batchForm.getFieldsValue()
-      await window.electron.map.batchGenerate(novelId, {
+      const result = await window.electron.map.batchGenerate(novelId, {
         layerCounts: blueprintLevels.map((level) => ({
           depth: level.depth,
           count: values[`layer_${level.depth}`] || level.suggestedCount,
         })),
         namedPlaces: values.namedPlaces || '',
+        parentBatchSize: values.parentBatchSize || 1,
       })
-      setBatchOpen(false)
-      batchForm.resetFields()
       await loadTree()
-      message.success('地图生成完成')
+      message.success((result as MapBatchGenerationResult).message || COPY.generateSuccess)
+      if ((result as MapBatchGenerationResult).completed) {
+        setBatchOpen(false)
+      }
     } catch (error: unknown) {
-      message.error(`生成失败：${error instanceof Error ? error.message : '未知错误'}`)
+      message.error(error instanceof Error ? error.message : COPY.generateError)
     } finally {
       setBatchLoading(false)
     }
   }
 
-  const { nodes, edges } = buildFlowGraph(treeData)
+  const handleClear = async () => {
+    Modal.confirm({
+      title: '清空地图结构？',
+      content: '会删除当前小说下全部国家、区域、地点节点及其层级关系，此操作不可撤销。',
+      okType: 'danger',
+      okText: '确认清空',
+      onOk: async () => {
+        await window.electron.map.clear(novelId)
+        setSelected(null)
+        detailForm.resetFields()
+        await loadTree()
+        message.success('地图结构已清空')
+      },
+    })
+  }
+
+  const { nodes, edges } = useMemo(() => buildFlowGraph(treeData), [treeData])
   const nodeCount = countTreeNodes(treeData)
+  const rootCount = treeData.length
+  const secondLevelCount = countNodesByDepth(treeData, 2)
+  const leafCount = countNodesByDepth(treeData, Math.max(maxDepth, 1))
   const selectedRule = selected ? getBlueprintLevelByDepth(worldRules, selected.level) : null
+  const mapGenerationStatus = useMemo(
+    () => getMapGenerationStatus(treeData, requestedLayerCounts, blueprintLevels),
+    [treeData, requestedLayerCounts, blueprintLevels],
+  )
+  const parentBatchSize = batchPreviewValues?.parentBatchSize || 1
+  const generateButtonLabel = mapGenerationStatus.completed
+    ? COPY.generate
+    : nodeCount === 0
+      ? COPY.actionStart
+      : COPY.actionContinue
 
   return (
     <WorkspacePage
-      eyebrow="Atlas Blueprint"
-      title="地图与势力结构"
-      description="这一步负责给故事安排空间骨架。不同题材需要不同的层级结构，例如国家 / 势力 / 宗门 / 场景，或者城市 / 区域 / 基地 / 建筑。后面的事件、人物和物品都会从这里取落点。"
+      className="novel-map-page"
+      eyebrow={COPY.eyebrow}
+      title={COPY.title}
+      description={COPY.description}
       actions={(
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <Space wrap>
           <Button
             type={viewMode === 'tree' ? 'primary' : 'default'}
             icon={<UnorderedListOutlined />}
             onClick={() => setViewMode('tree')}
           >
-            树形视图
+            {'树形编辑'}
           </Button>
           <Button
             type={viewMode === 'graph' ? 'primary' : 'default'}
             icon={<ShareAltOutlined />}
             onClick={() => setViewMode('graph')}
           >
-            图谱视图
+            {'图谱总览'}
           </Button>
           <Button icon={<ApartmentOutlined />} onClick={() => setBatchOpen(true)}>
-            按蓝图生成
+            {generateButtonLabel}
           </Button>
           <Button icon={<PlusOutlined />} onClick={handleAddRoot}>
-            添加根节点
+            {'添加根节点'}
           </Button>
-        </div>
+          <Button danger icon={<DeleteOutlined />} onClick={() => void handleClear()}>
+            {'清空地图'}
+          </Button>
+        </Space>
+      )}
+      contextSummary={(
+        <WorkspaceContextSummary
+          items={[
+            { label: COPY.theme, value: currentNovel?.genreName || COPY.placeholderUnknown },
+            { label: COPY.blueprintDepth, value: `${blueprintLevels.length} 层` },
+            {
+              label: COPY.structurePath,
+              value: blueprintLevels.map((level) => level.label).join(' → '),
+            },
+            {
+              label: COPY.currentSelection,
+              value: selected ? `${selected.name} · 第${selected.level}层` : COPY.selectHint,
+            },
+          ]}
+        />
       )}
       metrics={(
         <>
-          <WorkspaceMetric label="地图节点" value={nodeCount} tone="warm" hint="当前已创建的全部地区与场景" />
-          <WorkspaceMetric label="地图层级" value={blueprintLevels.length} hint={`最深 ${maxDepth} 层`} />
-          <WorkspaceMetric label="节点类型库" value={nodeTypeOptions.length} tone="cool" hint="来源于世界规则的地图蓝图" />
-          <WorkspaceMetric label="关联势力" value={factionOptions.length} hint="可挂接到地图节点的势力标签" />
-        </>
-      )}
-      aside={(
-        <>
-          <WorkspaceTip title="地图页该怎么用">
-            <div>先用蓝图生成一个能工作的空间骨架，再逐个补重要节点的职责、氛围和剧情用途。</div>
-            <div>地图不是景点清单，而是故事发生的结构容器。每个节点都最好能回答“谁会来这里、为什么会来、来这里会发生什么”。</div>
-          </WorkspaceTip>
-
-          <WorkspacePanel title="蓝图摘要" description="当前题材的空间组织方式">
-            <div className="novel-note-list">
-              <div className="novel-note-list__item">{worldRules.mapBlueprint.overview || '尚未设置地图蓝图概述。'}</div>
-            </div>
-          </WorkspacePanel>
-
-          <WorkspacePanel title={selected ? `当前节点 · ${selected.name}` : '节点编辑提示'} description="右侧表单会继承层级规则">
-            <div className="novel-note-list">
-              <div className="novel-note-list__item">
-                {selected
-                  ? `当前位于第 ${selected.level} 层，建议优先补“蓝图职责”“剧情关联”和“关联势力”。`
-                  : '先从左侧选一个节点，再在右侧补细节。'}
-              </div>
-              <div className="novel-note-list__item">
-                {selectedRule
-                  ? `这一层推荐作为「${selectedRule.label}」使用，建议数量 ${selectedRule.suggestedCount}。`
-                  : '如果还没有节点，可以先按蓝图生成一版基础地图。'}
-              </div>
-            </div>
-          </WorkspacePanel>
+          <WorkspaceMetric label={COPY.rootMetric} value={rootCount} tone="warm" hint={COPY.rootHint} />
+          <WorkspaceMetric label={COPY.secondMetric} value={secondLevelCount} hint={COPY.secondHint} />
+          <WorkspaceMetric label={COPY.leafMetric} value={leafCount} tone="cool" hint={COPY.leafHint} />
+          <WorkspaceMetric label={COPY.totalMetric} value={nodeCount} hint={`${factionOptions.length} 个势力标签可联动`} />
         </>
       )}
     >
       <WorkspacePanel
-        title="地图编辑台"
-        description="上半区先看当前题材的地图蓝图，下半区根据视图模式切换树形编辑或全局图谱。"
-        extra={<div className="novel-pill">{viewMode === 'tree' ? '当前为树形编辑模式' : '当前为图谱总览模式'}</div>}
+        title={COPY.panelTitle}
+        description={COPY.panelDescription}
+        extra={<div className="novel-pill">{viewMode === 'tree' ? COPY.treeModePill : COPY.graphModePill}</div>}
       >
         <div className="novel-map-shell">
           <div className="novel-map-blueprint">
             {blueprintLevels.map((level) => (
               <div key={level.depth} className="novel-map-blueprint-card">
-                <strong>第 {level.depth} 层 · {level.label}</strong>
-                <span>节点类型：{level.nodeTypes.join('、') || '未设置'}</span>
-                <span>建议数量：{level.suggestedCount}</span>
-                <span>{level.relationHint}</span>
+                <div className="novel-map-blueprint-card__eyebrow">{level.depth === 1 ? COPY.rootCountEyebrow : COPY.perParentEyebrow}</div>
+                <div className="novel-map-blueprint-card__title">
+                  <span>{level.label}</span>
+                  <span className="novel-map-blueprint-card__count">{batchPreviewValues?.[`layer_${level.depth}`] || level.suggestedCount}</span>
+                </div>
+                <div className="novel-map-blueprint-card__types">{COPY.typePrefix}{level.nodeTypes.join('、') || COPY.placeholderUnknown}</div>
+                <div className="novel-map-blueprint-card__hint">{level.relationHint}</div>
               </div>
             ))}
+          </div>
+
+          <div className="novel-note-list" style={{ marginBottom: 18 }}>
+            <div className="novel-note-list__item">
+              {mapGenerationStatus.completed
+                ? COPY.progressDone
+                : `${COPY.progressPendingPrefix}第 ${mapGenerationStatus.nextDepth} 层「${mapGenerationStatus.nextLabel}」，当前还有 ${mapGenerationStatus.pendingParentCount} ${COPY.progressParentsSuffix}，待补节点约 ${mapGenerationStatus.pendingNodeCount} 个。`}
+            </div>
+            <div className="novel-note-list__item">
+              {`当前每批按 ${parentBatchSize} 个父节点推进，适合长篇场景逐步补地图，不再一次性要求整棵树输出。`}
+            </div>
           </div>
 
           <div className="novel-map-main" style={viewMode === 'graph' ? { gridTemplateColumns: '1fr' } : undefined}>
             {viewMode === 'tree' ? (
               <>
                 <div className="novel-map-tree">
-                  <div style={{ padding: 16, borderBottom: '1px solid rgba(122, 93, 52, 0.12)' }}>
-                    <div style={{ display: 'grid', gap: 4 }}>
-                      <div style={{ color: 'var(--workspace-ink)', fontSize: 16, fontWeight: 700 }}>地图节点</div>
-                      <div style={{ color: 'var(--workspace-ink-soft)', fontSize: 12 }}>
-                        {nodeCount > 0 ? `已生成 ${nodeCount} 个节点` : '还没有地图数据'}
-                      </div>
+                  <div className="novel-map-tree__header">
+                    <div>
+                      <div className="novel-map-tree__title">{COPY.treeTitle}</div>
+                      <div className="novel-map-tree__copy">{COPY.treeCopy}</div>
                     </div>
+                    <div className="novel-pill">{`${COPY.generatedCountPrefix} ${nodeCount} ${COPY.generatedCountSuffix}`}</div>
                   </div>
-                  <div style={{ flex: 1, overflow: 'auto', padding: 8 }}>
+                  <div className="novel-map-tree__body">
                     {loading ? (
                       <div className="novel-empty"><Spin /></div>
                     ) : treeData.length === 0 ? (
-                      <Empty description="暂无地图数据" image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ margin: '40px 0' }} />
+                      <Empty description={COPY.emptyMap} image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ margin: '40px 0' }} />
                     ) : (
                       <Tree
                         treeData={mapToTreeData(treeData)}
@@ -427,79 +651,100 @@ export default function MapManager({ novelId }: Props) {
                 </div>
 
                 <div className="novel-map-detail">
-                  {selected ? (
-                    <>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20, gap: 12, flexWrap: 'wrap' }}>
-                        <div>
-                          <h3 style={{ color: 'var(--workspace-ink)', margin: 0 }}>
-                            编辑：{selected.name}
-                            <span style={{ color: 'var(--workspace-ink-soft)', fontSize: 12, marginLeft: 8 }}>
-                              第 {selected.level} 层
-                            </span>
-                          </h3>
-                          <div style={{ color: 'var(--workspace-ink-soft)', fontSize: 12, marginTop: 4 }}>
-                            {selected.nodeType || selected.locationType || '未设置节点类型'}
+                  <div className="novel-map-detail__header">
+                    <div>
+                      <div className="novel-map-detail__title">{selected ? selected.name : COPY.detailFallbackTitle}</div>
+                      <div className="novel-map-detail__copy">
+                        {selected
+                          ? `${selected.nodeType || selected.locationType || `第${selected.level}层`} · ${selectedRule?.relationHint || COPY.detailEmpty}`
+                          : COPY.detailEmpty}
+                      </div>
+                    </div>
+                    {selected ? (
+                      <Space wrap>
+                        {selected.level < maxDepth ? (
+                          <Button icon={<PlusOutlined />} onClick={() => handleAddChild(selected)}>
+                            {'添加子节点'}
+                          </Button>
+                        ) : null}
+                        <Button danger icon={<DeleteOutlined />} onClick={handleDelete}>
+                          {'删除'}
+                        </Button>
+                        <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={handleSaveDetail}>
+                          {'保存'}
+                        </Button>
+                      </Space>
+                    ) : null}
+                  </div>
+
+                  <div className="novel-map-detail__body">
+                    {selected ? (
+                      <Form form={detailForm} layout="vertical">
+                        <div className="novel-form-section">
+                          <div className="novel-form-section__header">
+                            <div className="novel-form-section__title">{COPY.basicTitle}</div>
+                            <div className="novel-form-section__desc">{COPY.basicDesc}</div>
+                          </div>
+                          <div className="novel-grid novel-grid--3">
+                            <Form.Item name="name" label={COPY.name}>
+                              <Input />
+                            </Form.Item>
+                            <Form.Item name="nodeType" label={COPY.nodeType}>
+                              <Select
+                                showSearch
+                                allowClear
+                                options={nodeTypeOptions.map((value) => ({ value, label: value }))}
+                              />
+                            </Form.Item>
+                            <Form.Item name="dangerLevel" label={COPY.dangerLevel}>
+                              <Input placeholder={COPY.dangerPlaceholder} />
+                            </Form.Item>
+                          </div>
+                          <div className="novel-grid novel-grid--2">
+                            <Form.Item name="locationType" label={COPY.locationType}>
+                              <Input placeholder={COPY.locationPlaceholder} />
+                            </Form.Item>
+                            <Form.Item name="structureRole" label={COPY.structureRole}>
+                              <Input placeholder={COPY.rolePlaceholder} />
+                            </Form.Item>
                           </div>
                         </div>
-                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                          {selected.level < maxDepth && (
-                            <Button icon={<PlusOutlined />} onClick={() => handleAddChild(selected)}>
-                              添加子节点
-                            </Button>
-                          )}
-                          <Button danger icon={<DeleteOutlined />} onClick={handleDelete}>
-                            删除
-                          </Button>
-                          <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={handleSaveDetail}>
-                            保存
-                          </Button>
-                        </div>
-                      </div>
 
-                      <Form form={detailForm} layout="vertical">
-                        <div className="novel-grid novel-grid--3">
-                          <Form.Item name="name" label="名称">
-                            <Input />
+                        <div className="novel-form-section">
+                          <div className="novel-form-section__header">
+                            <div className="novel-form-section__title">{COPY.atmosphereTitle}</div>
+                            <div className="novel-form-section__desc">{COPY.atmosphereDesc}</div>
+                          </div>
+                          <Form.Item name="description" label={COPY.descriptionLabel}>
+                            <Input.TextArea rows={5} placeholder={COPY.descriptionPlaceholder} />
                           </Form.Item>
-                          <Form.Item name="nodeType" label="节点类型">
-                            <Select
-                              showSearch
-                              allowClear
-                              options={nodeTypeOptions.map((value) => ({ value, label: value }))}
-                            />
-                          </Form.Item>
-                          <Form.Item name="dangerLevel" label="危险等级">
-                            <Input placeholder="例如：低 / 中 / 高 / 禁入" />
+                          <Form.Item name="atmosphere" label={COPY.atmosphereLabel}>
+                            <Input placeholder={COPY.atmospherePlaceholder} />
                           </Form.Item>
                         </div>
-                        <div className="novel-grid novel-grid--2">
-                          <Form.Item name="structureRole" label="蓝图职责">
-                            <Input placeholder="例如：顶级势力、补给点、高风险区、试炼地" />
+
+                        <div className="novel-form-section">
+                          <div className="novel-form-section__header">
+                            <div className="novel-form-section__title">{COPY.storyTitle}</div>
+                            <div className="novel-form-section__desc">{COPY.storyDesc}</div>
+                          </div>
+                          <Form.Item name="plotRelevance" label={COPY.plotRelevance}>
+                            <Input.TextArea rows={4} placeholder={COPY.plotPlaceholder} />
                           </Form.Item>
-                          <Form.Item name="locationType" label="地点细分">
-                            <Input placeholder="例如：医院、洞府、宗门大殿、研究楼" />
-                          </Form.Item>
+                          <div className="novel-grid novel-grid--2">
+                            <Form.Item name="tags" label={COPY.tags}>
+                              <Select mode="tags" placeholder={COPY.tagsPlaceholder} />
+                            </Form.Item>
+                            <Form.Item name="affiliatedFactions" label={COPY.factions}>
+                              <Select mode="tags" options={factionOptions.map((value) => ({ value, label: value }))} />
+                            </Form.Item>
+                          </div>
                         </div>
-                        <Form.Item name="description" label="描述">
-                          <Input.TextArea rows={5} placeholder="地点的外观、规则和使用方式。" />
-                        </Form.Item>
-                        <Form.Item name="atmosphere" label="氛围基调">
-                          <Input placeholder="例如：繁华喧嚣、死寂封锁、灵气浓郁、审讯感强" />
-                        </Form.Item>
-                        <Form.Item name="plotRelevance" label="剧情关联">
-                          <Input.TextArea rows={4} placeholder="这个地方承担什么剧情事件、冲突或回收。" />
-                        </Form.Item>
-                        <Form.Item name="tags" label="地图标签">
-                          <Select mode="tags" placeholder="例如：势力核心、补给点、禁区、秘境入口" />
-                        </Form.Item>
-                        <Form.Item name="affiliatedFactions" label="关联势力">
-                          <Select mode="tags" options={factionOptions.map((value) => ({ value, label: value }))} />
-                        </Form.Item>
                       </Form>
-                    </>
-                  ) : (
-                    <div className="novel-empty">选择左侧节点后，再在这里补充职责、氛围和剧情用途。</div>
-                  )}
+                    ) : (
+                      <div className="novel-empty">{COPY.noSelection}</div>
+                    )}
+                  </div>
                 </div>
               </>
             ) : (
@@ -507,7 +752,7 @@ export default function MapManager({ novelId }: Props) {
                 {loading ? (
                   <div className="novel-empty" style={{ height: '100%' }}><Spin /></div>
                 ) : treeData.length === 0 ? (
-                  <div className="novel-empty" style={{ height: '100%' }}>暂无地图数据，请先添加或按蓝图生成。</div>
+                  <div className="novel-empty" style={{ height: '100%' }}>{COPY.graphEmpty}</div>
                 ) : (
                   <ReactFlowProvider>
                     <ReactFlow nodes={nodes} edges={edges} fitView style={{ background: 'transparent' }}>
@@ -523,26 +768,52 @@ export default function MapManager({ novelId }: Props) {
       </WorkspacePanel>
 
       <Modal
-        title="按题材蓝图生成地图"
+        title={COPY.modalTitle}
         open={batchOpen}
         onCancel={() => setBatchOpen(false)}
         onOk={handleBatchGenerate}
         confirmLoading={batchLoading}
-        okText="开始生成"
+        okText={COPY.modalOk}
       >
         <Form form={batchForm} layout="vertical">
+          <div className="novel-note-list" style={{ marginBottom: 16 }}>
+            <div className="novel-note-list__item">
+              {mapGenerationStatus.completed
+                ? COPY.progressDone
+                : `${COPY.progressPendingPrefix}第 ${mapGenerationStatus.nextDepth} 层「${mapGenerationStatus.nextLabel}」，待处理父节点 ${mapGenerationStatus.pendingParentCount} 个。`}
+            </div>
+            <div className="novel-note-list__item">
+              {`这轮会按 ${parentBatchSize} 个父节点为一批推进。长篇建议从 1 开始，确认稳定后再调到 2 或 3。`}
+            </div>
+          </div>
+
           {blueprintLevels.map((level) => (
             <Form.Item
               key={level.depth}
               name={`layer_${level.depth}`}
-              label={`${level.label} 数量`}
+              label={buildLayerFieldLabel(level.depth)}
               initialValue={level.suggestedCount}
+              extra={level.depth === 1 ? COPY.rootCountExtra : COPY.perParentExtra}
             >
               <InputNumber min={1} max={12} style={{ width: '100%' }} />
             </Form.Item>
           ))}
-          <Form.Item name="namedPlaces" label="已知地点名称（每行一个，可留空）">
-            <Input.TextArea rows={5} placeholder="如：长安城&#10;临港基地&#10;九焰秘境" />
+          <Form.Item
+            name="parentBatchSize"
+            label={COPY.batchSizeLabel}
+            initialValue={1}
+            extra={COPY.batchSizeExtra}
+          >
+            <Select
+              options={[
+                { value: 1, label: '1 个父节点' },
+                { value: 2, label: '2 个父节点' },
+                { value: 3, label: '3 个父节点' },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item name="namedPlaces" label={COPY.namedPlaces}>
+            <Input.TextArea rows={5} placeholder={COPY.namedPlacesPlaceholder} />
           </Form.Item>
         </Form>
       </Modal>

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+﻿import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Space, Tag, message } from 'antd'
 import {
   BarsOutlined,
@@ -30,7 +30,6 @@ import {
   WorkspaceMetric,
   WorkspacePage,
   WorkspacePanel,
-  WorkspaceTip,
 } from '../components/WorkspaceShell'
 
 interface Props {
@@ -77,6 +76,17 @@ function getSeverityColor(severity: 'high' | 'medium' | 'low') {
       return 'warning'
     default:
       return 'default'
+  }
+}
+
+function getSeverityLabel(severity: 'high' | 'medium' | 'low') {
+  switch (severity) {
+    case 'high':
+      return '高优先'
+    case 'medium':
+      return '中优先'
+    default:
+      return '低优先'
   }
 }
 
@@ -166,7 +176,10 @@ export default function GuidePage({ novelId }: Props) {
       .sort((left, right) => left.depth - right.depth)
       .map((level) => level.suggestedCount)
 
-    await window.electron.map.batchGenerate(novelId, { layerCounts })
+    await window.electron.map.batchGenerate(novelId, {
+      layerCounts,
+      parentBatchSize: 1,
+    })
   }, [novelId, worldRules.mapBlueprint.levels])
 
   const generateCharactersCore = useCallback(async () => {
@@ -193,6 +206,7 @@ export default function GuidePage({ novelId }: Props) {
       count: itemProfile.defaultBatch,
       templateOnly: false,
       refreshTemplates: true,
+      batchSize: 4,
       focus: '先补足符合题材的流通物品和剧情挂点，再生成可落地实例。',
     })
   }, [itemProfile.defaultBatch, novelId])
@@ -204,6 +218,7 @@ export default function GuidePage({ novelId }: Props) {
   const generateTimelineCore = useCallback(async () => {
     await window.electron.timeline.generate(novelId, {
       count: 12,
+      batchSize: 4,
       focus: '优先串联主角、关键地点、关键物品和主要冲突的先后顺序与回收关系。',
     })
   }, [novelId])
@@ -228,11 +243,11 @@ export default function GuidePage({ novelId }: Props) {
   }, [refreshDiagnostics, refreshStats])
 
   const syncWorldRules = () => runStep('world-rules', syncWorldRulesCore, '世界规则已按当前题材同步。')
-  const generateMap = () => runStep('map', generateMapCore, '地图骨架已生成。')
+  const generateMap = () => runStep('map', generateMapCore, '地图首批骨架已生成，可继续在地图页补下一批。')
   const generateCharacters = () => runStep('characters', generateCharactersCore, '人物网络首版已生成。')
-  const generateItems = () => runStep('items', generateItemsCore, '物品模板与实例首版已生成。')
-  const generateOutline = () => runStep('outline', generateOutlineCore, '故事大纲已生成。')
-  const generateTimeline = () => runStep('timeline', generateTimelineCore, '事件时间轴已生成。')
+  const generateItems = () => runStep('items', generateItemsCore, '物品模板与实例首批已生成，可继续在物品页补下一批。')
+  const generateOutline = () => runStep('outline', generateOutlineCore, '故事弧首批已生成，可继续在大纲页细化章节。')
+  const generateTimeline = () => runStep('timeline', generateTimelineCore, '时间轴首批事件已生成，可继续追加下一批。')
 
   const runPipeline = async () => {
     setRunningKey('pipeline')
@@ -250,10 +265,10 @@ export default function GuidePage({ novelId }: Props) {
       await refreshStats()
       await generateTimelineCore()
       await Promise.all([refreshStats(), refreshDiagnostics()])
-      message.success('首版结构资产已铺好，可以继续细修并推进正文。')
+      message.success('首批结构资产已铺好，剩余内容请在各页面继续分批扩展。')
     } catch (error) {
       console.error(error)
-      message.error('一键铺设中断，请先检查核心设定和题材规则是否完整。')
+      message.error('AI 铺设中断，请先检查核心设定和题材规则是否完整。')
     } finally {
       setRunningKey(null)
     }
@@ -308,7 +323,7 @@ export default function GuidePage({ novelId }: Props) {
       action: (
         <Space wrap>
           <Button loading={runningKey === 'world-rules'} icon={<ThunderboltOutlined />} onClick={syncWorldRules}>
-            一键同步
+            同步规则
           </Button>
           <Button type="link" onClick={() => navigate(`/novels/${novelId}/world-rules`)}>
             进入页面
@@ -331,7 +346,7 @@ export default function GuidePage({ novelId }: Props) {
       action: (
         <Space wrap>
           <Button loading={runningKey === 'map'} icon={<CompassOutlined />} onClick={generateMap}>
-            一键生成
+            AI 生成首批
           </Button>
           <Button type="link" onClick={() => navigate(`/novels/${novelId}/map`)}>
             进入页面
@@ -354,7 +369,7 @@ export default function GuidePage({ novelId }: Props) {
       action: (
         <Space wrap>
           <Button loading={runningKey === 'characters'} icon={<TeamOutlined />} onClick={generateCharacters}>
-            一键生成
+            AI 批量生成
           </Button>
           <Button type="link" onClick={() => navigate(`/novels/${novelId}/characters`)}>
             进入页面
@@ -377,7 +392,7 @@ export default function GuidePage({ novelId }: Props) {
       action: (
         <Space wrap>
           <Button loading={runningKey === 'items'} icon={<ShoppingOutlined />} onClick={generateItems}>
-            一键生成
+            AI 生成首批
           </Button>
           <Button type="link" onClick={() => navigate(`/novels/${novelId}/items`)}>
             进入页面
@@ -400,7 +415,7 @@ export default function GuidePage({ novelId }: Props) {
       action: (
         <Space wrap>
           <Button loading={runningKey === 'outline'} icon={<BarsOutlined />} onClick={generateOutline}>
-            一键生成
+            AI 生成首批
           </Button>
           <Button type="link" onClick={() => navigate(`/novels/${novelId}/outline`)}>
             进入页面
@@ -423,7 +438,7 @@ export default function GuidePage({ novelId }: Props) {
       action: (
         <Space wrap>
           <Button loading={runningKey === 'timeline'} icon={<ClockCircleOutlined />} onClick={generateTimeline}>
-            一键生成
+            AI 生成首批
           </Button>
           <Button type="link" onClick={() => navigate(`/novels/${novelId}/timeline`)}>
             进入页面
@@ -438,7 +453,7 @@ export default function GuidePage({ novelId }: Props) {
   return (
     <WorkspacePage
       className={`novel-guide novel-guide--${mode}`}
-      eyebrow={mode === 'guided' ? 'Guided Workflow' : 'Editorial Workflow'}
+      eyebrow={mode === 'guided' ? '分步创作' : '创作工作流'}
       title="创作向导"
       description={
         mode === 'guided'
@@ -453,7 +468,7 @@ export default function GuidePage({ novelId }: Props) {
             loading={Boolean(runningKey)}
             onClick={runPipeline}
           >
-            一键铺好首版结构
+            AI 铺设首批骨架
           </Button>
           <Button icon={<EditOutlined />} onClick={() => navigate(`/novels/${novelId}/writing`)}>
             进入正文写作
@@ -501,14 +516,6 @@ export default function GuidePage({ novelId }: Props) {
       )}
       aside={(
         <>
-          <WorkspaceTip title={nextStep ? `下一步建议：${nextStep.title}` : '结构资产已就绪'}>
-            <div>{nextStep ? nextStep.support : '基础结构已经齐备，可以转去正文页开始章节写作。'}</div>
-            <div>
-              {mode === 'guided'
-                ? '如果你是第一次搭小说结构，优先按页面顺序走，不要跳着补。'
-                : '如果你已经有部分内容，可以只处理缺口，不必每次都全量重跑。'}
-            </div>
-          </WorkspaceTip>
 
           {consistencyReport && (
             <WorkspacePanel title="结构体检" description="全书级一致性校验器会自动检查人物、事件、时间轴、地图、物品和章节之间的冲突。">
@@ -541,13 +548,6 @@ export default function GuidePage({ novelId }: Props) {
             </WorkspacePanel>
           )}
 
-          <WorkspacePanel title="操作原则" description="这一套流程的重点不是点按钮，而是让后续写作一直有稳定的上下文。">
-            <div className="novel-note-list">
-              <div className="novel-note-list__item">核心设定决定故事要走到哪里，世界规则决定这个题材能怎样运转。</div>
-              <div className="novel-note-list__item">地图、人物、物品和时间轴会互相挂接，越早补齐，后面越不容易产生孤立设定。</div>
-              <div className="novel-note-list__item">写作页会直接读取场景计划、审校意见、长文记忆和一致性报告，不再只看最近摘要。</div>
-            </div>
-          </WorkspacePanel>
         </>
       )}
     >
@@ -561,11 +561,6 @@ export default function GuidePage({ novelId }: Props) {
         />
       )}
 
-      <WorkspaceTip title={mode === 'guided' ? '推荐推进顺序' : '工作流说明'}>
-        <div>先完成核心设定，至少把背景、主题、主线目标和核心冲突写清楚。</div>
-        <div>再按顺序同步世界规则、地图、人物、物品、大纲和时间轴。每一步都会吃前一步的上下文。</div>
-        <div>如果你已经有部分内容，也可以只补缺口，不必每次都全量重来。</div>
-      </WorkspaceTip>
 
       <WorkspacePanel
         title="推荐推进顺序"
@@ -577,7 +572,7 @@ export default function GuidePage({ novelId }: Props) {
             <div key={step.key} className={`novel-stage-card ${step.ready ? 'novel-stage-card--ready' : ''}`}>
               <div className="novel-stage-card__header">
                 <div>
-                  <div className="novel-kicker">{`Step ${String(index + 1).padStart(2, '0')}`}</div>
+                  <div className="novel-kicker">{`步骤 ${String(index + 1).padStart(2, '0')}`}</div>
                   <div className="novel-stage-card__title">
                     {step.icon}
                     {step.title}
@@ -623,7 +618,7 @@ export default function GuidePage({ novelId }: Props) {
             {consistencyReport.issues.slice(0, mode === 'guided' ? 4 : 8).map((issue) => (
               <div key={issue.id} className="novel-issue-item">
                 <div className="novel-issue-item__head">
-                  <Tag color={getSeverityColor(issue.severity)}>{issue.severity}</Tag>
+                  <Tag color={getSeverityColor(issue.severity)}>{getSeverityLabel(issue.severity)}</Tag>
                   <strong>{issue.title}</strong>
                 </div>
                 <div className="novel-issue-item__desc">{issue.description}</div>
@@ -636,3 +631,5 @@ export default function GuidePage({ novelId }: Props) {
     </WorkspacePage>
   )
 }
+
+

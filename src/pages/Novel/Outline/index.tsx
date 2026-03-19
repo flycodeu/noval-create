@@ -8,13 +8,12 @@ import {
   HolderOutlined
 } from '@ant-design/icons'
 import { DragDropContext, Droppable, Draggable, DropResult, DraggableProvidedDragHandleProps } from '@hello-pangea/dnd'
-import { StoryArc, Chapter } from '../../../types'
+import type { Chapter, OutlineChapterBatchGenerationResult, StoryArc } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
 import {
   WorkspaceMetric,
   WorkspacePage,
   WorkspacePanel,
-  WorkspaceTip,
 } from '../components/WorkspaceShell'
 
 interface Props { novelId: number }
@@ -54,8 +53,8 @@ export default function Outline({ novelId }: Props) {
     setGenerating(true)
     try {
       await window.electron.outline.generateArcs(novelId)
-      loadData()
-      message.success('故事弧规划完成')
+      await loadData()
+      message.success('故事弧首批规划完成')
     } catch (e: unknown) {
       message.error(`生成失败：${e instanceof Error ? e.message : '请先完善核心设定'}`)
     } finally {
@@ -66,9 +65,9 @@ export default function Outline({ novelId }: Props) {
   const handleGenerateChapterOutlines = async (arcId: number) => {
     setGenerating(true)
     try {
-      await window.electron.outline.generateChapterOutlines(arcId)
-      loadData()
-      message.success('章节细纲生成完成')
+      const result = await window.electron.outline.generateChapterOutlines(arcId, { batchSize: 4 })
+      await loadData()
+      message.success((result as OutlineChapterBatchGenerationResult).message || '章节细纲首批已生成。')
     } catch (e: unknown) {
       message.error(`生成失败：${e instanceof Error ? e.message : ''}`)
     } finally {
@@ -99,6 +98,21 @@ export default function Outline({ novelId }: Props) {
       onOk: async () => {
         await window.electron.outline.deleteArc(arc.id)
         loadData()
+      },
+    })
+  }
+
+  const handleClear = async () => {
+    Modal.confirm({
+      title: '清空故事大纲？',
+      content: '会删除全部故事弧与章节细纲归属，但不会删除已有章节正文。',
+      okType: 'danger',
+      okText: '确认清空',
+      onOk: async () => {
+        await window.electron.outline.clear(novelId)
+        setExpandedArcId(null)
+        loadData()
+        message.success('故事大纲已清空')
       },
     })
   }
@@ -134,7 +148,7 @@ export default function Outline({ novelId }: Props) {
 
   return (
     <WorkspacePage
-      eyebrow="Structure Board"
+      eyebrow="故事大纲"
       title="故事大纲"
       description="先把小说拆成几条清晰的故事弧，再把每条弧分配到章节。这样时间轴、人物变化和正文推进才不会后期失控。"
       actions={(
@@ -149,6 +163,9 @@ export default function Outline({ novelId }: Props) {
           >
             新建故事弧
           </Button>
+          <Button danger icon={<DeleteOutlined />} onClick={() => void handleClear()}>
+            清空大纲
+          </Button>
         </div>
       )}
       metrics={(
@@ -160,10 +177,6 @@ export default function Outline({ novelId }: Props) {
         </>
       )}
     >
-      <WorkspaceTip title="大纲页的使用建议">
-        <div>先用故事弧切出阶段，再决定每一阶段需要多少章来承载冲突升级、关系变化和回收节点。</div>
-        <div>如果你已经生成了时间轴，最好让章节顺序和关键事件节点互相对照，避免正文推进时出现时间和因果错位。</div>
-      </WorkspaceTip>
 
       {loading ? (
         <WorkspacePanel title="故事弧时间线" description="正在读取当前小说的大纲结构。">
@@ -214,7 +227,7 @@ export default function Outline({ novelId }: Props) {
                           loading={generating}
                           onClick={() => handleGenerateChapterOutlines(arc.id)}
                         >
-                          生成细纲
+                          生成下一批细纲
                         </Button>
                         <Button
                           size="small"
@@ -242,7 +255,7 @@ export default function Outline({ novelId }: Props) {
             {!expandedArc ? (
               <div className="novel-empty">点击上方任意故事弧，查看该阶段下的章节细纲。</div>
             ) : getArcChapters(expandedArc).length === 0 ? (
-              <Empty description="暂无章节，点击「生成细纲」" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              <Empty description="暂无章节，点击「生成下一批细纲」" image={Empty.PRESENTED_IMAGE_SIMPLE} />
             ) : (
               <DragDropContext onDragEnd={handleChapterDragEnd}>
                 <Droppable droppableId={`arc-${expandedArc.id}`}>

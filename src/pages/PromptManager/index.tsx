@@ -213,7 +213,7 @@ export default function PromptManager() {
         onOk={handleEditSave}
         okText="保存本地草稿"
         width={760}
-        destroyOnClose
+        destroyOnHidden
       >
         <div style={{ marginBottom: 12, color: 'var(--color-text-secondary)', fontSize: 12 }}>
           这里保存的是本地参考文本，便于复制和比较。当前版本不会直接改动系统运行时提示词。

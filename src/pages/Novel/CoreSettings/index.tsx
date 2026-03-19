@@ -27,7 +27,6 @@ import {
   WorkspaceMetric,
   WorkspacePage,
   WorkspacePanel,
-  WorkspaceTip,
 } from '../components/WorkspaceShell'
 import { useWorkspaceStore } from '../../../stores/workspace.store'
 
@@ -296,6 +295,36 @@ ${buildHumanLanguageRules([
       setSaving(false)
     }
   }
+
+  const resetCoreSettingsEditor = useCallback(() => {
+    form.resetFields()
+    form.setFieldsValue({ subplot_batch_count: DEFAULT_SUBPLOT_BATCH_COUNT })
+    setSubPlots([])
+    setSubplotGenerationProgress(null)
+    setIsGeneratingCoreSettings(false)
+    setCoreSettingsProgress(null)
+    setPendingGeneratedSettings(null)
+    setGeneratedApplyModalOpen(false)
+    setApplyingGeneratedMode(null)
+    setSettingsOpen(false)
+    setIsBackgroundExpanded(false)
+    clearByPrefix(draftPrefix)
+    message.destroy(SUBPLOT_PROGRESS_MESSAGE_KEY)
+    message.success('当前流程内容已清空，未保存前不会影响已保存设定')
+  }, [clearByPrefix, draftPrefix, form])
+
+  const handleClearCurrentFlow = useCallback(() => {
+    if (isAnyAIActionRunning) return
+
+    Modal.confirm({
+      title: '清空当前流程内容？',
+      content: '会清空当前页表单、支线和 AI 草稿，但不会直接覆盖已保存的核心设定。',
+      okText: '确认清空',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: resetCoreSettingsEditor,
+    })
+  }, [isAnyAIActionRunning, resetCoreSettingsEditor])
 
   // AI扩展通用处理：填入字段并保存草稿
   const applyAndSaveDraft = (fieldName: string, value: string, label: string) => {
@@ -1335,7 +1364,7 @@ ${buildHumanLanguageRules([
     <WorkspacePage
       className={`novel-core-settings novel-core-settings--${mode}`}
       heroVariant="compact"
-      eyebrow={isGuided ? 'Core Story Engine' : 'Story Engine'}
+      eyebrow={isGuided ? '核心设定' : '故事引擎'}
       title="核心设定"
       description="把题材、背景、故事目标、核心冲突、主线推进、支线和结局先锁成一个可写的故事引擎。后续的人物、物品、时间轴和大纲都会沿用这里的叙事口径。"
       actions={(
@@ -1362,6 +1391,9 @@ ${buildHumanLanguageRules([
               </Button>
             </Badge>
           </Popover>
+          <Button danger icon={<DeleteOutlined />} disabled={isAnyAIActionRunning || saving} onClick={handleClearCurrentFlow}>
+            清空当前流程
+          </Button>
           <Button type="primary" icon={<SaveOutlined />} loading={saving} disabled={isGeneratingCoreSettings} onClick={handleSave}>
             保存设定
           </Button>
@@ -1388,10 +1420,6 @@ ${buildHumanLanguageRules([
       )}
       aside={(
         <>
-          <WorkspaceTip title="新手最稳的填写顺序">
-            <div>先写故事最终要抵达什么状态，再写阻碍这个目标实现的核心对立，最后补主线推进与结局。</div>
-            <div>支线不是越多越好，必须和主线、人物成长或世界真相有明确连接，才能在后面写作时真正用得上。</div>
-          </WorkspaceTip>
 
           <WorkspacePanel title="生成状态" description="这里统一看当前 AI 工作状态">
             <div className="novel-note-list">
@@ -1402,23 +1430,10 @@ ${buildHumanLanguageRules([
             </div>
           </WorkspacePanel>
 
-          <WorkspacePanel title="页面职责提醒" description="这页不是碎片化灵感板">
-            <div className="novel-note-list">
-              <div className="novel-note-list__item">核心设定负责统一叙事方向，而不是堆砌漂亮设定词。</div>
-              <div className="novel-note-list__item">后面的人物、物品、时间轴和大纲都会默认引用这里的目标、冲突和结局口径。</div>
-            </div>
-          </WorkspacePanel>
         </>
       )}
     >
       {heroContextSummary}
-
-      {isGuided && (
-        <WorkspaceTip title="小白模式建议先这样填">
-          <div>先锁定故事最终要抵达的状态，再写阻碍它实现的核心冲突，最后补主线推进和结局。</div>
-          <div>如果你暂时不确定支线和节奏，可以先把核心四项填稳，再回来细化剩余部分。</div>
-        </WorkspaceTip>
-      )}
 
       {coreSettingsProgress && (
         <Alert
@@ -1456,7 +1471,6 @@ ${buildHumanLanguageRules([
       <WorkspacePanel
         title="故事引擎编辑台"
         description="先锁定故事目标、核心冲突和主线，再处理支线、节奏与结局。整页生成只是起点，最后仍然建议你用人类语言再收一遍。"
-        extra={<div className="novel-pill">AI 输出会自动遵守去引号、去口号和去模板化要求</div>}
       >
         <Form form={form} layout="vertical">
           <Collapse
@@ -1476,7 +1490,7 @@ ${buildHumanLanguageRules([
           setPendingGeneratedSettings(null)
           setCoreSettingsProgress(null)
         }}
-        destroyOnClose
+        destroyOnHidden
         footer={[
           <Button
             key="cancel"

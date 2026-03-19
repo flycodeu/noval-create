@@ -25,6 +25,7 @@ export type TaskType =
   | 'generate_timeline'
   | 'subplot_framework'
   | 'core_settings_generate'
+  | 'world_rules_generate'
 
 interface CreateTaskOptions {
   type: TaskType

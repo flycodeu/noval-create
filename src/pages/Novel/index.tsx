@@ -1,15 +1,18 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { Spin, Tag } from 'antd'
+import { Button, Spin, Tag } from 'antd'
 import {
   AppstoreOutlined,
+  ArrowLeftOutlined,
   BarsOutlined,
   ClockCircleOutlined,
   DashboardOutlined,
   EditOutlined,
   EnvironmentOutlined,
   GlobalOutlined,
+  LeftOutlined,
   RocketOutlined,
+  RightOutlined,
   SettingOutlined,
   TeamOutlined,
 } from '@ant-design/icons'
@@ -25,6 +28,12 @@ import ItemsPage from './Items'
 import Outline from './Outline'
 import TimelinePage from './Timeline'
 import Writing from './Writing'
+import {
+  countMapNodes,
+  EMPTY_WORKFLOW_STATS,
+  getRecommendedWorkflowStep,
+  type WorkflowStats,
+} from './workflow'
 
 type WorkspaceKey =
   | 'guide'
@@ -110,6 +119,7 @@ export default function NovelRouter() {
   const { currentNovel, setCurrentNovel } = useNovelStore()
   const { mode, setMode } = useWorkspaceStore()
   const [loading, setLoading] = useState(true)
+  const [workflowStats, setWorkflowStats] = useState<WorkflowStats>(EMPTY_WORKFLOW_STATS)
 
   const novelId = Number.parseInt(id || '0', 10)
   const flatItems = useMemo(() => workspaceGroups.flatMap((group) => group.items), [])
@@ -125,6 +135,52 @@ export default function NovelRouter() {
     () => flatItems.find((item) => item.key === currentPage) || flatItems[0],
     [currentPage, flatItems],
   )
+  const currentPageIndex = useMemo(
+    () => flatItems.findIndex((item) => item.key === currentPage),
+    [currentPage, flatItems],
+  )
+  const previousPageMeta = currentPageIndex > 0 ? flatItems[currentPageIndex - 1] : null
+  const nextPageMeta = currentPageIndex >= 0 && currentPageIndex < flatItems.length - 1
+    ? flatItems[currentPageIndex + 1]
+    : null
+  const recommendedPageKey = useMemo(
+    () => getRecommendedWorkflowStep(currentNovel, workflowStats),
+    [currentNovel, workflowStats],
+  )
+  const recommendedPageMeta = useMemo(
+    () => recommendedPageKey
+      ? flatItems.find((item) => item.key === recommendedPageKey) || null
+      : null,
+    [flatItems, recommendedPageKey],
+  )
+
+  const navigateToPage = (pageKey: WorkspaceKey) => {
+    navigate(`/novels/${novelId}/${pageKey}`)
+  }
+
+  const refreshWorkflowStats = useCallback(async () => {
+    if (!novelId) return
+
+    try {
+      const [mapTree, characters, items, arcs, events] = await Promise.all([
+        window.electron.map.getTree(novelId),
+        window.electron.character.list(novelId),
+        window.electron.item.list(novelId),
+        window.electron.outline.getArcs(novelId),
+        window.electron.timeline.list(novelId),
+      ])
+
+      setWorkflowStats({
+        mapCount: countMapNodes(mapTree),
+        characterCount: characters.length,
+        itemCount: items.length,
+        outlineCount: arcs.length,
+        timelineCount: events.length,
+      })
+    } catch (error) {
+      console.error(error)
+    }
+  }, [novelId])
 
   useEffect(() => {
     if (!novelId) return
@@ -148,6 +204,10 @@ export default function NovelRouter() {
       alive = false
     }
   }, [navigate, novelId, setCurrentNovel])
+
+  useEffect(() => {
+    void refreshWorkflowStats()
+  }, [location.pathname, refreshWorkflowStats])
 
   if (loading) {
     return (
@@ -178,26 +238,6 @@ export default function NovelRouter() {
             <span>{currentPageMeta?.summary || '围绕同一套背景、类型和主题，推进整本书的写作工作流。'}</span>
           </div>
         </div>
-
-        <section className="novel-sidebar__mode">
-          <div className="novel-sidebar__mode-header">
-            <strong>{MODE_COPY[mode].label}</strong>
-            <span>可随时切换，不会影响已生成内容</span>
-          </div>
-          <div className="novel-mode-switch" role="tablist" aria-label="工作台模式">
-            {(['guided', 'pro'] as WorkspaceMode[]).map((value) => (
-              <button
-                key={value}
-                type="button"
-                className={`novel-mode-switch__button ${mode === value ? 'novel-mode-switch__button--active' : ''}`}
-                onClick={() => setMode(value)}
-              >
-                {MODE_COPY[value].label}
-              </button>
-            ))}
-          </div>
-          <p className="novel-sidebar__mode-copy">{MODE_COPY[mode].description}</p>
-        </section>
 
         <section className="novel-sidebar__assist novel-sidebar__assist--hidden" aria-hidden="true">
           <div className="novel-sidebar__assist-title">当前页面要做什么</div>
@@ -239,19 +279,97 @@ export default function NovelRouter() {
       </aside>
 
       <main className="novel-route-shell__content">
-        <Routes>
-          <Route path="guide" element={<GuidePage novelId={novelId} />} />
-          <Route path="overview" element={<Overview novelId={novelId} />} />
-          <Route path="core-settings" element={<CoreSettings novelId={novelId} />} />
-          <Route path="world-rules" element={<WorldRules novelId={novelId} />} />
-          <Route path="map" element={<MapManager novelId={novelId} />} />
-          <Route path="characters" element={<Characters novelId={novelId} />} />
-          <Route path="items" element={<ItemsPage novelId={novelId} />} />
-          <Route path="outline" element={<Outline novelId={novelId} />} />
-          <Route path="timeline" element={<TimelinePage novelId={novelId} />} />
-          <Route path="writing" element={<Writing novelId={novelId} />} />
-          <Route path="*" element={<GuidePage novelId={novelId} />} />
-        </Routes>
+        <div className="novel-route-shell__content-frame">
+          <div className="novel-route-shell__content-topbar">
+            <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/novels')}>
+              返回主页
+            </Button>
+            <div className="novel-route-shell__content-breadcrumb">
+              <strong>{currentNovel?.title || '当前小说'}</strong>
+              <span>{currentPageMeta?.label || '创作向导'}</span>
+            </div>
+          </div>
+          <div className="novel-route-shell__flowbar">
+            <div className="novel-route-shell__flowbar-header">
+              <div className="novel-route-shell__flowbar-summary">
+                <div className="novel-route-shell__flowbar-kicker">当前页面</div>
+                <strong>{currentPageMeta?.label || '创作向导'}</strong>
+                <span>{currentPageMeta?.summary || '围绕同一套背景、类型和主题，推进整本书的写作工作流。'}</span>
+              </div>
+              <div className="novel-route-shell__flowbar-actions">
+                <button
+                  type="button"
+                  className="novel-route-shell__next-step"
+                  onClick={() => recommendedPageMeta && navigateToPage(recommendedPageMeta.key)}
+                  disabled={!recommendedPageMeta}
+                  title={recommendedPageMeta?.summary || '正在读取当前小说的完成状态。'}
+                >
+                  <span className="novel-route-shell__next-step-kicker">
+                    {recommendedPageMeta?.key === currentPage ? '当前建议' : '下一步建议'}
+                  </span>
+                  <strong>{recommendedPageMeta?.label || '正在分析流程'}</strong>
+                </button>
+                <div className="novel-route-shell__flowbar-mode" title={MODE_COPY[mode].description}>
+                  <span className="novel-route-shell__flowbar-mode-label">{MODE_COPY[mode].label}</span>
+                  <div className="novel-mode-switch novel-mode-switch--compact" role="tablist" aria-label="工作台模式">
+                    {(['guided', 'pro'] as WorkspaceMode[]).map((value) => (
+                      <button
+                        key={value}
+                        type="button"
+                        className={`novel-mode-switch__button ${mode === value ? 'novel-mode-switch__button--active' : ''}`}
+                        onClick={() => setMode(value)}
+                      >
+                        {MODE_COPY[value].label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="novel-route-shell__content-body">
+            <Routes>
+              <Route path="guide" element={<GuidePage novelId={novelId} />} />
+              <Route path="overview" element={<Overview novelId={novelId} />} />
+              <Route path="core-settings" element={<CoreSettings novelId={novelId} />} />
+              <Route path="world-rules" element={<WorldRules novelId={novelId} />} />
+              <Route path="map" element={<MapManager novelId={novelId} />} />
+              <Route path="characters" element={<Characters novelId={novelId} />} />
+              <Route path="items" element={<ItemsPage novelId={novelId} />} />
+              <Route path="outline" element={<Outline novelId={novelId} />} />
+              <Route path="timeline" element={<TimelinePage novelId={novelId} />} />
+              <Route path="writing" element={<Writing novelId={novelId} />} />
+              <Route path="*" element={<GuidePage novelId={novelId} />} />
+            </Routes>
+          </div>
+          <div className="novel-route-shell__content-footer">
+            <div className="novel-route-shell__content-footer-copy">
+              <strong>{currentPageMeta?.label || '创作向导'}</strong>
+              <span>
+                {previousPageMeta ? `上一步：${previousPageMeta.label}` : '当前已经是第一个流程'}
+                {' · '}
+                {nextPageMeta ? `下一步：${nextPageMeta.label}` : '当前已经是最后一个流程'}
+              </span>
+            </div>
+            <div className="novel-route-shell__content-footer-actions">
+              <Button
+                icon={<LeftOutlined />}
+                disabled={!previousPageMeta}
+                onClick={() => previousPageMeta && navigateToPage(previousPageMeta.key)}
+              >
+                上一步
+              </Button>
+              <Button
+                type="primary"
+                icon={<RightOutlined />}
+                disabled={!nextPageMeta}
+                onClick={() => nextPageMeta && navigateToPage(nextPageMeta.key)}
+              >
+                下一步
+              </Button>
+            </div>
+          </div>
+        </div>
       </main>
     </div>
   )

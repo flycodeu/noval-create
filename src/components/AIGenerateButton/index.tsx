@@ -107,7 +107,7 @@ export default function AIGenerateButton({
         onOk={handleConfirmPick}
         okText={<><CheckOutlined /> 填入选中</>}
         width={Math.min(900, results.length * 340 + 48)}
-        destroyOnClose
+        destroyOnHidden
       >
         <div style={{
           display: 'grid',
