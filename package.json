@@ -26,7 +26,9 @@
     "setup:nsis": "node scripts/setup-local-nsis.cjs",
     "generate:icon": "python scripts/generate-app-icon.py",
     "setup:nsis-resources": "node scripts/setup-local-nsis-resources.cjs",
-    "setup:win-tools": "npm run setup:nsis && npm run setup:nsis-resources"
+    "setup:win-tools": "npm run setup:nsis && npm run setup:nsis-resources",
+    "test:subplot": "node scripts/subplot-framework.test.cjs",
+    "test:prompt-guardrails": "node scripts/prompt-guardrails.test.cjs"
   },
   "dependencies": {
     "@ant-design/icons": "^5.3.0",

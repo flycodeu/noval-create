@@ -4,10 +4,17 @@ import type { GenreWorldRules } from '../../src/shared/genre-system'
 import {
   buildCharacterEcologySummary,
   buildMapBlueprintSummary,
+  buildRealityConstraintSummary,
   buildTimelineConfigSummary,
+  buildWritingStyleSummary,
   normalizeWorldRules,
 } from '../../src/shared/genre-system'
-import { buildHumanLanguageRules } from '../../src/shared/prompt-library'
+import {
+  buildContextAlignmentRules,
+  buildGenreRealityRules,
+  buildHumanLanguageRules,
+  buildOutputQualityRules,
+} from '../../src/shared/prompt-library'
 import {
   WORLD_RULE_SECTION_DEFINITIONS,
   WORLD_RULE_SECTION_ORDER,
@@ -59,13 +66,11 @@ function renderPrompt(parts: Array<string | undefined | null | false>): string {
 function summarizeLanguageConstraints(rules: GenreWorldRules): string {
   const writing = rules.writingConstraints
   return joinLines([
-    writing.antiQuoteEmphasis ? '避免引号强调' : '',
-    writing.antiConceptSlogans ? '避免概念口号' : '',
-    writing.antiSymmetricLines ? '避免对称排比' : '',
-    writing.narrationStyle ? `叙述风格：${writing.narrationStyle}` : '',
-    writing.dialogueStyle ? `对话风格：${writing.dialogueStyle}` : '',
-    writing.forbiddenPhrases.length > 0 ? `禁用 AI 腔：${writing.forbiddenPhrases.join('、')}` : '',
-    writing.extraRules.length > 0 ? `额外规则：${writing.extraRules.join('、')}` : '',
+    writing.antiQuoteEmphasis ? '避免用引号抬高普通概念' : '',
+    writing.antiConceptSlogans ? '避免概念口号和空泛金句' : '',
+    writing.antiSymmetricLines ? '避免对称排比和刻意整句' : '',
+    buildRealityConstraintSummary(writing),
+    buildWritingStyleSummary(writing),
   ])
 }
 
@@ -219,19 +224,19 @@ function buildSectionRequirement(sectionKey: WorldRuleSectionKey): string {
 function buildOutputSchema(sectionKey: WorldRuleSectionKey): string {
   switch (sectionKey) {
     case 'overview':
-      return '只返回 JSON，不要解释、不要 Markdown、不要代码块：{"genreProfile":{"name":"","subgenre":"","worldviewTone":"","socialFrame":"","narrativeFocus":[""],"languageAvoidances":[""]}}'
+      return '只输出 JSON：{"genreProfile":{"name":"","subgenre":"","worldviewTone":"","socialFrame":"","narrativeFocus":[""],"languageAvoidances":[""]}}'
     case 'power':
-      return '只返回 JSON：{"powerSystems":[{"name":"","appliesTo":[""],"levels":[""],"advancementRule":"","limitations":"","cost":"","taboo":""}]}'
+      return '只输出 JSON：{"powerSystems":[{"name":"","appliesTo":[""],"levels":[""],"advancementRule":"","limitations":"","cost":"","taboo":""}]}'
     case 'species':
-      return '只返回 JSON：{"speciesSystem":[{"name":"","entityType":"human|undead|beast|immortal|nonhuman","summary":"","traits":[""],"commonIdentities":[""],"relationToHumans":"","storyUse":""}],"factionSystem":[{"name":"","factionType":"","summary":"","structure":"","resources":"","externalRelations":"","recruitFrom":"","notableSites":[""]}]}'
+      return '只输出 JSON：{"speciesSystem":[{"name":"","entityType":"human|undead|beast|immortal|nonhuman","summary":"","traits":[""],"commonIdentities":[""],"relationToHumans":"","storyUse":""}],"factionSystem":[{"name":"","factionType":"","summary":"","structure":"","resources":"","externalRelations":"","recruitFrom":"","notableSites":[""]}]}'
     case 'ecology':
-      return '只返回 JSON：{"characterEcology":{"overview":"","slots":[{"label":"","entityType":"human|undead|beast|immortal|nonhuman","species":"","narrativeFunction":"","contextLink":"","preferredFactions":[""],"powerBias":[""]}]}}'
+      return '只输出 JSON：{"characterEcology":{"overview":"","slots":[{"label":"","entityType":"human|undead|beast|immortal|nonhuman","species":"","narrativeFunction":"","contextLink":"","preferredFactions":[""],"powerBias":[""]}]}}'
     case 'map':
-      return '只返回 JSON：{"mapBlueprint":{"overview":"","levels":[{"depth":1,"label":"","nodeTypes":[""],"relationHint":"","suggestedCount":3,"examples":[""]}]}}'
+      return '只输出 JSON：{"mapBlueprint":{"overview":"","levels":[{"depth":1,"label":"","nodeTypes":[""],"relationHint":"","suggestedCount":3,"examples":[""]}]}}'
     case 'timeline':
-      return '只返回 JSON：{"timelineConfig":{"calendarType":"gregorian|regnal|relative-disaster|custom-era|future-date","eraName":"","epochLabel":"","baseYearLabel":"","displayPattern":"","relativeZeroLabel":"","recommendedEventTypes":[""],"precisionOptions":[""]}}'
+      return '只输出 JSON：{"timelineConfig":{"calendarType":"gregorian|regnal|relative-disaster|custom-era|future-date","eraName":"","epochLabel":"","baseYearLabel":"","displayPattern":"","relativeZeroLabel":"","recommendedEventTypes":[""],"precisionOptions":[""]}}'
     case 'language':
-      return '只返回 JSON：{"writingConstraints":{"antiQuoteEmphasis":true,"antiConceptSlogans":true,"antiSymmetricLines":true,"narrationStyle":"","dialogueStyle":"","forbiddenPhrases":[""],"extraRules":[""]}}'
+      return '只输出 JSON：{"writingConstraints":{"antiQuoteEmphasis":true,"antiConceptSlogans":true,"antiSymmetricLines":true,"narrationStyle":"","dialogueStyle":"","forbiddenPhrases":[""],"extraRules":[""],"realismLevel":"strict-realism|rule-realism|stylized-fantasy","sciencePolicy":"","physicsPolicy":"","commonSenseFocus":[""],"contextAlignmentFocus":[""]}}'
     default:
       return ''
   }
@@ -249,18 +254,34 @@ function buildSectionPrompt(
   const otherSummary = summarizeOtherSections(sectionKey, rules)
 
   return renderPrompt([
-    `你是小说世界规则协作助手，现在只处理「${sectionLabel}」分区。`,
+    `你现在只负责补全世界规则分区：${sectionLabel}。`,
     section('故事核心', buildStoryCoreSummary(profile)),
-    section('当前分区草稿', currentSummary || '当前分区还没有可用草稿，请从零生成。'),
+    section('当前分区草稿', currentSummary || '当前分区暂无可用草稿，请从零开始补齐。'),
     otherSummary ? section('其他分区参考', otherSummary) : '',
     requirements ? section('额外要求', requirements) : '',
-    section('任务目标', buildActionInstruction(action)),
-    section('本分区要求', buildSectionRequirement(sectionKey)),
+    section('本轮任务', buildActionInstruction(action)),
+    section('本分区硬要求', buildSectionRequirement(sectionKey)),
+    section('上下文护栏', buildContextAlignmentRules({
+      background: profile.background,
+      storyCore: buildStoryCoreSummary(profile),
+      worldSummary: [currentSummary, otherSummary].filter(Boolean).join('\n\n'),
+      taskFocus: `只补「${sectionLabel}」这一区，并与现有小说信息、其他规则分区保持一致。`,
+      extraLines: ['不要静悄悄把小说改造成另一种题材、时代或规则体系。'],
+    })),
+    section('真实度护栏', buildGenreRealityRules({
+      genre: profile.genre,
+      worldSummary: summarizeLanguageConstraints(rules),
+      extraLines: ['如果你定义了超常规则，同时要写出它的限制、代价或触发条件。'],
+    })),
+    section('输出质量底线', buildOutputQualityRules([
+      '每条规则都要能直接服务后续的人物、地图、时间轴和章节生成。',
+      '宁可给出少而硬的规则，也不要堆一串漂亮但空泛的装饰想法。',
+    ])),
     section('语言要求', buildHumanLanguageRules([
-      '减少空泛口号和百科式说明，保留题材气质。',
-      '每条规则尽量写出对象、条件、代价或关联关系。',
-      '如果涉及地图、势力、人物槽位或时间制度，要与其他分区保持一致。',
-      '不要发明与故事核心无关的宏大设定。',
+      '只补能直接写进世界规则表单的内容，不要写成宣传文案或百科腔。',
+      '新增设定要给出用途、限制或影响，不要只留下一个漂亮名词。',
+      '如果当前分区与其他分区有冲突，先修正冲突，不要强行两套并存。',
+      '现实向题材先守常识、科学、物理和社会运作逻辑；幻想向题材先守既定体系、等级与代价。',
     ])),
     buildOutputSchema(sectionKey),
   ])

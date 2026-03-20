@@ -11,7 +11,12 @@ import {
   getMapBlueprintDepth,
   parseWorldRulesJson,
 } from '../../src/shared/genre-system'
-import { buildHumanLanguageRules } from '../../src/shared/prompt-library'
+import {
+  buildContextAlignmentRules,
+  buildGenreRealityRules,
+  buildHumanLanguageRules,
+  buildOutputQualityRules,
+} from '../../src/shared/prompt-library'
 import type { MapBatchGenerateOptions, MapBatchGenerationResult } from '../../src/types'
 import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/utils/text'
 

@@ -577,6 +577,8 @@ export async function generateCharacterRelations(novelId: number): Promise<void>
   const prompt = characterRelationsPrompt({
     novelSynopsis: novel.synopsis || novel.expandedBackground || '',
     characterList: characterListText,
+    genre: profile.genre,
+    worldSummary: profile.worldRulesSummary,
   })
 
   const result = await runChatTask({

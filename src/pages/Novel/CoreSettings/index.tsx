@@ -81,6 +81,30 @@ function getSubplotSummary(subplots: SubPlot[], limit = 3): string {
     .join('\n')
 }
 
+function buildSubplotJsonHardRules(example: string, keepOrder = false): string {
+  const lines = [
+    'JSON output rules:',
+    '- Output JSON only. No explanation, no title, no numbering, no code fence, no comments.',
+    '- Use only these keys: name / characters / conflict / mainlineLink / endChapter.',
+    '- Every string value must stay inside double quotes. Never output {"conflict": bare text}.',
+    '- conflict must be one concrete sentence. mainlineLink must be one concrete sentence.',
+  ]
+
+  if (keepOrder) {
+    lines.push('- Keep item count, item order, and field order exactly the same as the input.')
+  }
+
+  lines.push(`- Example: ${example}`)
+  return lines.join('\n')
+}
+
+function summarizeSubplotWarnings(warnings: string[], fallback: string): string {
+  const unique = [...new Set(warnings.map((warning) => warning.trim()).filter(Boolean))]
+  if (unique.length === 0) return fallback
+  const detail = unique.slice(0, 2).join('\uFF1B')
+  return `${fallback} - ${detail}${unique.length > 2 ? ' / more in Task Center' : ''}`
+}
+
 function getFieldPromptGuidance(fieldName: StoryFieldName, label: string) {
   switch (fieldName) {
     case 'story_goal':
@@ -601,42 +625,37 @@ ${buildHumanLanguageRules([
     const sub = subPlots[index]
     const mainPlot = form.getFieldValue('main_plot') || ''
     const relatedContext = buildRelatedSettingsContext('sub_plots_list')
-    const prompt = `你在刷新一条支线框架。目标是让它和主线互相加压，而不是平行长出另一条小故事。
-【小说背景】${novelBackground || '（暂无补充背景）'}
-【题材】${genreContext}
-【当前主角指代】${protagonistReference}
-【主角称谓规则】${protagonistRule}
-${relatedContext ? `【已确定的关联设定】
-${relatedContext}
-` : ''}【主线剧情】${mainPlot || '（暂未填写）'}
-【当前支线基础信息】
-- 名称：${sub?.name || '（未命名）'}
-- 涉及人物：${sub?.characters || '（暂未填写）'}
-- 核心冲突：${sub?.conflict || '（暂未填写）'}
-- 与主线关联：${sub?.mainlineLink || '（暂未填写）'}
-- 预计收束章节：第${sub?.endChapter || 'X'}章
-${aiConfig.requirements ? `【额外要求】${aiConfig.requirements}
-` : ''}${optimization ? `【评分问题】${optimization.topFixes}
-【改进方向】${optimization.dimSuggestions || '请优先修正评分最低的维度。'}
-${optimization.extraReqs ? `【追加要求】${optimization.extraReqs}` : ''}` : ''}
-【语言要求】
+    const prompt = `Refresh this subplot frame so it actively pressures the main plot instead of becoming a detached side story.
+[NOVEL BACKGROUND] ${novelBackground || 'none'}
+[GENRE] ${genreContext}
+[PROTAGONIST REFERENCE] ${protagonistReference}
+[PROTAGONIST NAMING RULE] ${protagonistRule}
+${relatedContext ? `[LOCKED CONTEXT]\n${relatedContext}\n` : ''}[MAIN PLOT] ${mainPlot || 'none'}
+[CURRENT SUBPLOT]
+- Name: ${sub?.name || 'none'}
+- Characters: ${sub?.characters || 'none'}
+- Conflict: ${sub?.conflict || 'none'}
+- Mainline Link: ${sub?.mainlineLink || 'none'}
+- End Chapter: ${sub?.endChapter || 'X'}
+${aiConfig.requirements ? `[EXTRA REQUIREMENTS] ${aiConfig.requirements}\n` : ''}${optimization ? `[SCORING ISSUES] ${optimization.topFixes}
+[IMPROVEMENT TARGET] ${optimization.dimSuggestions || 'Fix the weakest dimension first.'}
+${optimization.extraReqs ? `[ADDITIONAL REQUIREMENTS] ${optimization.extraReqs}` : ''}` : ''}
+[LANGUAGE RULES]
 ${buildHumanLanguageRules([
-  'conflict 和 mainlineLink 必须是常规中文句子，不要写成抽象标签。',
-  '贴近当前题材常见的支线设计方式，不靠概念包装制造“高级感”。',
+  'Use plain, natural Chinese for conflict and mainlineLink.',
+  'Do not turn ordinary facts into abstract slogans or labels.',
 ])}
+${buildSubplotJsonHardRules('{"name":"subplot name","characters":"Character A,Character B","conflict":"The team finds scarce medicine and the protagonist must choose between saving the wounded or trading for passage.","mainlineLink":"The choice turns logistics allies into rivals and pushes the main resource conflict forward.","endChapter":15}', true)}
 
-刷新原则：
-- 支线必须与主题核心、故事核心目标、核心冲突或主线推进形成明确关联，不能是独立小故事
-- 至少承担一种明确职能：推进主线、揭示世界或主题、推动人物成长或关系变化、制造阶段性反转或伏笔回收
-- 本轮只写这条支线的起爆矛盾、主线作用和收束位置，不展开成长篇情节
-- 若旧版本与最新上下文冲突，优先按最新上下文重写；若旧版本仍有效，可以保留其核心方向
-- 若涉及主角，characters 字段中只能写「${protagonistReference}」
-- characters 只写人物称谓，用逗号分隔
-- conflict 要写成完整、具体的支线核心冲突，不能只写抽象关键词
-- mainlineLink 要写清这条支线如何推动主线、人物或主题，不能写空泛口号
-- endChapter 输出数字
-- 只输出 JSON 对象，不要解释，不要使用 Markdown：
-{"name":"支线名称","characters":"涉及人物1,涉及人物2","conflict":"支线核心冲突","mainlineLink":"与主线或主题的具体关联方式","endChapter":15}`
+Rules:
+- The subplot must connect directly to the story goal, core conflict, main plot, theme pressure, or relationship pressure.
+- Keep only the ignition conflict, the mainline consequence, and the ending position. Do not expand into a full subplot outline.
+- If the old version still fits the latest context, keep its direction instead of rewriting for novelty.
+- If the protagonist appears, characters can only use "${protagonistReference}".
+- conflict must be one complete, concrete sentence.
+- mainlineLink must state the exact pressure or change it causes.
+- endChapter must be numeric.
+- Output one JSON object only.`
 
     return [{ role: 'user' as const, content: prompt }]
   }, [aiConfig.requirements, buildRelatedSettingsContext, form, genreContext, novelBackground, protagonistReference, protagonistRule, subPlots])
@@ -645,40 +664,34 @@ ${buildHumanLanguageRules([
     const mainPlot = form.getFieldValue('main_plot') || ''
     const relatedContext = buildRelatedSettingsContext('sub_plots_list')
     const existingSummary = getSubplotSummary(existingSubplots, SUBPLOT_SUMMARY_LIMIT)
-    const prompt = `请为小说分批补支线框架，本批只做 ${batchCount} 条。
-【小说背景】${novelBackground || '（暂无补充背景）'}
-【题材】${genreContext}
-【当前主角指代】${protagonistReference}
-【主角称谓规则】${protagonistRule}
-${relatedContext ? `【已确定的关联设定】
-${relatedContext}
-` : ''}【主线剧情】${mainPlot || '（暂未填写）'}
-【生成进度】第 ${batchIndex} / ${totalBatches} 批
-【当前已有支线数量】${existingSubplots.length}
-${existingSummary ? `【当前已有支线摘要】
-${existingSummary}
-` : ''}【本批生成数量】${batchCount}
-${aiConfig.requirements ? `【额外要求】${aiConfig.requirements}` : ''}
-【语言要求】
+    const prompt = `Generate ${batchCount} new subplot frames for this batch.
+[NOVEL BACKGROUND] ${novelBackground || 'none'}
+[GENRE] ${genreContext}
+[PROTAGONIST REFERENCE] ${protagonistReference}
+[PROTAGONIST NAMING RULE] ${protagonistRule}
+${relatedContext ? `[LOCKED CONTEXT]\n${relatedContext}\n` : ''}[MAIN PLOT] ${mainPlot || 'none'}
+[BATCH PROGRESS] ${batchIndex}/${totalBatches}
+[EXISTING SUBPLOT COUNT] ${existingSubplots.length}
+${existingSummary ? `[EXISTING SUBPLOTS]\n${existingSummary}\n` : ''}[THIS BATCH COUNT] ${batchCount}
+${aiConfig.requirements ? `[EXTRA REQUIREMENTS] ${aiConfig.requirements}` : ''}
+[LANGUAGE RULES]
 ${buildHumanLanguageRules([
-  '每条支线都要写得准确、直接，不能为了显得高级而写不自然的句子。',
-  '贴近当前题材常见的支线设计方案，不靠空洞概念堆砌存在感。',
+  'Write each subplot in plain, natural Chinese.',
+  'Do not use abstract packaging or slogan-like wording to fake depth.',
 ])}
+${buildSubplotJsonHardRules('[{"name":"subplot name","characters":"Character A,Character B","conflict":"The team finds scarce medicine and the protagonist must choose between saving the wounded or trading for passage.","mainlineLink":"The decision turns logistics allies into rivals and pushes the main resource conflict forward.","endChapter":15}]')}
 
-本批要求：
-- 本次只生成 ${batchCount} 条不同支线，输出 JSON array，数组长度必须等于 ${batchCount}
-- 每条支线都必须与主题核心、故事核心目标、核心冲突或主线推进形成明确因果关联
-- 每条支线只保留最能驱动主线、人物关系或主题的那根线，不要把一条支线写成完整副本剧情
-- 从整轮已生成支线来看，要尽量覆盖不同功能；若当前类型单一，本批优先补足推进主线、揭示世界或主题、推动人物成长、放大人物关系、制造反转或伏笔回收等未覆盖方向
-- 不要与当前已有支线在名称、核心冲突或主线作用上重复
-- 若涉及主角，characters 字段中只能写「${protagonistReference}」，禁止发明新名字
-- 每条 conflict 必须压缩成 1-2 句核心冲突摘要，控制在 ${SUBPLOT_MAX_CONFLICT_LENGTH} 字以内，禁止扩写成长段情节
-- 每条 mainlineLink 控制在 ${SUBPLOT_MAX_MAINLINE_LINK_LENGTH} 字以内，只写它如何推动主线、人物或主题
-- endChapter 输出数字
-- 输出 JSON array，且只输出 JSON：
-[
-  {"name":"支线名称","characters":"涉及人物1,涉及人物2","conflict":"支线核心冲突","mainlineLink":"与主线或主题的具体关联方式","endChapter":15}
-]`
+Batch requirements:
+- Generate exactly ${batchCount} distinct subplots. Output a JSON array with the same length.
+- Every subplot must create clear cause-and-effect pressure on the story goal, core conflict, theme, relationships, or main plot.
+- Keep only the one line that matters most for main-plot pressure; do not write a full subplot synopsis.
+- Across all generated subplots, cover different functions instead of repeating the same type.
+- Do not duplicate existing subplot names, conflicts, or mainlineLink functions.
+- If the protagonist appears, characters can only use "${protagonistReference}".
+- conflict must be one concrete sentence within ${SUBPLOT_MAX_CONFLICT_LENGTH} Chinese characters.
+- mainlineLink must be one concrete sentence within ${SUBPLOT_MAX_MAINLINE_LINK_LENGTH} Chinese characters.
+- endChapter must be numeric.
+- Output a JSON array only.`
 
     return [{ role: 'user' as const, content: prompt }]
   }, [aiConfig.requirements, buildRelatedSettingsContext, form, genreContext, novelBackground, protagonistReference, protagonistRule])
@@ -717,7 +730,7 @@ ${buildHumanLanguageRules([
     count: number,
   ) => {
     const outputs: string[] = []
-    let warningCount = 0
+    const warningMessages: string[] = []
     let existingPool = subPlots.filter((_, subplotIndex) => subplotIndex !== index)
 
     for (let drawIndex = 0; drawIndex < count; drawIndex += 1) {
@@ -731,18 +744,18 @@ ${buildHumanLanguageRules([
 
       const subplot = result.accepted[0]
       if (!subplot) {
-        throw new Error('AI 未返回可保留的支线结果')
+        throw new Error('\u0041\u0049 \u672a\u8fd4\u56de\u53ef\u4fdd\u7559\u7684\u652f\u7ebf\u7ed3\u679c')
       }
 
       outputs.push(JSON.stringify(subplot))
       existingPool = [...existingPool, subplot]
       if (result.warningMessage) {
-        warningCount += 1
+        warningMessages.push(result.warningMessage)
       }
     }
 
-    if (warningCount > 0) {
-      message.warning(`支线结果已部分放宽保留，详情见任务中心`)
+    if (warningMessages.length > 0) {
+      message.warning(summarizeSubplotWarnings(warningMessages, '\u652f\u7ebf\u7ed3\u679c\u5df2\u90e8\u5206\u653e\u5bbd\u4fdd\u7559'))
     }
 
     return outputs
@@ -757,6 +770,7 @@ ${buildHumanLanguageRules([
     let failedBatch = 1
     let accumulatedSubplots = [...subPlots]
     let partialBatchCount = 0
+    const partialWarnings: string[] = []
 
     setSubplotGenerationProgress({
       completed: 0,
@@ -769,7 +783,7 @@ ${buildHumanLanguageRules([
       key: SUBPLOT_PROGRESS_MESSAGE_KEY,
       type: 'loading',
       duration: 0,
-      content: `正在生成支线：第 1/${totalBatches} 批，已生成 0/${totalToGenerate} 条`,
+      content: `\u6b63\u5728\u751f\u6210\u652f\u7ebf\uff1a\u7b2c 1/${totalBatches} \u6279\uff0c\u5df2\u751f\u6210 0/${totalToGenerate} \u6761`,
     })
 
     try {
@@ -788,7 +802,7 @@ ${buildHumanLanguageRules([
           key: SUBPLOT_PROGRESS_MESSAGE_KEY,
           type: 'loading',
           duration: 0,
-          content: `正在生成支线：第 ${currentBatch}/${totalBatches} 批，已生成 ${generatedCount}/${totalToGenerate} 条`,
+          content: `\u6b63\u5728\u751f\u6210\u652f\u7ebf\uff1a\u7b2c ${currentBatch}/${totalBatches} \u6279\uff0c\u5df2\u751f\u6210 ${generatedCount}/${totalToGenerate} \u6761`,
         })
 
         const batchResult = await generateSubplotBatch(
@@ -802,6 +816,7 @@ ${buildHumanLanguageRules([
         generatedCount += batchResult.accepted.length
         if (batchResult.warningMessage) {
           partialBatchCount += 1
+          partialWarnings.push(batchResult.warningMessage)
         }
         setSubPlots(accumulatedSubplots)
         setSubplotGenerationProgress({
@@ -817,8 +832,8 @@ ${buildHumanLanguageRules([
         type: partialBatchCount > 0 || generatedCount < totalToGenerate ? 'warning' : 'success',
         duration: 3,
         content: partialBatchCount > 0 || generatedCount < totalToGenerate
-          ? `已保留 ${generatedCount}/${totalToGenerate} 条支线框架，部分批次有校验拒绝，详情见任务中心`
-          : `已分批生成 ${generatedCount} 条支线框架`,
+          ? summarizeSubplotWarnings(partialWarnings, `\u5df2\u4fdd\u7559 ${generatedCount}/${totalToGenerate} \u6761\u652f\u7ebf\u6846\u67b6`)
+          : `\u5df2\u5206\u6279\u751f\u6210 ${generatedCount} \u6761\u652f\u7ebf\u6846\u67b6`,
       })
     } catch (error) {
       message.open({
@@ -826,8 +841,8 @@ ${buildHumanLanguageRules([
         type: generatedCount > 0 ? 'warning' : 'error',
         duration: 3,
         content: generatedCount > 0
-          ? `支线生成在第 ${failedBatch}/${totalBatches} 批中断，已保留前面生成的 ${generatedCount}/${totalToGenerate} 条，详情见任务中心`
-          : `支线生成失败：${error instanceof Error ? error.message : '请重试'}`,
+          ? `\u652f\u7ebf\u751f\u6210\u5728\u7b2c ${failedBatch}/${totalBatches} \u6279\u4e2d\u65ad\uff0c\u5df2\u4fdd\u7559\u524d\u9762\u751f\u6210\u7684 ${generatedCount}/${totalToGenerate} \u6761\uff0c\u8be6\u60c5\u89c1\u4efb\u52a1\u4e2d\u5fc3`
+          : `\u652f\u7ebf\u751f\u6210\u5931\u8d25\uff1a${error instanceof Error ? error.message : '\u8bf7\u91cd\u8bd5'}`,
       })
     } finally {
       setSubplotGenerationProgress(null)

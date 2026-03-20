@@ -19,6 +19,11 @@ import {
 import { runChatTask, runStreamTask } from './task.service'
 import { buildConsistencyPromptSummary, buildNovelConsistencyReport } from './consistency.service'
 import { syncChapterTimelineStatuses } from './link-sync.service'
+import {
+  collectQualityGuardrailFindings,
+  formatQualityGuardrailSummary,
+  shouldForceRepair,
+} from '../../src/shared/content-guardrails'
 
 interface ChapterSummaryData {
   summary: string
@@ -39,13 +44,19 @@ interface ScenePlanStep {
   exit_hook: string
 }
 
+type ReviewSeverity = 'low' | 'medium' | 'high'
+
 interface ChapterReviewNotes {
   summary: string
   critical_fixes: string[]
   continuity_risks: string[]
+  context_drift_risks: string[]
+  realism_risks: string[]
   language_risks: string[]
   missing_payoffs: string[]
   strengths: string[]
+  severity: ReviewSeverity
+  rewrite_required: boolean
   revision_brief: string
 }
 
@@ -78,6 +89,19 @@ function toStringArray(value: unknown): string[] {
 
 function asText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
+}
+
+function dedupeTextList(values: string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))]
+}
+
+function normalizeReviewSeverity(value: unknown): ReviewSeverity {
+  return value === 'high' || value === 'medium' || value === 'low' ? value : 'medium'
+}
+
+function mergeSeverity(current: ReviewSeverity, incoming: ReviewSeverity): ReviewSeverity {
+  const rank: Record<ReviewSeverity, number> = { low: 1, medium: 2, high: 3 }
+  return rank[incoming] > rank[current] ? incoming : current
 }
 
 function extractChapterGoal(outline?: string | null): string {
@@ -245,9 +269,13 @@ function normalizeReviewNotes(raw: unknown): ChapterReviewNotes {
     summary: asText(record.summary),
     critical_fixes: toStringArray(record.critical_fixes),
     continuity_risks: toStringArray(record.continuity_risks),
+    context_drift_risks: toStringArray(record.context_drift_risks),
+    realism_risks: toStringArray(record.realism_risks),
     language_risks: toStringArray(record.language_risks),
     missing_payoffs: toStringArray(record.missing_payoffs),
     strengths: toStringArray(record.strengths),
+    severity: normalizeReviewSeverity(record.severity),
+    rewrite_required: record.rewrite_required === true,
     revision_brief: asText(record.revision_brief),
   }
 }
@@ -257,9 +285,12 @@ function hasReviewNotes(notes: ChapterReviewNotes): boolean {
     notes.summary ||
     notes.critical_fixes.length > 0 ||
     notes.continuity_risks.length > 0 ||
+    notes.context_drift_risks.length > 0 ||
+    notes.realism_risks.length > 0 ||
     notes.language_risks.length > 0 ||
     notes.missing_payoffs.length > 0 ||
     notes.strengths.length > 0 ||
+    notes.rewrite_required ||
     notes.revision_brief,
   )
 }
@@ -272,13 +303,17 @@ function buildFallbackReviewNotes(consistencyNotes: string): ChapterReviewNotes 
     .slice(0, 3)
 
   return {
-    summary: '先按场景计划写顺结构，再统一修正承接和语言。',
+    summary: '先按场景计划把事件链写顺，再统一修正承接、常识和语言。',
     critical_fixes: ['逐段核对场景计划里的 must_cover 是否全部落地。'],
     continuity_risks: consistencyLines,
+    context_drift_risks: [],
+    realism_risks: [],
     language_risks: ['删除抽象口号、概念引号和不自然搭配。'],
     missing_payoffs: [],
     strengths: [],
-    revision_brief: '保持当前剧情方向，重点修承接、人物状态、物品去向和语言自然度。',
+    severity: 'medium',
+    rewrite_required: true,
+    revision_brief: '保持当前剧情方向，重点修承接、人物状态、物品去向、代价落点和语言自然度。',
   }
 }
 
@@ -287,11 +322,173 @@ function formatReviewNotes(notes: ChapterReviewNotes): string {
     notes.summary ? `整体判断：${notes.summary}` : '',
     notes.critical_fixes.length > 0 ? `必须修改：\n- ${notes.critical_fixes.join('\n- ')}` : '',
     notes.continuity_risks.length > 0 ? `连续性风险：\n- ${notes.continuity_risks.join('\n- ')}` : '',
+    notes.context_drift_risks.length > 0 ? `上下文漂移风险：\n- ${notes.context_drift_risks.join('\n- ')}` : '',
+    notes.realism_risks.length > 0 ? `常识/规则风险：\n- ${notes.realism_risks.join('\n- ')}` : '',
     notes.language_risks.length > 0 ? `语言风险：\n- ${notes.language_risks.join('\n- ')}` : '',
     notes.missing_payoffs.length > 0 ? `缺失回收：\n- ${notes.missing_payoffs.join('\n- ')}` : '',
     notes.strengths.length > 0 ? `可保留优点：\n- ${notes.strengths.join('\n- ')}` : '',
+    `严重等级：${notes.severity}`,
+    `是否需要重写：${notes.rewrite_required ? '是' : '否'}`,
     notes.revision_brief ? `修订摘要：${notes.revision_brief}` : '',
   ].filter(Boolean).join('\n\n')
+}
+
+function findingSeverityToReviewSeverity(severity: 'low' | 'medium' | 'high'): ReviewSeverity {
+  if (severity === 'high') return 'high'
+  if (severity === 'medium') return 'medium'
+  return 'low'
+}
+
+function buildGuardrailCriticalFixes(findings: ReturnType<typeof collectQualityGuardrailFindings>): string[] {
+  const fixes: string[] = []
+
+  if (findings.some((finding) => finding.code === 'object_category_mismatch')) {
+    fixes.push('把物体、系统、设施被写成人的句子全部改成准确说法，例如把“电网死亡”改成“电网瘫痪”或“电网中断”。')
+  }
+
+  if (findings.some((finding) => finding.code === 'zero_cost_resolution')) {
+    fixes.push('把伤势、物资、秩序或战斗结果的代价写进场景里，不能一句话零成本解决。')
+  }
+
+  if (findings.some((finding) => finding.code === 'ai_slogan' || finding.code === 'template_emotion')) {
+    fixes.push('删掉口号句、模板情绪和假深刻抒情，改回动作、反应、对话与细节。')
+  }
+
+  return fixes
+}
+
+function appendRevisionBrief(base: string, additions: string[]): string {
+  const merged = dedupeTextList([base, ...additions])
+  if (merged.length === 0) return ''
+  return merged.join('；').slice(0, 140)
+}
+
+function enhanceReviewNotesWithGuardrails(
+  reviewNotes: ChapterReviewNotes,
+  content: string,
+  genre?: string,
+  existingFindings?: ReturnType<typeof collectQualityGuardrailFindings>,
+): ChapterReviewNotes {
+  const findings = existingFindings ?? collectQualityGuardrailFindings(content, genre)
+  if (findings.length === 0) return reviewNotes
+
+  const realismFindings = formatQualityGuardrailSummary(
+    findings.filter((finding) => finding.code === 'object_category_mismatch' || finding.code === 'zero_cost_resolution'),
+  )
+  const languageFindings = formatQualityGuardrailSummary(
+    findings.filter((finding) => finding.code === 'ai_slogan' || finding.code === 'template_emotion'),
+  )
+
+  const next: ChapterReviewNotes = {
+    ...reviewNotes,
+    critical_fixes: dedupeTextList([...buildGuardrailCriticalFixes(findings), ...reviewNotes.critical_fixes]),
+    continuity_risks: dedupeTextList(reviewNotes.continuity_risks),
+    context_drift_risks: dedupeTextList(reviewNotes.context_drift_risks),
+    realism_risks: dedupeTextList([...reviewNotes.realism_risks, ...realismFindings]),
+    language_risks: dedupeTextList([...reviewNotes.language_risks, ...languageFindings]),
+    missing_payoffs: dedupeTextList(reviewNotes.missing_payoffs),
+    strengths: dedupeTextList(reviewNotes.strengths),
+    severity: findings.reduce(
+      (current, finding) => mergeSeverity(current, findingSeverityToReviewSeverity(finding.severity)),
+      reviewNotes.severity,
+    ),
+    rewrite_required: reviewNotes.rewrite_required || shouldForceRepair(findings),
+    summary: reviewNotes.summary || '当前稿件仍有需要落地修正的常识或语言问题。',
+    revision_brief: appendRevisionBrief(reviewNotes.revision_brief, [
+      realismFindings.length > 0 ? '把伤势、资源、秩序、移动成本和世界规则的代价写实写满。' : '',
+      languageFindings.length > 0 ? '删除口号句、模板情绪和对象类别错配，改回自然中文。' : '',
+    ]),
+  }
+
+  return next
+}
+
+interface ChapterRepairInput {
+  chapter: typeof chapters.$inferSelect
+  novel: typeof novels.$inferSelect
+  context: Awaited<ReturnType<typeof buildChapterContext>>
+  storyCore: string
+  profile: Awaited<ReturnType<typeof buildStoryProfile>>
+  scenePlanText: string
+  consistencyNotes: string
+  reviewNotes: ChapterReviewNotes
+  content: string
+}
+
+async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
+  content: string
+  reviewNotes: ChapterReviewNotes
+}> {
+  const originalContent = input.content.trim()
+  const findings = collectQualityGuardrailFindings(originalContent, input.profile.genre)
+  if (findings.length === 0 || !shouldForceRepair(findings)) {
+    return {
+      content: originalContent,
+      reviewNotes: input.reviewNotes,
+    }
+  }
+
+  const repairNotes = enhanceReviewNotesWithGuardrails(input.reviewNotes, originalContent, input.profile.genre, findings)
+
+  try {
+    const repairedContent = (await runChatTask({
+      type: 'chapter_write',
+      novelId: input.chapter.novelId,
+      relatedEntityType: 'chapter',
+      relatedEntityId: input.chapter.id,
+      messages: [{
+        role: 'user',
+        content: buildChapterRewritePrompt({
+          novelTitle: input.novel.title,
+          chapterNum: input.chapter.chapterNum,
+          chapterTitle: input.chapter.title || `第${input.chapter.chapterNum}章`,
+          chapterGoal: input.context.chapterGoal,
+          emotionTone: input.chapter.emotionTone || '平稳',
+          targetWords: input.chapter.targetWords || 3000,
+          storyCore: input.storyCore,
+          currentArc: input.context.currentArc,
+          worldRules: input.context.worldRules,
+          characterStates: input.context.characterStates,
+          itemSummary: input.context.itemSummary,
+          previousSummaries: input.context.previousSummaries,
+          lastChapterEnding: input.context.lastChapterEnding,
+          continuitySummary: input.context.continuitySummary,
+          openLoops: input.context.openLoops,
+          continuityNotes: input.context.continuityNotes,
+          timelineSummary: input.context.timelineSummary,
+          timelineOpenThreads: input.context.timelineOpenThreads,
+          longTermMemory: input.context.longTermMemory,
+          consistencyNotes: input.consistencyNotes,
+          scenePlan: input.scenePlanText,
+          draftContent: originalContent,
+          reviewNotes: formatReviewNotes(repairNotes),
+          protagonistReference: input.profile.protagonistReference,
+          protagonistRule: input.profile.protagonistRule,
+        }),
+      }],
+      modelConfigId: input.novel.modelConfigId || undefined,
+    })).trim()
+
+    if (!repairedContent) {
+      return {
+        content: originalContent,
+        reviewNotes: repairNotes,
+      }
+    }
+
+    const finalFindings = collectQualityGuardrailFindings(repairedContent, input.profile.genre)
+    return {
+      content: repairedContent,
+      reviewNotes: finalFindings.length > 0
+        ? enhanceReviewNotesWithGuardrails(repairNotes, repairedContent, input.profile.genre, finalFindings)
+        : repairNotes,
+    }
+  } catch {
+    return {
+      content: originalContent,
+      reviewNotes: repairNotes,
+    }
+  }
 }
 
 async function updateChapterContinuityState(
@@ -674,6 +871,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
       reviewNotes = buildFallbackReviewNotes(consistencyNotes)
     }
 
+    reviewNotes = enhanceReviewNotesWithGuardrails(reviewNotes, draftContent, profile.genre)
     updateChapter(chapterId, { reviewNotesJson: JSON.stringify(reviewNotes) })
 
     sendGenerationProgress(sender, {
@@ -726,12 +924,28 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
       modelConfigId: novel.modelConfigId || undefined,
       sender,
       onSuccess: async (output) => {
-        const result = await finalizeGeneratedChapterContent(chapterId, output)
+        const repaired = await repairChapterOutputIfNeeded({
+          chapter,
+          novel,
+          context,
+          storyCore,
+          profile,
+          scenePlanText,
+          consistencyNotes,
+          reviewNotes,
+          content: output,
+        })
+
+        if (repaired.reviewNotes !== reviewNotes) {
+          updateChapter(chapterId, { reviewNotesJson: JSON.stringify(repaired.reviewNotes) })
+        }
+
+        const result = await finalizeGeneratedChapterContent(chapterId, repaired.content)
         sendGenerationProgress(sender, {
           chapterId,
           stage: 'completed',
-          label: '生成完成',
-          detail: '摘要、连续性记忆和时间轴状态已同步。',
+          label: '完成入稿',
+          detail: '章节已完成自动修订，并写入摘要与连续性记忆。',
           completed: 4,
           total: 4,
           status: 'success',

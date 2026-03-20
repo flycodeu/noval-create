@@ -10,7 +10,8 @@ import {
   type CoreSettingsGenerationStepResult,
 } from '../../src/shared/core-settings-generation'
 import {
-  parseSubPlotFrameworkResponse,
+  normalizeSubplotIdentity,
+  parseSubPlotFrameworkResponseDetailed,
   validateGeneratedSubplots,
   type PromptMessage,
   type SubPlotDraft,
@@ -20,7 +21,12 @@ import { getDb } from '../database/db'
 import { novels } from '../database/schema'
 import { safeParseJson } from '../utils/json'
 import { buildStoryProfile } from './context.service'
-import { buildHumanLanguageRules } from '../../src/shared/prompt-library'
+import {
+  buildContextAlignmentRules,
+  buildGenreRealityRules,
+  buildHumanLanguageRules,
+  buildOutputQualityRules,
+} from '../../src/shared/prompt-library'
 import { generateSubplotBatch } from './subplot.service'
 import { runChatTask } from './task.service'
 
@@ -86,12 +92,82 @@ function cleanPlainText(text: string): string {
   return cleanAiFieldText(text).trim()
 }
 
-function sanitizeErrorMessage(error: unknown, fallback = '生成失败'): string {
+function sanitizeErrorMessage(error: unknown, fallback = '\u751f\u6210\u5931\u8d25'): string {
   const raw = error instanceof Error ? error.message : fallback
   return raw
     .replace(/^\[[^\]]+\]\s*/g, '')
     .replace(/\s+/g, ' ')
     .trim()
+}
+
+function joinWarnings(...warnings: Array<string | undefined | null>): string | undefined {
+  const parts = warnings
+    .map((warning) => warning?.trim())
+    .filter((warning): warning is string => Boolean(warning))
+
+  return parts.length > 0 ? parts.join('\uFF1B') : undefined
+}
+
+function buildSubplotJsonHardRules(example: string, keepOrder = false): string {
+  const lines = [
+    'JSON output rules:',
+    '- Output JSON only. No explanation, no title, no numbering, no code fence, no comments.',
+    '- Use only these keys: name / characters / conflict / mainlineLink / endChapter.',
+    '- Every string value must stay inside double quotes. Never output {"conflict": bare text}.',
+    '- conflict must be one concrete sentence about who faces what dilemma or pressure.',
+    '- mainlineLink must be one concrete sentence about what this subplot changes in the main story.',
+  ]
+
+  if (keepOrder) {
+    lines.push('- Keep item count, item order, and field order exactly the same as the input.')
+  }
+
+  lines.push(`- Example: ${example}`)
+  return lines.join('\n')
+}
+
+function mergePolishedSubplots(original: SubPlotDraft[], polished: SubPlotDraft[]) {
+  const merged = [...original]
+  const matched = new Set<number>()
+  const originalIndexesByName = new Map<string, number[]>()
+
+  original.forEach((subplot, index) => {
+    const key = normalizeSubplotIdentity(subplot.name)
+    if (!key) return
+    const list = originalIndexesByName.get(key) || []
+    list.push(index)
+    originalIndexesByName.set(key, list)
+  })
+
+  let fallbackIndex = 0
+  let replacedCount = 0
+
+  for (const subplot of polished) {
+    let targetIndex = -1
+    const key = normalizeSubplotIdentity(subplot.name)
+    const namedCandidates = key
+      ? (originalIndexesByName.get(key) || []).filter((index) => !matched.has(index))
+      : []
+
+    if (namedCandidates.length > 0) {
+      targetIndex = namedCandidates[0]
+    } else {
+      while (fallbackIndex < original.length && matched.has(fallbackIndex)) {
+        fallbackIndex += 1
+      }
+      if (fallbackIndex < original.length) {
+        targetIndex = fallbackIndex
+        fallbackIndex += 1
+      }
+    }
+
+    if (targetIndex === -1) continue
+    merged[targetIndex] = subplot
+    matched.add(targetIndex)
+    replacedCount += 1
+  }
+
+  return { merged, replacedCount }
 }
 
 function clampSubplotCount(value: number): number {
@@ -545,7 +621,7 @@ function buildSubplotPromptV2(
     .join('\n')
 
   return renderPrompt([
-    `请为这部小说生成 ${batchCount} 条新的支线剧情框架。`,
+    `请为这部小说生成 ${batchCount} 条新的支线框架。`,
     section('基础背景', buildBaseContextV2(context)),
     buildUserRequirementSectionV2(context.requirements),
     buildDecisionConstraintSectionV2(context),
@@ -555,26 +631,40 @@ function buildSubplotPromptV2(
       `主线剧情：${mainPlot}`,
     ]),
     sectionLines('当前批次', [
-      `批次：第 ${batchIndex}/${totalBatches} 批`,
+      `批次：${batchIndex}/${totalBatches}`,
       `本批数量：${batchCount}`,
       `已有支线数量：${existingSubplots.length}`,
     ]),
     existingSummary ? section('已有支线摘要', existingSummary) : '',
+    section('上下文护栏', buildContextAlignmentRules({
+      background: context.background,
+      storyCore: [`故事核心目标：${storyGoal}`, `核心冲突：${coreConflict}`, `主线剧情：${mainPlot}`].join('\n'),
+      worldSummary: context.worldRulesSummary,
+      taskFocus: '只补与当前主线同一套背景和规则下的支线，不要跳到另一种题材或另一套规则。',
+      extraLines: [`涉及主角时，只能使用「${context.protagonistReference}」称呼，不能自行补实名。`],
+    })),
+    section('真实度护栏', buildGenreRealityRules({
+      genre: context.genre,
+      worldSummary: context.worldRulesSummary,
+      extraLines: ['如果支线涉及末世生存、感染、秩序、围困或资源分配，必须写清风险承担者、代价承担者和决策压力。'],
+    })),
+    section('输出质量底线', buildOutputQualityRules([
+      '每条支线都要写成能直接落进后续剧情的具体矛盾，不要写成题材标签或主题口号。',
+      '不同支线要承担不同剧情功能，避免名称、冲突或主线作用重复。',
+    ])),
     section('生成要求', [
-      '每条支线都必须与主线推进、主题揭示、人物成长或关键关系变化形成明确因果关联。',
-      '不同支线要承担不同功能，避免名称、核心冲突或主线作用重复。',
-      'characters 只写人物称谓，用逗号分隔；涉及主角时只能写当前主角称呼。',
-      `conflict 用 1 到 2 句话写清支线核心矛盾，不超过 ${maxConflictLength} 字。`,
-      'mainlineLink 用一句话写清它如何推动主线、人物或主题，不超过 60 字。',
-      '如果支线涉及生存、感染、秩序或资源问题，冲突必须写出谁承担风险、谁承担代价。',
+      'characters 只写人物称谓，用英文逗号分隔；涉及主角时只能写当前主角称呼。',
+      `conflict 必须是 1 句具体中文，不超过 ${maxConflictLength} 字，写清谁面临什么两难、风险或代价。`,
+      'mainlineLink 必须是 1 句具体中文，不超过 60 字，写清它改变了主线的哪一处推进、关系或局势。',
       'endChapter 输出数字。',
+      '优先用短句，先写行动、压力和后果，不要写成空泛主题句或章节摘要腔。',
       buildHumanLanguageRules([
-        '冲突和主线关联都要写得准确直接，不要出现对象错配和空话。',
-        '宁可短，也不要扩写成长段剧情；一句话写清矛盾即可。',
+        '先写清具体行动、压力和后果。',
+        '不要写成标签化短语或空泛主题口号。',
       ]),
+      buildSubplotJsonHardRules('[{"name":"支线名","characters":"人物A,人物B","conflict":"队伍找到稀缺药物，主角必须在救治伤员和换取通行之间做选择。","mainlineLink":"这个选择把后勤盟友推向对立面，并把主线资源冲突继续升级。","endChapter":15}]'),
     ].join('\n')),
-    '只输出 JSON array，且数组长度必须等于本批数量。',
-    '[{"name":"支线名称","characters":"涉及人物1,涉及人物2","conflict":"支线核心冲突","mainlineLink":"与主线或主题的具体关联","endChapter":15}]',
+    '只输出 JSON array，数组长度必须等于本批数量，不要解释，不要 Markdown。',
   ])
 }
 
@@ -586,7 +676,7 @@ function buildSubplotPolishPromptV2(
   subplots: SubPlotDraft[],
 ): string {
   return renderPrompt([
-    '请只润色下面这组支线框架的中文表达，不改动条目数量、名称方向、主线作用和收束章节。',
+    '请只润色下面这组支线框架的中文表达，不改动条目数量、功能方向和收束章节。',
     section('基础背景', buildBaseContextV2(context)),
     buildUserRequirementSectionV2(context.requirements),
     buildDecisionConstraintSectionV2(context),
@@ -595,13 +685,31 @@ function buildSubplotPolishPromptV2(
       `核心冲突：${coreConflict}`,
       `主线剧情：${mainPlot}`,
     ]),
-    section('待润色支线', JSON.stringify(subplots, null, 2)),
-    section('润色重点', buildHumanLanguageRules([
-      '重点润色 conflict 和 mainlineLink 的表达，不要改成另一条支线。',
-      '把空泛、悬浮或对象错配的表达改成自然准确的中文。',
-      '保留 characters 和 endChapter 的原意，不新增设定。',
-    ])),
-    '只输出润色后的 JSON array，不要解释，不要 Markdown。',
+    section('待修正支线', JSON.stringify(subplots, null, 2)),
+    section('上下文护栏', buildContextAlignmentRules({
+      background: context.background,
+      storyCore: [`故事核心目标：${storyGoal}`, `核心冲突：${coreConflict}`, `主线剧情：${mainPlot}`].join('\n'),
+      worldSummary: context.worldRulesSummary,
+      taskFocus: '只修正这组支线的中文表达，不要借机换成另一组剧情。',
+      extraLines: ['如果某条文案已经自然准确，就直接保留。'],
+    })),
+    section('真实度护栏', buildGenreRealityRules({
+      genre: context.genre,
+      worldSummary: context.worldRulesSummary,
+      extraLines: ['如果某条支线涉及生存、感染、秩序或资源，修辞后仍要保留风险承担者与代价落点。'],
+    })),
+    section('修正重点', [
+      '只重写字符串内容，不能改动条目数量、字段名、字段顺序、对象顺序和 endChapter 原意。',
+      '重点修 conflict 和 mainlineLink 的语感，但不能修成另一条支线。',
+      '把空泛、悬浮、对象错配或生硬的表达改成自然、准确的中文。',
+      '不要为了“换一种说法”就硬改原本已经成立的句子。',
+      buildHumanLanguageRules([
+        '只修语言，不补新设定，不换冲突，不扩写剧情。',
+        '输出前再自查一遍，确保所有字符串字段都是合法 JSON。',
+      ]),
+      buildSubplotJsonHardRules('[{"name":"支线名","characters":"人物A,人物B","conflict":"队伍找到稀缺药物，主角必须在救治伤员和换取通行之间做选择。","mainlineLink":"这个选择把后勤盟友推向对立面，并把主线资源冲突继续升级。","endChapter":15}]', true),
+    ].join('\n')),
+    '只输出修正后的 JSON array，不要解释，不要 Markdown。',
   ])
 }
 
@@ -854,8 +962,8 @@ async function generateSubplots(
         context.modelConfigId,
         buildSubplotPolishPromptV2(context, storyGoal, coreConflict, mainPlot, accumulated),
       )
-      const polished = parseSubPlotFrameworkResponse(polishedRaw)
-      const validation = validateGeneratedSubplots(polished, {
+      const parsedResult = parseSubPlotFrameworkResponseDetailed(polishedRaw)
+      const validation = validateGeneratedSubplots(parsedResult.subplots, {
         existingSubplots: [],
         expectedCount: accumulated.length,
         maxConflictLength: 90,
@@ -863,15 +971,34 @@ async function generateSubplots(
       })
 
       if (validation.accepted.length > 0) {
-        accumulated = validation.accepted
-        if (validation.warningMessage) {
-          warnings.push(`支线语言修正后校验提示：${validation.warningMessage}`)
+        const originalCount = accumulated.length
+        const { merged, replacedCount } = mergePolishedSubplots(accumulated, validation.accepted)
+        accumulated = merged
+
+        const polishWarning = joinWarnings(
+          parsedResult.notes.length > 0 ? parsedResult.notes.join('\uFF1B') : undefined,
+          validation.rejectionReasons.length > 0 ? `\u6da6\u8272\u7ed3\u679c\u62d2\u7edd\u539f\u56e0\uff1a${validation.rejectionReasons.join('\uFF1B')}` : undefined,
+          replacedCount < originalCount ? `\u4ec5\u66ff\u6362 ${replacedCount}/${originalCount} \u6761\u6da6\u8272\u7ed3\u679c\uff0c\u5176\u4f59\u4fdd\u7559\u539f\u59cb\u652f\u7ebf\u6846\u67b6` : undefined,
+        )
+
+        if (polishWarning) {
+          warnings.push(`\u652f\u7ebf\u8bed\u8a00\u4fee\u6b63\u63d0\u793a\uff1a${polishWarning}`)
         }
       } else {
-        warnings.push('支线语言修正结果未通过校验，已保留原始支线框架')
+        const failedReasons = joinWarnings(
+          parsedResult.notes.length > 0 ? parsedResult.notes.join('\uFF1B') : undefined,
+          validation.rejectionReasons.length > 0 ? `\u6821\u9a8c\u539f\u56e0\uff1a${validation.rejectionReasons.join('\uFF1B')}` : undefined,
+        )
+        warnings.push(joinWarnings(
+          '\u652f\u7ebf\u8bed\u8a00\u4fee\u6b63\u7ed3\u679c\u672a\u901a\u8fc7\u6821\u9a8c\uff0c\u5df2\u4fdd\u7559\u539f\u59cb\u652f\u7ebf\u6846\u67b6',
+          failedReasons,
+        ) || '\u652f\u7ebf\u8bed\u8a00\u4fee\u6b63\u7ed3\u679c\u672a\u901a\u8fc7\u6821\u9a8c\uff0c\u5df2\u4fdd\u7559\u539f\u59cb\u652f\u7ebf\u6846\u67b6')
       }
-    } catch {
-      warnings.push('支线语言修正失败，已保留原始支线框架')
+    } catch (error) {
+      warnings.push(joinWarnings(
+        '\u652f\u7ebf\u8bed\u8a00\u4fee\u6b63\u5931\u8d25\uff0c\u5df2\u4fdd\u7559\u539f\u59cb\u652f\u7ebf\u6846\u67b6',
+        sanitizeErrorMessage(error),
+      ) || '\u652f\u7ebf\u8bed\u8a00\u4fee\u6b63\u5931\u8d25\uff0c\u5df2\u4fdd\u7559\u539f\u59cb\u652f\u7ebf\u6846\u67b6')
     }
   }
 

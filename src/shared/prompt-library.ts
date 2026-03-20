@@ -1,3 +1,5 @@
+import { buildRealityConstraintSummary, getBuiltinGenreRules } from './genre-system'
+
 export interface PromptParamMeta {
   key: string
   label: string
@@ -66,6 +68,8 @@ export interface RegenerateCharacterPromptInput {
 export interface CharacterRelationsPromptInput {
   novelSynopsis: string
   characterList: string
+  genre?: string
+  worldSummary?: string
 }
 
 export interface MapGenerationPromptInput {
@@ -248,6 +252,8 @@ export interface RewriteParagraphPromptInput {
   originalParagraph: string
   contextBefore: string
   specificRequirements: string
+  genreContext?: string
+  worldSummary?: string
 }
 
 export interface GenericExpandPromptInput {
@@ -402,6 +408,93 @@ export function buildHumanLanguageRules(extraLines: string[] = []): string {
     .join('\n')
 }
 
+interface PromptGuardrailOptions {
+  genre?: string
+  background?: string
+  storyCore?: string
+  worldSummary?: string
+  taskFocus: string
+  extraContextLines?: string[]
+  extraRealityLines?: string[]
+  extraQualityLines?: string[]
+}
+
+function getGenreRealityBaseline(genre?: string): string {
+  return buildRealityConstraintSummary(getBuiltinGenreRules(genre).writingConstraints)
+}
+
+export function buildContextAlignmentRules(params: {
+  background?: string
+  storyCore?: string
+  worldSummary?: string
+  taskFocus: string
+  extraLines?: string[]
+}): string {
+  return [
+    '只沿着当前背景、主题、世界规则和已知人物处境继续往下写。',
+    '已有地点、势力、体系、资源和关系链优先复用，确有必要再新增。',
+    '如果上下文不完整，选择最保守、最贴合当前题材和既有设定的延伸方案。',
+    '每个新增事件或细节都要回答：为什么是现在、谁在推动、代价落在谁身上、之后改变了什么。',
+    params.background ? '背景设定仍是本轮生成的第一锚点。' : '',
+    params.storyCore ? '故事目标、核心冲突和主线推进是不能越界的硬边界。' : '',
+    params.worldSummary ? '若给定世界摘要里没有支持某条规则、能力、机构或技术，就不要自行补造。' : '',
+    params.taskFocus ? `本轮任务焦点：${params.taskFocus}` : '',
+    ...(params.extraLines || []),
+  ]
+    .filter(Boolean)
+    .map((line) => `- ${line}`)
+    .join('\n')
+}
+
+export function buildGenreRealityRules(params: {
+  genre?: string
+  worldSummary?: string
+  extraLines?: string[]
+}): string {
+  return [
+    '现实向题材默认要遵守常识、常规科学和常规物理，除非给定设定已经明确推翻了它们。',
+    '幻想向题材可以有超常元素，但必须落在既定体系、等级、代价、触发条件和社会规则里。',
+    getGenreRealityBaseline(params.genre),
+    params.worldSummary ? '如果题材默认与已给定世界摘要冲突，优先服从已给定的世界摘要，但不能与现有事实相矛盾。' : '',
+    ...(params.extraLines || []),
+  ]
+    .filter(Boolean)
+    .map((line) => `- ${line}`)
+    .join('\n')
+}
+
+export function buildOutputQualityRules(extraLines: string[] = []): string {
+  return [
+    '先写具体事实、动作、条件和后果，再写情绪、意义或评价。',
+    '不要写口号腔、平台文案腔、百科腔、空洞概括或假深刻结论。',
+    '人物行为必须匹配身份、信息量、伤势、体力、资源、环境和利害压力。',
+    '拿不准时，选择最直白、最符合常识的说法，不要硬造新奇感。',
+    '如果设定里有超常能力，同时要交代触发条件、限制或代价。',
+    ...extraLines,
+  ]
+    .filter(Boolean)
+    .map((line) => `- ${line}`)
+    .join('\n')
+}
+
+function buildPromptGuardrailSections(options: PromptGuardrailOptions): string[] {
+  return [
+    section('上下文护栏', buildContextAlignmentRules({
+      background: options.background,
+      storyCore: options.storyCore,
+      worldSummary: options.worldSummary,
+      taskFocus: options.taskFocus,
+      extraLines: options.extraContextLines,
+    })),
+    section('真实度护栏', buildGenreRealityRules({
+      genre: options.genre,
+      worldSummary: options.worldSummary,
+      extraLines: options.extraRealityLines,
+    })),
+    section('输出质量底线', buildOutputQualityRules(options.extraQualityLines || [])),
+  ]
+}
+
 export function buildStoryAnchorPrompt(params: StoryAnchorPromptInput): string {
   const guidance = getStoryAnchorGuidance(params.field, params.label)
   const protagonistReference = params.protagonistReference?.trim() || '主角'
@@ -441,27 +534,29 @@ export function buildStoryAnchorPrompt(params: StoryAnchorPromptInput): string {
 }
 export const GLOBAL_WRITING_RULES = `你现在写的是可直接入稿的中文小说正文。
 
-基本要求：
-1. 先把事情写清，再让情绪和分量自然露出来，不替读者抢结论。
-2. 情绪尽量落在动作、反应、对话、停顿和细节里，少用抽象判断句。
-3. 对话要像人会说的话，允许绕开、停顿、答非所问，不要每句都补说话方式。
-4. 句子自然，不摆写作腔，不堆对称句、排比句和故作深沉的收尾。
-5. 一切服从当前章节任务、人物状态、世界规则和连续性。
-6. 主谓宾搭配必须准确，动作和状态要符合对象本身；不要把非生物写成会死亡、呼吸、哭泣或思考。
-7. 贴近当前题材常见的叙述气质和节奏；如果给了文风参考，只借语气、视角和句子密度，不模仿具体作者。
+核心规则：
+1. 先把事件、动作、条件和后果写清，再进情绪和意义。
+2. 情绪要落在动作、反应、对话、停顿和细节上，不要用抽象评语代替。
+3. 对话要像这个人在当下压力里真会说的话。
+4. 句子保持自然，避免刻意对称、假深刻和过度修辞。
+5. 无论什么时候，都要服从当前章节任务、人物状态、世界规则和连续性。
+6. 主语、谓语、宾语必须搭配成立，不要给物体、系统或建筑安上只有人才有的生命状态。
+7. 贴近当前题材常见的叙事质感，但不模仿具体作者。
+8. 除非当前世界规则已经明确允许，不要自行发明新能力、技术跃迁、奇迹恒复、免费资源或瞬间全员达成一致。
 
-高风险表达，尽量不要出现：
-- 不禁、不由得、忍不住、此刻、顿时、瞬间、莫名、说不清这类万能引导词
-- 深吸一口气、攥紧拳头、微微一愣、瞪大眼睛、心头一紧这类过度模板动作
-- 靠反复强调命运、希望、成长来制造分量，而不是写具体处境和代价
-- 普通概念随意加中文引号或书名号，例如“人类筛选”“真正的成长”“命运齿轮”
-- 用破折号解释、顿悟、硬造停顿
-- 为了显得深刻而造词，尤其任何“XX之感 / 之际 / 之意”式表达
-- 把对象写错，比如“电网的死亡”“城市在哭泣”“铁门感到愤怒”这类不成立或高歧义表达
+高风险坏习惯：
+- “突然”“不由得”“这一刻”“顷刻之间”这类万能起手
+- 深吸一口气、攒紧拳头、瞪大眼睛、僵在原地这类套路动作
+- 用命运、希望、成长或口号去覆盖具体处境和代价
+- 给普通概念乱加引号
+- 用破折号偷懒解释或做假揭示
+- 为了显得深刻而硬造伪文艺句
+- 写出“系统死亡”“城市哭泣”“门感到愤怒”这类不成立搭配
+- 把重伤、断缺、秩序崩塌或等级差距写成零代价解决
 
-输出要求：
-- 只输出正文，不要解释，不要标题，不要 Markdown
-- 用纯文本分段，段间空一行`.trim()
+输出：
+- 只输出最终正文
+- 只用纯文本分段`.trim()
 
 export function expandBackgroundPrompt(params: {
   userBackground: string
@@ -475,6 +570,13 @@ export function expandBackgroundPrompt(params: {
       '题材：' + params.genre,
       params.worldTemplateSummary ? '世界观参考：' + params.worldTemplateSummary : '',
     ]),
+    ...buildPromptGuardrailSections({
+      genre: params.genre,
+      background: params.userBackground,
+      worldSummary: params.worldTemplateSummary,
+      taskFocus: '1. 写一段 300 到 500 字的扩展背景，只补当前可写的世界处境、日常规则、危险来源和人物起步位置。',
+      extraQualityLines: ['标题和简介都要贴题材，避免万能热词和平台套路文案。'],
+    }),
     section('任务', [
       '1. 写一段 300 到 500 字的扩展背景，只补当前可写的世界处境、日常规则、危险来源和人物起步位置。',
       '2. 给 3 个标题，分别偏人物、偏悬念、偏题材气质，名字要像正经小说，不要像宣传语。',
@@ -511,6 +613,14 @@ export function protagonistPrompt(params: ProtagonistPromptInput): string {
       '性别：' + params.gender,
       params.surnameHint ? '姓名方向：' + params.surnameHint : '',
     ]),
+    ...buildPromptGuardrailSections({
+      genre: params.genre,
+      background: params.novelSynopsis,
+      storyCore: params.storyCore,
+      worldSummary: params.worldSummary,
+      taskFocus: '这个人要能解释为什么能卷进主线、为什么会撑到后续关键选择。',
+      extraQualityLines: ['优点、缺点、秘密、软肋和关系张力都要能互相咬合，别把角色写成完美设定包。'],
+    }),
     section('命名要求', [
       '姓名要贴题材、时代和社会环境，优先顺口、可记、可读。',
       params.surnameHint ? '如果给了姓名方向，优先沿用，不要故意逆着来。' : '',
@@ -550,6 +660,14 @@ export function batchCharacterPrompt(params: BatchCharacterPromptInput): string 
       '性别比例：' + params.genderRatio,
       params.specialRequirements ? '特殊要求：' + params.specialRequirements : '',
     ]),
+    ...buildPromptGuardrailSections({
+      genre: params.genre,
+      background: params.novelSynopsis,
+      storyCore: params.storyCore,
+      worldSummary: params.worldSummary,
+      taskFocus: '先把人物网补完整：主线推进位、对立位、辅助位、搅局位、情感或利益牵引位。',
+      extraQualityLines: ['人物之间要有层次差异：有人强势、有人实用、有人隐忍、有人会制造额外麻烦，不要一批人一个腔调。'],
+    }),
     section('生成要求', [
       '先把人物网补完整：主线推进位、对立位、辅助位、搅局位、情感或利益牵引位。',
       '每个人都要写清与主角、主线或某条支线的实际关系，不要只给一个空标签。',
@@ -583,6 +701,14 @@ export function regenerateCharacterPrompt(params: RegenerateCharacterPromptInput
       '角色姓名必须保留：' + params.lockedName,
       '角色类型必须保留：' + params.lockedRoleType,
     ]),
+    ...buildPromptGuardrailSections({
+      genre: params.genre,
+      background: params.novelSynopsis,
+      storyCore: params.storyCore,
+      worldSummary: params.worldSummary,
+      taskFocus: '优先修正旧档案里不贴合主线、不贴合关系网、或和世界规则脱节的部分。',
+      extraQualityLines: ['让优点、缺点、秘密、软肋和利益立场彼此咬合，避免空转的复杂。'],
+    }),
     section('当前人物旧档案', params.currentProfile),
     section('相关人物', params.relatedCharacters || '暂无'),
     section('现有关系信息', params.relationSummary || '暂无'),
@@ -608,6 +734,13 @@ export function characterRelationsPrompt(params: CharacterRelationsPromptInput):
       '小说背景：' + params.novelSynopsis,
       '人物列表：\n' + params.characterList,
     ]),
+    ...buildPromptGuardrailSections({
+      genre: params.genre,
+      background: params.novelSynopsis,
+      worldSummary: params.worldSummary,
+      taskFocus: '优先保留会影响剧情推进的关系，别把无关社交都塞进去。',
+      extraQualityLines: ['不是所有人都必须互相认识，关系疏密要合理。'],
+    }),
     section('关系要求', [
       '关系要具体，能看出历史、利益、情感或权力位置，不要只写朋友、同事这种空标签。',
       '不是所有人都必须互相认识，关系疏密要合理。',
@@ -635,6 +768,14 @@ export function mapGenerationPrompt(params: MapGenerationPromptInput): string {
       params.writingConstraints ? `语言约束：${params.writingConstraints}` : '',
       params.namedPlaces ? `用户指定地点：${params.namedPlaces}` : '',
     ]),
+    ...buildPromptGuardrailSections({
+      genre: params.genre,
+      background: params.worldSummary,
+      worldSummary: params.worldSummary,
+      taskFocus: '地点之间要有基本地理逻辑和父子层级逻辑，不要像随机抽卡。',
+      extraRealityLines: ['地图层级严格服从题材蓝图，不要把丧尸题材写成宗门结构，也不要把仙侠地图写成现代行政区模板。'],
+      extraQualityLines: ['剧情关联要写具体事件或用途，不写“重要地点”这种空话。'],
+    }),
     section('生成要求', [
       '命名要贴合题材和文化背景，不要串味。',
       '每个地点既要有氛围，也要有存在价值，最好能看出会承载什么事件。',
@@ -664,6 +805,13 @@ export function buildStoryArcPlanningPrompt(params: StoryArcPromptInput): string
       '主角称呼：' + params.protagonistReference,
       '主角命名规则：' + params.protagonistRule,
     ]),
+    ...buildPromptGuardrailSections({
+      genre: params.genre,
+      background: params.background,
+      storyCore: [params.storyGoal, params.coreConflict, params.mainPlot, params.ending].filter(Boolean).join('\n'),
+      taskFocus: '每个故事弧都要回答：这一段推进了什么、加压了什么、把什么交给下一段。',
+      extraQualityLines: ['先保证主线因果顺，再安排支线落位；不要为了平均分配章节硬拆结构。'],
+    }),
     sectionLines('核心约束', [
       '故事核心目标：' + (params.storyGoal || '未提供'),
       '核心冲突：' + (params.coreConflict || '未提供'),
@@ -715,6 +863,13 @@ export function buildChapterOutlinePlanningPrompt(params: ChapterOutlinePromptIn
       params.characterStates ? '关键人物状态：\n' + params.characterStates : '',
       params.worldRulesSummary ? '世界规则：\n' + params.worldRulesSummary : '',
     ]),
+    ...buildPromptGuardrailSections({
+      genre: params.genre,
+      storyCore: [params.storyGoal, params.coreConflict, params.mainPlot, params.arcGoal].filter(Boolean).join('\n'),
+      worldSummary: params.worldRulesSummary,
+      taskFocus: '每章 目标 必须服务本弧目标，合起来能看出主线持续推进。',
+      extraQualityLines: ['章节之间要有轻重起伏，不能每章都像同一个节奏模板。'],
+    }),
     section('生成要求', [
       '每章 goal 必须服务本弧目标，合起来能看出主线持续推进。',
       'plot_points 按发生顺序写具体事件，不写“制造冲突”“推进剧情”这种空话。',
@@ -746,6 +901,14 @@ export function buildTimelineEventsPrompt(params: TimelineEventPromptInput): str
       `支线剧情：${params.subPlots || '暂无'}`,
       `结局方向：${params.ending || '未提供'}`,
     ]),
+    ...buildPromptGuardrailSections({
+      genre: params.genre,
+      background: params.background,
+      storyCore: [params.storyGoal, params.coreConflict, params.mainPlot, params.ending].filter(Boolean).join('\n'),
+      worldSummary: [params.worldRulesSummary, params.timelineRules].filter(Boolean).join('\n'),
+      taskFocus: '每个事件都要写清楚时间标签、事件名称、事件作用、主角是否在场、主角做了什么、直接结果、后续遗留问题。',
+      extraRealityLines: ['事件描述要像人类策划记录，不要写空洞口号，不要给普通概念随意加引号。'],
+    }),
     sectionLines('世界与时间规则', [
       params.worldRulesSummary ? `世界规则：\n${params.worldRulesSummary}` : '',
       params.timelineRules ? `时间规则：\n${params.timelineRules}` : '',
@@ -782,6 +945,13 @@ export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
       '目标字数：' + params.targetWords + ' 字左右',
       params.emotionTone ? '情绪基调：' + params.emotionTone : '',
     ]),
+    ...buildPromptGuardrailSections({
+      storyCore: params.storyCore,
+      worldSummary: params.worldRules,
+      taskFocus: '场景顺序必须连贯，前一段的结果要自然推动后一段。',
+      extraContextLines: ['每个场景写清：这一段要完成什么、当前冲突是什么、谁在场、会用到什么关键物品、必须交代什么。'],
+      extraRealityLines: ['优先处理章节任务和因果推进，不要为了花样强行加戏。'],
+    }),
     section('本章目标', params.chapterGoal),
     section('本章细纲', params.plotPoints),
     section('当前故事弧', params.currentArc),
@@ -824,6 +994,13 @@ export function buildChapterWritingPrompt(params: ChapterWritingPromptInput): st
       '目标字数：' + params.targetWords + ' 字左右',
       params.emotionTone ? '情绪基调：' + params.emotionTone : '',
     ]),
+    ...buildPromptGuardrailSections({
+      storyCore: params.storyCore,
+      worldSummary: params.worldRules,
+      taskFocus: '先把事件链、动作链和后果链写顺，再让情绪自然浮出来。',
+      extraContextLines: ['只写和本章任务有关的场景，不要为了凑字数平铺日常。'],
+      extraRealityLines: ['遇到不准确搭配，优先改成读者最熟悉、最准确的常规说法。'],
+    }),
     section('本章必须完成', params.chapterGoal || '按已定大纲执行'),
     section('已定章节大纲', params.plotPoints),
     section('本章必须承接', params.continuityNotes),
@@ -861,6 +1038,13 @@ export function buildChapterDraftPrompt(params: ChapterRewritePromptInput): stri
       '目标字数：' + params.targetWords + ' 字左右',
       params.emotionTone ? '情绪基调：' + params.emotionTone : '',
     ]),
+    ...buildPromptGuardrailSections({
+      storyCore: params.storyCore,
+      worldSummary: params.worldRules,
+      taskFocus: '只按场景计划推进，不跳场景，不漏 必须交代项。',
+      extraContextLines: ['只按场景计划推进，不跳场景，不漏 必须交代项。'],
+      extraRealityLines: ['人物状态、物品去向、地点变换和事件顺序必须写准，避免后面大修。'],
+    }),
     section('场景计划', params.scenePlan),
     section('本章目标', params.chapterGoal),
     section('当前故事弧', params.currentArc),
@@ -889,16 +1073,22 @@ export function buildChapterDraftPrompt(params: ChapterRewritePromptInput): stri
 
 export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): string {
   return renderPrompt([
-    '你是小说统稿编辑。请只找会影响后续长文稳定性的真实问题：结构断裂、承接缺失、人物/物品/时间轴冲突、语言 AI 味、信息漏写。',
+    '你是本书的连续性审校编辑。只指出会真正影响后续章节的问题：连续性断裂、上下文漂移、常识或规则违反、因果薄弱、铺垫落空、以及明显的 AI 腔。',
     sectionLines('章节信息', [
       '小说：' + params.novelTitle,
       '章节：第' + params.chapterNum + '章 ' + params.chapterTitle,
       '主角称呼：' + params.protagonistReference,
       '主角命名规则：' + params.protagonistRule,
     ]),
+    ...buildPromptGuardrailSections({
+      storyCore: params.storyCore,
+      worldSummary: params.worldRules,
+      taskFocus: '只找出真正砸掉上下文、真实度、连续性或人话感的问题。',
+      extraQualityLines: ['优先给出具体修法，不要给空泛评论。'],
+    }),
     section('本章目标', params.chapterGoal),
     section('场景计划', params.scenePlan),
-    section('小说核心约束', params.storyCore),
+    section('小说核心', params.storyCore),
     section('当前故事弧', params.currentArc),
     section('世界规则', params.worldRules),
     section('人物当前状态', params.characterStates),
@@ -906,58 +1096,70 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
     section('连续性记忆', params.continuitySummary),
     section('未回收事项', params.openLoops),
     section('时间轴锚点', params.timelineSummary),
-    section('长文压缩记忆', params.longTermMemory),
+    section('长期记忆', params.longTermMemory),
     section('结构体检提醒', params.consistencyNotes),
-    section('待审校初稿', params.draftContent),
-    section('输出要求', [
-      '只保留真正需要修改的问题，不要泛泛而谈。',
-      'critical_fixes 最多 5 条，写成能直接执行的修改动作。',
-      'continuity_risks 只写承接、伏笔、人物状态、物品去向、时间顺序的风险。',
-      'language_risks 只写 AI 味、抽象空话、搭配错误、无效抒情或不自然口吻。',
-      'missing_payoffs 只写本章已经提出、但没有落地的关键信息。',
-      'strengths 也要具体，说明这章已经成立的部分，避免误改。',
-      'revision_brief 用 60 到 120 字概括返修方向。',
+    section('待审初稿', params.draftContent),
+    section('输出规则', [
+      '只保留真正值得修的问题。',
+      'critical_fixes 最多 5 条，且必须是可直接执行的修改动作。',
+      'continuity_risks 只写连续性、伏笔、状态跟踪、物品跟踪或时间顺序问题。',
+      'context_drift_risks 只写脱离既定背景、主题、世界规则或人物动机的问题。',
+      'realism_risks 只写常识、科学、物理、资源、伤病、秩序或能力规则问题。',
+      'language_risks 只写 AI 腔、抽象化、搭配错误、空洞抒情或不自然表达。',
+      'missing_payoffs 只写本章已经抛出但没有落地的铺垫。',
+      'strengths 只写已经成立且应该保留的具体优点。',
+      'severity 只能是 low / medium / high。',
+      '出现 high 级问题时 rewrite_required 必须是 true，其余情况可以是 false。',
+      'revision_brief 用 60 到 120 字中文写清修改方向。',
     ].join('\n')),
-    '只输出 JSON：{"summary":"本章初稿整体情况","critical_fixes":["修改动作1"],"continuity_risks":["风险1"],"language_risks":["风险1"],"missing_payoffs":["缺口1"],"strengths":["优点1"],"revision_brief":"修订说明"}',
+    '只输出 JSON：{"summary":"总体判断","critical_fixes":["必改 1"],"continuity_risks":["连续性风险 1"],"context_drift_risks":["漂移风险 1"],"realism_risks":["真实度风险 1"],"language_risks":["语言风险 1"],"missing_payoffs":["未落地伏笔 1"],"strengths":["优点 1"],"severity":"medium","rewrite_required":true,"revision_brief":"修订方向摘要"}',
   ])
 }
 
 export function buildChapterRewritePrompt(params: ChapterRewritePromptInput): string {
   return renderPrompt([
     GLOBAL_WRITING_RULES,
-    '根据初稿和审校意见重写这一章，输出可直接入稿的版本。修订时优先保证承接、人物状态、事件顺序和物品去向准确。',
+    '把这一章重写成可直接入稿的版本。先修连续性、因果、人物状态、真实度、时间和物品准确性，最后再打磨语言。',
     sectionLines('章节信息', [
       '小说：' + params.novelTitle,
       '章节：第' + params.chapterNum + '章 ' + params.chapterTitle,
       '主角称呼：' + params.protagonistReference,
       '主角命名规则：' + params.protagonistRule,
-      '目标字数：' + params.targetWords + ' 字左右',
+      '目标字数：' + params.targetWords,
       params.emotionTone ? '情绪基调：' + params.emotionTone : '',
     ]),
+    ...buildPromptGuardrailSections({
+      storyCore: params.storyCore,
+      worldSummary: params.worldRules,
+      taskFocus: '只在既有上下文内重写，同时修复连续性、真实度和语言风险。',
+      extraContextLines: ['不要通过删掉剧情压力或改写章节目标来假装解决上下文问题。'],
+      extraRealityLines: ['如果审校指出反应、伤势、代价、移动跳跃或能力使用不合理，必须在正文里明确修正。'],
+    }),
     section('场景计划', params.scenePlan),
-    section('初稿正文', params.draftContent),
+    section('当前稿件', params.draftContent),
     section('审校意见', params.reviewNotes),
     section('本章目标', params.chapterGoal),
     section('当前故事弧', params.currentArc),
-    section('小说核心约束', params.storyCore),
+    section('小说核心', params.storyCore),
     section('世界规则', params.worldRules),
     section('人物当前状态', params.characterStates),
     section('关键物品与去向', params.itemSummary),
     section('上章结尾', params.lastChapterEnding),
-    section('最近章节摘要', params.previousSummaries),
+    section('近章摘要', params.previousSummaries),
     section('连续性记忆', params.continuitySummary),
     section('必须承接', params.continuityNotes),
     section('未回收事项', params.openLoops),
     section('时间轴锚点', params.timelineSummary),
     section('时间轴待回收', params.timelineOpenThreads),
-    section('长文压缩记忆', params.longTermMemory),
+    section('长期记忆', params.longTermMemory),
     section('结构体检提醒', params.consistencyNotes),
-    section('修订要求', [
-      '保留初稿里已经成立的有效段落，但要修掉真正影响成稿质量的问题。',
-      '如果初稿遗漏场景计划里的 must_cover，必须补齐。',
-      '优先修因果、指代、节奏和人物反应，再修文气。',
-      '删掉空转抒情、模板句和解释性旁白，让情绪落在动作、对话和细节里。',
-      '只输出最终正文，不要解释。',
+    section('重写要求', [
+      '已经成立的段落可以保留，但凡是影响成稿质量的都要修。',
+      '如果场景计划里的 must_cover 漏了，补上。',
+      '先修因果、指代清晰度、节奏、人物反应和真实度，最后再抛光语言。',
+      '删掉空洞抒情、模板句和解释性旁白，把情绪放回动作、对话和细节里。',
+      '在同一轮里一起修好上下文漂移、常识失效、规则越界、零代价奇迹和 AI 腔。',
+      '只输出重写后的最终正文。',
     ].join('\n')),
   ])
 }
@@ -972,6 +1174,11 @@ export function buildContinuityStatePrompt(params: ContinuityPromptInput): strin
       params.chapterGoal ? `本章目标：${params.chapterGoal}` : '',
       params.summary ? `本章摘要：${params.summary}` : '',
     ]),
+    ...buildPromptGuardrailSections({
+      background: params.summary,
+      taskFocus: '只保留清楚、可验证的事实，不写情绪化判断和抽象口号。',
+      extraQualityLines: ['每条尽量写成短句，具体、可复用。'],
+    }),
     section('本章正文', params.chapterContent),
     section('提炼规则', [
       'plot_progress 只写真正推动了主线或支线的事实。',
@@ -1081,6 +1288,12 @@ export function chapterSummaryPrompt(chapterContent: string): string {
   return renderPrompt([
     '为这一章生成后续写作要用的结构化摘要。只写事实，不渲染气氛。',
     section('章节内容', chapterContent),
+    section('上下文护栏', buildContextAlignmentRules({
+      taskFocus: '只总结具体事实、状态变化和下一章最自然的承接点。',
+    })),
+    section('输出质量底线', buildOutputQualityRules([
+      '不要把不确定的解读升级成硬事实。',
+    ])),
     section('要求', [
       'summary 控制在 150 到 200 字，写清楚发生了什么、涉及谁、造成了什么变化。',
       '记录重要人物状态变化、关系变化、获得或失去的关键物件、局势变化。',
@@ -1095,23 +1308,27 @@ export function chapterSummaryPrompt(chapterContent: string): string {
 
 export function aiCheckPrompt(text: string): string {
   return renderPrompt([
-    '检查下面这段小说文字里常见的 AI 写作痕迹，重点给出能直接修改的建议。',
-    section('待检测文本', text),
-    section('重点检查', [
-      '1. 破折号拿来解释、顿悟、停顿。',
-      '2. 引号给普通词加重，或“所谓的”这类概念包装。',
-      '3. 宏大空话和抽象大词压过具体情节。',
-      '4. 造词、之字结构、模板化抒情。',
-      '5. 万能引导词和动作套路，比如“不禁”“微微一愣”。',
-      '6. 主谓宾搭配不成立，或把物体、系统、组织写成只有人和生物才会有的状态。',
+    '检查这段小说文字里的 AI 指纹，以及会让读者出戏的真实度或上下文问题。',
+    section('待检查文本', text),
+    section('真实度护栏', buildGenreRealityRules({
+      extraLines: ['同时标出上下文漂移、不合理恢复、不合理移动、不可能的资源结果，以及缺乏规则支撑的能力使用。'],
+    })),
+    section('检查重点', [
+      '1. 用破折号偷懒解释或做假揭示',
+      '2. 用引号抬高普通概念',
+      '3. 抽象口号压过具体场景材料',
+      '4. 硬造伪文艺句或模板抒情',
+      '5. 万能引子和套路肌体反应',
+      '6. 主谓宾逻辑断裂或对象类别错配',
+      '7. 伤病、断缺、秩序、距离或能力上限被零代价解决',
     ].join('\n')),
-    section('输出要求', [
-      'issues 里的 location 只截取 15 字以内原文。',
-      'suggestion 要写成可执行改法，不要只说“更自然一点”。',
+    section('输出规则', [
+      'issues.location 最多引用原文 15 个字。',
+      'suggestion 必须是可直接执行的修改方向。',
       'overall_feedback 用一句话概括最主要的问题。',
-      '如果发现“电网的死亡”这一类问题，要明确指出应该改成“电网瘫痪/崩溃/中断”等准确表达。',
+      '如果发现“电网死亡”这类对象类别错配，要明确建议改成“电网瘫痪”“电力中断”“系统崩溃”这类精确说法。',
     ].join('\n')),
-    '只输出 JSON：{"score":0,"issues":[{"type":"检测类型","location":"原文片段","suggestion":"具体改法","severity":"高/中/低"}],"repetitions":["重复词1","重复词2"],"quote_abuse_count":0,"overall_feedback":"一句总体评价","ai_like_rate":0}',
+    '只输出 JSON：{"score":0,"issues":[{"type":"问题类型","location":"原文位置","suggestion":"具体修改方向","severity":"high/medium/low"}],"repetitions":["重复 1","重复 2"],"quote_abuse_count":0,"overall_feedback":"一句结论","ai_like_rate":0}',
   ])
 }
 
@@ -1122,6 +1339,13 @@ export function rewriteParagraphPrompt(params: RewriteParagraphPromptInput): str
     section('原段落', params.originalParagraph),
     section('前文参考', params.contextBefore),
     section('额外要求', params.specificRequirements || '保持原意，让语言更自然、更贴人。'),
+    ...buildPromptGuardrailSections({
+      genre: params.genreContext,
+      background: params.contextBefore,
+      worldSummary: params.worldSummary,
+      taskFocus: '先保住情节和信息，再处理语气、句式和细节。',
+      extraQualityLines: ['逐句检查搭配是否成立，把不符合常规汉语的表达改成准确说法。'],
+    }),
     section('改写原则', [
       '先保住情节和信息，再处理语气、句式和细节。',
       '少解释，多把心理落到动作、反应、对话里。',
@@ -1144,6 +1368,12 @@ export function genericExpandPrompt(params: GenericExpandPromptInput): string {
       '已有内容：' + (params.existingContent || '暂无'),
       params.requirements ? '额外要求：' + params.requirements : '',
     ]),
+    ...buildPromptGuardrailSections({
+      genre: params.genreContext,
+      background: params.novelContext,
+      taskFocus: '只处理当前内容类型，不跳出去发明无关设定、专业指标或跨领域比喻。',
+      extraQualityLines: ['先补事实、条件、关系、限制、用途和代价，再谈气质或意义。'],
+    }),
     section('扩写要求', [
       '保留原始意图，优先补足能直接写进后续流程的细节。',
       '先补事实、条件、关系、限制、用途和代价，再谈气质或意义。',
@@ -1170,6 +1400,12 @@ export function subplotExpandPrompt(params: SubplotExpandPromptInput): string {
       '预计收束章节：第' + (params.subplot.endChapter || 'X') + '章',
       params.requirements ? '额外要求：' + params.requirements : '',
     ]),
+    ...buildPromptGuardrailSections({
+      genre: params.genreContext,
+      storyCore: params.mainPlot,
+      taskFocus: '写清支线的引爆点、推进节点、转折、与主线交织的位置、收束方式和留下的余波。',
+      extraQualityLines: ['支线最好至少改变一层关系、一次判断或一项局势，不然就不值得保留。'],
+    }),
     section('输出内容', [
       '写清支线的引爆点、推进节点、转折、与主线交织的位置、收束方式和留下的余波。',
       '每一部分都写具体事件，不要只写方向或主题口号。',
@@ -1191,6 +1427,14 @@ export function contentScoringPrompt(params: ContentScoringPromptInput): string 
       `题材：${params.genreContext}`,
       `故事背景：${params.novelBackground}`,
     ]),
+    section('上下文护栏', buildContextAlignmentRules({
+      background: params.novelBackground,
+      taskFocus: '从当前背景和题材出发给文本打分，不要拿它去和一个虚构的“更好版本”比较。',
+    })),
+    section('真实度护栏', buildGenreRealityRules({
+      genre: params.genreContext,
+      extraLines: ['把上下文贴合度、真实度贴合度和常识贴合度也纳入逻辑质量评价。'],
+    })),
     section('待评价内容', params.content),
     section('评分维度', [
       '创新性：有没有明显套路感，是否有独特内容。',
@@ -1203,7 +1447,8 @@ export function contentScoringPrompt(params: ContentScoringPromptInput): string 
       '给出 ai_like_rate，重点看抽象大词、模板句、动作套路、概念包装、引号强调，以及“电网的死亡”这类搭配错误。',
       '所有建议必须基于当前文本本身，不得发明额外设定、专业指标、概率判断或跨领域概念。',
       'top_fixes 只列最值得先改的 3 处，要具体、可操作，最好直接给出更自然的替换说法。',
-    ].join('\n')),    '只输出 JSON：{"dimensions":[{"name":"创新性","score":0,"feedback":"一句简评","suggestion":"具体改法"},{"name":"丰富度","score":0,"feedback":"一句简评","suggestion":"具体改法"},{"name":"自然度","score":0,"feedback":"一句简评","suggestion":"具体改法"},{"name":"逻辑性","score":0,"feedback":"一句简评","suggestion":"具体改法"},{"name":"读者代入感","score":0,"feedback":"一句简评","suggestion":"具体改法"}],"ai_like_rate":0,"repetition_risk":"低/中/高","overall_score":0,"overall_feedback":"综合评价","top_fixes":["修改建议1","修改建议2","修改建议3"]}',
+    ].join('\n')),
+    '只输出 JSON：{"dimensions":[{"name":"创新性","score":0,"feedback":"一句简评","suggestion":"具体改法"},{"name":"丰富度","score":0,"feedback":"一句简评","suggestion":"具体改法"},{"name":"自然度","score":0,"feedback":"一句简评","suggestion":"具体改法"},{"name":"逻辑性","score":0,"feedback":"一句简评","suggestion":"具体改法"},{"name":"读者代入感","score":0,"feedback":"一句简评","suggestion":"具体改法"}],"ai_like_rate":0,"repetition_risk":"低/中/高","overall_score":0,"overall_feedback":"综合评价","top_fixes":["修改建议1","修改建议2","修改建议3"]}',
   ])
 }
 

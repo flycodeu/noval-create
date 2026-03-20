@@ -93,6 +93,8 @@ export interface TimelineConfig {
   precisionOptions: string[]
 }
 
+export type RealismLevel = 'strict-realism' | 'rule-realism' | 'stylized-fantasy'
+
 export interface WritingConstraints {
   antiQuoteEmphasis: boolean
   antiConceptSlogans: boolean
@@ -101,6 +103,11 @@ export interface WritingConstraints {
   dialogueStyle: string
   forbiddenPhrases: string[]
   extraRules: string[]
+  realismLevel: RealismLevel
+  sciencePolicy: string
+  physicsPolicy: string
+  commonSenseFocus: string[]
+  contextAlignmentFocus: string[]
 }
 
 export interface CharacterEcology {
@@ -170,12 +177,90 @@ function normalizeArray<T>(
   return result.length > 0 ? result : clone(fallback)
 }
 
+interface WritingRealityOptions {
+  realismLevel: RealismLevel
+  sciencePolicy: string
+  physicsPolicy: string
+  commonSenseFocus: string[]
+  contextAlignmentFocus: string[]
+}
+
+const REALISM_LEVEL_LABELS: Record<RealismLevel, string> = {
+  'strict-realism': '\u4e25\u683c\u5199\u5b9e',
+  'rule-realism': '\u89c4\u5219\u5199\u5b9e',
+  'stylized-fantasy': '\u98ce\u683c\u5316\u5e7b\u60f3',
+}
+
+function getDefaultRealityOptions(packKey: GenreRulePackKey): WritingRealityOptions {
+  switch (packKey) {
+    case 'zombie':
+      return {
+        realismLevel: 'strict-realism',
+        sciencePolicy: '\u611f\u67d3\u3001\u4f24\u75c5\u3001\u836f\u7269\u548c\u8865\u7ed9\u6309\u73b0\u5b9e\u5e38\u8bc6\u5904\u7406\u3002',
+        physicsPolicy: '\u79fb\u52a8\u3001\u566a\u58f0\u3001\u8d1f\u91cd\u548c\u5efa\u7b51\u7834\u574f\u9075\u5b88\u73b0\u5b9e\u56e0\u679c\u3002',
+        commonSenseFocus: ['\u611f\u67d3\u4f20\u64ad', '\u4f24\u75c5\u6062\u590d', '\u8d44\u6e90\u6d88\u8017', '\u7fa4\u4f53\u7eaa\u5f8b', '\u64a4\u79bb\u8def\u7ebf', '\u8865\u7ed9\u5206\u914d'],
+        contextAlignmentFocus: ['\u57fa\u5730\u79e9\u5e8f', '\u5e78\u5b58\u8005\u5173\u7cfb', '\u5730\u7406\u5c01\u9501', '\u7269\u8d44\u6765\u6e90', '\u98ce\u9669\u627f\u62c5'],
+      }
+    case 'xianxia':
+      return {
+        realismLevel: 'rule-realism',
+        sciencePolicy: '\u8d85\u81ea\u7136\u53ef\u4ee5\u5b58\u5728\uff0c\u4f46\u5fc5\u987b\u670d\u4ece\u65e2\u5b9a\u4fee\u70bc\u4f53\u7cfb\u548c\u4ee3\u4ef7\u3002',
+        physicsPolicy: '\u51e1\u4fd7\u5c42\u9762\u4fdd\u6301\u81ea\u6d3d\uff0c\u8d85\u5e38\u6548\u679c\u8981\u6709\u5883\u754c\u3001\u6cd5\u95e8\u6216\u5a92\u4ecb\u652f\u6491\u3002',
+        commonSenseFocus: ['\u5883\u754c\u5dee\u8ddd', '\u8d44\u6e90\u4ee3\u4ef7', '\u5b97\u95e8\u793c\u6cd5', '\u95ed\u5173\u5468\u671f', '\u56e0\u679c\u62a5\u5e94', '\u8eab\u4efd\u79e9\u5e8f'],
+        contextAlignmentFocus: ['\u5b97\u95e8\u4f53\u7cfb', '\u529f\u6cd5\u6765\u6e90', '\u79d8\u5883\u89c4\u5219', '\u4eba\u7269\u4fee\u4e3a', '\u52bf\u529b\u5229\u76ca'],
+      }
+    case 'fantasy':
+      return {
+        realismLevel: 'rule-realism',
+        sciencePolicy: '\u5141\u8bb8\u865a\u6784\u529b\u91cf\uff0c\u4f46\u7b49\u7ea7\u3001\u8840\u8109\u3001\u6cd5\u5668\u548c\u8d44\u6e90\u8981\u524d\u540e\u4e00\u81f4\u3002',
+        physicsPolicy: '\u6218\u6597\u3001\u8ffd\u9010\u3001\u7834\u574f\u8303\u56f4\u548c\u6062\u590d\u901f\u5ea6\u8981\u4e0e\u4eba\u7269\u7b49\u7ea7\u3001\u88c5\u5907\u548c\u573a\u5730\u5339\u914d\u3002',
+        commonSenseFocus: ['\u7b49\u7ea7\u5dee\u8ddd', '\u6218\u6597\u4ee3\u4ef7', '\u8d44\u6e90\u4e89\u593a', '\u52bf\u529b\u53cd\u5e94', '\u9057\u8ff9\u98ce\u9669', '\u8eab\u4efd\u540e\u679c'],
+        contextAlignmentFocus: ['\u529b\u91cf\u4f53\u7cfb', '\u9635\u8425\u5173\u7cfb', '\u6210\u957f\u8def\u5f84', '\u5173\u952e\u8d44\u6e90', '\u5730\u56fe\u5c42\u7ea7'],
+      }
+    case 'urban-ability':
+      return {
+        realismLevel: 'rule-realism',
+        sciencePolicy: '\u73b0\u4ee3\u793e\u4f1a\u90e8\u5206\u5148\u9075\u5b88\u73b0\u5b9e\u5e38\u8bc6\uff0c\u5f02\u80fd\u90e8\u5206\u5fc5\u987b\u6709\u89e6\u53d1\u6761\u4ef6\u548c\u526f\u4f5c\u7528\u3002',
+        physicsPolicy: '\u65e5\u5e38\u884c\u52a8\u3001\u76d1\u63a7\u75d5\u8ff9\u3001\u4f24\u52bf\u4e0e\u6267\u6cd5\u53cd\u5e94\u6309\u73b0\u5b9e\u5904\u7406\u3002',
+        commonSenseFocus: ['\u8eab\u4efd\u4f2a\u88c5', '\u76d1\u63a7\u53d6\u8bc1', '\u526f\u4f5c\u7528', '\u8206\u8bba\u98ce\u9669', '\u7ec4\u7ec7\u89c4\u7a0b', '\u751f\u6d3b\u538b\u529b'],
+        contextAlignmentFocus: ['\u90fd\u5e02\u65e5\u5e38', '\u5f02\u80fd\u7ec4\u7ec7', '\u793e\u4f1a\u89c4\u5219', '\u6848\u4ef6\u7ebf\u7d22', '\u66b4\u9732\u540e\u679c'],
+      }
+    case 'western-fantasy':
+      return {
+        realismLevel: 'rule-realism',
+        sciencePolicy: '\u5141\u8bb8\u9b54\u6cd5\u548c\u795e\u672f\uff0c\u4f46\u65bd\u6cd5\u6765\u6e90\u3001\u4eea\u5f0f\u6750\u6599\u548c\u79cd\u65cf\u5929\u8d4b\u5fc5\u987b\u4e00\u81f4\u3002',
+        physicsPolicy: '\u666e\u901a\u4eba\u7684\u4f53\u80fd\u3001\u884c\u519b\u3001\u56f4\u57ce\u548c\u4f24\u4ea1\u9075\u5b88\u5e38\u8bc6\uff0c\u8d85\u5e38\u73b0\u8c61\u9700\u8981\u9636\u4f4d\u6216\u4eea\u5f0f\u652f\u6491\u3002',
+        commonSenseFocus: ['\u9636\u5c42\u793c\u6cd5', '\u519b\u653f\u540e\u52e4', '\u65bd\u6cd5\u4ee3\u4ef7', '\u4fe1\u4ef0\u79e9\u5e8f', '\u79cd\u65cf\u5173\u7cfb', '\u9886\u5730\u6cbb\u7406'],
+        contextAlignmentFocus: ['\u738b\u56fd\u7ed3\u6784', '\u6559\u4f1a\u6743\u529b', '\u6cd5\u672f\u6765\u6e90', '\u76df\u7ea6\u4ec7\u6028', '\u5730\u56fe\u4ea4\u901a'],
+      }
+    case 'generic':
+    default:
+      return {
+        realismLevel: 'rule-realism',
+        sciencePolicy: '\u672a\u660e\u786e\u5141\u8bb8\u8d85\u5e38\u73b0\u8c61\u65f6\uff0c\u9ed8\u8ba4\u9075\u5b88\u73b0\u5b9e\u5e38\u8bc6\u548c\u793e\u4f1a\u903b\u8f91\u3002',
+        physicsPolicy: '\u4e8b\u4ef6\u63a8\u8fdb\u3001\u79fb\u52a8\u3001\u4f24\u52bf\u548c\u8d44\u6e90\u6d88\u8017\u8981\u6709\u53ef\u9a8c\u8bc1\u7684\u4ee3\u4ef7\u3002',
+        commonSenseFocus: ['\u56e0\u679c\u94fe', '\u4ee3\u4ef7\u627f\u62c5', '\u4eba\u7269\u52a8\u673a', '\u8d44\u6e90\u9650\u5236', '\u884c\u52a8\u6761\u4ef6', '\u7ec4\u7ec7\u53cd\u5e94'],
+        contextAlignmentFocus: ['\u80cc\u666f\u8bbe\u5b9a', '\u4e3b\u9898\u65b9\u5411', '\u4eba\u7269\u5173\u7cfb', '\u4e16\u754c\u89c4\u5219', '\u65f6\u95f4\u987a\u5e8f'],
+      }
+  }
+}
+
+export function describeRealismLevel(level: RealismLevel): string {
+  return REALISM_LEVEL_LABELS[level] || '\u89c4\u5219\u5199\u5b9e'
+}
+
 function createWritingConstraints(
   narrationStyle: string,
   dialogueStyle: string,
   forbiddenPhrases: string[],
   extraRules: string[],
+  options: Partial<WritingRealityOptions> = {},
 ): WritingConstraints {
+  const reality = {
+    ...getDefaultRealityOptions('generic'),
+    ...options,
+  }
+
   return {
     antiQuoteEmphasis: true,
     antiConceptSlogans: true,
@@ -184,6 +269,11 @@ function createWritingConstraints(
     dialogueStyle,
     forbiddenPhrases,
     extraRules,
+    realismLevel: reality.realismLevel,
+    sciencePolicy: reality.sciencePolicy,
+    physicsPolicy: reality.physicsPolicy,
+    commonSenseFocus: dedupe(reality.commonSenseFocus).slice(0, 8),
+    contextAlignmentFocus: dedupe(reality.contextAlignmentFocus).slice(0, 8),
   }
 }
 
@@ -378,6 +468,7 @@ const BUILTIN_GENRE_RULE_PACKS: Record<GenreRulePackKey, GenreWorldRuleSeed> = {
       '对白允许停顿、回避和信息差，不要求每句都工整完整。',
       ['所谓', '某种意义上', '命运', '这一刻', '不由得', '他说着说着'],
       ['普通概念不要加引号。', '不要把设定写成展示说明。'],
+      getDefaultRealityOptions('generic'),
     ),
   },
   zombie: {
@@ -549,6 +640,7 @@ const BUILTIN_GENRE_RULE_PACKS: Record<GenreRulePackKey, GenreWorldRuleSeed> = {
       '对白要带求生目的、信息差和戒备感，不要人人都像概念发言。',
       ['命运', '文明的挽歌', '所谓人性', '最后的希望', '死亡在呼吸'],
       ['感染、断电、秩序崩坏等要用准确说法，不要拟人化。', '普通词不要套引号。'],
+      getDefaultRealityOptions('zombie'),
     ),
   },
   xianxia: {
@@ -720,6 +812,7 @@ const BUILTIN_GENRE_RULE_PACKS: Record<GenreRulePackKey, GenreWorldRuleSeed> = {
       '对白要符合身份层级和修真礼法，少用现代口头语。',
       ['大道无情', '天命如此', '仙路茫茫', '某种玄而又玄的感觉'],
       ['境界名称可以保留，但普通概念不要加引号。', '不要把宗门设定写成百科词条。'],
+      getDefaultRealityOptions('xianxia'),
     ),
   },
   fantasy: {
@@ -871,6 +964,7 @@ const BUILTIN_GENRE_RULE_PACKS: Record<GenreRulePackKey, GenreWorldRuleSeed> = {
       '对白要体现出身和立场，不要人人都用同一套狠话。',
       ['震惊', '恐怖如斯', '气势如虹般席卷', '某种无法言说的强大'],
       ['战力等级可以保留，但要解释其现实作用。'],
+      getDefaultRealityOptions('fantasy'),
     ),
   },
   'urban-ability': {
@@ -1001,6 +1095,7 @@ const BUILTIN_GENRE_RULE_PACKS: Record<GenreRulePackKey, GenreWorldRuleSeed> = {
       '对白贴近现代人表达，不要写成中二宣言。',
       ['命运的齿轮', '都市暗面的王者', '某种无法言说的悸动'],
       ['异能名可以保留，但普通概念不要加引号。'],
+      getDefaultRealityOptions('urban-ability'),
     ),
   },
   'western-fantasy': {
@@ -1131,6 +1226,7 @@ const BUILTIN_GENRE_RULE_PACKS: Record<GenreRulePackKey, GenreWorldRuleSeed> = {
       '对白要带阶层感、礼仪感和立场差异。',
       ['古老而神秘', '命运的指引', '史诗般的伟大', '光与暗的永恒战争'],
       ['专有名词可保留，普通概念不要加引号。'],
+      getDefaultRealityOptions('western-fantasy'),
     ),
   },
 }
@@ -1374,6 +1470,13 @@ function normalizeWritingConstraints(
     ? value as Record<string, unknown>
     : {}
 
+  const rawRealismLevel = asText(record.realismLevel) || asText(legacy?.realism_level)
+  const realismLevel = rawRealismLevel === 'strict-realism'
+    || rawRealismLevel === 'rule-realism'
+    || rawRealismLevel === 'stylized-fantasy'
+    ? rawRealismLevel
+    : fallback.realismLevel
+
   return {
     antiQuoteEmphasis: typeof record.antiQuoteEmphasis === 'boolean'
       ? record.antiQuoteEmphasis
@@ -1396,6 +1499,19 @@ function normalizeWritingConstraints(
       ...toStringArray(legacy?.special_terms),
       ...fallback.extraRules,
     ]).slice(0, 12),
+    realismLevel,
+    sciencePolicy: asText(record.sciencePolicy) || asText(legacy?.science_policy) || fallback.sciencePolicy,
+    physicsPolicy: asText(record.physicsPolicy) || asText(legacy?.physics_policy) || fallback.physicsPolicy,
+    commonSenseFocus: dedupe([
+      ...toStringArray(record.commonSenseFocus),
+      ...toStringArray(legacy?.common_sense_focus),
+      ...fallback.commonSenseFocus,
+    ]).slice(0, 8),
+    contextAlignmentFocus: dedupe([
+      ...toStringArray(record.contextAlignmentFocus),
+      ...toStringArray(legacy?.context_alignment_focus),
+      ...fallback.contextAlignmentFocus,
+    ]).slice(0, 8),
   }
 }
 
@@ -1513,6 +1629,25 @@ export function buildTimelineConfigSummary(rules: GenreWorldRules): string {
   return lines.join('\n')
 }
 
+export function buildWritingStyleSummary(writing: WritingConstraints): string {
+  return [
+    writing.narrationStyle ? `\u53d9\u8ff0=${writing.narrationStyle}` : '',
+    writing.dialogueStyle ? `\u5bf9\u767d=${writing.dialogueStyle}` : '',
+    writing.forbiddenPhrases.length > 0 ? `\u7981\u7528\u8bcd=${writing.forbiddenPhrases.join('\u3001')}` : '',
+    writing.extraRules.length > 0 ? `\u989d\u5916\u7ea6\u675f=${writing.extraRules.join('\u3001')}` : '',
+  ].filter(Boolean).join('\n')
+}
+
+export function buildRealityConstraintSummary(writing: WritingConstraints): string {
+  return [
+    `\u771f\u5b9e\u5ea6=${describeRealismLevel(writing.realismLevel)}`,
+    writing.sciencePolicy ? `\u79d1\u5b66\u8fb9\u754c=${writing.sciencePolicy}` : '',
+    writing.physicsPolicy ? `\u7269\u7406\u8fb9\u754c=${writing.physicsPolicy}` : '',
+    writing.commonSenseFocus.length > 0 ? `\u5e38\u8bc6\u91cd\u70b9=${writing.commonSenseFocus.join('\u3001')}` : '',
+    writing.contextAlignmentFocus.length > 0 ? `\u4e0a\u4e0b\u6587\u91cd\u70b9=${writing.contextAlignmentFocus.join('\u3001')}` : '',
+  ].filter(Boolean).join('\n')
+}
+
 export function buildWorldRulesSummary(rules: GenreWorldRules): string {
   const lines: string[] = [
     `题材定位：${rules.genreProfile.name}${rules.genreProfile.subgenre ? ` / ${rules.genreProfile.subgenre}` : ''}`,
@@ -1553,14 +1688,14 @@ export function buildWorldRulesSummary(rules: GenreWorldRules): string {
     lines.push(`地图蓝图：\n${mapSummary}`)
   }
 
-  const writing = [
-    rules.writingConstraints.narrationStyle ? `叙述=${rules.writingConstraints.narrationStyle}` : '',
-    rules.writingConstraints.dialogueStyle ? `对白=${rules.writingConstraints.dialogueStyle}` : '',
-    rules.writingConstraints.forbiddenPhrases.length > 0 ? `禁用词=${rules.writingConstraints.forbiddenPhrases.join('、')}` : '',
-    rules.writingConstraints.extraRules.length > 0 ? `额外约束=${rules.writingConstraints.extraRules.join('、')}` : '',
-  ].filter(Boolean)
-  if (writing.length > 0) {
-    lines.push(`语言约束：${writing.join('；')}`)
+  const reality = buildRealityConstraintSummary(rules.writingConstraints)
+  if (reality) {
+    lines.push(`\u771f\u5b9e\u5ea6\u7ea6\u675f:\n${reality}`)
+  }
+
+  const writing = buildWritingStyleSummary(rules.writingConstraints)
+  if (writing) {
+    lines.push(`\u8bed\u8a00\u7ea6\u675f:\n${writing}`)
   }
 
   return lines.join('\n')
