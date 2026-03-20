@@ -11,6 +11,7 @@ import {
   resolveGenreFamily,
 } from '../../src/shared/creation-tools'
 import { getFactionNameOptions, parseWorldRulesJson } from '../../src/shared/genre-system'
+import { buildHumanLanguageRules } from '../../src/shared/prompt-library'
 import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/utils/text'
 
 type StoryItemStatus = 'available' | 'consumed' | 'hidden' | 'destroyed'
@@ -184,10 +185,10 @@ function buildExistingItemSummary(rows: Array<typeof storyItems.$inferSelect>): 
     .filter((row) => row.itemKind === 'instance')
     .slice(0, 12)
     .map((row) => {
-      const parts = [row.category, row.locationMapId ? '\u5df2\u7ed1\u5b9a\u5730\u70b9' : '', row.ownerCharacterId ? '\u5df2\u7ed1\u5b9a\u6301\u6709\u8005' : '']
+      const parts = [row.category, row.locationMapId ? '已绑定地点' : '', row.ownerCharacterId ? '已绑定持有者' : '']
         .filter(Boolean)
         .join(' / ')
-      return `- ${row.itemName}${parts ? `\uFF1A${parts}` : ''}`
+      return `- ${row.itemName}${parts ? `：${parts}` : ''}`
     })
     .join('\n')
 }
@@ -246,6 +247,13 @@ function buildPrompt(input: {
     '3. 能关联人物就关联人物，能关联地点或事件就尽量关联，避免“通用道具”。',
     '4. 名称要像小说编辑写工作稿，不要故作玄虚，不要给普通词乱加引号。',
     '5. summary、plot_function、cost、risk 都要写具体，不要出现“承载命运”“真正成长”这种空话。',
+    '',
+    '【语言要求】',
+    buildHumanLanguageRules([
+      '物品说明只写和剧情、人物、地点、事件直接相关的信息，不要扩展到无关领域。',
+      '不要把没有直接关系的概念硬拼在一句话里，例如卡路里、感染概率、金融指标之类。',
+      'summary、plot_function、cost、risk 优先写成自然中文短句，不要写成广告口号或假深刻文案。',
+    ]),
     '',
     '【输出格式】',
     '只输出 JSON 数组，不要解释，不要 Markdown：',
@@ -482,7 +490,7 @@ export async function generateStoryItems(
       arcSummary: buildArcSummary(arcRows),
       eventSummary: buildEventSummary(eventRows),
       existingItemSummary: buildExistingItemSummary(currentItems),
-      focus: [options.focus, `\u7b2c${Math.floor(generatedCount / batchSize) + 1}\u6279\uff1a\u53ea\u8865 ${currentBatchCount} \u4e2a\u65b0\u7684\u7269\u54c1\u5b9e\u4f8b\uff0c\u907f\u514d\u91cd\u590d\u5df2\u6709\u7269\u54c1\u3002`].filter(Boolean).join('\n'),
+      focus: [options.focus, `第${Math.floor(generatedCount / batchSize) + 1}批：只补 ${currentBatchCount} 个新的物品实例，避免重复已有物品。`].filter(Boolean).join('\n'),
       count: currentBatchCount,
     })
 

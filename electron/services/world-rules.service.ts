@@ -46,7 +46,7 @@ function joinLines(parts: Array<string | undefined | null | false>): string {
 function section(title: string, content?: string | null): string {
   const body = clean(content)
   if (!body) return ''
-  return `\u3010${title}\u3011\n${body}`
+  return `【${title}】\n${body}`
 }
 
 function renderPrompt(parts: Array<string | undefined | null | false>): string {
@@ -59,13 +59,13 @@ function renderPrompt(parts: Array<string | undefined | null | false>): string {
 function summarizeLanguageConstraints(rules: GenreWorldRules): string {
   const writing = rules.writingConstraints
   return joinLines([
-    writing.antiQuoteEmphasis ? '\u907f\u514d\u5f15\u53f7\u5f3a\u8c03' : '',
-    writing.antiConceptSlogans ? '\u907f\u514d\u6982\u5ff5\u53e3\u53f7' : '',
-    writing.antiSymmetricLines ? '\u907f\u514d\u5bf9\u79f0\u6392\u6bd4' : '',
-    writing.narrationStyle ? `\u53d9\u8ff0\u98ce\u683c\uff1a${writing.narrationStyle}` : '',
-    writing.dialogueStyle ? `\u5bf9\u8bdd\u98ce\u683c\uff1a${writing.dialogueStyle}` : '',
-    writing.forbiddenPhrases.length > 0 ? `\u7981\u7528 AI \u8154\uff1a${writing.forbiddenPhrases.join('\u3001')}` : '',
-    writing.extraRules.length > 0 ? `\u989d\u5916\u89c4\u5219\uff1a${writing.extraRules.join('\u3001')}` : '',
+    writing.antiQuoteEmphasis ? '避免引号强调' : '',
+    writing.antiConceptSlogans ? '避免概念口号' : '',
+    writing.antiSymmetricLines ? '避免对称排比' : '',
+    writing.narrationStyle ? `叙述风格：${writing.narrationStyle}` : '',
+    writing.dialogueStyle ? `对话风格：${writing.dialogueStyle}` : '',
+    writing.forbiddenPhrases.length > 0 ? `禁用 AI 腔：${writing.forbiddenPhrases.join('、')}` : '',
+    writing.extraRules.length > 0 ? `额外规则：${writing.extraRules.join('、')}` : '',
   ])
 }
 
@@ -73,48 +73,48 @@ function summarizeCurrentSection(sectionKey: WorldRuleSectionKey, rules: GenreWo
   switch (sectionKey) {
     case 'overview':
       return joinLines([
-        `\u7c7b\u578b\u540d\u79f0\uff1a${rules.genreProfile.name || '\u672a\u8bbe\u7f6e'}`,
-        rules.genreProfile.subgenre ? `\u5b50\u7c7b\u578b\uff1a${rules.genreProfile.subgenre}` : '',
-        rules.genreProfile.worldviewTone ? `\u4e16\u754c\u89c2\u57fa\u8c03\uff1a${rules.genreProfile.worldviewTone}` : '',
-        rules.genreProfile.socialFrame ? `\u793e\u4f1a\u6846\u67b6\uff1a${rules.genreProfile.socialFrame}` : '',
-        rules.genreProfile.narrativeFocus.length > 0 ? `\u53d9\u4e8b\u7126\u70b9\uff1a${rules.genreProfile.narrativeFocus.join('\u3001')}` : '',
-        rules.genreProfile.languageAvoidances.length > 0 ? `\u8bed\u8a00\u907f\u8ba9\uff1a${rules.genreProfile.languageAvoidances.join('\u3001')}` : '',
+        `类型名称：${rules.genreProfile.name || '未设置'}`,
+        rules.genreProfile.subgenre ? `子类型：${rules.genreProfile.subgenre}` : '',
+        rules.genreProfile.worldviewTone ? `世界观基调：${rules.genreProfile.worldviewTone}` : '',
+        rules.genreProfile.socialFrame ? `社会框架：${rules.genreProfile.socialFrame}` : '',
+        rules.genreProfile.narrativeFocus.length > 0 ? `叙事焦点：${rules.genreProfile.narrativeFocus.join('、')}` : '',
+        rules.genreProfile.languageAvoidances.length > 0 ? `语言避让：${rules.genreProfile.languageAvoidances.join('、')}` : '',
       ])
     case 'power':
       return rules.powerSystems
         .map((system, index) => joinLines([
-          `${index + 1}. \u4f53\u7cfb\uff1a${system.name || '\u672a\u547d\u540d'}`,
-          system.appliesTo.length > 0 ? `   \u9002\u7528\u5bf9\u8c61\uff1a${system.appliesTo.join('\u3001')}` : '',
-          system.levels.length > 0 ? `   \u7b49\u7ea7\u9636\u6bb5\uff1a${system.levels.join(' / ')}` : '',
-          system.advancementRule ? `   \u664b\u5347\u89c4\u5219\uff1a${system.advancementRule}` : '',
-          system.limitations ? `   \u9650\u5236\u6761\u4ef6\uff1a${system.limitations}` : '',
-          system.cost ? `   \u4ee3\u4ef7\uff1a${system.cost}` : '',
-          system.taboo ? `   \u7981\u5fcc\uff1a${system.taboo}` : '',
+          `${index + 1}. 体系：${system.name || '未命名'}`,
+          system.appliesTo.length > 0 ? `   适用对象：${system.appliesTo.join('、')}` : '',
+          system.levels.length > 0 ? `   等级阶段：${system.levels.join(' / ')}` : '',
+          system.advancementRule ? `   晋升规则：${system.advancementRule}` : '',
+          system.limitations ? `   限制条件：${system.limitations}` : '',
+          system.cost ? `   代价：${system.cost}` : '',
+          system.taboo ? `   禁忌：${system.taboo}` : '',
         ]))
         .join('\n')
     case 'species':
       return [
         rules.speciesSystem.length > 0
-          ? section('\u79cd\u65cf\u5b9e\u4f53', rules.speciesSystem.map((item, index) => joinLines([
-              `${index + 1}. \u540d\u79f0\uff1a${item.name || '\u672a\u547d\u540d'}`,
-              item.entityType ? `   \u5b9e\u4f53\u7c7b\u578b\uff1a${item.entityType}` : '',
-              item.summary ? `   \u7b80\u8ff0\uff1a${item.summary}` : '',
-              item.traits.length > 0 ? `   \u7279\u5f81\uff1a${item.traits.join('\u3001')}` : '',
-              item.commonIdentities.length > 0 ? `   \u5e38\u89c1\u8eab\u4efd\uff1a${item.commonIdentities.join('\u3001')}` : '',
-              item.relationToHumans ? `   \u4e0e\u4e3b\u6d41\u793e\u4f1a\u5173\u7cfb\uff1a${item.relationToHumans}` : '',
-              item.storyUse ? `   \u5267\u60c5\u7528\u9014\uff1a${item.storyUse}` : '',
+          ? section('种族实体', rules.speciesSystem.map((item, index) => joinLines([
+              `${index + 1}. 名称：${item.name || '未命名'}`,
+              item.entityType ? `   实体类型：${item.entityType}` : '',
+              item.summary ? `   简述：${item.summary}` : '',
+              item.traits.length > 0 ? `   特征：${item.traits.join('、')}` : '',
+              item.commonIdentities.length > 0 ? `   常见身份：${item.commonIdentities.join('、')}` : '',
+              item.relationToHumans ? `   与主流社会关系：${item.relationToHumans}` : '',
+              item.storyUse ? `   剧情用途：${item.storyUse}` : '',
             ])).join('\n'))
           : '',
         rules.factionSystem.length > 0
-          ? section('\u7ec4\u7ec7\u52bf\u529b', rules.factionSystem.map((item, index) => joinLines([
-              `${index + 1}. \u540d\u79f0\uff1a${item.name || '\u672a\u547d\u540d'}`,
-              item.factionType ? `   \u52bf\u529b\u7c7b\u578b\uff1a${item.factionType}` : '',
-              item.summary ? `   \u7b80\u8ff0\uff1a${item.summary}` : '',
-              item.structure ? `   \u7ec4\u7ec7\u7ed3\u6784\uff1a${item.structure}` : '',
-              item.resources ? `   \u6838\u5fc3\u8d44\u6e90\uff1a${item.resources}` : '',
-              item.externalRelations ? `   \u5bf9\u5916\u5173\u7cfb\uff1a${item.externalRelations}` : '',
-              item.recruitFrom ? `   \u5438\u7eb3\u6765\u6e90\uff1a${item.recruitFrom}` : '',
-              item.notableSites.length > 0 ? `   \u91cd\u8981\u636e\u70b9\uff1a${item.notableSites.join('\u3001')}` : '',
+          ? section('组织势力', rules.factionSystem.map((item, index) => joinLines([
+              `${index + 1}. 名称：${item.name || '未命名'}`,
+              item.factionType ? `   势力类型：${item.factionType}` : '',
+              item.summary ? `   简述：${item.summary}` : '',
+              item.structure ? `   组织结构：${item.structure}` : '',
+              item.resources ? `   核心资源：${item.resources}` : '',
+              item.externalRelations ? `   对外关系：${item.externalRelations}` : '',
+              item.recruitFrom ? `   吸纳来源：${item.recruitFrom}` : '',
+              item.notableSites.length > 0 ? `   重要据点：${item.notableSites.join('、')}` : '',
             ])).join('\n'))
           : '',
       ].filter(Boolean).join('\n\n')
@@ -145,32 +145,32 @@ function summarizeOtherSections(sectionKey: WorldRuleSectionKey, rules: GenreWor
 
 function buildStoryCoreSummary(profile: Awaited<ReturnType<typeof buildStoryProfile>>): string {
   return joinLines([
-    `\u5c0f\u8bf4\uff1a${profile.novelTitle}`,
-    `\u9898\u6750\uff1a${profile.genre}`,
-    profile.background ? `\u57fa\u7840\u80cc\u666f\uff1a${profile.background}` : '',
-    profile.storyGoal ? `\u6545\u4e8b\u76ee\u6807\uff1a${profile.storyGoal}` : '',
-    profile.coreConflict ? `\u6838\u5fc3\u51b2\u7a81\uff1a${profile.coreConflict}` : '',
-    profile.mainPlot ? `\u4e3b\u7ebf\u63a8\u8fdb\uff1a${profile.mainPlot}` : '',
-    profile.subPlots ? `\u652f\u7ebf\u6982\u8981\uff1a${profile.subPlots}` : '',
-    profile.ending ? `\u7ed3\u5c40\u65b9\u5411\uff1a${profile.ending}` : '',
-    `\u4e3b\u89d2\u6307\u4ee3\uff1a${profile.protagonistReference}`,
-    `\u4e3b\u89d2\u79f0\u547c\u89c4\u5219\uff1a${profile.protagonistRule}`,
+    `小说：${profile.novelTitle}`,
+    `题材：${profile.genre}`,
+    profile.background ? `基础背景：${profile.background}` : '',
+    profile.storyGoal ? `故事目标：${profile.storyGoal}` : '',
+    profile.coreConflict ? `核心冲突：${profile.coreConflict}` : '',
+    profile.mainPlot ? `主线推进：${profile.mainPlot}` : '',
+    profile.subPlots ? `支线概要：${profile.subPlots}` : '',
+    profile.ending ? `结局方向：${profile.ending}` : '',
+    `主角指代：${profile.protagonistReference}`,
+    `主角称呼规则：${profile.protagonistRule}`,
   ])
 }
 
 function buildActionInstruction(action: WorldRulesGenerationRequest['action']): string {
   if (action === 'expand') {
     return joinLines([
-      '\u57fa\u4e8e\u5f53\u524d\u5206\u533a\u8349\u7a3f\u7ee7\u7eed\u6269\u5199\uff0c\u4e0d\u8981\u63a8\u7ffb\u5df2\u6709\u53ef\u7528\u5185\u5bb9\u3002',
-      '\u65b0\u589e\u4fe1\u606f\u8981\u56de\u6263\u57fa\u7840\u80cc\u666f\u3001\u6838\u5fc3\u8bbe\u5b9a\u3001\u9898\u6750\u4ee5\u53ca\u5176\u4ed6\u5206\u533a\u3002',
-      '\u4f18\u5148\u8865\u8db3\u9650\u5236\u3001\u4ee3\u4ef7\u3001\u7ed3\u6784\u5173\u7cfb\u3001\u5267\u60c5\u7528\u9014\u4e0e\u53ef\u5199\u573a\u666f\u3002',
+      '基于当前分区草稿继续扩写，不要推翻已有可用内容。',
+      '新增信息要回扣基础背景、核心设定、题材以及其他分区。',
+      '优先补足限制、代价、结构关系、剧情用途与可写场景。',
     ])
   }
 
   return joinLines([
-    '\u5982\u679c\u5f53\u524d\u5206\u533a\u4e3a\u7a7a\uff0c\u76f4\u63a5\u7ed9\u51fa\u53ef\u843d\u5230\u8868\u5355\u7684\u7b2c\u4e00\u7248\u89c4\u5219\u3002',
-    '\u5982\u679c\u5f53\u524d\u5206\u533a\u5df2\u6709\u90e8\u5206\u5185\u5bb9\uff0c\u5141\u8bb8\u7ee7\u627f\u5e76\u8865\u5168\uff0c\u4e0d\u8981\u91cd\u590d\u5806\u780c\u3002',
-    '\u51cf\u5c11\u7a7a\u6cdb\u53e3\u53f7\u4e0e\u767e\u79d1\u5f0f\u8bf4\u660e\uff0c\u8ba9\u89c4\u5219\u80fd\u76f4\u63a5\u670d\u52a1\u4eba\u7269\u3001\u5730\u56fe\u3001\u65f6\u95f4\u8f74\u548c\u5199\u4f5c\u3002',
+    '如果当前分区为空，直接给出可落到表单的第一版规则。',
+    '如果当前分区已有部分内容，允许继承并补全，不要重复堆砌。',
+    '减少空泛口号与百科式说明，让规则能直接服务人物、地图、时间轴和写作。',
   ])
 }
 
@@ -178,38 +178,38 @@ function buildSectionRequirement(sectionKey: WorldRuleSectionKey): string {
   switch (sectionKey) {
     case 'overview':
       return joinLines([
-        '\u5199\u6e05\u4e16\u754c\u89c2\u57fa\u8c03\u3001\u793e\u4f1a\u6846\u67b6\u4e0e\u6545\u4e8b\u53d9\u4e8b\u91cd\u5fc3\u3002',
-        '\u5c3d\u91cf\u8ba9\u57fa\u8c03\u548c\u4eba\u7269\u5904\u5883\u3001\u8d44\u6e90\u7ade\u4e89\u3001\u7ec4\u7ec7\u5173\u7cfb\u76f4\u63a5\u76f8\u8fde\u3002',
+        '写清世界观基调、社会框架与故事叙事重心。',
+        '尽量让基调和人物处境、资源竞争、组织关系直接相连。',
       ])
     case 'power':
       return joinLines([
-        '\u6bcf\u5957\u4f53\u7cfb\u90fd\u8981\u5177\u5907\u5bf9\u8c61\u3001\u9636\u6bb5\u3001\u664b\u5347\u6761\u4ef6\u3001\u9650\u5236\u4e0e\u4ee3\u4ef7\u3002',
-        '\u4f18\u5148\u7ed9\u51fa\u5c11\u800c\u6e05\u6670\u7684\u4f53\u7cfb\uff0c\u4e0d\u8981\u4e00\u6b21\u5806\u51fa\u8fc7\u591a\u7a7a\u58f3\u7b49\u7ea7\u3002',
+        '每套体系都要具备对象、阶段、晋升条件、限制与代价。',
+        '优先给出少而清晰的体系，不要一次堆出过多空壳等级。',
       ])
     case 'species':
       return joinLines([
-        '\u79cd\u65cf\u3001\u5b9e\u4f53\u4e0e\u52bf\u529b\u7684\u8bbe\u5b9a\u8981\u80fd\u76f4\u63a5\u53c2\u4e0e\u5267\u60c5\u51b2\u7a81\u3002',
-        '\u79cd\u65cf\u5199\u751f\u5b58\u903b\u8f91\uff0c\u52bf\u529b\u5199\u7ec4\u7ec7\u7ed3\u6784\u4e0e\u8d44\u6e90\u63a7\u5236\u3002',
+        '种族、实体与势力的设定要能直接参与剧情冲突。',
+        '种族写生存逻辑，势力写组织结构与资源控制。',
       ])
     case 'ecology':
       return joinLines([
-        '\u4eba\u7269\u69fd\u4f4d\u8981\u4e0e\u4e3b\u7ebf\u51b2\u7a81\u3001\u52bf\u529b\u7ed3\u6784\u3001\u5730\u56fe\u7a7a\u95f4\u76f8\u8fde\u3002',
-        '\u5c3d\u91cf\u7ed9\u51fa\u53ef\u7528\u4e8e\u4eba\u7269\u6279\u91cf\u751f\u6210\u7684\u7ed3\u6784\u6027\u69fd\u4f4d\u3002',
+        '人物槽位要与主线冲突、势力结构、地图空间相连。',
+        '尽量给出可用于人物批量生成的结构性槽位。',
       ])
     case 'map':
       return joinLines([
-        '\u5730\u56fe\u6309\u5c42\u7ea7\u8bbe\u8ba1\uff0c\u7b2c 1 \u5c42\u8868\u793a\u56fd\u5bb6 / \u5927\u533a / \u754c\u57df\uff0c\u7b2c 2 \u5c42\u8868\u793a\u6bcf\u4e2a\u4e0a\u7ea7\u4e0b\u7684\u533a\u57df\uff0c\u66f4\u6df1\u5c42\u518d\u8868\u793a\u5730\u70b9\u3002',
-        '\u5bf9 suggestedCount \u7684\u7406\u89e3\u662f\u201c\u6bcf\u4e2a\u7236\u8282\u70b9\u5404\u81ea\u62e5\u6709\u7684\u76f4\u5c5e\u5b50\u8282\u70b9\u6570\u91cf\u201d\uff0c\u4e0d\u662f\u5168\u5c40\u603b\u6570\u3002',
+        '地图按层级设计，第 1 层表示国家 / 大区 / 界域，第 2 层表示每个上级下的区域，更深层再表示地点。',
+        '对 suggestedCount 的理解是“每个父节点各自拥有的直属子节点数量”，不是全局总数。',
       ])
     case 'timeline':
       return joinLines([
-        '\u5199\u6e05\u7eaa\u5143\u3001\u96f6\u70b9\u3001\u663e\u793a\u683c\u5f0f\u3001\u53ef\u7528\u7cbe\u5ea6\u548c\u63a8\u8350\u4e8b\u4ef6\u7c7b\u578b\u3002',
-        '\u65f6\u95f4\u89c4\u5219\u8981\u80fd\u76f4\u63a5\u670d\u52a1\u4e8b\u4ef6\u65f6\u95f4\u8f74\u7684\u547d\u540d\u548c\u6392\u5e8f\u3002',
+        '写清纪元、零点、显示格式、可用精度和推荐事件类型。',
+        '时间规则要能直接服务事件时间轴的命名和排序。',
       ])
     case 'language':
       return joinLines([
-        '\u6587\u98ce\u7ea6\u675f\u8981\u80fd\u76f4\u63a5\u4f5c\u4e3a\u540e\u7eed\u6b63\u6587\u5199\u4f5c\u7684\u786c\u89c4\u5219\u3002',
-        '\u4f18\u5148\u5f3a\u5316\u81ea\u7136\u4e2d\u6587\u3001\u5173\u7cfb\u611f\u548c\u5177\u4f53\u573a\u666f\uff0c\u51cf\u5c11 AI \u5473\u3002',
+        '文风约束要能直接作为后续正文写作的硬规则。',
+        '优先强化自然中文、关系感和具体场景，减少 AI 味。',
       ])
     default:
       return ''
@@ -219,19 +219,19 @@ function buildSectionRequirement(sectionKey: WorldRuleSectionKey): string {
 function buildOutputSchema(sectionKey: WorldRuleSectionKey): string {
   switch (sectionKey) {
     case 'overview':
-      return '\u53ea\u8fd4\u56de JSON\uff0c\u4e0d\u8981\u89e3\u91ca\u3001\u4e0d\u8981 Markdown\u3001\u4e0d\u8981\u4ee3\u7801\u5757\uff1a{"genreProfile":{"name":"","subgenre":"","worldviewTone":"","socialFrame":"","narrativeFocus":[""],"languageAvoidances":[""]}}'
+      return '只返回 JSON，不要解释、不要 Markdown、不要代码块：{"genreProfile":{"name":"","subgenre":"","worldviewTone":"","socialFrame":"","narrativeFocus":[""],"languageAvoidances":[""]}}'
     case 'power':
-      return '\u53ea\u8fd4\u56de JSON\uff1a{"powerSystems":[{"name":"","appliesTo":[""],"levels":[""],"advancementRule":"","limitations":"","cost":"","taboo":""}]}'
+      return '只返回 JSON：{"powerSystems":[{"name":"","appliesTo":[""],"levels":[""],"advancementRule":"","limitations":"","cost":"","taboo":""}]}'
     case 'species':
-      return '\u53ea\u8fd4\u56de JSON\uff1a{"speciesSystem":[{"name":"","entityType":"human|undead|beast|immortal|nonhuman","summary":"","traits":[""],"commonIdentities":[""],"relationToHumans":"","storyUse":""}],"factionSystem":[{"name":"","factionType":"","summary":"","structure":"","resources":"","externalRelations":"","recruitFrom":"","notableSites":[""]}]}'
+      return '只返回 JSON：{"speciesSystem":[{"name":"","entityType":"human|undead|beast|immortal|nonhuman","summary":"","traits":[""],"commonIdentities":[""],"relationToHumans":"","storyUse":""}],"factionSystem":[{"name":"","factionType":"","summary":"","structure":"","resources":"","externalRelations":"","recruitFrom":"","notableSites":[""]}]}'
     case 'ecology':
-      return '\u53ea\u8fd4\u56de JSON\uff1a{"characterEcology":{"overview":"","slots":[{"label":"","entityType":"human|undead|beast|immortal|nonhuman","species":"","narrativeFunction":"","contextLink":"","preferredFactions":[""],"powerBias":[""]}]}}'
+      return '只返回 JSON：{"characterEcology":{"overview":"","slots":[{"label":"","entityType":"human|undead|beast|immortal|nonhuman","species":"","narrativeFunction":"","contextLink":"","preferredFactions":[""],"powerBias":[""]}]}}'
     case 'map':
-      return '\u53ea\u8fd4\u56de JSON\uff1a{"mapBlueprint":{"overview":"","levels":[{"depth":1,"label":"","nodeTypes":[""],"relationHint":"","suggestedCount":3,"examples":[""]}]}}'
+      return '只返回 JSON：{"mapBlueprint":{"overview":"","levels":[{"depth":1,"label":"","nodeTypes":[""],"relationHint":"","suggestedCount":3,"examples":[""]}]}}'
     case 'timeline':
-      return '\u53ea\u8fd4\u56de JSON\uff1a{"timelineConfig":{"calendarType":"gregorian|regnal|relative-disaster|custom-era|future-date","eraName":"","epochLabel":"","baseYearLabel":"","displayPattern":"","relativeZeroLabel":"","recommendedEventTypes":[""],"precisionOptions":[""]}}'
+      return '只返回 JSON：{"timelineConfig":{"calendarType":"gregorian|regnal|relative-disaster|custom-era|future-date","eraName":"","epochLabel":"","baseYearLabel":"","displayPattern":"","relativeZeroLabel":"","recommendedEventTypes":[""],"precisionOptions":[""]}}'
     case 'language':
-      return '\u53ea\u8fd4\u56de JSON\uff1a{"writingConstraints":{"antiQuoteEmphasis":true,"antiConceptSlogans":true,"antiSymmetricLines":true,"narrationStyle":"","dialogueStyle":"","forbiddenPhrases":[""],"extraRules":[""]}}'
+      return '只返回 JSON：{"writingConstraints":{"antiQuoteEmphasis":true,"antiConceptSlogans":true,"antiSymmetricLines":true,"narrationStyle":"","dialogueStyle":"","forbiddenPhrases":[""],"extraRules":[""]}}'
     default:
       return ''
   }
@@ -249,18 +249,18 @@ function buildSectionPrompt(
   const otherSummary = summarizeOtherSections(sectionKey, rules)
 
   return renderPrompt([
-    `\u4f60\u662f\u5c0f\u8bf4\u4e16\u754c\u89c4\u5219\u534f\u4f5c\u52a9\u624b\uff0c\u73b0\u5728\u53ea\u5904\u7406\u300c${sectionLabel}\u300d\u5206\u533a\u3002`,
-    section('\u6545\u4e8b\u6838\u5fc3', buildStoryCoreSummary(profile)),
-    section('\u5f53\u524d\u5206\u533a\u8349\u7a3f', currentSummary || '\u5f53\u524d\u5206\u533a\u8fd8\u6ca1\u6709\u53ef\u7528\u8349\u7a3f\uff0c\u8bf7\u4ece\u96f6\u751f\u6210\u3002'),
-    otherSummary ? section('\u5176\u4ed6\u5206\u533a\u53c2\u8003', otherSummary) : '',
-    requirements ? section('\u989d\u5916\u8981\u6c42', requirements) : '',
-    section('\u4efb\u52a1\u76ee\u6807', buildActionInstruction(action)),
-    section('\u672c\u5206\u533a\u8981\u6c42', buildSectionRequirement(sectionKey)),
-    section('\u8bed\u8a00\u8981\u6c42', buildHumanLanguageRules([
-      '\u51cf\u5c11\u7a7a\u6cdb\u53e3\u53f7\u548c\u767e\u79d1\u5f0f\u8bf4\u660e\uff0c\u4fdd\u7559\u9898\u6750\u6c14\u8d28\u3002',
-      '\u6bcf\u6761\u89c4\u5219\u5c3d\u91cf\u5199\u51fa\u5bf9\u8c61\u3001\u6761\u4ef6\u3001\u4ee3\u4ef7\u6216\u5173\u8054\u5173\u7cfb\u3002',
-      '\u5982\u679c\u6d89\u53ca\u5730\u56fe\u3001\u52bf\u529b\u3001\u4eba\u7269\u69fd\u4f4d\u6216\u65f6\u95f4\u5236\u5ea6\uff0c\u8981\u4e0e\u5176\u4ed6\u5206\u533a\u4fdd\u6301\u4e00\u81f4\u3002',
-      '\u4e0d\u8981\u53d1\u660e\u4e0e\u6545\u4e8b\u6838\u5fc3\u65e0\u5173\u7684\u5b8f\u5927\u8bbe\u5b9a\u3002',
+    `你是小说世界规则协作助手，现在只处理「${sectionLabel}」分区。`,
+    section('故事核心', buildStoryCoreSummary(profile)),
+    section('当前分区草稿', currentSummary || '当前分区还没有可用草稿，请从零生成。'),
+    otherSummary ? section('其他分区参考', otherSummary) : '',
+    requirements ? section('额外要求', requirements) : '',
+    section('任务目标', buildActionInstruction(action)),
+    section('本分区要求', buildSectionRequirement(sectionKey)),
+    section('语言要求', buildHumanLanguageRules([
+      '减少空泛口号和百科式说明，保留题材气质。',
+      '每条规则尽量写出对象、条件、代价或关联关系。',
+      '如果涉及地图、势力、人物槽位或时间制度，要与其他分区保持一致。',
+      '不要发明与故事核心无关的宏大设定。',
     ])),
     buildOutputSchema(sectionKey),
   ])
@@ -393,12 +393,12 @@ function ensurePatchHasContent(sectionKey: WorldRuleSectionKey, patch: Partial<G
   switch (sectionKey) {
     case 'overview':
       if (!patch.genreProfile || Object.keys(asRecord(patch.genreProfile)).length === 0) {
-        throw new Error('\u672a\u751f\u6210\u53ef\u7528\u7684\u4e16\u754c\u6982\u89c8')
+        throw new Error('未生成可用的世界概览')
       }
       return
     case 'power':
       if (!Array.isArray(patch.powerSystems) || patch.powerSystems.length === 0) {
-        throw new Error('\u672a\u751f\u6210\u53ef\u7528\u7684\u529b\u91cf\u4f53\u7cfb')
+        throw new Error('未生成可用的力量体系')
       }
       return
     case 'species':
@@ -406,27 +406,27 @@ function ensurePatchHasContent(sectionKey: WorldRuleSectionKey, patch: Partial<G
         (!Array.isArray(patch.speciesSystem) || patch.speciesSystem.length === 0)
         && (!Array.isArray(patch.factionSystem) || patch.factionSystem.length === 0)
       ) {
-        throw new Error('\u672a\u751f\u6210\u53ef\u7528\u7684\u79cd\u65cf\u6216\u52bf\u529b')
+        throw new Error('未生成可用的种族或势力')
       }
       return
     case 'ecology':
       if (!patch.characterEcology || Object.keys(asRecord(patch.characterEcology)).length === 0) {
-        throw new Error('\u672a\u751f\u6210\u53ef\u7528\u7684\u4eba\u7269\u751f\u6001')
+        throw new Error('未生成可用的人物生态')
       }
       return
     case 'map':
       if (!patch.mapBlueprint || Object.keys(asRecord(patch.mapBlueprint)).length === 0) {
-        throw new Error('\u672a\u751f\u6210\u53ef\u7528\u7684\u5730\u56fe\u84dd\u56fe')
+        throw new Error('未生成可用的地图蓝图')
       }
       return
     case 'timeline':
       if (!patch.timelineConfig || Object.keys(asRecord(patch.timelineConfig)).length === 0) {
-        throw new Error('\u672a\u751f\u6210\u53ef\u7528\u7684\u65f6\u95f4\u89c4\u5219')
+        throw new Error('未生成可用的时间规则')
       }
       return
     case 'language':
       if (!patch.writingConstraints || Object.keys(asRecord(patch.writingConstraints)).length === 0) {
-        throw new Error('\u672a\u751f\u6210\u53ef\u7528\u7684\u6587\u98ce\u7ea6\u675f')
+        throw new Error('未生成可用的文风约束')
       }
       return
     default:
@@ -434,7 +434,7 @@ function ensurePatchHasContent(sectionKey: WorldRuleSectionKey, patch: Partial<G
   }
 }
 
-function sanitizeErrorMessage(error: unknown, fallback = '\u751f\u6210\u5931\u8d25'): string {
+function sanitizeErrorMessage(error: unknown, fallback = '生成失败'): string {
   const raw = error instanceof Error ? error.message : fallback
   return cleanAiFieldText(raw).replace(/^\[[^\]]+\]\s*/g, '').trim() || fallback
 }
@@ -466,12 +466,12 @@ export async function generateWorldRules(
   sender?: WebContents,
 ): Promise<WorldRulesGenerationResult> {
   if (data.mode === 'section' && !data.section) {
-    throw new Error('\u7f3a\u5c11\u76ee\u6807\u5206\u533a')
+    throw new Error('缺少目标分区')
   }
 
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, data.novelId)).all()[0]
-  if (!novel) throw new Error('\u5c0f\u8bf4\u4e0d\u5b58\u5728')
+  if (!novel) throw new Error('小说不存在')
 
   const profile = await buildStoryProfile(data.novelId)
   const requestedSections = data.mode === 'section'
@@ -493,8 +493,8 @@ export async function generateWorldRules(
       completed: completedSteps,
       total: requestedSections.length,
       detail: data.action === 'expand'
-        ? '\u6b63\u5728\u7ed3\u5408\u73b0\u6709\u8349\u7a3f\u7ee7\u7eed\u6269\u5199...'
-        : '\u6b63\u5728\u6839\u636e\u73b0\u6709\u8bbe\u5b9a\u751f\u6210\u5206\u533a\u521d\u7a3f...',
+        ? '正在结合现有草稿继续扩写...'
+        : '正在根据现有设定生成分区初稿...',
     })
 
     try {
@@ -513,8 +513,8 @@ export async function generateWorldRules(
       workingRules = nextRules
       completedSteps += 1
 
-      const warning = changed ? undefined : '\u751f\u6210\u7ed3\u679c\u672a\u5e26\u6765\u65b0\u7684\u6709\u6548\u6539\u52a8'
-      if (warning) warnings.push(`${label}\uff1a${warning}`)
+      const warning = changed ? undefined : '生成结果未带来新的有效改动'
+      if (warning) warnings.push(`${label}：${warning}`)
 
       steps.push({
         key: sectionKey,
@@ -531,11 +531,11 @@ export async function generateWorldRules(
         completed: completedSteps,
         total: requestedSections.length,
         warning,
-        detail: warning || `${label}\u5df2\u66f4\u65b0\u5230\u8868\u5355\u8349\u7a3f`,
+        detail: warning || `${label}已更新到表单草稿`,
       })
     } catch (error) {
       const errorMessage = sanitizeErrorMessage(error)
-      warnings.push(`${label}\uff1a${errorMessage}`)
+      warnings.push(`${label}：${errorMessage}`)
       steps.push({
         key: sectionKey,
         label,
@@ -551,7 +551,7 @@ export async function generateWorldRules(
         completed: completedSteps,
         total: requestedSections.length,
         warning: errorMessage,
-        detail: `${label}\u751f\u6210\u5931\u8d25`,
+        detail: `${label}生成失败`,
       })
 
       if (data.mode === 'section') {

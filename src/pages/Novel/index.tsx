@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Button, Spin } from 'antd'
 import {
   AppstoreOutlined,
@@ -11,7 +11,6 @@ import {
   EnvironmentOutlined,
   GlobalOutlined,
   LeftOutlined,
-  RocketOutlined,
   RightOutlined,
   SettingOutlined,
   TeamOutlined,
@@ -19,6 +18,7 @@ import {
 import { useNovelStore } from '../../stores/novel.store'
 import { useWorkspaceStore, type WorkspaceMode } from '../../stores/workspace.store'
 import GuidePage from './Guide'
+import GuidedWorkspaceStep from './GuidedStep'
 import Overview from './Overview'
 import CoreSettings from './CoreSettings'
 import WorldRules from './WorldRules'
@@ -31,11 +31,19 @@ import Writing from './Writing'
 import {
   countMapNodes,
   EMPTY_WORKFLOW_STATS,
+  getGuidedStepProgressMap,
+  getRecommendedGuidedWorkflowStep,
   getRecommendedWorkflowStep,
+  isMapStructureReady,
+  isStoryCoreReady,
+  isStoryPlotReady,
+  isWorldFoundationReady,
+  type GuidedWorkflowStepKey,
+  type WorkflowRecommendationKey,
   type WorkflowStats,
 } from './workflow'
 
-type WorkspaceKey =
+type ProWorkspaceKey =
   | 'guide'
   | 'overview'
   | 'core-settings'
@@ -47,6 +55,8 @@ type WorkspaceKey =
   | 'timeline'
   | 'writing'
 
+type WorkspaceKey = GuidedWorkflowStepKey | ProWorkspaceKey
+
 interface WorkspaceItem {
   key: WorkspaceKey
   icon: React.ReactNode
@@ -54,43 +64,100 @@ interface WorkspaceItem {
   summary: string
 }
 
-const workspaceGroups: Array<{ title: string; items: WorkspaceItem[] }> = [
+const GUIDED_ITEMS: WorkspaceItem[] = [
+  { key: 'basics', icon: <DashboardOutlined />, label: '基础信息', summary: '只填书名、简介和背景。' },
+  { key: 'story-core', icon: <SettingOutlined />, label: '核心设定', summary: '先定目标和冲突。' },
+  { key: 'story-plot', icon: <BarsOutlined />, label: '主线推进', summary: '再补主线和结局。' },
+  { key: 'world-foundation', icon: <GlobalOutlined />, label: '世界规则', summary: '先同步题材规则。' },
+  { key: 'map-structure', icon: <EnvironmentOutlined />, label: '地图结构', summary: '只做地点骨架。' },
+  { key: 'character-roster', icon: <TeamOutlined />, label: '角色系统', summary: '先补主角和关键角色。' },
+  { key: 'items-equipment', icon: <AppstoreOutlined />, label: '物品装备', summary: '只补关键道具和装备。' },
+  { key: 'write-start', icon: <EditOutlined />, label: '开始写作', summary: '生成骨架后进入正文。' },
+]
+
+const PRO_GROUPS: Array<{ title: string; items: WorkspaceItem[] }> = [
   {
-    title: '创作总览',
+    title: '基础',
     items: [
-      { key: 'guide', icon: <RocketOutlined />, label: '创作向导', summary: '按步骤补齐设定、资产和写作前置' },
-      { key: 'overview', icon: <DashboardOutlined />, label: '概览', summary: '查看进度、缺口和当前结构状态' },
-      { key: 'core-settings', icon: <SettingOutlined />, label: '核心设定', summary: '统一主题、冲突、主线和结局方向' },
-      { key: 'world-rules', icon: <GlobalOutlined />, label: '世界规则', summary: '同步种族、等级、地图层级和时间制度' },
+      { key: 'guide', icon: <DashboardOutlined />, label: '创作向导', summary: '查看当前缺口。' },
+      { key: 'overview', icon: <AppstoreOutlined />, label: '基础总览', summary: '查看小说基础信息。' },
+      { key: 'core-settings', icon: <SettingOutlined />, label: '核心设定', summary: '编辑故事引擎与主线。' },
     ],
   },
   {
-    title: '结构资产',
+    title: '世界',
     items: [
-      { key: 'map', icon: <EnvironmentOutlined />, label: '地图结构', summary: '国家、势力、门派、基地和关键场景' },
-      { key: 'characters', icon: <TeamOutlined />, label: '人物系统', summary: '角色、种族、关系网络和角色定位' },
-      { key: 'items', icon: <AppstoreOutlined />, label: '物品装备', summary: '按题材生成模板、实例和剧情挂点' },
-      { key: 'timeline', icon: <ClockCircleOutlined />, label: '事件时间轴', summary: '把事件、人物、物品和章节串起来' },
+      { key: 'world-rules', icon: <GlobalOutlined />, label: '世界规则', summary: '维护题材与语言规则。' },
+      { key: 'map', icon: <EnvironmentOutlined />, label: '地图结构', summary: '维护地点层级。' },
     ],
   },
   {
-    title: '写作推进',
+    title: '资源',
     items: [
-      { key: 'outline', icon: <BarsOutlined />, label: '故事大纲', summary: '故事弧、章节细纲和节奏结构' },
-      { key: 'writing', icon: <EditOutlined />, label: '正文写作', summary: '四阶段流水线、长文记忆和结构体检' },
+      { key: 'characters', icon: <TeamOutlined />, label: '角色系统', summary: '维护人物关系。' },
+      { key: 'items', icon: <AppstoreOutlined />, label: '物品装备', summary: '维护道具与装备。' },
+    ],
+  },
+  {
+    title: '推进',
+    items: [
+      { key: 'outline', icon: <BarsOutlined />, label: '故事大纲', summary: '维护故事弧。' },
+      { key: 'timeline', icon: <ClockCircleOutlined />, label: '时间轴', summary: '维护事件顺序。' },
+      { key: 'writing', icon: <EditOutlined />, label: '正文写作', summary: '进入正文编辑。' },
     ],
   },
 ]
 
-const MODE_COPY: Record<WorkspaceMode, { label: string; description: string }> = {
-  guided: {
-    label: '小白模式',
-    description: '告诉你先做什么、为什么先做，并把关键操作压缩成一套清晰流程。',
-  },
-  pro: {
-    label: '专业模式',
-    description: '保留完整结构信息和联动细节，适合边写边调参与精修设定。',
-  },
+const GUIDED_TO_PRO_PAGE: Record<GuidedWorkflowStepKey, ProWorkspaceKey> = {
+  basics: 'overview',
+  'story-core': 'core-settings',
+  'story-plot': 'core-settings',
+  'world-foundation': 'world-rules',
+  'map-structure': 'map',
+  'character-roster': 'characters',
+  'items-equipment': 'items',
+  'write-start': 'writing',
+}
+
+const MODE_COPY: Record<WorkspaceMode, string> = {
+  guided: '向导',
+  pro: '详细编辑',
+}
+
+function getGuidedStepStateLabel(completedCount: number, totalCount: number) {
+  if (completedCount >= totalCount) return '完成'
+  if (completedCount > 0) return `${completedCount}/${totalCount}`
+  return '未做'
+}
+
+function getGuidedTargetForProPage(
+  page: ProWorkspaceKey,
+  currentNovel: ReturnType<typeof useNovelStore.getState>['currentNovel'],
+  workflowStats: WorkflowStats,
+  recommendedKey: GuidedWorkflowStepKey,
+): GuidedWorkflowStepKey {
+  switch (page) {
+    case 'guide':
+    case 'overview':
+      return 'basics'
+    case 'core-settings':
+      if (!isStoryCoreReady(currentNovel)) return 'story-core'
+      if (!isStoryPlotReady(currentNovel)) return 'story-plot'
+      return recommendedKey
+    case 'world-rules':
+      if (!isWorldFoundationReady(currentNovel)) return 'world-foundation'
+      return isMapStructureReady(workflowStats) ? recommendedKey : 'map-structure'
+    case 'map':
+      return 'map-structure'
+    case 'characters':
+      return 'character-roster'
+    case 'items':
+      return 'items-equipment'
+    case 'outline':
+    case 'timeline':
+    case 'writing':
+      return 'write-start'
+  }
 }
 
 export default function NovelRouter() {
@@ -103,49 +170,57 @@ export default function NovelRouter() {
   const [workflowStats, setWorkflowStats] = useState<WorkflowStats>(EMPTY_WORKFLOW_STATS)
 
   const novelId = Number.parseInt(id || '0', 10)
-  const flatItems = useMemo(() => workspaceGroups.flatMap((group) => group.items), [])
+  const proItems = useMemo(() => PRO_GROUPS.flatMap((group) => group.items), [])
+  const currentItems = mode === 'guided' ? GUIDED_ITEMS : proItems
+  const pathSegment = location.pathname.split('/').filter(Boolean).at(-1) as WorkspaceKey | undefined
 
   const currentPage = useMemo<WorkspaceKey>(() => {
-    const segment = location.pathname.split('/').filter(Boolean).at(-1)
-    return flatItems.some((item) => item.key === segment)
-      ? (segment as WorkspaceKey)
-      : 'guide'
-  }, [flatItems, location.pathname])
+    if (pathSegment && currentItems.some((item) => item.key === pathSegment)) {
+      return pathSegment
+    }
+
+    return currentItems[0]?.key || 'basics'
+  }, [currentItems, pathSegment])
 
   const currentPageMeta = useMemo(
-    () => flatItems.find((item) => item.key === currentPage) || flatItems[0],
-    [currentPage, flatItems],
+    () => currentItems.find((item) => item.key === currentPage) || currentItems[0],
+    [currentItems, currentPage],
   )
+
   const currentPageIndex = useMemo(
-    () => flatItems.findIndex((item) => item.key === currentPage),
-    [currentPage, flatItems],
+    () => currentItems.findIndex((item) => item.key === currentPage),
+    [currentItems, currentPage],
   )
-  const previousPageMeta = currentPageIndex > 0 ? flatItems[currentPageIndex - 1] : null
-  const nextPageMeta = currentPageIndex >= 0 && currentPageIndex < flatItems.length - 1
-    ? flatItems[currentPageIndex + 1]
+
+  const previousPageMeta = currentPageIndex > 0 ? currentItems[currentPageIndex - 1] : null
+  const nextPageMeta = currentPageIndex >= 0 && currentPageIndex < currentItems.length - 1
+    ? currentItems[currentPageIndex + 1]
     : null
-  const recommendedPageKey = useMemo(
-    () => getRecommendedWorkflowStep(currentNovel, workflowStats),
+
+  const guidedProgressMap = useMemo(
+    () => getGuidedStepProgressMap(currentNovel, workflowStats),
     [currentNovel, workflowStats],
   )
-  const recommendedPageMeta = useMemo(
-    () => recommendedPageKey
-      ? flatItems.find((item) => item.key === recommendedPageKey) || null
-      : null,
-    [flatItems, recommendedPageKey],
-  )
-  const sidebarSynopsis = currentNovel?.synopsis?.trim()
-    || '先补一条一句话简介，让整本书的气质、主角处境和核心冲突先定下来。'
 
-  const navigateToPage = (pageKey: WorkspaceKey) => {
-    navigate(`/novels/${novelId}/${pageKey}`)
-  }
+  const recommendedGuidedKey = useMemo(
+    () => getRecommendedGuidedWorkflowStep(currentNovel, workflowStats),
+    [currentNovel, workflowStats],
+  )
+
+  const recommendedProKey = useMemo(
+    () => getRecommendedWorkflowStep(currentNovel, workflowStats) || 'guide',
+    [currentNovel, workflowStats],
+  )
+
+  const recommendedKey = mode === 'guided' ? recommendedGuidedKey : recommendedProKey
+  const headerSummary = currentPageMeta?.summary || '进入当前模块。'
 
   const refreshWorkflowStats = useCallback(async () => {
     if (!novelId) return
 
     try {
-      const [mapTree, characters, items, arcs, events] = await Promise.all([
+      const [baseStats, mapTree, characters, items, arcs, events] = await Promise.all([
+        window.electron.novel.stats(novelId),
         window.electron.map.getTree(novelId),
         window.electron.character.list(novelId),
         window.electron.item.list(novelId),
@@ -159,6 +234,10 @@ export default function NovelRouter() {
         itemCount: items.length,
         outlineCount: arcs.length,
         timelineCount: events.length,
+        chapterCount: baseStats.totalChapters,
+        completedChapterCount: baseStats.completedChapters,
+        totalWords: baseStats.totalWords,
+        hasProtagonist: characters.some((item) => item.roleType === 'protagonist'),
       })
     } catch (error) {
       console.error(error)
@@ -192,6 +271,27 @@ export default function NovelRouter() {
     void refreshWorkflowStats()
   }, [location.pathname, refreshWorkflowStats])
 
+  useEffect(() => {
+    if (loading || !novelId) return
+
+    const validForCurrentMode = pathSegment && currentItems.some((item) => item.key === pathSegment)
+    if (!validForCurrentMode) {
+      navigate(`/novels/${novelId}/${recommendedKey}`, { replace: true })
+    }
+  }, [currentItems, loading, navigate, novelId, pathSegment, recommendedKey])
+
+  const handleModeChange = (nextMode: WorkspaceMode) => {
+    if (nextMode === mode) return
+
+    setMode(nextMode)
+
+    const targetKey = nextMode === 'guided'
+      ? getGuidedTargetForProPage(currentPage as ProWorkspaceKey, currentNovel, workflowStats, recommendedGuidedKey)
+      : (GUIDED_TO_PRO_PAGE[currentPage as GuidedWorkflowStepKey] || recommendedProKey)
+
+    navigate(`/novels/${novelId}/${targetKey}`)
+  }
+
   if (loading) {
     return (
       <div className="novel-route-shell novel-route-shell--loading">
@@ -203,103 +303,114 @@ export default function NovelRouter() {
   return (
     <div className={`novel-route-shell novel-route-shell--${mode}`}>
       <aside className="novel-route-shell__sidebar">
-        <div className="novel-sidebar__brand">
-          <div className="novel-sidebar__brand-mark">Novel Forge Workspace</div>
-          <div className="novel-sidebar__brand-rule" />
-        </div>
-
-        <div className="novel-sidebar__summary">
-          <div className="novel-sidebar__eyebrow">当前小说</div>
+        <div className="novel-sidebar__title-block">
+          <div className="novel-sidebar__eyebrow">小说</div>
           <h1 className="novel-sidebar__title">{currentNovel?.title || '未命名小说'}</h1>
-          <p className="novel-sidebar__summary-copy">{sidebarSynopsis}</p>
         </div>
-
-        <section className="novel-sidebar__assist novel-sidebar__assist--hidden" aria-hidden="true">
-          <div className="novel-sidebar__assist-title">当前页面要做什么</div>
-          <div className="novel-sidebar__assist-copy">{currentPageMeta?.summary}</div>
-          <ul className="novel-sidebar__hint-list">
-            <li>所有模块都会持续继承题材、主题、背景、世界规则和既有资产。</li>
-            <li>人物、物品、时间轴和章节不再孤立生成，而是互相回写和校验。</li>
-            <li>写作页会直接看到场景计划、审校意见、长文记忆和一致性体检。</li>
-          </ul>
-        </section>
 
         <div className="novel-sidebar__nav">
-          {workspaceGroups.map((group) => (
-            <section key={group.title} className="novel-sidebar__group">
-              <div className="novel-sidebar__group-title">{group.title}</div>
-              <div className="novel-sidebar__group-list">
-                {group.items.map((item) => (
-                  <button
-                    key={item.key}
-                    type="button"
-                    className={`novel-sidebar__nav-item ${currentPage === item.key ? 'novel-sidebar__nav-item--active' : ''}`}
-                    onClick={() => navigate(`/novels/${novelId}/${item.key}`)}
-                  >
-                    <span className="novel-sidebar__nav-icon">{item.icon}</span>
-                    <span className="novel-sidebar__nav-copy">
-                      <strong>{item.label}</strong>
-                      <small>{item.summary}</small>
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </section>
-          ))}
-        </div>
+          {mode === 'guided' ? (
+            GUIDED_ITEMS.map((item, index) => {
+              const progress = guidedProgressMap[item.key as GuidedWorkflowStepKey]
+              const isActive = currentPage === item.key
 
-        <div className="novel-sidebar__footer">
-          系统会持续串联人物、事件、时间轴、地图、物品和章节信息，并在正文生成前后做全书级一致性校验。
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  className={`novel-sidebar__nav-item ${isActive ? 'novel-sidebar__nav-item--active' : ''}`}
+                  onClick={() => navigate(`/novels/${novelId}/${item.key}`)}
+                >
+                  <span className="novel-sidebar__nav-order">{index + 1}</span>
+                  <span className="novel-sidebar__nav-copy">
+                    <strong>{item.label}</strong>
+                  </span>
+                  <span className={`novel-sidebar__nav-state ${progress.isComplete ? 'novel-sidebar__nav-state--done' : ''}`}>
+                    {getGuidedStepStateLabel(progress.completedCount, progress.totalCount)}
+                  </span>
+                </button>
+              )
+            })
+          ) : (
+            PRO_GROUPS.map((group) => (
+              <section key={group.title} className="novel-sidebar__group">
+                <div className="novel-sidebar__group-title">{group.title}</div>
+                <div className="novel-sidebar__group-list">
+                  {group.items.map((item) => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      className={`novel-sidebar__nav-item ${currentPage === item.key ? 'novel-sidebar__nav-item--active' : ''}`}
+                      onClick={() => navigate(`/novels/${novelId}/${item.key}`)}
+                    >
+                      <span className="novel-sidebar__nav-icon">{item.icon}</span>
+                      <span className="novel-sidebar__nav-copy">
+                        <strong>{item.label}</strong>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            ))
+          )}
         </div>
       </aside>
 
       <main className="novel-route-shell__content">
         <div className="novel-route-shell__content-frame">
-          <div className="novel-route-shell__header">
+          <div className="novel-route-shell__header novel-route-shell__header--compact">
             <div className="novel-route-shell__header-main">
               <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/novels')}>
-                返回主页
+                返回项目列表
               </Button>
               <div className="novel-route-shell__header-copy">
-                <div className="novel-route-shell__header-kicker">
-                  当前页面 · {currentPageMeta?.label || '创作向导'}
-                </div>
-                <strong>{currentNovel?.title || '当前小说'}</strong>
-                <span>{currentPageMeta?.summary || '围绕同一套背景、类型和主题，推进整本书的写作工作流。'}</span>
+                <div className="novel-route-shell__header-kicker">{currentNovel?.title || '当前小说'}</div>
+                <strong>{currentPageMeta?.label}</strong>
+                <span>{headerSummary}</span>
               </div>
             </div>
             <div className="novel-route-shell__header-actions">
-              <button
-                type="button"
-                className="novel-route-shell__next-step"
-                onClick={() => recommendedPageMeta && navigateToPage(recommendedPageMeta.key)}
-                disabled={!recommendedPageMeta}
-                title={recommendedPageMeta?.summary || '正在读取当前小说的完成状态。'}
-              >
-                <span className="novel-route-shell__next-step-kicker">
-                  {recommendedPageMeta?.key === currentPage ? '当前建议' : '下一步建议'}
-                </span>
-                <strong>{recommendedPageMeta?.label || '正在分析流程'}</strong>
-              </button>
-              <div className="novel-route-shell__header-mode" title={MODE_COPY[mode].description}>
-                <span className="novel-route-shell__header-mode-label">{MODE_COPY[mode].label}</span>
-                <div className="novel-mode-switch novel-mode-switch--compact" role="tablist" aria-label="工作台模式">
-                  {(['guided', 'pro'] as WorkspaceMode[]).map((value) => (
-                    <button
-                      key={value}
-                      type="button"
-                      className={`novel-mode-switch__button ${mode === value ? 'novel-mode-switch__button--active' : ''}`}
-                      onClick={() => setMode(value)}
-                    >
-                      {MODE_COPY[value].label}
-                    </button>
-                  ))}
-                </div>
+              <div className="novel-mode-switch novel-mode-switch--compact novel-route-shell__header-switch" role="tablist" aria-label="工作模式切换">
+                {(['guided', 'pro'] as WorkspaceMode[]).map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={`novel-mode-switch__button ${mode === value ? 'novel-mode-switch__button--active' : ''}`}
+                    onClick={() => handleModeChange(value)}
+                  >
+                    {MODE_COPY[value]}
+                  </button>
+                ))}
               </div>
+              <Button
+                icon={<LeftOutlined />}
+                disabled={!previousPageMeta}
+                onClick={() => previousPageMeta && navigate(`/novels/${novelId}/${previousPageMeta.key}`)}
+              >
+                上一步
+              </Button>
+              <Button
+                type="primary"
+                icon={<RightOutlined />}
+                disabled={!nextPageMeta}
+                onClick={() => nextPageMeta && navigate(`/novels/${novelId}/${nextPageMeta.key}`)}
+              >
+                下一步
+              </Button>
             </div>
           </div>
+
           <div className="novel-route-shell__content-body">
             <Routes>
+              <Route path="basics" element={<GuidedWorkspaceStep novelId={novelId} stepKey="basics" />} />
+              <Route path="story-core" element={<GuidedWorkspaceStep novelId={novelId} stepKey="story-core" />} />
+              <Route path="story-plot" element={<GuidedWorkspaceStep novelId={novelId} stepKey="story-plot" />} />
+              <Route path="world-foundation" element={<GuidedWorkspaceStep novelId={novelId} stepKey="world-foundation" />} />
+              <Route path="map-structure" element={<GuidedWorkspaceStep novelId={novelId} stepKey="map-structure" />} />
+              <Route path="character-roster" element={<GuidedWorkspaceStep novelId={novelId} stepKey="character-roster" />} />
+              <Route path="items-equipment" element={<GuidedWorkspaceStep novelId={novelId} stepKey="items-equipment" />} />
+              <Route path="write-start" element={<GuidedWorkspaceStep novelId={novelId} stepKey="write-start" />} />
+
               <Route path="guide" element={<GuidePage novelId={novelId} />} />
               <Route path="overview" element={<Overview novelId={novelId} />} />
               <Route path="core-settings" element={<CoreSettings novelId={novelId} />} />
@@ -310,35 +421,8 @@ export default function NovelRouter() {
               <Route path="outline" element={<Outline novelId={novelId} />} />
               <Route path="timeline" element={<TimelinePage novelId={novelId} />} />
               <Route path="writing" element={<Writing novelId={novelId} />} />
-              <Route path="*" element={<GuidePage novelId={novelId} />} />
+              <Route path="*" element={<Navigate replace to={`/novels/${novelId}/${recommendedKey}`} />} />
             </Routes>
-          </div>
-          <div className="novel-route-shell__content-footer">
-            <div className="novel-route-shell__content-footer-copy">
-              <strong>{currentPageMeta?.label || '创作向导'}</strong>
-              <span>
-                {previousPageMeta ? `上一步：${previousPageMeta.label}` : '当前已经是第一个流程'}
-                {' · '}
-                {nextPageMeta ? `下一步：${nextPageMeta.label}` : '当前已经是最后一个流程'}
-              </span>
-            </div>
-            <div className="novel-route-shell__content-footer-actions">
-              <Button
-                icon={<LeftOutlined />}
-                disabled={!previousPageMeta}
-                onClick={() => previousPageMeta && navigateToPage(previousPageMeta.key)}
-              >
-                上一步
-              </Button>
-              <Button
-                type="primary"
-                icon={<RightOutlined />}
-                disabled={!nextPageMeta}
-                onClick={() => nextPageMeta && navigateToPage(nextPageMeta.key)}
-              >
-                下一步
-              </Button>
-            </div>
           </div>
         </div>
       </main>

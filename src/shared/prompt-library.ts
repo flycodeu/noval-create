@@ -279,6 +279,20 @@ export interface ContentScoringPromptInput {
   novelBackground: string
 }
 
+export type StoryAnchorField = 'story_goal' | 'core_conflict' | 'main_plot' | 'ending'
+
+export interface StoryAnchorPromptInput {
+  field: StoryAnchorField
+  label: string
+  novelBackground: string
+  genre: string
+  currentContent?: string
+  relatedContext?: string
+  protagonistReference?: string
+  protagonistRule?: string
+  requirements?: string
+}
+
 function clean(value?: string | null): string {
   return value?.trim() || ''
 }
@@ -308,6 +322,66 @@ function placeholder(key: string): string {
   return `{${key}}`
 }
 
+function getStoryAnchorGuidance(field: StoryAnchorField, label: string) {
+  switch (field) {
+    case 'story_goal':
+      return {
+        label,
+        duty: '只写故事最后要抵达的目标、终局状态或核心命题。',
+        requirements: [
+          '回答“这本书最后要实现什么”，不要改写成过程描述。',
+          '可以带出主题方向，但落点必须是明确结果，而不是抽象口号。',
+        ],
+        avoid: [
+          '不要把中段剧情、阶段任务或具体场景塞进来。',
+          '不要把阻碍、敌人或困难本身写成最终目标。',
+          '不要复述主线推进或核心冲突。',
+        ],
+      }
+    case 'core_conflict':
+      return {
+        label,
+        duty: '只写阻碍目标实现的核心对立、不可回避的代价与持续张力。',
+        requirements: [
+          '回答“为什么这件事难以实现”，而不是“最后想实现什么”。',
+          '写清对立双方、冲突来源或必须支付的代价。',
+        ],
+        avoid: [
+          '不要写成结局目标、主题口号或人物愿望。',
+          '不要用流水账代替冲突本身。',
+          '不要换一种说法重复主线概述。',
+        ],
+      }
+    case 'main_plot':
+      return {
+        label,
+        duty: '只写围绕目标与冲突展开的关键事件链，强调因果推进、升级和转折。',
+        requirements: [
+          '回答“故事如何一步步推进到结局”，至少体现起点、升级、转折与逼近收束。',
+          '主线必须显式承接故事目标和核心冲突，不能另起一条故事。',
+        ],
+        avoid: [
+          '不要重新定义故事目标或核心冲突。',
+          '不要只写抽象主题感受、人物评价或世界观说明。',
+          '不要只列场景，不写事件之间的因果关系。',
+        ],
+      }
+    case 'ending':
+      return {
+        label,
+        duty: '只写故事最终如何收束、主要矛盾如何落地以及结局余波。',
+        requirements: [
+          '结局要回应既定目标、冲突和主线推进结果。',
+          '说明最终状态，不要在结局字段里再铺一条新主线。',
+        ],
+        avoid: [
+          '不要把尚未发生的中段情节写进结局字段。',
+          '不要只写价值判断，不写结果落点。',
+        ],
+      }
+  }
+}
+
 export const HUMAN_LANGUAGE_RULE_LINES = [
   '使用自然、可读的小说中文，先保证句子顺和意思准。',
   '先写清事实、动作、关系和后果，再让情绪与分量自然露出来。',
@@ -316,6 +390,9 @@ export const HUMAN_LANGUAGE_RULE_LINES = [
   '少用模板化引导词、抽象口号和假深刻表达，多写具体处境、判断依据和行为代价。',
   '普通概念、职业、情绪和判断不要随意加引号；只有称号、制度名、功法名、专有名词才保留引号。',
   '贴近当前题材常见的叙述气质、节奏和措辞密度，不模仿具体作者。',
+  '只处理当前字段和当前任务，不擅自扩写到无关领域，不拼接没有直接关系的概念。',
+  '如果输入没有明确涉及某个专业领域，不要擅自引入卡路里、感染概率、药理、金融指标、法律结论等外部概念。',
+  '不要为了显得高级，硬把两个语义上没有直接关系的词并在一句里。',
   '一旦出现不自然搭配，优先改成读者最熟悉、最直白、最准确的常规说法。',
 ] as const
 
@@ -325,6 +402,43 @@ export function buildHumanLanguageRules(extraLines: string[] = []): string {
     .join('\n')
 }
 
+export function buildStoryAnchorPrompt(params: StoryAnchorPromptInput): string {
+  const guidance = getStoryAnchorGuidance(params.field, params.label)
+  const protagonistReference = params.protagonistReference?.trim() || '主角'
+  const protagonistRule = params.protagonistRule?.trim() || '若涉及主角，沿用现有设定中的唯一称呼，不要擅自改名。'
+
+  return renderPrompt([
+    `你在补《${params.label}》这一项，请只完成这一项。`,
+    section('本项职责', guidance.duty),
+    sectionLines('输入信息', [
+      `题材：${params.genre}`,
+      `小说背景：${params.novelBackground || '（暂无补充背景）'}`,
+      `主角称呼：${protagonistReference}`,
+      `主角命名规则：${protagonistRule}`,
+    ]),
+    section('已确定的关联设定', params.relatedContext || '暂无'),
+    section('当前字段内容', params.currentContent || '暂无，请根据背景与已确定设定补全'),
+    section('额外要求', params.requirements || ''),
+    section('本次处理原则', [
+      ...guidance.requirements,
+      '只允许在当前背景、题材和已确定设定上深化，禁止改写成另一套故事。',
+      '先补人物动机、因果关系和结果落点，再考虑气质和文气。',
+      `本轮只处理《${params.label}》，不要越界代写其他字段。`,
+      '如果上下文出现旧名字、占位名或彼此冲突的人名，统一按主角命名规则处理。',
+      '与其他字段中的人物关系、事件因果和核心矛盾保持前后一致，不得漂移。',
+      '如果原内容可用，保留它的核心方向，只补缺口和逻辑。',
+      '禁止事项：',
+      ...guidance.avoid.map((item) => `- ${item}`),
+    ].join('\n')),
+    section('语言要求', buildHumanLanguageRules([
+      '输出前自行检查搭配是否准确，不要保留物体被写成人或生物的表达。',
+      '贴近当前题材常见的策划口径，但不要模仿具体作者。',
+    ])),
+    '输出要求：',
+    '- 直接输出可落进表单的纯文本',
+    '- 不要使用 Markdown、标题、列表或字段标签',
+  ])
+}
 export const GLOBAL_WRITING_RULES = `你现在写的是可直接入稿的中文小说正文。
 
 基本要求：
@@ -511,32 +625,32 @@ export function characterRelationsPrompt(params: CharacterRelationsPromptInput):
 
 export function mapGenerationPrompt(params: MapGenerationPromptInput): string {
   return renderPrompt([
-    `\u4e3a\u5c0f\u8bf4\u300a${params.novelTitle}\u300b\u8865\u4e00\u5957\u80fd\u652f\u6491\u5267\u60c5\u7684\u5730\u56fe\u7ed3\u6784\u3002`,
-    sectionLines('\u73b0\u6709\u4fe1\u606f', [
-      `\u4e16\u754c\u89c2\uff1a${params.worldSummary}`,
-      `\u9898\u6750\uff1a${params.genre}`,
-      `\u5730\u56fe\u7ed3\u6784\u8981\u6c42\uff1a${params.mapStructure}`,
-      params.factionSummary ? `\u52bf\u529b\u7ed3\u6784\uff1a${params.factionSummary}` : '',
-      params.mapSummary ? `\u84dd\u56fe\u8865\u5145\uff1a${params.mapSummary}` : '',
-      params.writingConstraints ? `\u8bed\u8a00\u7ea6\u675f\uff1a${params.writingConstraints}` : '',
-      params.namedPlaces ? `\u7528\u6237\u6307\u5b9a\u5730\u70b9\uff1a${params.namedPlaces}` : '',
+    `为小说《${params.novelTitle}》补一套能支撑剧情的地图结构。`,
+    sectionLines('现有信息', [
+      `世界观：${params.worldSummary}`,
+      `题材：${params.genre}`,
+      `地图结构要求：${params.mapStructure}`,
+      params.factionSummary ? `势力结构：${params.factionSummary}` : '',
+      params.mapSummary ? `蓝图补充：${params.mapSummary}` : '',
+      params.writingConstraints ? `语言约束：${params.writingConstraints}` : '',
+      params.namedPlaces ? `用户指定地点：${params.namedPlaces}` : '',
     ]),
-    section('\u751f\u6210\u8981\u6c42', [
-      '\u547d\u540d\u8981\u8d34\u5408\u9898\u6750\u548c\u6587\u5316\u80cc\u666f\uff0c\u4e0d\u8981\u4e32\u5473\u3002',
-      '\u6bcf\u4e2a\u5730\u70b9\u65e2\u8981\u6709\u6c1b\u56f4\uff0c\u4e5f\u8981\u6709\u5b58\u5728\u4ef7\u503c\uff0c\u6700\u597d\u80fd\u770b\u51fa\u4f1a\u627f\u8f7d\u4ec0\u4e48\u4e8b\u4ef6\u3002',
-      '\u5730\u70b9\u4e4b\u95f4\u8981\u6709\u57fa\u672c\u5730\u7406\u903b\u8f91\u548c\u7236\u5b50\u5c42\u7ea7\u903b\u8f91\uff0c\u4e0d\u8981\u50cf\u968f\u673a\u62bd\u5361\u3002',
-      '\u5730\u56fe\u5c42\u7ea7\u4e25\u683c\u670d\u4ece\u9898\u6750\u84dd\u56fe\uff0c\u4e0d\u8981\u628a\u4e27\u5c38\u9898\u6750\u5199\u6210\u5b97\u95e8\u7ed3\u6784\uff0c\u4e5f\u4e0d\u8981\u628a\u4ed9\u4fa0\u5730\u56fe\u5199\u6210\u73b0\u4ee3\u884c\u653f\u533a\u6a21\u677f\u3002',
-      '\u7b2c\u4e00\u5c42\u6570\u91cf\u662f\u6839\u8282\u70b9\u603b\u6570\uff0c\u5fc5\u987b\u4e25\u683c\u7b49\u4e8e\u8981\u6c42\u3002',
-      '\u4ece\u7b2c\u4e8c\u5c42\u5f00\u59cb\uff0c\u6570\u91cf\u8981\u6c42\u8868\u793a\u201c\u6bcf\u4e2a\u7236\u8282\u70b9\u90fd\u8981\u751f\u6210\u591a\u5c11\u4e2a\u76f4\u5c5e\u5b50\u8282\u70b9\u201d\uff0c\u4e0d\u662f\u6574\u5f20\u5730\u56fe\u5171\u4eab\u4e00\u4e2a\u603b\u6570\u3002',
-      '\u5982\u679c\u8981\u6c42\u662f\u201c2 \u4e2a\u56fd\u5bb6 / \u6bcf\u56fd 3 \u4e2a\u533a\u57df / \u6bcf\u533a\u57df 4 \u4e2a\u5730\u70b9\u201d\uff0c\u5c31\u5fc5\u987b\u8f93\u51fa 2 -> 3 -> 4 \u7684\u7236\u5b50\u6276\u51fa\u7ed3\u6784\u3002',
-      '\u5267\u60c5\u5173\u8054\u8981\u5199\u5177\u4f53\u4e8b\u4ef6\u6216\u7528\u9014\uff0c\u4e0d\u5199\u201c\u91cd\u8981\u5730\u70b9\u201d\u8fd9\u79cd\u7a7a\u8bdd\u3002',
-      'children \u53ea\u80fd\u653e\u76f4\u5c5e\u4e0b\u4e00\u5c42\u8282\u70b9\uff0c\u4e0d\u80fd\u8df3\u5c42\u3002',
+    section('生成要求', [
+      '命名要贴合题材和文化背景，不要串味。',
+      '每个地点既要有氛围，也要有存在价值，最好能看出会承载什么事件。',
+      '地点之间要有基本地理逻辑和父子层级逻辑，不要像随机抽卡。',
+      '地图层级严格服从题材蓝图，不要把丧尸题材写成宗门结构，也不要把仙侠地图写成现代行政区模板。',
+      '第一层数量是根节点总数，必须严格等于要求。',
+      '从第二层开始，数量要求表示“每个父节点都要生成多少个直属子节点”，不是整张地图共享一个总数。',
+      '如果要求是“2 个国家 / 每国 3 个区域 / 每区域 4 个地点”，就必须输出 2 -> 3 -> 4 的父子扶出结构。',
+      '剧情关联要写具体事件或用途，不写“重要地点”这种空话。',
+      'children 只能放直属下一层节点，不能跳层。',
     ].join('\n')),
-    section('\u8bed\u8a00\u8981\u6c42', buildHumanLanguageRules([
-      '\u5730\u70b9\u63cf\u8ff0\u8981\u5177\u4f53\uff0c\u4e0d\u8981\u5806\u780c\u5f62\u5bb9\u8bcd\u6216\u5199\u6210\u65c5\u6e38\u5ba3\u4f20\u8bed\u3002',
-      '\u666e\u901a\u5730\u70b9\u6027\u8d28\u4e0d\u8981\u52a0\u5f15\u53f7\uff0c\u4e0d\u8981\u5199\u6210\u201c\u771f\u6b63\u7981\u533a\u201d\u201c\u5e0c\u671b\u4e4b\u5730\u201d\u8fd9\u7c7b\u6982\u5ff5\u5305\u88c5\u3002',
+    section('语言要求', buildHumanLanguageRules([
+      '地点描述要具体，不要堆砌形容词或写成旅游宣传语。',
+      '普通地点性质不要加引号，不要写成“真正禁区”“希望之地”这类概念包装。',
     ])),
-    '\u53ea\u8f93\u51fa\u9012\u5f52 JSON\uff1a{"nodes":[{"name":"","node_type":"\u56fd\u5bb6/\u5b97\u95e8/\u57fa\u5730/\u57ce\u5e02/\u79d8\u5883/\u8bbe\u65bd\u7b49","structure_role":"\u8be5\u8282\u70b9\u5728\u84dd\u56fe\u4e2d\u7684\u804c\u8d23","description":"","atmosphere":"","plot_relevance":"","tags":["\u6807\u7b7e1"],"affiliated_factions":["\u52bf\u529b1"],"children":[{"name":"","node_type":"","structure_role":"","description":"","atmosphere":"","plot_relevance":"","tags":["\u6807\u7b7e1"],"affiliated_factions":["\u52bf\u529b1"],"children":[]}]}]}',
+    '只输出递归 JSON：{"nodes":[{"name":"","node_type":"国家/宗门/基地/城市/秘境/设施等","structure_role":"该节点在蓝图中的职责","description":"","atmosphere":"","plot_relevance":"","tags":["标签1"],"affiliated_factions":["势力1"],"children":[{"name":"","node_type":"","structure_role":"","description":"","atmosphere":"","plot_relevance":"","tags":["标签1"],"affiliated_factions":["势力1"],"children":[]}]}]}',
   ])
 }
 
@@ -1034,10 +1148,10 @@ export function genericExpandPrompt(params: GenericExpandPromptInput): string {
       '保留原始意图，优先补足能直接写进后续流程的细节。',
       '先补事实、条件、关系、限制、用途和代价，再谈气质或意义。',
       '如果原内容已经成立，就顺着往下补，不要推翻重来。',
+      '只处理当前内容类型，不跳出去发明无关设定、专业指标或跨领域比喻。',
       '语言紧一点，少写套话和百科说明。',
       '只输出纯文本，不要 Markdown，不要前言。',
-    ].join('\n')),
-    section('语言要求', buildHumanLanguageRules([
+    ].join('\n')),    section('语言要求', buildHumanLanguageRules([
       '贴近当前题材常见写法，但不要模仿具体作者。',
     ])),
   ])
@@ -1087,9 +1201,9 @@ export function contentScoringPrompt(params: ContentScoringPromptInput): string 
     ].join('\n')),
     section('补充分析', [
       '给出 ai_like_rate，重点看抽象大词、模板句、动作套路、概念包装、引号强调，以及“电网的死亡”这类搭配错误。',
+      '所有建议必须基于当前文本本身，不得发明额外设定、专业指标、概率判断或跨领域概念。',
       'top_fixes 只列最值得先改的 3 处，要具体、可操作，最好直接给出更自然的替换说法。',
-    ].join('\n')),
-    '只输出 JSON：{"dimensions":[{"name":"创新性","score":0,"feedback":"一句简评","suggestion":"具体改法"},{"name":"丰富度","score":0,"feedback":"一句简评","suggestion":"具体改法"},{"name":"自然度","score":0,"feedback":"一句简评","suggestion":"具体改法"},{"name":"逻辑性","score":0,"feedback":"一句简评","suggestion":"具体改法"},{"name":"读者代入感","score":0,"feedback":"一句简评","suggestion":"具体改法"}],"ai_like_rate":0,"repetition_risk":"低/中/高","overall_score":0,"overall_feedback":"综合评价","top_fixes":["修改建议1","修改建议2","修改建议3"]}',
+    ].join('\n')),    '只输出 JSON：{"dimensions":[{"name":"创新性","score":0,"feedback":"一句简评","suggestion":"具体改法"},{"name":"丰富度","score":0,"feedback":"一句简评","suggestion":"具体改法"},{"name":"自然度","score":0,"feedback":"一句简评","suggestion":"具体改法"},{"name":"逻辑性","score":0,"feedback":"一句简评","suggestion":"具体改法"},{"name":"读者代入感","score":0,"feedback":"一句简评","suggestion":"具体改法"}],"ai_like_rate":0,"repetition_risk":"低/中/高","overall_score":0,"overall_feedback":"综合评价","top_fixes":["修改建议1","修改建议2","修改建议3"]}',
   ])
 }
 

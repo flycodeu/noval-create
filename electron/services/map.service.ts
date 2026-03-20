@@ -11,6 +11,7 @@ import {
   getMapBlueprintDepth,
   parseWorldRulesJson,
 } from '../../src/shared/genre-system'
+import { buildHumanLanguageRules } from '../../src/shared/prompt-library'
 import type { MapBatchGenerateOptions, MapBatchGenerationResult } from '../../src/types'
 import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/utils/text'
 
@@ -84,7 +85,7 @@ function toStringArray(value: unknown): string[] {
 
   const text = asText(value)
   if (!text) return []
-  return cleanAiStringArray(text.split(/[\n,\uFF0C\u3001]/))
+  return cleanAiStringArray(text.split(/[\n,，、]/))
 }
 
 function toGeneratedNodes(value: unknown): GeneratedMapNode[] {
@@ -117,7 +118,7 @@ function getLayerPlans(input: MapBatchGenerateOptions, rulesRaw: ParsedWorldRule
       label: level.label,
       count: getLayerCount(input, level.depth, level.suggestedCount),
       parentLabel: level.depth > 1
-        ? getBlueprintLevelByDepth(rulesRaw, level.depth - 1)?.label || `\u7b2c${level.depth - 1}\u5c42`
+        ? getBlueprintLevelByDepth(rulesRaw, level.depth - 1)?.label || `第${level.depth - 1}层`
         : '',
     }))
 }
@@ -125,9 +126,9 @@ function getLayerPlans(input: MapBatchGenerateOptions, rulesRaw: ParsedWorldRule
 function buildMapStructureSummary(plans: LayerPlan[]): string {
   return plans
     .map((plan) => plan.depth === 1
-      ? `${plan.label}\uff1a\u603b\u6570 ${plan.count} \u4e2a`
-      : `${plan.label}\uff1a\u6bcf\u4e2a${plan.parentLabel}\u4e0b ${plan.count} \u4e2a`)
-    .join('\uff1b')
+      ? `${plan.label}：总数 ${plan.count} 个`
+      : `${plan.label}：每个${plan.parentLabel}下 ${plan.count} 个`)
+    .join('；')
 }
 
 function clampBatchSize(value: number | undefined): number {
@@ -187,7 +188,7 @@ function createNodesAtDepth(
   rulesRaw: ParsedWorldRules,
 ): number {
   const defaultNodeType = getBlueprintLevelByDepth(rulesRaw, depth)?.nodeTypes[0]
-    || (depth === 1 ? '\u533a\u57df' : '\u5730\u70b9')
+    || (depth === 1 ? '区域' : '地点')
   let createdCount = 0
 
   for (const rawNode of nodes) {
@@ -290,6 +291,12 @@ function buildRootBatchPrompt(params: {
     '2. 名称必须贴合题材和世界背景，且不要与已有根节点重名。',
     '3. description、atmosphere、plot_relevance 都要具体，能直接服务后续剧情和挂点。',
     '4. children 必须返回空数组。',
+    '【语言要求】',
+    buildHumanLanguageRules([
+      'plot_relevance 只写这个地点会承接什么事件、冲突或用途，不要写空泛大词。',
+      '不要把地点、势力、人物和无关概念强行拼接，例如卡路里、感染概率、金融指标之类。',
+      'description 和 atmosphere 优先写读者能立刻感知到的空间特征，不要写假深刻文案。',
+    ]),
     '只输出 JSON 数组：[{"name":"","node_type":"","structure_role":"","description":"","atmosphere":"","plot_relevance":"","tags":["标签1"],"affiliated_factions":["势力1"],"danger_level":"","children":[]}]',
   ].filter(Boolean).join('\n')
 }
@@ -334,6 +341,12 @@ function buildChildBatchPrompt(params: {
     '3. 名称不要与该父节点已有直属子节点重名。',
     '4. children 必须返回空数组。',
     '5. plot_relevance 要写具体事件、用途或冲突，不写空话。',
+    '【语言要求】',
+    buildHumanLanguageRules([
+      '只围绕这个父节点的空间功能和剧情作用来写，不要跳出当前层级发明无关设定。',
+      '不要把没有直接关系的概念硬拼进一句话，例如卡路里、感染概率、金融指标之类。',
+      'description、atmosphere、plot_relevance 都要写成自然中文短句，不要写口号或百科腔。',
+    ]),
     '只输出 JSON 数组：[{"name":"","node_type":"","structure_role":"","description":"","atmosphere":"","plot_relevance":"","tags":["标签1"],"affiliated_factions":["势力1"],"danger_level":"","children":[]}]',
   ].filter(Boolean).join('\n')
 }
@@ -413,15 +426,15 @@ export async function batchGenerateMap(
 ): Promise<MapBatchGenerationResult> {
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
-  if (!novel) throw new Error('\u5c0f\u8bf4\u4e0d\u5b58\u5728')
+  if (!novel) throw new Error('小说不存在')
 
   const profile = await buildStoryProfile(novelId)
   const rules = parseWorldRulesJson(novel.worldRulesJson, profile.genre)
   const layerPlans = getLayerPlans(structure, rules)
   const structureSummary = buildMapStructureSummary(layerPlans)
-  const factionSummary = getFactionNameOptions(rules).join('\u3001')
+  const factionSummary = getFactionNameOptions(rules).join('、')
   const mapSummary = buildMapBlueprintSummary(rules)
-  const writingConstraints = rules.writingConstraints.extraRules.join('\uff1b')
+  const writingConstraints = rules.writingConstraints.extraRules.join('；')
   const parentBatchSize = clampBatchSize(structure.parentBatchSize)
   const rows = listMapRows(novelId)
   const nextBatch = findNextMapBatch(rows, layerPlans, parentBatchSize)
@@ -435,7 +448,7 @@ export async function batchGenerateMap(
       pendingParentCount: 0,
       processedParentNames: [],
       completed: true,
-      message: '\u5730\u56fe\u84dd\u56fe\u5df2\u8865\u9f50\uff0c\u5f53\u524d\u6ca1\u6709\u9700\u8981\u7ee7\u7eed\u751f\u6210\u7684\u6279\u6b21\u3002',
+      message: '地图蓝图已补齐，当前没有需要继续生成的批次。',
       nextDepth: null,
     }
   }
@@ -446,7 +459,7 @@ export async function batchGenerateMap(
   try {
     if (nextBatch.stage === 'root') {
       const rootPlan = layerPlans[0]
-      if (!rootPlan) throw new Error('\u7f3a\u5c11\u6839\u5c42\u84dd\u56fe')
+      if (!rootPlan) throw new Error('缺少根层蓝图')
 
       const existingRootNames = rows.filter((row) => row.level === 1).map((row) => row.name).filter(Boolean)
       const batchCount = Math.min(parentBatchSize, nextBatch.rootMissingCount || rootPlan.count)
@@ -472,14 +485,14 @@ export async function batchGenerateMap(
       })
 
       const nodes = parseGeneratedNodeBatch(result)
-      ensureExactNodeCount(nodes, batchCount, '\u6839\u5c42')
+      ensureExactNodeCount(nodes, batchCount, '根层')
       generatedNodeCount += createNodesAtDepth(novelId, nodes, 1, undefined, rules)
       processedParentNames.push(...nodes.map((node) => asText(node.name)).filter(Boolean))
     } else {
       const targetDepth = nextBatch.targetDepth
       const targetPlan = targetDepth ? getBlueprintLevelByDepth(rules, targetDepth) : undefined
       if (!targetDepth || !targetPlan || !nextBatch.parents || nextBatch.parents.length === 0) {
-        throw new Error('\u65e0\u6cd5\u786e\u5b9a\u5f53\u524d\u5730\u56fe\u6279\u6b21')
+        throw new Error('无法确定当前地图批次')
       }
 
       for (const plan of nextBatch.parents) {
@@ -515,14 +528,14 @@ export async function batchGenerateMap(
         })
 
         const nodes = parseGeneratedNodeBatch(result)
-        ensureExactNodeCount(nodes, missingCount, `${currentParent.name}\u4e0b\u7684${targetPlan.label}`)
+        ensureExactNodeCount(nodes, missingCount, `${currentParent.name}下的${targetPlan.label}`)
         generatedNodeCount += createNodesAtDepth(novelId, nodes, targetDepth, currentParent, rules)
         processedParentNames.push(currentParent.name)
       }
     }
   } catch (error) {
-    console.error('\u5730\u56fe\u5206\u6279\u751f\u6210\u89e3\u6790\u5931\u8d25:', error)
-    throw new Error(error instanceof Error ? error.message : '\u5730\u56fe\u751f\u6210\u7ed3\u679c\u89e3\u6790\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5')
+    console.error('地图分批生成解析失败:', error)
+    throw new Error(error instanceof Error ? error.message : '地图生成结果解析失败，请重试')
   }
 
   const refreshedRows = listMapRows(novelId)
@@ -538,8 +551,8 @@ export async function batchGenerateMap(
       processedParentNames,
       completed: nextState.stage === 'completed',
       message: nextState.stage === 'completed'
-        ? `\u6839\u5c42\u5df2\u751f\u6210\u5b8c\u6210\uff0c\u5730\u56fe\u84dd\u56fe\u4e5f\u5df2\u5168\u90e8\u8865\u9f50\u3002\u672c\u6279\u65b0\u589e ${generatedNodeCount} \u4e2a\u8282\u70b9\u3002`
-        : `\u6839\u5c42\u672c\u6279\u65b0\u589e ${generatedNodeCount} \u4e2a\u8282\u70b9\uff0c\u4ecd\u53ef\u7ee7\u7eed\u751f\u6210\u540e\u7eed\u5c42\u7ea7\u3002`,
+        ? `根层已生成完成，地图蓝图也已全部补齐。本批新增 ${generatedNodeCount} 个节点。`
+        : `根层本批新增 ${generatedNodeCount} 个节点，仍可继续生成后续层级。`,
       nextDepth: nextState.stage === 'children' ? nextState.targetDepth : nextState.targetDepth,
     }
   }
@@ -557,8 +570,8 @@ export async function batchGenerateMap(
     processedParentNames,
     completed: nextState.stage === 'completed',
     message: nextState.stage === 'completed'
-      ? `\u5df2\u8865\u9f50\u300c${processedParentNames.join('\u3001')} \u300d\u7684\u76f4\u5c5e\u5b50\u8282\u70b9\uff0c\u5730\u56fe\u84dd\u56fe\u5df2\u5168\u90e8\u5b8c\u6210\u3002`
-      : `\u5df2\u8865\u9f50\u300c${processedParentNames.join('\u3001')} \u300d\u7684\u76f4\u5c5e\u5b50\u8282\u70b9\uff0c\u672c\u6279\u65b0\u589e ${generatedNodeCount} \u4e2a\u8282\u70b9\u3002`,
+      ? `已补齐「${processedParentNames.join('、')} 」的直属子节点，地图蓝图已全部完成。`
+      : `已补齐「${processedParentNames.join('、')} 」的直属子节点，本批新增 ${generatedNodeCount} 个节点。`,
     nextDepth: nextState.targetDepth,
   }
 }

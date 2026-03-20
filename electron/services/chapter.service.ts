@@ -62,7 +62,7 @@ interface ChapterGenerationProgressEvent {
 }
 
 function countChineseWords(text: string): number {
-  const chinese = (text.match(/[\u4e00-\u9fa5]/g) || []).length
+  const chinese = (text.match(/[一-龥]/g) || []).length
   const english = (text.match(/\b[a-zA-Z]+\b/g) || []).length
   const numbers = (text.match(/\d+/g) || []).length
   return chinese + english + numbers

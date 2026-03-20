@@ -7,6 +7,29 @@ import {
   type PromptCatalogEntry,
 } from '../../shared/prompt-library'
 
+function normalizePromptText(text: string): string {
+  return text
+    .replace(/\\u([0-9a-fA-F]{4})/g, (_, code: string) => String.fromCharCode(Number.parseInt(code, 16)))
+    .replace(/\uFEFF/g, '')
+    .replace(/\r\n/g, '\n')
+}
+
+function looksLikePromptSource(text: string): boolean {
+  return /renderPrompt\s*\(|sectionLines?\s*\(|PROMPT_CATALOG|=>\s*renderPrompt/.test(text)
+}
+
+function sanitizePromptText(text: string, fallback?: string): string {
+  const normalized = normalizePromptText(text || '')
+  if (!normalized) return normalizePromptText(fallback || '')
+
+  if (fallback && looksLikePromptSource(normalized)) {
+    const fallbackText = normalizePromptText(fallback)
+    if (!looksLikePromptSource(fallbackText)) return fallbackText
+  }
+
+  return normalized
+}
+
 export default function PromptManager() {
   const [activeCategory, setActiveCategory] = useState('全部')
   const [searchText, setSearchText] = useState('')
@@ -15,7 +38,12 @@ export default function PromptManager() {
   const [editModalOpen, setEditModalOpen] = useState(false)
   const [customOverrides, setCustomOverrides] = useState<Record<string, string>>(() => {
     try {
-      return JSON.parse(localStorage.getItem('novelforge-prompt-overrides') || '{}')
+      const parsed = JSON.parse(localStorage.getItem('novelforge-prompt-overrides') || '{}') as Record<string, unknown>
+      return Object.fromEntries(
+        Object.entries(parsed)
+          .filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+          .map(([key, value]) => [key, normalizePromptText(value)]),
+      )
     } catch {
       return {}
     }
@@ -30,12 +58,12 @@ export default function PromptManager() {
   }, [activeCategory, searchText])
 
   const handleCopy = (text: string) => {
-    navigator.clipboard.writeText(text).then(() => message.success('已复制到剪贴板'))
+    navigator.clipboard.writeText(sanitizePromptText(text)).then(() => message.success('已复制到剪贴板'))
   }
 
   const handleEditSave = () => {
     if (!selectedPrompt) return
-    const nextOverrides = { ...customOverrides, [selectedPrompt.key]: editingTemplate }
+    const nextOverrides = { ...customOverrides, [selectedPrompt.key]: normalizePromptText(editingTemplate) }
     setCustomOverrides(nextOverrides)
     localStorage.setItem('novelforge-prompt-overrides', JSON.stringify(nextOverrides))
     setEditModalOpen(false)
@@ -91,7 +119,7 @@ export default function PromptManager() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 16 }}>
         {filteredPrompts.map((prompt) => {
           const hasOverride = Boolean(customOverrides[prompt.key])
-          const currentTemplate = customOverrides[prompt.key] || prompt.template
+          const currentTemplate = sanitizePromptText(customOverrides[prompt.key] || prompt.template, prompt.template)
 
           return (
             <div
