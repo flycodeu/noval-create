@@ -27,19 +27,29 @@ const STATUS_LABELS: Record<string, { label: string; color: string; icon: React.
 const TYPE_LABELS: Record<string, string> = {
   init: '初始化',
   character_gen: 'AI 生成人物',
+  chapter_scene_plan: 'AI 场景规划',
+  chapter_draft: 'AI 草稿生成',
   chapter_outline: 'AI 生成细纲',
+  chapter_review: 'AI 审校建议',
   chapter_write: 'AI 生成正文',
   summary: '更新章节记忆',
+  continuity: '连续性检查',
   review: 'AI 审校修订',
   ai_check: 'AI 检测',
   expand_background: 'AI 扩展背景',
   generate_relations: 'AI 生成人物关系',
   generate_map: 'AI 生成地图',
   generate_arcs: 'AI 生成故事弧',
+  generate_items: 'AI 生成物品',
   generate_timeline: 'AI 生成时间轴',
   subplot_framework: 'AI 生成支线',
   core_settings_generate: 'AI 生成核心设定',
   world_rules_generate: 'AI 生成世界规则',
+}
+
+const RUNNER_LABELS: Record<string, string> = {
+  chat: '单次执行',
+  stream: '流式执行',
 }
 
 function formatTaskPayload(raw?: string): string {
@@ -54,6 +64,20 @@ function formatTaskPayload(raw?: string): string {
 
 function getTaskTypeLabel(type: string): string {
   return TYPE_LABELS[type] || type
+}
+
+function getTaskRunnerLabel(task: Task): string {
+  return RUNNER_LABELS[task.runnerType || 'chat'] || (task.runnerType || 'chat')
+}
+
+function getTaskRetryabilityLabel(task: Task): string {
+  return isTaskRetryable(task) ? '支持安全重试' : '需回功能页重发'
+}
+
+function isTaskRetryable(task: Task): boolean {
+  if (task.type === 'chapter_write' && task.relatedEntityType === 'chapter' && task.relatedEntityId) return true
+  if (task.type === 'subplot_framework') return true
+  return Boolean(task.retryable)
 }
 
 function getTaskSummary(task: Task, stream?: { content: string }): string {
@@ -214,6 +238,8 @@ export default function TaskCenter() {
                           <Tag style={{ background: 'transparent', border: `1px solid ${status.color}`, color: status.color }}>
                             {status.label}
                           </Tag>
+                          <Tag>{getTaskRunnerLabel(task)}</Tag>
+                          {isTaskRetryable(task) ? <Tag color="processing">可重试</Tag> : null}
                           {task.durationMs ? <Tag>{`${(task.durationMs / 1000).toFixed(1)}s`}</Tag> : null}
                           {task.tokensUsed ? <Tag>{`${task.tokensUsed} 令牌`}</Tag> : null}
                         </div>
@@ -237,7 +263,7 @@ export default function TaskCenter() {
                   {'取消'}
                 </Button>
               ) : null}
-              {(selectedTask.status === 'failed' || selectedTask.status === 'cancelled') ? (
+              {(selectedTask.status === 'failed' || selectedTask.status === 'cancelled') && isTaskRetryable(selectedTask) ? (
                 <Button icon={<ReloadOutlined />} onClick={() => handleRetry(selectedTask.id)}>
                   {'重试'}
                 </Button>
@@ -272,8 +298,28 @@ export default function TaskCenter() {
                 />
               ) : null}
 
+              {(selectedTask.status === 'failed' || selectedTask.status === 'cancelled') && !isTaskRetryable(selectedTask) ? (
+                <Alert
+                  type="info"
+                  showIcon
+                  message="当前任务不支持安全重试"
+                  description="这类任务会直接改动数据库状态，不能只靠重放原始 prompt 重新执行。请回到对应功能页重新发起。"
+                />
+              ) : null}
+
+              {(selectedTask.status === 'failed' || selectedTask.status === 'cancelled') && isTaskRetryable(selectedTask) ? (
+                <Alert
+                  type="success"
+                  showIcon
+                  message="当前任务支持安全重试"
+                  description="系统已经保留本次请求上下文，可以直接重放同一组消息，不需要回到原页面重新填写。"
+                />
+              ) : null}
+
               <div className="novel-note-list">
                 <div className="novel-note-list__item">{`任务 ID：${selectedTask.id}`}</div>
+                <div className="novel-note-list__item">{`执行方式：${getTaskRunnerLabel(selectedTask)}`}</div>
+                <div className="novel-note-list__item">{`重试能力：${getTaskRetryabilityLabel(selectedTask)}`}</div>
                 <div className="novel-note-list__item">{`模型配置：${selectedTask.modelConfigId || '-'}`}</div>
                 <div className="novel-note-list__item">{`耗时：${selectedTask.durationMs ? `${(selectedTask.durationMs / 1000).toFixed(1)}s` : '-'}`}</div>
                 <div className="novel-note-list__item">{`令牌消耗：${selectedTask.tokensUsed || '-'}`}</div>

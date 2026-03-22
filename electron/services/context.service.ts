@@ -1,8 +1,17 @@
-import { asc, eq } from 'drizzle-orm'
+﻿import { asc, eq } from 'drizzle-orm'
 import { getDb } from '../database/db'
 import { chapters, characters, genres, novels, storyArcs, storyItems, templates, timelineEvents, worldMap } from '../database/schema'
 import { buildWorldRulesSummary, parseWorldRulesJson } from '../../src/shared/genre-system'
+import {
+  buildPremiseSummary,
+  buildStoryDesignSummary,
+  buildWritingRulesSummary,
+  parseStorySettingsDocument,
+  type StoryPremiseSettings,
+  type StoryWritingRulesSettings,
+} from '../../src/shared/story-settings'
 import { buildStoryMemoryPromptSummary } from './story-memory.service'
+import { ensureStoryStructure } from './story-structure.service'
 
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 1.5)
@@ -12,6 +21,12 @@ function truncateToTokens(text: string, maxTokens: number): string {
   const maxChars = Math.max(Math.floor(maxTokens * 1.5), 0)
   if (text.length <= maxChars) return text
   return `${text.slice(0, maxChars)}...`
+}
+
+function resolveRecentContextWindow(targetWords: number, chapterCount: number): number {
+  if (targetWords >= 800000 || chapterCount >= 180) return 8
+  if (targetWords >= 350000 || chapterCount >= 80) return 6
+  return 5
 }
 
 interface ContextPart {
@@ -29,6 +44,8 @@ export interface StorySubPlot {
 }
 
 export interface StorySettings {
+  premise: StoryPremiseSettings
+  writingRules: StoryWritingRulesSettings
   storyGoal: string
   coreConflict: string
   mainPlot: string
@@ -45,6 +62,9 @@ export interface StoryProfile {
   novelTitle: string
   genre: string
   background: string
+  premiseSummary: string
+  storyDesignSummary: string
+  writingRulesSummary: string
   storyGoal: string
   coreConflict: string
   mainPlot: string
@@ -227,18 +247,20 @@ function parseSubPlots(value: unknown): StorySubPlot[] {
 }
 
 export function parseStorySettings(raw?: string | null): StorySettings {
-  const settings = parseJsonRecord(raw)
+  const settings = parseStorySettingsDocument(raw)
 
   return {
-    storyGoal: asText(settings.story_goal),
-    coreConflict: asText(settings.core_conflict),
-    mainPlot: asText(settings.main_plot),
-    ending: asText(settings.ending),
-    subPlotsText: asText(settings.sub_plots),
-    subPlotsList: parseSubPlots(settings.sub_plots_list),
-    rhythmSetup: asNumber(settings.rhythm_setup),
-    rhythmConflict: asNumber(settings.rhythm_conflict),
-    rhythmEnding: asNumber(settings.rhythm_ending),
+    premise: settings.premise,
+    writingRules: settings.writingRules,
+    storyGoal: settings.storyDesign.storyGoal,
+    coreConflict: settings.storyDesign.coreConflict,
+    mainPlot: settings.storyDesign.mainPlot,
+    ending: settings.storyDesign.ending,
+    subPlotsText: settings.storyDesign.subPlotsText,
+    subPlotsList: parseSubPlots(settings.storyDesign.subPlotsList),
+    rhythmSetup: settings.storyDesign.rhythmSetup,
+    rhythmConflict: settings.storyDesign.rhythmConflict,
+    rhythmEnding: settings.storyDesign.rhythmEnding,
   }
 }
 
@@ -268,7 +290,7 @@ function formatRhythmSummary(settings: StorySettings): string {
     settings.rhythmEnding ? `后期收束 ${settings.rhythmEnding}%` : '',
   ].filter(Boolean)
 
-  return parts.length > 0 ? parts.join('，') : '（未配置）'
+  return parts.length > 0 ? parts.join('；') : '（未配置）'
 }
 
 function formatWorldRulesSummary(raw?: string | null): string {
@@ -286,7 +308,7 @@ function formatStyleTemplateSummary(contentJson?: string | null): string {
     ['emotion_style', '情感表达'],
     ['dialogue_style', '对话风格'],
     ['description_style', '描写风格'],
-    ['example_tone', '整体调性'],
+    ['example_tone', '整体语气'],
   ]
 
   for (const [key, label] of fields) {
@@ -297,6 +319,47 @@ function formatStyleTemplateSummary(contentJson?: string | null): string {
   const forbidden = toStringArray(content.forbidden)
   if (forbidden.length > 0) {
     lines.push(`避免：${forbidden.slice(0, 5).join('、')}`)
+  }
+
+  return lines.join('\n')
+}
+
+function formatWorldTemplateSummary(template?: typeof templates.$inferSelect | null): string {
+  if (!template) return ''
+
+  const content = parseJsonRecord(template.contentJson)
+  const lines: string[] = []
+
+  if (template.name?.trim()) {
+    lines.push(`模板名称：${template.name.trim()}`)
+  }
+  if (template.description?.trim()) {
+    lines.push(`模板说明：${template.description.trim()}`)
+  }
+
+  for (const [key, value] of Object.entries(content)) {
+    if (typeof value === 'string' && value.trim()) {
+      lines.push(`${key}：${value.trim()}`)
+      continue
+    }
+
+    if (Array.isArray(value) && value.length > 0) {
+      const items = value.map(asLooseText).filter(Boolean).slice(0, 6)
+      if (items.length > 0) {
+        lines.push(`${key}：${items.join('、')}`)
+      }
+      continue
+    }
+
+    if (value && typeof value === 'object') {
+      const nested = Object.entries(value as Record<string, unknown>)
+        .map(([nestedKey, nestedValue]) => `${nestedKey}=${asLooseText(nestedValue)}`)
+        .filter((item) => !item.endsWith('='))
+        .slice(0, 6)
+      if (nested.length > 0) {
+        lines.push(`${key}：${nested.join('；')}`)
+      }
+    }
   }
 
   return lines.join('\n')
@@ -336,12 +399,10 @@ function buildProtagonistPolicy(allCharacters: Array<typeof characters.$inferSel
 
 function buildStoryCoreText(profile: StoryProfile): string {
   return [
-    `故事核心目标：${profile.storyGoal || '（未填写）'}`,
-    `核心冲突：${profile.coreConflict || '（未填写）'}`,
-    `主线剧情：${profile.mainPlot || '（未填写）'}`,
-    `支线剧情：${profile.subPlots || '（暂无支线）'}`,
-    `结局方向：${profile.ending || '（未填写）'}`,
-  ].join('\n')
+    profile.premiseSummary,
+    profile.storyDesignSummary,
+    profile.writingRulesSummary,
+  ].filter(Boolean).join('\n\n')
 }
 
 function formatArcContext(arc?: typeof storyArcs.$inferSelect | null): string {
@@ -368,7 +429,9 @@ function buildCharacterStates(
 ): string {
   const protagonist = getCanonicalProtagonist(allCharacters)
   const staticLines = getImportantCharacters(allCharacters).map((character) => {
-    const traits = character.personalityTraitsJson ? toStringArray(parseJsonRecord(`{"items":${character.personalityTraitsJson}}`).items).slice(0, 2).join('、') : ''
+    const traits = character.personalityTraitsJson
+      ? toStringArray(parseJsonRecord(`{"items":${character.personalityTraitsJson}}`).items).slice(0, 2).join('、')
+      : ''
     const summary = [
       character.entityType ? `实体=${character.entityType}` : '',
       character.species ? `种族=${character.species}` : '',
@@ -394,7 +457,7 @@ function buildCharacterStates(
 
 function extractChapterGoal(outline?: string | null): string {
   if (!outline) return ''
-  const match = outline.match(/(?:^|\n)(?:目标|本章目标)[:：]\s*(.+)/)
+  const match = outline.match(/(?:^|\n)(?:目标|本章目标)[:：]?\s*(.+)/)
   if (match?.[1]) return match[1].trim()
 
   const firstLine = outline.split('\n').map((line) => line.trim()).find(Boolean)
@@ -461,7 +524,7 @@ function buildTimelineEventLine(
   const chapterEnd = event.chapterEndId ? chapterNumMap.get(event.chapterEndId) : undefined
 
   const parts = [
-    `${event.timeLabel || '时间待定'}｜${event.eventTitle}`,
+    `${event.timeLabel || '时间待定'} -> ${event.eventTitle}`,
     event.eventType ? `类型=${event.eventType}` : '',
     event.arcId ? `故事弧=${arcNameMap.get(event.arcId) || ''}` : '',
     chapterStart ? `起始章节=第${chapterStart}章` : '',
@@ -472,7 +535,7 @@ function buildTimelineEventLine(
     result ? `结果=${result}` : '',
   ].filter(Boolean)
 
-  return parts.join('｜')
+  return parts.join(' | ')
 }
 
 function buildTimelineContext(
@@ -555,7 +618,7 @@ function buildItemSummary(novelId: number): string {
         item.locationMapId ? `地点#${item.locationMapId}` : '',
         item.plotFunction || item.summary || '',
       ].filter(Boolean)
-      return `${item.itemName}${parts.length > 0 ? `：${parts.join('｜')}` : ''}`
+      return `${item.itemName}${parts.length > 0 ? `（${parts.join(' | ')}）` : ''}`
     })
     .join('\n')
 }
@@ -589,6 +652,7 @@ function toChapterWithContinuity(row: typeof chapters.$inferSelect): ChapterWith
 
 export async function buildStoryProfile(novelId: number): Promise<StoryProfile> {
   const db = getDb()
+  ensureStoryStructure(novelId)
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
   if (!novel) throw new Error('小说不存在')
 
@@ -597,6 +661,9 @@ export async function buildStoryProfile(novelId: number): Promise<StoryProfile> 
     : null
   const styleTemplate = novel.styleTemplateId
     ? db.select().from(templates).where(eq(templates.id, novel.styleTemplateId)).all()[0]
+    : null
+  const worldTemplate = novel.worldTemplateId
+    ? db.select().from(templates).where(eq(templates.id, novel.worldTemplateId)).all()[0]
     : null
   const allCharacters = db.select().from(characters).where(eq(characters.novelId, novelId)).all()
 
@@ -608,13 +675,29 @@ export async function buildStoryProfile(novelId: number): Promise<StoryProfile> 
     novelTitle: novel.title,
     genre: genre?.name || '未知题材',
     background: buildBackgroundText(novel),
+    premiseSummary: buildPremiseSummary(settings.premise),
+    storyDesignSummary: buildStoryDesignSummary({
+      storyGoal: settings.storyGoal,
+      coreConflict: settings.coreConflict,
+      mainPlot: settings.mainPlot,
+      subPlotsText: settings.subPlotsText,
+      subPlotsList: settings.subPlotsList,
+      rhythmSetup: settings.rhythmSetup,
+      rhythmConflict: settings.rhythmConflict,
+      rhythmEnding: settings.rhythmEnding,
+      ending: settings.ending,
+    }),
+    writingRulesSummary: buildWritingRulesSummary(settings.writingRules),
     storyGoal: settings.storyGoal,
     coreConflict: settings.coreConflict,
     mainPlot: settings.mainPlot,
     subPlots: formatSubPlots(settings),
     ending: settings.ending,
     rhythmSummary: formatRhythmSummary(settings),
-    worldRulesSummary: formatWorldRulesSummary(novel.worldRulesJson),
+    worldRulesSummary: [
+      formatWorldRulesSummary(novel.worldRulesJson),
+      formatWorldTemplateSummary(worldTemplate),
+    ].filter(Boolean).join('\n\n'),
     styleTemplateSummary: formatStyleTemplateSummary(styleTemplate?.contentJson),
     hasProtagonist: protagonistPolicy.hasProtagonist,
     protagonistName: protagonistPolicy.protagonistName,
@@ -626,7 +709,9 @@ export async function buildStoryProfile(novelId: number): Promise<StoryProfile> 
 export async function buildOutlineGenerationContext(arcId: number): Promise<OutlineGenerationContext> {
   const db = getDb()
   const arc = db.select().from(storyArcs).where(eq(storyArcs.id, arcId)).all()[0]
+  if (arc) ensureStoryStructure(arc.novelId)
   if (!arc) throw new Error('故事弧不存在')
+  const novel = db.select().from(novels).where(eq(novels.id, arc.novelId)).all()[0]
 
   const profile = await buildStoryProfile(arc.novelId)
   const allCharacters = db.select().from(characters).where(eq(characters.novelId, arc.novelId)).all()
@@ -636,7 +721,8 @@ export async function buildOutlineGenerationContext(arcId: number): Promise<Outl
     .all()
     .filter((chapter) => chapter.chapterNum < (arc.chapterStart || 1))
 
-  const recentChapters = previousRows.slice(-5).map(toChapterWithContinuity)
+  const recentWindow = resolveRecentContextWindow(novel?.targetWords || 0, previousRows.length)
+  const recentChapters = previousRows.slice(-recentWindow).map(toChapterWithContinuity)
   const previousSummary = recentChapters
     .filter((chapter) => chapter.summary)
     .map((chapter) => `第${chapter.chapterNum}章：${chapter.summary}`)
@@ -661,6 +747,7 @@ export async function buildChapterContext(
   totalBudget: number = 6000,
 ): Promise<ChapterContext> {
   const db = getDb()
+  ensureStoryStructure(novelId)
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
   if (!novel) throw new Error('小说不存在')
 
@@ -673,7 +760,8 @@ export async function buildChapterContext(
   const arcs = db.select().from(storyArcs).where(eq(storyArcs.novelId, novelId)).all()
   const currentArc = resolveArcForChapter(chapterNum, currentChapter?.arcId, arcs)
   const previousRows = chapterRows.filter((chapter) => chapter.chapterNum < chapterNum)
-  const recentChapters = previousRows.slice(-5).map(toChapterWithContinuity)
+  const recentWindow = resolveRecentContextWindow(novel.targetWords || 0, chapterRows.length)
+  const recentChapters = previousRows.slice(-recentWindow).map(toChapterWithContinuity)
   const continuityChapters = recentChapters.filter((chapter) => hasContinuityContent(chapter.continuityState))
   const allCharacters = db.select().from(characters).where(eq(characters.novelId, novelId)).all()
   const timelineContext = buildTimelineContext(
@@ -683,7 +771,7 @@ export async function buildChapterContext(
     chapterRows,
     allCharacters,
   )
-  const longTermMemory = buildStoryMemoryPromptSummary(novelId)
+  const longTermMemory = buildStoryMemoryPromptSummary(novelId, { chapterId: currentChapter?.id })
   const itemSummary = buildItemSummary(novelId)
 
   const previousSummaries = recentChapters
@@ -699,8 +787,15 @@ export async function buildChapterContext(
       ].filter(Boolean).join('\n')
     : ''
 
-  const reservedForOutput = 2000
-  const contextBudget = totalBudget - reservedForOutput
+  const budgetFloor = novel.targetWords >= 800000
+    ? 7200
+    : novel.targetWords >= 350000
+      ? 6600
+      : totalBudget
+  const effectiveBudget = Math.max(totalBudget, budgetFloor)
+  const reservedForOutput = novel.targetWords >= 800000 ? 2200 : 2000
+  const contextBudget = effectiveBudget - reservedForOutput
+  const longTermMemoryPriority = novel.targetWords >= 350000 || chapterRows.length >= 80 ? 1 : 2
 
   const parts: ContextPart[] = [
     { priority: 0, label: 'chapterGoal', content: extractChapterGoal(currentChapter?.outline) },
@@ -712,10 +807,10 @@ export async function buildChapterContext(
     { priority: 1, label: 'timelineOpenThreads', content: timelineContext.timelineOpenThreads },
     { priority: 1, label: 'worldRules', content: profile.worldRulesSummary },
     { priority: 1, label: 'itemSummary', content: itemSummary },
+    { priority: longTermMemoryPriority as 1 | 2, label: 'longTermMemory', content: longTermMemory },
     { priority: 2, label: 'characterStates', content: buildCharacterStates(allCharacters, recentChapters) },
     { priority: 2, label: 'continuitySummary', content: continuityChapters.map(formatContinuityEntry).join('\n') },
     { priority: 2, label: 'timelineSummary', content: timelineContext.timelineSummary },
-    { priority: 2, label: 'longTermMemory', content: longTermMemory },
     { priority: 2, label: 'styleTemplate', content: profile.styleTemplateSummary },
     { priority: 3, label: 'previousSummaries', content: previousSummaries },
   ]
@@ -740,3 +835,6 @@ export async function buildChapterContext(
     longTermMemory: allocated.longTermMemory || '',
   }
 }
+
+
+

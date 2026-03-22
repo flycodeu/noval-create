@@ -1,7 +1,8 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+﻿import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Button, Spin } from 'antd'
 import {
+  ApartmentOutlined,
   AppstoreOutlined,
   ArrowLeftOutlined,
   BarsOutlined,
@@ -20,18 +21,20 @@ import { useWorkspaceStore, type WorkspaceMode } from '../../stores/workspace.st
 import GuidePage from './Guide'
 import GuidedWorkspaceStep from './GuidedStep'
 import Overview from './Overview'
+import PremisePage from './Premise'
 import CoreSettings from './CoreSettings'
 import WorldRules from './WorldRules'
-import MapManager from './MapManager'
+import MapExplorer from './MapExplorer'
 import Characters from './Characters'
-import ItemsPage from './Items'
+import ItemsWorkspace from './ItemsWorkspace'
 import Outline from './Outline'
+import Structure from './Structure'
 import TimelinePage from './Timeline'
 import Writing from './Writing'
 import {
-  countMapNodes,
   EMPTY_WORKFLOW_STATS,
   getGuidedStepProgressMap,
+  loadWorkflowStats,
   getRecommendedGuidedWorkflowStep,
   getRecommendedWorkflowStep,
   isMapStructureReady,
@@ -47,11 +50,13 @@ type ProWorkspaceKey =
   | 'guide'
   | 'overview'
   | 'core-settings'
+  | 'story-design'
   | 'world-rules'
   | 'map'
   | 'characters'
   | 'items'
   | 'outline'
+  | 'structure'
   | 'timeline'
   | 'writing'
 
@@ -66,12 +71,12 @@ interface WorkspaceItem {
 
 const GUIDED_ITEMS: WorkspaceItem[] = [
   { key: 'basics', icon: <DashboardOutlined />, label: '基础信息', summary: '只填书名、简介和背景。' },
-  { key: 'story-core', icon: <SettingOutlined />, label: '核心设定', summary: '先定目标和冲突。' },
-  { key: 'story-plot', icon: <BarsOutlined />, label: '主线推进', summary: '再补主线和结局。' },
+  { key: 'story-core', icon: <SettingOutlined />, label: '基础设定', summary: '先定背景定位、主角起点和底层约束。' },
+  { key: 'story-plot', icon: <BarsOutlined />, label: '故事设计', summary: '资产齐后再设计主线、支线和结局。' },
   { key: 'world-foundation', icon: <GlobalOutlined />, label: '世界规则', summary: '先同步题材规则。' },
-  { key: 'map-structure', icon: <EnvironmentOutlined />, label: '地图结构', summary: '只做地点骨架。' },
+  { key: 'map-structure', icon: <EnvironmentOutlined />, label: '地图结构', summary: '先搭地点骨架。' },
   { key: 'character-roster', icon: <TeamOutlined />, label: '角色系统', summary: '先补主角和关键角色。' },
-  { key: 'items-equipment', icon: <AppstoreOutlined />, label: '物品装备', summary: '只补关键道具和装备。' },
+  { key: 'items-equipment', icon: <AppstoreOutlined />, label: '物品装备', summary: '先补关键道具和装备。' },
   { key: 'write-start', icon: <EditOutlined />, label: '开始写作', summary: '生成骨架后进入正文。' },
 ]
 
@@ -81,7 +86,7 @@ const PRO_GROUPS: Array<{ title: string; items: WorkspaceItem[] }> = [
     items: [
       { key: 'guide', icon: <DashboardOutlined />, label: '创作向导', summary: '查看当前缺口。' },
       { key: 'overview', icon: <AppstoreOutlined />, label: '基础总览', summary: '查看小说基础信息。' },
-      { key: 'core-settings', icon: <SettingOutlined />, label: '核心设定', summary: '编辑故事引擎与主线。' },
+      { key: 'core-settings', icon: <SettingOutlined />, label: '基础设定', summary: '维护 premise 与写作边界。' },
     ],
   },
   {
@@ -101,6 +106,7 @@ const PRO_GROUPS: Array<{ title: string; items: WorkspaceItem[] }> = [
   {
     title: '推进',
     items: [
+      { key: 'story-design', icon: <BarsOutlined />, label: '故事设计', summary: '在资产到位后设计主线、支线和结局。' },
       { key: 'outline', icon: <BarsOutlined />, label: '故事大纲', summary: '维护故事弧。' },
       { key: 'timeline', icon: <ClockCircleOutlined />, label: '时间轴', summary: '维护事件顺序。' },
       { key: 'writing', icon: <EditOutlined />, label: '正文写作', summary: '进入正文编辑。' },
@@ -108,10 +114,17 @@ const PRO_GROUPS: Array<{ title: string; items: WorkspaceItem[] }> = [
   },
 ]
 
+const STRUCTURE_ITEM: WorkspaceItem = {
+  key: 'structure',
+  icon: <ApartmentOutlined />,
+  label: '结构阶段',
+  summary: '拆分卷、部、章和场景结构。',
+}
+
 const GUIDED_TO_PRO_PAGE: Record<GuidedWorkflowStepKey, ProWorkspaceKey> = {
   basics: 'overview',
   'story-core': 'core-settings',
-  'story-plot': 'core-settings',
+  'story-plot': 'story-design',
   'world-foundation': 'world-rules',
   'map-structure': 'map',
   'character-roster': 'characters',
@@ -141,9 +154,9 @@ function getGuidedTargetForProPage(
     case 'overview':
       return 'basics'
     case 'core-settings':
-      if (!isStoryCoreReady(currentNovel)) return 'story-core'
-      if (!isStoryPlotReady(currentNovel)) return 'story-plot'
-      return recommendedKey
+      return 'story-core'
+    case 'story-design':
+      return 'story-plot'
     case 'world-rules':
       if (!isWorldFoundationReady(currentNovel)) return 'world-foundation'
       return isMapStructureReady(workflowStats) ? recommendedKey : 'map-structure'
@@ -154,6 +167,7 @@ function getGuidedTargetForProPage(
     case 'items':
       return 'items-equipment'
     case 'outline':
+    case 'structure':
     case 'timeline':
     case 'writing':
       return 'write-start'
@@ -170,7 +184,7 @@ export default function NovelRouter() {
   const [workflowStats, setWorkflowStats] = useState<WorkflowStats>(EMPTY_WORKFLOW_STATS)
 
   const novelId = Number.parseInt(id || '0', 10)
-  const proItems = useMemo(() => PRO_GROUPS.flatMap((group) => group.items), [])
+  const proItems = useMemo(() => [...PRO_GROUPS.flatMap((group) => group.items), STRUCTURE_ITEM], [])
   const currentItems = mode === 'guided' ? GUIDED_ITEMS : proItems
   const pathSegment = location.pathname.split('/').filter(Boolean).at(-1) as WorkspaceKey | undefined
 
@@ -219,26 +233,7 @@ export default function NovelRouter() {
     if (!novelId) return
 
     try {
-      const [baseStats, mapTree, characters, items, arcs, events] = await Promise.all([
-        window.electron.novel.stats(novelId),
-        window.electron.map.getTree(novelId),
-        window.electron.character.list(novelId),
-        window.electron.item.list(novelId),
-        window.electron.outline.getArcs(novelId),
-        window.electron.timeline.list(novelId),
-      ])
-
-      setWorkflowStats({
-        mapCount: countMapNodes(mapTree),
-        characterCount: characters.length,
-        itemCount: items.length,
-        outlineCount: arcs.length,
-        timelineCount: events.length,
-        chapterCount: baseStats.totalChapters,
-        completedChapterCount: baseStats.completedChapters,
-        totalWords: baseStats.totalWords,
-        hasProtagonist: characters.some((item) => item.roleType === 'protagonist'),
-      })
+      setWorkflowStats(await loadWorkflowStats(novelId))
     } catch (error) {
       console.error(error)
     }
@@ -332,26 +327,44 @@ export default function NovelRouter() {
               )
             })
           ) : (
-            PRO_GROUPS.map((group) => (
-              <section key={group.title} className="novel-sidebar__group">
-                <div className="novel-sidebar__group-title">{group.title}</div>
+            <>
+              {PRO_GROUPS.map((group) => (
+                <section key={group.title} className="novel-sidebar__group">
+                  <div className="novel-sidebar__group-title">{group.title}</div>
+                  <div className="novel-sidebar__group-list">
+                    {group.items.map((item) => (
+                      <button
+                        key={item.key}
+                        type="button"
+                        className={`novel-sidebar__nav-item ${currentPage === item.key ? 'novel-sidebar__nav-item--active' : ''}`}
+                        onClick={() => navigate(`/novels/${novelId}/${item.key}`)}
+                      >
+                        <span className="novel-sidebar__nav-icon">{item.icon}</span>
+                        <span className="novel-sidebar__nav-copy">
+                          <strong>{item.label}</strong>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              ))}
+
+              <section className="novel-sidebar__group">
+                <div className="novel-sidebar__group-title">长篇</div>
                 <div className="novel-sidebar__group-list">
-                  {group.items.map((item) => (
-                    <button
-                      key={item.key}
-                      type="button"
-                      className={`novel-sidebar__nav-item ${currentPage === item.key ? 'novel-sidebar__nav-item--active' : ''}`}
-                      onClick={() => navigate(`/novels/${novelId}/${item.key}`)}
-                    >
-                      <span className="novel-sidebar__nav-icon">{item.icon}</span>
-                      <span className="novel-sidebar__nav-copy">
-                        <strong>{item.label}</strong>
-                      </span>
-                    </button>
-                  ))}
+                  <button
+                    type="button"
+                    className={`novel-sidebar__nav-item ${currentPage === STRUCTURE_ITEM.key ? 'novel-sidebar__nav-item--active' : ''}`}
+                    onClick={() => navigate(`/novels/${novelId}/${STRUCTURE_ITEM.key}`)}
+                  >
+                    <span className="novel-sidebar__nav-icon">{STRUCTURE_ITEM.icon}</span>
+                    <span className="novel-sidebar__nav-copy">
+                      <strong>{STRUCTURE_ITEM.label}</strong>
+                    </span>
+                  </button>
                 </div>
               </section>
-            ))
+            </>
           )}
         </div>
       </aside>
@@ -413,12 +426,14 @@ export default function NovelRouter() {
 
               <Route path="guide" element={<GuidePage novelId={novelId} />} />
               <Route path="overview" element={<Overview novelId={novelId} />} />
-              <Route path="core-settings" element={<CoreSettings novelId={novelId} />} />
+              <Route path="core-settings" element={<PremisePage novelId={novelId} />} />
+              <Route path="story-design" element={<CoreSettings novelId={novelId} />} />
               <Route path="world-rules" element={<WorldRules novelId={novelId} />} />
-              <Route path="map" element={<MapManager novelId={novelId} />} />
+              <Route path="map" element={<MapExplorer novelId={novelId} />} />
               <Route path="characters" element={<Characters novelId={novelId} />} />
-              <Route path="items" element={<ItemsPage novelId={novelId} />} />
+              <Route path="items" element={<ItemsWorkspace novelId={novelId} />} />
               <Route path="outline" element={<Outline novelId={novelId} />} />
+              <Route path="structure" element={<Structure novelId={novelId} />} />
               <Route path="timeline" element={<TimelinePage novelId={novelId} />} />
               <Route path="writing" element={<Writing novelId={novelId} />} />
               <Route path="*" element={<Navigate replace to={`/novels/${novelId}/${recommendedKey}`} />} />

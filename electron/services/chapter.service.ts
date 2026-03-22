@@ -1,4 +1,4 @@
-import { WebContents } from 'electron'
+﻿import { WebContents } from 'electron'
 import { asc, eq } from 'drizzle-orm'
 import { getDb } from '../database/db'
 import { chapters, novels, storyArcs } from '../database/schema'
@@ -24,6 +24,17 @@ import {
   formatQualityGuardrailSummary,
   shouldForceRepair,
 } from '../../src/shared/content-guardrails'
+import {
+  markChapterContextCurrent,
+  markSubsequentChaptersStale,
+  runChapterPublishCheck,
+} from './context-impact.service'
+import { refreshStoryMemoryCheckpoints } from './story-memory.service'
+import {
+  ensureStoryStructure,
+  resolveDefaultStructure,
+  syncChapterToSegments,
+} from './story-structure.service'
 
 interface ChapterSummaryData {
   summary: string
@@ -73,10 +84,14 @@ interface ChapterGenerationProgressEvent {
 }
 
 function countChineseWords(text: string): number {
-  const chinese = (text.match(/[一-龥]/g) || []).length
+  const chinese = (text.match(/[\u4e00-\u9fff]/g) || []).length
   const english = (text.match(/\b[a-zA-Z]+\b/g) || []).length
   const numbers = (text.match(/\d+/g) || []).length
   return chinese + english + numbers
+}
+
+function getDefaultChapterTitle(chapterNum: number): string {
+  return `第${chapterNum}章`
 }
 
 function toStringArray(value: unknown): string[] {
@@ -106,7 +121,7 @@ function mergeSeverity(current: ReviewSeverity, incoming: ReviewSeverity): Revie
 
 function extractChapterGoal(outline?: string | null): string {
   if (!outline) return ''
-  const match = outline.match(/(?:^|\n)(?:目标|本章目标)[:：]\s*(.+)/)
+  const match = outline.match(/(?:^|\n)(?:目标|本章目标)[:：]?\s*(.+)/)
   if (match?.[1]) return match[1].trim()
 
   const firstLine = outline.split('\n').map((line) => line.trim()).find(Boolean)
@@ -136,12 +151,10 @@ function sendGenerationProgress(
 function buildStoryCore(profile: Awaited<ReturnType<typeof buildStoryProfile>>, fallback?: string): string {
   if (fallback?.trim()) return fallback
   return [
-    `故事核心目标：${profile.storyGoal || '（未填写）'}`,
-    `核心冲突：${profile.coreConflict || '（未填写）'}`,
-    `主线剧情：${profile.mainPlot || '（未填写）'}`,
-    `支线剧情：${profile.subPlots || '（暂无支线）'}`,
-    `结局方向：${profile.ending || '（未填写）'}`,
-  ].join('\n')
+    profile.premiseSummary,
+    profile.storyDesignSummary,
+    profile.writingRulesSummary,
+  ].filter(Boolean).join('\n\n')
 }
 
 function buildFallbackContinuityState(
@@ -149,7 +162,7 @@ function buildFallbackContinuityState(
   summaryData: ChapterSummaryData,
 ): ContinuityState {
   const chapterGoal = extractChapterGoal(chapter.outline)
-  const summary = summaryData.summary || chapter.title || `第${chapter.chapterNum}章完成当前章节推进`
+  const summary = summaryData.summary || chapter.title || `${getDefaultChapterTitle(chapter.chapterNum)}完成当前章节推进`
   const nextSeed = summaryData.nextChapterSeed
 
   return {
@@ -224,7 +237,7 @@ function buildFallbackScenePlan(chapter: typeof chapters.$inferSelect): ScenePla
 
   const seeds = outlineLines.length > 0
     ? outlineLines
-    : [extractChapterGoal(chapter.outline) || `完成第${chapter.chapterNum}章的核心推进`]
+    : [extractChapterGoal(chapter.outline) || `完成${getDefaultChapterTitle(chapter.chapterNum)}的核心推进`]
 
   return seeds.map((line, index) => ({
     scene_order: index + 1,
@@ -237,7 +250,7 @@ function buildFallbackScenePlan(chapter: typeof chapters.$inferSelect): ScenePla
     conflict: '',
     beat: line,
     must_cover: [line],
-    exit_hook: index === seeds.length - 1 ? '把本章推进到自然收束点。' : '把冲突继续推向下一段。',
+    exit_hook: index === seeds.length - 1 ? '把本章推进到自然收束点。' : '把当前冲突继续推向下一段。',
   }))
 }
 
@@ -303,12 +316,12 @@ function buildFallbackReviewNotes(consistencyNotes: string): ChapterReviewNotes 
     .slice(0, 3)
 
   return {
-    summary: '先按场景计划把事件链写顺，再统一修正承接、常识和语言。',
+    summary: '先按场景计划把事件链写顺，再统一修正承接、常识和语言问题。',
     critical_fixes: ['逐段核对场景计划里的 must_cover 是否全部落地。'],
     continuity_risks: consistencyLines,
     context_drift_risks: [],
     realism_risks: [],
-    language_risks: ['删除抽象口号、概念引号和不自然搭配。'],
+    language_risks: ['删除抽象口号、概念化抒情和不自然搭配。'],
     missing_payoffs: [],
     strengths: [],
     severity: 'medium',
@@ -343,11 +356,11 @@ function buildGuardrailCriticalFixes(findings: ReturnType<typeof collectQualityG
   const fixes: string[] = []
 
   if (findings.some((finding) => finding.code === 'object_category_mismatch')) {
-    fixes.push('把物体、系统、设施被写成人的句子全部改成准确说法，例如把“电网死亡”改成“电网瘫痪”或“电网中断”。')
+    fixes.push('把物体、系统或设施写成人的句子全部改成准确说法，例如把“电网死亡”改成“电网瘫痪”或“电网中断”。')
   }
 
   if (findings.some((finding) => finding.code === 'zero_cost_resolution')) {
-    fixes.push('把伤势、物资、秩序或战斗结果的代价写进场景里，不能一句话零成本解决。')
+    fixes.push('把伤亡、物资、秩序或战斗结果的代价写进场景里，不能一句话零成本解决。')
   }
 
   if (findings.some((finding) => finding.code === 'ai_slogan' || finding.code === 'template_emotion')) {
@@ -395,8 +408,8 @@ function enhanceReviewNotesWithGuardrails(
     rewrite_required: reviewNotes.rewrite_required || shouldForceRepair(findings),
     summary: reviewNotes.summary || '当前稿件仍有需要落地修正的常识或语言问题。',
     revision_brief: appendRevisionBrief(reviewNotes.revision_brief, [
-      realismFindings.length > 0 ? '把伤势、资源、秩序、移动成本和世界规则的代价写实写满。' : '',
-      languageFindings.length > 0 ? '删除口号句、模板情绪和对象类别错配，改回自然中文。' : '',
+      realismFindings.length > 0 ? '把伤害、资源、秩序、移动成本和世界规则的代价写实写满。' : '',
+      languageFindings.length > 0 ? '删掉口号句、模板情绪和对象类别错配，改回自然中文。' : '',
     ]),
   }
 
@@ -441,7 +454,7 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
         content: buildChapterRewritePrompt({
           novelTitle: input.novel.title,
           chapterNum: input.chapter.chapterNum,
-          chapterTitle: input.chapter.title || `第${input.chapter.chapterNum}章`,
+          chapterTitle: input.chapter.title || getDefaultChapterTitle(input.chapter.chapterNum),
           chapterGoal: input.context.chapterGoal,
           emotionTone: input.chapter.emotionTone || '平稳',
           targetWords: input.chapter.targetWords || 3000,
@@ -521,7 +534,7 @@ async function updateChapterContinuityState(
         content: buildContinuityStatePrompt({
           novelTitle: novel.title,
           chapterNum: chapter.chapterNum,
-          chapterTitle: chapter.title || `第${chapter.chapterNum}章`,
+          chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
           arcName: arc?.arcName || '',
           chapterGoal: extractChapterGoal(chapter.outline),
           summary: summaryData.summary,
@@ -603,8 +616,13 @@ async function refreshChapterMemory(chapterId: number): Promise<{
   summary: ChapterSummaryData
   continuity: ContinuityState
 }> {
+  const db = getDb()
+  const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
+  if (!chapter) throw new Error('Chapter not found')
   const summary = await updateChapterSummaryData(chapterId)
   const continuity = await updateChapterContinuityState(chapterId, summary)
+  refreshStoryMemoryCheckpoints(chapter.novelId)
+  markChapterContextCurrent(chapterId)
   return { summary, continuity }
 }
 
@@ -612,11 +630,16 @@ async function finalizeGeneratedChapterContent(chapterId: number, content: strin
   updateChapter(chapterId, {
     content,
     status: 'draft',
-  })
+  }, { skipStaleTracking: true })
 
   const { summary } = await refreshChapterMemory(chapterId)
   const chapter = getChapter(chapterId)
   if (chapter) {
+    markSubsequentChaptersStale(
+      chapter.novelId,
+      chapter.chapterNum,
+      `Chapter ${chapter.chapterNum} content changed`,
+    )
     syncChapterTimelineStatuses(chapter.novelId, chapter.chapterNum)
   }
 
@@ -631,11 +654,15 @@ async function finalizeGeneratedChapterContent(chapterId: number, content: strin
 
 export function listChapters(novelId: number) {
   const db = getDb()
+  ensureStoryStructure(novelId)
   return db.select().from(chapters).where(eq(chapters.novelId, novelId)).orderBy(asc(chapters.chapterNum)).all()
 }
 
 export function getChapter(id: number) {
   const db = getDb()
+  const chapter = db.select().from(chapters).where(eq(chapters.id, id)).all()[0] || null
+  if (!chapter) return null
+  ensureStoryStructure(chapter.novelId)
   return db.select().from(chapters).where(eq(chapters.id, id)).all()[0] || null
 }
 
@@ -646,10 +673,25 @@ export function createChapter(novelId: number, data: Partial<{
   targetWords: number
   emotionTone: string
   arcId: number
+  volumeId: number
+  partId: number
 }>) {
   const db = getDb()
+  const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
+  const defaults = resolveDefaultStructure(novelId)
   const chapterNum = data.chapterNum ?? (db.select().from(chapters).where(eq(chapters.novelId, novelId)).all().length + 1)
-  const result = db.insert(chapters).values({ novelId, ...data, chapterNum }).run()
+  const result = db.insert(chapters).values({
+    novelId,
+    ...data,
+    volumeId: data.volumeId ?? defaults.volumeId,
+    partId: data.partId ?? defaults.partId,
+    chapterNum,
+    compiledFromSegments: 0,
+    segmentCount: 0,
+    contextVersion: novel?.contextVersion || 1,
+    staleReasonJson: JSON.stringify([]),
+  }).run()
+  ensureStoryStructure(novelId)
   return Number(result.lastInsertRowid)
 }
 
@@ -669,8 +711,15 @@ export function updateChapter(id: number, data: Partial<{
   emotionTone: string
   chapterNum: number
   arcId: number | null
-}>) {
+  volumeId: number | null
+  partId: number | null
+  compiledFromSegments: number
+  segmentCount: number
+  contextVersion: number
+  staleReasonJson: string
+}>, options: { skipStaleTracking?: boolean } = {}) {
   const db = getDb()
+  const previous = db.select().from(chapters).where(eq(chapters.id, id)).all()[0]
 
   if (data.content !== undefined) {
     data.wordCount = countChineseWords(data.content)
@@ -690,11 +739,31 @@ export function updateChapter(id: number, data: Partial<{
       updatedAt: new Date().toISOString(),
     }).where(eq(novels.id, chapter.novelId)).run()
   }
+
+  if (data.content !== undefined && chapter) {
+    syncChapterToSegments(id, data.content, { createIfMissing: true })
+  }
+
+  if (!options.skipStaleTracking && previous && data.content !== undefined) {
+    markSubsequentChaptersStale(
+      previous.novelId,
+      previous.chapterNum,
+      `Chapter ${previous.chapterNum} content changed`,
+    )
+  }
 }
 
 export function deleteChapter(id: number) {
   const db = getDb()
+  const current = db.select().from(chapters).where(eq(chapters.id, id)).all()[0]
   db.delete(chapters).where(eq(chapters.id, id)).run()
+  if (current) {
+    markSubsequentChaptersStale(
+      current.novelId,
+      current.chapterNum - 1,
+      `Chapter order changed after chapter ${current.chapterNum}`,
+    )
+  }
 }
 
 export async function generateChapterContent(chapterId: number, sender?: WebContents): Promise<number> {
@@ -708,6 +777,10 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
   const profile = await buildStoryProfile(chapter.novelId)
   const context = await buildChapterContext(chapter.novelId, chapter.chapterNum, 7200)
   const consistencyNotes = buildConsistencyPromptSummary(buildNovelConsistencyReport(chapter.novelId))
+  const writingGuidance = [
+    context.styleTemplate ? `Writing style guide:\n${context.styleTemplate}` : '',
+    consistencyNotes,
+  ].filter(Boolean).join('\n\n')
   const previousStatus = chapter.status || 'outline'
   const fallbackScenePlan = buildFallbackScenePlan(chapter)
   const storyCore = buildStoryCore(profile, context.storyCore)
@@ -722,7 +795,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
     sendGenerationProgress(sender, {
       chapterId,
       stage: 'planning',
-      label: '场景计划',
+      label: '场景规划',
       detail: '先把本章拆成可执行的场景链。',
       completed: 1,
       total: 4,
@@ -741,7 +814,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
           content: buildScenePlanPrompt({
             novelTitle: novel.title,
             chapterNum: chapter.chapterNum,
-            chapterTitle: chapter.title || `第${chapter.chapterNum}章`,
+            chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
             chapterGoal: context.chapterGoal,
             plotPoints: chapter.outline || '',
             emotionTone: chapter.emotionTone || '平稳',
@@ -794,7 +867,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
         content: buildChapterDraftPrompt({
           novelTitle: novel.title,
           chapterNum: chapter.chapterNum,
-          chapterTitle: chapter.title || `第${chapter.chapterNum}章`,
+          chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
           chapterGoal: context.chapterGoal,
           emotionTone: chapter.emotionTone || '平稳',
           targetWords: chapter.targetWords || 3000,
@@ -811,7 +884,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
           timelineSummary: context.timelineSummary,
           timelineOpenThreads: context.timelineOpenThreads,
           longTermMemory: context.longTermMemory,
-          consistencyNotes,
+          consistencyNotes: writingGuidance,
           scenePlan: scenePlanText,
           draftContent: '',
           reviewNotes: '',
@@ -844,7 +917,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
           content: buildChapterReviewPrompt({
             novelTitle: novel.title,
             chapterNum: chapter.chapterNum,
-            chapterTitle: chapter.title || `第${chapter.chapterNum}章`,
+            chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
             chapterGoal: context.chapterGoal,
             storyCore,
             currentArc: context.currentArc,
@@ -887,7 +960,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
     const prompt = buildChapterRewritePrompt({
       novelTitle: novel.title,
       chapterNum: chapter.chapterNum,
-      chapterTitle: chapter.title || `第${chapter.chapterNum}章`,
+      chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
       chapterGoal: context.chapterGoal,
       emotionTone: chapter.emotionTone || '平稳',
       targetWords: chapter.targetWords || 3000,
@@ -904,7 +977,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
       timelineSummary: context.timelineSummary,
       timelineOpenThreads: context.timelineOpenThreads,
       longTermMemory: context.longTermMemory,
-      consistencyNotes,
+      consistencyNotes: writingGuidance,
       scenePlan: scenePlanText,
       draftContent,
       reviewNotes: formatReviewNotes(reviewNotes),
@@ -931,7 +1004,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
           storyCore,
           profile,
           scenePlanText,
-          consistencyNotes,
+          consistencyNotes: writingGuidance,
           reviewNotes,
           content: output,
         })
@@ -1003,3 +1076,6 @@ export async function aiCheckChapter(chapterId: number): Promise<unknown> {
     return { score: 0, issues: [], overall_feedback: result }
   }
 }
+
+export { runChapterPublishCheck }
+

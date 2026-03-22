@@ -1,0 +1,172 @@
+.novel-structure-page .novel-structure-volume-board {
+  display: grid;
+  gap: 18px;
+}
+
+.novel-structure-page .novel-structure-volume-card,
+.novel-structure-page .novel-structure-part-card,
+.novel-structure-page .novel-structure-editor-card,
+.novel-structure-page .novel-structure-checkpoint {
+  border: 1px solid rgba(122, 93, 52, 0.12);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.76);
+  box-shadow: 0 14px 28px rgba(71, 53, 28, 0.06);
+}
+
+.novel-structure-page .novel-structure-volume-card {
+  padding: 20px;
+}
+
+.novel-structure-page .novel-structure-volume-card__head,
+.novel-structure-page .novel-structure-part-card__head,
+.novel-structure-page .novel-structure-editor-card__head,
+.novel-structure-page .novel-structure-checkpoint__head,
+.novel-structure-page .novel-structure-scene-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.novel-structure-page .novel-structure-volume-card__meta,
+.novel-structure-page .novel-structure-part-card__meta,
+.novel-structure-page .novel-structure-checkpoint__meta,
+.novel-structure-page .novel-structure-chapter-card__meta,
+.novel-structure-page .novel-structure-scene-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  color: var(--workspace-ink-soft);
+  font-size: 12px;
+}
+
+.novel-structure-page .novel-structure-part-stack,
+.novel-structure-page .novel-structure-editor-stack,
+.novel-structure-page .novel-structure-checkpoint-list {
+  display: grid;
+  gap: 14px;
+}
+
+.novel-structure-page .novel-structure-part-card,
+.novel-structure-page .novel-structure-editor-card,
+.novel-structure-page .novel-structure-checkpoint {
+  padding: 18px;
+}
+
+.novel-structure-page .novel-structure-part-card.is-active {
+  border-color: rgba(143, 99, 48, 0.28);
+  background: linear-gradient(180deg, rgba(246, 202, 124, 0.12), rgba(255, 255, 255, 0.82));
+}
+
+.novel-structure-page .novel-structure-chapter-grid,
+.novel-structure-page .novel-structure-scene-board {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.novel-structure-page .novel-structure-chapter-card,
+.novel-structure-page .novel-structure-scene-card {
+  width: 100%;
+  padding: 14px;
+  border: 1px solid rgba(122, 93, 52, 0.12);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  text-align: left;
+  transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.novel-structure-page .novel-structure-chapter-card:hover,
+.novel-structure-page .novel-structure-scene-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(62, 105, 136, 0.28);
+  box-shadow: 0 12px 24px rgba(71, 53, 28, 0.08);
+}
+
+.novel-structure-page .novel-structure-chapter-card.is-active,
+.novel-structure-page .novel-structure-scene-card.is-active {
+  border-color: rgba(143, 99, 48, 0.28);
+  background: linear-gradient(180deg, rgba(246, 202, 124, 0.14), rgba(255, 255, 255, 0.82));
+}
+
+.novel-structure-page .novel-structure-chapter-card__head,
+.novel-structure-page .novel-structure-scene-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.novel-structure-page .novel-structure-chapter-card strong,
+.novel-structure-page .novel-structure-scene-card strong,
+.novel-structure-page .novel-structure-volume-card strong,
+.novel-structure-page .novel-structure-part-card strong,
+.novel-structure-page .novel-structure-editor-card strong,
+.novel-structure-page .novel-structure-checkpoint strong {
+  color: var(--workspace-ink);
+  font-size: 15px;
+}
+
+.novel-structure-page .novel-structure-scene-card__desc,
+.novel-structure-page .novel-structure-checkpoint__summary,
+.novel-structure-page .novel-structure-inline-hint span,
+.novel-structure-page .novel-structure-chapter-empty {
+  margin-top: 8px;
+  color: var(--workspace-ink-soft);
+  font-size: 12px;
+  line-height: 1.75;
+}
+
+.novel-structure-page .novel-structure-scene-toolbar {
+  margin-bottom: 14px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(122, 93, 52, 0.1);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.novel-structure-page .novel-structure-scene-toolbar span,
+.novel-structure-page .novel-structure-inline-hint {
+  color: var(--workspace-ink-soft);
+  font-size: 12px;
+  line-height: 1.75;
+}
+
+.novel-structure-page .novel-structure-inline-hint {
+  display: grid;
+  gap: 6px;
+  align-self: center;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.novel-structure-page .novel-structure-checkpoint--stale {
+  border-color: rgba(212, 136, 6, 0.22);
+  background: linear-gradient(180deg, rgba(250, 229, 181, 0.28), rgba(255, 255, 255, 0.82));
+}
+
+@media (max-width: 960px) {
+  .novel-structure-page .novel-structure-volume-card__head,
+  .novel-structure-page .novel-structure-part-card__head,
+  .novel-structure-page .novel-structure-editor-card__head,
+  .novel-structure-page .novel-structure-checkpoint__head,
+  .novel-structure-page .novel-structure-scene-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+.novel-structure-page .novel-structure-card-title { display: flex; align-items: flex-start; gap: 10px; flex: 1; }
+.novel-structure-page .novel-structure-card-title__main { flex: 1; border: 0; background: transparent; padding: 0; text-align: left; cursor: pointer; }
+.novel-structure-page .novel-structure-drag-handle { width: 34px; height: 34px; border: 1px dashed rgba(122,93,52,.18); border-radius: 12px; background: rgba(255,255,255,.78); color: var(--workspace-ink-soft); cursor: grab; }
+.novel-structure-page .novel-structure-inline-editor { display: grid; grid-template-columns: minmax(0,1fr) auto auto; gap: 8px; margin-top: 8px; }
+.novel-structure-page .novel-structure-volume-card.is-active { border-color: rgba(143,99,48,.28); background: linear-gradient(180deg, rgba(246,202,124,.16), rgba(255,255,255,.82)); }
+.novel-structure-page .novel-structure-linked-list { display: grid; gap: 12px; }
+.novel-structure-page .novel-structure-linked-card { width: 100%; border: 1px solid rgba(122,93,52,.12); border-radius: 18px; background: rgba(255,255,255,.82); padding: 14px; text-align: left; cursor: pointer; transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease; }
+.novel-structure-page .novel-structure-linked-card:hover { transform: translateY(-1px); border-color: rgba(62,105,136,.28); box-shadow: 0 12px 24px rgba(71,53,28,.08); }
+.novel-structure-page .novel-structure-linked-card__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.novel-structure-page .novel-structure-linked-card__meta, .novel-structure-page .novel-structure-linked-card__desc { margin-top: 8px; color: var(--workspace-ink-soft); font-size: 12px; line-height: 1.7; display: flex; flex-wrap: wrap; gap: 8px; }

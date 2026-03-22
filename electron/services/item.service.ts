@@ -1,5 +1,5 @@
 import { asc, eq } from 'drizzle-orm'
-import { getDb } from '../database/db'
+import { getDb, getSqlite } from '../database/db'
 import { characters, novels, storyArcs, storyItems, timelineEvents, worldMap } from '../database/schema'
 import { safeParseJson } from '../utils/json'
 import { buildStoryProfile } from './context.service'
@@ -13,6 +13,7 @@ import {
 import { getFactionNameOptions, parseWorldRulesJson } from '../../src/shared/genre-system'
 import { buildHumanLanguageRules } from '../../src/shared/prompt-library'
 import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/utils/text'
+import { markNovelContextChanged } from './context-impact.service'
 
 type StoryItemStatus = 'available' | 'consumed' | 'hidden' | 'destroyed'
 
@@ -43,6 +44,16 @@ interface GeneratedStoryItem {
   faction_hint?: unknown
   linked_character_names?: unknown
   tags?: unknown
+}
+
+interface StoryItemQueryFilters {
+  novelId: number
+  itemKind?: 'template' | 'instance'
+  category?: string
+  status?: StoryItemStatus
+  keyword?: string
+  page?: number
+  pageSize?: number
 }
 
 function asText(value: unknown): string {
@@ -311,6 +322,202 @@ function buildGeneratedPayload(
   }
 }
 
+function normalizePaging(page?: number, pageSize?: number, fallbackPageSize = 24) {
+  const nextPageSize = Math.max(1, Math.min(pageSize || fallbackPageSize, 200))
+  const nextPage = Math.max(1, page || 1)
+  const offset = (nextPage - 1) * nextPageSize
+  return { page: nextPage, pageSize: nextPageSize, offset }
+}
+
+function buildPagedResult<T>(items: T[], page: number, pageSize: number, total: number) {
+  return {
+    items,
+    page,
+    pageSize,
+    total,
+    hasMore: page * pageSize < total,
+  }
+}
+
+function mapStoryItemRecord(row: Record<string, unknown>) {
+  return {
+    id: Number(row.id),
+    novelId: Number(row.novel_id),
+    itemKind: String(row.item_kind || 'instance') as 'template' | 'instance',
+    parentItemId: row.parent_item_id == null ? undefined : Number(row.parent_item_id),
+    itemName: String(row.item_name || ''),
+    genreFamily: typeof row.genre_family === 'string' ? row.genre_family : undefined,
+    category: typeof row.category === 'string' ? row.category : undefined,
+    subType: typeof row.sub_type === 'string' ? row.sub_type : undefined,
+    rarity: typeof row.rarity === 'string' ? row.rarity : undefined,
+    ownerCharacterId: row.owner_character_id == null ? undefined : Number(row.owner_character_id),
+    locationMapId: row.location_map_id == null ? undefined : Number(row.location_map_id),
+    status: String(row.status || 'available') as StoryItemStatus,
+    summary: typeof row.summary === 'string' ? row.summary : undefined,
+    acquisitionMethod: typeof row.acquisition_method === 'string' ? row.acquisition_method : undefined,
+    usageMethod: typeof row.usage_method === 'string' ? row.usage_method : undefined,
+    cost: typeof row.cost === 'string' ? row.cost : undefined,
+    risk: typeof row.risk === 'string' ? row.risk : undefined,
+    plotFunction: typeof row.plot_function === 'string' ? row.plot_function : undefined,
+    appearance: typeof row.appearance === 'string' ? row.appearance : undefined,
+    factionHint: typeof row.faction_hint === 'string' ? row.faction_hint : undefined,
+    linkedCharacterIdsJson: typeof row.linked_character_ids_json === 'string' ? row.linked_character_ids_json : undefined,
+    linkedTimelineEventIdsJson: typeof row.linked_timeline_event_ids_json === 'string' ? row.linked_timeline_event_ids_json : undefined,
+    tagsJson: typeof row.tags_json === 'string' ? row.tags_json : undefined,
+    sortOrder: Number(row.sort_order || 0),
+    createdAt: typeof row.created_at === 'string' ? row.created_at : '',
+    updatedAt: typeof row.updated_at === 'string' ? row.updated_at : '',
+  }
+}
+
+function parseTimelineLinkCount(raw?: unknown) {
+  if (typeof raw !== 'string' || !raw) return 0
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.length : 0
+  } catch {
+    return 0
+  }
+}
+
+function buildItemWhere(filters: StoryItemQueryFilters) {
+  const whereClauses = ['i.novel_id = ?']
+  const params: Array<number | string> = [filters.novelId]
+
+  if (filters.itemKind) {
+    whereClauses.push('i.item_kind = ?')
+    params.push(filters.itemKind)
+  }
+
+  if (filters.category) {
+    whereClauses.push('i.category = ?')
+    params.push(filters.category)
+  }
+
+  if (filters.status) {
+    whereClauses.push('i.status = ?')
+    params.push(filters.status)
+  }
+
+  const keyword = typeof filters.keyword === 'string' ? filters.keyword.trim() : ''
+  if (keyword) {
+    const like = `%${keyword}%`
+    whereClauses.push(`
+      (
+        i.item_name LIKE ?
+        OR COALESCE(i.category, '') LIKE ?
+        OR COALESCE(i.sub_type, '') LIKE ?
+        OR COALESCE(i.summary, '') LIKE ?
+        OR COALESCE(i.plot_function, '') LIKE ?
+        OR COALESCE(i.faction_hint, '') LIKE ?
+      )
+    `)
+    params.push(like, like, like, like, like, like)
+  }
+
+  return {
+    whereSql: whereClauses.join(' AND '),
+    params,
+  }
+}
+
+export function queryStoryItems(filters: StoryItemQueryFilters) {
+  const sqlite = getSqlite()
+  const paging = normalizePaging(filters.page, filters.pageSize, 24)
+  const query = buildItemWhere(filters)
+  const countRow = sqlite.prepare(`
+    SELECT COUNT(*) AS total
+    FROM story_items i
+    WHERE ${query.whereSql}
+  `).get(...query.params) as { total?: number } | undefined
+
+  const rows = sqlite.prepare(`
+    SELECT i.*
+    FROM story_items i
+    WHERE ${query.whereSql}
+    ORDER BY
+      CASE i.item_kind WHEN 'template' THEN 0 ELSE 1 END ASC,
+      i.sort_order ASC,
+      i.id ASC
+    LIMIT ? OFFSET ?
+  `).all(...query.params, paging.pageSize, paging.offset) as Array<Record<string, unknown>>
+
+  const items = rows.map(mapStoryItemRecord)
+  return buildPagedResult(items, paging.page, paging.pageSize, Number(countRow?.total || 0))
+}
+
+export function getStoryItemStats(filters: StoryItemQueryFilters) {
+  const sqlite = getSqlite()
+  const query = buildItemWhere(filters)
+  const row = sqlite.prepare(`
+    SELECT
+      COUNT(*) AS total,
+      SUM(CASE WHEN i.item_kind = 'template' THEN 1 ELSE 0 END) AS templateCount,
+      SUM(CASE WHEN i.item_kind = 'instance' THEN 1 ELSE 0 END) AS instanceCount,
+      COUNT(DISTINCT NULLIF(TRIM(COALESCE(i.category, '')), '')) AS categoryCount
+    FROM story_items i
+    WHERE ${query.whereSql}
+  `).get(...query.params) as Record<string, unknown> | undefined
+
+  const linkedRows = sqlite.prepare(`
+    SELECT i.linked_timeline_event_ids_json AS linkedTimelineEventIdsJson
+    FROM story_items i
+    WHERE ${query.whereSql}
+  `).all(...query.params) as Array<{ linkedTimelineEventIdsJson?: string | null }>
+
+  return {
+    total: Number(row?.total || 0),
+    templateCount: Number(row?.templateCount || 0),
+    instanceCount: Number(row?.instanceCount || 0),
+    linkedEventCount: linkedRows.reduce((total, item) => total + parseTimelineLinkCount(item.linkedTimelineEventIdsJson), 0),
+    categoryCount: Number(row?.categoryCount || 0),
+  }
+}
+
+export function getStoryItemFilterOptions(novelId: number) {
+  const sqlite = getSqlite()
+  const categoryRows = sqlite.prepare(`
+    SELECT DISTINCT category
+    FROM story_items
+    WHERE novel_id = ?
+      AND category IS NOT NULL
+      AND TRIM(category) <> ''
+    ORDER BY category ASC
+  `).all(novelId) as Array<{ category?: string | null }>
+  const rarityRows = sqlite.prepare(`
+    SELECT DISTINCT rarity
+    FROM story_items
+    WHERE novel_id = ?
+      AND rarity IS NOT NULL
+      AND TRIM(rarity) <> ''
+    ORDER BY rarity ASC
+  `).all(novelId) as Array<{ rarity?: string | null }>
+
+  return {
+    categories: categoryRows
+      .map((row) => (typeof row.category === 'string' ? row.category.trim() : ''))
+      .filter(Boolean),
+    rarities: rarityRows
+      .map((row) => (typeof row.rarity === 'string' ? row.rarity.trim() : ''))
+      .filter(Boolean),
+  }
+}
+
+export function searchStoryItems(
+  novelId: number,
+  keyword = '',
+  itemKind?: 'template' | 'instance',
+  limit = 20,
+) {
+  return queryStoryItems({
+    novelId,
+    keyword,
+    itemKind,
+    page: 1,
+    pageSize: Math.max(1, Math.min(limit, 50)),
+  }).items
+}
+
 function ensureTemplateRows(
   novelId: number,
   options: {
@@ -346,7 +553,7 @@ function ensureTemplateRows(
         plotFunction: template.storyValue,
         appearance: template.examples.join('、'),
         tagsJson: stringifyStringArray(template.examples),
-      })
+      }, { skipContextTracking: true })
       continue
     }
 
@@ -366,7 +573,7 @@ function ensureTemplateRows(
       appearance: template.examples.join('、'),
       tagsJson: stringifyStringArray(template.examples),
       sortOrder: index + 1,
-    })
+    }, { skipContextTracking: true })
   }
 
   return db.select().from(storyItems)
@@ -389,7 +596,11 @@ export function getStoryItem(id: number) {
   return db.select().from(storyItems).where(eq(storyItems.id, id)).all()[0] || null
 }
 
-export function createStoryItem(novelId: number, data: Partial<typeof storyItems.$inferInsert>) {
+export function createStoryItem(
+  novelId: number,
+  data: Partial<typeof storyItems.$inferInsert>,
+  options: { skipContextTracking?: boolean } = {},
+) {
   const db = getDb()
   const sortOrder = typeof data.sortOrder === 'number' ? data.sortOrder : getNextSortOrder(novelId)
   const payload = sanitizeStoryItemPayload(data)
@@ -406,25 +617,42 @@ export function createStoryItem(novelId: number, data: Partial<typeof storyItems
   }).run()
   const id = Number(result.lastInsertRowid)
   syncStoryItemTimelineLinks(id)
+  if (!options.skipContextTracking) {
+    markNovelContextChanged(novelId, 'Story items changed')
+  }
   return id
 }
 
-export function updateStoryItem(id: number, data: Partial<typeof storyItems.$inferInsert>) {
+export function updateStoryItem(
+  id: number,
+  data: Partial<typeof storyItems.$inferInsert>,
+  options: { skipContextTracking?: boolean } = {},
+) {
   const db = getDb()
   db.update(storyItems).set({
     ...sanitizeStoryItemPayload(data),
     updatedAt: new Date().toISOString(),
   }).where(eq(storyItems.id, id)).run()
   syncStoryItemTimelineLinks(id)
+  if (!options.skipContextTracking) {
+    const current = getStoryItem(id)
+    if (current) {
+      markNovelContextChanged(current.novelId, 'Story items changed')
+    }
+  }
 }
 
-export function deleteStoryItem(id: number) {
+export function deleteStoryItem(id: number, options: { skipContextTracking?: boolean } = {}) {
   const db = getDb()
+  const current = getStoryItem(id)
   removeStoryItemFromEvents(id)
   db.delete(storyItems).where(eq(storyItems.id, id)).run()
+  if (!options.skipContextTracking && current) {
+    markNovelContextChanged(current.novelId, 'Story items changed')
+  }
 }
 
-export function clearStoryItemsByNovel(novelId: number) {
+export function clearStoryItemsByNovel(novelId: number, options: { skipContextTracking?: boolean } = {}) {
   const db = getDb()
   const eventRows = db.select().from(timelineEvents).where(eq(timelineEvents.novelId, novelId)).all()
 
@@ -436,6 +664,9 @@ export function clearStoryItemsByNovel(novelId: number) {
   })
 
   db.delete(storyItems).where(eq(storyItems.novelId, novelId)).run()
+  if (!options.skipContextTracking) {
+    markNovelContextChanged(novelId, 'Story items changed')
+  }
 }
 
 export async function generateStoryItems(
@@ -516,10 +747,14 @@ export async function generateStoryItems(
         sortOrder: nextSort,
       })
       if (!payload) continue
-      const id = createStoryItem(novelId, payload)
+      const id = createStoryItem(novelId, payload, { skipContextTracking: true })
       createdIds.push(id)
       nextSort += 1
     }
+  }
+
+  if (createdIds.length > 0) {
+    markNovelContextChanged(novelId, 'Story items changed')
   }
 
   return createdIds

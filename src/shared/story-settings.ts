@@ -1,0 +1,322 @@
+﻿import type { SubPlotDraft } from './subplot-framework'
+
+export type StoryEndingType = 'HE' | 'BE' | 'open' | 'multi' | 'HE_BE'
+
+export interface StoryPremiseSettings {
+  positioning: string
+  coreHook: string
+  protagonistStart: string
+  constraints: string
+  languageGuardrails: string
+}
+
+export interface StoryDesignSettings {
+  storyGoal: string
+  coreConflict: string
+  mainPlot: string
+  subPlotsText: string
+  subPlotsList: SubPlotDraft[]
+  rhythmSetup?: number
+  rhythmConflict?: number
+  rhythmEnding?: number
+  endingType?: StoryEndingType
+  ending: string
+}
+
+export interface StoryWritingRulesSettings {
+  antiAiFlavor: string
+  commonSenseRules: string
+  bannedTerms: string
+}
+
+export interface StorySettingsDocument {
+  premise: StoryPremiseSettings
+  storyDesign: StoryDesignSettings
+  writingRules: StoryWritingRulesSettings
+}
+
+export interface StorySettingsSnapshot extends StorySettingsDocument {
+  storyGoal: string
+  coreConflict: string
+  mainPlot: string
+  ending: string
+  subPlotCount: number
+  premiseReadyCount: number
+  storyDesignReadyCount: number
+}
+
+const EMPTY_PREMISE: StoryPremiseSettings = {
+  positioning: '',
+  coreHook: '',
+  protagonistStart: '',
+  constraints: '',
+  languageGuardrails: '',
+}
+
+const EMPTY_STORY_DESIGN: StoryDesignSettings = {
+  storyGoal: '',
+  coreConflict: '',
+  mainPlot: '',
+  subPlotsText: '',
+  subPlotsList: [],
+  rhythmSetup: undefined,
+  rhythmConflict: undefined,
+  rhythmEnding: undefined,
+  endingType: undefined,
+  ending: '',
+}
+
+const EMPTY_WRITING_RULES: StoryWritingRulesSettings = {
+  antiAiFlavor: '',
+  commonSenseRules: '',
+  bannedTerms: '',
+}
+
+function parseJsonObject(raw?: string | null): Record<string, unknown> {
+  if (!raw) return {}
+
+  try {
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {}
+  } catch {
+    return {}
+  }
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+}
+
+function asText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function asLooseText(value: unknown): string {
+  if (typeof value === 'string') return value.trim()
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  return ''
+}
+
+function asNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim() && !Number.isNaN(Number(value))) return Number(value)
+  return undefined
+}
+
+function parseSubPlots(value: unknown): SubPlotDraft[] {
+  if (!Array.isArray(value)) return []
+
+  return value
+    .filter((item) => item && typeof item === 'object' && !Array.isArray(item))
+    .map((item) => {
+      const record = item as Record<string, unknown>
+      return {
+        name: asText(record.name),
+        characters: asText(record.characters),
+        conflict: asText(record.conflict),
+        mainlineLink: asText(record.mainlineLink),
+        endChapter: asLooseText(record.endChapter),
+      }
+    })
+    .filter((subplot) => Object.values(subplot).some(Boolean))
+}
+
+function compactObject<T extends Record<string, unknown>>(value: T): T {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, entry]) => entry !== undefined),
+  ) as T
+}
+
+function cleanPatch<T extends Record<string, unknown>>(patch?: Partial<T>): Partial<T> {
+  if (!patch) return {}
+  return compactObject(patch as Record<string, unknown>) as Partial<T>
+}
+
+export function parseStorySettingsDocument(raw?: string | null): StorySettingsDocument {
+  const root = parseJsonObject(raw)
+  const premise = asRecord(root.premise)
+  const storyDesign = asRecord(root.story_design)
+  const writingRules = asRecord(root.writing_rules)
+
+  const nextPremise: StoryPremiseSettings = {
+    positioning: asText(premise.positioning ?? root.premise_positioning),
+    coreHook: asText(premise.core_hook ?? root.premise_core_hook ?? root.core_hook),
+    protagonistStart: asText(premise.protagonist_start ?? root.protagonist_start ?? root.protagonist_baseline),
+    constraints: asText(premise.constraints ?? root.premise_constraints ?? root.core_constraints),
+    languageGuardrails: asText(
+      premise.language_guardrails
+      ?? root.language_guardrails
+      ?? root.writing_constraints
+      ?? root.common_sense_rules,
+    ),
+  }
+
+  const nextStoryDesign: StoryDesignSettings = {
+    storyGoal: asText(storyDesign.story_goal ?? root.story_goal),
+    coreConflict: asText(storyDesign.core_conflict ?? root.core_conflict),
+    mainPlot: asText(storyDesign.main_plot ?? root.main_plot),
+    subPlotsText: asText(storyDesign.sub_plots ?? root.sub_plots),
+    subPlotsList: parseSubPlots(storyDesign.sub_plots_list ?? root.sub_plots_list),
+    rhythmSetup: asNumber(storyDesign.rhythm_setup ?? root.rhythm_setup),
+    rhythmConflict: asNumber(storyDesign.rhythm_conflict ?? root.rhythm_conflict),
+    rhythmEnding: asNumber(storyDesign.rhythm_ending ?? root.rhythm_ending),
+    endingType: asText(storyDesign.ending_type ?? root.ending_type) as StoryEndingType | '',
+    ending: asText(storyDesign.ending ?? root.ending),
+  }
+
+  const nextWritingRules: StoryWritingRulesSettings = {
+    antiAiFlavor: asText(writingRules.anti_ai_flavor ?? root.anti_ai_flavor),
+    commonSenseRules: asText(writingRules.common_sense_rules ?? root.common_sense_rules ?? nextPremise.languageGuardrails),
+    bannedTerms: asText(writingRules.banned_terms ?? root.banned_terms),
+  }
+
+  if (!nextPremise.positioning && nextStoryDesign.storyGoal) {
+    nextPremise.positioning = nextStoryDesign.storyGoal
+  }
+  if (!nextPremise.constraints && nextStoryDesign.coreConflict) {
+    nextPremise.constraints = nextStoryDesign.coreConflict
+  }
+
+  return {
+    premise: { ...EMPTY_PREMISE, ...nextPremise },
+    storyDesign: { ...EMPTY_STORY_DESIGN, ...nextStoryDesign },
+    writingRules: { ...EMPTY_WRITING_RULES, ...nextWritingRules },
+  }
+}
+
+export function parseStorySettingsSnapshot(raw?: string | null): StorySettingsSnapshot {
+  const document = parseStorySettingsDocument(raw)
+  const premiseReadyCount = [
+    document.premise.positioning,
+    document.premise.coreHook,
+    document.premise.protagonistStart,
+    document.premise.constraints,
+    document.premise.languageGuardrails,
+  ].filter(Boolean).length
+  const storyDesignReadyCount = [
+    document.storyDesign.storyGoal,
+    document.storyDesign.coreConflict,
+    document.storyDesign.mainPlot,
+    document.storyDesign.ending,
+  ].filter(Boolean).length
+
+  return {
+    ...document,
+    storyGoal: document.storyDesign.storyGoal,
+    coreConflict: document.storyDesign.coreConflict,
+    mainPlot: document.storyDesign.mainPlot,
+    ending: document.storyDesign.ending,
+    subPlotCount: document.storyDesign.subPlotsList.length,
+    premiseReadyCount,
+    storyDesignReadyCount,
+  }
+}
+
+export function buildStorySettingsPayload(
+  patch: {
+    premise?: Partial<StoryPremiseSettings>
+    storyDesign?: Partial<StoryDesignSettings>
+    writingRules?: Partial<StoryWritingRulesSettings>
+  },
+  existingRaw?: string | null,
+): Record<string, unknown> {
+  const legacyRoot = parseJsonObject(existingRaw)
+  const current = parseStorySettingsDocument(existingRaw)
+  const premise = { ...current.premise, ...cleanPatch(patch.premise) }
+  const storyDesign = { ...current.storyDesign, ...cleanPatch(patch.storyDesign) }
+  const writingRules = { ...current.writingRules, ...cleanPatch(patch.writingRules) }
+
+  const payload: Record<string, unknown> = {
+    ...legacyRoot,
+    premise: compactObject({
+      positioning: premise.positioning,
+      core_hook: premise.coreHook,
+      protagonist_start: premise.protagonistStart,
+      constraints: premise.constraints,
+      language_guardrails: premise.languageGuardrails,
+    }),
+    story_design: compactObject({
+      story_goal: storyDesign.storyGoal,
+      core_conflict: storyDesign.coreConflict,
+      main_plot: storyDesign.mainPlot,
+      sub_plots: storyDesign.subPlotsText,
+      sub_plots_list: storyDesign.subPlotsList,
+      rhythm_setup: storyDesign.rhythmSetup,
+      rhythm_conflict: storyDesign.rhythmConflict,
+      rhythm_ending: storyDesign.rhythmEnding,
+      ending_type: storyDesign.endingType,
+      ending: storyDesign.ending,
+    }),
+    writing_rules: compactObject({
+      anti_ai_flavor: writingRules.antiAiFlavor,
+      common_sense_rules: writingRules.commonSenseRules,
+      banned_terms: writingRules.bannedTerms,
+    }),
+    premise_positioning: premise.positioning,
+    premise_core_hook: premise.coreHook,
+    protagonist_start: premise.protagonistStart,
+    premise_constraints: premise.constraints,
+    language_guardrails: premise.languageGuardrails,
+    anti_ai_flavor: writingRules.antiAiFlavor,
+    common_sense_rules: writingRules.commonSenseRules,
+    banned_terms: writingRules.bannedTerms,
+    story_goal: storyDesign.storyGoal,
+    core_conflict: storyDesign.coreConflict,
+    main_plot: storyDesign.mainPlot,
+    sub_plots: storyDesign.subPlotsText,
+    sub_plots_list: storyDesign.subPlotsList,
+    rhythm_setup: storyDesign.rhythmSetup,
+    rhythm_conflict: storyDesign.rhythmConflict,
+    rhythm_ending: storyDesign.rhythmEnding,
+    ending_type: storyDesign.endingType,
+    ending: storyDesign.ending,
+  }
+
+  return compactObject(payload)
+}
+
+export function buildPremiseSummary(premise: StoryPremiseSettings): string {
+  return [
+    premise.positioning ? `作品定位：${premise.positioning}` : '',
+    premise.coreHook ? `核心信息：${premise.coreHook}` : '',
+    premise.protagonistStart ? `主角起点：${premise.protagonistStart}` : '',
+    premise.constraints ? `底层约束：${premise.constraints}` : '',
+    premise.languageGuardrails ? `语言边界：${premise.languageGuardrails}` : '',
+  ].filter(Boolean).join('\n')
+}
+
+export function buildStoryDesignSummary(
+  storyDesign: StoryDesignSettings,
+  options: { includeSubplots?: boolean } = {},
+): string {
+  const lines = [
+    storyDesign.storyGoal ? `主线目标：${storyDesign.storyGoal}` : '',
+    storyDesign.coreConflict ? `核心冲突：${storyDesign.coreConflict}` : '',
+    storyDesign.mainPlot ? `推进链：${storyDesign.mainPlot}` : '',
+    storyDesign.ending ? `结局方向：${storyDesign.ending}` : '',
+  ]
+
+  if (options.includeSubplots !== false) {
+    const subplotSummary = storyDesign.subPlotsList.length > 0
+      ? storyDesign.subPlotsList
+        .slice(0, 6)
+        .map((subplot, index) => `${index + 1}. ${[subplot.name, subplot.conflict, subplot.mainlineLink].filter(Boolean).join(' / ')}`)
+        .join('\n')
+      : storyDesign.subPlotsText
+    lines.push(subplotSummary ? `支线设计：${subplotSummary}` : '')
+  }
+
+  return lines.filter(Boolean).join('\n')
+}
+
+export function buildWritingRulesSummary(writingRules: StoryWritingRulesSettings): string {
+  return [
+    writingRules.antiAiFlavor ? `去AI腔：${writingRules.antiAiFlavor}` : '',
+    writingRules.commonSenseRules ? `常识约束：${writingRules.commonSenseRules}` : '',
+    writingRules.bannedTerms ? `禁用表达：${writingRules.bannedTerms}` : '',
+  ].filter(Boolean).join('\n')
+}

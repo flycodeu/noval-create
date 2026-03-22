@@ -1,44 +1,128 @@
+export type AiJsonRoot = 'object' | 'array' | 'any'
+
+function trimCodeFence(text: string): string {
+  return text
+    .replace(/^\uFEFF/, '')
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```\s*$/i, '')
+    .trim()
+}
+
+function buildParseError(message: string, text: string): SyntaxError {
+  const preview = text.replace(/\s+/g, ' ').slice(0, 220)
+  return new SyntaxError(`${message}。输出片段：${preview}`)
+}
+
+function findBalancedEnd(text: string, startIdx: number, openChar: '{' | '[', closeChar: '}' | ']'): number {
+  let depth = 0
+  let inString = false
+  let escaped = false
+
+  for (let index = startIdx; index < text.length; index += 1) {
+    const char = text[index]
+
+    if (inString) {
+      if (escaped) {
+        escaped = false
+        continue
+      }
+      if (char === '\\') {
+        escaped = true
+        continue
+      }
+      if (char === '"') {
+        inString = false
+      }
+      continue
+    }
+
+    if (char === '"') {
+      inString = true
+      continue
+    }
+
+    if (char === openChar) {
+      depth += 1
+      continue
+    }
+
+    if (char === closeChar) {
+      depth -= 1
+      if (depth === 0) return index
+    }
+  }
+
+  return -1
+}
+
+export function extractBalancedJson(text: string, expectedRoot: AiJsonRoot = 'any'): string {
+  const cleaned = trimCodeFence(text)
+  const candidates = expectedRoot === 'object'
+    ? [{ openChar: '{' as const, closeChar: '}' as const }]
+    : expectedRoot === 'array'
+      ? [{ openChar: '[' as const, closeChar: ']' as const }]
+      : [
+          { openChar: '{' as const, closeChar: '}' as const },
+          { openChar: '[' as const, closeChar: ']' as const },
+        ]
+
+  let bestMatch: { startIdx: number; endIdx: number } | null = null
+
+  for (const candidate of candidates) {
+    let startIdx = cleaned.indexOf(candidate.openChar)
+    while (startIdx !== -1) {
+      const endIdx = findBalancedEnd(cleaned, startIdx, candidate.openChar, candidate.closeChar)
+      if (endIdx !== -1) {
+        if (!bestMatch || startIdx < bestMatch.startIdx) {
+          bestMatch = { startIdx, endIdx }
+        }
+        break
+      }
+      startIdx = cleaned.indexOf(candidate.openChar, startIdx + 1)
+    }
+  }
+
+  if (!bestMatch) {
+    throw buildParseError('AI 返回内容中未找到完整 JSON', cleaned)
+  }
+
+  return cleaned.slice(bestMatch.startIdx, bestMatch.endIdx + 1)
+}
+
+function removeTrailingCommas(text: string): string {
+  return text.replace(/,\s*([}\]])/g, '$1')
+}
+
+function normalizeAiJsonText(text: string, expectedRoot: AiJsonRoot): string {
+  const cleaned = trimCodeFence(text)
+  const extracted = extractBalancedJson(cleaned, expectedRoot)
+  return removeTrailingCommas(extracted)
+}
+
 /**
- * 安全解析 AI 返回的 JSON —— AI 有时会用 ```json ... ``` 包裹
+ * Parse AI output that is expected to contain JSON, allowing mild wrapper text
+ * and simple formatting mistakes such as trailing commas.
  */
-export function safeParseJson<T = unknown>(text: string): T {
-  let cleaned = text.trim()
+export function safeParseAiJson<T = unknown>(text: string, expectedRoot: AiJsonRoot = 'any'): T {
+  const cleaned = trimCodeFence(text)
 
-  // 去除最外层 markdown 代码块（```json ... ``` 或 ``` ... ```）
-  cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim()
-
-  // 尝试直接解析
   try {
     return JSON.parse(cleaned) as T
   } catch {
-    // 尝试提取第一个完整 JSON 对象或数组
-    const firstBrace = cleaned.indexOf('{')
-    const firstBracket = cleaned.indexOf('[')
+    const normalized = normalizeAiJsonText(cleaned, expectedRoot)
 
-    let startIdx = -1
-    let endChar = ''
-
-    if (firstBrace === -1 && firstBracket === -1) {
-      throw new SyntaxError(`AI 返回内容中未找到 JSON：${cleaned.slice(0, 100)}`)
+    try {
+      return JSON.parse(normalized) as T
+    } catch (error) {
+      const rawMessage = error instanceof Error ? error.message : 'JSON parse failed'
+      throw buildParseError(`AI JSON 解析失败：${rawMessage}`, normalized)
     }
-
-    if (firstBrace === -1) {
-      startIdx = firstBracket
-      endChar = ']'
-    } else if (firstBracket === -1) {
-      startIdx = firstBrace
-      endChar = '}'
-    } else {
-      startIdx = Math.min(firstBrace, firstBracket)
-      endChar = startIdx === firstBrace ? '}' : ']'
-    }
-
-    const lastIdx = cleaned.lastIndexOf(endChar)
-    if (lastIdx <= startIdx) {
-      throw new SyntaxError(`AI 返回的 JSON 不完整：${cleaned.slice(0, 100)}`)
-    }
-
-    const extracted = cleaned.slice(startIdx, lastIdx + 1)
-    return JSON.parse(extracted) as T
   }
+}
+
+/**
+ * Backward-compatible helper for existing call sites.
+ */
+export function safeParseJson<T = unknown>(text: string): T {
+  return safeParseAiJson<T>(text, 'any')
 }

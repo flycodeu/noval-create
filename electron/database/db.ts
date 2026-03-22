@@ -15,6 +15,13 @@ export function getDb() {
   return _db
 }
 
+export function getSqlite() {
+  if (!_sqlite) {
+    throw new Error('Database not initialized. Call initDb() first.')
+  }
+  return _sqlite
+}
+
 export function initDb(): ReturnType<typeof drizzle> {
   if (_db) return _db
 
@@ -67,7 +74,35 @@ function runMigrations(sqlite: Database.Database) {
       world_rules_json TEXT,
       style_template_id INTEGER,
       world_template_id INTEGER,
+      context_version INTEGER DEFAULT 1,
       model_config_id INTEGER,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS story_volumes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+      volume_number INTEGER NOT NULL,
+      title TEXT,
+      summary TEXT,
+      target_words INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'planning',
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS story_parts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+      volume_id INTEGER NOT NULL REFERENCES story_volumes(id) ON DELETE CASCADE,
+      part_number INTEGER NOT NULL,
+      title TEXT,
+      summary TEXT,
+      target_words INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'planning',
+      start_chapter_num INTEGER,
+      end_chapter_num INTEGER,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
@@ -75,6 +110,8 @@ function runMigrations(sqlite: Database.Database) {
     CREATE TABLE IF NOT EXISTS chapters (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+      volume_id INTEGER REFERENCES story_volumes(id) ON DELETE SET NULL,
+      part_id INTEGER REFERENCES story_parts(id) ON DELETE SET NULL,
       chapter_num INTEGER NOT NULL,
       title TEXT,
       outline TEXT,
@@ -90,6 +127,34 @@ function runMigrations(sqlite: Database.Database) {
       arc_id INTEGER,
       target_words INTEGER DEFAULT 3000,
       emotion_tone TEXT,
+      compiled_from_segments INTEGER DEFAULT 0,
+      segment_count INTEGER DEFAULT 0,
+      context_version INTEGER DEFAULT 1,
+      stale_reason_json TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS chapter_segments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+      chapter_id INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
+      volume_id INTEGER REFERENCES story_volumes(id) ON DELETE SET NULL,
+      part_id INTEGER REFERENCES story_parts(id) ON DELETE SET NULL,
+      segment_order INTEGER NOT NULL,
+      title TEXT,
+      segment_type TEXT DEFAULT 'scene',
+      purpose TEXT,
+      time_anchor TEXT,
+      location_name TEXT,
+      present_character_ids_json TEXT,
+      linked_item_ids_json TEXT,
+      input_state TEXT,
+      output_state TEXT,
+      summary TEXT,
+      content TEXT,
+      risk_tags_json TEXT,
+      status TEXT DEFAULT 'planned',
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
@@ -196,8 +261,11 @@ function runMigrations(sqlite: Database.Database) {
       is_major_event INTEGER DEFAULT 1,
       event_type TEXT,
       arc_id INTEGER REFERENCES story_arcs(id) ON DELETE SET NULL,
+      volume_id INTEGER REFERENCES story_volumes(id) ON DELETE SET NULL,
+      part_id INTEGER REFERENCES story_parts(id) ON DELETE SET NULL,
       chapter_start_id INTEGER REFERENCES chapters(id) ON DELETE SET NULL,
       chapter_end_id INTEGER REFERENCES chapters(id) ON DELETE SET NULL,
+      segment_id INTEGER REFERENCES chapter_segments(id) ON DELETE SET NULL,
       location_map_id INTEGER REFERENCES world_map(id) ON DELETE SET NULL,
       present_character_ids_json TEXT,
       affected_character_ids_json TEXT,
@@ -210,6 +278,7 @@ function runMigrations(sqlite: Database.Database) {
       direct_consequences_json TEXT,
       open_threads_json TEXT,
       notes TEXT,
+      anchor_invalid INTEGER DEFAULT 0,
       status TEXT DEFAULT 'planned',
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -244,6 +313,29 @@ function runMigrations(sqlite: Database.Database) {
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS story_memory_checkpoints (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+      scope_type TEXT NOT NULL,
+      scope_id INTEGER,
+      label TEXT,
+      summary TEXT,
+      resolved_threads_json TEXT,
+      active_threads_json TEXT,
+      character_state_digest TEXT,
+      relation_digest TEXT,
+      item_digest TEXT,
+      timeline_digest TEXT,
+      forbidden_directions_json TEXT,
+      style_guard TEXT,
+      source_range_start INTEGER,
+      source_range_end INTEGER,
+      version INTEGER DEFAULT 1,
+      stale INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS model_configs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
@@ -269,6 +361,12 @@ function runMigrations(sqlite: Database.Database) {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS prompt_overrides (
+      key TEXT PRIMARY KEY,
+      content TEXT NOT NULL,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS tasks (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       novel_id INTEGER,
@@ -282,17 +380,53 @@ function runMigrations(sqlite: Database.Database) {
       error_message TEXT,
       related_entity_type TEXT,
       related_entity_id INTEGER,
+      runner_type TEXT DEFAULT 'chat',
+      retryable INTEGER DEFAULT 0,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
-    CREATE INDEX IF NOT EXISTS idx_timeline_events_novel_sort
-    ON timeline_events (novel_id, time_sort_value, sort_order, id);
   `)
 
+  ensureColumn(sqlite, 'story_volumes', 'summary', 'TEXT')
+  ensureColumn(sqlite, 'story_volumes', 'target_words', 'INTEGER DEFAULT 0')
+  ensureColumn(sqlite, 'story_volumes', 'status', "TEXT DEFAULT 'planning'")
+  ensureColumn(sqlite, 'story_volumes', 'created_at', 'TEXT')
+  ensureColumn(sqlite, 'story_volumes', 'updated_at', 'TEXT')
+  ensureColumn(sqlite, 'story_parts', 'volume_id', 'INTEGER')
+  ensureColumn(sqlite, 'story_parts', 'target_words', 'INTEGER DEFAULT 0')
+  ensureColumn(sqlite, 'story_parts', 'status', "TEXT DEFAULT 'planning'")
+  ensureColumn(sqlite, 'story_parts', 'start_chapter_num', 'INTEGER')
+  ensureColumn(sqlite, 'story_parts', 'end_chapter_num', 'INTEGER')
+  ensureColumn(sqlite, 'story_parts', 'created_at', 'TEXT')
+  ensureColumn(sqlite, 'story_parts', 'updated_at', 'TEXT')
   ensureColumn(sqlite, 'chapters', 'continuity_state_json', 'TEXT')
   ensureColumn(sqlite, 'chapters', 'scene_plan_json', 'TEXT')
   ensureColumn(sqlite, 'chapters', 'review_notes_json', 'TEXT')
+  ensureColumn(sqlite, 'chapters', 'volume_id', 'INTEGER')
+  ensureColumn(sqlite, 'chapters', 'part_id', 'INTEGER')
+  ensureColumn(sqlite, 'chapters', 'compiled_from_segments', 'INTEGER DEFAULT 0')
+  ensureColumn(sqlite, 'chapters', 'segment_count', 'INTEGER DEFAULT 0')
+  ensureColumn(sqlite, 'novels', 'context_version', 'INTEGER DEFAULT 1')
+  ensureColumn(sqlite, 'chapters', 'context_version', 'INTEGER DEFAULT 1')
+  ensureColumn(sqlite, 'chapters', 'stale_reason_json', 'TEXT')
+  ensureColumn(sqlite, 'chapter_segments', 'volume_id', 'INTEGER')
+  ensureColumn(sqlite, 'chapter_segments', 'part_id', 'INTEGER')
+  ensureColumn(sqlite, 'chapter_segments', 'title', 'TEXT')
+  ensureColumn(sqlite, 'chapter_segments', 'segment_type', "TEXT DEFAULT 'scene'")
+  ensureColumn(sqlite, 'chapter_segments', 'purpose', 'TEXT')
+  ensureColumn(sqlite, 'chapter_segments', 'time_anchor', 'TEXT')
+  ensureColumn(sqlite, 'chapter_segments', 'location_name', 'TEXT')
+  ensureColumn(sqlite, 'chapter_segments', 'present_character_ids_json', 'TEXT')
+  ensureColumn(sqlite, 'chapter_segments', 'linked_item_ids_json', 'TEXT')
+  ensureColumn(sqlite, 'chapter_segments', 'input_state', 'TEXT')
+  ensureColumn(sqlite, 'chapter_segments', 'output_state', 'TEXT')
+  ensureColumn(sqlite, 'chapter_segments', 'summary', 'TEXT')
+  ensureColumn(sqlite, 'chapter_segments', 'content', 'TEXT')
+  ensureColumn(sqlite, 'chapter_segments', 'risk_tags_json', 'TEXT')
+  ensureColumn(sqlite, 'chapter_segments', 'status', "TEXT DEFAULT 'planned'")
+  ensureColumn(sqlite, 'chapter_segments', 'created_at', 'TEXT')
+  ensureColumn(sqlite, 'chapter_segments', 'updated_at', 'TEXT')
   ensureColumn(sqlite, 'characters', 'entity_type', "TEXT DEFAULT 'human'")
   ensureColumn(sqlite, 'characters', 'species', 'TEXT')
   ensureColumn(sqlite, 'characters', 'surface_desire', 'TEXT')
@@ -319,11 +453,24 @@ function runMigrations(sqlite: Database.Database) {
   ensureColumn(sqlite, 'world_map', 'affiliated_faction_ids_json', 'TEXT')
   ensureColumn(sqlite, 'world_map', 'danger_level', 'TEXT')
   ensureColumn(sqlite, 'timeline_events', 'linked_item_ids_json', 'TEXT')
+  ensureColumn(sqlite, 'timeline_events', 'volume_id', 'INTEGER REFERENCES story_volumes(id) ON DELETE SET NULL')
+  ensureColumn(sqlite, 'timeline_events', 'part_id', 'INTEGER REFERENCES story_parts(id) ON DELETE SET NULL')
+  ensureColumn(sqlite, 'timeline_events', 'chapter_start_id', 'INTEGER REFERENCES chapters(id) ON DELETE SET NULL')
+  ensureColumn(sqlite, 'timeline_events', 'chapter_end_id', 'INTEGER REFERENCES chapters(id) ON DELETE SET NULL')
+  ensureColumn(sqlite, 'timeline_events', 'segment_id', 'INTEGER REFERENCES chapter_segments(id) ON DELETE SET NULL')
+  ensureColumn(sqlite, 'timeline_events', 'anchor_invalid', 'INTEGER DEFAULT 0')
+  ensureColumn(sqlite, 'tasks', 'runner_type', "TEXT DEFAULT 'chat'")
+  ensureColumn(sqlite, 'tasks', 'retryable', 'INTEGER DEFAULT 0')
 
+  ensureIndexes(sqlite)
   migrateWorldRules(sqlite)
   backfillCharacterTaxonomy(sqlite)
   backfillMapTaxonomy(sqlite)
   backfillStoryItems(sqlite)
+  backfillContextMetadata(sqlite)
+  backfillStoryStructureLinks(sqlite)
+  backfillStoryStructureMetadata(sqlite)
+  backfillTimelineStructureAnchors(sqlite)
 }
 
 function ensureColumn(
@@ -336,6 +483,43 @@ function ensureColumn(
   if (columns.some((column) => column.name === columnName)) return
 
   sqlite.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnDefinition};`)
+}
+
+function ensureIndexes(sqlite: Database.Database) {
+  sqlite.exec(`
+    CREATE INDEX IF NOT EXISTS idx_timeline_events_novel_sort
+    ON timeline_events (novel_id, time_sort_value, sort_order, id);
+
+    CREATE INDEX IF NOT EXISTS idx_timeline_events_volume
+    ON timeline_events (novel_id, volume_id, time_sort_value, sort_order, id);
+
+    CREATE INDEX IF NOT EXISTS idx_timeline_events_part
+    ON timeline_events (novel_id, part_id, time_sort_value, sort_order, id);
+
+    CREATE INDEX IF NOT EXISTS idx_timeline_events_segment
+    ON timeline_events (novel_id, segment_id, time_sort_value, sort_order, id);
+
+    CREATE INDEX IF NOT EXISTS idx_timeline_events_status
+    ON timeline_events (novel_id, status, time_sort_value, sort_order, id);
+
+    CREATE INDEX IF NOT EXISTS idx_story_volumes_novel_order
+    ON story_volumes (novel_id, volume_number, id);
+
+    CREATE INDEX IF NOT EXISTS idx_story_parts_volume_order
+    ON story_parts (volume_id, part_number, id);
+
+    CREATE INDEX IF NOT EXISTS idx_chapters_part_order
+    ON chapters (part_id, chapter_num, id);
+
+    CREATE INDEX IF NOT EXISTS idx_chapters_novel_order
+    ON chapters (novel_id, chapter_num, id);
+
+    CREATE INDEX IF NOT EXISTS idx_chapter_segments_chapter_order
+    ON chapter_segments (chapter_id, segment_order, id);
+
+    CREATE INDEX IF NOT EXISTS idx_story_memory_checkpoints_scope
+    ON story_memory_checkpoints (novel_id, scope_type, scope_id, version);
+  `)
 }
 
 function getGenreNameMap(sqlite: Database.Database): Map<number, string> {
@@ -366,6 +550,48 @@ function migrateWorldRules(sqlite: Database.Database) {
     const normalized = normalizeWorldRules(parseWorldRulesForMigration(row.world_rules_json), genreName)
     update.run(stringifyWorldRules(normalized as GenreWorldRules), row.id)
   }
+}
+
+function backfillTimelineStructureAnchors(sqlite: Database.Database) {
+  sqlite.exec(`
+    UPDATE timeline_events
+    SET
+      chapter_start_id = COALESCE(
+        chapter_start_id,
+        (SELECT chapter_id FROM chapter_segments WHERE chapter_segments.id = timeline_events.segment_id)
+      ),
+      chapter_end_id = COALESCE(
+        chapter_end_id,
+        (SELECT chapter_id FROM chapter_segments WHERE chapter_segments.id = timeline_events.segment_id)
+      )
+    WHERE segment_id IS NOT NULL;
+
+    UPDATE timeline_events
+    SET
+      part_id = COALESCE(
+        (SELECT part_id FROM chapter_segments WHERE chapter_segments.id = timeline_events.segment_id),
+        (SELECT part_id FROM chapters WHERE chapters.id = COALESCE(timeline_events.chapter_start_id, timeline_events.chapter_end_id)),
+        (SELECT story_parts.id FROM story_parts WHERE story_parts.id = timeline_events.part_id)
+      ),
+      volume_id = COALESCE(
+        (SELECT volume_id FROM chapter_segments WHERE chapter_segments.id = timeline_events.segment_id),
+        (SELECT volume_id FROM chapters WHERE chapters.id = COALESCE(timeline_events.chapter_start_id, timeline_events.chapter_end_id)),
+        (SELECT volume_id FROM story_parts WHERE story_parts.id = timeline_events.part_id),
+        (SELECT story_volumes.id FROM story_volumes WHERE story_volumes.id = timeline_events.volume_id)
+      );
+
+    UPDATE timeline_events
+    SET volume_id = (
+      SELECT volume_id
+      FROM story_parts
+      WHERE story_parts.id = timeline_events.part_id
+    )
+    WHERE part_id IS NOT NULL;
+
+    UPDATE timeline_events
+    SET anchor_invalid = 0
+    WHERE anchor_invalid IS NULL;
+  `)
 }
 
 function backfillCharacterTaxonomy(sqlite: Database.Database) {
@@ -421,6 +647,106 @@ function backfillStoryItems(sqlite: Database.Database) {
   sqlite.exec(`
     UPDATE timeline_events
     SET linked_item_ids_json = COALESCE(linked_item_ids_json, '[]')
+  `)
+}
+
+function backfillStoryStructureLinks(sqlite: Database.Database) {
+  sqlite.exec(`
+    UPDATE story_volumes
+    SET target_words = COALESCE(target_words, 0),
+        status = COALESCE(NULLIF(status, ''), 'planning');
+
+    UPDATE story_parts
+    SET
+      volume_id = COALESCE(
+        volume_id,
+        (
+          SELECT c.volume_id
+          FROM chapters c
+          WHERE c.part_id = story_parts.id
+            AND c.volume_id IS NOT NULL
+          ORDER BY c.chapter_num ASC, c.id ASC
+          LIMIT 1
+        ),
+        (
+          SELECT v.id
+          FROM story_volumes v
+          WHERE v.novel_id = story_parts.novel_id
+          ORDER BY v.volume_number ASC, v.id ASC
+          LIMIT 1
+        )
+      ),
+      target_words = COALESCE(target_words, 0),
+      status = COALESCE(NULLIF(status, ''), 'planning'),
+      start_chapter_num = COALESCE(
+        start_chapter_num,
+        (SELECT MIN(c.chapter_num) FROM chapters c WHERE c.part_id = story_parts.id)
+      ),
+      end_chapter_num = COALESCE(
+        end_chapter_num,
+        (SELECT MAX(c.chapter_num) FROM chapters c WHERE c.part_id = story_parts.id)
+      );
+
+    UPDATE chapters
+    SET
+      volume_id = COALESCE(
+        volume_id,
+        (SELECT p.volume_id FROM story_parts p WHERE p.id = chapters.part_id)
+      ),
+      compiled_from_segments = COALESCE(compiled_from_segments, 0),
+      segment_count = COALESCE(segment_count, 0);
+
+    UPDATE chapter_segments
+    SET
+      part_id = COALESCE(
+        part_id,
+        (SELECT c.part_id FROM chapters c WHERE c.id = chapter_segments.chapter_id)
+      ),
+      volume_id = COALESCE(
+        volume_id,
+        (SELECT c.volume_id FROM chapters c WHERE c.id = chapter_segments.chapter_id)
+      ),
+      present_character_ids_json = COALESCE(present_character_ids_json, '[]'),
+      linked_item_ids_json = COALESCE(linked_item_ids_json, '[]'),
+      risk_tags_json = COALESCE(risk_tags_json, '[]'),
+      segment_type = COALESCE(NULLIF(segment_type, ''), 'scene'),
+      status = COALESCE(NULLIF(status, ''), 'planned');
+  `)
+}
+
+function backfillContextMetadata(sqlite: Database.Database) {
+  sqlite.exec(`
+    UPDATE novels
+    SET context_version = COALESCE(context_version, 1)
+  `)
+
+  sqlite.exec(`
+    UPDATE chapters
+    SET context_version = COALESCE(context_version, 1),
+        stale_reason_json = COALESCE(stale_reason_json, '[]')
+  `)
+
+  sqlite.exec(`
+    UPDATE tasks
+    SET runner_type = COALESCE(NULLIF(runner_type, ''), 'chat'),
+        retryable = COALESCE(retryable, 0)
+  `)
+}
+
+function backfillStoryStructureMetadata(sqlite: Database.Database) {
+  sqlite.exec(`
+    UPDATE chapters
+    SET compiled_from_segments = COALESCE(compiled_from_segments, 0),
+        segment_count = COALESCE(segment_count, 0)
+  `)
+
+  sqlite.exec(`
+    UPDATE story_memory_checkpoints
+    SET resolved_threads_json = COALESCE(resolved_threads_json, '[]'),
+        active_threads_json = COALESCE(active_threads_json, '[]'),
+        forbidden_directions_json = COALESCE(forbidden_directions_json, '[]'),
+        version = COALESCE(version, 1),
+        stale = COALESCE(stale, 0)
   `)
 }
 

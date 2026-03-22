@@ -2,6 +2,7 @@ import { desc, eq } from 'drizzle-orm'
 import { getBuiltinGenreRules, normalizeWorldRules, stringifyWorldRules } from '../../src/shared/genre-system'
 import { getDb } from '../database/db'
 import { chapters, characters, genres, novels } from '../database/schema'
+import { getNovelContextStatus, markNovelContextChanged } from './context-impact.service'
 
 function normalizeWorldRulesJson(raw: string, genreName?: string) {
   try {
@@ -9,6 +10,58 @@ function normalizeWorldRulesJson(raw: string, genreName?: string) {
   } catch {
     return raw
   }
+}
+
+function deriveNovelChangeReasons(
+  current: typeof novels.$inferSelect,
+  next: Partial<{
+    title: string
+    synopsis: string
+    genreId: number
+    userBackground: string
+    status: string
+    totalWords: number
+    targetWords: number
+    settingsJson: string
+    worldRulesJson: string
+    expandedBackground: string
+    modelConfigId: number
+    styleTemplateId: number
+    worldTemplateId: number
+  }>,
+): string[] {
+  const reasons = new Set<string>()
+
+  if (
+    Object.prototype.hasOwnProperty.call(next, 'title')
+    || Object.prototype.hasOwnProperty.call(next, 'synopsis')
+    || Object.prototype.hasOwnProperty.call(next, 'userBackground')
+    || Object.prototype.hasOwnProperty.call(next, 'expandedBackground')
+    || Object.prototype.hasOwnProperty.call(next, 'settingsJson')
+  ) {
+    reasons.add('Core story setup changed')
+  }
+
+  if (
+    Object.prototype.hasOwnProperty.call(next, 'genreId')
+    || Object.prototype.hasOwnProperty.call(next, 'worldRulesJson')
+    || Object.prototype.hasOwnProperty.call(next, 'worldTemplateId')
+  ) {
+    reasons.add('World rules changed')
+  }
+
+  if (Object.prototype.hasOwnProperty.call(next, 'styleTemplateId')) {
+    reasons.add('Writing style guide changed')
+  }
+
+  if (
+    Object.prototype.hasOwnProperty.call(next, 'targetWords')
+    && next.targetWords !== current.targetWords
+  ) {
+    reasons.add('Narrative planning targets changed')
+  }
+
+  return [...reasons]
 }
 
 export function listNovels(filters?: { status?: string; genreId?: number; search?: string }) {
@@ -22,6 +75,7 @@ export function listNovels(filters?: { status?: string; genreId?: number; search
     totalWords: novels.totalWords,
     targetWords: novels.targetWords,
     coverImage: novels.coverImage,
+    contextVersion: novels.contextVersion,
     createdAt: novels.createdAt,
     updatedAt: novels.updatedAt,
     genreName: genres.name,
@@ -50,6 +104,7 @@ export function getNovel(id: number) {
     worldRulesJson: novels.worldRulesJson,
     styleTemplateId: novels.styleTemplateId,
     worldTemplateId: novels.worldTemplateId,
+    contextVersion: novels.contextVersion,
     modelConfigId: novels.modelConfigId,
     createdAt: novels.createdAt,
     updatedAt: novels.updatedAt,
@@ -128,11 +183,17 @@ export function updateNovel(id: number, data: Partial<{
     }
   }
 
+  const changeReasons = deriveNovelChangeReasons(current, data)
+
   db.update(novels).set({
     ...data,
     worldRulesJson: normalizedWorldRules,
     updatedAt: new Date().toISOString(),
   }).where(eq(novels.id, id)).run()
+
+  if (changeReasons.length > 0) {
+    markNovelContextChanged(id, changeReasons)
+  }
 }
 
 export function deleteNovel(id: number) {
@@ -155,3 +216,5 @@ export function getNovelStats(id: number) {
     characterCount: charList.length,
   }
 }
+
+export { getNovelContextStatus }

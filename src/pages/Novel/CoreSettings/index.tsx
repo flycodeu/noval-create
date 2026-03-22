@@ -1,1680 +1,782 @@
-import React, { useEffect, useState, useCallback } from 'react'
+﻿import React, { useEffect, useMemo, useState } from 'react'
+import { Alert, Button, Drawer, Form, Input, InputNumber, Modal, Select, Slider, Space, Tag, message } from 'antd'
 import {
-  Form, Input, InputNumber, Button, Collapse, Select, Slider, message, Row, Col,
-  Popover, Radio, Badge, Alert, Tooltip, Modal
-} from 'antd'
-import {
-  SaveOutlined, SettingOutlined, PlusOutlined, DeleteOutlined, RobotOutlined,
+  ArrowRightOutlined,
+  DeleteOutlined,
+  PlusOutlined,
+  RobotOutlined,
+  SaveOutlined,
 } from '@ant-design/icons'
+import { useNavigate } from 'react-router-dom'
 import { useNovelStore } from '../../../stores/novel.store'
-import { useAIDraftStore } from '../../../stores/aiDraft.store'
-import AIGenerateButton from '../../../components/AIGenerateButton'
-import AIScorePanel from '../../../components/AIScorePanel'
-import { parseSections } from '../../../utils/text'
-import type { AIScoreResult, SubPlot } from '../../../types'
+import type { SubPlot } from '../../../types'
 import type {
   CoreSettingsGenerationProgressEvent,
   CoreSettingsGenerationResult,
 } from '../../../shared/core-settings-generation'
 import {
-  normalizeSubPlot,
-  parseSubPlotFrameworkResponse,
-  type PromptMessage,
-} from '../../../shared/subplot-framework'
-import { buildHumanLanguageRules } from '../../../shared/prompt-library'
+  buildStorySettingsPayload,
+  parseStorySettingsSnapshot,
+  type StoryEndingType,
+} from '../../../shared/story-settings'
+import {
+  isCharacterRosterReady,
+  isItemsEquipmentReady,
+  isMapStructureReady,
+  isStoryPlotReady,
+  isWorldFoundationReady,
+  loadWorkflowStats,
+} from '../workflow'
 import {
   WorkspaceContextSummary,
   WorkspaceMetric,
   WorkspacePage,
   WorkspacePanel,
 } from '../components/WorkspaceShell'
-import { useWorkspaceStore } from '../../../stores/workspace.store'
 
-interface Props { novelId: number }
-
-// AdvancedAI 配置（页面级状态）
-interface AIConfig {
-  drawCount: 1 | 2 | 3
-  requirements: string
+interface Props {
+  novelId: number
 }
 
-const DEFAULT_SUBPLOT_BATCH_COUNT = 10
+interface StoryDesignFormValues {
+  story_goal: string
+  core_conflict: string
+  main_plot: string
+  rhythm_setup: number
+  rhythm_conflict: number
+  rhythm_ending: number
+  ending_type: StoryEndingType | ''
+  ending: string
+  subplot_batch_count: number
+}
+
+type GenerationMode = 'all' | 'subplots'
+type SubplotLaneKey = 'setup' | 'escalation' | 'pressure' | 'payoff' | 'unscheduled'
+
+const DEFAULT_SUBPLOT_BATCH_COUNT = 8
 const MIN_SUBPLOT_BATCH_COUNT = 1
 const MAX_SUBPLOT_BATCH_COUNT = 20
-const SUBPLOT_GENERATION_CHUNK_SIZE = 3
-const SUBPLOT_GENERATION_RETRY_LIMIT = 1
-const SUBPLOT_SUMMARY_LIMIT = 8
-const SUBPLOT_MAX_CONFLICT_LENGTH = 90
-const SUBPLOT_MAX_MAINLINE_LINK_LENGTH = 60
-const SUBPLOT_PROGRESS_MESSAGE_KEY = 'subplot-batch-generation'
-
-type StoryFieldName = 'story_goal' | 'core_conflict' | 'main_plot' | 'ending'
-
-interface SubplotGenerationProgress {
-  completed: number
-  currentBatch: number
-  total: number
-  totalBatches: number
+const EMPTY_STATS = {
+  mapCount: 0,
+  characterCount: 0,
+  itemCount: 0,
+  outlineCount: 0,
+  timelineCount: 0,
+  chapterCount: 0,
+  completedChapterCount: 0,
+  totalWords: 0,
+  hasProtagonist: false,
 }
 
-type GeneratedApplyMode = 'draft' | 'save'
+const SUBPLOT_LANES: Array<{ key: SubplotLaneKey; label: string; hint: string }> = [
+  { key: 'setup', label: '前段铺垫', hint: '埋钩子、立代价、把支线挂到主线。' },
+  { key: 'escalation', label: '中段升温', hint: '让人物关系与主线压力持续抬高。' },
+  { key: 'pressure', label: '后段反压', hint: '让支线反咬主线，制造失控与代价。' },
+  { key: 'payoff', label: '回收兑现', hint: '回收伏笔、兑现代价、落下后果。' },
+  { key: 'unscheduled', label: '未排回收', hint: '尚未安排回收章位，后期失控风险最高。' },
+]
 
-function clampSubplotBatchCount(value: unknown): number {
-  const numericValue = typeof value === 'number'
-    ? value
-    : typeof value === 'string'
-      ? Number(value)
-      : NaN
+const ENDING_OPTIONS: Array<{ value: StoryEndingType; label: string }> = [
+  { value: 'HE', label: '圆满结局（HE）' },
+  { value: 'BE', label: '悲剧结局（BE）' },
+  { value: 'open', label: '开放结局' },
+  { value: 'multi', label: '多线并收' },
+  { value: 'HE_BE', label: '部分圆满，部分失去' },
+]
 
-  if (!Number.isFinite(numericValue)) return DEFAULT_SUBPLOT_BATCH_COUNT
-  return Math.min(MAX_SUBPLOT_BATCH_COUNT, Math.max(MIN_SUBPLOT_BATCH_COUNT, Math.round(numericValue)))
+function emptySubplot(): SubPlot {
+  return {
+    name: '',
+    characters: '',
+    conflict: '',
+    mainlineLink: '',
+    endChapter: '',
+  }
 }
 
-function getSubplotSummary(subplots: SubPlot[], limit = 3): string {
+function compactText(value?: string | null, max = 44): string {
+  const text = value?.trim() || ''
+  if (!text) return '未补背景'
+  return text.length > max ? `${text.slice(0, max)}...` : text
+}
+
+function clampBatchCount(value: unknown): number {
+  const numeric = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(numeric)) return DEFAULT_SUBPLOT_BATCH_COUNT
+  return Math.min(MAX_SUBPLOT_BATCH_COUNT, Math.max(MIN_SUBPLOT_BATCH_COUNT, Math.round(numeric)))
+}
+
+function parseChapterMarker(value?: string): number | null {
+  if (!value) return null
+  const match = value.match(/\d+/)
+  if (!match) return null
+  const parsed = Number(match[0])
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+}
+
+function splitCharacterNames(value?: string): string[] {
+  if (!value) return []
+  return value
+    .split(/[、，,\/\s]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function getEstimatedChapterTotal(targetWords: number | undefined, subplots: SubPlot[]): number {
+  const byTarget = targetWords ? Math.ceil(targetWords / 3000) : 0
+  const bySubplotEnd = subplots.reduce((maxValue, subplot) => {
+    const end = parseChapterMarker(subplot.endChapter)
+    return end && end > maxValue ? end : maxValue
+  }, 0)
+  const byScale = subplots.length > 0 ? Math.max(12, subplots.length * 4) : 12
+  return Math.max(byTarget, bySubplotEnd, byScale)
+}
+
+function resolveLane(endChapter: string, estimatedTotal: number): SubplotLaneKey {
+  const chapter = parseChapterMarker(endChapter)
+  if (!chapter) return 'unscheduled'
+  const ratio = chapter / Math.max(estimatedTotal, 1)
+  if (ratio <= 0.25) return 'setup'
+  if (ratio <= 0.55) return 'escalation'
+  if (ratio <= 0.82) return 'pressure'
+  return 'payoff'
+}
+
+function getSubplotCompleteness(subplot: SubPlot): number {
+  const fields = [subplot.name, subplot.characters, subplot.conflict, subplot.mainlineLink, subplot.endChapter]
+  const completed = fields.filter((field) => field && field.trim()).length
+  return Math.round((completed / fields.length) * 100)
+}
+
+function buildLegacySubplotText(subplots: SubPlot[]): string {
   return subplots
-    .slice(0, limit)
-    .map((sub, index) => {
-      const parts = [sub.name, sub.conflict, sub.mainlineLink].filter(Boolean)
-      return parts.length > 0 ? `${index + 1}. ${parts.join(' / ')}` : ''
+    .map((subplot, index) => {
+      const parts = [
+        subplot.name ? `名称：${subplot.name}` : '',
+        subplot.characters ? `人物：${subplot.characters}` : '',
+        subplot.conflict ? `冲突：${subplot.conflict}` : '',
+        subplot.mainlineLink ? `关联：${subplot.mainlineLink}` : '',
+        subplot.endChapter ? `回收：${subplot.endChapter}` : '',
+      ].filter(Boolean)
+      return parts.length > 0 ? `${index + 1}. ${parts.join('；')}` : ''
     })
     .filter(Boolean)
     .join('\n')
 }
 
-function buildSubplotJsonHardRules(example: string, keepOrder = false): string {
-  const lines = [
-    'JSON output rules:',
-    '- Output JSON only. No explanation, no title, no numbering, no code fence, no comments.',
-    '- Use only these keys: name / characters / conflict / mainlineLink / endChapter.',
-    '- Every string value must stay inside double quotes. Never output {"conflict": bare text}.',
-    '- conflict must be one concrete sentence. mainlineLink must be one concrete sentence.',
-  ]
-
-  if (keepOrder) {
-    lines.push('- Keep item count, item order, and field order exactly the same as the input.')
-  }
-
-  lines.push(`- Example: ${example}`)
-  return lines.join('\n')
-}
-
-function summarizeSubplotWarnings(warnings: string[], fallback: string): string {
-  const unique = [...new Set(warnings.map((warning) => warning.trim()).filter(Boolean))]
-  if (unique.length === 0) return fallback
-  const detail = unique.slice(0, 2).join('\uFF1B')
-  return `${fallback} - ${detail}${unique.length > 2 ? ' / more in Task Center' : ''}`
-}
-
-function getFieldPromptGuidance(fieldName: StoryFieldName, label: string) {
-  switch (fieldName) {
-    case 'story_goal':
-      return {
-        label,
-        duty: '只写故事最终要抵达的目标、终局状态或核心命题。',
-        requirements: [
-          '回答“这个故事最后要实现什么”，而不是“中间会发生什么”。',
-          '可以带出主题方向，但要落在明确的终局追求或最终改变上。',
-        ],
-        avoid: [
-          '不要展开事件流程、阶段任务或场景细节。',
-          '不要把阻碍、敌人或困难写成目标本身。',
-          '不要直接复述主线剧情或核心冲突。',
-        ],
-      }
-    case 'core_conflict':
-      return {
-        label,
-        duty: '只写阻碍目标实现的核心对立、不可回避的代价与矛盾张力。',
-        requirements: [
-          '回答“为什么这个目标难以实现”，而不是“最后想实现什么”。',
-          '要明确对立双方、冲突来源或必须付出的代价。',
-        ],
-        avoid: [
-          '不要写成终局目标、主题口号或人物愿望。',
-          '不要用剧情流水账代替冲突本身。',
-          '不要把主线概述换一种说法重复出来。',
-        ],
-      }
-    case 'main_plot':
-      return {
-        label,
-        duty: '只写围绕目标与冲突展开的关键事件链，强调因果推进、升级和转折。',
-        requirements: [
-          '回答“故事如何一步步推进到终局”，至少体现起点、升级、转折与逼近收束。',
-          '主线必须显式承接故事核心目标与核心冲突，不能另起一套故事。',
-        ],
-        avoid: [
-          '不要重新定义故事核心目标或核心冲突。',
-          '不要只写抽象主题句、人物评价或世界观说明。',
-          '不要只列场景，不写事件之间的因果关系。',
-        ],
-      }
-    case 'ending':
-      return {
-        label,
-        duty: '只写故事最终如何收束、主要矛盾如何落地以及结局余波。',
-        requirements: [
-          '结局要回应既定目标、冲突和主线推进结果。',
-          '说明收束状态，而不是重新铺陈新的主线。',
-        ],
-        avoid: [
-          '不要把未发生的中段情节写进结局字段。',
-          '不要只写价值判断，不写结果落点。',
-        ],
-      }
-  }
+function normalizeSubplots(list: Array<Partial<SubPlot> | null | undefined>): SubPlot[] {
+  return list.map((item) => ({
+    name: item?.name?.trim() || '',
+    characters: item?.characters?.trim() || '',
+    conflict: item?.conflict?.trim() || '',
+    mainlineLink: item?.mainlineLink?.trim() || '',
+    endChapter: item?.endChapter?.trim() || '',
+  }))
 }
 
 export default function CoreSettings({ novelId }: Props) {
+  const navigate = useNavigate()
   const { currentNovel, setCurrentNovel } = useNovelStore()
-  const { saveDraft, clearByPrefix } = useAIDraftStore()
-  const { mode } = useWorkspaceStore()
-  const [form] = Form.useForm()
+  const [form] = Form.useForm<StoryDesignFormValues>()
+  const [subplots, setSubplots] = useState<SubPlot[]>([])
   const [saving, setSaving] = useState(false)
-  const [subPlots, setSubPlots] = useState<SubPlot[]>([])
-  const [aiConfig, setAIConfig] = useState<AIConfig>({ drawCount: 1, requirements: '' })
-  const [settingsOpen, setSettingsOpen] = useState(false)
-  const [subplotGenerationProgress, setSubplotGenerationProgress] = useState<SubplotGenerationProgress | null>(null)
-  const [isGeneratingCoreSettings, setIsGeneratingCoreSettings] = useState(false)
-  const [coreSettingsProgress, setCoreSettingsProgress] = useState<CoreSettingsGenerationProgressEvent | null>(null)
-  const [pendingGeneratedSettings, setPendingGeneratedSettings] = useState<CoreSettingsGenerationResult | null>(null)
-  const [generatedApplyModalOpen, setGeneratedApplyModalOpen] = useState(false)
-  const [applyingGeneratedMode, setApplyingGeneratedMode] = useState<GeneratedApplyMode | null>(null)
-  const [isBackgroundExpanded, setIsBackgroundExpanded] = useState(false)
+  const [generatingMode, setGeneratingMode] = useState<GenerationMode | null>(null)
+  const [generationProgress, setGenerationProgress] = useState<CoreSettingsGenerationProgressEvent | null>(null)
+  const [selectedSubplotIndex, setSelectedSubplotIndex] = useState<number | null>(null)
+  const [stats, setStats] = useState(EMPTY_STATS)
 
-  // 检查是否有待填充的草稿
-  const draftPrefix = `novel:${novelId}:coresettings`
-  const hasDraft = useAIDraftStore(s => Object.keys(s.drafts).some(k => k.startsWith(draftPrefix)))
-
-  const genreContext = currentNovel?.genreName || '未知题材'
-  const novelBackground = currentNovel?.expandedBackground || currentNovel?.synopsis || ''
-  const backgroundBasisText = novelBackground.trim() || '尚未补充背景，建议先写清世界处境'
-  const canToggleBackgroundBasis = backgroundBasisText.length > 120
-  const storyGoalValue = Form.useWatch('story_goal', form)
-  const coreConflictValue = Form.useWatch('core_conflict', form)
-  const mainPlotValue = Form.useWatch('main_plot', form)
-  const endingValue = Form.useWatch('ending', form)
-  const rhythmSetupValue = Form.useWatch('rhythm_setup', form)
-  const rhythmConflictValue = Form.useWatch('rhythm_conflict', form)
-  const rhythmEndingValue = Form.useWatch('rhythm_ending', form)
+  const settings = useMemo(
+    () => parseStorySettingsSnapshot(currentNovel?.settingsJson),
+    [currentNovel?.settingsJson],
+  )
 
   useEffect(() => {
-    if (currentNovel?.settingsJson) {
-      try {
-        const settings = JSON.parse(currentNovel.settingsJson)
-        form.setFieldsValue({
-          subplot_batch_count: DEFAULT_SUBPLOT_BATCH_COUNT,
-          ...settings,
-        })
-        setSubPlots(Array.isArray(settings.sub_plots_list)
-          ? settings.sub_plots_list.map(normalizeSubPlot).filter((subplot: SubPlot | null): subplot is SubPlot => Boolean(subplot))
-          : [])
-      } catch {
-        form.setFieldsValue({ subplot_batch_count: DEFAULT_SUBPLOT_BATCH_COUNT })
-        setSubPlots([])
-      }
-    } else {
-      form.setFieldsValue({ subplot_batch_count: DEFAULT_SUBPLOT_BATCH_COUNT })
-      setSubPlots([])
+    form.setFieldsValue({
+      story_goal: settings.storyDesign.storyGoal,
+      core_conflict: settings.storyDesign.coreConflict,
+      main_plot: settings.storyDesign.mainPlot,
+      rhythm_setup: settings.storyDesign.rhythmSetup ?? 30,
+      rhythm_conflict: settings.storyDesign.rhythmConflict ?? 50,
+      rhythm_ending: settings.storyDesign.rhythmEnding ?? 20,
+      ending_type: settings.storyDesign.endingType ?? '',
+      ending: settings.storyDesign.ending,
+      subplot_batch_count: DEFAULT_SUBPLOT_BATCH_COUNT,
+    })
+    setSubplots(normalizeSubplots(settings.storyDesign.subPlotsList))
+    setSelectedSubplotIndex(null)
+  }, [form, settings])
+
+  useEffect(() => {
+    let active = true
+    void loadWorkflowStats(novelId).then((workflowStats) => {
+      if (active) setStats(workflowStats)
+    })
+    return () => {
+      active = false
     }
-  }, [currentNovel, form])
-
-  useEffect(() => {
-    setIsBackgroundExpanded(false)
-  }, [backgroundBasisText, novelId])
-
-  const protagonistReference = '主角'
-  const protagonistRule = '在核心设定与支线设定中，凡涉及主角，一律只使用「主角」指代；禁止出现任何具体姓名、旧名字、化名或代号；若输入中已有姓名，也必须在输出中统一改写为「主角」。'
-  const isGeneratingSubplots = Boolean(subplotGenerationProgress)
-  const isAnyAIActionRunning = isGeneratingSubplots || isGeneratingCoreSettings
+  }, [novelId])
 
   useEffect(() => {
     const unsubscribe = window.electron.on('ai:core-settings-progress', (...args) => {
       const payload = args[0] as CoreSettingsGenerationProgressEvent | undefined
       if (!payload || payload.novelId !== novelId) return
-      setCoreSettingsProgress(payload)
+      setGenerationProgress(payload)
     })
-
     return unsubscribe
   }, [novelId])
 
-  const buildRelatedSettingsContext = useCallback((fieldName?: string) => {
-    const values = form.getFieldsValue(['story_goal', 'core_conflict', 'main_plot', 'ending'])
-    const relatedLines = [
-      fieldName !== 'story_goal' && values.story_goal ? `【故事核心目标】${values.story_goal}` : '',
-      fieldName !== 'core_conflict' && values.core_conflict ? `【核心冲突】${values.core_conflict}` : '',
-      fieldName !== 'main_plot' && values.main_plot ? `【主线剧情】${values.main_plot}` : '',
-      fieldName !== 'ending' && values.ending ? `【结局方向】${values.ending}` : '',
-    ].filter(Boolean)
+  const formValues = (Form.useWatch([], form) as Partial<StoryDesignFormValues> | undefined) || {}
+  const premiseReady = settings.premiseReadyCount >= 4
+  const assetReadyCount = [
+    isWorldFoundationReady(currentNovel),
+    isMapStructureReady(stats),
+    isCharacterRosterReady(stats),
+    isItemsEquipmentReady(stats),
+  ].filter(Boolean).length
+  const storyReady = isStoryPlotReady(currentNovel)
+  const watchedBatchCount = Form.useWatch('subplot_batch_count', form) as number | undefined
+  const batchCount = clampBatchCount(watchedBatchCount)
+  const estimatedChapterTotal = useMemo(
+    () => getEstimatedChapterTotal(currentNovel?.targetWords, subplots),
+    [currentNovel?.targetWords, subplots],
+  )
+  const anchorReadyCount = [
+    formValues.story_goal,
+    formValues.core_conflict,
+    formValues.main_plot,
+    formValues.ending,
+  ].filter((value) => typeof value === 'string' && value.trim()).length
+  const subplotLinkedCount = subplots.filter((subplot) => subplot.mainlineLink.trim()).length
+  const subplotScheduledCount = subplots.filter((subplot) => Boolean(parseChapterMarker(subplot.endChapter))).length
+  const selectedSubplot = selectedSubplotIndex === null ? null : subplots[selectedSubplotIndex] || null
 
-    if (subPlots.length > 0) {
-      const subplotSummary = getSubplotSummary(subPlots)
+  const subplotBoard = useMemo(() => {
+    const lanes = SUBPLOT_LANES.map((lane) => ({
+      ...lane,
+      items: [] as Array<SubPlot & { index: number; completeness: number }>,
+    }))
+    const laneMap = new Map(lanes.map((lane) => [lane.key, lane]))
 
-      if (subplotSummary) {
-        relatedLines.push(`【支线摘要】\n${subplotSummary}`)
-      }
-    }
+    subplots.forEach((subplot, index) => {
+      const lane = resolveLane(subplot.endChapter, estimatedChapterTotal)
+      laneMap.get(lane)?.items.push({
+        ...subplot,
+        index,
+        completeness: getSubplotCompleteness(subplot),
+      })
+    })
 
-    return relatedLines.join('\n')
-  }, [form, subPlots])
-
-  const buildOptimizationMessages = useCallback((
-    fieldName: StoryFieldName,
-    label: string,
-    content: string,
-    result: AIScoreResult,
-    extraReqs: string,
-  ) => {
-    const guidance = getFieldPromptGuidance(fieldName, label)
-    const sorted = [...result.dimensions].sort((a, b) => a.score - b.score)
-    const dimSuggestions = sorted.slice(0, 3)
-      .filter(d => d.suggestion)
-      .map(d => `${d.name}（当前${d.score}分）：${d.suggestion}`)
-      .join('\n')
-    const topFixes = result.top_fixes.map((fix, index) => `${index + 1}. ${fix}`).join('\n')
-    const relatedContext = buildRelatedSettingsContext(fieldName)
-
-    return [{
-      role: 'user' as const,
-      content: `你在返修小说策划案里的【${label}】。请只修这一项，让它更适合继续往人物、大纲和正文推进。
-【本项职责】${guidance.duty}
-【当前内容】${content}
-【小说背景】${novelBackground || '（暂无补充背景）'}
-【题材】${genreContext}
-【当前主角指代】${protagonistReference}
-【主角称谓规则】${protagonistRule}
-${relatedContext ? `【已确定的关联设定】
-${relatedContext}
-` : ''}【优先修复问题】${topFixes}
-【重点改进方向】${dimSuggestions || '请优先修正最弱维度，并补足具体细节。'}
-${extraReqs ? `【追加要求】${extraReqs}` : ''}
-【语言要求】
-${buildHumanLanguageRules([
-  '重点修复主谓宾搭配错误、对象类别错配和抽象概念堆砌。',
-  '贴近当前题材常见的叙述气质和策划口径，不模仿具体作者。',
-])}
-
-返修原则：
-- ${guidance.requirements.join('\n- ')}
-- 只在当前背景、题材和已确定设定内返修，不改写成另一套故事
-- 先补因果、动机、结果落点，再处理气质和文气
-- 本轮只处理【${label}】，不要越界替其他字段下结论
-- 若上下文出现旧名字、占位名或彼此冲突的人名，统一按主角称谓规则处理
-- 与其他字段的人物关系、事件因果和情绪走向保持一致，不得自相矛盾
-- 不要写成宣传语、百科说明或空洞主题口号
-- 禁止事项：
-- ${guidance.avoid.join('\n- ')}
-- 直接输出返修后的纯文本内容，不要解释，不要使用 Markdown。`,
-    }]
-  }, [buildRelatedSettingsContext, genreContext, novelBackground, protagonistReference, protagonistRule])
+    return lanes
+  }, [estimatedChapterTotal, subplots])
 
   const handleSave = async () => {
+    const values = await form.validateFields()
     setSaving(true)
+
     try {
-      const values = form.getFieldsValue(true)
-      const data = { ...values, sub_plots_list: subPlots }
-      await window.electron.novel.update(novelId, { settingsJson: JSON.stringify(data) })
+      const payload = buildStorySettingsPayload({
+        storyDesign: {
+          storyGoal: values.story_goal.trim(),
+          coreConflict: values.core_conflict.trim(),
+          mainPlot: values.main_plot.trim(),
+          subPlotsList: subplots,
+          subPlotsText: buildLegacySubplotText(subplots),
+          rhythmSetup: values.rhythm_setup,
+          rhythmConflict: values.rhythm_conflict,
+          rhythmEnding: values.rhythm_ending,
+          endingType: values.ending_type || undefined,
+          ending: values.ending.trim(),
+        },
+      }, currentNovel?.settingsJson)
+
+      await window.electron.novel.update(novelId, {
+        settingsJson: JSON.stringify(payload),
+      })
+
       const updated = await window.electron.novel.get(novelId)
       if (updated) setCurrentNovel(updated)
-      clearByPrefix(draftPrefix)
-      message.success('已保存')
-    } catch {
-      message.error('保存失败')
+      message.success('故事设计已保存。')
+    } catch (error) {
+      console.error(error)
+      message.error(error instanceof Error ? error.message : '故事设计保存失败。')
     } finally {
       setSaving(false)
     }
   }
 
-  const resetCoreSettingsEditor = useCallback(() => {
-    form.resetFields()
-    form.setFieldsValue({ subplot_batch_count: DEFAULT_SUBPLOT_BATCH_COUNT })
-    setSubPlots([])
-    setSubplotGenerationProgress(null)
-    setIsGeneratingCoreSettings(false)
-    setCoreSettingsProgress(null)
-    setPendingGeneratedSettings(null)
-    setGeneratedApplyModalOpen(false)
-    setApplyingGeneratedMode(null)
-    setSettingsOpen(false)
-    setIsBackgroundExpanded(false)
-    clearByPrefix(draftPrefix)
-    message.destroy(SUBPLOT_PROGRESS_MESSAGE_KEY)
-    message.success('当前流程内容已清空，未保存前不会影响已保存设定')
-  }, [clearByPrefix, draftPrefix, form])
-
-  const handleClearCurrentFlow = useCallback(() => {
-    if (isAnyAIActionRunning) return
-
+  const clearStoryDesign = () => {
     Modal.confirm({
-      title: '清空当前流程内容？',
-      content: '会清空当前页表单、支线和 AI 草稿，但不会直接覆盖已保存的核心设定。',
+      title: '清空当前故事设计',
+      content: '会清空主线锚点、节奏、结局和支线卡片，但不会直接覆盖已经保存的小说设定。确认继续？',
       okText: '确认清空',
       okType: 'danger',
       cancelText: '取消',
-      onOk: resetCoreSettingsEditor,
+      onOk: () => {
+        form.setFieldsValue({
+          story_goal: '',
+          core_conflict: '',
+          main_plot: '',
+          rhythm_setup: 30,
+          rhythm_conflict: 50,
+          rhythm_ending: 20,
+          ending_type: '',
+          ending: '',
+          subplot_batch_count: DEFAULT_SUBPLOT_BATCH_COUNT,
+        })
+        setSubplots([])
+        setSelectedSubplotIndex(null)
+        message.success('当前故事设计已清空。')
+      },
     })
-  }, [isAnyAIActionRunning, resetCoreSettingsEditor])
-
-  // AI扩展通用处理：填入字段并保存草稿
-  const applyAndSaveDraft = (fieldName: string, value: string, label: string) => {
-    form.setFieldValue(fieldName, value)
-    saveDraft(`${draftPrefix}:${fieldName}`, value, label)
   }
 
-  const hasSuccessfulGeneratedStep = useCallback((
-    result: CoreSettingsGenerationResult,
-    key: CoreSettingsGenerationResult['steps'][number]['key'],
-  ) => {
-    return result.steps.some((step) => step.key === key && (step.status === 'success' || step.status === 'warning'))
-  }, [])
+  const clearSubplots = () => {
+    Modal.confirm({
+      title: '清空支线卡片',
+      content: '只会清空当前支线列表，不影响主线锚点、节奏和结局。',
+      okText: '确认清空',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: () => {
+        setSubplots([])
+        setSelectedSubplotIndex(null)
+        message.success('支线卡片已清空。')
+      },
+    })
+  }
 
-  const applyGeneratedSettingsToForm = useCallback((result: CoreSettingsGenerationResult, saveAsDraft: boolean) => {
-    const normalizedSubplots = result.sub_plots_list
-      .map(normalizeSubPlot)
-      .filter((subplot): subplot is SubPlot => Boolean(subplot))
-    const nextValues: Record<string, unknown> = {}
+  const applyGeneratedResult = (result: CoreSettingsGenerationResult) => {
+    form.setFieldsValue({
+      story_goal: result.story_goal || '',
+      core_conflict: result.core_conflict || '',
+      main_plot: result.main_plot || '',
+      rhythm_setup: result.rhythm_setup || 30,
+      rhythm_conflict: result.rhythm_conflict || 50,
+      rhythm_ending: result.rhythm_ending || 20,
+      ending_type: result.ending_type || '',
+      ending: result.ending || '',
+    })
+    setSubplots(normalizeSubplots(result.sub_plots_list))
+    setSelectedSubplotIndex(null)
+  }
 
-    if (hasSuccessfulGeneratedStep(result, 'story_goal') && result.story_goal.trim()) {
-      nextValues.story_goal = result.story_goal
-    }
-    if (hasSuccessfulGeneratedStep(result, 'core_conflict') && result.core_conflict.trim()) {
-      nextValues.core_conflict = result.core_conflict
-    }
-    if (hasSuccessfulGeneratedStep(result, 'main_plot') && result.main_plot.trim()) {
-      nextValues.main_plot = result.main_plot
-    }
-    if (hasSuccessfulGeneratedStep(result, 'rhythm')) {
-      nextValues.rhythm_setup = result.rhythm_setup
-      nextValues.rhythm_conflict = result.rhythm_conflict
-      nextValues.rhythm_ending = result.rhythm_ending
-    }
-    if (hasSuccessfulGeneratedStep(result, 'ending') && result.ending.trim()) {
-      nextValues.ending_type = result.ending_type
-      nextValues.ending = result.ending
-    }
-
-    if (Object.keys(nextValues).length > 0) {
-      form.setFieldsValue(nextValues)
-    }
-    if (hasSuccessfulGeneratedStep(result, 'sub_plots_list')) {
-      setSubPlots(normalizedSubplots)
-    }
-
-    if (!saveAsDraft) return
-
-    if (hasSuccessfulGeneratedStep(result, 'story_goal') && result.story_goal.trim()) {
-      saveDraft(`${draftPrefix}:story_goal`, result.story_goal, '故事核心目标（一键生成）')
-    }
-    if (hasSuccessfulGeneratedStep(result, 'core_conflict') && result.core_conflict.trim()) {
-      saveDraft(`${draftPrefix}:core_conflict`, result.core_conflict, '核心冲突（一键生成）')
-    }
-    if (hasSuccessfulGeneratedStep(result, 'main_plot') && result.main_plot.trim()) {
-      saveDraft(`${draftPrefix}:main_plot`, result.main_plot, '主线剧情（一键生成）')
-    }
-    if (hasSuccessfulGeneratedStep(result, 'sub_plots_list')) {
-      saveDraft(`${draftPrefix}:sub_plots_list`, JSON.stringify(normalizedSubplots, null, 2), '支线剧情（一键生成）')
-    }
-    if (hasSuccessfulGeneratedStep(result, 'rhythm')) {
-      saveDraft(
-        `${draftPrefix}:rhythm`,
-        `前期铺垫 ${result.rhythm_setup}% / 中期冲突 ${result.rhythm_conflict}% / 后期收束 ${result.rhythm_ending}%`,
-        '叙事节奏（一键生成）',
-      )
-    }
-    if (hasSuccessfulGeneratedStep(result, 'ending') && result.ending.trim()) {
-      saveDraft(`${draftPrefix}:ending`, result.ending, '结局设定（一键生成）')
-    }
-  }, [draftPrefix, form, hasSuccessfulGeneratedStep, saveDraft])
-
-  const persistGeneratedSettings = useCallback(async (result: CoreSettingsGenerationResult) => {
-    const values = form.getFieldsValue(true)
-    const normalizedSubplots = result.sub_plots_list
-      .map(normalizeSubPlot)
-      .filter((subplot): subplot is SubPlot => Boolean(subplot))
-    const data = {
-      ...values,
-    }
-
-    if (hasSuccessfulGeneratedStep(result, 'story_goal') && result.story_goal.trim()) {
-      data.story_goal = result.story_goal
-    }
-    if (hasSuccessfulGeneratedStep(result, 'core_conflict') && result.core_conflict.trim()) {
-      data.core_conflict = result.core_conflict
-    }
-    if (hasSuccessfulGeneratedStep(result, 'main_plot') && result.main_plot.trim()) {
-      data.main_plot = result.main_plot
-    }
-    if (hasSuccessfulGeneratedStep(result, 'sub_plots_list')) {
-      data.sub_plots_list = normalizedSubplots
-    }
-    if (hasSuccessfulGeneratedStep(result, 'rhythm')) {
-      data.rhythm_setup = result.rhythm_setup
-      data.rhythm_conflict = result.rhythm_conflict
-      data.rhythm_ending = result.rhythm_ending
-    }
-    if (hasSuccessfulGeneratedStep(result, 'ending') && result.ending.trim()) {
-      data.ending_type = result.ending_type
-      data.ending = result.ending
-    }
-
-    setSaving(true)
-    try {
-      await window.electron.novel.update(novelId, { settingsJson: JSON.stringify(data) })
-      const updated = await window.electron.novel.get(novelId)
-      if (updated) setCurrentNovel(updated)
-      form.setFieldsValue(data)
-      if (hasSuccessfulGeneratedStep(result, 'sub_plots_list')) {
-        setSubPlots(normalizedSubplots)
-      }
-      clearByPrefix(draftPrefix)
-      message.success('核心设定已生成并保存')
-      return true
-    } catch {
-      message.error('核心设定保存失败')
-      return false
-    } finally {
-      setSaving(false)
-    }
-  }, [clearByPrefix, draftPrefix, form, hasSuccessfulGeneratedStep, novelId, setCurrentNovel])
-
-  const handleApplyGeneratedSettings = useCallback(async (mode: GeneratedApplyMode) => {
-    if (!pendingGeneratedSettings) return
-
-    setApplyingGeneratedMode(mode)
-    try {
-      if (mode === 'draft') {
-        applyGeneratedSettingsToForm(pendingGeneratedSettings, true)
-        message.success('一键生成结果已填入表单，请确认后保存')
-      } else {
-        const saved = await persistGeneratedSettings(pendingGeneratedSettings)
-        if (!saved) return
-      }
-
-      setGeneratedApplyModalOpen(false)
-      setPendingGeneratedSettings(null)
-      setCoreSettingsProgress(null)
-    } finally {
-      setApplyingGeneratedMode(null)
-    }
-  }, [applyGeneratedSettingsToForm, pendingGeneratedSettings, persistGeneratedSettings])
-
-  const getSubplotBatchCount = useCallback(() => {
-    return clampSubplotBatchCount(form.getFieldValue('subplot_batch_count'))
-  }, [form])
-
-  const handleGenerateCoreSettings = useCallback(async () => {
-    if (isAnyAIActionRunning) return
-
-    setIsGeneratingCoreSettings(true)
-    setCoreSettingsProgress(null)
-    setPendingGeneratedSettings(null)
-    setGeneratedApplyModalOpen(false)
+  const handleGenerate = async (mode: GenerationMode) => {
+    setGeneratingMode(mode)
+    setGenerationProgress(null)
 
     try {
+      const values = form.getFieldsValue()
+      const requirements = [
+        '故事设计必须建立在已经存在的世界规则、地图、人物和物品基础上，不要把背景底盘直接写成剧情。',
+        '减少 AI 腔、减少重复句式、减少空洞口号、减少无关支线。',
+        '命名和措辞必须符合常规人类语言，禁止生造不连贯词语。',
+        settings.writingRules.antiAiFlavor,
+        settings.writingRules.commonSenseRules,
+        mode === 'subplots'
+          ? [
+              '本轮重点是重做支线布局，只需要围绕现有主线目标、核心冲突、主推进链和结局落点重新排支线。',
+              values.story_goal ? `已定主线目标：${values.story_goal}` : '',
+              values.core_conflict ? `已定核心冲突：${values.core_conflict}` : '',
+              values.main_plot ? `已定主推进链：${values.main_plot}` : '',
+              values.ending ? `已定结局落点：${values.ending}` : '',
+            ].filter(Boolean).join('\n')
+          : '本轮生成需要同时整理主线目标、冲突、推进链、节奏、结局和支线布局。',
+      ].filter(Boolean).join('\n')
+
       const result = await window.electron.ai.generateCoreSettings({
         novelId,
-        subplotCount: getSubplotBatchCount(),
-        requirements: aiConfig.requirements,
+        subplotCount: Math.max(batchCount, subplots.length || DEFAULT_SUBPLOT_BATCH_COUNT),
+        requirements,
       })
 
-      if (result.failedSteps > 0) {
-        const failedDetails = result.steps
-          .filter((step) => step.status === 'failed')
-          .map((step) => `${step.label}${step.error ? `：${step.error}` : ''}`)
-          .join('；')
-        setCoreSettingsProgress({
-          novelId,
-          step: 'ending',
-          label: '部分步骤需要处理',
-          status: 'failed',
-          completed: result.completedSteps,
-          total: result.steps.length,
-          warning: failedDetails,
-        })
-      }
-
-      if (result.hasPartialResult) {
-        setPendingGeneratedSettings(result)
-        setGeneratedApplyModalOpen(true)
-      }
-
-      if (result.failedSteps > 0 && result.hasPartialResult) {
-        message.warning('一键生成已完成，但部分步骤失败，可先应用已生成内容')
-      } else if (result.warnings.length > 0) {
-        message.warning('核心设定已生成，部分内容带有提示，应用前建议检查')
-      } else if (result.hasPartialResult) {
-        message.success('核心设定一键生成完成')
+      if (mode === 'subplots') {
+        setSubplots(normalizeSubplots(result.sub_plots_list))
+        setSelectedSubplotIndex(null)
       } else {
-        message.error('一键生成未产生可应用内容，请调整要求后重试')
+        applyGeneratedResult(result)
+      }
+
+      if (result.warnings.length > 0) {
+        message.warning(`AI 已生成内容，但有 ${result.warnings.length} 条提醒，保存前请复核。`)
+      } else if (mode === 'subplots') {
+        message.success('支线看板已按当前故事锚点重算。')
+      } else {
+        message.success('故事设计首版已生成到表单。')
       }
     } catch (error) {
-      message.error(`一键生成失败：${error instanceof Error ? error.message : '请先配置 AI 模型'}`)
+      console.error(error)
+      message.error(error instanceof Error ? error.message : '故事设计生成失败。')
     } finally {
-      setIsGeneratingCoreSettings(false)
+      setGeneratingMode(null)
+      setGenerationProgress(null)
     }
-  }, [aiConfig.requirements, getSubplotBatchCount, isAnyAIActionRunning, novelId])
-
-  const addSubPlot = () => {
-    setSubPlots(prev => [...prev, { name: '', characters: '', conflict: '', mainlineLink: '', endChapter: '' }])
   }
 
-  const updateSubPlot = (index: number, field: keyof SubPlot, value: string) => {
-    setSubPlots(prev => prev.map((item, i) => i === index ? { ...item, [field]: value } : item))
+  const updateSubplot = (index: number, patch: Partial<SubPlot>) => {
+    setSubplots((current) => current.map((subplot, currentIndex) => (
+      currentIndex === index ? { ...subplot, ...patch } : subplot
+    )))
   }
 
-  const removeSubPlot = (index: number) => {
-    setSubPlots(prev => prev.filter((_, i) => i !== index))
-  }
-
-  const applySubplotFramework = useCallback((index: number, subplot: SubPlot) => {
-    setSubPlots(prev => prev.map((item, i) => i === index ? subplot : item))
-  }, [])
-
-  const applySingleSubplotFromResponse = useCallback((index: number, raw: string) => {
-    const [subplot] = parseSubPlotFrameworkResponse(raw)
-    if (!subplot) {
-      throw new Error('empty')
-    }
-    applySubplotFramework(index, subplot)
-    return subplot
-  }, [applySubplotFramework])
-
-  const buildContextAwareExpandMessages = useCallback((fieldName: StoryFieldName, label: string) => {
-    const guidance = getFieldPromptGuidance(fieldName, label)
-    const current = form.getFieldValue(fieldName) || ''
-    const relatedContext = buildRelatedSettingsContext(fieldName)
-    const prompt = `你在为长篇小说的策划案补【${label}】这一项，请只完成这一项。
-【本项职责】${guidance.duty}
-【小说背景】${novelBackground || '（暂无补充背景）'}
-【题材】${genreContext}
-【当前主角指代】${protagonistReference}
-【主角称谓规则】${protagonistRule}
-${relatedContext ? `【已确定的关联设定】
-${relatedContext}
-` : ''}【当前字段内容】${current || '（暂无，请根据背景和已确定设定生成合适内容）'}
-${aiConfig.requirements ? `【额外要求】${aiConfig.requirements}` : ''}
-【语言要求】
-${buildHumanLanguageRules([
-  '输出前自行检查搭配是否准确，不要保留物体被写成人或生物的表达。',
-  '贴近当前题材常见的叙述气质和策划口径，不模仿具体作者。',
-])}
-
-本次处理原则：
-- ${guidance.requirements.join('\n- ')}
-- 只允许在当前背景、题材和已确定设定上深化，禁止改写成另一套故事
-- 先补足人物动机、因果关系和结果落点，再考虑气质和文气
-- 本轮只处理【${label}】，不要越界代写其他字段
-- 若上下文中出现旧名字、占位名或彼此冲突的人名，统一按主角称谓规则处理
-- 与其他字段中的人物关系、事件因果和核心矛盾保持前后一致，不得漂移
-- 如果原内容可用，保留它的核心方向，只补足缺口和逻辑
-- 禁止事项：
-- ${guidance.avoid.join('\n- ')}
-
-输出要求：
-- 直接输出可落进表单的纯文本
-- 不要使用 Markdown、标题、列表或字段标签`
-
-    return [{ role: 'user' as const, content: prompt }]
-  }, [aiConfig.requirements, buildRelatedSettingsContext, form, genreContext, novelBackground, protagonistReference, protagonistRule])
-
-  const buildContextAwareSubplotMessages = useCallback((index: number, optimization?: {
-    topFixes: string
-    dimSuggestions: string
-    extraReqs: string
-  }) => {
-    const sub = subPlots[index]
-    const mainPlot = form.getFieldValue('main_plot') || ''
-    const relatedContext = buildRelatedSettingsContext('sub_plots_list')
-    const prompt = `Refresh this subplot frame so it actively pressures the main plot instead of becoming a detached side story.
-[NOVEL BACKGROUND] ${novelBackground || 'none'}
-[GENRE] ${genreContext}
-[PROTAGONIST REFERENCE] ${protagonistReference}
-[PROTAGONIST NAMING RULE] ${protagonistRule}
-${relatedContext ? `[LOCKED CONTEXT]\n${relatedContext}\n` : ''}[MAIN PLOT] ${mainPlot || 'none'}
-[CURRENT SUBPLOT]
-- Name: ${sub?.name || 'none'}
-- Characters: ${sub?.characters || 'none'}
-- Conflict: ${sub?.conflict || 'none'}
-- Mainline Link: ${sub?.mainlineLink || 'none'}
-- End Chapter: ${sub?.endChapter || 'X'}
-${aiConfig.requirements ? `[EXTRA REQUIREMENTS] ${aiConfig.requirements}\n` : ''}${optimization ? `[SCORING ISSUES] ${optimization.topFixes}
-[IMPROVEMENT TARGET] ${optimization.dimSuggestions || 'Fix the weakest dimension first.'}
-${optimization.extraReqs ? `[ADDITIONAL REQUIREMENTS] ${optimization.extraReqs}` : ''}` : ''}
-[LANGUAGE RULES]
-${buildHumanLanguageRules([
-  'Use plain, natural Chinese for conflict and mainlineLink.',
-  'Do not turn ordinary facts into abstract slogans or labels.',
-])}
-${buildSubplotJsonHardRules('{"name":"subplot name","characters":"Character A,Character B","conflict":"The team finds scarce medicine and the protagonist must choose between saving the wounded or trading for passage.","mainlineLink":"The choice turns logistics allies into rivals and pushes the main resource conflict forward.","endChapter":15}', true)}
-
-Rules:
-- The subplot must connect directly to the story goal, core conflict, main plot, theme pressure, or relationship pressure.
-- Keep only the ignition conflict, the mainline consequence, and the ending position. Do not expand into a full subplot outline.
-- If the old version still fits the latest context, keep its direction instead of rewriting for novelty.
-- If the protagonist appears, characters can only use "${protagonistReference}".
-- conflict must be one complete, concrete sentence.
-- mainlineLink must state the exact pressure or change it causes.
-- endChapter must be numeric.
-- Output one JSON object only.`
-
-    return [{ role: 'user' as const, content: prompt }]
-  }, [aiConfig.requirements, buildRelatedSettingsContext, form, genreContext, novelBackground, protagonistReference, protagonistRule, subPlots])
-
-  const buildSubplotFrameworkMessages = useCallback((batchCount: number, existingSubplots: SubPlot[], batchIndex: number, totalBatches: number) => {
-    const mainPlot = form.getFieldValue('main_plot') || ''
-    const relatedContext = buildRelatedSettingsContext('sub_plots_list')
-    const existingSummary = getSubplotSummary(existingSubplots, SUBPLOT_SUMMARY_LIMIT)
-    const prompt = `Generate ${batchCount} new subplot frames for this batch.
-[NOVEL BACKGROUND] ${novelBackground || 'none'}
-[GENRE] ${genreContext}
-[PROTAGONIST REFERENCE] ${protagonistReference}
-[PROTAGONIST NAMING RULE] ${protagonistRule}
-${relatedContext ? `[LOCKED CONTEXT]\n${relatedContext}\n` : ''}[MAIN PLOT] ${mainPlot || 'none'}
-[BATCH PROGRESS] ${batchIndex}/${totalBatches}
-[EXISTING SUBPLOT COUNT] ${existingSubplots.length}
-${existingSummary ? `[EXISTING SUBPLOTS]\n${existingSummary}\n` : ''}[THIS BATCH COUNT] ${batchCount}
-${aiConfig.requirements ? `[EXTRA REQUIREMENTS] ${aiConfig.requirements}` : ''}
-[LANGUAGE RULES]
-${buildHumanLanguageRules([
-  'Write each subplot in plain, natural Chinese.',
-  'Do not use abstract packaging or slogan-like wording to fake depth.',
-])}
-${buildSubplotJsonHardRules('[{"name":"subplot name","characters":"Character A,Character B","conflict":"The team finds scarce medicine and the protagonist must choose between saving the wounded or trading for passage.","mainlineLink":"The decision turns logistics allies into rivals and pushes the main resource conflict forward.","endChapter":15}]')}
-
-Batch requirements:
-- Generate exactly ${batchCount} distinct subplots. Output a JSON array with the same length.
-- Every subplot must create clear cause-and-effect pressure on the story goal, core conflict, theme, relationships, or main plot.
-- Keep only the one line that matters most for main-plot pressure; do not write a full subplot synopsis.
-- Across all generated subplots, cover different functions instead of repeating the same type.
-- Do not duplicate existing subplot names, conflicts, or mainlineLink functions.
-- If the protagonist appears, characters can only use "${protagonistReference}".
-- conflict must be one concrete sentence within ${SUBPLOT_MAX_CONFLICT_LENGTH} Chinese characters.
-- mainlineLink must be one concrete sentence within ${SUBPLOT_MAX_MAINLINE_LINK_LENGTH} Chinese characters.
-- endChapter must be numeric.
-- Output a JSON array only.`
-
-    return [{ role: 'user' as const, content: prompt }]
-  }, [aiConfig.requirements, buildRelatedSettingsContext, form, genreContext, novelBackground, protagonistReference, protagonistRule])
-
-  const generateSubplotBatch = useCallback(async (
-    messages: PromptMessage[],
-    batchCount: number,
-    existingSubplots: SubPlot[],
-    batchIndex: number,
-    totalBatches: number,
-  ) => {
-    let lastError: unknown
-
-    for (let attempt = 0; attempt <= SUBPLOT_GENERATION_RETRY_LIMIT; attempt += 1) {
-      try {
-        return await window.electron.ai.generateSubplotBatch({
-          novelId,
-          messages,
-          expectedCount: batchCount,
-          existingSubplots,
-          modelConfigId: currentNovel?.modelConfigId,
-          batchIndex,
-          totalBatches,
-        })
-      } catch (error) {
-        lastError = error
-      }
-    }
-
-    throw lastError instanceof Error ? lastError : new Error('支线生成失败')
-  }, [currentNovel?.modelConfigId, novelId])
-
-  const runSubplotRefreshDraws = useCallback(async (
-    index: number,
-    messages: PromptMessage[],
-    count: number,
-  ) => {
-    const outputs: string[] = []
-    const warningMessages: string[] = []
-    let existingPool = subPlots.filter((_, subplotIndex) => subplotIndex !== index)
-
-    for (let drawIndex = 0; drawIndex < count; drawIndex += 1) {
-      const result = await generateSubplotBatch(
-        messages,
-        1,
-        existingPool,
-        drawIndex + 1,
-        count,
-      )
-
-      const subplot = result.accepted[0]
-      if (!subplot) {
-        throw new Error('\u0041\u0049 \u672a\u8fd4\u56de\u53ef\u4fdd\u7559\u7684\u652f\u7ebf\u7ed3\u679c')
-      }
-
-      outputs.push(JSON.stringify(subplot))
-      existingPool = [...existingPool, subplot]
-      if (result.warningMessage) {
-        warningMessages.push(result.warningMessage)
-      }
-    }
-
-    if (warningMessages.length > 0) {
-      message.warning(summarizeSubplotWarnings(warningMessages, '\u652f\u7ebf\u7ed3\u679c\u5df2\u90e8\u5206\u653e\u5bbd\u4fdd\u7559'))
-    }
-
-    return outputs
-  }, [generateSubplotBatch, subPlots])
-
-  const handleBatchGenerateSubplots = useCallback(async () => {
-    if (isGeneratingSubplots || isGeneratingCoreSettings) return
-
-    const totalToGenerate = getSubplotBatchCount()
-    const totalBatches = Math.ceil(totalToGenerate / SUBPLOT_GENERATION_CHUNK_SIZE)
-    let generatedCount = 0
-    let failedBatch = 1
-    let accumulatedSubplots = [...subPlots]
-    let partialBatchCount = 0
-    const partialWarnings: string[] = []
-
-    setSubplotGenerationProgress({
-      completed: 0,
-      currentBatch: 1,
-      total: totalToGenerate,
-      totalBatches,
+  const addSubplot = () => {
+    setSubplots((current) => {
+      const next = [...current, emptySubplot()]
+      setSelectedSubplotIndex(next.length - 1)
+      return next
     })
+  }
 
-    message.open({
-      key: SUBPLOT_PROGRESS_MESSAGE_KEY,
-      type: 'loading',
-      duration: 0,
-      content: `\u6b63\u5728\u751f\u6210\u652f\u7ebf\uff1a\u7b2c 1/${totalBatches} \u6279\uff0c\u5df2\u751f\u6210 0/${totalToGenerate} \u6761`,
+  const removeSubplot = (index: number) => {
+    setSubplots((current) => current.filter((_, currentIndex) => currentIndex !== index))
+    setSelectedSubplotIndex((current) => {
+      if (current === null) return null
+      if (current === index) return null
+      return current > index ? current - 1 : current
     })
+  }
 
-    try {
-      for (let batchIndex = 0; batchIndex < totalBatches; batchIndex += 1) {
-        const batchCount = Math.min(SUBPLOT_GENERATION_CHUNK_SIZE, totalToGenerate - generatedCount)
-        const currentBatch = batchIndex + 1
-        failedBatch = currentBatch
-
-        setSubplotGenerationProgress({
-          completed: generatedCount,
-          currentBatch,
-          total: totalToGenerate,
-          totalBatches,
-        })
-        message.open({
-          key: SUBPLOT_PROGRESS_MESSAGE_KEY,
-          type: 'loading',
-          duration: 0,
-          content: `\u6b63\u5728\u751f\u6210\u652f\u7ebf\uff1a\u7b2c ${currentBatch}/${totalBatches} \u6279\uff0c\u5df2\u751f\u6210 ${generatedCount}/${totalToGenerate} \u6761`,
-        })
-
-        const batchResult = await generateSubplotBatch(
-          buildSubplotFrameworkMessages(batchCount, accumulatedSubplots, currentBatch, totalBatches),
-          batchCount,
-          accumulatedSubplots,
-          currentBatch,
-          totalBatches,
-        )
-        accumulatedSubplots = [...accumulatedSubplots, ...batchResult.accepted]
-        generatedCount += batchResult.accepted.length
-        if (batchResult.warningMessage) {
-          partialBatchCount += 1
-          partialWarnings.push(batchResult.warningMessage)
-        }
-        setSubPlots(accumulatedSubplots)
-        setSubplotGenerationProgress({
-          completed: generatedCount,
-          currentBatch,
-          total: totalToGenerate,
-          totalBatches,
-        })
-      }
-
-      message.open({
-        key: SUBPLOT_PROGRESS_MESSAGE_KEY,
-        type: partialBatchCount > 0 || generatedCount < totalToGenerate ? 'warning' : 'success',
-        duration: 3,
-        content: partialBatchCount > 0 || generatedCount < totalToGenerate
-          ? summarizeSubplotWarnings(partialWarnings, `\u5df2\u4fdd\u7559 ${generatedCount}/${totalToGenerate} \u6761\u652f\u7ebf\u6846\u67b6`)
-          : `\u5df2\u5206\u6279\u751f\u6210 ${generatedCount} \u6761\u652f\u7ebf\u6846\u67b6`,
-      })
-    } catch (error) {
-      message.open({
-        key: SUBPLOT_PROGRESS_MESSAGE_KEY,
-        type: generatedCount > 0 ? 'warning' : 'error',
-        duration: 3,
-        content: generatedCount > 0
-          ? `\u652f\u7ebf\u751f\u6210\u5728\u7b2c ${failedBatch}/${totalBatches} \u6279\u4e2d\u65ad\uff0c\u5df2\u4fdd\u7559\u524d\u9762\u751f\u6210\u7684 ${generatedCount}/${totalToGenerate} \u6761\uff0c\u8be6\u60c5\u89c1\u4efb\u52a1\u4e2d\u5fc3`
-          : `\u652f\u7ebf\u751f\u6210\u5931\u8d25\uff1a${error instanceof Error ? error.message : '\u8bf7\u91cd\u8bd5'}`,
-      })
-    } finally {
-      setSubplotGenerationProgress(null)
-    }
-  }, [buildSubplotFrameworkMessages, generateSubplotBatch, getSubplotBatchCount, isGeneratingCoreSettings, isGeneratingSubplots, subPlots])
-
-  const buildStoryCoreOptimizationMessages = useCallback((
-    content: string,
-    result: AIScoreResult,
-    extraReqs: string,
-  ) => {
-    const sorted = [...result.dimensions].sort((a, b) => a.score - b.score)
-    const dimSuggestions = sorted.slice(0, 3)
-      .filter(d => d.suggestion)
-      .map(d => `${d.name}（当前${d.score}分）：${d.suggestion}`)
-      .join('\n')
-    const topFixes = result.top_fixes.map((fix, index) => `${index + 1}. ${fix}`).join('\n')
-    const relatedContext = buildRelatedSettingsContext()
-
-    return [{
-      role: 'user' as const,
-      content: `请根据 AI 评分反馈，分别返修「故事核心目标」和「核心冲突」。
-【当前内容】${content}
-【小说背景】${novelBackground || '（暂无补充背景）'}
-【题材】${genreContext}
-【当前主角指代】${protagonistReference}
-【主角称谓规则】${protagonistRule}
-${relatedContext ? `【已确定的关联设定】
-${relatedContext}
-` : ''}【评分问题】${topFixes}
-【改进方向】${dimSuggestions || '请优先修正评分最低的维度，并补足具体细节。'}
-${extraReqs ? `【追加要求】${extraReqs}` : ''}
-【语言要求】
-${buildHumanLanguageRules([
-  '重点修正目标和冲突里的语义重复、搭配错误和抽象化表达。',
-  '两个字段都要让普通读者直接读懂，像成熟小说策划案里的定稿字段。',
-])}
-
-返修原则：
-- 「故事核心目标」只回答故事最终要抵达什么状态、目标或命题，不写过程和阻碍
-- 「核心冲突」只回答阻止目标实现的核心对立、代价与张力，不写完整剧情流程
-- 先消除语义重复，再补足因果、代价和结果落点
-- 两个字段内容都要独立完整，但必须属于同一套故事设定，且不能互相改写成近义句
-- 若出现旧名字、占位名或彼此冲突的人名，统一按主角称谓规则处理
-- 贴近当前题材常见的叙述气质和策划口径，不模仿具体作者
-- 不要使用 Markdown
-- 严格按以下格式输出：
-【故事核心目标】此处输出返修后的故事核心目标
-【核心冲突】此处输出返修后的核心冲突`,
-    }]
-  }, [buildRelatedSettingsContext, genreContext, novelBackground, protagonistReference, protagonistRule])
-
-  // 高级设置 Popover 内容
-  const advancedSettingsContent = (
-    <div className="novel-core-settings__popover">
-      <div className="novel-core-settings__popover-section">
-        <div className="novel-core-settings__popover-label">
-          抽卡次数（生成 N 个版本供选择）
-        </div>
-        <Radio.Group
-          value={aiConfig.drawCount}
-          onChange={e => setAIConfig(c => ({ ...c, drawCount: e.target.value }))}
-          size="small"
-        >
-          <Radio.Button value={1}>1 次</Radio.Button>
-          <Radio.Button value={2}>2 次</Radio.Button>
-          <Radio.Button value={3}>3 次</Radio.Button>
-        </Radio.Group>
-      </div>
-      <div>
-        <div className="novel-core-settings__popover-label">
-          全局生成要求（可选）
-        </div>
-        <Input.TextArea
-          className="novel-core-settings__popover-textarea"
-          value={aiConfig.requirements}
-          onChange={e => setAIConfig(c => ({ ...c, requirements: e.target.value }))}
-          placeholder="例如：悬疑感更强、人物说话更克制、减少设定讲解、冲突更紧。"
-          rows={3}
-        />
-        <div className="novel-core-settings__popover-help">
-          整页一键生成会沿用这里的全局要求；抽卡次数仅作用于单字段生成和评分重生成。
-        </div>
-      </div>
-    </div>
-  )
-
-  const collapseItems = [
-    {
-      key: 'core',
-      label: (
-        <div className="novel-core-settings__section-head">
-          <span className="novel-core-settings__section-title">故事核心</span>
-          <span className="novel-core-settings__section-meta">
-            目标 / 冲突 / 主线职责分离
-          </span>
-        </div>
-      ),
-      children: (
-        <>
-          <div className="novel-core-settings__section-description">
-            故事核心目标回答“最后要达成什么”，核心冲突回答“为什么难以达成”，主线概述回答“故事如何一步步推进”。
-          </div>
-          <Form.Item
-            name="story_goal"
-            extra="只写故事最终要达成的目标、终局状态或核心命题，不写过程。"
-            label={
-              <span className="novel-core-settings__field-label">
-                故事核心目标
-                <AIGenerateButton
-                  label="AI"
-                  size="small"
-                  type="text"
-                  buildMessages={() => buildContextAwareExpandMessages('story_goal', '故事核心目标')}
-                  drawCount={aiConfig.drawCount}
-                  disabled={isAnyAIActionRunning}
-                  onResult={v => applyAndSaveDraft('story_goal', v, '故事核心目标')}
-                />
-              </span>
-            }
-          >
-            <Input.TextArea rows={6} placeholder="只写故事最终要抵达的目标、终局状态或核心命题" />
-          </Form.Item>
-          <Form.Item
-            name="core_conflict"
-            extra="只写阻碍目标实现的核心对立、代价与张力，不写完整剧情流程。"
-            label={
-              <span className="novel-core-settings__field-label">
-                核心冲突
-                <AIGenerateButton
-                  label="AI"
-                  size="small"
-                  type="text"
-                  buildMessages={() => buildContextAwareExpandMessages('core_conflict', '核心冲突')}
-                  drawCount={aiConfig.drawCount}
-                  disabled={isAnyAIActionRunning}
-                  onResult={v => applyAndSaveDraft('core_conflict', v, '核心冲突')}
-                />
-              </span>
-            }
-          >
-            <Input.TextArea rows={6} placeholder="只写阻碍目标实现的最核心对立、代价与矛盾张力" />
-          </Form.Item>
-          <AIScorePanel
-            getContent={() => {
-              const v = form.getFieldsValue()
-              return [v.story_goal, v.core_conflict].filter(Boolean).join('\n\n')
-            }}
-            contentType="故事核心"
-            novelBackground={novelBackground}
-            genreContext={genreContext}
-            drawCount={aiConfig.drawCount}
-            customIsJson={false}
-            disabled={isAnyAIActionRunning}
-            buildCustomRegenMessages={buildStoryCoreOptimizationMessages}
-            onRegenerate={v => {
-              // 用标记解析，每个字段内容独立完整
-              const sections = parseSections(v, '故事核心目标', '核心冲突')
-              if (sections['故事核心目标']) {
-                applyAndSaveDraft('story_goal', sections['故事核心目标'], '故事核心目标（优化版）')
-              }
-              if (sections['核心冲突']) {
-                applyAndSaveDraft('core_conflict', sections['核心冲突'], '核心冲突（优化版）')
-              }
-              if (!sections['故事核心目标'] && !sections['核心冲突']) {
-                // 回退：整体放入 story_goal
-                applyAndSaveDraft('story_goal', v, '故事核心（优化版）')
-              }
-            }}
-          />
-        </>
-      ),
-    },
-    {
-      key: 'plot',
-      label: (
-        <div className="novel-core-settings__section-head">
-          <span className="novel-core-settings__section-title">主线剧情</span>
-          <AIGenerateButton
-            label="AI 扩展"
-            drawCount={aiConfig.drawCount}
-            buildMessages={() => buildContextAwareExpandMessages('main_plot', '主线剧情概述')}
-            disabled={isAnyAIActionRunning}
-            onResult={v => applyAndSaveDraft('main_plot', v, '主线剧情')}
-          />
-        </div>
-      ),
-      children: (
-        <>
-          <Form.Item
-            name="main_plot"
-            label="主线概述"
-            extra="只写围绕目标与冲突展开的关键事件链，重点体现因果推进、升级和转折。"
-          >
-            <Input.TextArea rows={7} placeholder="只写围绕目标与冲突展开的关键事件链和推进节点" />
-          </Form.Item>
-          <AIScorePanel
-            getContent={() => form.getFieldValue('main_plot') || ''}
-            contentType="主线剧情"
-            novelBackground={novelBackground}
-            genreContext={genreContext}
-            drawCount={aiConfig.drawCount}
-            disabled={isAnyAIActionRunning}
-            buildCustomRegenMessages={(content, result, extraReqs) =>
-              buildOptimizationMessages('main_plot', '主线剧情', content, result, extraReqs)}
-            onRegenerate={v => applyAndSaveDraft('main_plot', v, '主线剧情（优化版）')}
-          />
-        </>
-      ),
-    },
-    {
-      key: 'subplot',
-      label: (
-        <div className="novel-core-settings__section-head">
-          <span className="novel-core-settings__section-title">
-            支线剧情 <span className="novel-core-settings__section-title-extra">({subPlots.length}条)</span>
-          </span>
-          <div className="novel-core-settings__subplot-toolbar" onClick={e => e.stopPropagation()}>
-            <div className="novel-core-settings__subplot-toolbar-group">
-              <span className="novel-core-settings__toolbar-label">生成数量</span>
-              <Form.Item name="subplot_batch_count" noStyle initialValue={DEFAULT_SUBPLOT_BATCH_COUNT}>
-                <InputNumber
-                  size="small"
-                  min={MIN_SUBPLOT_BATCH_COUNT}
-                  max={MAX_SUBPLOT_BATCH_COUNT}
-                  precision={0}
-                  className="novel-core-settings__batch-input"
-                  disabled={isAnyAIActionRunning}
-                  onChange={value => form.setFieldValue('subplot_batch_count', clampSubplotBatchCount(value))}
-                />
-              </Form.Item>
-              <span className="novel-core-settings__toolbar-hint">
-                按每批 {SUBPLOT_GENERATION_CHUNK_SIZE} 条分批生成
-              </span>
-            </div>
-            <Button
-              size="small"
-              icon={<RobotOutlined />}
-              loading={isGeneratingSubplots}
-              disabled={isGeneratingCoreSettings}
-              onClick={e => {
-                e.stopPropagation()
-                void handleBatchGenerateSubplots()
-              }}
-            >
-              {isGeneratingSubplots ? '分批生成中' : 'AI 分批生成'}
-            </Button>
-            <Button
-              size="small"
-              icon={<PlusOutlined />}
-              disabled={isAnyAIActionRunning}
-              onClick={e => { e.stopPropagation(); addSubPlot() }}
-            >
-              手动添加
-            </Button>
-          </div>
-        </div>
-      ),
-      children: (
-        <div className="novel-core-settings__subplot-body">
-          {subplotGenerationProgress && (
-            <div className="novel-core-settings__subplot-progress">
-              正在分批生成：第 {subplotGenerationProgress.currentBatch}/{subplotGenerationProgress.totalBatches} 批，
-              已生成 {subplotGenerationProgress.completed}/{subplotGenerationProgress.total} 条
-            </div>
-          )}
-          {subPlots.length === 0 ? (
-            <div className="novel-core-settings__subplot-empty">
-              暂无支线，点击「AI 分批生成」或「手动添加」
-            </div>
-          ) : (
-            subPlots.map((sub, index) => (
-              <div
-                key={index}
-                className="novel-core-settings__subplot-card"
-              >
-                <div className="novel-core-settings__subplot-card-head">
-                  <span className="novel-core-settings__subplot-card-title">
-                    支线 {index + 1}
-                  </span>
-                  <div className="novel-core-settings__subplot-card-actions">
-                    <AIGenerateButton
-                      label="AI 刷新"
-                      size="small"
-                      type="text"
-                      drawCount={aiConfig.drawCount}
-                      disabled={isAnyAIActionRunning}
-                      buildMessages={() => buildContextAwareSubplotMessages(index)}
-                      runGeneration={({ messages, count }) => runSubplotRefreshDraws(index, messages as PromptMessage[], count)}
-                      isJson
-                      onResult={v => {
-                        try {
-                          applySingleSubplotFromResponse(index, v)
-                          message.success('支线已按最新上下文刷新')
-                        } catch {
-                          message.error('AI 返回格式异常，请重试')
-                        }
-                      }}
-                    />
-                    <Button
-                      type="text"
-                      size="small"
-                      danger
-                      disabled={isAnyAIActionRunning}
-                      icon={<DeleteOutlined />}
-                      onClick={() => removeSubPlot(index)}
-                    />
-                  </div>
-                </div>
-                <Row gutter={12}>
-                  <Col span={12}>
-                    <div className="novel-core-settings__subplot-field">
-                      <div className="novel-core-settings__subplot-field-label">支线名称</div>
-                      <Input
-                        size="small"
-                        disabled={isAnyAIActionRunning}
-                        value={sub.name}
-                        onChange={e => updateSubPlot(index, 'name', e.target.value)}
-                        placeholder="例如：师门情仇、商战暗线"
-                      />
-                    </div>
-                  </Col>
-                  <Col span={12}>
-                    <div className="novel-core-settings__subplot-field">
-                      <div className="novel-core-settings__subplot-field-label">涉及人物</div>
-                      <Input
-                        size="small"
-                        disabled={isAnyAIActionRunning}
-                        value={sub.characters}
-                        onChange={e => updateSubPlot(index, 'characters', e.target.value)}
-                        placeholder="角色名，逗号分隔"
-                      />
-                    </div>
-                  </Col>
-                  <Col span={24}>
-                    <div className="novel-core-settings__subplot-field">
-                      <div className="novel-core-settings__subplot-field-label">核心矛盾</div>
-                      <Input.TextArea
-                        size="small"
-                        rows={5}
-                        disabled={isAnyAIActionRunning}
-                        value={sub.conflict}
-                        onChange={e => updateSubPlot(index, 'conflict', e.target.value)}
-                        placeholder="这条支线的核心矛盾和目的"
-                      />
-                    </div>
-                  </Col>
-                  <Col span={16}>
-                    <div className="novel-core-settings__subplot-field">
-                      <div className="novel-core-settings__subplot-field-label">与主线关联</div>
-                      <Input
-                        size="small"
-                        disabled={isAnyAIActionRunning}
-                        value={sub.mainlineLink}
-                        onChange={e => updateSubPlot(index, 'mainlineLink', e.target.value)}
-                        placeholder="如何与主线产生交集或呼应"
-                      />
-                    </div>
-                  </Col>
-                  <Col span={8}>
-                    <div className="novel-core-settings__subplot-field">
-                      <div className="novel-core-settings__subplot-field-label">预计收束章节</div>
-                      <Input
-                        size="small"
-                        disabled={isAnyAIActionRunning}
-                        value={sub.endChapter}
-                        onChange={e => updateSubPlot(index, 'endChapter', e.target.value)}
-                        placeholder="第X章"
-                      />
-                    </div>
-                  </Col>
-                </Row>
-                <AIScorePanel
-                  getContent={() => [sub.name, sub.conflict, sub.mainlineLink].filter(Boolean).join('\n\n')}
-                  contentType={`支线剧情（${sub.name || '未命名'}）`}
-                  novelBackground={novelBackground}
-                  genreContext={genreContext}
-                  drawCount={aiConfig.drawCount}
-                  disabled={isAnyAIActionRunning}
-                  customRunGeneration={({ messages, count }) => runSubplotRefreshDraws(index, messages as PromptMessage[], count)}
-                  onRegenerate={isGeneratingSubplots ? undefined : (v => {
-                    try {
-                      applySingleSubplotFromResponse(index, v)
-                      message.info('支线框架已按评分意见更新')
-                    } catch {
-                      message.error('AI 返回格式异常，请重试')
-                    }
-                  })}
-                  customIsJson
-                  buildCustomRegenMessages={(_, result, extraReqs) => {
-                    const sorted = [...result.dimensions].sort((a, b) => a.score - b.score)
-                    const dimSuggestions = sorted.slice(0, 3)
-                      .filter(d => d.suggestion)
-                      .map(d => `${d.name}（当前${d.score}分）：${d.suggestion}`)
-                      .join('\n')
-                    const topFixes = result.top_fixes.map((fix, fixIndex) => `${fixIndex + 1}. ${fix}`).join('\n')
-                    return buildContextAwareSubplotMessages(index, {
-                      topFixes,
-                      dimSuggestions,
-                      extraReqs,
-                    })
-                  }}
-                />
-              </div>
-            ))
-          )}
-        </div>
-      ),
-    },
-    {
-      key: 'rhythm',
-      label: (
-        <div className="novel-core-settings__section-head">
-          <span className="novel-core-settings__section-title">叙事节奏</span>
-          <Tooltip title="三段比例建议合计100%，可以不严格">
-            <span className="novel-core-settings__section-meta">比例参考</span>
-          </Tooltip>
-        </div>
-      ),
-      children: (
-        <div>
-          <div className="novel-core-settings__rhythm-note">
-            三段节奏比例（仅为参考，合计约100%）
-          </div>
-          <Row gutter={24}>
-            <Col span={8}>
-              <div className="novel-core-settings__rhythm-label">前期铺垫</div>
-              <Form.Item name="rhythm_setup" initialValue={30} noStyle>
-                <Slider min={10} max={60} step={5} marks={{ 10: '10%', 30: '30%', 60: '60%' }} />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <div className="novel-core-settings__rhythm-label">中期冲突</div>
-              <Form.Item name="rhythm_conflict" initialValue={50} noStyle>
-                <Slider min={20} max={70} step={5} marks={{ 20: '20%', 50: '50%', 70: '70%' }} />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <div className="novel-core-settings__rhythm-label">后期收束</div>
-              <Form.Item name="rhythm_ending" initialValue={20} noStyle>
-                <Slider min={5} max={40} step={5} marks={{ 5: '5%', 20: '20%', 40: '40%' }} />
-              </Form.Item>
-            </Col>
-          </Row>
-        </div>
-      ),
-    },
-    {
-      key: 'ending',
-      label: (
-        <div className="novel-core-settings__section-head">
-          <span className="novel-core-settings__section-title">结局设定</span>
-          <AIGenerateButton
-            label="AI 扩展"
-            drawCount={aiConfig.drawCount}
-            buildMessages={() => buildContextAwareExpandMessages('ending', '结局内容')}
-            disabled={isAnyAIActionRunning}
-            onResult={v => applyAndSaveDraft('ending', v, '结局设定')}
-          />
-        </div>
-      ),
-      children: (
-        <>
-          <Form.Item name="ending_type" label="结局类型">
-            <Select options={[
-              { value: 'HE', label: '圆满结局（HE）' },
-              { value: 'BE', label: '悲剧结局（BE）' },
-              { value: 'open', label: '开放式结局' },
-              { value: 'multi', label: '多结局' },
-              { value: 'HE_BE', label: '主CP圆满，部分角色悲剧' },
-            ]} />
-          </Form.Item>
-          <Form.Item
-            name="ending"
-            label={
-              <span className="novel-core-settings__field-label">
-                结局内容
-                <AIGenerateButton
-                  label="AI"
-                  size="small"
-                  type="text"
-                  buildMessages={() => buildContextAwareExpandMessages('ending', '故事结局内容')}
-                  drawCount={aiConfig.drawCount}
-                  disabled={isAnyAIActionRunning}
-                  onResult={v => applyAndSaveDraft('ending', v, '结局内容')}
-                />
-              </span>
-            }
-          >
-            <Input.TextArea rows={6} placeholder="故事如何结束，主要矛盾如何收束" />
-          </Form.Item>
-          <AIScorePanel
-            getContent={() => form.getFieldValue('ending') || ''}
-            contentType="结局设定"
-            novelBackground={novelBackground}
-            genreContext={genreContext}
-            drawCount={aiConfig.drawCount}
-            disabled={isAnyAIActionRunning}
-            buildCustomRegenMessages={(content, result, extraReqs) =>
-              buildOptimizationMessages('ending', '结局设定', content, result, extraReqs)}
-            onRegenerate={v => applyAndSaveDraft('ending', v, '结局设定（优化版）')}
-          />
-        </>
-      ),
-    },
-  ]
-
-  const storyAnchorCount = [storyGoalValue, coreConflictValue, mainPlotValue, endingValue]
-    .filter((item) => typeof item === 'string' && item.trim()).length
-  const rhythmReady = [rhythmSetupValue, rhythmConflictValue, rhythmEndingValue]
-    .every((item) => typeof item === 'number' && item > 0)
-  const isGuided = mode === 'guided'
-  const workflowPhaseLabel = storyAnchorCount < 4
-    ? '先定骨架'
-    : subPlots.length === 0
-      ? '补支线'
-      : rhythmReady
-        ? '联调收束'
-        : '校节奏'
-  const currentEditingFocus = storyAnchorCount < 4
-    ? '先把目标、冲突、主线、结局四个锚点定稳'
-    : subPlots.length === 0
-      ? '补出能反向推动主线的支线框架'
-      : rhythmReady
-        ? '检查支线、节奏和结局是否彼此回扣'
-        : '用节奏比例确认前中后段的推进重心'
-  const currentEditingNote = storyAnchorCount < 4
-    ? '四个锚点成立后，后面的人物、大纲和正文才不会飘。'
-    : subPlots.length === 0
-      ? '支线只补对主线、人物关系或主题有用的那部分。'
-      : rhythmReady
-        ? '最后一轮重点看因果闭环、收束位置和余波是否合理。'
-        : '节奏比例不求死板，但要能看出铺垫、加压和收束的主次。'
-  const workflowPhaseNote = storyAnchorCount < 4
-    ? '四个锚点没有定稳前，先别急着堆太多设定枝叶。'
-    : subPlots.length === 0
-      ? '支线只补会反向推动主线、人物关系或主题的那一部分。'
-      : rhythmReady
-        ? '这一轮主要核对因果闭环、收束位置和余波。'
-        : '用前中后段占比确认铺垫、加压和收束的主次。'
-  const anchorProgressSummary = storyAnchorCount === 4
-    ? '四个故事锚点已齐，可以继续检查支线与节奏。'
-    : '已定 ' + storyAnchorCount + '/4 个锚点，先把目标、冲突、主线、结局补完整。'
-  const saveStateSummary = hasDraft
-    ? '表单里有待确认的 AI 草稿，保存前建议先通读一遍。'
-    : '当前表单与已保存设定保持同步。'
-  const aiModeSummary = aiConfig.requirements.trim()
-    ? aiConfig.requirements.trim()
-    : '默认口径 · 单字段抽卡 ' + aiConfig.drawCount + ' 次'
-  const collapseDefaultKeys = isGuided
-    ? ['core', 'plot', 'ending']
-    : ['core', 'plot', 'subplot', 'rhythm', 'ending']
-  const heroContextSummary = (
-    <div className="novel-core-settings__hero-context-clean">
-      <section className="novel-core-settings__focus-strip">
-        <div className="novel-core-settings__focus-card novel-core-settings__focus-card--accent">
-          <span className="novel-kicker">当前重点</span>
-          <strong>{currentEditingFocus}</strong>
-          <small>{currentEditingNote}</small>
-        </div>
-        <div className="novel-core-settings__focus-card">
-          <span className="novel-kicker">推进阶段</span>
-          <strong>{workflowPhaseLabel}</strong>
-          <small>{workflowPhaseNote}</small>
-          <div className="novel-core-settings__focus-meta">{anchorProgressSummary}</div>
-        </div>
-        <div className="novel-core-settings__focus-card">
-          <span className="novel-kicker">AI 口径</span>
-          <strong>{aiConfig.requirements.trim() ? '已附加全局要求' : '使用默认口径'}</strong>
-          <small>{aiModeSummary}</small>
-        </div>
-      </section>
-      <WorkspaceContextSummary
-        items={[
-          { label: '题材', value: genreContext },
-          { label: '工作模式', value: isGuided ? '小白模式' : '专业模式' },
-          { label: '保存状态', value: hasDraft ? '有待确认草稿' : '纯编辑状态' },
-        ]}
-      />
-      <section className="novel-core-settings__background-strip">
-        <div className="novel-core-settings__background-head">
-          <div className="novel-core-settings__background-label">背景依据</div>
-          {canToggleBackgroundBasis ? (
-            <button
-              type="button"
-              className="novel-core-settings__background-toggle"
-              onClick={() => setIsBackgroundExpanded((value) => !value)}
-              aria-expanded={isBackgroundExpanded}
-            >
-              {isBackgroundExpanded ? '收起' : '展开全文'}
-            </button>
-          ) : null}
-        </div>
-        <div
-          className={[
-            'novel-core-settings__background-copy',
-            !isBackgroundExpanded && canToggleBackgroundBasis ? 'novel-core-settings__background-copy--collapsed' : '',
-          ].filter(Boolean).join(' ')}
-        >
-          {backgroundBasisText}
-        </div>
-      </section>
-    </div>
-  )
-
+  const openSubplot = (index: number) => {
+    setSelectedSubplotIndex(index)
+  }
 
   return (
     <WorkspacePage
-      className={`novel-core-settings novel-core-settings--${mode}`}
+      className="novel-story-design-page"
       layout="wide"
       heroVariant="compact"
-      eyebrow={isGuided ? '核心设定' : '故事引擎'}
-      title="核心设定"
-      description="把题材、背景、故事目标、核心冲突、主线推进、支线和结局先锁成一个可写的故事引擎。后续的人物、物品、时间轴和大纲都会沿用这里的叙事口径。"
+      asidePlacement="side"
+      eyebrow="故事设计"
+      title="故事设计"
+      description="这里专门负责主线目标、核心冲突、主推进链、支线布局、节奏比例和结局落点。背景、人物、地图、物品先在前面准备好，再来这里把剧情骨架压实。"
       actions={(
-        <div className="novel-core-settings__hero-actions">
-          <div className="novel-core-settings__action-cluster novel-core-settings__action-cluster--primary">
-            <Button
-              icon={<RobotOutlined />}
-              loading={isGeneratingCoreSettings}
-              disabled={isGeneratingSubplots}
-              onClick={() => void handleGenerateCoreSettings()}
-            >
-              {isGeneratingCoreSettings ? '整页生成中' : 'AI 一键生成'}
-            </Button>
-            <Button type="primary" icon={<SaveOutlined />} loading={saving} disabled={isGeneratingCoreSettings} onClick={handleSave}>
-              保存设定
-            </Button>
-          </div>
-          <div className="novel-core-settings__action-cluster">
-            <Popover
-              title={<span className="novel-core-settings__popover-title">AI 高级设置</span>}
-              content={advancedSettingsContent}
-              trigger="click"
-              open={settingsOpen}
-              onOpenChange={setSettingsOpen}
-              placement="bottomRight"
-            >
-              <Badge dot={aiConfig.drawCount > 1 || !!aiConfig.requirements} color="var(--color-blue-primary)">
-                <Button icon={<SettingOutlined />} size="small" disabled={isGeneratingCoreSettings}>
-                  AI 选项{aiConfig.drawCount > 1 ? ` (抽卡×${aiConfig.drawCount})` : ''}
-                </Button>
-              </Badge>
-            </Popover>
-            <Button danger icon={<DeleteOutlined />} disabled={isAnyAIActionRunning || saving} onClick={handleClearCurrentFlow}>
-              清空当前流程
-            </Button>
-          </div>
-        </div>
+        <Space wrap>
+          <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>
+            保存故事设计
+          </Button>
+          <Button icon={<RobotOutlined />} loading={generatingMode === 'all'} onClick={() => void handleGenerate('all')}>
+            AI 生成故事骨架
+          </Button>
+          <Button icon={<DeleteOutlined />} danger onClick={clearStoryDesign}>
+            清空当前设计
+          </Button>
+          <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/structure`)}>
+            去结构页
+          </Button>
+        </Space>
+      )}
+      contextSummary={(
+        <WorkspaceContextSummary
+          items={[
+            { label: '题材', value: currentNovel?.genreName || '未设置' },
+            { label: '背景摘要', value: compactText(currentNovel?.expandedBackground || currentNovel?.synopsis) },
+            { label: '基础设定', value: premiseReady ? '已就绪' : '待补齐' },
+            { label: '预计章数', value: `约 ${estimatedChapterTotal} 章` },
+          ]}
+        />
       )}
       metrics={(
         <>
-          <WorkspaceMetric label="故事锚点" value={storyAnchorCount + '/4'} tone="warm" hint="目标、冲突、主线、结局" />
-          <WorkspaceMetric label="支线数量" value={subPlots.length} hint={subplotGenerationProgress ? '当前生成 ' + subplotGenerationProgress.completed + '/' + subplotGenerationProgress.total : '建议控制在主线能承载的范围内'} />
-          <WorkspaceMetric label="叙事节奏" value={rhythmReady ? '已设定' : '待补齐'} tone="cool" hint={rhythmReady ? rhythmSetupValue + '% / ' + rhythmConflictValue + '% / ' + rhythmEndingValue + '%' : '前中后段占比还未明确'} />
-          <WorkspaceMetric label="保存状态" value={hasDraft ? '待确认' : '已同步'} hint={saveStateSummary} />
+          <WorkspaceMetric label="剧情锚点" value={`${anchorReadyCount}/4`} tone="warm" hint="目标、冲突、推进链、结局" />
+          <WorkspaceMetric label="支线数量" value={subplots.length} hint="只保留对主线有因果作用的支线" />
+          <WorkspaceMetric label="节奏比例" value={`${formValues.rhythm_setup ?? 30}/${formValues.rhythm_conflict ?? 50}/${formValues.rhythm_ending ?? 20}`} hint="铺垫 / 冲突 / 回收" />
+          <WorkspaceMetric label="已保存版本" value={storyReady ? '存在' : '未保存'} hint="保存后会进入全书上下文。" />
         </>
       )}
-      contextSummary={null}
       aside={(
-        <>
-          <WorkspacePanel title="生成状态" description="这里只保留当前真正会影响产出的 AI 状态。">
-            <div className="novel-core-settings__status-board">
-              <div className="novel-core-settings__status-card">
-                <span>整页生成</span>
-                <strong>{isGeneratingCoreSettings ? '进行中' : '空闲'}</strong>
-                <small>{coreSettingsProgress?.label || '当前没有整页生成任务。'}</small>
+        <div className="story-design__side-list">
+          <WorkspacePanel title="前置依赖" description="故事设计不是背景复述，而是把现有资产组织成可执行剧情。">
+            <div className="premise-page__summary-grid">
+              <div className="premise-page__summary-card">
+                <span>基础设定</span>
+                <strong>{premiseReady ? '已齐' : '待补'}</strong>
+                <small>缺 premise 与写作边界时，主线会继续发散。</small>
               </div>
-              <div className="novel-core-settings__status-card">
-                <span>支线批量</span>
-                <strong>{isGeneratingSubplots ? '进行中' : '空闲'}</strong>
-                <small>{subplotGenerationProgress ? '已完成 ' + subplotGenerationProgress.completed + '/' + subplotGenerationProgress.total : '按主线承载量补支线。'}</small>
-              </div>
-              <div className="novel-core-settings__status-card">
-                <span>抽卡次数</span>
-                <strong>{aiConfig.drawCount} 次</strong>
-                <small>{'当前字段默认返回 ' + aiConfig.drawCount + ' 个版本供筛选。'}</small>
-              </div>
-              <div className="novel-core-settings__status-card">
-                <span>草稿 / 保存</span>
-                <strong>{hasDraft ? '待确认' : '已同步'}</strong>
-                <small>{saveStateSummary}</small>
+              <div className="premise-page__summary-card">
+                <span>世界资产</span>
+                <strong>{assetReadyCount}/4</strong>
+                <small>地图、人物、物品越完整，剧情越不容易空转。</small>
               </div>
             </div>
           </WorkspacePanel>
-        </>
+
+          <WorkspacePanel title="支线健康度" description="支线必须服务主线，不准游离。">
+            <div className="premise-page__summary-grid">
+              <div className="premise-page__summary-card premise-page__summary-card--accent">
+                <span>已挂主线</span>
+                <strong>{subplotLinkedCount}/{subplots.length}</strong>
+                <small>没有主线因果的支线，应优先删掉或改写。</small>
+              </div>
+              <div className="premise-page__summary-card">
+                <span>已排回收</span>
+                <strong>{subplotScheduledCount}/{subplots.length}</strong>
+                <small>没有回收章位的支线，后期失控风险最高。</small>
+              </div>
+            </div>
+          </WorkspacePanel>
+        </div>
       )}
     >
-      {heroContextSummary}
-
-      {coreSettingsProgress && (
+      {!premiseReady ? (
         <Alert
-          type={coreSettingsProgress.status === 'failed' ? 'error' : coreSettingsProgress.status === 'success' ? 'success' : 'info'}
+          type="warning"
           showIcon
-          message={
-            coreSettingsProgress.status === 'running'
-              ? `AI 一键生成中：${coreSettingsProgress.label}`
-              : coreSettingsProgress.status === 'success'
-                ? `AI 一键生成完成：${coreSettingsProgress.label}`
-                : `AI 一键生成失败：${coreSettingsProgress.label}`
-          }
-          description={[
-            `已完成 ${coreSettingsProgress.completed}/${coreSettingsProgress.total} 个步骤`,
-            coreSettingsProgress.detail || '',
-            coreSettingsProgress.warning || '',
-          ].filter(Boolean).join(' · ')}
+          message="基础设定还没写稳。建议先回基础设定页补齐 premise 与写作边界，再做故事设计。"
         />
-      )}
+      ) : null}
 
-      {hasDraft && (
+      {assetReadyCount < 4 ? (
         <Alert
           type="info"
           showIcon
-          closable
-          message="有 AI 生成的内容已填入表单，记得点击「保存设定」"
-          action={
-            <Button size="small" onClick={() => clearByPrefix(draftPrefix)}>
-              清除草稿
-            </Button>
-          }
+          message="资产还没有完全到位。你已经可以起一版故事设计，但人物、地图、物品越完整，剧情越不容易空转。"
         />
-      )}
+      ) : null}
 
-      <WorkspacePanel
-        title="故事引擎编辑台"
-        description="先把四个故事锚点定稳，再补支线、节奏与结局。整页生成只是起点，最后仍然建议你像编辑一样再收一遍。"
-      >
+      {generationProgress ? (
+        <Alert
+          type="info"
+          showIcon
+          message={`AI 正在生成：${generationProgress.label}`}
+          description={generationProgress.detail || '正在根据当前设定整理故事骨架。'}
+        />
+      ) : null}
+
+      <WorkspacePanel title="设计原则" description="先把剧情骨架写硬，再继续拆结构、时间轴和正文。">
+        <div className="guided-step__checklist">
+          <div className="guided-step__checkitem guided-step__checkitem--done">
+            <div className="guided-step__checkhead"><strong>只做骨架</strong></div>
+            <p>这里只写目标、冲突、推进链、支线作用和结局，不提前把每章剧情写满。</p>
+          </div>
+          <div className="guided-step__checkitem guided-step__checkitem--done">
+            <div className="guided-step__checkhead"><strong>支线必须有用</strong></div>
+            <p>每条支线都要直接作用于主线、人物关系或主题压力，不能游离成无关故事。</p>
+          </div>
+          <div className="guided-step__checkitem guided-step__checkitem--done">
+            <div className="guided-step__checkhead"><strong>语言必须自然</strong></div>
+            <p>禁止口号式总结、生造词、万能情绪句和违背常识的推进方式。</p>
+          </div>
+        </div>
+      </WorkspacePanel>
+
+      <WorkspacePanel title="故事锚点" description="四个锚点先固定住，后面的结构页和时间轴页都围绕这里展开。">
         <Form form={form} layout="vertical">
-          <Collapse
-            items={collapseItems}
-            className="novel-core-settings__collapse"
-            defaultActiveKey={collapseDefaultKeys}
-          />
+          <div className="story-design__anchor-grid">
+            <div className="story-design__anchor-card">
+              <Form.Item name="story_goal" label="故事核心目标" rules={[{ required: true, message: '请写清故事核心目标' }]}>
+                <Input.TextArea rows={4} placeholder="写这部书最终要抵达什么状态，不写过程流水账。" />
+              </Form.Item>
+            </div>
+            <div className="story-design__anchor-card">
+              <Form.Item name="core_conflict" label="核心冲突" rules={[{ required: true, message: '请写清核心冲突' }]}>
+                <Input.TextArea rows={4} placeholder="写目标为什么难实现，谁在对抗，代价落在谁身上。" />
+              </Form.Item>
+            </div>
+            <div className="story-design__anchor-card story-design__anchor-card--full">
+              <Form.Item name="main_plot" label="主推进链" rules={[{ required: true, message: '请写清主推进链' }]}>
+                <Input.TextArea rows={5} placeholder="写主线如何一步步推进到结局，强调因果、升级和转折。" />
+              </Form.Item>
+            </div>
+            <div className="story-design__anchor-card story-design__anchor-card--compact">
+              <Form.Item name="ending_type" label="结局类型">
+                <Select allowClear options={ENDING_OPTIONS} placeholder="选择结局类型" />
+              </Form.Item>
+            </div>
+            <div className="story-design__anchor-card story-design__anchor-card--full">
+              <Form.Item name="ending" label="结局落点" rules={[{ required: true, message: '请写清结局落点' }]}>
+                <Input.TextArea rows={4} placeholder="写故事最终如何收束，主要矛盾如何落地，代价与余波如何留下。" />
+              </Form.Item>
+            </div>
+          </div>
         </Form>
       </WorkspacePanel>
 
-      <Modal
-        title="应用一键生成结果"
-        open={generatedApplyModalOpen}
-        onCancel={() => {
-          if (applyingGeneratedMode) return
-          setGeneratedApplyModalOpen(false)
-          setPendingGeneratedSettings(null)
-          setCoreSettingsProgress(null)
-        }}
-        destroyOnHidden
-        footer={[
-          <Button
-            key="cancel"
-            onClick={() => {
-              setGeneratedApplyModalOpen(false)
-              setPendingGeneratedSettings(null)
-              setCoreSettingsProgress(null)
-            }}
-            disabled={Boolean(applyingGeneratedMode)}
-          >
-            暂不应用
-          </Button>,
-          <Button
-            key="draft"
-            loading={applyingGeneratedMode === 'draft'}
-            disabled={Boolean(applyingGeneratedMode)}
-            onClick={() => void handleApplyGeneratedSettings('draft')}
-          >
-            仅填入草稿
-          </Button>,
-          <Button
-            key="save"
-            type="primary"
-            loading={applyingGeneratedMode === 'save'}
-            disabled={Boolean(applyingGeneratedMode)}
-            onClick={() => void handleApplyGeneratedSettings('save')}
-          >
-            直接保存
-          </Button>,
-        ]}
+      <WorkspacePanel
+        title="节奏与结局"
+        description="长篇不要只盯着章数，先把三段比例定下来。"
+        extra={<Tag color="gold">推荐先定比例，再拆卷部章</Tag>}
       >
-        <div className="novel-core-settings__result-copy">
-          {pendingGeneratedSettings?.failedSteps
-            ? '本次生成已完成，但有部分步骤失败。你可以先应用已完成内容，再补充或重试失败步骤。'
-            : '已完成整页核心设定生成。你可以先把结果填入表单作为草稿检查，也可以直接写入当前小说设定。'}
-        </div>
-        {pendingGeneratedSettings && (
-          <div className="novel-core-settings__result-summary">
-            <div className="novel-core-settings__result-summary-title">
-              生成摘要
+        <Form form={form} layout="vertical">
+          <div className="story-design__ratio-grid">
+            <div className="story-design__ratio-card">
+              <Form.Item name="rhythm_setup" label="前段铺垫">
+                <Slider min={10} max={60} />
+              </Form.Item>
+              <small>负责立环境、立代价、立悬念。</small>
             </div>
-            <div className="novel-core-settings__result-summary-copy">
-              已完成 {pendingGeneratedSettings.completedSteps}/{pendingGeneratedSettings.steps.length} 个步骤，
-              失败 {pendingGeneratedSettings.failedSteps} 个步骤。
-              {hasSuccessfulGeneratedStep(pendingGeneratedSettings, 'sub_plots_list')
-                ? ` 支线已生成 ${pendingGeneratedSettings.sub_plots_list.length} 条。`
-                : ' 支线本次未生成。'}
-              {hasSuccessfulGeneratedStep(pendingGeneratedSettings, 'rhythm')
-                ? ` 节奏建议为 ${pendingGeneratedSettings.rhythm_setup}% / ${pendingGeneratedSettings.rhythm_conflict}% / ${pendingGeneratedSettings.rhythm_ending}%。`
-                : ''}
+            <div className="story-design__ratio-card">
+              <Form.Item name="rhythm_conflict" label="中段冲突">
+                <Slider min={20} max={70} />
+              </Form.Item>
+              <small>负责持续抬升压力与关系对抗。</small>
             </div>
-            <div className="novel-core-settings__result-list">
-              {pendingGeneratedSettings.steps.map((step) => (
-                <div
-                  key={step.key}
-                  className={`novel-core-settings__result-step novel-core-settings__result-step--${step.status}`}
-                >
-                  <div className="novel-core-settings__result-step-title">
-                    {step.label} · {
-                      step.status === 'failed'
-                        ? '失败'
-                        : step.status === 'warning'
-                          ? '部分成功'
-                          : '成功'
-                    }
-                  </div>
-                  {(step.warning || step.error) && (
-                    <div className="novel-core-settings__result-step-copy">
-                      {step.error || step.warning}
-                    </div>
-                  )}
-                </div>
-              ))}
+            <div className="story-design__ratio-card">
+              <Form.Item name="rhythm_ending" label="后段回收">
+                <Slider min={10} max={40} />
+              </Form.Item>
+              <small>负责回收伏笔、兑现代价和后果。</small>
             </div>
-            {pendingGeneratedSettings.warnings.length > 0 && (
-              <Alert
-                className="novel-core-settings__result-alert"
-                type="warning"
-                showIcon
-                message="生成提示"
-                description={pendingGeneratedSettings.warnings.join('；')}
-              />
-            )}
+          </div>
+        </Form>
+      </WorkspacePanel>
+
+      <WorkspacePanel
+        title="支线看板"
+        description="先把支线当成项目卡片管理，而不是堆成长文本。点击卡片可在右侧抽屉细修。"
+        extra={(
+          <div className="story-design__toolbar">
+            <Form form={form} component={false}>
+              <Form.Item name="subplot_batch_count" style={{ marginBottom: 0 }}>
+                <InputNumber min={MIN_SUBPLOT_BATCH_COUNT} max={MAX_SUBPLOT_BATCH_COUNT} />
+              </Form.Item>
+            </Form>
+            <Button icon={<RobotOutlined />} loading={generatingMode === 'subplots'} onClick={() => void handleGenerate('subplots')}>
+              AI 重算支线
+            </Button>
+            <Button icon={<PlusOutlined />} onClick={addSubplot}>
+              新增支线
+            </Button>
+            <Button danger icon={<DeleteOutlined />} onClick={clearSubplots}>
+              一键清空支线
+            </Button>
           </div>
         )}
-      </Modal>
+      >
+        <div className="story-design__stats-grid">
+          <div className="guided-step__fact-card">
+            <span>本轮 AI 数量</span>
+            <strong>{batchCount}</strong>
+            <small>用于生成或重算支线时的目标数量。</small>
+          </div>
+          <div className="guided-step__fact-card">
+            <span>已挂主线</span>
+            <strong>{subplotLinkedCount}/{subplots.length}</strong>
+            <small>没有主线因果的支线，应优先删掉或改写。</small>
+          </div>
+          <div className="guided-step__fact-card">
+            <span>已排回收</span>
+            <strong>{subplotScheduledCount}/{subplots.length}</strong>
+            <small>未定回收章位越多，后期失控风险越高。</small>
+          </div>
+          <div className="guided-step__fact-card">
+            <span>预计全书长度</span>
+            <strong>{estimatedChapterTotal} 章</strong>
+            <small>按目标字数和支线回收章位粗估。</small>
+          </div>
+        </div>
+
+        <div className="story-design__board">
+          {subplotBoard.map((lane) => (
+            <section key={lane.key} className="story-design__lane">
+              <div className="story-design__lane-head">
+                <div className="story-design__lane-copy">
+                  <strong>{lane.label}</strong>
+                  <span>{lane.hint}</span>
+                </div>
+                <Tag>{lane.items.length}</Tag>
+              </div>
+
+              <div className="story-design__lane-body">
+                {lane.items.length === 0 ? (
+                  <div className="story-design__lane-empty">当前还没有落在这一阶段的支线。</div>
+                ) : lane.items.map((subplot) => (
+                  <button
+                    key={`${lane.key}-${subplot.index}`}
+                    type="button"
+                    className="story-design__card"
+                    onClick={() => openSubplot(subplot.index)}
+                  >
+                    <div className="story-design__card-head">
+                      <strong>{subplot.name || `支线 ${subplot.index + 1}`}</strong>
+                      <Tag color={subplot.completeness === 100 ? 'success' : 'default'}>{subplot.completeness}%</Tag>
+                    </div>
+                    <div className="story-design__card-copy">
+                      {subplot.conflict || '还没有写清这条支线的核心冲突。'}
+                    </div>
+                    <div className="story-design__card-copy story-design__card-copy--soft">
+                      {subplot.mainlineLink || '还没有写清这条支线如何反作用于主线。'}
+                    </div>
+                    <div className="story-design__card-meta">
+                      {splitCharacterNames(subplot.characters).slice(0, 3).map((name) => (
+                        <Tag key={name}>{name}</Tag>
+                      ))}
+                      <Tag>{parseChapterMarker(subplot.endChapter) ? `第 ${parseChapterMarker(subplot.endChapter)} 章回收` : '未安排回收'}</Tag>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
+      </WorkspacePanel>
+
+      <Drawer
+        title={selectedSubplot ? selectedSubplot.name || '支线编辑' : '支线编辑'}
+        placement="right"
+        width={420}
+        open={selectedSubplotIndex !== null && Boolean(selectedSubplot)}
+        onClose={() => setSelectedSubplotIndex(null)}
+        extra={selectedSubplotIndex !== null ? (
+          <Button danger type="text" icon={<DeleteOutlined />} onClick={() => removeSubplot(selectedSubplotIndex)}>
+            删除
+          </Button>
+        ) : null}
+      >
+        {selectedSubplot && selectedSubplotIndex !== null ? (
+          <div className="story-design__drawer">
+            <div className="story-design__drawer-section story-design__drawer-section--compact">
+              <label>支线名称</label>
+              <Input
+                value={selectedSubplot.name}
+                onChange={(event) => updateSubplot(selectedSubplotIndex, { name: event.target.value })}
+                placeholder="例如：后勤线崩盘"
+              />
+            </div>
+
+            <div className="story-design__drawer-meta">
+              <div className="story-design__drawer-section story-design__drawer-section--compact">
+                <label>回收章位</label>
+                <Input
+                  value={selectedSubplot.endChapter}
+                  onChange={(event) => updateSubplot(selectedSubplotIndex, { endChapter: event.target.value })}
+                  placeholder="例如：36"
+                />
+              </div>
+              <div className="story-design__drawer-section story-design__drawer-section--compact">
+                <label>涉及人物</label>
+                <Input
+                  value={selectedSubplot.characters}
+                  onChange={(event) => updateSubplot(selectedSubplotIndex, { characters: event.target.value })}
+                  placeholder="使用顿号或逗号分隔"
+                />
+              </div>
+            </div>
+
+            <div className="story-design__drawer-section">
+              <label>核心冲突</label>
+              <Input.TextArea
+                rows={5}
+                value={selectedSubplot.conflict}
+                onChange={(event) => updateSubplot(selectedSubplotIndex, { conflict: event.target.value })}
+                placeholder="写这条支线真正制造的麻烦、代价与压力。"
+              />
+            </div>
+
+            <div className="story-design__drawer-section">
+              <label>对主线的作用</label>
+              <Input.TextArea
+                rows={5}
+                value={selectedSubplot.mainlineLink}
+                onChange={(event) => updateSubplot(selectedSubplotIndex, { mainlineLink: event.target.value })}
+                placeholder="写它怎样反作用于主线、人物关系或主题压力。"
+              />
+            </div>
+
+            <div className="story-design__inline-note">
+              支线卡片只保留 5 个高频字段，方便超长篇拆分、替换、回查和后续挂到结构页、时间轴页。
+            </div>
+          </div>
+        ) : null}
+      </Drawer>
     </WorkspacePage>
   )
 }

@@ -1,0 +1,592 @@
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { Alert, Button, Collapse, Form, Input, Space, Tag, message, notification } from 'antd'
+import {
+  ArrowRightOutlined,
+  BarsOutlined,
+  CheckCircleOutlined,
+  DeleteOutlined,
+  EnvironmentOutlined,
+  GlobalOutlined,
+  ReloadOutlined,
+  RobotOutlined,
+  SaveOutlined,
+  TeamOutlined,
+} from '@ant-design/icons'
+import { useNavigate } from 'react-router-dom'
+import type {
+  PremiseGenerationMode,
+  PremiseGenerationProgressEvent,
+  PremiseGenerationResult,
+} from '../../../shared/premise-generation'
+import { useNovelStore } from '../../../stores/novel.store'
+import {
+  buildStorySettingsPayload,
+  parseStorySettingsSnapshot,
+} from '../../../shared/story-settings'
+import {
+  buildAiResultKey,
+  useAiResultStore,
+  type PendingAiResult,
+} from '../../../stores/ai-result.store'
+import {
+  isCharacterRosterReady,
+  isItemsEquipmentReady,
+  isMapStructureReady,
+  isStoryPlotReady,
+  isWorldFoundationReady,
+  loadWorkflowStats,
+} from '../workflow'
+import {
+  WorkspaceContextSummary,
+  WorkspaceMetric,
+  WorkspacePage,
+  WorkspacePanel,
+} from '../components/WorkspaceShell'
+
+interface Props {
+  novelId: number
+}
+
+interface PremiseFormValues {
+  positioning: string
+  coreHook: string
+  protagonistStart: string
+  constraints: string
+  languageGuardrails: string
+  antiAiFlavor: string
+  commonSenseRules: string
+  bannedTerms: string
+}
+
+const EMPTY_STATS = {
+  mapCount: 0,
+  characterCount: 0,
+  itemCount: 0,
+  outlineCount: 0,
+  timelineCount: 0,
+  chapterCount: 0,
+  completedChapterCount: 0,
+  totalWords: 0,
+  hasProtagonist: false,
+}
+
+function compactText(value?: string | null, max = 46): string {
+  const text = value?.trim() || ''
+  if (!text) return '未补背景'
+  return text.length > max ? `${text.slice(0, max)}...` : text
+}
+
+function mergeGeneratedValues(
+  current: PremiseFormValues,
+  result: PremiseGenerationResult,
+  mode: PremiseGenerationMode,
+): PremiseFormValues {
+  const pick = (existing: string, next: string) => {
+    if (mode === 'fill_blanks' && existing.trim()) return existing
+    return next
+  }
+
+  return {
+    positioning: pick(current.positioning, result.positioning),
+    coreHook: pick(current.coreHook, result.coreHook),
+    protagonistStart: pick(current.protagonistStart, result.protagonistStart),
+    constraints: pick(current.constraints, result.constraints),
+    languageGuardrails: pick(current.languageGuardrails, result.languageGuardrails),
+    antiAiFlavor: pick(current.antiAiFlavor, result.antiAiFlavor),
+    commonSenseRules: pick(current.commonSenseRules, result.commonSenseRules),
+    bannedTerms: pick(current.bannedTerms, result.bannedTerms),
+  }
+}
+
+export default function PremisePage({ novelId }: Props) {
+  const navigate = useNavigate()
+  const { currentNovel, setCurrentNovel } = useNovelStore()
+  const pendingResultKey = useMemo(() => buildAiResultKey('premise_generate', novelId), [novelId])
+  const [form] = Form.useForm<PremiseFormValues>()
+  const [saving, setSaving] = useState(false)
+  const [generatingMode, setGeneratingMode] = useState<PremiseGenerationMode | null>(null)
+  const [generationProgress, setGenerationProgress] = useState<PremiseGenerationProgressEvent | null>(null)
+  const [stats, setStats] = useState(EMPTY_STATS)
+  const aliveRef = useRef(true)
+  const pendingResult = useAiResultStore(
+    (state) => state.results[pendingResultKey] as PendingAiResult<PremiseGenerationResult> | undefined,
+  )
+  const setPendingResult = useAiResultStore((state) => state.setPendingResult)
+  const markApplied = useAiResultStore((state) => state.markApplied)
+  const clearPendingResult = useAiResultStore((state) => state.clearPendingResult)
+
+  const settings = useMemo(
+    () => parseStorySettingsSnapshot(currentNovel?.settingsJson),
+    [currentNovel?.settingsJson],
+  )
+
+  useEffect(() => {
+    aliveRef.current = true
+    return () => {
+      aliveRef.current = false
+    }
+  }, [])
+
+  useEffect(() => {
+    form.setFieldsValue({
+      positioning: settings.premise.positioning,
+      coreHook: settings.premise.coreHook,
+      protagonistStart: settings.premise.protagonistStart,
+      constraints: settings.premise.constraints,
+      languageGuardrails: settings.premise.languageGuardrails,
+      antiAiFlavor: settings.writingRules.antiAiFlavor,
+      commonSenseRules: settings.writingRules.commonSenseRules,
+      bannedTerms: settings.writingRules.bannedTerms,
+    })
+  }, [form, settings])
+
+  useEffect(() => {
+    let active = true
+    void loadWorkflowStats(novelId).then((workflowStats) => {
+      if (active) setStats(workflowStats)
+    })
+    return () => {
+      active = false
+    }
+  }, [novelId])
+
+  useEffect(() => {
+    const unsubscribe = window.electron.on('ai:premise-progress', (...args) => {
+      const payload = args[0] as PremiseGenerationProgressEvent | undefined
+      if (!payload || payload.novelId !== novelId) return
+      setGenerationProgress(payload)
+    })
+    return unsubscribe
+  }, [novelId])
+
+  useEffect(() => {
+    if (!pendingResult?.appliedAt) return
+
+    const applyMode = (pendingResult.appliedMode || pendingResult.mode || 'replace') as PremiseGenerationMode
+    const currentValues = form.getFieldsValue()
+    form.setFieldsValue(mergeGeneratedValues(currentValues, pendingResult.result, applyMode))
+  }, [
+    form,
+    pendingResult?.appliedAt,
+    pendingResult?.appliedMode,
+    pendingResult?.completedAt,
+    pendingResult?.mode,
+    pendingResult?.result,
+  ])
+
+  const formValues = (Form.useWatch([], form) as Partial<PremiseFormValues> | undefined) || {}
+  const assetReadiness = [
+    isWorldFoundationReady(currentNovel),
+    isMapStructureReady(stats),
+    isCharacterRosterReady(stats),
+    isItemsEquipmentReady(stats),
+  ].filter(Boolean).length
+  const storyDesignReady = isStoryPlotReady(currentNovel)
+  const premiseFilledCount = [
+    formValues.positioning,
+    formValues.coreHook,
+    formValues.protagonistStart,
+    formValues.constraints,
+    formValues.languageGuardrails,
+  ].filter((value) => typeof value === 'string' && value.trim()).length
+  const writingRuleCount = [
+    formValues.antiAiFlavor,
+    formValues.commonSenseRules,
+    formValues.bannedTerms,
+  ].filter((value) => typeof value === 'string' && value.trim()).length
+
+  const applyPendingResult = (mode: PremiseGenerationMode) => {
+    if (!pendingResult) return
+
+    const currentValues = form.getFieldsValue()
+    form.setFieldsValue(mergeGeneratedValues(currentValues, pendingResult.result, mode))
+    markApplied(pendingResultKey, mode)
+  }
+
+  const handleSave = async () => {
+    const values = await form.validateFields()
+    setSaving(true)
+
+    try {
+      const payload = buildStorySettingsPayload({
+        premise: {
+          positioning: values.positioning.trim(),
+          coreHook: values.coreHook.trim(),
+          protagonistStart: values.protagonistStart.trim(),
+          constraints: values.constraints.trim(),
+          languageGuardrails: values.languageGuardrails.trim(),
+        },
+        writingRules: {
+          antiAiFlavor: values.antiAiFlavor.trim(),
+          commonSenseRules: values.commonSenseRules.trim(),
+          bannedTerms: values.bannedTerms.trim(),
+        },
+      }, currentNovel?.settingsJson)
+
+      await window.electron.novel.update(novelId, {
+        settingsJson: JSON.stringify(payload),
+      })
+
+      const updated = await window.electron.novel.get(novelId)
+      if (updated) setCurrentNovel(updated)
+      if (pendingResult?.appliedAt) {
+        clearPendingResult(pendingResultKey)
+      }
+      message.success('基础设定已保存。')
+    } catch (error) {
+      console.error(error)
+      message.error(error instanceof Error ? error.message : '基础设定保存失败。')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleGenerate = async (mode: PremiseGenerationMode) => {
+    setGeneratingMode(mode)
+    setGenerationProgress(null)
+    const startedAt = new Date().toISOString()
+
+    try {
+      const result = await window.electron.ai.generatePremise({
+        novelId,
+        mode,
+        requirements: '只生成基础设定与写作边界，不要写主线、支线、章节、阶段转折和结局。',
+      })
+
+      setPendingResult({
+        key: pendingResultKey,
+        taskType: 'premise_generate',
+        novelId,
+        status: 'pending',
+        result,
+        warnings: result.warnings,
+        sourcePage: 'core-settings',
+        mode,
+        createdAt: startedAt,
+        completedAt: new Date().toISOString(),
+      })
+
+      if (aliveRef.current) {
+        const currentValues = form.getFieldsValue()
+        form.setFieldsValue(mergeGeneratedValues(currentValues, result, mode))
+        markApplied(pendingResultKey, mode)
+
+        if (result.warnings.length > 0) {
+          message.warning(`AI 结果已填入表单，但仍有 ${result.warnings.length} 条提醒，请保存前复核。`)
+        } else if (mode === 'fill_blanks') {
+          message.success('空白字段已补齐到表单，当前尚未保存。')
+        } else {
+          message.success('基础设定首版已填入表单，当前尚未保存。')
+        }
+      } else {
+        notification.success({
+          message: '基础设定 AI 已完成',
+          description: result.warnings.length > 0
+            ? `结果已保留，含 ${result.warnings.length} 条提醒。返回基础设定页可继续应用或复核。`
+            : '结果已保留。返回基础设定页可继续应用或复核。',
+          duration: 6,
+          placement: 'bottomRight',
+          onClick: () => {
+            window.location.hash = `#/novels/${novelId}/core-settings`
+          },
+        })
+      }
+    } catch (error) {
+      console.error(error)
+      const errorMessage = error instanceof Error ? error.message : '基础设定生成失败。'
+      if (aliveRef.current) {
+        message.error(errorMessage)
+      } else {
+        notification.error({
+          message: '基础设定 AI 生成失败',
+          description: errorMessage,
+          duration: 6,
+          placement: 'bottomRight',
+          onClick: () => {
+            window.location.hash = `#/novels/${novelId}/core-settings`
+          },
+        })
+      }
+    } finally {
+      if (aliveRef.current) {
+        setGeneratingMode(null)
+        setGenerationProgress(null)
+      }
+    }
+  }
+
+  return (
+    <WorkspacePage
+      className="novel-premise-page"
+      layout="wide"
+      heroVariant="compact"
+      asidePlacement="side"
+      eyebrow="基础设定"
+      title="基础设定"
+      description="这里先收口作品底盘，只处理背景定位、核心信息、主角起点、底层约束和写作边界。主线、支线、结局统一放到后面的故事设计。"
+      actions={(
+        <Space wrap>
+          <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>
+            保存基础设定
+          </Button>
+          <Button
+            icon={<RobotOutlined />}
+            loading={generatingMode === 'replace'}
+            disabled={Boolean(generatingMode)}
+            onClick={() => void handleGenerate('replace')}
+          >
+            AI 生成基础设定
+          </Button>
+          <Button
+            loading={generatingMode === 'fill_blanks'}
+            disabled={Boolean(generatingMode)}
+            onClick={() => void handleGenerate('fill_blanks')}
+          >
+            AI 只补空字段
+          </Button>
+          <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/story-design`)}>
+            进入故事设计
+          </Button>
+        </Space>
+      )}
+      contextSummary={(
+        <WorkspaceContextSummary
+          items={[
+            { label: '题材', value: currentNovel?.genreName || '未设置' },
+            { label: '背景摘要', value: compactText(currentNovel?.expandedBackground || currentNovel?.synopsis) },
+            { label: '资产就绪', value: `${assetReadiness}/4` },
+            { label: '故事设计', value: storyDesignReady ? '已存在' : '待设计' },
+          ]}
+        />
+      )}
+      metrics={(
+        <>
+          <WorkspaceMetric label="基础字段" value={`${premiseFilledCount}/5`} tone="warm" hint="定位、核心信息、主角起点、约束、语言边界" />
+          <WorkspaceMetric label="写作约束" value={`${writingRuleCount}/3`} hint="去 AI 腔、常识约束、禁用表达" />
+          <WorkspaceMetric label="世界资产" value={`${assetReadiness}/4`} hint="世界、地图、人物、物品就绪度" />
+        </>
+      )}
+      aside={(
+        <div className="premise-page__aside-stack">
+          <WorkspacePanel title="当前摘要" description="把最关键的边界稳定下来，后面的故事设计才不会发散。">
+            <div className="premise-page__summary-grid">
+              <div className="premise-page__summary-card">
+                <span>基础设定完成度</span>
+                <strong>{premiseFilledCount}/5</strong>
+                <small>{formValues.constraints?.trim() || '优先写清不能违背的代价和规则。'}</small>
+              </div>
+              <div className="premise-page__summary-card">
+                <span>去 AI 味规则</span>
+                <strong>{writingRuleCount}/3</strong>
+                <small>{formValues.antiAiFlavor?.trim() || '补充禁写句式，避免重复模板。'}</small>
+              </div>
+            </div>
+          </WorkspacePanel>
+
+          <WorkspacePanel title="AI 生成说明" description="生成结果会先填到表单，不会自动保存。">
+            <div className="premise-page__summary-grid">
+              <div className="premise-page__summary-card premise-page__summary-card--accent">
+                <span>首版生成</span>
+                <strong>重整当前表单</strong>
+                <small>适合刚开始搭底盘，统一措辞和边界。</small>
+              </div>
+              <div className="premise-page__summary-card">
+                <span>补空字段</span>
+                <strong>保留已写内容</strong>
+                <small>只填缺口，适合已有部分设定时继续补齐。</small>
+              </div>
+            </div>
+          </WorkspacePanel>
+        </div>
+      )}
+    >
+      {!currentNovel?.expandedBackground && !currentNovel?.synopsis ? (
+        <Alert type="warning" showIcon message="背景还没有补全。建议先在概览页把简介和扩展背景写稳，再回来整理基础设定。" />
+      ) : null}
+
+      {generationProgress ? (
+        <Alert
+          type="info"
+          showIcon
+          message={`AI 正在生成：${generationProgress.label}`}
+          description={generationProgress.detail || '正在根据当前背景和资产整理基础设定。'}
+        />
+      ) : null}
+
+      {pendingResult ? (
+        <div className={`premise-page__pending-result ${pendingResult.appliedAt ? 'premise-page__pending-result--applied' : ''}`}>
+          <div className="premise-page__pending-head">
+            <div className="premise-page__pending-copy">
+              <span>{pendingResult.appliedAt ? '本轮结果已填入当前表单，尚未保存。' : '本轮结果已生成，等待应用到表单。'}</span>
+              <strong>{pendingResult.mode === 'fill_blanks' ? '补空结果草稿' : '基础设定首版草稿'}</strong>
+              <small>
+                {pendingResult.appliedAt
+                  ? '你可以重新应用全部覆盖，或按“只补空字段”保留当前已写内容。'
+                  : '如果中途离开了页面，结果也不会丢失，回到这里仍可继续处理。'}
+              </small>
+            </div>
+            <Space size={[8, 8]} wrap>
+              <Tag color={pendingResult.appliedAt ? 'green' : 'gold'}>
+                {pendingResult.appliedAt ? '已填入未保存' : '待应用'}
+              </Tag>
+              <Tag>
+                {pendingResult.result.steps.filter((step) => step.status === 'success' || step.status === 'warning').length}
+                /
+                {pendingResult.result.steps.length}
+                {' '}
+                步
+              </Tag>
+              {pendingResult.warnings.length > 0 ? <Tag color="orange">{pendingResult.warnings.length} 条提醒</Tag> : <Tag color="blue">无额外提醒</Tag>}
+            </Space>
+          </div>
+
+          {pendingResult.warnings.length > 0 ? (
+            <div className="premise-page__pending-warnings">
+              {pendingResult.warnings.map((warning, index) => (
+                <div key={`${pendingResult.completedAt}-${index}`}>{warning}</div>
+              ))}
+            </div>
+          ) : null}
+
+          <div className="premise-page__pending-actions">
+            <Button type="primary" icon={<CheckCircleOutlined />} onClick={() => applyPendingResult('replace')}>
+              {pendingResult.appliedAt ? '重新应用全部' : '应用全部'}
+            </Button>
+            <Button icon={<ReloadOutlined />} onClick={() => applyPendingResult('fill_blanks')}>
+              只补空字段
+            </Button>
+            <Button
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() => {
+                clearPendingResult(pendingResultKey)
+                message.info('已丢弃本轮 AI 结果记录。当前表单内容不会被回滚。')
+              }}
+            >
+              丢弃结果
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      <WorkspacePanel title="本页职责" description="先把作品边界和语言规则说清楚，再进入情节设计。">
+        <div className="guided-step__checklist">
+          <div className="guided-step__checkitem guided-step__checkitem--done">
+            <div className="guided-step__checkhead"><strong>这里保留什么</strong></div>
+            <p>作品定位、核心信息、主角起点、底层约束，以及用于压住 AI 味和常识偏差的写作规则。</p>
+          </div>
+          <div className="guided-step__checkitem">
+            <div className="guided-step__checkhead"><strong>这里不写什么</strong></div>
+            <p>主线推进、支线框架、阶段转折和结局落点，统一放到故事设计页处理。</p>
+          </div>
+        </div>
+      </WorkspacePanel>
+
+      <WorkspacePanel title="基础设定编辑器" description="优先填写后续所有模块都会反复引用的 5 个核心字段。">
+        <Form form={form} layout="vertical">
+          <div className="guided-step__field-grid">
+            <div className="guided-step__field-card">
+              <Form.Item name="positioning" label="作品定位" rules={[{ required: true, message: '请写清作品定位' }]}>
+                <Input.TextArea rows={4} placeholder="写清作品的时代、环境、社会压力和整体叙事方向。" />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card">
+              <Form.Item name="coreHook" label="核心信息" rules={[{ required: true, message: '请写清核心信息' }]}>
+                <Input.TextArea rows={4} placeholder="写这部书最值得展开的核心信息，不要直接写成事件链。" />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card">
+              <Form.Item name="protagonistStart" label="主角起点" rules={[{ required: true, message: '请写清主角起点' }]}>
+                <Input.TextArea rows={4} placeholder="写主角开局的身份、处境、资源和限制。" />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card">
+              <Form.Item name="constraints" label="底层约束" rules={[{ required: true, message: '请写清底层约束' }]}>
+                <Input.TextArea rows={4} placeholder="写不能违背的世界规则、社会规则、代价和常识边界。" />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card guided-step__field-card--full">
+              <Form.Item name="languageGuardrails" label="语言边界">
+                <Input.TextArea rows={3} placeholder="写命名、称呼、语气、禁用表达和叙述口径边界。" />
+              </Form.Item>
+            </div>
+          </div>
+        </Form>
+      </WorkspacePanel>
+
+      <WorkspacePanel title="语言与写作边界" description="高频规则直接可见，高级规则收起，减少页面堆叠高度。">
+        <Form form={form} layout="vertical">
+          <Collapse
+            ghost
+            className="premise-page__advanced"
+            items={[
+              {
+                key: 'writing-rules',
+                label: (
+                  <div className="premise-page__collapse-label">
+                    <span>展开高级写作限制</span>
+                    <Space size={6} wrap>
+                      {formValues.antiAiFlavor?.trim() ? <Tag color="gold">已写去 AI 腔</Tag> : <Tag>待补去 AI 腔</Tag>}
+                      {formValues.commonSenseRules?.trim() ? <Tag color="green">已写常识约束</Tag> : <Tag>待补常识约束</Tag>}
+                    </Space>
+                  </div>
+                ),
+                children: (
+                  <div className="guided-step__field-grid">
+                    <div className="guided-step__field-card">
+                      <Form.Item name="antiAiFlavor" label="去 AI 腔规则">
+                        <Input.TextArea rows={4} placeholder="例如：禁止口号式总结、禁止万能情绪句、禁止对称排比收尾。" />
+                      </Form.Item>
+                    </div>
+                    <div className="guided-step__field-card">
+                      <Form.Item name="commonSenseRules" label="常识约束">
+                        <Input.TextArea rows={4} placeholder="例如：人物行为必须服从信息量、伤势、资源、地图距离和制度压力。" />
+                      </Form.Item>
+                    </div>
+                    <div className="guided-step__field-card guided-step__field-card--full">
+                      <Form.Item name="bannedTerms" label="禁用表达">
+                        <Input.TextArea rows={3} placeholder="写需要尽量避免的空洞词、套话和生造词。" />
+                      </Form.Item>
+                    </div>
+                  </div>
+                ),
+              },
+            ]}
+          />
+        </Form>
+      </WorkspacePanel>
+
+      <WorkspacePanel title="下一步建议" description="故事设计最好建立在世界资产已经准备好的基础上。">
+        <div className="guided-step__fact-grid">
+          <div className="guided-step__fact-card">
+            <span>世界规则</span>
+            <strong>{isWorldFoundationReady(currentNovel) ? '已就绪' : '待补齐'}</strong>
+            <small>先统一时间、规则、势力和语言边界。</small>
+          </div>
+          <div className="guided-step__fact-card">
+            <span>地图与空间</span>
+            <strong>{isMapStructureReady(stats) ? '已就绪' : '待补齐'}</strong>
+            <small>故事设计前先让地点和行动半径可见。</small>
+          </div>
+          <div className="guided-step__fact-card">
+            <span>人物资产</span>
+            <strong>{isCharacterRosterReady(stats) ? '已就绪' : '待补齐'}</strong>
+            <small>至少让主角和关键对位角色先落地。</small>
+          </div>
+          <div className="guided-step__fact-card">
+            <span>物品挂点</span>
+            <strong>{isItemsEquipmentReady(stats) ? '已就绪' : '待补齐'}</strong>
+            <small>关键物品和资源链补起来后，再做故事设计更稳。</small>
+          </div>
+        </div>
+        <div className="guided-step__panel-gap" />
+        <Space wrap>
+          <Button icon={<GlobalOutlined />} onClick={() => navigate(`/novels/${novelId}/world-rules`)}>世界规则</Button>
+          <Button icon={<EnvironmentOutlined />} onClick={() => navigate(`/novels/${novelId}/map`)}>地图</Button>
+          <Button icon={<TeamOutlined />} onClick={() => navigate(`/novels/${novelId}/characters`)}>人物</Button>
+          <Button icon={<BarsOutlined />} type="primary" onClick={() => navigate(`/novels/${novelId}/story-design`)}>去做故事设计</Button>
+        </Space>
+      </WorkspacePanel>
+    </WorkspacePage>
+  )
+}

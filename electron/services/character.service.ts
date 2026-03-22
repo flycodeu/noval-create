@@ -1,6 +1,6 @@
-import { WebContents } from 'electron'
+﻿import { WebContents } from 'electron'
 import { asc, eq } from 'drizzle-orm'
-import { getDb } from '../database/db'
+import { getDb, getSqlite } from '../database/db'
 import { characters, characterRelations, novels, storyItems, timelineEvents } from '../database/schema'
 import { safeParseJson } from '../utils/json'
 import { buildStoryProfile } from './context.service'
@@ -19,6 +19,7 @@ import {
 } from './prompts'
 import { runChatTask } from './task.service'
 import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/utils/text'
+import { markNovelContextChanged } from './context-impact.service'
 
 function asText(value: unknown): string {
   return typeof value === 'string' ? cleanAiFieldText(value) : ''
@@ -88,10 +89,10 @@ function inferEntityType(species: string): string {
   if (!species || species === '人类' || species === '幸存者' || species === '人族' || species === '人族修士') {
     return 'human'
   }
-  if (/丧尸|感染者|尸/u.test(species)) return 'undead'
-  if (/兽|猫|狗|灵兽|魔兽/u.test(species)) return 'beast'
-  if (/精灵|异族/u.test(species)) return 'nonhuman'
-  if (/仙|神/u.test(species)) return 'immortal'
+  if (/(丧尸|感染者|尸鬼|亡灵)/u.test(species)) return 'undead'
+  if (/(兽|狼|虎|狐|熊|龙|灵兽|魔兽)/u.test(species)) return 'beast'
+  if (/(精灵|异族|妖|魔|鬼)/u.test(species)) return 'nonhuman'
+  if (/(仙|神)/u.test(species)) return 'immortal'
   return 'nonhuman'
 }
 
@@ -126,12 +127,10 @@ function buildRoleQueue(opts: {
 
 function buildStoryCoreSummary(profile: Awaited<ReturnType<typeof buildStoryProfile>>): string {
   return [
-    `故事核心目标：${profile.storyGoal || '（未填写）'}`,
-    `核心冲突：${profile.coreConflict || '（未填写）'}`,
-    `主线剧情：${profile.mainPlot || '（未填写）'}`,
-    `支线剧情：${profile.subPlots || '（暂无支线）'}`,
-    `结局方向：${profile.ending || '（未填写）'}`,
-  ].join('\n')
+    profile.premiseSummary,
+    profile.storyDesignSummary,
+    profile.writingRulesSummary,
+  ].filter(Boolean).join('\n\n')
 }
 
 function buildOptionSummary(label: string, values: string[]): string {
@@ -211,7 +210,7 @@ function buildCharacterPayload(
 ): Partial<typeof characters.$inferInsert> {
   const sanitized = cleanAiValue(parsed)
   const appearance = asText(sanitized.appearance) || parseAppearanceDescription(fallback.existing?.appearanceJson)
-  const fullName = asText(sanitized.full_name) || asText(sanitized.name) || fallback.fullName || fallback.existing?.fullName || '未命名'
+  const fullName = asText(sanitized.full_name) || asText(sanitized.name) || fallback.fullName || fallback.existing?.fullName || '未命名角色'
   const roleType = asText(sanitized.role_type) || fallback.roleType || fallback.existing?.roleType || 'minor'
   const personalityTraits = toStringArray(sanitized.personality_traits).length > 0
     ? toStringArray(sanitized.personality_traits)
@@ -281,6 +280,424 @@ function buildCharacterPayload(
   }
 }
 
+interface CharacterQueryFilters {
+  novelId: number
+  roleType?: typeof characters.$inferSelect['roleType']
+  entityType?: string
+  species?: string
+  keyword?: string
+  page?: number
+  pageSize?: number
+}
+
+interface CharacterGraphFilters {
+  novelId: number
+  characterIds?: number[]
+  focusCharacterId?: number
+  limit?: number
+}
+
+function normalizePaging(page?: number, pageSize?: number, fallbackPageSize = 24) {
+  const nextPageSize = Math.max(1, Math.min(pageSize || fallbackPageSize, 200))
+  const nextPage = Math.max(1, page || 1)
+  const offset = (nextPage - 1) * nextPageSize
+  return { page: nextPage, pageSize: nextPageSize, offset }
+}
+
+function buildPagedResult<T>(items: T[], page: number, pageSize: number, total: number) {
+  return {
+    items,
+    page,
+    pageSize,
+    total,
+    hasMore: page * pageSize < total,
+  }
+}
+
+function mapCharacterRecord(row: Record<string, unknown>) {
+  return {
+    id: Number(row.id),
+    novelId: Number(row.novel_id),
+    roleType: String(row.role_type || 'minor') as typeof characters.$inferSelect['roleType'],
+    entityType: typeof row.entity_type === 'string' ? row.entity_type : undefined,
+    species: typeof row.species === 'string' ? row.species : undefined,
+    surname: typeof row.surname === 'string' ? row.surname : undefined,
+    givenName: typeof row.given_name === 'string' ? row.given_name : undefined,
+    fullName: String(row.full_name || ''),
+    gender: typeof row.gender === 'string' ? row.gender : undefined,
+    age: row.age == null ? undefined : Number(row.age),
+    birthplace: typeof row.birthplace === 'string' ? row.birthplace : undefined,
+    occupation: typeof row.occupation === 'string' ? row.occupation : undefined,
+    rankLevel: typeof row.rank_level === 'string' ? row.rank_level : undefined,
+    socialIdentity: typeof row.social_identity === 'string' ? row.social_identity : undefined,
+    background: typeof row.background === 'string' ? row.background : undefined,
+    personalityTraitsJson: typeof row.personality_traits_json === 'string' ? row.personality_traits_json : undefined,
+    flawsJson: typeof row.flaws_json === 'string' ? row.flaws_json : undefined,
+    habitsJson: typeof row.habits_json === 'string' ? row.habits_json : undefined,
+    campFactionIdsJson: typeof row.camp_faction_ids_json === 'string' ? row.camp_faction_ids_json : undefined,
+    powerSystemRefsJson: typeof row.power_system_refs_json === 'string' ? row.power_system_refs_json : undefined,
+    contextHooksJson: typeof row.context_hooks_json === 'string' ? row.context_hooks_json : undefined,
+    goals: typeof row.goals === 'string' ? row.goals : undefined,
+    firstImpression: typeof row.first_impression === 'string' ? row.first_impression : undefined,
+    surfaceDesire: typeof row.surface_desire === 'string' ? row.surface_desire : undefined,
+    deepNeed: typeof row.deep_need === 'string' ? row.deep_need : undefined,
+    coreFear: typeof row.core_fear === 'string' ? row.core_fear : undefined,
+    innerConflict: typeof row.inner_conflict === 'string' ? row.inner_conflict : undefined,
+    hiddenSecret: typeof row.hidden_secret === 'string' ? row.hidden_secret : undefined,
+    moralLine: typeof row.moral_line === 'string' ? row.moral_line : undefined,
+    selfDeception: typeof row.self_deception === 'string' ? row.self_deception : undefined,
+    trauma: typeof row.trauma === 'string' ? row.trauma : undefined,
+    contradiction: typeof row.contradiction === 'string' ? row.contradiction : undefined,
+    relationshipTension: typeof row.relationship_tension === 'string' ? row.relationship_tension : undefined,
+    resonancePoint: typeof row.resonance_point === 'string' ? row.resonance_point : undefined,
+    characterArc: typeof row.character_arc === 'string' ? row.character_arc : undefined,
+    appearanceJson: typeof row.appearance_json === 'string' ? row.appearance_json : undefined,
+    abilitiesJson: typeof row.abilities_json === 'string' ? row.abilities_json : undefined,
+    appearChapter: row.appear_chapter == null ? undefined : Number(row.appear_chapter),
+    sortOrder: Number(row.sort_order || 0),
+    createdAt: typeof row.created_at === 'string' ? row.created_at : '',
+    updatedAt: typeof row.updated_at === 'string' ? row.updated_at : '',
+  }
+}
+
+function mapRelationRecord(row: Record<string, unknown>) {
+  return {
+    id: Number(row.id),
+    novelId: Number(row.novel_id),
+    charAId: Number(row.char_a_id),
+    charBId: Number(row.char_b_id),
+    relationType: typeof row.relation_type === 'string' ? row.relation_type : undefined,
+    relationLabel: typeof row.relation_label === 'string' ? row.relation_label : undefined,
+    bilateral: Number(row.bilateral || 0),
+    description: typeof row.description === 'string' ? row.description : undefined,
+  }
+}
+
+function mapStoryItemRecord(row: Record<string, unknown>) {
+  return {
+    id: Number(row.id),
+    novelId: Number(row.novel_id),
+    itemKind: String(row.item_kind || 'instance') as 'template' | 'instance',
+    parentItemId: row.parent_item_id == null ? undefined : Number(row.parent_item_id),
+    itemName: String(row.item_name || ''),
+    genreFamily: typeof row.genre_family === 'string' ? row.genre_family : undefined,
+    category: typeof row.category === 'string' ? row.category : undefined,
+    subType: typeof row.sub_type === 'string' ? row.sub_type : undefined,
+    rarity: typeof row.rarity === 'string' ? row.rarity : undefined,
+    ownerCharacterId: row.owner_character_id == null ? undefined : Number(row.owner_character_id),
+    locationMapId: row.location_map_id == null ? undefined : Number(row.location_map_id),
+    status: String(row.status || 'available') as 'available' | 'consumed' | 'hidden' | 'destroyed',
+    summary: typeof row.summary === 'string' ? row.summary : undefined,
+    acquisitionMethod: typeof row.acquisition_method === 'string' ? row.acquisition_method : undefined,
+    usageMethod: typeof row.usage_method === 'string' ? row.usage_method : undefined,
+    cost: typeof row.cost === 'string' ? row.cost : undefined,
+    risk: typeof row.risk === 'string' ? row.risk : undefined,
+    plotFunction: typeof row.plot_function === 'string' ? row.plot_function : undefined,
+    appearance: typeof row.appearance === 'string' ? row.appearance : undefined,
+    factionHint: typeof row.faction_hint === 'string' ? row.faction_hint : undefined,
+    linkedCharacterIdsJson: typeof row.linked_character_ids_json === 'string' ? row.linked_character_ids_json : undefined,
+    linkedTimelineEventIdsJson: typeof row.linked_timeline_event_ids_json === 'string' ? row.linked_timeline_event_ids_json : undefined,
+    tagsJson: typeof row.tags_json === 'string' ? row.tags_json : undefined,
+    sortOrder: Number(row.sort_order || 0),
+    createdAt: typeof row.created_at === 'string' ? row.created_at : '',
+    updatedAt: typeof row.updated_at === 'string' ? row.updated_at : '',
+  }
+}
+
+function buildCharacterWhere(filters: CharacterQueryFilters) {
+  const whereClauses = ['c.novel_id = ?']
+  const params: Array<number | string> = [filters.novelId]
+
+  if (filters.roleType) {
+    whereClauses.push('c.role_type = ?')
+    params.push(filters.roleType)
+  }
+
+  if (filters.entityType) {
+    whereClauses.push('c.entity_type = ?')
+    params.push(filters.entityType)
+  }
+
+  if (filters.species) {
+    whereClauses.push('c.species = ?')
+    params.push(filters.species)
+  }
+
+  const keyword = typeof filters.keyword === 'string' ? filters.keyword.trim() : ''
+  if (keyword) {
+    const like = `%${keyword}%`
+    whereClauses.push(`
+      (
+        c.full_name LIKE ?
+        OR COALESCE(c.species, '') LIKE ?
+        OR COALESCE(c.occupation, '') LIKE ?
+        OR COALESCE(c.rank_level, '') LIKE ?
+        OR COALESCE(c.goals, '') LIKE ?
+        OR COALESCE(c.inner_conflict, '') LIKE ?
+        OR COALESCE(c.background, '') LIKE ?
+      )
+    `)
+    params.push(like, like, like, like, like, like, like)
+  }
+
+  return {
+    whereSql: whereClauses.join(' AND '),
+    params,
+  }
+}
+
+function uniqueNumberArray(values: number[]) {
+  return [...new Set(values.filter((value) => Number.isFinite(value)))]
+}
+
+export function queryCharacters(filters: CharacterQueryFilters) {
+  const sqlite = getSqlite()
+  const paging = normalizePaging(filters.page, filters.pageSize, 24)
+  const query = buildCharacterWhere(filters)
+  const countRow = sqlite.prepare(`
+    SELECT COUNT(*) AS total
+    FROM characters c
+    WHERE ${query.whereSql}
+  `).get(...query.params) as { total?: number } | undefined
+
+  const rows = sqlite.prepare(`
+    SELECT c.*
+    FROM characters c
+    WHERE ${query.whereSql}
+    ORDER BY
+      CASE c.role_type
+        WHEN 'protagonist' THEN 0
+        WHEN 'major' THEN 1
+        WHEN 'antagonist' THEN 2
+        WHEN 'supporting' THEN 3
+        ELSE 4
+      END ASC,
+      c.sort_order ASC,
+      c.id ASC
+    LIMIT ? OFFSET ?
+  `).all(...query.params, paging.pageSize, paging.offset) as Array<Record<string, unknown>>
+
+  const items = rows.map(mapCharacterRecord)
+  return buildPagedResult(items, paging.page, paging.pageSize, Number(countRow?.total || 0))
+}
+
+export function getCharacterStats(filters: CharacterQueryFilters) {
+  const sqlite = getSqlite()
+  const query = buildCharacterWhere(filters)
+  const row = sqlite.prepare(`
+    SELECT
+      COUNT(*) AS total,
+      SUM(CASE WHEN c.role_type = 'protagonist' THEN 1 ELSE 0 END) AS protagonistCount,
+      SUM(CASE WHEN c.role_type = 'major' THEN 1 ELSE 0 END) AS majorCount,
+      SUM(CASE WHEN c.role_type = 'antagonist' THEN 1 ELSE 0 END) AS antagonistCount,
+      COUNT(DISTINCT NULLIF(TRIM(COALESCE(c.species, '')), '')) AS speciesCount
+    FROM characters c
+    WHERE ${query.whereSql}
+  `).get(...query.params) as Record<string, unknown> | undefined
+
+  const relationRow = sqlite.prepare(`
+    SELECT COUNT(*) AS relationCount
+    FROM character_relations r
+    WHERE r.novel_id = ?
+      AND (
+        r.char_a_id IN (SELECT c.id FROM characters c WHERE ${query.whereSql})
+        OR r.char_b_id IN (SELECT c.id FROM characters c WHERE ${query.whereSql})
+      )
+  `).get(filters.novelId, ...query.params, ...query.params) as Record<string, unknown> | undefined
+
+  return {
+    total: Number(row?.total || 0),
+    protagonistCount: Number(row?.protagonistCount || 0),
+    majorCount: Number(row?.majorCount || 0),
+    antagonistCount: Number(row?.antagonistCount || 0),
+    relationCount: Number(relationRow?.relationCount || 0),
+    speciesCount: Number(row?.speciesCount || 0),
+  }
+}
+
+export function getCharacterFilterOptions(novelId: number) {
+  const sqlite = getSqlite()
+  const speciesRows = sqlite.prepare(`
+    SELECT DISTINCT species
+    FROM characters
+    WHERE novel_id = ?
+      AND species IS NOT NULL
+      AND TRIM(species) <> ''
+    ORDER BY species ASC
+  `).all(novelId) as Array<{ species?: string | null }>
+  const entityRows = sqlite.prepare(`
+    SELECT DISTINCT entity_type
+    FROM characters
+    WHERE novel_id = ?
+      AND entity_type IS NOT NULL
+      AND TRIM(entity_type) <> ''
+    ORDER BY entity_type ASC
+  `).all(novelId) as Array<{ entity_type?: string | null }>
+
+  return {
+    species: speciesRows
+      .map((row) => (typeof row.species === 'string' ? row.species.trim() : ''))
+      .filter(Boolean),
+    entityTypes: entityRows
+      .map((row) => (typeof row.entity_type === 'string' ? row.entity_type.trim() : ''))
+      .filter(Boolean),
+  }
+}
+
+export function searchCharacters(novelId: number, keyword = '', limit = 20) {
+  return queryCharacters({
+    novelId,
+    keyword,
+    page: 1,
+    pageSize: Math.max(1, Math.min(limit, 50)),
+  }).items
+}
+
+export function getCharacterGraph(filters: CharacterGraphFilters) {
+  const sqlite = getSqlite()
+  const relationWindowLimit = Math.max(12, Math.min(filters.limit || 24, 80))
+  const seedIds = uniqueNumberArray([
+    ...(filters.characterIds || []),
+    ...(typeof filters.focusCharacterId === 'number' ? [filters.focusCharacterId] : []),
+  ])
+
+  if (seedIds.length === 0) {
+    return { characters: [], relations: [] }
+  }
+
+  let visibleIds = [...seedIds]
+  if (typeof filters.focusCharacterId === 'number') {
+    const focusRelations = sqlite.prepare(`
+      SELECT *
+      FROM character_relations
+      WHERE novel_id = ?
+        AND (char_a_id = ? OR char_b_id = ?)
+      ORDER BY id ASC
+      LIMIT ?
+    `).all(filters.novelId, filters.focusCharacterId, filters.focusCharacterId, relationWindowLimit) as Array<Record<string, unknown>>
+
+    const neighborIds = uniqueNumberArray(focusRelations.flatMap((row) => {
+      const charAId = Number(row.char_a_id)
+      const charBId = Number(row.char_b_id)
+      return charAId === filters.focusCharacterId ? [charBId] : [charAId]
+    }))
+    visibleIds = uniqueNumberArray([...visibleIds, ...neighborIds])
+  }
+
+  if (visibleIds.length === 0) {
+    return { characters: [], relations: [] }
+  }
+
+  const placeholders = visibleIds.map(() => '?').join(', ')
+  const characterRows = sqlite.prepare(`
+    SELECT *
+    FROM characters
+    WHERE novel_id = ?
+      AND id IN (${placeholders})
+    ORDER BY
+      CASE role_type
+        WHEN 'protagonist' THEN 0
+        WHEN 'major' THEN 1
+        WHEN 'antagonist' THEN 2
+        WHEN 'supporting' THEN 3
+        ELSE 4
+      END ASC,
+      sort_order ASC,
+      id ASC
+  `).all(filters.novelId, ...visibleIds) as Array<Record<string, unknown>>
+
+  const graphCharacterIds = characterRows.map((row) => Number(row.id))
+  if (graphCharacterIds.length === 0) {
+    return { characters: [], relations: [] }
+  }
+
+  const graphPlaceholders = graphCharacterIds.map(() => '?').join(', ')
+  const relationRows = sqlite.prepare(`
+    SELECT *
+    FROM character_relations
+    WHERE novel_id = ?
+      AND char_a_id IN (${graphPlaceholders})
+      AND char_b_id IN (${graphPlaceholders})
+    ORDER BY id ASC
+    LIMIT ?
+  `).all(filters.novelId, ...graphCharacterIds, ...graphCharacterIds, relationWindowLimit * 4) as Array<Record<string, unknown>>
+
+  return {
+    characters: characterRows.map(mapCharacterRecord),
+    relations: relationRows.map(mapRelationRecord),
+  }
+}
+
+export function getCharacterDetailContext(characterId: number) {
+  const current = getCharacter(characterId)
+  if (!current) {
+    return {
+      relatedItems: [],
+      relatedCharacters: [],
+      relatedRelations: [],
+    }
+  }
+
+  const sqlite = getSqlite()
+  const relationRows = sqlite.prepare(`
+    SELECT *
+    FROM character_relations
+    WHERE novel_id = ?
+      AND (char_a_id = ? OR char_b_id = ?)
+    ORDER BY id ASC
+    LIMIT 32
+  `).all(current.novelId, characterId, characterId) as Array<Record<string, unknown>>
+  const relatedRelations = relationRows.map(mapRelationRecord)
+  const relatedIds = uniqueNumberArray(relatedRelations.flatMap((relation) => (
+    relation.charAId === characterId ? [relation.charBId] : [relation.charAId]
+  )))
+
+  const relatedCharacters = relatedIds.length > 0
+    ? sqlite.prepare(`
+      SELECT *
+      FROM characters
+      WHERE novel_id = ?
+        AND id IN (${relatedIds.map(() => '?').join(', ')})
+      ORDER BY
+        CASE role_type
+          WHEN 'protagonist' THEN 0
+          WHEN 'major' THEN 1
+          WHEN 'antagonist' THEN 2
+          WHEN 'supporting' THEN 3
+          ELSE 4
+        END ASC,
+        sort_order ASC,
+        id ASC
+    `).all(current.novelId, ...relatedIds).map((row) => mapCharacterRecord(row as Record<string, unknown>))
+    : []
+
+  const singlePattern = `[${characterId}]`
+  const prefixPattern = `[${characterId},%`
+  const middlePattern = `%,${characterId},%`
+  const suffixPattern = `%,${characterId}]`
+  const itemRows = sqlite.prepare(`
+    SELECT *
+    FROM story_items
+    WHERE novel_id = ?
+      AND item_kind = 'instance'
+      AND (
+        owner_character_id = ?
+        OR linked_character_ids_json = ?
+        OR linked_character_ids_json LIKE ?
+        OR linked_character_ids_json LIKE ?
+        OR linked_character_ids_json LIKE ?
+      )
+    ORDER BY sort_order ASC, id ASC
+    LIMIT 24
+  `).all(current.novelId, characterId, singlePattern, prefixPattern, middlePattern, suffixPattern) as Array<Record<string, unknown>>
+
+  return {
+    relatedItems: itemRows.map(mapStoryItemRecord),
+    relatedCharacters,
+    relatedRelations,
+  }
+}
+
 export function listCharacters(novelId: number) {
   const db = getDb()
   return db.select().from(characters)
@@ -294,23 +711,45 @@ export function getCharacter(id: number) {
   return db.select().from(characters).where(eq(characters.id, id)).all()[0] || null
 }
 
-export function createCharacter(novelId: number, data: Partial<typeof characters.$inferInsert>) {
+export function createCharacter(
+  novelId: number,
+  data: Partial<typeof characters.$inferInsert>,
+  options: { skipContextTracking?: boolean } = {},
+) {
   const db = getDb()
-  const result = db.insert(characters).values({ novelId, fullName: data.fullName || '未命名', ...data }).run()
-  return Number(result.lastInsertRowid)
+  const result = db.insert(characters).values({ novelId, fullName: data.fullName || '未命名角色', ...data }).run()
+  const id = Number(result.lastInsertRowid)
+  if (!options.skipContextTracking) {
+    markNovelContextChanged(novelId, 'Character profiles changed')
+  }
+  return id
 }
 
-export function updateCharacter(id: number, data: Partial<typeof characters.$inferInsert>) {
+export function updateCharacter(
+  id: number,
+  data: Partial<typeof characters.$inferInsert>,
+  options: { skipContextTracking?: boolean } = {},
+) {
   const db = getDb()
   db.update(characters).set({ ...data, updatedAt: new Date().toISOString() }).where(eq(characters.id, id)).run()
+  if (!options.skipContextTracking) {
+    const current = getCharacter(id)
+    if (current) {
+      markNovelContextChanged(current.novelId, 'Character profiles changed')
+    }
+  }
 }
 
-export function deleteCharacter(id: number) {
+export function deleteCharacter(id: number, options: { skipContextTracking?: boolean } = {}) {
   const db = getDb()
+  const current = getCharacter(id)
   db.delete(characters).where(eq(characters.id, id)).run()
+  if (!options.skipContextTracking && current) {
+    markNovelContextChanged(current.novelId, 'Character profiles changed')
+  }
 }
 
-export function clearCharactersByNovel(novelId: number) {
+export function clearCharactersByNovel(novelId: number, options: { skipContextTracking?: boolean } = {}) {
   const db = getDb()
 
   const itemRows = db.select().from(storyItems).where(eq(storyItems.novelId, novelId)).all()
@@ -337,6 +776,9 @@ export function clearCharactersByNovel(novelId: number) {
 
   db.delete(characterRelations).where(eq(characterRelations.novelId, novelId)).run()
   db.delete(characters).where(eq(characters.novelId, novelId)).run()
+  if (!options.skipContextTracking) {
+    markNovelContextChanged(novelId, 'Character profiles changed')
+  }
 }
 
 export function getCharacterRelations(novelId: number) {
@@ -352,9 +794,31 @@ export function upsertRelation(data: {
   relationLabel?: string
   description?: string
   bilateral?: number
-}) {
+}, options: { skipContextTracking?: boolean } = {}) {
   const db = getDb()
-  db.insert(characterRelations).values(data).run()
+  const existing = getCharacterRelations(data.novelId).find((relation) => {
+    const sameDirection = relation.charAId === data.charAId && relation.charBId === data.charBId
+    const reverseDirection = relation.charAId === data.charBId && relation.charBId === data.charAId
+    return sameDirection || reverseDirection
+  })
+
+  if (existing) {
+    db.update(characterRelations).set({
+      ...data,
+      description: data.description || null,
+      relationLabel: data.relationLabel || null,
+    }).where(eq(characterRelations.id, existing.id)).run()
+  } else {
+    db.insert(characterRelations).values({
+      ...data,
+      description: data.description || null,
+      relationLabel: data.relationLabel || null,
+    }).run()
+  }
+
+  if (!options.skipContextTracking) {
+    markNovelContextChanged(data.novelId, 'Character relations changed')
+  }
 }
 
 export async function generateProtagonist(novelId: number, opts: {
@@ -383,14 +847,17 @@ export async function generateProtagonist(novelId: number, opts: {
   })
 
   const result = await runChatTask({
-    type: 'character_gen',
+    type: 'generate_relations',
     novelId,
     messages: [{ role: 'user', content: prompt }],
     modelConfigId: novel.modelConfigId || undefined,
   })
 
   const parsed = cleanAiValue(safeParseJson<Record<string, unknown>>(result))
-  const charId = createCharacter(novelId, buildCharacterPayload(parsed, { roleType: 'protagonist' }))
+  const charId = createCharacter(novelId, buildCharacterPayload(parsed, { roleType: 'protagonist' }), {
+    skipContextTracking: true,
+  })
+  markNovelContextChanged(novelId, 'Character profiles changed')
   return charId
 }
 
@@ -466,7 +933,7 @@ export async function batchGenerateCharacters(novelId: number, opts: {
         const payload = buildCharacterPayload(char, {
           roleType: normalizeRoleType(asText(char.role_type) || fallbackRole),
         })
-        const id = createCharacter(novelId, payload)
+        const id = createCharacter(novelId, payload, { skipContextTracking: true })
         reservedNames.push(typeof payload.fullName === 'string' ? payload.fullName : '')
         newIds.push(id)
       }
@@ -477,6 +944,10 @@ export async function batchGenerateCharacters(novelId: number, opts: {
     if (sender && !sender.isDestroyed()) {
       sender.send('character:batch-progress', { batch: i + 1, total: batches, newIds })
     }
+  }
+
+  if (newIds.length > 0) {
+    markNovelContextChanged(novelId, 'Character profiles changed')
   }
 
   return newIds
@@ -519,8 +990,8 @@ export async function regenerateCharacter(id: number): Promise<typeof characters
       const otherId = relation.charAId === current.id ? relation.charBId : relation.charAId
       const other = allCharacters.find((character) => character.id === otherId)
       if (!other) return ''
-      const parts = [relation.relationLabel || relation.relationType, relation.description].filter(Boolean).join('，')
-      return `- 与${other.fullName}：${parts || '已有关系'}`
+      const parts = [relation.relationLabel || relation.relationType, relation.description].filter(Boolean).join('；')
+      return `- 与 ${other.fullName}：${parts || '已有关系'}`
     })
     .filter(Boolean)
     .join('\n')
@@ -561,17 +1032,19 @@ export async function regenerateCharacter(id: number): Promise<typeof characters
   payload.fullName = current.fullName
   payload.roleType = current.roleType || 'minor'
 
-  updateCharacter(current.id, payload)
+  updateCharacter(current.id, payload, { skipContextTracking: true })
+  markNovelContextChanged(current.novelId, 'Character profiles changed')
   return getCharacter(current.id)
 }
 
 export async function generateCharacterRelations(novelId: number): Promise<void> {
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
+  const profile = await buildStoryProfile(novelId)
   if (!novel) throw new Error('小说不存在')
 
   const charList = db.select().from(characters).where(eq(characters.novelId, novelId)).all()
-  if (charList.length < 2) throw new Error('至少需要2个人物才能生成关系网络')
+  if (charList.length < 2) throw new Error('至少需要 2 个人物才能生成关系网络')
 
   const characterListText = charList.map((character) => buildCharacterSummary(character)).join('\n')
   const prompt = characterRelationsPrompt({
@@ -590,6 +1063,7 @@ export async function generateCharacterRelations(novelId: number): Promise<void>
 
   try {
     const relations = safeParseJson<Array<Record<string, unknown>>>(result)
+    db.delete(characterRelations).where(eq(characterRelations.novelId, novelId)).run()
     for (const relation of relations) {
       const charA = charList.find((character) => character.fullName === relation.char_a)
       const charB = charList.find((character) => character.fullName === relation.char_b)
@@ -602,10 +1076,12 @@ export async function generateCharacterRelations(novelId: number): Promise<void>
           relationLabel: asText(relation.label),
           description: asText(relation.description),
           bilateral: relation.bilateral ? 1 : 0,
-        })
+        }, { skipContextTracking: true })
       }
     }
+    markNovelContextChanged(novelId, 'Character relations changed')
   } catch (error) {
     console.error('关系解析失败:', error)
   }
 }
+

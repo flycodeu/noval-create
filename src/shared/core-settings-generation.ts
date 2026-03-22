@@ -1,4 +1,4 @@
-import type { SubPlotDraft } from './subplot-framework'
+﻿import type { SubPlotDraft } from './subplot-framework'
 
 export type CoreSettingsGenerationStepKey =
   | 'story_goal'
@@ -58,8 +58,8 @@ export const CORE_SETTINGS_GENERATION_STEPS: Array<{
 }> = [
   { key: 'story_goal', label: '故事核心目标' },
   { key: 'core_conflict', label: '核心冲突' },
-  { key: 'main_plot', label: '主线剧情' },
-  { key: 'sub_plots_list', label: '支线剧情' },
-  { key: 'rhythm', label: '叙事节奏' },
-  { key: 'ending', label: '结局设定' },
+  { key: 'main_plot', label: '主线推进链' },
+  { key: 'sub_plots_list', label: '支线布局' },
+  { key: 'rhythm', label: '节奏比例' },
+  { key: 'ending', label: '结局落点' },
 ]

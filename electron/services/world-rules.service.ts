@@ -1,4 +1,4 @@
-import type { WebContents } from 'electron'
+﻿import type { WebContents } from 'electron'
 import { eq } from 'drizzle-orm'
 import type { GenreWorldRules } from '../../src/shared/genre-system'
 import {
@@ -66,9 +66,9 @@ function renderPrompt(parts: Array<string | undefined | null | false>): string {
 function summarizeLanguageConstraints(rules: GenreWorldRules): string {
   const writing = rules.writingConstraints
   return joinLines([
-    writing.antiQuoteEmphasis ? '避免用引号抬高普通概念' : '',
-    writing.antiConceptSlogans ? '避免概念口号和空泛金句' : '',
-    writing.antiSymmetricLines ? '避免对称排比和刻意整句' : '',
+    writing.antiQuoteEmphasis ? '避免用引号抬高普通概念。' : '',
+    writing.antiConceptSlogans ? '避免概念口号和空泛金句。' : '',
+    writing.antiSymmetricLines ? '避免对称排比和刻意整句。' : '',
     buildRealityConstraintSummary(writing),
     buildWritingStyleSummary(writing),
   ])
@@ -79,8 +79,8 @@ function summarizeCurrentSection(sectionKey: WorldRuleSectionKey, rules: GenreWo
     case 'overview':
       return joinLines([
         `类型名称：${rules.genreProfile.name || '未设置'}`,
-        rules.genreProfile.subgenre ? `子类型：${rules.genreProfile.subgenre}` : '',
-        rules.genreProfile.worldviewTone ? `世界观基调：${rules.genreProfile.worldviewTone}` : '',
+        rules.genreProfile.subgenre ? `瀛愮被鍨嬶細${rules.genreProfile.subgenre}` : '',
+        rules.genreProfile.worldviewTone ? `涓栫晫瑙傚熀璋冿細${rules.genreProfile.worldviewTone}` : '',
         rules.genreProfile.socialFrame ? `社会框架：${rules.genreProfile.socialFrame}` : '',
         rules.genreProfile.narrativeFocus.length > 0 ? `叙事焦点：${rules.genreProfile.narrativeFocus.join('、')}` : '',
         rules.genreProfile.languageAvoidances.length > 0 ? `语言避让：${rules.genreProfile.languageAvoidances.join('、')}` : '',
@@ -103,7 +103,7 @@ function summarizeCurrentSection(sectionKey: WorldRuleSectionKey, rules: GenreWo
           ? section('种族实体', rules.speciesSystem.map((item, index) => joinLines([
               `${index + 1}. 名称：${item.name || '未命名'}`,
               item.entityType ? `   实体类型：${item.entityType}` : '',
-              item.summary ? `   简述：${item.summary}` : '',
+              item.summary ? `   概述：${item.summary}` : '',
               item.traits.length > 0 ? `   特征：${item.traits.join('、')}` : '',
               item.commonIdentities.length > 0 ? `   常见身份：${item.commonIdentities.join('、')}` : '',
               item.relationToHumans ? `   与主流社会关系：${item.relationToHumans}` : '',
@@ -114,7 +114,7 @@ function summarizeCurrentSection(sectionKey: WorldRuleSectionKey, rules: GenreWo
           ? section('组织势力', rules.factionSystem.map((item, index) => joinLines([
               `${index + 1}. 名称：${item.name || '未命名'}`,
               item.factionType ? `   势力类型：${item.factionType}` : '',
-              item.summary ? `   简述：${item.summary}` : '',
+              item.summary ? `   概述：${item.summary}` : '',
               item.structure ? `   组织结构：${item.structure}` : '',
               item.resources ? `   核心资源：${item.resources}` : '',
               item.externalRelations ? `   对外关系：${item.externalRelations}` : '',
@@ -153,11 +153,9 @@ function buildStoryCoreSummary(profile: Awaited<ReturnType<typeof buildStoryProf
     `小说：${profile.novelTitle}`,
     `题材：${profile.genre}`,
     profile.background ? `基础背景：${profile.background}` : '',
-    profile.storyGoal ? `故事目标：${profile.storyGoal}` : '',
-    profile.coreConflict ? `核心冲突：${profile.coreConflict}` : '',
-    profile.mainPlot ? `主线推进：${profile.mainPlot}` : '',
-    profile.subPlots ? `支线概要：${profile.subPlots}` : '',
-    profile.ending ? `结局方向：${profile.ending}` : '',
+    profile.premiseSummary,
+    profile.storyDesignSummary,
+    profile.writingRulesSummary,
     `主角指代：${profile.protagonistReference}`,
     `主角称呼规则：${profile.protagonistRule}`,
   ])
@@ -203,7 +201,7 @@ function buildSectionRequirement(sectionKey: WorldRuleSectionKey): string {
       ])
     case 'map':
       return joinLines([
-        '地图按层级设计，第 1 层表示国家 / 大区 / 界域，第 2 层表示每个上级下的区域，更深层再表示地点。',
+        '地图按层级设计，第 1 层表示国家/大区/界域，第 2 层表示每个上级下的区域，更深层再表示地点。',
         '对 suggestedCount 的理解是“每个父节点各自拥有的直属子节点数量”，不是全局总数。',
       ])
     case 'timeline':
@@ -265,7 +263,7 @@ function buildSectionPrompt(
       background: profile.background,
       storyCore: buildStoryCoreSummary(profile),
       worldSummary: [currentSummary, otherSummary].filter(Boolean).join('\n\n'),
-      taskFocus: `只补「${sectionLabel}」这一区，并与现有小说信息、其他规则分区保持一致。`,
+      taskFocus: `只补“${sectionLabel}”这一个区块，并与现有小说信息、其他规则分区保持一致。`,
       extraLines: ['不要静悄悄把小说改造成另一种题材、时代或规则体系。'],
     })),
     section('真实度护栏', buildGenreRealityRules({
@@ -414,12 +412,12 @@ function ensurePatchHasContent(sectionKey: WorldRuleSectionKey, patch: Partial<G
   switch (sectionKey) {
     case 'overview':
       if (!patch.genreProfile || Object.keys(asRecord(patch.genreProfile)).length === 0) {
-        throw new Error('未生成可用的世界概览')
+        throw new Error('鏈敓鎴愬彲鐢ㄧ殑涓栫晫姒傝')
       }
       return
     case 'power':
       if (!Array.isArray(patch.powerSystems) || patch.powerSystems.length === 0) {
-        throw new Error('未生成可用的力量体系')
+        throw new Error('鏈敓鎴愬彲鐢ㄧ殑鍔涢噺浣撶郴')
       }
       return
     case 'species':
@@ -437,17 +435,17 @@ function ensurePatchHasContent(sectionKey: WorldRuleSectionKey, patch: Partial<G
       return
     case 'map':
       if (!patch.mapBlueprint || Object.keys(asRecord(patch.mapBlueprint)).length === 0) {
-        throw new Error('未生成可用的地图蓝图')
+        throw new Error('鏈敓鎴愬彲鐢ㄧ殑鍦板浘钃濆浘')
       }
       return
     case 'timeline':
       if (!patch.timelineConfig || Object.keys(asRecord(patch.timelineConfig)).length === 0) {
-        throw new Error('未生成可用的时间规则')
+        throw new Error('鏈敓鎴愬彲鐢ㄧ殑鏃堕棿瑙勫垯')
       }
       return
     case 'language':
       if (!patch.writingConstraints || Object.keys(asRecord(patch.writingConstraints)).length === 0) {
-        throw new Error('未生成可用的文风约束')
+        throw new Error('鏈敓鎴愬彲鐢ㄧ殑鏂囬绾︽潫')
       }
       return
     default:
@@ -455,7 +453,7 @@ function ensurePatchHasContent(sectionKey: WorldRuleSectionKey, patch: Partial<G
   }
 }
 
-function sanitizeErrorMessage(error: unknown, fallback = '生成失败'): string {
+function sanitizeErrorMessage(error: unknown, fallback = '鐢熸垚澶辫触'): string {
   const raw = error instanceof Error ? error.message : fallback
   return cleanAiFieldText(raw).replace(/^\[[^\]]+\]\s*/g, '').trim() || fallback
 }
@@ -552,7 +550,7 @@ export async function generateWorldRules(
         completed: completedSteps,
         total: requestedSections.length,
         warning,
-        detail: warning || `${label}已更新到表单草稿`,
+        detail: warning || `${label} 已更新到表单草稿`,
       })
     } catch (error) {
       const errorMessage = sanitizeErrorMessage(error)
@@ -572,7 +570,7 @@ export async function generateWorldRules(
         completed: completedSteps,
         total: requestedSections.length,
         warning: errorMessage,
-        detail: `${label}生成失败`,
+        detail: `${label} 生成失败`,
       })
 
       if (data.mode === 'section') {
@@ -592,3 +590,4 @@ export async function generateWorldRules(
     hasPartialResult: completedSteps > 0,
   }
 }
+

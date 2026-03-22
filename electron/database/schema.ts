@@ -1,7 +1,6 @@
 import { integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 import { sql } from 'drizzle-orm'
 
-// 题材表
 export const genres = sqliteTable('genres', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   name: text('name').notNull(),
@@ -10,13 +9,12 @@ export const genres = sqliteTable('genres', {
   colorTag: text('color_tag'),
 })
 
-// 小说主表
 export const novels = sqliteTable('novels', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   title: text('title').notNull(),
   synopsis: text('synopsis'),
   genreId: integer('genre_id').references(() => genres.id),
-  status: text('status').default('draft'), // draft/writing/completed/archived
+  status: text('status').default('draft'),
   totalWords: integer('total_words').default(0),
   targetWords: integer('target_words').default(200000),
   coverImage: text('cover_image'),
@@ -26,15 +24,44 @@ export const novels = sqliteTable('novels', {
   worldRulesJson: text('world_rules_json'),
   styleTemplateId: integer('style_template_id'),
   worldTemplateId: integer('world_template_id'),
+  contextVersion: integer('context_version').default(1),
   modelConfigId: integer('model_config_id'),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
 })
 
-// 章节表
+export const storyVolumes = sqliteTable('story_volumes', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  volumeNumber: integer('volume_number').notNull(),
+  title: text('title'),
+  summary: text('summary'),
+  targetWords: integer('target_words').default(0),
+  status: text('status').default('planning'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
+export const storyParts = sqliteTable('story_parts', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  volumeId: integer('volume_id').notNull().references(() => storyVolumes.id, { onDelete: 'cascade' }),
+  partNumber: integer('part_number').notNull(),
+  title: text('title'),
+  summary: text('summary'),
+  targetWords: integer('target_words').default(0),
+  status: text('status').default('planning'),
+  startChapterNum: integer('start_chapter_num'),
+  endChapterNum: integer('end_chapter_num'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
 export const chapters = sqliteTable('chapters', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  volumeId: integer('volume_id').references(() => storyVolumes.id, { onDelete: 'set null' }),
+  partId: integer('part_id').references(() => storyParts.id, { onDelete: 'set null' }),
   chapterNum: integer('chapter_num').notNull(),
   title: text('title'),
   outline: text('outline'),
@@ -45,16 +72,43 @@ export const chapters = sqliteTable('chapters', {
   nextChapterSeed: text('next_chapter_seed'),
   continuityStateJson: text('continuity_state_json'),
   reviewNotesJson: text('review_notes_json'),
-  status: text('status').default('outline'), // outline/writing/draft/reviewing/final
+  status: text('status').default('outline'),
   aiScoreJson: text('ai_score_json'),
   arcId: integer('arc_id'),
   targetWords: integer('target_words').default(3000),
   emotionTone: text('emotion_tone'),
+  compiledFromSegments: integer('compiled_from_segments').default(0),
+  segmentCount: integer('segment_count').default(0),
+  contextVersion: integer('context_version').default(1),
+  staleReasonJson: text('stale_reason_json'),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
 })
 
-// 故事弧表
+export const chapterSegments = sqliteTable('chapter_segments', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  chapterId: integer('chapter_id').notNull().references(() => chapters.id, { onDelete: 'cascade' }),
+  volumeId: integer('volume_id').references(() => storyVolumes.id, { onDelete: 'set null' }),
+  partId: integer('part_id').references(() => storyParts.id, { onDelete: 'set null' }),
+  segmentOrder: integer('segment_order').notNull(),
+  title: text('title'),
+  segmentType: text('segment_type').default('scene'),
+  purpose: text('purpose'),
+  timeAnchor: text('time_anchor'),
+  locationName: text('location_name'),
+  presentCharacterIdsJson: text('present_character_ids_json'),
+  linkedItemIdsJson: text('linked_item_ids_json'),
+  inputState: text('input_state'),
+  outputState: text('output_state'),
+  summary: text('summary'),
+  content: text('content'),
+  riskTagsJson: text('risk_tags_json'),
+  status: text('status').default('planned'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
 export const storyArcs = sqliteTable('story_arcs', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
@@ -66,17 +120,16 @@ export const storyArcs = sqliteTable('story_arcs', {
   arcSummary: text('arc_summary'),
 })
 
-// 人物表
 export const characters = sqliteTable('characters', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
-  roleType: text('role_type').default('minor'), // protagonist/major/minor/antagonist/supporting
+  roleType: text('role_type').default('minor'),
   entityType: text('entity_type').default('human'),
   species: text('species'),
   surname: text('surname'),
   givenName: text('given_name'),
   fullName: text('full_name').notNull(),
-  gender: text('gender'), // male/female/other
+  gender: text('gender'),
   age: integer('age'),
   birthplace: text('birthplace'),
   activeRegionsJson: text('active_regions_json'),
@@ -113,23 +166,21 @@ export const characters = sqliteTable('characters', {
   updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
 })
 
-// 人物关系表
 export const characterRelations = sqliteTable('character_relations', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   novelId: integer('novel_id').notNull(),
   charAId: integer('char_a_id').notNull().references(() => characters.id, { onDelete: 'cascade' }),
   charBId: integer('char_b_id').notNull().references(() => characters.id, { onDelete: 'cascade' }),
-  relationType: text('relation_type'), // friend/enemy/lover/parent_child/colleague/rival/mentor_student
+  relationType: text('relation_type'),
   relationLabel: text('relation_label'),
-  bilateral: integer('bilateral').default(1), // 1=双向 0=单向
+  bilateral: integer('bilateral').default(1),
   description: text('description'),
 })
 
-// 地图表（三级结构用 parent_id 实现）
 export const worldMap = sqliteTable('world_map', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
-  level: integer('level').notNull(), // 1=国家/大区域 2=区域 3=具体地点
+  level: integer('level').notNull(),
   parentId: integer('parent_id'),
   name: text('name').notNull(),
   locationType: text('location_type'),
@@ -160,8 +211,11 @@ export const timelineEvents = sqliteTable('timeline_events', {
   isMajorEvent: integer('is_major_event').default(1),
   eventType: text('event_type'),
   arcId: integer('arc_id').references(() => storyArcs.id, { onDelete: 'set null' }),
+  volumeId: integer('volume_id').references(() => storyVolumes.id, { onDelete: 'set null' }),
+  partId: integer('part_id').references(() => storyParts.id, { onDelete: 'set null' }),
   chapterStartId: integer('chapter_start_id').references(() => chapters.id, { onDelete: 'set null' }),
   chapterEndId: integer('chapter_end_id').references(() => chapters.id, { onDelete: 'set null' }),
+  segmentId: integer('segment_id').references(() => chapterSegments.id, { onDelete: 'set null' }),
   locationMapId: integer('location_map_id').references(() => worldMap.id, { onDelete: 'set null' }),
   presentCharacterIdsJson: text('present_character_ids_json'),
   affectedCharacterIdsJson: text('affected_character_ids_json'),
@@ -174,6 +228,7 @@ export const timelineEvents = sqliteTable('timeline_events', {
   directConsequencesJson: text('direct_consequences_json'),
   openThreadsJson: text('open_threads_json'),
   notes: text('notes'),
+  anchorInvalid: integer('anchor_invalid').default(0),
   status: text('status').default('planned'),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
@@ -208,13 +263,35 @@ export const storyItems = sqliteTable('story_items', {
   updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
 })
 
-// 模型配置表
+export const storyMemoryCheckpoints = sqliteTable('story_memory_checkpoints', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  scopeType: text('scope_type').notNull(),
+  scopeId: integer('scope_id'),
+  label: text('label'),
+  summary: text('summary'),
+  resolvedThreadsJson: text('resolved_threads_json'),
+  activeThreadsJson: text('active_threads_json'),
+  characterStateDigest: text('character_state_digest'),
+  relationDigest: text('relation_digest'),
+  itemDigest: text('item_digest'),
+  timelineDigest: text('timeline_digest'),
+  forbiddenDirectionsJson: text('forbidden_directions_json'),
+  styleGuard: text('style_guard'),
+  sourceRangeStart: integer('source_range_start'),
+  sourceRangeEnd: integer('source_range_end'),
+  version: integer('version').default(1),
+  stale: integer('stale').default(0),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
 export const modelConfigs = sqliteTable('model_configs', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   name: text('name').notNull(),
-  provider: text('provider').notNull(), // openai/anthropic/baidu/aliyun/bytedance/deepseek/custom
+  provider: text('provider').notNull(),
   modelId: text('model_id').notNull(),
-  apiKey: text('api_key'), // 加密存储
+  apiKey: text('api_key'),
   baseUrl: text('base_url'),
   temperature: real('temperature').default(0.85),
   maxTokens: integer('max_tokens').default(4096),
@@ -223,10 +300,9 @@ export const modelConfigs = sqliteTable('model_configs', {
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
 })
 
-// 模板表
 export const templates = sqliteTable('templates', {
   id: integer('id').primaryKey({ autoIncrement: true }),
-  type: text('type').notNull(), // style/genre/world/character/outline/writing_step
+  type: text('type').notNull(),
   name: text('name').notNull(),
   description: text('description'),
   contentJson: text('content_json'),
@@ -235,36 +311,52 @@ export const templates = sqliteTable('templates', {
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
 })
 
-// 任务日志表
+export const promptOverrides = sqliteTable('prompt_overrides', {
+  key: text('key').primaryKey(),
+  content: text('content').notNull(),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
 export const tasks = sqliteTable('tasks', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   novelId: integer('novel_id'),
-  type: text('type').notNull(), // init/character_gen/chapter_outline/chapter_write/summary/review/ai_check
-  status: text('status').default('pending'), // pending/running/success/failed/cancelled
+  type: text('type').notNull(),
+  status: text('status').default('pending'),
   inputJson: text('input_json'),
   outputText: text('output_text'),
   modelConfigId: integer('model_config_id'),
   tokensUsed: integer('tokens_used'),
   durationMs: integer('duration_ms'),
   errorMessage: text('error_message'),
-  relatedEntityType: text('related_entity_type'), // chapter/character/novel
+  relatedEntityType: text('related_entity_type'),
   relatedEntityId: integer('related_entity_id'),
+  runnerType: text('runner_type').default('chat'),
+  retryable: integer('retryable').default(0),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
 })
 
 export type Novel = typeof novels.$inferSelect
 export type NewNovel = typeof novels.$inferInsert
+export type StoryVolume = typeof storyVolumes.$inferSelect
+export type NewStoryVolume = typeof storyVolumes.$inferInsert
+export type StoryPart = typeof storyParts.$inferSelect
+export type NewStoryPart = typeof storyParts.$inferInsert
 export type Chapter = typeof chapters.$inferSelect
 export type NewChapter = typeof chapters.$inferInsert
+export type ChapterSegment = typeof chapterSegments.$inferSelect
+export type NewChapterSegment = typeof chapterSegments.$inferInsert
 export type Character = typeof characters.$inferSelect
 export type NewCharacter = typeof characters.$inferInsert
 export type CharacterRelation = typeof characterRelations.$inferSelect
 export type WorldMapItem = typeof worldMap.$inferSelect
 export type TimelineEvent = typeof timelineEvents.$inferSelect
 export type StoryItem = typeof storyItems.$inferSelect
+export type StoryMemoryCheckpoint = typeof storyMemoryCheckpoints.$inferSelect
+export type NewStoryMemoryCheckpoint = typeof storyMemoryCheckpoints.$inferInsert
 export type ModelConfig = typeof modelConfigs.$inferSelect
 export type Template = typeof templates.$inferSelect
+export type PromptOverride = typeof promptOverrides.$inferSelect
 export type Task = typeof tasks.$inferSelect
 export type NewTask = typeof tasks.$inferInsert
 export type Genre = typeof genres.$inferSelect

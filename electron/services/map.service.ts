@@ -1,5 +1,5 @@
 import { asc, eq } from 'drizzle-orm'
-import { getDb } from '../database/db'
+import { getDb, getSqlite } from '../database/db'
 import { novels, storyItems, timelineEvents, worldMap } from '../database/schema'
 import { safeParseJson } from '../utils/json'
 import { buildStoryProfile } from './context.service'
@@ -19,6 +19,7 @@ import {
 } from '../../src/shared/prompt-library'
 import type { MapBatchGenerateOptions, MapBatchGenerationResult } from '../../src/types'
 import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/utils/text'
+import { markNovelContextChanged } from './context-impact.service'
 
 export interface MapTreeNode {
   id: number
@@ -72,6 +73,15 @@ interface NextMapBatchPlan {
   rootMissingCount?: number
   parents?: PendingParentPlan[]
   pendingParentCount: number
+}
+
+interface MapNodeQueryFilters {
+  novelId: number
+  parentId?: number | null
+  level?: number
+  keyword?: string
+  page?: number
+  pageSize?: number
 }
 
 function asText(value: unknown): string {
@@ -215,7 +225,7 @@ function createNodesAtDepth(
       tagsJson: JSON.stringify(toStringArray(node.tags)),
       affiliatedFactionIdsJson: JSON.stringify(toStringArray(node.affiliated_factions)),
       dangerLevel: asText(node.danger_level),
-    })
+    }, { skipContextTracking: true })
     createdCount += 1
   }
 
@@ -356,6 +366,181 @@ function buildChildBatchPrompt(params: {
   ].filter(Boolean).join('\n')
 }
 
+function normalizePaging(page?: number, pageSize?: number, fallbackPageSize = 30) {
+  const nextPageSize = Math.max(1, Math.min(pageSize || fallbackPageSize, 200))
+  const nextPage = Math.max(1, page || 1)
+  const offset = (nextPage - 1) * nextPageSize
+  return { page: nextPage, pageSize: nextPageSize, offset }
+}
+
+function buildPagedResult<T>(items: T[], page: number, pageSize: number, total: number) {
+  return {
+    items,
+    page,
+    pageSize,
+    total,
+    hasMore: page * pageSize < total,
+  }
+}
+
+function mapNodeSummaryRecord(row: Record<string, unknown>) {
+  return {
+    id: Number(row.id),
+    novelId: Number(row.novel_id),
+    level: Number(row.level),
+    parentId: row.parent_id == null ? undefined : Number(row.parent_id),
+    name: String(row.name || ''),
+    locationType: typeof row.location_type === 'string' ? row.location_type : undefined,
+    nodeType: typeof row.node_type === 'string' ? row.node_type : undefined,
+    structureRole: typeof row.structure_role === 'string' ? row.structure_role : undefined,
+    parentRuleType: typeof row.parent_rule_type === 'string' ? row.parent_rule_type : undefined,
+    description: typeof row.description === 'string' ? row.description : undefined,
+    atmosphere: typeof row.atmosphere === 'string' ? row.atmosphere : undefined,
+    plotRelevance: typeof row.plot_relevance === 'string' ? row.plot_relevance : undefined,
+    tagsJson: typeof row.tags_json === 'string' ? row.tags_json : undefined,
+    affiliatedFactionIdsJson: typeof row.affiliated_faction_ids_json === 'string' ? row.affiliated_faction_ids_json : undefined,
+    dangerLevel: typeof row.danger_level === 'string' ? row.danger_level : undefined,
+    sortOrder: Number(row.sort_order || 0),
+    childCount: Number(row.childCount || 0),
+  }
+}
+
+function buildMapWhere(filters: MapNodeQueryFilters) {
+  const whereClauses = ['m.novel_id = ?']
+  const params: Array<number | string> = [filters.novelId]
+
+  if ('parentId' in filters) {
+    if (filters.parentId == null) {
+      whereClauses.push('m.parent_id IS NULL')
+    } else {
+      whereClauses.push('m.parent_id = ?')
+      params.push(filters.parentId)
+    }
+  }
+
+  if (typeof filters.level === 'number') {
+    whereClauses.push('m.level = ?')
+    params.push(filters.level)
+  }
+
+  const keyword = typeof filters.keyword === 'string' ? filters.keyword.trim() : ''
+  if (keyword) {
+    const like = `%${keyword}%`
+    whereClauses.push(`
+      (
+        m.name LIKE ?
+        OR COALESCE(m.node_type, '') LIKE ?
+        OR COALESCE(m.location_type, '') LIKE ?
+        OR COALESCE(m.structure_role, '') LIKE ?
+        OR COALESCE(m.plot_relevance, '') LIKE ?
+        OR COALESCE(m.description, '') LIKE ?
+      )
+    `)
+    params.push(like, like, like, like, like, like)
+  }
+
+  return {
+    whereSql: whereClauses.join(' AND '),
+    params,
+  }
+}
+
+export function queryMapNodes(filters: MapNodeQueryFilters) {
+  const sqlite = getSqlite()
+  const paging = normalizePaging(filters.page, filters.pageSize, 30)
+  const query = buildMapWhere(filters)
+  const countRow = sqlite.prepare(`
+    SELECT COUNT(*) AS total
+    FROM world_map m
+    WHERE ${query.whereSql}
+  `).get(...query.params) as { total?: number } | undefined
+
+  const rows = sqlite.prepare(`
+    SELECT
+      m.*,
+      (
+        SELECT COUNT(*)
+        FROM world_map c
+        WHERE c.parent_id = m.id
+      ) AS childCount
+    FROM world_map m
+    WHERE ${query.whereSql}
+    ORDER BY m.sort_order ASC, m.id ASC
+    LIMIT ? OFFSET ?
+  `).all(...query.params, paging.pageSize, paging.offset) as Array<Record<string, unknown>>
+
+  const items = rows.map(mapNodeSummaryRecord)
+  return buildPagedResult(items, paging.page, paging.pageSize, Number(countRow?.total || 0))
+}
+
+export function getMapNode(id: number) {
+  const sqlite = getSqlite()
+  const row = sqlite.prepare(`
+    SELECT
+      m.*,
+      (
+        SELECT COUNT(*)
+        FROM world_map c
+        WHERE c.parent_id = m.id
+      ) AS childCount
+    FROM world_map m
+    WHERE m.id = ?
+    LIMIT 1
+  `).get(id) as Record<string, unknown> | undefined
+  return row ? mapNodeSummaryRecord(row) : null
+}
+
+export function searchMapNodes(novelId: number, keyword = '', limit = 20) {
+  return queryMapNodes({
+    novelId,
+    keyword,
+    page: 1,
+    pageSize: Math.max(1, Math.min(limit, 50)),
+  }).items
+}
+
+export function getMapStats(novelId: number) {
+  const sqlite = getSqlite()
+  const countsByLevel = sqlite.prepare(`
+    SELECT level, COUNT(*) AS count
+    FROM world_map
+    WHERE novel_id = ?
+    GROUP BY level
+    ORDER BY level ASC
+  `).all(novelId) as Array<{ level?: number | null; count?: number | null }>
+  const summary = sqlite.prepare(`
+    SELECT
+      COUNT(*) AS total,
+      SUM(CASE WHEN level = 1 THEN 1 ELSE 0 END) AS rootCount,
+      SUM(CASE WHEN level = 2 THEN 1 ELSE 0 END) AS secondLevelCount,
+      MAX(level) AS maxDepth
+    FROM world_map
+    WHERE novel_id = ?
+  `).get(novelId) as Record<string, unknown> | undefined
+  const leafRow = sqlite.prepare(`
+    SELECT COUNT(*) AS leafCount
+    FROM world_map m
+    WHERE m.novel_id = ?
+      AND NOT EXISTS (
+        SELECT 1
+        FROM world_map c
+        WHERE c.parent_id = m.id
+      )
+  `).get(novelId) as Record<string, unknown> | undefined
+
+  return {
+    total: Number(summary?.total || 0),
+    rootCount: Number(summary?.rootCount || 0),
+    secondLevelCount: Number(summary?.secondLevelCount || 0),
+    leafCount: Number(leafRow?.leafCount || 0),
+    maxDepth: Number(summary?.maxDepth || 0),
+    countsByLevel: countsByLevel.map((row) => ({
+      level: Number(row.level || 0),
+      count: Number(row.count || 0),
+    })),
+  }
+}
+
 export function getMapTree(novelId: number): MapTreeNode[] {
   const db = getDb()
   const items = db.select().from(worldMap)
@@ -390,27 +575,45 @@ export function getMapTree(novelId: number): MapTreeNode[] {
 export function createMapItem(novelId: number, data: Partial<typeof worldMap.$inferInsert> & {
   level: number
   name: string
-}) {
+}, options: { skipContextTracking?: boolean } = {}) {
   const db = getDb()
   const result = db.insert(worldMap).values({ novelId, ...data }).run()
-  return Number(result.lastInsertRowid)
+  const id = Number(result.lastInsertRowid)
+  if (!options.skipContextTracking) {
+    markNovelContextChanged(novelId, 'Map structure changed')
+  }
+  return id
 }
 
-export function updateMapItem(id: number, data: Partial<typeof worldMap.$inferInsert>) {
+export function updateMapItem(
+  id: number,
+  data: Partial<typeof worldMap.$inferInsert>,
+  options: { skipContextTracking?: boolean } = {},
+) {
   const db = getDb()
   db.update(worldMap).set(data).where(eq(worldMap.id, id)).run()
+  if (!options.skipContextTracking) {
+    const current = db.select().from(worldMap).where(eq(worldMap.id, id)).all()[0]
+    if (current) {
+      markNovelContextChanged(current.novelId, 'Map structure changed')
+    }
+  }
 }
 
-export function deleteMapItem(id: number) {
+export function deleteMapItem(id: number, options: { skipContextTracking?: boolean } = {}) {
   const db = getDb()
+  const current = db.select().from(worldMap).where(eq(worldMap.id, id)).all()[0]
   const children = db.select().from(worldMap).where(eq(worldMap.parentId, id)).all()
   for (const child of children) {
-    deleteMapItem(child.id)
+    deleteMapItem(child.id, { skipContextTracking: true })
   }
   db.delete(worldMap).where(eq(worldMap.id, id)).run()
+  if (!options.skipContextTracking && current) {
+    markNovelContextChanged(current.novelId, 'Map structure changed')
+  }
 }
 
-export function clearMapByNovel(novelId: number) {
+export function clearMapByNovel(novelId: number, options: { skipContextTracking?: boolean } = {}) {
   const db = getDb()
   db.update(timelineEvents).set({
     locationMapId: null,
@@ -423,6 +626,9 @@ export function clearMapByNovel(novelId: number) {
   }).where(eq(storyItems.novelId, novelId)).run()
 
   db.delete(worldMap).where(eq(worldMap.novelId, novelId)).run()
+  if (!options.skipContextTracking) {
+    markNovelContextChanged(novelId, 'Map structure changed')
+  }
 }
 
 export async function batchGenerateMap(
@@ -545,6 +751,9 @@ export async function batchGenerateMap(
 
   const refreshedRows = listMapRows(novelId)
   const nextState = findNextMapBatch(refreshedRows, layerPlans, parentBatchSize)
+  if (generatedNodeCount > 0) {
+    markNovelContextChanged(novelId, 'Map structure changed')
+  }
 
   if (nextBatch.stage === 'root') {
     return {

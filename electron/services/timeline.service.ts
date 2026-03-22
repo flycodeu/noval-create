@@ -1,11 +1,13 @@
-import { asc, eq } from 'drizzle-orm'
-import { getDb } from '../database/db'
+﻿import { asc, eq } from 'drizzle-orm'
+import { getDb, getSqlite } from '../database/db'
 import {
+  chapterSegments,
   chapters,
   characters,
   novels,
   storyArcs,
   storyItems,
+  storyParts,
   timelineEvents,
   worldMap,
 } from '../database/schema'
@@ -19,6 +21,7 @@ import {
   parseWorldRulesJson,
 } from '../../src/shared/genre-system'
 import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/utils/text'
+import { markNovelContextChanged } from './context-impact.service'
 
 type TimelineStatus = 'planned' | 'seeded' | 'written' | 'resolved'
 
@@ -52,6 +55,33 @@ interface GeneratedTimelineEvent {
   direct_consequences?: unknown
   open_threads?: unknown
   notes?: unknown
+}
+
+interface TimelineAnchorFilters {
+  novelId: number
+  volumeId?: number
+  partId?: number
+  chapterId?: number
+  segmentId?: number
+}
+
+interface TimelineAnchorState {
+  volumeId: number | null
+  partId: number | null
+  chapterStartId: number | null
+  chapterEndId: number | null
+  segmentId: number | null
+  anchorInvalid: number
+}
+
+interface TimelineQueryFilters extends TimelineAnchorFilters {
+  status?: TimelineStatus
+  eventType?: string
+  keyword?: string
+  page?: number
+  pageSize?: number
+  sortBy?: 'timeSortValue' | 'createdAt'
+  sortDirection?: 'asc' | 'desc'
 }
 
 function asText(value: unknown): string {
@@ -163,12 +193,10 @@ function resolveCharacterIds(
 
 function buildStoryCoreSummary(profile: Awaited<ReturnType<typeof buildStoryProfile>>): string {
   return [
-    `故事目标：${profile.storyGoal || '未填写'}`,
-    `核心冲突：${profile.coreConflict || '未填写'}`,
-    `主线剧情：${profile.mainPlot || '未填写'}`,
-    `支线剧情：${profile.subPlots || '暂无'}`,
-    `结局方向：${profile.ending || '未填写'}`,
-  ].join('\n')
+    profile.premiseSummary,
+    profile.storyDesignSummary,
+    profile.writingRulesSummary,
+  ].filter(Boolean).join('\n\n')
 }
 
 function buildArcSummary(rows: Array<typeof storyArcs.$inferSelect>): string {
@@ -177,9 +205,9 @@ function buildArcSummary(rows: Array<typeof storyArcs.$inferSelect>): string {
     .sort((left, right) => left.arcOrder - right.arcOrder)
     .map((arc) => {
       const range = arc.chapterStart || arc.chapterEnd
-        ? `第${arc.chapterStart || '?'}章-第${arc.chapterEnd || '?'}章`
+        ? `第${arc.chapterStart || '?'}章 - 第${arc.chapterEnd || '?'}章`
         : '章节范围待定'
-      return `- ${arc.arcName}｜${range}｜${arc.arcGoal || arc.arcSummary || '暂无说明'}`
+      return `- ${arc.arcName} | ${range} | ${arc.arcGoal || arc.arcSummary || '暂无说明'}`
     })
     .join('\n')
 }
@@ -191,13 +219,8 @@ function buildCharacterSummary(rows: Array<typeof characters.$inferSelect>): str
     .sort((left, right) => priority.indexOf(left.roleType || 'minor') - priority.indexOf(right.roleType || 'minor'))
     .slice(0, 10)
     .map((character) => {
-      const parts = [
-        character.roleType || 'minor',
-        character.species || '',
-        character.rankLevel || '',
-        character.goals || '',
-      ].filter(Boolean)
-      return `- ${character.fullName}｜${parts.join('｜') || '暂无补充'}`
+      const parts = [character.roleType || 'minor', character.species || '', character.rankLevel || '', character.goals || ''].filter(Boolean)
+      return `- ${character.fullName} | ${parts.join(' | ') || '暂无补充'}`
     })
     .join('\n')
 }
@@ -207,12 +230,8 @@ function buildLocationSummary(rows: Array<typeof worldMap.$inferSelect>): string
   return flattenMapTree(rows)
     .slice(0, 12)
     .map((location) => {
-      const parts = [
-        location.level ? `层级${location.level}` : '',
-        location.nodeType || location.locationType || '',
-        location.structureRole || '',
-      ].filter(Boolean)
-      return `- ${location.name}${parts.length > 0 ? `｜${parts.join('｜')}` : ''}`
+      const parts = [location.level ? `层级${location.level}` : '', location.nodeType || location.locationType || '', location.structureRole || ''].filter(Boolean)
+      return `- ${location.name}${parts.length > 0 ? ` | ${parts.join(' | ')}` : ''}`
     })
     .join('\n')
 }
@@ -222,13 +241,8 @@ function buildExistingEventSummary(rows: Array<typeof timelineEvents.$inferSelec
   return rows
     .slice(0, 10)
     .map((event) => {
-      const parts = [
-        event.timeLabel,
-        event.eventTitle,
-        event.eventType || '',
-        event.status || '',
-      ].filter(Boolean)
-      return `- ${parts.join('｜')}`
+      const parts = [event.timeLabel, event.eventTitle, event.eventType || '', event.status || ''].filter(Boolean)
+      return `- ${parts.join(' | ')}`
     })
     .join('\n')
 }
@@ -239,17 +253,11 @@ function buildItemSummary(rows: Array<typeof storyItems.$inferSelect>): string {
     .filter((item) => item.itemKind === 'instance')
     .slice(0, 12)
     .map((item) => {
-      const parts = [
-        item.category || '',
-        item.ownerCharacterId ? `角色#${item.ownerCharacterId}` : '',
-        item.locationMapId ? `地点#${item.locationMapId}` : '',
-        item.plotFunction || item.summary || '',
-      ].filter(Boolean)
-      return `- ${item.itemName}${parts.length > 0 ? `｜${parts.join('｜')}` : ''}`
+      const parts = [item.category || '', item.ownerCharacterId ? `角色#${item.ownerCharacterId}` : '', item.locationMapId ? `地点#${item.locationMapId}` : '', item.plotFunction || item.summary || ''].filter(Boolean)
+      return `- ${item.itemName}${parts.length > 0 ? ` | ${parts.join(' | ')}` : ''}`
     })
     .join('\n')
 }
-
 function sanitizeTimelinePayload(
   data: Partial<typeof timelineEvents.$inferInsert>,
 ): Partial<typeof timelineEvents.$inferInsert> {
@@ -265,8 +273,11 @@ function sanitizeTimelinePayload(
   if (typeof data.isMajorEvent === 'number') next.isMajorEvent = data.isMajorEvent ? 1 : 0
   if (typeof data.eventType === 'string') next.eventType = cleanAiFieldText(data.eventType)
   if ('arcId' in data) next.arcId = data.arcId ?? null
+  if ('volumeId' in data) next.volumeId = data.volumeId ?? null
+  if ('partId' in data) next.partId = data.partId ?? null
   if ('chapterStartId' in data) next.chapterStartId = data.chapterStartId ?? null
   if ('chapterEndId' in data) next.chapterEndId = data.chapterEndId ?? null
+  if ('segmentId' in data) next.segmentId = data.segmentId ?? null
   if ('locationMapId' in data) next.locationMapId = data.locationMapId ?? null
   if (typeof data.presentCharacterIdsJson === 'string') next.presentCharacterIdsJson = data.presentCharacterIdsJson
   if (typeof data.affectedCharacterIdsJson === 'string') next.affectedCharacterIdsJson = data.affectedCharacterIdsJson
@@ -279,9 +290,115 @@ function sanitizeTimelinePayload(
   if (typeof data.directConsequencesJson === 'string') next.directConsequencesJson = data.directConsequencesJson
   if (typeof data.openThreadsJson === 'string') next.openThreadsJson = data.openThreadsJson
   if (typeof data.notes === 'string') next.notes = cleanAiFieldText(data.notes)
+  if (typeof data.anchorInvalid === 'number') next.anchorInvalid = data.anchorInvalid ? 1 : 0
   if (typeof data.status === 'string') next.status = normalizeStatus(data.status)
 
   return next
+}
+
+function resolveTimelineAnchorState(
+  novelId: number,
+  data: Partial<typeof timelineEvents.$inferInsert>,
+): TimelineAnchorState {
+  const db = getDb()
+  const chapterRows = db.select().from(chapters).where(eq(chapters.novelId, novelId)).all()
+  const partRows = db.select().from(storyParts).where(eq(storyParts.novelId, novelId)).all()
+  const segmentRows = db.select().from(chapterSegments).where(eq(chapterSegments.novelId, novelId)).all()
+  const chapterById = new Map(chapterRows.map((chapter) => [chapter.id, chapter]))
+  const partById = new Map(partRows.map((part) => [part.id, part]))
+  const segmentById = new Map(segmentRows.map((segment) => [segment.id, segment]))
+
+  const next: TimelineAnchorState = {
+    volumeId: data.volumeId ?? null,
+    partId: data.partId ?? null,
+    chapterStartId: data.chapterStartId ?? null,
+    chapterEndId: data.chapterEndId ?? null,
+    segmentId: data.segmentId ?? null,
+    anchorInvalid: typeof data.anchorInvalid === 'number' ? (data.anchorInvalid ? 1 : 0) : 0,
+  }
+
+  if (next.segmentId) {
+    const segment = segmentById.get(next.segmentId)
+    if (segment) {
+      next.chapterStartId = segment.chapterId
+      next.chapterEndId = segment.chapterId
+      next.partId = segment.partId ?? null
+      next.volumeId = segment.volumeId ?? null
+      next.anchorInvalid = 0
+      return next
+    }
+    next.segmentId = null
+    next.anchorInvalid = 1
+  }
+
+  const anchorChapterId = next.chapterStartId ?? next.chapterEndId
+  if (anchorChapterId) {
+    const chapter = chapterById.get(anchorChapterId)
+    if (chapter) {
+      next.partId = chapter.partId ?? next.partId ?? null
+      next.volumeId = chapter.volumeId
+        ?? (next.partId ? partById.get(next.partId)?.volumeId ?? null : next.volumeId ?? null)
+      next.anchorInvalid = 0
+      return next
+    }
+  }
+
+  if (next.partId) {
+    const part = partById.get(next.partId)
+    if (part) {
+      next.volumeId = part.volumeId
+      next.anchorInvalid = 0
+      return next
+    }
+    next.partId = null
+    next.anchorInvalid = 1
+  }
+
+  if (next.volumeId) {
+    next.anchorInvalid = 0
+  }
+
+  return next
+}
+
+function buildTimelineMutation(
+  novelId: number,
+  data: Partial<typeof timelineEvents.$inferInsert>,
+  current?: typeof timelineEvents.$inferSelect | null,
+): Partial<typeof timelineEvents.$inferInsert> {
+  const sanitized = sanitizeTimelinePayload(data)
+  const anchors = resolveTimelineAnchorState(novelId, {
+    volumeId: 'volumeId' in sanitized ? sanitized.volumeId : current?.volumeId ?? null,
+    partId: 'partId' in sanitized ? sanitized.partId : current?.partId ?? null,
+    chapterStartId: 'chapterStartId' in sanitized ? sanitized.chapterStartId : current?.chapterStartId ?? null,
+    chapterEndId: 'chapterEndId' in sanitized ? sanitized.chapterEndId : current?.chapterEndId ?? null,
+    segmentId: 'segmentId' in sanitized ? sanitized.segmentId : current?.segmentId ?? null,
+    anchorInvalid: 'anchorInvalid' in sanitized ? sanitized.anchorInvalid : current?.anchorInvalid ?? 0,
+  })
+
+  return {
+    ...sanitized,
+    ...anchors,
+  }
+}
+
+function isEventLinkedToChapter(
+  event: typeof timelineEvents.$inferSelect,
+  chapter: typeof chapters.$inferSelect,
+  chapterNumById: Map<number, number>,
+  segmentIdsByChapter: Map<number, Set<number>>,
+): boolean {
+  if (event.segmentId && segmentIdsByChapter.get(chapter.id)?.has(event.segmentId)) return true
+  if (event.chapterStartId === chapter.id || event.chapterEndId === chapter.id) return true
+
+  const startNum = event.chapterStartId ? chapterNumById.get(event.chapterStartId) : undefined
+  const endNum = event.chapterEndId ? chapterNumById.get(event.chapterEndId) : undefined
+  if (typeof startNum === 'number' && typeof endNum === 'number') {
+    return chapter.chapterNum >= startNum && chapter.chapterNum <= endNum
+  }
+  if (typeof startNum === 'number') return chapter.chapterNum === startNum
+  if (typeof endNum === 'number') return chapter.chapterNum === endNum
+  return false
 }
 
 function buildGeneratedPayload(
@@ -364,9 +481,333 @@ export function getTimelineEvent(id: number) {
   return db.select().from(timelineEvents).where(eq(timelineEvents.id, id)).all()[0] || null
 }
 
-export function createTimelineEvent(novelId: number, data: Partial<typeof timelineEvents.$inferInsert>) {
+export function listLinkedTimelineEvents(filters: TimelineAnchorFilters) {
+  const db = getDb()
+  const events = listTimelineEvents(filters.novelId)
+  if (filters.segmentId) {
+    return events.filter((event) => event.segmentId === filters.segmentId)
+  }
+  if (filters.chapterId) {
+    const chapter = db.select().from(chapters).where(eq(chapters.id, filters.chapterId)).all()[0]
+    if (!chapter) return []
+    const chapterRows = db.select().from(chapters).where(eq(chapters.novelId, filters.novelId)).all()
+    const chapterNumById = new Map(chapterRows.map((item) => [item.id, item.chapterNum]))
+    const segmentRows = db.select().from(chapterSegments).where(eq(chapterSegments.novelId, filters.novelId)).all()
+    const segmentIdsByChapter = new Map<number, Set<number>>()
+    segmentRows.forEach((segment) => {
+      const current = segmentIdsByChapter.get(segment.chapterId) || new Set<number>()
+      current.add(segment.id)
+      segmentIdsByChapter.set(segment.chapterId, current)
+    })
+    return events.filter((event) => isEventLinkedToChapter(event, chapter, chapterNumById, segmentIdsByChapter))
+  }
+  if (filters.partId) {
+    return events.filter((event) => event.partId === filters.partId)
+  }
+  if (filters.volumeId) {
+    return events.filter((event) => event.volumeId === filters.volumeId)
+  }
+  return events
+}
+
+function normalizePaging(page?: number, pageSize?: number, fallbackPageSize = 100) {
+  const nextPageSize = Math.max(1, Math.min(pageSize || fallbackPageSize, 200))
+  const nextPage = Math.max(1, page || 1)
+  const offset = (nextPage - 1) * nextPageSize
+  return { page: nextPage, pageSize: nextPageSize, offset }
+}
+
+function buildPagedResult<T>(items: T[], page: number, pageSize: number, total: number) {
+  return {
+    items,
+    page,
+    pageSize,
+    total,
+    hasMore: page * pageSize < total,
+  }
+}
+
+function buildTimelineWhere(filters: TimelineQueryFilters) {
+  const db = getDb()
+  const whereClauses = ['e.novel_id = ?']
+  const params: Array<number | string> = [filters.novelId]
+  let joinSql = ''
+
+  if (filters.status) {
+    whereClauses.push('e.status = ?')
+    params.push(filters.status)
+  }
+
+  if (filters.eventType) {
+    whereClauses.push('e.event_type = ?')
+    params.push(filters.eventType)
+  }
+
+  const keyword = typeof filters.keyword === 'string' ? filters.keyword.trim() : ''
+  if (keyword) {
+    const like = `%${keyword}%`
+    whereClauses.push(`
+      (
+        e.event_title LIKE ?
+        OR e.time_label LIKE ?
+        OR COALESCE(e.event_summary, '') LIKE ?
+        OR COALESCE(e.event_result, '') LIKE ?
+        OR COALESCE(e.notes, '') LIKE ?
+      )
+    `)
+    params.push(like, like, like, like, like)
+  }
+
+  if (filters.volumeId) {
+    whereClauses.push('e.volume_id = ?')
+    params.push(filters.volumeId)
+  }
+
+  if (filters.partId) {
+    whereClauses.push('e.part_id = ?')
+    params.push(filters.partId)
+  }
+
+  if (filters.segmentId) {
+    whereClauses.push('e.segment_id = ?')
+    params.push(filters.segmentId)
+  }
+
+  if (filters.chapterId) {
+    const chapter = db.select().from(chapters).where(eq(chapters.id, filters.chapterId)).all()[0]
+    if (!chapter) {
+      return {
+        empty: true,
+        joinSql: '',
+        whereSql: '1 = 0',
+        params,
+      }
+    }
+
+    joinSql = `
+      LEFT JOIN chapters cs ON cs.id = e.chapter_start_id
+      LEFT JOIN chapters ce ON ce.id = e.chapter_end_id
+    `
+    whereClauses.push(`
+      (
+        e.segment_id IN (SELECT s.id FROM chapter_segments s WHERE s.chapter_id = ?)
+        OR e.chapter_start_id = ?
+        OR e.chapter_end_id = ?
+        OR (cs.chapter_num IS NOT NULL AND ce.chapter_num IS NOT NULL AND ? BETWEEN cs.chapter_num AND ce.chapter_num)
+        OR (cs.chapter_num IS NOT NULL AND ce.chapter_num IS NULL AND ? = cs.chapter_num)
+        OR (ce.chapter_num IS NOT NULL AND cs.chapter_num IS NULL AND ? = ce.chapter_num)
+      )
+    `)
+    params.push(chapter.id, chapter.id, chapter.id, chapter.chapterNum, chapter.chapterNum, chapter.chapterNum)
+  }
+
+  return {
+    empty: false,
+    joinSql,
+    whereSql: whereClauses.join(' AND '),
+    params,
+  }
+}
+
+const TIMELINE_SELECT_SQL = `
+  SELECT
+    e.id AS id,
+    e.novel_id AS novelId,
+    e.sort_order AS sortOrder,
+    e.event_title AS eventTitle,
+    e.event_summary AS eventSummary,
+    e.time_mode AS timeMode,
+    e.time_label AS timeLabel,
+    e.time_sort_value AS timeSortValue,
+    e.time_precision AS timePrecision,
+    e.is_major_event AS isMajorEvent,
+    e.event_type AS eventType,
+    e.arc_id AS arcId,
+    e.volume_id AS volumeId,
+    e.part_id AS partId,
+    e.chapter_start_id AS chapterStartId,
+    e.chapter_end_id AS chapterEndId,
+    e.segment_id AS segmentId,
+    e.location_map_id AS locationMapId,
+    e.present_character_ids_json AS presentCharacterIdsJson,
+    e.affected_character_ids_json AS affectedCharacterIdsJson,
+    e.protagonist_present AS protagonistPresent,
+    e.protagonist_action AS protagonistAction,
+    e.event_cause AS eventCause,
+    e.event_process AS eventProcess,
+    e.event_result AS eventResult,
+    e.linked_item_ids_json AS linkedItemIdsJson,
+    e.direct_consequences_json AS directConsequencesJson,
+    e.open_threads_json AS openThreadsJson,
+    e.notes AS notes,
+    e.anchor_invalid AS anchorInvalid,
+    e.status AS status,
+    e.created_at AS createdAt,
+    e.updated_at AS updatedAt
+  FROM timeline_events e
+`
+
+export function queryTimelineEvents(filters: TimelineQueryFilters) {
+  const sqlite = getSqlite()
+  const paging = normalizePaging(filters.page, filters.pageSize, 100)
+  const query = buildTimelineWhere(filters)
+  if (query.empty) {
+    return buildPagedResult([], paging.page, paging.pageSize, 0)
+  }
+
+  const sortBy = filters.sortBy === 'createdAt' ? 'e.created_at' : 'e.time_sort_value'
+  const sortDirection = filters.sortDirection === 'desc' ? 'DESC' : 'ASC'
+  const countRow = sqlite.prepare(`
+    SELECT COUNT(*) AS total
+    FROM timeline_events e
+    ${query.joinSql}
+    WHERE ${query.whereSql}
+  `).get(...query.params) as { total?: number } | undefined
+
+  const rows = sqlite.prepare(`
+    ${TIMELINE_SELECT_SQL}
+    ${query.joinSql}
+    WHERE ${query.whereSql}
+    ORDER BY ${sortBy} ${sortDirection}, e.sort_order ASC, e.id ASC
+    LIMIT ? OFFSET ?
+  `).all(...query.params, paging.pageSize, paging.offset) as Array<Record<string, unknown>>
+
+  const items = rows.map((row) => ({
+    ...row,
+    id: Number(row.id),
+    novelId: Number(row.novelId),
+    sortOrder: Number(row.sortOrder || 0),
+    timeSortValue: Number(row.timeSortValue || 0),
+    isMajorEvent: Number(row.isMajorEvent || 0),
+    arcId: row.arcId == null ? undefined : Number(row.arcId),
+    volumeId: row.volumeId == null ? undefined : Number(row.volumeId),
+    partId: row.partId == null ? undefined : Number(row.partId),
+    chapterStartId: row.chapterStartId == null ? undefined : Number(row.chapterStartId),
+    chapterEndId: row.chapterEndId == null ? undefined : Number(row.chapterEndId),
+    segmentId: row.segmentId == null ? undefined : Number(row.segmentId),
+    locationMapId: row.locationMapId == null ? undefined : Number(row.locationMapId),
+    protagonistPresent: Number(row.protagonistPresent || 0),
+    anchorInvalid: Number(row.anchorInvalid || 0),
+  }))
+
+  return buildPagedResult(items, paging.page, paging.pageSize, Number(countRow?.total || 0))
+}
+
+export function searchTimelineEvents(novelId: number, keyword = '', limit = 20) {
+  return queryTimelineEvents({
+    novelId,
+    keyword,
+    page: 1,
+    pageSize: Math.max(1, Math.min(limit, 50)),
+    sortBy: 'timeSortValue',
+    sortDirection: 'asc',
+  }).items
+}
+
+export function listLinkedTimelineEventsPage(filters: TimelineAnchorFilters, page?: number, pageSize?: number) {
+  return queryTimelineEvents({
+    ...filters,
+    page,
+    pageSize: pageSize || 12,
+    sortBy: 'timeSortValue',
+    sortDirection: 'asc',
+  })
+}
+
+export function getTimelineStats(filters: TimelineQueryFilters) {
+  const sqlite = getSqlite()
+  const query = buildTimelineWhere(filters)
+  if (query.empty) {
+    return {
+      total: 0,
+      majorCount: 0,
+      resolvedCount: 0,
+      openThreadCount: 0,
+    }
+  }
+
+  const rows = sqlite.prepare(`
+    SELECT
+      e.is_major_event AS isMajorEvent,
+      e.status AS status,
+      e.open_threads_json AS openThreadsJson
+    FROM timeline_events e
+    ${query.joinSql}
+    WHERE ${query.whereSql}
+  `).all(...query.params) as Array<Record<string, unknown>>
+
+  return rows.reduce((result, row) => {
+    result.total += 1
+    if (Number(row.isMajorEvent || 0)) result.majorCount += 1
+    if (row.status === 'resolved') result.resolvedCount += 1
+    result.openThreadCount += parseJsonStringArray((row.openThreadsJson as string | undefined) || '').length
+    return result
+  }, {
+    total: 0,
+    majorCount: 0,
+    resolvedCount: 0,
+    openThreadCount: 0,
+  })
+}
+
+export function getTimelineFilterOptions(novelId: number) {
+  const sqlite = getSqlite()
+  const rows = sqlite.prepare(`
+    SELECT DISTINCT event_type AS eventType
+    FROM timeline_events
+    WHERE novel_id = ?
+      AND event_type IS NOT NULL
+      AND TRIM(event_type) <> ''
+    ORDER BY event_type ASC
+  `).all(novelId) as Array<{ eventType?: string | null }>
+
+  return {
+    eventTypes: rows
+      .map((row) => asText(row.eventType))
+      .filter(Boolean),
+  }
+}
+
+export function markTimelineEventsSegmentAnchorInvalid(segmentId: number) {
+  const db = getDb()
+  db.update(timelineEvents).set({
+    segmentId: null,
+    anchorInvalid: 1,
+    updatedAt: new Date().toISOString(),
+  }).where(eq(timelineEvents.segmentId, segmentId)).run()
+}
+
+export function syncTimelineStructureAnchors(novelId: number) {
+  const db = getDb()
+  const rows = listTimelineEvents(novelId)
+  rows.forEach((row) => {
+    const next = resolveTimelineAnchorState(novelId, row)
+    if (
+      next.volumeId === (row.volumeId ?? null)
+      && next.partId === (row.partId ?? null)
+      && next.chapterStartId === (row.chapterStartId ?? null)
+      && next.chapterEndId === (row.chapterEndId ?? null)
+      && next.segmentId === (row.segmentId ?? null)
+      && next.anchorInvalid === (row.anchorInvalid ?? 0)
+    ) {
+      return
+    }
+
+    db.update(timelineEvents).set({
+      ...next,
+      updatedAt: new Date().toISOString(),
+    }).where(eq(timelineEvents.id, row.id)).run()
+  })
+}
+
+export function createTimelineEvent(
+  novelId: number,
+  data: Partial<typeof timelineEvents.$inferInsert>,
+  options: { skipContextTracking?: boolean } = {},
+) {
   const db = getDb()
   const nextSortOrder = typeof data.sortOrder === 'number' ? data.sortOrder : getNextSortOrder(novelId)
+  const mutation = buildTimelineMutation(novelId, data)
   const result = db.insert(timelineEvents).values({
     novelId,
     sortOrder: nextSortOrder,
@@ -383,28 +824,46 @@ export function createTimelineEvent(novelId: number, data: Partial<typeof timeli
     isMajorEvent: typeof data.isMajorEvent === 'number' ? data.isMajorEvent : 1,
     status: normalizeStatus(data.status),
     ...sanitizeTimelinePayload(data),
+    ...mutation,
   }).run()
   const id = Number(result.lastInsertRowid)
   syncTimelineEventItemLinks(id)
+  if (!options.skipContextTracking) {
+    markNovelContextChanged(novelId, 'Timeline events changed')
+  }
   return id
 }
 
-export function updateTimelineEvent(id: number, data: Partial<typeof timelineEvents.$inferInsert>) {
+export function updateTimelineEvent(
+  id: number,
+  data: Partial<typeof timelineEvents.$inferInsert>,
+  options: { skipContextTracking?: boolean } = {},
+) {
+  const current = getTimelineEvent(id)
+  if (!current) return
   const db = getDb()
   db.update(timelineEvents).set({
     ...sanitizeTimelinePayload(data),
+    ...buildTimelineMutation(current.novelId, data, current),
     updatedAt: new Date().toISOString(),
   }).where(eq(timelineEvents.id, id)).run()
   syncTimelineEventItemLinks(id)
+  if (!options.skipContextTracking) {
+    markNovelContextChanged(current.novelId, 'Timeline events changed')
+  }
 }
 
-export function deleteTimelineEvent(id: number) {
+export function deleteTimelineEvent(id: number, options: { skipContextTracking?: boolean } = {}) {
   const db = getDb()
+  const current = getTimelineEvent(id)
   removeTimelineEventFromItems(id)
   db.delete(timelineEvents).where(eq(timelineEvents.id, id)).run()
+  if (!options.skipContextTracking && current) {
+    markNovelContextChanged(current.novelId, 'Timeline events changed')
+  }
 }
 
-export function clearTimelineByNovel(novelId: number) {
+export function clearTimelineByNovel(novelId: number, options: { skipContextTracking?: boolean } = {}) {
   const db = getDb()
   const itemRows = db.select().from(storyItems).where(eq(storyItems.novelId, novelId)).all()
 
@@ -416,6 +875,9 @@ export function clearTimelineByNovel(novelId: number) {
   })
 
   db.delete(timelineEvents).where(eq(timelineEvents.novelId, novelId)).run()
+  if (!options.skipContextTracking) {
+    markNovelContextChanged(novelId, 'Timeline events changed')
+  }
 }
 
 export async function generateTimelineEvents(
@@ -447,7 +909,7 @@ export async function generateTimelineEvents(
       background: [
         profile.background,
         options.focus ? `额外聚焦：${options.focus}` : '',
-        `本批要求：只补 ${currentBatchCount} 个新事件，避免复述已有时间轴。`,
+        `本批要求：只生成 ${currentBatchCount} 个新事件，避免重复已有时间轴内容。`,
       ].filter(Boolean).join('\n'),
       storyGoal: profile.storyGoal,
       coreConflict: profile.coreConflict,
@@ -492,8 +954,12 @@ export async function generateTimelineEvents(
         mapRows,
       })
       if (!payload) return
-      createdIds.push(createTimelineEvent(novelId, payload))
+      createdIds.push(createTimelineEvent(novelId, payload, { skipContextTracking: true }))
     })
+  }
+
+  if (createdIds.length > 0) {
+    markNovelContextChanged(novelId, 'Timeline events changed')
   }
 
   return createdIds
@@ -510,3 +976,4 @@ export function getTimelineEventCharacterIds(id: number): number[] {
   if (!row) return []
   return parseJsonNumberArray(row.presentCharacterIdsJson)
 }
+

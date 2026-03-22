@@ -50,6 +50,21 @@ export default function Outline({ novelId }: Props) {
   useEffect(() => { loadData() }, [loadData])
 
   const handleGenerateArcs = async () => {
+    if (arcs.length > 0 || chapters.some((chapter) => chapter.arcId || chapter.outline || chapter.emotionTone)) {
+      const shouldContinue = await new Promise<boolean>((resolve) => {
+        Modal.confirm({
+          title: '重新生成故事弧？',
+          content: '这会替换现有故事弧，并清空所有章节的弧线归属、章节细纲和情绪基调。正文内容不会被删除。',
+          okText: '继续生成',
+          cancelText: '取消',
+          onOk: () => resolve(true),
+          onCancel: () => resolve(false),
+        })
+      })
+
+      if (!shouldContinue) return
+    }
+
     setGenerating(true)
     try {
       await window.electron.outline.generateArcs(novelId)

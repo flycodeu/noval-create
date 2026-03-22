@@ -1,0 +1,2 @@
+﻿.novel-timeline-page .novel-timeline-structure-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.novel-timeline-page .novel-timeline-structure-tags .ant-tag { margin-inline-end: 0; }

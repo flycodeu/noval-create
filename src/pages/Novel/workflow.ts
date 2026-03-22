@@ -1,14 +1,18 @@
-import type { Novel } from '../../types'
+﻿import type { Novel } from '../../types'
+import { parseStorySettingsSnapshot } from '../../shared/story-settings'
+import type { StorySettingsSnapshot } from '../../shared/story-settings'
 
 export type WorkflowRecommendationKey =
   | 'guide'
   | 'overview'
   | 'core-settings'
+  | 'story-design'
   | 'world-rules'
   | 'map'
   | 'characters'
   | 'items'
   | 'outline'
+  | 'structure'
   | 'timeline'
   | 'writing'
 
@@ -34,28 +38,22 @@ export interface WorkflowStats {
   hasProtagonist: boolean
 }
 
-export interface StorySettingsSnapshot {
-  storyGoal: string
-  coreConflict: string
-  mainPlot: string
-  ending: string
-  subPlotCount: number
-}
-
 export interface GuidedStepProgress {
   completedCount: number
   totalCount: number
   isComplete: boolean
 }
 
+export type { StorySettingsSnapshot }
+
 export const GUIDED_STEP_ORDER: GuidedWorkflowStepKey[] = [
   'basics',
   'story-core',
-  'story-plot',
   'world-foundation',
   'map-structure',
   'character-roster',
   'items-equipment',
+  'story-plot',
   'write-start',
 ]
 
@@ -71,38 +69,37 @@ export const EMPTY_WORKFLOW_STATS: WorkflowStats = {
   hasProtagonist: false,
 }
 
+export async function loadWorkflowStats(novelId: number): Promise<WorkflowStats> {
+  const [baseStats, characterStats, itemStats, mapStats, arcs, timelineStats] = await Promise.all([
+    window.electron.novel.stats(novelId),
+    window.electron.character.getStats({ novelId, page: 1, pageSize: 1 }),
+    window.electron.item.getStats({ novelId, page: 1, pageSize: 1 }),
+    window.electron.map.getStats(novelId),
+    window.electron.outline.getArcs(novelId),
+    window.electron.timeline.getStats({ novelId }),
+  ])
+
+  return {
+    mapCount: mapStats.total,
+    characterCount: characterStats.total,
+    itemCount: itemStats.total,
+    outlineCount: arcs.length,
+    timelineCount: timelineStats.total,
+    chapterCount: baseStats.totalChapters,
+    completedChapterCount: baseStats.completedChapters,
+    totalWords: baseStats.totalWords,
+    hasProtagonist: characterStats.protagonistCount > 0,
+  }
+}
+
 export function countMapNodes(nodes: Array<{ children?: unknown[] }>): number {
   return nodes.reduce((total, node) => (
     total + 1 + countMapNodes(Array.isArray(node.children) ? node.children as Array<{ children?: unknown[] }> : [])
   ), 0)
 }
 
-function parseJsonObject(raw?: string): Record<string, unknown> {
-  if (!raw) return {}
-
-  try {
-    const parsed = JSON.parse(raw)
-    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {}
-  } catch {
-    return {}
-  }
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : ''
-}
-
 export function parseStorySettings(raw?: string): StorySettingsSnapshot {
-  const parsed = parseJsonObject(raw)
-  const subPlots = Array.isArray(parsed.sub_plots_list) ? parsed.sub_plots_list : []
-
-  return {
-    storyGoal: readString(parsed.story_goal),
-    coreConflict: readString(parsed.core_conflict),
-    mainPlot: readString(parsed.main_plot),
-    ending: readString(parsed.ending),
-    subPlotCount: subPlots.length,
-  }
+  return parseStorySettingsSnapshot(raw)
 }
 
 export function isBasicsReady(
@@ -116,12 +113,21 @@ export function isBasicsReady(
 
 export function isStoryCoreReady(novel: Pick<Novel, 'settingsJson'> | null | undefined): boolean {
   const settings = parseStorySettings(novel?.settingsJson)
-  return Boolean(settings.storyGoal && settings.coreConflict)
+  return Boolean(
+    settings.premise.positioning
+    && settings.premise.coreHook
+    && settings.premise.constraints,
+  )
 }
 
 export function isStoryPlotReady(novel: Pick<Novel, 'settingsJson'> | null | undefined): boolean {
   const settings = parseStorySettings(novel?.settingsJson)
-  return Boolean(settings.mainPlot && settings.ending)
+  return Boolean(
+    settings.storyGoal
+    && settings.coreConflict
+    && settings.mainPlot
+    && settings.ending,
+  )
 }
 
 export function isWorldFoundationReady(
@@ -158,8 +164,18 @@ export function getGuidedStepProgressMap(
   const basicsProgress = [novel?.title, novel?.synopsis, novel?.userBackground, novel?.expandedBackground]
     .filter((value) => typeof value === 'string' && value.trim().length > 0)
     .length
-  const storyCoreProgress = [settings.storyGoal, settings.coreConflict].filter(Boolean).length
-  const storyPlotProgress = [settings.mainPlot, settings.ending].filter(Boolean).length
+  const storyCoreProgress = [
+    settings.premise.positioning,
+    settings.premise.coreHook,
+    settings.premise.protagonistStart,
+    settings.premise.constraints,
+  ].filter(Boolean).length
+  const storyPlotProgress = [
+    settings.storyGoal,
+    settings.coreConflict,
+    settings.mainPlot,
+    settings.ending,
+  ].filter(Boolean).length
   const characterProgress = [stats.hasProtagonist, stats.characterCount > 0].filter(Boolean).length
   const writingProgress = [
     stats.outlineCount > 0,
@@ -176,13 +192,8 @@ export function getGuidedStepProgressMap(
     },
     'story-core': {
       completedCount: storyCoreProgress,
-      totalCount: 2,
-      isComplete: storyCoreProgress >= 2,
-    },
-    'story-plot': {
-      completedCount: storyPlotProgress,
-      totalCount: 2,
-      isComplete: storyPlotProgress >= 2,
+      totalCount: 4,
+      isComplete: Boolean(settings.premise.positioning && settings.premise.coreHook && settings.premise.constraints),
     },
     'world-foundation': {
       completedCount: novel?.worldRulesJson ? 1 : 0,
@@ -204,6 +215,11 @@ export function getGuidedStepProgressMap(
       totalCount: 1,
       isComplete: stats.itemCount > 0,
     },
+    'story-plot': {
+      completedCount: storyPlotProgress,
+      totalCount: 4,
+      isComplete: storyPlotProgress >= 4,
+    },
     'write-start': {
       completedCount: writingProgress,
       totalCount: 4,
@@ -218,11 +234,11 @@ export function getRecommendedGuidedWorkflowStep(
 ): GuidedWorkflowStepKey {
   if (!isBasicsReady(novel)) return 'basics'
   if (!isStoryCoreReady(novel)) return 'story-core'
-  if (!isStoryPlotReady(novel)) return 'story-plot'
   if (!isWorldFoundationReady(novel)) return 'world-foundation'
   if (!isMapStructureReady(stats)) return 'map-structure'
   if (!isCharacterRosterReady(stats)) return 'character-roster'
   if (!isItemsEquipmentReady(stats)) return 'items-equipment'
+  if (!isStoryPlotReady(novel)) return 'story-plot'
   return 'write-start'
 }
 
@@ -231,13 +247,14 @@ export function getRecommendedWorkflowStep(
   stats: WorkflowStats,
 ): WorkflowRecommendationKey | null {
   if (!novel) return null
-  if (!novel.settingsJson) return 'core-settings'
+  if (!isStoryCoreReady(novel)) return 'core-settings'
   if (!novel.worldRulesJson) return 'world-rules'
   if (stats.mapCount <= 0) return 'map'
   if (stats.characterCount <= 0) return 'characters'
   if (stats.itemCount <= 0) return 'items'
-  if (stats.outlineCount <= 0) return 'outline'
+  if (!isStoryPlotReady(novel)) return 'story-design'
+  if (stats.outlineCount <= 0) return 'structure'
   if (stats.timelineCount <= 0) return 'timeline'
-  if (stats.chapterCount <= 0) return 'writing'
-  return 'guide'
+  if (stats.chapterCount <= 0 && stats.totalWords <= 0) return 'writing'
+  return 'overview'
 }

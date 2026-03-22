@@ -371,9 +371,24 @@ export function buildNovelConsistencyReport(novelId: number): NovelConsistencyRe
       }
     })
 
+    if (event.anchorInvalid) {
+      pushIssue(
+        issueList,
+        'medium',
+        'timeline',
+        '时间轴结构锚点失效',
+        `${event.eventTitle} 绑定的结构锚点已经失效，需要重新确认落点。`,
+        '重新选择卷、部、章节或场景，避免事件与结构页脱钩。',
+        { entityType: 'timeline', entityId: event.id, entityLabel: event.eventTitle },
+      )
+    }
+
     if (
+      !event.volumeId &&
+      !event.partId &&
       !event.chapterStartId &&
       !event.chapterEndId &&
+      !event.segmentId &&
       !event.locationMapId &&
       presentIds.length === 0 &&
       linkedItemIds.length === 0
@@ -507,7 +522,13 @@ export function buildNovelConsistencyReport(novelId: number): NovelConsistencyRe
 
   const chaptersMissingSummary = chapterRows.filter((row) => asText(row.content) && !asText(row.summary)).length
   const chaptersMissingContinuity = chapterRows.filter((row) => asText(row.content) && !asText(row.continuityStateJson)).length
-  const linkedTimelineCount = eventRows.filter((row) => row.chapterStartId || row.chapterEndId || row.locationMapId).length
+  const linkedTimelineCount = eventRows.filter((row) =>
+    row.volumeId
+    || row.partId
+    || row.chapterStartId
+    || row.chapterEndId
+    || row.segmentId
+    || row.locationMapId).length
   const bidirectionalLinkCount = itemRows.filter((item) =>
     listLinkedTimelineEventIds(item.linkedTimelineEventIdsJson)
       .every((eventId) => eventRows.some((event) => event.id === eventId && listLinkedItemIds(event.linkedItemIdsJson).includes(item.id))),

@@ -11,7 +11,7 @@ import {
   ThunderboltOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
-import type { NovelConsistencyReport } from '../../../types'
+import type { NovelConsistencyReport, NovelContextStatus } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
 import { useWorkspaceStore } from '../../../stores/workspace.store'
 import {
@@ -30,6 +30,7 @@ import {
   WorkspacePage,
   WorkspacePanel,
 } from '../components/WorkspaceShell'
+import { isStoryCoreReady, isStoryPlotReady, loadWorkflowStats } from '../workflow'
 
 interface Props {
   novelId: number
@@ -108,6 +109,7 @@ export default function GuidePage({ novelId }: Props) {
     hasProtagonist: false,
   })
   const [consistencyReport, setConsistencyReport] = useState<NovelConsistencyReport | null>(null)
+  const [contextStatus, setContextStatus] = useState<NovelContextStatus | null>(null)
   const [runningKey, setRunningKey] = useState<string | null>(null)
 
   const worldRules = useMemo(
@@ -126,32 +128,25 @@ export default function GuidePage({ novelId }: Props) {
   )
 
   const refreshStats = useCallback(async () => {
-    const [mapTree, characters, items, arcs, events] = await Promise.all([
-      window.electron.map.getTree(novelId),
-      window.electron.character.list(novelId),
-      window.electron.item.list(novelId),
-      window.electron.outline.getArcs(novelId),
-      window.electron.timeline.list(novelId),
-    ])
-
-    const countMapNodes = (nodes: typeof mapTree): number => nodes.reduce(
-      (total, node) => total + 1 + countMapNodes(node.children || []),
-      0,
-    )
+    const workflowStats = await loadWorkflowStats(novelId)
 
     setStats({
-      mapCount: countMapNodes(mapTree),
-      characterCount: characters.length,
-      itemCount: items.length,
-      outlineCount: arcs.length,
-      timelineCount: events.length,
-      hasProtagonist: characters.some((item) => item.roleType === 'protagonist'),
+      mapCount: workflowStats.mapCount,
+      characterCount: workflowStats.characterCount,
+      itemCount: workflowStats.itemCount,
+      outlineCount: workflowStats.outlineCount,
+      timelineCount: workflowStats.timelineCount,
+      hasProtagonist: workflowStats.hasProtagonist,
     })
   }, [novelId])
 
   const refreshDiagnostics = useCallback(async () => {
-    const report = await window.electron.novel.runConsistencyCheck(novelId)
+    const [report, nextContextStatus] = await Promise.all([
+      window.electron.novel.runConsistencyCheck(novelId),
+      window.electron.novel.getContextStatus(novelId),
+    ])
     setConsistencyReport(report)
+    setContextStatus(nextContextStatus)
   }, [novelId])
 
   useEffect(() => {
@@ -209,6 +204,34 @@ export default function GuidePage({ novelId }: Props) {
       focus: '先补足符合题材的流通物品和剧情挂点，再生成可落地实例。',
     })
   }, [itemProfile.defaultBatch, novelId])
+  const generateStoryDesignCore = useCallback(async () => {
+    const result = await window.electron.ai.generateCoreSettings({
+      novelId,
+      subplotCount: 8,
+      requirements: '故事设计必须建立在已经存在的世界规则、地图、人物和物品基础上，不要再把背景底盘写成剧情本身。减少口号化和同模板输出。',
+    })
+
+    const payload = buildStorySettingsPayload({
+      storyDesign: {
+        storyGoal: result.story_goal,
+        coreConflict: result.core_conflict,
+        mainPlot: result.main_plot,
+        subPlotsList: result.sub_plots_list,
+        rhythmSetup: result.rhythm_setup,
+        rhythmConflict: result.rhythm_conflict,
+        rhythmEnding: result.rhythm_ending,
+        endingType: result.ending_type,
+        ending: result.ending,
+      },
+    }, currentNovel?.settingsJson)
+
+    await window.electron.novel.update(novelId, {
+      settingsJson: JSON.stringify(payload),
+    })
+
+    const updated = await window.electron.novel.get(novelId)
+    if (updated) setCurrentNovel(updated)
+  }, [currentNovel?.settingsJson, novelId, setCurrentNovel])
 
   const generateOutlineCore = useCallback(async () => {
     await window.electron.outline.generateArcs(novelId)
@@ -246,6 +269,7 @@ export default function GuidePage({ novelId }: Props) {
   const generateCharacters = () => runStep('characters', generateCharactersCore, '人物网络首版已生成。')
   const generateItems = () => runStep('items', generateItemsCore, '物品模板与实例首批已生成，可继续在物品页补下一批。')
   const generateOutline = () => runStep('outline', generateOutlineCore, '故事弧首批已生成，可继续在大纲页细化章节。')
+  const generateStoryDesign = () => runStep('story-design', generateStoryDesignCore, '故事设计首版已生成，可继续在故事设计页细修。')
   const generateTimeline = () => runStep('timeline', generateTimelineCore, '时间轴首批事件已生成，可继续追加下一批。')
 
   const runPipeline = async () => {
@@ -260,33 +284,36 @@ export default function GuidePage({ novelId }: Props) {
       await refreshStats()
       await generateItemsCore()
       await refreshStats()
+      await generateStoryDesignCore()
+      await refreshStats()
       await generateOutlineCore()
       await refreshStats()
       await generateTimelineCore()
       await Promise.all([refreshStats(), refreshDiagnostics()])
-      message.success('首批结构资产已铺好，剩余内容请在各页面继续分批扩展。')
+      message.success('首批基础资产与故事设计已铺好，后续请在结构、时间轴和正文页继续分批细化。')
     } catch (error) {
       console.error(error)
-      message.error('AI 铺设中断，请先检查核心设定和题材规则是否完整。')
+      message.error('AI 铺设中断，请先检查基础设定、世界资产和故事设计前置是否完整。')
     } finally {
       setRunningKey(null)
     }
   }
 
   const structureReadyCount = [
-    Boolean(currentNovel?.settingsJson),
+    isStoryCoreReady(currentNovel),
     Boolean(currentNovel?.worldRulesJson),
     stats.mapCount > 0,
     stats.characterCount > 0,
     stats.itemCount > 0,
+    isStoryPlotReady(currentNovel),
     stats.outlineCount > 0,
     stats.timelineCount > 0,
   ].filter(Boolean).length
-
   const recommendedCharacterCount = characterPreset.majorCount
     + characterPreset.antagonistCount
     + characterPreset.supportingCount
     + characterPreset.minorCount
+  const staleChapterCount = contextStatus?.staleChapterCount || 0
 
   const steps: StepConfig[] = [
     {
@@ -400,6 +427,29 @@ export default function GuidePage({ novelId }: Props) {
       ),
     },
     {
+      key: 'story-design',
+      pageKey: 'story-design',
+      title: '故事设计',
+      desc: '等世界、地图、人物和物品都到位后，再统一设计主线、支线和结局。',
+      status: isStoryPlotReady(currentNovel) ? '已生成' : '待生成',
+      count: isStoryPlotReady(currentNovel) ? '主线骨架已落地' : '建议在资产准备后执行',
+      support: isStoryPlotReady(currentNovel)
+        ? '故事设计已经成型，接下来可以直接转去结构和时间线。'
+        : '这一步把主线目标、核心冲突、推进链和结局方向压成统一骨架，避免大纲从空白起步。',
+      ready: isStoryPlotReady(currentNovel),
+      icon: <BarsOutlined />,
+      action: (
+        <Space wrap>
+          <Button loading={runningKey === 'story-design'} icon={<BarsOutlined />} onClick={generateStoryDesign}>
+            AI 生成首版
+          </Button>
+          <Button type="link" onClick={() => navigate(`/novels/${novelId}/story-design`)}>
+            进入页面
+          </Button>
+        </Space>
+      ),
+    },
+    {
       key: 'outline',
       pageKey: 'outline',
       title: '故事大纲',
@@ -497,6 +547,7 @@ export default function GuidePage({ novelId }: Props) {
               label: '时间制度',
               value: TIME_MODE_LABELS[worldRules.timelineConfig.calendarType] || worldRules.timelineConfig.calendarType,
             },
+            { label: '待同步章节', value: staleChapterCount > 0 ? `${staleChapterCount} 章` : '全部最新' },
           ]}
         />
       )}
@@ -509,10 +560,10 @@ export default function GuidePage({ novelId }: Props) {
             hint="主角之外的主要人物、反派、功能角色和次要人物总和"
           />
           <WorkspaceMetric
-            label="物品模板方向"
-            value={itemProfile.templates.length}
-            tone="cool"
-            hint={itemProfile.title}
+            label="待同步章节"
+            value={contextStatus ? staleChapterCount : '加载中'}
+            tone={staleChapterCount > 0 ? 'warm' : 'cool'}
+            hint={staleChapterCount > 0 ? '设定已变更，受影响章节需要回查或重生成' : '当前没有被上下文变更影响的章节'}
           />
           <WorkspaceMetric
             label="结构体检"
@@ -528,6 +579,23 @@ export default function GuidePage({ novelId }: Props) {
       )}
       aside={(
         <>
+          {contextStatus && (
+            <WorkspacePanel
+              title="上下文同步"
+              description="当核心设定、世界规则、人物、地图、物品、时间轴或大纲发生变化时，受影响章节会被标记为待同步。"
+            >
+              <div className="novel-note-list">
+                <div className="novel-note-list__item">{`当前上下文版本：v${contextStatus.contextVersion}`}</div>
+                <div className="novel-note-list__item">{`章节总数：${contextStatus.totalChapterCount}`}</div>
+                <div className="novel-note-list__item">{`待同步章节：${contextStatus.staleChapterCount}`}</div>
+                <div className="novel-note-list__item">
+                  {contextStatus.staleChapterCount > 0
+                    ? '建议先去正文页回查受影响章节，再继续批量生成后续内容。'
+                    : '当前章节上下文与最新设定保持一致，可以继续推进。'}
+                </div>
+              </div>
+            </WorkspacePanel>
+          )}
 
           {consistencyReport && (
             <WorkspacePanel title="结构体检" description="全书级一致性校验器会自动检查人物、事件、时间轴、地图、物品和章节之间的冲突。">
@@ -563,6 +631,16 @@ export default function GuidePage({ novelId }: Props) {
         </>
       )}
     >
+      {contextStatus && contextStatus.staleChapterCount > 0 && (
+        <Alert
+          className="novel-guide__alert"
+          type="warning"
+          showIcon
+          message={`有 ${contextStatus.staleChapterCount} 章需要重新同步上下文`}
+          description="最近的设定或结构变更已经影响到现有章节。继续批量生成前，建议先回到正文页处理这些章节，避免后续文本承接旧设定。"
+        />
+      )}
+
       {consistencyReport && consistencyReport.highCount > 0 && (
         <Alert
           className="novel-guide__alert"
@@ -664,5 +742,8 @@ export default function GuidePage({ novelId }: Props) {
     </WorkspacePage>
   )
 }
+
+
+
 
 

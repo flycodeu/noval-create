@@ -1,8 +1,9 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+﻿import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import { desc, eq } from 'drizzle-orm'
 import type { CoreSettingsGenerationRequest } from '../src/shared/core-settings-generation'
+import type { PremiseGenerationRequest } from '../src/shared/premise-generation'
 import type { WorldRulesGenerationRequest } from '../src/shared/world-rules-generation'
 import type { SubplotGenerationRequest } from '../src/shared/subplot-framework'
 import { closeDb, getDb, initDb } from './database/db'
@@ -19,6 +20,7 @@ import * as chapterService from './services/chapter.service'
 import * as characterService from './services/character.service'
 import * as consistencyService from './services/consistency.service'
 import * as coreSettingsService from './services/core-settings.service'
+import * as premiseService from './services/premise.service'
 import { buildOutlineGenerationContext, buildStoryProfile } from './services/context.service'
 import * as worldRulesService from './services/world-rules.service'
 import * as exportService from './services/export.service'
@@ -30,6 +32,8 @@ import * as novelService from './services/novel.service'
 import * as subplotService from './services/subplot.service'
 import * as timelineService from './services/timeline.service'
 import * as storyMemoryService from './services/story-memory.service'
+import * as promptOverrideService from './services/prompt-override.service'
+import * as storyStructureService from './services/story-structure.service'
 import {
   contentScoringPrompt,
   expandBackgroundPrompt,
@@ -41,6 +45,7 @@ import {
 } from './services/story-prompts'
 import * as taskService from './services/task.service'
 import { safeParseJson } from './utils/json'
+import { getNovelContextStatus, markNovelContextChanged } from './services/context-impact.service'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -142,12 +147,12 @@ function formatGeneratedOutline(outline: Record<string, unknown>): string {
   const characters = toStringArray(outline.characters)
 
   return [
-    typeof outline.goal === 'string' && outline.goal.trim() ? `目标：${outline.goal.trim()}` : '',
-    characters.length > 0 ? `人物：${characters.join('、')}` : '',
-    typeof outline.location === 'string' && outline.location.trim() ? `场景：${outline.location.trim()}` : '',
+    typeof outline.goal === 'string' && outline.goal.trim() ? `鐩爣锛?{outline.goal.trim()}` : '',
+    characters.length > 0 ? `浜虹墿锛?{characters.join('銆?)}` : '',
+    typeof outline.location === 'string' && outline.location.trim() ? `鍦烘櫙锛?{outline.location.trim()}` : '',
     ...toStringArray(outline.plot_points).map((item) => `- ${item}`),
-    typeof outline.bridge_in === 'string' && outline.bridge_in.trim() ? `承接：${outline.bridge_in.trim()}` : '',
-    typeof outline.bridge_out === 'string' && outline.bridge_out.trim() ? `转出：${outline.bridge_out.trim()}` : '',
+    typeof outline.bridge_in === 'string' && outline.bridge_in.trim() ? `鎵挎帴锛?{outline.bridge_in.trim()}` : '',
+    typeof outline.bridge_out === 'string' && outline.bridge_out.trim() ? `杞嚭锛?{outline.bridge_out.trim()}` : '',
   ].filter(Boolean).join('\n')
 }
 
@@ -176,6 +181,36 @@ function registerIpcHandlers() {
   ipcMain.handle('novel:stats', (_, id) => novelService.getNovelStats(id))
   ipcMain.handle('novel:runConsistencyCheck', (_, id) => consistencyService.buildNovelConsistencyReport(id))
   ipcMain.handle('novel:getStoryMemory', (_, id) => storyMemoryService.buildStoryMemorySnapshot(id))
+  ipcMain.handle('novel:getContextStatus', (_, id) => getNovelContextStatus(id))
+
+  ipcMain.handle('structure:getTree', (_, novelId) => storyStructureService.listStoryStructure(novelId))
+  ipcMain.handle('structure:listVolumes', (_, novelId) => storyStructureService.listStructureVolumes(novelId))
+  ipcMain.handle('structure:listPartsPage', (_, volumeId, page, pageSize) => storyStructureService.listStructurePartsPage(volumeId, page, pageSize))
+  ipcMain.handle('structure:listChaptersPage', (_, partId, page, pageSize) => storyStructureService.listStructureChaptersPage(partId, page, pageSize))
+  ipcMain.handle('structure:listSegments', (_, chapterId) => storyStructureService.listChapterSegments(chapterId))
+  ipcMain.handle('structure:getSegment', (_, id) => storyStructureService.getChapterSegment(id))
+  ipcMain.handle('structure:listSegmentsPage', (_, chapterId, page, pageSize) => storyStructureService.listChapterSegmentsPage(chapterId, page, pageSize))
+  ipcMain.handle('structure:listCheckpoints', (_, novelId) => storyStructureService.listStoryCheckpoints(novelId))
+  ipcMain.handle('structure:listCheckpointsPage', (_, filters, page, pageSize) => storyStructureService.listStoryCheckpointsPage(filters, page, pageSize))
+  ipcMain.handle('structure:listLinkedTimelineEvents', (_, filters) => timelineService.listLinkedTimelineEvents(filters))
+  ipcMain.handle('structure:listLinkedTimelineEventsPage', (_, filters, page, pageSize) => timelineService.listLinkedTimelineEventsPage(filters, page, pageSize))
+  ipcMain.handle('structure:resolvePath', (_, filters) => storyStructureService.resolveStructurePath(filters))
+  ipcMain.handle('structure:createVolume', (_, novelId, data) => storyStructureService.createStoryVolume(novelId, data))
+  ipcMain.handle('structure:updateVolume', (_, id, data) => storyStructureService.updateStoryVolume(id, data))
+  ipcMain.handle('structure:deleteVolume', (_, id) => storyStructureService.deleteStoryVolume(id))
+  ipcMain.handle('structure:reorderVolumes', (_, novelId, orderedIds) => storyStructureService.reorderStoryVolumes(novelId, orderedIds))
+  ipcMain.handle('structure:createPart', (_, volumeId, data) => storyStructureService.createStoryPart(volumeId, data))
+  ipcMain.handle('structure:updatePart', (_, id, data) => storyStructureService.updateStoryPart(id, data))
+  ipcMain.handle('structure:deletePart', (_, id) => storyStructureService.deleteStoryPart(id))
+  ipcMain.handle('structure:reorderParts', (_, novelId, operations) => storyStructureService.reorderStoryParts(novelId, operations))
+  ipcMain.handle('structure:reorderPartsInVolume', (_, volumeId, orderedIds) => storyStructureService.reorderStoryPartsInVolume(volumeId, orderedIds))
+  ipcMain.handle('structure:assignChapter', (_, chapterId, partId) => storyStructureService.assignChapterToPart(chapterId, partId))
+  ipcMain.handle('structure:createSegment', (_, chapterId, data) => storyStructureService.createChapterSegment(chapterId, data))
+  ipcMain.handle('structure:updateSegment', (_, id, data) => storyStructureService.updateChapterSegment(id, data))
+  ipcMain.handle('structure:deleteSegment', (_, id) => storyStructureService.deleteChapterSegment(id))
+  ipcMain.handle('structure:reorderSegments', (_, chapterId, orderedIds) => storyStructureService.reorderChapterSegments(chapterId, orderedIds))
+  ipcMain.handle('structure:compileChapter', (_, chapterId) => storyStructureService.compileChapterFromSegments(chapterId))
+  ipcMain.handle('structure:refreshCheckpoints', (_, novelId) => storyMemoryService.refreshStoryMemoryCheckpoints(novelId))
 
   ipcMain.handle('chapter:list', (_, novelId) => chapterService.listChapters(novelId))
   ipcMain.handle('chapter:get', (_, id) => chapterService.getChapter(id))
@@ -188,9 +223,17 @@ function registerIpcHandlers() {
     chapterService.generateChapterSummary(chapterId))
   ipcMain.handle('chapter:aiCheck', (_, chapterId) =>
     chapterService.aiCheckChapter(chapterId))
+  ipcMain.handle('chapter:runPublishCheck', (_, chapterId) =>
+    chapterService.runChapterPublishCheck(chapterId))
 
   ipcMain.handle('character:list', (_, novelId) => characterService.listCharacters(novelId))
+  ipcMain.handle('character:query', (_, filters) => characterService.queryCharacters(filters))
+  ipcMain.handle('character:getStats', (_, filters) => characterService.getCharacterStats(filters))
+  ipcMain.handle('character:getFilterOptions', (_, novelId) => characterService.getCharacterFilterOptions(novelId))
   ipcMain.handle('character:get', (_, id) => characterService.getCharacter(id))
+  ipcMain.handle('character:search', (_, novelId, keyword, limit) => characterService.searchCharacters(novelId, keyword, limit))
+  ipcMain.handle('character:getGraph', (_, filters) => characterService.getCharacterGraph(filters))
+  ipcMain.handle('character:getDetailContext', (_, characterId) => characterService.getCharacterDetailContext(characterId))
   ipcMain.handle('character:create', (_, novelId, data) => characterService.createCharacter(novelId, data))
   ipcMain.handle('character:update', (_, id, data) => characterService.updateCharacter(id, data))
   ipcMain.handle('character:delete', (_, id) => characterService.deleteCharacter(id))
@@ -206,6 +249,10 @@ function registerIpcHandlers() {
   ipcMain.handle('character:clear', (_, novelId) => characterService.clearCharactersByNovel(novelId))
 
   ipcMain.handle('map:getTree', (_, novelId) => mapService.getMapTree(novelId))
+  ipcMain.handle('map:queryNodes', (_, filters) => mapService.queryMapNodes(filters))
+  ipcMain.handle('map:getStats', (_, novelId) => mapService.getMapStats(novelId))
+  ipcMain.handle('map:getNode', (_, id) => mapService.getMapNode(id))
+  ipcMain.handle('map:searchNodes', (_, novelId, keyword, limit) => mapService.searchMapNodes(novelId, keyword, limit))
   ipcMain.handle('map:create', (_, novelId, data) => mapService.createMapItem(novelId, data))
   ipcMain.handle('map:update', (_, id, data) => mapService.updateMapItem(id, data))
   ipcMain.handle('map:delete', (_, id) => mapService.deleteMapItem(id))
@@ -214,6 +261,10 @@ function registerIpcHandlers() {
   ipcMain.handle('map:clear', (_, novelId) => mapService.clearMapByNovel(novelId))
 
   ipcMain.handle('timeline:list', (_, novelId) => timelineService.listTimelineEvents(novelId))
+  ipcMain.handle('timeline:query', (_, filters) => timelineService.queryTimelineEvents(filters))
+  ipcMain.handle('timeline:search', (_, novelId, keyword, limit) => timelineService.searchTimelineEvents(novelId, keyword, limit))
+  ipcMain.handle('timeline:getStats', (_, filters) => timelineService.getTimelineStats(filters))
+  ipcMain.handle('timeline:getFilterOptions', (_, novelId) => timelineService.getTimelineFilterOptions(novelId))
   ipcMain.handle('timeline:get', (_, id) => timelineService.getTimelineEvent(id))
   ipcMain.handle('timeline:create', (_, novelId, data) => timelineService.createTimelineEvent(novelId, data))
   ipcMain.handle('timeline:update', (_, id, data) => timelineService.updateTimelineEvent(id, data))
@@ -223,7 +274,11 @@ function registerIpcHandlers() {
   ipcMain.handle('timeline:clear', (_, novelId) => timelineService.clearTimelineByNovel(novelId))
 
   ipcMain.handle('item:list', (_, novelId) => itemService.listStoryItems(novelId))
+  ipcMain.handle('item:query', (_, filters) => itemService.queryStoryItems(filters))
+  ipcMain.handle('item:getStats', (_, filters) => itemService.getStoryItemStats(filters))
+  ipcMain.handle('item:getFilterOptions', (_, novelId) => itemService.getStoryItemFilterOptions(novelId))
   ipcMain.handle('item:get', (_, id) => itemService.getStoryItem(id))
+  ipcMain.handle('item:search', (_, novelId, keyword, itemKind, limit) => itemService.searchStoryItems(novelId, keyword, itemKind, limit))
   ipcMain.handle('item:create', (_, novelId, data) => itemService.createStoryItem(novelId, data))
   ipcMain.handle('item:update', (_, id, data) => itemService.updateStoryItem(id, data))
   ipcMain.handle('item:delete', (_, id) => itemService.deleteStoryItem(id))
@@ -238,17 +293,26 @@ function registerIpcHandlers() {
   ipcMain.handle('outline:createArc', (_, novelId, data) => {
     const db = getDb()
     const result = db.insert(storyArcs).values({ novelId, ...data }).run()
+    markNovelContextChanged(novelId, 'Story outline changed')
     return Number(result.lastInsertRowid)
   })
 
   ipcMain.handle('outline:updateArc', (_, id, data) => {
     const db = getDb()
+    const current = db.select().from(storyArcs).where(eq(storyArcs.id, id)).all()[0]
     db.update(storyArcs).set(data).where(eq(storyArcs.id, id)).run()
+    if (current) {
+      markNovelContextChanged(current.novelId, 'Story outline changed')
+    }
   })
 
   ipcMain.handle('outline:deleteArc', (_, id) => {
     const db = getDb()
+    const current = db.select().from(storyArcs).where(eq(storyArcs.id, id)).all()[0]
     db.delete(storyArcs).where(eq(storyArcs.id, id)).run()
+    if (current) {
+      markNovelContextChanged(current.novelId, 'Story outline changed')
+    }
   })
 
   ipcMain.handle('outline:clear', (_, novelId) => {
@@ -260,6 +324,7 @@ function registerIpcHandlers() {
       emotionTone: null,
       updatedAt: new Date().toISOString(),
     }).where(eq(chapters.novelId, novelId)).run()
+    markNovelContextChanged(novelId, 'Story outline changed')
   })
 
   ipcMain.handle('outline:generateArcs', async (_, novelId) => {
@@ -292,10 +357,17 @@ function registerIpcHandlers() {
     })
 
     const arcs = safeParseJson<Record<string, unknown>[]>(result)
+    db.delete(storyArcs).where(eq(storyArcs.novelId, novelId)).run()
+    db.update(chapters).set({
+      arcId: null,
+      outline: null,
+      emotionTone: null,
+      updatedAt: new Date().toISOString(),
+    }).where(eq(chapters.novelId, novelId)).run()
     for (const [index, arc] of arcs.entries()) {
       db.insert(storyArcs).values({
         novelId,
-        arcName: typeof arc.arc_name === 'string' ? arc.arc_name : typeof arc.name === 'string' ? arc.name : `故事弧${index + 1}`,
+        arcName: typeof arc.arc_name === 'string' ? arc.arc_name : typeof arc.name === 'string' ? arc.name : `鏁呬簨寮?{index + 1}`,
         arcOrder: typeof arc.order === 'number' ? arc.order : index + 1,
         chapterStart: typeof arc.chapter_start === 'number' ? arc.chapter_start : null,
         chapterEnd: typeof arc.chapter_end === 'number' ? arc.chapter_end : null,
@@ -304,13 +376,14 @@ function registerIpcHandlers() {
       }).run()
     }
 
+    markNovelContextChanged(novelId, 'Story outline changed')
     return arcs
   })
 
   ipcMain.handle('outline:generateChapterOutlines', async (_, arcId, options?: { batchSize?: number }) => {
     const db = getDb()
     const arc = db.select().from(storyArcs).where(eq(storyArcs.id, arcId)).all()[0]
-    if (!arc) throw new Error('故事弧不存在')
+    if (!arc) throw new Error('鏁呬簨寮т笉瀛樺湪')
 
     const novel = db.select().from(novelsTable).where(eq(novelsTable.id, arc.novelId)).all()[0]
     if (!novel) throw new Error('小说不存在')
@@ -395,7 +468,7 @@ function registerIpcHandlers() {
 
       const existing = chapterRows.find((chapter) => chapter.chapterNum === chapterNum)
       const outlineText = formatGeneratedOutline(outline)
-      const title = typeof outline.title === 'string' ? outline.title : '第' + chapterNum + '章'
+      const title = typeof outline.title === 'string' ? outline.title : `第${chapterNum}章`
       const emotionTone = typeof outline.emotion_tone === 'string' ? outline.emotion_tone : ''
 
       if (existing) {
@@ -415,6 +488,8 @@ function registerIpcHandlers() {
           arcId,
           status: 'outline',
           targetWords: 3000,
+          contextVersion: novel.contextVersion || 1,
+          staleReasonJson: JSON.stringify([]),
         }).run()
       }
       generatedCount += 1
@@ -430,14 +505,18 @@ function registerIpcHandlers() {
     const completed = Array.from({ length: chapterEnd - chapterStart + 1 }, (_, index) => chapterStart + index)
       .every((chapterNum) => refreshedOutlinedNums.has(chapterNum))
 
+    if (generatedCount > 0) {
+      markNovelContextChanged(arc.novelId, 'Chapter outlines changed')
+    }
+
     return {
       generatedCount,
       completed,
       batchStart,
       batchEnd,
       message: completed
-        ? '第' + batchStart + '至第' + batchEnd + '章细纲已生成，当前故事弧已补齐。'
-        : '第' + batchStart + '至第' + batchEnd + '章细纲已生成，可继续生成下一批。',
+        ? `第${batchStart}至第${batchEnd}章细纲已生成，当前故事弧已补齐。`
+        : `第${batchStart}至第${batchEnd}章细纲已生成，可继续生成下一批。`,
     }
   })
 
@@ -501,9 +580,13 @@ function registerIpcHandlers() {
   ipcMain.handle('template:delete', (_, id) => {
     const db = getDb()
     const template = db.select().from(templates).where(eq(templates.id, id)).all()[0]
-    if (template?.isBuiltin) throw new Error('内置模板不可删除')
+    if (template?.isBuiltin) throw new Error('鍐呯疆妯℃澘涓嶅彲鍒犻櫎')
     db.delete(templates).where(eq(templates.id, id)).run()
   })
+
+  ipcMain.handle('prompt:list', () => promptOverrideService.listPromptOverrides())
+  ipcMain.handle('prompt:save', (_, key, content) => promptOverrideService.savePromptOverride(key, content))
+  ipcMain.handle('prompt:delete', (_, key) => promptOverrideService.deletePromptOverride(key))
 
   ipcMain.handle('task:list', (_, novelId) => {
     const db = getDb()
@@ -545,7 +628,7 @@ function registerIpcHandlers() {
     const genreRows = input.genreId
       ? db.select().from(genresTable).where(eq(genresTable.id, input.genreId)).all()
       : []
-    const genre = genreRows[0]?.name || '未知题材'
+    const genre = genreRows[0]?.name || '鏈煡棰樻潗'
 
     let worldTemplateSummary = ''
     if (input.worldTemplateId) {
@@ -555,6 +638,7 @@ function registerIpcHandlers() {
 
     const result = await taskService.runChatTask({
       type: 'init',
+      retryable: true,
       messages: [{
         role: 'user',
         content: expandBackgroundPrompt({
@@ -571,6 +655,8 @@ function registerIpcHandlers() {
 
   ipcMain.handle('ai:generateCoreSettings', (event, data: CoreSettingsGenerationRequest) =>
     coreSettingsService.generateCoreSettings(data, event.sender))
+  ipcMain.handle('ai:generatePremise', (event, data: PremiseGenerationRequest) =>
+    premiseService.generatePremise(data, event.sender))
   ipcMain.handle('ai:generateWorldRules', (event, data: WorldRulesGenerationRequest) =>
     worldRulesService.generateWorldRules(data, event.sender))
 
@@ -587,6 +673,7 @@ function registerIpcHandlers() {
   }) => {
     const result = await taskService.runChatTask({
       type: 'review',
+      retryable: true,
       messages: [{
         role: 'user',
         content: rewriteParagraphPrompt({
@@ -614,6 +701,7 @@ function registerIpcHandlers() {
     const results = Array.from({ length: count }, () =>
       taskService.runChatTask({
         type: 'review',
+        retryable: true,
         messages: data.messages,
         modelConfigId: data.modelConfigId,
       }),
@@ -630,6 +718,7 @@ function registerIpcHandlers() {
   }) => {
     const result = await taskService.runChatTask({
       type: 'review',
+      retryable: true,
       messages: [{
         role: 'user',
         content: contentScoringPrompt(data),
@@ -640,3 +729,5 @@ function registerIpcHandlers() {
     return safeParseJson(result)
   })
 }
+
+

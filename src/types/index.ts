@@ -1,4 +1,4 @@
-import type {
+﻿import type {
   SubPlotDraft,
   SubplotGenerationRequest,
   SubplotGenerationResult,
@@ -8,6 +8,11 @@ import type {
   CoreSettingsGenerationRequest,
   CoreSettingsGenerationResult,
 } from '../shared/core-settings-generation'
+import type {
+  PremiseGenerationProgressEvent,
+  PremiseGenerationRequest,
+  PremiseGenerationResult,
+} from '../shared/premise-generation'
 import type {
   WorldRulesGenerationProgressEvent,
   WorldRulesGenerationRequest,
@@ -19,6 +24,11 @@ export type {
   CoreSettingsGenerationRequest,
   CoreSettingsGenerationResult,
 } from '../shared/core-settings-generation'
+export type {
+  PremiseGenerationProgressEvent,
+  PremiseGenerationRequest,
+  PremiseGenerationResult,
+} from '../shared/premise-generation'
 export type {
   WorldRulesGenerationProgressEvent,
   WorldRulesGenerationRequest,
@@ -42,6 +52,7 @@ export interface Novel {
   worldRulesJson?: string
   styleTemplateId?: number
   worldTemplateId?: number
+  contextVersion?: number
   modelConfigId?: number
   createdAt: string
   updatedAt: string
@@ -50,6 +61,8 @@ export interface Novel {
 export interface Chapter {
   id: number
   novelId: number
+  volumeId?: number
+  partId?: number
   chapterNum: number
   title?: string
   outline?: string
@@ -65,6 +78,10 @@ export interface Chapter {
   arcId?: number
   targetWords: number
   emotionTone?: string
+  compiledFromSegments?: number
+  segmentCount?: number
+  contextVersion?: number
+  staleReasonJson?: string
   createdAt: string
   updatedAt: string
 }
@@ -124,6 +141,48 @@ export interface CharacterRelation {
   description?: string
 }
 
+export interface CharacterQueryInput {
+  novelId: number
+  roleType?: Character['roleType']
+  entityType?: string
+  species?: string
+  keyword?: string
+  page?: number
+  pageSize?: number
+}
+
+export interface CharacterStats {
+  total: number
+  protagonistCount: number
+  majorCount: number
+  antagonistCount: number
+  relationCount: number
+  speciesCount: number
+}
+
+export interface CharacterFilterOptions {
+  species: string[]
+  entityTypes: string[]
+}
+
+export interface CharacterGraphQueryInput {
+  novelId: number
+  characterIds?: number[]
+  focusCharacterId?: number
+  limit?: number
+}
+
+export interface CharacterGraphPayload {
+  characters: Character[]
+  relations: CharacterRelation[]
+}
+
+export interface CharacterDetailContext {
+  relatedItems: StoryItem[]
+  relatedCharacters: Character[]
+  relatedRelations: CharacterRelation[]
+}
+
 export interface WorldMapItem {
   id: number
   novelId: number
@@ -142,6 +201,44 @@ export interface WorldMapItem {
   dangerLevel?: string
   sortOrder: number
   children?: WorldMapItem[]
+}
+
+export interface MapNodeSummary {
+  id: number
+  novelId: number
+  level: number
+  parentId?: number
+  name: string
+  locationType?: string
+  nodeType?: string
+  structureRole?: string
+  parentRuleType?: string
+  description?: string
+  atmosphere?: string
+  plotRelevance?: string
+  tagsJson?: string
+  affiliatedFactionIdsJson?: string
+  dangerLevel?: string
+  sortOrder: number
+  childCount: number
+}
+
+export interface MapQueryInput {
+  novelId: number
+  parentId?: number | null
+  level?: number
+  keyword?: string
+  page?: number
+  pageSize?: number
+}
+
+export interface MapStats {
+  total: number
+  rootCount: number
+  secondLevelCount: number
+  leafCount: number
+  maxDepth: number
+  countsByLevel: Array<{ level: number; count: number }>
 }
 
 export interface MapBatchGenerateOptions {
@@ -175,8 +272,11 @@ export interface TimelineEvent {
   isMajorEvent: number
   eventType?: string
   arcId?: number
+  volumeId?: number
+  partId?: number
   chapterStartId?: number
   chapterEndId?: number
+  segmentId?: number
   locationMapId?: number
   presentCharacterIdsJson?: string
   affectedCharacterIdsJson?: string
@@ -189,6 +289,7 @@ export interface TimelineEvent {
   directConsequencesJson?: string
   openThreadsJson?: string
   notes?: string
+  anchorInvalid?: number
   status: 'planned' | 'seeded' | 'written' | 'resolved'
   createdAt: string
   updatedAt: string
@@ -261,8 +362,67 @@ export interface Task {
   errorMessage?: string
   relatedEntityType?: string
   relatedEntityId?: number
+  runnerType?: 'chat' | 'stream'
+  retryable?: number
   createdAt: string
   updatedAt: string
+}
+
+export interface StoryItemQueryInput {
+  novelId: number
+  itemKind?: StoryItem['itemKind']
+  category?: string
+  status?: StoryItem['status']
+  keyword?: string
+  page?: number
+  pageSize?: number
+}
+
+export interface StoryItemStats {
+  total: number
+  templateCount: number
+  instanceCount: number
+  linkedEventCount: number
+  categoryCount: number
+}
+
+export interface StoryItemFilterOptions {
+  categories: string[]
+  rarities: string[]
+}
+
+export interface PromptOverride {
+  key: string
+  content: string
+  updatedAt: string
+}
+
+export interface NovelContextStatus {
+  novelId: number
+  contextVersion: number
+  totalChapterCount: number
+  staleChapterCount: number
+  staleChapterIds: number[]
+}
+
+export interface ChapterPublishCheckItem {
+  key: string
+  label: string
+  status: 'pass' | 'warning' | 'blocker'
+  detail: string
+}
+
+export interface ChapterPublishCheck {
+  chapterId: number
+  chapterNum: number
+  ready: boolean
+  summary: string
+  blockerCount: number
+  warningCount: number
+  staleReasons: string[]
+  chapterContextVersion: number
+  novelContextVersion: number
+  checklist: ChapterPublishCheckItem[]
 }
 
 export interface Genre {
@@ -282,6 +442,190 @@ export interface StoryArc {
   chapterEnd?: number
   arcGoal?: string
   arcSummary?: string
+}
+
+export interface StoryVolume {
+  id: number
+  novelId: number
+  volumeNumber: number
+  title?: string
+  summary?: string
+  targetWords: number
+  status: 'planning' | 'draft' | 'locked'
+  createdAt: string
+  updatedAt: string
+}
+
+export interface StoryPart {
+  id: number
+  novelId: number
+  volumeId: number
+  partNumber: number
+  title?: string
+  summary?: string
+  targetWords: number
+  status: 'planning' | 'draft' | 'locked'
+  startChapterNum?: number
+  endChapterNum?: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ChapterSegment {
+  id: number
+  novelId: number
+  chapterId: number
+  volumeId?: number
+  partId?: number
+  segmentOrder: number
+  title?: string
+  segmentType?: string
+  purpose?: string
+  timeAnchor?: string
+  locationName?: string
+  presentCharacterIdsJson?: string
+  linkedItemIdsJson?: string
+  inputState?: string
+  outputState?: string
+  summary?: string
+  content?: string
+  riskTagsJson?: string
+  status?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface StoryMemoryCheckpoint {
+  id: number
+  novelId: number
+  scopeType: 'novel' | 'volume' | 'part'
+  scopeId?: number
+  label?: string
+  summary?: string
+  resolvedThreadsJson?: string
+  activeThreadsJson?: string
+  characterStateDigest?: string
+  relationDigest?: string
+  itemDigest?: string
+  timelineDigest?: string
+  forbiddenDirectionsJson?: string
+  styleGuard?: string
+  sourceRangeStart?: number
+  sourceRangeEnd?: number
+  version: number
+  stale: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface StoryStructureChapterView extends Chapter {
+  segments: ChapterSegment[]
+}
+
+export interface StoryStructurePartView extends StoryPart {
+  chapters: StoryStructureChapterView[]
+  wordCount: number
+  segmentCount: number
+}
+
+export interface StoryStructureVolumeView extends StoryVolume {
+  parts: StoryStructurePartView[]
+  wordCount: number
+  chapterCount: number
+  segmentCount: number
+}
+
+export interface StoryStructureTree {
+  novelId: number
+  volumes: StoryStructureVolumeView[]
+}
+
+export interface PagedResult<T> {
+  items: T[]
+  page: number
+  pageSize: number
+  total: number
+  hasMore: boolean
+}
+
+export interface StoryStructureVolumeSummary extends StoryVolume {
+  wordCount: number
+  chapterCount: number
+  segmentCount: number
+  partCount: number
+  linkedTimelineEventCount: number
+}
+
+export interface StoryStructurePartSummary extends StoryPart {
+  wordCount: number
+  chapterCount: number
+  segmentCount: number
+  linkedTimelineEventCount: number
+}
+
+export interface StoryStructureChapterSummary extends Chapter {
+  linkedTimelineEventCount: number
+}
+
+export interface StoryStructureSegmentSummary extends ChapterSegment {
+  linkedTimelineEventCount: number
+}
+
+export interface StoryCheckpointListFilters {
+  novelId: number
+  scopeType?: 'novel' | 'volume' | 'part'
+  scopeId?: number
+}
+
+export interface StructurePathResolution {
+  novelId: number
+  volumeId: number | null
+  volumeIndex: number
+  partId: number | null
+  partPage: number
+  partPageSize: number
+  chapterId: number | null
+  chapterPage: number
+  chapterPageSize: number
+  segmentId: number | null
+  segmentPage: number
+  segmentPageSize: number
+  resolvedLevel: 'novel' | 'volume' | 'part' | 'chapter' | 'segment'
+}
+
+export interface StoryPartReorderOperation {
+  id: number
+  volumeId: number
+  partNumber: number
+}
+
+export interface TimelineAnchorFilters {
+  novelId: number
+  volumeId?: number
+  partId?: number
+  chapterId?: number
+  segmentId?: number
+}
+
+export interface TimelineQueryInput extends TimelineAnchorFilters {
+  status?: TimelineEvent['status']
+  eventType?: string
+  keyword?: string
+  page?: number
+  pageSize?: number
+  sortBy?: 'timeSortValue' | 'createdAt'
+  sortDirection?: 'asc' | 'desc'
+}
+
+export interface TimelineStats {
+  total: number
+  majorCount: number
+  resolvedCount: number
+  openThreadCount: number
+}
+
+export interface TimelineFilterOptions {
+  eventTypes: string[]
 }
 
 export interface OutlineChapterBatchGenerateOptions {
@@ -333,6 +677,9 @@ export interface StoryMemorySnapshot {
   generatedAt: string
   chapterCount: number
   lastChapterNum: number
+  memoryMode: 'standard' | 'longform' | 'epic'
+  coverageSummary: string
+  phaseDigest: string[]
   plotMilestones: string[]
   arcSignals: string[]
   characterLedger: string[]
@@ -345,7 +692,7 @@ export interface StoryMemorySnapshot {
 
 export type SubPlot = SubPlotDraft
 
-// AI 评分结果类型
+// AI 璇勫垎缁撴灉绫诲瀷
 export interface AIScoreDimension {
   name: string
   score: number
@@ -356,13 +703,13 @@ export interface AIScoreDimension {
 export interface AIScoreResult {
   dimensions: AIScoreDimension[]
   ai_like_rate: number
-  repetition_risk: '低' | '中' | '高'
+  repetition_risk: '浣? | '涓? | '楂?
   overall_score: number
   overall_feedback: string
   top_fixes: string[]
 }
 
-// 扩展 window 类型
+// 鎵╁睍 window 绫诲瀷
 declare global {
   interface Window {
     electron: {
@@ -376,6 +723,37 @@ declare global {
         stats: (id: number) => Promise<{ totalChapters: number; completedChapters: number; totalWords: number; characterCount: number }>
         runConsistencyCheck: (id: number) => Promise<NovelConsistencyReport>
         getStoryMemory: (id: number) => Promise<StoryMemorySnapshot>
+        getContextStatus: (id: number) => Promise<NovelContextStatus>
+      }
+      structure: {
+        getTree: (novelId: number) => Promise<StoryStructureTree>
+        listVolumes: (novelId: number) => Promise<StoryStructureVolumeSummary[]>
+        listPartsPage: (volumeId: number, page?: number, pageSize?: number) => Promise<PagedResult<StoryStructurePartSummary>>
+        listChaptersPage: (partId: number, page?: number, pageSize?: number) => Promise<PagedResult<StoryStructureChapterSummary>>
+        listSegments: (chapterId: number) => Promise<ChapterSegment[]>
+        getSegment: (id: number) => Promise<ChapterSegment | null>
+        listSegmentsPage: (chapterId: number, page?: number, pageSize?: number) => Promise<PagedResult<StoryStructureSegmentSummary>>
+        listCheckpoints: (novelId: number) => Promise<StoryMemoryCheckpoint[]>
+        listCheckpointsPage: (filters: StoryCheckpointListFilters, page?: number, pageSize?: number) => Promise<PagedResult<StoryMemoryCheckpoint>>
+        listLinkedTimelineEvents: (filters: TimelineAnchorFilters) => Promise<TimelineEvent[]>
+        listLinkedTimelineEventsPage: (filters: TimelineAnchorFilters, page?: number, pageSize?: number) => Promise<PagedResult<TimelineEvent>>
+        resolvePath: (filters: TimelineAnchorFilters) => Promise<StructurePathResolution>
+        createVolume: (novelId: number, data: Partial<StoryVolume>) => Promise<number>
+        updateVolume: (id: number, data: Partial<StoryVolume>) => Promise<void>
+        deleteVolume: (id: number) => Promise<void>
+        reorderVolumes: (novelId: number, orderedIds: number[]) => Promise<void>
+        createPart: (volumeId: number, data: Partial<StoryPart>) => Promise<number>
+        updatePart: (id: number, data: Partial<StoryPart>) => Promise<void>
+        deletePart: (id: number) => Promise<void>
+        reorderParts: (novelId: number, operations: StoryPartReorderOperation[]) => Promise<void>
+        reorderPartsInVolume: (volumeId: number, orderedIds: number[]) => Promise<void>
+        assignChapter: (chapterId: number, partId: number) => Promise<void>
+        createSegment: (chapterId: number, data: Partial<ChapterSegment>) => Promise<number>
+        updateSegment: (id: number, data: Partial<ChapterSegment>) => Promise<void>
+        deleteSegment: (id: number) => Promise<void>
+        reorderSegments: (chapterId: number, orderedIds: number[]) => Promise<void>
+        compileChapter: (chapterId: number) => Promise<Chapter | null>
+        refreshCheckpoints: (novelId: number) => Promise<StoryMemoryCheckpoint[]>
       }
       chapter: {
         list: (novelId: number) => Promise<Chapter[]>
@@ -386,10 +764,17 @@ declare global {
         generateContent: (chapterId: number) => Promise<number>
         generateSummary: (chapterId: number) => Promise<void>
         aiCheck: (chapterId: number) => Promise<unknown>
+        runPublishCheck: (chapterId: number) => Promise<ChapterPublishCheck>
       }
       character: {
         list: (novelId: number) => Promise<Character[]>
+        query: (filters: CharacterQueryInput) => Promise<PagedResult<Character>>
+        getStats: (filters: CharacterQueryInput) => Promise<CharacterStats>
+        getFilterOptions: (novelId: number) => Promise<CharacterFilterOptions>
         get: (id: number) => Promise<Character | null>
+        search: (novelId: number, keyword?: string, limit?: number) => Promise<Character[]>
+        getGraph: (filters: CharacterGraphQueryInput) => Promise<CharacterGraphPayload>
+        getDetailContext: (characterId: number) => Promise<CharacterDetailContext>
         create: (novelId: number, data: Partial<Character>) => Promise<number>
         update: (id: number, data: Partial<Character>) => Promise<void>
         delete: (id: number) => Promise<void>
@@ -403,6 +788,10 @@ declare global {
       }
       map: {
         getTree: (novelId: number) => Promise<WorldMapItem[]>
+        queryNodes: (filters: MapQueryInput) => Promise<PagedResult<MapNodeSummary>>
+        getStats: (novelId: number) => Promise<MapStats>
+        getNode: (id: number) => Promise<MapNodeSummary | null>
+        searchNodes: (novelId: number, keyword?: string, limit?: number) => Promise<MapNodeSummary[]>
         create: (novelId: number, data: unknown) => Promise<number>
         update: (id: number, data: unknown) => Promise<void>
         delete: (id: number) => Promise<void>
@@ -411,6 +800,10 @@ declare global {
       }
       timeline: {
         list: (novelId: number) => Promise<TimelineEvent[]>
+        query: (filters: TimelineQueryInput) => Promise<PagedResult<TimelineEvent>>
+        search: (novelId: number, keyword?: string, limit?: number) => Promise<TimelineEvent[]>
+        getStats: (filters: { novelId: number; status?: TimelineEvent['status']; eventType?: string; volumeId?: number; partId?: number; chapterId?: number; segmentId?: number }) => Promise<TimelineStats>
+        getFilterOptions: (novelId: number) => Promise<TimelineFilterOptions>
         get: (id: number) => Promise<TimelineEvent | null>
         create: (novelId: number, data: Partial<TimelineEvent>) => Promise<number>
         update: (id: number, data: Partial<TimelineEvent>) => Promise<void>
@@ -420,7 +813,11 @@ declare global {
       }
       item: {
         list: (novelId: number) => Promise<StoryItem[]>
+        query: (filters: StoryItemQueryInput) => Promise<PagedResult<StoryItem>>
+        getStats: (filters: StoryItemQueryInput) => Promise<StoryItemStats>
+        getFilterOptions: (novelId: number) => Promise<StoryItemFilterOptions>
         get: (id: number) => Promise<StoryItem | null>
+        search: (novelId: number, keyword?: string, itemKind?: StoryItem['itemKind'], limit?: number) => Promise<StoryItem[]>
         create: (novelId: number, data: Partial<StoryItem>) => Promise<number>
         update: (id: number, data: Partial<StoryItem>) => Promise<void>
         delete: (id: number) => Promise<void>
@@ -450,6 +847,11 @@ declare global {
         update: (id: number, data: Partial<Template>) => Promise<void>
         delete: (id: number) => Promise<void>
       }
+      prompt: {
+        list: () => Promise<PromptOverride[]>
+        save: (key: string, content: string) => Promise<void>
+        delete: (key: string) => Promise<void>
+      }
       task: {
         list: (novelId?: number) => Promise<Task[]>
         get: (id: number) => Promise<Task | null>
@@ -459,6 +861,7 @@ declare global {
       ai: {
         expandBackground: (input: unknown) => Promise<{ expanded_background: string; titles: string[]; synopsis: string }>
         generateCoreSettings: (data: CoreSettingsGenerationRequest) => Promise<CoreSettingsGenerationResult>
+        generatePremise: (data: PremiseGenerationRequest) => Promise<PremiseGenerationResult>
         generateWorldRules: (data: WorldRulesGenerationRequest) => Promise<WorldRulesGenerationResult>
         generateCharacter: (novelId: number, opts: unknown) => Promise<number>
         generateRelations: (novelId: number) => Promise<void>
@@ -478,3 +881,4 @@ declare global {
     }
   }
 }
+
