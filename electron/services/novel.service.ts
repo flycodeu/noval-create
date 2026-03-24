@@ -1,12 +1,13 @@
-import { desc, eq } from 'drizzle-orm'
-import { getBuiltinGenreRules, normalizeWorldRules, stringifyWorldRules } from '../../src/shared/genre-system'
+﻿import { desc, eq } from 'drizzle-orm'
+import { getBuiltinGenreRules, stringifyWorldRules } from '../../src/shared/genre-system'
+import { normalizeWorldRulesDraft, stringifyWorldRulesDraft } from '../../src/shared/world-rules-draft'
 import { getDb } from '../database/db'
 import { chapters, characters, genres, novels } from '../database/schema'
 import { getNovelContextStatus, markNovelContextChanged } from './context-impact.service'
 
 function normalizeWorldRulesJson(raw: string, genreName?: string) {
   try {
-    return stringifyWorldRules(normalizeWorldRules(JSON.parse(raw) as unknown, genreName))
+    return stringifyWorldRulesDraft(normalizeWorldRulesDraft(JSON.parse(raw) as unknown, genreName))
   } catch {
     return raw
   }
@@ -227,3 +228,5 @@ export function getNovelStats(id: number) {
 }
 
 export { getNovelContextStatus }
+
+

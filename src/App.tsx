@@ -26,7 +26,14 @@ export default function App() {
     })
     const unsubComplete = window.electron.on('task:complete', (data: unknown) => {
       const { taskId, status } = data as { taskId: number; status: string }
-      completeStream(taskId, status === 'success' ? 'completed' : 'failed')
+      completeStream(
+        taskId,
+        status === 'success'
+          ? 'completed'
+          : status === 'cancelled'
+            ? 'cancelled'
+            : 'failed',
+      )
     })
     const unsubStatus = window.electron.on('task:status-change', (data: unknown) => {
       const { taskId, status } = data as { taskId: number; status: string }

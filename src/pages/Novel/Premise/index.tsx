@@ -18,6 +18,7 @@ import type {
   PremiseGenerationProgressEvent,
   PremiseGenerationResult,
 } from '../../../shared/premise-generation'
+import type { PremiseDraftRecord } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
 import {
   buildStorySettingsPayload,
@@ -58,6 +59,11 @@ interface PremiseFormValues {
   bannedTerms: string
 }
 
+type PremiseGenerationResultWithMeta = PremiseGenerationResult & {
+  missingFields?: string[]
+  draftTaskId?: number
+}
+
 const EMPTY_STATS = {
   mapCount: 0,
   characterCount: 0,
@@ -68,6 +74,21 @@ const EMPTY_STATS = {
   completedChapterCount: 0,
   totalWords: 0,
   hasProtagonist: false,
+}
+
+const PREMISE_FIELD_LABELS: Record<string, string> = {
+  positioning: '作品定位',
+  coreHook: '核心信息',
+  protagonistStart: '主角起点',
+  constraints: '底层约束',
+  languageGuardrails: '语言边界',
+  antiAiFlavor: '去 AI 腔规则',
+  commonSenseRules: '常识约束',
+  bannedTerms: '禁用表达',
+}
+
+function normalizeText(value?: string | null): string {
+  return value?.trim() || ''
 }
 
 function compactText(value?: string | null, max = 46): string {
@@ -81,9 +102,10 @@ function mergeGeneratedValues(
   result: PremiseGenerationResult,
   mode: PremiseGenerationMode,
 ): PremiseFormValues {
-  const pick = (existing: string, next: string) => {
-    if (mode === 'fill_blanks' && existing.trim()) return existing
-    return next
+  const pick = (existing?: string | null, next?: string | null) => {
+    const currentValue = normalizeText(existing)
+    if (mode === 'fill_blanks' && currentValue) return currentValue
+    return normalizeText(next)
   }
 
   return {
@@ -109,7 +131,7 @@ export default function PremisePage({ novelId }: Props) {
   const [stats, setStats] = useState(EMPTY_STATS)
   const aliveRef = useRef(true)
   const pendingResult = useAiResultStore(
-    (state) => state.results[pendingResultKey] as PendingAiResult<PremiseGenerationResult> | undefined,
+    (state) => state.results[pendingResultKey] as PendingAiResult<PremiseGenerationResultWithMeta> | undefined,
   )
   const setPendingResult = useAiResultStore((state) => state.setPendingResult)
   const markApplied = useAiResultStore((state) => state.markApplied)
@@ -174,6 +196,64 @@ export default function PremisePage({ novelId }: Props) {
     pendingResult?.result,
   ])
 
+  useEffect(() => {
+    if (pendingResult) return
+
+    let active = true
+    void window.electron.premiseDraft.getLatest(novelId).then((draft) => {
+      if (!active || !draft) return
+
+      const restored = draft as PremiseDraftRecord
+      setPendingResult({
+        key: pendingResultKey,
+        taskType: 'premise_generate',
+        novelId,
+        status: restored.status,
+        result: restored.result as PremiseGenerationResultWithMeta,
+        warnings: restored.warnings,
+        sourcePage: restored.sourcePage,
+        mode: restored.mode,
+        appliedMode: restored.appliedMode,
+        createdAt: restored.createdAt,
+        completedAt: restored.completedAt,
+        appliedAt: restored.appliedAt,
+      })
+    }).catch((error) => {
+      console.error(error)
+    })
+
+    return () => {
+      active = false
+    }
+  }, [novelId, pendingResult, pendingResultKey, setPendingResult])
+
+  const syncDraftApplied = async (
+    result: PremiseGenerationResultWithMeta | undefined,
+    mode: PremiseGenerationMode,
+  ) => {
+    if (!result?.draftTaskId) return
+
+    try {
+      await window.electron.premiseDraft.markApplied(result.draftTaskId, mode)
+    } catch (error) {
+      console.error(error)
+    }
+  }
+
+  const clearPersistedDrafts = async () => {
+    try {
+      await window.electron.premiseDraft.clearAll(novelId)
+    } catch (error) {
+      console.error(error)
+    }
+  }
+
+  const handleDiscardPendingResult = async () => {
+    await clearPersistedDrafts()
+    clearPendingResult(pendingResultKey)
+    message.info('已丢弃本轮 AI 结果记录。当前表单内容不会被回滚。')
+  }
+
   const formValues = (Form.useWatch([], form) as Partial<PremiseFormValues> | undefined) || {}
   const assetReadiness = [
     isWorldFoundationReady(currentNovel),
@@ -195,12 +275,15 @@ export default function PremisePage({ novelId }: Props) {
     formValues.bannedTerms,
   ].filter((value) => typeof value === 'string' && value.trim()).length
 
-  const applyPendingResult = (mode: PremiseGenerationMode) => {
+  const pendingMissingFields = pendingResult?.result.missingFields || []
+
+  const applyPendingResult = async (mode: PremiseGenerationMode) => {
     if (!pendingResult) return
 
     const currentValues = form.getFieldsValue()
     form.setFieldsValue(mergeGeneratedValues(currentValues, pendingResult.result, mode))
     markApplied(pendingResultKey, mode)
+    await syncDraftApplied(pendingResult.result, mode)
   }
 
   const handleSave = async () => {
@@ -210,16 +293,16 @@ export default function PremisePage({ novelId }: Props) {
     try {
       const payload = buildStorySettingsPayload({
         premise: {
-          positioning: values.positioning.trim(),
-          coreHook: values.coreHook.trim(),
-          protagonistStart: values.protagonistStart.trim(),
-          constraints: values.constraints.trim(),
-          languageGuardrails: values.languageGuardrails.trim(),
+          positioning: normalizeText(values.positioning),
+          coreHook: normalizeText(values.coreHook),
+          protagonistStart: normalizeText(values.protagonistStart),
+          constraints: normalizeText(values.constraints),
+          languageGuardrails: normalizeText(values.languageGuardrails),
         },
         writingRules: {
-          antiAiFlavor: values.antiAiFlavor.trim(),
-          commonSenseRules: values.commonSenseRules.trim(),
-          bannedTerms: values.bannedTerms.trim(),
+          antiAiFlavor: normalizeText(values.antiAiFlavor),
+          commonSenseRules: normalizeText(values.commonSenseRules),
+          bannedTerms: normalizeText(values.bannedTerms),
         },
       }, currentNovel?.settingsJson)
 
@@ -229,6 +312,7 @@ export default function PremisePage({ novelId }: Props) {
 
       const updated = await window.electron.novel.get(novelId)
       if (updated) setCurrentNovel(updated)
+      await clearPersistedDrafts()
       if (pendingResult?.appliedAt) {
         clearPendingResult(pendingResultKey)
       }
@@ -260,7 +344,7 @@ export default function PremisePage({ novelId }: Props) {
         status: 'pending',
         result,
         warnings: result.warnings,
-        sourcePage: 'core-settings',
+        sourcePage: 'premise',
         mode,
         createdAt: startedAt,
         completedAt: new Date().toISOString(),
@@ -270,6 +354,7 @@ export default function PremisePage({ novelId }: Props) {
         const currentValues = form.getFieldsValue()
         form.setFieldsValue(mergeGeneratedValues(currentValues, result, mode))
         markApplied(pendingResultKey, mode)
+        await syncDraftApplied(result as PremiseGenerationResultWithMeta, mode)
 
         if (result.warnings.length > 0) {
           message.warning(`AI 结果已填入表单，但仍有 ${result.warnings.length} 条提醒，请保存前复核。`)
@@ -436,9 +521,16 @@ export default function PremisePage({ novelId }: Props) {
                 {' '}
                 步
               </Tag>
+              {pendingMissingFields.length > 0 ? <Tag color="red">缺少 {pendingMissingFields.length} 项</Tag> : null}
               {pendingResult.warnings.length > 0 ? <Tag color="orange">{pendingResult.warnings.length} 条提醒</Tag> : <Tag color="blue">无额外提醒</Tag>}
             </Space>
           </div>
+
+          {pendingMissingFields.length > 0 ? (
+            <div className="premise-page__pending-warnings">
+              <div>{`以下基础设定字段仍为空：${pendingMissingFields.map((field) => PREMISE_FIELD_LABELS[field] || field).join('、')}`}</div>
+            </div>
+          ) : null}
 
           {pendingResult.warnings.length > 0 ? (
             <div className="premise-page__pending-warnings">
@@ -449,19 +541,16 @@ export default function PremisePage({ novelId }: Props) {
           ) : null}
 
           <div className="premise-page__pending-actions">
-            <Button type="primary" icon={<CheckCircleOutlined />} onClick={() => applyPendingResult('replace')}>
+            <Button type="primary" icon={<CheckCircleOutlined />} onClick={() => void applyPendingResult('replace')}>
               {pendingResult.appliedAt ? '重新应用全部' : '应用全部'}
             </Button>
-            <Button icon={<ReloadOutlined />} onClick={() => applyPendingResult('fill_blanks')}>
+            <Button icon={<ReloadOutlined />} onClick={() => void applyPendingResult('fill_blanks')}>
               只补空字段
             </Button>
             <Button
               danger
               icon={<DeleteOutlined />}
-              onClick={() => {
-                clearPendingResult(pendingResultKey)
-                message.info('已丢弃本轮 AI 结果记录。当前表单内容不会被回滚。')
-              }}
+              onClick={() => void handleDiscardPendingResult()}
             >
               丢弃结果
             </Button>

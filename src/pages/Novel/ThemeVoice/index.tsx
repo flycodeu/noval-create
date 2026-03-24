@@ -62,19 +62,23 @@ function isFilled(value?: string | null): boolean {
   return Boolean(value && value.trim())
 }
 
+function normalizeText(value?: string | null): string {
+  return value?.trim() || ''
+}
+
 function normalizeFormValues(values: ThemeVoiceFormValues): ThemeVoiceFormValues {
   return {
-    theme: values.theme.trim(),
-    motifs: values.motifs.trim(),
-    emotionalCore: values.emotionalCore.trim(),
+    theme: normalizeText(values.theme),
+    motifs: normalizeText(values.motifs),
+    emotionalCore: normalizeText(values.emotionalCore),
     pov: values.pov,
     tense: values.tense,
-    narratorDistance: values.narratorDistance.trim(),
-    voiceKeywords: values.voiceKeywords.trim(),
-    styleRules: values.styleRules.trim(),
-    dialogueRules: values.dialogueRules.trim(),
-    descriptionRules: values.descriptionRules.trim(),
-    forbiddenPhrases: values.forbiddenPhrases.trim(),
+    narratorDistance: normalizeText(values.narratorDistance),
+    voiceKeywords: normalizeText(values.voiceKeywords),
+    styleRules: normalizeText(values.styleRules),
+    dialogueRules: normalizeText(values.dialogueRules),
+    descriptionRules: normalizeText(values.descriptionRules),
+    forbiddenPhrases: normalizeText(values.forbiddenPhrases),
   }
 }
 
@@ -95,9 +99,10 @@ function mergeGeneratedValues(
   result: ThemeVoiceGenerationResult,
   mode: ThemeVoiceGenerationMode,
 ): ThemeVoiceFormValues {
-  const pick = (existing: string, next: string) => {
-    if (mode === 'fill_blanks' && existing.trim()) return existing
-    return next
+  const pick = (existing?: string | null, next?: string | null) => {
+    const currentValue = normalizeText(existing)
+    if (mode === 'fill_blanks' && currentValue) return currentValue
+    return normalizeText(next)
   }
 
   return {

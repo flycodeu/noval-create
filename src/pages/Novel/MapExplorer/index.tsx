@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Button, Form, Input, InputNumber, Modal, Pagination, Select, Space, Spin, Tag, message } from 'antd'
-import { ApartmentOutlined, DeleteOutlined, PlusOutlined, ReloadOutlined, SaveOutlined, ShareAltOutlined, UnorderedListOutlined } from '@ant-design/icons'
+import { Alert, Button, Form, Input, InputNumber, Modal, Pagination, Progress, Select, Space, Spin, Tag, message } from 'antd'
+import { ApartmentOutlined, DeleteOutlined, PlusOutlined, ReloadOutlined, SaveOutlined, ShareAltOutlined, StopOutlined, UnorderedListOutlined } from '@ant-design/icons'
 import ReactFlow, { Background, Controls, MarkerType, type Edge, type Node } from 'reactflow'
 import VirtualList from 'rc-virtual-list'
 import 'reactflow/dist/style.css'
 import AIGenerateButton from '../../../components/AIGenerateButton'
-import type { MapBatchGenerateOptions, MapBatchGenerationResult, MapNodeSummary, MapStats, PagedResult } from '../../../types'
+import type { MapAutoGenerateStatus, MapBatchGenerateOptions, MapBatchGenerationResult, MapNodeSummary, MapStats, PagedResult, Task } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
 import { getBlueprintLevelByDepth, getFactionNameOptions, getMapBlueprintDepth, getMapNodeTypeOptions, parseWorldRulesJson } from '../../../shared/genre-system'
 import { buildDraftMessages, normalizeStringArray, parseDraftJson } from '../shared/ai-draft'
@@ -29,6 +29,7 @@ interface DetailFormValues {
 const PAGE_SIZE = 20
 const EMPTY_PAGE: PagedResult<MapNodeSummary> = { items: [], page: 1, pageSize: PAGE_SIZE, total: 0, hasMore: false }
 const EMPTY_STATS: MapStats = { total: 0, rootCount: 0, secondLevelCount: 0, leafCount: 0, maxDepth: 0, countsByLevel: [] }
+const EMPTY_AUTO_STATUS: MapAutoGenerateStatus = { taskId: 0, novelId: 0, status: 'pending', currentStage: 'idle', targetDepth: null, currentParentName: '', generatedNodeCount: 0, processedParentCount: 0, pendingParentCount: 0, retryCount: 0, lastError: '', completed: false, message: '', currentBatchKey: '' }
 
 function parseStringArrayJson(raw?: string) {
   if (!raw) return []
@@ -52,6 +53,21 @@ function toFormValues(node: MapNodeSummary): DetailFormValues {
     dangerLevel: node.dangerLevel || '',
     tags: parseStringArrayJson(node.tagsJson),
     affiliatedFactions: parseStringArrayJson(node.affiliatedFactionIdsJson),
+  }
+}
+
+function buildGenerateOptions(
+  values: Record<string, unknown>,
+  blueprintLevels: Array<{ depth: number; suggestedCount: number }>,
+): MapBatchGenerateOptions {
+  return {
+    layerCounts: blueprintLevels.map((level) => ({
+      depth: level.depth,
+      count: Number(values[`layer_${level.depth}`] || level.suggestedCount),
+    })),
+    namedPlaces: typeof values.namedPlaces === 'string' ? values.namedPlaces : '',
+    parentBatchSize: Number(values.parentBatchSize || 1),
+    maxRetries: Number(values.maxRetries || 2),
   }
 }
 
@@ -90,6 +106,8 @@ export default function MapExplorer({ novelId }: Props) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [batchLoading, setBatchLoading] = useState(false)
+  const [autoLoading, setAutoLoading] = useState(false)
+  const [autoStopping, setAutoStopping] = useState(false)
   const [rootData, setRootData] = useState<PagedResult<MapNodeSummary>>(EMPTY_PAGE)
   const [branchData, setBranchData] = useState<PagedResult<MapNodeSummary>>(EMPTY_PAGE)
   const [stats, setStats] = useState<MapStats>(EMPTY_STATS)
@@ -100,6 +118,8 @@ export default function MapExplorer({ novelId }: Props) {
   const [searchKeyword, setSearchKeyword] = useState('')
   const [batchOpen, setBatchOpen] = useState(false)
   const [viewMode, setViewMode] = useState<'branch' | 'graph'>('branch')
+  const [autoTask, setAutoTask] = useState<Task | null>(null)
+  const [autoStatus, setAutoStatus] = useState<MapAutoGenerateStatus>(EMPTY_AUTO_STATUS)
 
   const worldRules = useMemo(() => parseWorldRulesJson(currentNovel?.worldRulesJson, currentNovel?.genreName), [currentNovel?.genreName, currentNovel?.worldRulesJson])
   const blueprintLevels = useMemo(() => [...worldRules.mapBlueprint.levels].sort((a, b) => a.depth - b.depth), [worldRules.mapBlueprint.levels])
@@ -119,23 +139,59 @@ export default function MapExplorer({ novelId }: Props) {
     setBranchData(await window.electron.map.queryNodes({ novelId, parentId: parent.id, page: targetPage, pageSize: PAGE_SIZE }))
   }, [branchPage, novelId])
   const loadStats = useCallback(async () => { setStats(await window.electron.map.getStats(novelId)) }, [novelId])
+  const loadAutoStatus = useCallback(async () => {
+    const latestTask = await window.electron.map.getLatestAutoGenerateTask(novelId)
+    setAutoTask(latestTask)
+    if (latestTask) {
+      setAutoStatus(await window.electron.map.getAutoGenerateStatus(latestTask.id) || EMPTY_AUTO_STATUS)
+      return latestTask
+    }
+    setAutoStatus(EMPTY_AUTO_STATUS)
+    return null
+  }, [novelId])
   const selectNode = useCallback((node: MapNodeSummary | null) => { setSelectedNode(node); if (node) detailForm.setFieldsValue(toFormValues(node)); else detailForm.resetFields() }, [detailForm])
 
   const refreshVisible = useCallback(async (preferredId?: number | null) => {
     setLoading(true)
     try {
-      await Promise.all([loadRoots(rootPage), loadBranch(currentParent, branchPage), loadStats()])
+      await Promise.all([loadRoots(rootPage), loadBranch(currentParent, branchPage), loadStats(), loadAutoStatus()])
       const nextSelected = preferredId ? await window.electron.map.getNode(preferredId) : selectedNode?.id ? await window.electron.map.getNode(selectedNode.id) : null
       if (nextSelected) selectNode(nextSelected)
       else { setSelectedNode(null); detailForm.resetFields() }
     } finally {
       setLoading(false)
     }
-  }, [branchPage, currentParent, detailForm, loadBranch, loadRoots, loadStats, rootPage, selectNode, selectedNode])
+  }, [branchPage, currentParent, detailForm, loadAutoStatus, loadBranch, loadRoots, loadStats, rootPage, selectNode, selectedNode])
 
   useEffect(() => { void refreshVisible(selectedNode?.id || null) }, [refreshVisible, rootPage, branchPage, selectedNode?.id])
   useEffect(() => { setRootPage(1) }, [searchKeyword])
-  useEffect(() => { const initialValues: Record<string, number> = { parentBatchSize: 1 }; blueprintLevels.forEach((level) => { initialValues[`layer_${level.depth}`] = level.suggestedCount }); batchForm.setFieldsValue(initialValues) }, [batchForm, blueprintLevels])
+  useEffect(() => { const initialValues: Record<string, number> = { parentBatchSize: 1, maxRetries: 2 }; blueprintLevels.forEach((level) => { initialValues[`layer_${level.depth}`] = level.suggestedCount }); batchForm.setFieldsValue(initialValues) }, [batchForm, blueprintLevels])
+  useEffect(() => {
+    if (!autoTask?.id) return
+    const reload = () => { void loadAutoStatus(); void loadStats() }
+    const unsubProgress = window.electron.on('task:progress', (data: unknown) => {
+      const payload = data as { taskId: number }
+      if (payload?.taskId === autoTask.id) reload()
+    })
+    const unsubStatus = window.electron.on('task:status-change', (data: unknown) => {
+      const payload = data as { taskId: number }
+      if (payload?.taskId === autoTask.id) reload()
+    })
+    const unsubComplete = window.electron.on('task:complete', (data: unknown) => {
+      const payload = data as { taskId: number }
+      if (payload?.taskId === autoTask.id) {
+        reload()
+        void refreshVisible(selectedNode?.id || null)
+      }
+    })
+    const timer = setInterval(reload, 5000)
+    return () => {
+      clearInterval(timer)
+      unsubProgress()
+      unsubStatus()
+      unsubComplete()
+    }
+  }, [autoTask?.id, loadAutoStatus, loadStats, refreshVisible, selectedNode?.id])
 
   const handleSelectRoot = async (node: MapNodeSummary) => { setBranchPath([node]); setBranchPage(1); selectNode(node); await loadBranch(node, 1) }
   const handleDive = async (node: MapNodeSummary) => { setBranchPath((current) => [...current, node]); setBranchPage(1); selectNode(node); await loadBranch(node, 1) }
@@ -146,6 +202,10 @@ export default function MapExplorer({ novelId }: Props) {
   const handleAddChild = async () => { if (!selectedNode) return; const nextLevel = selectedNode.level + 1; if (nextLevel > maxDepth) { message.warning('已经到当前蓝图的最深层。'); return } const levelRule = getBlueprintLevelByDepth(worldRules, nextLevel); const nextId = await window.electron.map.create(novelId, { level: nextLevel, parentId: selectedNode.id, name: levelRule?.examples?.[0] || `新${levelRule?.label || '节点'}`, nodeType: levelRule?.nodeTypes?.[0] || '地点', parentRuleType: selectedNode.nodeType || selectedNode.locationType || '', structureRole: levelRule?.relationHint || '' }); if (currentParent?.id !== selectedNode.id) { setBranchPath((current) => [...current, selectedNode]); setBranchPage(1); await loadBranch(selectedNode, 1) } await refreshVisible(nextId); message.success('子节点已创建。') }
   const handleClear = async () => { Modal.confirm({ title: '清空地图结构？', content: '会删除当前小说下全部地图节点。', okType: 'danger', okText: '确认清空', onOk: async () => { await window.electron.map.clear(novelId); setBranchPath([]); selectNode(null); setBranchData(EMPTY_PAGE); await refreshVisible(null); message.success('地图结构已清空。') } }) }
   const handleBatchGenerate = async () => { setBatchLoading(true); try { const values = batchForm.getFieldsValue(); const result = await window.electron.map.batchGenerate(novelId, { layerCounts: blueprintLevels.map((level) => ({ depth: level.depth, count: values[`layer_${level.depth}`] || level.suggestedCount })), namedPlaces: values.namedPlaces || '', parentBatchSize: values.parentBatchSize || 1 } as MapBatchGenerateOptions); await refreshVisible(selectedNode?.id || null); message.success((result as MapBatchGenerationResult).message || '地图结构已生成。'); if ((result as MapBatchGenerationResult).completed) setBatchOpen(false) } catch (error: unknown) { message.error(error instanceof Error ? error.message : '地图生成失败。') } finally { setBatchLoading(false) } }
+
+  const handleStartAutoGenerate = async () => { setAutoLoading(true); try { const values = batchForm.getFieldsValue(); await window.electron.map.startAutoGenerate(novelId, buildGenerateOptions(values, blueprintLevels)); await loadAutoStatus(); setBatchOpen(false); message.success('地图自动分批生成已启动。') } catch (error: unknown) { message.error(error instanceof Error ? error.message : '地图自动生成启动失败。') } finally { setAutoLoading(false) } }
+  const handleStopAutoGenerate = async () => { if (!autoTask?.id) return; setAutoStopping(true); try { await window.electron.workflow.cancel(autoTask.id); await loadAutoStatus(); message.info('已发送停止请求，当前批次结束后不会继续后续生成。') } finally { setAutoStopping(false) } }
+  const handleResumeAutoGenerate = async () => { if (!autoTask?.id) return; setAutoLoading(true); try { await window.electron.workflow.resume(autoTask.id); await loadAutoStatus(); message.success('地图自动生成已继续。') } catch (error: unknown) { message.error(error instanceof Error ? error.message : '地图自动生成继续失败。') } finally { setAutoLoading(false) } }
 
   const aiActions = selectedNode ? (
     <AIGenerateButton
@@ -200,6 +260,17 @@ export default function MapExplorer({ novelId }: Props) {
     />
   ) : null
 
+  const autoPercent = autoStatus
+    ? autoStatus.completed
+      ? 100
+      : autoStatus.pendingParentCount > 0
+        ? Math.max(5, Math.min(95, Math.round((autoStatus.processedParentCount / Math.max(autoStatus.processedParentCount + autoStatus.pendingParentCount, 1)) * 100)))
+        : autoTask?.status === 'running'
+          ? 15
+          : 0
+    : 0
+  const hasRunningAutoTask = autoTask?.status === 'running' || autoTask?.status === 'cancel_requested'
+
   return (
     <WorkspacePage
       eyebrow="地图结构"
@@ -215,6 +286,35 @@ export default function MapExplorer({ novelId }: Props) {
           : <div className="novel-empty">当前是分支视图。</div>}
       </WorkspacePanel>
 
+      <WorkspacePanel
+          title="AI 自动生成"
+          description="后台按批次自动补地图节点，可在这里查看进度、暂停点和停止状态。"
+          extra={(
+            <Space wrap>
+              {!autoTask ? <Button type="primary" loading={autoLoading} onClick={() => void handleStartAutoGenerate()}>启动自动分批</Button> : null}
+              {autoTask?.status === 'paused' ? <Button icon={<ReloadOutlined />} loading={autoLoading} onClick={() => void handleResumeAutoGenerate()}>继续</Button> : null}
+              {hasRunningAutoTask ? <Button danger icon={<StopOutlined />} loading={autoStopping} onClick={() => void handleStopAutoGenerate()}>停止</Button> : null}
+            </Space>
+          )}
+        >
+          <Alert
+            type={autoTask?.status === 'failed' ? 'error' : autoTask?.status === 'paused' ? 'warning' : autoTask?.status === 'success' ? 'success' : 'info'}
+            showIcon
+            message={autoTask ? (autoStatus.message || '地图自动生成任务运行中') : '当前还没有运行中的自动任务'}
+            description={autoTask ? (autoStatus.lastError || (autoStatus.currentParentName ? `当前对象：${autoStatus.currentParentName}` : '系统会逐批校验并继续执行。')) : '点击上方按钮后，系统会在后台自动连续补齐地图节点。'}
+          />
+          <div style={{ marginTop: 16 }}>
+            <Progress percent={autoPercent} status={autoTask?.status === 'failed' ? 'exception' : autoTask?.status === 'success' ? 'success' : 'active'} />
+            <div className="novel-note-list">
+              <div className="novel-note-list__item">{`任务状态：${autoTask?.status || 'idle'}`}</div>
+              <div className="novel-note-list__item">{`当前层级：${autoStatus.targetDepth ?? '-'}`}</div>
+              <div className="novel-note-list__item">{`已处理对象：${autoStatus.processedParentCount}`}</div>
+              <div className="novel-note-list__item">{`待处理对象：${autoStatus.pendingParentCount}`}</div>
+              <div className="novel-note-list__item">{`累计生成节点：${autoStatus.generatedNodeCount}`}</div>
+              <div className="novel-note-list__item">{`当前重试次数：${autoStatus.retryCount}`}</div>
+            </div>
+          </div>
+        </WorkspacePanel>
       <div className="novel-split novel-split--sidebar">
         <WorkspacePanel title={searchKeyword.trim() ? '搜索结果' : '根层节点'} description={searchKeyword.trim() ? '结果按页返回。' : '这里只显示根层入口。'} extra={<div className="novel-filter-bar"><div className="novel-filter-bar__row"><Input.Search allowClear placeholder="搜索名称、类型、剧情作用" value={searchKeyword} onChange={(event) => setSearchKeyword(event.target.value)} onSearch={setSearchKeyword} /></div><div className="novel-filter-bar__summary">{searchKeyword.trim() ? `命中 ${rootData.total} 个节点` : `当前根层 ${rootData.total} 个节点`}</div></div>}>
           {loading ? <div className="novel-empty"><Spin /></div> : rootData.total === 0 ? <div className="novel-empty">{searchKeyword.trim() ? '没有搜索到节点。' : '还没有根层节点。'}</div> : <div style={{ display: 'grid', gap: 12 }}><VirtualList data={rootData.items} height={420} itemHeight={112} itemKey="id">{(node: MapNodeSummary) => <button key={node.id} type="button" className={`novel-list-card ${selectedNode?.id === node.id ? 'novel-list-card--active' : ''}`} onClick={() => { selectNode(node); if (node.childCount > 0) void handleSelectRoot(node) }} style={{ textAlign: 'left', cursor: 'pointer' }}><div className="novel-list-card__title">{node.name}</div><div className="novel-list-card__meta"><Tag color="blue">{node.nodeType || node.locationType || `第 ${node.level} 层`}</Tag><Tag>{node.childCount} 个下级</Tag></div><div className="novel-list-card__desc">{node.plotRelevance || node.description || '还没有补剧情作用。'}</div></button>}</VirtualList><Pagination current={rootData.page} pageSize={rootData.pageSize} total={rootData.total} size="small" showSizeChanger={false} onChange={setRootPage} /></div>}

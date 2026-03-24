@@ -1,4 +1,4 @@
-import type { WebContents } from 'electron'
+﻿import type { WebContents } from 'electron'
 import { eq } from 'drizzle-orm'
 import type { GenreWorldRules } from '../../src/shared/genre-system'
 import {
@@ -7,8 +7,8 @@ import {
   buildRealityConstraintSummary,
   buildTimelineConfigSummary,
   buildWritingStyleSummary,
-  normalizeWorldRules,
 } from '../../src/shared/genre-system'
+import { normalizeWorldRulesDraft } from '../../src/shared/world-rules-draft'
 import {
   buildContextAlignmentRules,
   buildGenreRealityRules,
@@ -29,7 +29,7 @@ import { getDb } from '../database/db'
 import { novels } from '../database/schema'
 import { safeParseJson } from '../utils/json'
 import { buildStoryProfile } from './context.service'
-import { runChatTask } from './task.service'
+import { createTask, executeChatTask, runChatTask, updateTask } from './task.service'
 
 const SECTION_LABELS = new Map(WORLD_RULE_SECTION_DEFINITIONS.map((item) => [item.key, item.label]))
 
@@ -78,7 +78,7 @@ function summarizeCurrentSection(sectionKey: WorldRuleSectionKey, rules: GenreWo
   switch (sectionKey) {
     case 'overview':
       return joinLines([
-        `类型名称：${rules.genreProfile.name || '未设置'}`,
+        `题材名称：${rules.genreProfile.name || '未设置'}`,
         rules.genreProfile.subgenre ? `子类型：${rules.genreProfile.subgenre}` : '',
         rules.genreProfile.worldviewTone ? `世界观基调：${rules.genreProfile.worldviewTone}` : '',
         rules.genreProfile.socialFrame ? `社会框架：${rules.genreProfile.socialFrame}` : '',
@@ -118,7 +118,7 @@ function summarizeCurrentSection(sectionKey: WorldRuleSectionKey, rules: GenreWo
               item.structure ? `   组织结构：${item.structure}` : '',
               item.resources ? `   核心资源：${item.resources}` : '',
               item.externalRelations ? `   对外关系：${item.externalRelations}` : '',
-              item.recruitFrom ? `   吸纳来源：${item.recruitFrom}` : '',
+              item.recruitFrom ? `   招募来源：${item.recruitFrom}` : '',
               item.notableSites.length > 0 ? `   重要据点：${item.notableSites.join('、')}` : '',
             ])).join('\n'))
           : '',
@@ -201,7 +201,7 @@ function buildSectionRequirement(sectionKey: WorldRuleSectionKey): string {
       ])
     case 'map':
       return joinLines([
-        '地图按层级设计，第 1 层表示国家/大区/界域，第 2 层表示每个上级下的区域，更深层再表示地点。',
+        '地图按层级设计，第 1 层表示国家、大区或界域，第 2 层表示每个上级下属的区域，更深层再表示地点。',
         '对 suggestedCount 的理解是“每个父节点各自拥有的直属子节点数量”，不是全局总数。',
       ])
     case 'timeline':
@@ -293,7 +293,7 @@ function applySectionPatch(
 ): GenreWorldRules {
   switch (sectionKey) {
     case 'overview':
-      return normalizeWorldRules({
+      return normalizeWorldRulesDraft({
         ...currentRules,
         genreProfile: {
           ...currentRules.genreProfile,
@@ -301,18 +301,18 @@ function applySectionPatch(
         },
       }, genreName)
     case 'power':
-      return normalizeWorldRules({
+      return normalizeWorldRulesDraft({
         ...currentRules,
         powerSystems: patch.powerSystems ?? currentRules.powerSystems,
       }, genreName)
     case 'species':
-      return normalizeWorldRules({
+      return normalizeWorldRulesDraft({
         ...currentRules,
         speciesSystem: patch.speciesSystem ?? currentRules.speciesSystem,
         factionSystem: patch.factionSystem ?? currentRules.factionSystem,
       }, genreName)
     case 'ecology':
-      return normalizeWorldRules({
+      return normalizeWorldRulesDraft({
         ...currentRules,
         characterEcology: {
           ...currentRules.characterEcology,
@@ -320,7 +320,7 @@ function applySectionPatch(
         },
       }, genreName)
     case 'map':
-      return normalizeWorldRules({
+      return normalizeWorldRulesDraft({
         ...currentRules,
         mapBlueprint: {
           ...currentRules.mapBlueprint,
@@ -328,7 +328,7 @@ function applySectionPatch(
         },
       }, genreName)
     case 'timeline':
-      return normalizeWorldRules({
+      return normalizeWorldRulesDraft({
         ...currentRules,
         timelineConfig: {
           ...currentRules.timelineConfig,
@@ -336,7 +336,7 @@ function applySectionPatch(
         },
       }, genreName)
     case 'language':
-      return normalizeWorldRules({
+      return normalizeWorldRulesDraft({
         ...currentRules,
         writingConstraints: {
           ...currentRules.writingConstraints,
@@ -463,21 +463,179 @@ function sendProgress(sender: WebContents | undefined, payload: WorldRulesGenera
   sender.send('ai:world-rules-progress', payload)
 }
 
-async function runPromptTask(
-  novelId: number,
-  modelConfigId: number | undefined,
-  prompt: string,
-): Promise<string> {
-  const messages = [{ role: 'user' as const, content: prompt }]
-  return runChatTask({
+export interface WorldRulesGenerationContext {
+  novelId: number
+  modelConfigId?: number
+  profile: Awaited<ReturnType<typeof buildStoryProfile>>
+}
+
+export interface GenerateWorldRulesSectionOptions {
+  context: WorldRulesGenerationContext
+  sectionKey: WorldRuleSectionKey
+  action: WorldRulesGenerationRequest['action']
+  workingRules: GenreWorldRules
+  requirements?: string
+  sender?: WebContents
+  parentTaskId?: number
+  completedBefore?: number
+  totalSections?: number
+}
+
+export interface GenerateWorldRulesSectionResult {
+  nextRules: GenreWorldRules
+  step: WorldRulesGenerationStepResult
+  warning?: string
+}
+
+async function runPromptTask(params: {
+  novelId: number
+  modelConfigId?: number
+  prompt: string
+  sender?: WebContents
+  parentTaskId?: number
+}): Promise<string> {
+  const messages = [{ role: 'user' as const, content: params.prompt }]
+
+  if (typeof params.parentTaskId !== 'number') {
+    return runChatTask({
+      type: 'world_rules_generate',
+      novelId: params.novelId,
+      modelConfigId: params.modelConfigId,
+      relatedEntityType: 'novel',
+      relatedEntityId: params.novelId,
+      inputJson: JSON.stringify(messages),
+      messages,
+      sender: params.sender,
+    })
+  }
+
+  const childTaskId = await createTask({
     type: 'world_rules_generate',
-    novelId,
-    modelConfigId,
+    novelId: params.novelId,
+    modelConfigId: params.modelConfigId,
     relatedEntityType: 'novel',
-    relatedEntityId: novelId,
+    relatedEntityId: params.novelId,
     inputJson: JSON.stringify(messages),
-    messages,
+    runnerType: 'chat',
+    parentTaskId: params.parentTaskId,
   })
+
+  updateTask(params.parentTaskId, { currentChildTaskId: childTaskId })
+
+  try {
+    return await executeChatTask(childTaskId, {
+      type: 'world_rules_generate',
+      novelId: params.novelId,
+      modelConfigId: params.modelConfigId,
+      relatedEntityType: 'novel',
+      relatedEntityId: params.novelId,
+      inputJson: JSON.stringify(messages),
+      messages,
+      sender: params.sender,
+    })
+  } finally {
+    updateTask(params.parentTaskId, { currentChildTaskId: null })
+  }
+}
+
+export async function loadWorldRulesGenerationContext(novelId: number): Promise<WorldRulesGenerationContext> {
+  const db = getDb()
+  const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
+  if (!novel) throw new Error('小说不存在')
+
+  const profile = await buildStoryProfile(novelId)
+  return {
+    novelId,
+    modelConfigId: novel.modelConfigId || undefined,
+    profile,
+  }
+}
+
+export async function generateWorldRulesSection(
+  options: GenerateWorldRulesSectionOptions,
+): Promise<GenerateWorldRulesSectionResult> {
+  const {
+    context,
+    sectionKey,
+    action,
+    workingRules,
+    requirements,
+    sender,
+    parentTaskId,
+  } = options
+  const label = SECTION_LABELS.get(sectionKey) || sectionKey
+  const completedBefore = Math.max(0, options.completedBefore || 0)
+  const totalSections = Math.max(options.totalSections || 1, 1)
+
+  sendProgress(sender, {
+    novelId: context.novelId,
+    section: sectionKey,
+    label,
+    status: 'running',
+    completed: completedBefore,
+    total: totalSections,
+    detail: action === 'expand'
+      ? '正在结合现有草稿继续扩写当前分区...'
+      : '正在根据上下文逐步生成当前分区...',
+  })
+
+  try {
+    const prompt = buildSectionPrompt(sectionKey, action, context.profile, workingRules, requirements)
+    const output = await runPromptTask({
+      novelId: context.novelId,
+      modelConfigId: context.modelConfigId,
+      prompt,
+      sender,
+      parentTaskId,
+    })
+    const patch = parseSectionPatch(sectionKey, output)
+    ensurePatchHasContent(sectionKey, patch)
+
+    const nextRules = applySectionPatch(
+      workingRules,
+      sectionKey,
+      patch,
+      workingRules.genreProfile.name || context.profile.genre,
+    )
+    const changed = JSON.stringify(nextRules) !== JSON.stringify(workingRules)
+    const warning = changed ? undefined : '生成结果没有带来新的有效改动'
+    const step: WorldRulesGenerationStepResult = {
+      key: sectionKey,
+      label,
+      status: warning ? 'warning' : 'success',
+      warning,
+    }
+
+    sendProgress(sender, {
+      novelId: context.novelId,
+      section: sectionKey,
+      label,
+      status: 'success',
+      completed: completedBefore + 1,
+      total: totalSections,
+      warning,
+      detail: warning || `${label} 已更新到当前草稿`,
+    })
+
+    return {
+      nextRules,
+      step,
+      warning,
+    }
+  } catch (error) {
+    const errorMessage = sanitizeErrorMessage(error)
+    sendProgress(sender, {
+      novelId: context.novelId,
+      section: sectionKey,
+      label,
+      status: 'failed',
+      completed: completedBefore,
+      total: totalSections,
+      warning: errorMessage,
+      detail: `${label} 生成失败`,
+    })
+    throw new Error(errorMessage)
+  }
 }
 
 export async function generateWorldRules(
@@ -488,71 +646,35 @@ export async function generateWorldRules(
     throw new Error('缺少目标分区')
   }
 
-  const db = getDb()
-  const novel = db.select().from(novels).where(eq(novels.id, data.novelId)).all()[0]
-  if (!novel) throw new Error('小说不存在')
-
-  const profile = await buildStoryProfile(data.novelId)
+  const context = await loadWorldRulesGenerationContext(data.novelId)
   const requestedSections = data.mode === 'section'
     ? [data.section as WorldRuleSectionKey]
     : [...WORLD_RULE_SECTION_ORDER]
 
-  let workingRules = normalizeWorldRules(data.currentRules, profile.genre)
+  let workingRules = normalizeWorldRulesDraft(data.currentRules, context.profile.genre)
   const steps: WorldRulesGenerationStepResult[] = []
   const warnings: string[] = []
   let completedSteps = 0
 
   for (const sectionKey of requestedSections) {
-    const label = SECTION_LABELS.get(sectionKey) || sectionKey
-    sendProgress(sender, {
-      novelId: data.novelId,
-      section: sectionKey,
-      label,
-      status: 'running',
-      completed: completedSteps,
-      total: requestedSections.length,
-      detail: data.action === 'expand'
-        ? '正在结合现有草稿继续扩写...'
-        : '正在根据现有设定生成分区初稿...',
-    })
-
     try {
-      const prompt = buildSectionPrompt(sectionKey, data.action, profile, workingRules, data.requirements)
-      const output = await runPromptTask(data.novelId, novel.modelConfigId || undefined, prompt)
-      const patch = parseSectionPatch(sectionKey, output)
-      ensurePatchHasContent(sectionKey, patch)
-      const nextRules = applySectionPatch(
-        workingRules,
+      const result = await generateWorldRulesSection({
+        context,
         sectionKey,
-        patch,
-        workingRules.genreProfile.name || profile.genre,
-      )
+        action: data.action,
+        workingRules,
+        requirements: data.requirements,
+        sender,
+        completedBefore: completedSteps,
+        totalSections: requestedSections.length,
+      })
 
-      const changed = JSON.stringify(nextRules) !== JSON.stringify(workingRules)
-      workingRules = nextRules
+      workingRules = result.nextRules
+      steps.push(result.step)
+      if (result.warning) warnings.push(`${result.step.label}：${result.warning}`)
       completedSteps += 1
-
-      const warning = changed ? undefined : '生成结果未带来新的有效改动'
-      if (warning) warnings.push(`${label}：${warning}`)
-
-      steps.push({
-        key: sectionKey,
-        label,
-        status: warning ? 'warning' : 'success',
-        warning,
-      })
-
-      sendProgress(sender, {
-        novelId: data.novelId,
-        section: sectionKey,
-        label,
-        status: 'success',
-        completed: completedSteps,
-        total: requestedSections.length,
-        warning,
-        detail: warning || `${label} 已更新到表单草稿`,
-      })
     } catch (error) {
+      const label = SECTION_LABELS.get(sectionKey) || sectionKey
       const errorMessage = sanitizeErrorMessage(error)
       warnings.push(`${label}：${errorMessage}`)
       steps.push({
@@ -560,17 +682,6 @@ export async function generateWorldRules(
         label,
         status: 'failed',
         error: errorMessage,
-      })
-
-      sendProgress(sender, {
-        novelId: data.novelId,
-        section: sectionKey,
-        label,
-        status: 'failed',
-        completed: completedSteps,
-        total: requestedSections.length,
-        warning: errorMessage,
-        detail: `${label} 生成失败`,
       })
 
       if (data.mode === 'section') {
@@ -581,7 +692,7 @@ export async function generateWorldRules(
 
   const failedSteps = steps.filter((step) => step.status === 'failed').length
   return {
-    rules: normalizeWorldRules(workingRules, workingRules.genreProfile.name || profile.genre),
+    rules: normalizeWorldRulesDraft(workingRules, workingRules.genreProfile.name || context.profile.genre),
     requestedSections,
     steps,
     warnings,

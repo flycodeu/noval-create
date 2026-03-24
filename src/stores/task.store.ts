@@ -4,7 +4,7 @@ import { Task } from '../types'
 interface TaskStream {
   taskId: number
   content: string
-  status: 'running' | 'completed' | 'failed'
+  status: 'running' | 'completed' | 'failed' | 'cancelled'
 }
 
 interface TaskStore {
@@ -14,7 +14,7 @@ interface TaskStore {
   setTasks: (tasks: Task[]) => void
   addStream: (taskId: number) => void
   appendStreamChunk: (taskId: number, chunk: string) => void
-  completeStream: (taskId: number, status: 'completed' | 'failed') => void
+  completeStream: (taskId: number, status: 'completed' | 'failed' | 'cancelled') => void
   clearStream: (taskId: number) => void
 }
 

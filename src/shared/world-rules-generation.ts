@@ -1,4 +1,4 @@
-import type { GenreWorldRules } from './genre-system'
+﻿import type { GenreWorldRules } from './genre-system'
 
 export type WorldRuleSectionKey =
   | 'overview'
@@ -49,6 +49,13 @@ export interface WorldRulesGenerationResult {
   hasPartialResult: boolean
 }
 
+export interface WorldRulesAutoGenerateOptions {
+  currentRules: GenreWorldRules
+  requirements?: string
+  sectionOrder?: WorldRuleSectionKey[]
+  maxRetries?: number
+}
+
 export const WORLD_RULE_SECTION_DEFINITIONS: Array<{
   key: WorldRuleSectionKey
   label: string
@@ -63,3 +70,4 @@ export const WORLD_RULE_SECTION_DEFINITIONS: Array<{
 ]
 
 export const WORLD_RULE_SECTION_ORDER = WORLD_RULE_SECTION_DEFINITIONS.map((item) => item.key)
+

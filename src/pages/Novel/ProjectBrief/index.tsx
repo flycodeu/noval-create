@@ -62,16 +62,20 @@ function isFilled(value?: string | null): boolean {
   return Boolean(value && value.trim())
 }
 
+function normalizeText(value?: string | null): string {
+  return value?.trim() || ''
+}
+
 function normalizeFormValues(values: ProjectBriefFormValues): ProjectBriefFormValues {
   return {
     platformMode: values.platformMode,
-    targetAudience: values.targetAudience.trim(),
-    targetReader: values.targetReader.trim(),
-    readerPromise: values.readerPromise.trim(),
-    sellingPoints: values.sellingPoints.trim(),
-    compTitles: values.compTitles.trim(),
-    tabooRules: values.tabooRules.trim(),
-    deliveryRhythm: values.deliveryRhythm.trim(),
+    targetAudience: normalizeText(values.targetAudience),
+    targetReader: normalizeText(values.targetReader),
+    readerPromise: normalizeText(values.readerPromise),
+    sellingPoints: normalizeText(values.sellingPoints),
+    compTitles: normalizeText(values.compTitles),
+    tabooRules: normalizeText(values.tabooRules),
+    deliveryRhythm: normalizeText(values.deliveryRhythm),
   }
 }
 
@@ -91,9 +95,10 @@ function mergeGeneratedValues(
   result: ProjectBriefGenerationResult,
   mode: ProjectBriefGenerationMode,
 ): ProjectBriefFormValues {
-  const pick = (existing: string, next: string) => {
-    if (mode === 'fill_blanks' && existing.trim()) return existing
-    return next
+  const pick = (existing?: string | null, next?: string | null) => {
+    const currentValue = normalizeText(existing)
+    if (mode === 'fill_blanks' && currentValue) return currentValue
+    return normalizeText(next)
   }
 
   return {

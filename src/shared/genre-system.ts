@@ -1,4 +1,4 @@
-export type GenreRulePackKey =
+﻿export type GenreRulePackKey =
   | 'generic'
   | 'zombie'
   | 'xianxia'

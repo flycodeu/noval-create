@@ -20,6 +20,8 @@ export type TaskType =
   | 'expand_background'
   | 'generate_relations'
   | 'generate_map'
+  | 'map_auto_generate'
+  | 'world_rules_auto_generate'
   | 'generate_arcs'
   | 'generate_items'
   | 'generate_timeline'
@@ -31,6 +33,23 @@ export type TaskType =
   | 'theme_voice_generate'
   | 'story_thread_generate'
 
+export type TaskRunnerType = 'chat' | 'stream' | 'workflow'
+export type TaskStatus =
+  | 'pending'
+  | 'running'
+  | 'success'
+  | 'failed'
+  | 'cancelled'
+  | 'paused'
+  | 'cancel_requested'
+
+export interface TaskControlState {
+  cancelRequested?: boolean
+  maxRetries?: number
+  retryCount?: number
+  batchKey?: string
+}
+
 interface CreateTaskOptions {
   type: TaskType
   novelId?: number
@@ -38,8 +57,13 @@ interface CreateTaskOptions {
   relatedEntityType?: string
   relatedEntityId?: number
   inputJson?: string
-  runnerType?: 'chat' | 'stream'
+  runnerType?: TaskRunnerType
   retryable?: boolean
+  parentTaskId?: number
+  currentChildTaskId?: number
+  controlJson?: string
+  progressJson?: string
+  status?: TaskStatus
 }
 
 interface RunTaskOptions extends CreateTaskOptions {
@@ -50,6 +74,21 @@ interface RunTaskOptions extends CreateTaskOptions {
 }
 
 const abortControllers = new Map<number, AbortController>()
+
+function parseJsonObject<T extends Record<string, unknown>>(raw?: string | null): T {
+  if (!raw) return {} as T
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as T : {} as T
+  } catch {
+    return {} as T
+  }
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error
+    && (error.name === 'AbortError' || /abort|cancel/i.test(error.message))
+}
 
 export async function createTask(opts: CreateTaskOptions): Promise<number> {
   const db = getDb()
@@ -62,29 +101,80 @@ export async function createTask(opts: CreateTaskOptions): Promise<number> {
     inputJson: opts.inputJson,
     runnerType: opts.runnerType || 'chat',
     retryable: opts.retryable ? 1 : 0,
-    status: 'pending',
+    parentTaskId: opts.parentTaskId,
+    currentChildTaskId: opts.currentChildTaskId,
+    controlJson: opts.controlJson,
+    progressJson: opts.progressJson,
+    status: opts.status || 'pending',
   }).run()
 
   return Number(result.lastInsertRowid)
 }
 
-function notifyStatus(sender: WebContents | undefined, taskId: number, status: string) {
+export function getTaskRecord(taskId: number) {
+  const db = getDb()
+  return db.select().from(tasks).where(eq(tasks.id, taskId)).all()[0] || null
+}
+
+export function parseTaskControl(task: Pick<typeof tasks.$inferSelect, 'controlJson'> | null | undefined): TaskControlState {
+  return parseJsonObject<TaskControlState>(task?.controlJson)
+}
+
+export function parseTaskProgress<T extends Record<string, unknown>>(task: Pick<typeof tasks.$inferSelect, 'progressJson'> | null | undefined): T {
+  return parseJsonObject<T>(task?.progressJson)
+}
+
+export function updateTask(taskId: number, data: Partial<typeof tasks.$inferInsert>) {
+  const db = getDb()
+  db.update(tasks).set({
+    ...data,
+    updatedAt: data.updatedAt || new Date().toISOString(),
+  }).where(eq(tasks.id, taskId)).run()
+}
+
+function notifyStatus(sender: WebContents | undefined, taskId: number, status: TaskStatus) {
   if (sender && !sender.isDestroyed()) {
     sender.send('task:status-change', { taskId, status })
   }
 }
 
+function notifyProgress(sender: WebContents | undefined, taskId: number, progress: Record<string, unknown>) {
+  if (sender && !sender.isDestroyed()) {
+    sender.send('task:progress', { taskId, progress })
+  }
+}
+
 function notifyComplete(
   sender: WebContents | undefined,
-  payload: { taskId: number; status: string; output?: string; error?: string; result?: unknown },
+  payload: { taskId: number; status: TaskStatus; output?: string; error?: string; result?: unknown },
 ) {
   if (sender && !sender.isDestroyed()) {
     sender.send('task:complete', payload)
   }
 }
 
+export function updateTaskStatus(taskId: number, status: TaskStatus, sender?: WebContents, extra: Partial<typeof tasks.$inferInsert> = {}) {
+  updateTask(taskId, {
+    ...extra,
+    status,
+  })
+  notifyStatus(sender, taskId, status)
+}
+
+export function updateTaskProgress(taskId: number, progress: Record<string, unknown>, sender?: WebContents) {
+  updateTask(taskId, {
+    progressJson: JSON.stringify(progress),
+  })
+  notifyProgress(sender, taskId, progress)
+}
+
+export function updateTaskControl(taskId: number, control: TaskControlState) {
+  updateTask(taskId, {
+    controlJson: JSON.stringify(control),
+  })
+}
+
 export async function runStreamTask(opts: RunTaskOptions): Promise<number> {
-  const db = getDb()
   const inputJson = opts.inputJson || JSON.stringify(opts.messages)
   const taskId = await createTask({
     ...opts,
@@ -95,12 +185,7 @@ export async function runStreamTask(opts: RunTaskOptions): Promise<number> {
   const controller = new AbortController()
   abortControllers.set(taskId, controller)
 
-  db.update(tasks).set({
-    status: 'running',
-    updatedAt: new Date().toISOString(),
-  }).where(eq(tasks.id, taskId)).run()
-
-  notifyStatus(opts.sender, taskId, 'running')
+  updateTaskStatus(taskId, 'running', opts.sender)
 
   const startTime = Date.now()
   let fullOutput = ''
@@ -126,13 +211,12 @@ export async function runStreamTask(opts: RunTaskOptions): Promise<number> {
       const durationMs = Date.now() - startTime
       const tokensUsed = adapter.countTokens(fullOutput)
 
-      db.update(tasks).set({
+      updateTask(taskId, {
         status: 'success',
         outputText: fullOutput,
         durationMs,
         tokensUsed,
-        updatedAt: new Date().toISOString(),
-      }).where(eq(tasks.id, taskId)).run()
+      })
 
       notifyComplete(opts.sender, {
         taskId,
@@ -141,17 +225,15 @@ export async function runStreamTask(opts: RunTaskOptions): Promise<number> {
         result,
       })
     } catch (error: unknown) {
-      const isAbort = error instanceof Error && error.name === 'AbortError'
-      const status = isAbort ? 'cancelled' : 'failed'
+      const status: TaskStatus = isAbortError(error) ? 'cancelled' : 'failed'
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
 
-      db.update(tasks).set({
+      updateTask(taskId, {
         status,
-        errorMessage: isAbort ? 'User cancelled' : errorMessage,
+        errorMessage: status === 'cancelled' ? 'User cancelled' : errorMessage,
         outputText: fullOutput || null,
         durationMs: Date.now() - startTime,
-        updatedAt: new Date().toISOString(),
-      }).where(eq(tasks.id, taskId)).run()
+      })
 
       notifyComplete(opts.sender, {
         taskId,
@@ -166,15 +248,10 @@ export async function runStreamTask(opts: RunTaskOptions): Promise<number> {
   return taskId
 }
 
-async function executeChatTask(taskId: number, opts: RunTaskOptions): Promise<string> {
-  const db = getDb()
-
-  db.update(tasks).set({
-    status: 'running',
-    updatedAt: new Date().toISOString(),
-  }).where(eq(tasks.id, taskId)).run()
-
-  notifyStatus(opts.sender, taskId, 'running')
+export async function executeChatTask(taskId: number, opts: RunTaskOptions): Promise<string> {
+  const controller = new AbortController()
+  abortControllers.set(taskId, controller)
+  updateTaskStatus(taskId, 'running', opts.sender)
 
   const startTime = Date.now()
 
@@ -185,17 +262,18 @@ async function executeChatTask(taskId: number, opts: RunTaskOptions): Promise<st
 
     const result = await adapter.chat(opts.messages, {
       ...opts.chatOpts,
+      signal: controller.signal,
     })
 
     const finalResult = opts.onSuccess ? await opts.onSuccess(result, taskId) : undefined
 
-    db.update(tasks).set({
+    updateTask(taskId, {
       status: 'success',
       outputText: result,
       durationMs: Date.now() - startTime,
       tokensUsed: adapter.countTokens(result),
-      updatedAt: new Date().toISOString(),
-    }).where(eq(tasks.id, taskId)).run()
+      currentChildTaskId: null,
+    })
 
     notifyComplete(opts.sender, {
       taskId,
@@ -206,26 +284,31 @@ async function executeChatTask(taskId: number, opts: RunTaskOptions): Promise<st
 
     return result
   } catch (error: unknown) {
+    const currentTask = getTaskRecord(taskId)
+    const aborted = isAbortError(error) || currentTask?.status === 'cancel_requested'
+    const status: TaskStatus = aborted ? 'cancelled' : 'failed'
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
 
-    db.update(tasks).set({
-      status: 'failed',
-      errorMessage,
+    updateTask(taskId, {
+      status,
+      errorMessage: aborted ? 'User cancelled' : errorMessage,
       durationMs: Date.now() - startTime,
-      updatedAt: new Date().toISOString(),
-    }).where(eq(tasks.id, taskId)).run()
+      currentChildTaskId: null,
+    })
 
     notifyComplete(opts.sender, {
       taskId,
-      status: 'failed',
+      status,
       error: errorMessage,
     })
 
     throw error
+  } finally {
+    abortControllers.delete(taskId)
   }
 }
 
-async function startChatTask(opts: RunTaskOptions): Promise<number> {
+export async function startChatTask(opts: RunTaskOptions): Promise<number> {
   const inputJson = opts.inputJson || JSON.stringify(opts.messages)
   const taskId = await createTask({
     ...opts,
@@ -259,7 +342,25 @@ export async function runChatTask(opts: RunTaskOptions): Promise<string> {
   })
 }
 
-export function cancelTask(taskId: number): boolean {
+export function cancelTask(taskId: number, sender?: WebContents): boolean {
+  const task = getTaskRecord(taskId)
+  if (!task) return false
+
+  if (task.runnerType === 'workflow') {
+    const control = parseTaskControl(task)
+    updateTaskStatus(taskId, 'cancel_requested', sender, {
+      controlJson: JSON.stringify({
+        ...control,
+        cancelRequested: true,
+      }),
+    })
+
+    if (typeof task.currentChildTaskId === 'number') {
+      cancelTask(task.currentChildTaskId, sender)
+    }
+    return true
+  }
+
   const controller = abortControllers.get(taskId)
   if (!controller) return false
 
@@ -268,9 +369,11 @@ export function cancelTask(taskId: number): boolean {
 }
 
 export async function retryTask(taskId: number, sender?: WebContents): Promise<number> {
-  const db = getDb()
-  const task = db.select().from(tasks).where(eq(tasks.id, taskId)).all()[0]
+  const task = getTaskRecord(taskId)
   if (!task) throw new Error(`Task ${taskId} not found`)
+  if (task.runnerType === 'workflow') {
+    throw new Error('Workflow tasks should be resumed instead of retried.')
+  }
   if (!task.retryable) throw new Error('This task cannot be retried safely.')
   if (!task.inputJson) throw new Error('This task does not have replayable input.')
 
@@ -297,6 +400,4 @@ export async function retryTask(taskId: number, sender?: WebContents): Promise<n
 
   return startChatTask(baseOptions)
 }
-
-
 

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+﻿import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Alert,
   Button,
@@ -21,15 +21,19 @@ import {
   ReloadOutlined,
   RobotOutlined,
   SaveOutlined,
+  StopOutlined,
 } from '@ant-design/icons'
+import type { Task, WorldRulesAutoGenerateStatus } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
+import type { GenreWorldRules } from '../../../shared/genre-system'
 import {
-  normalizeWorldRules,
-  parseWorldRulesJson,
-  type GenreWorldRules,
-} from '../../../shared/genre-system'
+  createEmptyWorldRules,
+  normalizeWorldRulesDraft,
+  parseWorldRulesDraftJson,
+} from '../../../shared/world-rules-draft'
 import {
   WORLD_RULE_SECTION_DEFINITIONS,
+  WORLD_RULE_SECTION_ORDER,
   type WorldRuleSectionKey,
   type WorldRulesGenerationProgressEvent,
 } from '../../../shared/world-rules-generation'
@@ -62,6 +66,30 @@ const CALENDAR_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'future-date', label: '未来日期' },
 ]
 
+const REALISM_LEVEL_OPTIONS = [
+  { value: 'strict-realism', label: '严格写实' },
+  { value: 'rule-realism', label: '规则写实' },
+  { value: 'stylized-fantasy', label: '风格化幻想' },
+]
+
+const EMPTY_AUTO_STATUS: WorldRulesAutoGenerateStatus = {
+  taskId: 0,
+  novelId: 0,
+  status: 'pending',
+  currentSection: '',
+  currentSectionLabel: '',
+  completedSectionCount: 0,
+  pendingSectionCount: 0,
+  totalSections: 0,
+  completedSections: [],
+  pendingSections: [],
+  failedSections: [],
+  retryCount: 0,
+  lastError: '',
+  completed: false,
+  message: '',
+}
+
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 1.5)
 }
@@ -87,7 +115,7 @@ function RuleListCard({
 }
 
 function normalizeFormRules(formValues: Record<string, unknown>, genreName?: string) {
-  return normalizeWorldRules(formValues, genreName)
+  return normalizeWorldRulesDraft(formValues, genreName)
 }
 
 function getProgressType(progress: WorldRulesGenerationProgressEvent | null): 'info' | 'success' | 'error' {
@@ -104,13 +132,17 @@ export default function WorldRules({ novelId }: Props) {
   const [activeTab, setActiveTab] = useState<WorldRuleSectionKey>('overview')
   const [runningAction, setRunningAction] = useState<RunningAction>(null)
   const [generationProgress, setGenerationProgress] = useState<WorldRulesGenerationProgressEvent | null>(null)
+  const [autoTask, setAutoTask] = useState<Task | null>(null)
+  const [autoStatus, setAutoStatus] = useState<WorldRulesAutoGenerateStatus>(EMPTY_AUTO_STATUS)
+  const [autoLoading, setAutoLoading] = useState(false)
+  const [autoStopping, setAutoStopping] = useState(false)
 
   const parsedRules = useMemo(
-    () => parseWorldRulesJson(currentNovel?.worldRulesJson, currentNovel?.genreName),
+    () => parseWorldRulesDraftJson(currentNovel?.worldRulesJson, currentNovel?.genreName),
     [currentNovel?.genreName, currentNovel?.worldRulesJson],
   )
   const blankRules = useMemo(
-    () => normalizeWorldRules({}, currentNovel?.genreName),
+    () => createEmptyWorldRules(currentNovel?.genreName),
     [currentNovel?.genreName],
   )
   const watchedValues = Form.useWatch([], form) as GenreWorldRules | undefined
@@ -119,9 +151,30 @@ export default function WorldRules({ novelId }: Props) {
     [currentNovel?.genreName, parsedRules, watchedValues],
   )
 
+  const loadAutoStatus = useCallback(async (applyDraft = false) => {
+    const latestTask = await window.electron.worldRules.getLatestAutoGenerateTask(novelId)
+    setAutoTask(latestTask)
+
+    if (!latestTask) {
+      setAutoStatus(EMPTY_AUTO_STATUS)
+      return null
+    }
+
+    const latestStatus = await window.electron.worldRules.getAutoGenerateStatus(latestTask.id) || EMPTY_AUTO_STATUS
+    setAutoStatus(latestStatus)
+    if (applyDraft && latestStatus.workingRules) {
+      form.setFieldsValue(latestStatus.workingRules)
+    }
+    return latestTask
+  }, [form, novelId])
+
   useEffect(() => {
     form.setFieldsValue(parsedRules)
   }, [form, parsedRules])
+
+  useEffect(() => {
+    void loadAutoStatus(true)
+  }, [loadAutoStatus])
 
   useEffect(() => {
     const unsubscribe = window.electron.on('ai:world-rules-progress', (...args) => {
@@ -131,6 +184,35 @@ export default function WorldRules({ novelId }: Props) {
     })
     return unsubscribe
   }, [novelId])
+
+  useEffect(() => {
+    if (!autoTask?.id) return
+    if (!['running', 'cancel_requested'].includes(autoTask.status || '')) return
+
+    const reload = () => {
+      void loadAutoStatus(true)
+    }
+    const unsubProgress = window.electron.on('task:progress', (data: unknown) => {
+      const payload = data as { taskId: number }
+      if (payload?.taskId === autoTask.id) reload()
+    })
+    const unsubStatus = window.electron.on('task:status-change', (data: unknown) => {
+      const payload = data as { taskId: number }
+      if (payload?.taskId === autoTask.id) reload()
+    })
+    const unsubComplete = window.electron.on('task:complete', (data: unknown) => {
+      const payload = data as { taskId: number }
+      if (payload?.taskId === autoTask.id) reload()
+    })
+    const timer = setInterval(reload, 5000)
+
+    return () => {
+      clearInterval(timer)
+      unsubProgress()
+      unsubStatus()
+      unsubComplete()
+    }
+  }, [autoTask?.id, autoTask?.status, loadAutoStatus])
 
   const tokenCount = useMemo(() => estimateTokens(JSON.stringify(liveRules)), [liveRules])
   const tokenStatusText = tokenCount > 1400
@@ -149,6 +231,14 @@ export default function WorldRules({ novelId }: Props) {
     ? Math.max(0, Math.min(100, Math.round((generationProgress.completed / Math.max(generationProgress.total, 1)) * 100)))
     : 0
   const isGenerating = Boolean(runningAction)
+  const hasRunningAutoTask = autoTask?.status === 'running' || autoTask?.status === 'cancel_requested'
+  const autoPercent = autoTask
+    ? autoStatus.completed
+      ? 100
+      : autoStatus.totalSections > 0
+        ? Math.max(autoTask.status === 'running' ? 5 : 0, Math.min(95, Math.round((autoStatus.completedSectionCount / Math.max(autoStatus.totalSections, 1)) * 100)))
+        : 0
+    : 0
   const calendarLabel = CALENDAR_OPTIONS.find((item) => item.value === liveRules.timelineConfig.calendarType)?.label
     || liveRules.timelineConfig.calendarType
     || '未设置'
@@ -158,39 +248,50 @@ export default function WorldRules({ novelId }: Props) {
     try {
       const values = normalizeFormRules(form.getFieldsValue(true) as unknown as Record<string, unknown>, currentNovel?.genreName)
       await window.electron.novel.update(novelId, { worldRulesJson: JSON.stringify(values) })
+      await window.electron.worldRules.clearAutoGenerateDraft(novelId)
+      setAutoTask(null)
+      setAutoStatus(EMPTY_AUTO_STATUS)
       const updated = await window.electron.novel.get(novelId)
       if (updated) setCurrentNovel(updated)
       message.success('世界规则已保存')
-    } catch {
-      message.error('保存失败')
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '保存失败')
     } finally {
       setSaving(false)
     }
   }
 
-  const resetWorldRulesEditor = useCallback(() => {
+  const resetWorldRulesEditor = useCallback(async () => {
+    await window.electron.worldRules.clearAutoGenerateDraft(novelId)
     form.resetFields()
     form.setFieldsValue(blankRules)
     setActiveTab('overview')
     setRunningAction(null)
     setGenerationProgress(null)
+    setAutoTask(null)
+    setAutoStatus(EMPTY_AUTO_STATUS)
     message.success('当前流程内容已清空，未保存前不会影响已保存规则')
-  }, [blankRules, form])
+  }, [blankRules, form, novelId])
 
   const handleClearCurrentFlow = useCallback(() => {
-    if (isGenerating) return
+    if (isGenerating || hasRunningAutoTask) return
 
     Modal.confirm({
       title: '清空当前流程内容？',
-      content: '会清空当前页的世界规则编辑内容并回到世界概览，但不会直接覆盖已保存规则。',
+      content: '会清空当前页的世界规则编辑内容，并丢弃未保存的自动生成草稿，但不会直接覆盖已保存规则。',
       okText: '确认清空',
       okType: 'danger',
       cancelText: '取消',
       onOk: resetWorldRulesEditor,
     })
-  }, [isGenerating, resetWorldRulesEditor])
+  }, [hasRunningAutoTask, isGenerating, resetWorldRulesEditor])
 
   const handleGenerateWorldRules = useCallback(async (mode: 'all' | 'section', action: 'generate' | 'expand') => {
+    if (hasRunningAutoTask) {
+      message.warning('请先停止当前自动任务，再执行手动生成。')
+      return
+    }
+
     const nextAction: RunningAction = mode === 'all'
       ? 'all-generate'
       : action === 'expand'
@@ -223,18 +324,61 @@ export default function WorldRules({ novelId }: Props) {
       } else if (result.failedSteps > 0) {
         message.error(`${sectionLabel}失败，请检查当前设定后重试。`)
       } else {
-        message.success(
-          mode === 'all'
-            ? '世界规则分批生成完成，请确认后保存。'
-            : `${activeSectionMeta.label}${actionLabel}完成。`,
-        )
+        message.success(mode === 'all' ? '世界规则分批生成完成，请确认后保存。' : `${activeSectionMeta.label}${actionLabel}完成。`)
       }
     } catch (error) {
       message.error(`AI 生成失败：${error instanceof Error ? error.message : '请稍后重试'}`)
     } finally {
       setRunningAction(null)
     }
-  }, [activeSectionMeta.label, activeTab, form, liveRules, novelId])
+  }, [activeSectionMeta.label, activeTab, form, hasRunningAutoTask, liveRules, novelId])
+
+  const handleStartAutoGenerate = useCallback(async () => {
+    if (isGenerating) return
+
+    setAutoLoading(true)
+    setGenerationProgress(null)
+    try {
+      await window.electron.worldRules.startAutoGenerate(novelId, {
+        currentRules: liveRules,
+        sectionOrder: WORLD_RULE_SECTION_ORDER,
+      })
+      await loadAutoStatus(true)
+      message.success('世界规则自动分批生成已启动')
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '世界规则自动生成启动失败')
+    } finally {
+      setAutoLoading(false)
+    }
+  }, [isGenerating, liveRules, loadAutoStatus, novelId])
+
+  const handleStopAutoGenerate = useCallback(async () => {
+    if (!autoTask?.id) return
+
+    setAutoStopping(true)
+    try {
+      await window.electron.workflow.cancel(autoTask.id)
+      await loadAutoStatus(true)
+      message.info('已发送停止请求，当前分区结束后不会继续后续生成。')
+    } finally {
+      setAutoStopping(false)
+    }
+  }, [autoTask?.id, loadAutoStatus])
+
+  const handleResumeAutoGenerate = useCallback(async () => {
+    if (!autoTask?.id) return
+
+    setAutoLoading(true)
+    try {
+      await window.electron.worldRules.resumeAutoGenerate(autoTask.id, liveRules)
+      await loadAutoStatus(true)
+      message.success('世界规则自动生成已继续')
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '世界规则自动生成继续失败')
+    } finally {
+      setAutoLoading(false)
+    }
+  }, [autoTask?.id, liveRules, loadAutoStatus])
 
   const tabItems = [
     {
@@ -245,11 +389,11 @@ export default function WorldRules({ novelId }: Props) {
           <Form.Item name={['genreProfile', 'name']} label="题材名称">
             <Input placeholder="例如：都市异能、修真仙侠" />
           </Form.Item>
-          <Form.Item name={['genreProfile', 'subgenre']} label="子类型 / 题材">
-            <Input placeholder="例如：悬疑成长、宗门争霸" />
+          <Form.Item name={['genreProfile', 'subgenre']} label="子类型 / 题材关键词">
+            <Input placeholder="例如：悬疑成长、宗门争斗" />
           </Form.Item>
           <Form.Item name={['genreProfile', 'worldviewTone']} label="世界观基调">
-            <Input.TextArea rows={4} placeholder="概括这个世界整体的气质、运行逻辑和主要矛盾。" />
+            <Input.TextArea rows={4} placeholder="概括这个世界整体的气质、运转逻辑和主要矛盾。" />
           </Form.Item>
           <Form.Item name={['genreProfile', 'socialFrame']} label="社会框架">
             <Input.TextArea rows={4} placeholder="写清权力结构、阶层秩序、组织关系和资源分配方式。" />
@@ -271,9 +415,7 @@ export default function WorldRules({ novelId }: Props) {
           {(fields, { add, remove }) => (
             <>
               <div style={{ marginBottom: 12 }}>
-                <Button icon={<PlusOutlined />} onClick={() => add({ appliesTo: [], levels: [] })}>
-                  {'添加体系'}
-                </Button>
+                <Button icon={<PlusOutlined />} onClick={() => add({ appliesTo: [], levels: [] })}>添加体系</Button>
               </div>
               {fields.map((field, index) => (
                 <RuleListCard
@@ -297,7 +439,7 @@ export default function WorldRules({ novelId }: Props) {
                     <Input.TextArea rows={2} placeholder="写清不能做什么、会被什么卡住。" />
                   </Form.Item>
                   <Form.Item name={[field.name, 'cost']} label="代价">
-                    <Input.TextArea rows={2} placeholder="写清获得力量或资源后要付出的代价。" />
+                    <Input.TextArea rows={2} placeholder="写清获得力量或资源后要付出的成本。" />
                   </Form.Item>
                   <Form.Item name={[field.name, 'taboo']} label="禁忌">
                     <Input.TextArea rows={2} placeholder="写清绝不能触碰的规则或后果。" />
@@ -314,14 +456,12 @@ export default function WorldRules({ novelId }: Props) {
       label: '种族势力',
       children: (
         <>
-          <Divider orientation="left">{'种族 / 实体'}</Divider>
+          <Divider orientation="left">种族 / 实体</Divider>
           <Form.List name="speciesSystem">
             {(fields, { add, remove }) => (
               <>
                 <div style={{ marginBottom: 12 }}>
-                  <Button icon={<PlusOutlined />} onClick={() => add({ traits: [], commonIdentities: [] })}>
-                    {'添加种族'}
-                  </Button>
+                  <Button icon={<PlusOutlined />} onClick={() => add({ traits: [], commonIdentities: [] })}>添加种族</Button>
                 </div>
                 {fields.map((field, index) => (
                   <RuleListCard
@@ -330,18 +470,18 @@ export default function WorldRules({ novelId }: Props) {
                     extra={<Button type="text" danger icon={<DeleteOutlined />} onClick={() => remove(field.name)} />}
                   >
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                      <Form.Item name={[field.name, 'name']} label="种族名称" rules={[{ required: true, message: '请输入种族名称' }]}>
-                        <Input placeholder="例如：人类、血裔、雾灵" />
+                      <Form.Item name={[field.name, 'name']} label="名称" rules={[{ required: true, message: '请输入名称' }]}>
+                        <Input placeholder="例如：人类、夜行者、山海异种" />
                       </Form.Item>
                       <Form.Item name={[field.name, 'entityType']} label="实体类型">
                         <Select options={ENTITY_TYPE_OPTIONS} />
                       </Form.Item>
                     </div>
-                    <Form.Item name={[field.name, 'summary']} label="简述">
-                      <Input.TextArea rows={2} placeholder="用两三句话概括这个种族的定位和存在感。" />
+                    <Form.Item name={[field.name, 'summary']} label="概述">
+                      <Input.TextArea rows={2} placeholder="写清这个实体在世界里的定位和存在方式。" />
                     </Form.Item>
                     <Form.Item name={[field.name, 'traits']} label="特征">
-                      <Select mode="tags" placeholder="输入种族特征后回车" />
+                      <Select mode="tags" placeholder="输入特征后回车" />
                     </Form.Item>
                     <Form.Item name={[field.name, 'commonIdentities']} label="常见身份">
                       <Select mode="tags" placeholder="输入常见身份后回车" />
@@ -349,7 +489,7 @@ export default function WorldRules({ novelId }: Props) {
                     <Form.Item name={[field.name, 'relationToHumans']} label="与主流社会关系">
                       <Input.TextArea rows={2} placeholder="写清和主流秩序是合作、对立、依附还是隔绝。" />
                     </Form.Item>
-                    <Form.Item name={[field.name, 'storyUse']} label="剧情用途">
+                    <Form.Item name={[field.name, 'storyUse']} label="剧情作用">
                       <Input.TextArea rows={2} placeholder="写清这个种族通常承担什么剧情功能。" />
                     </Form.Item>
                   </RuleListCard>
@@ -358,14 +498,12 @@ export default function WorldRules({ novelId }: Props) {
             )}
           </Form.List>
 
-          <Divider orientation="left">{'势力'}</Divider>
+          <Divider orientation="left">势力</Divider>
           <Form.List name="factionSystem">
             {(fields, { add, remove }) => (
               <>
                 <div style={{ marginBottom: 12 }}>
-                  <Button icon={<PlusOutlined />} onClick={() => add({ notableSites: [] })}>
-                    {'添加势力'}
-                  </Button>
+                  <Button icon={<PlusOutlined />} onClick={() => add({ notableSites: [] })}>添加势力</Button>
                 </div>
                 {fields.map((field, index) => (
                   <RuleListCard
@@ -381,7 +519,7 @@ export default function WorldRules({ novelId }: Props) {
                         <Input placeholder="例如：宗门、官方机构、商会、军团" />
                       </Form.Item>
                     </div>
-                    <Form.Item name={[field.name, 'summary']} label="简述">
+                    <Form.Item name={[field.name, 'summary']} label="概述">
                       <Input.TextArea rows={2} placeholder="概括这个势力的定位、立场和影响力。" />
                     </Form.Item>
                     <Form.Item name={[field.name, 'structure']} label="组织结构">
@@ -419,9 +557,7 @@ export default function WorldRules({ novelId }: Props) {
             {(fields, { add, remove }) => (
               <>
                 <div style={{ marginBottom: 12 }}>
-                  <Button icon={<PlusOutlined />} onClick={() => add({ preferredFactions: [], powerBias: [] })}>
-                    {'添加槽位'}
-                  </Button>
+                  <Button icon={<PlusOutlined />} onClick={() => add({ preferredFactions: [], powerBias: [] })}>添加槽位</Button>
                 </div>
                 {fields.map((field, index) => (
                   <RuleListCard
@@ -437,7 +573,7 @@ export default function WorldRules({ novelId }: Props) {
                         <Select options={ENTITY_TYPE_OPTIONS} />
                       </Form.Item>
                       <Form.Item name={[field.name, 'species']} label="对应种族">
-                        <Input placeholder="例如：人类、异兽、长生种" />
+                        <Input placeholder="例如：人类、异裔、长生种" />
                       </Form.Item>
                     </div>
                     <Form.Item name={[field.name, 'narrativeFunction']} label="叙事功能">
@@ -472,9 +608,7 @@ export default function WorldRules({ novelId }: Props) {
             {(fields, { add, remove }) => (
               <>
                 <div style={{ marginBottom: 12 }}>
-                  <Button icon={<PlusOutlined />} onClick={() => add({ nodeTypes: [], examples: [], suggestedCount: 3 })}>
-                    {'添加层级'}
-                  </Button>
+                  <Button icon={<PlusOutlined />} onClick={() => add({ nodeTypes: [], examples: [], suggestedCount: 3 })}>添加层级</Button>
                 </div>
                 {fields.map((field, index) => (
                   <RuleListCard
@@ -517,7 +651,7 @@ export default function WorldRules({ novelId }: Props) {
         <>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
             <Form.Item name={['timelineConfig', 'calendarType']} label="时间制度">
-              <Select options={CALENDAR_OPTIONS} />
+              <Select options={CALENDAR_OPTIONS} allowClear />
             </Form.Item>
             <Form.Item name={['timelineConfig', 'eraName']} label="纪元名称">
               <Input placeholder="例如：公历、王朝纪年、修真历" />
@@ -535,7 +669,7 @@ export default function WorldRules({ novelId }: Props) {
             </Form.Item>
           </div>
           <Form.Item name={['timelineConfig', 'displayPattern']} label="显示格式">
-            <Input.TextArea rows={3} placeholder="例如：王历X年 / 雪月 / 战役周" />
+            <Input.TextArea rows={3} placeholder="例如：王历 X 年 / 雪月 / 战后第 N 周" />
           </Form.Item>
           <Form.Item name={['timelineConfig', 'precisionOptions']} label="时间精度">
             <Select mode="tags" placeholder="输入时间精度后回车" />
@@ -553,33 +687,26 @@ export default function WorldRules({ novelId }: Props) {
         <>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(180px, 1fr))', gap: 12, marginBottom: 16 }}>
             <Card size="small" style={{ background: 'var(--color-bg-card)' }}>
-              <Form.Item name={['writingConstraints', 'antiQuoteEmphasis']} label="避免引号强调" valuePropName="checked" style={{ marginBottom: 0 }}>
-                <Switch />
-              </Form.Item>
+              <Form.Item name={['writingConstraints', 'antiQuoteEmphasis']} label="避免引号强调" valuePropName="checked" style={{ marginBottom: 0 }}><Switch /></Form.Item>
             </Card>
             <Card size="small" style={{ background: 'var(--color-bg-card)' }}>
-              <Form.Item name={['writingConstraints', 'antiConceptSlogans']} label="避免概念口号" valuePropName="checked" style={{ marginBottom: 0 }}>
-                <Switch />
-              </Form.Item>
+              <Form.Item name={['writingConstraints', 'antiConceptSlogans']} label="避免概念口号" valuePropName="checked" style={{ marginBottom: 0 }}><Switch /></Form.Item>
             </Card>
             <Card size="small" style={{ background: 'var(--color-bg-card)' }}>
-              <Form.Item name={['writingConstraints', 'antiSymmetricLines']} label="避免对称排比" valuePropName="checked" style={{ marginBottom: 0 }}>
-                <Switch />
-              </Form.Item>
+              <Form.Item name={['writingConstraints', 'antiSymmetricLines']} label="避免对称排比" valuePropName="checked" style={{ marginBottom: 0 }}><Switch /></Form.Item>
             </Card>
           </div>
-          <Form.Item name={['writingConstraints', 'narrationStyle']} label="叙述风格">
-            <Input.TextArea rows={3} placeholder="写清叙述应偏冷静、克制、直接还是抒情。" />
-          </Form.Item>
-          <Form.Item name={['writingConstraints', 'dialogueStyle']} label="对话风格">
-            <Input.TextArea rows={3} placeholder="写清人物说话的语气、节奏和用词边界。" />
-          </Form.Item>
-          <Form.Item name={['writingConstraints', 'forbiddenPhrases']} label="禁用 AI 腔">
-            <Select mode="tags" placeholder="输入禁用表达后回车" />
-          </Form.Item>
-          <Form.Item name={['writingConstraints', 'extraRules']} label="额外规则">
-            <Select mode="tags" placeholder="输入额外规则后回车" />
-          </Form.Item>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <Form.Item name={['writingConstraints', 'realismLevel']} label="真实度层级"><Select options={REALISM_LEVEL_OPTIONS} placeholder="选择文本真实度基线" /></Form.Item>
+            <Form.Item name={['writingConstraints', 'forbiddenPhrases']} label="禁用 AI 腔"><Select mode="tags" placeholder="输入禁用表达后回车" /></Form.Item>
+          </div>
+          <Form.Item name={['writingConstraints', 'narrationStyle']} label="叙述风格"><Input.TextArea rows={3} placeholder="写清叙述应偏冷静、克制、直接还是抒情。" /></Form.Item>
+          <Form.Item name={['writingConstraints', 'dialogueStyle']} label="对话风格"><Input.TextArea rows={3} placeholder="写清人物说话的语气、节奏和用词边界。" /></Form.Item>
+          <Form.Item name={['writingConstraints', 'sciencePolicy']} label="科学边界"><Input.TextArea rows={2} placeholder="例如现代题材先守现实常识，幻想题材明确哪些超常现象成立。" /></Form.Item>
+          <Form.Item name={['writingConstraints', 'physicsPolicy']} label="物理边界"><Input.TextArea rows={2} placeholder="写清行动、伤势、破坏、移动和恢复速度的底线。" /></Form.Item>
+          <Form.Item name={['writingConstraints', 'commonSenseFocus']} label="常识重点"><Select mode="tags" placeholder="输入需要长期校验的常识重点后回车" /></Form.Item>
+          <Form.Item name={['writingConstraints', 'contextAlignmentFocus']} label="上下文对齐重点"><Select mode="tags" placeholder="输入需要长期对齐的背景或规则后回车" /></Form.Item>
+          <Form.Item name={['writingConstraints', 'extraRules']} label="额外规则"><Select mode="tags" placeholder="输入额外规则后回车" /></Form.Item>
         </>
       ),
     },
@@ -589,42 +716,22 @@ export default function WorldRules({ novelId }: Props) {
     <WorkspacePage
       eyebrow="世界规则"
       title="世界规则"
-      description="基于基础背景、核心设定和题材，把世界运行逻辑拆成分区，再让 AI 按分区生成或扩写。"
+      description="基于背景、基础设定和题材，把世界运行逻辑拆成分区，再让 AI 逐步生成、暂停、继续和恢复草稿。"
       actions={(
         <Space wrap>
-          <Button
-            icon={<RobotOutlined />}
-            loading={runningAction === 'all-generate'}
-            disabled={saving || (isGenerating && runningAction !== 'all-generate')}
-            onClick={() => void handleGenerateWorldRules('all', 'generate')}
-          >
+          <Button icon={<RobotOutlined />} loading={runningAction === 'all-generate'} disabled={saving || isGenerating || hasRunningAutoTask || autoTask?.status === 'paused'} onClick={() => void handleGenerateWorldRules('all', 'generate')}>
             {'AI 分批生成'}
           </Button>
-          <Button
-            icon={<ReloadOutlined />}
-            loading={runningAction === 'section-generate'}
-            disabled={saving || (isGenerating && runningAction !== 'section-generate')}
-            onClick={() => void handleGenerateWorldRules('section', 'generate')}
-          >
+          <Button icon={<ReloadOutlined />} loading={runningAction === 'section-generate'} disabled={saving || isGenerating || hasRunningAutoTask || autoTask?.status === 'paused'} onClick={() => void handleGenerateWorldRules('section', 'generate')}>
             {'生成当前分区'}
           </Button>
-          <Button
-            icon={<PlusOutlined />}
-            loading={runningAction === 'section-expand'}
-            disabled={saving || (isGenerating && runningAction !== 'section-expand')}
-            onClick={() => void handleGenerateWorldRules('section', 'expand')}
-          >
+          <Button icon={<PlusOutlined />} loading={runningAction === 'section-expand'} disabled={saving || isGenerating || hasRunningAutoTask || autoTask?.status === 'paused'} onClick={() => void handleGenerateWorldRules('section', 'expand')}>
             {'扩写当前分区'}
           </Button>
-          <Button
-            danger
-            icon={<DeleteOutlined />}
-            disabled={saving || isGenerating}
-            onClick={handleClearCurrentFlow}
-          >
+          <Button danger icon={<DeleteOutlined />} disabled={saving || isGenerating || hasRunningAutoTask} onClick={handleClearCurrentFlow}>
             {'清空当前流程'}
           </Button>
-          <Button type="primary" icon={<SaveOutlined />} loading={saving} disabled={isGenerating} onClick={handleSave}>
+          <Button type="primary" icon={<SaveOutlined />} loading={saving} disabled={isGenerating || hasRunningAutoTask} onClick={handleSave}>
             {'保存规则'}
           </Button>
         </Space>
@@ -637,23 +744,14 @@ export default function WorldRules({ novelId }: Props) {
           <WorkspaceMetric label="地图层级" value={liveRules.mapBlueprint.levels.length} hint={tokenStatusText} />
         </>
       )}
-      contextSummary={(
-        <WorkspaceContextSummary
-          items={[
-            { label: '题材', value: liveRules.genreProfile.name || currentNovel?.genreName || '未设置' },
-            { label: '当前分区', value: activeSectionMeta.label },
-            { label: '时间制度', value: calendarLabel },
-            { label: '文风约束', value: `${activeLanguageRules} 项硬约束 / ${liveRules.writingConstraints.forbiddenPhrases.length} 条禁用语` },
-          ]}
-        />
-      )}
+      contextSummary={<WorkspaceContextSummary items={[{ label: '题材', value: liveRules.genreProfile.name || currentNovel?.genreName || '未设置' }, { label: '当前分区', value: activeSectionMeta.label }, { label: '时间制度', value: calendarLabel }, { label: '文风约束', value: `${activeLanguageRules} 项硬约束 / ${liveRules.writingConstraints.forbiddenPhrases.length} 条禁用语` }]} />}
       aside={(
-        <WorkspacePanel title="使用建议" description="让 AI 更像共创助手，而不是一次性说明书。">
+        <WorkspacePanel title="使用建议" description="先把核心上下文补齐，再让 AI 连续分步生成。">
           <div className="novel-note-list">
-            <div className="novel-note-list__item">{'先补齐基础背景和核心设定，再生成世界规则。'}</div>
-            <div className="novel-note-list__item">{'建议优先生成世界概览、地图蓝图、时间规则。'}</div>
-            <div className="novel-note-list__item">{'AI 结果只会先写入当前表单，不会自动保存。'}</div>
-            <div className="novel-note-list__item">{'单个分区不满意时，可以单独重生成或继续扩写。'}</div>
+            <div className="novel-note-list__item">先补齐基础背景和核心设定，再生成世界规则。</div>
+            <div className="novel-note-list__item">建议优先生成世界概览、地图蓝图、时间规则和文风约束。</div>
+            <div className="novel-note-list__item">自动分批任务会把每一步结果持续写回当前草稿，但不会直接覆盖已保存规则。</div>
+            <div className="novel-note-list__item">暂停中的自动草稿支持继续；清空或保存时会同步清掉这份后台草稿。</div>
           </div>
         </WorkspacePanel>
       )}
@@ -663,46 +761,47 @@ export default function WorldRules({ novelId }: Props) {
           type={getProgressType(generationProgress)}
           showIcon
           message={`${generationProgress.label} - ${generationProgress.status === 'failed' ? '失败' : generationProgress.status === 'success' ? '已完成' : '生成中'}`}
-          description={(
-            <div style={{ display: 'grid', gap: 12 }}>
-              <Progress
-                percent={generationPercent}
-                size="small"
-                status={generationProgress.status === 'failed' ? 'exception' : generationProgress.status === 'success' && generationProgress.completed >= generationProgress.total ? 'success' : 'active'}
-              />
-              <div>{generationProgress.detail || '正在处理当前分区...'}</div>
-              {generationProgress.warning ? <div>{generationProgress.warning}</div> : null}
-            </div>
-          )}
+          description={<div style={{ display: 'grid', gap: 12 }}><Progress percent={generationPercent} size="small" status={generationProgress.status === 'failed' ? 'exception' : generationProgress.status === 'success' && generationProgress.completed >= generationProgress.total ? 'success' : 'active'} /><div>{generationProgress.detail || '正在处理当前分区...'}</div>{generationProgress.warning ? <div>{generationProgress.warning}</div> : null}</div>}
           style={{ marginBottom: 18 }}
         />
       ) : tokenCount > 1400 ? (
-        <Alert
-          type="warning"
-          message={`当前世界规则约 ${tokenCount} token，建议后续优先按分区生成。`}
-          showIcon
-          style={{ marginBottom: 18 }}
-        />
+        <Alert type="warning" message={`当前世界规则约 ${tokenCount} token，建议后续优先按分区生成。`} showIcon style={{ marginBottom: 18 }} />
       ) : (
-        <div className="novel-pill" style={{ marginBottom: 18 }}>
-          {tokenCount > 0 ? `当前规则体量约 ${tokenCount} token` : '当前规则体量尚未形成'}
-        </div>
+        <div className="novel-pill" style={{ marginBottom: 18 }}>{tokenCount > 0 ? `当前规则体量约 ${tokenCount} token` : '当前规则体量尚未形成'}</div>
       )}
 
       <WorkspacePanel
-        title="分区编辑器"
-        description="按分区维护世界规则，方便和地图、人物、时间轴持续联动。"
-        extra={<div className="novel-pill">{`当前分区：${activeSectionMeta.label}`}</div>}
+        title="AI 自动分批"
+        description="系统会按分区逐步调用 AI，生成一段就写回当前草稿，并支持停止、继续和重启后恢复。"
+        extra={<Space wrap>{!autoTask || !['running', 'cancel_requested', 'paused'].includes(autoTask.status || '') ? <Button type="primary" icon={<RobotOutlined />} loading={autoLoading} disabled={saving || isGenerating} onClick={() => void handleStartAutoGenerate()}>启动自动分批</Button> : null}{autoTask?.status === 'paused' ? <Button icon={<ReloadOutlined />} loading={autoLoading} disabled={saving || isGenerating} onClick={() => void handleResumeAutoGenerate()}>继续</Button> : null}{hasRunningAutoTask ? <Button danger icon={<StopOutlined />} loading={autoStopping} onClick={() => void handleStopAutoGenerate()}>停止</Button> : null}</Space>}
       >
-        <Form form={form} layout="vertical">
-          <Tabs
-            className="novel-editor-tabs"
-            items={tabItems}
-            activeKey={activeTab}
-            onChange={(key) => setActiveTab(key as WorldRuleSectionKey)}
-          />
+        <Alert
+          type={autoTask?.status === 'failed' ? 'error' : autoTask?.status === 'paused' ? 'warning' : autoTask?.status === 'success' ? 'success' : 'info'}
+          showIcon
+          message={autoTask ? (autoStatus.message || '世界规则自动任务正在处理当前分区。') : '当前还没有自动分批任务'}
+          description={autoTask ? (autoStatus.lastError || (autoStatus.currentSectionLabel ? `当前分区：${autoStatus.currentSectionLabel}` : '系统会逐步检查并继续执行剩余分区。')) : '点击上方按钮后，系统会按世界概览、力量体系、种族势力、人物生态、地图蓝图、时间规则、文风约束的顺序自动生成。'}
+        />
+        <div style={{ marginTop: 16, display: 'grid', gap: 16 }}>
+          <Progress percent={autoPercent} status={autoTask?.status === 'failed' ? 'exception' : autoTask?.status === 'success' ? 'success' : 'active'} />
+          <div className="novel-note-list">
+            <div className="novel-note-list__item">{`任务状态：${autoTask?.status || 'idle'}`}</div>
+            <div className="novel-note-list__item">{`当前分区：${autoStatus.currentSectionLabel || '-'}`}</div>
+            <div className="novel-note-list__item">{`已完成分区：${autoStatus.completedSectionCount}`}</div>
+            <div className="novel-note-list__item">{`待完成分区：${autoStatus.pendingSectionCount}`}</div>
+            <div className="novel-note-list__item">{`累计总分区：${autoStatus.totalSections}`}</div>
+            <div className="novel-note-list__item">{`当前重试次数：${autoStatus.retryCount}`}</div>
+          </div>
+          {autoStatus.failedSections.length > 0 ? <div className="novel-note-list">{autoStatus.failedSections.map((item) => <div key={item.key} className="novel-note-list__item">{`${item.label}：${item.error}`}</div>)}</div> : null}
+        </div>
+      </WorkspacePanel>
+
+      <WorkspacePanel title="分区编辑器" description="按分区维护世界规则，便于与地图、人物、时间轴持续联动。" extra={<div className="novel-pill">{`当前分区：${activeSectionMeta.label}`}</div>}>
+        <Form form={form} layout="vertical" disabled={hasRunningAutoTask}>
+          <Tabs className="novel-editor-tabs" items={tabItems} activeKey={activeTab} onChange={(key) => setActiveTab(key as WorldRuleSectionKey)} />
         </Form>
       </WorkspacePanel>
     </WorkspacePage>
   )
 }
+
+

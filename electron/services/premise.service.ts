@@ -1,5 +1,5 @@
 ﻿import type { WebContents } from 'electron'
-import { eq } from 'drizzle-orm'
+import { desc, eq } from 'drizzle-orm'
 import {
   PREMISE_GENERATION_STEPS,
   type PremiseGenerationMode,
@@ -21,10 +21,10 @@ import {
 } from '../../src/shared/story-settings'
 import { cleanAiFieldText, cleanAiValue } from '../../src/utils/text'
 import { getDb } from '../database/db'
-import { novels } from '../database/schema'
+import { novels, tasks } from '../database/schema'
 import { safeParseAiJson } from '../utils/json'
 import { buildStoryProfile } from './context.service'
-import { runChatTask } from './task.service'
+import { createTask, runChatTask, updateTask } from './task.service'
 
 interface PremiseContext {
   novelId: number
@@ -54,7 +54,58 @@ interface WritingRulesDraft {
   bannedTerms: string
 }
 
+type PremiseFieldKey =
+  | 'positioning'
+  | 'coreHook'
+  | 'protagonistStart'
+  | 'constraints'
+  | 'languageGuardrails'
+  | 'antiAiFlavor'
+  | 'commonSenseRules'
+  | 'bannedTerms'
+
+type WritingRulesFieldKey = 'antiAiFlavor' | 'commonSenseRules' | 'bannedTerms'
+
+interface PremiseResultWithMeta extends PremiseGenerationResult {
+  missingFields?: PremiseFieldKey[]
+  draftTaskId?: number
+}
+
+interface PremiseDraftRecord {
+  taskId: number
+  novelId: number
+  status: 'pending' | 'applied'
+  result: PremiseResultWithMeta
+  warnings: string[]
+  sourcePage?: string
+  mode?: PremiseGenerationMode
+  appliedMode?: PremiseGenerationMode
+  createdAt: string
+  completedAt: string
+  appliedAt?: string
+}
+
+interface PersistedPremiseDraftProgress {
+  kind: 'premise_draft'
+  message: string
+  cleared?: boolean
+  draft: PremiseDraftRecord
+}
+
 const STEP_LABELS = new Map(PREMISE_GENERATION_STEPS.map((item) => [item.key, item.label]))
+
+const FIELD_LABELS: Record<PremiseFieldKey, string> = {
+  positioning: '作品定位',
+  coreHook: '核心信息',
+  protagonistStart: '主角起点',
+  constraints: '底层约束',
+  languageGuardrails: '语言边界',
+  antiAiFlavor: '去 AI 腔规则',
+  commonSenseRules: '常识约束',
+  bannedTerms: '禁用表达',
+}
+
+const WRITING_RULE_FIELD_KEYS: WritingRulesFieldKey[] = ['antiAiFlavor', 'commonSenseRules', 'bannedTerms']
 
 function clean(value?: string | null): string {
   return value?.trim() || ''
@@ -80,6 +131,81 @@ function sanitizeErrorMessage(error: unknown, fallback = '生成失败'): string
 
 function previewText(text: string, max = 220): string {
   return text.replace(/\s+/g, ' ').trim().slice(0, max)
+}
+
+function parseJsonObject<T extends Record<string, unknown>>(raw?: string | null): T {
+  if (!raw) return {} as T
+
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as T : {} as T
+  } catch {
+    return {} as T
+  }
+}
+
+function getWritingRuleMissingFields(draft: WritingRulesDraft): WritingRulesFieldKey[] {
+  return WRITING_RULE_FIELD_KEYS.filter((field) => !clean(draft[field]))
+}
+
+function getMissingPremiseFields(result: PremiseResultWithMeta): PremiseFieldKey[] {
+  return (Object.keys(FIELD_LABELS) as PremiseFieldKey[]).filter((field) => !clean(result[field]))
+}
+
+function buildDraftMessage(draft: PremiseDraftRecord, cleared = false): string {
+  if (cleared) return '基础设定 AI 草稿已清除。'
+  if (draft.appliedAt) return '基础设定 AI 草稿已应用到表单，尚未保存。'
+  return '基础设定 AI 草稿已生成，等待应用到表单。'
+}
+
+function serializePremiseDraftProgress(draft: PremiseDraftRecord, cleared = false): string {
+  const payload: PersistedPremiseDraftProgress = {
+    kind: 'premise_draft',
+    message: buildDraftMessage(draft, cleared),
+    cleared,
+    draft,
+  }
+  return JSON.stringify(payload)
+}
+
+function parsePremiseDraftProgress(raw?: string | null): PersistedPremiseDraftProgress | null {
+  const parsed = parseJsonObject<Record<string, unknown>>(raw)
+  if (parsed.kind !== 'premise_draft') return null
+
+  const draft = parsed.draft
+  if (!draft || typeof draft !== 'object' || Array.isArray(draft)) return null
+
+  const record = draft as Record<string, unknown>
+  const result = record.result
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return null
+
+  return {
+    kind: 'premise_draft',
+    message: typeof parsed.message === 'string' ? parsed.message : '',
+    cleared: Boolean(parsed.cleared),
+    draft: {
+      taskId: typeof record.taskId === 'number' ? record.taskId : 0,
+      novelId: typeof record.novelId === 'number' ? record.novelId : 0,
+      status: record.status === 'applied' ? 'applied' : 'pending',
+      result: result as PremiseResultWithMeta,
+      warnings: Array.isArray(record.warnings) ? record.warnings.filter((item): item is string => typeof item === 'string') : [],
+      sourcePage: typeof record.sourcePage === 'string' ? record.sourcePage : undefined,
+      mode: record.mode === 'fill_blanks' ? 'fill_blanks' : record.mode === 'replace' ? 'replace' : undefined,
+      appliedMode: record.appliedMode === 'fill_blanks' ? 'fill_blanks' : record.appliedMode === 'replace' ? 'replace' : undefined,
+      createdAt: typeof record.createdAt === 'string' ? record.createdAt : '',
+      completedAt: typeof record.completedAt === 'string' ? record.completedAt : '',
+      appliedAt: typeof record.appliedAt === 'string' ? record.appliedAt : undefined,
+    },
+  }
+}
+
+function listPremiseDraftTasks(novelId: number) {
+  const db = getDb()
+  return db.select().from(tasks)
+    .where(eq(tasks.novelId, novelId))
+    .orderBy(desc(tasks.updatedAt), desc(tasks.id))
+    .all()
+    .filter((task) => task.type === 'premise_generate' && parsePremiseDraftProgress(task.progressJson))
 }
 
 function sendProgress(sender: WebContents | undefined, payload: PremiseGenerationProgressEvent) {
@@ -294,6 +420,43 @@ function buildWritingRulesPrompt(context: PremiseContext, premiseCore: PremiseCo
   ])
 }
 
+function buildWritingRulesPatchPrompt(
+  context: PremiseContext,
+  premiseCore: PremiseCoreDraft,
+  currentRules: WritingRulesDraft,
+  missingFields: WritingRulesFieldKey[],
+): string {
+  return renderPrompt([
+    '请补齐这部小说缺失的“写作与去 AI 味约束”字段，只补空字段，不重写已有规则。',
+    section('任务模式', [
+      '本轮只补缺失字段，已有规则视为已确认内容。',
+      `本轮只需要补这几个键：${missingFields.join(' / ')}`,
+    ].join('\n')),
+    section('已确定的基础设定', [
+      `作品定位：${premiseCore.positioning}`,
+      `核心信息：${premiseCore.coreHook}`,
+      `主角起点：${premiseCore.protagonistStart}`,
+      `底层约束：${premiseCore.constraints}`,
+      premiseCore.languageGuardrails ? `语言边界：${premiseCore.languageGuardrails}` : '',
+    ].filter(Boolean).join('\n')),
+    section('当前已有写作规则', [
+      currentRules.antiAiFlavor ? `去 AI 腔：${currentRules.antiAiFlavor}` : '去 AI 腔：<待补>',
+      currentRules.commonSenseRules ? `常识约束：${currentRules.commonSenseRules}` : '常识约束：<待补>',
+      currentRules.bannedTerms ? `禁用表达：${currentRules.bannedTerms}` : '禁用表达：<待补>',
+    ].join('\n')),
+    section('补齐要求', [
+      missingFields.includes('antiAiFlavor') ? '- antiAiFlavor：补具体禁写句式、总结腔、模板化情绪句、对称排比收尾。' : '',
+      missingFields.includes('commonSenseRules') ? '- commonSenseRules：补行为、伤势、资源、距离、制度压力、信息差等常识约束。' : '',
+      missingFields.includes('bannedTerms') ? '- bannedTerms：补容易显 AI 味的空洞词、套话、命名习惯或句式。' : '',
+      '只补缺的键，不要改写已有内容。',
+      '规则必须短、硬、可执行，不要写空泛口号。',
+      context.requirements,
+    ].filter(Boolean).join('\n')),
+    '只输出 JSON，不要解释，不要代码块。',
+    `JSON 键必须且只能使用 ${missingFields.join(' / ')}。`,
+  ])
+}
+
 function parsePremiseCore(raw: string): PremiseCoreDraft {
   const parsed = cleanAiValue(safeParseAiJson<Record<string, unknown>>(raw, 'object'))
   return {
@@ -370,6 +533,18 @@ function resolveWritingRules(
   }
 }
 
+function mergeMissingWritingRules(
+  currentRules: WritingRulesDraft,
+  patch: WritingRulesDraft,
+  missingFields: WritingRulesFieldKey[],
+): WritingRulesDraft {
+  return {
+    antiAiFlavor: missingFields.includes('antiAiFlavor') ? clean(patch.antiAiFlavor) || currentRules.antiAiFlavor : currentRules.antiAiFlavor,
+    commonSenseRules: missingFields.includes('commonSenseRules') ? clean(patch.commonSenseRules) || currentRules.commonSenseRules : currentRules.commonSenseRules,
+    bannedTerms: missingFields.includes('bannedTerms') ? clean(patch.bannedTerms) || currentRules.bannedTerms : currentRules.bannedTerms,
+  }
+}
+
 async function loadPremiseContext(data: PremiseGenerationRequest): Promise<PremiseContext> {
   const profile = await buildStoryProfile(data.novelId)
   const db = getDb()
@@ -406,6 +581,122 @@ function buildStepResult(
     warning: options.warning,
     error: options.error,
   }
+}
+
+async function persistPremiseDraft(
+  request: PremiseGenerationRequest,
+  result: PremiseResultWithMeta,
+  options: {
+    warnings: string[]
+    sourcePage?: string
+    completedAt: string
+  },
+): Promise<number> {
+  const taskId = await createTask({
+    type: 'premise_generate',
+    novelId: request.novelId,
+    relatedEntityType: 'novel',
+    relatedEntityId: request.novelId,
+    inputJson: JSON.stringify({
+      novelId: request.novelId,
+      mode: request.mode || 'replace',
+      requirements: request.requirements || '',
+    }),
+    runnerType: 'workflow',
+    retryable: false,
+    status: 'success',
+  })
+
+  const draft: PremiseDraftRecord = {
+    taskId,
+    novelId: request.novelId,
+    status: 'pending',
+    result: {
+      ...result,
+      draftTaskId: taskId,
+    },
+    warnings: options.warnings,
+    sourcePage: options.sourcePage,
+    mode: request.mode || 'replace',
+    createdAt: new Date().toISOString(),
+    completedAt: options.completedAt,
+  }
+
+  updateTask(taskId, {
+    progressJson: serializePremiseDraftProgress(draft),
+    outputText: JSON.stringify(draft.result, null, 2),
+    errorMessage: null,
+  })
+
+  return taskId
+}
+
+export function getLatestPremiseDraft(novelId: number): PremiseDraftRecord | null {
+  const task = listPremiseDraftTasks(novelId)
+    .find((item) => {
+      const progress = parsePremiseDraftProgress(item.progressJson)
+      return progress && !progress.cleared
+    }) || null
+
+  if (!task) return null
+
+  const progress = parsePremiseDraftProgress(task.progressJson)
+  if (!progress || progress.cleared) return null
+
+  return {
+    ...progress.draft,
+    taskId: task.id,
+    result: {
+      ...progress.draft.result,
+      draftTaskId: task.id,
+    },
+  }
+}
+
+export function markPremiseDraftApplied(taskId: number, appliedMode: PremiseGenerationMode) {
+  const db = getDb()
+  const task = db.select().from(tasks).where(eq(tasks.id, taskId)).all()[0]
+  if (!task) return
+
+  const progress = parsePremiseDraftProgress(task.progressJson)
+  if (!progress || progress.cleared) return
+
+  const nextDraft: PremiseDraftRecord = {
+    ...progress.draft,
+    taskId,
+    status: 'applied',
+    appliedMode,
+    appliedAt: progress.draft.appliedAt || new Date().toISOString(),
+    result: {
+      ...progress.draft.result,
+      draftTaskId: taskId,
+    },
+  }
+
+  updateTask(taskId, {
+    progressJson: serializePremiseDraftProgress(nextDraft),
+    outputText: JSON.stringify(nextDraft.result, null, 2),
+  })
+}
+
+export function clearPremiseDrafts(novelId: number, excludeTaskId?: number) {
+  listPremiseDraftTasks(novelId).forEach((task) => {
+    if (excludeTaskId && task.id === excludeTaskId) return
+
+    const progress = parsePremiseDraftProgress(task.progressJson)
+    if (!progress || progress.cleared) return
+
+    updateTask(task.id, {
+      progressJson: serializePremiseDraftProgress({
+        ...progress.draft,
+        taskId: task.id,
+        result: {
+          ...progress.draft.result,
+          draftTaskId: task.id,
+        },
+      }, true),
+    })
+  })
 }
 
 export async function generatePremise(
@@ -476,6 +767,7 @@ export async function generatePremise(
     bannedTerms: context.currentSettings.writingRules.bannedTerms,
   }
   let hasPartialResult = false
+  const writingRuleStepWarnings: string[] = []
 
   sendProgress(sender, {
     novelId: context.novelId,
@@ -487,6 +779,7 @@ export async function generatePremise(
     detail: '正在整理语言边界、常识约束与禁用表达。',
   })
 
+  let initialWritingRulesError: string | undefined
   try {
     const writingRulesResult = await runPromptTaskWithJsonRepair(
       context.novelId,
@@ -500,22 +793,54 @@ export async function generatePremise(
     const repairWarning = writingRulesResult.repaired
       ? '语言与写作边界的 JSON 输出格式异常，已自动修复一次后继续使用结果。'
       : undefined
-    if (repairWarning) warnings.push(repairWarning)
-    sendProgress(sender, {
-      novelId: context.novelId,
-      step: 'writing_rules',
-      label: STEP_LABELS.get('writing_rules') || '语言与去 AI 边界',
-      status: 'success',
-      completed: 2,
-      total,
-      detail: '语言与写作边界已生成。',
-      warning: repairWarning,
-    })
-    steps.push(buildStepResult('writing_rules', 'success', repairWarning ? { warning: repairWarning } : {}))
+    if (repairWarning) {
+      warnings.push(repairWarning)
+      writingRuleStepWarnings.push(repairWarning)
+    }
   } catch (error) {
-    const warning = `写作边界生成失败，已保留当前规则：${sanitizeErrorMessage(error, '生成失败')}`
+    initialWritingRulesError = sanitizeErrorMessage(error, '生成失败')
+    const warning = `写作边界首轮生成失败，准备仅针对缺失规则补救一次：${initialWritingRulesError}`
     warnings.push(warning)
+    writingRuleStepWarnings.push(warning)
+  }
+
+  let missingWritingFields = getWritingRuleMissingFields(writingRules)
+
+  if (missingWritingFields.length > 0) {
+    try {
+      const patchResult = await runPromptTaskWithJsonRepair(
+        context.novelId,
+        context.modelConfigId,
+        buildWritingRulesPatchPrompt(context, premiseCore, writingRules, missingWritingFields),
+        '语言与写作边界补字段',
+        missingWritingFields,
+        parseWritingRules,
+      )
+      writingRules = mergeMissingWritingRules(writingRules, patchResult.value, missingWritingFields)
+
+      const patchRepairWarning = patchResult.repaired
+        ? '语言与写作边界补字段时 JSON 输出格式异常，已自动修复一次后继续使用结果。'
+        : undefined
+
+      if (patchRepairWarning) {
+        warnings.push(patchRepairWarning)
+        writingRuleStepWarnings.push(patchRepairWarning)
+      }
+    } catch (error) {
+      const warning = `写作边界补字段失败：${sanitizeErrorMessage(error, '生成失败')}`
+      warnings.push(warning)
+      writingRuleStepWarnings.push(warning)
+    }
+
+    missingWritingFields = getWritingRuleMissingFields(writingRules)
+  }
+
+  if (missingWritingFields.length > 0) {
+    const warning = `以下规则仍为空：${missingWritingFields.map((field) => FIELD_LABELS[field]).join('、')}`
+    warnings.push(warning)
+    writingRuleStepWarnings.push(warning)
     hasPartialResult = true
+
     sendProgress(sender, {
       novelId: context.novelId,
       step: 'writing_rules',
@@ -526,25 +851,26 @@ export async function generatePremise(
       detail: warning,
       warning,
     })
-    steps.push(buildStepResult('writing_rules', 'warning', { warning }))
+  } else {
+    sendProgress(sender, {
+      novelId: context.novelId,
+      step: 'writing_rules',
+      label: STEP_LABELS.get('writing_rules') || '语言与去 AI 边界',
+      status: 'success',
+      completed: 2,
+      total,
+      detail: '语言与写作边界已生成。',
+      warning: writingRuleStepWarnings.join('；') || undefined,
+    })
   }
 
-  const emptyFields = [
-    premiseCore.positioning ? '' : '作品定位',
-    premiseCore.coreHook ? '' : '核心信息',
-    premiseCore.protagonistStart ? '' : '主角起点',
-    premiseCore.constraints ? '' : '底层约束',
-    premiseCore.languageGuardrails ? '' : '语言边界',
-    writingRules.antiAiFlavor ? '' : '去 AI 腔规则',
-    writingRules.commonSenseRules ? '' : '常识约束',
-  ].filter(Boolean)
+  steps.push(buildStepResult(
+    'writing_rules',
+    writingRuleStepWarnings.length > 0 ? 'warning' : 'success',
+    writingRuleStepWarnings.length > 0 ? { warning: writingRuleStepWarnings.join('；') } : {},
+  ))
 
-  if (emptyFields.length > 0) {
-    warnings.push(`以下字段仍为空：${emptyFields.join('、')}`)
-    hasPartialResult = true
-  }
-
-  return {
+  const resultWithoutDraftId: PremiseResultWithMeta = {
     positioning: premiseCore.positioning,
     coreHook: premiseCore.coreHook,
     protagonistStart: premiseCore.protagonistStart,
@@ -556,5 +882,29 @@ export async function generatePremise(
     steps,
     warnings,
     hasPartialResult,
+    missingFields: [],
   }
+
+  resultWithoutDraftId.missingFields = getMissingPremiseFields(resultWithoutDraftId)
+
+  if (resultWithoutDraftId.missingFields.length > 0) {
+    warnings.push(`以下字段仍为空：${resultWithoutDraftId.missingFields.map((field) => FIELD_LABELS[field]).join('、')}`)
+    resultWithoutDraftId.missingFields = getMissingPremiseFields(resultWithoutDraftId)
+    resultWithoutDraftId.hasPartialResult = true
+  }
+
+  try {
+    const completedAt = new Date().toISOString()
+    const draftTaskId = await persistPremiseDraft(data, resultWithoutDraftId, {
+      warnings,
+      sourcePage: 'premise',
+      completedAt,
+    })
+    clearPremiseDrafts(data.novelId, draftTaskId)
+    resultWithoutDraftId.draftTaskId = draftTaskId
+  } catch (error) {
+    warnings.push(`基础设定草稿持久化失败，重启后可能丢失：${sanitizeErrorMessage(error, '持久化失败')}`)
+  }
+
+  return resultWithoutDraftId
 }

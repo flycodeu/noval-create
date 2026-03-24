@@ -19,6 +19,8 @@ import {
 const STATUS_LABELS: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
   pending: { label: '等待中', color: '#5c6378', icon: <ClockCircleOutlined /> },
   running: { label: '运行中', color: '#2E86AB', icon: <LoadingOutlined spin /> },
+  cancel_requested: { label: '停止中', color: '#faad14', icon: <StopOutlined /> },
+  paused: { label: '已暂停', color: '#d48806', icon: <ClockCircleOutlined /> },
   success: { label: '成功', color: '#52c41a', icon: <CheckCircleOutlined /> },
   failed: { label: '失败', color: '#ff4d4f', icon: <CloseCircleOutlined /> },
   cancelled: { label: '已取消', color: '#faad14', icon: <StopOutlined /> },
@@ -39,17 +41,22 @@ const TYPE_LABELS: Record<string, string> = {
   expand_background: 'AI 扩展背景',
   generate_relations: 'AI 生成人物关系',
   generate_map: 'AI 生成地图',
+  map_auto_generate: 'AI 自动生成地图',
   generate_arcs: 'AI 生成故事弧',
   generate_items: 'AI 生成物品',
   generate_timeline: 'AI 生成时间轴',
   subplot_framework: 'AI 生成支线',
+  premise_generate: 'AI 基础设定',
   core_settings_generate: 'AI 生成核心设定',
+  project_brief_generate: 'AI 生成项目立项',
+  theme_voice_generate: 'AI 生成主题与文风',
   world_rules_generate: 'AI 生成世界规则',
 }
 
 const RUNNER_LABELS: Record<string, string> = {
   chat: '单次执行',
   stream: '流式执行',
+  workflow: '后台流程',
 }
 
 function formatTaskPayload(raw?: string): string {
@@ -62,6 +69,16 @@ function formatTaskPayload(raw?: string): string {
   }
 }
 
+function parseTaskProgress(raw?: string): Record<string, unknown> {
+  if (!raw) return {}
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}
+  } catch {
+    return {}
+  }
+}
+
 function getTaskTypeLabel(type: string): string {
   return TYPE_LABELS[type] || type
 }
@@ -71,6 +88,7 @@ function getTaskRunnerLabel(task: Task): string {
 }
 
 function isTaskRetryable(task: Task): boolean {
+  if (task.runnerType === 'workflow') return false
   if (task.type === 'chapter_write' && task.relatedEntityType === 'chapter' && task.relatedEntityId) return true
   if (task.type === 'subplot_framework') return true
   return Boolean(task.retryable)
@@ -81,7 +99,9 @@ function getTaskRetryabilityLabel(task: Task): string {
 }
 
 function getTaskSummary(task: Task, stream?: { content: string }): string {
+  const progress = parseTaskProgress(task.progressJson)
   if (task.errorMessage) return task.errorMessage
+  if (typeof progress.message === 'string' && progress.message.trim()) return progress.message
   if (stream?.content) return stream.content.slice(0, 140)
   if (task.outputText) return task.outputText.slice(0, 140)
   if (task.inputJson) return formatTaskPayload(task.inputJson).slice(0, 140)
@@ -155,7 +175,16 @@ export default function TaskCenter() {
     }
   }
 
-  const runningCount = tasks.filter((task) => task.status === 'running').length
+  const handleResume = async (taskId: number) => {
+    try {
+      await window.electron.workflow.resume(taskId)
+      await loadTasks()
+    } catch {
+      // Keep the page quiet and let the detail panel explain workflow state.
+    }
+  }
+
+  const runningCount = tasks.filter((task) => task.status === 'running' || task.status === 'cancel_requested').length
   const failedCount = tasks.filter((task) => task.status === 'failed').length
   const successCount = tasks.filter((task) => task.status === 'success').length
   const pendingCount = tasks.filter((task) => task.status === 'pending').length
@@ -225,6 +254,8 @@ export default function TaskCenter() {
                   options={[
                     { value: 'all', label: '全部状态' },
                     { value: 'running', label: '运行中' },
+                    { value: 'cancel_requested', label: '停止中' },
+                    { value: 'paused', label: '已暂停' },
                     { value: 'pending', label: '等待中' },
                     { value: 'success', label: '成功' },
                     { value: 'failed', label: '失败' },
@@ -296,6 +327,11 @@ export default function TaskCenter() {
               {selectedTask.status === 'running' ? (
                 <Button danger icon={<StopOutlined />} onClick={() => void handleCancel(selectedTask.id)}>
                   取消
+                </Button>
+              ) : null}
+              {selectedTask.runnerType === 'workflow' && selectedTask.status === 'paused' ? (
+                <Button icon={<ReloadOutlined />} onClick={() => void handleResume(selectedTask.id)}>
+                  继续
                 </Button>
               ) : null}
               {(selectedTask.status === 'failed' || selectedTask.status === 'cancelled') && isTaskRetryable(selectedTask) ? (
@@ -375,3 +411,4 @@ export default function TaskCenter() {
     </WorkspacePage>
   )
 }
+

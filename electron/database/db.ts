@@ -426,6 +426,10 @@ function runMigrations(sqlite: Database.Database) {
       related_entity_id INTEGER,
       runner_type TEXT DEFAULT 'chat',
       retryable INTEGER DEFAULT 0,
+      parent_task_id INTEGER,
+      current_child_task_id INTEGER,
+      control_json TEXT,
+      progress_json TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
@@ -535,6 +539,10 @@ function runMigrations(sqlite: Database.Database) {
   ensureColumn(sqlite, 'revision_tasks', 'updated_at', 'TEXT')
   ensureColumn(sqlite, 'tasks', 'runner_type', "TEXT DEFAULT 'chat'")
   ensureColumn(sqlite, 'tasks', 'retryable', 'INTEGER DEFAULT 0')
+  ensureColumn(sqlite, 'tasks', 'parent_task_id', 'INTEGER')
+  ensureColumn(sqlite, 'tasks', 'current_child_task_id', 'INTEGER')
+  ensureColumn(sqlite, 'tasks', 'control_json', 'TEXT')
+  ensureColumn(sqlite, 'tasks', 'progress_json', 'TEXT')
 
   ensureIndexes(sqlite)
   migrateWorldRules(sqlite)
@@ -594,6 +602,10 @@ function validateRequiredSchema(sqlite: Database.Database) {
     {
       tableName: 'revision_tasks',
       columns: ['task_source', 'task_type', 'status', 'severity', 'title', 'updated_at'],
+    },
+    {
+      tableName: 'tasks',
+      columns: ['runner_type', 'retryable', 'parent_task_id', 'current_child_task_id', 'control_json', 'progress_json'],
     },
   ]
 
@@ -664,6 +676,15 @@ function ensureIndexes(sqlite: Database.Database) {
 
     CREATE INDEX IF NOT EXISTS idx_revision_tasks_novel_status
     ON revision_tasks (novel_id, status, updated_at, id);
+
+    CREATE INDEX IF NOT EXISTS idx_tasks_novel_updated
+    ON tasks (novel_id, updated_at, id);
+
+    CREATE INDEX IF NOT EXISTS idx_tasks_status_updated
+    ON tasks (status, updated_at, id);
+
+    CREATE INDEX IF NOT EXISTS idx_tasks_parent
+    ON tasks (parent_task_id, created_at, id);
   `)
 }
 
@@ -874,7 +895,9 @@ function backfillContextMetadata(sqlite: Database.Database) {
   sqlite.exec(`
     UPDATE tasks
     SET runner_type = COALESCE(NULLIF(runner_type, ''), 'chat'),
-        retryable = COALESCE(retryable, 0)
+        retryable = COALESCE(retryable, 0),
+        control_json = COALESCE(control_json, '{}'),
+        progress_json = COALESCE(progress_json, '{}')
   `)
 }
 

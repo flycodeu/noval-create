@@ -374,6 +374,10 @@ export const tasks = sqliteTable('tasks', {
   relatedEntityId: integer('related_entity_id'),
   runnerType: text('runner_type').default('chat'),
   retryable: integer('retryable').default(0),
+  parentTaskId: integer('parent_task_id'),
+  currentChildTaskId: integer('current_child_task_id'),
+  controlJson: text('control_json'),
+  progressJson: text('progress_json'),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
 })

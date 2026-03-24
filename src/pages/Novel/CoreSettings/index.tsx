@@ -100,6 +100,10 @@ function compactText(value?: string | null, max = 44): string {
   return text.length > max ? `${text.slice(0, max)}...` : text
 }
 
+function normalizeText(value?: string | null): string {
+  return value?.trim() || ''
+}
+
 function clampBatchCount(value: unknown): number {
   const numeric = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(numeric)) return DEFAULT_SUBPLOT_BATCH_COUNT
@@ -276,16 +280,16 @@ export default function CoreSettings({ novelId }: Props) {
     try {
       const payload = buildStorySettingsPayload({
         storyDesign: {
-          storyGoal: values.story_goal.trim(),
-          coreConflict: values.core_conflict.trim(),
-          mainPlot: values.main_plot.trim(),
+          storyGoal: normalizeText(values.story_goal),
+          coreConflict: normalizeText(values.core_conflict),
+          mainPlot: normalizeText(values.main_plot),
           subPlotsList: subplots,
           subPlotsText: buildLegacySubplotText(subplots),
           rhythmSetup: values.rhythm_setup,
           rhythmConflict: values.rhythm_conflict,
           rhythmEnding: values.rhythm_ending,
           endingType: values.ending_type || undefined,
-          ending: values.ending.trim(),
+          ending: normalizeText(values.ending),
         },
       }, currentNovel?.settingsJson)
 
