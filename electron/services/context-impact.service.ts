@@ -204,11 +204,12 @@ function collectChapterRelatedIssues(
   const db = getDb()
   const report = buildNovelConsistencyReport(novelId)
   const chapterRows = db.select().from(chapters).where(eq(chapters.novelId, novelId)).all()
+  const currentChapter = chapterRows.find((item) => item.id === chapterId)
   const chapterIdToNum = new Map(chapterRows.map((chapter) => [chapter.id, chapter.chapterNum]))
   const eventRows = db.select().from(timelineEvents).where(eq(timelineEvents.novelId, novelId)).all()
   const relatedEvents = eventRows.filter((event) => {
-    if (event.partId && event.partId === chapter.partId) return true
-    if (event.volumeId && event.volumeId === chapter.volumeId) return true
+    if (currentChapter?.partId && event.partId === currentChapter.partId) return true
+    if (currentChapter?.volumeId && event.volumeId === currentChapter.volumeId) return true
     if (event.chapterStartId === chapterId || event.chapterEndId === chapterId) return true
     const startNum = event.chapterStartId ? chapterIdToNum.get(event.chapterStartId) : undefined
     const endNum = event.chapterEndId ? chapterIdToNum.get(event.chapterEndId) : undefined

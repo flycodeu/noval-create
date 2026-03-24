@@ -8,6 +8,7 @@ import {
   novels,
   storyItems,
   storyMemoryCheckpoints,
+  storyParts,
   storyVolumes,
   timelineEvents,
 } from '../database/schema'

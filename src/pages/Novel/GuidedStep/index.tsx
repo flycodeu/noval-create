@@ -12,7 +12,10 @@ import {
   TeamOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
+import { parseProjectBriefSnapshot } from '../../../shared/project-brief'
+import { parseThemeVoiceSnapshot } from '../../../shared/theme-voice'
 import { useNovelStore } from '../../../stores/novel.store'
+import { useWorkspaceStore } from '../../../stores/workspace.store'
 import {
   WorkspaceContextSummary,
   WorkspaceMetric,
@@ -26,8 +29,10 @@ import {
   isCharacterRosterReady,
   isItemsEquipmentReady,
   isMapStructureReady,
+  isProjectBriefReady,
   isStoryCoreReady,
   isStoryPlotReady,
+  isStoryThreadsReady,
   isWorldFoundationReady,
   loadWorkflowStats,
   parseStorySettings,
@@ -50,42 +55,57 @@ interface BasicsFormValues {
 
 const STEP_META: Record<GuidedWorkflowStepKey, { eyebrow: string; title: string; description: string }> = {
   basics: {
-    eyebrow: '第 1 步 / 8',
+    eyebrow: '第 1 步 / 11',
     title: '先把作品底盘说清楚',
     description: '这里只保留书名、简介和背景，不把别的功能堆进来。',
   },
+  'project-brief': {
+    eyebrow: '第 2 步 / 11',
+    title: '先统一这本书的产品定义',
+    description: '先写清服务谁、承诺什么、靠什么被点开，以及哪些东西绝对不能写偏。',
+  },
   'story-core': {
-    eyebrow: '第 2 步 / 8',
+    eyebrow: '第 3 步 / 11',
     title: '基础设定先钉住',
     description: '先写 premise、主角起点和底层约束，不提前写剧情。',
   },
+  'theme-voice': {
+    eyebrow: '第 4 步 / 11',
+    title: '把主题与文风钉成硬规则',
+    description: '先固定主题、情感核心、视角、时态和语言禁区，减少口吻漂移与 AI 腔。',
+  },
   'world-foundation': {
-    eyebrow: '第 3 步 / 8',
+    eyebrow: '第 5 步 / 11',
     title: '统一世界规则口径',
     description: '先把时间、势力、语言边界和题材规则定稳。',
   },
   'map-structure': {
-    eyebrow: '第 4 步 / 8',
+    eyebrow: '第 6 步 / 11',
     title: '先搭地点骨架',
     description: '先让人物和事件有真实落点，再去细化情节。',
   },
   'character-roster': {
-    eyebrow: '第 5 步 / 8',
+    eyebrow: '第 7 步 / 11',
     title: '补齐关键角色',
     description: '主角和关键对位角色先落地，别让剧情靠空气推进。',
   },
   'items-equipment': {
-    eyebrow: '第 6 步 / 8',
+    eyebrow: '第 8 步 / 11',
     title: '补关键物品与资源',
     description: '道具、资源和装备必须服务冲突，不是事后装饰。',
   },
+  'story-threads': {
+    eyebrow: '第 9 步 / 11',
+    title: '把长线推进整理成线程',
+    description: '主线、支线、悬念和关系线都要挂成可追踪线程，后面的结构和正文才不会失忆。',
+  },
   'story-plot': {
-    eyebrow: '第 7 步 / 8',
+    eyebrow: '第 10 步 / 11',
     title: '现在再做故事设计',
     description: '资产到位之后，再统一设计主线、支线、节奏和结局。',
   },
   'write-start': {
-    eyebrow: '第 8 步 / 8',
+    eyebrow: '第 11 步 / 11',
     title: '转入结构与写作',
     description: '有了骨架和资产后，再进入结构页、时间轴和正文页。',
   },
@@ -94,6 +114,7 @@ const STEP_META: Record<GuidedWorkflowStepKey, { eyebrow: string; title: string;
 export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
   const navigate = useNavigate()
   const { currentNovel, setCurrentNovel } = useNovelStore()
+  const { setMode } = useWorkspaceStore()
   const [form] = Form.useForm<BasicsFormValues>()
   const [stats, setStats] = useState<WorkflowStats>(EMPTY_WORKFLOW_STATS)
   const [savingBasics, setSavingBasics] = useState(false)
@@ -102,6 +123,14 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
   const settings = useMemo(
     () => parseStorySettings(currentNovel?.settingsJson),
     [currentNovel?.settingsJson],
+  )
+  const projectBrief = useMemo(
+    () => parseProjectBriefSnapshot(currentNovel?.projectBriefJson),
+    [currentNovel?.projectBriefJson],
+  )
+  const themeVoice = useMemo(
+    () => parseThemeVoiceSnapshot(currentNovel?.themeVoiceJson),
+    [currentNovel?.themeVoiceJson],
   )
   const stepMeta = STEP_META[stepKey]
   const progress = useMemo(
@@ -140,6 +169,11 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
     />
   )
 
+  const openProPage = (page: string) => {
+    setMode('pro')
+    navigate(`/novels/${novelId}/${page}`)
+  }
+
   const handleSaveBasics = async () => {
     const values = await form.validateFields()
     setSavingBasics(true)
@@ -176,7 +210,7 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
       const updatedStats = await loadWorkflowStats(novelId)
       setStats(updatedStats)
       message.success('首章已创建，正在进入正文页。')
-      navigate(`/novels/${novelId}/writing`)
+      openProPage('writing')
     } catch (error) {
       console.error(error)
       message.error(error instanceof Error ? error.message : '创建首章失败。')
@@ -199,8 +233,8 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
             <Button type="primary" icon={<SaveOutlined />} loading={savingBasics} onClick={() => void handleSaveBasics()}>
               保存这一页
             </Button>
-            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/core-settings`)}>
-              去基础设定
+            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/project-brief`)}>
+              去项目立项
             </Button>
           </Space>
         )}
@@ -247,6 +281,65 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
     )
   }
 
+  if (stepKey === 'project-brief') {
+    return (
+      <WorkspacePage
+        className="guided-step guided-step--project-brief"
+        layout="wide"
+        heroVariant="compact"
+        eyebrow={stepMeta.eyebrow}
+        title={stepMeta.title}
+        description={stepMeta.description}
+        actions={(
+          <Space wrap>
+            <Button type="primary" icon={<AppstoreOutlined />} onClick={() => openProPage('project-brief')}>
+              打开项目立项
+            </Button>
+            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/story-core`)}>
+              去基础设定
+            </Button>
+          </Space>
+        )}
+        contextSummary={contextSummary}
+        metrics={(
+          <>
+            <WorkspaceMetric label="完成度" value={`${projectBrief.readyCount}/${progress.totalCount}`} tone="warm" hint="平台模式、赛道、读者、承诺、卖点、参考系" />
+            <WorkspaceMetric label="基础底盘" value={isBasicsReady(currentNovel) ? '已完成' : '待补齐'} hint="先把简介和背景写稳，再做立项，读者承诺才不会悬空。" />
+          </>
+        )}
+      >
+        {!isBasicsReady(currentNovel) ? (
+          <Alert type="warning" showIcon message="基础信息还没补齐。建议先把书名、简介和背景写稳，再统一项目立项。" />
+        ) : null}
+
+        <WorkspacePanel title="立项检查">
+          <div className="guided-step__fact-grid">
+            <div className="guided-step__fact-card">
+              <span>平台模式</span>
+              <strong>{projectBrief.platformMode ? '已填写' : '未填写'}</strong>
+              <small>{projectBrief.platformMode || '先确定这本书是通用、网文长篇还是出版形态。'}</small>
+            </div>
+            <div className="guided-step__fact-card">
+              <span>目标赛道</span>
+              <strong>{projectBrief.targetAudience ? '已填写' : '未填写'}</strong>
+              <small>{projectBrief.targetAudience || '写清主要服务的赛道和阅读偏好。'}</small>
+            </div>
+            <div className="guided-step__fact-card">
+              <span>读者承诺</span>
+              <strong>{projectBrief.readerPromise ? '已填写' : '未填写'}</strong>
+              <small>{projectBrief.readerPromise || '告诉系统读者点开后会稳定得到什么体验。'}</small>
+            </div>
+            <div className="guided-step__fact-card">
+              <span>卖点 / 参考</span>
+              <strong>{projectBrief.sellingPoints || projectBrief.compTitles ? '已填写' : '未填写'}</strong>
+              <small>{projectBrief.sellingPoints || projectBrief.compTitles || '卖点必须可执行，参考系必须可对齐。'}</small>
+            </div>
+          </div>
+        </WorkspacePanel>
+      </WorkspacePage>
+    )
+  }
+
   if (stepKey === 'story-core') {
     return (
       <WorkspacePage
@@ -258,11 +351,11 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         description={stepMeta.description}
         actions={(
           <Space wrap>
-            <Button type="primary" icon={<SettingOutlined />} onClick={() => navigate(`/novels/${novelId}/core-settings`)}>
+            <Button type="primary" icon={<SettingOutlined />} onClick={() => openProPage('core-settings')}>
               打开基础设定
             </Button>
-            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/world-rules`)}>
-              去世界规则
+            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/theme-voice`)}>
+              去主题与文风
             </Button>
           </Space>
         )}
@@ -306,6 +399,65 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
     )
   }
 
+  if (stepKey === 'theme-voice') {
+    return (
+      <WorkspacePage
+        className="guided-step guided-step--theme-voice"
+        layout="wide"
+        heroVariant="compact"
+        eyebrow={stepMeta.eyebrow}
+        title={stepMeta.title}
+        description={stepMeta.description}
+        actions={(
+          <Space wrap>
+            <Button type="primary" icon={<EditOutlined />} onClick={() => openProPage('theme-voice')}>
+              打开主题与文风
+            </Button>
+            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/world-foundation`)}>
+              去世界规则
+            </Button>
+          </Space>
+        )}
+        contextSummary={contextSummary}
+        metrics={(
+          <>
+            <WorkspaceMetric label="完成度" value={`${themeVoice.readyCount}/${progress.totalCount}`} tone="warm" hint="主题、情感核心、视角、时态、风格规则、对白规则" />
+            <WorkspaceMetric label="立项前置" value={isProjectBriefReady(currentNovel) ? '已完成' : '建议先补'} hint="Project Brief 越清楚，Voice Bible 越贴近目标读者和产品承诺。" />
+          </>
+        )}
+      >
+        {!isProjectBriefReady(currentNovel) ? (
+          <Alert type="info" showIcon message="建议先完成项目立项，再来定义文风。这样主题和口吻会更贴合目标读者。" />
+        ) : null}
+
+        <WorkspacePanel title="主题与文风检查">
+          <div className="guided-step__fact-grid">
+            <div className="guided-step__fact-card">
+              <span>主题命题</span>
+              <strong>{themeVoice.theme ? '已填写' : '未填写'}</strong>
+              <small>{themeVoice.theme || '写这本书真正要持续回答的命题。'}</small>
+            </div>
+            <div className="guided-step__fact-card">
+              <span>情感核心</span>
+              <strong>{themeVoice.emotionalCore ? '已填写' : '未填写'}</strong>
+              <small>{themeVoice.emotionalCore || '写读者最稳定会收到的情感回报。'}</small>
+            </div>
+            <div className="guided-step__fact-card">
+              <span>视角 / 时态</span>
+              <strong>{themeVoice.pov && themeVoice.tense ? '已填写' : '未填写'}</strong>
+              <small>{[themeVoice.pov, themeVoice.tense].filter(Boolean).join(' / ') || '先固定叙事视角和时态，长篇口吻才不会漂移。'}</small>
+            </div>
+            <div className="guided-step__fact-card">
+              <span>语言规则</span>
+              <strong>{themeVoice.styleRules && themeVoice.dialogueRules ? '已填写' : '未填写'}</strong>
+              <small>{themeVoice.styleRules || themeVoice.dialogueRules || '把风格与对白约束写成可执行规则，而不是形容词。'}</small>
+            </div>
+          </div>
+        </WorkspacePanel>
+      </WorkspacePage>
+    )
+  }
+
   if (stepKey === 'world-foundation') {
     return (
       <WorkspacePage
@@ -317,10 +469,10 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         description={stepMeta.description}
         actions={(
           <Space wrap>
-            <Button type="primary" icon={<GlobalOutlined />} onClick={() => navigate(`/novels/${novelId}/world-rules`)}>
+            <Button type="primary" icon={<GlobalOutlined />} onClick={() => openProPage('world-rules')}>
               打开世界规则
             </Button>
-            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/map`)}>
+            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/map-structure`)}>
               去地图结构
             </Button>
           </Space>
@@ -360,10 +512,10 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         description={stepMeta.description}
         actions={(
           <Space wrap>
-            <Button type="primary" icon={<EnvironmentOutlined />} onClick={() => navigate(`/novels/${novelId}/map`)}>
+            <Button type="primary" icon={<EnvironmentOutlined />} onClick={() => openProPage('map')}>
               打开地图页
             </Button>
-            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/characters`)}>
+            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/character-roster`)}>
               去角色系统
             </Button>
           </Space>
@@ -394,10 +546,10 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         description={stepMeta.description}
         actions={(
           <Space wrap>
-            <Button type="primary" icon={<TeamOutlined />} onClick={() => navigate(`/novels/${novelId}/characters`)}>
+            <Button type="primary" icon={<TeamOutlined />} onClick={() => openProPage('characters')}>
               打开角色页
             </Button>
-            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/items`)}>
+            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/items-equipment`)}>
               去物品装备
             </Button>
           </Space>
@@ -428,11 +580,11 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         description={stepMeta.description}
         actions={(
           <Space wrap>
-            <Button type="primary" icon={<AppstoreOutlined />} onClick={() => navigate(`/novels/${novelId}/items`)}>
+            <Button type="primary" icon={<AppstoreOutlined />} onClick={() => openProPage('items')}>
               打开物品页
             </Button>
-            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/story-design`)}>
-              去故事设计
+            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/story-threads`)}>
+              去故事线程
             </Button>
           </Space>
         )}
@@ -451,6 +603,53 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
     )
   }
 
+  if (stepKey === 'story-threads') {
+    return (
+      <WorkspacePage
+        className="guided-step guided-step--story-threads"
+        layout="wide"
+        heroVariant="compact"
+        eyebrow={stepMeta.eyebrow}
+        title={stepMeta.title}
+        description={stepMeta.description}
+        actions={(
+          <Space wrap>
+            <Button type="primary" icon={<BarsOutlined />} onClick={() => openProPage('threads')}>
+              打开故事线程
+            </Button>
+            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/story-plot`)}>
+              去故事设计
+            </Button>
+          </Space>
+        )}
+        contextSummary={contextSummary}
+        metrics={(
+          <>
+            <WorkspaceMetric label="线程数" value={stats.threadCount} tone="warm" hint={stats.threadCount > 0 ? '已经有可追踪的长线。' : '还没有任何线程，后续最容易丢伏笔和关系线。'} />
+            <WorkspaceMetric label="前置资产" value={isItemsEquipmentReady(stats) ? '已完成' : '待完成'} hint="人物、物品和地点越完整，线程越不会写成空话。" />
+          </>
+        )}
+      >
+        {!isItemsEquipmentReady(stats) ? (
+          <Alert type="warning" showIcon message="建议先把关键物品与资源补齐，再整理故事线程。" />
+        ) : null}
+
+        <WorkspacePanel title="线程页要解决的问题">
+          <div className="guided-step__checklist">
+            <div className="guided-step__checkitem guided-step__checkitem--done">
+              <div className="guided-step__checkhead"><strong>把长线写成对象</strong></div>
+              <p>主线、支线、悬念、关系线都要写清开始点、当前状态、回收条件和目标章位。</p>
+            </div>
+            <div className="guided-step__checkitem">
+              <div className="guided-step__checkhead"><strong>为结构和正文供血</strong></div>
+              <p>结构页、时间轴和正文都应该回查这些线程，而不是每一页各写各的推进链。</p>
+            </div>
+          </div>
+        </WorkspacePanel>
+      </WorkspacePage>
+    )
+  }
+
   if (stepKey === 'story-plot') {
     return (
       <WorkspacePage
@@ -462,11 +661,11 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         description={stepMeta.description}
         actions={(
           <Space wrap>
-            <Button type="primary" icon={<BarsOutlined />} onClick={() => navigate(`/novels/${novelId}/story-design`)}>
+            <Button type="primary" icon={<BarsOutlined />} onClick={() => openProPage('story-design')}>
               打开故事设计
             </Button>
-            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/structure`)}>
-              去结构页
+            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/write-start`)}>
+              去开始写作
             </Button>
           </Space>
         )}
@@ -517,7 +716,7 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
       actions={(
         <Space wrap>
           {stats.chapterCount > 0 ? (
-            <Button type="primary" icon={<EditOutlined />} onClick={() => navigate(`/novels/${novelId}/writing`)}>
+            <Button type="primary" icon={<EditOutlined />} onClick={() => openProPage('writing')}>
               进入正文页
             </Button>
           ) : (
@@ -525,10 +724,10 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
               创建首章
             </Button>
           )}
-          <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/structure`)}>
+          <Button icon={<ArrowRightOutlined />} onClick={() => openProPage('structure')}>
             打开结构页
           </Button>
-          <Button onClick={() => navigate(`/novels/${novelId}/timeline`)}>
+          <Button onClick={() => openProPage('timeline')}>
             打开时间轴
           </Button>
         </Space>
@@ -538,6 +737,7 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         <>
           <WorkspaceMetric label="大纲" value={stats.outlineCount} tone="warm" hint="先把故事弧和结构分层压稳。" />
           <WorkspaceMetric label="时间轴" value={stats.timelineCount} hint="记清谁在何时何地做了什么。" />
+          <WorkspaceMetric label="线程" value={stats.threadCount} hint={isStoryThreadsReady(stats) ? '主线、支线和回收线已经有统一挂点。' : '建议至少先建立第一批故事线程。'} />
           <WorkspaceMetric label="章节" value={stats.chapterCount} hint={stats.chapterCount > 0 ? '已经可以继续写正文。' : '还没有首章。'} />
         </>
       )}
@@ -554,14 +754,19 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
             <small>先有 premise，正文才不会一路跑偏。</small>
           </div>
           <div className="guided-step__fact-card">
+            <span>主题与文风</span>
+            <strong>{themeVoice.readyCount > 0 ? `${themeVoice.readyCount}/6` : '待补齐'}</strong>
+            <small>正文越长，越依赖稳定的视角、时态和语言边界。</small>
+          </div>
+          <div className="guided-step__fact-card">
             <span>故事设计</span>
             <strong>{isStoryPlotReady(currentNovel) ? '已完成' : '待补齐'}</strong>
             <small>先有目标和冲突，结构页才有可拆内容。</small>
           </div>
           <div className="guided-step__fact-card">
             <span>结构资产</span>
-            <strong>{stats.outlineCount + stats.timelineCount}</strong>
-            <small>大纲和时间轴越完整，正文越稳。</small>
+            <strong>{stats.outlineCount + stats.timelineCount + stats.threadCount}</strong>
+            <small>大纲、时间轴和线程越完整，正文越稳。</small>
           </div>
           <div className="guided-step__fact-card">
             <span>正文状态</span>

@@ -1,4 +1,4 @@
-import React from 'react'
+﻿import React from 'react'
 
 function joinClassNames(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(' ')
@@ -35,6 +35,8 @@ export function WorkspacePage({
   className?: string
   children: React.ReactNode
 }) {
+  const hasAside = Boolean(aside)
+
   return (
     <div className={joinClassNames('novel-workspace', `novel-workspace--${layout}`, className)}>
       <section className={joinClassNames('novel-hero', heroVariant === 'compact' && 'novel-hero--compact')}>
@@ -51,8 +53,8 @@ export function WorkspacePage({
       <div
         className={joinClassNames(
           'novel-workspace__body',
-          aside && 'novel-workspace__body--with-aside',
-          aside && `novel-workspace__body--aside-${asidePlacement}`,
+          hasAside && 'novel-workspace__body--with-aside',
+          hasAside && `novel-workspace__body--aside-${asidePlacement}`,
           bodyClassName,
         )}
       >

@@ -1,28 +1,30 @@
 import Database from 'better-sqlite3'
-import { drizzle } from 'drizzle-orm/better-sqlite3'
+import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import { app } from 'electron'
 import path from 'path'
 import * as schema from './schema'
 import { normalizeWorldRules, stringifyWorldRules, type GenreWorldRules } from '../../src/shared/genre-system'
 
-let _db: ReturnType<typeof drizzle> | null = null
+type AppDatabase = BetterSQLite3Database<typeof schema>
+
+let _db: AppDatabase | null = null
 let _sqlite: Database.Database | null = null
 
-export function getDb() {
+export function getDb(): AppDatabase {
   if (!_db) {
     throw new Error('Database not initialized. Call initDb() first.')
   }
   return _db
 }
 
-export function getSqlite() {
+export function getSqlite(): Database.Database {
   if (!_sqlite) {
     throw new Error('Database not initialized. Call initDb() first.')
   }
   return _sqlite
 }
 
-export function initDb(): ReturnType<typeof drizzle> {
+export function initDb(): AppDatabase {
   if (_db) return _db
 
   const userDataPath = app.getPath('userData')
@@ -70,7 +72,9 @@ function runMigrations(sqlite: Database.Database) {
       cover_image TEXT,
       user_background TEXT,
       expanded_background TEXT,
+      project_brief_json TEXT,
       settings_json TEXT,
+      theme_voice_json TEXT,
       world_rules_json TEXT,
       style_template_id INTEGER,
       world_template_id INTEGER,
@@ -168,6 +172,28 @@ function runMigrations(sqlite: Database.Database) {
       chapter_end INTEGER,
       arc_goal TEXT,
       arc_summary TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS story_threads (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+      thread_type TEXT DEFAULT 'subplot',
+      title TEXT NOT NULL,
+      summary TEXT,
+      premise TEXT,
+      status TEXT DEFAULT 'planned',
+      priority TEXT DEFAULT 'medium',
+      start_chapter INTEGER,
+      target_payoff_chapter INTEGER,
+      payoff_condition TEXT,
+      current_state TEXT,
+      related_character_ids_json TEXT,
+      related_item_ids_json TEXT,
+      related_timeline_event_ids_json TEXT,
+      notes TEXT,
+      sort_order INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS characters (
@@ -367,6 +393,24 @@ function runMigrations(sqlite: Database.Database) {
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS revision_tasks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+      task_source TEXT DEFAULT 'manual',
+      task_type TEXT DEFAULT 'continuity',
+      status TEXT DEFAULT 'open',
+      severity TEXT DEFAULT 'medium',
+      title TEXT NOT NULL,
+      description TEXT,
+      fix_brief TEXT,
+      related_page TEXT,
+      entity_type TEXT,
+      entity_id INTEGER,
+      chapter_id INTEGER REFERENCES chapters(id) ON DELETE SET NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS tasks (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       novel_id INTEGER,
@@ -407,6 +451,8 @@ function runMigrations(sqlite: Database.Database) {
   ensureColumn(sqlite, 'chapters', 'part_id', 'INTEGER')
   ensureColumn(sqlite, 'chapters', 'compiled_from_segments', 'INTEGER DEFAULT 0')
   ensureColumn(sqlite, 'chapters', 'segment_count', 'INTEGER DEFAULT 0')
+  ensureColumn(sqlite, 'novels', 'project_brief_json', 'TEXT')
+  ensureColumn(sqlite, 'novels', 'theme_voice_json', 'TEXT')
   ensureColumn(sqlite, 'novels', 'context_version', 'INTEGER DEFAULT 1')
   ensureColumn(sqlite, 'chapters', 'context_version', 'INTEGER DEFAULT 1')
   ensureColumn(sqlite, 'chapters', 'stale_reason_json', 'TEXT')
@@ -459,6 +505,34 @@ function runMigrations(sqlite: Database.Database) {
   ensureColumn(sqlite, 'timeline_events', 'chapter_end_id', 'INTEGER REFERENCES chapters(id) ON DELETE SET NULL')
   ensureColumn(sqlite, 'timeline_events', 'segment_id', 'INTEGER REFERENCES chapter_segments(id) ON DELETE SET NULL')
   ensureColumn(sqlite, 'timeline_events', 'anchor_invalid', 'INTEGER DEFAULT 0')
+  ensureColumn(sqlite, 'story_threads', 'thread_type', "TEXT DEFAULT 'subplot'")
+  ensureColumn(sqlite, 'story_threads', 'summary', 'TEXT')
+  ensureColumn(sqlite, 'story_threads', 'premise', 'TEXT')
+  ensureColumn(sqlite, 'story_threads', 'status', "TEXT DEFAULT 'planned'")
+  ensureColumn(sqlite, 'story_threads', 'priority', "TEXT DEFAULT 'medium'")
+  ensureColumn(sqlite, 'story_threads', 'start_chapter', 'INTEGER')
+  ensureColumn(sqlite, 'story_threads', 'target_payoff_chapter', 'INTEGER')
+  ensureColumn(sqlite, 'story_threads', 'payoff_condition', 'TEXT')
+  ensureColumn(sqlite, 'story_threads', 'current_state', 'TEXT')
+  ensureColumn(sqlite, 'story_threads', 'related_character_ids_json', 'TEXT')
+  ensureColumn(sqlite, 'story_threads', 'related_item_ids_json', 'TEXT')
+  ensureColumn(sqlite, 'story_threads', 'related_timeline_event_ids_json', 'TEXT')
+  ensureColumn(sqlite, 'story_threads', 'notes', 'TEXT')
+  ensureColumn(sqlite, 'story_threads', 'sort_order', 'INTEGER DEFAULT 0')
+  ensureColumn(sqlite, 'story_threads', 'created_at', 'TEXT')
+  ensureColumn(sqlite, 'story_threads', 'updated_at', 'TEXT')
+  ensureColumn(sqlite, 'revision_tasks', 'task_source', "TEXT DEFAULT 'manual'")
+  ensureColumn(sqlite, 'revision_tasks', 'task_type', "TEXT DEFAULT 'continuity'")
+  ensureColumn(sqlite, 'revision_tasks', 'status', "TEXT DEFAULT 'open'")
+  ensureColumn(sqlite, 'revision_tasks', 'severity', "TEXT DEFAULT 'medium'")
+  ensureColumn(sqlite, 'revision_tasks', 'description', 'TEXT')
+  ensureColumn(sqlite, 'revision_tasks', 'fix_brief', 'TEXT')
+  ensureColumn(sqlite, 'revision_tasks', 'related_page', 'TEXT')
+  ensureColumn(sqlite, 'revision_tasks', 'entity_type', 'TEXT')
+  ensureColumn(sqlite, 'revision_tasks', 'entity_id', 'INTEGER')
+  ensureColumn(sqlite, 'revision_tasks', 'chapter_id', 'INTEGER REFERENCES chapters(id) ON DELETE SET NULL')
+  ensureColumn(sqlite, 'revision_tasks', 'created_at', 'TEXT')
+  ensureColumn(sqlite, 'revision_tasks', 'updated_at', 'TEXT')
   ensureColumn(sqlite, 'tasks', 'runner_type', "TEXT DEFAULT 'chat'")
   ensureColumn(sqlite, 'tasks', 'retryable', 'INTEGER DEFAULT 0')
 
@@ -470,7 +544,9 @@ function runMigrations(sqlite: Database.Database) {
   backfillContextMetadata(sqlite)
   backfillStoryStructureLinks(sqlite)
   backfillStoryStructureMetadata(sqlite)
+  backfillPlanningWorkspaceData(sqlite)
   backfillTimelineStructureAnchors(sqlite)
+  validateRequiredSchema(sqlite)
 }
 
 function ensureColumn(
@@ -483,6 +559,63 @@ function ensureColumn(
   if (columns.some((column) => column.name === columnName)) return
 
   sqlite.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnDefinition};`)
+}
+
+function hasTable(sqlite: Database.Database, tableName: string): boolean {
+  const row = sqlite.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`).get(tableName)
+  return Boolean(row)
+}
+
+function getColumnNames(sqlite: Database.Database, tableName: string): Set<string> {
+  if (!hasTable(sqlite, tableName)) {
+    return new Set()
+  }
+
+  const rows = sqlite.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>
+  return new Set(rows.map((row) => row.name))
+}
+
+function validateRequiredSchema(sqlite: Database.Database) {
+  const requirements = [
+    { tableName: 'novels', columns: ['project_brief_json', 'theme_voice_json'] },
+    {
+      tableName: 'story_threads',
+      columns: [
+        'thread_type',
+        'title',
+        'status',
+        'priority',
+        'related_character_ids_json',
+        'related_item_ids_json',
+        'related_timeline_event_ids_json',
+        'sort_order',
+      ],
+    },
+    {
+      tableName: 'revision_tasks',
+      columns: ['task_source', 'task_type', 'status', 'severity', 'title', 'updated_at'],
+    },
+  ]
+
+  const missing: string[] = []
+
+  requirements.forEach(({ tableName, columns }) => {
+    if (!hasTable(sqlite, tableName)) {
+      missing.push(`table ${tableName}`)
+      return
+    }
+
+    const existing = getColumnNames(sqlite, tableName)
+    columns.forEach((columnName) => {
+      if (!existing.has(columnName)) {
+        missing.push(`column ${tableName}.${columnName}`)
+      }
+    })
+  })
+
+  if (missing.length > 0) {
+    throw new Error(`Database schema migration incomplete. Missing ${missing.join(', ')}`)
+  }
 }
 
 function ensureIndexes(sqlite: Database.Database) {
@@ -519,6 +652,18 @@ function ensureIndexes(sqlite: Database.Database) {
 
     CREATE INDEX IF NOT EXISTS idx_story_memory_checkpoints_scope
     ON story_memory_checkpoints (novel_id, scope_type, scope_id, version);
+
+    CREATE INDEX IF NOT EXISTS idx_story_threads_novel_order
+    ON story_threads (novel_id, sort_order, id);
+
+    CREATE INDEX IF NOT EXISTS idx_story_threads_novel_status
+    ON story_threads (novel_id, status, sort_order, id);
+
+    CREATE INDEX IF NOT EXISTS idx_revision_tasks_novel_updated
+    ON revision_tasks (novel_id, updated_at, id);
+
+    CREATE INDEX IF NOT EXISTS idx_revision_tasks_novel_status
+    ON revision_tasks (novel_id, status, updated_at, id);
   `)
 }
 
@@ -747,6 +892,27 @@ function backfillStoryStructureMetadata(sqlite: Database.Database) {
         forbidden_directions_json = COALESCE(forbidden_directions_json, '[]'),
         version = COALESCE(version, 1),
         stale = COALESCE(stale, 0)
+  `)
+}
+
+function backfillPlanningWorkspaceData(sqlite: Database.Database) {
+  sqlite.exec(`
+    UPDATE story_threads
+    SET thread_type = COALESCE(NULLIF(thread_type, ''), 'subplot'),
+        status = COALESCE(NULLIF(status, ''), 'planned'),
+        priority = COALESCE(NULLIF(priority, ''), 'medium'),
+        related_character_ids_json = COALESCE(related_character_ids_json, '[]'),
+        related_item_ids_json = COALESCE(related_item_ids_json, '[]'),
+        related_timeline_event_ids_json = COALESCE(related_timeline_event_ids_json, '[]'),
+        sort_order = COALESCE(sort_order, 0)
+  `)
+
+  sqlite.exec(`
+    UPDATE revision_tasks
+    SET task_source = COALESCE(NULLIF(task_source, ''), 'manual'),
+        task_type = COALESCE(NULLIF(task_type, ''), 'continuity'),
+        status = COALESCE(NULLIF(status, ''), 'open'),
+        severity = COALESCE(NULLIF(severity, ''), 'medium')
   `)
 }
 

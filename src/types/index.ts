@@ -14,10 +14,30 @@ import type {
   PremiseGenerationResult,
 } from '../shared/premise-generation'
 import type {
+  ProjectBriefDocument,
+  ProjectBriefSnapshot,
+} from '../shared/project-brief'
+import type {
+  ProjectBriefGenerationRequest,
+  ProjectBriefGenerationResult,
+} from '../shared/project-brief-generation'
+import type {
+  StoryThreadBatchGenerateOptions,
+  StoryThreadBatchGenerationResult,
+} from '../shared/story-thread-generation'
+import type {
   WorldRulesGenerationProgressEvent,
   WorldRulesGenerationRequest,
   WorldRulesGenerationResult,
 } from '../shared/world-rules-generation'
+import type {
+  ThemeVoiceDocument,
+  ThemeVoiceSnapshot,
+} from '../shared/theme-voice'
+import type {
+  ThemeVoiceGenerationRequest,
+  ThemeVoiceGenerationResult,
+} from '../shared/theme-voice-generation'
 
 export type {
   CoreSettingsGenerationProgressEvent,
@@ -30,10 +50,30 @@ export type {
   PremiseGenerationResult,
 } from '../shared/premise-generation'
 export type {
+  ProjectBriefDocument,
+  ProjectBriefSnapshot,
+} from '../shared/project-brief'
+export type {
+  ProjectBriefGenerationRequest,
+  ProjectBriefGenerationResult,
+} from '../shared/project-brief-generation'
+export type {
+  StoryThreadBatchGenerateOptions,
+  StoryThreadBatchGenerationResult,
+} from '../shared/story-thread-generation'
+export type {
   WorldRulesGenerationProgressEvent,
   WorldRulesGenerationRequest,
   WorldRulesGenerationResult,
 } from '../shared/world-rules-generation'
+export type {
+  ThemeVoiceDocument,
+  ThemeVoiceSnapshot,
+} from '../shared/theme-voice'
+export type {
+  ThemeVoiceGenerationRequest,
+  ThemeVoiceGenerationResult,
+} from '../shared/theme-voice-generation'
 
 export interface Novel {
   id: number
@@ -48,7 +88,9 @@ export interface Novel {
   coverImage?: string
   userBackground?: string
   expandedBackground?: string
+  projectBriefJson?: string
   settingsJson?: string
+  themeVoiceJson?: string
   worldRulesJson?: string
   styleTemplateId?: number
   worldTemplateId?: number
@@ -444,6 +486,86 @@ export interface StoryArc {
   arcSummary?: string
 }
 
+export interface StoryThread {
+  id: number
+  novelId: number
+  threadType: 'main' | 'subplot' | 'mystery' | 'payoff' | 'relationship'
+  title: string
+  summary?: string
+  premise?: string
+  status: 'planned' | 'active' | 'resolved' | 'stalled' | 'abandoned'
+  priority: 'high' | 'medium' | 'low'
+  startChapter?: number
+  targetPayoffChapter?: number
+  payoffCondition?: string
+  currentState?: string
+  relatedCharacterIdsJson?: string
+  relatedItemIdsJson?: string
+  relatedTimelineEventIdsJson?: string
+  notes?: string
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface StoryThreadQueryInput {
+  novelId: number
+  threadType?: StoryThread['threadType']
+  status?: StoryThread['status']
+  keyword?: string
+  page?: number
+  pageSize?: number
+}
+
+export interface StoryThreadStats {
+  total: number
+  activeCount: number
+  resolvedCount: number
+  stalledCount: number
+  overdueCount: number
+}
+
+export interface RevisionTask {
+  id: number
+  novelId: number
+  taskSource: 'manual' | 'system'
+  taskType: string
+  status: 'open' | 'in_progress' | 'resolved' | 'ignored'
+  severity: 'high' | 'medium' | 'low'
+  title: string
+  description?: string
+  fixBrief?: string
+  relatedPage?: string
+  entityType?: string
+  entityId?: number
+  chapterId?: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface RevisionTaskQueryInput {
+  novelId: number
+  taskSource?: RevisionTask['taskSource']
+  status?: RevisionTask['status']
+  severity?: RevisionTask['severity']
+  keyword?: string
+  page?: number
+  pageSize?: number
+}
+
+export interface RevisionTaskStats {
+  total: number
+  openCount: number
+  inProgressCount: number
+  resolvedCount: number
+  blockerCount: number
+}
+
+export interface RevisionCenterSnapshot {
+  tasks: RevisionTask[]
+  stats: RevisionTaskStats
+}
+
 export interface StoryVolume {
   id: number
   novelId: number
@@ -692,7 +814,7 @@ export interface StoryMemorySnapshot {
 
 export type SubPlot = SubPlotDraft
 
-// AI 璇勫垎缁撴灉绫诲瀷
+// AI 评分结果类型
 export interface AIScoreDimension {
   name: string
   score: number
@@ -703,13 +825,13 @@ export interface AIScoreDimension {
 export interface AIScoreResult {
   dimensions: AIScoreDimension[]
   ai_like_rate: number
-  repetition_risk: '浣? | '涓? | '楂?
+  repetition_risk: '低' | '中' | '高'
   overall_score: number
   overall_feedback: string
   top_fixes: string[]
 }
 
-// 鎵╁睍 window 绫诲瀷
+// 扩展 window 类型
 declare global {
   interface Window {
     electron: {
@@ -833,6 +955,26 @@ declare global {
         generateChapterOutlines: (arcId: number, options?: OutlineChapterBatchGenerateOptions) => Promise<OutlineChapterBatchGenerationResult>
         clear: (novelId: number) => Promise<void>
       }
+      thread: {
+        list: (novelId: number) => Promise<StoryThread[]>
+        query: (filters: StoryThreadQueryInput) => Promise<PagedResult<StoryThread>>
+        getStats: (filters: StoryThreadQueryInput) => Promise<StoryThreadStats>
+        get: (id: number) => Promise<StoryThread | null>
+        generate: (novelId: number, options?: StoryThreadBatchGenerateOptions) => Promise<StoryThreadBatchGenerationResult>
+        create: (novelId: number, data: Partial<StoryThread>) => Promise<number>
+        update: (id: number, data: Partial<StoryThread>) => Promise<void>
+        delete: (id: number) => Promise<void>
+      }
+      revision: {
+        list: (novelId: number) => Promise<RevisionTask[]>
+        query: (filters: RevisionTaskQueryInput) => Promise<PagedResult<RevisionTask>>
+        getStats: (filters: RevisionTaskQueryInput) => Promise<RevisionTaskStats>
+        getSnapshot: (novelId: number) => Promise<RevisionCenterSnapshot>
+        get: (id: number) => Promise<RevisionTask | null>
+        create: (novelId: number, data: Partial<RevisionTask>) => Promise<number>
+        update: (id: number, data: Partial<RevisionTask>) => Promise<void>
+        delete: (id: number) => Promise<void>
+      }
       model: {
         list: () => Promise<ModelConfig[]>
         create: (data: Partial<ModelConfig>) => Promise<number>
@@ -862,6 +1004,8 @@ declare global {
         expandBackground: (input: unknown) => Promise<{ expanded_background: string; titles: string[]; synopsis: string }>
         generateCoreSettings: (data: CoreSettingsGenerationRequest) => Promise<CoreSettingsGenerationResult>
         generatePremise: (data: PremiseGenerationRequest) => Promise<PremiseGenerationResult>
+        generateProjectBrief: (data: ProjectBriefGenerationRequest) => Promise<ProjectBriefGenerationResult>
+        generateThemeVoice: (data: ThemeVoiceGenerationRequest) => Promise<ThemeVoiceGenerationResult>
         generateWorldRules: (data: WorldRulesGenerationRequest) => Promise<WorldRulesGenerationResult>
         generateCharacter: (novelId: number, opts: unknown) => Promise<number>
         generateRelations: (novelId: number) => Promise<void>
@@ -881,4 +1025,5 @@ declare global {
     }
   }
 }
+
 

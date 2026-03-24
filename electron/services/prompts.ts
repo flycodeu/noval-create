@@ -1,4 +1,4 @@
-import {
+﻿import {
   GLOBAL_WRITING_RULES,
   expandBackgroundPrompt as rawExpandBackgroundPrompt,
   protagonistPrompt as rawProtagonistPrompt,
@@ -29,66 +29,61 @@ import { applyPromptOverride } from './prompt-override.service'
 
 export { GLOBAL_WRITING_RULES }
 
+type StoryArcsPromptParams = Parameters<typeof rawStoryArcsPrompt>[0]
+type ChapterOutlinePromptParams = Parameters<typeof rawChapterOutlinePrompt>[0]
+type ChapterWritingPromptParams = Parameters<typeof rawChapterWritingPrompt>[0]
+
 export function expandBackgroundPrompt(params: {
   userBackground: string
   genre: string
   worldTemplateSummary?: string
 }): string {
-  const fallback = rawExpandBackgroundPrompt(params)
-  return applyPromptOverride('expandBackground', fallback, params)
+  const normalizedParams = {
+    ...params,
+    worldTemplateSummary: params.worldTemplateSummary || '',
+  }
+  const fallback = rawExpandBackgroundPrompt(normalizedParams)
+  return applyPromptOverride('expandBackground', fallback, normalizedParams)
 }
 
 export function protagonistPrompt(params: ProtagonistPromptInput): string {
   const fallback = rawProtagonistPrompt(params)
-  return applyPromptOverride('protagonist', fallback, params as Record<string, unknown>)
+  return applyPromptOverride('protagonist', fallback, params as unknown as Record<string, unknown>)
 }
 
 export function batchCharacterPrompt(params: BatchCharacterPromptInput): string {
   const fallback = rawBatchCharacterPrompt(params)
-  return applyPromptOverride('batchCharacter', fallback, params as Record<string, unknown>)
+  return applyPromptOverride('batchCharacter', fallback, params as unknown as Record<string, unknown>)
 }
 
 export function regenerateCharacterPrompt(params: RegenerateCharacterPromptInput): string {
   const fallback = rawRegenerateCharacterPrompt(params)
-  return applyPromptOverride('regenerateCharacter', fallback, params as Record<string, unknown>)
+  return applyPromptOverride('regenerateCharacter', fallback, params as unknown as Record<string, unknown>)
 }
 
 export function characterRelationsPrompt(params: CharacterRelationsPromptInput): string {
   const fallback = rawCharacterRelationsPrompt(params)
-  return applyPromptOverride('characterRelations', fallback, params as Record<string, unknown>)
+  return applyPromptOverride('characterRelations', fallback, params as unknown as Record<string, unknown>)
 }
 
 export function mapGenerationPrompt(params: MapGenerationPromptInput): string {
   const fallback = rawMapGenerationPrompt(params)
-  return applyPromptOverride('mapGeneration', fallback, params as Record<string, unknown>)
+  return applyPromptOverride('mapGeneration', fallback, params as unknown as Record<string, unknown>)
 }
 
-export function storyArcsPrompt(params: {
-  background: string
-  targetWords: number
-}): string {
+export function storyArcsPrompt(params: StoryArcsPromptParams): string {
   const fallback = rawStoryArcsPrompt(params)
-  return applyPromptOverride('storyArcsLegacy', fallback, params)
+  return applyPromptOverride('storyArcsLegacy', fallback, params as unknown as Record<string, unknown>)
 }
 
-export function chapterOutlinePrompt(params: {
-  arcName: string
-  chapterRange: string
-  arcSummary: string
-  previousSummary: string
-}): string {
+export function chapterOutlinePrompt(params: ChapterOutlinePromptParams): string {
   const fallback = rawChapterOutlinePrompt(params)
-  return applyPromptOverride('chapterOutlineLegacy', fallback, params)
+  return applyPromptOverride('chapterOutlineLegacy', fallback, params as unknown as Record<string, unknown>)
 }
 
-export function chapterWritingPrompt(params: {
-  chapterTitle: string
-  outline: string
-  previousSummary: string
-  styleTemplate?: string
-}): string {
+export function chapterWritingPrompt(params: ChapterWritingPromptParams): string {
   const fallback = rawChapterWritingPrompt(params)
-  return applyPromptOverride('chapterWriting', fallback, params)
+  return applyPromptOverride('chapterWriting', fallback, params as unknown as Record<string, unknown>)
 }
 
 export function chapterSummaryPrompt(chapterContent: string): string {
@@ -103,20 +98,20 @@ export function aiCheckPrompt(text: string): string {
 
 export function rewriteParagraphPrompt(params: RewriteParagraphPromptInput): string {
   const fallback = rawRewriteParagraphPrompt(params)
-  return applyPromptOverride('rewriteParagraph', fallback, params as Record<string, unknown>)
+  return applyPromptOverride('rewriteParagraph', fallback, params as unknown as Record<string, unknown>)
 }
 
 export function genericExpandPrompt(params: GenericExpandPromptInput): string {
   const fallback = rawGenericExpandPrompt(params)
-  return applyPromptOverride('genericExpand', fallback, params as Record<string, unknown>)
+  return applyPromptOverride('genericExpand', fallback, params as unknown as Record<string, unknown>)
 }
 
 export function subplotExpandPrompt(params: SubplotExpandPromptInput): string {
   const fallback = rawSubplotExpandPrompt(params)
-  return applyPromptOverride('subplotExpand', fallback, params as Record<string, unknown>)
+  return applyPromptOverride('subplotExpand', fallback, params as unknown as Record<string, unknown>)
 }
 
 export function contentScoringPrompt(params: ContentScoringPromptInput): string {
   const fallback = rawContentScoringPrompt(params)
-  return applyPromptOverride('contentScoring', fallback, params as Record<string, unknown>)
+  return applyPromptOverride('contentScoring', fallback, params as unknown as Record<string, unknown>)
 }

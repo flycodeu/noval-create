@@ -4,6 +4,8 @@ import path from 'path'
 import { desc, eq } from 'drizzle-orm'
 import type { CoreSettingsGenerationRequest } from '../src/shared/core-settings-generation'
 import type { PremiseGenerationRequest } from '../src/shared/premise-generation'
+import type { ProjectBriefGenerationRequest } from '../src/shared/project-brief-generation'
+import type { ThemeVoiceGenerationRequest } from '../src/shared/theme-voice-generation'
 import type { WorldRulesGenerationRequest } from '../src/shared/world-rules-generation'
 import type { SubplotGenerationRequest } from '../src/shared/subplot-framework'
 import { closeDb, getDb, initDb } from './database/db'
@@ -21,6 +23,7 @@ import * as characterService from './services/character.service'
 import * as consistencyService from './services/consistency.service'
 import * as coreSettingsService from './services/core-settings.service'
 import * as premiseService from './services/premise.service'
+import * as projectBriefService from './services/project-brief.service'
 import { buildOutlineGenerationContext, buildStoryProfile } from './services/context.service'
 import * as worldRulesService from './services/world-rules.service'
 import * as exportService from './services/export.service'
@@ -30,10 +33,13 @@ import * as modelService from './services/model.service'
 import { encryptApiKey } from './services/model.service'
 import * as novelService from './services/novel.service'
 import * as subplotService from './services/subplot.service'
+import * as themeVoiceService from './services/theme-voice.service'
 import * as timelineService from './services/timeline.service'
 import * as storyMemoryService from './services/story-memory.service'
 import * as promptOverrideService from './services/prompt-override.service'
+import * as revisionTaskService from './services/revision-task.service'
 import * as storyStructureService from './services/story-structure.service'
+import * as storyThreadService from './services/story-thread.service'
 import {
   contentScoringPrompt,
   expandBackgroundPrompt,
@@ -147,12 +153,12 @@ function formatGeneratedOutline(outline: Record<string, unknown>): string {
   const characters = toStringArray(outline.characters)
 
   return [
-    typeof outline.goal === 'string' && outline.goal.trim() ? `鐩爣锛?{outline.goal.trim()}` : '',
-    characters.length > 0 ? `浜虹墿锛?{characters.join('銆?)}` : '',
-    typeof outline.location === 'string' && outline.location.trim() ? `鍦烘櫙锛?{outline.location.trim()}` : '',
+    typeof outline.goal === 'string' && outline.goal.trim() ? `目标：${outline.goal.trim()}` : '',
+    characters.length > 0 ? `人物：${characters.join('、')}` : '',
+    typeof outline.location === 'string' && outline.location.trim() ? `场景：${outline.location.trim()}` : '',
     ...toStringArray(outline.plot_points).map((item) => `- ${item}`),
-    typeof outline.bridge_in === 'string' && outline.bridge_in.trim() ? `鎵挎帴锛?{outline.bridge_in.trim()}` : '',
-    typeof outline.bridge_out === 'string' && outline.bridge_out.trim() ? `杞嚭锛?{outline.bridge_out.trim()}` : '',
+    typeof outline.bridge_in === 'string' && outline.bridge_in.trim() ? `承接：${outline.bridge_in.trim()}` : '',
+    typeof outline.bridge_out === 'string' && outline.bridge_out.trim() ? `转出：${outline.bridge_out.trim()}` : '',
   ].filter(Boolean).join('\n')
 }
 
@@ -367,7 +373,7 @@ function registerIpcHandlers() {
     for (const [index, arc] of arcs.entries()) {
       db.insert(storyArcs).values({
         novelId,
-        arcName: typeof arc.arc_name === 'string' ? arc.arc_name : typeof arc.name === 'string' ? arc.name : `鏁呬簨寮?{index + 1}`,
+        arcName: typeof arc.arc_name === 'string' ? arc.arc_name : typeof arc.name === 'string' ? arc.name : `故事弧 ${index + 1}`,
         arcOrder: typeof arc.order === 'number' ? arc.order : index + 1,
         chapterStart: typeof arc.chapter_start === 'number' ? arc.chapter_start : null,
         chapterEnd: typeof arc.chapter_end === 'number' ? arc.chapter_end : null,
@@ -383,7 +389,7 @@ function registerIpcHandlers() {
   ipcMain.handle('outline:generateChapterOutlines', async (_, arcId, options?: { batchSize?: number }) => {
     const db = getDb()
     const arc = db.select().from(storyArcs).where(eq(storyArcs.id, arcId)).all()[0]
-    if (!arc) throw new Error('鏁呬簨寮т笉瀛樺湪')
+    if (!arc) throw new Error('故事弧不存在')
 
     const novel = db.select().from(novelsTable).where(eq(novelsTable.id, arc.novelId)).all()[0]
     if (!novel) throw new Error('小说不存在')
@@ -520,6 +526,24 @@ function registerIpcHandlers() {
     }
   })
 
+  ipcMain.handle('thread:list', (_, novelId) => storyThreadService.listStoryThreads(novelId))
+  ipcMain.handle('thread:query', (_, filters) => storyThreadService.queryStoryThreads(filters))
+  ipcMain.handle('thread:getStats', (_, filters) => storyThreadService.getStoryThreadStats(filters))
+  ipcMain.handle('thread:get', (_, id) => storyThreadService.getStoryThread(id))
+  ipcMain.handle('thread:generate', (_, novelId, options) => storyThreadService.generateStoryThreads(novelId, options))
+  ipcMain.handle('thread:create', (_, novelId, data) => storyThreadService.createStoryThread(novelId, data))
+  ipcMain.handle('thread:update', (_, id, data) => storyThreadService.updateStoryThread(id, data))
+  ipcMain.handle('thread:delete', (_, id) => storyThreadService.deleteStoryThread(id))
+
+  ipcMain.handle('revision:list', (_, novelId) => revisionTaskService.listRevisionTasks(novelId))
+  ipcMain.handle('revision:query', (_, filters) => revisionTaskService.queryRevisionTasks(filters))
+  ipcMain.handle('revision:getStats', (_, filters) => revisionTaskService.getRevisionTaskStats(filters))
+  ipcMain.handle('revision:getSnapshot', (_, novelId) => revisionTaskService.getRevisionCenterSnapshot(novelId))
+  ipcMain.handle('revision:get', (_, id) => revisionTaskService.getRevisionTask(id))
+  ipcMain.handle('revision:create', (_, novelId, data) => revisionTaskService.createRevisionTask(novelId, data))
+  ipcMain.handle('revision:update', (_, id, data) => revisionTaskService.updateRevisionTask(id, data))
+  ipcMain.handle('revision:delete', (_, id) => revisionTaskService.deleteRevisionTask(id))
+
   ipcMain.handle('model:list', () => {
     const db = getDb()
     return db.select().from(modelConfigs).all().map((config) => ({
@@ -580,7 +604,7 @@ function registerIpcHandlers() {
   ipcMain.handle('template:delete', (_, id) => {
     const db = getDb()
     const template = db.select().from(templates).where(eq(templates.id, id)).all()[0]
-    if (template?.isBuiltin) throw new Error('鍐呯疆妯℃澘涓嶅彲鍒犻櫎')
+    if (template?.isBuiltin) throw new Error('内置模板不可删除')
     db.delete(templates).where(eq(templates.id, id)).run()
   })
 
@@ -628,7 +652,7 @@ function registerIpcHandlers() {
     const genreRows = input.genreId
       ? db.select().from(genresTable).where(eq(genresTable.id, input.genreId)).all()
       : []
-    const genre = genreRows[0]?.name || '鏈煡棰樻潗'
+    const genre = genreRows[0]?.name || '未知题材'
 
     let worldTemplateSummary = ''
     if (input.worldTemplateId) {
@@ -657,6 +681,10 @@ function registerIpcHandlers() {
     coreSettingsService.generateCoreSettings(data, event.sender))
   ipcMain.handle('ai:generatePremise', (event, data: PremiseGenerationRequest) =>
     premiseService.generatePremise(data, event.sender))
+  ipcMain.handle('ai:generateProjectBrief', (_, data: ProjectBriefGenerationRequest) =>
+    projectBriefService.generateProjectBrief(data))
+  ipcMain.handle('ai:generateThemeVoice', (_, data: ThemeVoiceGenerationRequest) =>
+    themeVoiceService.generateThemeVoice(data))
   ipcMain.handle('ai:generateWorldRules', (event, data: WorldRulesGenerationRequest) =>
     worldRulesService.generateWorldRules(data, event.sender))
 
@@ -729,5 +757,7 @@ function registerIpcHandlers() {
     return safeParseJson(result)
   })
 }
+
+
 
 

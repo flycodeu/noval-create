@@ -27,6 +27,9 @@ export type TaskType =
   | 'core_settings_generate'
   | 'premise_generate'
   | 'world_rules_generate'
+  | 'project_brief_generate'
+  | 'theme_voice_generate'
+  | 'story_thread_generate'
 
 interface CreateTaskOptions {
   type: TaskType
@@ -294,5 +297,6 @@ export async function retryTask(taskId: number, sender?: WebContents): Promise<n
 
   return startChatTask(baseOptions)
 }
+
 
 

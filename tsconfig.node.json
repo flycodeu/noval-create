@@ -14,5 +14,5 @@
       "@main/*": ["electron/*"]
     }
   },
-  "include": ["electron/**/*.ts", "src/shared/**/*.ts", "src/utils/**/*.ts", "electron.vite.config.ts"]
+  "include": ["electron/**/*.ts", "src/shared/**/*.ts", "src/types/**/*.ts", "src/utils/**/*.ts", "electron.vite.config.ts"]
 }

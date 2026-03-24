@@ -1,0 +1,509 @@
+﻿import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import { Alert, Button, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, message } from 'antd'
+import type { ColumnsType } from 'antd/es/table'
+import { ArrowRightOutlined, DeleteOutlined, PlusOutlined, RobotOutlined } from '@ant-design/icons'
+import { useNavigate } from 'react-router-dom'
+import type { StoryThread } from '../../../types'
+import { useNovelStore } from '../../../stores/novel.store'
+import type { StoryThreadBatchGenerateOptions } from '../../../shared/story-thread-generation'
+import {
+  WorkspaceContextSummary,
+  WorkspaceMetric,
+  WorkspacePage,
+  WorkspacePanel,
+} from '../components/WorkspaceShell'
+
+interface Props {
+  novelId: number
+}
+
+interface StoryThreadFormValues {
+  threadType: StoryThread['threadType']
+  title: string
+  summary: string
+  premise: string
+  status: StoryThread['status']
+  priority: StoryThread['priority']
+  startChapter?: number
+  targetPayoffChapter?: number
+  payoffCondition: string
+  currentState: string
+  notes: string
+}
+
+interface GenerateFormValues {
+  count: number
+  batchSize: number
+  focus: string
+}
+
+const THREAD_TYPE_OPTIONS: Array<{ value: StoryThread['threadType']; label: string }> = [
+  { value: 'main', label: '主线' },
+  { value: 'subplot', label: '支线' },
+  { value: 'mystery', label: '悬念' },
+  { value: 'payoff', label: '回收线' },
+  { value: 'relationship', label: '关系线' },
+]
+
+const THREAD_STATUS_OPTIONS: Array<{ value: StoryThread['status']; label: string }> = [
+  { value: 'planned', label: '待推进' },
+  { value: 'active', label: '推进中' },
+  { value: 'stalled', label: '卡住' },
+  { value: 'resolved', label: '已回收' },
+  { value: 'abandoned', label: '废弃' },
+]
+
+const PRIORITY_OPTIONS: Array<{ value: StoryThread['priority']; label: string }> = [
+  { value: 'high', label: '高优先级' },
+  { value: 'medium', label: '中优先级' },
+  { value: 'low', label: '低优先级' },
+]
+
+const EMPTY_EDITOR_VALUES: StoryThreadFormValues = {
+  threadType: 'subplot',
+  title: '',
+  summary: '',
+  premise: '',
+  status: 'planned',
+  priority: 'medium',
+  startChapter: undefined,
+  targetPayoffChapter: undefined,
+  payoffCondition: '',
+  currentState: '',
+  notes: '',
+}
+
+const DEFAULT_GENERATE_VALUES: GenerateFormValues = {
+  count: 8,
+  batchSize: 4,
+  focus: '',
+}
+
+function compactText(value?: string | null, max = 44): string {
+  const text = value?.trim() || ''
+  if (!text) return '待补充'
+  return text.length > max ? `${text.slice(0, max)}...` : text
+}
+
+function getStatusColor(status: StoryThread['status']) {
+  if (status === 'resolved') return 'success'
+  if (status === 'stalled') return 'warning'
+  if (status === 'abandoned') return 'default'
+  if (status === 'active') return 'processing'
+  return 'blue'
+}
+
+function getPriorityColor(priority: StoryThread['priority']) {
+  if (priority === 'high') return 'error'
+  if (priority === 'low') return 'default'
+  return 'gold'
+}
+
+function buildEditorValues(thread?: StoryThread | null): StoryThreadFormValues {
+  if (!thread) return EMPTY_EDITOR_VALUES
+
+  return {
+    threadType: thread.threadType,
+    title: thread.title,
+    summary: thread.summary || '',
+    premise: thread.premise || '',
+    status: thread.status,
+    priority: thread.priority,
+    startChapter: thread.startChapter || undefined,
+    targetPayoffChapter: thread.targetPayoffChapter || undefined,
+    payoffCondition: thread.payoffCondition || '',
+    currentState: thread.currentState || '',
+    notes: thread.notes || '',
+  }
+}
+
+function normalizeEditorValues(values: StoryThreadFormValues): StoryThreadFormValues {
+  return {
+    threadType: values.threadType,
+    title: values.title.trim(),
+    summary: values.summary.trim(),
+    premise: values.premise.trim(),
+    status: values.status,
+    priority: values.priority,
+    startChapter: values.startChapter,
+    targetPayoffChapter: values.targetPayoffChapter,
+    payoffCondition: values.payoffCondition.trim(),
+    currentState: values.currentState.trim(),
+    notes: values.notes.trim(),
+  }
+}
+
+function normalizeGenerateValues(values: GenerateFormValues): StoryThreadBatchGenerateOptions {
+  return {
+    count: Math.max(1, Math.min(20, Math.round(values.count || 8))),
+    batchSize: Math.max(1, Math.min(6, Math.round(values.batchSize || 4))),
+    focus: values.focus.trim() || undefined,
+  }
+}
+
+function formatChapter(value?: number | null): string {
+  if (typeof value !== 'number' || value <= 0) return '未安排'
+  return `第 ${value} 章`
+}
+
+export default function StoryThreadsPage({ novelId }: Props) {
+  const navigate = useNavigate()
+  const { currentNovel } = useNovelStore()
+  const [editorForm] = Form.useForm<StoryThreadFormValues>()
+  const [generateForm] = Form.useForm<GenerateFormValues>()
+  const [threads, setThreads] = useState<StoryThread[]>([])
+  const [stats, setStats] = useState({ total: 0, activeCount: 0, resolvedCount: 0, stalledCount: 0, overdueCount: 0 })
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [generating, setGenerating] = useState(false)
+  const [editorOpen, setEditorOpen] = useState(false)
+  const [generateOpen, setGenerateOpen] = useState(false)
+  const [editingThread, setEditingThread] = useState<StoryThread | null>(null)
+  const [generationWarnings, setGenerationWarnings] = useState<string[]>([])
+
+  const refresh = useCallback(async () => {
+    setLoading(true)
+    try {
+      const [queryResult, nextStats] = await Promise.all([
+        window.electron.thread.query({ novelId, page: 1, pageSize: 200 }),
+        window.electron.thread.getStats({ novelId, page: 1, pageSize: 1 }),
+      ])
+      setThreads(queryResult.items)
+      setStats(nextStats)
+    } catch (error) {
+      console.error(error)
+      message.error(error instanceof Error ? error.message : '故事线程加载失败。')
+    } finally {
+      setLoading(false)
+    }
+  }, [novelId])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  useEffect(() => {
+    generateForm.setFieldsValue(DEFAULT_GENERATE_VALUES)
+  }, [generateForm])
+
+  const openEditor = (thread?: StoryThread) => {
+    setEditingThread(thread || null)
+    editorForm.resetFields()
+    editorForm.setFieldsValue(buildEditorValues(thread))
+    setEditorOpen(true)
+  }
+
+  const openGenerateModal = () => {
+    generateForm.resetFields()
+    generateForm.setFieldsValue(DEFAULT_GENERATE_VALUES)
+    setGenerateOpen(true)
+  }
+
+  const handleDelete = (thread: StoryThread) => {
+    Modal.confirm({
+      title: `删除线程「${thread.title}」`,
+      content: '删除后不会自动回滚结构页、时间轴页或正文中已经引用到的内容，请确认。',
+      okText: '确认删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await window.electron.thread.delete(thread.id)
+          message.success('故事线程已删除。')
+          await refresh()
+        } catch (error) {
+          console.error(error)
+          message.error(error instanceof Error ? error.message : '故事线程删除失败。')
+        }
+      },
+    })
+  }
+
+  const handleSave = async () => {
+    const values = normalizeEditorValues(await editorForm.validateFields())
+    setSaving(true)
+
+    try {
+      if (editingThread) {
+        await window.electron.thread.update(editingThread.id, values)
+        message.success('故事线程已更新。')
+      } else {
+        await window.electron.thread.create(novelId, values)
+        message.success('故事线程已创建。')
+      }
+
+      setEditorOpen(false)
+      setEditingThread(null)
+      await refresh()
+    } catch (error) {
+      console.error(error)
+      message.error(error instanceof Error ? error.message : '故事线程保存失败。')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleGenerate = async () => {
+    const values = normalizeGenerateValues(await generateForm.validateFields())
+    setGenerating(true)
+    setGenerationWarnings([])
+
+    try {
+      const result = await window.electron.thread.generate(novelId, values)
+      setGenerationWarnings(result.warnings)
+      setGenerateOpen(false)
+      await refresh()
+
+      if (result.warnings.length > 0) {
+        message.warning(`已生成 ${result.createdCount}/${result.requestedCount} 条线程，另有 ${result.warnings.length} 条提醒。`)
+      } else {
+        message.success(`已生成 ${result.createdCount} 条故事线程。`)
+      }
+    } catch (error) {
+      console.error(error)
+      message.error(error instanceof Error ? error.message : '故事线程生成失败。')
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  const columns = useMemo<ColumnsType<StoryThread>>(() => [
+    {
+      title: '线程',
+      dataIndex: 'title',
+      key: 'title',
+      render: (_, record) => (
+        <div>
+          <strong>{record.title}</strong>
+          <div style={{ color: 'var(--color-text-muted)', fontSize: 12, marginTop: 4 }}>
+            {record.summary || record.premise || '还没有写清这条线程在持续推动什么。'}
+          </div>
+        </div>
+      ),
+    },
+    {
+      title: '类型',
+      dataIndex: 'threadType',
+      key: 'threadType',
+      width: 120,
+      render: (value: StoryThread['threadType']) => <Tag>{THREAD_TYPE_OPTIONS.find((item) => item.value === value)?.label || value}</Tag>,
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      width: 120,
+      render: (value: StoryThread['status']) => <Tag color={getStatusColor(value)}>{THREAD_STATUS_OPTIONS.find((item) => item.value === value)?.label || value}</Tag>,
+    },
+    {
+      title: '优先级',
+      dataIndex: 'priority',
+      key: 'priority',
+      width: 120,
+      render: (value: StoryThread['priority']) => <Tag color={getPriorityColor(value)}>{PRIORITY_OPTIONS.find((item) => item.value === value)?.label || value}</Tag>,
+    },
+    {
+      title: '目标回收',
+      dataIndex: 'targetPayoffChapter',
+      key: 'targetPayoffChapter',
+      width: 120,
+      render: (value: StoryThread['targetPayoffChapter']) => formatChapter(value),
+    },
+    {
+      title: '操作',
+      key: 'actions',
+      width: 150,
+      render: (_, record) => (
+        <Space>
+          <Button size="small" onClick={() => openEditor(record)}>编辑</Button>
+          <Button size="small" danger icon={<DeleteOutlined />} onClick={() => handleDelete(record)} />
+        </Space>
+      ),
+    },
+  ], [])
+
+  return (
+    <WorkspacePage
+      className="novel-story-threads-page"
+      layout="wide"
+      heroVariant="compact"
+      eyebrow="故事线程"
+      title="Story Threads"
+      description="把主线、支线、悬念、关系线和回收点统一管理成可追踪卡片。结构页、时间轴页和正文都应引用这些线程，而不是各写各的。"
+      actions={(
+        <Space wrap>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>
+            新建线程
+          </Button>
+          <Button icon={<RobotOutlined />} loading={generating} onClick={openGenerateModal}>
+            AI 批量生成
+          </Button>
+          <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/structure`)}>
+            去结构页
+          </Button>
+        </Space>
+      )}
+      contextSummary={(
+        <WorkspaceContextSummary
+          items={[
+            { label: '书名', value: currentNovel?.title || '未命名小说' },
+            { label: '故事设计', value: currentNovel?.settingsJson ? '已存在' : '建议先补故事设计' },
+            { label: '背景摘要', value: compactText(currentNovel?.expandedBackground || currentNovel?.synopsis) },
+            { label: '线程总数', value: stats.total },
+          ]}
+        />
+      )}
+      metrics={(
+        <>
+          <WorkspaceMetric label="推进中" value={stats.activeCount} tone="warm" hint="仍在施压主线或人物关系的线程。" />
+          <WorkspaceMetric label="已回收" value={stats.resolvedCount} hint="已经完成回收或兑现代价的线程。" />
+          <WorkspaceMetric label="卡住" value={stats.stalledCount} hint="最容易拖累后续章节推进的线程。" />
+          <WorkspaceMetric label="过期" value={stats.overdueCount} hint="目标回收章位已过但仍未处理的线程。" />
+        </>
+      )}
+    >
+      {!currentNovel?.settingsJson ? (
+        <Alert
+          type="info"
+          showIcon
+          message="建议先把故事设计页里的主线目标、核心冲突和结局落点写稳，再批量生成线程，结果会更贴合主推进链。"
+        />
+      ) : null}
+
+      {generationWarnings.length > 0 ? (
+        <Alert
+          type="warning"
+          showIcon
+          message="最近一次批量生成带有提醒"
+          description={(
+            <div>
+              {generationWarnings.map((warning) => (
+                <div key={warning}>{warning}</div>
+              ))}
+            </div>
+          )}
+        />
+      ) : null}
+
+      <WorkspacePanel title="使用原则" description="每条线程都要有起点、当前状态和回收条件。">
+        <div className="guided-step__checklist">
+          <div className="guided-step__checkitem guided-step__checkitem--done">
+            <div className="guided-step__checkhead"><strong>线程必须服务主线</strong></div>
+            <p>如果一条线既不推动主线、也不压迫人物关系、也不承担悬念回收，就不该继续保留。</p>
+          </div>
+          <div className="guided-step__checkitem guided-step__checkitem--done">
+            <div className="guided-step__checkhead"><strong>回收条件要可判断</strong></div>
+            <p>不要只写“情绪到位”或“关系升温”，要写清楚什么事件发生后才算真正回收。</p>
+          </div>
+        </div>
+      </WorkspacePanel>
+
+      <WorkspacePanel title="线程看板" description="可手工维护，也可以先批量生成再逐条修。">
+        <Table
+          rowKey="id"
+          loading={loading}
+          columns={columns}
+          dataSource={threads}
+          pagination={false}
+        />
+      </WorkspacePanel>
+
+      <Modal
+        title={editingThread ? '编辑故事线程' : '新建故事线程'}
+        open={editorOpen}
+        forceRender
+        onCancel={() => {
+          setEditorOpen(false)
+          setEditingThread(null)
+        }}
+        onOk={() => void handleSave()}
+        confirmLoading={saving}
+        okText={editingThread ? '保存修改' : '创建线程'}
+        width={760}
+      >
+        <Form form={editorForm} layout="vertical" initialValues={EMPTY_EDITOR_VALUES}>
+          <div className="guided-step__field-grid">
+            <div className="guided-step__field-card guided-step__field-card--compact">
+              <Form.Item name="threadType" label="线程类型" rules={[{ required: true, message: '请选择线程类型' }]}>
+                <Select options={THREAD_TYPE_OPTIONS} />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card guided-step__field-card--compact">
+              <Form.Item name="status" label="当前状态" rules={[{ required: true, message: '请选择当前状态' }]}>
+                <Select options={THREAD_STATUS_OPTIONS} />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card guided-step__field-card--compact">
+              <Form.Item name="priority" label="优先级" rules={[{ required: true, message: '请选择优先级' }]}>
+                <Select options={PRIORITY_OPTIONS} />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card guided-step__field-card--full">
+              <Form.Item name="title" label="线程标题" rules={[{ required: true, message: '请填写线程标题' }]}>
+                <Input placeholder="例如：主角身份暴露 / 南区补给线崩盘 / 姐弟关系修复" />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card guided-step__field-card--full">
+              <Form.Item name="summary" label="线程摘要">
+                <Input.TextArea rows={3} placeholder="用 1-2 句话说明这条线程在持续推动什么。" />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card guided-step__field-card--full">
+              <Form.Item name="premise" label="触发前提 / 起始条件">
+                <Input.TextArea rows={3} placeholder="写这条线程从哪里开始，为什么会成立。" />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card guided-step__field-card--compact">
+              <Form.Item name="startChapter" label="开始章位">
+                <InputNumber min={1} style={{ width: '100%' }} />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card guided-step__field-card--compact">
+              <Form.Item name="targetPayoffChapter" label="目标回收章位">
+                <InputNumber min={1} style={{ width: '100%' }} />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card guided-step__field-card--full">
+              <Form.Item name="currentState" label="当前状态描述">
+                <Input.TextArea rows={3} placeholder="写现在推进到了哪一步，阻力在哪，谁正在承受代价。" />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card guided-step__field-card--full">
+              <Form.Item name="payoffCondition" label="回收条件">
+                <Input.TextArea rows={3} placeholder="写清楚发生什么以后，这条线程才算真正回收。" />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card guided-step__field-card--full">
+              <Form.Item name="notes" label="补充说明">
+                <Input.TextArea rows={3} placeholder="补充风险点、伏笔位置，或与其他线程的耦合关系。" />
+              </Form.Item>
+            </div>
+          </div>
+        </Form>
+      </Modal>
+
+      <Modal
+        title="AI 批量生成故事线程"
+        open={generateOpen}
+        forceRender
+        onCancel={() => setGenerateOpen(false)}
+        onOk={() => void handleGenerate()}
+        confirmLoading={generating}
+        okText="开始生成"
+        width={560}
+      >
+        <Form form={generateForm} layout="vertical" initialValues={DEFAULT_GENERATE_VALUES}>
+          <Form.Item name="count" label="目标数量" rules={[{ required: true, message: '请填写数量' }]}>
+            <InputNumber min={1} max={20} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item name="batchSize" label="单批数量" rules={[{ required: true, message: '请填写单批数量' }]}>
+            <InputNumber min={1} max={6} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item name="focus" label="本轮聚焦方向">
+            <Input.TextArea rows={4} placeholder="例如：优先补悬念线和关系线；避免重复主线冲突；重点围绕第 20-40 章的中段压力。" />
+          </Form.Item>
+        </Form>
+      </Modal>
+    </WorkspacePage>
+  )
+}

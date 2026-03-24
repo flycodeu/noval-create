@@ -1,7 +1,8 @@
-﻿/* ============================================================
-   CSS 鑷畾涔夊彉閲?- 姣忎富棰樹竴濂?   ============================================================ */
+/* ============================================================
+   Core theme variables and global application styles
+   ============================================================ */
 :root {
-  /* 榛樿鍙橀噺锛堟祬鑹诧紝纭繚鏃?data-theme 鏃朵篃姝ｅ父锛?*/
+  /* Light theme tokens. Dark mode overrides are applied via [data-theme]. */
   --color-bg-primary: #f5f7fa;
   --color-bg-secondary: #ffffff;
   --color-bg-card: #ffffff;
@@ -121,7 +122,7 @@
 }
 
 /* ============================================================
-   鍩虹閲嶇疆
+   Base reset
    ============================================================ */
 *, *::before, *::after {
   box-sizing: border-box;
@@ -141,7 +142,7 @@ html, body, #root {
 }
 
 /* ============================================================
-   鑷畾涔夋粴鍔ㄦ潯
+   Custom scrollbars
    ============================================================ */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -182,7 +183,7 @@ html, body, #root {
 .loading-ripple::after { animation-delay: 0.7s; }
 
 /* ============================================================
-   Ant Design 鈥斺€?娣辫壊涓婚瑕嗙洊
+   Ant Design dark theme overrides
    ============================================================ */
 html[data-theme="dark"] .ant-layout,
 html[data-theme="dark"] .ant-layout-sider {
@@ -247,7 +248,7 @@ html[data-theme="dark"] .ant-slider-track { background: var(--color-blue-primary
 html[data-theme="dark"] .ant-form-item-label > label { color: var(--color-text-secondary) !important; }
 
 /* ============================================================
-   Ant Design 鈥斺€?娴呰壊涓婚瑕嗙洊
+   Ant Design light theme overrides
    ============================================================ */
 html[data-theme="light"] body,
 html[data-theme="light"] #root {
@@ -2287,7 +2288,7 @@ html[data-theme="light"] .ant-progress-text {
 }
 
 /* ============================================================
-   Ant Design 鈥斺€?鏌斿拰涓婚瑕嗙洊
+   Ant Design soft theme overrides
    ============================================================ */
 html[data-theme="soft"] body,
 html[data-theme="soft"] #root {
@@ -2388,7 +2389,7 @@ html[data-theme="soft"] .ant-empty-description {
 }
 
 /* ============================================================
-   Ant Design Card 鎿嶄綔鏍?鈥斺€?鍚勪富棰樿鐩栵紙TemplateManager 绛夛級
+   Ant Design card action refinements for TemplateManager and similar lists
    ============================================================ */
 html[data-theme="light"] .ant-card-actions,
 html[data-theme="soft"] .ant-card-actions {
@@ -2458,7 +2459,7 @@ html[data-theme="dark"] .ant-card-actions > li {
 }
 
 /* ============================================================
-   鐘舵€侀鑹诧紙鍏ㄥ眬锛?   ============================================================ */
+   Status tag helpers   ============================================================ */
 .status-draft { color: var(--color-text-muted); }
 .status-writing { color: var(--color-blue-primary); }
 .status-completed { color: var(--color-success); }

@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+﻿import { eq } from 'drizzle-orm'
 import { getDb } from '../database/db'
 import { promptOverrides } from '../database/schema'
 
@@ -33,14 +33,23 @@ export interface PromptOverrideRecord {
   updatedAt: string
 }
 
+function normalizeRecord(row: typeof promptOverrides.$inferSelect): PromptOverrideRecord {
+  return {
+    key: row.key,
+    content: row.content,
+    updatedAt: row.updatedAt || '',
+  }
+}
+
 export function listPromptOverrides(): PromptOverrideRecord[] {
   const db = getDb()
-  return db.select().from(promptOverrides).all()
+  return db.select().from(promptOverrides).all().map(normalizeRecord)
 }
 
 export function getPromptOverride(key: string): PromptOverrideRecord | null {
   const db = getDb()
-  return db.select().from(promptOverrides).where(eq(promptOverrides.key, key)).all()[0] || null
+  const row = db.select().from(promptOverrides).where(eq(promptOverrides.key, key)).all()[0]
+  return row ? normalizeRecord(row) : null
 }
 
 export function savePromptOverride(key: string, content: string): void {

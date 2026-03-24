@@ -1,18 +1,11 @@
 import React, { useState } from 'react'
 import { Button, Modal, message } from 'antd'
-import { RobotOutlined, CheckOutlined } from '@ant-design/icons'
+import { CheckOutlined, RobotOutlined } from '@ant-design/icons'
 import { cleanAiFieldText } from '../../utils/text'
-
-/** 后处理：去除 Markdown 格式 + 引号着重，返回纯净文本 */
-function cleanAIOutput(text: string): string {
-  return cleanAiFieldText(text)
-}
 
 interface Props {
   label?: string
-  /** 构建消息的函数，调用时生成提示词 */
   buildMessages: () => { role: 'user' | 'assistant'; content: string }[]
-  /** 自定义生成执行器，返回抽卡候选结果；未提供时默认调用 ai.runPrompt */
   runGeneration?: (input: {
     messages: { role: 'user' | 'assistant'; content: string }[]
     count: number
@@ -24,8 +17,11 @@ interface Props {
   size?: 'small' | 'middle' | 'large'
   disabled?: boolean
   type?: 'default' | 'text' | 'primary' | 'dashed' | 'link'
-  /** 是否自动去除 Markdown 格式标记（默认 true，JSON 内容设 false） */
   isJson?: boolean
+}
+
+function cleanOutput(text: string): string {
+  return cleanAiFieldText(text)
 }
 
 export default function AIGenerateButton({
@@ -47,25 +43,26 @@ export default function AIGenerateButton({
 
   const handleGenerate = async () => {
     setLoading(true)
+
     try {
       const messages = buildMessages()
       const count = Math.max(1, Math.min(drawCount, 3))
       const rawOutputs = runGeneration
         ? await runGeneration({ messages, count, modelConfigId })
         : await window.electron.ai.runPrompt({ messages, count, modelConfigId })
-      // 去除 Markdown 格式 + 引号着重（JSON 内容跳过清理）
-      const outputs = isJson ? rawOutputs : rawOutputs.map(cleanAIOutput)
+      const outputs = isJson ? rawOutputs : rawOutputs.map(cleanOutput)
 
-      if (count <= 1 || outputs.length === 1) {
+      if (count === 1 || outputs.length <= 1) {
         onResult(outputs[0])
-        message.success('AI 生成完成')
-      } else {
-        setResults(outputs)
-        setPicked(0)
-        setPickOpen(true)
+        message.success('AI 草稿已填入。')
+        return
       }
-    } catch (e: unknown) {
-      message.error(`生成失败：${e instanceof Error ? e.message : '请先配置 AI 模型'}`)
+
+      setResults(outputs)
+      setPicked(0)
+      setPickOpen(true)
+    } catch (error) {
+      message.error(`生成失败：${error instanceof Error ? error.message : '请先检查 AI 模型配置。'}`)
     } finally {
       setLoading(false)
     }
@@ -75,10 +72,8 @@ export default function AIGenerateButton({
     onResult(results[picked])
     setPickOpen(false)
     setResults([])
-    message.success('已填入选中结果')
+    message.success('已填入所选草稿。')
   }
-
-  const buttonLabel = drawCount > 1 ? `${label} ×${drawCount}` : label
 
   return (
     <>
@@ -87,67 +82,67 @@ export default function AIGenerateButton({
         type={type}
         icon={<RobotOutlined />}
         loading={loading}
-        onClick={handleGenerate}
         disabled={disabled}
+        onClick={handleGenerate}
       >
-        {buttonLabel}
+        {drawCount > 1 ? `${label} ×${drawCount}` : label}
       </Button>
 
       <Modal
-        title={
-          <span>
-            抽卡结果&nbsp;
-            <span style={{ color: 'var(--color-text-muted)', fontSize: 13, fontWeight: 400 }}>
-              — 共 {results.length} 个，请选择
-            </span>
-          </span>
-        }
+        title="选择草稿"
         open={pickOpen}
         onCancel={() => setPickOpen(false)}
         onOk={handleConfirmPick}
-        okText={<><CheckOutlined /> 填入选中</>}
-        width={Math.min(900, results.length * 340 + 48)}
+        okText={<><CheckOutlined /> 填入所选</>}
+        width={Math.min(900, Math.max(420, results.length * 320 + 48))}
         destroyOnHidden
       >
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: `repeat(${results.length}, 1fr)`,
-          gap: 12,
-          marginTop: 8,
-        }}>
-          {results.map((r, i) => (
-            <div
-              key={i}
-              onClick={() => setPicked(i)}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: `repeat(${results.length}, 1fr)`,
+            gap: 12,
+            marginTop: 8,
+          }}
+        >
+          {results.map((result, index) => (
+            <button
+              key={index}
+              type="button"
+              onClick={() => setPicked(index)}
               style={{
-                border: `2px solid ${picked === i ? 'var(--color-blue-primary)' : 'var(--border-color)'}`,
+                border: `2px solid ${picked === index ? 'var(--color-blue-primary)' : 'var(--border-color)'}`,
                 borderRadius: 8,
                 padding: '10px 14px',
                 cursor: 'pointer',
-                background: picked === i ? 'rgba(46,134,171,0.06)' : 'var(--color-bg-hover)',
+                background: picked === index ? 'rgba(46,134,171,0.06)' : 'var(--color-bg-hover)',
                 transition: 'border-color 0.15s, background 0.15s',
-                position: 'relative',
+                textAlign: 'left',
               }}
             >
-              <div style={{
-                fontSize: 11,
-                color: picked === i ? 'var(--color-blue-primary)' : 'var(--color-text-muted)',
-                marginBottom: 8,
-                fontWeight: 600,
-              }}>
-                {picked === i ? '✓ ' : ''}结果 {i + 1}
+              <div
+                style={{
+                  fontSize: 11,
+                  color: picked === index ? 'var(--color-blue-primary)' : 'var(--color-text-muted)',
+                  marginBottom: 8,
+                  fontWeight: 600,
+                }}
+              >
+                {picked === index ? '当前选择' : `候选 ${index + 1}`}
               </div>
-              <div style={{
-                fontSize: 12,
-                color: 'var(--color-text-primary)',
-                lineHeight: 1.8,
-                whiteSpace: 'pre-wrap',
-                maxHeight: 260,
-                overflow: 'auto',
-              }}>
-                {r}
+              <div
+                style={{
+                  fontSize: 12,
+                  color: 'var(--color-text-primary)',
+                  lineHeight: 1.8,
+                  whiteSpace: 'pre-wrap',
+                  maxHeight: 260,
+                  overflow: 'auto',
+                }}
+              >
+                {result}
               </div>
-            </div>
+            </button>
           ))}
         </div>
       </Modal>

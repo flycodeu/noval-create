@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Collapse, Empty, Select, Space, Tag } from 'antd'
+﻿import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import { Alert, Button, Collapse, Empty, Select, Space, Tag, type CollapseProps } from 'antd'
 import {
   CheckCircleOutlined,
   ClockCircleOutlined,
@@ -29,13 +29,13 @@ const TYPE_LABELS: Record<string, string> = {
   character_gen: 'AI 生成人物',
   chapter_scene_plan: 'AI 场景规划',
   chapter_draft: 'AI 草稿生成',
-  chapter_outline: 'AI 生成细纲',
+  chapter_outline: 'AI 章节细纲',
   chapter_review: 'AI 审校建议',
-  chapter_write: 'AI 生成正文',
-  summary: '更新章节记忆',
+  chapter_write: 'AI 章节正文',
+  summary: '刷新章节记忆',
   continuity: '连续性检查',
   review: 'AI 审校修订',
-  ai_check: 'AI 检测',
+  ai_check: 'AI 痕迹检测',
   expand_background: 'AI 扩展背景',
   generate_relations: 'AI 生成人物关系',
   generate_map: 'AI 生成地图',
@@ -70,14 +70,14 @@ function getTaskRunnerLabel(task: Task): string {
   return RUNNER_LABELS[task.runnerType || 'chat'] || (task.runnerType || 'chat')
 }
 
-function getTaskRetryabilityLabel(task: Task): string {
-  return isTaskRetryable(task) ? '支持安全重试' : '需回功能页重发'
-}
-
 function isTaskRetryable(task: Task): boolean {
   if (task.type === 'chapter_write' && task.relatedEntityType === 'chapter' && task.relatedEntityId) return true
   if (task.type === 'subplot_framework') return true
   return Boolean(task.retryable)
+}
+
+function getTaskRetryabilityLabel(task: Task): string {
+  return isTaskRetryable(task) ? '支持安全重试' : '需回到功能页重新发起'
 }
 
 function getTaskSummary(task: Task, stream?: { content: string }): string {
@@ -103,22 +103,27 @@ export default function TaskCenter() {
   }, [])
 
   useEffect(() => {
-    loadTasks()
-    const timer = setInterval(loadTasks, 5000)
+    void loadTasks()
+    const timer = setInterval(() => {
+      void loadTasks()
+    }, 5000)
     return () => clearInterval(timer)
   }, [loadTasks])
 
-  const filteredTasks = useMemo(() => tasks
-    .filter((task) => {
-      if (statusFilter !== 'all' && task.status !== statusFilter) return false
-      if (typeFilter !== 'all' && task.type !== typeFilter) return false
-      return true
-    })
-    .sort((left, right) => {
-      const rightTime = new Date(right.updatedAt || right.createdAt).getTime()
-      const leftTime = new Date(left.updatedAt || left.createdAt).getTime()
-      return rightTime - leftTime
-    }), [statusFilter, tasks, typeFilter])
+  const filteredTasks = useMemo(
+    () => tasks
+      .filter((task) => {
+        if (statusFilter !== 'all' && task.status !== statusFilter) return false
+        if (typeFilter !== 'all' && task.type !== typeFilter) return false
+        return true
+      })
+      .sort((left, right) => {
+        const rightTime = new Date(right.updatedAt || right.createdAt).getTime()
+        const leftTime = new Date(left.updatedAt || left.createdAt).getTime()
+        return rightTime - leftTime
+      }),
+    [statusFilter, tasks, typeFilter],
+  )
 
   useEffect(() => {
     if (filteredTasks.length === 0) {
@@ -138,15 +143,15 @@ export default function TaskCenter() {
 
   const handleCancel = async (taskId: number) => {
     await window.electron.task.cancel(taskId)
-    loadTasks()
+    await loadTasks()
   }
 
   const handleRetry = async (taskId: number) => {
     try {
       await window.electron.task.retry(taskId)
-      loadTasks()
+      await loadTasks()
     } catch {
-      // keep page quiet and let detail state show retry availability
+      // Keep the page quiet and let the detail panel explain retry availability.
     }
   }
 
@@ -156,31 +161,61 @@ export default function TaskCenter() {
   const pendingCount = tasks.filter((task) => task.status === 'pending').length
   const selectedStream = selectedTask ? streams[selectedTask.id] : undefined
 
+  const detailSections = useMemo<CollapseProps['items']>(() => {
+    const items: NonNullable<CollapseProps['items']> = []
+
+    if (selectedStream?.content) {
+      items.push({
+        key: 'stream',
+        label: '实时输出',
+        children: <div className="task-center-code">{selectedStream.content}</div>,
+      })
+    }
+
+    if (selectedTask?.outputText) {
+      items.push({
+        key: 'output',
+        label: '结果输出',
+        children: <div className="task-center-code">{selectedTask.outputText}</div>,
+      })
+    }
+
+    if (selectedTask?.inputJson) {
+      items.push({
+        key: 'input',
+        label: '请求上下文',
+        children: <div className="task-center-code">{formatTaskPayload(selectedTask.inputJson)}</div>,
+      })
+    }
+
+    return items
+  }, [selectedStream, selectedTask])
+
   return (
     <WorkspacePage
       className="task-center-page"
       eyebrow="任务运行台"
-      title={'任务中心'}
-      description="把 AI 生成、重试、取消、报错和流式输出放在同一套工作台里，便于快速判断当前流程卡在哪一步。"
+      title="任务中心"
+      description="把 AI 生成、重试、取消、报错和流式输出放在同一套工作台里，便于判断流程卡在哪一步。"
       actions={(
         <Space wrap>
-          <Button icon={<ReloadOutlined />} onClick={loadTasks}>{'刷新'}</Button>
-          <div className="novel-pill">{`当前筛选 ${filteredTasks.length} 条任务`}</div>
+          <Button icon={<ReloadOutlined />} onClick={() => void loadTasks()}>刷新</Button>
+          <div className="novel-pill">当前筛选 {filteredTasks.length} 条任务</div>
         </Space>
       )}
       metrics={(
         <>
-          <WorkspaceMetric label={'运行中'} value={runningCount} tone="cool" hint={'正在执行的 AI 任务'} />
-          <WorkspaceMetric label={'等待中'} value={pendingCount} hint={'还没开始的队列任务'} />
-          <WorkspaceMetric label={'已成功'} value={successCount} tone="warm" hint={'最近已完成的任务'} />
-          <WorkspaceMetric label={'已失败'} value={failedCount} hint={'需要重试或检查提示词的任务'} />
+          <WorkspaceMetric label="运行中" value={runningCount} tone="cool" hint="当前仍在执行的 AI 任务" />
+          <WorkspaceMetric label="等待中" value={pendingCount} hint="已入队但尚未开始的任务" />
+          <WorkspaceMetric label="已成功" value={successCount} tone="warm" hint="最近已经完成的任务" />
+          <WorkspaceMetric label="已失败" value={failedCount} hint="需要重试或回查提示词的任务" />
         </>
       )}
     >
       <div className="novel-split novel-split--sidebar">
         <WorkspacePanel
-          title={'任务列表'}
-          description={'左侧按状态和类型筛选，右侧看完整输出、请求上下文和错误信息。'}
+          title="任务列表"
+          description="左侧按状态和类型筛选，右侧看完整输出、请求上下文和错误信息。"
           extra={(
             <div className="novel-filter-bar">
               <div className="novel-filter-bar__row">
@@ -206,7 +241,7 @@ export default function TaskCenter() {
                 />
               </div>
               <div className="novel-filter-bar__summary">
-                {'同类任务可以集中查看失败原因和重试结果，不再被时间线打散。'}
+                同类任务可以集中查看失败原因和重试结果，不再被时间线打散。
               </div>
             </div>
           )}
@@ -214,7 +249,7 @@ export default function TaskCenter() {
           {loading ? (
             <div className="novel-empty"><LoadingOutlined spin /></div>
           ) : filteredTasks.length === 0 ? (
-            <Empty description={'当前筛选下暂无任务记录'} style={{ paddingTop: 40 }} />
+            <Empty description="当前筛选下暂无任务记录" style={{ paddingTop: 40 }} />
           ) : (
             <div className="task-center-list">
               {filteredTasks.map((task) => {
@@ -241,7 +276,7 @@ export default function TaskCenter() {
                           <Tag>{getTaskRunnerLabel(task)}</Tag>
                           {isTaskRetryable(task) ? <Tag color="processing">可重试</Tag> : null}
                           {task.durationMs ? <Tag>{`${(task.durationMs / 1000).toFixed(1)}s`}</Tag> : null}
-                          {task.tokensUsed ? <Tag>{`${task.tokensUsed} 令牌`}</Tag> : null}
+                          {task.tokensUsed ? <Tag>{`${task.tokensUsed} tokens`}</Tag> : null}
                         </div>
                       </div>
                       <div className="task-center-card__summary">{getTaskSummary(task, stream)}</div>
@@ -259,13 +294,13 @@ export default function TaskCenter() {
           extra={selectedTask ? (
             <div className="task-center-detail__actions">
               {selectedTask.status === 'running' ? (
-                <Button danger icon={<StopOutlined />} onClick={() => handleCancel(selectedTask.id)}>
-                  {'取消'}
+                <Button danger icon={<StopOutlined />} onClick={() => void handleCancel(selectedTask.id)}>
+                  取消
                 </Button>
               ) : null}
               {(selectedTask.status === 'failed' || selectedTask.status === 'cancelled') && isTaskRetryable(selectedTask) ? (
-                <Button icon={<ReloadOutlined />} onClick={() => handleRetry(selectedTask.id)}>
-                  {'重试'}
+                <Button icon={<ReloadOutlined />} onClick={() => void handleRetry(selectedTask.id)}>
+                  重试
                 </Button>
               ) : null}
             </div>
@@ -278,7 +313,11 @@ export default function TaskCenter() {
               <div className="task-center-detail__header">
                 <div>
                   <div className="task-center-detail__title">{getTaskTypeLabel(selectedTask.type)}</div>
-                  <div className="task-center-detail__summary">{selectedTask.relatedEntityType ? `${selectedTask.relatedEntityType} #${selectedTask.relatedEntityId || '-'}` : '未绑定关联实体'}</div>
+                  <div className="task-center-detail__summary">
+                    {selectedTask.relatedEntityType
+                      ? `${selectedTask.relatedEntityType} #${selectedTask.relatedEntityId || '-'}`
+                      : '未绑定关联实体'}
+                  </div>
                 </div>
                 <div className="task-center-detail__meta">
                   <Tag style={{ background: 'transparent', border: `1px solid ${(STATUS_LABELS[selectedTask.status] || STATUS_LABELS.pending).color}`, color: (STATUS_LABELS[selectedTask.status] || STATUS_LABELS.pending).color }}>
@@ -293,7 +332,7 @@ export default function TaskCenter() {
                 <Alert
                   type={selectedTask.status === 'success' ? 'warning' : 'error'}
                   showIcon
-                  message={'运行提示'}
+                  message="运行提示"
                   description={selectedTask.errorMessage}
                 />
               ) : null}
@@ -303,7 +342,7 @@ export default function TaskCenter() {
                   type="info"
                   showIcon
                   message="当前任务不支持安全重试"
-                  description="这类任务会直接改动数据库状态，不能只靠重放原始 prompt 重新执行。请回到对应功能页重新发起。"
+                  description="这类任务会直接改动数据库状态，不能只靠重放原始 prompt 再跑一遍。请回到对应功能页重新发起。"
                 />
               ) : null}
 
@@ -322,40 +361,12 @@ export default function TaskCenter() {
                 <div className="novel-note-list__item">{`重试能力：${getTaskRetryabilityLabel(selectedTask)}`}</div>
                 <div className="novel-note-list__item">{`模型配置：${selectedTask.modelConfigId || '-'}`}</div>
                 <div className="novel-note-list__item">{`耗时：${selectedTask.durationMs ? `${(selectedTask.durationMs / 1000).toFixed(1)}s` : '-'}`}</div>
-                <div className="novel-note-list__item">{`令牌消耗：${selectedTask.tokensUsed || '-'}`}</div>
+                <div className="novel-note-list__item">{`Token 消耗：${selectedTask.tokensUsed || '-'}`}</div>
               </div>
 
               <Collapse
-                items={[
-                  selectedStream ? {
-                    key: 'stream',
-                    label: '实时输出',
-                    children: (
-                      <div className="task-center-code">
-                        {selectedStream.content}
-                      </div>
-                    ),
-                  } : null,
-                  selectedTask.outputText ? {
-                    key: 'output',
-                    label: '结果输出',
-                    children: (
-                      <div className="task-center-code">
-                        {selectedTask.outputText}
-                      </div>
-                    ),
-                  } : null,
-                  selectedTask.inputJson ? {
-                    key: 'input',
-                    label: '请求上下文',
-                    children: (
-                      <div className="task-center-code">
-                        {formatTaskPayload(selectedTask.inputJson)}
-                      </div>
-                    ),
-                  } : null,
-                ].filter(Boolean)}
-                defaultActiveKey={selectedStream ? ['stream'] : selectedTask.outputText ? ['output'] : undefined}
+                items={detailSections}
+                defaultActiveKey={selectedStream?.content ? ['stream'] : selectedTask.outputText ? ['output'] : undefined}
               />
             </div>
           )}

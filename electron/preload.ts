@@ -1,11 +1,14 @@
 ﻿import { contextBridge, ipcRenderer } from 'electron'
 import type { CoreSettingsGenerationRequest } from '../src/shared/core-settings-generation'
 import type { PremiseGenerationRequest } from '../src/shared/premise-generation'
+import type { ProjectBriefGenerationRequest } from '../src/shared/project-brief-generation'
+import type { StoryThreadBatchGenerateOptions } from '../src/shared/story-thread-generation'
 import type { WorldRulesGenerationRequest } from '../src/shared/world-rules-generation'
 import type { SubplotGenerationRequest } from '../src/shared/subplot-framework'
+import type { ThemeVoiceGenerationRequest } from '../src/shared/theme-voice-generation'
 
 const api = {
-  // 灏忚绠＄悊
+  // Novel workspace APIs
   novel: {
     list: (filters?: unknown) => ipcRenderer.invoke('novel:list', filters),
     get: (id: number) => ipcRenderer.invoke('novel:get', id),
@@ -50,7 +53,7 @@ const api = {
     refreshCheckpoints: (novelId: number) => ipcRenderer.invoke('structure:refreshCheckpoints', novelId),
   },
 
-  // 绔犺妭绠＄悊
+  // Chapter APIs
   chapter: {
     list: (novelId: number) => ipcRenderer.invoke('chapter:list', novelId),
     get: (id: number) => ipcRenderer.invoke('chapter:get', id),
@@ -63,7 +66,7 @@ const api = {
     runPublishCheck: (chapterId: number) => ipcRenderer.invoke('chapter:runPublishCheck', chapterId),
   },
 
-  // 浜虹墿绠＄悊
+  // Character APIs
   character: {
     list: (novelId: number) => ipcRenderer.invoke('character:list', novelId),
     query: (filters: unknown) => ipcRenderer.invoke('character:query', filters),
@@ -85,7 +88,7 @@ const api = {
     clear: (novelId: number) => ipcRenderer.invoke('character:clear', novelId),
   },
 
-  // 鍦板浘绠＄悊
+  // Map APIs
   map: {
     getTree: (novelId: number) => ipcRenderer.invoke('map:getTree', novelId),
     queryNodes: (filters: unknown) => ipcRenderer.invoke('map:queryNodes', filters),
@@ -127,7 +130,7 @@ const api = {
     clear: (novelId: number) => ipcRenderer.invoke('item:clear', novelId),
   },
 
-  // 澶х翰绠＄悊
+  // Outline APIs
   outline: {
     getArcs: (novelId: number) => ipcRenderer.invoke('outline:getArcs', novelId),
     createArc: (novelId: number, data: unknown) => ipcRenderer.invoke('outline:createArc', novelId, data),
@@ -138,7 +141,29 @@ const api = {
     clear: (novelId: number) => ipcRenderer.invoke('outline:clear', novelId),
   },
 
-  // 妯″瀷绠＄悊
+  thread: {
+    list: (novelId: number) => ipcRenderer.invoke('thread:list', novelId),
+    query: (filters: unknown) => ipcRenderer.invoke('thread:query', filters),
+    getStats: (filters: unknown) => ipcRenderer.invoke('thread:getStats', filters),
+    get: (id: number) => ipcRenderer.invoke('thread:get', id),
+    generate: (novelId: number, options?: StoryThreadBatchGenerateOptions) => ipcRenderer.invoke('thread:generate', novelId, options),
+    create: (novelId: number, data: unknown) => ipcRenderer.invoke('thread:create', novelId, data),
+    update: (id: number, data: unknown) => ipcRenderer.invoke('thread:update', id, data),
+    delete: (id: number) => ipcRenderer.invoke('thread:delete', id),
+  },
+
+  revision: {
+    list: (novelId: number) => ipcRenderer.invoke('revision:list', novelId),
+    query: (filters: unknown) => ipcRenderer.invoke('revision:query', filters),
+    getStats: (filters: unknown) => ipcRenderer.invoke('revision:getStats', filters),
+    getSnapshot: (novelId: number) => ipcRenderer.invoke('revision:getSnapshot', novelId),
+    get: (id: number) => ipcRenderer.invoke('revision:get', id),
+    create: (novelId: number, data: unknown) => ipcRenderer.invoke('revision:create', novelId, data),
+    update: (id: number, data: unknown) => ipcRenderer.invoke('revision:update', id, data),
+    delete: (id: number) => ipcRenderer.invoke('revision:delete', id),
+  },
+
+  // Model APIs
   model: {
     list: () => ipcRenderer.invoke('model:list'),
     create: (data: unknown) => ipcRenderer.invoke('model:create', data),
@@ -148,7 +173,7 @@ const api = {
     test: (id: number) => ipcRenderer.invoke('model:test', id),
   },
 
-  // 妯℃澘绠＄悊
+  // Template APIs
   template: {
     list: (type?: string) => ipcRenderer.invoke('template:list', type),
     create: (data: unknown) => ipcRenderer.invoke('template:create', data),
@@ -162,7 +187,7 @@ const api = {
     delete: (key: string) => ipcRenderer.invoke('prompt:delete', key),
   },
 
-  // 浠诲姟绠＄悊
+  // Task APIs
   task: {
     list: (novelId?: number) => ipcRenderer.invoke('task:list', novelId),
     get: (id: number) => ipcRenderer.invoke('task:get', id),
@@ -170,20 +195,22 @@ const api = {
     retry: (id: number) => ipcRenderer.invoke('task:retry', id),
   },
 
-  // AI 鍔熻兘
+  // AI generation APIs
   ai: {
     expandBackground: (input: unknown) => ipcRenderer.invoke('ai:expandBackground', input),
     generateCoreSettings: (data: CoreSettingsGenerationRequest) => ipcRenderer.invoke('ai:generateCoreSettings', data),
     generatePremise: (data: PremiseGenerationRequest) => ipcRenderer.invoke('ai:generatePremise', data),
+    generateProjectBrief: (data: ProjectBriefGenerationRequest) => ipcRenderer.invoke('ai:generateProjectBrief', data),
+    generateThemeVoice: (data: ThemeVoiceGenerationRequest) => ipcRenderer.invoke('ai:generateThemeVoice', data),
     generateWorldRules: (data: WorldRulesGenerationRequest) => ipcRenderer.invoke('ai:generateWorldRules', data),
     generateCharacter: (novelId: number, opts: unknown) => ipcRenderer.invoke('ai:generateCharacter', novelId, opts),
     generateRelations: (novelId: number) => ipcRenderer.invoke('ai:generateRelations', novelId),
     generateSubplotBatch: (data: SubplotGenerationRequest) => ipcRenderer.invoke('ai:generateSubplotBatch', data),
     rewriteParagraph: (data: unknown) => ipcRenderer.invoke('ai:rewriteParagraph', data),
-    // 鎶藉崱锛氭壒閲忚繍琛屾彁绀鸿瘝
+    // Story structure and planning generation
     runPrompt: (data: { messages: unknown[]; count?: number; modelConfigId?: number }) =>
       ipcRenderer.invoke('ai:runPrompt', data),
-    // 鍐呭璇勫垎
+    // Content scoring
     scoreContent: (data: {
       contentType: string
       content: string
@@ -193,7 +220,7 @@ const api = {
     }) => ipcRenderer.invoke('ai:scoreContent', data),
   },
 
-  // 浜嬩欢鐩戝惉
+  // Event listeners
   on: (channel: string, callback: (...args: unknown[]) => void) => {
     const validChannels = [
       'task:stream-chunk',

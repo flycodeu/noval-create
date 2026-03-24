@@ -1,4 +1,4 @@
-import { integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+﻿import { integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 import { sql } from 'drizzle-orm'
 
 export const genres = sqliteTable('genres', {
@@ -16,11 +16,13 @@ export const novels = sqliteTable('novels', {
   genreId: integer('genre_id').references(() => genres.id),
   status: text('status').default('draft'),
   totalWords: integer('total_words').default(0),
-  targetWords: integer('target_words').default(200000),
+  targetWords: integer('target_words').notNull().default(200000),
   coverImage: text('cover_image'),
   userBackground: text('user_background'),
   expandedBackground: text('expanded_background'),
+  projectBriefJson: text('project_brief_json'),
   settingsJson: text('settings_json'),
+  themeVoiceJson: text('theme_voice_json'),
   worldRulesJson: text('world_rules_json'),
   styleTemplateId: integer('style_template_id'),
   worldTemplateId: integer('world_template_id'),
@@ -36,7 +38,7 @@ export const storyVolumes = sqliteTable('story_volumes', {
   volumeNumber: integer('volume_number').notNull(),
   title: text('title'),
   summary: text('summary'),
-  targetWords: integer('target_words').default(0),
+  targetWords: integer('target_words').notNull().default(0),
   status: text('status').default('planning'),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
@@ -49,7 +51,7 @@ export const storyParts = sqliteTable('story_parts', {
   partNumber: integer('part_number').notNull(),
   title: text('title'),
   summary: text('summary'),
-  targetWords: integer('target_words').default(0),
+  targetWords: integer('target_words').notNull().default(0),
   status: text('status').default('planning'),
   startChapterNum: integer('start_chapter_num'),
   endChapterNum: integer('end_chapter_num'),
@@ -75,7 +77,7 @@ export const chapters = sqliteTable('chapters', {
   status: text('status').default('outline'),
   aiScoreJson: text('ai_score_json'),
   arcId: integer('arc_id'),
-  targetWords: integer('target_words').default(3000),
+  targetWords: integer('target_words').notNull().default(3000),
   emotionTone: text('emotion_tone'),
   compiledFromSegments: integer('compiled_from_segments').default(0),
   segmentCount: integer('segment_count').default(0),
@@ -118,6 +120,28 @@ export const storyArcs = sqliteTable('story_arcs', {
   chapterEnd: integer('chapter_end'),
   arcGoal: text('arc_goal'),
   arcSummary: text('arc_summary'),
+})
+
+export const storyThreads = sqliteTable('story_threads', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  threadType: text('thread_type').default('subplot'),
+  title: text('title').notNull(),
+  summary: text('summary'),
+  premise: text('premise'),
+  status: text('status').default('planned'),
+  priority: text('priority').default('medium'),
+  startChapter: integer('start_chapter'),
+  targetPayoffChapter: integer('target_payoff_chapter'),
+  payoffCondition: text('payoff_condition'),
+  currentState: text('current_state'),
+  relatedCharacterIdsJson: text('related_character_ids_json'),
+  relatedItemIdsJson: text('related_item_ids_json'),
+  relatedTimelineEventIdsJson: text('related_timeline_event_ids_json'),
+  notes: text('notes'),
+  sortOrder: integer('sort_order').default(0),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
 })
 
 export const characters = sqliteTable('characters', {
@@ -317,6 +341,24 @@ export const promptOverrides = sqliteTable('prompt_overrides', {
   updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
 })
 
+export const revisionTasks = sqliteTable('revision_tasks', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  taskSource: text('task_source').default('manual'),
+  taskType: text('task_type').default('continuity'),
+  status: text('status').default('open'),
+  severity: text('severity').default('medium'),
+  title: text('title').notNull(),
+  description: text('description'),
+  fixBrief: text('fix_brief'),
+  relatedPage: text('related_page'),
+  entityType: text('entity_type'),
+  entityId: integer('entity_id'),
+  chapterId: integer('chapter_id').references(() => chapters.id, { onDelete: 'set null' }),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
 export const tasks = sqliteTable('tasks', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   novelId: integer('novel_id'),
@@ -346,6 +388,8 @@ export type Chapter = typeof chapters.$inferSelect
 export type NewChapter = typeof chapters.$inferInsert
 export type ChapterSegment = typeof chapterSegments.$inferSelect
 export type NewChapterSegment = typeof chapterSegments.$inferInsert
+export type StoryThread = typeof storyThreads.$inferSelect
+export type NewStoryThread = typeof storyThreads.$inferInsert
 export type Character = typeof characters.$inferSelect
 export type NewCharacter = typeof characters.$inferInsert
 export type CharacterRelation = typeof characterRelations.$inferSelect
@@ -357,7 +401,10 @@ export type NewStoryMemoryCheckpoint = typeof storyMemoryCheckpoints.$inferInser
 export type ModelConfig = typeof modelConfigs.$inferSelect
 export type Template = typeof templates.$inferSelect
 export type PromptOverride = typeof promptOverrides.$inferSelect
+export type RevisionTask = typeof revisionTasks.$inferSelect
+export type NewRevisionTask = typeof revisionTasks.$inferInsert
 export type Task = typeof tasks.$inferSelect
 export type NewTask = typeof tasks.$inferInsert
 export type Genre = typeof genres.$inferSelect
 export type StoryArc = typeof storyArcs.$inferSelect
+

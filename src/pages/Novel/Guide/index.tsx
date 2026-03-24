@@ -14,40 +14,38 @@ import { useNavigate } from 'react-router-dom'
 import type { NovelConsistencyReport, NovelContextStatus } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
 import { useWorkspaceStore } from '../../../stores/workspace.store'
-import {
-  getCharacterBatchPreset,
-  getItemGenerationProfile,
-} from '../../../shared/creation-tools'
+import { getCharacterBatchPreset, getItemGenerationProfile } from '../../../shared/creation-tools'
+import { parseProjectBriefSnapshot } from '../../../shared/project-brief'
+import { buildStorySettingsPayload, parseStorySettingsSnapshot } from '../../../shared/story-settings'
 import {
   getFactionNameOptions,
   getSpeciesNameOptions,
   parseWorldRulesJson,
   stringifyWorldRules,
 } from '../../../shared/genre-system'
+import { parseThemeVoiceSnapshot } from '../../../shared/theme-voice'
 import {
   WorkspaceContextSummary,
   WorkspaceMetric,
   WorkspacePage,
   WorkspacePanel,
 } from '../components/WorkspaceShell'
-import { isStoryCoreReady, isStoryPlotReady, loadWorkflowStats } from '../workflow'
+import {
+  EMPTY_WORKFLOW_STATS,
+  isProjectBriefReady,
+  isStoryCoreReady,
+  isStoryPlotReady,
+  isThemeVoiceReady,
+  loadWorkflowStats,
+  type WorkflowStats,
+} from '../workflow'
 
 interface Props {
   novelId: number
 }
 
-interface GuideStats {
-  mapCount: number
-  characterCount: number
-  itemCount: number
-  outlineCount: number
-  timelineCount: number
-  hasProtagonist: boolean
-}
-
 interface StepConfig {
   key: string
-  pageKey: string
   title: string
   desc: string
   status: string
@@ -57,8 +55,6 @@ interface StepConfig {
   icon: React.ReactNode
   action: React.ReactNode
 }
-
-const READY_STATUSES = new Set(['已填写', '已同步', '已生成'])
 
 const TIME_MODE_LABELS: Record<string, string> = {
   gregorian: '公历时间',
@@ -100,18 +96,23 @@ export default function GuidePage({ novelId }: Props) {
   const navigate = useNavigate()
   const { currentNovel, setCurrentNovel } = useNovelStore()
   const { mode } = useWorkspaceStore()
-  const [stats, setStats] = useState<GuideStats>({
-    mapCount: 0,
-    characterCount: 0,
-    itemCount: 0,
-    outlineCount: 0,
-    timelineCount: 0,
-    hasProtagonist: false,
-  })
+  const [stats, setStats] = useState<WorkflowStats>(EMPTY_WORKFLOW_STATS)
   const [consistencyReport, setConsistencyReport] = useState<NovelConsistencyReport | null>(null)
   const [contextStatus, setContextStatus] = useState<NovelContextStatus | null>(null)
   const [runningKey, setRunningKey] = useState<string | null>(null)
 
+  const projectBrief = useMemo(
+    () => parseProjectBriefSnapshot(currentNovel?.projectBriefJson),
+    [currentNovel?.projectBriefJson],
+  )
+  const themeVoice = useMemo(
+    () => parseThemeVoiceSnapshot(currentNovel?.themeVoiceJson),
+    [currentNovel?.themeVoiceJson],
+  )
+  const storySettings = useMemo(
+    () => parseStorySettingsSnapshot(currentNovel?.settingsJson),
+    [currentNovel?.settingsJson],
+  )
   const worldRules = useMemo(
     () => parseWorldRulesJson(currentNovel?.worldRulesJson, currentNovel?.genreName),
     [currentNovel?.genreName, currentNovel?.worldRulesJson],
@@ -128,16 +129,7 @@ export default function GuidePage({ novelId }: Props) {
   )
 
   const refreshStats = useCallback(async () => {
-    const workflowStats = await loadWorkflowStats(novelId)
-
-    setStats({
-      mapCount: workflowStats.mapCount,
-      characterCount: workflowStats.characterCount,
-      itemCount: workflowStats.itemCount,
-      outlineCount: workflowStats.outlineCount,
-      timelineCount: workflowStats.timelineCount,
-      hasProtagonist: workflowStats.hasProtagonist,
-    })
+    setStats(await loadWorkflowStats(novelId))
   }, [novelId])
 
   const refreshDiagnostics = useCallback(async () => {
@@ -160,9 +152,7 @@ export default function GuidePage({ novelId }: Props) {
     })
 
     const updated = await window.electron.novel.get(novelId)
-    if (updated) {
-      setCurrentNovel(updated)
-    }
+    if (updated) setCurrentNovel(updated)
   }, [currentNovel?.genreName, currentNovel?.worldRulesJson, novelId, setCurrentNovel])
 
   const generateMapCore = useCallback(async () => {
@@ -204,11 +194,12 @@ export default function GuidePage({ novelId }: Props) {
       focus: '先补足符合题材的流通物品和剧情挂点，再生成可落地实例。',
     })
   }, [itemProfile.defaultBatch, novelId])
+
   const generateStoryDesignCore = useCallback(async () => {
     const result = await window.electron.ai.generateCoreSettings({
       novelId,
       subplotCount: 8,
-      requirements: '故事设计必须建立在已经存在的世界规则、地图、人物和物品基础上，不要再把背景底盘写成剧情本身。减少口号化和同模板输出。',
+      requirements: '故事设计必须建立在已经存在的世界规则、地图、人物、物品和线程基础上，不要再把背景底盘写成剧情本身。减少口号化和同模板输出。',
     })
 
     const payload = buildStorySettingsPayload({
@@ -299,16 +290,6 @@ export default function GuidePage({ novelId }: Props) {
     }
   }
 
-  const structureReadyCount = [
-    isStoryCoreReady(currentNovel),
-    Boolean(currentNovel?.worldRulesJson),
-    stats.mapCount > 0,
-    stats.characterCount > 0,
-    stats.itemCount > 0,
-    isStoryPlotReady(currentNovel),
-    stats.outlineCount > 0,
-    stats.timelineCount > 0,
-  ].filter(Boolean).length
   const recommendedCharacterCount = characterPreset.majorCount
     + characterPreset.antagonistCount
     + characterPreset.supportingCount
@@ -317,16 +298,32 @@ export default function GuidePage({ novelId }: Props) {
 
   const steps: StepConfig[] = [
     {
+      key: 'project-brief',
+      title: '项目立项',
+      desc: '先统一平台模式、目标读者、读者承诺、卖点和禁区，后续所有内容都以这个 Brief 为产品基线。',
+      status: isProjectBriefReady(currentNovel) ? '已填写' : '待补全',
+      count: `${projectBrief.readyCount}/6`,
+      support: isProjectBriefReady(currentNovel)
+        ? '产品定位已经稳定，后续主题、角色和线程会更贴近目标读者。'
+        : '如果项目立项含糊，后面的主题、人物和正文很容易写成“什么都沾一点”。',
+      ready: isProjectBriefReady(currentNovel),
+      icon: <EditOutlined />,
+      action: (
+        <Button type="primary" ghost icon={<EditOutlined />} onClick={() => navigate(`/novels/${novelId}/project-brief`)}>
+          去填写
+        </Button>
+      ),
+    },
+    {
       key: 'core-settings',
-      pageKey: 'core-settings',
       title: '核心设定',
-      desc: '先写清主题、故事目标、核心冲突和结局方向，后面所有模块都会引用这里的上下文。',
-      status: currentNovel?.settingsJson ? '已填写' : '待补全',
-      count: currentNovel?.settingsJson ? '故事引擎已落地' : '建议最先完成',
-      support: currentNovel?.settingsJson
-        ? '主线目标已经有了统一口径，后续地图、人物和时间轴不会再凭空生长。'
+      desc: '先写清 premise、主角起点、底层约束和语言边界，后面所有模块都会引用这里的上下文。',
+      status: isStoryCoreReady(currentNovel) ? '已填写' : '待补全',
+      count: `${storySettings.premiseReadyCount}/5`,
+      support: isStoryCoreReady(currentNovel)
+        ? '故事底盘已经有了统一口径，后续地图、人物和时间轴不会再凭空生长。'
         : '如果这里还是空的，后续自动生成就会失去边界，人物、地图和物品都会发散。',
-      ready: Boolean(currentNovel?.settingsJson),
+      ready: isStoryCoreReady(currentNovel),
       icon: <EditOutlined />,
       action: (
         <Button type="primary" ghost icon={<EditOutlined />} onClick={() => navigate(`/novels/${novelId}/core-settings`)}>
@@ -335,8 +332,24 @@ export default function GuidePage({ novelId }: Props) {
       ),
     },
     {
+      key: 'theme-voice',
+      title: '主题与文风',
+      desc: '把主题、情感核心、叙事视角、时态、风格规则和对白规则固定下来，降低 AI 味和口吻漂移。',
+      status: isThemeVoiceReady(currentNovel) ? '已填写' : '待补全',
+      count: `${themeVoice.readyCount}/6`,
+      support: isThemeVoiceReady(currentNovel)
+        ? '语言边界已经收紧，后续正文和修订都会有统一口吻。'
+        : '如果主题与文风没有被钉住，长篇生成最容易出现人机味、总结腔和视角越权。',
+      ready: isThemeVoiceReady(currentNovel),
+      icon: <ThunderboltOutlined />,
+      action: (
+        <Button type="primary" ghost icon={<ThunderboltOutlined />} onClick={() => navigate(`/novels/${novelId}/theme-voice`)}>
+          去填写
+        </Button>
+      ),
+    },
+    {
       key: 'world-rules',
-      pageKey: 'world-rules',
       title: '世界规则',
       desc: '同步题材对应的种族、等级、势力、地图层级、时间制度和语言约束。',
       status: currentNovel?.worldRulesJson ? '已同步' : '待生成',
@@ -359,7 +372,6 @@ export default function GuidePage({ novelId }: Props) {
     },
     {
       key: 'map',
-      pageKey: 'map',
       title: '地图与势力落点',
       desc: '按题材自动搭出区域、国家、门派、基地或关键场景，让人物和事件有真实发生位置。',
       status: stats.mapCount > 0 ? '已生成' : '待生成',
@@ -382,7 +394,6 @@ export default function GuidePage({ novelId }: Props) {
     },
     {
       key: 'characters',
-      pageKey: 'characters',
       title: '人物批量生成',
       desc: '按主角、主要人物、反派、功能角色和次要人物的配额先搭人物网，再逐个细修。',
       status: stats.characterCount > 0 ? '已生成' : '待生成',
@@ -405,7 +416,6 @@ export default function GuidePage({ novelId }: Props) {
     },
     {
       key: 'items',
-      pageKey: 'items',
       title: '物品与装备',
       desc: '先生成符合题材的模板，再把具体物品挂到人物、地点和事件上，避免后期凭空补道具。',
       status: stats.itemCount > 0 ? '已生成' : '待生成',
@@ -427,12 +437,28 @@ export default function GuidePage({ novelId }: Props) {
       ),
     },
     {
+      key: 'threads',
+      title: '故事线程',
+      desc: '把主线、支线、悬念、关系线和回收线都建成可追踪线程，减少长篇推进中的遗忘和断裂。',
+      status: stats.threadCount > 0 ? '已建立' : '待建立',
+      count: `${stats.threadCount} 条线程`,
+      support: stats.threadCount > 0
+        ? '线程已经能给结构、时间轴和正文提供统一的回查挂点。'
+        : '没有线程层，后面的结构和正文只会各自推进，伏笔、关系线和回收点会越来越散。',
+      ready: stats.threadCount > 0,
+      icon: <BarsOutlined />,
+      action: (
+        <Button type="primary" ghost icon={<BarsOutlined />} onClick={() => navigate(`/novels/${novelId}/threads`)}>
+          去整理
+        </Button>
+      ),
+    },
+    {
       key: 'story-design',
-      pageKey: 'story-design',
       title: '故事设计',
-      desc: '等世界、地图、人物和物品都到位后，再统一设计主线、支线和结局。',
+      desc: '等世界、地图、人物、物品和线程都到位后，再统一设计主线、支线和结局。',
       status: isStoryPlotReady(currentNovel) ? '已生成' : '待生成',
-      count: isStoryPlotReady(currentNovel) ? '主线骨架已落地' : '建议在资产准备后执行',
+      count: `${storySettings.storyDesignReadyCount}/4`,
       support: isStoryPlotReady(currentNovel)
         ? '故事设计已经成型，接下来可以直接转去结构和时间线。'
         : '这一步把主线目标、核心冲突、推进链和结局方向压成统一骨架，避免大纲从空白起步。',
@@ -451,7 +477,6 @@ export default function GuidePage({ novelId }: Props) {
     },
     {
       key: 'outline',
-      pageKey: 'outline',
       title: '故事大纲',
       desc: '把主线拆成连续推进的故事弧，为章节节奏和正文推进准备稳定骨架。',
       status: stats.outlineCount > 0 ? '已生成' : '待生成',
@@ -474,7 +499,6 @@ export default function GuidePage({ novelId }: Props) {
     },
     {
       key: 'timeline',
-      pageKey: 'timeline',
       title: '事件时间轴',
       desc: '把关键事件按先后顺序串起来，记清谁在场、拿着什么、结果如何，还有哪些线没回收。',
       status: stats.timelineCount > 0 ? '已生成' : '待生成',
@@ -495,21 +519,37 @@ export default function GuidePage({ novelId }: Props) {
         </Space>
       ),
     },
+    {
+      key: 'revision',
+      title: '修订中心',
+      desc: '把一致性问题、待同步章节和人工修订任务集中到一个入口，避免问题散落在各页。',
+      status: stats.revisionTaskCount > 0 ? '待处理' : '已稳定',
+      count: stats.revisionTaskCount > 0 ? `${stats.revisionTaskCount} 条待处理` : '当前无未处理任务',
+      support: stats.revisionTaskCount > 0
+        ? '这里会汇总系统体检结果、上下文变更影响和人工修订项，适合作为开写前的最后一道检查。'
+        : '当前没有未处理修订任务，可以继续写作或继续细修结构资产。',
+      ready: stats.revisionTaskCount <= 0,
+      icon: <EditOutlined />,
+      action: (
+        <Button type="primary" ghost icon={<EditOutlined />} onClick={() => navigate(`/novels/${novelId}/revision`)}>
+          打开修订中心
+        </Button>
+      ),
+    },
   ]
 
+  const structureReadyCount = steps.filter((step) => step.ready).length
   const nextStep = steps.find((step) => !step.ready) || null
   const pendingSteps = steps.filter((step) => !step.ready)
   const queuedSteps = pendingSteps.slice(1, 4)
   const nextStepNarrative = nextStep
     ? nextStep.support
-    : '首批结构资产已经齐备，可以转去正文写作，也可以继续细修人物、地图、时间轴和大纲。'
+    : '主要设计资产已经齐备，可以转去正文写作，也可以继续细修人物、地图、时间轴和大纲。'
   const flowDigest = nextStep
     ? queuedSteps.length > 0
       ? '这一环补稳后，顺着继续推进 ' + queuedSteps.map((step) => step.title).join('、') + '。'
       : '这一环完成后，就已经具备直接转入正文写作的条件。'
-    : '七步骨架都已就绪，已经具备直接开写的条件。'
-
-
+    : '关键工作流已经就绪，已经具备直接开写的条件。'
 
   return (
     <WorkspacePage
@@ -519,8 +559,8 @@ export default function GuidePage({ novelId }: Props) {
       title="创作向导"
       description={
         mode === 'guided'
-          ? '把小说从“核心设定”一路推进到“可以开写”。这里不是功能堆叠，而是一套按顺序推进的工作流。'
-          : '把核心设定、世界规则、结构资产和写作前置统一管理，并在每一步都维持上下文继承和结构校验。'
+          ? '把小说从“底盘”一路推进到“可以开写”。这里不是功能堆叠，而是一套按顺序推进的工作流。'
+          : '把产品立项、主题文风、世界资产、结构资产和修订前置统一管理，并在每一步都维持上下文继承和结构校验。'
       }
       actions={(
         <Space wrap>
@@ -532,8 +572,8 @@ export default function GuidePage({ novelId }: Props) {
           >
             AI 铺设首批骨架
           </Button>
-          <Button icon={<EditOutlined />} onClick={() => navigate(`/novels/${novelId}/writing`)}>
-            进入正文写作
+          <Button icon={<EditOutlined />} onClick={() => navigate(`/novels/${novelId}/${stats.revisionTaskCount > 0 ? 'revision' : 'writing'}`)}>
+            {stats.revisionTaskCount > 0 ? '打开修订中心' : '进入正文写作'}
           </Button>
         </Space>
       )}
@@ -542,7 +582,7 @@ export default function GuidePage({ novelId }: Props) {
           items={[
             { label: '题材', value: currentNovel?.genreName || '未设置' },
             { label: '工作模式', value: mode === 'guided' ? '小白模式' : '专业模式' },
-            { label: '结构完成度', value: `${structureReadyCount}/7 步就绪` },
+            { label: '结构完成度', value: `${structureReadyCount}/${steps.length} 步就绪` },
             {
               label: '时间制度',
               value: TIME_MODE_LABELS[worldRules.timelineConfig.calendarType] || worldRules.timelineConfig.calendarType,
@@ -560,20 +600,20 @@ export default function GuidePage({ novelId }: Props) {
             hint="主角之外的主要人物、反派、功能角色和次要人物总和"
           />
           <WorkspaceMetric
-            label="待同步章节"
-            value={contextStatus ? staleChapterCount : '加载中'}
-            tone={staleChapterCount > 0 ? 'warm' : 'cool'}
-            hint={staleChapterCount > 0 ? '设定已变更，受影响章节需要回查或重生成' : '当前没有被上下文变更影响的章节'}
+            label="主题与文风"
+            value={`${themeVoice.readyCount}/6`}
+            hint="先把视角、时态、风格规则和对白边界压稳"
           />
           <WorkspaceMetric
-            label="结构体检"
-            value={consistencyReport ? `${consistencyReport.readinessScore} 分` : '加载中'}
-            hint={consistencyReport ? getHealthTone(consistencyReport.readinessScore) : '正在分析全书结构'}
+            label="故事线程"
+            value={stats.threadCount}
+            tone="cool"
+            hint="后续结构页、时间轴和正文都应回查这些线程"
           />
           <WorkspaceMetric
-            label="时间轴节点"
-            value={stats.timelineCount}
-            hint="后续章节最常回查的结构资产"
+            label="修订压力"
+            value={stats.revisionTaskCount}
+            hint={stats.revisionTaskCount > 0 ? '建议开写前先处理未闭环问题' : '当前没有未处理修订任务'}
           />
         </>
       )}
@@ -582,7 +622,7 @@ export default function GuidePage({ novelId }: Props) {
           {contextStatus && (
             <WorkspacePanel
               title="上下文同步"
-              description="当核心设定、世界规则、人物、地图、物品、时间轴或大纲发生变化时，受影响章节会被标记为待同步。"
+              description="当核心设定、世界规则、人物、地图、物品、线程、时间轴或大纲发生变化时，受影响章节会被标记为待同步。"
             >
               <div className="novel-note-list">
                 <div className="novel-note-list__item">{`当前上下文版本：v${contextStatus.contextVersion}`}</div>
@@ -590,12 +630,21 @@ export default function GuidePage({ novelId }: Props) {
                 <div className="novel-note-list__item">{`待同步章节：${contextStatus.staleChapterCount}`}</div>
                 <div className="novel-note-list__item">
                   {contextStatus.staleChapterCount > 0
-                    ? '建议先去正文页回查受影响章节，再继续批量生成后续内容。'
+                    ? '建议先去修订中心或正文页回查受影响章节，再继续批量生成后续内容。'
                     : '当前章节上下文与最新设定保持一致，可以继续推进。'}
                 </div>
               </div>
             </WorkspacePanel>
           )}
+
+          <WorkspacePanel title="设计底盘快照" description="这些模块越早钉住，后面的正文就越不容易出现 AI 味和断线问题。">
+            <div className="novel-note-list">
+              <div className="novel-note-list__item">{`项目立项：${projectBrief.readyCount}/6`}</div>
+              <div className="novel-note-list__item">{`基础设定：${storySettings.premiseReadyCount}/5`}</div>
+              <div className="novel-note-list__item">{`主题与文风：${themeVoice.readyCount}/6`}</div>
+              <div className="novel-note-list__item">{`故事设计：${storySettings.storyDesignReadyCount}/4`}</div>
+            </div>
+          </WorkspacePanel>
 
           {consistencyReport && (
             <WorkspacePanel title="结构体检" description="全书级一致性校验器会自动检查人物、事件、时间轴、地图、物品和章节之间的冲突。">
@@ -627,7 +676,6 @@ export default function GuidePage({ novelId }: Props) {
               </div>
             </WorkspacePanel>
           )}
-
         </>
       )}
     >
@@ -637,7 +685,7 @@ export default function GuidePage({ novelId }: Props) {
           type="warning"
           showIcon
           message={`有 ${contextStatus.staleChapterCount} 章需要重新同步上下文`}
-          description="最近的设定或结构变更已经影响到现有章节。继续批量生成前，建议先回到正文页处理这些章节，避免后续文本承接旧设定。"
+          description="最近的设定或结构变更已经影响到现有章节。继续批量生成前，建议先回到修订中心或正文页处理这些章节，避免后续文本承接旧设定。"
         />
       )}
 
@@ -651,6 +699,15 @@ export default function GuidePage({ novelId }: Props) {
         />
       )}
 
+      {(!isProjectBriefReady(currentNovel) || !isThemeVoiceReady(currentNovel)) && (
+        <Alert
+          className="novel-guide__alert"
+          type="info"
+          showIcon
+          message="产品立项与文风底盘还没有钉稳"
+          description="如果这两层没有先收紧，后面的 AI 生成很容易出现人机味、空泛卖点和口吻漂移。"
+        />
+      )}
 
       <WorkspacePanel
         title="推荐推进顺序"
@@ -660,9 +717,9 @@ export default function GuidePage({ novelId }: Props) {
         <div className="novel-guide__flow-head">
           <div className="novel-guide__flow-lead">
             <div className="novel-kicker">{nextStep ? '当前建议' : '流程状态'}</div>
-            <strong>{nextStep ? nextStep.title : '结构骨架已铺好'}</strong>
+            <strong>{nextStep ? nextStep.title : '关键骨架已铺好'}</strong>
             <div className="novel-guide__flow-queue">
-              <span className="novel-guide__flow-chip">{'已就绪 ' + structureReadyCount + '/7'}</span>
+              <span className="novel-guide__flow-chip">{'已就绪 ' + structureReadyCount + '/' + steps.length}</span>
               {queuedSteps.length > 0
                 ? queuedSteps.map((step) => (
                   <span key={step.key} className="novel-guide__flow-chip novel-guide__flow-chip--muted">
@@ -699,9 +756,7 @@ export default function GuidePage({ novelId }: Props) {
               {nextStep?.key === step.key ? (
                 <div className="novel-stage-card__focus">{step.support}</div>
               ) : null}
-              <div className="novel-stage-card__actions">
-                {step.action}
-              </div>
+              <div className="novel-stage-card__actions">{step.action}</div>
             </div>
           ))}
         </div>
@@ -742,8 +797,3 @@ export default function GuidePage({ novelId }: Props) {
     </WorkspacePage>
   )
 }
-
-
-
-
-

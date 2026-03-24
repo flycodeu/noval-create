@@ -1,7 +1,7 @@
 {
   "name": "novelforge",
   "version": "1.0.0",
-  "description": "AI 智能小说创作平台",
+  "description": "AI 小说智能创作平台",
   "main": "out/main/main.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -28,7 +28,11 @@
     "setup:nsis-resources": "node scripts/setup-local-nsis-resources.cjs",
     "setup:win-tools": "npm run setup:nsis && npm run setup:nsis-resources",
     "test:subplot": "node scripts/subplot-framework.test.cjs",
-    "test:prompt-guardrails": "node scripts/prompt-guardrails.test.cjs"
+    "test:prompt-guardrails": "node scripts/prompt-guardrails.test.cjs",
+    "typecheck:web": "tsc -p tsconfig.web.json --noEmit",
+    "typecheck:node": "tsc -p tsconfig.node.json --noEmit",
+    "typecheck": "npm run typecheck:web && npm run typecheck:node",
+    "check:encoding": "node scripts/check-encoding.cjs"
   },
   "dependencies": {
     "@ant-design/icons": "^5.3.0",

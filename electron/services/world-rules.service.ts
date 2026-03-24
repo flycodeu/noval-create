@@ -1,4 +1,4 @@
-﻿import type { WebContents } from 'electron'
+import type { WebContents } from 'electron'
 import { eq } from 'drizzle-orm'
 import type { GenreWorldRules } from '../../src/shared/genre-system'
 import {
@@ -79,8 +79,8 @@ function summarizeCurrentSection(sectionKey: WorldRuleSectionKey, rules: GenreWo
     case 'overview':
       return joinLines([
         `类型名称：${rules.genreProfile.name || '未设置'}`,
-        rules.genreProfile.subgenre ? `瀛愮被鍨嬶細${rules.genreProfile.subgenre}` : '',
-        rules.genreProfile.worldviewTone ? `涓栫晫瑙傚熀璋冿細${rules.genreProfile.worldviewTone}` : '',
+        rules.genreProfile.subgenre ? `子类型：${rules.genreProfile.subgenre}` : '',
+        rules.genreProfile.worldviewTone ? `世界观基调：${rules.genreProfile.worldviewTone}` : '',
         rules.genreProfile.socialFrame ? `社会框架：${rules.genreProfile.socialFrame}` : '',
         rules.genreProfile.narrativeFocus.length > 0 ? `叙事焦点：${rules.genreProfile.narrativeFocus.join('、')}` : '',
         rules.genreProfile.languageAvoidances.length > 0 ? `语言避让：${rules.genreProfile.languageAvoidances.join('、')}` : '',
@@ -355,7 +355,7 @@ function parseSectionPatch(sectionKey: WorldRuleSectionKey, text: string): Parti
     case 'overview': {
       const genreProfile = asRecord(parsed.genreProfile)
       const direct = Object.keys(genreProfile).length > 0 ? genreProfile : parsed
-      return { genreProfile: direct as GenreWorldRules['genreProfile'] }
+      return { genreProfile: direct as unknown as GenreWorldRules['genreProfile'] }
     }
     case 'power': {
       const powerSystems = Array.isArray(parsed.powerSystems)
@@ -365,7 +365,7 @@ function parseSectionPatch(sectionKey: WorldRuleSectionKey, text: string): Parti
           : Array.isArray(parsed.list)
             ? parsed.list
             : []
-      return { powerSystems: powerSystems as GenreWorldRules['powerSystems'] }
+      return { powerSystems: powerSystems as unknown as GenreWorldRules['powerSystems'] }
     }
     case 'species': {
       const speciesSystem = Array.isArray(parsed.speciesSystem)
@@ -379,29 +379,29 @@ function parseSectionPatch(sectionKey: WorldRuleSectionKey, text: string): Parti
           ? parsed.factions
           : []
       return {
-        speciesSystem: speciesSystem as GenreWorldRules['speciesSystem'],
-        factionSystem: factionSystem as GenreWorldRules['factionSystem'],
+        speciesSystem: speciesSystem as unknown as GenreWorldRules['speciesSystem'],
+        factionSystem: factionSystem as unknown as GenreWorldRules['factionSystem'],
       }
     }
     case 'ecology': {
       const ecology = asRecord(parsed.characterEcology)
       const direct = Object.keys(ecology).length > 0 ? ecology : parsed
-      return { characterEcology: direct as GenreWorldRules['characterEcology'] }
+      return { characterEcology: direct as unknown as GenreWorldRules['characterEcology'] }
     }
     case 'map': {
       const blueprint = asRecord(parsed.mapBlueprint)
       const direct = Object.keys(blueprint).length > 0 ? blueprint : parsed
-      return { mapBlueprint: direct as GenreWorldRules['mapBlueprint'] }
+      return { mapBlueprint: direct as unknown as GenreWorldRules['mapBlueprint'] }
     }
     case 'timeline': {
       const config = asRecord(parsed.timelineConfig)
       const direct = Object.keys(config).length > 0 ? config : parsed
-      return { timelineConfig: direct as GenreWorldRules['timelineConfig'] }
+      return { timelineConfig: direct as unknown as GenreWorldRules['timelineConfig'] }
     }
     case 'language': {
       const writing = asRecord(parsed.writingConstraints)
       const direct = Object.keys(writing).length > 0 ? writing : parsed
-      return { writingConstraints: direct as GenreWorldRules['writingConstraints'] }
+      return { writingConstraints: direct as unknown as GenreWorldRules['writingConstraints'] }
     }
     default:
       return {}
@@ -412,12 +412,12 @@ function ensurePatchHasContent(sectionKey: WorldRuleSectionKey, patch: Partial<G
   switch (sectionKey) {
     case 'overview':
       if (!patch.genreProfile || Object.keys(asRecord(patch.genreProfile)).length === 0) {
-        throw new Error('鏈敓鎴愬彲鐢ㄧ殑涓栫晫姒傝')
+        throw new Error('未生成可用的世界概览')
       }
       return
     case 'power':
       if (!Array.isArray(patch.powerSystems) || patch.powerSystems.length === 0) {
-        throw new Error('鏈敓鎴愬彲鐢ㄧ殑鍔涢噺浣撶郴')
+        throw new Error('未生成可用的力量体系')
       }
       return
     case 'species':
@@ -435,17 +435,17 @@ function ensurePatchHasContent(sectionKey: WorldRuleSectionKey, patch: Partial<G
       return
     case 'map':
       if (!patch.mapBlueprint || Object.keys(asRecord(patch.mapBlueprint)).length === 0) {
-        throw new Error('鏈敓鎴愬彲鐢ㄧ殑鍦板浘钃濆浘')
+        throw new Error('未生成可用的地图蓝图')
       }
       return
     case 'timeline':
       if (!patch.timelineConfig || Object.keys(asRecord(patch.timelineConfig)).length === 0) {
-        throw new Error('鏈敓鎴愬彲鐢ㄧ殑鏃堕棿瑙勫垯')
+        throw new Error('未生成可用的时间规则')
       }
       return
     case 'language':
       if (!patch.writingConstraints || Object.keys(asRecord(patch.writingConstraints)).length === 0) {
-        throw new Error('鏈敓鎴愬彲鐢ㄧ殑鏂囬绾︽潫')
+        throw new Error('未生成可用的文风约束')
       }
       return
     default:
@@ -453,7 +453,7 @@ function ensurePatchHasContent(sectionKey: WorldRuleSectionKey, patch: Partial<G
   }
 }
 
-function sanitizeErrorMessage(error: unknown, fallback = '鐢熸垚澶辫触'): string {
+function sanitizeErrorMessage(error: unknown, fallback = '生成失败'): string {
   const raw = error instanceof Error ? error.message : fallback
   return cleanAiFieldText(raw).replace(/^\[[^\]]+\]\s*/g, '').trim() || fallback
 }

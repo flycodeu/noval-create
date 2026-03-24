@@ -1,22 +1,63 @@
-import React, { useEffect, useState, useCallback } from 'react'
+﻿import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Button, Input, Select, Dropdown, Modal, Steps, Form, Radio,
-  Tag, Progress, Empty, Spin, message, Tooltip, Card, Row, Col
+  Button,
+  Card,
+  Col,
+  Dropdown,
+  Empty,
+  Form,
+  Input,
+  Modal,
+  Progress,
+  Radio,
+  Row,
+  Select,
+  Space,
+  Spin,
+  Steps,
+  Tag,
+  Tooltip,
+  message,
 } from 'antd'
+import type { MenuProps } from 'antd'
 import {
-  PlusOutlined, SearchOutlined, MoreOutlined, DeleteOutlined,
-  ExportOutlined, EditOutlined, LoadingOutlined, ReloadOutlined,
-  CheckOutlined
+  CheckOutlined,
+  DeleteOutlined,
+  EditOutlined,
+  ExportOutlined,
+  LoadingOutlined,
+  MoreOutlined,
+  PlusOutlined,
+  ReloadOutlined,
+  SearchOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 import 'dayjs/locale/zh-cn'
-import { Novel, Genre, Template } from '../../types'
+import type { Novel, Template } from '../../types'
 import { useNovelStore } from '../../stores/novel.store'
 
 dayjs.extend(relativeTime)
 dayjs.locale('zh-cn')
+
+interface WizardFormValues {
+  genreId: number
+  styleTemplateId?: number
+  worldTemplateId?: number
+  modelConfigId?: number
+  userBackground: string
+  expandedBackground: string
+  synopsis: string
+  title: string
+  targetWords: number
+}
+
+interface ExpandBackgroundResult {
+  expanded_background: string
+  titles: string[]
+  synopsis: string
+}
 
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   draft: { label: '草稿', color: '#5c6378' },
@@ -25,19 +66,34 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   archived: { label: '已归档', color: '#3d4155' },
 }
 
+const GENRE_OPTIONS = [
+  { value: 1, label: '现代都市', description: '都市生活、职场、生存压力与现代关系。' },
+  { value: 2, label: '古代言情', description: '古典情感、宫廷关系与时代规训。' },
+  { value: 3, label: '玄幻修真', description: '修炼体系、宗门势力与超凡成长。' },
+  { value: 4, label: '悬疑推理', description: '谜案、线索追查与心理博弈。' },
+  { value: 5, label: '科幻未来', description: '未来科技、社会变迁与宏观设定。' },
+  { value: 6, label: '架空历史', description: '虚构历史路线下的家国与权力演化。' },
+  { value: 7, label: '赛博朋克', description: '高科技、低生活与秩序失衡。' },
+  { value: 8, label: '武侠', description: '江湖秩序、门派冲突与侠义选择。' },
+  { value: 9, label: '历史正剧', description: '历史叙事、人物命运与时代结构。' },
+  { value: 10, label: '末世求生', description: '灾变后的生存、重建与资源竞争。' },
+  { value: 11, label: '丧尸末日', description: '感染蔓延、逃亡协作与社会崩塌。' },
+  { value: 12, label: '盗墓探秘', description: '古墓机关、线索破解与冒险探索。' },
+] as const
+
 const GENRE_GRADIENTS: Record<string, string> = {
-  '现代都市': 'linear-gradient(135deg, #2E86AB, #1E3A5F)',
-  '古代言情': 'linear-gradient(135deg, #E84393, #8B1A5C)',
-  '玄幻修真': 'linear-gradient(135deg, #9B59B6, #4A235A)',
-  '悬疑推理': 'linear-gradient(135deg, #2C3E50, #1A252F)',
-  '科幻未来': 'linear-gradient(135deg, #1ABC9C, #0E6655)',
-  '架空历史': 'linear-gradient(135deg, #D35400, #784212)',
-  '赛博朋克': 'linear-gradient(135deg, #8E44AD, #1A5276)',
-  '武侠': 'linear-gradient(135deg, #C0392B, #641E16)',
-  '历史正剧': 'linear-gradient(135deg, #7D6608, #4D4004)',
-  '末世求生': 'linear-gradient(135deg, #5D4037, #3E2723)',
-  '丧尸末日': 'linear-gradient(135deg, #37474F, #263238)',
-  '盗墓探秘': 'linear-gradient(135deg, #4E342E, #1B0000)',
+  现代都市: 'linear-gradient(135deg, #2E86AB, #1E3A5F)',
+  古代言情: 'linear-gradient(135deg, #E84393, #8B1A5C)',
+  玄幻修真: 'linear-gradient(135deg, #9B59B6, #4A235A)',
+  悬疑推理: 'linear-gradient(135deg, #2C3E50, #1A252F)',
+  科幻未来: 'linear-gradient(135deg, #1ABC9C, #0E6655)',
+  架空历史: 'linear-gradient(135deg, #D35400, #784212)',
+  赛博朋克: 'linear-gradient(135deg, #8E44AD, #1A5276)',
+  武侠: 'linear-gradient(135deg, #C0392B, #641E16)',
+  历史正剧: 'linear-gradient(135deg, #7D6608, #4D4004)',
+  末世求生: 'linear-gradient(135deg, #5D4037, #3E2723)',
+  丧尸末日: 'linear-gradient(135deg, #37474F, #263238)',
+  盗墓探秘: 'linear-gradient(135deg, #4E342E, #1B0000)',
 }
 
 const TARGET_WORDS_OPTIONS = [
@@ -52,42 +108,36 @@ function formatWordCount(value: number) {
   return `${value.toLocaleString()} 字`
 }
 
-const GENRE_DESCRIPTIONS: Record<number, string> = {
-  1: '都市生活与现代情感',
-  2: '古典爱情与宫廷风云',
-  3: '仙法修炼与玄幻世界',
-  4: '烧脑推理与心理博弈',
-  5: '未来科技与星际探索',
-  6: '另一种历史演进轨迹',
-  7: '高科技与低生活并存',
-  8: '侠义江湖与武林争霸',
-  9: '正史叙事与家国情怀',
-  10: '末日灾变后的生存重建',
-  11: '病毒蔓延的生死逃亡',
-  12: '古墓机关与寻宝探秘',
+function normalizeTargetWords(value?: number | null) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
 }
 
 export default function NovelList() {
   const navigate = useNavigate()
   const { novels, setNovels } = useNovelStore()
-
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [sortBy, setSortBy] = useState<string>('updatedAt')
   const [styleTemplates, setStyleTemplates] = useState<Template[]>([])
   const [worldTemplates, setWorldTemplates] = useState<Template[]>([])
-  const [modelConfigs, setModelConfigs] = useState<{ id: number; name: string }[]>([])
-
-  // 向导状态
+  const [modelConfigs, setModelConfigs] = useState<Array<{ id: number; name: string }>>([])
   const [wizardOpen, setWizardOpen] = useState(false)
   const [wizardStep, setWizardStep] = useState(0)
   const [wizardLoading, setWizardLoading] = useState(false)
-  const [wizardForm] = Form.useForm()
-  const [expandedData, setExpandedData] = useState<{
-    expanded_background: string; titles: string[]; synopsis: string
-  } | null>(null)
+  const [wizardForm] = Form.useForm<WizardFormValues>()
+  const [expandedData, setExpandedData] = useState<ExpandBackgroundResult | null>(null)
   const [selectedGenreId, setSelectedGenreId] = useState<number | null>(null)
+
+  const resetWizard = useCallback(() => {
+    setWizardOpen(false)
+    setWizardStep(0)
+    setWizardLoading(false)
+    setExpandedData(null)
+    setSelectedGenreId(null)
+    wizardForm.resetFields()
+    wizardForm.setFieldsValue({ targetWords: 200000 })
+  }, [wizardForm])
 
   const loadNovels = useCallback(async () => {
     setLoading(true)
@@ -95,43 +145,51 @@ export default function NovelList() {
       const list = await window.electron.novel.list()
       setNovels(list)
     } catch {
-      message.error('加载失败')
+      message.error('加载小说列表失败。')
     } finally {
       setLoading(false)
     }
   }, [setNovels])
 
   useEffect(() => {
-    loadNovels()
-    window.electron.template.list('style').then(setStyleTemplates)
-    window.electron.template.list('world').then(setWorldTemplates)
-    window.electron.model.list().then(setModelConfigs)
-  }, [loadNovels])
+    void loadNovels()
+    void window.electron.template.list('style').then(setStyleTemplates)
+    void window.electron.template.list('world').then(setWorldTemplates)
+    void window.electron.model.list().then(setModelConfigs)
+    wizardForm.setFieldsValue({ targetWords: 200000 })
+  }, [loadNovels, wizardForm])
 
-  const filteredNovels = novels
-    .filter(n => {
-      if (search && !n.title.includes(search)) return false
-      if (statusFilter !== 'all' && n.status !== statusFilter) return false
-      return true
-    })
-    .sort((a, b) => {
-      if (sortBy === 'updatedAt') return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-      if (sortBy === 'totalWords') return b.totalWords - a.totalWords
-      if (sortBy === 'title') return a.title.localeCompare(b.title, 'zh')
-      return 0
-    })
+  const filteredNovels = useMemo(() => {
+    const keyword = search.trim().toLowerCase()
+    return [...novels]
+      .filter((novel) => {
+        if (statusFilter !== 'all' && novel.status !== statusFilter) return false
+        if (!keyword) return true
+        return [novel.title, novel.synopsis, novel.genreName]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+          .includes(keyword)
+      })
+      .sort((left, right) => {
+        if (sortBy === 'updatedAt') return new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime()
+        if (sortBy === 'totalWords') return right.totalWords - left.totalWords
+        if (sortBy === 'title') return left.title.localeCompare(right.title, 'zh')
+        return 0
+      })
+  }, [novels, search, sortBy, statusFilter])
 
   const handleDelete = async (id: number, title: string) => {
     Modal.confirm({
       title: `确认删除《${title}》？`,
-      content: '删除后所有章节、人物、地图数据将一并删除，无法恢复。',
+      content: '删除后章节、人物、地图、线程和结构数据都会一并删除，无法恢复。',
       okText: '确认删除',
       okType: 'danger',
       cancelText: '取消',
       onOk: async () => {
         await window.electron.novel.delete(id)
-        loadNovels()
-        message.success('已删除')
+        await loadNovels()
+        message.success('小说已删除。')
       },
     })
   }
@@ -140,29 +198,32 @@ export default function NovelList() {
     try {
       const filePath = await window.electron.novel.export(id, format)
       message.success(`已导出到 ${filePath}`)
-    } catch (e: unknown) {
-      if (e instanceof Error && e.message !== '用户取消') {
-        message.error('导出失败')
+    } catch (error) {
+      if (error instanceof Error && error.message !== '用户取消') {
+        message.error('导出失败。')
       }
     }
   }
 
-  // 向导处理
   const handleWizardNext = async () => {
     if (wizardStep === 0) {
-      await wizardForm.validateFields(['genreId', 'styleTemplateId', 'worldTemplateId'])
+      await wizardForm.validateFields(['genreId'])
       setWizardStep(1)
-    } else if (wizardStep === 1) {
+      return
+    }
+
+    if (wizardStep === 1) {
       const values = await wizardForm.validateFields(['userBackground'])
       setWizardLoading(true)
       try {
-        const { genreId, worldTemplateId, modelConfigId } = wizardForm.getFieldsValue()
+        const allValues = wizardForm.getFieldsValue(true) as Partial<WizardFormValues>
         const data = await window.electron.ai.expandBackground({
           userBackground: values.userBackground,
-          genreId,
-          worldTemplateId,
-          modelConfigId,
-        })
+          genreId: allValues.genreId,
+          worldTemplateId: allValues.worldTemplateId,
+          modelConfigId: allValues.modelConfigId,
+        }) as ExpandBackgroundResult
+
         setExpandedData(data)
         wizardForm.setFieldsValue({
           expandedBackground: data.expanded_background,
@@ -170,72 +231,60 @@ export default function NovelList() {
           title: data.titles[0] || '',
         })
         setWizardStep(2)
-      } catch (e: unknown) {
-        message.error(`AI 扩充失败：${e instanceof Error ? e.message : '未知错误'}`)
+      } catch (error) {
+        console.error(error)
+        message.error(error instanceof Error ? error.message : 'AI 扩写失败。')
       } finally {
         setWizardLoading(false)
       }
-    } else if (wizardStep === 2) {
+      return
+    }
+
+    if (wizardStep === 2) {
       setWizardStep(3)
-    } else if (wizardStep === 3) {
-      const values = await wizardForm.validateFields(['title', 'synopsis', 'targetWords'])
-      const allValues = wizardForm.getFieldsValue(true)
-      try {
-        const novelId = await window.electron.novel.create({
-          title: values.title,
-          synopsis: values.synopsis,
-          genreId: allValues.genreId,
-          userBackground: allValues.userBackground,
-          expandedBackground: allValues.expandedBackground,
-          styleTemplateId: allValues.styleTemplateId,
-          worldTemplateId: allValues.worldTemplateId,
-          modelConfigId: allValues.modelConfigId,
-          targetWords: values.targetWords,
-        })
-        setWizardOpen(false)
-        wizardForm.resetFields()
-        setWizardStep(0)
-        setExpandedData(null)
-        setSelectedGenreId(null)
-        await loadNovels()
-        navigate(`/novels/${novelId}/overview`)
-      } catch {
-        message.error('创建失败')
-      }
+      return
+    }
+
+    const values = await wizardForm.validateFields(['title', 'synopsis', 'targetWords'])
+    const allValues = wizardForm.getFieldsValue(true) as Partial<WizardFormValues>
+
+    try {
+      const novelId = await window.electron.novel.create({
+        title: values.title.trim(),
+        synopsis: values.synopsis.trim(),
+        genreId: allValues.genreId,
+        userBackground: allValues.userBackground?.trim(),
+        expandedBackground: allValues.expandedBackground?.trim(),
+        styleTemplateId: allValues.styleTemplateId,
+        worldTemplateId: allValues.worldTemplateId,
+        modelConfigId: allValues.modelConfigId,
+        targetWords: values.targetWords,
+      })
+
+      await loadNovels()
+      resetWizard()
+      navigate(`/novels/${novelId}/overview`)
+    } catch (error) {
+      console.error(error)
+      message.error('创建小说失败。')
     }
   }
 
-  const genreOptions = [
-    { value: 1, label: '现代都市' },
-    { value: 2, label: '古代言情' },
-    { value: 3, label: '玄幻修真' },
-    { value: 4, label: '悬疑推理' },
-    { value: 5, label: '科幻未来' },
-    { value: 6, label: '架空历史' },
-    { value: 7, label: '赛博朋克' },
-    { value: 8, label: '武侠' },
-    { value: 9, label: '历史正剧' },
-    { value: 10, label: '末世求生' },
-    { value: 11, label: '丧尸末日' },
-    { value: 12, label: '盗墓探秘' },
-  ]
-
   return (
     <div style={{ padding: '20px 24px', height: '100%', overflow: 'auto' }}>
-      {/* 顶部操作栏 */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 20, alignItems: 'center' }}>
         <Input
           prefix={<SearchOutlined />}
           placeholder="搜索小说..."
           value={search}
-          onChange={e => setSearch(e.target.value)}
-          style={{ width: 240 }}
+          onChange={(event) => setSearch(event.target.value)}
+          style={{ width: 260 }}
           allowClear
         />
         <Select
           value={statusFilter}
           onChange={setStatusFilter}
-          style={{ width: 120 }}
+          style={{ width: 140 }}
           options={[
             { value: 'all', label: '全部状态' },
             { value: 'draft', label: '草稿' },
@@ -247,7 +296,7 @@ export default function NovelList() {
         <Select
           value={sortBy}
           onChange={setSortBy}
-          style={{ width: 140 }}
+          style={{ width: 150 }}
           options={[
             { value: 'updatedAt', label: '最近修改' },
             { value: 'totalWords', label: '按字数排序' },
@@ -255,62 +304,55 @@ export default function NovelList() {
           ]}
         />
         <div style={{ flex: 1 }} />
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => setWizardOpen(true)}
-        >
+        <Button type="primary" icon={<PlusOutlined />} onClick={() => setWizardOpen(true)}>
           新建小说
         </Button>
       </div>
 
-      {/* 小说卡片网格 */}
       {loading ? (
         <div style={{ textAlign: 'center', padding: 80 }}>
           <Spin size="large" />
         </div>
       ) : filteredNovels.length === 0 ? (
         <Empty
-          description={search ? '没有找到匹配的小说' : '还没有小说，点击「新建小说」开始创作'}
+          description={search ? '没有找到匹配的小说。' : '还没有小说，点击“新建小说”开始创作。'}
           style={{ paddingTop: 80 }}
         />
       ) : (
         <Row gutter={[16, 16]}>
-          {filteredNovels.map(novel => (
+          {filteredNovels.map((novel) => (
             <Col key={novel.id} xs={24} sm={12} md={8} lg={6}>
               <NovelCard
                 novel={novel}
                 onClick={() => navigate(`/novels/${novel.id}/overview`)}
-                onDelete={() => handleDelete(novel.id, novel.title)}
-                onExport={(format) => handleExport(novel.id, format)}
+                onDelete={() => void handleDelete(novel.id, novel.title)}
+                onExport={(format) => void handleExport(novel.id, format)}
               />
             </Col>
           ))}
         </Row>
       )}
 
-      {/* 初始化向导 Modal */}
       <Modal
         title="新建小说"
         open={wizardOpen}
-        onCancel={() => { setWizardOpen(false); setWizardStep(0); wizardForm.resetFields(); setSelectedGenreId(null) }}
+        onCancel={resetWizard}
         footer={null}
-        width={800}
+        width={820}
         destroyOnHidden
       >
         <Steps
           current={wizardStep}
           items={[
-            { title: '题材选择' },
-            { title: '背景录入' },
-            { title: 'AI 扩充' },
-            { title: '基础信息' },
+            { title: '题材与模板' },
+            { title: '原始背景' },
+            { title: 'AI 扩写' },
+            { title: '最终确认' },
           ]}
           style={{ marginBottom: 32 }}
         />
 
         <Form form={wizardForm} layout="vertical">
-          {/* Step 0: 题材与模板 */}
           {wizardStep === 0 && (
             <>
               <Form.Item
@@ -320,9 +362,10 @@ export default function NovelList() {
               >
                 <div>
                   <Row gutter={[10, 10]}>
-                    {genreOptions.map(genre => {
+                    {GENRE_OPTIONS.map((genre) => {
                       const isSelected = selectedGenreId === genre.value
                       const gradient = GENRE_GRADIENTS[genre.label] || 'linear-gradient(135deg, #1a1d27, #252840)'
+
                       return (
                         <Col span={8} key={genre.value}>
                           <div
@@ -332,29 +375,26 @@ export default function NovelList() {
                             }}
                             style={{
                               background: gradient,
-                              borderRadius: 8,
+                              borderRadius: 10,
                               padding: '12px 14px',
                               cursor: 'pointer',
                               border: isSelected ? '2px solid #2E86AB' : '2px solid transparent',
                               position: 'relative',
-                              transition: 'border-color 0.2s',
+                              minHeight: 90,
                             }}
                           >
-                            {isSelected && (
+                            {isSelected ? (
                               <CheckOutlined style={{
                                 position: 'absolute',
                                 top: 8,
                                 right: 8,
-                                color: '#2E86AB',
+                                color: '#fff',
                                 fontSize: 14,
-                                fontWeight: 700,
                               }} />
-                            )}
-                            <div style={{ fontWeight: 600, color: 'white', marginBottom: 4 }}>
-                              {genre.label}
-                            </div>
-                            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.65)' }}>
-                              {GENRE_DESCRIPTIONS[genre.value] || ''}
+                            ) : null}
+                            <div style={{ fontWeight: 600, color: '#fff', marginBottom: 6 }}>{genre.label}</div>
+                            <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.72)', lineHeight: 1.5 }}>
+                              {genre.description}
                             </div>
                           </div>
                         </Col>
@@ -363,21 +403,22 @@ export default function NovelList() {
                   </Row>
                 </div>
               </Form.Item>
+
               <Row gutter={12}>
                 <Col span={8}>
                   <Form.Item name="styleTemplateId" label="文风模板">
                     <Select
-                      options={styleTemplates.map(t => ({ value: t.id, label: t.name }))}
-                      placeholder="选择写作风格（可选）"
+                      options={styleTemplates.map((template) => ({ value: template.id, label: template.name }))}
+                      placeholder="可选"
                       allowClear
                     />
                   </Form.Item>
                 </Col>
                 <Col span={8}>
-                  <Form.Item name="worldTemplateId" label="世界观模板">
+                  <Form.Item name="worldTemplateId" label="世界模板">
                     <Select
-                      options={worldTemplates.map(t => ({ value: t.id, label: t.name }))}
-                      placeholder="选择世界观体系（可选）"
+                      options={worldTemplates.map((template) => ({ value: template.id, label: template.name }))}
+                      placeholder="可选"
                       allowClear
                     />
                   </Form.Item>
@@ -385,8 +426,8 @@ export default function NovelList() {
                 <Col span={8}>
                   <Form.Item name="modelConfigId" label="使用模型">
                     <Select
-                      options={modelConfigs.map(m => ({ value: m.id, label: m.name }))}
-                      placeholder="使用默认模型"
+                      options={modelConfigs.map((model) => ({ value: model.id, label: model.name }))}
+                      placeholder="默认模型"
                       allowClear
                     />
                   </Form.Item>
@@ -395,37 +436,38 @@ export default function NovelList() {
             </>
           )}
 
-          {/* Step 1: 背景录入 */}
           {wizardStep === 1 && (
             <Form.Item
               name="userBackground"
               label="故事背景"
-              rules={[{ required: true, message: '请输入背景' }, { min: 20, message: '至少20字' }]}
-              extra="用你自己的话描述故事背景，不需要完整，关键词也行（建议50字以上）"
+              rules={[
+                { required: true, message: '请输入故事背景' },
+                { min: 20, message: '至少写 20 个字' },
+              ]}
+              extra="用你自己的话描述故事处境、冲突、氛围或关键设定，写得越具体，AI 扩写越稳。"
             >
               <Input.TextArea
-                rows={6}
-                placeholder="例如：一个现代城市的侦探，意外卷入了一起连环失踪案，发现背后隐藏着一个存在了百年的秘密组织..."
+                rows={7}
+                placeholder="例如：一座沿海城市的冷案记者，意外卷入二十年前的沉船旧案，发现幸存者名单里藏着她父亲失踪的线索。"
                 showCount
               />
             </Form.Item>
           )}
 
-          {/* Step 2: AI 扩充确认 */}
           {wizardStep === 2 && (
             <div style={{ display: 'flex', gap: 20 }}>
               <div style={{ flex: 1 }}>
-                <Form.Item name="expandedBackground" label="AI 扩充背景（可编辑）">
+                <Form.Item name="expandedBackground" label="AI 扩写背景（可编辑）">
                   <Input.TextArea rows={10} />
                 </Form.Item>
               </div>
-              <div style={{ width: 260 }}>
-                <div style={{ marginBottom: 8, color: 'var(--color-text-secondary)', fontSize: 12 }}>选择标题</div>
+              <div style={{ width: 280 }}>
+                <div style={{ marginBottom: 8, color: 'var(--color-text-secondary)', fontSize: 12 }}>标题建议</div>
                 <Form.Item name="title">
                   <Radio.Group style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {expandedData?.titles.map((t, i) => (
-                      <Radio key={i} value={t} style={{ whiteSpace: 'normal', lineHeight: 1.5 }}>
-                        {t}
+                    {expandedData?.titles.map((title) => (
+                      <Radio key={title} value={title} style={{ whiteSpace: 'normal', lineHeight: 1.5 }}>
+                        {title}
                       </Radio>
                     ))}
                   </Radio.Group>
@@ -436,7 +478,10 @@ export default function NovelList() {
                 <Button
                   icon={<ReloadOutlined />}
                   loading={wizardLoading}
-                  onClick={() => { setWizardStep(1); setExpandedData(null) }}
+                  onClick={() => {
+                    setWizardStep(1)
+                    setExpandedData(null)
+                  }}
                 >
                   重新生成
                 </Button>
@@ -444,13 +489,12 @@ export default function NovelList() {
             </div>
           )}
 
-          {/* Step 3: 基础信息完善 */}
           {wizardStep === 3 && (
             <>
-              <Form.Item name="title" label="最终标题" rules={[{ required: true }]}>
+              <Form.Item name="title" label="最终标题" rules={[{ required: true, message: '请填写标题' }]}>
                 <Input placeholder="小说标题" />
               </Form.Item>
-              <Form.Item name="synopsis" label="最终简介">
+              <Form.Item name="synopsis" label="最终简介" rules={[{ required: true, message: '请填写简介' }]}>
                 <Input.TextArea rows={5} />
               </Form.Item>
               <Form.Item name="targetWords" label="目标字数" initialValue={200000}>
@@ -461,16 +505,16 @@ export default function NovelList() {
         </Form>
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 24 }}>
-          {wizardStep > 0 && (
-            <Button onClick={() => setWizardStep(s => s - 1)}>上一步</Button>
-          )}
+          {wizardStep > 0 ? (
+            <Button onClick={() => setWizardStep((step) => step - 1)}>上一步</Button>
+          ) : null}
           <Button
             type="primary"
-            onClick={handleWizardNext}
+            onClick={() => void handleWizardNext()}
             loading={wizardLoading}
             icon={wizardLoading ? <LoadingOutlined /> : undefined}
           >
-            {wizardStep === 3 ? '创建小说' : wizardStep === 1 ? 'AI 扩充' : '下一步'}
+            {wizardStep === 3 ? '创建小说' : wizardStep === 1 ? 'AI 扩写' : '下一步'}
           </Button>
         </div>
       </Modal>
@@ -478,7 +522,6 @@ export default function NovelList() {
   )
 }
 
-// 单张小说卡片组件
 function NovelCard({
   novel,
   onClick,
@@ -491,8 +534,9 @@ function NovelCard({
   onExport: (format: string) => void
 }) {
   const status = STATUS_LABELS[novel.status] || STATUS_LABELS.draft
-  const progress = novel.targetWords > 0
-    ? Math.min(100, Math.round((novel.totalWords / novel.targetWords) * 100))
+  const targetWords = normalizeTargetWords(novel.targetWords)
+  const progress = targetWords > 0
+    ? Math.min(100, Math.round((novel.totalWords / targetWords) * 100))
     : 0
   const gradient = GENRE_GRADIENTS[novel.genreName || ''] || 'linear-gradient(135deg, #1a1d27, #252840)'
   const synopsis = novel.synopsis?.trim()
@@ -500,12 +544,12 @@ function NovelCard({
     || novel.userBackground?.trim()
     || '还没有补充简介，进入工作台后可以继续完善背景、设定和结构。'
 
-  const menuItems = [
+  const menuItems: MenuProps['items'] = [
     {
       key: 'edit',
       icon: <EditOutlined />,
       label: '继续创作',
-      onClick: onClick,
+      onClick,
     },
     {
       key: 'export-txt',
@@ -525,7 +569,7 @@ function NovelCard({
       label: '导出 DOCX',
       onClick: () => onExport('docx'),
     },
-    { type: 'divider' as const },
+    { type: 'divider' },
     {
       key: 'delete',
       icon: <DeleteOutlined />,
@@ -549,42 +593,45 @@ function NovelCard({
       }}
       onClick={onClick}
     >
-      {/* 封面 */}
-      <div className="novel-home-card__cover" style={{
-        height: 156,
-        background: gradient,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        position: 'relative',
-      }}>
+      <div
+        className="novel-home-card__cover"
+        style={{
+          height: 156,
+          background: gradient,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          position: 'relative',
+        }}
+      >
         <span style={{ fontSize: 40, opacity: 0.3 }}>✦</span>
-        <div style={{ position: 'absolute', top: 8, right: 8 }} onClick={e => e.stopPropagation()}>
+        <div style={{ position: 'absolute', top: 8, right: 8 }} onClick={(event) => event.stopPropagation()}>
           <Dropdown menu={{ items: menuItems }} trigger={['click']}>
             <Button
               type="text"
               size="small"
               icon={<MoreOutlined style={{ color: 'white' }} />}
-              style={{ background: 'rgba(0,0,0,0.3)' }}
+              style={{ background: 'rgba(0, 0, 0, 0.3)' }}
             />
           </Dropdown>
         </div>
         <Tag
           style={{
-            position: 'absolute', bottom: 8, left: 8,
-            background: 'rgba(0,0,0,0.4)', border: 'none',
-            color: 'white', fontSize: 11,
+            position: 'absolute',
+            bottom: 8,
+            left: 8,
+            background: 'rgba(0, 0, 0, 0.4)',
+            border: 'none',
+            color: 'white',
+            fontSize: 11,
           }}
         >
           {novel.genreName || '未分类'}
         </Tag>
       </div>
 
-      {/* 卡片内容 */}
       <div className="novel-home-card__body">
-        <div className="novel-home-card__title">
-          {novel.title}
-        </div>
+        <div className="novel-home-card__title">{novel.title}</div>
 
         <div className="novel-home-card__meta">
           <Tag
@@ -598,21 +645,15 @@ function NovelCard({
           >
             {status.label}
           </Tag>
-          <span className="novel-home-card__meta-copy">
-            {formatWordCount(novel.totalWords)}
-          </span>
+          <span className="novel-home-card__meta-copy">{formatWordCount(novel.totalWords)}</span>
           <span style={{ flex: 1 }} />
-          <span className="novel-home-card__meta-copy">
-            {dayjs(novel.updatedAt).fromNow()}
-          </span>
+          <span className="novel-home-card__meta-copy">{dayjs(novel.updatedAt).fromNow()}</span>
         </div>
 
-        <div className="novel-home-card__synopsis">
-          {synopsis}
-        </div>
+        <div className="novel-home-card__synopsis">{synopsis}</div>
 
         <div className="novel-home-card__progress">
-          <Tooltip title={`${novel.totalWords.toLocaleString()} / ${novel.targetWords.toLocaleString()} 字`}>
+          <Tooltip title={`${novel.totalWords.toLocaleString()} / ${targetWords.toLocaleString()} 字`}>
             <Progress
               percent={progress}
               size="small"
@@ -622,7 +663,7 @@ function NovelCard({
             />
           </Tooltip>
           <div className="novel-home-card__progress-meta">
-            <span>目标 {formatWordCount(novel.targetWords)}</span>
+            <span>目标 {formatWordCount(targetWords)}</span>
             <strong>{progress}%</strong>
           </div>
         </div>

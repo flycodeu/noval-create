@@ -1,4 +1,4 @@
-﻿import { asc, eq } from 'drizzle-orm'
+import { asc, eq } from 'drizzle-orm'
 import { getDb, getSqlite } from '../database/db'
 import {
   chapterSegments,
@@ -82,6 +82,13 @@ interface TimelineQueryFilters extends TimelineAnchorFilters {
   pageSize?: number
   sortBy?: 'timeSortValue' | 'createdAt'
   sortDirection?: 'asc' | 'desc'
+}
+
+interface TimelineStatsAccumulator {
+  total: number
+  majorCount: number
+  resolvedCount: number
+  openThreadCount: number
 }
 
 function asText(value: unknown): string {
@@ -736,7 +743,7 @@ export function getTimelineStats(filters: TimelineQueryFilters) {
     WHERE ${query.whereSql}
   `).all(...query.params) as Array<Record<string, unknown>>
 
-  return rows.reduce((result, row) => {
+  return rows.reduce<TimelineStatsAccumulator>((result, row) => {
     result.total += 1
     if (Number(row.isMajorEvent || 0)) result.majorCount += 1
     if (row.status === 'resolved') result.resolvedCount += 1

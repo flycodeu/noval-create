@@ -712,7 +712,7 @@ export async function batchGenerateMap(
         if (!currentParent) continue
 
         const existingChildren = getChildrenOf(latestRows, currentParent.id)
-        const missingCount = targetPlan.count - existingChildren.length
+        const missingCount = targetPlan.suggestedCount - existingChildren.length
         if (missingCount <= 0) continue
 
         const prompt = buildChildBatchPrompt({

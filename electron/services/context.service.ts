@@ -1,7 +1,8 @@
 ﻿import { asc, eq } from 'drizzle-orm'
 import { getDb } from '../database/db'
-import { chapters, characters, genres, novels, storyArcs, storyItems, templates, timelineEvents, worldMap } from '../database/schema'
+import { chapters, characters, genres, novels, storyArcs, storyItems, storyThreads, templates, timelineEvents, worldMap } from '../database/schema'
 import { buildWorldRulesSummary, parseWorldRulesJson } from '../../src/shared/genre-system'
+import { buildProjectBriefSummary, parseProjectBriefDocument } from '../../src/shared/project-brief'
 import {
   buildPremiseSummary,
   buildStoryDesignSummary,
@@ -10,6 +11,7 @@ import {
   type StoryPremiseSettings,
   type StoryWritingRulesSettings,
 } from '../../src/shared/story-settings'
+import { buildThemeVoiceSummary, parseThemeVoiceDocument } from '../../src/shared/theme-voice'
 import { buildStoryMemoryPromptSummary } from './story-memory.service'
 import { ensureStoryStructure } from './story-structure.service'
 
@@ -62,9 +64,12 @@ export interface StoryProfile {
   novelTitle: string
   genre: string
   background: string
+  projectBriefSummary: string
   premiseSummary: string
   storyDesignSummary: string
+  themeVoiceSummary: string
   writingRulesSummary: string
+  storyThreadsSummary: string
   storyGoal: string
   coreConflict: string
   mainPlot: string
@@ -399,9 +404,12 @@ function buildProtagonistPolicy(allCharacters: Array<typeof characters.$inferSel
 
 function buildStoryCoreText(profile: StoryProfile): string {
   return [
+    profile.projectBriefSummary,
     profile.premiseSummary,
     profile.storyDesignSummary,
+    profile.themeVoiceSummary,
     profile.writingRulesSummary,
+    profile.storyThreadsSummary,
   ].filter(Boolean).join('\n\n')
 }
 
@@ -623,6 +631,30 @@ function buildItemSummary(novelId: number): string {
     .join('\n')
 }
 
+function buildStoryThreadsSummary(novelId: number): string {
+  const db = getDb()
+  const rows = db.select().from(storyThreads)
+    .where(eq(storyThreads.novelId, novelId))
+    .orderBy(asc(storyThreads.sortOrder), asc(storyThreads.id))
+    .all()
+    .filter((thread) => thread.status !== 'resolved' && thread.status !== 'abandoned')
+
+  if (rows.length === 0) return ''
+
+  return rows
+    .slice(0, 8)
+    .map((thread) => {
+      const parts = [
+        thread.threadType || 'subplot',
+        thread.status || 'planned',
+        thread.targetPayoffChapter ? `目标回收=第${thread.targetPayoffChapter}章` : '',
+        thread.currentState || thread.summary || thread.premise || '',
+      ].filter(Boolean)
+      return `${thread.title}${parts.length > 0 ? `：${parts.join(' | ')}` : ''}`
+    })
+    .join('\n')
+}
+
 function resolveArcForChapter(
   chapterNum: number,
   chapterArcId: number | null | undefined,
@@ -668,6 +700,8 @@ export async function buildStoryProfile(novelId: number): Promise<StoryProfile> 
   const allCharacters = db.select().from(characters).where(eq(characters.novelId, novelId)).all()
 
   const settings = parseStorySettings(novel.settingsJson)
+  const projectBrief = parseProjectBriefDocument(novel.projectBriefJson)
+  const themeVoice = parseThemeVoiceDocument(novel.themeVoiceJson)
   const protagonistPolicy = buildProtagonistPolicy(allCharacters)
 
   return {
@@ -675,6 +709,7 @@ export async function buildStoryProfile(novelId: number): Promise<StoryProfile> 
     novelTitle: novel.title,
     genre: genre?.name || '未知题材',
     background: buildBackgroundText(novel),
+    projectBriefSummary: buildProjectBriefSummary(projectBrief),
     premiseSummary: buildPremiseSummary(settings.premise),
     storyDesignSummary: buildStoryDesignSummary({
       storyGoal: settings.storyGoal,
@@ -687,7 +722,9 @@ export async function buildStoryProfile(novelId: number): Promise<StoryProfile> 
       rhythmEnding: settings.rhythmEnding,
       ending: settings.ending,
     }),
+    themeVoiceSummary: buildThemeVoiceSummary(themeVoice),
     writingRulesSummary: buildWritingRulesSummary(settings.writingRules),
+    storyThreadsSummary: buildStoryThreadsSummary(novelId),
     storyGoal: settings.storyGoal,
     coreConflict: settings.coreConflict,
     mainPlot: settings.mainPlot,
@@ -760,7 +797,8 @@ export async function buildChapterContext(
   const arcs = db.select().from(storyArcs).where(eq(storyArcs.novelId, novelId)).all()
   const currentArc = resolveArcForChapter(chapterNum, currentChapter?.arcId, arcs)
   const previousRows = chapterRows.filter((chapter) => chapter.chapterNum < chapterNum)
-  const recentWindow = resolveRecentContextWindow(novel.targetWords || 0, chapterRows.length)
+  const targetWords = Number(novel.targetWords || 0)
+  const recentWindow = resolveRecentContextWindow(targetWords, chapterRows.length)
   const recentChapters = previousRows.slice(-recentWindow).map(toChapterWithContinuity)
   const continuityChapters = recentChapters.filter((chapter) => hasContinuityContent(chapter.continuityState))
   const allCharacters = db.select().from(characters).where(eq(characters.novelId, novelId)).all()
@@ -787,15 +825,15 @@ export async function buildChapterContext(
       ].filter(Boolean).join('\n')
     : ''
 
-  const budgetFloor = novel.targetWords >= 800000
+  const budgetFloor = targetWords >= 800000
     ? 7200
-    : novel.targetWords >= 350000
+    : targetWords >= 350000
       ? 6600
       : totalBudget
   const effectiveBudget = Math.max(totalBudget, budgetFloor)
-  const reservedForOutput = novel.targetWords >= 800000 ? 2200 : 2000
+  const reservedForOutput = targetWords >= 800000 ? 2200 : 2000
   const contextBudget = effectiveBudget - reservedForOutput
-  const longTermMemoryPriority = novel.targetWords >= 350000 || chapterRows.length >= 80 ? 1 : 2
+  const longTermMemoryPriority = targetWords >= 350000 || chapterRows.length >= 80 ? 1 : 2
 
   const parts: ContextPart[] = [
     { priority: 0, label: 'chapterGoal', content: extractChapterGoal(currentChapter?.outline) },
@@ -835,6 +873,7 @@ export async function buildChapterContext(
     longTermMemory: allocated.longTermMemory || '',
   }
 }
+
 
 
 

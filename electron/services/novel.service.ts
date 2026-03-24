@@ -22,7 +22,9 @@ function deriveNovelChangeReasons(
     status: string
     totalWords: number
     targetWords: number
+    projectBriefJson: string
     settingsJson: string
+    themeVoiceJson: string
     worldRulesJson: string
     expandedBackground: string
     modelConfigId: number
@@ -37,7 +39,9 @@ function deriveNovelChangeReasons(
     || Object.prototype.hasOwnProperty.call(next, 'synopsis')
     || Object.prototype.hasOwnProperty.call(next, 'userBackground')
     || Object.prototype.hasOwnProperty.call(next, 'expandedBackground')
+    || Object.prototype.hasOwnProperty.call(next, 'projectBriefJson')
     || Object.prototype.hasOwnProperty.call(next, 'settingsJson')
+    || Object.prototype.hasOwnProperty.call(next, 'themeVoiceJson')
   ) {
     reasons.add('Core story setup changed')
   }
@@ -100,7 +104,9 @@ export function getNovel(id: number) {
     coverImage: novels.coverImage,
     userBackground: novels.userBackground,
     expandedBackground: novels.expandedBackground,
+    projectBriefJson: novels.projectBriefJson,
     settingsJson: novels.settingsJson,
+    themeVoiceJson: novels.themeVoiceJson,
     worldRulesJson: novels.worldRulesJson,
     styleTemplateId: novels.styleTemplateId,
     worldTemplateId: novels.worldTemplateId,
@@ -125,6 +131,7 @@ export function createNovel(data: {
   genreId?: number
   userBackground?: string
   expandedBackground?: string
+  projectBriefJson?: string
   styleTemplateId?: number
   worldTemplateId?: number
   targetWords?: number
@@ -149,14 +156,16 @@ export function updateNovel(id: number, data: Partial<{
   title: string
   synopsis: string
   genreId: number
-  userBackground: string
-  status: string
-  totalWords: number
-  targetWords: number
-  settingsJson: string
-  worldRulesJson: string
-  expandedBackground: string
-  modelConfigId: number
+    userBackground: string
+    status: string
+    totalWords: number
+    targetWords: number
+    projectBriefJson: string
+    settingsJson: string
+    themeVoiceJson: string
+    worldRulesJson: string
+    expandedBackground: string
+    modelConfigId: number
   styleTemplateId: number
   worldTemplateId: number
 }>) {

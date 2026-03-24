@@ -1,104 +1,368 @@
-﻿import React,{useCallback,useEffect,useMemo,useRef,useState} from 'react'
-import {Alert,Button,Empty,Form,Input,InputNumber,Pagination,Select,Space,Spin,Tag,message} from 'antd'
-import {ApartmentOutlined,BranchesOutlined,BuildOutlined,EditOutlined,HolderOutlined,LinkOutlined,PlusOutlined,ReloadOutlined,SaveOutlined} from '@ant-design/icons'
-import {DragDropContext,Draggable,Droppable,type DropResult} from '@hello-pangea/dnd'
-import VirtualList from 'rc-virtual-list'
-import {useNavigate,useSearchParams} from 'react-router-dom'
-import type {Chapter,ChapterSegment,PagedResult,StoryMemoryCheckpoint,StoryStructureChapterSummary,StoryStructurePartSummary,StoryStructureSegmentSummary,StoryStructureVolumeSummary,TimelineAnchorFilters,TimelineEvent} from '../../../types'
-import {WorkspaceContextSummary,WorkspaceMetric,WorkspacePage,WorkspacePanel,WorkspaceTip} from '../components/WorkspaceShell'
+import React from 'react'
+import { Button, Space, Spin } from 'antd'
+import {
+  ApartmentOutlined,
+  BranchesOutlined,
+  BuildOutlined,
+  LinkOutlined,
+  PlusOutlined,
+  ReloadOutlined,
+} from '@ant-design/icons'
+import AIGenerateButton from '../../../components/AIGenerateButton'
+import { useNovelStore } from '../../../stores/novel.store'
+import { buildDraftMessages, normalizeOptionalNumber, parseDraftJson } from '../shared/ai-draft'
+import {
+  ChapterEditorPanel,
+  SegmentEditorPanel,
+  StructureAsideTip,
+  StructureChaptersPanel,
+  StructureCheckpointsPanel,
+  StructureLinkedEventsPanel,
+  StructurePartsPanel,
+  StructureSegmentsPanel,
+  StructureVolumesPanel,
+} from './StructurePanels'
+import { useStructureWorkspace } from './useStructureWorkspace'
+import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage } from '../components/WorkspaceShell'
+import { getChapterLabel, getPartLabel, getSegmentLabel, getVolumeLabel } from '../shared/workspace-utils'
 import './index.css'
 
-type Sel={volumeId:number|null;partId:number|null;chapterId:number|null;segmentId:number|null}
-type ChapterValues={title?:string;outline?:string;targetWords?:number;partId?:number}
-type SegmentValues={title?:string;segmentType?:string;purpose?:string;timeAnchor?:string;locationName?:string;inputState?:string;outputState?:string;summary?:string;content?:string;status?:string}
-const PART_SIZE=30,CHAPTER_SIZE=50,SEGMENT_SIZE=80,LINKED_SIZE=12,CHECKPOINT_SIZE=12
-const SEGMENT_TYPE_OPTIONS=[{value:'scene',label:'场景'},{value:'bridge',label:'过渡'},{value:'turn',label:'转折'},{value:'reveal',label:'揭示'},{value:'climax',label:'高潮'}]
-const SEGMENT_STATUS_OPTIONS=[{value:'planned',label:'待写'},{value:'draft',label:'草稿'},{value:'locked',label:'定稿'}]
-const STATUS_META:Record<TimelineEvent['status'],{label:string;color:string}>={planned:{label:'计划中',color:'default'},seeded:{label:'已埋点',color:'orange'},written:{label:'已写入正文',color:'blue'},resolved:{label:'已回收',color:'green'}}
-const emptyPage=<T,>(pageSize:number):PagedResult<T>=>({items:[],page:1,pageSize,total:0,hasMore:false})
-const parseNumber=(value:string|null)=>{if(!value)return null;const next=Number(value);return Number.isFinite(next)?next:null}
-const parseThreads=(raw?:string|null)=>{if(!raw)return 0;try{const parsed=JSON.parse(raw);return Array.isArray(parsed)?parsed.filter((item)=>typeof item==='string'&&item.trim()).length:0}catch{return 0}}
-const parseRoute=(search:URLSearchParams):Partial<Sel>=>({volumeId:parseNumber(search.get('volumeId')),partId:parseNumber(search.get('partId')),chapterId:parseNumber(search.get('chapterId')),segmentId:parseNumber(search.get('segmentId'))})
-const buildParams=(sel:Sel)=>{const p=new URLSearchParams(); if(sel.volumeId)p.set('volumeId',String(sel.volumeId)); if(sel.partId)p.set('partId',String(sel.partId)); if(sel.chapterId)p.set('chapterId',String(sel.chapterId)); if(sel.segmentId)p.set('segmentId',String(sel.segmentId)); return p}
-const reorder=<T,>(items:T[],from:number,to:number)=>{const next=[...items];const [moved]=next.splice(from,1);next.splice(to,0,moved);return next}
+function summarizeSegments(items: Array<{ segmentOrder: number; title?: string | null; purpose?: string | null }>) {
+  return items
+    .slice(0, 8)
+    .map((item) => `场景 ${item.segmentOrder}：${item.title || item.purpose || '待补充'}`)
+    .join('\n')
+}
 
-export default function StructurePage({novelId}:{novelId:number}){
-  const navigate=useNavigate(); const [searchParams]=useSearchParams(); const route=useMemo(()=>parseRoute(searchParams),[searchParams])
-  const [chapterForm]=Form.useForm<ChapterValues>(); const [segmentForm]=Form.useForm<SegmentValues>()
-  const [loading,setLoading]=useState(true); const [savingChapter,setSavingChapter]=useState(false); const [savingSegment,setSavingSegment]=useState(false); const [refreshing,setRefreshing]=useState(false)
-  const [volumes,setVolumes]=useState<StoryStructureVolumeSummary[]>([])
-  const [parts,setParts]=useState<PagedResult<StoryStructurePartSummary>>(emptyPage(PART_SIZE))
-  const [chapters,setChapters]=useState<PagedResult<StoryStructureChapterSummary>>(emptyPage(CHAPTER_SIZE))
-  const [segments,setSegments]=useState<PagedResult<StoryStructureSegmentSummary>>(emptyPage(SEGMENT_SIZE))
-  const [linked,setLinked]=useState<PagedResult<TimelineEvent>>(emptyPage(LINKED_SIZE))
-  const [checkpoints,setCheckpoints]=useState<PagedResult<StoryMemoryCheckpoint>>(emptyPage(CHECKPOINT_SIZE))
-  const [selection,setSelection]=useState<Sel>({volumeId:null,partId:null,chapterId:null,segmentId:null})
-  const [chapterDetail,setChapterDetail]=useState<Chapter|null>(null); const [segmentDetail,setSegmentDetail]=useState<ChapterSegment|null>(null)
-  const [editingVolumeId,setEditingVolumeId]=useState<number|null>(null); const [editingPartId,setEditingPartId]=useState<number|null>(null); const [editingTitle,setEditingTitle]=useState('')
-  const routeApplyingRef=useRef(false)
-  const partsCache=useRef(new Map<string,PagedResult<StoryStructurePartSummary>>()); const chapterCache=useRef(new Map<string,PagedResult<StoryStructureChapterSummary>>()); const segmentCache=useRef(new Map<string,PagedResult<StoryStructureSegmentSummary>>()); const linkedCache=useRef(new Map<string,PagedResult<TimelineEvent>>()); const checkpointCache=useRef(new Map<string,PagedResult<StoryMemoryCheckpoint>>())
-  const currentVolume=useMemo(()=>volumes.find((item)=>item.id===selection.volumeId)||null,[selection.volumeId,volumes])
-  const currentPart=useMemo(()=>parts.items.find((item)=>item.id===selection.partId)||null,[parts.items,selection.partId])
+export default function StructurePage({ novelId }: { novelId: number }) {
+  const workspace = useStructureWorkspace(novelId)
+  const { currentNovel } = useNovelStore()
 
-  const clearCaches=useCallback(()=>{partsCache.current.clear();chapterCache.current.clear();segmentCache.current.clear();linkedCache.current.clear();checkpointCache.current.clear()},[])
-  const loadVolumes=useCallback(async()=>{const rows=await window.electron.structure.listVolumes(novelId); setVolumes(rows); return rows},[novelId])
-  const loadParts=useCallback(async(volumeId:number,page:number,force=false)=>{const key=`${volumeId}:${page}`; if(!force&&partsCache.current.has(key)){const cached=partsCache.current.get(key)!; setParts(cached); return cached} const next=await window.electron.structure.listPartsPage(volumeId,page,PART_SIZE); partsCache.current.set(key,next); setParts(next); return next},[])
-  const loadChapters=useCallback(async(partId:number,page:number,force=false)=>{const key=`${partId}:${page}`; if(!force&&chapterCache.current.has(key)){const cached=chapterCache.current.get(key)!; setChapters(cached); return cached} const next=await window.electron.structure.listChaptersPage(partId,page,CHAPTER_SIZE); chapterCache.current.set(key,next); setChapters(next); return next},[])
-  const loadSegments=useCallback(async(chapterId:number,page:number,force=false)=>{const key=`${chapterId}:${page}`; if(!force&&segmentCache.current.has(key)){const cached=segmentCache.current.get(key)!; setSegments(cached); return cached} const next=await window.electron.structure.listSegmentsPage(chapterId,page,SEGMENT_SIZE); segmentCache.current.set(key,next); setSegments(next); return next},[])
-  const loadLinked=useCallback(async(filters:TimelineAnchorFilters,page:number,force=false)=>{const key=JSON.stringify({...filters,page}); if(!force&&linkedCache.current.has(key)){const cached=linkedCache.current.get(key)!; setLinked(cached); return cached} const next=await window.electron.structure.listLinkedTimelineEventsPage(filters,page,LINKED_SIZE); linkedCache.current.set(key,next); setLinked(next); return next},[])
-  const loadCheckpoints=useCallback(async(filters:{novelId:number;scopeType?:'novel'|'volume'|'part';scopeId?:number},page:number,force=false)=>{const key=JSON.stringify({...filters,page}); if(!force&&checkpointCache.current.has(key)){const cached=checkpointCache.current.get(key)!; setCheckpoints(cached); return cached} const next=await window.electron.structure.listCheckpointsPage(filters,page,CHECKPOINT_SIZE); checkpointCache.current.set(key,next); setCheckpoints(next); return next},[])
-  const loadChapterDetail=useCallback(async(chapterId:number)=>{const chapter=await window.electron.chapter.get(chapterId); setChapterDetail(chapter); return chapter},[])
-  const loadSegmentDetail=useCallback(async(segmentId:number|null)=>{if(!segmentId){setSegmentDetail(null); return null} const segment=await window.electron.structure.getSegment(segmentId); setSegmentDetail(segment); return segment},[])
+  const {
+    chapterDetail,
+    chapterForm,
+    chapters,
+    checkpointPanelTitle,
+    checkpoints,
+    currentPart,
+    currentVolume,
+    editingPartId,
+    editingTitle,
+    editingVolumeId,
+    linked,
+    loading,
+    parts,
+    refreshing,
+    savingChapter,
+    savingSegment,
+    segmentDetail,
+    segmentForm,
+    segments,
+    selection,
+    timelineFilters,
+    volumes,
+    canReorderSegments,
+    setEditingTitle,
+    addChapter,
+    addPart,
+    addSegment,
+    addVolume,
+    cancelRename,
+    compileChapter,
+    loadCheckpoints,
+    loadLinked,
+    loadParts,
+    loadChapters,
+    loadSegments,
+    openCreateEvent,
+    openLinkedEvent,
+    openWritingPage,
+    refreshMemory,
+    refreshStructure,
+    saveChapter,
+    saveRename,
+    saveSegment,
+    selectChapter,
+    selectPart,
+    selectSegment,
+    selectVolume,
+    startRenamePart,
+    startRenameVolume,
+    handlePartDragEnd,
+    handleSegmentDragEnd,
+    handleVolumeDragEnd,
+  } = workspace
 
-  const resolveAndLoad=useCallback(async(preferred:Partial<Sel>,force=false)=>{
-    routeApplyingRef.current=true; setLoading(true)
-    try{ const volumeRows=await loadVolumes(); if(volumeRows.length===0){setSelection({volumeId:null,partId:null,chapterId:null,segmentId:null}); return}
-      const resolved=await window.electron.structure.resolvePath({novelId,...preferred})
-      const nextSel:Sel={volumeId:resolved.volumeId,partId:resolved.partId,chapterId:resolved.chapterId,segmentId:resolved.segmentId}; setSelection(nextSel)
-      if(resolved.volumeId) await loadParts(resolved.volumeId,resolved.partPage,force); else setParts(emptyPage(PART_SIZE))
-      if(resolved.partId) await loadChapters(resolved.partId,resolved.chapterPage,force); else setChapters(emptyPage(CHAPTER_SIZE))
-      if(resolved.chapterId) await Promise.all([loadSegments(resolved.chapterId,resolved.segmentPage,force),loadChapterDetail(resolved.chapterId)]); else {setSegments(emptyPage(SEGMENT_SIZE)); setChapterDetail(null); setSegmentDetail(null)}
-    } finally { setLoading(false); routeApplyingRef.current=false }
-  },[loadChapterDetail,loadChapters,loadParts,loadSegments,loadVolumes,novelId])
+  const chapterAiActions = chapterDetail ? (
+    <AIGenerateButton
+      label="AI 生成章节"
+      isJson
+      buildMessages={() => {
+        const values = chapterForm.getFieldsValue(true)
 
-  useEffect(()=>{ void resolveAndLoad(route,true) },[resolveAndLoad,route])
-  useEffect(()=>{ if(routeApplyingRef.current)return; const next=buildParams(selection).toString(); const current=searchParams.toString(); if(next!==current) navigate(`/novels/${novelId}/structure${next?`?${next}`:''}`,{replace:true}) },[navigate,novelId,searchParams,selection])
-  useEffect(()=>{ if(!selection.chapterId){setChapterDetail(null);setSegmentDetail(null);return} void loadChapterDetail(selection.chapterId) },[loadChapterDetail,selection.chapterId])
-  useEffect(()=>{ if(!selection.chapterId){setSegmentDetail(null);return} const activeSegmentId=selection.segmentId??segments.items[0]?.id??null; void loadSegmentDetail(activeSegmentId) },[loadSegmentDetail,segments.items,selection.chapterId,selection.segmentId])
-  useEffect(()=>{ if(!chapterDetail)return chapterForm.resetFields(); chapterForm.setFieldsValue({title:chapterDetail.title||'',outline:chapterDetail.outline||'',targetWords:chapterDetail.targetWords||3000,partId:chapterDetail.partId}) },[chapterDetail,chapterForm])
-  useEffect(()=>{ if(!segmentDetail)return segmentForm.resetFields(); segmentForm.setFieldsValue({title:segmentDetail.title||'',segmentType:segmentDetail.segmentType||'scene',purpose:segmentDetail.purpose||'',timeAnchor:segmentDetail.timeAnchor||'',locationName:segmentDetail.locationName||'',inputState:segmentDetail.inputState||'',outputState:segmentDetail.outputState||'',summary:segmentDetail.summary||'',content:segmentDetail.content||'',status:segmentDetail.status||'planned'}) },[segmentDetail,segmentForm])
-  useEffect(()=>{ const filters:TimelineAnchorFilters|null=selection.segmentId?{novelId,segmentId:selection.segmentId}:selection.chapterId?{novelId,chapterId:selection.chapterId}:selection.partId?{novelId,partId:selection.partId}:selection.volumeId?{novelId,volumeId:selection.volumeId}:null; if(!filters) return setLinked(emptyPage(LINKED_SIZE)); void loadLinked(filters,1) },[loadLinked,novelId,selection])
-  useEffect(()=>{ const filters=selection.partId?{novelId,scopeType:'part' as const,scopeId:selection.partId}:selection.volumeId?{novelId,scopeType:'volume' as const,scopeId:selection.volumeId}:{novelId,scopeType:'novel' as const}; void loadCheckpoints(filters,1) },[loadCheckpoints,novelId,selection.partId,selection.volumeId])
-  const timelineFilters:TimelineAnchorFilters|null=selection.segmentId?{novelId,segmentId:selection.segmentId}:selection.chapterId?{novelId,chapterId:selection.chapterId}:selection.partId?{novelId,partId:selection.partId}:selection.volumeId?{novelId,volumeId:selection.volumeId}:null
-  const checkpointFilters=selection.partId?{novelId,scopeType:'part' as const,scopeId:selection.partId}:selection.volumeId?{novelId,scopeType:'volume' as const,scopeId:selection.volumeId}:{novelId,scopeType:'novel' as const}
-  const canReorderSegments=segments.total>0&&segments.total<=segments.pageSize
-  const saveRename=async()=>{const title=editingTitle.trim(); if(!title)return message.warning('标题不能为空。'); if(editingVolumeId) await window.electron.structure.updateVolume(editingVolumeId,{title}); if(editingPartId) await window.electron.structure.updatePart(editingPartId,{title}); setEditingTitle(''); setEditingPartId(null); setEditingVolumeId(null); clearCaches(); await resolveAndLoad(selection,true); message.success('名称已更新。')}
-  const addVolume=async()=>{const volumeId=await window.electron.structure.createVolume(novelId,{}); clearCaches(); await resolveAndLoad({volumeId},true); message.success('新卷已创建。')}
-  const addPart=async(volumeId:number)=>{const partId=await window.electron.structure.createPart(volumeId,{}); clearCaches(); await resolveAndLoad({volumeId,partId},true); message.success('新部已创建。')}
-  const addChapter=async()=>{if(!selection.partId||!selection.volumeId)return; const chapterId=await window.electron.chapter.create(novelId,{status:'outline',targetWords:3000,partId:selection.partId,volumeId:selection.volumeId}); clearCaches(); await resolveAndLoad({volumeId:selection.volumeId,partId:selection.partId,chapterId},true); message.success('新章节已创建。')}
-  const addSegment=async()=>{if(!selection.chapterId)return; const segmentId=await window.electron.structure.createSegment(selection.chapterId,{title:`场景 ${String((segments.total||0)+1).padStart(2,'0')}`,segmentType:'scene',status:'planned'}); clearCaches(); await resolveAndLoad({volumeId:selection.volumeId||undefined,partId:selection.partId||undefined,chapterId:selection.chapterId,segmentId},true); message.success('新场景已创建。')}
-  const saveChapter=async()=>{if(!chapterDetail)return; const values=await chapterForm.validateFields(); setSavingChapter(true); try{ if(values.partId&&values.partId!==chapterDetail.partId) await window.electron.structure.assignChapter(chapterDetail.id,values.partId); await window.electron.chapter.update(chapterDetail.id,{title:values.title?.trim()||chapterDetail.title,outline:values.outline?.trim()||'',targetWords:values.targetWords||3000}); clearCaches(); await resolveAndLoad(selection,true); message.success('章节已保存。') } finally { setSavingChapter(false) } }
-  const saveSegment=async()=>{if(!segmentDetail)return; const values=await segmentForm.validateFields(); setSavingSegment(true); try{ await window.electron.structure.updateSegment(segmentDetail.id,values); clearCaches(); await resolveAndLoad(selection,true); message.success('场景已保存。') } finally { setSavingSegment(false) } }
-  const compileChapter=async()=>{if(!selection.chapterId)return; await window.electron.structure.compileChapter(selection.chapterId); clearCaches(); await resolveAndLoad(selection,true); message.success('章节已重新编译。')}
-  const refreshMemory=async()=>{setRefreshing(true); try{await window.electron.structure.refreshCheckpoints(novelId); checkpointCache.current.clear(); await loadCheckpoints(checkpointFilters,1,true); message.success('检查点已刷新。')} finally {setRefreshing(false)}}
-  const onVolumeDragEnd=async(result:DropResult)=>{if(!result.destination)return; const ordered=reorder(volumes,result.source.index,result.destination.index); await window.electron.structure.reorderVolumes(novelId,ordered.map((item)=>item.id)); await loadVolumes(); message.success('卷顺序已更新。')}
-  const onPartDragEnd=async(result:DropResult)=>{if(!result.destination||!selection.volumeId)return; if(parts.total>parts.pageSize) return message.warning('当前卷已分页，请先缩小范围后再排序。'); const ordered=reorder(parts.items,result.source.index,result.destination.index); await window.electron.structure.reorderPartsInVolume(selection.volumeId,ordered.map((item)=>item.id)); partsCache.current.clear(); await loadParts(selection.volumeId,1,true); message.success('部顺序已更新。')}
-  const onSegmentDragEnd=async(result:DropResult)=>{if(!result.destination||!selection.chapterId)return; if(segments.total>segments.pageSize) return message.warning('当前章节已分页，请先缩小范围后再排序。'); const ordered=reorder(segments.items,result.source.index,result.destination.index); await window.electron.structure.reorderSegments(selection.chapterId,ordered.map((item)=>item.id)); clearCaches(); await resolveAndLoad(selection,true); message.success('场景顺序已更新。')}
+        return buildDraftMessages({
+          task: '章节结构草稿',
+          mode: 'replace',
+          context: [
+            { label: '书名', value: currentNovel?.title || '' },
+            { label: '题材', value: currentNovel?.genreName || '' },
+            { label: '小说简介', value: currentNovel?.synopsis || '' },
+            { label: '扩展背景', value: currentNovel?.expandedBackground || '' },
+            { label: '当前卷', value: getVolumeLabel(currentVolume) },
+            { label: '当前部', value: getPartLabel(currentPart) },
+            { label: '已有场景', value: summarizeSegments(segments.items) },
+          ],
+          fields: [
+            { key: 'title', label: '章节标题', value: values.title, hint: '短而明确，能体现本章推进。' },
+            { key: 'outline', label: '章节目标', value: values.outline, hint: '写清本章推进、转折和留下的问题。' },
+            { key: 'targetWords', label: '目标字数', type: 'number', value: values.targetWords, hint: '给出合理整数。' },
+          ],
+          requirements: [
+            '不要改动当前卷和当前部的定位。',
+            '如果已有场景列表，章节目标必须能覆盖这些场景。',
+          ],
+        })
+      }}
+      onResult={(raw) => {
+        const draft = parseDraftJson<{ title?: string; outline?: string; targetWords?: number }>(raw)
+        const currentValues = chapterForm.getFieldsValue(true)
 
-  return <WorkspacePage className="novel-structure-page" layout="wide" eyebrow="结构工程" title="卷 / 部 / 章 / 场景结构板" description="按卷展开、局部分页、局部回载。" actions={<Space wrap><Button icon={<PlusOutlined />} onClick={()=>void addVolume()}>新建卷</Button><Button icon={<BuildOutlined />} loading={refreshing} onClick={()=>void refreshMemory()}>刷新检查点</Button><Button icon={<ReloadOutlined />} onClick={()=>void resolveAndLoad(selection,true)}>刷新结构</Button><Button type="primary" icon={<LinkOutlined />} disabled={!selection.volumeId} onClick={()=>navigate(`/novels/${novelId}/timeline?${buildParams(selection).toString()}&action=new`)}>为当前节点建事件</Button><Button type="primary" icon={<BranchesOutlined />} disabled={!selection.chapterId} onClick={()=>void compileChapter()}>编译当前章节</Button><Button icon={<ApartmentOutlined />} disabled={!selection.chapterId} onClick={()=>navigate(`/novels/${novelId}/writing`)}>去写作页</Button></Space>} metrics={<><WorkspaceMetric label="卷数" value={volumes.length} tone="warm" hint="按阶段拆解长篇" /><WorkspaceMetric label="当前部章节" value={chapters.total} hint="只取当前部分页" /><WorkspaceMetric label="当前章场景" value={segments.total} tone="cool" hint="最小修订单位" /><WorkspaceMetric label="关联事件" value={linked.total} hint="当前节点的时间轴事件" /></>} contextSummary={<WorkspaceContextSummary items={[{label:'当前卷',value:currentVolume?.title||'未选择'},{label:'当前部',value:currentPart?.title||'未选择'},{label:'当前章',value:chapterDetail?`第 ${chapterDetail.chapterNum} 章`:'未选择'},{label:'当前场景',value:segmentDetail?.title||'未选择'},{label:'恢复方式',value:'按路径自动恢复'}]} />} aside={<><WorkspacePanel title="关联时间轴" description="当前节点事件分页回查。">{linked.total===0?<div className="novel-empty">当前节点还没有绑定事件。</div>:<div className="novel-structure-linked-list">{linked.items.map((event)=><button key={event.id} type="button" className="novel-structure-linked-card" onClick={()=>navigate(`/novels/${novelId}/timeline?eventId=${event.id}`)}><div className="novel-structure-linked-card__head"><strong>{event.eventTitle}</strong><Tag color={STATUS_META[event.status].color}>{STATUS_META[event.status].label}</Tag></div><div className="novel-structure-linked-card__meta"><span>{event.timeLabel||'时间未标注'}</span>{event.eventType?<span>{event.eventType}</span>:null}{event.anchorInvalid?<span>锚点待修复</span>:null}</div><div className="novel-structure-linked-card__desc">{event.eventSummary||event.eventResult||event.eventCause||'这个事件还没有补出摘要。'}</div></button>)}<Pagination current={linked.page} pageSize={linked.pageSize} total={linked.total} size="small" showSizeChanger={false} onChange={(page)=>{if(timelineFilters) void loadLinked(timelineFilters,page)}} /></div>}</WorkspacePanel><WorkspacePanel title={selection.partId?'当前部检查点':selection.volumeId?'当前卷检查点':'全书检查点'} description="当前工作层的记忆检查点。">{checkpoints.total===0?<div className="novel-empty">当前层级还没有检查点。</div>:<div className="novel-structure-checkpoint-list">{checkpoints.items.map((item)=><section key={item.id} className={`novel-structure-checkpoint ${item.stale===1?'novel-structure-checkpoint--stale':''}`}><div className="novel-structure-checkpoint__head"><strong>{item.label||'未命名检查点'}</strong><Tag color={item.stale===1?'warning':'success'}>{item.stale===1?'待刷新':`v${item.version}`}</Tag></div><div className="novel-structure-checkpoint__summary">{item.summary||'暂无摘要。'}</div><div className="novel-structure-checkpoint__meta"><span>{item.sourceRangeStart?`章节 ${item.sourceRangeStart}-${item.sourceRangeEnd||item.sourceRangeStart}`:'范围待定'}</span><span>{parseThreads(item.activeThreadsJson)} 条活跃线索</span></div></section>)}<Pagination current={checkpoints.page} pageSize={checkpoints.pageSize} total={checkpoints.total} size="small" showSizeChanger={false} onChange={(page)=>void loadCheckpoints(checkpointFilters,page)} /></div>}</WorkspacePanel><WorkspaceTip title="长篇原则"><div>卷只负责阶段组织，进入卷后再逐层展开。</div><div>跳结构、跳时间轴、刷新恢复都走路径定位。</div></WorkspaceTip></>}>
-    {loading?<div className="novel-empty"><Spin /></div>:<>
-      <div className="novel-split novel-split--sidebar">
-        <WorkspacePanel title="卷板" description="轻量卷列表支持拖拽排序。">{volumes.length===0?<div className="novel-empty">当前还没有卷结构，先新建一卷。</div>:<DragDropContext onDragEnd={(result)=>void onVolumeDragEnd(result)}><Droppable droppableId="volumes" type="volume">{(drop)=><div ref={drop.innerRef} {...drop.droppableProps} className="novel-structure-volume-board">{volumes.map((volume,index)=><Draggable key={volume.id} draggableId={`volume-${volume.id}`} index={index}>{(drag)=><section ref={drag.innerRef} {...drag.draggableProps} className={`novel-structure-volume-card ${selection.volumeId===volume.id?'is-active':''}`}><div className="novel-structure-volume-card__head"><div className="novel-structure-card-title"><button type="button" className="novel-structure-drag-handle" {...drag.dragHandleProps}><HolderOutlined /></button><button type="button" className="novel-structure-card-title__main" onClick={()=>void resolveAndLoad({volumeId:volume.id})}><div className="novel-kicker">{`第 ${volume.volumeNumber} 卷`}</div>{editingVolumeId===volume.id?<div className="novel-structure-inline-editor" onClick={(event)=>event.stopPropagation()}><Input value={editingTitle} onChange={(event)=>setEditingTitle(event.target.value)} onPressEnter={()=>void saveRename()} autoFocus /><Button size="small" type="primary" onClick={()=>void saveRename()}>保存</Button><Button size="small" onClick={()=>{setEditingTitle('');setEditingVolumeId(null)}}>取消</Button></div>:<strong>{volume.title||`第 ${volume.volumeNumber} 卷`}</strong>}</button></div><Space size={8}>{editingVolumeId!==volume.id?<Button size="small" icon={<EditOutlined />} onClick={()=>{setEditingTitle(volume.title||`第 ${volume.volumeNumber} 卷`);setEditingVolumeId(volume.id);setEditingPartId(null)}}>改名</Button>:null}<Button size="small" icon={<PlusOutlined />} onClick={()=>void addPart(volume.id)}>加一部</Button></Space></div><div className="novel-structure-volume-card__meta"><span>{volume.partCount} 部</span><span>{volume.chapterCount} 章</span><span>{volume.segmentCount} 场景</span><span>{volume.linkedTimelineEventCount} 条事件</span></div></section>}</Draggable>)}{drop.placeholder}</div>}</Droppable></DragDropContext>}</WorkspacePanel>
-        <WorkspacePanel title={currentVolume?`部板 · ${currentVolume.title||`第 ${currentVolume.volumeNumber} 卷`}`:'部板'} description="只加载当前卷的部分页。">{!currentVolume?<div className="novel-empty">先选择一卷。</div>:parts.total===0?<Empty description="当前卷还没有部。" />:<><DragDropContext onDragEnd={(result)=>void onPartDragEnd(result)}><Droppable droppableId="parts" type="part">{(drop)=><div ref={drop.innerRef} {...drop.droppableProps} className="novel-structure-part-stack">{parts.items.map((part,index)=><Draggable key={part.id} draggableId={`part-${part.id}`} index={index}>{(drag)=><section ref={drag.innerRef} {...drag.draggableProps} className={`novel-structure-part-card ${selection.partId===part.id?'is-active':''}`}><div className="novel-structure-part-card__head"><div className="novel-structure-card-title"><button type="button" className="novel-structure-drag-handle" {...drag.dragHandleProps}><HolderOutlined /></button><button type="button" className="novel-structure-card-title__main" onClick={()=>void resolveAndLoad({volumeId:currentVolume.id,partId:part.id})}><div className="novel-kicker">{`第 ${part.partNumber} 部`}</div>{editingPartId===part.id?<div className="novel-structure-inline-editor" onClick={(event)=>event.stopPropagation()}><Input value={editingTitle} onChange={(event)=>setEditingTitle(event.target.value)} onPressEnter={()=>void saveRename()} autoFocus /><Button size="small" type="primary" onClick={()=>void saveRename()}>保存</Button><Button size="small" onClick={()=>{setEditingTitle('');setEditingPartId(null)}}>取消</Button></div>:<strong>{part.title||`第 ${part.partNumber} 部`}</strong>}</button></div>{editingPartId!==part.id?<Button size="small" icon={<EditOutlined />} onClick={()=>{setEditingTitle(part.title||`第 ${part.partNumber} 部`);setEditingPartId(part.id);setEditingVolumeId(null)}}>改名</Button>:null}</div><div className="novel-structure-part-card__meta"><span>{part.chapterCount} 章</span><span>{part.segmentCount} 场景</span><span>{part.linkedTimelineEventCount} 条事件</span></div></section>}</Draggable>)}{drop.placeholder}</div>}</Droppable></DragDropContext><Pagination current={parts.page} pageSize={parts.pageSize} total={parts.total} size="small" showSizeChanger={false} onChange={(page)=>{if(selection.volumeId) void loadParts(selection.volumeId,page)}} /></>}</WorkspacePanel>
-      </div>
-      <div className="novel-split novel-split--sidebar">
-        <WorkspacePanel title={currentPart?`章节窗口 · ${currentPart.title||`第 ${currentPart.partNumber} 部`}`:'章节窗口'} description="章节按分页窗口加载。" extra={currentPart?<Button icon={<PlusOutlined />} onClick={()=>void addChapter()}>加章节</Button>:null}>{!currentPart?<div className="novel-empty">先选择一部。</div>:chapters.total===0?<Empty description="当前部分还没有章节。" />:<div style={{display:'grid',gap:12}}><VirtualList data={chapters.items} height={420} itemHeight={118} itemKey="id">{(chapter:StoryStructureChapterSummary)=><button key={chapter.id} type="button" className={`novel-structure-chapter-card ${selection.chapterId===chapter.id?'is-active':''}`} onClick={()=>void resolveAndLoad({volumeId:selection.volumeId||undefined,partId:currentPart.id,chapterId:chapter.id})}><div className="novel-structure-chapter-card__head"><span>{`第 ${chapter.chapterNum} 章`}</span><Tag color={chapter.segmentCount&&chapter.segmentCount>1?'blue':'default'}>{chapter.segmentCount||0} 场景</Tag></div><strong>{chapter.title||`第 ${chapter.chapterNum} 章`}</strong><div className="novel-structure-chapter-card__meta"><span>{chapter.wordCount||0} 字</span><span>{chapter.linkedTimelineEventCount} 条事件</span><span>{chapter.compiledFromSegments?'已编译':'待编译'}</span></div></button>}</VirtualList><Pagination current={chapters.page} pageSize={chapters.pageSize} total={chapters.total} size="small" showSizeChanger={false} onChange={(page)=>{if(selection.partId) void loadChapters(selection.partId,page)}} /></div>}</WorkspacePanel>
-        <WorkspacePanel title={chapterDetail?`场景板 · 第 ${chapterDetail.chapterNum} 章`:'场景板'} description={chapterDetail?'场景按页显示，当前章单独回载。':'先选择章节。'} extra={chapterDetail?<Space size={8}><Button icon={<PlusOutlined />} onClick={()=>void addSegment()}>加场景</Button><Button icon={<LinkOutlined />} onClick={()=>navigate(`/novels/${novelId}/timeline?${buildParams(selection).toString()}&action=new`)}>建事件</Button></Space>:null}>{!chapterDetail?<div className="novel-empty">先选择章节。</div>:segments.total===0?<Empty description="当前章节还没有场景。" />:<div style={{display:'grid',gap:12}}>{canReorderSegments?<DragDropContext onDragEnd={(result)=>void onSegmentDragEnd(result)}><Droppable droppableId="segments" type="segment">{(drop)=><div ref={drop.innerRef} {...drop.droppableProps} className="novel-structure-scene-board">{segments.items.map((segment,index)=><Draggable key={segment.id} draggableId={`segment-${segment.id}`} index={index}>{(drag)=><button ref={drag.innerRef} {...drag.draggableProps} {...drag.dragHandleProps} type="button" className={`novel-structure-scene-card ${selection.segmentId===segment.id?'is-active':''}`} onClick={()=>void resolveAndLoad({volumeId:selection.volumeId||undefined,partId:selection.partId||undefined,chapterId:chapterDetail.id,segmentId:segment.id})}><div className="novel-structure-scene-card__head"><span>{`场景 ${String(segment.segmentOrder).padStart(2,'0')}`}</span><Tag color={segment.status==='locked'?'success':segment.status==='draft'?'processing':'default'}>{segment.status||'planned'}</Tag></div><strong>{segment.title||`场景 ${segment.segmentOrder}`}</strong><div className="novel-structure-scene-card__meta"><span>{segment.segmentType||'scene'}</span><span>{segment.locationName||'地点未定'}</span><span>{segment.linkedTimelineEventCount||0} 条事件</span></div><div className="novel-structure-scene-card__desc">{segment.purpose||segment.summary||'先写清这个场景为什么存在。'}</div></button>}</Draggable>)}{drop.placeholder}</div>}</Droppable></DragDropContext>:<><VirtualList data={segments.items} height={360} itemHeight={118} itemKey="id">{(segment:StoryStructureSegmentSummary)=><button key={segment.id} type="button" className={`novel-structure-scene-card ${selection.segmentId===segment.id?'is-active':''}`} onClick={()=>void resolveAndLoad({volumeId:selection.volumeId||undefined,partId:selection.partId||undefined,chapterId:chapterDetail.id,segmentId:segment.id})}><div className="novel-structure-scene-card__head"><span>{`场景 ${String(segment.segmentOrder).padStart(2,'0')}`}</span><Tag color={segment.status==='locked'?'success':segment.status==='draft'?'processing':'default'}>{segment.status||'planned'}</Tag></div><strong>{segment.title||`场景 ${segment.segmentOrder}`}</strong><div className="novel-structure-scene-card__meta"><span>{segment.segmentType||'scene'}</span><span>{segment.locationName||'地点未定'}</span><span>{segment.linkedTimelineEventCount} 条事件</span></div><div className="novel-structure-scene-card__desc">{segment.purpose||segment.summary||'先写清这个场景为什么存在。'}</div></button>}</VirtualList><Pagination current={segments.page} pageSize={segments.pageSize} total={segments.total} size="small" showSizeChanger={false} onChange={(page)=>{if(selection.chapterId) void loadSegments(selection.chapterId,page)}} /></>}</div>}</WorkspacePanel>
-      </div>
-      <div className="novel-split novel-split--sidebar">
-        <WorkspacePanel title={chapterDetail?`章节卡 · 第 ${chapterDetail.chapterNum} 章`:'章节卡'} description="只编辑当前章节。" extra={chapterDetail?<Button type="primary" icon={<SaveOutlined />} loading={savingChapter} onClick={()=>void saveChapter()}>保存章节</Button>:null}>{!chapterDetail?<div className="novel-empty">先选择章节。</div>:<Form form={chapterForm} layout="vertical"><div className="novel-grid novel-grid--2"><Form.Item name="title" label="章节标题"><Input /></Form.Item><Form.Item name="partId" label="所属部分"><Select options={parts.items.map((item)=>({value:item.id,label:item.title||`第 ${item.partNumber} 部`}))} /></Form.Item></div><div className="novel-grid novel-grid--2"><Form.Item name="targetWords" label="目标字数"><InputNumber min={1000} step={500} style={{width:'100%'}} /></Form.Item><div className="novel-structure-inline-hint"><strong>正文状态</strong><span>{chapterDetail.compiledFromSegments?'当前正文来自场景编译。':'当前正文可能与场景结构不同步。'}</span></div></div><Form.Item name="outline" label="本章目标"><Input.TextArea rows={4} placeholder="本章推进什么，收束什么，留下什么。" /></Form.Item></Form>}</WorkspacePanel>
-        <WorkspacePanel title={segmentDetail?`场景卡 · ${segmentDetail.title||`场景 ${segmentDetail.segmentOrder}`}`:'场景卡'} description="只编辑当前场景。" extra={segmentDetail?<Button type="primary" icon={<SaveOutlined />} loading={savingSegment} onClick={()=>void saveSegment()}>保存场景</Button>:null}>{!segmentDetail?<div className="novel-empty">先选择一个场景。</div>:<><Form form={segmentForm} layout="vertical"><div className="novel-grid novel-grid--2"><Form.Item name="title" label="场景标题"><Input /></Form.Item><Form.Item name="segmentType" label="片段类型"><Select options={SEGMENT_TYPE_OPTIONS} /></Form.Item></div><div className="novel-grid novel-grid--3"><Form.Item name="timeAnchor" label="时间锚点"><Input /></Form.Item><Form.Item name="locationName" label="地点"><Input /></Form.Item><Form.Item name="status" label="状态"><Select options={SEGMENT_STATUS_OPTIONS} /></Form.Item></div><div className="novel-grid novel-grid--2"><Form.Item name="inputState" label="进入状态"><Input.TextArea rows={3} /></Form.Item><Form.Item name="outputState" label="离开状态"><Input.TextArea rows={3} /></Form.Item></div><Form.Item name="purpose" label="场景作用"><Input.TextArea rows={3} /></Form.Item><Form.Item name="summary" label="片段摘要"><Input.TextArea rows={3} /></Form.Item><Form.Item name="content" label="场景正文"><Input.TextArea rows={10} /></Form.Item></Form>{segmentDetail&&selection.segmentId&&!segments.items.some((item)=>item.id===selection.segmentId)?<Alert style={{marginTop:14}} showIcon type="info" message="当前场景不在本页窗口中" description="编辑面板已经定位到目标场景，场景板可通过分页继续查看它所在的窗口。" />:null}</>}</WorkspacePanel>
-      </div>
-    </>}
-  </WorkspacePage>
+        chapterForm.setFieldsValue({
+          ...currentValues,
+          title: typeof draft.title === 'string' ? draft.title : currentValues.title,
+          outline: typeof draft.outline === 'string' ? draft.outline : currentValues.outline,
+          targetWords: normalizeOptionalNumber(draft.targetWords ?? currentValues.targetWords) || currentValues.targetWords,
+        })
+      }}
+    />
+  ) : null
+
+  const segmentAiActions = segmentDetail ? (
+    <AIGenerateButton
+      label="AI 生成场景"
+      isJson
+      buildMessages={() => {
+        const values = segmentForm.getFieldsValue(true)
+
+        return buildDraftMessages({
+          task: '场景结构草稿',
+          mode: 'replace',
+          context: [
+            { label: '书名', value: currentNovel?.title || '' },
+            { label: '题材', value: currentNovel?.genreName || '' },
+            { label: '小说简介', value: currentNovel?.synopsis || '' },
+            { label: '当前章节', value: getChapterLabel(chapterDetail) },
+            { label: '章节目标', value: chapterForm.getFieldValue('outline') },
+            { label: '当前场景序号', value: segmentDetail.segmentOrder },
+            { label: '同章场景列表', value: summarizeSegments(segments.items) },
+          ],
+          fields: [
+            { key: 'title', label: '场景标题', value: values.title, hint: '一句话点出场景焦点。' },
+            { key: 'segmentType', label: '片段类型', value: values.segmentType, hint: '只使用 scene、bridge、turn、reveal、climax 之一。' },
+            { key: 'purpose', label: '场景作用', value: values.purpose, hint: '写清这一场为什么存在。' },
+            { key: 'timeAnchor', label: '时间锚点', value: values.timeAnchor, hint: '写成可回查的时间描述。' },
+            { key: 'locationName', label: '地点', value: values.locationName, hint: '使用当前世界里真实可写的地点。' },
+            { key: 'inputState', label: '进入状态', value: values.inputState, hint: '角色进入场景前的状态。' },
+            { key: 'outputState', label: '离开状态', value: values.outputState, hint: '场景结束后的状态变化。' },
+            { key: 'summary', label: '片段摘要', value: values.summary, hint: '2-3 句写完因果。' },
+            { key: 'content', label: '场景正文', value: values.content, hint: '写成可直接进入正文的短场景。' },
+          ],
+          requirements: [
+            '正文必须自然，不要模板腔。',
+            '场景内容必须服务当前章节目标。',
+          ],
+        })
+      }}
+      onResult={(raw) => {
+        const draft = parseDraftJson<{
+          title?: string
+          segmentType?: string
+          purpose?: string
+          timeAnchor?: string
+          locationName?: string
+          inputState?: string
+          outputState?: string
+          summary?: string
+          content?: string
+        }>(raw)
+        const currentValues = segmentForm.getFieldsValue(true)
+
+        segmentForm.setFieldsValue({
+          ...currentValues,
+          title: typeof draft.title === 'string' ? draft.title : currentValues.title,
+          segmentType: typeof draft.segmentType === 'string' ? draft.segmentType : currentValues.segmentType,
+          purpose: typeof draft.purpose === 'string' ? draft.purpose : currentValues.purpose,
+          timeAnchor: typeof draft.timeAnchor === 'string' ? draft.timeAnchor : currentValues.timeAnchor,
+          locationName: typeof draft.locationName === 'string' ? draft.locationName : currentValues.locationName,
+          inputState: typeof draft.inputState === 'string' ? draft.inputState : currentValues.inputState,
+          outputState: typeof draft.outputState === 'string' ? draft.outputState : currentValues.outputState,
+          summary: typeof draft.summary === 'string' ? draft.summary : currentValues.summary,
+          content: typeof draft.content === 'string' ? draft.content : currentValues.content,
+        })
+      }}
+    />
+  ) : null
+
+  return (
+    <WorkspacePage
+      className="novel-structure-page"
+      layout="wide"
+      eyebrow="结构工程"
+      title="卷 / 部 / 章 / 场景"
+      description="按路径管理结构，再逐层补全章节和场景。"
+      actions={(
+        <Space wrap>
+          <Button icon={<PlusOutlined />} onClick={() => void addVolume()}>
+            新建卷
+          </Button>
+          <Button icon={<BuildOutlined />} loading={refreshing} onClick={() => void refreshMemory()}>
+            刷新检查点
+          </Button>
+          <Button icon={<ReloadOutlined />} onClick={() => void refreshStructure()}>
+            刷新结构
+          </Button>
+          <Button
+            type="primary"
+            icon={<LinkOutlined />}
+            disabled={!selection.volumeId}
+            onClick={openCreateEvent}
+          >
+            创建事件
+          </Button>
+          <Button
+            type="primary"
+            icon={<BranchesOutlined />}
+            disabled={!selection.chapterId}
+            onClick={() => void compileChapter()}
+          >
+            编译章节
+          </Button>
+          <Button icon={<ApartmentOutlined />} disabled={!selection.chapterId} onClick={openWritingPage}>
+            去正文页
+          </Button>
+        </Space>
+      )}
+      metrics={(
+        <>
+          <WorkspaceMetric label="卷数" value={volumes.length} tone="warm" hint="按阶段组织长篇。" />
+          <WorkspaceMetric label="当前部章节" value={chapters.total} hint="当前窗口内的章节数。" />
+          <WorkspaceMetric label="当前章场景" value={segments.total} tone="cool" hint="当前章节的最小结构单元。" />
+          <WorkspaceMetric label="关联事件" value={linked.total} hint="当前路径上的时间轴事件。" />
+        </>
+      )}
+      contextSummary={(
+        <WorkspaceContextSummary
+          items={[
+            { label: '当前卷', value: getVolumeLabel(currentVolume) },
+            { label: '当前部', value: getPartLabel(currentPart) },
+            { label: '当前章', value: getChapterLabel(chapterDetail) },
+            { label: '当前场景', value: getSegmentLabel(segmentDetail) },
+            { label: '定位方式', value: '按路径自动恢复' },
+          ]}
+        />
+      )}
+      aside={(
+        <>
+          <StructureLinkedEventsPanel
+            linked={linked}
+            timelineFilters={timelineFilters}
+            onOpenEvent={openLinkedEvent}
+            onPageChange={(page) => void loadLinked(page)}
+          />
+          <StructureCheckpointsPanel
+            title={checkpointPanelTitle}
+            checkpoints={checkpoints}
+            onPageChange={(page) => void loadCheckpoints(page)}
+          />
+          <StructureAsideTip />
+        </>
+      )}
+    >
+      {loading ? (
+        <div className="novel-empty">
+          <Spin />
+        </div>
+      ) : (
+        <>
+          <div className="novel-split novel-split--sidebar">
+            <StructureVolumesPanel
+              volumes={volumes}
+              selectedVolumeId={selection.volumeId}
+              editingVolumeId={editingVolumeId}
+              editingTitle={editingTitle}
+              onEditingTitleChange={setEditingTitle}
+              onSelectVolume={(volumeId) => void selectVolume(volumeId)}
+              onStartRenameVolume={startRenameVolume}
+              onCancelRename={cancelRename}
+              onSaveRename={() => void saveRename()}
+              onAddPart={(volumeId) => void addPart(volumeId)}
+              onDragEnd={(result) => void handleVolumeDragEnd(result)}
+            />
+            <StructurePartsPanel
+              currentVolume={currentVolume}
+              parts={parts}
+              selectedPartId={selection.partId}
+              editingPartId={editingPartId}
+              editingTitle={editingTitle}
+              onEditingTitleChange={setEditingTitle}
+              onSelectPart={(partId) => void selectPart(partId)}
+              onStartRenamePart={startRenamePart}
+              onCancelRename={cancelRename}
+              onSaveRename={() => void saveRename()}
+              onPageChange={(page) => {
+                if (selection.volumeId) void loadParts(selection.volumeId, page)
+              }}
+              onDragEnd={(result) => void handlePartDragEnd(result)}
+            />
+          </div>
+
+          <div className="novel-split novel-split--sidebar">
+            <StructureChaptersPanel
+              currentPart={currentPart}
+              chapters={chapters}
+              selectedChapterId={selection.chapterId}
+              onSelectChapter={(chapterId) => void selectChapter(chapterId)}
+              onAddChapter={() => void addChapter()}
+              onPageChange={(page) => {
+                if (selection.partId) void loadChapters(selection.partId, page)
+              }}
+            />
+            <StructureSegmentsPanel
+              chapterDetail={chapterDetail}
+              segments={segments}
+              selectedSegmentId={selection.segmentId}
+              canReorderSegments={canReorderSegments}
+              onSelectSegment={(segmentId) => void selectSegment(segmentId)}
+              onAddSegment={() => void addSegment()}
+              onCreateEvent={openCreateEvent}
+              onDragEnd={(result) => void handleSegmentDragEnd(result)}
+              onPageChange={(page) => {
+                if (selection.chapterId) void loadSegments(selection.chapterId, page)
+              }}
+            />
+          </div>
+
+          <div className="novel-split novel-split--sidebar">
+            <ChapterEditorPanel
+              chapterDetail={chapterDetail}
+              parts={parts}
+              chapterForm={chapterForm}
+              savingChapter={savingChapter}
+              onSaveChapter={() => void saveChapter()}
+              aiActions={chapterAiActions}
+            />
+            <SegmentEditorPanel
+              segmentDetail={segmentDetail}
+              selectionSegmentId={selection.segmentId}
+              visibleSegments={segments.items}
+              segmentForm={segmentForm}
+              savingSegment={savingSegment}
+              onSaveSegment={() => void saveSegment()}
+              aiActions={segmentAiActions}
+            />
+          </div>
+        </>
+      )}
+    </WorkspacePage>
+  )
 }

@@ -1,103 +1,241 @@
-﻿import React,{useCallback,useEffect,useMemo,useRef,useState} from 'react'
-import {Alert,Button,Form,Input,InputNumber,Modal,Pagination,Select,Space,Spin,Switch,Tag,message} from 'antd'
-import {DeleteOutlined,LinkOutlined,PlusOutlined,ReloadOutlined,SaveOutlined,ThunderboltOutlined} from '@ant-design/icons'
-import VirtualList from 'rc-virtual-list'
-import {useNavigate,useSearchParams} from 'react-router-dom'
-import type {Character,MapNodeSummary,PagedResult,StoryArc,StoryItem,StoryStructureChapterSummary,StoryStructurePartSummary,StoryStructureSegmentSummary,StoryStructureVolumeSummary,TimelineEvent,TimelineFilterOptions,TimelineQueryInput,TimelineStats} from '../../../types'
-import {useNovelStore} from '../../../stores/novel.store'
-import {parseWorldRulesJson} from '../../../shared/genre-system'
-import {WorkspaceContextSummary,WorkspaceMetric,WorkspacePage,WorkspacePanel} from '../components/WorkspaceShell'
+﻿import React from 'react'
+import { Button, Space } from 'antd'
+import {
+  DeleteOutlined,
+  PlusOutlined,
+  ReloadOutlined,
+  ThunderboltOutlined,
+} from '@ant-design/icons'
+import AIGenerateButton from '../../../components/AIGenerateButton'
+import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage } from '../components/WorkspaceShell'
+import { buildDraftMessages, normalizeOptionalNumber, normalizeStringArray, parseDraftJson } from '../shared/ai-draft'
+import {
+  TIMELINE_TEXT,
+  type TimelinePageProps,
+} from './helpers'
+import {
+  TimelineBoardPanel,
+  TimelineEditorPanel,
+  TimelineGenerateModal,
+  TimelineListPanel,
+} from './TimelinePanels'
+import { useTimelineWorkspace } from './useTimelineWorkspace'
 import '../components/boards.css'
 import './index.css'
 
-interface Props{novelId:number}
-interface FormValues{eventTitle:string;eventSummary?:string;timeMode:string;timeLabel:string;timeSortValue:number;timePrecision?:string;isMajorEvent:boolean;eventType?:string;arcId?:number;volumeId?:number;partId?:number;chapterStartId?:number;chapterEndId?:number;segmentId?:number;locationMapId?:number;presentCharacterIds:number[];affectedCharacterIds:number[];linkedItemIds:number[];protagonistPresent:boolean;protagonistAction?:string;eventCause?:string;eventProcess?:string;eventResult?:string;directConsequences:string[];openThreads:string[];notes?:string;status:'planned'|'seeded'|'written'|'resolved'}
-interface GenerateValues{count:number;batchSize:number;focus?:string}
-const STATUS_META:Record<TimelineEvent['status'],{label:string;color:string}>={planned:{label:'计划中',color:'default'},seeded:{label:'已埋点',color:'orange'},written:{label:'已写入正文',color:'blue'},resolved:{label:'已回收',color:'green'}}
-const BOARD_COLUMNS:TimelineEvent['status'][]=['planned','seeded','written','resolved']
-const TIME_MODE_OPTIONS=[{value:'gregorian',label:'公历时间'},{value:'regnal',label:'年号 / 王朝纪年'},{value:'relative-disaster',label:'灾变后相对时间'},{value:'custom-era',label:'虚构纪元'},{value:'future-date',label:'未来时间'}]
-const TIME_MODE_EXAMPLES:Record<string,string>={gregorian:'示例：2026年3月17日 21:00',regnal:'示例：昭宁三年秋 / 王历十二年冬','relative-disaster':'示例：灾变后第7天 / 断电后第3周','custom-era':'示例：玄曜纪三百二十七年 / 第六次开荒季','future-date':'示例：公元2089年 · 近地轨道站时 04:20'}
-const emptyPage=<T,>(pageSize:number):PagedResult<T>=>({items:[],page:1,pageSize,total:0,hasMore:false})
-const parseStringArray=(raw?:string|null)=>{if(!raw)return[];try{const parsed=JSON.parse(raw);return Array.isArray(parsed)?parsed.filter((item):item is string=>typeof item==='string').map((item)=>item.trim()).filter(Boolean):[]}catch{return[]}}
-const parseNumberArray=(raw?:string|null)=>{if(!raw)return[];try{const parsed=JSON.parse(raw);return Array.isArray(parsed)?parsed.map((item)=>typeof item==='number'?item:typeof item==='string'?Number(item):Number.NaN).filter((item)=>Number.isFinite(item)):[]}catch{return[]}}
-const parseNumber=(value:string|null)=>{if(!value)return null; const next=Number(value); return Number.isFinite(next)?next:null}
-const parseRoute=(search:URLSearchParams)=>({eventId:parseNumber(search.get('eventId')),action:search.get('action'),volumeId:parseNumber(search.get('volumeId')),partId:parseNumber(search.get('partId')),chapterId:parseNumber(search.get('chapterId')),segmentId:parseNumber(search.get('segmentId'))})
-const toForm=(event:TimelineEvent,defaultMode:string,defaultPrecision:string,defaultType:string):FormValues=>({eventTitle:event.eventTitle,eventSummary:event.eventSummary||'',timeMode:event.timeMode||defaultMode,timeLabel:event.timeLabel,timeSortValue:event.timeSortValue??0,timePrecision:event.timePrecision||defaultPrecision,isMajorEvent:Boolean(event.isMajorEvent),eventType:event.eventType||defaultType,arcId:event.arcId,volumeId:event.volumeId,partId:event.partId,chapterStartId:event.chapterStartId,chapterEndId:event.chapterEndId,segmentId:event.segmentId,locationMapId:event.locationMapId,presentCharacterIds:parseNumberArray(event.presentCharacterIdsJson),affectedCharacterIds:parseNumberArray(event.affectedCharacterIdsJson),linkedItemIds:parseNumberArray(event.linkedItemIdsJson),protagonistPresent:Boolean(event.protagonistPresent),protagonistAction:event.protagonistAction||'',eventCause:event.eventCause||'',eventProcess:event.eventProcess||'',eventResult:event.eventResult||'',directConsequences:parseStringArray(event.directConsequencesJson),openThreads:parseStringArray(event.openThreadsJson),notes:event.notes||'',status:event.status})
-const serialize=(values:FormValues):Partial<TimelineEvent>=>({eventTitle:values.eventTitle.trim(),eventSummary:values.eventSummary?.trim()||'',timeMode:values.timeMode,timeLabel:values.timeLabel.trim(),timeSortValue:Number(values.timeSortValue||0),timePrecision:values.timePrecision?.trim()||'',isMajorEvent:values.isMajorEvent?1:0,eventType:values.eventType?.trim()||'',arcId:values.arcId,volumeId:values.volumeId,partId:values.partId,chapterStartId:values.chapterStartId,chapterEndId:values.chapterEndId,segmentId:values.segmentId,locationMapId:values.locationMapId,presentCharacterIdsJson:JSON.stringify(values.presentCharacterIds||[]),affectedCharacterIdsJson:JSON.stringify(values.affectedCharacterIds||[]),linkedItemIdsJson:JSON.stringify(values.linkedItemIds||[]),protagonistPresent:values.protagonistPresent?1:0,protagonistAction:values.protagonistAction?.trim()||'',eventCause:values.eventCause?.trim()||'',eventProcess:values.eventProcess?.trim()||'',eventResult:values.eventResult?.trim()||'',directConsequencesJson:JSON.stringify((values.directConsequences||[]).map((item)=>item.trim()).filter(Boolean)),openThreadsJson:JSON.stringify((values.openThreads||[]).map((item)=>item.trim()).filter(Boolean)),notes:values.notes?.trim()||'',status:values.status})
-const buildDefault=(defaultMode:string,defaultPrecision:string,defaultType:string,anchor:Partial<FormValues>={},count=1):FormValues=>({eventTitle:'',eventSummary:'',timeMode:defaultMode,timeLabel:'',timeSortValue:count,timePrecision:defaultPrecision,isMajorEvent:true,eventType:defaultType,arcId:undefined,volumeId:anchor.volumeId,partId:anchor.partId,chapterStartId:anchor.chapterStartId,chapterEndId:anchor.chapterEndId,segmentId:anchor.segmentId,locationMapId:undefined,presentCharacterIds:[],affectedCharacterIds:[],linkedItemIds:[],protagonistPresent:true,protagonistAction:'',eventCause:'',eventProcess:'',eventResult:'',directConsequences:[],openThreads:[],notes:'',status:'planned'})
-const mergeById=<T extends {id:number}>(base:T[],extras:Array<T|null|undefined>)=>{const map=new Map(base.map((item)=>[item.id,item])); extras.forEach((item)=>{if(item) map.set(item.id,item)}); return [...map.values()]}
+export default function TimelinePage({ novelId }: TimelinePageProps) {
+  const workspace = useTimelineWorkspace(novelId)
+  const eventDraftButton = workspace.selectedEvent || workspace.creating ? (
+    <AIGenerateButton
+      label="AI 起草事件"
+      isJson
+      buildMessages={() => {
+        const values = workspace.form.getFieldsValue(true)
+        return buildDraftMessages({
+          task: '时间轴事件草稿',
+          mode: values.eventTitle ? 'optimize' : 'replace',
+          context: [
+            { label: '小说名', value: workspace.currentNovel?.title || '' },
+            { label: '题材', value: workspace.currentNovel?.genreName || '' },
+            { label: '简介', value: workspace.currentNovel?.synopsis || '' },
+            { label: '扩展背景', value: workspace.currentNovel?.expandedBackground || '' },
+            { label: '时间模式', value: workspace.modeLabel },
+            { label: '结构过滤', value: workspace.structureFilterSummary },
+          ],
+          fields: [
+            { key: 'eventTitle', label: '事件标题', value: values.eventTitle, hint: '一句话点出事件。' },
+            { key: 'eventSummary', label: '事件摘要', value: values.eventSummary, hint: '说明这件事为什么重要。' },
+            { key: 'timeLabel', label: '时间标签', value: values.timeLabel, hint: '写成统一口径。' },
+            { key: 'timeSortValue', label: '排序值', type: 'number', value: values.timeSortValue, hint: '给出合理整数。' },
+            { key: 'eventType', label: '事件类型', value: values.eventType, hint: '例如冲突、转折、回收。' },
+            { key: 'protagonistAction', label: '主角行动', value: values.protagonistAction, hint: '只写动作和选择。' },
+            { key: 'eventCause', label: '事件起因', value: values.eventCause, hint: '写清因果起点。' },
+            { key: 'eventProcess', label: '事件过程', value: values.eventProcess, hint: '写清关键推进。' },
+            { key: 'eventResult', label: '事件结果', value: values.eventResult, hint: '写清直接结果。' },
+            { key: 'directConsequences', label: '直接后果', type: 'string[]', value: values.directConsequences, hint: '2 到 5 条短句。' },
+            { key: 'openThreads', label: '待回收问题', type: 'string[]', value: values.openThreads, hint: '没有可留空。' },
+            { key: 'notes', label: '补充备注', value: values.notes, hint: '只写必要补充。' },
+          ],
+          requirements: [
+            '不要改动已选中的卷、部、章节、场景、地点和角色关联。',
+            '不要写空泛总结和宣传腔。',
+          ],
+        })
+      }}
+      onResult={(raw) => {
+        const draft = parseDraftJson<Record<string, unknown>>(raw)
+        const currentValues = workspace.form.getFieldsValue(true)
+        workspace.form.setFieldsValue({
+          ...currentValues,
+          eventTitle: typeof draft.eventTitle === 'string' ? draft.eventTitle : currentValues.eventTitle,
+          eventSummary: typeof draft.eventSummary === 'string' ? draft.eventSummary : currentValues.eventSummary,
+          timeLabel: typeof draft.timeLabel === 'string' ? draft.timeLabel : currentValues.timeLabel,
+          timeSortValue: normalizeOptionalNumber(draft.timeSortValue ?? currentValues.timeSortValue) ?? currentValues.timeSortValue,
+          eventType: typeof draft.eventType === 'string' ? draft.eventType : currentValues.eventType,
+          protagonistAction: typeof draft.protagonistAction === 'string' ? draft.protagonistAction : currentValues.protagonistAction,
+          eventCause: typeof draft.eventCause === 'string' ? draft.eventCause : currentValues.eventCause,
+          eventProcess: typeof draft.eventProcess === 'string' ? draft.eventProcess : currentValues.eventProcess,
+          eventResult: typeof draft.eventResult === 'string' ? draft.eventResult : currentValues.eventResult,
+          directConsequences: normalizeStringArray(draft.directConsequences ?? currentValues.directConsequences),
+          openThreads: normalizeStringArray(draft.openThreads ?? currentValues.openThreads),
+          notes: typeof draft.notes === 'string' ? draft.notes : currentValues.notes,
+        })
+      }}
+    />
+  ) : null
 
-export default function TimelinePage({novelId}:Props){
-  const navigate=useNavigate(); const [searchParams]=useSearchParams(); const route=useMemo(()=>parseRoute(searchParams),[searchParams]); const routeKeyRef=useRef(''); const suppressRefreshRef=useRef(false)
-  const {currentNovel}=useNovelStore(); const [form]=Form.useForm<FormValues>(); const [generateForm]=Form.useForm<GenerateValues>()
-  const [loading,setLoading]=useState(true); const [saving,setSaving]=useState(false); const [generating,setGenerating]=useState(false); const [generateOpen,setGenerateOpen]=useState(false)
-  const [pageData,setPageData]=useState<PagedResult<TimelineEvent>>(emptyPage(100)); const [stats,setStats]=useState<TimelineStats>({total:0,majorCount:0,resolvedCount:0,openThreadCount:0}); const [filterOptions,setFilterOptions]=useState<TimelineFilterOptions>({eventTypes:[]})
-  const [selectedId,setSelectedId]=useState<number|null>(null); const [selectedEvent,setSelectedEvent]=useState<TimelineEvent|null>(null); const [creating,setCreating]=useState(false)
-  const [statusFilter,setStatusFilter]=useState<'all'|TimelineEvent['status']>('all'); const [typeFilter,setTypeFilter]=useState('all'); const [volumeFilter,setVolumeFilter]=useState<number|'all'>('all'); const [partFilter,setPartFilter]=useState<number|'all'>('all'); const [chapterFilter,setChapterFilter]=useState<number|'all'>('all'); const [segmentFilter,setSegmentFilter]=useState<number|'all'>('all'); const [page,setPage]=useState(1)
-  const [volumes,setVolumes]=useState<StoryStructureVolumeSummary[]>([]); const [filterParts,setFilterParts]=useState<StoryStructurePartSummary[]>([]); const [filterChapters,setFilterChapters]=useState<StoryStructureChapterSummary[]>([])
-  const [formParts,setFormParts]=useState<StoryStructurePartSummary[]>([]); const [formChapters,setFormChapters]=useState<StoryStructureChapterSummary[]>([]); const [formSegments,setFormSegments]=useState<StoryStructureSegmentSummary[]>([])
-  const [arcs,setArcs]=useState<StoryArc[]>([]); const [characterOptions,setCharacterOptions]=useState<Character[]>([]); const [locationOptions,setLocationOptions]=useState<MapNodeSummary[]>([]); const [itemOptions,setItemOptions]=useState<StoryItem[]>([])
-  const worldRules=useMemo(()=>parseWorldRulesJson(currentNovel?.worldRulesJson,currentNovel?.genreName),[currentNovel?.genreName,currentNovel?.worldRulesJson]); const defaultMode=worldRules.timelineConfig.calendarType; const defaultPrecision=worldRules.timelineConfig.precisionOptions[0]||'阶段'; const defaultType=worldRules.timelineConfig.recommendedEventTypes[0]||''
-  const watchedVolumeId=Form.useWatch('volumeId',form); const watchedPartId=Form.useWatch('partId',form); const watchedChapterStartId=Form.useWatch('chapterStartId',form); const watchedChapterEndId=Form.useWatch('chapterEndId',form); const watchedSegmentId=Form.useWatch('segmentId',form); const selectedTimeMode=Form.useWatch('timeMode',form)||defaultMode
-  const modeLabel=TIME_MODE_OPTIONS.find((item)=>item.value===selectedTimeMode)?.label||selectedTimeMode
-  const laneItems=useMemo(()=>BOARD_COLUMNS.map((status)=>({status,items:pageData.items.filter((item)=>item.status===status)})),[pageData.items])
-  const volumeById=useMemo(()=>new Map(volumes.map((item)=>[item.id,item])),[volumes])
-  const partById=useMemo(()=>new Map([...filterParts,...formParts].map((item)=>[item.id,item])),[filterParts,formParts])
-  const chapterById=useMemo(()=>new Map([...filterChapters,...formChapters].map((item)=>[item.id,item])),[filterChapters,formChapters])
-  const segmentById=useMemo(()=>new Map(formSegments.map((item)=>[item.id,item])),[formSegments])
-  const loadShared=useCallback(async()=>{const [volumeRows,arcRows,nextFilters]=await Promise.all([window.electron.structure.listVolumes(novelId),window.electron.outline.getArcs(novelId),window.electron.timeline.getFilterOptions(novelId)]); setVolumes(volumeRows); setArcs(arcRows); setFilterOptions(nextFilters)},[novelId])
-  const searchCharacters=useCallback(async(value='')=>{const rows=await window.electron.character.search(novelId,value,20); setCharacterOptions((prev)=>mergeById(rows,prev))},[novelId])
-  const searchLocations=useCallback(async(value='')=>{const rows=await window.electron.map.searchNodes(novelId,value,20); setLocationOptions((prev)=>mergeById(rows,prev))},[novelId])
-  const searchItems=useCallback(async(value='')=>{const rows=await window.electron.item.search(novelId,value,'instance',20); setItemOptions((prev)=>mergeById(rows,prev))},[novelId])
-  const hydrateOptions=useCallback(async(event?:TimelineEvent|null)=>{const locationId=event?.locationMapId; const characterIds=[...parseNumberArray(event?.presentCharacterIdsJson),...parseNumberArray(event?.affectedCharacterIdsJson)]; const itemIds=parseNumberArray(event?.linkedItemIdsJson); const [baseCharacters,baseLocations,baseItems,extraLocation,extraCharacters,extraItems]=await Promise.all([window.electron.character.search(novelId,'',20),window.electron.map.searchNodes(novelId,'',20),window.electron.item.search(novelId,'','instance',20),locationId?window.electron.map.getNode(locationId):Promise.resolve(null),Promise.all(characterIds.map((id)=>window.electron.character.get(id))),Promise.all(itemIds.map((id)=>window.electron.item.get(id)))]); setCharacterOptions(mergeById(baseCharacters,extraCharacters)); setLocationOptions(mergeById(baseLocations,[extraLocation])); setItemOptions(mergeById(baseItems,extraItems))},[novelId])
-  const loadPartsFor=useCallback(async(volumeId?:number,target:'filter'|'form'='filter')=>{if(!volumeId){target==='filter'?setFilterParts([]):setFormParts([]); return []} const result=await window.electron.structure.listPartsPage(volumeId,1,200); target==='filter'?setFilterParts(result.items):setFormParts(result.items); return result.items},[])
-  const loadChaptersFor=useCallback(async(partId?:number,target:'filter'|'form'='filter')=>{if(!partId){target==='filter'?setFilterChapters([]):setFormChapters([]); return []} const result=await window.electron.structure.listChaptersPage(partId,1,200); target==='filter'?setFilterChapters(result.items):setFormChapters(result.items); return result.items},[])
-  const loadSegmentsFor=useCallback(async(chapterId?:number)=>{if(!chapterId){setFormSegments([]); return []} const result=await window.electron.structure.listSegmentsPage(chapterId,1,200); setFormSegments(result.items); return result.items},[])
-  const loadEventDetail=useCallback(async(id:number)=>{const row=await window.electron.timeline.get(id); setSelectedEvent(row); setSelectedId(row?.id||null); if(row){setCreating(false); form.setFieldsValue(toForm(row,defaultMode,defaultPrecision,defaultType)); if(row.volumeId) await loadPartsFor(row.volumeId,'form'); if(row.partId) await loadChaptersFor(row.partId,'form'); let segmentChapterId=row.chapterStartId||row.chapterEndId; if(!segmentChapterId&&row.segmentId){const segment=await window.electron.structure.getSegment(row.segmentId); segmentChapterId=segment?.chapterId} await loadSegmentsFor(segmentChapterId); await hydrateOptions(row)} else {await hydrateOptions(null)} return row},[defaultMode,defaultPrecision,defaultType,form,hydrateOptions,loadChaptersFor,loadPartsFor,loadSegmentsFor])
-  const buildQuery=useCallback((pageValue=page):TimelineQueryInput=>({novelId,page:pageValue,pageSize:100,sortBy:'timeSortValue',sortDirection:'asc',...(statusFilter!=='all'?{status:statusFilter}:{}),...(typeFilter!=='all'?{eventType:typeFilter}:{}),...(volumeFilter!=='all'?{volumeId:volumeFilter}:{}),...(partFilter!=='all'?{partId:partFilter}:{}),...(chapterFilter!=='all'?{chapterId:chapterFilter}:{}),...(segmentFilter!=='all'?{segmentId:segmentFilter}:{} )}),[chapterFilter,novelId,page,partFilter,segmentFilter,statusFilter,typeFilter,volumeFilter])
-  const refreshPage=useCallback(async(preferredId?:number|null,routeAction?:string|null)=>{setLoading(true); try{const query=routeAction?{...buildQuery(routeAction==='new'?1:1),...(route.volumeId?{volumeId:route.volumeId}:{}),...(route.partId?{partId:route.partId}:{}),...(route.chapterId?{chapterId:route.chapterId}:{}),...(route.segmentId?{segmentId:route.segmentId}:{} )}:buildQuery(page); const [list,summary]=await Promise.all([window.electron.timeline.query(query),window.electron.timeline.getStats({...query,page:undefined,pageSize:undefined})]); setPageData(list); setStats(summary); if(routeAction==='new'){const anchor={volumeId:route.volumeId??(volumeFilter==='all'?undefined:volumeFilter),partId:route.partId??(partFilter==='all'?undefined:partFilter),chapterStartId:route.chapterId??(chapterFilter==='all'?undefined:chapterFilter),chapterEndId:route.chapterId??(chapterFilter==='all'?undefined:chapterFilter),segmentId:route.segmentId??(segmentFilter==='all'?undefined:segmentFilter)}; setCreating(true); setSelectedId(null); setSelectedEvent(null); form.setFieldsValue(buildDefault(defaultMode,defaultPrecision,defaultType,anchor,list.total+1)); if(anchor.volumeId) await loadPartsFor(anchor.volumeId,'form'); if(anchor.partId) await loadChaptersFor(anchor.partId,'form'); if(anchor.chapterStartId) await loadSegmentsFor(anchor.chapterStartId); await hydrateOptions(null); return} const nextId=preferredId??route.eventId??selectedId??list.items[0]?.id??null; if(nextId) await loadEventDetail(nextId); else {setSelectedId(null); setSelectedEvent(null); setCreating(false); form.setFieldsValue(buildDefault(defaultMode,defaultPrecision,defaultType,{},list.total+1)); await hydrateOptions(null)}} finally{setLoading(false)}},[buildQuery,chapterFilter,defaultMode,defaultPrecision,defaultType,form,hydrateOptions,loadChaptersFor,loadEventDetail,loadPartsFor,loadSegmentsFor,page,partFilter,route.chapterId,route.eventId,route.partId,route.segmentId,route.volumeId,selectedId,segmentFilter,volumeFilter])
+  return (
+    <WorkspacePage
+      className="novel-timeline-page"
+      eyebrow={TIMELINE_TEXT.pageEyebrow}
+      title={TIMELINE_TEXT.pageTitle}
+      description={TIMELINE_TEXT.pageDescription}
+      actions={(
+        <Space wrap>
+          <Button icon={<ReloadOutlined />} onClick={() => void workspace.refreshPage()}>
+            {TIMELINE_TEXT.refresh}
+          </Button>
+          <Button icon={<PlusOutlined />} onClick={workspace.handleNew}>
+            {TIMELINE_TEXT.create}
+          </Button>
+          {eventDraftButton}
+          <Button
+            type="primary"
+            icon={<ThunderboltOutlined />}
+            loading={workspace.generating}
+            onClick={() => workspace.setGenerateOpen(true)}
+          >
+            {TIMELINE_TEXT.generate}
+          </Button>
+          <Button
+            danger
+            icon={<DeleteOutlined />}
+            loading={workspace.generating}
+            onClick={workspace.handleClear}
+          >
+            {TIMELINE_TEXT.clear}
+          </Button>
+        </Space>
+      )}
+      contextSummary={(
+        <WorkspaceContextSummary
+          items={[
+            { label: TIMELINE_TEXT.genre, value: workspace.currentNovel?.genreName || TIMELINE_TEXT.notConfigured },
+            {
+              label: TIMELINE_TEXT.timeSystem,
+              value: `${workspace.modeLabel} · ${workspace.worldRules.timelineConfig.eraName || TIMELINE_TEXT.currentThemeTimeline}`,
+            },
+            {
+              label: TIMELINE_TEXT.timeZero,
+              value: workspace.worldRules.timelineConfig.relativeZeroLabel
+                || workspace.worldRules.timelineConfig.baseYearLabel
+                || TIMELINE_TEXT.notDefined,
+            },
+            { label: TIMELINE_TEXT.structureFilter, value: workspace.structureFilterSummary },
+          ]}
+        />
+      )}
+      metrics={(
+        <>
+          <WorkspaceMetric label={TIMELINE_TEXT.metricTotal} value={workspace.stats.total} tone="warm" hint={TIMELINE_TEXT.metricTotalHint} />
+          <WorkspaceMetric label={TIMELINE_TEXT.metricMajor} value={workspace.stats.majorCount} tone="cool" hint={TIMELINE_TEXT.metricMajorHint} />
+          <WorkspaceMetric label={TIMELINE_TEXT.metricResolved} value={workspace.stats.resolvedCount} hint={TIMELINE_TEXT.metricResolvedHint} />
+          <WorkspaceMetric label={TIMELINE_TEXT.metricOpenThreads} value={workspace.stats.openThreadCount} hint={TIMELINE_TEXT.metricOpenThreadsHint} />
+        </>
+      )}
+    >
+      <TimelineBoardPanel
+        pageData={workspace.pageData}
+        laneItems={workspace.laneItems}
+        selectedId={workspace.selectedId}
+        onSelect={(event) => void workspace.handleSelect(event)}
+        getStructureTags={workspace.getStructureTagsForEvent}
+      />
 
-  useEffect(()=>{ void loadShared(); void hydrateOptions(null); generateForm.setFieldsValue({count:12,batchSize:4,focus:''}) },[generateForm,hydrateOptions,loadShared])
-  useEffect(()=>{ const key=searchParams.toString(); if(routeKeyRef.current===key) return; routeKeyRef.current=key; suppressRefreshRef.current=true; setVolumeFilter(route.volumeId||'all'); setPartFilter(route.partId||'all'); setChapterFilter(route.chapterId||'all'); setSegmentFilter(route.segmentId||'all'); setPage(1); if(route.volumeId) void loadPartsFor(route.volumeId,'filter'); if(route.partId) void loadChaptersFor(route.partId,'filter'); if(route.chapterId) void loadSegmentsFor(route.chapterId); void refreshPage(undefined,route.action||'__route__') },[loadChaptersFor,loadPartsFor,loadSegmentsFor,refreshPage,route.action,route.chapterId,route.partId,route.segmentId,route.volumeId,searchParams])
-  useEffect(()=>{ if(!routeKeyRef.current) return; if(suppressRefreshRef.current){suppressRefreshRef.current=false; return} void refreshPage() },[page,statusFilter,typeFilter,volumeFilter,partFilter,chapterFilter,segmentFilter,refreshPage])
-  useEffect(()=>{ if(volumeFilter==='all'){setFilterParts([]); setPartFilter('all'); setFilterChapters([]); setChapterFilter('all'); setSegmentFilter('all'); return} void loadPartsFor(volumeFilter,'filter') },[loadPartsFor,volumeFilter])
-  useEffect(()=>{ if(partFilter==='all'){setFilterChapters([]); setChapterFilter('all'); setSegmentFilter('all'); return} void loadChaptersFor(partFilter,'filter') },[loadChaptersFor,partFilter])
-  useEffect(()=>{ if(!watchedVolumeId){setFormParts([]); return} void loadPartsFor(watchedVolumeId,'form') },[loadPartsFor,watchedVolumeId])
-  useEffect(()=>{ if(!watchedPartId){setFormChapters([]); return} void loadChaptersFor(watchedPartId,'form') },[loadChaptersFor,watchedPartId])
-  useEffect(()=>{ const chapterId=watchedSegmentId?segmentById.get(watchedSegmentId)?.chapterId:watchedChapterStartId||watchedChapterEndId; if(!chapterId){setFormSegments([]); return} void loadSegmentsFor(chapterId) },[loadSegmentsFor,segmentById,watchedChapterEndId,watchedChapterStartId,watchedSegmentId])
+      <div className="novel-split novel-split--sidebar">
+        <TimelineListPanel
+          loading={workspace.loading}
+          pageData={workspace.pageData}
+          selectedId={workspace.selectedId}
+          statusFilter={workspace.statusFilter}
+          typeFilter={workspace.typeFilter}
+          volumeFilter={workspace.volumeFilter}
+          partFilter={workspace.partFilter}
+          chapterFilter={workspace.chapterFilter}
+          statusOptions={workspace.statusOptions}
+          eventTypeOptions={workspace.eventTypeOptions}
+          volumeOptions={workspace.filterVolumeOptions}
+          partOptions={workspace.filterPartOptions}
+          chapterOptions={workspace.filterChapterOptions}
+          filterSummary={workspace.filterSummary}
+          onStatusChange={(value) => {
+            workspace.setStatusFilter(value)
+            workspace.setPage(1)
+          }}
+          onTypeChange={(value) => {
+            workspace.setTypeFilter(value)
+            workspace.setPage(1)
+          }}
+          onVolumeChange={(value) => {
+            workspace.setVolumeFilter(value)
+            workspace.setPartFilter('all')
+            workspace.setChapterFilter('all')
+            workspace.setSegmentFilter('all')
+            workspace.setPage(1)
+          }}
+          onPartChange={(value) => {
+            workspace.setPartFilter(value)
+            workspace.setChapterFilter('all')
+            workspace.setSegmentFilter('all')
+            workspace.setPage(1)
+          }}
+          onChapterChange={(value) => {
+            workspace.setChapterFilter(value)
+            workspace.setSegmentFilter('all')
+            workspace.setPage(1)
+          }}
+          onPageChange={workspace.setPage}
+          onSelect={(event) => void workspace.handleSelect(event)}
+          getStructureTags={workspace.getStructureTagsForEvent}
+        />
 
-  const handleSelect=async(event:TimelineEvent)=>{await loadEventDetail(event.id)}
-  const handleNew=()=>{setCreating(true); setSelectedId(null); setSelectedEvent(null); form.setFieldsValue(buildDefault(defaultMode,defaultPrecision,defaultType,{volumeId:volumeFilter==='all'?undefined:volumeFilter,partId:partFilter==='all'?undefined:partFilter,chapterStartId:chapterFilter==='all'?undefined:chapterFilter,chapterEndId:chapterFilter==='all'?undefined:chapterFilter,segmentId:segmentFilter==='all'?undefined:segmentFilter},pageData.total+1)); void hydrateOptions(null)}
-  const handleChange=(changed:Partial<FormValues>,values:FormValues)=>{if('volumeId' in changed){form.setFieldsValue({partId:undefined,chapterStartId:undefined,chapterEndId:undefined,segmentId:undefined})} if('partId' in changed&&changed.partId){const part=partById.get(changed.partId); form.setFieldsValue({volumeId:part?.volumeId,chapterStartId:undefined,chapterEndId:undefined,segmentId:undefined})} if('chapterStartId' in changed&&changed.chapterStartId){const chapter=chapterById.get(changed.chapterStartId); form.setFieldsValue({volumeId:chapter?.volumeId,partId:chapter?.partId,segmentId:undefined})} if('chapterEndId' in changed&&changed.chapterEndId&&!values.chapterStartId){const chapter=chapterById.get(changed.chapterEndId); form.setFieldsValue({volumeId:chapter?.volumeId,partId:chapter?.partId})} if('segmentId' in changed&&changed.segmentId){const segment=segmentById.get(changed.segmentId); if(segment){const chapterId=segment.chapterId; const chapter=chapterById.get(chapterId); form.setFieldsValue({volumeId:chapter?.volumeId,partId:chapter?.partId,chapterStartId:chapterId,chapterEndId:chapterId})}} }
-  const handleSave=async()=>{const values=await form.validateFields(); setSaving(true); try{ if(selectedEvent?.id){await window.electron.timeline.update(selectedEvent.id,serialize(values)); await refreshPage(selectedEvent.id)} else {const nextId=await window.electron.timeline.create(novelId,serialize(values)); await refreshPage(nextId)} setCreating(false); message.success('事件已保存。') } catch(error){console.error(error); message.error('保存失败，请稍后再试。')} finally{setSaving(false)} }
-  const handleDelete=()=>{ if(!selectedEvent?.id) return; Modal.confirm({title:`删除「${selectedEvent.eventTitle}」？`,content:'删除后不会自动清理章节、大纲或物品中的关联文字，请确认这不是仍在使用的事件。',okButtonProps:{danger:true},onOk:async()=>{await window.electron.timeline.delete(selectedEvent.id); await refreshPage(); message.success('事件已删除。')}}) }
-  const handleGenerate=async()=>{const values=generateForm.getFieldsValue(); setGenerating(true); try{await window.electron.timeline.generate(novelId,{count:values.count||12,batchSize:values.batchSize||4,focus:values.focus||'把主角、关键地点、关键物品和主线冲突串成完整时间链，同时补上后果与未回收线索。'}); setGenerateOpen(false); await refreshPage(); message.success('时间轴首批事件已补齐。')} catch(error){console.error(error); message.error('生成失败，请稍后再试。')} finally{setGenerating(false)} }
-  const handleClear=()=>{Modal.confirm({title:'清空事件时间轴？',content:'会删除当前小说下全部时间轴事件，但不会删除章节正文。',okType:'danger',okText:'确认清空',onOk:async()=>{await window.electron.timeline.clear(novelId); form.resetFields(); setSelectedId(null); setSelectedEvent(null); setCreating(false); await refreshPage(null); message.success('事件时间轴已清空')}})}
-  const jumpToStructure=()=>{if(!selectedEvent)return; const params=new URLSearchParams(); if(selectedEvent.volumeId) params.set('volumeId',String(selectedEvent.volumeId)); if(selectedEvent.partId) params.set('partId',String(selectedEvent.partId)); if(selectedEvent.chapterStartId) params.set('chapterId',String(selectedEvent.chapterStartId)); if(selectedEvent.segmentId) params.set('segmentId',String(selectedEvent.segmentId)); navigate(`/novels/${novelId}/structure?${params.toString()}`)}
-  const structureTags=(event:TimelineEvent)=>{const tags:string[]=[]; if(event.volumeId&&volumeById.get(event.volumeId)) tags.push(volumeById.get(event.volumeId)?.title||`第 ${volumeById.get(event.volumeId)?.volumeNumber} 卷`); if(event.partId&&partById.get(event.partId)) tags.push(partById.get(event.partId)?.title||`第 ${partById.get(event.partId)?.partNumber} 部`); if(event.chapterStartId&&chapterById.get(event.chapterStartId)) tags.push(`第 ${chapterById.get(event.chapterStartId)?.chapterNum} 章`); if(event.segmentId&&segmentById.get(event.segmentId)) tags.push(segmentById.get(event.segmentId)?.title||'场景'); return tags }
-  return <WorkspacePage className="novel-timeline-page" eyebrow="时间轴" title="事件时间轴" description="服务端查询、分页展示、局部详情加载。" actions={<Space wrap><Button icon={<ReloadOutlined />} onClick={()=>void refreshPage()}>刷新</Button><Button icon={<PlusOutlined />} onClick={handleNew}>新建事件</Button><Button type="primary" icon={<ThunderboltOutlined />} loading={generating} onClick={()=>setGenerateOpen(true)}>AI 分批生成</Button><Button danger icon={<DeleteOutlined />} loading={generating} onClick={()=>void handleClear()}>清空时间轴</Button></Space>} contextSummary={<WorkspaceContextSummary items={[{label:'题材',value:currentNovel?.genreName||'未设置'},{label:'时间制',value:`${modeLabel} · ${worldRules.timelineConfig.eraName||'当前题材时间制'}`},{label:'时间零点',value:worldRules.timelineConfig.relativeZeroLabel||worldRules.timelineConfig.baseYearLabel||'未设定'},{label:'结构过滤',value:volumeFilter==='all'&&partFilter==='all'&&chapterFilter==='all'&&segmentFilter==='all'?'全局':'已按结构筛选'}]} />} metrics={<><WorkspaceMetric label="事件数量" value={stats.total} tone="warm" hint="当前过滤下的总事件数" /><WorkspaceMetric label="关键事件" value={stats.majorCount} tone="cool" hint="优先检查结构落点" /><WorkspaceMetric label="已回收" value={stats.resolvedCount} hint="已经完成回收" /><WorkspaceMetric label="待回收线" value={stats.openThreadCount} hint="仍挂在时间轴上的问题" /></>}>
-    <WorkspacePanel title="当前窗口泳道" description="当前分页窗口里的事件按状态分组显示。">{pageData.total===0?<div className="novel-empty">当前筛选下还没有事件。</div>:<div className="novel-board-lanes">{laneItems.map((lane)=><section key={lane.status} className="novel-board-lane"><div className="novel-board-lane__head"><strong>{STATUS_META[lane.status].label}</strong><span>{lane.items.length} 条</span></div><div className="novel-board-lane__body">{lane.items.length>0?lane.items.map((event)=><button key={event.id} type="button" className={`novel-board-card ${selectedId===event.id?'novel-board-card--active':''}`} onClick={()=>void handleSelect(event)}><div className="novel-board-card__kicker">{event.timeLabel}</div><strong>{event.eventTitle}</strong><div className="novel-board-card__meta"><span>{event.eventType||'未分类'}</span><span>{event.isMajorEvent?'关键节点':'普通节点'}</span></div><div className="novel-timeline-structure-tags">{structureTags(event).map((tag)=><Tag key={tag}>{tag}</Tag>)}</div><div className="novel-board-card__desc">{event.eventResult||event.eventSummary||event.eventCause||'这条事件还没有补出结果。'}</div></button>):<div className="novel-board-lane__empty">当前列暂无事件。</div>}</div></section>)}</div>}</WorkspacePanel>
-    <div className="novel-split novel-split--sidebar">
-      <WorkspacePanel title="事件列表" description="过滤、分页、虚拟滚动都走服务端查询。" extra={<div className="novel-filter-bar"><div className="novel-filter-bar__row"><Select value={statusFilter} options={[{value:'all',label:'全部状态'},{value:'planned',label:'计划中'},{value:'seeded',label:'已埋点'},{value:'written',label:'已写入正文'},{value:'resolved',label:'已回收'}]} onChange={(value)=>{setStatusFilter(value); setPage(1)}} /><Select value={typeFilter} options={[{value:'all',label:'全部类型'},...filterOptions.eventTypes.map((item)=>({value:item,label:item}))]} onChange={(value)=>{setTypeFilter(value); setPage(1)}} /><Select value={volumeFilter} options={[{value:'all',label:'全部卷'},...volumes.map((item)=>({value:item.id,label:item.title||`第 ${item.volumeNumber} 卷`}))]} onChange={(value)=>{setVolumeFilter(value); setPartFilter('all'); setChapterFilter('all'); setSegmentFilter('all'); setPage(1)}} /><Select value={partFilter} disabled={volumeFilter==='all'} options={[{value:'all',label:'全部部'},...filterParts.map((item)=>({value:item.id,label:item.title||`第 ${item.partNumber} 部`}))]} onChange={(value)=>{setPartFilter(value); setChapterFilter('all'); setSegmentFilter('all'); setPage(1)}} /><Select value={chapterFilter} disabled={partFilter==='all'} options={[{value:'all',label:'全部章'},...filterChapters.map((item)=>({value:item.id,label:`第 ${item.chapterNum} 章`}))]} onChange={(value)=>{setChapterFilter(value); setSegmentFilter('all'); setPage(1)}} /></div><div className="novel-filter-bar__summary">当前筛出 {pageData.total} 个事件，本页显示 {pageData.items.length} 个。</div></div>}>
-        {loading?<div className="novel-empty"><Spin /></div>:pageData.total===0?<div className="novel-empty">当前筛选下还没有事件。</div>:<div style={{display:'grid',gap:12}}><VirtualList data={pageData.items} height={560} itemHeight={126} itemKey="id">{(event:TimelineEvent)=><button key={event.id} type="button" className={`novel-list-card ${selectedId===event.id?'novel-list-card--active':''}`} onClick={()=>void handleSelect(event)} style={{textAlign:'left',cursor:'pointer'}}><div className="novel-kicker">{event.timeLabel}</div><div className="novel-list-card__title">{event.eventTitle}</div><div className="novel-list-card__meta"><Tag color={STATUS_META[event.status].color}>{STATUS_META[event.status].label}</Tag>{event.eventType?<Tag>{event.eventType}</Tag>:null}{event.isMajorEvent?<Tag color="gold">关键节点</Tag>:null}</div><div className="novel-timeline-structure-tags">{structureTags(event).map((tag)=><Tag key={tag}>{tag}</Tag>)}</div><div className="novel-list-card__desc">{event.eventSummary||event.eventResult||'这个事件还没有补出摘要。'}</div></button>}</VirtualList><Pagination current={pageData.page} pageSize={pageData.pageSize} total={pageData.total} size="small" showSizeChanger={false} onChange={(next)=>setPage(next)} /></div>}
-      </WorkspacePanel>
-      <WorkspacePanel title={selectedEvent?`编辑：${selectedEvent.eventTitle}`:creating?'新建事件':'事件详情'} description="时间定义、结构锚点、剧情挂点和因果链都只编辑当前事件。" extra={<Space>{selectedEvent?<Button icon={<LinkOutlined />} onClick={jumpToStructure}>跳到结构页</Button>:null}{selectedEvent?<Button danger icon={<DeleteOutlined />} onClick={handleDelete}>删除</Button>:null}<Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={handleSave}>保存</Button></Space>}>
-        {!selectedEvent&&!creating&&!loading?<div className="novel-empty">左侧选择一个事件后，这里就能直接补完整时间链信息。也可以从零新建。</div>:<Form form={form} layout="vertical" onValuesChange={handleChange}>{selectedEvent?.anchorInvalid?<Alert style={{marginBottom:16}} showIcon type="warning" message="这个事件的场景锚点已经失效" description="请重新确认卷、部、章节或场景，否则结构页无法稳定回查到它。" />:null}<div className="novel-form-section"><div className="novel-form-section__header"><div className="novel-form-section__title">时间定义</div><div className="novel-form-section__desc">先保证时间标签和排序值可读、可排、可回查。</div></div><div className="novel-note-list" style={{marginBottom:14}}><div className="novel-note-list__item">{modeLabel}写法建议：{TIME_MODE_EXAMPLES[selectedTimeMode]||'先统一口径，再写具体事件。'}</div></div><div className="novel-grid novel-grid--3"><Form.Item name="eventTitle" label="事件标题" rules={[{required:true,message:'请输入事件标题'}]}><Input placeholder="例如：南门补给线断裂" /></Form.Item><Form.Item name="timeLabel" label="时间标签" rules={[{required:true,message:'请输入时间标签'}]}><Input placeholder={TIME_MODE_EXAMPLES[selectedTimeMode]||'例如：灾变后第七天'} /></Form.Item><Form.Item name="timeSortValue" label="排序值" rules={[{required:true,message:'请输入排序值'}]}><InputNumber min={0} style={{width:'100%'}} /></Form.Item></div><div className="novel-grid novel-grid--3"><Form.Item name="timeMode" label="时间模式"><Select options={TIME_MODE_OPTIONS} /></Form.Item><Form.Item name="timePrecision" label="时间精度"><Select allowClear options={worldRules.timelineConfig.precisionOptions.map((item)=>({value:item,label:item}))} /></Form.Item><Form.Item name="status" label="当前状态"><Select options={Object.entries(STATUS_META).map(([value,meta])=>({value,label:meta.label}))} /></Form.Item></div><div className="novel-grid novel-grid--2"><Form.Item name="eventType" label="事件类型"><Select allowClear showSearch options={filterOptions.eventTypes.map((item)=>({value:item,label:item}))} /></Form.Item><div className="novel-grid novel-grid--2" style={{alignItems:'start'}}><Form.Item name="isMajorEvent" label="关键节点" valuePropName="checked" style={{marginBottom:0}}><Switch /></Form.Item><Form.Item name="protagonistPresent" label="主角在场" valuePropName="checked" style={{marginBottom:0}}><Switch /></Form.Item></div></div><Form.Item name="eventSummary" label="事件摘要"><Input.TextArea rows={3} placeholder="用 1-2 句话说明这个事件为什么重要，不要写空话。" /></Form.Item></div><div className="novel-form-section"><div className="novel-form-section__header"><div className="novel-form-section__title">结构锚点</div><div className="novel-form-section__desc">卷、部、章、场景按需联动加载，不再依赖全量树。</div></div><div className="novel-grid novel-grid--2"><Form.Item name="volumeId" label="所属卷"><Select allowClear options={volumes.map((item)=>({value:item.id,label:item.title||`第 ${item.volumeNumber} 卷`}))} /></Form.Item><Form.Item name="partId" label="所属部"><Select allowClear options={formParts.map((item)=>({value:item.id,label:item.title||`第 ${item.partNumber} 部`}))} /></Form.Item></div><div className="novel-grid novel-grid--2"><Form.Item name="chapterStartId" label="起始章节"><Select allowClear options={formChapters.map((item)=>({value:item.id,label:`第 ${item.chapterNum} 章`}))} /></Form.Item><Form.Item name="chapterEndId" label="结束章节"><Select allowClear options={formChapters.map((item)=>({value:item.id,label:`第 ${item.chapterNum} 章`}))} /></Form.Item></div><Form.Item name="segmentId" label="落点场景"><Select allowClear options={formSegments.map((item)=>({value:item.id,label:item.title||`场景 ${item.segmentOrder}`}))} /></Form.Item></div><div className="novel-form-section"><div className="novel-form-section__header"><div className="novel-form-section__title">剧情挂点</div><div className="novel-form-section__desc">把时间轴和大纲、地点接起来，后续写正文时能直接回查。</div></div><div className="novel-grid novel-grid--2"><Form.Item name="arcId" label="关联故事弧"><Select allowClear options={arcs.map((item)=>({value:item.id,label:item.arcName}))} /></Form.Item><Form.Item name="locationMapId" label="主要地点"><Select allowClear showSearch filterOption={false} options={locationOptions.map((item)=>({value:item.id,label:item.name}))} onFocus={()=>void searchLocations('')} onSearch={(value)=>void searchLocations(value)} /></Form.Item></div></div><div className="novel-form-section"><div className="novel-form-section__header"><div className="novel-form-section__title">人物与物品</div><div className="novel-form-section__desc">写清谁在场、谁受影响、主角做了什么，以及哪些物品被用到。</div></div><div className="novel-grid novel-grid--2"><Form.Item name="presentCharacterIds" label="在场人物"><Select mode="multiple" allowClear showSearch filterOption={false} options={characterOptions.map((item)=>({value:item.id,label:item.fullName}))} onFocus={()=>void searchCharacters('')} onSearch={(value)=>void searchCharacters(value)} /></Form.Item><Form.Item name="affectedCharacterIds" label="受影响人物"><Select mode="multiple" allowClear showSearch filterOption={false} options={characterOptions.map((item)=>({value:item.id,label:item.fullName}))} onFocus={()=>void searchCharacters('')} onSearch={(value)=>void searchCharacters(value)} /></Form.Item></div><div className="novel-grid novel-grid--2"><Form.Item name="linkedItemIds" label="关联物品"><Select mode="multiple" allowClear showSearch filterOption={false} options={itemOptions.map((item)=>({value:item.id,label:item.itemName}))} onFocus={()=>void searchItems('')} onSearch={(value)=>void searchItems(value)} /></Form.Item><Form.Item name="protagonistAction" label="主角做了什么"><Input.TextArea rows={3} placeholder="写动作或选择，不要写抽象评价。" /></Form.Item></div></div><div className="novel-form-section"><div className="novel-form-section__header"><div className="novel-form-section__title">因果链</div><div className="novel-form-section__desc">尽量把起因、过程、结果写成能直接接到后续章节的句子。</div></div><div className="novel-grid novel-grid--3"><Form.Item name="eventCause" label="事件起因"><Input.TextArea rows={4} /></Form.Item><Form.Item name="eventProcess" label="事件过程"><Input.TextArea rows={4} /></Form.Item><Form.Item name="eventResult" label="事件结果"><Input.TextArea rows={4} /></Form.Item></div><Form.Item name="directConsequences" label="直接后果"><Select mode="tags" open={false} /></Form.Item><Form.Item name="openThreads" label="待回收问题"><Select mode="tags" open={false} /></Form.Item><Form.Item name="notes" label="补充备注"><Input.TextArea rows={4} /></Form.Item></div></Form>}
-      </WorkspacePanel>
-    </div>
-    <Modal title="AI 分批生成时间轴" open={generateOpen} onCancel={()=>setGenerateOpen(false)} onOk={()=>void handleGenerate()} confirmLoading={generating} okText="生成下一批"><Form form={generateForm} layout="vertical"><div className="novel-note-list" style={{marginBottom:16}}><div className="novel-note-list__item">长篇建议先补关键事件骨架，再逐轮追加人物后果、伏笔和回收节点。</div><div className="novel-note-list__item">每批数量越小，越容易避免时间顺序断裂或重复生成。</div><div className="novel-note-list__item">已有事件会被带入上下文，系统优先补缺口，不整段重写。</div></div><Form.Item name="count" label="本轮目标事件数"><Select options={[8,10,12,16,20].map((item)=>({value:item,label:item+' 个'}))} /></Form.Item><Form.Item name="batchSize" label="每批生成数量"><Select options={[2,3,4,5,6].map((item)=>({value:item,label:item+' 个 / 批'}))} /></Form.Item><Form.Item name="focus" label="额外聚焦"><Input.TextArea rows={3} placeholder="例如：主角行动线、政变前后节点、物品回收或感情线转折。" /></Form.Item></Form></Modal>
-  </WorkspacePage>
+        <TimelineEditorPanel
+          selectedEvent={workspace.selectedEvent}
+          creating={workspace.creating}
+          loading={workspace.loading}
+          saving={workspace.saving}
+          form={workspace.form}
+          modeLabel={workspace.modeLabel}
+          timeModeHint={workspace.timeModeHint}
+          filterOptions={workspace.filterOptions}
+          arcs={workspace.arcs}
+          characterOptions={workspace.characterOptions}
+          locationOptions={workspace.locationOptions}
+          itemOptions={workspace.itemOptions}
+          formVolumeOptions={workspace.formVolumeOptions}
+          formPartOptions={workspace.formPartOptions}
+          formChapterOptions={workspace.formChapterOptions}
+          formSegmentOptions={workspace.formSegmentOptions}
+          timePrecisionOptions={workspace.timePrecisionOptions}
+          selectedTimeMode={workspace.selectedTimeMode}
+          worldRulesPrecisionFallback={workspace.defaultPrecision}
+          searchCharacters={(value) => void workspace.searchCharacters(value)}
+          searchLocations={(value) => void workspace.searchLocations(value)}
+          searchItems={(value) => void workspace.searchItems(value)}
+          onValuesChange={workspace.handleFormValuesChange}
+          onSave={() => void workspace.handleSave()}
+          onDelete={workspace.handleDelete}
+          onJumpToStructure={workspace.openSelectedEventInStructure}
+        />
+      </div>
+
+      <TimelineGenerateModal
+        open={workspace.generateOpen}
+        loading={workspace.generating}
+        form={workspace.generateForm}
+        onCancel={() => workspace.setGenerateOpen(false)}
+        onSubmit={() => void workspace.handleGenerate()}
+      />
+    </WorkspacePage>
+  )
 }
-
-
-
-
-
-
-
-
-
-
-
-
-

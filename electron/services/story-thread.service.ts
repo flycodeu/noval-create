@@ -1,0 +1,540 @@
+﻿import { asc, eq } from 'drizzle-orm'
+import type {
+  StoryThreadBatchGenerateOptions,
+  StoryThreadBatchGenerationResult,
+} from '../../src/shared/story-thread-generation'
+import {
+  buildContextAlignmentRules,
+  buildHumanLanguageRules,
+  buildOutputQualityRules,
+} from '../../src/shared/prompt-library'
+import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/utils/text'
+import { getDb } from '../database/db'
+import { chapters, novels, storyThreads } from '../database/schema'
+import { safeParseAiJson } from '../utils/json'
+import { markNovelContextChanged } from './context-impact.service'
+import { buildStoryProfile } from './context.service'
+import { runChatTask } from './task.service'
+
+type StoryThreadType = 'main' | 'subplot' | 'mystery' | 'payoff' | 'relationship'
+type StoryThreadStatus = 'planned' | 'active' | 'resolved' | 'stalled' | 'abandoned'
+type StoryThreadPriority = 'high' | 'medium' | 'low'
+
+interface StoryThreadQueryFilters {
+  novelId: number
+  threadType?: StoryThreadType
+  status?: StoryThreadStatus
+  keyword?: string
+  page?: number
+  pageSize?: number
+}
+
+interface GeneratedStoryThread {
+  thread_type?: unknown
+  title?: unknown
+  summary?: unknown
+  premise?: unknown
+  status?: unknown
+  priority?: unknown
+  start_chapter?: unknown
+  target_payoff_chapter?: unknown
+  payoff_condition?: unknown
+  current_state?: unknown
+  notes?: unknown
+}
+
+function asText(value: unknown): string {
+  return typeof value === 'string' ? cleanAiFieldText(value) : ''
+}
+
+function asNumber(value: unknown): number | null | undefined {
+  if (value === null) return null
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.round(value)
+  if (typeof value === 'string' && value.trim() && !Number.isNaN(Number(value))) return Math.round(Number(value))
+  return undefined
+}
+
+function normalizeThreadType(value: unknown): StoryThreadType {
+  const text = asText(value)
+  if (text === 'main' || text === 'mystery' || text === 'payoff' || text === 'relationship') return text
+  return 'subplot'
+}
+
+function normalizeStatus(value: unknown): StoryThreadStatus {
+  const text = asText(value)
+  if (text === 'active' || text === 'resolved' || text === 'stalled' || text === 'abandoned') return text
+  return 'planned'
+}
+
+function normalizePriority(value: unknown): StoryThreadPriority {
+  const text = asText(value)
+  if (text === 'high' || text === 'low') return text
+  return 'medium'
+}
+
+function stringifyNumberArray(raw: unknown): string {
+  if (typeof raw === 'string') return raw
+  if (!Array.isArray(raw)) return '[]'
+  return JSON.stringify(raw
+    .map((item) => asNumber(item))
+    .filter((item): item is number => typeof item === 'number'))
+}
+
+function normalizePaging(page?: number, pageSize?: number, fallbackPageSize = 24) {
+  const nextPageSize = Math.max(1, Math.min(pageSize || fallbackPageSize, 200))
+  const nextPage = Math.max(1, page || 1)
+  const offset = (nextPage - 1) * nextPageSize
+  return { page: nextPage, pageSize: nextPageSize, offset }
+}
+
+function buildPagedResult<T>(items: T[], page: number, pageSize: number, total: number) {
+  return {
+    items,
+    page,
+    pageSize,
+    total,
+    hasMore: page * pageSize < total,
+  }
+}
+
+function priorityWeight(priority: StoryThreadPriority) {
+  if (priority === 'high') return 0
+  if (priority === 'medium') return 1
+  return 2
+}
+
+function sanitizeStoryThreadPayload(
+  data: Partial<typeof storyThreads.$inferInsert>,
+): Partial<typeof storyThreads.$inferInsert> {
+  const next: Partial<typeof storyThreads.$inferInsert> = {}
+
+  if ('threadType' in data) next.threadType = normalizeThreadType(data.threadType)
+  if (typeof data.title === 'string') next.title = asText(data.title)
+  if (typeof data.summary === 'string') next.summary = asText(data.summary)
+  if (typeof data.premise === 'string') next.premise = asText(data.premise)
+  if ('status' in data) next.status = normalizeStatus(data.status)
+  if ('priority' in data) next.priority = normalizePriority(data.priority)
+  if ('startChapter' in data) next.startChapter = asNumber(data.startChapter)
+  if ('targetPayoffChapter' in data) next.targetPayoffChapter = asNumber(data.targetPayoffChapter)
+  if (typeof data.payoffCondition === 'string') next.payoffCondition = asText(data.payoffCondition)
+  if (typeof data.currentState === 'string') next.currentState = asText(data.currentState)
+  if ('relatedCharacterIdsJson' in data) next.relatedCharacterIdsJson = stringifyNumberArray(data.relatedCharacterIdsJson)
+  if ('relatedItemIdsJson' in data) next.relatedItemIdsJson = stringifyNumberArray(data.relatedItemIdsJson)
+  if ('relatedTimelineEventIdsJson' in data) next.relatedTimelineEventIdsJson = stringifyNumberArray(data.relatedTimelineEventIdsJson)
+  if (typeof data.notes === 'string') next.notes = asText(data.notes)
+  if ('sortOrder' in data) next.sortOrder = asNumber(data.sortOrder) ?? 0
+
+  return next
+}
+
+function getLatestChapterNum(novelId: number): number {
+  const db = getDb()
+  const rows = db.select().from(chapters).where(eq(chapters.novelId, novelId)).all()
+  return rows.reduce((maxValue, chapter) => Math.max(maxValue, chapter.chapterNum || 0), 0)
+}
+
+function clampGenerateCount(value: unknown): number {
+  const numeric = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(numeric)) return 8
+  return Math.max(1, Math.min(20, Math.round(numeric)))
+}
+
+function clampBatchSize(value: unknown, totalCount: number): number {
+  const numeric = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(numeric)) return Math.min(totalCount, 4)
+  return Math.max(1, Math.min(totalCount, Math.round(numeric), 6))
+}
+
+function sanitizeErrorMessage(error: unknown, fallback = '生成失败'): string {
+  const raw = error instanceof Error ? error.message : fallback
+  return cleanAiFieldText(raw).replace(/^\[[^\]]+\]\s*/g, '').trim() || fallback
+}
+
+function normalizeThreadTitleKey(value: string): string {
+  return value.replace(/\s+/g, '').trim().toLowerCase()
+}
+
+function normalizeBlockText(value: unknown): string {
+  if (Array.isArray(value)) {
+    return cleanAiStringArray(
+      value
+        .filter((item): item is string => typeof item === 'string')
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ).join('\n')
+  }
+
+  return typeof value === 'string' ? cleanAiFieldText(value) : ''
+}
+
+function clampChapter(value: unknown, chapterCeiling: number): number | null {
+  const numeric = asNumber(value)
+  if (typeof numeric !== 'number' || numeric <= 0) return null
+  return Math.max(1, Math.min(chapterCeiling, numeric))
+}
+
+function buildThreadSummary(
+  existingRows: Array<typeof storyThreads.$inferSelect>,
+  createdDrafts: Array<Partial<typeof storyThreads.$inferInsert>> = [],
+): string {
+  const existingLines = existingRows.map((thread, index) => {
+    const parts = [
+      thread.threadType || 'subplot',
+      thread.status || 'planned',
+      thread.priority || 'medium',
+      typeof thread.targetPayoffChapter === 'number' ? `回收=第${thread.targetPayoffChapter}章` : '',
+      thread.summary || thread.currentState || thread.premise || '',
+    ].filter(Boolean)
+    return `${index + 1}. ${thread.title}${parts.length > 0 ? ` | ${parts.join(' | ')}` : ''}`
+  })
+
+  const createdLines = createdDrafts.map((thread, index) => {
+    const parts = [
+      typeof thread.threadType === 'string' ? thread.threadType : 'subplot',
+      typeof thread.status === 'string' ? thread.status : 'planned',
+      typeof thread.priority === 'string' ? thread.priority : 'medium',
+      typeof thread.targetPayoffChapter === 'number' ? `回收=第${thread.targetPayoffChapter}章` : '',
+      typeof thread.summary === 'string' ? thread.summary : '',
+    ].filter(Boolean)
+    return `${existingLines.length + index + 1}. ${thread.title || '未命名线程'}${parts.length > 0 ? ` | ${parts.join(' | ')}` : ''}`
+  })
+
+  const lines = [...existingLines, ...createdLines]
+  return lines.length > 0 ? lines.join('\n') : '当前还没有任何故事线程。'
+}
+
+function buildStoryThreadPrompt(params: {
+  profile: Awaited<ReturnType<typeof buildStoryProfile>>
+  existingSummary: string
+  count: number
+  latestChapterNum: number
+  estimatedChapterTotal: number
+  focus?: string
+}): string {
+  const storyCore = [
+    params.profile.projectBriefSummary,
+    params.profile.premiseSummary,
+    params.profile.storyDesignSummary,
+    params.profile.themeVoiceSummary,
+    params.profile.worldRulesSummary,
+  ].filter(Boolean).join('\n\n')
+
+  return [
+    `你是中文长篇小说的结构策划。请为这部小说补出 ${params.count} 条新的故事线程。`,
+    '',
+    '【小说基础】',
+    `小说：${params.profile.novelTitle}`,
+    `题材：${params.profile.genre}`,
+    params.profile.background ? `背景：${params.profile.background}` : '',
+    storyCore ? `故事底盘：${storyCore}` : '',
+    `主角称呼：${params.profile.protagonistReference}`,
+    `主角命名规则：${params.profile.protagonistRule}`,
+    '',
+    '【当前故事核心】',
+    `故事目标：${params.profile.storyGoal || '暂未明确'}`,
+    `核心冲突：${params.profile.coreConflict || '暂未明确'}`,
+    `主推进链：${params.profile.mainPlot || '暂未明确'}`,
+    `支线基础：${params.profile.subPlots || '暂未明确'}`,
+    `结局方向：${params.profile.ending || '暂未明确'}`,
+    `节奏比例：${params.profile.rhythmSummary || '暂未明确'}`,
+    '',
+    '【现有线程】',
+    params.existingSummary,
+    '',
+    '【本轮目标】',
+    '- 只生成新的故事线程，不要和已有线程重名、重功能或重回收点。',
+    '- 线程类型只能使用：main / subplot / mystery / payoff / relationship。',
+    '- status 优先使用 planned；只有在当前章节已经推进到相关阶段时才允许 active。',
+    '- priority 只能使用：high / medium / low。',
+    `- 回收章位请尽量落在 1 到 ${params.estimatedChapterTotal} 章之间。`,
+    `- 当前已写到大约第 ${Math.max(params.latestChapterNum, 1)} 章；若线程尚未进入正文，请保持 planned。`,
+    params.focus ? `- 本轮额外聚焦：${params.focus}` : '',
+    '',
+    '【字段要求】',
+    '- title：线程标题，要能一眼看出它在推进什么。',
+    '- summary：用 1 句话说明这条线程在持续推动什么。',
+    '- premise：写它从哪里被触发、为什么成立。',
+    '- payoff_condition：写这条线程什么情况下才算真正回收。',
+    '- current_state：写当前阶段的状态，不要写成大段剧情。',
+    '- notes：写回收注意点、禁忌或与其他线的耦合风险。',
+    '',
+    '【上下文护栏】',
+    buildContextAlignmentRules({
+      background: params.profile.background,
+      storyCore,
+      worldSummary: params.profile.worldRulesSummary,
+      taskFocus: '补出可追踪、可回收、能服务主线推进的线程卡片。',
+      extraLines: [
+        '线程必须能被结构页、时间轴页和正文页反复引用，而不是一次性灵感。',
+        '每条线程都要和主线推进、人物关系、悬念回收或主题压力至少绑定一个。',
+      ],
+    }),
+    '',
+    '【输出质量底线】',
+    buildOutputQualityRules([
+      '不要把线程写成整段剧情摘要，卡片必须短、硬、能追踪。',
+      '避免“命运”“羁绊”“信念觉醒”这种空概念，优先写清具体矛盾和回收条件。',
+      '如果是 mystery 线程，要写清谜面是什么；如果是 payoff 线程，要写清回收触发条件。',
+    ]),
+    '',
+    '【语言要求】',
+    buildHumanLanguageRules([
+      '标题、摘要和状态描述都要像编辑在管理线索卡，而不是像宣传文案。',
+      '不要生造词，不要口号化，不要空泛抒情。',
+    ]),
+    '',
+    '只输出 JSON array，不要解释，不要 Markdown，不要代码块。数组长度必须等于本轮数量。',
+    '[{"thread_type":"subplot","title":"","summary":"","premise":"","status":"planned","priority":"medium","start_chapter":1,"target_payoff_chapter":12,"payoff_condition":"","current_state":"","notes":""}]',
+  ].filter(Boolean).join('\n')
+}
+
+function parseGeneratedThread(
+  raw: GeneratedStoryThread,
+  chapterCeiling: number,
+): Partial<typeof storyThreads.$inferInsert> | null {
+  const item = cleanAiValue(raw)
+  const title = normalizeBlockText(item.title)
+  if (!title) return null
+
+  const startChapter = clampChapter(item.start_chapter, chapterCeiling)
+  const targetPayoffChapterRaw = clampChapter(item.target_payoff_chapter, chapterCeiling)
+  const targetPayoffChapter = typeof startChapter === 'number' && typeof targetPayoffChapterRaw === 'number'
+    ? Math.max(startChapter, targetPayoffChapterRaw)
+    : targetPayoffChapterRaw
+
+  return {
+    threadType: normalizeThreadType(item.thread_type),
+    title,
+    summary: normalizeBlockText(item.summary),
+    premise: normalizeBlockText(item.premise),
+    status: normalizeStatus(item.status),
+    priority: normalizePriority(item.priority),
+    startChapter: startChapter ?? null,
+    targetPayoffChapter: targetPayoffChapter ?? null,
+    payoffCondition: normalizeBlockText(item.payoff_condition),
+    currentState: normalizeBlockText(item.current_state),
+    relatedCharacterIdsJson: '[]',
+    relatedItemIdsJson: '[]',
+    relatedTimelineEventIdsJson: '[]',
+    notes: normalizeBlockText(item.notes),
+  }
+}
+
+export function listStoryThreads(novelId: number) {
+  const db = getDb()
+  return db.select().from(storyThreads)
+    .where(eq(storyThreads.novelId, novelId))
+    .orderBy(asc(storyThreads.sortOrder), asc(storyThreads.id))
+    .all()
+}
+
+export function getStoryThread(id: number) {
+  const db = getDb()
+  return db.select().from(storyThreads).where(eq(storyThreads.id, id)).all()[0] || null
+}
+
+export function queryStoryThreads(filters: StoryThreadQueryFilters) {
+  const paging = normalizePaging(filters.page, filters.pageSize, 24)
+  const keyword = asText(filters.keyword).toLowerCase()
+  const items = listStoryThreads(filters.novelId)
+    .filter((thread) => !filters.threadType || thread.threadType === filters.threadType)
+    .filter((thread) => !filters.status || thread.status === filters.status)
+    .filter((thread) => {
+      if (!keyword) return true
+      const haystack = [thread.title, thread.summary, thread.premise, thread.currentState, thread.notes]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+      return haystack.includes(keyword)
+    })
+    .sort((left, right) => {
+      const priorityDiff = priorityWeight(normalizePriority(left.priority)) - priorityWeight(normalizePriority(right.priority))
+      if (priorityDiff !== 0) return priorityDiff
+      return (left.sortOrder || 0) - (right.sortOrder || 0)
+    })
+
+  return buildPagedResult(
+    items.slice(paging.offset, paging.offset + paging.pageSize),
+    paging.page,
+    paging.pageSize,
+    items.length,
+  )
+}
+
+export function getStoryThreadStats(filters: StoryThreadQueryFilters) {
+  const items = queryStoryThreads({
+    ...filters,
+    page: 1,
+    pageSize: 1000,
+  }).items
+  const latestChapterNum = getLatestChapterNum(filters.novelId)
+
+  return items.reduce((result, thread) => {
+    result.total += 1
+    if (thread.status === 'active') result.activeCount += 1
+    if (thread.status === 'resolved') result.resolvedCount += 1
+    if (thread.status === 'stalled') result.stalledCount += 1
+    if (
+      thread.status !== 'resolved'
+      && thread.status !== 'abandoned'
+      && typeof thread.targetPayoffChapter === 'number'
+      && thread.targetPayoffChapter > 0
+      && thread.targetPayoffChapter < latestChapterNum
+    ) {
+      result.overdueCount += 1
+    }
+    return result
+  }, {
+    total: 0,
+    activeCount: 0,
+    resolvedCount: 0,
+    stalledCount: 0,
+    overdueCount: 0,
+  })
+}
+
+export function createStoryThread(
+  novelId: number,
+  data: Partial<typeof storyThreads.$inferInsert>,
+  options: { skipContextTracking?: boolean } = {},
+) {
+  const db = getDb()
+  const rows = listStoryThreads(novelId)
+  const result = db.insert(storyThreads).values({
+    novelId,
+    threadType: 'subplot',
+    title: data.title || '未命名线程',
+    status: 'planned',
+    priority: 'medium',
+    relatedCharacterIdsJson: '[]',
+    relatedItemIdsJson: '[]',
+    relatedTimelineEventIdsJson: '[]',
+    sortOrder: rows.length > 0 ? Math.max(...rows.map((thread) => thread.sortOrder || 0)) + 1 : 1,
+    ...sanitizeStoryThreadPayload(data),
+  }).run()
+
+  if (!options.skipContextTracking) {
+    markNovelContextChanged(novelId, 'Story threads changed')
+  }
+
+  return Number(result.lastInsertRowid)
+}
+
+export function updateStoryThread(
+  id: number,
+  data: Partial<typeof storyThreads.$inferInsert>,
+  options: { skipContextTracking?: boolean } = {},
+) {
+  const current = getStoryThread(id)
+  if (!current) return
+  const db = getDb()
+  db.update(storyThreads).set({
+    ...sanitizeStoryThreadPayload(data),
+    updatedAt: new Date().toISOString(),
+  }).where(eq(storyThreads.id, id)).run()
+
+  if (!options.skipContextTracking) {
+    markNovelContextChanged(current.novelId, 'Story threads changed')
+  }
+}
+
+export function deleteStoryThread(id: number, options: { skipContextTracking?: boolean } = {}) {
+  const current = getStoryThread(id)
+  if (!current) return
+  const db = getDb()
+  db.delete(storyThreads).where(eq(storyThreads.id, id)).run()
+
+  if (!options.skipContextTracking) {
+    markNovelContextChanged(current.novelId, 'Story threads changed')
+  }
+}
+
+export async function generateStoryThreads(
+  novelId: number,
+  options: StoryThreadBatchGenerateOptions = {},
+): Promise<StoryThreadBatchGenerationResult> {
+  const db = getDb()
+  const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
+  if (!novel) throw new Error('小说不存在')
+
+  const profile = await buildStoryProfile(novelId)
+  const existingRows = listStoryThreads(novelId)
+  const latestChapterNum = getLatestChapterNum(novelId)
+  const estimatedChapterTotal = Math.max(
+    12,
+    latestChapterNum,
+    Math.ceil((novel.targetWords || 200000) / 3000),
+  )
+  const requestedCount = clampGenerateCount(options.count)
+  const batchSize = clampBatchSize(options.batchSize, requestedCount)
+  const createdDrafts: Array<Partial<typeof storyThreads.$inferInsert>> = []
+  const createdIds: number[] = []
+  const warnings: string[] = []
+  const usedTitleKeys = new Set(
+    existingRows
+      .map((thread) => normalizeThreadTitleKey(thread.title || ''))
+      .filter(Boolean),
+  )
+
+  for (let offset = 0; offset < requestedCount; offset += batchSize) {
+    const currentBatchCount = Math.min(batchSize, requestedCount - offset)
+
+    try {
+      const result = await runChatTask({
+        type: 'story_thread_generate',
+        novelId,
+        modelConfigId: novel.modelConfigId || undefined,
+        relatedEntityType: 'novel',
+        relatedEntityId: novelId,
+        messages: [{
+          role: 'user',
+          content: buildStoryThreadPrompt({
+            profile,
+            existingSummary: buildThreadSummary(existingRows, createdDrafts),
+            count: currentBatchCount,
+            latestChapterNum,
+            estimatedChapterTotal,
+            focus: options.focus,
+          }),
+        }],
+      })
+
+      const parsed = cleanAiValue(safeParseAiJson<GeneratedStoryThread[]>(result, 'array'))
+      let acceptedInBatch = 0
+
+      for (const item of parsed) {
+        const payload = parseGeneratedThread(item, estimatedChapterTotal)
+        if (!payload?.title) continue
+
+        const titleKey = normalizeThreadTitleKey(payload.title)
+        if (!titleKey || usedTitleKeys.has(titleKey)) {
+          warnings.push(`线程「${payload.title}」与现有线程重名或过于相近，已跳过。`)
+          continue
+        }
+
+        const id = createStoryThread(novelId, payload, { skipContextTracking: true })
+        createdIds.push(id)
+        createdDrafts.push(payload)
+        usedTitleKeys.add(titleKey)
+        acceptedInBatch += 1
+      }
+
+      if (acceptedInBatch === 0) {
+        warnings.push(`第 ${Math.floor(offset / batchSize) + 1} 批没有生成可用线程。`)
+      }
+    } catch (error) {
+      warnings.push(`第 ${Math.floor(offset / batchSize) + 1} 批生成失败：${sanitizeErrorMessage(error)}`)
+    }
+  }
+
+  if (createdIds.length > 0) {
+    markNovelContextChanged(novelId, 'Story threads changed')
+  }
+
+  return {
+    ids: createdIds,
+    requestedCount,
+    createdCount: createdIds.length,
+    warnings,
+  }
+}

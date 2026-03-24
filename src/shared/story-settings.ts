@@ -107,6 +107,12 @@ function asNumber(value: unknown): number | undefined {
   return undefined
 }
 
+function asEndingType(value: unknown): StoryEndingType | undefined {
+  return value === 'HE' || value === 'BE' || value === 'open' || value === 'multi' || value === 'HE_BE'
+    ? value
+    : undefined
+}
+
 function parseSubPlots(value: unknown): SubPlotDraft[] {
   if (!Array.isArray(value)) return []
 
@@ -164,7 +170,7 @@ export function parseStorySettingsDocument(raw?: string | null): StorySettingsDo
     rhythmSetup: asNumber(storyDesign.rhythm_setup ?? root.rhythm_setup),
     rhythmConflict: asNumber(storyDesign.rhythm_conflict ?? root.rhythm_conflict),
     rhythmEnding: asNumber(storyDesign.rhythm_ending ?? root.rhythm_ending),
-    endingType: asText(storyDesign.ending_type ?? root.ending_type) as StoryEndingType | '',
+    endingType: asEndingType(asText(storyDesign.ending_type ?? root.ending_type)),
     ending: asText(storyDesign.ending ?? root.ending),
   }
 
@@ -281,11 +287,11 @@ export function buildStorySettingsPayload(
 
 export function buildPremiseSummary(premise: StoryPremiseSettings): string {
   return [
-    premise.positioning ? `作品定位：${premise.positioning}` : '',
-    premise.coreHook ? `核心信息：${premise.coreHook}` : '',
+    premise.positioning ? `故事定位：${premise.positioning}` : '',
+    premise.coreHook ? `核心钩子：${premise.coreHook}` : '',
     premise.protagonistStart ? `主角起点：${premise.protagonistStart}` : '',
-    premise.constraints ? `底层约束：${premise.constraints}` : '',
-    premise.languageGuardrails ? `语言边界：${premise.languageGuardrails}` : '',
+    premise.constraints ? `关键限制：${premise.constraints}` : '',
+    premise.languageGuardrails ? `语言约束：${premise.languageGuardrails}` : '',
   ].filter(Boolean).join('\n')
 }
 
@@ -294,10 +300,10 @@ export function buildStoryDesignSummary(
   options: { includeSubplots?: boolean } = {},
 ): string {
   const lines = [
-    storyDesign.storyGoal ? `主线目标：${storyDesign.storyGoal}` : '',
+    storyDesign.storyGoal ? `故事目标：${storyDesign.storyGoal}` : '',
     storyDesign.coreConflict ? `核心冲突：${storyDesign.coreConflict}` : '',
-    storyDesign.mainPlot ? `推进链：${storyDesign.mainPlot}` : '',
-    storyDesign.ending ? `结局方向：${storyDesign.ending}` : '',
+    storyDesign.mainPlot ? `主线剧情：${storyDesign.mainPlot}` : '',
+    storyDesign.ending ? `结局设计：${storyDesign.ending}` : '',
   ]
 
   if (options.includeSubplots !== false) {
@@ -315,7 +321,7 @@ export function buildStoryDesignSummary(
 
 export function buildWritingRulesSummary(writingRules: StoryWritingRulesSettings): string {
   return [
-    writingRules.antiAiFlavor ? `去AI腔：${writingRules.antiAiFlavor}` : '',
+    writingRules.antiAiFlavor ? `反 AI 味：${writingRules.antiAiFlavor}` : '',
     writingRules.commonSenseRules ? `常识约束：${writingRules.commonSenseRules}` : '',
     writingRules.bannedTerms ? `禁用表达：${writingRules.bannedTerms}` : '',
   ].filter(Boolean).join('\n')
