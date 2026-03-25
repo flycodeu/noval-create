@@ -1,6 +1,7 @@
-﻿export type GenreRulePackKey =
+export type GenreRulePackKey =
   | 'generic'
   | 'zombie'
+  | 'wuxia'
   | 'xianxia'
   | 'fantasy'
   | 'urban-ability'
@@ -201,6 +202,14 @@ function getDefaultRealityOptions(packKey: GenreRulePackKey): WritingRealityOpti
         commonSenseFocus: ['\u611f\u67d3\u4f20\u64ad', '\u4f24\u75c5\u6062\u590d', '\u8d44\u6e90\u6d88\u8017', '\u7fa4\u4f53\u7eaa\u5f8b', '\u64a4\u79bb\u8def\u7ebf', '\u8865\u7ed9\u5206\u914d'],
         contextAlignmentFocus: ['\u57fa\u5730\u79e9\u5e8f', '\u5e78\u5b58\u8005\u5173\u7cfb', '\u5730\u7406\u5c01\u9501', '\u7269\u8d44\u6765\u6e90', '\u98ce\u9669\u627f\u62c5'],
       }
+    case 'wuxia':
+      return {
+        realismLevel: 'rule-realism',
+        sciencePolicy: '没有修仙式奇迹，武学、药理、马力、武器和行旅逻辑要尽量符合江湖常识与时代背景。',
+        physicsPolicy: '招式距离、伤势恢复、追杀路线和地形影响要有实际代价。',
+        commonSenseFocus: ['伤病代价', '赶路脚程', '银钱余粮', '门规师承', '官面压力', '名声后果', '兵器适配'],
+        contextAlignmentFocus: ['江湖秩序', '师门恩怨', '地域路线', '追捕与寻仇', '重要决定', '人情旧债'],
+      }
     case 'xianxia':
       return {
         realismLevel: 'rule-realism',
@@ -305,6 +314,16 @@ function getDefaultTimelineConfig(packKey: GenreRulePackKey): TimelineConfig {
         relativeZeroLabel: '爆发当日',
         recommendedEventTypes: ['爆发', '失守', '补给', '搜救', '尸潮', '背叛', '迁移', '反攻', '收束'],
         precisionOptions: ['天', '周', '月', '年'],
+      })
+    case 'wuxia':
+      return createTimelineConfig('regnal', {
+        eraName: '江湖纪事',
+        epochLabel: '某朝',
+        baseYearLabel: '元年',
+        displayPattern: '某朝某年 / 某季某月 / 某次大案后',
+        relativeZeroLabel: '开篇之前',
+        recommendedEventTypes: ['拜师', '下山', '押镖', '论剑', '缉拿', '寻仇', '失镖', '灭门', '归隐'],
+        precisionOptions: ['年', '季', '月'],
       })
     case 'xianxia':
       return createTimelineConfig('custom-era', {
@@ -643,15 +662,187 @@ const BUILTIN_GENRE_RULE_PACKS: Record<GenreRulePackKey, GenreWorldRuleSeed> = {
       getDefaultRealityOptions('zombie'),
     ),
   },
+  wuxia: {
+    version: 2,
+    genreProfile: {
+      key: 'wuxia',
+      name: '武侠江湖',
+      subgenre: '架空江湖 / 写实武林',
+      worldviewTone: '江湖规矩、门第出身、伤病代价和朝堂力量共同塑造人物命运。',
+      socialFrame: '世界由州府城镇、镖局帮会、武林门派、江湖散人、黑市牙行和官府缉捕体系交错构成。',
+      narrativeFocus: ['江湖秩序', '人物成长', '师承恩怨', '名声代价', '行旅与见闻'],
+      languageAvoidances: ['修仙口号', '万能神功设定', '空泛侠义宣言'],
+    },
+    powerSystems: [
+      {
+        id: 'martial-realm',
+        name: '武学境界',
+        appliesTo: ['侠客', '门派弟子', '镖师', '高手'],
+        levels: ['入门', '练劲', '通脉', '凝势', '宗师', '绝顶'],
+        advancementRule: '靠师承、苦练、实战、伤后恢复和长期积累推进，不靠一夜顿悟横跨数阶。',
+        limitations: '体力、伤势、年龄、兵器适配和功法相性都会限制上限。',
+        cost: '练功会耗时、耗银、耗药材和耗身体本钱，强行突破会留下暗伤。',
+        taboo: '不要把内力写成无限能源，也不要让低阶角色随意横扫绝顶高手。',
+      },
+      {
+        id: 'jianghu-status',
+        name: '江湖名位',
+        appliesTo: ['江湖人物', '帮会首脑', '镖师', '捕快'],
+        levels: ['无名后辈', '地方成名', '一方豪强', '江湖名宿', '宗师/魁首'],
+        advancementRule: '由战绩、信誉、门第、地盘、人脉和公开事件共同累积。',
+        limitations: '名声可以带来号召力，也会引来寻仇、挑战和官面关注。',
+        cost: '地位越高，越难抽身，越要承担师门、帮会和旧债压力。',
+        taboo: '不要把名望写成空标签，它必须对应具体人脉、责任和风险。',
+      },
+    ],
+    speciesSystem: [
+      {
+        id: 'jianghu-human',
+        name: '江湖人物',
+        entityType: 'human',
+        summary: '闯荡江湖的主体，可能背着师门、旧债或血仇。',
+        traits: ['讲路数', '重脸面', '代价现实'],
+        commonIdentities: ['门派弟子', '散客', '镖师'],
+        relationToHumans: '本质上就是人与人的恩怨网。',
+        storyUse: '承接成长、师承、寻仇、护镖和结盟。',
+      },
+      {
+        id: 'commonfolk',
+        name: '市井百姓',
+        entityType: 'human',
+        summary: '官税、战乱、帮会和武林冲突的直接承受者。',
+        traits: ['求生务实', '怕事也记仇', '会识时势'],
+        commonIdentities: ['掌柜', '船户', '村民', '工匠'],
+        relationToHumans: '他们就是江湖所依附的人间地基。',
+        storyUse: '用来呈现人间疾苦、政令压力和主角选择的后果。',
+      },
+      {
+        id: 'border-guest',
+        name: '边地来客',
+        entityType: 'human',
+        summary: '走商、番僧、异域高手或边军逃人等流动人物。',
+        traits: ['路线复杂', '背景难测', '开阔见识'],
+        commonIdentities: ['走商', '番僧', '边军旧人'],
+        relationToHumans: '带来外部视角和新的利益链。',
+        storyUse: '用来打开边地事态、跨域交易和异域恩怨。',
+      },
+    ],
+    factionSystem: [
+      {
+        id: 'sect',
+        name: '门派',
+        factionType: '门派',
+        summary: '传承武学、维持门规并参与武林排位的核心组织。',
+        structure: '掌门、长老、真传、内外门弟子层次分明。',
+        resources: '秘笈、武库、药间、地盘和名望。',
+        externalRelations: '与别派争排位、争弟子，也会与官府或商路合作。',
+        recruitFrom: '师承传承、开山收徒、寒门投奔者。',
+        notableSites: ['山门', '演武场', '藏兵楼'],
+      },
+      {
+        id: 'underworld',
+        name: '帮会/镖局',
+        factionType: '江湖组织',
+        summary: '掌控地盘、押运、漕运或黑市生意的现实势力。',
+        structure: '首脑、堂口、镖师、外雇高手红白并立。',
+        resources: '人手、银两、车马、消息网和线人。',
+        externalRelations: '既要与门派打交道，也要应付官面缉捕和同行吞并。',
+        recruitFrom: '流民、逃军、行商伙伴、失意武者。',
+        notableSites: ['总堂', '码头', '黑市'],
+      },
+      {
+        id: 'yamen',
+        name: '官府/缉事机构',
+        factionType: '官面',
+        summary: '负责治安、缉拿、缉边或秘查的权力系统。',
+        structure: '州府行政、捕快系统、密探线人分层运作。',
+        resources: '律令、牢狱、公文、驻兵和档案。',
+        externalRelations: '对门派和帮会时而拉拢，时而打压。',
+        recruitFrom: '科举失意者、边军旧部、缉拿能手。',
+        notableSites: ['州衙', '大牢', '缉事房'],
+      },
+    ],
+    characterEcology: {
+      overview: '角色生态要同时有行走江湖的主体、师门或旧债压力位、市井锚点和官面对照位。',
+      slots: [
+        {
+          id: 'jianghu-lead',
+          label: '行路主角',
+          entityType: 'human',
+          species: '江湖人物',
+          narrativeFunction: '承担行走、练功、选择和付出代价。',
+          contextLink: '必须被卷入师门、人情或大案之一。',
+          preferredFactions: ['门派', '帮会/镖局', '官府/缉事机构'],
+          powerBias: ['武学境界', '江湖名位'],
+        },
+        {
+          id: 'master-pressure',
+          label: '师门或旧债压力位',
+          entityType: 'human',
+          species: '江湖人物',
+          narrativeFunction: '提供门规、情义、背叛或追杀压力。',
+          contextLink: '要能对主角的路线和底线产生长期影响。',
+          preferredFactions: ['门派', '官府/缉事机构'],
+          powerBias: ['武学境界', '江湖名位'],
+        },
+        {
+          id: 'mortal-anchor',
+          label: '市井锚点',
+          entityType: 'human',
+          species: '市井百姓',
+          narrativeFunction: '让江湖冲突落到人间疾苦、生计和小人命运上。',
+          contextLink: '要能看见主角选择对普通人的真实影响。',
+          preferredFactions: ['帮会/镖局', '官府/缉事机构'],
+          powerBias: ['江湖名位'],
+        },
+      ],
+    },
+    mapBlueprint: {
+      overview: '地图按州域路线、城镇/门派/帮口、客栈/镖路/险地递进，体现江湖是一个需要赶路、打点、还人情的人间网络。',
+      levels: [
+        {
+          depth: 1,
+          label: '州域/路线',
+          nodeTypes: ['州域', '边地', '官道'],
+          relationHint: '决定人物行走范围和消息流速。',
+          suggestedCount: 2,
+          examples: ['青州道', '塞北边路'],
+        },
+        {
+          depth: 2,
+          label: '城镇/门派/据点',
+          nodeTypes: ['州城', '县镇', '门派', '镇口'],
+          relationHint: '承载重要阵营和人情网络。',
+          suggestedCount: 3,
+          examples: ['龙门镇', '听潮门', '运河镇口'],
+        },
+        {
+          depth: 3,
+          label: '现场/险地/行旅点',
+          nodeTypes: ['客栈', '镖道', '山寨', '渡口', '矿场'],
+          relationHint: '用于爆发交手、护人、失物、寻踪和螺旋升压。',
+          suggestedCount: 4,
+          examples: ['断碑渡', '黑风寨', '长庭客栈'],
+        },
+      ],
+    },
+    writingConstraints: createWritingConstraints(
+      '多写路程、伤势、银钱、人情、门规和官面压力，让江湖像有人住的地方，不要写成悬空神话。',
+      '对白要分出门第、师承、行当和火气，少用修仙腔、热血宣言腔。',
+      ['大道', '飞升', '天命所归', '一念通天'],
+      ['写实武侠优先服从真实地理、兵器、伤病、官府和时代常识；架空武侠也要保持自己的秩序闭环。', '招式可以有名目，但出手距离、体力消耗和伤害后果要说得通。', '不要把江湖规矩写成空口号，要落实到追杀、护短、赔礼、结盟和报官等具体动作。'],
+      getDefaultRealityOptions('wuxia'),
+    ),
+  },
   xianxia: {
     version: 2,
     genreProfile: {
       key: 'xianxia',
       name: '仙侠修真',
       subgenre: '修炼成长 / 宗门世界',
-      worldviewTone: '境界、寿命、资源和宗门秩序共同决定人物命运。',
-      socialFrame: '世界通常由凡俗王朝、修真宗门、家族势力和上层界域共同构成。',
-      narrativeFocus: ['境界晋升', '宗门秩序', '资源争夺', '因果代价'],
+      worldviewTone: '境界、寿命、资源、因果和宗门秩序共同决定人物命运，凡俗与仙途之间长期存在落差。',
+      socialFrame: '世界通常由凡俗王朝、修真宗门、修真家族、散修据点、坊市势力、秘境入口和上层界域共同构成。',
+      narrativeFocus: ['境界晋升', '凡俗与仙途落差', '宗门秩序', '资源争夺', '因果代价'],
       languageAvoidances: ['现代口头语', '玄虚口号', '浮夸称号堆砌'],
     },
     powerSystems: [
@@ -688,6 +879,16 @@ const BUILTIN_GENRE_RULE_PACKS: Record<GenreRulePackKey, GenreWorldRuleSeed> = {
         storyUse: '承接成长、师承、宗门斗争与飞升路线。',
       },
       {
+        id: 'mortal-population',
+        name: '凡俗众生',
+        entityType: 'human',
+        summary: '尚未踏入修途的百姓、工匠、军户和边地人口。',
+        traits: ['要面对天灾人祸', '对修士又敬又怕', '生计压力真实'],
+        commonIdentities: ['村民', '工匠', '军户', '商贾'],
+        relationToHumans: '是修真世界的人间基底。',
+        storyUse: '用来呈现凡俗与仙途的落差、人间疾苦与主角选择的后果。',
+      },
+      {
         id: 'spirit-beast',
         name: '灵兽',
         entityType: 'beast',
@@ -698,14 +899,24 @@ const BUILTIN_GENRE_RULE_PACKS: Record<GenreRulePackKey, GenreWorldRuleSeed> = {
         storyUse: '补足非人生态、陪伴关系和秘境体系。',
       },
       {
-        id: 'immortal-race',
-        name: '仙界来者',
-        entityType: 'immortal',
-        summary: '来自上层界域或拥有上界血脉的存在。',
-        traits: ['身份高差明显', '视角超脱', '规则压制强'],
-        commonIdentities: ['监察者', '上界使者', '谪仙'],
-        relationToHumans: '对下界修士形成天然威压或资源垄断。',
-        storyUse: '用于拉开世界纵深与上界压迫。',
+        id: 'feral-beast',
+        name: '异兽/妖物',
+        entityType: 'beast',
+        summary: '受煞气、秘境异变或古老血脉影响的凶物。',
+        traits: ['领地性强', '环境适应极端', '多半具有特殊材料价值'],
+        commonIdentities: ['山泽霸主', '秘境凶物', '炼丹材料来源'],
+        relationToHumans: '既是资源与危险，也会倒逼势力重新划分边界。',
+        storyUse: '用来支撑试炼、狩猎、护城、失控灾害和资源争夺。',
+      },
+      {
+        id: 'evil-spirit',
+        name: '恶灵/邪祟',
+        entityType: 'nonhuman',
+        summary: '由怨念、禁术、祭炼或灾厄死地孕生的异质存在。',
+        traits: ['规则性强', '多与地脉或执念绑定', '难以用寻常方式彻底解决'],
+        commonIdentities: ['恶地残魂', '养鬼产物', '封印物'],
+        relationToHumans: '常与邪修、遗迹和禁地纠缠不清。',
+        storyUse: '用来扩展灾厄来源、规则风险和因果反噬。',
       },
     ],
     factionSystem: [
@@ -742,9 +953,31 @@ const BUILTIN_GENRE_RULE_PACKS: Record<GenreRulePackKey, GenreWorldRuleSeed> = {
         recruitFrom: '本族血脉、联姻、客卿修士。',
         notableSites: ['祖地', '家族秘库'],
       },
+      {
+        id: 'market-alliance',
+        name: '坊市/散修盟',
+        factionType: '交易网络',
+        summary: '连接散修、行商、炼师和情报贩子的流动势力。',
+        structure: '坐馆人、交易行、客卿和地下线人交错运作。',
+        resources: '灵石、情报、罕见材料、黑市通道。',
+        externalRelations: '和各家宗门、王朝、邪修都有交集，立场往往取决于利益。',
+        recruitFrom: '散修、被放逐者、商贾与灰色人员。',
+        notableSites: ['云河坊市', '拍卖楼', '散修客栈'],
+      },
+      {
+        id: 'evil-cultivators',
+        name: '邪修/魔道',
+        factionType: '异端势力',
+        summary: '通过抽魂、养鬼、血祭或禁术获取力量的暗面组织。',
+        structure: '多以秘主、护法、供品和外围佣从构成。',
+        resources: '禁术、尸地、生魂、邪器和隐匿洞府。',
+        externalRelations: '和恶灵、异兽、黑市交易网络关系紧密，也会反向渗透正道宗门。',
+        recruitFrom: '被逐出的弟子、因仇入魔者、走投无路的散修。',
+        notableSites: ['尸河谷', '封魂坡', '地下血坛'],
+      },
     ],
     characterEcology: {
-      overview: '角色生态必须包含不同境界、不同势力和非人角色，体现宗门、王朝、家族与界域之间的秩序差。',
+      overview: '角色生态必须包含不同境界、不同势力、非人角色与凡俗锚点，体现宗门、王朝、家族、散修和界域之间的秩序差。',
       slots: [
         {
           id: 'cultivator-lead',
@@ -752,8 +985,8 @@ const BUILTIN_GENRE_RULE_PACKS: Record<GenreRulePackKey, GenreWorldRuleSeed> = {
           entityType: 'human',
           species: '人族修士',
           narrativeFunction: '承担成长、突破与因果代价。',
-          contextLink: '必须被卷入宗门或界域秩序。',
-          preferredFactions: ['宗门', '修真家族'],
+          contextLink: '必须被卷入宗门、坊市或界域秩序。',
+          preferredFactions: ['宗门', '修真家族', '坊市/散修盟'],
           powerBias: ['修炼境界', '宗门身份阶位'],
         },
         {
@@ -765,6 +998,26 @@ const BUILTIN_GENRE_RULE_PACKS: Record<GenreRulePackKey, GenreWorldRuleSeed> = {
           contextLink: '与主角在利益或道义上形成长期拉扯。',
           preferredFactions: ['宗门'],
           powerBias: ['修炼境界', '宗门身份阶位'],
+        },
+        {
+          id: 'mortal-anchor',
+          label: '凡俗牵引点',
+          entityType: 'human',
+          species: '凡俗众生',
+          narrativeFunction: '让主角看见人间疾苦、赋税兵祸和灾变的真实后果。',
+          contextLink: '要能影响主角对修行、权力和取舍的判断。',
+          preferredFactions: ['王朝/州国', '坊市/散修盟'],
+          powerBias: ['宗门身份阶位'],
+        },
+        {
+          id: 'heterodox-pressure',
+          label: '邪修或异类压力位',
+          entityType: 'nonhuman',
+          species: '恶灵/邪祟',
+          narrativeFunction: '提供禁术、反噬和道心考验。',
+          contextLink: '必须与秘境、邪修或旧因果有直接关联。',
+          preferredFactions: ['邪修/魔道'],
+          powerBias: ['修炼境界'],
         },
         {
           id: 'nonhuman-link',
@@ -779,7 +1032,7 @@ const BUILTIN_GENRE_RULE_PACKS: Record<GenreRulePackKey, GenreWorldRuleSeed> = {
       ],
     },
     mapBlueprint: {
-      overview: '地图按界域、州国/宗门、城池/秘境/洞府递进，体现修真世界层级和资源分布。',
+      overview: '地图按界域、凡俗王朝/宗门势力、城池/坊市/秘境/洞府递进，体现修真世界层级、凡俗差异和资源分布。',
       levels: [
         {
           depth: 1,
@@ -808,10 +1061,10 @@ const BUILTIN_GENRE_RULE_PACKS: Record<GenreRulePackKey, GenreWorldRuleSeed> = {
       ],
     },
     writingConstraints: createWritingConstraints(
-      '用具体修炼条件、资源和身份约束来解释冲突，不要空喊仙途、大道。',
+      '用具体修炼条件、资源、身份和凡俗纠葛来解释冲突，不要空喊仙途、大道。',
       '对白要符合身份层级和修真礼法，少用现代口头语。',
       ['大道无情', '天命如此', '仙路茫茫', '某种玄而又玄的感觉'],
-      ['境界名称可以保留，但普通概念不要加引号。', '不要把宗门设定写成百科词条。'],
+      ['境界名称可以保留，但普通概念不要加引号。', '凡人区域、坊市、散修、邪修、灵兽、异兽和恶灵都要写出用处与代价。', '不要把宗门设定写成百科词条。'],
       getDefaultRealityOptions('xianxia'),
     ),
   },
@@ -1234,6 +1487,7 @@ const BUILTIN_GENRE_RULE_PACKS: Record<GenreRulePackKey, GenreWorldRuleSeed> = {
 const GENRE_ALIAS_RULES: Array<{ pattern: RegExp; key: GenreRulePackKey }> = [
   { pattern: /丧尸|末世|病毒|尸潮/u, key: 'zombie' },
   { pattern: /仙侠|修真|修仙|仙界|宗门/u, key: 'xianxia' },
+  { pattern: /武侠|江湖|侠客|武林|镖局|帮会/u, key: 'wuxia' },
   { pattern: /玄幻|斗破|斗气|升级/u, key: 'fantasy' },
   { pattern: /都市|异能|现代异能/u, key: 'urban-ability' },
   { pattern: /西幻|魔法|教会|王国/u, key: 'western-fantasy' },

@@ -421,7 +421,9 @@ function formatArcContext(arc?: typeof storyArcs.$inferSelect | null): string {
     `章节范围：第${arc.chapterStart || '?'}章 - 第${arc.chapterEnd || '?'}章`,
     `本弧目标：${arc.arcGoal || '（未填写）'}`,
     `本弧概述：${arc.arcSummary || '（未填写）'}`,
-  ].join('\n')
+    arc.growthLedger ? `成长账本：${arc.growthLedger}` : '',
+    arc.costLedger ? `代价账本：${arc.costLedger}` : '',
+  ].filter(Boolean).join('\n')
 }
 
 function getImportantCharacters(allCharacters: Array<typeof characters.$inferSelect>): Array<typeof characters.$inferSelect> {
@@ -873,6 +875,7 @@ export async function buildChapterContext(
     longTermMemory: allocated.longTermMemory || '',
   }
 }
+
 
 
 

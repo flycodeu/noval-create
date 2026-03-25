@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+﻿import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button, Empty, Form, Input, Modal, Space, Spin, Tag, message } from 'antd'
 import { DeleteOutlined, EditOutlined, HolderOutlined, PlusOutlined, RobotOutlined } from '@ant-design/icons'
 import { DragDropContext, Draggable, Droppable, type DragDropContextProps, type DraggableProvidedDragHandleProps } from '@hello-pangea/dnd'
@@ -15,6 +15,8 @@ interface ArcFormValues {
   chapterEnd?: number
   arcGoal?: string
   arcSummary?: string
+  growthLedger?: string
+  costLedger?: string
 }
 
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
@@ -50,7 +52,7 @@ export default function Outline({ novelId }: Props) {
 
   const openCreateModal = () => {
     setEditingArc(null)
-    arcForm.setFieldsValue({ arcName: '', chapterStart: undefined, chapterEnd: undefined, arcGoal: '', arcSummary: '' })
+    arcForm.setFieldsValue({ arcName: '', chapterStart: undefined, chapterEnd: undefined, arcGoal: '', arcSummary: '', growthLedger: '', costLedger: '' })
     setArcModalOpen(true)
   }
 
@@ -62,6 +64,8 @@ export default function Outline({ novelId }: Props) {
       chapterEnd: arc.chapterEnd,
       arcGoal: arc.arcGoal || '',
       arcSummary: arc.arcSummary || '',
+      growthLedger: arc.growthLedger || '',
+      costLedger: arc.costLedger || '',
     })
     setArcModalOpen(true)
   }
@@ -179,6 +183,8 @@ export default function Outline({ novelId }: Props) {
             { key: 'chapterEnd', label: '结束章节', type: 'number', value: values.chapterEnd, hint: '给出合理整数。' },
             { key: 'arcGoal', label: '本弧目标', value: values.arcGoal, hint: '写清这条弧要完成什么推进。' },
             { key: 'arcSummary', label: '本弧概述', value: values.arcSummary, hint: '写清起点、转折和阶段收束。' },
+            { key: 'growthLedger', label: '成长账本', value: values.growthLedger, hint: '写清这一弧主角具体获得了什么变化。' },
+            { key: 'costLedger', label: '代价账本', value: values.costLedger, hint: '写清这一弧具体付出了什么代价。' },
           ],
           requirements: ['不要和已有故事弧重名。', '不要写成空泛的“成长、蜕变、命运交汇”。'],
         })
@@ -193,6 +199,8 @@ export default function Outline({ novelId }: Props) {
           chapterEnd: normalizeOptionalNumber(draft.chapterEnd ?? currentValues.chapterEnd),
           arcGoal: typeof draft.arcGoal === 'string' ? draft.arcGoal : currentValues.arcGoal,
           arcSummary: typeof draft.arcSummary === 'string' ? draft.arcSummary : currentValues.arcSummary,
+          growthLedger: typeof draft.growthLedger === 'string' ? draft.growthLedger : currentValues.growthLedger,
+          costLedger: typeof draft.costLedger === 'string' ? draft.costLedger : currentValues.costLedger,
         })
       }}
     />
@@ -231,6 +239,8 @@ export default function Outline({ novelId }: Props) {
                       <div className="novel-outline-arc__title">{arc.arcName}</div>
                       <div className="novel-outline-arc__meta">第 {arc.chapterStart || '?'} ~ {arc.chapterEnd || '?'} 章</div>
                       {arc.arcGoal ? <div className="novel-outline-arc__desc">{arc.arcGoal}</div> : null}
+                      {arc.growthLedger ? <div className="novel-outline-arc__desc">成长账本：{arc.growthLedger}</div> : null}
+                      {arc.costLedger ? <div className="novel-outline-arc__desc">代价账本：{arc.costLedger}</div> : null}
                       <div className="novel-outline-arc__progress"><div style={{ width: `${progressPercent}%`, height: '100%', background: progressPercent === 100 ? '#4f8b64' : '#8f6330', transition: 'width 0.3s' }} /></div>
                       <div className="novel-outline-arc__progress-label">{completedCount}/{arcChapters.length} 章完成</div>
                       <div className="novel-outline-arc__actions" onClick={(event) => event.stopPropagation()}>
@@ -286,6 +296,8 @@ export default function Outline({ novelId }: Props) {
           </div>
           <Form.Item name="arcGoal" label="本弧目标"><Input.TextArea rows={4} placeholder="写清这一弧要推进什么" /></Form.Item>
           <Form.Item name="arcSummary" label="本弧概述"><Input.TextArea rows={5} placeholder="写清起点、转折和阶段收束" /></Form.Item>
+          <Form.Item name="growthLedger" label="成长账本"><Input.TextArea rows={4} placeholder="写清这一弧主角具体获得了什么变化" /></Form.Item>
+          <Form.Item name="costLedger" label="代价账本"><Input.TextArea rows={4} placeholder="写清这一弧具体付出了什么代价" /></Form.Item>
         </Form>
       </Modal>
     </WorkspacePage>
@@ -309,3 +321,7 @@ function ChapterCard({ chapter, dragHandleProps }: { chapter: Chapter; dragHandl
     </div>
   )
 }
+
+
+
+

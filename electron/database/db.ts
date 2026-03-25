@@ -171,7 +171,9 @@ function runMigrations(sqlite: Database.Database) {
       chapter_start INTEGER,
       chapter_end INTEGER,
       arc_goal TEXT,
-      arc_summary TEXT
+      arc_summary TEXT,
+      growth_ledger TEXT,
+      cost_ledger TEXT
     );
 
     CREATE TABLE IF NOT EXISTS story_threads (
@@ -509,6 +511,8 @@ function runMigrations(sqlite: Database.Database) {
   ensureColumn(sqlite, 'timeline_events', 'chapter_end_id', 'INTEGER REFERENCES chapters(id) ON DELETE SET NULL')
   ensureColumn(sqlite, 'timeline_events', 'segment_id', 'INTEGER REFERENCES chapter_segments(id) ON DELETE SET NULL')
   ensureColumn(sqlite, 'timeline_events', 'anchor_invalid', 'INTEGER DEFAULT 0')
+  ensureColumn(sqlite, 'story_arcs', 'growth_ledger', 'TEXT')
+  ensureColumn(sqlite, 'story_arcs', 'cost_ledger', 'TEXT')
   ensureColumn(sqlite, 'story_threads', 'thread_type', "TEXT DEFAULT 'subplot'")
   ensureColumn(sqlite, 'story_threads', 'summary', 'TEXT')
   ensureColumn(sqlite, 'story_threads', 'premise', 'TEXT')
@@ -586,6 +590,7 @@ function getColumnNames(sqlite: Database.Database, tableName: string): Set<strin
 function validateRequiredSchema(sqlite: Database.Database) {
   const requirements = [
     { tableName: 'novels', columns: ['project_brief_json', 'theme_voice_json'] },
+    { tableName: 'story_arcs', columns: ['growth_ledger', 'cost_ledger'] },
     {
       tableName: 'story_threads',
       columns: [

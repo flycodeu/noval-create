@@ -1,4 +1,4 @@
-import { buildRealityConstraintSummary, getBuiltinGenreRules } from './genre-system'
+﻿import { buildRealityConstraintSummary, getBuiltinGenreRules } from './genre-system'
 
 export interface PromptParamMeta {
   key: string
@@ -107,6 +107,8 @@ export interface ChapterOutlinePromptInput {
   arcName: string
   arcGoal: string
   arcSummary: string
+  arcGrowthLedger?: string
+  arcCostLedger?: string
   chapterStart: number
   chapterEnd: number
   previousSummary: string
@@ -141,6 +143,7 @@ export interface TimelineEventPromptInput {
 
 export interface ChapterWritingPromptInput {
   novelTitle: string
+  genre?: string
   chapterNum: number
   chapterTitle: string
   chapterGoal: string
@@ -165,6 +168,7 @@ export interface ChapterWritingPromptInput {
 
 export interface ScenePlanPromptInput {
   novelTitle: string
+  genre?: string
   chapterNum: number
   chapterTitle: string
   chapterGoal: string
@@ -191,6 +195,7 @@ export interface ScenePlanPromptInput {
 
 export interface ChapterReviewPromptInput {
   novelTitle: string
+  genre?: string
   chapterNum: number
   chapterTitle: string
   chapterGoal: string
@@ -212,6 +217,7 @@ export interface ChapterReviewPromptInput {
 
 export interface ChapterRewritePromptInput {
   novelTitle: string
+  genre?: string
   chapterNum: number
   chapterTitle: string
   chapterGoal: string
@@ -423,6 +429,49 @@ function getGenreRealityBaseline(genre?: string): string {
   return buildRealityConstraintSummary(getBuiltinGenreRules(genre).writingConstraints)
 }
 
+function getGenreNarrativeDiscipline(genre?: string): string[] {
+  switch (getBuiltinGenreRules(genre).genreProfile.key) {
+    case 'zombie':
+      return [
+        '丧尸题材先保生存链：食水、药物、体力、噪声、路线、感染和收容能力必须彼此挂钩。',
+        '人与人的信任、纪律、谣言和利益分配要持续施压，不要把队伍写成自动同心。',
+      ]
+    case 'xianxia':
+      return [
+        '修仙题材要同时写境界、资源、宗门秩序、因果和凡俗牵连，不要只剩升级播报。',
+        '凡人区域、坊市、散修、邪修、灵兽、异兽、恶灵和秘境都要有实际用途、进入门槛和代价。',
+      ]
+    case 'wuxia':
+      return [
+        '武侠题材要让江湖规矩、师承门第、名声、伤病、银钱和路程共同起作用。',
+        '写实武侠优先服从史实与社会常识，架空武侠也要保住自己的朝廷、地理和江湖秩序闭环。',
+      ]
+    default:
+      return []
+  }
+}
+
+function getLongFormGrowthRules(genre?: string): string[] {
+  const base = [
+    '主角不是许愿机或功能块，允许恐惧、迟疑、犯错、失望、开心、嫉妒、心软和阶段性退让。',
+    '成长至少落到能力、关系、认知、责任、资源或道德选择中的两项，不要只写成单线变强。',
+    '重要遭遇必须改变人物后续判断、关系站位或行动路线，不能只当世界观陈列。',
+    '遇到暂时解决不了的问题时，允许人物求援、绕路、隐忍、付费、撤退或承担失败，不要硬开万能解。',
+    '长篇推进里要持续追踪伤、债、名声、身份、物资、承诺和后遗症，让变化能累计。',
+  ]
+
+  switch (getBuiltinGenreRules(genre).genreProfile.key) {
+    case 'zombie':
+      return [...base, '末世成长重点是判断、纪律、信任和取舍，不是突然无敌。']
+    case 'xianxia':
+      return [...base, '修仙成长还要写闭关、破境失败、资源枯竭、师承压力和凡俗牵挂的长期影响。']
+    case 'wuxia':
+      return [...base, '武侠成长要写出见闻、挫败和行路中的选择，别把江湖磨成单纯打怪线。']
+    default:
+      return base
+  }
+}
+
 export function buildContextAlignmentRules(params: {
   background?: string
   storyCore?: string
@@ -455,6 +504,7 @@ export function buildGenreRealityRules(params: {
     '现实向题材默认要遵守常识、常规科学和常规物理，除非给定设定已经明确推翻了它们。',
     '幻想向题材可以有超常元素，但必须落在既定体系、等级、代价、触发条件和社会规则里。',
     getGenreRealityBaseline(params.genre),
+    ...getGenreNarrativeDiscipline(params.genre),
     params.worldSummary ? '如果题材默认与已给定世界摘要冲突，优先服从已给定的世界摘要，但不能与现有事实相矛盾。' : '',
     ...(params.extraLines || []),
   ]
@@ -463,13 +513,14 @@ export function buildGenreRealityRules(params: {
     .join('\n')
 }
 
-export function buildOutputQualityRules(extraLines: string[] = []): string {
+export function buildOutputQualityRules(extraLines: string[] = [], genre?: string): string {
   return [
     '先写具体事实、动作、条件和后果，再写情绪、意义或评价。',
     '不要写口号腔、平台文案腔、百科腔、空洞概括或假深刻结论。',
     '人物行为必须匹配身份、信息量、伤势、体力、资源、环境和利害压力。',
     '拿不准时，选择最直白、最符合常识的说法，不要硬造新奇感。',
     '如果设定里有超常能力，同时要交代触发条件、限制或代价。',
+    ...(genre ? getLongFormGrowthRules(genre) : []),
     ...extraLines,
   ]
     .filter(Boolean)
@@ -491,7 +542,7 @@ function buildPromptGuardrailSections(options: PromptGuardrailOptions): string[]
       worldSummary: options.worldSummary,
       extraLines: options.extraRealityLines,
     })),
-    section('输出质量底线', buildOutputQualityRules(options.extraQualityLines || [])),
+    section('输出质量底线', buildOutputQualityRules(options.extraQualityLines || [], options.genre)),
   ]
 }
 
@@ -628,6 +679,8 @@ export function protagonistPrompt(params: ProtagonistPromptInput): string {
     ].filter(Boolean).join('\n')),
     section('人物要求', [
       '先写清主角眼下想要什么、缺什么、怕什么，再决定他会怎么做。',
+      '允许主角在早期和中期出现恐惧、犹豫、误判、嫉妒、失望或心软，别做成天降满配人设。',
+      '成长至少落到能力、关系、认知、责任、资源或道德选择中的两项，不要只写成变强。',
       '背景经历必须落实到现在的判断、习惯、伤口、关系或行动方式里。',
       '这个人要能解释为什么能卷进主线、为什么会撑到后续关键选择。',
       '外貌只写辨识度和气质来源，不写空泛形容词堆砌。',
@@ -824,15 +877,18 @@ export function buildStoryArcPlanningPrompt(params: StoryArcPromptInput): string
     section('规划要求', [
       '规划 3 到 5 个故事弧，章节范围必须连续、无重叠、无空档。',
       '每个故事弧都要回答：这一段推进了什么、加压了什么、把什么交给下一段。',
+      '每个故事弧都要让主角在能力、关系、认知、责任、资源或道德选择上至少有一项发生可追踪变化。',
+      'growth_ledger 要写 2 到 4 条本弧累计形成的成长账本，明确主角到底学会了什么、失去了什么盲点、换来了什么位置变化。',
+      'cost_ledger 要写 2 到 4 条本弧累计付出的代价账本，优先记录伤病、资源、人情、名声、机会、秩序或道德代价。',
       'key_turns 只写会改变量势的具体事件或决定，不写“矛盾升级”“命运转折”这种空话。',
       'subplot_links 要明确哪条支线在这里进入、发酵、反咬或回收。',
       '先保证主线因果顺，再安排支线落位；不要为了平均分配章节硬拆结构。',
       '最后一个故事弧必须负责主线收束，并给主要支线留出回扣空间。',
     ].join('\n')),
     section('语言要求', buildHumanLanguageRules([
-      'summary、arc_goal 和 key_turns 都写成普通编辑能直接接手的结构说明，不要写策划黑话。',
+      'summary、arc_goal、growth_ledger、cost_ledger 和 key_turns 都写成普通编辑能直接接手的结构说明，不要写策划黑话。',
     ])),
-    '只输出 JSON 数组：[{"arc_name":"","stage":"铺垫/升级/高潮/收束","chapter_start":1,"chapter_end":10,"arc_goal":"本弧必须完成的推进","key_turns":["具体转折1","具体转折2"],"subplot_links":["某条支线如何介入/推进/回收"],"pacing":"快/中/慢","summary":"40到80字，写清这一弧到底发生了什么"}]',
+    '只输出 JSON 数组：[{"arc_name":"","stage":"铺垫/升级/高潮/收束","chapter_start":1,"chapter_end":10,"arc_goal":"本弧必须完成的推进","growth_ledger":["成长变化1","成长变化2"],"cost_ledger":["代价1","代价2"],"key_turns":["具体转折1","具体转折2"],"subplot_links":["某条支线如何介入/推进/回收"],"pacing":"快/中/慢","summary":"40到80字，写清这一弧到底发生了什么"}]',
   ])
 }
 
@@ -854,6 +910,8 @@ export function buildChapterOutlinePlanningPrompt(params: ChapterOutlinePromptIn
       '名称：' + params.arcName,
       '目标：' + (params.arcGoal || '未提供'),
       '概述：' + (params.arcSummary || '未提供'),
+      params.arcGrowthLedger ? '成长账本：' + params.arcGrowthLedger : '',
+      params.arcCostLedger ? '代价账本：' + params.arcCostLedger : '',
       '章节范围：第' + params.chapterStart + '章到第' + params.chapterEnd + '章',
     ]),
     sectionLines('连续性上下文', [
@@ -874,13 +932,16 @@ export function buildChapterOutlinePlanningPrompt(params: ChapterOutlinePromptIn
       '每章 goal 必须服务本弧目标，合起来能看出主线持续推进。',
       'plot_points 按发生顺序写具体事件，不写“制造冲突”“推进剧情”这种空话。',
       'bridge_in 写清这章接住了什么，bridge_out 写清这章把什么递给下一章。',
+      'growth_ledger 要写 1 到 3 条本章真正新增或兑现的成长账本，落在能力、关系、认知、责任、资源或道德选择的变化上。',
+      'cost_ledger 要写 1 到 3 条本章真正付出的代价账本，落在伤病、资源、人情、时间、名声、机会或秩序压力上。',
+      '至少安排部分章节让主角遭遇暂时解决不了的问题或明确代价，不要章章顺利推进。',
       '章节之间要有轻重起伏，不能每章都像同一个节奏模板。',
       '优先安排真正需要上场的人物和地点，别把所有线索都塞进每一章。',
     ].join('\n')),
     section('语言要求', buildHumanLanguageRules([
-      '章节标题、目标和事件点都要写得清楚直接，避免抽象套话。',
+      '章节标题、目标、成长账本和代价账本都要写得清楚直接，避免抽象套话。',
     ])),
-    '只输出 JSON 数组：[{"chapter_num":' + params.chapterStart + ',"title":"","goal":"本章要完成的推进","plot_points":["事件1","事件2","事件3"],"characters":["登场人物A","登场人物B"],"location":"主要场景","emotion_tone":"情绪基调","bridge_in":"这章承接了什么","bridge_out":"这章给下章留下什么"}]',
+    '只输出 JSON 数组：[{"chapter_num":' + params.chapterStart + ',"title":"","goal":"本章要完成的推进","growth_ledger":["成长变化1"],"cost_ledger":["代价1"],"plot_points":["事件1","事件2","事件3"],"characters":["登场人物A","登场人物B"],"location":"主要场景","emotion_tone":"情绪基调","bridge_in":"这章承接了什么","bridge_out":"这章给下章留下什么"}]',
   ])
 }
 
@@ -946,6 +1007,7 @@ export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
       params.emotionTone ? '情绪基调：' + params.emotionTone : '',
     ]),
     ...buildPromptGuardrailSections({
+      genre: params.genre,
       storyCore: params.storyCore,
       worldSummary: params.worldRules,
       taskFocus: '场景顺序必须连贯，前一段的结果要自然推动后一段。',
@@ -971,6 +1033,7 @@ export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
     section('计划要求', [
       '拆成 4 到 7 个场景或连续段落，每一段都要能直接落成正文。',
       '每个场景写清：这一段要完成什么、当前冲突是什么、谁在场、会用到什么关键物品、必须交代什么。',
+      '至少安排一两个场景通过试错、碰壁或代价来体现人物成长，不要只靠总结句宣布成长。',
       '场景顺序必须连贯，前一段的结果要自然推动后一段。',
       '优先处理章节任务和因果推进，不要为了花样强行加戏。',
       'exit_hook 只写最自然的收尾钩子，不要故作玄虚。',
@@ -995,6 +1058,7 @@ export function buildChapterWritingPrompt(params: ChapterWritingPromptInput): st
       params.emotionTone ? '情绪基调：' + params.emotionTone : '',
     ]),
     ...buildPromptGuardrailSections({
+      genre: params.genre,
       storyCore: params.storyCore,
       worldSummary: params.worldRules,
       taskFocus: '先把事件链、动作链和后果链写顺，再让情绪自然浮出来。',
@@ -1018,6 +1082,7 @@ export function buildChapterWritingPrompt(params: ChapterWritingPromptInput): st
     section('写作要求', [
       '先把事件链、动作链和后果链写顺，再让情绪自然浮出来。',
       '人物说话要像这个人当下会说的话，别让所有角色一个语气。',
+      '主角在本章里可以害怕、迟疑、失望、心软或犯错，但这些反应必须推动后续选择。',
       '只写和本章任务有关的场景，不要为了凑字数平铺日常。',
       '如果给了文风参考，只借叙述气质、视角和句子密度，不模仿具体作者。',
       '遇到不准确搭配，优先改成读者最熟悉、最准确的常规说法。',
@@ -1039,6 +1104,7 @@ export function buildChapterDraftPrompt(params: ChapterRewritePromptInput): stri
       params.emotionTone ? '情绪基调：' + params.emotionTone : '',
     ]),
     ...buildPromptGuardrailSections({
+      genre: params.genre,
       storyCore: params.storyCore,
       worldSummary: params.worldRules,
       taskFocus: '只按场景计划推进，不跳场景，不漏 必须交代项。',
@@ -1064,6 +1130,7 @@ export function buildChapterDraftPrompt(params: ChapterRewritePromptInput): stri
     section('初稿要求', [
       '只按场景计划推进，不跳场景，不漏 must_cover。',
       '先把行为、对话、信息交接和后果写清，再处理气氛。',
+      '让成长落在事件、关系和代价里，不要只在段尾用一句总结硬说人物成长。',
       '人物状态、物品去向、地点变换和事件顺序必须写准，避免后面大修。',
       '如果某段只有情绪没有动作或结果，补上能落地的外部承载。',
       '只输出初稿正文，不要解释。',
@@ -1081,6 +1148,7 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
       '主角命名规则：' + params.protagonistRule,
     ]),
     ...buildPromptGuardrailSections({
+      genre: params.genre,
       storyCore: params.storyCore,
       worldSummary: params.worldRules,
       taskFocus: '只找出真正砸掉上下文、真实度、连续性或人话感的问题。',
@@ -1106,13 +1174,15 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
       'context_drift_risks 只写脱离既定背景、主题、世界规则或人物动机的问题。',
       'realism_risks 只写常识、科学、物理、资源、伤病、秩序或能力规则问题。',
       'language_risks 只写 AI 腔、抽象化、搭配错误、空洞抒情或不自然表达。',
+      'genre_hollowing_risks 只写体裁生态被写空的问题，例如修仙只喊大道却没有境界资源和宗门秩序，末世只有丧尸却没有生存链，武侠只有打斗却没有江湖秩序。',
+      '如果主角像功能人、体裁生态被写空，或成长只剩口号，也要明确指出。',
       'missing_payoffs 只写本章已经抛出但没有落地的铺垫。',
       'strengths 只写已经成立且应该保留的具体优点。',
       'severity 只能是 low / medium / high。',
       '出现 high 级问题时 rewrite_required 必须是 true，其余情况可以是 false。',
       'revision_brief 用 60 到 120 字中文写清修改方向。',
     ].join('\n')),
-    '只输出 JSON：{"summary":"总体判断","critical_fixes":["必改 1"],"continuity_risks":["连续性风险 1"],"context_drift_risks":["漂移风险 1"],"realism_risks":["真实度风险 1"],"language_risks":["语言风险 1"],"missing_payoffs":["未落地伏笔 1"],"strengths":["优点 1"],"severity":"medium","rewrite_required":true,"revision_brief":"修订方向摘要"}',
+    '只输出 JSON：{"summary":"总体判断","critical_fixes":["必改 1"],"continuity_risks":["连续性风险 1"],"context_drift_risks":["漂移风险 1"],"realism_risks":["真实度风险 1"],"language_risks":["语言风险 1"],"genre_hollowing_risks":["体裁空心化风险 1"],"missing_payoffs":["未落地伏笔 1"],"strengths":["优点 1"],"severity":"medium","rewrite_required":true,"revision_brief":"修订方向摘要"}',
   ])
 }
 
@@ -1129,6 +1199,7 @@ export function buildChapterRewritePrompt(params: ChapterRewritePromptInput): st
       params.emotionTone ? '情绪基调：' + params.emotionTone : '',
     ]),
     ...buildPromptGuardrailSections({
+      genre: params.genre,
       storyCore: params.storyCore,
       worldSummary: params.worldRules,
       taskFocus: '只在既有上下文内重写，同时修复连续性、真实度和语言风险。',
@@ -1158,6 +1229,7 @@ export function buildChapterRewritePrompt(params: ChapterRewritePromptInput): st
       '如果场景计划里的 must_cover 漏了，补上。',
       '先修因果、指代清晰度、节奏、人物反应和真实度，最后再抛光语言。',
       '删掉空洞抒情、模板句和解释性旁白，把情绪放回动作、对话和细节里。',
+      '把成长变化写回事件、关系、资源和代价，不要只靠总结句宣告人物成长。',
       '在同一轮里一起修好上下文漂移、常识失效、规则越界、零代价奇迹和 AI 腔。',
       '只输出重写后的最终正文。',
     ].join('\n')),
@@ -1218,6 +1290,8 @@ export function chapterOutlinePrompt(params: {
   novelTitle: string
   arcName: string
   arcGoal: string
+  arcGrowthLedger?: string
+  arcCostLedger?: string
   chapterStart: number
   chapterEnd: number
   previousSummary: string
@@ -1233,6 +1307,8 @@ export function chapterOutlinePrompt(params: {
     arcName: params.arcName,
     arcGoal: params.arcGoal,
     arcSummary: '',
+    arcGrowthLedger: params.arcGrowthLedger || '',
+    arcCostLedger: params.arcCostLedger || '',
     chapterStart: params.chapterStart,
     chapterEnd: params.chapterEnd,
     previousSummary: params.previousSummary,
@@ -1587,6 +1663,8 @@ export const PROMPT_CATALOG: PromptCatalogEntry[] = [
       { key: 'arcName', label: '故事弧名称' },
       { key: 'arcGoal', label: '故事弧目标' },
       { key: 'arcSummary', label: '故事弧概述' },
+      { key: 'arcGrowthLedger', label: '成长账本' },
+      { key: 'arcCostLedger', label: '代价账本' },
       { key: 'chapterStart', label: '起始章节' },
       { key: 'chapterEnd', label: '结束章节' },
       { key: 'previousSummary', label: '前情摘要' },
@@ -1606,6 +1684,8 @@ export const PROMPT_CATALOG: PromptCatalogEntry[] = [
       arcName: placeholder('arcName'),
       arcGoal: placeholder('arcGoal'),
       arcSummary: placeholder('arcSummary'),
+      arcGrowthLedger: placeholder('arcGrowthLedger'),
+      arcCostLedger: placeholder('arcCostLedger'),
       chapterStart: Number.NaN,
       chapterEnd: Number.NaN,
       previousSummary: placeholder('previousSummary'),
@@ -1764,3 +1844,14 @@ export const PROMPT_CATALOG: PromptCatalogEntry[] = [
     }),
   },
 ]
+
+
+
+
+
+
+
+
+
+
+

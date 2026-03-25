@@ -120,6 +120,8 @@ export const storyArcs = sqliteTable('story_arcs', {
   chapterEnd: integer('chapter_end'),
   arcGoal: text('arc_goal'),
   arcSummary: text('arc_summary'),
+  growthLedger: text('growth_ledger'),
+  costLedger: text('cost_ledger'),
 })
 
 export const storyThreads = sqliteTable('story_threads', {

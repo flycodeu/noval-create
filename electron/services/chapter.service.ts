@@ -64,6 +64,7 @@ interface ChapterReviewNotes {
   context_drift_risks: string[]
   realism_risks: string[]
   language_risks: string[]
+  genre_hollowing_risks: string[]
   missing_payoffs: string[]
   strengths: string[]
   severity: ReviewSeverity
@@ -285,6 +286,7 @@ function normalizeReviewNotes(raw: unknown): ChapterReviewNotes {
     context_drift_risks: toStringArray(record.context_drift_risks),
     realism_risks: toStringArray(record.realism_risks),
     language_risks: toStringArray(record.language_risks),
+    genre_hollowing_risks: toStringArray(record.genre_hollowing_risks),
     missing_payoffs: toStringArray(record.missing_payoffs),
     strengths: toStringArray(record.strengths),
     severity: normalizeReviewSeverity(record.severity),
@@ -301,6 +303,7 @@ function hasReviewNotes(notes: ChapterReviewNotes): boolean {
     notes.context_drift_risks.length > 0 ||
     notes.realism_risks.length > 0 ||
     notes.language_risks.length > 0 ||
+    notes.genre_hollowing_risks.length > 0 ||
     notes.missing_payoffs.length > 0 ||
     notes.strengths.length > 0 ||
     notes.rewrite_required ||
@@ -322,6 +325,7 @@ function buildFallbackReviewNotes(consistencyNotes: string): ChapterReviewNotes 
     context_drift_risks: [],
     realism_risks: [],
     language_risks: ['删除抽象口号、概念化抒情和不自然搭配。'],
+    genre_hollowing_risks: [],
     missing_payoffs: [],
     strengths: [],
     severity: 'medium',
@@ -338,6 +342,7 @@ function formatReviewNotes(notes: ChapterReviewNotes): string {
     notes.context_drift_risks.length > 0 ? `上下文漂移风险：\n- ${notes.context_drift_risks.join('\n- ')}` : '',
     notes.realism_risks.length > 0 ? `常识/规则风险：\n- ${notes.realism_risks.join('\n- ')}` : '',
     notes.language_risks.length > 0 ? `语言风险：\n- ${notes.language_risks.join('\n- ')}` : '',
+    notes.genre_hollowing_risks.length > 0 ? `体裁空心化：\n- ${notes.genre_hollowing_risks.join('\n- ')}` : '',
     notes.missing_payoffs.length > 0 ? `缺失回收：\n- ${notes.missing_payoffs.join('\n- ')}` : '',
     notes.strengths.length > 0 ? `可保留优点：\n- ${notes.strengths.join('\n- ')}` : '',
     `严重等级：${notes.severity}`,
@@ -367,6 +372,10 @@ function buildGuardrailCriticalFixes(findings: ReturnType<typeof collectQualityG
     fixes.push('删掉口号句、模板情绪和假深刻抒情，改回动作、反应、对话与细节。')
   }
 
+  if (findings.some((finding) => finding.code === 'genre_hollowing')) {
+    fixes.push('把体裁生态写回场景，补齐修行秩序、生存链或江湖规矩，不要只剩抽象口号和单一动作。')
+  }
+
   return fixes
 }
 
@@ -391,6 +400,9 @@ function enhanceReviewNotesWithGuardrails(
   const languageFindings = formatQualityGuardrailSummary(
     findings.filter((finding) => finding.code === 'ai_slogan' || finding.code === 'template_emotion'),
   )
+  const genreHollowFindings = formatQualityGuardrailSummary(
+    findings.filter((finding) => finding.code === 'genre_hollowing'),
+  )
 
   const next: ChapterReviewNotes = {
     ...reviewNotes,
@@ -399,6 +411,7 @@ function enhanceReviewNotesWithGuardrails(
     context_drift_risks: dedupeTextList(reviewNotes.context_drift_risks),
     realism_risks: dedupeTextList([...reviewNotes.realism_risks, ...realismFindings]),
     language_risks: dedupeTextList([...reviewNotes.language_risks, ...languageFindings]),
+    genre_hollowing_risks: dedupeTextList([...reviewNotes.genre_hollowing_risks, ...genreHollowFindings]),
     missing_payoffs: dedupeTextList(reviewNotes.missing_payoffs),
     strengths: dedupeTextList(reviewNotes.strengths),
     severity: findings.reduce(
@@ -406,10 +419,11 @@ function enhanceReviewNotesWithGuardrails(
       reviewNotes.severity,
     ),
     rewrite_required: reviewNotes.rewrite_required || shouldForceRepair(findings),
-    summary: reviewNotes.summary || '当前稿件仍有需要落地修正的常识或语言问题。',
+    summary: reviewNotes.summary || '当前稿件仍有需要落地修正的体裁、常识或语言问题。',
     revision_brief: appendRevisionBrief(reviewNotes.revision_brief, [
       realismFindings.length > 0 ? '把伤害、资源、秩序、移动成本和世界规则的代价写实写满。' : '',
       languageFindings.length > 0 ? '删掉口号句、模板情绪和对象类别错配，改回自然中文。' : '',
+      genreHollowFindings.length > 0 ? '把题材生态写回具体场景，补齐生存链、修行秩序或江湖规矩。' : '',
     ]),
   }
 
@@ -453,6 +467,7 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
         role: 'user',
         content: buildChapterRewritePrompt({
           novelTitle: input.novel.title,
+          genre: input.profile.genre,
           chapterNum: input.chapter.chapterNum,
           chapterTitle: input.chapter.title || getDefaultChapterTitle(input.chapter.chapterNum),
           chapterGoal: input.context.chapterGoal,
@@ -813,6 +828,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
           role: 'user',
           content: buildScenePlanPrompt({
             novelTitle: novel.title,
+            genre: profile.genre,
             chapterNum: chapter.chapterNum,
             chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
             chapterGoal: context.chapterGoal,
@@ -866,6 +882,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
         role: 'user',
         content: buildChapterDraftPrompt({
           novelTitle: novel.title,
+          genre: profile.genre,
           chapterNum: chapter.chapterNum,
           chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
           chapterGoal: context.chapterGoal,
@@ -916,6 +933,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
           role: 'user',
           content: buildChapterReviewPrompt({
             novelTitle: novel.title,
+            genre: profile.genre,
             chapterNum: chapter.chapterNum,
             chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
             chapterGoal: context.chapterGoal,
@@ -959,6 +977,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
 
     const prompt = buildChapterRewritePrompt({
       novelTitle: novel.title,
+      genre: profile.genre,
       chapterNum: chapter.chapterNum,
       chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
       chapterGoal: context.chapterGoal,
@@ -1078,4 +1097,6 @@ export async function aiCheckChapter(chapterId: number): Promise<unknown> {
 }
 
 export { runChapterPublishCheck }
+
+
 

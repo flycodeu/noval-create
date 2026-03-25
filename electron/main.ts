@@ -150,11 +150,22 @@ function toStringArray(value: unknown): string[] {
     .filter(Boolean)
 }
 
+function toLedgerText(value: unknown): string {
+  if (typeof value === 'string' && value.trim()) return value.trim()
+
+  const items = toStringArray(value)
+  return items.length > 0 ? items.join('；') : ''
+}
+
 function formatGeneratedOutline(outline: Record<string, unknown>): string {
   const characters = toStringArray(outline.characters)
+  const growthLedger = toLedgerText(outline.growth_ledger)
+  const costLedger = toLedgerText(outline.cost_ledger)
 
   return [
     typeof outline.goal === 'string' && outline.goal.trim() ? `目标：${outline.goal.trim()}` : '',
+    growthLedger ? `成长账本：${growthLedger}` : '',
+    costLedger ? `代价账本：${costLedger}` : '',
     characters.length > 0 ? `人物：${characters.join('、')}` : '',
     typeof outline.location === 'string' && outline.location.trim() ? `场景：${outline.location.trim()}` : '',
     ...toStringArray(outline.plot_points).map((item) => `- ${item}`),
@@ -399,6 +410,8 @@ function registerIpcHandlers() {
         chapterEnd: typeof arc.chapter_end === 'number' ? arc.chapter_end : null,
         arcGoal: typeof arc.arc_goal === 'string' ? arc.arc_goal : typeof arc.goal === 'string' ? arc.goal : '',
         arcSummary: typeof arc.summary === 'string' ? arc.summary : '',
+        growthLedger: toLedgerText(arc.growth_ledger),
+        costLedger: toLedgerText(arc.cost_ledger),
       }).run()
     }
 
@@ -467,6 +480,8 @@ function registerIpcHandlers() {
           arcName: arc.arcName,
           arcGoal: arc.arcGoal || '',
           arcSummary: arc.arcSummary || '',
+          arcGrowthLedger: arc.growthLedger || '',
+          arcCostLedger: arc.costLedger || '',
           chapterStart: batchStart,
           chapterEnd: batchEnd,
           previousSummary: context.previousSummary,
@@ -787,6 +802,9 @@ function registerIpcHandlers() {
     return safeParseJson(result)
   })
 }
+
+
+
 
 
 

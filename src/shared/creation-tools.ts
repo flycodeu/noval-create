@@ -41,7 +41,7 @@ export interface ItemGenerationProfile {
 
 const GENRE_RULES: Array<{ family: StoryGenreFamily; pattern: RegExp }> = [
   { family: 'zombie', pattern: /丧尸|末日|病毒|尸潮|灾变/u },
-  { family: 'wuxia', pattern: /武侠|江湖|门派|侠客/u },
+  { family: 'wuxia', pattern: /武侠|江湖|侠客|武林|镖局|帮会/u },
   { family: 'xianxia', pattern: /仙侠|修真|修仙|宗门|仙界/u },
   { family: 'fantasy', pattern: /玄幻|斗破|斗气|异界|魔幻升级/u },
   { family: 'scifi', pattern: /科幻|未来|赛博|机甲|星际|外星/u },

@@ -1,4 +1,4 @@
-const assert = require('node:assert/strict')
+﻿const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const Module = require('node:module')
@@ -125,6 +125,7 @@ const tests = [
     run() {
       const text = prompt.buildChapterReviewPrompt({
         novelTitle: '\u907f\u96be\u6240',
+        genre: '\u672b\u4e16',
         chapterNum: 12,
         chapterTitle: '\u65ad\u7535\u591c',
         chapterGoal: '\u5b88\u4f4f\u5b89\u68c0\u53e3\u5e76\u627e\u51fa\u9690\u7792\u4f24\u5458',
@@ -147,10 +148,69 @@ const tests = [
       assert.match(text, /\u771f\u5b9e\u5ea6\u62a4\u680f/u)
       assert.match(text, /context_drift_risks/u)
       assert.match(text, /realism_risks/u)
+      assert.match(text, /genre_hollowing_risks/u)
       assert.match(text, /rewrite_required/u)
     },
   },
   {
+    name: 'story arc and chapter outline prompts expose growth and cost ledgers',
+    run() {
+      const arcPrompt = prompt.buildStoryArcPlanningPrompt({
+        novelTitle: '\u5c71\u95e8\u65e7\u96ea',
+        genre: '\u4ed9\u4fa0\u4fee\u771f',
+        storyGoal: '\u4e3b\u89d2\u8981\u4ece\u51e1\u4eba\u57ce\u8d70\u5230\u5c71\u95e8\u5185\u95e8\uff0c\u5e76\u627e\u56de\u5bb6\u65cf\u88ab\u5916\u95e8\u76d7\u8d70\u7684\u7075\u8109\u5730\u56fe\u3002',
+        coreConflict: '\u4e3b\u89d2\u8d44\u8d28\u5e73\u5eb8\uff0c\u65e2\u7f3a\u8d44\u6e90\uff0c\u53c8\u88ab\u5b97\u95e8\u6743\u529b\u3001\u6563\u4fee\u4ea4\u6613\u548c\u51e1\u4eba\u5bb6\u65cf\u8fde\u5750\u540c\u65f6\u6324\u538b\u3002',
+        mainPlot: '\u4e3b\u89d2\u5728\u51e1\u4eba\u57ce\u3001\u574a\u5e02\u3001\u79d8\u5883\u548c\u5c71\u95e8\u4e4b\u95f4\u79ef\u7d2f\u529f\u52b3\uff0c\u4e00\u8fb9\u4fee\u884c\u4e00\u8fb9\u5904\u7406\u5bb6\u65cf\u56e0\u679c\u3002',
+        subPlots: '\u51e1\u4eba\u6751\u707e\u7ebf\uff1b\u5916\u95e8\u8003\u6838\u7ebf\uff1b\u90aa\u4fee\u5e02\u96c6\u6f5c\u5165\u7ebf\u3002',
+        ending: '\u4e3b\u89d2\u7b51\u57fa\u6210\u529f\uff0c\u4f46\u8981\u5728\u5b88\u4f4f\u5bb6\u65cf\u548c\u8fdb\u5165\u5b97\u95e8\u6743\u529b\u6838\u5fc3\u4e4b\u95f4\u505a\u51fa\u9009\u62e9\u3002',
+        totalChapters: 90,
+        rhythmSummary: '\u524d\u671f\u79ef\u84c4\uff0c\u4e2d\u671f\u593a\u8d44\u6e90\uff0c\u540e\u671f\u7834\u5c40\u3002',
+        background: '\u51e1\u4eba\u57ce\u9644\u8fd1\u7075\u8109\u6e10\u67af\uff0c\u5916\u95e8\u8bd5\u70bc\u4e0e\u6563\u4fee\u4ea4\u6613\u540c\u65f6\u53d8\u5f97\u6fc0\u70c8\u3002',
+        protagonistReference: '\u4e3b\u89d2',
+        protagonistRule: '\u82e5\u6d89\u53ca\u4e3b\u89d2\uff0c\u53ea\u7528\u300c\u4e3b\u89d2\u300d\u79f0\u547c\u3002',
+      })
+      const outlinePrompt = prompt.buildChapterOutlinePlanningPrompt({
+        novelTitle: '\u5c71\u95e8\u65e7\u96ea',
+        genre: '\u4ed9\u4fa0\u4fee\u771f',
+        storyGoal: '\u4e3b\u89d2\u8fdb\u5165\u5185\u95e8\u5e76\u627e\u56de\u7075\u8109\u5730\u56fe',
+        coreConflict: '\u8d44\u6e90\u7d27\u7f3a\u4e0e\u5b97\u95e8\u79e9\u5e8f\u6324\u538b\u5e76\u884c',
+        mainPlot: '\u4e3b\u89d2\u5728\u574a\u5e02\u3001\u5916\u95e8\u548c\u79d8\u5883\u4e4b\u95f4\u7d2f\u79ef\u7834\u5883\u8d44\u672c\u3002',
+        arcName: '\u5916\u95e8\u7acb\u8db3\u7ebf',
+        arcGoal: '\u62ff\u5230\u5916\u95e8\u5b58\u8eab\u8d44\u683c\u5e76\u4fdd\u4f4f\u51e1\u4eba\u5bb6\u65cf\u4e0d\u88ab\u8fde\u5750',
+        arcSummary: '\u4e3b\u89d2\u5148\u5728\u51e1\u4eba\u57ce\u633a\u8fc7\u7075\u7cae\u77ed\u7f3a\uff0c\u540e\u5728\u574a\u5e02\u7b79\u6389\u5165\u5c71\u95e8\u6240\u9700\u7684\u8d21\u5949\u548c\u4eba\u60c5\u3002',
+        arcGrowthLedger: '\u4e3b\u89d2\u5b66\u4f1a\u5982\u4f55\u5728\u574a\u5e02\u8c08\u5224\u4e0e\u5224\u65ad\u9648\u5c40\uff1b\u5f00\u59cb\u7406\u89e3\u5b97\u95e8\u89c4\u77e9\u548c\u51e1\u4eba\u56e0\u679c\u7684\u51b2\u7a81',
+        arcCostLedger: '\u4e3b\u89d2\u8d77\u6b65\u79ef\u84c4\u88ab\u8017\u7a7a\uff1b\u4e3a\u4fdd\u4f4f\u5bb6\u4eba\u6b20\u4e0b\u6563\u4fee\u4eba\u60c5',
+        chapterStart: 11,
+        chapterEnd: 14,
+        previousSummary: '\u4e3b\u89d2\u521a\u4ece\u51e1\u4eba\u57ce\u9003\u51fa\u3002',
+        characterStates: '\u4e3b\u89d2\u4f24\u52bf\u672a\u6108\uff0c\u5bb6\u4eba\u4ecd\u88ab\u6263\u5728\u57ce\u5185\u3002',
+        continuitySummary: '\u9700\u8981\u8ffd\u8e2a\u8d21\u5949\u3001\u4eba\u60c5\u503a\u548c\u7834\u5883\u98ce\u9669\u3002',
+        openLoops: '\u8c01\u5728\u80cc\u540e\u63a8\u52a8\u7075\u8109\u5730\u56fe\u5916\u6d41\u3002',
+        worldRulesSummary: buildWorldRulesSummary('\u4ed9\u4fa0\u4fee\u771f'),
+        protagonistReference: '\u4e3b\u89d2',
+        protagonistRule: '\u82e5\u6d89\u53ca\u4e3b\u89d2\uff0c\u53ea\u7528\u300c\u4e3b\u89d2\u300d\u79f0\u547c\u3002',
+      })
+      assert.match(arcPrompt, /growth_ledger/u)
+      assert.match(arcPrompt, /cost_ledger/u)
+      assert.match(outlinePrompt, /growth_ledger/u)
+      assert.match(outlinePrompt, /cost_ledger/u)
+      assert.match(outlinePrompt, /成长账本/u)
+      assert.match(outlinePrompt, /代价账本/u)
+    },
+  },
+  {
+    name: 'genre hollowing guardrails catch xianxia zombie and wuxia drift',
+    run() {
+      const zombieFindings = guardrails.collectQualityGuardrailFindings('末世里尸潮逼近，丧尸在街口嘶吼，所有人都在灾变中感受绝望，只会反复喊要活下去。', '末世')
+      const xianxiaFindings = guardrails.collectQualityGuardrailFindings('他仰望大道，心里只剩飞升、长生与问道，仿佛仙途尽头自有造化与天道回应。', '仙侠修真')
+      const wuxiaFindings = guardrails.collectQualityGuardrailFindings('刀光一闪，剑光再起，两人交手数十招，掌风四散，决战之后各自远去。', '武侠')
+
+      assert.ok(zombieFindings.some((item) => item.code === 'genre_hollowing'))
+      assert.ok(xianxiaFindings.some((item) => item.code === 'genre_hollowing'))
+      assert.ok(wuxiaFindings.some((item) => item.code === 'genre_hollowing'))
+      assert.match(guardrails.formatQualityGuardrailSummary(xianxiaFindings).join('\n'), /体裁|修仙/u)
+    },
+  },  {
     name: 'quality guardrails catch object mismatch and zero-cost resolution',
     run() {
       const findings = guardrails.collectQualityGuardrailFindings('\u7535\u7f51\u6b7b\u4ea1\u4e4b\u540e\uff0c\u5e78\u5b58\u8005\u7acb\u523b\u6062\u590d\uff0c\u4e00\u4e0b\u5b50\u5c31\u5168\u90e8\u540c\u610f\u4e86\u8fd9\u4e2a\u51b3\u5b9a\u3002', '\u672b\u4e16')
@@ -200,6 +260,7 @@ const tests = [
 
       const chapterPrompt = prompt.buildChapterWritingPrompt({
         novelTitle: '\u5c01\u9501\u7ebf',
+        genre: '\u672b\u4e16',
         chapterNum: 18,
         chapterTitle: '\u65e7\u8bca\u6240',
         chapterGoal: '\u62ff\u5230\u6297\u751f\u7d20\u5e76\u51b3\u5b9a\u5148\u7ed9\u8c01\u7528\uff0c\u540c\u65f6\u538b\u4f4f\u961f\u4f0d\u5206\u88c2\u3002',
@@ -340,6 +401,7 @@ const tests = [
 
       const chapterPrompt = prompt.buildChapterWritingPrompt({
         novelTitle: '\u5c71\u95e8\u65e7\u96ea',
+        genre: '\u4ed9\u4fa0\u4fee\u771f',
         chapterNum: 24,
         chapterTitle: '\u7981\u5e93\u98ce\u58f0',
         chapterGoal: '\u4e3b\u89d2\u8981\u5728\u4e0d\u60ca\u52a8\u6267\u5f8b\u5802\u7684\u524d\u63d0\u4e0b\u786e\u8ba4\u624b\u672d\u6b8b\u9875\u662f\u5426\u5728\u7981\u5e93\u3002',
@@ -368,6 +430,59 @@ const tests = [
       assert.match(chapterPrompt, /\u56e0\u679c\u62a5\u5e94/u)
     },
   },
+  {
+    name: 'wuxia prompt chain keeps jianghu order and realistic pressure explicit',
+    run() {
+      const worldRules = buildWorldRulesSummary('\u6b66\u4fa0\u5199\u5b9e')
+      const arcPrompt = prompt.buildStoryArcPlanningPrompt({
+        novelTitle: '\u6e21\u53e3\u65e7\u4e8b',
+        genre: '\u6b66\u4fa0\u5199\u5b9e',
+        storyGoal: '\u4e3b\u89d2\u8981\u628a\u65e7\u6848\u8d26\u518c\u9001\u51fa\u6c5f\u5357\uff0c\u5728\u5b98\u9762\u5c01\u9501\u524d\u66ff\u67d0\u5bb6\u6d17\u6389\u51a4\u540d\u3002',
+        coreConflict: '\u4e3b\u89d2\u65e2\u6709\u88ab\u9010\u5e08\u95e8\u7684\u65e7\u503a\uff0c\u53c8\u88ab\u7f09\u4e8b\u673a\u6784\u548c\u65e7\u4ec7\u540c\u65f6\u8ffd\u6355\uff0c\u4f24\u52bf\u3001\u76d8\u7f20\u548c\u8bc1\u4eba\u5b89\u5371\u90fd\u5728\u7d27\u7f29\u3002',
+        mainPlot: '\u4e3b\u89d2\u62a4\u9001\u8bc1\u4eba\u7a7f\u8fc7\u9547\u53e3\u3001\u6e21\u53e3\u548c\u95e8\u6d3e\u65e7\u5730\uff0c\u4e00\u8def\u8981\u5728\u62a4\u4eba\u3001\u8fd8\u503a\u548c\u81ea\u4fdd\u4e4b\u95f4\u505a\u9009\u62e9\u3002',
+        subPlots: '\u5e08\u95e8\u65e7\u503a\u7ebf\uff1b\u6e21\u53e3\u7ebf\u4eba\u7ebf\uff1b\u8bc1\u4eba\u4f24\u52bf\u7ebf\u3002',
+        ending: '\u4e3b\u89d2\u9001\u51fa\u8d26\u518c\uff0c\u5374\u4e5f\u56e0\u6b64\u5f7b\u5e95\u4e0e\u5e08\u95e8\u5207\u5272\u3002',
+        totalChapters: 88,
+        rhythmSummary: '\u524d\u6bb5\u8d76\u8def\u8fc3\u907f\uff0c\u4e2d\u6bb5\u65e7\u6848\u53cd\u54ac\uff0c\u540e\u6bb5\u6e05\u7b97\u4eba\u60c5\u4e0e\u4ed8\u4ef7\u3002',
+        background: '\u67d0\u671d\u672b\u5e74\uff0c\u5dde\u53bf\u6df7\u4e71\uff0c\u95e8\u6d3e\u3001\u9556\u5c40\u548c\u7f09\u4e8b\u623f\u90fd\u5728\u4e89\u4e00\u672c\u65e7\u8d26\u518c\u3002',
+        protagonistReference: '\u4e3b\u89d2',
+        protagonistRule: '\u6d89\u53ca\u4e3b\u89d2\u65f6\u53ea\u7528\u201c\u4e3b\u89d2\u201d\uff0c\u4e0d\u8981\u6539\u540d\u3002',
+      })
+      assert.match(arcPrompt, /\u6c5f\u6e56\u89c4\u77e9/u)
+      assert.match(arcPrompt, /\u4f24\u75c5\u4ee3\u4ef7/u)
+      assert.match(arcPrompt, /\u672c\u8f6e\u4efb\u52a1\u7126\u70b9/u)
+
+      const scenePrompt = prompt.buildScenePlanPrompt({
+        novelTitle: '\u6e21\u53e3\u65e7\u4e8b',
+        genre: '\u6b66\u4fa0\u5199\u5b9e',
+        chapterNum: 9,
+        chapterTitle: '\u591c\u8fc7\u65ad\u7891\u6e21',
+        chapterGoal: '\u4e3b\u89d2\u8981\u62a4\u9001\u53d7\u4f24\u8bc1\u4eba\u8fc7\u6cb3\uff0c\u540c\u65f6\u8eb2\u5f00\u65e7\u4ec7\u548c\u5b98\u5dee\u76d8\u67e5\u3002',
+        plotPoints: '\u6e21\u53e3\u5c01\u9501\uff1b\u8bc1\u4eba\u53d1\u70ed\uff1b\u65e7\u4ec7\u8ba4\u51fa\u4e3b\u89d2\uff1b\u4e3b\u89d2\u51b3\u5b9a\u5f03\u8239\u8fd8\u662f\u8d3f\u8d42\u8239\u5bb6\u3002',
+        emotionTone: '\u538b\u6291\u3001\u8b66\u89c9\u3001\u514b\u5236',
+        targetWords: 2400,
+        storyCore: '\u4e3b\u89d2\u5fc5\u987b\u5728\u4eba\u547d\u3001\u65e7\u503a\u548c\u5b98\u9762\u538b\u529b\u4e4b\u95f4\u505a\u53d6\u820d\uff0c\u4e0d\u80fd\u9760\u795e\u529f\u786c\u89e3\u3002',
+        currentArc: '\u62bc\u9001\u8bc1\u4eba\u4e0e\u65e7\u6848\u53cd\u54ac',
+        worldRules,
+        characterStates: '\u4e3b\u89d2\u5de6\u80a9\u65e7\u4f24\u672a\u6108\uff1b\u8bc1\u4eba\u5931\u8840\u8fc7\u591a\uff1b\u540c\u4f34\u53ea\u5269\u534a\u888b\u788e\u94f6\u3002',
+        itemSummary: '\u8def\u5f15\u4e00\u4efd\uff1b\u65e7\u6848\u8d26\u518c\u4e00\u518c\uff1b\u6b62\u8840\u836f\u534a\u5305\u3002',
+        previousSummaries: '\u4e0a\u7ae0\u521a\u5f97\u77e5\u7f09\u4e8b\u623f\u5df2\u7ecf\u5c01\u6b7b\u5b98\u9053\uff0c\u53ea\u5269\u6e21\u53e3\u53ef\u8d70\u3002',
+        lastChapterEnding: '\u6cb3\u9762\u8d77\u96fe\uff0c\u6e21\u53e3\u706b\u628a\u4e00\u76cf\u76cf\u4eae\u8d77\u6765\u3002',
+        continuitySummary: '\u65e7\u4f24\u3001\u76d8\u7f20\u3001\u8d26\u518c\u53bb\u5411\u548c\u5b98\u5dee\u811a\u7a0b\u90fd\u8981\u6301\u7eed\u8ffd\u8e2a\u3002',
+        openLoops: '\u8239\u5bb6\u662f\u5426\u53ef\u9760\uff1b\u65e7\u4ec7\u662f\u5426\u5df2\u548c\u5b98\u5dee\u4e32\u8054\u3002',
+        continuityNotes: '\u4e3b\u89d2\u7b54\u5e94\u8fc7\u8bc1\u4eba\uff0c\u53ea\u8981\u4eba\u6ca1\u6b7b\u5c31\u4e0d\u4e22\u4e0b\u5979\u3002',
+        timelineSummary: '\u67d0\u671d\u67d0\u5e74 \u79cb\u672b \u591c\u534a\u524d',
+        timelineOpenThreads: '\u82e5\u4eca\u591c\u8fc7\u4e0d\u4e86\u6cb3\uff0c\u5929\u4eae\u540e\u5dde\u8859\u5c31\u4f1a\u5c01\u6e21\u3002',
+        longTermMemory: '\u4e3b\u89d2\u66fe\u56e0\u8bef\u6740\u6848\u88ab\u9010\u51fa\u5e08\u95e8\uff0c\u5bf9\u5b98\u5e9c\u548c\u5e08\u95e8\u90fd\u4e0d\u518d\u8f7b\u4fe1\u3002',
+        consistencyNotes: '\u6ce8\u610f\u4f24\u75c5\u3001\u8def\u7a0b\u3001\u94f6\u94b1\u548c\u6e21\u53e3\u79e9\u5e8f\u3002',
+        protagonistReference: '\u4e3b\u89d2',
+        protagonistRule: '\u6d89\u53ca\u4e3b\u89d2\u65f6\u53ea\u7528\u201c\u4e3b\u89d2\u201d\uff0c\u4e0d\u8981\u6539\u540d\u3002',
+      })
+      assert.match(scenePrompt, /\u6b66\u4fa0\u9898\u6750\u8981\u8ba9\u6c5f\u6e56\u89c4\u77e9/u)
+      assert.match(scenePrompt, /\u94f6\u94b1/u)
+      assert.match(scenePrompt, /\u5199\u5b9e\u6b66\u4fa0\u4f18\u5148\u670d\u4ece\u53f2\u5b9e\u4e0e\u793e\u4f1a\u5e38\u8bc6/u)
+    },
+  },
 ]
 
 let failed = 0
@@ -387,3 +502,5 @@ if (failed > 0) {
 } else {
   console.log(`All ${tests.length} prompt guardrail tests passed.`)
 }
+
+

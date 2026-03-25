@@ -562,6 +562,8 @@ export interface StoryArc {
   chapterEnd?: number
   arcGoal?: string
   arcSummary?: string
+  growthLedger?: string
+  costLedger?: string
 }
 
 export interface StoryThread {

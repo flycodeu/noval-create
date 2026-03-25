@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Empty, Modal, Progress, Select, Spin, Tag, message } from 'antd'
 import {
   ApartmentOutlined,
@@ -32,7 +32,7 @@ interface Props { novelId: number }
 interface AiCheckPayload { score: number; issues: Array<{ type: string; location: string; suggestion: string }>; overall_feedback: string }
 interface ContinuityPayload { plot_progress?: string[]; character_state_changes?: string[]; world_state_changes?: string[]; open_loops?: string[]; continuity_notes?: string[]; arc_progress?: string }
 interface ScenePlanStep { scene_order: number; scene_title: string; purpose: string; location: string; time_anchor: string; present_characters: string[]; key_items: string[]; must_cover: string[] }
-interface ReviewNotes { summary: string; critical_fixes: string[]; continuity_risks: string[]; language_risks: string[]; revision_brief: string }
+interface ReviewNotes { summary: string; critical_fixes: string[]; continuity_risks: string[]; language_risks: string[]; genre_hollowing_risks: string[]; revision_brief: string }
 type InsightTab = 'chapter' | 'memory' | 'health'
 type ChapterGenerationStage = 'planning' | 'drafting' | 'reviewing' | 'rewriting' | 'completed' | 'failed'
 interface ChapterGenerationProgressEvent { chapterId: number; stage: ChapterGenerationStage; label: string; detail?: string; completed: number; total: number; status: 'running' | 'success' | 'failed' }
@@ -418,6 +418,7 @@ export default function Writing({ novelId }: Props) {
     ...(reviewNotes?.critical_fixes || []).map((item) => `关键修订：${item}`),
     ...(reviewNotes?.continuity_risks || []).map((item) => `连续性风险：${item}`),
     ...(reviewNotes?.language_risks || []).map((item) => `语言提示：${item}`),
+    ...(reviewNotes?.genre_hollowing_risks || []).map((item) => `体裁空心化：${item}`),
   ].filter((item): item is string => Boolean(item))
 
   const pipelineStatus = PIPELINE_STAGES.map((stage, index) => {
@@ -799,3 +800,4 @@ function SegmentBoardPreview({
     </div>
   )
 }
+
