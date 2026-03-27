@@ -123,9 +123,12 @@ function createWindow() {
   if (process.env.NODE_ENV === 'development' || !app.isPackaged) {
     const devUrl = process.env.ELECTRON_RENDERER_URL || 'http://localhost:5173'
     mainWindow.loadURL(devUrl)
-    mainWindow.webContents.openDevTools()
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
+  }
+
+  if (process.env.NOVELFORGE_OPEN_DEVTOOLS === '1') {
+    mainWindow.webContents.openDevTools()
   }
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -268,11 +271,15 @@ function registerIpcHandlers() {
 
   ipcMain.handle('map:getTree', (_, novelId) => mapService.getMapTree(novelId))
   ipcMain.handle('map:queryNodes', (_, filters) => mapService.queryMapNodes(filters))
+  ipcMain.handle('map:getGraph', (_, filters) => mapService.getMapGraph(filters))
+  ipcMain.handle('map:getRelations', (_, novelId, focusNodeId) => mapService.getMapRelations(novelId, focusNodeId))
   ipcMain.handle('map:getStats', (_, novelId) => mapService.getMapStats(novelId))
   ipcMain.handle('map:getNode', (_, id) => mapService.getMapNode(id))
   ipcMain.handle('map:searchNodes', (_, novelId, keyword, limit) => mapService.searchMapNodes(novelId, keyword, limit))
   ipcMain.handle('map:create', (_, novelId, data) => mapService.createMapItem(novelId, data))
   ipcMain.handle('map:update', (_, id, data) => mapService.updateMapItem(id, data))
+  ipcMain.handle('map:upsertRelation', (_, data) => mapService.upsertMapRelation(data))
+  ipcMain.handle('map:deleteRelation', (_, id) => mapService.deleteMapRelation(id))
   ipcMain.handle('map:delete', (_, id) => mapService.deleteMapItem(id))
   ipcMain.handle('map:batchGenerate', (_, novelId, structure) =>
     mapService.batchGenerateMap(novelId, structure))
@@ -466,6 +473,15 @@ function registerIpcHandlers() {
     }
 
     const context = await buildOutlineGenerationContext(arcId)
+
+    // 收集已有章节大纲用于差异化约束
+    const existingOutlines = chapterRows
+      .filter((chapter) => outlinedNums.has(chapter.chapterNum) && chapter.outline)
+      .sort((a, b) => a.chapterNum - b.chapterNum)
+      .slice(-6)
+      .map((chapter) => `第${chapter.chapterNum}章《${chapter.title || '无标题'}》：${(chapter.outline || '').split('\n')[0].slice(0, 60)}`)
+      .join('\n')
+
     const result = await taskService.runChatTask({
       type: 'chapter_outline',
       novelId: arc.novelId,
@@ -489,6 +505,7 @@ function registerIpcHandlers() {
           continuitySummary: context.continuitySummary,
           openLoops: context.openLoops,
           worldRulesSummary: context.worldRulesSummary,
+          previousChapterOutlines: existingOutlines || undefined,
           protagonistReference: context.profile.protagonistReference,
           protagonistRule: context.profile.protagonistRule,
         }),

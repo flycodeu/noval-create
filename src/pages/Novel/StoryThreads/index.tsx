@@ -7,6 +7,12 @@ import type { StoryThread } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
 import type { StoryThreadBatchGenerateOptions } from '../../../shared/story-thread-generation'
 import {
+  EMPTY_WORKFLOW_STATS,
+  getWorkflowBlockers,
+  loadWorkflowStats,
+  type WorkflowStats,
+} from '../workflow'
+import {
   WorkspaceContextSummary,
   WorkspaceMetric,
   WorkspacePage,
@@ -153,6 +159,7 @@ export default function StoryThreadsPage({ novelId }: Props) {
   const [generateForm] = Form.useForm<GenerateFormValues>()
   const [threads, setThreads] = useState<StoryThread[]>([])
   const [stats, setStats] = useState({ total: 0, activeCount: 0, resolvedCount: 0, stalledCount: 0, overdueCount: 0 })
+  const [workflowStats, setWorkflowStats] = useState<WorkflowStats>(EMPTY_WORKFLOW_STATS)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [generating, setGenerating] = useState(false)
@@ -160,16 +167,22 @@ export default function StoryThreadsPage({ novelId }: Props) {
   const [generateOpen, setGenerateOpen] = useState(false)
   const [editingThread, setEditingThread] = useState<StoryThread | null>(null)
   const [generationWarnings, setGenerationWarnings] = useState<string[]>([])
+  const generationBlockers = useMemo(
+    () => getWorkflowBlockers('threads', currentNovel, workflowStats),
+    [currentNovel, workflowStats],
+  )
 
   const refresh = useCallback(async () => {
     setLoading(true)
     try {
-      const [queryResult, nextStats] = await Promise.all([
+      const [queryResult, nextStats, nextWorkflowStats] = await Promise.all([
         window.electron.thread.query({ novelId, page: 1, pageSize: 200 }),
         window.electron.thread.getStats({ novelId, page: 1, pageSize: 1 }),
+        loadWorkflowStats(novelId),
       ])
       setThreads(queryResult.items)
       setStats(nextStats)
+      setWorkflowStats(nextWorkflowStats)
     } catch (error) {
       console.error(error)
       message.error(error instanceof Error ? error.message : '故事线程加载失败。')
@@ -193,7 +206,15 @@ export default function StoryThreadsPage({ novelId }: Props) {
     setEditorOpen(true)
   }
 
-  const openGenerateModal = () => {
+  const openGenerateModal = async () => {
+    const nextWorkflowStats = await loadWorkflowStats(novelId)
+    setWorkflowStats(nextWorkflowStats)
+    const blockers = getWorkflowBlockers('threads', currentNovel, nextWorkflowStats)
+    if (blockers.length > 0) {
+      message.warning(blockers.join('\n'))
+      return
+    }
+
     generateForm.resetFields()
     generateForm.setFieldsValue(DEFAULT_GENERATE_VALUES)
     setGenerateOpen(true)
@@ -244,6 +265,14 @@ export default function StoryThreadsPage({ novelId }: Props) {
   }
 
   const handleGenerate = async () => {
+    const nextWorkflowStats = await loadWorkflowStats(novelId)
+    setWorkflowStats(nextWorkflowStats)
+    const blockers = getWorkflowBlockers('threads', currentNovel, nextWorkflowStats)
+    if (blockers.length > 0) {
+      message.warning(blockers.join('\n'))
+      return
+    }
+
     const values = normalizeGenerateValues(await generateForm.validateFields())
     setGenerating(true)
     setGenerationWarnings([])
@@ -335,7 +364,7 @@ export default function StoryThreadsPage({ novelId }: Props) {
           <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>
             新建线程
           </Button>
-          <Button icon={<RobotOutlined />} loading={generating} onClick={openGenerateModal}>
+          <Button icon={<RobotOutlined />} loading={generating} onClick={() => void openGenerateModal()}>
             AI 批量生成
           </Button>
           <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/structure`)}>
@@ -362,6 +391,21 @@ export default function StoryThreadsPage({ novelId }: Props) {
         </>
       )}
     >
+      {generationBlockers.length > 0 ? (
+        <Alert
+          type="warning"
+          showIcon
+          message="当前还不适合批量生成故事线程"
+          description={(
+            <div>
+              {generationBlockers.map((blocker) => (
+                <div key={blocker}>{blocker}</div>
+              ))}
+            </div>
+          )}
+        />
+      ) : null}
+
       {!currentNovel?.settingsJson ? (
         <Alert
           type="info"

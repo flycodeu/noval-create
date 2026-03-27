@@ -224,6 +224,20 @@ export const worldMap = sqliteTable('world_map', {
   sortOrder: integer('sort_order').default(0),
 })
 
+export const mapRelations = sqliteTable('map_relations', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  mapAId: integer('map_a_id').notNull().references(() => worldMap.id, { onDelete: 'cascade' }),
+  mapBId: integer('map_b_id').notNull().references(() => worldMap.id, { onDelete: 'cascade' }),
+  relationType: text('relation_type'),
+  relationLabel: text('relation_label'),
+  bilateral: integer('bilateral').default(1),
+  description: text('description'),
+  intensity: text('intensity'),
+  colorHint: text('color_hint'),
+  sortOrder: integer('sort_order').default(0),
+})
+
 export const timelineEvents = sqliteTable('timeline_events', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),

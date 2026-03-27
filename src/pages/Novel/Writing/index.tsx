@@ -32,7 +32,19 @@ interface Props { novelId: number }
 interface AiCheckPayload { score: number; issues: Array<{ type: string; location: string; suggestion: string }>; overall_feedback: string }
 interface ContinuityPayload { plot_progress?: string[]; character_state_changes?: string[]; world_state_changes?: string[]; open_loops?: string[]; continuity_notes?: string[]; arc_progress?: string }
 interface ScenePlanStep { scene_order: number; scene_title: string; purpose: string; location: string; time_anchor: string; present_characters: string[]; key_items: string[]; must_cover: string[] }
-interface ReviewNotes { summary: string; critical_fixes: string[]; continuity_risks: string[]; language_risks: string[]; genre_hollowing_risks: string[]; revision_brief: string }
+interface ReviewNotes {
+  summary: string
+  critical_fixes: string[]
+  continuity_risks: string[]
+  context_drift_risks?: string[]
+  realism_risks?: string[]
+  coherence_risks?: string[]
+  reader_hook_risks?: string[]
+  language_risks: string[]
+  human_language_repairs?: string[]
+  genre_hollowing_risks: string[]
+  revision_brief: string
+}
 type InsightTab = 'chapter' | 'memory' | 'health'
 type ChapterGenerationStage = 'planning' | 'drafting' | 'reviewing' | 'rewriting' | 'completed' | 'failed'
 interface ChapterGenerationProgressEvent { chapterId: number; stage: ChapterGenerationStage; label: string; detail?: string; completed: number; total: number; status: 'running' | 'success' | 'failed' }
@@ -417,8 +429,22 @@ export default function Writing({ novelId }: Props) {
     reviewNotes?.revision_brief ? `修订摘要：${reviewNotes.revision_brief}` : '',
     ...(reviewNotes?.critical_fixes || []).map((item) => `关键修订：${item}`),
     ...(reviewNotes?.continuity_risks || []).map((item) => `连续性风险：${item}`),
+    ...(reviewNotes?.context_drift_risks || []).map((item) => `上下文漂移：${item}`),
+    ...(reviewNotes?.realism_risks || []).map((item) => `真实度风险：${item}`),
+    ...(reviewNotes?.coherence_risks || []).map((item) => `连贯性风险：${item}`),
+    ...(reviewNotes?.reader_hook_risks || []).map((item) => `追读风险：${item}`),
     ...(reviewNotes?.language_risks || []).map((item) => `语言提示：${item}`),
+    ...(reviewNotes?.human_language_repairs || []).map((item) => `语言替换：${item}`),
     ...(reviewNotes?.genre_hollowing_risks || []).map((item) => `体裁空心化：${item}`),
+  ].filter((item): item is string => Boolean(item))
+
+  const productionBriefItems = [
+    reviewNotes?.revision_brief ? `定稿方向：${reviewNotes.revision_brief}` : '',
+    ...(reviewNotes?.critical_fixes || []).slice(0, 2).map((item) => `先改：${item}`),
+    ...(reviewNotes?.coherence_risks || []).slice(0, 2).map((item) => `读者易乱：${item}`),
+    ...(reviewNotes?.reader_hook_risks || []).slice(0, 2).map((item) => `追读流失点：${item}`),
+    ...(reviewNotes?.human_language_repairs || []).slice(0, 2).map((item) => `语言替换：${item}`),
+    ...((aiResult?.issues || []).slice(0, 2).map((issue) => `AI体检：${issue.suggestion}`)),
   ].filter((item): item is string => Boolean(item))
 
   const pipelineStatus = PIPELINE_STAGES.map((stage, index) => {
@@ -439,8 +465,8 @@ export default function Writing({ novelId }: Props) {
   const editorEyebrow = currentChapter ? `第 ${String(currentChapter.chapterNum).padStart(2, '0')} 章` : '写作编辑器'
   const editorTitle = currentChapter ? currentChapter.title || `第${currentChapter.chapterNum}章` : '请选择一个章节'
   const editorSubtitle = currentChapter
-    ? `当前状态：${currentStatusLabel} · 文稿会在停止输入后自动保存。`
-    : '从左侧选择章节后即可直接编辑，右侧同步查看本章链路与体检建议。'
+    ? `当前状态：${currentStatusLabel} · 当前正文视为入库稿，停止输入后会自动保存。`
+    : '从左侧选择章节后即可直接编辑，右侧同步查看本章链路、修订建议与体检结果。'
 
   const resolvedEditorSubtitle = hasMultiSegments
     ? `当前状态：${currentStatusLabel} · 本章已拆成 ${currentChapter?.segmentCount || 0} 个场景，请优先在结构页维护场景后再编译整章。`
@@ -452,7 +478,7 @@ export default function Writing({ novelId }: Props) {
       layout="wide"
       eyebrow={mode === 'guided' ? '写作台' : '章节流水线'}
       title="正文写作"
-      description={mode === 'guided' ? '在同一个写作台里完成章节生成、场景计划、审校修订、长文记忆和一致性检查。' : '正文页直接打通章节四阶段流水线、全书一致性报告、时间轴联动和长文压缩记忆。'}
+      description={mode === 'guided' ? '在同一个写作台里完成 AI 主写、场景计划、审校修订、长文记忆和一致性检查。' : '正文页直接打通 AI 主写四阶段流水线、全书一致性报告、时间轴联动和长文压缩记忆。'}
       heroVariant="compact"
       actions={(
         <>
@@ -542,6 +568,22 @@ export default function Writing({ novelId }: Props) {
                     ))}
                   </div>
                   {generationProgress ? <div className={`novel-writing-shell__generation-note novel-writing-shell__generation-note--${generationProgress.status}`}><strong>{generationProgress.label}</strong><span>{generationProgress.detail || '正在同步最新阶段进度。'}</span></div> : null}
+                  {productionBriefItems.length > 0 ? (
+                    <section className="novel-writing-shell__review-strip">
+                      <div className="novel-writing-shell__review-strip-head">
+                        <div>
+                          <div className="novel-kicker">AI 定稿摘要</div>
+                          <strong>本章最值得先处理的问题已经汇总到这里</strong>
+                        </div>
+                        {reviewNotes?.revision_brief ? <Tag color="gold">审校已生成</Tag> : null}
+                      </div>
+                      <div className="novel-writing-shell__review-strip-list">
+                        {productionBriefItems.map((item, index) => (
+                          <div key={`${item}-${index}`} className="novel-writing-shell__review-strip-item">{item}</div>
+                        ))}
+                      </div>
+                    </section>
+                  ) : null}
                   {currentChapterStaleReasons.length > 0 ? (
                     <Alert
                       showIcon
@@ -641,6 +683,7 @@ export default function Writing({ novelId }: Props) {
                   </InsightCard>
                 </div>
                 <div className="novel-writing-shell__insight-stack">
+                  <InsightCard title="生产摘要" eyebrow="AI 主写 / 人工定稿" tone="soft"><StringList items={productionBriefItems} empty="章节进入审校后，这里会先汇总最值得优先处理的定稿建议。" /></InsightCard>
                   <InsightCard title="关联线索" eyebrow="时间轴 / 道具" tone="soft"><StringList items={relatedInsightItems.slice(0, mode === 'guided' ? 6 : 12)} empty="当前章节暂未关联时间轴事件或关键道具。" /></InsightCard>
                   <InsightCard title="修订提示" eyebrow="复盘重点" tone="soft"><StringList items={reviewInsightItems} empty="运行审校或摘要更新后，这里会汇总需要回看的修订点。" /></InsightCard>
                   <InsightCard title="世界规则" eyebrow="写作边界" tone="soft"><StringList items={worldRulesSummary} empty={currentNovel?.worldRulesJson ? '当前世界规则已录入，但还没有提炼出本章相关边界。' : '先完善世界规则，这里会同步展示写作边界。'} /></InsightCard>

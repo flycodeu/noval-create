@@ -6881,3 +6881,335 @@ html[data-theme="dark"] .ant-card-actions > li {
 }
 /* premise-story-design-refresh:end */
 
+/* productivity-refresh:start */
+.novel-route-shell {
+  min-height: 100%;
+  height: auto;
+  align-items: start;
+  grid-template-columns: 292px minmax(0, 1fr);
+}
+
+.novel-route-shell__sidebar {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  max-height: 100dvh;
+  overflow: auto;
+  padding-bottom: 30px;
+}
+
+.novel-route-shell__content,
+.novel-route-shell__content-body,
+.novel-route-shell__content-frame {
+  min-width: 0;
+}
+
+.novel-route-shell__content {
+  overflow: visible;
+}
+
+.novel-route-shell__content-body {
+  overflow: visible;
+}
+
+.novel-workspace {
+  height: auto;
+  min-height: 100%;
+  overflow: visible;
+  padding: 26px 22px 36px;
+}
+
+.novel-workspace > .novel-hero,
+.novel-workspace > .novel-workspace__body,
+.novel-workspace > .novel-workspace__footer {
+  min-width: 0;
+}
+
+.novel-writing-page .novel-writing-shell {
+  grid-template-columns: 244px minmax(0, 1.22fr) 344px;
+  min-height: auto;
+  align-items: start;
+}
+
+.novel-writing-page .novel-writing-shell__sidebar,
+.novel-writing-page .novel-writing-shell__insight {
+  position: sticky;
+  top: 20px;
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+}
+
+.novel-writing-page .novel-writing-shell__editor-stage {
+  padding: 28px 24px 30px;
+}
+
+.novel-writing-page .novel-writing-shell__editor-stage-inner {
+  width: min(1200px, 100%);
+}
+
+.novel-writing-page .novel-writing-shell__review-strip {
+  display: grid;
+  gap: 14px;
+  width: min(1140px, 100%);
+  margin: 0 auto;
+  padding: 18px 20px;
+  border: 1px solid rgba(165, 115, 42, 0.16);
+  border-radius: 24px;
+  background: linear-gradient(180deg, rgba(255, 250, 242, 0.96), rgba(250, 245, 236, 0.9));
+  box-shadow: 0 20px 36px rgba(122, 93, 52, 0.08);
+}
+
+.novel-writing-page .novel-writing-shell__review-strip-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.novel-writing-page .novel-writing-shell__review-strip-head strong {
+  color: var(--workspace-ink);
+  font-size: 17px;
+  line-height: 1.4;
+}
+
+.novel-writing-page .novel-writing-shell__review-strip-list {
+  display: grid;
+  gap: 10px;
+}
+
+.novel-writing-page .novel-writing-shell__review-strip-item {
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.76);
+  border: 1px solid rgba(122, 93, 52, 0.1);
+  color: #534434;
+  font-size: 13px;
+  line-height: 1.75;
+}
+
+.prompt-manager-page .novel-hero__description {
+  max-width: 920px;
+}
+
+.prompt-manager-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(360px, 0.64fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.prompt-manager-filter-group,
+.prompt-manager-lanes,
+.prompt-manager-param-list,
+.prompt-manager-card__meta,
+.prompt-manager-inspector-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.prompt-manager-filter,
+.prompt-manager-lane {
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(122, 93, 52, 0.14);
+  background: rgba(255, 255, 255, 0.82);
+  color: #5c5144;
+  cursor: pointer;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+}
+
+.prompt-manager-filter--active,
+.prompt-manager-lane--active {
+  border-color: rgba(165, 115, 42, 0.32);
+  background: linear-gradient(180deg, rgba(255, 243, 221, 0.96), rgba(255, 255, 255, 0.92));
+  color: #7b551d;
+  box-shadow: 0 14px 24px rgba(122, 93, 52, 0.08);
+}
+
+.prompt-manager-card-grid {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.prompt-manager-card {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  padding: 18px;
+  border-radius: 24px;
+  border: 1px solid rgba(122, 93, 52, 0.14);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(249, 245, 238, 0.96));
+  box-shadow: 0 16px 30px rgba(71, 53, 28, 0.08);
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+.prompt-manager-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(165, 115, 42, 0.26);
+  box-shadow: 0 22px 34px rgba(71, 53, 28, 0.12);
+}
+
+.prompt-manager-card--active {
+  border-color: rgba(165, 115, 42, 0.32);
+  background: linear-gradient(180deg, rgba(255, 244, 226, 0.98), rgba(255, 255, 255, 0.96));
+}
+
+.prompt-manager-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.prompt-manager-card__title-block {
+  display: grid;
+  gap: 6px;
+}
+
+.prompt-manager-card__title-block strong {
+  color: var(--workspace-ink);
+  font-size: 17px;
+  line-height: 1.35;
+}
+
+.prompt-manager-card__title-block span,
+.prompt-manager-card__goal,
+.prompt-manager-card__risk {
+  color: var(--workspace-ink-soft);
+  font-size: 12px;
+  line-height: 1.72;
+}
+
+.prompt-manager-card__risk {
+  color: #7f6545;
+}
+
+.prompt-manager-card__preview,
+.prompt-manager-template-preview {
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(122, 93, 52, 0.12);
+  background: rgba(250, 247, 242, 0.94);
+  color: #685748;
+  font-family: Consolas, "SFMono-Regular", monospace;
+  font-size: 11px;
+  line-height: 1.72;
+  white-space: pre-wrap;
+}
+
+.prompt-manager-card__preview {
+  max-height: 132px;
+  overflow: auto;
+}
+
+.prompt-manager-inspector {
+  position: sticky;
+  top: 20px;
+}
+
+.prompt-manager-inspector-body {
+  display: grid;
+  gap: 16px;
+}
+
+.prompt-manager-inspector-meta {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.prompt-manager-inspector-meta__item {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(122, 93, 52, 0.12);
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.prompt-manager-inspector-meta__item span {
+  color: var(--workspace-ink-soft);
+  font-size: 11px;
+}
+
+.prompt-manager-inspector-meta__item strong {
+  color: var(--workspace-ink);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.prompt-manager-callout,
+.prompt-manager-inspector-section {
+  display: grid;
+  gap: 8px;
+  padding: 16px 18px;
+  border-radius: 20px;
+  border: 1px solid rgba(122, 93, 52, 0.12);
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.prompt-manager-callout strong,
+.prompt-manager-inspector-section__title {
+  color: var(--workspace-ink);
+  font-size: 14px;
+}
+
+.prompt-manager-callout span,
+.prompt-manager-inspector-section__copy {
+  color: var(--workspace-ink-soft);
+  font-size: 12px;
+  line-height: 1.75;
+}
+
+@media (max-width: 1480px) {
+  .prompt-manager-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .prompt-manager-inspector {
+    position: static;
+  }
+}
+
+@media (max-width: 1380px) {
+  .novel-writing-page .novel-writing-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .novel-writing-page .novel-writing-shell__sidebar,
+  .novel-writing-page .novel-writing-shell__insight {
+    position: static;
+    max-height: none;
+  }
+}
+
+@media (max-width: 960px) {
+  .novel-route-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .novel-route-shell__sidebar {
+    position: static;
+    max-height: none;
+  }
+
+  .prompt-manager-inspector-meta {
+    grid-template-columns: 1fr;
+  }
+
+  .novel-writing-page .novel-writing-shell__review-strip-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .novel-writing-page .novel-writing-shell__editor-stage {
+    padding: 22px 18px 24px;
+  }
+}
+/* productivity-refresh:end */
+

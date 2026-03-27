@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Button, Form, Input, Modal, Pagination, Select, Space, Spin, Tag, message } from 'antd'
+import { Alert, Button, Form, Input, Modal, Pagination, Select, Space, Spin, Tag, message } from 'antd'
 import { AppstoreAddOutlined, DeleteOutlined, InboxOutlined, ReloadOutlined, SaveOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import VirtualList from 'rc-virtual-list'
 import AIGenerateButton from '../../../components/AIGenerateButton'
@@ -7,6 +7,7 @@ import type { Character, MapNodeSummary, PagedResult, StoryItem, StoryItemFilter
 import { useNovelStore } from '../../../stores/novel.store'
 import { buildDraftMessages, normalizeStringArray, parseDraftJson } from '../shared/ai-draft'
 import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
+import { EMPTY_WORKFLOW_STATS, getWorkflowBlockers, loadWorkflowStats, type WorkflowStats } from '../workflow'
 
 interface Props { novelId: number }
 interface ItemFormValues {
@@ -141,6 +142,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
   const [generating, setGenerating] = useState(false)
   const [pageData, setPageData] = useState<PagedResult<StoryItem>>(EMPTY_PAGE)
   const [stats, setStats] = useState<StoryItemStats>(EMPTY_STATS)
+  const [workflowStats, setWorkflowStats] = useState<WorkflowStats>(EMPTY_WORKFLOW_STATS)
   const [filters, setFilters] = useState<StoryItemFilterOptions>(EMPTY_FILTERS)
   const [selectedItem, setSelectedItem] = useState<StoryItem | null>(null)
   const [selectedId, setSelectedId] = useState<number | null>(null)
@@ -156,6 +158,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
   const [eventOptions, setEventOptions] = useState<TimelineEvent[]>([])
   const itemKind = Form.useWatch('itemKind', form)
   const rarityOptions = useMemo(() => Array.from(new Set([...RARITY_OPTIONS, ...filters.rarities].filter(Boolean))), [filters.rarities])
+  const generationBlockers = useMemo(() => getWorkflowBlockers('items', currentNovel, workflowStats), [currentNovel, workflowStats])
 
   const searchTemplates = useCallback(async (value = '') => {
     const rows = await window.electron.item.search(novelId, value, 'template', 20)
@@ -212,10 +215,11 @@ export default function ItemsWorkspace({ novelId }: Props) {
     setLoading(true)
     try {
       const query = { novelId, itemKind: listMode, page: targetPage, pageSize: PAGE_SIZE, ...(categoryFilter !== 'all' ? { category: categoryFilter } : {}), ...(keyword.trim() ? { keyword: keyword.trim() } : {}) }
-      const [list, summary, nextFilters] = await Promise.all([window.electron.item.query(query), window.electron.item.getStats({ novelId }), window.electron.item.getFilterOptions(novelId)])
+      const [list, summary, nextFilters, nextWorkflowStats] = await Promise.all([window.electron.item.query(query), window.electron.item.getStats({ novelId }), window.electron.item.getFilterOptions(novelId), loadWorkflowStats(novelId)])
       setPageData(list)
       setStats(summary)
       setFilters(nextFilters)
+      setWorkflowStats(nextWorkflowStats)
       const nextId = preferredId ?? (list.items.some((item) => item.id === selectedId) ? selectedId : list.items[0]?.id ?? null)
       if (nextId) { setCreating(false); await loadItemDetail(nextId) }
       else { setSelectedId(null); setSelectedItem(null); setCreating(false); form.resetFields(); await hydrateOptions(null) }
@@ -263,7 +267,29 @@ export default function ItemsWorkspace({ novelId }: Props) {
     })
   }
 
+  const resolveGenerationBlockers = useCallback(async () => {
+    const nextWorkflowStats = await loadWorkflowStats(novelId)
+    setWorkflowStats(nextWorkflowStats)
+    return getWorkflowBlockers('items', currentNovel, nextWorkflowStats)
+  }, [currentNovel, novelId])
+
+  const openGenerateModal = useCallback(async () => {
+    const blockers = await resolveGenerationBlockers()
+    if (blockers.length > 0) {
+      message.warning(blockers.join('\n'))
+      return
+    }
+
+    setGenerateOpen(true)
+  }, [resolveGenerationBlockers])
+
   const handleGenerate = async () => {
+    const blockers = await resolveGenerationBlockers()
+    if (blockers.length > 0) {
+      message.warning(blockers.join('\n'))
+      return
+    }
+
     const values = generateForm.getFieldsValue()
     setGenerating(true)
     try {
@@ -354,10 +380,25 @@ export default function ItemsWorkspace({ novelId }: Props) {
       eyebrow="物品系统"
       title="物品与装备"
       description="模板和实例统一管理，单条记录支持 AI 起草。"
-      actions={<Space wrap><Button icon={<ReloadOutlined />} onClick={() => void loadPage(selectedId, page)}>刷新</Button><Button icon={<AppstoreAddOutlined />} onClick={() => handleNew('template')}>新建模板</Button><Button icon={<InboxOutlined />} onClick={() => handleNew('instance')}>新建实例</Button><Button type="primary" icon={<ThunderboltOutlined />} onClick={() => setGenerateOpen(true)}>AI 批量生成</Button><Button danger icon={<DeleteOutlined />} onClick={() => void handleClear()}>清空</Button></Space>}
+      actions={<Space wrap><Button icon={<ReloadOutlined />} onClick={() => void loadPage(selectedId, page)}>刷新</Button><Button icon={<AppstoreAddOutlined />} onClick={() => handleNew('template')}>新建模板</Button><Button icon={<InboxOutlined />} onClick={() => handleNew('instance')}>新建实例</Button><Button type="primary" icon={<ThunderboltOutlined />} onClick={() => void openGenerateModal()}>AI 批量生成</Button><Button danger icon={<DeleteOutlined />} onClick={() => void handleClear()}>清空</Button></Space>}
       contextSummary={<WorkspaceContextSummary items={[{ label: '书名', value: currentNovel?.title || '未命名小说' }, { label: '当前列表', value: listMode === 'template' ? '模板' : '实例' }, { label: '筛选结果', value: `${pageData.total} 条` }, { label: '当前焦点', value: selectedItem?.itemName || (creating ? '新建中' : '未选择') }]} />}
       metrics={<><WorkspaceMetric label="模板" value={stats.templateCount} tone="warm" /><WorkspaceMetric label="实例" value={stats.instanceCount} /><WorkspaceMetric label="分类" value={stats.categoryCount} tone="cool" /><WorkspaceMetric label="事件关联" value={stats.linkedEventCount} /></>}
     >
+      {generationBlockers.length > 0 ? (
+        <Alert
+          type="warning"
+          showIcon
+          message="当前还不适合批量生成物品"
+          description={(
+            <div>
+              {generationBlockers.map((blocker) => (
+                <div key={blocker}>{blocker}</div>
+              ))}
+            </div>
+          )}
+        />
+      ) : null}
+
       <div className="novel-split novel-split--sidebar">
         <WorkspacePanel title="列表" description="筛选和搜索都走后端查询。" extra={<div className="novel-filter-bar"><div className="novel-filter-bar__row"><Input.Search allowClear placeholder="搜索名称、分类、作用" value={keyword} onChange={(event) => setKeyword(event.target.value)} onSearch={setKeyword} /><Select value={listMode} options={[{ value: 'template', label: '模板' }, { value: 'instance', label: '实例' }]} onChange={(value) => setListMode(value)} /></div><div className="novel-filter-bar__row"><Select value={categoryFilter} options={[{ value: 'all', label: '全部分类' }, ...filters.categories.map((item) => ({ value: item, label: item }))]} onChange={setCategoryFilter} /></div><div className="novel-filter-bar__summary">当前共 {pageData.total} 条</div></div>}>
           {loading ? <div className="novel-empty"><Spin /></div> : pageData.total === 0 ? <div className="novel-empty">当前筛选下还没有记录。</div> : <div style={{ display: 'grid', gap: 12 }}><VirtualList data={pageData.items} height={520} itemHeight={118} itemKey="id">{(item: StoryItem) => <button key={item.id} type="button" className={`novel-list-card ${selectedId === item.id ? 'novel-list-card--active' : ''}`} onClick={() => void loadItemDetail(item.id)} style={{ textAlign: 'left', cursor: 'pointer' }}><div className="novel-list-card__title">{item.itemName}</div><div className="novel-list-card__meta"><Tag color={item.itemKind === 'template' ? 'blue' : 'processing'}>{item.itemKind === 'template' ? '模板' : '实例'}</Tag>{item.category ? <Tag>{item.category}</Tag> : null}{item.subType ? <Tag>{item.subType}</Tag> : null}{item.rarity ? <Tag color="gold">{item.rarity}</Tag> : null}</div><div className="novel-list-card__desc">{item.plotFunction || item.summary || item.appearance || '还没有补充说明。'}</div></button>}</VirtualList><Pagination current={pageData.page} pageSize={pageData.pageSize} total={pageData.total} size="small" showSizeChanger={false} onChange={setPage} /></div>}

@@ -1,5 +1,5 @@
 import { asc, eq } from 'drizzle-orm'
-import { getDb } from '../database/db'
+import { getDb, getSqlite } from '../database/db'
 import { chapters, novels, storyItems, timelineEvents } from '../database/schema'
 import { buildNovelConsistencyReport, type ConsistencyIssue } from './consistency.service'
 
@@ -135,18 +135,20 @@ export function markNovelContextChanged(novelId: number, reasons: string | strin
   const nextVersion = (novel.contextVersion || 1) + 1
   const now = new Date().toISOString()
 
-  db.update(novels).set({
-    contextVersion: nextVersion,
-    updatedAt: now,
-  }).where(eq(novels.id, novelId)).run()
-
-  const chapterRows = db.select().from(chapters).where(eq(chapters.novelId, novelId)).all()
-  for (const chapter of chapterRows) {
-    db.update(chapters).set({
-      staleReasonJson: mergeReasons(chapter.staleReasonJson, normalizedReasons),
+  getSqlite().transaction(() => {
+    db.update(novels).set({
+      contextVersion: nextVersion,
       updatedAt: now,
-    }).where(eq(chapters.id, chapter.id)).run()
-  }
+    }).where(eq(novels.id, novelId)).run()
+
+    const chapterRows = db.select().from(chapters).where(eq(chapters.novelId, novelId)).all()
+    for (const chapter of chapterRows) {
+      db.update(chapters).set({
+        staleReasonJson: mergeReasons(chapter.staleReasonJson, normalizedReasons),
+        updatedAt: now,
+      }).where(eq(chapters.id, chapter.id)).run()
+    }
+  })()
 
   return nextVersion
 }
@@ -169,12 +171,16 @@ export function markSubsequentChaptersStale(
     .all()
     .filter((chapter) => chapter.chapterNum > chapterNum)
 
-  for (const chapter of chapterRows) {
-    db.update(chapters).set({
-      staleReasonJson: mergeReasons(chapter.staleReasonJson, normalizedReasons),
-      updatedAt: now,
-    }).where(eq(chapters.id, chapter.id)).run()
-  }
+  if (chapterRows.length === 0) return
+
+  getSqlite().transaction(() => {
+    for (const chapter of chapterRows) {
+      db.update(chapters).set({
+        staleReasonJson: mergeReasons(chapter.staleReasonJson, normalizedReasons),
+        updatedAt: now,
+      }).where(eq(chapters.id, chapter.id)).run()
+    }
+  })()
 }
 
 export function markChapterContextCurrent(chapterId: number): void {

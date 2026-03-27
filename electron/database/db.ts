@@ -276,6 +276,20 @@ function runMigrations(sqlite: Database.Database) {
       sort_order INTEGER DEFAULT 0
     );
 
+    CREATE TABLE IF NOT EXISTS map_relations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+      map_a_id INTEGER NOT NULL REFERENCES world_map(id) ON DELETE CASCADE,
+      map_b_id INTEGER NOT NULL REFERENCES world_map(id) ON DELETE CASCADE,
+      relation_type TEXT,
+      relation_label TEXT,
+      bilateral INTEGER DEFAULT 1,
+      description TEXT,
+      intensity TEXT,
+      color_hint TEXT,
+      sort_order INTEGER DEFAULT 0
+    );
+
     CREATE TABLE IF NOT EXISTS timeline_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
@@ -504,6 +518,13 @@ function runMigrations(sqlite: Database.Database) {
   ensureColumn(sqlite, 'world_map', 'tags_json', 'TEXT')
   ensureColumn(sqlite, 'world_map', 'affiliated_faction_ids_json', 'TEXT')
   ensureColumn(sqlite, 'world_map', 'danger_level', 'TEXT')
+  ensureColumn(sqlite, 'map_relations', 'relation_type', 'TEXT')
+  ensureColumn(sqlite, 'map_relations', 'relation_label', 'TEXT')
+  ensureColumn(sqlite, 'map_relations', 'bilateral', 'INTEGER DEFAULT 1')
+  ensureColumn(sqlite, 'map_relations', 'description', 'TEXT')
+  ensureColumn(sqlite, 'map_relations', 'intensity', 'TEXT')
+  ensureColumn(sqlite, 'map_relations', 'color_hint', 'TEXT')
+  ensureColumn(sqlite, 'map_relations', 'sort_order', 'INTEGER DEFAULT 0')
   ensureColumn(sqlite, 'timeline_events', 'linked_item_ids_json', 'TEXT')
   ensureColumn(sqlite, 'timeline_events', 'volume_id', 'INTEGER REFERENCES story_volumes(id) ON DELETE SET NULL')
   ensureColumn(sqlite, 'timeline_events', 'part_id', 'INTEGER REFERENCES story_parts(id) ON DELETE SET NULL')
@@ -612,6 +633,10 @@ function validateRequiredSchema(sqlite: Database.Database) {
       tableName: 'tasks',
       columns: ['runner_type', 'retryable', 'parent_task_id', 'current_child_task_id', 'control_json', 'progress_json'],
     },
+    {
+      tableName: 'map_relations',
+      columns: ['novel_id', 'map_a_id', 'map_b_id', 'bilateral', 'sort_order'],
+    },
   ]
 
   const missing: string[] = []
@@ -651,6 +676,12 @@ function ensureIndexes(sqlite: Database.Database) {
 
     CREATE INDEX IF NOT EXISTS idx_timeline_events_status
     ON timeline_events (novel_id, status, time_sort_value, sort_order, id);
+
+    CREATE INDEX IF NOT EXISTS idx_map_relations_novel_pair
+    ON map_relations (novel_id, map_a_id, map_b_id, sort_order, id);
+
+    CREATE INDEX IF NOT EXISTS idx_map_relations_novel_reverse_pair
+    ON map_relations (novel_id, map_b_id, map_a_id, sort_order, id);
 
     CREATE INDEX IF NOT EXISTS idx_story_volumes_novel_order
     ON story_volumes (novel_id, volume_number, id);

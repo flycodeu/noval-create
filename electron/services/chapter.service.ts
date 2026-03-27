@@ -63,7 +63,10 @@ interface ChapterReviewNotes {
   continuity_risks: string[]
   context_drift_risks: string[]
   realism_risks: string[]
+  coherence_risks: string[]
+  reader_hook_risks: string[]
   language_risks: string[]
+  human_language_repairs: string[]
   genre_hollowing_risks: string[]
   missing_payoffs: string[]
   strengths: string[]
@@ -170,7 +173,8 @@ function buildFallbackContinuityState(
     plotProgress: [summary].filter(Boolean),
     characterStateChanges: [],
     worldStateChanges: [],
-    openLoops: nextSeed ? [nextSeed] : [],
+    // openLoops 只记录真正未回收的悬挂情节，nextChapterSeed 是衔接提示而非伏笔
+    openLoops: [],
     continuityNotes: [nextSeed || chapterGoal].filter(Boolean),
     arcProgress: chapterGoal || '',
   }
@@ -285,7 +289,10 @@ function normalizeReviewNotes(raw: unknown): ChapterReviewNotes {
     continuity_risks: toStringArray(record.continuity_risks),
     context_drift_risks: toStringArray(record.context_drift_risks),
     realism_risks: toStringArray(record.realism_risks),
+    coherence_risks: toStringArray(record.coherence_risks),
+    reader_hook_risks: toStringArray(record.reader_hook_risks),
     language_risks: toStringArray(record.language_risks),
+    human_language_repairs: toStringArray(record.human_language_repairs),
     genre_hollowing_risks: toStringArray(record.genre_hollowing_risks),
     missing_payoffs: toStringArray(record.missing_payoffs),
     strengths: toStringArray(record.strengths),
@@ -302,7 +309,10 @@ function hasReviewNotes(notes: ChapterReviewNotes): boolean {
     notes.continuity_risks.length > 0 ||
     notes.context_drift_risks.length > 0 ||
     notes.realism_risks.length > 0 ||
+    notes.coherence_risks.length > 0 ||
+    notes.reader_hook_risks.length > 0 ||
     notes.language_risks.length > 0 ||
+    notes.human_language_repairs.length > 0 ||
     notes.genre_hollowing_risks.length > 0 ||
     notes.missing_payoffs.length > 0 ||
     notes.strengths.length > 0 ||
@@ -324,7 +334,10 @@ function buildFallbackReviewNotes(consistencyNotes: string): ChapterReviewNotes 
     continuity_risks: consistencyLines,
     context_drift_risks: [],
     realism_risks: [],
+    coherence_risks: [],
+    reader_hook_risks: [],
     language_risks: ['删除抽象口号、概念化抒情和不自然搭配。'],
+    human_language_repairs: [],
     genre_hollowing_risks: [],
     missing_payoffs: [],
     strengths: [],
@@ -341,7 +354,10 @@ function formatReviewNotes(notes: ChapterReviewNotes): string {
     notes.continuity_risks.length > 0 ? `连续性风险：\n- ${notes.continuity_risks.join('\n- ')}` : '',
     notes.context_drift_risks.length > 0 ? `上下文漂移风险：\n- ${notes.context_drift_risks.join('\n- ')}` : '',
     notes.realism_risks.length > 0 ? `常识/规则风险：\n- ${notes.realism_risks.join('\n- ')}` : '',
+    notes.coherence_risks.length > 0 ? `连贯性风险：\n- ${notes.coherence_risks.join('\n- ')}` : '',
+    notes.reader_hook_risks.length > 0 ? `追读风险：\n- ${notes.reader_hook_risks.join('\n- ')}` : '',
     notes.language_risks.length > 0 ? `语言风险：\n- ${notes.language_risks.join('\n- ')}` : '',
+    notes.human_language_repairs.length > 0 ? `语言替换建议：\n- ${notes.human_language_repairs.join('\n- ')}` : '',
     notes.genre_hollowing_risks.length > 0 ? `体裁空心化：\n- ${notes.genre_hollowing_risks.join('\n- ')}` : '',
     notes.missing_payoffs.length > 0 ? `缺失回收：\n- ${notes.missing_payoffs.join('\n- ')}` : '',
     notes.strengths.length > 0 ? `可保留优点：\n- ${notes.strengths.join('\n- ')}` : '',
@@ -410,7 +426,10 @@ function enhanceReviewNotesWithGuardrails(
     continuity_risks: dedupeTextList(reviewNotes.continuity_risks),
     context_drift_risks: dedupeTextList(reviewNotes.context_drift_risks),
     realism_risks: dedupeTextList([...reviewNotes.realism_risks, ...realismFindings]),
+    coherence_risks: dedupeTextList(reviewNotes.coherence_risks),
+    reader_hook_risks: dedupeTextList(reviewNotes.reader_hook_risks),
     language_risks: dedupeTextList([...reviewNotes.language_risks, ...languageFindings]),
+    human_language_repairs: dedupeTextList(reviewNotes.human_language_repairs),
     genre_hollowing_risks: dedupeTextList([...reviewNotes.genre_hollowing_risks, ...genreHollowFindings]),
     missing_payoffs: dedupeTextList(reviewNotes.missing_payoffs),
     strengths: dedupeTextList(reviewNotes.strengths),
@@ -490,6 +509,7 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
           scenePlan: input.scenePlanText,
           draftContent: originalContent,
           reviewNotes: formatReviewNotes(repairNotes),
+          activeThreads: input.context.activeThreads,
           protagonistReference: input.profile.protagonistReference,
           protagonistRule: input.profile.protagonistRule,
         }),
@@ -505,6 +525,58 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
     }
 
     const finalFindings = collectQualityGuardrailFindings(repairedContent, input.profile.genre)
+    if (finalFindings.length > 0 && shouldForceRepair(finalFindings)) {
+      // 第二轮修复：首轮修复后仍有强制修复触发，再做一次
+      const secondRepairNotes = enhanceReviewNotesWithGuardrails(repairNotes, repairedContent, input.profile.genre, finalFindings)
+      try {
+        const secondContent = (await runChatTask({
+          type: 'chapter_write',
+          novelId: input.chapter.novelId,
+          relatedEntityType: 'chapter',
+          relatedEntityId: input.chapter.id,
+          messages: [{
+            role: 'user',
+            content: buildChapterRewritePrompt({
+              novelTitle: input.novel.title,
+              genre: input.profile.genre,
+              chapterNum: input.chapter.chapterNum,
+              chapterTitle: input.chapter.title || getDefaultChapterTitle(input.chapter.chapterNum),
+              chapterGoal: input.context.chapterGoal,
+              emotionTone: input.chapter.emotionTone || '平稳',
+              targetWords: input.chapter.targetWords || 3000,
+              storyCore: input.storyCore,
+              currentArc: input.context.currentArc,
+              worldRules: input.context.worldRules,
+              characterStates: input.context.characterStates,
+              itemSummary: input.context.itemSummary,
+              previousSummaries: input.context.previousSummaries,
+              lastChapterEnding: input.context.lastChapterEnding,
+              continuitySummary: input.context.continuitySummary,
+              openLoops: input.context.openLoops,
+              continuityNotes: input.context.continuityNotes,
+              timelineSummary: input.context.timelineSummary,
+              timelineOpenThreads: input.context.timelineOpenThreads,
+              longTermMemory: input.context.longTermMemory,
+              consistencyNotes: input.consistencyNotes,
+              scenePlan: input.scenePlanText,
+              draftContent: repairedContent,
+              reviewNotes: formatReviewNotes(secondRepairNotes),
+              activeThreads: input.context.activeThreads,
+              protagonistReference: input.profile.protagonistReference,
+              protagonistRule: input.profile.protagonistRule,
+            }),
+          }],
+          modelConfigId: input.novel.modelConfigId || undefined,
+        })).trim()
+        if (secondContent) {
+          return { content: secondContent, reviewNotes: secondRepairNotes }
+        }
+      } catch {
+        // 第二轮失败时返回第一轮结果
+      }
+      return { content: repairedContent, reviewNotes: secondRepairNotes }
+    }
+
     return {
       content: repairedContent,
       reviewNotes: finalFindings.length > 0
@@ -653,7 +725,7 @@ async function finalizeGeneratedChapterContent(chapterId: number, content: strin
     markSubsequentChaptersStale(
       chapter.novelId,
       chapter.chapterNum,
-      `Chapter ${chapter.chapterNum} content changed`,
+      `第${chapter.chapterNum}章内容已更新`,
     )
     syncChapterTimelineStatuses(chapter.novelId, chapter.chapterNum)
   }
@@ -763,7 +835,7 @@ export function updateChapter(id: number, data: Partial<{
     markSubsequentChaptersStale(
       previous.novelId,
       previous.chapterNum,
-      `Chapter ${previous.chapterNum} content changed`,
+      `第${previous.chapterNum}章内容已更新`,
     )
   }
 }
@@ -776,7 +848,7 @@ export function deleteChapter(id: number) {
     markSubsequentChaptersStale(
       current.novelId,
       current.chapterNum - 1,
-      `Chapter order changed after chapter ${current.chapterNum}`,
+      `第${current.chapterNum}章已删除，后续章节顺序已变更`,
     )
   }
 }
@@ -849,6 +921,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
             timelineOpenThreads: context.timelineOpenThreads,
             longTermMemory: context.longTermMemory,
             consistencyNotes,
+            activeThreads: context.activeThreads,
             protagonistReference: profile.protagonistReference,
             protagonistRule: profile.protagonistRule,
           }),
@@ -905,6 +978,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
           scenePlan: scenePlanText,
           draftContent: '',
           reviewNotes: '',
+          activeThreads: context.activeThreads,
           protagonistReference: profile.protagonistReference,
           protagonistRule: profile.protagonistRule,
         }),
@@ -1000,6 +1074,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
       scenePlan: scenePlanText,
       draftContent,
       reviewNotes: formatReviewNotes(reviewNotes),
+      activeThreads: context.activeThreads,
       protagonistReference: profile.protagonistReference,
       protagonistRule: profile.protagonistRule,
     })
@@ -1024,7 +1099,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
           profile,
           scenePlanText,
           consistencyNotes: writingGuidance,
-          reviewNotes,
+          reviewNotes: buildFallbackReviewNotes(''),
           content: output,
         })
 
@@ -1071,7 +1146,8 @@ export async function aiCheckChapter(chapterId: number): Promise<unknown> {
 
   const novel = db.select().from(novels).where(eq(novels.id, chapter.novelId)).all()[0]
   const content = chapter.content
-  const textToCheck = content.length > 6000
+  const isTruncated = content.length > 6000
+  const textToCheck = isTruncated
     ? `${content.slice(0, 3200)}\n\n……\n\n${content.slice(-2400)}`
     : content
 
@@ -1080,7 +1156,7 @@ export async function aiCheckChapter(chapterId: number): Promise<unknown> {
     novelId: chapter.novelId,
     relatedEntityType: 'chapter',
     relatedEntityId: chapterId,
-    messages: [{ role: 'user', content: aiCheckPrompt(textToCheck) }],
+    messages: [{ role: 'user', content: aiCheckPrompt(textToCheck, isTruncated) }],
     modelConfigId: novel?.modelConfigId || undefined,
   })
 

@@ -741,7 +741,14 @@ export function getWorldRulesAutoGenerateStatus(taskId: number) {
 }
 
 export function getLatestMapAutoGenerateTask(novelId: number) {
-  return getLatestMapWorkflow(novelId)
+  const task = getLatestMapWorkflow(novelId)
+  if (!task) return null
+
+  if (['pending', 'running', 'cancel_requested', 'paused'].includes(task.status || '')) {
+    return task
+  }
+
+  return null
 }
 
 export function getLatestWorldRulesAutoGenerateTask(novelId: number) {

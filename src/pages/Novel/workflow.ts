@@ -35,6 +35,17 @@ export type GuidedWorkflowStepKey =
   | 'story-plot'
   | 'write-start'
 
+export type WorkflowRunnableStepKey =
+  | 'world-rules'
+  | 'map'
+  | 'characters'
+  | 'items'
+  | 'threads'
+  | 'story-design'
+  | 'outline'
+  | 'timeline'
+  | 'writing'
+
 export interface WorkflowStats {
   mapCount: number
   characterCount: number
@@ -54,6 +65,18 @@ export interface GuidedStepProgress {
   totalCount: number
   isComplete: boolean
 }
+
+type WorkflowNovelContext = Pick<
+Novel,
+| 'title'
+| 'synopsis'
+| 'userBackground'
+| 'expandedBackground'
+| 'projectBriefJson'
+| 'settingsJson'
+| 'themeVoiceJson'
+| 'worldRulesJson'
+> | null | undefined
 
 export type { StorySettingsSnapshot }
 
@@ -335,4 +358,122 @@ export function getRecommendedWorkflowStep(
   if (stats.chapterCount <= 0 && stats.totalWords <= 0) return 'writing'
   if (stats.revisionTaskCount > 0) return 'revision'
   return 'overview'
+}
+
+export function getWorkflowBlockers(
+  step: WorkflowRunnableStepKey,
+  novel: WorkflowNovelContext,
+  stats: WorkflowStats,
+): string[] {
+  if (!novel) {
+    return ['当前小说数据还没加载完成，请刷新后再试。']
+  }
+
+  const blockers: string[] = []
+  const pushIfMissing = (ready: boolean, message: string) => {
+    if (!ready) blockers.push(message)
+  }
+
+  const requireBasics = (action: string) => {
+    pushIfMissing(
+      isBasicsReady(novel),
+      `请先补齐书名、简介、用户背景和扩展背景，再${action}。`,
+    )
+  }
+
+  const requireProjectBrief = (action: string) => {
+    pushIfMissing(isProjectBriefReady(novel), `请先补齐项目立项，再${action}。`)
+  }
+
+  const requireStoryCore = (action: string) => {
+    pushIfMissing(isStoryCoreReady(novel), `请先补齐 premise、核心钩子和底层约束，再${action}。`)
+  }
+
+  const requireThemeVoice = (action: string) => {
+    pushIfMissing(isThemeVoiceReady(novel), `请先补齐主题与文风，再${action}。`)
+  }
+
+  const requireWorldRules = (action: string) => {
+    pushIfMissing(isWorldFoundationReady(novel), `请先补齐世界规则，再${action}。`)
+  }
+
+  const requireMap = (action: string) => {
+    pushIfMissing(isMapStructureReady(stats), `请先建立地图骨架，再${action}。`)
+  }
+
+  const requireCharacters = (action: string) => {
+    pushIfMissing(isCharacterRosterReady(stats), `请先建立主角与人物网络，再${action}。`)
+  }
+
+  const requireItems = (action: string) => {
+    pushIfMissing(isItemsEquipmentReady(stats), `请先补齐物品资产，再${action}。`)
+  }
+
+  const requireThreads = (action: string) => {
+    pushIfMissing(isStoryThreadsReady(stats), `请先建立故事线程，再${action}。`)
+  }
+
+  switch (step) {
+    case 'world-rules':
+      requireBasics('同步世界规则')
+      requireProjectBrief('同步世界规则')
+      requireStoryCore('同步世界规则')
+      requireThemeVoice('同步世界规则')
+      break
+    case 'map':
+      requireWorldRules('生成地图')
+      break
+    case 'characters':
+      requireWorldRules('生成人物')
+      requireMap('生成人物')
+      break
+    case 'items':
+      requireWorldRules('生成物品')
+      requireMap('生成物品')
+      requireCharacters('生成物品')
+      break
+    case 'threads':
+      if (!isStoryPlotReady(novel)) {
+        requireWorldRules('生成故事线程')
+        requireMap('生成故事线程')
+        requireCharacters('生成故事线程')
+        requireItems('生成故事线程')
+      }
+      break
+    case 'story-design':
+      requireWorldRules('生成故事设计')
+      requireMap('生成故事设计')
+      requireCharacters('生成故事设计')
+      requireItems('生成故事设计')
+      requireThreads('生成故事设计')
+      break
+    case 'outline':
+      pushIfMissing(isStoryPlotReady(novel), '请先完成故事设计，再生成故事大纲。')
+      break
+    case 'timeline':
+      requireWorldRules('生成时间轴')
+      requireMap('生成时间轴')
+      requireCharacters('生成时间轴')
+      requireItems('生成时间轴')
+      pushIfMissing(
+        isStoryPlotReady(novel) || stats.outlineCount > 0,
+        '请先完成故事设计，或先生成故事大纲，再生成时间轴。',
+      )
+      break
+    case 'writing':
+      requireThreads('开始正文写作')
+      pushIfMissing(stats.outlineCount > 0, '请先生成故事大纲，再开始正文写作。')
+      pushIfMissing(stats.timelineCount > 0, '请先补齐时间轴，再开始正文写作。')
+      break
+  }
+
+  return blockers
+}
+
+export function canRunWorkflowStep(
+  step: WorkflowRunnableStepKey,
+  novel: WorkflowNovelContext,
+  stats: WorkflowStats,
+): boolean {
+  return getWorkflowBlockers(step, novel, stats).length === 0
 }

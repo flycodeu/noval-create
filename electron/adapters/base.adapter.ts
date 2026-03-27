@@ -10,6 +10,8 @@ export interface ChatOptions {
   stopSequences?: string[]
   onStream?: (chunk: string) => void
   signal?: AbortSignal
+  timeoutMs?: number
+  requestRetryCount?: number
 }
 
 export abstract class BaseAdapter {

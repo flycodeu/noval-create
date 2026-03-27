@@ -116,6 +116,7 @@ export interface ChapterOutlinePromptInput {
   continuitySummary: string
   openLoops: string
   worldRulesSummary: string
+  previousChapterOutlines?: string
   protagonistReference: string
   protagonistRule: string
 }
@@ -162,6 +163,7 @@ export interface ChapterWritingPromptInput {
   continuityNotes: string
   timelineSummary: string
   timelineOpenThreads: string
+  activeThreads?: string
   protagonistReference: string
   protagonistRule: string
 }
@@ -189,6 +191,7 @@ export interface ScenePlanPromptInput {
   timelineOpenThreads: string
   longTermMemory: string
   consistencyNotes: string
+  activeThreads?: string
   protagonistReference: string
   protagonistRule: string
 }
@@ -240,6 +243,7 @@ export interface ChapterRewritePromptInput {
   scenePlan: string
   draftContent: string
   reviewNotes: string
+  activeThreads?: string
   protagonistReference: string
   protagonistRule: string
 }
@@ -921,6 +925,7 @@ export function buildChapterOutlinePlanningPrompt(params: ChapterOutlinePromptIn
       params.characterStates ? '关键人物状态：\n' + params.characterStates : '',
       params.worldRulesSummary ? '世界规则：\n' + params.worldRulesSummary : '',
     ]),
+    params.previousChapterOutlines ? section('已有章节大纲（差异化参考）', params.previousChapterOutlines) : '',
     ...buildPromptGuardrailSections({
       genre: params.genre,
       storyCore: [params.storyGoal, params.coreConflict, params.mainPlot, params.arcGoal].filter(Boolean).join('\n'),
@@ -936,6 +941,7 @@ export function buildChapterOutlinePlanningPrompt(params: ChapterOutlinePromptIn
       'cost_ledger 要写 1 到 3 条本章真正付出的代价账本，落在伤病、资源、人情、时间、名声、机会或秩序压力上。',
       '至少安排部分章节让主角遭遇暂时解决不了的问题或明确代价，不要章章顺利推进。',
       '章节之间要有轻重起伏，不能每章都像同一个节奏模板。',
+      '新生成的章节开头方式、情绪基调、登场人物组合不得与已有章节大纲连续重复超过两章。',
       '优先安排真正需要上场的人物和地点，别把所有线索都塞进每一章。',
     ].join('\n')),
     section('语言要求', buildHumanLanguageRules([
@@ -1028,6 +1034,7 @@ export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
     section('未回收事项', params.openLoops),
     section('时间轴锚点', params.timelineSummary),
     section('时间轴待回收', params.timelineOpenThreads),
+    section('活跃支线与伏笔', params.activeThreads),
     section('长文压缩记忆', params.longTermMemory),
     section('当前结构体检提醒', params.consistencyNotes),
     section('计划要求', [
@@ -1071,6 +1078,7 @@ export function buildChapterWritingPrompt(params: ChapterWritingPromptInput): st
     section('当前未回收事项', params.openLoops),
     section('时间轴关键节点', params.timelineSummary),
     section('时间轴待回收事项', params.timelineOpenThreads),
+    section('活跃支线与伏笔', params.activeThreads),
     section('上章结尾', params.lastChapterEnding),
     section('当前人物状态', params.characterStates),
     section('当前故事弧', params.currentArc),
@@ -1125,6 +1133,7 @@ export function buildChapterDraftPrompt(params: ChapterRewritePromptInput): stri
     section('未回收事项', params.openLoops),
     section('时间轴锚点', params.timelineSummary),
     section('时间轴待回收', params.timelineOpenThreads),
+    section('活跃支线与伏笔', params.activeThreads),
     section('长文压缩记忆', params.longTermMemory),
     section('结构体检提醒', params.consistencyNotes),
     section('初稿要求', [
@@ -1276,48 +1285,61 @@ export function storyArcsPrompt(params: {
   subPlots: string
   ending: string
   totalChapters: number
+  rhythmSummary?: string
+  background?: string
+  protagonistReference?: string
+  protagonistRule?: string
 }): string {
   return buildStoryArcPlanningPrompt({
     ...params,
-    rhythmSummary: '',
-    background: '',
-    protagonistReference: '主角',
-    protagonistRule: '若涉及主角，沿用现有设定中的唯一称呼，不要擅自改名。',
+    rhythmSummary: params.rhythmSummary || '',
+    background: params.background || '',
+    protagonistReference: params.protagonistReference || '主角',
+    protagonistRule: params.protagonistRule || '若涉及主角，沿用现有设定中的唯一称呼，不要擅自改名。',
   })
 }
 
 export function chapterOutlinePrompt(params: {
   novelTitle: string
+  genre?: string
+  storyGoal?: string
+  coreConflict?: string
+  mainPlot?: string
   arcName: string
   arcGoal: string
+  arcSummary?: string
   arcGrowthLedger?: string
   arcCostLedger?: string
   chapterStart: number
   chapterEnd: number
   previousSummary: string
   characterStates: string
+  continuitySummary?: string
+  openLoops?: string
   worldRulesSummary: string
+  protagonistReference?: string
+  protagonistRule?: string
 }): string {
   return buildChapterOutlinePlanningPrompt({
     novelTitle: params.novelTitle,
-    genre: '',
-    storyGoal: '',
-    coreConflict: '',
-    mainPlot: '',
+    genre: params.genre || '',
+    storyGoal: params.storyGoal || '',
+    coreConflict: params.coreConflict || '',
+    mainPlot: params.mainPlot || '',
     arcName: params.arcName,
     arcGoal: params.arcGoal,
-    arcSummary: '',
+    arcSummary: params.arcSummary || '',
     arcGrowthLedger: params.arcGrowthLedger || '',
     arcCostLedger: params.arcCostLedger || '',
     chapterStart: params.chapterStart,
     chapterEnd: params.chapterEnd,
     previousSummary: params.previousSummary,
     characterStates: params.characterStates,
-    continuitySummary: '',
-    openLoops: '',
+    continuitySummary: params.continuitySummary || '',
+    openLoops: params.openLoops || '',
     worldRulesSummary: params.worldRulesSummary,
-    protagonistReference: '主角',
-    protagonistRule: '若涉及主角，沿用现有设定中的唯一称呼，不要擅自改名。',
+    protagonistReference: params.protagonistReference || '主角',
+    protagonistRule: params.protagonistRule || '若涉及主角，沿用现有设定中的唯一称呼，不要擅自改名。',
   })
 }
 
@@ -1334,6 +1356,16 @@ export function chapterWritingPrompt(params: {
   lastChapterEnding: string
   styleTemplate: string
   targetWords: number
+  genre?: string
+  storyCore?: string
+  currentArc?: string
+  continuitySummary?: string
+  openLoops?: string
+  continuityNotes?: string
+  timelineSummary?: string
+  timelineOpenThreads?: string
+  protagonistReference?: string
+  protagonistRule?: string
 }): string {
   return buildChapterWritingPrompt({
     novelTitle: params.novelTitle,
@@ -1343,20 +1375,21 @@ export function chapterWritingPrompt(params: {
     plotPoints: params.plotPoints,
     emotionTone: params.emotionTone,
     targetWords: params.targetWords,
-    storyCore: '',
-    currentArc: '',
+    genre: params.genre || '',
+    storyCore: params.storyCore || '',
+    currentArc: params.currentArc || '',
     worldRules: params.worldRules,
     characterStates: params.characterStates,
     previousSummaries: params.previousSummaries,
     lastChapterEnding: params.lastChapterEnding,
     styleTemplate: params.styleTemplate,
-    continuitySummary: '',
-    openLoops: '',
-    continuityNotes: '',
-    timelineSummary: '',
-    timelineOpenThreads: '',
-    protagonistReference: '主角',
-    protagonistRule: '若涉及主角，沿用现有设定中的唯一称呼，不要擅自改名。',
+    continuitySummary: params.continuitySummary || '',
+    openLoops: params.openLoops || '',
+    continuityNotes: params.continuityNotes || '',
+    timelineSummary: params.timelineSummary || '',
+    timelineOpenThreads: params.timelineOpenThreads || '',
+    protagonistReference: params.protagonistReference || '主角',
+    protagonistRule: params.protagonistRule || '若涉及主角，沿用现有设定中的唯一称呼，不要擅自改名。',
   })
 }
 
@@ -1382,9 +1415,12 @@ export function chapterSummaryPrompt(chapterContent: string): string {
   ])
 }
 
-export function aiCheckPrompt(text: string): string {
+export function aiCheckPrompt(text: string, truncated = false): string {
   return renderPrompt([
     '检查这段小说文字里的 AI 指纹，以及会让读者出戏的真实度或上下文问题。',
+    truncated
+      ? '【注意】以下文本因篇幅过长已做首尾采样，中间省略部分用“……”表示。请基于可见内容进行评估，不要对省略部分下结论。'
+      : '',
     section('待检查文本', text),
     section('真实度护栏', buildGenreRealityRules({
       extraLines: ['同时标出上下文漂移、不合理恢复、不合理移动、不可能的资源结果，以及缺乏规则支撑的能力使用。'],

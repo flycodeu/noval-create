@@ -119,6 +119,7 @@ export interface ChapterContext {
   timelineSummary: string
   timelineOpenThreads: string
   longTermMemory: string
+  activeThreads: string
 }
 
 interface ChapterWithContinuity {
@@ -633,6 +634,35 @@ function buildItemSummary(novelId: number): string {
     .join('\n')
 }
 
+function buildActiveThreadsContext(novelId: number, chapterNum: number): string {
+  const db = getDb()
+  const rows = db.select().from(storyThreads)
+    .where(eq(storyThreads.novelId, novelId))
+    .orderBy(asc(storyThreads.sortOrder), asc(storyThreads.id))
+    .all()
+    .filter((thread) => {
+      if (thread.status === 'resolved' || thread.status === 'abandoned') return false
+      if (thread.status !== 'active') return false
+      return true
+    })
+
+  if (rows.length === 0) return ''
+
+  // 优先显示即将到期（targetPayoffChapter 在当前章节附近 10 章内）的线索
+  const urgent = rows.filter((t) => t.targetPayoffChapter != null && t.targetPayoffChapter - chapterNum <= 10 && t.targetPayoffChapter >= chapterNum)
+  const rest = rows.filter((t) => !urgent.includes(t))
+  const ordered = [...urgent, ...rest].slice(0, 6)
+
+  return ordered
+    .map((thread) => {
+      const urgentTag = urgent.includes(thread) ? `[即将回收第${thread.targetPayoffChapter}章]` : ''
+      const payoff = thread.payoffCondition ? `回收条件：${thread.payoffCondition}` : ''
+      const state = thread.currentState || thread.summary || thread.premise || ''
+      return [`【${thread.threadType || '支线'}】${thread.title}${urgentTag}`, state, payoff].filter(Boolean).join(' | ')
+    })
+    .join('\n')
+}
+
 function buildStoryThreadsSummary(novelId: number): string {
   const db = getDb()
   const rows = db.select().from(storyThreads)
@@ -813,6 +843,7 @@ export async function buildChapterContext(
   )
   const longTermMemory = buildStoryMemoryPromptSummary(novelId, { chapterId: currentChapter?.id })
   const itemSummary = buildItemSummary(novelId)
+  const activeThreadsContext = buildActiveThreadsContext(novelId, chapterNum)
 
   const previousSummaries = recentChapters
     .filter((chapter) => chapter.summary)
@@ -851,6 +882,7 @@ export async function buildChapterContext(
     { priority: 2, label: 'characterStates', content: buildCharacterStates(allCharacters, recentChapters) },
     { priority: 2, label: 'continuitySummary', content: continuityChapters.map(formatContinuityEntry).join('\n') },
     { priority: 2, label: 'timelineSummary', content: timelineContext.timelineSummary },
+    { priority: 2, label: 'activeThreads', content: activeThreadsContext },
     { priority: 2, label: 'styleTemplate', content: profile.styleTemplateSummary },
     { priority: 3, label: 'previousSummaries', content: previousSummaries },
   ]
@@ -873,6 +905,7 @@ export async function buildChapterContext(
     timelineSummary: allocated.timelineSummary || '',
     timelineOpenThreads: allocated.timelineOpenThreads || '',
     longTermMemory: allocated.longTermMemory || '',
+    activeThreads: allocated.activeThreads || '',
   }
 }
 

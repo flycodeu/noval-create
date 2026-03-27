@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Space, Tag, message } from 'antd'
 import {
   BarsOutlined,
@@ -32,11 +32,13 @@ import {
 } from '../components/WorkspaceShell'
 import {
   EMPTY_WORKFLOW_STATS,
+  getWorkflowBlockers,
   isProjectBriefReady,
   isStoryCoreReady,
   isStoryPlotReady,
   isThemeVoiceReady,
   loadWorkflowStats,
+  type WorkflowRunnableStepKey,
   type WorkflowStats,
 } from '../workflow'
 
@@ -128,9 +130,23 @@ export default function GuidePage({ novelId }: Props) {
     [currentNovel?.genreName],
   )
 
-  const refreshStats = useCallback(async () => {
-    setStats(await loadWorkflowStats(novelId))
-  }, [novelId])
+  const refreshWorkflowContext = useCallback(async () => {
+    const [nextNovel, nextStats] = await Promise.all([
+      window.electron.novel.get(novelId),
+      loadWorkflowStats(novelId),
+    ])
+
+    if (nextNovel) {
+      setCurrentNovel(nextNovel)
+    }
+
+    setStats(nextStats)
+
+    return {
+      novel: nextNovel,
+      stats: nextStats,
+    }
+  }, [novelId, setCurrentNovel])
 
   const refreshDiagnostics = useCallback(async () => {
     const [report, nextContextStatus] = await Promise.all([
@@ -142,8 +158,8 @@ export default function GuidePage({ novelId }: Props) {
   }, [novelId])
 
   useEffect(() => {
-    void Promise.all([refreshStats(), refreshDiagnostics()])
-  }, [refreshDiagnostics, refreshStats])
+    void Promise.all([refreshWorkflowContext(), refreshDiagnostics()])
+  }, [refreshDiagnostics, refreshWorkflowContext])
 
   const syncWorldRulesCore = useCallback(async () => {
     const normalized = parseWorldRulesJson(currentNovel?.worldRulesJson, currentNovel?.genreName)
@@ -191,9 +207,25 @@ export default function GuidePage({ novelId }: Props) {
       templateOnly: false,
       refreshTemplates: true,
       batchSize: 4,
-      focus: '先补足符合题材的流通物品和剧情挂点，再生成可落地实例。',
+      focus: 'Prioritize practical item circulation and concrete plot hooks before adding new instances.',
     })
   }, [itemProfile.defaultBatch, novelId])
+
+  const generateThreadsCore = useCallback(async () => {
+    const result = await window.electron.thread.generate(novelId, {
+      count: 8,
+      batchSize: 4,
+      focus: 'Prioritize mainline momentum, relationship pressure, suspense payoff, and ending callbacks.',
+    })
+
+    if (result.createdCount <= 0) {
+      throw new Error(result.warnings[0] || 'Story thread generation produced no usable results.')
+    }
+
+    if (result.warnings.length > 0) {
+      message.warning(`Generated ${result.createdCount} threads with ${result.warnings.length} warnings.`)
+    }
+  }, [novelId])
 
   const generateStoryDesignCore = useCallback(async () => {
     const result = await window.electron.ai.generateCoreSettings({
@@ -245,46 +277,79 @@ export default function GuidePage({ novelId }: Props) {
 
     try {
       await action()
-      await Promise.all([refreshStats(), refreshDiagnostics()])
+      await Promise.all([refreshWorkflowContext(), refreshDiagnostics()])
       message.success(successText)
     } catch (error) {
       console.error(error)
-      message.error('执行失败，请稍后重试或先检查前置内容是否完整。')
+      message.error(error instanceof Error ? error.message : 'Execution failed. Check prerequisites and try again.')
     } finally {
       setRunningKey(null)
     }
-  }, [refreshDiagnostics, refreshStats])
+  }, [refreshDiagnostics, refreshWorkflowContext])
 
-  const syncWorldRules = () => runStep('world-rules', syncWorldRulesCore, '世界规则已按当前题材同步。')
-  const generateMap = () => runStep('map', generateMapCore, '地图首批骨架已生成，可继续在地图页补下一批。')
-  const generateCharacters = () => runStep('characters', generateCharactersCore, '人物网络首版已生成。')
-  const generateItems = () => runStep('items', generateItemsCore, '物品模板与实例首批已生成，可继续在物品页补下一批。')
-  const generateOutline = () => runStep('outline', generateOutlineCore, '故事弧首批已生成，可继续在大纲页细化章节。')
-  const generateStoryDesign = () => runStep('story-design', generateStoryDesignCore, '故事设计首版已生成，可继续在故事设计页细修。')
-  const generateTimeline = () => runStep('timeline', generateTimelineCore, '时间轴首批事件已生成，可继续追加下一批。')
+  const ensureStepReady = useCallback(async (step: WorkflowRunnableStepKey) => {
+    const workflowContext = await refreshWorkflowContext()
+    const blockers = getWorkflowBlockers(step, workflowContext.novel, workflowContext.stats)
+
+    if (blockers.length > 0) {
+      message.warning(blockers.join('\n'))
+      return false
+    }
+
+    return true
+  }, [refreshWorkflowContext])
+
+  const runGuardedStep = useCallback(async (
+    step: WorkflowRunnableStepKey,
+    action: () => Promise<void>,
+    successText: string,
+  ) => {
+    const ready = await ensureStepReady(step)
+    if (!ready) return
+    await runStep(step, action, successText)
+  }, [ensureStepReady, runStep])
+
+  const syncWorldRules = () => void runGuardedStep('world-rules', syncWorldRulesCore, 'World rules synced for the current genre.')
+  const generateMap = () => void runGuardedStep('map', generateMapCore, 'Initial map skeleton generated. Continue refining on the map page.')
+  const generateCharacters = () => void runGuardedStep('characters', generateCharactersCore, 'Initial character network generated.')
+  const generateItems = () => void runGuardedStep('items', generateItemsCore, 'Initial item templates and instances generated.')
+  const generateThreads = () => void runGuardedStep('threads', generateThreadsCore, 'Initial story threads generated. Continue refining on the threads page.')
+  const generateOutline = () => void runGuardedStep('outline', generateOutlineCore, 'Initial story arcs generated. Continue refining on the outline page.')
+  const generateStoryDesign = () => void runGuardedStep('story-design', generateStoryDesignCore, 'Initial story design generated. Continue refining on the story design page.')
+  const generateTimeline = () => void runGuardedStep('timeline', generateTimelineCore, 'Initial timeline events generated. Continue refining on the timeline page.')
 
   const runPipeline = async () => {
     setRunningKey('pipeline')
 
     try {
+      if (!(await ensureStepReady('world-rules'))) return
       await syncWorldRulesCore()
-      await refreshStats()
+      await refreshWorkflowContext()
+      if (!(await ensureStepReady('map'))) return
       await generateMapCore()
-      await refreshStats()
+      await refreshWorkflowContext()
+      if (!(await ensureStepReady('characters'))) return
       await generateCharactersCore()
-      await refreshStats()
+      await refreshWorkflowContext()
+      if (!(await ensureStepReady('items'))) return
       await generateItemsCore()
-      await refreshStats()
+      await refreshWorkflowContext()
+      if (!(await ensureStepReady('threads'))) return
+      await generateThreadsCore()
+      await refreshWorkflowContext()
+      if (!(await ensureStepReady('story-design'))) return
       await generateStoryDesignCore()
-      await refreshStats()
+      await refreshWorkflowContext()
+      if (!(await ensureStepReady('outline'))) return
       await generateOutlineCore()
-      await refreshStats()
+      await refreshWorkflowContext()
+      if (!(await ensureStepReady('timeline'))) return
       await generateTimelineCore()
-      await Promise.all([refreshStats(), refreshDiagnostics()])
-      message.success('首批基础资产与故事设计已铺好，后续请在结构、时间轴和正文页继续分批细化。')
+      await Promise.all([refreshWorkflowContext(), refreshDiagnostics()])
+      message.success('Initial assets and story structure are in place. Continue refining in outline, timeline, and writing.')
     } catch (error) {
       console.error(error)
-      message.error('AI 铺设中断，请先检查基础设定、世界资产和故事设计前置是否完整。')
+      message.error(error instanceof Error ? error.message : 'AI pipeline interrupted. Check prerequisites before continuing.')
     } finally {
       setRunningKey(null)
     }
@@ -438,19 +503,24 @@ export default function GuidePage({ novelId }: Props) {
     },
     {
       key: 'threads',
-      title: '故事线程',
-      desc: '把主线、支线、悬念、关系线和回收线都建成可追踪线程，减少长篇推进中的遗忘和断裂。',
-      status: stats.threadCount > 0 ? '已建立' : '待建立',
-      count: `${stats.threadCount} 条线程`,
+      title: 'Story Threads',
+      desc: 'Track mainline, subplots, mysteries, relationship arcs, and payoffs as reusable threads for outline, timeline, and drafting.',
+      status: stats.threadCount > 0 ? 'Ready' : 'Pending',
+      count: `${stats.threadCount} threads`,
       support: stats.threadCount > 0
-        ? '线程已经能给结构、时间轴和正文提供统一的回查挂点。'
-        : '没有线程层，后面的结构和正文只会各自推进，伏笔、关系线和回收点会越来越散。',
+        ? 'Threads can now anchor outline, timeline, and chapter callbacks.'
+        : 'Without a thread layer, later structure and drafting will drift apart and forget setups.',
       ready: stats.threadCount > 0,
       icon: <BarsOutlined />,
       action: (
-        <Button type="primary" ghost icon={<BarsOutlined />} onClick={() => navigate(`/novels/${novelId}/threads`)}>
-          去整理
-        </Button>
+        <Space wrap>
+          <Button loading={runningKey === 'threads'} icon={<BarsOutlined />} onClick={generateThreads}>
+            AI Generate
+          </Button>
+          <Button type="link" onClick={() => navigate(`/novels/${novelId}/threads`)}>
+            Open Page
+          </Button>
+        </Space>
       ),
     },
     {

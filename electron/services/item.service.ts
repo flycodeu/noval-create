@@ -11,7 +11,12 @@ import {
   resolveGenreFamily,
 } from '../../src/shared/creation-tools'
 import { getFactionNameOptions, parseWorldRulesJson } from '../../src/shared/genre-system'
-import { buildHumanLanguageRules } from '../../src/shared/prompt-library'
+import {
+  buildContextAlignmentRules,
+  buildGenreRealityRules,
+  buildHumanLanguageRules,
+  buildOutputQualityRules,
+} from '../../src/shared/prompt-library'
 import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/utils/text'
 import { markNovelContextChanged } from './context-impact.service'
 
@@ -72,7 +77,7 @@ function toStringArray(value: unknown): string[] {
 
   const text = asText(value)
   if (!text) return []
-  return cleanAiStringArray(text.split(/[\n,，、]/))
+  return cleanAiStringArray(text.split(/[\n,]/))
 }
 
 function stringifyNumberArray(value: number[]): string {
@@ -161,7 +166,7 @@ function buildCharacterSummary(rows: Array<typeof characters.$inferSelect>): str
     .slice(0, 10)
     .map((row) => {
       const pieces = [row.roleType, row.species, row.occupation, row.rankLevel].filter(Boolean)
-      return `- ${row.fullName}${pieces.length > 0 ? `：${pieces.join(' / ')}` : ''}`
+      return `- ${row.fullName}${pieces.length > 0 ? `锛?{pieces.join(' / ')}` : ''}`
     })
     .join('\n')
 }
@@ -171,7 +176,7 @@ function buildLocationSummary(rows: Array<typeof worldMap.$inferSelect>): string
     .slice(0, 10)
     .map((row) => {
       const pieces = [row.nodeType, row.structureRole].filter(Boolean)
-      return `- ${row.name}${pieces.length > 0 ? `：${pieces.join(' / ')}` : ''}`
+      return `- ${row.name}${pieces.length > 0 ? `锛?{pieces.join(' / ')}` : ''}`
     })
     .join('\n')
 }
@@ -180,14 +185,14 @@ function buildArcSummary(rows: Array<typeof storyArcs.$inferSelect>): string {
   return rows
     .sort((left, right) => left.arcOrder - right.arcOrder)
     .slice(0, 8)
-    .map((row) => `- ${row.arcName}：${row.arcGoal || row.arcSummary || '未补充'}`)
+    .map((row) => `- ${row.arcName}锛?{row.arcGoal || row.arcSummary || '鏈ˉ鍏?}`)
     .join('\n')
 }
 
 function buildEventSummary(rows: Array<typeof timelineEvents.$inferSelect>): string {
   return rows
     .slice(0, 10)
-    .map((row) => `- ${row.timeLabel}｜${row.eventTitle}`)
+    .map((row) => `- ${row.timeLabel}锝?{row.eventTitle}`)
     .join('\n')
 }
 
@@ -196,12 +201,21 @@ function buildExistingItemSummary(rows: Array<typeof storyItems.$inferSelect>): 
     .filter((row) => row.itemKind === 'instance')
     .slice(0, 12)
     .map((row) => {
-      const parts = [row.category, row.locationMapId ? '已绑定地点' : '', row.ownerCharacterId ? '已绑定持有者' : '']
+      const parts = [row.category, row.locationMapId ? 'linked location' : '', row.ownerCharacterId ? 'linked owner' : '']
         .filter(Boolean)
         .join(' / ')
-      return `- ${row.itemName}${parts ? `：${parts}` : ''}`
+      return `- ${row.itemName}${parts ? ` (${parts})` : ''}`
     })
     .join('\n')
+}
+
+function buildSection(title: string, lines: Array<string | undefined | null | false>): string {
+  const body = lines
+    .map((line) => (typeof line === 'string' ? line.trim() : ''))
+    .filter(Boolean)
+    .join('\n')
+
+  return body ? `[${title}]\n${body}` : ''
 }
 
 function buildPrompt(input: {
@@ -221,55 +235,77 @@ function buildPrompt(input: {
   count: number
 }) {
   return [
-    `你要为小说《${input.novelTitle}》生成一组可直接用于写作的剧情物品。`,
-    '要求这些物品必须贴合题材、背景、势力结构、角色关系和时间轴，不能脱离上下文单独发明。',
-    '',
-    '【小说上下文】',
-    `题材：${input.genre}`,
-    `背景：${input.background || '未补充'}`,
-    `世界规则：${input.worldSummary || '未补充'}`,
-    `故事核心：${input.storyCore || '未补充'}`,
-    input.focus ? `本次额外聚焦：${input.focus}` : '',
-    '',
-    '【物品模板】',
-    input.templateSummary,
-    '',
-    '【人物】',
-    input.characterSummary || '暂无人物',
-    '',
-    '【地点】',
-    input.locationSummary || '暂无地点',
-    '',
-    '【势力】',
-    input.factionSummary || '暂无势力',
-    '',
-    '【故事弧】',
-    input.arcSummary || '暂无故事弧',
-    '',
-    '【时间轴】',
-    input.eventSummary || '暂无时间轴事件',
-    '',
-    '【已有物品实例】',
-    input.existingItemSummary || '暂无已有实例',
-    '',
-    '【生成要求】',
-    `1. 生成 ${input.count} 个具体物品实例，不要只给分类。`,
-    '2. 每个物品都要说清楚它属于哪类模板、为什么会出现在这个故事里、谁会持有或争夺它。',
-    '3. 能关联人物就关联人物，能关联地点或事件就尽量关联，避免“通用道具”。',
-    '4. 名称要像小说编辑写工作稿，不要故作玄虚，不要给普通词乱加引号。',
-    '5. summary、plot_function、cost、risk 都要写具体，不要出现“承载命运”“真正成长”这种空话。',
-    '',
-    '【语言要求】',
-    buildHumanLanguageRules([
-      '物品说明只写和剧情、人物、地点、事件直接相关的信息，不要扩展到无关领域。',
-      '不要把没有直接关系的概念硬拼在一句话里，例如卡路里、感染概率、金融指标之类。',
-      'summary、plot_function、cost、risk 优先写成自然中文短句，不要写成广告口号或假深刻文案。',
+    `You are the item editor for a Chinese long-form novel. Generate ${input.count} concrete story item instances for "${input.novelTitle}".`,
+    buildSection('Task Goal', [
+      'Generate concrete, reusable item instances instead of abstract concepts or loose category labels.',
+      'Every item must attach to a character, location, event, faction, or explicit circulation path so later chapters can call it back directly.',
+      'All generated field values must read as natural Chinese that matches the existing novel setting unless a term is already established in another language.',
+      input.focus ? `Current batch focus: ${input.focus}` : '',
     ]),
-    '',
-    '【输出格式】',
-    '只输出 JSON 数组，不要解释，不要 Markdown：',
-    '[{"template_name":"对应模板名称","item_name":"物品名","category":"类别","sub_type":"更细分类型","rarity":"常见/稀有/核心/禁用级","owner_name":"持有者姓名，没有就留空","location_name":"常见出现地点，没有就留空","event_title":"最相关的时间轴事件，没有就留空","summary":"40字内说明它是什么","acquisition_method":"如何获得","usage_method":"怎么用","cost":"使用或持有代价","risk":"风险","plot_function":"对剧情的作用","appearance":"可识别外观细节","faction_hint":"最相关的势力或组织","linked_character_names":["相关人物A"],"tags":["标签1","标签2"]}]',
-  ].filter(Boolean).join('\n')
+    buildSection('Story Context', [
+      `Genre: ${input.genre}`,
+      `Background: ${input.background || 'Not provided'}`,
+      `World rules: ${input.worldSummary || 'Not provided'}`,
+      `Story core: ${input.storyCore || 'Not provided'}`,
+    ]),
+    buildSection('Existing Templates', [input.templateSummary || 'No template summary provided']),
+    buildSection('Characters', [input.characterSummary || 'No characters available']),
+    buildSection('Locations', [input.locationSummary || 'No locations available']),
+    buildSection('Factions', [input.factionSummary || 'No factions available']),
+    buildSection('Story Arcs', [input.arcSummary || 'No story arcs available']),
+    buildSection('Timeline Events', [input.eventSummary || 'No timeline events available']),
+    buildSection('Existing Item Instances', [input.existingItemSummary || 'No existing item instances']),
+    buildSection('Context Guardrails', [
+      buildContextAlignmentRules({
+        background: input.background,
+        storyCore: input.storyCore,
+        worldSummary: input.worldSummary,
+        taskFocus: 'Generate grounded item instances that can be traced, reused, and called back in later chapters.',
+        extraLines: [
+          'Prefer existing characters, locations, events, factions, and templates before inventing anything new.',
+          'Each item must answer: why it appears now, who uses or fights over it, and what changes after it appears.',
+        ],
+      }),
+    ]),
+    buildSection('Reality Guardrails', [
+      buildGenreRealityRules({
+        genre: input.genre,
+        worldSummary: input.worldSummary,
+        extraLines: [
+          'Item power, rarity, circulation, maintenance, and danger must fit the current world order and resource logic.',
+          'Do not introduce sudden black-box artifacts, omnipotent plot devices, or unexplained cross-genre technology jumps.',
+        ],
+      }),
+    ]),
+    buildSection('Output Quality Floor', [
+      buildOutputQualityRules([
+        'summary, plot_function, cost, and risk must stay concrete and factual; prioritize conditions, actions, limits, and consequences.',
+        'Each item must bind to at least one person, place, or event; if that is impossible, explain a clear source and destination within the fields.',
+        'Do not output omnipotent props, fate props, empty symbolic props, or objects that only exist to say they push the plot.',
+        'Do not repeat existing item names, functions, origins, or payoff roles.',
+        'Avoid slogan-like phrasing, pseudo-poetic metaphors, floating abstractions, and fake depth.',
+      ], input.genre),
+    ]),
+    buildSection('Language Rules', [
+      buildHumanLanguageRules([
+        'Name the item like something a human editor would put on a story asset board, not like a marketing slogan.',
+        'Keep summary, plot_function, cost, and risk in short natural sentences instead of abstract declarations.',
+        'Only write information directly relevant to the item itself; do not drift into encyclopedia mode or unrelated world exposition.',
+      ]),
+    ]),
+    buildSection('Generation Requirements', [
+      `Return exactly ${input.count} item instances. The JSON array length must equal ${input.count}.`,
+      'template_name should match an existing template when possible. If there is no good template, leave it empty but keep item_name fully concrete.',
+      'owner_name, location_name, and event_title should reuse existing assets whenever possible. Leave them empty instead of fabricating new proper nouns.',
+      'summary should answer what the item is; plot_function should answer which conflict, payoff, or leverage point it affects; cost and risk should state clear tradeoffs and consequences.',
+      'linked_character_names should contain 0 to 3 strongly related characters. tags should contain 2 to 5 short labels.',
+      'rarity, acquisition_method, usage_method, appearance, and faction_hint must all be specific and grounded.',
+    ]),
+    buildSection('Output Contract', [
+      'Return JSON array only. No explanation. No markdown. No code fences.',
+      '[{"template_name":"existing template name or empty","item_name":"concrete item name","category":"category","sub_type":"specific subtype","rarity":"common/rare/core/forbidden","owner_name":"existing owner name or empty","location_name":"existing location name or empty","event_title":"existing event title or empty","summary":"one-sentence description","acquisition_method":"how it is obtained","usage_method":"how it is used","cost":"concrete cost","risk":"concrete risk","plot_function":"specific story function","appearance":"recognizable appearance","faction_hint":"related faction or organization","linked_character_names":["related character A"],"tags":["tag1","tag2"]}]',
+    ]),
+  ].filter(Boolean).join('\n\n')
 }
 
 function buildGeneratedPayload(
@@ -551,7 +587,7 @@ function ensureTemplateRows(
         cost: '',
         risk: '',
         plotFunction: template.storyValue,
-        appearance: template.examples.join('、'),
+        appearance: template.examples.join(', '),
         tagsJson: stringifyStringArray(template.examples),
       }, { skipContextTracking: true })
       continue
@@ -570,7 +606,7 @@ function ensureTemplateRows(
       cost: '',
       risk: '',
       plotFunction: template.storyValue,
-      appearance: template.examples.join('、'),
+      appearance: template.examples.join(', '),
       tagsJson: stringifyStringArray(template.examples),
       sortOrder: index + 1,
     }, { skipContextTracking: true })
@@ -607,7 +643,7 @@ export function createStoryItem(
   const result = db.insert(storyItems).values({
     novelId,
     itemKind: 'instance',
-    itemName: data.itemName || '未命名物品',
+    itemName: data.itemName || 'Unnamed item',
     status: 'available',
     linkedCharacterIdsJson: '[]',
     linkedTimelineEventIdsJson: '[]',
@@ -675,7 +711,7 @@ export async function generateStoryItems(
 ): Promise<number[]> {
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
-  if (!novel) throw new Error('小说不存在')
+  if (!novel) throw new Error('Novel not found')
 
   const profile = await buildStoryProfile(novelId)
   const rules = parseWorldRulesJson(novel.worldRulesJson, profile.genre)
@@ -720,8 +756,7 @@ export async function generateStoryItems(
       factionSummary: getFactionNameOptions(rules).join(', '),
       arcSummary: buildArcSummary(arcRows),
       eventSummary: buildEventSummary(eventRows),
-      existingItemSummary: buildExistingItemSummary(currentItems),
-      focus: [options.focus, `第${Math.floor(generatedCount / batchSize) + 1}批：只补 ${currentBatchCount} 个新的物品实例，避免重复已有物品。`].filter(Boolean).join('\n'),
+      existingItemSummary: buildExistingItemSummary(currentItems),      focus: [options.focus, `Batch ${Math.floor(generatedCount / batchSize) + 1}: add ${currentBatchCount} new item instances and avoid duplicating existing items.`].filter(Boolean).join('\n'),
       count: currentBatchCount,
     })
 
@@ -759,3 +794,4 @@ export async function generateStoryItems(
 
   return createdIds
 }
+

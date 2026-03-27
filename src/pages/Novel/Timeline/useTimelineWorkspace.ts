@@ -19,6 +19,12 @@ import type {
 import { useNovelStore } from '../../../stores/novel.store'
 import { parseWorldRulesJson } from '../../../shared/genre-system'
 import {
+  EMPTY_WORKFLOW_STATS,
+  getWorkflowBlockers,
+  loadWorkflowStats,
+  type WorkflowStats,
+} from '../workflow'
+import {
   createEmptyPage,
   getPartOptionLabel,
   getSegmentOptionLabel,
@@ -76,6 +82,7 @@ export function useTimelineWorkspace(novelId: number) {
 
   const [pageData, setPageData] = useState<PagedResult<TimelineEvent>>(createEmptyPage(100))
   const [stats, setStats] = useState<TimelineStats>(EMPTY_TIMELINE_STATS)
+  const [workflowStats, setWorkflowStats] = useState<WorkflowStats>(EMPTY_WORKFLOW_STATS)
   const [filterOptions, setFilterOptions] = useState<TimelineFilterOptions>(EMPTY_FILTER_OPTIONS)
 
   const [selectedId, setSelectedId] = useState<number | null>(null)
@@ -199,17 +206,23 @@ export function useTimelineWorkspace(novelId: number) {
     () => [{ value: 'all', label: TIMELINE_TEXT.typeAll }, ...filterOptions.eventTypes.map((item) => ({ value: item, label: item }))],
     [filterOptions.eventTypes],
   )
+  const generationBlockers = useMemo(
+    () => getWorkflowBlockers('timeline', currentNovel, workflowStats),
+    [currentNovel, workflowStats],
+  )
 
   const loadShared = useCallback(async () => {
-    const [volumeRows, arcRows, nextFilters] = await Promise.all([
+    const [volumeRows, arcRows, nextFilters, nextWorkflowStats] = await Promise.all([
       window.electron.structure.listVolumes(novelId),
       window.electron.outline.getArcs(novelId),
       window.electron.timeline.getFilterOptions(novelId),
+      loadWorkflowStats(novelId),
     ])
 
     setVolumes(volumeRows)
     setArcs(arcRows)
     setFilterOptions(nextFilters)
+    setWorkflowStats(nextWorkflowStats)
   }, [novelId])
 
   const searchCharacters = useCallback(async (value = '') => {
@@ -667,6 +680,14 @@ export function useTimelineWorkspace(novelId: number) {
   }, [refreshPage, selectedEvent])
 
   const handleGenerate = useCallback(async () => {
+    const nextWorkflowStats = await loadWorkflowStats(novelId)
+    setWorkflowStats(nextWorkflowStats)
+    const blockers = getWorkflowBlockers('timeline', currentNovel, nextWorkflowStats)
+    if (blockers.length > 0) {
+      message.warning(blockers.join('\n'))
+      return
+    }
+
     const values = generateForm.getFieldsValue()
     setGenerating(true)
 
@@ -685,7 +706,19 @@ export function useTimelineWorkspace(novelId: number) {
     } finally {
       setGenerating(false)
     }
-  }, [generateForm, novelId, refreshPage])
+  }, [currentNovel, generateForm, novelId, refreshPage])
+
+  const openGenerateModal = useCallback(async () => {
+    const nextWorkflowStats = await loadWorkflowStats(novelId)
+    setWorkflowStats(nextWorkflowStats)
+    const blockers = getWorkflowBlockers('timeline', currentNovel, nextWorkflowStats)
+    if (blockers.length > 0) {
+      message.warning(blockers.join('\n'))
+      return
+    }
+
+    setGenerateOpen(true)
+  }, [currentNovel, novelId])
 
   const handleClear = useCallback(() => {
     Modal.confirm({
@@ -739,6 +772,7 @@ export function useTimelineWorkspace(novelId: number) {
     formSegmentOptions,
     formSegments,
     generateForm,
+    generationBlockers,
     generateOpen,
     generating,
     getStructureTagsForEvent,
@@ -755,6 +789,7 @@ export function useTimelineWorkspace(novelId: number) {
     locationOptions,
     modeLabel,
     openSelectedEventInStructure,
+    openGenerateModal,
     page,
     pageData,
     partFilter,

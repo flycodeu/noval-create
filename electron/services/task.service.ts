@@ -75,7 +75,12 @@ interface RunTaskOptions extends CreateTaskOptions {
 
 const abortControllers = new Map<number, AbortController>()
 
-function parseJsonObject<T extends Record<string, unknown>>(raw?: string | null): T {
+type ErrorLike = Error & {
+  code?: string
+  cause?: unknown
+}
+
+function parseJsonObject<T extends object>(raw?: string | null): T {
   if (!raw) return {} as T
   try {
     const parsed = JSON.parse(raw) as unknown
@@ -88,6 +93,76 @@ function parseJsonObject<T extends Record<string, unknown>>(raw?: string | null)
 function isAbortError(error: unknown): boolean {
   return error instanceof Error
     && (error.name === 'AbortError' || /abort|cancel/i.test(error.message))
+}
+
+function collectErrorDetails(error: unknown, seen = new Set<unknown>()): { codes: string[]; messages: string[]; names: string[] } {
+  if (!error || seen.has(error)) return { codes: [], messages: [], names: [] }
+  seen.add(error)
+
+  if (!(error instanceof Error)) return { codes: [], messages: [], names: [] }
+
+  const typed = error as ErrorLike
+  const nested = typed.cause ? collectErrorDetails(typed.cause, seen) : { codes: [], messages: [], names: [] }
+
+  return {
+    codes: [typed.code || '', ...nested.codes].filter(Boolean),
+    messages: [typed.message || '', ...nested.messages].filter(Boolean),
+    names: [typed.name || '', ...nested.names].filter(Boolean),
+  }
+}
+
+function isTransientModelNetworkError(error: unknown): boolean {
+  if (isAbortError(error)) return false
+
+  const details = collectErrorDetails(error)
+  const codes = new Set(details.codes)
+  if (
+    codes.has('ECONNRESET')
+    || codes.has('ECONNABORTED')
+    || codes.has('ETIMEDOUT')
+    || codes.has('EAI_AGAIN')
+    || codes.has('EPIPE')
+    || codes.has('UND_ERR_SOCKET')
+    || codes.has('UND_ERR_CONNECT_TIMEOUT')
+    || codes.has('UND_ERR_HEADERS_TIMEOUT')
+    || codes.has('UND_ERR_BODY_TIMEOUT')
+    || codes.has('REQUEST_TIMEOUT')
+  ) return true
+
+  const combinedText = [...details.messages, ...details.names].join(' ').toLowerCase()
+  return [
+    'fetch failed',
+    'terminated',
+    'other side closed',
+    'read econnreset',
+    'connection reset',
+    'network error',
+    'socket',
+    'timed out',
+  ].some((pattern) => combinedText.includes(pattern))
+}
+
+function describeTransientNetworkError(error: unknown): string {
+  const details = collectErrorDetails(error)
+  const code = details.codes[0] || ''
+  const combinedText = [...details.messages, ...details.names].join(' ').toLowerCase()
+
+  if (code === 'ECONNRESET' || combinedText.includes('econnreset')) return '连接被远端重置（ECONNRESET）'
+  if (code === 'UND_ERR_SOCKET' || combinedText.includes('other side closed')) return '连接被对端中断（UND_ERR_SOCKET）'
+  if (code === 'REQUEST_TIMEOUT' || code === 'ETIMEDOUT' || combinedText.includes('timed out')) return '请求超时'
+  if (combinedText.includes('terminated')) return '连接在响应过程中被中断'
+
+  const firstMessage = details.messages.find(Boolean)
+  if (firstMessage && !/^fetch failed$/i.test(firstMessage.trim())) return firstMessage
+  return code ? `网络异常（${code}）` : '网络异常'
+}
+
+function normalizeTaskErrorMessage(error: unknown, fallback = 'Unknown error'): string {
+  if (isAbortError(error)) return 'User cancelled'
+  if (isTransientModelNetworkError(error)) {
+    return `模型服务连接不稳定：${describeTransientNetworkError(error)}。请稍后重试。`
+  }
+  return error instanceof Error ? error.message : fallback
 }
 
 export async function createTask(opts: CreateTaskOptions): Promise<number> {
@@ -120,7 +195,7 @@ export function parseTaskControl(task: Pick<typeof tasks.$inferSelect, 'controlJ
   return parseJsonObject<TaskControlState>(task?.controlJson)
 }
 
-export function parseTaskProgress<T extends Record<string, unknown>>(task: Pick<typeof tasks.$inferSelect, 'progressJson'> | null | undefined): T {
+export function parseTaskProgress<T extends object>(task: Pick<typeof tasks.$inferSelect, 'progressJson'> | null | undefined): T {
   return parseJsonObject<T>(task?.progressJson)
 }
 
@@ -138,7 +213,7 @@ function notifyStatus(sender: WebContents | undefined, taskId: number, status: T
   }
 }
 
-function notifyProgress(sender: WebContents | undefined, taskId: number, progress: Record<string, unknown>) {
+function notifyProgress(sender: WebContents | undefined, taskId: number, progress: object) {
   if (sender && !sender.isDestroyed()) {
     sender.send('task:progress', { taskId, progress })
   }
@@ -161,7 +236,7 @@ export function updateTaskStatus(taskId: number, status: TaskStatus, sender?: We
   notifyStatus(sender, taskId, status)
 }
 
-export function updateTaskProgress(taskId: number, progress: Record<string, unknown>, sender?: WebContents) {
+export function updateTaskProgress(taskId: number, progress: object, sender?: WebContents) {
   updateTask(taskId, {
     progressJson: JSON.stringify(progress),
   })
@@ -226,7 +301,7 @@ export async function runStreamTask(opts: RunTaskOptions): Promise<number> {
       })
     } catch (error: unknown) {
       const status: TaskStatus = isAbortError(error) ? 'cancelled' : 'failed'
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      const errorMessage = normalizeTaskErrorMessage(error)
 
       updateTask(taskId, {
         status,
@@ -287,7 +362,7 @@ export async function executeChatTask(taskId: number, opts: RunTaskOptions): Pro
     const currentTask = getTaskRecord(taskId)
     const aborted = isAbortError(error) || currentTask?.status === 'cancel_requested'
     const status: TaskStatus = aborted ? 'cancelled' : 'failed'
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    const errorMessage = normalizeTaskErrorMessage(error)
 
     updateTask(taskId, {
       status,
@@ -348,16 +423,24 @@ export function cancelTask(taskId: number, sender?: WebContents): boolean {
 
   if (task.runnerType === 'workflow') {
     const control = parseTaskControl(task)
-    updateTaskStatus(taskId, 'cancel_requested', sender, {
-      controlJson: JSON.stringify({
-        ...control,
-        cancelRequested: true,
-      }),
+    const nextControlJson = JSON.stringify({
+      ...control,
+      cancelRequested: true,
     })
 
-    if (typeof task.currentChildTaskId === 'number') {
-      cancelTask(task.currentChildTaskId, sender)
+    if (typeof task.currentChildTaskId !== 'number') {
+      updateTaskStatus(taskId, 'cancelled', sender, {
+        controlJson: nextControlJson,
+        currentChildTaskId: null,
+        errorMessage: 'User cancelled',
+      })
+      return true
     }
+
+    updateTaskStatus(taskId, 'cancel_requested', sender, {
+      controlJson: nextControlJson,
+    })
+    cancelTask(task.currentChildTaskId, sender)
     return true
   }
 

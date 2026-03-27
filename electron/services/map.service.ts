@@ -1,7 +1,7 @@
 import { WebContents } from 'electron'
 import { asc, eq } from 'drizzle-orm'
 import { getDb, getSqlite } from '../database/db'
-import { novels, storyItems, timelineEvents, worldMap } from '../database/schema'
+import { mapRelations, novels, storyItems, timelineEvents, worldMap } from '../database/schema'
 import { safeParseJson } from '../utils/json'
 import { buildStoryProfile } from './context.service'
 import { createTask, executeChatTask, runChatTask, updateTask } from './task.service'
@@ -12,9 +12,18 @@ import {
   parseWorldRulesJson,
 } from '../../src/shared/genre-system'
 import { buildHumanLanguageRules } from '../../src/shared/prompt-library'
-import type { MapBatchGenerateOptions, MapBatchGenerationResult } from '../../src/types'
+import type {
+  MapBatchGenerateOptions,
+  MapBatchGenerationResult,
+  MapGraphPayload,
+  MapGraphQueryInput,
+  MapGraphNode,
+  MapRelation,
+  MapRelationInput,
+} from '../../src/types'
 import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/utils/text'
 import { markNovelContextChanged } from './context-impact.service'
+import { logError, logInfo, logWarn } from '../utils/runtime-log'
 
 export interface MapTreeNode {
   id: number
@@ -48,6 +57,7 @@ interface GeneratedMapNode {
 
 type ParsedWorldRules = ReturnType<typeof parseWorldRulesJson>
 type MapRow = typeof worldMap.$inferSelect
+type MapRelationRow = typeof mapRelations.$inferSelect
 
 interface LayerPlan {
   depth: number
@@ -94,12 +104,61 @@ interface MapNodeQueryFilters {
   pageSize?: number
 }
 
+interface ParseGeneratedNodeBatchContext {
+  label: string
+  expectedCount: number
+  parentName?: string
+}
+
+const MAP_JSON_OUTPUT_RULES = [
+  '只返回合法 JSON，不要写注释、说明、Markdown、代码块或省略号。',
+  '所有字段值必须是完整的 JSON 字符串或数组，不要输出半截名称、半截句子或未闭合引号。',
+  '如果字段内容里需要引号，请改写表达，不要输出未转义的双引号。',
+]
+
+const MAP_GENERATED_NODE_ALLOWED_KEYS = [
+  'name',
+  'node_type',
+  'location_type',
+  'structure_role',
+  'description',
+  'atmosphere',
+  'plot_relevance',
+  'tags',
+  'affiliated_factions',
+  'danger_level',
+  'children',
+]
+
+const MAP_NODE_BATCH_SCHEMA = '[{"name":"","node_type":"","location_type":"","structure_role":"","description":"","atmosphere":"","plot_relevance":"","tags":["标签1"],"affiliated_factions":["势力1"],"danger_level":"","children":[]}]'
+
+function cleanPromptText(value?: string | null): string {
+  return value?.trim() || ''
+}
+
+function section(title: string, content?: string | null): string {
+  const body = cleanPromptText(content)
+  if (!body) return ''
+  return `【${title}】\n${body}`
+}
+
+function renderPrompt(parts: Array<string | undefined | null | false>): string {
+  return parts
+    .map((part) => (typeof part === 'string' ? part.trim() : ''))
+    .filter(Boolean)
+    .join('\n\n')
+}
+
 function asText(value: unknown): string {
   return typeof value === 'string' ? cleanAiFieldText(value) : ''
 }
 
 function normalizeNameKey(value: string): string {
   return value.replace(/\s+/g, '').trim().toLowerCase()
+}
+
+function uniqueNumberArray(values: Array<number | null | undefined>): number[] {
+  return [...new Set(values.filter((value): value is number => typeof value === 'number' && Number.isFinite(value)))]
 }
 
 function toStringArray(value: unknown): string[] {
@@ -158,15 +217,119 @@ function buildNodePath(row: MapRow, rows: MapRow[]): string {
   return labels.join(' -> ')
 }
 
-function parseGeneratedNodeBatch(raw: string): GeneratedMapNode[] {
-  const parsed = cleanAiValue(safeParseJson<unknown>(raw))
+function formatGeneratedNodeBatchTarget(context: ParseGeneratedNodeBatchContext): string {
+  return context.parentName
+    ? `${context.label}（父节点：${context.parentName}）`
+    : context.label
+}
+
+function buildGeneratedNodeBatchError(context: ParseGeneratedNodeBatchContext, message: string): Error {
+  const target = formatGeneratedNodeBatchTarget(context)
+  return new Error(`${target} 当前批次返回的 JSON 无法解析：${message}。系统会按当前批次重试策略处理。`)
+}
+
+function sanitizeMapErrorMessage(error: unknown, fallback = '地图生成失败'): string {
+  const raw = error instanceof Error ? error.message : fallback
+  const normalized = raw
+    .replace(/^\[[^\]]+\]\s*/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/。原始输出片段：.*$/u, '')
+    .replace(/。输出片段：.*$/u, '')
+    .trim()
+  return normalized || fallback
+}
+
+function previewText(text: string, max = 220): string {
+  return text.replace(/\s+/g, ' ').trim().slice(0, max)
+}
+
+function buildMapNodeBatchRepairPrompt(context: ParseGeneratedNodeBatchContext, raw: string): string {
+  return renderPrompt([
+    `你现在只负责修复 ${formatGeneratedNodeBatchTarget(context)} 的 JSON 格式，不新增设定，不重写内容。`,
+    section('任务目标', [
+      `把下面的原始输出整理成一个合法的 JSON 数组，数组长度保持为 ${context.expectedCount}。`,
+      `每个节点只允许保留这些键：${MAP_GENERATED_NODE_ALLOWED_KEYS.join(' / ')}`,
+      'name、node_type、location_type、structure_role、description、atmosphere、plot_relevance、danger_level 必须是字符串。',
+      'tags、affiliated_factions、children 必须是 JSON 数组，children 必须返回空数组。',
+    ].join('\n')),
+    section('原始输出', raw),
+    section('强约束', [
+      '不要补剧情，不要扩写，不要改事实方向。',
+      '如果有代码块、解释文字、数组外包裹对象、多余字段或 children 的子内容，删除它们。',
+      '如果字符串内部出现双引号，必须正确转义。',
+      '只输出合法 JSON 数组，不要解释，不要 Markdown，不要注释。',
+    ].join('\n')),
+    `输出格式参考：${MAP_NODE_BATCH_SCHEMA}`,
+  ])
+}
+
+function parseGeneratedNodeBatch(raw: string, context: ParseGeneratedNodeBatchContext): GeneratedMapNode[] {
+  let parsed: unknown
+  try {
+    parsed = cleanAiValue(safeParseJson<unknown>(raw))
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '未知解析错误'
+    throw buildGeneratedNodeBatchError(context, message)
+  }
+
   if (Array.isArray(parsed)) return toGeneratedNodes(parsed)
   if (parsed && typeof parsed === 'object') {
     const record = parsed as Record<string, unknown>
     const preferred = toGeneratedNodes(record.nodes)
-    return preferred.length > 0 ? preferred : toGeneratedNodes(record.items)
+    if (preferred.length > 0) return preferred
+
+    const fallback = toGeneratedNodes(record.items)
+    if (fallback.length > 0) return fallback
   }
-  return []
+
+  throw buildGeneratedNodeBatchError(context, `返回结果不是长度为 ${context.expectedCount} 的节点数组`)
+}
+
+async function runMapPromptTaskWithJsonRepair<T>(
+  params: {
+    novelId: number
+    modelConfigId?: number
+    prompt: string
+    parentTaskId?: number
+    sender?: WebContents
+    context: ParseGeneratedNodeBatchContext
+    parser: (raw: string) => T
+  },
+): Promise<{ value: T; repaired: boolean }> {
+  const raw = await runMapPromptTask({
+    novelId: params.novelId,
+    modelConfigId: params.modelConfigId,
+    prompt: params.prompt,
+    parentTaskId: params.parentTaskId,
+    sender: params.sender,
+  })
+
+  try {
+    return { value: params.parser(raw), repaired: false }
+  } catch (initialError) {
+    const initialMessage = sanitizeMapErrorMessage(initialError, `${formatGeneratedNodeBatchTarget(params.context)} 解析失败`)
+
+    let repairedRaw = ''
+    try {
+      repairedRaw = await runMapPromptTask({
+        novelId: params.novelId,
+        modelConfigId: params.modelConfigId,
+        prompt: buildMapNodeBatchRepairPrompt(params.context, raw),
+        parentTaskId: params.parentTaskId,
+        sender: params.sender,
+      })
+    } catch (repairTaskError) {
+      throw new Error(`${formatGeneratedNodeBatchTarget(params.context)} JSON 解析失败，自动修复步骤执行失败：${sanitizeMapErrorMessage(repairTaskError)}。原始输出片段：${previewText(raw)}`)
+    }
+
+    try {
+      return { value: params.parser(repairedRaw), repaired: true }
+    } catch (repairError) {
+      throw new Error(
+        `${formatGeneratedNodeBatchTarget(params.context)} JSON 解析失败，已自动修复一次仍未成功。首轮原因：${initialMessage}。修复后原因：${sanitizeMapErrorMessage(repairError)}。原始输出片段：${previewText(raw)}`,
+      )
+    }
+  }
 }
 
 function validateGeneratedNodes(nodes: GeneratedMapNode[], expectedCount: number, label: string, existingNames: string[]) {
@@ -232,6 +395,110 @@ function mapNodeSummaryRecord(row: Record<string, unknown>) {
   }
 }
 
+function mapRelationRecord(row: Record<string, unknown>): MapRelation {
+  return {
+    id: Number(row.id),
+    novelId: Number(row.novel_id),
+    mapAId: Number(row.map_a_id),
+    mapBId: Number(row.map_b_id),
+    relationType: typeof row.relation_type === 'string' ? row.relation_type : undefined,
+    relationLabel: typeof row.relation_label === 'string' ? row.relation_label : undefined,
+    bilateral: Number(row.bilateral || 0),
+    description: typeof row.description === 'string' ? row.description : undefined,
+    intensity: typeof row.intensity === 'string' ? row.intensity : undefined,
+    colorHint: typeof row.color_hint === 'string' ? row.color_hint : undefined,
+    sortOrder: Number(row.sort_order || 0),
+  }
+}
+
+function parseJsonStringArray(raw?: string | null): string[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean)
+      : []
+  } catch {
+    return []
+  }
+}
+
+function buildMapGraphSummary(row: MapRow): string {
+  return [
+    row.plotRelevance,
+    row.description,
+    row.structureRole,
+    row.atmosphere,
+  ].find((item) => typeof item === 'string' && item.trim())?.trim() || ''
+}
+
+function buildMapGraphNode(row: MapRow, graphRole: MapGraphNode['graphRole'], childCount: number): MapGraphNode {
+  return {
+    id: row.id,
+    novelId: row.novelId,
+    level: row.level,
+    parentId: row.parentId == null ? undefined : row.parentId,
+    name: row.name,
+    locationType: row.locationType || undefined,
+    nodeType: row.nodeType || undefined,
+    structureRole: row.structureRole || undefined,
+    parentRuleType: row.parentRuleType || undefined,
+    description: row.description || undefined,
+    atmosphere: row.atmosphere || undefined,
+    plotRelevance: row.plotRelevance || undefined,
+    tagsJson: row.tagsJson || undefined,
+    affiliatedFactionIdsJson: row.affiliatedFactionIdsJson || undefined,
+    dangerLevel: row.dangerLevel || undefined,
+    sortOrder: row.sortOrder || 0,
+    childCount,
+    graphRole,
+    tags: parseJsonStringArray(row.tagsJson),
+    affiliatedFactions: parseJsonStringArray(row.affiliatedFactionIdsJson),
+    summaryText: buildMapGraphSummary(row),
+  }
+}
+
+function getAncestorIds(rowById: Map<number, MapRow>, startId: number): number[] {
+  const ids: number[] = []
+  let current = rowById.get(startId)
+  while (current && typeof current.parentId === 'number') {
+    ids.unshift(current.parentId)
+    current = rowById.get(current.parentId)
+  }
+  return ids
+}
+
+function buildRelationAdjacency(relations: MapRelation[]): Map<number, MapRelation[]> {
+  const adjacency = new Map<number, MapRelation[]>()
+  relations.forEach((relation) => {
+    const existingA = adjacency.get(relation.mapAId) || []
+    existingA.push(relation)
+    adjacency.set(relation.mapAId, existingA)
+
+    const existingB = adjacency.get(relation.mapBId) || []
+    existingB.push(relation)
+    adjacency.set(relation.mapBId, existingB)
+  })
+  return adjacency
+}
+
+function getNodeGraphRole(params: {
+  id: number
+  focusNodeId?: number
+  rootNodeIds: Set<number>
+  ancestorIds: Set<number>
+  descendantIds: Set<number>
+  siblingIds: Set<number>
+  relationNodeIds: Set<number>
+}): MapGraphNode['graphRole'] {
+  if (typeof params.focusNodeId === 'number' && params.id === params.focusNodeId) return 'focus'
+  if (params.ancestorIds.has(params.id)) return 'ancestor'
+  if (params.descendantIds.has(params.id)) return 'descendant'
+  if (params.siblingIds.has(params.id)) return 'sibling'
+  if (params.relationNodeIds.has(params.id)) return 'related'
+  return params.rootNodeIds.has(params.id) ? 'root' : 'descendant'
+}
+
 function buildMapWhere(filters: MapNodeQueryFilters) {
   const whereClauses = ['m.novel_id = ?']
   const params: Array<number | string> = [filters.novelId]
@@ -285,6 +552,144 @@ export function searchMapNodes(novelId: number, keyword = '', limit = 20) {
   return queryMapNodes({ novelId, keyword, page: 1, pageSize: Math.max(1, Math.min(limit, 50)) }).items
 }
 
+export function getMapRelations(novelId: number, focusNodeId?: number): MapRelation[] {
+  const sqlite = getSqlite()
+  const rows = typeof focusNodeId === 'number'
+    ? sqlite.prepare(`
+      SELECT *
+      FROM map_relations
+      WHERE novel_id = ?
+        AND (map_a_id = ? OR map_b_id = ?)
+      ORDER BY sort_order ASC, id ASC
+    `).all(novelId, focusNodeId, focusNodeId) as Array<Record<string, unknown>>
+    : sqlite.prepare(`
+      SELECT *
+      FROM map_relations
+      WHERE novel_id = ?
+      ORDER BY sort_order ASC, id ASC
+    `).all(novelId) as Array<Record<string, unknown>>
+  return rows.map(mapRelationRecord)
+}
+
+export function getMapGraph(filters: MapGraphQueryInput): MapGraphPayload {
+  const rows = listMapRows(filters.novelId)
+  if (rows.length === 0) {
+    return { nodes: [], edges: [], focusNodeId: filters.focusNodeId, relationNodeIds: [], rootNodeIds: [] }
+  }
+
+  const rowById = new Map(rows.map((row) => [row.id, row]))
+  const childCountByParentId = new Map<number, number>()
+  rows.forEach((row) => {
+    if (typeof row.parentId !== 'number') return
+    childCountByParentId.set(row.parentId, (childCountByParentId.get(row.parentId) || 0) + 1)
+  })
+
+  const rootNodeIds = rows.filter((row) => row.level === 1).map((row) => row.id)
+  const allRelations = getMapRelations(filters.novelId)
+  const adjacency = buildRelationAdjacency(allRelations)
+  const relationDepth = Math.max(1, Math.min(2, Math.round(filters.relationDepth || 1)))
+  const visibleIds = new Set<number>()
+  const ancestorIds = new Set<number>()
+  const descendantIds = new Set<number>()
+  const siblingIds = new Set<number>()
+  const relationNodeIds = new Set<number>()
+  const includeRelationEdges = filters.includeRelationEdges !== false
+
+  if (typeof filters.focusNodeId === 'number' && rowById.has(filters.focusNodeId)) {
+    visibleIds.add(filters.focusNodeId)
+
+    getAncestorIds(rowById, filters.focusNodeId).forEach((id) => {
+      ancestorIds.add(id)
+      visibleIds.add(id)
+    })
+
+    rows.filter((row) => row.parentId === filters.focusNodeId).forEach((row) => {
+      descendantIds.add(row.id)
+      visibleIds.add(row.id)
+    })
+
+    const focusRow = rowById.get(filters.focusNodeId)
+    if (filters.includeSiblingNodes !== false && typeof focusRow?.parentId === 'number') {
+      rows.filter((row) => row.parentId === focusRow.parentId && row.id !== filters.focusNodeId).forEach((row) => {
+        siblingIds.add(row.id)
+        visibleIds.add(row.id)
+      })
+    }
+
+    let frontier = new Set<number>([filters.focusNodeId])
+    for (let depth = 0; depth < relationDepth; depth += 1) {
+      const nextFrontier = new Set<number>()
+      frontier.forEach((sourceId) => {
+        ;(adjacency.get(sourceId) || []).forEach((relation) => {
+          const targetId = relation.mapAId === sourceId ? relation.mapBId : relation.mapAId
+          if (!rowById.has(targetId)) return
+          relationNodeIds.add(targetId)
+          visibleIds.add(targetId)
+          if (!frontier.has(targetId)) nextFrontier.add(targetId)
+        })
+      })
+      frontier = nextFrontier
+    }
+  } else {
+    rows.forEach((row) => visibleIds.add(row.id))
+  }
+
+  const nodes = rows
+    .filter((row) => visibleIds.has(row.id))
+    .map((row) => buildMapGraphNode(
+      row,
+      getNodeGraphRole({
+        id: row.id,
+        focusNodeId: filters.focusNodeId,
+        rootNodeIds: new Set(rootNodeIds),
+        ancestorIds,
+        descendantIds,
+        siblingIds,
+        relationNodeIds,
+      }),
+      childCountByParentId.get(row.id) || 0,
+    ))
+    .sort((a, b) => a.level - b.level || a.sortOrder - b.sortOrder || a.id - b.id)
+
+  const edges: MapGraphPayload['edges'] = []
+  rows.forEach((row) => {
+    if (typeof row.parentId !== 'number') return
+    if (!visibleIds.has(row.id) || !visibleIds.has(row.parentId)) return
+    edges.push({
+      id: `hierarchy:${row.parentId}:${row.id}`,
+      sourceId: row.parentId,
+      targetId: row.id,
+      edgeKind: 'hierarchy',
+    })
+  })
+
+  if (includeRelationEdges) {
+    allRelations.forEach((relation) => {
+      if (!visibleIds.has(relation.mapAId) || !visibleIds.has(relation.mapBId)) return
+      edges.push({
+        id: `relation:${relation.id}`,
+        sourceId: relation.mapAId,
+        targetId: relation.mapBId,
+        edgeKind: 'relation',
+        relationId: relation.id,
+        relationType: relation.relationType,
+        relationLabel: relation.relationLabel,
+        description: relation.description,
+        bilateral: relation.bilateral,
+        colorHint: relation.colorHint,
+      })
+    })
+  }
+
+  return {
+    nodes,
+    edges,
+    focusNodeId: typeof filters.focusNodeId === 'number' ? filters.focusNodeId : undefined,
+    relationNodeIds: [...relationNodeIds],
+    rootNodeIds,
+  }
+}
+
 export function getMapStats(novelId: number) {
   const sqlite = getSqlite()
   const countsByLevel = sqlite.prepare('SELECT level, COUNT(*) AS count FROM world_map WHERE novel_id = ? GROUP BY level ORDER BY level ASC').all(novelId) as Array<{ level?: number | null; count?: number | null }>
@@ -334,10 +739,91 @@ export function getMapTree(novelId: number): MapTreeNode[] {
 
 export function createMapItem(novelId: number, data: Partial<typeof worldMap.$inferInsert> & { level: number; name: string }, options: { skipContextTracking?: boolean } = {}) {
   const db = getDb()
-  const result = db.insert(worldMap).values({ novelId, ...sanitizeMapPayload(data) }).run()
+  const payload = sanitizeMapPayload(data)
+  const result = db.insert(worldMap).values({
+    ...payload,
+    novelId,
+    level: payload.level ?? data.level,
+    name: payload.name ?? data.name,
+  }).run()
   const id = Number(result.lastInsertRowid)
   if (!options.skipContextTracking) markNovelContextChanged(novelId, 'Map structure changed')
   return id
+}
+
+function sanitizeMapRelationInput(data: MapRelationInput): MapRelationInput {
+  return {
+    id: typeof data.id === 'number' ? data.id : undefined,
+    novelId: Number(data.novelId),
+    mapAId: Number(data.mapAId),
+    mapBId: Number(data.mapBId),
+    relationType: asText(data.relationType),
+    relationLabel: asText(data.relationLabel),
+    bilateral: Number(data.bilateral ?? 1) > 0 ? 1 : 0,
+    description: asText(data.description),
+    intensity: asText(data.intensity),
+    colorHint: asText(data.colorHint),
+    sortOrder: typeof data.sortOrder === 'number' ? Math.max(0, Math.round(data.sortOrder)) : 0,
+  }
+}
+
+function findExistingMapRelation(data: MapRelationInput): MapRelationRow | undefined {
+  const db = getDb()
+  const relations = db.select().from(mapRelations).where(eq(mapRelations.novelId, data.novelId)).all()
+  return relations.find((relation) => {
+    if (typeof data.id === 'number' && relation.id === data.id) return true
+    const sameDirection = relation.mapAId === data.mapAId && relation.mapBId === data.mapBId
+    const reverseDirection = relation.mapAId === data.mapBId && relation.mapBId === data.mapAId
+    const matchesPair = data.bilateral ? (sameDirection || reverseDirection) : sameDirection
+    if (!matchesPair) return false
+    const sameType = (relation.relationType || '') === (data.relationType || '')
+    const sameLabel = (relation.relationLabel || '') === (data.relationLabel || '')
+    return sameType && sameLabel
+  })
+}
+
+export function upsertMapRelation(input: MapRelationInput) {
+  const db = getDb()
+  const data = sanitizeMapRelationInput(input)
+  if (!Number.isFinite(data.novelId) || !Number.isFinite(data.mapAId) || !Number.isFinite(data.mapBId)) {
+    throw new Error('地图关系参数无效')
+  }
+  if (data.mapAId === data.mapBId) throw new Error('关系两端不能是同一个节点')
+
+  const nodeA = db.select().from(worldMap).where(eq(worldMap.id, data.mapAId)).all()[0]
+  const nodeB = db.select().from(worldMap).where(eq(worldMap.id, data.mapBId)).all()[0]
+  if (!nodeA || !nodeB || nodeA.novelId !== data.novelId || nodeB.novelId !== data.novelId) {
+    throw new Error('地图关系节点不存在或不属于当前小说')
+  }
+
+  const existing = findExistingMapRelation(data)
+  const payload = {
+    novelId: data.novelId,
+    mapAId: data.mapAId,
+    mapBId: data.mapBId,
+    relationType: data.relationType || null,
+    relationLabel: data.relationLabel || null,
+    bilateral: data.bilateral ?? 1,
+    description: data.description || null,
+    intensity: data.intensity || null,
+    colorHint: data.colorHint || null,
+    sortOrder: data.sortOrder ?? 0,
+  }
+
+  if (existing) {
+    db.update(mapRelations).set(payload).where(eq(mapRelations.id, existing.id)).run()
+  } else {
+    db.insert(mapRelations).values(payload).run()
+  }
+
+  markNovelContextChanged(data.novelId, 'Map relations changed')
+}
+
+export function deleteMapRelation(id: number) {
+  const db = getDb()
+  const current = db.select().from(mapRelations).where(eq(mapRelations.id, id)).all()[0]
+  db.delete(mapRelations).where(eq(mapRelations.id, id)).run()
+  if (current) markNovelContextChanged(current.novelId, 'Map relations changed')
 }
 
 export function updateMapItem(id: number, data: Partial<typeof worldMap.$inferInsert>, options: { skipContextTracking?: boolean } = {}) {
@@ -449,6 +935,7 @@ function buildRootBatchPrompt(params: { novelTitle: string; genre: string; world
     params.existingRootNames.length > 0 ? `已有根节点：${params.existingRootNames.join('、')}` : '当前还没有根节点。',
     `只生成 ${params.batchCount} 个第 1 层“${params.rootLabel}”节点，不要生成 children，不要跨层。`,
     '名称必须与已有根节点区分开，description/plot_relevance 至少一个有实质内容，children 返回空数组。',
+    ...MAP_JSON_OUTPUT_RULES,
     buildHumanLanguageRules(['description 写可直接落笔的空间特征。', 'plot_relevance 只写这个地点承接什么事件或冲突。']),
     '[{"name":"","node_type":"","location_type":"","structure_role":"","description":"","atmosphere":"","plot_relevance":"","tags":["标签1"],"affiliated_factions":["势力1"],"danger_level":"","children":[]}]',
   ].filter(Boolean).join('\n')
@@ -469,6 +956,7 @@ function buildChildBatchPrompt(params: { novelTitle: string; genre: string; worl
     params.existingChildNames.length > 0 ? `已有直属子节点：${params.existingChildNames.join('、')}` : '当前还没有直属子节点。',
     `只生成这个父节点下 ${params.batchCount} 个直属“${params.targetLabel}”节点，不要返回 grandchildren。`,
     '名称不能与已有直属子节点重名，description/plot_relevance 至少一个有实质内容，children 返回空数组。',
+    ...MAP_JSON_OUTPUT_RULES,
     buildHumanLanguageRules(['内容必须紧扣父节点，不要跳出当前层级乱扩设定。', 'plot_relevance 只写这个地点在剧情里的具体作用。']),
     '[{"name":"","node_type":"","location_type":"","structure_role":"","description":"","atmosphere":"","plot_relevance":"","tags":["标签1"],"affiliated_factions":["势力1"],"danger_level":"","children":[]}]',
   ].filter(Boolean).join('\n')
@@ -478,6 +966,41 @@ function createAbortError() {
   const error = new Error('User cancelled')
   error.name = 'AbortError'
   return error
+}
+
+function getInlineBatchRetryLimit(structure: MapBatchGenerateOptions, runtime: MapBatchGenerateRuntimeOptions): number {
+  if (typeof runtime.parentTaskId === 'number') return 0
+  const retries = typeof structure.maxRetries === 'number' ? structure.maxRetries : 2
+  return Math.max(0, Math.min(5, Math.round(retries)))
+}
+
+async function runBatchWithRetries<T>(
+  execute: () => Promise<T>,
+  retryLimit: number,
+  label: string,
+): Promise<T> {
+  let lastError: unknown
+  for (let attempt = 0; attempt <= retryLimit; attempt += 1) {
+    try {
+      return await execute()
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') throw error
+      lastError = error
+      if (attempt >= retryLimit) break
+      logWarn('map', '地图批次执行失败，准备重试。', {
+        consoleSummary: `[map:warn] batch-retry label=${label} attempt=${attempt + 1}/${retryLimit + 1}`,
+        context: {
+          label,
+          attempt: attempt + 1,
+          maxAttempts: retryLimit + 1,
+        },
+        error,
+      })
+    }
+  }
+
+  if (lastError instanceof Error) throw lastError
+  throw new Error(`${label} failed`)
 }
 
 async function runMapPromptTask(params: { novelId: number; modelConfigId?: number; prompt: string; parentTaskId?: number; sender?: WebContents }) {
@@ -533,6 +1056,7 @@ export async function batchGenerateMap(novelId: number, structure: MapBatchGener
   const mapSummary = buildMapBlueprintSummary(rules)
   const writingConstraints = rules.writingConstraints.extraRules.join('；')
   const parentBatchSize = clampBatchSize(structure.parentBatchSize)
+  const inlineBatchRetryLimit = getInlineBatchRetryLimit(structure, runtime)
   const nextBatch = findNextMapBatch(listMapRows(novelId), layerPlans, parentBatchSize)
   runtime.onBatchPlan?.(buildMapBatchPreview(nextBatch, parentBatchSize))
   if (nextBatch.stage === 'completed') return { stage: 'completed', targetDepth: null, generatedNodeCount: 0, processedParentCount: 0, pendingParentCount: 0, processedParentNames: [], completed: true, message: '地图蓝图已补齐，当前没有需要继续生成的批次。', nextDepth: null }
@@ -547,9 +1071,32 @@ export async function batchGenerateMap(novelId: number, structure: MapBatchGener
       const existingRootNames = rows.filter((row) => row.level === 1).map((row) => row.name).filter(Boolean)
       const batchCount = Math.min(parentBatchSize, nextBatch.rootMissingCount || rootPlan.count)
       const prompt = buildRootBatchPrompt({ novelTitle: novel.title, genre: profile.genre, worldSummary: profile.worldRulesSummary, mapStructure: structureSummary, rootLabel: rootPlan.label, batchCount, existingRootNames, factionSummary, mapSummary, namedPlaces: structure.namedPlaces || '', writingConstraints })
-      const result = await runMapPromptTask({ novelId, modelConfigId: novel.modelConfigId || undefined, prompt, parentTaskId: runtime.parentTaskId, sender: runtime.sender })
-      const nodes = parseGeneratedNodeBatch(result)
-      validateGeneratedNodes(nodes, batchCount, '根层', existingRootNames)
+      const nodes = await runBatchWithRetries(async () => {
+        const context = {
+          label: '根层节点',
+          expectedCount: batchCount,
+        }
+        const { value: parsed, repaired } = await runMapPromptTaskWithJsonRepair({
+          novelId,
+          modelConfigId: novel.modelConfigId || undefined,
+          prompt,
+          parentTaskId: runtime.parentTaskId,
+          sender: runtime.sender,
+          context,
+          parser: (raw) => parseGeneratedNodeBatch(raw, context),
+        })
+        if (repaired) {
+          logInfo('map', '地图根层批次 JSON 已自动修复一次后继续使用。', {
+            consoleSummary: '[map:info] root-batch-json-repaired',
+            context: {
+              batchCount,
+              rootLabel: rootPlan.label,
+            },
+          })
+        }
+        validateGeneratedNodes(parsed, batchCount, '根层', existingRootNames)
+        return parsed
+      }, inlineBatchRetryLimit, 'map root batch')
       generatedNodeCount += createNodesAtDepth(novelId, nodes, 1, undefined, rules)
       processedParentNames.push(...nodes.map((node) => asText(node.name)).filter(Boolean))
     } else {
@@ -566,17 +1113,46 @@ export async function batchGenerateMap(novelId: number, structure: MapBatchGener
         const missingCount = targetLayerPlan.count - existingChildren.length
         if (missingCount <= 0) continue
         const prompt = buildChildBatchPrompt({ novelTitle: novel.title, genre: profile.genre, worldSummary: profile.worldRulesSummary, mapStructure: structureSummary, targetLabel: targetPlan.label, batchCount: missingCount, parent: currentParent, parentPath: buildNodePath(currentParent, rows), existingChildNames: existingChildren.map((row) => row.name).filter(Boolean), factionSummary, mapSummary, namedPlaces: structure.namedPlaces || '', writingConstraints })
-        const result = await runMapPromptTask({ novelId, modelConfigId: novel.modelConfigId || undefined, prompt, parentTaskId: runtime.parentTaskId, sender: runtime.sender })
-        const nodes = parseGeneratedNodeBatch(result)
-        validateGeneratedNodes(nodes, missingCount, `${currentParent.name}下的${targetPlan.label}`, existingChildren.map((row) => row.name).filter(Boolean))
+        const nodes = await runBatchWithRetries(async () => {
+          const context = {
+            label: `${targetPlan.label} 节点`,
+            expectedCount: missingCount,
+            parentName: currentParent.name,
+          }
+          const { value: parsed, repaired } = await runMapPromptTaskWithJsonRepair({
+            novelId,
+            modelConfigId: novel.modelConfigId || undefined,
+            prompt,
+            parentTaskId: runtime.parentTaskId,
+            sender: runtime.sender,
+            context,
+            parser: (raw) => parseGeneratedNodeBatch(raw, context),
+          })
+          if (repaired) {
+            logInfo('map', '地图子节点批次 JSON 已自动修复一次后继续使用。', {
+              consoleSummary: `[map:info] child-batch-json-repaired parent_id=${currentParent.id}`,
+              context: {
+                parentId: currentParent.id,
+                parentName: currentParent.name,
+                targetLabel: targetPlan.label,
+                batchCount: missingCount,
+              },
+            })
+          }
+          validateGeneratedNodes(parsed, missingCount, `${currentParent.name}下的${targetPlan.label}`, existingChildren.map((row) => row.name).filter(Boolean))
+          return parsed
+        }, inlineBatchRetryLimit, `map child batch ${currentParent.id}`)
         generatedNodeCount += createNodesAtDepth(novelId, nodes, targetDepth, currentParent, rules)
         processedParentNames.push(currentParent.name)
       }
     }
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') throw error
-    console.error('地图分批生成失败:', error)
-    throw new Error(error instanceof Error ? error.message : '地图生成结果解析失败，请重试')
+    logError('map', '地图分批生成失败。', {
+      consoleSummary: '[map:error] batch-generation-failed',
+      error,
+    })
+    throw new Error(sanitizeMapErrorMessage(error, '地图生成结果解析失败，请重试'))
   }
   if (generatedNodeCount > 0) markNovelContextChanged(novelId, 'Map structure changed')
   const nextState = findNextMapBatch(listMapRows(novelId), layerPlans, parentBatchSize)

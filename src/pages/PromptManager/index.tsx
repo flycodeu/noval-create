@@ -12,6 +12,7 @@ import {
   regenerateCharacterPrompt,
   type PromptCatalogEntry,
 } from '../../shared/prompt-library'
+import { WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../Novel/components/WorkspaceShell'
 
 function normalizePromptText(text: string): string {
   return text
@@ -281,10 +282,65 @@ const EXTRA_RUNTIME_PROMPTS: PromptCatalogEntry[] = [
 
 const PROMPT_CATALOG = [...BASE_PROMPT_CATALOG, ...EXTRA_RUNTIME_PROMPTS]
 
+type PromptLane = '全部' | '初始化' | '世界与资源' | '剧情规划' | '正文生产' | '质量评审'
+
+interface PromptFlowMeta {
+  lane: Exclude<PromptLane, '全部'>
+  stage: string
+  goal: string
+  risk: string
+}
+
+const PROMPT_LANES: PromptLane[] = ['全部', '初始化', '世界与资源', '剧情规划', '正文生产', '质量评审']
+
+const PROMPT_FLOW_META: Record<string, PromptFlowMeta> = {
+  expandBackground: { lane: '初始化', stage: '开篇立项', goal: '把背景、标题和简介定成可继续推进的起稿状态。', risk: '最容易出现世界观漂移和空泛开局。' },
+  protagonist: { lane: '世界与资源', stage: '角色底盘', goal: '让主角档案能直接进入后续场景与冲突。', risk: '容易生成功能人、标签化人格和空心弱点。' },
+  batchCharacter: { lane: '世界与资源', stage: '角色扩充', goal: '批量补足有剧情用途的角色。', risk: '容易批量同质化、关系松散、功能重复。' },
+  regenerateCharacter: { lane: '世界与资源', stage: '角色修复', goal: '在不换角色槽位的前提下修掉人设空洞和 AI 味。', risk: '容易改得更华丽，却没有更好用。' },
+  characterRelations: { lane: '世界与资源', stage: '关系张力', goal: '整理能真正影响场景的关系网。', risk: '容易写成标签罗列，而不是关系压力。' },
+  mapGeneration: { lane: '世界与资源', stage: '地点骨架', goal: '生成可承载行动路线和剧情压力的地点结构。', risk: '容易只产出好看的地名，缺乏剧情功能。' },
+  storyArcs: { lane: '剧情规划', stage: '故事弧', goal: '把主线和支线拆成连续可生产的故事弧。', risk: '容易只有宏观概念，没有章节级推进。' },
+  chapterOutline: { lane: '剧情规划', stage: '章节细纲', goal: '把故事弧拆成可写的逐章推进。', risk: '容易只有结构名词，缺乏读者感受和因果链。' },
+  timelineEvents: { lane: '剧情规划', stage: '时序管理', goal: '给全书补齐时间锚点和事件因果。', risk: '容易沦为资料表，不服务章节承接。' },
+  scenePlan: { lane: '正文生产', stage: '场景计划', goal: '把章节拆成 AI 可施工的场景链。', risk: '容易写成策划摘要，而不是正文施工单。' },
+  chapterDraft: { lane: '正文生产', stage: '初稿生成', goal: '先写出一版可审校的完整初稿。', risk: '容易把修辞放前面，导致事件链和代价链不清。' },
+  chapterWriting: { lane: '正文生产', stage: '成稿直写', goal: '直接输出可读性较高的章节正文。', risk: '容易出现提示词味、说明腔和模板化衔接。' },
+  chapterSummary: { lane: '正文生产', stage: '章节沉淀', goal: '把本章事实压缩成后续可调用的摘要。', risk: '容易夹带赏析口吻或抽象总结。' },
+  continuityState: { lane: '正文生产', stage: '连续性提炼', goal: '提炼后文必须记住的硬事实。', risk: '容易把猜测和情绪误记成事实。' },
+  chapterReview: { lane: '质量评审', stage: '自动审校', goal: '找出真正影响成稿质量和阅读体验的问题。', risk: '容易给空话建议，不给可执行修法。' },
+  chapterRewrite: { lane: '正文生产', stage: '定稿重写', goal: '把初稿按审校意见压成可入稿版本。', risk: '容易只修句子，不修承接、代价和读者张力。' },
+  aiCheck: { lane: '质量评审', stage: 'AI 体检', goal: '检测 AI 痕迹、搭配错误和出戏点。', risk: '容易只抓表面模板句，漏掉更深层的不自然。' },
+  rewriteParagraph: { lane: '质量评审', stage: '段落修复', goal: '保留事件信息，修掉人机味和生硬表达。', risk: '容易改出另一个意思或削弱上下文承接。' },
+  contentScoring: { lane: '质量评审', stage: '编辑评分', goal: '从编辑和普通读者双视角给出改稿优先级。', risk: '如果维度太粗，会掩盖连贯性和追读欲问题。' },
+  genericExpand: { lane: '剧情规划', stage: '资产扩写', goal: '把已有想法扩成可继续使用的创作资产。', risk: '容易越写越散，脱离当前项目边界。' },
+  subplotExpand: { lane: '剧情规划', stage: '支线修整', goal: '让支线真正回推主线、关系或主题。', risk: '容易写成独立番外，无法反哺主线。' },
+}
+
+function getPromptFlowMeta(prompt: PromptCatalogEntry): PromptFlowMeta {
+  const byKey = PROMPT_FLOW_META[prompt.key]
+  if (byKey) return byKey
+
+  if (prompt.category === '创作初始化') {
+    return { lane: '初始化', stage: '基础链路', goal: '为后续提示词提供稳定起点。', risk: '输入范围不稳时容易整体漂移。' }
+  }
+  if (prompt.category === '人物系统' || prompt.category === '世界构建') {
+    return { lane: '世界与资源', stage: '设定资产', goal: '补齐后续写作要反复调用的设定资源。', risk: '容易只产出资料，缺乏剧情用途。' }
+  }
+  if (prompt.category === '大纲规划') {
+    return { lane: '剧情规划', stage: '结构规划', goal: '把长篇推进拆成可执行链路。', risk: '容易概括化，缺乏章节可执行性。' }
+  }
+  if (prompt.category === '正文编写') {
+    return { lane: '正文生产', stage: '正文链路', goal: '直接服务章节生产和定稿。', risk: '最容易暴露 AI 腔和承接错误。' }
+  }
+  return { lane: '质量评审', stage: '补充链路', goal: '补足运行时校验与修复。', risk: '容易只给结论，不给修法。' }
+}
+
 export default function PromptManager() {
   const [activeCategory, setActiveCategory] = useState('全部')
+  const [activeLane, setActiveLane] = useState<PromptLane>('全部')
   const [searchText, setSearchText] = useState('')
-  const [selectedPrompt, setSelectedPrompt] = useState<PromptCatalogEntry | null>(null)
+  const [selectedPromptKey, setSelectedPromptKey] = useState<string>('')
   const [editingTemplate, setEditingTemplate] = useState('')
   const [editModalOpen, setEditModalOpen] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -308,23 +364,57 @@ export default function PromptManager() {
     return () => { alive = false }
   }, [])
 
-  const filteredPrompts = useMemo(() => {
-    return PROMPT_CATALOG.filter((prompt) => {
-      if (activeCategory !== '全部' && prompt.category !== activeCategory) return false
-      if (!searchText) return true
-      return prompt.name.includes(searchText) || prompt.description.includes(searchText) || prompt.key.includes(searchText)
+  const promptRows = useMemo(() => {
+    return PROMPT_CATALOG.map((prompt) => {
+      const meta = getPromptFlowMeta(prompt)
+      const hasOverride = Boolean(customOverrides[prompt.key])
+      const currentTemplate = sanitizePromptText(customOverrides[prompt.key] || prompt.template, prompt.template)
+      return {
+        prompt,
+        meta,
+        hasOverride,
+        currentTemplate,
+      }
     })
-  }, [activeCategory, searchText])
+  }, [customOverrides])
+
+  const filteredPrompts = useMemo(() => {
+    return promptRows.filter(({ prompt, meta }) => {
+      if (activeCategory !== '全部' && prompt.category !== activeCategory) return false
+      if (activeLane !== '全部' && meta.lane !== activeLane) return false
+      if (!searchText) return true
+      return prompt.name.includes(searchText) || prompt.description.includes(searchText) || prompt.key.includes(searchText) || meta.stage.includes(searchText)
+    })
+  }, [activeCategory, activeLane, promptRows, searchText])
+
+  useEffect(() => {
+    if (filteredPrompts.length === 0) {
+      setSelectedPromptKey('')
+      return
+    }
+
+    if (!filteredPrompts.some(({ prompt }) => prompt.key === selectedPromptKey)) {
+      setSelectedPromptKey(filteredPrompts[0].prompt.key)
+    }
+  }, [filteredPrompts, selectedPromptKey])
+
+  const selectedPromptRow = useMemo(
+    () => filteredPrompts.find(({ prompt }) => prompt.key === selectedPromptKey) || filteredPrompts[0] || null,
+    [filteredPrompts, selectedPromptKey],
+  )
+
+  const overrideCount = useMemo(() => Object.keys(customOverrides).length, [customOverrides])
+  const qualityPromptCount = useMemo(() => promptRows.filter(({ meta }) => meta.lane === '质量评审').length, [promptRows])
 
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(sanitizePromptText(text)).then(() => message.success('已复制到剪贴板'))
   }
 
   const handleEditSave = async () => {
-    if (!selectedPrompt) return
+    if (!selectedPromptRow) return
     const normalized = normalizePromptText(editingTemplate)
-    await window.electron.prompt.save(selectedPrompt.key, normalized)
-    setCustomOverrides((prev) => ({ ...prev, [selectedPrompt.key]: normalized }))
+    await window.electron.prompt.save(selectedPromptRow.prompt.key, normalized)
+    setCustomOverrides((prev) => ({ ...prev, [selectedPromptRow.prompt.key]: normalized }))
     setEditModalOpen(false)
     message.success('运行时提示词已保存')
   }
@@ -348,164 +438,180 @@ export default function PromptManager() {
   }
 
   return (
-    <div style={{ padding: 24, height: '100%', overflow: 'auto' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-        <div>
-          <h2 style={{ color: 'var(--color-text-primary)', margin: 0, marginBottom: 4 }}>提示词管理中心</h2>
-          <div style={{ color: 'var(--color-text-muted)', fontSize: 12 }}>
-            这里保存的修改会直接作用到运行时生成链路，不再只是本地参考。
-          </div>
-        </div>
+    <WorkspacePage
+      className="prompt-manager-page"
+      layout="wide"
+      eyebrow="运行时控制台"
+      title="提示词控制台"
+      description="这里维护的是会直接作用到生成链路的运行时 prompt。目录区按生产阶段筛选，右侧检查器用于查看当前模板、风险点和覆盖状态。"
+      heroVariant="compact"
+      actions={(
         <Input.Search
-          placeholder="搜索提示词..."
+          placeholder="搜索提示词、阶段或 key"
           value={searchText}
-          onChange={(e) => setSearchText(e.target.value)}
-          style={{ width: 260 }}
+          onChange={(event) => setSearchText(event.target.value)}
+          style={{ width: 320, maxWidth: '100%' }}
           allowClear
         />
-      </div>
-
-      <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
-        {PROMPT_CATEGORIES.map((category) => (
-          <Tag
-            key={category}
-            onClick={() => setActiveCategory(category)}
-            style={{
-              cursor: 'pointer',
-              padding: '4px 12px',
-              fontSize: 13,
-              background: activeCategory === category ? 'var(--color-blue-primary)' : 'transparent',
-              border: `1px solid ${activeCategory === category ? 'var(--color-blue-primary)' : 'var(--border-color)'}`,
-              color: activeCategory === category ? 'white' : 'var(--color-text-secondary)',
-              borderRadius: 20,
-            }}
-          >
-            {category}
-          </Tag>
-        ))}
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 16 }}>
-        {filteredPrompts.map((prompt) => {
-          const hasOverride = Boolean(customOverrides[prompt.key])
-          const currentTemplate = sanitizePromptText(customOverrides[prompt.key] || prompt.template, prompt.template)
-
-          return (
-            <div
-              key={prompt.key}
-              style={{
-                background: 'var(--color-bg-card)',
-                border: `1px solid ${hasOverride ? 'var(--color-blue-primary)' : 'var(--border-color)'}`,
-                borderRadius: 10,
-                padding: 16,
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 10,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                    <span style={{ fontWeight: 600, fontSize: 15, color: 'var(--color-text-primary)' }}>
-                      {prompt.name}
-                    </span>
-                    {hasOverride ? (
-                      <Tag color="blue" style={{ fontSize: 10, padding: '0 4px' }}>
-                        运行中
-                      </Tag>
-                    ) : null}
-                  </div>
-                  <Tag
-                    style={{
-                      fontSize: 10,
-                      padding: '0 6px',
-                      background: 'transparent',
-                      border: '1px solid var(--border-color)',
-                      color: 'var(--color-text-muted)',
-                    }}
-                  >
-                    {prompt.category}
-                  </Tag>
-                </div>
-                <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-                  <Button size="small" icon={<CopyOutlined />} onClick={() => handleCopy(currentTemplate)} />
-                  <Button
-                    size="small"
-                    icon={<EditOutlined />}
-                    onClick={() => {
-                      setSelectedPrompt(prompt)
-                      setEditingTemplate(currentTemplate)
-                      setEditModalOpen(true)
-                    }}
-                  />
-                  {hasOverride ? (
-                    <Button size="small" onClick={() => void handleResetOverride(prompt.key)} style={{ fontSize: 10 }}>
-                      重置
-                    </Button>
-                  ) : null}
-                </div>
-              </div>
-
-              <div style={{ color: 'var(--color-text-secondary)', fontSize: 12, lineHeight: 1.7 }}>
-                {prompt.description}
-              </div>
-
-              <div>
-                <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 4 }}>输入参数：</div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                  {prompt.params.map((param) => (
-                    <Tag
-                      key={param.key}
-                      style={{
-                        fontSize: 10,
-                        background: 'rgba(46,134,171,0.1)',
-                        border: '1px solid rgba(46,134,171,0.25)',
-                        color: 'var(--color-blue-light)',
-                        padding: '1px 6px',
-                      }}
-                    >
-                      {param.key}（{param.label}）
-                    </Tag>
-                  ))}
-                </div>
-              </div>
-
-              <div
-                style={{
-                  background: 'var(--color-bg-primary)',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: 6,
-                  padding: '8px 10px',
-                  fontSize: 11,
-                  color: 'var(--color-text-muted)',
-                  fontFamily: 'monospace',
-                  maxHeight: 120,
-                  overflow: 'auto',
-                  whiteSpace: 'pre-wrap',
-                  lineHeight: 1.6,
-                }}
-              >
-                {currentTemplate}
-              </div>
+      )}
+      metrics={(
+        <>
+          <WorkspaceMetric label="总提示词" value={promptRows.length} tone="warm" hint="基础模板 + 运行时链路" />
+          <WorkspaceMetric label="运行时覆盖" value={overrideCount} hint={overrideCount > 0 ? '这些模板已被本地覆盖并实时生效' : '当前全部使用默认模板'} />
+          <WorkspaceMetric label="质量评审链路" value={qualityPromptCount} tone="cool" hint="负责 AI 痕迹、读者感受和修订反馈" />
+          <WorkspaceMetric label="当前筛选结果" value={filteredPrompts.length} hint={activeLane === '全部' ? '可继续按生产阶段缩小范围' : `当前阶段：${activeLane}`} />
+        </>
+      )}
+    >
+      <div className="prompt-manager-shell">
+        <WorkspacePanel
+          className="prompt-manager-catalog"
+          title="链路目录"
+          description="先按生产阶段筛，再进具体模板。目录中的覆盖标记表示这条 prompt 已被本地改写。"
+          extra={(
+            <div className="prompt-manager-filter-group">
+              {PROMPT_CATEGORIES.map((category) => (
+                <button
+                  key={category}
+                  type="button"
+                  className={`prompt-manager-filter ${activeCategory === category ? 'prompt-manager-filter--active' : ''}`}
+                  onClick={() => setActiveCategory(category)}
+                >
+                  {category}
+                </button>
+              ))}
             </div>
-          )
-        })}
+          )}
+        >
+          <div className="prompt-manager-lanes">
+            {PROMPT_LANES.map((lane) => (
+              <button
+                key={lane}
+                type="button"
+                className={`prompt-manager-lane ${activeLane === lane ? 'prompt-manager-lane--active' : ''}`}
+                onClick={() => setActiveLane(lane)}
+              >
+                {lane}
+              </button>
+            ))}
+          </div>
+
+          <div className="prompt-manager-card-grid">
+            {filteredPrompts.map(({ prompt, meta, hasOverride, currentTemplate }) => (
+              <button
+                key={prompt.key}
+                type="button"
+                className={`prompt-manager-card ${selectedPromptRow?.prompt.key === prompt.key ? 'prompt-manager-card--active' : ''}`}
+                onClick={() => setSelectedPromptKey(prompt.key)}
+              >
+                <div className="prompt-manager-card__head">
+                  <div className="prompt-manager-card__title-block">
+                    <strong>{prompt.name}</strong>
+                    <span>{prompt.description}</span>
+                  </div>
+                  {hasOverride ? <Tag color="blue">覆盖中</Tag> : <Tag>默认</Tag>}
+                </div>
+
+                <div className="prompt-manager-card__meta">
+                  <Tag color="gold">{meta.lane}</Tag>
+                  <Tag color="processing">{meta.stage}</Tag>
+                  <Tag>{prompt.category}</Tag>
+                  <Tag>{`${prompt.params.length} 个参数`}</Tag>
+                </div>
+
+                <div className="prompt-manager-card__goal">{meta.goal}</div>
+                <div className="prompt-manager-card__risk">{`风险点：${meta.risk}`}</div>
+                <div className="prompt-manager-card__preview">{currentTemplate}</div>
+              </button>
+            ))}
+          </div>
+        </WorkspacePanel>
+
+        <div className="prompt-manager-inspector">
+          <WorkspacePanel
+            className="prompt-manager-inspector-panel"
+            title={selectedPromptRow ? selectedPromptRow.prompt.name : '未选择提示词'}
+            description={selectedPromptRow ? selectedPromptRow.meta.goal : '从左侧选择一条提示词后，这里会显示它的运行时模板、风险和参数。'}
+            extra={selectedPromptRow ? (
+              <div className="prompt-manager-inspector-actions">
+                <Button size="small" icon={<CopyOutlined />} onClick={() => handleCopy(selectedPromptRow.currentTemplate)}>复制</Button>
+                <Button
+                  size="small"
+                  type="primary"
+                  icon={<EditOutlined />}
+                  onClick={() => {
+                    setEditingTemplate(selectedPromptRow.currentTemplate)
+                    setEditModalOpen(true)
+                  }}
+                >
+                  编辑
+                </Button>
+                {selectedPromptRow.hasOverride ? (
+                  <Button size="small" onClick={() => void handleResetOverride(selectedPromptRow.prompt.key)}>恢复默认</Button>
+                ) : null}
+              </div>
+            ) : null}
+          >
+            {selectedPromptRow ? (
+              <div className="prompt-manager-inspector-body">
+                <div className="prompt-manager-inspector-meta">
+                  <div className="prompt-manager-inspector-meta__item">
+                    <span>生产阶段</span>
+                    <strong>{selectedPromptRow.meta.lane} · {selectedPromptRow.meta.stage}</strong>
+                  </div>
+                  <div className="prompt-manager-inspector-meta__item">
+                    <span>运行状态</span>
+                    <strong>{selectedPromptRow.hasOverride ? '本地覆盖生效中' : '默认模板生效中'}</strong>
+                  </div>
+                </div>
+
+                <div className="prompt-manager-callout">
+                  <strong>运行时说明</strong>
+                  <span>这里展示的是当前可覆盖模板。部分链路还会在 Electron 服务层叠加生产护栏，用于强化读者体验、连贯性和 AI 味治理。</span>
+                </div>
+
+                <div className="prompt-manager-inspector-section">
+                  <div className="prompt-manager-inspector-section__title">风险点</div>
+                  <div className="prompt-manager-inspector-section__copy">{selectedPromptRow.meta.risk}</div>
+                </div>
+
+                <div className="prompt-manager-inspector-section">
+                  <div className="prompt-manager-inspector-section__title">输入参数</div>
+                  <div className="prompt-manager-param-list">
+                    {selectedPromptRow.prompt.params.map((param) => (
+                      <Tag key={param.key} style={{ fontSize: 11 }}>
+                        {param.key} · {param.label}
+                      </Tag>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="prompt-manager-inspector-section">
+                  <div className="prompt-manager-inspector-section__title">当前模板</div>
+                  <div className="prompt-manager-template-preview">{selectedPromptRow.currentTemplate}</div>
+                </div>
+              </div>
+            ) : (
+              <div className="novel-empty">当前筛选下没有可显示的提示词。</div>
+            )}
+          </WorkspacePanel>
+        </div>
       </div>
 
       <Modal
-        title={`编辑运行时提示词：${selectedPrompt?.name || ''}`}
+        title={`编辑运行时提示词：${selectedPromptRow?.prompt.name || ''}`}
         open={editModalOpen}
         onCancel={() => setEditModalOpen(false)}
         onOk={() => void handleEditSave()}
         okText="保存并生效"
-        width={760}
+        width={880}
         destroyOnHidden
       >
         <div style={{ marginBottom: 12, color: 'var(--color-text-secondary)', fontSize: 12 }}>
           保存后会直接影响后端运行时 prompt。使用 `{`参数名`}` 可以引用上下文字段。
         </div>
         <div style={{ marginBottom: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {selectedPrompt?.params.map((param) => (
+          {selectedPromptRow?.prompt.params.map((param) => (
             <Tag
               key={param.key}
               style={{ fontSize: 11, cursor: 'pointer', color: 'var(--color-blue-light)' }}
@@ -518,10 +624,10 @@ export default function PromptManager() {
         <Input.TextArea
           value={editingTemplate}
           onChange={(e) => setEditingTemplate(e.target.value)}
-          rows={18}
+          rows={20}
           style={{ fontFamily: 'monospace', fontSize: 12 }}
         />
       </Modal>
-    </div>
+    </WorkspacePage>
   )
 }

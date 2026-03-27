@@ -60,7 +60,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const hideAppSidebar = location.pathname.startsWith('/novels/') && location.pathname !== '/novels'
 
   return (
-    <Layout style={{ height: '100vh', background: 'var(--color-bg-primary)' }}>
+    <Layout style={{ minHeight: '100vh', height: '100dvh', background: 'var(--color-bg-primary)' }}>
       {!hideAppSidebar ? (
       <Sider
         width={180}
@@ -69,6 +69,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
           borderRight: '1px solid var(--border-color)',
           display: 'flex',
           flexDirection: 'column',
+          overflow: 'hidden',
         }}
       >
         {/* Logo */}
@@ -150,9 +151,11 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
       <Content style={{
         background: 'var(--color-bg-primary)',
-        overflow: 'hidden',
+        overflowX: 'hidden',
+        overflowY: 'auto',
         display: 'flex',
         flexDirection: 'column',
+        minWidth: 0,
       }}>
         {children}
       </Content>

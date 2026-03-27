@@ -20,6 +20,7 @@ import {
   type StoryEndingType,
 } from '../../../shared/story-settings'
 import {
+  getWorkflowBlockers,
   isCharacterRosterReady,
   isItemsEquipmentReady,
   isMapStructureReady,
@@ -60,8 +61,10 @@ const EMPTY_STATS = {
   mapCount: 0,
   characterCount: 0,
   itemCount: 0,
+  threadCount: 0,
   outlineCount: 0,
   timelineCount: 0,
+  revisionTaskCount: 0,
   chapterCount: 0,
   completedChapterCount: 0,
   totalWords: 0,
@@ -237,6 +240,10 @@ export default function CoreSettings({ novelId }: Props) {
     isCharacterRosterReady(stats),
     isItemsEquipmentReady(stats),
   ].filter(Boolean).length
+  const generationBlockers = useMemo(
+    () => getWorkflowBlockers('story-design', currentNovel, stats),
+    [currentNovel, stats],
+  )
   const storyReady = isStoryPlotReady(currentNovel)
   const watchedBatchCount = Form.useWatch('subplot_batch_count', form) as number | undefined
   const batchCount = clampBatchCount(watchedBatchCount)
@@ -365,6 +372,14 @@ export default function CoreSettings({ novelId }: Props) {
   }
 
   const handleGenerate = async (mode: GenerationMode) => {
+    const nextStats = await loadWorkflowStats(novelId)
+    setStats(nextStats)
+    const blockers = getWorkflowBlockers('story-design', currentNovel, nextStats)
+    if (blockers.length > 0) {
+      message.warning(blockers.join('\n'))
+      return
+    }
+
     setGeneratingMode(mode)
     setGenerationProgress(null)
 
@@ -525,6 +540,21 @@ export default function CoreSettings({ novelId }: Props) {
           type="warning"
           showIcon
           message="基础设定还没写稳。建议先回基础设定页补齐 premise 与写作边界，再做故事设计。"
+        />
+      ) : null}
+
+      {generationBlockers.length > 0 ? (
+        <Alert
+          type="warning"
+          showIcon
+          message="当前还不适合生成故事设计"
+          description={(
+            <div>
+              {generationBlockers.map((blocker) => (
+                <div key={blocker}>{blocker}</div>
+              ))}
+            </div>
+          )}
         />
       ) : null}
 

@@ -272,6 +272,70 @@ export interface MapNodeSummary {
   childCount: number
 }
 
+export interface MapRelation {
+  id: number
+  novelId: number
+  mapAId: number
+  mapBId: number
+  relationType?: string
+  relationLabel?: string
+  bilateral: number
+  description?: string
+  intensity?: string
+  colorHint?: string
+  sortOrder: number
+}
+
+export interface MapRelationInput {
+  id?: number
+  novelId: number
+  mapAId: number
+  mapBId: number
+  relationType?: string
+  relationLabel?: string
+  bilateral?: number
+  description?: string
+  intensity?: string
+  colorHint?: string
+  sortOrder?: number
+}
+
+export interface MapGraphQueryInput {
+  novelId: number
+  focusNodeId?: number
+  relationDepth?: number
+  includeSiblingNodes?: boolean
+  includeRelationEdges?: boolean
+}
+
+export interface MapGraphNode extends MapNodeSummary {
+  graphRole: 'root' | 'focus' | 'ancestor' | 'descendant' | 'sibling' | 'related'
+  tags: string[]
+  affiliatedFactions: string[]
+  summaryText: string
+}
+
+export interface MapGraphEdge {
+  id: string
+  sourceId: number
+  targetId: number
+  edgeKind: 'hierarchy' | 'relation'
+  relationId?: number
+  relationType?: string
+  relationLabel?: string
+  description?: string
+  bilateral?: number
+  colorHint?: string
+}
+
+export interface MapGraphPayload {
+  nodes: MapGraphNode[]
+  edges: MapGraphEdge[]
+  focusNodeId?: number
+  relationNodeIds: number[]
+  rootNodeIds: number[]
+}
+
 export interface MapQueryInput {
   novelId: number
   parentId?: number | null
@@ -991,11 +1055,15 @@ declare global {
       map: {
         getTree: (novelId: number) => Promise<WorldMapItem[]>
         queryNodes: (filters: MapQueryInput) => Promise<PagedResult<MapNodeSummary>>
+        getGraph: (filters: MapGraphQueryInput) => Promise<MapGraphPayload>
+        getRelations: (novelId: number, focusNodeId?: number) => Promise<MapRelation[]>
         getStats: (novelId: number) => Promise<MapStats>
         getNode: (id: number) => Promise<MapNodeSummary | null>
         searchNodes: (novelId: number, keyword?: string, limit?: number) => Promise<MapNodeSummary[]>
         create: (novelId: number, data: unknown) => Promise<number>
         update: (id: number, data: unknown) => Promise<void>
+        upsertRelation: (data: MapRelationInput) => Promise<void>
+        deleteRelation: (id: number) => Promise<void>
         delete: (id: number) => Promise<void>
         batchGenerate: (novelId: number, structure: MapBatchGenerateOptions) => Promise<MapBatchGenerationResult>
         startAutoGenerate: (novelId: number, structure: MapBatchGenerateOptions) => Promise<number>
