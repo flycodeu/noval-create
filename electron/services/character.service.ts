@@ -73,6 +73,14 @@ function stringifyNumberArray(values: number[]): string {
   return JSON.stringify([...new Set(values.filter((item) => Number.isFinite(item)))])
 }
 
+function normalizeLookup(input: string): string {
+  return input.trim().replace(/\s+/g, '').toLowerCase()
+}
+
+function normalizeRecordStatus(value: unknown): 'draft' | 'confirmed' {
+  return asText(value) === 'draft' ? 'draft' : 'confirmed'
+}
+
 function parseAppearanceDescription(raw?: string | null): string {
   if (!raw) return ''
   try {
@@ -135,6 +143,42 @@ function buildStoryCoreSummary(profile: Awaited<ReturnType<typeof buildStoryProf
 
 function buildOptionSummary(label: string, values: string[]): string {
   return values.length > 0 ? `${label}：${values.join('、')}` : ''
+}
+
+function buildItemResourceSummary(rows: Array<typeof storyItems.$inferSelect>): string {
+  return rows
+    .filter((item) => item.itemKind === 'instance')
+    .slice(0, 12)
+    .map((item) => {
+      const parts = [item.category, item.ownerCharacterId ? '已绑定人物' : '', item.summary || item.plotFunction || '']
+        .filter(Boolean)
+        .slice(0, 3)
+      return `- ${item.itemName}${parts.length > 0 ? `：${parts.join('；')}` : ''}`
+    })
+    .join('\n')
+}
+
+function buildRoleBlueprintSummary(opts: {
+  majorCount: number
+  minorCount: number
+  antagonistCount?: number
+  supportingCount?: number
+  helperRoles?: string[]
+}): string {
+  return [
+    `主要人物 ${opts.majorCount} 位`,
+    `对立角色 ${opts.antagonistCount || 0} 位`,
+    `功能角色 ${opts.supportingCount || 0} 位`,
+    `次要人物 ${opts.minorCount} 位`,
+    opts.helperRoles && opts.helperRoles.length > 0 ? `优先功能位：${opts.helperRoles.join('、')}` : '',
+  ].filter(Boolean).join('；')
+}
+
+function buildExistingCharacterDigest(rows: Array<typeof characters.$inferSelect>): string {
+  return rows
+    .slice(0, 10)
+    .map((character) => buildCharacterSummary(character))
+    .join('\n')
 }
 
 function buildCharacterSummary(character: typeof characters.$inferSelect): string {
@@ -206,6 +250,8 @@ function buildCharacterPayload(
     roleType?: string
     fullName?: string
     existing?: typeof characters.$inferSelect | null
+    recordStatus?: 'draft' | 'confirmed'
+    sourceContextJson?: string
   } = {},
 ): Partial<typeof characters.$inferInsert> {
   const sanitized = cleanAiValue(parsed)
@@ -240,9 +286,14 @@ function buildCharacterPayload(
   const contextHooks = toStringArray(sanitized.context_hooks).length > 0
     ? toStringArray(sanitized.context_hooks)
     : parseJsonArray(fallback.existing?.contextHooksJson)
+  const recordStatus = Object.prototype.hasOwnProperty.call(sanitized, 'record_status')
+    ? normalizeRecordStatus(sanitized.record_status)
+    : fallback.recordStatus || fallback.existing?.recordStatus || 'confirmed'
+  const sourceContextJson = asText(sanitized.source_context_json) || fallback.sourceContextJson || fallback.existing?.sourceContextJson || ''
 
   return {
     roleType,
+    recordStatus,
     entityType,
     species,
     surname: asText(sanitized.surname) || fallback.existing?.surname || '',
@@ -276,6 +327,7 @@ function buildCharacterPayload(
     resonancePoint: asText(sanitized.resonance_point) || fallback.existing?.resonancePoint || '',
     characterArc: asText(sanitized.character_arc) || fallback.existing?.characterArc || '',
     appearanceJson: JSON.stringify({ description: appearance }),
+    sourceContextJson,
     appearChapter: asNumber(sanitized.appear_chapter) ?? fallback.existing?.appearChapter,
   }
 }
@@ -283,6 +335,7 @@ function buildCharacterPayload(
 interface CharacterQueryFilters {
   novelId: number
   roleType?: typeof characters.$inferSelect['roleType']
+  recordStatus?: 'draft' | 'confirmed' | 'all'
   entityType?: string
   species?: string
   keyword?: string
@@ -294,6 +347,10 @@ interface CharacterGraphFilters {
   novelId: number
   characterIds?: number[]
   focusCharacterId?: number
+  roleTypes?: Array<typeof characters.$inferSelect['roleType']>
+  relationTypes?: string[]
+  factionNames?: string[]
+  recordStatus?: 'draft' | 'confirmed' | 'all'
   limit?: number
 }
 
@@ -319,6 +376,7 @@ function mapCharacterRecord(row: Record<string, unknown>) {
     id: Number(row.id),
     novelId: Number(row.novel_id),
     roleType: String(row.role_type || 'minor') as typeof characters.$inferSelect['roleType'],
+    recordStatus: normalizeRecordStatus(row.record_status),
     entityType: typeof row.entity_type === 'string' ? row.entity_type : undefined,
     species: typeof row.species === 'string' ? row.species : undefined,
     surname: typeof row.surname === 'string' ? row.surname : undefined,
@@ -353,6 +411,7 @@ function mapCharacterRecord(row: Record<string, unknown>) {
     characterArc: typeof row.character_arc === 'string' ? row.character_arc : undefined,
     appearanceJson: typeof row.appearance_json === 'string' ? row.appearance_json : undefined,
     abilitiesJson: typeof row.abilities_json === 'string' ? row.abilities_json : undefined,
+    sourceContextJson: typeof row.source_context_json === 'string' ? row.source_context_json : undefined,
     appearChapter: row.appear_chapter == null ? undefined : Number(row.appear_chapter),
     sortOrder: Number(row.sort_order || 0),
     createdAt: typeof row.created_at === 'string' ? row.created_at : '',
@@ -384,6 +443,7 @@ function mapStoryItemRecord(row: Record<string, unknown>) {
     category: typeof row.category === 'string' ? row.category : undefined,
     subType: typeof row.sub_type === 'string' ? row.sub_type : undefined,
     rarity: typeof row.rarity === 'string' ? row.rarity : undefined,
+    recordStatus: normalizeRecordStatus(row.record_status),
     ownerCharacterId: row.owner_character_id == null ? undefined : Number(row.owner_character_id),
     locationMapId: row.location_map_id == null ? undefined : Number(row.location_map_id),
     status: String(row.status || 'available') as 'available' | 'consumed' | 'hidden' | 'destroyed',
@@ -398,6 +458,7 @@ function mapStoryItemRecord(row: Record<string, unknown>) {
     linkedCharacterIdsJson: typeof row.linked_character_ids_json === 'string' ? row.linked_character_ids_json : undefined,
     linkedTimelineEventIdsJson: typeof row.linked_timeline_event_ids_json === 'string' ? row.linked_timeline_event_ids_json : undefined,
     tagsJson: typeof row.tags_json === 'string' ? row.tags_json : undefined,
+    sourceContextJson: typeof row.source_context_json === 'string' ? row.source_context_json : undefined,
     sortOrder: Number(row.sort_order || 0),
     createdAt: typeof row.created_at === 'string' ? row.created_at : '',
     updatedAt: typeof row.updated_at === 'string' ? row.updated_at : '',
@@ -411,6 +472,11 @@ function buildCharacterWhere(filters: CharacterQueryFilters) {
   if (filters.roleType) {
     whereClauses.push('c.role_type = ?')
     params.push(filters.roleType)
+  }
+
+  if (filters.recordStatus && filters.recordStatus !== 'all') {
+    whereClauses.push("COALESCE(c.record_status, 'confirmed') = ?")
+    params.push(filters.recordStatus)
   }
 
   if (filters.entityType) {
@@ -487,9 +553,11 @@ export function getCharacterStats(filters: CharacterQueryFilters) {
   const row = sqlite.prepare(`
     SELECT
       COUNT(*) AS total,
-      SUM(CASE WHEN c.role_type = 'protagonist' THEN 1 ELSE 0 END) AS protagonistCount,
-      SUM(CASE WHEN c.role_type = 'major' THEN 1 ELSE 0 END) AS majorCount,
-      SUM(CASE WHEN c.role_type = 'antagonist' THEN 1 ELSE 0 END) AS antagonistCount,
+      SUM(CASE WHEN COALESCE(c.record_status, 'confirmed') = 'confirmed' THEN 1 ELSE 0 END) AS confirmedCount,
+      SUM(CASE WHEN COALESCE(c.record_status, 'confirmed') = 'draft' THEN 1 ELSE 0 END) AS draftCount,
+      SUM(CASE WHEN c.role_type = 'protagonist' AND COALESCE(c.record_status, 'confirmed') = 'confirmed' THEN 1 ELSE 0 END) AS protagonistCount,
+      SUM(CASE WHEN c.role_type = 'major' AND COALESCE(c.record_status, 'confirmed') = 'confirmed' THEN 1 ELSE 0 END) AS majorCount,
+      SUM(CASE WHEN c.role_type = 'antagonist' AND COALESCE(c.record_status, 'confirmed') = 'confirmed' THEN 1 ELSE 0 END) AS antagonistCount,
       COUNT(DISTINCT NULLIF(TRIM(COALESCE(c.species, '')), '')) AS speciesCount
     FROM characters c
     WHERE ${query.whereSql}
@@ -507,6 +575,8 @@ export function getCharacterStats(filters: CharacterQueryFilters) {
 
   return {
     total: Number(row?.total || 0),
+    confirmedCount: Number(row?.confirmedCount || 0),
+    draftCount: Number(row?.draftCount || 0),
     protagonistCount: Number(row?.protagonistCount || 0),
     majorCount: Number(row?.majorCount || 0),
     antagonistCount: Number(row?.antagonistCount || 0),
@@ -553,20 +623,51 @@ export function searchCharacters(novelId: number, keyword = '', limit = 20) {
   }).items
 }
 
+function characterMatchesGraphFilters(
+  row: Record<string, unknown>,
+  filters: CharacterGraphFilters,
+): boolean {
+  const roleType = String(row.role_type || 'minor')
+  const recordStatus = normalizeRecordStatus(row.record_status)
+  if (filters.recordStatus && filters.recordStatus !== 'all' && recordStatus !== filters.recordStatus) return false
+  if (filters.roleTypes && filters.roleTypes.length > 0 && !filters.roleTypes.includes(roleType as typeof characters.$inferSelect['roleType'])) return false
+  if (filters.factionNames && filters.factionNames.length > 0) {
+    const factionNames = parseJsonArray(typeof row.camp_faction_ids_json === 'string' ? row.camp_faction_ids_json : '')
+    if (!filters.factionNames.some((name) => factionNames.includes(name))) return false
+  }
+  return true
+}
+
 export function getCharacterGraph(filters: CharacterGraphFilters) {
   const sqlite = getSqlite()
   const relationWindowLimit = Math.max(12, Math.min(filters.limit || 24, 80))
-  const seedIds = uniqueNumberArray([
+  const requestedSeedIds = uniqueNumberArray([
     ...(filters.characterIds || []),
     ...(typeof filters.focusCharacterId === 'number' ? [filters.focusCharacterId] : []),
   ])
 
-  if (seedIds.length === 0) {
-    return { characters: [], relations: [] }
-  }
+  const allRows = sqlite.prepare(`
+    SELECT *
+    FROM characters
+    WHERE novel_id = ?
+    ORDER BY
+      CASE role_type
+        WHEN 'protagonist' THEN 0
+        WHEN 'major' THEN 1
+        WHEN 'antagonist' THEN 2
+        WHEN 'supporting' THEN 3
+        ELSE 4
+      END ASC,
+      sort_order ASC,
+      id ASC
+  `).all(filters.novelId) as Array<Record<string, unknown>>
 
-  let visibleIds = [...seedIds]
-  if (typeof filters.focusCharacterId === 'number') {
+  const filteredRows = allRows.filter((row) => characterMatchesGraphFilters(row, filters))
+  let visibleIds = requestedSeedIds.length > 0
+    ? requestedSeedIds.filter((id) => filteredRows.some((row) => Number(row.id) === id))
+    : filteredRows.slice(0, relationWindowLimit).map((row) => Number(row.id))
+
+  if (typeof filters.focusCharacterId === 'number' && visibleIds.includes(filters.focusCharacterId)) {
     const focusRelations = sqlite.prepare(`
       SELECT *
       FROM character_relations
@@ -580,7 +681,7 @@ export function getCharacterGraph(filters: CharacterGraphFilters) {
       const charAId = Number(row.char_a_id)
       const charBId = Number(row.char_b_id)
       return charAId === filters.focusCharacterId ? [charBId] : [charAId]
-    }))
+    })).filter((id) => filteredRows.some((item) => Number(item.id) === id))
     visibleIds = uniqueNumberArray([...visibleIds, ...neighborIds])
   }
 
@@ -588,23 +689,7 @@ export function getCharacterGraph(filters: CharacterGraphFilters) {
     return { characters: [], relations: [] }
   }
 
-  const placeholders = visibleIds.map(() => '?').join(', ')
-  const characterRows = sqlite.prepare(`
-    SELECT *
-    FROM characters
-    WHERE novel_id = ?
-      AND id IN (${placeholders})
-    ORDER BY
-      CASE role_type
-        WHEN 'protagonist' THEN 0
-        WHEN 'major' THEN 1
-        WHEN 'antagonist' THEN 2
-        WHEN 'supporting' THEN 3
-        ELSE 4
-      END ASC,
-      sort_order ASC,
-      id ASC
-  `).all(filters.novelId, ...visibleIds) as Array<Record<string, unknown>>
+  const characterRows = filteredRows.filter((row) => visibleIds.includes(Number(row.id)))
 
   const graphCharacterIds = characterRows.map((row) => Number(row.id))
   if (graphCharacterIds.length === 0) {
@@ -622,9 +707,15 @@ export function getCharacterGraph(filters: CharacterGraphFilters) {
     LIMIT ?
   `).all(filters.novelId, ...graphCharacterIds, ...graphCharacterIds, relationWindowLimit * 4) as Array<Record<string, unknown>>
 
+  const filteredRelations = relationRows.filter((row) => {
+    if (!filters.relationTypes || filters.relationTypes.length === 0) return true
+    const relationType = typeof row.relation_type === 'string' ? row.relation_type : ''
+    return filters.relationTypes.includes(relationType)
+  })
+
   return {
     characters: characterRows.map(mapCharacterRecord),
-    relations: relationRows.map(mapRelationRecord),
+    relations: filteredRelations.map(mapRelationRecord),
   }
 }
 
@@ -717,7 +808,12 @@ export function createCharacter(
   options: { skipContextTracking?: boolean } = {},
 ) {
   const db = getDb()
-  const result = db.insert(characters).values({ novelId, fullName: data.fullName || '未命名角色', ...data }).run()
+  const result = db.insert(characters).values({
+    novelId,
+    fullName: data.fullName || '未命名角色',
+    recordStatus: normalizeRecordStatus(data.recordStatus),
+    ...data,
+  }).run()
   const id = Number(result.lastInsertRowid)
   if (!options.skipContextTracking) {
     markNovelContextChanged(novelId, 'Character profiles changed')
@@ -731,7 +827,11 @@ export function updateCharacter(
   options: { skipContextTracking?: boolean } = {},
 ) {
   const db = getDb()
-  db.update(characters).set({ ...data, updatedAt: new Date().toISOString() }).where(eq(characters.id, id)).run()
+  db.update(characters).set({
+    ...data,
+    ...(data.recordStatus ? { recordStatus: normalizeRecordStatus(data.recordStatus) } : {}),
+    updatedAt: new Date().toISOString(),
+  }).where(eq(characters.id, id)).run()
   if (!options.skipContextTracking) {
     const current = getCharacter(id)
     if (current) {
@@ -821,9 +921,23 @@ export function upsertRelation(data: {
   }
 }
 
+function hasReservedCharacterName(name: string, reservedNames: string[]) {
+  const normalized = normalizeLookup(name)
+  if (!normalized) return false
+  return reservedNames.some((item) => normalizeLookup(item) === normalized)
+}
+
 export async function generateProtagonist(novelId: number, opts: {
   gender?: string
   surnameHint?: string
+  ageRange?: string
+  species?: string
+  occupationHint?: string
+  factionHint?: string
+  itemPreferences?: string[]
+  personalitySeed?: string
+  forbiddenNames?: string[]
+  forceDifferentFromExisting?: boolean
 }): Promise<number> {
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
@@ -831,30 +945,66 @@ export async function generateProtagonist(novelId: number, opts: {
 
   const profile = await buildStoryProfile(novelId)
   const rules = parseWorldRulesJson(novel.worldRulesJson, profile.genre)
-  const prompt = protagonistPrompt({
-    novelTitle: novel.title,
-    novelSynopsis: profile.background,
-    genre: profile.genre,
-    worldSummary: profile.worldRulesSummary,
-    storyCore: buildStoryCoreSummary(profile),
-    speciesSummary: buildOptionSummary('可用种族', getSpeciesNameOptions(rules)),
-    factionSummary: buildOptionSummary('核心势力', getFactionNameOptions(rules)),
-    ecologySummary: buildCharacterEcologySummary(rules),
-    mapSummary: buildMapBlueprintSummary(rules),
-    writingConstraints: rules.writingConstraints.extraRules.join('；'),
-    gender: opts.gender || '不限',
-    surnameHint: opts.surnameHint,
-  })
+  const existingChars = db.select().from(characters).where(eq(characters.novelId, novelId)).all()
+  const itemRows = db.select().from(storyItems).where(eq(storyItems.novelId, novelId)).all()
+  const reservedNames = [...new Set([
+    ...existingChars.map((character) => character.fullName).filter(Boolean),
+    ...(opts.forbiddenNames || []).filter(Boolean),
+  ])]
 
-  const result = await runChatTask({
-    type: 'generate_relations',
-    novelId,
-    messages: [{ role: 'user', content: prompt }],
-    modelConfigId: novel.modelConfigId || undefined,
-  })
+  let parsed: Record<string, unknown> | null = null
+  const attempts = opts.forceDifferentFromExisting ? 3 : 2
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const prompt = protagonistPrompt({
+      novelTitle: novel.title,
+      novelSynopsis: profile.background,
+      genre: profile.genre,
+      worldSummary: profile.worldRulesSummary,
+      storyCore: buildStoryCoreSummary(profile),
+      speciesSummary: buildOptionSummary('可用种族', getSpeciesNameOptions(rules)),
+      factionSummary: buildOptionSummary('核心势力', getFactionNameOptions(rules)),
+      ecologySummary: buildCharacterEcologySummary(rules),
+      mapSummary: buildMapBlueprintSummary(rules),
+      writingConstraints: rules.writingConstraints.extraRules.join('；'),
+      gender: opts.gender || '不限',
+      surnameHint: opts.surnameHint,
+      ageRange: opts.ageRange,
+      speciesPreference: opts.species,
+      occupationHint: opts.occupationHint,
+      factionHint: opts.factionHint,
+      itemPreferences: opts.itemPreferences?.join('、'),
+      personalitySeed: opts.personalitySeed,
+      forbiddenNames: reservedNames.join('、'),
+      forceDifferentFromExisting: opts.forceDifferentFromExisting,
+    })
 
-  const parsed = cleanAiValue(safeParseJson<Record<string, unknown>>(result))
-  const charId = createCharacter(novelId, buildCharacterPayload(parsed, { roleType: 'protagonist' }), {
+    const result = await runChatTask({
+      type: 'character_gen',
+      novelId,
+      messages: [{ role: 'user', content: prompt }],
+      modelConfigId: novel.modelConfigId || undefined,
+    })
+
+    const nextParsed = cleanAiValue(safeParseJson<Record<string, unknown>>(result))
+    const candidateName = asText(nextParsed.full_name) || asText(nextParsed.name)
+    if (!hasReservedCharacterName(candidateName, reservedNames) || attempt === attempts - 1) {
+      parsed = nextParsed
+      break
+    }
+  }
+
+  const payload = buildCharacterPayload(parsed || {}, {
+    roleType: 'protagonist',
+    recordStatus: 'confirmed',
+  })
+  payload.contextHooksJson = jsonStringifyArray([
+    ...parseJsonArray(payload.contextHooksJson as string | undefined),
+    ...(opts.itemPreferences || []).map((item) => `${item}线索`),
+  ])
+  if (!payload.background && itemRows.length > 0) {
+    payload.background = `与 ${itemRows.slice(0, 2).map((item) => item.itemName).join('、')} 等关键资源存在潜在关联。`
+  }
+  const charId = createCharacter(novelId, payload, {
     skipContextTracking: true,
   })
   markNovelContextChanged(novelId, 'Character profiles changed')
@@ -872,6 +1022,9 @@ export async function batchGenerateCharacters(novelId: number, opts: {
   helperRoles?: string[]
   specialRequirements: string
   batchSize: number
+  relationSeedMode?: 'balanced' | 'conflict-heavy' | 'ally-heavy'
+  requiredItemLinks?: string[]
+  diversityConstraints?: string[]
 }, sender?: WebContents): Promise<number[]> {
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
@@ -880,9 +1033,13 @@ export async function batchGenerateCharacters(novelId: number, opts: {
   const profile = await buildStoryProfile(novelId)
   const rules = parseWorldRulesJson(novel.worldRulesJson, profile.genre)
   const existingChars = db.select().from(characters).where(eq(characters.novelId, novelId)).all()
+  const itemRows = db.select().from(storyItems).where(eq(storyItems.novelId, novelId)).all()
   const reservedNames = existingChars.map((character) => character.fullName).filter(Boolean)
   const protagonist = existingChars.find(c => c.roleType === 'protagonist')
   const protagonistSummary = protagonist ? buildCharacterSummary(protagonist) : '主角未设定'
+  const existingCharacterSummaries = buildExistingCharacterDigest(existingChars)
+  const roleBlueprint = buildRoleBlueprintSummary(opts)
+  const itemSummary = buildItemResourceSummary(itemRows)
 
   const roleQueue = buildRoleQueue(opts)
   const specialRequirements = [
@@ -891,21 +1048,23 @@ export async function batchGenerateCharacters(novelId: number, opts: {
     opts.preferredSpecies && opts.preferredSpecies.length > 0 ? `优先种族或实体：${opts.preferredSpecies.join('、')}。` : '',
     opts.factionBias && opts.factionBias.length > 0 ? `优先势力来源：${opts.factionBias.join('、')}。` : '',
     opts.helperRoles && opts.helperRoles.length > 0 ? `优先补齐这些角色功能位：${opts.helperRoles.join('、')}。` : '',
+    itemSummary ? `优先与这些现有物品/资源发生绑定：\n${itemSummary}` : '',
     '角色必须和题材、背景、地图结构、势力关系与主线冲突直接相关。',
   ].filter(Boolean).join('\n')
 
   const totalCount = roleQueue.length
   if (totalCount <= 0) return []
-  const batches = Math.ceil(totalCount / opts.batchSize)
   const newIds: number[] = []
+  let generatedAttempts = 0
 
-  for (let i = 0; i < batches; i++) {
-    const batchCount = Math.min(opts.batchSize, totalCount - i * opts.batchSize)
+  while (newIds.length < totalCount && generatedAttempts < Math.max(3, totalCount)) {
+    const batchCount = Math.min(opts.batchSize, totalCount - newIds.length)
     const prompt = batchCharacterPrompt({
       novelTitle: novel.title,
       novelSynopsis: profile.background,
       protagonistSummary,
       existingNames: reservedNames.join('、'),
+      existingCharacterSummaries,
       genre: profile.genre,
       worldSummary: profile.worldRulesSummary,
       storyCore: buildStoryCoreSummary(profile),
@@ -915,8 +1074,12 @@ export async function batchGenerateCharacters(novelId: number, opts: {
       mapSummary: buildMapBlueprintSummary(rules),
       writingConstraints: rules.writingConstraints.extraRules.join('；'),
       count: batchCount,
-      genderRatio: opts.genderRatio,
+      genderRatio: opts.genderRatio || '不限',
       specialRequirements,
+      roleBlueprint,
+      relationSeedMode: opts.relationSeedMode,
+      requiredItemLinks: opts.requiredItemLinks?.join('、'),
+      diversityConstraints: opts.diversityConstraints?.join('、'),
     })
 
     const result = await runChatTask({
@@ -932,18 +1095,32 @@ export async function batchGenerateCharacters(novelId: number, opts: {
         const fallbackRole = roleQueue[newIds.length] || 'minor'
         const payload = buildCharacterPayload(char, {
           roleType: normalizeRoleType(asText(char.role_type) || fallbackRole),
+          recordStatus: 'confirmed',
         })
+        const candidateName = typeof payload.fullName === 'string' ? payload.fullName : ''
+        if (!candidateName || hasReservedCharacterName(candidateName, reservedNames)) {
+          continue
+        }
+        if (itemRows.length > 0 && !payload.contextHooksJson) {
+          payload.contextHooksJson = jsonStringifyArray(itemRows.slice(0, 2).map((item) => `${item.itemName}相关`))
+        }
         const id = createCharacter(novelId, payload, { skipContextTracking: true })
-        reservedNames.push(typeof payload.fullName === 'string' ? payload.fullName : '')
+        reservedNames.push(candidateName)
         newIds.push(id)
+        if (newIds.length >= totalCount) break
       }
     } catch (error) {
       console.error('批量生成人物解析失败:', error)
     }
 
     if (sender && !sender.isDestroyed()) {
-      sender.send('character:batch-progress', { batch: i + 1, total: batches, newIds })
+      sender.send('character:batch-progress', {
+        batch: generatedAttempts + 1,
+        total: Math.max(1, Math.ceil(totalCount / Math.max(1, opts.batchSize))),
+        newIds,
+      })
     }
+    generatedAttempts += 1
   }
 
   if (newIds.length > 0) {
@@ -1063,7 +1240,6 @@ export async function generateCharacterRelations(novelId: number): Promise<void>
 
   try {
     const relations = safeParseJson<Array<Record<string, unknown>>>(result)
-    db.delete(characterRelations).where(eq(characterRelations.novelId, novelId)).run()
     for (const relation of relations) {
       const charA = charList.find((character) => character.fullName === relation.char_a)
       const charB = charList.find((character) => character.fullName === relation.char_b)

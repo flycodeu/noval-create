@@ -32,6 +32,23 @@ export { GLOBAL_WRITING_RULES }
 type StoryArcsPromptParams = Parameters<typeof rawStoryArcsPrompt>[0]
 type ChapterOutlinePromptParams = Parameters<typeof rawChapterOutlinePrompt>[0]
 type ChapterWritingPromptParams = Parameters<typeof rawChapterWritingPrompt>[0]
+type ExtendedProtagonistPromptInput = ProtagonistPromptInput & {
+  ageRange?: string
+  speciesPreference?: string
+  occupationHint?: string
+  factionHint?: string
+  itemPreferences?: string
+  personalitySeed?: string
+  forbiddenNames?: string
+  forceDifferentFromExisting?: boolean
+}
+type ExtendedBatchCharacterPromptInput = BatchCharacterPromptInput & {
+  existingCharacterSummaries?: string
+  roleBlueprint?: string
+  relationSeedMode?: string
+  requiredItemLinks?: string
+  diversityConstraints?: string
+}
 
 function appendPromptSection(prompt: string, title: string, lines: string[]): string {
   const body = lines.map((line) => line.trim()).filter(Boolean).join('\n')
@@ -58,19 +75,77 @@ export function expandBackgroundPrompt(params: {
   return applyPromptOverride('expandBackground', fallback, normalizedParams)
 }
 
-export function protagonistPrompt(params: ProtagonistPromptInput): string {
-  const fallback = appendPromptSection(rawProtagonistPrompt(params), '生产补充要求', [
-    '- 主角档案必须能直接进入场景写作，不能只像设定卡。',
-    '- 动机、弱点、关系和能力都要能制造后续章节冲突与代价。',
-  ])
+export function protagonistPrompt(params: ExtendedProtagonistPromptInput): string {
+  const baseParams: ProtagonistPromptInput = {
+    novelTitle: params.novelTitle,
+    novelSynopsis: params.novelSynopsis,
+    genre: params.genre,
+    worldSummary: params.worldSummary,
+    storyCore: params.storyCore,
+    gender: params.gender,
+    surnameHint: params.surnameHint,
+    speciesSummary: params.speciesSummary,
+    factionSummary: params.factionSummary,
+    ecologySummary: params.ecologySummary,
+    mapSummary: params.mapSummary,
+    writingConstraints: params.writingConstraints,
+  }
+  const fallback = appendPromptSection(
+    appendPromptSection(rawProtagonistPrompt(baseParams), '差异化约束', [
+      params.ageRange ? `- 年龄区间偏好：${params.ageRange}` : '',
+      params.speciesPreference ? `- 种类偏好：${params.speciesPreference}` : '',
+      params.occupationHint ? `- 职业或身份倾向：${params.occupationHint}` : '',
+      params.factionHint ? `- 势力倾向：${params.factionHint}` : '',
+      params.itemPreferences ? `- 重点绑定物品或资源：${params.itemPreferences}` : '',
+      params.personalitySeed ? `- 性格种子：${params.personalitySeed}` : '',
+      params.forbiddenNames ? `- 禁止复用或接近这些名字：${params.forbiddenNames}` : '',
+      typeof params.forceDifferentFromExisting === 'boolean'
+        ? `- ${params.forceDifferentFromExisting ? '必须显著区别于现有人物设定。' : '可以适度沿用现有生态风格。'}`
+        : '',
+    ]),
+    '生产补充要求',
+    [
+      '- 主角档案必须能直接进入场景写作，不能只像设定卡。',
+      '- 动机、弱点、关系和能力都要能制造后续章节冲突与代价。',
+      '- 主角需要带出至少一个可持续调用的物品、资源或身份筹码。',
+    ],
+  )
   return applyPromptOverride('protagonist', fallback, params as unknown as Record<string, unknown>)
 }
 
-export function batchCharacterPrompt(params: BatchCharacterPromptInput): string {
-  const fallback = appendPromptSection(rawBatchCharacterPrompt(params), '生产补充要求', [
-    '- 每个配角都要承担明确剧情功能，避免批量生成同质化人物。',
-    '- 如果某个角色对主线、支线、冲突或关系网没有作用，就不要硬塞进去。',
-  ])
+export function batchCharacterPrompt(params: ExtendedBatchCharacterPromptInput): string {
+  const baseParams: BatchCharacterPromptInput = {
+    novelTitle: params.novelTitle,
+    novelSynopsis: params.novelSynopsis,
+    protagonistSummary: params.protagonistSummary,
+    existingNames: params.existingNames,
+    genre: params.genre,
+    worldSummary: params.worldSummary,
+    storyCore: params.storyCore,
+    count: params.count,
+    genderRatio: params.genderRatio,
+    specialRequirements: params.specialRequirements,
+    speciesSummary: params.speciesSummary,
+    factionSummary: params.factionSummary,
+    ecologySummary: params.ecologySummary,
+    mapSummary: params.mapSummary,
+    writingConstraints: params.writingConstraints,
+  }
+  const fallback = appendPromptSection(
+    appendPromptSection(rawBatchCharacterPrompt(baseParams), '角色网络约束', [
+      params.roleBlueprint ? `- 角色槽位蓝图：${params.roleBlueprint}` : '',
+      params.relationSeedMode ? `- 关系网络倾向：${params.relationSeedMode}` : '',
+      params.requiredItemLinks ? `- 每一批至少覆盖这些物品或资源线：${params.requiredItemLinks}` : '',
+      params.diversityConstraints ? `- 差异化硬约束：${params.diversityConstraints}` : '',
+      params.existingCharacterSummaries ? `- 现有人物摘要，避免撞设定：\n${params.existingCharacterSummaries}` : '',
+    ]),
+    '生产补充要求',
+    [
+      '- 每个配角都要承担明确剧情功能，避免批量生成同质化人物。',
+      '- 如果某个角色对主线、支线、冲突或关系网没有作用，就不要硬塞进去。',
+      '- 至少一部分人物要直接绑定物品、资源、地点或组织权力，而不是只有情绪标签。',
+    ],
+  )
   return applyPromptOverride('batchCharacter', fallback, params as unknown as Record<string, unknown>)
 }
 
@@ -83,7 +158,10 @@ export function regenerateCharacterPrompt(params: RegenerateCharacterPromptInput
 }
 
 export function characterRelationsPrompt(params: CharacterRelationsPromptInput): string {
-  const fallback = rawCharacterRelationsPrompt(params)
+  const fallback = appendPromptSection(rawCharacterRelationsPrompt(params), '关系类型补充', [
+    '- 在既有 friend / enemy / lover / parent_child / colleague / rival / mentor_student / acquaintance 基础上，也允许输出 family / ally / subordinate / benefactor / debtor / handler / teammate / spouse / ex_lover / political_partner。',
+    '- label 要写成读者一眼能懂的中文关系简称，例如“同门师兄妹”“互相利用”“表面同盟”。',
+  ])
   return applyPromptOverride('characterRelations', fallback, params as unknown as Record<string, unknown>)
 }
 

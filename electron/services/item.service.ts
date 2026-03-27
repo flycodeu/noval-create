@@ -54,6 +54,7 @@ interface GeneratedStoryItem {
 interface StoryItemQueryFilters {
   novelId: number
   itemKind?: 'template' | 'instance'
+  recordStatus?: 'draft' | 'confirmed' | 'all'
   category?: string
   status?: StoryItemStatus
   keyword?: string
@@ -125,6 +126,10 @@ function normalizeStatus(value: unknown): StoryItemStatus {
   return 'available'
 }
 
+function normalizeRecordStatus(value: unknown): 'draft' | 'confirmed' {
+  return asText(value) === 'draft' ? 'draft' : 'confirmed'
+}
+
 function getNextSortOrder(novelId: number): number {
   const rows = listStoryItems(novelId)
   return rows.length > 0 ? Math.max(...rows.map((row) => row.sortOrder || 0)) + 1 : 1
@@ -142,6 +147,7 @@ function sanitizeStoryItemPayload(
   if (typeof data.category === 'string') next.category = cleanAiFieldText(data.category)
   if (typeof data.subType === 'string') next.subType = cleanAiFieldText(data.subType)
   if (typeof data.rarity === 'string') next.rarity = cleanAiFieldText(data.rarity)
+  if (typeof data.recordStatus === 'string') next.recordStatus = normalizeRecordStatus(data.recordStatus)
   if ('ownerCharacterId' in data) next.ownerCharacterId = data.ownerCharacterId ?? null
   if ('locationMapId' in data) next.locationMapId = data.locationMapId ?? null
   if (typeof data.status === 'string') next.status = normalizeStatus(data.status)
@@ -156,6 +162,7 @@ function sanitizeStoryItemPayload(
   if (typeof data.linkedCharacterIdsJson === 'string') next.linkedCharacterIdsJson = data.linkedCharacterIdsJson
   if (typeof data.linkedTimelineEventIdsJson === 'string') next.linkedTimelineEventIdsJson = data.linkedTimelineEventIdsJson
   if (typeof data.tagsJson === 'string') next.tagsJson = data.tagsJson
+  if (typeof data.sourceContextJson === 'string') next.sourceContextJson = data.sourceContextJson
   if (typeof data.sortOrder === 'number') next.sortOrder = Math.round(data.sortOrder)
 
   return next
@@ -386,6 +393,7 @@ function mapStoryItemRecord(row: Record<string, unknown>) {
     category: typeof row.category === 'string' ? row.category : undefined,
     subType: typeof row.sub_type === 'string' ? row.sub_type : undefined,
     rarity: typeof row.rarity === 'string' ? row.rarity : undefined,
+    recordStatus: normalizeRecordStatus(row.record_status),
     ownerCharacterId: row.owner_character_id == null ? undefined : Number(row.owner_character_id),
     locationMapId: row.location_map_id == null ? undefined : Number(row.location_map_id),
     status: String(row.status || 'available') as StoryItemStatus,
@@ -400,6 +408,7 @@ function mapStoryItemRecord(row: Record<string, unknown>) {
     linkedCharacterIdsJson: typeof row.linked_character_ids_json === 'string' ? row.linked_character_ids_json : undefined,
     linkedTimelineEventIdsJson: typeof row.linked_timeline_event_ids_json === 'string' ? row.linked_timeline_event_ids_json : undefined,
     tagsJson: typeof row.tags_json === 'string' ? row.tags_json : undefined,
+    sourceContextJson: typeof row.source_context_json === 'string' ? row.source_context_json : undefined,
     sortOrder: Number(row.sort_order || 0),
     createdAt: typeof row.created_at === 'string' ? row.created_at : '',
     updatedAt: typeof row.updated_at === 'string' ? row.updated_at : '',
@@ -423,6 +432,11 @@ function buildItemWhere(filters: StoryItemQueryFilters) {
   if (filters.itemKind) {
     whereClauses.push('i.item_kind = ?')
     params.push(filters.itemKind)
+  }
+
+  if (filters.recordStatus && filters.recordStatus !== 'all') {
+    whereClauses.push("COALESCE(i.record_status, 'confirmed') = ?")
+    params.push(filters.recordStatus)
   }
 
   if (filters.category) {
@@ -488,6 +502,8 @@ export function getStoryItemStats(filters: StoryItemQueryFilters) {
   const row = sqlite.prepare(`
     SELECT
       COUNT(*) AS total,
+      SUM(CASE WHEN COALESCE(i.record_status, 'confirmed') = 'confirmed' THEN 1 ELSE 0 END) AS confirmedCount,
+      SUM(CASE WHEN COALESCE(i.record_status, 'confirmed') = 'draft' THEN 1 ELSE 0 END) AS draftCount,
       SUM(CASE WHEN i.item_kind = 'template' THEN 1 ELSE 0 END) AS templateCount,
       SUM(CASE WHEN i.item_kind = 'instance' THEN 1 ELSE 0 END) AS instanceCount,
       COUNT(DISTINCT NULLIF(TRIM(COALESCE(i.category, '')), '')) AS categoryCount
@@ -503,6 +519,8 @@ export function getStoryItemStats(filters: StoryItemQueryFilters) {
 
   return {
     total: Number(row?.total || 0),
+    confirmedCount: Number(row?.confirmedCount || 0),
+    draftCount: Number(row?.draftCount || 0),
     templateCount: Number(row?.templateCount || 0),
     instanceCount: Number(row?.instanceCount || 0),
     linkedEventCount: linkedRows.reduce((total, item) => total + parseTimelineLinkCount(item.linkedTimelineEventIdsJson), 0),
@@ -644,6 +662,7 @@ export function createStoryItem(
     novelId,
     itemKind: 'instance',
     itemName: data.itemName || 'Unnamed item',
+    recordStatus: normalizeRecordStatus(data.recordStatus),
     status: 'available',
     linkedCharacterIdsJson: '[]',
     linkedTimelineEventIdsJson: '[]',

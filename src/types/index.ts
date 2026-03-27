@@ -139,6 +139,7 @@ export interface Character {
   id: number
   novelId: number
   roleType: 'protagonist' | 'major' | 'minor' | 'antagonist' | 'supporting'
+  recordStatus?: 'draft' | 'confirmed'
   entityType?: string
   species?: string
   surname?: string
@@ -173,6 +174,7 @@ export interface Character {
   characterArc?: string
   appearanceJson?: string
   abilitiesJson?: string
+  sourceContextJson?: string
   appearChapter?: number
   sortOrder: number
   createdAt: string
@@ -193,6 +195,7 @@ export interface CharacterRelation {
 export interface CharacterQueryInput {
   novelId: number
   roleType?: Character['roleType']
+  recordStatus?: 'draft' | 'confirmed' | 'all'
   entityType?: string
   species?: string
   keyword?: string
@@ -202,6 +205,8 @@ export interface CharacterQueryInput {
 
 export interface CharacterStats {
   total: number
+  confirmedCount?: number
+  draftCount?: number
   protagonistCount: number
   majorCount: number
   antagonistCount: number
@@ -218,12 +223,45 @@ export interface CharacterGraphQueryInput {
   novelId: number
   characterIds?: number[]
   focusCharacterId?: number
+  roleTypes?: Character['roleType'][]
+  relationTypes?: string[]
+  factionNames?: string[]
+  recordStatus?: 'draft' | 'confirmed' | 'all'
   limit?: number
 }
 
 export interface CharacterGraphPayload {
   characters: Character[]
   relations: CharacterRelation[]
+}
+
+export interface CharacterGenerationOptions {
+  gender?: string
+  surnameHint?: string
+  ageRange?: string
+  species?: string
+  occupationHint?: string
+  factionHint?: string
+  itemPreferences?: string[]
+  personalitySeed?: string
+  forbiddenNames?: string[]
+  forceDifferentFromExisting?: boolean
+}
+
+export interface CharacterBatchGenerationOptions {
+  majorCount: number
+  minorCount: number
+  antagonistCount?: number
+  supportingCount?: number
+  genderRatio?: string
+  preferredSpecies?: string[]
+  factionBias?: string[]
+  helperRoles?: string[]
+  batchSize: number
+  specialRequirements?: string
+  relationSeedMode?: 'balanced' | 'conflict-heavy' | 'ally-heavy'
+  requiredItemLinks?: string[]
+  diversityConstraints?: string[]
 }
 
 export interface CharacterDetailContext {
@@ -419,6 +457,7 @@ export interface StoryItem {
   category?: string
   subType?: string
   rarity?: string
+  recordStatus?: 'draft' | 'confirmed'
   ownerCharacterId?: number
   locationMapId?: number
   status: 'available' | 'consumed' | 'hidden' | 'destroyed'
@@ -433,6 +472,7 @@ export interface StoryItem {
   linkedCharacterIdsJson?: string
   linkedTimelineEventIdsJson?: string
   tagsJson?: string
+  sourceContextJson?: string
   sortOrder: number
   createdAt: string
   updatedAt: string
@@ -555,6 +595,7 @@ export interface WorldRulesAutoGenerateStatus {
 export interface StoryItemQueryInput {
   novelId: number
   itemKind?: StoryItem['itemKind']
+  recordStatus?: 'draft' | 'confirmed' | 'all'
   category?: string
   status?: StoryItem['status']
   keyword?: string
@@ -564,10 +605,22 @@ export interface StoryItemQueryInput {
 
 export interface StoryItemStats {
   total: number
+  confirmedCount?: number
+  draftCount?: number
   templateCount: number
   instanceCount: number
   linkedEventCount: number
   categoryCount: number
+}
+
+export interface DiscoveredEntityCandidate {
+  entityType: 'character' | 'item'
+  name: string
+  summary?: string
+  relationHint?: string
+  sourcePage: 'outline' | 'writing'
+  sourceLabel: string
+  sourceEntityId?: number
 }
 
 export interface StoryItemFilterOptions {
@@ -1045,8 +1098,8 @@ declare global {
         update: (id: number, data: Partial<Character>) => Promise<void>
         delete: (id: number) => Promise<void>
         regenerate: (id: number) => Promise<Character | null>
-        batchGenerate: (novelId: number, opts: unknown) => Promise<number[]>
-        generateProtagonist: (novelId: number, opts: unknown) => Promise<number>
+        batchGenerate: (novelId: number, opts: CharacterBatchGenerationOptions) => Promise<number[]>
+        generateProtagonist: (novelId: number, opts: CharacterGenerationOptions) => Promise<number>
         getRelations: (novelId: number) => Promise<CharacterRelation[]>
         generateRelations: (novelId: number) => Promise<void>
         upsertRelation: (data: unknown) => Promise<void>
@@ -1177,7 +1230,7 @@ declare global {
         generateProjectBrief: (data: ProjectBriefGenerationRequest) => Promise<ProjectBriefGenerationResult>
         generateThemeVoice: (data: ThemeVoiceGenerationRequest) => Promise<ThemeVoiceGenerationResult>
         generateWorldRules: (data: WorldRulesGenerationRequest) => Promise<WorldRulesGenerationResult>
-        generateCharacter: (novelId: number, opts: unknown) => Promise<number>
+        generateCharacter: (novelId: number, opts: CharacterGenerationOptions) => Promise<number>
         generateRelations: (novelId: number) => Promise<void>
         generateSubplotBatch: (data: SubplotGenerationRequest) => Promise<SubplotGenerationResult>
         rewriteParagraph: (data: unknown) => Promise<string>

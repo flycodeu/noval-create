@@ -3,7 +3,7 @@ import { Alert, Button, Form, Input, Modal, Pagination, Select, Space, Spin, Tag
 import { AppstoreAddOutlined, DeleteOutlined, InboxOutlined, ReloadOutlined, SaveOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import VirtualList from 'rc-virtual-list'
 import AIGenerateButton from '../../../components/AIGenerateButton'
-import type { Character, MapNodeSummary, PagedResult, StoryItem, StoryItemFilterOptions, StoryItemStats, TimelineEvent } from '../../../types'
+import type { Character, MapNodeSummary, PagedResult, StoryItem, StoryItemFilterOptions, StoryItemQueryInput, StoryItemStats, TimelineEvent } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
 import { buildDraftMessages, normalizeStringArray, parseDraftJson } from '../shared/ai-draft'
 import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
@@ -42,7 +42,7 @@ interface GenerateFormValues {
 
 const PAGE_SIZE = 24
 const EMPTY_PAGE: PagedResult<StoryItem> = { items: [], page: 1, pageSize: PAGE_SIZE, total: 0, hasMore: false }
-const EMPTY_STATS: StoryItemStats = { total: 0, templateCount: 0, instanceCount: 0, linkedEventCount: 0, categoryCount: 0 }
+const EMPTY_STATS: StoryItemStats = { total: 0, confirmedCount: 0, draftCount: 0, templateCount: 0, instanceCount: 0, linkedEventCount: 0, categoryCount: 0 }
 const EMPTY_FILTERS: StoryItemFilterOptions = { categories: [], rarities: [] }
 const RARITY_OPTIONS = ['常见', '稀有', '核心', '禁用级']
 
@@ -63,6 +63,18 @@ function parseStringArray(raw?: string | null): string[] {
   try {
     const parsed = JSON.parse(raw)
     return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean) : []
+  } catch {
+    return []
+  }
+}
+
+function parseSourceContexts(raw?: string | null) {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is { page?: string; label?: string; detectedAt?: string } => Boolean(item) && typeof item === 'object')
+      : []
   } catch {
     return []
   }
@@ -104,6 +116,7 @@ function emptyValues(kind: StoryItem['itemKind']): ItemFormValues {
 
 function serialize(values: ItemFormValues): Partial<StoryItem> {
   return {
+    recordStatus: 'confirmed',
     itemKind: values.itemKind,
     parentItemId: values.parentItemId,
     itemName: values.itemName.trim(),
@@ -147,6 +160,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
   const [selectedItem, setSelectedItem] = useState<StoryItem | null>(null)
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [listMode, setListMode] = useState<'template' | 'instance'>('template')
+  const [recordStatusFilter, setRecordStatusFilter] = useState<'confirmed' | 'draft' | 'all'>('confirmed')
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [keyword, setKeyword] = useState('')
   const [page, setPage] = useState(1)
@@ -159,6 +173,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
   const itemKind = Form.useWatch('itemKind', form)
   const rarityOptions = useMemo(() => Array.from(new Set([...RARITY_OPTIONS, ...filters.rarities].filter(Boolean))), [filters.rarities])
   const generationBlockers = useMemo(() => getWorkflowBlockers('items', currentNovel, workflowStats), [currentNovel, workflowStats])
+  const sourceContexts = useMemo(() => parseSourceContexts(selectedItem?.sourceContextJson), [selectedItem?.sourceContextJson])
 
   const searchTemplates = useCallback(async (value = '') => {
     const rows = await window.electron.item.search(novelId, value, 'template', 20)
@@ -211,11 +226,26 @@ export default function ItemsWorkspace({ novelId }: Props) {
     await hydrateOptions(item)
   }, [form, hydrateOptions])
 
+  const buildQuery = useCallback((targetPage = page): StoryItemQueryInput => ({
+    novelId,
+    itemKind: listMode,
+    page: targetPage,
+    pageSize: PAGE_SIZE,
+    recordStatus: recordStatusFilter,
+    ...(categoryFilter !== 'all' ? { category: categoryFilter } : {}),
+    ...(keyword.trim() ? { keyword: keyword.trim() } : {}),
+  }), [categoryFilter, keyword, listMode, novelId, page, recordStatusFilter])
+
   const loadPage = useCallback(async (preferredId?: number | null, targetPage = page) => {
     setLoading(true)
     try {
-      const query = { novelId, itemKind: listMode, page: targetPage, pageSize: PAGE_SIZE, ...(categoryFilter !== 'all' ? { category: categoryFilter } : {}), ...(keyword.trim() ? { keyword: keyword.trim() } : {}) }
-      const [list, summary, nextFilters, nextWorkflowStats] = await Promise.all([window.electron.item.query(query), window.electron.item.getStats({ novelId }), window.electron.item.getFilterOptions(novelId), loadWorkflowStats(novelId)])
+      const query = buildQuery(targetPage)
+      const [list, summary, nextFilters, nextWorkflowStats] = await Promise.all([
+        window.electron.item.query(query),
+        window.electron.item.getStats({ novelId }),
+        window.electron.item.getFilterOptions(novelId),
+        loadWorkflowStats(novelId),
+      ])
       setPageData(list)
       setStats(summary)
       setFilters(nextFilters)
@@ -226,10 +256,10 @@ export default function ItemsWorkspace({ novelId }: Props) {
     } finally {
       setLoading(false)
     }
-  }, [categoryFilter, form, hydrateOptions, keyword, listMode, loadItemDetail, novelId, page, selectedId])
+  }, [buildQuery, form, hydrateOptions, loadItemDetail, novelId, page, selectedId])
 
   useEffect(() => { void loadPage(selectedId, page) }, [loadPage, page, selectedId])
-  useEffect(() => { setPage(1) }, [categoryFilter, keyword, listMode])
+  useEffect(() => { setPage(1) }, [categoryFilter, keyword, listMode, recordStatusFilter])
   useEffect(() => { generateForm.setFieldsValue({ count: 12, batchSize: 4, templateOnly: false, refreshTemplates: true, focus: '' }) }, [generateForm])
 
   const handleNew = (kind: 'template' | 'instance') => {
@@ -248,7 +278,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
       if (selectedItem?.id) { await window.electron.item.update(selectedItem.id, serialize(values)); await loadPage(selectedItem.id, page) }
       else { const nextId = await window.electron.item.create(novelId, serialize(values)); await loadPage(nextId, page) }
       setCreating(false)
-      message.success('物品已保存。')
+      message.success(selectedItem?.recordStatus === 'draft' ? '物品草稿已确认并保存。' : '物品已保存。')
     } catch (error) {
       console.error(error)
       message.error('保存失败，请稍后再试。')
@@ -379,11 +409,21 @@ export default function ItemsWorkspace({ novelId }: Props) {
     <WorkspacePage
       eyebrow="物品系统"
       title="物品与装备"
-      description="模板和实例统一管理，单条记录支持 AI 起草。"
+      description="模板、实例和自动发现草稿统一管理，支持后续手工补全并转正。"
       actions={<Space wrap><Button icon={<ReloadOutlined />} onClick={() => void loadPage(selectedId, page)}>刷新</Button><Button icon={<AppstoreAddOutlined />} onClick={() => handleNew('template')}>新建模板</Button><Button icon={<InboxOutlined />} onClick={() => handleNew('instance')}>新建实例</Button><Button type="primary" icon={<ThunderboltOutlined />} onClick={() => void openGenerateModal()}>AI 批量生成</Button><Button danger icon={<DeleteOutlined />} onClick={() => void handleClear()}>清空</Button></Space>}
-      contextSummary={<WorkspaceContextSummary items={[{ label: '书名', value: currentNovel?.title || '未命名小说' }, { label: '当前列表', value: listMode === 'template' ? '模板' : '实例' }, { label: '筛选结果', value: `${pageData.total} 条` }, { label: '当前焦点', value: selectedItem?.itemName || (creating ? '新建中' : '未选择') }]} />}
-      metrics={<><WorkspaceMetric label="模板" value={stats.templateCount} tone="warm" /><WorkspaceMetric label="实例" value={stats.instanceCount} /><WorkspaceMetric label="分类" value={stats.categoryCount} tone="cool" /><WorkspaceMetric label="事件关联" value={stats.linkedEventCount} /></>}
+      contextSummary={<WorkspaceContextSummary items={[{ label: '书名', value: currentNovel?.title || '未命名小说' }, { label: '当前列表', value: listMode === 'template' ? '模板' : '实例' }, { label: '当前状态', value: recordStatusFilter === 'confirmed' ? '正式记录' : recordStatusFilter === 'draft' ? '草稿记录' : '全部状态' }, { label: '当前焦点', value: selectedItem?.itemName || (creating ? '新建中' : '未选择') }]} />}
+      metrics={<><WorkspaceMetric label="模板" value={stats.templateCount} tone="warm" /><WorkspaceMetric label="实例" value={stats.instanceCount} /><WorkspaceMetric label="草稿队列" value={stats.draftCount || 0} tone="cool" /><WorkspaceMetric label="事件关联" value={stats.linkedEventCount} /><WorkspaceMetric label="分类" value={stats.categoryCount} /></>}
     >
+      {stats.draftCount ? (
+        <Alert
+          type="info"
+          showIcon
+          message={`当前有 ${stats.draftCount} 个待确认物品草稿`}
+          description="这些草稿会在大纲或正文发现新实体后自动进入这里。编辑并保存即可转为正式记录。"
+          action={recordStatusFilter !== 'draft' ? <Button size="small" onClick={() => setRecordStatusFilter('draft')}>查看草稿</Button> : undefined}
+        />
+      ) : null}
+
       {generationBlockers.length > 0 ? (
         <Alert
           type="warning"
@@ -400,11 +440,11 @@ export default function ItemsWorkspace({ novelId }: Props) {
       ) : null}
 
       <div className="novel-split novel-split--sidebar">
-        <WorkspacePanel title="列表" description="筛选和搜索都走后端查询。" extra={<div className="novel-filter-bar"><div className="novel-filter-bar__row"><Input.Search allowClear placeholder="搜索名称、分类、作用" value={keyword} onChange={(event) => setKeyword(event.target.value)} onSearch={setKeyword} /><Select value={listMode} options={[{ value: 'template', label: '模板' }, { value: 'instance', label: '实例' }]} onChange={(value) => setListMode(value)} /></div><div className="novel-filter-bar__row"><Select value={categoryFilter} options={[{ value: 'all', label: '全部分类' }, ...filters.categories.map((item) => ({ value: item, label: item }))]} onChange={setCategoryFilter} /></div><div className="novel-filter-bar__summary">当前共 {pageData.total} 条</div></div>}>
-          {loading ? <div className="novel-empty"><Spin /></div> : pageData.total === 0 ? <div className="novel-empty">当前筛选下还没有记录。</div> : <div style={{ display: 'grid', gap: 12 }}><VirtualList data={pageData.items} height={520} itemHeight={118} itemKey="id">{(item: StoryItem) => <button key={item.id} type="button" className={`novel-list-card ${selectedId === item.id ? 'novel-list-card--active' : ''}`} onClick={() => void loadItemDetail(item.id)} style={{ textAlign: 'left', cursor: 'pointer' }}><div className="novel-list-card__title">{item.itemName}</div><div className="novel-list-card__meta"><Tag color={item.itemKind === 'template' ? 'blue' : 'processing'}>{item.itemKind === 'template' ? '模板' : '实例'}</Tag>{item.category ? <Tag>{item.category}</Tag> : null}{item.subType ? <Tag>{item.subType}</Tag> : null}{item.rarity ? <Tag color="gold">{item.rarity}</Tag> : null}</div><div className="novel-list-card__desc">{item.plotFunction || item.summary || item.appearance || '还没有补充说明。'}</div></button>}</VirtualList><Pagination current={pageData.page} pageSize={pageData.pageSize} total={pageData.total} size="small" showSizeChanger={false} onChange={setPage} /></div>}
+        <WorkspacePanel title="列表" description="筛选和搜索都走后端查询。" extra={<div className="novel-filter-bar"><div className="novel-filter-bar__row"><Input.Search allowClear placeholder="搜索名称、分类、作用" value={keyword} onChange={(event) => setKeyword(event.target.value)} onSearch={setKeyword} /><Select value={listMode} options={[{ value: 'template', label: '模板' }, { value: 'instance', label: '实例' }]} onChange={(value) => setListMode(value)} /></div><div className="novel-filter-bar__row"><Select value={categoryFilter} options={[{ value: 'all', label: '全部分类' }, ...filters.categories.map((item) => ({ value: item, label: item }))]} onChange={setCategoryFilter} /><Select value={recordStatusFilter} options={[{ value: 'confirmed', label: '正式' }, { value: 'draft', label: '草稿' }, { value: 'all', label: '全部状态' }]} onChange={setRecordStatusFilter} /></div><div className="novel-filter-bar__summary">当前共 {pageData.total} 条</div></div>}>
+          {loading ? <div className="novel-empty"><Spin /></div> : pageData.total === 0 ? <div className="novel-empty">当前筛选下还没有记录。</div> : <div style={{ display: 'grid', gap: 12 }}><VirtualList data={pageData.items} height={520} itemHeight={118} itemKey="id">{(item: StoryItem) => <button key={item.id} type="button" className={`novel-list-card ${selectedId === item.id ? 'novel-list-card--active' : ''}`} onClick={() => void loadItemDetail(item.id)} style={{ textAlign: 'left', cursor: 'pointer' }}><div className="novel-list-card__title"><span>{item.itemName}</span>{item.recordStatus === 'draft' ? <Tag color="processing">草稿</Tag> : null}</div><div className="novel-list-card__meta"><Tag color={item.itemKind === 'template' ? 'blue' : 'processing'}>{item.itemKind === 'template' ? '模板' : '实例'}</Tag>{item.category ? <Tag>{item.category}</Tag> : null}{item.subType ? <Tag>{item.subType}</Tag> : null}{item.rarity ? <Tag color="gold">{item.rarity}</Tag> : null}</div><div className="novel-list-card__desc">{item.plotFunction || item.summary || item.appearance || '还没有补充说明。'}</div></button>}</VirtualList><Pagination current={pageData.page} pageSize={pageData.pageSize} total={pageData.total} size="small" showSizeChanger={false} onChange={setPage} /></div>}
         </WorkspacePanel>
         <WorkspacePanel title={selectedItem ? `编辑：${selectedItem.itemName}` : creating ? '新建物品' : '物品详情'} description="只编辑当前记录。" extra={<Space wrap>{aiActions}{selectedItem ? <Button danger icon={<DeleteOutlined />} onClick={() => void handleDelete()}>删除</Button> : null}<Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>保存</Button></Space>}>
-          {!selectedItem && !creating && !loading ? <div className="novel-empty">从左侧选择一条记录，或直接新建。</div> : <Form form={form} layout="vertical"><div className="novel-grid novel-grid--3"><Form.Item name="itemKind" label="记录类型" rules={[{ required: true, message: '请选择记录类型' }]}><Select options={[{ value: 'template', label: '模板' }, { value: 'instance', label: '实例' }]} /></Form.Item><Form.Item name="category" label="主分类"><Input placeholder="例如：武器、药品、证据" /></Form.Item><Form.Item name="subType" label="细分类"><Input placeholder="进一步说明形态或用途" /></Form.Item></div><div className="novel-grid novel-grid--3"><Form.Item name="itemName" label="名称" rules={[{ required: true, message: '请输入名称' }]}><Input placeholder="写得像剧情里的真实物品" /></Form.Item><Form.Item name="rarity" label="稀缺度"><Select allowClear options={rarityOptions.map((value) => ({ value, label: value }))} /></Form.Item><Form.Item name="status" label="状态"><Select options={[{ value: 'available', label: '可用' }, { value: 'hidden', label: '隐藏' }, { value: 'consumed', label: '已消耗' }, { value: 'destroyed', label: '已毁损' }]} /></Form.Item></div><div className="novel-grid novel-grid--2"><Form.Item name="summary" label="一句话说明"><Input.TextArea rows={3} /></Form.Item><Form.Item name="appearance" label="外观"><Input.TextArea rows={3} /></Form.Item></div><div className="novel-grid novel-grid--2"><Form.Item name="acquisitionMethod" label="获取方式"><Input.TextArea rows={3} /></Form.Item><Form.Item name="usageMethod" label="使用方式"><Input.TextArea rows={3} /></Form.Item></div><div className="novel-grid novel-grid--2"><Form.Item name="cost" label="代价"><Input.TextArea rows={3} /></Form.Item><Form.Item name="risk" label="风险"><Input.TextArea rows={3} /></Form.Item></div><Form.Item name="plotFunction" label="剧情作用"><Input.TextArea rows={3} /></Form.Item><div className="novel-grid novel-grid--2"><Form.Item name="factionHint" label="关联势力"><Input /></Form.Item><Form.Item name="tags" label="标签"><Select mode="tags" open={false} placeholder="输入后回车" /></Form.Item></div>{itemKind === 'instance' ? <><div className="novel-grid novel-grid--3"><Form.Item name="parentItemId" label="来源模板"><Select allowClear showSearch filterOption={false} options={templateOptions.map((item) => ({ value: item.id, label: item.itemName }))} onFocus={() => void searchTemplates('')} onSearch={(value) => void searchTemplates(value)} /></Form.Item><Form.Item name="ownerCharacterId" label="当前持有者"><Select allowClear showSearch filterOption={false} options={characterOptions.map((item) => ({ value: item.id, label: item.fullName }))} onFocus={() => void searchCharacters('')} onSearch={(value) => void searchCharacters(value)} /></Form.Item><Form.Item name="locationMapId" label="主要地点"><Select allowClear showSearch filterOption={false} options={locationOptions.map((item) => ({ value: item.id, label: item.name }))} onFocus={() => void searchLocations('')} onSearch={(value) => void searchLocations(value)} /></Form.Item></div><div className="novel-grid novel-grid--2"><Form.Item name="linkedCharacterIds" label="关联人物"><Select mode="multiple" allowClear showSearch filterOption={false} options={characterOptions.map((item) => ({ value: item.id, label: item.fullName }))} onFocus={() => void searchCharacters('')} onSearch={(value) => void searchCharacters(value)} /></Form.Item><Form.Item name="linkedTimelineEventIds" label="关联事件"><Select mode="multiple" allowClear showSearch filterOption={false} options={eventOptions.map((item) => ({ value: item.id, label: `${item.timeLabel} · ${item.eventTitle}` }))} onFocus={() => void searchEvents('')} onSearch={(value) => void searchEvents(value)} /></Form.Item></div></> : null}</Form>}
+          {!selectedItem && !creating && !loading ? <div className="novel-empty">从左侧选择一条记录，或直接新建。</div> : <>{selectedItem?.recordStatus === 'draft' && sourceContexts.length > 0 ? <Alert type="warning" showIcon message="这个物品来自自动发现" description={sourceContexts.map((item, index) => <div key={`${item.label || 'source'}-${index}`}>{item.label || item.page || '未知来源'}</div>)} /> : null}<Form form={form} layout="vertical"><div className="novel-grid novel-grid--3"><Form.Item name="itemKind" label="记录类型" rules={[{ required: true, message: '请选择记录类型' }]}><Select options={[{ value: 'template', label: '模板' }, { value: 'instance', label: '实例' }]} /></Form.Item><Form.Item name="category" label="主分类"><Input placeholder="例如：武器、药品、证据" /></Form.Item><Form.Item name="subType" label="细分类"><Input placeholder="进一步说明形态或用途" /></Form.Item></div><div className="novel-grid novel-grid--3"><Form.Item name="itemName" label="名称" rules={[{ required: true, message: '请输入名称' }]}><Input placeholder="写得像剧情里的真实物品" /></Form.Item><Form.Item name="rarity" label="稀缺度"><Select allowClear options={rarityOptions.map((value) => ({ value, label: value }))} /></Form.Item><Form.Item name="status" label="状态"><Select options={[{ value: 'available', label: '可用' }, { value: 'hidden', label: '隐藏' }, { value: 'consumed', label: '已消耗' }, { value: 'destroyed', label: '已毁损' }]} /></Form.Item></div><div className="novel-grid novel-grid--2"><Form.Item name="summary" label="一句话说明"><Input.TextArea rows={3} /></Form.Item><Form.Item name="appearance" label="外观"><Input.TextArea rows={3} /></Form.Item></div><div className="novel-grid novel-grid--2"><Form.Item name="acquisitionMethod" label="获取方式"><Input.TextArea rows={3} /></Form.Item><Form.Item name="usageMethod" label="使用方式"><Input.TextArea rows={3} /></Form.Item></div><div className="novel-grid novel-grid--2"><Form.Item name="cost" label="代价"><Input.TextArea rows={3} /></Form.Item><Form.Item name="risk" label="风险"><Input.TextArea rows={3} /></Form.Item></div><Form.Item name="plotFunction" label="剧情作用"><Input.TextArea rows={3} /></Form.Item><div className="novel-grid novel-grid--2"><Form.Item name="factionHint" label="关联势力"><Input /></Form.Item><Form.Item name="tags" label="标签"><Select mode="tags" open={false} placeholder="输入后回车" /></Form.Item></div>{itemKind === 'instance' ? <><div className="novel-grid novel-grid--3"><Form.Item name="parentItemId" label="来源模板"><Select allowClear showSearch filterOption={false} options={templateOptions.map((item) => ({ value: item.id, label: item.itemName }))} onFocus={() => void searchTemplates('')} onSearch={(value) => void searchTemplates(value)} /></Form.Item><Form.Item name="ownerCharacterId" label="当前持有者"><Select allowClear showSearch filterOption={false} options={characterOptions.map((item) => ({ value: item.id, label: item.fullName }))} onFocus={() => void searchCharacters('')} onSearch={(value) => void searchCharacters(value)} /></Form.Item><Form.Item name="locationMapId" label="主要地点"><Select allowClear showSearch filterOption={false} options={locationOptions.map((item) => ({ value: item.id, label: item.name }))} onFocus={() => void searchLocations('')} onSearch={(value) => void searchLocations(value)} /></Form.Item></div><div className="novel-grid novel-grid--2"><Form.Item name="linkedCharacterIds" label="关联人物"><Select mode="multiple" allowClear showSearch filterOption={false} options={characterOptions.map((item) => ({ value: item.id, label: item.fullName }))} onFocus={() => void searchCharacters('')} onSearch={(value) => void searchCharacters(value)} /></Form.Item><Form.Item name="linkedTimelineEventIds" label="关联事件"><Select mode="multiple" allowClear showSearch filterOption={false} options={eventOptions.map((item) => ({ value: item.id, label: `${item.timeLabel} · ${item.eventTitle}` }))} onFocus={() => void searchEvents('')} onSearch={(value) => void searchEvents(value)} /></Form.Item></div></> : null}</Form></>}
         </WorkspacePanel>
       </div>
       <Modal title="AI 批量生成物品" open={generateOpen} forceRender onCancel={() => setGenerateOpen(false)} onOk={() => void handleGenerate()} confirmLoading={generating} okText="生成下一批"><Form form={generateForm} layout="vertical"><Form.Item name="templateOnly" label="生成模式"><Select options={[{ value: false, label: '模板和实例一起生成' }, { value: true, label: '只生成模板' }]} /></Form.Item><Form.Item name="refreshTemplates" label="模板同步"><Select options={[{ value: true, label: '按当前题材刷新模板' }, { value: false, label: '保留已有模板，只补缺口' }]} /></Form.Item><Form.Item name="count" label="本轮目标数量"><Select options={[8, 10, 12, 14, 18].map((count) => ({ value: count, label: `${count} 条` }))} /></Form.Item><Form.Item name="batchSize" label="每批数量"><Select options={[2, 3, 4, 5, 6].map((count) => ({ value: count, label: `${count} 条 / 批` }))} /></Form.Item><Form.Item name="focus" label="额外聚焦"><Input.TextArea rows={3} placeholder="例如：主角团装备、关键证据、宗门资源" /></Form.Item></Form></Modal>

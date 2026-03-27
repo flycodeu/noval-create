@@ -87,8 +87,8 @@ export const GUIDED_STEP_ORDER: GuidedWorkflowStepKey[] = [
   'theme-voice',
   'world-foundation',
   'map-structure',
-  'character-roster',
   'items-equipment',
+  'character-roster',
   'story-threads',
   'story-plot',
   'write-start',
@@ -332,8 +332,8 @@ export function getRecommendedGuidedWorkflowStep(
   if (!isThemeVoiceReady(novel)) return 'theme-voice'
   if (!isWorldFoundationReady(novel)) return 'world-foundation'
   if (!isMapStructureReady(stats)) return 'map-structure'
-  if (!isCharacterRosterReady(stats)) return 'character-roster'
   if (!isItemsEquipmentReady(stats)) return 'items-equipment'
+  if (!isCharacterRosterReady(stats)) return 'character-roster'
   if (!isStoryThreadsReady(stats)) return 'story-threads'
   if (!isStoryPlotReady(novel)) return 'story-plot'
   return 'write-start'
@@ -349,8 +349,8 @@ export function getRecommendedWorkflowStep(
   if (!isThemeVoiceReady(novel)) return 'theme-voice'
   if (!novel.worldRulesJson) return 'world-rules'
   if (stats.mapCount <= 0) return 'map'
-  if (stats.characterCount <= 0) return 'characters'
   if (stats.itemCount <= 0) return 'items'
+  if (stats.characterCount <= 0) return 'characters'
   if (stats.threadCount <= 0) return 'threads'
   if (!isStoryPlotReady(novel)) return 'story-design'
   if (stats.outlineCount <= 0) return 'structure'
@@ -430,7 +430,6 @@ export function getWorkflowBlockers(
     case 'items':
       requireWorldRules('生成物品')
       requireMap('生成物品')
-      requireCharacters('生成物品')
       break
     case 'threads':
       if (!isStoryPlotReady(novel)) {

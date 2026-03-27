@@ -84,8 +84,8 @@ const GUIDED_ITEMS: WorkspaceItem[] = [
   { key: 'theme-voice', icon: <EditOutlined />, label: '主题与文风', summary: '固定主题、视角、时态与语言边界。' },
   { key: 'world-foundation', icon: <GlobalOutlined />, label: '世界规则', summary: '先同步题材规则。' },
   { key: 'map-structure', icon: <EnvironmentOutlined />, label: '地图结构', summary: '先搭地点骨架。' },
-  { key: 'character-roster', icon: <TeamOutlined />, label: '角色系统', summary: '先补主角和关键角色。' },
   { key: 'items-equipment', icon: <AppstoreOutlined />, label: '物品装备', summary: '先补关键道具和装备。' },
+  { key: 'character-roster', icon: <TeamOutlined />, label: '角色系统', summary: '基于物品和地图补主角与关键角色。' },
   { key: 'story-threads', icon: <BarsOutlined />, label: '故事线程', summary: '把主线、支线和伏笔回收挂成线。' },
   { key: 'story-plot', icon: <BarsOutlined />, label: '故事设计', summary: '资产齐后再设计主线、支线和结局。' },
   { key: 'write-start', icon: <EditOutlined />, label: '开始写作', summary: '生成骨架后进入正文。' },
@@ -112,8 +112,8 @@ const PRO_GROUPS: Array<{ title: string; items: WorkspaceItem[] }> = [
   {
     title: '资源',
     items: [
-      { key: 'characters', icon: <TeamOutlined />, label: '角色系统', summary: '维护人物关系。' },
       { key: 'items', icon: <AppstoreOutlined />, label: '物品装备', summary: '维护道具与装备。' },
+      { key: 'characters', icon: <TeamOutlined />, label: '角色系统', summary: '维护人物关系。' },
       { key: 'threads', icon: <BarsOutlined />, label: '故事线程', summary: '维护主线、支线、悬念与回收。' },
     ],
   },

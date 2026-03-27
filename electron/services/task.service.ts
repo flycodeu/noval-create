@@ -31,6 +31,7 @@ export type TaskType =
   | 'world_rules_generate'
   | 'project_brief_generate'
   | 'theme_voice_generate'
+  | 'entity_discovery'
   | 'story_thread_generate'
 
 export type TaskRunnerType = 'chat' | 'stream' | 'workflow'

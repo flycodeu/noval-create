@@ -41,6 +41,7 @@ import * as revisionTaskService from './services/revision-task.service'
 import * as storyStructureService from './services/story-structure.service'
 import * as storyThreadService from './services/story-thread.service'
 import * as workflowTaskService from './services/workflow-task.service'
+import { discoverEntitiesFromContent } from './services/entity-discovery.service'
 import {
   contentScoringPrompt,
   expandBackgroundPrompt,
@@ -338,7 +339,18 @@ function registerIpcHandlers() {
     const db = getDb()
     const result = db.insert(storyArcs).values({ novelId, ...data }).run()
     markNovelContextChanged(novelId, 'Story outline changed')
-    return Number(result.lastInsertRowid)
+    const arcId = Number(result.lastInsertRowid)
+    const content = [data.arcGoal, data.arcSummary, data.growthLedger, data.costLedger].filter(Boolean).join('\n')
+    if (content.trim()) {
+      void discoverEntitiesFromContent({
+        novelId,
+        sourcePage: 'outline',
+        sourceLabel: `故事弧 ${data.arcName || arcId}`,
+        sourceEntityId: arcId,
+        content,
+      }).catch(console.error)
+    }
+    return arcId
   })
 
   ipcMain.handle('outline:updateArc', (_, id, data) => {
@@ -347,6 +359,16 @@ function registerIpcHandlers() {
     db.update(storyArcs).set(data).where(eq(storyArcs.id, id)).run()
     if (current) {
       markNovelContextChanged(current.novelId, 'Story outline changed')
+      const content = [data.arcGoal, data.arcSummary, data.growthLedger, data.costLedger].filter(Boolean).join('\n')
+      if (content.trim()) {
+        void discoverEntitiesFromContent({
+          novelId: current.novelId,
+          sourcePage: 'outline',
+          sourceLabel: `故事弧 ${data.arcName || current.arcName || id}`,
+          sourceEntityId: id,
+          content,
+        }).catch(console.error)
+      }
     }
   })
 
@@ -409,7 +431,7 @@ function registerIpcHandlers() {
       updatedAt: new Date().toISOString(),
     }).where(eq(chapters.novelId, novelId)).run()
     for (const [index, arc] of arcs.entries()) {
-      db.insert(storyArcs).values({
+      const resultArc = {
         novelId,
         arcName: typeof arc.arc_name === 'string' ? arc.arc_name : typeof arc.name === 'string' ? arc.name : `故事弧 ${index + 1}`,
         arcOrder: typeof arc.order === 'number' ? arc.order : index + 1,
@@ -419,7 +441,18 @@ function registerIpcHandlers() {
         arcSummary: typeof arc.summary === 'string' ? arc.summary : '',
         growthLedger: toLedgerText(arc.growth_ledger),
         costLedger: toLedgerText(arc.cost_ledger),
-      }).run()
+      }
+      const insertResult = db.insert(storyArcs).values(resultArc).run()
+      const discoveryText = [resultArc.arcGoal, resultArc.arcSummary, resultArc.growthLedger, resultArc.costLedger].filter(Boolean).join('\n')
+      if (discoveryText.trim()) {
+        void discoverEntitiesFromContent({
+          novelId,
+          sourcePage: 'outline',
+          sourceLabel: `故事弧 ${resultArc.arcName}`,
+          sourceEntityId: Number(insertResult.lastInsertRowid),
+          content: discoveryText,
+        }).catch(console.error)
+      }
     }
 
     markNovelContextChanged(novelId, 'Story outline changed')
@@ -529,6 +562,7 @@ function registerIpcHandlers() {
       const title = typeof outline.title === 'string' ? outline.title : `第${chapterNum}章`
       const emotionTone = typeof outline.emotion_tone === 'string' ? outline.emotion_tone : ''
 
+      let chapterId = existing?.id
       if (existing) {
         db.update(chapters).set({
           title,
@@ -537,7 +571,7 @@ function registerIpcHandlers() {
           arcId,
         }).where(eq(chapters.id, existing.id)).run()
       } else {
-        db.insert(chapters).values({
+        const insertResult = db.insert(chapters).values({
           novelId: arc.novelId,
           chapterNum,
           title,
@@ -549,6 +583,16 @@ function registerIpcHandlers() {
           contextVersion: novel.contextVersion || 1,
           staleReasonJson: JSON.stringify([]),
         }).run()
+        chapterId = Number(insertResult.lastInsertRowid)
+      }
+      if (outlineText.trim()) {
+        void discoverEntitiesFromContent({
+          novelId: arc.novelId,
+          sourcePage: 'outline',
+          sourceLabel: `第${chapterNum}章 ${title}`.trim(),
+          sourceEntityId: chapterId,
+          content: outlineText,
+        }).catch(console.error)
       }
       generatedCount += 1
     }

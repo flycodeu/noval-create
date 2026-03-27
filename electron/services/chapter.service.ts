@@ -35,6 +35,7 @@ import {
   resolveDefaultStructure,
   syncChapterToSegments,
 } from './story-structure.service'
+import { discoverEntitiesFromContent } from './entity-discovery.service'
 
 interface ChapterSummaryData {
   summary: string
@@ -721,6 +722,15 @@ async function finalizeGeneratedChapterContent(chapterId: number, content: strin
 
   const { summary } = await refreshChapterMemory(chapterId)
   const chapter = getChapter(chapterId)
+  if (chapter && content.trim()) {
+    await discoverEntitiesFromContent({
+      novelId: chapter.novelId,
+      sourcePage: 'writing',
+      sourceLabel: `第${chapter.chapterNum}章 ${chapter.title || ''}`.trim(),
+      sourceEntityId: chapter.id,
+      content,
+    })
+  }
   if (chapter) {
     markSubsequentChaptersStale(
       chapter.novelId,
