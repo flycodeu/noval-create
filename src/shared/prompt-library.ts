@@ -27,6 +27,7 @@ export interface ProtagonistPromptInput {
   ecologySummary?: string
   mapSummary?: string
   writingConstraints?: string
+  attemptNumber?: number
 }
 
 export interface BatchCharacterPromptInput {
@@ -45,6 +46,7 @@ export interface BatchCharacterPromptInput {
   ecologySummary?: string
   mapSummary?: string
   writingConstraints?: string
+  attemptNumber?: number
 }
 
 export interface RegenerateCharacterPromptInput {
@@ -81,6 +83,7 @@ export interface MapGenerationPromptInput {
   factionSummary?: string
   mapSummary?: string
   writingConstraints?: string
+  attemptNumber?: number
 }
 
 export interface StoryArcPromptInput {
@@ -96,6 +99,8 @@ export interface StoryArcPromptInput {
   background: string
   protagonistReference: string
   protagonistRule: string
+  targetWords?: number
+  attemptNumber?: number
 }
 
 export interface ChapterOutlinePromptInput {
@@ -109,6 +114,7 @@ export interface ChapterOutlinePromptInput {
   arcSummary: string
   arcGrowthLedger?: string
   arcCostLedger?: string
+  arcTargetWords?: number
   chapterStart: number
   chapterEnd: number
   previousSummary: string
@@ -119,6 +125,7 @@ export interface ChapterOutlinePromptInput {
   previousChapterOutlines?: string
   protagonistReference: string
   protagonistRule: string
+  attemptNumber?: number
 }
 
 export interface TimelineEventPromptInput {
@@ -166,6 +173,7 @@ export interface ChapterWritingPromptInput {
   activeThreads?: string
   protagonistReference: string
   protagonistRule: string
+  attemptNumber?: number
 }
 
 export interface ScenePlanPromptInput {
@@ -194,6 +202,7 @@ export interface ScenePlanPromptInput {
   activeThreads?: string
   protagonistReference: string
   protagonistRule: string
+  attemptNumber?: number
 }
 
 export interface ChapterReviewPromptInput {
@@ -338,6 +347,86 @@ function placeholder(key: string): string {
   return `{${key}}`
 }
 
+const VARIATION_HINTS_CHARACTER = [
+  '本次侧重从成长弧线和转变节点切入来塑造人物。',
+  '本次侧重从关系网络和利益纠葛切入来塑造人物。',
+  '本次侧重从创伤、代价和内在矛盾切入来塑造人物。',
+  '本次侧重从职业技能、日常习惯和行为细节切入来塑造人物。',
+  '本次侧重从秘密、谎言和道德灰色地带切入来塑造人物。',
+  '本次侧重从恐惧、软肋和失控时刻切入来塑造人物。',
+]
+
+const VARIATION_HINTS_CHAPTER = [
+  '本次请以对话冲突作为开场方式。',
+  '本次请以环境和氛围描写切入，再过渡到人物动作。',
+  '本次请从配角或旁观者的视角起笔，再转回主线视角。',
+  '本次请以一个具体的物件或细节作为开篇锚点。',
+  '本次请以时间跳跃或回忆闪回作为开场手法。',
+  '本次请以动作场景或紧张节奏直接开场。',
+]
+
+const VARIATION_HINTS_OUTLINE = [
+  '本次侧重外部威胁和环境压力来推进章节结构。',
+  '本次侧重内部矛盾和人物关系裂变来推进章节结构。',
+  '本次侧重信息差、误解和秘密暴露来推进章节结构。',
+  '本次侧重资源争夺和利益博弈来推进章节结构。',
+  '本次侧重意外事件和计划失败来推进章节结构。',
+  '本次侧重旧伤复发和历史遗留问题来推进章节结构。',
+]
+
+const VARIATION_HINTS_MAP = [
+  '本次侧重地理阻隔和路线限制来构建地图逻辑。',
+  '本次侧重资源分布和控制权争夺来构建地图逻辑。',
+  '本次侧重历史遗迹和文化痕迹来构建地图逻辑。',
+  '本次侧重危险等级梯度和生存难度来构建地图逻辑。',
+  '本次侧重势力边界和缓冲地带来构建地图逻辑。',
+]
+
+const VARIATION_HINTS_GENERIC = [
+  '本次请尝试与上次不同的切入角度和侧重方向。',
+  '本次请优先从实用性和可操作性出发。',
+  '本次请侧重矛盾、代价和限制条件。',
+  '本次请侧重细节、具体场景和感官信息。',
+  '本次请从风险和潜在问题出发来组织内容。',
+]
+
+export type VariationEntityType = 'character' | 'chapter' | 'outline' | 'map' | 'generic'
+
+export function buildVariationHint(attemptNumber: number, entityType: VariationEntityType): string {
+  if (attemptNumber <= 1) return ''
+
+  const hintsMap: Record<VariationEntityType, string[]> = {
+    character: VARIATION_HINTS_CHARACTER,
+    chapter: VARIATION_HINTS_CHAPTER,
+    outline: VARIATION_HINTS_OUTLINE,
+    map: VARIATION_HINTS_MAP,
+    generic: VARIATION_HINTS_GENERIC,
+  }
+
+  const hints = hintsMap[entityType] || VARIATION_HINTS_GENERIC
+  const index = (attemptNumber - 2) % hints.length
+  const hint = hints[index]
+
+  return section('创意方向提示', [
+    `这是第 ${attemptNumber} 次生成，请确保本次结果与之前有明显差异。`,
+    hint,
+    '注意：方向提示只是引导，核心设定、世界规则和已锁定条件不能被覆盖。',
+  ].join('\n'))
+}
+
+export function buildAvoidanceSection(rejectedDigests: string[]): string {
+  if (!rejectedDigests || rejectedDigests.length === 0) return ''
+  const lines = rejectedDigests.map((digest, i) => {
+    const trimmed = digest.slice(0, 150).replace(/\n/g, ' ')
+    return `方案${i + 1}摘要："${trimmed}…"`
+  })
+  return section('避免方向', [
+    '以下是之前被否决的生成方案摘要，本次生成必须在核心方向、切入角度和关键设定上与它们明显不同：',
+    ...lines,
+    '不要只做表面改动（换名字、换措辞），要从根本思路上走不同的路。',
+  ].join('\n'))
+}
+
 function getStoryAnchorGuidance(field: StoryAnchorField, label: string) {
   switch (field) {
     case 'story_goal':
@@ -410,6 +499,10 @@ export const HUMAN_LANGUAGE_RULE_LINES = [
   '如果输入没有明确涉及某个专业领域，不要擅自引入卡路里、感染概率、药理、金融指标、法律结论等外部概念。',
   '不要为了显得高级，硬把两个语义上没有直接关系的词并在一句里。',
   '一旦出现不自然搭配，优先改成读者最熟悉、最直白、最准确的常规说法。',
+  '不要在每个字段里都写成"一方面...另一方面..."或"既...又..."的平衡结构，真实人物的矛盾往往偏向一端。',
+  '不要用"某种"开头的模糊指代来假装深度，要么写清到底是什么，要么不提。',
+  '段落结尾不要用一句感悟、总结或升华来收尾，让事件和动作自己说话。',
+  '不要反复出现"似乎明白了什么""仿佛在诉说着什么""不知为何"这类伪留白。',
 ] as const
 
 export function buildHumanLanguageRules(extraLines: string[] = []): string {
@@ -608,6 +701,10 @@ export const GLOBAL_WRITING_RULES = `你现在写的是可直接入稿的中文�
 - 为了显得深刻而硬造伪文艺句
 - 写出“系统死亡”“城市哭泣”“门感到愤怒”这类不成立搭配
 - 把重伤、断缺、秩序崩塌或等级差距写成零代价解决
+- 用"某种"开头的模糊指代来假装深度
+- 每段结尾都用一句感悟或总结收尾
+- "嘴角微微上扬""目光深邃""心中涌起一股暖流""不由自主地"这类 AI 高频表达
+- 连续两段以上使用相同句式结构
 
 输出：
 - 只输出最终正文
@@ -690,12 +787,14 @@ export function protagonistPrompt(params: ProtagonistPromptInput): string {
       '外貌只写辨识度和气质来源，不写空泛形容词堆砌。',
       '优点、缺点、秘密、软肋和关系张力都要能互相咬合，别把角色写成完美设定包。',
       '实体类型、种族、身份、势力归属和力量体系必须贴合现有规则，不默认只有普通人模板。',
+      '心理维度之间必须互相咬合形成因果链：core_fear 必须直接解释 self_deception 为什么成立，trauma 必须影响 inner_conflict 的具体内容，surface_desire 和 deep_need 之间必须存在具体矛盾而非抽象对立。不允许每个字段独立编一套说辞。',
     ].join('\n')),
     section('语言要求', buildHumanLanguageRules([
       '档案要像编辑可直接交给作者继续写戏的人物卡，不要写悬浮鸡汤和伪深刻结论。',
       '贴近当前题材常见角色写法，但不要模仿具体作者。',
     ])),
     '只输出 JSON：{"surname":"","given_name":"","full_name":"","entity_type":"human/undead/beast/immortal/nonhuman","species":"角色种族","gender":"","age":0,"occupation":"","rank_level":"当前等级/境界/身份阶位","social_identity":"社会身份或阵营位置","faction_names":["势力1"],"power_system_names":["体系1"],"context_hooks":["与主线/背景/主题的关联"],"appearance":"外貌3到4句，只写能认出来的细节","background":"180字以内，写关键经历以及它留下的影响","personality_traits":["特点1","特点2","特点3"],"flaws":["缺点1","缺点2"],"habits":["习惯1"],"goals":"当前追求","surface_desire":"表层最想得到的东西","deep_need":"真正缺失却不愿承认的需要","core_fear":"最怕失去或面对的东西","inner_conflict":"最核心的内在拉扯","hidden_secret":"不愿公开的秘密","moral_line":"轻易不会跨过的底线","self_deception":"一直拿来自我说服的谎话","trauma":"仍在影响现在的旧伤","contradiction":"最能体现复杂度的反差点","relationship_tension":"在亲密或权力关系里的张力来源","resonance_point":"读者最容易共情的一点","character_arc":"后续可能的变化方向","first_impression":"第一次出场最抓人的地方"}',
+    params.attemptNumber && params.attemptNumber > 1 ? buildVariationHint(params.attemptNumber, 'character') : '',
   ])
 }
 
@@ -732,12 +831,14 @@ export function batchCharacterPrompt(params: BatchCharacterPromptInput): string 
       '至少让一部分角色携带秘密、旧债、错位立场或利益冲突，这样后面才有戏。',
       '遵守现有世界规则、势力结构、地图和题材生态，不重名，不撞设定。',
       '贴近当前题材常见群像写法，但不要直接模仿具体作者。',
+      '每个角色的心理维度必须形成因果链：core_fear 解释 self_deception，trauma 影响 inner_conflict，surface_desire 和 deep_need 之间有具体矛盾。不允许每个字段独立编一套说辞。',
     ].join('\n')),
     section('语言要求', buildHumanLanguageRules([
       '人物描述要像编辑会采纳的角色档案，不要写成悬浮文案。',
       '少用万能热词，多写这个人具体能做什么、会卡住谁、会被什么反噬。',
     ])),
     '只输出 JSON 数组：[{"full_name":"","entity_type":"human/undead/beast/immortal/nonhuman","species":"角色种族","gender":"","age":0,"role_type":"major/minor/antagonist/supporting","occupation":"","rank_level":"当前等级/阶位","social_identity":"社会身份","faction_names":["势力1"],"power_system_names":["体系1"],"context_hooks":["与主线或主题的关联"],"background":"80到120字，写关键经历和现状","personality_traits":["特点1","特点2"],"flaws":["缺点1","缺点2"],"habits":["习惯1"],"goals":"当前追求","surface_desire":"表层欲望","deep_need":"深层需要","core_fear":"核心恐惧","inner_conflict":"内在矛盾","hidden_secret":"隐藏秘密","moral_line":"道德底线","self_deception":"自我欺骗","trauma":"旧伤或创伤","contradiction":"人物反差点","relationship_tension":"与主角或关键人物的张力","resonance_point":"读者共情点","character_arc":"后续变化方向","relation_to_protagonist":"与主角的关系与拉扯","first_impression":"第一次出场的印象","appearance":"外貌1到2句，只写辨识度","appear_chapter":1}]',
+    params.attemptNumber && params.attemptNumber > 1 ? buildVariationHint(params.attemptNumber, 'character') : '',
   ])
 }
 
@@ -849,6 +950,7 @@ export function mapGenerationPrompt(params: MapGenerationPromptInput): string {
       '普通地点性质不要加引号，不要写成“真正禁区”“希望之地”这类概念包装。',
     ])),
     '只输出递归 JSON：{"nodes":[{"name":"","node_type":"国家/宗门/基地/城市/秘境/设施等","structure_role":"该节点在蓝图中的职责","description":"","atmosphere":"","plot_relevance":"","tags":["标签1"],"affiliated_factions":["势力1"],"children":[{"name":"","node_type":"","structure_role":"","description":"","atmosphere":"","plot_relevance":"","tags":["标签1"],"affiliated_factions":["势力1"],"children":[]}]}]}',
+    params.attemptNumber && params.attemptNumber > 1 ? buildVariationHint(params.attemptNumber, 'map') : '',
   ])
 }
 
@@ -877,6 +979,7 @@ export function buildStoryArcPlanningPrompt(params: StoryArcPromptInput): string
       '结局方向：' + (params.ending || '未提供'),
       '节奏比例：' + (params.rhythmSummary || '未配置'),
       '预计总章节：' + params.totalChapters + '章',
+      params.targetWords ? '全书目标字数：' + params.targetWords + '字，请在每个弧的 target_words 字段中分配字数预算，总和必须等于全书目标。' : '',
     ]),
     section('规划要求', [
       '规划 3 到 5 个故事弧，章节范围必须连续、无重叠、无空档。',
@@ -892,7 +995,8 @@ export function buildStoryArcPlanningPrompt(params: StoryArcPromptInput): string
     section('语言要求', buildHumanLanguageRules([
       'summary、arc_goal、growth_ledger、cost_ledger 和 key_turns 都写成普通编辑能直接接手的结构说明，不要写策划黑话。',
     ])),
-    '只输出 JSON 数组：[{"arc_name":"","stage":"铺垫/升级/高潮/收束","chapter_start":1,"chapter_end":10,"arc_goal":"本弧必须完成的推进","growth_ledger":["成长变化1","成长变化2"],"cost_ledger":["代价1","代价2"],"key_turns":["具体转折1","具体转折2"],"subplot_links":["某条支线如何介入/推进/回收"],"pacing":"快/中/慢","summary":"40到80字，写清这一弧到底发生了什么"}]',
+    '只输出 JSON 数组：[{"arc_name":"","stage":"铺垫/升级/高潮/收束","chapter_start":1,"chapter_end":10,"arc_goal":"本弧必须完成的推进","target_words":50000,"growth_ledger":["成长变化1","成长变化2"],"cost_ledger":["代价1","代价2"],"key_turns":["具体转折1","具体转折2"],"subplot_links":["某条支线如何介入/推进/回收"],"pacing":"快/中/慢","summary":"40到80字，写清这一弧到底发生了什么"}]',
+    params.attemptNumber && params.attemptNumber > 1 ? buildVariationHint(params.attemptNumber, 'outline') : '',
   ])
 }
 
@@ -916,6 +1020,7 @@ export function buildChapterOutlinePlanningPrompt(params: ChapterOutlinePromptIn
       '概述：' + (params.arcSummary || '未提供'),
       params.arcGrowthLedger ? '成长账本：' + params.arcGrowthLedger : '',
       params.arcCostLedger ? '代价账本：' + params.arcCostLedger : '',
+      params.arcTargetWords ? '本弧字数预算：' + params.arcTargetWords + '字，章节数量和单章篇幅要匹配这个预算。' : '',
       '章节范围：第' + params.chapterStart + '章到第' + params.chapterEnd + '章',
     ]),
     sectionLines('连续性上下文', [
@@ -948,6 +1053,65 @@ export function buildChapterOutlinePlanningPrompt(params: ChapterOutlinePromptIn
       '章节标题、目标、成长账本和代价账本都要写得清楚直接，避免抽象套话。',
     ])),
     '只输出 JSON 数组：[{"chapter_num":' + params.chapterStart + ',"title":"","goal":"本章要完成的推进","growth_ledger":["成长变化1"],"cost_ledger":["代价1"],"plot_points":["事件1","事件2","事件3"],"characters":["登场人物A","登场人物B"],"location":"主要场景","emotion_tone":"情绪基调","bridge_in":"这章承接了什么","bridge_out":"这章给下章留下什么"}]',
+    params.attemptNumber && params.attemptNumber > 1 ? buildVariationHint(params.attemptNumber, 'outline') : '',
+  ])
+}
+
+export interface VolumePlanningPromptInput {
+  novelTitle: string
+  novelSynopsis: string
+  genre: string
+  targetTotalWords: number
+  storyGoal: string
+  coreConflict: string
+  mainPlot: string
+  ending: string
+  existingArcs: string
+  protagonistSummary: string
+  worldRulesSummary: string
+  threadsSummary: string
+  attemptNumber?: number
+}
+
+export function buildVolumePlanningPrompt(params: VolumePlanningPromptInput): string {
+  const estimatedVolumes = Math.max(1, Math.ceil(params.targetTotalWords / 300000))
+  return renderPrompt([
+    `为这部${params.targetTotalWords >= 1000000 ? '百万字级' : '长篇'}小说规划卷结构。`,
+    `总目标字数约 ${params.targetTotalWords} 字，预估 ${estimatedVolumes} 卷左右（可根据剧情需要调整）。`,
+    '每卷必须有独立的阶段性目标和高潮，同时服务于全书主线推进。',
+    sectionLines('小说信息', [
+      '书名：' + params.novelTitle,
+      '简介：' + params.novelSynopsis,
+      '题材：' + params.genre,
+    ]),
+    sectionLines('故事主线', [
+      '故事目标：' + (params.storyGoal || '未提供'),
+      '核心冲突：' + (params.coreConflict || '未提供'),
+      '主线剧情：' + (params.mainPlot || '未提供'),
+      '结局方向：' + (params.ending || '未提供'),
+    ]),
+    params.existingArcs ? section('已有故事弧', params.existingArcs) : '',
+    params.protagonistSummary ? section('主角概况', params.protagonistSummary) : '',
+    params.worldRulesSummary ? section('世界规则', params.worldRulesSummary) : '',
+    params.threadsSummary ? section('故事线索', params.threadsSummary) : '',
+    ...buildPromptGuardrailSections({
+      genre: params.genre,
+      storyCore: [params.storyGoal, params.coreConflict, params.mainPlot].filter(Boolean).join('\n'),
+      worldSummary: params.worldRulesSummary,
+      taskFocus: '卷规划必须体现主角成长阶梯和主线推进节奏，每卷有明确的阶段性高潮。',
+    }),
+    section('规划要求', [
+      '每卷的 theme 不能是空泛的"成长""蜕变"，必须写清这一卷主角面对的具体困境和要解决的具体问题。',
+      '每卷的 key_arcs 必须指向具体的故事弧名称或事件，不能只写"主线推进"。',
+      '相邻两卷之间必须有明确的承接关系：上一卷的遗留问题如何影响下一卷。',
+      '字数分配要考虑节奏：开篇卷可以短一些（15-25万字），中段卷可以长一些（25-35万字），收束卷根据需要调整。',
+      '每卷必须标注主角在该卷的成长阶段和实力/地位变化。',
+    ].join('\n')),
+    section('语言要求', buildHumanLanguageRules([
+      '卷标题和主题描述要具体，不要写成"黎明前的黑暗"这种万能标题。',
+    ])),
+    '只输出 JSON 数组：[{"volume_number":1,"title":"卷标题","theme":"本卷核心主题和具体困境","target_words":' + Math.round(params.targetTotalWords / estimatedVolumes) + ',"chapter_estimate":{"start":1,"end":100},"protagonist_stage":"主角在本卷的状态和成长阶段","key_arcs":["故事弧1","故事弧2"],"major_events":["本卷关键事件1","关键事件2"],"subplot_status":{"线索名":"推进/引入/回收"},"volume_climax":"本卷高潮事件","bridge_to_next":"留给下一卷的悬念或遗留问题"}]',
+    params.attemptNumber && params.attemptNumber > 1 ? buildVariationHint(params.attemptNumber, 'outline') : '',
   ])
 }
 
@@ -1049,6 +1213,7 @@ export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
       '场景目标和冲突都写具体事实，不写“命运转折”“真正成长”这种空话。',
     ])),
     '只输出 JSON 数组：[{"scene_order":1,"scene_title":"场景名","purpose":"这一段必须完成什么","location":"地点或空间","time_anchor":"时间标签","present_characters":["人物A"],"key_items":["物品A"],"conflict":"这一段最直接的冲突","beat":"这一段发生的关键动作","must_cover":["必须交代1","必须交代2"],"exit_hook":"如何推到下一段"}]',
+    params.attemptNumber && params.attemptNumber > 1 ? buildVariationHint(params.attemptNumber, 'outline') : '',
   ])
 }
 
@@ -1096,6 +1261,7 @@ export function buildChapterWritingPrompt(params: ChapterWritingPromptInput): st
       '遇到不准确搭配，优先改成读者最熟悉、最准确的常规说法。',
       '只输出正文，不要解释。',
     ].join('\n')),
+    params.attemptNumber && params.attemptNumber > 1 ? buildVariationHint(params.attemptNumber, 'chapter') : '',
   ])
 }
 
@@ -1881,9 +2047,79 @@ export const PROMPT_CATALOG: PromptCatalogEntry[] = [
   },
 ]
 
+export interface PowerSystemExpandInput {
+  novelTitle: string
+  genre: string
+  worldSummary: string
+  existingPowerSystems: string
+  attemptNumber?: number
+}
 
+export function buildPowerSystemExpandPrompt(input: PowerSystemExpandInput): string {
+  return renderPrompt([
+    section('任务', [
+      '你是一位精通力量体系设计的世界观架构师。',
+      `为小说《${input.novelTitle}》（${input.genre}）深度扩展力量体系。`,
+    ]),
+    section('世界观背景', [input.worldSummary]),
+    section('已有力量体系', [input.existingPowerSystems || '暂无']),
+    section('扩展要求', [
+      '为每个力量体系补充以下维度：',
+      '1. 境界细分：每个大境界拆出 2-4 个小阶段，写清每阶段的标志性能力变化。',
+      '2. 修炼资源：写清每个阶段需要什么资源、资源从哪来、谁控制资源。',
+      '3. 瓶颈与代价：每次突破的风险、失败后果、不可逆的代价。',
+      '4. 战力锚点：给出 2-3 个具体场景说明该境界能做什么、不能做什么。',
+      '5. 体系交互：不同力量体系之间的克制、协同或冲突关系。',
+    ]),
+    section('硬约束', [
+      '不要写成百科词条，要写成能直接用于剧情的设定。',
+      '每个境界的描述必须包含"能做什么"和"做不到什么"两面。',
+      '资源和代价必须具体到可以写进剧情的程度。',
+    ]),
+    buildVariationHint(input.attemptNumber),
+    section('输出格式', [
+      '输出 JSON 数组，每个元素代表一个力量体系：',
+      '[{"name":"体系名","levels":[{"rank":"境界名","subStages":["小阶段1","小阶段2"],"abilities":"能力描述","limitations":"限制描述","resources":"所需资源","breakthroughRisk":"突破风险"}],"interactions":"与其他体系的关系"}]',
+    ]),
+  ])
+}
 
+export interface FactionSystemExpandInput {
+  novelTitle: string
+  genre: string
+  worldSummary: string
+  existingFactions: string
+  attemptNumber?: number
+}
 
+export function buildFactionSystemExpandPrompt(input: FactionSystemExpandInput): string {
+  return renderPrompt([
+    section('任务', [
+      '你是一位精通势力组织设计的世界观架构师。',
+      `为小说《${input.novelTitle}》（${input.genre}）深度扩展势力组织体系。`,
+    ]),
+    section('世界观背景', [input.worldSummary]),
+    section('已有势力', [input.existingFactions || '暂无']),
+    section('扩展要求', [
+      '为每个势力补充以下维度：',
+      '1. 内部层级：写清从底层到顶层的权力结构，每层有多少人、掌握什么权限。',
+      '2. 核心资源：这个势力靠什么立足——领地、技术、人脉、信仰还是暴力。',
+      '3. 内部矛盾：派系分歧、继承危机、理念冲突，写出至少一个可以推动剧情的内部裂痕。',
+      '4. 外部关系网：与其他势力的同盟、敌对、利用关系，写清利益交换的具体内容。',
+      '5. 关键人物槽位：预留 2-3 个关键角色位置（掌权者、叛逆者、中间人），写清其职能但不命名。',
+    ]),
+    section('硬约束', [
+      '势力之间必须存在至少一组不可调和的利益冲突。',
+      '每个势力的"核心资源"必须是其他势力想要但得不到的东西。',
+      '内部矛盾必须具体到可以写成剧情线的程度，不要写"内部存在分歧"这种空话。',
+    ]),
+    buildVariationHint(input.attemptNumber),
+    section('输出格式', [
+      '输出 JSON 数组，每个元素代表一个势力：',
+      '[{"name":"势力名","hierarchy":[{"level":"层级名","count":"人数规模","authority":"权限范围"}],"coreResource":"核心资源描述","internalConflict":"内部矛盾描述","externalRelations":[{"target":"对方势力","relation":"关系类型","exchange":"利益交换内容"}],"keySlots":[{"role":"角色定位","function":"职能描述"}]}]',
+    ]),
+  ])
+}
 
 
 

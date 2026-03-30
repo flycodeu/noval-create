@@ -33,6 +33,7 @@ export type GuidedWorkflowStepKey =
   | 'items-equipment'
   | 'story-threads'
   | 'story-plot'
+  | 'volume-planning'
   | 'write-start'
 
 export type WorkflowRunnableStepKey =
@@ -58,6 +59,7 @@ export interface WorkflowStats {
   completedChapterCount: number
   totalWords: number
   hasProtagonist: boolean
+  volumeCount: number
 }
 
 export interface GuidedStepProgress {
@@ -91,6 +93,7 @@ export const GUIDED_STEP_ORDER: GuidedWorkflowStepKey[] = [
   'character-roster',
   'story-threads',
   'story-plot',
+  'volume-planning',
   'write-start',
 ]
 
@@ -106,10 +109,11 @@ export const EMPTY_WORKFLOW_STATS: WorkflowStats = {
   completedChapterCount: 0,
   totalWords: 0,
   hasProtagonist: false,
+  volumeCount: 0,
 }
 
 export async function loadWorkflowStats(novelId: number): Promise<WorkflowStats> {
-  const [baseStats, characterStats, itemStats, mapStats, threadStats, revisionStats, arcs, timelineStats] = await Promise.all([
+  const [baseStats, characterStats, itemStats, mapStats, threadStats, revisionStats, arcs, timelineStats, volumes] = await Promise.all([
     window.electron.novel.stats(novelId),
     window.electron.character.getStats({ novelId, page: 1, pageSize: 1 }),
     window.electron.item.getStats({ novelId, page: 1, pageSize: 1 }),
@@ -118,6 +122,7 @@ export async function loadWorkflowStats(novelId: number): Promise<WorkflowStats>
     window.electron.revision.getStats({ novelId, page: 1, pageSize: 1 }),
     window.electron.outline.getArcs(novelId),
     window.electron.timeline.getStats({ novelId }),
+    window.electron.structure.listVolumes(novelId),
   ])
 
   return {
@@ -132,6 +137,7 @@ export async function loadWorkflowStats(novelId: number): Promise<WorkflowStats>
     completedChapterCount: baseStats.completedChapters,
     totalWords: baseStats.totalWords,
     hasProtagonist: characterStats.protagonistCount > 0,
+    volumeCount: Array.isArray(volumes) ? volumes.length : 0,
   }
 }
 
@@ -213,6 +219,10 @@ export function isItemsEquipmentReady(stats: Pick<WorkflowStats, 'itemCount'>): 
 
 export function isStoryThreadsReady(stats: Pick<WorkflowStats, 'threadCount'>): boolean {
   return stats.threadCount > 0
+}
+
+export function isVolumePlanningReady(stats: Pick<WorkflowStats, 'volumeCount'>): boolean {
+  return stats.volumeCount > 0
 }
 
 export function isWritingStepReady(
@@ -314,6 +324,11 @@ export function getGuidedStepProgressMap(
       totalCount: 4,
       isComplete: storyPlotProgress >= 4,
     },
+    'volume-planning': {
+      completedCount: stats.volumeCount > 0 ? 1 : 0,
+      totalCount: 1,
+      isComplete: stats.volumeCount > 0,
+    },
     'write-start': {
       completedCount: writingProgress,
       totalCount: 5,
@@ -336,6 +351,7 @@ export function getRecommendedGuidedWorkflowStep(
   if (!isCharacterRosterReady(stats)) return 'character-roster'
   if (!isStoryThreadsReady(stats)) return 'story-threads'
   if (!isStoryPlotReady(novel)) return 'story-plot'
+  if (!isVolumePlanningReady(stats)) return 'volume-planning'
   return 'write-start'
 }
 

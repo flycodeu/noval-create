@@ -49,6 +49,7 @@ export interface TaskControlState {
   maxRetries?: number
   retryCount?: number
   batchKey?: string
+  contentAttemptNumber?: number
 }
 
 interface CreateTaskOptions {
@@ -75,6 +76,37 @@ interface RunTaskOptions extends CreateTaskOptions {
 }
 
 const abortControllers = new Map<number, AbortController>()
+
+function computeAttemptTemperature(attemptNumber: number): number {
+  if (attemptNumber <= 1) return 0.85
+  return Math.min(0.98, 0.85 + (attemptNumber - 1) * 0.05)
+}
+
+function countPreviousAttempts(
+  novelId: number | null | undefined,
+  entityType: string | null | undefined,
+  entityId: number | null | undefined,
+  taskType: string,
+): number {
+  if (!novelId || !entityType || !entityId) return 0
+  const db = getDb()
+  const rows = db
+    .select({ id: tasks.id })
+    .from(tasks)
+    .where(eq(tasks.novelId, novelId))
+    .all()
+    .filter(
+      (row) => {
+        const t = getTaskRecord(row.id)
+        return t
+          && t.type === taskType
+          && t.relatedEntityType === entityType
+          && t.relatedEntityId === entityId
+          && (t.status === 'success' || t.status === 'failed')
+      },
+    )
+  return rows.length
+}
 
 type ErrorLike = Error & {
   code?: string
@@ -466,6 +498,17 @@ export async function retryTask(taskId: number, sender?: WebContents): Promise<n
     throw new Error('Task input is not a replayable message array.')
   }
 
+  const previousAttempts = countPreviousAttempts(
+    task.novelId,
+    task.relatedEntityType,
+    task.relatedEntityId,
+    task.type,
+  )
+  const attemptNumber = previousAttempts + 1
+  const temperature = computeAttemptTemperature(attemptNumber)
+
+  const controlState: TaskControlState = { contentAttemptNumber: attemptNumber }
+
   const baseOptions: RunTaskOptions = {
     type: task.type as TaskType,
     novelId: task.novelId || undefined,
@@ -476,6 +519,8 @@ export async function retryTask(taskId: number, sender?: WebContents): Promise<n
     messages,
     sender,
     retryable: Boolean(task.retryable),
+    chatOpts: { temperature },
+    controlJson: JSON.stringify(controlState),
   }
 
   if (task.runnerType === 'stream') {

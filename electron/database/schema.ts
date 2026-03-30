@@ -122,6 +122,7 @@ export const storyArcs = sqliteTable('story_arcs', {
   arcSummary: text('arc_summary'),
   growthLedger: text('growth_ledger'),
   costLedger: text('cost_ledger'),
+  targetWords: integer('target_words').notNull().default(0),
 })
 
 export const storyThreads = sqliteTable('story_threads', {
@@ -326,6 +327,8 @@ export const storyMemoryCheckpoints = sqliteTable('story_memory_checkpoints', {
   sourceRangeEnd: integer('source_range_end'),
   version: integer('version').default(1),
   stale: integer('stale').default(0),
+  lastRefreshedChapterNum: integer('last_refreshed_chapter_num').default(0),
+  locked: integer('locked').default(0),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
 })
@@ -432,3 +435,17 @@ export type NewTask = typeof tasks.$inferInsert
 export type Genre = typeof genres.$inferSelect
 export type StoryArc = typeof storyArcs.$inferSelect
 
+export const generationHistory = sqliteTable('generation_history', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  entityType: text('entity_type').notNull(),
+  entityId: integer('entity_id'),
+  taskType: text('task_type').notNull(),
+  outputDigest: text('output_digest').notNull(),
+  rejected: integer('rejected').default(0),
+  attemptNumber: integer('attempt_number').default(1),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
+export type GenerationHistory = typeof generationHistory.$inferSelect
+export type NewGenerationHistory = typeof generationHistory.$inferInsert

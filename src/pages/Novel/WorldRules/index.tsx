@@ -433,6 +433,9 @@ export default function WorldRules({ novelId }: Props) {
     }
   }, [autoTask?.id, liveRules, loadAutoStatus])
 
+  const genreName = currentNovel?.genreName || liveRules.genreProfile.name || ''
+  const isFantasyGenre = /仙侠|武侠|玄幻|修真|奇幻|异能/.test(genreName)
+
   const tabItems = [
     {
       key: 'overview',
@@ -468,7 +471,14 @@ export default function WorldRules({ novelId }: Props) {
           {(fields, { add, remove }) => (
             <>
               <div style={{ marginBottom: 12 }}>
-                <Button icon={<PlusOutlined />} onClick={() => add({ appliesTo: [], levels: [] })}>添加体系</Button>
+                <Space>
+                  <Button icon={<PlusOutlined />} onClick={() => add({ appliesTo: [], levels: [] })}>添加体系</Button>
+                  {isFantasyGenre && (
+                    <Button icon={<RobotOutlined />} disabled={saving || isGenerating} onClick={() => void handleGenerateWorldRules('section', 'expand')}>
+                      AI 深度扩展境界/资源/限制
+                    </Button>
+                  )}
+                </Space>
               </div>
               {fields.map((field, index) => (
                 <RuleListCard
@@ -556,7 +566,14 @@ export default function WorldRules({ novelId }: Props) {
             {(fields, { add, remove }) => (
               <>
                 <div style={{ marginBottom: 12 }}>
-                  <Button icon={<PlusOutlined />} onClick={() => add({ notableSites: [] })}>添加势力</Button>
+                  <Space>
+                    <Button icon={<PlusOutlined />} onClick={() => add({ notableSites: [] })}>添加势力</Button>
+                    {isFantasyGenre && (
+                      <Button icon={<RobotOutlined />} disabled={saving || isGenerating} onClick={() => void handleGenerateWorldRules('section', 'expand')}>
+                        AI 深度扩展层级/资源/冲突
+                      </Button>
+                    )}
+                  </Space>
                 </div>
                 {fields.map((field, index) => (
                   <RuleListCard

@@ -33,6 +33,7 @@ import {
   isStoryCoreReady,
   isStoryPlotReady,
   isStoryThreadsReady,
+  isVolumePlanningReady,
   isWorldFoundationReady,
   loadWorkflowStats,
   parseStorySettings,
@@ -55,57 +56,62 @@ interface BasicsFormValues {
 
 const STEP_META: Record<GuidedWorkflowStepKey, { eyebrow: string; title: string; description: string }> = {
   basics: {
-    eyebrow: '第 1 步 / 11',
+    eyebrow: '第 1 步 / 12',
     title: '先把作品底盘说清楚',
     description: '这里只保留书名、简介和背景，不把别的功能堆进来。',
   },
   'project-brief': {
-    eyebrow: '第 2 步 / 11',
+    eyebrow: '第 2 步 / 12',
     title: '先统一这本书的产品定义',
     description: '先写清服务谁、承诺什么、靠什么被点开，以及哪些东西绝对不能写偏。',
   },
   'story-core': {
-    eyebrow: '第 3 步 / 11',
+    eyebrow: '第 3 步 / 12',
     title: '基础设定先钉住',
     description: '先写 premise、主角起点和底层约束，不提前写剧情。',
   },
   'theme-voice': {
-    eyebrow: '第 4 步 / 11',
+    eyebrow: '第 4 步 / 12',
     title: '把主题与文风钉成硬规则',
     description: '先固定主题、情感核心、视角、时态和语言禁区，减少口吻漂移与 AI 腔。',
   },
   'world-foundation': {
-    eyebrow: '第 5 步 / 11',
+    eyebrow: '第 5 步 / 12',
     title: '统一世界规则口径',
     description: '先把时间、势力、语言边界和题材规则定稳。',
   },
   'map-structure': {
-    eyebrow: '第 6 步 / 11',
+    eyebrow: '第 6 步 / 12',
     title: '先搭地点骨架',
     description: '先让人物和事件有真实落点，再去细化情节。',
   },
   'character-roster': {
-    eyebrow: '第 7 步 / 11',
+    eyebrow: '第 7 步 / 12',
     title: '补齐关键角色',
     description: '主角和关键对位角色先落地，别让剧情靠空气推进。',
   },
   'items-equipment': {
-    eyebrow: '第 8 步 / 11',
+    eyebrow: '第 8 步 / 12',
     title: '补关键物品与资源',
     description: '道具、资源和装备必须服务冲突，不是事后装饰。',
   },
   'story-threads': {
-    eyebrow: '第 9 步 / 11',
+    eyebrow: '第 9 步 / 12',
     title: '把长线推进整理成线程',
     description: '主线、支线、悬念和关系线都要挂成可追踪线程，后面的结构和正文才不会失忆。',
   },
   'story-plot': {
-    eyebrow: '第 10 步 / 11',
+    eyebrow: '第 10 步 / 12',
     title: '现在再做故事设计',
     description: '资产到位之后，再统一设计主线、支线、节奏和结局。',
   },
+  'volume-planning': {
+    eyebrow: '第 11 步 / 12',
+    title: '拆卷规划，分配节奏',
+    description: '百万字长篇必须先拆卷，每卷有独立高潮和阶段目标，才不会写到中段失控。',
+  },
   'write-start': {
-    eyebrow: '第 11 步 / 11',
+    eyebrow: '第 12 步 / 12',
     title: '转入结构与写作',
     description: '有了骨架和资产后，再进入结构页、时间轴和正文页。',
   },
@@ -664,8 +670,8 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
             <Button type="primary" icon={<BarsOutlined />} onClick={() => openProPage('story-design')}>
               打开故事设计
             </Button>
-            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/write-start`)}>
-              去开始写作
+            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/volume-planning`)}>
+              去卷册规划
             </Button>
           </Space>
         )}
@@ -698,6 +704,61 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
               <span>结局落点</span>
               <strong>{settings.ending ? '已填写' : '未填写'}</strong>
               <small>{settings.ending || '写故事最终如何收束。'}</small>
+            </div>
+          </div>
+        </WorkspacePanel>
+      </WorkspacePage>
+    )
+  }
+
+  if (stepKey === 'volume-planning') {
+    return (
+      <WorkspacePage
+        className="guided-step guided-step--volume-planning"
+        layout="wide"
+        heroVariant="compact"
+        eyebrow={stepMeta.eyebrow}
+        title={stepMeta.title}
+        description={stepMeta.description}
+        actions={(
+          <Space wrap>
+            <Button type="primary" icon={<BarsOutlined />} onClick={() => openProPage('structure')}>
+              打开结构页
+            </Button>
+            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/write-start`)}>
+              去开始写作
+            </Button>
+          </Space>
+        )}
+        contextSummary={contextSummary}
+        metrics={(
+          <>
+            <WorkspaceMetric label="完成度" value={`${progress.completedCount}/${progress.totalCount}`} tone="warm" hint="至少拆出一卷" />
+            <WorkspaceMetric label="已有卷数" value={stats.volumeCount} hint="百万字建议 3-8 卷，每卷 15-40 万字。" />
+            <WorkspaceMetric label="目标字数" value={`${(currentNovel?.targetWords || 0).toLocaleString()} 字`} hint="总字数预算，拆卷时按比例分配。" />
+          </>
+        )}
+      >
+        {!isStoryPlotReady(currentNovel) ? (
+          <Alert type="warning" showIcon message="故事设计还没完成。建议先补齐目标、冲突、推进链和结局，再做卷册规划。" style={{ marginBottom: 16 }} />
+        ) : null}
+
+        <WorkspacePanel title="卷册规划检查" description="长篇必须先拆卷，每卷有独立高潮和阶段目标。">
+          <div className="guided-step__fact-grid">
+            <div className="guided-step__fact-card">
+              <span>卷数</span>
+              <strong>{stats.volumeCount > 0 ? `${stats.volumeCount} 卷` : '未规划'}</strong>
+              <small>建议先在结构页创建卷，再分配弧线和字数预算。</small>
+            </div>
+            <div className="guided-step__fact-card">
+              <span>故事弧</span>
+              <strong>{stats.outlineCount > 0 ? `${stats.outlineCount} 条` : '未创建'}</strong>
+              <small>每卷应分配 1-3 条主要弧线。</small>
+            </div>
+            <div className="guided-step__fact-card">
+              <span>线程覆盖</span>
+              <strong>{stats.threadCount > 0 ? `${stats.threadCount} 条` : '未创建'}</strong>
+              <small>确保每条线程都有卷级归属，不要悬空。</small>
             </div>
           </div>
         </WorkspacePanel>

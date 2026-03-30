@@ -573,6 +573,24 @@ function runMigrations(sqlite: Database.Database) {
   ensureColumn(sqlite, 'tasks', 'control_json', 'TEXT')
   ensureColumn(sqlite, 'tasks', 'progress_json', 'TEXT')
 
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS generation_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+      entity_type TEXT NOT NULL,
+      entity_id INTEGER,
+      task_type TEXT NOT NULL,
+      output_digest TEXT NOT NULL,
+      rejected INTEGER DEFAULT 0,
+      attempt_number INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+
+  ensureColumn(sqlite, 'story_arcs', 'target_words', 'INTEGER DEFAULT 0')
+  ensureColumn(sqlite, 'story_memory_checkpoints', 'last_refreshed_chapter_num', 'INTEGER DEFAULT 0')
+  ensureColumn(sqlite, 'story_memory_checkpoints', 'locked', 'INTEGER DEFAULT 0')
+
   ensureIndexes(sqlite)
   migrateWorldRules(sqlite)
   backfillCharacterTaxonomy(sqlite)

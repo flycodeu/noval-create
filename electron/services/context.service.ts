@@ -26,6 +26,7 @@ function truncateToTokens(text: string, maxTokens: number): string {
 }
 
 function resolveRecentContextWindow(targetWords: number, chapterCount: number): number {
+  if (targetWords >= 1500000 || chapterCount >= 400) return 10
   if (targetWords >= 800000 || chapterCount >= 180) return 8
   if (targetWords >= 350000 || chapterCount >= 80) return 6
   return 5
@@ -858,13 +859,15 @@ export async function buildChapterContext(
       ].filter(Boolean).join('\n')
     : ''
 
-  const budgetFloor = targetWords >= 800000
-    ? 7200
-    : targetWords >= 350000
-      ? 6600
-      : totalBudget
+  const budgetFloor = targetWords >= 1500000
+    ? 8000
+    : targetWords >= 800000
+      ? 7200
+      : targetWords >= 350000
+        ? 6600
+        : totalBudget
   const effectiveBudget = Math.max(totalBudget, budgetFloor)
-  const reservedForOutput = targetWords >= 800000 ? 2200 : 2000
+  const reservedForOutput = targetWords >= 1500000 ? 2400 : targetWords >= 800000 ? 2200 : 2000
   const contextBudget = effectiveBudget - reservedForOutput
   const longTermMemoryPriority = targetWords >= 350000 || chapterRows.length >= 80 ? 1 : 2
 

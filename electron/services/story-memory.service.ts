@@ -14,7 +14,7 @@ import {
 } from '../database/schema'
 import { ensureStoryStructure } from './story-structure.service'
 
-type StoryMemoryMode = 'standard' | 'longform' | 'epic'
+type StoryMemoryMode = 'standard' | 'longform' | 'epic' | 'mega'
 type CheckpointScope = 'novel' | 'volume' | 'part'
 
 export interface StoryMemorySnapshot {
@@ -128,13 +128,16 @@ function stringifyStringArray(values: string[]): string {
 }
 
 function resolveStoryMemoryMode(targetWords: number, chapterCount: number): StoryMemoryMode {
+  if (targetWords >= 1500000 || chapterCount >= 400) return 'mega'
   if (targetWords >= 800000 || chapterCount >= 180) return 'epic'
   if (targetWords >= 350000 || chapterCount >= 80) return 'longform'
   return 'standard'
 }
 
-function getModeLimit(mode: StoryMemoryMode, standard: number, longform: number, epic: number): number {
+function getModeLimit(mode: StoryMemoryMode, standard: number, longform: number, epic: number, mega?: number): number {
   switch (mode) {
+    case 'mega':
+      return mega ?? Math.round(epic * 1.4)
     case 'epic':
       return epic
     case 'longform':
@@ -151,6 +154,9 @@ function buildCoverageSummary(
   targetWords: number,
 ): string {
   const targetLabel = targetWords > 0 ? `target ${targetWords.toLocaleString()} words` : 'target words not set'
+  if (mode === 'mega') {
+    return `Mega mode with volume-scoped checkpoints and thread decay. ${chapterCount} chapters covered, latest chapter ${lastChapterNum}, ${targetLabel}.`
+  }
   if (mode === 'epic') {
     return `Epic mode with staged checkpoints enabled. ${chapterCount} chapters covered, latest chapter ${lastChapterNum}, ${targetLabel}.`
   }
@@ -388,7 +394,10 @@ export function refreshStoryMemoryCheckpoints(novelId: number) {
   const forbiddenDirectionsJson = stringifyStringArray(buildForbiddenDirections())
   const styleGuard = buildStyleGuard()
 
-  for (const checkpoint of db.select().from(storyMemoryCheckpoints).where(eq(storyMemoryCheckpoints.novelId, novelId)).all()) {
+  // Skip locked checkpoints (completed volumes in mega mode)
+  const existingCheckpoints = db.select().from(storyMemoryCheckpoints).where(eq(storyMemoryCheckpoints.novelId, novelId)).all()
+  for (const checkpoint of existingCheckpoints) {
+    if (checkpoint.locked === 1) continue
     db.update(storyMemoryCheckpoints).set({
       stale: 1,
       updatedAt: new Date().toISOString(),
@@ -436,6 +445,7 @@ export function refreshStoryMemoryCheckpoints(novelId: number) {
       styleGuard,
       sourceRangeStart: start || null,
       sourceRangeEnd: end || null,
+      lastRefreshedChapterNum: end || 0,
       version: baseVersion,
       stale: 0,
     })
@@ -469,9 +479,22 @@ export function refreshStoryMemoryCheckpoints(novelId: number) {
       styleGuard,
       sourceRangeStart: start || null,
       sourceRangeEnd: end || null,
+      lastRefreshedChapterNum: end || 0,
       version: baseVersion,
       stale: 0,
     })
+
+    // In mega mode, lock completed volume checkpoints to avoid re-processing
+    const memoryMode = resolveStoryMemoryMode(novel.targetWords || 0, chapterRows.length)
+    if (memoryMode === 'mega' && rows.length > 0 && rows.every((row) => (row.wordCount || 0) > 0 && row.status === 'completed')) {
+      const existing = db.select().from(storyMemoryCheckpoints)
+        .where(eq(storyMemoryCheckpoints.novelId, novelId))
+        .all()
+        .find((cp) => cp.scopeType === 'volume' && cp.scopeId === volume.id)
+      if (existing) {
+        db.update(storyMemoryCheckpoints).set({ locked: 1 }).where(eq(storyMemoryCheckpoints.id, existing.id)).run()
+      }
+    }
   }
 
   for (const part of partRows) {
@@ -500,6 +523,7 @@ export function refreshStoryMemoryCheckpoints(novelId: number) {
       styleGuard,
       sourceRangeStart: start || null,
       sourceRangeEnd: end || null,
+      lastRefreshedChapterNum: end || 0,
       version: baseVersion,
       stale: 0,
     })
@@ -543,6 +567,12 @@ export function buildStoryMemorySnapshot(novelId: number): StoryMemorySnapshot {
     .filter((checkpoint) => checkpoint.scopeType === 'volume' && checkpoint.summary)
     .map((checkpoint) => checkpoint.summary || '')
 
+  // In mega mode, apply thread decay: filter out open loops from chapters older than 150 chapters
+  const threadDecayThreshold = memoryMode === 'mega' ? 150 : Infinity
+  const recentContinuityRows = threadDecayThreshold < Infinity
+    ? continuityRows.filter((row) => lastChapterNum - row.chapterNum < threadDecayThreshold)
+    : continuityRows
+
   return {
     generatedAt: new Date().toISOString(),
     chapterCount: chapterRows.length,
@@ -553,7 +583,7 @@ export function buildStoryMemorySnapshot(novelId: number): StoryMemorySnapshot {
       ...partDigests.slice(0, 3),
       ...volumeDigests.slice(0, 2),
       ...buildPhaseDigest(continuityRows, memoryMode),
-    ], getModeLimit(memoryMode, 6, 8, 10)),
+    ], getModeLimit(memoryMode, 6, 8, 10, 14)),
     plotMilestones: dedupe([
       ...continuityRows.map((row) => row.summary ? `Ch.${row.chapterNum}: ${row.summary}` : '').filter(Boolean),
       ...continuityRows.flatMap((row) => row.continuity.plotProgress.map((entry) => `Ch.${row.chapterNum}: ${entry}`)),
@@ -570,9 +600,9 @@ export function buildStoryMemorySnapshot(novelId: number): StoryMemorySnapshot {
       getModeLimit(memoryMode, 10, 14, 18),
     ),
     activeThreads: dedupe([
-      ...continuityRows.flatMap((row) => row.continuity.openLoops),
+      ...recentContinuityRows.flatMap((row) => row.continuity.openLoops),
       ...eventRows.flatMap((event) => parseStringArray(event.openThreadsJson)),
-    ], getModeLimit(memoryMode, 14, 18, 24)),
+    ], getModeLimit(memoryMode, 14, 18, 24, 32)),
     continuityDirectives: dedupe(
       continuityRows.flatMap((row) => row.continuity.continuityNotes),
       getModeLimit(memoryMode, 12, 16, 20),

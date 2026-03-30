@@ -681,6 +681,7 @@ export interface StoryArc {
   arcSummary?: string
   growthLedger?: string
   costLedger?: string
+  targetWords?: number
 }
 
 export interface StoryThread {

@@ -35,7 +35,7 @@ const LANGUAGE_PATTERN_RULES: PatternRule[] = [
     code: 'ai_slogan',
     severity: 'medium',
     message: '口号化、假深刻的 AI 腔盖过了具体场景。',
-    pattern: /(命运的齿轮|某种无法言说|真正的成长|古老而神秘|光与暗的永恒战争)/u,
+    pattern: /(命运的齿轮|某种无法言说|真正的成长|古老而神秘|光与暗的永恒战争|不知为何|仿佛在诉说|似乎明白了什么|某种说不清)/u,
   },
   {
     code: 'zero_cost_resolution',
@@ -47,7 +47,7 @@ const LANGUAGE_PATTERN_RULES: PatternRule[] = [
     code: 'template_emotion',
     severity: 'low',
     message: '模板化情绪表达正在拉平文本质感。',
-    pattern: /(不禁|不由得|忍不住|微微一愣|心头一紧)/u,
+    pattern: /(不禁|不由得|忍不住|微微一愣|心头一紧|嘴角微微上扬|目光深邃|心中涌起|不由自主地)/u,
   },
 ]
 
