@@ -302,9 +302,9 @@ export default function StoryThreadsPage({ novelId }: Props) {
       dataIndex: 'title',
       key: 'title',
       render: (_, record) => (
-        <div>
+        <div className="story-threads__table-cell">
           <strong>{record.title}</strong>
-          <div style={{ color: 'var(--color-text-muted)', fontSize: 12, marginTop: 4 }}>
+          <div className="story-threads__table-copy">
             {record.summary || record.premise || '还没有写清这条线程在持续推动什么。'}
           </div>
         </div>
@@ -357,7 +357,7 @@ export default function StoryThreadsPage({ novelId }: Props) {
       layout="wide"
       heroVariant="compact"
       eyebrow="故事线程"
-      title="Story Threads"
+      title="故事线程"
       description="把主线、支线、悬念、关系线和回收点统一管理成可追踪卡片。结构页、时间轴页和正文都应引用这些线程，而不是各写各的。"
       actions={(
         <Space wrap>

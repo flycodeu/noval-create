@@ -374,7 +374,7 @@ export function refreshStoryMemoryCheckpoints(novelId: number) {
   ensureStoryStructure(novelId)
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
-  if (!novel) throw new Error('Novel not found')
+  if (!novel) throw new Error('小说不存在')
 
   const chapterRows = db.select().from(chapters)
     .where(eq(chapters.novelId, novelId))

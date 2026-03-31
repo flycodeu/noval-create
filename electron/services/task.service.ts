@@ -126,7 +126,7 @@ function parseJsonObject<T extends object>(raw?: string | null): T {
 
 function isAbortError(error: unknown): boolean {
   return error instanceof Error
-    && (error.name === 'AbortError' || /abort|cancel/i.test(error.message))
+    && (error.name === 'AbortError' || /abort|cancel|取消/i.test(error.message))
 }
 
 function collectErrorDetails(error: unknown, seen = new Set<unknown>()): { codes: string[]; messages: string[]; names: string[] } {
@@ -191,8 +191,8 @@ function describeTransientNetworkError(error: unknown): string {
   return code ? `网络异常（${code}）` : '网络异常'
 }
 
-function normalizeTaskErrorMessage(error: unknown, fallback = 'Unknown error'): string {
-  if (isAbortError(error)) return 'User cancelled'
+function normalizeTaskErrorMessage(error: unknown, fallback = '未知错误'): string {
+  if (isAbortError(error)) return '用户已取消'
   if (isTransientModelNetworkError(error)) {
     return `模型服务连接不稳定：${describeTransientNetworkError(error)}。请稍后重试。`
   }
@@ -339,7 +339,7 @@ export async function runStreamTask(opts: RunTaskOptions): Promise<number> {
 
       updateTask(taskId, {
         status,
-        errorMessage: status === 'cancelled' ? 'User cancelled' : errorMessage,
+        errorMessage: status === 'cancelled' ? '用户已取消' : errorMessage,
         outputText: fullOutput || null,
         durationMs: Date.now() - startTime,
       })
@@ -400,7 +400,7 @@ export async function executeChatTask(taskId: number, opts: RunTaskOptions): Pro
 
     updateTask(taskId, {
       status,
-      errorMessage: aborted ? 'User cancelled' : errorMessage,
+      errorMessage: aborted ? '用户已取消' : errorMessage,
       durationMs: Date.now() - startTime,
       currentChildTaskId: null,
     })
@@ -466,7 +466,7 @@ export function cancelTask(taskId: number, sender?: WebContents): boolean {
       updateTaskStatus(taskId, 'cancelled', sender, {
         controlJson: nextControlJson,
         currentChildTaskId: null,
-        errorMessage: 'User cancelled',
+        errorMessage: '用户已取消',
       })
       return true
     }
@@ -487,16 +487,16 @@ export function cancelTask(taskId: number, sender?: WebContents): boolean {
 
 export async function retryTask(taskId: number, sender?: WebContents): Promise<number> {
   const task = getTaskRecord(taskId)
-  if (!task) throw new Error(`Task ${taskId} not found`)
+  if (!task) throw new Error(`任务 ${taskId} 不存在`)
   if (task.runnerType === 'workflow') {
-    throw new Error('Workflow tasks should be resumed instead of retried.')
+    throw new Error('工作流任务请使用继续，而不是重试。')
   }
-  if (!task.retryable) throw new Error('This task cannot be retried safely.')
-  if (!task.inputJson) throw new Error('This task does not have replayable input.')
+  if (!task.retryable) throw new Error('当前任务不支持安全重试。')
+  if (!task.inputJson) throw new Error('当前任务缺少可重放的输入。')
 
   const messages = JSON.parse(task.inputJson)
   if (!Array.isArray(messages)) {
-    throw new Error('Task input is not a replayable message array.')
+    throw new Error('任务输入不是可重放的消息数组。')
   }
 
   const previousAttempts = countPreviousAttempts(

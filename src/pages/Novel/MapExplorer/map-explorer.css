@@ -118,6 +118,10 @@
   margin: 0;
   color: rgba(61, 47, 33, 0.86);
   line-height: 1.9;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
 }
 
 .map-graph-stage-brief__tags {
@@ -410,6 +414,10 @@
 .map-graph-focus-card__summary {
   line-height: 1.82;
   color: rgba(59, 47, 35, 0.86);
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
 }
 
 .map-graph-badges {
@@ -531,14 +539,20 @@
   margin-top: 10px;
   color: rgba(60, 46, 34, 0.8);
   line-height: 1.75;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
 }
 
 .map-graph-detail-grid {
   display: grid;
   gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
 .map-graph-detail-grid__item {
+  min-width: 0;
   padding: 14px 16px;
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.72);
@@ -553,8 +567,12 @@
 }
 
 .map-graph-detail-grid__item strong {
+  display: -webkit-box;
   color: #201810;
   line-height: 1.7;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
 }
 
 .map-node-relations-inline {
@@ -631,6 +649,10 @@
   }
 
   .map-graph-stage-brief {
+    grid-template-columns: 1fr;
+  }
+
+  .map-graph-detail-grid {
     grid-template-columns: 1fr;
   }
 

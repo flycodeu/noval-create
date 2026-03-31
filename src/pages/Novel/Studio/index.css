@@ -91,6 +91,68 @@
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
+.studio-readiness-grid--dense {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.studio-bible-board {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.82fr) minmax(0, 1.18fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.studio-bible-overview {
+  display: grid;
+  gap: 14px;
+  padding: 22px;
+  border-radius: 24px;
+  border: 1px solid rgba(24, 40, 58, 0.08);
+  background:
+    radial-gradient(circle at top left, rgba(188, 108, 37, 0.14), transparent 42%),
+    rgba(255, 255, 255, 0.78);
+}
+
+.studio-bible-overview__eyebrow,
+.studio-bible-overview__focus span,
+.studio-readiness-card__foot {
+  color: rgba(24, 40, 58, 0.62);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.studio-bible-overview__score {
+  color: var(--studio-ink);
+  font-size: 52px;
+  line-height: 1;
+}
+
+.studio-bible-overview__copy {
+  margin: 0;
+  color: rgba(24, 40, 58, 0.72);
+  line-height: 1.8;
+}
+
+.studio-bible-overview__focus {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(24, 40, 58, 0.05);
+}
+
+.studio-bible-overview__focus strong {
+  color: var(--studio-ink);
+  font-size: 18px;
+}
+
+.studio-bible-overview__focus small {
+  color: rgba(24, 40, 58, 0.68);
+  line-height: 1.7;
+}
+
 .studio-readiness-card,
 .studio-action-card,
 .studio-link-button,
@@ -99,6 +161,8 @@
 }
 
 .studio-readiness-card {
+  display: grid;
+  gap: 12px;
   border: 1px solid rgba(24, 40, 58, 0.09);
   border-radius: 22px;
   padding: 18px;
@@ -133,15 +197,23 @@
 
 .studio-readiness-card strong {
   display: block;
-  margin-bottom: 10px;
   font-size: 28px;
   line-height: 1;
   color: var(--studio-ink);
 }
 
-.studio-readiness-card p {
+.studio-readiness-card__summary {
+  margin: 0;
   color: rgba(24, 40, 58, 0.74);
   line-height: 1.75;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+}
+
+.studio-readiness-card__foot {
+  margin-top: auto;
 }
 
 .studio-action-grid {
@@ -203,8 +275,13 @@
 
 .studio-action-card p {
   flex: 1;
+  margin: 0;
   color: rgba(24, 40, 58, 0.72);
   line-height: 1.75;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
 }
 
 .studio-quality-strip {
@@ -339,6 +416,7 @@
 }
 
 @media (max-width: 1024px) {
+  .studio-bible-board,
   .studio-quality-strip {
     grid-template-columns: 1fr;
   }
@@ -348,6 +426,14 @@
   .studio-readiness-grid,
   .studio-action-grid {
     grid-template-columns: 1fr;
+  }
+
+  .studio-bible-overview {
+    padding: 18px;
+  }
+
+  .studio-bible-overview__score {
+    font-size: 42px;
   }
 
   .studio-health-card__stats {

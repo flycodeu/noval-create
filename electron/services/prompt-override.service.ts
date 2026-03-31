@@ -56,7 +56,7 @@ export function savePromptOverride(key: string, content: string): void {
   const db = getDb()
   const normalizedKey = key.trim()
   if (!normalizedKey) {
-    throw new Error('Prompt key is required')
+    throw new Error('提示词键不能为空')
   }
 
   const normalizedContent = normalizeText(content)

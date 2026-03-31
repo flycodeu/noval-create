@@ -1,4 +1,4 @@
-﻿import { integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 import { sql } from 'drizzle-orm'
 
 export const genres = sqliteTable('genres', {
@@ -204,6 +204,10 @@ export const characterRelations = sqliteTable('character_relations', {
   relationLabel: text('relation_label'),
   bilateral: integer('bilateral').default(1),
   description: text('description'),
+  intimacyLevel: integer('intimacy_level'),
+  tensionLevel: integer('tension_level'),
+  interactionStyle: text('interaction_style'),
+  subtextRule: text('subtext_rule'),
 })
 
 export const worldMap = sqliteTable('world_map', {

@@ -58,7 +58,7 @@ export function createAdapter(config: {
     case 'custom':
       return new CustomAdapter(key, modelId, baseUrl || 'http://localhost:11434/v1')
     default:
-      throw new Error(`Unknown provider: ${provider}`)
+      throw new Error(`未知模型提供商：${provider}`)
   }
 }
 

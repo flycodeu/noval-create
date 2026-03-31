@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo } from 'react'
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { Layout, ConfigProvider, theme as antdTheme } from 'antd'
+import { Alert, Layout, ConfigProvider, theme as antdTheme } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import AppLayout from './components/Layout'
 import NovelList from './pages/NovelList'
@@ -18,8 +18,16 @@ const FONT = "-apple-system, 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', sans-
 export default function App() {
   const { addStream, appendStreamChunk, completeStream } = useTaskStore()
   const { theme } = useThemeStore()
+  const hasElectronBridge = typeof window !== 'undefined'
+    && typeof window.electron?.on === 'function'
+    && typeof window.electron?.novel?.list === 'function'
 
   useEffect(() => {
+    if (!hasElectronBridge) {
+      console.error('Electron preload bridge is unavailable. Open this app through Electron instead of a plain browser tab.')
+      return undefined
+    }
+
     const unsubChunk = window.electron.on('task:stream-chunk', (data: unknown) => {
       const { taskId, chunk } = data as { taskId: number; chunk: string }
       appendStreamChunk(taskId, chunk)
@@ -40,7 +48,7 @@ export default function App() {
       if (status === 'running') addStream(taskId)
     })
     return () => { unsubChunk(); unsubComplete(); unsubStatus() }
-  }, [])
+  }, [addStream, appendStreamChunk, completeStream, hasElectronBridge])
 
   const antdThemeConfig = useMemo(() => {
     if (theme === 'dark') {
@@ -108,6 +116,17 @@ export default function App() {
 
   return (
     <ConfigProvider theme={antdThemeConfig} locale={zhCN}>
+      {!hasElectronBridge ? (
+        <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 24 }}>
+          <Alert
+            type="error"
+            showIcon
+            message="Electron 桥接未加载"
+            description="当前页面缺少 preload 注入的 window.electron。请通过 Electron 启动桌面应用，不要直接在普通浏览器里打开 Vite 地址。"
+            style={{ maxWidth: 720 }}
+          />
+        </div>
+      ) : (
       <HashRouter>
         <AppLayout>
           <Routes>
@@ -121,6 +140,7 @@ export default function App() {
           </Routes>
         </AppLayout>
       </HashRouter>
+      )}
     </ConfigProvider>
   )
 }

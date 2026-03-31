@@ -24,6 +24,7 @@ import {
   stringifyWorldRules,
 } from '../../../shared/genre-system'
 import { parseThemeVoiceSnapshot } from '../../../shared/theme-voice'
+import { formatWritingContractTags } from '../../../shared/writing-contract'
 import {
   WorkspaceContextSummary,
   WorkspaceMetric,
@@ -219,11 +220,11 @@ export default function GuidePage({ novelId }: Props) {
     })
 
     if (result.createdCount <= 0) {
-      throw new Error(result.warnings[0] || 'Story thread generation produced no usable results.')
+      throw new Error(result.warnings[0] || '故事线程生成后没有产出可用结果。')
     }
 
     if (result.warnings.length > 0) {
-      message.warning(`Generated ${result.createdCount} threads with ${result.warnings.length} warnings.`)
+      message.warning(`已生成 ${result.createdCount} 条线程，另有 ${result.warnings.length} 条提示待处理。`)
     }
   }, [novelId])
 
@@ -281,7 +282,7 @@ export default function GuidePage({ novelId }: Props) {
       message.success(successText)
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : 'Execution failed. Check prerequisites and try again.')
+      message.error(error instanceof Error ? error.message : '执行失败，请先检查前置条件后再试。')
     } finally {
       setRunningKey(null)
     }
@@ -309,14 +310,14 @@ export default function GuidePage({ novelId }: Props) {
     await runStep(step, action, successText)
   }, [ensureStepReady, runStep])
 
-  const syncWorldRules = () => void runGuardedStep('world-rules', syncWorldRulesCore, 'World rules synced for the current genre.')
-  const generateMap = () => void runGuardedStep('map', generateMapCore, 'Initial map skeleton generated. Continue refining on the map page.')
-  const generateCharacters = () => void runGuardedStep('characters', generateCharactersCore, 'Initial character network generated.')
-  const generateItems = () => void runGuardedStep('items', generateItemsCore, 'Initial item templates and instances generated.')
-  const generateThreads = () => void runGuardedStep('threads', generateThreadsCore, 'Initial story threads generated. Continue refining on the threads page.')
-  const generateOutline = () => void runGuardedStep('outline', generateOutlineCore, 'Initial story arcs generated. Continue refining on the outline page.')
-  const generateStoryDesign = () => void runGuardedStep('story-design', generateStoryDesignCore, 'Initial story design generated. Continue refining on the story design page.')
-  const generateTimeline = () => void runGuardedStep('timeline', generateTimelineCore, 'Initial timeline events generated. Continue refining on the timeline page.')
+  const syncWorldRules = () => void runGuardedStep('world-rules', syncWorldRulesCore, '当前题材的世界规则已同步。')
+  const generateMap = () => void runGuardedStep('map', generateMapCore, '首批地图骨架已生成，可继续到地图页细化。')
+  const generateCharacters = () => void runGuardedStep('characters', generateCharactersCore, '首批人物网络已生成。')
+  const generateItems = () => void runGuardedStep('items', generateItemsCore, '首批物品模板与实例已生成。')
+  const generateThreads = () => void runGuardedStep('threads', generateThreadsCore, '首批故事线程已生成，可继续到线程页细化。')
+  const generateOutline = () => void runGuardedStep('outline', generateOutlineCore, '首批故事弧已生成，可继续到大纲页细化。')
+  const generateStoryDesign = () => void runGuardedStep('story-design', generateStoryDesignCore, '首版故事设计已生成，可继续到故事设计页细化。')
+  const generateTimeline = () => void runGuardedStep('timeline', generateTimelineCore, '首批时间轴事件已生成，可继续到时间轴页细化。')
 
   const runPipeline = async () => {
     setRunningKey('pipeline')
@@ -346,10 +347,10 @@ export default function GuidePage({ novelId }: Props) {
       if (!(await ensureStepReady('timeline'))) return
       await generateTimelineCore()
       await Promise.all([refreshWorkflowContext(), refreshDiagnostics()])
-      message.success('Initial assets and story structure are in place. Continue refining in outline, timeline, and writing.')
+      message.success('首批世界资产与结构骨架已铺设完成，可继续细化大纲、时间轴与正文。')
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : 'AI pipeline interrupted. Check prerequisites before continuing.')
+      message.error(error instanceof Error ? error.message : 'AI 工作流已中断，请先检查前置条件后再继续。')
     } finally {
       setRunningKey(null)
     }
@@ -360,6 +361,11 @@ export default function GuidePage({ novelId }: Props) {
     + characterPreset.supportingCount
     + characterPreset.minorCount
   const staleChapterCount = contextStatus?.staleChapterCount || 0
+  const writingContractLabel = formatWritingContractTags(themeVoice.writingContractTags) || '待设定'
+  const protagonistRelationCount = consistencyReport?.metrics.protagonistRelationCount || 0
+  const styledRelationCount = consistencyReport?.metrics.styledRelationCount || 0
+  const subtextRelationCount = consistencyReport?.metrics.subtextRelationCount || 0
+  const ratedRelationCount = consistencyReport?.metrics.ratedRelationCount || 0
 
   const steps: StepConfig[] = [
     {
@@ -503,22 +509,22 @@ export default function GuidePage({ novelId }: Props) {
     },
     {
       key: 'threads',
-      title: 'Story Threads',
-      desc: 'Track mainline, subplots, mysteries, relationship arcs, and payoffs as reusable threads for outline, timeline, and drafting.',
-      status: stats.threadCount > 0 ? 'Ready' : 'Pending',
-      count: `${stats.threadCount} threads`,
+      title: '故事线程',
+      desc: '把主线、支线、悬念、关系线和回收点钉成可追踪线程，后续大纲、时间轴和正文都围着这层推进。',
+      status: stats.threadCount > 0 ? '已生成' : '待生成',
+      count: `${stats.threadCount} 条线程`,
       support: stats.threadCount > 0
-        ? 'Threads can now anchor outline, timeline, and chapter callbacks.'
-        : 'Without a thread layer, later structure and drafting will drift apart and forget setups.',
+        ? '线程层已经能给大纲、时间轴和章节回收提供统一锚点。'
+        : '没有线程层，后面的结构页和正文很容易断线，伏笔、关系线和回收点会越写越散。',
       ready: stats.threadCount > 0,
       icon: <BarsOutlined />,
       action: (
         <Space wrap>
           <Button loading={runningKey === 'threads'} icon={<BarsOutlined />} onClick={generateThreads}>
-            AI Generate
+            AI 生成首批
           </Button>
           <Button type="link" onClick={() => navigate(`/novels/${novelId}/threads`)}>
-            Open Page
+            进入页面
           </Button>
         </Space>
       ),
@@ -675,6 +681,12 @@ export default function GuidePage({ novelId }: Props) {
             hint="先把视角、时态、风格规则和对白边界压稳"
           />
           <WorkspaceMetric
+            label="写作类型"
+            value={writingContractLabel}
+            tone="cool"
+            hint="先钉整本书的阅读预期，再让节奏和对白跟着走"
+          />
+          <WorkspaceMetric
             label="故事线程"
             value={stats.threadCount}
             tone="cool"
@@ -712,12 +724,15 @@ export default function GuidePage({ novelId }: Props) {
               <div className="novel-note-list__item">{`项目立项：${projectBrief.readyCount}/6`}</div>
               <div className="novel-note-list__item">{`基础设定：${storySettings.premiseReadyCount}/5`}</div>
               <div className="novel-note-list__item">{`主题与文风：${themeVoice.readyCount}/6`}</div>
+              <div className="novel-note-list__item">{`写作类型：${writingContractLabel}`}</div>
               <div className="novel-note-list__item">{`故事设计：${storySettings.storyDesignReadyCount}/4`}</div>
+              <div className="novel-note-list__item">{consistencyReport ? `主角关键关系：${protagonistRelationCount} 条` : '主角关键关系：检测中'}</div>
+              <div className="novel-note-list__item">{consistencyReport ? `已写互动方式：${styledRelationCount} 条，已写潜台词：${subtextRelationCount} 条，已写强弱等级：${ratedRelationCount} 条` : '关系对白底盘：检测中'}</div>
             </div>
           </WorkspacePanel>
 
           {consistencyReport && (
-            <WorkspacePanel title="结构体检" description="全书级一致性校验器会自动检查人物、事件、时间轴、地图、物品和章节之间的冲突。">
+            <WorkspacePanel title="结构体检" description="全书级一致性校验器会自动检查人物、写作类型、关系对白、事件、时间轴、地图、物品和章节之间的冲突。">
               <div className="novel-health-board">
                 <div className="novel-health-score">
                   <strong>{consistencyReport.readinessScore}</strong>
@@ -740,6 +755,9 @@ export default function GuidePage({ novelId }: Props) {
               </div>
 
               <div className="novel-note-list">
+                <div className="novel-note-list__item">{`写作类型标签：${consistencyReport.metrics.writingContractTagCount} 个`}</div>
+                <div className="novel-note-list__item">{`主角关键关系：${protagonistRelationCount} 条，已写互动方式 ${styledRelationCount} 条`}</div>
+                <div className="novel-note-list__item">{`已写潜台词：${subtextRelationCount} 条，已写强弱等级：${ratedRelationCount} 条`}</div>
                 {consistencyReport.focusAreas.map((focus) => (
                   <div key={focus} className="novel-note-list__item">{focus}</div>
                 ))}
@@ -766,6 +784,26 @@ export default function GuidePage({ novelId }: Props) {
           showIcon
           message="当前存在高优先级结构冲突"
           description="建议优先修复高优先问题，再继续批量生成或长文写作，否则冲突会在后续章节中被不断放大。"
+        />
+      )}
+
+      {consistencyReport && consistencyReport.metrics.writingContractTagCount <= 0 && (
+        <Alert
+          className="novel-guide__alert"
+          type="warning"
+          showIcon
+          message="整本书还没有写作类型锚点"
+          description="当前还没有明确“爽文 / 写实 / 言情”等全书级阅读预期。建议先去主题与文风页钉住写作类型，再继续批量生成故事设计和正文。"
+        />
+      )}
+
+      {consistencyReport && protagonistRelationCount <= 0 && (
+        <Alert
+          className="novel-guide__alert"
+          type="warning"
+          showIcon
+          message="主角还没有关键人物关系"
+          description="关系网为空时，后续对白、情感推进和冲突站位都会失去抓手。建议先补主角与家人、朋友、陌生人或对立者的核心关系。"
         />
       )}
 
@@ -841,6 +879,12 @@ export default function GuidePage({ novelId }: Props) {
           <div className="novel-issue-mini-grid">
             <div className="novel-note-list__item">
               章节：{consistencyReport.metrics.chapterCount} 章，其中缺摘要 {consistencyReport.metrics.chaptersMissingSummary} 章，缺连续性记忆 {consistencyReport.metrics.chaptersMissingContinuity} 章。
+            </div>
+            <div className="novel-note-list__item">
+              写作类型：{consistencyReport.metrics.writingContractTagCount} 个标签；主角关键关系 {protagonistRelationCount} 条。
+            </div>
+            <div className="novel-note-list__item">
+              关系对白：已写互动方式 {styledRelationCount} 条，已写潜台词 {subtextRelationCount} 条，已写强弱等级 {ratedRelationCount} 条。
             </div>
             <div className="novel-note-list__item">
               时间轴：{consistencyReport.metrics.timelineCount} 个事件，已与章节/地点联动 {consistencyReport.metrics.linkedTimelineCount} 个。

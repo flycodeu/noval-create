@@ -1,4 +1,5 @@
 const fs = require('fs')
+const iconv = require('iconv-lite')
 const path = require('path')
 
 const root = path.resolve(__dirname, '..')
@@ -7,6 +8,24 @@ const scanFiles = ['package.json', 'electron.vite.config.ts']
 const textExtensions = new Set(['.ts', '.tsx', '.js', '.jsx', '.json', '.css', '.md', '.cjs', '.mjs', '.yml', '.yaml'])
 const issues = []
 const replacementChar = String.fromCharCode(0xfffd)
+const hanPattern = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/u
+const segmentPattern = /'(?<single>(?:\\.|[^'\\])*)'|"(?<double>(?:\\.|[^"\\])*)"|>(?<jsx>[^<>{\r\n]+)</g
+const mojibakePatterns = [
+  { label: 'question mark after non-ASCII text', pattern: /[\u0080-\uFFFF]\?(?=[`"'})\],:;])/u },
+  { label: 'question mark before template interpolation', pattern: /[\u0080-\uFFFF]\?\{/u },
+]
+
+function recoverMojibake(text) {
+  try {
+    const recovered = iconv.decode(iconv.encode(text, 'gbk'), 'utf8').trim()
+    if (recovered === text.trim()) return ''
+    if (!recovered || recovered.includes(replacementChar)) return ''
+    if (!hanPattern.test(recovered)) return ''
+    return recovered
+  } catch {
+    return ''
+  }
+}
 
 function walk(dir) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -24,6 +43,11 @@ function walk(dir) {
   }
 }
 
+function findMojibakePatterns(text) {
+  return mojibakePatterns
+    .filter((rule) => rule.pattern.test(text))
+    .map((rule) => rule.label)
+}
 function containsPrivateUseCharacter(text) {
   for (const ch of text) {
     const codePoint = ch.codePointAt(0)
@@ -32,6 +56,26 @@ function containsPrivateUseCharacter(text) {
     }
   }
   return false
+}
+
+function findRecoverableMojibake(text) {
+  const hits = []
+
+  for (const match of text.matchAll(segmentPattern)) {
+    const value = match.groups?.single ?? match.groups?.double ?? match.groups?.jsx ?? ''
+    const trimmed = value.trim()
+    if (!trimmed || !/[^\u0000-\u007f]/.test(trimmed)) continue
+
+    const recovered = recoverMojibake(value)
+    if (!recovered) continue
+
+    hits.push({
+      original: trimmed.slice(0, 40),
+      recovered: recovered.slice(0, 40),
+    })
+  }
+
+  return hits
 }
 
 function inspect(filePath) {
@@ -49,6 +93,16 @@ function inspect(filePath) {
 
   if (containsPrivateUseCharacter(text)) {
     issues.push(`${relPath}: contains private-use Unicode characters that often indicate mojibake`)
+  }
+
+  const mojibakeHits = findMojibakePatterns(text)
+  if (mojibakeHits.length > 0) {
+    issues.push(`${relPath}: contains suspicious mojibake fragments (${mojibakeHits.join(', ')})`)
+  }
+
+  const recoverableHits = findRecoverableMojibake(text)
+  for (const hit of recoverableHits) {
+    issues.push(`${relPath}: contains recoverable mojibake ("${hit.original}" -> "${hit.recovered}")`)
   }
 
   const utf8RoundTrip = Buffer.from(text, 'utf8')

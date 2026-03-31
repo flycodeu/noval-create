@@ -1,5 +1,5 @@
 ﻿import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Collapse, Empty, Select, Space, Tag, type CollapseProps } from 'antd'
+import { Alert, Button, Collapse, Empty, Select, Space, Tag, message, type CollapseProps } from 'antd'
 import {
   CheckCircleOutlined,
   ClockCircleOutlined,
@@ -51,6 +51,8 @@ const TYPE_LABELS: Record<string, string> = {
   project_brief_generate: 'AI 生成项目立项',
   theme_voice_generate: 'AI 生成主题与文风',
   world_rules_generate: 'AI 生成世界规则',
+  world_rules_auto_generate: 'AI 自动生成世界规则',
+  story_thread_generate: 'AI 生成故事线程',
 }
 
 const RUNNER_LABELS: Record<string, string> = {
@@ -58,6 +60,7 @@ const RUNNER_LABELS: Record<string, string> = {
   stream: '流式执行',
   workflow: '后台流程',
 }
+const RESUMABLE_WORKFLOW_TYPES = new Set(['map_auto_generate', 'world_rules_auto_generate'])
 
 function formatTaskPayload(raw?: string): string {
   if (!raw) return ''
@@ -92,6 +95,10 @@ function isTaskRetryable(task: Task): boolean {
   if (task.type === 'chapter_write' && task.relatedEntityType === 'chapter' && task.relatedEntityId) return true
   if (task.type === 'subplot_framework') return true
   return Boolean(task.retryable)
+}
+
+function isWorkflowResumable(task: Task): boolean {
+  return task.runnerType === 'workflow' && RESUMABLE_WORKFLOW_TYPES.has(task.type)
 }
 
 function getTaskRetryabilityLabel(task: Task): string {
@@ -178,9 +185,10 @@ export default function TaskCenter() {
   const handleResume = async (taskId: number) => {
     try {
       await window.electron.workflow.resume(taskId)
+      message.success('后台流程已继续执行。')
       await loadTasks()
-    } catch {
-      // Keep the page quiet and let the detail panel explain workflow state.
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '继续任务失败，请稍后再试。')
     }
   }
 
@@ -329,7 +337,7 @@ export default function TaskCenter() {
                   取消
                 </Button>
               ) : null}
-              {selectedTask.runnerType === 'workflow' && selectedTask.status === 'paused' ? (
+              {selectedTask.status === 'paused' && isWorkflowResumable(selectedTask) ? (
                 <Button icon={<ReloadOutlined />} onClick={() => void handleResume(selectedTask.id)}>
                   继续
                 </Button>

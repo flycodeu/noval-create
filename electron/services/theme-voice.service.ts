@@ -1,4 +1,4 @@
-﻿import { eq } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import type {
   ThemeVoiceGenerationRequest,
   ThemeVoiceGenerationResult,
@@ -6,6 +6,11 @@ import type {
 } from '../../src/shared/theme-voice-generation'
 import type { ThemeVoiceDocument, ThemeVoicePov, ThemeVoiceTense } from '../../src/shared/theme-voice'
 import { parseThemeVoiceDocument } from '../../src/shared/theme-voice'
+import {
+  WRITING_CONTRACT_PRESETS,
+  formatWritingContractTags,
+  normalizeWritingContractTags,
+} from '../../src/shared/writing-contract'
 import {
   buildContextAlignmentRules,
   buildHumanLanguageRules,
@@ -77,6 +82,7 @@ function normalizeBlockText(value: unknown): string {
 
 function buildCurrentThemeVoiceSummary(document: ThemeVoiceDocument): string {
   const lines = [
+    document.writingContractTags.length > 0 ? `写作类型：${formatWritingContractTags(document.writingContractTags)}` : '',
     document.theme ? `主题：${document.theme}` : '',
     document.motifs ? `母题：${document.motifs}` : '',
     document.emotionalCore ? `情感核心：${document.emotionalCore}` : '',
@@ -99,6 +105,10 @@ function buildThemeVoicePrompt(
   mode: ThemeVoiceGenerationRequest['mode'],
   requirements?: string,
 ): string {
+  const writingContractChoices = WRITING_CONTRACT_PRESETS
+    .map((preset) => `${preset.value}（${preset.label}）`)
+    .join(' / ')
+
   return renderPrompt([
     '你是中文小说的主题与文风设计师。现在只输出一份 Theme & Voice Bible，不要代写剧情，不要扩写世界观设定。',
     sectionLines('小说基础', [
@@ -118,9 +128,10 @@ function buildThemeVoicePrompt(
       mode === 'fill_blanks'
         ? '尽量沿用当前已有风格方向，重点补齐空白字段，不要推翻已经成立的口吻边界。'
         : '给出一版可直接约束后续正文生成与修订的主题与文风圣经。',
-      '这份文档的重点是：作品到底在持续表达什么、用什么视角和时态、正文怎样写、哪些表达绝对不能再出现。',
+      '这份文档的重点是：作品到底在持续表达什么、整体想给读者什么阅读体验、用什么视角和时态、正文怎样写、哪些表达绝对不能再出现。',
     ].join('\n')),
     section('字段要求', [
+      `- writingContractTags 写 1-4 个全书级写作类型标签，优先从 ${writingContractChoices} 里选；允许补少量自定义中文短标签，但 wish_fulfillment 和 realism 不能并存。`,
       '- theme 写作品持续回答的命题，不要写成宣传口号。',
       '- motifs 写 3-6 个会反复出现的意象、母题或回响。',
       '- emotionalCore 写读者最稳定收到的情绪回报。',
@@ -135,15 +146,17 @@ function buildThemeVoicePrompt(
       background: profile.background,
       storyCore: [profile.projectBriefSummary, profile.premiseSummary, profile.storyDesignSummary].filter(Boolean).join('\n\n'),
       worldSummary: profile.worldRulesSummary,
-      taskFocus: '固定主题、视角、时态和语言规则，减少 AI 味、总结腔和口吻漂移。',
+      taskFocus: '固定阅读预期、主题、视角、时态和语言规则，减少 AI 味、总结腔和口吻漂移。',
       extraLines: [
         '文风规则必须能直接变成正文写作与修订时的硬约束。',
+        '如果选择了言情、爽文、写实等标签，就要把它们翻译成对白、节奏、关系推进和细节表现规则。',
       ],
     })),
     section('输出质量底线', buildOutputQualityRules([
       '风格规则要写成动作和限制，不要写成“高级”“细腻”“有文学性”这种空形容词。',
       '对白规则要落到潜台词密度、句子长度、解释比例和人物区分度上。',
       '禁用表达要真能拦住 AI 口号腔、万能情绪句、总结收尾和无意义对仗。',
+      '如果有写作类型标签，就要给出与之对应的执行规则，不能只列名称。',
     ])),
     section('语言要求', buildHumanLanguageRules([
       '主题与文风说明要像真正的写作规范，不要写成海报文案。',
@@ -151,7 +164,7 @@ function buildThemeVoicePrompt(
       '如果需要给出禁用表达，优先写类型和模式，也可以补少量典型短句。',
     ])),
     '只输出 JSON，不要解释，不要 Markdown，不要代码块。',
-    '{"theme":"","motifs":"每行一条","emotionalCore":"","pov":"third_limited","tense":"past","narratorDistance":"","voiceKeywords":"每行一条","styleRules":"每行一条","dialogueRules":"每行一条","descriptionRules":"每行一条","forbiddenPhrases":"每行一条"}',
+    '{"writingContractTags":["wish_fulfillment"],"theme":"","motifs":"每行一条","emotionalCore":"","pov":"third_limited","tense":"past","narratorDistance":"","voiceKeywords":"每行一条","styleRules":"每行一条","dialogueRules":"每行一条","descriptionRules":"每行一条","forbiddenPhrases":"每行一条"}',
   ])
 }
 
@@ -159,6 +172,7 @@ function parseGeneratedThemeVoice(text: string): ThemeVoiceDocument {
   const parsed = cleanAiValue(safeParseAiJson<Record<string, unknown>>(text, 'object'))
 
   return {
+    writingContractTags: normalizeWritingContractTags(parsed.writingContractTags ?? parsed.writing_contract_tags),
     theme: normalizeBlockText(parsed.theme),
     motifs: normalizeBlockText(parsed.motifs),
     emotionalCore: normalizeBlockText(parsed.emotionalCore ?? parsed.emotional_core),
@@ -203,6 +217,7 @@ export async function generateThemeVoice(
 
     const document = parseGeneratedThemeVoice(result)
     const warnings = [
+      document.writingContractTags.length > 0 ? '' : '写作类型仍为空，建议先定整本书的阅读预期。',
       document.theme ? '' : '主题仍为空，建议补出作品持续回答的核心命题。',
       document.emotionalCore ? '' : '情感核心仍为空，建议补出稳定的情绪回报。',
       document.pov ? '' : '叙事视角仍为空，长篇很容易发生视角漂移。',
@@ -221,7 +236,7 @@ export async function generateThemeVoice(
       ...document,
       steps: [step],
       warnings,
-      hasPartialResult: Object.values(document).some(Boolean),
+      hasPartialResult: Object.values(document).some((value) => Array.isArray(value) ? value.length > 0 : Boolean(value)),
     }
   } catch (error) {
     const errorMessage = sanitizeErrorMessage(error)

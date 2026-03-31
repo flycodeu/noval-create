@@ -43,9 +43,13 @@ import * as storyThreadService from './services/story-thread.service'
 import * as workflowTaskService from './services/workflow-task.service'
 import { discoverEntitiesFromContent } from './services/entity-discovery.service'
 import {
+  buildBackgroundExpansionRepairPrompt,
+  collectForbiddenBackgroundNaming,
   contentScoringPrompt,
   expandBackgroundPrompt,
+  normalizeBackgroundExpansionPayload,
   rewriteParagraphPrompt,
+  sanitizeBackgroundExpansionResult,
 } from './services/prompts'
 import {
   buildChapterOutlinePlanningPrompt,
@@ -329,6 +333,7 @@ function registerIpcHandlers() {
   ipcMain.handle('item:getStats', (_, filters) => itemService.getStoryItemStats(filters))
   ipcMain.handle('item:getFilterOptions', (_, novelId) => itemService.getStoryItemFilterOptions(novelId))
   ipcMain.handle('item:get', (_, id) => itemService.getStoryItem(id))
+  ipcMain.handle('item:getDetailContext', (_, id) => itemService.getStoryItemDetailContext(id))
   ipcMain.handle('item:search', (_, novelId, keyword, itemKind, limit) => itemService.searchStoryItems(novelId, keyword, itemKind, limit))
   ipcMain.handle('item:create', (_, novelId, data) => itemService.createStoryItem(novelId, data))
   ipcMain.handle('item:update', (_, id, data) => itemService.updateStoryItem(id, data))
@@ -734,7 +739,7 @@ function registerIpcHandlers() {
   ipcMain.handle('task:retry', async (event, id) => {
     const db = getDb()
     const task = db.select().from(tasks).where(eq(tasks.id, id)).all()[0]
-    if (!task) throw new Error(`Task ${id} not found`)
+    if (!task) throw new Error(`任务 ${id} 不存在`)
 
     if (task.type === 'chapter_write' && task.relatedEntityType === 'chapter' && task.relatedEntityId) {
       return chapterService.generateChapterContent(task.relatedEntityId, event.sender)
@@ -775,21 +780,57 @@ function registerIpcHandlers() {
       worldTemplateSummary = template?.name || ''
     }
 
-    const result = await taskService.runChatTask({
-      type: 'init',
+    const runBackgroundPrompt = async (content: string) => taskService.runChatTask({
+      type: 'expand_background',
       retryable: true,
       messages: [{
         role: 'user',
-        content: expandBackgroundPrompt({
-          userBackground: input.userBackground,
-          genre,
-          worldTemplateSummary,
-        }),
+        content,
       }],
       modelConfigId: input.modelConfigId,
     })
 
-    return safeParseJson(result)
+    const initialRaw = await runBackgroundPrompt(expandBackgroundPrompt({
+      userBackground: input.userBackground,
+      genre,
+      worldTemplateSummary,
+    }))
+
+    let parsed = normalizeBackgroundExpansionPayload(
+      safeParseJson(initialRaw),
+      genre,
+      input.userBackground,
+    )
+    let violations = collectForbiddenBackgroundNaming(parsed, input.userBackground)
+
+    if (violations.length > 0) {
+      const repairedRaw = await runBackgroundPrompt(buildBackgroundExpansionRepairPrompt({
+        userBackground: input.userBackground,
+        genre,
+        worldTemplateSummary,
+        invalidResult: parsed,
+        violations,
+      }))
+
+      parsed = normalizeBackgroundExpansionPayload(
+        safeParseJson(repairedRaw),
+        genre,
+        input.userBackground,
+      )
+      violations = collectForbiddenBackgroundNaming(parsed, input.userBackground)
+    }
+
+    if (violations.length > 0) {
+      parsed = sanitizeBackgroundExpansionResult(parsed, violations, genre)
+      violations = collectForbiddenBackgroundNaming(parsed, input.userBackground)
+    }
+
+    if (violations.length > 0) {
+      const names = violations.map((item) => item.token).join('、')
+      throw new Error(`AI 扩写结果仍包含未授权命名：${names}。请在原始背景里先明确这些名字，或改用不带专名的描述后重试。`)
+    }
+
+    return parsed
   })
 
   ipcMain.handle('ai:generateCoreSettings', (event, data: CoreSettingsGenerationRequest) =>

@@ -963,7 +963,7 @@ function buildChildBatchPrompt(params: { novelTitle: string; genre: string; worl
 }
 
 function createAbortError() {
-  const error = new Error('User cancelled')
+  const error = new Error('用户已取消')
   error.name = 'AbortError'
   return error
 }
@@ -1000,7 +1000,7 @@ async function runBatchWithRetries<T>(
   }
 
   if (lastError instanceof Error) throw lastError
-  throw new Error(`${label} failed`)
+  throw new Error(`${label}执行失败`)
 }
 
 async function runMapPromptTask(params: { novelId: number; modelConfigId?: number; prompt: string; parentTaskId?: number; sender?: WebContents }) {

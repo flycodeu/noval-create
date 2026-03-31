@@ -1,5 +1,14 @@
 import { asc, eq } from 'drizzle-orm'
-import type { EntityRegenerateOptions } from '../../src/types'
+import type {
+  Character as AppCharacter,
+  EntityRegenerateOptions,
+  MapNodeSummary,
+  StoryArc as AppStoryArc,
+  StoryItem as AppStoryItem,
+  StoryItemDetailContext,
+  StoryItemSourceContext,
+  TimelineEvent as AppTimelineEvent,
+} from '../../src/types'
 import { getDb, getSqlite } from '../database/db'
 import { characters, novels, storyArcs, storyItems, timelineEvents, worldMap } from '../database/schema'
 import { safeParseJson } from '../utils/json'
@@ -181,7 +190,7 @@ function buildCharacterSummary(rows: Array<typeof characters.$inferSelect>): str
     .slice(0, 10)
     .map((row) => {
       const pieces = [row.roleType, row.species, row.occupation, row.rankLevel].filter(Boolean)
-      return `- ${row.fullName}${pieces.length > 0 ? `锛?{pieces.join(' / ')}` : ''}`
+      return `- ${row.fullName}${pieces.length > 0 ? `\uFF08${pieces.join(' / ')}\uFF09` : ''}`
     })
     .join('\n')
 }
@@ -191,7 +200,7 @@ function buildLocationSummary(rows: Array<typeof worldMap.$inferSelect>): string
     .slice(0, 10)
     .map((row) => {
       const pieces = [row.nodeType, row.structureRole].filter(Boolean)
-      return `- ${row.name}${pieces.length > 0 ? `锛?{pieces.join(' / ')}` : ''}`
+      return `- ${row.name}${pieces.length > 0 ? `\uFF08${pieces.join(' / ')}\uFF09` : ''}`
     })
     .join('\n')
 }
@@ -200,14 +209,14 @@ function buildArcSummary(rows: Array<typeof storyArcs.$inferSelect>): string {
   return rows
     .sort((left, right) => left.arcOrder - right.arcOrder)
     .slice(0, 8)
-    .map((row) => `- ${row.arcName}锛?{row.arcGoal || row.arcSummary || '鏈ˉ鍏?}`)
+    .map((row) => `- ${row.arcName}\uFF1A${row.arcGoal || row.arcSummary || '\u672A\u8865\u5145'}`)
     .join('\n')
 }
 
 function buildEventSummary(rows: Array<typeof timelineEvents.$inferSelect>): string {
   return rows
     .slice(0, 10)
-    .map((row) => `- ${row.timeLabel}锝?{row.eventTitle}`)
+    .map((row) => `- ${row.timeLabel}\uFF1A${row.eventTitle}`)
     .join('\n')
 }
 
@@ -234,6 +243,197 @@ function parseJsonNumberArray(raw?: string | null): number[] {
       .filter((item) => Number.isFinite(item))
   } catch {
     return []
+  }
+}
+
+function uniqueNumberArray(values: Array<number | null | undefined>) {
+  return [...new Set(values.filter((value): value is number => typeof value === 'number' && Number.isFinite(value)))]
+}
+
+function parseSourceContexts(raw?: string | null): StoryItemSourceContext[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item))
+      .map((item) => ({
+        page: typeof item.page === 'string' ? item.page : undefined,
+        label: typeof item.label === 'string' ? item.label : undefined,
+        detectedAt: typeof item.detectedAt === 'string' ? item.detectedAt : undefined,
+      }))
+      .filter((item) => item.page || item.label || item.detectedAt)
+  } catch {
+    return []
+  }
+}
+
+function mapMapNodeSummary(
+  row: typeof worldMap.$inferSelect,
+  childCountByParentId: Map<number, number>,
+): MapNodeSummary {
+  return {
+    id: row.id,
+    novelId: row.novelId,
+    level: row.level,
+    parentId: row.parentId ?? undefined,
+    name: row.name,
+    locationType: row.locationType ?? undefined,
+    nodeType: row.nodeType ?? undefined,
+    structureRole: row.structureRole ?? undefined,
+    parentRuleType: row.parentRuleType ?? undefined,
+    description: row.description ?? undefined,
+    atmosphere: row.atmosphere ?? undefined,
+    plotRelevance: row.plotRelevance ?? undefined,
+    tagsJson: row.tagsJson ?? undefined,
+    affiliatedFactionIdsJson: row.affiliatedFactionIdsJson ?? undefined,
+    dangerLevel: row.dangerLevel ?? undefined,
+    sortOrder: row.sortOrder || 0,
+    childCount: childCountByParentId.get(row.id) || 0,
+  }
+}
+
+function mapStoryItemEntity(row: typeof storyItems.$inferSelect): AppStoryItem {
+  return {
+    ...row,
+    itemKind: row.itemKind === 'template' ? 'template' : 'instance',
+    parentItemId: row.parentItemId ?? undefined,
+    genreFamily: row.genreFamily ?? undefined,
+    category: row.category ?? undefined,
+    subType: row.subType ?? undefined,
+    rarity: row.rarity ?? undefined,
+    recordStatus: row.recordStatus === 'draft' ? 'draft' : 'confirmed',
+    ownerCharacterId: row.ownerCharacterId ?? undefined,
+    locationMapId: row.locationMapId ?? undefined,
+    status: row.status === 'consumed' || row.status === 'hidden' || row.status === 'destroyed' ? row.status : 'available',
+    summary: row.summary ?? undefined,
+    acquisitionMethod: row.acquisitionMethod ?? undefined,
+    usageMethod: row.usageMethod ?? undefined,
+    cost: row.cost ?? undefined,
+    risk: row.risk ?? undefined,
+    plotFunction: row.plotFunction ?? undefined,
+    appearance: row.appearance ?? undefined,
+    factionHint: row.factionHint ?? undefined,
+    linkedCharacterIdsJson: row.linkedCharacterIdsJson ?? undefined,
+    linkedTimelineEventIdsJson: row.linkedTimelineEventIdsJson ?? undefined,
+    tagsJson: row.tagsJson ?? undefined,
+    sourceContextJson: row.sourceContextJson ?? undefined,
+    sortOrder: row.sortOrder || 0,
+    createdAt: row.createdAt || '',
+    updatedAt: row.updatedAt || '',
+  } as AppStoryItem
+}
+
+function mapCharacterEntity(row: typeof characters.$inferSelect): AppCharacter {
+  return {
+    ...row,
+    roleType: row.roleType === 'protagonist' || row.roleType === 'major' || row.roleType === 'antagonist' || row.roleType === 'supporting'
+      ? row.roleType
+      : 'minor',
+    recordStatus: row.recordStatus === 'draft' ? 'draft' : 'confirmed',
+    entityType: row.entityType ?? undefined,
+    species: row.species ?? undefined,
+    surname: row.surname ?? undefined,
+    givenName: row.givenName ?? undefined,
+    gender: row.gender ?? undefined,
+    age: row.age ?? undefined,
+    birthplace: row.birthplace ?? undefined,
+    occupation: row.occupation ?? undefined,
+    rankLevel: row.rankLevel ?? undefined,
+    socialIdentity: row.socialIdentity ?? undefined,
+    background: row.background ?? undefined,
+    personalityTraitsJson: row.personalityTraitsJson ?? undefined,
+    flawsJson: row.flawsJson ?? undefined,
+    habitsJson: row.habitsJson ?? undefined,
+    campFactionIdsJson: row.campFactionIdsJson ?? undefined,
+    powerSystemRefsJson: row.powerSystemRefsJson ?? undefined,
+    contextHooksJson: row.contextHooksJson ?? undefined,
+    goals: row.goals ?? undefined,
+    firstImpression: row.firstImpression ?? undefined,
+    surfaceDesire: row.surfaceDesire ?? undefined,
+    deepNeed: row.deepNeed ?? undefined,
+    coreFear: row.coreFear ?? undefined,
+    innerConflict: row.innerConflict ?? undefined,
+    hiddenSecret: row.hiddenSecret ?? undefined,
+    moralLine: row.moralLine ?? undefined,
+    selfDeception: row.selfDeception ?? undefined,
+    trauma: row.trauma ?? undefined,
+    contradiction: row.contradiction ?? undefined,
+    relationshipTension: row.relationshipTension ?? undefined,
+    resonancePoint: row.resonancePoint ?? undefined,
+    characterArc: row.characterArc ?? undefined,
+    appearanceJson: row.appearanceJson ?? undefined,
+    abilitiesJson: row.abilitiesJson ?? undefined,
+    sourceContextJson: row.sourceContextJson ?? undefined,
+    appearChapter: row.appearChapter ?? undefined,
+    sortOrder: row.sortOrder || 0,
+    createdAt: row.createdAt || '',
+    updatedAt: row.updatedAt || '',
+  } as AppCharacter
+}
+
+function mapTimelineEventEntity(row: typeof timelineEvents.$inferSelect): AppTimelineEvent {
+  return {
+    ...row,
+    sortOrder: row.sortOrder || 0,
+    eventSummary: row.eventSummary ?? undefined,
+    timeMode: row.timeMode || 'custom-era',
+    timeLabel: row.timeLabel || '',
+    timeSortValue: row.timeSortValue || 0,
+    timePrecision: row.timePrecision ?? undefined,
+    isMajorEvent: row.isMajorEvent || 0,
+    eventType: row.eventType ?? undefined,
+    arcId: row.arcId ?? undefined,
+    volumeId: row.volumeId ?? undefined,
+    partId: row.partId ?? undefined,
+    chapterStartId: row.chapterStartId ?? undefined,
+    chapterEndId: row.chapterEndId ?? undefined,
+    segmentId: row.segmentId ?? undefined,
+    locationMapId: row.locationMapId ?? undefined,
+    presentCharacterIdsJson: row.presentCharacterIdsJson ?? undefined,
+    affectedCharacterIdsJson: row.affectedCharacterIdsJson ?? undefined,
+    protagonistPresent: row.protagonistPresent || 0,
+    protagonistAction: row.protagonistAction ?? undefined,
+    eventCause: row.eventCause ?? undefined,
+    eventProcess: row.eventProcess ?? undefined,
+    eventResult: row.eventResult ?? undefined,
+    linkedItemIdsJson: row.linkedItemIdsJson ?? undefined,
+    directConsequencesJson: row.directConsequencesJson ?? undefined,
+    openThreadsJson: row.openThreadsJson ?? undefined,
+    notes: row.notes ?? undefined,
+    anchorInvalid: row.anchorInvalid || 0,
+    status: row.status === 'seeded' || row.status === 'written' || row.status === 'resolved' ? row.status : 'planned',
+    createdAt: row.createdAt || '',
+    updatedAt: row.updatedAt || '',
+  } as AppTimelineEvent
+}
+
+function mapStoryArcEntity(row: typeof storyArcs.$inferSelect): AppStoryArc {
+  return {
+    ...row,
+    chapterStart: row.chapterStart ?? undefined,
+    chapterEnd: row.chapterEnd ?? undefined,
+    arcGoal: row.arcGoal ?? undefined,
+    arcSummary: row.arcSummary ?? undefined,
+    growthLedger: row.growthLedger ?? undefined,
+    costLedger: row.costLedger ?? undefined,
+    targetWords: row.targetWords || 0,
+  } as AppStoryArc
+}
+
+function buildEmptyStoryItemDetailContext(): StoryItemDetailContext {
+  return {
+    item: null,
+    parentTemplate: null,
+    ownerCharacter: null,
+    location: null,
+    relatedCharacters: [],
+    relatedEvents: [],
+    relatedArcs: [],
+    relatedLocations: [],
+    derivedInstances: [],
+    siblingInstances: [],
+    sourceContexts: [],
   }
 }
 
@@ -748,6 +948,98 @@ export function getStoryItem(id: number) {
   return db.select().from(storyItems).where(eq(storyItems.id, id)).all()[0] || null
 }
 
+export function getStoryItemDetailContext(id: number): StoryItemDetailContext {
+  const current = getStoryItem(id)
+  if (!current) {
+    return buildEmptyStoryItemDetailContext()
+  }
+
+  const db = getDb()
+  const [itemRows, characterRows, eventRows, arcRows, mapRows] = [
+    db.select().from(storyItems)
+      .where(eq(storyItems.novelId, current.novelId))
+      .orderBy(asc(storyItems.itemKind), asc(storyItems.sortOrder), asc(storyItems.id))
+      .all(),
+    db.select().from(characters)
+      .where(eq(characters.novelId, current.novelId))
+      .orderBy(asc(characters.sortOrder), asc(characters.id))
+      .all(),
+    db.select().from(timelineEvents)
+      .where(eq(timelineEvents.novelId, current.novelId))
+      .orderBy(asc(timelineEvents.timeSortValue), asc(timelineEvents.sortOrder), asc(timelineEvents.id))
+      .all(),
+    db.select().from(storyArcs)
+      .where(eq(storyArcs.novelId, current.novelId))
+      .orderBy(asc(storyArcs.arcOrder), asc(storyArcs.id))
+      .all(),
+    db.select().from(worldMap)
+      .where(eq(worldMap.novelId, current.novelId))
+      .orderBy(asc(worldMap.level), asc(worldMap.parentId), asc(worldMap.sortOrder), asc(worldMap.id))
+      .all(),
+  ]
+
+  const mappedCurrent = mapStoryItemEntity(current)
+  const mappedItems = itemRows.map(mapStoryItemEntity)
+  const mappedCharacters = characterRows.map(mapCharacterEntity)
+  const mappedEvents = eventRows.map(mapTimelineEventEntity)
+  const mappedArcs = arcRows.map(mapStoryArcEntity)
+  const itemById = new Map(mappedItems.map((row) => [row.id, row]))
+  const characterById = new Map(mappedCharacters.map((row) => [row.id, row]))
+  const eventById = new Map(mappedEvents.map((row) => [row.id, row]))
+  const arcById = new Map(mappedArcs.map((row) => [row.id, row]))
+  const mapById = new Map(mapRows.map((row) => [row.id, row]))
+  const childCountByParentId = new Map<number, number>()
+
+  mapRows.forEach((row) => {
+    if (typeof row.parentId === 'number') {
+      childCountByParentId.set(row.parentId, (childCountByParentId.get(row.parentId) || 0) + 1)
+    }
+  })
+
+  const toMapSummary = (mapId?: number | null) => {
+    if (typeof mapId !== 'number') return null
+    const row = mapById.get(mapId)
+    return row ? mapMapNodeSummary(row, childCountByParentId) : null
+  }
+
+  const linkedCharacterIds = uniqueNumberArray(parseJsonNumberArray(mappedCurrent.linkedCharacterIdsJson))
+  const linkedEventIds = uniqueNumberArray(parseJsonNumberArray(mappedCurrent.linkedTimelineEventIdsJson))
+  const relatedEvents = linkedEventIds
+    .map((eventId) => eventById.get(eventId) || null)
+    .filter((event): event is AppTimelineEvent => Boolean(event))
+  const relatedArcs = uniqueNumberArray(relatedEvents.map((event) => event.arcId ?? null))
+    .map((arcId) => arcById.get(arcId) || null)
+    .filter((arc): arc is AppStoryArc => Boolean(arc))
+  const primaryLocation = toMapSummary(mappedCurrent.locationMapId)
+  const relatedLocations = uniqueNumberArray(relatedEvents.map((event) => event.locationMapId ?? null))
+    .map((mapId) => toMapSummary(mapId))
+    .filter((location): location is NonNullable<ReturnType<typeof toMapSummary>> => Boolean(location))
+    .filter((location) => location.id !== primaryLocation?.id)
+  const derivedInstances = mappedCurrent.itemKind === 'template'
+    ? mappedItems.filter((row) => row.itemKind === 'instance' && row.parentItemId === mappedCurrent.id)
+    : []
+  const siblingInstances = mappedCurrent.itemKind === 'instance' && typeof mappedCurrent.parentItemId === 'number'
+    ? mappedItems.filter((row) => row.itemKind === 'instance' && row.parentItemId === mappedCurrent.parentItemId && row.id !== mappedCurrent.id)
+    : []
+
+  return {
+    item: mappedCurrent,
+    parentTemplate: typeof mappedCurrent.parentItemId === 'number' ? itemById.get(mappedCurrent.parentItemId) || null : null,
+    ownerCharacter: typeof mappedCurrent.ownerCharacterId === 'number' ? characterById.get(mappedCurrent.ownerCharacterId) || null : null,
+    location: primaryLocation,
+    relatedCharacters: linkedCharacterIds
+      .filter((characterId) => characterId !== mappedCurrent.ownerCharacterId)
+      .map((characterId) => characterById.get(characterId) || null)
+      .filter((character): character is AppCharacter => Boolean(character)),
+    relatedEvents,
+    relatedArcs,
+    relatedLocations,
+    derivedInstances,
+    siblingInstances,
+    sourceContexts: parseSourceContexts(mappedCurrent.sourceContextJson),
+  }
+}
+
 export function createStoryItem(
   novelId: number,
   data: Partial<typeof storyItems.$inferInsert>,
@@ -828,7 +1120,7 @@ export async function generateStoryItems(
 ): Promise<number[]> {
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
-  if (!novel) throw new Error('Novel not found')
+  if (!novel) throw new Error('小说不存在')
 
   const profile = await buildStoryProfile(novelId)
   const rules = parseWorldRulesJson(novel.worldRulesJson, profile.genre)
@@ -901,7 +1193,7 @@ export async function generateStoryItems(
     }
     if (!Array.isArray(parsed)) {
       markRejected(historyId)
-      throw new Error('Item generation result is not a valid array')
+      throw new Error('物品生成结果不是有效数组。')
     }
 
     const usedSignatures = new Set(

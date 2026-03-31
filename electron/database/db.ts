@@ -12,14 +12,14 @@ let _sqlite: Database.Database | null = null
 
 export function getDb(): AppDatabase {
   if (!_db) {
-    throw new Error('Database not initialized. Call initDb() first.')
+    throw new Error('数据库尚未初始化，请先调用 initDb()。')
   }
   return _db
 }
 
 export function getSqlite(): Database.Database {
   if (!_sqlite) {
-    throw new Error('Database not initialized. Call initDb() first.')
+    throw new Error('数据库尚未初始化，请先调用 initDb()。')
   }
   return _sqlite
 }
@@ -252,7 +252,11 @@ function runMigrations(sqlite: Database.Database) {
       relation_type TEXT,
       relation_label TEXT,
       bilateral INTEGER DEFAULT 1,
-      description TEXT
+      description TEXT,
+      intimacy_level INTEGER,
+      tension_level INTEGER,
+      interaction_style TEXT,
+      subtext_rule TEXT
     );
 
     CREATE TABLE IF NOT EXISTS world_map (
@@ -516,6 +520,10 @@ function runMigrations(sqlite: Database.Database) {
   ensureColumn(sqlite, 'characters', 'camp_faction_ids_json', 'TEXT')
   ensureColumn(sqlite, 'characters', 'power_system_refs_json', 'TEXT')
   ensureColumn(sqlite, 'characters', 'context_hooks_json', 'TEXT')
+  ensureColumn(sqlite, 'character_relations', 'intimacy_level', 'INTEGER')
+  ensureColumn(sqlite, 'character_relations', 'tension_level', 'INTEGER')
+  ensureColumn(sqlite, 'character_relations', 'interaction_style', 'TEXT')
+  ensureColumn(sqlite, 'character_relations', 'subtext_rule', 'TEXT')
   ensureColumn(sqlite, 'world_map', 'node_type', 'TEXT')
   ensureColumn(sqlite, 'world_map', 'structure_role', 'TEXT')
   ensureColumn(sqlite, 'world_map', 'parent_rule_type', 'TEXT')
@@ -686,7 +694,7 @@ function validateRequiredSchema(sqlite: Database.Database) {
   })
 
   if (missing.length > 0) {
-    throw new Error(`Database schema migration incomplete. Missing ${missing.join(', ')}`)
+    throw new Error(`数据库结构迁移未完成，缺少：${missing.join(', ')}`)
   }
 }
 
@@ -1009,270 +1017,179 @@ function backfillPlanningWorkspaceData(sqlite: Database.Database) {
 }
 
 function seedBuiltinData(db: ReturnType<typeof drizzle>) {
-  // 检查是否已有数据
   const existingGenres = db.select().from(schema.genres).all()
   if (existingGenres.length === 0) {
-    // 插入内置题材
     db.insert(schema.genres).values([
-      { name: '现代都市', description: '以现代城市为背景的故事', isBuiltin: 1, colorTag: '#2E86AB' },
-      { name: '古代言情', description: '古代背景的爱情故事', isBuiltin: 1, colorTag: '#E84393' },
-      { name: '玄幻修真', description: '修仙、玄幻类奇幻故事', isBuiltin: 1, colorTag: '#9B59B6' },
-      { name: '悬疑推理', description: '以谜题和推理为核心的故事', isBuiltin: 1, colorTag: '#2C3E50' },
-      { name: '科幻未来', description: '以未来科技为背景的故事', isBuiltin: 1, colorTag: '#1ABC9C' },
-      { name: '架空历史', description: '基于历史但有所改变的故事', isBuiltin: 1, colorTag: '#D35400' },
-      { name: '赛博朋克', description: '高科技低生活的反乌托邦故事', isBuiltin: 1, colorTag: '#8E44AD' },
-      { name: '武侠', description: '以武功和江湖为背景的故事', isBuiltin: 1, colorTag: '#C0392B' },
-      { name: '历史正剧', description: '以真实历史为背景的正统故事', isBuiltin: 1, colorTag: '#7D6608' },
-      { name: '末世求生', description: '末日灾变后的生存与重建', isBuiltin: 1, colorTag: '#5D4037' },
-      { name: '丧尸末日', description: '病毒蔓延、生死逃亡与人性博弈', isBuiltin: 1, colorTag: '#37474F' },
-      { name: '盗墓探秘', description: '古墓机关、神秘遗迹与寻宝冒险', isBuiltin: 1, colorTag: '#4E342E' },
+      { name: '现代都市', description: '都市生活、职场、生存压力与现代关系。', isBuiltin: 1, colorTag: '#2E86AB' },
+      { name: '古代言情', description: '古典情感、宫廷关系与时代规训。', isBuiltin: 1, colorTag: '#E84393' },
+      { name: '玄幻修真', description: '修炼体系、宗门势力与超凡成长。', isBuiltin: 1, colorTag: '#9B59B6' },
+      { name: '悬疑推理', description: '谜案、线索追查与心理博弈。', isBuiltin: 1, colorTag: '#2C3E50' },
+      { name: '科幻未来', description: '未来科技、社会变迁与宏观设定。', isBuiltin: 1, colorTag: '#1ABC9C' },
+      { name: '架空历史', description: '虚构历史路线下的家国与权力演化。', isBuiltin: 1, colorTag: '#D35400' },
+      { name: '赛博朋克', description: '高科技、低生活与秩序失衡。', isBuiltin: 1, colorTag: '#8E44AD' },
+      { name: '武侠', description: '江湖秩序、门派冲突与侠义选择。', isBuiltin: 1, colorTag: '#C0392B' },
+      { name: '历史正剧', description: '历史叙事、人物命运与时代结构。', isBuiltin: 1, colorTag: '#7D6608' },
+      { name: '末世求生', description: '灾变后的生存、重建与资源竞争。', isBuiltin: 1, colorTag: '#5D4037' },
+      { name: '丧尸末日', description: '感染蔓延、逃亡协作与社会崩塌。', isBuiltin: 1, colorTag: '#37474F' },
+      { name: '盗墓探秘', description: '古墓机关、线索破解与冒险探索。', isBuiltin: 1, colorTag: '#4E342E' },
     ]).run()
-  } else {
-    // 迁移：检查新题材是否存在，不存在则补充
-    const genreNames = new Set(existingGenres.map(g => g.name))
-    const newGenres = [
-      { name: '末世求生', description: '末日灾变后的生存与重建', isBuiltin: 1, colorTag: '#5D4037' },
-      { name: '丧尸末日', description: '病毒蔓延、生死逃亡与人性博弈', isBuiltin: 1, colorTag: '#37474F' },
-      { name: '盗墓探秘', description: '古墓机关、神秘遗迹与寻宝冒险', isBuiltin: 1, colorTag: '#4E342E' },
-    ].filter(g => !genreNames.has(g.name))
-    if (newGenres.length > 0) {
-      db.insert(schema.genres).values(newGenres).run()
-    }
   }
 
-  // 插入内置文风模板
-  const styleTemplates = [
+  const styleTemplates: Array<typeof schema.templates.$inferInsert> = [
     {
       type: 'style',
-      name: '冷峻叙事',
-      description: '短句为主，情感克制，用行动展现情绪，适合硬派武侠或犯罪悬疑',
+      name: '快节奏爽感',
+      description: '适合爽文和强冲突推进，优先兑现反馈与压制反打。',
       contentJson: JSON.stringify({
-        perspective: '第三人称有限视角',
-        sentence_style: '短句为主，控制在15字以内，间隔使用长句形成节奏变化',
-        emotion_style: '情感克制，用行动和对话展现情绪，避免直接描写心理',
-        dialogue_style: '对话简洁，人物说话目的性强，废话少',
-        description_style: '场景描写只取关键细节，不超过2句',
-        forbidden: ['堆砌形容词', '过多心理独白', '环境描写超过3句'],
-        example_tone: '接近硬派武侠或犯罪悬疑风格'
+        perspective: '第三人称近距，紧贴当前行动视角。',
+        sentence_style: '短句优先，节奏利落，少铺垫性废话，关键节点直接落动作和结果。',
+        emotion_style: '情绪反馈直接，但要落在身体反应、判断和反击上，不写空喊口号。',
+        dialogue_style: '对白要干脆，有锋芒，有来回压制和快速试探，不拖泥带水。',
+        description_style: '环境与人物描写服务冲突和兑现，只保留最有压迫感或最有收益感的细节。',
+        forbidden: ['假深沉感慨', '空泛燃句', '模板化爽点口号'],
+        example_tone: '动作先行，情绪紧跟，结果要让读者立刻感到值回票价。',
       }),
       isBuiltin: 1,
     },
     {
       type: 'style',
-      name: '细腻情感',
-      description: '深入主角内心，细腻情感描写，适合现代言情或青春成长小说',
+      name: '克制写实',
+      description: '适合现实流和稳态叙事，强调常识、后果与自然交流感。',
       contentJson: JSON.stringify({
-        perspective: '第一人称或第三人称限制视角（深入主角内心）',
-        sentence_style: '长短句结合，情感波动时句子更短，平静时可适当延长',
-        emotion_style: '允许较细腻的情感描写，但要具体，避免模糊化表达',
-        dialogue_style: '对话承载情感，言外之意重要，潜台词丰富',
-        description_style: '环境描写服务于情绪渲染，但不超过3句',
-        forbidden: ['情绪词叠加', '过度煽情', '模糊的「难以言说」表达'],
-        example_tone: '接近现代言情或青春成长小说'
+        perspective: '第三人称有限视角或第一人称内省视角，以贴近人物处境为主。',
+        sentence_style: '句子自然克制，保留必要停顿和观察，不追求华丽堆叠。',
+        emotion_style: '情绪通过动作、犹豫、沉默和后果显现，不直接替人物总结。',
+        dialogue_style: '对白贴近真实身份、关系和场景压力，避免统一腔调。',
+        description_style: '多写环境约束、资源消耗、伤病负担和现实细节，让事件可信。',
+        forbidden: ['悬浮金句', '无根据升温', '说明书式心理分析'],
+        example_tone: '先把人放回处境，再写他会怎么说、怎么忍、怎么付代价。',
       }),
       isBuiltin: 1,
     },
     {
       type: 'style',
-      name: '快节奏爽文',
-      description: '情节密度高，节奏快，主角情绪爽朗，适合网络爽文',
+      name: '细腻言情',
+      description: '适合关系驱动型叙事，重点写温差、试探、误会与情感推进。',
       contentJson: JSON.stringify({
-        perspective: '第一或第三人称，贴近主角',
-        sentence_style: '短句为主，节奏快，情节密度高',
-        emotion_style: '情感直接，主角情绪爽朗或激昂，少量内心戏',
-        dialogue_style: '对话推进情节，反转和打脸要干脆利落',
-        description_style: '战斗/技能描写清晰，场景描写极简',
-        forbidden: ['大量铺垫', '过多内心纠结', '节奏拖沓的环境描写'],
-        example_tone: '网络爽文主流风格'
+        perspective: '近距离贴角色感受，但不过度自我解说。',
+        sentence_style: '节奏有呼吸感，保留停顿、转折和未说出口的部分。',
+        emotion_style: '情绪放在称呼变化、眼神、肢体、回避、照顾和误判里。',
+        dialogue_style: '对白要有潜台词和情绪温差，亲密关系不能说成普通同事口吻。',
+        description_style: '重点捕捉人与人之间的距离变化，而不是空写氛围形容词。',
+        forbidden: ['工业糖精句式', '空心虐感宣言', '脱离情境的心动独白'],
+        example_tone: '一句称呼变了，一个动作慢了半拍，关系就已经往前推了一格。',
       }),
       isBuiltin: 1,
     },
     {
       type: 'style',
-      name: '古典白话',
-      description: '四字短语和文言句式穿插，接近明清白话小说',
+      name: '冷感悬疑',
+      description: '适合悬疑与调查推进，强调信息差、压迫感和线索回收。',
       contentJson: JSON.stringify({
-        perspective: '第三人称全知视角',
-        sentence_style: '四字短语和文言句式穿插，保持流畅，不生僻',
-        emotion_style: '含蓄，多用比兴手法',
-        dialogue_style: '称谓得体，语气符合古代礼仪和阶级',
-        description_style: '适度借鉴古典小说的白描手法',
-        forbidden: ['现代词汇', '英文词', '不符合时代的表达方式'],
-        example_tone: '接近明清白话小说'
-      }),
-      isBuiltin: 1,
-    },
-    {
-      type: 'style',
-      name: '现实主义',
-      description: '贴近生活，心理刻画深入，语言朴实有力',
-      contentJson: JSON.stringify({
-        perspective: '第三人称全知或限制视角',
-        sentence_style: '自然口语化，长短结合',
-        emotion_style: '通过细节和行为揭示内心，不直白叙述',
-        dialogue_style: '方言感、生活气息强，符合人物阶层',
-        description_style: '环境描写有深度，承载社会意义',
-        forbidden: ['过于文艺的比喻', '刻意堆砌诗意'],
-        example_tone: '接近余华、路遥风格'
-      }),
-      isBuiltin: 1,
-    },
-    {
-      type: 'style',
-      name: '黑暗悬疑',
-      description: '氛围压抑，悬念密布，叙事有迷惑性',
-      contentJson: JSON.stringify({
-        perspective: '第一人称不可靠叙事或第三人称限制视角',
-        sentence_style: '节奏紧张时短句，铺垫时中等长度',
-        emotion_style: '恐惧、不安通过细节渗透，不直接说「恐惧」',
-        dialogue_style: '对话暗藏信息，读者需要主动思考',
-        description_style: '环境描写充满隐喻和不安感',
-        forbidden: ['过于直白的解释', '破坏悬念的叙述'],
-        example_tone: '接近东野圭吾或斯蒂芬金风格'
+        perspective: '第三人称有限视角，优先保留未知与误判空间。',
+        sentence_style: '句子收紧，信息分段释放，避免一次性解释完。',
+        emotion_style: '情绪偏压抑和警觉，通过细微异常与反常反应推进。',
+        dialogue_style: '对白要带试探、遮掩和信息差，不轻易把底牌翻出来。',
+        description_style: '环境描写服务线索、风险和不安，不写观光式场景说明。',
+        forbidden: ['过度剧透', '故作玄虚', '无意义惊叹号'],
+        example_tone: '先让读者察觉不对，再让人物意识到危险，答案最后再露面。',
       }),
       isBuiltin: 1,
     },
   ]
 
-  // 插入内置世界观模板
-  const worldTemplates = [
+  const worldTemplates: Array<typeof schema.templates.$inferInsert> = [
     {
       type: 'world',
-      name: '修仙体系',
-      description: '东方修仙世界，以境界晋升为核心',
+      name: '现代都市底盘',
+      description: '适合都市、职场、现实关系类题材，强调真实社会结构。',
       contentJson: JSON.stringify({
-        power_system: {
-          name: '修仙体系',
-          levels: ['炼气', '筑基', '金丹', '元婴', '化神', '炼虚', '合体', '大乘', '渡劫'],
-          rules: '境界越高，寿命越长，移山填海之力。普通人无法修炼，需有灵根。'
-        },
-        social_structure: '以宗门和散修为主，朝廷在修士面前形同虚设',
-        common_elements: ['飞剑', '灵石', '灵药', '法宝', '秘境', '宗门'],
-        forbidden_elements: ['现代科技', '枪炮', '网络', '不符合世界观的现代词汇']
+        time_period: '当代',
+        technology_level: '现代城市基础设施与互联网社会。',
+        social_structure: '家庭、学校、公司、平台和阶层流动共同塑造人物选择。',
+        common_elements: ['职场压力', '住房成本', '亲密关系', '社交媒体', '现实规则'],
+        forbidden_elements: ['脱离现实的万能资源', '无后果的身份跃迁'],
       }),
       isBuiltin: 1,
     },
     {
       type: 'world',
-      name: '现代社会',
-      description: '以当代中国城市为背景',
+      name: '宫廷家国',
+      description: '适合古代言情、朝堂博弈和门第婚配叙事。',
       contentJson: JSON.stringify({
-        time_period: '当代（2020年代）',
-        technology_level: '互联网、智能手机、高铁',
-        social_structure: '市场经济社会，阶层分化明显',
-        common_elements: ['手机', '社交媒体', '职场', '城市生活'],
-        forbidden_elements: ['不存在的科技', '穿越', '超自然现象（除非是悬疑设定）']
+        time_period: '古代王朝架空时期',
+        technology_level: '冷兵器与传统交通，信息传递依赖人力与制度。',
+        social_structure: '皇权、家族、门第、婚姻和礼法共同分配利益与风险。',
+        common_elements: ['宗族关系', '礼法规训', '婚配联盟', '朝堂压力', '身份尊卑'],
+        forbidden_elements: ['现代平权话术直贴', '无制度成本的越级抗命'],
       }),
       isBuiltin: 1,
     },
     {
       type: 'world',
-      name: '魔法世界',
-      description: '西方奇幻风格，魔法与剑并存',
+      name: '宗门修真',
+      description: '适合玄幻修真和仙侠成长，强调资源、境界与因果秩序。',
       contentJson: JSON.stringify({
-        power_system: {
-          name: '魔法体系',
-          schools: ['火系', '水系', '土系', '风系', '光系', '暗系', '时空系'],
-          rules: '魔法需要消耗魔力（MP），过度使用会导致魔力枯竭'
-        },
-        social_structure: '王国制度，贵族掌权，魔法师地位特殊',
-        common_elements: ['法杖', '魔晶石', '魔法阵', '精灵', '矮人', '龙'],
-        forbidden_elements: ['现代科技', '枪械（除非是蒸汽朋克设定）']
+        time_period: '架空修真时代',
+        technology_level: '超凡能力与法器体系并存，凡俗与修行世界长期分层。',
+        social_structure: '宗门、世家、秘境、资源点和境界差距决定地位与冲突。',
+        common_elements: ['境界晋升', '灵脉资源', '宗门派系', '秘境试炼', '因果报应'],
+        forbidden_elements: ['无根基秒升境界', '没有代价的天降机缘'],
       }),
       isBuiltin: 1,
     },
     {
       type: 'world',
-      name: '未来科技',
-      description: '近未来或远未来的科幻世界',
+      name: '赛博失衡都市',
+      description: '适合赛博朋克和高科技低生活叙事，强调系统压迫与资源垄断。',
       contentJson: JSON.stringify({
-        time_period: '2150年后',
-        technology_level: 'AI 普及、星际旅行、基因改造、量子计算',
-        social_structure: '星际联盟或企业邦联',
-        common_elements: ['飞船', 'AI助理', '全息投影', '基因改造人', '机甲'],
-        forbidden_elements: ['魔法', '超自然现象（除非是人造的）']
-      }),
-      isBuiltin: 1,
-    },
-    {
-      type: 'world',
-      name: '架空古代',
-      description: '参考中国古代但虚构的朝代与地理',
-      contentJson: JSON.stringify({
-        time_period: '虚构的封建王朝时期',
-        technology_level: '冷兵器时代，农耕文明',
-        social_structure: '皇权专制，士农工商四个阶层',
-        common_elements: ['铁器', '马匹', '古典建筑', '科举制度', '江湖'],
-        forbidden_elements: ['现代词汇', '枪炮', '汽车', '电力']
-      }),
-      isBuiltin: 1,
-    },
-    {
-      type: 'world',
-      name: '赛博朋克',
-      description: '高科技低生活的反乌托邦未来都市',
-      contentJson: JSON.stringify({
-        time_period: '2077-2100年',
-        technology_level: '义体改造、神经接入、AI统治、巨型企业垄断',
-        social_structure: '企业城市，贫富极度分化，政府形同虚设',
-        common_elements: ['义肢', '神经接口', '霓虹灯', '暗网', '黑客', '雨夜'],
-        forbidden_elements: ['乌托邦式政府', '传统农耕生活']
+        time_period: '近未来',
+        technology_level: '高密度数字网络、改造技术和企业控制基础设施。',
+        social_structure: '企业、帮派、平台系统和底层社区并行争夺秩序。',
+        common_elements: ['义体改造', '监控系统', '黑市交易', '数据垄断', '阶层断裂'],
+        forbidden_elements: ['没有副作用的高科技', '脱离系统代价的自由行动'],
       }),
       isBuiltin: 1,
     },
     {
       type: 'world',
       name: '末世废土',
-      description: '文明崩溃后的废土世界，资源匮乏，秩序重建',
+      description: '适合末世求生和秩序重建，强调资源、感染和信任成本。',
       contentJson: JSON.stringify({
-        time_period: '灾变后第X年',
-        technology_level: '工业文明遗迹，修理和改装为主，偶有旧世科技',
-        social_structure: '部落制或要塞制，强者为尊，以物易物',
-        common_elements: ['避难所', '辐射区', '废墟城市', '幸存者营地', '改装车辆', '物资争夺'],
-        forbidden_elements: ['现代正常社会运转', '大型超市', '网络通信'],
-        disaster_type: '可自定义：核战/病毒/天灾/外星入侵/AI叛乱'
+        time_period: '灾变后数年到数十年',
+        technology_level: '残存旧时代设施与低效手工补给系统并存。',
+        social_structure: '聚落、武装、物资分配和信任链决定生存资格。',
+        common_elements: ['食水补给', '感染风险', '避难聚落', '路线选择', '人性博弈'],
+        forbidden_elements: ['忽略生存链的空抒情', '无限补给'],
       }),
       isBuiltin: 1,
     },
     {
       type: 'world',
-      name: '丧尸世界',
-      description: '病毒蔓延引发的丧尸末日，生存与人性的极限考验',
+      name: '架空王朝风云',
+      description: '适合历史正剧和架空历史，强调制度、地理与权力结构。',
       contentJson: JSON.stringify({
-        time_period: '感染爆发后数周至数年',
-        technology_level: '依赖旧世界遗留物资，不再有新生产',
-        social_structure: '小型幸存者群体，内外威胁并存',
-        common_elements: ['感染者', '清醒幸存者', '安全区', '物资搜刮', '心理崩溃'],
-        forbidden_elements: ['治愈方法（除非是核心剧情）', '大规模政府救援'],
-        virus_rules: '被咬必感染，潜伏期可自设，感染者对声音/气味敏感'
-      }),
-      isBuiltin: 1,
-    },
-    {
-      type: 'world',
-      name: '盗墓世界',
-      description: '古墓机关、神秘符文与地下文明探索',
-      contentJson: JSON.stringify({
-        time_period: '现代（但涉及古代文明遗迹）',
-        technology_level: '现代工具与古代机关并存',
-        social_structure: '地下圈子，摸金校尉、发丘中郎将等门派传承',
-        common_elements: ['青铜门', '粽子（僵尸）', '搬山卸岭', '倒斗工具', '九层妖塔', '陨铁神器'],
-        forbidden_elements: ['现代警察轻易介入', '机关太过现代化'],
-        special_rules: '古墓中有守墓人（粽子），墓主文化影响机关风格，胆肥则财大'
+        time_period: '中前工业时代的架空王朝',
+        technology_level: '农业、手工业与传统军事体系为主。',
+        social_structure: '王权、官僚、地方豪强、宗族和边地势力长期角力。',
+        common_elements: ['州府边军', '税赋徭役', '门阀联盟', '地理阻隔', '政治风向'],
+        forbidden_elements: ['现代组织逻辑硬套', '跳过制度成本的改革奇迹'],
       }),
       isBuiltin: 1,
     },
   ]
 
-  // 检查模板是否已存在再插入（避免重复）
   const existingTemplates = db.select().from(schema.templates).all()
+  const allTemplates = [...styleTemplates, ...worldTemplates]
+
   if (existingTemplates.length === 0) {
-    db.insert(schema.templates).values([...styleTemplates, ...worldTemplates]).run()
-  } else {
-    const existingTemplateNames = new Set(existingTemplates.map(t => t.name))
-    const newTemplates = [...styleTemplates, ...worldTemplates].filter(t => !existingTemplateNames.has(t.name))
-    if (newTemplates.length > 0) {
-      db.insert(schema.templates).values(newTemplates).run()
-    }
+    db.insert(schema.templates).values(allTemplates).run()
+    return
+  }
+
+  const existingTemplateNames = new Set(existingTemplates.map((template) => template.name))
+  const newTemplates = allTemplates.filter((template) => !existingTemplateNames.has(template.name))
+  if (newTemplates.length > 0) {
+    db.insert(schema.templates).values(newTemplates).run()
   }
 }

@@ -494,6 +494,8 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
           emotionTone: input.chapter.emotionTone || '平稳',
           targetWords: input.chapter.targetWords || 3000,
           storyCore: input.storyCore,
+          writingContractSummary: input.context.writingContractSummary,
+          relationSummary: input.context.relationSummary,
           currentArc: input.context.currentArc,
           worldRules: input.context.worldRules,
           characterStates: input.context.characterStates,
@@ -546,6 +548,8 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
               emotionTone: input.chapter.emotionTone || '平稳',
               targetWords: input.chapter.targetWords || 3000,
               storyCore: input.storyCore,
+              writingContractSummary: input.context.writingContractSummary,
+              relationSummary: input.context.relationSummary,
               currentArc: input.context.currentArc,
               worldRules: input.context.worldRules,
               characterStates: input.context.characterStates,
@@ -706,7 +710,7 @@ async function refreshChapterMemory(chapterId: number): Promise<{
 }> {
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
-  if (!chapter) throw new Error('Chapter not found')
+  if (!chapter) throw new Error('章节不存在')
   const summary = await updateChapterSummaryData(chapterId)
   const continuity = await updateChapterContinuityState(chapterId, summary)
   refreshStoryMemoryCheckpoints(chapter.novelId)
@@ -866,10 +870,10 @@ export function deleteChapter(id: number) {
 export async function generateChapterContent(chapterId: number, sender?: WebContents): Promise<number> {
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
-  if (!chapter) throw new Error(`Chapter #${chapterId} not found`)
+  if (!chapter) throw new Error(`章节 ${chapterId} 不存在`)
 
   const novel = db.select().from(novels).where(eq(novels.id, chapter.novelId)).all()[0]
-  if (!novel) throw new Error('Novel not found')
+  if (!novel) throw new Error('小说不存在')
 
   const profile = await buildStoryProfile(chapter.novelId)
   const context = await buildChapterContext(chapter.novelId, chapter.chapterNum, 7200)
@@ -918,6 +922,8 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
             emotionTone: chapter.emotionTone || '平稳',
             targetWords: chapter.targetWords || 3000,
             storyCore,
+            writingContractSummary: context.writingContractSummary,
+            relationSummary: context.relationSummary,
             currentArc: context.currentArc,
             worldRules: context.worldRules,
             characterStates: context.characterStates,
@@ -972,6 +978,8 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
           emotionTone: chapter.emotionTone || '平稳',
           targetWords: chapter.targetWords || 3000,
           storyCore,
+          writingContractSummary: context.writingContractSummary,
+          relationSummary: context.relationSummary,
           currentArc: context.currentArc,
           worldRules: context.worldRules,
           characterStates: context.characterStates,
@@ -1022,6 +1030,8 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
             chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
             chapterGoal: context.chapterGoal,
             storyCore,
+            writingContractSummary: context.writingContractSummary,
+            relationSummary: context.relationSummary,
             currentArc: context.currentArc,
             worldRules: context.worldRules,
             characterStates: context.characterStates,
@@ -1068,6 +1078,8 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
       emotionTone: chapter.emotionTone || '平稳',
       targetWords: chapter.targetWords || 3000,
       storyCore,
+      writingContractSummary: context.writingContractSummary,
+      relationSummary: context.relationSummary,
       currentArc: context.currentArc,
       worldRules: context.worldRules,
       characterStates: context.characterStates,
@@ -1183,6 +1195,5 @@ export async function aiCheckChapter(chapterId: number): Promise<unknown> {
 }
 
 export { runChapterPublishCheck }
-
 
 

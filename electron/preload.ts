@@ -139,6 +139,7 @@ const api = {
     getStats: (filters: unknown) => ipcRenderer.invoke('item:getStats', filters),
     getFilterOptions: (novelId: number) => ipcRenderer.invoke('item:getFilterOptions', novelId),
     get: (id: number) => ipcRenderer.invoke('item:get', id),
+    getDetailContext: (id: number) => ipcRenderer.invoke('item:getDetailContext', id),
     search: (novelId: number, keyword?: string, itemKind?: 'template' | 'instance', limit?: number) => ipcRenderer.invoke('item:search', novelId, keyword, itemKind, limit),
     create: (novelId: number, data: unknown) => ipcRenderer.invoke('item:create', novelId, data),
     update: (id: number, data: unknown) => ipcRenderer.invoke('item:update', id, data),

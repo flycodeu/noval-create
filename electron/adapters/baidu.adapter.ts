@@ -61,7 +61,7 @@ export class BaiduAdapter extends BaseAdapter {
 
     if (!response.ok) {
       const err = await response.text()
-      throw new Error(`百度文心 API Error ${response.status}: ${err}`)
+      throw new Error(`百度文心 API 请求失败（${response.status}）：${err}`)
     }
 
     const data = await response.json() as Record<string, any>

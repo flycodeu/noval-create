@@ -1,4 +1,4 @@
-﻿import { WebContents } from 'electron'
+import { WebContents } from 'electron'
 import { asc, eq } from 'drizzle-orm'
 import { getDb, getSqlite } from '../database/db'
 import { characters, characterRelations, novels, storyItems, timelineEvents } from '../database/schema'
@@ -25,6 +25,7 @@ import {
 } from './generation-history.service'
 import { runChatTask } from './task.service'
 import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/utils/text'
+import { buildCharacterRelationSummaryLine, normalizeCharacterRelationLevel } from '../../src/shared/character-relations'
 import { markNovelContextChanged } from './context-impact.service'
 
 function asText(value: unknown): string {
@@ -431,10 +432,14 @@ function mapRelationRecord(row: Record<string, unknown>) {
     novelId: Number(row.novel_id),
     charAId: Number(row.char_a_id),
     charBId: Number(row.char_b_id),
-    relationType: typeof row.relation_type === 'string' ? row.relation_type : undefined,
-    relationLabel: typeof row.relation_label === 'string' ? row.relation_label : undefined,
+    relationType: typeof row.relation_type === "string" ? row.relation_type : undefined,
+    relationLabel: typeof row.relation_label === "string" ? row.relation_label : undefined,
     bilateral: Number(row.bilateral || 0),
-    description: typeof row.description === 'string' ? row.description : undefined,
+    description: typeof row.description === "string" ? row.description : undefined,
+    intimacyLevel: normalizeCharacterRelationLevel(row.intimacy_level),
+    tensionLevel: normalizeCharacterRelationLevel(row.tension_level),
+    interactionStyle: typeof row.interaction_style === "string" ? row.interaction_style : undefined,
+    subtextRule: typeof row.subtext_rule === "string" ? row.subtext_rule : undefined,
   }
 }
 
@@ -900,6 +905,10 @@ export function upsertRelation(data: {
   relationLabel?: string
   description?: string
   bilateral?: number
+  intimacyLevel?: number
+  tensionLevel?: number
+  interactionStyle?: string
+  subtextRule?: string
 }, options: { skipContextTracking?: boolean } = {}) {
   const db = getDb()
   const existing = getCharacterRelations(data.novelId).find((relation) => {
@@ -908,22 +917,25 @@ export function upsertRelation(data: {
     return sameDirection || reverseDirection
   })
 
+  const payload = {
+    ...data,
+    relationLabel: data.relationLabel?.trim() || null,
+    description: data.description?.trim() || null,
+    bilateral: data.bilateral ? 1 : 0,
+    intimacyLevel: normalizeCharacterRelationLevel(data.intimacyLevel) ?? null,
+    tensionLevel: normalizeCharacterRelationLevel(data.tensionLevel) ?? null,
+    interactionStyle: data.interactionStyle?.trim() || null,
+    subtextRule: data.subtextRule?.trim() || null,
+  }
+
   if (existing) {
-    db.update(characterRelations).set({
-      ...data,
-      description: data.description || null,
-      relationLabel: data.relationLabel || null,
-    }).where(eq(characterRelations.id, existing.id)).run()
+    db.update(characterRelations).set(payload).where(eq(characterRelations.id, existing.id)).run()
   } else {
-    db.insert(characterRelations).values({
-      ...data,
-      description: data.description || null,
-      relationLabel: data.relationLabel || null,
-    }).run()
+    db.insert(characterRelations).values(payload).run()
   }
 
   if (!options.skipContextTracking) {
-    markNovelContextChanged(data.novelId, 'Character relations changed')
+    markNovelContextChanged(data.novelId, "Character relations changed")
   }
 }
 
@@ -1197,12 +1209,11 @@ export async function regenerateCharacter(id: number): Promise<typeof characters
     .map((relation) => {
       const otherId = relation.charAId === current.id ? relation.charBId : relation.charAId
       const other = allCharacters.find((character) => character.id === otherId)
-      if (!other) return ''
-      const parts = [relation.relationLabel || relation.relationType, relation.description].filter(Boolean).join('；')
-      return `- 与 ${other.fullName}：${parts || '已有关系'}`
+      if (!other) return ""
+      return buildCharacterRelationSummaryLine(current.fullName, other.fullName, relation)
     })
     .filter(Boolean)
-    .join('\n')
+    .join("\n")
   const historyEntityType = 'character'
   const historyTaskType = 'character_regenerate'
   const attemptNumber = getAttemptCount(current.novelId, historyEntityType, current.id, historyTaskType) + 1
@@ -1286,10 +1297,14 @@ export async function generateCharacterRelations(novelId: number): Promise<void>
           novelId,
           charAId: charA.id,
           charBId: charB.id,
-          relationType: asText(relation.type),
-          relationLabel: asText(relation.label),
+          relationType: asText(relation.type || relation.relation_type),
+          relationLabel: asText(relation.label || relation.relation_label),
           description: asText(relation.description),
           bilateral: relation.bilateral ? 1 : 0,
+          intimacyLevel: normalizeCharacterRelationLevel(relation.intimacy_level ?? relation.intimacyLevel),
+          tensionLevel: normalizeCharacterRelationLevel(relation.tension_level ?? relation.tensionLevel),
+          interactionStyle: asText(relation.interaction_style || relation.interactionStyle),
+          subtextRule: asText(relation.subtext_rule || relation.subtextRule),
         }, { skipContextTracking: true })
       }
     }
@@ -1298,4 +1313,3 @@ export async function generateCharacterRelations(novelId: number): Promise<void>
     console.error('关系解析失败:', error)
   }
 }
-

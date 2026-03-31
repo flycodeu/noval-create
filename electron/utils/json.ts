@@ -367,7 +367,7 @@ export function safeParseAiJson<T = unknown>(text: string, expectedRoot: AiJsonR
       try {
         return JSON.parse(repaired) as T
       } catch (repairError) {
-        const rawMessage = repairError instanceof Error ? repairError.message : 'JSON parse failed'
+        const rawMessage = repairError instanceof Error ? repairError.message : 'JSON 解析失败'
         throw buildParseError(`AI JSON 解析失败：${rawMessage}`, repaired)
       }
     }

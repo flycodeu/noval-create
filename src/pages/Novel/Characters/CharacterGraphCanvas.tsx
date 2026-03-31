@@ -14,7 +14,8 @@ import ReactFlow, {
   useEdgesState,
   useNodesState,
 } from 'reactflow'
-import type { Character, CharacterGraphPayload } from '../../../types'
+import type { Character, CharacterGraphPayload, CharacterRelation } from '../../../types'
+import { getCharacterRelationLabel, normalizeCharacterRelationLevel } from '../../../shared/character-relations'
 
 interface CharacterGraphCanvasProps {
   data: CharacterGraphPayload
@@ -26,6 +27,7 @@ interface CharacterGraphCanvasProps {
 interface CanvasNodeData {
   item: Character
   active: boolean
+  dimmed: boolean
 }
 
 const ROLE_LABELS: Record<Character['roleType'], string> = {
@@ -44,32 +46,78 @@ const ROLE_COLORS: Record<Character['roleType'], string> = {
   minor: '#6f648e',
 }
 
-const RELATION_META: Record<string, { label: string; color: string }> = {
-  friend: { label: '朋友', color: '#3b7fa5' },
-  enemy: { label: '敌人', color: '#b55252' },
-  family: { label: '家人', color: '#7b5a2e' },
-  parent_child: { label: '亲属', color: '#7b5a2e' },
-  colleague: { label: '同事', color: '#6d6d90' },
-  acquaintance: { label: '陌生/泛识', color: '#8a826c' },
-  rival: { label: '竞争', color: '#8a4e91' },
-  mentor_student: { label: '师徒', color: '#0e7c6c' },
-  ally: { label: '同盟', color: '#19806a' },
-  subordinate: { label: '从属', color: '#576fa8' },
-  benefactor: { label: '恩主', color: '#b07a2d' },
-  debtor: { label: '债务', color: '#8b5b47' },
-  handler: { label: '操控', color: '#8c4969' },
-  teammate: { label: '队友', color: '#1f7d61' },
-  lover: { label: '恋人', color: '#b35678' },
-  spouse: { label: '伴侣', color: '#b35678' },
-  ex_lover: { label: '旧情', color: '#8d5a72' },
-  political_partner: { label: '政治同盟', color: '#7b6a42' },
-}
+const LEGEND_ITEMS = [
+  { label: '亲密 / 家人 / 恋人', color: '#b26a43', note: '暖色线代表高情感温度关系' },
+  { label: '朋友 / 同盟 / 师徒', color: '#2f7b70', note: '青绿色线代表协作与信任' },
+  { label: '陌生 / 同事 / 上下级', color: '#5b6f9a', note: '蓝灰线代表日常或结构关系' },
+  { label: '竞争 / 敌对', color: '#b5544e', note: '红色虚线代表高张力或对抗' },
+]
 
 function truncate(text?: string, max = 68) {
   if (!text) return ''
   const normalized = text.replace(/\s+/g, ' ').trim()
   if (normalized.length <= max) return normalized
   return `${normalized.slice(0, max).trim()}...`
+}
+
+function isRelationConnectedToSelection(relation: CharacterRelation, selectedCharacterId?: number | null) {
+  if (!selectedCharacterId) return true
+  return relation.charAId === selectedCharacterId || relation.charBId === selectedCharacterId
+}
+
+function getConnectedCharacterIds(relations: CharacterRelation[], selectedCharacterId?: number | null) {
+  const ids = new Set<number>()
+  if (!selectedCharacterId) return ids
+  ids.add(selectedCharacterId)
+  relations.forEach((relation) => {
+    if (!isRelationConnectedToSelection(relation, selectedCharacterId)) return
+    ids.add(relation.charAId)
+    ids.add(relation.charBId)
+  })
+  return ids
+}
+
+function getRelationColor(type?: string | null) {
+  switch (type) {
+    case 'family':
+      return '#a56a36'
+    case 'lover':
+      return '#bb5b78'
+    case 'friend':
+    case 'ally':
+    case 'mentor_student':
+      return '#2f7b70'
+    case 'colleague':
+    case 'subordinate':
+      return '#5b6f9a'
+    case 'stranger':
+    case 'acquaintance':
+      return '#8c7d6d'
+    case 'rival':
+    case 'enemy':
+      return '#b5544e'
+    default:
+      return '#8a6f54'
+  }
+}
+
+function getRelationStrokeWidth(relation: CharacterRelation) {
+  const intimacy = normalizeCharacterRelationLevel(relation.intimacyLevel) || 0
+  const tension = normalizeCharacterRelationLevel(relation.tensionLevel) || 0
+  return 1.5 + intimacy * 0.24 + tension * 0.32
+}
+
+function buildEdgeLabel(relation: CharacterRelation, crowded: boolean) {
+  if (crowded) return undefined
+  const label = getCharacterRelationLabel(relation.relationType, relation.relationLabel)
+  const intimacy = normalizeCharacterRelationLevel(relation.intimacyLevel)
+  const tension = normalizeCharacterRelationLevel(relation.tensionLevel)
+  const parts = [
+    label,
+    intimacy ? `亲密${intimacy}/5` : '',
+    tension ? `张力${tension}/5` : '',
+  ].filter(Boolean)
+  return parts.join(' · ')
 }
 
 function buildGraphNodes(data: CharacterGraphPayload) {
@@ -100,6 +148,7 @@ function buildGraphNodes(data: CharacterGraphPayload) {
       || left.sortOrder - right.sortOrder
       || left.id - right.id
     ))
+
     items.forEach((item, rowIndex) => {
       nodes.push({
         id: `character-${item.id}`,
@@ -111,6 +160,7 @@ function buildGraphNodes(data: CharacterGraphPayload) {
         data: {
           item,
           active: false,
+          dimmed: false,
         },
         style: { width },
       })
@@ -120,52 +170,67 @@ function buildGraphNodes(data: CharacterGraphPayload) {
   return nodes
 }
 
-function buildGraphEdges(data: CharacterGraphPayload) {
+function buildGraphEdges(data: CharacterGraphPayload, selectedCharacterId?: number | null) {
   const crowded = data.relations.length > 18
+
   return data.relations.map((relation) => {
-    const meta = RELATION_META[relation.relationType || ''] || {
-      label: relation.relationLabel || relation.relationType || '关系',
-      color: '#8a6f54',
-    }
+    const color = getRelationColor(relation.relationType)
+    const connected = isRelationConnectedToSelection(relation, selectedCharacterId)
+    const tension = normalizeCharacterRelationLevel(relation.tensionLevel) || 0
+    const opacity = !selectedCharacterId ? 0.76 : connected ? 0.92 : 0.14
+
     return {
       id: `relation-${relation.id}`,
       source: `character-${relation.charAId}`,
       target: `character-${relation.charBId}`,
       type: 'smoothstep',
-      label: crowded ? undefined : (relation.relationLabel || meta.label),
+      label: buildEdgeLabel(relation, crowded),
       style: {
-        stroke: meta.color,
-        strokeWidth: 1.7,
-        strokeOpacity: 0.72,
+        stroke: color,
+        strokeWidth: getRelationStrokeWidth(relation),
+        strokeOpacity: opacity,
+        strokeDasharray: tension >= 4 || relation.relationType === 'rival' || relation.relationType === 'enemy'
+          ? '10 6'
+          : undefined,
       },
       labelStyle: {
-        fill: '#49392a',
+        fill: connected || !selectedCharacterId ? '#49392a' : 'rgba(73, 57, 42, 0.42)',
         fontSize: 12,
         fontWeight: 700,
       },
       labelBgStyle: {
-        fill: 'rgba(255,255,255,0.94)',
+        fill: connected || !selectedCharacterId ? 'rgba(255,255,255,0.94)' : 'rgba(255,255,255,0.68)',
         fillOpacity: 1,
       },
+      labelBgPadding: [6, 4],
       markerEnd: {
         type: MarkerType.ArrowClosed,
-        color: meta.color,
+        color,
       },
       markerStart: relation.bilateral
         ? {
           type: MarkerType.ArrowClosed,
-          color: meta.color,
+          color,
         }
         : undefined,
+      animated: !crowded && connected && tension >= 5,
+      zIndex: connected ? 10 : 1,
       data: relation,
     } satisfies Edge
   })
 }
 
 function CharacterNode({ data }: NodeProps<CanvasNodeData>) {
-  const { item, active } = data
+  const { item, active, dimmed } = data
   return (
-    <div className={`character-graph-node character-graph-node--${item.roleType} ${active ? 'character-graph-node--active' : ''}`}>
+    <div
+      className={[
+        'character-graph-node',
+        `character-graph-node--${item.roleType}`,
+        active ? 'character-graph-node--active' : '',
+        dimmed ? 'character-graph-node--dimmed' : '',
+      ].filter(Boolean).join(' ')}
+    >
       <Handle type="target" position={Position.Left} style={{ opacity: 0 }} />
       <Handle type="source" position={Position.Right} style={{ opacity: 0 }} />
 
@@ -190,14 +255,27 @@ const nodeTypes = {
   characterNode: CharacterNode,
 }
 
-function decorateNodes(nodes: Node<CanvasNodeData>[], selectedCharacterId?: number | null) {
-  return nodes.map((node) => ({
-    ...node,
-    data: {
-      ...node.data,
-      active: (node.data as CanvasNodeData).item.id === selectedCharacterId,
-    },
-  }))
+function decorateNodes(
+  nodes: Node<CanvasNodeData>[],
+  relations: CharacterRelation[],
+  selectedCharacterId?: number | null,
+) {
+  const connectedIds = getConnectedCharacterIds(relations, selectedCharacterId)
+
+  return nodes.map((node) => {
+    const item = (node.data as CanvasNodeData).item
+    const active = item.id === selectedCharacterId
+    const dimmed = Boolean(selectedCharacterId) && !active && !connectedIds.has(item.id)
+
+    return {
+      ...node,
+      data: {
+        ...node.data,
+        active,
+        dimmed,
+      },
+    }
+  })
 }
 
 export default function CharacterGraphCanvas({
@@ -207,15 +285,17 @@ export default function CharacterGraphCanvas({
   onCanvasClick,
 }: CharacterGraphCanvasProps) {
   const baseNodes = useMemo(() => buildGraphNodes(data), [data])
-  const baseEdges = useMemo(() => buildGraphEdges(data), [data])
-  const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNodeData>(decorateNodes(baseNodes, selectedCharacterId))
+  const baseEdges = useMemo(() => buildGraphEdges(data, selectedCharacterId), [data, selectedCharacterId])
+  const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNodeData>(
+    decorateNodes(baseNodes, data.relations, selectedCharacterId),
+  )
   const [edges, setEdges, onEdgesChange] = useEdgesState(baseEdges)
   const [instance, setInstance] = useState<ReactFlowInstance | null>(null)
   const fittedRef = useRef(false)
 
   useEffect(() => {
-    setNodes(decorateNodes(baseNodes, selectedCharacterId))
-  }, [baseNodes, selectedCharacterId, setNodes])
+    setNodes(decorateNodes(baseNodes, data.relations, selectedCharacterId))
+  }, [baseNodes, data.relations, selectedCharacterId, setNodes])
 
   useEffect(() => {
     setEdges(baseEdges)
@@ -245,6 +325,21 @@ export default function CharacterGraphCanvas({
   return (
     <div className="character-graph-shell">
       <button type="button" className="character-graph-shell__fit" onClick={handleFit}>重新居中</button>
+      <div className="character-graph-shell__legend">
+        <div className="character-graph-shell__legend-title">关系图例</div>
+        {LEGEND_ITEMS.map((item) => (
+          <div key={item.label} className="character-graph-shell__legend-row">
+            <span className="character-graph-shell__legend-swatch" style={{ background: item.color }} />
+            <div>
+              <strong>{item.label}</strong>
+              <span>{item.note}</span>
+            </div>
+          </div>
+        ))}
+        <div className="character-graph-shell__legend-note">
+          线越粗代表关系越强；虚线代表高张力；单箭头表示单向感受，双箭头表示双方都承认这层关系。
+        </div>
+      </div>
       <ReactFlow
         nodes={nodes}
         edges={edges}

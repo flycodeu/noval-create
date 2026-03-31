@@ -402,7 +402,7 @@ export function getWorkflowBlockers(
   }
 
   const requireStoryCore = (action: string) => {
-    pushIfMissing(isStoryCoreReady(novel), `请先补齐 premise、核心钩子和底层约束，再${action}。`)
+    pushIfMissing(isStoryCoreReady(novel), `请先补齐基础设定、核心钩子和底层约束，再${action}。`)
   }
 
   const requireThemeVoice = (action: string) => {

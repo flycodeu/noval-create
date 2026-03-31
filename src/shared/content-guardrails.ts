@@ -66,6 +66,13 @@ const GENRE_HOLLOW_RULES: Partial<Record<string, GenreHollowRule>> = {
     minAbstractHits: 2,
     maxConcreteHits: 1,
   },
+  'modern-mystery': {
+    message: '\u73b0\u4ee3\u60ac\u7591\u6bb5\u843d\u53ea\u5199\u79d8\u5bc6\u3001\u538b\u6291\u6216\u5f02\u6837\uff0c\u5374\u7f3a\u5c11\u6848\u4ef6\u5165\u53e3\u3001\u8bc1\u636e\u8f7d\u4f53\u3001\u673a\u6784\u963b\u529b\u548c\u8c03\u67e5\u8def\u5f84\u3002',
+    abstractTokens: ['\u79d8\u5bc6', '\u771f\u76f8', '\u9634\u5f71', '\u8ff7\u96fe', '\u5f02\u5e38', '\u8be1\u5f02', '\u6c89\u9ed8', '\u4e0d\u5bf9\u52b2'],
+    concreteTokens: ['\u8bc1\u636e', '\u5377\u5b97', '\u6863\u6848', '\u76d1\u63a7', '\u53e3\u4f9b', '\u76ee\u51fb\u8005', '\u503c\u73ed\u8bb0\u5f55', '\u901a\u8054', '\u8d70\u8bbf', '\u8c03\u9605', '\u73b0\u573a', '\u65f6\u95f4\u7ebf', '\u62a5\u6848', '\u5c01\u5b58', '\u5206\u5c40', '\u533b\u9662', '\u5382\u533a', '\u6863\u6848\u9986', '\u8bb0\u8005'],
+    minAbstractHits: 2,
+    maxConcreteHits: 1,
+  },
   wuxia: {
     message: '武侠段落只有打斗或招式，却缺少江湖规矩、师承门第、名声、盘缠、官府和行路成本。',
     abstractTokens: ['刀光', '剑光', '掌风', '交手', '过招', '比武', '决战', '轻功', '剑招', '刀招'],

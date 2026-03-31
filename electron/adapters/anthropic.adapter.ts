@@ -26,7 +26,7 @@ export class AnthropicAdapter extends BaseAdapter {
 
     if (!response.ok) {
       const err = await response.text()
-      throw new Error(`Anthropic API Error ${response.status}: ${err}`)
+      throw new Error(`Anthropic API 请求失败（${response.status}）：${err}`)
     }
 
     const data = await response.json() as Record<string, any>
@@ -44,7 +44,7 @@ export class AnthropicAdapter extends BaseAdapter {
 
     if (!response.ok) {
       const err = await response.text()
-      throw new Error(`Anthropic API Error ${response.status}: ${err}`)
+      throw new Error(`Anthropic API 请求失败（${response.status}）：${err}`)
     }
 
     const reader = response.body!.getReader()

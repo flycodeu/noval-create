@@ -111,7 +111,10 @@ function getRelatedPage(taskType: string) {
     case 'item':
       return 'items'
     case 'character':
+    case 'relation':
       return 'characters'
+    case 'voice':
+      return 'theme-voice'
     case 'thread':
       return 'threads'
     case 'map':
@@ -353,10 +356,10 @@ async function repairChapterTask(task: typeof revisionTasks.$inferSelect): Promi
     : typeof task.entityId === 'number'
       ? task.entityId
       : null
-  if (!chapterId) throw new Error('Chapter id is missing.')
+  if (!chapterId) throw new Error('缺少章节 ID。')
 
   const current = chapterService.getChapter(chapterId)
-  if (!current) throw new Error('Chapter not found.')
+  if (!current) throw new Error('章节不存在。')
 
   const title = task.title || ''
   const needsMemoryRefresh =
@@ -391,10 +394,10 @@ async function repairChapterTask(task: typeof revisionTasks.$inferSelect): Promi
 
 function repairMapTask(task: typeof revisionTasks.$inferSelect): void {
   const entityId = typeof task.entityId === 'number' ? task.entityId : null
-  if (!entityId) throw new Error('Map entity id is missing.')
+  if (!entityId) throw new Error('缺少地图实体 ID。')
 
   const node = mapService.getMapNode(entityId)
-  if (!node) throw new Error('Map node not found.')
+  if (!node) throw new Error('地图节点不存在。')
 
   const db = getDb()
   const parent = typeof node.parentId === 'number'
@@ -410,11 +413,11 @@ function repairMapTask(task: typeof revisionTasks.$inferSelect): void {
 
 function repairOutlineTask(task: typeof revisionTasks.$inferSelect): void {
   const entityId = typeof task.entityId === 'number' ? task.entityId : null
-  if (!entityId) throw new Error('Story arc id is missing.')
+  if (!entityId) throw new Error('缺少故事弧 ID。')
 
   const db = getDb()
   const arc = db.select().from(storyArcs).where(eq(storyArcs.id, entityId)).all()[0]
-  if (!arc) throw new Error('Story arc not found.')
+  if (!arc) throw new Error('故事弧不存在。')
 
   const title = task.title || ''
   if (title === '故事弧章位反转') {
@@ -796,7 +799,7 @@ async function runTaskAutoFix(current: typeof revisionTasks.$inferSelect): Promi
   const entityId = typeof current.entityId === 'number' ? current.entityId : undefined
 
   if (!isAutoFixableTask(current.taskType || 'continuity', entityType, entityId, current.title)) {
-    throw new Error('Current task does not support AI auto-fix.')
+    throw new Error('当前任务不支持 AI 自动修复。')
   }
 
   if (entityType === 'character') {

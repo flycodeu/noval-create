@@ -141,7 +141,7 @@ export class OpenAIAdapter extends BaseAdapter {
 
       if (!response.ok) {
         const err = await response.text()
-        throw new Error(`OpenAI API Error ${response.status}: ${err}`)
+        throw new Error(`OpenAI API 请求失败（${response.status}）：${err}`)
       }
 
       return response
@@ -252,7 +252,7 @@ export class OpenAIAdapter extends BaseAdapter {
   }
 
   private buildAbortError(): Error {
-    const error = new Error('User cancelled')
+    const error = new Error('用户已取消')
     error.name = 'AbortError'
     return error
   }
@@ -266,7 +266,7 @@ export class OpenAIAdapter extends BaseAdapter {
 
   private isAbortError(error: unknown): boolean {
     return error instanceof Error
-      && (error.name === 'AbortError' || /abort|cancel/i.test(error.message))
+      && (error.name === 'AbortError' || /abort|cancel|取消/i.test(error.message))
   }
 
   private resolveTimeoutMs(timeoutMs?: number): number {

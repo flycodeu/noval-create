@@ -4,6 +4,7 @@ export type GenreRulePackKey =
   | 'wuxia'
   | 'xianxia'
   | 'fantasy'
+  | 'modern-mystery'
   | 'urban-ability'
   | 'western-fantasy'
 
@@ -226,6 +227,14 @@ function getDefaultRealityOptions(packKey: GenreRulePackKey): WritingRealityOpti
         commonSenseFocus: ['\u7b49\u7ea7\u5dee\u8ddd', '\u6218\u6597\u4ee3\u4ef7', '\u8d44\u6e90\u4e89\u593a', '\u52bf\u529b\u53cd\u5e94', '\u9057\u8ff9\u98ce\u9669', '\u8eab\u4efd\u540e\u679c'],
         contextAlignmentFocus: ['\u529b\u91cf\u4f53\u7cfb', '\u9635\u8425\u5173\u7cfb', '\u6210\u957f\u8def\u5f84', '\u5173\u952e\u8d44\u6e90', '\u5730\u56fe\u5c42\u7ea7'],
       }
+    case 'modern-mystery':
+      return {
+        realismLevel: 'strict-realism',
+        sciencePolicy: '\u73b0\u4ee3\u60ac\u7591\u9ed8\u8ba4\u4e0d\u5f15\u5165\u8d85\u81ea\u7136\u3001\u9ed1\u79d1\u6280\u6377\u5f84\u6216\u4e07\u80fd\u4fa6\u67e5\u624b\u6bb5\uff0c\u8c03\u67e5\u3001\u6cd5\u533b\u3001\u76d1\u63a7\u3001\u901a\u8baf\u3001\u5a92\u4f53\u4e0e\u884c\u653f\u6d41\u7a0b\u6309\u73b0\u5b9e\u5e38\u8bc6\u5904\u7406\u3002',
+        physicsPolicy: '\u8def\u7a0b\u3001\u4f24\u52bf\u3001\u76d1\u63a7\u8986\u76d6\u3001\u8bc1\u636e\u7559\u5b58\u3001\u8bbf\u95ee\u6743\u9650\u548c\u884c\u52a8\u98ce\u9669\u90fd\u8981\u6709\u73b0\u5b9e\u4ee3\u4ef7\uff0c\u4e0d\u80fd\u9760\u4e00\u53e5\u8bdd\u8df3\u8fc7\u3002',
+        commonSenseFocus: ['\u65f6\u95f4\u7ebf\u6821\u5bf9', '\u8bc1\u636e\u94fe', '\u76d1\u63a7\u75d5\u8ff9', '\u8bbf\u95ee\u6743\u9650', '\u5730\u65b9\u5173\u7cfb', '\u8206\u8bba\u98ce\u9669', '\u4f24\u52bf\u6062\u590d', '\u884c\u52a8\u6210\u672c'],
+        contextAlignmentFocus: ['\u65e7\u6848\u4e0e\u5f53\u4e0b\u7684\u8fde\u63a5', '\u673a\u6784\u963b\u529b', '\u5730\u65b9\u884c\u4e1a\u7eb9\u7406', '\u4fe1\u606f\u4e0d\u5bf9\u79f0', '\u77e5\u60c5\u4eba\u6c89\u9ed8', '\u73b0\u5b9e\u5730\u7406\u95ed\u73af'],
+      }
     case 'urban-ability':
       return {
         realismLevel: 'rule-realism',
@@ -344,6 +353,16 @@ function getDefaultTimelineConfig(packKey: GenreRulePackKey): TimelineConfig {
         relativeZeroLabel: '故事前史',
         recommendedEventTypes: ['觉醒', '试炼', '远征', '揭示', '阵营裂变', '大战', '加冕', '回收伏笔'],
         precisionOptions: ['年', '季', '月', '战役阶段'],
+      })
+    case 'modern-mystery':
+      return createTimelineConfig('gregorian', {
+        eraName: '公历',
+        epochLabel: '公元',
+        baseYearLabel: '2026',
+        displayPattern: 'YYYY年MM月DD日 / HH:mm / 某案发生后第X天',
+        relativeZeroLabel: '异常事件发生前',
+        recommendedEventTypes: ['旧案', '异常发现', '走访', '调阅', '封存', '失联', '追查', '通报', '收束'],
+        precisionOptions: ['年', '月', '日', '小时'],
       })
     case 'urban-ability':
       return createTimelineConfig('gregorian', {
@@ -1220,6 +1239,127 @@ const BUILTIN_GENRE_RULE_PACKS: Record<GenreRulePackKey, GenreWorldRuleSeed> = {
       getDefaultRealityOptions('fantasy'),
     ),
   },
+  'modern-mystery': {
+    version: 2,
+    genreProfile: {
+      key: 'modern-mystery',
+      name: '现代悬疑推理',
+      subgenre: '社会派 / 刑侦 / 调查 / 旧案',
+      worldviewTone: '异常埋在旧案、档案和地方关系里，调查推进要受到现实秩序的持续阻力。',
+      socialFrame: '故事发生在真实城市语境里，基层机构、旧工业单位、家庭网络和媒体渠道共同施压。',
+      narrativeFocus: ['旧案切口', '调查阻力', '证据链缺口', '地方现实纹理', '知情人沉默'],
+      languageAvoidances: ['万能阴谋论', '空洞氛围词', '超自然偷解', '平台悬浮文案'],
+    },
+    powerSystems: [
+      {
+        id: 'access-tier',
+        name: '调查权限与信息层级',
+        appliesTo: ['记者', '警务人员', '档案管理者', '企业内部人员', '知情人'],
+        levels: ['公开信息', '内部线索', '封存记录', '核心真相'],
+        advancementRule: '通过走访、调阅、交换情报、建立信任或承担风险逐层靠近真相。',
+        limitations: '权限越深，越容易触发缄默、阻拦、删改记录和现实报复。',
+        cost: '每向前一步都可能付出职业代价、关系代价、名誉代价或人身风险。',
+        taboo: '不要让主角靠一句套话就轻易拿到关键卷宗和口供。',
+      },
+    ],
+    speciesSystem: [
+      {
+        id: 'human',
+        name: '普通人',
+        entityType: 'human',
+        summary: '现代悬疑的主体仍是现实社会中的普通人，他们的身份、职业和过往决定了能看到什么、敢追到哪里。',
+        traits: ['现实处境明确', '信息不完整', '会被制度与人情同时约束'],
+        commonIdentities: ['记者', '民警', '家属', '保安', '医生', '工人', '教师', '社区居民'],
+        relationToHumans: '人物之间的鸿沟主要来自权力、信息、职业边界和旧关系，而不是种族差异。',
+        storyUse: '承接现实压力、调查路径、证词偏差和情感代价。',
+      },
+    ],
+    factionSystem: [
+      {
+        id: 'local-system',
+        name: '地方调查系统',
+        factionType: '机构',
+        summary: '负责立案、协查、封存和现场控制的正式系统，既可能提供线索，也可能成为第一道阻力。',
+        structure: '分局、派出所、档案室、内勤与外勤层层相扣。',
+        resources: '卷宗、监控、接警记录、问询权限和现场进入资格。',
+        externalRelations: '要和医院、媒体、企业、街道、学校与上级系统保持平衡。',
+        recruitFrom: '警务人员、内勤文员、技术人员和协查接口人。',
+        notableSites: ['分局档案室', '值班室', '证物室'],
+      },
+      {
+        id: 'legacy-industry',
+        name: '旧工业体系',
+        factionType: '企业/单位',
+        summary: '由老厂区、改制企业、退休办和遗留资产构成的利益网络，表面沉寂，内部却保存着大量无法公开的旧账。',
+        structure: '厂办、保卫科、退休办与外包物业交织。',
+        resources: '历史档案、旧通讯设备、内部名单、厂区空间和地方人脉。',
+        externalRelations: '与地方机构既合作又互相遮掩，遇到调查时优先维稳和切割责任。',
+        recruitFrom: '老职工、家属、保安、后勤和承包商。',
+        notableSites: ['老厂办公楼', '封闭车间', '退休办'],
+      },
+    ],
+    characterEcology: {
+      overview: '现代悬疑的角色生态要围绕“谁知道一点、谁在阻拦、谁承担后果”来布置，而不是一味堆神秘人。',
+      slots: [
+        {
+          id: 'investigator',
+          label: '追查推动者',
+          entityType: 'human',
+          species: '普通人',
+          narrativeFunction: '推动线索串联、承担调查成本并把旧案与当下连起来。',
+          contextLink: '必须有现实理由接近事件，同时会被权限、关系或职业边界卡住。',
+          preferredFactions: ['地方调查系统', '旧工业体系'],
+          powerBias: ['调查权限与信息层级'],
+        },
+        {
+          id: 'gatekeeper',
+          label: '沉默守门人',
+          entityType: 'human',
+          species: '普通人',
+          narrativeFunction: '掌握一段关键记录或关键记忆，是第一层阻力来源。',
+          contextLink: '沉默必须有利害原因，不是单纯装神秘。',
+          preferredFactions: ['地方调查系统', '旧工业体系'],
+          powerBias: ['调查权限与信息层级'],
+        },
+      ],
+    },
+    mapBlueprint: {
+      overview: '地图按城市层级、机构空间和封闭现场展开，重点是哪些地方能进、哪些地方不能进。',
+      levels: [
+        {
+          depth: 1,
+          label: '城市/县城/老工业区',
+          nodeTypes: ['城市', '县城', '老工业区', '沿江港区'],
+          relationHint: '确定地方规模、熟人社会密度和线索流向。',
+          suggestedCount: 2,
+          examples: ['北城老工业区', '沿江新区'],
+        },
+        {
+          depth: 2,
+          label: '机构/单位/生活节点',
+          nodeTypes: ['分局', '报社', '医院', '学校', '厂办', '街道'],
+          relationHint: '承载权限边界、信息来源和现实阻力。',
+          suggestedCount: 4,
+          examples: ['分局档案室', '市报社副刊部', '职工医院'],
+        },
+        {
+          depth: 3,
+          label: '封闭现场/证据节点',
+          nodeTypes: ['废弃车间', '通讯站', '地下仓库', '出租屋', '值班室'],
+          relationHint: '用于发现异样、取证、对质和回收旧记录。',
+          suggestedCount: 4,
+          examples: ['封闭通讯站', '废弃仓库夹层', '夜班值班室'],
+        },
+      ],
+    },
+    writingConstraints: createWritingConstraints(
+      '优先写线索入口、现实阻力、空间细节和人物判断，不要把悬疑写成空心氛围。',
+      '对白要像现实中的走访、问话、敷衍、试探和留白，不要人人都端着谜语腔。',
+      ['命运的齿轮', '深不见底的迷雾', '某种无法言说的阴影', '所有真相终将浮出水面'],
+      ['优先使用卷宗、档案、监控、通联、旧闻、值班记录、医院记录等现实线索载体。', '标题和设定名尽量从职业现场、地点纹理、时间锚点和证据载体里取词。'],
+      getDefaultRealityOptions('modern-mystery'),
+    ),
+  },
   'urban-ability': {
     version: 2,
     genreProfile: {
@@ -1485,12 +1625,13 @@ const BUILTIN_GENRE_RULE_PACKS: Record<GenreRulePackKey, GenreWorldRuleSeed> = {
 }
 
 const GENRE_ALIAS_RULES: Array<{ pattern: RegExp; key: GenreRulePackKey }> = [
-  { pattern: /丧尸|末世|病毒|尸潮/u, key: 'zombie' },
-  { pattern: /仙侠|修真|修仙|仙界|宗门/u, key: 'xianxia' },
-  { pattern: /武侠|江湖|侠客|武林|镖局|帮会/u, key: 'wuxia' },
-  { pattern: /玄幻|斗破|斗气|升级/u, key: 'fantasy' },
-  { pattern: /都市|异能|现代异能/u, key: 'urban-ability' },
-  { pattern: /西幻|魔法|教会|王国/u, key: 'western-fantasy' },
+  { pattern: /\u4e27\u5c38|\u672b\u4e16|\u75c5\u6bd2|\u5c38\u6f6e/u, key: 'zombie' },
+  { pattern: /\u4ed9\u4fa0|\u4fee\u771f|\u4fee\u4ed9|\u4ed9\u754c|\u5b97\u95e8/u, key: 'xianxia' },
+  { pattern: /\u6b66\u4fa0|\u6c5f\u6e56|\u4fa0\u5ba2|\u6b66\u6797|\u9556\u5c40|\u5e2e\u4f1a/u, key: 'wuxia' },
+  { pattern: /\u7384\u5e7b|\u6597\u7834|\u6597\u6c14|\u5347\u7ea7/u, key: 'fantasy' },
+  { pattern: /\u60ac\u7591|\u63a8\u7406|\u5211\u4fa6|\u4fa6\u67e5|\u8c03\u67e5|\u793e\u4f1a\u6d3e|\u672c\u683c|\u7f6a\u6848|\u65e7\u6848/u, key: 'modern-mystery' },
+  { pattern: /\u90fd\u5e02\u5f02\u80fd|\u5f02\u80fd|\u73b0\u4ee3\u5f02\u80fd|\u8d85\u80fd\u529b|\u89c9\u9192/u, key: 'urban-ability' },
+  { pattern: /\u897f\u5e7b|\u9b54\u6cd5|\u6559\u4f1a|\u738b\u56fd/u, key: 'western-fantasy' },
 ]
 
 function resolvePackKey(genreName?: string | null): GenreRulePackKey {

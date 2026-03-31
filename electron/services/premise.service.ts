@@ -21,9 +21,9 @@ import {
 } from '../../src/shared/story-settings'
 import { cleanAiFieldText, cleanAiValue } from '../../src/utils/text'
 import { getDb } from '../database/db'
-import { novels, tasks } from '../database/schema'
+import { characters, novels, tasks } from '../database/schema'
 import { safeParseAiJson } from '../utils/json'
-import { buildStoryProfile } from './context.service'
+import { buildStoryProfile, buildStoryRelationSummary } from './context.service'
 import { createTask, runChatTask, updateTask } from './task.service'
 
 interface PremiseContext {
@@ -36,6 +36,8 @@ interface PremiseContext {
   worldRulesSummary: string
   protagonistReference: string
   protagonistRule: string
+  writingContractSummary: string
+  relationSummary: string
   requirements: string
   currentSettings: StorySettingsDocument
 }
@@ -321,6 +323,8 @@ function buildPremiseCorePrompt(context: PremiseContext): string {
       `主角指代：${context.protagonistReference}`,
       `主角称呼规则：${context.protagonistRule}`,
     ].filter(Boolean).join('\n')),
+    section('写作类型', context.writingContractSummary),
+    section('关键人物关系', context.relationSummary),
     section('当前基础设定', [
       premise.positioning ? `作品定位：${premise.positioning}` : '',
       premise.coreHook ? `核心信息：${premise.coreHook}` : '',
@@ -333,6 +337,8 @@ function buildPremiseCorePrompt(context: PremiseContext): string {
       '不要把背景底盘直接写成已经发生的详细剧情。',
       '命名、概念和措辞必须符合正常中文表达，不准生造不连贯词语。',
       '人物行为、资源条件、制度压力、距离、风险和代价必须符合常识或已给定题材规则。',
+      '如果给了写作类型，就要把它翻译成读者预期、关系推进速度和语言边界，而不是只把标签换个说法写回去。',
+      '如果给了关系摘要，主角起点、核心信息和底层约束必须能解释关键关系为什么会这样拉扯。',
       '如果输入信息不足，就保守输出，不要幻觉补完。',
       context.requirements,
     ].filter(Boolean).join('\n')),
@@ -385,6 +391,8 @@ function buildWritingRulesPrompt(context: PremiseContext, premiseCore: PremiseCo
       `底层约束：${premiseCore.constraints}`,
       premiseCore.languageGuardrails ? `语言边界：${premiseCore.languageGuardrails}` : '',
     ].filter(Boolean).join('\n')),
+    section('写作类型', context.writingContractSummary),
+    section('关键人物关系', context.relationSummary),
     section('当前写作规则', [
       writingRules.antiAiFlavor ? `去 AI 腔：${writingRules.antiAiFlavor}` : '',
       writingRules.commonSenseRules ? `常识约束：${writingRules.commonSenseRules}` : '',
@@ -400,6 +408,8 @@ function buildWritingRulesPrompt(context: PremiseContext, premiseCore: PremiseCo
       '不要写“语言优美”“富有张力”这类空泛要求。',
       '禁用表达必须是具体词类、句式类或命名类问题，不是泛泛提醒。',
       '常识约束必须能直接用于限制后续人物行为与情节推进。',
+      '如果有爽文、写实、言情等写作类型，要把它们翻译成节奏、对白和关系推进规则。',
+      '如果有关键关系摘要，要明确不同关系不能共用同一种语气，家人、朋友、陌生人、上下级和亲密关系要有不同说话方式。',
       context.requirements,
     ].filter(Boolean).join('\n')),
     section('输出质量底线', buildOutputQualityRules([
@@ -439,6 +449,8 @@ function buildWritingRulesPatchPrompt(
       `底层约束：${premiseCore.constraints}`,
       premiseCore.languageGuardrails ? `语言边界：${premiseCore.languageGuardrails}` : '',
     ].filter(Boolean).join('\n')),
+    section('写作类型', context.writingContractSummary),
+    section('关键人物关系', context.relationSummary),
     section('当前已有写作规则', [
       currentRules.antiAiFlavor ? `去 AI 腔：${currentRules.antiAiFlavor}` : '去 AI 腔：<待补>',
       currentRules.commonSenseRules ? `常识约束：${currentRules.commonSenseRules}` : '常识约束：<待补>',
@@ -549,6 +561,7 @@ async function loadPremiseContext(data: PremiseGenerationRequest): Promise<Premi
   const profile = await buildStoryProfile(data.novelId)
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, data.novelId)).all()[0]
+  const allCharacters = db.select().from(characters).where(eq(characters.novelId, data.novelId)).all()
 
   if (!novel) {
     throw new Error('小说不存在')
@@ -564,6 +577,13 @@ async function loadPremiseContext(data: PremiseGenerationRequest): Promise<Premi
     worldRulesSummary: profile.worldRulesSummary,
     protagonistReference: profile.protagonistReference,
     protagonistRule: profile.protagonistRule,
+    writingContractSummary: profile.writingContractSummary,
+    relationSummary: buildStoryRelationSummary(
+      data.novelId,
+      allCharacters,
+      [profile.protagonistReference, profile.storyGoal, profile.coreConflict, profile.themeVoiceSummary].filter(Boolean).join('\n'),
+      6,
+    ),
     requirements: clean(data.requirements),
     currentSettings: parseStorySettingsDocument(novel.settingsJson),
   }

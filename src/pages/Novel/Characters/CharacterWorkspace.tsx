@@ -14,6 +14,7 @@ import AIGenerateButton from '../../../components/AIGenerateButton'
 import type {
   Character,
   CharacterBatchGenerationOptions,
+  CharacterRelation,
   CharacterDetailContext,
   CharacterFilterOptions,
   CharacterGenerationOptions,
@@ -26,6 +27,7 @@ import type {
 import { useNovelStore } from '../../../stores/novel.store'
 import { getCharacterBatchPreset } from '../../../shared/creation-tools'
 import { getFactionNameOptions, getPowerSystemNameOptions, getSpeciesNameOptions, parseWorldRulesJson } from '../../../shared/genre-system'
+import { CHARACTER_RELATION_PRESETS, getCharacterRelationLabel, normalizeCharacterRelationLevel } from '../../../shared/character-relations'
 import { buildDraftMessages, normalizeOptionalNumber, normalizeStringArray, parseDraftJson } from '../shared/ai-draft'
 import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel, WorkspaceTip } from '../components/WorkspaceShell'
 import '../components/boards.css'
@@ -66,6 +68,18 @@ interface ProtagonistFormValues extends CharacterGenerationOptions {
   forbiddenNameText?: string[]
 }
 
+interface RelationFormValues {
+  charBId: number
+  relationType: string
+  relationLabel?: string
+  bilateral?: boolean
+  description?: string
+  intimacyLevel?: number
+  tensionLevel?: number
+  interactionStyle?: string
+  subtextRule?: string
+}
+
 const PAGE_SIZE = 24
 const EMPTY_PAGE: PagedResult<Character> = { items: [], page: 1, pageSize: PAGE_SIZE, total: 0, hasMore: false }
 const EMPTY_STATS: CharacterStats = { total: 0, confirmedCount: 0, draftCount: 0, protagonistCount: 0, majorCount: 0, antagonistCount: 0, relationCount: 0, speciesCount: 0 }
@@ -91,16 +105,7 @@ const ROLE_OPTIONS = [
 
 const RELATION_OPTIONS = [
   { value: 'all', label: '全部关系' },
-  { value: 'friend', label: '朋友' },
-  { value: 'enemy', label: '敌人' },
-  { value: 'family', label: '家人' },
-  { value: 'colleague', label: '同事' },
-  { value: 'mentor_student', label: '师徒' },
-  { value: 'ally', label: '同盟' },
-  { value: 'subordinate', label: '从属' },
-  { value: 'rival', label: '竞争' },
-  { value: 'lover', label: '恋人' },
-  { value: 'acquaintance', label: '陌生 / 泛识' },
+  ...CHARACTER_RELATION_PRESETS.map((preset) => ({ value: preset.value, label: preset.label })),
 ]
 
 const ENTITY_TYPE_OPTIONS = [
@@ -217,7 +222,18 @@ function serialize(values: CharacterFormValues): Partial<Character> {
 }
 
 function relationLabel(type?: string, fallback?: string) {
-  return RELATION_OPTIONS.find((item) => item.value === type)?.label || fallback || type || '关系待补'
+  return getCharacterRelationLabel(type, fallback)
+}
+
+function buildRelationBody(relation: CharacterRelation) {
+  const parts = [
+    relation.description,
+    relation.interactionStyle ? '互动：' + relation.interactionStyle : '',
+    relation.subtextRule ? '潜台词：' + relation.subtextRule : '',
+    relation.intimacyLevel ? '亲密 ' + relation.intimacyLevel + '/5' : '',
+    relation.tensionLevel ? '张力 ' + relation.tensionLevel + '/5' : '',
+  ].filter(Boolean)
+  return parts.join('；') || '需要补充这个关系的具体拉扯。'
 }
 
 export default function CharacterWorkspace({ novelId }: Props) {
@@ -225,6 +241,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
   const [form] = Form.useForm<CharacterFormValues>()
   const [batchForm] = Form.useForm<CharacterBatchFormValues>()
   const [protagonistForm] = Form.useForm<ProtagonistFormValues>()
+  const [relationForm] = Form.useForm<RelationFormValues>()
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [generating, setGenerating] = useState(false)
@@ -240,6 +257,10 @@ export default function CharacterWorkspace({ novelId }: Props) {
   const [creating, setCreating] = useState(false)
   const [batchOpen, setBatchOpen] = useState(false)
   const [protagonistOpen, setProtagonistOpen] = useState(false)
+  const [relationModalOpen, setRelationModalOpen] = useState(false)
+  const [editingRelation, setEditingRelation] = useState<CharacterRelation | null>(null)
+  const [relationSaving, setRelationSaving] = useState(false)
+  const [relationCharacterOptions, setRelationCharacterOptions] = useState<Character[]>([])
   const [page, setPage] = useState(1)
   const [keyword, setKeyword] = useState('')
   const [roleFilter, setRoleFilter] = useState<Character['roleType'] | 'all'>('all')
@@ -264,6 +285,12 @@ export default function CharacterWorkspace({ novelId }: Props) {
     value: item.itemName,
     label: `${item.itemName}${item.recordStatus === 'draft' ? ' · 草稿' : ''}`,
   })), [itemOptions])
+  const relationCharacterSelectOptions = useMemo(() => relationCharacterOptions
+    .filter((character) => character.id !== selectedCharacter?.id)
+    .map((character) => ({
+      value: character.id,
+      label: character.fullName + (character.roleType ? ' · ' + ROLE_META[character.roleType].label : ''),
+    })), [relationCharacterOptions, selectedCharacter?.id])
   const selectedLead = selectedCharacter
     ? selectedCharacter.innerConflict || selectedCharacter.goals || selectedCharacter.firstImpression || selectedCharacter.background || '先把这个角色的动机、关系和资源绑紧。'
     : creating
@@ -299,6 +326,15 @@ export default function CharacterWorkspace({ novelId }: Props) {
     const baseItems = await window.electron.item.search(novelId, '', 'instance', 24)
     setItemOptions(mergeById(baseItems, context?.relatedItems || []))
   }, [novelId])
+
+  const searchRelationCharacters = useCallback(async (value = '') => {
+    const rows = await window.electron.character.search(novelId, value, 80)
+    const merged = mergeById(
+      rows.filter((character) => character.id !== selectedCharacter?.id),
+      [...detailContext.relatedCharacters, ...pageData.items].filter((character) => character.id !== selectedCharacter?.id),
+    )
+    setRelationCharacterOptions(merged.filter((character) => character.id !== selectedCharacter?.id))
+  }, [detailContext.relatedCharacters, novelId, pageData.items, selectedCharacter?.id])
 
   const loadCharacterDetail = useCallback(async (characterId: number) => {
     const [character, context] = await Promise.all([
@@ -543,6 +579,56 @@ export default function CharacterWorkspace({ novelId }: Props) {
     }
   }
 
+  const openRelationModal = useCallback(async (relation?: CharacterRelation) => {
+    if (!selectedCharacter?.id) return
+    await searchRelationCharacters('')
+    setEditingRelation(relation || null)
+    relationForm.setFieldsValue({
+      charBId: relation ? (relation.charAId === selectedCharacter.id ? relation.charBId : relation.charAId) : undefined,
+      relationType: relation?.relationType || 'friend',
+      relationLabel: relation?.relationLabel || '',
+      bilateral: relation ? relation.bilateral !== 0 : true,
+      description: relation?.description || '',
+      intimacyLevel: relation?.intimacyLevel,
+      tensionLevel: relation?.tensionLevel,
+      interactionStyle: relation?.interactionStyle || '',
+      subtextRule: relation?.subtextRule || '',
+    })
+    setRelationModalOpen(true)
+  }, [relationForm, searchRelationCharacters, selectedCharacter])
+
+  const handleSaveRelation = async () => {
+    if (!selectedCharacter?.id) return
+    const values = await relationForm.validateFields()
+    setRelationSaving(true)
+    try {
+      await window.electron.character.upsertRelation({
+        novelId,
+        charAId: selectedCharacter.id,
+        charBId: values.charBId,
+        relationType: values.relationType,
+        relationLabel: values.relationLabel?.trim() || undefined,
+        description: values.description?.trim() || undefined,
+        bilateral: values.bilateral === false ? 0 : 1,
+        intimacyLevel: normalizeCharacterRelationLevel(values.intimacyLevel),
+        tensionLevel: normalizeCharacterRelationLevel(values.tensionLevel),
+        interactionStyle: values.interactionStyle?.trim() || undefined,
+        subtextRule: values.subtextRule?.trim() || undefined,
+      })
+      setRelationModalOpen(false)
+      setEditingRelation(null)
+      relationForm.resetFields()
+      await loadPage(selectedCharacter.id, page)
+      await loadGraph()
+      message.success(editingRelation ? '关系已更新。' : '关系已保存。')
+    } catch (error) {
+      console.error(error)
+      message.error('关系保存失败。')
+    } finally {
+      setRelationSaving(false)
+    }
+  }
+
   const handleClear = async () => {
     Modal.confirm({
       title: '清空人物系统？',
@@ -781,6 +867,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
                     })
                   }}
                 />
+                {selectedCharacter ? <Button icon={<ApartmentOutlined />} onClick={() => { void openRelationModal() }}>编辑关系</Button> : null}
                 {selectedCharacter ? <Button danger icon={<DeleteOutlined />} onClick={() => void handleDelete()}>删除</Button> : null}
                 <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>保存并确认</Button>
               </Space>
@@ -873,9 +960,12 @@ export default function CharacterWorkspace({ novelId }: Props) {
                       {detailContext.relatedRelations.length === 0 ? <div>这个角色还没有关系链。</div> : detailContext.relatedRelations.map((relation) => {
                         const other = detailContext.relatedCharacters.find((item) => item.id === (relation.charAId === selectedCharacter.id ? relation.charBId : relation.charAId))
                         return (
-                          <div key={relation.id} className="novel-character-linked-row">
-                            <strong>{other?.fullName || '未知人物'} · {relation.relationLabel || relationLabel(relation.relationType)}</strong>
-                            <span>{relation.description || '需要补充这个关系的具体拉扯。'}</span>
+                          <div key={relation.id} className="novel-character-linked-row" style={{ display: "grid", gap: 6 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+                              <strong>{other?.fullName || '未知人物'} · {relation.relationLabel || relationLabel(relation.relationType)}</strong>
+                              <Button type="link" size="small" onClick={() => { void openRelationModal(relation) }}>编辑</Button>
+                            </div>
+                            <span>{buildRelationBody(relation)}</span>
                           </div>
                         )
                       })}
@@ -887,6 +977,49 @@ export default function CharacterWorkspace({ novelId }: Props) {
           </WorkspacePanel>
         </div>
       </div>
+
+      <Modal
+        title={editingRelation ? '编辑人物关系' : '新建人物关系'}
+        open={relationModalOpen}
+        forceRender
+        onCancel={() => {
+          setRelationModalOpen(false)
+          setEditingRelation(null)
+          relationForm.resetFields()
+        }}
+        onOk={() => void handleSaveRelation()}
+        confirmLoading={relationSaving}
+        okText={editingRelation ? '保存关系' : '创建关系'}
+      >
+        <Form form={relationForm} layout="vertical">
+          <Form.Item name="charBId" label="关联角色" rules={[{ required: true, message: '请选择关联角色' }]}>
+            <Select
+              showSearch
+              filterOption={false}
+              options={relationCharacterSelectOptions}
+              onFocus={() => { void searchRelationCharacters('') }}
+              onSearch={(value) => { void searchRelationCharacters(value) }}
+              placeholder="选择当前角色要建立关系的人物"
+            />
+          </Form.Item>
+          <div className="novel-grid novel-grid--2">
+            <Form.Item name="relationType" label="关系类型" rules={[{ required: true, message: '请选择关系类型' }]}>
+              <Select options={CHARACTER_RELATION_PRESETS.map((preset) => ({ value: preset.value, label: preset.label }))} />
+            </Form.Item>
+            <Form.Item name="bilateral" label="关系方向" initialValue={true}>
+              <Select options={[{ value: true, label: '双向关系' }, { value: false, label: '单向 / 不对称' }]} />
+            </Form.Item>
+          </div>
+          <Form.Item name="relationLabel" label="关系简称"><Input placeholder="例如：旧同桌、表面同盟、点头之交" /></Form.Item>
+          <Form.Item name="description" label="当前关系状态"><Input.TextArea rows={3} placeholder="用一句话写清这两个人目前怎么拉扯。" /></Form.Item>
+          <div className="novel-grid novel-grid--2">
+            <Form.Item name="intimacyLevel" label="亲密度 1-5"><InputNumber min={1} max={5} style={{ width: "100%" }} /></Form.Item>
+            <Form.Item name="tensionLevel" label="张力度 1-5"><InputNumber min={1} max={5} style={{ width: "100%" }} /></Form.Item>
+          </div>
+          <Form.Item name="interactionStyle" label="互动方式"><Input.TextArea rows={2} placeholder="例如：嘴硬、互相打断、很少直视对方、称呼始终很客气。" /></Form.Item>
+          <Form.Item name="subtextRule" label="潜台词规则"><Input.TextArea rows={2} placeholder="例如：明明在关心，但谁都不先承认；永远不直接提旧事。" /></Form.Item>
+        </Form>
+      </Modal>
 
       <Modal title="AI 生成主角" open={protagonistOpen} forceRender onCancel={() => setProtagonistOpen(false)} onOk={() => void handleGenerateProtagonist()} confirmLoading={generating} okText="生成主角">
         <Form form={protagonistForm} layout="vertical">

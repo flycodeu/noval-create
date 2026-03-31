@@ -2,7 +2,6 @@
   GLOBAL_WRITING_RULES,
   buildAvoidanceSection,
   buildVariationHint,
-  expandBackgroundPrompt as rawExpandBackgroundPrompt,
   protagonistPrompt as rawProtagonistPrompt,
   batchCharacterPrompt as rawBatchCharacterPrompt,
   regenerateCharacterPrompt as rawRegenerateCharacterPrompt,
@@ -27,6 +26,7 @@
   type RewriteParagraphPromptInput,
   type SubplotExpandPromptInput,
 } from '../../src/shared/prompt-library'
+import { getBuiltinGenreRules } from '../../src/shared/genre-system'
 import { applyPromptOverride } from './prompt-override.service'
 
 export { GLOBAL_WRITING_RULES }
@@ -58,6 +58,119 @@ type ExtendedRegenerateCharacterPromptInput = RegenerateCharacterPromptInput & {
   rejectedDigests?: string[]
 }
 
+export interface BackgroundExpansionResult {
+  expanded_background: string
+  titles: string[]
+  synopsis: string
+}
+
+export interface BackgroundNamingViolation {
+  token: string
+  kind: 'person' | 'place' | 'org'
+  placeholder: string
+}
+
+interface BackgroundNamingRule {
+  kind: BackgroundNamingViolation['kind']
+  placeholder: string
+  pattern: RegExp
+}
+
+const GENERIC_BACKGROUND_NAME_TOKENS = new Set([
+  '主角',
+  '主人公',
+  '角色',
+  '人物',
+  '身份',
+  '处境',
+  '背景',
+  '设定',
+  '城市',
+  '城镇',
+  '县城',
+  '小镇',
+  '组织',
+  '机构',
+  '部门',
+  '单位',
+  '工厂',
+  '厂区',
+  '报社',
+  '公司',
+  '集团',
+  '学校',
+  '学院',
+  '大学',
+  '基地',
+  '据点',
+  '避难所',
+  '区域',
+  '地方',
+  '城区',
+  '代号',
+  '这座城市',
+  '某个机构',
+  '某家工厂',
+  '某家报社',
+  '某家公司',
+  '某所学校',
+  '某个基地',
+])
+
+const BACKGROUND_FALLBACK_TITLE_MAP: Array<{ match: RegExp; titles: string[] }> = [
+  { match: /\u60ac\u7591|\u63a8\u7406|\u63a2\u79d8/u, titles: ['\u7f3a\u9875\u5377\u5b97', '\u5c01\u5b58\u8bb0\u5f55', '\u503c\u73ed\u5ba4\u7559\u6863'] },
+  { match: /\u73b0\u4ee3|\u90fd\u5e02/u, titles: ['\u65e7\u57ce\u6162\u7ebf', '\u665a\u73ed\u4e4b\u540e', '\u7a7a\u767d\u8bb0\u5f55'] },
+  { match: /\u8d5b\u535a/u, titles: ['\u5931\u5e8f\u8fb9\u754c', '\u9759\u9ed8\u534f\u8bae', '\u7070\u57df\u56de\u58f0'] },
+  { match: /\u79d1\u5e7b/u, titles: ['\u5931\u8861\u5e74\u4ee3', '\u8fb9\u754c\u56de\u58f0', '\u9759\u9ed8\u822a\u7ebf'] },
+  { match: /\u672b\u4e16|\u4e27\u5c38/u, titles: ['\u4f59\u70ec\u4e4b\u540e', '\u5931\u5b88\u8fb9\u7ebf', '\u9759\u9ed8\u8865\u7ed9'] },
+  { match: /\u6b66\u4fa0/u, titles: ['\u6e21\u53e3\u65e7\u4e8b', '\u6c5f\u6e56\u56de\u6f6e', '\u65ad\u7891\u4e4b\u524d'] },
+  { match: /\u7384\u5e7b|\u4fee\u771f|\u4ed9\u4fa0/u, titles: ['\u5c71\u95e8\u65e7\u96ea', '\u7075\u8109\u56de\u58f0', '\u7981\u5730\u6765\u4fe1'] },
+  { match: /\u53e4\u4ee3|\u5386\u53f2/u, titles: ['\u65e7\u671d\u98ce\u58f0', '\u957f\u591c\u672a\u592e', '\u5c40\u4e2d\u4eba'] },
+]
+
+const BACKGROUND_NAMING_RULES: BackgroundNamingRule[] = [
+  {
+    kind: 'person',
+    placeholder: '主角',
+    pattern: /(?:主角|主人公|男主|女主)(?:叫|名叫|名为|是)?[“"'《「『]?([\u4e00-\u9fff·]{2,4})[”"'》」』]?(?=[，。；：、“”"'《》「」『』\s]|是|在|从|将|已)/gu,
+  },
+  {
+    kind: 'place',
+    placeholder: '这座城市',
+    pattern: /(?:这座城市|这座城|城市|城镇|县城|小镇|都城|城邦|国家|王朝|帝国|联邦)(?:叫|名叫|名为|被称为)[“"'《「『]?([\u4e00-\u9fffA-Za-z·]{2,12})[”"'》」』]?/gu,
+  },
+  {
+    kind: 'org',
+    placeholder: '某个机构',
+    pattern: /(?:组织|机构|部门|单位)(?:叫|名叫|名为|被称为)[“"'《「『]?([\u4e00-\u9fffA-Za-z·]{2,12})[”"'》」』]?/gu,
+  },
+  {
+    kind: 'org',
+    placeholder: '某家工厂',
+    pattern: /(?:工厂|机械厂|厂区)(?:叫|名叫|名为|被称为)[“"'《「『]?([\u4e00-\u9fffA-Za-z·]{2,12})[”"'》」』]?/gu,
+  },
+  {
+    kind: 'org',
+    placeholder: '某家报社',
+    pattern: /(?:报社|报馆)(?:叫|名叫|名为|被称为)[“"'《「『]?([\u4e00-\u9fffA-Za-z·]{2,12})[”"'》」』]?/gu,
+  },
+  {
+    kind: 'org',
+    placeholder: '某家公司',
+    pattern: /(?:公司|集团)(?:叫|名叫|名为|被称为)[“"'《「『]?([\u4e00-\u9fffA-Za-z·]{2,12})[”"'》」』]?/gu,
+  },
+  {
+    kind: 'org',
+    placeholder: '某所学校',
+    pattern: /(?:学校|学院|大学)(?:叫|名叫|名为|被称为)[“"'《「『]?([\u4e00-\u9fffA-Za-z·]{2,12})[”"'》」』]?/gu,
+  },
+  {
+    kind: 'org',
+    placeholder: '某个基地',
+    pattern: /(?:基地|据点|避难所)(?:叫|名叫|名为|被称为)[“"'《「『]?([\u4e00-\u9fffA-Za-z·]{2,12})[”"'》」』]?/gu,
+  },
+]
+
 function appendPromptSection(prompt: string, title: string, lines: string[]): string {
   const body = lines.map((line) => line.trim()).filter(Boolean).join('\n')
   if (!body) return prompt
@@ -70,6 +183,237 @@ function appendPromptText(prompt: string, text: string): string {
   return `${prompt}\n\n${normalized}`
 }
 
+function appendMandatoryExpandBackgroundGuardrails(prompt: string): string {
+  return appendPromptSection(prompt, '不可覆盖的硬约束', [
+    '- 只允许沿用用户原始背景里已经明确出现的专有名词。',
+    '- 如果用户没有明确给出人名、城市名、组织名、工厂名、学校名、机构名、地名或代号，禁止擅自补出这些名字。',
+    '- 需要指代时只能使用“主角”“这座城市”“某家工厂”“某个机构”“这片区域”等泛称。',
+    '- 不要把泛称换成带引号的伪专名，不要发明简称、旧称、别名或代号。',
+    '- 标题、简介和扩展背景都必须遵守同样的命名规则。',
+    '- 只输出 JSON：{"expanded_background":"...","titles":["A","B","C"],"synopsis":"..."}',
+  ])
+}
+function appendGenreSpecificExpandBackgroundFocus(prompt: string, genre: string): string {
+  const genreKey = getBuiltinGenreRules(genre).genreProfile.key
+  if (genreKey !== 'modern-mystery') return prompt
+
+  return appendPromptSection(prompt, '现代悬疑校准', [
+    '- 必须给出一个可追查的异常切口，例如旧案缺页、记录矛盾、封存卷宗、监控空窗、失联人员或厂区旧事故。',
+    '- 必须写出主角为什么能接触这条线索，以及第一道现实阻力来自哪里：权限、人情、单位流程、面子、维稳或证据缺口。',
+    '- 场域优先使用县城、老工业区、沿江港区、报社、医院、学校、街道、分局、档案馆、厂办等现实空间。',
+    '- 标题优先从证据载体、地点纹理、时间锚点和职业现场取词，不要堆“迷雾”“深渊”“命运”这类万能词。',
+    '- 如果用户已经给了人名地名，沿用并保持现实质感；如果没有给，就继续使用泛称。',
+  ])
+}
+
+function normalizeBackgroundText(text: string): string {
+  return text
+    .replace(/\r\n/g, '\n')
+    .replace(/\uFEFF/g, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim()
+}
+
+function normalizeBackgroundTitle(text: string): string {
+  return normalizeBackgroundText(text)
+    .replace(/[\r\n]/g, ' ')
+    .replace(/[“”"'《》「」『』]/g, '')
+    .replace(/\s+/g, '')
+    .trim()
+}
+
+function uniqueValues<T>(values: T[]): T[] {
+  return [...new Set(values)]
+}
+
+function fallbackBackgroundTitles(genre: string): string[] {
+  const matched = BACKGROUND_FALLBACK_TITLE_MAP.find((entry) => entry.match.test(genre))
+  return matched?.titles.slice() || ['未竟之事', '暗线初起', '风暴前夜']
+}
+
+function finalizeBackgroundTitles(titles: string[], genre: string): string[] {
+  const normalized = uniqueValues(
+    titles
+      .map(normalizeBackgroundTitle)
+      .filter(Boolean),
+  )
+
+  for (const fallback of fallbackBackgroundTitles(genre)) {
+    if (normalized.length >= 3) break
+    if (!normalized.includes(fallback)) normalized.push(fallback)
+  }
+
+  return normalized.slice(0, 3)
+}
+
+function clipBackgroundSynopsis(text: string): string {
+  const normalized = normalizeBackgroundText(text)
+  if (normalized.length <= 180) return normalized
+  return `${normalized.slice(0, 176)}...`
+}
+
+function buildFallbackBackgroundSynopsis(source: string): string {
+  const normalized = normalizeBackgroundText(source)
+  if (!normalized) return ''
+  if (normalized.length <= 160) return normalized
+  return `${normalized.slice(0, 156)}...`
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function replaceBackgroundToken(text: string, token: string, placeholder: string): string {
+  if (!text || !token) return text
+  const quoted = new RegExp(`[“"'《「『]?${escapeRegExp(token)}[”"'》」』]?`, 'gu')
+  return text.replace(quoted, placeholder)
+}
+
+function normalizeBackgroundPlaceholders(text: string): string {
+  return normalizeBackgroundText(text)
+    .replace(/这座城市(?:叫|名叫|名为|被称为)这座城市/gu, '这座城市')
+    .replace(/某个机构(?:叫|名叫|名为|被称为)某个机构/gu, '某个机构')
+    .replace(/某家工厂(?:叫|名叫|名为|被称为)某家工厂/gu, '某家工厂')
+    .replace(/某家报社(?:叫|名叫|名为|被称为)某家报社/gu, '某家报社')
+    .replace(/某家公司(?:叫|名叫|名为|被称为)某家公司/gu, '某家公司')
+    .replace(/某所学校(?:叫|名叫|名为|被称为)某所学校/gu, '某所学校')
+    .replace(/某个基地(?:叫|名叫|名为|被称为)某个基地/gu, '某个基地')
+    .replace(/[“"'《》「」『』](主角|这座城市|某个机构|某家工厂|某家报社|某家公司|某所学校|某个基地)[“"'《》「」『』]/gu, '$1')
+    .replace(/(主角){2,}/gu, '主角')
+    .replace(/(这座城市){2,}/gu, '这座城市')
+    .replace(/(某个机构){2,}/gu, '某个机构')
+    .replace(/(某家工厂){2,}/gu, '某家工厂')
+    .replace(/(某家报社){2,}/gu, '某家报社')
+    .replace(/(某家公司){2,}/gu, '某家公司')
+    .replace(/(某所学校){2,}/gu, '某所学校')
+    .replace(/(某个基地){2,}/gu, '某个基地')
+}
+
+export function normalizeBackgroundExpansionPayload(
+  payload: unknown,
+  genre: string,
+  fallbackSource = '',
+): BackgroundExpansionResult {
+  const record = payload && typeof payload === 'object' && !Array.isArray(payload)
+    ? payload as Record<string, unknown>
+    : {}
+
+  const expandedBackground = normalizeBackgroundText(
+    (typeof record.expanded_background === 'string' ? record.expanded_background : '')
+    || (typeof record.expandedBackground === 'string' ? record.expandedBackground : '')
+    || fallbackSource,
+  )
+  const synopsis = clipBackgroundSynopsis(
+    (typeof record.synopsis === 'string' ? record.synopsis : '')
+    || buildFallbackBackgroundSynopsis(expandedBackground || fallbackSource),
+  )
+  const rawTitles = Array.isArray(record.titles)
+    ? record.titles.map((value) => (typeof value === 'string' ? value : ''))
+    : []
+
+  return {
+    expanded_background: expandedBackground,
+    synopsis,
+    titles: finalizeBackgroundTitles(rawTitles, genre),
+  }
+}
+
+export function collectForbiddenBackgroundNaming(
+  result: BackgroundExpansionResult,
+  originalInput: string,
+): BackgroundNamingViolation[] {
+  const content = [result.expanded_background, result.synopsis, ...result.titles].join('\n')
+  const findings: BackgroundNamingViolation[] = []
+
+  for (const rule of BACKGROUND_NAMING_RULES) {
+    for (const match of content.matchAll(rule.pattern)) {
+      const token = (match[1] || '').trim()
+      if (!token || token.length <= 1) continue
+      if (GENERIC_BACKGROUND_NAME_TOKENS.has(token)) continue
+      if (originalInput.includes(token)) continue
+      findings.push({ token, kind: rule.kind, placeholder: rule.placeholder })
+    }
+  }
+
+  const seen = new Set<string>()
+  return findings.filter((item) => {
+    const key = `${item.kind}:${item.token}:${item.placeholder}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+export function sanitizeBackgroundExpansionResult(
+  result: BackgroundExpansionResult,
+  violations: BackgroundNamingViolation[],
+  genre: string,
+): BackgroundExpansionResult {
+  const ordered = [...violations].sort((left, right) => right.token.length - left.token.length)
+
+  const sanitizeText = (value: string) => ordered.reduce(
+    (current, item) => replaceBackgroundToken(current, item.token, item.placeholder),
+    value,
+  )
+
+  const expandedBackground = normalizeBackgroundPlaceholders(sanitizeText(result.expanded_background))
+  const synopsis = clipBackgroundSynopsis(
+    normalizeBackgroundPlaceholders(sanitizeText(result.synopsis || expandedBackground)),
+  )
+  const titles = finalizeBackgroundTitles(
+    result.titles.map((title) => ordered.reduce(
+      (current, item) => replaceBackgroundToken(current, item.token, ''),
+      title,
+    )),
+    genre,
+  )
+
+  return {
+    expanded_background: expandedBackground,
+    synopsis,
+    titles,
+  }
+}
+
+export function buildBackgroundExpansionRepairPrompt(params: {
+  userBackground: string
+  genre: string
+  worldTemplateSummary?: string
+  invalidResult: BackgroundExpansionResult
+  violations: BackgroundNamingViolation[]
+}): string {
+  const violationText = params.violations
+    .map((item) => `${item.token}（${item.kind === 'person' ? '人物名' : item.kind === 'place' ? '地点名' : '组织名'}）`)
+    .join('、')
+
+  return [
+    '下面这份“背景扩写”结果违反了命名约束，请只做收敛修复，不要重写成另一套故事。',
+    '',
+    '【用户原始输入】',
+    `题材：${params.genre}`,
+    `背景：${params.userBackground}`,
+    params.worldTemplateSummary ? `世界模板参考：${params.worldTemplateSummary}` : '',
+    '',
+    '【发现的问题】',
+    `以下名字不在用户原始输入里，却被擅自补出来了：${violationText}`,
+    '',
+    '【修复要求】',
+    '1. 只允许保留用户原始输入里已经明确出现过的专有名词。',
+    '2. 所有新增人物名统一改成“主角”。',
+    '3. 所有新增城市/地区名统一改成“这座城市”或“这片区域”。',
+    '4. 所有新增组织/工厂/报社/公司/学校/基地名统一改成泛称，例如“某个机构”“某家工厂”“某家报社”。',
+    '5. 只做必要替换和轻微润色，让语句自然，不要改变故事方向、题材和冲突。',
+    '6. 标题、简介和扩展背景都要同步修正。',
+    '',
+    '【待修复结果】',
+    JSON.stringify(params.invalidResult, null, 2),
+    '',
+    '只输出 JSON：{"expanded_background":"...","titles":["A","B","C"],"synopsis":"..."}',
+  ].filter(Boolean).join('\n')
+}
+
 export function expandBackgroundPrompt(params: {
   userBackground: string
   genre: string
@@ -79,10 +423,42 @@ export function expandBackgroundPrompt(params: {
     ...params,
     worldTemplateSummary: params.worldTemplateSummary || '',
   }
-  const fallback = rawExpandBackgroundPrompt(normalizedParams)
-  return applyPromptOverride('expandBackground', fallback, normalizedParams)
+  const genreKey = getBuiltinGenreRules(normalizedParams.genre).genreProfile.key
+  const isModernMystery = genreKey === 'modern-mystery'
+  const fallback = [
+    '你在补一份新小说的开篇背景。',
+    '目标是把开局底盘写稳：时代环境、日常规则、制度压力、资源约束、危险来源和主角所处位置。',
+    '不要提前展开中后期剧情，不要偷写真相、终局、反转或完整事件链。',
+    '',
+    '【已有信息】',
+    `用户背景：${normalizedParams.userBackground}`,
+    `题材：${normalizedParams.genre}`,
+    normalizedParams.worldTemplateSummary ? `世界模板参考：${normalizedParams.worldTemplateSummary}` : '',
+    '',
+    '【本次任务】',
+    '1. 写一段 300-500 字的扩展背景，只补当前可直接开写的处境和压力。',
+    '2. 给出 3 个标题建议，标题要贴题材、贴冲突，不要像宣传语。',
+    '3. 写一段 120-180 字的简介，直接点明开局处境、驱动力和最大阻力。',
+    ...(isModernMystery ? ['4. 现代悬疑必须交代可追查的异常切口、调查入口和第一道现实阻力。'] : []),
+    '',
+    '【写法要求】',
+    '1. 优先沿用用户已有设想，再补缺口，不要另起一套世界观。',
+    '2. 优先写具体处境、行动边界、制度摩擦、资源短缺、风险和代价，少写空泛气氛。',
+    '3. 允许写“首轮冲突的来源”，但不要直接写成详细剧情过程。',
+    '4. 语言要自然、克制、可引用，像编辑会留下来的项目底稿，不要写成广告文案。',
+    '5. 如果输入信息不够，就保守输出，不要靠幻觉补完。',
+    ...(isModernMystery ? [
+      '6. 现代悬疑必须给出异常切口、调查入口和现实阻力，不能只写压抑氛围。',
+      '7. 标题和简介优先从卷宗、记录、地点、时间、机构和职业现场取词。',
+    ] : []),
+    '',
+    '【输出格式】',
+    '只输出 JSON：{"expanded_background":"...","titles":["A","B","C"],"synopsis":"..."}',
+  ].filter(Boolean).join('\n')
+  const overridden = applyPromptOverride('expandBackground', fallback, normalizedParams)
+  const genreAligned = appendGenreSpecificExpandBackgroundFocus(overridden, normalizedParams.genre)
+  return appendMandatoryExpandBackgroundGuardrails(genreAligned)
 }
-
 export function protagonistPrompt(params: ExtendedProtagonistPromptInput): string {
   const baseParams: ProtagonistPromptInput = {
     novelTitle: params.novelTitle,
@@ -204,8 +580,9 @@ export function regenerateCharacterPrompt(params: ExtendedRegenerateCharacterPro
 
 export function characterRelationsPrompt(params: CharacterRelationsPromptInput): string {
   const fallback = appendPromptSection(rawCharacterRelationsPrompt(params), '关系类型补充', [
-    '- 在既有 friend / enemy / lover / parent_child / colleague / rival / mentor_student / acquaintance 基础上，也允许输出 family / ally / subordinate / benefactor / debtor / handler / teammate / spouse / ex_lover / political_partner。',
+    '- 关系类型只使用 stranger / acquaintance / friend / family / colleague / mentor_student / ally / subordinate / rival / lover / enemy，不要额外发明新枚举。',
     '- label 要写成读者一眼能懂的中文关系简称，例如“同门师兄妹”“互相利用”“表面同盟”。',
+    '- 如果关系明显是单向错位，可以把 bilateral 设为 false，并在 description 里写清双方认知差。',
   ])
   return applyPromptOverride('characterRelations', fallback, params as unknown as Record<string, unknown>)
 }

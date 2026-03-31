@@ -395,7 +395,7 @@ export function updateStoryVolume(
 ) {
   const db = getDb()
   const current = db.select().from(storyVolumes).where(eq(storyVolumes.id, id)).all()[0]
-  if (!current) throw new Error('Volume not found')
+  if (!current) throw new Error('卷不存在')
   db.update(storyVolumes).set({
     title: data.title !== undefined ? asText(data.title) : current.title,
     summary: data.summary !== undefined ? asText(data.summary) : current.summary,
@@ -410,12 +410,12 @@ export function reorderStoryVolumes(novelId: number, orderedIds: number[]) {
   const db = getDb()
   const rows = getVolumeRows(novelId)
   if (rows.length !== orderedIds.length) {
-    throw new Error('Volume count mismatch')
+    throw new Error('卷数量不匹配')
   }
 
   const existingIds = new Set(rows.map((row) => row.id))
   if (orderedIds.some((id) => !existingIds.has(id))) {
-    throw new Error('Volume ids are invalid')
+    throw new Error('卷 ID 无效')
   }
 
   orderedIds.forEach((id, index) => {
@@ -485,7 +485,7 @@ export function createStoryPart(
 ) {
   const db = getDb()
   const volume = db.select().from(storyVolumes).where(eq(storyVolumes.id, volumeId)).all()[0]
-  if (!volume) throw new Error('Volume not found')
+  if (!volume) throw new Error('卷不存在')
   const nextNumber = (getPartRows(volume.novelId).filter((part) => part.volumeId === volumeId).at(-1)?.partNumber || 0) + 1
   const result = db.insert(storyParts).values({
     novelId: volume.novelId,
@@ -511,7 +511,7 @@ export function updateStoryPart(
 ) {
   const db = getDb()
   const current = db.select().from(storyParts).where(eq(storyParts.id, id)).all()[0]
-  if (!current) throw new Error('Part not found')
+  if (!current) throw new Error('分册不存在')
   db.update(storyParts).set({
     title: data.title !== undefined ? asText(data.title) : current.title,
     summary: data.summary !== undefined ? asText(data.summary) : current.summary,
@@ -529,20 +529,20 @@ export function reorderStoryParts(novelId: number, operations: StoryPartReorderO
   const volumeRows = getVolumeRows(novelId)
 
   if (partRows.length !== operations.length) {
-    throw new Error('Part count mismatch')
+    throw new Error('分册数量不匹配')
   }
 
   const partById = new Map(partRows.map((part) => [part.id, part]))
   const volumeIds = new Set(volumeRows.map((volume) => volume.id))
   const operationIds = new Set(operations.map((item) => item.id))
   if (operationIds.size !== operations.length || operations.some((item) => !partById.has(item.id))) {
-    throw new Error('Part ids are invalid')
+    throw new Error('分册 ID 无效')
   }
   if (partRows.some((part) => !operationIds.has(part.id))) {
-    throw new Error('Part ids are incomplete')
+    throw new Error('分册 ID 不完整')
   }
   if (operations.some((item) => !volumeIds.has(item.volumeId))) {
-    throw new Error('Target volume ids are invalid')
+    throw new Error('目标卷 ID 无效')
   }
 
   operations.forEach((item) => {
@@ -574,16 +574,16 @@ export function reorderStoryParts(novelId: number, operations: StoryPartReorderO
 export function reorderStoryPartsInVolume(volumeId: number, orderedIds: number[]) {
   const db = getDb()
   const volume = db.select().from(storyVolumes).where(eq(storyVolumes.id, volumeId)).all()[0]
-  if (!volume) throw new Error('Volume not found')
+  if (!volume) throw new Error('卷不存在')
 
   const partRows = getPartRows(volume.novelId).filter((part) => part.volumeId === volumeId)
   if (partRows.length !== orderedIds.length) {
-    throw new Error('Part count mismatch')
+    throw new Error('分册数量不匹配')
   }
 
   const partIds = new Set(partRows.map((part) => part.id))
   if (new Set(orderedIds).size !== orderedIds.length || orderedIds.some((id) => !partIds.has(id))) {
-    throw new Error('Part ids are invalid')
+    throw new Error('分册 ID 无效')
   }
 
   orderedIds.forEach((id, index) => {
@@ -627,7 +627,7 @@ export function assignChapterToPart(chapterId: number, partId: number) {
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
   const part = db.select().from(storyParts).where(eq(storyParts.id, partId)).all()[0]
-  if (!chapter || !part) throw new Error('Chapter or part not found')
+  if (!chapter || !part) throw new Error('章节或分册不存在')
   db.update(chapters).set({
     volumeId: part.volumeId,
     partId: part.id,
@@ -663,7 +663,7 @@ export function createChapterSegment(
 ) {
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
-  if (!chapter) throw new Error('Chapter not found')
+  if (!chapter) throw new Error('章节不存在')
   ensureStoryStructure(chapter.novelId)
   const nextOrder = (listChapterSegments(chapterId).at(-1)?.segmentOrder || 0) + 1
   const result = db.insert(chapterSegments).values({
@@ -712,7 +712,7 @@ export function updateChapterSegment(
 ) {
   const db = getDb()
   const current = db.select().from(chapterSegments).where(eq(chapterSegments.id, id)).all()[0]
-  if (!current) throw new Error('Segment not found')
+  if (!current) throw new Error('片段不存在')
   db.update(chapterSegments).set({
     title: data.title !== undefined ? asText(data.title) : current.title,
     segmentType: data.segmentType !== undefined ? asText(data.segmentType) : current.segmentType,
@@ -740,7 +740,7 @@ export function deleteChapterSegment(id: number) {
   if (!current) return
   const siblings = listChapterSegments(current.chapterId)
   if (siblings.length <= 1) {
-    throw new Error('A chapter must keep at least one segment')
+    throw new Error('每章至少需要保留一个片段')
   }
   markTimelineEventsSegmentAnchorInvalid(id)
   db.delete(chapterSegments).where(eq(chapterSegments.id, id)).run()
@@ -760,11 +760,11 @@ export function reorderChapterSegments(chapterId: number, orderedIds: number[]) 
   const db = getDb()
   const segments = listChapterSegments(chapterId)
   if (segments.length !== orderedIds.length) {
-    throw new Error('Segment count mismatch')
+    throw new Error('片段数量不匹配')
   }
   const existingIds = new Set(segments.map((segment) => segment.id))
   if (orderedIds.some((id) => !existingIds.has(id))) {
-    throw new Error('Segment ids are invalid')
+    throw new Error('片段 ID 无效')
   }
   orderedIds.forEach((id, index) => {
     db.update(chapterSegments).set({
@@ -784,7 +784,7 @@ export function compileChapterFromSegments(
 ) {
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
-  if (!chapter) throw new Error('Chapter not found')
+  if (!chapter) throw new Error('章节不存在')
   ensureStoryStructure(chapter.novelId)
   const segments = listChapterSegments(chapterId)
   const compiledContent = segments
@@ -814,7 +814,7 @@ export function syncChapterToSegments(
 ) {
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
-  if (!chapter) throw new Error('Chapter not found')
+  if (!chapter) throw new Error('章节不存在')
   ensureStoryStructure(chapter.novelId)
   const segments = listChapterSegments(chapterId)
   if (segments.length === 0 && options.createIfMissing) {

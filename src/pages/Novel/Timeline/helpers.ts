@@ -66,7 +66,7 @@ export type NumericFilter = number | 'all'
 export const TIMELINE_TEXT = {
   pageEyebrow: '\u65f6\u95f4\u8f74',
   pageTitle: '\u4e8b\u4ef6\u65f6\u95f4\u8f74',
-  pageDescription: '\u670d\u52a1\u7aef\u67e5\u8be2\u3001\u5206\u9875\u5c55\u793a\u3001\u5c40\u90e8\u8be6\u60c5\u52a0\u8f7d\u3002',
+  pageDescription: '\u7edf\u4e00\u56de\u67e5\u4e8b\u4ef6\u987a\u5e8f\u3001\u56e0\u679c\u94fe\u548c\u7ed3\u6784\u843d\u70b9\u3002',
   refresh: '\u5237\u65b0',
   create: '\u65b0\u5efa\u4e8b\u4ef6',
   generate: 'AI \u5206\u6279\u751f\u6210',
@@ -450,3 +450,4 @@ export interface TimelineEntityOptions {
   locationOptions: MapNodeSummary[]
   volumes: StoryStructureVolumeSummary[]
 }
+

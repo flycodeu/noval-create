@@ -5,6 +5,7 @@ export type StoryGenreFamily =
   | 'fantasy'
   | 'scifi'
   | 'modern'
+  | 'mystery'
   | 'romance'
   | 'classical'
   | 'generic'
@@ -40,16 +41,16 @@ export interface ItemGenerationProfile {
 }
 
 const GENRE_RULES: Array<{ family: StoryGenreFamily; pattern: RegExp }> = [
-  { family: 'zombie', pattern: /丧尸|末日|病毒|尸潮|灾变/u },
-  { family: 'wuxia', pattern: /武侠|江湖|侠客|武林|镖局|帮会/u },
-  { family: 'xianxia', pattern: /仙侠|修真|修仙|宗门|仙界/u },
-  { family: 'fantasy', pattern: /玄幻|斗破|斗气|异界|魔幻升级/u },
-  { family: 'scifi', pattern: /科幻|未来|赛博|机甲|星际|外星/u },
-  { family: 'romance', pattern: /言情|恋爱|甜宠|情感/u },
-  { family: 'classical', pattern: /文言|古代|朝堂|宫廷|历史/u },
-  { family: 'modern', pattern: /现代|都市|现实|职场|校园/u },
+  { family: 'zombie', pattern: /\u4e27\u5c38|\u672b\u65e5|\u75c5\u6bd2|\u5c38\u6f6e|\u707e\u53d8/u },
+  { family: 'wuxia', pattern: /\u6b66\u4fa0|\u6c5f\u6e56|\u4fa0\u5ba2|\u6b66\u6797|\u9556\u5c40|\u5e2e\u4f1a/u },
+  { family: 'xianxia', pattern: /\u4ed9\u4fa0|\u4fee\u771f|\u4fee\u4ed9|\u5b97\u95e8|\u4ed9\u754c/u },
+  { family: 'fantasy', pattern: /\u7384\u5e7b|\u6597\u7834|\u6597\u6c14|\u5f02\u754c|\u9b54\u5e7b\u5347\u7ea7/u },
+  { family: 'scifi', pattern: /\u79d1\u5e7b|\u672a\u6765|\u8d5b\u535a|\u673a\u7532|\u661f\u9645|\u5916\u661f/u },
+  { family: 'romance', pattern: /\u8a00\u60c5|\u604b\u7231|\u751c\u5ba0|\u60c5\u611f/u },
+  { family: 'classical', pattern: /\u6587\u8a00|\u53e4\u4ee3|\u671d\u5802|\u5bab\u5ef7|\u5386\u53f2/u },
+  { family: 'mystery', pattern: /\u60ac\u7591|\u63a8\u7406|\u5211\u4fa6|\u4fa6\u67e5|\u8c03\u67e5|\u793e\u4f1a\u6d3e|\u672c\u683c|\u7f6a\u6848|\u65e7\u6848/u },
+  { family: 'modern', pattern: /\u73b0\u4ee3|\u90fd\u5e02|\u73b0\u5b9e|\u804c\u573a|\u6821\u56ed/u },
 ]
-
 const ITEM_PROFILES: Record<StoryGenreFamily, ItemGenerationProfile> = {
   zombie: {
     genreFamily: 'zombie',
@@ -343,6 +344,48 @@ const ITEM_PROFILES: Record<StoryGenreFamily, ItemGenerationProfile> = {
       },
     ],
   },
+  mystery: {
+    genreFamily: 'mystery',
+    title: '\u8c03\u67e5\u8bc1\u636e\u7269\u4ef6\u4f53\u7cfb',
+    overview: '\u73b0\u4ee3\u60ac\u7591\u91cd\u70b9\u4e0d\u662f\u552f\u7f8e\u9053\u5177\uff0c\u800c\u662f\u8bc1\u636e\u3001\u8bb0\u5f55\u3001\u901a\u8054\u548c\u573a\u6240\u7269\u4ef6\u600e\u4e48\u63a8\u52a8\u8c03\u67e5\u3002',
+    defaultBatch: 12,
+    beginnerTips: [
+      '\u4f18\u5148\u751f\u6210\u80fd\u6784\u6210\u7ebf\u7d22\u94fe\u7684\u7269\u4ef6\uff0c\u4e0d\u8981\u53ea\u5806\u6c1b\u56f4\u611f\u3002',
+      '\u540c\u4e00\u6837\u7269\u4ef6\u6700\u597d\u540c\u65f6\u53ef\u4ee5\u5145\u5f53\u8bc1\u636e\u3001\u8bef\u5bfc\u6216\u5173\u7cfb\u5f15\u4fe1\u3002',
+    ],
+    templates: [
+      {
+        key: 'records',
+        name: '\u6863\u6848\u4e0e\u8bb0\u5f55',
+        category: '\u8bb0\u5f55',
+        summary: '\u5377\u5b97\u3001\u767b\u8bb0\u7c3f\u3001\u503c\u73ed\u8bb0\u5f55\u548c\u901a\u8054\u6e05\u5355\u3002',
+        holders: '\u6863\u6848\u5ba4\u3001\u5185\u52e4\u4eba\u5458\u3001\u65e7\u5355\u4f4d\u77e5\u60c5\u4eba',
+        circulation: '\u5e38\u901a\u8fc7\u8c03\u9605\u3001\u590d\u5370\u3001\u79c1\u4e0b\u4f20\u9012\u6216\u5220\u6539\u6d41\u8f6c\u3002',
+        storyValue: '\u9002\u5408\u7528\u6765\u505a\u65f6\u95f4\u7ebf\u6821\u5bf9\u3001\u7f3a\u53f7\u8bc1\u660e\u548c\u65e7\u6848\u56de\u6536\u3002',
+        examples: ['\u5c01\u5b58\u5377\u5b97', '\u503c\u73ed\u8bb0\u5f55', 'U\u76d8', '\u901a\u8054\u6e05\u5355'],
+      },
+      {
+        key: 'scene-evidence',
+        name: '\u73b0\u573a\u9057\u7559\u7269',
+        category: '\u8bc1\u636e',
+        summary: '\u5e26\u6709\u65f6\u95f4\u3001\u5730\u70b9\u6216\u4eba\u9645\u6307\u5411\u7684\u5fae\u5c0f\u7269\u4ef6\u3002',
+        holders: '\u8c03\u67e5\u8005\u3001\u77e5\u60c5\u4eba\u3001\u5bf9\u624b\u6216\u73b0\u573a\u6e05\u7406\u8005',
+        circulation: '\u5f88\u5bb9\u6613\u88ab\u5ffd\u7565\u3001\u8f6c\u79fb\u6216\u88ab\u5f53\u6210\u65e5\u5e38\u6751\u6599\u3002',
+        storyValue: '\u80fd\u628a\u73b0\u573a\u7a7a\u95f4\u548c\u4eba\u7269\u884c\u52a8\u94fe\u771f\u6b63\u8fde\u8d77\u6765\u3002',
+        examples: ['\u65e7\u5de5\u724c', '\u6c61\u635f\u7968\u6839', '\u95e8\u7981\u5361', '\u6444\u50cf\u5934\u5b58\u50a8\u5361'],
+      },
+      {
+        key: 'private-items',
+        name: '\u79c1\u4eba\u751f\u6d3b\u7269\u4ef6',
+        category: '\u751f\u6d3b',
+        summary: '\u804a\u5929\u8bb0\u5f55\u3001\u7167\u7247\u3001\u8bca\u65ad\u4e66\u548c\u7a7a\u95f4\u6446\u4ef6\u3002',
+        holders: '\u53d7\u5bb3\u4eba\u5bb6\u5c5e\u3001\u5173\u952e\u8bc1\u4eba\u3001\u5931\u8054\u8005\u65e7\u53cb',
+        circulation: '\u901a\u5e38\u88ab\u9690\u85cf\uff0c\u4f46\u4e00\u65e6\u88ab\u627e\u5230\u5c31\u5e26\u6709\u5f88\u5f3a\u7684\u4eba\u7269\u6307\u5411\u3002',
+        storyValue: '\u9002\u5408\u505a\u60c5\u611f\u94a9\u5b50\u3001\u8bef\u5bfc\u7ebf\u7d22\u548c\u65e7\u4e8b\u56de\u58f0\u3002',
+        examples: ['\u65e7\u624b\u673a', '\u51b2\u5370\u7167\u7247', '\u75c5\u5386\u590d\u5370\u4ef6', '\u624b\u5199\u4fbf\u7b7e'],
+      },
+    ],
+  },
   romance: {
     genreFamily: 'romance',
     title: '情感线索物件体系',
@@ -531,6 +574,16 @@ export function getCharacterBatchPreset(genreName?: string | null, speciesOption
         genderRatio: '性别均衡，职业身份优先于年龄标签',
         helperRoles: ['技术员', '公司代表', '调查员', '实验体'],
         preferredSpecies: firstSpecies.length > 0 ? firstSpecies : ['人类', '机器人', '外星种族'],
+      }
+    case 'mystery':
+      return {
+        majorCount: 4,
+        minorCount: 5,
+        antagonistCount: 2,
+        supportingCount: 4,
+        genderRatio: '\u6027\u522b\u548c\u5e74\u9f84\u81ea\u7136\u5206\u5e03\uff0c\u4f18\u5148\u4fdd\u8bc1\u804c\u4e1a\u4e0e\u5229\u5bb3\u7acb\u573a\u7684\u5dee\u5f02\u3002',
+        helperRoles: ['\u8c03\u67e5\u534f\u529b\u8005', '\u5b88\u95e8\u4eba', '\u5173\u952e\u8bc1\u4eba', '\u5229\u5bb3\u76f8\u5173\u4eba'],
+        preferredSpecies: firstSpecies.length > 0 ? firstSpecies : ['\u4eba\u7c7b'],
       }
     case 'romance':
       return {

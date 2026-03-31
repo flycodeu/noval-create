@@ -98,7 +98,7 @@ export function getNovelContextStatus(novelId: number): NovelContextStatus {
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
   if (!novel) {
-    throw new Error('Novel not found')
+    throw new Error('小说不存在')
   }
 
   const chapterRows = db.select().from(chapters)
@@ -122,7 +122,7 @@ export function markNovelContextChanged(novelId: number, reasons: string | strin
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
   if (!novel) {
-    throw new Error('Novel not found')
+    throw new Error('小说不存在')
   }
 
   const normalizedReasons = [...new Set((Array.isArray(reasons) ? reasons : [reasons])
@@ -187,12 +187,12 @@ export function markChapterContextCurrent(chapterId: number): void {
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
   if (!chapter) {
-    throw new Error('Chapter not found')
+    throw new Error('章节不存在')
   }
 
   const novel = db.select().from(novels).where(eq(novels.id, chapter.novelId)).all()[0]
   if (!novel) {
-    throw new Error('Novel not found')
+    throw new Error('小说不存在')
   }
 
   db.update(chapters).set({
@@ -243,12 +243,12 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
   if (!chapter) {
-    throw new Error('Chapter not found')
+    throw new Error('章节不存在')
   }
 
   const novel = db.select().from(novels).where(eq(novels.id, chapter.novelId)).all()[0]
   if (!novel) {
-    throw new Error('Novel not found')
+    throw new Error('小说不存在')
   }
 
   const staleReasons = parseStringArray(chapter.staleReasonJson)
