@@ -1,8 +1,15 @@
 import { asc, eq } from 'drizzle-orm'
+import type { EntityRegenerateOptions } from '../../src/types'
 import { getDb, getSqlite } from '../database/db'
 import { characters, novels, storyArcs, storyItems, timelineEvents, worldMap } from '../database/schema'
 import { safeParseJson } from '../utils/json'
 import { buildStoryProfile } from './context.service'
+import {
+  getAttemptCount,
+  getRecentRejectedDigests,
+  markRejected,
+  recordGeneration,
+} from './generation-history.service'
 import { runChatTask } from './task.service'
 import { removeStoryItemFromEvents, syncStoryItemTimelineLinks } from './link-sync.service'
 import {
@@ -19,6 +26,7 @@ import {
 } from '../../src/shared/prompt-library'
 import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/utils/text'
 import { markNovelContextChanged } from './context-impact.service'
+import { appendVariationMessage } from './variation-control.service'
 
 type StoryItemStatus = 'available' | 'consumed' | 'hidden' | 'destroyed'
 
@@ -214,6 +222,96 @@ function buildExistingItemSummary(rows: Array<typeof storyItems.$inferSelect>): 
       return `- ${row.itemName}${parts ? ` (${parts})` : ''}`
     })
     .join('\n')
+}
+
+function parseJsonNumberArray(raw?: string | null): number[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .map((item) => (typeof item === 'number' && Number.isFinite(item) ? item : Number(item)))
+      .filter((item) => Number.isFinite(item))
+  } catch {
+    return []
+  }
+}
+
+function normalizeSignaturePart(value?: string | null): string {
+  return (value || '').replace(/\s+/g, '').trim().toLowerCase()
+}
+
+function buildItemSignature(payload: Partial<typeof storyItems.$inferInsert>): string {
+  return [
+    normalizeSignaturePart(typeof payload.itemName === 'string' ? payload.itemName : ''),
+    normalizeSignaturePart(typeof payload.category === 'string' ? payload.category : ''),
+    normalizeSignaturePart(typeof payload.subType === 'string' ? payload.subType : ''),
+    normalizeSignaturePart(typeof payload.plotFunction === 'string' ? payload.plotFunction : ''),
+    typeof payload.ownerCharacterId === 'number' ? String(payload.ownerCharacterId) : '',
+    typeof payload.locationMapId === 'number' ? String(payload.locationMapId) : '',
+    parseJsonNumberArray(typeof payload.linkedTimelineEventIdsJson === 'string' ? payload.linkedTimelineEventIdsJson : '')
+      .sort((left, right) => left - right)
+      .join(','),
+  ].filter(Boolean).join('|')
+}
+
+function buildItemCurrentSummary(item: typeof storyItems.$inferSelect): string {
+  return [
+    `名称：${item.itemName}`,
+    item.category ? `分类：${item.category}` : '',
+    item.subType ? `子类：${item.subType}` : '',
+    item.rarity ? `稀有度：${item.rarity}` : '',
+    typeof item.ownerCharacterId === 'number' ? `拥有者ID：${item.ownerCharacterId}` : '',
+    typeof item.locationMapId === 'number' ? `地点ID：${item.locationMapId}` : '',
+    item.summary ? `摘要：${item.summary}` : '',
+    item.plotFunction ? `剧情功能：${item.plotFunction}` : '',
+    item.acquisitionMethod ? `获取方式：${item.acquisitionMethod}` : '',
+    item.usageMethod ? `使用方式：${item.usageMethod}` : '',
+    item.cost ? `代价：${item.cost}` : '',
+    item.risk ? `风险：${item.risk}` : '',
+    item.appearance ? `外观：${item.appearance}` : '',
+    item.factionHint ? `势力线索：${item.factionHint}` : '',
+  ].filter(Boolean).join('\n')
+}
+
+function buildItemRepairPrompt(input: {
+  novelTitle: string
+  genre: string
+  background: string
+  worldSummary: string
+  storyCore: string
+  characterSummary: string
+  locationSummary: string
+  eventSummary: string
+  currentSummary: string
+  mode: 'repair' | 'replace'
+}) {
+  return [
+    `You are the item editor for a Chinese long-form novel. ${input.mode === 'replace' ? 'Replace' : 'Repair'} the following story item while keeping it usable inside the current novel.`,
+    buildSection('Story Context', [
+      `Novel: ${input.novelTitle}`,
+      `Genre: ${input.genre || 'Not provided'}`,
+      `Background: ${input.background || 'Not provided'}`,
+      `World rules: ${input.worldSummary || 'Not provided'}`,
+      `Story core: ${input.storyCore || 'Not provided'}`,
+    ]),
+    buildSection('Current Item', [input.currentSummary]),
+    buildSection('Nearby Assets', [
+      input.characterSummary ? `Characters:\n${input.characterSummary}` : '',
+      input.locationSummary ? `Locations:\n${input.locationSummary}` : '',
+      input.eventSummary ? `Timeline events:\n${input.eventSummary}` : '',
+    ]),
+    buildSection('Repair Goal', [
+      input.mode === 'replace'
+        ? 'Keep the same asset slot, but change the name, hook, leverage point, and payoff role in a clearly different direction.'
+        : 'Keep the same asset slot, but remove repetition, vague AI-sounding phrasing, and missing story utility.',
+      'The item must stay concrete, reusable, and anchored to at least one character, place, or event.',
+      'Return one JSON object only and keep the same field schema as batch item generation.',
+    ]),
+    buildSection('Output Contract', [
+      '{"template_name":"existing template name or empty","item_name":"concrete item name","category":"category","sub_type":"specific subtype","rarity":"common/rare/core/forbidden","owner_name":"existing owner name or empty","location_name":"existing location name or empty","event_title":"existing event title or empty","summary":"one-sentence description","acquisition_method":"how it is obtained","usage_method":"how it is used","cost":"concrete cost","risk":"concrete risk","plot_function":"specific story function","appearance":"recognizable appearance","faction_hint":"related faction or organization","linked_character_names":["related character A"],"tags":["tag1","tag2"]}',
+    ]),
+  ].filter(Boolean).join('\n\n')
 }
 
 function buildSection(title: string, lines: Array<string | undefined | null | false>): string {
@@ -752,6 +850,8 @@ export async function generateStoryItems(
   const batchSize = Math.max(1, Math.min(totalCount, options.batchSize || Math.min(totalCount, 4)))
 
   const createdIds: number[] = []
+  const historyEntityType = 'item'
+  const historyTaskType = 'story_item_generate_batch'
   let nextSort = getNextSortOrder(novelId)
 
   for (let generatedCount = 0; generatedCount < totalCount; generatedCount += batchSize) {
@@ -778,18 +878,39 @@ export async function generateStoryItems(
       existingItemSummary: buildExistingItemSummary(currentItems),      focus: [options.focus, `Batch ${Math.floor(generatedCount / batchSize) + 1}: add ${currentBatchCount} new item instances and avoid duplicating existing items.`].filter(Boolean).join('\n'),
       count: currentBatchCount,
     })
+    const attemptNumber = getAttemptCount(novelId, historyEntityType, null, historyTaskType) + 1
+    const rejectedDigests = getRecentRejectedDigests(novelId, historyEntityType, null, historyTaskType)
+    const messages = appendVariationMessage([{ role: 'user', content: prompt }], {
+      attemptNumber,
+      rejectedDigests,
+    })
 
     const result = await runChatTask({
       type: 'generate_items',
       novelId,
-      messages: [{ role: 'user', content: prompt }],
+      messages,
       modelConfigId: novel.modelConfigId || undefined,
     })
-
-    const parsed = cleanAiValue(safeParseJson<GeneratedStoryItem[]>(result))
+    const historyId = recordGeneration(novelId, historyEntityType, null, historyTaskType, result, attemptNumber)
+    let parsed: GeneratedStoryItem[]
+    try {
+      parsed = cleanAiValue(safeParseJson<GeneratedStoryItem[]>(result))
+    } catch (error) {
+      markRejected(historyId)
+      throw error
+    }
     if (!Array.isArray(parsed)) {
+      markRejected(historyId)
       throw new Error('Item generation result is not a valid array')
     }
+
+    const usedSignatures = new Set(
+      currentItems
+        .filter((item) => item.itemKind === 'instance')
+        .map((item) => buildItemSignature(item))
+        .filter(Boolean),
+    )
+    let acceptedInBatch = 0
 
     for (const rawItem of parsed) {
       const payload = buildGeneratedPayload(rawItem, {
@@ -801,9 +922,17 @@ export async function generateStoryItems(
         sortOrder: nextSort,
       })
       if (!payload) continue
+      const signature = buildItemSignature(payload)
+      if (!signature || usedSignatures.has(signature)) continue
       const id = createStoryItem(novelId, payload, { skipContextTracking: true })
       createdIds.push(id)
+      usedSignatures.add(signature)
+      acceptedInBatch += 1
       nextSort += 1
+    }
+
+    if (acceptedInBatch === 0) {
+      markRejected(historyId)
     }
   }
 
@@ -812,5 +941,94 @@ export async function generateStoryItems(
   }
 
   return createdIds
+}
+
+export async function regenerateStoryItem(
+  id: number,
+  options: EntityRegenerateOptions = {},
+): Promise<typeof storyItems.$inferSelect | null> {
+  const current = getStoryItem(id)
+  if (!current) return null
+
+  const db = getDb()
+  const novel = db.select().from(novels).where(eq(novels.id, current.novelId)).all()[0]
+  if (!novel) return null
+
+  const profile = await buildStoryProfile(current.novelId)
+  const mode = options.mode === 'replace' ? 'replace' : 'repair'
+  const characterRows = db.select().from(characters).where(eq(characters.novelId, current.novelId)).all()
+  const mapRows = db.select().from(worldMap).where(eq(worldMap.novelId, current.novelId)).all()
+  const eventRows = db.select().from(timelineEvents).where(eq(timelineEvents.novelId, current.novelId)).all()
+  const templateRows = ensureTemplateRows(current.novelId, {
+    genreName: profile.genre,
+    refreshTemplates: false,
+  })
+  const historyEntityType = 'item'
+  const historyTaskType = 'story_item_regenerate'
+  const attemptNumber = getAttemptCount(current.novelId, historyEntityType, current.id, historyTaskType) + 1
+  const rejectedDigests = getRecentRejectedDigests(current.novelId, historyEntityType, current.id, historyTaskType)
+  const currentSignature = buildItemSignature(current)
+  const messages = appendVariationMessage([{
+    role: 'user',
+    content: buildItemRepairPrompt({
+      novelTitle: novel.title,
+      genre: profile.genre,
+      background: profile.background,
+      worldSummary: profile.worldRulesSummary,
+      storyCore: [
+        `Story goal: ${profile.storyGoal || 'not provided'}`,
+        `Core conflict: ${profile.coreConflict || 'not provided'}`,
+        `Main plot: ${profile.mainPlot || 'not provided'}`,
+        `Ending direction: ${profile.ending || 'not provided'}`,
+      ].join('\n'),
+      characterSummary: buildCharacterSummary(characterRows),
+      locationSummary: buildLocationSummary(mapRows),
+      eventSummary: buildEventSummary(eventRows),
+      currentSummary: buildItemCurrentSummary(current),
+      mode,
+    }),
+  }], {
+    attemptNumber,
+    rejectedDigests,
+  })
+
+  const result = await runChatTask({
+    type: 'generate_items',
+    novelId: current.novelId,
+    relatedEntityType: 'item',
+    relatedEntityId: current.id,
+    messages,
+    modelConfigId: novel.modelConfigId || undefined,
+  })
+  const historyId = recordGeneration(current.novelId, historyEntityType, current.id, historyTaskType, result, attemptNumber)
+  let parsed: GeneratedStoryItem
+  try {
+    parsed = cleanAiValue(safeParseJson<GeneratedStoryItem>(result))
+  } catch {
+    markRejected(historyId)
+    return current
+  }
+  if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+    markRejected(historyId)
+    return current
+  }
+
+  const payload = buildGeneratedPayload(parsed, {
+    genreFamily: resolveGenreFamily(profile.genre),
+    templateRows,
+    characterRows,
+    mapRows,
+    eventRows,
+    sortOrder: current.sortOrder || 0,
+  })
+  const nextSignature = payload ? buildItemSignature(payload) : ''
+  if (!payload || !payload.itemName || !nextSignature || nextSignature === currentSignature) {
+    markRejected(historyId)
+    return current
+  }
+
+  updateStoryItem(id, payload, { skipContextTracking: true })
+  markNovelContextChanged(current.novelId, 'Story items changed')
+  return getStoryItem(id)
 }
 

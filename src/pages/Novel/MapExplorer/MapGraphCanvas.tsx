@@ -473,7 +473,7 @@ export default function MapGraphCanvas({
         {data.nodes.length <= 80 ? (
           <MiniMap
             className="map-graph-minimap"
-            bgColor="rgba(255, 249, 240, 0.94)"
+            style={{ backgroundColor: 'rgba(255, 249, 240, 0.94)' }}
             maskColor="rgba(111, 89, 61, 0.12)"
             pannable
             zoomable

@@ -2057,13 +2057,13 @@ export interface PowerSystemExpandInput {
 
 export function buildPowerSystemExpandPrompt(input: PowerSystemExpandInput): string {
   return renderPrompt([
-    section('任务', [
+    sectionLines('任务', [
       '你是一位精通力量体系设计的世界观架构师。',
       `为小说《${input.novelTitle}》（${input.genre}）深度扩展力量体系。`,
     ]),
-    section('世界观背景', [input.worldSummary]),
-    section('已有力量体系', [input.existingPowerSystems || '暂无']),
-    section('扩展要求', [
+    sectionLines('世界观背景', [input.worldSummary]),
+    sectionLines('已有力量体系', [input.existingPowerSystems || '暂无']),
+    sectionLines('扩展要求', [
       '为每个力量体系补充以下维度：',
       '1. 境界细分：每个大境界拆出 2-4 个小阶段，写清每阶段的标志性能力变化。',
       '2. 修炼资源：写清每个阶段需要什么资源、资源从哪来、谁控制资源。',
@@ -2071,13 +2071,13 @@ export function buildPowerSystemExpandPrompt(input: PowerSystemExpandInput): str
       '4. 战力锚点：给出 2-3 个具体场景说明该境界能做什么、不能做什么。',
       '5. 体系交互：不同力量体系之间的克制、协同或冲突关系。',
     ]),
-    section('硬约束', [
+    sectionLines('硬约束', [
       '不要写成百科词条，要写成能直接用于剧情的设定。',
       '每个境界的描述必须包含"能做什么"和"做不到什么"两面。',
       '资源和代价必须具体到可以写进剧情的程度。',
     ]),
-    buildVariationHint(input.attemptNumber),
-    section('输出格式', [
+    input.attemptNumber ? buildVariationHint(input.attemptNumber, 'generic') : '',
+    sectionLines('输出格式', [
       '输出 JSON 数组，每个元素代表一个力量体系：',
       '[{"name":"体系名","levels":[{"rank":"境界名","subStages":["小阶段1","小阶段2"],"abilities":"能力描述","limitations":"限制描述","resources":"所需资源","breakthroughRisk":"突破风险"}],"interactions":"与其他体系的关系"}]',
     ]),
@@ -2094,13 +2094,13 @@ export interface FactionSystemExpandInput {
 
 export function buildFactionSystemExpandPrompt(input: FactionSystemExpandInput): string {
   return renderPrompt([
-    section('任务', [
+    sectionLines('任务', [
       '你是一位精通势力组织设计的世界观架构师。',
       `为小说《${input.novelTitle}》（${input.genre}）深度扩展势力组织体系。`,
     ]),
-    section('世界观背景', [input.worldSummary]),
-    section('已有势力', [input.existingFactions || '暂无']),
-    section('扩展要求', [
+    sectionLines('世界观背景', [input.worldSummary]),
+    sectionLines('已有势力', [input.existingFactions || '暂无']),
+    sectionLines('扩展要求', [
       '为每个势力补充以下维度：',
       '1. 内部层级：写清从底层到顶层的权力结构，每层有多少人、掌握什么权限。',
       '2. 核心资源：这个势力靠什么立足——领地、技术、人脉、信仰还是暴力。',
@@ -2108,13 +2108,13 @@ export function buildFactionSystemExpandPrompt(input: FactionSystemExpandInput):
       '4. 外部关系网：与其他势力的同盟、敌对、利用关系，写清利益交换的具体内容。',
       '5. 关键人物槽位：预留 2-3 个关键角色位置（掌权者、叛逆者、中间人），写清其职能但不命名。',
     ]),
-    section('硬约束', [
+    sectionLines('硬约束', [
       '势力之间必须存在至少一组不可调和的利益冲突。',
       '每个势力的"核心资源"必须是其他势力想要但得不到的东西。',
       '内部矛盾必须具体到可以写成剧情线的程度，不要写"内部存在分歧"这种空话。',
     ]),
-    buildVariationHint(input.attemptNumber),
-    section('输出格式', [
+    input.attemptNumber ? buildVariationHint(input.attemptNumber, 'generic') : '',
+    sectionLines('输出格式', [
       '输出 JSON 数组，每个元素代表一个势力：',
       '[{"name":"势力名","hierarchy":[{"level":"层级名","count":"人数规模","authority":"权限范围"}],"coreResource":"核心资源描述","internalConflict":"内部矛盾描述","externalRelations":[{"target":"对方势力","relation":"关系类型","exchange":"利益交换内容"}],"keySlots":[{"role":"角色定位","function":"职能描述"}]}]',
     ]),

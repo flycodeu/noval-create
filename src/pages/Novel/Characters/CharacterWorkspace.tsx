@@ -242,7 +242,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
   const [protagonistOpen, setProtagonistOpen] = useState(false)
   const [page, setPage] = useState(1)
   const [keyword, setKeyword] = useState('')
-  const [roleFilter, setRoleFilter] = useState<string>('all')
+  const [roleFilter, setRoleFilter] = useState<Character['roleType'] | 'all'>('all')
   const [speciesFilter, setSpeciesFilter] = useState<string>('all')
   const [entityTypeFilter, setEntityTypeFilter] = useState<string>('all')
   const [recordStatusFilter, setRecordStatusFilter] = useState<'confirmed' | 'draft' | 'all'>('confirmed')

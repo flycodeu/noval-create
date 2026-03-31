@@ -1,5 +1,7 @@
 ﻿import {
   GLOBAL_WRITING_RULES,
+  buildAvoidanceSection,
+  buildVariationHint,
   expandBackgroundPrompt as rawExpandBackgroundPrompt,
   protagonistPrompt as rawProtagonistPrompt,
   batchCharacterPrompt as rawBatchCharacterPrompt,
@@ -41,6 +43,7 @@ type ExtendedProtagonistPromptInput = ProtagonistPromptInput & {
   personalitySeed?: string
   forbiddenNames?: string
   forceDifferentFromExisting?: boolean
+  rejectedDigests?: string[]
 }
 type ExtendedBatchCharacterPromptInput = BatchCharacterPromptInput & {
   existingCharacterSummaries?: string
@@ -48,6 +51,11 @@ type ExtendedBatchCharacterPromptInput = BatchCharacterPromptInput & {
   relationSeedMode?: string
   requiredItemLinks?: string
   diversityConstraints?: string
+  rejectedDigests?: string[]
+}
+type ExtendedRegenerateCharacterPromptInput = RegenerateCharacterPromptInput & {
+  attemptNumber?: number
+  rejectedDigests?: string[]
 }
 
 function appendPromptSection(prompt: string, title: string, lines: string[]): string {
@@ -89,9 +97,11 @@ export function protagonistPrompt(params: ExtendedProtagonistPromptInput): strin
     ecologySummary: params.ecologySummary,
     mapSummary: params.mapSummary,
     writingConstraints: params.writingConstraints,
+    attemptNumber: params.attemptNumber,
   }
-  const fallback = appendPromptSection(
-    appendPromptSection(rawProtagonistPrompt(baseParams), '差异化约束', [
+  const fallback = appendPromptText(
+    appendPromptSection(
+      appendPromptSection(rawProtagonistPrompt(baseParams), '差异化约束', [
       params.ageRange ? `- 年龄区间偏好：${params.ageRange}` : '',
       params.speciesPreference ? `- 种类偏好：${params.speciesPreference}` : '',
       params.occupationHint ? `- 职业或身份倾向：${params.occupationHint}` : '',
@@ -102,13 +112,18 @@ export function protagonistPrompt(params: ExtendedProtagonistPromptInput): strin
       typeof params.forceDifferentFromExisting === 'boolean'
         ? `- ${params.forceDifferentFromExisting ? '必须显著区别于现有人物设定。' : '可以适度沿用现有生态风格。'}`
         : '',
-    ]),
-    '生产补充要求',
+      ]),
+      '生产补充要求',
+      [
+        '- 主角档案必须能直接进入场景写作，不能只像设定卡。',
+        '- 动机、弱点、关系和能力都要能制造后续章节冲突与代价。',
+        '- 主角需要带出至少一个可持续调用的物品、资源或身份筹码。',
+      ],
+    ),
     [
-      '- 主角档案必须能直接进入场景写作，不能只像设定卡。',
-      '- 动机、弱点、关系和能力都要能制造后续章节冲突与代价。',
-      '- 主角需要带出至少一个可持续调用的物品、资源或身份筹码。',
-    ],
+      buildAvoidanceSection(params.rejectedDigests || []),
+      params.attemptNumber && params.attemptNumber > 1 ? buildVariationHint(params.attemptNumber, 'character') : '',
+    ].filter(Boolean).join('\n\n'),
   )
   return applyPromptOverride('protagonist', fallback, params as unknown as Record<string, unknown>)
 }
@@ -130,30 +145,60 @@ export function batchCharacterPrompt(params: ExtendedBatchCharacterPromptInput):
     ecologySummary: params.ecologySummary,
     mapSummary: params.mapSummary,
     writingConstraints: params.writingConstraints,
+    attemptNumber: params.attemptNumber,
   }
-  const fallback = appendPromptSection(
-    appendPromptSection(rawBatchCharacterPrompt(baseParams), '角色网络约束', [
+  const fallback = appendPromptText(
+    appendPromptSection(
+      appendPromptSection(rawBatchCharacterPrompt(baseParams), '角色网络约束', [
       params.roleBlueprint ? `- 角色槽位蓝图：${params.roleBlueprint}` : '',
       params.relationSeedMode ? `- 关系网络倾向：${params.relationSeedMode}` : '',
       params.requiredItemLinks ? `- 每一批至少覆盖这些物品或资源线：${params.requiredItemLinks}` : '',
       params.diversityConstraints ? `- 差异化硬约束：${params.diversityConstraints}` : '',
       params.existingCharacterSummaries ? `- 现有人物摘要，避免撞设定：\n${params.existingCharacterSummaries}` : '',
-    ]),
-    '生产补充要求',
+      ]),
+      '生产补充要求',
+      [
+        '- 每个配角都要承担明确剧情功能，避免批量生成同质化人物。',
+        '- 如果某个角色对主线、支线、冲突或关系网没有作用，就不要硬塞进去。',
+        '- 至少一部分人物要直接绑定物品、资源、地点或组织权力，而不是只有情绪标签。',
+      ],
+    ),
     [
-      '- 每个配角都要承担明确剧情功能，避免批量生成同质化人物。',
-      '- 如果某个角色对主线、支线、冲突或关系网没有作用，就不要硬塞进去。',
-      '- 至少一部分人物要直接绑定物品、资源、地点或组织权力，而不是只有情绪标签。',
-    ],
+      buildAvoidanceSection(params.rejectedDigests || []),
+      params.attemptNumber && params.attemptNumber > 1 ? buildVariationHint(params.attemptNumber, 'character') : '',
+    ].filter(Boolean).join('\n\n'),
   )
   return applyPromptOverride('batchCharacter', fallback, params as unknown as Record<string, unknown>)
 }
 
-export function regenerateCharacterPrompt(params: RegenerateCharacterPromptInput): string {
-  const fallback = appendPromptSection(rawRegenerateCharacterPrompt(params), '生产补充要求', [
-    '- 重做人设时优先修正空心化、工具人感和人机味，保住原有剧情槽位。',
-    '- 修改结果必须能直接用于后续章节，不要只变得更华丽。',
-  ])
+export function regenerateCharacterPrompt(params: ExtendedRegenerateCharacterPromptInput): string {
+  const baseParams: RegenerateCharacterPromptInput = {
+    novelTitle: params.novelTitle,
+    novelSynopsis: params.novelSynopsis,
+    genre: params.genre,
+    worldSummary: params.worldSummary,
+    storyCore: params.storyCore,
+    protagonistRule: params.protagonistRule,
+    lockedName: params.lockedName,
+    lockedRoleType: params.lockedRoleType,
+    currentProfile: params.currentProfile,
+    relatedCharacters: params.relatedCharacters,
+    relationSummary: params.relationSummary,
+    speciesSummary: params.speciesSummary,
+    factionSummary: params.factionSummary,
+    ecologySummary: params.ecologySummary,
+    writingConstraints: params.writingConstraints,
+  }
+  const fallback = appendPromptText(
+    appendPromptSection(rawRegenerateCharacterPrompt(baseParams), '生产补充要求', [
+      '- 重做人设时优先修正空心化、工具人感和人机味，保住原有剧情槽位。',
+      '- 修改结果必须能直接用于后续章节，不要只变得更华丽。',
+    ]),
+    [
+      buildAvoidanceSection(params.rejectedDigests || []),
+      params.attemptNumber && params.attemptNumber > 1 ? buildVariationHint(params.attemptNumber, 'character') : '',
+    ].filter(Boolean).join('\n\n'),
+  )
   return applyPromptOverride('regenerateCharacter', fallback, params as unknown as Record<string, unknown>)
 }
 

@@ -54,6 +54,11 @@ import {
 import * as taskService from './services/task.service'
 import { safeParseJson } from './utils/json'
 import { getNovelContextStatus, markNovelContextChanged } from './services/context-impact.service'
+import {
+  appendVariationMessage,
+  buildVariationDigest,
+  isCandidateTooSimilar,
+} from './services/variation-control.service'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -316,6 +321,7 @@ function registerIpcHandlers() {
   ipcMain.handle('timeline:delete', (_, id) => timelineService.deleteTimelineEvent(id))
   ipcMain.handle('timeline:generate', (_, novelId, options) =>
     timelineService.generateTimelineEvents(novelId, options))
+  ipcMain.handle('timeline:regenerate', (_, id, options) => timelineService.regenerateTimelineEvent(id, options))
   ipcMain.handle('timeline:clear', (_, novelId) => timelineService.clearTimelineByNovel(novelId))
 
   ipcMain.handle('item:list', (_, novelId) => itemService.listStoryItems(novelId))
@@ -328,6 +334,7 @@ function registerIpcHandlers() {
   ipcMain.handle('item:update', (_, id, data) => itemService.updateStoryItem(id, data))
   ipcMain.handle('item:delete', (_, id) => itemService.deleteStoryItem(id))
   ipcMain.handle('item:generate', (_, novelId, options) => itemService.generateStoryItems(novelId, options))
+  ipcMain.handle('item:regenerate', (_, id, options) => itemService.regenerateStoryItem(id, options))
   ipcMain.handle('item:clear', (_, novelId) => itemService.clearStoryItemsByNovel(novelId))
 
   ipcMain.handle('outline:getArcs', (_, novelId) => {
@@ -630,6 +637,7 @@ function registerIpcHandlers() {
   ipcMain.handle('thread:create', (_, novelId, data) => storyThreadService.createStoryThread(novelId, data))
   ipcMain.handle('thread:update', (_, id, data) => storyThreadService.updateStoryThread(id, data))
   ipcMain.handle('thread:delete', (_, id) => storyThreadService.deleteStoryThread(id))
+  ipcMain.handle('thread:regenerate', (_, id, options) => storyThreadService.regenerateStoryThread(id, options))
 
   ipcMain.handle('revision:list', (_, novelId) => revisionTaskService.listRevisionTasks(novelId))
   ipcMain.handle('revision:query', (_, filters) => revisionTaskService.queryRevisionTasks(filters))
@@ -639,6 +647,7 @@ function registerIpcHandlers() {
   ipcMain.handle('revision:create', (_, novelId, data) => revisionTaskService.createRevisionTask(novelId, data))
   ipcMain.handle('revision:update', (_, id, data) => revisionTaskService.updateRevisionTask(id, data))
   ipcMain.handle('revision:delete', (_, id) => revisionTaskService.deleteRevisionTask(id))
+  ipcMain.handle('revision:autoFix', (_, id) => revisionTaskService.autoFixRevisionTask(id))
 
   ipcMain.handle('model:list', () => {
     const db = getDb()
@@ -832,15 +841,41 @@ function registerIpcHandlers() {
     modelConfigId?: number
   }) => {
     const count = Math.min(Math.max(data.count || 1, 1), 3)
-    const results = Array.from({ length: count }, () =>
-      taskService.runChatTask({
+    const accepted: string[] = []
+    const rejectedDigests: string[] = []
+    const maxAttempts = Math.max(count, count * 3)
+    let lastOutput = ''
+
+    for (let attemptNumber = 1; attemptNumber <= maxAttempts && accepted.length < count; attemptNumber += 1) {
+      const messages = appendVariationMessage(data.messages, {
+        attemptNumber,
+        candidateIndex: accepted.length + 1,
+        totalCandidates: count,
+        rejectedDigests,
+      })
+
+      const output = await taskService.runChatTask({
         type: 'review',
         retryable: true,
-        messages: data.messages,
+        messages,
         modelConfigId: data.modelConfigId,
-      }),
-    )
-    return Promise.all(results)
+      })
+
+      lastOutput = output
+
+      if (isCandidateTooSimilar(output, accepted)) {
+        rejectedDigests.push(buildVariationDigest(output))
+        continue
+      }
+
+      accepted.push(output)
+    }
+
+    if (accepted.length === 0 && lastOutput) {
+      accepted.push(lastOutput)
+    }
+
+    return accepted
   })
 
   ipcMain.handle('ai:scoreContent', async (_, data: {

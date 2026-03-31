@@ -69,6 +69,7 @@ const EMPTY_STATS = {
   completedChapterCount: 0,
   totalWords: 0,
   hasProtagonist: false,
+  volumeCount: 0,
 }
 
 const SUBPLOT_LANES: Array<{ key: SubplotLaneKey; label: string; hint: string }> = [

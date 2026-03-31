@@ -111,6 +111,7 @@ export default function RevisionCenterPage({ novelId }: Props) {
   const [consistencyReport, setConsistencyReport] = useState<NovelConsistencyReport | null>(null)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [actionKey, setActionKey] = useState<string | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
   const [editingTask, setEditingTask] = useState<RevisionTask | null>(null)
   const [sourceFilter, setSourceFilter] = useState<'all' | RevisionTask['taskSource']>('all')
@@ -257,7 +258,7 @@ export default function RevisionCenterPage({ novelId }: Props) {
   }
 
   const handleQuickStatus = async (task: RevisionTask, status: RevisionTask['status']) => {
-    if (task.taskSource !== 'manual') return
+    setActionKey(`status:${task.id}:${status}`)
     try {
       await window.electron.revision.update(task.id, { status })
       message.success('修订任务状态已更新。')
@@ -265,6 +266,28 @@ export default function RevisionCenterPage({ novelId }: Props) {
     } catch (error) {
       console.error(error)
       message.error('修订任务状态更新失败。')
+    } finally {
+      setActionKey(null)
+    }
+  }
+
+  const handleAutoFix = async (task: RevisionTask) => {
+    setActionKey(`autofix:${task.id}`)
+    try {
+      const result = await window.electron.revision.autoFix(task.id)
+      if (result.status === 'failed') {
+        message.error(result.message)
+      } else if (result.status === 'unsupported') {
+        message.warning(result.message)
+      } else {
+        message.success(result.message)
+      }
+      await refresh()
+    } catch (error) {
+      console.error(error)
+      message.error('AI 修复执行失败。')
+    } finally {
+      setActionKey(null)
     }
   }
 
@@ -313,7 +336,7 @@ export default function RevisionCenterPage({ novelId }: Props) {
     {
       title: '操作',
       key: 'actions',
-      width: 250,
+      width: 320,
       render: (_, record) => (
         <Space wrap>
           <Button size="small" icon={<ArrowRightOutlined />} onClick={() => openRelatedPage(record)}>
@@ -323,17 +346,60 @@ export default function RevisionCenterPage({ novelId }: Props) {
             <>
               <Button size="small" onClick={() => openEditor(record)}>编辑</Button>
               {record.status !== 'resolved' ? (
-                <Button size="small" onClick={() => void handleQuickStatus(record, 'resolved')}>
+                <Button
+                  size="small"
+                  loading={actionKey === `status:${record.id}:resolved`}
+                  onClick={() => void handleQuickStatus(record, 'resolved')}
+                >
                   标记解决
                 </Button>
               ) : null}
               <Button size="small" danger icon={<DeleteOutlined />} onClick={() => void handleDelete(record)} />
             </>
-          ) : null}
+          ) : (
+            <>
+              {record.autoFixable ? (
+                <Button
+                  size="small"
+                  type="primary"
+                  loading={actionKey === `autofix:${record.id}`}
+                  onClick={() => void handleAutoFix(record)}
+                >
+                  AI 修复
+                </Button>
+              ) : null}
+              {record.status === 'ignored' ? (
+                <Button
+                  size="small"
+                  loading={actionKey === `status:${record.id}:open`}
+                  onClick={() => void handleQuickStatus(record, 'open')}
+                >
+                  恢复
+                </Button>
+              ) : (
+                <Button
+                  size="small"
+                  loading={actionKey === `status:${record.id}:ignored`}
+                  onClick={() => void handleQuickStatus(record, 'ignored')}
+                >
+                  忽略
+                </Button>
+              )}
+              {record.status !== 'resolved' ? (
+                <Button
+                  size="small"
+                  loading={actionKey === `status:${record.id}:resolved`}
+                  onClick={() => void handleQuickStatus(record, 'resolved')}
+                >
+                  标记完成
+                </Button>
+              ) : null}
+            </>
+          )}
         </Space>
       ),
     },
-  ], [])
+  ], [actionKey, handleAutoFix, handleDelete, handleQuickStatus, openRelatedPage])
 
   return (
     <WorkspacePage
@@ -371,7 +437,7 @@ export default function RevisionCenterPage({ novelId }: Props) {
           <WorkspaceMetric label="阻塞项" value={stats.blockerCount} tone="warm" hint="高优先且仍未解决的问题，会直接影响后续章节稳定性。" />
           <WorkspaceMetric label="待处理" value={stats.openCount} hint="还没有开始处理的任务。" />
           <WorkspaceMetric label="处理中" value={stats.inProgressCount} hint="正在回查和修正的任务。" />
-          <WorkspaceMetric label="人工 / 系统" value={`${manualCount} / ${systemCount}`} hint="人工任务可编辑，系统任务用于提示风险。" />
+          <WorkspaceMetric label="人工 / 系统" value={`${manualCount} / ${systemCount}`} hint="系统任务支持忽略、恢复和 AI 修复；人工任务支持自由编辑。" />
         </>
       )}
       aside={(

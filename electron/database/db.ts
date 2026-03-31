@@ -413,6 +413,7 @@ function runMigrations(sqlite: Database.Database) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
       task_source TEXT DEFAULT 'manual',
+      issue_key TEXT,
       task_type TEXT DEFAULT 'continuity',
       status TEXT DEFAULT 'open',
       severity TEXT DEFAULT 'medium',
@@ -423,6 +424,9 @@ function runMigrations(sqlite: Database.Database) {
       entity_type TEXT,
       entity_id INTEGER,
       chapter_id INTEGER REFERENCES chapters(id) ON DELETE SET NULL,
+      origin_meta_json TEXT,
+      last_detected_at TEXT,
+      resolved_at TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
@@ -555,6 +559,7 @@ function runMigrations(sqlite: Database.Database) {
   ensureColumn(sqlite, 'story_items', 'record_status', "TEXT DEFAULT 'confirmed'")
   ensureColumn(sqlite, 'story_items', 'source_context_json', 'TEXT')
   ensureColumn(sqlite, 'revision_tasks', 'task_source', "TEXT DEFAULT 'manual'")
+  ensureColumn(sqlite, 'revision_tasks', 'issue_key', 'TEXT')
   ensureColumn(sqlite, 'revision_tasks', 'task_type', "TEXT DEFAULT 'continuity'")
   ensureColumn(sqlite, 'revision_tasks', 'status', "TEXT DEFAULT 'open'")
   ensureColumn(sqlite, 'revision_tasks', 'severity', "TEXT DEFAULT 'medium'")
@@ -564,6 +569,9 @@ function runMigrations(sqlite: Database.Database) {
   ensureColumn(sqlite, 'revision_tasks', 'entity_type', 'TEXT')
   ensureColumn(sqlite, 'revision_tasks', 'entity_id', 'INTEGER')
   ensureColumn(sqlite, 'revision_tasks', 'chapter_id', 'INTEGER REFERENCES chapters(id) ON DELETE SET NULL')
+  ensureColumn(sqlite, 'revision_tasks', 'origin_meta_json', 'TEXT')
+  ensureColumn(sqlite, 'revision_tasks', 'last_detected_at', 'TEXT')
+  ensureColumn(sqlite, 'revision_tasks', 'resolved_at', 'TEXT')
   ensureColumn(sqlite, 'revision_tasks', 'created_at', 'TEXT')
   ensureColumn(sqlite, 'revision_tasks', 'updated_at', 'TEXT')
   ensureColumn(sqlite, 'tasks', 'runner_type', "TEXT DEFAULT 'chat'")
@@ -649,7 +657,7 @@ function validateRequiredSchema(sqlite: Database.Database) {
     },
     {
       tableName: 'revision_tasks',
-      columns: ['task_source', 'task_type', 'status', 'severity', 'title', 'updated_at'],
+      columns: ['task_source', 'issue_key', 'task_type', 'status', 'severity', 'title', 'updated_at'],
     },
     {
       tableName: 'tasks',
@@ -734,6 +742,9 @@ function ensureIndexes(sqlite: Database.Database) {
 
     CREATE INDEX IF NOT EXISTS idx_revision_tasks_novel_status
     ON revision_tasks (novel_id, status, updated_at, id);
+
+    CREATE INDEX IF NOT EXISTS idx_revision_tasks_issue_key
+    ON revision_tasks (novel_id, task_source, issue_key, id);
 
     CREATE INDEX IF NOT EXISTS idx_tasks_novel_updated
     ON tasks (novel_id, updated_at, id);

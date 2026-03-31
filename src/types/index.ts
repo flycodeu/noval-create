@@ -613,6 +613,10 @@ export interface StoryItemStats {
   categoryCount: number
 }
 
+export interface EntityRegenerateOptions {
+  mode?: 'repair' | 'replace'
+}
+
 export interface DiscoveredEntityCandidate {
   entityType: 'character' | 'item'
   name: string
@@ -727,6 +731,7 @@ export interface RevisionTask {
   id: number
   novelId: number
   taskSource: 'manual' | 'system'
+  issueKey?: string
   taskType: string
   status: 'open' | 'in_progress' | 'resolved' | 'ignored'
   severity: 'high' | 'medium' | 'low'
@@ -737,8 +742,21 @@ export interface RevisionTask {
   entityType?: string
   entityId?: number
   chapterId?: number
+  originMetaJson?: string
+  lastDetectedAt?: string
+  resolvedAt?: string
+  autoFixable?: boolean
   createdAt: string
   updatedAt: string
+}
+
+export interface RevisionAutoFixResult {
+  taskId: number
+  novelId: number
+  status: 'fixed' | 'unsupported' | 'failed'
+  message: string
+  relatedPage?: string
+  refreshedTask?: RevisionTask | null
 }
 
 export interface RevisionTaskQueryInput {
@@ -963,11 +981,11 @@ export interface OutlineChapterBatchGenerationResult {
 export interface ConsistencyIssue {
   id: string
   severity: 'high' | 'medium' | 'low'
-  category: 'character' | 'chapter' | 'timeline' | 'item' | 'map' | 'outline' | 'continuity'
+  category: 'character' | 'chapter' | 'timeline' | 'item' | 'map' | 'outline' | 'continuity' | 'thread'
   title: string
   description: string
   suggestion: string
-  entityType?: 'character' | 'chapter' | 'timeline' | 'item' | 'map' | 'arc'
+  entityType?: 'character' | 'chapter' | 'timeline' | 'item' | 'map' | 'arc' | 'thread'
   entityId?: number
   entityLabel?: string
 }
@@ -1144,6 +1162,7 @@ declare global {
         update: (id: number, data: Partial<TimelineEvent>) => Promise<void>
         delete: (id: number) => Promise<void>
         generate: (novelId: number, options?: unknown) => Promise<number[]>
+        regenerate: (id: number, options?: EntityRegenerateOptions) => Promise<TimelineEvent | null>
         clear: (novelId: number) => Promise<void>
       }
       item: {
@@ -1157,6 +1176,7 @@ declare global {
         update: (id: number, data: Partial<StoryItem>) => Promise<void>
         delete: (id: number) => Promise<void>
         generate: (novelId: number, options?: unknown) => Promise<number[]>
+        regenerate: (id: number, options?: EntityRegenerateOptions) => Promise<StoryItem | null>
         clear: (novelId: number) => Promise<void>
       }
       outline: {
@@ -1177,6 +1197,7 @@ declare global {
         create: (novelId: number, data: Partial<StoryThread>) => Promise<number>
         update: (id: number, data: Partial<StoryThread>) => Promise<void>
         delete: (id: number) => Promise<void>
+        regenerate: (id: number, options?: EntityRegenerateOptions) => Promise<StoryThread | null>
       }
       revision: {
         list: (novelId: number) => Promise<RevisionTask[]>
@@ -1187,6 +1208,7 @@ declare global {
         create: (novelId: number, data: Partial<RevisionTask>) => Promise<number>
         update: (id: number, data: Partial<RevisionTask>) => Promise<void>
         delete: (id: number) => Promise<void>
+        autoFix: (id: number) => Promise<RevisionAutoFixResult>
       }
       model: {
         list: () => Promise<ModelConfig[]>
@@ -1249,7 +1271,3 @@ declare global {
     }
   }
 }
-
-
-
-

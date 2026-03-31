@@ -4,6 +4,7 @@ import { getDb } from '../database/db'
 import { tasks } from '../database/schema'
 import { Message, ChatOptions } from '../adapters/base.adapter'
 import { getAdapterById, getDefaultAdapter } from './model.service'
+import { appendVariationMessage, buildVariationDigest } from './variation-control.service'
 
 export type TaskType =
   | 'init'
@@ -506,6 +507,10 @@ export async function retryTask(taskId: number, sender?: WebContents): Promise<n
   )
   const attemptNumber = previousAttempts + 1
   const temperature = computeAttemptTemperature(attemptNumber)
+  const retryMessages = appendVariationMessage(messages as Message[], {
+    attemptNumber,
+    rejectedDigests: task.outputText ? [buildVariationDigest(task.outputText)] : [],
+  })
 
   const controlState: TaskControlState = { contentAttemptNumber: attemptNumber }
 
@@ -515,8 +520,8 @@ export async function retryTask(taskId: number, sender?: WebContents): Promise<n
     modelConfigId: task.modelConfigId || undefined,
     relatedEntityType: task.relatedEntityType || undefined,
     relatedEntityId: task.relatedEntityId || undefined,
-    inputJson: task.inputJson || undefined,
-    messages,
+    inputJson: JSON.stringify(retryMessages),
+    messages: retryMessages,
     sender,
     retryable: Boolean(task.retryable),
     chatOpts: { temperature },
@@ -529,4 +534,3 @@ export async function retryTask(taskId: number, sender?: WebContents): Promise<n
 
   return startChatTask(baseOptions)
 }
-

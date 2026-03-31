@@ -17,6 +17,12 @@ import {
   protagonistPrompt,
   regenerateCharacterPrompt,
 } from './prompts'
+import {
+  getAttemptCount,
+  getRecentRejectedDigests,
+  markRejected,
+  recordGeneration,
+} from './generation-history.service'
 import { runChatTask } from './task.service'
 import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/utils/text'
 import { markNovelContextChanged } from './context-impact.service'
@@ -951,10 +957,14 @@ export async function generateProtagonist(novelId: number, opts: {
     ...existingChars.map((character) => character.fullName).filter(Boolean),
     ...(opts.forbiddenNames || []).filter(Boolean),
   ])]
+  const historyEntityType = 'character'
+  const historyTaskType = 'character_protagonist'
 
   let parsed: Record<string, unknown> | null = null
   const attempts = opts.forceDifferentFromExisting ? 3 : 2
   for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const attemptNumber = getAttemptCount(novelId, historyEntityType, null, historyTaskType) + 1
+    const rejectedDigests = getRecentRejectedDigests(novelId, historyEntityType, null, historyTaskType)
     const prompt = protagonistPrompt({
       novelTitle: novel.title,
       novelSynopsis: profile.background,
@@ -976,6 +986,8 @@ export async function generateProtagonist(novelId: number, opts: {
       personalitySeed: opts.personalitySeed,
       forbiddenNames: reservedNames.join('、'),
       forceDifferentFromExisting: opts.forceDifferentFromExisting,
+      attemptNumber,
+      rejectedDigests,
     })
 
     const result = await runChatTask({
@@ -984,16 +996,22 @@ export async function generateProtagonist(novelId: number, opts: {
       messages: [{ role: 'user', content: prompt }],
       modelConfigId: novel.modelConfigId || undefined,
     })
+    const historyId = recordGeneration(novelId, historyEntityType, null, historyTaskType, result, attemptNumber)
 
     const nextParsed = cleanAiValue(safeParseJson<Record<string, unknown>>(result))
     const candidateName = asText(nextParsed.full_name) || asText(nextParsed.name)
-    if (!hasReservedCharacterName(candidateName, reservedNames) || attempt === attempts - 1) {
+    if (!hasReservedCharacterName(candidateName, reservedNames)) {
       parsed = nextParsed
       break
     }
+    markRejected(historyId)
   }
 
-  const payload = buildCharacterPayload(parsed || {}, {
+  if (!parsed) {
+    throw new Error('主角生成未产出可用且不重名的人物，请重试。')
+  }
+
+  const payload = buildCharacterPayload(parsed, {
     roleType: 'protagonist',
     recordStatus: 'confirmed',
   })
@@ -1056,9 +1074,13 @@ export async function batchGenerateCharacters(novelId: number, opts: {
   if (totalCount <= 0) return []
   const newIds: number[] = []
   let generatedAttempts = 0
+  const historyEntityType = 'character'
+  const historyTaskType = 'character_batch'
 
   while (newIds.length < totalCount && generatedAttempts < Math.max(3, totalCount)) {
     const batchCount = Math.min(opts.batchSize, totalCount - newIds.length)
+    const attemptNumber = getAttemptCount(novelId, historyEntityType, null, historyTaskType) + 1
+    const rejectedDigests = getRecentRejectedDigests(novelId, historyEntityType, null, historyTaskType)
     const prompt = batchCharacterPrompt({
       novelTitle: novel.title,
       novelSynopsis: profile.background,
@@ -1080,6 +1102,8 @@ export async function batchGenerateCharacters(novelId: number, opts: {
       relationSeedMode: opts.relationSeedMode,
       requiredItemLinks: opts.requiredItemLinks?.join('、'),
       diversityConstraints: opts.diversityConstraints?.join('、'),
+      attemptNumber,
+      rejectedDigests,
     })
 
     const result = await runChatTask({
@@ -1088,6 +1112,8 @@ export async function batchGenerateCharacters(novelId: number, opts: {
       messages: [{ role: 'user', content: prompt }],
       modelConfigId: novel.modelConfigId || undefined,
     })
+    const historyId = recordGeneration(novelId, historyEntityType, null, historyTaskType, result, attemptNumber)
+    const beforeCreateCount = newIds.length
 
     try {
       const parsed = cleanAiValue(safeParseJson<Array<Record<string, unknown>>>(result))
@@ -1111,6 +1137,11 @@ export async function batchGenerateCharacters(novelId: number, opts: {
       }
     } catch (error) {
       console.error('批量生成人物解析失败:', error)
+      markRejected(historyId)
+    }
+
+    if (newIds.length === beforeCreateCount) {
+      markRejected(historyId)
     }
 
     if (sender && !sender.isDestroyed()) {
@@ -1172,6 +1203,10 @@ export async function regenerateCharacter(id: number): Promise<typeof characters
     })
     .filter(Boolean)
     .join('\n')
+  const historyEntityType = 'character'
+  const historyTaskType = 'character_regenerate'
+  const attemptNumber = getAttemptCount(current.novelId, historyEntityType, current.id, historyTaskType) + 1
+  const rejectedDigests = getRecentRejectedDigests(current.novelId, historyEntityType, current.id, historyTaskType)
 
   const prompt = regenerateCharacterPrompt({
     novelTitle: novel.title,
@@ -1189,6 +1224,8 @@ export async function regenerateCharacter(id: number): Promise<typeof characters
     currentProfile: buildCurrentProfileSummary(current),
     relatedCharacters,
     relationSummary,
+    attemptNumber,
+    rejectedDigests,
   })
 
   const result = await runChatTask({
@@ -1199,6 +1236,7 @@ export async function regenerateCharacter(id: number): Promise<typeof characters
     messages: [{ role: 'user', content: prompt }],
     modelConfigId: novel.modelConfigId || undefined,
   })
+  recordGeneration(current.novelId, historyEntityType, current.id, historyTaskType, result, attemptNumber)
 
   const parsed = cleanAiValue(safeParseJson<Record<string, unknown>>(result))
   const payload = buildCharacterPayload(parsed, {

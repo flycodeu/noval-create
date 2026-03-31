@@ -368,6 +368,7 @@ export const revisionTasks = sqliteTable('revision_tasks', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
   taskSource: text('task_source').default('manual'),
+  issueKey: text('issue_key'),
   taskType: text('task_type').default('continuity'),
   status: text('status').default('open'),
   severity: text('severity').default('medium'),
@@ -378,6 +379,9 @@ export const revisionTasks = sqliteTable('revision_tasks', {
   entityType: text('entity_type'),
   entityId: integer('entity_id'),
   chapterId: integer('chapter_id').references(() => chapters.id, { onDelete: 'set null' }),
+  originMetaJson: text('origin_meta_json'),
+  lastDetectedAt: text('last_detected_at'),
+  resolvedAt: text('resolved_at'),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
 })

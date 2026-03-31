@@ -5,6 +5,7 @@ import {
   characters,
   storyArcs,
   storyItems,
+  storyThreads,
   timelineEvents,
   worldMap,
 } from '../database/schema'
@@ -15,11 +16,11 @@ export type ConsistencySeverity = 'high' | 'medium' | 'low'
 export interface ConsistencyIssue {
   id: string
   severity: ConsistencySeverity
-  category: 'character' | 'chapter' | 'timeline' | 'item' | 'map' | 'outline' | 'continuity'
+  category: 'character' | 'chapter' | 'timeline' | 'item' | 'map' | 'outline' | 'continuity' | 'thread'
   title: string
   description: string
   suggestion: string
-  entityType?: 'character' | 'chapter' | 'timeline' | 'item' | 'map' | 'arc'
+  entityType?: 'character' | 'chapter' | 'timeline' | 'item' | 'map' | 'arc' | 'thread'
   entityId?: number
   entityLabel?: string
 }
@@ -62,21 +63,33 @@ function parseNumberArray(raw?: string | null): number[] {
   }
 }
 
-function toStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-  return value
-    .filter((item): item is string => typeof item === 'string')
-    .map((item) => item.trim())
-    .filter(Boolean)
-}
-
 function parseStringArray(raw?: string | null): string[] {
   if (!raw) return []
   try {
-    return toStringArray(JSON.parse(raw))
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .filter((value): value is string => typeof value === 'string')
+      .map((value) => value.trim())
+      .filter(Boolean)
   } catch {
     return []
   }
+}
+
+function normalizeSignaturePart(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, '')
+}
+
+function buildThreadSimilaritySignature(row: typeof storyThreads.$inferSelect): string {
+  return [
+    normalizeSignaturePart(row.threadType || 'subplot'),
+    normalizeSignaturePart(row.summary || ''),
+    normalizeSignaturePart(row.premise || ''),
+    normalizeSignaturePart(row.payoffCondition || ''),
+    typeof row.startChapter === 'number' ? String(row.startChapter) : '',
+    typeof row.targetPayoffChapter === 'number' ? String(row.targetPayoffChapter) : '',
+  ].filter(Boolean).join('|')
 }
 
 function pushIssue(
@@ -99,26 +112,17 @@ function pushIssue(
   })
 }
 
-function getChapterNumMap(novelId: number) {
-  const db = getDb()
-  const chapterRows = db.select().from(chapters)
-    .where(eq(chapters.novelId, novelId))
-    .orderBy(asc(chapters.chapterNum))
-    .all()
-  return new Map(chapterRows.map((row) => [row.id, row.chapterNum]))
-}
-
 function buildOverview(highCount: number, mediumCount: number, lowCount: number): string {
   if (highCount > 0) {
-    return `当前存在 ${highCount} 个高优先级冲突，建议先修复结构问题再继续大批量生成。`
+    return `当前存在 ${highCount} 个高优先级结构问题，建议先修关键冲突再继续批量生成。`
   }
   if (mediumCount > 0) {
-    return `当前没有致命冲突，但还有 ${mediumCount} 个中等级问题会持续放大。`
+    return `当前没有致命冲突，但还有 ${mediumCount} 个中优先问题会持续放大。`
   }
   if (lowCount > 0) {
-    return `当前结构已经能继续写作，只剩 ${lowCount} 个轻度提醒需要逐步收口。`
+    return `当前结构可以继续推进，但还有 ${lowCount} 个轻度问题值得尽快收口。`
   }
-  return '当前未发现明显结构冲突，可以继续推进正文与细化设定。'
+  return '当前未发现明显结构冲突，可以继续推进结构、正文和精修。'
 }
 
 export function buildConsistencyPromptSummary(report: NovelConsistencyReport, limit = 6): string {
@@ -134,7 +138,7 @@ export function buildConsistencyPromptSummary(report: NovelConsistencyReport, li
 
 export function buildNovelConsistencyReport(novelId: number): NovelConsistencyReport {
   const db = getDb()
-  const issueList: ConsistencyIssue[] = []
+  const issues: ConsistencyIssue[] = []
 
   const chapterRows = db.select().from(chapters)
     .where(eq(chapters.novelId, novelId))
@@ -142,6 +146,10 @@ export function buildNovelConsistencyReport(novelId: number): NovelConsistencyRe
     .all()
   const characterRows = db.select().from(characters).where(eq(characters.novelId, novelId)).all()
   const arcRows = db.select().from(storyArcs).where(eq(storyArcs.novelId, novelId)).all()
+  const threadRows = db.select().from(storyThreads)
+    .where(eq(storyThreads.novelId, novelId))
+    .orderBy(asc(storyThreads.sortOrder), asc(storyThreads.id))
+    .all()
   const eventRows = db.select().from(timelineEvents)
     .where(eq(timelineEvents.novelId, novelId))
     .orderBy(asc(timelineEvents.timeSortValue), asc(timelineEvents.sortOrder), asc(timelineEvents.id))
@@ -149,6 +157,7 @@ export function buildNovelConsistencyReport(novelId: number): NovelConsistencyRe
   const itemRows = db.select().from(storyItems).where(eq(storyItems.novelId, novelId)).all()
   const mapRows = db.select().from(worldMap).where(eq(worldMap.novelId, novelId)).all()
 
+  const latestChapterNum = chapterRows.reduce((maxValue, row) => Math.max(maxValue, row.chapterNum || 0), 0)
   const chapterNumMap = new Map(chapterRows.map((row) => [row.id, row.chapterNum]))
   const characterIdSet = new Set(characterRows.map((row) => row.id))
   const arcIdSet = new Set(arcRows.map((row) => row.id))
@@ -159,21 +168,21 @@ export function buildNovelConsistencyReport(novelId: number): NovelConsistencyRe
   const protagonists = characterRows.filter((row) => row.roleType === 'protagonist')
   if (protagonists.length === 0) {
     pushIssue(
-      issueList,
+      issues,
       'high',
       'character',
       '缺少主角',
-      '当前人物表里没有主角，后续人物关系、正文称谓和大纲都会失去锚点。',
-      '先补一个主角，再批量生成人物和章节内容。',
+      '当前角色系统里没有主角，后续称呼、主线推进和人物关系都会失去锚点。',
+      '先补一个主角，再继续扩人物网络和章节内容。',
     )
   } else if (protagonists.length > 1) {
     pushIssue(
-      issueList,
+      issues,
       'high',
       'character',
       '主角数量冲突',
-      `当前标记了 ${protagonists.length} 位主角，会导致正文称谓和主线重心混乱。`,
-      '只保留一个主角标记，其余角色改成 major / supporting / antagonist。',
+      `当前标记了 ${protagonists.length} 位主角，容易造成叙事重心和称呼规则混乱。`,
+      '保留一个真正的主角，其余角色改成 major、supporting 或 antagonist。',
     )
   }
 
@@ -181,13 +190,13 @@ export function buildNovelConsistencyReport(novelId: number): NovelConsistencyRe
   chapterRows.forEach((chapter, index) => {
     if (chapterNums.has(chapter.chapterNum)) {
       pushIssue(
-        issueList,
+        issues,
         'high',
         'chapter',
         '章节编号重复',
-        `第 ${chapter.chapterNum} 章出现了重复记录。`,
-        '调整章节编号，确保时间轴和故事弧只对应唯一章节。',
-        { entityType: 'chapter', entityId: chapter.id, entityLabel: chapter.title || `第${chapter.chapterNum}章` },
+        `第 ${chapter.chapterNum} 章存在重复记录。`,
+        '调整章节编号，确保时间轴和故事弧都只对应一个稳定章位。',
+        { entityType: 'chapter', entityId: chapter.id, entityLabel: chapter.title || `第 ${chapter.chapterNum} 章` },
       )
     }
     chapterNums.add(chapter.chapterNum)
@@ -195,50 +204,50 @@ export function buildNovelConsistencyReport(novelId: number): NovelConsistencyRe
     const previous = chapterRows[index - 1]
     if (previous && chapter.chapterNum - previous.chapterNum > 1) {
       pushIssue(
-        issueList,
+        issues,
         'medium',
         'chapter',
-        '章节编号存在断档',
+        '章节编号出现断档',
         `第 ${previous.chapterNum} 章和第 ${chapter.chapterNum} 章之间存在空档。`,
-        '确认是否故意留空；如果不是，补齐章节编号或调整时间轴。',
-        { entityType: 'chapter', entityId: chapter.id, entityLabel: chapter.title || `第${chapter.chapterNum}章` },
+        '确认是否有意留空；如果不是，补齐章节编号或重新校准结构。',
+        { entityType: 'chapter', entityId: chapter.id, entityLabel: chapter.title || `第 ${chapter.chapterNum} 章` },
       )
     }
 
     const hasContent = Boolean(asText(chapter.content))
     if (hasContent && !asText(chapter.summary)) {
       pushIssue(
-        issueList,
+        issues,
         'medium',
         'continuity',
         '章节缺少摘要',
         `第 ${chapter.chapterNum} 章已有正文，但没有摘要。`,
-        '执行一次“更新摘要”，让后续长文记忆和体检有稳定锚点。',
-        { entityType: 'chapter', entityId: chapter.id, entityLabel: chapter.title || `第${chapter.chapterNum}章` },
+        '先刷新摘要，给后续长文记忆和修订回查提供稳定锚点。',
+        { entityType: 'chapter', entityId: chapter.id, entityLabel: chapter.title || `第 ${chapter.chapterNum} 章` },
       )
     }
 
     if (hasContent && !asText(chapter.continuityStateJson)) {
       pushIssue(
-        issueList,
+        issues,
         'medium',
         'continuity',
         '章节缺少连续性记忆',
-        `第 ${chapter.chapterNum} 章已有正文，但没有连续性记忆。`,
-        '执行一次“更新摘要”，补齐剧情推进、人物变化和待回收事项。',
-        { entityType: 'chapter', entityId: chapter.id, entityLabel: chapter.title || `第${chapter.chapterNum}章` },
+        `第 ${chapter.chapterNum} 章已有正文，但没有连续性状态。`,
+        '刷新连续性状态，补齐剧情推进、人物变化和待回收事项。',
+        { entityType: 'chapter', entityId: chapter.id, entityLabel: chapter.title || `第 ${chapter.chapterNum} 章` },
       )
     }
 
     if ((chapter.status === 'draft' || chapter.status === 'final') && !asText(chapter.outline)) {
       pushIssue(
-        issueList,
+        issues,
         'medium',
         'chapter',
         '已写章节缺少细纲',
-        `第 ${chapter.chapterNum} 章已经进入 ${chapter.status} 状态，但没有保留本章大纲。`,
-        '补一版章节细纲，避免后续时间轴和回收点失去来源。',
-        { entityType: 'chapter', entityId: chapter.id, entityLabel: chapter.title || `第${chapter.chapterNum}章` },
+        `第 ${chapter.chapterNum} 章已经进入 ${chapter.status} 状态，但没有细纲。`,
+        '补一版章节细纲，避免后续结构追踪和回收点失去来源。',
+        { entityType: 'chapter', entityId: chapter.id, entityLabel: chapter.title || `第 ${chapter.chapterNum} 章` },
       )
     }
   })
@@ -247,14 +256,15 @@ export function buildNovelConsistencyReport(novelId: number): NovelConsistencyRe
   sortedArcs.forEach((arc, index) => {
     const start = arc.chapterStart ?? 0
     const end = arc.chapterEnd ?? 0
+
     if (start && end && start > end) {
       pushIssue(
-        issueList,
+        issues,
         'high',
         'outline',
-        '故事弧章节范围反转',
-        `${arc.arcName} 的起始章节大于结束章节。`,
-        '修正故事弧章节范围，保证大纲和时间轴可以正确关联。',
+        '故事弧章位反转',
+        `${arc.arcName} 的起始章位大于结束章位。`,
+        '修正故事弧范围，保证大纲与时间轴能正确对齐。',
         { entityType: 'arc', entityId: arc.id, entityLabel: arc.arcName },
       )
     }
@@ -262,12 +272,12 @@ export function buildNovelConsistencyReport(novelId: number): NovelConsistencyRe
     const previous = sortedArcs[index - 1]
     if (previous && previous.chapterEnd && arc.chapterStart && previous.chapterEnd >= arc.chapterStart) {
       pushIssue(
-        issueList,
+        issues,
         'medium',
         'outline',
         '故事弧范围重叠',
         `${previous.arcName} 与 ${arc.arcName} 的章节范围存在重叠。`,
-        '重新梳理故事弧范围，避免同一章同时归属多个主弧。',
+        '重新梳理故事弧边界，避免同一章在结构上承担过多主线任务。',
         { entityType: 'arc', entityId: arc.id, entityLabel: arc.arcName },
       )
     }
@@ -276,52 +286,167 @@ export function buildNovelConsistencyReport(novelId: number): NovelConsistencyRe
   mapRows.forEach((node) => {
     if (node.parentId && !mapIdSet.has(node.parentId)) {
       pushIssue(
-        issueList,
+        issues,
         'high',
         'map',
         '地图节点父级丢失',
         `${node.name} 的父节点不存在。`,
-        '修正地图层级，避免地点、势力和场景挂到孤立节点上。',
+        '修正地图层级，避免地点关系链断裂。',
         { entityType: 'map', entityId: node.id, entityLabel: node.name },
       )
     }
   })
 
+  if (threadRows.length === 0) {
+    pushIssue(
+      issues,
+      'medium',
+      'thread',
+      '缺少故事线程',
+      '当前还没有任何可追踪的故事线程，后续章节很难稳定回收冲突和悬念。',
+      '先补出主线、关系线或悬念线，再继续批量写作。',
+    )
+  } else {
+    const mainThreads = threadRows.filter((row) => row.threadType === 'main')
+    if (mainThreads.length === 0) {
+      pushIssue(
+        issues,
+        'high',
+        'thread',
+        '缺少主线线程',
+        '当前线程列表里没有主线线程，结构页和时间轴缺少总推进链。',
+        '补一条 main 线程，明确主推进目标、起始章和回收条件。',
+      )
+    } else if (mainThreads.length > 1) {
+      pushIssue(
+        issues,
+        'high',
+        'thread',
+        '主线线程数量冲突',
+        `当前存在 ${mainThreads.length} 条主线线程，容易导致结构重心不稳定。`,
+        '保留一条真正的主线，其余转成 subplot、mystery、relationship 或 payoff。',
+      )
+    }
+
+    const seenThreadSignatures = new Map<string, typeof storyThreads.$inferSelect>()
+    threadRows.forEach((thread) => {
+      const activeLike = thread.status !== 'resolved' && thread.status !== 'abandoned'
+
+      if (activeLike && typeof thread.startChapter !== 'number') {
+        pushIssue(
+          issues,
+          'medium',
+          'thread',
+          '线程缺少起始章位',
+          `${thread.title} 仍在推进中，但没有起始章位。`,
+          '补充 startChapter，让结构页、时间轴和章节回查都能追踪这条线程。',
+          { entityType: 'thread', entityId: thread.id, entityLabel: thread.title },
+        )
+      }
+
+      if (activeLike && typeof thread.targetPayoffChapter !== 'number') {
+        pushIssue(
+          issues,
+          'medium',
+          'thread',
+          '线程缺少回收章位',
+          `${thread.title} 仍在推进中，但没有目标回收章位。`,
+          '补充 targetPayoffChapter 或至少写清回收条件，避免线程悬空。',
+          { entityType: 'thread', entityId: thread.id, entityLabel: thread.title },
+        )
+      }
+
+      if (
+        activeLike
+        && typeof thread.targetPayoffChapter === 'number'
+        && latestChapterNum > 0
+        && thread.targetPayoffChapter < latestChapterNum
+      ) {
+        pushIssue(
+          issues,
+          'medium',
+          'thread',
+          '线程已过回收窗口',
+          `${thread.title} 仍未解决，但目标回收章位已经落后于当前正文进度。`,
+          '要么尽快回收这条线程，要么重设章位并同步当前状态。',
+          { entityType: 'thread', entityId: thread.id, entityLabel: thread.title },
+        )
+      }
+
+      if (
+        thread.status === 'resolved'
+        && typeof thread.targetPayoffChapter === 'number'
+        && latestChapterNum > 0
+        && thread.targetPayoffChapter > latestChapterNum
+      ) {
+        pushIssue(
+          issues,
+          'low',
+          'thread',
+          '线程状态早于正文进度',
+          `${thread.title} 已标记为 resolved，但回收章位还在当前正文之后。`,
+          '检查这条线程是提前结清了，还是章位和状态没有同步更新。',
+          { entityType: 'thread', entityId: thread.id, entityLabel: thread.title },
+        )
+      }
+
+      const signature = buildThreadSimilaritySignature(thread)
+      if (!signature || !activeLike) return
+
+      const previous = seenThreadSignatures.get(signature)
+      if (previous) {
+        pushIssue(
+          issues,
+          'medium',
+          'thread',
+          '线程功能位高度重复',
+          `${thread.title} 与 ${previous.title} 的冲突抓手、回收条件或章位过于接近。`,
+          '保留一条更清晰的线程，另一条改成明显不同的功能位或直接合并。',
+          { entityType: 'thread', entityId: thread.id, entityLabel: thread.title },
+        )
+        return
+      }
+
+      seenThreadSignatures.set(signature, thread)
+    })
+  }
+
   eventRows.forEach((event) => {
     const startNum = event.chapterStartId ? chapterNumMap.get(event.chapterStartId) : undefined
     const endNum = event.chapterEndId ? chapterNumMap.get(event.chapterEndId) : undefined
+
     if (typeof startNum === 'number' && typeof endNum === 'number' && startNum > endNum) {
       pushIssue(
-        issueList,
+        issues,
         'high',
         'timeline',
         '时间轴章节范围反转',
-        `${event.eventTitle} 的起始章节大于结束章节。`,
-        '调整事件对应章节范围，避免正文和时间轴顺序冲突。',
+        `${event.eventTitle} 的起始章位大于结束章位。`,
+        '调整事件对应章节范围，避免正文顺序和时间轴冲突。',
         { entityType: 'timeline', entityId: event.id, entityLabel: event.eventTitle },
       )
     }
 
     if (event.arcId && !arcIdSet.has(event.arcId)) {
       pushIssue(
-        issueList,
+        issues,
         'medium',
         'timeline',
-        '时间轴事件挂到了不存在的故事弧',
-        `${event.eventTitle} 引用了失效的故事弧。`,
-        '重新绑定故事弧，或者清空该事件的故事弧引用。',
+        '时间轴事件引用了失效故事弧',
+        `${event.eventTitle} 关联的故事弧已经不存在。`,
+        '重新绑定故事弧，或清空无效引用。',
         { entityType: 'timeline', entityId: event.id, entityLabel: event.eventTitle },
       )
     }
 
     if (event.locationMapId && !mapIdSet.has(event.locationMapId)) {
       pushIssue(
-        issueList,
+        issues,
         'high',
         'timeline',
         '时间轴事件地点失效',
-        `${event.eventTitle} 引用了已失效的地点。`,
-        '重新绑定地点，避免事件成为无落点记录。',
+        `${event.eventTitle} 关联的地点已经失效。`,
+        '重新绑定地点，避免事件失去落点。',
         { entityType: 'timeline', entityId: event.id, entityLabel: event.eventTitle },
       )
     }
@@ -331,12 +456,12 @@ export function buildNovelConsistencyReport(novelId: number): NovelConsistencyRe
     const missingCharacters = [...presentIds, ...affectedIds].filter((id) => !characterIdSet.has(id))
     if (missingCharacters.length > 0) {
       pushIssue(
-        issueList,
+        issues,
         'high',
         'timeline',
         '时间轴事件人物引用失效',
-        `${event.eventTitle} 包含 ${missingCharacters.length} 个已失效人物引用。`,
-        '重新选择在场人物和受影响人物，避免人物状态统计失真。',
+        `${event.eventTitle} 包含 ${missingCharacters.length} 个已经失效的人物引用。`,
+        '重新选择在场人物和受影响人物，避免后续统计失真。',
         { entityType: 'timeline', entityId: event.id, entityLabel: event.eventTitle },
       )
     }
@@ -345,12 +470,12 @@ export function buildNovelConsistencyReport(novelId: number): NovelConsistencyRe
     linkedItemIds.forEach((itemId) => {
       if (!itemIdSet.has(itemId)) {
         pushIssue(
-          issueList,
+          issues,
           'high',
           'timeline',
           '时间轴事件物品引用失效',
           `${event.eventTitle} 引用了已删除物品 #${itemId}。`,
-          '清理失效物品，或重新绑定正确物品。',
+          '清理无效物品，或重新绑定正确物品。',
           { entityType: 'timeline', entityId: event.id, entityLabel: event.eventTitle },
         )
         return
@@ -360,12 +485,12 @@ export function buildNovelConsistencyReport(novelId: number): NovelConsistencyRe
       const backLinks = listLinkedTimelineEventIds(item?.linkedTimelineEventIdsJson)
       if (!backLinks.includes(event.id)) {
         pushIssue(
-          issueList,
+          issues,
           'high',
           'timeline',
           '事件与物品没有双向同步',
-          `${event.eventTitle} 关联了 ${item?.itemName || `物品#${itemId}` }，但物品侧没有回写这个事件。`,
-          '执行一次结构体检或重新保存该事件/物品，补齐双向联动。',
+          `${event.eventTitle} 关联了 ${item?.itemName || `物品#${itemId}` }，但物品侧没有回写这条事件。`,
+          '重存该事件或物品，补齐双向关联。',
           { entityType: 'timeline', entityId: event.id, entityLabel: event.eventTitle },
         )
       }
@@ -373,49 +498,49 @@ export function buildNovelConsistencyReport(novelId: number): NovelConsistencyRe
 
     if (event.anchorInvalid) {
       pushIssue(
-        issueList,
+        issues,
         'medium',
         'timeline',
         '时间轴结构锚点失效',
-        `${event.eventTitle} 绑定的结构锚点已经失效，需要重新确认落点。`,
-        '重新选择卷、部、章节或场景，避免事件与结构页脱钩。',
+        `${event.eventTitle} 绑定的结构锚点已经失效。`,
+        '重新选择卷、部、章节或场景落点，避免事件漂浮。',
         { entityType: 'timeline', entityId: event.id, entityLabel: event.eventTitle },
       )
     }
 
     if (
-      !event.volumeId &&
-      !event.partId &&
-      !event.chapterStartId &&
-      !event.chapterEndId &&
-      !event.segmentId &&
-      !event.locationMapId &&
-      presentIds.length === 0 &&
-      linkedItemIds.length === 0
+      !event.volumeId
+      && !event.partId
+      && !event.chapterStartId
+      && !event.chapterEndId
+      && !event.segmentId
+      && !event.locationMapId
+      && presentIds.length === 0
+      && linkedItemIds.length === 0
     ) {
       pushIssue(
-        issueList,
+        issues,
         'low',
         'timeline',
         '时间轴事件过于孤立',
-        `${event.eventTitle} 目前没有章节、地点、人物或物品挂点。`,
-        '至少补一个章节范围或地点，再补人物/物品挂点。',
+        `${event.eventTitle} 没有章节、地点、人物或物品挂点。`,
+        '至少补一个章节范围或地点，再补人物或物品挂点。',
         { entityType: 'timeline', entityId: event.id, entityLabel: event.eventTitle },
       )
     }
 
     if (
-      event.status === 'planned' &&
-      ((typeof startNum === 'number' && chapterRows.some((row) => row.chapterNum >= startNum && asText(row.content))) ||
-        (typeof endNum === 'number' && chapterRows.some((row) => row.chapterNum >= endNum && asText(row.content))))
+      event.status === 'planned'
+      && ((typeof startNum === 'number' && chapterRows.some((row) => row.chapterNum >= startNum && asText(row.content)))
+        || (typeof endNum === 'number' && chapterRows.some((row) => row.chapterNum >= endNum && asText(row.content))))
     ) {
       pushIssue(
-        issueList,
+        issues,
         'low',
         'timeline',
-        '时间轴状态未跟正文进度同步',
-        `${event.eventTitle} 对应章节已经有正文，但事件状态还停留在 planned。`,
-        '重新保存章节或事件，让事件状态同步到 written / resolved。',
+        '时间轴状态未跟正文同步',
+        `${event.eventTitle} 对应章节已经有正文，但事件状态仍停留在 planned。`,
+        '重存事件或章节，让状态推进到 written 或 resolved。',
         { entityType: 'timeline', entityId: event.id, entityLabel: event.eventTitle },
       )
     }
@@ -424,23 +549,23 @@ export function buildNovelConsistencyReport(novelId: number): NovelConsistencyRe
   itemRows.forEach((item) => {
     if (item.parentItemId && !itemIdSet.has(item.parentItemId)) {
       pushIssue(
-        issueList,
+        issues,
         'medium',
         'item',
         '物品模板引用失效',
         `${item.itemName} 引用了不存在的模板。`,
-        '重新选择模板，或清空模板引用。',
+        '重新选择模板，或清空无效模板引用。',
         { entityType: 'item', entityId: item.id, entityLabel: item.itemName },
       )
     }
 
     if (item.ownerCharacterId && !characterIdSet.has(item.ownerCharacterId)) {
       pushIssue(
-        issueList,
+        issues,
         'high',
         'item',
         '物品持有者失效',
-        `${item.itemName} 绑定的持有者已不存在。`,
+        `${item.itemName} 绑定的持有者已经不存在。`,
         '重新绑定持有者，避免人物装备链断裂。',
         { entityType: 'item', entityId: item.id, entityLabel: item.itemName },
       )
@@ -448,12 +573,12 @@ export function buildNovelConsistencyReport(novelId: number): NovelConsistencyRe
 
     if (item.locationMapId && !mapIdSet.has(item.locationMapId)) {
       pushIssue(
-        issueList,
+        issues,
         'high',
         'item',
         '物品地点失效',
-        `${item.itemName} 绑定的地点已不存在。`,
-        '重新绑定地点，避免关键物品去向丢失。',
+        `${item.itemName} 绑定的地点已经不存在。`,
+        '重新绑定地点，避免关键物品失去去向。',
         { entityType: 'item', entityId: item.id, entityLabel: item.itemName },
       )
     }
@@ -462,12 +587,12 @@ export function buildNovelConsistencyReport(novelId: number): NovelConsistencyRe
     linkedEvents.forEach((eventId) => {
       if (!eventIdSet.has(eventId)) {
         pushIssue(
-          issueList,
+          issues,
           'high',
           'item',
           '物品事件引用失效',
           `${item.itemName} 引用了已删除事件 #${eventId}。`,
-          '清理失效事件，或重新绑定正确时间轴节点。',
+          '清理无效事件，或重新绑定正确时间轴节点。',
           { entityType: 'item', entityId: item.id, entityLabel: item.itemName },
         )
         return
@@ -477,44 +602,44 @@ export function buildNovelConsistencyReport(novelId: number): NovelConsistencyRe
       const backLinks = listLinkedItemIds(event?.linkedItemIdsJson)
       if (!backLinks.includes(item.id)) {
         pushIssue(
-          issueList,
+          issues,
           'high',
           'item',
           '物品与事件没有双向同步',
-          `${item.itemName} 关联了 ${event?.eventTitle || `事件#${eventId}` }，但事件侧没有回写这个物品。`,
-          '重新保存该物品或事件，补齐双向联动。',
+          `${item.itemName} 关联了 ${event?.eventTitle || `事件#${eventId}` }，但事件侧没有回写这件物品。`,
+          '重存该物品或事件，补齐双向关联。',
           { entityType: 'item', entityId: item.id, entityLabel: item.itemName },
         )
       }
     })
 
-    const linkedCharacters = parseNumberArray(item.linkedCharacterIdsJson).filter((id) => !characterIdSet.has(id))
-    if (linkedCharacters.length > 0) {
+    const missingLinkedCharacters = parseNumberArray(item.linkedCharacterIdsJson).filter((id) => !characterIdSet.has(id))
+    if (missingLinkedCharacters.length > 0) {
       pushIssue(
-        issueList,
+        issues,
         'medium',
         'item',
         '物品角色引用失效',
-        `${item.itemName} 的关联角色里有 ${linkedCharacters.length} 个失效引用。`,
+        `${item.itemName} 的关联角色里有 ${missingLinkedCharacters.length} 个失效引用。`,
         '重新选择关联角色，避免物品关系链出现空洞。',
         { entityType: 'item', entityId: item.id, entityLabel: item.itemName },
       )
     }
 
     if (
-      item.itemKind === 'instance' &&
-      !item.ownerCharacterId &&
-      !item.locationMapId &&
-      linkedEvents.length === 0 &&
-      parseNumberArray(item.linkedCharacterIdsJson).length === 0
+      item.itemKind === 'instance'
+      && !item.ownerCharacterId
+      && !item.locationMapId
+      && linkedEvents.length === 0
+      && parseNumberArray(item.linkedCharacterIdsJson).length === 0
     ) {
       pushIssue(
-        issueList,
+        issues,
         'low',
         'item',
         '物品实例仍然悬空',
-        `${item.itemName} 还没有挂到人物、地点或事件。`,
-        '至少给它一个持有人、出现地点或相关事件，避免变成摆设。',
+        `${item.itemName} 还没有挂到人物、地点或事件上。`,
+        '至少给它一个持有人、地点或关联事件，避免沦为摆设。',
         { entityType: 'item', entityId: item.id, entityLabel: item.itemName },
       )
     }
@@ -534,13 +659,13 @@ export function buildNovelConsistencyReport(novelId: number): NovelConsistencyRe
       .every((eventId) => eventRows.some((event) => event.id === eventId && listLinkedItemIds(event.linkedItemIdsJson).includes(item.id))),
   ).length
 
-  const highCount = issueList.filter((issue) => issue.severity === 'high').length
-  const mediumCount = issueList.filter((issue) => issue.severity === 'medium').length
-  const lowCount = issueList.filter((issue) => issue.severity === 'low').length
+  const highCount = issues.filter((issue) => issue.severity === 'high').length
+  const mediumCount = issues.filter((issue) => issue.severity === 'medium').length
+  const lowCount = issues.filter((issue) => issue.severity === 'low').length
   const readinessScore = Math.max(0, 100 - highCount * 18 - mediumCount * 9 - lowCount * 4)
 
   const categoryWeight = new Map<string, number>()
-  issueList.forEach((issue) => {
+  issues.forEach((issue) => {
     const current = categoryWeight.get(issue.category) || 0
     const weight = issue.severity === 'high' ? 3 : issue.severity === 'medium' ? 2 : 1
     categoryWeight.set(issue.category, current + weight)
@@ -552,18 +677,20 @@ export function buildNovelConsistencyReport(novelId: number): NovelConsistencyRe
     .map(([category]) => {
       switch (category) {
         case 'timeline':
-          return '优先清理时间轴挂点和事件顺序。'
+          return '优先清理时间轴挂点、事件顺序和失效引用。'
+        case 'thread':
+          return '优先补主线线程、回收章位和重复功能位。'
         case 'item':
-          return '优先补齐物品与人物/事件的双向联动。'
+          return '优先补齐物品与人物、地点、事件之间的双向关联。'
         case 'chapter':
         case 'continuity':
           return '优先补摘要、连续性记忆和章节细纲。'
         case 'map':
-          return '优先修正地图节点层级和失效地点。'
+          return '优先修正地图层级和失效地点。'
         case 'outline':
           return '优先整理故事弧范围和章节归属。'
         default:
-          return '优先稳定人物主线锚点。'
+          return '优先稳住角色锚点和主线重心。'
       }
     })
 
@@ -571,7 +698,7 @@ export function buildNovelConsistencyReport(novelId: number): NovelConsistencyRe
     generatedAt: new Date().toISOString(),
     readinessScore,
     overview: buildOverview(highCount, mediumCount, lowCount),
-    issueCount: issueList.length,
+    issueCount: issues.length,
     highCount,
     mediumCount,
     lowCount,
@@ -585,6 +712,6 @@ export function buildNovelConsistencyReport(novelId: number): NovelConsistencyRe
       itemCount: itemRows.length,
       bidirectionalLinkCount,
     },
-    issues: issueList,
+    issues,
   }
 }

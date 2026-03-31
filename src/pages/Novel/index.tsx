@@ -18,7 +18,7 @@ import {
 } from '@ant-design/icons'
 import { useNovelStore } from '../../stores/novel.store'
 import { useWorkspaceStore, type WorkspaceMode } from '../../stores/workspace.store'
-import GuidePage from './Guide'
+import StudioPage from './Studio'
 import GuidedWorkspaceStep from './GuidedStep'
 import Overview from './Overview'
 import PremisePage from './Premise'
@@ -95,7 +95,7 @@ const PRO_GROUPS: Array<{ title: string; items: WorkspaceItem[] }> = [
   {
     title: '基础',
     items: [
-      { key: 'guide', icon: <DashboardOutlined />, label: '创作向导', summary: '查看当前缺口。' },
+      { key: 'guide', icon: <DashboardOutlined />, label: 'AI Studio', summary: '统一编排底盘、资产与质量。' },
       { key: 'overview', icon: <AppstoreOutlined />, label: '基础总览', summary: '查看小说基础信息。' },
       { key: 'project-brief', icon: <AppstoreOutlined />, label: '项目立项', summary: '统一读者承诺、卖点和禁区。' },
       { key: 'core-settings', icon: <SettingOutlined />, label: '基础设定', summary: '维护 premise 与写作边界。' },
@@ -148,6 +148,7 @@ const GUIDED_TO_PRO_PAGE: Record<GuidedWorkflowStepKey, ProWorkspaceKey> = {
   'items-equipment': 'items',
   'story-threads': 'threads',
   'write-start': 'writing',
+  'volume-planning': 'structure',
 }
 
 const MODE_COPY: Record<WorkspaceMode, string> = {
@@ -462,7 +463,7 @@ export default function NovelRouter() {
               <Route path="story-threads" element={<GuidedWorkspaceStep novelId={novelId} stepKey="story-threads" />} />
               <Route path="write-start" element={<GuidedWorkspaceStep novelId={novelId} stepKey="write-start" />} />
 
-              <Route path="guide" element={<GuidePage novelId={novelId} />} />
+              <Route path="guide" element={<StudioPage novelId={novelId} />} />
               <Route path="overview" element={<Overview novelId={novelId} />} />
               <Route path="core-settings" element={<PremisePage novelId={novelId} />} />
               <Route path="story-design" element={<CoreSettings novelId={novelId} />} />

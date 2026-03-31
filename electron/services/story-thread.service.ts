@@ -8,13 +8,21 @@ import {
   buildHumanLanguageRules,
   buildOutputQualityRules,
 } from '../../src/shared/prompt-library'
+import type { EntityRegenerateOptions } from '../../src/types'
 import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/utils/text'
 import { getDb } from '../database/db'
 import { chapters, novels, storyThreads } from '../database/schema'
 import { safeParseAiJson } from '../utils/json'
 import { markNovelContextChanged } from './context-impact.service'
 import { buildStoryProfile } from './context.service'
+import {
+  getAttemptCount,
+  getRecentRejectedDigests,
+  markRejected,
+  recordGeneration,
+} from './generation-history.service'
 import { runChatTask } from './task.service'
+import { appendVariationMessage } from './variation-control.service'
 
 type StoryThreadType = 'main' | 'subplot' | 'mystery' | 'payoff' | 'relationship'
 type StoryThreadStatus = 'planned' | 'active' | 'resolved' | 'stalled' | 'abandoned'
@@ -201,6 +209,79 @@ function buildThreadSummary(
 
   const lines = [...existingLines, ...createdLines]
   return lines.length > 0 ? lines.join('\n') : '当前还没有任何故事线程。'
+}
+
+function normalizeSignaturePart(value?: string | null): string {
+  return (value || '').replace(/\s+/g, '').trim().toLowerCase()
+}
+
+function buildThreadSignature(payload: Partial<typeof storyThreads.$inferInsert>): string {
+  return [
+    normalizeSignaturePart(typeof payload.title === 'string' ? payload.title : ''),
+    normalizeSignaturePart(typeof payload.summary === 'string' ? payload.summary : ''),
+    normalizeSignaturePart(typeof payload.premise === 'string' ? payload.premise : ''),
+    normalizeSignaturePart(typeof payload.payoffCondition === 'string' ? payload.payoffCondition : ''),
+    typeof payload.startChapter === 'number' ? String(payload.startChapter) : '',
+    typeof payload.targetPayoffChapter === 'number' ? String(payload.targetPayoffChapter) : '',
+  ].filter(Boolean).join('|')
+}
+
+function buildThreadCurrentSummary(thread: typeof storyThreads.$inferSelect): string {
+  return [
+    `标题：${thread.title}`,
+    `类型：${thread.threadType || 'subplot'}`,
+    `状态：${thread.status || 'planned'}`,
+    `优先级：${thread.priority || 'medium'}`,
+    typeof thread.startChapter === 'number' ? `起始章：第${thread.startChapter}章` : '',
+    typeof thread.targetPayoffChapter === 'number' ? `目标回收章：第${thread.targetPayoffChapter}章` : '',
+    thread.summary ? `摘要：${thread.summary}` : '',
+    thread.premise ? `触发前提：${thread.premise}` : '',
+    thread.payoffCondition ? `回收条件：${thread.payoffCondition}` : '',
+    thread.currentState ? `当前状态：${thread.currentState}` : '',
+    thread.notes ? `备注：${thread.notes}` : '',
+  ].filter(Boolean).join('\n')
+}
+
+function buildStoryThreadRepairPrompt(params: {
+  profile: Awaited<ReturnType<typeof buildStoryProfile>>
+  current: typeof storyThreads.$inferSelect
+  latestChapterNum: number
+  estimatedChapterTotal: number
+  mode: 'repair' | 'replace'
+}): string {
+  const storyCore = [
+    params.profile.projectBriefSummary,
+    params.profile.premiseSummary,
+    params.profile.storyDesignSummary,
+    params.profile.themeVoiceSummary,
+    params.profile.worldRulesSummary,
+  ].filter(Boolean).join('\n\n')
+
+  return [
+    `你是中文长篇小说的结构策划。请${params.mode === 'replace' ? '用明显不同的新方案替换' : '修复'}下面这条故事线程。`,
+    '',
+    '【小说基础】',
+    `小说：${params.profile.novelTitle}`,
+    `题材：${params.profile.genre}`,
+    params.profile.background ? `背景：${params.profile.background}` : '',
+    storyCore ? `故事底盘：${storyCore}` : '',
+    `主角称呼：${params.profile.protagonistReference}`,
+    `主角命名规则：${params.profile.protagonistRule}`,
+    '',
+    '【当前线程】',
+    buildThreadCurrentSummary(params.current),
+    '',
+    '【修复目标】',
+    params.mode === 'replace'
+      ? '- 保留这条线程在结构中的功能位，但换成明显不同的标题、冲突抓手、回收条件和推进方式。'
+      : '- 保留这条线程在结构中的功能位，优先修复空泛、重复、AI 味重和回收条件不清的问题。',
+    `- 当前已写到约第 ${Math.max(params.latestChapterNum, 1)} 章，章位必须和正文进度相容。`,
+    `- 回收章位请尽量落在 1 到 ${params.estimatedChapterTotal} 章之间。`,
+    '- 不要把线程写成大段剧情摘要，必须保持成可追踪的线程卡片。',
+    '',
+    '只输出单个 JSON object，不要解释，不要 Markdown。',
+    '{"thread_type":"subplot","title":"","summary":"","premise":"","status":"planned","priority":"medium","start_chapter":1,"target_payoff_chapter":12,"payoff_condition":"","current_state":"","notes":""}',
+  ].filter(Boolean).join('\n')
 }
 
 function buildStoryThreadPrompt(params: {
@@ -470,9 +551,16 @@ export async function generateStoryThreads(
   const createdDrafts: Array<Partial<typeof storyThreads.$inferInsert>> = []
   const createdIds: number[] = []
   const warnings: string[] = []
+  const historyEntityType = 'thread'
+  const historyTaskType = 'story_thread_generate_batch'
   const usedTitleKeys = new Set(
     existingRows
       .map((thread) => normalizeThreadTitleKey(thread.title || ''))
+      .filter(Boolean),
+  )
+  const usedSignatures = new Set(
+    existingRows
+      .map((thread) => buildThreadSignature(thread))
       .filter(Boolean),
   )
 
@@ -480,26 +568,38 @@ export async function generateStoryThreads(
     const currentBatchCount = Math.min(batchSize, requestedCount - offset)
 
     try {
+      const attemptNumber = getAttemptCount(novelId, historyEntityType, null, historyTaskType) + 1
+      const rejectedDigests = getRecentRejectedDigests(novelId, historyEntityType, null, historyTaskType)
+      const messages = appendVariationMessage([{
+        role: 'user',
+        content: buildStoryThreadPrompt({
+          profile,
+          existingSummary: buildThreadSummary(existingRows, createdDrafts),
+          count: currentBatchCount,
+          latestChapterNum,
+          estimatedChapterTotal,
+          focus: options.focus,
+        }),
+      }], {
+        attemptNumber,
+        rejectedDigests,
+      })
       const result = await runChatTask({
         type: 'story_thread_generate',
         novelId,
         modelConfigId: novel.modelConfigId || undefined,
         relatedEntityType: 'novel',
         relatedEntityId: novelId,
-        messages: [{
-          role: 'user',
-          content: buildStoryThreadPrompt({
-            profile,
-            existingSummary: buildThreadSummary(existingRows, createdDrafts),
-            count: currentBatchCount,
-            latestChapterNum,
-            estimatedChapterTotal,
-            focus: options.focus,
-          }),
-        }],
+        messages,
       })
-
-      const parsed = cleanAiValue(safeParseAiJson<GeneratedStoryThread[]>(result, 'array'))
+      const historyId = recordGeneration(novelId, historyEntityType, null, historyTaskType, result, attemptNumber)
+      let parsed: GeneratedStoryThread[]
+      try {
+        parsed = cleanAiValue(safeParseAiJson<GeneratedStoryThread[]>(result, 'array'))
+      } catch (error) {
+        markRejected(historyId)
+        throw error
+      }
       let acceptedInBatch = 0
 
       for (const item of parsed) {
@@ -512,14 +612,22 @@ export async function generateStoryThreads(
           continue
         }
 
+        const signature = buildThreadSignature(payload)
+        if (!signature || usedSignatures.has(signature)) {
+          warnings.push(`线程「${payload.title}」与现有线程功能或回收位过近，已跳过。`)
+          continue
+        }
+
         const id = createStoryThread(novelId, payload, { skipContextTracking: true })
         createdIds.push(id)
         createdDrafts.push(payload)
         usedTitleKeys.add(titleKey)
+        usedSignatures.add(signature)
         acceptedInBatch += 1
       }
 
       if (acceptedInBatch === 0) {
+        markRejected(historyId)
         warnings.push(`第 ${Math.floor(offset / batchSize) + 1} 批没有生成可用线程。`)
       }
     } catch (error) {
@@ -537,4 +645,71 @@ export async function generateStoryThreads(
     createdCount: createdIds.length,
     warnings,
   }
+}
+
+export async function regenerateStoryThread(
+  id: number,
+  options: EntityRegenerateOptions = {},
+): Promise<typeof storyThreads.$inferSelect | null> {
+  const current = getStoryThread(id)
+  if (!current) return null
+
+  const db = getDb()
+  const novel = db.select().from(novels).where(eq(novels.id, current.novelId)).all()[0]
+  if (!novel) return null
+
+  const mode = options.mode === 'replace' ? 'replace' : 'repair'
+  const profile = await buildStoryProfile(current.novelId)
+  const latestChapterNum = getLatestChapterNum(current.novelId)
+  const estimatedChapterTotal = Math.max(
+    12,
+    latestChapterNum,
+    Math.ceil((novel.targetWords || 200000) / 3000),
+  )
+  const historyEntityType = 'thread'
+  const historyTaskType = 'story_thread_regenerate'
+  const attemptNumber = getAttemptCount(current.novelId, historyEntityType, current.id, historyTaskType) + 1
+  const rejectedDigests = getRecentRejectedDigests(current.novelId, historyEntityType, current.id, historyTaskType)
+  const currentSignature = buildThreadSignature(current)
+  const messages = appendVariationMessage([{
+    role: 'user',
+    content: buildStoryThreadRepairPrompt({
+      profile,
+      current,
+      latestChapterNum,
+      estimatedChapterTotal,
+      mode,
+    }),
+  }], {
+    attemptNumber,
+    rejectedDigests,
+  })
+
+  const result = await runChatTask({
+    type: 'story_thread_generate',
+    novelId: current.novelId,
+    modelConfigId: novel.modelConfigId || undefined,
+    relatedEntityType: 'thread',
+    relatedEntityId: current.id,
+    messages,
+  })
+  const historyId = recordGeneration(current.novelId, historyEntityType, current.id, historyTaskType, result, attemptNumber)
+  let parsed: GeneratedStoryThread
+  try {
+    parsed = cleanAiValue(safeParseAiJson<GeneratedStoryThread>(result, 'object'))
+  } catch {
+    markRejected(historyId)
+    return current
+  }
+  const payload = parseGeneratedThread(parsed, estimatedChapterTotal)
+  const nextSignature = payload ? buildThreadSignature(payload) : ''
+
+  if (!payload || !payload.title || !nextSignature || nextSignature === currentSignature) {
+    markRejected(historyId)
+    return current
+  }
+
+  updateStoryThread(id, payload, { skipContextTracking: true })
+  markNovelContextChanged(current.novelId, 'Story threads changed')
+  return getStoryThread(id)
 }

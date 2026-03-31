@@ -1,4 +1,5 @@
 import { asc, eq } from 'drizzle-orm'
+import type { EntityRegenerateOptions } from '../../src/types'
 import { getDb, getSqlite } from '../database/db'
 import {
   chapterSegments,
@@ -14,6 +15,12 @@ import {
 import { safeParseJson } from '../utils/json'
 import { buildStoryProfile } from './context.service'
 import { buildTimelineEventsPrompt } from './story-prompts'
+import {
+  getAttemptCount,
+  getRecentRejectedDigests,
+  markRejected,
+  recordGeneration,
+} from './generation-history.service'
 import { runChatTask } from './task.service'
 import { removeTimelineEventFromItems, syncTimelineEventItemLinks } from './link-sync.service'
 import {
@@ -22,6 +29,7 @@ import {
 } from '../../src/shared/genre-system'
 import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/utils/text'
 import { markNovelContextChanged } from './context-impact.service'
+import { appendVariationMessage } from './variation-control.service'
 
 type TimelineStatus = 'planned' | 'seeded' | 'written' | 'resolved'
 
@@ -265,6 +273,90 @@ function buildItemSummary(rows: Array<typeof storyItems.$inferSelect>): string {
     })
     .join('\n')
 }
+
+function normalizeSignaturePart(value?: string | null): string {
+  return (value || '').replace(/\s+/g, '').trim().toLowerCase()
+}
+
+function buildTimelineSignature(payload: Partial<typeof timelineEvents.$inferInsert>): string {
+  return [
+    normalizeSignaturePart(typeof payload.timeLabel === 'string' ? payload.timeLabel : ''),
+    normalizeSignaturePart(typeof payload.eventTitle === 'string' ? payload.eventTitle : ''),
+    normalizeSignaturePart(typeof payload.eventType === 'string' ? payload.eventType : ''),
+    typeof payload.arcId === 'number' ? String(payload.arcId) : '',
+    typeof payload.chapterStartId === 'number' ? String(payload.chapterStartId) : '',
+    typeof payload.chapterEndId === 'number' ? String(payload.chapterEndId) : '',
+    normalizeSignaturePart(typeof payload.openThreadsJson === 'string' ? payload.openThreadsJson : ''),
+  ].filter(Boolean).join('|')
+}
+
+function buildTimelineCurrentSummary(event: typeof timelineEvents.$inferSelect): string {
+  return [
+    `时间标签：${event.timeLabel}`,
+    `事件标题：${event.eventTitle}`,
+    event.eventType ? `事件类型：${event.eventType}` : '',
+    typeof event.arcId === 'number' ? `故事弧ID：${event.arcId}` : '',
+    typeof event.chapterStartId === 'number' ? `起始章节ID：${event.chapterStartId}` : '',
+    typeof event.chapterEndId === 'number' ? `结束章节ID：${event.chapterEndId}` : '',
+    event.eventSummary ? `摘要：${event.eventSummary}` : '',
+    event.eventCause ? `起因：${event.eventCause}` : '',
+    event.eventProcess ? `过程：${event.eventProcess}` : '',
+    event.eventResult ? `结果：${event.eventResult}` : '',
+    event.protagonistAction ? `主角动作：${event.protagonistAction}` : '',
+    event.notes ? `备注：${event.notes}` : '',
+  ].filter(Boolean).join('\n')
+}
+
+function buildTimelineRepairPrompt(input: {
+  novelTitle: string
+  genre: string
+  background: string
+  worldSummary: string
+  timelineRules: string
+  storyGoal: string
+  coreConflict: string
+  mainPlot: string
+  ending: string
+  arcSummary: string
+  characterSummary: string
+  locationSummary: string
+  itemSummary: string
+  currentSummary: string
+  mode: 'repair' | 'replace'
+}) {
+  return [
+    `请${input.mode === 'replace' ? '用明显不同的新方案替换' : '修复'}下面这个时间轴事件，保持它仍然服务于当前小说。`,
+    '',
+    '【故事上下文】',
+    `小说：${input.novelTitle}`,
+    `题材：${input.genre || '未知题材'}`,
+    `背景：${input.background || '未提供'}`,
+    `故事目标：${input.storyGoal || '未提供'}`,
+    `核心冲突：${input.coreConflict || '未提供'}`,
+    `主线剧情：${input.mainPlot || '未提供'}`,
+    `结局方向：${input.ending || '未提供'}`,
+    input.worldSummary ? `世界规则：${input.worldSummary}` : '',
+    input.timelineRules ? `时间规则：${input.timelineRules}` : '',
+    '',
+    '【当前事件】',
+    input.currentSummary,
+    '',
+    '【附近资产】',
+    input.arcSummary ? `故事弧：\n${input.arcSummary}` : '',
+    input.characterSummary ? `关键人物：\n${input.characterSummary}` : '',
+    input.locationSummary ? `关键地点：\n${input.locationSummary}` : '',
+    input.itemSummary ? `关键物品：\n${input.itemSummary}` : '',
+    '',
+    '【修复目标】',
+    input.mode === 'replace'
+      ? '- 保留这个事件在节奏中的功能位，但换成明显不同的事件触发、过程和后果。'
+      : '- 修复时间标签、事件逻辑、后果链、AI 味和空泛表述，不要只微调措辞。',
+    '- 章节锚点、人物在场、地点和物品引用必须尽量复用当前已有资产。',
+    '- 只输出单个 JSON object，不要解释，不要 Markdown。',
+    '{"time_mode":"gregorian/regnal/relative-disaster/custom-era/future-date","time_label":"时间标签","time_sort_value":1,"time_precision":"年/月/日/阶段","event_title":"事件标题","event_summary":"30~60字概述","is_major_event":1,"event_type":"事件类型","arc_name":"关联故事弧","chapter_start_num":1,"chapter_end_num":2,"location_name":"关联地点","present_characters":["人物A"],"affected_characters":["人物C"],"protagonist_present":1,"protagonist_action":"主角做了什么","event_cause":"事件起因","event_process":"事件过程","event_result":"事件结果","linked_items":["物品A"],"direct_consequences":["直接后果1"],"open_threads":["待回收问题1"],"notes":"补充备注"}',
+  ].filter(Boolean).join('\n')
+}
+
 function sanitizeTimelinePayload(
   data: Partial<typeof timelineEvents.$inferInsert>,
 ): Partial<typeof timelineEvents.$inferInsert> {
@@ -904,6 +996,8 @@ export async function generateTimelineEvents(
   const mapRows = db.select().from(worldMap).where(eq(worldMap.novelId, novelId)).all()
   const defaultPrecision = rules.timelineConfig.precisionOptions[0] || '阶段'
   const createdIds: number[] = []
+  const historyEntityType = 'timeline'
+  const historyTaskType = 'timeline_generate_batch'
   const totalCount = Math.min(Math.max(options.count || 10, 4), 24)
   const batchSize = Math.max(1, Math.min(totalCount, options.batchSize || Math.min(totalCount, 4), 6))
 
@@ -935,19 +1029,40 @@ export async function generateTimelineEvents(
       protagonistRule: profile.protagonistRule,
     })
 
+    const attemptNumber = getAttemptCount(novelId, historyEntityType, null, historyTaskType) + 1
+    const rejectedDigests = getRecentRejectedDigests(novelId, historyEntityType, null, historyTaskType)
+    const messages = appendVariationMessage([{ role: 'user', content: prompt }], {
+      attemptNumber,
+      rejectedDigests,
+    })
+
     const result = await runChatTask({
       type: 'generate_timeline',
       novelId,
-      messages: [{ role: 'user', content: prompt }],
+      messages,
       modelConfigId: novel.modelConfigId || undefined,
     })
+    const historyId = recordGeneration(novelId, historyEntityType, null, historyTaskType, result, attemptNumber)
 
-    const parsed = cleanAiValue(safeParseJson<GeneratedTimelineEvent[]>(result))
+    let parsed: GeneratedTimelineEvent[]
+    try {
+      parsed = cleanAiValue(safeParseJson<GeneratedTimelineEvent[]>(result))
+    } catch (error) {
+      markRejected(historyId)
+      throw error
+    }
     if (!Array.isArray(parsed)) {
+      markRejected(historyId)
       throw new Error('时间轴生成结果不是有效数组')
     }
 
     const startSortOrder = getNextSortOrder(novelId)
+    const usedSignatures = new Set(
+      existingEvents
+        .map((event) => buildTimelineSignature(event))
+        .filter(Boolean),
+    )
+    let acceptedInBatch = 0
 
     parsed.forEach((raw, index) => {
       const payload = buildGeneratedPayload(raw, {
@@ -961,8 +1076,16 @@ export async function generateTimelineEvents(
         mapRows,
       })
       if (!payload) return
+      const signature = buildTimelineSignature(payload)
+      if (!signature || usedSignatures.has(signature)) return
       createdIds.push(createTimelineEvent(novelId, payload, { skipContextTracking: true }))
+      usedSignatures.add(signature)
+      acceptedInBatch += 1
     })
+
+    if (acceptedInBatch === 0) {
+      markRejected(historyId)
+    }
   }
 
   if (createdIds.length > 0) {
@@ -970,6 +1093,97 @@ export async function generateTimelineEvents(
   }
 
   return createdIds
+}
+
+export async function regenerateTimelineEvent(
+  id: number,
+  options: EntityRegenerateOptions = {},
+): Promise<typeof timelineEvents.$inferSelect | null> {
+  const current = getTimelineEvent(id)
+  if (!current) return null
+
+  const db = getDb()
+  const novel = db.select().from(novels).where(eq(novels.id, current.novelId)).all()[0]
+  if (!novel) return null
+
+  const profile = await buildStoryProfile(current.novelId)
+  const rules = parseWorldRulesJson(novel.worldRulesJson, profile.genre)
+  const arcRows = db.select().from(storyArcs).where(eq(storyArcs.novelId, current.novelId)).all()
+  const chapterRows = db.select().from(chapters).where(eq(chapters.novelId, current.novelId)).all()
+  const characterRows = db.select().from(characters).where(eq(characters.novelId, current.novelId)).all()
+  const itemRows = db.select().from(storyItems).where(eq(storyItems.novelId, current.novelId)).all()
+  const mapRows = db.select().from(worldMap).where(eq(worldMap.novelId, current.novelId)).all()
+  const defaultPrecision = rules.timelineConfig.precisionOptions[0] || '阶段'
+  const mode = options.mode === 'replace' ? 'replace' : 'repair'
+  const historyEntityType = 'timeline'
+  const historyTaskType = 'timeline_regenerate'
+  const attemptNumber = getAttemptCount(current.novelId, historyEntityType, current.id, historyTaskType) + 1
+  const rejectedDigests = getRecentRejectedDigests(current.novelId, historyEntityType, current.id, historyTaskType)
+  const currentSignature = buildTimelineSignature(current)
+  const messages = appendVariationMessage([{
+    role: 'user',
+    content: buildTimelineRepairPrompt({
+      novelTitle: novel.title,
+      genre: profile.genre,
+      background: profile.background,
+      worldSummary: profile.worldRulesSummary,
+      timelineRules: buildTimelineConfigSummary(rules),
+      storyGoal: profile.storyGoal,
+      coreConflict: profile.coreConflict,
+      mainPlot: profile.mainPlot,
+      ending: profile.ending,
+      arcSummary: buildArcSummary(arcRows),
+      characterSummary: buildCharacterSummary(characterRows),
+      locationSummary: buildLocationSummary(mapRows),
+      itemSummary: buildItemSummary(itemRows),
+      currentSummary: buildTimelineCurrentSummary(current),
+      mode,
+    }),
+  }], {
+    attemptNumber,
+    rejectedDigests,
+  })
+
+  const result = await runChatTask({
+    type: 'generate_timeline',
+    novelId: current.novelId,
+    modelConfigId: novel.modelConfigId || undefined,
+    relatedEntityType: 'timeline',
+    relatedEntityId: current.id,
+    messages,
+  })
+  const historyId = recordGeneration(current.novelId, historyEntityType, current.id, historyTaskType, result, attemptNumber)
+  let parsed: GeneratedTimelineEvent
+  try {
+    parsed = cleanAiValue(safeParseJson<GeneratedTimelineEvent>(result))
+  } catch {
+    markRejected(historyId)
+    return current
+  }
+  if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+    markRejected(historyId)
+    return current
+  }
+
+  const payload = buildGeneratedPayload(parsed, {
+    defaultTimeMode: rules.timelineConfig.calendarType,
+    defaultPrecision,
+    sortOrder: current.sortOrder || 0,
+    arcRows,
+    chapterRows,
+    characterRows,
+    itemRows,
+    mapRows,
+  })
+  const nextSignature = payload ? buildTimelineSignature(payload) : ''
+  if (!payload || !payload.eventTitle || !nextSignature || nextSignature === currentSignature) {
+    markRejected(historyId)
+    return current
+  }
+
+  updateTimelineEvent(id, payload, { skipContextTracking: true })
+  markNovelContextChanged(current.novelId, 'Timeline events changed')
+  return getTimelineEvent(id)
 }
 
 export function getTimelineEventOpenThreads(id: number): string[] {

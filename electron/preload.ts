@@ -129,6 +129,7 @@ const api = {
     update: (id: number, data: unknown) => ipcRenderer.invoke('timeline:update', id, data),
     delete: (id: number) => ipcRenderer.invoke('timeline:delete', id),
     generate: (novelId: number, options?: unknown) => ipcRenderer.invoke('timeline:generate', novelId, options),
+    regenerate: (id: number, options?: unknown) => ipcRenderer.invoke('timeline:regenerate', id, options),
     clear: (novelId: number) => ipcRenderer.invoke('timeline:clear', novelId),
   },
 
@@ -143,6 +144,7 @@ const api = {
     update: (id: number, data: unknown) => ipcRenderer.invoke('item:update', id, data),
     delete: (id: number) => ipcRenderer.invoke('item:delete', id),
     generate: (novelId: number, options?: unknown) => ipcRenderer.invoke('item:generate', novelId, options),
+    regenerate: (id: number, options?: unknown) => ipcRenderer.invoke('item:regenerate', id, options),
     clear: (novelId: number) => ipcRenderer.invoke('item:clear', novelId),
   },
 
@@ -166,6 +168,7 @@ const api = {
     create: (novelId: number, data: unknown) => ipcRenderer.invoke('thread:create', novelId, data),
     update: (id: number, data: unknown) => ipcRenderer.invoke('thread:update', id, data),
     delete: (id: number) => ipcRenderer.invoke('thread:delete', id),
+    regenerate: (id: number, options?: unknown) => ipcRenderer.invoke('thread:regenerate', id, options),
   },
 
   revision: {
@@ -177,6 +180,7 @@ const api = {
     create: (novelId: number, data: unknown) => ipcRenderer.invoke('revision:create', novelId, data),
     update: (id: number, data: unknown) => ipcRenderer.invoke('revision:update', id, data),
     delete: (id: number) => ipcRenderer.invoke('revision:delete', id),
+    autoFix: (id: number) => ipcRenderer.invoke('revision:autoFix', id),
   },
 
   // Model APIs
