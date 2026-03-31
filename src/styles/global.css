@@ -5797,12 +5797,23 @@ html[data-theme="dark"] .ant-card-actions > li {
 
 .novel-characters-page .novel-list-card__desc {
   line-height: 1.9;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
 }
 
 .novel-characters__editor-intro {
   gap: 20px;
   padding: 20px 22px;
   border-radius: 26px;
+}
+
+.novel-characters__editor-intro-copy span {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
 }
 
 .novel-characters__editor-tags {
@@ -5843,6 +5854,26 @@ html[data-theme="dark"] .ant-card-actions > li {
   border-radius: 24px;
   background: rgba(255, 255, 255, 0.74);
   box-shadow: 0 14px 28px rgba(122, 93, 52, 0.05);
+}
+
+.story-threads__table-cell {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.story-threads__table-copy {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.7;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+.novel-story-threads-page .ant-table-cell {
+  vertical-align: top;
 }
 
 .novel-characters-page .novel-tip-card__body {
@@ -6418,6 +6449,10 @@ html[data-theme="dark"] .ant-card-actions > li {
   color: var(--workspace-ink-soft);
   font-size: 12px;
   line-height: 1.6;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
 }
 
 .guided-step__fact-card--done {
@@ -6532,6 +6567,8 @@ html[data-theme="dark"] .ant-card-actions > li {
 .premise-page__summary-grid {
   display: grid;
   gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  align-items: start;
 }
 
 .premise-page__summary-card {
@@ -6564,6 +6601,10 @@ html[data-theme="dark"] .ant-card-actions > li {
   color: var(--workspace-ink-soft);
   font-size: 12px;
   line-height: 1.65;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
 }
 
 .premise-page__pending-result {
@@ -6611,6 +6652,10 @@ html[data-theme="dark"] .ant-card-actions > li {
   color: var(--workspace-ink-soft);
   font-size: 12px;
   line-height: 1.7;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
 }
 
 .premise-page__pending-warnings {
@@ -6806,10 +6851,15 @@ html[data-theme="dark"] .ant-card-actions > li {
   color: #4d4235;
   font-size: 12px;
   line-height: 1.7;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
 }
 
 .story-design__card-copy--soft {
   color: #7f6f5d;
+  -webkit-line-clamp: 3;
 }
 
 .story-design__card-meta {

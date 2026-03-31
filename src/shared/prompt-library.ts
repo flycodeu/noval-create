@@ -1,4 +1,4 @@
-﻿import { buildRealityConstraintSummary, getBuiltinGenreRules } from './genre-system'
+import { buildRealityConstraintSummary, getBuiltinGenreRules } from './genre-system'
 
 export interface PromptParamMeta {
   key: string
@@ -159,6 +159,8 @@ export interface ChapterWritingPromptInput {
   emotionTone: string
   targetWords: number
   storyCore: string
+  writingContractSummary?: string
+  relationSummary?: string
   currentArc: string
   worldRules: string
   characterStates: string
@@ -186,6 +188,8 @@ export interface ScenePlanPromptInput {
   emotionTone: string
   targetWords: number
   storyCore: string
+  writingContractSummary?: string
+  relationSummary?: string
   currentArc: string
   worldRules: string
   characterStates: string
@@ -212,6 +216,8 @@ export interface ChapterReviewPromptInput {
   chapterTitle: string
   chapterGoal: string
   storyCore: string
+  writingContractSummary?: string
+  relationSummary?: string
   currentArc: string
   worldRules: string
   characterStates: string
@@ -236,6 +242,8 @@ export interface ChapterRewritePromptInput {
   emotionTone: string
   targetWords: number
   storyCore: string
+  writingContractSummary?: string
+  relationSummary?: string
   currentArc: string
   worldRules: string
   characterStates: string
@@ -887,33 +895,36 @@ export function regenerateCharacterPrompt(params: RegenerateCharacterPromptInput
 
 export function characterRelationsPrompt(params: CharacterRelationsPromptInput): string {
   return renderPrompt([
-    '为小说整理一张能直接服务剧情的人物关系网。重点不是关系名词，而是谁会拉扯谁、利用谁、亏欠谁、护着谁。',
-    sectionLines('输入信息', [
-      '小说背景：' + params.novelSynopsis,
-      '人物列表：\n' + params.characterList,
+    '基于现有小说背景和角色清单，生成能直接作用于章节写作的人物关系网。关系不能只停在“朋友”“家人”这种空标签，必须能写进对白、动作和情绪变化里。',
+    sectionLines('现有信息', [
+      '故事背景：' + params.novelSynopsis,
+      '角色清单：\n' + params.characterList,
     ]),
     ...buildPromptGuardrailSections({
       genre: params.genre,
       background: params.novelSynopsis,
       worldSummary: params.worldSummary,
-      taskFocus: '优先保留会影响剧情推进的关系，别把无关社交都塞进去。',
-      extraQualityLines: ['不是所有人都必须互相认识，关系疏密要合理。'],
+      taskFocus: '人物关系要能解释他们为什么这样说话、这样试探、这样互相靠近或互相伤害。',
+      extraQualityLines: ['重点检查不同关系是否真的有不同温度、边界、称呼和冲突方式。'],
     }),
-    section('关系要求', [
-      '关系要具体，能看出历史、利益、情感或权力位置，不要只写朋友、同事这种空标签。',
-      '不是所有人都必须互相认识，关系疏密要合理。',
-      '要区分双向和单向，尤其是利用、暗恋、仇视、提防这类不对称关系。',
-      'description 直接写可见互动方式或真实拉扯，不写抽象判断。',
-      '优先保留会影响剧情推进的关系，别把无关社交都塞进去。',
+    section('生成要求', [
+      '优先补足主角相关、当前剧情高频互动、以及会影响主线推进的关键关系。',
+      '每条关系都要给出当前状态，而不是只写一个静态身份标签。',
+      '关系必须体现亲密度、张力度、互动方式和潜台词规则，确保后续章节对白不再一个基调。',
+      'description 写关系形成原因、当前状态和主要拉扯，不写空泛概括。',
+      'interaction_style 写双方平时如何说话、试探、回避、照顾、顶撞或施压。',
+      'subtext_rule 写这段关系里不能直说但会持续影响对白的暗线。',
+      'intimacy_level 和 tension_level 使用 1 到 5 的整数，1 最弱，5 最强。',
+      '如果关系是单向错位，例如一方把对方当盟友、另一方只把他当工具，也要在说明里写出来。',
     ].join('\n')),
     section('语言要求', buildHumanLanguageRules([
-      '关系描述要像真实人物之间会发生的拉扯，不要写成概念句或价值判断。',
+      '关系描述要像编剧室会直接拿去写戏的工作备注，不要写成百科定义。',
+      '少用“感情深厚”“关系复杂”这类空词，优先写称呼、边界、顾忌、依赖、旧账和压迫感。',
     ])),
-    '关系类型只从这些里选：friend / enemy / lover / parent_child / colleague / rival / mentor_student / acquaintance',
-    '只输出 JSON 数组：[{"char_a":"","char_b":"","type":"","label":"关系简称","description":"20字内，写清具体拉扯","bilateral":true}]',
+    'type 仅可使用：stranger / acquaintance / friend / family / colleague / mentor_student / ally / subordinate / rival / lover / enemy',
+    '只输出 JSON 数组：[{"char_a":"","char_b":"","type":"","label":"朋友/师徒/互相利用等中文简称","description":"20到60字，写关系形成与当前状态","bilateral":true,"intimacy_level":3,"tension_level":2,"interaction_style":"平时如何说话和互动","subtext_rule":"这段关系里不能直说的暗线"}]',
   ])
 }
-
 export function mapGenerationPrompt(params: MapGenerationPromptInput): string {
   return renderPrompt([
     `为小说《${params.novelTitle}》补一套能支撑剧情的地图结构。`,
@@ -1188,6 +1199,8 @@ export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
     section('本章细纲', params.plotPoints),
     section('当前故事弧', params.currentArc),
     section('小说核心约束', params.storyCore),
+    section('写作类型', params.writingContractSummary),
+    section('关键人物关系', params.relationSummary),
     section('世界规则', params.worldRules),
     section('人物当前状态', params.characterStates),
     section('关键物品与去向', params.itemSummary),
@@ -1239,6 +1252,8 @@ export function buildChapterWritingPrompt(params: ChapterWritingPromptInput): st
     }),
     section('本章必须完成', params.chapterGoal || '按已定大纲执行'),
     section('已定章节大纲', params.plotPoints),
+    section('写作类型', params.writingContractSummary),
+    section('关键人物关系', params.relationSummary),
     section('本章必须承接', params.continuityNotes),
     section('当前未回收事项', params.openLoops),
     section('时间轴关键节点', params.timelineSummary),
@@ -1255,6 +1270,7 @@ export function buildChapterWritingPrompt(params: ChapterWritingPromptInput): st
     section('写作要求', [
       '先把事件链、动作链和后果链写顺，再让情绪自然浮出来。',
       '人物说话要像这个人当下会说的话，别让所有角色一个语气。',
+      '如果上下文给了关系摘要，就把亲疏、权力差、潜台词和说话习惯写进对白。',
       '主角在本章里可以害怕、迟疑、失望、心软或犯错，但这些反应必须推动后续选择。',
       '只写和本章任务有关的场景，不要为了凑字数平铺日常。',
       '如果给了文风参考，只借叙述气质、视角和句子密度，不模仿具体作者。',
@@ -1289,6 +1305,8 @@ export function buildChapterDraftPrompt(params: ChapterRewritePromptInput): stri
     section('本章目标', params.chapterGoal),
     section('当前故事弧', params.currentArc),
     section('小说核心约束', params.storyCore),
+    section('写作类型', params.writingContractSummary),
+    section('关键人物关系', params.relationSummary),
     section('世界规则', params.worldRules),
     section('人物当前状态', params.characterStates),
     section('关键物品与去向', params.itemSummary),
@@ -1305,6 +1323,7 @@ export function buildChapterDraftPrompt(params: ChapterRewritePromptInput): stri
     section('初稿要求', [
       '只按场景计划推进，不跳场景，不漏 must_cover。',
       '先把行为、对话、信息交接和后果写清，再处理气氛。',
+      '涉及多人对话时，家人、朋友、陌生人、上下级和恋爱关系不能一个语气。',
       '让成长落在事件、关系和代价里，不要只在段尾用一句总结硬说人物成长。',
       '人物状态、物品去向、地点变换和事件顺序必须写准，避免后面大修。',
       '如果某段只有情绪没有动作或结果，补上能落地的外部承载。',
@@ -1332,6 +1351,8 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
     section('本章目标', params.chapterGoal),
     section('场景计划', params.scenePlan),
     section('小说核心', params.storyCore),
+    section('写作类型', params.writingContractSummary),
+    section('关键人物关系', params.relationSummary),
     section('当前故事弧', params.currentArc),
     section('世界规则', params.worldRules),
     section('人物当前状态', params.characterStates),
@@ -1349,6 +1370,7 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
       'context_drift_risks 只写脱离既定背景、主题、世界规则或人物动机的问题。',
       'realism_risks 只写常识、科学、物理、资源、伤病、秩序或能力规则问题。',
       'language_risks 只写 AI 腔、抽象化、搭配错误、空洞抒情或不自然表达。',
+      '如果对话无视人物关系、称呼层级、亲疏温度或潜台词，也要归入 language_risks 或 context_drift_risks。',
       'genre_hollowing_risks 只写体裁生态被写空的问题，例如修仙只喊大道却没有境界资源和宗门秩序，末世只有丧尸却没有生存链，武侠只有打斗却没有江湖秩序。',
       '如果主角像功能人、体裁生态被写空，或成长只剩口号，也要明确指出。',
       'missing_payoffs 只写本章已经抛出但没有落地的铺垫。',
@@ -1387,6 +1409,8 @@ export function buildChapterRewritePrompt(params: ChapterRewritePromptInput): st
     section('本章目标', params.chapterGoal),
     section('当前故事弧', params.currentArc),
     section('小说核心', params.storyCore),
+    section('写作类型', params.writingContractSummary),
+    section('关键人物关系', params.relationSummary),
     section('世界规则', params.worldRules),
     section('人物当前状态', params.characterStates),
     section('关键物品与去向', params.itemSummary),
@@ -1404,6 +1428,7 @@ export function buildChapterRewritePrompt(params: ChapterRewritePromptInput): st
       '如果场景计划里的 must_cover 漏了，补上。',
       '先修因果、指代清晰度、节奏、人物反应和真实度，最后再抛光语言。',
       '删掉空洞抒情、模板句和解释性旁白，把情绪放回动作、对话和细节里。',
+      '把关系温度、权力差和潜台词写回称呼、打断、停顿和回避方式，不要让所有对白一个基调。',
       '把成长变化写回事件、关系、资源和代价，不要只靠总结句宣告人物成长。',
       '在同一轮里一起修好上下文漂移、常识失效、规则越界、零代价奇迹和 AI 腔。',
       '只输出重写后的最终正文。',

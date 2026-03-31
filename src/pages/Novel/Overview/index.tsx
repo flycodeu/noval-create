@@ -388,7 +388,7 @@ export default function Overview({ novelId }: Props) {
         </Form>
       </WorkspacePanel>
 
-      <WorkspacePanel title="Story Bible 快照" description="检查底盘是否稳定。">
+      <WorkspacePanel title="故事底盘快照" description="只看关键底盘是否收口。">
         <div className="guided-step__fact-grid">
           <div className="guided-step__fact-card">
             <span>项目立项</span>

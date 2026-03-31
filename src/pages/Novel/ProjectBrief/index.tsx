@@ -220,8 +220,8 @@ export default function ProjectBriefPage({ novelId }: Props) {
       layout="wide"
       heroVariant="compact"
       eyebrow="项目立项"
-      title="Project Brief"
-      description="先统一这本书面向谁、承诺什么、靠什么被点开，以及什么内容绝对不能写偏。后面的主题、人物、线索和正文，都应服从这份产品层面的约束。"
+      title="项目立项"
+      description="统一读者、承诺、卖点和禁区，后续设定、线索和正文都以这里为准。"
       actions={(
         <Space wrap>
           <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>

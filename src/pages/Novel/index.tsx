@@ -95,10 +95,10 @@ const PRO_GROUPS: Array<{ title: string; items: WorkspaceItem[] }> = [
   {
     title: '基础',
     items: [
-      { key: 'guide', icon: <DashboardOutlined />, label: 'AI Studio', summary: '统一编排底盘、资产与质量。' },
+      { key: 'guide', icon: <DashboardOutlined />, label: '小说总控台', summary: '统一编排底盘、资产与质量。' },
       { key: 'overview', icon: <AppstoreOutlined />, label: '基础总览', summary: '查看小说基础信息。' },
       { key: 'project-brief', icon: <AppstoreOutlined />, label: '项目立项', summary: '统一读者承诺、卖点和禁区。' },
-      { key: 'core-settings', icon: <SettingOutlined />, label: '基础设定', summary: '维护 premise 与写作边界。' },
+      { key: 'core-settings', icon: <SettingOutlined />, label: '基础设定', summary: '维护故事前提与写作边界。' },
       { key: 'theme-voice', icon: <EditOutlined />, label: '主题与文风', summary: '维护主题、叙事口吻和禁用表达。' },
     ],
   },

@@ -1,7 +1,13 @@
-﻿export type ThemeVoicePov = 'first_person' | 'third_limited' | 'third_omniscient' | 'multi_pov'
+import {
+  formatWritingContractTags,
+  normalizeWritingContractTags,
+} from './writing-contract'
+
+export type ThemeVoicePov = 'first_person' | 'third_limited' | 'third_omniscient' | 'multi_pov'
 export type ThemeVoiceTense = 'past' | 'present' | 'mixed'
 
 export interface ThemeVoiceDocument {
+  writingContractTags: string[]
   theme: string
   motifs: string
   emotionalCore: string
@@ -20,6 +26,7 @@ export interface ThemeVoiceSnapshot extends ThemeVoiceDocument {
 }
 
 const EMPTY_THEME_VOICE: ThemeVoiceDocument = {
+  writingContractTags: [],
   theme: '',
   motifs: '',
   emotionalCore: '',
@@ -76,6 +83,7 @@ export function parseThemeVoiceDocument(raw?: string | null): ThemeVoiceDocument
   const root = parseJsonObject(raw)
 
   return {
+    writingContractTags: normalizeWritingContractTags(root.writing_contract_tags ?? root.writingContractTags),
     theme: asText(root.theme),
     motifs: asText(root.motifs),
     emotionalCore: asText(root.emotional_core ?? root.emotionalCore),
@@ -93,6 +101,7 @@ export function parseThemeVoiceDocument(raw?: string | null): ThemeVoiceDocument
 export function parseThemeVoiceSnapshot(raw?: string | null): ThemeVoiceSnapshot {
   const document = parseThemeVoiceDocument(raw)
   const readyCount = [
+    document.writingContractTags.length > 0,
     document.theme,
     document.emotionalCore,
     document.pov,
@@ -116,9 +125,11 @@ export function buildThemeVoicePayload(
   const next = {
     ...current,
     ...patch,
+    writingContractTags: normalizeWritingContractTags(patch.writingContractTags ?? current.writingContractTags),
   }
 
   return JSON.stringify(compactObject({
+    writing_contract_tags: next.writingContractTags.length > 0 ? next.writingContractTags : undefined,
     theme: next.theme,
     motifs: next.motifs,
     emotional_core: next.emotionalCore,
@@ -135,6 +146,7 @@ export function buildThemeVoicePayload(
 
 export function buildThemeVoiceSummary(themeVoice: ThemeVoiceDocument): string {
   return [
+    themeVoice.writingContractTags.length > 0 ? `写作类型：${formatWritingContractTags(themeVoice.writingContractTags)}` : '',
     themeVoice.theme ? `主题：${themeVoice.theme}` : '',
     themeVoice.motifs ? `母题：${themeVoice.motifs}` : '',
     themeVoice.emotionalCore ? `情感核心：${themeVoice.emotionalCore}` : '',

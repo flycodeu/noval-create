@@ -18,9 +18,9 @@ import {
 } from '../../src/shared/subplot-framework'
 import { cleanAiFieldText } from '../../src/utils/text'
 import { getDb } from '../database/db'
-import { novels } from '../database/schema'
+import { characters, novels } from '../database/schema'
 import { safeParseJson } from '../utils/json'
-import { buildStoryProfile } from './context.service'
+import { buildStoryProfile, buildStoryRelationSummary } from './context.service'
 import {
   buildContextAlignmentRules,
   buildGenreRealityRules,
@@ -53,6 +53,8 @@ interface StoryContext {
   worldRulesSummary: string
   protagonistReference: string
   protagonistRule: string
+  writingContractSummary: string
+  relationSummary: string
   requirements: string
 }
 
@@ -498,6 +500,25 @@ function buildBaseContextV2(context: StoryContext): string {
   ].filter(Boolean).join('\n')
 }
 
+function buildWritingContractSectionV2(context: StoryContext): string {
+  return section('写作类型', context.writingContractSummary)
+}
+
+function buildRelationSectionV2(context: StoryContext): string {
+  return section('关键人物关系', context.relationSummary)
+}
+
+function buildNarrativeExecutionSectionV2(): string {
+  return section('写作落实要求', [
+    '把写作类型翻译成节奏、冲突兑现速度、关系推进方式和语言边界，不要只把标签挂在页面上。',
+    '关系线只能从现有人物关系网长出来，不要凭空再造与角色网脱节的情感线、冲突线或立场线。',
+    '家人、朋友、陌生人、上下级、恋人、敌对关系，必须体现不同的称呼距离、互动方式、试探强度和潜台词。',
+    '如果标签偏爽文，重点强化冲突兑现、回报反馈和情绪释放，但仍服从世界规则与代价逻辑。',
+    '如果标签偏写实，重点强化事件基础、成本承担和时间积累，禁止无成本升温或空降转折。',
+    '如果标签含言情，关系变化优先落在称呼变化、停顿、回避、试探、照顾、误会和潜台词上。',
+  ].join('\n'))
+}
+
 function buildUserRequirementSectionV2(requirements: string): string {
   return requirements ? `【额外要求】\n${requirements}` : ''
 }
@@ -521,6 +542,9 @@ async function polishPlainTextV2(
   const prompt = renderPrompt([
     `请只润色「${label}」的中文表达，不改动事实方向、设定关系和核心信息。`,
     section('基础背景', buildBaseContextV2(context)),
+    buildWritingContractSectionV2(context),
+    buildRelationSectionV2(context),
+    buildNarrativeExecutionSectionV2(),
     buildDecisionConstraintSectionV2(context),
     relatedContext ? section('关联上下文', relatedContext) : '',
     section('待润色文本', content),
@@ -541,7 +565,10 @@ function buildStoryGoalPromptV2(context: StoryContext): string {
   return renderPrompt([
     '你是资深中文小说策划。现在只生成「故事核心目标」。',
     section('基础背景', buildBaseContextV2(context)),
+    buildWritingContractSectionV2(context),
+    buildRelationSectionV2(context),
     buildUserRequirementSectionV2(context.requirements),
+    buildNarrativeExecutionSectionV2(),
     buildDecisionConstraintSectionV2(context),
     section('字段职责', '只回答故事最后要抵达什么状态、结果或根本性改变，不写过程，不写冲突本身。'),
     section('生成要求', [
@@ -560,7 +587,10 @@ function buildCoreConflictPromptV2(context: StoryContext, storyGoal: string): st
   return renderPrompt([
     '你是资深中文小说策划。现在只生成「核心冲突」。',
     section('基础背景', buildBaseContextV2(context)),
+    buildWritingContractSectionV2(context),
+    buildRelationSectionV2(context),
     buildUserRequirementSectionV2(context.requirements),
+    buildNarrativeExecutionSectionV2(),
     buildDecisionConstraintSectionV2(context),
     section('已确定目标', storyGoal),
     section('字段职责', '只回答为什么这个目标难以实现，明确写出对立双方、风险来源、不可兼得之处和持续代价。'),
@@ -586,7 +616,10 @@ function buildMainPlotPromptV2(
   return renderPrompt([
     '你是资深中文小说策划。现在只生成「主线剧情」。',
     section('基础背景', buildBaseContextV2(context)),
+    buildWritingContractSectionV2(context),
+    buildRelationSectionV2(context),
     buildUserRequirementSectionV2(context.requirements),
+    buildNarrativeExecutionSectionV2(),
     buildDecisionConstraintSectionV2(context),
     section('故事核心目标', storyGoal),
     section('核心冲突', coreConflict),
@@ -623,7 +656,10 @@ function buildSubplotPromptV2(
   return renderPrompt([
     `请为这部小说生成 ${batchCount} 条新的支线框架。`,
     section('基础背景', buildBaseContextV2(context)),
+    buildWritingContractSectionV2(context),
+    buildRelationSectionV2(context),
     buildUserRequirementSectionV2(context.requirements),
+    buildNarrativeExecutionSectionV2(),
     buildDecisionConstraintSectionV2(context),
     sectionLines('主线约束', [
       `故事核心目标：${storyGoal}`,
@@ -678,7 +714,10 @@ function buildSubplotPolishPromptV2(
   return renderPrompt([
     '请只润色下面这组支线框架的中文表达，不改动条目数量、功能方向和收束章节。',
     section('基础背景', buildBaseContextV2(context)),
+    buildWritingContractSectionV2(context),
+    buildRelationSectionV2(context),
     buildUserRequirementSectionV2(context.requirements),
+    buildNarrativeExecutionSectionV2(),
     buildDecisionConstraintSectionV2(context),
     sectionLines('主线约束', [
       `故事核心目标：${storyGoal}`,
@@ -723,7 +762,10 @@ function buildRhythmPromptV2(
   return renderPrompt([
     '请根据当前小说设定，给出三段式叙事节奏建议。',
     section('基础背景', buildBaseContextV2(context)),
+    buildWritingContractSectionV2(context),
+    buildRelationSectionV2(context),
     buildUserRequirementSectionV2(context.requirements),
+    buildNarrativeExecutionSectionV2(),
     buildDecisionConstraintSectionV2(context),
     sectionLines('核心设定', [
       `故事核心目标：${storyGoal}`,
@@ -752,7 +794,10 @@ function buildEndingPromptV2(
   return renderPrompt([
     '你是资深中文小说策划。现在生成「结局设定」。',
     section('基础背景', buildBaseContextV2(context)),
+    buildWritingContractSectionV2(context),
+    buildRelationSectionV2(context),
     buildUserRequirementSectionV2(context.requirements),
+    buildNarrativeExecutionSectionV2(),
     buildDecisionConstraintSectionV2(context),
     sectionLines('既定约束', [
       `故事核心目标：${storyGoal}`,
@@ -779,6 +824,7 @@ async function loadStoryContext(request: CoreSettingsGenerationRequest): Promise
   const profile = await buildStoryProfile(request.novelId)
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, request.novelId)).all()[0]
+  const allCharacters = db.select().from(characters).where(eq(characters.novelId, request.novelId)).all()
 
   if (!novel) {
     throw new Error('小说不存在')
@@ -793,6 +839,20 @@ async function loadStoryContext(request: CoreSettingsGenerationRequest): Promise
     worldRulesSummary: profile.worldRulesSummary,
     protagonistReference: profile.protagonistReference,
     protagonistRule: profile.protagonistRule,
+    writingContractSummary: profile.writingContractSummary,
+    relationSummary: buildStoryRelationSummary(
+      request.novelId,
+      allCharacters,
+      [
+        profile.protagonistReference,
+        profile.storyGoal,
+        profile.coreConflict,
+        profile.mainPlot,
+        profile.themeVoiceSummary,
+        profile.storyThreadsSummary,
+      ].filter(Boolean).join('\n'),
+      8,
+    ),
     requirements: clean(request.requirements),
   }
 }

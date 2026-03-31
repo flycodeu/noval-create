@@ -509,7 +509,7 @@ export default function CoreSettings({ novelId }: Props) {
               <div className="premise-page__summary-card">
                 <span>基础设定</span>
                 <strong>{premiseReady ? '已齐' : '待补'}</strong>
-                <small>缺 premise 与写作边界时，主线会继续发散。</small>
+                <small>缺基础设定与写作边界时，主线会继续发散。</small>
               </div>
               <div className="premise-page__summary-card">
                 <span>世界资产</span>
@@ -540,7 +540,7 @@ export default function CoreSettings({ novelId }: Props) {
         <Alert
           type="warning"
           showIcon
-          message="基础设定还没写稳。建议先回基础设定页补齐 premise 与写作边界，再做故事设计。"
+          message="基础设定还没写稳。建议先回基础设定页补齐关键约束与写作边界，再做故事设计。"
         />
       ) : null}
 

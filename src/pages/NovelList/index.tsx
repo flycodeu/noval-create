@@ -37,6 +37,8 @@ import relativeTime from 'dayjs/plugin/relativeTime'
 import 'dayjs/locale/zh-cn'
 import type { Novel, Template } from '../../types'
 import { useNovelStore } from '../../stores/novel.store'
+import { buildThemeVoicePayload } from '../../shared/theme-voice'
+import { WRITING_CONTRACT_PRESETS, getWritingContractValidationError, normalizeWritingContractTags } from '../../shared/writing-contract'
 
 dayjs.extend(relativeTime)
 dayjs.locale('zh-cn')
@@ -46,6 +48,7 @@ interface WizardFormValues {
   styleTemplateId?: number
   worldTemplateId?: number
   modelConfigId?: number
+  writingContractTags?: string[]
   userBackground: string
   expandedBackground: string
   synopsis: string
@@ -207,7 +210,7 @@ export default function NovelList() {
 
   const handleWizardNext = async () => {
     if (wizardStep === 0) {
-      await wizardForm.validateFields(['genreId'])
+      await wizardForm.validateFields(['genreId', 'writingContractTags'])
       setWizardStep(1)
       return
     }
@@ -247,7 +250,12 @@ export default function NovelList() {
 
     const values = await wizardForm.validateFields(['title', 'synopsis', 'targetWords'])
     const allValues = wizardForm.getFieldsValue(true) as Partial<WizardFormValues>
-
+    const writingContractTags = normalizeWritingContractTags(allValues.writingContractTags)
+    const writingContractError = getWritingContractValidationError(writingContractTags)
+    if (writingContractError) {
+      message.error(writingContractError)
+      return
+    }
     try {
       const novelId = await window.electron.novel.create({
         title: values.title.trim(),
@@ -260,7 +268,11 @@ export default function NovelList() {
         modelConfigId: allValues.modelConfigId,
         targetWords: values.targetWords,
       })
-
+      if (writingContractTags.length > 0) {
+        await window.electron.novel.update(novelId, {
+          themeVoiceJson: buildThemeVoicePayload({ writingContractTags }),
+        })
+      }
       await loadNovels()
       resetWizard()
       navigate(`/novels/${novelId}/overview`)
@@ -433,6 +445,29 @@ export default function NovelList() {
                   </Form.Item>
                 </Col>
               </Row>
+
+              <Form.Item
+                name="writingContractTags"
+                label="写作类型"
+                extra="“爽文 / 写实”只能选一个；其余标签可叠加，自定义标签只作为弱提示。"
+                rules={[{
+                  validator: async (_, value?: string[]) => {
+                    const error = getWritingContractValidationError(normalizeWritingContractTags(value))
+                    if (error) throw new Error(error)
+                  },
+                }]}
+              >
+                <Select
+                  mode="tags"
+                  allowClear
+                  options={WRITING_CONTRACT_PRESETS.map((preset) => ({
+                    value: preset.value,
+                    label: preset.label,
+                  }))}
+                  placeholder="例如：爽文、言情，或补充自定义短标签"
+                  tokenSeparators={[',', '，', '、']}
+                />
+              </Form.Item>
             </>
           )}
 

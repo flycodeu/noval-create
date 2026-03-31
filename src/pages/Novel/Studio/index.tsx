@@ -407,7 +407,7 @@ export default function StudioPage({ novelId }: Props) {
   const readinessCards = useMemo<ReadinessCard[]>(() => ([
     {
       key: 'brief',
-      title: 'Project Brief',
+      title: '项目立项',
       value: `${projectBrief.readyCount}/6`,
       summary: projectBrief.readerPromise || '先钉读者承诺、赛道和禁区。',
       ready: isProjectBriefReady(currentNovel),
@@ -415,15 +415,15 @@ export default function StudioPage({ novelId }: Props) {
     },
     {
       key: 'premise',
-      title: 'Story Premise',
+      title: '基础设定',
       value: `${storySettings.premiseReadyCount}/5`,
-      summary: storySettings.premise.constraints || 'premise、主角起点和底层约束还没收紧。',
+      summary: storySettings.premise.constraints || '主角起点和底层约束还没收紧。',
       ready: isStoryCoreReady(currentNovel),
       route: 'core-settings',
     },
     {
       key: 'voice',
-      title: 'Theme & Voice',
+      title: '主题与文风',
       value: `${themeVoice.readyCount}/6`,
       summary: themeVoice.styleRules || '先把主题、时态、视角和禁写规则写成硬边界。',
       ready: isThemeVoiceReady(currentNovel),
@@ -431,7 +431,7 @@ export default function StudioPage({ novelId }: Props) {
     },
     {
       key: 'design',
-      title: 'Story Design',
+      title: '故事设计',
       value: `${storySettings.storyDesignReadyCount}/4`,
       summary: storySettings.storyDesign.mainPlot || '目标、冲突、推进链和结局还未闭合。',
       ready: isStoryPlotReady(currentNovel),
@@ -443,7 +443,7 @@ export default function StudioPage({ novelId }: Props) {
     {
       key: 'world-rules',
       title: '同步世界规则',
-      eyebrow: 'Story Bible',
+      eyebrow: '故事底盘',
       count: `${speciesOptions.length} 种族 / ${factionOptions.length} 势力`,
       summary: '统一题材规则、势力结构、地图蓝图和时间制度，后面的角色与事件都从这里取口径。',
       ready: Boolean(currentNovel?.worldRulesJson),
@@ -454,7 +454,7 @@ export default function StudioPage({ novelId }: Props) {
     {
       key: 'map',
       title: '铺地图骨架',
-      eyebrow: 'Asset Graph',
+      eyebrow: '资产图谱',
       count: `${stats.mapCount} 个地点节点`,
       summary: '先给角色和事件真实落点，减少“空气里推进剧情”。',
       ready: stats.mapCount > 0,
@@ -465,7 +465,7 @@ export default function StudioPage({ novelId }: Props) {
     {
       key: 'characters',
       title: '生成人物网络',
-      eyebrow: 'Cast Engine',
+      eyebrow: '人物系统',
       count: `${stats.characterCount} 人 / 主角${stats.hasProtagonist ? '已建' : '未建'}`,
       summary: '优先补功能位、对立位和关系张力，严格避开已拒绝方案和撞名结果。',
       ready: stats.characterCount > 0 && stats.hasProtagonist,
@@ -476,7 +476,7 @@ export default function StudioPage({ novelId }: Props) {
     {
       key: 'items',
       title: '补物品资产',
-      eyebrow: 'Asset Graph',
+      eyebrow: '资产图谱',
       count: `${stats.itemCount} 个物品`,
       summary: '道具必须可追踪、可绑定、可回收，不能只是装饰性的“神奇物件”。',
       ready: stats.itemCount > 0,
@@ -487,7 +487,7 @@ export default function StudioPage({ novelId }: Props) {
     {
       key: 'threads',
       title: '挂故事线程',
-      eyebrow: 'Structure',
+      eyebrow: '结构推进',
       count: `${stats.threadCount} 条线程`,
       summary: '把主线、支线、悬念和关系推进写成可回查对象，不让后续正文失忆。',
       ready: stats.threadCount > 0,
@@ -498,7 +498,7 @@ export default function StudioPage({ novelId }: Props) {
     {
       key: 'story-design',
       title: '收主线设计',
-      eyebrow: 'Structure',
+      eyebrow: '结构推进',
       count: `${storySettings.storyDesignReadyCount}/4`,
       summary: '在世界、人物、物品、线程齐备后再统一主线设计，避免空想式剧情。',
       ready: isStoryPlotReady(currentNovel),
@@ -509,7 +509,7 @@ export default function StudioPage({ novelId }: Props) {
     {
       key: 'outline',
       title: '拆故事弧',
-      eyebrow: 'Longform',
+      eyebrow: '长篇推进',
       count: `${stats.outlineCount} 条故事弧`,
       summary: '把长篇推进拆成稳定的结构骨架，为卷章规划和正文铺路。',
       ready: stats.outlineCount > 0,
@@ -520,7 +520,7 @@ export default function StudioPage({ novelId }: Props) {
     {
       key: 'timeline',
       title: '补时间轴',
-      eyebrow: 'Longform',
+      eyebrow: '长篇推进',
       count: `${stats.timelineCount} 个事件`,
       summary: '让谁在何时何地做了什么可以回查，压低长篇中段跑偏概率。',
       ready: stats.timelineCount > 0,
@@ -545,6 +545,8 @@ export default function StudioPage({ novelId }: Props) {
   ])
 
   const nextAction = actionCards.find((card) => !card.ready) || null
+  const readyReadinessCount = readinessCards.filter((card) => card.ready).length
+  const nextReadinessCard = readinessCards.find((card) => !card.ready) || null
   const readinessPercent = Math.round((actionCards.filter((card) => card.ready).length / Math.max(actionCards.length, 1)) * 100)
   const storyBibleScore = Math.round((
     projectBrief.readyCount
@@ -557,9 +559,10 @@ export default function StudioPage({ novelId }: Props) {
     <WorkspacePage
       className="studio-page"
       layout="wide"
-      eyebrow="AI Studio"
-      title="故事底盘、资产生成和质量预警在一个入口里完成"
-      description="这里不是功能清单，而是小说生成总控台。先稳住 Story Bible，再批量生成资产，最后盯住重复、AI 味和上下文过期风险。"
+      heroVariant="compact"
+      eyebrow="小说总控台"
+      title="底盘、资产与质量统一编排"
+      description="统一查看底盘完成度、资产生成状态和质量风险。"
       actions={(
         <Space wrap>
           <Button
@@ -587,7 +590,7 @@ export default function StudioPage({ novelId }: Props) {
       )}
       metrics={(
         <>
-          <WorkspaceMetric label="Story Bible" value={`${storyBibleScore}%`} tone="warm" hint="项目立项、基础设定、主题文风、故事设计的综合完成度" />
+          <WorkspaceMetric label="故事底盘" value={`${storyBibleScore}%`} tone="warm" hint="项目立项、基础设定、主题文风、故事设计的综合完成度" />
           <WorkspaceMetric label="资产图谱" value={stats.mapCount + stats.characterCount + stats.itemCount + stats.threadCount + stats.timelineCount} tone="cool" hint="地点、人物、物品、线程、时间轴总数" />
           <WorkspaceMetric label="结构体检" value={consistencyReport ? `${consistencyReport.readinessScore} 分` : '加载中'} hint={consistencyReport ? getStudioTone(consistencyReport.readinessScore) : '正在分析全书健康度'} />
           <WorkspaceMetric label="编排进度" value={`${readinessPercent}%`} hint={`${actionCards.filter((card) => card.ready).length}/${actionCards.length} 个关键环节已就绪`} />
@@ -664,26 +667,41 @@ export default function StudioPage({ novelId }: Props) {
       ) : null}
 
       <WorkspacePanel
-        title="Story Bible"
-        description="先把产品定位、故事底盘和语言边界锁稳，再让 AI 大批量出货。"
-        extra={<div className="studio-panel-pill">{`完成 ${readinessCards.filter((card) => card.ready).length}/${readinessCards.length}`}</div>}
+        title="故事底盘"
+        description="先确认立项、设定、文风和主线设计是否收口。"
+        extra={<div className="studio-panel-pill">{`完成 ${readyReadinessCount}/${readinessCards.length}`}</div>}
       >
-        <div className="studio-readiness-grid">
-          {readinessCards.map((card) => (
-            <button
-              key={card.key}
-              type="button"
-              className={`studio-readiness-card ${card.ready ? 'studio-readiness-card--ready' : ''}`}
-              onClick={() => navigate(`/novels/${novelId}/${card.route}`)}
-            >
-              <div className="studio-readiness-card__head">
-                <span>{card.title}</span>
-                <Tag color={card.ready ? 'success' : 'default'}>{card.ready ? '已就绪' : '待补齐'}</Tag>
-              </div>
-              <strong>{card.value}</strong>
-              <p>{card.summary}</p>
-            </button>
-          ))}
+        <div className="studio-bible-board">
+          <section className="studio-bible-overview">
+            <div className="studio-bible-overview__eyebrow">底盘完成度</div>
+            <strong className="studio-bible-overview__score">{storyBibleScore}%</strong>
+            <Progress percent={storyBibleScore} showInfo={false} strokeColor="#bc6c25" trailColor="rgba(24, 40, 58, 0.12)" />
+            <p className="studio-bible-overview__copy">项目立项、基础设定、主题文风和故事设计的综合完成度。</p>
+            <div className="studio-bible-overview__focus">
+              <span>当前短板</span>
+              <strong>{nextReadinessCard?.title || '底盘已齐'}</strong>
+              <small>{nextReadinessCard?.summary || '可以转入资产生成或质量修订。'}</small>
+            </div>
+          </section>
+
+          <div className="studio-readiness-grid studio-readiness-grid--dense">
+            {readinessCards.map((card) => (
+              <button
+                key={card.key}
+                type="button"
+                className={`studio-readiness-card ${card.ready ? 'studio-readiness-card--ready' : ''}`}
+                onClick={() => navigate(`/novels/${novelId}/${card.route}`)}
+              >
+                <div className="studio-readiness-card__head">
+                  <span>{card.title}</span>
+                  <Tag color={card.ready ? 'success' : 'default'}>{card.ready ? '已就绪' : '待补齐'}</Tag>
+                </div>
+                <strong>{card.value}</strong>
+                <p className="studio-readiness-card__summary">{card.summary}</p>
+                <div className="studio-readiness-card__foot">{card.ready ? '继续细化' : '立即补齐'}</div>
+              </button>
+            ))}
+          </div>
         </div>
       </WorkspacePanel>
 

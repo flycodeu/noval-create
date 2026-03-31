@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Form, Input, Select, Space, Tag, message } from 'antd'
 import { ArrowRightOutlined, RobotOutlined, SaveOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
@@ -8,6 +8,12 @@ import {
   type ThemeVoicePov,
   type ThemeVoiceTense,
 } from '../../../shared/theme-voice'
+import {
+  WRITING_CONTRACT_PRESETS,
+  formatWritingContractTags,
+  getWritingContractValidationError,
+  normalizeWritingContractTags,
+} from '../../../shared/writing-contract'
 import type {
   ThemeVoiceGenerationMode,
   ThemeVoiceGenerationResult,
@@ -26,6 +32,7 @@ interface Props {
 }
 
 interface ThemeVoiceFormValues {
+  writingContractTags: string[]
   theme: string
   motifs: string
   emotionalCore: string
@@ -68,6 +75,7 @@ function normalizeText(value?: string | null): string {
 
 function normalizeFormValues(values: ThemeVoiceFormValues): ThemeVoiceFormValues {
   return {
+    writingContractTags: normalizeWritingContractTags(values.writingContractTags),
     theme: normalizeText(values.theme),
     motifs: normalizeText(values.motifs),
     emotionalCore: normalizeText(values.emotionalCore),
@@ -89,6 +97,7 @@ function buildCurrentFormValues(
   return {
     ...snapshot,
     ...formValues,
+    writingContractTags: normalizeWritingContractTags(formValues.writingContractTags ?? snapshot.writingContractTags),
     pov: formValues.pov ?? snapshot.pov,
     tense: formValues.tense ?? snapshot.tense,
   }
@@ -105,7 +114,15 @@ function mergeGeneratedValues(
     return normalizeText(next)
   }
 
+  const pickTags = () => {
+    const currentTags = normalizeWritingContractTags(current.writingContractTags)
+    if (mode === 'fill_blanks' && currentTags.length > 0) return currentTags
+    const nextTags = normalizeWritingContractTags(result.writingContractTags)
+    return nextTags.length > 0 ? nextTags : currentTags
+  }
+
   return {
+    writingContractTags: pickTags(),
     theme: pick(current.theme, result.theme),
     motifs: pick(current.motifs, result.motifs),
     emotionalCore: pick(current.emotionalCore, result.emotionalCore),
@@ -155,6 +172,7 @@ export default function ThemeVoicePage({ novelId }: Props) {
   const watchedValues = (Form.useWatch([], form) as Partial<ThemeVoiceFormValues> | undefined) || {}
   const currentValues = buildCurrentFormValues(snapshot, watchedValues)
   const foundationCount = [
+    currentValues.writingContractTags.length > 0,
     currentValues.theme,
     currentValues.emotionalCore,
     currentValues.pov,
@@ -172,6 +190,12 @@ export default function ThemeVoicePage({ novelId }: Props) {
 
   const handleSave = async () => {
     const values = normalizeFormValues(await form.validateFields())
+    const contractError = getWritingContractValidationError(values.writingContractTags)
+    if (contractError) {
+      message.warning(contractError)
+      return
+    }
+
     setSaving(true)
 
     try {
@@ -230,8 +254,8 @@ export default function ThemeVoicePage({ novelId }: Props) {
       layout="wide"
       heroVariant="compact"
       eyebrow="主题与文风"
-      title="Theme & Voice Bible"
-      description="把主题、情感核心、视角、时态、口吻和禁用表达固定下来。这一页负责统一正文口径，也是减少 AI 味、降低修订返工的重要约束层。"
+      title="主题与文风"
+      description="固定整本书的阅读预期、主题、情感核心、视角、时态和语言边界，减少 AI 痕迹与返工。"
       actions={(
         <Space wrap>
           <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>
@@ -261,17 +285,17 @@ export default function ThemeVoicePage({ novelId }: Props) {
         <WorkspaceContextSummary
           items={[
             { label: '书名', value: currentNovel?.title || '未命名小说' },
-            { label: 'Project Brief', value: currentNovel?.projectBriefJson ? '已存在' : '建议先补项目立项' },
+            { label: '项目立项', value: currentNovel?.projectBriefJson ? '已存在' : '建议先补项目立项' },
+            { label: '写作类型', value: formatWritingContractTags(currentValues.writingContractTags) || '待设定' },
             { label: '背景摘要', value: compactText(currentNovel?.expandedBackground || currentNovel?.synopsis) },
-            { label: '当前字数', value: `${stats.totalWords.toLocaleString()} 字` },
           ]}
         />
       )}
       metrics={(
         <>
-          <WorkspaceMetric label="基础约束" value={`${foundationCount}/6`} tone="warm" hint="主题、情感核心、视角、时态、风格、对白。" />
+          <WorkspaceMetric label="基础约束" value={`${foundationCount}/7`} tone="warm" hint="阅读预期、主题、情感核心、视角、时态、风格、对白。" />
           <WorkspaceMetric label="补充细则" value={`${detailCount}/5`} hint="母题、叙述距离、口吻词、描写规则、禁用表达。" />
-          <WorkspaceMetric label="修订压力" value={stats.revisionTaskCount} hint="文风规则越清楚，后面修订中心的返工越少。" />
+          <WorkspaceMetric label="修订压力" value={stats.revisionTaskCount} hint="规则越清楚，后面修订中心的返工越少。" />
         </>
       )}
     >
@@ -279,7 +303,7 @@ export default function ThemeVoicePage({ novelId }: Props) {
         <Alert
           type="info"
           showIcon
-          message="建议先完成 Project Brief，再来定义主题与文风。这样文风规则会更贴合目标读者和产品承诺。"
+          message="建议先完成项目立项，再来定义主题与文风。这样写作类型和文风规则会更贴合目标读者与产品承诺。"
         />
       ) : null}
 
@@ -301,6 +325,10 @@ export default function ThemeVoicePage({ novelId }: Props) {
       <WorkspacePanel title="使用原则" description="不要写空泛的审美判断，要写成正文生成时真的能执行的规则。">
         <div className="guided-step__checklist">
           <div className="guided-step__checkitem guided-step__checkitem--done">
+            <div className="guided-step__checkhead"><strong>先定整本书的阅读预期</strong></div>
+            <p>“爽文”“写实”“言情”不是标签墙，它们会直接决定节奏、对白、关系推进和读者期待。</p>
+          </div>
+          <div className="guided-step__checkitem guided-step__checkitem--done">
             <div className="guided-step__checkhead"><strong>先定视角和时态</strong></div>
             <p>长篇最容易在这里漂移。视角和时态不稳，后面的段落修订会越来越贵。</p>
           </div>
@@ -318,6 +346,30 @@ export default function ThemeVoicePage({ novelId }: Props) {
       >
         <Form form={form} layout="vertical">
           <div className="guided-step__field-grid">
+            <div className="guided-step__field-card guided-step__field-card--full">
+              <Form.Item
+                name="writingContractTags"
+                label="写作类型"
+                extra="内置标签会触发强规则；自定义标签只作为弱提示。核心阅读预期“爽文 / 写实”只能选一个。"
+                rules={[{
+                  validator: async (_, value?: string[]) => {
+                    const error = getWritingContractValidationError(normalizeWritingContractTags(value))
+                    if (error) throw new Error(error)
+                  },
+                }]}
+              >
+                <Select
+                  mode="tags"
+                  allowClear
+                  options={WRITING_CONTRACT_PRESETS.map((preset) => ({
+                    value: preset.value,
+                    label: `${preset.label} · ${preset.group === 'core' ? '核心预期' : '内容重心'}`,
+                  }))}
+                  placeholder="例如：爽文、言情，或补充自定义短标签"
+                  tokenSeparators={[',', '，', '、']}
+                />
+              </Form.Item>
+            </div>
             <div className="guided-step__field-card">
               <Form.Item name="theme" label="主题" rules={[{ required: true, message: '请写清主题' }]}>
                 <Input.TextArea rows={4} placeholder="写作品持续回答的命题，不要写成宣传口号。" />

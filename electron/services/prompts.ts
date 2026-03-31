@@ -204,8 +204,9 @@ export function regenerateCharacterPrompt(params: ExtendedRegenerateCharacterPro
 
 export function characterRelationsPrompt(params: CharacterRelationsPromptInput): string {
   const fallback = appendPromptSection(rawCharacterRelationsPrompt(params), '关系类型补充', [
-    '- 在既有 friend / enemy / lover / parent_child / colleague / rival / mentor_student / acquaintance 基础上，也允许输出 family / ally / subordinate / benefactor / debtor / handler / teammate / spouse / ex_lover / political_partner。',
+    '- 关系类型只使用 stranger / acquaintance / friend / family / colleague / mentor_student / ally / subordinate / rival / lover / enemy，不要额外发明新枚举。',
     '- label 要写成读者一眼能懂的中文关系简称，例如“同门师兄妹”“互相利用”“表面同盟”。',
+    '- 如果关系明显是单向错位，可以把 bilateral 设为 false，并在 description 里写清双方认知差。',
   ])
   return applyPromptOverride('characterRelations', fallback, params as unknown as Record<string, unknown>)
 }

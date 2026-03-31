@@ -1,4 +1,4 @@
-﻿import type { GenreWorldRules } from '../shared/genre-system'
+import type { GenreWorldRules } from '../shared/genre-system'
 import type {
   SubPlotDraft,
   SubplotGenerationRequest,
@@ -190,6 +190,25 @@ export interface CharacterRelation {
   relationLabel?: string
   bilateral: number
   description?: string
+  intimacyLevel?: number
+  tensionLevel?: number
+  interactionStyle?: string
+  subtextRule?: string
+}
+
+export interface CharacterRelationInput {
+  id?: number
+  novelId: number
+  charAId: number
+  charBId: number
+  relationType: string
+  relationLabel?: string
+  description?: string
+  bilateral?: number
+  intimacyLevel?: number
+  tensionLevel?: number
+  interactionStyle?: string
+  subtextRule?: string
 }
 
 export interface CharacterQueryInput {
@@ -981,7 +1000,7 @@ export interface OutlineChapterBatchGenerationResult {
 export interface ConsistencyIssue {
   id: string
   severity: 'high' | 'medium' | 'low'
-  category: 'character' | 'chapter' | 'timeline' | 'item' | 'map' | 'outline' | 'continuity' | 'thread'
+  category: 'character' | 'chapter' | 'timeline' | 'item' | 'map' | 'outline' | 'continuity' | 'thread' | 'voice' | 'relation'
   title: string
   description: string
   suggestion: string
@@ -1007,6 +1026,11 @@ export interface NovelConsistencyReport {
     linkedTimelineCount: number
     itemCount: number
     bidirectionalLinkCount: number
+    writingContractTagCount: number
+    protagonistRelationCount: number
+    styledRelationCount: number
+    subtextRelationCount: number
+    ratedRelationCount: number
   }
   issues: ConsistencyIssue[]
 }
@@ -1121,7 +1145,7 @@ declare global {
         generateProtagonist: (novelId: number, opts: CharacterGenerationOptions) => Promise<number>
         getRelations: (novelId: number) => Promise<CharacterRelation[]>
         generateRelations: (novelId: number) => Promise<void>
-        upsertRelation: (data: unknown) => Promise<void>
+        upsertRelation: (data: CharacterRelationInput) => Promise<void>
         clear: (novelId: number) => Promise<void>
       }
       map: {

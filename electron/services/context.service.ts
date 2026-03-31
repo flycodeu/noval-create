@@ -1,6 +1,6 @@
 ﻿import { asc, eq } from 'drizzle-orm'
 import { getDb } from '../database/db'
-import { chapters, characters, genres, novels, storyArcs, storyItems, storyThreads, templates, timelineEvents, worldMap } from '../database/schema'
+import { chapters, characterRelations, characters, genres, novels, storyArcs, storyItems, storyThreads, templates, timelineEvents, worldMap } from '../database/schema'
 import { buildWorldRulesSummary, parseWorldRulesJson } from '../../src/shared/genre-system'
 import { buildProjectBriefSummary, parseProjectBriefDocument } from '../../src/shared/project-brief'
 import {
@@ -12,6 +12,8 @@ import {
   type StoryWritingRulesSettings,
 } from '../../src/shared/story-settings'
 import { buildThemeVoiceSummary, parseThemeVoiceDocument } from '../../src/shared/theme-voice'
+import { buildWritingContractSummary } from '../../src/shared/writing-contract'
+import { buildCharacterRelationSummaryLine } from '../../src/shared/character-relations'
 import { buildStoryMemoryPromptSummary } from './story-memory.service'
 import { ensureStoryStructure } from './story-structure.service'
 
@@ -69,6 +71,7 @@ export interface StoryProfile {
   premiseSummary: string
   storyDesignSummary: string
   themeVoiceSummary: string
+  writingContractSummary: string
   writingRulesSummary: string
   storyThreadsSummary: string
   storyGoal: string
@@ -121,6 +124,8 @@ export interface ChapterContext {
   timelineOpenThreads: string
   longTermMemory: string
   activeThreads: string
+  writingContractSummary: string
+  relationSummary: string
 }
 
 interface ChapterWithContinuity {
@@ -410,6 +415,7 @@ function buildStoryCoreText(profile: StoryProfile): string {
     profile.premiseSummary,
     profile.storyDesignSummary,
     profile.themeVoiceSummary,
+    profile.writingContractSummary,
     profile.writingRulesSummary,
     profile.storyThreadsSummary,
   ].filter(Boolean).join('\n\n')
@@ -509,6 +515,51 @@ function formatContinuityEntry(chapter: ChapterWithContinuity): string {
   ].filter(Boolean)
 
   return `第${chapter.chapterNum}章：${parts.join(' | ')}`
+}
+
+export function buildStoryRelationSummary(
+  novelId: number,
+  allCharacters: Array<typeof characters.$inferSelect>,
+  focusText: string,
+  limit = 8,
+): string {
+  const db = getDb()
+  const relationRows = db.select().from(characterRelations).where(eq(characterRelations.novelId, novelId)).all()
+  if (relationRows.length === 0 || allCharacters.length < 2) return ""
+
+  const nameMap = new Map(allCharacters.map((character) => [character.id, character.fullName]))
+  const focusIds = new Set<number>()
+  const normalizedFocusText = focusText.trim()
+
+  allCharacters.forEach((character) => {
+    if (!character.fullName) return
+    if (character.roleType === "protagonist" || character.roleType === "major" || character.roleType === "antagonist") {
+      focusIds.add(character.id)
+    }
+    if (normalizedFocusText && normalizedFocusText.includes(character.fullName)) {
+      focusIds.add(character.id)
+    }
+  })
+
+  return relationRows
+    .filter((relation) => Boolean(nameMap.get(relation.charAId)) && Boolean(nameMap.get(relation.charBId)))
+    .map((relation) => ({
+      relation,
+      score:
+        (focusIds.has(relation.charAId) ? 3 : 0) +
+        (focusIds.has(relation.charBId) ? 3 : 0) +
+        Number(relation.intimacyLevel || 0) +
+        Number(relation.tensionLevel || 0) +
+        (relation.relationType === "lover" || relation.relationType === "enemy" || relation.relationType === "family" ? 1 : 0),
+    }))
+    .sort((left, right) => right.score - left.score || right.relation.id - left.relation.id)
+    .slice(0, limit)
+    .map(({ relation }) => buildCharacterRelationSummaryLine(
+      nameMap.get(relation.charAId) || "角色甲",
+      nameMap.get(relation.charBId) || "角色乙",
+      relation,
+    ))
+    .join("\n")
 }
 
 function collectOpenLoops(chapterRows: ChapterWithContinuity[]): string {
@@ -735,6 +786,7 @@ export async function buildStoryProfile(novelId: number): Promise<StoryProfile> 
   const settings = parseStorySettings(novel.settingsJson)
   const projectBrief = parseProjectBriefDocument(novel.projectBriefJson)
   const themeVoice = parseThemeVoiceDocument(novel.themeVoiceJson)
+  const writingContractSummary = buildWritingContractSummary(themeVoice.writingContractTags)
   const protagonistPolicy = buildProtagonistPolicy(allCharacters)
 
   return {
@@ -756,6 +808,7 @@ export async function buildStoryProfile(novelId: number): Promise<StoryProfile> 
       ending: settings.ending,
     }),
     themeVoiceSummary: buildThemeVoiceSummary(themeVoice),
+    writingContractSummary,
     writingRulesSummary: buildWritingRulesSummary(settings.writingRules),
     storyThreadsSummary: buildStoryThreadsSummary(novelId),
     storyGoal: settings.storyGoal,
@@ -851,6 +904,12 @@ export async function buildChapterContext(
     .map((chapter) => `第${chapter.chapterNum}章：${chapter.summary}`)
     .join('\n')
 
+  const relationSummary = buildStoryRelationSummary(
+    novelId,
+    allCharacters,
+    [currentChapter?.outline, currentArc?.arcSummary, currentArc?.arcGoal, previousSummaries].filter(Boolean).join("\n"),
+  )
+
   const previousChapter = recentChapters[recentChapters.length - 1]
   const lastChapterEnding = previousChapter
     ? [
@@ -874,6 +933,7 @@ export async function buildChapterContext(
   const parts: ContextPart[] = [
     { priority: 0, label: 'chapterGoal', content: extractChapterGoal(currentChapter?.outline) },
     { priority: 0, label: 'storyCore', content: buildStoryCoreText(profile) },
+    { priority: 0, label: 'writingContractSummary', content: profile.writingContractSummary },
     { priority: 0, label: 'currentArc', content: formatArcContext(currentArc) },
     { priority: 1, label: 'continuityNotes', content: collectContinuityNotes(continuityChapters) },
     { priority: 1, label: 'lastChapterEnding', content: lastChapterEnding },
@@ -885,6 +945,7 @@ export async function buildChapterContext(
     { priority: 2, label: 'characterStates', content: buildCharacterStates(allCharacters, recentChapters) },
     { priority: 2, label: 'continuitySummary', content: continuityChapters.map(formatContinuityEntry).join('\n') },
     { priority: 2, label: 'timelineSummary', content: timelineContext.timelineSummary },
+    { priority: 2, label: 'relationSummary', content: relationSummary },
     { priority: 2, label: 'activeThreads', content: activeThreadsContext },
     { priority: 2, label: 'styleTemplate', content: profile.styleTemplateSummary },
     { priority: 3, label: 'previousSummaries', content: previousSummaries },
@@ -909,10 +970,10 @@ export async function buildChapterContext(
     timelineOpenThreads: allocated.timelineOpenThreads || '',
     longTermMemory: allocated.longTermMemory || '',
     activeThreads: allocated.activeThreads || '',
+    writingContractSummary: allocated.writingContractSummary || profile.writingContractSummary || '',
+    relationSummary: allocated.relationSummary || relationSummary || '',
   }
 }
-
-
 
 
 

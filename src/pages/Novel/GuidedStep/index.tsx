@@ -68,7 +68,7 @@ const STEP_META: Record<GuidedWorkflowStepKey, { eyebrow: string; title: string;
   'story-core': {
     eyebrow: '第 3 步 / 12',
     title: '基础设定先钉住',
-    description: '先写 premise、主角起点和底层约束，不提前写剧情。',
+    description: '先写基础设定、主角起点和底层约束，不提前写剧情。',
   },
   'theme-voice': {
     eyebrow: '第 4 步 / 12',
@@ -369,7 +369,7 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         metrics={(
           <>
             <WorkspaceMetric label="完成度" value={`${progress.completedCount}/${progress.totalCount}`} tone="warm" hint="定位、核心信息、主角起点、约束" />
-            <WorkspaceMetric label="背景基础" value={isBasicsReady(currentNovel) ? '已就绪' : '待补齐'} hint="建议先写稳简介和背景，再整理 premise。" />
+            <WorkspaceMetric label="背景基础" value={isBasicsReady(currentNovel) ? '已就绪' : '待补齐'} hint="建议先写稳简介和背景，再整理基础设定。" />
           </>
         )}
       >
@@ -428,7 +428,7 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         metrics={(
           <>
             <WorkspaceMetric label="完成度" value={`${themeVoice.readyCount}/${progress.totalCount}`} tone="warm" hint="主题、情感核心、视角、时态、风格规则、对白规则" />
-            <WorkspaceMetric label="立项前置" value={isProjectBriefReady(currentNovel) ? '已完成' : '建议先补'} hint="Project Brief 越清楚，Voice Bible 越贴近目标读者和产品承诺。" />
+            <WorkspaceMetric label="立项前置" value={isProjectBriefReady(currentNovel) ? '已完成' : '建议先补'} hint="项目立项越清楚，主题与文风越贴近目标读者和产品承诺。" />
           </>
         )}
       >
@@ -487,7 +487,7 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         metrics={(
           <>
             <WorkspaceMetric label="规则状态" value={isWorldFoundationReady(currentNovel) ? '已就绪' : '待补齐'} tone="warm" hint="时间、势力、种族、等级和语言边界" />
-            <WorkspaceMetric label="前置依赖" value={isStoryCoreReady(currentNovel) ? '基础设定已齐' : '先补基础设定'} hint="先有 premise，再统一世界口径。" />
+            <WorkspaceMetric label="前置依赖" value={isStoryCoreReady(currentNovel) ? '基础设定已齐' : '先补基础设定'} hint="先有基础设定，再统一世界口径。" />
           </>
         )}
       >
@@ -812,7 +812,7 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
           <div className="guided-step__fact-card">
             <span>基础设定</span>
             <strong>{isStoryCoreReady(currentNovel) ? '已完成' : '待补齐'}</strong>
-            <small>先有 premise，正文才不会一路跑偏。</small>
+            <small>先有基础设定，正文才不会一路跑偏。</small>
           </div>
           <div className="guided-step__fact-card">
             <span>主题与文风</span>

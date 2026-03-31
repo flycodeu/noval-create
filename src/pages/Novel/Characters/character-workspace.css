@@ -109,6 +109,58 @@
   cursor: pointer;
 }
 
+.character-graph-shell__legend {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  z-index: 12;
+  max-width: 280px;
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid rgba(122, 93, 52, 0.14);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 16px 28px rgba(72, 54, 31, 0.1);
+}
+
+.character-graph-shell__legend-title {
+  color: #2f241b;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.character-graph-shell__legend-row {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.character-graph-shell__legend-swatch {
+  display: block;
+  width: 14px;
+  height: 14px;
+  margin-top: 4px;
+  border-radius: 999px;
+}
+
+.character-graph-shell__legend-row strong,
+.character-graph-shell__legend-note {
+  color: #3d3025;
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.character-graph-shell__legend-row span {
+  display: block;
+  color: rgba(77, 60, 42, 0.74);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
 .character-graph-shell .react-flow__pane {
   cursor: grab;
 }
@@ -142,6 +194,12 @@
 .character-graph-node--active {
   transform: translateY(-2px);
   box-shadow: 0 20px 38px rgba(15, 66, 83, 0.16);
+}
+
+.character-graph-node--dimmed {
+  opacity: 0.34;
+  transform: scale(0.98);
+  box-shadow: none;
 }
 
 .character-graph-node--protagonist {
@@ -229,5 +287,13 @@
   .novel-character-graph-panel__canvas,
   .character-graph-shell {
     min-height: 460px;
+  }
+
+  .character-graph-shell__legend {
+    right: 14px;
+    left: 14px;
+    top: auto;
+    bottom: 14px;
+    max-width: none;
   }
 }

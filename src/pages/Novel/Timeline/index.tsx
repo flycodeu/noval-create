@@ -27,7 +27,7 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
   const workspace = useTimelineWorkspace(novelId)
   const eventDraftButton = workspace.selectedEvent || workspace.creating ? (
     <AIGenerateButton
-      label="AI Draft Event"
+      label="AI 草拟事件"
       isJson
       buildMessages={() => {
         const values = workspace.form.getFieldsValue(true)
@@ -35,30 +35,30 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
           task: 'timeline event draft',
           mode: values.eventTitle ? 'optimize' : 'replace',
           context: [
-            { label: 'Novel', value: workspace.currentNovel?.title || '' },
-            { label: 'Genre', value: workspace.currentNovel?.genreName || '' },
-            { label: 'Synopsis', value: workspace.currentNovel?.synopsis || '' },
-            { label: 'Background', value: workspace.currentNovel?.expandedBackground || '' },
-            { label: 'Time mode', value: workspace.modeLabel },
-            { label: 'Structure filter', value: workspace.structureFilterSummary },
+            { label: '书名', value: workspace.currentNovel?.title || '' },
+            { label: '题材', value: workspace.currentNovel?.genreName || '' },
+            { label: '一句话简介', value: workspace.currentNovel?.synopsis || '' },
+            { label: '扩展背景', value: workspace.currentNovel?.expandedBackground || '' },
+            { label: '时间模式', value: workspace.modeLabel },
+            { label: '结构筛选', value: workspace.structureFilterSummary },
           ],
           fields: [
-            { key: 'eventTitle', label: 'Event title', value: values.eventTitle, hint: 'One line that names the event.' },
-            { key: 'eventSummary', label: 'Event summary', value: values.eventSummary, hint: 'Explain why this event matters.' },
-            { key: 'timeLabel', label: 'Time label', value: values.timeLabel, hint: 'Keep it in the project time format.' },
-            { key: 'timeSortValue', label: 'Sort value', type: 'number', value: values.timeSortValue, hint: 'Use a reasonable integer.' },
-            { key: 'eventType', label: 'Event type', value: values.eventType, hint: 'Examples: conflict, reversal, payoff.' },
-            { key: 'protagonistAction', label: 'Protagonist action', value: values.protagonistAction, hint: 'Describe the action or decision.' },
-            { key: 'eventCause', label: 'Cause', value: values.eventCause, hint: 'State the trigger clearly.' },
-            { key: 'eventProcess', label: 'Process', value: values.eventProcess, hint: 'State the key progression.' },
-            { key: 'eventResult', label: 'Result', value: values.eventResult, hint: 'State the direct outcome.' },
-            { key: 'directConsequences', label: 'Direct consequences', type: 'string[]', value: values.directConsequences, hint: 'Use 2 to 5 short lines.' },
-            { key: 'openThreads', label: 'Open threads', type: 'string[]', value: values.openThreads, hint: 'Leave empty when none.' },
-            { key: 'notes', label: 'Notes', value: values.notes, hint: 'Only add necessary context.' },
+            { key: 'eventTitle', label: '事件标题', value: values.eventTitle, hint: '用一句话明确这件事是什么。' },
+            { key: 'eventSummary', label: '事件摘要', value: values.eventSummary, hint: '说明它为什么重要。' },
+            { key: 'timeLabel', label: '时间标签', value: values.timeLabel, hint: '保持项目当前采用的时间格式。' },
+            { key: 'timeSortValue', label: '排序值', type: 'number', value: values.timeSortValue, hint: '填写合理的整数。' },
+            { key: 'eventType', label: '事件类型', value: values.eventType, hint: '例如：冲突、反转、回收。' },
+            { key: 'protagonistAction', label: '主角动作', value: values.protagonistAction, hint: '写清动作或决策。' },
+            { key: 'eventCause', label: '起因', value: values.eventCause, hint: '把触发因素说清楚。' },
+            { key: 'eventProcess', label: '过程', value: values.eventProcess, hint: '写清关键推进。' },
+            { key: 'eventResult', label: '结果', value: values.eventResult, hint: '写清直接结果。' },
+            { key: 'directConsequences', label: '直接后果', type: 'string[]', value: values.directConsequences, hint: '建议 2 到 5 条短句。' },
+            { key: 'openThreads', label: '待回收线索', type: 'string[]', value: values.openThreads, hint: '没有就留空。' },
+            { key: 'notes', label: '补充备注', value: values.notes, hint: '只保留必要上下文。' },
           ],
           requirements: [
-            'Do not change already selected structure, location, character, or item links.',
-            'Avoid slogans, generic summaries, and empty marketing language.',
+            '不要改动已经选定的结构、地点、人物或物品关联。',
+            '避免口号式总结、空泛概述和宣传腔。',
           ],
         })
       }}
@@ -148,7 +148,7 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
         <Alert
           type="warning"
           showIcon
-          message="Current prerequisites are not ready for timeline generation"
+          message="当前前置条件还不足以生成时间轴"
           description={(
             <div>
               {workspace.generationBlockers.map((blocker) => (

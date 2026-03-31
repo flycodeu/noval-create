@@ -111,7 +111,10 @@ function getRelatedPage(taskType: string) {
     case 'item':
       return 'items'
     case 'character':
+    case 'relation':
       return 'characters'
+    case 'voice':
+      return 'theme-voice'
     case 'thread':
       return 'threads'
     case 'map':
