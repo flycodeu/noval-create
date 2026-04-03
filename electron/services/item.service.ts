@@ -487,28 +487,28 @@ function buildItemRepairPrompt(input: {
   mode: 'repair' | 'replace'
 }) {
   return [
-    `You are the item editor for a Chinese long-form novel. ${input.mode === 'replace' ? 'Replace' : 'Repair'} the following story item while keeping it usable inside the current novel.`,
-    buildSection('Story Context', [
-      `Novel: ${input.novelTitle}`,
-      `Genre: ${input.genre || 'Not provided'}`,
-      `Background: ${input.background || 'Not provided'}`,
-      `World rules: ${input.worldSummary || 'Not provided'}`,
-      `Story core: ${input.storyCore || 'Not provided'}`,
+    `你是中文长篇小说的物品编辑。现在要${input.mode === 'replace' ? '重做' : '修正'}下面这个故事物品，同时保留它在当前小说里的功能槽位。`,
+    buildSection('故事上下文', [
+      `小说：${input.novelTitle}`,
+      `题材：${input.genre || '未提供'}`,
+      `背景：${input.background || '未提供'}`,
+      `世界规则：${input.worldSummary || '未提供'}`,
+      `故事核心：${input.storyCore || '未提供'}`,
     ]),
-    buildSection('Current Item', [input.currentSummary]),
-    buildSection('Nearby Assets', [
-      input.characterSummary ? `Characters:\n${input.characterSummary}` : '',
-      input.locationSummary ? `Locations:\n${input.locationSummary}` : '',
-      input.eventSummary ? `Timeline events:\n${input.eventSummary}` : '',
+    buildSection('当前物品', [input.currentSummary]),
+    buildSection('周边资产', [
+      input.characterSummary ? `人物：\n${input.characterSummary}` : '',
+      input.locationSummary ? `地点：\n${input.locationSummary}` : '',
+      input.eventSummary ? `时间轴事件：\n${input.eventSummary}` : '',
     ]),
-    buildSection('Repair Goal', [
+    buildSection('修复目标', [
       input.mode === 'replace'
-        ? 'Keep the same asset slot, but change the name, hook, leverage point, and payoff role in a clearly different direction.'
-        : 'Keep the same asset slot, but remove repetition, vague AI-sounding phrasing, and missing story utility.',
-      'The item must stay concrete, reusable, and anchored to at least one character, place, or event.',
-      'Return one JSON object only and keep the same field schema as batch item generation.',
+        ? '保留同一个资产槽位，但把名称、钩子、博弈点和回收作用换成明显不同的新方向。'
+        : '保留同一个资产槽位，但去掉重复、空泛、AI 味和缺少剧情用途的问题。',
+      '物品必须保持具体、可复用，并至少挂到一个人物、地点或事件上。',
+      '只返回 1 个 JSON 对象，字段结构与批量物品生成保持一致。',
     ]),
-    buildSection('Output Contract', [
+    buildSection('输出格式', [
       '{"template_name":"existing template name or empty","item_name":"concrete item name","category":"category","sub_type":"specific subtype","rarity":"common/rare/core/forbidden","owner_name":"existing owner name or empty","location_name":"existing location name or empty","event_title":"existing event title or empty","summary":"one-sentence description","acquisition_method":"how it is obtained","usage_method":"how it is used","cost":"concrete cost","risk":"concrete risk","plot_function":"specific story function","appearance":"recognizable appearance","faction_hint":"related faction or organization","linked_character_names":["related character A"],"tags":["tag1","tag2"]}',
     ]),
   ].filter(Boolean).join('\n\n')
@@ -520,7 +520,7 @@ function buildSection(title: string, lines: Array<string | undefined | null | fa
     .filter(Boolean)
     .join('\n')
 
-  return body ? `[${title}]\n${body}` : ''
+  return body ? `【${title}】\n${body}` : ''
 }
 
 function buildPrompt(input: {
@@ -540,74 +540,74 @@ function buildPrompt(input: {
   count: number
 }) {
   return [
-    `You are the item editor for a Chinese long-form novel. Generate ${input.count} concrete story item instances for "${input.novelTitle}".`,
-    buildSection('Task Goal', [
-      'Generate concrete, reusable item instances instead of abstract concepts or loose category labels.',
-      'Every item must attach to a character, location, event, faction, or explicit circulation path so later chapters can call it back directly.',
-      'All generated field values must read as natural Chinese that matches the existing novel setting unless a term is already established in another language.',
-      input.focus ? `Current batch focus: ${input.focus}` : '',
+    `你是中文长篇小说的物品编辑。请为《${input.novelTitle}》生成 ${input.count} 个具体可用的故事物品实例。`,
+    buildSection('本轮目标', [
+      '生成的是能直接进入剧情的具体物品实例，不是抽象概念，也不是松散的分类名。',
+      '每个物品都必须挂到人物、地点、事件、势力，或明确的流转路径上，方便后续章节直接回查。',
+      '所有字段都必须是自然中文，除非上下文已经明确确立了外文术语。',
+      input.focus ? `本轮侧重：${input.focus}` : '',
     ]),
-    buildSection('Story Context', [
-      `Genre: ${input.genre}`,
-      `Background: ${input.background || 'Not provided'}`,
-      `World rules: ${input.worldSummary || 'Not provided'}`,
-      `Story core: ${input.storyCore || 'Not provided'}`,
+    buildSection('故事上下文', [
+      `题材：${input.genre}`,
+      `背景：${input.background || '未提供'}`,
+      `世界规则：${input.worldSummary || '未提供'}`,
+      `故事核心：${input.storyCore || '未提供'}`,
     ]),
-    buildSection('Existing Templates', [input.templateSummary || 'No template summary provided']),
-    buildSection('Characters', [input.characterSummary || 'No characters available']),
-    buildSection('Locations', [input.locationSummary || 'No locations available']),
-    buildSection('Factions', [input.factionSummary || 'No factions available']),
-    buildSection('Story Arcs', [input.arcSummary || 'No story arcs available']),
-    buildSection('Timeline Events', [input.eventSummary || 'No timeline events available']),
-    buildSection('Existing Item Instances', [input.existingItemSummary || 'No existing item instances']),
-    buildSection('Context Guardrails', [
+    buildSection('已有模板', [input.templateSummary || '当前没有可用模板摘要']),
+    buildSection('人物', [input.characterSummary || '当前没有可用人物']),
+    buildSection('地点', [input.locationSummary || '当前没有可用地点']),
+    buildSection('势力', [input.factionSummary || '当前没有可用势力']),
+    buildSection('故事弧', [input.arcSummary || '当前没有可用故事弧']),
+    buildSection('时间轴事件', [input.eventSummary || '当前没有可用时间轴事件']),
+    buildSection('已有物品实例', [input.existingItemSummary || '当前没有已有物品实例']),
+    buildSection('上下文护栏', [
       buildContextAlignmentRules({
         background: input.background,
         storyCore: input.storyCore,
         worldSummary: input.worldSummary,
-        taskFocus: 'Generate grounded item instances that can be traced, reused, and called back in later chapters.',
+        taskFocus: '生成能被追踪、可复用，并能在后续章节被回收的具体物品。',
         extraLines: [
-          'Prefer existing characters, locations, events, factions, and templates before inventing anything new.',
-          'Each item must answer: why it appears now, who uses or fights over it, and what changes after it appears.',
+          '优先复用已有的人物、地点、事件、势力和模板，再考虑新增。',
+          '每个物品都要回答：它为什么现在出现、谁在使用或争夺、它出现后改变了什么。',
         ],
       }),
     ]),
-    buildSection('Reality Guardrails', [
+    buildSection('真实度护栏', [
       buildGenreRealityRules({
         genre: input.genre,
         worldSummary: input.worldSummary,
         extraLines: [
-          'Item power, rarity, circulation, maintenance, and danger must fit the current world order and resource logic.',
-          'Do not introduce sudden black-box artifacts, omnipotent plot devices, or unexplained cross-genre technology jumps.',
+          '物品的强度、稀有度、流通方式、维护成本和危险性都必须服从当前世界秩序与资源逻辑。',
+          '不要突然引入黑箱神器、万能道具，或没有解释的跨题材技术跳级。',
         ],
       }),
     ]),
-    buildSection('Output Quality Floor', [
+    buildSection('输出质量底线', [
       buildOutputQualityRules([
-        'summary, plot_function, cost, and risk must stay concrete and factual; prioritize conditions, actions, limits, and consequences.',
-        'Each item must bind to at least one person, place, or event; if that is impossible, explain a clear source and destination within the fields.',
-        'Do not output omnipotent props, fate props, empty symbolic props, or objects that only exist to say they push the plot.',
-        'Do not repeat existing item names, functions, origins, or payoff roles.',
-        'Avoid slogan-like phrasing, pseudo-poetic metaphors, floating abstractions, and fake depth.',
+        'summary、plot_function、cost 和 risk 必须具体、可验证，优先写条件、动作、限制和后果。',
+        '每个物品至少要绑定一个人物、地点或事件；如果做不到，就在字段里写清它的来源和去向。',
+        '不要输出万能道具、命运道具、空壳象征物，或只会空喊“推动剧情”的工具物。',
+        '不要重复已有物品的名字、功能、来源或回收作用。',
+        '避免口号句、伪诗化比喻、悬空抽象词和假深刻表达。',
       ], input.genre),
     ]),
-    buildSection('Language Rules', [
+    buildSection('语言要求', [
       buildHumanLanguageRules([
-        'Name the item like something a human editor would put on a story asset board, not like a marketing slogan.',
-        'Keep summary, plot_function, cost, and risk in short natural sentences instead of abstract declarations.',
-        'Only write information directly relevant to the item itself; do not drift into encyclopedia mode or unrelated world exposition.',
+        '物品命名要像编辑会放进资产板里的名字，不要像营销口号。',
+        'summary、plot_function、cost 和 risk 用短而自然的句子写，不要用抽象宣言。',
+        '只写和这个物品直接相关的信息，不要滑进百科腔或无关世界观扩写。',
       ]),
     ]),
-    buildSection('Generation Requirements', [
-      `Return exactly ${input.count} item instances. The JSON array length must equal ${input.count}.`,
-      'template_name should match an existing template when possible. If there is no good template, leave it empty but keep item_name fully concrete.',
-      'owner_name, location_name, and event_title should reuse existing assets whenever possible. Leave them empty instead of fabricating new proper nouns.',
-      'summary should answer what the item is; plot_function should answer which conflict, payoff, or leverage point it affects; cost and risk should state clear tradeoffs and consequences.',
-      'linked_character_names should contain 0 to 3 strongly related characters. tags should contain 2 to 5 short labels.',
-      'rarity, acquisition_method, usage_method, appearance, and faction_hint must all be specific and grounded.',
+    buildSection('生成要求', [
+      `必须返回 ${input.count} 个物品实例，JSON array 长度必须等于 ${input.count}。`,
+      'template_name 优先对齐已有模板；如果没有合适模板，可以留空，但 item_name 必须具体。',
+      'owner_name、location_name 和 event_title 优先复用已有资产；没有把握就留空，不要硬造新专有名词。',
+      'summary 回答“这是什么”；plot_function 回答“它影响了哪条冲突、回收或博弈点”；cost 和 risk 要写清代价与后果。',
+      'linked_character_names 填 0 到 3 个强相关角色；tags 填 2 到 5 个短标签。',
+      'rarity、acquisition_method、usage_method、appearance 和 faction_hint 都必须具体、落地。',
     ]),
-    buildSection('Output Contract', [
-      'Return JSON array only. No explanation. No markdown. No code fences.',
+    buildSection('输出格式', [
+      '只输出 JSON array，不要解释，不要 Markdown，不要代码块。',
       '[{"template_name":"existing template name or empty","item_name":"concrete item name","category":"category","sub_type":"specific subtype","rarity":"common/rare/core/forbidden","owner_name":"existing owner name or empty","location_name":"existing location name or empty","event_title":"existing event title or empty","summary":"one-sentence description","acquisition_method":"how it is obtained","usage_method":"how it is used","cost":"concrete cost","risk":"concrete risk","plot_function":"specific story function","appearance":"recognizable appearance","faction_hint":"related faction or organization","linked_character_names":["related character A"],"tags":["tag1","tag2"]}]',
     ]),
   ].filter(Boolean).join('\n\n')
@@ -1156,18 +1156,22 @@ export async function generateStoryItems(
       background: profile.background,
       worldSummary: profile.worldRulesSummary,
       storyCore: [
-        `Story goal: ${profile.storyGoal || 'not provided'}`,
-        `Core conflict: ${profile.coreConflict || 'not provided'}`,
-        `Main plot: ${profile.mainPlot || 'not provided'}`,
-        `Ending direction: ${profile.ending || 'not provided'}`,
+        `故事目标：${profile.storyGoal || '未提供'}`,
+        `核心冲突：${profile.coreConflict || '未提供'}`,
+        `主线剧情：${profile.mainPlot || '未提供'}`,
+        `结局方向：${profile.ending || '未提供'}`,
       ].join('\n'),
       templateSummary: buildItemTemplateSummary(itemProfile),
       characterSummary: buildCharacterSummary(characterRows),
       locationSummary: buildLocationSummary(mapRows),
-      factionSummary: getFactionNameOptions(rules).join(', '),
+      factionSummary: getFactionNameOptions(rules).join('、'),
       arcSummary: buildArcSummary(arcRows),
       eventSummary: buildEventSummary(eventRows),
-      existingItemSummary: buildExistingItemSummary(currentItems),      focus: [options.focus, `Batch ${Math.floor(generatedCount / batchSize) + 1}: add ${currentBatchCount} new item instances and avoid duplicating existing items.`].filter(Boolean).join('\n'),
+      existingItemSummary: buildExistingItemSummary(currentItems),
+      focus: [
+        options.focus,
+        `第 ${Math.floor(generatedCount / batchSize) + 1} 批：新增 ${currentBatchCount} 个物品实例，并主动避开已有物品的重复功能。`,
+      ].filter(Boolean).join('\n'),
       count: currentBatchCount,
     })
     const attemptNumber = getAttemptCount(novelId, historyEntityType, null, historyTaskType) + 1

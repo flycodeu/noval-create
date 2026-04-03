@@ -7,7 +7,7 @@ interface WorkspaceStore {
   setMode: (mode: WorkspaceMode) => void
 }
 
-const savedMode = (localStorage.getItem('novelforge-workspace-mode') as WorkspaceMode) || 'guided'
+const savedMode = (localStorage.getItem('novelforge-workspace-mode') as WorkspaceMode) || 'pro'
 
 export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
   mode: savedMode,

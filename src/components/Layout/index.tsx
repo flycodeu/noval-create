@@ -57,7 +57,8 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const { theme, setTheme } = useThemeStore()
 
   const selectedKey = menuItems.find(item => location.pathname.startsWith(item.key))?.key || '/novels'
-  const hideAppSidebar = location.pathname.startsWith('/novels/') && location.pathname !== '/novels'
+  const isNovelWorkspace = location.pathname.startsWith('/novels/') && location.pathname !== '/novels'
+  const hideAppSidebar = isNovelWorkspace
 
   return (
     <Layout style={{ minHeight: '100vh', height: '100dvh', background: 'var(--color-bg-primary)' }}>

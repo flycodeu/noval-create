@@ -13,7 +13,6 @@ import {
 import { useNavigate } from 'react-router-dom'
 import type { NovelConsistencyReport, NovelContextStatus } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
-import { useWorkspaceStore } from '../../../stores/workspace.store'
 import { getCharacterBatchPreset, getItemGenerationProfile } from '../../../shared/creation-tools'
 import { parseProjectBriefSnapshot } from '../../../shared/project-brief'
 import { buildStorySettingsPayload, parseStorySettingsSnapshot } from '../../../shared/story-settings'
@@ -98,7 +97,6 @@ function getHealthTone(score: number) {
 export default function GuidePage({ novelId }: Props) {
   const navigate = useNavigate()
   const { currentNovel, setCurrentNovel } = useNovelStore()
-  const { mode } = useWorkspaceStore()
   const [stats, setStats] = useState<WorkflowStats>(EMPTY_WORKFLOW_STATS)
   const [consistencyReport, setConsistencyReport] = useState<NovelConsistencyReport | null>(null)
   const [contextStatus, setContextStatus] = useState<NovelContextStatus | null>(null)
@@ -629,15 +627,11 @@ export default function GuidePage({ novelId }: Props) {
 
   return (
     <WorkspacePage
-      className={`novel-guide novel-guide--${mode}`}
+      className="novel-guide novel-guide--single"
       layout="wide"
-      eyebrow={mode === 'guided' ? '分步创作' : '创作工作流'}
+      eyebrow="创作工作流"
       title="创作向导"
-      description={
-        mode === 'guided'
-          ? '把小说从“底盘”一路推进到“可以开写”。这里不是功能堆叠，而是一套按顺序推进的工作流。'
-          : '把产品立项、主题文风、世界资产、结构资产和修订前置统一管理，并在每一步都维持上下文继承和结构校验。'
-      }
+      description="把产品立项、主题文风、世界资产、结构资产和修订前置统一管理，并在每一步都维持上下文继承和结构校验。"
       actions={(
         <Space wrap>
           <Button
@@ -657,7 +651,6 @@ export default function GuidePage({ novelId }: Props) {
         <WorkspaceContextSummary
           items={[
             { label: '题材', value: currentNovel?.genreName || '未设置' },
-            { label: '工作模式', value: mode === 'guided' ? '小白模式' : '专业模式' },
             { label: '结构完成度', value: `${structureReadyCount}/${steps.length} 步就绪` },
             {
               label: '时间制度',
@@ -895,7 +888,7 @@ export default function GuidePage({ novelId }: Props) {
           </div>
 
           <div className="novel-issue-list">
-            {consistencyReport.issues.slice(0, mode === 'guided' ? 4 : 8).map((issue) => (
+            {consistencyReport.issues.slice(0, 8).map((issue) => (
               <div key={issue.id} className="novel-issue-item">
                 <div className="novel-issue-item__head">
                   <Tag color={getSeverityColor(issue.severity)}>{getSeverityLabel(issue.severity)}</Tag>

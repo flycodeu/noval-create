@@ -24,7 +24,6 @@ import type {
 } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
 import { useTaskStore } from '../../../stores/task.store'
-import { useWorkspaceStore } from '../../../stores/workspace.store'
 import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage } from '../components/WorkspaceShell'
 import './index.css'
 
@@ -115,7 +114,6 @@ export default function Writing({ novelId }: Props) {
   const navigate = useNavigate()
   const { chapters, currentChapterId, currentNovel, setChapters, setCurrentChapterId, updateChapter } = useNovelStore()
   const { streams, clearStream } = useTaskStore()
-  const { mode } = useWorkspaceStore()
   const editorRef = useRef<HTMLDivElement>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const currentChapterIdRef = useRef<number | null>(null)
@@ -139,7 +137,6 @@ export default function Writing({ novelId }: Props) {
   const [insightTab, setInsightTab] = useState<InsightTab>('chapter')
 
   useEffect(() => { currentChapterIdRef.current = currentChapterId }, [currentChapterId])
-  useEffect(() => { if (mode === 'guided') setInsightTab('chapter') }, [mode])
 
   const refreshMeta = useCallback(async () => {
     const [report, memory] = await Promise.all([
@@ -474,18 +471,18 @@ export default function Writing({ novelId }: Props) {
 
   return (
     <WorkspacePage
-      className={`novel-writing-page novel-writing-page--${mode}`}
+      className="novel-writing-page"
       layout="wide"
-      eyebrow={mode === 'guided' ? '写作台' : '章节流水线'}
+      eyebrow="正文工作台"
       title="正文写作"
-      description={mode === 'guided' ? '在同一个写作台里完成 AI 主写、场景计划、审校修订、长文记忆和一致性检查。' : '正文页直接打通 AI 主写四阶段流水线、全书一致性报告、时间轴联动和长文压缩记忆。'}
+      description="在同一个工作台里完成场景计划、AI 主写、自动审校、修订定稿、长文记忆和一致性检查。"
       heroVariant="compact"
       actions={(
         <>
           <Button icon={<PlusOutlined />} onClick={() => void handleAddChapter()}>新建章节</Button>
           {generating
             ? <Button danger icon={<LoadingOutlined />} onClick={() => void handleCancelGenerate()}>取消流水线</Button>
-            : <Button type="primary" icon={<RobotOutlined />} disabled={!currentChapter} onClick={() => void handleGenerateContent()}>{mode === 'guided' ? '运行四阶段写作' : '运行章节流水线'}</Button>}
+            : <Button type="primary" icon={<RobotOutlined />} disabled={!currentChapter} onClick={() => void handleGenerateContent()}>运行章节流水线</Button>}
           <Button icon={<BulbOutlined />} disabled={!currentChapter} onClick={() => void handleGenerateSummary()}>更新记忆</Button>
           <Button icon={<FileSearchOutlined />} disabled={!currentChapter} onClick={() => void handleAiCheck()}>AI 检测</Button>
         </>
@@ -502,7 +499,6 @@ export default function Writing({ novelId }: Props) {
         <WorkspaceContextSummary
           items={[
             { label: '当前章节', value: currentChapter ? `第${currentChapter.chapterNum}章 ${currentChapter.title || ''}` : '未选择章节' },
-            { label: '工作模式', value: mode === 'guided' ? '小白模式' : '专业模式' },
             { label: '当前状态', value: currentStatusLabel },
             { label: '长文记忆', value: storyMemory ? `${storyMemory.chapterCount} 章 · ${storyMemory.memoryMode === 'epic' ? '超长篇' : storyMemory.memoryMode === 'longform' ? '长篇' : '标准'}` : '尚未加载' },
             { label: '上下文版本', value: contextStatus ? `v${contextStatus.contextVersion}` : '加载中' },
@@ -513,7 +509,7 @@ export default function Writing({ novelId }: Props) {
       {loading ? (
         <div className="novel-empty novel-empty--writing"><Spin /></div>
       ) : (
-        <div className={`novel-writing-shell novel-writing-shell--${mode}`}>
+        <div className="novel-writing-shell">
           <aside className="novel-writing-shell__sidebar">
             <div className="novel-writing-shell__sidebar-header">
               <div className="novel-writing-shell__sidebar-title">章节列表</div>
@@ -676,7 +672,7 @@ export default function Writing({ novelId }: Props) {
                   <ChapterFocusCard
                     summary={currentChapter?.summary}
                     nextChapterSeed={currentChapter?.nextChapterSeed}
-                    continuityItems={continuityItems.slice(0, mode === 'guided' ? 5 : continuityItems.length)}
+                    continuityItems={continuityItems}
                   />
                   <InsightCard title="场景拆解" eyebrow="执行顺序">
                     {scenePlan.length > 0 ? <div className="novel-scene-list">{scenePlan.map((scene) => <div key={`${scene.scene_order}-${scene.scene_title}`} className="novel-scene-card"><div className="novel-scene-card__header"><span>{`场景 ${String(scene.scene_order).padStart(2, '0')}`}</span><strong>{scene.scene_title}</strong></div><div className="novel-scene-card__body"><div>{scene.purpose}</div>{scene.location ? <div>地点：{scene.location}</div> : null}{scene.time_anchor ? <div>时间：{scene.time_anchor}</div> : null}{scene.present_characters?.length ? <div>人物：{scene.present_characters.join('、')}</div> : null}{scene.key_items?.length ? <div>道具：{scene.key_items.join('、')}</div> : null}{scene.must_cover?.length ? <div>必须覆盖：{scene.must_cover.join('、')}</div> : null}</div></div>)}</div> : <div className="novel-copy-block">先运行章节流水线后，这里会整理本章场景计划。</div>}
@@ -684,7 +680,7 @@ export default function Writing({ novelId }: Props) {
                 </div>
                 <div className="novel-writing-shell__insight-stack">
                   <InsightCard title="生产摘要" eyebrow="AI 主写 / 人工定稿" tone="soft"><StringList items={productionBriefItems} empty="章节进入审校后，这里会先汇总最值得优先处理的定稿建议。" /></InsightCard>
-                  <InsightCard title="关联线索" eyebrow="时间轴 / 道具" tone="soft"><StringList items={relatedInsightItems.slice(0, mode === 'guided' ? 6 : 12)} empty="当前章节暂未关联时间轴事件或关键道具。" /></InsightCard>
+                  <InsightCard title="关联线索" eyebrow="时间轴 / 道具" tone="soft"><StringList items={relatedInsightItems.slice(0, 12)} empty="当前章节暂未关联时间轴事件或关键道具。" /></InsightCard>
                   <InsightCard title="修订提示" eyebrow="复盘重点" tone="soft"><StringList items={reviewInsightItems} empty="运行审校或摘要更新后，这里会汇总需要回看的修订点。" /></InsightCard>
                   <InsightCard title="世界规则" eyebrow="写作边界" tone="soft"><StringList items={worldRulesSummary} empty={currentNovel?.worldRulesJson ? '当前世界规则已录入，但还没有提炼出本章相关边界。' : '先完善世界规则，这里会同步展示写作边界。'} /></InsightCard>
                 </div>
@@ -694,10 +690,10 @@ export default function Writing({ novelId }: Props) {
             {insightTab === 'memory' ? (
               <div className="novel-writing-shell__insight-stack">
                 <InsightCard title="阶段摘要" eyebrow={storyMemory?.coverageSummary || '长篇覆盖'} tone="soft"><StringList items={storyMemory?.phaseDigest || []} empty="章节量还不大，阶段摘要会在长篇推进后逐步显现。" /></InsightCard>
-                <InsightCard title="剧情里程碑" eyebrow="压缩摘要"><StringList items={storyMemory ? storyMemory.plotMilestones.slice(0, mode === 'guided' ? 6 : 12) : []} empty="长文记忆尚未生成。" /></InsightCard>
-                <InsightCard title="活跃线程" eyebrow="待持续追踪" tone="soft"><StringList items={storyMemory ? storyMemory.activeThreads.slice(0, mode === 'guided' ? 6 : 12) : []} empty="当前没有需要持续追踪的活跃线程。" /></InsightCard>
-                <InsightCard title="时间锚点" eyebrow="时序参照" tone="soft"><StringList items={storyMemory ? storyMemory.timelineAnchors.slice(0, mode === 'guided' ? 6 : 10) : []} empty="时间轴锚点会在这里同步展示。" /></InsightCard>
-                <InsightCard title="道具账本" eyebrow="状态同步" tone="soft"><StringList items={storyMemory ? storyMemory.itemLedger.slice(0, mode === 'guided' ? 6 : 10) : []} empty="关键道具与线索的状态变化会记录在这里。" /></InsightCard>
+                <InsightCard title="剧情里程碑" eyebrow="压缩摘要"><StringList items={storyMemory ? storyMemory.plotMilestones.slice(0, 12) : []} empty="长文记忆尚未生成。" /></InsightCard>
+                <InsightCard title="活跃线程" eyebrow="待持续追踪" tone="soft"><StringList items={storyMemory ? storyMemory.activeThreads.slice(0, 12) : []} empty="当前没有需要持续追踪的活跃线程。" /></InsightCard>
+                <InsightCard title="时间锚点" eyebrow="时序参照" tone="soft"><StringList items={storyMemory ? storyMemory.timelineAnchors.slice(0, 10) : []} empty="时间轴锚点会在这里同步展示。" /></InsightCard>
+                <InsightCard title="道具账本" eyebrow="状态同步" tone="soft"><StringList items={storyMemory ? storyMemory.itemLedger.slice(0, 10) : []} empty="关键道具与线索的状态变化会记录在这里。" /></InsightCard>
               </div>
             ) : null}
 
@@ -705,7 +701,7 @@ export default function Writing({ novelId }: Props) {
               <>
                 <div className="novel-writing-shell__insight-spotlight">
                   <InsightCard title="全书健康度" eyebrow="结构体检" tone="hero">{consistencyReport ? <div className="novel-health-board"><div className="novel-health-score"><strong>{consistencyReport.readinessScore}</strong><span>{getHealthLabel(consistencyReport.readinessScore)}</span></div><div className="novel-health-breakdown"><div><strong>{consistencyReport.highCount}</strong><span>高危</span></div><div><strong>{consistencyReport.mediumCount}</strong><span>中危</span></div><div><strong>{consistencyReport.lowCount}</strong><span>低危</span></div></div></div> : <div className="novel-copy-block">正在分析全书结构健康度。</div>}</InsightCard>
-                  <InsightCard title="本章风险" eyebrow="优先修复">{chapterIssues.length > 0 ? <div className="novel-issue-list">{chapterIssues.slice(0, mode === 'guided' ? 4 : 8).map((issue) => <div key={issue.id} className="novel-issue-item"><div className="novel-issue-item__head"><Tag color={getIssueColor(issue.severity)}>{getIssueLabel(issue.severity)}</Tag><strong>{issue.title}</strong></div><div className="novel-issue-item__desc">{issue.description}</div><div className="novel-issue-item__suggestion">建议：{issue.suggestion}</div></div>)}</div> : <div className="novel-copy-block">当前章节没有被结构体检命中的明显风险。</div>}</InsightCard>
+                  <InsightCard title="本章风险" eyebrow="优先修复">{chapterIssues.length > 0 ? <div className="novel-issue-list">{chapterIssues.slice(0, 8).map((issue) => <div key={issue.id} className="novel-issue-item"><div className="novel-issue-item__head"><Tag color={getIssueColor(issue.severity)}>{getIssueLabel(issue.severity)}</Tag><strong>{issue.title}</strong></div><div className="novel-issue-item__desc">{issue.description}</div><div className="novel-issue-item__suggestion">建议：{issue.suggestion}</div></div>)}</div> : <div className="novel-copy-block">当前章节没有被结构体检命中的明显风险。</div>}</InsightCard>
                 </div>
                 <div className="novel-writing-shell__insight-stack">
                   <InsightCard title="发布前检查" eyebrow="完成门槛" tone="soft">

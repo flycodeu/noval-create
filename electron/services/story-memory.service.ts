@@ -304,27 +304,27 @@ function buildScopeSummary(
   ], 5)
 
   return [
-    `${label}: chapters ${rows[0]?.chapterNum || 0}-${rows.at(-1)?.chapterNum || 0}`,
-    summaries.length > 0 ? `Highlights: ${summaries.join(' | ')}` : '',
-    threads.length > 0 ? `Active threads: ${threads.join(' | ')}` : '',
+    `${label}：第 ${rows[0]?.chapterNum || 0} 章到第 ${rows.at(-1)?.chapterNum || 0} 章`,
+    summaries.length > 0 ? `关键进展：${summaries.join(' | ')}` : '',
+    threads.length > 0 ? `活跃线程：${threads.join(' | ')}` : '',
   ].filter(Boolean).join('\n')
 }
 
 function buildForbiddenDirections(): string[] {
   return [
-    'Do not invent disconnected jargon or fake literary phrasing.',
-    'Do not violate common sense, physical constraints, or ordinary human speech habits.',
-    'Do not expand irrelevant subplots that are not tied to the current staged plan.',
-    'Keep people, items, and timeline states consistent with prior checkpoints.',
+    '不要发明和当前小说无关的黑话、术语或伪文艺说法。',
+    '不要违反常识、物理约束或正常中文表达习惯。',
+    '不要扩写与当前阶段计划无关的旁支情节。',
+    '人物、物品和时间轴状态必须与前序检查点保持一致。',
   ]
 }
 
 function buildStyleGuard(): string {
   return [
-    'Use natural Chinese.',
-    'Prefer concrete action, consequence, and dialogue over slogans.',
-    'Avoid awkward new words and abstract AI-sounding conclusions.',
-    'Every scene should inherit prior state and produce a usable next state.',
+    '使用自然中文。',
+    '优先保留具体动作、后果和对白，不要写成口号句。',
+    '避免生造词、翻译腔和抽象的 AI 式结论。',
+    '每个场景都要继承前序状态，并产出可继续调用的下一状态。',
   ].join(' ')
 }
 
@@ -650,13 +650,13 @@ export function buildStoryMemoryPromptSummary(
       return [
         checkpoint.label ? `[${checkpoint.label}]` : '',
         checkpoint.summary || '',
-        checkpoint.characterStateDigest ? `Character states:\n${checkpoint.characterStateDigest}` : '',
-        checkpoint.relationDigest ? `Relations:\n${checkpoint.relationDigest}` : '',
-        checkpoint.itemDigest ? `Items:\n${checkpoint.itemDigest}` : '',
-        checkpoint.timelineDigest ? `Timeline:\n${checkpoint.timelineDigest}` : '',
-        activeThreads.length > 0 ? `Active threads:\n- ${activeThreads.join('\n- ')}` : '',
-        resolvedThreads.length > 0 ? `Resolved threads:\n- ${resolvedThreads.join('\n- ')}` : '',
-        checkpoint.styleGuard ? `Style guard: ${checkpoint.styleGuard}` : '',
+        checkpoint.characterStateDigest ? `人物状态：\n${checkpoint.characterStateDigest}` : '',
+        checkpoint.relationDigest ? `人物关系：\n${checkpoint.relationDigest}` : '',
+        checkpoint.itemDigest ? `物品账本：\n${checkpoint.itemDigest}` : '',
+        checkpoint.timelineDigest ? `时间轴：\n${checkpoint.timelineDigest}` : '',
+        activeThreads.length > 0 ? `活跃线程：\n- ${activeThreads.join('\n- ')}` : '',
+        resolvedThreads.length > 0 ? `已回收线程：\n- ${resolvedThreads.join('\n- ')}` : '',
+        checkpoint.styleGuard ? `文风护栏：${checkpoint.styleGuard}` : '',
       ].filter(Boolean).join('\n\n')
     })
 
@@ -667,10 +667,10 @@ export function buildStoryMemoryPromptSummary(
   const snapshot = buildStoryMemorySnapshot(novelId)
   return [
     snapshot.coverageSummary,
-    snapshot.phaseDigest.length > 0 ? `Phase digest:\n- ${snapshot.phaseDigest.join('\n- ')}` : '',
-    snapshot.plotMilestones.length > 0 ? `Milestones:\n- ${snapshot.plotMilestones.join('\n- ')}` : '',
-    snapshot.activeThreads.length > 0 ? `Open threads:\n- ${snapshot.activeThreads.join('\n- ')}` : '',
-    snapshot.timelineAnchors.length > 0 ? `Timeline anchors:\n- ${snapshot.timelineAnchors.join('\n- ')}` : '',
-    snapshot.itemLedger.length > 0 ? `Item ledger:\n- ${snapshot.itemLedger.join('\n- ')}` : '',
+    snapshot.phaseDigest.length > 0 ? `阶段摘要：\n- ${snapshot.phaseDigest.join('\n- ')}` : '',
+    snapshot.plotMilestones.length > 0 ? `剧情里程碑：\n- ${snapshot.plotMilestones.join('\n- ')}` : '',
+    snapshot.activeThreads.length > 0 ? `未回收线程：\n- ${snapshot.activeThreads.join('\n- ')}` : '',
+    snapshot.timelineAnchors.length > 0 ? `时间锚点：\n- ${snapshot.timelineAnchors.join('\n- ')}` : '',
+    snapshot.itemLedger.length > 0 ? `物品账本：\n- ${snapshot.itemLedger.join('\n- ')}` : '',
   ].filter(Boolean).join('\n\n')
 }

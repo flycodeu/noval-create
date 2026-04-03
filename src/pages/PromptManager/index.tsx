@@ -317,6 +317,43 @@ const PROMPT_FLOW_META: Record<string, PromptFlowMeta> = {
   subplotExpand: { lane: '剧情规划', stage: '支线修整', goal: '让支线真正回推主线、关系或主题。', risk: '容易写成独立番外，无法反哺主线。' },
 }
 
+const SERVICE_GUARDRAIL_KEYS = new Set([
+  'expandBackground',
+  'protagonist',
+  'batchCharacter',
+  'regenerateCharacter',
+  'mapGeneration',
+  'storyArcs',
+  'chapterOutline',
+  'timelineEvents',
+  'scenePlan',
+  'chapterDraft',
+  'chapterWriting',
+  'chapterReview',
+  'chapterRewrite',
+  'aiCheck',
+  'genericExpand',
+  'contentScoring',
+])
+
+function getPromptLayers(key: string, template: string): string[] {
+  const layers = ['基础模板']
+  const hasSharedChineseBase = template.includes('【上下文护栏】')
+    || template.includes('【真实度护栏】')
+    || template.includes('【输出质量底线】')
+    || template.includes('你现在写的是可直接入稿的中文小说正文')
+
+  if (hasSharedChineseBase) {
+    layers.push('公共中文底板')
+  }
+
+  if (SERVICE_GUARDRAIL_KEYS.has(key)) {
+    layers.push('服务层追加护栏')
+  }
+
+  return layers
+}
+
 function getPromptFlowMeta(prompt: PromptCatalogEntry): PromptFlowMeta {
   const byKey = PROMPT_FLOW_META[prompt.key]
   if (byKey) return byKey
@@ -369,11 +406,13 @@ export default function PromptManager() {
       const meta = getPromptFlowMeta(prompt)
       const hasOverride = Boolean(customOverrides[prompt.key])
       const currentTemplate = sanitizePromptText(customOverrides[prompt.key] || prompt.template, prompt.template)
+      const layers = getPromptLayers(prompt.key, currentTemplate)
       return {
         prompt,
         meta,
         hasOverride,
         currentTemplate,
+        layers,
       }
     })
   }, [customOverrides])
@@ -405,6 +444,10 @@ export default function PromptManager() {
 
   const overrideCount = useMemo(() => Object.keys(customOverrides).length, [customOverrides])
   const qualityPromptCount = useMemo(() => promptRows.filter(({ meta }) => meta.lane === '质量评审').length, [promptRows])
+  const chineseBaseCount = useMemo(
+    () => promptRows.filter(({ layers }) => layers.includes('公共中文底板')).length,
+    [promptRows],
+  )
 
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(sanitizePromptText(text)).then(() => message.success('已复制到剪贴板'))
@@ -443,7 +486,7 @@ export default function PromptManager() {
       layout="wide"
       eyebrow="运行时控制台"
       title="提示词控制台"
-      description="这里维护的是会直接作用到生成链路的运行时 prompt。目录区按生产阶段筛选，右侧检查器用于查看当前模板、风险点和覆盖状态。"
+      description="这里维护的是直接作用到生成链路的运行时提示词。左侧按生产阶段筛选，右侧检查当前模板、中文底板接入情况和服务层追加护栏。"
       heroVariant="compact"
       actions={(
         <Input.Search
@@ -458,8 +501,8 @@ export default function PromptManager() {
         <>
           <WorkspaceMetric label="总提示词" value={promptRows.length} tone="warm" hint="基础模板 + 运行时链路" />
           <WorkspaceMetric label="运行时覆盖" value={overrideCount} hint={overrideCount > 0 ? '这些模板已被本地覆盖并实时生效' : '当前全部使用默认模板'} />
+          <WorkspaceMetric label="中文底板接入" value={chineseBaseCount} tone="cool" hint="已接入自然中文、真实度和输出质量公共护栏的模板数" />
           <WorkspaceMetric label="质量评审链路" value={qualityPromptCount} tone="cool" hint="负责 AI 痕迹、读者感受和修订反馈" />
-          <WorkspaceMetric label="当前筛选结果" value={filteredPrompts.length} hint={activeLane === '全部' ? '可继续按生产阶段缩小范围' : `当前阶段：${activeLane}`} />
         </>
       )}
     >
@@ -567,12 +610,23 @@ export default function PromptManager() {
 
                 <div className="prompt-manager-callout">
                   <strong>运行时说明</strong>
-                  <span>这里展示的是当前可覆盖模板。部分链路还会在 Electron 服务层叠加生产护栏，用于强化读者体验、连贯性和 AI 味治理。</span>
+                  <span>这里展示的是当前运行中的模板。真正生效的链路通常由三层组成：基础模板、公共中文底板，以及 Electron 服务层追加的生产护栏。</span>
                 </div>
 
                 <div className="prompt-manager-inspector-section">
                   <div className="prompt-manager-inspector-section__title">风险点</div>
                   <div className="prompt-manager-inspector-section__copy">{selectedPromptRow.meta.risk}</div>
+                </div>
+
+                <div className="prompt-manager-inspector-section">
+                  <div className="prompt-manager-inspector-section__title">组成层</div>
+                  <div className="prompt-manager-param-list">
+                    {selectedPromptRow.layers.map((layer) => (
+                      <Tag key={layer} style={{ fontSize: 11 }}>
+                        {layer}
+                      </Tag>
+                    ))}
+                  </div>
                 </div>
 
                 <div className="prompt-manager-inspector-section">
