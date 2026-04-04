@@ -607,6 +607,25 @@ function runMigrations(sqlite: Database.Database) {
   ensureColumn(sqlite, 'story_memory_checkpoints', 'last_refreshed_chapter_num', 'INTEGER DEFAULT 0')
   ensureColumn(sqlite, 'story_memory_checkpoints', 'locked', 'INTEGER DEFAULT 0')
 
+  // P0: 伏笔追踪字段
+  ensureColumn(sqlite, 'story_threads', 'planted_chapter', 'INTEGER')
+  ensureColumn(sqlite, 'story_threads', 'last_referenced_chapter', 'INTEGER')
+  ensureColumn(sqlite, 'story_threads', 'reminder_interval', 'INTEGER DEFAULT 20')
+
+  // P0/P1: 角色语言画像字段
+  ensureColumn(sqlite, 'characters', 'speech_pattern', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'catchphrases', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'vocabulary_level', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'dialect_features', 'TEXT')
+
+  // P2: 物品能力规格字段
+  ensureColumn(sqlite, 'story_items', 'ability_spec', 'TEXT')
+  ensureColumn(sqlite, 'story_items', 'limitations', 'TEXT')
+
+  // P3: 章节质量评分字段
+  ensureColumn(sqlite, 'chapters', 'quality_scores_json', 'TEXT')
+  ensureColumn(sqlite, 'chapters', 'locked_paragraphs_json', 'TEXT')
+
   ensureIndexes(sqlite)
   migrateWorldRules(sqlite)
   backfillCharacterTaxonomy(sqlite)

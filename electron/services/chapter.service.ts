@@ -393,6 +393,21 @@ function buildGuardrailCriticalFixes(findings: ReturnType<typeof collectQualityG
     fixes.push('把体裁生态写回场景，补齐修行秩序、生存链或江湖规矩，不要只剩抽象口号和单一动作。')
   }
 
+  if (findings.some((finding) => finding.code === 'ai_opener' || finding.code === 'ai_action_cliche' || finding.code === 'ai_emotional_cliche')) {
+    fixes.push('替换所有AI高频开头（"��然""这一刻"）、套路动作（"深吸一口气""瞳孔骤然收缩"）和模板情绪（"心中涌起""百感交集"），改用角色特有的反应方式。')
+  }
+
+  if (findings.some((finding) => finding.code === 'ai_pseudo_philosophy' || finding.code === 'ai_ending_summary')) {
+    fixes.push('删掉段落结尾的伪哲学总结句（"或许这就是""这一刻他终于明白"），让事件和动作自己说话。')
+  }
+
+  if (findings.some((finding) => finding.code === 'high_frequency_repetition')) {
+    const repetitionFinding = findings.find((f) => f.code === 'high_frequency_repetition')
+    if (repetitionFinding) {
+      fixes.push(`高频重复词组需替换：${repetitionFinding.excerpt}——用同义表达或删减来避免阅读疲劳。`)
+    }
+  }
+
   return fixes
 }
 
@@ -867,6 +882,25 @@ export function deleteChapter(id: number) {
   }
 }
 
+type ChapterComplexity = 'simple' | 'standard' | 'key'
+
+function classifyChapterComplexity(chapter: typeof chapters.$inferSelect): ChapterComplexity {
+  const outline = chapter.outline || ''
+  const emotionTone = (chapter.emotionTone || '').toLowerCase()
+
+  // 关键章节：高潮、转折、结局
+  if (emotionTone.includes('高潮') || emotionTone.includes('climax') || emotionTone.includes('爆发') || emotionTone.includes('转折')) {
+    return 'key'
+  }
+
+  // 简单章节：过渡、日常、铺垫，且大纲较短
+  if ((emotionTone.includes('过渡') || emotionTone.includes('日常') || emotionTone.includes('平缓')) && outline.length < 200) {
+    return 'simple'
+  }
+
+  return 'standard'
+}
+
 export async function generateChapterContent(chapterId: number, sender?: WebContents): Promise<number> {
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
@@ -876,7 +910,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
   if (!novel) throw new Error('小说不存在')
 
   const profile = await buildStoryProfile(chapter.novelId)
-  const context = await buildChapterContext(chapter.novelId, chapter.chapterNum, 7200)
+  const context = await buildChapterContext(chapter.novelId, chapter.chapterNum)
   const consistencyNotes = buildConsistencyPromptSummary(buildNovelConsistencyReport(chapter.novelId))
   const writingGuidance = [
     context.styleTemplate ? `Writing style guide:\n${context.styleTemplate}` : '',
@@ -885,6 +919,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
   const previousStatus = chapter.status || 'outline'
   const fallbackScenePlan = buildFallbackScenePlan(chapter)
   const storyCore = buildStoryCore(profile, context.storyCore)
+  const complexity = classifyChapterComplexity(chapter)
 
   updateChapter(chapterId, {
     status: 'writing',
@@ -1007,53 +1042,57 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
     sendGenerationProgress(sender, {
       chapterId,
       stage: 'reviewing',
-      label: '自动审校',
-      detail: '检查承接、事件顺序和语言问题。',
+      label: complexity === 'simple' ? '快速质检' : '自动审校',
+      detail: complexity === 'simple' ? '简单章节跳过AI审校，仅运行质量护栏检测。' : '检查承接、事件顺序和语言问题。',
       completed: 3,
       total: 4,
       status: 'running',
     })
 
     let reviewNotes = buildFallbackReviewNotes(consistencyNotes)
-    try {
-      const reviewResult = await runChatTask({
-        type: 'chapter_review',
-        novelId: chapter.novelId,
-        relatedEntityType: 'chapter',
-        relatedEntityId: chapterId,
-        messages: [{
-          role: 'user',
-          content: buildChapterReviewPrompt({
-            novelTitle: novel.title,
-            genre: profile.genre,
-            chapterNum: chapter.chapterNum,
-            chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
-            chapterGoal: context.chapterGoal,
-            storyCore,
-            writingContractSummary: context.writingContractSummary,
-            relationSummary: context.relationSummary,
-            currentArc: context.currentArc,
-            worldRules: context.worldRules,
-            characterStates: context.characterStates,
-            itemSummary: context.itemSummary,
-            continuitySummary: context.continuitySummary,
-            openLoops: context.openLoops,
-            timelineSummary: context.timelineSummary,
-            longTermMemory: context.longTermMemory,
-            consistencyNotes,
-            scenePlan: scenePlanText,
-            draftContent,
-            protagonistReference: profile.protagonistReference,
-            protagonistRule: profile.protagonistRule,
-          }),
-        }],
-        modelConfigId: novel.modelConfigId || undefined,
-      })
 
-      const normalizedNotes = normalizeReviewNotes(safeParseJson<unknown>(reviewResult))
-      reviewNotes = hasReviewNotes(normalizedNotes) ? normalizedNotes : reviewNotes
-    } catch {
-      reviewNotes = buildFallbackReviewNotes(consistencyNotes)
+    if (complexity !== 'simple') {
+      // standard/key 章节：完整AI审校
+      try {
+        const reviewResult = await runChatTask({
+          type: 'chapter_review',
+          novelId: chapter.novelId,
+          relatedEntityType: 'chapter',
+          relatedEntityId: chapterId,
+          messages: [{
+            role: 'user',
+            content: buildChapterReviewPrompt({
+              novelTitle: novel.title,
+              genre: profile.genre,
+              chapterNum: chapter.chapterNum,
+              chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
+              chapterGoal: context.chapterGoal,
+              storyCore,
+              writingContractSummary: context.writingContractSummary,
+              relationSummary: context.relationSummary,
+              currentArc: context.currentArc,
+              worldRules: context.worldRules,
+              characterStates: context.characterStates,
+              itemSummary: context.itemSummary,
+              continuitySummary: context.continuitySummary,
+              openLoops: context.openLoops,
+              timelineSummary: context.timelineSummary,
+              longTermMemory: context.longTermMemory,
+              consistencyNotes,
+              scenePlan: scenePlanText,
+              draftContent,
+              protagonistReference: profile.protagonistReference,
+              protagonistRule: profile.protagonistRule,
+            }),
+          }],
+          modelConfigId: novel.modelConfigId || undefined,
+        })
+
+        const normalizedNotes = normalizeReviewNotes(safeParseJson<unknown>(reviewResult))
+        reviewNotes = hasReviewNotes(normalizedNotes) ? normalizedNotes : reviewNotes
+      } catch {
+        reviewNotes = buildFallbackReviewNotes(consistencyNotes)
+      }
     }
 
     reviewNotes = enhanceReviewNotesWithGuardrails(reviewNotes, draftContent, profile.genre)

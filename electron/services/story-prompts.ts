@@ -73,24 +73,50 @@ export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
     '- 这份场景计划会直接进入 AI 主写流程，所以每段都必须可落成正文。',
     '- 先保证场景连贯、动作清楚、冲突具体，再考虑节奏和文气。',
     '- 场景说明用自然中文写，不要夹解释腔、策划黑话或翻译腔。',
+    '- 每章同时推进的活跃支线/伏笔不超过 3-5 条，避免信息过载——优先推进标注了[即将回收]的线索。',
+    '- 如果"活跃支线与伏笔"中有标注[已N章未提及]的线索，至少用一个场景的细节或对话暗示来回顾它。',
   ])
   return applyPromptOverride('scenePlan', fallback, params as unknown as Record<string, unknown>)
 }
 
+function buildRhythmGuide(emotionTone?: string, targetWords?: number): string {
+  const tone = (emotionTone || '').toLowerCase()
+  const words = targetWords || 3000
+
+  if (tone.includes('高潮') || tone.includes('climax') || tone.includes('激烈') || tone.includes('爆发')) {
+    return `高潮节奏——短句为主（每句≤15字），段落紧凑（≤100字），对话密集且急促，动作描写优先，删掉一切不推进冲突的修饰。目标字数${words}字可适当上浮20%以充分展开。`
+  }
+  if (tone.includes('过渡') || tone.includes('transition') || tone.includes('平缓') || tone.includes('日常')) {
+    return `过渡节奏——长短句交替，段落舒展（150-300字），允许环境描写和内心独白，对话节奏放松，可用细节暗埋伏笔。目标字数${words}字可适当下调20%以快速推进。`
+  }
+  if (tone.includes('悬念') || tone.includes('suspense') || tone.includes('紧张') || tone.includes('压抑')) {
+    return `悬念节奏——句子长短参差制造不安感，关键信息放在段落末尾，适度留白和省略，对话含糊暗示多于直说。控制在${words}字左右，不要写满，留出呼吸空间。`
+  }
+  if (tone.includes('悲伤') || tone.includes('沉重') || tone.includes('告别')) {
+    return `沉郁节奏——句子偏长但不拖沓，重感官细节（触觉、温度、声音），对话少而重，沉默和停顿比语言更有力。`
+  }
+
+  return ''
+}
+
 export function buildChapterDraftPrompt(params: ChapterRewritePromptInput): string {
+  const rhythmGuide = buildRhythmGuide(params.emotionTone, params.targetWords)
   const fallback = appendPromptSection(rawBuildChapterDraftPrompt(params), '生产补充要求', [
     '- 当前目标是交出可审校的初稿，不是一次性追求终稿腔调。',
     '- 先把事件、状态、关系、物品去向和代价写准，后续再精修语言。',
     '- 行文必须贴中文小说语感，不要露出提示词腔、翻译腔和说明书味。',
+    ...(rhythmGuide ? [`- 本章节奏指导：${rhythmGuide}`] : []),
   ])
   return applyPromptOverride('chapterDraft', fallback, params as unknown as Record<string, unknown>)
 }
 
 export function buildChapterWritingPrompt(params: ChapterWritingPromptInput): string {
+  const rhythmGuide = buildRhythmGuide(params.emotionTone, params.targetWords)
   const fallback = appendPromptSection(rawBuildChapterWritingPrompt(params), '生产补充要求', [
     '- 正文必须像给真实读者看的成稿，不要保留策划腔、提示词腔或解释腔。',
     '- 如果某个转折不能提高理解度或追读欲，就不要硬加。',
     '- 避免不合中文语境的搭配、书面翻译句式和为了显高级而生造的表达。',
+    ...(rhythmGuide ? [`- 本章节奏指导：${rhythmGuide}`] : []),
   ])
   return applyPromptOverride('chapterWriting', fallback, params as unknown as Record<string, unknown>)
 }
@@ -100,9 +126,12 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
     appendPromptSection(rawBuildChapterReviewPrompt(params), '补充审校要求', [
       '- coherence_risks 只写会让读者读乱的地方，例如指代不明、信息顺序失衡、情绪跳变、动机断层。',
       '- reader_hook_risks 只写会削弱追读意愿的问题，例如冲突太虚、转折太轻、结果无代价、悬念不成立。',
-      '- human_language_repairs 只列最值得先改的 1 到 3 处生硬表达，尽量直接给出“原说法 -> 更自然说法”。',
+      '- human_language_repairs 只列最值得先改的 1 到 3 处生硬表达，尽量直接给出”原说法 -> 更自然说法”。',
       '- revision_brief 先讲承接和真实度，再讲语言和追读感。',
       '- 如果出现翻译腔、搭配不成立、伪文艺句或明显 AI 套话，要优先列进 language_risks 和 human_language_repairs。',
+      '- missing_payoffs 重点检查：活跃支线和伏笔中标注了[即将回收]或[已N章未提及]的线索，在本章是否有推进或至少暗示。',
+      '- continuity_risks 必须检查：本章角色行为是否与人物当前状态中记录的性格、立场、伤势、能力等一致。',
+      '- 因果链检查：本章每个重大事件是否有合理的触发原因，结果是否产生了后续影响而非凭空出现凭空消失。',
     ]),
     '只输出 JSON：{"summary":"总体判断","critical_fixes":["必改 1"],"continuity_risks":["连续性风险 1"],"context_drift_risks":["漂移风险 1"],"realism_risks":["真实度风险 1"],"coherence_risks":["连贯性风险 1"],"reader_hook_risks":["追读风险 1"],"language_risks":["语言风险 1"],"human_language_repairs":["原说法 -> 更自然说法"],"genre_hollowing_risks":["体裁空心化风险 1"],"missing_payoffs":["未落地伏笔 1"],"strengths":["优点 1"],"severity":"medium","rewrite_required":true,"revision_brief":"修订方向摘要"}',
   )
@@ -110,9 +139,14 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
 }
 
 export function buildChapterRewritePrompt(params: ChapterRewritePromptInput): string {
+  const rhythmGuide = buildRhythmGuide(params.emotionTone, params.targetWords)
   const fallback = appendPromptSection(rawBuildChapterRewritePrompt(params), '最终成稿补充要求', [
     '- 优先采纳审校里列出的关键修订、连贯性风险、追读风险和语言替换建议。',
     '- 目标是交付可入稿的最终版，不要留下明显模板腔、解释腔或人机味。',
+    '- 对话辨识度要求：每个角色说话时要体现其独特的语言习惯（口头禅、用词水平、句式偏好）。如果人物状态里给了说话方式、口头禅或方言特征，必须体现在对话中。',
+    '- 对话自然度：允许打断、省略、口误、沉默、答非所问。上下级不同调、亲疏不同温度、紧张时短句、放松时废话多。',
+    '- 如果初稿中有用【锁定】或 [LOCKED] 标记的段落，这些段落是作者已确认的内容，必须原封不动保留，只修改未标记的部分。',
+    ...(rhythmGuide ? [`- 本章节奏指导：${rhythmGuide}`] : []),
   ])
   return applyPromptOverride('chapterRewrite', fallback, params as unknown as Record<string, unknown>)
 }
