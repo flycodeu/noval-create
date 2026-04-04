@@ -1,9 +1,9 @@
 ﻿import { WebContents } from 'electron'
 import { eq } from 'drizzle-orm'
 import { getDb } from '../database/db'
-import { tasks } from '../database/schema'
-import { Message, ChatOptions } from '../adapters/base.adapter'
-import { getAdapterById, getDefaultAdapter } from './model.service'
+import { modelConfigs, tasks } from '../database/schema'
+import { BaseAdapter, Message, ChatOptions } from '../adapters/base.adapter'
+import { createAdapter, getDefaultModelConfigRecord, getModelConfigRecord } from './model.service'
 import { appendVariationMessage, buildVariationDigest } from './variation-control.service'
 
 export type TaskType =
@@ -77,7 +77,34 @@ interface RunTaskOptions extends CreateTaskOptions {
   onSuccess?: (outputText: string, taskId: number) => Promise<unknown> | unknown
 }
 
+interface TaskModelRuntime {
+  configId: number
+  provider: string
+  maxConcurrency: number
+  adapter: BaseAdapter
+}
+
+interface QueuedTaskEntry {
+  taskId: number
+  modelConfigId: number
+  runtime: TaskModelRuntime
+  resolve: (runtime: TaskModelRuntime) => void
+  reject: (error: Error) => void
+}
+
+interface ModelQueueState {
+  active: number
+  limit: number
+  pendingTaskIds: number[]
+}
+
 const abortControllers = new Map<number, AbortController>()
+const queuedTaskEntries = new Map<number, QueuedTaskEntry>()
+const modelQueueStates = new Map<number, ModelQueueState>()
+const TASK_HEARTBEAT_INTERVAL_MS = 15_000
+const RATE_LIMIT_RETRY_LIMIT = 3
+const RATE_LIMIT_BASE_DELAY_MS = 1_500
+const RATE_LIMIT_MAX_DELAY_MS = 12_000
 
 function computeAttemptTemperature(attemptNumber: number): number {
   if (attemptNumber <= 1) return 0.85
@@ -106,8 +133,136 @@ function countPreviousAttempts(
           && t.relatedEntityId === entityId
           && (t.status === 'success' || t.status === 'failed')
       },
-    )
+  )
   return rows.length
+}
+
+function buildAbortError(message = '用户已取消'): Error {
+  const error = new Error(message)
+  error.name = 'AbortError'
+  return error
+}
+
+function resolveTaskModelConfig(modelConfigId?: number | null): typeof modelConfigs.$inferSelect {
+  if (typeof modelConfigId === 'number') {
+    return getModelConfigRecord(modelConfigId)
+  }
+  return getDefaultModelConfigRecord()
+}
+
+function buildTaskModelRuntime(modelConfigId?: number | null): TaskModelRuntime {
+  const config = resolveTaskModelConfig(modelConfigId)
+  return {
+    configId: config.id,
+    provider: config.provider,
+    maxConcurrency: Math.max(1, config.maxConcurrency || 2),
+    adapter: createAdapter(config),
+  }
+}
+
+function getModelQueueState(runtime: TaskModelRuntime): ModelQueueState {
+  const existing = modelQueueStates.get(runtime.configId)
+  if (existing) {
+    existing.limit = Math.max(1, runtime.maxConcurrency)
+    return existing
+  }
+
+  const created: ModelQueueState = {
+    active: 0,
+    limit: Math.max(1, runtime.maxConcurrency),
+    pendingTaskIds: [],
+  }
+  modelQueueStates.set(runtime.configId, created)
+  return created
+}
+
+function releaseModelSlot(modelConfigId: number) {
+  const state = modelQueueStates.get(modelConfigId)
+  if (!state) return
+
+  state.active = Math.max(0, state.active - 1)
+  while (state.active < state.limit && state.pendingTaskIds.length > 0) {
+    const nextTaskId = state.pendingTaskIds.shift()
+    if (typeof nextTaskId !== 'number') break
+
+    const queued = queuedTaskEntries.get(nextTaskId)
+    if (!queued) continue
+    queuedTaskEntries.delete(nextTaskId)
+    state.active += 1
+    queued.resolve(queued.runtime)
+  }
+
+  if (state.active === 0 && state.pendingTaskIds.length === 0) {
+    modelQueueStates.delete(modelConfigId)
+  }
+}
+
+function removeQueuedTask(taskId: number): boolean {
+  const queued = queuedTaskEntries.get(taskId)
+  if (!queued) return false
+
+  queuedTaskEntries.delete(taskId)
+  const state = modelQueueStates.get(queued.modelConfigId)
+  if (state) {
+    state.pendingTaskIds = state.pendingTaskIds.filter((id) => id !== taskId)
+    if (state.active === 0 && state.pendingTaskIds.length === 0) {
+      modelQueueStates.delete(queued.modelConfigId)
+    }
+  }
+
+  queued.reject(buildAbortError())
+  return true
+}
+
+async function acquireModelSlot(
+  taskId: number,
+  modelConfigId: number | null | undefined,
+  signal: AbortSignal,
+): Promise<{ runtime: TaskModelRuntime; release: () => void }> {
+  if (signal.aborted) throw buildAbortError()
+
+  const runtime = buildTaskModelRuntime(modelConfigId)
+  if (signal.aborted) throw buildAbortError()
+
+  const state = getModelQueueState(runtime)
+  if (state.active < state.limit) {
+    state.active += 1
+    return {
+      runtime,
+      release: () => releaseModelSlot(runtime.configId),
+    }
+  }
+
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      if (!queuedTaskEntries.has(taskId)) return
+      queuedTaskEntries.delete(taskId)
+      state.pendingTaskIds = state.pendingTaskIds.filter((id) => id !== taskId)
+      if (state.active === 0 && state.pendingTaskIds.length === 0) {
+        modelQueueStates.delete(runtime.configId)
+      }
+      reject(buildAbortError())
+    }
+
+    signal.addEventListener('abort', onAbort, { once: true })
+    state.pendingTaskIds.push(taskId)
+    queuedTaskEntries.set(taskId, {
+      taskId,
+      modelConfigId: runtime.configId,
+      runtime,
+      resolve: (resolvedRuntime) => {
+        signal.removeEventListener('abort', onAbort)
+        resolve({
+          runtime: resolvedRuntime,
+          release: () => releaseModelSlot(resolvedRuntime.configId),
+        })
+      },
+      reject: (error) => {
+        signal.removeEventListener('abort', onAbort)
+        reject(error)
+      },
+    })
+  })
 }
 
 type ErrorLike = Error & {
@@ -192,8 +347,108 @@ function describeTransientNetworkError(error: unknown): string {
   return code ? `网络异常（${code}）` : '网络异常'
 }
 
+function isRateLimitError(error: unknown): boolean {
+  if (isAbortError(error)) return false
+
+  const details = collectErrorDetails(error)
+  const combinedText = [...details.messages, ...details.names, ...details.codes]
+    .join(' ')
+    .toLowerCase()
+
+  return [
+    '429',
+    'rate limit',
+    'too many requests',
+    'quota exceeded',
+    'retry later',
+    'retry after',
+    'requests per min',
+    'requests per minute',
+    'rate_limit',
+    'resource_exhausted',
+  ].some((pattern) => combinedText.includes(pattern))
+}
+
+function getRateLimitDelayMs(attempt: number, error: unknown): number {
+  const details = collectErrorDetails(error)
+  const combinedText = details.messages.join(' ')
+  const retryAfterMatch = combinedText.match(/retry[- ]after[: ]+(\d+)/i)
+  if (retryAfterMatch) {
+    return Math.max(1_000, Math.min(30_000, Number(retryAfterMatch[1]) * 1_000))
+  }
+  return Math.min(RATE_LIMIT_MAX_DELAY_MS, RATE_LIMIT_BASE_DELAY_MS * (2 ** attempt))
+}
+
+async function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) throw buildAbortError()
+
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+
+    const onAbort = () => {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
+      reject(buildAbortError())
+    }
+
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+async function executeChatWithRateLimitRetries(
+  adapter: BaseAdapter,
+  messages: Message[],
+  opts: Partial<ChatOptions> & { signal: AbortSignal },
+): Promise<string> {
+  let lastError: unknown
+
+  for (let attempt = 0; attempt < RATE_LIMIT_RETRY_LIMIT; attempt += 1) {
+    try {
+      return await adapter.chat(messages, opts)
+    } catch (error) {
+      if (opts.signal.aborted || !isRateLimitError(error) || attempt >= RATE_LIMIT_RETRY_LIMIT - 1) {
+        throw error
+      }
+      lastError = error
+      await delay(getRateLimitDelayMs(attempt, error), opts.signal)
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error('模型限流后重试仍失败')
+}
+
+async function executeStreamWithRateLimitRetries(
+  adapter: BaseAdapter,
+  messages: Message[],
+  opts: Partial<ChatOptions> & { signal: AbortSignal; onStream?: (chunk: string) => void },
+): Promise<void> {
+  for (let attempt = 0; attempt < RATE_LIMIT_RETRY_LIMIT; attempt += 1) {
+    let receivedChunk = false
+
+    try {
+      await adapter.stream(messages, {
+        ...opts,
+        onStream: (chunk) => {
+          receivedChunk = true
+          opts.onStream?.(chunk)
+        },
+      })
+      return
+    } catch (error) {
+      if (opts.signal.aborted || receivedChunk || !isRateLimitError(error) || attempt >= RATE_LIMIT_RETRY_LIMIT - 1) {
+        throw error
+      }
+      await delay(getRateLimitDelayMs(attempt, error), opts.signal)
+    }
+  }
+}
+
 function normalizeTaskErrorMessage(error: unknown, fallback = '未知错误'): string {
   if (isAbortError(error)) return '用户已取消'
+  if (isRateLimitError(error)) return '模型请求触发速率限制，系统已自动退避后仍失败。请稍后重试。'
   if (isTransientModelNetworkError(error)) {
     return `模型服务连接不稳定：${describeTransientNetworkError(error)}。请稍后重试。`
   }
@@ -240,6 +495,18 @@ export function updateTask(taskId: number, data: Partial<typeof tasks.$inferInse
     ...data,
     updatedAt: data.updatedAt || new Date().toISOString(),
   }).where(eq(tasks.id, taskId)).run()
+}
+
+function startTaskHeartbeat(taskId: number): () => void {
+  const timer = setInterval(() => {
+    const current = getTaskRecord(taskId)
+    if (!current || (current.status !== 'running' && current.status !== 'cancel_requested')) return
+    updateTask(taskId, {
+      updatedAt: new Date().toISOString(),
+    })
+  }, TASK_HEARTBEAT_INTERVAL_MS)
+  timer.unref?.()
+  return () => clearInterval(timer)
 }
 
 function notifyStatus(sender: WebContents | undefined, taskId: number, status: TaskStatus) {
@@ -295,18 +562,19 @@ export async function runStreamTask(opts: RunTaskOptions): Promise<number> {
   const controller = new AbortController()
   abortControllers.set(taskId, controller)
 
-  updateTaskStatus(taskId, 'running', opts.sender)
-
   const startTime = Date.now()
   let fullOutput = ''
 
   ;(async () => {
+    let stopHeartbeat = () => {}
+    let release = () => {}
     try {
-      const adapter = opts.modelConfigId
-        ? await getAdapterById(opts.modelConfigId)
-        : await getDefaultAdapter()
+      const acquired = await acquireModelSlot(taskId, opts.modelConfigId, controller.signal)
+      release = acquired.release
+      updateTaskStatus(taskId, 'running', opts.sender)
+      stopHeartbeat = startTaskHeartbeat(taskId)
 
-      await adapter.stream(opts.messages, {
+      await executeStreamWithRateLimitRetries(acquired.runtime.adapter, opts.messages, {
         ...opts.chatOpts,
         signal: controller.signal,
         onStream: (chunk) => {
@@ -319,7 +587,7 @@ export async function runStreamTask(opts: RunTaskOptions): Promise<number> {
 
       const result = opts.onSuccess ? await opts.onSuccess(fullOutput, taskId) : undefined
       const durationMs = Date.now() - startTime
-      const tokensUsed = adapter.countTokens(fullOutput)
+      const tokensUsed = acquired.runtime.adapter.countTokens(fullOutput)
 
       updateTask(taskId, {
         status: 'success',
@@ -335,22 +603,26 @@ export async function runStreamTask(opts: RunTaskOptions): Promise<number> {
         result,
       })
     } catch (error: unknown) {
+      const currentTask = getTaskRecord(taskId)
+      const aborted = isAbortError(error) || currentTask?.status === 'cancel_requested'
       const status: TaskStatus = isAbortError(error) ? 'cancelled' : 'failed'
       const errorMessage = normalizeTaskErrorMessage(error)
 
       updateTask(taskId, {
-        status,
-        errorMessage: status === 'cancelled' ? '用户已取消' : errorMessage,
+        status: aborted ? 'cancelled' : status,
+        errorMessage: aborted ? '用户已取消' : errorMessage,
         outputText: fullOutput || null,
         durationMs: Date.now() - startTime,
       })
 
       notifyComplete(opts.sender, {
         taskId,
-        status,
+        status: aborted ? 'cancelled' : status,
         error: errorMessage,
       })
     } finally {
+      stopHeartbeat()
+      release()
       abortControllers.delete(taskId)
     }
   })()
@@ -361,16 +633,18 @@ export async function runStreamTask(opts: RunTaskOptions): Promise<number> {
 export async function executeChatTask(taskId: number, opts: RunTaskOptions): Promise<string> {
   const controller = new AbortController()
   abortControllers.set(taskId, controller)
-  updateTaskStatus(taskId, 'running', opts.sender)
 
   const startTime = Date.now()
+  let stopHeartbeat = () => {}
+  let release = () => {}
 
   try {
-    const adapter = opts.modelConfigId
-      ? await getAdapterById(opts.modelConfigId)
-      : await getDefaultAdapter()
+    const acquired = await acquireModelSlot(taskId, opts.modelConfigId, controller.signal)
+    release = acquired.release
+    updateTaskStatus(taskId, 'running', opts.sender)
+    stopHeartbeat = startTaskHeartbeat(taskId)
 
-    const result = await adapter.chat(opts.messages, {
+    const result = await executeChatWithRateLimitRetries(acquired.runtime.adapter, opts.messages, {
       ...opts.chatOpts,
       signal: controller.signal,
     })
@@ -381,7 +655,7 @@ export async function executeChatTask(taskId: number, opts: RunTaskOptions): Pro
       status: 'success',
       outputText: result,
       durationMs: Date.now() - startTime,
-      tokensUsed: adapter.countTokens(result),
+      tokensUsed: acquired.runtime.adapter.countTokens(result),
       currentChildTaskId: null,
     })
 
@@ -414,6 +688,8 @@ export async function executeChatTask(taskId: number, opts: RunTaskOptions): Pro
 
     throw error
   } finally {
+    stopHeartbeat()
+    release()
     abortControllers.delete(taskId)
   }
 }
@@ -480,10 +756,60 @@ export function cancelTask(taskId: number, sender?: WebContents): boolean {
   }
 
   const controller = abortControllers.get(taskId)
+  const wasQueued = removeQueuedTask(taskId)
+
+  if (wasQueued) {
+    updateTaskStatus(taskId, 'cancelled', sender, {
+      controlJson: JSON.stringify({
+        ...parseTaskControl(task),
+        cancelRequested: true,
+      }),
+      errorMessage: '用户已取消',
+      currentChildTaskId: null,
+    })
+    controller?.abort()
+    return true
+  }
+
   if (!controller) return false
 
+  updateTaskStatus(taskId, 'cancel_requested', sender, {
+    controlJson: JSON.stringify({
+      ...parseTaskControl(task),
+      cancelRequested: true,
+    }),
+  })
   controller.abort()
   return true
+}
+
+export function recoverOrphanedTasks(): number {
+  const db = getDb()
+  const recoveryTimestamp = new Date().toISOString()
+  const orphanedTasks = db.select().from(tasks).all()
+    .filter((task) => {
+      if (task.status === 'running' || task.status === 'cancel_requested') return true
+      return task.runnerType !== 'workflow' && task.status === 'pending'
+    })
+
+  orphanedTasks.forEach((task) => {
+    const recoveredStatus: TaskStatus = task.status === 'cancel_requested' ? 'cancelled' : 'failed'
+    updateTask(task.id, {
+      status: recoveredStatus,
+      currentChildTaskId: null,
+      errorMessage: recoveredStatus === 'cancelled'
+        ? '任务在应用重启前已收到取消请求，已自动收尾。'
+        : task.status === 'pending'
+          ? '任务在应用重启前仍在队列中，已自动标记为失败。'
+          : '任务在应用重启前异常中断，已自动标记为失败。',
+      updatedAt: recoveryTimestamp,
+    })
+  })
+
+  abortControllers.clear()
+  queuedTaskEntries.clear()
+  modelQueueStates.clear()
+  return orphanedTasks.length
 }
 
 export async function retryTask(taskId: number, sender?: WebContents): Promise<number> {

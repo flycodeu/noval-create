@@ -1,4 +1,4 @@
-import { asc, eq } from 'drizzle-orm'
+import { asc, eq, inArray } from 'drizzle-orm'
 import type { EntityRegenerateOptions } from '../../src/types'
 import { getDb, getSqlite } from '../database/db'
 import {
@@ -30,6 +30,7 @@ import {
 import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/utils/text'
 import { markNovelContextChanged } from './context-impact.service'
 import { appendVariationMessage } from './variation-control.service'
+import { buildBatchKey, createOperationLog } from './history.service'
 
 type TimelineStatus = 'planned' | 'seeded' | 'written' | 'resolved'
 
@@ -960,6 +961,82 @@ export function deleteTimelineEvent(id: number, options: { skipContextTracking?:
   if (!options.skipContextTracking && current) {
     markNovelContextChanged(current.novelId, 'Timeline events changed')
   }
+}
+
+export function batchUpdateTimelineEvents(
+  ids: number[],
+  data: Partial<Pick<typeof timelineEvents.$inferInsert, 'status' | 'isMajorEvent'>>,
+) {
+  const eventIds = [...new Set(ids.filter((id) => Number.isFinite(id) && id > 0))]
+  if (eventIds.length === 0) return 0
+
+  const db = getDb()
+  const rows = db.select().from(timelineEvents)
+    .where(inArray(timelineEvents.id, eventIds))
+    .orderBy(asc(timelineEvents.timeSortValue), asc(timelineEvents.sortOrder), asc(timelineEvents.id))
+    .all()
+  if (rows.length === 0) return 0
+
+  rows.forEach((row) => {
+    updateTimelineEvent(row.id, {
+      ...(data.status !== undefined ? { status: data.status } : {}),
+      ...(data.isMajorEvent !== undefined ? { isMajorEvent: data.isMajorEvent } : {}),
+    }, { skipContextTracking: true })
+  })
+
+  createOperationLog({
+    novelId: rows[0].novelId,
+    entityType: 'timeline',
+    entityIds: rows.map((row) => row.id),
+    operationType: 'batch_update',
+    summary: `批量更新 ${rows.length} 条时间轴事件`,
+    batchKey: buildBatchKey('timeline-batch-update'),
+    before: rows,
+    after: data,
+    undoPayload: {
+      kind: 'timeline.batch_update',
+      novelId: rows[0].novelId,
+      events: rows,
+    },
+  })
+
+  markNovelContextChanged(rows[0].novelId, 'Timeline events changed')
+  return rows.length
+}
+
+export function batchDeleteTimelineEvents(ids: number[]) {
+  const eventIds = [...new Set(ids.filter((id) => Number.isFinite(id) && id > 0))]
+  if (eventIds.length === 0) return 0
+
+  const db = getDb()
+  const rows = db.select().from(timelineEvents)
+    .where(inArray(timelineEvents.id, eventIds))
+    .orderBy(asc(timelineEvents.timeSortValue), asc(timelineEvents.sortOrder), asc(timelineEvents.id))
+    .all()
+  if (rows.length === 0) return 0
+
+  rows.forEach((row) => {
+    deleteTimelineEvent(row.id, { skipContextTracking: true })
+  })
+
+  createOperationLog({
+    novelId: rows[0].novelId,
+    entityType: 'timeline',
+    entityIds: rows.map((row) => row.id),
+    operationType: 'batch_delete',
+    summary: `批量删除 ${rows.length} 条时间轴事件`,
+    batchKey: buildBatchKey('timeline-batch-delete'),
+    before: rows,
+    after: [],
+    undoPayload: {
+      kind: 'timeline.batch_delete',
+      novelId: rows[0].novelId,
+      events: rows,
+    },
+  })
+
+  markNovelContextChanged(rows[0].novelId, 'Timeline events changed')
+  return rows.length
 }
 
 export function clearTimelineByNovel(novelId: number, options: { skipContextTracking?: boolean } = {}) {

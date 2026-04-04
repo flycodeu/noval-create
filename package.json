@@ -28,6 +28,7 @@
     "setup:nsis-resources": "node scripts/setup-local-nsis-resources.cjs",
     "setup:win-tools": "npm run setup:nsis && npm run setup:nsis-resources",
     "test:subplot": "node scripts/subplot-framework.test.cjs",
+    "test:migrations": "electron scripts/migration-safety.test.cjs",
     "test:prompt-guardrails": "node scripts/prompt-guardrails.test.cjs",
     "test:workspace-routing": "node scripts/workspace-routing.test.cjs",
     "typecheck:web": "tsc -p tsconfig.web.json --noEmit",

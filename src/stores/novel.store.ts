@@ -16,23 +16,43 @@ interface NovelStore {
   setCurrentChapterId: (id: number | null) => void
   setCharacters: (characters: Character[]) => void
   updateChapter: (id: number, data: Partial<Chapter>) => void
+  resetWorkspace: () => void
+}
+
+const EMPTY_WORKSPACE_STATE = {
+  currentNovelId: null,
+  currentNovel: null,
+  chapters: [] as Chapter[],
+  currentChapterId: null,
+  characters: [] as Character[],
 }
 
 export const useNovelStore = create<NovelStore>((set) => ({
   novels: [],
-  currentNovelId: null,
-  currentNovel: null,
-  chapters: [],
-  currentChapterId: null,
-  characters: [],
+  ...EMPTY_WORKSPACE_STATE,
 
   setNovels: (novels) => set({ novels }),
-  setCurrentNovel: (novel) => set({ currentNovel: novel, currentNovelId: novel?.id || null }),
-  setCurrentNovelId: (id) => set({ currentNovelId: id }),
+  setCurrentNovel: (novel) => set((state) => {
+    const nextNovelId = novel?.id || null
+    const shouldReset = state.currentNovelId !== null && state.currentNovelId !== nextNovelId
+    return shouldReset
+      ? { ...EMPTY_WORKSPACE_STATE, currentNovel: novel, currentNovelId: nextNovelId }
+      : { currentNovel: novel, currentNovelId: nextNovelId }
+  }),
+  setCurrentNovelId: (id) => set((state) => {
+    if (state.currentNovelId === id) {
+      return { currentNovelId: id }
+    }
+    return {
+      ...EMPTY_WORKSPACE_STATE,
+      currentNovelId: id,
+    }
+  }),
   setChapters: (chapters) => set({ chapters }),
   setCurrentChapterId: (id) => set({ currentChapterId: id }),
   setCharacters: (characters) => set({ characters }),
   updateChapter: (id, data) => set((state) => ({
     chapters: state.chapters.map(c => c.id === id ? { ...c, ...data } : c),
   })),
+  resetWorkspace: () => set(EMPTY_WORKSPACE_STATE),
 }))

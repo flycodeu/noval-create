@@ -54,6 +54,15 @@ interface ContextPart {
   content: string
 }
 
+export type ChapterContextPromptProfile = 'scenePlan' | 'draft' | 'review' | 'rewrite'
+export type ChapterContextComplexity = 'simple' | 'standard' | 'key'
+
+export interface BuildChapterContextOptions {
+  totalBudget?: number
+  promptProfile?: ChapterContextPromptProfile
+  chapterComplexity?: ChapterContextComplexity
+}
+
 export interface StorySubPlot {
   name: string
   characters: string
@@ -141,6 +150,8 @@ export interface ChapterContext {
   writingContractSummary: string
   relationSummary: string
 }
+
+type ChapterContextLabel = keyof ChapterContext
 
 interface ChapterWithContinuity {
   chapterNum: number
@@ -253,6 +264,186 @@ function allocateTokens(parts: ContextPart[], totalBudget: number): Record<strin
   }
 
   return result
+}
+
+function resolveChapterBudgetFloor(targetWords: number, requestedBudget: number): number {
+  if (targetWords >= 1500000) return Math.max(requestedBudget, 22000)
+  if (targetWords >= 800000) return Math.max(requestedBudget, 18000)
+  if (targetWords >= 350000) return Math.max(requestedBudget, 14000)
+  return requestedBudget
+}
+
+function resolvePromptFixedOverhead(
+  promptProfile: ChapterContextPromptProfile,
+  chapterComplexity: ChapterContextComplexity,
+  targetWords: number,
+): number {
+  const baseByProfile: Record<ChapterContextPromptProfile, number> = {
+    scenePlan: 950,
+    draft: 1200,
+    review: 1100,
+    rewrite: 1500,
+  }
+  const complexityOffset: Record<ChapterContextComplexity, number> = {
+    simple: -180,
+    standard: 0,
+    key: 320,
+  }
+  const largeNovelOffset = targetWords >= 800000 ? 180 : targetWords >= 350000 ? 80 : 0
+  return Math.max(500, baseByProfile[promptProfile] + complexityOffset[chapterComplexity] + largeNovelOffset)
+}
+
+function resolvePromptOutputReserve(
+  promptProfile: ChapterContextPromptProfile,
+  chapterComplexity: ChapterContextComplexity,
+  targetWords: number,
+): number {
+  const baseByProfile: Record<ChapterContextPromptProfile, number> = {
+    scenePlan: 1600,
+    draft: 3000,
+    review: 1700,
+    rewrite: 3400,
+  }
+  const complexityOffset: Record<ChapterContextComplexity, number> = {
+    simple: -150,
+    standard: 0,
+    key: 280,
+  }
+  const largeNovelOffset = targetWords >= 800000 && (promptProfile === 'draft' || promptProfile === 'rewrite')
+    ? 260
+    : targetWords >= 350000 && promptProfile === 'rewrite'
+      ? 160
+      : 0
+  return Math.max(1200, baseByProfile[promptProfile] + complexityOffset[chapterComplexity] + largeNovelOffset)
+}
+
+function createStagePriorityMap(
+  promptProfile: ChapterContextPromptProfile,
+  chapterComplexity: ChapterContextComplexity,
+  targetWords: number,
+  chapterCount: number,
+): Partial<Record<ChapterContextLabel, ContextPart['priority'] | null>> {
+  const priorities: Partial<Record<ChapterContextLabel, ContextPart['priority'] | null>> = (() => {
+    switch (promptProfile) {
+      case 'scenePlan':
+        return {
+          chapterGoal: 0,
+          storyCore: 0,
+          currentArc: 0,
+          worldRules: 0,
+          continuityNotes: 0,
+          openLoops: 0,
+          characterStates: 0,
+          itemSummary: 1,
+          lastChapterEnding: 1,
+          continuitySummary: 2,
+          timelineSummary: 1,
+          timelineOpenThreads: 1,
+          longTermMemory: 2,
+          activeThreads: 1,
+          previousSummaries: 2,
+          styleTemplate: 3,
+          writingContractSummary: 1,
+          relationSummary: 1,
+        }
+      case 'draft':
+        return {
+          chapterGoal: 0,
+          storyCore: 0,
+          currentArc: 0,
+          worldRules: 0,
+          continuityNotes: 0,
+          openLoops: 0,
+          characterStates: 0,
+          itemSummary: 1,
+          lastChapterEnding: 1,
+          continuitySummary: 1,
+          timelineSummary: 1,
+          timelineOpenThreads: 1,
+          longTermMemory: 2,
+          activeThreads: 1,
+          previousSummaries: 2,
+          styleTemplate: 2,
+          writingContractSummary: 1,
+          relationSummary: 1,
+        }
+      case 'review':
+        return {
+          chapterGoal: 0,
+          storyCore: 0,
+          currentArc: 0,
+          worldRules: 0,
+          continuityNotes: 1,
+          openLoops: 0,
+          characterStates: 0,
+          itemSummary: 1,
+          lastChapterEnding: 2,
+          continuitySummary: 0,
+          timelineSummary: 0,
+          timelineOpenThreads: 2,
+          longTermMemory: 1,
+          activeThreads: 1,
+          previousSummaries: 2,
+          styleTemplate: null,
+          writingContractSummary: 1,
+          relationSummary: 1,
+        }
+      case 'rewrite':
+      default:
+        return {
+          chapterGoal: 0,
+          storyCore: 0,
+          currentArc: 0,
+          worldRules: 0,
+          continuityNotes: 0,
+          openLoops: 0,
+          characterStates: 0,
+          itemSummary: 1,
+          lastChapterEnding: 1,
+          continuitySummary: 1,
+          timelineSummary: 1,
+          timelineOpenThreads: 1,
+          longTermMemory: 1,
+          activeThreads: 1,
+          previousSummaries: 2,
+          styleTemplate: 2,
+          writingContractSummary: 1,
+          relationSummary: 1,
+        }
+    }
+  })()
+
+  if (chapterComplexity === 'simple') {
+    priorities.styleTemplate = null
+    priorities.previousSummaries = 3
+    priorities.activeThreads = Math.min(3, (priorities.activeThreads ?? 2) + 1) as ContextPart['priority']
+    priorities.longTermMemory = targetWords >= 350000 || chapterCount >= 80
+      ? 2
+      : null
+    priorities.relationSummary = Math.min(2, (priorities.relationSummary ?? 1) + 1) as ContextPart['priority']
+  } else if (chapterComplexity === 'key') {
+    const promote = (label: ChapterContextLabel) => {
+      const current = priorities[label]
+      if (typeof current !== 'number') return
+      priorities[label] = Math.max(0, current - 1) as ContextPart['priority']
+    }
+
+    promote('continuitySummary')
+    promote('relationSummary')
+    promote('activeThreads')
+    promote('previousSummaries')
+    promote('lastChapterEnding')
+    promote('timelineSummary')
+  }
+
+  if (targetWords >= 350000 || chapterCount >= 80) {
+    const currentLongTermPriority = priorities.longTermMemory
+    if (typeof currentLongTermPriority === 'number') {
+      priorities.longTermMemory = Math.min(currentLongTermPriority, 1) as ContextPart['priority']
+    }
+  }
+
+  return priorities
 }
 
 function parseSubPlots(value: unknown): StorySubPlot[] {
@@ -443,6 +634,13 @@ function formatArcContext(arc?: typeof storyArcs.$inferSelect | null): string {
     `章节范围：第${arc.chapterStart || '?'}章 - 第${arc.chapterEnd || '?'}章`,
     `本弧目标：${arc.arcGoal || '（未填写）'}`,
     `本弧概述：${arc.arcSummary || '（未填写）'}`,
+    `当前推进度：${arc.progressPercent || 0}%`,
+    typeof arc.stalledChapterCount === 'number' && arc.stalledChapterCount > 0
+      ? `连续空转章节：${arc.stalledChapterCount}`
+      : '',
+    typeof arc.lastProgressChapterNum === 'number'
+      ? `最近推进章节：第${arc.lastProgressChapterNum}章`
+      : '',
     arc.growthLedger ? `成长账本：${arc.growthLedger}` : '',
     arc.costLedger ? `代价账本：${arc.costLedger}` : '',
   ].filter(Boolean).join('\n')
@@ -731,7 +929,11 @@ function buildItemSummary(novelId: number): string {
     .join('\n')
 }
 
-function buildActiveThreadsContext(novelId: number, chapterNum: number): string {
+function buildActiveThreadsContext(
+  novelId: number,
+  chapterNum: number,
+  currentArc?: typeof storyArcs.$inferSelect | null,
+): string {
   const db = getDb()
   const rows = db.select().from(storyThreads)
     .where(eq(storyThreads.novelId, novelId))
@@ -745,27 +947,78 @@ function buildActiveThreadsContext(novelId: number, chapterNum: number): string 
 
   if (rows.length === 0) return ''
 
-  // 即将到期（targetPayoffChapter 在当前章节附近 10 章内）
-  const urgent = rows.filter((t) => t.targetPayoffChapter != null && t.targetPayoffChapter - chapterNum <= 10 && t.targetPayoffChapter >= chapterNum)
+  const isArcPriority = (thread: typeof storyThreads.$inferSelect) => {
+    if (!currentArc || typeof currentArc.chapterStart !== 'number' || typeof currentArc.chapterEnd !== 'number') {
+      return false
+    }
 
-  // 需要提醒的长线伏笔：超过 reminderInterval 章没被引用
-  const needsReminder = rows.filter((t) => {
-    if (urgent.includes(t)) return false
-    const interval = t.reminderInterval || 20
-    const lastRef = t.lastReferencedChapter || t.plantedChapter || t.startChapter || 0
-    return lastRef > 0 && (chapterNum - lastRef) >= interval
+    const spanStart = thread.startChapter || thread.plantedChapter || thread.lastReferencedChapter || 0
+    const spanEnd = thread.targetPayoffChapter || thread.lastReferencedChapter || thread.plantedChapter || thread.startChapter || 0
+    if (!spanStart && !spanEnd) return false
+
+    const rangeStart = spanStart || spanEnd
+    const rangeEnd = spanEnd || spanStart
+    return rangeStart <= currentArc.chapterEnd && rangeEnd >= currentArc.chapterStart
+  }
+
+  const getThreadSpan = (thread: typeof storyThreads.$inferSelect) => {
+    const baseChapter = thread.lastReferencedChapter || thread.plantedChapter || thread.startChapter || chapterNum
+    if (typeof thread.targetPayoffChapter === 'number' && thread.targetPayoffChapter > 0) {
+      return Math.max(1, thread.targetPayoffChapter - baseChapter)
+    }
+    return Math.max(1, chapterNum - baseChapter + 6)
+  }
+
+  const getEffectiveReminderInterval = (thread: typeof storyThreads.$inferSelect) => {
+    const baseInterval = Math.max(3, thread.reminderInterval || 20)
+    return Math.max(3, Math.min(baseInterval, Math.ceil(getThreadSpan(thread) / 3)))
+  }
+
+  // 距离目标回收不足 5 章时强制紧急注入
+  const urgent = rows.filter((thread) => (
+    typeof thread.targetPayoffChapter === 'number'
+    && thread.targetPayoffChapter >= chapterNum
+    && (thread.targetPayoffChapter - chapterNum) <= 5
+  ))
+
+  // 需要提醒的活跃线索：按弧长自适应提醒间隔
+  const needsReminder = rows.filter((thread) => {
+    if (urgent.includes(thread)) return false
+    const lastRef = thread.lastReferencedChapter || thread.plantedChapter || thread.startChapter || 0
+    return lastRef > 0 && (chapterNum - lastRef) >= getEffectiveReminderInterval(thread)
   })
 
-  const rest = rows.filter((t) => !urgent.includes(t) && !needsReminder.includes(t))
-  const ordered = [...urgent, ...needsReminder, ...rest].slice(0, 10)
+  const rest = rows.filter((thread) => !urgent.includes(thread) && !needsReminder.includes(thread))
+  const ordered = [...urgent, ...needsReminder, ...rest]
+    .sort((left, right) => {
+      const leftArcPriority = isArcPriority(left) ? 0 : 1
+      const rightArcPriority = isArcPriority(right) ? 0 : 1
+      if (leftArcPriority !== rightArcPriority) {
+        return leftArcPriority - rightArcPriority
+      }
+
+      const leftPayoffDistance = typeof left.targetPayoffChapter === 'number'
+        ? Math.abs(left.targetPayoffChapter - chapterNum)
+        : Number.MAX_SAFE_INTEGER
+      const rightPayoffDistance = typeof right.targetPayoffChapter === 'number'
+        ? Math.abs(right.targetPayoffChapter - chapterNum)
+        : Number.MAX_SAFE_INTEGER
+      if (leftPayoffDistance !== rightPayoffDistance) {
+        return leftPayoffDistance - rightPayoffDistance
+      }
+
+      return (left.sortOrder || 0) - (right.sortOrder || 0)
+    })
+    .slice(0, 10)
 
   return ordered
     .map((thread) => {
       const tags: string[] = []
+      if (isArcPriority(thread)) tags.push('[本弧优先]')
       if (urgent.includes(thread)) tags.push(`[即将回收第${thread.targetPayoffChapter}章]`)
       if (needsReminder.includes(thread)) {
         const lastRef = thread.lastReferencedChapter || thread.plantedChapter || thread.startChapter || 0
-        tags.push(`[已${chapterNum - lastRef}章未提及，需适当回顾]`)
+        tags.push(`[已${chapterNum - lastRef}章未提及，建议回顾；提醒间隔≈${getEffectiveReminderInterval(thread)}章]`)
       }
       const payoff = thread.payoffCondition ? `回收条件：${thread.payoffCondition}` : ''
       const state = thread.currentState || thread.summary || thread.premise || ''
@@ -926,12 +1179,19 @@ export async function buildOutlineGenerationContext(arcId: number): Promise<Outl
 export async function buildChapterContext(
   novelId: number,
   chapterNum: number,
-  totalBudget: number = 10000,
+  options: number | BuildChapterContextOptions = 10000,
 ): Promise<ChapterContext> {
   const db = getDb()
   ensureStoryStructure(novelId)
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
   if (!novel) throw new Error('小说不存在')
+
+  const normalizedOptions: BuildChapterContextOptions = typeof options === 'number'
+    ? { totalBudget: options }
+    : options || {}
+  const totalBudget = normalizedOptions.totalBudget ?? 10000
+  const promptProfile = normalizedOptions.promptProfile || 'draft'
+  const chapterComplexity = normalizedOptions.chapterComplexity || 'standard'
 
   const profile = await buildStoryProfile(novelId)
   const chapterRows = db.select().from(chapters)
@@ -956,7 +1216,7 @@ export async function buildChapterContext(
   )
   const longTermMemory = buildStoryMemoryPromptSummary(novelId, { chapterId: currentChapter?.id })
   const itemSummary = buildItemSummary(novelId)
-  const activeThreadsContext = buildActiveThreadsContext(novelId, chapterNum)
+  const activeThreadsContext = buildActiveThreadsContext(novelId, chapterNum, currentArc)
 
   // 从当前章节大纲和最近摘要中提取提及的角色名，用于动态召回
   const contextText = [currentChapter?.outline, currentArc?.arcSummary, currentArc?.arcGoal].filter(Boolean).join('\n')
@@ -986,38 +1246,43 @@ export async function buildChapterContext(
       ].filter(Boolean).join('\n')
     : ''
 
-  const budgetFloor = targetWords >= 1500000
-    ? 16000
-    : targetWords >= 800000
-      ? 14000
-      : targetWords >= 350000
-        ? 12000
-        : totalBudget
-  const effectiveBudget = Math.max(totalBudget, budgetFloor)
-  const reservedForOutput = targetWords >= 1500000 ? 3000 : targetWords >= 800000 ? 2800 : 2400
-  const contextBudget = effectiveBudget - reservedForOutput
-  const longTermMemoryPriority = targetWords >= 350000 || chapterRows.length >= 80 ? 1 : 2
+  const effectiveBudget = resolveChapterBudgetFloor(targetWords, totalBudget)
+  const promptFixedOverhead = resolvePromptFixedOverhead(promptProfile, chapterComplexity, targetWords)
+  const reservedForOutput = resolvePromptOutputReserve(promptProfile, chapterComplexity, targetWords)
+  const contextBudget = Math.max(3600, effectiveBudget - promptFixedOverhead - reservedForOutput)
+  const priorityMap = createStagePriorityMap(promptProfile, chapterComplexity, targetWords, chapterRows.length)
 
-  const parts: ContextPart[] = [
-    { priority: 0, label: 'chapterGoal', content: extractChapterGoal(currentChapter?.outline) },
-    { priority: 0, label: 'storyCore', content: buildStoryCoreText(profile) },
-    { priority: 0, label: 'writingContractSummary', content: profile.writingContractSummary },
-    { priority: 0, label: 'currentArc', content: formatArcContext(currentArc) },
-    { priority: 1, label: 'continuityNotes', content: collectContinuityNotes(continuityChapters) },
-    { priority: 1, label: 'lastChapterEnding', content: lastChapterEnding },
-    { priority: 1, label: 'openLoops', content: collectOpenLoops(continuityChapters) },
-    { priority: 1, label: 'timelineOpenThreads', content: timelineContext.timelineOpenThreads },
-    { priority: 0, label: 'worldRules', content: profile.worldRulesSummary },
-    { priority: 1, label: 'itemSummary', content: itemSummary },
-    { priority: longTermMemoryPriority as 1 | 2, label: 'longTermMemory', content: longTermMemory },
-    { priority: 2, label: 'characterStates', content: buildCharacterStates(allCharacters, recentChapters, mentionedCharacterNames) },
-    { priority: 2, label: 'continuitySummary', content: continuityChapters.map(formatContinuityEntry).join('\n') },
-    { priority: 2, label: 'timelineSummary', content: timelineContext.timelineSummary },
-    { priority: 2, label: 'relationSummary', content: relationSummary },
-    { priority: 2, label: 'activeThreads', content: activeThreadsContext },
-    { priority: 2, label: 'styleTemplate', content: profile.styleTemplateSummary },
-    { priority: 3, label: 'previousSummaries', content: previousSummaries },
+  const partDefinitions: Array<{ label: ChapterContextLabel; content: string }> = [
+    { label: 'chapterGoal', content: extractChapterGoal(currentChapter?.outline) },
+    { label: 'storyCore', content: buildStoryCoreText(profile) },
+    { label: 'writingContractSummary', content: profile.writingContractSummary },
+    { label: 'currentArc', content: formatArcContext(currentArc) },
+    { label: 'continuityNotes', content: collectContinuityNotes(continuityChapters) },
+    { label: 'lastChapterEnding', content: lastChapterEnding },
+    { label: 'openLoops', content: collectOpenLoops(continuityChapters) },
+    { label: 'timelineOpenThreads', content: timelineContext.timelineOpenThreads },
+    { label: 'worldRules', content: profile.worldRulesSummary },
+    { label: 'itemSummary', content: itemSummary },
+    { label: 'longTermMemory', content: longTermMemory },
+    { label: 'characterStates', content: buildCharacterStates(allCharacters, recentChapters, mentionedCharacterNames) },
+    { label: 'continuitySummary', content: continuityChapters.map(formatContinuityEntry).join('\n') },
+    { label: 'timelineSummary', content: timelineContext.timelineSummary },
+    { label: 'relationSummary', content: relationSummary },
+    { label: 'activeThreads', content: activeThreadsContext },
+    { label: 'styleTemplate', content: profile.styleTemplateSummary },
+    { label: 'previousSummaries', content: previousSummaries },
   ]
+
+  const parts = partDefinitions.reduce<ContextPart[]>((result, part) => {
+    const priority = priorityMap[part.label]
+    if (typeof priority !== 'number' || !part.content) return result
+    result.push({
+      priority,
+      label: part.label,
+      content: part.content,
+    })
+    return result
+  }, [])
 
   const allocated = allocateTokens(parts, contextBudget)
 
@@ -1042,4 +1307,3 @@ export async function buildChapterContext(
     relationSummary: allocated.relationSummary || relationSummary || '',
   }
 }
-

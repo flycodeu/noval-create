@@ -135,6 +135,21 @@ export interface Chapter {
   updatedAt: string
 }
 
+export interface ChapterUpdateOptions {
+  skipStaleTracking?: boolean
+  versionSource?: 'manual-save' | 'ai-rewrite' | 'pipeline-generate' | 'version-restore' | false
+}
+
+export interface ChapterVersion {
+  id: number
+  novelId: number
+  chapterId: number
+  versionSource: 'manual-save' | 'ai-rewrite' | 'pipeline-generate' | 'version-restore'
+  content: string
+  wordCount: number
+  createdAt: string
+}
+
 export interface Character {
   id: number
   novelId: number
@@ -526,6 +541,7 @@ export interface ModelConfig {
   baseUrl?: string
   temperature: number
   maxTokens: number
+  maxConcurrency: number
   isDefault: number
   extraParamsJson?: string
   createdAt: string
@@ -755,6 +771,9 @@ export interface StoryArc {
   growthLedger?: string
   costLedger?: string
   targetWords?: number
+  progressPercent?: number
+  stalledChapterCount?: number
+  lastProgressChapterNum?: number
 }
 
 export interface StoryThread {
@@ -770,6 +789,9 @@ export interface StoryThread {
   targetPayoffChapter?: number
   payoffCondition?: string
   currentState?: string
+  plantedChapter?: number
+  lastReferencedChapter?: number
+  reminderInterval?: number
   relatedCharacterIdsJson?: string
   relatedItemIdsJson?: string
   relatedTimelineEventIdsJson?: string
@@ -777,6 +799,22 @@ export interface StoryThread {
   sortOrder: number
   createdAt: string
   updatedAt: string
+}
+
+export interface OperationLog {
+  id: number
+  novelId: number
+  entityType: 'chapter' | 'thread' | 'timeline' | string
+  entityIdsJson?: string
+  operationType: 'batch_update' | 'batch_delete' | 'batch_reindex' | string
+  summary: string
+  batchKey?: string
+  beforeJson?: string
+  afterJson?: string
+  undoPayloadJson: string
+  undone: number
+  undoneAt?: string
+  createdAt: string
 }
 
 export interface StoryThreadQueryInput {
@@ -1265,8 +1303,13 @@ declare global {
         list: (novelId: number) => Promise<Chapter[]>
         get: (id: number) => Promise<Chapter | null>
         create: (novelId: number, data: Partial<Chapter>) => Promise<number>
-        update: (id: number, data: Partial<Chapter>) => Promise<void>
+        update: (id: number, data: Partial<Chapter>, options?: ChapterUpdateOptions) => Promise<void>
         delete: (id: number) => Promise<void>
+        listVersions: (chapterId: number) => Promise<ChapterVersion[]>
+        restoreVersion: (versionId: number) => Promise<Chapter | null>
+        batchUpdate: (ids: number[], data: Partial<Pick<Chapter, 'status' | 'arcId'>>) => Promise<number>
+        batchDelete: (ids: number[]) => Promise<number>
+        batchRenumber: (ids: number[], startChapterNum: number) => Promise<number>
         generateContent: (chapterId: number) => Promise<number>
         generateSummary: (chapterId: number) => Promise<void>
         aiCheck: (chapterId: number) => Promise<unknown>
@@ -1329,6 +1372,8 @@ declare global {
         create: (novelId: number, data: Partial<TimelineEvent>) => Promise<number>
         update: (id: number, data: Partial<TimelineEvent>) => Promise<void>
         delete: (id: number) => Promise<void>
+        batchUpdate: (ids: number[], data: Partial<Pick<TimelineEvent, 'status' | 'isMajorEvent'>>) => Promise<number>
+        batchDelete: (ids: number[]) => Promise<number>
         generate: (novelId: number, options?: unknown) => Promise<number[]>
         regenerate: (id: number, options?: EntityRegenerateOptions) => Promise<TimelineEvent | null>
         clear: (novelId: number) => Promise<void>
@@ -1366,7 +1411,14 @@ declare global {
         create: (novelId: number, data: Partial<StoryThread>) => Promise<number>
         update: (id: number, data: Partial<StoryThread>) => Promise<void>
         delete: (id: number) => Promise<void>
+        batchUpdate: (ids: number[], data: Partial<Pick<StoryThread, 'status' | 'priority'>>) => Promise<number>
+        batchDelete: (ids: number[]) => Promise<number>
         regenerate: (id: number, options?: EntityRegenerateOptions) => Promise<StoryThread | null>
+      }
+      history: {
+        listRecent: (novelId: number, limit?: number) => Promise<OperationLog[]>
+        getLatestUndoable: (novelId: number) => Promise<OperationLog | null>
+        undo: (logId: number) => Promise<OperationLog | null>
       }
       revision: {
         list: (novelId: number) => Promise<RevisionTask[]>

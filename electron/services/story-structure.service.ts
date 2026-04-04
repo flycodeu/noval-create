@@ -13,7 +13,7 @@ import {
   storyVolumes,
   timelineEvents,
 } from '../database/schema'
-import { markNovelContextChanged } from './context-impact.service'
+import { markNovelContextChanged, markStoryMemoryCheckpointsDirty } from './context-impact.service'
 import { markTimelineEventsSegmentAnchorInvalid, syncTimelineStructureAnchors } from './timeline.service'
 import {
   applyStructureBatchEdit as applyStructureBatchEditTransactional,
@@ -302,6 +302,8 @@ function markNovelContextChangedInline(novelId: number, reasons: string | string
       updatedAt: now,
     }).where(eq(chapters.id, chapter.id)).run()
   }
+
+  markStoryMemoryCheckpointsDirty(novelId, now)
 
   return nextVersion
 }

@@ -50,9 +50,11 @@ export function closeDb() {
   }
 }
 
-function runMigrations(sqlite: Database.Database) {
-  // 手动建表（使用 better-sqlite3 直接执行 SQL）
-  sqlite.exec(`
+export function runMigrations(sqlite: Database.Database) {
+  ensureMigrationTable(sqlite)
+
+  runMigrationStep(sqlite, '0001_core_schema', () => {
+    sqlite.exec(`
     CREATE TABLE IF NOT EXISTS genres (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
@@ -139,6 +141,16 @@ function runMigrations(sqlite: Database.Database) {
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS chapter_versions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+      chapter_id INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
+      version_source TEXT DEFAULT 'manual-save',
+      content TEXT NOT NULL,
+      word_count INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS chapter_segments (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
@@ -173,7 +185,11 @@ function runMigrations(sqlite: Database.Database) {
       arc_goal TEXT,
       arc_summary TEXT,
       growth_ledger TEXT,
-      cost_ledger TEXT
+      cost_ledger TEXT,
+      target_words INTEGER DEFAULT 0,
+      progress_percent INTEGER DEFAULT 0,
+      stalled_chapter_count INTEGER DEFAULT 0,
+      last_progress_chapter_num INTEGER
     );
 
     CREATE TABLE IF NOT EXISTS story_threads (
@@ -391,6 +407,7 @@ function runMigrations(sqlite: Database.Database) {
       base_url TEXT,
       temperature REAL DEFAULT 0.85,
       max_tokens INTEGER DEFAULT 4096,
+      max_concurrency INTEGER DEFAULT 2,
       is_default INTEGER DEFAULT 0,
       extra_params_json TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -458,8 +475,26 @@ function runMigrations(sqlite: Database.Database) {
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
-  `)
+    CREATE TABLE IF NOT EXISTS operation_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+      entity_type TEXT NOT NULL,
+      entity_ids_json TEXT,
+      operation_type TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      batch_key TEXT,
+      before_json TEXT,
+      after_json TEXT,
+      undo_payload_json TEXT NOT NULL,
+      undone INTEGER DEFAULT 0,
+      undone_at TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
 
+  `)
+  })
+
+  runMigrationStep(sqlite, '0002_additive_schema', () => {
   ensureColumn(sqlite, 'story_volumes', 'summary', 'TEXT')
   ensureColumn(sqlite, 'story_volumes', 'target_words', 'INTEGER DEFAULT 0')
   ensureColumn(sqlite, 'story_volumes', 'status', "TEXT DEFAULT 'planning'")
@@ -588,6 +623,7 @@ function runMigrations(sqlite: Database.Database) {
   ensureColumn(sqlite, 'tasks', 'current_child_task_id', 'INTEGER')
   ensureColumn(sqlite, 'tasks', 'control_json', 'TEXT')
   ensureColumn(sqlite, 'tasks', 'progress_json', 'TEXT')
+  ensureColumn(sqlite, 'model_configs', 'max_concurrency', 'INTEGER DEFAULT 2')
 
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS generation_history (
@@ -604,6 +640,9 @@ function runMigrations(sqlite: Database.Database) {
   `)
 
   ensureColumn(sqlite, 'story_arcs', 'target_words', 'INTEGER DEFAULT 0')
+  ensureColumn(sqlite, 'story_arcs', 'progress_percent', 'INTEGER DEFAULT 0')
+  ensureColumn(sqlite, 'story_arcs', 'stalled_chapter_count', 'INTEGER DEFAULT 0')
+  ensureColumn(sqlite, 'story_arcs', 'last_progress_chapter_num', 'INTEGER')
   ensureColumn(sqlite, 'story_memory_checkpoints', 'last_refreshed_chapter_num', 'INTEGER DEFAULT 0')
   ensureColumn(sqlite, 'story_memory_checkpoints', 'locked', 'INTEGER DEFAULT 0')
 
@@ -625,18 +664,105 @@ function runMigrations(sqlite: Database.Database) {
   // P3: 章节质量评分字段
   ensureColumn(sqlite, 'chapters', 'quality_scores_json', 'TEXT')
   ensureColumn(sqlite, 'chapters', 'locked_paragraphs_json', 'TEXT')
+  })
 
-  ensureIndexes(sqlite)
-  migrateWorldRules(sqlite)
-  backfillCharacterTaxonomy(sqlite)
-  backfillMapTaxonomy(sqlite)
-  backfillStoryItems(sqlite)
-  backfillContextMetadata(sqlite)
-  backfillStoryStructureLinks(sqlite)
-  backfillStoryStructureMetadata(sqlite)
-  backfillPlanningWorkspaceData(sqlite)
-  backfillTimelineStructureAnchors(sqlite)
-  validateRequiredSchema(sqlite)
+  runMigrationStep(sqlite, '0003_indexes', () => {
+    ensureIndexes(sqlite)
+  })
+
+  runMigrationStep(sqlite, '0004_backfills', () => {
+    migrateWorldRules(sqlite)
+    backfillCharacterTaxonomy(sqlite)
+    backfillMapTaxonomy(sqlite)
+    backfillStoryItems(sqlite)
+    backfillContextMetadata(sqlite)
+    backfillStoryStructureLinks(sqlite)
+    backfillStoryStructureMetadata(sqlite)
+    backfillPlanningWorkspaceData(sqlite)
+    backfillTimelineStructureAnchors(sqlite)
+  })
+
+  runMigrationStep(sqlite, '0005_validate_schema', () => {
+    validateRequiredSchema(sqlite)
+  })
+
+  runMigrationStep(sqlite, '0006_history_recovery', () => {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS chapter_versions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        chapter_id INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
+        version_source TEXT DEFAULT 'manual-save',
+        content TEXT NOT NULL,
+        word_count INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS operation_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        entity_type TEXT NOT NULL,
+        entity_ids_json TEXT,
+        operation_type TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        batch_key TEXT,
+        before_json TEXT,
+        after_json TEXT,
+        undo_payload_json TEXT NOT NULL,
+        undone INTEGER DEFAULT 0,
+        undone_at TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+    `)
+
+    ensureColumn(sqlite, 'chapter_versions', 'version_source', "TEXT DEFAULT 'manual-save'")
+    ensureColumn(sqlite, 'chapter_versions', 'word_count', 'INTEGER DEFAULT 0')
+    ensureColumn(sqlite, 'chapter_versions', 'created_at', 'TEXT')
+
+    ensureColumn(sqlite, 'operation_logs', 'entity_ids_json', 'TEXT')
+    ensureColumn(sqlite, 'operation_logs', 'summary', 'TEXT')
+    ensureColumn(sqlite, 'operation_logs', 'batch_key', 'TEXT')
+    ensureColumn(sqlite, 'operation_logs', 'before_json', 'TEXT')
+    ensureColumn(sqlite, 'operation_logs', 'after_json', 'TEXT')
+    ensureColumn(sqlite, 'operation_logs', 'undo_payload_json', 'TEXT')
+    ensureColumn(sqlite, 'operation_logs', 'undone', 'INTEGER DEFAULT 0')
+    ensureColumn(sqlite, 'operation_logs', 'undone_at', 'TEXT')
+    ensureColumn(sqlite, 'operation_logs', 'created_at', 'TEXT')
+
+    ensureIndexes(sqlite)
+  })
+
+  runMigrationStep(sqlite, '0007_validate_history', () => {
+    validateRequiredSchema(sqlite)
+    validateHistorySchema(sqlite)
+  })
+}
+
+function ensureMigrationTable(sqlite: Database.Database) {
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS _schema_migrations (
+      id TEXT PRIMARY KEY,
+      applied_at TEXT NOT NULL
+    )
+  `)
+}
+
+function runMigrationStep(
+  sqlite: Database.Database,
+  migrationId: string,
+  execute: () => void,
+) {
+  const existing = sqlite.prepare('SELECT id FROM _schema_migrations WHERE id = ?').get(migrationId) as { id: string } | undefined
+  if (existing) return
+
+  const transaction = sqlite.transaction(() => {
+    execute()
+    sqlite.prepare('INSERT INTO _schema_migrations (id, applied_at) VALUES (?, ?)').run(
+      migrationId,
+      new Date().toISOString(),
+    )
+  })
+  transaction()
 }
 
 function ensureColumn(
@@ -668,7 +794,11 @@ function getColumnNames(sqlite: Database.Database, tableName: string): Set<strin
 function validateRequiredSchema(sqlite: Database.Database) {
   const requirements = [
     { tableName: 'novels', columns: ['project_brief_json', 'theme_voice_json'] },
-    { tableName: 'story_arcs', columns: ['growth_ledger', 'cost_ledger'] },
+    {
+      tableName: 'story_arcs',
+      columns: ['growth_ledger', 'cost_ledger', 'progress_percent', 'stalled_chapter_count', 'last_progress_chapter_num'],
+    },
+    { tableName: 'model_configs', columns: ['max_concurrency'] },
     {
       tableName: 'story_threads',
       columns: [
@@ -717,6 +847,39 @@ function validateRequiredSchema(sqlite: Database.Database) {
   }
 }
 
+function validateHistorySchema(sqlite: Database.Database) {
+  const requirements = [
+    {
+      tableName: 'chapter_versions',
+      columns: ['novel_id', 'chapter_id', 'version_source', 'content', 'word_count', 'created_at'],
+    },
+    {
+      tableName: 'operation_logs',
+      columns: ['novel_id', 'entity_type', 'operation_type', 'summary', 'undo_payload_json', 'undone', 'created_at'],
+    },
+  ]
+
+  const missing: string[] = []
+
+  requirements.forEach(({ tableName, columns }) => {
+    if (!hasTable(sqlite, tableName)) {
+      missing.push(`table ${tableName}`)
+      return
+    }
+
+    const existing = getColumnNames(sqlite, tableName)
+    columns.forEach((columnName) => {
+      if (!existing.has(columnName)) {
+        missing.push(`column ${tableName}.${columnName}`)
+      }
+    })
+  })
+
+  if (missing.length > 0) {
+    throw new Error(`数据库历史恢复结构迁移未完成，缺少：${missing.join(', ')}`)
+  }
+}
+
 function ensureIndexes(sqlite: Database.Database) {
   sqlite.exec(`
     CREATE INDEX IF NOT EXISTS idx_timeline_events_novel_sort
@@ -752,11 +915,23 @@ function ensureIndexes(sqlite: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_chapters_novel_order
     ON chapters (novel_id, chapter_num, id);
 
+    CREATE INDEX IF NOT EXISTS idx_chapters_novel_status
+    ON chapters (novel_id, status, chapter_num, id);
+
     CREATE INDEX IF NOT EXISTS idx_chapter_segments_chapter_order
     ON chapter_segments (chapter_id, segment_order, id);
 
     CREATE INDEX IF NOT EXISTS idx_story_memory_checkpoints_scope
     ON story_memory_checkpoints (novel_id, scope_type, scope_id, version);
+
+    CREATE INDEX IF NOT EXISTS idx_story_memory_checkpoints_lookup
+    ON story_memory_checkpoints (novel_id, scope_type, scope_id);
+
+    CREATE INDEX IF NOT EXISTS idx_story_arcs_novel_order
+    ON story_arcs (novel_id, arc_order, id);
+
+    CREATE INDEX IF NOT EXISTS idx_characters_novel_role
+    ON characters (novel_id, role_type, id);
 
     CREATE INDEX IF NOT EXISTS idx_story_threads_novel_order
     ON story_threads (novel_id, sort_order, id);
@@ -781,6 +956,18 @@ function ensureIndexes(sqlite: Database.Database) {
 
     CREATE INDEX IF NOT EXISTS idx_tasks_parent
     ON tasks (parent_task_id, created_at, id);
+
+    CREATE INDEX IF NOT EXISTS idx_timeline_events_arc_status
+    ON timeline_events (novel_id, arc_id, status, time_sort_value, sort_order, id);
+
+    CREATE INDEX IF NOT EXISTS idx_chapter_versions_chapter_created
+    ON chapter_versions (chapter_id, created_at, id);
+
+    CREATE INDEX IF NOT EXISTS idx_operation_logs_novel_created
+    ON operation_logs (novel_id, created_at, id);
+
+    CREATE INDEX IF NOT EXISTS idx_operation_logs_novel_undone
+    ON operation_logs (novel_id, undone, created_at, id);
   `)
 }
 

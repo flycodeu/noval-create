@@ -1,8 +1,8 @@
 ﻿import { WebContents } from 'electron'
-import { asc, eq } from 'drizzle-orm'
+import { asc, desc, eq, inArray } from 'drizzle-orm'
 import { getDb } from '../database/db'
-import { chapters, novels, storyArcs } from '../database/schema'
-import { safeParseJson } from '../utils/json'
+import { chapterSegments, chapterVersions, chapters, novels, storyArcs } from '../database/schema'
+import { parseAiJsonResult } from '../utils/json'
 import { aiCheckPrompt, chapterSummaryPrompt } from './prompts'
 import {
   buildChapterContext,
@@ -36,6 +36,7 @@ import {
   syncChapterToSegments,
 } from './story-structure.service'
 import { discoverEntitiesFromContent } from './entity-discovery.service'
+import { buildBatchKey, captureTimelineAnchorsForChapterIds, createOperationLog } from './history.service'
 
 interface ChapterSummaryData {
   summary: string
@@ -62,6 +63,7 @@ interface ChapterReviewNotes {
   summary: string
   critical_fixes: string[]
   continuity_risks: string[]
+  arc_progress_risks: string[]
   context_drift_risks: string[]
   realism_risks: string[]
   coherence_risks: string[]
@@ -88,6 +90,47 @@ interface ChapterGenerationProgressEvent {
   status: 'running' | 'success' | 'failed'
 }
 
+interface LockedParagraphContext {
+  lockedParagraphs: string[]
+  promptDraftContent: string
+  initialFallbackContent: string
+}
+
+export type ChapterVersionSource =
+  | 'manual-save'
+  | 'ai-rewrite'
+  | 'pipeline-generate'
+  | 'version-restore'
+
+const EMPTY_CONTINUITY_STATE: ContinuityState = {
+  plotProgress: [],
+  characterStateChanges: [],
+  worldStateChanges: [],
+  openLoops: [],
+  continuityNotes: [],
+  arcProgress: '',
+}
+
+const MAX_CHAPTER_VERSION_COUNT = 20
+
+const ARC_PROGRESS_STALL_PATTERNS = [
+  /未推进/,
+  /没有推进/,
+  /无实质推进/,
+  /推进不足/,
+  /尚未推进/,
+  /尚未触及/,
+  /仍在铺垫/,
+  /空转/,
+  /停滞/,
+  /原地/,
+  /受阻/,
+  /搁置/,
+  /偏离/,
+  /反向/,
+  /倒退/,
+]
+
 function countChineseWords(text: string): number {
   const chinese = (text.match(/[\u4e00-\u9fff]/g) || []).length
   const english = (text.match(/\b[a-zA-Z]+\b/g) || []).length
@@ -97,6 +140,53 @@ function countChineseWords(text: string): number {
 
 function getDefaultChapterTitle(chapterNum: number): string {
   return `第${chapterNum}章`
+}
+
+function normalizeChapterVersionSource(
+  value?: ChapterVersionSource | false,
+): ChapterVersionSource | null {
+  if (value === false) return null
+  if (value === 'ai-rewrite' || value === 'pipeline-generate' || value === 'version-restore') {
+    return value
+  }
+  return 'manual-save'
+}
+
+function createChapterVersionSnapshot(chapterId: number, source: ChapterVersionSource) {
+  const db = getDb()
+  const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
+  if (!chapter) return null
+
+  const content = typeof chapter.content === 'string' ? chapter.content : ''
+  if (!content.trim()) return null
+
+  const latest = db.select().from(chapterVersions)
+    .where(eq(chapterVersions.chapterId, chapterId))
+    .orderBy(desc(chapterVersions.createdAt), desc(chapterVersions.id))
+    .all()[0]
+  if (latest?.content === content) {
+    return latest
+  }
+
+  const result = db.insert(chapterVersions).values({
+    novelId: chapter.novelId,
+    chapterId,
+    versionSource: source,
+    content,
+    wordCount: chapter.wordCount || countChineseWords(content),
+  }).run()
+
+  const versionIds = db.select({ id: chapterVersions.id }).from(chapterVersions)
+    .where(eq(chapterVersions.chapterId, chapterId))
+    .orderBy(desc(chapterVersions.createdAt), desc(chapterVersions.id))
+    .all()
+    .map((row) => row.id)
+  const staleIds = versionIds.slice(MAX_CHAPTER_VERSION_COUNT)
+  if (staleIds.length > 0) {
+    db.delete(chapterVersions).where(inArray(chapterVersions.id, staleIds)).run()
+  }
+
+  return Number(result.lastInsertRowid)
 }
 
 function toStringArray(value: unknown): string[] {
@@ -260,6 +350,180 @@ function buildFallbackScenePlan(chapter: typeof chapters.$inferSelect): ScenePla
   }))
 }
 
+function parseLockedParagraphsJson(raw?: string | null): string[] {
+  if (!raw?.trim()) return []
+
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    return dedupeTextList(parsed
+      .map((item) => {
+        if (typeof item === 'string') return item
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return ''
+        const record = item as Record<string, unknown>
+        return typeof record.content === 'string'
+          ? record.content
+          : typeof record.paragraph === 'string'
+            ? record.paragraph
+            : typeof record.text === 'string'
+              ? record.text
+              : ''
+      }))
+  } catch {
+    return []
+  }
+}
+
+function normalizeParagraphFingerprint(text: string): string {
+  return text.replace(/\r/g, '').replace(/[ \t]+/g, ' ').trim()
+}
+
+function contentContainsLockedParagraph(content: string, lockedParagraph: string): boolean {
+  const normalizedContent = normalizeParagraphFingerprint(content)
+  const normalizedParagraph = normalizeParagraphFingerprint(lockedParagraph)
+  if (!normalizedParagraph) return false
+  return normalizedContent.includes(normalizedParagraph)
+}
+
+function contentPreservesLockedParagraphs(content: string, lockedParagraphs: string[]): boolean {
+  if (lockedParagraphs.length === 0) return true
+  if (!content.trim()) return false
+  return lockedParagraphs.every((paragraph) => contentContainsLockedParagraph(content, paragraph))
+}
+
+function markLockedParagraphsInContent(content: string, lockedParagraphs: string[]): string {
+  if (!content.trim() || lockedParagraphs.length === 0) return content
+
+  let next = content
+  lockedParagraphs
+    .slice()
+    .sort((left, right) => right.length - left.length)
+    .forEach((paragraph) => {
+      if (!paragraph || !next.includes(paragraph)) return
+      next = next.split(paragraph).join(`【锁定】\n${paragraph}\n【/锁定】`)
+    })
+
+  return next
+}
+
+function buildLockedParagraphContext(
+  chapter: typeof chapters.$inferSelect,
+  draftContent: string,
+): LockedParagraphContext {
+  const lockedParagraphs = parseLockedParagraphsJson(chapter.lockedParagraphsJson)
+  const previousContent = typeof chapter.content === 'string' ? chapter.content.trim() : ''
+  const initialFallbackContent = contentPreservesLockedParagraphs(previousContent, lockedParagraphs)
+    ? previousContent
+    : draftContent.trim()
+
+  return {
+    lockedParagraphs,
+    promptDraftContent: markLockedParagraphsInContent(draftContent, lockedParagraphs),
+    initialFallbackContent,
+  }
+}
+
+function enforceLockedParagraphProtection(
+  content: string,
+  lockedParagraphs: string[],
+  fallbackContent: string,
+  reviewNotes: ChapterReviewNotes,
+): { content: string; reviewNotes: ChapterReviewNotes; violated: boolean } {
+  const trimmed = content.trim()
+  if (lockedParagraphs.length === 0 || contentPreservesLockedParagraphs(trimmed, lockedParagraphs)) {
+    return {
+      content: trimmed,
+      reviewNotes,
+      violated: false,
+    }
+  }
+
+  return {
+    content: fallbackContent.trim() || trimmed,
+    reviewNotes: {
+      ...reviewNotes,
+      critical_fixes: dedupeTextList([
+        '严格保留作者锁定段落，任何改动只能发生在未锁定内容。',
+        ...reviewNotes.critical_fixes,
+      ]),
+      language_risks: dedupeTextList([
+        '本次重写改动了作者锁定段落，已触发保护回退。',
+        ...reviewNotes.language_risks,
+      ]),
+      severity: mergeSeverity(reviewNotes.severity, 'high'),
+      rewrite_required: true,
+      summary: reviewNotes.summary || '检测到锁定段落被改写，当前结果已回退到安全版本。',
+      revision_brief: appendRevisionBrief(reviewNotes.revision_brief, [
+        '锁定段落必须逐字保留，只能调整周边衔接。',
+      ]),
+    },
+    violated: true,
+  }
+}
+
+function extractArcProgressPercentHint(text: string): number {
+  const match = text.match(/(\d{1,3})\s*%/)
+  if (!match) return 0
+  return Math.max(0, Math.min(100, Math.round(Number(match[1]))))
+}
+
+function indicatesArcProgress(text: string): boolean {
+  const normalized = text.trim()
+  return Boolean(normalized) && !ARC_PROGRESS_STALL_PATTERNS.some((pattern) => pattern.test(normalized))
+}
+
+function getArcChapterRangeMetrics(
+  arc: typeof storyArcs.$inferSelect,
+  chapterNum: number,
+): { total: number; index: number; percent: number } | null {
+  if (typeof arc.chapterStart !== 'number' || typeof arc.chapterEnd !== 'number' || arc.chapterEnd < arc.chapterStart) {
+    return null
+  }
+
+  const total = Math.max(arc.chapterEnd - arc.chapterStart + 1, 1)
+  const index = Math.max(1, Math.min(total, chapterNum - arc.chapterStart + 1))
+  return {
+    total,
+    index,
+    percent: Math.max(0, Math.min(100, Math.round((index / total) * 100))),
+  }
+}
+
+function buildArcProgressStatus(
+  arc: typeof storyArcs.$inferSelect | null,
+  chapterNum: number,
+): string {
+  if (!arc) return ''
+
+  const metrics = getArcChapterRangeMetrics(arc, chapterNum)
+  return [
+    `已记录推进度：${arc.progressPercent || 0}%`,
+    metrics ? `当前章节位于本弧第 ${metrics.index} / ${metrics.total} 章` : '',
+    `连续未推进章节：${arc.stalledChapterCount || 0}`,
+    typeof arc.lastProgressChapterNum === 'number' ? `最近明确推进章节：第${arc.lastProgressChapterNum}章` : '最近明确推进章节：暂无记录',
+  ].filter(Boolean).join('\n')
+}
+
+function buildArcProgressCheckpoint(
+  arc: typeof storyArcs.$inferSelect | null,
+  chapterNum: number,
+): string {
+  if (!arc) return ''
+
+  const metrics = getArcChapterRangeMetrics(arc, chapterNum)
+  if (!metrics || metrics.total < 4 || typeof arc.chapterStart !== 'number') return ''
+
+  const checkpoints = [
+    { label: '25%', chapterNum: arc.chapterStart + Math.round((metrics.total - 1) * 0.25) },
+    { label: '50%', chapterNum: arc.chapterStart + Math.round((metrics.total - 1) * 0.5) },
+    { label: '75%', chapterNum: arc.chapterStart + Math.round((metrics.total - 1) * 0.75) },
+  ]
+  const current = checkpoints.find((checkpoint) => checkpoint.chapterNum === chapterNum)
+  if (!current) return ''
+
+  return `当前位于本弧 ${current.label} 检查点（第${metrics.index} / ${metrics.total}章），本章必须明确兑现本弧目标，不能只重复铺垫或转移注意力。`
+}
+
 function formatScenePlan(scenePlan: ScenePlanStep[]): string {
   return scenePlan
     .map((step) => {
@@ -288,6 +552,7 @@ function normalizeReviewNotes(raw: unknown): ChapterReviewNotes {
     summary: asText(record.summary),
     critical_fixes: toStringArray(record.critical_fixes),
     continuity_risks: toStringArray(record.continuity_risks),
+    arc_progress_risks: toStringArray(record.arc_progress_risks),
     context_drift_risks: toStringArray(record.context_drift_risks),
     realism_risks: toStringArray(record.realism_risks),
     coherence_risks: toStringArray(record.coherence_risks),
@@ -308,6 +573,7 @@ function hasReviewNotes(notes: ChapterReviewNotes): boolean {
     notes.summary ||
     notes.critical_fixes.length > 0 ||
     notes.continuity_risks.length > 0 ||
+    notes.arc_progress_risks.length > 0 ||
     notes.context_drift_risks.length > 0 ||
     notes.realism_risks.length > 0 ||
     notes.coherence_risks.length > 0 ||
@@ -333,6 +599,7 @@ function buildFallbackReviewNotes(consistencyNotes: string): ChapterReviewNotes 
     summary: '先按场景计划把事件链写顺，再统一修正承接、常识和语言问题。',
     critical_fixes: ['逐段核对场景计划里的 must_cover 是否全部落地。'],
     continuity_risks: consistencyLines,
+    arc_progress_risks: [],
     context_drift_risks: [],
     realism_risks: [],
     coherence_risks: [],
@@ -353,6 +620,7 @@ function formatReviewNotes(notes: ChapterReviewNotes): string {
     notes.summary ? `整体判断：${notes.summary}` : '',
     notes.critical_fixes.length > 0 ? `必须修改：\n- ${notes.critical_fixes.join('\n- ')}` : '',
     notes.continuity_risks.length > 0 ? `连续性风险：\n- ${notes.continuity_risks.join('\n- ')}` : '',
+    notes.arc_progress_risks.length > 0 ? `故事弧推进风险：\n- ${notes.arc_progress_risks.join('\n- ')}` : '',
     notes.context_drift_risks.length > 0 ? `上下文漂移风险：\n- ${notes.context_drift_risks.join('\n- ')}` : '',
     notes.realism_risks.length > 0 ? `常识/规则风险：\n- ${notes.realism_risks.join('\n- ')}` : '',
     notes.coherence_risks.length > 0 ? `连贯性风险：\n- ${notes.coherence_risks.join('\n- ')}` : '',
@@ -440,6 +708,7 @@ function enhanceReviewNotesWithGuardrails(
     ...reviewNotes,
     critical_fixes: dedupeTextList([...buildGuardrailCriticalFixes(findings), ...reviewNotes.critical_fixes]),
     continuity_risks: dedupeTextList(reviewNotes.continuity_risks),
+    arc_progress_risks: dedupeTextList(reviewNotes.arc_progress_risks),
     context_drift_risks: dedupeTextList(reviewNotes.context_drift_risks),
     realism_risks: dedupeTextList([...reviewNotes.realism_risks, ...realismFindings]),
     coherence_risks: dedupeTextList(reviewNotes.coherence_risks),
@@ -465,6 +734,146 @@ function enhanceReviewNotesWithGuardrails(
   return next
 }
 
+function parseStoredReviewNotes(raw?: string | null): ChapterReviewNotes {
+  if (!raw?.trim()) return normalizeReviewNotes({})
+
+  try {
+    return normalizeReviewNotes(JSON.parse(raw) as unknown)
+  } catch {
+    return normalizeReviewNotes({})
+  }
+}
+
+function parseStoredContinuityState(raw?: string | null): ContinuityState | null {
+  if (!raw?.trim()) return null
+
+  try {
+    return normalizeContinuityState(JSON.parse(raw) as Record<string, unknown>, EMPTY_CONTINUITY_STATE)
+  } catch {
+    return null
+  }
+}
+
+function getLatestArcProgressNote(
+  novelId: number,
+  arc: typeof storyArcs.$inferSelect | null,
+  beforeChapterNum: number,
+): string {
+  if (!arc) return ''
+
+  const db = getDb()
+  const arcChapters = db.select().from(chapters).where(eq(chapters.novelId, novelId)).all()
+    .filter((chapter) => {
+      if (chapter.chapterNum >= beforeChapterNum) return false
+      if (chapter.arcId === arc.id) return true
+      if (typeof arc.chapterStart !== 'number' || typeof arc.chapterEnd !== 'number') return false
+      return chapter.chapterNum >= arc.chapterStart && chapter.chapterNum <= arc.chapterEnd
+    })
+    .sort((left, right) => right.chapterNum - left.chapterNum)
+
+  for (const chapter of arcChapters) {
+    const continuity = parseStoredContinuityState(chapter.continuityStateJson)
+    if (continuity?.arcProgress?.trim()) return continuity.arcProgress.trim()
+  }
+
+  return ''
+}
+
+function computeStoryArcProgressState(
+  arc: typeof storyArcs.$inferSelect,
+  currentChapter: typeof chapters.$inferSelect,
+  currentContinuity: ContinuityState,
+): { progressPercent: number; stalledChapterCount: number; lastProgressChapterNum: number | null; warnings: string[] } {
+  const db = getDb()
+  const arcChapters = db.select().from(chapters).where(eq(chapters.novelId, currentChapter.novelId)).all()
+    .filter((chapter) => {
+      if (chapter.arcId === arc.id) return true
+      if (typeof arc.chapterStart !== 'number' || typeof arc.chapterEnd !== 'number') return false
+      return chapter.chapterNum >= arc.chapterStart && chapter.chapterNum <= arc.chapterEnd
+    })
+    .sort((left, right) => left.chapterNum - right.chapterNum)
+
+  const relevantChapters = arcChapters.filter((chapter) => chapter.chapterNum <= currentChapter.chapterNum)
+  const continuityByChapterId = new Map<number, ContinuityState>()
+  continuityByChapterId.set(currentChapter.id, currentContinuity)
+
+  let lastProgressChapterNum: number | null = null
+  let hintedPercent = 0
+
+  for (const chapter of relevantChapters) {
+    const reviewNotes = parseStoredReviewNotes(chapter.reviewNotesJson)
+    const continuity = continuityByChapterId.get(chapter.id) || parseStoredContinuityState(chapter.continuityStateJson)
+    if (!continuity) continue
+
+    hintedPercent = Math.max(hintedPercent, extractArcProgressPercentHint(continuity.arcProgress))
+    if (reviewNotes.arc_progress_risks.length > 0) continue
+    if (indicatesArcProgress(continuity.arcProgress)) {
+      lastProgressChapterNum = chapter.chapterNum
+    }
+  }
+
+  let stalledChapterCount = 0
+  for (let index = relevantChapters.length - 1; index >= 0; index -= 1) {
+    const chapter = relevantChapters[index]
+    const reviewNotes = parseStoredReviewNotes(chapter.reviewNotesJson)
+    const continuity = continuityByChapterId.get(chapter.id) || parseStoredContinuityState(chapter.continuityStateJson)
+    if (continuity && reviewNotes.arc_progress_risks.length === 0 && indicatesArcProgress(continuity.arcProgress)) {
+      break
+    }
+    stalledChapterCount += 1
+  }
+
+  const metrics = typeof lastProgressChapterNum === 'number'
+    ? getArcChapterRangeMetrics(arc, lastProgressChapterNum)
+    : null
+  const progressPercent = Math.max(hintedPercent, metrics?.percent || 0)
+
+  const warnings = stalledChapterCount >= 5
+    ? [`故事弧“${arc.arcName}”已连续 ${stalledChapterCount} 章未见实质推进，需要让当前章节明确服务本弧目标，或立即调整弧设计与章节安排。`]
+    : []
+  const checkpointWarning = buildArcProgressCheckpoint(arc, currentChapter.chapterNum)
+  const currentReviewNotes = parseStoredReviewNotes(currentChapter.reviewNotesJson)
+  if (checkpointWarning && currentReviewNotes.arc_progress_risks.length > 0) {
+    warnings.push(`${checkpointWarning} 当前稿件仍未给出足够的弧推进。`)
+  }
+
+  return {
+    progressPercent,
+    stalledChapterCount,
+    lastProgressChapterNum,
+    warnings: dedupeTextList(warnings),
+  }
+}
+
+function persistArcProgressWarnings(chapterId: number, warnings: string[]): void {
+  if (warnings.length === 0) return
+
+  const db = getDb()
+  const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
+  if (!chapter) return
+
+  const reviewNotes = parseStoredReviewNotes(chapter.reviewNotesJson)
+  const nextNotes: ChapterReviewNotes = {
+    ...reviewNotes,
+    arc_progress_risks: dedupeTextList([...reviewNotes.arc_progress_risks, ...warnings]),
+    critical_fixes: dedupeTextList([
+      '让本章明确推进当前故事弧目标，避免继续空转。',
+      ...reviewNotes.critical_fixes,
+    ]),
+    severity: mergeSeverity(reviewNotes.severity, 'medium'),
+    rewrite_required: true,
+    summary: reviewNotes.summary || '当前章节存在需要修正的故事弧推进问题。',
+    revision_brief: appendRevisionBrief(reviewNotes.revision_brief, [
+      '让本章明确服务当前故事弧目标，并补上阶段性推进。',
+    ]),
+  }
+
+  db.update(chapters).set({
+    reviewNotesJson: JSON.stringify(nextNotes),
+    updatedAt: new Date().toISOString(),
+  }).where(eq(chapters.id, chapterId)).run()
+}
+
 interface ChapterRepairInput {
   chapter: typeof chapters.$inferSelect
   novel: typeof novels.$inferSelect
@@ -475,6 +884,7 @@ interface ChapterRepairInput {
   consistencyNotes: string
   reviewNotes: ChapterReviewNotes
   content: string
+  lockedParagraphs: string[]
 }
 
 async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
@@ -482,6 +892,7 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
   reviewNotes: ChapterReviewNotes
 }> {
   const originalContent = input.content.trim()
+  const promptTier = classifyChapterComplexity(input.chapter)
   const findings = collectQualityGuardrailFindings(originalContent, input.profile.genre)
   if (findings.length === 0 || !shouldForceRepair(findings)) {
     return {
@@ -493,6 +904,7 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
   const repairNotes = enhanceReviewNotesWithGuardrails(input.reviewNotes, originalContent, input.profile.genre, findings)
 
   try {
+    const repairPromptDraftContent = markLockedParagraphsInContent(originalContent, input.lockedParagraphs)
     const repairedContent = (await runChatTask({
       type: 'chapter_write',
       novelId: input.chapter.novelId,
@@ -525,11 +937,13 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
           longTermMemory: input.context.longTermMemory,
           consistencyNotes: input.consistencyNotes,
           scenePlan: input.scenePlanText,
-          draftContent: originalContent,
+          draftContent: repairPromptDraftContent,
           reviewNotes: formatReviewNotes(repairNotes),
+          lockedParagraphs: input.lockedParagraphs,
           activeThreads: input.context.activeThreads,
           protagonistReference: input.profile.protagonistReference,
           protagonistRule: input.profile.protagonistRule,
+          promptTier,
         }),
       }],
       modelConfigId: input.novel.modelConfigId || undefined,
@@ -542,11 +956,30 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
       }
     }
 
-    const finalFindings = collectQualityGuardrailFindings(repairedContent, input.profile.genre)
+    const protectedRepaired = enforceLockedParagraphProtection(
+      repairedContent,
+      input.lockedParagraphs,
+      originalContent,
+      repairNotes,
+    )
+    if (protectedRepaired.violated) {
+      return {
+        content: protectedRepaired.content,
+        reviewNotes: protectedRepaired.reviewNotes,
+      }
+    }
+
+    const finalFindings = collectQualityGuardrailFindings(protectedRepaired.content, input.profile.genre)
     if (finalFindings.length > 0 && shouldForceRepair(finalFindings)) {
       // 第二轮修复：首轮修复后仍有强制修复触发，再做一次
-      const secondRepairNotes = enhanceReviewNotesWithGuardrails(repairNotes, repairedContent, input.profile.genre, finalFindings)
+      const secondRepairNotes = enhanceReviewNotesWithGuardrails(
+        protectedRepaired.reviewNotes,
+        protectedRepaired.content,
+        input.profile.genre,
+        finalFindings,
+      )
       try {
+        const secondPromptDraftContent = markLockedParagraphsInContent(protectedRepaired.content, input.lockedParagraphs)
         const secondContent = (await runChatTask({
           type: 'chapter_write',
           novelId: input.chapter.novelId,
@@ -579,29 +1012,37 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
               longTermMemory: input.context.longTermMemory,
               consistencyNotes: input.consistencyNotes,
               scenePlan: input.scenePlanText,
-              draftContent: repairedContent,
+              draftContent: secondPromptDraftContent,
               reviewNotes: formatReviewNotes(secondRepairNotes),
+              lockedParagraphs: input.lockedParagraphs,
               activeThreads: input.context.activeThreads,
               protagonistReference: input.profile.protagonistReference,
               protagonistRule: input.profile.protagonistRule,
+              promptTier,
             }),
           }],
           modelConfigId: input.novel.modelConfigId || undefined,
         })).trim()
         if (secondContent) {
-          return { content: secondContent, reviewNotes: secondRepairNotes }
+          const protectedSecond = enforceLockedParagraphProtection(
+            secondContent,
+            input.lockedParagraphs,
+            protectedRepaired.content,
+            secondRepairNotes,
+          )
+          return { content: protectedSecond.content, reviewNotes: protectedSecond.reviewNotes }
         }
       } catch {
         // 第二轮失败时返回第一轮结果
       }
-      return { content: repairedContent, reviewNotes: secondRepairNotes }
+      return { content: protectedRepaired.content, reviewNotes: secondRepairNotes }
     }
 
     return {
-      content: repairedContent,
+      content: protectedRepaired.content,
       reviewNotes: finalFindings.length > 0
-        ? enhanceReviewNotesWithGuardrails(repairNotes, repairedContent, input.profile.genre, finalFindings)
-        : repairNotes,
+        ? enhanceReviewNotesWithGuardrails(protectedRepaired.reviewNotes, protectedRepaired.content, input.profile.genre, finalFindings)
+        : protectedRepaired.reviewNotes,
     }
   } catch {
     return {
@@ -629,6 +1070,7 @@ async function updateChapterContinuityState(
     : null
 
   const fallback = buildFallbackContinuityState(chapter, summaryData)
+  let nextState = fallback
 
   try {
     const result = await runChatTask({
@@ -651,23 +1093,39 @@ async function updateChapterContinuityState(
       modelConfigId: novel.modelConfigId || undefined,
     })
 
-    const parsed = safeParseJson<Record<string, unknown>>(result)
-    const normalized = normalizeContinuityState(parsed, fallback)
-
-    db.update(chapters).set({
-      continuityStateJson: serializeContinuityState(normalized),
-      updatedAt: new Date().toISOString(),
-    }).where(eq(chapters.id, chapterId)).run()
-
-    return normalized
+    const parsedResult = parseAiJsonResult<Record<string, unknown>>(result, 'object', {
+      channel: 'chapter',
+      message: '章节连续性状态 JSON 解析失败，已回退到保底连续性摘要。',
+      consoleSummary: `[chapter:warn] continuity-json chapter=${chapterId}`,
+      context: {
+        chapterId,
+        novelId: chapter.novelId,
+        stage: 'continuity',
+      },
+    })
+    if (parsedResult.success && parsedResult.data) {
+      nextState = normalizeContinuityState(parsedResult.data, fallback)
+    }
   } catch {
-    db.update(chapters).set({
-      continuityStateJson: serializeContinuityState(fallback),
-      updatedAt: new Date().toISOString(),
-    }).where(eq(chapters.id, chapterId)).run()
-
-    return fallback
+    nextState = fallback
   }
+
+  db.update(chapters).set({
+    continuityStateJson: serializeContinuityState(nextState),
+    updatedAt: new Date().toISOString(),
+  }).where(eq(chapters.id, chapterId)).run()
+
+  if (arc) {
+    const progressState = computeStoryArcProgressState(arc, chapter, nextState)
+    db.update(storyArcs).set({
+      progressPercent: progressState.progressPercent,
+      stalledChapterCount: progressState.stalledChapterCount,
+      lastProgressChapterNum: progressState.lastProgressChapterNum,
+    }).where(eq(storyArcs.id, arc.id)).run()
+    persistArcProgressWarnings(chapterId, progressState.warnings)
+  }
+
+  return nextState
 }
 
 async function updateChapterSummaryData(chapterId: number): Promise<ChapterSummaryData> {
@@ -687,13 +1145,22 @@ async function updateChapterSummaryData(chapterId: number): Promise<ChapterSumma
       modelConfigId: novel?.modelConfigId || undefined,
     })
 
-    try {
-      const parsed = safeParseJson<Record<string, unknown>>(result)
+    const parsedResult = parseAiJsonResult<Record<string, unknown>>(result, 'object', {
+      channel: 'chapter',
+      message: '章节摘要 JSON 解析失败，已降级使用原始摘要文本。',
+      consoleSummary: `[chapter:warn] summary-json chapter=${chapterId}`,
+      context: {
+        chapterId,
+        novelId: chapter.novelId,
+        stage: 'summary',
+      },
+    })
+    if (parsedResult.success && parsedResult.data) {
       summaryData = {
-        summary: typeof parsed.summary === 'string' ? parsed.summary.trim() : '',
-        nextChapterSeed: typeof parsed.next_chapter_seed === 'string' ? parsed.next_chapter_seed.trim() : '',
+        summary: typeof parsedResult.data.summary === 'string' ? parsedResult.data.summary.trim() : '',
+        nextChapterSeed: typeof parsedResult.data.next_chapter_seed === 'string' ? parsedResult.data.next_chapter_seed.trim() : '',
       }
-    } catch {
+    } else {
       summaryData = {
         summary: result.trim(),
         nextChapterSeed: '',
@@ -737,7 +1204,10 @@ async function finalizeGeneratedChapterContent(chapterId: number, content: strin
   updateChapter(chapterId, {
     content,
     status: 'draft',
-  }, { skipStaleTracking: true })
+  }, {
+    skipStaleTracking: true,
+    versionSource: 'pipeline-generate',
+  })
 
   const { summary } = await refreshChapterMemory(chapterId)
   const chapter = getChapter(chapterId)
@@ -833,9 +1303,12 @@ export function updateChapter(id: number, data: Partial<{
   segmentCount: number
   contextVersion: number
   staleReasonJson: string
-}>, options: { skipStaleTracking?: boolean } = {}) {
+}>, options: { skipStaleTracking?: boolean; versionSource?: ChapterVersionSource | false } = {}) {
   const db = getDb()
   const previous = db.select().from(chapters).where(eq(chapters.id, id)).all()[0]
+  const versionSource = data.content !== undefined
+    ? normalizeChapterVersionSource(options.versionSource)
+    : null
 
   if (data.content !== undefined) {
     data.wordCount = countChineseWords(data.content)
@@ -860,6 +1333,10 @@ export function updateChapter(id: number, data: Partial<{
     syncChapterToSegments(id, data.content, { createIfMissing: true })
   }
 
+  if (chapter && versionSource) {
+    createChapterVersionSnapshot(id, versionSource)
+  }
+
   if (!options.skipStaleTracking && previous && data.content !== undefined) {
     markSubsequentChaptersStale(
       previous.novelId,
@@ -882,7 +1359,177 @@ export function deleteChapter(id: number) {
   }
 }
 
+export function listChapterVersions(chapterId: number) {
+  const db = getDb()
+  return db.select().from(chapterVersions)
+    .where(eq(chapterVersions.chapterId, chapterId))
+    .orderBy(desc(chapterVersions.createdAt), desc(chapterVersions.id))
+    .all()
+}
+
+export async function restoreChapterVersion(versionId: number) {
+  const db = getDb()
+  const version = db.select().from(chapterVersions).where(eq(chapterVersions.id, versionId)).all()[0]
+  if (!version) throw new Error('章节版本不存在')
+
+  const chapter = getChapter(version.chapterId)
+  if (!chapter) throw new Error('对应章节不存在')
+  if ((chapter.content || '') === version.content) {
+    return chapter
+  }
+
+  updateChapter(chapter.id, {
+    content: version.content,
+  }, {
+    versionSource: 'version-restore',
+  })
+
+  await refreshChapterMemory(chapter.id)
+  syncChapterTimelineStatuses(chapter.novelId, chapter.chapterNum)
+
+  return getChapter(chapter.id)
+}
+
+export function batchUpdateChapters(
+  ids: number[],
+  data: {
+    status?: typeof chapters.$inferSelect['status']
+    arcId?: number | null
+  },
+) {
+  const chapterIds = [...new Set(ids.filter((id) => Number.isFinite(id) && id > 0))]
+  if (chapterIds.length === 0) return 0
+
+  const db = getDb()
+  const rows = db.select().from(chapters)
+    .where(inArray(chapters.id, chapterIds))
+    .orderBy(asc(chapters.chapterNum))
+    .all()
+  if (rows.length === 0) return 0
+
+  rows.forEach((row) => {
+    const nextStatus = typeof data.status === 'string' ? data.status : undefined
+    updateChapter(row.id, {
+      ...(nextStatus !== undefined ? { status: nextStatus } : {}),
+      ...(data.arcId !== undefined ? { arcId: data.arcId ?? null } : {}),
+    }, {
+      skipStaleTracking: true,
+      versionSource: false,
+    })
+  })
+
+  createOperationLog({
+    novelId: rows[0].novelId,
+    entityType: 'chapter',
+    entityIds: rows.map((row) => row.id),
+    operationType: 'batch_update',
+    summary: `批量更新 ${rows.length} 章`,
+    batchKey: buildBatchKey('chapter-batch-update'),
+    before: rows,
+    after: data,
+    undoPayload: {
+      kind: 'chapter.batch_update',
+      novelId: rows[0].novelId,
+      chapters: rows,
+      reason: '已撤销章节批量更新',
+    },
+  })
+
+  return rows.length
+}
+
+export function batchDeleteChapters(ids: number[]) {
+  const chapterIds = [...new Set(ids.filter((id) => Number.isFinite(id) && id > 0))]
+  if (chapterIds.length === 0) return 0
+
+  const db = getDb()
+  const rows = db.select().from(chapters)
+    .where(inArray(chapters.id, chapterIds))
+    .orderBy(asc(chapters.chapterNum))
+    .all()
+  if (rows.length === 0) return 0
+
+  const segments = db.select().from(chapterSegments)
+    .where(inArray(chapterSegments.chapterId, rows.map((row) => row.id)))
+    .orderBy(asc(chapterSegments.chapterId), asc(chapterSegments.segmentOrder))
+    .all()
+  const timelineAnchors = captureTimelineAnchorsForChapterIds(rows.map((row) => row.id))
+
+  rows.forEach((row) => {
+    deleteChapter(row.id)
+  })
+
+  createOperationLog({
+    novelId: rows[0].novelId,
+    entityType: 'chapter',
+    entityIds: rows.map((row) => row.id),
+    operationType: 'batch_delete',
+    summary: `批量删除 ${rows.length} 章`,
+    batchKey: buildBatchKey('chapter-batch-delete'),
+    before: rows,
+    after: [],
+    undoPayload: {
+      kind: 'chapter.batch_delete',
+      novelId: rows[0].novelId,
+      chapters: rows,
+      segments,
+      timelineAnchors,
+      reason: '已撤销章节批量删除',
+    },
+  })
+
+  return rows.length
+}
+
+export function batchRenumberChapters(ids: number[], startChapterNum: number) {
+  const normalizedStart = Math.max(1, Math.round(startChapterNum || 1))
+  const chapterIds = [...new Set(ids.filter((id) => Number.isFinite(id) && id > 0))]
+  if (chapterIds.length === 0) return 0
+
+  const db = getDb()
+  const rows = db.select().from(chapters)
+    .where(inArray(chapters.id, chapterIds))
+    .orderBy(asc(chapters.chapterNum))
+    .all()
+  if (rows.length === 0) return 0
+
+  rows.forEach((row, index) => {
+    updateChapter(row.id, {
+      chapterNum: normalizedStart + index,
+    }, {
+      skipStaleTracking: true,
+      versionSource: false,
+    })
+  })
+
+  markSubsequentChaptersStale(
+    rows[0].novelId,
+    Math.max(0, normalizedStart - 1),
+    '章节顺序已批量调整',
+  )
+
+  createOperationLog({
+    novelId: rows[0].novelId,
+    entityType: 'chapter',
+    entityIds: rows.map((row) => row.id),
+    operationType: 'batch_reindex',
+    summary: `批量顺延重排 ${rows.length} 章`,
+    batchKey: buildBatchKey('chapter-batch-reindex'),
+    before: rows,
+    after: { startChapterNum: normalizedStart },
+    undoPayload: {
+      kind: 'chapter.batch_reindex',
+      novelId: rows[0].novelId,
+      chapters: rows,
+      reason: '已撤销章节顺序调整',
+    },
+  })
+
+  return rows.length
+}
+
 type ChapterComplexity = 'simple' | 'standard' | 'key'
+type ChapterContextStage = 'scenePlan' | 'draft' | 'review' | 'rewrite'
 
 function classifyChapterComplexity(chapter: typeof chapters.$inferSelect): ChapterComplexity {
   const outline = chapter.outline || ''
@@ -901,6 +1548,31 @@ function classifyChapterComplexity(chapter: typeof chapters.$inferSelect): Chapt
   return 'standard'
 }
 
+function resolveContextBudgetForStage(
+  stage: ChapterContextStage,
+  complexity: ChapterComplexity,
+  targetWords: number,
+): number {
+  const baseByStage: Record<ChapterContextStage, number> = {
+    scenePlan: 10000,
+    draft: 12000,
+    review: 10000,
+    rewrite: 13500,
+  }
+  const complexityOffset: Record<ChapterComplexity, number> = {
+    simple: -1200,
+    standard: 0,
+    key: 1800,
+  }
+  const largeChapterOffset = targetWords >= 5000
+    ? 1200
+    : targetWords >= 3500
+      ? 400
+      : 0
+
+  return Math.max(7000, baseByStage[stage] + complexityOffset[complexity] + largeChapterOffset)
+}
+
 export async function generateChapterContent(chapterId: number, sender?: WebContents): Promise<number> {
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
@@ -910,16 +1582,30 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
   if (!novel) throw new Error('小说不存在')
 
   const profile = await buildStoryProfile(chapter.novelId)
-  const context = await buildChapterContext(chapter.novelId, chapter.chapterNum)
   const consistencyNotes = buildConsistencyPromptSummary(buildNovelConsistencyReport(chapter.novelId))
-  const writingGuidance = [
-    context.styleTemplate ? `Writing style guide:\n${context.styleTemplate}` : '',
+  const complexity = classifyChapterComplexity(chapter)
+  const stageContext = async (promptProfile: ChapterContextStage) => buildChapterContext(chapter.novelId, chapter.chapterNum, {
+    promptProfile,
+    chapterComplexity: complexity,
+    totalBudget: resolveContextBudgetForStage(promptProfile, complexity, chapter.targetWords || 3000),
+  })
+  const scenePlanContext = await stageContext('scenePlan')
+  const draftContext = await stageContext('draft')
+  const reviewContext = complexity === 'simple' ? draftContext : await stageContext('review')
+  const rewriteContext = await stageContext('rewrite')
+  const buildWritingGuidance = (styleTemplate: string) => [
+    styleTemplate ? `Writing style guide:\n${styleTemplate}` : '',
     consistencyNotes,
   ].filter(Boolean).join('\n\n')
+  const draftWritingGuidance = buildWritingGuidance(draftContext.styleTemplate)
+  const rewriteWritingGuidance = buildWritingGuidance(rewriteContext.styleTemplate)
   const previousStatus = chapter.status || 'outline'
   const fallbackScenePlan = buildFallbackScenePlan(chapter)
-  const storyCore = buildStoryCore(profile, context.storyCore)
-  const complexity = classifyChapterComplexity(chapter)
+  const storyCore = buildStoryCore(profile, rewriteContext.storyCore || draftContext.storyCore || scenePlanContext.storyCore)
+  const currentArcRow = chapter.arcId
+    ? db.select().from(storyArcs).where(eq(storyArcs.id, chapter.arcId)).all()[0] || null
+    : null
+  const latestArcProgressNote = getLatestArcProgressNote(chapter.novelId, currentArcRow, chapter.chapterNum)
 
   updateChapter(chapterId, {
     status: 'writing',
@@ -938,51 +1624,60 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
       status: 'running',
     })
 
-    let scenePlan = fallbackScenePlan
-    try {
-      const scenePlanResult = await runChatTask({
-        type: 'chapter_scene_plan',
+    const scenePlanResult = await runChatTask({
+      type: 'chapter_scene_plan',
+      novelId: chapter.novelId,
+      relatedEntityType: 'chapter',
+      relatedEntityId: chapterId,
+      messages: [{
+        role: 'user',
+        content: buildScenePlanPrompt({
+          novelTitle: novel.title,
+          genre: profile.genre,
+          chapterNum: chapter.chapterNum,
+          chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
+          chapterGoal: scenePlanContext.chapterGoal,
+          plotPoints: chapter.outline || '',
+          emotionTone: chapter.emotionTone || '平稳',
+          targetWords: chapter.targetWords || 3000,
+          storyCore,
+          writingContractSummary: scenePlanContext.writingContractSummary,
+          relationSummary: scenePlanContext.relationSummary,
+          currentArc: scenePlanContext.currentArc,
+          worldRules: scenePlanContext.worldRules,
+          characterStates: scenePlanContext.characterStates,
+          itemSummary: scenePlanContext.itemSummary,
+          previousSummaries: scenePlanContext.previousSummaries,
+          lastChapterEnding: scenePlanContext.lastChapterEnding,
+          continuitySummary: scenePlanContext.continuitySummary,
+          openLoops: scenePlanContext.openLoops,
+          continuityNotes: scenePlanContext.continuityNotes,
+          timelineSummary: scenePlanContext.timelineSummary,
+          timelineOpenThreads: scenePlanContext.timelineOpenThreads,
+          longTermMemory: scenePlanContext.longTermMemory,
+          consistencyNotes,
+          activeThreads: scenePlanContext.activeThreads,
+          protagonistReference: profile.protagonistReference,
+          protagonistRule: profile.protagonistRule,
+          promptTier: complexity,
+        }),
+      }],
+      modelConfigId: novel.modelConfigId || undefined,
+    })
+    const scenePlanParse = parseAiJsonResult<unknown>(scenePlanResult, 'array', {
+      channel: 'chapter',
+      message: '章节场景规划 JSON 解析失败，本次生成已中止。',
+      consoleSummary: `[chapter:warn] scene-plan-json chapter=${chapterId}`,
+      context: {
+        chapterId,
         novelId: chapter.novelId,
-        relatedEntityType: 'chapter',
-        relatedEntityId: chapterId,
-        messages: [{
-          role: 'user',
-          content: buildScenePlanPrompt({
-            novelTitle: novel.title,
-            genre: profile.genre,
-            chapterNum: chapter.chapterNum,
-            chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
-            chapterGoal: context.chapterGoal,
-            plotPoints: chapter.outline || '',
-            emotionTone: chapter.emotionTone || '平稳',
-            targetWords: chapter.targetWords || 3000,
-            storyCore,
-            writingContractSummary: context.writingContractSummary,
-            relationSummary: context.relationSummary,
-            currentArc: context.currentArc,
-            worldRules: context.worldRules,
-            characterStates: context.characterStates,
-            itemSummary: context.itemSummary,
-            previousSummaries: context.previousSummaries,
-            lastChapterEnding: context.lastChapterEnding,
-            continuitySummary: context.continuitySummary,
-            openLoops: context.openLoops,
-            continuityNotes: context.continuityNotes,
-            timelineSummary: context.timelineSummary,
-            timelineOpenThreads: context.timelineOpenThreads,
-            longTermMemory: context.longTermMemory,
-            consistencyNotes,
-            activeThreads: context.activeThreads,
-            protagonistReference: profile.protagonistReference,
-            protagonistRule: profile.protagonistRule,
-          }),
-        }],
-        modelConfigId: novel.modelConfigId || undefined,
-      })
-      scenePlan = normalizeScenePlan(safeParseJson<unknown>(scenePlanResult), fallbackScenePlan)
-    } catch {
-      scenePlan = fallbackScenePlan
+        stage: 'scene-plan',
+      },
+    })
+    if (!scenePlanParse.success) {
+      throw scenePlanParse.error || new Error('章节场景规划 JSON 解析失败')
     }
+    const scenePlan = normalizeScenePlan(scenePlanParse.data, fallbackScenePlan)
 
     updateChapter(chapterId, { scenePlanJson: JSON.stringify(scenePlan) })
     const scenePlanText = formatScenePlan(scenePlan)
@@ -1009,35 +1704,37 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
           genre: profile.genre,
           chapterNum: chapter.chapterNum,
           chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
-          chapterGoal: context.chapterGoal,
+          chapterGoal: draftContext.chapterGoal,
           emotionTone: chapter.emotionTone || '平稳',
           targetWords: chapter.targetWords || 3000,
           storyCore,
-          writingContractSummary: context.writingContractSummary,
-          relationSummary: context.relationSummary,
-          currentArc: context.currentArc,
-          worldRules: context.worldRules,
-          characterStates: context.characterStates,
-          itemSummary: context.itemSummary,
-          previousSummaries: context.previousSummaries,
-          lastChapterEnding: context.lastChapterEnding,
-          continuitySummary: context.continuitySummary,
-          openLoops: context.openLoops,
-          continuityNotes: context.continuityNotes,
-          timelineSummary: context.timelineSummary,
-          timelineOpenThreads: context.timelineOpenThreads,
-          longTermMemory: context.longTermMemory,
-          consistencyNotes: writingGuidance,
+          writingContractSummary: draftContext.writingContractSummary,
+          relationSummary: draftContext.relationSummary,
+          currentArc: draftContext.currentArc,
+          worldRules: draftContext.worldRules,
+          characterStates: draftContext.characterStates,
+          itemSummary: draftContext.itemSummary,
+          previousSummaries: draftContext.previousSummaries,
+          lastChapterEnding: draftContext.lastChapterEnding,
+          continuitySummary: draftContext.continuitySummary,
+          openLoops: draftContext.openLoops,
+          continuityNotes: draftContext.continuityNotes,
+          timelineSummary: draftContext.timelineSummary,
+          timelineOpenThreads: draftContext.timelineOpenThreads,
+          longTermMemory: draftContext.longTermMemory,
+          consistencyNotes: draftWritingGuidance,
           scenePlan: scenePlanText,
           draftContent: '',
           reviewNotes: '',
-          activeThreads: context.activeThreads,
+          activeThreads: draftContext.activeThreads,
           protagonistReference: profile.protagonistReference,
           protagonistRule: profile.protagonistRule,
+          promptTier: complexity,
         }),
       }],
       modelConfigId: novel.modelConfigId || undefined,
     })
+    const lockedParagraphContext = buildLockedParagraphContext(chapter, draftContent)
 
     sendGenerationProgress(sender, {
       chapterId,
@@ -1053,46 +1750,60 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
 
     if (complexity !== 'simple') {
       // standard/key 章节：完整AI审校
-      try {
-        const reviewResult = await runChatTask({
-          type: 'chapter_review',
-          novelId: chapter.novelId,
-          relatedEntityType: 'chapter',
-          relatedEntityId: chapterId,
-          messages: [{
-            role: 'user',
-            content: buildChapterReviewPrompt({
-              novelTitle: novel.title,
-              genre: profile.genre,
-              chapterNum: chapter.chapterNum,
-              chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
-              chapterGoal: context.chapterGoal,
-              storyCore,
-              writingContractSummary: context.writingContractSummary,
-              relationSummary: context.relationSummary,
-              currentArc: context.currentArc,
-              worldRules: context.worldRules,
-              characterStates: context.characterStates,
-              itemSummary: context.itemSummary,
-              continuitySummary: context.continuitySummary,
-              openLoops: context.openLoops,
-              timelineSummary: context.timelineSummary,
-              longTermMemory: context.longTermMemory,
-              consistencyNotes,
-              scenePlan: scenePlanText,
-              draftContent,
-              protagonistReference: profile.protagonistReference,
-              protagonistRule: profile.protagonistRule,
-            }),
-          }],
-          modelConfigId: novel.modelConfigId || undefined,
-        })
+      const reviewResult = await runChatTask({
+        type: 'chapter_review',
+        novelId: chapter.novelId,
+        relatedEntityType: 'chapter',
+        relatedEntityId: chapterId,
+        messages: [{
+          role: 'user',
+          content: buildChapterReviewPrompt({
+            novelTitle: novel.title,
+            genre: profile.genre,
+            chapterNum: chapter.chapterNum,
+            chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
+            chapterGoal: reviewContext.chapterGoal,
+            storyCore,
+            writingContractSummary: reviewContext.writingContractSummary,
+            relationSummary: reviewContext.relationSummary,
+            currentArc: reviewContext.currentArc,
+            worldRules: reviewContext.worldRules,
+            characterStates: reviewContext.characterStates,
+            itemSummary: reviewContext.itemSummary,
+            continuitySummary: reviewContext.continuitySummary,
+            openLoops: reviewContext.openLoops,
+            timelineSummary: reviewContext.timelineSummary,
+            longTermMemory: reviewContext.longTermMemory,
+            consistencyNotes,
+            arcProgress: latestArcProgressNote,
+            arcProgressStatus: buildArcProgressStatus(currentArcRow, chapter.chapterNum),
+            arcProgressCheckpoint: buildArcProgressCheckpoint(currentArcRow, chapter.chapterNum),
+            scenePlan: scenePlanText,
+            draftContent,
+            protagonistReference: profile.protagonistReference,
+            protagonistRule: profile.protagonistRule,
+            promptTier: complexity,
+          }),
+        }],
+        modelConfigId: novel.modelConfigId || undefined,
+      })
 
-        const normalizedNotes = normalizeReviewNotes(safeParseJson<unknown>(reviewResult))
-        reviewNotes = hasReviewNotes(normalizedNotes) ? normalizedNotes : reviewNotes
-      } catch {
-        reviewNotes = buildFallbackReviewNotes(consistencyNotes)
+      const reviewParse = parseAiJsonResult<unknown>(reviewResult, 'object', {
+        channel: 'chapter',
+        message: '章节审校 JSON 解析失败，本次生成已中止。',
+        consoleSummary: `[chapter:warn] review-json chapter=${chapterId}`,
+        context: {
+          chapterId,
+          novelId: chapter.novelId,
+          stage: 'review',
+        },
+      })
+      if (!reviewParse.success) {
+        throw reviewParse.error || new Error('章节审校 JSON 解析失败')
       }
+
+      const normalizedNotes = normalizeReviewNotes(reviewParse.data)
+      reviewNotes = hasReviewNotes(normalizedNotes) ? normalizedNotes : reviewNotes
     }
 
     reviewNotes = enhanceReviewNotesWithGuardrails(reviewNotes, draftContent, profile.genre)
@@ -1113,31 +1824,33 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
       genre: profile.genre,
       chapterNum: chapter.chapterNum,
       chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
-      chapterGoal: context.chapterGoal,
+      chapterGoal: rewriteContext.chapterGoal,
       emotionTone: chapter.emotionTone || '平稳',
       targetWords: chapter.targetWords || 3000,
       storyCore,
-      writingContractSummary: context.writingContractSummary,
-      relationSummary: context.relationSummary,
-      currentArc: context.currentArc,
-      worldRules: context.worldRules,
-      characterStates: context.characterStates,
-      itemSummary: context.itemSummary,
-      previousSummaries: context.previousSummaries,
-      lastChapterEnding: context.lastChapterEnding,
-      continuitySummary: context.continuitySummary,
-      openLoops: context.openLoops,
-      continuityNotes: context.continuityNotes,
-      timelineSummary: context.timelineSummary,
-      timelineOpenThreads: context.timelineOpenThreads,
-      longTermMemory: context.longTermMemory,
-      consistencyNotes: writingGuidance,
+      writingContractSummary: rewriteContext.writingContractSummary,
+      relationSummary: rewriteContext.relationSummary,
+      currentArc: rewriteContext.currentArc,
+      worldRules: rewriteContext.worldRules,
+      characterStates: rewriteContext.characterStates,
+      itemSummary: rewriteContext.itemSummary,
+      previousSummaries: rewriteContext.previousSummaries,
+      lastChapterEnding: rewriteContext.lastChapterEnding,
+      continuitySummary: rewriteContext.continuitySummary,
+      openLoops: rewriteContext.openLoops,
+      continuityNotes: rewriteContext.continuityNotes,
+      timelineSummary: rewriteContext.timelineSummary,
+      timelineOpenThreads: rewriteContext.timelineOpenThreads,
+      longTermMemory: rewriteContext.longTermMemory,
+      consistencyNotes: rewriteWritingGuidance,
       scenePlan: scenePlanText,
-      draftContent,
+      draftContent: lockedParagraphContext.promptDraftContent,
       reviewNotes: formatReviewNotes(reviewNotes),
-      activeThreads: context.activeThreads,
+      lockedParagraphs: lockedParagraphContext.lockedParagraphs,
+      activeThreads: rewriteContext.activeThreads,
       protagonistReference: profile.protagonistReference,
       protagonistRule: profile.protagonistRule,
+      promptTier: complexity,
     })
 
     const messages = [{ role: 'user' as const, content: prompt }]
@@ -1152,16 +1865,23 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
       modelConfigId: novel.modelConfigId || undefined,
       sender,
       onSuccess: async (output) => {
+        const protectedOutput = enforceLockedParagraphProtection(
+          output,
+          lockedParagraphContext.lockedParagraphs,
+          lockedParagraphContext.initialFallbackContent,
+          reviewNotes,
+        )
         const repaired = await repairChapterOutputIfNeeded({
           chapter,
           novel,
-          context,
+          context: rewriteContext,
           storyCore,
           profile,
           scenePlanText,
-          consistencyNotes: writingGuidance,
-          reviewNotes,
-          content: output,
+          consistencyNotes: rewriteWritingGuidance,
+          reviewNotes: protectedOutput.reviewNotes,
+          content: protectedOutput.content,
+          lockedParagraphs: lockedParagraphContext.lockedParagraphs,
         })
 
         if (repaired.reviewNotes !== reviewNotes) {
@@ -1222,16 +1942,27 @@ export async function aiCheckChapter(chapterId: number): Promise<unknown> {
   })
 
   try {
-    const parsed = safeParseJson<Record<string, unknown>>(result)
+    const parsedResult = parseAiJsonResult<Record<string, unknown>>(result, 'object', {
+      channel: 'chapter',
+      message: '章节 AI 体检 JSON 解析失败，已降级返回原始文本。',
+      consoleSummary: `[chapter:warn] ai-check-json chapter=${chapterId}`,
+      context: {
+        chapterId,
+        novelId: chapter.novelId,
+        stage: 'ai-check',
+      },
+    })
     db.update(chapters).set({
       aiScoreJson: result,
       updatedAt: new Date().toISOString(),
     }).where(eq(chapters.id, chapterId)).run()
-    return parsed
+    if (parsedResult.success && parsedResult.data) {
+      return parsedResult.data
+    }
+    return { score: 0, issues: [], overall_feedback: result }
   } catch {
     return { score: 0, issues: [], overall_feedback: result }
   }
 }
 
 export { runChapterPublishCheck }
-

@@ -12,7 +12,11 @@ import {
   storyVolumes,
   timelineEvents,
 } from '../database/schema'
+import { markStoryMemoryCheckpointsDirty } from './context-impact.service'
 import { ensureStoryStructure } from './story-structure.service'
+
+const CHECKPOINT_CHAPTER_REFRESH_INTERVAL = 30
+const CHECKPOINT_TIME_REFRESH_MS = 7 * 24 * 60 * 60 * 1000
 
 type StoryMemoryMode = 'standard' | 'longform' | 'epic' | 'mega'
 type CheckpointScope = 'novel' | 'volume' | 'part'
@@ -367,7 +371,39 @@ function checkpointsNeedRefresh(novelId: number): boolean {
     .where(eq(storyMemoryCheckpoints.novelId, novelId))
     .all()
   if (checkpoints.length === 0) return true
-  return checkpoints.some((checkpoint) => (checkpoint.version || 1) < (novel.contextVersion || 1) || checkpoint.stale === 1)
+  if (checkpoints.some((checkpoint) => (checkpoint.version || 1) < (novel.contextVersion || 1) || checkpoint.stale === 1)) {
+    return true
+  }
+
+  const latestChapterNum = db.select().from(chapters)
+    .where(eq(chapters.novelId, novelId))
+    .orderBy(asc(chapters.chapterNum))
+    .all()
+    .at(-1)?.chapterNum || 0
+  const novelCheckpoint = checkpoints.find((checkpoint) =>
+    checkpoint.scopeType === 'novel' && (checkpoint.scopeId ?? null) === null)
+  if (!novelCheckpoint) return true
+
+  if (
+    latestChapterNum > 0
+    && latestChapterNum - (novelCheckpoint.lastRefreshedChapterNum || 0) >= CHECKPOINT_CHAPTER_REFRESH_INTERVAL
+  ) {
+    markStoryMemoryCheckpointsDirty(novelId)
+    return true
+  }
+
+  const refreshedAt = Date.parse(novelCheckpoint.updatedAt || novelCheckpoint.createdAt || '')
+  if (!Number.isFinite(refreshedAt)) {
+    markStoryMemoryCheckpointsDirty(novelId)
+    return true
+  }
+
+  if (Date.now() - refreshedAt >= CHECKPOINT_TIME_REFRESH_MS) {
+    markStoryMemoryCheckpointsDirty(novelId)
+    return true
+  }
+
+  return false
 }
 
 export function refreshStoryMemoryCheckpoints(novelId: number) {

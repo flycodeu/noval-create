@@ -10,7 +10,6 @@ import {
 } from '../database/schema'
 import { markTimelineEventsSegmentAnchorInvalid, syncTimelineStructureAnchors } from './timeline.service'
 import type {
-  Chapter,
   StoryPart,
   StoryPartReorderOperation,
   StoryVolume,
@@ -22,6 +21,7 @@ import type {
   StructureBatchPreview,
   StructureBatchPreviewItem,
 } from '../../src/types'
+import { markStoryMemoryCheckpointsDirty } from './context-impact.service'
 
 function asText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
@@ -266,6 +266,8 @@ function markNovelContextChangedInline(novelId: number, reason: string) {
       updatedAt: now,
     }).where(eq(chapters.id, chapter.id)).run()
   }
+
+  markStoryMemoryCheckpointsDirty(novelId, now)
 }
 
 function runStructureTransaction(novelId: number, mutate: () => void) {
@@ -1104,7 +1106,7 @@ export function applyStructureBatchEdit(novelId: number, operations: StructureBa
 }
 
 function createStructureSegmentFromPlan(
-  chapterRow: Chapter,
+  chapterRow: typeof chapters.$inferSelect,
   segment: StructureBatchPlanSegmentInput,
   segmentOrder: number,
 ) {

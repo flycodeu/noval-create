@@ -1,4 +1,24 @@
+import { logWarn } from './runtime-log'
+
 export type AiJsonRoot = 'object' | 'array' | 'any'
+
+type AiJsonParseStrategy = 'raw' | 'normalized' | 'repaired'
+
+export interface AiJsonParseResult<T = unknown> {
+  success: boolean
+  data?: T
+  error?: SyntaxError
+  payloadPreview: string
+  repaired: boolean
+  strategy?: AiJsonParseStrategy
+}
+
+interface AiJsonParseLogOptions {
+  channel?: string
+  message?: string
+  context?: Record<string, unknown>
+  consoleSummary?: string
+}
 
 function normalizeCjkQuotes(text: string): string {
   return text
@@ -22,6 +42,20 @@ function trimCodeFence(text: string): string {
 function buildParseError(message: string, text: string): SyntaxError {
   const preview = text.replace(/\s+/g, ' ').slice(0, 220)
   return new SyntaxError(`${message}。输出片段：${preview}`)
+}
+
+function buildPayloadPreview(text: string): string {
+  return trimCodeFence(text).replace(/\s+/g, ' ').slice(0, 500)
+}
+
+function assertExpectedRoot(value: unknown, expectedRoot: AiJsonRoot, sourceText: string): void {
+  if (expectedRoot === 'object' && (!value || typeof value !== 'object' || Array.isArray(value))) {
+    throw buildParseError('AI JSON 根节点必须是对象', sourceText)
+  }
+
+  if (expectedRoot === 'array' && !Array.isArray(value)) {
+    throw buildParseError('AI JSON 根节点必须是数组', sourceText)
+  }
 }
 
 function findNextNonWhitespaceIndex(text: string, start: number): number {
@@ -347,31 +381,86 @@ function repairCommonAiJsonIssues(text: string): string {
   return removeTrailingCommas(result.join(''))
 }
 
-/**
- * Parse AI output that is expected to contain JSON, allowing mild wrapper text
- * and simple formatting mistakes such as trailing commas.
- */
-export function safeParseAiJson<T = unknown>(text: string, expectedRoot: AiJsonRoot = 'any'): T {
+function parseAiJsonInternal<T = unknown>(
+  text: string,
+  expectedRoot: AiJsonRoot,
+): { data: T; strategy: AiJsonParseStrategy } {
   const cleaned = trimCodeFence(text)
 
   try {
-    return JSON.parse(cleaned) as T
+    const parsed = JSON.parse(cleaned) as T
+    assertExpectedRoot(parsed, expectedRoot, cleaned)
+    return { data: parsed, strategy: 'raw' }
   } catch {
     const normalized = normalizeAiJsonText(cleaned, expectedRoot)
 
     try {
-      return JSON.parse(normalized) as T
-    } catch (error) {
+      const parsed = JSON.parse(normalized) as T
+      assertExpectedRoot(parsed, expectedRoot, normalized)
+      return { data: parsed, strategy: 'normalized' }
+    } catch {
       const repaired = repairCommonAiJsonIssues(normalized)
 
       try {
-        return JSON.parse(repaired) as T
+        const parsed = JSON.parse(repaired) as T
+        assertExpectedRoot(parsed, expectedRoot, repaired)
+        return { data: parsed, strategy: 'repaired' }
       } catch (repairError) {
         const rawMessage = repairError instanceof Error ? repairError.message : 'JSON 解析失败'
         throw buildParseError(`AI JSON 解析失败：${rawMessage}`, repaired)
       }
     }
   }
+}
+
+export function parseAiJsonResult<T = unknown>(
+  text: string,
+  expectedRoot: AiJsonRoot = 'any',
+  logOptions: AiJsonParseLogOptions = {},
+): AiJsonParseResult<T> {
+  const payloadPreview = buildPayloadPreview(text)
+
+  try {
+    const parsed = parseAiJsonInternal<T>(text, expectedRoot)
+    return {
+      success: true,
+      data: parsed.data,
+      payloadPreview,
+      repaired: parsed.strategy === 'repaired',
+      strategy: parsed.strategy,
+    }
+  } catch (error) {
+    const syntaxError = error instanceof SyntaxError
+      ? error
+      : buildParseError(error instanceof Error ? error.message : 'AI JSON 解析失败', text)
+
+    logWarn(logOptions.channel || 'json', logOptions.message || 'AI JSON 解析失败。', {
+      consoleSummary: logOptions.consoleSummary || `[json:warn] AI JSON parse failed`,
+      context: {
+        expectedRoot,
+        payloadPreview,
+        ...logOptions.context,
+      },
+      error: syntaxError,
+    })
+
+    return {
+      success: false,
+      error: syntaxError,
+      payloadPreview,
+      repaired: false,
+    }
+  }
+}
+
+/**
+ * Parse AI output that is expected to contain JSON, allowing mild wrapper text
+ * and simple formatting mistakes such as trailing commas.
+ */
+export function safeParseAiJson<T = unknown>(text: string, expectedRoot: AiJsonRoot = 'any'): T {
+  const result = parseAiJsonResult<T>(text, expectedRoot)
+  if (result.success) return result.data as T
+  throw result.error || buildParseError('AI JSON 解析失败', text)
 }
 
 /**

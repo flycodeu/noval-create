@@ -88,6 +88,8 @@ export function useTimelineWorkspace(novelId: number) {
 
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [selectedEvent, setSelectedEvent] = useState<TimelineEvent | null>(null)
+  const [selectedIds, setSelectedIds] = useState<number[]>([])
+  const [lastSelectedListId, setLastSelectedListId] = useState<number | null>(null)
   const [creating, setCreating] = useState(false)
 
   const [statusFilter, setStatusFilter] = useState<TimelineStatusFilter>('all')
@@ -558,14 +560,47 @@ export function useTimelineWorkspace(novelId: number) {
     void loadSegmentsFor(chapterId)
   }, [loadSegmentsFor, segmentById, watchedChapterEndId, watchedChapterStartId, watchedSegmentId])
 
-  const handleSelect = useCallback(async (event: TimelineEvent) => {
+  const clearSelection = useCallback(() => {
+    setSelectedIds([])
+    setLastSelectedListId(null)
+  }, [])
+
+  const handleSelect = useCallback(async (
+    event: TimelineEvent,
+    nativeEvent?: { metaKey?: boolean; ctrlKey?: boolean; shiftKey?: boolean },
+  ) => {
+    const withMeta = Boolean(nativeEvent && (nativeEvent.metaKey || nativeEvent.ctrlKey))
+    const withShift = Boolean(nativeEvent && nativeEvent.shiftKey)
+
+    if (withShift && lastSelectedListId) {
+      const startIndex = pageData.items.findIndex((item) => item.id === lastSelectedListId)
+      const endIndex = pageData.items.findIndex((item) => item.id === event.id)
+      if (startIndex >= 0 && endIndex >= 0) {
+        const [from, to] = startIndex < endIndex ? [startIndex, endIndex] : [endIndex, startIndex]
+        const rangeIds = pageData.items.slice(from, to + 1).map((item) => item.id)
+        setSelectedIds((current) => [...new Set([...current, ...rangeIds])])
+        return
+      }
+    }
+
+    if (withMeta) {
+      setSelectedIds((current) => current.includes(event.id)
+        ? current.filter((item) => item !== event.id)
+        : [...current, event.id])
+      setLastSelectedListId(event.id)
+      return
+    }
+
+    setSelectedIds([event.id])
+    setLastSelectedListId(event.id)
     await loadEventDetail(event.id)
-  }, [loadEventDetail])
+  }, [lastSelectedListId, loadEventDetail, pageData.items])
 
   const handleNew = useCallback(() => {
     setCreating(true)
     setSelectedId(null)
     setSelectedEvent(null)
+    clearSelection()
     form.setFieldsValue(buildDefaultTimelineValues(
       defaultMode,
       defaultPrecision,
@@ -580,7 +615,7 @@ export function useTimelineWorkspace(novelId: number) {
       pageData.total + 1,
     ))
     void hydrateOptions(null)
-  }, [chapterFilter, defaultMode, defaultPrecision, defaultType, form, hydrateOptions, pageData.total, partFilter, segmentFilter, volumeFilter])
+  }, [chapterFilter, clearSelection, defaultMode, defaultPrecision, defaultType, form, hydrateOptions, pageData.total, partFilter, segmentFilter, volumeFilter])
 
   const handleFormValuesChange = useCallback((changed: Partial<TimelineFormValues>, values: TimelineFormValues) => {
     if ('volumeId' in changed) {
@@ -768,6 +803,7 @@ export function useTimelineWorkspace(novelId: number) {
     arcs,
     chapterFilter,
     characterOptions,
+    clearSelection,
     creating,
     currentNovel,
     defaultMode,
@@ -819,6 +855,7 @@ export function useTimelineWorkspace(novelId: number) {
     segmentFilter,
     selectedEvent,
     selectedId,
+    selectedIds,
     selectedTimeMode,
     setChapterFilter,
     setGenerateOpen,

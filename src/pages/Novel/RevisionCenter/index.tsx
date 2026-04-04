@@ -70,6 +70,8 @@ const EMPTY_VALUES: RevisionTaskFormValues = {
   relatedPage: 'writing',
 }
 
+const REVISION_PAGE_SIZE = 50
+
 function getStatusColor(status: RevisionTask['status']) {
   if (status === 'resolved') return 'success'
   if (status === 'in_progress') return 'processing'
@@ -109,6 +111,7 @@ export default function RevisionCenterPage({ novelId }: Props) {
   const { currentNovel } = useNovelStore()
   const [form] = Form.useForm<RevisionTaskFormValues>()
   const [tasks, setTasks] = useState<RevisionTask[]>([])
+  const [taskTotal, setTaskTotal] = useState(0)
   const [stats, setStats] = useState({ total: 0, openCount: 0, inProgressCount: 0, resolvedCount: 0, blockerCount: 0 })
   const [contextStatus, setContextStatus] = useState<NovelContextStatus | null>(null)
   const [consistencyReport, setConsistencyReport] = useState<NovelConsistencyReport | null>(null)
@@ -120,6 +123,7 @@ export default function RevisionCenterPage({ novelId }: Props) {
   const [sourceFilter, setSourceFilter] = useState<'all' | RevisionTask['taskSource']>('all')
   const [statusFilter, setStatusFilter] = useState<'all' | RevisionTask['status']>('all')
   const [keyword, setKeyword] = useState('')
+  const [page, setPage] = useState(1)
   const [draftWarnings, setDraftWarnings] = useState<string[]>([])
   const draftWarningsRef = React.useRef<string[]>([])
   const draftObservabilityRef = React.useRef<{ inputSummary: string; lintWarnings: string[]; rawOutputs: string[] } | null>(null)
@@ -127,13 +131,22 @@ export default function RevisionCenterPage({ novelId }: Props) {
   const refresh = useCallback(async () => {
     setLoading(true)
     try {
-      const [snapshot, nextContextStatus, report] = await Promise.all([
-        window.electron.revision.getSnapshot(novelId),
+      const [queryResult, nextStats, nextContextStatus, report] = await Promise.all([
+        window.electron.revision.query({
+          novelId,
+          page,
+          pageSize: REVISION_PAGE_SIZE,
+          taskSource: sourceFilter === 'all' ? undefined : sourceFilter,
+          status: statusFilter === 'all' ? undefined : statusFilter,
+          keyword: keyword.trim() || undefined,
+        }),
+        window.electron.revision.getStats({ novelId }),
         window.electron.novel.getContextStatus(novelId),
         window.electron.novel.runConsistencyCheck(novelId),
       ])
-      setTasks(snapshot.tasks)
-      setStats(snapshot.stats)
+      setTasks(queryResult.items)
+      setTaskTotal(queryResult.total)
+      setStats(nextStats)
       setContextStatus(nextContextStatus)
       setConsistencyReport(report)
     } catch (error) {
@@ -142,25 +155,15 @@ export default function RevisionCenterPage({ novelId }: Props) {
     } finally {
       setLoading(false)
     }
-  }, [novelId])
+  }, [keyword, novelId, page, sourceFilter, statusFilter])
 
   useEffect(() => {
     void refresh()
   }, [refresh])
 
-  const visibleTasks = useMemo(() => {
-    const normalizedKeyword = keyword.trim().toLowerCase()
-    return tasks.filter((task) => {
-      if (sourceFilter !== 'all' && task.taskSource !== sourceFilter) return false
-      if (statusFilter !== 'all' && task.status !== statusFilter) return false
-      if (!normalizedKeyword) return true
-      const haystack = [task.title, task.description, task.fixBrief, task.relatedPage]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase()
-      return haystack.includes(normalizedKeyword)
-    })
-  }, [keyword, sourceFilter, statusFilter, tasks])
+  useEffect(() => {
+    setPage(1)
+  }, [keyword, sourceFilter, statusFilter])
 
   const manualCount = useMemo(
     () => tasks.filter((task) => task.taskSource === 'manual').length,
@@ -547,8 +550,14 @@ export default function RevisionCenterPage({ novelId }: Props) {
             rowKey="id"
             loading={loading}
             columns={columns}
-            dataSource={visibleTasks}
-            pagination={false}
+            dataSource={tasks}
+            pagination={{
+              current: page,
+              pageSize: REVISION_PAGE_SIZE,
+              total: taskTotal,
+              showSizeChanger: false,
+              onChange: setPage,
+            }}
           />
         </div>
       </WorkspacePanel>

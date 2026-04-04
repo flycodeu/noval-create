@@ -51,6 +51,7 @@ export default function ModelManager() {
       baseUrl: config.baseUrl,
       temperature: config.temperature,
       maxTokens: config.maxTokens,
+      maxConcurrency: config.maxConcurrency,
     })
   }
 
@@ -59,7 +60,7 @@ export default function ModelManager() {
     setIsNew(true)
     setTestResult(null)
     form.resetFields()
-    form.setFieldsValue({ temperature: 0.85, maxTokens: 4096, provider: 'openai' })
+    form.setFieldsValue({ temperature: 0.85, maxTokens: 4096, maxConcurrency: 2, provider: 'openai' })
   }
 
   const handleSave = async () => {
@@ -256,6 +257,10 @@ export default function ModelManager() {
 
               <Form.Item name="maxTokens" label="Max Tokens（最大输出）">
                 <InputNumber min={512} max={32000} step={512} style={{ width: '100%' }} />
+              </Form.Item>
+
+              <Form.Item name="maxConcurrency" label="最大并发请求数">
+                <InputNumber min={1} max={8} step={1} style={{ width: '100%' }} />
               </Form.Item>
 
               {/* 测试连接 */}

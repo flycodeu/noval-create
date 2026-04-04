@@ -19,6 +19,7 @@ import {
   WorkspacePage,
   WorkspacePanel,
 } from '../components/WorkspaceShell'
+import { useNovelWorkspaceActions } from '../workspace-shortcuts'
 
 interface Props {
   novelId: number
@@ -85,6 +86,8 @@ const DEFAULT_GENERATE_VALUES: GenerateFormValues = {
   batchSize: 4,
   focus: '',
 }
+
+const THREADS_PAGE_SIZE = 50
 
 function compactText(value?: string | null, max = 44): string {
   const text = value?.trim() || ''
@@ -161,10 +164,12 @@ function parseRouteId(value: string | null): number | null {
 export default function StoryThreadsPage({ novelId }: Props) {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
+  const { mutationToken, notifyWorkspaceMutation, registerEscapeHandler, registerSaveHandler } = useNovelWorkspaceActions()
   const { currentNovel } = useNovelStore()
   const [editorForm] = Form.useForm<StoryThreadFormValues>()
   const [generateForm] = Form.useForm<GenerateFormValues>()
   const [threads, setThreads] = useState<StoryThread[]>([])
+  const [threadTotal, setThreadTotal] = useState(0)
   const [stats, setStats] = useState({ total: 0, activeCount: 0, resolvedCount: 0, stalledCount: 0, overdueCount: 0 })
   const [workflowStats, setWorkflowStats] = useState<WorkflowStats>(EMPTY_WORKFLOW_STATS)
   const [loading, setLoading] = useState(false)
@@ -174,6 +179,10 @@ export default function StoryThreadsPage({ novelId }: Props) {
   const [generateOpen, setGenerateOpen] = useState(false)
   const [editingThread, setEditingThread] = useState<StoryThread | null>(null)
   const [generationWarnings, setGenerationWarnings] = useState<string[]>([])
+  const [selectedRowKeys, setSelectedRowKeys] = useState<number[]>([])
+  const [batchStatus, setBatchStatus] = useState<StoryThread['status']>('planned')
+  const [batchPriority, setBatchPriority] = useState<StoryThread['priority']>('medium')
+  const [page, setPage] = useState(1)
   const routeEditorRef = useRef<number | null>(null)
   const routeThreadId = useMemo(() => parseRouteId(searchParams.get('threadId')), [searchParams])
   const routeAction = useMemo(() => searchParams.get('action'), [searchParams])
@@ -186,11 +195,12 @@ export default function StoryThreadsPage({ novelId }: Props) {
     setLoading(true)
     try {
       const [queryResult, nextStats, nextWorkflowStats] = await Promise.all([
-        window.electron.thread.query({ novelId, page: 1, pageSize: 200 }),
+        window.electron.thread.query({ novelId, page, pageSize: THREADS_PAGE_SIZE }),
         window.electron.thread.getStats({ novelId, page: 1, pageSize: 1 }),
         loadWorkflowStats(novelId),
       ])
       setThreads(queryResult.items)
+      setThreadTotal(queryResult.total)
       setStats(nextStats)
       setWorkflowStats(nextWorkflowStats)
     } catch (error) {
@@ -199,17 +209,24 @@ export default function StoryThreadsPage({ novelId }: Props) {
     } finally {
       setLoading(false)
     }
-  }, [novelId])
+  }, [novelId, page])
 
   useEffect(() => {
     void refresh()
-  }, [refresh])
+  }, [mutationToken, refresh])
   useEffect(() => {
     if (!routeThreadId || routeAction !== 'edit' || routeEditorRef.current === routeThreadId) return
     const target = threads.find((thread) => thread.id === routeThreadId)
-    if (!target) return
-    routeEditorRef.current = routeThreadId
-    openEditor(target)
+    if (target) {
+      routeEditorRef.current = routeThreadId
+      openEditor(target)
+      return
+    }
+    void window.electron.thread.get(routeThreadId).then((thread) => {
+      if (!thread) return
+      routeEditorRef.current = routeThreadId
+      openEditor(thread)
+    })
   }, [routeAction, routeThreadId, threads])
 
   useEffect(() => {
@@ -246,9 +263,10 @@ export default function StoryThreadsPage({ novelId }: Props) {
       cancelText: '取消',
       onOk: async () => {
         try {
-          await window.electron.thread.delete(thread.id)
+          await window.electron.thread.batchDelete([thread.id])
           message.success('故事线程已删除。')
           await refresh()
+          notifyWorkspaceMutation()
         } catch (error) {
           console.error(error)
           message.error(error instanceof Error ? error.message : '故事线程删除失败。')
@@ -273,12 +291,69 @@ export default function StoryThreadsPage({ novelId }: Props) {
       setEditorOpen(false)
       setEditingThread(null)
       await refresh()
+      notifyWorkspaceMutation()
     } catch (error) {
       console.error(error)
       message.error(error instanceof Error ? error.message : '故事线程保存失败。')
     } finally {
       setSaving(false)
     }
+  }
+
+  useEffect(() => {
+    registerSaveHandler(editorOpen ? () => { void handleSave() } : null)
+    return () => registerSaveHandler(null)
+  }, [editorOpen, handleSave, registerSaveHandler])
+
+  useEffect(() => {
+    registerEscapeHandler(() => {
+      setSelectedRowKeys([])
+    })
+    return () => registerEscapeHandler(null)
+  }, [registerEscapeHandler])
+
+  const handleBatchStatusUpdate = async () => {
+    if (selectedRowKeys.length === 0) return
+    try {
+      await window.electron.thread.batchUpdate(selectedRowKeys, { status: batchStatus })
+      setSelectedRowKeys([])
+      await refresh()
+      notifyWorkspaceMutation()
+      message.success(`已批量更新 ${selectedRowKeys.length} 条线程状态。`)
+    } catch (error) {
+      console.error(error)
+      message.error(error instanceof Error ? error.message : '批量更新线程状态失败。')
+    }
+  }
+
+  const handleBatchPriorityUpdate = async () => {
+    if (selectedRowKeys.length === 0) return
+    try {
+      await window.electron.thread.batchUpdate(selectedRowKeys, { priority: batchPriority })
+      setSelectedRowKeys([])
+      await refresh()
+      notifyWorkspaceMutation()
+      message.success(`已批量更新 ${selectedRowKeys.length} 条线程优先级。`)
+    } catch (error) {
+      console.error(error)
+      message.error(error instanceof Error ? error.message : '批量更新线程优先级失败。')
+    }
+  }
+
+  const handleBatchDelete = () => {
+    if (selectedRowKeys.length === 0) return
+    Modal.confirm({
+      title: `删除选中的 ${selectedRowKeys.length} 条故事线程？`,
+      content: '会创建恢复点，可通过“撤销最近操作”恢复。',
+      okType: 'danger',
+      onOk: async () => {
+        await window.electron.thread.batchDelete(selectedRowKeys)
+        setSelectedRowKeys([])
+        await refresh()
+        notifyWorkspaceMutation()
+        message.success('已批量删除故事线程。')
+      },
+    })
   }
 
   const handleGenerate = async () => {
@@ -299,6 +374,7 @@ export default function StoryThreadsPage({ novelId }: Props) {
       setGenerationWarnings(result.warnings)
       setGenerateOpen(false)
       await refresh()
+      notifyWorkspaceMutation()
 
       if (result.warnings.length > 0) {
         message.warning(`已生成 ${result.createdCount}/${result.requestedCount} 条线程，另有 ${result.warnings.length} 条提醒。`)
@@ -319,6 +395,7 @@ export default function StoryThreadsPage({ novelId }: Props) {
       await window.electron.thread.regenerate(thread.id)
       message.success('故事线程已按当前设定重生成。')
       await refresh()
+      notifyWorkspaceMutation()
     } catch (error) {
       console.error(error)
       message.error(error instanceof Error ? error.message : '故事线程重生成失败。')
@@ -327,7 +404,7 @@ export default function StoryThreadsPage({ novelId }: Props) {
     }
   }
 
-  const columns = useMemo<ColumnsType<StoryThread>>(() => [
+  const columns: ColumnsType<StoryThread> = [
     {
       title: '线程',
       dataIndex: 'title',
@@ -381,7 +458,7 @@ export default function StoryThreadsPage({ novelId }: Props) {
         </Space>
       ),
     },
-  ], [])
+  ]
 
   return (
     <WorkspacePage
@@ -475,12 +552,45 @@ export default function StoryThreadsPage({ novelId }: Props) {
       </WorkspacePanel>
 
       <WorkspacePanel title="线程看板" description="可手工维护，也可以先批量生成再逐条修。">
+        {selectedRowKeys.length > 0 ? (
+          <div className="novel-filter-bar" style={{ marginBottom: 16 }}>
+            <div className="novel-filter-bar__row">
+              <Tag color="processing">{`已选 ${selectedRowKeys.length} 条`}</Tag>
+              <Select
+                value={batchStatus}
+                style={{ width: 160 }}
+                options={THREAD_STATUS_OPTIONS}
+                onChange={(value) => setBatchStatus(value)}
+              />
+              <Button onClick={() => void handleBatchStatusUpdate()}>批量改状态</Button>
+              <Select
+                value={batchPriority}
+                style={{ width: 160 }}
+                options={PRIORITY_OPTIONS}
+                onChange={(value) => setBatchPriority(value)}
+              />
+              <Button onClick={() => void handleBatchPriorityUpdate()}>批量改优先级</Button>
+              <Button danger onClick={handleBatchDelete}>批量删除</Button>
+            </div>
+            <div className="novel-filter-bar__summary">危险操作会自动创建恢复点，`Esc` 可清空当前批量选择。</div>
+          </div>
+        ) : null}
         <Table
           rowKey="id"
+          rowSelection={{
+            selectedRowKeys,
+            onChange: (keys) => setSelectedRowKeys(keys as number[]),
+          }}
           loading={loading}
           columns={columns}
           dataSource={threads}
-          pagination={false}
+          pagination={{
+            current: page,
+            pageSize: THREADS_PAGE_SIZE,
+            total: threadTotal,
+            showSizeChanger: false,
+            onChange: setPage,
+          }}
         />
       </WorkspacePanel>
 

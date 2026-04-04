@@ -1,4 +1,4 @@
-﻿import { asc, eq } from 'drizzle-orm'
+import { asc, eq, inArray } from 'drizzle-orm'
 import type {
   StoryThreadBatchGenerateOptions,
   StoryThreadBatchGenerationResult,
@@ -15,6 +15,7 @@ import { chapters, novels, storyThreads } from '../database/schema'
 import { safeParseAiJson } from '../utils/json'
 import { markNovelContextChanged } from './context-impact.service'
 import { buildStoryProfile } from './context.service'
+import { buildBatchKey, createOperationLog } from './history.service'
 import {
   getAttemptCount,
   getRecentRejectedDigests,
@@ -528,6 +529,82 @@ export function deleteStoryThread(id: number, options: { skipContextTracking?: b
   if (!options.skipContextTracking) {
     markNovelContextChanged(current.novelId, 'Story threads changed')
   }
+}
+
+export function batchUpdateStoryThreads(
+  ids: number[],
+  data: Partial<Pick<typeof storyThreads.$inferInsert, 'status' | 'priority'>>,
+) {
+  const threadIds = [...new Set(ids.filter((id) => Number.isFinite(id) && id > 0))]
+  if (threadIds.length === 0) return 0
+
+  const db = getDb()
+  const rows = db.select().from(storyThreads)
+    .where(inArray(storyThreads.id, threadIds))
+    .orderBy(asc(storyThreads.sortOrder), asc(storyThreads.id))
+    .all()
+  if (rows.length === 0) return 0
+
+  rows.forEach((row) => {
+    updateStoryThread(row.id, {
+      ...(data.status !== undefined ? { status: data.status } : {}),
+      ...(data.priority !== undefined ? { priority: data.priority } : {}),
+    }, { skipContextTracking: true })
+  })
+
+  createOperationLog({
+    novelId: rows[0].novelId,
+    entityType: 'thread',
+    entityIds: rows.map((row) => row.id),
+    operationType: 'batch_update',
+    summary: `批量更新 ${rows.length} 条故事线程`,
+    batchKey: buildBatchKey('thread-batch-update'),
+    before: rows,
+    after: data,
+    undoPayload: {
+      kind: 'thread.batch_update',
+      novelId: rows[0].novelId,
+      threads: rows,
+    },
+  })
+
+  markNovelContextChanged(rows[0].novelId, 'Story threads changed')
+  return rows.length
+}
+
+export function batchDeleteStoryThreads(ids: number[]) {
+  const threadIds = [...new Set(ids.filter((id) => Number.isFinite(id) && id > 0))]
+  if (threadIds.length === 0) return 0
+
+  const db = getDb()
+  const rows = db.select().from(storyThreads)
+    .where(inArray(storyThreads.id, threadIds))
+    .orderBy(asc(storyThreads.sortOrder), asc(storyThreads.id))
+    .all()
+  if (rows.length === 0) return 0
+
+  rows.forEach((row) => {
+    deleteStoryThread(row.id, { skipContextTracking: true })
+  })
+
+  createOperationLog({
+    novelId: rows[0].novelId,
+    entityType: 'thread',
+    entityIds: rows.map((row) => row.id),
+    operationType: 'batch_delete',
+    summary: `批量删除 ${rows.length} 条故事线程`,
+    batchKey: buildBatchKey('thread-batch-delete'),
+    before: rows,
+    after: [],
+    undoPayload: {
+      kind: 'thread.batch_delete',
+      novelId: rows[0].novelId,
+      threads: rows,
+    },
+  })
+
+  markNovelContextChanged(rows[0].novelId, 'Story threads changed')
+  return rows.length
 }
 
 export async function generateStoryThreads(

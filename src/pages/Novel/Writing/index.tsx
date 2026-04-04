@@ -16,6 +16,7 @@ import AIScorePanel from '../../../components/AIScorePanel'
 import type {
   Chapter,
   ChapterSegment,
+  ChapterVersion,
   ChapterPublishCheck,
   NovelConsistencyReport,
   NovelContextStatus,
@@ -26,6 +27,7 @@ import type {
 import { useNovelStore } from '../../../stores/novel.store'
 import { useTaskStore } from '../../../stores/task.store'
 import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage } from '../components/WorkspaceShell'
+import { useNovelWorkspaceActions } from '../workspace-shortcuts'
 import './index.css'
 
 interface Props { novelId: number }
@@ -36,6 +38,7 @@ interface ReviewNotes {
   summary: string
   critical_fixes: string[]
   continuity_risks: string[]
+  arc_progress_risks?: string[]
   context_drift_risks?: string[]
   realism_risks?: string[]
   coherence_risks?: string[]
@@ -146,15 +149,27 @@ function getSelectionSnapshot(container: HTMLElement): TextSelectionSnapshot | n
   }
 }
 
+function chapterVersionSourceLabel(source: ChapterVersion['versionSource']) {
+  if (source === 'ai-rewrite') return 'AI 重写'
+  if (source === 'pipeline-generate') return '流水线生成'
+  if (source === 'version-restore') return '历史恢复'
+  return '手动保存'
+}
+
 export default function Writing({ novelId }: Props) {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
+  const { notifyWorkspaceMutation, registerEscapeHandler, registerSaveHandler } = useNovelWorkspaceActions()
   const { chapters, currentChapterId, currentNovel, setChapters, setCurrentChapterId, updateChapter } = useNovelStore()
   const { streams, clearStream } = useTaskStore()
   const editorRef = useRef<HTMLDivElement>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const currentChapterIdRef = useRef<number | null>(null)
   const routeChapterFocusRef = useRef<number | null>(null)
+  const undoStackRef = useRef<string[]>([])
+  const redoStackRef = useRef<string[]>([])
+  const historyBaselineRef = useRef('')
+  const lastHistoryAtRef = useRef(0)
 
   const [loading, setLoading] = useState(true)
   const [currentChapter, setCurrentChapter] = useState<Chapter | null>(null)
@@ -177,13 +192,69 @@ export default function Writing({ novelId }: Props) {
   const [rewriteModalOpen, setRewriteModalOpen] = useState(false)
   const [rewriteRequirements, setRewriteRequirements] = useState('')
   const [rewritingSelection, setRewritingSelection] = useState(false)
+  const [versionHistoryOpen, setVersionHistoryOpen] = useState(false)
+  const [versionHistoryLoading, setVersionHistoryLoading] = useState(false)
+  const [chapterVersions, setChapterVersions] = useState<ChapterVersion[]>([])
+  const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null)
   const routeChapterId = useMemo(() => parseRouteId(searchParams.get('chapterId')), [searchParams])
   const routeInsight = useMemo(() => {
     const value = searchParams.get('insight')
     return value === 'memory' || value === 'health' ? value : 'chapter'
   }, [searchParams])
+  const selectedVersion = useMemo(
+    () => chapterVersions.find((version) => version.id === selectedVersionId) || chapterVersions[0] || null,
+    [chapterVersions, selectedVersionId],
+  )
 
   useEffect(() => { currentChapterIdRef.current = currentChapterId }, [currentChapterId])
+
+  const clearChapterArtifacts = useCallback(() => {
+    setTimelineEvents([])
+    setStoryItems([])
+    setChapterSegments([])
+    setAiResult(null)
+    setPublishCheck(null)
+    setSelectedSnippet(null)
+  }, [])
+
+  const resetEditorHistory = useCallback((nextText: string) => {
+    undoStackRef.current = []
+    redoStackRef.current = []
+    historyBaselineRef.current = normalizeEditorText(nextText)
+    lastHistoryAtRef.current = Date.now()
+  }, [])
+
+  const recordUndoSnapshot = useCallback((nextText: string) => {
+    const normalized = normalizeEditorText(nextText)
+    const previousBaseline = historyBaselineRef.current
+    if (normalized === previousBaseline) return
+
+    const now = Date.now()
+    const shouldCommit = !previousBaseline
+      || (now - lastHistoryAtRef.current) > 700
+      || Math.abs(normalized.length - previousBaseline.length) > 120
+
+    if (shouldCommit && previousBaseline) {
+      undoStackRef.current = [...undoStackRef.current.slice(-59), previousBaseline]
+    }
+
+    historyBaselineRef.current = normalized
+    lastHistoryAtRef.current = now
+    redoStackRef.current = []
+  }, [])
+
+  const refreshVersionHistory = useCallback(async (chapterId: number) => {
+    setVersionHistoryLoading(true)
+    try {
+      const versions = await window.electron.chapter.listVersions(chapterId)
+      setChapterVersions(versions)
+      setSelectedVersionId((current) => current && versions.some((item) => item.id === current)
+        ? current
+        : versions[0]?.id || null)
+    } finally {
+      setVersionHistoryLoading(false)
+    }
+  }, [])
 
   const refreshMeta = useCallback(async () => {
     const [report, memory] = await Promise.all([
@@ -224,6 +295,7 @@ export default function Writing({ novelId }: Props) {
   }, [])
 
   const refreshChapter = useCallback(async (chapterId: number) => {
+    clearChapterArtifacts()
     const [full, segments] = await Promise.all([
       window.electron.chapter.get(chapterId),
       window.electron.structure.listSegments(chapterId),
@@ -233,21 +305,26 @@ export default function Writing({ novelId }: Props) {
     setCurrentChapter(full)
     setContent(full.content || '')
     setWordCount(countWords(full.content || ''))
+    resetEditorHistory(full.content || '')
     updateChapter(chapterId, full)
     if (editorRef.current) editorRef.current.innerHTML = (full.content || '').replace(/\n/g, '<br>')
+    if (versionHistoryOpen) {
+      await refreshVersionHistory(chapterId)
+    }
     await Promise.all([refreshPublishCheck(chapterId), refreshContextStatus(), refreshChapterLinks(full)])
-  }, [refreshChapterLinks, refreshContextStatus, refreshPublishCheck, updateChapter])
+  }, [clearChapterArtifacts, refreshChapterLinks, refreshContextStatus, refreshPublishCheck, refreshVersionHistory, resetEditorHistory, updateChapter, versionHistoryOpen])
 
   const loadChapters = useCallback(async (preferredChapterId?: number) => {
     const list = await window.electron.chapter.list(novelId)
     setChapters(list)
     if (list.length === 0) {
+      resetEditorHistory('')
       setCurrentChapter(null); setCurrentChapterId(null); setContent(''); setWordCount(0); setPublishCheck(null); setChapterSegments([]); setTimelineEvents([]); setStoryItems([]); await refreshContextStatus(); return
     }
     const target = list.find((chapter) => chapter.id === (preferredChapterId ?? currentChapterIdRef.current)) || list[0]
     setCurrentChapterId(target.id)
     await refreshChapter(target.id)
-  }, [novelId, refreshChapter, refreshContextStatus, setChapters, setCurrentChapterId])
+  }, [novelId, refreshChapter, refreshContextStatus, resetEditorHistory, setChapters, setCurrentChapterId])
 
   useEffect(() => {
     let alive = true
@@ -293,27 +370,52 @@ export default function Writing({ novelId }: Props) {
       setGenerating(false); setGeneratingTaskId(null); clearStream(stream.taskId)
       message.error('正文生成失败，请检查模型配置或前置结构。')
     }
+    if (stream.status === 'cancelled') {
+      setGenerating(false); setGeneratingTaskId(null); clearStream(stream.taskId)
+      message.info('正文生成已取消。')
+    }
   }, [streams, generatingTaskId, currentChapter?.id, clearStream, loadChapters, refreshMeta, refreshChapter])
 
-  useEffect(() => () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current) }, [])
+  useEffect(() => () => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    clearChapterArtifacts()
+    setGenerationProgress(null)
+  }, [clearChapterArtifacts])
 
-  const queueSave = useCallback((chapterId: number, text: string) => {
+  const saveNow = useCallback(async (
+    chapterId: number,
+    text: string,
+    versionSource: 'manual-save' | 'ai-rewrite' = 'manual-save',
+  ) => {
+    const nextWordCount = countWords(text)
+    await window.electron.chapter.update(chapterId, {
+      content: text,
+      wordCount: nextWordCount,
+    }, {
+      versionSource,
+    })
+    await refreshContextStatus()
+    if (currentChapterIdRef.current === chapterId) {
+      await refreshPublishCheck(chapterId)
+    }
+    updateChapter(chapterId, { content: text, wordCount: nextWordCount })
+  }, [refreshContextStatus, refreshPublishCheck, updateChapter])
+
+  const queueSave = useCallback((
+    chapterId: number,
+    text: string,
+    versionSource: 'manual-save' | 'ai-rewrite' = 'manual-save',
+  ) => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     saveTimerRef.current = setTimeout(() => {
-      void window.electron.chapter.update(chapterId, { content: text, wordCount: countWords(text) })
-        .then(async () => {
-          await refreshContextStatus()
-          if (currentChapterIdRef.current === chapterId) {
-            await refreshPublishCheck(chapterId)
-          }
-        })
-      updateChapter(chapterId, { content: text, wordCount: countWords(text) })
+      void saveNow(chapterId, text, versionSource).catch(console.error)
     }, 1500)
-  }, [refreshContextStatus, refreshPublishCheck, updateChapter])
+  }, [saveNow])
 
   const handleContentChange = (event: React.FormEvent<HTMLDivElement>) => {
     if ((currentChapter?.segmentCount || 0) > 1) return
     const text = event.currentTarget.innerText || ''
+    recordUndoSnapshot(text)
     setContent(text); setWordCount(countWords(text))
     if (currentChapter) queueSave(currentChapter.id, text)
   }
@@ -326,7 +428,10 @@ export default function Writing({ novelId }: Props) {
     setSelectedSnippet(getSelectionSnapshot(editorRef.current))
   }, [currentChapter?.segmentCount])
 
-  const applyChapterContent = useCallback((nextText: string) => {
+  const applyChapterContent = useCallback((
+    nextText: string,
+    versionSource: 'manual-save' | 'ai-rewrite' = 'manual-save',
+  ) => {
     const normalized = normalizeEditorText(nextText)
     const nextWordCount = countWords(normalized)
     setContent(normalized)
@@ -336,10 +441,105 @@ export default function Writing({ novelId }: Props) {
       editorRef.current.innerHTML = normalized.replace(/\n/g, '<br>')
     }
     if (currentChapter) {
-      queueSave(currentChapter.id, normalized)
+      historyBaselineRef.current = normalized
+      lastHistoryAtRef.current = Date.now()
+      queueSave(currentChapter.id, normalized, versionSource)
       updateChapter(currentChapter.id, { content: normalized, wordCount: nextWordCount })
     }
   }, [currentChapter, queueSave, updateChapter])
+
+  const handleUndoEditor = useCallback(() => {
+    if ((currentChapter?.segmentCount || 0) > 1) return
+    const previous = undoStackRef.current.pop()
+    if (typeof previous !== 'string') return
+    redoStackRef.current = [...redoStackRef.current, normalizeEditorText(editorRef.current?.innerText || content)]
+    historyBaselineRef.current = previous
+    applyChapterContent(previous)
+  }, [applyChapterContent, content, currentChapter?.segmentCount])
+
+  const handleRedoEditor = useCallback(() => {
+    if ((currentChapter?.segmentCount || 0) > 1) return
+    const next = redoStackRef.current.pop()
+    if (typeof next !== 'string') return
+    undoStackRef.current = [...undoStackRef.current, normalizeEditorText(editorRef.current?.innerText || content)]
+    historyBaselineRef.current = next
+    applyChapterContent(next)
+  }, [applyChapterContent, content, currentChapter?.segmentCount])
+
+  const handleOpenVersionHistory = useCallback(async () => {
+    if (!currentChapter) return
+    setVersionHistoryOpen(true)
+    await refreshVersionHistory(currentChapter.id)
+  }, [currentChapter, refreshVersionHistory])
+
+  const handleRestoreVersion = useCallback(async () => {
+    if (!selectedVersionId || !currentChapter) return
+    try {
+      await window.electron.chapter.restoreVersion(selectedVersionId)
+      await Promise.all([
+        loadChapters(currentChapter.id),
+        refreshMeta(),
+        refreshContextStatus(),
+        refreshVersionHistory(currentChapter.id),
+      ])
+      message.success('已恢复所选历史版本。')
+      notifyWorkspaceMutation()
+    } catch (error: unknown) {
+      message.error(error instanceof Error ? error.message : '恢复历史版本失败。')
+    }
+  }, [currentChapter, loadChapters, notifyWorkspaceMutation, refreshContextStatus, refreshMeta, refreshVersionHistory, selectedVersionId])
+
+  useEffect(() => {
+    registerSaveHandler(() => {
+      if (!currentChapter || (currentChapter.segmentCount || 0) > 1) return
+      const latestText = normalizeEditorText(editorRef.current?.innerText || content)
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+      void saveNow(currentChapter.id, latestText).then(() => {
+        message.success('正文已保存。')
+      }).catch((error) => {
+        console.error(error)
+        message.error(error instanceof Error ? error.message : '正文保存失败。')
+      })
+    })
+
+    return () => registerSaveHandler(null)
+  }, [content, currentChapter, registerSaveHandler, saveNow])
+
+  useEffect(() => {
+    registerEscapeHandler(() => {
+      if (rewriteModalOpen) {
+        setRewriteModalOpen(false)
+        return
+      }
+      if (versionHistoryOpen) {
+        setVersionHistoryOpen(false)
+      }
+    })
+
+    return () => registerEscapeHandler(null)
+  }, [registerEscapeHandler, rewriteModalOpen, versionHistoryOpen])
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((currentChapter?.segmentCount || 0) > 1) return
+      const isMeta = event.metaKey || event.ctrlKey
+      if (!isMeta) return
+
+      const key = event.key.toLowerCase()
+      if (key === 'z' && !event.shiftKey) {
+        event.preventDefault()
+        handleUndoEditor()
+        return
+      }
+      if ((key === 'z' && event.shiftKey) || key === 'y') {
+        event.preventDefault()
+        handleRedoEditor()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [currentChapter?.segmentCount, handleRedoEditor, handleUndoEditor])
 
   const handleGenerateContent = async () => {
     if (!currentChapter) return message.warning('请先选择章节。')
@@ -411,7 +611,7 @@ export default function Writing({ novelId }: Props) {
         return
       }
 
-      applyChapterContent(`${before}${rewritten}${after}`)
+      applyChapterContent(`${before}${rewritten}${after}`, 'ai-rewrite')
       setRewriteModalOpen(false)
       setInsightTab('health')
       message.success('选中文段已重写并回填。')
@@ -546,6 +746,7 @@ export default function Writing({ novelId }: Props) {
     reviewNotes?.revision_brief ? `修订摘要：${reviewNotes.revision_brief}` : '',
     ...(reviewNotes?.critical_fixes || []).map((item) => `关键修订：${item}`),
     ...(reviewNotes?.continuity_risks || []).map((item) => `连续性风险：${item}`),
+    ...(reviewNotes?.arc_progress_risks || []).map((item) => `弧推进风险：${item}`),
     ...(reviewNotes?.context_drift_risks || []).map((item) => `上下文漂移：${item}`),
     ...(reviewNotes?.realism_risks || []).map((item) => `真实度风险：${item}`),
     ...(reviewNotes?.coherence_risks || []).map((item) => `连贯性风险：${item}`),
@@ -558,6 +759,7 @@ export default function Writing({ novelId }: Props) {
   const productionBriefItems = [
     reviewNotes?.revision_brief ? `定稿方向：${reviewNotes.revision_brief}` : '',
     ...(reviewNotes?.critical_fixes || []).slice(0, 2).map((item) => `先改：${item}`),
+    ...(reviewNotes?.arc_progress_risks || []).slice(0, 2).map((item) => `弧推进：${item}`),
     ...(reviewNotes?.coherence_risks || []).slice(0, 2).map((item) => `读者易乱：${item}`),
     ...(reviewNotes?.reader_hook_risks || []).slice(0, 2).map((item) => `追读流失点：${item}`),
     ...(reviewNotes?.human_language_repairs || []).slice(0, 2).map((item) => `语言替换：${item}`),
@@ -780,6 +982,7 @@ export default function Writing({ novelId }: Props) {
               ) : <div className="novel-empty novel-empty--writing">请选择左侧章节，或先创建一个新章节开始写作。</div>}
             </div>
             <div className="novel-writing-shell__editor-footer">
+              <Button disabled={!currentChapter} onClick={() => void handleOpenVersionHistory()}>版本历史</Button>
               <Button icon={<BulbOutlined />} disabled={!currentChapter} onClick={() => void handleGenerateSummary()}>更新摘要</Button>
               <Button icon={<FileSearchOutlined />} disabled={!currentChapter} onClick={() => void handleAiCheck()}>AI 体检</Button>
               <Button icon={<RobotOutlined />} disabled={!currentChapter || hasMultiSegments || !selectedSnippet?.text} loading={rewritingSelection} onClick={handleOpenRewriteModal}>重写选中文段</Button>
@@ -866,6 +1069,41 @@ export default function Writing({ novelId }: Props) {
           </aside>
         </div>
       )}
+      <Modal
+        title="章节版本历史"
+        open={versionHistoryOpen}
+        onCancel={() => setVersionHistoryOpen(false)}
+        onOk={() => void handleRestoreVersion()}
+        okButtonProps={{ disabled: !selectedVersion }}
+        okText="恢复所选版本"
+        width={860}
+      >
+        <div className="novel-split novel-split--sidebar">
+          <div className="novel-note-list">
+            {versionHistoryLoading ? <Spin size="small" /> : null}
+            {!versionHistoryLoading && chapterVersions.length === 0 ? (
+              <div className="novel-note-list__item">当前章节还没有可恢复的版本。</div>
+            ) : null}
+            {chapterVersions.map((version) => (
+              <button
+                key={version.id}
+                type="button"
+                className={`novel-sidebar__nav-item ${selectedVersion?.id === version.id ? 'novel-sidebar__nav-item--active' : ''}`}
+                style={{ width: '100%', textAlign: 'left' }}
+                onClick={() => setSelectedVersionId(version.id)}
+              >
+                <span className="novel-sidebar__nav-copy">
+                  <strong>{chapterVersionSourceLabel(version.versionSource)}</strong>
+                  <small>{`${version.wordCount || 0} 字 · ${new Date(version.createdAt).toLocaleString()}`}</small>
+                </span>
+              </button>
+            ))}
+          </div>
+          <div className="novel-copy-block" style={{ whiteSpace: 'pre-wrap', minHeight: 320 }}>
+            {selectedVersion?.content || '选择左侧版本后，这里会显示正文预览。'}
+          </div>
+        </div>
+      </Modal>
       <Modal
         title="重写选中文段"
         open={rewriteModalOpen}

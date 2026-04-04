@@ -149,6 +149,8 @@ export interface TimelineEventPromptInput {
   protagonistRule: string
 }
 
+export type PromptTier = 'simple' | 'standard' | 'key'
+
 export interface ChapterWritingPromptInput {
   novelTitle: string
   genre?: string
@@ -175,6 +177,7 @@ export interface ChapterWritingPromptInput {
   activeThreads?: string
   protagonistReference: string
   protagonistRule: string
+  promptTier?: PromptTier
   attemptNumber?: number
 }
 
@@ -206,6 +209,7 @@ export interface ScenePlanPromptInput {
   activeThreads?: string
   protagonistReference: string
   protagonistRule: string
+  promptTier?: PromptTier
   attemptNumber?: number
 }
 
@@ -227,10 +231,14 @@ export interface ChapterReviewPromptInput {
   timelineSummary: string
   longTermMemory: string
   consistencyNotes: string
+  arcProgress?: string
+  arcProgressStatus?: string
+  arcProgressCheckpoint?: string
   scenePlan: string
   draftContent: string
   protagonistReference: string
   protagonistRule: string
+  promptTier?: PromptTier
 }
 
 export interface ChapterRewritePromptInput {
@@ -260,9 +268,11 @@ export interface ChapterRewritePromptInput {
   scenePlan: string
   draftContent: string
   reviewNotes: string
+  lockedParagraphs?: string[]
   activeThreads?: string
   protagonistReference: string
   protagonistRule: string
+  promptTier?: PromptTier
 }
 
 export interface ContinuityPromptInput {
@@ -1394,6 +1404,9 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
     section('写作类型', params.writingContractSummary),
     section('关键人物关系', params.relationSummary),
     section('当前故事弧', params.currentArc),
+    section('本弧推进记录', params.arcProgress),
+    section('本弧进度状态', params.arcProgressStatus),
+    section('弧检查点提醒', params.arcProgressCheckpoint),
     section('世界规则', params.worldRules),
     section('人物当前状态', params.characterStates),
     section('关键物品与去向', params.itemSummary),
@@ -1407,10 +1420,12 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
       '只保留真正值得修的问题。',
       'critical_fixes 最多 5 条，且必须是可直接执行的修改动作。',
       'continuity_risks 只写连续性、伏笔、状态跟踪、物品跟踪或时间顺序问题。',
+      'arc_progress_risks 只写本章没有推进、反向推进、在关键检查点空转，或与当前故事弧目标脱节的问题。',
       'context_drift_risks 只写脱离既定背景、主题、世界规则或人物动机的问题。',
       'realism_risks 只写常识、科学、物理、资源、伤病、秩序或能力规则问题。',
       'language_risks 只写 AI 腔、抽象化、搭配错误、空洞抒情或不自然表达。',
       '如果对话无视人物关系、称呼层级、亲疏温度或潜台词，也要归入 language_risks 或 context_drift_risks。',
+      '必须结合当前故事弧、本章目标、场景计划、待审初稿和本弧进度状态，判断本章是否真的在服务当前弧目标。',
       'genre_hollowing_risks 只写体裁生态被写空的问题，例如修仙只喊大道却没有境界资源和宗门秩序，末世只有丧尸却没有生存链，武侠只有打斗却没有江湖秩序。',
       '如果主角像功能人、体裁生态被写空，或成长只剩口号，也要明确指出。',
       'missing_payoffs 只写本章已经抛出但没有落地的铺垫。',
@@ -1419,7 +1434,7 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
       '出现 high 级问题时 rewrite_required 必须是 true，其余情况可以是 false。',
       'revision_brief 用 60 到 120 字中文写清修改方向。',
     ].join('\n')),
-    '只输出 JSON：{"summary":"总体判断","critical_fixes":["必改 1"],"continuity_risks":["连续性风险 1"],"context_drift_risks":["漂移风险 1"],"realism_risks":["真实度风险 1"],"language_risks":["语言风险 1"],"genre_hollowing_risks":["体裁空心化风险 1"],"missing_payoffs":["未落地伏笔 1"],"strengths":["优点 1"],"severity":"medium","rewrite_required":true,"revision_brief":"修订方向摘要"}',
+    '只输出 JSON：{"summary":"总体判断","critical_fixes":["必改 1"],"continuity_risks":["连续性风险 1"],"arc_progress_risks":["故事弧推进风险 1"],"context_drift_risks":["漂移风险 1"],"realism_risks":["真实度风险 1"],"language_risks":["语言风险 1"],"genre_hollowing_risks":["体裁空心化风险 1"],"missing_payoffs":["未落地伏笔 1"],"strengths":["优点 1"],"severity":"medium","rewrite_required":true,"revision_brief":"修订方向摘要"}',
   ])
 }
 
@@ -1445,6 +1460,7 @@ export function buildChapterRewritePrompt(params: ChapterRewritePromptInput): st
     }),
     section('场景计划', params.scenePlan),
     section('当前稿件', params.draftContent),
+    section('作者锁定段落（逐字保留）', params.lockedParagraphs?.join('\n\n')),
     section('审校意见', params.reviewNotes),
     section('本章目标', params.chapterGoal),
     section('当前故事弧', params.currentArc),
@@ -1471,6 +1487,7 @@ export function buildChapterRewritePrompt(params: ChapterRewritePromptInput): st
       '把关系温度、权力差和潜台词写回称呼、打断、停顿和回避方式，不要让所有对白一个基调。',
       '把成长变化写回事件、关系、资源和代价，不要只靠总结句宣告人物成长。',
       '在同一轮里一起修好上下文漂移、常识失效、规则越界、零代价奇迹和 AI 腔。',
+      '作者锁定段落不得改写、删减、拆分、合并或替换措辞，只能改动周边段落来完成衔接。',
       '只输出重写后的最终正文。',
     ].join('\n')),
   ])
@@ -2189,8 +2206,6 @@ export function buildFactionSystemExpandPrompt(input: FactionSystemExpandInput):
     ]),
   ])
 }
-
-
 
 
 

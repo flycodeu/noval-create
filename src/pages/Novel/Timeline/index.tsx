@@ -1,5 +1,5 @@
 import React from 'react'
-import { Alert, Button, Space } from 'antd'
+import { Alert, Button, Modal, Select, Space, Tag } from 'antd'
 import {
   DeleteOutlined,
   PlusOutlined,
@@ -22,12 +22,16 @@ import {
   TimelineListPanel,
 } from './TimelinePanels'
 import { useTimelineWorkspace } from './useTimelineWorkspace'
+import { useNovelWorkspaceActions } from '../workspace-shortcuts'
 import '../components/boards.css'
 import './index.css'
 
 export default function TimelinePage({ novelId }: TimelinePageProps) {
   const workspace = useTimelineWorkspace(novelId)
+  const { mutationToken, notifyWorkspaceMutation, registerEscapeHandler, registerSaveHandler } = useNovelWorkspaceActions()
   const [draftWarnings, setDraftWarnings] = React.useState<string[]>([])
+  const [batchStatus, setBatchStatus] = React.useState<'planned' | 'seeded' | 'written' | 'resolved'>('planned')
+  const [batchMajorEvent, setBatchMajorEvent] = React.useState(1)
   const draftWarningsRef = React.useRef<string[]>([])
   const draftObservabilityRef = React.useRef<{ inputSummary: string; lintWarnings: string[]; rawOutputs: string[] } | null>(null)
   const applyTimelineDraft = React.useCallback((draft: Record<string, unknown>) => {
@@ -111,6 +115,53 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
     await finalizeDraft(finalData)
     await clearDraft()
   }, [clearDraft, finalizeDraft, workspace])
+
+  React.useEffect(() => {
+    registerSaveHandler((workspace.selectedEvent || workspace.creating) ? () => { void handleSave() } : null)
+    return () => registerSaveHandler(null)
+  }, [handleSave, registerSaveHandler, workspace.creating, workspace.selectedEvent])
+
+  React.useEffect(() => {
+    registerEscapeHandler(() => {
+      workspace.clearSelection()
+    })
+    return () => registerEscapeHandler(null)
+  }, [registerEscapeHandler, workspace.clearSelection])
+
+  React.useEffect(() => {
+    void workspace.refreshPage()
+  }, [mutationToken, workspace.refreshPage])
+
+  const handleBatchStatusUpdate = React.useCallback(async () => {
+    if (workspace.selectedIds.length === 0) return
+    await window.electron.timeline.batchUpdate(workspace.selectedIds, { status: batchStatus })
+    workspace.clearSelection()
+    await workspace.refreshPage()
+    notifyWorkspaceMutation()
+  }, [batchStatus, notifyWorkspaceMutation, workspace])
+
+  const handleBatchMajorUpdate = React.useCallback(async () => {
+    if (workspace.selectedIds.length === 0) return
+    await window.electron.timeline.batchUpdate(workspace.selectedIds, { isMajorEvent: batchMajorEvent })
+    workspace.clearSelection()
+    await workspace.refreshPage()
+    notifyWorkspaceMutation()
+  }, [batchMajorEvent, notifyWorkspaceMutation, workspace])
+
+  const handleBatchDelete = React.useCallback(() => {
+    if (workspace.selectedIds.length === 0) return
+    Modal.confirm({
+      title: `删除选中的 ${workspace.selectedIds.length} 条时间轴事件？`,
+      content: '会创建恢复点，可通过“撤销最近操作”恢复。',
+      okType: 'danger',
+      onOk: async () => {
+        await window.electron.timeline.batchDelete(workspace.selectedIds)
+        workspace.clearSelection()
+        await workspace.refreshPage()
+        notifyWorkspaceMutation()
+      },
+    })
+  }, [notifyWorkspaceMutation, workspace])
 
   return (
     <WorkspacePage
@@ -203,6 +254,42 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
         />
       ) : null}
 
+      {workspace.selectedIds.length > 0 ? (
+        <Alert
+          type="info"
+          showIcon
+          message={`已选 ${workspace.selectedIds.length} 条时间轴事件`}
+          description={(
+            <Space wrap>
+              <Tag color="processing">批量工具条</Tag>
+              <Select
+                value={batchStatus}
+                style={{ width: 160 }}
+                options={[
+                  { value: 'planned', label: '待规划' },
+                  { value: 'seeded', label: '已埋点' },
+                  { value: 'written', label: '已写入' },
+                  { value: 'resolved', label: '已解决' },
+                ]}
+                onChange={(value) => setBatchStatus(value)}
+              />
+              <Button onClick={() => void handleBatchStatusUpdate()}>批量改状态</Button>
+              <Select
+                value={batchMajorEvent}
+                style={{ width: 160 }}
+                options={[
+                  { value: 1, label: '标记重大事件' },
+                  { value: 0, label: '标记普通事件' },
+                ]}
+                onChange={(value) => setBatchMajorEvent(value)}
+              />
+              <Button onClick={() => void handleBatchMajorUpdate()}>批量改重大级别</Button>
+              <Button danger onClick={handleBatchDelete}>批量删除</Button>
+            </Space>
+          )}
+        />
+      ) : null}
+
       <TimelineBoardPanel
         pageData={workspace.pageData}
         laneItems={workspace.laneItems}
@@ -216,6 +303,7 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
           loading={workspace.loading}
           pageData={workspace.pageData}
           selectedId={workspace.selectedId}
+          selectedIds={workspace.selectedIds}
           statusFilter={workspace.statusFilter}
           typeFilter={workspace.typeFilter}
           volumeFilter={workspace.volumeFilter}

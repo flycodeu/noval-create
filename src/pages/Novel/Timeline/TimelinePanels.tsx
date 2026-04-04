@@ -44,7 +44,7 @@ interface TimelineBoardPanelProps {
   pageData: PagedResult<TimelineEvent>
   laneItems: Array<{ status: TimelineEvent['status']; items: TimelineEvent[] }>
   selectedId: number | null
-  onSelect: (event: TimelineEvent) => void
+  onSelect: (event: TimelineEvent, nativeEvent?: { metaKey?: boolean; ctrlKey?: boolean; shiftKey?: boolean }) => void
   getStructureTags: (event: TimelineEvent) => string[]
 }
 
@@ -80,7 +80,7 @@ export function TimelineBoardPanel({
                       key={event.id}
                       type="button"
                       className={`novel-board-card ${selectedId === event.id ? 'novel-board-card--active' : ''}`}
-                      onClick={() => onSelect(event)}
+                      onClick={(nativeEvent) => onSelect(event, nativeEvent)}
                     >
                       <div className="novel-board-card__kicker">{event.timeLabel}</div>
                       <strong>{event.eventTitle}</strong>
@@ -112,6 +112,7 @@ interface TimelineListPanelProps {
   loading: boolean
   pageData: PagedResult<TimelineEvent>
   selectedId: number | null
+  selectedIds: number[]
   statusFilter: TimelineStatusFilter
   typeFilter: string
   volumeFilter: number | 'all'
@@ -129,7 +130,7 @@ interface TimelineListPanelProps {
   onPartChange: (value: number | 'all') => void
   onChapterChange: (value: number | 'all') => void
   onPageChange: (page: number) => void
-  onSelect: (event: TimelineEvent) => void
+  onSelect: (event: TimelineEvent, nativeEvent?: { metaKey?: boolean; ctrlKey?: boolean; shiftKey?: boolean }) => void
   getStructureTags: (event: TimelineEvent) => string[]
 }
 
@@ -137,6 +138,7 @@ export function TimelineListPanel({
   loading,
   pageData,
   selectedId,
+  selectedIds,
   statusFilter,
   typeFilter,
   volumeFilter,
@@ -203,8 +205,8 @@ export function TimelineListPanel({
                 <button
                   key={event.id}
                   type="button"
-                  className={`novel-list-card ${selectedId === event.id ? 'novel-list-card--active' : ''}`}
-                  onClick={() => onSelect(event)}
+                  className={`novel-list-card ${selectedId === event.id ? 'novel-list-card--active' : ''} ${selectedIds.includes(event.id) ? 'novel-list-card--selected' : ''}`}
+                  onClick={(nativeEvent) => onSelect(event, nativeEvent)}
                   style={{ textAlign: 'left', cursor: 'pointer' }}
                 >
                   <div className="novel-kicker">{event.timeLabel}</div>

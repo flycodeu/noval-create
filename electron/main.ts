@@ -37,6 +37,7 @@ import * as novelService from './services/novel.service'
 import * as subplotService from './services/subplot.service'
 import * as themeVoiceService from './services/theme-voice.service'
 import * as timelineService from './services/timeline.service'
+import * as historyService from './services/history.service'
 import * as storyMemoryService from './services/story-memory.service'
 import * as promptOverrideService from './services/prompt-override.service'
 import * as revisionTaskService from './services/revision-task.service'
@@ -191,6 +192,7 @@ function formatGeneratedOutline(outline: Record<string, unknown>): string {
 
 app.whenReady().then(() => {
   initDb()
+  taskService.recoverOrphanedTasks()
   createWindow()
   registerIpcHandlers()
 
@@ -251,8 +253,13 @@ function registerIpcHandlers() {
   ipcMain.handle('chapter:list', (_, novelId) => chapterService.listChapters(novelId))
   ipcMain.handle('chapter:get', (_, id) => chapterService.getChapter(id))
   ipcMain.handle('chapter:create', (_, novelId, data) => chapterService.createChapter(novelId, data))
-  ipcMain.handle('chapter:update', (_, id, data) => chapterService.updateChapter(id, data))
+  ipcMain.handle('chapter:update', (_, id, data, options) => chapterService.updateChapter(id, data, options))
   ipcMain.handle('chapter:delete', (_, id) => chapterService.deleteChapter(id))
+  ipcMain.handle('chapter:listVersions', (_, chapterId) => chapterService.listChapterVersions(chapterId))
+  ipcMain.handle('chapter:restoreVersion', (_, versionId) => chapterService.restoreChapterVersion(versionId))
+  ipcMain.handle('chapter:batchUpdate', (_, ids, data) => chapterService.batchUpdateChapters(ids, data))
+  ipcMain.handle('chapter:batchDelete', (_, ids) => chapterService.batchDeleteChapters(ids))
+  ipcMain.handle('chapter:batchRenumber', (_, ids, startChapterNum) => chapterService.batchRenumberChapters(ids, startChapterNum))
   ipcMain.handle('chapter:generateContent', (event, chapterId) =>
     chapterService.generateChapterContent(chapterId, event.sender))
   ipcMain.handle('chapter:generateSummary', (_, chapterId) =>
@@ -328,6 +335,8 @@ function registerIpcHandlers() {
   ipcMain.handle('timeline:create', (_, novelId, data) => timelineService.createTimelineEvent(novelId, data))
   ipcMain.handle('timeline:update', (_, id, data) => timelineService.updateTimelineEvent(id, data))
   ipcMain.handle('timeline:delete', (_, id) => timelineService.deleteTimelineEvent(id))
+  ipcMain.handle('timeline:batchUpdate', (_, ids, data) => timelineService.batchUpdateTimelineEvents(ids, data))
+  ipcMain.handle('timeline:batchDelete', (_, ids) => timelineService.batchDeleteTimelineEvents(ids))
   ipcMain.handle('timeline:generate', (_, novelId, options) =>
     timelineService.generateTimelineEvents(novelId, options))
   ipcMain.handle('timeline:regenerate', (_, id, options) => timelineService.regenerateTimelineEvent(id, options))
@@ -647,7 +656,13 @@ function registerIpcHandlers() {
   ipcMain.handle('thread:create', (_, novelId, data) => storyThreadService.createStoryThread(novelId, data))
   ipcMain.handle('thread:update', (_, id, data) => storyThreadService.updateStoryThread(id, data))
   ipcMain.handle('thread:delete', (_, id) => storyThreadService.deleteStoryThread(id))
+  ipcMain.handle('thread:batchUpdate', (_, ids, data) => storyThreadService.batchUpdateStoryThreads(ids, data))
+  ipcMain.handle('thread:batchDelete', (_, ids) => storyThreadService.batchDeleteStoryThreads(ids))
   ipcMain.handle('thread:regenerate', (_, id, options) => storyThreadService.regenerateStoryThread(id, options))
+
+  ipcMain.handle('history:listRecent', (_, novelId, limit) => historyService.listRecentOperationLogs(novelId, limit))
+  ipcMain.handle('history:getLatestUndoable', (_, novelId) => historyService.getLatestUndoableOperation(novelId))
+  ipcMain.handle('history:undo', (_, logId) => historyService.undoOperation(logId))
 
   ipcMain.handle('revision:list', (_, novelId) => revisionTaskService.listRevisionTasks(novelId))
   ipcMain.handle('revision:query', (_, filters) => revisionTaskService.queryRevisionTasks(filters))
@@ -663,6 +678,7 @@ function registerIpcHandlers() {
     const db = getDb()
     return db.select().from(modelConfigs).all().map((config) => ({
       ...config,
+      maxConcurrency: modelService.normalizeModelConcurrency(config.maxConcurrency),
       apiKey: config.apiKey ? '已设置' : '',
     }))
   })
@@ -670,7 +686,11 @@ function registerIpcHandlers() {
   ipcMain.handle('model:create', (_, data) => {
     const db = getDb()
     const encryptedKey = data.apiKey ? encryptApiKey(data.apiKey) : null
-    const result = db.insert(modelConfigs).values({ ...data, apiKey: encryptedKey }).run()
+    const result = db.insert(modelConfigs).values({
+      ...data,
+      maxConcurrency: modelService.normalizeModelConcurrency(data.maxConcurrency),
+      apiKey: encryptedKey,
+    }).run()
     return Number(result.lastInsertRowid)
   })
 
@@ -680,6 +700,9 @@ function registerIpcHandlers() {
       data.apiKey = encryptApiKey(data.apiKey)
     } else if (data.apiKey === '已设置') {
       delete data.apiKey
+    }
+    if ('maxConcurrency' in data) {
+      data.maxConcurrency = modelService.normalizeModelConcurrency(data.maxConcurrency)
     }
     db.update(modelConfigs).set(data).where(eq(modelConfigs.id, id)).run()
   })

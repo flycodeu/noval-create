@@ -1,6 +1,6 @@
 import { asc, eq } from 'drizzle-orm'
 import { getDb, getSqlite } from '../database/db'
-import { chapters, novels, storyItems, timelineEvents } from '../database/schema'
+import { chapters, novels, storyItems, storyMemoryCheckpoints, timelineEvents } from '../database/schema'
 import { buildNovelConsistencyReport, type ConsistencyIssue } from './consistency.service'
 
 function parseStringArray(raw?: string | null): string[] {
@@ -148,9 +148,19 @@ export function markNovelContextChanged(novelId: number, reasons: string | strin
         updatedAt: now,
       }).where(eq(chapters.id, chapter.id)).run()
     }
+
+    markStoryMemoryCheckpointsDirty(novelId, now)
   })()
 
   return nextVersion
+}
+
+export function markStoryMemoryCheckpointsDirty(novelId: number, updatedAt = new Date().toISOString()): void {
+  const db = getDb()
+  db.update(storyMemoryCheckpoints).set({
+    stale: 1,
+    updatedAt,
+  }).where(eq(storyMemoryCheckpoints.novelId, novelId)).run()
 }
 
 export function markSubsequentChaptersStale(

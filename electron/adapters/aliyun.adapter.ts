@@ -1,4 +1,5 @@
 import { BaseAdapter, ChatOptions, Message } from './base.adapter'
+import { consumeSseStream, safeParseSseJson } from './sse'
 
 export class AliyunAdapter extends BaseAdapter {
   id = 'aliyun'
@@ -49,29 +50,18 @@ export class AliyunAdapter extends BaseAdapter {
         signal: opts?.signal,
       }
     )
-
-    const reader = response.body!.getReader()
-    const decoder = new TextDecoder()
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      const text = decoder.decode(value, { stream: true })
-      const lines = text.split('\n').filter(l => l.startsWith('data:'))
-
-      for (const line of lines) {
-        try {
-          const data = JSON.parse(line.slice(5))
-          const content = data.output?.choices?.[0]?.message?.content || data.output?.text
-          if (content) {
-            opts?.onStream?.(content)
-          }
-        } catch {
-          // 跳过
-        }
-      }
+    if (!response.ok) {
+      const err = await response.text()
+      throw new Error(`通义千问 API 请求失败（${response.status}）：${err}`)
     }
+
+    await consumeSseStream(response, async ({ data, event }) => {
+      const parsed = safeParseSseJson<Record<string, any>>(this.provider, data, event)
+      const content = parsed?.output?.choices?.[0]?.message?.content || parsed?.output?.text
+      if (content) {
+        opts?.onStream?.(content)
+      }
+    })
   }
 
   private buildHeaders() {

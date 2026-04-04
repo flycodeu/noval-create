@@ -1,5 +1,5 @@
 ﻿import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Button, Empty, Form, Input, InputNumber, Modal, Space, Spin, Tag, message } from 'antd'
+import { Button, Empty, Form, Input, InputNumber, Modal, Pagination, Select, Space, Spin, Tag, message } from 'antd'
 import { DeleteOutlined, EditOutlined, HolderOutlined, PlusOutlined, RobotOutlined } from '@ant-design/icons'
 import { DragDropContext, Draggable, Droppable, type DragDropContextProps, type DraggableProvidedDragHandleProps } from '@hello-pangea/dnd'
 import AIGenerateButton from '../../../components/AIGenerateButton'
@@ -9,6 +9,7 @@ import { buildDraftMessages, normalizeOptionalNumber, parseDraftJson } from '../
 import { usePlanningDraft } from '../shared/planning-draft'
 import { generateOutlineArcDraft } from '../shared/planning-ai-service'
 import { WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
+import { useNovelWorkspaceActions } from '../workspace-shortcuts'
 
 interface Props { novelId: number }
 interface ArcFormValues {
@@ -29,8 +30,11 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   final: { label: '已完成', color: '#52c41a' },
 }
 
+const OUTLINE_CHAPTER_PAGE_SIZE = 50
+
 export default function Outline({ novelId }: Props) {
   const { chapters, setChapters, currentNovel } = useNovelStore()
+  const { mutationToken, notifyWorkspaceMutation, registerEscapeHandler, registerSaveHandler } = useNovelWorkspaceActions()
   const [arcs, setArcs] = useState<StoryArc[]>([])
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
@@ -38,8 +42,13 @@ export default function Outline({ novelId }: Props) {
   const [arcModalOpen, setArcModalOpen] = useState(false)
   const [editingArc, setEditingArc] = useState<StoryArc | null>(null)
   const [expandedArcId, setExpandedArcId] = useState<number | null>(null)
+  const [expandedChapterPage, setExpandedChapterPage] = useState(1)
   const [outlineBatchSize, setOutlineBatchSize] = useState(4)
   const [outlineTargetCount, setOutlineTargetCount] = useState(8)
+  const [selectedChapterIds, setSelectedChapterIds] = useState<number[]>([])
+  const [lastSelectedChapterId, setLastSelectedChapterId] = useState<number | null>(null)
+  const [batchStatus, setBatchStatus] = useState<Chapter['status']>('outline')
+  const [batchStartChapterNum, setBatchStartChapterNum] = useState(1)
   const [draftWarnings, setDraftWarnings] = useState<string[]>([])
   const draftWarningsRef = React.useRef<string[]>([])
   const draftObservabilityRef = React.useRef<{ inputSummary: string; lintWarnings: string[]; rawOutputs: string[] } | null>(null)
@@ -55,7 +64,7 @@ export default function Outline({ novelId }: Props) {
     }
   }, [novelId, setChapters])
 
-  useEffect(() => { void loadData() }, [loadData])
+  useEffect(() => { void loadData() }, [loadData, mutationToken])
 
   const openCreateModal = () => {
     setEditingArc(null)
@@ -145,6 +154,11 @@ export default function Outline({ novelId }: Props) {
     await loadData()
   }
 
+  useEffect(() => {
+    registerSaveHandler(arcModalOpen ? () => { void handleSaveArc() } : null)
+    return () => registerSaveHandler(null)
+  }, [arcModalOpen, handleSaveArc, registerSaveHandler])
+
   const handleDeleteArc = async (arc: StoryArc) => {
     Modal.confirm({
       title: `删除“${arc.arcName}”？`,
@@ -165,6 +179,67 @@ export default function Outline({ novelId }: Props) {
 
   const getArcChapters = useCallback((arc: StoryArc) => chapters.filter((chapter) => chapter.arcId === arc.id || (chapter.chapterNum >= (arc.chapterStart || 0) && chapter.chapterNum <= (arc.chapterEnd || 9999))).sort((a, b) => a.chapterNum - b.chapterNum), [chapters])
 
+  const handleChapterSelection = useCallback((event: React.MouseEvent, chapter: Chapter, orderedChapters: Chapter[]) => {
+    const withMeta = event.metaKey || event.ctrlKey
+    const withShift = event.shiftKey
+
+    setSelectedChapterIds((current) => {
+      if (withShift && lastSelectedChapterId) {
+        const startIndex = orderedChapters.findIndex((item) => item.id === lastSelectedChapterId)
+        const endIndex = orderedChapters.findIndex((item) => item.id === chapter.id)
+        if (startIndex >= 0 && endIndex >= 0) {
+          const [from, to] = startIndex < endIndex ? [startIndex, endIndex] : [endIndex, startIndex]
+          const rangeIds = orderedChapters.slice(from, to + 1).map((item) => item.id)
+          return [...new Set([...current, ...rangeIds])]
+        }
+      }
+
+      if (withMeta) {
+        return current.includes(chapter.id)
+          ? current.filter((item) => item !== chapter.id)
+          : [...current, chapter.id]
+      }
+
+      return [chapter.id]
+    })
+
+    setLastSelectedChapterId(chapter.id)
+  }, [lastSelectedChapterId])
+
+  const handleBatchStatusUpdate = useCallback(async () => {
+    if (selectedChapterIds.length === 0) return
+    await window.electron.chapter.batchUpdate(selectedChapterIds, { status: batchStatus })
+    setSelectedChapterIds([])
+    await loadData()
+    notifyWorkspaceMutation()
+    message.success(`已批量更新 ${selectedChapterIds.length} 章状态。`)
+  }, [batchStatus, loadData, notifyWorkspaceMutation, selectedChapterIds])
+
+  const handleBatchDelete = useCallback(() => {
+    if (selectedChapterIds.length === 0) return
+    Modal.confirm({
+      title: `删除选中的 ${selectedChapterIds.length} 章？`,
+      content: '会删除章节正文、细纲和场景片段，但可通过“撤销最近操作”恢复。',
+      okType: 'danger',
+      onOk: async () => {
+        await window.electron.chapter.batchDelete(selectedChapterIds)
+        setSelectedChapterIds([])
+        await loadData()
+        notifyWorkspaceMutation()
+        message.success('已批量删除选中章节。')
+      },
+    })
+  }, [loadData, notifyWorkspaceMutation, selectedChapterIds])
+
+  const handleBatchRenumber = useCallback(async () => {
+    if (selectedChapterIds.length === 0) return
+    await window.electron.chapter.batchRenumber(selectedChapterIds, batchStartChapterNum)
+    setSelectedChapterIds([])
+    await loadData()
+    notifyWorkspaceMutation()
+    message.success(`已从第 ${batchStartChapterNum} 章开始顺延重排。`)
+  }, [batchStartChapterNum, loadData, notifyWorkspaceMutation, selectedChapterIds])
+
   const handleChapterDragEnd: DragDropContextProps['onDragEnd'] = async (result) => {
     if (!result.destination) return
     const arcId = Number(result.draggableId.split('-')[0])
@@ -183,9 +258,42 @@ export default function Outline({ novelId }: Props) {
 
   const totalCompletedChapters = chapters.filter((chapter) => chapter.status === 'final').length
   const expandedArc = expandedArcId ? arcs.find((arc) => arc.id === expandedArcId) || null : null
+  const expandedArcChapters = useMemo(
+    () => (expandedArc ? getArcChapters(expandedArc) : []),
+    [expandedArc, getArcChapters],
+  )
+  const expandedChapterPageStart = (expandedChapterPage - 1) * OUTLINE_CHAPTER_PAGE_SIZE
+  const visibleExpandedArcChapters = useMemo(
+    () => expandedArcChapters.slice(expandedChapterPageStart, expandedChapterPageStart + OUTLINE_CHAPTER_PAGE_SIZE),
+    [expandedArcChapters, expandedChapterPageStart],
+  )
+  const selectedExpandedChapters = useMemo(
+    () => expandedArcChapters.filter((chapter) => selectedChapterIds.includes(chapter.id)),
+    [expandedArcChapters, selectedChapterIds],
+  )
   const getMissingOutlineCount = useCallback((arc: StoryArc) => (
     getArcChapters(arc).filter((chapter) => !chapter.outline?.trim()).length
   ), [getArcChapters])
+
+  useEffect(() => {
+    setExpandedChapterPage(1)
+    setSelectedChapterIds([])
+    setLastSelectedChapterId(null)
+  }, [expandedArcId])
+
+  useEffect(() => {
+    if (selectedExpandedChapters.length === 0) return
+    setBatchStartChapterNum(Math.min(...selectedExpandedChapters.map((chapter) => chapter.chapterNum)))
+  }, [selectedExpandedChapters])
+
+  useEffect(() => {
+    registerEscapeHandler(() => {
+      setSelectedChapterIds([])
+      setLastSelectedChapterId(null)
+    })
+
+    return () => registerEscapeHandler(null)
+  }, [registerEscapeHandler])
   const applyOutlineDraft = useCallback((draft: Partial<ArcFormValues>) => {
     const currentValues = arcForm.getFieldsValue(true)
     arcForm.setFieldsValue({
@@ -338,27 +446,67 @@ export default function Outline({ novelId }: Props) {
           <WorkspacePanel title={expandedArc ? `章节细纲 · ${expandedArc.arcName}` : '章节细纲'} extra={expandedArc ? <Tag>{`第 ${expandedArc.chapterStart || '?'} ~ ${expandedArc.chapterEnd || '?'} 章`}</Tag> : null}>
             {!expandedArc ? (
               <div className="novel-empty">先展开一条故事弧。</div>
-            ) : getArcChapters(expandedArc).length === 0 ? (
+            ) : expandedArcChapters.length === 0 ? (
               <Empty description="当前故事弧下还没有章节。" image={Empty.PRESENTED_IMAGE_SIMPLE} />
             ) : (
-              <DragDropContext onDragEnd={handleChapterDragEnd}>
-                <Droppable droppableId={`arc-${expandedArc.id}`}>
-                  {(provided) => (
-                    <div ref={provided.innerRef} {...provided.droppableProps} className="novel-outline-chapter-grid">
-                      {getArcChapters(expandedArc).map((chapter, index) => (
-                        <Draggable key={chapter.id} draggableId={`${expandedArc.id}-${chapter.id}`} index={index}>
-                          {(prov, snapshot) => (
-                            <div ref={prov.innerRef} {...prov.draggableProps} style={{ ...prov.draggableProps.style, opacity: snapshot.isDragging ? 0.82 : 1 }}>
-                              <ChapterCard chapter={chapter} dragHandleProps={prov.dragHandleProps ?? undefined} />
-                            </div>
-                          )}
-                        </Draggable>
-                      ))}
-                      {provided.placeholder}
+              <>
+                {selectedChapterIds.length > 0 ? (
+                  <div className="novel-filter-bar" style={{ marginBottom: 16 }}>
+                    <div className="novel-filter-bar__row">
+                      <Tag color="processing">{`已选 ${selectedChapterIds.length} 章`}</Tag>
+                      <Select
+                        value={batchStatus}
+                        style={{ width: 140 }}
+                        onChange={(value: Chapter['status']) => setBatchStatus(value)}
+                        options={Object.entries(STATUS_LABELS).map(([value, meta]) => ({ value, label: meta.label }))}
+                      />
+                      <Button onClick={() => void handleBatchStatusUpdate()}>批量改状态</Button>
+                      <InputNumber min={1} value={batchStartChapterNum} onChange={(value) => setBatchStartChapterNum(Number(value) || 1)} />
+                      <Button onClick={() => void handleBatchRenumber()}>顺延重排</Button>
+                      <Button danger onClick={() => void handleBatchDelete()}>批量删除</Button>
                     </div>
-                  )}
-                </Droppable>
-              </DragDropContext>
+                    <div className="novel-filter-bar__summary">支持单选、Ctrl/Cmd 追加和 Shift 区间选择，`Esc` 可清空批量选择。</div>
+                  </div>
+                ) : null}
+                <DragDropContext onDragEnd={handleChapterDragEnd}>
+                  <Droppable droppableId={`arc-${expandedArc.id}`}>
+                    {(provided) => (
+                      <div ref={provided.innerRef} {...provided.droppableProps} className="novel-outline-chapter-grid">
+                        {visibleExpandedArcChapters.map((chapter, index) => (
+                          <Draggable
+                            key={chapter.id}
+                            draggableId={`${expandedArc.id}-${chapter.id}`}
+                            index={expandedChapterPageStart + index}
+                          >
+                            {(prov, snapshot) => (
+                              <div ref={prov.innerRef} {...prov.draggableProps} style={{ ...prov.draggableProps.style, opacity: snapshot.isDragging ? 0.82 : 1 }}>
+                                <ChapterCard
+                                  chapter={chapter}
+                                  selected={selectedChapterIds.includes(chapter.id)}
+                                  dragHandleProps={prov.dragHandleProps ?? undefined}
+                                  onClick={(event) => handleChapterSelection(event, chapter, expandedArcChapters)}
+                                />
+                              </div>
+                            )}
+                          </Draggable>
+                        ))}
+                        {provided.placeholder}
+                      </div>
+                    )}
+                  </Droppable>
+                </DragDropContext>
+                {expandedArcChapters.length > OUTLINE_CHAPTER_PAGE_SIZE ? (
+                  <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
+                    <Pagination
+                      current={expandedChapterPage}
+                      pageSize={OUTLINE_CHAPTER_PAGE_SIZE}
+                      total={expandedArcChapters.length}
+                      showSizeChanger={false}
+                      onChange={setExpandedChapterPage}
+                    />
+                  </div>
+                ) : null}
+              </>
             )}
           </WorkspacePanel>
         </>
@@ -384,10 +532,23 @@ export default function Outline({ novelId }: Props) {
   )
 }
 
-function ChapterCard({ chapter, dragHandleProps }: { chapter: Chapter; dragHandleProps?: DraggableProvidedDragHandleProps }) {
+function ChapterCard({
+  chapter,
+  selected,
+  dragHandleProps,
+  onClick,
+}: {
+  chapter: Chapter
+  selected: boolean
+  dragHandleProps?: DraggableProvidedDragHandleProps
+  onClick: (event: React.MouseEvent<HTMLDivElement>) => void
+}) {
   const status = STATUS_LABELS[chapter.status] || STATUS_LABELS.outline
   return (
-    <div className="novel-outline-chapter-card">
+    <div
+      className={`novel-outline-chapter-card ${selected ? 'novel-outline-chapter-card--selected' : ''}`}
+      onClick={onClick}
+    >
       <div {...dragHandleProps} className="novel-outline-chapter-card__handle"><HolderOutlined style={{ fontSize: 12 }} /></div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div className="novel-outline-chapter-card__meta">

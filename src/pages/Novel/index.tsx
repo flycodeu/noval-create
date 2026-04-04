@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { Button, Spin } from 'antd'
+import { Button, Input, Modal, Spin, message } from 'antd'
 import {
   ApartmentOutlined,
   AppstoreOutlined,
@@ -15,6 +15,9 @@ import {
   RightOutlined,
   SettingOutlined,
   TeamOutlined,
+  RollbackOutlined,
+  SearchOutlined,
+  QuestionCircleOutlined,
 } from '@ant-design/icons'
 import { useNovelStore } from '../../stores/novel.store'
 import { useWorkspaceStore } from '../../stores/workspace.store'
@@ -34,6 +37,7 @@ import Structure from './Structure'
 import TimelinePage from './Timeline'
 import Writing from './Writing'
 import RevisionCenterPage from './RevisionCenter'
+import WorkspaceErrorBoundary from './components/WorkspaceErrorBoundary'
 import {
   EMPTY_WORKFLOW_STATS,
   getGuidedStepProgressMap,
@@ -43,6 +47,8 @@ import {
   type GuidedWorkflowStepKey,
   type WorkflowStats,
 } from './workflow'
+import { NovelWorkspaceActionsProvider } from './workspace-shortcuts'
+import type { Chapter, OperationLog } from '../../types'
 
 type ProWorkspaceKey =
   | 'guide'
@@ -67,6 +73,14 @@ interface WorkspaceItem {
   icon: React.ReactNode
   label: string
   summary: string
+}
+
+interface WorkspaceSearchResult {
+  id: string
+  type: 'chapter' | 'thread' | 'timeline' | 'character' | 'item' | 'map'
+  label: string
+  description: string
+  route: string
 }
 
 const WORKSPACE_GROUPS: Array<{ title: string; items: WorkspaceItem[] }> = [
@@ -128,14 +142,47 @@ function formatCountState(count: number, singularUnit: string, emptyLabel = '待
   return `${count}${singularUnit}`
 }
 
+function isEditableTarget(target: EventTarget | null): boolean {
+  const element = target as HTMLElement | null
+  if (!element) return false
+  const tagName = element.tagName?.toLowerCase()
+  return Boolean(
+    element.isContentEditable
+    || tagName === 'input'
+    || tagName === 'textarea'
+    || tagName === 'select'
+    || element.closest('.ant-select')
+    || element.closest('.ant-input')
+    || element.closest('[contenteditable="true"]'),
+  )
+}
+
 export default function NovelRouter() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const location = useLocation()
-  const { currentNovel, setCurrentNovel } = useNovelStore()
+  const {
+    chapters,
+    currentChapterId,
+    currentNovel,
+    setChapters,
+    setCurrentNovel,
+    resetWorkspace,
+  } = useNovelStore()
   const { mode, setMode } = useWorkspaceStore()
+  const saveHandlerRef = useRef<(() => void) | null>(null)
+  const escapeHandlerRef = useRef<(() => void) | null>(null)
   const [loading, setLoading] = useState(true)
   const [workflowStats, setWorkflowStats] = useState<WorkflowStats>(EMPTY_WORKFLOW_STATS)
+  const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false)
+  const [chapterJumpOpen, setChapterJumpOpen] = useState(false)
+  const [quickSearchOpen, setQuickSearchOpen] = useState(false)
+  const [chapterJumpKeyword, setChapterJumpKeyword] = useState('')
+  const [quickSearchKeyword, setQuickSearchKeyword] = useState('')
+  const [quickSearchLoading, setQuickSearchLoading] = useState(false)
+  const [quickSearchResults, setQuickSearchResults] = useState<WorkspaceSearchResult[]>([])
+  const [latestUndoable, setLatestUndoable] = useState<OperationLog | null>(null)
+  const [workspaceMutationToken, setWorkspaceMutationToken] = useState(0)
 
   const novelId = Number.parseInt(id || '0', 10)
   const workspaceGroups = useMemo(() => WORKSPACE_GROUPS, [])
@@ -314,6 +361,135 @@ export default function NovelRouter() {
     }
   }, [novelId])
 
+  const refreshUndoable = useCallback(async () => {
+    if (!novelId) return
+    try {
+      setLatestUndoable(await window.electron.history.getLatestUndoable(novelId))
+    } catch (error) {
+      console.error(error)
+    }
+  }, [novelId])
+
+  const registerSaveHandler = useCallback((handler: (() => void) | null) => {
+    saveHandlerRef.current = handler
+  }, [])
+
+  const registerEscapeHandler = useCallback((handler: (() => void) | null) => {
+    escapeHandlerRef.current = handler
+  }, [])
+
+  const notifyWorkspaceMutation = useCallback(() => {
+    setWorkspaceMutationToken((current) => current + 1)
+    void Promise.all([refreshWorkflowStats(), refreshUndoable()])
+  }, [refreshUndoable, refreshWorkflowStats])
+
+  const ensureChapterListLoaded = useCallback(async (): Promise<Chapter[]> => {
+    if (chapters.length > 0) return chapters
+    const list = await window.electron.chapter.list(novelId)
+    setChapters(list)
+    return list
+  }, [chapters, novelId, setChapters])
+
+  const jumpToChapter = useCallback(async (chapterId: number) => {
+    const list = await ensureChapterListLoaded()
+    const target = list.find((chapter) => chapter.id === chapterId)
+    if (!target) return
+    navigate(`/novels/${novelId}/writing?chapterId=${chapterId}`)
+    setChapterJumpOpen(false)
+  }, [ensureChapterListLoaded, navigate, novelId])
+
+  const performQuickSearch = useCallback(async (keyword: string) => {
+    const trimmed = keyword.trim()
+    if (!trimmed) {
+      setQuickSearchResults([])
+      return
+    }
+
+    setQuickSearchLoading(true)
+    try {
+      const chapterList = await ensureChapterListLoaded()
+      const [threadPage, timelineRows, characterRows, itemRows, mapRows] = await Promise.all([
+        window.electron.thread.query({ novelId, keyword: trimmed, page: 1, pageSize: 6 }),
+        window.electron.timeline.search(novelId, trimmed, 6),
+        window.electron.character.search(novelId, trimmed, 6),
+        window.electron.item.search(novelId, trimmed, undefined, 6),
+        window.electron.map.searchNodes(novelId, trimmed, 6),
+      ])
+
+      const chapterRows = chapterList
+        .filter((chapter) => {
+          const haystack = [
+            `第${chapter.chapterNum}章`,
+            chapter.title || '',
+            chapter.summary || '',
+            chapter.outline || '',
+          ].join(' ')
+          return haystack.toLowerCase().includes(trimmed.toLowerCase())
+        })
+        .slice(0, 6)
+
+      const results: WorkspaceSearchResult[] = [
+        ...chapterRows.map((chapter) => ({
+          id: `chapter-${chapter.id}`,
+          type: 'chapter' as const,
+          label: `第 ${chapter.chapterNum} 章 ${chapter.title || ''}`.trim(),
+          description: chapter.summary || chapter.outline || '跳到正文写作页',
+          route: `/novels/${novelId}/writing?chapterId=${chapter.id}`,
+        })),
+        ...threadPage.items.map((thread) => ({
+          id: `thread-${thread.id}`,
+          type: 'thread' as const,
+          label: thread.title,
+          description: thread.summary || thread.currentState || '跳到故事线程页',
+          route: `/novels/${novelId}/threads?threadId=${thread.id}&action=edit`,
+        })),
+        ...timelineRows.map((event) => ({
+          id: `timeline-${event.id}`,
+          type: 'timeline' as const,
+          label: event.eventTitle,
+          description: event.eventSummary || event.eventResult || event.timeLabel,
+          route: `/novels/${novelId}/timeline?eventId=${event.id}`,
+        })),
+        ...characterRows.map((character) => ({
+          id: `character-${character.id}`,
+          type: 'character' as const,
+          label: character.fullName,
+          description: character.background || character.goals || '跳到角色页',
+          route: `/novels/${novelId}/characters?characterId=${character.id}`,
+        })),
+        ...itemRows.map((item) => ({
+          id: `item-${item.id}`,
+          type: 'item' as const,
+          label: item.itemName,
+          description: item.summary || item.plotFunction || '跳到物品页',
+          route: `/novels/${novelId}/items?itemId=${item.id}`,
+        })),
+        ...mapRows.map((node) => ({
+          id: `map-${node.id}`,
+          type: 'map' as const,
+          label: node.name,
+          description: node.description || node.plotRelevance || '跳到地图页',
+          route: `/novels/${novelId}/map?nodeId=${node.id}`,
+        })),
+      ]
+
+      setQuickSearchResults(results.slice(0, 24))
+    } finally {
+      setQuickSearchLoading(false)
+    }
+  }, [ensureChapterListLoaded, novelId])
+
+  const filteredChapterResults = useMemo(() => {
+    const normalized = chapterJumpKeyword.trim().toLowerCase()
+    return chapters.filter((chapter) => {
+      if (!normalized) return true
+      const haystack = [`第${chapter.chapterNum}章`, chapter.title || '', chapter.summary || '']
+        .join(' ')
+        .toLowerCase()
+      return haystack.includes(normalized)
+    })
+  }, [chapterJumpKeyword, chapters])
+
   useEffect(() => {
     if (mode !== 'pro') {
       setMode('pro')
@@ -340,12 +516,107 @@ export default function NovelRouter() {
 
     return () => {
       alive = false
+      resetWorkspace()
     }
-  }, [navigate, novelId, setCurrentNovel])
+  }, [navigate, novelId, resetWorkspace, setCurrentNovel])
 
   useEffect(() => {
     void refreshWorkflowStats()
   }, [location.pathname, refreshWorkflowStats])
+
+  useEffect(() => {
+    void refreshUndoable()
+  }, [location.pathname, refreshUndoable])
+
+  useEffect(() => {
+    if (!quickSearchOpen) return undefined
+    const timer = window.setTimeout(() => {
+      void performQuickSearch(quickSearchKeyword)
+    }, 220)
+    return () => window.clearTimeout(timer)
+  }, [performQuickSearch, quickSearchKeyword, quickSearchOpen])
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const isMeta = event.metaKey || event.ctrlKey
+      const key = event.key.toLowerCase()
+      const editable = isEditableTarget(event.target)
+
+      if (key === 'escape') {
+        if (quickSearchOpen) {
+          event.preventDefault()
+          setQuickSearchOpen(false)
+          return
+        }
+        if (chapterJumpOpen) {
+          event.preventDefault()
+          setChapterJumpOpen(false)
+          return
+        }
+        if (shortcutHelpOpen) {
+          event.preventDefault()
+          setShortcutHelpOpen(false)
+          return
+        }
+        escapeHandlerRef.current?.()
+        return
+      }
+
+      if (editable && !isMeta) {
+        return
+      }
+
+      if (isMeta && key === 's') {
+        event.preventDefault()
+        saveHandlerRef.current?.()
+        return
+      }
+
+      if (isMeta && key === 'f') {
+        event.preventDefault()
+        setQuickSearchOpen(true)
+        return
+      }
+
+      if (isMeta && key === 'g') {
+        event.preventDefault()
+        void ensureChapterListLoaded().then(() => setChapterJumpOpen(true)).catch(console.error)
+        return
+      }
+
+      if (isMeta && (key === 'arrowleft' || key === 'arrowright')) {
+        event.preventDefault()
+        void ensureChapterListLoaded().then((list) => {
+          const currentId = currentChapterId || Number(new URLSearchParams(location.search).get('chapterId'))
+          const currentIndex = list.findIndex((chapter) => chapter.id === currentId)
+          if (currentIndex < 0) return
+          const nextIndex = key === 'arrowleft' ? currentIndex - 1 : currentIndex + 1
+          const nextChapter = list[nextIndex]
+          if (nextChapter) {
+            navigate(`/novels/${novelId}/writing?chapterId=${nextChapter.id}`)
+          }
+        }).catch(console.error)
+        return
+      }
+
+      if (!editable && event.key === '?') {
+        event.preventDefault()
+        setShortcutHelpOpen(true)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [
+    chapterJumpOpen,
+    currentChapterId,
+    ensureChapterListLoaded,
+    location.search,
+    navigate,
+    novelId,
+    quickSearchOpen,
+    shortcutHelpOpen,
+  ])
 
   useEffect(() => {
     if (loading || !novelId) return
@@ -370,7 +641,14 @@ export default function NovelRouter() {
   }
 
   return (
-    <div className="novel-route-shell novel-route-shell--single">
+    <WorkspaceErrorBoundary resetKey={`${novelId}:${location.pathname}`}>
+      <NovelWorkspaceActionsProvider value={{
+        mutationToken: workspaceMutationToken,
+        registerSaveHandler,
+        registerEscapeHandler,
+        notifyWorkspaceMutation,
+      }}>
+      <div className="novel-route-shell novel-route-shell--single">
       <aside className="novel-route-shell__sidebar">
         <div className="novel-sidebar__title-block">
           <div className="novel-sidebar__eyebrow">小说工作台</div>
@@ -449,6 +727,34 @@ export default function NovelRouter() {
               </div>
             </div>
             <div className="novel-route-shell__header-actions">
+              <Button icon={<SearchOutlined />} onClick={() => setQuickSearchOpen(true)}>
+                全局搜索
+              </Button>
+              <Button icon={<QuestionCircleOutlined />} onClick={() => setShortcutHelpOpen(true)}>
+                快捷键
+              </Button>
+              <Button onClick={() => void ensureChapterListLoaded().then(() => setChapterJumpOpen(true)).catch(console.error)}>
+                跳转章节
+              </Button>
+              <Button
+                icon={<RollbackOutlined />}
+                disabled={!latestUndoable}
+                title={latestUndoable?.summary || '没有可撤销的最近操作'}
+                onClick={() => {
+                  if (!latestUndoable) return
+                  void window.electron.history.undo(latestUndoable.id)
+                    .then(() => {
+                      message.success(`已撤销：${latestUndoable.summary}`)
+                      notifyWorkspaceMutation()
+                    })
+                    .catch((error) => {
+                      console.error(error)
+                      message.error(error instanceof Error ? error.message : '撤销失败')
+                    })
+                }}
+              >
+                撤销最近操作
+              </Button>
               {currentPage !== recommendedKey ? (
                 <Button onClick={() => navigate(`/novels/${novelId}/${recommendedKey}`)}>
                   推荐下一步
@@ -506,6 +812,92 @@ export default function NovelRouter() {
           </div>
         </div>
       </main>
-    </div>
+      </div>
+      <Modal
+        title="工作区搜索"
+        open={quickSearchOpen}
+        footer={null}
+        onCancel={() => setQuickSearchOpen(false)}
+      >
+        <Input
+          autoFocus
+          value={quickSearchKeyword}
+          onChange={(event) => setQuickSearchKeyword(event.target.value)}
+          placeholder="搜索章节、线程、时间轴、角色、物品或地点"
+        />
+        <div className="novel-note-list" style={{ marginTop: 16 }}>
+          {quickSearchLoading ? <Spin size="small" /> : null}
+          {!quickSearchLoading && quickSearchResults.length === 0 ? (
+            <div className="novel-note-list__item">输入关键词后会在整个 Novel 工作区里搜索。</div>
+          ) : null}
+          {quickSearchResults.map((result) => (
+            <button
+              key={result.id}
+              type="button"
+              className="novel-sidebar__nav-item"
+              style={{ width: '100%', textAlign: 'left' }}
+              onClick={() => {
+                navigate(result.route)
+                setQuickSearchOpen(false)
+              }}
+            >
+              <span className="novel-sidebar__nav-copy">
+                <strong>{result.label}</strong>
+                <small>{`${result.type} · ${result.description}`}</small>
+              </span>
+            </button>
+          ))}
+        </div>
+      </Modal>
+      <Modal
+        title="章节跳转"
+        open={chapterJumpOpen}
+        footer={null}
+        onCancel={() => setChapterJumpOpen(false)}
+      >
+        <Input
+          autoFocus
+          value={chapterJumpKeyword}
+          onChange={(event) => setChapterJumpKeyword(event.target.value)}
+          placeholder="按章节号或标题筛选"
+        />
+        <div className="novel-note-list" style={{ marginTop: 16 }}>
+          {filteredChapterResults.slice(0, 20).map((chapter) => (
+            <button
+              key={chapter.id}
+              type="button"
+              className="novel-sidebar__nav-item"
+              style={{ width: '100%', textAlign: 'left' }}
+              onClick={() => void jumpToChapter(chapter.id)}
+            >
+              <span className="novel-sidebar__nav-copy">
+                <strong>{`第 ${chapter.chapterNum} 章 ${chapter.title || ''}`.trim()}</strong>
+                <small>{chapter.summary || chapter.outline || '跳到正文写作页'}</small>
+              </span>
+            </button>
+          ))}
+          {filteredChapterResults.length === 0 ? (
+            <div className="novel-note-list__item">当前没有匹配章节。</div>
+          ) : null}
+        </div>
+      </Modal>
+      <Modal
+        title="工作区快捷键"
+        open={shortcutHelpOpen}
+        footer={null}
+        onCancel={() => setShortcutHelpOpen(false)}
+      >
+        <div className="novel-note-list">
+          <div className="novel-note-list__item">`Ctrl/Cmd+S`：保存当前页可保存内容</div>
+          <div className="novel-note-list__item">`Ctrl/Cmd+F`：打开工作区搜索</div>
+          <div className="novel-note-list__item">`Ctrl/Cmd+G`：打开章节跳转</div>
+          <div className="novel-note-list__item">`Ctrl/Cmd+←/→`：上一章 / 下一章</div>
+          <div className="novel-note-list__item">`Esc`：关闭当前弹窗或清空批量选择</div>
+          <div className="novel-note-list__item">`?`：打开这份快捷键面板</div>
+          <div className="novel-note-list__item">正文写作页额外支持 `Ctrl/Cmd+Z` / `Ctrl/Cmd+Shift+Z` 本地撤销重做。</div>
+        </div>
+      </Modal>
+      </NovelWorkspaceActionsProvider>
+    </WorkspaceErrorBoundary>
   )
 }

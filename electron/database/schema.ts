@@ -89,6 +89,16 @@ export const chapters = sqliteTable('chapters', {
   updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
 })
 
+export const chapterVersions = sqliteTable('chapter_versions', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  chapterId: integer('chapter_id').notNull().references(() => chapters.id, { onDelete: 'cascade' }),
+  versionSource: text('version_source').notNull().default('manual-save'),
+  content: text('content').notNull(),
+  wordCount: integer('word_count').default(0),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
 export const chapterSegments = sqliteTable('chapter_segments', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
@@ -125,6 +135,9 @@ export const storyArcs = sqliteTable('story_arcs', {
   growthLedger: text('growth_ledger'),
   costLedger: text('cost_ledger'),
   targetWords: integer('target_words').notNull().default(0),
+  progressPercent: integer('progress_percent').notNull().default(0),
+  stalledChapterCount: integer('stalled_chapter_count').notNull().default(0),
+  lastProgressChapterNum: integer('last_progress_chapter_num'),
 })
 
 export const storyThreads = sqliteTable('story_threads', {
@@ -357,6 +370,7 @@ export const modelConfigs = sqliteTable('model_configs', {
   baseUrl: text('base_url'),
   temperature: real('temperature').default(0.85),
   maxTokens: integer('max_tokens').default(4096),
+  maxConcurrency: integer('max_concurrency').default(2),
   isDefault: integer('is_default').default(0),
   extraParamsJson: text('extra_params_json'),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
@@ -424,6 +438,22 @@ export const tasks = sqliteTable('tasks', {
   updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
 })
 
+export const operationLogs = sqliteTable('operation_logs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  entityType: text('entity_type').notNull(),
+  entityIdsJson: text('entity_ids_json'),
+  operationType: text('operation_type').notNull(),
+  summary: text('summary').notNull(),
+  batchKey: text('batch_key'),
+  beforeJson: text('before_json'),
+  afterJson: text('after_json'),
+  undoPayloadJson: text('undo_payload_json').notNull(),
+  undone: integer('undone').default(0),
+  undoneAt: text('undone_at'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
 export type Novel = typeof novels.$inferSelect
 export type NewNovel = typeof novels.$inferInsert
 export type StoryVolume = typeof storyVolumes.$inferSelect
@@ -432,6 +462,8 @@ export type StoryPart = typeof storyParts.$inferSelect
 export type NewStoryPart = typeof storyParts.$inferInsert
 export type Chapter = typeof chapters.$inferSelect
 export type NewChapter = typeof chapters.$inferInsert
+export type ChapterVersion = typeof chapterVersions.$inferSelect
+export type NewChapterVersion = typeof chapterVersions.$inferInsert
 export type ChapterSegment = typeof chapterSegments.$inferSelect
 export type NewChapterSegment = typeof chapterSegments.$inferInsert
 export type StoryThread = typeof storyThreads.$inferSelect
@@ -451,6 +483,8 @@ export type RevisionTask = typeof revisionTasks.$inferSelect
 export type NewRevisionTask = typeof revisionTasks.$inferInsert
 export type Task = typeof tasks.$inferSelect
 export type NewTask = typeof tasks.$inferInsert
+export type OperationLog = typeof operationLogs.$inferSelect
+export type NewOperationLog = typeof operationLogs.$inferInsert
 export type Genre = typeof genres.$inferSelect
 export type StoryArc = typeof storyArcs.$inferSelect
 

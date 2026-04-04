@@ -14,6 +14,12 @@ import os from 'os'
 
 const MACHINE_SALT = `novelforge-${os.hostname()}-${os.platform()}`
 
+export function normalizeModelConcurrency(value: unknown): number {
+  const numeric = typeof value === 'number' ? Math.round(value) : Number(value)
+  if (!Number.isFinite(numeric)) return 2
+  return Math.max(1, Math.min(8, numeric))
+}
+
 export function encryptApiKey(key: string): string {
   if (safeStorage.isEncryptionAvailable()) {
     return safeStorage.encryptString(key).toString('base64')
@@ -62,22 +68,33 @@ export function createAdapter(config: {
   }
 }
 
-export async function getDefaultAdapter(): Promise<BaseAdapter> {
+export function getModelConfigRecord(id: number) {
   const db = getDb()
-  const configs = db.select().from(modelConfigs).where(eq(modelConfigs.isDefault, 1)).all()
-  if (configs.length === 0) {
-    const all = db.select().from(modelConfigs).all()
-    if (all.length === 0) throw new Error('未配置任何模型，请先在模型管理页添加配置')
-    return createAdapter(all[0])
+  const config = db.select().from(modelConfigs).where(eq(modelConfigs.id, id)).all()[0]
+  if (!config) throw new Error(`模型配置 #${id} 不存在`)
+  return {
+    ...config,
+    maxConcurrency: normalizeModelConcurrency(config.maxConcurrency),
   }
-  return createAdapter(configs[0])
+}
+
+export function getDefaultModelConfigRecord() {
+  const db = getDb()
+  const defaults = db.select().from(modelConfigs).where(eq(modelConfigs.isDefault, 1)).all()
+  const config = defaults[0] || db.select().from(modelConfigs).all()[0]
+  if (!config) throw new Error('未配置任何模型，请先在模型管理页添加配置')
+  return {
+    ...config,
+    maxConcurrency: normalizeModelConcurrency(config.maxConcurrency),
+  }
+}
+
+export async function getDefaultAdapter(): Promise<BaseAdapter> {
+  return createAdapter(getDefaultModelConfigRecord())
 }
 
 export async function getAdapterById(id: number): Promise<BaseAdapter> {
-  const db = getDb()
-  const configs = db.select().from(modelConfigs).where(eq(modelConfigs.id, id)).all()
-  if (configs.length === 0) throw new Error(`模型配置 #${id} 不存在`)
-  return createAdapter(configs[0])
+  return createAdapter(getModelConfigRecord(id))
 }
 
 export async function testAdapter(configId: number): Promise<{ success: boolean; latency: number; info: string }> {
