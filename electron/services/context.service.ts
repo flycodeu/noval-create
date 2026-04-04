@@ -663,6 +663,14 @@ function buildTimelineContext(
 
 function buildItemSummary(novelId: number): string {
   const db = getDb()
+  const characterNameMap = new Map(
+    db.select({ id: characters.id, fullName: characters.fullName }).from(characters).all()
+      .map((row) => [row.id, row.fullName]),
+  )
+  const locationNameMap = new Map(
+    db.select({ id: worldMap.id, name: worldMap.name }).from(worldMap).all()
+      .map((row) => [row.id, row.name]),
+  )
   const rows = db.select().from(storyItems)
     .where(eq(storyItems.novelId, novelId))
     .orderBy(asc(storyItems.sortOrder), asc(storyItems.id))
@@ -674,11 +682,13 @@ function buildItemSummary(novelId: number): string {
   return rows
     .slice(0, 10)
     .map((item) => {
+      const ownerName = item.ownerCharacterId ? characterNameMap.get(item.ownerCharacterId) : ''
+      const locationName = item.locationMapId ? locationNameMap.get(item.locationMapId) : ''
       const parts = [
         item.category || '',
         item.status || '',
-        item.ownerCharacterId ? `角色#${item.ownerCharacterId}` : '',
-        item.locationMapId ? `地点#${item.locationMapId}` : '',
+        ownerName ? `持有人=${ownerName}` : (item.ownerCharacterId ? '持有人=待补角色名' : ''),
+        locationName ? `地点=${locationName}` : (item.locationMapId ? '地点=待补地点名' : ''),
         item.plotFunction || item.summary || '',
       ].filter(Boolean)
       return `${item.itemName}${parts.length > 0 ? `（${parts.join(' | ')}）` : ''}`
@@ -974,6 +984,4 @@ export async function buildChapterContext(
     relationSummary: allocated.relationSummary || relationSummary || '',
   }
 }
-
-
 

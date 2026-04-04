@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Form, Input, InputNumber, Progress, Space, message } from 'antd'
 import {
   BarsOutlined,
@@ -18,6 +18,8 @@ import { buildPremiseSummary, buildStoryDesignSummary, parseStorySettingsSnapsho
 import { buildThemeVoiceSummary, parseThemeVoiceSnapshot } from '../../../shared/theme-voice'
 import { useNovelStore } from '../../../stores/novel.store'
 import { buildDraftMessages, normalizeOptionalNumber, parseDraftJson } from '../shared/ai-draft'
+import { usePlanningDraft } from '../shared/planning-draft'
+import { generateOverviewDraft } from '../shared/planning-ai-service'
 import {
   WorkspaceContextSummary,
   WorkspaceMetric,
@@ -78,6 +80,9 @@ export default function Overview({ novelId }: Props) {
   const [form] = Form.useForm<OverviewFormValues>()
   const [saving, setSaving] = useState(false)
   const [stats, setStats] = useState<OverviewStats>(EMPTY_STATS)
+  const [draftWarnings, setDraftWarnings] = useState<string[]>([])
+  const draftWarningsRef = useRef<string[]>([])
+  const draftObservabilityRef = useRef<{ inputSummary: string; lintWarnings: string[]; rawOutputs: string[] } | null>(null)
 
   useEffect(() => {
     form.setFieldsValue({
@@ -194,9 +199,8 @@ export default function Overview({ novelId }: Props) {
   const nextFocus = readinessItems.find((item) => !item.ready)?.title
     || (stats.revisionTaskCount > 0 ? '修订中心' : '正文写作')
 
-  const handleApplyDraft = (raw: string) => {
+  const applyOverviewDraft = (draft: Partial<OverviewFormValues>) => {
     const currentValues = form.getFieldsValue(true)
-    const draft = parseDraftJson<OverviewFormValues>(raw)
 
     form.setFieldsValue({
       ...currentValues,
@@ -208,21 +212,46 @@ export default function Overview({ novelId }: Props) {
     })
   }
 
+  const { clearDraft, draft, finalizeDraft, saveAppliedDraft } = usePlanningDraft<OverviewFormValues>({
+    novelId,
+    pageKey: 'overview',
+    applyDraft: applyOverviewDraft,
+  })
+
+  const handleApplyDraft = (raw: string) => {
+    const parsedDraft = parseDraftJson<OverviewFormValues>(raw)
+    const currentValues = form.getFieldsValue(true)
+    const mergedDraft: OverviewFormValues = {
+      ...currentValues,
+      title: typeof parsedDraft.title === 'string' ? parsedDraft.title : currentValues.title,
+      synopsis: typeof parsedDraft.synopsis === 'string' ? parsedDraft.synopsis : currentValues.synopsis,
+      userBackground: typeof parsedDraft.userBackground === 'string' ? parsedDraft.userBackground : currentValues.userBackground,
+      expandedBackground: typeof parsedDraft.expandedBackground === 'string' ? parsedDraft.expandedBackground : currentValues.expandedBackground,
+      targetWords: normalizeTargetWords(parsedDraft.targetWords ?? currentValues.targetWords),
+    }
+
+    applyOverviewDraft(mergedDraft)
+    void saveAppliedDraft(mergedDraft, draftWarningsRef.current, 'overview', draftObservabilityRef.current || undefined).catch(console.error)
+  }
+
   const handleSave = async () => {
     const values = await form.validateFields()
     setSaving(true)
 
     try {
-      await window.electron.novel.update(novelId, {
+      const finalPayload = {
         title: values.title.trim(),
         synopsis: values.synopsis.trim(),
         userBackground: values.userBackground.trim(),
         expandedBackground: values.expandedBackground.trim(),
         targetWords: values.targetWords,
-      })
+      }
+      await window.electron.novel.update(novelId, finalPayload)
 
       const updated = await window.electron.novel.get(novelId)
       if (updated) setCurrentNovel(updated)
+      await finalizeDraft(finalPayload)
+      await clearDraft()
       message.success('基础信息已保存。')
     } catch (error) {
       console.error(error)
@@ -245,6 +274,13 @@ export default function Overview({ novelId }: Props) {
           <AIGenerateButton
             label="AI 生成基础信息"
             isJson
+            runGeneration={async (input) => {
+              const result = await generateOverviewDraft(input, { genre: currentNovel?.genreName })
+              draftWarningsRef.current = result.warnings
+              draftObservabilityRef.current = result.observability
+              setDraftWarnings(result.warnings)
+              return result.outputs
+            }}
             buildMessages={() => {
               const values = form.getFieldsValue(true)
 
@@ -334,6 +370,22 @@ export default function Overview({ novelId }: Props) {
           type="warning"
           showIcon
           message="简介或扩展背景还不完整。"
+        />
+      ) : null}
+      {draftWarnings.length > 0 ? (
+        <Alert
+          type="info"
+          showIcon
+          message="本轮 AI 草稿带有提醒"
+          description={draftWarnings.map((warning) => <div key={warning}>{warning}</div>)}
+        />
+      ) : null}
+      {draft?.appliedAt ? (
+        <Alert
+          type="info"
+          showIcon
+          message="已恢复最近一次未保存的 AI 草稿"
+          description="当前表单包含最近一次已应用但尚未保存的 Overview 草稿。保存基础信息后会自动清除。"
         />
       ) : null}
 

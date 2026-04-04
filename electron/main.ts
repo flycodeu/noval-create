@@ -8,6 +8,7 @@ import type { ProjectBriefGenerationRequest } from '../src/shared/project-brief-
 import type { ThemeVoiceGenerationRequest } from '../src/shared/theme-voice-generation'
 import type { WorldRulesGenerationRequest } from '../src/shared/world-rules-generation'
 import type { SubplotGenerationRequest } from '../src/shared/subplot-framework'
+import type { PlanningDraftPageKey } from '../src/types'
 import { closeDb, getDb, initDb } from './database/db'
 import {
   chapters,
@@ -23,6 +24,7 @@ import * as characterService from './services/character.service'
 import * as consistencyService from './services/consistency.service'
 import * as coreSettingsService from './services/core-settings.service'
 import * as premiseService from './services/premise.service'
+import * as planningDraftService from './services/planning-draft.service'
 import * as projectBriefService from './services/project-brief.service'
 import { buildOutlineGenerationContext, buildStoryProfile } from './services/context.service'
 import * as worldRulesService from './services/world-rules.service'
@@ -242,6 +244,9 @@ function registerIpcHandlers() {
   ipcMain.handle('structure:reorderSegments', (_, chapterId, orderedIds) => storyStructureService.reorderChapterSegments(chapterId, orderedIds))
   ipcMain.handle('structure:compileChapter', (_, chapterId) => storyStructureService.compileChapterFromSegments(chapterId))
   ipcMain.handle('structure:refreshCheckpoints', (_, novelId) => storyMemoryService.refreshStoryMemoryCheckpoints(novelId))
+  ipcMain.handle('structure:applyBatchPlan', (_, novelId, plan) => storyStructureService.applyStructureBatchPlan(novelId, plan))
+  ipcMain.handle('structure:previewBatchEdit', (_, novelId, operations) => storyStructureService.previewStructureBatchEdit(novelId, operations))
+  ipcMain.handle('structure:applyBatchEdit', (_, novelId, operations) => storyStructureService.applyStructureBatchEdit(novelId, operations))
 
   ipcMain.handle('chapter:list', (_, novelId) => chapterService.listChapters(novelId))
   ipcMain.handle('chapter:get', (_, id) => chapterService.getChapter(id))
@@ -761,6 +766,25 @@ function registerIpcHandlers() {
   ipcMain.handle('premiseDraft:markApplied', (_, taskId: number, appliedMode: 'replace' | 'fill_blanks') =>
     premiseService.markPremiseDraftApplied(taskId, appliedMode))
   ipcMain.handle('premiseDraft:clearAll', (_, novelId: number) => premiseService.clearPremiseDrafts(novelId))
+  ipcMain.handle('planningDraft:getLatest', (_, novelId: number, pageKey: PlanningDraftPageKey) =>
+    planningDraftService.getLatestPlanningDraft(novelId, pageKey))
+  ipcMain.handle('planningDraft:save', (_, data: {
+    novelId: number
+    pageKey: PlanningDraftPageKey
+    data: Record<string, unknown>
+    warnings?: string[]
+    sourcePage?: string
+    inputSummary?: string
+    lintWarnings?: string[]
+    rawOutputs?: string[]
+    rejectionReason?: string
+  }) => planningDraftService.savePlanningDraft(data))
+  ipcMain.handle('planningDraft:markApplied', (_, taskId: number) =>
+    planningDraftService.markPlanningDraftApplied(taskId))
+  ipcMain.handle('planningDraft:finalize', (_, taskId: number, finalData: Record<string, unknown>) =>
+    planningDraftService.finalizePlanningDraft(taskId, finalData))
+  ipcMain.handle('planningDraft:clear', (_, novelId: number, pageKey: PlanningDraftPageKey) =>
+    planningDraftService.clearPlanningDrafts(novelId, pageKey))
 
   ipcMain.handle('ai:expandBackground', async (_, input: {
     userBackground: string

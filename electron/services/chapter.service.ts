@@ -1121,7 +1121,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
           profile,
           scenePlanText,
           consistencyNotes: writingGuidance,
-          reviewNotes: buildFallbackReviewNotes(''),
+          reviewNotes,
           content: output,
         })
 
@@ -1195,5 +1195,4 @@ export async function aiCheckChapter(chapterId: number): Promise<unknown> {
 }
 
 export { runChapterPublishCheck }
-
 

@@ -17,6 +17,7 @@ import type { FormInstance } from 'antd'
 import {
   DeleteOutlined,
   LinkOutlined,
+  ReloadOutlined,
   SaveOutlined,
 } from '@ant-design/icons'
 import VirtualList from 'rc-virtual-list'
@@ -242,6 +243,7 @@ interface TimelineEditorPanelProps {
   creating: boolean
   loading: boolean
   saving: boolean
+  regenerating: boolean
   form: FormInstance<TimelineFormValues>
   modeLabel: string
   timeModeHint: string
@@ -263,6 +265,7 @@ interface TimelineEditorPanelProps {
   onValuesChange: (changed: Partial<TimelineFormValues>, values: TimelineFormValues) => void
   onSave: () => void
   onDelete: () => void
+  onRegenerate: () => void
   onJumpToStructure: () => void
 }
 
@@ -271,6 +274,7 @@ export function TimelineEditorPanel({
   creating,
   loading,
   saving,
+  regenerating,
   form,
   modeLabel,
   timeModeHint,
@@ -292,6 +296,7 @@ export function TimelineEditorPanel({
   onValuesChange,
   onSave,
   onDelete,
+  onRegenerate,
   onJumpToStructure,
 }: TimelineEditorPanelProps) {
   const panelTitle = selectedEvent
@@ -309,6 +314,11 @@ export function TimelineEditorPanel({
         </div>
         <div className="novel-panel__extra">
           <Space>
+            {selectedEvent ? (
+              <Button icon={<ReloadOutlined />} loading={regenerating} onClick={onRegenerate}>
+                AI 重生成
+              </Button>
+            ) : null}
             {selectedEvent ? (
               <Button icon={<LinkOutlined />} onClick={onJumpToStructure}>
                 {TIMELINE_TEXT.jumpToStructure}

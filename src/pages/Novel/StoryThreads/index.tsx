@@ -1,8 +1,9 @@
 ﻿import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, message } from 'antd'
+import { useRef } from 'react'
 import type { ColumnsType } from 'antd/es/table'
 import { ArrowRightOutlined, DeleteOutlined, PlusOutlined, RobotOutlined } from '@ant-design/icons'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import type { StoryThread } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
 import type { StoryThreadBatchGenerateOptions } from '../../../shared/story-thread-generation'
@@ -152,7 +153,13 @@ function formatChapter(value?: number | null): string {
   return `第 ${value} 章`
 }
 
+function parseRouteId(value: string | null): number | null {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+}
+
 export default function StoryThreadsPage({ novelId }: Props) {
+  const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const { currentNovel } = useNovelStore()
   const [editorForm] = Form.useForm<StoryThreadFormValues>()
@@ -167,6 +174,9 @@ export default function StoryThreadsPage({ novelId }: Props) {
   const [generateOpen, setGenerateOpen] = useState(false)
   const [editingThread, setEditingThread] = useState<StoryThread | null>(null)
   const [generationWarnings, setGenerationWarnings] = useState<string[]>([])
+  const routeEditorRef = useRef<number | null>(null)
+  const routeThreadId = useMemo(() => parseRouteId(searchParams.get('threadId')), [searchParams])
+  const routeAction = useMemo(() => searchParams.get('action'), [searchParams])
   const generationBlockers = useMemo(
     () => getWorkflowBlockers('threads', currentNovel, workflowStats),
     [currentNovel, workflowStats],
@@ -194,6 +204,13 @@ export default function StoryThreadsPage({ novelId }: Props) {
   useEffect(() => {
     void refresh()
   }, [refresh])
+  useEffect(() => {
+    if (!routeThreadId || routeAction !== 'edit' || routeEditorRef.current === routeThreadId) return
+    const target = threads.find((thread) => thread.id === routeThreadId)
+    if (!target) return
+    routeEditorRef.current = routeThreadId
+    openEditor(target)
+  }, [routeAction, routeThreadId, threads])
 
   useEffect(() => {
     generateForm.setFieldsValue(DEFAULT_GENERATE_VALUES)
@@ -296,6 +313,20 @@ export default function StoryThreadsPage({ novelId }: Props) {
     }
   }
 
+  const handleRegenerate = async (thread: StoryThread) => {
+    setGenerating(true)
+    try {
+      await window.electron.thread.regenerate(thread.id)
+      message.success('故事线程已按当前设定重生成。')
+      await refresh()
+    } catch (error) {
+      console.error(error)
+      message.error(error instanceof Error ? error.message : '故事线程重生成失败。')
+    } finally {
+      setGenerating(false)
+    }
+  }
+
   const columns = useMemo<ColumnsType<StoryThread>>(() => [
     {
       title: '线程',
@@ -345,6 +376,7 @@ export default function StoryThreadsPage({ novelId }: Props) {
       render: (_, record) => (
         <Space>
           <Button size="small" onClick={() => openEditor(record)}>编辑</Button>
+          <Button size="small" loading={generating} onClick={() => void handleRegenerate(record)}>AI 重生成</Button>
           <Button size="small" danger icon={<DeleteOutlined />} onClick={() => handleDelete(record)} />
         </Space>
       ),

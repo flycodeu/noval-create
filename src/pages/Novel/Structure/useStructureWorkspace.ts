@@ -1,4 +1,4 @@
-import { Form, message } from 'antd'
+import { Form, Modal, message } from 'antd'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import type {
@@ -12,7 +12,7 @@ import type {
   StoryStructureVolumeSummary,
   TimelineEvent,
 } from '../../../types'
-import { createEmptyPage, getPartLabel, getVolumeLabel, optionalId } from '../shared/workspace-utils'
+import { createEmptyPage, getPartLabel, getSegmentLabel, getVolumeLabel, optionalId } from '../shared/workspace-utils'
 import type { ChapterFormValues, SegmentFormValues, StructureSelection } from './helpers'
 import {
   CHAPTER_PAGE_SIZE,
@@ -395,11 +395,37 @@ export function useStructureWorkspace(novelId: number) {
     message.success('新卷已创建。')
   }, [clearCaches, novelId, resolveAndLoad])
 
+  const addVolumes = useCallback(async (count: number) => {
+    const safeCount = Math.max(1, Math.min(Math.floor(count) || 1, 20))
+    let lastVolumeId: number | null = null
+
+    for (let index = 0; index < safeCount; index += 1) {
+      lastVolumeId = await window.electron.structure.createVolume(novelId, {})
+    }
+
+    clearCaches()
+    await resolveAndLoad(lastVolumeId ? { volumeId: lastVolumeId } : {}, true)
+    message.success(`已新增 ${safeCount} 卷。`)
+  }, [clearCaches, novelId, resolveAndLoad])
+
   const addPart = useCallback(async (volumeId: number) => {
     const partId = await window.electron.structure.createPart(volumeId, {})
     clearCaches()
     await resolveAndLoad({ volumeId, partId }, true)
     message.success('新部已创建。')
+  }, [clearCaches, resolveAndLoad])
+
+  const addParts = useCallback(async (volumeId: number, count: number) => {
+    const safeCount = Math.max(1, Math.min(Math.floor(count) || 1, 20))
+    let lastPartId: number | null = null
+
+    for (let index = 0; index < safeCount; index += 1) {
+      lastPartId = await window.electron.structure.createPart(volumeId, {})
+    }
+
+    clearCaches()
+    await resolveAndLoad(lastPartId ? { volumeId, partId: lastPartId } : { volumeId }, true)
+    message.success(`已新增 ${safeCount} 部。`)
   }, [clearCaches, resolveAndLoad])
 
   const addChapter = useCallback(async () => {
@@ -424,6 +450,33 @@ export function useStructureWorkspace(novelId: number) {
     message.success('新章节已创建。')
   }, [clearCaches, novelId, resolveAndLoad, selection.partId, selection.volumeId])
 
+  const addChapters = useCallback(async (count: number) => {
+    if (!selection.partId || !selection.volumeId) return
+
+    const safeCount = Math.max(1, Math.min(Math.floor(count) || 1, 50))
+    let lastChapterId: number | null = null
+
+    for (let index = 0; index < safeCount; index += 1) {
+      lastChapterId = await window.electron.chapter.create(novelId, {
+        status: 'outline',
+        targetWords: 3000,
+        partId: selection.partId,
+        volumeId: selection.volumeId,
+      })
+    }
+
+    clearCaches()
+    await resolveAndLoad(
+      {
+        volumeId: selection.volumeId,
+        partId: selection.partId,
+        chapterId: lastChapterId ?? undefined,
+      },
+      true,
+    )
+    message.success(`已新增 ${safeCount} 章。`)
+  }, [clearCaches, novelId, resolveAndLoad, selection.partId, selection.volumeId])
+
   const addSegment = useCallback(async () => {
     if (!selection.chapterId) return
 
@@ -445,6 +498,129 @@ export function useStructureWorkspace(novelId: number) {
     )
     message.success('新场景已创建。')
   }, [clearCaches, resolveAndLoad, segments.total, selection.chapterId, selection.partId, selection.volumeId])
+
+  const addSegments = useCallback(async (count: number) => {
+    if (!selection.chapterId) return
+
+    const safeCount = Math.max(1, Math.min(Math.floor(count) || 1, 50))
+    let lastSegmentId: number | null = null
+    const baseOrder = segments.total || 0
+
+    for (let index = 0; index < safeCount; index += 1) {
+      lastSegmentId = await window.electron.structure.createSegment(selection.chapterId, {
+        title: `场景 ${String(baseOrder + index + 1).padStart(2, '0')}`,
+        segmentType: 'scene',
+        status: 'planned',
+      })
+    }
+
+    clearCaches()
+    await resolveAndLoad(
+      {
+        volumeId: optionalId(selection.volumeId),
+        partId: optionalId(selection.partId),
+        chapterId: selection.chapterId,
+        segmentId: lastSegmentId ?? undefined,
+      },
+      true,
+    )
+    message.success(`已新增 ${safeCount} 个场景。`)
+  }, [clearCaches, resolveAndLoad, segments.total, selection.chapterId, selection.partId, selection.volumeId])
+
+  const deleteVolume = useCallback(async (volume: StoryStructureVolumeSummary) => {
+    const shouldDelete = await new Promise<boolean>((resolve) => {
+      Modal.confirm({
+        title: `删除 ${getVolumeLabel(volume)}？`,
+        content: '会移除该卷及其下属结构。请确认当前内容已经整理完毕。',
+        okText: '删除',
+        okType: 'danger',
+        cancelText: '取消',
+        onOk: () => resolve(true),
+        onCancel: () => resolve(false),
+      })
+    })
+
+    if (!shouldDelete) return
+
+    await window.electron.structure.deleteVolume(volume.id)
+    clearCaches()
+    await resolveAndLoad({}, true)
+    message.success('卷已删除。')
+  }, [clearCaches, resolveAndLoad])
+
+  const deletePart = useCallback(async (part: StoryStructurePartSummary) => {
+    const shouldDelete = await new Promise<boolean>((resolve) => {
+      Modal.confirm({
+        title: `删除 ${getPartLabel(part)}？`,
+        content: '会移除该部及其下属章节和场景。',
+        okText: '删除',
+        okType: 'danger',
+        cancelText: '取消',
+        onOk: () => resolve(true),
+        onCancel: () => resolve(false),
+      })
+    })
+
+    if (!shouldDelete) return
+
+    await window.electron.structure.deletePart(part.id)
+    clearCaches()
+    await resolveAndLoad({ volumeId: optionalId(selection.volumeId) }, true)
+    message.success('部已删除。')
+  }, [clearCaches, resolveAndLoad, selection.volumeId])
+
+  const deleteChapter = useCallback(async () => {
+    if (!chapterDetail) return
+
+    const shouldDelete = await new Promise<boolean>((resolve) => {
+      Modal.confirm({
+        title: `删除第 ${chapterDetail.chapterNum} 章？`,
+        content: '会删除当前章节及其结构数据，请确认正文内容不再需要。',
+        okText: '删除',
+        okType: 'danger',
+        cancelText: '取消',
+        onOk: () => resolve(true),
+        onCancel: () => resolve(false),
+      })
+    })
+
+    if (!shouldDelete) return
+
+    await window.electron.chapter.delete(chapterDetail.id)
+    clearCaches()
+    await resolveAndLoad({
+      volumeId: optionalId(selection.volumeId),
+      partId: optionalId(selection.partId),
+    }, true)
+    message.success('章节已删除。')
+  }, [chapterDetail, clearCaches, resolveAndLoad, selection.partId, selection.volumeId])
+
+  const deleteSegment = useCallback(async () => {
+    if (!segmentDetail) return
+
+    const shouldDelete = await new Promise<boolean>((resolve) => {
+      Modal.confirm({
+        title: `删除 ${getSegmentLabel(segmentDetail)}？`,
+        content: '会删除当前场景。',
+        okText: '删除',
+        okType: 'danger',
+        cancelText: '取消',
+        onOk: () => resolve(true),
+        onCancel: () => resolve(false),
+      })
+    })
+
+    if (!shouldDelete) return
+
+    await window.electron.structure.deleteSegment(segmentDetail.id)
+    clearCaches()
+    await resolveAndLoad({
+      volumeId: optionalId(selection.volumeId),
+      partId: optionalId(selection.partId),
+      chapterId: optionalId(selection.chapterId),
+    }, true)
+    message.success('场景已删除。')
+  }, [clearCaches, resolveAndLoad, segmentDetail, selection.chapterId, selection.partId, selection.volumeId])
 
   const saveChapter = useCallback(async () => {
     if (!chapterDetail) return
@@ -615,11 +791,19 @@ export function useStructureWorkspace(novelId: number) {
     canReorderSegments,
     setEditingTitle,
     addChapter,
+    addChapters,
     addPart,
+    addParts,
     addSegment,
+    addSegments,
     addVolume,
+    addVolumes,
     cancelRename,
     compileChapter,
+    deleteChapter,
+    deletePart,
+    deleteSegment,
+    deleteVolume,
     loadCheckpoints,
     loadLinked,
     loadParts,

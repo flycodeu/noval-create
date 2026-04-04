@@ -32,6 +32,7 @@ export type TaskType =
   | 'world_rules_generate'
   | 'project_brief_generate'
   | 'theme_voice_generate'
+  | 'planning_draft'
   | 'entity_discovery'
   | 'story_thread_generate'
 

@@ -8,8 +8,10 @@ import {
   ReloadOutlined,
   StopOutlined,
 } from '@ant-design/icons'
+import { useNavigate } from 'react-router-dom'
 import { Task } from '../../types'
 import { useTaskStore } from '../../stores/task.store'
+import { buildTaskRecoveryAction } from '../Novel/shared/workspace-navigation'
 import {
   WorkspaceMetric,
   WorkspacePage,
@@ -53,6 +55,7 @@ const TYPE_LABELS: Record<string, string> = {
   world_rules_generate: 'AI 生成世界规则',
   world_rules_auto_generate: 'AI 自动生成世界规则',
   story_thread_generate: 'AI 生成故事线程',
+  planning_draft: 'AI 规划草稿',
 }
 
 const RUNNER_LABELS: Record<string, string> = {
@@ -116,6 +119,7 @@ function getTaskSummary(task: Task, stream?: { content: string }): string {
 }
 
 export default function TaskCenter() {
+  const navigate = useNavigate()
   const [tasks, setTasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState('all')
@@ -167,6 +171,10 @@ export default function TaskCenter() {
     () => filteredTasks.find((task) => task.id === selectedId) || null,
     [filteredTasks, selectedId],
   )
+  const selectedRecoveryAction = useMemo(
+    () => (selectedTask ? buildTaskRecoveryAction(selectedTask) : null),
+    [selectedTask],
+  )
 
   const handleCancel = async (taskId: number) => {
     await window.electron.task.cancel(taskId)
@@ -191,6 +199,12 @@ export default function TaskCenter() {
       message.error(error instanceof Error ? error.message : '继续任务失败，请稍后再试。')
     }
   }
+
+  const handleRecoverDraft = useCallback((path?: string) => {
+    if (!path) return
+    navigate(path)
+    message.success('已打开对应工作台，草稿会自动恢复。')
+  }, [navigate])
 
   const runningCount = tasks.filter((task) => task.status === 'running' || task.status === 'cancel_requested').length
   const failedCount = tasks.filter((task) => task.status === 'failed').length
@@ -222,6 +236,25 @@ export default function TaskCenter() {
         key: 'input',
         label: '请求上下文',
         children: <div className="task-center-code">{formatTaskPayload(selectedTask.inputJson)}</div>,
+      })
+    }
+
+    const progress = selectedTask ? parseTaskProgress(selectedTask.progressJson) : {}
+    const draft = progress.draft && typeof progress.draft === 'object' && !Array.isArray(progress.draft)
+      ? progress.draft as Record<string, unknown>
+      : null
+    const observabilityLines = [
+      typeof draft?.inputSummary === 'string' && draft.inputSummary.trim() ? `输入摘要：${draft.inputSummary.trim()}` : '',
+      Array.isArray(draft?.warnings) && draft.warnings.length > 0 ? `生成提醒：${draft.warnings.join('；')}` : '',
+      Array.isArray(draft?.lintWarnings) && draft.lintWarnings.length > 0 ? `语言 lint：${draft.lintWarnings.join('；')}` : '',
+      Array.isArray(draft?.diffSummary) && draft.diffSummary.length > 0 ? `人工修改差异：${draft.diffSummary.join('；')}` : '',
+    ].filter(Boolean)
+
+    if (observabilityLines.length > 0) {
+      items.push({
+        key: 'observability',
+        label: '草稿观测',
+        children: <div className="task-center-code">{observabilityLines.join('\n\n')}</div>,
       })
     }
 
@@ -342,6 +375,11 @@ export default function TaskCenter() {
                   继续
                 </Button>
               ) : null}
+              {selectedRecoveryAction?.kind === 'recover_draft' ? (
+                <Button icon={<ReloadOutlined />} onClick={() => handleRecoverDraft(selectedRecoveryAction.path)}>
+                  {selectedRecoveryAction.label}
+                </Button>
+              ) : null}
               {(selectedTask.status === 'failed' || selectedTask.status === 'cancelled') && isTaskRetryable(selectedTask) ? (
                 <Button icon={<ReloadOutlined />} onClick={() => void handleRetry(selectedTask.id)}>
                   重试
@@ -396,6 +434,15 @@ export default function TaskCenter() {
                   showIcon
                   message="当前任务支持安全重试"
                   description="系统已经保留本次请求上下文，可以直接重放同一组消息，不需要回到原页面重新填写。"
+                />
+              ) : null}
+
+              {selectedRecoveryAction?.kind === 'recover_draft' ? (
+                <Alert
+                  type="info"
+                  showIcon
+                  message={selectedRecoveryAction.label}
+                  description={selectedRecoveryAction.description}
                 />
               ) : null}
 

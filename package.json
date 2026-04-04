@@ -29,6 +29,7 @@
     "setup:win-tools": "npm run setup:nsis && npm run setup:nsis-resources",
     "test:subplot": "node scripts/subplot-framework.test.cjs",
     "test:prompt-guardrails": "node scripts/prompt-guardrails.test.cjs",
+    "test:workspace-routing": "node scripts/workspace-routing.test.cjs",
     "typecheck:web": "tsc -p tsconfig.web.json --noEmit",
     "typecheck:node": "tsc -p tsconfig.node.json --noEmit",
     "typecheck": "npm run typecheck:web && npm run typecheck:node",

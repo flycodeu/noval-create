@@ -224,6 +224,19 @@ const tests = [
     },
   },
   {
+    name: 'quality guardrails catch id pollution relation labels and abstract packaging',
+    run() {
+      const findings = guardrails.collectQualityGuardrailFindings(
+        '\u89d2\u8272#12\u5728\u5730\u70b9#7\u548c\u89d2\u8272#4\u78b0\u5934\uff0c\u4ed6\u4eec\u4e24\u4eba\u4e0d\u8fc7\u662f\u5bbf\u654c\u5173\u7cfb\uff0c\u538b\u8feb\u611f\u5728\u5fc3\u5e95\u8513\u5ef6\u3002',
+        '\u672b\u4e16',
+      )
+      const codes = findings.map((item) => item.code)
+      assert.ok(codes.includes('id_pollution'))
+      assert.ok(codes.includes('relation_labelization'))
+      assert.ok(codes.includes('abstract_emotion_packaging'))
+    },
+  },
+  {
     name: 'prompt library taskFocus and extraLines are fully unified to Chinese',
     run() {
       for (const snippet of removedEnglishGuardrailSnippets) {

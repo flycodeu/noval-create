@@ -78,6 +78,7 @@ export function useTimelineWorkspace(novelId: number) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [generating, setGenerating] = useState(false)
+  const [regenerating, setRegenerating] = useState(false)
   const [generateOpen, setGenerateOpen] = useState(false)
 
   const [pageData, setPageData] = useState<PagedResult<TimelineEvent>>(createEmptyPage(100))
@@ -679,6 +680,21 @@ export function useTimelineWorkspace(novelId: number) {
     })
   }, [refreshPage, selectedEvent])
 
+  const handleRegenerate = useCallback(async () => {
+    if (!selectedEvent?.id) return
+    setRegenerating(true)
+    try {
+      const regenerated = await window.electron.timeline.regenerate(selectedEvent.id)
+      await refreshPage(regenerated?.id || selectedEvent.id)
+      message.success('时间轴事件已按当前上下文重生成。')
+    } catch (error) {
+      console.error(error)
+      message.error(error instanceof Error ? error.message : TIMELINE_TEXT.generateFailed)
+    } finally {
+      setRegenerating(false)
+    }
+  }, [refreshPage, selectedEvent])
+
   const handleGenerate = useCallback(async () => {
     const nextWorkflowStats = await loadWorkflowStats(novelId)
     setWorkflowStats(nextWorkflowStats)
@@ -775,12 +791,14 @@ export function useTimelineWorkspace(novelId: number) {
     generationBlockers,
     generateOpen,
     generating,
+    regenerating,
     getStructureTagsForEvent,
     handleClear,
     handleDelete,
     handleFormValuesChange,
     handleGenerate,
     handleNew,
+    handleRegenerate,
     handleSave,
     handleSelect,
     itemOptions,

@@ -51,6 +51,9 @@ const api = {
     reorderSegments: (chapterId: number, orderedIds: number[]) => ipcRenderer.invoke('structure:reorderSegments', chapterId, orderedIds),
     compileChapter: (chapterId: number) => ipcRenderer.invoke('structure:compileChapter', chapterId),
     refreshCheckpoints: (novelId: number) => ipcRenderer.invoke('structure:refreshCheckpoints', novelId),
+    applyBatchPlan: (novelId: number, plan: unknown) => ipcRenderer.invoke('structure:applyBatchPlan', novelId, plan),
+    previewBatchEdit: (novelId: number, operations: unknown[]) => ipcRenderer.invoke('structure:previewBatchEdit', novelId, operations),
+    applyBatchEdit: (novelId: number, operations: unknown[]) => ipcRenderer.invoke('structure:applyBatchEdit', novelId, operations),
   },
 
   // Chapter APIs
@@ -227,6 +230,14 @@ const api = {
     getLatest: (novelId: number) => ipcRenderer.invoke('premiseDraft:getLatest', novelId),
     markApplied: (taskId: number, appliedMode: string) => ipcRenderer.invoke('premiseDraft:markApplied', taskId, appliedMode),
     clearAll: (novelId: number) => ipcRenderer.invoke('premiseDraft:clearAll', novelId),
+  },
+
+  planningDraft: {
+    getLatest: (novelId: number, pageKey: string) => ipcRenderer.invoke('planningDraft:getLatest', novelId, pageKey),
+    save: (data: unknown) => ipcRenderer.invoke('planningDraft:save', data),
+    markApplied: (taskId: number) => ipcRenderer.invoke('planningDraft:markApplied', taskId),
+    finalize: (taskId: number, finalData: Record<string, unknown>) => ipcRenderer.invoke('planningDraft:finalize', taskId, finalData),
+    clear: (novelId: number, pageKey: string) => ipcRenderer.invoke('planningDraft:clear', novelId, pageKey),
   },
 
   // AI generation APIs

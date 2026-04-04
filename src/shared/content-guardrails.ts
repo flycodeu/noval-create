@@ -49,6 +49,30 @@ const LANGUAGE_PATTERN_RULES: PatternRule[] = [
     message: '模板化情绪表达正在拉平文本质感。',
     pattern: /(不禁|不由得|忍不住|微微一愣|心头一紧|嘴角微微上扬|目光深邃|心中涌起|不由自主地)/u,
   },
+  {
+    code: 'id_pollution',
+    severity: 'high',
+    message: '内部 ID 或占位标识直接进入文本，会显著拉低人类语言质感。',
+    pattern: /(角色|地点|物品|事件|章节|场景|线程|故事弧)#\d+/u,
+  },
+  {
+    code: 'relation_labelization',
+    severity: 'medium',
+    message: '关系被标签词直接替代了互动细节，容易只剩设定板而没有真实拉扯。',
+    pattern: /(他们|两人|二人|他和她|她和他|双方).{0,8}(只是|不过是|本质上)?(盟友|宿敌|师徒|恋人|主仆|上下级|兄妹|姐弟|父子|母女)(关系)?/u,
+  },
+  {
+    code: 'abstract_emotion_packaging',
+    severity: 'medium',
+    message: '抽象情绪名词在替代具体动作、表情或代价。',
+    pattern: /(宿命感|压迫感|安全感|失落感|情绪价值|复杂情绪|某种情绪|情绪在心底蔓延)/u,
+  },
+  {
+    code: 'world_rules_hollowing',
+    severity: 'medium',
+    message: '世界规则只剩抽象包装词，缺少真正能落到行动层的制度与代价。',
+    pattern: /(世界规则|体系规则|制度|秩序|法则).{0,8}(完善|严密|森严|井然有序|自成体系)/u,
+  },
 ]
 
 const GENRE_HOLLOW_RULES: Partial<Record<string, GenreHollowRule>> = {
@@ -164,4 +188,3 @@ export function formatQualityGuardrailSummary(findings: TextGuardrailFinding[]):
     return `${prefix} ${finding.message}${finding.excerpt ? ` 例子：${finding.excerpt}` : ''}`
   })
 }
-

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Pagination, Progress, Select, Space, Spin, Switch, Tag, message } from 'antd'
 import { ApartmentOutlined, DeleteOutlined, DownOutlined, EditOutlined, EyeInvisibleOutlined, FullscreenExitOutlined, FullscreenOutlined, PlusOutlined, ReloadOutlined, RobotOutlined, SaveOutlined, ShareAltOutlined, StopOutlined, UnorderedListOutlined, UpOutlined } from '@ant-design/icons'
+import { useSearchParams } from 'react-router-dom'
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import type { MapBatchGenerationResult, MapGraphPayload, MapNodeSummary, MapRelation, MapRelationInput, Task, WorldMapItem } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
@@ -45,6 +46,11 @@ const RELATION_TYPE_TEXT: Record<string, string> = {
   trade: '贸易 / 补给',
   pollution: '污染 / 外溢',
   secret_link: '隐蔽通道',
+}
+
+function parseRouteId(value: string | null): number | null {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
 }
 
 const RELATION_INTENSITY_TEXT: Record<string, string> = {
@@ -143,6 +149,7 @@ function TaskStrip({
 }
 
 export default function MapExplorerPage({ novelId }: Props) {
+  const [searchParams] = useSearchParams()
   const { currentNovel } = useNovelStore()
   const [detailForm] = Form.useForm<DetailFormValues>()
   const [batchForm] = Form.useForm()
@@ -179,6 +186,7 @@ export default function MapExplorerPage({ novelId }: Props) {
   const [autoTask, setAutoTask] = useState<Task | null>(null)
   const [autoStatus, setAutoStatus] = useState(EMPTY_AUTO_STATUS)
   const [autoTaskCardExpanded, setAutoTaskCardExpanded] = useState(false)
+  const routeNodeFocusRef = useRef<number | null>(null)
 
   const worldRules = useMemo(() => parseWorldRulesJson(currentNovel?.worldRulesJson, currentNovel?.genreName), [currentNovel?.genreName, currentNovel?.worldRulesJson])
   const blueprintLevels = useMemo(() => [...worldRules.mapBlueprint.levels].sort((a, b) => a.depth - b.depth), [worldRules.mapBlueprint.levels])
@@ -218,6 +226,7 @@ export default function MapExplorerPage({ novelId }: Props) {
     value: item.value,
     label: RELATION_INTENSITY_TEXT[item.value] || item.label,
   })), [])
+  const routeNodeId = useMemo(() => parseRouteId(searchParams.get('nodeId')), [searchParams])
 
   const loadRoots = useCallback(async (targetPage = rootPage, keyword = searchKeyword) => {
     const trimmedKeyword = keyword.trim()
@@ -374,6 +383,11 @@ export default function MapExplorerPage({ novelId }: Props) {
   useEffect(() => {
     void refreshVisible()
   }, [])
+  useEffect(() => {
+    if (!routeNodeId || routeNodeFocusRef.current === routeNodeId) return
+    routeNodeFocusRef.current = routeNodeId
+    void focusNodeById(routeNodeId)
+  }, [focusNodeById, routeNodeId])
 
   useEffect(() => {
     if (rootPage === 1 && branchPage === 1) return

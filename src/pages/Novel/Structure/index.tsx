@@ -1,5 +1,5 @@
 import React from 'react'
-import { Button, Space, Spin } from 'antd'
+import { Button, Form, Input, InputNumber, Modal, Space, Spin, message } from 'antd'
 import {
   ApartmentOutlined,
   BranchesOutlined,
@@ -7,10 +7,17 @@ import {
   LinkOutlined,
   PlusOutlined,
   ReloadOutlined,
+  RobotOutlined,
 } from '@ant-design/icons'
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import { useNovelStore } from '../../../stores/novel.store'
 import { buildDraftMessages, normalizeOptionalNumber, parseDraftJson } from '../shared/ai-draft'
+import { usePlanningDraft } from '../shared/planning-draft'
+import {
+  generateStructureChapterDraft,
+  generateStructureHierarchyPlan,
+  generateStructureSegmentDraft,
+} from '../shared/planning-ai-service'
 import {
   ChapterEditorPanel,
   SegmentEditorPanel,
@@ -34,9 +41,24 @@ function summarizeSegments(items: Array<{ segmentOrder: number; title?: string |
     .join('\n')
 }
 
+interface StructurePlannerFormValues {
+  volumeCount: number
+  partsPerVolume: number
+  chaptersPerPart: number
+  segmentsPerChapter: number
+  focus: string
+}
+
 export default function StructurePage({ novelId }: { novelId: number }) {
   const workspace = useStructureWorkspace(novelId)
   const { currentNovel } = useNovelStore()
+  const [plannerForm] = Form.useForm<StructurePlannerFormValues>()
+  const [draftWarnings, setDraftWarnings] = React.useState<string[]>([])
+  const draftWarningsRef = React.useRef<string[]>([])
+  const draftObservabilityRef = React.useRef<{ inputSummary: string; lintWarnings: string[]; rawOutputs: string[] } | null>(null)
+  const [batchCreateCount, setBatchCreateCount] = React.useState(3)
+  const [plannerOpen, setPlannerOpen] = React.useState(false)
+  const [plannerGenerating, setPlannerGenerating] = React.useState(false)
 
   const {
     chapterDetail,
@@ -64,11 +86,19 @@ export default function StructurePage({ novelId }: { novelId: number }) {
     canReorderSegments,
     setEditingTitle,
     addChapter,
+    addChapters,
     addPart,
+    addParts,
     addSegment,
+    addSegments,
     addVolume,
+    addVolumes,
     cancelRename,
     compileChapter,
+    deleteChapter,
+    deletePart,
+    deleteSegment,
+    deleteVolume,
     loadCheckpoints,
     loadLinked,
     loadParts,
@@ -92,11 +122,175 @@ export default function StructurePage({ novelId }: { novelId: number }) {
     handleSegmentDragEnd,
     handleVolumeDragEnd,
   } = workspace
+  const applyStructureDraft = React.useCallback((draft: Record<string, unknown>) => {
+    if (draft.draftKind === 'segment') {
+      const currentValues = segmentForm.getFieldsValue(true)
+      segmentForm.setFieldsValue({
+        ...currentValues,
+        title: typeof draft.title === 'string' ? draft.title : currentValues.title,
+        segmentType: typeof draft.segmentType === 'string' ? draft.segmentType : currentValues.segmentType,
+        purpose: typeof draft.purpose === 'string' ? draft.purpose : currentValues.purpose,
+        timeAnchor: typeof draft.timeAnchor === 'string' ? draft.timeAnchor : currentValues.timeAnchor,
+        locationName: typeof draft.locationName === 'string' ? draft.locationName : currentValues.locationName,
+        inputState: typeof draft.inputState === 'string' ? draft.inputState : currentValues.inputState,
+        outputState: typeof draft.outputState === 'string' ? draft.outputState : currentValues.outputState,
+        summary: typeof draft.summary === 'string' ? draft.summary : currentValues.summary,
+        content: typeof draft.content === 'string' ? draft.content : currentValues.content,
+      })
+      return
+    }
+
+    const currentValues = chapterForm.getFieldsValue(true)
+    chapterForm.setFieldsValue({
+      ...currentValues,
+      title: typeof draft.title === 'string' ? draft.title : currentValues.title,
+      outline: typeof draft.outline === 'string' ? draft.outline : currentValues.outline,
+      targetWords: normalizeOptionalNumber(draft.targetWords ?? currentValues.targetWords) || currentValues.targetWords,
+    })
+  }, [chapterForm, segmentForm])
+  const { clearDraft, draft, finalizeDraft, saveAppliedDraft } = usePlanningDraft<Record<string, unknown>>({
+    novelId,
+    pageKey: 'structure',
+    applyDraft: applyStructureDraft,
+  })
+
+  React.useEffect(() => {
+    plannerForm.setFieldsValue({
+      volumeCount: 1,
+      partsPerVolume: 2,
+      chaptersPerPart: 4,
+      segmentsPerChapter: 3,
+      focus: '',
+    })
+  }, [plannerForm])
+
+  const applyHierarchyPlan = React.useCallback(async (values: StructurePlannerFormValues) => {
+    setPlannerGenerating(true)
+
+    try {
+      const result = await generateStructureHierarchyPlan({
+        count: 1,
+        messages: buildDraftMessages({
+          task: '长篇结构批量规划',
+          mode: 'replace',
+          context: [
+            { label: '书名', value: currentNovel?.title || '' },
+            { label: '题材', value: currentNovel?.genreName || '' },
+            { label: '小说简介', value: currentNovel?.synopsis || '' },
+            { label: '扩展背景', value: currentNovel?.expandedBackground || '' },
+            { label: '当前卷数', value: volumes.length },
+            { label: '当前部数', value: parts.total },
+            { label: '当前章数', value: chapters.total },
+            { label: '当前场景数', value: segments.total },
+          ],
+          fields: [
+            { key: 'summary', label: '规划摘要', value: '', hint: '先用几句话概括整套卷部章场景结构。' },
+            { key: 'volumes', label: '卷结构', value: '', hint: '按卷 > 部 > 章 > 场景输出完整嵌套 JSON。' },
+          ],
+          requirements: [
+            `严格输出 ${values.volumeCount} 卷，每卷 ${values.partsPerVolume} 部，每部 ${values.chaptersPerPart} 章，每章 ${values.segmentsPerChapter} 个场景。`,
+            '所有标题必须像人类编辑写的工作标题，不要写“命运交汇”“最终抉择”这类空泛词。',
+            '章节目标和场景作用必须具体，能直接指导后续写作。',
+            '这是追加规划，不要重写已经存在的卷部章。',
+            values.focus.trim() ? `额外聚焦：${values.focus.trim()}` : '',
+            'JSON 结构必须是 { "summary": "", "volumes": [{ "title": "", "summary": "", "targetWords": 0, "parts": [{ "title": "", "summary": "", "targetWords": 0, "chapters": [{ "title": "", "outline": "", "targetWords": 0, "segments": [{ "title": "", "segmentType": "", "purpose": "", "timeAnchor": "", "locationName": "", "inputState": "", "outputState": "", "summary": "", "content": "" }] }] }] }] }。',
+          ],
+        }),
+      }, { genre: currentNovel?.genreName })
+
+      setDraftWarnings(result.warnings)
+      const plan = result.payloads[0]
+      if (!plan || plan.volumes.length === 0) {
+        message.warning('AI 没有返回可执行的卷部章场景规划。')
+        return
+      }
+
+      let firstChapterId: number | null = null
+
+      for (const volume of plan.volumes.slice(0, values.volumeCount)) {
+        const volumeId = await window.electron.structure.createVolume(novelId, {
+          title: volume.title,
+          summary: volume.summary,
+          targetWords: volume.targetWords || values.partsPerVolume * values.chaptersPerPart * values.segmentsPerChapter * 3000,
+          status: 'planning',
+        })
+
+        for (const part of volume.parts.slice(0, values.partsPerVolume)) {
+          const partId = await window.electron.structure.createPart(volumeId, {
+            title: part.title,
+            summary: part.summary,
+            targetWords: part.targetWords || values.chaptersPerPart * values.segmentsPerChapter * 3000,
+            status: 'planning',
+          })
+
+          for (const chapter of part.chapters.slice(0, values.chaptersPerPart)) {
+            const chapterId = await window.electron.chapter.create(novelId, {
+              volumeId,
+              partId,
+              title: chapter.title,
+              outline: chapter.outline,
+              targetWords: chapter.targetWords || values.segmentsPerChapter * 3000,
+              status: 'outline',
+            })
+
+            if (!firstChapterId) firstChapterId = chapterId
+
+            for (const segment of chapter.segments.slice(0, values.segmentsPerChapter)) {
+              await window.electron.structure.createSegment(chapterId, {
+                title: segment.title,
+                segmentType: segment.segmentType || 'scene',
+                purpose: segment.purpose,
+                timeAnchor: segment.timeAnchor,
+                locationName: segment.locationName,
+                inputState: segment.inputState,
+                outputState: segment.outputState,
+                summary: segment.summary,
+                content: segment.content,
+                status: 'planned',
+              })
+            }
+          }
+        }
+      }
+
+      await refreshStructure()
+      if (firstChapterId) {
+        await selectChapter(firstChapterId)
+      }
+      setPlannerOpen(false)
+      message.success('卷 / 部 / 章 / 场景批量规划已追加到结构页。')
+    } catch (error) {
+      console.error(error)
+      message.error(error instanceof Error ? error.message : '结构批量规划失败。')
+    } finally {
+      setPlannerGenerating(false)
+    }
+  }, [
+    chapters.total,
+    currentNovel?.expandedBackground,
+    currentNovel?.genreName,
+    currentNovel?.synopsis,
+    currentNovel?.title,
+    novelId,
+    parts.total,
+    plannerForm,
+    refreshStructure,
+    segments.total,
+    selectChapter,
+    volumes.length,
+  ])
 
   const chapterAiActions = chapterDetail ? (
     <AIGenerateButton
       label="AI 生成章节"
       isJson
+      runGeneration={async (input) => {
+        const result = await generateStructureChapterDraft(input, { genre: currentNovel?.genreName })
+        draftWarningsRef.current = result.warnings
+        draftObservabilityRef.current = result.observability
+        setDraftWarnings(result.warnings)
+        return result.outputs
+      }}
       buildMessages={() => {
         const values = chapterForm.getFieldsValue(true)
 
@@ -124,15 +318,18 @@ export default function StructurePage({ novelId }: { novelId: number }) {
         })
       }}
       onResult={(raw) => {
-        const draft = parseDraftJson<{ title?: string; outline?: string; targetWords?: number }>(raw)
+        const draftPayload = parseDraftJson<{ title?: string; outline?: string; targetWords?: number }>(raw)
         const currentValues = chapterForm.getFieldsValue(true)
 
-        chapterForm.setFieldsValue({
+        const mergedDraft = {
           ...currentValues,
-          title: typeof draft.title === 'string' ? draft.title : currentValues.title,
-          outline: typeof draft.outline === 'string' ? draft.outline : currentValues.outline,
-          targetWords: normalizeOptionalNumber(draft.targetWords ?? currentValues.targetWords) || currentValues.targetWords,
-        })
+          title: typeof draftPayload.title === 'string' ? draftPayload.title : currentValues.title,
+          outline: typeof draftPayload.outline === 'string' ? draftPayload.outline : currentValues.outline,
+          targetWords: normalizeOptionalNumber(draftPayload.targetWords ?? currentValues.targetWords) || currentValues.targetWords,
+          draftKind: 'chapter',
+        }
+        applyStructureDraft(mergedDraft)
+        void saveAppliedDraft(mergedDraft, draftWarningsRef.current, 'structure', draftObservabilityRef.current || undefined).catch(console.error)
       }}
     />
   ) : null
@@ -141,6 +338,13 @@ export default function StructurePage({ novelId }: { novelId: number }) {
     <AIGenerateButton
       label="AI 生成场景"
       isJson
+      runGeneration={async (input) => {
+        const result = await generateStructureSegmentDraft(input, { genre: currentNovel?.genreName })
+        draftWarningsRef.current = result.warnings
+        draftObservabilityRef.current = result.observability
+        setDraftWarnings(result.warnings)
+        return result.outputs
+      }}
       buildMessages={() => {
         const values = segmentForm.getFieldsValue(true)
 
@@ -174,7 +378,7 @@ export default function StructurePage({ novelId }: { novelId: number }) {
         })
       }}
       onResult={(raw) => {
-        const draft = parseDraftJson<{
+        const draftPayload = parseDraftJson<{
           title?: string
           segmentType?: string
           purpose?: string
@@ -186,19 +390,21 @@ export default function StructurePage({ novelId }: { novelId: number }) {
           content?: string
         }>(raw)
         const currentValues = segmentForm.getFieldsValue(true)
-
-        segmentForm.setFieldsValue({
+        const mergedDraft = {
           ...currentValues,
-          title: typeof draft.title === 'string' ? draft.title : currentValues.title,
-          segmentType: typeof draft.segmentType === 'string' ? draft.segmentType : currentValues.segmentType,
-          purpose: typeof draft.purpose === 'string' ? draft.purpose : currentValues.purpose,
-          timeAnchor: typeof draft.timeAnchor === 'string' ? draft.timeAnchor : currentValues.timeAnchor,
-          locationName: typeof draft.locationName === 'string' ? draft.locationName : currentValues.locationName,
-          inputState: typeof draft.inputState === 'string' ? draft.inputState : currentValues.inputState,
-          outputState: typeof draft.outputState === 'string' ? draft.outputState : currentValues.outputState,
-          summary: typeof draft.summary === 'string' ? draft.summary : currentValues.summary,
-          content: typeof draft.content === 'string' ? draft.content : currentValues.content,
-        })
+          title: typeof draftPayload.title === 'string' ? draftPayload.title : currentValues.title,
+          segmentType: typeof draftPayload.segmentType === 'string' ? draftPayload.segmentType : currentValues.segmentType,
+          purpose: typeof draftPayload.purpose === 'string' ? draftPayload.purpose : currentValues.purpose,
+          timeAnchor: typeof draftPayload.timeAnchor === 'string' ? draftPayload.timeAnchor : currentValues.timeAnchor,
+          locationName: typeof draftPayload.locationName === 'string' ? draftPayload.locationName : currentValues.locationName,
+          inputState: typeof draftPayload.inputState === 'string' ? draftPayload.inputState : currentValues.inputState,
+          outputState: typeof draftPayload.outputState === 'string' ? draftPayload.outputState : currentValues.outputState,
+          summary: typeof draftPayload.summary === 'string' ? draftPayload.summary : currentValues.summary,
+          content: typeof draftPayload.content === 'string' ? draftPayload.content : currentValues.content,
+          draftKind: 'segment',
+        }
+        applyStructureDraft(mergedDraft)
+        void saveAppliedDraft(mergedDraft, draftWarningsRef.current, 'structure', draftObservabilityRef.current || undefined).catch(console.error)
       }}
     />
   ) : null
@@ -214,6 +420,31 @@ export default function StructurePage({ novelId }: { novelId: number }) {
         <Space wrap>
           <Button icon={<PlusOutlined />} onClick={() => void addVolume()}>
             新建卷
+          </Button>
+          <Button icon={<RobotOutlined />} onClick={() => setPlannerOpen(true)}>
+            AI 批量规划
+          </Button>
+          <div className="novel-pill" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span>新增数量</span>
+            <InputNumber
+              min={1}
+              max={20}
+              value={batchCreateCount}
+              onChange={(value) => setBatchCreateCount(Math.max(1, Math.min(20, Number(value) || 1)))}
+              style={{ width: 88 }}
+            />
+          </div>
+          <Button icon={<PlusOutlined />} onClick={() => void addVolumes(batchCreateCount)}>
+            批量加卷
+          </Button>
+          <Button icon={<PlusOutlined />} disabled={!selection.volumeId} onClick={() => selection.volumeId && void addParts(selection.volumeId, batchCreateCount)}>
+            批量加部
+          </Button>
+          <Button icon={<PlusOutlined />} disabled={!selection.partId} onClick={() => void addChapters(batchCreateCount)}>
+            批量加章
+          </Button>
+          <Button icon={<PlusOutlined />} disabled={!selection.chapterId} onClick={() => void addSegments(batchCreateCount)}>
+            批量加场景
           </Button>
           <Button icon={<BuildOutlined />} loading={refreshing} onClick={() => void refreshMemory()}>
             刷新检查点
@@ -278,6 +509,16 @@ export default function StructurePage({ novelId }: { novelId: number }) {
         </>
       )}
     >
+      {draftWarnings.length > 0 ? (
+        <div className="novel-note-list" style={{ marginBottom: 16 }}>
+          {draftWarnings.map((warning) => <div key={warning} className="novel-note-list__item">{warning}</div>)}
+        </div>
+      ) : null}
+      {draft?.appliedAt ? (
+        <div className="novel-note-list" style={{ marginBottom: 16 }}>
+          <div className="novel-note-list__item">最近一次已应用但未保存的结构草稿已恢复。保存章节或场景后会自动清除。</div>
+        </div>
+      ) : null}
       {loading ? (
         <div className="novel-empty">
           <Spin />
@@ -296,6 +537,7 @@ export default function StructurePage({ novelId }: { novelId: number }) {
               onCancelRename={cancelRename}
               onSaveRename={() => void saveRename()}
               onAddPart={(volumeId) => void addPart(volumeId)}
+              onDeleteVolume={(volume) => void deleteVolume(volume)}
               onDragEnd={(result) => void handleVolumeDragEnd(result)}
             />
             <StructurePartsPanel
@@ -309,6 +551,7 @@ export default function StructurePage({ novelId }: { novelId: number }) {
               onStartRenamePart={startRenamePart}
               onCancelRename={cancelRename}
               onSaveRename={() => void saveRename()}
+              onDeletePart={(part) => void deletePart(part)}
               onPageChange={(page) => {
                 if (selection.volumeId) void loadParts(selection.volumeId, page)
               }}
@@ -348,7 +591,13 @@ export default function StructurePage({ novelId }: { novelId: number }) {
               parts={parts}
               chapterForm={chapterForm}
               savingChapter={savingChapter}
-              onSaveChapter={() => void saveChapter()}
+              onSaveChapter={() => void (async () => {
+                const finalData = chapterForm.getFieldsValue(true) as Record<string, unknown>
+                await saveChapter()
+                await finalizeDraft(finalData)
+                await clearDraft()
+              })()}
+              onDeleteChapter={() => void deleteChapter()}
               aiActions={chapterAiActions}
             />
             <SegmentEditorPanel
@@ -357,12 +606,58 @@ export default function StructurePage({ novelId }: { novelId: number }) {
               visibleSegments={segments.items}
               segmentForm={segmentForm}
               savingSegment={savingSegment}
-              onSaveSegment={() => void saveSegment()}
+              onSaveSegment={() => void (async () => {
+                const finalData = segmentForm.getFieldsValue(true) as Record<string, unknown>
+                await saveSegment()
+                await finalizeDraft(finalData)
+                await clearDraft()
+              })()}
+              onDeleteSegment={() => void deleteSegment()}
               aiActions={segmentAiActions}
             />
           </div>
         </>
       )}
+      <Modal
+        open={plannerOpen}
+        title="AI 批量规划卷 / 部 / 章 / 场景"
+        okText="追加规划"
+        cancelText="取消"
+        confirmLoading={plannerGenerating}
+        onCancel={() => setPlannerOpen(false)}
+        onOk={() => void plannerForm.validateFields().then((values) => applyHierarchyPlan(values)).catch(() => undefined)}
+      >
+        <Form
+          form={plannerForm}
+          layout="vertical"
+          initialValues={{
+            volumeCount: 1,
+            partsPerVolume: 2,
+            chaptersPerPart: 4,
+            segmentsPerChapter: 3,
+            focus: '',
+          }}
+        >
+          <Form.Item name="volumeCount" label="卷数" rules={[{ required: true }]}>
+            <InputNumber min={1} max={6} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item name="partsPerVolume" label="每卷部数" rules={[{ required: true }]}>
+            <InputNumber min={1} max={6} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item name="chaptersPerPart" label="每部章节数" rules={[{ required: true }]}>
+            <InputNumber min={1} max={12} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item name="segmentsPerChapter" label="每章场景数" rules={[{ required: true }]}>
+            <InputNumber min={1} max={8} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item name="focus" label="额外聚焦">
+            <Input.TextArea
+              rows={4}
+              placeholder="例如：前两卷重点压主角资源链和关系线，场景必须体现地点/代价/后果，避免空洞标题。"
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
     </WorkspacePage>
   )
 }

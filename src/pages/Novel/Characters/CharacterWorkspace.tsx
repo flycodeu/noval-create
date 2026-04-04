@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Form, Input, InputNumber, Modal, Pagination, Select, Space, Spin, Tag, message } from 'antd'
 import {
   ApartmentOutlined,
@@ -11,6 +11,7 @@ import {
   UserAddOutlined,
 } from '@ant-design/icons'
 import AIGenerateButton from '../../../components/AIGenerateButton'
+import { useSearchParams } from 'react-router-dom'
 import type {
   Character,
   CharacterBatchGenerationOptions,
@@ -168,6 +169,11 @@ function mergeById<T extends { id: number }>(base: T[], extras: Array<T | null |
   return [...map.values()]
 }
 
+function parseRouteId(value: string | null): number | null {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+}
+
 function buildFormValues(character: Character, detailContext: CharacterDetailContext): CharacterFormValues {
   return {
     roleType: character.roleType,
@@ -237,6 +243,7 @@ function buildRelationBody(relation: CharacterRelation) {
 }
 
 export default function CharacterWorkspace({ novelId }: Props) {
+  const [searchParams] = useSearchParams()
   const { currentNovel, setCharacters } = useNovelStore()
   const [form] = Form.useForm<CharacterFormValues>()
   const [batchForm] = Form.useForm<CharacterBatchFormValues>()
@@ -258,6 +265,8 @@ export default function CharacterWorkspace({ novelId }: Props) {
   const [batchOpen, setBatchOpen] = useState(false)
   const [protagonistOpen, setProtagonistOpen] = useState(false)
   const [relationModalOpen, setRelationModalOpen] = useState(false)
+  const routeFocusRef = useRef<number | null>(null)
+  const routeCharacterId = useMemo(() => parseRouteId(searchParams.get('characterId')), [searchParams])
   const [editingRelation, setEditingRelation] = useState<CharacterRelation | null>(null)
   const [relationSaving, setRelationSaving] = useState(false)
   const [relationCharacterOptions, setRelationCharacterOptions] = useState<Character[]>([])
@@ -406,6 +415,12 @@ export default function CharacterWorkspace({ novelId }: Props) {
   useEffect(() => { void loadPage(selectedId, page) }, [loadPage, page, selectedId])
   useEffect(() => { setPage(1) }, [entityTypeFilter, keyword, recordStatusFilter, roleFilter, speciesFilter])
   useEffect(() => { void loadGraph() }, [loadGraph])
+  useEffect(() => {
+    if (!routeCharacterId || routeFocusRef.current === routeCharacterId) return
+    routeFocusRef.current = routeCharacterId
+    setPage(1)
+    void loadPage(routeCharacterId, 1)
+  }, [loadPage, routeCharacterId])
 
   useEffect(() => {
     batchForm.setFieldsValue({
@@ -574,6 +589,21 @@ export default function CharacterWorkspace({ novelId }: Props) {
     } catch (error) {
       console.error(error)
       message.error('人物关系生成失败。')
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  const handleRegenerate = async () => {
+    if (!selectedCharacter?.id) return
+    setGenerating(true)
+    try {
+      const regenerated = await window.electron.character.regenerate(selectedCharacter.id)
+      await Promise.all([loadPage(regenerated?.id || selectedCharacter.id, page), loadGraph()])
+      message.success('人物已按当前上下文重新生成。')
+    } catch (error) {
+      console.error(error)
+      message.error(error instanceof Error ? error.message : '人物重生成失败。')
     } finally {
       setGenerating(false)
     }
@@ -867,6 +897,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
                     })
                   }}
                 />
+                {selectedCharacter ? <Button icon={<ReloadOutlined />} loading={generating} onClick={() => void handleRegenerate()}>AI 重生成</Button> : null}
                 {selectedCharacter ? <Button icon={<ApartmentOutlined />} onClick={() => { void openRelationModal() }}>编辑关系</Button> : null}
                 {selectedCharacter ? <Button danger icon={<DeleteOutlined />} onClick={() => void handleDelete()}>删除</Button> : null}
                 <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>保存并确认</Button>

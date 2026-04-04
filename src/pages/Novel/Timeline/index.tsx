@@ -9,6 +9,8 @@ import {
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage } from '../components/WorkspaceShell'
 import { buildDraftMessages, normalizeOptionalNumber, normalizeStringArray, parseDraftJson } from '../shared/ai-draft'
+import { usePlanningDraft } from '../shared/planning-draft'
+import { generateTimelineDraft } from '../shared/planning-ai-service'
 import {
   TIMELINE_TEXT,
   type TimelinePageProps,
@@ -25,10 +27,43 @@ import './index.css'
 
 export default function TimelinePage({ novelId }: TimelinePageProps) {
   const workspace = useTimelineWorkspace(novelId)
+  const [draftWarnings, setDraftWarnings] = React.useState<string[]>([])
+  const draftWarningsRef = React.useRef<string[]>([])
+  const draftObservabilityRef = React.useRef<{ inputSummary: string; lintWarnings: string[]; rawOutputs: string[] } | null>(null)
+  const applyTimelineDraft = React.useCallback((draft: Record<string, unknown>) => {
+    const currentValues = workspace.form.getFieldsValue(true)
+    workspace.form.setFieldsValue({
+      ...currentValues,
+      eventTitle: typeof draft.eventTitle === 'string' ? draft.eventTitle : currentValues.eventTitle,
+      eventSummary: typeof draft.eventSummary === 'string' ? draft.eventSummary : currentValues.eventSummary,
+      timeLabel: typeof draft.timeLabel === 'string' ? draft.timeLabel : currentValues.timeLabel,
+      timeSortValue: normalizeOptionalNumber(draft.timeSortValue ?? currentValues.timeSortValue) ?? currentValues.timeSortValue,
+      eventType: typeof draft.eventType === 'string' ? draft.eventType : currentValues.eventType,
+      protagonistAction: typeof draft.protagonistAction === 'string' ? draft.protagonistAction : currentValues.protagonistAction,
+      eventCause: typeof draft.eventCause === 'string' ? draft.eventCause : currentValues.eventCause,
+      eventProcess: typeof draft.eventProcess === 'string' ? draft.eventProcess : currentValues.eventProcess,
+      eventResult: typeof draft.eventResult === 'string' ? draft.eventResult : currentValues.eventResult,
+      directConsequences: normalizeStringArray(draft.directConsequences ?? currentValues.directConsequences),
+      openThreads: normalizeStringArray(draft.openThreads ?? currentValues.openThreads),
+      notes: typeof draft.notes === 'string' ? draft.notes : currentValues.notes,
+    })
+  }, [workspace.form])
+  const { clearDraft, draft, finalizeDraft, saveAppliedDraft } = usePlanningDraft<Record<string, unknown>>({
+    novelId,
+    pageKey: 'timeline',
+    applyDraft: applyTimelineDraft,
+  })
   const eventDraftButton = workspace.selectedEvent || workspace.creating ? (
     <AIGenerateButton
       label="AI 草拟事件"
       isJson
+      runGeneration={async (input) => {
+        const result = await generateTimelineDraft(input, { genre: workspace.currentNovel?.genreName })
+        draftWarningsRef.current = result.warnings
+        draftObservabilityRef.current = result.observability
+        setDraftWarnings(result.warnings)
+        return result.outputs
+      }}
       buildMessages={() => {
         const values = workspace.form.getFieldsValue(true)
         return buildDraftMessages({
@@ -63,26 +98,19 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
         })
       }}
       onResult={(raw) => {
-        const draft = parseDraftJson<Record<string, unknown>>(raw)
-        const currentValues = workspace.form.getFieldsValue(true)
-        workspace.form.setFieldsValue({
-          ...currentValues,
-          eventTitle: typeof draft.eventTitle === 'string' ? draft.eventTitle : currentValues.eventTitle,
-          eventSummary: typeof draft.eventSummary === 'string' ? draft.eventSummary : currentValues.eventSummary,
-          timeLabel: typeof draft.timeLabel === 'string' ? draft.timeLabel : currentValues.timeLabel,
-          timeSortValue: normalizeOptionalNumber(draft.timeSortValue ?? currentValues.timeSortValue) ?? currentValues.timeSortValue,
-          eventType: typeof draft.eventType === 'string' ? draft.eventType : currentValues.eventType,
-          protagonistAction: typeof draft.protagonistAction === 'string' ? draft.protagonistAction : currentValues.protagonistAction,
-          eventCause: typeof draft.eventCause === 'string' ? draft.eventCause : currentValues.eventCause,
-          eventProcess: typeof draft.eventProcess === 'string' ? draft.eventProcess : currentValues.eventProcess,
-          eventResult: typeof draft.eventResult === 'string' ? draft.eventResult : currentValues.eventResult,
-          directConsequences: normalizeStringArray(draft.directConsequences ?? currentValues.directConsequences),
-          openThreads: normalizeStringArray(draft.openThreads ?? currentValues.openThreads),
-          notes: typeof draft.notes === 'string' ? draft.notes : currentValues.notes,
-        })
+        const parsedDraft = parseDraftJson<Record<string, unknown>>(raw)
+        applyTimelineDraft(parsedDraft)
+        void saveAppliedDraft(parsedDraft, draftWarningsRef.current, 'timeline', draftObservabilityRef.current || undefined).catch(console.error)
       }}
     />
   ) : null
+
+  const handleSave = React.useCallback(async () => {
+    const finalData = workspace.form.getFieldsValue(true) as Record<string, unknown>
+    await workspace.handleSave()
+    await finalizeDraft(finalData)
+    await clearDraft()
+  }, [clearDraft, finalizeDraft, workspace])
 
   return (
     <WorkspacePage
@@ -144,6 +172,22 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
         </>
       )}
     >
+      {draftWarnings.length > 0 ? (
+        <Alert
+          type="info"
+          showIcon
+          message="本轮 AI 草稿带有提醒"
+          description={draftWarnings.map((warning) => <div key={warning}>{warning}</div>)}
+        />
+      ) : null}
+      {draft?.appliedAt ? (
+        <Alert
+          type="info"
+          showIcon
+          message="已恢复最近一次未保存的 AI 草稿"
+          description="当前时间轴编辑表单包含最近一次已应用但尚未保存的 AI 结果。保存后会自动清除。"
+        />
+      ) : null}
       {workspace.generationBlockers.length > 0 ? (
         <Alert
           type="warning"
@@ -219,6 +263,7 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
           creating={workspace.creating}
           loading={workspace.loading}
           saving={workspace.saving}
+          regenerating={workspace.regenerating}
           form={workspace.form}
           modeLabel={workspace.modeLabel}
           timeModeHint={workspace.timeModeHint}
@@ -238,8 +283,9 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
           searchLocations={(value) => void workspace.searchLocations(value)}
           searchItems={(value) => void workspace.searchItems(value)}
           onValuesChange={workspace.handleFormValuesChange}
-          onSave={() => void workspace.handleSave()}
+          onSave={() => void handleSave()}
           onDelete={workspace.handleDelete}
+          onRegenerate={() => void workspace.handleRegenerate()}
           onJumpToStructure={workspace.openSelectedEventInStructure}
         />
       </div>

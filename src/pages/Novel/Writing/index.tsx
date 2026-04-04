@@ -1,5 +1,5 @@
 ﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Button, Empty, Modal, Progress, Select, Spin, Tag, message } from 'antd'
+import { Alert, Button, Empty, Input, Modal, Progress, Select, Spin, Tag, message } from 'antd'
 import {
   ApartmentOutlined,
   BranchesOutlined,
@@ -11,7 +11,8 @@ import {
   PlusOutlined,
   RobotOutlined,
 } from '@ant-design/icons'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import AIScorePanel from '../../../components/AIScorePanel'
 import type {
   Chapter,
   ChapterSegment,
@@ -43,6 +44,11 @@ interface ReviewNotes {
   human_language_repairs?: string[]
   genre_hollowing_risks: string[]
   revision_brief: string
+}
+interface TextSelectionSnapshot {
+  start: number
+  end: number
+  text: string
 }
 type InsightTab = 'chapter' | 'memory' | 'health'
 type ChapterGenerationStage = 'planning' | 'drafting' | 'reviewing' | 'rewriting' | 'completed' | 'failed'
@@ -110,13 +116,45 @@ const getWorldRulesSummary = (raw?: string) => {
   } catch { return [] }
 }
 
+function normalizeEditorText(value?: string | null): string {
+  return (value || '').replace(/\r\n/g, '\n')
+}
+
+function parseRouteId(value: string | null): number | null {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+}
+
+function getSelectionSnapshot(container: HTMLElement): TextSelectionSnapshot | null {
+  const selection = window.getSelection()
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null
+  const range = selection.getRangeAt(0)
+  if (!container.contains(range.commonAncestorContainer)) return null
+
+  const prefixRange = range.cloneRange()
+  prefixRange.selectNodeContents(container)
+  prefixRange.setEnd(range.startContainer, range.startOffset)
+
+  const text = normalizeEditorText(range.toString()).trim()
+  if (!text) return null
+
+  const start = normalizeEditorText(prefixRange.toString()).length
+  return {
+    start,
+    end: start + text.length,
+    text,
+  }
+}
+
 export default function Writing({ novelId }: Props) {
+  const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const { chapters, currentChapterId, currentNovel, setChapters, setCurrentChapterId, updateChapter } = useNovelStore()
   const { streams, clearStream } = useTaskStore()
   const editorRef = useRef<HTMLDivElement>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const currentChapterIdRef = useRef<number | null>(null)
+  const routeChapterFocusRef = useRef<number | null>(null)
 
   const [loading, setLoading] = useState(true)
   const [currentChapter, setCurrentChapter] = useState<Chapter | null>(null)
@@ -135,6 +173,15 @@ export default function Writing({ novelId }: Props) {
   const [publishCheck, setPublishCheck] = useState<ChapterPublishCheck | null>(null)
   const [hoverChapterId, setHoverChapterId] = useState<number | null>(null)
   const [insightTab, setInsightTab] = useState<InsightTab>('chapter')
+  const [selectedSnippet, setSelectedSnippet] = useState<TextSelectionSnapshot | null>(null)
+  const [rewriteModalOpen, setRewriteModalOpen] = useState(false)
+  const [rewriteRequirements, setRewriteRequirements] = useState('')
+  const [rewritingSelection, setRewritingSelection] = useState(false)
+  const routeChapterId = useMemo(() => parseRouteId(searchParams.get('chapterId')), [searchParams])
+  const routeInsight = useMemo(() => {
+    const value = searchParams.get('insight')
+    return value === 'memory' || value === 'health' ? value : 'chapter'
+  }, [searchParams])
 
   useEffect(() => { currentChapterIdRef.current = currentChapterId }, [currentChapterId])
 
@@ -206,10 +253,20 @@ export default function Writing({ novelId }: Props) {
     let alive = true
     void (async () => {
       setLoading(true)
-      try { await Promise.all([loadChapters(), refreshMeta(), refreshContextStatus()]) } finally { if (alive) setLoading(false) }
+      try { await Promise.all([loadChapters(routeChapterId || undefined), refreshMeta(), refreshContextStatus()]) } finally { if (alive) setLoading(false) }
     })()
     return () => { alive = false }
-  }, [loadChapters, refreshContextStatus, refreshMeta])
+  }, [loadChapters, refreshContextStatus, refreshMeta, routeChapterId])
+
+  useEffect(() => {
+    if (!routeChapterId || routeChapterFocusRef.current === routeChapterId) return
+    routeChapterFocusRef.current = routeChapterId
+    void loadChapters(routeChapterId)
+  }, [loadChapters, routeChapterId])
+
+  useEffect(() => {
+    setInsightTab(routeInsight)
+  }, [routeInsight])
 
   useEffect(() => {
     const unsubscribe = window.electron.on('chapter:generation-progress', (data: unknown) => {
@@ -261,6 +318,29 @@ export default function Writing({ novelId }: Props) {
     if (currentChapter) queueSave(currentChapter.id, text)
   }
 
+  const syncSelectedSnippet = useCallback(() => {
+    if (!editorRef.current || (currentChapter?.segmentCount || 0) > 1) {
+      setSelectedSnippet(null)
+      return
+    }
+    setSelectedSnippet(getSelectionSnapshot(editorRef.current))
+  }, [currentChapter?.segmentCount])
+
+  const applyChapterContent = useCallback((nextText: string) => {
+    const normalized = normalizeEditorText(nextText)
+    const nextWordCount = countWords(normalized)
+    setContent(normalized)
+    setWordCount(nextWordCount)
+    setSelectedSnippet(null)
+    if (editorRef.current) {
+      editorRef.current.innerHTML = normalized.replace(/\n/g, '<br>')
+    }
+    if (currentChapter) {
+      queueSave(currentChapter.id, normalized)
+      updateChapter(currentChapter.id, { content: normalized, wordCount: nextWordCount })
+    }
+  }, [currentChapter, queueSave, updateChapter])
+
   const handleGenerateContent = async () => {
     if (!currentChapter) return message.warning('请先选择章节。')
     setGenerationProgress(null); setGenerating(true)
@@ -300,6 +380,46 @@ export default function Writing({ novelId }: Props) {
     if (!currentChapter) return
     try { setAiResult(await window.electron.chapter.aiCheck(currentChapter.id) as AiCheckPayload); setInsightTab('health') }
     catch (error: unknown) { message.error(`检测失败：${error instanceof Error ? error.message : '请稍后重试。'}`) }
+  }
+
+  const handleOpenRewriteModal = () => {
+    if (!currentChapter || !selectedSnippet?.text) {
+      message.warning('请先在正文里选中需要重写的文段。')
+      return
+    }
+    setRewriteRequirements('')
+    setRewriteModalOpen(true)
+  }
+
+  const handleRewriteSelectedText = async () => {
+    if (!currentChapter || !selectedSnippet?.text) return
+    const latestText = normalizeEditorText(editorRef.current?.innerText || content)
+    const before = latestText.slice(0, selectedSnippet.start)
+    const after = latestText.slice(selectedSnippet.end)
+
+    setRewritingSelection(true)
+    try {
+      const rewritten = normalizeEditorText(await window.electron.ai.rewriteParagraph({
+        originalParagraph: selectedSnippet.text,
+        contextBefore: before.slice(-800),
+        specificRequirements: rewriteRequirements.trim() || '保持事件与设定不变，重点修语言自然度、逻辑衔接和人类表达。',
+        modelConfigId: currentNovel?.modelConfigId,
+      }) as string)
+
+      if (!rewritten.trim()) {
+        message.warning('AI 没有返回可用的重写结果。')
+        return
+      }
+
+      applyChapterContent(`${before}${rewritten}${after}`)
+      setRewriteModalOpen(false)
+      setInsightTab('health')
+      message.success('选中文段已重写并回填。')
+    } catch (error: unknown) {
+      message.error(`重写失败：${error instanceof Error ? error.message : '请稍后重试。'}`)
+    } finally {
+      setRewritingSelection(false)
+    }
   }
 
   const handleStatusChange = async (status: string) => {
@@ -645,7 +765,16 @@ export default function Writing({ novelId }: Props) {
                       <div className="novel-writing-shell__editor-sheet novel-writing-shell__editor-sheet--readonly" dangerouslySetInnerHTML={{ __html: content.replace(/\n/g, '<br>') }} />
                     </div>
                   ) : (
-                    <div ref={editorRef} contentEditable suppressContentEditableWarning onInput={handleContentChange} className="novel-writing-shell__editor-sheet" dangerouslySetInnerHTML={{ __html: content.replace(/\n/g, '<br>') }} />
+                    <div
+                      ref={editorRef}
+                      contentEditable
+                      suppressContentEditableWarning
+                      onInput={handleContentChange}
+                      onMouseUp={syncSelectedSnippet}
+                      onKeyUp={syncSelectedSnippet}
+                      className="novel-writing-shell__editor-sheet"
+                      dangerouslySetInnerHTML={{ __html: content.replace(/\n/g, '<br>') }}
+                    />
                   )}
                 </div>
               ) : <div className="novel-empty novel-empty--writing">请选择左侧章节，或先创建一个新章节开始写作。</div>}
@@ -653,6 +782,8 @@ export default function Writing({ novelId }: Props) {
             <div className="novel-writing-shell__editor-footer">
               <Button icon={<BulbOutlined />} disabled={!currentChapter} onClick={() => void handleGenerateSummary()}>更新摘要</Button>
               <Button icon={<FileSearchOutlined />} disabled={!currentChapter} onClick={() => void handleAiCheck()}>AI 体检</Button>
+              <Button icon={<RobotOutlined />} disabled={!currentChapter || hasMultiSegments || !selectedSnippet?.text} loading={rewritingSelection} onClick={handleOpenRewriteModal}>重写选中文段</Button>
+              {selectedSnippet?.text ? <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>{`已选 ${selectedSnippet.text.length} 字`}</span> : null}
               <Button icon={<CheckOutlined />} disabled={!currentChapter} onClick={() => void handleStatusChange('final')} style={{ marginLeft: 'auto' }}>标记完成</Button>
             </div>
           </section>
@@ -715,7 +846,19 @@ export default function Writing({ novelId }: Props) {
                       />
                     ) : <div className="novel-copy-block">当前没有发布前检查结果。</div>}
                   </InsightCard>
-                  <InsightCard title="AI 复检" eyebrow="局部诊断" tone="soft">{aiResult ? <AiCheckResult result={aiResult} /> : <div className="novel-copy-block">点击上方 AI 体检后，这里会展示语义与表达层面的复检结果。</div>}</InsightCard>
+                  <InsightCard title="AI 评分与复检" eyebrow="局部诊断" tone="soft">
+                    <AIScorePanel
+                      getContent={() => normalizeEditorText(editorRef.current?.innerText || content)}
+                      contentType="chapter"
+                      genreContext={currentNovel?.genreName || ''}
+                      novelBackground={[currentNovel?.synopsis, currentNovel?.expandedBackground].filter(Boolean).join('\n')}
+                      modelConfigId={currentNovel?.modelConfigId}
+                      disabled={!currentChapter}
+                      onRegenerate={applyChapterContent}
+                      drawCount={1}
+                    />
+                    {aiResult ? <div style={{ marginTop: 12 }}><AiCheckResult result={aiResult} /></div> : <div className="novel-copy-block" style={{ marginTop: 12 }}>点击上方 AI 体检后，这里也会展示语义与表达层面的复检结果。</div>}
+                  </InsightCard>
                   <InsightCard title="建议优先处理" eyebrow="下一步" tone="soft"><StringList items={consistencyReport?.focusAreas || []} empty="当前没有额外的优先处理建议。" /></InsightCard>
                 </div>
               </>
@@ -723,6 +866,27 @@ export default function Writing({ novelId }: Props) {
           </aside>
         </div>
       )}
+      <Modal
+        title="重写选中文段"
+        open={rewriteModalOpen}
+        onCancel={() => setRewriteModalOpen(false)}
+        onOk={() => void handleRewriteSelectedText()}
+        confirmLoading={rewritingSelection}
+        okText="应用重写"
+      >
+        <div className="novel-note-list" style={{ marginBottom: 12 }}>
+          <div className="novel-note-list__item">AI 只会重写当前选中的文段，不会改动其他正文。</div>
+          <div className="novel-note-list__item">默认保留事件与设定，优先修正语言、逻辑和衔接。</div>
+        </div>
+        <Input.TextArea value={selectedSnippet?.text || ''} rows={6} readOnly />
+        <Input.TextArea
+          style={{ marginTop: 12 }}
+          value={rewriteRequirements}
+          rows={3}
+          onChange={(event) => setRewriteRequirements(event.target.value)}
+          placeholder="补充要求，例如：更克制、减少说明句、强化动作细节。"
+        />
+      </Modal>
     </WorkspacePage>
   )
 }

@@ -582,6 +582,36 @@ export interface PremiseDraftRecord {
   appliedAt?: string
 }
 
+export type PlanningDraftPageKey =
+  | 'overview'
+  | 'project-brief'
+  | 'theme-voice'
+  | 'story-design'
+  | 'outline'
+  | 'structure'
+  | 'timeline'
+  | 'revision'
+
+export interface PlanningDraftRecord {
+  taskId: number
+  novelId: number
+  pageKey: PlanningDraftPageKey
+  status: 'pending' | 'applied'
+  data: Record<string, unknown>
+  warnings: string[]
+  sourcePage?: string
+  inputSummary?: string
+  lintWarnings?: string[]
+  rawOutputs?: string[]
+  rejectionReason?: string
+  finalData?: Record<string, unknown>
+  diffSummary?: string[]
+  finalizedAt?: string
+  createdAt: string
+  completedAt: string
+  appliedAt?: string
+}
+
 export interface TaskControlState {
   cancelRequested?: boolean
   maxRetries?: number
@@ -970,6 +1000,97 @@ export interface StructurePathResolution {
   resolvedLevel: 'novel' | 'volume' | 'part' | 'chapter' | 'segment'
 }
 
+export interface StructureBatchPlanSegmentInput {
+  title?: string
+  segmentType?: string
+  purpose?: string
+  timeAnchor?: string
+  locationName?: string
+  inputState?: string
+  outputState?: string
+  summary?: string
+  content?: string
+  status?: string
+}
+
+export interface StructureBatchPlanChapterInput {
+  title?: string
+  outline?: string
+  targetWords?: number
+  status?: Chapter['status']
+  segments: StructureBatchPlanSegmentInput[]
+}
+
+export interface StructureBatchPlanPartInput {
+  title?: string
+  summary?: string
+  targetWords?: number
+  status?: StoryPart['status']
+  chapters: StructureBatchPlanChapterInput[]
+}
+
+export interface StructureBatchPlanVolumeInput {
+  title?: string
+  summary?: string
+  targetWords?: number
+  status?: StoryVolume['status']
+  parts: StructureBatchPlanPartInput[]
+}
+
+export interface StructureBatchPlan {
+  summary?: string
+  volumes: StructureBatchPlanVolumeInput[]
+}
+
+export type StructureBatchEditOperation =
+  | { kind: 'move_parts'; partIds: number[]; targetVolumeId: number }
+  | { kind: 'move_chapters'; chapterIds: number[]; targetPartId: number }
+  | { kind: 'move_segments'; segmentIds: number[]; targetChapterId: number }
+  | { kind: 'delete_volumes'; volumeIds: number[] }
+  | { kind: 'delete_parts'; partIds: number[] }
+  | { kind: 'delete_chapters'; chapterIds: number[] }
+  | { kind: 'delete_segments'; segmentIds: number[] }
+  | { kind: 'reorder_volumes'; orderedIds: number[] }
+  | { kind: 'reorder_parts'; volumeId: number; orderedIds: number[] }
+  | { kind: 'reorder_chapters'; partId: number; orderedIds: number[] }
+  | { kind: 'reorder_segments'; chapterId: number; orderedIds: number[] }
+
+export interface StructureBatchPreviewItem {
+  kind: StructureBatchEditOperation['kind']
+  summary: string
+  targetLabel?: string
+  timelineEffect: 'rebind' | 'invalidate' | 'none'
+  selectedCount: number
+  volumeCount: number
+  partCount: number
+  chapterCount: number
+  segmentCount: number
+  timelineEventCount: number
+  anchorRiskCount: number
+  warnings: string[]
+}
+
+export interface StructureBatchPreview {
+  novelId: number
+  summary: string
+  items: StructureBatchPreviewItem[]
+  warnings: string[]
+}
+
+export interface StructureBatchFocus {
+  volumeId?: number
+  partId?: number
+  chapterId?: number
+  segmentId?: number
+}
+
+export interface StructureBatchApplyResult {
+  novelId: number
+  message: string
+  firstChapterId: number | null
+  focus?: StructureBatchFocus
+}
+
 export interface StoryPartReorderOperation {
   id: number
   volumeId: number
@@ -1136,6 +1257,9 @@ declare global {
         reorderSegments: (chapterId: number, orderedIds: number[]) => Promise<void>
         compileChapter: (chapterId: number) => Promise<Chapter | null>
         refreshCheckpoints: (novelId: number) => Promise<StoryMemoryCheckpoint[]>
+        applyBatchPlan: (novelId: number, plan: StructureBatchPlan) => Promise<StructureBatchApplyResult>
+        previewBatchEdit: (novelId: number, operations: StructureBatchEditOperation[]) => Promise<StructureBatchPreview>
+        applyBatchEdit: (novelId: number, operations: StructureBatchEditOperation[]) => Promise<StructureBatchApplyResult>
       }
       chapter: {
         list: (novelId: number) => Promise<Chapter[]>
@@ -1290,6 +1414,23 @@ declare global {
         getLatest: (novelId: number) => Promise<PremiseDraftRecord | null>
         markApplied: (taskId: number, appliedMode: PremiseGenerationMode) => Promise<void>
         clearAll: (novelId: number) => Promise<void>
+      }
+      planningDraft: {
+        getLatest: (novelId: number, pageKey: PlanningDraftPageKey) => Promise<PlanningDraftRecord | null>
+        save: (data: {
+          novelId: number
+          pageKey: PlanningDraftPageKey
+          data: Record<string, unknown>
+          warnings?: string[]
+          sourcePage?: string
+          inputSummary?: string
+          lintWarnings?: string[]
+          rawOutputs?: string[]
+          rejectionReason?: string
+        }) => Promise<PlanningDraftRecord>
+        markApplied: (taskId: number) => Promise<void>
+        finalize: (taskId: number, finalData: Record<string, unknown>) => Promise<PlanningDraftRecord | null>
+        clear: (novelId: number, pageKey: PlanningDraftPageKey) => Promise<void>
       }
       ai: {
         expandBackground: (input: unknown) => Promise<{ expanded_background: string; titles: string[]; synopsis: string }>

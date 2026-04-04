@@ -171,6 +171,7 @@ export function isStoryCoreReady(novel: Pick<Novel, 'settingsJson'> | null | und
   return Boolean(
     settings.premise.positioning
     && settings.premise.coreHook
+    && settings.premise.protagonistStart
     && settings.premise.constraints
   )
 }
@@ -180,8 +181,11 @@ export function isThemeVoiceReady(
 ): boolean {
   const themeVoice = parseThemeVoiceSnapshot(novel?.themeVoiceJson)
   return Boolean(
-    themeVoice.theme
+    themeVoice.writingContractTags.length > 0
+    && themeVoice.theme
     && themeVoice.emotionalCore
+    && themeVoice.pov
+    && themeVoice.tense
     && themeVoice.styleRules
     && themeVoice.dialogueRules
   )
@@ -369,7 +373,7 @@ export function getRecommendedWorkflowStep(
   if (stats.characterCount <= 0) return 'characters'
   if (stats.threadCount <= 0) return 'threads'
   if (!isStoryPlotReady(novel)) return 'story-design'
-  if (stats.outlineCount <= 0) return 'structure'
+  if (stats.outlineCount <= 0) return 'outline'
   if (stats.timelineCount <= 0) return 'timeline'
   if (stats.chapterCount <= 0 && stats.totalWords <= 0) return 'writing'
   if (stats.revisionTaskCount > 0) return 'revision'

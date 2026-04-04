@@ -7472,12 +7472,12 @@ html[data-theme="dark"] .ant-card-actions > li {
   position: sticky;
   top: 0;
   align-self: start;
-  height: 100dvh;
-  max-height: 100dvh;
-  min-height: 0;
+  height: calc(100dvh - 2px);
+  max-height: calc(100dvh - 2px);
+  min-height: calc(100dvh - 2px);
   overflow: hidden;
   gap: 10px;
-  padding: 12px 14px 10px;
+  padding: 12px 14px 14px;
 }
 
 .novel-sidebar__title-block {
@@ -7557,6 +7557,7 @@ html[data-theme="dark"] .ant-card-actions > li {
   overflow: auto;
   gap: 10px;
   padding-right: 2px;
+  padding-bottom: 12px;
 }
 
 .novel-sidebar__group-list {
@@ -7717,8 +7718,9 @@ html[data-theme="dark"] .ant-card-actions > li {
 
 @media (max-height: 880px) {
   .novel-route-shell__sidebar {
-    height: calc(100dvh - 12px);
-    max-height: calc(100dvh - 12px);
+    height: calc(100dvh - 4px);
+    max-height: calc(100dvh - 4px);
+    min-height: calc(100dvh - 4px);
   }
 
   .novel-sidebar__summary-copy {

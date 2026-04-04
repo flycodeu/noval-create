@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Form, Input, Modal, Pagination, Select, Space, Spin, Tag, message } from 'antd'
 import {
   AppstoreAddOutlined,
@@ -9,6 +9,7 @@ import {
   ThunderboltOutlined,
 } from '@ant-design/icons'
 import VirtualList from 'rc-virtual-list'
+import { useSearchParams } from 'react-router-dom'
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import type {
   Character,
@@ -150,6 +151,11 @@ function mergeById<T extends { id: number }>(base: T[], extras: Array<T | null |
     if (item) map.set(item.id, item)
   })
   return [...map.values()]
+}
+
+function parseRouteId(value: string | null): number | null {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
 }
 
 function emptyValues(kind: StoryItem['itemKind']): ItemFormValues {
@@ -309,6 +315,7 @@ function pickCurrentItemKind(
 }
 
 export default function ItemsWorkspace({ novelId }: Props) {
+  const [searchParams] = useSearchParams()
   const { currentNovel } = useNovelStore()
   const [form] = Form.useForm<ItemFormValues>()
   const [generateForm] = Form.useForm<GenerateFormValues>()
@@ -328,6 +335,8 @@ export default function ItemsWorkspace({ novelId }: Props) {
   const [keyword, setKeyword] = useState('')
   const [page, setPage] = useState(1)
   const [creating, setCreating] = useState(false)
+  const routeFocusRef = useRef<number | null>(null)
+  const routeItemId = useMemo(() => parseRouteId(searchParams.get('itemId')), [searchParams])
   const [generateOpen, setGenerateOpen] = useState(false)
   const [templateOptions, setTemplateOptions] = useState<StoryItem[]>([])
   const [characterOptions, setCharacterOptions] = useState<Character[]>([])
@@ -479,6 +488,12 @@ export default function ItemsWorkspace({ novelId }: Props) {
   useEffect(() => {
     void loadPage(selectedId, page, { preserveCreating: creating })
   }, [loadPage, page, listMode, recordStatusFilter, categoryFilter, keyword, novelId])
+  useEffect(() => {
+    if (!routeItemId || routeFocusRef.current === routeItemId) return
+    routeFocusRef.current = routeItemId
+    setPage(1)
+    void loadPage(routeItemId, 1, { preserveCreating: false })
+  }, [loadPage, routeItemId])
 
   useEffect(() => {
     setPage(1)
@@ -591,6 +606,21 @@ export default function ItemsWorkspace({ novelId }: Props) {
     } catch (error) {
       console.error(error)
       message.error('生成失败，请稍后重试。')
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  const handleRegenerate = async () => {
+    if (!selectedItem?.id) return
+    setGenerating(true)
+    try {
+      const regenerated = await window.electron.item.regenerate(selectedItem.id)
+      await loadPage(regenerated?.id || selectedItem.id, page, { preserveCreating: false })
+      message.success('当前物品已按上下文重生成。')
+    } catch (error) {
+      console.error(error)
+      message.error(error instanceof Error ? error.message : '物品重生成失败。')
     } finally {
       setGenerating(false)
     }
@@ -887,6 +917,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
           extra={(
             <Space wrap>
               {aiActions}
+              {selectedItem ? <Button icon={<ReloadOutlined />} loading={generating} onClick={() => void handleRegenerate()}>AI 重生成</Button> : null}
               {selectedItem ? <Button danger icon={<DeleteOutlined />} onClick={() => void handleDelete()}>删除</Button> : null}
               <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>保存</Button>
             </Space>

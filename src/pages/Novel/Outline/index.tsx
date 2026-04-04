@@ -1,11 +1,13 @@
 ﻿import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Button, Empty, Form, Input, Modal, Space, Spin, Tag, message } from 'antd'
+import { Button, Empty, Form, Input, InputNumber, Modal, Space, Spin, Tag, message } from 'antd'
 import { DeleteOutlined, EditOutlined, HolderOutlined, PlusOutlined, RobotOutlined } from '@ant-design/icons'
 import { DragDropContext, Draggable, Droppable, type DragDropContextProps, type DraggableProvidedDragHandleProps } from '@hello-pangea/dnd'
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import type { Chapter, OutlineChapterBatchGenerationResult, StoryArc } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
 import { buildDraftMessages, normalizeOptionalNumber, parseDraftJson } from '../shared/ai-draft'
+import { usePlanningDraft } from '../shared/planning-draft'
+import { generateOutlineArcDraft } from '../shared/planning-ai-service'
 import { WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
 
 interface Props { novelId: number }
@@ -36,6 +38,11 @@ export default function Outline({ novelId }: Props) {
   const [arcModalOpen, setArcModalOpen] = useState(false)
   const [editingArc, setEditingArc] = useState<StoryArc | null>(null)
   const [expandedArcId, setExpandedArcId] = useState<number | null>(null)
+  const [outlineBatchSize, setOutlineBatchSize] = useState(4)
+  const [outlineTargetCount, setOutlineTargetCount] = useState(8)
+  const [draftWarnings, setDraftWarnings] = useState<string[]>([])
+  const draftWarningsRef = React.useRef<string[]>([])
+  const draftObservabilityRef = React.useRef<{ inputSummary: string; lintWarnings: string[]; rawOutputs: string[] } | null>(null)
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -100,9 +107,22 @@ export default function Outline({ novelId }: Props) {
   const handleGenerateChapterOutlines = async (arcId: number) => {
     setGenerating(true)
     try {
-      const result = await window.electron.outline.generateChapterOutlines(arcId, { batchSize: 4 })
+      const safeBatchSize = Math.max(1, Math.min(outlineBatchSize, 6))
+      const safeTargetCount = Math.max(1, Math.min(outlineTargetCount, 24))
+      let generatedCount = 0
+      let lastResult: OutlineChapterBatchGenerationResult | null = null
+
+      while (generatedCount < safeTargetCount) {
+        const currentBatchSize = Math.min(safeBatchSize, safeTargetCount - generatedCount)
+        const result = await window.electron.outline.generateChapterOutlines(arcId, { batchSize: currentBatchSize })
+        lastResult = result as OutlineChapterBatchGenerationResult
+        generatedCount += lastResult.generatedCount || 0
+        if (lastResult.completed || lastResult.generatedCount <= 0) break
+      }
+
       await loadData()
-      message.success((result as OutlineChapterBatchGenerationResult).message || '章节细纲已生成一批。')
+      const summary = lastResult?.message || '章节细纲已生成一批。'
+      message.success(generatedCount > 0 ? `${summary} 本轮共生成 ${generatedCount} 章。` : summary)
     } catch (error: unknown) {
       message.error(`生成失败：${error instanceof Error ? error.message : ''}`)
     } finally {
@@ -117,6 +137,8 @@ export default function Outline({ novelId }: Props) {
     } else {
       await window.electron.outline.createArc(novelId, { ...values, arcOrder: arcs.length + 1 })
     }
+    await finalizeDraft(values)
+    await clearDraft()
     setArcModalOpen(false)
     setEditingArc(null)
     arcForm.resetFields()
@@ -161,10 +183,38 @@ export default function Outline({ novelId }: Props) {
 
   const totalCompletedChapters = chapters.filter((chapter) => chapter.status === 'final').length
   const expandedArc = expandedArcId ? arcs.find((arc) => arc.id === expandedArcId) || null : null
+  const getMissingOutlineCount = useCallback((arc: StoryArc) => (
+    getArcChapters(arc).filter((chapter) => !chapter.outline?.trim()).length
+  ), [getArcChapters])
+  const applyOutlineDraft = useCallback((draft: Partial<ArcFormValues>) => {
+    const currentValues = arcForm.getFieldsValue(true)
+    arcForm.setFieldsValue({
+      ...currentValues,
+      arcName: typeof draft.arcName === 'string' ? draft.arcName : currentValues.arcName,
+      chapterStart: normalizeOptionalNumber(draft.chapterStart ?? currentValues.chapterStart),
+      chapterEnd: normalizeOptionalNumber(draft.chapterEnd ?? currentValues.chapterEnd),
+      arcGoal: typeof draft.arcGoal === 'string' ? draft.arcGoal : currentValues.arcGoal,
+      arcSummary: typeof draft.arcSummary === 'string' ? draft.arcSummary : currentValues.arcSummary,
+      growthLedger: typeof draft.growthLedger === 'string' ? draft.growthLedger : currentValues.growthLedger,
+      costLedger: typeof draft.costLedger === 'string' ? draft.costLedger : currentValues.costLedger,
+    })
+  }, [arcForm])
+  const { clearDraft, draft, finalizeDraft, saveAppliedDraft } = usePlanningDraft<ArcFormValues>({
+    novelId,
+    pageKey: 'outline',
+    applyDraft: applyOutlineDraft,
+  })
   const arcDraftButton = (
     <AIGenerateButton
       label="AI 起草故事弧"
       isJson
+      runGeneration={async (input) => {
+        const result = await generateOutlineArcDraft(input, arcs.map((item) => item.arcName), { genre: currentNovel?.genreName })
+        draftWarningsRef.current = result.warnings
+        draftObservabilityRef.current = result.observability
+        setDraftWarnings(result.warnings)
+        return result.outputs
+      }}
       buildMessages={() => {
         const values = arcForm.getFieldsValue(true)
         return buildDraftMessages({
@@ -190,18 +240,20 @@ export default function Outline({ novelId }: Props) {
         })
       }}
       onResult={(raw) => {
-        const draft = parseDraftJson<Record<string, unknown>>(raw)
+        const parsedDraft = parseDraftJson<ArcFormValues>(raw)
         const currentValues = arcForm.getFieldsValue(true)
-        arcForm.setFieldsValue({
+        const mergedDraft: ArcFormValues = {
           ...currentValues,
-          arcName: typeof draft.arcName === 'string' ? draft.arcName : currentValues.arcName,
-          chapterStart: normalizeOptionalNumber(draft.chapterStart ?? currentValues.chapterStart),
-          chapterEnd: normalizeOptionalNumber(draft.chapterEnd ?? currentValues.chapterEnd),
-          arcGoal: typeof draft.arcGoal === 'string' ? draft.arcGoal : currentValues.arcGoal,
-          arcSummary: typeof draft.arcSummary === 'string' ? draft.arcSummary : currentValues.arcSummary,
-          growthLedger: typeof draft.growthLedger === 'string' ? draft.growthLedger : currentValues.growthLedger,
-          costLedger: typeof draft.costLedger === 'string' ? draft.costLedger : currentValues.costLedger,
-        })
+          arcName: typeof parsedDraft.arcName === 'string' ? parsedDraft.arcName : currentValues.arcName,
+          chapterStart: normalizeOptionalNumber(parsedDraft.chapterStart ?? currentValues.chapterStart),
+          chapterEnd: normalizeOptionalNumber(parsedDraft.chapterEnd ?? currentValues.chapterEnd),
+          arcGoal: typeof parsedDraft.arcGoal === 'string' ? parsedDraft.arcGoal : currentValues.arcGoal,
+          arcSummary: typeof parsedDraft.arcSummary === 'string' ? parsedDraft.arcSummary : currentValues.arcSummary,
+          growthLedger: typeof parsedDraft.growthLedger === 'string' ? parsedDraft.growthLedger : currentValues.growthLedger,
+          costLedger: typeof parsedDraft.costLedger === 'string' ? parsedDraft.costLedger : currentValues.costLedger,
+        }
+        applyOutlineDraft(mergedDraft)
+        void saveAppliedDraft(mergedDraft, draftWarningsRef.current, 'outline', draftObservabilityRef.current || undefined).catch(console.error)
       }}
     />
   )
@@ -211,9 +263,35 @@ export default function Outline({ novelId }: Props) {
       eyebrow="故事大纲"
       title="故事大纲"
       description="按故事弧组织章节，单条故事弧支持 AI 起草。"
-      actions={<div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}><Button icon={<RobotOutlined />} loading={generating} onClick={() => void handleGenerateArcs()}>AI 生成故事弧</Button><Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>新建故事弧</Button><Button danger icon={<DeleteOutlined />} onClick={() => void handleClear()}>清空</Button></div>}
+      actions={(
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <Button icon={<RobotOutlined />} loading={generating} onClick={() => void handleGenerateArcs()}>AI 生成故事弧</Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>新建故事弧</Button>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>单批</span>
+            <InputNumber min={1} max={6} value={outlineBatchSize} onChange={(value) => setOutlineBatchSize(Number(value) || 4)} style={{ width: 80 }} />
+            <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>本轮总数</span>
+            <InputNumber min={1} max={24} value={outlineTargetCount} onChange={(value) => setOutlineTargetCount(Number(value) || 8)} style={{ width: 92 }} />
+          </div>
+          <Button danger icon={<DeleteOutlined />} onClick={() => void handleClear()}>清空</Button>
+        </div>
+      )}
       metrics={<><WorkspaceMetric label="故事弧" value={arcs.length} tone="warm" hint="按阶段组织长篇结构" /><WorkspaceMetric label="章节数" value={chapters.length} hint="当前小说全部章节" /><WorkspaceMetric label="已完成章节" value={totalCompletedChapters} tone="cool" hint="状态为 final 的章节" /><WorkspaceMetric label="当前展开" value={expandedArc?.arcName || '未选择'} hint="展开后查看章节细纲" /></>}
     >
+      {draftWarnings.length > 0 ? (
+        <WorkspacePanel title="AI 提醒">
+          <div className="novel-note-list">
+            {draftWarnings.map((warning) => <div key={warning} className="novel-note-list__item">{warning}</div>)}
+          </div>
+        </WorkspacePanel>
+      ) : null}
+      {draft?.appliedAt ? (
+        <WorkspacePanel title="草稿恢复">
+          <div className="novel-note-list">
+            <div className="novel-note-list__item">最近一次已应用但未保存的故事弧草稿已恢复到表单。保存故事弧后会自动清除。</div>
+          </div>
+        </WorkspacePanel>
+      ) : null}
       {loading ? (
         <WorkspacePanel title="故事弧">
           <div className="novel-empty"><Spin /></div>
@@ -231,6 +309,7 @@ export default function Outline({ novelId }: Props) {
                 const isExpanded = expandedArcId === arc.id
                 const completedCount = arcChapters.filter((chapter) => chapter.status === 'final').length
                 const progressPercent = arcChapters.length > 0 ? Math.round((completedCount / arcChapters.length) * 100) : 0
+                const missingOutlineCount = getMissingOutlineCount(arc)
                 return (
                   <React.Fragment key={arc.id}>
                     {index > 0 ? <div className="novel-outline-link" /> : null}
@@ -241,10 +320,11 @@ export default function Outline({ novelId }: Props) {
                       {arc.arcGoal ? <div className="novel-outline-arc__desc">{arc.arcGoal}</div> : null}
                       {arc.growthLedger ? <div className="novel-outline-arc__desc">成长账本：{arc.growthLedger}</div> : null}
                       {arc.costLedger ? <div className="novel-outline-arc__desc">代价账本：{arc.costLedger}</div> : null}
+                      <div className="novel-outline-arc__desc">{missingOutlineCount > 0 ? `待补细纲：${missingOutlineCount} 章` : '当前故事弧细纲已补齐'}</div>
                       <div className="novel-outline-arc__progress"><div style={{ width: `${progressPercent}%`, height: '100%', background: progressPercent === 100 ? '#4f8b64' : '#8f6330', transition: 'width 0.3s' }} /></div>
                       <div className="novel-outline-arc__progress-label">{completedCount}/{arcChapters.length} 章完成</div>
                       <div className="novel-outline-arc__actions" onClick={(event) => event.stopPropagation()}>
-                        <Button size="small" icon={<RobotOutlined />} loading={generating} onClick={() => void handleGenerateChapterOutlines(arc.id)}>生成细纲</Button>
+                        <Button size="small" icon={<RobotOutlined />} loading={generating} disabled={missingOutlineCount <= 0} onClick={() => void handleGenerateChapterOutlines(arc.id)}>{arcChapters.some((chapter) => chapter.outline?.trim()) ? '继续生成' : '生成细纲'}</Button>
                         <Button size="small" icon={<EditOutlined />} onClick={() => openEditModal(arc)} />
                         <Button size="small" danger icon={<DeleteOutlined />} onClick={() => void handleDeleteArc(arc)} />
                       </div>

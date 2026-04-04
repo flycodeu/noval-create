@@ -19,6 +19,7 @@ import type {
   ThemeVoiceGenerationResult,
 } from '../../../shared/theme-voice-generation'
 import { useNovelStore } from '../../../stores/novel.store'
+import { usePlanningDraft } from '../shared/planning-draft'
 import {
   WorkspaceContextSummary,
   WorkspaceMetric,
@@ -187,6 +188,14 @@ export default function ThemeVoicePage({ novelId }: Props) {
     currentValues.descriptionRules,
     currentValues.forbiddenPhrases,
   ].filter(isFilled).length
+  const applyThemeVoiceDraft = (draft: Partial<ThemeVoiceFormValues>) => {
+    form.setFieldsValue(buildCurrentFormValues(snapshot, draft))
+  }
+  const { clearDraft, draft, finalizeDraft, saveAppliedDraft } = usePlanningDraft<ThemeVoiceFormValues>({
+    novelId,
+    pageKey: 'theme-voice',
+    applyDraft: applyThemeVoiceDraft,
+  })
 
   const handleSave = async () => {
     const values = normalizeFormValues(await form.validateFields())
@@ -205,6 +214,8 @@ export default function ThemeVoicePage({ novelId }: Props) {
 
       const updated = await window.electron.novel.get(novelId)
       if (updated) setCurrentNovel(updated)
+      await finalizeDraft(values)
+      await clearDraft()
       message.success('主题与文风已保存。')
     } catch (error) {
       console.error(error)
@@ -232,6 +243,9 @@ export default function ThemeVoicePage({ novelId }: Props) {
       )
       form.setFieldsValue(merged)
       setWarnings(result.warnings)
+      void saveAppliedDraft(merged, result.warnings, 'theme-voice', {
+        inputSummary: `${mode === 'fill_blanks' ? '补空白' : '首版'} · ${currentNovel?.title || '未命名小说'}`,
+      }).catch(console.error)
 
       if (result.warnings.length > 0) {
         message.warning(`AI 已填入表单，但还有 ${result.warnings.length} 条提醒，保存前请复核。`)
@@ -319,6 +333,14 @@ export default function ThemeVoicePage({ novelId }: Props) {
               ))}
             </div>
           )}
+        />
+      ) : null}
+      {draft?.appliedAt ? (
+        <Alert
+          type="info"
+          showIcon
+          message="已恢复最近一次未保存的 AI 草稿"
+          description="当前主题与文风表单包含最近一次已应用但尚未保存的 AI 结果。保存后会自动清除。"
         />
       ) : null}
 

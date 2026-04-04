@@ -34,6 +34,7 @@ import {
   WorkspacePage,
   WorkspacePanel,
 } from '../components/WorkspaceShell'
+import { usePlanningDraft } from '../shared/planning-draft'
 
 interface Props {
   novelId: number
@@ -261,6 +262,28 @@ export default function CoreSettings({ novelId }: Props) {
   const subplotLinkedCount = subplots.filter((subplot) => subplot.mainlineLink.trim()).length
   const subplotScheduledCount = subplots.filter((subplot) => Boolean(parseChapterMarker(subplot.endChapter))).length
   const selectedSubplot = selectedSubplotIndex === null ? null : subplots[selectedSubplotIndex] || null
+  const applyStoryDesignDraft = (draft: Partial<StoryDesignFormValues> & { subplots?: SubPlot[] }) => {
+    form.setFieldsValue({
+      story_goal: typeof draft.story_goal === 'string' ? draft.story_goal : settings.storyDesign.storyGoal,
+      core_conflict: typeof draft.core_conflict === 'string' ? draft.core_conflict : settings.storyDesign.coreConflict,
+      main_plot: typeof draft.main_plot === 'string' ? draft.main_plot : settings.storyDesign.mainPlot,
+      rhythm_setup: typeof draft.rhythm_setup === 'number' ? draft.rhythm_setup : settings.storyDesign.rhythmSetup ?? 30,
+      rhythm_conflict: typeof draft.rhythm_conflict === 'number' ? draft.rhythm_conflict : settings.storyDesign.rhythmConflict ?? 50,
+      rhythm_ending: typeof draft.rhythm_ending === 'number' ? draft.rhythm_ending : settings.storyDesign.rhythmEnding ?? 20,
+      ending_type: typeof draft.ending_type === 'string' ? draft.ending_type : settings.storyDesign.endingType ?? '',
+      ending: typeof draft.ending === 'string' ? draft.ending : settings.storyDesign.ending,
+      subplot_batch_count: clampBatchCount(draft.subplot_batch_count),
+    })
+    if (Array.isArray(draft.subplots)) {
+      setSubplots(normalizeSubplots(draft.subplots))
+      setSelectedSubplotIndex(null)
+    }
+  }
+  const { clearDraft, draft, finalizeDraft, saveAppliedDraft } = usePlanningDraft<StoryDesignFormValues & { subplots?: SubPlot[] }>({
+    novelId,
+    pageKey: 'story-design',
+    applyDraft: applyStoryDesignDraft,
+  })
 
   const subplotBoard = useMemo(() => {
     const lanes = SUBPLOT_LANES.map((lane) => ({
@@ -307,6 +330,19 @@ export default function CoreSettings({ novelId }: Props) {
 
       const updated = await window.electron.novel.get(novelId)
       if (updated) setCurrentNovel(updated)
+      await finalizeDraft({
+        story_goal: normalizeText(values.story_goal),
+        core_conflict: normalizeText(values.core_conflict),
+        main_plot: normalizeText(values.main_plot),
+        rhythm_setup: values.rhythm_setup,
+        rhythm_conflict: values.rhythm_conflict,
+        rhythm_ending: values.rhythm_ending,
+        ending_type: values.ending_type || '',
+        ending: normalizeText(values.ending),
+        subplot_batch_count: batchCount,
+        subplots: normalizeSubplots(subplots),
+      })
+      await clearDraft()
       message.success('故事设计已保存。')
     } catch (error) {
       console.error(error)
@@ -415,6 +451,20 @@ export default function CoreSettings({ novelId }: Props) {
       } else {
         applyGeneratedResult(result)
       }
+      void saveAppliedDraft({
+        story_goal: result.story_goal || values.story_goal || '',
+        core_conflict: result.core_conflict || values.core_conflict || '',
+        main_plot: result.main_plot || values.main_plot || '',
+        rhythm_setup: result.rhythm_setup || values.rhythm_setup || 30,
+        rhythm_conflict: result.rhythm_conflict || values.rhythm_conflict || 50,
+        rhythm_ending: result.rhythm_ending || values.rhythm_ending || 20,
+        ending_type: result.ending_type || values.ending_type || '',
+        ending: result.ending || values.ending || '',
+        subplot_batch_count: batchCount,
+        subplots: normalizeSubplots(result.sub_plots_list),
+      }, result.warnings, 'story-design', {
+        inputSummary: `${mode === 'subplots' ? '重排支线' : '生成故事骨架'} · ${currentNovel?.title || '未命名小说'}`,
+      }).catch(console.error)
 
       if (result.warnings.length > 0) {
         message.warning(`AI 已生成内容，但有 ${result.warnings.length} 条提醒，保存前请复核。`)

@@ -12,6 +12,7 @@ import {
   Tag,
 } from 'antd'
 import {
+  DeleteOutlined,
   EditOutlined,
   HolderOutlined,
   LinkOutlined,
@@ -173,6 +174,7 @@ interface StructureVolumesPanelProps {
   onCancelRename: () => void
   onSaveRename: () => void
   onAddPart: (volumeId: number) => void
+  onDeleteVolume: (volume: StoryStructureVolumeSummary) => void
   onDragEnd: (result: DropResult) => void
 }
 
@@ -187,6 +189,7 @@ export function StructureVolumesPanel({
   onCancelRename,
   onSaveRename,
   onAddPart,
+  onDeleteVolume,
   onDragEnd,
 }: StructureVolumesPanelProps) {
   return (
@@ -242,6 +245,9 @@ export function StructureVolumesPanel({
                             <Button size="small" icon={<PlusOutlined />} onClick={() => onAddPart(volume.id)}>
                               加一部
                             </Button>
+                            <Button size="small" danger icon={<DeleteOutlined />} onClick={() => onDeleteVolume(volume)}>
+                              删除
+                            </Button>
                           </Space>
                         </div>
                         <div className="novel-structure-volume-card__meta">
@@ -275,6 +281,7 @@ interface StructurePartsPanelProps {
   onStartRenamePart: (part: StoryStructurePartSummary) => void
   onCancelRename: () => void
   onSaveRename: () => void
+  onDeletePart: (part: StoryStructurePartSummary) => void
   onPageChange: (page: number) => void
   onDragEnd: (result: DropResult) => void
 }
@@ -290,6 +297,7 @@ export function StructurePartsPanel({
   onStartRenamePart,
   onCancelRename,
   onSaveRename,
+  onDeletePart,
   onPageChange,
   onDragEnd,
 }: StructurePartsPanelProps) {
@@ -343,11 +351,16 @@ export function StructurePartsPanel({
                                 )}
                               </button>
                             </div>
-                            {editingPartId !== part.id ? (
-                              <Button size="small" icon={<EditOutlined />} onClick={() => onStartRenamePart(part)}>
-                                改名
+                            <Space size={8}>
+                              {editingPartId !== part.id ? (
+                                <Button size="small" icon={<EditOutlined />} onClick={() => onStartRenamePart(part)}>
+                                  改名
+                                </Button>
+                              ) : null}
+                              <Button size="small" danger icon={<DeleteOutlined />} onClick={() => onDeletePart(part)}>
+                                删除
                               </Button>
-                            ) : null}
+                            </Space>
                           </div>
                           <div className="novel-structure-part-card__meta">
                             <span>{part.chapterCount} 章</span>
@@ -567,6 +580,7 @@ interface ChapterEditorPanelProps {
   chapterForm: ReturnType<typeof Form.useForm<ChapterFormValues>>[0]
   savingChapter: boolean
   onSaveChapter: () => void
+  onDeleteChapter: () => void
   aiActions?: React.ReactNode
 }
 
@@ -576,6 +590,7 @@ export function ChapterEditorPanel({
   chapterForm,
   savingChapter,
   onSaveChapter,
+  onDeleteChapter,
   aiActions,
 }: ChapterEditorPanelProps) {
   return (
@@ -585,6 +600,9 @@ export function ChapterEditorPanel({
       extra={chapterDetail ? (
         <Space>
           {aiActions}
+          <Button danger icon={<DeleteOutlined />} onClick={onDeleteChapter}>
+            删除章节
+          </Button>
           <Button type="primary" icon={<SaveOutlined />} loading={savingChapter} onClick={onSaveChapter}>
             保存章节
           </Button>
@@ -628,6 +646,7 @@ interface SegmentEditorPanelProps {
   segmentForm: ReturnType<typeof Form.useForm<SegmentFormValues>>[0]
   savingSegment: boolean
   onSaveSegment: () => void
+  onDeleteSegment: () => void
   aiActions?: React.ReactNode
 }
 
@@ -638,6 +657,7 @@ export function SegmentEditorPanel({
   segmentForm,
   savingSegment,
   onSaveSegment,
+  onDeleteSegment,
   aiActions,
 }: SegmentEditorPanelProps) {
   const isSelectedSegmentOutsideWindow = Boolean(
@@ -653,6 +673,9 @@ export function SegmentEditorPanel({
       extra={segmentDetail ? (
         <Space>
           {aiActions}
+          <Button danger icon={<DeleteOutlined />} onClick={onDeleteSegment}>
+            删除场景
+          </Button>
           <Button type="primary" icon={<SaveOutlined />} loading={savingSegment} onClick={onSaveSegment}>
             保存场景
           </Button>

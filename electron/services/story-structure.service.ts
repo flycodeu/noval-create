@@ -11,9 +11,35 @@ import {
   storyMemoryCheckpoints,
   storyParts,
   storyVolumes,
+  timelineEvents,
 } from '../database/schema'
 import { markNovelContextChanged } from './context-impact.service'
 import { markTimelineEventsSegmentAnchorInvalid, syncTimelineStructureAnchors } from './timeline.service'
+import {
+  applyStructureBatchEdit as applyStructureBatchEditTransactional,
+  applyStructureBatchPlan as applyStructureBatchPlanTransactional,
+  assignChapterToPartTransactional,
+  deleteChapterSegmentTransactional,
+  deleteStoryPartTransactional,
+  deleteStoryVolumeTransactional,
+  previewStructureBatchEdit as previewStructureBatchEditTransactional,
+  reorderChapterSegmentsTransactional,
+  reorderStoryPartsInVolumeTransactional,
+  reorderStoryPartsTransactional,
+  reorderStoryVolumesTransactional,
+} from './story-structure-batch.service'
+import type {
+  StructureBatchApplyResult,
+  StructureBatchEditOperation,
+  StructureBatchFocus,
+  StructureBatchPlan,
+  StructureBatchPlanChapterInput,
+  StructureBatchPlanPartInput,
+  StructureBatchPlanSegmentInput,
+  StructureBatchPlanVolumeInput,
+  StructureBatchPreview,
+  StructureBatchPreviewItem,
+} from '../../src/types'
 
 type StructureStatus = 'planning' | 'draft' | 'locked'
 type CheckpointScope = 'novel' | 'volume' | 'part'
@@ -125,6 +151,174 @@ function getCheckpointRows(novelId: number) {
     .where(eq(storyMemoryCheckpoints.novelId, novelId))
     .orderBy(asc(storyMemoryCheckpoints.scopeType), asc(storyMemoryCheckpoints.scopeId), asc(storyMemoryCheckpoints.id))
     .all()
+}
+
+function parseStoredStringArray(raw?: string | null): string[] {
+  if (!raw) return []
+  try {
+    return toStringArray(JSON.parse(raw))
+  } catch {
+    return []
+  }
+}
+
+function mergeStoredReasons(raw: string | null | undefined, reasons: string[]): string {
+  return stringifyStringArray([...parseStoredStringArray(raw), ...reasons])
+}
+
+function getTimelineRows(novelId: number) {
+  const db = getDb()
+  return db.select().from(timelineEvents)
+    .where(eq(timelineEvents.novelId, novelId))
+    .all()
+}
+
+function normalizeVolumeNumbers(novelId: number) {
+  const db = getDb()
+  const now = new Date().toISOString()
+  getVolumeRows(novelId).forEach((volume, index) => {
+    const nextNumber = index + 1
+    if (volume.volumeNumber === nextNumber) return
+    db.update(storyVolumes).set({
+      volumeNumber: nextNumber,
+      updatedAt: now,
+    }).where(eq(storyVolumes.id, volume.id)).run()
+  })
+}
+
+function normalizePartNumbers(novelId: number) {
+  const db = getDb()
+  const now = new Date().toISOString()
+  const partRows = getPartRows(novelId)
+  const volumes = getVolumeRows(novelId)
+
+  for (const volume of volumes) {
+    partRows
+      .filter((part) => part.volumeId === volume.id)
+      .sort((left, right) => left.partNumber - right.partNumber || left.id - right.id)
+      .forEach((part, index) => {
+        const nextNumber = index + 1
+        if (part.partNumber === nextNumber) return
+        db.update(storyParts).set({
+          partNumber: nextNumber,
+          updatedAt: now,
+        }).where(eq(storyParts.id, part.id)).run()
+      })
+  }
+}
+
+function normalizeChapterNumbers(novelId: number) {
+  const db = getDb()
+  const now = new Date().toISOString()
+  const volumeRows = getVolumeRows(novelId)
+  const partRows = getPartRows(novelId)
+  const chapterRows = getChapterRows(novelId)
+  let nextChapterNum = 1
+
+  for (const volume of volumeRows) {
+    const volumeParts = partRows
+      .filter((part) => part.volumeId === volume.id)
+      .sort((left, right) => left.partNumber - right.partNumber || left.id - right.id)
+
+    for (const part of volumeParts) {
+      const partChapters = chapterRows
+        .filter((chapter) => chapter.partId === part.id)
+        .sort((left, right) => left.chapterNum - right.chapterNum || left.id - right.id)
+
+      for (const chapter of partChapters) {
+        if (chapter.chapterNum === nextChapterNum) {
+          nextChapterNum += 1
+          continue
+        }
+
+        db.update(chapters).set({
+          chapterNum: nextChapterNum,
+          updatedAt: now,
+        }).where(eq(chapters.id, chapter.id)).run()
+        nextChapterNum += 1
+      }
+    }
+  }
+
+  const knownPartIds = new Set(partRows.map((part) => part.id))
+  const orphanChapters = chapterRows
+    .filter((chapter) => !chapter.partId || !knownPartIds.has(chapter.partId))
+    .sort((left, right) => left.chapterNum - right.chapterNum || left.id - right.id)
+
+  for (const chapter of orphanChapters) {
+    if (chapter.chapterNum === nextChapterNum) {
+      nextChapterNum += 1
+      continue
+    }
+
+    db.update(chapters).set({
+      chapterNum: nextChapterNum,
+      updatedAt: now,
+    }).where(eq(chapters.id, chapter.id)).run()
+    nextChapterNum += 1
+  }
+}
+
+function normalizeSegmentOrders(chapterId: number) {
+  const db = getDb()
+  const now = new Date().toISOString()
+  db.select().from(chapterSegments)
+    .where(eq(chapterSegments.chapterId, chapterId))
+    .orderBy(asc(chapterSegments.segmentOrder), asc(chapterSegments.id))
+    .all()
+    .sort((left, right) => left.segmentOrder - right.segmentOrder || left.id - right.id)
+    .forEach((segment, index) => {
+      const nextOrder = index + 1
+      if (segment.segmentOrder === nextOrder) return
+      db.update(chapterSegments).set({
+        segmentOrder: nextOrder,
+        updatedAt: now,
+      }).where(eq(chapterSegments.id, segment.id)).run()
+    })
+}
+
+function markNovelContextChangedInline(novelId: number, reasons: string | string[]) {
+  const db = getDb()
+  const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
+  if (!novel) throw new Error('小说不存在')
+
+  const normalizedReasons = [...new Set((Array.isArray(reasons) ? reasons : [reasons])
+    .map((item) => item.trim())
+    .filter(Boolean))]
+
+  if (normalizedReasons.length === 0) return novel.contextVersion || 1
+
+  const nextVersion = (novel.contextVersion || 1) + 1
+  const now = new Date().toISOString()
+  db.update(novels).set({
+    contextVersion: nextVersion,
+    updatedAt: now,
+  }).where(eq(novels.id, novelId)).run()
+
+  const chapterRows = db.select().from(chapters).where(eq(chapters.novelId, novelId)).all()
+  for (const chapter of chapterRows) {
+    db.update(chapters).set({
+      staleReasonJson: mergeStoredReasons(chapter.staleReasonJson, normalizedReasons),
+      updatedAt: now,
+    }).where(eq(chapters.id, chapter.id)).run()
+  }
+
+  return nextVersion
+}
+
+function runStructureTransaction(
+  novelId: number,
+  reason: string,
+  mutate: () => void,
+) {
+  const sqlite = getSqlite()
+  sqlite.transaction(() => {
+    mutate()
+    syncChapterSegmentMetadata(novelId)
+    syncPartRanges(novelId)
+    syncTimelineStructureAnchors(novelId)
+    markNovelContextChangedInline(novelId, reason)
+  })()
 }
 
 export function resolveDefaultStructure(novelId: number): { volumeId: number; partId: number } {
@@ -361,6 +555,21 @@ export function listStoryCheckpoints(novelId: number) {
   return getCheckpointRows(novelId)
 }
 
+export function previewStructureBatchEdit(novelId: number, operations: StructureBatchEditOperation[]) {
+  ensureStoryStructure(novelId)
+  return previewStructureBatchEditTransactional(novelId, operations)
+}
+
+export function applyStructureBatchEdit(novelId: number, operations: StructureBatchEditOperation[]) {
+  ensureStoryStructure(novelId)
+  return applyStructureBatchEditTransactional(novelId, operations)
+}
+
+export function applyStructureBatchPlan(novelId: number, plan: StructureBatchPlan) {
+  ensureStoryStructure(novelId)
+  return applyStructureBatchPlanTransactional(novelId, plan)
+}
+
 export function createStoryVolume(
   novelId: number,
   data: Partial<{
@@ -407,25 +616,7 @@ export function updateStoryVolume(
 }
 
 export function reorderStoryVolumes(novelId: number, orderedIds: number[]) {
-  const db = getDb()
-  const rows = getVolumeRows(novelId)
-  if (rows.length !== orderedIds.length) {
-    throw new Error('卷数量不匹配')
-  }
-
-  const existingIds = new Set(rows.map((row) => row.id))
-  if (orderedIds.some((id) => !existingIds.has(id))) {
-    throw new Error('卷 ID 无效')
-  }
-
-  orderedIds.forEach((id, index) => {
-    db.update(storyVolumes).set({
-      volumeNumber: index + 1,
-      updatedAt: new Date().toISOString(),
-    }).where(eq(storyVolumes.id, id)).run()
-  })
-
-  markNovelContextChanged(novelId, 'Story structure changed')
+  reorderStoryVolumesTransactional(novelId, orderedIds)
 }
 
 function ensureFallbackPartForVolume(novelId: number, volumeId: number) {
@@ -444,34 +635,7 @@ function ensureFallbackPartForVolume(novelId: number, volumeId: number) {
 }
 
 export function deleteStoryVolume(id: number) {
-  const db = getDb()
-  const current = db.select().from(storyVolumes).where(eq(storyVolumes.id, id)).all()[0]
-  if (!current) return
-
-  const sibling = getVolumeRows(current.novelId).find((volume) => volume.id !== id)
-  const fallbackVolumeId = sibling?.id || createStoryVolume(current.novelId, {
-    title: getDefaultVolumeTitle((getVolumeRows(current.novelId).at(-1)?.volumeNumber || 0) + 1),
-  })
-  const fallbackPart = ensureFallbackPartForVolume(current.novelId, fallbackVolumeId)
-
-  db.update(storyParts).set({
-    volumeId: fallbackVolumeId,
-    updatedAt: new Date().toISOString(),
-  }).where(eq(storyParts.volumeId, id)).run()
-  db.update(chapters).set({
-    volumeId: fallbackVolumeId,
-    partId: fallbackPart.id,
-    updatedAt: new Date().toISOString(),
-  }).where(eq(chapters.volumeId, id)).run()
-  db.update(chapterSegments).set({
-    volumeId: fallbackVolumeId,
-    partId: fallbackPart.id,
-    updatedAt: new Date().toISOString(),
-  }).where(eq(chapterSegments.volumeId, id)).run()
-  db.delete(storyVolumes).where(eq(storyVolumes.id, id)).run()
-  syncPartRanges(current.novelId)
-  syncTimelineStructureAnchors(current.novelId)
-  markNovelContextChanged(current.novelId, 'Story structure changed')
+  deleteStoryVolumeTransactional(id)
 }
 
 export function createStoryPart(
@@ -524,123 +688,19 @@ export function updateStoryPart(
 }
 
 export function reorderStoryParts(novelId: number, operations: StoryPartReorderOperation[]) {
-  const db = getDb()
-  const partRows = getPartRows(novelId)
-  const volumeRows = getVolumeRows(novelId)
-
-  if (partRows.length !== operations.length) {
-    throw new Error('分册数量不匹配')
-  }
-
-  const partById = new Map(partRows.map((part) => [part.id, part]))
-  const volumeIds = new Set(volumeRows.map((volume) => volume.id))
-  const operationIds = new Set(operations.map((item) => item.id))
-  if (operationIds.size !== operations.length || operations.some((item) => !partById.has(item.id))) {
-    throw new Error('分册 ID 无效')
-  }
-  if (partRows.some((part) => !operationIds.has(part.id))) {
-    throw new Error('分册 ID 不完整')
-  }
-  if (operations.some((item) => !volumeIds.has(item.volumeId))) {
-    throw new Error('目标卷 ID 无效')
-  }
-
-  operations.forEach((item) => {
-    db.update(storyParts).set({
-      volumeId: item.volumeId,
-      partNumber: item.partNumber,
-      updatedAt: new Date().toISOString(),
-    }).where(eq(storyParts.id, item.id)).run()
-  })
-
-  operations.forEach((item) => {
-    const current = partById.get(item.id)
-    if (!current || current.volumeId === item.volumeId) return
-    db.update(chapters).set({
-      volumeId: item.volumeId,
-      updatedAt: new Date().toISOString(),
-    }).where(eq(chapters.partId, item.id)).run()
-    db.update(chapterSegments).set({
-      volumeId: item.volumeId,
-      updatedAt: new Date().toISOString(),
-    }).where(eq(chapterSegments.partId, item.id)).run()
-  })
-
-  syncPartRanges(novelId)
-  syncTimelineStructureAnchors(novelId)
-  markNovelContextChanged(novelId, 'Story structure changed')
+  reorderStoryPartsTransactional(novelId, operations)
 }
 
 export function reorderStoryPartsInVolume(volumeId: number, orderedIds: number[]) {
-  const db = getDb()
-  const volume = db.select().from(storyVolumes).where(eq(storyVolumes.id, volumeId)).all()[0]
-  if (!volume) throw new Error('卷不存在')
-
-  const partRows = getPartRows(volume.novelId).filter((part) => part.volumeId === volumeId)
-  if (partRows.length !== orderedIds.length) {
-    throw new Error('分册数量不匹配')
-  }
-
-  const partIds = new Set(partRows.map((part) => part.id))
-  if (new Set(orderedIds).size !== orderedIds.length || orderedIds.some((id) => !partIds.has(id))) {
-    throw new Error('分册 ID 无效')
-  }
-
-  orderedIds.forEach((id, index) => {
-    db.update(storyParts).set({
-      partNumber: index + 1,
-      updatedAt: new Date().toISOString(),
-    }).where(eq(storyParts.id, id)).run()
-  })
-
-  syncPartRanges(volume.novelId)
-  syncTimelineStructureAnchors(volume.novelId)
-  markNovelContextChanged(volume.novelId, 'Story structure changed')
+  reorderStoryPartsInVolumeTransactional(volumeId, orderedIds)
 }
 
 export function deleteStoryPart(id: number) {
-  const db = getDb()
-  const current = db.select().from(storyParts).where(eq(storyParts.id, id)).all()[0]
-  if (!current) return
-  const sibling = getPartRows(current.novelId).find((part) => part.id !== id && part.volumeId === current.volumeId)
-  const fallbackPartId = sibling?.id || createStoryPart(current.volumeId, {
-    title: getDefaultPartTitle((getPartRows(current.novelId).filter((part) => part.volumeId === current.volumeId).at(-1)?.partNumber || 0) + 1),
-  })
-  const fallbackPart = db.select().from(storyParts).where(eq(storyParts.id, fallbackPartId)).all()[0]
-  db.update(chapters).set({
-    volumeId: fallbackPart.volumeId,
-    partId: fallbackPart.id,
-    updatedAt: new Date().toISOString(),
-  }).where(eq(chapters.partId, id)).run()
-  db.update(chapterSegments).set({
-    volumeId: fallbackPart.volumeId,
-    partId: fallbackPart.id,
-    updatedAt: new Date().toISOString(),
-  }).where(eq(chapterSegments.partId, id)).run()
-  db.delete(storyParts).where(eq(storyParts.id, id)).run()
-  syncPartRanges(current.novelId)
-  syncTimelineStructureAnchors(current.novelId)
-  markNovelContextChanged(current.novelId, 'Story structure changed')
+  deleteStoryPartTransactional(id)
 }
 
 export function assignChapterToPart(chapterId: number, partId: number) {
-  const db = getDb()
-  const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
-  const part = db.select().from(storyParts).where(eq(storyParts.id, partId)).all()[0]
-  if (!chapter || !part) throw new Error('章节或分册不存在')
-  db.update(chapters).set({
-    volumeId: part.volumeId,
-    partId: part.id,
-    updatedAt: new Date().toISOString(),
-  }).where(eq(chapters.id, chapterId)).run()
-  db.update(chapterSegments).set({
-    volumeId: part.volumeId,
-    partId: part.id,
-    updatedAt: new Date().toISOString(),
-  }).where(eq(chapterSegments.chapterId, chapterId)).run()
-  syncPartRanges(chapter.novelId)
-  syncTimelineStructureAnchors(chapter.novelId)
-  markNovelContextChanged(chapter.novelId, 'Story structure changed')
+  assignChapterToPartTransactional(chapterId, partId)
 }
 
 export function createChapterSegment(
@@ -735,47 +795,11 @@ export function updateChapterSegment(
 }
 
 export function deleteChapterSegment(id: number) {
-  const db = getDb()
-  const current = db.select().from(chapterSegments).where(eq(chapterSegments.id, id)).all()[0]
-  if (!current) return
-  const siblings = listChapterSegments(current.chapterId)
-  if (siblings.length <= 1) {
-    throw new Error('每章至少需要保留一个片段')
-  }
-  markTimelineEventsSegmentAnchorInvalid(id)
-  db.delete(chapterSegments).where(eq(chapterSegments.id, id)).run()
-  const remaining = listChapterSegments(current.chapterId)
-  remaining.forEach((segment, index) => {
-    db.update(chapterSegments).set({
-      segmentOrder: index + 1,
-      updatedAt: new Date().toISOString(),
-    }).where(eq(chapterSegments.id, segment.id)).run()
-  })
-  syncChapterSegmentMetadata(current.novelId)
-  syncTimelineStructureAnchors(current.novelId)
-  markNovelContextChanged(current.novelId, 'Chapter segments changed')
+  deleteChapterSegmentTransactional(id)
 }
 
 export function reorderChapterSegments(chapterId: number, orderedIds: number[]) {
-  const db = getDb()
-  const segments = listChapterSegments(chapterId)
-  if (segments.length !== orderedIds.length) {
-    throw new Error('片段数量不匹配')
-  }
-  const existingIds = new Set(segments.map((segment) => segment.id))
-  if (orderedIds.some((id) => !existingIds.has(id))) {
-    throw new Error('片段 ID 无效')
-  }
-  orderedIds.forEach((id, index) => {
-    db.update(chapterSegments).set({
-      segmentOrder: index + 1,
-      updatedAt: new Date().toISOString(),
-    }).where(eq(chapterSegments.id, id)).run()
-  })
-  const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
-  if (chapter) {
-    markNovelContextChanged(chapter.novelId, 'Chapter segments changed')
-  }
+  reorderChapterSegmentsTransactional(chapterId, orderedIds)
 }
 
 export function compileChapterFromSegments(

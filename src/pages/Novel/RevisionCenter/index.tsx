@@ -7,6 +7,9 @@ import AIGenerateButton from '../../../components/AIGenerateButton'
 import type { NovelConsistencyReport, NovelContextStatus, RevisionTask } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
 import { buildDraftMessages, parseDraftJson } from '../shared/ai-draft'
+import { usePlanningDraft } from '../shared/planning-draft'
+import { generateRevisionDraft } from '../shared/planning-ai-service'
+import { buildRevisionTaskTargetPath } from '../shared/workspace-navigation'
 import {
   WorkspaceContextSummary,
   WorkspaceMetric,
@@ -117,6 +120,9 @@ export default function RevisionCenterPage({ novelId }: Props) {
   const [sourceFilter, setSourceFilter] = useState<'all' | RevisionTask['taskSource']>('all')
   const [statusFilter, setStatusFilter] = useState<'all' | RevisionTask['status']>('all')
   const [keyword, setKeyword] = useState('')
+  const [draftWarnings, setDraftWarnings] = useState<string[]>([])
+  const draftWarningsRef = React.useRef<string[]>([])
+  const draftObservabilityRef = React.useRef<{ inputSummary: string; lintWarnings: string[]; rawOutputs: string[] } | null>(null)
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -161,10 +167,35 @@ export default function RevisionCenterPage({ novelId }: Props) {
     [tasks],
   )
   const systemCount = tasks.length - manualCount
+  const applyRevisionDraft = useCallback((draft: Partial<RevisionTaskFormValues>) => {
+    const currentValues = form.getFieldsValue(true)
+    form.setFieldsValue({
+      ...currentValues,
+      taskType: typeof draft.taskType === 'string' ? draft.taskType : currentValues.taskType,
+      title: typeof draft.title === 'string' ? draft.title : currentValues.title,
+      description: typeof draft.description === 'string' ? draft.description : currentValues.description,
+      fixBrief: typeof draft.fixBrief === 'string' ? draft.fixBrief : currentValues.fixBrief,
+      status: typeof draft.status === 'string' ? draft.status as RevisionTask['status'] : currentValues.status,
+      severity: typeof draft.severity === 'string' ? draft.severity as RevisionTask['severity'] : currentValues.severity,
+      relatedPage: typeof draft.relatedPage === 'string' ? draft.relatedPage : currentValues.relatedPage,
+    })
+  }, [form])
+  const { clearDraft, draft, finalizeDraft, saveAppliedDraft } = usePlanningDraft<RevisionTaskFormValues>({
+    novelId,
+    pageKey: 'revision',
+    applyDraft: applyRevisionDraft,
+  })
   const taskDraftButton = (
     <AIGenerateButton
       label="AI 起草任务"
       isJson
+      runGeneration={async (input) => {
+        const result = await generateRevisionDraft(input, { genre: currentNovel?.genreName })
+        draftWarningsRef.current = result.warnings
+        draftObservabilityRef.current = result.observability
+        setDraftWarnings(result.warnings)
+        return result.outputs
+      }}
       buildMessages={() => {
         const values = form.getFieldsValue(true)
         return buildDraftMessages({
@@ -193,18 +224,9 @@ export default function RevisionCenterPage({ novelId }: Props) {
         })
       }}
       onResult={(raw) => {
-        const draft = parseDraftJson<Record<string, unknown>>(raw)
-        const currentValues = form.getFieldsValue(true)
-        form.setFieldsValue({
-          ...currentValues,
-          taskType: typeof draft.taskType === 'string' ? draft.taskType : currentValues.taskType,
-          title: typeof draft.title === 'string' ? draft.title : currentValues.title,
-          description: typeof draft.description === 'string' ? draft.description : currentValues.description,
-          fixBrief: typeof draft.fixBrief === 'string' ? draft.fixBrief : currentValues.fixBrief,
-          status: typeof draft.status === 'string' ? draft.status as RevisionTask['status'] : currentValues.status,
-          severity: typeof draft.severity === 'string' ? draft.severity as RevisionTask['severity'] : currentValues.severity,
-          relatedPage: typeof draft.relatedPage === 'string' ? draft.relatedPage : currentValues.relatedPage,
-        })
+        const parsedDraft = parseDraftJson<RevisionTaskFormValues>(raw)
+        applyRevisionDraft(parsedDraft)
+        void saveAppliedDraft(parsedDraft, draftWarningsRef.current, 'revision', draftObservabilityRef.current || undefined).catch(console.error)
       }}
     />
   )
@@ -233,6 +255,8 @@ export default function RevisionCenterPage({ novelId }: Props) {
       } else {
         await window.electron.revision.create(novelId, values)
       }
+      await finalizeDraft(values)
+      await clearDraft()
       setModalOpen(false)
       setEditingTask(null)
       message.success(editingTask ? '修订任务已更新。' : '修订任务已创建。')
@@ -292,7 +316,7 @@ export default function RevisionCenterPage({ novelId }: Props) {
   }
 
   const openRelatedPage = (task: RevisionTask) => {
-    navigate(`/novels/${novelId}/${task.relatedPage || 'revision'}`)
+    navigate(buildRevisionTaskTargetPath(novelId, task))
   }
 
   const columns = useMemo<ColumnsType<RevisionTask>>(() => [
@@ -340,7 +364,7 @@ export default function RevisionCenterPage({ novelId }: Props) {
       render: (_, record) => (
         <Space wrap>
           <Button size="small" icon={<ArrowRightOutlined />} onClick={() => openRelatedPage(record)}>
-            打开页面
+            带上下文打开
           </Button>
           {record.taskSource === 'manual' ? (
             <>
@@ -470,6 +494,22 @@ export default function RevisionCenterPage({ novelId }: Props) {
           showIcon
           message={`有 ${contextStatus.staleChapterCount} 章仍在引用旧上下文`}
           description="建议先回查这些章节。"
+        />
+      ) : null}
+      {draftWarnings.length > 0 ? (
+        <Alert
+          type="info"
+          showIcon
+          message="本轮 AI 草稿带有提醒"
+          description={draftWarnings.map((warning) => <div key={warning}>{warning}</div>)}
+        />
+      ) : null}
+      {draft?.appliedAt ? (
+        <Alert
+          type="info"
+          showIcon
+          message="已恢复最近一次未保存的 AI 草稿"
+          description="当前修订任务表单包含最近一次已应用但尚未保存的 AI 结果。保存后会自动清除。"
         />
       ) : null}
 
