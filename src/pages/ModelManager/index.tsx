@@ -17,6 +17,14 @@ const PROVIDER_OPTIONS = [
   { value: 'baidu', label: '百度文心', models: ['ernie-4.0-8k', 'ernie-3.5-8k', 'ernie-speed'] },
   { value: 'custom', label: '自定义（OpenAI 兼容）', models: [] },
 ]
+const PROVIDER_DEFAULTS: Record<string, { temperature: number; maxTokens: number }> = {
+  openai: { temperature: 0.8, maxTokens: 8192 },
+  anthropic: { temperature: 0.75, maxTokens: 8192 },
+  deepseek: { temperature: 0.7, maxTokens: 8192 },
+  aliyun: { temperature: 0.85, maxTokens: 8192 },
+  baidu: { temperature: 0.8, maxTokens: 8192 },
+  custom: { temperature: 0.8, maxTokens: 8192 },
+}
 
 export default function ModelManager() {
   const [configs, setConfigs] = useState<ModelConfig[]>([])
@@ -39,6 +47,14 @@ export default function ModelManager() {
 
   useEffect(() => { loadConfigs() }, [loadConfigs])
 
+  const applyProviderDefaults = useCallback((provider: string) => {
+    const defaults = PROVIDER_DEFAULTS[provider] || PROVIDER_DEFAULTS.openai
+    form.setFieldsValue({
+      temperature: defaults.temperature,
+      maxTokens: defaults.maxTokens,
+    })
+  }, [form])
+
   const handleSelect = (config: ModelConfig) => {
     setSelected(config)
     setIsNew(false)
@@ -51,6 +67,7 @@ export default function ModelManager() {
       baseUrl: config.baseUrl,
       temperature: config.temperature,
       maxTokens: config.maxTokens,
+      maxContextTokens: config.maxContextTokens ?? undefined,
       maxConcurrency: config.maxConcurrency,
     })
   }
@@ -60,7 +77,8 @@ export default function ModelManager() {
     setIsNew(true)
     setTestResult(null)
     form.resetFields()
-    form.setFieldsValue({ temperature: 0.85, maxTokens: 4096, maxConcurrency: 2, provider: 'openai' })
+    form.setFieldsValue({ maxConcurrency: 2, provider: 'openai', maxContextTokens: undefined })
+    applyProviderDefaults('openai')
   }
 
   const handleSave = async () => {
@@ -225,7 +243,10 @@ export default function ModelManager() {
               <Form.Item name="provider" label="AI 提供商" rules={[{ required: true }]}>
                 <Select
                   options={PROVIDER_OPTIONS.map(p => ({ value: p.value, label: p.label }))}
-                  onChange={() => form.setFieldValue('modelId', undefined)}
+                  onChange={(value) => {
+                    form.setFieldValue('modelId', undefined)
+                    applyProviderDefaults(value)
+                  }}
                 />
               </Form.Item>
 
@@ -257,6 +278,10 @@ export default function ModelManager() {
 
               <Form.Item name="maxTokens" label="Max Tokens（最大输出）">
                 <InputNumber min={512} max={32000} step={512} style={{ width: '100%' }} />
+              </Form.Item>
+
+              <Form.Item name="maxContextTokens" label="上下文窗口（可留空使用默认）">
+                <InputNumber min={2048} max={2000000} step={1024} style={{ width: '100%' }} placeholder="例如：8192 / 32768 / 128000" />
               </Form.Item>
 
               <Form.Item name="maxConcurrency" label="最大并发请求数">

@@ -70,6 +70,7 @@ function getMigrationIds(db) {
 
 function assertRequiredColumns(db) {
   assert.ok(getColumns(db, 'model_configs').has('max_concurrency'))
+  assert.ok(getColumns(db, 'model_configs').has('max_context_tokens'))
   assert.ok(getColumns(db, 'story_arcs').has('progress_percent'))
   assert.ok(getColumns(db, 'story_arcs').has('stalled_chapter_count'))
   assert.ok(getColumns(db, 'story_arcs').has('last_progress_chapter_num'))
@@ -95,6 +96,9 @@ function testFreshDbIsIdempotent() {
       '0005_validate_schema',
       '0006_history_recovery',
       '0007_validate_history',
+      '0008_model_context_windows',
+      '0009_validate_model_runtime',
+      '0010_model_parameter_defaults',
     ])
 
     runMigrations(db)
@@ -160,6 +164,16 @@ function testPartialSchemaCanResume() {
       );
     `)
 
+    db.prepare(`
+      INSERT INTO model_configs (name, provider, model_id, api_key, temperature, max_tokens, max_concurrency)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run('OpenAI Legacy', 'openai', 'gpt-4o', null, 0.85, 4096, 4)
+
+    db.prepare(`
+      INSERT INTO model_configs (name, provider, model_id, api_key, temperature, max_tokens, max_concurrency)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run('Custom Legacy', 'custom', 'local-model', null, 0.85, 4096, 4)
+
     runMigrations(db)
     assertRequiredColumns(db)
     assert.deepEqual(getMigrationIds(db), [
@@ -170,6 +184,20 @@ function testPartialSchemaCanResume() {
       '0005_validate_schema',
       '0006_history_recovery',
       '0007_validate_history',
+      '0008_model_context_windows',
+      '0009_validate_model_runtime',
+      '0010_model_parameter_defaults',
+    ])
+
+    const configs = db.prepare(`
+      SELECT provider, temperature, max_tokens
+      FROM model_configs
+      ORDER BY id
+    `).all()
+
+    assert.deepEqual(configs, [
+      { provider: 'openai', temperature: 0.8, max_tokens: 8192 },
+      { provider: 'custom', temperature: 0.85, max_tokens: 4096 },
     ])
 
     runMigrations(db)

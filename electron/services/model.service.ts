@@ -13,11 +13,43 @@ import { CustomAdapter } from '../adapters/custom.adapter'
 import os from 'os'
 
 const MACHINE_SALT = `novelforge-${os.hostname()}-${os.platform()}`
+const PROVIDER_RUNTIME_DEFAULTS: Record<string, { temperature: number; maxTokens: number }> = {
+  openai: { temperature: 0.8, maxTokens: 8192 },
+  anthropic: { temperature: 0.75, maxTokens: 8192 },
+  aliyun: { temperature: 0.85, maxTokens: 8192 },
+  baidu: { temperature: 0.8, maxTokens: 8192 },
+  deepseek: { temperature: 0.7, maxTokens: 8192 },
+  custom: { temperature: 0.8, maxTokens: 8192 },
+}
 
 export function normalizeModelConcurrency(value: unknown): number {
   const numeric = typeof value === 'number' ? Math.round(value) : Number(value)
   if (!Number.isFinite(numeric)) return 2
   return Math.max(1, Math.min(8, numeric))
+}
+
+export function getProviderRuntimeDefaults(provider: string): { temperature: number; maxTokens: number } {
+  return PROVIDER_RUNTIME_DEFAULTS[provider] || PROVIDER_RUNTIME_DEFAULTS.openai
+}
+
+export function normalizeModelTemperature(value: unknown, provider: string): number {
+  const fallback = getProviderRuntimeDefaults(provider).temperature
+  const numeric = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(numeric)) return fallback
+  return Math.max(0, Math.min(1, numeric))
+}
+
+export function normalizeModelMaxTokens(value: unknown, provider: string): number {
+  const fallback = getProviderRuntimeDefaults(provider).maxTokens
+  const numeric = typeof value === 'number' ? Math.round(value) : Number(value)
+  if (!Number.isFinite(numeric) || numeric <= 0) return fallback
+  return Math.max(512, Math.min(32000, numeric))
+}
+
+export function normalizeModelContextTokens(value: unknown): number | null {
+  const numeric = typeof value === 'number' ? Math.round(value) : Number(value)
+  if (!Number.isFinite(numeric) || numeric <= 0) return null
+  return Math.max(2048, Math.min(2_000_000, numeric))
 }
 
 export function encryptApiKey(key: string): string {
@@ -44,25 +76,31 @@ export function createAdapter(config: {
   modelId: string
   apiKey?: string | null
   baseUrl?: string | null
+  maxContextTokens?: number | null
+  temperature?: number | null
+  maxTokens?: number | null
 }): BaseAdapter {
   const key = config.apiKey ? decryptApiKey(config.apiKey) : ''
   const { provider, modelId, baseUrl } = config
+  const maxContextTokens = normalizeModelContextTokens(config.maxContextTokens)
+  const temperature = normalizeModelTemperature(config.temperature, provider)
+  const maxTokens = normalizeModelMaxTokens(config.maxTokens, provider)
 
   switch (provider) {
     case 'openai':
-      return new OpenAIAdapter(key, modelId, baseUrl || undefined)
+      return new OpenAIAdapter(key, modelId, baseUrl || undefined, maxContextTokens, temperature, maxTokens)
     case 'anthropic':
-      return new AnthropicAdapter(key, modelId)
+      return new AnthropicAdapter(key, modelId, maxContextTokens, temperature, maxTokens)
     case 'baidu': {
       const [apiKey, secretKey] = key.split('|')
-      return new BaiduAdapter(apiKey, secretKey, modelId)
+      return new BaiduAdapter(apiKey, secretKey, modelId, maxContextTokens, temperature, maxTokens)
     }
     case 'aliyun':
-      return new AliyunAdapter(key, modelId)
+      return new AliyunAdapter(key, modelId, maxContextTokens, temperature, maxTokens)
     case 'deepseek':
-      return new DeepSeekAdapter(key, modelId)
+      return new DeepSeekAdapter(key, modelId, maxContextTokens, temperature, maxTokens)
     case 'custom':
-      return new CustomAdapter(key, modelId, baseUrl || 'http://localhost:11434/v1')
+      return new CustomAdapter(key, modelId, baseUrl || 'http://localhost:11434/v1', maxContextTokens, temperature, maxTokens)
     default:
       throw new Error(`未知模型提供商：${provider}`)
   }
@@ -74,7 +112,10 @@ export function getModelConfigRecord(id: number) {
   if (!config) throw new Error(`模型配置 #${id} 不存在`)
   return {
     ...config,
+    temperature: normalizeModelTemperature(config.temperature, config.provider),
+    maxTokens: normalizeModelMaxTokens(config.maxTokens, config.provider),
     maxConcurrency: normalizeModelConcurrency(config.maxConcurrency),
+    maxContextTokens: normalizeModelContextTokens(config.maxContextTokens),
   }
 }
 
@@ -85,7 +126,34 @@ export function getDefaultModelConfigRecord() {
   if (!config) throw new Error('未配置任何模型，请先在模型管理页添加配置')
   return {
     ...config,
+    temperature: normalizeModelTemperature(config.temperature, config.provider),
+    maxTokens: normalizeModelMaxTokens(config.maxTokens, config.provider),
     maxConcurrency: normalizeModelConcurrency(config.maxConcurrency),
+    maxContextTokens: normalizeModelContextTokens(config.maxContextTokens),
+  }
+}
+
+export function resolveModelRuntimeBudget(modelConfigId?: number | null): {
+  maxContextTokens: number | null
+  maxTokens: number | null
+} {
+  try {
+    const config = typeof modelConfigId === 'number'
+      ? getModelConfigRecord(modelConfigId)
+      : getDefaultModelConfigRecord()
+    const adapter = createAdapter(config)
+    const maxTokens = typeof config.maxTokens === 'number' && config.maxTokens > 0
+      ? Math.round(config.maxTokens)
+      : null
+    return {
+      maxContextTokens: adapter.maxContextTokens,
+      maxTokens,
+    }
+  } catch {
+    return {
+      maxContextTokens: null,
+      maxTokens: null,
+    }
   }
 }
 

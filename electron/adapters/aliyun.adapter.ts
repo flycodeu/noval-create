@@ -1,4 +1,5 @@
-import { BaseAdapter, ChatOptions, Message } from './base.adapter'
+import { BaseAdapter, ChatOptions, Message, normalizeContextWindowTokens } from './base.adapter'
+import { executeManagedRequest } from './request-support'
 import { consumeSseStream, safeParseSseJson } from './sse'
 
 export class AliyunAdapter extends BaseAdapter {
@@ -10,27 +11,23 @@ export class AliyunAdapter extends BaseAdapter {
   private apiKey: string
   private modelId: string
 
-  constructor(apiKey: string, modelId: string = 'qwen-max') {
+  constructor(
+    apiKey: string,
+    modelId: string = 'qwen-max',
+    maxContextTokens?: number | null,
+    defaultTemperature = 0.85,
+    defaultMaxTokens = 8192,
+  ) {
     super()
     this.apiKey = apiKey
     this.modelId = modelId
+    this.maxContextTokens = normalizeContextWindowTokens(maxContextTokens, 32000)
+    this.defaultTemperature = defaultTemperature
+    this.defaultMaxTokens = defaultMaxTokens
   }
 
   async chat(messages: Message[], opts?: ChatOptions): Promise<string> {
-    const response = await fetch(
-      'https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation',
-      {
-        method: 'POST',
-        headers: this.buildHeaders(),
-        body: JSON.stringify(this.buildBody(messages, opts)),
-        signal: opts?.signal,
-      }
-    )
-
-    if (!response.ok) {
-      const err = await response.text()
-      throw new Error(`通义千问 API 请求失败（${response.status}）：${err}`)
-    }
+    const response = await this.requestGeneration(this.buildBody(messages, opts), opts, false)
 
     const data = await response.json() as Record<string, any>
     if (data.code) {
@@ -41,26 +38,53 @@ export class AliyunAdapter extends BaseAdapter {
   }
 
   async stream(messages: Message[], opts?: ChatOptions): Promise<void> {
-    const response = await fetch(
-      'https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation',
-      {
-        method: 'POST',
-        headers: { ...this.buildHeaders(), 'X-DashScope-SSE': 'enable' },
-        body: JSON.stringify({ ...this.buildBody(messages, opts), stream: true }),
-        signal: opts?.signal,
-      }
-    )
-    if (!response.ok) {
-      const err = await response.text()
-      throw new Error(`通义千问 API 请求失败（${response.status}）：${err}`)
-    }
+    const response = await this.requestGeneration(this.buildBody(messages, opts, true), opts, true)
+    let previousContent = ''
 
     await consumeSseStream(response, async ({ data, event }) => {
       const parsed = safeParseSseJson<Record<string, any>>(this.provider, data, event)
-      const content = parsed?.output?.choices?.[0]?.message?.content || parsed?.output?.text
-      if (content) {
-        opts?.onStream?.(content)
+      const fullContent = parsed?.output?.choices?.[0]?.message?.content || parsed?.output?.text || ''
+      const delta = extractAccumulatedDelta(previousContent, fullContent)
+      if (delta) {
+        previousContent = fullContent
+        opts?.onStream?.(delta)
+      } else if (fullContent.length > previousContent.length) {
+        previousContent = fullContent
       }
+    })
+  }
+
+  private async requestGeneration(
+    body: Record<string, unknown>,
+    opts: ChatOptions | undefined,
+    stream: boolean,
+  ): Promise<Response> {
+    return executeManagedRequest({
+      provider: this.provider,
+      modelId: this.modelId,
+      signal: opts?.signal,
+      timeoutMs: opts?.timeoutMs,
+      requestRetryCount: opts?.requestRetryCount,
+      requestLabel: stream ? 'aliyun.generation.stream' : 'aliyun.generation.chat',
+    }, async (signal) => {
+      const response = await fetch(
+        'https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation',
+        {
+          method: 'POST',
+          headers: stream
+            ? { ...this.buildHeaders(), 'X-DashScope-SSE': 'enable' }
+            : this.buildHeaders(),
+          body: JSON.stringify(body),
+          signal,
+        },
+      )
+
+      if (!response.ok) {
+        const err = await response.text()
+        throw new Error(`通义千问 API 请求失败（${response.status}）：${err}`)
+      }
+
+      return response
     })
   }
 
@@ -71,7 +95,7 @@ export class AliyunAdapter extends BaseAdapter {
     }
   }
 
-  private buildBody(messages: Message[], opts?: ChatOptions) {
+  private buildBody(messages: Message[], opts?: ChatOptions, stream = false) {
     const systemMsg = opts?.systemPrompt || messages.find(m => m.role === 'system')?.content
     const userMessages = messages.filter(m => m.role !== 'system')
 
@@ -83,10 +107,21 @@ export class AliyunAdapter extends BaseAdapter {
           : userMessages,
       },
       parameters: {
-        temperature: opts?.temperature ?? 0.85,
-        max_tokens: opts?.maxTokens ?? 4096,
+        temperature: this.resolveTemperature(opts),
+        max_tokens: this.resolveMaxTokens(opts),
         result_format: 'message',
       },
+      stream,
     }
   }
+}
+
+function extractAccumulatedDelta(previousContent: string, fullContent: string): string {
+  if (!fullContent) return ''
+  if (!previousContent) return fullContent
+  if (fullContent === previousContent) return ''
+  if (fullContent.startsWith(previousContent)) {
+    return fullContent.slice(previousContent.length)
+  }
+  return fullContent
 }

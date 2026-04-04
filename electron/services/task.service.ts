@@ -3,7 +3,11 @@ import { eq } from 'drizzle-orm'
 import { getDb } from '../database/db'
 import { modelConfigs, tasks } from '../database/schema'
 import { BaseAdapter, Message, ChatOptions } from '../adapters/base.adapter'
-import { createAdapter, getDefaultModelConfigRecord, getModelConfigRecord } from './model.service'
+import {
+  createAdapter,
+  getDefaultModelConfigRecord,
+  getModelConfigRecord,
+} from './model.service'
 import { appendVariationMessage, buildVariationDigest } from './variation-control.service'
 
 export type TaskType =
@@ -81,6 +85,8 @@ interface TaskModelRuntime {
   configId: number
   provider: string
   maxConcurrency: number
+  temperature: number
+  maxTokens: number
   adapter: BaseAdapter
 }
 
@@ -106,9 +112,9 @@ const RATE_LIMIT_RETRY_LIMIT = 3
 const RATE_LIMIT_BASE_DELAY_MS = 1_500
 const RATE_LIMIT_MAX_DELAY_MS = 12_000
 
-function computeAttemptTemperature(attemptNumber: number): number {
-  if (attemptNumber <= 1) return 0.85
-  return Math.min(0.98, 0.85 + (attemptNumber - 1) * 0.05)
+function computeRetryTemperature(baseTemperature: number, attemptNumber: number): number {
+  if (attemptNumber <= 1) return baseTemperature
+  return Math.min(0.95, baseTemperature + (attemptNumber - 1) * 0.05)
 }
 
 function countPreviousAttempts(
@@ -156,6 +162,10 @@ function buildTaskModelRuntime(modelConfigId?: number | null): TaskModelRuntime 
     configId: config.id,
     provider: config.provider,
     maxConcurrency: Math.max(1, config.maxConcurrency || 2),
+    temperature: typeof config.temperature === 'number' ? config.temperature : 0.85,
+    maxTokens: typeof config.maxTokens === 'number' && config.maxTokens > 0
+      ? Math.round(config.maxTokens)
+      : 8192,
     adapter: createAdapter(config),
   }
 }
@@ -575,6 +585,8 @@ export async function runStreamTask(opts: RunTaskOptions): Promise<number> {
       stopHeartbeat = startTaskHeartbeat(taskId)
 
       await executeStreamWithRateLimitRetries(acquired.runtime.adapter, opts.messages, {
+        temperature: acquired.runtime.temperature,
+        maxTokens: acquired.runtime.maxTokens,
         ...opts.chatOpts,
         signal: controller.signal,
         onStream: (chunk) => {
@@ -645,6 +657,8 @@ export async function executeChatTask(taskId: number, opts: RunTaskOptions): Pro
     stopHeartbeat = startTaskHeartbeat(taskId)
 
     const result = await executeChatWithRateLimitRetries(acquired.runtime.adapter, opts.messages, {
+      temperature: acquired.runtime.temperature,
+      maxTokens: acquired.runtime.maxTokens,
       ...opts.chatOpts,
       signal: controller.signal,
     })
@@ -833,7 +847,8 @@ export async function retryTask(taskId: number, sender?: WebContents): Promise<n
     task.type,
   )
   const attemptNumber = previousAttempts + 1
-  const temperature = computeAttemptTemperature(attemptNumber)
+  const runtime = buildTaskModelRuntime(task.modelConfigId || undefined)
+  const temperature = computeRetryTemperature(runtime.temperature, attemptNumber)
   const retryMessages = appendVariationMessage(messages as Message[], {
     attemptNumber,
     rejectedDigests: task.outputText ? [buildVariationDigest(task.outputText)] : [],

@@ -5,8 +5,10 @@ import { chapterSegments, chapterVersions, chapters, novels, storyArcs } from '.
 import { parseAiJsonResult } from '../utils/json'
 import { aiCheckPrompt, chapterSummaryPrompt } from './prompts'
 import {
+  allocateChapterContext,
   buildChapterContext,
   buildStoryProfile,
+  collectChapterContextRawData,
   ContinuityState,
 } from './context.service'
 import {
@@ -885,6 +887,7 @@ interface ChapterRepairInput {
   reviewNotes: ChapterReviewNotes
   content: string
   lockedParagraphs: string[]
+  promptTier: ChapterComplexity
 }
 
 async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
@@ -892,7 +895,6 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
   reviewNotes: ChapterReviewNotes
 }> {
   const originalContent = input.content.trim()
-  const promptTier = classifyChapterComplexity(input.chapter)
   const findings = collectQualityGuardrailFindings(originalContent, input.profile.genre)
   if (findings.length === 0 || !shouldForceRepair(findings)) {
     return {
@@ -943,7 +945,7 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
           activeThreads: input.context.activeThreads,
           protagonistReference: input.profile.protagonistReference,
           protagonistRule: input.profile.protagonistRule,
-          promptTier,
+          promptTier: input.promptTier,
         }),
       }],
       modelConfigId: input.novel.modelConfigId || undefined,
@@ -1018,7 +1020,7 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
               activeThreads: input.context.activeThreads,
               protagonistReference: input.profile.protagonistReference,
               protagonistRule: input.profile.protagonistRule,
-              promptTier,
+              promptTier: input.promptTier,
             }),
           }],
           modelConfigId: input.novel.modelConfigId || undefined,
@@ -1249,7 +1251,7 @@ export function getChapter(id: number) {
   const chapter = db.select().from(chapters).where(eq(chapters.id, id)).all()[0] || null
   if (!chapter) return null
   ensureStoryStructure(chapter.novelId)
-  return db.select().from(chapters).where(eq(chapters.id, id)).all()[0] || null
+  return chapter
 }
 
 export function createChapter(novelId: number, data: Partial<{
@@ -1531,17 +1533,52 @@ export function batchRenumberChapters(ids: number[], startChapterNum: number) {
 type ChapterComplexity = 'simple' | 'standard' | 'key'
 type ChapterContextStage = 'scenePlan' | 'draft' | 'review' | 'rewrite'
 
-function classifyChapterComplexity(chapter: typeof chapters.$inferSelect): ChapterComplexity {
+interface ChapterComplexityInput {
+  chapter: typeof chapters.$inferSelect
+  currentArc: typeof storyArcs.$inferSelect | null
+  chapterRows: Array<typeof chapters.$inferSelect>
+  outlineMentionedCharacterCount: number
+  activeThreadPressureCount: number
+}
+
+function classifyChapterComplexity(input: ChapterComplexityInput): ChapterComplexity {
+  const { chapter, currentArc, chapterRows, outlineMentionedCharacterCount, activeThreadPressureCount } = input
   const outline = chapter.outline || ''
   const emotionTone = (chapter.emotionTone || '').toLowerCase()
+  const maxChapterNum = chapterRows.reduce((max, row) => Math.max(max, row.chapterNum), 0)
+  const isArcCheckpoint = Boolean(buildArcProgressCheckpoint(currentArc, chapter.chapterNum))
+  const isArcEnding = Boolean(currentArc && typeof currentArc.chapterEnd === 'number' && currentArc.chapterEnd === chapter.chapterNum)
+  const isFirstChapter = chapter.chapterNum === 1
+  const isLastChapter = maxChapterNum > 0 && chapter.chapterNum === maxChapterNum
 
-  // 关键章节：高潮、转折、结局
-  if (emotionTone.includes('高潮') || emotionTone.includes('climax') || emotionTone.includes('爆发') || emotionTone.includes('转折')) {
+  if (
+    emotionTone.includes('高潮') ||
+    emotionTone.includes('climax') ||
+    emotionTone.includes('爆发') ||
+    emotionTone.includes('转折') ||
+    emotionTone.includes('结局') ||
+    emotionTone.includes('决战') ||
+    isFirstChapter ||
+    isLastChapter ||
+    isArcCheckpoint ||
+    isArcEnding ||
+    outlineMentionedCharacterCount > 3 ||
+    activeThreadPressureCount >= 4
+  ) {
     return 'key'
   }
 
-  // 简单章节：过渡、日常、铺垫，且大纲较短
-  if ((emotionTone.includes('过渡') || emotionTone.includes('日常') || emotionTone.includes('平缓')) && outline.length < 200) {
+  if (
+    (emotionTone.includes('过渡') || emotionTone.includes('日常') || emotionTone.includes('平缓') || emotionTone.includes('铺垫')) &&
+    outline.length > 0 &&
+    outline.length < 200 &&
+    outlineMentionedCharacterCount <= 2 &&
+    activeThreadPressureCount <= 2 &&
+    !isFirstChapter &&
+    !isLastChapter &&
+    !isArcCheckpoint &&
+    !isArcEnding
+  ) {
     return 'simple'
   }
 
@@ -1578,21 +1615,26 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
   if (!chapter) throw new Error(`章节 ${chapterId} 不存在`)
 
-  const novel = db.select().from(novels).where(eq(novels.id, chapter.novelId)).all()[0]
-  if (!novel) throw new Error('小说不存在')
-
-  const profile = await buildStoryProfile(chapter.novelId)
+  const rawContext = await collectChapterContextRawData(chapter.novelId, chapter.chapterNum)
+  const novel = rawContext.novel
+  const profile = rawContext.profile
   const consistencyNotes = buildConsistencyPromptSummary(buildNovelConsistencyReport(chapter.novelId))
-  const complexity = classifyChapterComplexity(chapter)
-  const stageContext = async (promptProfile: ChapterContextStage) => buildChapterContext(chapter.novelId, chapter.chapterNum, {
+  const complexity = classifyChapterComplexity({
+    chapter,
+    currentArc: rawContext.currentArc,
+    chapterRows: rawContext.chapterRows,
+    outlineMentionedCharacterCount: rawContext.outlineMentionedCharacterCount,
+    activeThreadPressureCount: rawContext.activeThreadPressureCount,
+  })
+  const stageContext = (promptProfile: ChapterContextStage) => allocateChapterContext(rawContext, {
     promptProfile,
     chapterComplexity: complexity,
     totalBudget: resolveContextBudgetForStage(promptProfile, complexity, chapter.targetWords || 3000),
   })
-  const scenePlanContext = await stageContext('scenePlan')
-  const draftContext = await stageContext('draft')
-  const reviewContext = complexity === 'simple' ? draftContext : await stageContext('review')
-  const rewriteContext = await stageContext('rewrite')
+  const scenePlanContext = stageContext('scenePlan')
+  const draftContext = stageContext('draft')
+  const reviewContext = complexity === 'simple' ? draftContext : stageContext('review')
+  const rewriteContext = stageContext('rewrite')
   const buildWritingGuidance = (styleTemplate: string) => [
     styleTemplate ? `Writing style guide:\n${styleTemplate}` : '',
     consistencyNotes,
@@ -1602,9 +1644,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
   const previousStatus = chapter.status || 'outline'
   const fallbackScenePlan = buildFallbackScenePlan(chapter)
   const storyCore = buildStoryCore(profile, rewriteContext.storyCore || draftContext.storyCore || scenePlanContext.storyCore)
-  const currentArcRow = chapter.arcId
-    ? db.select().from(storyArcs).where(eq(storyArcs.id, chapter.arcId)).all()[0] || null
-    : null
+  const currentArcRow = rawContext.currentArc
   const latestArcProgressNote = getLatestArcProgressNote(chapter.novelId, currentArcRow, chapter.chapterNum)
 
   updateChapter(chapterId, {
@@ -1666,18 +1706,17 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
     })
     const scenePlanParse = parseAiJsonResult<unknown>(scenePlanResult, 'array', {
       channel: 'chapter',
-      message: '章节场景规划 JSON 解析失败，本次生成已中止。',
-      consoleSummary: `[chapter:warn] scene-plan-json chapter=${chapterId}`,
+      message: '章节场景规划 JSON 解析失败，已回退到后备场景计划继续生成。',
+      consoleSummary: `[chapter:warn] scene-plan-json-fallback chapter=${chapterId}`,
       context: {
         chapterId,
         novelId: chapter.novelId,
         stage: 'scene-plan',
       },
     })
-    if (!scenePlanParse.success) {
-      throw scenePlanParse.error || new Error('章节场景规划 JSON 解析失败')
-    }
-    const scenePlan = normalizeScenePlan(scenePlanParse.data, fallbackScenePlan)
+    const scenePlan = scenePlanParse.success
+      ? normalizeScenePlan(scenePlanParse.data, fallbackScenePlan)
+      : fallbackScenePlan
 
     updateChapter(chapterId, { scenePlanJson: JSON.stringify(scenePlan) })
     const scenePlanText = formatScenePlan(scenePlan)
@@ -1790,20 +1829,18 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
 
       const reviewParse = parseAiJsonResult<unknown>(reviewResult, 'object', {
         channel: 'chapter',
-        message: '章节审校 JSON 解析失败，本次生成已中止。',
-        consoleSummary: `[chapter:warn] review-json chapter=${chapterId}`,
+        message: '章节审校 JSON 解析失败，已回退到后备审校意见继续生成。',
+        consoleSummary: `[chapter:warn] review-json-fallback chapter=${chapterId}`,
         context: {
           chapterId,
           novelId: chapter.novelId,
           stage: 'review',
         },
       })
-      if (!reviewParse.success) {
-        throw reviewParse.error || new Error('章节审校 JSON 解析失败')
+      if (reviewParse.success) {
+        const normalizedNotes = normalizeReviewNotes(reviewParse.data)
+        reviewNotes = hasReviewNotes(normalizedNotes) ? normalizedNotes : reviewNotes
       }
-
-      const normalizedNotes = normalizeReviewNotes(reviewParse.data)
-      reviewNotes = hasReviewNotes(normalizedNotes) ? normalizedNotes : reviewNotes
     }
 
     reviewNotes = enhanceReviewNotesWithGuardrails(reviewNotes, draftContent, profile.genre)
@@ -1882,6 +1919,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
           reviewNotes: protectedOutput.reviewNotes,
           content: protectedOutput.content,
           lockedParagraphs: lockedParagraphContext.lockedParagraphs,
+          promptTier: complexity,
         })
 
         if (repaired.reviewNotes !== reviewNotes) {

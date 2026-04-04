@@ -407,6 +407,7 @@ export function runMigrations(sqlite: Database.Database) {
       base_url TEXT,
       temperature REAL DEFAULT 0.85,
       max_tokens INTEGER DEFAULT 4096,
+      max_context_tokens INTEGER,
       max_concurrency INTEGER DEFAULT 2,
       is_default INTEGER DEFAULT 0,
       extra_params_json TEXT,
@@ -623,6 +624,7 @@ export function runMigrations(sqlite: Database.Database) {
   ensureColumn(sqlite, 'tasks', 'current_child_task_id', 'INTEGER')
   ensureColumn(sqlite, 'tasks', 'control_json', 'TEXT')
   ensureColumn(sqlite, 'tasks', 'progress_json', 'TEXT')
+  ensureColumn(sqlite, 'model_configs', 'max_context_tokens', 'INTEGER')
   ensureColumn(sqlite, 'model_configs', 'max_concurrency', 'INTEGER DEFAULT 2')
 
   sqlite.exec(`
@@ -736,6 +738,33 @@ export function runMigrations(sqlite: Database.Database) {
     validateRequiredSchema(sqlite)
     validateHistorySchema(sqlite)
   })
+
+  runMigrationStep(sqlite, '0008_model_context_windows', () => {
+    ensureColumn(sqlite, 'model_configs', 'max_context_tokens', 'INTEGER')
+  })
+
+  runMigrationStep(sqlite, '0009_validate_model_runtime', () => {
+    validateRequiredSchema(sqlite)
+  })
+
+  runMigrationStep(sqlite, '0010_model_parameter_defaults', () => {
+    sqlite.exec(`
+      UPDATE model_configs
+      SET max_tokens = 8192
+      WHERE provider <> 'custom' AND COALESCE(max_tokens, 0) = 4096;
+
+      UPDATE model_configs
+      SET temperature = CASE
+        WHEN provider = 'openai' THEN 0.8
+        WHEN provider = 'anthropic' THEN 0.75
+        WHEN provider = 'aliyun' THEN 0.85
+        WHEN provider = 'baidu' THEN 0.8
+        WHEN provider = 'deepseek' THEN 0.7
+        ELSE temperature
+      END
+      WHERE provider <> 'custom' AND ABS(COALESCE(temperature, 0) - 0.85) < 0.000001;
+    `)
+  })
 }
 
 function ensureMigrationTable(sqlite: Database.Database) {
@@ -798,7 +827,7 @@ function validateRequiredSchema(sqlite: Database.Database) {
       tableName: 'story_arcs',
       columns: ['growth_ledger', 'cost_ledger', 'progress_percent', 'stalled_chapter_count', 'last_progress_chapter_num'],
     },
-    { tableName: 'model_configs', columns: ['max_concurrency'] },
+    { tableName: 'model_configs', columns: ['max_concurrency', 'max_context_tokens'] },
     {
       tableName: 'story_threads',
       columns: [

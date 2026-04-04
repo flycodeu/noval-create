@@ -1,4 +1,4 @@
-import { BaseAdapter, ChatOptions, Message } from './base.adapter'
+import { BaseAdapter, ChatOptions, Message, normalizeContextWindowTokens } from './base.adapter'
 import { executeManagedRequest } from './request-support'
 import { consumeSseStream, safeParseSseJson } from './sse'
 
@@ -12,11 +12,21 @@ export class OpenAIAdapter extends BaseAdapter {
   private baseUrl: string
   private modelId: string
 
-  constructor(apiKey: string, modelId: string = 'gpt-4o', baseUrl?: string) {
+  constructor(
+    apiKey: string,
+    modelId: string = 'gpt-4o',
+    baseUrl?: string,
+    maxContextTokens?: number | null,
+    defaultTemperature = 0.8,
+    defaultMaxTokens = 8192,
+  ) {
     super()
     this.apiKey = apiKey
     this.modelId = modelId
     this.baseUrl = baseUrl || 'https://api.openai.com/v1'
+    this.maxContextTokens = normalizeContextWindowTokens(maxContextTokens, 128000)
+    this.defaultTemperature = defaultTemperature
+    this.defaultMaxTokens = defaultMaxTokens
   }
 
   async chat(messages: Message[], opts?: ChatOptions): Promise<string> {
@@ -81,8 +91,8 @@ export class OpenAIAdapter extends BaseAdapter {
     return {
       model: this.modelId,
       messages: msgs,
-      temperature: opts?.temperature ?? 0.85,
-      max_tokens: opts?.maxTokens ?? 4096,
+      temperature: this.resolveTemperature(opts),
+      max_tokens: this.resolveMaxTokens(opts),
       stream,
       stop: opts?.stopSequences,
     }

@@ -370,6 +370,7 @@ export const modelConfigs = sqliteTable('model_configs', {
   baseUrl: text('base_url'),
   temperature: real('temperature').default(0.85),
   maxTokens: integer('max_tokens').default(4096),
+  maxContextTokens: integer('max_context_tokens'),
   maxConcurrency: integer('max_concurrency').default(2),
   isDefault: integer('is_default').default(0),
   extraParamsJson: text('extra_params_json'),

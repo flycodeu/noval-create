@@ -678,7 +678,10 @@ function registerIpcHandlers() {
     const db = getDb()
     return db.select().from(modelConfigs).all().map((config) => ({
       ...config,
+      temperature: modelService.normalizeModelTemperature(config.temperature, config.provider),
+      maxTokens: modelService.normalizeModelMaxTokens(config.maxTokens, config.provider),
       maxConcurrency: modelService.normalizeModelConcurrency(config.maxConcurrency),
+      maxContextTokens: modelService.normalizeModelContextTokens(config.maxContextTokens),
       apiKey: config.apiKey ? '已设置' : '',
     }))
   })
@@ -686,8 +689,12 @@ function registerIpcHandlers() {
   ipcMain.handle('model:create', (_, data) => {
     const db = getDb()
     const encryptedKey = data.apiKey ? encryptApiKey(data.apiKey) : null
+    const provider = typeof data.provider === 'string' ? data.provider : 'openai'
     const result = db.insert(modelConfigs).values({
       ...data,
+      temperature: modelService.normalizeModelTemperature(data.temperature, provider),
+      maxTokens: modelService.normalizeModelMaxTokens(data.maxTokens, provider),
+      maxContextTokens: modelService.normalizeModelContextTokens(data.maxContextTokens),
       maxConcurrency: modelService.normalizeModelConcurrency(data.maxConcurrency),
       apiKey: encryptedKey,
     }).run()
@@ -696,10 +703,23 @@ function registerIpcHandlers() {
 
   ipcMain.handle('model:update', (_, id, data) => {
     const db = getDb()
+    const existing = db.select().from(modelConfigs).where(eq(modelConfigs.id, id)).all()[0]
+    const provider = typeof data.provider === 'string'
+      ? data.provider
+      : (existing?.provider || 'openai')
     if (data.apiKey && data.apiKey !== '已设置') {
       data.apiKey = encryptApiKey(data.apiKey)
     } else if (data.apiKey === '已设置') {
       delete data.apiKey
+    }
+    if ('temperature' in data) {
+      data.temperature = modelService.normalizeModelTemperature(data.temperature, provider)
+    }
+    if ('maxTokens' in data) {
+      data.maxTokens = modelService.normalizeModelMaxTokens(data.maxTokens, provider)
+    }
+    if ('maxContextTokens' in data) {
+      data.maxContextTokens = modelService.normalizeModelContextTokens(data.maxContextTokens)
     }
     if ('maxConcurrency' in data) {
       data.maxConcurrency = modelService.normalizeModelConcurrency(data.maxConcurrency)

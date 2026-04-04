@@ -1,4 +1,4 @@
-import { BaseAdapter, ChatOptions, Message } from './base.adapter'
+import { BaseAdapter, ChatOptions, Message, normalizeContextWindowTokens } from './base.adapter'
 import { executeManagedRequest } from './request-support'
 import { consumeSseStream, safeParseSseJson } from './sse'
 
@@ -11,10 +11,19 @@ export class AnthropicAdapter extends BaseAdapter {
   private apiKey: string
   private modelId: string
 
-  constructor(apiKey: string, modelId: string = 'claude-opus-4-6') {
+  constructor(
+    apiKey: string,
+    modelId: string = 'claude-opus-4-6',
+    maxContextTokens?: number | null,
+    defaultTemperature = 0.75,
+    defaultMaxTokens = 8192,
+  ) {
     super()
     this.apiKey = apiKey
     this.modelId = modelId
+    this.maxContextTokens = normalizeContextWindowTokens(maxContextTokens, 200000)
+    this.defaultTemperature = defaultTemperature
+    this.defaultMaxTokens = defaultMaxTokens
   }
 
   async chat(messages: Message[], opts?: ChatOptions): Promise<string> {
@@ -75,8 +84,8 @@ export class AnthropicAdapter extends BaseAdapter {
 
     return {
       model: this.modelId,
-      max_tokens: opts?.maxTokens ?? 4096,
-      temperature: opts?.temperature ?? 0.85,
+      max_tokens: this.resolveMaxTokens(opts),
+      temperature: this.resolveTemperature(opts),
       system: opts?.systemPrompt || messages.find(m => m.role === 'system')?.content,
       messages: userMessages,
       stream,

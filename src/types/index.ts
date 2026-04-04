@@ -541,6 +541,7 @@ export interface ModelConfig {
   baseUrl?: string
   temperature: number
   maxTokens: number
+  maxContextTokens?: number | null
   maxConcurrency: number
   isDefault: number
   extraParamsJson?: string

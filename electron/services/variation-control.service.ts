@@ -71,17 +71,17 @@ export function buildVariationMessage({
   if (attemptNumber <= 1 && rejectedDigests.length === 0) return ''
 
   const lines = [
-    `This is attempt ${attemptNumber}.`,
+    `当前是第 ${attemptNumber} 次尝试。`,
     candidateIndex && totalCandidates
-      ? `Generate candidate ${candidateIndex} of ${totalCandidates}.`
-      : 'The new output must be meaningfully different from prior attempts.',
-    'Keep the same task facts, schema, and output format requirements, but change the angle, structure, emphasis, or expression.',
-    'Do not only swap a few words, lightly rename items, or restate the same information.',
-    'If the original task requires JSON, return JSON only. If it requires plain text, return plain text only.',
+      ? `请生成第 ${candidateIndex} / ${totalCandidates} 个候选结果。`
+      : '新的输出必须与之前的尝试有实质差异。',
+    '保持相同的任务事实、数据结构和输出格式要求，但必须改变切入角度、组织结构、重点安排或表达方式。',
+    '不要只替换几个词、轻微改名，或把同一批信息换个顺序重新说一遍。',
+    '如果原任务要求输出 JSON，就只返回 JSON；如果要求纯文本，就只返回纯文本。',
   ]
 
   if (rejectedDigests.length > 0) {
-    lines.push('Avoid these previously rejected directions because they were too similar or unusable:')
+    lines.push('避开以下已被拒绝的方向，它们要么过于相似，要么不可用：')
     rejectedDigests.slice(0, 3).forEach((digest, index) => {
       lines.push(`${index + 1}. ${summarizeRejectedDigest(digest)}`)
     })

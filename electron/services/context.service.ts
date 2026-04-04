@@ -16,6 +16,7 @@ import { buildWritingContractSummary } from '../../src/shared/writing-contract'
 import { buildCharacterRelationSummaryLine } from '../../src/shared/character-relations'
 import { buildStoryMemoryPromptSummary } from './story-memory.service'
 import { ensureStoryStructure } from './story-structure.service'
+import { resolveModelRuntimeBudget } from './model.service'
 
 /**
  * 改进的 token 估算：中文字符约 1 token/字，英文约 0.25 token/word (4 chars/token)，
@@ -152,6 +153,17 @@ export interface ChapterContext {
 }
 
 type ChapterContextLabel = keyof ChapterContext
+
+export interface ChapterContextRawData {
+  novel: typeof novels.$inferSelect
+  profile: StoryProfile
+  chapterRows: Array<typeof chapters.$inferSelect>
+  currentChapter?: typeof chapters.$inferSelect
+  currentArc: typeof storyArcs.$inferSelect | null
+  outlineMentionedCharacterCount: number
+  activeThreadPressureCount: number
+  contextParts: ChapterContext
+}
 
 interface ChapterWithContinuity {
   chapterNum: number
@@ -929,11 +941,11 @@ function buildItemSummary(novelId: number): string {
     .join('\n')
 }
 
-function buildActiveThreadsContext(
+function buildActiveThreadsContextData(
   novelId: number,
   chapterNum: number,
   currentArc?: typeof storyArcs.$inferSelect | null,
-): string {
+): { summary: string; pressureCount: number } {
   const db = getDb()
   const rows = db.select().from(storyThreads)
     .where(eq(storyThreads.novelId, novelId))
@@ -945,7 +957,9 @@ function buildActiveThreadsContext(
       return true
     })
 
-  if (rows.length === 0) return ''
+  if (rows.length === 0) {
+    return { summary: '', pressureCount: 0 }
+  }
 
   const isArcPriority = (thread: typeof storyThreads.$inferSelect) => {
     if (!currentArc || typeof currentArc.chapterStart !== 'number' || typeof currentArc.chapterEnd !== 'number') {
@@ -1011,8 +1025,9 @@ function buildActiveThreadsContext(
     })
     .slice(0, 10)
 
-  return ordered
-    .map((thread) => {
+  return {
+    summary: ordered
+      .map((thread) => {
       const tags: string[] = []
       if (isArcPriority(thread)) tags.push('[本弧优先]')
       if (urgent.includes(thread)) tags.push(`[即将回收第${thread.targetPayoffChapter}章]`)
@@ -1023,8 +1038,18 @@ function buildActiveThreadsContext(
       const payoff = thread.payoffCondition ? `回收条件：${thread.payoffCondition}` : ''
       const state = thread.currentState || thread.summary || thread.premise || ''
       return [`【${thread.threadType || '支线'}】${thread.title}${tags.join('')}`, state, payoff].filter(Boolean).join(' | ')
-    })
-    .join('\n')
+      })
+      .join('\n'),
+    pressureCount: urgent.length + needsReminder.length,
+  }
+}
+
+function buildActiveThreadsContext(
+  novelId: number,
+  chapterNum: number,
+  currentArc?: typeof storyArcs.$inferSelect | null,
+): string {
+  return buildActiveThreadsContextData(novelId, chapterNum, currentArc).summary
 }
 
 function buildStoryThreadsSummary(novelId: number): string {
@@ -1176,22 +1201,14 @@ export async function buildOutlineGenerationContext(arcId: number): Promise<Outl
   }
 }
 
-export async function buildChapterContext(
+export async function collectChapterContextRawData(
   novelId: number,
   chapterNum: number,
-  options: number | BuildChapterContextOptions = 10000,
-): Promise<ChapterContext> {
+): Promise<ChapterContextRawData> {
   const db = getDb()
   ensureStoryStructure(novelId)
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
   if (!novel) throw new Error('小说不存在')
-
-  const normalizedOptions: BuildChapterContextOptions = typeof options === 'number'
-    ? { totalBudget: options }
-    : options || {}
-  const totalBudget = normalizedOptions.totalBudget ?? 10000
-  const promptProfile = normalizedOptions.promptProfile || 'draft'
-  const chapterComplexity = normalizedOptions.chapterComplexity || 'standard'
 
   const profile = await buildStoryProfile(novelId)
   const chapterRows = db.select().from(chapters)
@@ -1216,7 +1233,7 @@ export async function buildChapterContext(
   )
   const longTermMemory = buildStoryMemoryPromptSummary(novelId, { chapterId: currentChapter?.id })
   const itemSummary = buildItemSummary(novelId)
-  const activeThreadsContext = buildActiveThreadsContext(novelId, chapterNum, currentArc)
+  const activeThreadsContext = buildActiveThreadsContextData(novelId, chapterNum, currentArc)
 
   // 从当前章节大纲和最近摘要中提取提及的角色名，用于动态召回
   const contextText = [currentChapter?.outline, currentArc?.arcSummary, currentArc?.arcGoal].filter(Boolean).join('\n')
@@ -1226,6 +1243,10 @@ export async function buildChapterContext(
       mentionedCharacterNames.add(character.fullName)
     }
   }
+  const outlineMentionedCharacterCount = allCharacters.filter((character) => {
+    if (!character.fullName) return false
+    return Boolean(currentChapter?.outline && currentChapter.outline.includes(character.fullName))
+  }).length
 
   const previousSummaries = recentChapters
     .filter((chapter) => chapter.summary)
@@ -1246,32 +1267,81 @@ export async function buildChapterContext(
       ].filter(Boolean).join('\n')
     : ''
 
-  const effectiveBudget = resolveChapterBudgetFloor(targetWords, totalBudget)
-  const promptFixedOverhead = resolvePromptFixedOverhead(promptProfile, chapterComplexity, targetWords)
-  const reservedForOutput = resolvePromptOutputReserve(promptProfile, chapterComplexity, targetWords)
-  const contextBudget = Math.max(3600, effectiveBudget - promptFixedOverhead - reservedForOutput)
-  const priorityMap = createStagePriorityMap(promptProfile, chapterComplexity, targetWords, chapterRows.length)
+  return {
+    novel,
+    profile,
+    chapterRows,
+    currentChapter,
+    currentArc,
+    outlineMentionedCharacterCount,
+    activeThreadPressureCount: activeThreadsContext.pressureCount,
+    contextParts: {
+      chapterGoal: extractChapterGoal(currentChapter?.outline),
+      storyCore: buildStoryCoreText(profile),
+      writingContractSummary: profile.writingContractSummary,
+      currentArc: formatArcContext(currentArc),
+      continuityNotes: collectContinuityNotes(continuityChapters),
+      lastChapterEnding,
+      openLoops: collectOpenLoops(continuityChapters),
+      timelineOpenThreads: timelineContext.timelineOpenThreads,
+      worldRules: profile.worldRulesSummary,
+      itemSummary,
+      longTermMemory,
+      characterStates: buildCharacterStates(allCharacters, recentChapters, mentionedCharacterNames),
+      continuitySummary: continuityChapters.map(formatContinuityEntry).join('\n'),
+      timelineSummary: timelineContext.timelineSummary,
+      relationSummary,
+      activeThreads: activeThreadsContext.summary,
+      styleTemplate: profile.styleTemplateSummary,
+      previousSummaries,
+    },
+  }
+}
 
-  const partDefinitions: Array<{ label: ChapterContextLabel; content: string }> = [
-    { label: 'chapterGoal', content: extractChapterGoal(currentChapter?.outline) },
-    { label: 'storyCore', content: buildStoryCoreText(profile) },
-    { label: 'writingContractSummary', content: profile.writingContractSummary },
-    { label: 'currentArc', content: formatArcContext(currentArc) },
-    { label: 'continuityNotes', content: collectContinuityNotes(continuityChapters) },
-    { label: 'lastChapterEnding', content: lastChapterEnding },
-    { label: 'openLoops', content: collectOpenLoops(continuityChapters) },
-    { label: 'timelineOpenThreads', content: timelineContext.timelineOpenThreads },
-    { label: 'worldRules', content: profile.worldRulesSummary },
-    { label: 'itemSummary', content: itemSummary },
-    { label: 'longTermMemory', content: longTermMemory },
-    { label: 'characterStates', content: buildCharacterStates(allCharacters, recentChapters, mentionedCharacterNames) },
-    { label: 'continuitySummary', content: continuityChapters.map(formatContinuityEntry).join('\n') },
-    { label: 'timelineSummary', content: timelineContext.timelineSummary },
-    { label: 'relationSummary', content: relationSummary },
-    { label: 'activeThreads', content: activeThreadsContext },
-    { label: 'styleTemplate', content: profile.styleTemplateSummary },
-    { label: 'previousSummaries', content: previousSummaries },
-  ]
+export function allocateChapterContext(
+  rawData: ChapterContextRawData,
+  options: number | BuildChapterContextOptions = 10000,
+): ChapterContext {
+  const normalizedOptions: BuildChapterContextOptions = typeof options === 'number'
+    ? { totalBudget: options }
+    : options || {}
+  const requestedBudget = normalizedOptions.totalBudget ?? 10000
+  const promptProfile = normalizedOptions.promptProfile || 'draft'
+  const chapterComplexity = normalizedOptions.chapterComplexity || 'standard'
+  const targetWords = Number(rawData.novel.targetWords || 0)
+  const modelRuntimeBudget = resolveModelRuntimeBudget(rawData.novel.modelConfigId)
+  const totalBudget = modelRuntimeBudget.maxContextTokens
+    ? Math.min(requestedBudget, modelRuntimeBudget.maxContextTokens)
+    : requestedBudget
+  const modelBudgetLimited = Boolean(
+    modelRuntimeBudget.maxContextTokens
+    && modelRuntimeBudget.maxContextTokens < requestedBudget,
+  )
+
+  const effectiveBudget = modelRuntimeBudget.maxContextTokens
+    ? Math.min(modelRuntimeBudget.maxContextTokens, resolveChapterBudgetFloor(targetWords, totalBudget))
+    : resolveChapterBudgetFloor(targetWords, totalBudget)
+  const promptFixedOverhead = resolvePromptFixedOverhead(promptProfile, chapterComplexity, targetWords)
+  const requestedOutputReserve = resolvePromptOutputReserve(promptProfile, chapterComplexity, targetWords)
+  const configuredOutputLimit = modelRuntimeBudget.maxTokens && modelRuntimeBudget.maxTokens > 0
+    ? modelRuntimeBudget.maxTokens
+    : requestedOutputReserve
+  const reservedForOutput = modelBudgetLimited
+    ? Math.max(0, Math.min(
+      Math.max(requestedOutputReserve, configuredOutputLimit),
+      Math.max(0, effectiveBudget - promptFixedOverhead),
+    ))
+    : requestedOutputReserve
+  const remainingContextBudget = effectiveBudget - promptFixedOverhead - reservedForOutput
+  const contextBudget = modelBudgetLimited
+    ? Math.max(0, remainingContextBudget)
+    : Math.max(3600, remainingContextBudget)
+  const priorityMap = createStagePriorityMap(promptProfile, chapterComplexity, targetWords, rawData.chapterRows.length)
+
+  const partDefinitions = (Object.keys(rawData.contextParts) as ChapterContextLabel[]).map((label) => ({
+    label,
+    content: rawData.contextParts[label],
+  }))
 
   const parts = partDefinitions.reduce<ContextPart[]>((result, part) => {
     const priority = priorityMap[part.label]
@@ -1303,7 +1373,16 @@ export async function buildChapterContext(
     timelineOpenThreads: allocated.timelineOpenThreads || '',
     longTermMemory: allocated.longTermMemory || '',
     activeThreads: allocated.activeThreads || '',
-    writingContractSummary: allocated.writingContractSummary || profile.writingContractSummary || '',
-    relationSummary: allocated.relationSummary || relationSummary || '',
+    writingContractSummary: allocated.writingContractSummary || rawData.profile.writingContractSummary || '',
+    relationSummary: allocated.relationSummary || rawData.contextParts.relationSummary || '',
   }
+}
+
+export async function buildChapterContext(
+  novelId: number,
+  chapterNum: number,
+  options: number | BuildChapterContextOptions = 10000,
+): Promise<ChapterContext> {
+  const rawData = await collectChapterContextRawData(novelId, chapterNum)
+  return allocateChapterContext(rawData, options)
 }
