@@ -1,15 +1,16 @@
-﻿import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Collapse, Empty, Select, Space, Tag, message, type CollapseProps } from 'antd'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Alert, Button, Collapse, Empty, Modal, Pagination, Select, Tag, message, type CollapseProps } from 'antd'
 import {
   CheckCircleOutlined,
   ClockCircleOutlined,
   CloseCircleOutlined,
+  DeleteOutlined,
   LoadingOutlined,
   ReloadOutlined,
   StopOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
-import { Task } from '../../types'
+import { PagedResult, Task, TaskQueryInput, TaskStats } from '../../types'
 import { useTaskStore } from '../../stores/task.store'
 import { buildTaskRecoveryAction } from '../Novel/shared/workspace-navigation'
 import {
@@ -17,6 +18,27 @@ import {
   WorkspacePage,
   WorkspacePanel,
 } from '../Novel/components/WorkspaceShell'
+
+const DEFAULT_PAGE_SIZE = 10
+const PAGE_SIZE_OPTIONS = ['10', '20', '50']
+const EMPTY_TASK_PAGE: PagedResult<Task> = {
+  items: [],
+  page: 1,
+  pageSize: DEFAULT_PAGE_SIZE,
+  total: 0,
+  hasMore: false,
+}
+const EMPTY_TASK_STATS: TaskStats = {
+  total: 0,
+  pendingCount: 0,
+  runningCount: 0,
+  cancelRequestedCount: 0,
+  pausedCount: 0,
+  successCount: 0,
+  failedCount: 0,
+  cancelledCount: 0,
+}
+const ENDED_TASK_STATUSES = new Set<Task['status']>(['success', 'failed', 'cancelled'])
 
 const STATUS_LABELS: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
   pending: { label: '等待中', color: '#5c6378', icon: <ClockCircleOutlined /> },
@@ -63,6 +85,7 @@ const RUNNER_LABELS: Record<string, string> = {
   stream: '流式执行',
   workflow: '后台流程',
 }
+
 const RESUMABLE_WORKFLOW_TYPES = new Set(['map_auto_generate', 'world_rules_auto_generate'])
 
 function formatTaskPayload(raw?: string): string {
@@ -120,71 +143,117 @@ function getTaskSummary(task: Task, stream?: { content: string }): string {
 
 export default function TaskCenter() {
   const navigate = useNavigate()
-  const [tasks, setTasks] = useState<Task[]>([])
+  const loadVersionRef = useRef(0)
+  const [pageData, setPageData] = useState<PagedResult<Task>>(EMPTY_TASK_PAGE)
+  const [stats, setStats] = useState<TaskStats>(EMPTY_TASK_STATS)
   const [loading, setLoading] = useState(true)
-  const [statusFilter, setStatusFilter] = useState('all')
-  const [typeFilter, setTypeFilter] = useState('all')
+  const [clearingHistory, setClearingHistory] = useState(false)
+  const [statusFilter, setStatusFilter] = useState<'all' | Task['status']>('all')
+  const [typeFilter, setTypeFilter] = useState<'all' | string>('all')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [selectedId, setSelectedId] = useState<number | null>(null)
-  const { streams } = useTaskStore()
+  const { streams, clearStream } = useTaskStore()
 
-  const loadTasks = useCallback(async () => {
-    const list = await window.electron.task.list()
-    setTasks(list)
-    setLoading(false)
-  }, [])
+  const buildTaskQueryInput = useCallback((overrides: Partial<TaskQueryInput> = {}): TaskQueryInput => ({
+    novelId: overrides.novelId,
+    page: overrides.page ?? page,
+    pageSize: overrides.pageSize ?? pageSize,
+    status: overrides.status ?? (statusFilter === 'all' ? undefined : statusFilter),
+    type: overrides.type ?? (typeFilter === 'all' ? undefined : typeFilter),
+  }), [page, pageSize, statusFilter, typeFilter])
+
+  const fetchTaskData = useCallback(
+    (overrides: Partial<TaskQueryInput> = {}) => Promise.all([
+      window.electron.task.query(buildTaskQueryInput(overrides)),
+      window.electron.task.getStats(overrides.novelId),
+    ]),
+    [buildTaskQueryInput],
+  )
+
+  const loadTasks = useCallback(async (options: { silent?: boolean; overrides?: Partial<TaskQueryInput> } = {}) => {
+    const requestId = ++loadVersionRef.current
+    if (!options.silent) setLoading(true)
+
+    try {
+      const [result, nextStats] = await fetchTaskData(options.overrides)
+      if (requestId !== loadVersionRef.current) return null
+      setPageData(result)
+      setStats(nextStats)
+      return result
+    } catch (error) {
+      if (requestId !== loadVersionRef.current) return null
+      if (!options.silent) {
+        message.error(error instanceof Error ? error.message : '任务中心加载失败，请稍后再试。')
+      }
+      return null
+    } finally {
+      if (requestId === loadVersionRef.current && !options.silent) {
+        setLoading(false)
+      }
+    }
+  }, [fetchTaskData])
 
   useEffect(() => {
     void loadTasks()
+  }, [loadTasks])
+
+  useEffect(() => {
     const timer = setInterval(() => {
-      void loadTasks()
+      void loadTasks({ silent: true })
     }, 5000)
     return () => clearInterval(timer)
   }, [loadTasks])
 
-  const filteredTasks = useMemo(
-    () => tasks
-      .filter((task) => {
-        if (statusFilter !== 'all' && task.status !== statusFilter) return false
-        if (typeFilter !== 'all' && task.type !== typeFilter) return false
-        return true
-      })
-      .sort((left, right) => {
-        const rightTime = new Date(right.updatedAt || right.createdAt).getTime()
-        const leftTime = new Date(left.updatedAt || left.createdAt).getTime()
-        return rightTime - leftTime
-      }),
-    [statusFilter, tasks, typeFilter],
-  )
-
   useEffect(() => {
-    if (filteredTasks.length === 0) {
+    if (pageData.items.length === 0) {
       setSelectedId(null)
       return
     }
 
-    if (!selectedId || !filteredTasks.some((task) => task.id === selectedId)) {
-      setSelectedId(filteredTasks[0].id)
+    if (!selectedId || !pageData.items.some((task) => task.id === selectedId)) {
+      setSelectedId(pageData.items[0].id)
     }
-  }, [filteredTasks, selectedId])
+  }, [pageData.items, selectedId])
 
   const selectedTask = useMemo(
-    () => filteredTasks.find((task) => task.id === selectedId) || null,
-    [filteredTasks, selectedId],
+    () => pageData.items.find((task) => task.id === selectedId) || null,
+    [pageData.items, selectedId],
   )
   const selectedRecoveryAction = useMemo(
     () => (selectedTask ? buildTaskRecoveryAction(selectedTask) : null),
     [selectedTask],
   )
+  const selectedStream = selectedTask ? streams[selectedTask.id] : undefined
+
+  const handleStatusFilterChange = (value: 'all' | Task['status']) => {
+    setStatusFilter(value)
+    setPage(1)
+  }
+
+  const handleTypeFilterChange = (value: string) => {
+    setTypeFilter(value)
+    setPage(1)
+  }
+
+  const handlePageChange = (nextPage: number, nextPageSize: number) => {
+    if (nextPageSize !== pageSize) {
+      setPageSize(nextPageSize)
+      setPage(1)
+      return
+    }
+    setPage(nextPage)
+  }
 
   const handleCancel = async (taskId: number) => {
     await window.electron.task.cancel(taskId)
-    await loadTasks()
+    await loadTasks({ silent: true })
   }
 
   const handleRetry = async (taskId: number) => {
     try {
       await window.electron.task.retry(taskId)
-      await loadTasks()
+      await loadTasks({ silent: true })
     } catch {
       // Keep the page quiet and let the detail panel explain retry availability.
     }
@@ -194,11 +263,55 @@ export default function TaskCenter() {
     try {
       await window.electron.workflow.resume(taskId)
       message.success('后台流程已继续执行。')
-      await loadTasks()
+      await loadTasks({ silent: true })
     } catch (error) {
       message.error(error instanceof Error ? error.message : '继续任务失败，请稍后再试。')
     }
   }
+
+  const handleClearHistory = useCallback(() => {
+    Modal.confirm({
+      title: '清空历史任务记录？',
+      content: '只会清空当前筛选范围内已结束的任务记录，不影响运行中、等待中、停止中或已暂停的任务。',
+      okText: '确认清空',
+      cancelText: '取消',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        setClearingHistory(true)
+        try {
+          const result = await window.electron.task.clearHistory({
+            status: statusFilter === 'all' ? undefined : statusFilter,
+            type: typeFilter === 'all' ? undefined : typeFilter,
+          })
+
+          result.deletedTaskIds.forEach((taskId) => clearStream(taskId))
+          if (selectedId && result.deletedTaskIds.includes(selectedId)) {
+            setSelectedId(null)
+          }
+
+          const [refreshedPage, nextStats] = await fetchTaskData()
+          const lastPage = Math.max(1, Math.ceil(refreshedPage.total / refreshedPage.pageSize))
+
+          setStats(nextStats)
+          if (page > lastPage) {
+            setPage(lastPage)
+          } else {
+            setPageData(refreshedPage)
+          }
+
+          message.success(
+            result.deletedCount > 0
+              ? `已清空 ${result.deletedCount} 条历史任务。`
+              : '当前筛选下暂无可清理的历史任务。',
+          )
+        } catch (error) {
+          message.error(error instanceof Error ? error.message : '清空历史任务失败，请稍后再试。')
+        } finally {
+          setClearingHistory(false)
+        }
+      },
+    })
+  }, [clearStream, fetchTaskData, page, selectedId, statusFilter, typeFilter])
 
   const handleRecoverDraft = useCallback((path?: string) => {
     if (!path) return
@@ -206,11 +319,11 @@ export default function TaskCenter() {
     message.success('已打开对应工作台，草稿会自动恢复。')
   }, [navigate])
 
-  const runningCount = tasks.filter((task) => task.status === 'running' || task.status === 'cancel_requested').length
-  const failedCount = tasks.filter((task) => task.status === 'failed').length
-  const successCount = tasks.filter((task) => task.status === 'success').length
-  const pendingCount = tasks.filter((task) => task.status === 'pending').length
-  const selectedStream = selectedTask ? streams[selectedTask.id] : undefined
+  const runningCount = stats.runningCount + stats.cancelRequestedCount
+  const pendingCount = stats.pendingCount
+  const successCount = stats.successCount
+  const failedCount = stats.failedCount
+  const canClearHistory = pageData.total > 0 && (statusFilter === 'all' || ENDED_TASK_STATUSES.has(statusFilter))
 
   const detailSections = useMemo<CollapseProps['items']>(() => {
     const items: NonNullable<CollapseProps['items']> = []
@@ -266,16 +379,27 @@ export default function TaskCenter() {
       className="task-center-page"
       eyebrow="任务运行台"
       title="任务中心"
-      description="把 AI 生成、重试、取消、报错和流式输出放在同一套工作台里，便于判断流程卡在哪一步。"
+      description="把 AI 生成、重试、取消、报错和流式输出放在同一套工作台里，支持按每页 10 / 20 / 50 条查看任务历史。"
       actions={(
-        <Space wrap>
-          <Button icon={<ReloadOutlined />} onClick={() => void loadTasks()}>刷新</Button>
-          <div className="novel-pill">当前筛选 {filteredTasks.length} 条任务</div>
-        </Space>
+        <div className="task-center-toolbar">
+          <Button icon={<ReloadOutlined />} loading={loading && !clearingHistory} onClick={() => void loadTasks()}>
+            刷新
+          </Button>
+          <Button
+            danger
+            icon={<DeleteOutlined />}
+            loading={clearingHistory}
+            disabled={!canClearHistory}
+            onClick={handleClearHistory}
+          >
+            清空历史
+          </Button>
+          <div className="novel-pill">{`当前筛选共 ${pageData.total} 条，每页 ${pageData.pageSize} 条`}</div>
+        </div>
       )}
       metrics={(
         <>
-          <WorkspaceMetric label="运行中" value={runningCount} tone="cool" hint="当前仍在执行的 AI 任务" />
+          <WorkspaceMetric label="运行中" value={runningCount} tone="cool" hint="当前仍在执行或收尾中的 AI 任务" />
           <WorkspaceMetric label="等待中" value={pendingCount} hint="已入队但尚未开始的任务" />
           <WorkspaceMetric label="已成功" value={successCount} tone="warm" hint="最近已经完成的任务" />
           <WorkspaceMetric label="已失败" value={failedCount} hint="需要重试或回查提示词的任务" />
@@ -285,13 +409,13 @@ export default function TaskCenter() {
       <div className="novel-split novel-split--sidebar">
         <WorkspacePanel
           title="任务列表"
-          description="左侧按状态和类型筛选，右侧看完整输出、请求上下文和错误信息。"
+          description="左侧按状态和类型筛选并分页查看，右侧看完整输出、请求上下文和错误信息。"
           extra={(
             <div className="novel-filter-bar">
               <div className="novel-filter-bar__row">
                 <Select
                   value={statusFilter}
-                  onChange={setStatusFilter}
+                  onChange={handleStatusFilterChange}
                   options={[
                     { value: 'all', label: '全部状态' },
                     { value: 'running', label: '运行中' },
@@ -305,7 +429,7 @@ export default function TaskCenter() {
                 />
                 <Select
                   value={typeFilter}
-                  onChange={setTypeFilter}
+                  onChange={handleTypeFilterChange}
                   options={[
                     { value: 'all', label: '全部类型' },
                     ...Object.entries(TYPE_LABELS).map(([value, label]) => ({ value, label })),
@@ -313,50 +437,63 @@ export default function TaskCenter() {
                 />
               </div>
               <div className="novel-filter-bar__summary">
-                同类任务可以集中查看失败原因和重试结果，不再被时间线打散。
+                同类任务可以集中查看失败原因和重试结果；当前按每页 10 / 20 / 50 条分页查看。
               </div>
             </div>
           )}
         >
           {loading ? (
             <div className="novel-empty"><LoadingOutlined spin /></div>
-          ) : filteredTasks.length === 0 ? (
+          ) : pageData.items.length === 0 ? (
             <Empty description="当前筛选下暂无任务记录" style={{ paddingTop: 40 }} />
           ) : (
-            <div className="task-center-list">
-              {filteredTasks.map((task) => {
-                const status = STATUS_LABELS[task.status] || STATUS_LABELS.pending
-                const stream = streams[task.id]
-                return (
-                  <button
-                    key={task.id}
-                    type="button"
-                    className={`novel-list-card ${selectedId === task.id ? 'novel-list-card--active' : ''}`}
-                    onClick={() => setSelectedId(task.id)}
-                    style={{ cursor: 'pointer', textAlign: 'left' }}
-                  >
-                    <div className="task-center-card">
-                      <div className="task-center-card__header">
-                        <div>
-                          <div className="task-center-card__title">{getTaskTypeLabel(task.type)}</div>
-                          <div className="task-center-card__summary">{new Date(task.createdAt).toLocaleString('zh-CN')}</div>
+            <>
+              <div className="task-center-list">
+                {pageData.items.map((task) => {
+                  const status = STATUS_LABELS[task.status] || STATUS_LABELS.pending
+                  const stream = streams[task.id]
+                  return (
+                    <button
+                      key={task.id}
+                      type="button"
+                      className={`novel-list-card ${selectedId === task.id ? 'novel-list-card--active' : ''}`}
+                      onClick={() => setSelectedId(task.id)}
+                      style={{ cursor: 'pointer', textAlign: 'left' }}
+                    >
+                      <div className="task-center-card">
+                        <div className="task-center-card__header">
+                          <div>
+                            <div className="task-center-card__title">{getTaskTypeLabel(task.type)}</div>
+                            <div className="task-center-card__summary">{new Date(task.createdAt).toLocaleString('zh-CN')}</div>
+                          </div>
+                          <div className="task-center-card__meta">
+                            <Tag style={{ background: 'transparent', border: `1px solid ${status.color}`, color: status.color }}>
+                              {status.label}
+                            </Tag>
+                            <Tag>{getTaskRunnerLabel(task)}</Tag>
+                            {isTaskRetryable(task) ? <Tag color="processing">可重试</Tag> : null}
+                            {task.durationMs ? <Tag>{`${(task.durationMs / 1000).toFixed(1)}s`}</Tag> : null}
+                            {task.tokensUsed ? <Tag>{`${task.tokensUsed} tokens`}</Tag> : null}
+                          </div>
                         </div>
-                        <div className="task-center-card__meta">
-                          <Tag style={{ background: 'transparent', border: `1px solid ${status.color}`, color: status.color }}>
-                            {status.label}
-                          </Tag>
-                          <Tag>{getTaskRunnerLabel(task)}</Tag>
-                          {isTaskRetryable(task) ? <Tag color="processing">可重试</Tag> : null}
-                          {task.durationMs ? <Tag>{`${(task.durationMs / 1000).toFixed(1)}s`}</Tag> : null}
-                          {task.tokensUsed ? <Tag>{`${task.tokensUsed} tokens`}</Tag> : null}
-                        </div>
+                        <div className="task-center-card__summary">{getTaskSummary(task, stream)}</div>
                       </div>
-                      <div className="task-center-card__summary">{getTaskSummary(task, stream)}</div>
-                    </div>
-                  </button>
-                )
-              })}
-            </div>
+                    </button>
+                  )
+                })}
+              </div>
+
+              <Pagination
+                className="task-center-pagination"
+                current={pageData.page}
+                pageSize={pageData.pageSize}
+                total={pageData.total}
+                showSizeChanger
+                pageSizeOptions={PAGE_SIZE_OPTIONS}
+                onChange={handlePageChange}
+                showTotal={(total, range) => `${range[0]}-${range[1]} / 共 ${total} 条`}
+              />
+            </>
           )}
         </WorkspacePanel>
 
@@ -466,4 +603,3 @@ export default function TaskCenter() {
     </WorkspacePage>
   )
 }
-

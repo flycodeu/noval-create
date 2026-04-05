@@ -1,5 +1,5 @@
 ﻿import { WebContents } from 'electron'
-import { eq } from 'drizzle-orm'
+import { and, desc, eq, inArray } from 'drizzle-orm'
 import { getDb } from '../database/db'
 import { modelConfigs, tasks } from '../database/schema'
 import { BaseAdapter, Message, ChatOptions } from '../adapters/base.adapter'
@@ -58,6 +58,36 @@ export interface TaskControlState {
   contentAttemptNumber?: number
 }
 
+interface TaskQueryFilters {
+  novelId?: number
+  status?: TaskStatus
+  type?: string
+  page?: number
+  pageSize?: number
+}
+
+interface TaskHistoryClearFilters {
+  novelId?: number
+  status?: TaskStatus
+  type?: string
+}
+
+export interface TaskStats {
+  total: number
+  pendingCount: number
+  runningCount: number
+  cancelRequestedCount: number
+  pausedCount: number
+  successCount: number
+  failedCount: number
+  cancelledCount: number
+}
+
+export interface ClearTaskHistoryResult {
+  deletedCount: number
+  deletedTaskIds: number[]
+}
+
 interface CreateTaskOptions {
   type: TaskType
   novelId?: number
@@ -111,6 +141,58 @@ const TASK_HEARTBEAT_INTERVAL_MS = 15_000
 const RATE_LIMIT_RETRY_LIMIT = 3
 const RATE_LIMIT_BASE_DELAY_MS = 1_500
 const RATE_LIMIT_MAX_DELAY_MS = 12_000
+const ENDED_TASK_STATUSES: TaskStatus[] = ['success', 'failed', 'cancelled']
+
+function normalizePaging(page?: number, pageSize?: number, fallbackPageSize = 10) {
+  const nextPageSize = Math.max(1, Math.min(pageSize || fallbackPageSize, 200))
+  const nextPage = Math.max(1, page || 1)
+  const offset = (nextPage - 1) * nextPageSize
+  return { page: nextPage, pageSize: nextPageSize, offset }
+}
+
+function buildPagedResult<T>(items: T[], page: number, pageSize: number, total: number) {
+  return {
+    items,
+    page,
+    pageSize,
+    total,
+    hasMore: page * pageSize < total,
+  }
+}
+
+function buildTaskWhereClause(filters: Pick<TaskQueryFilters, 'novelId' | 'status' | 'type'>) {
+  const whereClauses = []
+
+  if (typeof filters.novelId === 'number') {
+    whereClauses.push(eq(tasks.novelId, filters.novelId))
+  }
+  if (filters.status) {
+    whereClauses.push(eq(tasks.status, filters.status))
+  }
+  if (typeof filters.type === 'string' && filters.type.trim()) {
+    whereClauses.push(eq(tasks.type, filters.type.trim()))
+  }
+
+  if (whereClauses.length === 0) return undefined
+  if (whereClauses.length === 1) return whereClauses[0]
+  return and(...whereClauses)
+}
+
+function listTaskRows(filters: Pick<TaskQueryFilters, 'novelId' | 'status' | 'type'> = {}) {
+  const db = getDb()
+  const whereClause = buildTaskWhereClause(filters)
+
+  if (whereClause) {
+    return db.select().from(tasks)
+      .where(whereClause)
+      .orderBy(desc(tasks.updatedAt), desc(tasks.createdAt), desc(tasks.id))
+      .all()
+  }
+
+  return db.select().from(tasks)
+    .orderBy(desc(tasks.updatedAt), desc(tasks.createdAt), desc(tasks.id))
+    .all()
+}
 
 function computeRetryTemperature(baseTemperature: number, attemptNumber: number): number {
   if (attemptNumber <= 1) return baseTemperature
@@ -484,6 +566,66 @@ export async function createTask(opts: CreateTaskOptions): Promise<number> {
   }).run()
 
   return Number(result.lastInsertRowid)
+}
+
+export function listTasks(novelId?: number) {
+  return listTaskRows({ novelId })
+}
+
+export function queryTasks(filters: TaskQueryFilters) {
+  const paging = normalizePaging(filters.page, filters.pageSize, 10)
+  const items = listTaskRows(filters)
+
+  return buildPagedResult(
+    items.slice(paging.offset, paging.offset + paging.pageSize),
+    paging.page,
+    paging.pageSize,
+    items.length,
+  )
+}
+
+export function getTaskStats(novelId?: number): TaskStats {
+  return listTaskRows({ novelId }).reduce<TaskStats>((result, task) => {
+    result.total += 1
+    if (task.status === 'pending') result.pendingCount += 1
+    if (task.status === 'running') result.runningCount += 1
+    if (task.status === 'cancel_requested') result.cancelRequestedCount += 1
+    if (task.status === 'paused') result.pausedCount += 1
+    if (task.status === 'success') result.successCount += 1
+    if (task.status === 'failed') result.failedCount += 1
+    if (task.status === 'cancelled') result.cancelledCount += 1
+    return result
+  }, {
+    total: 0,
+    pendingCount: 0,
+    runningCount: 0,
+    cancelRequestedCount: 0,
+    pausedCount: 0,
+    successCount: 0,
+    failedCount: 0,
+    cancelledCount: 0,
+  })
+}
+
+export function clearTaskHistory(filters: TaskHistoryClearFilters = {}): ClearTaskHistoryResult {
+  const rows = listTaskRows(filters)
+    .filter((task) => ENDED_TASK_STATUSES.includes(task.status as TaskStatus))
+  const deletedTaskIds = rows.map((task) => task.id)
+
+  if (deletedTaskIds.length === 0) {
+    return {
+      deletedCount: 0,
+      deletedTaskIds: [],
+    }
+  }
+
+  const db = getDb()
+  db.delete(tasks).where(inArray(tasks.id, deletedTaskIds)).run()
+
+  return {
+    deletedCount: deletedTaskIds.length,
+    deletedTaskIds,
+  }
 }
 
 export function getTaskRecord(taskId: number) {

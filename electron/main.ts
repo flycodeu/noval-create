@@ -815,13 +815,10 @@ function registerIpcHandlers() {
   ipcMain.handle('prompt:save', (_, key, content) => promptOverrideService.savePromptOverride(key, content))
   ipcMain.handle('prompt:delete', (_, key) => promptOverrideService.deletePromptOverride(key))
 
-  ipcMain.handle('task:list', (_, novelId) => {
-    const db = getDb()
-    if (novelId) {
-      return db.select().from(tasks).where(eq(tasks.novelId, novelId)).orderBy(desc(tasks.createdAt)).all()
-    }
-    return db.select().from(tasks).orderBy(desc(tasks.createdAt)).all()
-  })
+  ipcMain.handle('task:list', (_, novelId) => taskService.listTasks(novelId))
+  ipcMain.handle('task:query', (_, filters) => taskService.queryTasks(filters || {}))
+  ipcMain.handle('task:getStats', (_, novelId) => taskService.getTaskStats(novelId))
+  ipcMain.handle('task:clearHistory', (_, filters) => taskService.clearTaskHistory(filters || {}))
 
   ipcMain.handle('task:get', (_, id) => {
     const db = getDb()

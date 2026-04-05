@@ -229,6 +229,9 @@ const api = {
   // Task APIs
   task: {
     list: (novelId?: number) => ipcRenderer.invoke('task:list', novelId),
+    query: (filters: unknown) => ipcRenderer.invoke('task:query', filters),
+    getStats: (novelId?: number) => ipcRenderer.invoke('task:getStats', novelId),
+    clearHistory: (filters?: unknown) => ipcRenderer.invoke('task:clearHistory', filters),
     get: (id: number) => ipcRenderer.invoke('task:get', id),
     cancel: (id: number) => ipcRenderer.invoke('task:cancel', id),
     retry: (id: number) => ipcRenderer.invoke('task:retry', id),

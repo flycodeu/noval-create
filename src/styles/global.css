@@ -4013,6 +4013,18 @@ html[data-theme="dark"] .ant-card-actions > li {
   gap: 14px;
 }
 
+.task-center-pagination {
+  margin-top: 18px;
+  justify-self: end;
+}
+
+.task-center-page .ant-pagination .ant-pagination-item,
+.task-center-page .ant-pagination .ant-pagination-prev,
+.task-center-page .ant-pagination .ant-pagination-next,
+.task-center-page .ant-pagination .ant-pagination-options {
+  border-radius: 12px;
+}
+
 .task-center-card {
   display: grid;
   gap: 12px;
@@ -4104,6 +4116,10 @@ html[data-theme="dark"] .ant-card-actions > li {
   .novel-map-blueprint,
   .task-center-toolbar {
     grid-template-columns: 1fr;
+  }
+
+  .task-center-pagination {
+    justify-self: stretch;
   }
 
   .novel-map-tree__header,

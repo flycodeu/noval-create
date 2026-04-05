@@ -582,6 +582,36 @@ export interface Task {
   updatedAt: string
 }
 
+export interface TaskQueryInput {
+  novelId?: number
+  status?: Task['status']
+  type?: string
+  page?: number
+  pageSize?: number
+}
+
+export interface TaskStats {
+  total: number
+  pendingCount: number
+  runningCount: number
+  cancelRequestedCount: number
+  pausedCount: number
+  successCount: number
+  failedCount: number
+  cancelledCount: number
+}
+
+export interface TaskHistoryClearInput {
+  novelId?: number
+  status?: Task['status']
+  type?: string
+}
+
+export interface TaskHistoryClearResult {
+  deletedCount: number
+  deletedTaskIds: number[]
+}
+
 export interface PremiseDraftRecord {
   taskId: number
   novelId: number
@@ -1530,6 +1560,9 @@ declare global {
       }
       task: {
         list: (novelId?: number) => Promise<Task[]>
+        query: (filters: TaskQueryInput) => Promise<PagedResult<Task>>
+        getStats: (novelId?: number) => Promise<TaskStats>
+        clearHistory: (filters?: TaskHistoryClearInput) => Promise<TaskHistoryClearResult>
         get: (id: number) => Promise<Task | null>
         cancel: (id: number) => Promise<boolean>
         retry: (id: number) => Promise<number>
