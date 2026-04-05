@@ -176,6 +176,7 @@ export function identifyParallelizableSegments(
   // Find convergence points: chapters where independent lines merge
   const convergencePoints: number[] = []
   for (const group of parallelGroups) {
+    if (group.length === 0) continue
     const maxEnd = Math.max(...group.map((s) => s.chapterRange[1]))
     if (maxEnd + 1 <= chapterEnd) {
       convergencePoints.push(maxEnd + 1)
@@ -184,7 +185,9 @@ export function identifyParallelizableSegments(
 
   const totalChapters = chapterEnd - chapterStart + 1
   const parallelChapters = parallelGroups.reduce(
-    (sum, group) => sum + Math.max(...group.map((s) => s.chapterRange[1] - s.chapterRange[0] + 1)),
+    (sum, group) => group.length > 0
+      ? sum + Math.max(...group.map((s) => s.chapterRange[1] - s.chapterRange[0] + 1))
+      : sum,
     0,
   )
   const estimatedSpeedup = totalChapters > 0

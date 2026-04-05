@@ -366,7 +366,6 @@ async function writeEpubExport(
     author: 'NovelForge',
     lang: 'zh-CN' as const,
     description: novel.synopsis || '',
-    content,
   }
 
   const epubBuffer = await new EPub(options, content).genEpub()

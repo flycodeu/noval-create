@@ -253,6 +253,7 @@ export default function NovelRouter() {
       structure: guidedProgressMap['volume-planning'].isComplete,
       timeline: workflowStats.timelineCount > 0,
       writing: isWritingStepReady(workflowStats),
+      quality: true,
     }),
     [guidedProgressMap, workflowStats],
   )
@@ -337,6 +338,10 @@ export default function NovelRouter() {
       revision: {
         label: workflowStats.revisionTaskCount > 0 ? `${workflowStats.revisionTaskCount}项待处理` : '已清空',
         complete: workflowStats.revisionTaskCount <= 0,
+      },
+      quality: {
+        label: '查看',
+        complete: true,
       },
     }),
     [guidedProgressMap, workflowStats, workspaceReadyCount, workspaceTotalCount],

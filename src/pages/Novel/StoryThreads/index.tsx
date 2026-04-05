@@ -1,7 +1,7 @@
 ﻿import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, message } from 'antd'
+import { Alert, Button, Checkbox, Form, Input, InputNumber, Modal, Pagination, Select, Space, Spin, Tag, message } from 'antd'
+import VirtualList from 'rc-virtual-list'
 import { useRef } from 'react'
-import type { ColumnsType } from 'antd/es/table'
 import { ArrowRightOutlined, DeleteOutlined, PlusOutlined, RobotOutlined } from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import type { StoryThread } from '../../../types'
@@ -154,6 +154,48 @@ function normalizeGenerateValues(values: GenerateFormValues): StoryThreadBatchGe
 function formatChapter(value?: number | null): string {
   if (typeof value !== 'number' || value <= 0) return '未安排'
   return `第 ${value} 章`
+}
+
+function StoryThreadRow({
+  thread,
+  selected,
+  onSelect,
+  onEdit,
+  onRegenerate,
+  onDelete,
+  regenerating,
+}: {
+  thread: StoryThread
+  selected: boolean
+  onSelect: (id: number, checked: boolean) => void
+  onEdit: (thread: StoryThread) => void
+  onRegenerate: (thread: StoryThread) => void
+  onDelete: (thread: StoryThread) => void
+  regenerating: boolean
+}) {
+  return (
+    <div className={`story-threads__row ${selected ? 'story-threads__row--selected' : ''}`}>
+      <Checkbox
+        checked={selected}
+        onChange={(e) => onSelect(thread.id, e.target.checked)}
+      />
+      <div className="story-threads__table-cell">
+        <strong>{thread.title}</strong>
+        <div className="story-threads__table-copy">
+          {thread.summary || thread.premise || '还没有写清这条线程在持续推动什么。'}
+        </div>
+      </div>
+      <Tag>{THREAD_TYPE_OPTIONS.find((item) => item.value === thread.threadType)?.label || thread.threadType}</Tag>
+      <Tag color={getStatusColor(thread.status)}>{THREAD_STATUS_OPTIONS.find((item) => item.value === thread.status)?.label || thread.status}</Tag>
+      <Tag color={getPriorityColor(thread.priority)}>{PRIORITY_OPTIONS.find((item) => item.value === thread.priority)?.label || thread.priority}</Tag>
+      <span className="story-threads__row-chapter">{formatChapter(thread.targetPayoffChapter)}</span>
+      <Space size={4}>
+        <Button size="small" onClick={() => onEdit(thread)}>编辑</Button>
+        <Button size="small" loading={regenerating} onClick={() => onRegenerate(thread)}>AI 重生成</Button>
+        <Button size="small" danger icon={<DeleteOutlined />} onClick={() => onDelete(thread)} />
+      </Space>
+    </div>
+  )
 }
 
 function parseRouteId(value: string | null): number | null {
@@ -404,62 +446,6 @@ export default function StoryThreadsPage({ novelId }: Props) {
     }
   }
 
-  const columns: ColumnsType<StoryThread> = [
-    {
-      title: '线程',
-      dataIndex: 'title',
-      key: 'title',
-      render: (_, record) => (
-        <div className="story-threads__table-cell">
-          <strong>{record.title}</strong>
-          <div className="story-threads__table-copy">
-            {record.summary || record.premise || '还没有写清这条线程在持续推动什么。'}
-          </div>
-        </div>
-      ),
-    },
-    {
-      title: '类型',
-      dataIndex: 'threadType',
-      key: 'threadType',
-      width: 120,
-      render: (value: StoryThread['threadType']) => <Tag>{THREAD_TYPE_OPTIONS.find((item) => item.value === value)?.label || value}</Tag>,
-    },
-    {
-      title: '状态',
-      dataIndex: 'status',
-      key: 'status',
-      width: 120,
-      render: (value: StoryThread['status']) => <Tag color={getStatusColor(value)}>{THREAD_STATUS_OPTIONS.find((item) => item.value === value)?.label || value}</Tag>,
-    },
-    {
-      title: '优先级',
-      dataIndex: 'priority',
-      key: 'priority',
-      width: 120,
-      render: (value: StoryThread['priority']) => <Tag color={getPriorityColor(value)}>{PRIORITY_OPTIONS.find((item) => item.value === value)?.label || value}</Tag>,
-    },
-    {
-      title: '目标回收',
-      dataIndex: 'targetPayoffChapter',
-      key: 'targetPayoffChapter',
-      width: 120,
-      render: (value: StoryThread['targetPayoffChapter']) => formatChapter(value),
-    },
-    {
-      title: '操作',
-      key: 'actions',
-      width: 150,
-      render: (_, record) => (
-        <Space>
-          <Button size="small" onClick={() => openEditor(record)}>编辑</Button>
-          <Button size="small" loading={generating} onClick={() => void handleRegenerate(record)}>AI 重生成</Button>
-          <Button size="small" danger icon={<DeleteOutlined />} onClick={() => handleDelete(record)} />
-        </Space>
-      ),
-    },
-  ]
-
   return (
     <WorkspacePage
       className="novel-story-threads-page"
@@ -575,23 +561,56 @@ export default function StoryThreadsPage({ novelId }: Props) {
             <div className="novel-filter-bar__summary">危险操作会自动创建恢复点，`Esc` 可清空当前批量选择。</div>
           </div>
         ) : null}
-        <Table
-          rowKey="id"
-          rowSelection={{
-            selectedRowKeys,
-            onChange: (keys) => setSelectedRowKeys(keys as number[]),
-          }}
-          loading={loading}
-          columns={columns}
-          dataSource={threads}
-          pagination={{
-            current: page,
-            pageSize: THREADS_PAGE_SIZE,
-            total: threadTotal,
-            showSizeChanger: false,
-            onChange: setPage,
-          }}
-        />
+        {loading ? (
+          <div style={{ display: 'flex', justifyContent: 'center', padding: 48 }}><Spin /></div>
+        ) : threads.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: 48, color: 'var(--workspace-ink-soft)' }}>暂无线程数据</div>
+        ) : (
+          <>
+            <div className="story-threads__row story-threads__row--header">
+              <Checkbox
+                checked={selectedRowKeys.length === threads.length && threads.length > 0}
+                indeterminate={selectedRowKeys.length > 0 && selectedRowKeys.length < threads.length}
+                onChange={(e) => setSelectedRowKeys(e.target.checked ? threads.map((t) => t.id) : [])}
+              />
+              <span>线程</span>
+              <span>类型</span>
+              <span>状态</span>
+              <span>优先级</span>
+              <span>目标回收</span>
+              <span>操作</span>
+            </div>
+            <VirtualList data={threads} height={520} itemHeight={72} itemKey="id">
+              {(thread: StoryThread) => (
+                <StoryThreadRow
+                  key={thread.id}
+                  thread={thread}
+                  selected={selectedRowKeys.includes(thread.id)}
+                  onSelect={(id, checked) => {
+                    setSelectedRowKeys((prev) =>
+                      checked ? [...prev, id] : prev.filter((k) => k !== id),
+                    )
+                  }}
+                  onEdit={openEditor}
+                  onRegenerate={(t) => void handleRegenerate(t)}
+                  onDelete={handleDelete}
+                  regenerating={generating}
+                />
+              )}
+            </VirtualList>
+            {threadTotal > THREADS_PAGE_SIZE ? (
+              <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
+                <Pagination
+                  current={page}
+                  pageSize={THREADS_PAGE_SIZE}
+                  total={threadTotal}
+                  showSizeChanger={false}
+                  onChange={setPage}
+                />
+              </div>
+            ) : null}
+          </>
+        )}
       </WorkspacePanel>
 
       <Modal

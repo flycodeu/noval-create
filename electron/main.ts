@@ -226,10 +226,18 @@ function registerIpcHandlers() {
   ipcMain.handle('embedding:reindex', async (_, novelId: number) => {
     const db = getDb()
     const chapterList = db.select().from(chapters).where(eq(chapters.novelId, novelId)).all()
+    let succeeded = 0
+    let failed = 0
     for (const chapter of chapterList) {
-      await embeddingService.generateChapterEmbeddings(novelId, chapter.id)
+      try {
+        await embeddingService.generateChapterEmbeddings(novelId, chapter.id)
+        succeeded += 1
+      } catch (err) {
+        console.warn(`[embedding:reindex] 章节 ${chapter.id} 向量化失败:`, err)
+        failed += 1
+      }
     }
-    return { reindexed: chapterList.length }
+    return { reindexed: succeeded, failed, total: chapterList.length }
   })
 
   // Style Analysis

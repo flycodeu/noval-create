@@ -719,6 +719,19 @@ html[data-theme="light"] .ant-dropdown-menu {
   --workspace-shadow-lg: 0 24px 56px rgba(37, 31, 24, 0.14);
   --workspace-shadow-md: 0 16px 34px rgba(37, 31, 24, 0.1);
   --workspace-shadow-sm: 0 8px 18px rgba(37, 31, 24, 0.08);
+
+  /* Spacing scale */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-2xl: 48px;
+
+  /* Workspace border-radius tokens */
+  --ws-radius-sm: 12px;
+  --ws-radius-md: 18px;
+  --ws-radius-lg: 24px;
 }
 
 .novel-route-shell {
@@ -739,10 +752,10 @@ html[data-theme="light"] .ant-dropdown-menu {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  gap: 20px;
   min-height: 0;
   overflow: auto;
-  padding: 26px 22px 22px;
+  padding: 20px 18px 18px;
   background:
     radial-gradient(circle at top right, rgba(246, 202, 124, 0.16), transparent 22%),
     linear-gradient(180deg, #1a2434 0%, #202d40 46%, #253448 100%);
@@ -773,18 +786,18 @@ html[data-theme="light"] .ant-dropdown-menu {
   display: grid;
   gap: 12px;
   padding: 18px 18px 20px;
-  border-radius: 26px;
+  border-radius: var(--ws-radius-lg);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03)),
     rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(246, 202, 124, 0.12);
-  box-shadow: 0 24px 44px rgba(5, 10, 18, 0.22);
+  box-shadow: 0 16px 32px rgba(5, 10, 18, 0.16);
 }
 
 .novel-sidebar__eyebrow {
   color: rgba(246, 202, 124, 0.9);
   font-size: 11px;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.2em;
   text-transform: uppercase;
 }
 
@@ -844,7 +857,7 @@ html[data-theme="light"] .ant-dropdown-menu {
 
 .novel-sidebar__group-list {
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .novel-sidebar__nav-item {
@@ -853,9 +866,9 @@ html[data-theme="light"] .ant-dropdown-menu {
   gap: 12px;
   align-items: start;
   width: 100%;
-  padding: 14px 14px 14px 16px;
+  padding: 11px 14px 11px 14px;
   border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 18px;
+  border-radius: var(--ws-radius-md);
   background: rgba(255, 255, 255, 0.02);
   color: rgba(248, 241, 230, 0.88);
   cursor: pointer;
@@ -870,11 +883,11 @@ html[data-theme="light"] .ant-dropdown-menu {
 }
 
 .novel-sidebar__nav-item--active {
-  border-color: rgba(246, 202, 124, 0.38);
+  border-color: rgba(246, 202, 124, 0.42);
   background:
-    linear-gradient(135deg, rgba(246, 202, 124, 0.16), rgba(246, 202, 124, 0.03)),
-    rgba(255, 255, 255, 0.08);
-  box-shadow: 0 16px 28px rgba(6, 11, 18, 0.24);
+    linear-gradient(135deg, rgba(246, 202, 124, 0.20), rgba(246, 202, 124, 0.05)),
+    rgba(255, 255, 255, 0.10);
+  box-shadow: 0 12px 24px rgba(6, 11, 18, 0.22);
 }
 
 .novel-sidebar__nav-icon {
@@ -981,15 +994,14 @@ html[data-theme="light"] .ant-dropdown-menu {
   position: relative;
   display: grid;
   gap: 16px;
-  margin-bottom: 20px;
+  margin-bottom: 28px;
   padding: 28px 30px 26px;
   overflow: hidden;
-  border: 1px solid rgba(122, 93, 52, 0.16);
-  border-radius: 32px;
+  border: 1px solid rgba(122, 93, 52, 0.12);
+  border-radius: var(--ws-radius-lg);
   background:
-    radial-gradient(circle at top right, rgba(246, 202, 124, 0.15), transparent 24%),
-    linear-gradient(180deg, rgba(255, 254, 250, 0.96), rgba(248, 242, 231, 0.94));
-  box-shadow: var(--workspace-shadow-lg);
+    linear-gradient(180deg, rgba(255, 254, 250, 0.97), rgba(249, 244, 235, 0.95));
+  box-shadow: 0 8px 24px rgba(37, 31, 24, 0.08);
 }
 
 .novel-hero::before {
@@ -998,13 +1010,13 @@ html[data-theme="light"] .ant-dropdown-menu {
   inset: 0;
   pointer-events: none;
   background:
-    linear-gradient(120deg, rgba(255, 255, 255, 0.32), transparent 28%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.18), transparent 38%);
+    linear-gradient(120deg, rgba(255, 255, 255, 0.2), transparent 28%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.1), transparent 38%);
 }
 
 .novel-hero--compact {
   padding: 22px 24px;
-  border-radius: 28px;
+  border-radius: var(--ws-radius-lg);
 }
 
 .novel-hero__copy,
@@ -1023,7 +1035,7 @@ html[data-theme="light"] .ant-dropdown-menu {
   margin-bottom: 10px;
   color: var(--workspace-accent);
   font-size: 11px;
-  letter-spacing: 0.24em;
+  letter-spacing: 0.2em;
   text-transform: uppercase;
 }
 
@@ -1045,7 +1057,7 @@ html[data-theme="light"] .ant-dropdown-menu {
   max-width: 920px;
   color: var(--workspace-ink-soft);
   font-size: 14px;
-  line-height: 1.85;
+  line-height: 1.75;
 }
 
 .novel-hero__actions {
@@ -1068,8 +1080,8 @@ html[data-theme="light"] .ant-dropdown-menu {
   display: grid;
   gap: 6px;
   padding: 14px 16px;
-  border-radius: 18px;
-  border: 1px solid rgba(122, 93, 52, 0.14);
+  border-radius: var(--ws-radius-md);
+  border: 1px solid rgba(122, 93, 52, 0.10);
   background: rgba(255, 255, 255, 0.52);
 }
 
@@ -1096,8 +1108,8 @@ html[data-theme="light"] .ant-dropdown-menu {
   display: grid;
   gap: 8px;
   padding: 16px 18px;
-  border-radius: 20px;
-  border: 1px solid rgba(122, 93, 52, 0.14);
+  border-radius: var(--ws-radius-md);
+  border: 1px solid rgba(122, 93, 52, 0.10);
   background: rgba(255, 255, 255, 0.62);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
 }
@@ -1126,6 +1138,7 @@ html[data-theme="light"] .ant-dropdown-menu {
   font-size: 24px;
   line-height: 1.15;
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .novel-metric__hint {
@@ -1136,11 +1149,11 @@ html[data-theme="light"] .ant-dropdown-menu {
 
 .novel-panel {
   overflow: hidden;
-  border: 1px solid rgba(122, 93, 52, 0.16);
-  border-radius: 28px;
+  border: 1px solid rgba(122, 93, 52, 0.12);
+  border-radius: var(--ws-radius-lg);
   background:
     linear-gradient(180deg, rgba(255, 254, 250, 0.98), rgba(249, 244, 236, 0.96));
-  box-shadow: var(--workspace-shadow-md);
+  box-shadow: 0 6px 18px rgba(37, 31, 24, 0.06);
 }
 
 .novel-panel__header {
@@ -1160,7 +1173,7 @@ html[data-theme="light"] .ant-dropdown-menu {
 }
 
 .novel-panel__desc {
-  margin-top: 8px;
+  margin-top: 6px;
   color: var(--workspace-ink-soft);
   font-size: 13px;
   line-height: 1.75;
@@ -1226,8 +1239,8 @@ html[data-theme="light"] .ant-dropdown-menu {
 .novel-list-card {
   width: 100%;
   padding: 16px 18px;
-  border-radius: 22px;
-  border: 1px solid rgba(122, 93, 52, 0.12);
+  border-radius: var(--ws-radius-md);
+  border: 1px solid rgba(122, 93, 52, 0.10);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.58));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.56);
@@ -1456,6 +1469,10 @@ html[data-theme="light"] .ant-dropdown-menu {
   display: grid;
   gap: 10px;
   min-width: 220px;
+  padding: 14px 18px;
+  border-radius: var(--ws-radius-md);
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid rgba(122, 93, 52, 0.08);
 }
 
 .novel-filter-bar__row {
@@ -5868,12 +5885,47 @@ html[data-theme="dark"] .ant-card-actions > li {
   line-height: 1.7;
   display: -webkit-box;
   overflow: hidden;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }
 
-.novel-story-threads-page .ant-table-cell {
-  vertical-align: top;
+.story-threads__row {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) 80px 90px 90px 90px 200px;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(122, 93, 52, 0.1);
+  transition: background 150ms ease;
+}
+
+.story-threads__row:hover {
+  background: rgba(143, 99, 48, 0.05);
+}
+
+.story-threads__row--selected {
+  background: rgba(143, 99, 48, 0.08);
+}
+
+.story-threads__row--header {
+  font-size: 12px;
+  color: var(--workspace-ink-soft);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid rgba(122, 93, 52, 0.18);
+  background: rgba(255, 255, 255, 0.4);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.story-threads__row--header:hover {
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.story-threads__row-chapter {
+  color: var(--workspace-ink-soft);
+  font-size: 13px;
 }
 
 .novel-characters-page .novel-tip-card__body {
