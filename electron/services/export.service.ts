@@ -7,7 +7,7 @@ import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } fro
 import { getDb } from '../database/db'
 import { chapters, novels, storyVolumes } from '../database/schema'
 
-type ExportFormat = 'txt' | 'md' | 'json' | 'docx'
+type ExportFormat = 'txt' | 'md' | 'json' | 'docx' | 'epub'
 type ChapterRecord = typeof chapters.$inferSelect
 type NovelRecord = typeof novels.$inferSelect
 type VolumeRecord = typeof storyVolumes.$inferSelect
@@ -333,6 +333,47 @@ async function writeDocxExport(
   await fs.promises.writeFile(filePath, buffer)
 }
 
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+async function writeEpubExport(
+  filePath: string,
+  novel: NovelRecord,
+  chapterList: ChapterRecord[],
+  chunkTitle?: string,
+): Promise<void> {
+  const EPub = (await import('epub-gen-memory')).default
+
+  const content = chapterList.map((chapter) => {
+    const paragraphs = (chapter.content || '').split(/\n+/).filter((p) => p.trim())
+    const htmlBody = paragraphs
+      .map((p) => `<p style="text-indent: 2em;">${escapeHtml(p.trim())}</p>`)
+      .join('\n')
+
+    return {
+      title: `第${chapter.chapterNum}章 ${chapter.title || ''}`,
+      data: htmlBody,
+    }
+  })
+
+  const options = {
+    title: chunkTitle ? `${novel.title} - ${chunkTitle}` : novel.title,
+    author: 'NovelForge',
+    lang: 'zh-CN' as const,
+    description: novel.synopsis || '',
+    content,
+  }
+
+  const epubBuffer = await new EPub(options, content).genEpub()
+  await fs.promises.mkdir(path.dirname(filePath), { recursive: true })
+  await fs.promises.writeFile(filePath, epubBuffer)
+}
+
 async function writeChunkExport(
   filePath: string,
   format: ExportFormat,
@@ -349,6 +390,10 @@ async function writeChunkExport(
   }
   if (format === 'json') {
     await writeJsonExport(filePath, novel, chunk.chapters, chunk.title)
+    return
+  }
+  if (format === 'epub') {
+    await writeEpubExport(filePath, novel, chunk.chapters, chunk.title)
     return
   }
   await writeDocxExport(filePath, novel, chunk.chapters, chunk.title)
@@ -370,6 +415,10 @@ async function writeSingleExport(
   }
   if (format === 'json') {
     await writeJsonExport(filePath, novel, chapterList)
+    return
+  }
+  if (format === 'epub') {
+    await writeEpubExport(filePath, novel, chapterList)
     return
   }
   await writeDocxExport(filePath, novel, chapterList)
@@ -409,7 +458,7 @@ export async function exportNovel(novelId: number, format: ExportFormat): Promis
   if (!splitExport) {
     const { filePath } = await dialog.showSaveDialog({
       defaultPath: path.join(app.getPath('documents'), `${defaultName}.${format}`),
-      filters: [{ name: format.toUpperCase(), extensions: [format] }],
+      filters: [{ name: format === 'epub' ? 'EPUB电子书' : format.toUpperCase(), extensions: [format] }],
     })
 
     if (!filePath) throw new Error('用户取消')

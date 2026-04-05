@@ -1,7 +1,8 @@
 ﻿import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button, Empty, Form, Input, InputNumber, Modal, Pagination, Select, Space, Spin, Tag, message } from 'antd'
-import { DeleteOutlined, EditOutlined, HolderOutlined, PlusOutlined, RobotOutlined } from '@ant-design/icons'
+import { DeleteOutlined, EditOutlined, HolderOutlined, PlusOutlined, RobotOutlined, SwapOutlined } from '@ant-design/icons'
 import { DragDropContext, Draggable, Droppable, type DragDropContextProps, type DraggableProvidedDragHandleProps } from '@hello-pangea/dnd'
+import VirtualList from 'rc-virtual-list'
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import type { Chapter, OutlineChapterBatchGenerationResult, StoryArc } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
@@ -49,6 +50,7 @@ export default function Outline({ novelId }: Props) {
   const [lastSelectedChapterId, setLastSelectedChapterId] = useState<number | null>(null)
   const [batchStatus, setBatchStatus] = useState<Chapter['status']>('outline')
   const [batchStartChapterNum, setBatchStartChapterNum] = useState(1)
+  const [reorderMode, setReorderMode] = useState(false)
   const [draftWarnings, setDraftWarnings] = useState<string[]>([])
   const draftWarningsRef = React.useRef<string[]>([])
   const draftObservabilityRef = React.useRef<{ inputSummary: string; lintWarnings: string[]; rawOutputs: string[] } | null>(null)
@@ -443,7 +445,7 @@ export default function Outline({ novelId }: Props) {
             </div>
           </WorkspacePanel>
 
-          <WorkspacePanel title={expandedArc ? `章节细纲 · ${expandedArc.arcName}` : '章节细纲'} extra={expandedArc ? <Tag>{`第 ${expandedArc.chapterStart || '?'} ~ ${expandedArc.chapterEnd || '?'} 章`}</Tag> : null}>
+          <WorkspacePanel title={expandedArc ? `章节细纲 · ${expandedArc.arcName}` : '章节细纲'} extra={expandedArc ? <Space><Button size="small" icon={<SwapOutlined />} type={reorderMode ? 'primary' : 'default'} onClick={() => setReorderMode(!reorderMode)}>{reorderMode ? '完成排序' : '拖拽排序'}</Button><Tag>{`第 ${expandedArc.chapterStart || '?'} ~ ${expandedArc.chapterEnd || '?'} 章`}</Tag></Space> : null}>
             {!expandedArc ? (
               <div className="novel-empty">先展开一条故事弧。</div>
             ) : expandedArcChapters.length === 0 ? (
@@ -468,6 +470,7 @@ export default function Outline({ novelId }: Props) {
                     <div className="novel-filter-bar__summary">支持单选、Ctrl/Cmd 追加和 Shift 区间选择，`Esc` 可清空批量选择。</div>
                   </div>
                 ) : null}
+                {reorderMode ? (
                 <DragDropContext onDragEnd={handleChapterDragEnd}>
                   <Droppable droppableId={`arc-${expandedArc.id}`}>
                     {(provided) => (
@@ -495,6 +498,20 @@ export default function Outline({ novelId }: Props) {
                     )}
                   </Droppable>
                 </DragDropContext>
+                ) : (
+                <div className="novel-outline-chapter-grid">
+                  <VirtualList data={visibleExpandedArcChapters} height={520} itemHeight={100} itemKey="id">
+                    {(chapter: Chapter) => (
+                      <ChapterCard
+                        key={chapter.id}
+                        chapter={chapter}
+                        selected={selectedChapterIds.includes(chapter.id)}
+                        onClick={(event) => handleChapterSelection(event, chapter, expandedArcChapters)}
+                      />
+                    )}
+                  </VirtualList>
+                </div>
+                )}
                 {expandedArcChapters.length > OUTLINE_CHAPTER_PAGE_SIZE ? (
                   <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
                     <Pagination

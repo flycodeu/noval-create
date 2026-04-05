@@ -3,6 +3,8 @@ import { getDb } from '../database/db'
 import { chapters, characterRelations, characters, genres, novels, storyArcs, storyItems, storyThreads, templates, timelineEvents, worldMap } from '../database/schema'
 import { buildWorldRulesSummary, parseWorldRulesJson } from '../../src/shared/genre-system'
 import { buildProjectBriefSummary, parseProjectBriefDocument } from '../../src/shared/project-brief'
+import { findSimilarFragments } from './embedding.service'
+import { buildStyleFingerprintPromptSection, listStyleFingerprints } from './style-analysis.service'
 import {
   buildPremiseSummary,
   buildStoryDesignSummary,
@@ -150,6 +152,7 @@ export interface ChapterContext {
   activeThreads: string
   writingContractSummary: string
   relationSummary: string
+  recalledMemory: string
 }
 
 type ChapterContextLabel = keyof ChapterContext
@@ -357,6 +360,7 @@ function createStagePriorityMap(
           styleTemplate: 3,
           writingContractSummary: 1,
           relationSummary: 1,
+          recalledMemory: 2,
         }
       case 'draft':
         return {
@@ -378,6 +382,7 @@ function createStagePriorityMap(
           styleTemplate: 2,
           writingContractSummary: 1,
           relationSummary: 1,
+          recalledMemory: 2,
         }
       case 'review':
         return {
@@ -399,6 +404,7 @@ function createStagePriorityMap(
           styleTemplate: null,
           writingContractSummary: 1,
           relationSummary: 1,
+          recalledMemory: 2,
         }
       case 'rewrite':
       default:
@@ -421,6 +427,7 @@ function createStagePriorityMap(
           styleTemplate: 2,
           writingContractSummary: 1,
           relationSummary: 1,
+          recalledMemory: 2,
         }
     }
   })()
@@ -551,6 +558,22 @@ function formatStyleTemplateSummary(contentJson?: string | null): string {
   }
 
   return lines.join('\n')
+}
+
+function enrichStyleTemplateWithFingerprint(baseTemplate: string, novelId: number): string {
+  try {
+    const fingerprints = listStyleFingerprints(novelId)
+    if (fingerprints.length === 0) return baseTemplate
+
+    // Use the most recent fingerprint for this novel
+    const latest = fingerprints[fingerprints.length - 1]
+    const section = buildStyleFingerprintPromptSection(latest.id)
+    if (!section) return baseTemplate
+
+    return baseTemplate ? `${baseTemplate}\n\n${section}` : section
+  } catch {
+    return baseTemplate
+  }
 }
 
 function formatWorldTemplateSummary(template?: typeof templates.$inferSelect | null): string {
@@ -1267,7 +1290,7 @@ export async function collectChapterContextRawData(
       ].filter(Boolean).join('\n')
     : ''
 
-  return {
+  const result = {
     novel,
     profile,
     chapterRows,
@@ -1292,10 +1315,27 @@ export async function collectChapterContextRawData(
       timelineSummary: timelineContext.timelineSummary,
       relationSummary,
       activeThreads: activeThreadsContext.summary,
-      styleTemplate: profile.styleTemplateSummary,
+      styleTemplate: enrichStyleTemplateWithFingerprint(profile.styleTemplateSummary, novelId),
       previousSummaries,
+      recalledMemory: '', // placeholder, filled below
     },
   }
+
+  // 向量化记忆召回：根据当前章节大纲语义检索历史相关片段
+  try {
+    const queryForRecall = [currentChapter?.outline, currentArc?.arcGoal].filter(Boolean).join('\n')
+    if (queryForRecall) {
+      const recalled = await findSimilarFragments(novelId, queryForRecall, 5, novel.modelConfigId || undefined)
+      if (recalled.length > 0) {
+        result.contextParts.recalledMemory = recalled
+          .filter((r) => r.similarity > 0.1)
+          .map((r) => `[关联记忆·${r.fragmentType}] ${r.fragmentText.slice(0, 300)}`)
+          .join('\n')
+      }
+    }
+  } catch { /* vector recall failure is non-blocking */ }
+
+  return result
 }
 
 export function allocateChapterContext(
@@ -1375,6 +1415,7 @@ export function allocateChapterContext(
     activeThreads: allocated.activeThreads || '',
     writingContractSummary: allocated.writingContractSummary || rawData.profile.writingContractSummary || '',
     relationSummary: allocated.relationSummary || rawData.contextParts.relationSummary || '',
+    recalledMemory: allocated.recalledMemory || '',
   }
 }
 

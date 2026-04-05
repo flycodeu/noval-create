@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Form, Input, Select, Space, Tag, message } from 'antd'
-import { ArrowRightOutlined, RobotOutlined, SaveOutlined } from '@ant-design/icons'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import { Alert, Button, Form, Input, List, Select, Space, Spin, Tag, message } from 'antd'
+import { ArrowRightOutlined, DeleteOutlined, RobotOutlined, SaveOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import {
   buildThemeVoicePayload,
@@ -450,6 +450,137 @@ export default function ThemeVoicePage({ novelId }: Props) {
           </div>
         </Form>
       </WorkspacePanel>
+
+      <StyleLearningPanel novelId={novelId} />
     </WorkspacePage>
+  )
+}
+
+function StyleLearningPanel({ novelId }: { novelId: number }) {
+  const [referenceText, setReferenceText] = useState('')
+  const [fingerprintName, setFingerprintName] = useState('')
+  const [analyzing, setAnalyzing] = useState(false)
+  const [fingerprints, setFingerprints] = useState<Array<{
+    id: number
+    name: string
+    fingerprintJson: string | null
+    createdAt: string
+  }>>([])
+
+  const loadFingerprints = useCallback(async () => {
+    try {
+      const list = await window.electron.style.list(novelId)
+      setFingerprints(list)
+    } catch { /* ignore */ }
+  }, [novelId])
+
+  useEffect(() => { void loadFingerprints() }, [loadFingerprints])
+
+  const handleAnalyze = async () => {
+    if (!referenceText.trim() || referenceText.length < 500) {
+      message.warning('请输入至少500字的参考文本')
+      return
+    }
+    if (!fingerprintName.trim()) {
+      message.warning('请填写风格名称')
+      return
+    }
+    setAnalyzing(true)
+    try {
+      await window.electron.style.create(novelId, fingerprintName.trim(), referenceText)
+      message.success('风格指纹已生成并应用到本小说')
+      setReferenceText('')
+      setFingerprintName('')
+      void loadFingerprints()
+    } catch (error) {
+      message.error('风格分析失败：' + (error instanceof Error ? error.message : '未知错误'))
+    } finally {
+      setAnalyzing(false)
+    }
+  }
+
+  const handleDelete = async (id: number) => {
+    try {
+      await window.electron.style.delete(id)
+      void loadFingerprints()
+      message.success('已删除')
+    } catch { /* ignore */ }
+  }
+
+  return (
+    <WorkspacePanel
+      title="风格学习"
+      description="粘贴1-3万字的参考文本（如喜欢的作家片段），AI将自动提取风格特征并应用到生成中。"
+    >
+      <div style={{ display: 'grid', gap: 16 }}>
+        <Input
+          placeholder={'风格名称，如"张三丰·冷硬派"'}
+          value={fingerprintName}
+          onChange={(e) => setFingerprintName(e.target.value)}
+          style={{ maxWidth: 400 }}
+        />
+        <Input.TextArea
+          rows={8}
+          placeholder="粘贴参考文本（建议500字以上，越多越准）"
+          value={referenceText}
+          onChange={(e) => setReferenceText(e.target.value)}
+        />
+        <div>
+          <Button
+            type="primary"
+            icon={<RobotOutlined />}
+            loading={analyzing}
+            onClick={() => void handleAnalyze()}
+            disabled={!referenceText.trim() || !fingerprintName.trim()}
+          >
+            分析并生成风格指纹
+          </Button>
+          <span style={{ marginLeft: 12, fontSize: 12, opacity: 0.6 }}>
+            {referenceText.length} 字
+          </span>
+        </div>
+
+        {fingerprints.length > 0 ? (
+          <div>
+            <div style={{ fontWeight: 500, marginBottom: 8 }}>已保存的风格指纹</div>
+            <List
+              size="small"
+              dataSource={fingerprints}
+              renderItem={(fp) => {
+                let preview = ''
+                if (fp.fingerprintJson) {
+                  try {
+                    const parsed = JSON.parse(fp.fingerprintJson)
+                    preview = [
+                      parsed.toneKeywords?.join('、'),
+                      parsed.paceProfile,
+                      parsed.dialogueStyle,
+                    ].filter(Boolean).join(' · ')
+                  } catch { /* ignore */ }
+                }
+                return (
+                  <List.Item
+                    actions={[
+                      <Button
+                        key="delete"
+                        size="small"
+                        danger
+                        icon={<DeleteOutlined />}
+                        onClick={() => void handleDelete(fp.id)}
+                      />,
+                    ]}
+                  >
+                    <List.Item.Meta
+                      title={<Tag color="blue">{fp.name}</Tag>}
+                      description={preview || '无预览'}
+                    />
+                  </List.Item>
+                )
+              }}
+            />
+          </div>
+        ) : null}
+      </div>
+    </WorkspacePanel>
   )
 }

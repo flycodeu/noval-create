@@ -255,6 +255,32 @@ const api = {
     clear: (novelId: number, pageKey: string) => ipcRenderer.invoke('planningDraft:clear', novelId, pageKey),
   },
 
+  // Quality Dashboard
+  quality: {
+    getDashboard: (novelId: number) => ipcRenderer.invoke('quality:getDashboard', novelId),
+  },
+
+  // Embedding / Vector Memory
+  embedding: {
+    reindex: (novelId: number) => ipcRenderer.invoke('embedding:reindex', novelId),
+  },
+
+  // Style Analysis
+  style: {
+    analyze: (text: string, modelConfigId?: number) => ipcRenderer.invoke('style:analyze', text, modelConfigId),
+    create: (novelId: number | null, name: string, text: string, modelConfigId?: number) => ipcRenderer.invoke('style:create', novelId, name, text, modelConfigId),
+    get: (id: number) => ipcRenderer.invoke('style:get', id),
+    list: (novelId?: number) => ipcRenderer.invoke('style:list', novelId),
+    delete: (id: number) => ipcRenderer.invoke('style:delete', id),
+  },
+
+  // Parallel Generation
+  parallel: {
+    analyzePlan: (novelId: number, chapterStart: number, chapterEnd: number) => ipcRenderer.invoke('parallel:analyzePlan', novelId, chapterStart, chapterEnd),
+    getWorldState: (novelId: number, atChapterNum: number) => ipcRenderer.invoke('parallel:getWorldState', novelId, atChapterNum),
+    mergeOutputs: (segments: unknown[]) => ipcRenderer.invoke('parallel:mergeOutputs', segments),
+  },
+
   // AI generation APIs
   ai: {
     expandBackground: (input: unknown) => ipcRenderer.invoke('ai:expandBackground', input),

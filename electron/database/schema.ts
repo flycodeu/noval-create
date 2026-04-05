@@ -503,3 +503,28 @@ export const generationHistory = sqliteTable('generation_history', {
 
 export type GenerationHistory = typeof generationHistory.$inferSelect
 export type NewGenerationHistory = typeof generationHistory.$inferInsert
+
+// --- Task 3: 向量记忆检索 ---
+export const chapterEmbeddings = sqliteTable('chapter_embeddings', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  chapterId: integer('chapter_id').notNull().references(() => chapters.id, { onDelete: 'cascade' }),
+  fragmentType: text('fragment_type').notNull(), // 'summary' | 'continuity' | 'seed'
+  fragmentText: text('fragment_text').notNull(),
+  embeddingJson: text('embedding_json'), // JSON array of floats
+  modelId: text('model_id'),
+  dimensions: integer('dimensions'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
+// --- Task 4: 风格学习 ---
+export const styleFingerprints = sqliteTable('style_fingerprints', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').references(() => novels.id, { onDelete: 'set null' }),
+  name: text('name').notNull(),
+  sourceText: text('source_text'),
+  fingerprintJson: text('fingerprint_json'),
+  analysisModelId: text('analysis_model_id'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})

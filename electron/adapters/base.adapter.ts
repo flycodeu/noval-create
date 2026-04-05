@@ -31,6 +31,8 @@ export abstract class BaseAdapter {
   abstract chat(messages: Message[], opts?: ChatOptions): Promise<string>
   abstract stream(messages: Message[], opts?: ChatOptions): Promise<void>
 
+  async embed?(texts: string[], opts?: { model?: string }): Promise<number[][]>
+
   countTokens(text: string): number {
     if (!text) return 0
     const chineseChars = (text.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length

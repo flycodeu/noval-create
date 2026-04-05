@@ -3,6 +3,7 @@ import { asc, desc, eq, inArray } from 'drizzle-orm'
 import { getDb } from '../database/db'
 import { chapterSegments, chapterVersions, chapters, novels, storyArcs } from '../database/schema'
 import { parseAiJsonResult } from '../utils/json'
+import { generateChapterEmbeddings } from './embedding.service'
 import { aiCheckPrompt, chapterSummaryPrompt } from './prompts'
 import {
   allocateChapterContext,
@@ -1927,6 +1928,14 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
         }
 
         const result = await finalizeGeneratedChapterContent(chapterId, repaired.content)
+
+        // Async: generate embeddings for vector memory retrieval (non-blocking)
+        const chapterRecord = getChapter(chapterId)
+        if (chapterRecord) {
+          generateChapterEmbeddings(chapterRecord.novelId, chapterId, novel?.modelConfigId || undefined)
+            .catch((err) => console.warn('[embedding] 向量生成失败（不影响主流程）:', err))
+        }
+
         sendGenerationProgress(sender, {
           chapterId,
           stage: 'completed',

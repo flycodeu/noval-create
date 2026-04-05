@@ -604,6 +604,12 @@ function NovelCard({
       label: '导出 DOCX',
       onClick: () => onExport('docx'),
     },
+    {
+      key: 'export-epub',
+      icon: <ExportOutlined />,
+      label: '导出 EPUB',
+      onClick: () => onExport('epub'),
+    },
     { type: 'divider' },
     {
       key: 'delete',

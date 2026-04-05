@@ -5,6 +5,7 @@ import {
   ApartmentOutlined,
   AppstoreOutlined,
   ArrowLeftOutlined,
+  BarChartOutlined,
   BarsOutlined,
   ClockCircleOutlined,
   DashboardOutlined,
@@ -37,6 +38,7 @@ import Structure from './Structure'
 import TimelinePage from './Timeline'
 import Writing from './Writing'
 import RevisionCenterPage from './RevisionCenter'
+import QualityDashboard from './QualityDashboard'
 import WorkspaceErrorBoundary from './components/WorkspaceErrorBoundary'
 import {
   EMPTY_WORKFLOW_STATS,
@@ -67,6 +69,7 @@ type ProWorkspaceKey =
   | 'timeline'
   | 'writing'
   | 'revision'
+  | 'quality'
 
 interface WorkspaceItem {
   key: ProWorkspaceKey
@@ -118,6 +121,7 @@ const WORKSPACE_GROUPS: Array<{ title: string; items: WorkspaceItem[] }> = [
       { key: 'timeline', icon: <ClockCircleOutlined />, label: '时间轴', summary: '维护事件顺序、后果链和时间锚点。' },
       { key: 'writing', icon: <EditOutlined />, label: '正文写作', summary: '集中处理场景计划、主写、审校和定稿。' },
       { key: 'revision', icon: <EditOutlined />, label: '修订中心', summary: '收口一致性问题和上下文同步任务。' },
+      { key: 'quality', icon: <BarChartOutlined />, label: '质量监控', summary: '查看各章节评分热力图、趋势和薄弱维度。' },
     ],
   },
 ]
@@ -807,6 +811,7 @@ export default function NovelRouter() {
               <Route path="timeline" element={<TimelinePage novelId={novelId} />} />
               <Route path="writing" element={<Writing novelId={novelId} />} />
               <Route path="revision" element={<RevisionCenterPage novelId={novelId} />} />
+              <Route path="quality" element={<QualityDashboard novelId={novelId} />} />
               <Route path="*" element={<Navigate replace to={`/novels/${novelId}/${recommendedKey}`} />} />
             </Routes>
           </div>

@@ -29,6 +29,10 @@ import * as projectBriefService from './services/project-brief.service'
 import { buildOutlineGenerationContext, buildStoryProfile } from './services/context.service'
 import * as worldRulesService from './services/world-rules.service'
 import * as exportService from './services/export.service'
+import * as qualityDashboardService from './services/quality-dashboard.service'
+import * as embeddingService from './services/embedding.service'
+import * as styleAnalysisService from './services/style-analysis.service'
+import * as parallelGenerationService from './services/parallel-generation.service'
 import * as itemService from './services/item.service'
 import * as mapService from './services/map.service'
 import * as modelService from './services/model.service'
@@ -214,6 +218,39 @@ function registerIpcHandlers() {
   ipcMain.handle('novel:delete', (_, id) => novelService.deleteNovel(id))
   ipcMain.handle('novel:export', (_, id, format) => exportService.exportNovel(id, format))
   ipcMain.handle('novel:stats', (_, id) => novelService.getNovelStats(id))
+
+  // Quality Dashboard
+  ipcMain.handle('quality:getDashboard', (_, novelId) => qualityDashboardService.getQualityDashboardData(novelId))
+
+  // Embedding
+  ipcMain.handle('embedding:reindex', async (_, novelId: number) => {
+    const db = getDb()
+    const chapterList = db.select().from(chapters).where(eq(chapters.novelId, novelId)).all()
+    for (const chapter of chapterList) {
+      await embeddingService.generateChapterEmbeddings(novelId, chapter.id)
+    }
+    return { reindexed: chapterList.length }
+  })
+
+  // Style Analysis
+  ipcMain.handle('style:analyze', (_, text: string, modelConfigId?: number) =>
+    styleAnalysisService.analyzeReferenceText(text, modelConfigId))
+  ipcMain.handle('style:create', (_, novelId: number | null, name: string, text: string, modelConfigId?: number) =>
+    styleAnalysisService.createStyleFingerprint(novelId, name, text, modelConfigId))
+  ipcMain.handle('style:get', (_, id: number) =>
+    styleAnalysisService.getStyleFingerprint(id))
+  ipcMain.handle('style:list', (_, novelId?: number) =>
+    styleAnalysisService.listStyleFingerprints(novelId))
+  ipcMain.handle('style:delete', (_, id: number) =>
+    styleAnalysisService.deleteStyleFingerprint(id))
+
+  // Parallel Generation
+  ipcMain.handle('parallel:analyzePlan', (_, novelId: number, chapterStart: number, chapterEnd: number) =>
+    parallelGenerationService.identifyParallelizableSegments(novelId, chapterStart, chapterEnd))
+  ipcMain.handle('parallel:getWorldState', (_, novelId: number, atChapterNum: number) =>
+    parallelGenerationService.buildSharedWorldState(novelId, atChapterNum))
+  ipcMain.handle('parallel:mergeOutputs', (_, segments: unknown[]) =>
+    parallelGenerationService.mergeParallelOutputs(segments as any))
   ipcMain.handle('novel:runConsistencyCheck', (_, id) => consistencyService.buildNovelConsistencyReport(id))
   ipcMain.handle('novel:getStoryMemory', (_, id) => storyMemoryService.buildStoryMemorySnapshot(id))
   ipcMain.handle('novel:getContextStatus', (_, id) => getNovelContextStatus(id))

@@ -765,6 +765,35 @@ export function runMigrations(sqlite: Database.Database) {
       WHERE provider <> 'custom' AND ABS(COALESCE(temperature, 0) - 0.85) < 0.000001;
     `)
   })
+
+  runMigrationStep(sqlite, '0011_embedding_and_style_tables', () => {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS chapter_embeddings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        chapter_id INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
+        fragment_type TEXT NOT NULL,
+        fragment_text TEXT NOT NULL,
+        embedding_json TEXT,
+        model_id TEXT,
+        dimensions INTEGER,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_chapter_embeddings_novel_type ON chapter_embeddings(novel_id, fragment_type);
+
+      CREATE TABLE IF NOT EXISTS style_fingerprints (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER REFERENCES novels(id) ON DELETE SET NULL,
+        name TEXT NOT NULL,
+        source_text TEXT,
+        fingerprint_json TEXT,
+        analysis_model_id TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_style_fingerprints_novel ON style_fingerprints(novel_id);
+    `)
+  })
 }
 
 function ensureMigrationTable(sqlite: Database.Database) {

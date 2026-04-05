@@ -97,4 +97,24 @@ export class OpenAIAdapter extends BaseAdapter {
       stop: opts?.stopSequences,
     }
   }
+
+  async embed(texts: string[], opts?: { model?: string }): Promise<number[][]> {
+    const embeddingModel = opts?.model || 'text-embedding-3-small'
+    const response = await fetch(`${this.baseUrl}/embeddings`, {
+      method: 'POST',
+      headers: this.buildHeaders(),
+      body: JSON.stringify({
+        model: embeddingModel,
+        input: texts,
+      }),
+    })
+
+    if (!response.ok) {
+      const err = await response.text()
+      throw new Error(`OpenAI Embedding API 请求失败（${response.status}）：${err}`)
+    }
+
+    const data = await response.json() as { data: Array<{ embedding: number[] }> }
+    return data.data.map((d) => d.embedding)
+  }
 }

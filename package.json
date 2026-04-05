@@ -45,6 +45,7 @@
     "dayjs": "^1.11.20",
     "docx": "^8.5.0",
     "drizzle-orm": "^0.30.8",
+    "epub-gen-memory": "^1.1.2",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "react-router-dom": "^6.22.0",

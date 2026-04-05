@@ -1249,6 +1249,83 @@ export interface AIScoreResult {
   overall_score: number
   overall_feedback: string
   top_fixes: string[]
+  weak_dimensions?: string[]
+}
+
+export interface QualityDashboardData {
+  heatmapData: Array<{ chapterNum: number; dimension: string; score: number }>
+  overallScoreTrend: Array<{ chapterNum: number; score: number }>
+  aiLikeRateTrend: Array<{ chapterNum: number; rate: number }>
+  weakDimensionFrequency: Array<{ dimension: string; count: number }>
+  chapterDetails: Array<{
+    chapterId: number
+    chapterNum: number
+    title: string
+    overallScore: number
+    aiLikeRate: number
+    weakDimensions: string[]
+    dimensions: AIScoreDimension[]
+  }>
+  totalChaptersScored: number
+  averageOverallScore: number
+  averageAiLikeRate: number
+}
+
+export interface StyleFingerprint {
+  avgSentenceLength: number
+  sentencePatterns: string[]
+  wordFrequencyProfile: Record<string, string[]>
+  narrativeTechniques: string
+  dialogueStyle: string
+  descriptionDensity: string
+  paceProfile: string
+  toneKeywords: string[]
+  forbiddenPatterns: string[]
+  exampleExcerpts: string[]
+}
+
+export interface StyleFingerprintRecord {
+  id: number
+  novelId: number | null
+  name: string
+  sourceText: string | null
+  fingerprintJson: string | null
+  analysisModelId: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ParallelSegmentGroup {
+  id: string
+  label: string
+  arcId: number
+  arcName: string
+  chapterRange: [number, number]
+  primaryCharacterIds: number[]
+  primaryCharacterNames: string[]
+  threadIds: number[]
+  isIndependent: boolean
+}
+
+export interface ParallelGenerationPlan {
+  parallelGroups: ParallelSegmentGroup[][]
+  sequentialSegments: ParallelSegmentGroup[]
+  convergencePoints: number[]
+  estimatedSpeedup: number
+}
+
+export interface ParallelMergeConflict {
+  characterId: number
+  characterName: string
+  conflictType: 'state' | 'location' | 'relationship'
+  description: string
+  sourceSegments: string[]
+}
+
+export interface ParallelMergeResult {
+  conflicts: ParallelMergeConflict[]
+  mergedState: Record<string, unknown>
+  success: boolean
 }
 
 // 扩展 window 类型
@@ -1484,6 +1561,24 @@ declare global {
         markApplied: (taskId: number) => Promise<void>
         finalize: (taskId: number, finalData: Record<string, unknown>) => Promise<PlanningDraftRecord | null>
         clear: (novelId: number, pageKey: PlanningDraftPageKey) => Promise<void>
+      }
+      quality: {
+        getDashboard: (novelId: number) => Promise<QualityDashboardData>
+      }
+      embedding: {
+        reindex: (novelId: number) => Promise<{ reindexed: number }>
+      }
+      style: {
+        analyze: (text: string, modelConfigId?: number) => Promise<StyleFingerprint>
+        create: (novelId: number | null, name: string, text: string, modelConfigId?: number) => Promise<number>
+        get: (id: number) => Promise<StyleFingerprintRecord | null>
+        list: (novelId?: number) => Promise<StyleFingerprintRecord[]>
+        delete: (id: number) => Promise<void>
+      }
+      parallel: {
+        analyzePlan: (novelId: number, chapterStart: number, chapterEnd: number) => Promise<ParallelGenerationPlan>
+        getWorldState: (novelId: number, atChapterNum: number) => Promise<Record<string, unknown>>
+        mergeOutputs: (segments: unknown[]) => Promise<ParallelMergeResult>
       }
       ai: {
         expandBackground: (input: unknown) => Promise<{ expanded_background: string; titles: string[]; synopsis: string }>

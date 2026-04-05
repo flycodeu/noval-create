@@ -20,6 +20,7 @@ import type {
   ChapterPublishCheck,
   NovelConsistencyReport,
   NovelContextStatus,
+  ParallelGenerationPlan,
   StoryItem,
   StoryMemorySnapshot,
   TimelineEvent,
@@ -1125,6 +1126,8 @@ export default function Writing({ novelId }: Props) {
           placeholder="补充要求，例如：更克制、减少说明句、强化动作细节。"
         />
       </Modal>
+
+      <ParallelGenerationModal novelId={novelId} chapters={chapters} />
     </WorkspacePage>
   )
 }
@@ -1239,6 +1242,119 @@ function SegmentBoardPreview({
         ))}
       </div>
     </div>
+  )
+}
+
+function ParallelGenerationModal({ novelId, chapters: chapterList }: { novelId: number; chapters: Chapter[] }) {
+  const [open, setOpen] = useState(false)
+  const [analyzing, setAnalyzing] = useState(false)
+  const [plan, setPlan] = useState<ParallelGenerationPlan | null>(null)
+
+  const handleAnalyze = async () => {
+    if (chapterList.length < 2) {
+      message.warning('至少需要2个章节才能分析并行可能性')
+      return
+    }
+    setAnalyzing(true)
+    try {
+      const minNum = Math.min(...chapterList.map((c) => c.chapterNum))
+      const maxNum = Math.max(...chapterList.map((c) => c.chapterNum))
+      const result = await window.electron.parallel.analyzePlan(novelId, minNum, maxNum)
+      setPlan(result)
+    } catch (error) {
+      message.error('分析失败：' + (error instanceof Error ? error.message : '未知错误'))
+    } finally {
+      setAnalyzing(false)
+    }
+  }
+
+  return (
+    <>
+      <div style={{ position: 'fixed', bottom: 20, right: 20, zIndex: 10 }}>
+        <Button
+          icon={<BranchesOutlined />}
+          onClick={() => setOpen(true)}
+          shape="circle"
+          size="large"
+          title="并行生成分析"
+        />
+      </div>
+      <Modal
+        title="多视角并行生成分析"
+        open={open}
+        onCancel={() => setOpen(false)}
+        footer={null}
+        width={640}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <p style={{ opacity: 0.7 }}>
+            分析故事弧中哪些叙事线可以并行生成。独立叙事线（无共享角色和线索）可以同时生成以加速创作。
+          </p>
+          <Button
+            type="primary"
+            icon={<BranchesOutlined />}
+            loading={analyzing}
+            onClick={() => void handleAnalyze()}
+          >
+            分析并行可能性
+          </Button>
+        </div>
+
+        {plan ? (
+          <div style={{ display: 'grid', gap: 16 }}>
+            <div style={{ display: 'flex', gap: 24 }}>
+              <Tag color="blue">预计加速 {plan.estimatedSpeedup}x</Tag>
+              <Tag color="green">{plan.parallelGroups.length} 组可并行</Tag>
+              <Tag>{plan.sequentialSegments.length} 段需串行</Tag>
+            </div>
+
+            {plan.parallelGroups.length > 0 ? (
+              <div>
+                <div style={{ fontWeight: 500, marginBottom: 8 }}>可并行组</div>
+                {plan.parallelGroups.map((group, gi) => (
+                  <div key={gi} style={{ marginBottom: 12, padding: 12, background: 'rgba(255,255,255,0.04)', borderRadius: 8 }}>
+                    <div style={{ fontSize: 12, opacity: 0.6, marginBottom: 4 }}>并行组 {gi + 1}</div>
+                    {group.map((seg) => (
+                      <div key={seg.id} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4 }}>
+                        <Tag color="processing">{seg.arcName}</Tag>
+                        <span style={{ fontSize: 12 }}>第{seg.chapterRange[0]}-{seg.chapterRange[1]}章</span>
+                        <span style={{ fontSize: 11, opacity: 0.5 }}>
+                          {seg.primaryCharacterNames.slice(0, 3).join('、')}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <Alert type="info" message="当前章节范围内未发现可并行的独立叙事线。不同弧共享了相同角色或线索。" />
+            )}
+
+            {plan.convergencePoints.length > 0 ? (
+              <div>
+                <div style={{ fontWeight: 500, marginBottom: 4 }}>汇合点</div>
+                <div style={{ fontSize: 12, opacity: 0.7 }}>
+                  并行生成完成后需在以下章节做状态合并：
+                  {plan.convergencePoints.map((cp) => `第${cp}章`).join('、')}
+                </div>
+              </div>
+            ) : null}
+
+            {plan.sequentialSegments.length > 0 ? (
+              <div>
+                <div style={{ fontWeight: 500, marginBottom: 4 }}>需串行</div>
+                {plan.sequentialSegments.map((seg) => (
+                  <div key={seg.id} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4 }}>
+                    <Tag>{seg.arcName}</Tag>
+                    <span style={{ fontSize: 12 }}>第{seg.chapterRange[0]}-{seg.chapterRange[1]}章</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </Modal>
+    </>
   )
 }
 
