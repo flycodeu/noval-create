@@ -45,9 +45,12 @@ function truncateToTokens(text: string, maxTokens: number): string {
 }
 
 function resolveRecentContextWindow(targetWords: number, chapterCount: number): number {
-  if (targetWords >= 1500000 || chapterCount >= 400) return 20
-  if (targetWords >= 800000 || chapterCount >= 180) return 15
-  if (targetWords >= 350000 || chapterCount >= 80) return 10
+  if (targetWords >= 1500000 || chapterCount >= 600) return 40
+  if (targetWords >= 1000000 || chapterCount >= 400) return 35
+  if (targetWords >= 800000 || chapterCount >= 280) return 28
+  if (targetWords >= 500000 || chapterCount >= 180) return 22
+  if (targetWords >= 350000 || chapterCount >= 80) return 15
+  if (targetWords >= 150000 || chapterCount >= 40) return 10
   return 8
 }
 
@@ -241,8 +244,24 @@ function dedupe(values: string[], limit?: number): string[] {
   return result
 }
 
-function allocateTokens(parts: ContextPart[], totalBudget: number): Record<string, string> {
+export interface TokenAllocationWarning {
+  label: string
+  priority: number
+  originalTokens: number
+  allocatedTokens: number
+  reason: 'truncated' | 'dropped'
+}
+
+export interface TokenAllocationResult {
+  allocated: Record<string, string>
+  warnings: TokenAllocationWarning[]
+  totalUsed: number
+  totalBudget: number
+}
+
+function allocateTokens(parts: ContextPart[], totalBudget: number): TokenAllocationResult {
   const result: Record<string, string> = {}
+  const warnings: TokenAllocationWarning[] = []
   const p0Parts = parts.filter((part) => part.priority === 0)
 
   let usedTokens = 0
@@ -253,13 +272,30 @@ function allocateTokens(parts: ContextPart[], totalBudget: number): Record<strin
 
   const remaining = totalBudget - usedTokens
   if (remaining <= 0) {
+    // P0 已经超出预算，需要截断
+    const perP0Budget = Math.floor(totalBudget / Math.max(p0Parts.length, 1))
+    usedTokens = 0
     for (const part of p0Parts) {
-      result[part.label] = truncateToTokens(part.content, Math.floor(totalBudget / Math.max(p0Parts.length, 1)))
+      const originalTokens = estimateTokens(part.content)
+      result[part.label] = truncateToTokens(part.content, perP0Budget)
+      const allocatedTokens = estimateTokens(result[part.label])
+      usedTokens += allocatedTokens
+      if (allocatedTokens < originalTokens) {
+        warnings.push({ label: part.label, priority: 0, originalTokens, allocatedTokens, reason: 'truncated' })
+      }
     }
     for (const part of parts.filter((part) => part.priority > 0)) {
       result[part.label] = ''
+      const originalTokens = estimateTokens(part.content)
+      if (originalTokens > 0) {
+        warnings.push({ label: part.label, priority: part.priority, originalTokens, allocatedTokens: 0, reason: 'dropped' })
+      }
     }
-    return result
+    if (warnings.length > 0) {
+      console.warn(`[context] 上下文预算不足(${totalBudget} tokens)，${warnings.length} 个部分被截断或丢弃:`,
+        warnings.map(w => `${w.label}(P${w.priority}): ${w.reason === 'dropped' ? '完全丢弃' : `${w.originalTokens}→${w.allocatedTokens}`}`).join(', '))
+    }
+    return { allocated: result, warnings, totalUsed: usedTokens, totalBudget }
   }
 
   let budget = remaining
@@ -268,17 +304,27 @@ function allocateTokens(parts: ContextPart[], totalBudget: number): Record<strin
       const needed = estimateTokens(part.content)
       if (budget <= 0) {
         result[part.label] = ''
+        if (needed > 0) {
+          warnings.push({ label: part.label, priority, originalTokens: needed, allocatedTokens: 0, reason: 'dropped' })
+        }
       } else if (needed <= budget) {
         result[part.label] = part.content
         budget -= needed
       } else {
         result[part.label] = truncateToTokens(part.content, budget)
+        const allocatedTokens = estimateTokens(result[part.label])
+        warnings.push({ label: part.label, priority, originalTokens: needed, allocatedTokens, reason: 'truncated' })
         budget = 0
       }
     }
   }
 
-  return result
+  if (warnings.length > 0) {
+    console.warn(`[context] 上下文分配警告(预算${totalBudget}, 剩余${budget}):`,
+      warnings.map(w => `${w.label}(P${w.priority}): ${w.reason === 'dropped' ? '丢弃' : `截断${w.originalTokens}→${w.allocatedTokens}`}`).join(', '))
+  }
+
+  return { allocated: result, warnings, totalUsed: totalBudget - budget, totalBudget }
 }
 
 function resolveChapterBudgetFloor(targetWords: number, requestedBudget: number): number {
@@ -1394,7 +1440,7 @@ export function allocateChapterContext(
     return result
   }, [])
 
-  const allocated = allocateTokens(parts, contextBudget)
+  const { allocated } = allocateTokens(parts, contextBudget)
 
   return {
     storyCore: allocated.storyCore || '',

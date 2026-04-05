@@ -1590,6 +1590,7 @@ function resolveContextBudgetForStage(
   stage: ChapterContextStage,
   complexity: ChapterComplexity,
   targetWords: number,
+  novelTargetWords?: number,
 ): number {
   const baseByStage: Record<ChapterContextStage, number> = {
     scenePlan: 10000,
@@ -1608,7 +1609,15 @@ function resolveContextBudgetForStage(
       ? 400
       : 0
 
-  return Math.max(7000, baseByStage[stage] + complexityOffset[complexity] + largeChapterOffset)
+  // 长篇小说需要更多上下文预算来维持连贯性
+  const novelScaleOffset = !novelTargetWords ? 0
+    : novelTargetWords >= 1500000 ? 4000
+    : novelTargetWords >= 800000 ? 2800
+    : novelTargetWords >= 500000 ? 1600
+    : novelTargetWords >= 300000 ? 800
+    : 0
+
+  return Math.max(7000, baseByStage[stage] + complexityOffset[complexity] + largeChapterOffset + novelScaleOffset)
 }
 
 export async function generateChapterContent(chapterId: number, sender?: WebContents): Promise<number> {
@@ -1627,14 +1636,15 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
     outlineMentionedCharacterCount: rawContext.outlineMentionedCharacterCount,
     activeThreadPressureCount: rawContext.activeThreadPressureCount,
   })
+  const novelTargetWords = novel.targetWords || 0
   const stageContext = (promptProfile: ChapterContextStage) => allocateChapterContext(rawContext, {
     promptProfile,
     chapterComplexity: complexity,
-    totalBudget: resolveContextBudgetForStage(promptProfile, complexity, chapter.targetWords || 3000),
+    totalBudget: resolveContextBudgetForStage(promptProfile, complexity, chapter.targetWords || 3000, novelTargetWords),
   })
   const scenePlanContext = stageContext('scenePlan')
   const draftContext = stageContext('draft')
-  const reviewContext = complexity === 'simple' ? draftContext : stageContext('review')
+  const reviewContext = stageContext('review')
   const rewriteContext = stageContext('rewrite')
   const buildWritingGuidance = (styleTemplate: string) => [
     styleTemplate ? `Writing style guide:\n${styleTemplate}` : '',
@@ -1779,8 +1789,8 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
     sendGenerationProgress(sender, {
       chapterId,
       stage: 'reviewing',
-      label: complexity === 'simple' ? '快速质检' : '自动审校',
-      detail: complexity === 'simple' ? '简单章节跳过AI审校，仅运行质量护栏检测。' : '检查承接、事件顺序和语言问题。',
+      label: '自动审校',
+      detail: '检查承接、事件顺序和语言问题。',
       completed: 3,
       total: 4,
       status: 'running',
@@ -1788,8 +1798,8 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
 
     let reviewNotes = buildFallbackReviewNotes(consistencyNotes)
 
-    if (complexity !== 'simple') {
-      // standard/key 章节：完整AI审校
+    {
+      // 所有章节都启用AI审校，确保百万字规模下质量一致
       const reviewResult = await runChatTask({
         type: 'chapter_review',
         novelId: chapter.novelId,
