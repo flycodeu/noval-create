@@ -26,6 +26,7 @@
   type RewriteParagraphPromptInput,
   type SubplotExpandPromptInput,
 } from '../../src/shared/prompt-library'
+import type { AssetReviewTarget } from '../../src/types'
 import { getBuiltinGenreRules } from '../../src/shared/genre-system'
 import { applyPromptOverride } from './prompt-override.service'
 
@@ -56,6 +57,25 @@ type ExtendedBatchCharacterPromptInput = BatchCharacterPromptInput & {
 type ExtendedRegenerateCharacterPromptInput = RegenerateCharacterPromptInput & {
   attemptNumber?: number
   rejectedDigests?: string[]
+}
+
+export interface AssetReviewPromptInput {
+  targetType: AssetReviewTarget
+  contextSummary: string
+  generatedOutput: string
+  schemaHint?: string
+  reviewFocus?: string[]
+}
+
+export interface AssetRewritePromptInput {
+  targetType: AssetReviewTarget
+  contextSummary: string
+  generatedOutput: string
+  reviewSummary: string
+  topFixes?: string[]
+  humanLanguageRepairs?: string[]
+  schemaHint?: string
+  rewriteConstraints?: string[]
 }
 
 export interface BackgroundExpansionResult {
@@ -657,4 +677,86 @@ export function contentScoringPrompt(params: ContentScoringPromptInput): string 
     '只输出 JSON：{"dimensions":[{"name":"创新性","score":0,"feedback":"一句简评","suggestion":"具体改法"},{"name":"丰富度","score":0,"feedback":"一句简评","suggestion":"具体改法"},{"name":"自然度","score":0,"feedback":"一句简评","suggestion":"具体改法"},{"name":"连贯性","score":0,"feedback":"一句简评","suggestion":"具体改法"},{"name":"准确度","score":0,"feedback":"一句简评","suggestion":"具体改法"},{"name":"追读欲","score":0,"feedback":"一句简评","suggestion":"具体改法"}],"ai_like_rate":0,"repetition_risk":"低/中/高","overall_score":0,"overall_feedback":"综合评价","top_fixes":["修改建议1","修改建议2","修改建议3"]}',
   )
   return applyPromptOverride('contentScoring', fallback, params as unknown as Record<string, unknown>)
+}
+
+function assetTargetLabel(targetType: AssetReviewTarget): string {
+  switch (targetType) {
+    case 'character':
+      return '人物资产'
+    case 'item':
+      return '物品资产'
+    case 'thread':
+      return '故事线程'
+    case 'timeline':
+      return '时间轴事件'
+    case 'subplot':
+      return '支线资产'
+    case 'map':
+      return '地图资产'
+    case 'world_rules':
+      return '世界规则分区'
+    default:
+      return '故事资产'
+  }
+}
+
+export function assetReviewPrompt(params: AssetReviewPromptInput): string {
+  const fallback = [
+    `你现在是小说生产链的资产审校器，负责审查一份${assetTargetLabel(params.targetType)}是否适合直接进入写作上下文。`,
+    '',
+    '审校原则：',
+    '- 先判断它是否贴合题材、背景、主线目标与核心冲突。',
+    '- 再判断它是否存在模板腔、设定稿腔、空泛抽象、语言生硬、人机味。',
+    '- 再判断它是否与世界规则、角色关系、时间逻辑或已有资产发生明显冲突。',
+    '- 轻问题使用 rewrite_required=true，表示可通过定向重写修复。',
+    '- 重问题使用 reject_required=true，表示不应直接落库，需要整条拒收或重生。',
+    '',
+    '【上游上下文】',
+    params.contextSummary.trim(),
+    '',
+    '【待审校输出】',
+    params.generatedOutput.trim(),
+    params.schemaHint?.trim() ? `\n【结构提示】\n${params.schemaHint.trim()}` : '',
+    params.reviewFocus && params.reviewFocus.length > 0
+      ? `\n【额外审校重点】\n${params.reviewFocus.map((line) => `- ${line.trim()}`).filter((line) => line !== '-').join('\n')}`
+      : '',
+    '',
+    '只输出 JSON：',
+    '{"summary":"总体判断","severity":"low|medium|high","rewrite_required":false,"reject_required":false,"genre_drift_risks":["风险1"],"theme_drift_risks":["风险1"],"background_drift_risks":["风险1"],"language_risks":["风险1"],"human_language_repairs":["原说法 -> 更自然说法"],"conflict_risks":["风险1"],"top_fixes":["修改建议1","修改建议2"],"strengths":["优点1"]}',
+  ].filter(Boolean).join('\n')
+
+  return applyPromptOverride('assetReview', fallback, params as unknown as Record<string, unknown>)
+}
+
+export function assetRewritePrompt(params: AssetRewritePromptInput): string {
+  const fallback = [
+    `你现在只负责定向修复一份${assetTargetLabel(params.targetType)}，不要另起炉灶，不要换题，不要发明新的主线方向。`,
+    '',
+    '修复原则：',
+    '- 只处理审校里指出的关键问题，优先修语言自然度、背景贴合度、主线贴合度和明显冲突。',
+    '- 如果原输出是 JSON，必须继续只输出 JSON，不要解释，不要 Markdown。',
+    '- 必须尽量保持原有顶层结构、数组长度、对象顺序、字段名和字段语义稳定。',
+    '- 不要新增无关设定，不要把轻修变成整份重写。',
+    '',
+    '【上游上下文】',
+    params.contextSummary.trim(),
+    '',
+    '【审校结论】',
+    params.reviewSummary.trim(),
+    ...(params.topFixes || []).map((line) => `- ${line}`),
+    ...(params.humanLanguageRepairs && params.humanLanguageRepairs.length > 0
+      ? ['语言替换建议：', ...params.humanLanguageRepairs.map((line) => `- ${line}`)]
+      : []),
+    '',
+    '【待修复输出】',
+    params.generatedOutput.trim(),
+    params.schemaHint?.trim() ? `\n【结构提示】\n${params.schemaHint.trim()}` : '',
+    ...(params.rewriteConstraints && params.rewriteConstraints.length > 0
+      ? ['', '【硬约束】', ...params.rewriteConstraints.map((line) => `- ${line.trim()}`)]
+      : []),
+    '',
+    '直接输出修复后的最终内容，不要补充解释。',
+  ].filter(Boolean).join('\n')
+
+  return applyPromptOverride('assetRewrite', fallback, params as unknown as Record<string, unknown>)
 }

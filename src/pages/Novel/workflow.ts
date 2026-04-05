@@ -55,9 +55,13 @@ export interface WorkflowStats {
   outlineCount: number
   timelineCount: number
   revisionTaskCount: number
+  revisionBlockerCount: number
+  revisionOpenCount: number
   chapterCount: number
   completedChapterCount: number
   totalWords: number
+  staleChapterCount: number
+  contextVersion: number
   hasProtagonist: boolean
   volumeCount: number
 }
@@ -105,15 +109,19 @@ export const EMPTY_WORKFLOW_STATS: WorkflowStats = {
   outlineCount: 0,
   timelineCount: 0,
   revisionTaskCount: 0,
+  revisionBlockerCount: 0,
+  revisionOpenCount: 0,
   chapterCount: 0,
   completedChapterCount: 0,
   totalWords: 0,
+  staleChapterCount: 0,
+  contextVersion: 1,
   hasProtagonist: false,
   volumeCount: 0,
 }
 
 export async function loadWorkflowStats(novelId: number): Promise<WorkflowStats> {
-  const [baseStats, characterStats, itemStats, mapStats, threadStats, revisionStats, arcs, timelineStats, volumes] = await Promise.all([
+  const [baseStats, characterStats, itemStats, mapStats, threadStats, revisionStats, arcs, timelineStats, volumes, contextStatus] = await Promise.all([
     window.electron.novel.stats(novelId),
     window.electron.character.getStats({ novelId, page: 1, pageSize: 1 }),
     window.electron.item.getStats({ novelId, page: 1, pageSize: 1 }),
@@ -123,6 +131,7 @@ export async function loadWorkflowStats(novelId: number): Promise<WorkflowStats>
     window.electron.outline.getArcs(novelId),
     window.electron.timeline.getStats({ novelId }),
     window.electron.structure.listVolumes(novelId),
+    window.electron.novel.getContextStatus(novelId),
   ])
 
   return {
@@ -133,9 +142,13 @@ export async function loadWorkflowStats(novelId: number): Promise<WorkflowStats>
     outlineCount: arcs.length,
     timelineCount: timelineStats.total,
     revisionTaskCount: revisionStats.openCount + revisionStats.inProgressCount,
+    revisionBlockerCount: revisionStats.blockerCount,
+    revisionOpenCount: revisionStats.openCount,
     chapterCount: baseStats.totalChapters,
     completedChapterCount: baseStats.completedChapters,
     totalWords: baseStats.totalWords,
+    staleChapterCount: contextStatus.staleChapterCount,
+    contextVersion: contextStatus.contextVersion,
     hasProtagonist: characterStats.protagonistCount > 0,
     volumeCount: Array.isArray(volumes) ? volumes.length : 0,
   }
@@ -433,6 +446,20 @@ export function getWorkflowBlockers(
     pushIfMissing(isStoryThreadsReady(stats), `请先建立故事线程，再${action}。`)
   }
 
+  const requireRevisionBlockersCleared = (action: string) => {
+    pushIfMissing(
+      stats.revisionBlockerCount <= 0,
+      `当前还有 ${stats.revisionBlockerCount} 个高优先级修订问题未处理，请先在修订中心完成，再${action}。`,
+    )
+  }
+
+  const requireFreshChapterContext = (action: string) => {
+    pushIfMissing(
+      stats.staleChapterCount <= 0,
+      `当前有 ${stats.staleChapterCount} 章仍在引用旧上下文，请先同步相关章节的摘要与连续性记忆，再${action}。`,
+    )
+  }
+
   switch (step) {
     case 'world-rules':
       requireBasics('同步世界规则')
@@ -468,6 +495,7 @@ export function getWorkflowBlockers(
       break
     case 'outline':
       pushIfMissing(isStoryPlotReady(novel), '请先完成故事设计，再生成故事大纲。')
+      requireRevisionBlockersCleared('生成故事大纲')
       break
     case 'timeline':
       requireWorldRules('生成时间轴')
@@ -478,11 +506,14 @@ export function getWorkflowBlockers(
         isStoryPlotReady(novel) || stats.outlineCount > 0,
         '请先完成故事设计，或先生成故事大纲，再生成时间轴。',
       )
+      requireRevisionBlockersCleared('生成时间轴')
       break
     case 'writing':
       requireThreads('开始正文写作')
       pushIfMissing(stats.outlineCount > 0, '请先生成故事大纲，再开始正文写作。')
       pushIfMissing(stats.timelineCount > 0, '请先补齐时间轴，再开始正文写作。')
+      requireFreshChapterContext('开始正文写作')
+      requireRevisionBlockersCleared('开始正文写作')
       break
   }
 

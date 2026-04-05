@@ -106,10 +106,20 @@ export interface TaskRecoveryAction {
   path?: string
 }
 
+const RESUMABLE_WORKFLOW_TYPES = new Set([
+  'map_auto_generate',
+  'world_rules_auto_generate',
+  'character_auto_generate',
+  'item_auto_generate',
+  'timeline_auto_generate',
+  'story_thread_auto_generate',
+  'subplot_auto_generate',
+])
+
 export function buildTaskRecoveryAction(task: Task): TaskRecoveryAction | null {
   if (!task.novelId) return null
 
-  if (task.runnerType === 'workflow' && task.status === 'paused' && (task.type === 'map_auto_generate' || task.type === 'world_rules_auto_generate')) {
+  if (task.runnerType === 'workflow' && task.status === 'paused' && RESUMABLE_WORKFLOW_TYPES.has(task.type)) {
     return {
       kind: 'resume',
       label: '继续后台流程',

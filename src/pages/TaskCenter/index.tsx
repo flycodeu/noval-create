@@ -10,7 +10,7 @@ import {
   StopOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
-import { PagedResult, Task, TaskQueryInput, TaskStats } from '../../types'
+import { AssetReviewObservability, PagedResult, Task, TaskQueryInput, TaskStats } from '../../types'
 import { useTaskStore } from '../../stores/task.store'
 import { buildTaskRecoveryAction } from '../Novel/shared/workspace-navigation'
 import {
@@ -68,8 +68,11 @@ const TYPE_LABELS: Record<string, string> = {
   map_auto_generate: 'AI 自动生成地图',
   generate_arcs: 'AI 生成故事弧',
   generate_items: 'AI 生成物品',
+  item_auto_generate: 'AI 自动生成物品',
   generate_timeline: 'AI 生成时间轴',
+  timeline_auto_generate: 'AI 自动生成时间轴',
   subplot_framework: 'AI 生成支线',
+  subplot_auto_generate: 'AI 自动生成支线',
   premise_generate: 'AI 基础设定',
   core_settings_generate: 'AI 生成核心设定',
   project_brief_generate: 'AI 生成项目立项',
@@ -77,6 +80,8 @@ const TYPE_LABELS: Record<string, string> = {
   world_rules_generate: 'AI 生成世界规则',
   world_rules_auto_generate: 'AI 自动生成世界规则',
   story_thread_generate: 'AI 生成故事线程',
+  story_thread_auto_generate: 'AI 自动生成故事线程',
+  character_auto_generate: 'AI 自动生成人物',
   planning_draft: 'AI 规划草稿',
 }
 
@@ -86,7 +91,15 @@ const RUNNER_LABELS: Record<string, string> = {
   workflow: '后台流程',
 }
 
-const RESUMABLE_WORKFLOW_TYPES = new Set(['map_auto_generate', 'world_rules_auto_generate'])
+const RESUMABLE_WORKFLOW_TYPES = new Set([
+  'map_auto_generate',
+  'world_rules_auto_generate',
+  'character_auto_generate',
+  'item_auto_generate',
+  'timeline_auto_generate',
+  'story_thread_auto_generate',
+  'subplot_auto_generate',
+])
 
 function formatTaskPayload(raw?: string): string {
   if (!raw) return ''
@@ -356,11 +369,21 @@ export default function TaskCenter() {
     const draft = progress.draft && typeof progress.draft === 'object' && !Array.isArray(progress.draft)
       ? progress.draft as Record<string, unknown>
       : null
+    const assetReview = progress.assetReview && typeof progress.assetReview === 'object' && !Array.isArray(progress.assetReview)
+      ? progress.assetReview as AssetReviewObservability
+      : null
     const observabilityLines = [
       typeof draft?.inputSummary === 'string' && draft.inputSummary.trim() ? `输入摘要：${draft.inputSummary.trim()}` : '',
       Array.isArray(draft?.warnings) && draft.warnings.length > 0 ? `生成提醒：${draft.warnings.join('；')}` : '',
       Array.isArray(draft?.lintWarnings) && draft.lintWarnings.length > 0 ? `语言 lint：${draft.lintWarnings.join('；')}` : '',
       Array.isArray(draft?.diffSummary) && draft.diffSummary.length > 0 ? `人工修改差异：${draft.diffSummary.join('；')}` : '',
+      assetReview?.targetType ? `资产类型：${assetReview.targetType}` : '',
+      assetReview?.stage ? `质检阶段：${assetReview.stage}` : '',
+      assetReview?.reviewSummary ? `质检结论：${assetReview.reviewSummary}` : '',
+      assetReview?.severity ? `风险等级：${assetReview.severity}` : '',
+      Array.isArray(assetReview?.topFixes) && assetReview.topFixes.length > 0 ? `优先修法：${assetReview.topFixes.join('；')}` : '',
+      Array.isArray(assetReview?.risks) && assetReview.risks.length > 0 ? `质检风险：${assetReview.risks.join('；')}` : '',
+      Array.isArray(assetReview?.warnings) && assetReview.warnings.length > 0 ? `质检备注：${assetReview.warnings.join('；')}` : '',
     ].filter(Boolean)
 
     if (observabilityLines.length > 0) {

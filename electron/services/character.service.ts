@@ -2,6 +2,7 @@ import { WebContents } from 'electron'
 import { asc, eq } from 'drizzle-orm'
 import { getDb, getSqlite } from '../database/db'
 import { characters, characterRelations, novels, storyItems, timelineEvents } from '../database/schema'
+import type { CharacterBatchGenerationOptions } from '../../src/types'
 import { safeParseJson } from '../utils/json'
 import { buildStoryProfile } from './context.service'
 import {
@@ -23,10 +24,11 @@ import {
   markRejected,
   recordGeneration,
 } from './generation-history.service'
-import { runChatTask } from './task.service'
+import { createTask, executeChatTask, runChatTask, updateTask } from './task.service'
 import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/utils/text'
 import { buildCharacterRelationSummaryLine, normalizeCharacterRelationLevel } from '../../src/shared/character-relations'
 import { markNovelContextChanged } from './context-impact.service'
+import { runAssetQualityLoop, summarizeAssetQualityWarnings } from './asset-quality.service'
 
 function asText(value: unknown): string {
   return typeof value === 'string' ? cleanAiFieldText(value) : ''
@@ -140,6 +142,16 @@ function buildRoleQueue(opts: {
   ]
 }
 
+export interface CharacterBatchChunkResult {
+  ids: number[]
+  majorGenerated: number
+  minorGenerated: number
+  antagonistGenerated: number
+  supportingGenerated: number
+  batchDigest?: string
+  warning?: string
+}
+
 function buildStoryCoreSummary(profile: Awaited<ReturnType<typeof buildStoryProfile>>): string {
   return [
     profile.premiseSummary,
@@ -249,6 +261,38 @@ function buildCurrentProfileSummary(character: typeof characters.$inferSelect): 
     character.firstImpression ? `初次印象：${character.firstImpression}` : '',
     parseAppearanceDescription(character.appearanceJson) ? `外貌描述：${parseAppearanceDescription(character.appearanceJson)}` : '',
   ].filter(Boolean).join('\n')
+}
+
+function buildCharacterReviewContext(params: {
+  profile: Awaited<ReturnType<typeof buildStoryProfile>>
+  worldSummary?: string
+  protagonistSummary?: string
+  existingCharacterSummaries?: string
+  relationSummary?: string
+  itemSummary?: string
+  extraLines?: string[]
+}): string {
+  return [
+    `题材：${params.profile.genre}`,
+    params.profile.background ? `背景摘要：${params.profile.background}` : '',
+    params.worldSummary ? `世界规则：${params.worldSummary}` : '',
+    buildStoryCoreSummary(params.profile) ? `故事核心：\n${buildStoryCoreSummary(params.profile)}` : '',
+    params.protagonistSummary ? `主角参考：\n${params.protagonistSummary}` : '',
+    params.existingCharacterSummaries ? `现有人物：\n${params.existingCharacterSummaries}` : '',
+    params.relationSummary ? `关系摘要：\n${params.relationSummary}` : '',
+    params.itemSummary ? `相关资源：\n${params.itemSummary}` : '',
+    ...(params.extraLines || []).filter(Boolean),
+  ].filter(Boolean).join('\n\n')
+}
+
+function characterSchemaHint(expectedCount?: number): string {
+  return [
+    typeof expectedCount === 'number'
+      ? `输出应保持为 ${expectedCount} 个角色对象组成的 JSON 数组。`
+      : '输出应保持为单个角色 JSON 对象。',
+    '不要改动字段语义，不要把人物卡重写成散文。',
+    '姓名、角色定位、背景、目标、矛盾、关系张力等关键字段必须保留。',
+  ].join('\n')
 }
 
 function buildCharacterPayload(
@@ -969,6 +1013,8 @@ export async function generateProtagonist(novelId: number, opts: {
     ...existingChars.map((character) => character.fullName).filter(Boolean),
     ...(opts.forbiddenNames || []).filter(Boolean),
   ])]
+  const existingCharacterSummaries = buildExistingCharacterDigest(existingChars)
+  const itemSummary = buildItemResourceSummary(itemRows)
   const historyEntityType = 'character'
   const historyTaskType = 'character_protagonist'
 
@@ -1002,15 +1048,58 @@ export async function generateProtagonist(novelId: number, opts: {
       rejectedDigests,
     })
 
+    let acceptedCandidate: Record<string, unknown> | null = null
+    let rejectedByQuality = false
     const result = await runChatTask({
       type: 'character_gen',
       novelId,
       messages: [{ role: 'user', content: prompt }],
       modelConfigId: novel.modelConfigId || undefined,
+      onSuccess: async (rawOutput, taskId) => {
+        const quality = await runAssetQualityLoop({
+          targetType: 'character',
+          novelId,
+          modelConfigId: novel.modelConfigId || undefined,
+          relatedEntityType: 'novel',
+          relatedEntityId: novelId,
+          parentTaskId: taskId,
+          contextSummary: buildCharacterReviewContext({
+            profile,
+            worldSummary: profile.worldRulesSummary,
+            protagonistSummary: '这是主角卡，请重点检查主角能否成立为全书最稳定的视角锚点。',
+            existingCharacterSummaries,
+            itemSummary,
+            extraLines: [
+              opts.itemPreferences && opts.itemPreferences.length > 0 ? `偏好线索：${opts.itemPreferences.join('、')}` : '',
+            ],
+          }),
+          generatedOutput: rawOutput,
+          schemaHint: characterSchemaHint(),
+          reviewFocus: [
+            '主角不能像万能模板人设，要有具体欲望、代价和内在矛盾。',
+            '主角描述要能直接进入正文上下文，不要停留在空泛标签。',
+          ],
+          rewriteConstraints: [
+            '保持单个角色 JSON 对象结构稳定。',
+            '不要替换人物姓名，除非原输出根本没有可用姓名。',
+          ],
+        })
+        if (quality.stage === 'rejected') {
+          rejectedByQuality = true
+          return quality
+        }
+        acceptedCandidate = cleanAiValue(safeParseJson<Record<string, unknown>>(quality.finalOutput))
+        return quality
+      },
     })
     const historyId = recordGeneration(novelId, historyEntityType, null, historyTaskType, result, attemptNumber)
 
-    const nextParsed = cleanAiValue(safeParseJson<Record<string, unknown>>(result))
+    if (rejectedByQuality) {
+      markRejected(historyId)
+      continue
+    }
+
+    const nextParsed = acceptedCandidate || cleanAiValue(safeParseJson<Record<string, unknown>>(result))
     const candidateName = asText(nextParsed.full_name) || asText(nextParsed.name)
     if (!hasReservedCharacterName(candidateName, reservedNames)) {
       parsed = nextParsed
@@ -1039,6 +1128,229 @@ export async function generateProtagonist(novelId: number, opts: {
   })
   markNovelContextChanged(novelId, 'Character profiles changed')
   return charId
+}
+
+export async function generateCharacterBatchChunk(
+  novelId: number,
+  opts: CharacterBatchGenerationOptions,
+  runtime: {
+    parentTaskId?: number
+    sender?: WebContents
+    batchIndex?: number
+    totalBatches?: number
+  } = {},
+): Promise<CharacterBatchChunkResult> {
+  const db = getDb()
+  const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
+  if (!novel) throw new Error('小说不存在')
+
+  const profile = await buildStoryProfile(novelId)
+  const rules = parseWorldRulesJson(novel.worldRulesJson, profile.genre)
+  const existingChars = db.select().from(characters).where(eq(characters.novelId, novelId)).all()
+  const itemRows = db.select().from(storyItems).where(eq(storyItems.novelId, novelId)).all()
+  const reservedNames = existingChars.map((character) => character.fullName).filter(Boolean)
+  const protagonist = existingChars.find((character) => character.roleType === 'protagonist')
+  const protagonistSummary = protagonist ? buildCharacterSummary(protagonist) : '主角未设定'
+  const existingCharacterSummaries = buildExistingCharacterDigest(existingChars)
+  const roleBlueprint = buildRoleBlueprintSummary(opts)
+  const itemSummary = buildItemResourceSummary(itemRows)
+  const roleQueue = buildRoleQueue(opts)
+  const totalCount = roleQueue.length
+  if (totalCount <= 0) {
+    return {
+      ids: [],
+      majorGenerated: 0,
+      minorGenerated: 0,
+      antagonistGenerated: 0,
+      supportingGenerated: 0,
+    }
+  }
+
+  const specialRequirements = [
+    opts.specialRequirements,
+    `角色配额：主要人物 ${opts.majorCount}，反派 ${opts.antagonistCount || 0}，功能角色 ${opts.supportingCount || 0}，次要人物 ${opts.minorCount}。`,
+    opts.preferredSpecies && opts.preferredSpecies.length > 0 ? `优先种族或实体：${opts.preferredSpecies.join('、')}。` : '',
+    opts.factionBias && opts.factionBias.length > 0 ? `优先势力来源：${opts.factionBias.join('、')}。` : '',
+    opts.helperRoles && opts.helperRoles.length > 0 ? `优先补齐这些角色功能位：${opts.helperRoles.join('、')}。` : '',
+    itemSummary ? `优先与这些现有物品/资源发生绑定：\n${itemSummary}` : '',
+    '角色必须和题材、背景、地图结构、势力关系与主线冲突直接相关。',
+  ].filter(Boolean).join('\n')
+  const reviewContext = buildCharacterReviewContext({
+    profile,
+    worldSummary: profile.worldRulesSummary,
+    protagonistSummary,
+    existingCharacterSummaries,
+    itemSummary,
+    extraLines: [
+      roleBlueprint ? `角色蓝图：${roleBlueprint}` : '',
+      specialRequirements ? `额外要求：${specialRequirements}` : '',
+    ],
+  })
+  const historyEntityType = 'character'
+  const historyTaskType = 'character_batch'
+  const attemptNumber = getAttemptCount(novelId, historyEntityType, null, historyTaskType) + 1
+  const rejectedDigests = getRecentRejectedDigests(novelId, historyEntityType, null, historyTaskType)
+  const prompt = batchCharacterPrompt({
+    novelTitle: novel.title,
+    novelSynopsis: profile.background,
+    protagonistSummary,
+    existingNames: reservedNames.join('、'),
+    existingCharacterSummaries,
+    genre: profile.genre,
+    worldSummary: profile.worldRulesSummary,
+    storyCore: buildStoryCoreSummary(profile),
+    speciesSummary: buildOptionSummary('可用种族', getSpeciesNameOptions(rules)),
+    factionSummary: buildOptionSummary('核心势力', getFactionNameOptions(rules)),
+    ecologySummary: buildCharacterEcologySummary(rules),
+    mapSummary: buildMapBlueprintSummary(rules),
+    writingConstraints: rules.writingConstraints.extraRules.join('；'),
+    count: totalCount,
+    genderRatio: opts.genderRatio || '不限',
+    specialRequirements,
+    roleBlueprint,
+    relationSeedMode: opts.relationSeedMode,
+    requiredItemLinks: opts.requiredItemLinks?.join('、'),
+    diversityConstraints: opts.diversityConstraints?.join('、'),
+    attemptNumber,
+    rejectedDigests,
+  })
+  const messages = [{ role: 'user' as const, content: prompt }]
+  const inputJson = JSON.stringify(messages)
+  const taskId = await createTask({
+    type: 'character_gen',
+    novelId,
+    modelConfigId: novel.modelConfigId || undefined,
+    relatedEntityType: 'novel',
+    relatedEntityId: novelId,
+    inputJson,
+    runnerType: 'chat',
+    parentTaskId: runtime.parentTaskId,
+  })
+
+  if (typeof runtime.parentTaskId === 'number') {
+    updateTask(runtime.parentTaskId, { currentChildTaskId: taskId })
+  }
+
+  let resultPayload: CharacterBatchChunkResult | null = null
+
+  try {
+    await executeChatTask(taskId, {
+      type: 'character_gen',
+      novelId,
+      modelConfigId: novel.modelConfigId || undefined,
+      relatedEntityType: 'novel',
+      relatedEntityId: novelId,
+      inputJson,
+      messages,
+      sender: runtime.sender,
+      onSuccess: async (result) => {
+        const historyId = recordGeneration(novelId, historyEntityType, null, historyTaskType, result, attemptNumber)
+        const quality = await runAssetQualityLoop({
+          targetType: 'character',
+          novelId,
+          modelConfigId: novel.modelConfigId || undefined,
+          relatedEntityType: 'novel',
+          relatedEntityId: novelId,
+          parentTaskId: taskId,
+          sender: runtime.sender,
+          contextSummary: reviewContext,
+          generatedOutput: result,
+          schemaHint: characterSchemaHint(totalCount),
+          reviewFocus: [
+            '角色描述必须具体，避免只剩标签、履历和模板化设定句。',
+            '每个角色都要和主线冲突、背景环境或关键资源形成可落笔的关系。',
+          ],
+          rewriteConstraints: [
+            '保持角色数组长度不变。',
+            '保持对象顺序和字段语义稳定，不要把批量人物卡改写成说明文。',
+          ],
+        })
+        if (quality.stage === 'rejected') {
+          markRejected(historyId)
+          resultPayload = {
+            ids: [],
+            majorGenerated: 0,
+            minorGenerated: 0,
+            antagonistGenerated: 0,
+            supportingGenerated: 0,
+            warning: summarizeAssetQualityWarnings(quality) || `第 ${runtime.batchIndex || 1}/${runtime.totalBatches || 1} 批人物被审校拒收。`,
+          }
+          return resultPayload
+        }
+
+        let parsed: Array<Record<string, unknown>>
+        try {
+          parsed = cleanAiValue(safeParseJson<Array<Record<string, unknown>>>(quality.finalOutput))
+        } catch (error) {
+          markRejected(historyId)
+          throw error
+        }
+
+        const createdIds: number[] = []
+        const createdNames: string[] = []
+        let majorGenerated = 0
+        let minorGenerated = 0
+        let antagonistGenerated = 0
+        let supportingGenerated = 0
+
+        for (const char of parsed) {
+          const fallbackRole = roleQueue[createdIds.length] || 'minor'
+          const payload = buildCharacterPayload(char, {
+            roleType: normalizeRoleType(asText(char.role_type) || fallbackRole),
+            recordStatus: 'confirmed',
+          })
+          const candidateName = typeof payload.fullName === 'string' ? payload.fullName : ''
+          if (!candidateName || hasReservedCharacterName(candidateName, reservedNames)) {
+            continue
+          }
+          if (itemRows.length > 0 && !payload.contextHooksJson) {
+            payload.contextHooksJson = jsonStringifyArray(itemRows.slice(0, 2).map((item) => `${item.itemName}相关`))
+          }
+          const id = createCharacter(novelId, payload, { skipContextTracking: true })
+          reservedNames.push(candidateName)
+          createdIds.push(id)
+          createdNames.push(candidateName)
+          if (payload.roleType === 'major') majorGenerated += 1
+          else if (payload.roleType === 'antagonist') antagonistGenerated += 1
+          else if (payload.roleType === 'supporting') supportingGenerated += 1
+          else minorGenerated += 1
+          if (createdIds.length >= totalCount) break
+        }
+
+        if (createdIds.length === 0) {
+          markRejected(historyId)
+        }
+        if (createdIds.length > 0) {
+          markNovelContextChanged(novelId, 'Character profiles changed')
+        }
+
+        resultPayload = {
+          ids: createdIds,
+          majorGenerated,
+          minorGenerated,
+          antagonistGenerated,
+          supportingGenerated,
+          batchDigest: createdNames.slice(0, 4).join('、'),
+          warning: createdIds.length > 0
+            ? summarizeAssetQualityWarnings(quality)
+            : (summarizeAssetQualityWarnings(quality) || `第 ${runtime.batchIndex || 1}/${runtime.totalBatches || 1} 批没有生成可用人物。`),
+        }
+        return resultPayload
+      },
+    })
+  } finally {
+    if (typeof runtime.parentTaskId === 'number') {
+      updateTask(runtime.parentTaskId, { currentChildTaskId: null })
+    }
+  }
+
+  return resultPayload || {
+    ids: [],
+    majorGenerated: 0,
+    minorGenerated: 0,
+    antagonistGenerated: 0,
+    supportingGenerated: 0,
+  }
 }
 
 export async function batchGenerateCharacters(novelId: number, opts: {
@@ -1070,6 +1382,17 @@ export async function batchGenerateCharacters(novelId: number, opts: {
   const existingCharacterSummaries = buildExistingCharacterDigest(existingChars)
   const roleBlueprint = buildRoleBlueprintSummary(opts)
   const itemSummary = buildItemResourceSummary(itemRows)
+  const reviewContext = buildCharacterReviewContext({
+    profile,
+    worldSummary: profile.worldRulesSummary,
+    protagonistSummary,
+    existingCharacterSummaries,
+    itemSummary,
+    extraLines: [
+      roleBlueprint ? `角色蓝图：${roleBlueprint}` : '',
+      opts.specialRequirements ? `额外要求：${opts.specialRequirements}` : '',
+    ],
+  })
 
   const roleQueue = buildRoleQueue(opts)
   const specialRequirements = [
@@ -1118,17 +1441,61 @@ export async function batchGenerateCharacters(novelId: number, opts: {
       rejectedDigests,
     })
 
+    let acceptedBatch: Array<Record<string, unknown>> | null = null
+    let rejectedByQuality = false
     const result = await runChatTask({
       type: 'character_gen',
       novelId,
       messages: [{ role: 'user', content: prompt }],
       modelConfigId: novel.modelConfigId || undefined,
+      sender,
+      onSuccess: async (rawOutput, taskId) => {
+        const quality = await runAssetQualityLoop({
+          targetType: 'character',
+          novelId,
+          modelConfigId: novel.modelConfigId || undefined,
+          relatedEntityType: 'novel',
+          relatedEntityId: novelId,
+          parentTaskId: taskId,
+          sender,
+          contextSummary: reviewContext,
+          generatedOutput: rawOutput,
+          schemaHint: characterSchemaHint(batchCount),
+          reviewFocus: [
+            '人物卡必须具体，不能只剩模板标签、履历词和空泛人设。',
+            '人物与主线、背景、关键资源之间要存在可直接写进正文的钩子。',
+          ],
+          rewriteConstraints: [
+            '保持角色数组长度不变。',
+            '保持对象顺序和字段语义稳定，不要把人物卡改写成散文。',
+          ],
+        })
+        if (quality.stage === 'rejected') {
+          rejectedByQuality = true
+          return quality
+        }
+        acceptedBatch = cleanAiValue(safeParseJson<Array<Record<string, unknown>>>(quality.finalOutput))
+        return quality
+      },
     })
     const historyId = recordGeneration(novelId, historyEntityType, null, historyTaskType, result, attemptNumber)
     const beforeCreateCount = newIds.length
 
+    if (rejectedByQuality) {
+      markRejected(historyId)
+      if (sender && !sender.isDestroyed()) {
+        sender.send('character:batch-progress', {
+          batch: generatedAttempts + 1,
+          total: Math.max(1, Math.ceil(totalCount / Math.max(1, opts.batchSize))),
+          newIds,
+        })
+      }
+      generatedAttempts += 1
+      continue
+    }
+
     try {
-      const parsed = cleanAiValue(safeParseJson<Array<Record<string, unknown>>>(result))
+      const parsed = acceptedBatch || cleanAiValue(safeParseJson<Array<Record<string, unknown>>>(result))
       for (const char of parsed) {
         const fallbackRole = roleQueue[newIds.length] || 'minor'
         const payload = buildCharacterPayload(char, {
@@ -1184,6 +1551,7 @@ export async function regenerateCharacter(id: number): Promise<typeof characters
   const profile = await buildStoryProfile(current.novelId)
   const rules = parseWorldRulesJson(novel.worldRulesJson, profile.genre)
   const allCharacters = db.select().from(characters).where(eq(characters.novelId, current.novelId)).all()
+  const itemRows = db.select().from(storyItems).where(eq(storyItems.novelId, current.novelId)).all()
   const relationRows = db.select().from(characterRelations).where(eq(characterRelations.novelId, current.novelId)).all()
     .filter((relation) => relation.charAId === current.id || relation.charBId === current.id)
 
@@ -1214,6 +1582,21 @@ export async function regenerateCharacter(id: number): Promise<typeof characters
     })
     .filter(Boolean)
     .join("\n")
+  const protagonist = allCharacters.find((character) => character.roleType === 'protagonist')
+  const protagonistSummary = protagonist ? buildCharacterSummary(protagonist) : ''
+  const itemSummary = buildItemResourceSummary(itemRows)
+  const reviewContext = buildCharacterReviewContext({
+    profile,
+    worldSummary: profile.worldRulesSummary,
+    protagonistSummary,
+    existingCharacterSummaries: buildExistingCharacterDigest(allCharacters.filter((character) => character.id !== current.id)),
+    relationSummary,
+    itemSummary,
+    extraLines: [
+      `当前人物卡：\n${buildCurrentProfileSummary(current)}`,
+      relatedCharacters ? `关联人物：\n${relatedCharacters}` : '',
+    ],
+  })
   const historyEntityType = 'character'
   const historyTaskType = 'character_regenerate'
   const attemptNumber = getAttemptCount(current.novelId, historyEntityType, current.id, historyTaskType) + 1
@@ -1239,6 +1622,8 @@ export async function regenerateCharacter(id: number): Promise<typeof characters
     rejectedDigests,
   })
 
+  let acceptedCandidate: Record<string, unknown> | null = null
+  let rejectedByQuality = false
   const result = await runChatTask({
     type: 'character_gen',
     novelId: current.novelId,
@@ -1246,10 +1631,42 @@ export async function regenerateCharacter(id: number): Promise<typeof characters
     relatedEntityId: current.id,
     messages: [{ role: 'user', content: prompt }],
     modelConfigId: novel.modelConfigId || undefined,
+    onSuccess: async (rawOutput, taskId) => {
+      const quality = await runAssetQualityLoop({
+        targetType: 'character',
+        novelId: current.novelId,
+        modelConfigId: novel.modelConfigId || undefined,
+        relatedEntityType: 'character',
+        relatedEntityId: current.id,
+        parentTaskId: taskId,
+        contextSummary: reviewContext,
+        generatedOutput: rawOutput,
+        schemaHint: characterSchemaHint(),
+        reviewFocus: [
+          '修复后的人物卡必须继续占据原功能位，不能漂移成另一个无关角色。',
+          '优先修复空泛、冲突、关系失真和语言模板感。',
+        ],
+        rewriteConstraints: [
+          '保持单个角色 JSON 对象结构稳定。',
+          '除非原输出缺名，否则不要替换锁定姓名。',
+        ],
+      })
+      if (quality.stage === 'rejected') {
+        rejectedByQuality = true
+        return quality
+      }
+      acceptedCandidate = cleanAiValue(safeParseJson<Record<string, unknown>>(quality.finalOutput))
+      return quality
+    },
   })
-  recordGeneration(current.novelId, historyEntityType, current.id, historyTaskType, result, attemptNumber)
+  const historyId = recordGeneration(current.novelId, historyEntityType, current.id, historyTaskType, result, attemptNumber)
 
-  const parsed = cleanAiValue(safeParseJson<Record<string, unknown>>(result))
+  if (rejectedByQuality) {
+    markRejected(historyId)
+    return current
+  }
+
+  const parsed = acceptedCandidate || cleanAiValue(safeParseJson<Record<string, unknown>>(result))
   const payload = buildCharacterPayload(parsed, {
     existing: current,
     fullName: current.fullName,

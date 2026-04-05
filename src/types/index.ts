@@ -298,6 +298,20 @@ export interface CharacterBatchGenerationOptions {
   diversityConstraints?: string[]
 }
 
+export interface StoryItemGenerateOptions {
+  count?: number
+  batchSize?: number
+  focus?: string
+  refreshTemplates?: boolean
+  templateOnly?: boolean
+}
+
+export interface TimelineGenerateOptions {
+  count?: number
+  batchSize?: number
+  focus?: string
+}
+
 export interface CharacterDetailContext {
   relatedItems: StoryItem[]
   relatedCharacters: Character[]
@@ -582,6 +596,42 @@ export interface Task {
   updatedAt: string
 }
 
+export type AssetReviewTarget =
+  | 'character'
+  | 'item'
+  | 'thread'
+  | 'timeline'
+  | 'subplot'
+  | 'map'
+  | 'world_rules'
+
+export interface AssetReviewResult {
+  summary: string
+  severity: 'low' | 'medium' | 'high'
+  rewriteRequired: boolean
+  rejectRequired: boolean
+  genreDriftRisks: string[]
+  themeDriftRisks: string[]
+  backgroundDriftRisks: string[]
+  languageRisks: string[]
+  humanLanguageRepairs: string[]
+  conflictRisks: string[]
+  topFixes: string[]
+  strengths?: string[]
+}
+
+export interface AssetReviewObservability {
+  targetType: AssetReviewTarget
+  stage: 'drafted' | 'reviewed' | 'rewritten' | 'rejected' | 'accepted'
+  reviewSummary: string
+  severity: AssetReviewResult['severity']
+  rewriteRequired: boolean
+  rejectRequired: boolean
+  topFixes: string[]
+  risks: string[]
+  warnings?: string[]
+}
+
 export interface TaskQueryInput {
   novelId?: number
   status?: Task['status']
@@ -706,6 +756,57 @@ export interface WorldRulesAutoGenerateStatus {
   completed: boolean
   message?: string
   workingRules?: GenreWorldRules
+}
+
+export interface BatchAutoGenerateStatusBase {
+  taskId: number
+  novelId: number
+  status: Task['status']
+  requestedCount: number
+  batchSize: number
+  currentBatch: number
+  totalBatches: number
+  resumeCursor: number
+  generatedCount: number
+  retryCount: number
+  lastError?: string
+  completed: boolean
+  message?: string
+  batchDigest?: string
+}
+
+export interface EntityBatchAutoGenerateStatus extends BatchAutoGenerateStatusBase {
+  acceptedIds: number[]
+  warnings: string[]
+}
+
+export interface CharacterAutoGenerateStatus extends EntityBatchAutoGenerateStatus {
+  majorGenerated: number
+  minorGenerated: number
+  antagonistGenerated: number
+  supportingGenerated: number
+}
+
+export type ItemAutoGenerateStatus = EntityBatchAutoGenerateStatus
+export type TimelineAutoGenerateStatus = EntityBatchAutoGenerateStatus
+
+export interface StoryThreadAutoGenerateStatus extends BatchAutoGenerateStatusBase {
+  acceptedIds: number[]
+  warnings: string[]
+}
+
+export interface SubplotAutoGenerateRequest {
+  novelId: number
+  subplotCount: number
+  storyGoal: string
+  coreConflict: string
+  mainPlot: string
+  requirements?: string
+}
+
+export interface SubplotAutoGenerateStatus extends BatchAutoGenerateStatusBase {
+  subplots: SubPlotDraft[]
+  warnings: string[]
 }
 
 export interface StoryItemQueryInput {
@@ -980,6 +1081,11 @@ export interface StoryMemoryCheckpoint {
   summary?: string
   resolvedThreadsJson?: string
   activeThreadsJson?: string
+  characterCardsJson?: string
+  relationCardsJson?: string
+  itemCardsJson?: string
+  timelineCardsJson?: string
+  threadCardsJson?: string
   characterStateDigest?: string
   relationDigest?: string
   itemDigest?: string
@@ -1437,6 +1543,10 @@ declare global {
         delete: (id: number) => Promise<void>
         regenerate: (id: number) => Promise<Character | null>
         batchGenerate: (novelId: number, opts: CharacterBatchGenerationOptions) => Promise<number[]>
+        startAutoGenerate: (novelId: number, opts: CharacterBatchGenerationOptions) => Promise<number>
+        getAutoGenerateStatus: (taskId: number) => Promise<CharacterAutoGenerateStatus | null>
+        getLatestAutoGenerateTask: (novelId: number) => Promise<Task | null>
+        resumeAutoGenerate: (taskId: number) => Promise<number>
         generateProtagonist: (novelId: number, opts: CharacterGenerationOptions) => Promise<number>
         getRelations: (novelId: number) => Promise<CharacterRelation[]>
         generateRelations: (novelId: number) => Promise<void>
@@ -1482,7 +1592,11 @@ declare global {
         delete: (id: number) => Promise<void>
         batchUpdate: (ids: number[], data: Partial<Pick<TimelineEvent, 'status' | 'isMajorEvent'>>) => Promise<number>
         batchDelete: (ids: number[]) => Promise<number>
-        generate: (novelId: number, options?: unknown) => Promise<number[]>
+        generate: (novelId: number, options?: TimelineGenerateOptions) => Promise<number[]>
+        startAutoGenerate: (novelId: number, options?: TimelineGenerateOptions) => Promise<number>
+        getAutoGenerateStatus: (taskId: number) => Promise<TimelineAutoGenerateStatus | null>
+        getLatestAutoGenerateTask: (novelId: number) => Promise<Task | null>
+        resumeAutoGenerate: (taskId: number) => Promise<number>
         regenerate: (id: number, options?: EntityRegenerateOptions) => Promise<TimelineEvent | null>
         clear: (novelId: number) => Promise<void>
       }
@@ -1497,7 +1611,11 @@ declare global {
         create: (novelId: number, data: Partial<StoryItem>) => Promise<number>
         update: (id: number, data: Partial<StoryItem>) => Promise<void>
         delete: (id: number) => Promise<void>
-        generate: (novelId: number, options?: unknown) => Promise<number[]>
+        generate: (novelId: number, options?: StoryItemGenerateOptions) => Promise<number[]>
+        startAutoGenerate: (novelId: number, options?: StoryItemGenerateOptions) => Promise<number>
+        getAutoGenerateStatus: (taskId: number) => Promise<ItemAutoGenerateStatus | null>
+        getLatestAutoGenerateTask: (novelId: number) => Promise<Task | null>
+        resumeAutoGenerate: (taskId: number) => Promise<number>
         regenerate: (id: number, options?: EntityRegenerateOptions) => Promise<StoryItem | null>
         clear: (novelId: number) => Promise<void>
       }
@@ -1516,12 +1634,23 @@ declare global {
         getStats: (filters: StoryThreadQueryInput) => Promise<StoryThreadStats>
         get: (id: number) => Promise<StoryThread | null>
         generate: (novelId: number, options?: StoryThreadBatchGenerateOptions) => Promise<StoryThreadBatchGenerationResult>
+        startAutoGenerate: (novelId: number, options?: StoryThreadBatchGenerateOptions) => Promise<number>
+        getAutoGenerateStatus: (taskId: number) => Promise<StoryThreadAutoGenerateStatus | null>
+        getLatestAutoGenerateTask: (novelId: number) => Promise<Task | null>
+        resumeAutoGenerate: (taskId: number) => Promise<number>
         create: (novelId: number, data: Partial<StoryThread>) => Promise<number>
         update: (id: number, data: Partial<StoryThread>) => Promise<void>
         delete: (id: number) => Promise<void>
         batchUpdate: (ids: number[], data: Partial<Pick<StoryThread, 'status' | 'priority'>>) => Promise<number>
         batchDelete: (ids: number[]) => Promise<number>
         regenerate: (id: number, options?: EntityRegenerateOptions) => Promise<StoryThread | null>
+      }
+      subplot: {
+        generate: (request: SubplotAutoGenerateRequest) => Promise<SubPlotDraft[]>
+        startAutoGenerate: (request: SubplotAutoGenerateRequest) => Promise<number>
+        getAutoGenerateStatus: (taskId: number) => Promise<SubplotAutoGenerateStatus | null>
+        getLatestAutoGenerateTask: (novelId: number) => Promise<Task | null>
+        resumeAutoGenerate: (taskId: number) => Promise<number>
       }
       history: {
         listRecent: (novelId: number, limit?: number) => Promise<OperationLog[]>

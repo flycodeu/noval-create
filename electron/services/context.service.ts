@@ -15,10 +15,22 @@ import {
 } from '../../src/shared/story-settings'
 import { buildThemeVoiceSummary, parseThemeVoiceDocument } from '../../src/shared/theme-voice'
 import { buildWritingContractSummary } from '../../src/shared/writing-contract'
-import { buildCharacterRelationSummaryLine } from '../../src/shared/character-relations'
 import { buildStoryMemoryPromptSummary } from './story-memory.service'
 import { ensureStoryStructure } from './story-structure.service'
 import { resolveModelRuntimeBudget } from './model.service'
+import {
+  buildCharacterContextCards,
+  buildRelationContextCards,
+  buildItemContextCards,
+  buildTimelineContextCards,
+  buildChapterThreadContextCards,
+  buildGenericThreadCardsFromTexts,
+  renderCharacterCards,
+  renderRelationCards,
+  renderItemCards,
+  renderTimelineCards,
+  renderThreadCards,
+} from './context-cards'
 
 /**
  * 改进的 token 估算：中文字符约 1 token/字，英文约 0.25 token/word (4 chars/token)，
@@ -242,6 +254,242 @@ function dedupe(values: string[], limit?: number): string[] {
     if (limit && result.length >= limit) break
   }
   return result
+}
+
+type RecallBucketKey = 'character' | 'rule' | 'thread'
+
+interface RecallQueryBucket {
+  bucket: RecallBucketKey
+  query: string
+  topK: number
+}
+
+interface RecallQueryBuildInput {
+  chapterGoal: string
+  outline: string
+  arcGoal: string
+  arcSummary: string
+  storyGoal: string
+  coreConflict: string
+  mainPlot: string
+  themeVoiceSummary: string
+  worldRules: string
+  relationSummary: string
+  characterStates: string
+  itemSummary: string
+  timelineSummary: string
+  timelineOpenThreads: string
+  activeThreads: string
+  openLoops: string
+  continuityNotes: string
+  storyThreadsSummary: string
+  mentionedCharacters: string[]
+  mentionedItems: string[]
+  mentionedLocations: string[]
+}
+
+interface RecallHit {
+  bucket: RecallBucketKey
+  chapterId: number
+  fragmentType: string
+  fragmentText: string
+  similarity: number
+}
+
+function compactRecallLine(text: string, maxLength = 96): string {
+  const normalized = text
+    .replace(/\r\n/g, '\n')
+    .replace(/\s*\n+\s*/g, '；')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!normalized) return ''
+  if (normalized.length <= maxLength) return normalized
+  return `${normalized.slice(0, Math.max(maxLength - 1, 1)).trim()}…`
+}
+
+function splitRecallLines(text: string, maxLines = 4, maxLength = 96): string[] {
+  if (!text) return []
+  const lines = text
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => compactRecallLine(line, maxLength))
+    .filter(Boolean)
+  if (lines.length > 0) return dedupe(lines, maxLines)
+  return dedupe([compactRecallLine(text, maxLength)].filter(Boolean), maxLines)
+}
+
+function collectMentionedEntityNames(
+  sourceText: string,
+  candidateNames: string[],
+  limit: number,
+): string[] {
+  if (!sourceText.trim()) return []
+  return dedupe(
+    candidateNames
+      .map((name) => name.trim())
+      .filter((name) => Boolean(name) && sourceText.includes(name))
+      .sort((left, right) => right.length - left.length),
+    limit,
+  )
+}
+
+function buildRecallQueryText(
+  title: string,
+  sections: Array<{ title: string; lines: string[] }>,
+  maxTokens = 450,
+): string {
+  const content = sections
+    .filter((section) => section.lines.length > 0)
+    .flatMap((section) => [
+      `${section.title}：`,
+      ...section.lines.map((line) => `- ${line}`),
+    ])
+    .join('\n')
+  if (!content) return ''
+  return truncateToTokens(`${title}\n${content}`, maxTokens)
+}
+
+function buildRecallQueryBuckets(input: RecallQueryBuildInput): RecallQueryBucket[] {
+  const characterQuery = buildRecallQueryText('角色关系召回', [
+    {
+      title: '本章任务',
+      lines: dedupe([
+        compactRecallLine(input.chapterGoal, 80),
+        ...splitRecallLines(input.outline, 3, 84),
+        compactRecallLine(input.arcGoal, 80),
+      ], 4),
+    },
+    {
+      title: '当前涉及人物物品地点',
+      lines: dedupe([
+        input.mentionedCharacters.length > 0 ? `人物=${input.mentionedCharacters.join('、')}` : '',
+        input.mentionedItems.length > 0 ? `物品=${input.mentionedItems.join('、')}` : '',
+        input.mentionedLocations.length > 0 ? `地点=${input.mentionedLocations.join('、')}` : '',
+      ], 3),
+    },
+    {
+      title: '关系冲突',
+      lines: splitRecallLines(input.relationSummary, 4, 96),
+    },
+    {
+      title: '人物状态',
+      lines: splitRecallLines(input.characterStates, 4, 96),
+    },
+  ])
+
+  const ruleQuery = buildRecallQueryText('规则主题召回', [
+    {
+      title: '本章任务',
+      lines: dedupe([
+        compactRecallLine(input.chapterGoal, 80),
+        compactRecallLine(input.arcGoal, 80),
+        compactRecallLine(input.arcSummary, 84),
+      ], 3),
+    },
+    {
+      title: '主线与主题',
+      lines: dedupe([
+        compactRecallLine(input.storyGoal, 80),
+        compactRecallLine(input.coreConflict, 80),
+        compactRecallLine(input.mainPlot, 84),
+        ...splitRecallLines(input.themeVoiceSummary, 3, 84),
+      ], 5),
+    },
+    {
+      title: '世界规则与边界',
+      lines: splitRecallLines(input.worldRules, 5, 96),
+    },
+    {
+      title: '时序与物品约束',
+      lines: dedupe([
+        ...splitRecallLines(input.timelineSummary, 2, 90),
+        ...splitRecallLines(input.itemSummary, 2, 90),
+      ], 4),
+    },
+  ])
+
+  const threadQuery = buildRecallQueryText('线程伏笔召回', [
+    {
+      title: '本章与故事弧',
+      lines: dedupe([
+        compactRecallLine(input.chapterGoal, 80),
+        compactRecallLine(input.arcGoal, 80),
+        compactRecallLine(input.arcSummary, 84),
+      ], 3),
+    },
+    {
+      title: '活跃线程',
+      lines: dedupe([
+        ...splitRecallLines(input.activeThreads, 4, 96),
+        ...splitRecallLines(input.storyThreadsSummary, 3, 96),
+      ], 6),
+    },
+    {
+      title: '待回收事项',
+      lines: dedupe([
+        ...splitRecallLines(input.openLoops, 4, 90),
+        ...splitRecallLines(input.timelineOpenThreads, 3, 90),
+        ...splitRecallLines(input.continuityNotes, 3, 90),
+      ], 6),
+    },
+  ])
+
+  return [
+    characterQuery ? { bucket: 'character' as const, query: characterQuery, topK: 4 } : null,
+    ruleQuery ? { bucket: 'rule' as const, query: ruleQuery, topK: 3 } : null,
+    threadQuery ? { bucket: 'thread' as const, query: threadQuery, topK: 4 } : null,
+  ].filter((bucket): bucket is RecallQueryBucket => Boolean(bucket))
+}
+
+function summarizeRecallHit(hit: RecallHit): string {
+  const lines = hit.fragmentText
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => compactRecallLine(line, 96))
+    .filter(Boolean)
+
+  if (lines.length === 0) return ''
+  if (hit.fragmentType !== 'continuity') {
+    return compactRecallLine(lines.slice(0, 2).join('；'), 110)
+  }
+
+  const preferredPrefixes = hit.bucket === 'character'
+    ? ['人物变化：', '剧情推进：', '承接提醒：']
+    : hit.bucket === 'rule'
+      ? ['世界变化：', '承接提醒：', '剧情推进：', '故事弧推进：']
+      : ['未回收事项：', '承接提醒：', '故事弧推进：', '剧情推进：']
+
+  const preferred = lines.filter((line) => preferredPrefixes.some((prefix) => line.startsWith(prefix)))
+  return compactRecallLine((preferred.length > 0 ? preferred : lines).slice(0, 2).join('；'), 110)
+}
+
+function formatRecalledMemory(bucketResults: Array<{ bucket: RecallBucketKey; hits: RecallHit[] }>): string {
+  const labels: Record<RecallBucketKey, string> = {
+    character: '角色/关系召回',
+    rule: '规则/主题召回',
+    thread: '线程/伏笔召回',
+  }
+  const lines: string[] = []
+  const seen = new Set<string>()
+
+  for (const result of bucketResults) {
+    const significant = result.hits.filter((hit) => hit.similarity > 0.08)
+    const selected = significant.length > 0
+      ? significant.slice(0, 2)
+      : result.hits.filter((hit) => hit.similarity > 0).slice(0, 1)
+
+    for (const hit of selected) {
+      const summary = summarizeRecallHit(hit)
+      if (!summary) continue
+      const dedupeKey = `${hit.fragmentType}:${summary}`
+      if (seen.has(dedupeKey)) continue
+      seen.add(dedupeKey)
+      lines.push(`[${labels[result.bucket]}·${hit.fragmentType}] ${summary}`)
+      if (lines.length >= 6) return lines.join('\n')
+    }
+  }
+
+  return lines.join('\n')
 }
 
 export interface TokenAllocationWarning {
@@ -727,61 +975,29 @@ function formatArcContext(arc?: typeof storyArcs.$inferSelect | null): string {
   ].filter(Boolean).join('\n')
 }
 
-function getImportantCharacters(
-  allCharacters: Array<typeof characters.$inferSelect>,
-  mentionedNames?: Set<string>,
-): Array<typeof characters.$inferSelect> {
-  const rolePriority = ['protagonist', 'major', 'antagonist', 'supporting']
-  const sorted = [...allCharacters]
-    .sort((left, right) => {
-      // 本章提及的角色优先
-      const leftMentioned = mentionedNames?.has(left.fullName || '') ? -10 : 0
-      const rightMentioned = mentionedNames?.has(right.fullName || '') ? -10 : 0
-      return (leftMentioned + rolePriority.indexOf(left.roleType || 'minor'))
-        - (rightMentioned + rolePriority.indexOf(right.roleType || 'minor'))
-    })
-  // 扩展到最多 15 个角色（从 8 个）
-  return sorted.slice(0, 15)
-}
-
 function buildCharacterStates(
   allCharacters: Array<typeof characters.$inferSelect>,
   recentChapters: ChapterWithContinuity[],
   mentionedNames?: Set<string>,
 ): string {
-  const protagonist = getCanonicalProtagonist(allCharacters)
-  const staticLines = getImportantCharacters(allCharacters, mentionedNames).map((character) => {
-    const traits = character.personalityTraitsJson
-      ? toStringArray(parseJsonRecord(`{"items":${character.personalityTraitsJson}}`).items).slice(0, 2).join('、')
-      : ''
-    const speechInfo = [
-      character.speechPattern ? `说话方式=${character.speechPattern}` : '',
-      character.catchphrases ? `口头禅=${character.catchphrases}` : '',
-      character.vocabularyLevel ? `用词水平=${character.vocabularyLevel}` : '',
-      character.dialectFeatures ? `方言特征=${character.dialectFeatures}` : '',
-    ].filter(Boolean).join('；')
-    const summary = [
-      character.entityType ? `实体=${character.entityType}` : '',
-      character.species ? `种族=${character.species}` : '',
-      character.occupation || '',
-      character.rankLevel || '',
-      character.socialIdentity || '',
-      traits || '',
-      character.goals || '',
-      character.innerConflict || '',
-      character.relationshipTension || '',
-      speechInfo || '',
-    ].filter(Boolean).join('；')
-    const displayName = protagonist && character.id === protagonist.id ? protagonist.fullName : character.fullName
-    return `${displayName}（${character.roleType || 'minor'}）：${summary || '暂无补充'}`
+  if (allCharacters.length === 0) return ''
+  const db = getDb()
+  const novelId = allCharacters[0]?.novelId
+  const relationRows = typeof novelId === 'number'
+    ? db.select().from(characterRelations).where(eq(characterRelations.novelId, novelId)).all()
+    : []
+  const cards = buildCharacterContextCards({
+    allCharacters,
+    relationRows,
+    recentStateEntries: recentChapters.flatMap((chapter) =>
+      chapter.continuityState.characterStateChanges.map((entry) => ({
+        chapterNum: chapter.chapterNum,
+        entry,
+      }))),
+    mentionedNames,
+    limit: 15,
   })
-
-  const dynamicLines = dedupe(
-    recentChapters.flatMap((chapter) => chapter.continuityState.characterStateChanges.map((item) => `第${chapter.chapterNum}章：${item}`)),
-    15,
-  )
-
-  return [...staticLines, ...dynamicLines].filter(Boolean).join('\n')
+  return renderCharacterCards(cards)
 }
 
 function extractChapterGoal(outline?: string | null): string {
@@ -836,41 +1052,14 @@ export function buildStoryRelationSummary(
 ): string {
   const db = getDb()
   const relationRows = db.select().from(characterRelations).where(eq(characterRelations.novelId, novelId)).all()
-  if (relationRows.length === 0 || allCharacters.length < 2) return ""
+  if (relationRows.length === 0 || allCharacters.length < 2) return ''
 
-  const nameMap = new Map(allCharacters.map((character) => [character.id, character.fullName]))
-  const focusIds = new Set<number>()
-  const normalizedFocusText = focusText.trim()
-
-  allCharacters.forEach((character) => {
-    if (!character.fullName) return
-    if (character.roleType === "protagonist" || character.roleType === "major" || character.roleType === "antagonist") {
-      focusIds.add(character.id)
-    }
-    if (normalizedFocusText && normalizedFocusText.includes(character.fullName)) {
-      focusIds.add(character.id)
-    }
-  })
-
-  return relationRows
-    .filter((relation) => Boolean(nameMap.get(relation.charAId)) && Boolean(nameMap.get(relation.charBId)))
-    .map((relation) => ({
-      relation,
-      score:
-        (focusIds.has(relation.charAId) ? 3 : 0) +
-        (focusIds.has(relation.charBId) ? 3 : 0) +
-        Number(relation.intimacyLevel || 0) +
-        Number(relation.tensionLevel || 0) +
-        (relation.relationType === "lover" || relation.relationType === "enemy" || relation.relationType === "family" ? 1 : 0),
-    }))
-    .sort((left, right) => right.score - left.score || right.relation.id - left.relation.id)
-    .slice(0, limit)
-    .map(({ relation }) => buildCharacterRelationSummaryLine(
-      nameMap.get(relation.charAId) || "角色甲",
-      nameMap.get(relation.charBId) || "角色乙",
-      relation,
-    ))
-    .join("\n")
+  return renderRelationCards(buildRelationContextCards({
+    allCharacters,
+    relationRows,
+    focusText,
+    limit,
+  }))
 }
 
 function collectOpenLoops(chapterRows: ChapterWithContinuity[]): string {
@@ -881,35 +1070,6 @@ function collectOpenLoops(chapterRows: ChapterWithContinuity[]): string {
 function collectContinuityNotes(chapterRows: ChapterWithContinuity[]): string {
   const values = dedupe(chapterRows.flatMap((chapter) => chapter.continuityState.continuityNotes), 8)
   return values.join('\n')
-}
-
-function buildTimelineEventLine(
-  event: typeof timelineEvents.$inferSelect,
-  arcNameMap: Map<number, string>,
-  chapterNumMap: Map<number, number>,
-  characterNameMap: Map<number, string>,
-  locationNameMap: Map<number, string>,
-): string {
-  const presentCharacters = parseJsonNumberArray(event.presentCharacterIdsJson)
-    .map((id) => characterNameMap.get(id))
-    .filter((item): item is string => Boolean(item))
-  const result = event.eventResult || event.eventSummary || event.notes || ''
-  const chapterStart = event.chapterStartId ? chapterNumMap.get(event.chapterStartId) : undefined
-  const chapterEnd = event.chapterEndId ? chapterNumMap.get(event.chapterEndId) : undefined
-
-  const parts = [
-    `${event.timeLabel || '时间待定'} -> ${event.eventTitle}`,
-    event.eventType ? `类型=${event.eventType}` : '',
-    event.arcId ? `故事弧=${arcNameMap.get(event.arcId) || ''}` : '',
-    chapterStart ? `起始章节=第${chapterStart}章` : '',
-    chapterEnd ? `结束章节=第${chapterEnd}章` : '',
-    event.locationMapId ? `地点=${locationNameMap.get(event.locationMapId) || ''}` : '',
-    presentCharacters.length > 0 ? `在场=${presentCharacters.join('、')}` : '',
-    event.protagonistPresent ? `主角行动=${event.protagonistAction || '主角在场'}` : '',
-    result ? `结果=${result}` : '',
-  ].filter(Boolean)
-
-  return parts.join(' | ')
 }
 
 function buildTimelineContext(
@@ -960,14 +1120,18 @@ function buildTimelineContext(
     .filter((event) => selectedIds.has(event.id))
     .slice(-6)
 
-  const timelineSummary = selectedRows
-    .map((event) => buildTimelineEventLine(event, arcNameMap, chapterNumMap, characterNameMap, locationNameMap))
-    .join('\n')
+  const timelineSummary = renderTimelineCards(buildTimelineContextCards(selectedRows, {
+    chapterNumMap,
+    arcNameMap,
+    characterNameMap,
+    locationNameMap,
+  }, 6))
 
-  const timelineOpenThreads = dedupe(
-    selectedRows.flatMap((event) => parseJsonStringArray(event.openThreadsJson)),
+  const timelineOpenThreads = renderThreadCards(buildGenericThreadCardsFromTexts(
+    dedupe(selectedRows.flatMap((event) => parseJsonStringArray(event.openThreadsJson)), 10),
+    '时间轴待回收',
     10,
-  ).join('\n')
+  ))
 
   return { timelineSummary, timelineOpenThreads }
 }
@@ -990,24 +1154,12 @@ function buildItemSummary(novelId: number): string {
 
   if (rows.length === 0) return ''
 
-  return rows
-    .slice(0, 12)
-    .map((item) => {
-      const ownerName = item.ownerCharacterId ? characterNameMap.get(item.ownerCharacterId) : ''
-      const locationName = item.locationMapId ? locationNameMap.get(item.locationMapId) : ''
-      const parts = [
-        item.category || '',
-        item.status || '',
-        ownerName ? `持有人=${ownerName}` : (item.ownerCharacterId ? '持有人=待补角色名' : ''),
-        locationName ? `地点=${locationName}` : (item.locationMapId ? '地点=待补地点名' : ''),
-        item.plotFunction || item.summary || '',
-        item.abilitySpec ? `能力=${item.abilitySpec}` : '',
-        item.limitations ? `限制=${item.limitations}` : '',
-        item.cost ? `代价=${item.cost}` : '',
-      ].filter(Boolean)
-      return `${item.itemName}${parts.length > 0 ? `（${parts.join(' | ')}）` : ''}`
-    })
-    .join('\n')
+  return renderItemCards(buildItemContextCards({
+    items: rows,
+    characterNameMap,
+    locationNameMap,
+    limit: 12,
+  }))
 }
 
 function buildActiveThreadsContextData(
@@ -1020,96 +1172,20 @@ function buildActiveThreadsContextData(
     .where(eq(storyThreads.novelId, novelId))
     .orderBy(asc(storyThreads.sortOrder), asc(storyThreads.id))
     .all()
-    .filter((thread) => {
-      if (thread.status === 'resolved' || thread.status === 'abandoned') return false
-      if (thread.status !== 'active') return false
-      return true
-    })
 
   if (rows.length === 0) {
     return { summary: '', pressureCount: 0 }
   }
-
-  const isArcPriority = (thread: typeof storyThreads.$inferSelect) => {
-    if (!currentArc || typeof currentArc.chapterStart !== 'number' || typeof currentArc.chapterEnd !== 'number') {
-      return false
-    }
-
-    const spanStart = thread.startChapter || thread.plantedChapter || thread.lastReferencedChapter || 0
-    const spanEnd = thread.targetPayoffChapter || thread.lastReferencedChapter || thread.plantedChapter || thread.startChapter || 0
-    if (!spanStart && !spanEnd) return false
-
-    const rangeStart = spanStart || spanEnd
-    const rangeEnd = spanEnd || spanStart
-    return rangeStart <= currentArc.chapterEnd && rangeEnd >= currentArc.chapterStart
-  }
-
-  const getThreadSpan = (thread: typeof storyThreads.$inferSelect) => {
-    const baseChapter = thread.lastReferencedChapter || thread.plantedChapter || thread.startChapter || chapterNum
-    if (typeof thread.targetPayoffChapter === 'number' && thread.targetPayoffChapter > 0) {
-      return Math.max(1, thread.targetPayoffChapter - baseChapter)
-    }
-    return Math.max(1, chapterNum - baseChapter + 6)
-  }
-
-  const getEffectiveReminderInterval = (thread: typeof storyThreads.$inferSelect) => {
-    const baseInterval = Math.max(3, thread.reminderInterval || 20)
-    return Math.max(3, Math.min(baseInterval, Math.ceil(getThreadSpan(thread) / 3)))
-  }
-
-  // 距离目标回收不足 5 章时强制紧急注入
-  const urgent = rows.filter((thread) => (
-    typeof thread.targetPayoffChapter === 'number'
-    && thread.targetPayoffChapter >= chapterNum
-    && (thread.targetPayoffChapter - chapterNum) <= 5
-  ))
-
-  // 需要提醒的活跃线索：按弧长自适应提醒间隔
-  const needsReminder = rows.filter((thread) => {
-    if (urgent.includes(thread)) return false
-    const lastRef = thread.lastReferencedChapter || thread.plantedChapter || thread.startChapter || 0
-    return lastRef > 0 && (chapterNum - lastRef) >= getEffectiveReminderInterval(thread)
+  const threadContext = buildChapterThreadContextCards({
+    threads: rows,
+    chapterNum,
+    currentArc,
+    limit: 10,
   })
 
-  const rest = rows.filter((thread) => !urgent.includes(thread) && !needsReminder.includes(thread))
-  const ordered = [...urgent, ...needsReminder, ...rest]
-    .sort((left, right) => {
-      const leftArcPriority = isArcPriority(left) ? 0 : 1
-      const rightArcPriority = isArcPriority(right) ? 0 : 1
-      if (leftArcPriority !== rightArcPriority) {
-        return leftArcPriority - rightArcPriority
-      }
-
-      const leftPayoffDistance = typeof left.targetPayoffChapter === 'number'
-        ? Math.abs(left.targetPayoffChapter - chapterNum)
-        : Number.MAX_SAFE_INTEGER
-      const rightPayoffDistance = typeof right.targetPayoffChapter === 'number'
-        ? Math.abs(right.targetPayoffChapter - chapterNum)
-        : Number.MAX_SAFE_INTEGER
-      if (leftPayoffDistance !== rightPayoffDistance) {
-        return leftPayoffDistance - rightPayoffDistance
-      }
-
-      return (left.sortOrder || 0) - (right.sortOrder || 0)
-    })
-    .slice(0, 10)
-
   return {
-    summary: ordered
-      .map((thread) => {
-      const tags: string[] = []
-      if (isArcPriority(thread)) tags.push('[本弧优先]')
-      if (urgent.includes(thread)) tags.push(`[即将回收第${thread.targetPayoffChapter}章]`)
-      if (needsReminder.includes(thread)) {
-        const lastRef = thread.lastReferencedChapter || thread.plantedChapter || thread.startChapter || 0
-        tags.push(`[已${chapterNum - lastRef}章未提及，建议回顾；提醒间隔≈${getEffectiveReminderInterval(thread)}章]`)
-      }
-      const payoff = thread.payoffCondition ? `回收条件：${thread.payoffCondition}` : ''
-      const state = thread.currentState || thread.summary || thread.premise || ''
-      return [`【${thread.threadType || '支线'}】${thread.title}${tags.join('')}`, state, payoff].filter(Boolean).join(' | ')
-      })
-      .join('\n'),
-    pressureCount: urgent.length + needsReminder.length,
+    summary: renderThreadCards(threadContext.cards),
+    pressureCount: threadContext.pressureCount,
   }
 }
 
@@ -1293,6 +1369,8 @@ export async function collectChapterContextRawData(
   const recentChapters = previousRows.slice(-recentWindow).map(toChapterWithContinuity)
   const continuityChapters = recentChapters.filter((chapter) => hasContinuityContent(chapter.continuityState))
   const allCharacters = db.select().from(characters).where(eq(characters.novelId, novelId)).all()
+  const allItems = db.select().from(storyItems).where(eq(storyItems.novelId, novelId)).all()
+  const allLocations = db.select().from(worldMap).where(eq(worldMap.novelId, novelId)).all()
   const timelineContext = buildTimelineContext(
     novelId,
     chapterNum,
@@ -1303,15 +1381,31 @@ export async function collectChapterContextRawData(
   const longTermMemory = buildStoryMemoryPromptSummary(novelId, { chapterId: currentChapter?.id })
   const itemSummary = buildItemSummary(novelId)
   const activeThreadsContext = buildActiveThreadsContextData(novelId, chapterNum, currentArc)
+  const chapterGoal = extractChapterGoal(currentChapter?.outline)
 
-  // 从当前章节大纲和最近摘要中提取提及的角色名，用于动态召回
-  const contextText = [currentChapter?.outline, currentArc?.arcSummary, currentArc?.arcGoal].filter(Boolean).join('\n')
-  const mentionedCharacterNames = new Set<string>()
-  for (const character of allCharacters) {
-    if (character.fullName && contextText.includes(character.fullName)) {
-      mentionedCharacterNames.add(character.fullName)
-    }
-  }
+  // 从当前章节任务相关文本里提取实体名，用于动态召回
+  const recallSignalText = [
+    currentChapter?.title,
+    chapterGoal,
+    currentChapter?.outline,
+    currentArc?.arcSummary,
+    currentArc?.arcGoal,
+  ].filter(Boolean).join('\n')
+  const mentionedCharacterNames = new Set<string>(collectMentionedEntityNames(
+    recallSignalText,
+    allCharacters.map((character) => character.fullName || ''),
+    8,
+  ))
+  const mentionedItemNames = collectMentionedEntityNames(
+    recallSignalText,
+    allItems.map((item) => item.itemName || ''),
+    8,
+  )
+  const mentionedLocationNames = collectMentionedEntityNames(
+    recallSignalText,
+    allLocations.map((location) => location.name || ''),
+    6,
+  )
   const outlineMentionedCharacterCount = allCharacters.filter((character) => {
     if (!character.fullName) return false
     return Boolean(currentChapter?.outline && currentChapter.outline.includes(character.fullName))
@@ -1345,7 +1439,7 @@ export async function collectChapterContextRawData(
     outlineMentionedCharacterCount,
     activeThreadPressureCount: activeThreadsContext.pressureCount,
     contextParts: {
-      chapterGoal: extractChapterGoal(currentChapter?.outline),
+      chapterGoal,
       storyCore: buildStoryCoreText(profile),
       writingContractSummary: profile.writingContractSummary,
       currentArc: formatArcContext(currentArc),
@@ -1367,17 +1461,45 @@ export async function collectChapterContextRawData(
     },
   }
 
-  // 向量化记忆召回：根据当前章节大纲语义检索历史相关片段
+  // 多信号向量召回：同时补足角色、规则、线程三类历史约束
   try {
-    const queryForRecall = [currentChapter?.outline, currentArc?.arcGoal].filter(Boolean).join('\n')
-    if (queryForRecall) {
-      const recalled = await findSimilarFragments(novelId, queryForRecall, 5, novel.modelConfigId || undefined)
-      if (recalled.length > 0) {
-        result.contextParts.recalledMemory = recalled
-          .filter((r) => r.similarity > 0.1)
-          .map((r) => `[关联记忆·${r.fragmentType}] ${r.fragmentText.slice(0, 300)}`)
-          .join('\n')
-      }
+    const recallBuckets = buildRecallQueryBuckets({
+      chapterGoal,
+      outline: currentChapter?.outline || '',
+      arcGoal: currentArc?.arcGoal || '',
+      arcSummary: currentArc?.arcSummary || '',
+      storyGoal: profile.storyGoal,
+      coreConflict: profile.coreConflict,
+      mainPlot: profile.mainPlot,
+      themeVoiceSummary: profile.themeVoiceSummary,
+      worldRules: result.contextParts.worldRules,
+      relationSummary,
+      characterStates: result.contextParts.characterStates,
+      itemSummary,
+      timelineSummary: timelineContext.timelineSummary,
+      timelineOpenThreads: timelineContext.timelineOpenThreads,
+      activeThreads: activeThreadsContext.summary,
+      openLoops: result.contextParts.openLoops,
+      continuityNotes: result.contextParts.continuityNotes,
+      storyThreadsSummary: profile.storyThreadsSummary,
+      mentionedCharacters: [...mentionedCharacterNames],
+      mentionedItems: mentionedItemNames,
+      mentionedLocations: mentionedLocationNames,
+    })
+
+    if (recallBuckets.length > 0) {
+      const bucketResults = await Promise.all(recallBuckets.map(async (bucket) => ({
+        bucket: bucket.bucket,
+        hits: (await findSimilarFragments(novelId, bucket.query, bucket.topK, novel.modelConfigId || undefined))
+          .map((hit) => ({
+            bucket: bucket.bucket,
+            chapterId: hit.chapterId,
+            fragmentType: hit.fragmentType,
+            fragmentText: hit.fragmentText,
+            similarity: hit.similarity,
+          })),
+      })))
+      result.contextParts.recalledMemory = formatRecalledMemory(bucketResults)
     }
   } catch { /* vector recall failure is non-blocking */ }
 

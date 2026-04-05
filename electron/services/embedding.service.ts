@@ -37,6 +37,49 @@ function keywordScore(text: string, keywords: string[]): number {
   return score
 }
 
+function asText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function toStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function dedupe(values: string[], limit?: number): string[] {
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const value of values.map((item) => item.trim()).filter(Boolean)) {
+    if (seen.has(value)) continue
+    seen.add(value)
+    result.push(value)
+    if (limit && result.length >= limit) break
+  }
+  return result
+}
+
+function buildContinuityFragmentText(raw?: string | null): string {
+  if (!raw) return ''
+
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    const lines = [
+      ...toStringArray(parsed.plot_progress).slice(0, 3).map((item) => `剧情推进：${item}`),
+      ...toStringArray(parsed.character_state_changes).slice(0, 4).map((item) => `人物变化：${item}`),
+      ...toStringArray(parsed.world_state_changes).slice(0, 3).map((item) => `世界变化：${item}`),
+      ...toStringArray(parsed.open_loops).slice(0, 4).map((item) => `未回收事项：${item}`),
+      ...toStringArray(parsed.continuity_notes).slice(0, 3).map((item) => `承接提醒：${item}`),
+      asText(parsed.arc_progress) ? `故事弧推进：${asText(parsed.arc_progress)}` : '',
+    ]
+    return dedupe(lines, 12).join('\n')
+  } catch {
+    return ''
+  }
+}
+
 export async function generateChapterEmbeddings(
   novelId: number,
   chapterId: number,
@@ -55,16 +98,10 @@ export async function generateChapterEmbeddings(
   }
 
   if (chapter.continuityStateJson) {
-    try {
-      const state = JSON.parse(chapter.continuityStateJson)
-      const parts: string[] = []
-      if (state.characterStates) parts.push(JSON.stringify(state.characterStates))
-      if (state.worldState) parts.push(JSON.stringify(state.worldState))
-      if (state.openThreads) parts.push(JSON.stringify(state.openThreads))
-      if (parts.length > 0) {
-        fragments.push({ type: 'continuity', text: parts.join('\n') })
-      }
-    } catch { /* ignore */ }
+    const continuityText = buildContinuityFragmentText(chapter.continuityStateJson)
+    if (continuityText) {
+      fragments.push({ type: 'continuity', text: continuityText })
+    }
   }
 
   if (chapter.nextChapterSeed) {

@@ -1,3 +1,4 @@
+import type { WebContents } from 'electron'
 import { asc, eq, inArray } from 'drizzle-orm'
 import type {
   StoryThreadBatchGenerateOptions,
@@ -22,7 +23,8 @@ import {
   markRejected,
   recordGeneration,
 } from './generation-history.service'
-import { runChatTask } from './task.service'
+import { createTask, executeChatTask, runChatTask, updateTask } from './task.service'
+import { runAssetQualityLoop, summarizeAssetQualityWarnings } from './asset-quality.service'
 import { appendVariationMessage } from './variation-control.service'
 
 type StoryThreadType = 'main' | 'subplot' | 'mystery' | 'payoff' | 'relationship'
@@ -36,6 +38,12 @@ interface StoryThreadQueryFilters {
   keyword?: string
   page?: number
   pageSize?: number
+}
+
+export interface StoryThreadBatchChunkResult {
+  ids: number[]
+  warnings: string[]
+  batchDigest?: string
 }
 
 interface GeneratedStoryThread {
@@ -370,6 +378,48 @@ function buildStoryThreadPrompt(params: {
   ].filter(Boolean).join('\n')
 }
 
+function buildThreadReviewContext(params: {
+  profile: Awaited<ReturnType<typeof buildStoryProfile>>
+  existingSummary: string
+  latestChapterNum: number
+  estimatedChapterTotal: number
+  currentSummary?: string
+  focus?: string
+  mode?: 'repair' | 'replace'
+}): string {
+  const storyCore = [
+    params.profile.projectBriefSummary,
+    params.profile.premiseSummary,
+    params.profile.storyDesignSummary,
+    params.profile.themeVoiceSummary,
+    params.profile.worldRulesSummary,
+  ].filter(Boolean).join('\n\n')
+
+  return [
+    `题材：${params.profile.genre}`,
+    params.profile.background ? `背景：${params.profile.background}` : '',
+    storyCore ? `故事底盘：\n${storyCore}` : '',
+    `当前正文进度：约第 ${Math.max(params.latestChapterNum, 1)} 章`,
+    `预计回收上限：约第 ${params.estimatedChapterTotal} 章`,
+    `主角称呼：${params.profile.protagonistReference}`,
+    `主角命名规则：${params.profile.protagonistRule}`,
+    params.currentSummary ? `当前线程：\n${params.currentSummary}` : '',
+    params.existingSummary ? `现有线程：\n${params.existingSummary}` : '',
+    params.focus ? `本轮聚焦：${params.focus}` : '',
+    params.mode ? `当前模式：${params.mode}` : '',
+  ].filter(Boolean).join('\n\n')
+}
+
+function threadSchemaHint(expectedCount?: number): string {
+  return [
+    typeof expectedCount === 'number'
+      ? `输出必须保持为 ${expectedCount} 个线程对象组成的 JSON 数组。`
+      : '输出必须保持为单个线程 JSON 对象。',
+    '不要把线程卡写成剧情长文或设定说明。',
+    'title、summary、premise、payoff_condition、current_state 等结构字段必须保留。',
+  ].join('\n')
+}
+
 function parseGeneratedThread(
   raw: GeneratedStoryThread,
   chapterCeiling: number,
@@ -607,6 +657,191 @@ export function batchDeleteStoryThreads(ids: number[]) {
   return rows.length
 }
 
+export async function generateStoryThreadBatchChunk(
+  novelId: number,
+  options: StoryThreadBatchGenerateOptions = {},
+  runtime: {
+    parentTaskId?: number
+    sender?: WebContents
+    batchIndex?: number
+    totalBatches?: number
+  } = {},
+): Promise<StoryThreadBatchChunkResult> {
+  const db = getDb()
+  const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
+  if (!novel) throw new Error('小说不存在')
+
+  const profile = await buildStoryProfile(novelId)
+  const existingRows = listStoryThreads(novelId)
+  const latestChapterNum = getLatestChapterNum(novelId)
+  const estimatedChapterTotal = Math.max(
+    12,
+    latestChapterNum,
+    Math.ceil((novel.targetWords || 200000) / 3000),
+  )
+  const requestedCount = clampGenerateCount(options.count)
+  const historyEntityType = 'thread'
+  const historyTaskType = 'story_thread_generate_batch'
+  const usedTitleKeys = new Set(
+    existingRows
+      .map((thread) => normalizeThreadTitleKey(thread.title || ''))
+      .filter(Boolean),
+  )
+  const usedSignatures = new Set(
+    existingRows
+      .map((thread) => buildThreadSignature(thread))
+      .filter(Boolean),
+  )
+  let resultPayload: StoryThreadBatchChunkResult | null = null
+  const existingSummary = buildThreadSummary(existingRows, [])
+  const focusSummary = [
+    options.focus,
+    `当前执行第 ${runtime.batchIndex || 1}/${runtime.totalBatches || 1} 批，只补新的可追踪线程。`,
+  ].filter(Boolean).join('\n')
+  const reviewContext = buildThreadReviewContext({
+    profile,
+    existingSummary,
+    latestChapterNum,
+    estimatedChapterTotal,
+    focus: focusSummary,
+  })
+
+  const attemptNumber = getAttemptCount(novelId, historyEntityType, null, historyTaskType) + 1
+  const rejectedDigests = getRecentRejectedDigests(novelId, historyEntityType, null, historyTaskType)
+  const messages = appendVariationMessage([{
+    role: 'user',
+    content: buildStoryThreadPrompt({
+      profile,
+      existingSummary,
+      count: requestedCount,
+      latestChapterNum,
+      estimatedChapterTotal,
+      focus: focusSummary,
+    }),
+  }], {
+    attemptNumber,
+    rejectedDigests,
+  })
+  const inputJson = JSON.stringify(messages)
+  const taskId = await createTask({
+    type: 'story_thread_generate',
+    novelId,
+    modelConfigId: novel.modelConfigId || undefined,
+    relatedEntityType: 'novel',
+    relatedEntityId: novelId,
+    inputJson,
+    runnerType: 'chat',
+    parentTaskId: runtime.parentTaskId,
+  })
+
+  if (typeof runtime.parentTaskId === 'number') {
+    updateTask(runtime.parentTaskId, { currentChildTaskId: taskId })
+  }
+
+  try {
+    await executeChatTask(taskId, {
+      type: 'story_thread_generate',
+      novelId,
+      modelConfigId: novel.modelConfigId || undefined,
+      relatedEntityType: 'novel',
+      relatedEntityId: novelId,
+      inputJson,
+      messages,
+      sender: runtime.sender,
+      onSuccess: async (result) => {
+        const historyId = recordGeneration(novelId, historyEntityType, null, historyTaskType, result, attemptNumber)
+        const quality = await runAssetQualityLoop({
+          targetType: 'thread',
+          novelId,
+          modelConfigId: novel.modelConfigId || undefined,
+          relatedEntityType: 'novel',
+          relatedEntityId: novelId,
+          parentTaskId: taskId,
+          sender: runtime.sender,
+          contextSummary: reviewContext,
+          generatedOutput: result,
+          schemaHint: threadSchemaHint(requestedCount),
+          reviewFocus: [
+            '线程标题要像可追踪的故事资产，不能写成设定说明或抽象主题词。',
+            'summary、premise、payoff_condition 要具体，且与主线、人物关系或回收位挂钩。',
+          ],
+          rewriteConstraints: [
+            '保持线程数组长度不变。',
+            '保持对象顺序和字段语义稳定，不要把 JSON 数组改成说明文。',
+          ],
+        })
+        if (quality.stage === 'rejected') {
+          markRejected(historyId)
+          resultPayload = {
+            ids: [],
+            warnings: [summarizeAssetQualityWarnings(quality) || `第 ${runtime.batchIndex || 1}/${runtime.totalBatches || 1} 批线程被审校拒收。`],
+          }
+          return resultPayload
+        }
+        let parsed: GeneratedStoryThread[]
+        try {
+          parsed = cleanAiValue(safeParseAiJson<GeneratedStoryThread[]>(quality.finalOutput, 'array'))
+        } catch (error) {
+          markRejected(historyId)
+          throw error
+        }
+
+        let acceptedInBatch = 0
+        const createdIds: number[] = []
+        const warnings = summarizeAssetQualityWarnings(quality)
+          ? [summarizeAssetQualityWarnings(quality) as string]
+          : []
+        const createdTitles: string[] = []
+
+        for (const item of parsed) {
+          const payload = parseGeneratedThread(item, estimatedChapterTotal)
+          if (!payload?.title) continue
+
+          const titleKey = normalizeThreadTitleKey(payload.title)
+          if (!titleKey || usedTitleKeys.has(titleKey)) {
+            warnings.push(`线程「${payload.title}」与现有线程重名或过于相近，已跳过。`)
+            continue
+          }
+
+          const signature = buildThreadSignature(payload)
+          if (!signature || usedSignatures.has(signature)) {
+            warnings.push(`线程「${payload.title}」与现有线程功能或回收位过近，已跳过。`)
+            continue
+          }
+
+          const id = createStoryThread(novelId, payload, { skipContextTracking: true })
+          createdIds.push(id)
+          usedTitleKeys.add(titleKey)
+          usedSignatures.add(signature)
+          acceptedInBatch += 1
+          createdTitles.push(payload.title)
+        }
+
+        if (acceptedInBatch === 0) {
+          markRejected(historyId)
+          warnings.push(`第 ${runtime.batchIndex || 1}/${runtime.totalBatches || 1} 批没有生成可用线程。`)
+        }
+        if (createdIds.length > 0) {
+          markNovelContextChanged(novelId, 'Story threads changed')
+        }
+
+        resultPayload = {
+          ids: createdIds,
+          warnings,
+          batchDigest: createdTitles.slice(0, 4).join('、'),
+        }
+        return resultPayload
+      },
+    })
+  } finally {
+    if (typeof runtime.parentTaskId === 'number') {
+      updateTask(runtime.parentTaskId, { currentChildTaskId: null })
+    }
+  }
+
+  return resultPayload || { ids: [], warnings: [] }
+}
+
 export async function generateStoryThreads(
   novelId: number,
   options: StoryThreadBatchGenerateOptions = {},
@@ -647,11 +882,19 @@ export async function generateStoryThreads(
     try {
       const attemptNumber = getAttemptCount(novelId, historyEntityType, null, historyTaskType) + 1
       const rejectedDigests = getRecentRejectedDigests(novelId, historyEntityType, null, historyTaskType)
+      const existingSummary = buildThreadSummary(existingRows, createdDrafts)
+      const reviewContext = buildThreadReviewContext({
+        profile,
+        existingSummary,
+        latestChapterNum,
+        estimatedChapterTotal,
+        focus: options.focus,
+      })
       const messages = appendVariationMessage([{
         role: 'user',
         content: buildStoryThreadPrompt({
           profile,
-          existingSummary: buildThreadSummary(existingRows, createdDrafts),
+          existingSummary,
           count: currentBatchCount,
           latestChapterNum,
           estimatedChapterTotal,
@@ -661,6 +904,8 @@ export async function generateStoryThreads(
         attemptNumber,
         rejectedDigests,
       })
+      let acceptedBatch: GeneratedStoryThread[] | null = null
+      let rejectedByQuality = false
       const result = await runChatTask({
         type: 'story_thread_generate',
         novelId,
@@ -668,11 +913,45 @@ export async function generateStoryThreads(
         relatedEntityType: 'novel',
         relatedEntityId: novelId,
         messages,
+        onSuccess: async (rawOutput, taskId) => {
+          const quality = await runAssetQualityLoop({
+            targetType: 'thread',
+            novelId,
+            modelConfigId: novel.modelConfigId || undefined,
+            relatedEntityType: 'novel',
+            relatedEntityId: novelId,
+            parentTaskId: taskId,
+            contextSummary: reviewContext,
+            generatedOutput: rawOutput,
+            schemaHint: threadSchemaHint(currentBatchCount),
+            reviewFocus: [
+              '线程标题和结构字段必须具体，不要退化成主题口号或设定说明。',
+              '线程要与当前正文进度、主线推进或回收位形成明确关联。',
+            ],
+            rewriteConstraints: [
+              '保持线程数组长度不变。',
+              '保持对象顺序和字段语义稳定。',
+            ],
+          })
+          if (quality.stage === 'rejected') {
+            rejectedByQuality = true
+            warnings.push(summarizeAssetQualityWarnings(quality) || `第 ${Math.floor(offset / batchSize) + 1} 批线程被审校拒收。`)
+            return quality
+          }
+          const qualityWarning = summarizeAssetQualityWarnings(quality)
+          if (qualityWarning) warnings.push(qualityWarning)
+          acceptedBatch = cleanAiValue(safeParseAiJson<GeneratedStoryThread[]>(quality.finalOutput, 'array'))
+          return quality
+        },
       })
       const historyId = recordGeneration(novelId, historyEntityType, null, historyTaskType, result, attemptNumber)
+      if (rejectedByQuality) {
+        markRejected(historyId)
+        continue
+      }
       let parsed: GeneratedStoryThread[]
       try {
-        parsed = cleanAiValue(safeParseAiJson<GeneratedStoryThread[]>(result, 'array'))
+        parsed = acceptedBatch || cleanAiValue(safeParseAiJson<GeneratedStoryThread[]>(result, 'array'))
       } catch (error) {
         markRejected(historyId)
         throw error
@@ -748,6 +1027,14 @@ export async function regenerateStoryThread(
   const attemptNumber = getAttemptCount(current.novelId, historyEntityType, current.id, historyTaskType) + 1
   const rejectedDigests = getRecentRejectedDigests(current.novelId, historyEntityType, current.id, historyTaskType)
   const currentSignature = buildThreadSignature(current)
+  const reviewContext = buildThreadReviewContext({
+    profile,
+    existingSummary: buildThreadSummary(listStoryThreads(current.novelId).filter((thread) => thread.id !== current.id), []),
+    latestChapterNum,
+    estimatedChapterTotal,
+    currentSummary: buildThreadCurrentSummary(current),
+    mode,
+  })
   const messages = appendVariationMessage([{
     role: 'user',
     content: buildStoryThreadRepairPrompt({
@@ -762,6 +1049,8 @@ export async function regenerateStoryThread(
     rejectedDigests,
   })
 
+  let acceptedCandidate: GeneratedStoryThread | null = null
+  let rejectedByQuality = false
   const result = await runChatTask({
     type: 'story_thread_generate',
     novelId: current.novelId,
@@ -769,11 +1058,42 @@ export async function regenerateStoryThread(
     relatedEntityType: 'thread',
     relatedEntityId: current.id,
     messages,
+    onSuccess: async (rawOutput, taskId) => {
+      const quality = await runAssetQualityLoop({
+        targetType: 'thread',
+        novelId: current.novelId,
+        modelConfigId: novel.modelConfigId || undefined,
+        relatedEntityType: 'thread',
+        relatedEntityId: current.id,
+        parentTaskId: taskId,
+        contextSummary: reviewContext,
+        generatedOutput: rawOutput,
+        schemaHint: threadSchemaHint(),
+        reviewFocus: [
+          '修复后的线程必须继续承担原结构功能位，不能漂移成另一条无关线程。',
+          '标题、回收条件、当前状态和推进抓手都要具体。',
+        ],
+        rewriteConstraints: [
+          '保持单个线程 JSON 对象结构稳定。',
+          '不要把线程卡改写成剧情长文。',
+        ],
+      })
+      if (quality.stage === 'rejected') {
+        rejectedByQuality = true
+        return quality
+      }
+      acceptedCandidate = cleanAiValue(safeParseAiJson<GeneratedStoryThread>(quality.finalOutput, 'object'))
+      return quality
+    },
   })
   const historyId = recordGeneration(current.novelId, historyEntityType, current.id, historyTaskType, result, attemptNumber)
+  if (rejectedByQuality) {
+    markRejected(historyId)
+    return current
+  }
   let parsed: GeneratedStoryThread
   try {
-    parsed = cleanAiValue(safeParseAiJson<GeneratedStoryThread>(result, 'object'))
+    parsed = acceptedCandidate || cleanAiValue(safeParseAiJson<GeneratedStoryThread>(result, 'object'))
   } catch {
     markRejected(historyId)
     return current

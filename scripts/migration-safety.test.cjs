@@ -74,6 +74,11 @@ function assertRequiredColumns(db) {
   assert.ok(getColumns(db, 'story_arcs').has('progress_percent'))
   assert.ok(getColumns(db, 'story_arcs').has('stalled_chapter_count'))
   assert.ok(getColumns(db, 'story_arcs').has('last_progress_chapter_num'))
+  assert.ok(getColumns(db, 'story_memory_checkpoints').has('character_cards_json'))
+  assert.ok(getColumns(db, 'story_memory_checkpoints').has('relation_cards_json'))
+  assert.ok(getColumns(db, 'story_memory_checkpoints').has('item_cards_json'))
+  assert.ok(getColumns(db, 'story_memory_checkpoints').has('timeline_cards_json'))
+  assert.ok(getColumns(db, 'story_memory_checkpoints').has('thread_cards_json'))
   assert.ok(getColumns(db, 'tasks').has('runner_type'))
   assert.ok(getColumns(db, 'tasks').has('progress_json'))
   assert.ok(getColumns(db, 'chapter_versions').has('version_source'))
@@ -99,6 +104,8 @@ function testFreshDbIsIdempotent() {
       '0008_model_context_windows',
       '0009_validate_model_runtime',
       '0010_model_parameter_defaults',
+      '0011_embedding_and_style_tables',
+      '0012_story_memory_context_cards',
     ])
 
     runMigrations(db)
@@ -187,6 +194,8 @@ function testPartialSchemaCanResume() {
       '0008_model_context_windows',
       '0009_validate_model_runtime',
       '0010_model_parameter_defaults',
+      '0011_embedding_and_style_tables',
+      '0012_story_memory_context_cards',
     ])
 
     const configs = db.prepare(`

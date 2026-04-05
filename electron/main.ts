@@ -33,6 +33,7 @@ import * as qualityDashboardService from './services/quality-dashboard.service'
 import * as embeddingService from './services/embedding.service'
 import * as styleAnalysisService from './services/style-analysis.service'
 import * as parallelGenerationService from './services/parallel-generation.service'
+import * as batchWorkflowService from './services/batch-workflow.service'
 import * as itemService from './services/item.service'
 import * as mapService from './services/map.service'
 import * as modelService from './services/model.service'
@@ -326,11 +327,19 @@ function registerIpcHandlers() {
   ipcMain.handle('character:update', (_, id, data) => characterService.updateCharacter(id, data))
   ipcMain.handle('character:delete', (_, id) => characterService.deleteCharacter(id))
   ipcMain.handle('character:regenerate', (_, id) => characterService.regenerateCharacter(id))
+  ipcMain.handle('character:startAutoGenerate', (event, novelId, opts) =>
+    batchWorkflowService.startCharacterAutoGenerateWorkflow(novelId, opts, event.sender))
+  ipcMain.handle('character:getAutoGenerateStatus', (_, taskId) =>
+    batchWorkflowService.getCharacterAutoGenerateStatus(taskId))
+  ipcMain.handle('character:getLatestAutoGenerateTask', (_, novelId) =>
+    batchWorkflowService.getLatestCharacterAutoGenerateTask(novelId))
+  ipcMain.handle('character:resumeAutoGenerate', (event, taskId) =>
+    batchWorkflowService.resumeBatchAutoGenerateWorkflow(taskId, event.sender))
   ipcMain.handle('character:getRelations', (_, novelId) => characterService.getCharacterRelations(novelId))
   ipcMain.handle('character:generateProtagonist', (_, novelId, opts) =>
     characterService.generateProtagonist(novelId, opts))
   ipcMain.handle('character:batchGenerate', (event, novelId, opts) =>
-    characterService.batchGenerateCharacters(novelId, opts, event.sender))
+    batchWorkflowService.generateCharactersViaWorkflow(novelId, opts, event.sender))
   ipcMain.handle('character:generateRelations', (_, novelId) =>
     characterService.generateCharacterRelations(novelId))
   ipcMain.handle('character:upsertRelation', (_, data) => characterService.upsertRelation(data))
@@ -382,8 +391,16 @@ function registerIpcHandlers() {
   ipcMain.handle('timeline:delete', (_, id) => timelineService.deleteTimelineEvent(id))
   ipcMain.handle('timeline:batchUpdate', (_, ids, data) => timelineService.batchUpdateTimelineEvents(ids, data))
   ipcMain.handle('timeline:batchDelete', (_, ids) => timelineService.batchDeleteTimelineEvents(ids))
-  ipcMain.handle('timeline:generate', (_, novelId, options) =>
-    timelineService.generateTimelineEvents(novelId, options))
+  ipcMain.handle('timeline:generate', (event, novelId, options) =>
+    batchWorkflowService.generateTimelineViaWorkflow(novelId, options, event.sender))
+  ipcMain.handle('timeline:startAutoGenerate', (event, novelId, options) =>
+    batchWorkflowService.startTimelineAutoGenerateWorkflow(novelId, options, event.sender))
+  ipcMain.handle('timeline:getAutoGenerateStatus', (_, taskId) =>
+    batchWorkflowService.getTimelineAutoGenerateStatus(taskId))
+  ipcMain.handle('timeline:getLatestAutoGenerateTask', (_, novelId) =>
+    batchWorkflowService.getLatestTimelineAutoGenerateTask(novelId))
+  ipcMain.handle('timeline:resumeAutoGenerate', (event, taskId) =>
+    batchWorkflowService.resumeBatchAutoGenerateWorkflow(taskId, event.sender))
   ipcMain.handle('timeline:regenerate', (_, id, options) => timelineService.regenerateTimelineEvent(id, options))
   ipcMain.handle('timeline:clear', (_, novelId) => timelineService.clearTimelineByNovel(novelId))
 
@@ -397,7 +414,15 @@ function registerIpcHandlers() {
   ipcMain.handle('item:create', (_, novelId, data) => itemService.createStoryItem(novelId, data))
   ipcMain.handle('item:update', (_, id, data) => itemService.updateStoryItem(id, data))
   ipcMain.handle('item:delete', (_, id) => itemService.deleteStoryItem(id))
-  ipcMain.handle('item:generate', (_, novelId, options) => itemService.generateStoryItems(novelId, options))
+  ipcMain.handle('item:generate', (event, novelId, options) => batchWorkflowService.generateItemsViaWorkflow(novelId, options, event.sender))
+  ipcMain.handle('item:startAutoGenerate', (event, novelId, options) =>
+    batchWorkflowService.startItemAutoGenerateWorkflow(novelId, options, event.sender))
+  ipcMain.handle('item:getAutoGenerateStatus', (_, taskId) =>
+    batchWorkflowService.getItemAutoGenerateStatus(taskId))
+  ipcMain.handle('item:getLatestAutoGenerateTask', (_, novelId) =>
+    batchWorkflowService.getLatestItemAutoGenerateTask(novelId))
+  ipcMain.handle('item:resumeAutoGenerate', (event, taskId) =>
+    batchWorkflowService.resumeBatchAutoGenerateWorkflow(taskId, event.sender))
   ipcMain.handle('item:regenerate', (_, id, options) => itemService.regenerateStoryItem(id, options))
   ipcMain.handle('item:clear', (_, novelId) => itemService.clearStoryItemsByNovel(novelId))
 
@@ -697,13 +722,30 @@ function registerIpcHandlers() {
   ipcMain.handle('thread:query', (_, filters) => storyThreadService.queryStoryThreads(filters))
   ipcMain.handle('thread:getStats', (_, filters) => storyThreadService.getStoryThreadStats(filters))
   ipcMain.handle('thread:get', (_, id) => storyThreadService.getStoryThread(id))
-  ipcMain.handle('thread:generate', (_, novelId, options) => storyThreadService.generateStoryThreads(novelId, options))
+  ipcMain.handle('thread:generate', (event, novelId, options) => batchWorkflowService.generateStoryThreadsViaWorkflow(novelId, options, event.sender))
+  ipcMain.handle('thread:startAutoGenerate', (event, novelId, options) =>
+    batchWorkflowService.startStoryThreadAutoGenerateWorkflow(novelId, options, event.sender))
+  ipcMain.handle('thread:getAutoGenerateStatus', (_, taskId) =>
+    batchWorkflowService.getStoryThreadAutoGenerateStatus(taskId))
+  ipcMain.handle('thread:getLatestAutoGenerateTask', (_, novelId) =>
+    batchWorkflowService.getLatestStoryThreadAutoGenerateTask(novelId))
+  ipcMain.handle('thread:resumeAutoGenerate', (event, taskId) =>
+    batchWorkflowService.resumeBatchAutoGenerateWorkflow(taskId, event.sender))
   ipcMain.handle('thread:create', (_, novelId, data) => storyThreadService.createStoryThread(novelId, data))
   ipcMain.handle('thread:update', (_, id, data) => storyThreadService.updateStoryThread(id, data))
   ipcMain.handle('thread:delete', (_, id) => storyThreadService.deleteStoryThread(id))
   ipcMain.handle('thread:batchUpdate', (_, ids, data) => storyThreadService.batchUpdateStoryThreads(ids, data))
   ipcMain.handle('thread:batchDelete', (_, ids) => storyThreadService.batchDeleteStoryThreads(ids))
   ipcMain.handle('thread:regenerate', (_, id, options) => storyThreadService.regenerateStoryThread(id, options))
+  ipcMain.handle('subplot:generate', (event, request) => batchWorkflowService.generateSubplotsViaWorkflow(request, event.sender))
+  ipcMain.handle('subplot:startAutoGenerate', (event, request) =>
+    batchWorkflowService.startSubplotAutoGenerateWorkflow(request, event.sender))
+  ipcMain.handle('subplot:getAutoGenerateStatus', (_, taskId) =>
+    batchWorkflowService.getSubplotAutoGenerateStatus(taskId))
+  ipcMain.handle('subplot:getLatestAutoGenerateTask', (_, novelId) =>
+    batchWorkflowService.getLatestSubplotAutoGenerateTask(novelId))
+  ipcMain.handle('subplot:resumeAutoGenerate', (event, taskId) =>
+    batchWorkflowService.resumeBatchAutoGenerateWorkflow(taskId, event.sender))
 
   ipcMain.handle('history:listRecent', (_, novelId, limit) => historyService.listRecentOperationLogs(novelId, limit))
   ipcMain.handle('history:getLatestUndoable', (_, novelId) => historyService.getLatestUndoableOperation(novelId))

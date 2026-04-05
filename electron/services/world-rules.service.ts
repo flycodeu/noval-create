@@ -30,6 +30,7 @@ import { novels } from '../database/schema'
 import { safeParseJson } from '../utils/json'
 import { buildStoryProfile } from './context.service'
 import { createTask, executeChatTask, runChatTask, updateTask } from './task.service'
+import { runAssetQualityLoop, summarizeAssetQualityWarnings } from './asset-quality.service'
 
 const SECTION_LABELS = new Map(WORLD_RULE_SECTION_DEFINITIONS.map((item) => [item.key, item.label]))
 
@@ -538,6 +539,29 @@ async function runPromptTask(params: {
   }
 }
 
+function buildWorldRulesReviewContext(
+  sectionKey: WorldRuleSectionKey,
+  profile: Awaited<ReturnType<typeof buildStoryProfile>>,
+  rules: GenreWorldRules,
+  requirements?: string,
+): string {
+  const sectionLabel = SECTION_LABELS.get(sectionKey) || sectionKey
+  const currentSummary = summarizeCurrentSection(sectionKey, rules)
+  const otherSummary = summarizeOtherSections(sectionKey, rules)
+
+  return renderPrompt([
+    `目标分区：${sectionLabel}`,
+    section('故事核心', buildStoryCoreSummary(profile)),
+    section('当前分区草稿', currentSummary || '当前分区暂无可用草稿'),
+    otherSummary ? section('其他分区参考', otherSummary) : '',
+    requirements ? section('额外要求', requirements) : '',
+    section('结构约束', [
+      '只允许修当前分区，不要顺手改动其他 section 的语义。',
+      '如果要重写，也必须保持当前分区的 JSON 结构稳定。',
+    ].join('\n')),
+  ])
+}
+
 export async function loadWorldRulesGenerationContext(novelId: number): Promise<WorldRulesGenerationContext> {
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
@@ -588,7 +612,31 @@ export async function generateWorldRulesSection(
       sender,
       parentTaskId,
     })
-    const patch = parseSectionPatch(sectionKey, output)
+    const quality = await runAssetQualityLoop({
+      targetType: 'world_rules',
+      novelId: context.novelId,
+      modelConfigId: context.modelConfigId,
+      relatedEntityType: 'novel',
+      relatedEntityId: context.novelId,
+      parentTaskId,
+      sender,
+      contextSummary: buildWorldRulesReviewContext(sectionKey, context.profile, workingRules, requirements),
+      generatedOutput: output,
+      schemaHint: buildOutputSchema(sectionKey),
+      reviewFocus: [
+        `只审校并修正「${label}」这个分区，不要把其他分区内容塞进来。`,
+        '新增规则必须写清用途、限制或影响，不能只留漂亮名词。',
+      ],
+      rewriteConstraints: [
+        '保持当前 section key 和数据结构稳定。',
+        '不要输出全文规则草稿，只输出当前分区对应的 JSON patch。',
+      ],
+    })
+    if (quality.stage === 'rejected') {
+      throw new Error(summarizeAssetQualityWarnings(quality) || quality.review.summary)
+    }
+
+    const patch = parseSectionPatch(sectionKey, quality.finalOutput)
     ensurePatchHasContent(sectionKey, patch)
 
     const nextRules = applySectionPatch(
@@ -598,7 +646,10 @@ export async function generateWorldRulesSection(
       workingRules.genreProfile.name || context.profile.genre,
     )
     const changed = JSON.stringify(nextRules) !== JSON.stringify(workingRules)
-    const warning = changed ? undefined : '生成结果没有带来新的有效改动'
+    const qualityWarning = summarizeAssetQualityWarnings(quality)
+    const warning = [changed ? undefined : '生成结果没有带来新的有效改动', qualityWarning]
+      .filter((item): item is string => Boolean(item))
+      .join('；') || undefined
     const step: WorldRulesGenerationStepResult = {
       key: sectionKey,
       label,

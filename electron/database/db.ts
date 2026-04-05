@@ -684,6 +684,14 @@ export function runMigrations(sqlite: Database.Database) {
     backfillTimelineStructureAnchors(sqlite)
   })
 
+  runMigrationStep(sqlite, '0012_story_memory_context_cards', () => {
+    ensureColumn(sqlite, 'story_memory_checkpoints', 'character_cards_json', 'TEXT')
+    ensureColumn(sqlite, 'story_memory_checkpoints', 'relation_cards_json', 'TEXT')
+    ensureColumn(sqlite, 'story_memory_checkpoints', 'item_cards_json', 'TEXT')
+    ensureColumn(sqlite, 'story_memory_checkpoints', 'timeline_cards_json', 'TEXT')
+    ensureColumn(sqlite, 'story_memory_checkpoints', 'thread_cards_json', 'TEXT')
+  })
+
   runMigrationStep(sqlite, '0005_validate_schema', () => {
     validateRequiredSchema(sqlite)
   })
@@ -881,6 +889,10 @@ function validateRequiredSchema(sqlite: Database.Database) {
     {
       tableName: 'map_relations',
       columns: ['novel_id', 'map_a_id', 'map_b_id', 'bilateral', 'sort_order'],
+    },
+    {
+      tableName: 'story_memory_checkpoints',
+      columns: ['character_cards_json', 'relation_cards_json', 'item_cards_json', 'timeline_cards_json', 'thread_cards_json'],
     },
   ]
 

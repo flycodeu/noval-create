@@ -1,5 +1,6 @@
+import type { WebContents } from 'electron'
 import { asc, eq, inArray } from 'drizzle-orm'
-import type { EntityRegenerateOptions } from '../../src/types'
+import type { EntityRegenerateOptions, TimelineGenerateOptions } from '../../src/types'
 import { getDb, getSqlite } from '../database/db'
 import {
   chapterSegments,
@@ -21,7 +22,7 @@ import {
   markRejected,
   recordGeneration,
 } from './generation-history.service'
-import { runChatTask } from './task.service'
+import { createTask, executeChatTask, runChatTask, updateTask } from './task.service'
 import { removeTimelineEventFromItems, syncTimelineEventItemLinks } from './link-sync.service'
 import {
   buildTimelineConfigSummary,
@@ -29,15 +30,16 @@ import {
 } from '../../src/shared/genre-system'
 import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/utils/text'
 import { markNovelContextChanged } from './context-impact.service'
+import { runAssetQualityLoop, summarizeAssetQualityWarnings } from './asset-quality.service'
 import { appendVariationMessage } from './variation-control.service'
 import { buildBatchKey, createOperationLog } from './history.service'
 
 type TimelineStatus = 'planned' | 'seeded' | 'written' | 'resolved'
 
-interface TimelineGenerateOptions {
-  count?: number
-  batchSize?: number
-  focus?: string
+export interface TimelineBatchChunkResult {
+  ids: number[]
+  warning?: string
+  batchDigest?: string
 }
 
 interface GeneratedTimelineEvent {
@@ -306,6 +308,46 @@ function buildTimelineCurrentSummary(event: typeof timelineEvents.$inferSelect):
     event.protagonistAction ? `主角动作：${event.protagonistAction}` : '',
     event.notes ? `备注：${event.notes}` : '',
   ].filter(Boolean).join('\n')
+}
+
+function buildTimelineReviewContext(input: {
+  profile: Awaited<ReturnType<typeof buildStoryProfile>>
+  storyCore: string
+  timelineRules: string
+  arcSummary: string
+  characterSummary: string
+  locationSummary: string
+  itemSummary: string
+  existingEvents: string
+  currentSummary?: string
+  focus?: string
+  mode?: 'repair' | 'replace'
+}): string {
+  return [
+    `题材：${input.profile.genre}`,
+    input.profile.background ? `背景：${input.profile.background}` : '',
+    input.profile.worldRulesSummary ? `世界规则：${input.profile.worldRulesSummary}` : '',
+    input.timelineRules ? `时间规则：${input.timelineRules}` : '',
+    input.storyCore ? `故事核心：\n${input.storyCore}` : '',
+    input.currentSummary ? `当前事件：\n${input.currentSummary}` : '',
+    input.arcSummary ? `故事弧：\n${input.arcSummary}` : '',
+    input.characterSummary ? `关键人物：\n${input.characterSummary}` : '',
+    input.locationSummary ? `关键地点：\n${input.locationSummary}` : '',
+    input.itemSummary ? `关键物品：\n${input.itemSummary}` : '',
+    input.existingEvents ? `已有时间轴：\n${input.existingEvents}` : '',
+    input.focus ? `本轮聚焦：${input.focus}` : '',
+    input.mode ? `当前模式：${input.mode}` : '',
+  ].filter(Boolean).join('\n\n')
+}
+
+function timelineSchemaHint(expectedCount?: number): string {
+  return [
+    typeof expectedCount === 'number'
+      ? `输出必须保持为 ${expectedCount} 个时间轴事件对象组成的 JSON 数组。`
+      : '输出必须保持为单个时间轴事件 JSON 对象。',
+    '不要把事件卡改写成剧情长文或散点说明。',
+    '时间标签、事件标题、起因、过程、结果、关联人物/物品/地点等字段必须保留。',
+  ].join('\n')
 }
 
 function buildTimelineRepairPrompt(input: {
@@ -1056,6 +1098,208 @@ export function clearTimelineByNovel(novelId: number, options: { skipContextTrac
   }
 }
 
+export async function generateTimelineBatchChunk(
+  novelId: number,
+  options: TimelineGenerateOptions = {},
+  runtime: {
+    parentTaskId?: number
+    sender?: WebContents
+    batchIndex?: number
+    totalBatches?: number
+  } = {},
+): Promise<TimelineBatchChunkResult> {
+  const db = getDb()
+  const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
+  if (!novel) throw new Error('小说不存在')
+
+  const profile = await buildStoryProfile(novelId)
+  const rules = parseWorldRulesJson(novel.worldRulesJson, profile.genre)
+  const arcRows = db.select().from(storyArcs).where(eq(storyArcs.novelId, novelId)).all()
+  const chapterRows = db.select().from(chapters).where(eq(chapters.novelId, novelId)).all()
+  const characterRows = db.select().from(characters).where(eq(characters.novelId, novelId)).all()
+  const itemRows = db.select().from(storyItems).where(eq(storyItems.novelId, novelId)).all()
+  const mapRows = db.select().from(worldMap).where(eq(worldMap.novelId, novelId)).all()
+  const defaultPrecision = rules.timelineConfig.precisionOptions[0] || '阶段'
+  const historyEntityType = 'timeline'
+  const historyTaskType = 'timeline_generate_batch'
+  const requestedCount = Math.max(1, Math.min(options.count || 10, 24))
+  let resultPayload: TimelineBatchChunkResult | null = null
+
+  const existingEvents = listTimelineEvents(novelId)
+  const storyCoreSummary = buildStoryCoreSummary(profile)
+  const timelineRulesSummary = buildTimelineConfigSummary(rules)
+  const arcSummary = buildArcSummary(arcRows)
+  const characterSummary = buildCharacterSummary(characterRows)
+  const locationSummary = buildLocationSummary(mapRows)
+  const itemSummary = buildItemSummary(itemRows)
+  const existingEventSummary = buildExistingEventSummary(existingEvents)
+  const focusSummary = [
+    options.focus ? `额外聚焦：${options.focus}` : '',
+    `本批要求：只生成 ${requestedCount} 个新事件，避免重复已有时间轴内容。`,
+  ].filter(Boolean).join('\n')
+  const reviewContext = buildTimelineReviewContext({
+    profile,
+    storyCore: storyCoreSummary,
+    timelineRules: timelineRulesSummary,
+    arcSummary,
+    characterSummary,
+    locationSummary,
+    itemSummary,
+    existingEvents: existingEventSummary,
+    focus: focusSummary,
+  })
+  const prompt = buildTimelineEventsPrompt({
+    novelTitle: novel.title,
+    genre: profile.genre,
+    background: [profile.background, focusSummary].filter(Boolean).join('\n'),
+    storyGoal: profile.storyGoal,
+    coreConflict: profile.coreConflict,
+    mainPlot: profile.mainPlot,
+    subPlots: profile.subPlots,
+    ending: profile.ending,
+    worldRulesSummary: `${profile.worldRulesSummary}\n\n${storyCoreSummary}`,
+    timelineRules: timelineRulesSummary,
+    arcSummary,
+    characterSummary,
+    locationSummary,
+    itemSummary,
+    existingEvents: existingEventSummary,
+    count: requestedCount,
+    protagonistReference: profile.protagonistReference,
+    protagonistRule: profile.protagonistRule,
+  })
+
+  const attemptNumber = getAttemptCount(novelId, historyEntityType, null, historyTaskType) + 1
+  const rejectedDigests = getRecentRejectedDigests(novelId, historyEntityType, null, historyTaskType)
+  const messages = appendVariationMessage([{ role: 'user', content: prompt }], {
+    attemptNumber,
+    rejectedDigests,
+  })
+  const inputJson = JSON.stringify(messages)
+  const taskId = await createTask({
+    type: 'generate_timeline',
+    novelId,
+    modelConfigId: novel.modelConfigId || undefined,
+    relatedEntityType: 'novel',
+    relatedEntityId: novelId,
+    inputJson,
+    runnerType: 'chat',
+    parentTaskId: runtime.parentTaskId,
+  })
+
+  if (typeof runtime.parentTaskId === 'number') {
+    updateTask(runtime.parentTaskId, { currentChildTaskId: taskId })
+  }
+
+  try {
+    await executeChatTask(taskId, {
+      type: 'generate_timeline',
+      novelId,
+      modelConfigId: novel.modelConfigId || undefined,
+      relatedEntityType: 'novel',
+      relatedEntityId: novelId,
+      inputJson,
+      messages,
+      sender: runtime.sender,
+      onSuccess: async (result) => {
+        const historyId = recordGeneration(novelId, historyEntityType, null, historyTaskType, result, attemptNumber)
+        const quality = await runAssetQualityLoop({
+          targetType: 'timeline',
+          novelId,
+          modelConfigId: novel.modelConfigId || undefined,
+          relatedEntityType: 'novel',
+          relatedEntityId: novelId,
+          parentTaskId: taskId,
+          sender: runtime.sender,
+          contextSummary: reviewContext,
+          generatedOutput: result,
+          schemaHint: timelineSchemaHint(requestedCount),
+          reviewFocus: [
+            '事件必须具备明确动机、因果和后果，不要只给标题和口号式概述。',
+            '时间锚点、人物在场、地点与物品引用要与现有资产和时间规则相容。',
+          ],
+          rewriteConstraints: [
+            '保持事件数组长度不变。',
+            '保持对象顺序和字段语义稳定，不要把数组改成长文。',
+          ],
+        })
+        if (quality.stage === 'rejected') {
+          markRejected(historyId)
+          resultPayload = {
+            ids: [],
+            warning: summarizeAssetQualityWarnings(quality) || `第 ${runtime.batchIndex || 1}/${runtime.totalBatches || 1} 批时间轴事件被审校拒收。`,
+          }
+          return resultPayload
+        }
+        let parsed: GeneratedTimelineEvent[]
+        try {
+          parsed = cleanAiValue(safeParseJson<GeneratedTimelineEvent[]>(quality.finalOutput))
+        } catch (error) {
+          markRejected(historyId)
+          throw error
+        }
+        if (!Array.isArray(parsed)) {
+          markRejected(historyId)
+          throw new Error('时间轴生成结果不是有效数组')
+        }
+
+        const startSortOrder = getNextSortOrder(novelId)
+        const usedSignatures = new Set(
+          existingEvents
+            .map((event) => buildTimelineSignature(event))
+            .filter(Boolean),
+        )
+        let acceptedInBatch = 0
+        const createdIds: number[] = []
+        const acceptedTitles: string[] = []
+
+        parsed.forEach((raw, index) => {
+          const payload = buildGeneratedPayload(raw, {
+            defaultTimeMode: rules.timelineConfig.calendarType,
+            defaultPrecision,
+            sortOrder: startSortOrder + index,
+            arcRows,
+            chapterRows,
+            characterRows,
+            itemRows,
+            mapRows,
+          })
+          if (!payload) return
+          const signature = buildTimelineSignature(payload)
+          if (!signature || usedSignatures.has(signature)) return
+          const id = createTimelineEvent(novelId, payload, { skipContextTracking: true })
+          createdIds.push(id)
+          usedSignatures.add(signature)
+          acceptedInBatch += 1
+          acceptedTitles.push(payload.eventTitle || `事件#${id}`)
+        })
+
+        if (acceptedInBatch === 0) {
+          markRejected(historyId)
+        }
+        if (createdIds.length > 0) {
+          markNovelContextChanged(novelId, 'Timeline events changed')
+        }
+
+        resultPayload = {
+          ids: createdIds,
+          warning: createdIds.length > 0
+            ? summarizeAssetQualityWarnings(quality)
+            : (summarizeAssetQualityWarnings(quality) || `第 ${runtime.batchIndex || 1}/${runtime.totalBatches || 1} 批没有生成可用时间轴事件。`),
+          batchDigest: acceptedTitles.slice(0, 4).join('、'),
+        }
+        return resultPayload
+      },
+    })
+  } finally {
+    if (typeof runtime.parentTaskId === 'number') {
+      updateTask(runtime.parentTaskId, { currentChildTaskId: null })
+    }
+  }
+
+  return resultPayload || { ids: [] }
+}
+
 export async function generateTimelineEvents(
   novelId: number,
   options: TimelineGenerateOptions = {},
@@ -1077,30 +1321,48 @@ export async function generateTimelineEvents(
   const historyTaskType = 'timeline_generate_batch'
   const totalCount = Math.min(Math.max(options.count || 10, 4), 24)
   const batchSize = Math.max(1, Math.min(totalCount, options.batchSize || Math.min(totalCount, 4), 6))
+  const storyCoreSummary = buildStoryCoreSummary(profile)
+  const timelineRulesSummary = buildTimelineConfigSummary(rules)
+  const arcSummary = buildArcSummary(arcRows)
+  const characterSummary = buildCharacterSummary(characterRows)
+  const locationSummary = buildLocationSummary(mapRows)
+  const itemSummary = buildItemSummary(itemRows)
 
   for (let generatedCount = 0; generatedCount < totalCount; generatedCount += batchSize) {
     const currentBatchCount = Math.min(batchSize, totalCount - generatedCount)
     const existingEvents = listTimelineEvents(novelId)
+    const existingEventSummary = buildExistingEventSummary(existingEvents)
+    const focusSummary = [
+      options.focus ? `额外聚焦：${options.focus}` : '',
+      `本批要求：只生成 ${currentBatchCount} 个新事件，避免重复已有时间轴内容。`,
+    ].filter(Boolean).join('\n')
+    const reviewContext = buildTimelineReviewContext({
+      profile,
+      storyCore: storyCoreSummary,
+      timelineRules: timelineRulesSummary,
+      arcSummary,
+      characterSummary,
+      locationSummary,
+      itemSummary,
+      existingEvents: existingEventSummary,
+      focus: focusSummary,
+    })
     const prompt = buildTimelineEventsPrompt({
       novelTitle: novel.title,
       genre: profile.genre,
-      background: [
-        profile.background,
-        options.focus ? `额外聚焦：${options.focus}` : '',
-        `本批要求：只生成 ${currentBatchCount} 个新事件，避免重复已有时间轴内容。`,
-      ].filter(Boolean).join('\n'),
+      background: [profile.background, focusSummary].filter(Boolean).join('\n'),
       storyGoal: profile.storyGoal,
       coreConflict: profile.coreConflict,
       mainPlot: profile.mainPlot,
       subPlots: profile.subPlots,
       ending: profile.ending,
-      worldRulesSummary: `${profile.worldRulesSummary}\n\n${buildStoryCoreSummary(profile)}`,
-      timelineRules: buildTimelineConfigSummary(rules),
-      arcSummary: buildArcSummary(arcRows),
-      characterSummary: buildCharacterSummary(characterRows),
-      locationSummary: buildLocationSummary(mapRows),
-      itemSummary: buildItemSummary(itemRows),
-      existingEvents: buildExistingEventSummary(existingEvents),
+      worldRulesSummary: `${profile.worldRulesSummary}\n\n${storyCoreSummary}`,
+      timelineRules: timelineRulesSummary,
+      arcSummary,
+      characterSummary,
+      locationSummary,
+      itemSummary,
+      existingEvents: existingEventSummary,
       count: currentBatchCount,
       protagonistReference: profile.protagonistReference,
       protagonistRule: profile.protagonistRule,
@@ -1113,17 +1375,50 @@ export async function generateTimelineEvents(
       rejectedDigests,
     })
 
+    let acceptedBatch: GeneratedTimelineEvent[] | null = null
+    let rejectedByQuality = false
     const result = await runChatTask({
       type: 'generate_timeline',
       novelId,
       messages,
       modelConfigId: novel.modelConfigId || undefined,
+      onSuccess: async (rawOutput, taskId) => {
+        const quality = await runAssetQualityLoop({
+          targetType: 'timeline',
+          novelId,
+          modelConfigId: novel.modelConfigId || undefined,
+          relatedEntityType: 'novel',
+          relatedEntityId: novelId,
+          parentTaskId: taskId,
+          contextSummary: reviewContext,
+          generatedOutput: rawOutput,
+          schemaHint: timelineSchemaHint(currentBatchCount),
+          reviewFocus: [
+            '事件必须有明确因果链和落地后果，不能只给标题与空泛概述。',
+            '时间规则、人物、地点、物品和章节锚点必须相容。',
+          ],
+          rewriteConstraints: [
+            '保持事件数组长度不变。',
+            '保持对象顺序和字段结构稳定。',
+          ],
+        })
+        if (quality.stage === 'rejected') {
+          rejectedByQuality = true
+          return quality
+        }
+        acceptedBatch = cleanAiValue(safeParseJson<GeneratedTimelineEvent[]>(quality.finalOutput))
+        return quality
+      },
     })
     const historyId = recordGeneration(novelId, historyEntityType, null, historyTaskType, result, attemptNumber)
+    if (rejectedByQuality) {
+      markRejected(historyId)
+      continue
+    }
 
     let parsed: GeneratedTimelineEvent[]
     try {
-      parsed = cleanAiValue(safeParseJson<GeneratedTimelineEvent[]>(result))
+      parsed = acceptedBatch || cleanAiValue(safeParseJson<GeneratedTimelineEvent[]>(result))
     } catch (error) {
       markRejected(historyId)
       throw error
@@ -1197,6 +1492,20 @@ export async function regenerateTimelineEvent(
   const attemptNumber = getAttemptCount(current.novelId, historyEntityType, current.id, historyTaskType) + 1
   const rejectedDigests = getRecentRejectedDigests(current.novelId, historyEntityType, current.id, historyTaskType)
   const currentSignature = buildTimelineSignature(current)
+  const storyCoreSummary = buildStoryCoreSummary(profile)
+  const timelineRulesSummary = buildTimelineConfigSummary(rules)
+  const reviewContext = buildTimelineReviewContext({
+    profile,
+    storyCore: storyCoreSummary,
+    timelineRules: timelineRulesSummary,
+    arcSummary: buildArcSummary(arcRows),
+    characterSummary: buildCharacterSummary(characterRows),
+    locationSummary: buildLocationSummary(mapRows),
+    itemSummary: buildItemSummary(itemRows),
+    existingEvents: buildExistingEventSummary(listTimelineEvents(current.novelId).filter((event) => event.id !== current.id)),
+    currentSummary: buildTimelineCurrentSummary(current),
+    mode,
+  })
   const messages = appendVariationMessage([{
     role: 'user',
     content: buildTimelineRepairPrompt({
@@ -1204,7 +1513,7 @@ export async function regenerateTimelineEvent(
       genre: profile.genre,
       background: profile.background,
       worldSummary: profile.worldRulesSummary,
-      timelineRules: buildTimelineConfigSummary(rules),
+      timelineRules: timelineRulesSummary,
       storyGoal: profile.storyGoal,
       coreConflict: profile.coreConflict,
       mainPlot: profile.mainPlot,
@@ -1221,6 +1530,8 @@ export async function regenerateTimelineEvent(
     rejectedDigests,
   })
 
+  let acceptedCandidate: GeneratedTimelineEvent | null = null
+  let rejectedByQuality = false
   const result = await runChatTask({
     type: 'generate_timeline',
     novelId: current.novelId,
@@ -1228,11 +1539,42 @@ export async function regenerateTimelineEvent(
     relatedEntityType: 'timeline',
     relatedEntityId: current.id,
     messages,
+    onSuccess: async (rawOutput, taskId) => {
+      const quality = await runAssetQualityLoop({
+        targetType: 'timeline',
+        novelId: current.novelId,
+        modelConfigId: novel.modelConfigId || undefined,
+        relatedEntityType: 'timeline',
+        relatedEntityId: current.id,
+        parentTaskId: taskId,
+        contextSummary: reviewContext,
+        generatedOutput: rawOutput,
+        schemaHint: timelineSchemaHint(),
+        reviewFocus: [
+          '修复后的事件必须继续承担原节奏功能位，同时补齐因果、锚点和引用关系。',
+          '避免空泛概述和与现有时间规则冲突的写法。',
+        ],
+        rewriteConstraints: [
+          '保持单个时间轴事件 JSON 对象结构稳定。',
+          '不要把事件卡改写成长文。',
+        ],
+      })
+      if (quality.stage === 'rejected') {
+        rejectedByQuality = true
+        return quality
+      }
+      acceptedCandidate = cleanAiValue(safeParseJson<GeneratedTimelineEvent>(quality.finalOutput))
+      return quality
+    },
   })
   const historyId = recordGeneration(current.novelId, historyEntityType, current.id, historyTaskType, result, attemptNumber)
+  if (rejectedByQuality) {
+    markRejected(historyId)
+    return current
+  }
   let parsed: GeneratedTimelineEvent
   try {
-    parsed = cleanAiValue(safeParseJson<GeneratedTimelineEvent>(result))
+    parsed = acceptedCandidate || cleanAiValue(safeParseJson<GeneratedTimelineEvent>(result))
   } catch {
     markRejected(historyId)
     return current

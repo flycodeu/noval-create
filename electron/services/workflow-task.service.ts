@@ -34,10 +34,19 @@ import {
   updateTaskProgress,
   updateTaskStatus,
 } from './task.service'
+import { isBatchWorkflowType, resumeBatchAutoGenerateWorkflow } from './batch-workflow.service'
 
 const DEFAULT_MAX_RETRIES = 2
 const activeWorkflows = new Set<number>()
-const RESUMABLE_WORKFLOW_TYPES = new Set(['map_auto_generate', 'world_rules_auto_generate'])
+const RESUMABLE_WORKFLOW_TYPES = new Set([
+  'map_auto_generate',
+  'world_rules_auto_generate',
+  'character_auto_generate',
+  'item_auto_generate',
+  'timeline_auto_generate',
+  'story_thread_auto_generate',
+  'subplot_auto_generate',
+])
 const WORLD_RULE_SECTION_LABELS = new Map(WORLD_RULE_SECTION_DEFINITIONS.map((item) => [item.key, item.label]))
 
 type TaskRow = typeof tasks.$inferSelect
@@ -818,7 +827,10 @@ export function listWorkflowTasks(novelId?: number) {
   const rows = novelId == null
     ? db.select().from(tasks).orderBy(desc(tasks.updatedAt), desc(tasks.id)).all()
     : db.select().from(tasks).where(eq(tasks.novelId, novelId)).orderBy(desc(tasks.updatedAt), desc(tasks.id)).all()
-  return rows.filter((task) => task.runnerType === 'workflow')
+  return rows
+    .filter((task) => task.runnerType === 'workflow')
+    .map((task) => reconcileStaleWorkflowTask(task))
+    .filter((task): task is TaskRow => Boolean(task))
 }
 
 export function getWorkflowTask(taskId: number) {
@@ -891,6 +903,10 @@ export async function resumeWorkflowTask(taskId: number, sender?: WebContents) {
 
   if (task.type === 'world_rules_auto_generate') {
     return resumeWorldRulesAutoGenerateWorkflow(taskId, undefined, sender)
+  }
+
+  if (isBatchWorkflowType(task.type)) {
+    return resumeBatchAutoGenerateWorkflow(taskId, sender)
   }
 
   throw new Error('当前工作流暂不支持在任务中心继续，请返回对应页面重新发起。')

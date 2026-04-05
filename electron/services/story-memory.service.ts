@@ -6,14 +6,41 @@ import {
   characterRelations,
   characters,
   novels,
+  storyArcs,
   storyItems,
   storyMemoryCheckpoints,
   storyParts,
+  storyThreads,
   storyVolumes,
   timelineEvents,
+  worldMap,
 } from '../database/schema'
 import { markStoryMemoryCheckpointsDirty } from './context-impact.service'
 import { ensureStoryStructure } from './story-structure.service'
+import {
+  buildCharacterContextCards,
+  buildRelationContextCards,
+  buildItemContextCards,
+  buildTimelineContextCards,
+  buildScopeThreadContextCards,
+  buildGenericThreadCardsFromTexts,
+  parseCharacterCards,
+  parseRelationCards,
+  parseItemCards,
+  parseTimelineCards,
+  parseThreadCards,
+  parseCardStringArray,
+  renderCharacterCards,
+  renderRelationCards,
+  renderItemCards,
+  renderTimelineCards,
+  renderThreadCards,
+  stringifyCharacterCards,
+  stringifyRelationCards,
+  stringifyItemCards,
+  stringifyTimelineCards,
+  stringifyThreadCards,
+} from './context-cards'
 
 const CHECKPOINT_CHAPTER_REFRESH_INTERVAL = 30
 const CHECKPOINT_TIME_REFRESH_MS = 7 * 24 * 60 * 60 * 1000
@@ -374,6 +401,14 @@ function checkpointsNeedRefresh(novelId: number): boolean {
   if (checkpoints.some((checkpoint) => (checkpoint.version || 1) < (novel.contextVersion || 1) || checkpoint.stale === 1)) {
     return true
   }
+  if (checkpoints.some((checkpoint) =>
+    !checkpoint.characterCardsJson
+    || !checkpoint.relationCardsJson
+    || !checkpoint.itemCardsJson
+    || !checkpoint.timelineCardsJson
+    || !checkpoint.threadCardsJson)) {
+    return true
+  }
 
   const latestChapterNum = db.select().from(chapters)
     .where(eq(chapters.novelId, novelId))
@@ -424,11 +459,26 @@ export function refreshStoryMemoryCheckpoints(novelId: number) {
     .where(eq(storyParts.novelId, novelId))
     .orderBy(asc(storyParts.volumeId), asc(storyParts.partNumber), asc(storyParts.id))
     .all()
+  const characterRows = db.select().from(characters).where(eq(characters.novelId, novelId)).all()
+  const relationRows = db.select().from(characterRelations).where(eq(characterRelations.novelId, novelId)).all()
+  const itemRows = db.select().from(storyItems)
+    .where(eq(storyItems.novelId, novelId))
+    .orderBy(asc(storyItems.sortOrder), asc(storyItems.id))
+    .all()
+  const threadRows = db.select().from(storyThreads)
+    .where(eq(storyThreads.novelId, novelId))
+    .orderBy(asc(storyThreads.sortOrder), asc(storyThreads.id))
+    .all()
+  const arcRows = db.select().from(storyArcs).where(eq(storyArcs.novelId, novelId)).all()
+  const mapRows = db.select().from(worldMap).where(eq(worldMap.novelId, novelId)).all()
 
   const baseVersion = novel.contextVersion || 1
-  const relationDigest = buildRelationDigest(novelId, 10)
   const forbiddenDirectionsJson = stringifyStringArray(buildForbiddenDirections())
   const styleGuard = buildStyleGuard()
+  const characterNameMap = new Map(characterRows.map((character) => [character.id, character.fullName]))
+  const locationNameMap = new Map(mapRows.map((row) => [row.id, row.name]))
+  const chapterNumMap = new Map(chapterRows.map((chapter) => [chapter.id, chapter.chapterNum]))
+  const arcNameMap = new Map(arcRows.map((arc) => [arc.id, arc.arcName]))
 
   // Skip locked checkpoints (completed volumes in mega mode)
   const existingCheckpoints = db.select().from(storyMemoryCheckpoints).where(eq(storyMemoryCheckpoints.novelId, novelId)).all()
@@ -445,10 +495,11 @@ export function refreshStoryMemoryCheckpoints(novelId: number) {
     scopeId: number | null,
     label: string,
     rows: typeof chapterRows,
+    filters: { volumeId?: number; partId?: number } = {},
   ) => {
     const start = rows[0]?.chapterNum ?? 0
     const end = rows.at(-1)?.chapterNum ?? 0
-    const events = listRelevantEvents(novelId, start || undefined, end || undefined)
+    const events = listRelevantEvents(novelId, start || undefined, end || undefined, filters)
     const eventIds = new Set(events.map((event) => event.id))
     const continuityRows = rows.map((row) => ({
       ...row,
@@ -461,22 +512,58 @@ export function refreshStoryMemoryCheckpoints(novelId: number) {
       ...continuityRows.flatMap((row) => row.continuity.openLoops),
       ...events.flatMap((event) => parseStringArray(event.openThreadsJson)),
     ], 18)
-    const characterStateDigest = dedupe(
-      continuityRows.flatMap((row) => row.continuity.characterStateChanges.map((entry) => `Ch.${row.chapterNum}: ${entry}`)),
-      16,
-    ).join('\n')
-    const timelineDigest = buildTimelineDigest(events, 14)
-    const itemDigest = buildItemDigest(novelId, eventIds, 14)
+    const summary = buildScopeSummary(label, rows, events)
+    const characterCards = buildCharacterContextCards({
+      allCharacters: characterRows,
+      relationRows,
+      recentStateEntries: continuityRows.flatMap((row) =>
+        row.continuity.characterStateChanges.map((entry) => ({
+          chapterNum: row.chapterNum,
+          entry,
+        }))),
+      limit: 12,
+    })
+    const relationCards = buildRelationContextCards({
+      allCharacters: characterRows,
+      relationRows,
+      focusText: [summary, ...rows.map((row) => asText(row.summary)), ...activeThreads].filter(Boolean).join('\n'),
+      limit: 10,
+    })
+    const itemCards = buildItemContextCards({
+      items: itemRows,
+      characterNameMap,
+      locationNameMap,
+      preferredEventIds: eventIds,
+      limit: 14,
+    })
+    const timelineCards = buildTimelineContextCards(events, {
+      chapterNumMap,
+      arcNameMap,
+      characterNameMap,
+      locationNameMap,
+    }, 14)
+    const threadCards = buildScopeThreadContextCards({
+      threads: threadRows,
+      startChapter: start || undefined,
+      endChapter: end || undefined,
+      extraThreadNames: activeThreads,
+      limit: 12,
+    })
 
     upsertCheckpoint(novelId, scopeType, scopeId, {
       label,
-      summary: buildScopeSummary(label, rows, events),
+      summary,
       resolvedThreadsJson: stringifyStringArray(resolvedThreads),
       activeThreadsJson: stringifyStringArray(activeThreads),
-      characterStateDigest,
-      relationDigest,
-      itemDigest,
-      timelineDigest,
+      characterCardsJson: stringifyCharacterCards(characterCards),
+      relationCardsJson: stringifyRelationCards(relationCards),
+      itemCardsJson: stringifyItemCards(itemCards),
+      timelineCardsJson: stringifyTimelineCards(timelineCards),
+      threadCardsJson: stringifyThreadCards(threadCards),
+      characterStateDigest: renderCharacterCards(characterCards),
+      relationDigest: renderRelationCards(relationCards),
+      itemDigest: renderItemCards(itemCards),
+      timelineDigest: renderTimelineCards(timelineCards),
       forbiddenDirectionsJson,
       styleGuard,
       sourceRangeStart: start || null,
@@ -491,34 +578,7 @@ export function refreshStoryMemoryCheckpoints(novelId: number) {
 
   for (const volume of volumeRows) {
     const rows = chapterRows.filter((chapter) => chapter.volumeId === volume.id)
-    const start = rows[0]?.chapterNum ?? 0
-    const end = rows.at(-1)?.chapterNum ?? 0
-    const events = listRelevantEvents(novelId, start || undefined, end || undefined, { volumeId: volume.id })
-    upsertCheckpoint(novelId, 'volume', volume.id, {
-      label: volume.title?.trim() || `第${volume.volumeNumber}卷`,
-      summary: buildScopeSummary(volume.title?.trim() || `第${volume.volumeNumber}卷`, rows, events),
-      resolvedThreadsJson: stringifyStringArray(dedupe(events.filter((event) => event.status === 'resolved').map((event) => event.eventTitle), 12)),
-      activeThreadsJson: stringifyStringArray(dedupe([
-        ...rows.map((row) => ({ ...row, continuity: parseContinuityState(row.continuityStateJson) })).flatMap((row) => row.continuity.openLoops),
-        ...events.flatMap((event) => parseStringArray(event.openThreadsJson)),
-      ], 18)),
-      characterStateDigest: dedupe(
-        rows
-          .map((row) => ({ ...row, continuity: parseContinuityState(row.continuityStateJson) }))
-          .flatMap((row) => row.continuity.characterStateChanges.map((entry) => `Ch.${row.chapterNum}: ${entry}`)),
-        16,
-      ).join('\n'),
-      relationDigest,
-      itemDigest: buildItemDigest(novelId, new Set(events.map((event) => event.id)), 14),
-      timelineDigest: buildTimelineDigest(events, 14),
-      forbiddenDirectionsJson,
-      styleGuard,
-      sourceRangeStart: start || null,
-      sourceRangeEnd: end || null,
-      lastRefreshedChapterNum: end || 0,
-      version: baseVersion,
-      stale: 0,
-    })
+    upsertScope('volume', volume.id, volume.title?.trim() || `第${volume.volumeNumber}卷`, rows, { volumeId: volume.id })
 
     // In mega mode, lock completed volume checkpoints to avoid re-processing
     const memoryMode = resolveStoryMemoryMode(novel.targetWords || 0, chapterRows.length)
@@ -535,34 +595,7 @@ export function refreshStoryMemoryCheckpoints(novelId: number) {
 
   for (const part of partRows) {
     const rows = chapterRows.filter((chapter) => chapter.partId === part.id)
-    const start = rows[0]?.chapterNum ?? 0
-    const end = rows.at(-1)?.chapterNum ?? 0
-    const events = listRelevantEvents(novelId, start || undefined, end || undefined, { partId: part.id })
-    upsertCheckpoint(novelId, 'part', part.id, {
-      label: part.title?.trim() || `第${part.partNumber}部`,
-      summary: buildScopeSummary(part.title?.trim() || `第${part.partNumber}部`, rows, events),
-      resolvedThreadsJson: stringifyStringArray(dedupe(events.filter((event) => event.status === 'resolved').map((event) => event.eventTitle), 12)),
-      activeThreadsJson: stringifyStringArray(dedupe([
-        ...rows.map((row) => ({ ...row, continuity: parseContinuityState(row.continuityStateJson) })).flatMap((row) => row.continuity.openLoops),
-        ...events.flatMap((event) => parseStringArray(event.openThreadsJson)),
-      ], 18)),
-      characterStateDigest: dedupe(
-        rows
-          .map((row) => ({ ...row, continuity: parseContinuityState(row.continuityStateJson) }))
-          .flatMap((row) => row.continuity.characterStateChanges.map((entry) => `Ch.${row.chapterNum}: ${entry}`)),
-        16,
-      ).join('\n'),
-      relationDigest,
-      itemDigest: buildItemDigest(novelId, new Set(events.map((event) => event.id)), 14),
-      timelineDigest: buildTimelineDigest(events, 14),
-      forbiddenDirectionsJson,
-      styleGuard,
-      sourceRangeStart: start || null,
-      sourceRangeEnd: end || null,
-      lastRefreshedChapterNum: end || 0,
-      version: baseVersion,
-      stale: 0,
-    })
+    upsertScope('part', part.id, part.title?.trim() || `第${part.partNumber}部`, rows, { partId: part.id })
   }
 
   return db.select().from(storyMemoryCheckpoints)
@@ -677,23 +710,30 @@ export function buildStoryMemoryPromptSummary(
     ? checkpointRows.find((checkpoint) => checkpoint.scopeType === 'volume' && checkpoint.scopeId === chapter.volumeId)
     : null
   const novelCheckpoint = checkpointRows.find((checkpoint) => checkpoint.scopeType === 'novel')
+  const renderList = (label: string, values: string[]) => values.length > 0 ? `${label}：\n- ${values.join('\n- ')}` : ''
 
   const sections = [partCheckpoint, volumeCheckpoint, novelCheckpoint]
     .filter((checkpoint): checkpoint is StoryMemoryCheckpointRow => Boolean(checkpoint))
     .map((checkpoint) => {
-      const activeThreads = parseStringArray(checkpoint.activeThreadsJson)
-      const resolvedThreads = parseStringArray(checkpoint.resolvedThreadsJson)
+      const activeThreads = parseCardStringArray(checkpoint.activeThreadsJson)
+      const resolvedThreads = parseCardStringArray(checkpoint.resolvedThreadsJson)
+      const characterCardsText = renderCharacterCards(parseCharacterCards(checkpoint.characterCardsJson))
+      const relationCardsText = renderRelationCards(parseRelationCards(checkpoint.relationCardsJson))
+      const itemCardsText = renderItemCards(parseItemCards(checkpoint.itemCardsJson))
+      const timelineCardsText = renderTimelineCards(parseTimelineCards(checkpoint.timelineCardsJson))
+      const threadCardsText = renderThreadCards(parseThreadCards(checkpoint.threadCardsJson))
+        || renderThreadCards(buildGenericThreadCardsFromTexts(activeThreads, '待持续追踪', 12))
       return [
         checkpoint.label ? `[${checkpoint.label}]` : '',
-        checkpoint.summary || '',
-        checkpoint.characterStateDigest ? `人物状态：\n${checkpoint.characterStateDigest}` : '',
-        checkpoint.relationDigest ? `人物关系：\n${checkpoint.relationDigest}` : '',
-        checkpoint.itemDigest ? `物品账本：\n${checkpoint.itemDigest}` : '',
-        checkpoint.timelineDigest ? `时间轴：\n${checkpoint.timelineDigest}` : '',
-        activeThreads.length > 0 ? `活跃线程：\n- ${activeThreads.join('\n- ')}` : '',
-        resolvedThreads.length > 0 ? `已回收线程：\n- ${resolvedThreads.join('\n- ')}` : '',
+        checkpoint.summary ? `摘要：${checkpoint.summary}` : '',
+        characterCardsText ? `人物卡：\n${characterCardsText}` : checkpoint.characterStateDigest ? `人物卡：\n${checkpoint.characterStateDigest}` : '',
+        relationCardsText ? `关系卡：\n${relationCardsText}` : checkpoint.relationDigest ? `关系卡：\n${checkpoint.relationDigest}` : '',
+        itemCardsText ? `物品卡：\n${itemCardsText}` : checkpoint.itemDigest ? `物品卡：\n${checkpoint.itemDigest}` : '',
+        timelineCardsText ? `时间卡：\n${timelineCardsText}` : checkpoint.timelineDigest ? `时间卡：\n${checkpoint.timelineDigest}` : '',
+        threadCardsText ? `线程卡：\n${threadCardsText}` : '',
+        renderList('已回收线程', resolvedThreads),
         checkpoint.styleGuard ? `文风护栏：${checkpoint.styleGuard}` : '',
-      ].filter(Boolean).join('\n\n')
+      ].filter(Boolean).join('\n')
     })
 
   if (sections.length > 0) {

@@ -175,6 +175,7 @@ export interface ChapterWritingPromptInput {
   timelineSummary: string
   timelineOpenThreads: string
   activeThreads?: string
+  recalledMemory?: string
   protagonistReference: string
   protagonistRule: string
   promptTier?: PromptTier
@@ -207,6 +208,7 @@ export interface ScenePlanPromptInput {
   longTermMemory: string
   consistencyNotes: string
   activeThreads?: string
+  recalledMemory?: string
   protagonistReference: string
   protagonistRule: string
   promptTier?: PromptTier
@@ -231,6 +233,7 @@ export interface ChapterReviewPromptInput {
   timelineSummary: string
   longTermMemory: string
   consistencyNotes: string
+  recalledMemory?: string
   arcProgress?: string
   arcProgressStatus?: string
   arcProgressCheckpoint?: string
@@ -270,6 +273,7 @@ export interface ChapterRewritePromptInput {
   reviewNotes: string
   lockedParagraphs?: string[]
   activeThreads?: string
+  recalledMemory?: string
   protagonistReference: string
   protagonistRule: string
   promptTier?: PromptTier
@@ -1273,6 +1277,7 @@ export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
     section('时间轴待回收', params.timelineOpenThreads),
     section('活跃支线与伏笔', params.activeThreads),
     section('长文压缩记忆', params.longTermMemory),
+    section('向量召回记忆', params.recalledMemory),
     section('当前结构体检提醒', params.consistencyNotes),
     section('计划要求', [
       '拆成 4 到 7 个场景或连续段落，每一段都要能直接落成正文。',
@@ -1338,6 +1343,7 @@ export function buildChapterWritingPrompt(params: ChapterWritingPromptInput): st
     section('世界规则与限制', params.worldRules),
     section('近章摘要', params.previousSummaries),
     section('连续性记忆', params.continuitySummary),
+    section('向量召回记忆', params.recalledMemory),
     section('文风参考', params.styleTemplate),
     section('写作要求', [
       '先把事件链、动作链和后果链写顺，再让情绪自然浮出来。',
@@ -1391,6 +1397,7 @@ export function buildChapterDraftPrompt(params: ChapterRewritePromptInput): stri
     section('时间轴待回收', params.timelineOpenThreads),
     section('活跃支线与伏笔', params.activeThreads),
     section('长文压缩记忆', params.longTermMemory),
+    section('向量召回记忆', params.recalledMemory),
     section('结构体检提醒', params.consistencyNotes),
     section('初稿要求', [
       '只按场景计划推进，不跳场景，不漏 must_cover。',
@@ -1438,6 +1445,7 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
     section('未回收事项', params.openLoops),
     section('时间轴锚点', params.timelineSummary),
     section('长期记忆', params.longTermMemory),
+    section('向量召回记忆', params.recalledMemory),
     section('结构体检提醒', params.consistencyNotes),
     section('待审初稿', params.draftContent),
     section('输出规则', [
@@ -1504,6 +1512,7 @@ export function buildChapterRewritePrompt(params: ChapterRewritePromptInput): st
     section('时间轴锚点', params.timelineSummary),
     section('时间轴待回收', params.timelineOpenThreads),
     section('长期记忆', params.longTermMemory),
+    section('向量召回记忆', params.recalledMemory),
     section('结构体检提醒', params.consistencyNotes),
     section('重写要求', [
       '已经成立的段落可以保留，但凡是影响成稿质量的都要修。',
@@ -1640,6 +1649,7 @@ export function chapterWritingPrompt(params: {
   continuityNotes?: string
   timelineSummary?: string
   timelineOpenThreads?: string
+  recalledMemory?: string
   protagonistReference?: string
   protagonistRule?: string
 }): string {
@@ -1664,6 +1674,7 @@ export function chapterWritingPrompt(params: {
     continuityNotes: params.continuityNotes || '',
     timelineSummary: params.timelineSummary || '',
     timelineOpenThreads: params.timelineOpenThreads || '',
+    recalledMemory: params.recalledMemory || '',
     protagonistReference: params.protagonistReference || '主角',
     protagonistRule: params.protagonistRule || '若涉及主角，沿用现有设定中的唯一称呼，不要擅自改名。',
   })
@@ -2034,6 +2045,7 @@ export const PROMPT_CATALOG: PromptCatalogEntry[] = [
       { key: 'lastChapterEnding', label: '上章结尾' },
       { key: 'styleTemplate', label: '文风参考' },
       { key: 'continuitySummary', label: '连续性记忆' },
+      { key: 'recalledMemory', label: '向量召回记忆' },
       { key: 'openLoops', label: '未回收事项' },
       { key: 'continuityNotes', label: '必须承接事项' },
       { key: 'timelineSummary', label: '时间轴关键节点' },
@@ -2057,6 +2069,7 @@ export const PROMPT_CATALOG: PromptCatalogEntry[] = [
       lastChapterEnding: placeholder('lastChapterEnding'),
       styleTemplate: placeholder('styleTemplate'),
       continuitySummary: placeholder('continuitySummary'),
+      recalledMemory: placeholder('recalledMemory'),
       openLoops: placeholder('openLoops'),
       continuityNotes: placeholder('continuityNotes'),
       timelineSummary: placeholder('timelineSummary'),
@@ -2234,6 +2247,3 @@ export function buildFactionSystemExpandPrompt(input: FactionSystemExpandInput):
     ]),
   ])
 }
-
-
-

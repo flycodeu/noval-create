@@ -23,6 +23,7 @@ import type {
 } from '../../src/types'
 import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/utils/text'
 import { markNovelContextChanged } from './context-impact.service'
+import { runAssetQualityLoop, summarizeAssetQualityWarnings } from './asset-quality.service'
 import { logError, logInfo, logWarn } from '../utils/runtime-log'
 
 export interface MapTreeNode {
@@ -263,6 +264,14 @@ function buildMapNodeBatchRepairPrompt(context: ParseGeneratedNodeBatchContext, 
   ])
 }
 
+function mapNodeBatchSchemaHint(expectedCount: number): string {
+  return [
+    `输出必须保持为 ${expectedCount} 个地图节点组成的 JSON 数组。`,
+    '每个节点必须保留 name、node_type、location_type、structure_role、description、atmosphere、plot_relevance、tags、affiliated_factions、danger_level、children 字段。',
+    'children 必须返回空数组，不要跨层扩展。',
+  ].join('\n')
+}
+
 function parseGeneratedNodeBatch(raw: string, context: ParseGeneratedNodeBatchContext): GeneratedMapNode[] {
   let parsed: unknown
   try {
@@ -293,9 +302,12 @@ async function runMapPromptTaskWithJsonRepair<T>(
     parentTaskId?: number
     sender?: WebContents
     context: ParseGeneratedNodeBatchContext
+    reviewContext: string
+    reviewFocus?: string[]
+    rewriteConstraints?: string[]
     parser: (raw: string) => T
   },
-): Promise<{ value: T; repaired: boolean }> {
+) : Promise<{ value: T; repaired: boolean; reviewWarning?: string }> {
   const raw = await runMapPromptTask({
     novelId: params.novelId,
     modelConfigId: params.modelConfigId,
@@ -304,8 +316,11 @@ async function runMapPromptTaskWithJsonRepair<T>(
     sender: params.sender,
   })
 
+  let candidateRaw = raw
+  let repaired = false
+
   try {
-    return { value: params.parser(raw), repaired: false }
+    params.parser(raw)
   } catch (initialError) {
     const initialMessage = sanitizeMapErrorMessage(initialError, `${formatGeneratedNodeBatchTarget(params.context)} 解析失败`)
 
@@ -323,12 +338,38 @@ async function runMapPromptTaskWithJsonRepair<T>(
     }
 
     try {
-      return { value: params.parser(repairedRaw), repaired: true }
+      params.parser(repairedRaw)
+      candidateRaw = repairedRaw
+      repaired = true
     } catch (repairError) {
       throw new Error(
         `${formatGeneratedNodeBatchTarget(params.context)} JSON 解析失败，已自动修复一次仍未成功。首轮原因：${initialMessage}。修复后原因：${sanitizeMapErrorMessage(repairError)}。原始输出片段：${previewText(raw)}`,
       )
     }
+  }
+
+  const quality = await runAssetQualityLoop({
+    targetType: 'map',
+    novelId: params.novelId,
+    modelConfigId: params.modelConfigId,
+    relatedEntityType: 'novel',
+    relatedEntityId: params.novelId,
+    parentTaskId: params.parentTaskId,
+    sender: params.sender,
+    contextSummary: params.reviewContext,
+    generatedOutput: candidateRaw,
+    schemaHint: mapNodeBatchSchemaHint(params.context.expectedCount),
+    reviewFocus: params.reviewFocus,
+    rewriteConstraints: params.rewriteConstraints,
+  })
+  if (quality.stage === 'rejected') {
+    throw new Error(`${formatGeneratedNodeBatchTarget(params.context)} 审校拒收：${summarizeAssetQualityWarnings(quality) || quality.review.summary}`)
+  }
+
+  return {
+    value: params.parser(quality.finalOutput),
+    repaired,
+    reviewWarning: summarizeAssetQualityWarnings(quality) || undefined,
   }
 }
 
@@ -1076,13 +1117,32 @@ export async function batchGenerateMap(novelId: number, structure: MapBatchGener
           label: '根层节点',
           expectedCount: batchCount,
         }
-        const { value: parsed, repaired } = await runMapPromptTaskWithJsonRepair({
+        const { value: parsed, repaired, reviewWarning } = await runMapPromptTaskWithJsonRepair({
           novelId,
           modelConfigId: novel.modelConfigId || undefined,
           prompt,
           parentTaskId: runtime.parentTaskId,
           sender: runtime.sender,
           context,
+          reviewContext: [
+            `题材：${profile.genre}`,
+            profile.background ? `背景：${profile.background}` : '',
+            profile.worldRulesSummary ? `世界规则：${profile.worldRulesSummary}` : '',
+            `地图蓝图：${structureSummary}`,
+            mapSummary ? `蓝图补充：${mapSummary}` : '',
+            factionSummary ? `势力：${factionSummary}` : '',
+            structure.namedPlaces ? `已知地点：${structure.namedPlaces}` : '',
+            `本批目标：根层 ${rootPlan.label} 节点 ${batchCount} 个，禁止跨层。`,
+            existingRootNames.length > 0 ? `已有根节点：${existingRootNames.join('、')}` : '当前还没有根节点。',
+          ].filter(Boolean).join('\n\n'),
+          reviewFocus: [
+            '地点职责、层级和剧情作用必须具体，不能只是空泛地名模板。',
+            'plot_relevance 要写清这个地点承接什么事件或冲突。',
+          ],
+          rewriteConstraints: [
+            '保持节点数组长度不变。',
+            'children 必须保持空数组，不要擅自生成子层节点。',
+          ],
           parser: (raw) => parseGeneratedNodeBatch(raw, context),
         })
         if (repaired) {
@@ -1091,6 +1151,16 @@ export async function batchGenerateMap(novelId: number, structure: MapBatchGener
             context: {
               batchCount,
               rootLabel: rootPlan.label,
+            },
+          })
+        }
+        if (reviewWarning) {
+          logInfo('map', '地图根层批次已通过资产审校并附带修正提示。', {
+            consoleSummary: '[map:info] root-batch-quality-reviewed',
+            context: {
+              batchCount,
+              rootLabel: rootPlan.label,
+              reviewWarning,
             },
           })
         }
@@ -1119,13 +1189,36 @@ export async function batchGenerateMap(novelId: number, structure: MapBatchGener
             expectedCount: missingCount,
             parentName: currentParent.name,
           }
-          const { value: parsed, repaired } = await runMapPromptTaskWithJsonRepair({
+          const { value: parsed, repaired, reviewWarning } = await runMapPromptTaskWithJsonRepair({
             novelId,
             modelConfigId: novel.modelConfigId || undefined,
             prompt,
             parentTaskId: runtime.parentTaskId,
             sender: runtime.sender,
             context,
+            reviewContext: [
+              `题材：${profile.genre}`,
+              profile.background ? `背景：${profile.background}` : '',
+              profile.worldRulesSummary ? `世界规则：${profile.worldRulesSummary}` : '',
+              `地图蓝图：${structureSummary}`,
+              mapSummary ? `蓝图补充：${mapSummary}` : '',
+              factionSummary ? `势力：${factionSummary}` : '',
+              `父节点路径：${buildNodePath(currentParent, rows)}`,
+              `父节点名称：${currentParent.name}`,
+              currentParent.nodeType || currentParent.locationType ? `父节点类型：${currentParent.nodeType || currentParent.locationType}` : '',
+              currentParent.structureRole ? `父节点职责：${currentParent.structureRole}` : '',
+              currentParent.plotRelevance ? `父节点剧情作用：${currentParent.plotRelevance}` : '',
+              `本批目标：为该父节点补 ${missingCount} 个 ${targetPlan.label} 直属子节点，禁止跨层。`,
+              existingChildren.length > 0 ? `已有直属子节点：${existingChildren.map((row) => row.name).filter(Boolean).join('、')}` : '当前还没有直属子节点。',
+            ].filter(Boolean).join('\n\n'),
+            reviewFocus: [
+              '子节点必须紧扣父节点职责和层级，不能跳层扩世界设定。',
+              '地点描述和剧情作用必须具体，避免模板腔。',
+            ],
+            rewriteConstraints: [
+              '保持节点数组长度不变。',
+              'children 必须保持空数组，不要返回 grandchildren。',
+            ],
             parser: (raw) => parseGeneratedNodeBatch(raw, context),
           })
           if (repaired) {
@@ -1136,6 +1229,17 @@ export async function batchGenerateMap(novelId: number, structure: MapBatchGener
                 parentName: currentParent.name,
                 targetLabel: targetPlan.label,
                 batchCount: missingCount,
+              },
+            })
+          }
+          if (reviewWarning) {
+            logInfo('map', '地图子节点批次已通过资产审校并附带修正提示。', {
+              consoleSummary: `[map:info] child-batch-quality-reviewed parent_id=${currentParent.id}`,
+              context: {
+                parentId: currentParent.id,
+                parentName: currentParent.name,
+                targetLabel: targetPlan.label,
+                reviewWarning,
               },
             })
           }

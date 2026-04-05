@@ -347,7 +347,7 @@ async function writeEpubExport(
   chapterList: ChapterRecord[],
   chunkTitle?: string,
 ): Promise<void> {
-  const EPub = (await import('epub-gen-memory')).default
+  const { EPub } = await import('epub-gen-memory')
 
   const content = chapterList.map((chapter) => {
     const paragraphs = (chapter.content || '').split(/\n+/).filter((p) => p.trim())
@@ -357,7 +357,7 @@ async function writeEpubExport(
 
     return {
       title: `第${chapter.chapterNum}章 ${chapter.title || ''}`,
-      data: htmlBody,
+      content: htmlBody,
     }
   })
 

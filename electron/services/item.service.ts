@@ -1,3 +1,4 @@
+import type { WebContents } from 'electron'
 import { asc, eq } from 'drizzle-orm'
 import type {
   Character as AppCharacter,
@@ -19,7 +20,7 @@ import {
   markRejected,
   recordGeneration,
 } from './generation-history.service'
-import { runChatTask } from './task.service'
+import { createTask, executeChatTask, runChatTask, updateTask } from './task.service'
 import { removeStoryItemFromEvents, syncStoryItemTimelineLinks } from './link-sync.service'
 import {
   buildItemTemplateSummary,
@@ -35,16 +36,23 @@ import {
 } from '../../src/shared/prompt-library'
 import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/utils/text'
 import { markNovelContextChanged } from './context-impact.service'
+import { runAssetQualityLoop, summarizeAssetQualityWarnings } from './asset-quality.service'
 import { appendVariationMessage } from './variation-control.service'
 
 type StoryItemStatus = 'available' | 'consumed' | 'hidden' | 'destroyed'
 
-interface StoryItemGenerateOptions {
+export interface StoryItemGenerateOptions {
   count?: number
   batchSize?: number
   focus?: string
   templateOnly?: boolean
   refreshTemplates?: boolean
+}
+
+export interface StoryItemBatchChunkResult {
+  ids: number[]
+  warning?: string
+  batchDigest?: string
 }
 
 interface GeneratedStoryItem {
@@ -472,6 +480,55 @@ function buildItemCurrentSummary(item: typeof storyItems.$inferSelect): string {
     item.appearance ? `外观：${item.appearance}` : '',
     item.factionHint ? `势力线索：${item.factionHint}` : '',
   ].filter(Boolean).join('\n')
+}
+
+function buildStoryCoreSummary(profile: Awaited<ReturnType<typeof buildStoryProfile>>): string {
+  return [
+    `故事目标：${profile.storyGoal || '未提供'}`,
+    `核心冲突：${profile.coreConflict || '未提供'}`,
+    `主线剧情：${profile.mainPlot || '未提供'}`,
+    `结局方向：${profile.ending || '未提供'}`,
+  ].join('\n')
+}
+
+function buildItemReviewContext(input: {
+  profile: Awaited<ReturnType<typeof buildStoryProfile>>
+  storyCore: string
+  characterSummary: string
+  locationSummary: string
+  factionSummary: string
+  arcSummary: string
+  eventSummary: string
+  existingItemSummary: string
+  currentSummary?: string
+  focus?: string
+  mode?: 'repair' | 'replace'
+}): string {
+  return [
+    `题材：${input.profile.genre}`,
+    input.profile.background ? `背景：${input.profile.background}` : '',
+    input.profile.worldRulesSummary ? `世界规则：${input.profile.worldRulesSummary}` : '',
+    input.storyCore ? `故事核心：\n${input.storyCore}` : '',
+    input.currentSummary ? `当前物品：\n${input.currentSummary}` : '',
+    input.characterSummary ? `人物：\n${input.characterSummary}` : '',
+    input.locationSummary ? `地点：\n${input.locationSummary}` : '',
+    input.factionSummary ? `势力：\n${input.factionSummary}` : '',
+    input.arcSummary ? `故事弧：\n${input.arcSummary}` : '',
+    input.eventSummary ? `时间轴事件：\n${input.eventSummary}` : '',
+    input.existingItemSummary ? `已有物品：\n${input.existingItemSummary}` : '',
+    input.focus ? `本轮聚焦：${input.focus}` : '',
+    input.mode ? `当前模式：${input.mode}` : '',
+  ].filter(Boolean).join('\n\n')
+}
+
+function itemSchemaHint(expectedCount?: number): string {
+  return [
+    typeof expectedCount === 'number'
+      ? `输出必须保持为 ${expectedCount} 个物品对象组成的 JSON 数组。`
+      : '输出必须保持为单个物品 JSON 对象。',
+    '不要改变字段结构，不要把物品卡改写成散文说明。',
+    '名称、功能、代价、风险、剧情作用等核心字段必须保留并具体化。',
+  ].join('\n')
 }
 
 function buildItemRepairPrompt(input: {
@@ -1114,6 +1171,213 @@ export function clearStoryItemsByNovel(novelId: number, options: { skipContextTr
   }
 }
 
+export async function generateStoryItemsBatchChunk(
+  novelId: number,
+  options: StoryItemGenerateOptions = {},
+  runtime: {
+    parentTaskId?: number
+    sender?: WebContents
+    batchIndex?: number
+    totalBatches?: number
+  } = {},
+): Promise<StoryItemBatchChunkResult> {
+  const db = getDb()
+  const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
+  if (!novel) throw new Error('小说不存在')
+
+  const profile = await buildStoryProfile(novelId)
+  const rules = parseWorldRulesJson(novel.worldRulesJson, profile.genre)
+  const itemProfile = getItemGenerationProfile(profile.genre)
+  const templateRows = ensureTemplateRows(novelId, {
+    genreName: profile.genre,
+    refreshTemplates: options.refreshTemplates,
+  })
+
+  if (options.templateOnly) {
+    return {
+      ids: templateRows.map((row) => row.id),
+      batchDigest: `模板 ${templateRows.length} 条`,
+    }
+  }
+
+  const characterRows = db.select().from(characters).where(eq(characters.novelId, novelId)).all()
+  const mapRows = db.select().from(worldMap).where(eq(worldMap.novelId, novelId)).all()
+  const eventRows = db.select().from(timelineEvents).where(eq(timelineEvents.novelId, novelId)).all()
+  const arcRows = db.select().from(storyArcs).where(eq(storyArcs.novelId, novelId)).all()
+  const currentItems = db.select().from(storyItems).where(eq(storyItems.novelId, novelId)).all()
+  const requestedCount = Math.max(1, Math.min(options.count || itemProfile.defaultBatch, 24))
+  const historyEntityType = 'item'
+  const historyTaskType = 'story_item_generate_batch'
+  let nextSort = getNextSortOrder(novelId)
+  let resultPayload: StoryItemBatchChunkResult | null = null
+  const storyCoreSummary = buildStoryCoreSummary(profile)
+  const characterSummary = buildCharacterSummary(characterRows)
+  const locationSummary = buildLocationSummary(mapRows)
+  const arcSummary = buildArcSummary(arcRows)
+  const eventSummary = buildEventSummary(eventRows)
+  const existingItemSummary = buildExistingItemSummary(currentItems)
+  const factionSummary = getFactionNameOptions(rules).join('、')
+  const reviewContext = buildItemReviewContext({
+    profile,
+    storyCore: storyCoreSummary,
+    characterSummary,
+    locationSummary,
+    factionSummary,
+    arcSummary,
+    eventSummary,
+    existingItemSummary,
+    focus: options.focus,
+  })
+
+  const prompt = buildPrompt({
+    novelTitle: novel.title,
+    genre: profile.genre,
+    background: profile.background,
+    worldSummary: profile.worldRulesSummary,
+    storyCore: storyCoreSummary,
+    templateSummary: buildItemTemplateSummary(itemProfile),
+    characterSummary,
+    locationSummary,
+    factionSummary,
+    arcSummary,
+    eventSummary,
+    existingItemSummary,
+    focus: [
+      options.focus,
+      `第 ${runtime.batchIndex || 1}/${runtime.totalBatches || 1} 批：新增 ${requestedCount} 个物品实例，并主动避开已有物品的重复功能。`,
+    ].filter(Boolean).join('\n'),
+    count: requestedCount,
+  })
+  const attemptNumber = getAttemptCount(novelId, historyEntityType, null, historyTaskType) + 1
+  const rejectedDigests = getRecentRejectedDigests(novelId, historyEntityType, null, historyTaskType)
+  const messages = appendVariationMessage([{ role: 'user', content: prompt }], {
+    attemptNumber,
+    rejectedDigests,
+  })
+  const inputJson = JSON.stringify(messages)
+  const taskId = await createTask({
+    type: 'generate_items',
+    novelId,
+    modelConfigId: novel.modelConfigId || undefined,
+    relatedEntityType: 'novel',
+    relatedEntityId: novelId,
+    inputJson,
+    runnerType: 'chat',
+    parentTaskId: runtime.parentTaskId,
+  })
+
+  if (typeof runtime.parentTaskId === 'number') {
+    updateTask(runtime.parentTaskId, { currentChildTaskId: taskId })
+  }
+
+  try {
+    await executeChatTask(taskId, {
+      type: 'generate_items',
+      novelId,
+      modelConfigId: novel.modelConfigId || undefined,
+      relatedEntityType: 'novel',
+      relatedEntityId: novelId,
+      inputJson,
+      messages,
+      sender: runtime.sender,
+      onSuccess: async (result) => {
+        const historyId = recordGeneration(novelId, historyEntityType, null, historyTaskType, result, attemptNumber)
+        const quality = await runAssetQualityLoop({
+          targetType: 'item',
+          novelId,
+          modelConfigId: novel.modelConfigId || undefined,
+          relatedEntityType: 'novel',
+          relatedEntityId: novelId,
+          parentTaskId: taskId,
+          sender: runtime.sender,
+          contextSummary: reviewContext,
+          generatedOutput: result,
+          schemaHint: itemSchemaHint(requestedCount),
+          reviewFocus: [
+            '物品必须具体可追踪，不能只剩抽象概念、模板道具名或空泛象征。',
+            '功能、代价、风险和剧情作用必须能落到人物、地点、事件或势力关系上。',
+          ],
+          rewriteConstraints: [
+            '保持物品数组长度不变。',
+            '保持对象顺序和字段语义稳定，不要把数组改成说明文。',
+          ],
+        })
+        if (quality.stage === 'rejected') {
+          markRejected(historyId)
+          resultPayload = {
+            ids: [],
+            warning: summarizeAssetQualityWarnings(quality) || `第 ${runtime.batchIndex || 1}/${runtime.totalBatches || 1} 批物品被审校拒收。`,
+          }
+          return resultPayload
+        }
+        let parsed: GeneratedStoryItem[]
+        try {
+          parsed = cleanAiValue(safeParseJson<GeneratedStoryItem[]>(quality.finalOutput))
+        } catch (error) {
+          markRejected(historyId)
+          throw error
+        }
+        if (!Array.isArray(parsed)) {
+          markRejected(historyId)
+          throw new Error('物品生成结果不是有效数组。')
+        }
+
+        const usedSignatures = new Set(
+          currentItems
+            .filter((item) => item.itemKind === 'instance')
+            .map((item) => buildItemSignature(item))
+            .filter(Boolean),
+        )
+        let acceptedInBatch = 0
+        const createdIds: number[] = []
+        const acceptedNames: string[] = []
+
+        for (const rawItem of parsed) {
+          const payload = buildGeneratedPayload(rawItem, {
+            genreFamily: resolveGenreFamily(profile.genre),
+            templateRows,
+            characterRows,
+            mapRows,
+            eventRows,
+            sortOrder: nextSort,
+          })
+          if (!payload) continue
+          const signature = buildItemSignature(payload)
+          if (!signature || usedSignatures.has(signature)) continue
+          const id = createStoryItem(novelId, payload, { skipContextTracking: true })
+          createdIds.push(id)
+          usedSignatures.add(signature)
+          acceptedInBatch += 1
+          nextSort += 1
+          acceptedNames.push(payload.itemName || `物品#${id}`)
+        }
+
+        if (acceptedInBatch === 0) {
+          markRejected(historyId)
+        }
+        if (createdIds.length > 0) {
+          markNovelContextChanged(novelId, 'Story items changed')
+        }
+
+        resultPayload = {
+          ids: createdIds,
+          warning: createdIds.length > 0
+            ? summarizeAssetQualityWarnings(quality)
+            : (summarizeAssetQualityWarnings(quality) || `第 ${runtime.batchIndex || 1}/${runtime.totalBatches || 1} 批没有生成可用物品。`),
+          batchDigest: acceptedNames.slice(0, 4).join('、'),
+        }
+        return resultPayload
+      },
+    })
+  } finally {
+    if (typeof runtime.parentTaskId === 'number') {
+      updateTask(runtime.parentTaskId, { currentChildTaskId: null })
+    }
+  }
+
+  return resultPayload || { ids: [] }
+}
+
 export async function generateStoryItems(
   novelId: number,
   options: StoryItemGenerateOptions = {},
@@ -1145,29 +1409,42 @@ export async function generateStoryItems(
   const historyEntityType = 'item'
   const historyTaskType = 'story_item_generate_batch'
   let nextSort = getNextSortOrder(novelId)
+  const storyCoreSummary = buildStoryCoreSummary(profile)
+  const characterSummary = buildCharacterSummary(characterRows)
+  const locationSummary = buildLocationSummary(mapRows)
+  const arcSummary = buildArcSummary(arcRows)
+  const eventSummary = buildEventSummary(eventRows)
+  const factionSummary = getFactionNameOptions(rules).join('、')
 
   for (let generatedCount = 0; generatedCount < totalCount; generatedCount += batchSize) {
     const currentBatchCount = Math.min(batchSize, totalCount - generatedCount)
     const currentItems = db.select().from(storyItems).where(eq(storyItems.novelId, novelId)).all()
+    const existingItemSummary = buildExistingItemSummary(currentItems)
+    const reviewContext = buildItemReviewContext({
+      profile,
+      storyCore: storyCoreSummary,
+      characterSummary,
+      locationSummary,
+      factionSummary,
+      arcSummary,
+      eventSummary,
+      existingItemSummary,
+      focus: options.focus,
+    })
 
     const prompt = buildPrompt({
       novelTitle: novel.title,
       genre: profile.genre,
       background: profile.background,
       worldSummary: profile.worldRulesSummary,
-      storyCore: [
-        `故事目标：${profile.storyGoal || '未提供'}`,
-        `核心冲突：${profile.coreConflict || '未提供'}`,
-        `主线剧情：${profile.mainPlot || '未提供'}`,
-        `结局方向：${profile.ending || '未提供'}`,
-      ].join('\n'),
+      storyCore: storyCoreSummary,
       templateSummary: buildItemTemplateSummary(itemProfile),
-      characterSummary: buildCharacterSummary(characterRows),
-      locationSummary: buildLocationSummary(mapRows),
-      factionSummary: getFactionNameOptions(rules).join('、'),
-      arcSummary: buildArcSummary(arcRows),
-      eventSummary: buildEventSummary(eventRows),
-      existingItemSummary: buildExistingItemSummary(currentItems),
+      characterSummary,
+      locationSummary,
+      factionSummary,
+      arcSummary,
+      eventSummary,
+      existingItemSummary,
       focus: [
         options.focus,
         `第 ${Math.floor(generatedCount / batchSize) + 1} 批：新增 ${currentBatchCount} 个物品实例，并主动避开已有物品的重复功能。`,
@@ -1181,16 +1458,49 @@ export async function generateStoryItems(
       rejectedDigests,
     })
 
+    let acceptedBatch: GeneratedStoryItem[] | null = null
+    let rejectedByQuality = false
     const result = await runChatTask({
       type: 'generate_items',
       novelId,
       messages,
       modelConfigId: novel.modelConfigId || undefined,
+      onSuccess: async (rawOutput, taskId) => {
+        const quality = await runAssetQualityLoop({
+          targetType: 'item',
+          novelId,
+          modelConfigId: novel.modelConfigId || undefined,
+          relatedEntityType: 'novel',
+          relatedEntityId: novelId,
+          parentTaskId: taskId,
+          contextSummary: reviewContext,
+          generatedOutput: rawOutput,
+          schemaHint: itemSchemaHint(currentBatchCount),
+          reviewFocus: [
+            '物品必须具体可复用，不能沦为空泛模板或万能道具。',
+            '剧情功能、代价和风险要能和现有人物、地点、事件形成挂钩。',
+          ],
+          rewriteConstraints: [
+            '保持物品数组长度不变。',
+            '保持对象顺序和字段结构稳定。',
+          ],
+        })
+        if (quality.stage === 'rejected') {
+          rejectedByQuality = true
+          return quality
+        }
+        acceptedBatch = cleanAiValue(safeParseJson<GeneratedStoryItem[]>(quality.finalOutput))
+        return quality
+      },
     })
     const historyId = recordGeneration(novelId, historyEntityType, null, historyTaskType, result, attemptNumber)
+    if (rejectedByQuality) {
+      markRejected(historyId)
+      continue
+    }
     let parsed: GeneratedStoryItem[]
     try {
-      parsed = cleanAiValue(safeParseJson<GeneratedStoryItem[]>(result))
+      parsed = acceptedBatch || cleanAiValue(safeParseJson<GeneratedStoryItem[]>(result))
     } catch (error) {
       markRejected(historyId)
       throw error
@@ -1264,6 +1574,22 @@ export async function regenerateStoryItem(
   const attemptNumber = getAttemptCount(current.novelId, historyEntityType, current.id, historyTaskType) + 1
   const rejectedDigests = getRecentRejectedDigests(current.novelId, historyEntityType, current.id, historyTaskType)
   const currentSignature = buildItemSignature(current)
+  const storyCoreSummary = buildStoryCoreSummary(profile)
+  const characterSummary = buildCharacterSummary(characterRows)
+  const locationSummary = buildLocationSummary(mapRows)
+  const eventSummary = buildEventSummary(eventRows)
+  const reviewContext = buildItemReviewContext({
+    profile,
+    storyCore: storyCoreSummary,
+    characterSummary,
+    locationSummary,
+    factionSummary: '',
+    arcSummary: '',
+    eventSummary,
+    existingItemSummary: buildExistingItemSummary(db.select().from(storyItems).where(eq(storyItems.novelId, current.novelId)).all()),
+    currentSummary: buildItemCurrentSummary(current),
+    mode,
+  })
   const messages = appendVariationMessage([{
     role: 'user',
     content: buildItemRepairPrompt({
@@ -1277,9 +1603,9 @@ export async function regenerateStoryItem(
         `Main plot: ${profile.mainPlot || 'not provided'}`,
         `Ending direction: ${profile.ending || 'not provided'}`,
       ].join('\n'),
-      characterSummary: buildCharacterSummary(characterRows),
-      locationSummary: buildLocationSummary(mapRows),
-      eventSummary: buildEventSummary(eventRows),
+      characterSummary,
+      locationSummary,
+      eventSummary,
       currentSummary: buildItemCurrentSummary(current),
       mode,
     }),
@@ -1288,6 +1614,8 @@ export async function regenerateStoryItem(
     rejectedDigests,
   })
 
+  let acceptedCandidate: GeneratedStoryItem | null = null
+  let rejectedByQuality = false
   const result = await runChatTask({
     type: 'generate_items',
     novelId: current.novelId,
@@ -1295,11 +1623,42 @@ export async function regenerateStoryItem(
     relatedEntityId: current.id,
     messages,
     modelConfigId: novel.modelConfigId || undefined,
+    onSuccess: async (rawOutput, taskId) => {
+      const quality = await runAssetQualityLoop({
+        targetType: 'item',
+        novelId: current.novelId,
+        modelConfigId: novel.modelConfigId || undefined,
+        relatedEntityType: 'item',
+        relatedEntityId: current.id,
+        parentTaskId: taskId,
+        contextSummary: reviewContext,
+        generatedOutput: rawOutput,
+        schemaHint: itemSchemaHint(),
+        reviewFocus: [
+          '修复后的物品必须继续承担原功能位，但去掉空泛、重复和失真问题。',
+          '名称、作用、代价、风险要与题材和现有上下文一致。',
+        ],
+        rewriteConstraints: [
+          '保持单个物品 JSON 对象结构稳定。',
+          '不要把单条物品卡改写成说明文。',
+        ],
+      })
+      if (quality.stage === 'rejected') {
+        rejectedByQuality = true
+        return quality
+      }
+      acceptedCandidate = cleanAiValue(safeParseJson<GeneratedStoryItem>(quality.finalOutput))
+      return quality
+    },
   })
   const historyId = recordGeneration(current.novelId, historyEntityType, current.id, historyTaskType, result, attemptNumber)
+  if (rejectedByQuality) {
+    markRejected(historyId)
+    return current
+  }
   let parsed: GeneratedStoryItem
   try {
-    parsed = cleanAiValue(safeParseJson<GeneratedStoryItem>(result))
+    parsed = acceptedCandidate || cleanAiValue(safeParseJson<GeneratedStoryItem>(result))
   } catch {
     markRejected(historyId)
     return current

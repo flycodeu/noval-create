@@ -99,8 +99,8 @@ export default function QualityDashboard({ novelId }: Props) {
       description="查看各章节的AI评分与质量趋势。"
       metrics={[
         <WorkspaceMetric key="scored" label="已评分章节" value={data.totalChaptersScored} />,
-        <WorkspaceMetric key="avg" label="平均总分" value={data.averageOverallScore} suffix="/ 10" />,
-        <WorkspaceMetric key="ailike" label="平均AI味率" value={data.averageAiLikeRate} suffix="%" />,
+        <WorkspaceMetric key="avg" label="平均总分" value={`${data.averageOverallScore} / 10`} />,
+        <WorkspaceMetric key="ailike" label="平均AI味率" value={`${data.averageAiLikeRate}%`} />,
       ]}
     >
       <WorkspacePanel title="质量热力图" description="X=章节，Y=评分维度，颜色越绿越好。">

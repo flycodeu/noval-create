@@ -66,9 +66,13 @@ const EMPTY_STATS = {
   outlineCount: 0,
   timelineCount: 0,
   revisionTaskCount: 0,
+  revisionBlockerCount: 0,
+  revisionOpenCount: 0,
   chapterCount: 0,
   completedChapterCount: 0,
   totalWords: 0,
+  staleChapterCount: 0,
+  contextVersion: 1,
   hasProtagonist: false,
   volumeCount: 0,
 }
@@ -408,6 +412,39 @@ export default function CoreSettings({ novelId }: Props) {
     setSelectedSubplotIndex(null)
   }
 
+  const waitForSubplotAutoGenerate = async (taskId: number) => {
+    while (true) {
+      const status = await window.electron.subplot.getAutoGenerateStatus(taskId)
+      if (!status) {
+        throw new Error('支线批量任务不存在，可能已被清理。')
+      }
+
+      setGenerationProgress({
+        novelId,
+        step: 'sub_plots_list',
+        label: '支线布局',
+        status: status.status === 'failed' ? 'failed' : 'running',
+        completed: Math.min(status.currentBatch, status.totalBatches),
+        total: Math.max(status.totalBatches, 1),
+        detail: status.message || `正在执行第 ${Math.min(status.currentBatch + 1, Math.max(status.totalBatches, 1))} 批支线生成。`,
+        warning: status.warnings[status.warnings.length - 1],
+      })
+
+      if (status.status === 'success') return status
+      if (status.status === 'failed') {
+        throw new Error(status.lastError || status.message || '支线批量生成失败。')
+      }
+      if (status.status === 'paused') {
+        throw new Error(status.message || '支线批量生成已暂停，请到任务中心继续执行。')
+      }
+      if (status.status === 'cancelled') {
+        throw new Error(status.message || '支线批量生成已取消。')
+      }
+
+      await new Promise((resolve) => window.setTimeout(resolve, 500))
+    }
+  }
+
   const handleGenerate = async (mode: GenerationMode) => {
     const nextStats = await loadWorkflowStats(novelId)
     setStats(nextStats)
@@ -439,39 +476,67 @@ export default function CoreSettings({ novelId }: Props) {
           : '本轮生成需要同时整理主线目标、冲突、推进链、节奏、结局和支线布局。',
       ].filter(Boolean).join('\n')
 
-      const result = await window.electron.ai.generateCoreSettings({
-        novelId,
-        subplotCount: Math.max(batchCount, subplots.length || DEFAULT_SUBPLOT_BATCH_COUNT),
-        requirements,
-      })
-
       if (mode === 'subplots') {
-        setSubplots(normalizeSubplots(result.sub_plots_list))
+        const taskId = await window.electron.subplot.startAutoGenerate({
+          novelId,
+          subplotCount: Math.max(batchCount, subplots.length || DEFAULT_SUBPLOT_BATCH_COUNT),
+          storyGoal: normalizeText(values.story_goal),
+          coreConflict: normalizeText(values.core_conflict),
+          mainPlot: normalizeText(values.main_plot),
+          requirements,
+        })
+        const status = await waitForSubplotAutoGenerate(taskId)
+        const nextSubplots = normalizeSubplots(status.subplots)
+        setSubplots(nextSubplots)
         setSelectedSubplotIndex(null)
-      } else {
-        applyGeneratedResult(result)
-      }
-      void saveAppliedDraft({
-        story_goal: result.story_goal || values.story_goal || '',
-        core_conflict: result.core_conflict || values.core_conflict || '',
-        main_plot: result.main_plot || values.main_plot || '',
-        rhythm_setup: result.rhythm_setup || values.rhythm_setup || 30,
-        rhythm_conflict: result.rhythm_conflict || values.rhythm_conflict || 50,
-        rhythm_ending: result.rhythm_ending || values.rhythm_ending || 20,
-        ending_type: result.ending_type || values.ending_type || '',
-        ending: result.ending || values.ending || '',
-        subplot_batch_count: batchCount,
-        subplots: normalizeSubplots(result.sub_plots_list),
-      }, result.warnings, 'story-design', {
-        inputSummary: `${mode === 'subplots' ? '重排支线' : '生成故事骨架'} · ${currentNovel?.title || '未命名小说'}`,
-      }).catch(console.error)
+        void saveAppliedDraft({
+          story_goal: normalizeText(values.story_goal),
+          core_conflict: normalizeText(values.core_conflict),
+          main_plot: normalizeText(values.main_plot),
+          rhythm_setup: values.rhythm_setup || 30,
+          rhythm_conflict: values.rhythm_conflict || 50,
+          rhythm_ending: values.rhythm_ending || 20,
+          ending_type: values.ending_type || '',
+          ending: normalizeText(values.ending),
+          subplot_batch_count: batchCount,
+          subplots: nextSubplots,
+        }, status.warnings, 'story-design', {
+          inputSummary: `重排支线 · ${currentNovel?.title || '未命名小说'}`,
+        }).catch(console.error)
 
-      if (result.warnings.length > 0) {
-        message.warning(`AI 已生成内容，但有 ${result.warnings.length} 条提醒，保存前请复核。`)
-      } else if (mode === 'subplots') {
-        message.success('支线看板已按当前故事锚点重算。')
+        if (status.warnings.length > 0) {
+          message.warning(`AI 已生成支线，但有 ${status.warnings.length} 条提醒，保存前请复核。`)
+        } else {
+          message.success('支线看板已按当前故事锚点重算。')
+        }
       } else {
-        message.success('故事设计首版已生成到表单。')
+        const result = await window.electron.ai.generateCoreSettings({
+          novelId,
+          subplotCount: Math.max(batchCount, subplots.length || DEFAULT_SUBPLOT_BATCH_COUNT),
+          requirements,
+        })
+
+        applyGeneratedResult(result)
+        void saveAppliedDraft({
+          story_goal: result.story_goal || values.story_goal || '',
+          core_conflict: result.core_conflict || values.core_conflict || '',
+          main_plot: result.main_plot || values.main_plot || '',
+          rhythm_setup: result.rhythm_setup || values.rhythm_setup || 30,
+          rhythm_conflict: result.rhythm_conflict || values.rhythm_conflict || 50,
+          rhythm_ending: result.rhythm_ending || values.rhythm_ending || 20,
+          ending_type: result.ending_type || values.ending_type || '',
+          ending: result.ending || values.ending || '',
+          subplot_batch_count: batchCount,
+          subplots: normalizeSubplots(result.sub_plots_list),
+        }, result.warnings, 'story-design', {
+          inputSummary: `生成故事骨架 · ${currentNovel?.title || '未命名小说'}`,
+        }).catch(console.error)
+
+        if (result.warnings.length > 0) {
+          message.warning(`AI 已生成内容，但有 ${result.warnings.length} 条提醒，保存前请复核。`)
+        } else {
+          message.success('故事设计首版已生成到表单。')
+        }
       }
     } catch (error) {
       console.error(error)

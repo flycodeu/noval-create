@@ -1,30 +1,21 @@
+import type { WebContents } from 'electron'
 import { eq } from 'drizzle-orm'
 import { Message } from '../adapters/base.adapter'
 import { getDb } from '../database/db'
 import { tasks } from '../database/schema'
-import { getAdapterById, getDefaultAdapter } from './model.service'
-import { createTask } from './task.service'
+import { createTask, executeChatTask, updateTask } from './task.service'
 import {
   parseSubPlotFrameworkResponseDetailed,
   validateGeneratedSubplots,
   type SubplotGenerationRequest,
   type SubplotGenerationResult,
 } from '../../src/shared/subplot-framework'
+import { runAssetQualityLoop, summarizeAssetQualityWarnings } from './asset-quality.service'
 
 const SUBPLOT_MAX_CONFLICT_LENGTH = 90
 const SUBPLOT_MAX_MAINLINE_LINK_LENGTH = 60
 
 type SubplotFailureStage = 'model_request' | 'parse_json' | 'validate_items'
-
-class SubplotGenerationError extends Error {
-  stage: SubplotFailureStage
-
-  constructor(stage: SubplotFailureStage, message: string) {
-    super(message)
-    this.name = 'SubplotGenerationError'
-    this.stage = stage
-  }
-}
 
 function updateTaskRecord(taskId: number, data: Partial<typeof tasks.$inferInsert>) {
   const db = getDb()
@@ -61,6 +52,36 @@ function buildTaskInput(request: SubplotGenerationRequest) {
   })
 }
 
+function buildSubplotReviewContext(request: SubplotGenerationRequest): string {
+  const promptSummary = request.messages
+    .filter((message) => message.role === 'user')
+    .map((message) => message.content.trim())
+    .filter(Boolean)
+    .slice(-2)
+    .join('\n\n')
+
+  const existingSummary = request.existingSubplots.length > 0
+    ? request.existingSubplots
+      .map((subplot, index) => `${index + 1}. ${subplot.name} | ${subplot.characters} | ${subplot.conflict} | ${subplot.mainlineLink} | ${subplot.endChapter}`)
+      .join('\n')
+    : '当前还没有已保留的支线框架。'
+
+  return [
+    `目标数量：${request.expectedCount}`,
+    request.batchIndex && request.totalBatches ? `当前批次：第 ${request.batchIndex}/${request.totalBatches} 批` : '',
+    `已有支线：\n${existingSummary}`,
+    promptSummary ? `生成提示：\n${promptSummary}` : '',
+  ].filter(Boolean).join('\n\n')
+}
+
+function subplotSchemaHint(expectedCount: number): string {
+  return [
+    `输出应保持为 ${expectedCount} 条支线组成的 JSON 数组。`,
+    '每条支线必须保留 name、characters、conflict、mainlineLink、endChapter 字段。',
+    '不要把支线框架改写成解释性长文。',
+  ].join('\n')
+}
+
 function joinWarnings(...warnings: Array<string | undefined | null>): string | undefined {
   const parts = warnings
     .map((warning) => warning?.trim())
@@ -72,88 +93,122 @@ function joinWarnings(...warnings: Array<string | undefined | null>): string | u
 async function runSubplotBatchTask(
   request: SubplotGenerationRequest,
   taskId: number,
+  sender?: WebContents,
 ): Promise<SubplotGenerationResult> {
-  const startedAt = Date.now()
-  let rawOutput = ''
-  let adapter: Awaited<ReturnType<typeof getDefaultAdapter>> | null = null
+  let finalResult: SubplotGenerationResult | null = null
+  const messages = request.messages as Message[]
 
   try {
-    adapter = request.modelConfigId
-      ? await getAdapterById(request.modelConfigId)
-      : await getDefaultAdapter()
+    await executeChatTask(taskId, {
+      type: 'subplot_framework',
+      novelId: request.novelId,
+      modelConfigId: request.modelConfigId,
+      relatedEntityType: 'novel',
+      relatedEntityId: request.novelId,
+      inputJson: buildTaskInput(request),
+      messages,
+      sender,
+      onSuccess: async (rawOutput) => {
+        if (!rawOutput.trim()) {
+          throw new Error(formatFailureMessage('model_request', request, 'AI 未返回内容'))
+        }
 
-    rawOutput = await adapter.chat(request.messages as Message[])
-    if (!rawOutput.trim()) {
-      throw new SubplotGenerationError('model_request', 'AI \u672a\u8fd4\u56de\u5185\u5bb9')
-    }
+        const quality = await runAssetQualityLoop({
+          targetType: 'subplot',
+          novelId: request.novelId,
+          modelConfigId: request.modelConfigId,
+          relatedEntityType: 'novel',
+          relatedEntityId: request.novelId,
+          parentTaskId: taskId,
+          sender,
+          contextSummary: buildSubplotReviewContext(request),
+          generatedOutput: rawOutput,
+          schemaHint: subplotSchemaHint(request.expectedCount),
+          reviewFocus: [
+            '支线必须像可执行的结构草稿，而不是主题句、设定说明或空泛概念。',
+            '冲突、主线连接和回收章位必须具体，且与当前主线推进兼容。',
+          ],
+          rewriteConstraints: [
+            '保持支线条数不变。',
+            '保持每条支线的字段结构稳定，不要改成说明文。',
+          ],
+        })
+        if (quality.stage === 'rejected') {
+          throw new Error(formatFailureMessage(
+            'validate_items',
+            request,
+            summarizeAssetQualityWarnings(quality) || '资产审校拒收了当前支线批次',
+          ))
+        }
 
-    let parsedResult
-    try {
-      parsedResult = parseSubPlotFrameworkResponseDetailed(rawOutput)
-    } catch (error) {
-      throw new SubplotGenerationError(
-        'parse_json',
-        error instanceof Error ? error.message : 'JSON \u89e3\u6790\u5931\u8d25',
-      )
-    }
+        let parsedResult
+        try {
+          parsedResult = parseSubPlotFrameworkResponseDetailed(quality.finalOutput)
+        } catch (error) {
+          throw new Error(formatFailureMessage(
+            'parse_json',
+            request,
+            error instanceof Error ? error.message : 'JSON 解析失败',
+          ))
+        }
 
-    const validation = validateGeneratedSubplots(parsedResult.subplots, {
-      existingSubplots: request.existingSubplots,
-      expectedCount: request.expectedCount,
-      maxConflictLength: SUBPLOT_MAX_CONFLICT_LENGTH,
-      maxMainlineLinkLength: SUBPLOT_MAX_MAINLINE_LINK_LENGTH,
-    })
+        const validation = validateGeneratedSubplots(parsedResult.subplots, {
+          existingSubplots: request.existingSubplots,
+          expectedCount: request.expectedCount,
+          maxConflictLength: SUBPLOT_MAX_CONFLICT_LENGTH,
+          maxMainlineLinkLength: SUBPLOT_MAX_MAINLINE_LINK_LENGTH,
+        })
 
-    if (validation.accepted.length === 0) {
-      throw new SubplotGenerationError(
-        'validate_items',
-        validation.fatalMessage || '\u672a\u627e\u5230\u53ef\u4fdd\u7559\u7684\u652f\u7ebf\u7ed3\u679c',
-      )
-    }
+        if (validation.accepted.length === 0) {
+          throw new Error(formatFailureMessage(
+            'validate_items',
+            request,
+            validation.fatalMessage || '未找到可保留的支线结果',
+          ))
+        }
 
-    const warningMessage = joinWarnings(
-      parsedResult.notes.length > 0 ? parsedResult.notes.join('\uFF1B') : undefined,
-      validation.warningMessage,
-    )
-
-    updateTaskRecord(taskId, {
-      status: 'success',
-      outputText: rawOutput,
-      tokensUsed: adapter.countTokens(rawOutput),
-      durationMs: Date.now() - startedAt,
-      errorMessage: warningMessage || null,
-    })
-
-    return {
-      taskId,
-      accepted: validation.accepted,
-      rejectedCount: validation.rejected.length,
-      rejectionReasons: validation.rejectionReasons,
-      rawOutput,
-      warningMessage,
-    }
-  } catch (error) {
-    const subplotError = error instanceof SubplotGenerationError
-      ? error
-      : new SubplotGenerationError(
-          'model_request',
-          error instanceof Error ? error.message : '\u672a\u77e5\u9519\u8bef',
+        const warningMessage = joinWarnings(
+          summarizeAssetQualityWarnings(quality),
+          parsedResult.notes.length > 0 ? parsedResult.notes.join('\uFF1B') : undefined,
+          validation.warningMessage,
         )
 
-    updateTaskRecord(taskId, {
-      status: 'failed',
-      outputText: rawOutput || null,
-      tokensUsed: rawOutput && adapter ? adapter.countTokens(rawOutput) : null,
-      durationMs: Date.now() - startedAt,
-      errorMessage: formatFailureMessage(subplotError.stage, request, subplotError.message),
-    })
+        finalResult = {
+          taskId,
+          accepted: validation.accepted,
+          rejectedCount: validation.rejected.length,
+          rejectionReasons: validation.rejectionReasons,
+          rawOutput: quality.finalOutput,
+          warningMessage,
+        }
 
-    throw new Error(formatFailureMessage(subplotError.stage, request, subplotError.message))
+        return finalResult
+      },
+    })
+  } catch (error) {
+    const raw = error instanceof Error ? error.message : '未知错误'
+    const formatted = raw.startsWith('[') ? raw : formatFailureMessage('model_request', request, raw)
+    updateTaskRecord(taskId, { errorMessage: formatted })
+    throw new Error(formatted)
   }
+
+  if (!finalResult) {
+    const message = formatFailureMessage('model_request', request, '支线批次未返回可用结果')
+    updateTaskRecord(taskId, { status: 'failed', errorMessage: message })
+    throw new Error(message)
+  }
+
+  const stableResult = finalResult as SubplotGenerationResult
+  updateTaskRecord(taskId, {
+    errorMessage: stableResult.warningMessage || null,
+  })
+
+  return stableResult
 }
 
 export async function generateSubplotBatch(
   request: SubplotGenerationRequest,
+  runtime: { parentTaskId?: number; sender?: WebContents } = {},
 ): Promise<SubplotGenerationResult> {
   const taskId = await createTask({
     type: 'subplot_framework',
@@ -162,11 +217,21 @@ export async function generateSubplotBatch(
     relatedEntityType: 'novel',
     relatedEntityId: request.novelId,
     inputJson: buildTaskInput(request),
+    runnerType: 'chat',
+    parentTaskId: runtime.parentTaskId,
   })
 
-  updateTaskRecord(taskId, { status: 'running' })
+  if (typeof runtime.parentTaskId === 'number') {
+    updateTask(runtime.parentTaskId, { currentChildTaskId: taskId })
+  }
 
-  return runSubplotBatchTask(request, taskId)
+  try {
+    return await runSubplotBatchTask(request, taskId, runtime.sender)
+  } finally {
+    if (typeof runtime.parentTaskId === 'number') {
+      updateTask(runtime.parentTaskId, { currentChildTaskId: null })
+    }
+  }
 }
 
 export async function retrySubplotBatch(taskId: number): Promise<number> {

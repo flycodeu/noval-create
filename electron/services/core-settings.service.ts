@@ -27,6 +27,7 @@ import {
   buildHumanLanguageRules,
   buildOutputQualityRules,
 } from '../../src/shared/prompt-library'
+import { runAssetQualityLoop, summarizeAssetQualityWarnings } from './asset-quality.service'
 import { generateSubplotBatch } from './subplot.service'
 import { runChatTask } from './task.service'
 
@@ -44,7 +45,7 @@ const DECISION_REALISM_HINT = [
   '冲突要落到谁承担代价、谁承担风险、谁必须现在做选择。',
 ].join('\n')
 
-interface StoryContext {
+export interface StoryContext {
   novelId: number
   modelConfigId?: number
   novelTitle: string
@@ -108,6 +109,97 @@ function joinWarnings(...warnings: Array<string | undefined | null>): string | u
     .filter((warning): warning is string => Boolean(warning))
 
   return parts.length > 0 ? parts.join('\uFF1B') : undefined
+}
+
+function buildSubplotSummaryText(subplots: SubPlotDraft[]): string {
+  return subplots.length > 0
+    ? subplots
+      .map((subplot, index) => `${index + 1}. ${subplot.name} | ${subplot.characters} | ${subplot.conflict} | ${subplot.mainlineLink} | ${subplot.endChapter}`)
+      .join('\n')
+    : '当前还没有支线框架。'
+}
+
+function buildSubplotPolishReviewContext(
+  context: StoryContext,
+  storyGoal: string,
+  coreConflict: string,
+  mainPlot: string,
+  subplots: SubPlotDraft[],
+): string {
+  return renderPrompt([
+    sectionLines('故事上下文', [
+      `小说：${context.novelTitle}`,
+      `题材：${context.genre}`,
+      `背景：${context.background || '未提供'}`,
+      `世界规则：${context.worldRulesSummary || '未提供'}`,
+      `故事目标：${storyGoal || '未提供'}`,
+      `核心冲突：${coreConflict || '未提供'}`,
+      `主线剧情：${mainPlot || '未提供'}`,
+      context.protagonistReference ? `主角称呼：${context.protagonistReference}` : '',
+      context.protagonistRule ? `主角规则：${context.protagonistRule}` : '',
+      context.relationSummary ? `关系摘要：${context.relationSummary}` : '',
+    ]),
+    section('当前支线框架', buildSubplotSummaryText(subplots)),
+    sectionLines('润色约束', [
+      '保持支线数量不变。',
+      '保持 name / characters / conflict / mainlineLink / endChapter 结构稳定。',
+      '只修语言、贴合度、冲突表达和主线连接，不要改成说明文。',
+    ]),
+  ])
+}
+
+function subplotSchemaHint(expectedCount: number): string {
+  return [
+    `输出应保持为 ${expectedCount} 条支线组成的 JSON 数组。`,
+    '每条支线必须保留 name、characters、conflict、mainlineLink、endChapter 字段。',
+    '不要把支线框架改写成解释性长文。',
+  ].join('\n')
+}
+
+async function runSubplotPolishPass(
+  context: StoryContext,
+  storyGoal: string,
+  coreConflict: string,
+  mainPlot: string,
+  subplots: SubPlotDraft[],
+) {
+  const polishedRaw = await runPromptTask(
+    context.novelId,
+    context.modelConfigId,
+    buildSubplotPolishPromptV2(context, storyGoal, coreConflict, mainPlot, subplots),
+  )
+  const quality = await runAssetQualityLoop({
+    targetType: 'subplot',
+    novelId: context.novelId,
+    modelConfigId: context.modelConfigId,
+    relatedEntityType: 'novel',
+    relatedEntityId: context.novelId,
+    contextSummary: buildSubplotPolishReviewContext(context, storyGoal, coreConflict, mainPlot, subplots),
+    generatedOutput: polishedRaw,
+    schemaHint: subplotSchemaHint(subplots.length),
+    reviewFocus: [
+      '支线润色结果必须保持为结构草稿，而不是散文式解释。',
+      '冲突、主线连接和回收章位需要更具体、更贴近当前故事。',
+    ],
+    rewriteConstraints: [
+      '保持支线条数不变。',
+      '保持字段结构稳定，不要新增无关字段。',
+    ],
+  })
+  if (quality.stage === 'rejected') {
+    throw new Error(summarizeAssetQualityWarnings(quality) || quality.review.summary)
+  }
+
+  return {
+    parsedResult: parseSubPlotFrameworkResponseDetailed(quality.finalOutput),
+    validation: validateGeneratedSubplots(parseSubPlotFrameworkResponseDetailed(quality.finalOutput).subplots, {
+      existingSubplots: [],
+      expectedCount: subplots.length,
+      maxConflictLength: 90,
+      maxMainlineLinkLength: 60,
+    }),
+    qualityWarning: summarizeAssetQualityWarnings(quality),
+  }
 }
 
 function buildSubplotJsonHardRules(example: string, keepOrder = false): string {
@@ -857,6 +949,17 @@ async function loadStoryContext(request: CoreSettingsGenerationRequest): Promise
   }
 }
 
+export async function loadSubplotAutoGenerateContext(request: {
+  novelId: number
+  requirements?: string
+}): Promise<StoryContext> {
+  return loadStoryContext({
+    novelId: request.novelId,
+    subplotCount: 1,
+    requirements: request.requirements,
+  })
+}
+
 async function runPlainTextStep(
   context: StoryContext,
   prompt: string,
@@ -872,7 +975,7 @@ async function runPlainTextStep(
   return polishPlainTextV2(context, label, cleaned, relatedContext)
 }
 
-async function tryGenerateSubplotBatch(
+export async function tryGenerateSubplotBatch(
   context: StoryContext,
   storyGoal: string,
   coreConflict: string,
@@ -881,6 +984,10 @@ async function tryGenerateSubplotBatch(
   accumulated: SubPlotDraft[],
   currentBatch: number,
   totalBatches: number,
+  runtime: {
+    parentTaskId?: number
+    sender?: WebContents
+  } = {},
 ): Promise<{ batchResult: Awaited<ReturnType<typeof generateSubplotBatch>> | null; warning?: string }> {
   let lastError: unknown
 
@@ -910,7 +1017,7 @@ async function tryGenerateSubplotBatch(
           modelConfigId: context.modelConfigId,
           batchIndex: currentBatch,
           totalBatches,
-        })
+        }, runtime)
       } catch (error) {
         lastError = error
       }
@@ -943,6 +1050,70 @@ async function tryGenerateSubplotBatch(
   return {
     batchResult: null,
     warning: `第 ${currentBatch}/${totalBatches} 批未生成可用支线：${sanitizeErrorMessage(lastError, initialError)}`,
+  }
+}
+
+export async function polishGeneratedSubplots(
+  context: StoryContext,
+  storyGoal: string,
+  coreConflict: string,
+  mainPlot: string,
+  accumulated: SubPlotDraft[],
+): Promise<{ subplots: SubPlotDraft[]; warning?: string }> {
+  let nextSubplots = [...accumulated]
+  const warnings: string[] = []
+
+  if (nextSubplots.length <= 0) {
+    return {
+      subplots: nextSubplots,
+    }
+  }
+
+  try {
+    const { parsedResult, validation, qualityWarning } = await runSubplotPolishPass(
+      context,
+      storyGoal,
+      coreConflict,
+      mainPlot,
+      nextSubplots,
+    )
+
+    if (validation.accepted.length > 0) {
+      const originalCount = nextSubplots.length
+      const { merged, replacedCount } = mergePolishedSubplots(nextSubplots, validation.accepted)
+      nextSubplots = merged
+
+      const polishWarning = joinWarnings(
+        qualityWarning,
+        parsedResult.notes.length > 0 ? parsedResult.notes.join('\uFF1B') : undefined,
+        validation.rejectionReasons.length > 0 ? `润色结果拒绝原因：${validation.rejectionReasons.join('\uFF1B')}` : undefined,
+        replacedCount < originalCount ? `仅替换 ${replacedCount}/${originalCount} 条润色结果，其余保留原始支线框架` : undefined,
+      )
+
+      if (polishWarning) {
+        warnings.push(`支线语言修正提示：${polishWarning}`)
+      }
+    } else {
+      const failedReasons = joinWarnings(
+        qualityWarning,
+        parsedResult.notes.length > 0 ? parsedResult.notes.join('\uFF1B') : undefined,
+        validation.rejectionReasons.length > 0 ? `校验原因：${validation.rejectionReasons.join('\uFF1B')}` : undefined,
+      )
+      warnings.push(joinWarnings(
+        '支线语言修正结果未通过校验，已保留原始支线框架',
+        failedReasons,
+      ) || '支线语言修正结果未通过校验，已保留原始支线框架')
+    }
+  } catch (error) {
+    warnings.push(joinWarnings(
+      '支线语言修正失败，已保留原始支线框架',
+      sanitizeErrorMessage(error),
+    ) || '支线语言修正失败，已保留原始支线框架')
+  }
+
+  return {
+    subplots: nextSubplots,
+    warning: warnings.length > 0 ? warnings.join('；') : undefined,
   }
 }
 
@@ -1017,18 +1188,13 @@ async function generateSubplots(
 
   if (accumulated.length > 0) {
     try {
-      const polishedRaw = await runPromptTask(
-        context.novelId,
-        context.modelConfigId,
-        buildSubplotPolishPromptV2(context, storyGoal, coreConflict, mainPlot, accumulated),
+      const { parsedResult, validation, qualityWarning } = await runSubplotPolishPass(
+        context,
+        storyGoal,
+        coreConflict,
+        mainPlot,
+        accumulated,
       )
-      const parsedResult = parseSubPlotFrameworkResponseDetailed(polishedRaw)
-      const validation = validateGeneratedSubplots(parsedResult.subplots, {
-        existingSubplots: [],
-        expectedCount: accumulated.length,
-        maxConflictLength: 90,
-        maxMainlineLinkLength: 60,
-      })
 
       if (validation.accepted.length > 0) {
         const originalCount = accumulated.length
@@ -1036,6 +1202,7 @@ async function generateSubplots(
         accumulated = merged
 
         const polishWarning = joinWarnings(
+          qualityWarning,
           parsedResult.notes.length > 0 ? parsedResult.notes.join('\uFF1B') : undefined,
           validation.rejectionReasons.length > 0 ? `\u6da6\u8272\u7ed3\u679c\u62d2\u7edd\u539f\u56e0\uff1a${validation.rejectionReasons.join('\uFF1B')}` : undefined,
           replacedCount < originalCount ? `\u4ec5\u66ff\u6362 ${replacedCount}/${originalCount} \u6761\u6da6\u8272\u7ed3\u679c\uff0c\u5176\u4f59\u4fdd\u7559\u539f\u59cb\u652f\u7ebf\u6846\u67b6` : undefined,
@@ -1046,6 +1213,7 @@ async function generateSubplots(
         }
       } else {
         const failedReasons = joinWarnings(
+          qualityWarning,
           parsedResult.notes.length > 0 ? parsedResult.notes.join('\uFF1B') : undefined,
           validation.rejectionReasons.length > 0 ? `\u6821\u9a8c\u539f\u56e0\uff1a${validation.rejectionReasons.join('\uFF1B')}` : undefined,
         )
