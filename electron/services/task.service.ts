@@ -7,6 +7,7 @@ import {
   createAdapter,
   getDefaultModelConfigRecord,
   getModelConfigRecord,
+  getProviderRuntimeDefaults,
 } from './model.service'
 import { appendVariationMessage, buildVariationDigest } from './variation-control.service'
 import { throwUserFacingError } from '../utils/user-facing-error'
@@ -256,7 +257,7 @@ function buildTaskModelRuntime(modelConfigId?: number | null): TaskModelRuntime 
     temperature: typeof config.temperature === 'number' ? config.temperature : 0.85,
     maxTokens: typeof config.maxTokens === 'number' && config.maxTokens > 0
       ? Math.round(config.maxTokens)
-      : 8192,
+      : getProviderRuntimeDefaults(config.provider).maxTokens,
     adapter: createAdapter(config),
   }
 }

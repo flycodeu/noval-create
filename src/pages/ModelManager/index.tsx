@@ -10,6 +10,9 @@ import {
 import { ModelConfig } from '../../types'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 
+const DEFAULT_MODEL_MAX_TOKENS = 65536
+const MAX_MODEL_MAX_TOKENS = 1000000
+
 const PROVIDER_OPTIONS = [
   { value: 'openai', label: 'OpenAI', models: ['gpt-4o', 'gpt-4-turbo', 'gpt-3.5-turbo', 'gpt-4o-mini'] },
   { value: 'anthropic', label: 'Anthropic Claude', models: ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'] },
@@ -19,12 +22,12 @@ const PROVIDER_OPTIONS = [
   { value: 'custom', label: '自定义（OpenAI 兼容）', models: [] },
 ]
 const PROVIDER_DEFAULTS: Record<string, { temperature: number; maxTokens: number }> = {
-  openai: { temperature: 0.8, maxTokens: 8192 },
-  anthropic: { temperature: 0.75, maxTokens: 8192 },
-  deepseek: { temperature: 0.7, maxTokens: 8192 },
-  aliyun: { temperature: 0.85, maxTokens: 8192 },
-  baidu: { temperature: 0.8, maxTokens: 8192 },
-  custom: { temperature: 0.8, maxTokens: 8192 },
+  openai: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
+  anthropic: { temperature: 0.75, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
+  deepseek: { temperature: 0.7, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
+  aliyun: { temperature: 0.85, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
+  baidu: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
+  custom: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
 }
 
 export default function ModelManager() {
@@ -277,12 +280,20 @@ export default function ModelManager() {
                 <Slider min={0} max={1} step={0.05} marks={{ 0: '0', 0.5: '0.5', 1: '1' }} />
               </Form.Item>
 
-              <Form.Item name="maxTokens" label="Max Tokens（最大输出）">
-                <InputNumber min={512} max={32000} step={512} style={{ width: '100%' }} />
+              <Form.Item
+                name="maxTokens"
+                label="Max Tokens（最大输出长度）"
+                extra="控制单次回复最多可生成多少 Token。可设置到更大的输出预算，但实际可用上限仍取决于模型提供方。"
+              >
+                <InputNumber min={512} max={MAX_MODEL_MAX_TOKENS} step={512} style={{ width: '100%' }} placeholder="例如：65536 / 128000 / 1000000" />
               </Form.Item>
 
-              <Form.Item name="maxContextTokens" label="上下文窗口（可留空使用默认）">
-                <InputNumber min={2048} max={2000000} step={1024} style={{ width: '100%' }} placeholder="例如：8192 / 32768 / 128000" />
+              <Form.Item
+                name="maxContextTokens"
+                label="上下文窗口（总上下文预算，可留空使用默认）"
+                extra="控制模型可接收的上下文总量。通常应大于等于最大输出长度。留空时使用对应适配器的默认窗口。"
+              >
+                <InputNumber min={2048} max={2000000} step={1024} style={{ width: '100%' }} placeholder="例如：200000 / 512000 / 1000000" />
               </Form.Item>
 
               <Form.Item name="maxConcurrency" label="最大并发请求数">

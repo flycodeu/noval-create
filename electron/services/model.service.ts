@@ -14,13 +14,15 @@ import { throwUserFacingError } from '../utils/user-facing-error'
 import os from 'os'
 
 const MACHINE_SALT = `novelforge-${os.hostname()}-${os.platform()}`
+const DEFAULT_MODEL_MAX_TOKENS = 65_536
+const MAX_MODEL_MAX_TOKENS = 1_000_000
 const PROVIDER_RUNTIME_DEFAULTS: Record<string, { temperature: number; maxTokens: number }> = {
-  openai: { temperature: 0.8, maxTokens: 8192 },
-  anthropic: { temperature: 0.75, maxTokens: 8192 },
-  aliyun: { temperature: 0.85, maxTokens: 8192 },
-  baidu: { temperature: 0.8, maxTokens: 8192 },
-  deepseek: { temperature: 0.7, maxTokens: 8192 },
-  custom: { temperature: 0.8, maxTokens: 8192 },
+  openai: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
+  anthropic: { temperature: 0.75, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
+  aliyun: { temperature: 0.85, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
+  baidu: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
+  deepseek: { temperature: 0.7, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
+  custom: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
 }
 
 export function normalizeModelConcurrency(value: unknown): number {
@@ -44,7 +46,7 @@ export function normalizeModelMaxTokens(value: unknown, provider: string): numbe
   const fallback = getProviderRuntimeDefaults(provider).maxTokens
   const numeric = typeof value === 'number' ? Math.round(value) : Number(value)
   if (!Number.isFinite(numeric) || numeric <= 0) return fallback
-  return Math.max(512, Math.min(32000, numeric))
+  return Math.max(512, Math.min(MAX_MODEL_MAX_TOKENS, numeric))
 }
 
 export function normalizeModelContextTokens(value: unknown): number | null {
