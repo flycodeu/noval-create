@@ -1,9 +1,10 @@
 ﻿import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Form, Input, Modal, Select, Space, Table, Tag, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { EditOutlined, PlusOutlined, ReloadOutlined, DeleteOutlined, ArrowRightOutlined } from '@ant-design/icons'
+import { PlusOutlined, ReloadOutlined, DeleteOutlined, ArrowRightOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import AIGenerateButton from '../../../components/AIGenerateButton'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import type { NovelConsistencyReport, NovelContextStatus, RevisionTask } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
 import { buildDraftMessages, parseDraftJson } from '../shared/ai-draft'
@@ -151,7 +152,7 @@ export default function RevisionCenterPage({ novelId }: Props) {
       setConsistencyReport(report)
     } catch (error) {
       console.error(error)
-      message.error('修订中心加载失败。')
+      message.error(getErrorMessage(error, 'revisionCenter.loadFailed'))
     } finally {
       setLoading(false)
     }
@@ -234,7 +235,7 @@ export default function RevisionCenterPage({ novelId }: Props) {
     />
   )
 
-  const openEditor = (task?: RevisionTask) => {
+  const openEditor = useCallback((task?: RevisionTask) => {
     setEditingTask(task || null)
     form.setFieldsValue(task ? {
       taskType: task.taskType || 'continuity',
@@ -246,7 +247,7 @@ export default function RevisionCenterPage({ novelId }: Props) {
       relatedPage: task.relatedPage || 'writing',
     } : EMPTY_VALUES)
     setModalOpen(true)
-  }
+  }, [form])
 
   const handleSave = async () => {
     const values = await form.validateFields()
@@ -262,43 +263,43 @@ export default function RevisionCenterPage({ novelId }: Props) {
       await clearDraft()
       setModalOpen(false)
       setEditingTask(null)
-      message.success(editingTask ? '修订任务已更新。' : '修订任务已创建。')
+      message.success(getUserFacingMessage(editingTask ? 'revisionCenter.updated' : 'revisionCenter.created'))
       await refresh()
     } catch (error) {
       console.error(error)
-      message.error(editingTask ? '修订任务更新失败。' : '修订任务创建失败。')
+      message.error(getErrorMessage(error, editingTask ? 'revisionCenter.updateFailed' : 'revisionCenter.createFailed'))
     } finally {
       setSaving(false)
     }
   }
 
-  const handleDelete = async (task: RevisionTask) => {
+  const handleDelete = useCallback(async (task: RevisionTask) => {
     if (task.taskSource !== 'manual') return
     try {
       await window.electron.revision.delete(task.id)
-      message.success('修订任务已删除。')
+      message.success(getUserFacingMessage('revisionCenter.deleted'))
       await refresh()
     } catch (error) {
       console.error(error)
-      message.error('修订任务删除失败。')
+      message.error(getErrorMessage(error, 'revisionCenter.deleteFailed'))
     }
-  }
+  }, [refresh])
 
-  const handleQuickStatus = async (task: RevisionTask, status: RevisionTask['status']) => {
+  const handleQuickStatus = useCallback(async (task: RevisionTask, status: RevisionTask['status']) => {
     setActionKey(`status:${task.id}:${status}`)
     try {
       await window.electron.revision.update(task.id, { status })
-      message.success('修订任务状态已更新。')
+      message.success(getUserFacingMessage('revisionCenter.statusUpdated'))
       await refresh()
     } catch (error) {
       console.error(error)
-      message.error('修订任务状态更新失败。')
+      message.error(getErrorMessage(error, 'revisionCenter.statusUpdateFailed'))
     } finally {
       setActionKey(null)
     }
-  }
+  }, [refresh])
 
-  const handleAutoFix = async (task: RevisionTask) => {
+  const handleAutoFix = useCallback(async (task: RevisionTask) => {
     setActionKey(`autofix:${task.id}`)
     try {
       const result = await window.electron.revision.autoFix(task.id)
@@ -312,15 +313,15 @@ export default function RevisionCenterPage({ novelId }: Props) {
       await refresh()
     } catch (error) {
       console.error(error)
-      message.error('AI 修复执行失败。')
+      message.error(getErrorMessage(error, 'revision.autofixFailed'))
     } finally {
       setActionKey(null)
     }
-  }
+  }, [refresh])
 
-  const openRelatedPage = (task: RevisionTask) => {
+  const openRelatedPage = useCallback((task: RevisionTask) => {
     navigate(buildRevisionTaskTargetPath(novelId, task))
-  }
+  }, [navigate, novelId])
 
   const columns = useMemo<ColumnsType<RevisionTask>>(() => [
     {
@@ -426,7 +427,7 @@ export default function RevisionCenterPage({ novelId }: Props) {
         </Space>
       ),
     },
-  ], [actionKey, handleAutoFix, handleDelete, handleQuickStatus, openRelatedPage])
+  ], [actionKey, handleAutoFix, handleDelete, handleQuickStatus, openEditor, openRelatedPage])
 
   return (
     <WorkspacePage

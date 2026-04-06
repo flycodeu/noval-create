@@ -10,6 +10,7 @@ import {
 } from '@ant-design/icons'
 import VirtualList from 'rc-virtual-list'
 import { useSearchParams } from 'react-router-dom'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import type {
   Character,
@@ -487,7 +488,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
 
   useEffect(() => {
     void loadPage(selectedId, page, { preserveCreating: creating })
-  }, [loadPage, page, listMode, recordStatusFilter, categoryFilter, keyword, novelId])
+  }, [categoryFilter, creating, keyword, listMode, loadPage, novelId, page, recordStatusFilter, selectedId])
   useEffect(() => {
     if (!routeItemId || routeFocusRef.current === routeItemId) return
     routeFocusRef.current = routeItemId
@@ -547,10 +548,10 @@ export default function ItemsWorkspace({ novelId }: Props) {
         await Promise.all([loadItemDetail(nextId), refreshListState(page)])
       }
       setCreating(false)
-      message.success(selectedItem?.recordStatus === 'draft' ? '物品草稿已确认并保存。' : '物品已保存。')
+      message.success(getUserFacingMessage(selectedItem?.recordStatus === 'draft' ? 'item.savedDraft' : 'item.saved'))
     } catch (error) {
       console.error(error)
-      message.error('保存失败，请稍后重试。')
+      message.error(getErrorMessage(error, 'item.saveFailed'))
     } finally {
       setSaving(false)
     }
@@ -568,7 +569,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
         const nextPage = page > 1 && pageData.items.length === 1 ? page - 1 : page
         setPage(nextPage)
         await loadPage(null, nextPage, { preserveCreating: false })
-        message.success('物品已删除。')
+        message.success(getUserFacingMessage('item.deleted'))
       },
     })
   }
@@ -602,10 +603,10 @@ export default function ItemsWorkspace({ novelId }: Props) {
       setGenerateOpen(false)
       setPage(1)
       await loadPage(null, 1, { preserveCreating: false })
-      message.success(values.templateOnly ? '模板已同步生成。' : '物品批量生成完成。')
+      message.success(getUserFacingMessage(values.templateOnly ? 'item.templateSynced' : 'item.generated'))
     } catch (error) {
       console.error(error)
-      message.error('生成失败，请稍后重试。')
+      message.error(getErrorMessage(error, 'item.generateFailed'))
     } finally {
       setGenerating(false)
     }
@@ -617,10 +618,10 @@ export default function ItemsWorkspace({ novelId }: Props) {
     try {
       const regenerated = await window.electron.item.regenerate(selectedItem.id)
       await loadPage(regenerated?.id || selectedItem.id, page, { preserveCreating: false })
-      message.success('当前物品已按上下文重生成。')
+      message.success(getUserFacingMessage('item.regenerated'))
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '物品重生成失败。')
+      message.error(getErrorMessage(error, 'item.regenerateFailed'))
     } finally {
       setGenerating(false)
     }
@@ -641,7 +642,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
         setDetailContext(EMPTY_DETAIL)
         form.resetFields()
         await loadPage(null, 1, { preserveCreating: false })
-        message.success('物品系统已清空。')
+        message.success(getUserFacingMessage('item.cleared'))
       },
     })
   }

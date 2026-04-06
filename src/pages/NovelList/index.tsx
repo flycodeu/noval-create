@@ -12,7 +12,6 @@ import {
   Radio,
   Row,
   Select,
-  Space,
   Spin,
   Steps,
   Tag,
@@ -32,6 +31,7 @@ import {
   SearchOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
+import { getErrorMessage, getUserFacingMessage, isUserFacingMessage } from '@/utils/user-facing-message'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 import 'dayjs/locale/zh-cn'
@@ -147,8 +147,8 @@ export default function NovelList() {
     try {
       const list = await window.electron.novel.list()
       setNovels(list)
-    } catch {
-      message.error('加载小说列表失败。')
+    } catch (error) {
+      message.error(getErrorMessage(error, 'novel.listLoadFailed'))
     } finally {
       setLoading(false)
     }
@@ -192,7 +192,7 @@ export default function NovelList() {
       onOk: async () => {
         await window.electron.novel.delete(id)
         await loadNovels()
-        message.success('小说已删除。')
+        message.success(getUserFacingMessage('novel.deleted'))
       },
     })
   }
@@ -200,10 +200,10 @@ export default function NovelList() {
   const handleExport = async (id: number, format: string) => {
     try {
       const filePath = await window.electron.novel.export(id, format)
-      message.success(`已导出到 ${filePath}`)
+      message.success(getUserFacingMessage('novel.exportedTo', { path: filePath }))
     } catch (error) {
-      if (error instanceof Error && error.message !== '用户取消') {
-        message.error('导出失败。')
+      if (!isUserFacingMessage(error, 'common.userCancelled')) {
+        message.error(getErrorMessage(error, 'novel.exportFailed'))
       }
     }
   }
@@ -236,7 +236,7 @@ export default function NovelList() {
         setWizardStep(2)
       } catch (error) {
         console.error(error)
-        message.error(error instanceof Error ? error.message : 'AI 扩写失败。')
+        message.error(getErrorMessage(error, 'novel.expandFailed'))
       } finally {
         setWizardLoading(false)
       }
@@ -278,7 +278,7 @@ export default function NovelList() {
       navigate(`/novels/${novelId}/overview`)
     } catch (error) {
       console.error(error)
-      message.error('创建小说失败。')
+      message.error(getErrorMessage(error, 'novel.createFailed'))
     }
   }
 

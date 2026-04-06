@@ -1,6 +1,7 @@
 import { asc, eq } from 'drizzle-orm'
 import { getDb, getSqlite } from '../database/db'
 import { chapters, novels, storyItems, storyMemoryCheckpoints, timelineEvents } from '../database/schema'
+import { throwUserFacingError } from '../utils/user-facing-error'
 import { buildNovelConsistencyReport, type ConsistencyIssue } from './consistency.service'
 
 function parseStringArray(raw?: string | null): string[] {
@@ -98,7 +99,7 @@ export function getNovelContextStatus(novelId: number): NovelContextStatus {
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
   if (!novel) {
-    throw new Error('小说不存在')
+    throwUserFacingError('novel.notFound')
   }
 
   const chapterRows = db.select().from(chapters)
@@ -122,7 +123,7 @@ export function markNovelContextChanged(novelId: number, reasons: string | strin
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
   if (!novel) {
-    throw new Error('小说不存在')
+    throwUserFacingError('novel.notFound')
   }
 
   const normalizedReasons = [...new Set((Array.isArray(reasons) ? reasons : [reasons])
@@ -197,12 +198,12 @@ export function markChapterContextCurrent(chapterId: number): void {
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
   if (!chapter) {
-    throw new Error('章节不存在')
+    throwUserFacingError('chapter.notFound')
   }
 
   const novel = db.select().from(novels).where(eq(novels.id, chapter.novelId)).all()[0]
   if (!novel) {
-    throw new Error('小说不存在')
+    throwUserFacingError('novel.notFound')
   }
 
   db.update(chapters).set({
@@ -253,12 +254,12 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
   if (!chapter) {
-    throw new Error('章节不存在')
+    throwUserFacingError('chapter.notFound')
   }
 
   const novel = db.select().from(novels).where(eq(novels.id, chapter.novelId)).all()[0]
   if (!novel) {
-    throw new Error('小说不存在')
+    throwUserFacingError('novel.notFound')
   }
 
   const staleReasons = parseStringArray(chapter.staleReasonJson)

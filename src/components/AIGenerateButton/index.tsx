@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { Button, Modal, message } from 'antd'
 import { CheckOutlined, RobotOutlined } from '@ant-design/icons'
+import { getUserFacingMessage } from '@/utils/user-facing-message'
 import { cleanAiFieldText } from '../../utils/text'
 
 interface Props {
@@ -54,7 +55,7 @@ export default function AIGenerateButton({
 
       if (count === 1 || outputs.length <= 1) {
         onResult(outputs[0])
-        message.success('AI 草稿已填入。')
+        message.success(getUserFacingMessage('aiGenerate.filled'))
         return
       }
 
@@ -62,7 +63,9 @@ export default function AIGenerateButton({
       setPicked(0)
       setPickOpen(true)
     } catch (error) {
-      message.error(`生成失败：${error instanceof Error ? error.message : '请先检查 AI 模型配置。'}`)
+      message.error(getUserFacingMessage('aiGenerate.failed', {
+        detail: error instanceof Error ? error.message : getUserFacingMessage('writing.configureModelFirst'),
+      }))
     } finally {
       setLoading(false)
     }
@@ -72,7 +75,7 @@ export default function AIGenerateButton({
     onResult(results[picked])
     setPickOpen(false)
     setResults([])
-    message.success('已填入所选草稿。')
+    message.success(getUserFacingMessage('aiGenerate.picked'))
   }
 
   return (

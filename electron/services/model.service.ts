@@ -10,6 +10,7 @@ import { BaiduAdapter } from '../adapters/baidu.adapter'
 import { AliyunAdapter } from '../adapters/aliyun.adapter'
 import { DeepSeekAdapter } from '../adapters/deepseek.adapter'
 import { CustomAdapter } from '../adapters/custom.adapter'
+import { throwUserFacingError } from '../utils/user-facing-error'
 import os from 'os'
 
 const MACHINE_SALT = `novelforge-${os.hostname()}-${os.platform()}`
@@ -63,12 +64,16 @@ export function decryptApiKey(encrypted: string): string {
   if (safeStorage.isEncryptionAvailable()) {
     try {
       return safeStorage.decryptString(Buffer.from(encrypted, 'base64'))
-    } catch {
-      // 降级解密
+    } catch (err) {
+      console.warn('[decryptApiKey] safeStorage 解密失败，尝试 CryptoJS 降级:', err)
     }
   }
   const bytes = CryptoJS.AES.decrypt(encrypted, MACHINE_SALT)
-  return bytes.toString(CryptoJS.enc.Utf8)
+  const result = bytes.toString(CryptoJS.enc.Utf8)
+  if (!result) {
+    console.error('[decryptApiKey] CryptoJS 解密结果为空，API Key 可能已损坏')
+  }
+  return result
 }
 
 export function createAdapter(config: {
@@ -102,14 +107,14 @@ export function createAdapter(config: {
     case 'custom':
       return new CustomAdapter(key, modelId, baseUrl || 'http://localhost:11434/v1', maxContextTokens, temperature, maxTokens)
     default:
-      throw new Error(`未知模型提供商：${provider}`)
+      throwUserFacingError('model.unknownProvider', { provider })
   }
 }
 
 export function getModelConfigRecord(id: number) {
   const db = getDb()
   const config = db.select().from(modelConfigs).where(eq(modelConfigs.id, id)).all()[0]
-  if (!config) throw new Error(`模型配置 #${id} 不存在`)
+  if (!config) throwUserFacingError('model.configNotFound', { id })
   return {
     ...config,
     temperature: normalizeModelTemperature(config.temperature, config.provider),
@@ -123,7 +128,7 @@ export function getDefaultModelConfigRecord() {
   const db = getDb()
   const defaults = db.select().from(modelConfigs).where(eq(modelConfigs.isDefault, 1)).all()
   const config = defaults[0] || db.select().from(modelConfigs).all()[0]
-  if (!config) throw new Error('未配置任何模型，请先在模型管理页添加配置')
+  if (!config) throwUserFacingError('model.noneConfigured')
   return {
     ...config,
     temperature: normalizeModelTemperature(config.temperature, config.provider),

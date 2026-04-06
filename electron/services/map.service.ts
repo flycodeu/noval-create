@@ -23,6 +23,7 @@ import type {
 } from '../../src/types'
 import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/utils/text'
 import { markNovelContextChanged } from './context-impact.service'
+import { throwUserFacingError } from '../utils/user-facing-error'
 import { runAssetQualityLoop, summarizeAssetQualityWarnings } from './asset-quality.service'
 import { logError, logInfo, logWarn } from '../utils/runtime-log'
 
@@ -827,14 +828,14 @@ export function upsertMapRelation(input: MapRelationInput) {
   const db = getDb()
   const data = sanitizeMapRelationInput(input)
   if (!Number.isFinite(data.novelId) || !Number.isFinite(data.mapAId) || !Number.isFinite(data.mapBId)) {
-    throw new Error('地图关系参数无效')
+    throwUserFacingError('map.relation.invalidParams')
   }
-  if (data.mapAId === data.mapBId) throw new Error('关系两端不能是同一个节点')
+  if (data.mapAId === data.mapBId) throwUserFacingError('map.relation.sameNode')
 
   const nodeA = db.select().from(worldMap).where(eq(worldMap.id, data.mapAId)).all()[0]
   const nodeB = db.select().from(worldMap).where(eq(worldMap.id, data.mapBId)).all()[0]
   if (!nodeA || !nodeB || nodeA.novelId !== data.novelId || nodeB.novelId !== data.novelId) {
-    throw new Error('地图关系节点不存在或不属于当前小说')
+    throwUserFacingError('map.relation.nodeMismatch')
   }
 
   const existing = findExistingMapRelation(data)
@@ -1088,7 +1089,7 @@ function createNodesAtDepth(novelId: number, nodes: GeneratedMapNode[], depth: n
 export async function batchGenerateMap(novelId: number, structure: MapBatchGenerateOptions, runtime: MapBatchGenerateRuntimeOptions = {}): Promise<MapBatchGenerationResult> {
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
-  if (!novel) throw new Error('小说不存在')
+  if (!novel) throwUserFacingError('novel.notFound')
   const profile = await buildStoryProfile(novelId)
   const rules = parseWorldRulesJson(novel.worldRulesJson, profile.genre)
   const layerPlans = getLayerPlans(structure, rules)
@@ -1107,7 +1108,7 @@ export async function batchGenerateMap(novelId: number, structure: MapBatchGener
   try {
     if (nextBatch.stage === 'root') {
       const rootPlan = layerPlans[0]
-      if (!rootPlan) throw new Error('缺少根层蓝图')
+      if (!rootPlan) throwUserFacingError('map.rootPlanMissing')
       const rows = listMapRows(novelId)
       const existingRootNames = rows.filter((row) => row.level === 1).map((row) => row.name).filter(Boolean)
       const batchCount = Math.min(parentBatchSize, nextBatch.rootMissingCount || rootPlan.count)
@@ -1173,7 +1174,9 @@ export async function batchGenerateMap(novelId: number, structure: MapBatchGener
       const targetDepth = nextBatch.targetDepth
       const targetPlan = targetDepth ? getBlueprintLevelByDepth(rules, targetDepth) : undefined
       const targetLayerPlan = targetDepth ? getLayerPlanByDepth(layerPlans, targetDepth) : undefined
-      if (!targetDepth || !targetPlan || !targetLayerPlan || !nextBatch.parents?.length) throw new Error('无法确定当前地图批次')
+      if (!targetDepth || !targetPlan || !targetLayerPlan || !nextBatch.parents?.length) {
+        throwUserFacingError('map.batchUndetermined')
+      }
       for (const plan of nextBatch.parents) {
         if (runtime.shouldStop?.()) throw createAbortError()
         const rows = listMapRows(novelId)

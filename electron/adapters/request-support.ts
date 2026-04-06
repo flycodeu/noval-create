@@ -3,6 +3,8 @@ import { logError, logWarn } from '../utils/runtime-log'
 type ErrorLike = Error & {
   code?: string
   cause?: unknown
+  statusCode?: number
+  retryAfterMs?: number
 }
 
 interface ManagedRequestSignal {
@@ -38,6 +40,36 @@ const RETRYABLE_NETWORK_ERROR_CODES = new Set([
   'UND_ERR_BODY_TIMEOUT',
   'REQUEST_TIMEOUT',
 ])
+
+export function parseRetryAfterMs(value: string | null | undefined): number | undefined {
+  const raw = typeof value === 'string' ? value.trim() : ''
+  if (!raw) return undefined
+
+  const seconds = Number(raw)
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.max(1_000, Math.min(30_000, Math.round(seconds * 1_000)))
+  }
+
+  const timestamp = Date.parse(raw)
+  if (!Number.isFinite(timestamp)) return undefined
+  const delayMs = timestamp - Date.now()
+  if (!Number.isFinite(delayMs) || delayMs <= 0) return 1_000
+  return Math.max(1_000, Math.min(30_000, delayMs))
+}
+
+export function buildHttpError(
+  message: string,
+  response: Pick<Response, 'status' | 'headers'>,
+  cause?: unknown,
+): Error {
+  const error = buildError(message, undefined, cause) as ErrorLike
+  error.statusCode = typeof response.status === 'number' ? response.status : undefined
+  const retryAfterMs = parseRetryAfterMs(response.headers?.get?.('retry-after'))
+  if (typeof retryAfterMs === 'number') {
+    error.retryAfterMs = retryAfterMs
+  }
+  return error
+}
 
 export async function executeManagedRequest<T>(
   options: ManagedRequestOptions,

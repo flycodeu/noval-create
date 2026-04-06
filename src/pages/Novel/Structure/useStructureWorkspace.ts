@@ -1,6 +1,7 @@
 import { Form, Modal, message } from 'antd'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { getUserFacingMessage } from '@/utils/user-facing-message'
 import type {
   Chapter,
   ChapterSegment,
@@ -349,7 +350,7 @@ export function useStructureWorkspace(novelId: number) {
   const saveRename = useCallback(async () => {
     const title = editingTitle.trim()
     if (!title) {
-      message.warning('标题不能为空。')
+      message.warning(getUserFacingMessage('structure.titleRequired'))
       return
     }
 
@@ -367,7 +368,7 @@ export function useStructureWorkspace(novelId: number) {
 
     clearCaches()
     await resolveAndLoad(selection, true)
-    message.success('名称已更新。')
+    message.success(getUserFacingMessage('structure.renameUpdated'))
   }, [clearCaches, editingPartId, editingTitle, editingVolumeId, resolveAndLoad, selection])
 
   const cancelRename = useCallback(() => {
@@ -392,7 +393,7 @@ export function useStructureWorkspace(novelId: number) {
     const volumeId = await window.electron.structure.createVolume(novelId, {})
     clearCaches()
     await resolveAndLoad({ volumeId }, true)
-    message.success('新卷已创建。')
+    message.success(getUserFacingMessage('structure.volumeCreated'))
   }, [clearCaches, novelId, resolveAndLoad])
 
   const addVolumes = useCallback(async (count: number) => {
@@ -405,14 +406,14 @@ export function useStructureWorkspace(novelId: number) {
 
     clearCaches()
     await resolveAndLoad(lastVolumeId ? { volumeId: lastVolumeId } : {}, true)
-    message.success(`已新增 ${safeCount} 卷。`)
+    message.success(getUserFacingMessage('structure.volumesCreated', { count: safeCount }))
   }, [clearCaches, novelId, resolveAndLoad])
 
   const addPart = useCallback(async (volumeId: number) => {
     const partId = await window.electron.structure.createPart(volumeId, {})
     clearCaches()
     await resolveAndLoad({ volumeId, partId }, true)
-    message.success('新部已创建。')
+    message.success(getUserFacingMessage('structure.partCreated'))
   }, [clearCaches, resolveAndLoad])
 
   const addParts = useCallback(async (volumeId: number, count: number) => {
@@ -425,7 +426,7 @@ export function useStructureWorkspace(novelId: number) {
 
     clearCaches()
     await resolveAndLoad(lastPartId ? { volumeId, partId: lastPartId } : { volumeId }, true)
-    message.success(`已新增 ${safeCount} 部。`)
+    message.success(getUserFacingMessage('structure.partsCreated', { count: safeCount }))
   }, [clearCaches, resolveAndLoad])
 
   const addChapter = useCallback(async () => {
@@ -447,7 +448,7 @@ export function useStructureWorkspace(novelId: number) {
       },
       true,
     )
-    message.success('新章节已创建。')
+    message.success(getUserFacingMessage('structure.chapterCreated'))
   }, [clearCaches, novelId, resolveAndLoad, selection.partId, selection.volumeId])
 
   const addChapters = useCallback(async (count: number) => {
@@ -474,7 +475,7 @@ export function useStructureWorkspace(novelId: number) {
       },
       true,
     )
-    message.success(`已新增 ${safeCount} 章。`)
+    message.success(getUserFacingMessage('structure.chaptersCreated', { count: safeCount }))
   }, [clearCaches, novelId, resolveAndLoad, selection.partId, selection.volumeId])
 
   const addSegment = useCallback(async () => {
@@ -496,7 +497,7 @@ export function useStructureWorkspace(novelId: number) {
       },
       true,
     )
-    message.success('新场景已创建。')
+    message.success(getUserFacingMessage('structure.segmentCreated'))
   }, [clearCaches, resolveAndLoad, segments.total, selection.chapterId, selection.partId, selection.volumeId])
 
   const addSegments = useCallback(async (count: number) => {
@@ -524,7 +525,7 @@ export function useStructureWorkspace(novelId: number) {
       },
       true,
     )
-    message.success(`已新增 ${safeCount} 个场景。`)
+    message.success(getUserFacingMessage('structure.segmentsCreated', { count: safeCount }))
   }, [clearCaches, resolveAndLoad, segments.total, selection.chapterId, selection.partId, selection.volumeId])
 
   const deleteVolume = useCallback(async (volume: StoryStructureVolumeSummary) => {
@@ -545,7 +546,7 @@ export function useStructureWorkspace(novelId: number) {
     await window.electron.structure.deleteVolume(volume.id)
     clearCaches()
     await resolveAndLoad({}, true)
-    message.success('卷已删除。')
+    message.success(getUserFacingMessage('structure.volumeDeleted'))
   }, [clearCaches, resolveAndLoad])
 
   const deletePart = useCallback(async (part: StoryStructurePartSummary) => {
@@ -566,7 +567,7 @@ export function useStructureWorkspace(novelId: number) {
     await window.electron.structure.deletePart(part.id)
     clearCaches()
     await resolveAndLoad({ volumeId: optionalId(selection.volumeId) }, true)
-    message.success('部已删除。')
+    message.success(getUserFacingMessage('structure.partDeleted'))
   }, [clearCaches, resolveAndLoad, selection.volumeId])
 
   const deleteChapter = useCallback(async () => {
@@ -592,7 +593,7 @@ export function useStructureWorkspace(novelId: number) {
       volumeId: optionalId(selection.volumeId),
       partId: optionalId(selection.partId),
     }, true)
-    message.success('章节已删除。')
+    message.success(getUserFacingMessage('structure.chapterDeleted'))
   }, [chapterDetail, clearCaches, resolveAndLoad, selection.partId, selection.volumeId])
 
   const deleteSegment = useCallback(async () => {
@@ -619,7 +620,7 @@ export function useStructureWorkspace(novelId: number) {
       partId: optionalId(selection.partId),
       chapterId: optionalId(selection.chapterId),
     }, true)
-    message.success('场景已删除。')
+    message.success(getUserFacingMessage('structure.segmentDeleted'))
   }, [clearCaches, resolveAndLoad, segmentDetail, selection.chapterId, selection.partId, selection.volumeId])
 
   const saveChapter = useCallback(async () => {
@@ -641,7 +642,7 @@ export function useStructureWorkspace(novelId: number) {
 
       clearCaches()
       await resolveAndLoad(selection, true)
-      message.success('章节已保存。')
+      message.success(getUserFacingMessage('structure.chapterSaved'))
     } finally {
       setSavingChapter(false)
     }
@@ -657,7 +658,7 @@ export function useStructureWorkspace(novelId: number) {
       await window.electron.structure.updateSegment(segmentDetail.id, values)
       clearCaches()
       await resolveAndLoad(selection, true)
-      message.success('场景已保存。')
+      message.success(getUserFacingMessage('structure.segmentSaved'))
     } finally {
       setSavingSegment(false)
     }
@@ -669,7 +670,7 @@ export function useStructureWorkspace(novelId: number) {
     await window.electron.structure.compileChapter(selection.chapterId)
     clearCaches()
     await resolveAndLoad(selection, true)
-    message.success('章节已重新编译。')
+    message.success(getUserFacingMessage('structure.chapterRecompiled'))
   }, [clearCaches, resolveAndLoad, selection])
 
   const refreshMemory = useCallback(async () => {
@@ -679,7 +680,7 @@ export function useStructureWorkspace(novelId: number) {
       await window.electron.structure.refreshCheckpoints(novelId)
       checkpointCache.current.clear()
       await loadCheckpoints(1, true)
-      message.success('检查点已刷新。')
+      message.success(getUserFacingMessage('structure.checkpointsRefreshed'))
     } finally {
       setRefreshing(false)
     }
@@ -691,14 +692,14 @@ export function useStructureWorkspace(novelId: number) {
     const ordered = reorderItems(volumes, result.source.index, result.destination.index)
     await window.electron.structure.reorderVolumes(novelId, ordered.map((item) => item.id))
     await loadVolumes()
-    message.success('卷顺序已更新。')
+    message.success(getUserFacingMessage('structure.volumeOrderUpdated'))
   }, [loadVolumes, novelId, volumes])
 
   const handlePartDragEnd = useCallback(async (result: { destination: { index: number } | null; source: { index: number } }) => {
     if (!result.destination || !selection.volumeId) return
 
     if (parts.total > parts.pageSize) {
-      message.warning('当前卷已分页，请缩小范围后再排序。')
+      message.warning(getUserFacingMessage('structure.partOrderPaged'))
       return
     }
 
@@ -706,14 +707,14 @@ export function useStructureWorkspace(novelId: number) {
     await window.electron.structure.reorderPartsInVolume(selection.volumeId, ordered.map((item) => item.id))
     partsCache.current.clear()
     await loadParts(selection.volumeId, 1, true)
-    message.success('部顺序已更新。')
+    message.success(getUserFacingMessage('structure.partOrderUpdated'))
   }, [loadParts, parts.items, parts.pageSize, parts.total, selection.volumeId])
 
   const handleSegmentDragEnd = useCallback(async (result: { destination: { index: number } | null; source: { index: number } }) => {
     if (!result.destination || !selection.chapterId) return
 
     if (segments.total > segments.pageSize) {
-      message.warning('当前章节已分页，请缩小范围后再排序。')
+      message.warning(getUserFacingMessage('structure.segmentOrderPaged'))
       return
     }
 
@@ -721,7 +722,7 @@ export function useStructureWorkspace(novelId: number) {
     await window.electron.structure.reorderSegments(selection.chapterId, ordered.map((item) => item.id))
     clearCaches()
     await resolveAndLoad(selection, true)
-    message.success('场景顺序已更新。')
+    message.success(getUserFacingMessage('structure.segmentOrderUpdated'))
   }, [clearCaches, resolveAndLoad, segments.items, segments.pageSize, segments.total, selection])
 
   const selectVolume = useCallback(async (volumeId: number) => {

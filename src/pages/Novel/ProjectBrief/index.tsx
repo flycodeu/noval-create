@@ -2,6 +2,7 @@
 import { Alert, Button, Form, Input, Select, Space, Tag, message } from 'antd'
 import { ArrowRightOutlined, RobotOutlined, SaveOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import type { ProjectPlatformMode } from '../../../shared/project-brief'
 import {
   buildProjectBriefPayload,
@@ -41,17 +42,6 @@ const PLATFORM_OPTIONS: Array<{ value: ProjectPlatformMode; label: string }> = [
   { value: 'web_serial', label: '网文连载' },
   { value: 'publishing', label: '出版小说' },
 ]
-
-const EMPTY_VALUES: ProjectBriefFormValues = {
-  platformMode: '',
-  targetAudience: '',
-  targetReader: '',
-  readerPromise: '',
-  sellingPoints: '',
-  compTitles: '',
-  tabooRules: '',
-  deliveryRhythm: '',
-}
 
 function compactText(value?: string | null, max = 44): string {
   const text = value?.trim() || ''
@@ -182,10 +172,10 @@ export default function ProjectBriefPage({ novelId }: Props) {
       if (updated) setCurrentNovel(updated)
       await finalizeDraft(values)
       await clearDraft()
-      message.success('项目立项已保存。')
+      message.success(getUserFacingMessage('projectBrief.saved'))
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '项目立项保存失败。')
+      message.error(getErrorMessage(error, 'projectBrief.saveFailed'))
     } finally {
       setSaving(false)
     }
@@ -214,15 +204,15 @@ export default function ProjectBriefPage({ novelId }: Props) {
       }).catch(console.error)
 
       if (result.warnings.length > 0) {
-        message.warning(`AI 已填入表单，但还有 ${result.warnings.length} 条提醒，保存前请复核。`)
+        message.warning(getUserFacingMessage('projectBrief.generatedWithWarnings', { count: result.warnings.length }))
       } else if (mode === 'fill_blanks') {
-        message.success('空白字段已补齐到表单，当前尚未保存。')
+        message.success(getUserFacingMessage('projectBrief.filledBlanks'))
       } else {
-        message.success('项目立项草稿已生成到表单，当前尚未保存。')
+        message.success(getUserFacingMessage('projectBrief.generated'))
       }
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '项目立项生成失败。')
+      message.error(getErrorMessage(error, 'projectBrief.generateFailed'))
     } finally {
       setGeneratingMode(null)
     }

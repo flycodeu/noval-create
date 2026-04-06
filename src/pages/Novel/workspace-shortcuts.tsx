@@ -1,20 +1,8 @@
 import React from 'react'
-
-interface NovelWorkspaceActions {
-  registerSaveHandler: (handler: (() => void) | null) => void
-  registerEscapeHandler: (handler: (() => void) | null) => void
-  notifyWorkspaceMutation: () => void
-  mutationToken: number
-}
-
-const DEFAULT_ACTIONS: NovelWorkspaceActions = {
-  registerSaveHandler: () => {},
-  registerEscapeHandler: () => {},
-  notifyWorkspaceMutation: () => {},
-  mutationToken: 0,
-}
-
-const NovelWorkspaceActionsContext = React.createContext<NovelWorkspaceActions>(DEFAULT_ACTIONS)
+import {
+  NovelWorkspaceActionsContext,
+  type NovelWorkspaceActions,
+} from './workspace-shortcuts-context'
 
 export function NovelWorkspaceActionsProvider({
   value,
@@ -28,8 +16,4 @@ export function NovelWorkspaceActionsProvider({
       {children}
     </NovelWorkspaceActionsContext.Provider>
   )
-}
-
-export function useNovelWorkspaceActions() {
-  return React.useContext(NovelWorkspaceActionsContext)
 }

@@ -12,6 +12,7 @@ import {
   regenerateCharacterPrompt,
   type PromptCatalogEntry,
 } from '../../shared/prompt-library'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../Novel/components/WorkspaceShell'
 
 function normalizePromptText(text: string): string {
@@ -392,7 +393,7 @@ export default function PromptManager() {
         setCustomOverrides(Object.fromEntries(rows.map((row) => [row.key, normalizePromptText(row.content)])))
       } catch (error) {
         if (alive) {
-          message.error(error instanceof Error ? error.message : '加载提示词失败')
+          message.error(getErrorMessage(error, 'prompt.loadFailed'))
         }
       } finally {
         if (alive) setLoading(false)
@@ -450,7 +451,7 @@ export default function PromptManager() {
   )
 
   const handleCopy = (text: string) => {
-    navigator.clipboard.writeText(sanitizePromptText(text)).then(() => message.success('已复制到剪贴板'))
+    navigator.clipboard.writeText(sanitizePromptText(text)).then(() => message.success(getUserFacingMessage('common.copied')))
   }
 
   const handleEditSave = async () => {
@@ -459,7 +460,7 @@ export default function PromptManager() {
     await window.electron.prompt.save(selectedPromptRow.prompt.key, normalized)
     setCustomOverrides((prev) => ({ ...prev, [selectedPromptRow.prompt.key]: normalized }))
     setEditModalOpen(false)
-    message.success('运行时提示词已保存')
+    message.success(getUserFacingMessage('prompt.runtimeSaved'))
   }
 
   const handleResetOverride = async (key: string) => {
@@ -469,7 +470,7 @@ export default function PromptManager() {
       delete next[key]
       return next
     })
-    message.success('已恢复默认提示词')
+    message.success(getUserFacingMessage('prompt.resetDefault'))
   }
 
   if (loading) {

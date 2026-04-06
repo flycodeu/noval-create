@@ -8,6 +8,7 @@ import {
   SaveOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { useNovelStore } from '../../../stores/novel.store'
 import type { SubPlot } from '../../../types'
 import type {
@@ -130,7 +131,7 @@ function parseChapterMarker(value?: string): number | null {
 function splitCharacterNames(value?: string): string[] {
   if (!value) return []
   return value
-    .split(/[、，,\/\s]+/)
+    .split(/[、，,/\s]+/)
     .map((item) => item.trim())
     .filter(Boolean)
 }
@@ -283,7 +284,7 @@ export default function CoreSettings({ novelId }: Props) {
       setSelectedSubplotIndex(null)
     }
   }
-  const { clearDraft, draft, finalizeDraft, saveAppliedDraft } = usePlanningDraft<StoryDesignFormValues & { subplots?: SubPlot[] }>({
+  const { clearDraft, finalizeDraft, saveAppliedDraft } = usePlanningDraft<StoryDesignFormValues & { subplots?: SubPlot[] }>({
     novelId,
     pageKey: 'story-design',
     applyDraft: applyStoryDesignDraft,
@@ -347,10 +348,10 @@ export default function CoreSettings({ novelId }: Props) {
         subplots: normalizeSubplots(subplots),
       })
       await clearDraft()
-      message.success('故事设计已保存。')
+      message.success(getUserFacingMessage('coreSettings.saved'))
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '故事设计保存失败。')
+      message.error(getErrorMessage(error, 'coreSettings.saveFailed'))
     } finally {
       setSaving(false)
     }
@@ -377,7 +378,7 @@ export default function CoreSettings({ novelId }: Props) {
         })
         setSubplots([])
         setSelectedSubplotIndex(null)
-        message.success('当前故事设计已清空。')
+        message.success(getUserFacingMessage('coreSettings.designCleared'))
       },
     })
   }
@@ -392,7 +393,7 @@ export default function CoreSettings({ novelId }: Props) {
       onOk: () => {
         setSubplots([])
         setSelectedSubplotIndex(null)
-        message.success('支线卡片已清空。')
+        message.success(getUserFacingMessage('coreSettings.subplotsCleared'))
       },
     })
   }
@@ -416,7 +417,7 @@ export default function CoreSettings({ novelId }: Props) {
     while (true) {
       const status = await window.electron.subplot.getAutoGenerateStatus(taskId)
       if (!status) {
-        throw new Error('支线批量任务不存在，可能已被清理。')
+        throw new Error(getUserFacingMessage('coreSettings.subplotTaskMissing'))
       }
 
       setGenerationProgress({
@@ -432,13 +433,13 @@ export default function CoreSettings({ novelId }: Props) {
 
       if (status.status === 'success') return status
       if (status.status === 'failed') {
-        throw new Error(status.lastError || status.message || '支线批量生成失败。')
+        throw new Error(status.lastError || status.message || getUserFacingMessage('coreSettings.subplotBatchFailed'))
       }
       if (status.status === 'paused') {
-        throw new Error(status.message || '支线批量生成已暂停，请到任务中心继续执行。')
+        throw new Error(status.message || getUserFacingMessage('coreSettings.subplotBatchPaused'))
       }
       if (status.status === 'cancelled') {
-        throw new Error(status.message || '支线批量生成已取消。')
+        throw new Error(status.message || getUserFacingMessage('coreSettings.subplotBatchCancelled'))
       }
 
       await new Promise((resolve) => window.setTimeout(resolve, 500))
@@ -505,9 +506,9 @@ export default function CoreSettings({ novelId }: Props) {
         }).catch(console.error)
 
         if (status.warnings.length > 0) {
-          message.warning(`AI 已生成支线，但有 ${status.warnings.length} 条提醒，保存前请复核。`)
+          message.warning(getUserFacingMessage('coreSettings.subplotGeneratedWithWarnings', { count: status.warnings.length }))
         } else {
-          message.success('支线看板已按当前故事锚点重算。')
+          message.success(getUserFacingMessage('coreSettings.subplotRecomputed'))
         }
       } else {
         const result = await window.electron.ai.generateCoreSettings({
@@ -533,14 +534,14 @@ export default function CoreSettings({ novelId }: Props) {
         }).catch(console.error)
 
         if (result.warnings.length > 0) {
-          message.warning(`AI 已生成内容，但有 ${result.warnings.length} 条提醒，保存前请复核。`)
+          message.warning(getUserFacingMessage('coreSettings.generatedWithWarnings', { count: result.warnings.length }))
         } else {
-          message.success('故事设计首版已生成到表单。')
+          message.success(getUserFacingMessage('coreSettings.generated'))
         }
       }
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '故事设计生成失败。')
+      message.error(getErrorMessage(error, 'coreSettings.generateFailed'))
     } finally {
       setGeneratingMode(null)
       setGenerationProgress(null)

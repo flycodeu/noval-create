@@ -215,8 +215,6 @@ export function normalizeWorldRulesDraft(raw: unknown, genreName?: string | null
   const record = asRecord(raw)
   const writing = asRecord(record.writingConstraints)
   const ecology = asRecord(record.characterEcology)
-  const timeline = asRecord(record.timelineConfig)
-  const mapBlueprint = asRecord(record.mapBlueprint)
   const realismLevelText = asText(writing.realismLevel)
   const realismLevel = (['strict-realism', 'rule-realism', 'stylized-fantasy'] as RealismLevel[]).includes(realismLevelText as RealismLevel)
     ? realismLevelText as RealismLevel

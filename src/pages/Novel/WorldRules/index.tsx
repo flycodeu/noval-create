@@ -39,6 +39,7 @@ import {
   type WorldRuleSectionKey,
   type WorldRulesGenerationProgressEvent,
 } from '../../../shared/world-rules-generation'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import {
   WorkspaceContextSummary,
   WorkspaceMetric,
@@ -306,9 +307,9 @@ export default function WorldRules({ novelId }: Props) {
       setAutoStatus(EMPTY_AUTO_STATUS)
       const updated = await window.electron.novel.get(novelId)
       if (updated) setCurrentNovel(updated)
-      message.success('世界规则已保存')
+      message.success(getUserFacingMessage('worldRules.saved'))
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '保存失败')
+      message.error(getErrorMessage(error, 'worldRules.saveFailed'))
     } finally {
       setSaving(false)
     }
@@ -323,7 +324,7 @@ export default function WorldRules({ novelId }: Props) {
     setGenerationProgress(null)
     setAutoTask(null)
     setAutoStatus(EMPTY_AUTO_STATUS)
-    message.success('当前流程内容已清空，未保存前不会影响已保存规则')
+    message.success(getUserFacingMessage('worldRules.flowCleared'))
   }, [blankRules, form, novelId])
 
   const handleClearCurrentFlow = useCallback(() => {
@@ -341,7 +342,7 @@ export default function WorldRules({ novelId }: Props) {
 
   const handleGenerateWorldRules = useCallback(async (mode: 'all' | 'section', action: 'generate' | 'expand') => {
     if (hasRunningAutoTask) {
-      message.warning('请先停止当前自动任务，再执行手动生成。')
+      message.warning(getUserFacingMessage('worldRules.stopAutoBeforeManual'))
       return
     }
 
@@ -373,14 +374,18 @@ export default function WorldRules({ novelId }: Props) {
         : `${activeSectionMeta.label}${actionLabel}`
 
       if (result.failedSteps > 0 && result.hasPartialResult) {
-        message.warning(`${sectionLabel}已完成，但仍有部分分区失败，可以单独重试。`)
+        message.warning(getUserFacingMessage('worldRules.partialFailed', { label: sectionLabel }))
       } else if (result.failedSteps > 0) {
-        message.error(`${sectionLabel}失败，请检查当前设定后重试。`)
+        message.error(getUserFacingMessage('worldRules.sectionFailed', { label: sectionLabel }))
       } else {
-        message.success(mode === 'all' ? '世界规则分批生成完成，请确认后保存。' : `${activeSectionMeta.label}${actionLabel}完成。`)
+        message.success(mode === 'all'
+          ? getUserFacingMessage('worldRules.generatedAll')
+          : getUserFacingMessage('worldRules.generatedSection', { label: `${activeSectionMeta.label}${actionLabel}` }))
       }
     } catch (error) {
-      message.error(`AI 生成失败：${error instanceof Error ? error.message : '请稍后重试'}`)
+      message.error(getUserFacingMessage('worldRules.generationFailed', {
+        detail: error instanceof Error ? error.message : '请稍后重试',
+      }))
     } finally {
       setRunningAction(null)
     }
@@ -397,9 +402,9 @@ export default function WorldRules({ novelId }: Props) {
         sectionOrder: WORLD_RULE_SECTION_ORDER,
       })
       await loadAutoStatus(true)
-      message.success('世界规则自动分批生成已启动')
+      message.success(getUserFacingMessage('worldRules.autoStarted'))
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '世界规则自动生成启动失败')
+      message.error(getErrorMessage(error, 'worldRules.autoStartFailed'))
     } finally {
       setAutoLoading(false)
     }
@@ -412,7 +417,7 @@ export default function WorldRules({ novelId }: Props) {
     try {
       await window.electron.workflow.cancel(autoTask.id)
       await loadAutoStatus(true)
-      message.info('已发送停止请求，当前分区结束后不会继续后续生成。')
+      message.info(getUserFacingMessage('worldRules.autoStopRequested'))
     } finally {
       setAutoStopping(false)
     }
@@ -425,9 +430,9 @@ export default function WorldRules({ novelId }: Props) {
     try {
       await window.electron.worldRules.resumeAutoGenerate(autoTask.id, liveRules)
       await loadAutoStatus(true)
-      message.success('世界规则自动生成已继续')
+      message.success(getUserFacingMessage('worldRules.autoResumed'))
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '世界规则自动生成继续失败')
+      message.error(getErrorMessage(error, 'worldRules.autoResumeFailed'))
     } finally {
       setAutoLoading(false)
     }
@@ -890,5 +895,4 @@ export default function WorldRules({ novelId }: Props) {
     </WorkspacePage>
   )
 }
-
 

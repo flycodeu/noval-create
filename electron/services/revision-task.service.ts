@@ -10,6 +10,7 @@ import * as itemService from './item.service'
 import * as mapService from './map.service'
 import * as storyThreadService from './story-thread.service'
 import * as timelineService from './timeline.service'
+import { throwUserFacingError } from '../utils/user-facing-error'
 
 interface RevisionTaskQueryFilters {
   novelId: number
@@ -356,10 +357,10 @@ async function repairChapterTask(task: typeof revisionTasks.$inferSelect): Promi
     : typeof task.entityId === 'number'
       ? task.entityId
       : null
-  if (!chapterId) throw new Error('缺少章节 ID。')
+  if (!chapterId) throwUserFacingError('revision.chapterIdMissing')
 
   const current = chapterService.getChapter(chapterId)
-  if (!current) throw new Error('章节不存在。')
+  if (!current) throwUserFacingError('chapter.notFound')
 
   const title = task.title || ''
   const needsMemoryRefresh =
@@ -394,10 +395,10 @@ async function repairChapterTask(task: typeof revisionTasks.$inferSelect): Promi
 
 function repairMapTask(task: typeof revisionTasks.$inferSelect): void {
   const entityId = typeof task.entityId === 'number' ? task.entityId : null
-  if (!entityId) throw new Error('缺少地图实体 ID。')
+  if (!entityId) throwUserFacingError('revision.mapEntityIdMissing')
 
   const node = mapService.getMapNode(entityId)
-  if (!node) throw new Error('地图节点不存在。')
+  if (!node) throwUserFacingError('map.nodeNotFound')
 
   const db = getDb()
   const parent = typeof node.parentId === 'number'
@@ -413,11 +414,11 @@ function repairMapTask(task: typeof revisionTasks.$inferSelect): void {
 
 function repairOutlineTask(task: typeof revisionTasks.$inferSelect): void {
   const entityId = typeof task.entityId === 'number' ? task.entityId : null
-  if (!entityId) throw new Error('缺少故事弧 ID。')
+  if (!entityId) throwUserFacingError('revision.arcIdMissing')
 
   const db = getDb()
   const arc = db.select().from(storyArcs).where(eq(storyArcs.id, entityId)).all()[0]
-  if (!arc) throw new Error('故事弧不存在。')
+  if (!arc) throwUserFacingError('storyArc.notFound')
 
   const title = task.title || ''
   if (title === '故事弧章位反转') {
@@ -799,7 +800,7 @@ async function runTaskAutoFix(current: typeof revisionTasks.$inferSelect): Promi
   const entityId = typeof current.entityId === 'number' ? current.entityId : undefined
 
   if (!isAutoFixableTask(current.taskType || 'continuity', entityType, entityId, current.title)) {
-    throw new Error('当前任务不支持 AI 自动修复。')
+    throwUserFacingError('revision.autoFixUnsupported')
   }
 
   if (entityType === 'character') {

@@ -23,6 +23,7 @@ import { cleanAiFieldText, cleanAiValue } from '../../src/utils/text'
 import { getDb } from '../database/db'
 import { characters, novels, tasks } from '../database/schema'
 import { safeParseAiJson } from '../utils/json'
+import { throwUserFacingError } from '../utils/user-facing-error'
 import { buildStoryProfile, buildStoryRelationSummary } from './context.service'
 import { createTask, runChatTask, updateTask } from './task.service'
 
@@ -564,7 +565,7 @@ async function loadPremiseContext(data: PremiseGenerationRequest): Promise<Premi
   const allCharacters = db.select().from(characters).where(eq(characters.novelId, data.novelId)).all()
 
   if (!novel) {
-    throw new Error('小说不存在')
+    throwUserFacingError('novel.notFound')
   }
 
   return {

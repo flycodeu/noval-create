@@ -12,6 +12,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 import { AssetReviewObservability, PagedResult, Task, TaskQueryInput, TaskStats } from '../../types'
 import { useTaskStore } from '../../stores/task.store'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { buildTaskRecoveryAction } from '../Novel/shared/workspace-navigation'
 import {
   WorkspaceMetric,
@@ -197,7 +198,7 @@ export default function TaskCenter() {
     } catch (error) {
       if (requestId !== loadVersionRef.current) return null
       if (!options.silent) {
-        message.error(error instanceof Error ? error.message : '任务中心加载失败，请稍后再试。')
+        message.error(getErrorMessage(error, 'taskCenter.loadFailed'))
       }
       return null
     } finally {
@@ -275,10 +276,10 @@ export default function TaskCenter() {
   const handleResume = async (taskId: number) => {
     try {
       await window.electron.workflow.resume(taskId)
-      message.success('后台流程已继续执行。')
+      message.success(getUserFacingMessage('taskCenter.resumed'))
       await loadTasks({ silent: true })
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '继续任务失败，请稍后再试。')
+      message.error(getErrorMessage(error, 'taskCenter.resumeFailed'))
     }
   }
 
@@ -314,11 +315,11 @@ export default function TaskCenter() {
 
           message.success(
             result.deletedCount > 0
-              ? `已清空 ${result.deletedCount} 条历史任务。`
-              : '当前筛选下暂无可清理的历史任务。',
+              ? getUserFacingMessage('taskCenter.historyCleared', { count: result.deletedCount })
+              : getUserFacingMessage('taskCenter.historyNothingToClear'),
           )
         } catch (error) {
-          message.error(error instanceof Error ? error.message : '清空历史任务失败，请稍后再试。')
+          message.error(getErrorMessage(error, 'taskCenter.clearHistoryFailed'))
         } finally {
           setClearingHistory(false)
         }
@@ -329,7 +330,7 @@ export default function TaskCenter() {
   const handleRecoverDraft = useCallback((path?: string) => {
     if (!path) return
     navigate(path)
-    message.success('已打开对应工作台，草稿会自动恢复。')
+    message.success(getUserFacingMessage('taskCenter.openedWorkspace'))
   }, [navigate])
 
   const runningCount = stats.runningCount + stats.cancelRequestedCount

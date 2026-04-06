@@ -4,6 +4,7 @@ import VirtualList from 'rc-virtual-list'
 import { useRef } from 'react'
 import { ArrowRightOutlined, DeleteOutlined, PlusOutlined, RobotOutlined } from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import type { StoryThread } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
 import type { StoryThreadBatchGenerateOptions } from '../../../shared/story-thread-generation'
@@ -19,7 +20,7 @@ import {
   WorkspacePage,
   WorkspacePanel,
 } from '../components/WorkspaceShell'
-import { useNovelWorkspaceActions } from '../workspace-shortcuts'
+import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 
 interface Props {
   novelId: number
@@ -247,7 +248,7 @@ export default function StoryThreadsPage({ novelId }: Props) {
       setWorkflowStats(nextWorkflowStats)
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '故事线程加载失败。')
+      message.error(getErrorMessage(error, 'storyThread.loadFailed'))
     } finally {
       setLoading(false)
     }
@@ -256,6 +257,13 @@ export default function StoryThreadsPage({ novelId }: Props) {
   useEffect(() => {
     void refresh()
   }, [mutationToken, refresh])
+  const openEditor = useCallback((thread?: StoryThread) => {
+    setEditingThread(thread || null)
+    editorForm.resetFields()
+    editorForm.setFieldsValue(buildEditorValues(thread))
+    setEditorOpen(true)
+  }, [editorForm])
+
   useEffect(() => {
     if (!routeThreadId || routeAction !== 'edit' || routeEditorRef.current === routeThreadId) return
     const target = threads.find((thread) => thread.id === routeThreadId)
@@ -269,18 +277,11 @@ export default function StoryThreadsPage({ novelId }: Props) {
       routeEditorRef.current = routeThreadId
       openEditor(thread)
     })
-  }, [routeAction, routeThreadId, threads])
+  }, [openEditor, routeAction, routeThreadId, threads])
 
   useEffect(() => {
     generateForm.setFieldsValue(DEFAULT_GENERATE_VALUES)
   }, [generateForm])
-
-  const openEditor = (thread?: StoryThread) => {
-    setEditingThread(thread || null)
-    editorForm.resetFields()
-    editorForm.setFieldsValue(buildEditorValues(thread))
-    setEditorOpen(true)
-  }
 
   const openGenerateModal = async () => {
     const nextWorkflowStats = await loadWorkflowStats(novelId)
@@ -306,28 +307,28 @@ export default function StoryThreadsPage({ novelId }: Props) {
       onOk: async () => {
         try {
           await window.electron.thread.batchDelete([thread.id])
-          message.success('故事线程已删除。')
+          message.success(getUserFacingMessage('storyThread.deleted'))
           await refresh()
           notifyWorkspaceMutation()
         } catch (error) {
           console.error(error)
-          message.error(error instanceof Error ? error.message : '故事线程删除失败。')
+          message.error(getErrorMessage(error, 'storyThread.deleteFailed'))
         }
       },
     })
   }
 
-  const handleSave = async () => {
+  const handleSave = useCallback(async () => {
     const values = normalizeEditorValues(await editorForm.validateFields())
     setSaving(true)
 
     try {
       if (editingThread) {
         await window.electron.thread.update(editingThread.id, values)
-        message.success('故事线程已更新。')
+        message.success(getUserFacingMessage('storyThread.updated'))
       } else {
         await window.electron.thread.create(novelId, values)
-        message.success('故事线程已创建。')
+        message.success(getUserFacingMessage('storyThread.created'))
       }
 
       setEditorOpen(false)
@@ -336,11 +337,11 @@ export default function StoryThreadsPage({ novelId }: Props) {
       notifyWorkspaceMutation()
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '故事线程保存失败。')
+      message.error(getErrorMessage(error, 'storyThread.saveFailed'))
     } finally {
       setSaving(false)
     }
-  }
+  }, [editingThread, editorForm, novelId, notifyWorkspaceMutation, refresh])
 
   useEffect(() => {
     registerSaveHandler(editorOpen ? () => { void handleSave() } : null)
@@ -361,10 +362,10 @@ export default function StoryThreadsPage({ novelId }: Props) {
       setSelectedRowKeys([])
       await refresh()
       notifyWorkspaceMutation()
-      message.success(`已批量更新 ${selectedRowKeys.length} 条线程状态。`)
+      message.success(getUserFacingMessage('storyThread.batchStatusUpdated', { count: selectedRowKeys.length }))
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '批量更新线程状态失败。')
+      message.error(getErrorMessage(error, 'storyThread.batchStatusUpdateFailed'))
     }
   }
 
@@ -375,10 +376,10 @@ export default function StoryThreadsPage({ novelId }: Props) {
       setSelectedRowKeys([])
       await refresh()
       notifyWorkspaceMutation()
-      message.success(`已批量更新 ${selectedRowKeys.length} 条线程优先级。`)
+      message.success(getUserFacingMessage('storyThread.batchPriorityUpdated', { count: selectedRowKeys.length }))
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '批量更新线程优先级失败。')
+      message.error(getErrorMessage(error, 'storyThread.batchPriorityUpdateFailed'))
     }
   }
 
@@ -393,7 +394,7 @@ export default function StoryThreadsPage({ novelId }: Props) {
         setSelectedRowKeys([])
         await refresh()
         notifyWorkspaceMutation()
-        message.success('已批量删除故事线程。')
+        message.success(getUserFacingMessage('storyThread.batchDeleted'))
       },
     })
   }
@@ -419,13 +420,17 @@ export default function StoryThreadsPage({ novelId }: Props) {
       notifyWorkspaceMutation()
 
       if (result.warnings.length > 0) {
-        message.warning(`已生成 ${result.createdCount}/${result.requestedCount} 条线程，另有 ${result.warnings.length} 条提醒。`)
+        message.warning(getUserFacingMessage('storyThread.generatedWithWarnings', {
+          createdCount: result.createdCount,
+          requestedCount: result.requestedCount,
+          warningCount: result.warnings.length,
+        }))
       } else {
-        message.success(`已生成 ${result.createdCount} 条故事线程。`)
+        message.success(getUserFacingMessage('storyThread.generated', { createdCount: result.createdCount }))
       }
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '故事线程生成失败。')
+      message.error(getErrorMessage(error, 'storyThread.generateFailed'))
     } finally {
       setGenerating(false)
     }
@@ -435,12 +440,12 @@ export default function StoryThreadsPage({ novelId }: Props) {
     setGenerating(true)
     try {
       await window.electron.thread.regenerate(thread.id)
-      message.success('故事线程已按当前设定重生成。')
+      message.success(getUserFacingMessage('storyThread.regenerated'))
       await refresh()
       notifyWorkspaceMutation()
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '故事线程重生成失败。')
+      message.error(getErrorMessage(error, 'storyThread.regenerateFailed'))
     } finally {
       setGenerating(false)
     }

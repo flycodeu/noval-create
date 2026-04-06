@@ -12,6 +12,7 @@ import {
   RobotOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import AIScorePanel from '../../../components/AIScorePanel'
 import type {
   Chapter,
@@ -28,7 +29,7 @@ import type {
 import { useNovelStore } from '../../../stores/novel.store'
 import { useTaskStore } from '../../../stores/task.store'
 import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage } from '../components/WorkspaceShell'
-import { useNovelWorkspaceActions } from '../workspace-shortcuts'
+import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import './index.css'
 
 interface Props { novelId: number }
@@ -364,16 +365,16 @@ export default function Writing({ novelId }: Props) {
       void (async () => {
         await Promise.all([loadChapters(chapterId), refreshMeta()])
         if (chapterId) await refreshChapter(chapterId)
-        message.success('章节流水线已完成，场景计划、审校记录和长文记忆已同步。')
+        message.success(getUserFacingMessage('writing.pipelineCompleted'))
       })()
     }
     if (stream.status === 'failed') {
       setGenerating(false); setGeneratingTaskId(null); clearStream(stream.taskId)
-      message.error('正文生成失败，请检查模型配置或前置结构。')
+      message.error(getUserFacingMessage('writing.generateFailed'))
     }
     if (stream.status === 'cancelled') {
       setGenerating(false); setGeneratingTaskId(null); clearStream(stream.taskId)
-      message.info('正文生成已取消。')
+      message.info(getUserFacingMessage('writing.generateCancelled'))
     }
   }, [streams, generatingTaskId, currentChapter?.id, clearStream, loadChapters, refreshMeta, refreshChapter])
 
@@ -483,10 +484,10 @@ export default function Writing({ novelId }: Props) {
         refreshContextStatus(),
         refreshVersionHistory(currentChapter.id),
       ])
-      message.success('已恢复所选历史版本。')
+      message.success(getUserFacingMessage('writing.versionRestored'))
       notifyWorkspaceMutation()
     } catch (error: unknown) {
-      message.error(error instanceof Error ? error.message : '恢复历史版本失败。')
+      message.error(getErrorMessage(error, 'writing.restoreVersionFailed'))
     }
   }, [currentChapter, loadChapters, notifyWorkspaceMutation, refreshContextStatus, refreshMeta, refreshVersionHistory, selectedVersionId])
 
@@ -496,10 +497,10 @@ export default function Writing({ novelId }: Props) {
       const latestText = normalizeEditorText(editorRef.current?.innerText || content)
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
       void saveNow(currentChapter.id, latestText).then(() => {
-        message.success('正文已保存。')
+        message.success(getUserFacingMessage('writing.saved'))
       }).catch((error) => {
         console.error(error)
-        message.error(error instanceof Error ? error.message : '正文保存失败。')
+        message.error(getErrorMessage(error, 'writing.saveFailed'))
       })
     })
 
@@ -543,10 +544,10 @@ export default function Writing({ novelId }: Props) {
   }, [currentChapter?.segmentCount, handleRedoEditor, handleUndoEditor])
 
   const handleGenerateContent = async () => {
-    if (!currentChapter) return message.warning('请先选择章节。')
+    if (!currentChapter) return message.warning(getUserFacingMessage('writing.selectChapterFirst'))
     setGenerationProgress(null); setGenerating(true)
     try { setGeneratingTaskId(await window.electron.chapter.generateContent(currentChapter.id)) }
-    catch (error: unknown) { setGenerating(false); message.error(error instanceof Error ? error.message : '请先配置可用的 AI 模型。') }
+    catch (error: unknown) { setGenerating(false); message.error(getErrorMessage(error, 'writing.configureModelFirst')) }
   }
 
   const handleCancelGenerate = async () => {
@@ -560,9 +561,11 @@ export default function Writing({ novelId }: Props) {
     try {
       await window.electron.chapter.generateSummary(currentChapter.id)
       await Promise.all([loadChapters(currentChapter.id), refreshMeta(), refreshContextStatus()])
-      message.success('摘要、连续性记忆和长文记忆已更新。')
+      message.success(getUserFacingMessage('writing.summaryUpdated'))
     } catch (error: unknown) {
-      message.error(`更新失败：${error instanceof Error ? error.message : '请稍后重试。'}`)
+      message.error(getUserFacingMessage('writing.summaryUpdateFailed', {
+        detail: error instanceof Error ? error.message : '请稍后重试。',
+      }))
     }
   }
 
@@ -571,21 +574,25 @@ export default function Writing({ novelId }: Props) {
     try {
       await window.electron.structure.compileChapter(currentChapter.id)
       await Promise.all([loadChapters(currentChapter.id), refreshMeta(), refreshContextStatus()])
-      message.success('已按场景重新编译当前章节。')
+      message.success(getUserFacingMessage('writing.compiled'))
     } catch (error: unknown) {
-      message.error(error instanceof Error ? error.message : '章节编译失败，请稍后再试。')
+      message.error(getErrorMessage(error, 'writing.compileFailed'))
     }
   }
 
   const handleAiCheck = async () => {
     if (!currentChapter) return
     try { setAiResult(await window.electron.chapter.aiCheck(currentChapter.id) as AiCheckPayload); setInsightTab('health') }
-    catch (error: unknown) { message.error(`检测失败：${error instanceof Error ? error.message : '请稍后重试。'}`) }
+    catch (error: unknown) {
+      message.error(getUserFacingMessage('writing.aiCheckFailed', {
+        detail: error instanceof Error ? error.message : '请稍后重试。',
+      }))
+    }
   }
 
   const handleOpenRewriteModal = () => {
     if (!currentChapter || !selectedSnippet?.text) {
-      message.warning('请先在正文里选中需要重写的文段。')
+      message.warning(getUserFacingMessage('writing.selectSnippetFirst'))
       return
     }
     setRewriteRequirements('')
@@ -608,16 +615,18 @@ export default function Writing({ novelId }: Props) {
       }) as string)
 
       if (!rewritten.trim()) {
-        message.warning('AI 没有返回可用的重写结果。')
+        message.warning(getUserFacingMessage('writing.rewriteNoResult'))
         return
       }
 
       applyChapterContent(`${before}${rewritten}${after}`, 'ai-rewrite')
       setRewriteModalOpen(false)
       setInsightTab('health')
-      message.success('选中文段已重写并回填。')
+      message.success(getUserFacingMessage('writing.rewriteApplied'))
     } catch (error: unknown) {
-      message.error(`重写失败：${error instanceof Error ? error.message : '请稍后重试。'}`)
+      message.error(getUserFacingMessage('writing.rewriteFailed', {
+        detail: error instanceof Error ? error.message : '请稍后重试。',
+      }))
     } finally {
       setRewritingSelection(false)
     }
@@ -677,7 +686,7 @@ export default function Writing({ novelId }: Props) {
     const nextNum = chapters.length > 0 ? Math.max(...chapters.map((chapter) => chapter.chapterNum)) + 1 : 1
     const chapterId = await window.electron.chapter.create(novelId, { chapterNum: nextNum, title: `第${nextNum}章`, status: 'outline' })
     await Promise.all([loadChapters(chapterId), refreshMeta(), refreshContextStatus()])
-    message.success('新章节已创建。')
+    message.success(getUserFacingMessage('writing.chapterCreated'))
   }
 
   const handleDeleteChapter = async (chapterId: number, event: React.MouseEvent) => {
@@ -1252,7 +1261,7 @@ function ParallelGenerationModal({ novelId, chapters: chapterList }: { novelId: 
 
   const handleAnalyze = async () => {
     if (chapterList.length < 2) {
-      message.warning('至少需要2个章节才能分析并行可能性')
+      message.warning(getUserFacingMessage('writing.parallelNeedMoreChapters'))
       return
     }
     setAnalyzing(true)
@@ -1262,7 +1271,9 @@ function ParallelGenerationModal({ novelId, chapters: chapterList }: { novelId: 
       const result = await window.electron.parallel.analyzePlan(novelId, minNum, maxNum)
       setPlan(result)
     } catch (error) {
-      message.error('分析失败：' + (error instanceof Error ? error.message : '未知错误'))
+      message.error(getUserFacingMessage('writing.parallelAnalyzeFailed', {
+        detail: error instanceof Error ? error.message : '未知错误',
+      }))
     } finally {
       setAnalyzing(false)
     }
@@ -1357,4 +1368,3 @@ function ParallelGenerationModal({ novelId, chapters: chapterList }: { novelId: 
     </>
   )
 }
-

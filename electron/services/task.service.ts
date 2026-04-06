@@ -9,6 +9,7 @@ import {
   getModelConfigRecord,
 } from './model.service'
 import { appendVariationMessage, buildVariationDigest } from './variation-control.service'
+import { throwUserFacingError } from '../utils/user-facing-error'
 
 export type TaskType =
   | 'init'
@@ -147,6 +148,7 @@ const RATE_LIMIT_RETRY_LIMIT = 3
 const RATE_LIMIT_BASE_DELAY_MS = 1_500
 const RATE_LIMIT_MAX_DELAY_MS = 12_000
 const ENDED_TASK_STATUSES: TaskStatus[] = ['success', 'failed', 'cancelled']
+const MAX_STREAM_OUTPUT_LENGTH = 524_288 // ~512K 字符安全上限
 
 function normalizePaging(page?: number, pageSize?: number, fallbackPageSize = 10) {
   const nextPageSize = Math.max(1, Math.min(pageSize || fallbackPageSize, 200))
@@ -200,8 +202,10 @@ function listTaskRows(filters: Pick<TaskQueryFilters, 'novelId' | 'status' | 'ty
 }
 
 function computeRetryTemperature(baseTemperature: number, attemptNumber: number): number {
-  if (attemptNumber <= 1) return baseTemperature
-  return Math.min(0.95, baseTemperature + (attemptNumber - 1) * 0.05)
+  const normalizedBase = Math.max(0, Math.min(1, baseTemperature))
+  if (attemptNumber <= 1) return normalizedBase
+  if (normalizedBase === 0) return 0.01
+  return Math.max(0, Math.min(0.95, normalizedBase + (attemptNumber - 1) * 0.05))
 }
 
 function countPreviousAttempts(
@@ -365,6 +369,8 @@ async function acquireModelSlot(
 type ErrorLike = Error & {
   code?: string
   cause?: unknown
+  statusCode?: number
+  retryAfterMs?: number
 }
 
 function parseJsonObject<T extends object>(raw?: string | null): T {
@@ -382,19 +388,36 @@ function isAbortError(error: unknown): boolean {
     && (error.name === 'AbortError' || /abort|cancel|取消/i.test(error.message))
 }
 
-function collectErrorDetails(error: unknown, seen = new Set<unknown>()): { codes: string[]; messages: string[]; names: string[] } {
-  if (!error || seen.has(error)) return { codes: [], messages: [], names: [] }
+function collectErrorDetails(
+  error: unknown,
+  seen = new Set<unknown>(),
+): { codes: string[]; messages: string[]; names: string[]; statusCodes: number[]; retryAfterMs: number[] } {
+  if (!error || seen.has(error)) {
+    return { codes: [], messages: [], names: [], statusCodes: [], retryAfterMs: [] }
+  }
   seen.add(error)
 
-  if (!(error instanceof Error)) return { codes: [], messages: [], names: [] }
+  if (!(error instanceof Error)) {
+    return { codes: [], messages: [], names: [], statusCodes: [], retryAfterMs: [] }
+  }
 
   const typed = error as ErrorLike
-  const nested = typed.cause ? collectErrorDetails(typed.cause, seen) : { codes: [], messages: [], names: [] }
+  const nested = typed.cause
+    ? collectErrorDetails(typed.cause, seen)
+    : { codes: [], messages: [], names: [], statusCodes: [], retryAfterMs: [] }
+  const statusCode = typeof typed.statusCode === 'number' && Number.isFinite(typed.statusCode)
+    ? typed.statusCode
+    : null
+  const retryAfterMs = typeof typed.retryAfterMs === 'number' && Number.isFinite(typed.retryAfterMs)
+    ? typed.retryAfterMs
+    : null
 
   return {
     codes: [typed.code || '', ...nested.codes].filter(Boolean),
     messages: [typed.message || '', ...nested.messages].filter(Boolean),
     names: [typed.name || '', ...nested.names].filter(Boolean),
+    statusCodes: [statusCode, ...nested.statusCodes].filter((value): value is number => typeof value === 'number'),
+    retryAfterMs: [retryAfterMs, ...nested.retryAfterMs].filter((value): value is number => typeof value === 'number'),
   }
 }
 
@@ -448,6 +471,7 @@ function isRateLimitError(error: unknown): boolean {
   if (isAbortError(error)) return false
 
   const details = collectErrorDetails(error)
+  if (details.statusCodes.includes(429)) return true
   const combinedText = [...details.messages, ...details.names, ...details.codes]
     .join(' ')
     .toLowerCase()
@@ -468,6 +492,10 @@ function isRateLimitError(error: unknown): boolean {
 
 function getRateLimitDelayMs(attempt: number, error: unknown): number {
   const details = collectErrorDetails(error)
+  const retryAfterMs = details.retryAfterMs.find((value) => typeof value === 'number' && Number.isFinite(value))
+  if (typeof retryAfterMs === 'number') {
+    return Math.max(1_000, Math.min(30_000, retryAfterMs))
+  }
   const combinedText = details.messages.join(' ')
   const retryAfterMatch = combinedText.match(/retry[- ]after[: ]+(\d+)/i)
   if (retryAfterMatch) {
@@ -667,23 +695,27 @@ function startTaskHeartbeat(taskId: number): () => void {
 }
 
 function notifyStatus(sender: WebContents | undefined, taskId: number, status: TaskStatus) {
-  if (sender && !sender.isDestroyed()) {
-    sender.send('task:status-change', { taskId, status })
-  }
+  safeSend(sender, 'task:status-change', { taskId, status })
 }
 
 function notifyProgress(sender: WebContents | undefined, taskId: number, progress: object) {
-  if (sender && !sender.isDestroyed()) {
-    sender.send('task:progress', { taskId, progress })
-  }
+  safeSend(sender, 'task:progress', { taskId, progress })
 }
 
 function notifyComplete(
   sender: WebContents | undefined,
   payload: { taskId: number; status: TaskStatus; output?: string; error?: string; result?: unknown },
 ) {
-  if (sender && !sender.isDestroyed()) {
-    sender.send('task:complete', payload)
+  safeSend(sender, 'task:complete', payload)
+}
+
+function safeSend(sender: WebContents | undefined, channel: string, payload: unknown): void {
+  try {
+    if (sender && !sender.isDestroyed()) {
+      sender.send(channel, payload)
+    }
+  } catch {
+    // 窗口在 isDestroyed 检查与 send 之间被销毁，安全忽略
   }
 }
 
@@ -721,6 +753,7 @@ export async function runStreamTask(opts: RunTaskOptions): Promise<number> {
 
   const startTime = Date.now()
   let fullOutput = ''
+  let outputLimitExceeded = false
 
   ;(async () => {
     let stopHeartbeat = () => {}
@@ -738,9 +771,12 @@ export async function runStreamTask(opts: RunTaskOptions): Promise<number> {
         signal: controller.signal,
         onStream: (chunk) => {
           fullOutput += chunk
-          if (opts.sender && !opts.sender.isDestroyed()) {
-            opts.sender.send('task:stream-chunk', { taskId, chunk })
+          if (fullOutput.length > MAX_STREAM_OUTPUT_LENGTH) {
+            outputLimitExceeded = true
+            controller.abort()
+            return
           }
+          safeSend(opts.sender, 'task:stream-chunk', { taskId, chunk })
         },
       })
 
@@ -762,6 +798,17 @@ export async function runStreamTask(opts: RunTaskOptions): Promise<number> {
         result,
       })
     } catch (error: unknown) {
+      if (outputLimitExceeded) {
+        const limitMsg = `流式输出超过最大限制 (${MAX_STREAM_OUTPUT_LENGTH} 字符)，已中止任务`
+        updateTask(taskId, {
+          status: 'failed',
+          errorMessage: limitMsg,
+          outputText: fullOutput || null,
+          durationMs: Date.now() - startTime,
+        })
+        notifyComplete(opts.sender, { taskId, status: 'failed', error: limitMsg })
+        return
+      }
       const currentTask = getTaskRecord(taskId)
       const aborted = isAbortError(error) || currentTask?.status === 'cancel_requested'
       const status: TaskStatus = isAbortError(error) ? 'cancelled' : 'failed'
@@ -784,7 +831,9 @@ export async function runStreamTask(opts: RunTaskOptions): Promise<number> {
       release()
       abortControllers.delete(taskId)
     }
-  })()
+  })().catch((err) => {
+    console.error(`[runStreamTask] Unhandled error in task ${taskId}:`, err)
+  })
 
   return taskId
 }
@@ -975,16 +1024,16 @@ export function recoverOrphanedTasks(): number {
 
 export async function retryTask(taskId: number, sender?: WebContents): Promise<number> {
   const task = getTaskRecord(taskId)
-  if (!task) throw new Error(`任务 ${taskId} 不存在`)
+  if (!task) throwUserFacingError('task.notFound', { id: taskId })
   if (task.runnerType === 'workflow') {
-    throw new Error('工作流任务请使用继续，而不是重试。')
+    throwUserFacingError('task.workflowUseResume')
   }
-  if (!task.retryable) throw new Error('当前任务不支持安全重试。')
-  if (!task.inputJson) throw new Error('当前任务缺少可重放的输入。')
+  if (!task.retryable) throwUserFacingError('task.retryUnsupported')
+  if (!task.inputJson) throwUserFacingError('task.replayInputMissing')
 
   const messages = JSON.parse(task.inputJson)
   if (!Array.isArray(messages)) {
-    throw new Error('任务输入不是可重放的消息数组。')
+    throwUserFacingError('task.replayInputInvalid')
   }
 
   const previousAttempts = countPreviousAttempts(

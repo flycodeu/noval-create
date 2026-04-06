@@ -13,6 +13,7 @@ import {
   TeamOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import type {
   PremiseGenerationMode,
   PremiseGenerationProgressEvent,
@@ -251,7 +252,7 @@ export default function PremisePage({ novelId }: Props) {
   const handleDiscardPendingResult = async () => {
     await clearPersistedDrafts()
     clearPendingResult(pendingResultKey)
-    message.info('已丢弃本轮 AI 结果记录。当前表单内容不会被回滚。')
+    message.info(getUserFacingMessage('premise.discardedDraft'))
   }
 
   const formValues = (Form.useWatch([], form) as Partial<PremiseFormValues> | undefined) || {}
@@ -316,10 +317,10 @@ export default function PremisePage({ novelId }: Props) {
       if (pendingResult?.appliedAt) {
         clearPendingResult(pendingResultKey)
       }
-      message.success('基础设定已保存。')
+      message.success(getUserFacingMessage('premise.saved'))
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '基础设定保存失败。')
+      message.error(getErrorMessage(error, 'premise.saveFailed'))
     } finally {
       setSaving(false)
     }
@@ -357,18 +358,18 @@ export default function PremisePage({ novelId }: Props) {
         await syncDraftApplied(result as PremiseGenerationResultWithMeta, mode)
 
         if (result.warnings.length > 0) {
-          message.warning(`AI 结果已填入表单，但仍有 ${result.warnings.length} 条提醒，请保存前复核。`)
+          message.warning(getUserFacingMessage('premise.generatedWithWarnings', { count: result.warnings.length }))
         } else if (mode === 'fill_blanks') {
-          message.success('空白字段已补齐到表单，当前尚未保存。')
+          message.success(getUserFacingMessage('premise.filledBlanks'))
         } else {
-          message.success('基础设定首版已填入表单，当前尚未保存。')
+          message.success(getUserFacingMessage('premise.generated'))
         }
       } else {
         notification.success({
-          message: '基础设定 AI 已完成',
+          message: getUserFacingMessage('premise.notificationCompletedTitle'),
           description: result.warnings.length > 0
-            ? `结果已保留，含 ${result.warnings.length} 条提醒。返回基础设定页可继续应用或复核。`
-            : '结果已保留。返回基础设定页可继续应用或复核。',
+            ? getUserFacingMessage('premise.notificationCompletedDescriptionWithWarnings', { count: result.warnings.length })
+            : getUserFacingMessage('premise.notificationCompletedDescription'),
           duration: 6,
           placement: 'bottomRight',
           onClick: () => {
@@ -378,12 +379,12 @@ export default function PremisePage({ novelId }: Props) {
       }
     } catch (error) {
       console.error(error)
-      const errorMessage = error instanceof Error ? error.message : '基础设定生成失败。'
+      const errorMessage = error instanceof Error ? error.message : getUserFacingMessage('premise.generateFailed')
       if (aliveRef.current) {
         message.error(errorMessage)
       } else {
         notification.error({
-          message: '基础设定 AI 生成失败',
+          message: getUserFacingMessage('premise.notificationFailedTitle'),
           description: errorMessage,
           duration: 6,
           placement: 'bottomRight',

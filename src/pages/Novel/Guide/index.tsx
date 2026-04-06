@@ -13,6 +13,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 import type { NovelConsistencyReport, NovelContextStatus } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { getCharacterBatchPreset, getItemGenerationProfile } from '../../../shared/creation-tools'
 import { parseProjectBriefSnapshot } from '../../../shared/project-brief'
 import { buildStorySettingsPayload, parseStorySettingsSnapshot } from '../../../shared/story-settings'
@@ -218,11 +219,14 @@ export default function GuidePage({ novelId }: Props) {
     })
 
     if (result.createdCount <= 0) {
-      throw new Error(result.warnings[0] || '故事线程生成后没有产出可用结果。')
+      throw new Error(result.warnings[0] || getUserFacingMessage('guide.threadGenerationEmpty'))
     }
 
     if (result.warnings.length > 0) {
-      message.warning(`已生成 ${result.createdCount} 条线程，另有 ${result.warnings.length} 条提示待处理。`)
+      message.warning(getUserFacingMessage('guide.threadGeneratedWithWarnings', {
+        createdCount: result.createdCount,
+        warningCount: result.warnings.length,
+      }))
     }
   }, [novelId])
 
@@ -280,7 +284,7 @@ export default function GuidePage({ novelId }: Props) {
       message.success(successText)
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '执行失败，请先检查前置条件后再试。')
+      message.error(getErrorMessage(error, 'guide.runFailed'))
     } finally {
       setRunningKey(null)
     }
@@ -308,14 +312,14 @@ export default function GuidePage({ novelId }: Props) {
     await runStep(step, action, successText)
   }, [ensureStepReady, runStep])
 
-  const syncWorldRules = () => void runGuardedStep('world-rules', syncWorldRulesCore, '当前题材的世界规则已同步。')
-  const generateMap = () => void runGuardedStep('map', generateMapCore, '首批地图骨架已生成，可继续到地图页细化。')
-  const generateCharacters = () => void runGuardedStep('characters', generateCharactersCore, '首批人物网络已生成。')
-  const generateItems = () => void runGuardedStep('items', generateItemsCore, '首批物品模板与实例已生成。')
-  const generateThreads = () => void runGuardedStep('threads', generateThreadsCore, '首批故事线程已生成，可继续到线程页细化。')
-  const generateOutline = () => void runGuardedStep('outline', generateOutlineCore, '首批故事弧已生成，可继续到大纲页细化。')
-  const generateStoryDesign = () => void runGuardedStep('story-design', generateStoryDesignCore, '首版故事设计已生成，可继续到故事设计页细化。')
-  const generateTimeline = () => void runGuardedStep('timeline', generateTimelineCore, '首批时间轴事件已生成，可继续到时间轴页细化。')
+  const syncWorldRules = () => void runGuardedStep('world-rules', syncWorldRulesCore, getUserFacingMessage('guide.worldRulesSynced'))
+  const generateMap = () => void runGuardedStep('map', generateMapCore, getUserFacingMessage('guide.mapGenerated'))
+  const generateCharacters = () => void runGuardedStep('characters', generateCharactersCore, getUserFacingMessage('guide.charactersGenerated'))
+  const generateItems = () => void runGuardedStep('items', generateItemsCore, getUserFacingMessage('guide.itemsGenerated'))
+  const generateThreads = () => void runGuardedStep('threads', generateThreadsCore, getUserFacingMessage('guide.threadsGenerated'))
+  const generateOutline = () => void runGuardedStep('outline', generateOutlineCore, getUserFacingMessage('guide.outlineGenerated'))
+  const generateStoryDesign = () => void runGuardedStep('story-design', generateStoryDesignCore, getUserFacingMessage('guide.storyDesignGenerated'))
+  const generateTimeline = () => void runGuardedStep('timeline', generateTimelineCore, getUserFacingMessage('guide.timelineGenerated'))
 
   const runPipeline = async () => {
     setRunningKey('pipeline')
@@ -345,10 +349,10 @@ export default function GuidePage({ novelId }: Props) {
       if (!(await ensureStepReady('timeline'))) return
       await generateTimelineCore()
       await Promise.all([refreshWorkflowContext(), refreshDiagnostics()])
-      message.success('首批世界资产与结构骨架已铺设完成，可继续细化大纲、时间轴与正文。')
+      message.success(getUserFacingMessage('guide.pipelineSucceeded'))
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : 'AI 工作流已中断，请先检查前置条件后再继续。')
+      message.error(getErrorMessage(error, 'guide.pipelineFailed'))
     } finally {
       setRunningKey(null)
     }

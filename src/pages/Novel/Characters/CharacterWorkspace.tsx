@@ -26,6 +26,7 @@ import type {
   StoryItem,
 } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { getCharacterBatchPreset } from '../../../shared/creation-tools'
 import { getFactionNameOptions, getPowerSystemNameOptions, getSpeciesNameOptions, parseWorldRulesJson } from '../../../shared/genre-system'
 import { CHARACTER_RELATION_PRESETS, getCharacterRelationLabel, normalizeCharacterRelationLevel } from '../../../shared/character-relations'
@@ -517,10 +518,12 @@ export default function CharacterWorkspace({ novelId }: Props) {
       }
       setCreating(false)
       await loadGraph()
-      message.success(selectedCharacter?.recordStatus === 'draft' ? '角色草稿已确认并保存。' : '人物档案已保存。')
+      message.success(getUserFacingMessage(
+        selectedCharacter?.recordStatus === 'draft' ? 'character.savedDraft' : 'character.savedProfile',
+      ))
     } catch (error) {
       console.error(error)
-      message.error('保存失败，请稍后重试。')
+      message.error(getErrorMessage(error, 'character.saveFailed'))
     } finally {
       setSaving(false)
     }
@@ -536,7 +539,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
         await window.electron.character.delete(selectedCharacter.id)
         await loadPage(null, page)
         await loadGraph()
-        message.success('人物已删除。')
+        message.success(getUserFacingMessage('character.deleted'))
       },
     })
   }
@@ -554,10 +557,10 @@ export default function CharacterWorkspace({ novelId }: Props) {
       protagonistForm.resetFields()
       await loadPage(nextId, 1)
       await loadGraph()
-      message.success('主角首版已生成。')
+      message.success(getUserFacingMessage('character.protagonistGenerated'))
     } catch (error) {
       console.error(error)
-      message.error('主角生成失败。')
+      message.error(getErrorMessage(error, 'character.protagonistGenerateFailed'))
     } finally {
       setGenerating(false)
     }
@@ -571,10 +574,10 @@ export default function CharacterWorkspace({ novelId }: Props) {
       setBatchOpen(false)
       await loadPage(null, 1)
       await loadGraph()
-      message.success('人物网络首轮已生成。')
+      message.success(getUserFacingMessage('character.batchGenerated'))
     } catch (error) {
       console.error(error)
-      message.error('批量生成人物失败。')
+      message.error(getErrorMessage(error, 'character.batchGenerateFailed'))
     } finally {
       setGenerating(false)
     }
@@ -585,10 +588,10 @@ export default function CharacterWorkspace({ novelId }: Props) {
     try {
       await window.electron.character.generateRelations(novelId)
       await Promise.all([loadPage(selectedId, page), loadGraph()])
-      message.success('人物关系已补齐。')
+      message.success(getUserFacingMessage('character.relationsGenerated'))
     } catch (error) {
       console.error(error)
-      message.error('人物关系生成失败。')
+      message.error(getErrorMessage(error, 'character.relationsGenerateFailed'))
     } finally {
       setGenerating(false)
     }
@@ -600,10 +603,10 @@ export default function CharacterWorkspace({ novelId }: Props) {
     try {
       const regenerated = await window.electron.character.regenerate(selectedCharacter.id)
       await Promise.all([loadPage(regenerated?.id || selectedCharacter.id, page), loadGraph()])
-      message.success('人物已按当前上下文重新生成。')
+      message.success(getUserFacingMessage('character.regenerated'))
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '人物重生成失败。')
+      message.error(getErrorMessage(error, 'character.regenerateFailed'))
     } finally {
       setGenerating(false)
     }
@@ -650,10 +653,10 @@ export default function CharacterWorkspace({ novelId }: Props) {
       relationForm.resetFields()
       await loadPage(selectedCharacter.id, page)
       await loadGraph()
-      message.success(editingRelation ? '关系已更新。' : '关系已保存。')
+      message.success(getUserFacingMessage(editingRelation ? 'common.relationUpdated' : 'common.relationSaved'))
     } catch (error) {
       console.error(error)
-      message.error('关系保存失败。')
+      message.error(getErrorMessage(error, 'common.relationSaveRetryLater'))
     } finally {
       setRelationSaving(false)
     }
@@ -673,7 +676,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
         setDetailContext(EMPTY_DETAIL)
         setCreating(false)
         await Promise.all([loadPage(null, 1), loadGraph()])
-        message.success('人物系统已清空。')
+        message.success(getUserFacingMessage('character.cleared'))
       },
     })
   }

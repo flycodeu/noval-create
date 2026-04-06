@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo } from 'react'
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { Alert, Layout, ConfigProvider, theme as antdTheme } from 'antd'
+import { Alert, ConfigProvider, theme as antdTheme } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import AppLayout from './components/Layout'
 import NovelList from './pages/NovelList'
@@ -12,7 +12,6 @@ import NovelRouter from './pages/Novel'
 import { useTaskStore } from './stores/task.store'
 import { useThemeStore } from './stores/theme.store'
 
-const { Content } = Layout
 const FONT = "-apple-system, 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', sans-serif"
 
 export default function App() {

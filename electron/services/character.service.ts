@@ -29,6 +29,7 @@ import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/ut
 import { buildCharacterRelationSummaryLine, normalizeCharacterRelationLevel } from '../../src/shared/character-relations'
 import { markNovelContextChanged } from './context-impact.service'
 import { runAssetQualityLoop, summarizeAssetQualityWarnings } from './asset-quality.service'
+import { throwUserFacingError } from '../utils/user-facing-error'
 
 function asText(value: unknown): string {
   return typeof value === 'string' ? cleanAiFieldText(value) : ''
@@ -1003,7 +1004,7 @@ export async function generateProtagonist(novelId: number, opts: {
 }): Promise<number> {
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
-  if (!novel) throw new Error('小说不存在')
+  if (!novel) throwUserFacingError('novel.notFound')
 
   const profile = await buildStoryProfile(novelId)
   const rules = parseWorldRulesJson(novel.worldRulesJson, profile.genre)
@@ -1109,7 +1110,7 @@ export async function generateProtagonist(novelId: number, opts: {
   }
 
   if (!parsed) {
-    throw new Error('主角生成未产出可用且不重名的人物，请重试。')
+    throwUserFacingError('character.protagonistNoUsableCandidate')
   }
 
   const payload = buildCharacterPayload(parsed, {
@@ -1142,7 +1143,7 @@ export async function generateCharacterBatchChunk(
 ): Promise<CharacterBatchChunkResult> {
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
-  if (!novel) throw new Error('小说不存在')
+  if (!novel) throwUserFacingError('novel.notFound')
 
   const profile = await buildStoryProfile(novelId)
   const rules = parseWorldRulesJson(novel.worldRulesJson, profile.genre)
@@ -1370,7 +1371,7 @@ export async function batchGenerateCharacters(novelId: number, opts: {
 }, sender?: WebContents): Promise<number[]> {
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
-  if (!novel) throw new Error('小说不存在')
+  if (!novel) throwUserFacingError('novel.notFound')
 
   const profile = await buildStoryProfile(novelId)
   const rules = parseWorldRulesJson(novel.worldRulesJson, profile.genre)
@@ -1543,10 +1544,10 @@ export async function batchGenerateCharacters(novelId: number, opts: {
 export async function regenerateCharacter(id: number): Promise<typeof characters.$inferSelect | null> {
   const db = getDb()
   const current = db.select().from(characters).where(eq(characters.id, id)).all()[0]
-  if (!current) throw new Error('人物不存在')
+  if (!current) throwUserFacingError('character.notFound')
 
   const novel = db.select().from(novels).where(eq(novels.id, current.novelId)).all()[0]
-  if (!novel) throw new Error('小说不存在')
+  if (!novel) throwUserFacingError('novel.notFound')
 
   const profile = await buildStoryProfile(current.novelId)
   const rules = parseWorldRulesJson(novel.worldRulesJson, profile.genre)
@@ -1684,10 +1685,10 @@ export async function generateCharacterRelations(novelId: number): Promise<void>
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
   const profile = await buildStoryProfile(novelId)
-  if (!novel) throw new Error('小说不存在')
+  if (!novel) throwUserFacingError('novel.notFound')
 
   const charList = db.select().from(characters).where(eq(characters.novelId, novelId)).all()
-  if (charList.length < 2) throw new Error('至少需要 2 个人物才能生成关系网络')
+  if (charList.length < 2) throwUserFacingError('character.relationNeedAtLeastTwo')
 
   const characterListText = charList.map((character) => buildCharacterSummary(character)).join('\n')
   const prompt = characterRelationsPrompt({

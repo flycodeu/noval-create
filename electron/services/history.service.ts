@@ -15,6 +15,7 @@ import {
 } from '../database/schema'
 import { removeTimelineEventFromItems, syncChapterTimelineStatuses, syncTimelineEventItemLinks } from './link-sync.service'
 import { markNovelContextChanged, markSubsequentChaptersStale } from './context-impact.service'
+import { throwUserFacingError } from '../utils/user-facing-error'
 
 type OperationEntityType = 'chapter' | 'thread' | 'timeline'
 type OperationType = 'batch_update' | 'batch_delete' | 'batch_reindex'
@@ -380,7 +381,7 @@ export function undoOperation(logId: number): OperationLog | null {
 
   const payload = parseJsonValue<OperationUndoPayload>(log.undoPayloadJson)
   if (!payload) {
-    throw new Error('恢复点内容损坏，无法撤销。')
+    throwUserFacingError('history.undoCheckpointCorrupt')
   }
 
   const run = sqlite.transaction(() => {
@@ -401,7 +402,7 @@ export function undoOperation(logId: number): OperationLog | null {
         restoreTimelinePayload(payload)
         break
       default:
-        throw new Error('暂不支持撤销该恢复点。')
+        throwUserFacingError('history.undoUnsupported')
     }
 
     db.update(operationLogs).set({

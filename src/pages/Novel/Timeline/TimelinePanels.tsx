@@ -27,9 +27,6 @@ import type {
   PagedResult,
   StoryArc,
   StoryItem,
-  StoryStructureChapterSummary,
-  StoryStructurePartSummary,
-  StoryStructureSegmentSummary,
   TimelineEvent,
   TimelineFilterOptions,
 } from '../../../types'
@@ -259,7 +256,6 @@ interface TimelineEditorPanelProps {
   formChapterOptions: Array<{ value: number; label: string }>
   formSegmentOptions: Array<{ value: number; label: string }>
   timePrecisionOptions: Array<{ value: string; label: string }>
-  selectedTimeMode: string
   worldRulesPrecisionFallback: string
   searchCharacters: (keyword?: string) => void
   searchLocations: (keyword?: string) => void
@@ -290,7 +286,6 @@ export function TimelineEditorPanel({
   formChapterOptions,
   formSegmentOptions,
   timePrecisionOptions,
-  selectedTimeMode,
   worldRulesPrecisionFallback,
   searchCharacters,
   searchLocations,

@@ -41,6 +41,7 @@ import {
   stringifyTimelineCards,
   stringifyThreadCards,
 } from './context-cards'
+import { throwUserFacingError } from '../utils/user-facing-error'
 
 const CHECKPOINT_CHAPTER_REFRESH_INTERVAL = 30
 const CHECKPOINT_TIME_REFRESH_MS = 7 * 24 * 60 * 60 * 1000
@@ -445,7 +446,7 @@ export function refreshStoryMemoryCheckpoints(novelId: number) {
   ensureStoryStructure(novelId)
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
-  if (!novel) throw new Error('小说不存在')
+  if (!novel) throwUserFacingError('novel.notFound')
 
   const chapterRows = db.select().from(chapters)
     .where(eq(chapters.novelId, novelId))

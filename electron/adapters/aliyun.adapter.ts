@@ -1,5 +1,5 @@
 import { BaseAdapter, ChatOptions, Message, normalizeContextWindowTokens } from './base.adapter'
-import { executeManagedRequest } from './request-support'
+import { buildHttpError, executeManagedRequest } from './request-support'
 import { consumeSseStream, safeParseSseJson } from './sse'
 
 export class AliyunAdapter extends BaseAdapter {
@@ -81,7 +81,7 @@ export class AliyunAdapter extends BaseAdapter {
 
       if (!response.ok) {
         const err = await response.text()
-        throw new Error(`通义千问 API 请求失败（${response.status}）：${err}`)
+        throw buildHttpError(`通义千问 API 请求失败（${response.status}）：${err}`, response)
       }
 
       return response

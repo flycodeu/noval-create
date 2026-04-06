@@ -5,20 +5,14 @@ import type {
   SubplotGenerationResult,
 } from '../shared/subplot-framework'
 import type {
-  CoreSettingsGenerationProgressEvent,
   CoreSettingsGenerationRequest,
   CoreSettingsGenerationResult,
 } from '../shared/core-settings-generation'
 import type {
   PremiseGenerationMode,
-  PremiseGenerationProgressEvent,
   PremiseGenerationRequest,
   PremiseGenerationResult,
 } from '../shared/premise-generation'
-import type {
-  ProjectBriefDocument,
-  ProjectBriefSnapshot,
-} from '../shared/project-brief'
 import type {
   ProjectBriefGenerationRequest,
   ProjectBriefGenerationResult,
@@ -30,14 +24,9 @@ import type {
 import type {
   WorldRuleSectionKey,
   WorldRulesAutoGenerateOptions,
-  WorldRulesGenerationProgressEvent,
   WorldRulesGenerationRequest,
   WorldRulesGenerationResult,
 } from '../shared/world-rules-generation'
-import type {
-  ThemeVoiceDocument,
-  ThemeVoiceSnapshot,
-} from '../shared/theme-voice'
 import type {
   ThemeVoiceGenerationRequest,
   ThemeVoiceGenerationResult,
@@ -105,6 +94,19 @@ export interface Novel {
   modelConfigId?: number
   createdAt: string
   updatedAt: string
+}
+
+export interface NovelCreateInput {
+  title: string
+  synopsis?: string
+  genreId?: number
+  userBackground?: string
+  expandedBackground?: string
+  projectBriefJson?: string
+  styleTemplateId?: number
+  worldTemplateId?: number
+  targetWords?: number
+  modelConfigId?: number
 }
 
 export interface Chapter {
@@ -1471,7 +1473,7 @@ declare global {
       novel: {
         list: (filters?: unknown) => Promise<Novel[]>
         get: (id: number) => Promise<Novel | null>
-        create: (data: Partial<Novel>) => Promise<number>
+        create: (data: NovelCreateInput) => Promise<number>
         update: (id: number, data: Partial<Novel>) => Promise<void>
         delete: (id: number) => Promise<void>
         export: (id: number, format: string) => Promise<string>

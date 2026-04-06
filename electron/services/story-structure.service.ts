@@ -28,6 +28,7 @@ import {
   reorderStoryPartsTransactional,
   reorderStoryVolumesTransactional,
 } from './story-structure-batch.service'
+import { throwUserFacingError } from '../utils/user-facing-error'
 import type {
   StructureBatchApplyResult,
   StructureBatchEditOperation,
@@ -280,7 +281,7 @@ function normalizeSegmentOrders(chapterId: number) {
 function markNovelContextChangedInline(novelId: number, reasons: string | string[]) {
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
-  if (!novel) throw new Error('小说不存在')
+  if (!novel) throwUserFacingError('novel.notFound')
 
   const normalizedReasons = [...new Set((Array.isArray(reasons) ? reasons : [reasons])
     .map((item) => item.trim())
@@ -606,7 +607,7 @@ export function updateStoryVolume(
 ) {
   const db = getDb()
   const current = db.select().from(storyVolumes).where(eq(storyVolumes.id, id)).all()[0]
-  if (!current) throw new Error('卷不存在')
+  if (!current) throwUserFacingError('volume.notFound')
   db.update(storyVolumes).set({
     title: data.title !== undefined ? asText(data.title) : current.title,
     summary: data.summary !== undefined ? asText(data.summary) : current.summary,
@@ -651,7 +652,7 @@ export function createStoryPart(
 ) {
   const db = getDb()
   const volume = db.select().from(storyVolumes).where(eq(storyVolumes.id, volumeId)).all()[0]
-  if (!volume) throw new Error('卷不存在')
+  if (!volume) throwUserFacingError('volume.notFound')
   const nextNumber = (getPartRows(volume.novelId).filter((part) => part.volumeId === volumeId).at(-1)?.partNumber || 0) + 1
   const result = db.insert(storyParts).values({
     novelId: volume.novelId,
@@ -677,7 +678,7 @@ export function updateStoryPart(
 ) {
   const db = getDb()
   const current = db.select().from(storyParts).where(eq(storyParts.id, id)).all()[0]
-  if (!current) throw new Error('分册不存在')
+  if (!current) throwUserFacingError('part.notFound')
   db.update(storyParts).set({
     title: data.title !== undefined ? asText(data.title) : current.title,
     summary: data.summary !== undefined ? asText(data.summary) : current.summary,
@@ -725,7 +726,7 @@ export function createChapterSegment(
 ) {
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
-  if (!chapter) throw new Error('章节不存在')
+  if (!chapter) throwUserFacingError('chapter.notFound')
   ensureStoryStructure(chapter.novelId)
   const nextOrder = (listChapterSegments(chapterId).at(-1)?.segmentOrder || 0) + 1
   const result = db.insert(chapterSegments).values({
@@ -774,7 +775,7 @@ export function updateChapterSegment(
 ) {
   const db = getDb()
   const current = db.select().from(chapterSegments).where(eq(chapterSegments.id, id)).all()[0]
-  if (!current) throw new Error('片段不存在')
+  if (!current) throwUserFacingError('segment.notFound')
   db.update(chapterSegments).set({
     title: data.title !== undefined ? asText(data.title) : current.title,
     segmentType: data.segmentType !== undefined ? asText(data.segmentType) : current.segmentType,
@@ -810,7 +811,7 @@ export function compileChapterFromSegments(
 ) {
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
-  if (!chapter) throw new Error('章节不存在')
+  if (!chapter) throwUserFacingError('chapter.notFound')
   ensureStoryStructure(chapter.novelId)
   const segments = listChapterSegments(chapterId)
   const compiledContent = segments
@@ -840,7 +841,7 @@ export function syncChapterToSegments(
 ) {
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
-  if (!chapter) throw new Error('章节不存在')
+  if (!chapter) throwUserFacingError('chapter.notFound')
   ensureStoryStructure(chapter.novelId)
   const segments = listChapterSegments(chapterId)
   if (segments.length === 0 && options.createIfMissing) {

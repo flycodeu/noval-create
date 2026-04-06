@@ -14,6 +14,7 @@ import type {
 import type { StoryThreadBatchGenerateOptions, StoryThreadBatchGenerationResult } from '../../src/shared/story-thread-generation'
 import { getDb } from '../database/db'
 import { tasks } from '../database/schema'
+import { throwUserFacingError } from '../utils/user-facing-error'
 import { generateCharacterBatchChunk } from './character.service'
 import { loadSubplotAutoGenerateContext, polishGeneratedSubplots, tryGenerateSubplotBatch } from './core-settings.service'
 import { generateStoryItemsBatchChunk } from './item.service'
@@ -32,6 +33,11 @@ import { generateTimelineBatchChunk } from './timeline.service'
 
 const DEFAULT_MAX_RETRIES = 2
 const activeBatchWorkflows = new Set<number>()
+const ACTIVE_BATCH_WORKFLOW_RUNNING_STATUSES = new Set(['pending', 'running', 'cancel_requested'])
+
+function logWorkflowError(taskId: number) {
+  return (err: unknown) => console.error(`[batch-workflow] Unhandled error in task ${taskId}:`, err)
+}
 
 type TaskRow = typeof tasks.$inferSelect
 type BatchWorkflowTaskType =
@@ -40,6 +46,30 @@ type BatchWorkflowTaskType =
   | 'timeline_auto_generate'
   | 'story_thread_auto_generate'
   | 'subplot_auto_generate'
+
+function isActiveBatchWorkflowStatus(status?: string | null): boolean {
+  return ACTIVE_BATCH_WORKFLOW_RUNNING_STATUSES.has(status || '')
+}
+
+function cleanupInactiveBatchWorkflowEntries(): void {
+  for (const taskId of activeBatchWorkflows) {
+    const task = getTaskRecord(taskId)
+    if (!task || task.runnerType !== 'workflow' || !isBatchWorkflowType(task.type) || !isActiveBatchWorkflowStatus(task.status)) {
+      activeBatchWorkflows.delete(taskId)
+    }
+  }
+}
+
+function tryRegisterActiveBatchWorkflow(taskId: number): boolean {
+  cleanupInactiveBatchWorkflowEntries()
+  if (activeBatchWorkflows.has(taskId)) return false
+  activeBatchWorkflows.add(taskId)
+  return true
+}
+
+function unregisterActiveBatchWorkflow(taskId: number): void {
+  activeBatchWorkflows.delete(taskId)
+}
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -147,6 +177,7 @@ function getLatestWorkflowByType(novelId: number, type: BatchWorkflowTaskType) {
 }
 
 function reconcileStaleBatchWorkflowTask(task: TaskRow | null): TaskRow | null {
+  cleanupInactiveBatchWorkflowEntries()
   if (!task || task.runnerType !== 'workflow') return task
   if (activeBatchWorkflows.has(task.id)) return task
   if (!['running', 'cancel_requested'].includes(task.status || '')) return task
@@ -326,7 +357,7 @@ function mergeWarnings(current: string[], next?: string | string[] | null): stri
 function getRunningTask(taskId: number, sender?: WebContents) {
   const task = getTaskRecord(taskId)
   if (!task || !task.novelId) {
-    throw new Error(`工作流任务 ${taskId} 不存在`)
+    throwUserFacingError('workflow.taskNotFound', { taskId })
   }
   updateTaskControl(taskId, {
     ...parseTaskControl(task),
@@ -347,8 +378,7 @@ function ensureSuccessfulTask(task: TaskRow) {
 }
 
 async function runCharacterAutoGenerateWorkflow(taskId: number, sender?: WebContents) {
-  if (activeBatchWorkflows.has(taskId)) return
-  activeBatchWorkflows.add(taskId)
+  if (!tryRegisterActiveBatchWorkflow(taskId)) return
 
   try {
     const task = getRunningTask(taskId, sender)
@@ -453,7 +483,7 @@ async function runCharacterAutoGenerateWorkflow(taskId: number, sender?: WebCont
       }
     }
   } finally {
-    activeBatchWorkflows.delete(taskId)
+    unregisterActiveBatchWorkflow(taskId)
   }
 }
 
@@ -462,8 +492,7 @@ async function runSimpleEntityWorkflow(
   sender: WebContents | undefined,
   type: 'item' | 'timeline' | 'thread',
 ) {
-  if (activeBatchWorkflows.has(taskId)) return
-  activeBatchWorkflows.add(taskId)
+  if (!tryRegisterActiveBatchWorkflow(taskId)) return
 
   try {
     const task = getRunningTask(taskId, sender)
@@ -612,13 +641,12 @@ async function runSimpleEntityWorkflow(
       }
     }
   } finally {
-    activeBatchWorkflows.delete(taskId)
+    unregisterActiveBatchWorkflow(taskId)
   }
 }
 
 async function runSubplotAutoGenerateWorkflow(taskId: number, sender?: WebContents) {
-  if (activeBatchWorkflows.has(taskId)) return
-  activeBatchWorkflows.add(taskId)
+  if (!tryRegisterActiveBatchWorkflow(taskId)) return
 
   try {
     const task = getRunningTask(taskId, sender)
@@ -712,14 +740,14 @@ async function runSubplotAutoGenerateWorkflow(taskId: number, sender?: WebConten
       updateTaskProgress(taskId, nextProgress, sender)
     }
   } finally {
-    activeBatchWorkflows.delete(taskId)
+    unregisterActiveBatchWorkflow(taskId)
   }
 }
 
 async function waitForWorkflowTask(taskId: number) {
   while (true) {
     const task = getTaskRecord(taskId)
-    if (!task) throw new Error(`工作流任务 ${taskId} 不存在`)
+    if (!task) throwUserFacingError('workflow.taskNotFound', { taskId })
     if (['success', 'failed', 'cancelled', 'paused'].includes(task.status || '')) {
       return task
     }
@@ -738,7 +766,7 @@ export function isBatchWorkflowType(type?: string | null): type is BatchWorkflow
 export async function startCharacterAutoGenerateWorkflow(novelId: number, options: CharacterBatchGenerationOptions, sender?: WebContents) {
   const existing = reconcileStaleBatchWorkflowTask(getLatestWorkflowByType(novelId, 'character_auto_generate'))
   if (existing && ['pending', 'running', 'cancel_requested'].includes(existing.status || '')) return existing.id
-  if (existing?.status === 'paused') throw new Error('当前已有暂停中的人物批量任务，请先继续或取消。')
+  if (existing?.status === 'paused') throwUserFacingError('batch.characterPausedExists')
 
   const normalized = parseCharacterOptions(JSON.stringify(options))
   const initial = createInitialCharacterStatus(0, novelId, normalized)
@@ -751,14 +779,14 @@ export async function startCharacterAutoGenerateWorkflow(novelId: number, option
     progressJson: JSON.stringify(initial),
   })
   updateTaskProgress(taskId, { ...initial, taskId }, sender)
-  void runCharacterAutoGenerateWorkflow(taskId, sender)
+  void runCharacterAutoGenerateWorkflow(taskId, sender).catch(logWorkflowError(taskId))
   return taskId
 }
 
 export async function startItemAutoGenerateWorkflow(novelId: number, options: StoryItemGenerateOptions = {}, sender?: WebContents) {
   const existing = reconcileStaleBatchWorkflowTask(getLatestWorkflowByType(novelId, 'item_auto_generate'))
   if (existing && ['pending', 'running', 'cancel_requested'].includes(existing.status || '')) return existing.id
-  if (existing?.status === 'paused') throw new Error('当前已有暂停中的物品批量任务，请先继续或取消。')
+  if (existing?.status === 'paused') throwUserFacingError('batch.itemPausedExists')
 
   const normalized = parseItemOptions(JSON.stringify(options))
   const initial = createInitialEntityStatus(0, novelId, normalized.count || 8, normalized.batchSize || 4)
@@ -771,14 +799,14 @@ export async function startItemAutoGenerateWorkflow(novelId: number, options: St
     progressJson: JSON.stringify(initial),
   })
   updateTaskProgress(taskId, { ...initial, taskId }, sender)
-  void runSimpleEntityWorkflow(taskId, sender, 'item')
+  void runSimpleEntityWorkflow(taskId, sender, 'item').catch(logWorkflowError(taskId))
   return taskId
 }
 
 export async function startTimelineAutoGenerateWorkflow(novelId: number, options: TimelineGenerateOptions = {}, sender?: WebContents) {
   const existing = reconcileStaleBatchWorkflowTask(getLatestWorkflowByType(novelId, 'timeline_auto_generate'))
   if (existing && ['pending', 'running', 'cancel_requested'].includes(existing.status || '')) return existing.id
-  if (existing?.status === 'paused') throw new Error('当前已有暂停中的时间轴批量任务，请先继续或取消。')
+  if (existing?.status === 'paused') throwUserFacingError('batch.timelinePausedExists')
 
   const normalized = parseTimelineOptions(JSON.stringify(options))
   const initial = createInitialEntityStatus(0, novelId, normalized.count || 10, normalized.batchSize || 4)
@@ -791,14 +819,14 @@ export async function startTimelineAutoGenerateWorkflow(novelId: number, options
     progressJson: JSON.stringify(initial),
   })
   updateTaskProgress(taskId, { ...initial, taskId }, sender)
-  void runSimpleEntityWorkflow(taskId, sender, 'timeline')
+  void runSimpleEntityWorkflow(taskId, sender, 'timeline').catch(logWorkflowError(taskId))
   return taskId
 }
 
 export async function startStoryThreadAutoGenerateWorkflow(novelId: number, options: StoryThreadBatchGenerateOptions = {}, sender?: WebContents) {
   const existing = reconcileStaleBatchWorkflowTask(getLatestWorkflowByType(novelId, 'story_thread_auto_generate'))
   if (existing && ['pending', 'running', 'cancel_requested'].includes(existing.status || '')) return existing.id
-  if (existing?.status === 'paused') throw new Error('当前已有暂停中的故事线程批量任务，请先继续或取消。')
+  if (existing?.status === 'paused') throwUserFacingError('batch.threadPausedExists')
 
   const normalized = parseThreadOptions(JSON.stringify(options))
   const initial = createInitialThreadStatus(0, novelId, normalized)
@@ -811,14 +839,14 @@ export async function startStoryThreadAutoGenerateWorkflow(novelId: number, opti
     progressJson: JSON.stringify(initial),
   })
   updateTaskProgress(taskId, { ...initial, taskId }, sender)
-  void runSimpleEntityWorkflow(taskId, sender, 'thread')
+  void runSimpleEntityWorkflow(taskId, sender, 'thread').catch(logWorkflowError(taskId))
   return taskId
 }
 
 export async function startSubplotAutoGenerateWorkflow(request: SubplotAutoGenerateRequest, sender?: WebContents) {
   const existing = reconcileStaleBatchWorkflowTask(getLatestWorkflowByType(request.novelId, 'subplot_auto_generate'))
   if (existing && ['pending', 'running', 'cancel_requested'].includes(existing.status || '')) return existing.id
-  if (existing?.status === 'paused') throw new Error('当前已有暂停中的支线批量任务，请先继续或取消。')
+  if (existing?.status === 'paused') throwUserFacingError('batch.subplotPausedExists')
 
   const normalized = parseSubplotRequest(JSON.stringify(request))
   const initial = createInitialSubplotStatus(0, normalized)
@@ -831,7 +859,7 @@ export async function startSubplotAutoGenerateWorkflow(request: SubplotAutoGener
     progressJson: JSON.stringify(initial),
   })
   updateTaskProgress(taskId, { ...initial, taskId }, sender)
-  void runSubplotAutoGenerateWorkflow(taskId, sender)
+  void runSubplotAutoGenerateWorkflow(taskId, sender).catch(logWorkflowError(taskId))
   return taskId
 }
 
@@ -885,9 +913,13 @@ export function getLatestSubplotAutoGenerateTask(novelId: number) {
 }
 
 async function resumeBatchWorkflow(taskId: number, sender: WebContents | undefined, type: BatchWorkflowTaskType) {
+  cleanupInactiveBatchWorkflowEntries()
   const task = getTaskRecord(taskId)
   if (!task || task.runnerType !== 'workflow' || task.type !== type) {
-    throw new Error(`工作流任务 ${taskId} 不存在`)
+    throwUserFacingError('workflow.taskNotFound', { taskId })
+  }
+  if (activeBatchWorkflows.has(taskId)) {
+    throwUserFacingError('workflow.taskRunningCannotResume', { taskId })
   }
   updateTask(taskId, {
     status: 'pending',
@@ -901,15 +933,15 @@ async function resumeBatchWorkflow(taskId: number, sender: WebContents | undefin
   })
 
   if (type === 'character_auto_generate') {
-    void runCharacterAutoGenerateWorkflow(taskId, sender)
+    void runCharacterAutoGenerateWorkflow(taskId, sender).catch(logWorkflowError(taskId))
   } else if (type === 'item_auto_generate') {
-    void runSimpleEntityWorkflow(taskId, sender, 'item')
+    void runSimpleEntityWorkflow(taskId, sender, 'item').catch(logWorkflowError(taskId))
   } else if (type === 'timeline_auto_generate') {
-    void runSimpleEntityWorkflow(taskId, sender, 'timeline')
+    void runSimpleEntityWorkflow(taskId, sender, 'timeline').catch(logWorkflowError(taskId))
   } else if (type === 'story_thread_auto_generate') {
-    void runSimpleEntityWorkflow(taskId, sender, 'thread')
+    void runSimpleEntityWorkflow(taskId, sender, 'thread').catch(logWorkflowError(taskId))
   } else {
-    void runSubplotAutoGenerateWorkflow(taskId, sender)
+    void runSubplotAutoGenerateWorkflow(taskId, sender).catch(logWorkflowError(taskId))
   }
   return taskId
 }
@@ -917,7 +949,7 @@ async function resumeBatchWorkflow(taskId: number, sender: WebContents | undefin
 export async function resumeBatchAutoGenerateWorkflow(taskId: number, sender?: WebContents) {
   const task = getTaskRecord(taskId)
   if (!task || !isBatchWorkflowType(task.type)) {
-    throw new Error(`工作流任务 ${taskId} 不存在`)
+    throwUserFacingError('workflow.taskNotFound', { taskId })
   }
   return resumeBatchWorkflow(taskId, sender, task.type)
 }

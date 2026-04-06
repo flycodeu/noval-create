@@ -33,6 +33,7 @@ import { markNovelContextChanged } from './context-impact.service'
 import { runAssetQualityLoop, summarizeAssetQualityWarnings } from './asset-quality.service'
 import { appendVariationMessage } from './variation-control.service'
 import { buildBatchKey, createOperationLog } from './history.service'
+import { throwUserFacingError } from '../utils/user-facing-error'
 
 type TimelineStatus = 'planned' | 'seeded' | 'written' | 'resolved'
 
@@ -1110,7 +1111,7 @@ export async function generateTimelineBatchChunk(
 ): Promise<TimelineBatchChunkResult> {
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
-  if (!novel) throw new Error('小说不存在')
+  if (!novel) throwUserFacingError('novel.notFound')
 
   const profile = await buildStoryProfile(novelId)
   const rules = parseWorldRulesJson(novel.worldRulesJson, profile.genre)
@@ -1240,7 +1241,7 @@ export async function generateTimelineBatchChunk(
         }
         if (!Array.isArray(parsed)) {
           markRejected(historyId)
-          throw new Error('时间轴生成结果不是有效数组')
+          throwUserFacingError('timeline.generatedArrayInvalid')
         }
 
         const startSortOrder = getNextSortOrder(novelId)
@@ -1306,7 +1307,7 @@ export async function generateTimelineEvents(
 ): Promise<number[]> {
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
-  if (!novel) throw new Error('小说不存在')
+  if (!novel) throwUserFacingError('novel.notFound')
 
   const profile = await buildStoryProfile(novelId)
   const rules = parseWorldRulesJson(novel.worldRulesJson, profile.genre)
@@ -1425,7 +1426,7 @@ export async function generateTimelineEvents(
     }
     if (!Array.isArray(parsed)) {
       markRejected(historyId)
-      throw new Error('时间轴生成结果不是有效数组')
+      throwUserFacingError('timeline.generatedArrayInvalid')
     }
 
     const startSortOrder = getNextSortOrder(novelId)

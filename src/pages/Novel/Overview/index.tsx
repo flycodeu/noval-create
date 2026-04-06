@@ -11,6 +11,7 @@ import {
   TeamOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import { parseWorldRulesJson } from '../../../shared/genre-system'
 import { buildProjectBriefSummary, parseProjectBriefSnapshot } from '../../../shared/project-brief'
@@ -252,10 +253,10 @@ export default function Overview({ novelId }: Props) {
       if (updated) setCurrentNovel(updated)
       await finalizeDraft(finalPayload)
       await clearDraft()
-      message.success('基础信息已保存。')
+      message.success(getUserFacingMessage('overview.saved'))
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '基础信息保存失败。')
+      message.error(getErrorMessage(error, 'overview.saveFailed'))
     } finally {
       setSaving(false)
     }

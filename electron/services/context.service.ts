@@ -18,6 +18,7 @@ import { buildWritingContractSummary } from '../../src/shared/writing-contract'
 import { buildStoryMemoryPromptSummary } from './story-memory.service'
 import { ensureStoryStructure } from './story-structure.service'
 import { resolveModelRuntimeBudget } from './model.service'
+import { throwUserFacingError } from '../utils/user-facing-error'
 import {
   buildCharacterContextCards,
   buildRelationContextCards,
@@ -1252,7 +1253,7 @@ export async function buildStoryProfile(novelId: number): Promise<StoryProfile> 
   const db = getDb()
   ensureStoryStructure(novelId)
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
-  if (!novel) throw new Error('小说不存在')
+  if (!novel) throwUserFacingError('novel.notFound')
 
   const genre = novel.genreId
     ? db.select().from(genres).where(eq(genres.id, novel.genreId)).all()[0]
@@ -1315,7 +1316,7 @@ export async function buildOutlineGenerationContext(arcId: number): Promise<Outl
   const db = getDb()
   const arc = db.select().from(storyArcs).where(eq(storyArcs.id, arcId)).all()[0]
   if (arc) ensureStoryStructure(arc.novelId)
-  if (!arc) throw new Error('故事弧不存在')
+  if (!arc) throwUserFacingError('storyArc.notFound')
   const novel = db.select().from(novels).where(eq(novels.id, arc.novelId)).all()[0]
 
   const profile = await buildStoryProfile(arc.novelId)
@@ -1353,7 +1354,7 @@ export async function collectChapterContextRawData(
   const db = getDb()
   ensureStoryStructure(novelId)
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
-  if (!novel) throw new Error('小说不存在')
+  if (!novel) throwUserFacingError('novel.notFound')
 
   const profile = await buildStoryProfile(novelId)
   const chapterRows = db.select().from(chapters)

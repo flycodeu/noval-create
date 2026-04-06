@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import {
-  Button, Form, Input, Select, Slider, Switch, Tag, message, Spin,
+  Button, Form, Input, Select, Slider, message, Spin,
   Modal, InputNumber, Empty
 } from 'antd'
 import {
@@ -8,6 +8,7 @@ import {
   StarOutlined, StarFilled
 } from '@ant-design/icons'
 import { ModelConfig } from '../../types'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 
 const PROVIDER_OPTIONS = [
   { value: 'openai', label: 'OpenAI', models: ['gpt-4o', 'gpt-4-turbo', 'gpt-3.5-turbo', 'gpt-4o-mini'] },
@@ -87,7 +88,7 @@ export default function ModelManager() {
     try {
       if (isNew) {
         const id = await window.electron.model.create(values)
-        message.success('配置已创建')
+        message.success(getUserFacingMessage('model.created'))
         await loadConfigs()
         const newConfigs = await window.electron.model.list()
         const newConfig = newConfigs.find(c => c.id === id)
@@ -95,11 +96,11 @@ export default function ModelManager() {
         setIsNew(false)
       } else if (selected) {
         await window.electron.model.update(selected.id, values)
-        message.success('已保存')
+        message.success(getUserFacingMessage('model.saved'))
         await loadConfigs()
       }
-    } catch {
-      message.error('保存失败')
+    } catch (error) {
+      message.error(getErrorMessage(error, 'model.saveFailed'))
     } finally {
       setSaving(false)
     }
@@ -121,14 +122,14 @@ export default function ModelManager() {
   const handleSetDefault = async (config: ModelConfig) => {
     await window.electron.model.setDefault(config.id)
     loadConfigs()
-    message.success(`已将「${config.name}」设为默认模型`)
+    message.success(getUserFacingMessage('model.defaultSet', { name: config.name }))
   }
 
   const handleTest = async () => {
     if (!selected && !isNew) return
     if (isNew) {
       // 先保存再测试
-      message.info('请先保存配置')
+      message.info(getUserFacingMessage('model.saveFirst'))
       return
     }
     setTesting(true)
@@ -137,7 +138,7 @@ export default function ModelManager() {
       const result = await window.electron.model.test(selected!.id)
       setTestResult(result)
     } catch {
-      setTestResult({ success: false, latency: 0, info: '测试失败' })
+      setTestResult({ success: false, latency: 0, info: getUserFacingMessage('model.testFailed') })
     } finally {
       setTesting(false)
     }

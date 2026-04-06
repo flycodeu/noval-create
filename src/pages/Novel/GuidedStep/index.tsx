@@ -12,6 +12,7 @@ import {
   TeamOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { parseProjectBriefSnapshot } from '../../../shared/project-brief'
 import { parseThemeVoiceSnapshot } from '../../../shared/theme-voice'
 import { useNovelStore } from '../../../stores/novel.store'
@@ -33,7 +34,6 @@ import {
   isStoryCoreReady,
   isStoryPlotReady,
   isStoryThreadsReady,
-  isVolumePlanningReady,
   isWorldFoundationReady,
   loadWorkflowStats,
   parseStorySettings,
@@ -195,10 +195,10 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
 
       const updated = await window.electron.novel.get(novelId)
       if (updated) setCurrentNovel(updated)
-      message.success('基础信息已保存。')
+      message.success(getUserFacingMessage('guidedStep.basicsSaved'))
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '基础信息保存失败。')
+      message.error(getErrorMessage(error, 'guidedStep.basicsSaveFailed'))
     } finally {
       setSavingBasics(false)
     }
@@ -215,11 +215,11 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
       })
       const updatedStats = await loadWorkflowStats(novelId)
       setStats(updatedStats)
-      message.success('首章已创建，正在进入正文页。')
+      message.success(getUserFacingMessage('guidedStep.firstChapterCreated'))
       openProPage('writing')
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '创建首章失败。')
+      message.error(getErrorMessage(error, 'guidedStep.firstChapterCreateFailed'))
     } finally {
       setCreatingChapter(false)
     }

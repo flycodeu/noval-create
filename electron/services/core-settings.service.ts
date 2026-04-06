@@ -30,6 +30,7 @@ import {
 import { runAssetQualityLoop, summarizeAssetQualityWarnings } from './asset-quality.service'
 import { generateSubplotBatch } from './subplot.service'
 import { runChatTask } from './task.service'
+import { throwUserFacingError } from '../utils/user-facing-error'
 
 const SUBPLOT_GENERATION_CHUNK_SIZE = 3
 const SUBPLOT_GENERATION_RETRY_LIMIT = 1
@@ -919,7 +920,7 @@ async function loadStoryContext(request: CoreSettingsGenerationRequest): Promise
   const allCharacters = db.select().from(characters).where(eq(characters.novelId, request.novelId)).all()
 
   if (!novel) {
-    throw new Error('小说不存在')
+    throwUserFacingError('novel.notFound')
   }
 
   return {
@@ -969,7 +970,7 @@ async function runPlainTextStep(
   const raw = await runPromptTask(context.novelId, context.modelConfigId, prompt)
   const cleaned = cleanPlainText(raw)
   if (!cleaned) {
-    throw new Error(`${label}生成结果为空`)
+    throwUserFacingError('coreSettings.sectionEmpty', { label })
   }
 
   return polishPlainTextV2(context, label, cleaned, relatedContext)
@@ -1421,7 +1422,7 @@ export async function generateCoreSettings(
       : ''
 
     if (!polishedEnding) {
-      throw new Error('结局设定生成结果为空')
+      throwUserFacingError('coreSettings.endingEmpty')
     }
 
     return {

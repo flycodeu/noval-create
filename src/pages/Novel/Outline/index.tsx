@@ -9,8 +9,9 @@ import { useNovelStore } from '../../../stores/novel.store'
 import { buildDraftMessages, normalizeOptionalNumber, parseDraftJson } from '../shared/ai-draft'
 import { usePlanningDraft } from '../shared/planning-draft'
 import { generateOutlineArcDraft } from '../shared/planning-ai-service'
+import { getUserFacingMessage } from '@/utils/user-facing-message'
 import { WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
-import { useNovelWorkspaceActions } from '../workspace-shortcuts'
+import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 
 interface Props { novelId: number }
 interface ArcFormValues {
@@ -107,9 +108,11 @@ export default function Outline({ novelId }: Props) {
     try {
       await window.electron.outline.generateArcs(novelId)
       await loadData()
-      message.success('故事弧已生成。')
+      message.success(getUserFacingMessage('outline.arcGenerated'))
     } catch (error: unknown) {
-      message.error(`生成失败：${error instanceof Error ? error.message : '请先完善基础设定。'}`)
+      message.error(error instanceof Error
+        ? getUserFacingMessage('outline.generateFailedDetail', { detail: error.message })
+        : getUserFacingMessage('outline.generateFailedCompleteBasics'))
     } finally {
       setGenerating(false)
     }
@@ -133,33 +136,17 @@ export default function Outline({ novelId }: Props) {
 
       await loadData()
       const summary = lastResult?.message || '章节细纲已生成一批。'
-      message.success(generatedCount > 0 ? `${summary} 本轮共生成 ${generatedCount} 章。` : summary)
+      message.success(generatedCount > 0
+        ? getUserFacingMessage('outline.batchGenerated', { summary, count: generatedCount })
+        : summary)
     } catch (error: unknown) {
-      message.error(`生成失败：${error instanceof Error ? error.message : ''}`)
+      message.error(getUserFacingMessage('outline.generateFailedDetail', {
+        detail: error instanceof Error ? error.message : '',
+      }))
     } finally {
       setGenerating(false)
     }
   }
-
-  const handleSaveArc = async () => {
-    const values = await arcForm.validateFields()
-    if (editingArc) {
-      await window.electron.outline.updateArc(editingArc.id, values)
-    } else {
-      await window.electron.outline.createArc(novelId, { ...values, arcOrder: arcs.length + 1 })
-    }
-    await finalizeDraft(values)
-    await clearDraft()
-    setArcModalOpen(false)
-    setEditingArc(null)
-    arcForm.resetFields()
-    await loadData()
-  }
-
-  useEffect(() => {
-    registerSaveHandler(arcModalOpen ? () => { void handleSaveArc() } : null)
-    return () => registerSaveHandler(null)
-  }, [arcModalOpen, handleSaveArc, registerSaveHandler])
 
   const handleDeleteArc = async (arc: StoryArc) => {
     Modal.confirm({
@@ -175,7 +162,7 @@ export default function Outline({ novelId }: Props) {
       content: '会删除全部故事弧和章节细纲归属，但不会删除正文。',
       okType: 'danger',
       okText: '确认清空',
-      onOk: async () => { await window.electron.outline.clear(novelId); setExpandedArcId(null); await loadData(); message.success('故事大纲已清空。') },
+      onOk: async () => { await window.electron.outline.clear(novelId); setExpandedArcId(null); await loadData(); message.success(getUserFacingMessage('outline.cleared')) },
     })
   }
 
@@ -214,7 +201,7 @@ export default function Outline({ novelId }: Props) {
     setSelectedChapterIds([])
     await loadData()
     notifyWorkspaceMutation()
-    message.success(`已批量更新 ${selectedChapterIds.length} 章状态。`)
+    message.success(getUserFacingMessage('outline.batchStatusUpdated', { count: selectedChapterIds.length }))
   }, [batchStatus, loadData, notifyWorkspaceMutation, selectedChapterIds])
 
   const handleBatchDelete = useCallback(() => {
@@ -228,7 +215,7 @@ export default function Outline({ novelId }: Props) {
         setSelectedChapterIds([])
         await loadData()
         notifyWorkspaceMutation()
-        message.success('已批量删除选中章节。')
+        message.success(getUserFacingMessage('outline.batchDeleted'))
       },
     })
   }, [loadData, notifyWorkspaceMutation, selectedChapterIds])
@@ -239,7 +226,7 @@ export default function Outline({ novelId }: Props) {
     setSelectedChapterIds([])
     await loadData()
     notifyWorkspaceMutation()
-    message.success(`已从第 ${batchStartChapterNum} 章开始顺延重排。`)
+    message.success(getUserFacingMessage('outline.batchRenumbered', { start: batchStartChapterNum }))
   }, [batchStartChapterNum, loadData, notifyWorkspaceMutation, selectedChapterIds])
 
   const handleChapterDragEnd: DragDropContextProps['onDragEnd'] = async (result) => {
@@ -314,6 +301,25 @@ export default function Outline({ novelId }: Props) {
     pageKey: 'outline',
     applyDraft: applyOutlineDraft,
   })
+  const handleSaveArc = useCallback(async () => {
+    const values = await arcForm.validateFields()
+    if (editingArc) {
+      await window.electron.outline.updateArc(editingArc.id, values)
+    } else {
+      await window.electron.outline.createArc(novelId, { ...values, arcOrder: arcs.length + 1 })
+    }
+    await finalizeDraft(values)
+    await clearDraft()
+    setArcModalOpen(false)
+    setEditingArc(null)
+    arcForm.resetFields()
+    await loadData()
+  }, [arcForm, arcs.length, clearDraft, editingArc, finalizeDraft, loadData, novelId])
+
+  useEffect(() => {
+    registerSaveHandler(arcModalOpen ? () => { void handleSaveArc() } : null)
+    return () => registerSaveHandler(null)
+  }, [arcModalOpen, handleSaveArc, registerSaveHandler])
   const arcDraftButton = (
     <AIGenerateButton
       label="AI 起草故事弧"
@@ -579,7 +585,3 @@ function ChapterCard({
     </div>
   )
 }
-
-
-
-

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Empty, Modal, Progress, Spin, Table, Tag, Tooltip } from 'antd'
+import { Empty, Modal, Progress, Spin, Tag, Tooltip } from 'antd'
 import VirtualList from 'rc-virtual-list'
 import { WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
 

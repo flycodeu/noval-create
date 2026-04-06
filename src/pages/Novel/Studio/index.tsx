@@ -17,6 +17,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 import type { NovelConsistencyReport, NovelContextStatus, RevisionCenterSnapshot, RevisionTask } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { getCharacterBatchPreset, getItemGenerationProfile } from '../../../shared/creation-tools'
 import { parseProjectBriefSnapshot } from '../../../shared/project-brief'
 import { buildStorySettingsPayload, parseStorySettingsSnapshot } from '../../../shared/story-settings'
@@ -220,7 +221,7 @@ export default function StudioPage({ novelId }: Props) {
     })
 
     if (result.createdCount <= 0) {
-      throw new Error(result.warnings[0] || '故事线程未产出可用结果。')
+      throw new Error(result.warnings[0] || getUserFacingMessage('studio.threadGenerationEmpty'))
     }
   }, [novelId])
 
@@ -278,7 +279,7 @@ export default function StudioPage({ novelId }: Props) {
       message.success(successText)
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '执行失败，请稍后重试。')
+      message.error(getErrorMessage(error, 'studio.runFailed'))
     } finally {
       setRunningKey(null)
     }
@@ -334,10 +335,10 @@ export default function StudioPage({ novelId }: Props) {
       if (!(await ensureStepReady('timeline'))) return
       await generateTimelineCore()
       await Promise.all([refreshWorkflowContext(), refreshDiagnostics()])
-      message.success('首版骨架已生成，可以转入结构页、时间轴和正文继续精修。')
+      message.success(getUserFacingMessage('studio.pipelineSucceeded'))
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : 'AI 编排被中断，请检查前置条件。')
+      message.error(getErrorMessage(error, 'studio.pipelineFailed'))
     } finally {
       setRunningKey(null)
     }
@@ -370,10 +371,16 @@ export default function StudioPage({ novelId }: Props) {
     try {
       await window.electron.revision.update(task.id, { status })
       await refreshDiagnostics()
-      message.success(status === 'ignored' ? '问题已忽略。' : status === 'open' ? '问题已恢复。' : '问题状态已更新。')
+      message.success(getUserFacingMessage(
+        status === 'ignored'
+          ? 'revision.statusIgnored'
+          : status === 'open'
+            ? 'revision.statusReopened'
+            : 'revision.statusUpdated',
+      ))
     } catch (error) {
       console.error(error)
-      message.error('问题状态更新失败。')
+      message.error(getErrorMessage(error, 'revision.statusUpdateFailed'))
     } finally {
       setTaskActionKey(null)
     }
@@ -398,7 +405,7 @@ export default function StudioPage({ novelId }: Props) {
       message.success(result.message)
     } catch (error) {
       console.error(error)
-      message.error('AI 修复执行失败。')
+      message.error(getErrorMessage(error, 'revision.autofixFailed'))
     } finally {
       setTaskActionKey(null)
     }

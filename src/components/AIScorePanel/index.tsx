@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { Button, Progress, Collapse, Tag, Input, message } from 'antd'
 import { BarChartOutlined, LoadingOutlined, SyncOutlined } from '@ant-design/icons'
 import { AIScoreResult } from '../../types'
+import { getUserFacingMessage } from '@/utils/user-facing-message'
 import AIGenerateButton from '../AIGenerateButton'
 
 type Message = { role: 'user' | 'assistant'; content: string }
@@ -65,7 +66,7 @@ export default function AIScorePanel({
     if (disabled) return
     const content = getContent()
     if (!content?.trim()) {
-      message.warning('请先填写内容再进行评分')
+      message.warning(getUserFacingMessage('aiScore.contentRequired'))
       return
     }
     setLoading(true)
@@ -80,7 +81,9 @@ export default function AIScorePanel({
       setResult(r)
       setShowRegen(false)
     } catch (e: unknown) {
-      message.error(`评分失败：${e instanceof Error ? e.message : '请先配置模型'}`)
+      message.error(getUserFacingMessage('aiScore.failed', {
+        detail: e instanceof Error ? e.message : getUserFacingMessage('writing.configureModelFirst'),
+      }))
     } finally {
       setLoading(false)
     }
@@ -319,7 +322,7 @@ export default function AIScorePanel({
               onResult={content => {
                 onRegenerate(content)
                 setShowRegen(false)
-                message.success('优化内容已应用，可继续评分查看效果')
+                message.success(getUserFacingMessage('aiScore.optimizedApplied'))
               }}
               modelConfigId={modelConfigId}
               type="primary"

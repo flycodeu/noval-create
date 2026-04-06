@@ -1,6 +1,7 @@
 ﻿import { eq } from 'drizzle-orm'
 import { getDb } from '../database/db'
 import { promptOverrides } from '../database/schema'
+import { throwUserFacingError } from '../utils/user-facing-error'
 
 function normalizeText(value: string): string {
   return value
@@ -56,7 +57,7 @@ export function savePromptOverride(key: string, content: string): void {
   const db = getDb()
   const normalizedKey = key.trim()
   if (!normalizedKey) {
-    throw new Error('提示词键不能为空')
+    throwUserFacingError('prompt.keyRequired')
   }
 
   const normalizedContent = normalizeText(content)

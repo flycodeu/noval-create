@@ -9,6 +9,7 @@ import { createStoryItem } from './item.service'
 import { markNovelContextChanged } from './context-impact.service'
 import { buildHumanLanguageRules } from '../../src/shared/prompt-library'
 import { cleanAiFieldText, cleanAiValue } from '../../src/utils/text'
+import { throwUserFacingError } from '../utils/user-facing-error'
 
 type DiscoverySourcePage = 'outline' | 'writing'
 
@@ -208,7 +209,7 @@ async function upsertDiscoveryRevisionTask(input: {
 export async function discoverEntitiesFromContent(source: DiscoverySource) {
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, source.novelId)).all()[0]
-  if (!novel) throw new Error('小说不存在')
+  if (!novel) throwUserFacingError('novel.notFound')
 
   const content = source.content.trim()
   if (!content || content.length < 24) {

@@ -1,4 +1,5 @@
 import { cleanAiValue } from '../../../utils/text'
+import { getUserFacingMessage } from '../../../utils/user-facing-message'
 
 export type DraftMode = 'replace' | 'fill_blanks' | 'optimize'
 export type DraftFieldType = 'string' | 'number' | 'string[]'
@@ -118,7 +119,7 @@ function extractJsonObject(raw: string): string {
   const end = trimmed.lastIndexOf('}')
 
   if (start === -1 || end === -1 || end < start) {
-    throw new Error('AI 输出不是有效的 JSON 对象。')
+    throw new Error(getUserFacingMessage('common.aiJsonObjectInvalid'))
   }
 
   return trimmed.slice(start, end + 1)

@@ -1,5 +1,5 @@
 import { BaseAdapter, ChatOptions, Message, normalizeContextWindowTokens } from './base.adapter'
-import { executeManagedRequest } from './request-support'
+import { buildHttpError, executeManagedRequest } from './request-support'
 import { consumeSseStream, safeParseSseJson } from './sse'
 
 export class OpenAIAdapter extends BaseAdapter {
@@ -69,7 +69,7 @@ export class OpenAIAdapter extends BaseAdapter {
 
       if (!response.ok) {
         const err = await response.text()
-        throw new Error(`OpenAI API 请求失败（${response.status}）：${err}`)
+        throw buildHttpError(`OpenAI API 请求失败（${response.status}）：${err}`, response)
       }
 
       return response
@@ -111,7 +111,7 @@ export class OpenAIAdapter extends BaseAdapter {
 
     if (!response.ok) {
       const err = await response.text()
-      throw new Error(`OpenAI Embedding API 请求失败（${response.status}）：${err}`)
+      throw buildHttpError(`OpenAI Embedding API 请求失败（${response.status}）：${err}`, response)
     }
 
     const data = await response.json() as { data: Array<{ embedding: number[] }> }

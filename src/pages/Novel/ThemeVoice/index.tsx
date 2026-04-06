@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Form, Input, List, Select, Space, Spin, Tag, message } from 'antd'
+import { Alert, Button, Form, Input, List, Select, Space, Tag, message } from 'antd'
 import { ArrowRightOutlined, DeleteOutlined, RobotOutlined, SaveOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import {
   buildThemeVoicePayload,
   parseThemeVoiceSnapshot,
@@ -216,10 +217,10 @@ export default function ThemeVoicePage({ novelId }: Props) {
       if (updated) setCurrentNovel(updated)
       await finalizeDraft(values)
       await clearDraft()
-      message.success('主题与文风已保存。')
+      message.success(getUserFacingMessage('themeVoice.saved'))
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '主题与文风保存失败。')
+      message.error(getErrorMessage(error, 'themeVoice.saveFailed'))
     } finally {
       setSaving(false)
     }
@@ -248,15 +249,15 @@ export default function ThemeVoicePage({ novelId }: Props) {
       }).catch(console.error)
 
       if (result.warnings.length > 0) {
-        message.warning(`AI 已填入表单，但还有 ${result.warnings.length} 条提醒，保存前请复核。`)
+        message.warning(getUserFacingMessage('themeVoice.generatedWithWarnings', { count: result.warnings.length }))
       } else if (mode === 'fill_blanks') {
-        message.success('空白字段已补齐到表单，当前尚未保存。')
+        message.success(getUserFacingMessage('themeVoice.filledBlanks'))
       } else {
-        message.success('主题与文风草稿已生成到表单，当前尚未保存。')
+        message.success(getUserFacingMessage('themeVoice.generated'))
       }
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '主题与文风生成失败。')
+      message.error(getErrorMessage(error, 'themeVoice.generateFailed'))
     } finally {
       setGeneratingMode(null)
     }
@@ -478,22 +479,24 @@ function StyleLearningPanel({ novelId }: { novelId: number }) {
 
   const handleAnalyze = async () => {
     if (!referenceText.trim() || referenceText.length < 500) {
-      message.warning('请输入至少500字的参考文本')
+      message.warning(getUserFacingMessage('themeVoice.referenceTextTooShort'))
       return
     }
     if (!fingerprintName.trim()) {
-      message.warning('请填写风格名称')
+      message.warning(getUserFacingMessage('themeVoice.styleNameRequired'))
       return
     }
     setAnalyzing(true)
     try {
       await window.electron.style.create(novelId, fingerprintName.trim(), referenceText)
-      message.success('风格指纹已生成并应用到本小说')
+      message.success(getUserFacingMessage('themeVoice.styleFingerprintApplied'))
       setReferenceText('')
       setFingerprintName('')
       void loadFingerprints()
     } catch (error) {
-      message.error('风格分析失败：' + (error instanceof Error ? error.message : '未知错误'))
+      message.error(getUserFacingMessage('themeVoice.styleAnalysisFailed', {
+        detail: error instanceof Error ? error.message : '未知错误',
+      }))
     } finally {
       setAnalyzing(false)
     }
@@ -503,7 +506,7 @@ function StyleLearningPanel({ novelId }: { novelId: number }) {
     try {
       await window.electron.style.delete(id)
       void loadFingerprints()
-      message.success('已删除')
+      message.success(getUserFacingMessage('themeVoice.deleted'))
     } catch { /* ignore */ }
   }
 

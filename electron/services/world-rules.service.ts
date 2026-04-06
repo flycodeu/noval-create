@@ -31,6 +31,7 @@ import { safeParseJson } from '../utils/json'
 import { buildStoryProfile } from './context.service'
 import { createTask, executeChatTask, runChatTask, updateTask } from './task.service'
 import { runAssetQualityLoop, summarizeAssetQualityWarnings } from './asset-quality.service'
+import { throwUserFacingError } from '../utils/user-facing-error'
 
 const SECTION_LABELS = new Map(WORLD_RULE_SECTION_DEFINITIONS.map((item) => [item.key, item.label]))
 
@@ -413,12 +414,12 @@ function ensurePatchHasContent(sectionKey: WorldRuleSectionKey, patch: Partial<G
   switch (sectionKey) {
     case 'overview':
       if (!patch.genreProfile || Object.keys(asRecord(patch.genreProfile)).length === 0) {
-        throw new Error('未生成可用的世界概览')
+        throwUserFacingError('worldRules.overviewMissing')
       }
       return
     case 'power':
       if (!Array.isArray(patch.powerSystems) || patch.powerSystems.length === 0) {
-        throw new Error('未生成可用的力量体系')
+        throwUserFacingError('worldRules.powerSystemMissing')
       }
       return
     case 'species':
@@ -426,27 +427,27 @@ function ensurePatchHasContent(sectionKey: WorldRuleSectionKey, patch: Partial<G
         (!Array.isArray(patch.speciesSystem) || patch.speciesSystem.length === 0)
         && (!Array.isArray(patch.factionSystem) || patch.factionSystem.length === 0)
       ) {
-        throw new Error('未生成可用的种族或势力')
+        throwUserFacingError('worldRules.factionMissing')
       }
       return
     case 'ecology':
       if (!patch.characterEcology || Object.keys(asRecord(patch.characterEcology)).length === 0) {
-        throw new Error('未生成可用的人物生态')
+        throwUserFacingError('worldRules.ecologyMissing')
       }
       return
     case 'map':
       if (!patch.mapBlueprint || Object.keys(asRecord(patch.mapBlueprint)).length === 0) {
-        throw new Error('未生成可用的地图蓝图')
+        throwUserFacingError('worldRules.mapBlueprintMissing')
       }
       return
     case 'timeline':
       if (!patch.timelineConfig || Object.keys(asRecord(patch.timelineConfig)).length === 0) {
-        throw new Error('未生成可用的时间规则')
+        throwUserFacingError('worldRules.timelineRuleMissing')
       }
       return
     case 'language':
       if (!patch.writingConstraints || Object.keys(asRecord(patch.writingConstraints)).length === 0) {
-        throw new Error('未生成可用的文风约束')
+        throwUserFacingError('worldRules.styleConstraintMissing')
       }
       return
     default:
@@ -565,7 +566,7 @@ function buildWorldRulesReviewContext(
 export async function loadWorldRulesGenerationContext(novelId: number): Promise<WorldRulesGenerationContext> {
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
-  if (!novel) throw new Error('小说不存在')
+  if (!novel) throwUserFacingError('novel.notFound')
 
   const profile = await buildStoryProfile(novelId)
   return {
@@ -694,7 +695,7 @@ export async function generateWorldRules(
   sender?: WebContents,
 ): Promise<WorldRulesGenerationResult> {
   if (data.mode === 'section' && !data.section) {
-    throw new Error('缺少目标分区')
+    throwUserFacingError('worldRules.targetSectionMissing')
   }
 
   const context = await loadWorldRulesGenerationContext(data.novelId)

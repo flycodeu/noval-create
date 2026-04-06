@@ -6,13 +6,14 @@ import type { StoryThreadBatchGenerateOptions } from '../src/shared/story-thread
 import type { WorldRulesGenerationRequest } from '../src/shared/world-rules-generation'
 import type { SubplotGenerationRequest } from '../src/shared/subplot-framework'
 import type { ThemeVoiceGenerationRequest } from '../src/shared/theme-voice-generation'
+import type { CharacterRelationInput, MapRelationInput, NovelCreateInput } from '../src/types'
 
 const api = {
   // Novel workspace APIs
   novel: {
     list: (filters?: unknown) => ipcRenderer.invoke('novel:list', filters),
     get: (id: number) => ipcRenderer.invoke('novel:get', id),
-    create: (data: unknown) => ipcRenderer.invoke('novel:create', data),
+    create: (data: NovelCreateInput) => ipcRenderer.invoke('novel:create', data),
     update: (id: number, data: unknown) => ipcRenderer.invoke('novel:update', id, data),
     delete: (id: number) => ipcRenderer.invoke('novel:delete', id),
     export: (id: number, format: string) => ipcRenderer.invoke('novel:export', id, format),
@@ -96,7 +97,7 @@ const api = {
     generateProtagonist: (novelId: number, opts: unknown) => ipcRenderer.invoke('character:generateProtagonist', novelId, opts),
     getRelations: (novelId: number) => ipcRenderer.invoke('character:getRelations', novelId),
     generateRelations: (novelId: number) => ipcRenderer.invoke('character:generateRelations', novelId),
-    upsertRelation: (data: unknown) => ipcRenderer.invoke('character:upsertRelation', data),
+    upsertRelation: (data: CharacterRelationInput) => ipcRenderer.invoke('character:upsertRelation', data),
     clear: (novelId: number) => ipcRenderer.invoke('character:clear', novelId),
   },
 
@@ -111,7 +112,7 @@ const api = {
     searchNodes: (novelId: number, keyword?: string, limit?: number) => ipcRenderer.invoke('map:searchNodes', novelId, keyword, limit),
     create: (novelId: number, data: unknown) => ipcRenderer.invoke('map:create', novelId, data),
     update: (id: number, data: unknown) => ipcRenderer.invoke('map:update', id, data),
-    upsertRelation: (data: unknown) => ipcRenderer.invoke('map:upsertRelation', data),
+    upsertRelation: (data: MapRelationInput) => ipcRenderer.invoke('map:upsertRelation', data),
     deleteRelation: (id: number) => ipcRenderer.invoke('map:deleteRelation', id),
     delete: (id: number) => ipcRenderer.invoke('map:delete', id),
     batchGenerate: (novelId: number, structure: unknown) => ipcRenderer.invoke('map:batchGenerate', novelId, structure),

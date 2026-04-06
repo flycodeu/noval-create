@@ -1,5 +1,5 @@
 import { BaseAdapter, ChatOptions, Message, normalizeContextWindowTokens } from './base.adapter'
-import { executeManagedRequest } from './request-support'
+import { buildHttpError, executeManagedRequest } from './request-support'
 import { consumeSseStream, safeParseSseJson } from './sse'
 
 export class AnthropicAdapter extends BaseAdapter {
@@ -64,7 +64,7 @@ export class AnthropicAdapter extends BaseAdapter {
 
       if (!response.ok) {
         const err = await response.text()
-        throw new Error(`Anthropic API 请求失败（${response.status}）：${err}`)
+        throw buildHttpError(`Anthropic API 请求失败（${response.status}）：${err}`, response)
       }
 
       return response

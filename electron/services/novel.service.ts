@@ -3,6 +3,7 @@ import { getBuiltinGenreRules, stringifyWorldRules } from '../../src/shared/genr
 import { normalizeWorldRulesDraft, stringifyWorldRulesDraft } from '../../src/shared/world-rules-draft'
 import { getDb } from '../database/db'
 import { chapters, characters, genres, novels } from '../database/schema'
+import { throwUserFacingError } from '../utils/user-facing-error'
 import { getNovelContextStatus, markNovelContextChanged } from './context-impact.service'
 
 function normalizeWorldRulesJson(raw: string, genreName?: string) {
@@ -174,7 +175,7 @@ export function updateNovel(id: number, data: Partial<{
   const current = db.select().from(novels).where(eq(novels.id, id)).all()[0]
 
   if (!current) {
-    throw new Error('小说不存在')
+    throwUserFacingError('novel.notFound')
   }
 
   const nextGenreId = typeof data.genreId === 'number' ? data.genreId : current.genreId || undefined

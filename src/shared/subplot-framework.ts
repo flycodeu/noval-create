@@ -83,7 +83,7 @@ const SUBPLOT_FIELD_ALIASES: Record<string, SubplotFieldKey> = {
 }
 
 const WRAPPER_ARRAY_KEYS = ['subPlots', 'subplots', 'items', 'data'] as const
-const LOOSE_FIELD_PATTERN = /(?:\"|')?(name|title|characters|character|conflict|coreConflict|core_conflict|mainlineLink|mainline_link|mainline|endChapter|end_chapter)(?:\"|')?\s*[:\uFF1A]/g
+const LOOSE_FIELD_PATTERN = /(?:"|')?(name|title|characters|character|conflict|coreConflict|core_conflict|mainlineLink|mainline_link|mainline|endChapter|end_chapter)(?:"|')?\s*[:\uFF1A]/g
 
 export function asSubPlotText(value: unknown): string {
   if (typeof value === 'string') return value.trim()
@@ -164,7 +164,7 @@ function tryParseStructuredJson(text: string): SubPlotDraft[] | null {
 }
 
 function extractBalancedJsonSegment(text: string): string | null {
-  const start = text.search(/[\[{]/)
+  const start = text.search(/[[{]/)
   if (start === -1) return null
 
   const stack: string[] = [text[start] === '[' ? ']' : '}']
@@ -484,7 +484,7 @@ export function normalizeSubplotIdentity(text: string): string {
   return text
     .trim()
     .toLowerCase()
-    .replace(/[\s\uFF0C\u3002\u3001\u201c\u201d\u2018\u2019"'\uFF1F\uFF01!?:\uFF1A;\uFF1B\u3001\uFF08\uFF09()\u300a\u300b\u3010\u3011\[\]<>\u2026\u2014\-]/g, '')
+    .replace(/(?:\[|[\]\s\uFF0C\u3002\u3001\u201c\u201d\u2018\u2019"'\uFF1F\uFF01!?:\uFF1A;\uFF1B\u3001\uFF08\uFF09()\u300a\u300b\u3010\u3011<>\u2026\u2014-])/g, '')
 }
 
 export function getSubplotSignature(subplot: SubPlotDraft): string {

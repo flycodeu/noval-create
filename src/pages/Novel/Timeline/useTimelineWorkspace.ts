@@ -1,6 +1,7 @@
 import { Form, Modal, message } from 'antd'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import type {
   Character,
   MapNodeSummary,
@@ -691,10 +692,10 @@ export function useTimelineWorkspace(novelId: number) {
       }
 
       setCreating(false)
-      message.success(TIMELINE_TEXT.saveSuccess)
+      message.success(getUserFacingMessage('timeline.saved'))
     } catch (error) {
       console.error(error)
-      message.error(TIMELINE_TEXT.saveFailed)
+      message.error(getErrorMessage(error, 'timeline.saveFailed'))
     } finally {
       setSaving(false)
     }
@@ -710,7 +711,7 @@ export function useTimelineWorkspace(novelId: number) {
       onOk: async () => {
         await window.electron.timeline.delete(selectedEvent.id)
         await refreshPage()
-        message.success(TIMELINE_TEXT.deleteSuccess)
+        message.success(getUserFacingMessage('timeline.deleted'))
       },
     })
   }, [refreshPage, selectedEvent])
@@ -721,10 +722,10 @@ export function useTimelineWorkspace(novelId: number) {
     try {
       const regenerated = await window.electron.timeline.regenerate(selectedEvent.id)
       await refreshPage(regenerated?.id || selectedEvent.id)
-      message.success('时间轴事件已按当前上下文重生成。')
+      message.success(getUserFacingMessage('timeline.regenerated'))
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : TIMELINE_TEXT.generateFailed)
+      message.error(getErrorMessage(error, 'timeline.generateFailed'))
     } finally {
       setRegenerating(false)
     }
@@ -750,10 +751,10 @@ export function useTimelineWorkspace(novelId: number) {
       })
       setGenerateOpen(false)
       await refreshPage()
-      message.success(TIMELINE_TEXT.generateSuccess)
+      message.success(getUserFacingMessage('timeline.generated'))
     } catch (error) {
       console.error(error)
-      message.error(TIMELINE_TEXT.generateFailed)
+      message.error(getErrorMessage(error, 'timeline.generateFailed'))
     } finally {
       setGenerating(false)
     }
@@ -784,7 +785,7 @@ export function useTimelineWorkspace(novelId: number) {
         setSelectedEvent(null)
         setCreating(false)
         await refreshPage(null)
-        message.success(TIMELINE_TEXT.clearSuccess)
+        message.success(getUserFacingMessage('timeline.cleared'))
       },
     })
   }, [form, novelId, refreshPage])

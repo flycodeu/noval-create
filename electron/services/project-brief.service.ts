@@ -15,6 +15,7 @@ import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/ut
 import { getDb } from '../database/db'
 import { novels } from '../database/schema'
 import { safeParseAiJson } from '../utils/json'
+import { throwUserFacingError } from '../utils/user-facing-error'
 import { buildStoryProfile } from './context.service'
 import { runChatTask } from './task.service'
 
@@ -159,7 +160,7 @@ export async function generateProjectBrief(
 ): Promise<ProjectBriefGenerationResult> {
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, request.novelId)).all()[0]
-  if (!novel) throw new Error('小说不存在')
+  if (!novel) throwUserFacingError('novel.notFound')
 
   const profile = await buildStoryProfile(request.novelId)
   const current = parseProjectBriefDocument(novel.projectBriefJson)

@@ -5,6 +5,7 @@ import { useSearchParams } from 'react-router-dom'
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import type { MapBatchGenerationResult, MapGraphPayload, MapNodeSummary, MapRelation, MapRelationInput, Task, WorldMapItem } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { getBlueprintLevelByDepth, getFactionNameOptions, getMapBlueprintDepth, getMapNodeTypeOptions, parseWorldRulesJson } from '../../../shared/genre-system'
 import { buildDraftMessages, normalizeStringArray, parseDraftJson } from '../shared/ai-draft'
 import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
@@ -187,6 +188,7 @@ export default function MapExplorerPage({ novelId }: Props) {
   const [autoStatus, setAutoStatus] = useState(EMPTY_AUTO_STATUS)
   const [autoTaskCardExpanded, setAutoTaskCardExpanded] = useState(false)
   const routeNodeFocusRef = useRef<number | null>(null)
+  const initialRefreshDoneRef = useRef(false)
 
   const worldRules = useMemo(() => parseWorldRulesJson(currentNovel?.worldRulesJson, currentNovel?.genreName), [currentNovel?.genreName, currentNovel?.worldRulesJson])
   const blueprintLevels = useMemo(() => [...worldRules.mapBlueprint.levels].sort((a, b) => a.depth - b.depth), [worldRules.mapBlueprint.levels])
@@ -381,8 +383,10 @@ export default function MapExplorerPage({ novelId }: Props) {
   }, [flattenedTree.byId, flattenedTree.pathById, loadBranch, selectNode])
 
   useEffect(() => {
+    if (initialRefreshDoneRef.current) return
+    initialRefreshDoneRef.current = true
     void refreshVisible()
-  }, [])
+  }, [refreshVisible])
   useEffect(() => {
     if (!routeNodeId || routeNodeFocusRef.current === routeNodeId) return
     routeNodeFocusRef.current = routeNodeId
@@ -515,10 +519,10 @@ export default function MapExplorerPage({ novelId }: Props) {
         affiliatedFactionIdsJson: JSON.stringify(values.affiliatedFactions || []),
       })
       await refreshVisible({ preferredId: selectedNode.id })
-      message.success('地图节点已保存。')
+      message.success(getUserFacingMessage('map.saved'))
     } catch (error) {
       console.error(error)
-      message.error('保存失败，请稍后重试。')
+      message.error(getErrorMessage(error, 'map.saveFailed'))
     } finally {
       setSaving(false)
     }
@@ -536,7 +540,7 @@ export default function MapExplorerPage({ novelId }: Props) {
         setBranchPath((current) => current.filter((item) => item.id !== selectedNode.id))
         selectNode(null)
         await refreshVisible({ preferredId: null })
-        message.success('节点已删除。')
+        message.success(getUserFacingMessage('map.nodeDeleted'))
       },
     })
   }
@@ -550,14 +554,14 @@ export default function MapExplorerPage({ novelId }: Props) {
       structureRole: levelRule?.relationHint || '',
     })
     await refreshVisible({ preferredId: nextId })
-    message.success('根节点已创建。')
+    message.success(getUserFacingMessage('map.rootCreated'))
   }
 
   const handleAddChild = async () => {
     if (!selectedNode) return
     const nextLevel = selectedNode.level + 1
     if (nextLevel > maxDepth) {
-      message.warning('已经到当前地图蓝图的最大层级。')
+      message.warning(getUserFacingMessage('map.maxDepthReached'))
       return
     }
 
@@ -578,7 +582,7 @@ export default function MapExplorerPage({ novelId }: Props) {
     }
 
     await refreshVisible({ preferredId: nextId, parent: selectedNode, branchPage: 1 })
-    message.success('子节点已创建。')
+    message.success(getUserFacingMessage('map.childCreated'))
   }
 
   const handleClear = async () => {
@@ -600,7 +604,7 @@ export default function MapExplorerPage({ novelId }: Props) {
         } finally {
           setLoading(false)
         }
-        message.success('地图结构已清空。')
+        message.success(getUserFacingMessage('map.cleared'))
       },
     })
   }
@@ -621,7 +625,7 @@ export default function MapExplorerPage({ novelId }: Props) {
       message.success(lastMessage)
       setBatchOpen(false)
     } catch (error: unknown) {
-      message.error(error instanceof Error ? error.message : '地图生成失败，请稍后重试。')
+      message.error(getErrorMessage(error, 'map.batchGenerateFailed'))
     } finally {
       setBatchLoading(false)
     }
@@ -635,9 +639,9 @@ export default function MapExplorerPage({ novelId }: Props) {
       await loadAutoStatus()
       setBatchOpen(false)
       setAutoTaskCardExpanded(true)
-      message.success('地图自动分批已启动。')
+      message.success(getUserFacingMessage('map.autoGenerateStarted'))
     } catch (error: unknown) {
-      message.error(error instanceof Error ? error.message : '地图自动分批启动失败。')
+      message.error(getErrorMessage(error, 'map.autoGenerateStartFailed'))
     } finally {
       setAutoLoading(false)
     }
@@ -650,7 +654,7 @@ export default function MapExplorerPage({ novelId }: Props) {
       await window.electron.workflow.cancel(autoTask.id)
       await loadAutoStatus()
       setAutoTaskCardExpanded(true)
-      message.info('已发送暂停请求，当前批次结束后会停止。')
+      message.info(getUserFacingMessage('map.autoGeneratePauseRequested'))
     } finally {
       setAutoStopping(false)
     }
@@ -663,9 +667,9 @@ export default function MapExplorerPage({ novelId }: Props) {
       await window.electron.map.resumeAutoGenerate(autoTask.id)
       await loadAutoStatus()
       setAutoTaskCardExpanded(true)
-      message.success('地图自动分批已继续。')
+      message.success(getUserFacingMessage('map.autoGenerateResumed'))
     } catch (error: unknown) {
-      message.error(error instanceof Error ? error.message : '地图自动分批继续失败。')
+      message.error(getErrorMessage(error, 'map.autoGenerateResumeFailed'))
     } finally {
       setAutoLoading(false)
     }
@@ -673,7 +677,7 @@ export default function MapExplorerPage({ novelId }: Props) {
 
   const openCreateRelation = useCallback(() => {
     if (!selectedNode) {
-      message.info('请先选择一个节点，再创建关系。')
+      message.info(getUserFacingMessage('map.relation.selectNodeFirst'))
       return
     }
     setEditingRelation(null)
@@ -692,7 +696,7 @@ export default function MapExplorerPage({ novelId }: Props) {
     try {
       const values = await relationForm.validateFields()
       if (!values.mapAId || !values.mapBId) {
-        message.warning('请选择关系两端的节点。')
+        message.warning(getUserFacingMessage('map.relation.selectEndpoints'))
         return
       }
       const payload: MapRelationInput = {
@@ -724,10 +728,10 @@ export default function MapExplorerPage({ novelId }: Props) {
       setSelectedRelation(nextSelected)
       setRelationModalOpen(false)
       setEditingRelation(null)
-      message.success(editingRelation ? '关系已更新。' : '关系已创建。')
+      message.success(getUserFacingMessage(editingRelation ? 'common.relationUpdated' : 'map.relation.created'))
     } catch (error: unknown) {
       if (typeof error === 'object' && error !== null && 'errorFields' in error) return
-      message.error(error instanceof Error ? error.message : '关系保存失败，请稍后重试。')
+      message.error(getErrorMessage(error, 'common.relationSaveRetryLater'))
     } finally {
       setRelationSaving(false)
     }
@@ -742,7 +746,7 @@ export default function MapExplorerPage({ novelId }: Props) {
         await window.electron.map.deleteRelation(relation.id)
         setSelectedRelation(null)
         await loadGraph()
-        message.success('关系已删除。')
+        message.success(getUserFacingMessage('map.relation.deleted'))
       },
     })
   }, [loadGraph])

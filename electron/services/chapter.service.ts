@@ -22,6 +22,7 @@ import {
 import { runChatTask, runStreamTask } from './task.service'
 import { buildConsistencyPromptSummary, buildNovelConsistencyReport } from './consistency.service'
 import { syncChapterTimelineStatuses } from './link-sync.service'
+import { throwUserFacingError } from '../utils/user-facing-error'
 import {
   collectQualityGuardrailFindings,
   formatQualityGuardrailSummary,
@@ -1064,11 +1065,11 @@ async function updateChapterContinuityState(
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
   if (!chapter || !chapter.content) {
-    throw new Error('章节内容为空，无法更新连续性记忆')
+    throwUserFacingError('chapter.contentEmptyForContinuity')
   }
 
   const novel = db.select().from(novels).where(eq(novels.id, chapter.novelId)).all()[0]
-  if (!novel) throw new Error('小说不存在')
+  if (!novel) throwUserFacingError('novel.notFound')
 
   const arc = chapter.arcId
     ? db.select().from(storyArcs).where(eq(storyArcs.id, chapter.arcId)).all()[0]
@@ -1136,7 +1137,7 @@ async function updateChapterContinuityState(
 async function updateChapterSummaryData(chapterId: number): Promise<ChapterSummaryData> {
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
-  if (!chapter || !chapter.content) throw new Error('章节内容为空，无法生成摘要')
+  if (!chapter || !chapter.content) throwUserFacingError('chapter.contentEmptyForSummary')
 
   const novel = db.select().from(novels).where(eq(novels.id, chapter.novelId)).all()[0]
   let summaryData: ChapterSummaryData
@@ -1197,7 +1198,7 @@ async function refreshChapterMemory(chapterId: number): Promise<{
 }> {
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
-  if (!chapter) throw new Error('章节不存在')
+  if (!chapter) throwUserFacingError('chapter.notFound')
   const summary = await updateChapterSummaryData(chapterId)
   const continuity = await updateChapterContinuityState(chapterId, summary)
   refreshStoryMemoryCheckpoints(chapter.novelId)
@@ -1375,10 +1376,10 @@ export function listChapterVersions(chapterId: number) {
 export async function restoreChapterVersion(versionId: number) {
   const db = getDb()
   const version = db.select().from(chapterVersions).where(eq(chapterVersions.id, versionId)).all()[0]
-  if (!version) throw new Error('章节版本不存在')
+  if (!version) throwUserFacingError('chapter.versionNotFound')
 
   const chapter = getChapter(version.chapterId)
-  if (!chapter) throw new Error('对应章节不存在')
+  if (!chapter) throwUserFacingError('chapter.correspondingNotFound')
   if ((chapter.content || '') === version.content) {
     return chapter
   }
@@ -1625,7 +1626,7 @@ function resolveContextBudgetForStage(
 export async function generateChapterContent(chapterId: number, sender?: WebContents): Promise<number> {
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
-  if (!chapter) throw new Error(`章节 ${chapterId} 不存在`)
+  if (!chapter) throwUserFacingError('chapter.notFoundWithId', { id: chapterId })
 
   const rawContext = await collectChapterContextRawData(chapter.novelId, chapter.chapterNum)
   const novel = rawContext.novel
@@ -1986,7 +1987,7 @@ export async function generateChapterSummary(chapterId: number): Promise<void> {
 export async function aiCheckChapter(chapterId: number): Promise<unknown> {
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
-  if (!chapter || !chapter.content) throw new Error('章节内容为空')
+  if (!chapter || !chapter.content) throwUserFacingError('chapter.contentEmpty')
 
   const novel = db.select().from(novels).where(eq(novels.id, chapter.novelId)).all()[0]
   const content = chapter.content

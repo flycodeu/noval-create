@@ -26,6 +26,7 @@ import {
 import { createTask, executeChatTask, runChatTask, updateTask } from './task.service'
 import { runAssetQualityLoop, summarizeAssetQualityWarnings } from './asset-quality.service'
 import { appendVariationMessage } from './variation-control.service'
+import { throwUserFacingError } from '../utils/user-facing-error'
 
 type StoryThreadType = 'main' | 'subplot' | 'mystery' | 'payoff' | 'relationship'
 type StoryThreadStatus = 'planned' | 'active' | 'resolved' | 'stalled' | 'abandoned'
@@ -669,7 +670,7 @@ export async function generateStoryThreadBatchChunk(
 ): Promise<StoryThreadBatchChunkResult> {
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
-  if (!novel) throw new Error('小说不存在')
+  if (!novel) throwUserFacingError('novel.notFound')
 
   const profile = await buildStoryProfile(novelId)
   const existingRows = listStoryThreads(novelId)
@@ -848,7 +849,7 @@ export async function generateStoryThreads(
 ): Promise<StoryThreadBatchGenerationResult> {
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
-  if (!novel) throw new Error('小说不存在')
+  if (!novel) throwUserFacingError('novel.notFound')
 
   const profile = await buildStoryProfile(novelId)
   const existingRows = listStoryThreads(novelId)

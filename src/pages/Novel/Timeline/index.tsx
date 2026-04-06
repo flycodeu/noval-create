@@ -22,13 +22,21 @@ import {
   TimelineListPanel,
 } from './TimelinePanels'
 import { useTimelineWorkspace } from './useTimelineWorkspace'
-import { useNovelWorkspaceActions } from '../workspace-shortcuts'
+import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import '../components/boards.css'
 import './index.css'
 
 export default function TimelinePage({ novelId }: TimelinePageProps) {
   const workspace = useTimelineWorkspace(novelId)
   const { mutationToken, notifyWorkspaceMutation, registerEscapeHandler, registerSaveHandler } = useNovelWorkspaceActions()
+  const {
+    clearSelection,
+    creating,
+    form,
+    handleSave: saveTimelineEvent,
+    refreshPage,
+    selectedEvent,
+  } = workspace
   const [draftWarnings, setDraftWarnings] = React.useState<string[]>([])
   const [batchStatus, setBatchStatus] = React.useState<'planned' | 'seeded' | 'written' | 'resolved'>('planned')
   const [batchMajorEvent, setBatchMajorEvent] = React.useState(1)
@@ -110,27 +118,27 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
   ) : null
 
   const handleSave = React.useCallback(async () => {
-    const finalData = workspace.form.getFieldsValue(true) as Record<string, unknown>
-    await workspace.handleSave()
+    const finalData = form.getFieldsValue(true) as Record<string, unknown>
+    await saveTimelineEvent()
     await finalizeDraft(finalData)
     await clearDraft()
-  }, [clearDraft, finalizeDraft, workspace])
+  }, [clearDraft, finalizeDraft, form, saveTimelineEvent])
 
   React.useEffect(() => {
-    registerSaveHandler((workspace.selectedEvent || workspace.creating) ? () => { void handleSave() } : null)
+    registerSaveHandler((selectedEvent || creating) ? () => { void handleSave() } : null)
     return () => registerSaveHandler(null)
-  }, [handleSave, registerSaveHandler, workspace.creating, workspace.selectedEvent])
+  }, [creating, handleSave, registerSaveHandler, selectedEvent])
 
   React.useEffect(() => {
     registerEscapeHandler(() => {
-      workspace.clearSelection()
+      clearSelection()
     })
     return () => registerEscapeHandler(null)
-  }, [registerEscapeHandler, workspace.clearSelection])
+  }, [clearSelection, registerEscapeHandler])
 
   React.useEffect(() => {
-    void workspace.refreshPage()
-  }, [mutationToken, workspace.refreshPage])
+    void refreshPage()
+  }, [mutationToken, refreshPage])
 
   const handleBatchStatusUpdate = React.useCallback(async () => {
     if (workspace.selectedIds.length === 0) return
@@ -365,7 +373,6 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
           formChapterOptions={workspace.formChapterOptions}
           formSegmentOptions={workspace.formSegmentOptions}
           timePrecisionOptions={workspace.timePrecisionOptions}
-          selectedTimeMode={workspace.selectedTimeMode}
           worldRulesPrecisionFallback={workspace.defaultPrecision}
           searchCharacters={(value) => void workspace.searchCharacters(value)}
           searchLocations={(value) => void workspace.searchLocations(value)}

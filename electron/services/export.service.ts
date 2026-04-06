@@ -6,6 +6,7 @@ import { asc, eq } from 'drizzle-orm'
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } from 'docx'
 import { getDb } from '../database/db'
 import { chapters, novels, storyVolumes } from '../database/schema'
+import { throwUserFacingError } from '../utils/user-facing-error'
 
 type ExportFormat = 'txt' | 'md' | 'json' | 'docx' | 'epub'
 type ChapterRecord = typeof chapters.$inferSelect
@@ -438,7 +439,7 @@ async function createExportDirectory(baseDir: string, novelTitle: string, format
 export async function exportNovel(novelId: number, format: ExportFormat): Promise<string> {
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
-  if (!novel) throw new Error('小说不存在')
+  if (!novel) throwUserFacingError('novel.notFound')
 
   const chapterList = db.select().from(chapters)
     .where(eq(chapters.novelId, novelId))
@@ -460,7 +461,7 @@ export async function exportNovel(novelId: number, format: ExportFormat): Promis
       filters: [{ name: format === 'epub' ? 'EPUB电子书' : format.toUpperCase(), extensions: [format] }],
     })
 
-    if (!filePath) throw new Error('用户取消')
+    if (!filePath) throwUserFacingError('common.userCancelled')
     await writeSingleExport(filePath, format, novel, chapterList)
     return filePath
   }
@@ -471,7 +472,7 @@ export async function exportNovel(novelId: number, format: ExportFormat): Promis
   })
 
   const selectedDir = filePaths[0]
-  if (!selectedDir) throw new Error('用户取消')
+  if (!selectedDir) throwUserFacingError('common.userCancelled')
 
   const outputDir = await createExportDirectory(selectedDir, defaultName, format)
   const chunks = buildExportChunks(chapterList, volumeRows)

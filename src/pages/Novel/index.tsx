@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Button, Input, Modal, Spin, message } from 'antd'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import {
   ApartmentOutlined,
   AppstoreOutlined,
@@ -753,12 +754,12 @@ export default function NovelRouter() {
                   if (!latestUndoable) return
                   void window.electron.history.undo(latestUndoable.id)
                     .then(() => {
-                      message.success(`已撤销：${latestUndoable.summary}`)
+                      message.success(getUserFacingMessage('common.undoSucceeded', { summary: latestUndoable.summary }))
                       notifyWorkspaceMutation()
                     })
                     .catch((error) => {
                       console.error(error)
-                      message.error(error instanceof Error ? error.message : '撤销失败')
+                      message.error(getErrorMessage(error, 'common.undoFailed'))
                     })
                 }}
               >

@@ -19,6 +19,7 @@ import type {
 } from '../../src/types'
 import { getDb } from '../database/db'
 import { tasks } from '../database/schema'
+import { throwUserFacingError } from '../utils/user-facing-error'
 import { batchGenerateMap } from './map.service'
 import {
   generateWorldRulesSection,
@@ -294,7 +295,7 @@ async function runMapAutoGenerateWorkflow(taskId: number, sender?: WebContents) 
   try {
     const task = getTaskRecord(taskId)
     if (!task || !task.novelId) {
-      throw new Error(`工作流任务 ${taskId} 不存在`)
+      throwUserFacingError('workflow.taskNotFound', { taskId })
     }
 
     const options = parseMapOptions(task.inputJson)
@@ -473,7 +474,7 @@ async function runWorldRulesAutoGenerateWorkflow(taskId: number, sender?: WebCon
   try {
     const task = getTaskRecord(taskId)
     if (!task || !task.novelId) {
-      throw new Error(`工作流任务 ${taskId} 不存在`)
+      throwUserFacingError('workflow.taskNotFound', { taskId })
     }
 
     const options = parseWorldRulesOptions(task.inputJson)
@@ -678,7 +679,7 @@ export async function startMapAutoGenerateWorkflow(
     return existing.id
   }
   if (existing?.status === 'paused') {
-    throw new Error('当前已有暂停中的地图自动任务，请先继续或取消。')
+    throwUserFacingError('workflow.mapPausedExists')
   }
 
   const taskId = await createTask({
@@ -710,7 +711,7 @@ export async function startWorldRulesAutoGenerateWorkflow(
     return existing.id
   }
   if (existing?.status === 'paused') {
-    throw new Error('当前已有暂停中的世界规则自动任务，请先继续或清除草稿。')
+    throwUserFacingError('workflow.worldRulesPausedExists')
   }
 
   const safeOptions: WorldRulesAutoGenerateOptions = {
@@ -845,7 +846,7 @@ export async function resumeWorldRulesAutoGenerateWorkflow(
 ) {
   const task = getTaskRecord(taskId)
   if (!task || task.runnerType !== 'workflow' || task.type !== 'world_rules_auto_generate') {
-    throw new Error(`工作流任务 ${taskId} 不存在`)
+    throwUserFacingError('workflow.taskNotFound', { taskId })
   }
 
   updateTask(taskId, {
@@ -879,11 +880,11 @@ export async function resumeWorldRulesAutoGenerateWorkflow(
 export async function resumeWorkflowTask(taskId: number, sender?: WebContents) {
   const task = getTaskRecord(taskId)
   if (!task || task.runnerType !== 'workflow') {
-    throw new Error(`工作流任务 ${taskId} 不存在`)
+    throwUserFacingError('workflow.taskNotFound', { taskId })
   }
 
   if (!RESUMABLE_WORKFLOW_TYPES.has(task.type)) {
-    throw new Error('当前工作流暂不支持在任务中心继续，请返回对应页面重新发起。')
+    throwUserFacingError('workflow.resumeUnsupported')
   }
 
   if (task.type === 'map_auto_generate') {
@@ -909,6 +910,6 @@ export async function resumeWorkflowTask(taskId: number, sender?: WebContents) {
     return resumeBatchAutoGenerateWorkflow(taskId, sender)
   }
 
-  throw new Error('当前工作流暂不支持在任务中心继续，请返回对应页面重新发起。')
+  throwUserFacingError('workflow.resumeUnsupported')
 }
 

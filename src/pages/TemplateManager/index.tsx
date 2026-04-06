@@ -4,6 +4,7 @@ import {
 } from 'antd'
 import { PlusOutlined, DeleteOutlined, EditOutlined, LockOutlined } from '@ant-design/icons'
 import { Template } from '../../types'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 
 const TYPE_LABELS: Record<string, string> = {
   style: '文风模板',
@@ -55,7 +56,7 @@ export default function TemplateManager() {
         try {
           JSON.parse(values.contentJson)
         } catch {
-          message.error('内容 JSON 格式错误')
+          message.error(getUserFacingMessage('common.contentJsonInvalid'))
           setSaving(false)
           return
         }
@@ -66,20 +67,20 @@ export default function TemplateManager() {
       } else {
         await window.electron.template.create(values)
       }
-      message.success('已保存')
+      message.success(getUserFacingMessage('template.saved'))
       setEditOpen(false)
       form.resetFields()
       setEditing(null)
       loadTemplates()
-    } catch {
-      message.error('保存失败')
+    } catch (error) {
+      message.error(getErrorMessage(error, 'template.saveFailed'))
     } finally {
       setSaving(false)
     }
   }
 
   const handleDelete = async (tmpl: Template) => {
-    if (tmpl.isBuiltin) { message.warning('内置模板不可删除'); return }
+    if (tmpl.isBuiltin) { message.warning(getUserFacingMessage('template.builtinDeleteBlocked')); return }
     Modal.confirm({
       title: `确认删除「${tmpl.name}」？`,
       okType: 'danger',
@@ -88,7 +89,7 @@ export default function TemplateManager() {
           await window.electron.template.delete(tmpl.id)
           loadTemplates()
         } catch (e: unknown) {
-          message.error(e instanceof Error ? e.message : '删除失败')
+          message.error(getErrorMessage(e, 'template.deleteFailed'))
         }
       },
     })

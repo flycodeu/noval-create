@@ -18,6 +18,7 @@ import {
   generateStructureHierarchyPlan,
   generateStructureSegmentDraft,
 } from '../shared/planning-ai-service'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import {
   ChapterEditorPanel,
   SegmentEditorPanel,
@@ -201,7 +202,7 @@ export default function StructurePage({ novelId }: { novelId: number }) {
       setDraftWarnings(result.warnings)
       const plan = result.payloads[0]
       if (!plan || plan.volumes.length === 0) {
-        message.warning('AI 没有返回可执行的卷部章场景规划。')
+        message.warning(getUserFacingMessage('structure.batchPlanEmpty'))
         return
       }
 
@@ -258,10 +259,10 @@ export default function StructurePage({ novelId }: { novelId: number }) {
         await selectChapter(firstChapterId)
       }
       setPlannerOpen(false)
-      message.success('卷 / 部 / 章 / 场景批量规划已追加到结构页。')
+      message.success(getUserFacingMessage('structure.batchPlanApplied'))
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '结构批量规划失败。')
+      message.error(getErrorMessage(error, 'structure.batchPlanFailed'))
     } finally {
       setPlannerGenerating(false)
     }
@@ -273,7 +274,6 @@ export default function StructurePage({ novelId }: { novelId: number }) {
     currentNovel?.title,
     novelId,
     parts.total,
-    plannerForm,
     refreshStructure,
     segments.total,
     selectChapter,

@@ -11,6 +11,7 @@ import {
   type SubplotGenerationResult,
 } from '../../src/shared/subplot-framework'
 import { runAssetQualityLoop, summarizeAssetQualityWarnings } from './asset-quality.service'
+import { throwUserFacingError } from '../utils/user-facing-error'
 
 const SUBPLOT_MAX_CONFLICT_LENGTH = 90
 const SUBPLOT_MAX_MAINLINE_LINK_LENGTH = 60
@@ -237,7 +238,7 @@ export async function generateSubplotBatch(
 export async function retrySubplotBatch(taskId: number): Promise<number> {
   const db = getDb()
   const task = db.select().from(tasks).where(eq(tasks.id, taskId)).all()[0]
-  if (!task) throw new Error(`任务 ${taskId} 不存在`)
+  if (!task) throwUserFacingError('task.notFound', { id: taskId })
   if (!task.inputJson) throw new Error('\u4efb\u52a1\u7f3a\u5c11\u8f93\u5165\u4e0a\u4e0b\u6587\uff0c\u65e0\u6cd5\u91cd\u8bd5')
 
   const request = JSON.parse(task.inputJson) as SubplotGenerationRequest

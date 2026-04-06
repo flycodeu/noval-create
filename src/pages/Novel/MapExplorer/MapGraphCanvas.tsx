@@ -89,10 +89,6 @@ function truncate(text?: string, max = 110) {
   return `${normalized.slice(0, max).trim()}...`
 }
 
-function sortGraphNodes(a: MapGraphNode, b: MapGraphNode) {
-  return a.level - b.level || a.sortOrder - b.sortOrder || a.id - b.id
-}
-
 function buildLayeredTreePositions(nodes: MapGraphNode[], width: number, nodeHeight: number) {
   if (nodes.length === 0) return new Map<number, { x: number; y: number }>()
 

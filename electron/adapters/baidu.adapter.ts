@@ -1,5 +1,5 @@
 import { BaseAdapter, ChatOptions, Message, normalizeContextWindowTokens } from './base.adapter'
-import { executeManagedRequest } from './request-support'
+import { buildHttpError, executeManagedRequest } from './request-support'
 import { consumeSseStream, safeParseSseJson } from './sse'
 
 export class BaiduAdapter extends BaseAdapter {
@@ -64,7 +64,7 @@ export class BaiduAdapter extends BaseAdapter {
 
       if (!result.ok) {
         const err = await result.text()
-        throw new Error(`百度 Token 获取失败（${result.status}）：${err}`)
+        throw buildHttpError(`百度 Token 获取失败（${result.status}）：${err}`, result)
       }
 
       return result
@@ -151,7 +151,7 @@ export class BaiduAdapter extends BaseAdapter {
 
       if (!response.ok) {
         const err = await response.text()
-        throw new Error(`百度文心 API 请求失败（${response.status}）：${err}`)
+        throw buildHttpError(`百度文心 API 请求失败（${response.status}）：${err}`, response)
       }
 
       return response

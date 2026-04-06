@@ -38,6 +38,7 @@ import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/ut
 import { markNovelContextChanged } from './context-impact.service'
 import { runAssetQualityLoop, summarizeAssetQualityWarnings } from './asset-quality.service'
 import { appendVariationMessage } from './variation-control.service'
+import { throwUserFacingError } from '../utils/user-facing-error'
 
 type StoryItemStatus = 'available' | 'consumed' | 'hidden' | 'destroyed'
 
@@ -1183,7 +1184,7 @@ export async function generateStoryItemsBatchChunk(
 ): Promise<StoryItemBatchChunkResult> {
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
-  if (!novel) throw new Error('小说不存在')
+  if (!novel) throwUserFacingError('novel.notFound')
 
   const profile = await buildStoryProfile(novelId)
   const rules = parseWorldRulesJson(novel.worldRulesJson, profile.genre)
@@ -1319,7 +1320,7 @@ export async function generateStoryItemsBatchChunk(
         }
         if (!Array.isArray(parsed)) {
           markRejected(historyId)
-          throw new Error('物品生成结果不是有效数组。')
+          throwUserFacingError('item.generatedArrayInvalid')
         }
 
         const usedSignatures = new Set(
@@ -1384,7 +1385,7 @@ export async function generateStoryItems(
 ): Promise<number[]> {
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
-  if (!novel) throw new Error('小说不存在')
+  if (!novel) throwUserFacingError('novel.notFound')
 
   const profile = await buildStoryProfile(novelId)
   const rules = parseWorldRulesJson(novel.worldRulesJson, profile.genre)
@@ -1507,7 +1508,7 @@ export async function generateStoryItems(
     }
     if (!Array.isArray(parsed)) {
       markRejected(historyId)
-      throw new Error('物品生成结果不是有效数组。')
+      throwUserFacingError('item.generatedArrayInvalid')
     }
 
     const usedSignatures = new Set(

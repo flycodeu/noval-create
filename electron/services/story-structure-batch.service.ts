@@ -22,6 +22,7 @@ import type {
   StructureBatchPreviewItem,
 } from '../../src/types'
 import { markStoryMemoryCheckpointsDirty } from './context-impact.service'
+import { throwUserFacingError } from '../utils/user-facing-error'
 
 function asText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
@@ -250,7 +251,7 @@ function normalizeSegmentOrders(chapterId: number) {
 function markNovelContextChangedInline(novelId: number, reason: string) {
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
-  if (!novel) throw new Error('小说不存在。')
+  if (!novel) throwUserFacingError('novel.notFound')
 
   const nextVersion = (novel.contextVersion || 1) + 1
   const now = new Date().toISOString()
@@ -451,11 +452,11 @@ function deleteVolumeCascade(novelId: number, volumeIds: number[]) {
 
 function applyDeleteVolumes(novelId: number, volumeIds: number[]): StructureBatchApplyResult {
   const selectedVolumeIds = normalizeIds(volumeIds)
-  if (selectedVolumeIds.length === 0) throw new Error('请至少选择一卷。')
+  if (selectedVolumeIds.length === 0) throwUserFacingError('structure.selectAtLeastOneVolume')
 
   const existingIds = new Set(getVolumeRows(novelId).map((volume) => volume.id))
   if (selectedVolumeIds.some((volumeId) => !existingIds.has(volumeId))) {
-    throw new Error('存在无效的卷 ID。')
+    throwUserFacingError('structure.invalidVolumeIds')
   }
 
   deleteVolumeCascade(novelId, selectedVolumeIds)
@@ -472,11 +473,11 @@ function applyDeleteVolumes(novelId: number, volumeIds: number[]): StructureBatc
 
 function applyDeleteParts(novelId: number, partIds: number[]): StructureBatchApplyResult {
   const selectedPartIds = normalizeIds(partIds)
-  if (selectedPartIds.length === 0) throw new Error('请至少选择一部。')
+  if (selectedPartIds.length === 0) throwUserFacingError('structure.selectAtLeastOnePart')
 
   const existingIds = new Set(getPartRows(novelId).map((part) => part.id))
   if (selectedPartIds.some((partId) => !existingIds.has(partId))) {
-    throw new Error('存在无效的部 ID。')
+    throwUserFacingError('structure.invalidPartIds')
   }
 
   deletePartCascade(novelId, selectedPartIds)
@@ -492,11 +493,11 @@ function applyDeleteParts(novelId: number, partIds: number[]): StructureBatchApp
 
 function applyDeleteChapters(novelId: number, chapterIds: number[]): StructureBatchApplyResult {
   const selectedChapterIds = normalizeIds(chapterIds)
-  if (selectedChapterIds.length === 0) throw new Error('请至少选择一章。')
+  if (selectedChapterIds.length === 0) throwUserFacingError('structure.selectAtLeastOneChapter')
 
   const existingIds = new Set(getChapterRows(novelId).map((chapter) => chapter.id))
   if (selectedChapterIds.some((chapterId) => !existingIds.has(chapterId))) {
-    throw new Error('存在无效的章节 ID。')
+    throwUserFacingError('structure.invalidChapterIds')
   }
 
   deleteChapterCascade(novelId, selectedChapterIds)
@@ -512,13 +513,13 @@ function applyDeleteChapters(novelId: number, chapterIds: number[]): StructureBa
 function applyDeleteSegments(novelId: number, segmentIds: number[]): StructureBatchApplyResult {
   const db = getDb()
   const selectedSegmentIds = normalizeIds(segmentIds)
-  if (selectedSegmentIds.length === 0) throw new Error('请至少选择一个场景。')
+  if (selectedSegmentIds.length === 0) throwUserFacingError('structure.selectAtLeastOneSegment')
 
   const selectedIdSet = new Set(selectedSegmentIds)
   const segmentRows = getSegmentRowsByNovel(novelId)
   const selectedSegments = segmentRows.filter((segment) => selectedIdSet.has(segment.id))
   if (selectedSegments.length !== selectedSegmentIds.length) {
-    throw new Error('存在无效的场景 ID。')
+    throwUserFacingError('structure.invalidSegmentIds')
   }
 
   const removalCountByChapter = new Map<number, number>()
@@ -531,7 +532,7 @@ function applyDeleteSegments(novelId: number, segmentIds: number[]): StructureBa
     const total = segmentRows.filter((segment) => segment.chapterId === chapterId).length
     if (total - removeCount <= 0) {
       const chapter = chapterById.get(chapterId)
-      throw new Error(`${chapter ? getChapterLabel(chapter) : '当前章节'} 至少需要保留一个场景。`)
+      throwUserFacingError('structure.keepAtLeastOneSegment', { chapterLabel: chapter ? getChapterLabel(chapter) : '当前章节' })
     }
   }
 
@@ -551,15 +552,15 @@ function applyDeleteSegments(novelId: number, segmentIds: number[]): StructureBa
 function applyMoveParts(novelId: number, partIds: number[], targetVolumeId: number): StructureBatchApplyResult {
   const db = getDb()
   const selectedPartIds = normalizeIds(partIds)
-  if (selectedPartIds.length === 0) throw new Error('请至少选择一部。')
+  if (selectedPartIds.length === 0) throwUserFacingError('structure.selectAtLeastOnePart')
 
   const volume = getVolumeRows(novelId).find((item) => item.id === targetVolumeId)
-  if (!volume) throw new Error('目标卷不存在。')
+  if (!volume) throwUserFacingError('structure.targetVolumeNotFound')
 
   const partRows = getPartRows(novelId)
   const partById = new Map(partRows.map((part) => [part.id, part]))
   if (selectedPartIds.some((partId) => !partById.has(partId))) {
-    throw new Error('存在无效的部 ID。')
+    throwUserFacingError('structure.invalidPartIds')
   }
 
   const selectedParts = selectedPartIds
@@ -604,15 +605,15 @@ function applyMoveParts(novelId: number, partIds: number[], targetVolumeId: numb
 function applyMoveChapters(novelId: number, chapterIds: number[], targetPartId: number): StructureBatchApplyResult {
   const db = getDb()
   const selectedChapterIds = normalizeIds(chapterIds)
-  if (selectedChapterIds.length === 0) throw new Error('请至少选择一章。')
+  if (selectedChapterIds.length === 0) throwUserFacingError('structure.selectAtLeastOneChapter')
 
   const part = getPartRows(novelId).find((item) => item.id === targetPartId)
-  if (!part) throw new Error('目标部不存在。')
+  if (!part) throwUserFacingError('structure.targetPartNotFound')
 
   const chapterRows = getChapterRows(novelId)
   const chapterById = new Map(chapterRows.map((chapter) => [chapter.id, chapter]))
   if (selectedChapterIds.some((chapterId) => !chapterById.has(chapterId))) {
-    throw new Error('存在无效的章节 ID。')
+    throwUserFacingError('structure.invalidChapterIds')
   }
 
   let nextChapterNum = chapterRows.reduce((max, chapter) => Math.max(max, chapter.chapterNum), 0) + 1
@@ -654,17 +655,17 @@ function applyMoveChapters(novelId: number, chapterIds: number[], targetPartId: 
 function applyMoveSegments(novelId: number, segmentIds: number[], targetChapterId: number): StructureBatchApplyResult {
   const db = getDb()
   const selectedSegmentIds = normalizeIds(segmentIds)
-  if (selectedSegmentIds.length === 0) throw new Error('请至少选择一个场景。')
+  if (selectedSegmentIds.length === 0) throwUserFacingError('structure.selectAtLeastOneSegment')
 
   const chapterRows = getChapterRows(novelId)
   const chapterById = new Map(chapterRows.map((chapter) => [chapter.id, chapter]))
   const targetChapter = chapterById.get(targetChapterId)
-  if (!targetChapter) throw new Error('目标章节不存在。')
+  if (!targetChapter) throwUserFacingError('structure.targetChapterNotFound')
 
   const segmentRows = getSegmentRowsByNovel(novelId)
   const segmentById = new Map(segmentRows.map((segment) => [segment.id, segment]))
   if (selectedSegmentIds.some((segmentId) => !segmentById.has(segmentId))) {
-    throw new Error('存在无效的场景 ID。')
+    throwUserFacingError('structure.invalidSegmentIds')
   }
 
   const selectedIdSet = new Set(selectedSegmentIds)
@@ -683,7 +684,7 @@ function applyMoveSegments(novelId: number, segmentIds: number[], targetChapterI
     const total = segmentRows.filter((segment) => segment.chapterId === chapterId).length
     if (total - removeCount <= 0) {
       const chapter = chapterById.get(chapterId)
-      throw new Error(`${chapter ? getChapterLabel(chapter) : '当前章节'} 至少需要保留一个场景。`)
+      throwUserFacingError('structure.keepAtLeastOneSegment', { chapterLabel: chapter ? getChapterLabel(chapter) : '当前章节' })
     }
   }
 
@@ -723,12 +724,12 @@ function applyReorderVolumes(novelId: number, orderedIds: number[]): StructureBa
   const normalizedIds = normalizeIds(orderedIds)
   const volumeRows = getVolumeRows(novelId)
   if (volumeRows.length !== normalizedIds.length) {
-    throw new Error('卷数量不匹配。')
+    throwUserFacingError('structure.volumeCountMismatch')
   }
 
   const existingIds = new Set(volumeRows.map((volume) => volume.id))
   if (normalizedIds.some((volumeId) => !existingIds.has(volumeId))) {
-    throw new Error('存在无效的卷 ID。')
+    throwUserFacingError('structure.invalidVolumeIds')
   }
 
   normalizedIds.forEach((volumeId, index) => {
@@ -750,17 +751,17 @@ function applyReorderVolumes(novelId: number, orderedIds: number[]): StructureBa
 function applyReorderParts(novelId: number, volumeId: number, orderedIds: number[]): StructureBatchApplyResult {
   const db = getDb()
   const volume = getVolumeRows(novelId).find((item) => item.id === volumeId)
-  if (!volume) throw new Error('卷不存在。')
+  if (!volume) throwUserFacingError('volume.notFound')
 
   const normalizedIds = normalizeIds(orderedIds)
   const partRows = getPartRows(novelId).filter((part) => part.volumeId === volumeId)
   if (partRows.length !== normalizedIds.length) {
-    throw new Error('部分数量不匹配。')
+    throwUserFacingError('structure.partCountMismatch')
   }
 
   const existingIds = new Set(partRows.map((part) => part.id))
   if (normalizedIds.some((partId) => !existingIds.has(partId))) {
-    throw new Error('存在无效的部 ID。')
+    throwUserFacingError('structure.invalidPartIds')
   }
 
   normalizedIds.forEach((partId, index) => {
@@ -782,17 +783,17 @@ function applyReorderParts(novelId: number, volumeId: number, orderedIds: number
 function applyReorderChapters(novelId: number, partId: number, orderedIds: number[]): StructureBatchApplyResult {
   const db = getDb()
   const part = getPartRows(novelId).find((item) => item.id === partId)
-  if (!part) throw new Error('部不存在。')
+  if (!part) throwUserFacingError('part.notFound')
 
   const normalizedIds = normalizeIds(orderedIds)
   const chapterRows = getChapterRows(novelId).filter((chapter) => chapter.partId === partId)
   if (chapterRows.length !== normalizedIds.length) {
-    throw new Error('章节数量不匹配。')
+    throwUserFacingError('structure.chapterCountMismatch')
   }
 
   const existingIds = new Set(chapterRows.map((chapter) => chapter.id))
   if (normalizedIds.some((chapterId) => !existingIds.has(chapterId))) {
-    throw new Error('存在无效的章节 ID。')
+    throwUserFacingError('structure.invalidChapterIds')
   }
 
   normalizedIds.forEach((chapterId, index) => {
@@ -814,17 +815,17 @@ function applyReorderChapters(novelId: number, partId: number, orderedIds: numbe
 function applyReorderSegments(novelId: number, chapterId: number, orderedIds: number[]): StructureBatchApplyResult {
   const db = getDb()
   const chapter = getChapterRows(novelId).find((item) => item.id === chapterId)
-  if (!chapter) throw new Error('章节不存在。')
+  if (!chapter) throwUserFacingError('chapter.notFound')
 
   const normalizedIds = normalizeIds(orderedIds)
   const segmentRows = getSegmentRowsByNovel(novelId).filter((segment) => segment.chapterId === chapterId)
   if (segmentRows.length !== normalizedIds.length) {
-    throw new Error('场景数量不匹配。')
+    throwUserFacingError('structure.segmentCountMismatch')
   }
 
   const existingIds = new Set(segmentRows.map((segment) => segment.id))
   if (normalizedIds.some((segmentId) => !existingIds.has(segmentId))) {
-    throw new Error('存在无效的场景 ID。')
+    throwUserFacingError('structure.invalidSegmentIds')
   }
 
   normalizedIds.forEach((segmentId, index) => {
@@ -914,7 +915,7 @@ function previewBatchEditOperation(novelId: number, operation: StructureBatchEdi
     case 'move_parts': {
       const impact = collectPartImpact(novelId, operation.partIds)
       const volume = getVolumeRows(novelId).find((item) => item.id === operation.targetVolumeId)
-      if (!volume) throw new Error('目标卷不存在。')
+      if (!volume) throwUserFacingError('structure.targetVolumeNotFound')
       const selectedPartSet = new Set(normalizeIds(operation.partIds))
       const warnings = getPartRows(novelId).some((part) => selectedPartSet.has(part.id) && part.volumeId === operation.targetVolumeId)
         ? ['所选部中包含已在目标卷下的记录，提交后会按目标卷尾部重新编号。']
@@ -937,7 +938,7 @@ function previewBatchEditOperation(novelId: number, operation: StructureBatchEdi
     case 'move_chapters': {
       const impact = collectChapterImpact(novelId, operation.chapterIds)
       const part = getPartRows(novelId).find((item) => item.id === operation.targetPartId)
-      if (!part) throw new Error('目标部不存在。')
+      if (!part) throwUserFacingError('structure.targetPartNotFound')
       return buildPreviewItem({
         kind: operation.kind,
         summary: `把 ${impact.selectedCount} 章移动到 ${getPartLabel(part)}，目标部会按追加方式重排章节顺序。`,
@@ -955,7 +956,7 @@ function previewBatchEditOperation(novelId: number, operation: StructureBatchEdi
     case 'move_segments': {
       const impact = collectSegmentImpact(novelId, operation.segmentIds)
       const chapter = getChapterRows(novelId).find((item) => item.id === operation.targetChapterId)
-      if (!chapter) throw new Error('目标章节不存在。')
+      if (!chapter) throwUserFacingError('structure.targetChapterNotFound')
       return buildPreviewItem({
         kind: operation.kind,
         summary: `把 ${impact.selectedCount} 个场景移动到 ${getChapterLabel(chapter)}，并在目标章末尾重排。`,
@@ -988,7 +989,7 @@ function previewBatchEditOperation(novelId: number, operation: StructureBatchEdi
     case 'reorder_parts': {
       const impact = collectPartImpact(novelId, operation.orderedIds)
       const volume = getVolumeRows(novelId).find((item) => item.id === operation.volumeId)
-      if (!volume) throw new Error('卷不存在。')
+      if (!volume) throwUserFacingError('volume.notFound')
       return buildPreviewItem({
         kind: operation.kind,
         summary: `重排 ${getVolumeLabel(volume)} 下的 ${impact.selectedCount} 部，并同步重算章节编号。`,
@@ -1006,7 +1007,7 @@ function previewBatchEditOperation(novelId: number, operation: StructureBatchEdi
     case 'reorder_chapters': {
       const impact = collectChapterImpact(novelId, operation.orderedIds)
       const part = getPartRows(novelId).find((item) => item.id === operation.partId)
-      if (!part) throw new Error('部不存在。')
+      if (!part) throwUserFacingError('part.notFound')
       return buildPreviewItem({
         kind: operation.kind,
         summary: `重排 ${getPartLabel(part)} 下的 ${impact.selectedCount} 章。`,
@@ -1024,7 +1025,7 @@ function previewBatchEditOperation(novelId: number, operation: StructureBatchEdi
     case 'reorder_segments': {
       const impact = collectSegmentImpact(novelId, operation.orderedIds)
       const chapter = getChapterRows(novelId).find((item) => item.id === operation.chapterId)
-      if (!chapter) throw new Error('章节不存在。')
+      if (!chapter) throwUserFacingError('chapter.notFound')
       return buildPreviewItem({
         kind: operation.kind,
         summary: `重排 ${getChapterLabel(chapter)} 下的 ${impact.selectedCount} 个场景。`,
@@ -1072,7 +1073,7 @@ function applyBatchEditOperation(novelId: number, operation: StructureBatchEditO
 export function previewStructureBatchEdit(novelId: number, operations: StructureBatchEditOperation[]): StructureBatchPreview {
   const safeOperations = Array.isArray(operations) ? operations : []
   if (safeOperations.length === 0) {
-    throw new Error('请至少提供一个结构批量操作。')
+    throwUserFacingError('structure.operationsRequired')
   }
 
   const items = safeOperations.map((operation) => previewBatchEditOperation(novelId, operation))
@@ -1087,7 +1088,7 @@ export function previewStructureBatchEdit(novelId: number, operations: Structure
 export function applyStructureBatchEdit(novelId: number, operations: StructureBatchEditOperation[]): StructureBatchApplyResult {
   const safeOperations = Array.isArray(operations) ? operations : []
   if (safeOperations.length === 0) {
-    throw new Error('请至少提供一个结构批量操作。')
+    throwUserFacingError('structure.operationsRequired')
   }
 
   let latestResult: StructureBatchApplyResult = {
@@ -1137,12 +1138,12 @@ function createStructureSegmentFromPlan(
 export function applyStructureBatchPlan(novelId: number, plan: StructureBatchPlan): StructureBatchApplyResult {
   const safePlan = plan && Array.isArray(plan.volumes) ? plan : { summary: '', volumes: [] }
   if (safePlan.volumes.length === 0) {
-    throw new Error('当前没有可追加的卷规划。')
+    throwUserFacingError('structure.noAppendableVolumePlan')
   }
 
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
-  if (!novel) throw new Error('小说不存在。')
+  if (!novel) throwUserFacingError('novel.notFound')
 
   let firstChapterId: number | null = null
   let focus: StructureBatchFocus | undefined
@@ -1206,7 +1207,7 @@ export function applyStructureBatchPlan(novelId: number, plan: StructureBatchPla
 
           const chapterId = Number(chapterInsert.lastInsertRowid)
           const chapterRow = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
-          if (!chapterRow) throw new Error('新章节写入后读取失败。')
+          if (!chapterRow) throwUserFacingError('structure.newChapterReadFailed')
 
           if (!firstChapterId) {
             firstChapterId = chapterId
@@ -1257,7 +1258,7 @@ export function deleteStoryPartTransactional(id: number) {
 
 export function assignChapterToPartTransactional(chapterId: number, partId: number) {
   const chapter = getDb().select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
-  if (!chapter) throw new Error('章节不存在。')
+  if (!chapter) throwUserFacingError('chapter.notFound')
   const result = applyStructureBatchEdit(chapter.novelId, [{ kind: 'move_chapters', chapterIds: [chapterId], targetPartId: partId }])
   void result
 }
@@ -1269,14 +1270,14 @@ export function reorderStoryVolumesTransactional(novelId: number, orderedIds: nu
 
 export function reorderStoryPartsInVolumeTransactional(volumeId: number, orderedIds: number[]) {
   const volume = getDb().select().from(storyVolumes).where(eq(storyVolumes.id, volumeId)).all()[0]
-  if (!volume) throw new Error('卷不存在。')
+  if (!volume) throwUserFacingError('volume.notFound')
   const result = applyStructureBatchEdit(volume.novelId, [{ kind: 'reorder_parts', volumeId, orderedIds }])
   void result
 }
 
 export function reorderChapterSegmentsTransactional(chapterId: number, orderedIds: number[]) {
   const chapter = getDb().select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
-  if (!chapter) throw new Error('章节不存在。')
+  if (!chapter) throwUserFacingError('chapter.notFound')
   const result = applyStructureBatchEdit(chapter.novelId, [{ kind: 'reorder_segments', chapterId, orderedIds }])
   void result
 }
@@ -1294,20 +1295,20 @@ export function reorderStoryPartsTransactional(novelId: number, operations: Stor
   const volumeRows = getVolumeRows(novelId)
 
   if (partRows.length !== operations.length) {
-    throw new Error('分册数量不匹配。')
+    throwUserFacingError('structure.partCountMismatch')
   }
 
   const partById = new Map(partRows.map((part) => [part.id, part]))
   const volumeIds = new Set(volumeRows.map((volume) => volume.id))
   const operationIds = new Set(operations.map((item) => item.id))
   if (operationIds.size !== operations.length || operations.some((item) => !partById.has(item.id))) {
-    throw new Error('存在无效的部 ID。')
+    throwUserFacingError('structure.invalidPartIds')
   }
   if (partRows.some((part) => !operationIds.has(part.id))) {
-    throw new Error('分册 ID 不完整。')
+    throwUserFacingError('structure.partIdsIncomplete')
   }
   if (operations.some((item) => !volumeIds.has(item.volumeId))) {
-    throw new Error('目标卷 ID 无效。')
+    throwUserFacingError('structure.targetVolumeIdInvalid')
   }
 
   runStructureTransaction(novelId, () => {
