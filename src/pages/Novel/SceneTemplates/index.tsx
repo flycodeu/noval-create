@@ -217,8 +217,8 @@ export default function SceneTemplatesPage({ novelId }: Props) {
       ) : null}
 
       <WorkspacePanel title="模板清单" description="左侧筛选，右侧编辑节拍与角色功能位。">
-        <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: 20 }}>
-          <div style={{ display: 'grid', gap: 12 }}>
+        <div className="novel-resource-workspace__layout">
+          <div className="novel-resource-workspace__sidebar">
             <Input.Search value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索模板名、描述或情绪弧线" allowClear />
             <Select value={scope} onChange={setScope} options={[
               { value: 'all', label: '全部' },
@@ -232,6 +232,7 @@ export default function SceneTemplatesPage({ novelId }: Props) {
               locale={{ emptyText: '当前没有场景模板' }}
               renderItem={(item) => (
                 <List.Item
+                  className="novel-resource-workspace__list-item"
                   onClick={() => setSelectedId(item.id)}
                   style={{
                     cursor: 'pointer',
@@ -244,20 +245,24 @@ export default function SceneTemplatesPage({ novelId }: Props) {
                 >
                   <List.Item.Meta
                     title={(
-                      <Space wrap>
-                        <strong>{item.name}</strong>
+                      <div className="novel-resource-workspace__title-row">
+                        <strong className="novel-resource-workspace__title-text" title={item.name}>{item.name}</strong>
                         <Tag>{CATEGORY_OPTIONS.find((option) => option.value === item.category)?.label || item.category}</Tag>
                         {item.isBuiltin > 0 ? <Tag color="gold">内置</Tag> : <Tag color="blue">自定义</Tag>}
-                      </Space>
+                      </div>
                     )}
-                    description={item.description || item.emotionArc || '还没有写清模板说明。'}
+                    description={(
+                      <div className="novel-resource-workspace__desc" title={item.description || item.emotionArc || '还没有写清模板说明。'}>
+                        {item.description || item.emotionArc || '还没有写清模板说明。'}
+                      </div>
+                    )}
                   />
                 </List.Item>
               )}
             />
           </div>
 
-          <Form form={form} layout="vertical" initialValues={EMPTY_VALUES} disabled={selectedIsBuiltin}>
+          <Form form={form} layout="vertical" initialValues={EMPTY_VALUES} disabled={selectedIsBuiltin} className="novel-resource-workspace__content">
             <div className="guided-step__field-grid">
               <div className="guided-step__field-card">
                 <Form.Item name="name" label="模板名称" rules={[{ required: true, message: '请填写模板名称' }]}>

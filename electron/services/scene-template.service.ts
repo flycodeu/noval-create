@@ -72,7 +72,7 @@ function mapSceneTemplate(row: typeof sceneTemplates.$inferSelect): AppSceneTemp
     typicalBeatsJson: row.typicalBeatsJson ?? undefined,
     suggestedCharacterRolesJson: row.suggestedCharacterRolesJson ?? undefined,
     emotionArc: row.emotionArc ?? undefined,
-    isBuiltin: row.isBuiltin > 0 ? 1 : 0,
+    isBuiltin: (row.isBuiltin ?? 0) > 0 ? 1 : 0,
     sortOrder: row.sortOrder || 0,
     createdAt: row.createdAt || '',
     updatedAt: row.updatedAt || '',

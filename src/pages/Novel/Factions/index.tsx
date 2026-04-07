@@ -250,8 +250,8 @@ export default function FactionsPage({ novelId }: Props) {
       ) : null}
 
       <WorkspacePanel title="势力清单" description="左侧筛选，右侧编辑。">
-        <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: 20 }}>
-          <div style={{ display: 'grid', gap: 12 }}>
+        <div className="novel-resource-workspace__layout">
+          <div className="novel-resource-workspace__sidebar">
             <Input.Search value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索势力、目标或资源" allowClear />
             <List
               loading={loading}
@@ -260,6 +260,7 @@ export default function FactionsPage({ novelId }: Props) {
               locale={{ emptyText: '当前没有势力记录' }}
               renderItem={(item) => (
                 <List.Item
+                  className="novel-resource-workspace__list-item"
                   onClick={() => setSelectedId(item.id)}
                   style={{
                     cursor: 'pointer',
@@ -272,19 +273,23 @@ export default function FactionsPage({ novelId }: Props) {
                 >
                   <List.Item.Meta
                     title={(
-                      <Space wrap>
-                        <strong>{item.name}</strong>
+                      <div className="novel-resource-workspace__title-row">
+                        <strong className="novel-resource-workspace__title-text" title={item.name}>{item.name}</strong>
                         <Tag>{FACTION_TYPE_OPTIONS.find((option) => option.value === item.type)?.label || item.type}</Tag>
-                      </Space>
+                      </div>
                     )}
-                    description={item.goal || item.currentPhase || '还没有写清目标与阶段。'}
+                    description={(
+                      <div className="novel-resource-workspace__desc" title={item.goal || item.currentPhase || '还没有写清目标与阶段。'}>
+                        {item.goal || item.currentPhase || '还没有写清目标与阶段。'}
+                      </div>
+                    )}
                   />
                 </List.Item>
               )}
             />
           </div>
 
-          <Form form={form} layout="vertical" initialValues={EMPTY_VALUES}>
+          <Form form={form} layout="vertical" initialValues={EMPTY_VALUES} className="novel-resource-workspace__content">
             <div className="guided-step__field-grid">
               <div className="guided-step__field-card">
                 <Form.Item name="name" label="势力名称" rules={[{ required: true, message: '请填写势力名称' }]}>
@@ -344,7 +349,7 @@ export default function FactionsPage({ novelId }: Props) {
                     <div style={{ display: 'grid', gap: 12 }}>
                       <div style={{ fontWeight: 600 }}>外部关系</div>
                       {fields.map((field) => (
-                        <div key={field.key} style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr 1fr auto', gap: 12, alignItems: 'start' }}>
+                        <div key={field.key} className="novel-faction-relations__row">
                           <Form.Item name={[field.name, 'targetFactionName']} rules={[{ required: true, message: '请填写目标势力' }]}>
                             <Input placeholder="目标势力名称" />
                           </Form.Item>
@@ -354,7 +359,7 @@ export default function FactionsPage({ novelId }: Props) {
                           <Form.Item name={[field.name, 'note']}>
                             <Input placeholder="补充说明" />
                           </Form.Item>
-                          <Button danger onClick={() => remove(field.name)}>删除</Button>
+                          <Button danger className="novel-faction-relations__remove" onClick={() => remove(field.name)}>删除</Button>
                         </div>
                       ))}
                       <Button onClick={() => add({ relation: 'neutral' })}>新增关系</Button>

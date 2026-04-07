@@ -443,7 +443,7 @@ function buildPagedResult<T>(items: T[], page: number, pageSize: number, total: 
 function mapCharacterEntity(row: typeof characters.$inferSelect) {
   return {
     ...row,
-    campFactionIdsJson: resolveFactionJson(row.novelId, row.campFactionIdsJson),
+    campFactionIdsJson: resolveFactionJson(row.novelId, row.campFactionIdsJson) ?? null,
   }
 }
 

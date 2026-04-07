@@ -4,6 +4,12 @@ function joinClassNames(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(' ')
 }
 
+function getNodeTitle(value: React.ReactNode): string | undefined {
+  return typeof value === 'string' || typeof value === 'number'
+    ? String(value)
+    : undefined
+}
+
 export function WorkspacePage({
   eyebrow,
   title,
@@ -43,7 +49,7 @@ export function WorkspacePage({
         <div className="novel-hero__copy">
           {eyebrow ? <div className="novel-hero__eyebrow">{eyebrow}</div> : null}
           <h1 className="novel-hero__title">{title}</h1>
-          <p className="novel-hero__description">{description}</p>
+          <p className="novel-hero__description" title={getNodeTitle(description)}>{description}</p>
         </div>
         {actions ? <div className="novel-hero__actions">{actions}</div> : null}
         {contextSummary ? <div className="novel-hero__context">{contextSummary}</div> : null}
@@ -81,8 +87,8 @@ export function WorkspaceMetric({
   return (
     <div className={`novel-metric novel-metric--${tone}`}>
       <div className="novel-metric__label">{label}</div>
-      <div className="novel-metric__value">{value}</div>
-      {hint ? <div className="novel-metric__hint">{hint}</div> : null}
+      <div className="novel-metric__value" title={getNodeTitle(value)}>{value}</div>
+      {hint ? <div className="novel-metric__hint" title={getNodeTitle(hint)}>{hint}</div> : null}
     </div>
   )
 }
@@ -108,7 +114,7 @@ export function WorkspacePanel({
         <div className="novel-panel__header">
           <div>
             {title ? <h2 className="novel-panel__title">{title}</h2> : null}
-            {description ? <div className="novel-panel__desc">{description}</div> : null}
+            {description ? <div className="novel-panel__desc" title={getNodeTitle(description)}>{description}</div> : null}
           </div>
           {extra ? <div className="novel-panel__extra">{extra}</div> : null}
         </div>
@@ -143,7 +149,7 @@ export function WorkspaceContextSummary({
       {items.map((item) => (
         <div key={item.label} className="novel-context-summary__item">
           <dt>{item.label}</dt>
-          <dd>{item.value}</dd>
+          <dd title={getNodeTitle(item.value)}>{item.value}</dd>
         </div>
       ))}
     </dl>

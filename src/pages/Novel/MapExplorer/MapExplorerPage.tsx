@@ -3,7 +3,7 @@ import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Pagination, Prog
 import { ApartmentOutlined, DeleteOutlined, DownOutlined, EditOutlined, EyeInvisibleOutlined, FullscreenExitOutlined, FullscreenOutlined, PlusOutlined, ReloadOutlined, RobotOutlined, SaveOutlined, ShareAltOutlined, StopOutlined, UnorderedListOutlined, UpOutlined } from '@ant-design/icons'
 import { useSearchParams } from 'react-router-dom'
 import AIGenerateButton from '../../../components/AIGenerateButton'
-import type { MapBatchGenerationResult, MapGraphPayload, MapNodeSummary, MapRelation, MapRelationInput, Task, WorldMapItem } from '../../../types'
+import type { MapAutoGenerateStatus, MapGraphPayload, MapNodeSummary, MapRelation, MapRelationInput, Task, WorldMapItem } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { getBlueprintLevelByDepth, getFactionNameOptions, getMapBlueprintDepth, getMapNodeTypeOptions, parseWorldRulesJson } from '../../../shared/genre-system'
@@ -66,6 +66,7 @@ const AUTO_TASK_STATUS_TEXT: Record<string, string> = {
   running: '运行中',
   cancel_requested: '停止中',
   paused: '已暂停',
+  cancelled: '已停止',
   failed: '失败',
   success: '已完成',
 }
@@ -157,7 +158,6 @@ export default function MapExplorerPage({ novelId }: Props) {
   const [relationForm] = Form.useForm<RelationFormValues>()
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [batchLoading, setBatchLoading] = useState(false)
   const [autoLoading, setAutoLoading] = useState(false)
   const [autoStopping, setAutoStopping] = useState(false)
   const [relationSaving, setRelationSaving] = useState(false)
@@ -168,6 +168,10 @@ export default function MapExplorerPage({ novelId }: Props) {
   const [allRelations, setAllRelations] = useState<MapRelation[]>([])
   const [selectedNode, setSelectedNode] = useState<MapNodeSummary | null>(null)
   const selectedNodeRef = useRef<MapNodeSummary | null>(null)
+  const autoTaskRef = useRef<Task | null>(null)
+  const autoStatusRef = useRef<MapAutoGenerateStatus>(EMPTY_AUTO_STATUS)
+  const autoRefreshInFlightRef = useRef(false)
+  const autoRefreshQueuedRef = useRef(false)
   const graphStageRef = useRef<HTMLDivElement | null>(null)
   const [selectedRelation, setSelectedRelation] = useState<MapRelation | null>(null)
   const [branchPath, setBranchPath] = useState<MapNodeSummary[]>([])
@@ -265,11 +269,25 @@ export default function MapExplorerPage({ novelId }: Props) {
 
   const loadAutoStatus = useCallback(async () => {
     const latestTask = await window.electron.map.getLatestAutoGenerateTask(novelId)
-    setAutoTask(latestTask)
     if (latestTask) {
-      setAutoStatus(await window.electron.map.getAutoGenerateStatus(latestTask.id) || EMPTY_AUTO_STATUS)
+      autoTaskRef.current = latestTask
+      setAutoTask(latestTask)
+      const latestStatus = await window.electron.map.getAutoGenerateStatus(latestTask.id) || EMPTY_AUTO_STATUS
+      autoStatusRef.current = latestStatus
+      setAutoStatus(latestStatus)
       return latestTask
     }
+
+    const retainedTask = autoTaskRef.current
+    if (retainedTask && ['success', 'failed', 'cancelled'].includes(retainedTask.status || '')) {
+      setAutoTask(retainedTask)
+      setAutoStatus(autoStatusRef.current)
+      return retainedTask
+    }
+
+    autoTaskRef.current = null
+    autoStatusRef.current = EMPTY_AUTO_STATUS
+    setAutoTask(null)
     setAutoStatus(EMPTY_AUTO_STATUS)
     return null
   }, [novelId])
@@ -362,6 +380,36 @@ export default function MapExplorerPage({ novelId }: Props) {
     }
   }, [branchPage, currentParent, loadAllRelations, loadAutoStatus, loadBranch, loadGraph, loadRoots, loadStats, loadTree, rootPage, searchKeyword, selectNode, workspaceMode])
 
+  const refreshGeneratedContent = useCallback(async (preferredId: number | null = selectedNodeRef.current?.id || null) => {
+    if (autoRefreshInFlightRef.current) {
+      autoRefreshQueuedRef.current = true
+      return
+    }
+
+    autoRefreshInFlightRef.current = true
+
+    try {
+      await Promise.all([
+        loadRoots(rootPage, searchKeyword),
+        loadBranch(currentParent, branchPage),
+        loadStats(),
+        loadTree(),
+        workspaceMode === 'graph' ? loadGraph() : loadAllRelations(),
+      ])
+
+      const nextSelected = preferredId ? await window.electron.map.getNode(preferredId) : null
+      if (nextSelected) selectNode(nextSelected)
+      else if (preferredId != null && selectedNodeRef.current?.id === preferredId) selectNode(null)
+    } finally {
+      autoRefreshInFlightRef.current = false
+
+      if (autoRefreshQueuedRef.current) {
+        autoRefreshQueuedRef.current = false
+        void refreshGeneratedContent(selectedNodeRef.current?.id || null)
+      }
+    }
+  }, [branchPage, currentParent, loadAllRelations, loadBranch, loadGraph, loadRoots, loadStats, loadTree, rootPage, searchKeyword, selectNode, workspaceMode])
+
   const focusNodeById = useCallback(async (nodeId?: number | null) => {
     if (!nodeId) {
       setBranchPath([])
@@ -409,33 +457,76 @@ export default function MapExplorerPage({ novelId }: Props) {
   }, [resetBatchForm])
 
   useEffect(() => {
+    autoTaskRef.current = autoTask
+  }, [autoTask])
+
+  useEffect(() => {
+    autoStatusRef.current = autoStatus
+  }, [autoStatus])
+
+  useEffect(() => {
     if (workspaceMode !== 'graph') return
     void loadGraph()
   }, [loadGraph, workspaceMode])
 
   useEffect(() => {
     if (!autoTask?.id) return
+    if (!['running', 'cancel_requested'].includes(autoTask.status || '')) return
+
+    const updateAutoTaskStatus = (status?: Task['status']) => {
+      if (!status) return
+      setAutoTask((current) => {
+        if (!current || current.id !== autoTask.id) return current
+        const nextTask = { ...current, status }
+        autoTaskRef.current = nextTask
+        return nextTask
+      })
+    }
+
+    const syncProgress = (nextProgress: MapAutoGenerateStatus) => {
+      const previous = autoStatusRef.current
+      autoStatusRef.current = nextProgress
+      setAutoStatus(nextProgress)
+
+      const batchAdvanced = nextProgress.generatedNodeCount > previous.generatedNodeCount
+        || nextProgress.processedParentCount > previous.processedParentCount
+        || (nextProgress.completed && !previous.completed)
+        || ['paused', 'success'].includes(nextProgress.status || '')
+
+      if (batchAdvanced) {
+        void refreshGeneratedContent(selectedNodeRef.current?.id || null)
+      }
+    }
 
     const reload = () => {
       void loadAutoStatus()
-      void loadStats()
+      void refreshGeneratedContent(selectedNodeRef.current?.id || null)
     }
 
     const unsubProgress = window.electron.on('task:progress', (data: unknown) => {
-      const payload = data as { taskId: number }
-      if (payload?.taskId === autoTask.id) reload()
+      const payload = data as { taskId: number; progress?: MapAutoGenerateStatus }
+      if (payload?.taskId !== autoTask.id) return
+      if (payload.progress && typeof payload.progress === 'object') {
+        syncProgress(payload.progress)
+        return
+      }
+      void loadAutoStatus()
     })
 
     const unsubStatus = window.electron.on('task:status-change', (data: unknown) => {
-      const payload = data as { taskId: number }
-      if (payload?.taskId === autoTask.id) reload()
+      const payload = data as { taskId: number; status?: Task['status'] }
+      if (payload?.taskId !== autoTask.id) return
+      updateAutoTaskStatus(payload.status)
+      if (['paused', 'success', 'failed', 'cancelled'].includes(payload.status || '')) {
+        void refreshGeneratedContent(selectedNodeRef.current?.id || null)
+      }
+      void loadAutoStatus()
     })
 
     const unsubComplete = window.electron.on('task:complete', (data: unknown) => {
       const payload = data as { taskId: number }
       if (payload?.taskId === autoTask.id) {
         reload()
-        void refreshVisible({ preferredId: selectedNode?.id || null })
       }
     })
 
@@ -447,7 +538,7 @@ export default function MapExplorerPage({ novelId }: Props) {
       unsubStatus()
       unsubComplete()
     }
-  }, [autoTask?.id, loadAutoStatus, loadStats, refreshVisible, selectedNode?.id])
+  }, [autoTask?.id, autoTask?.status, loadAutoStatus, refreshGeneratedContent])
 
   useEffect(() => {
     const syncFullscreenState = () => {
@@ -607,28 +698,6 @@ export default function MapExplorerPage({ novelId }: Props) {
         message.success(getUserFacingMessage('map.cleared'))
       },
     })
-  }
-
-  const handleBatchGenerate = async () => {
-    setBatchLoading(true)
-    try {
-      const values = batchForm.getFieldsValue()
-      const options = buildGenerateOptions(values, blueprintLevels)
-      let completed = false
-      let lastMessage = '地图结构已生成。'
-      while (!completed) {
-        const result = await window.electron.map.batchGenerate(novelId, options) as MapBatchGenerationResult
-        lastMessage = result.message || lastMessage
-        completed = result.completed
-        await refreshVisible({ preferredId: selectedNodeRef.current?.id || null })
-      }
-      message.success(lastMessage)
-      setBatchOpen(false)
-    } catch (error: unknown) {
-      message.error(getErrorMessage(error, 'map.batchGenerateFailed'))
-    } finally {
-      setBatchLoading(false)
-    }
   }
 
   const handleStartAutoGenerate = async () => {
@@ -849,7 +918,7 @@ export default function MapExplorerPage({ novelId }: Props) {
 
   const autoTaskTone = autoTask?.status === 'failed'
     ? 'error'
-    : autoTask?.status === 'paused'
+    : autoTask?.status === 'paused' || autoTask?.status === 'cancelled'
       ? 'warning'
       : autoTask?.status === 'success'
         ? 'success'
@@ -863,7 +932,7 @@ export default function MapExplorerPage({ novelId }: Props) {
           启动自动分批
         </Button>
       ) : null}
-      {autoTask?.status === 'paused' ? (
+      {['paused', 'cancelled'].includes(autoTask?.status || '') ? (
         <Button icon={<ReloadOutlined />} loading={autoLoading} onClick={() => void handleResumeAutoGenerate()}>
           继续
         </Button>
@@ -898,7 +967,7 @@ export default function MapExplorerPage({ novelId }: Props) {
       onToggle={setAutoTaskCardExpanded}
     >
       <Alert
-        type={autoTask?.status === 'failed' ? 'error' : autoTask?.status === 'paused' ? 'warning' : autoTask?.status === 'success' ? 'success' : 'info'}
+        type={autoTask?.status === 'failed' ? 'error' : autoTask?.status === 'paused' || autoTask?.status === 'cancelled' ? 'warning' : autoTask?.status === 'success' ? 'success' : 'info'}
         showIcon
         message={autoTaskMessage}
         description={autoTaskDescription}
@@ -1412,11 +1481,11 @@ export default function MapExplorerPage({ novelId }: Props) {
         title="按层级生成地图"
         open={batchOpen}
         forceRender
-        onCancel={() => { if (!batchLoading) setBatchOpen(false) }}
-        onOk={() => void handleBatchGenerate()}
-        confirmLoading={batchLoading}
-        okText="开始生成"
-        cancelButtonProps={{ disabled: batchLoading }}
+        onCancel={() => { if (!autoLoading) setBatchOpen(false) }}
+        onOk={() => void handleStartAutoGenerate()}
+        confirmLoading={autoLoading}
+        okText="开始后台生成"
+        cancelButtonProps={{ disabled: autoLoading }}
       >
         <Form form={batchForm} layout="vertical">
           {blueprintLevels.map((level) => (

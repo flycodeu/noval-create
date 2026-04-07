@@ -69,7 +69,7 @@ function mapGlossaryEntry(row: typeof glossary.$inferSelect): AppGlossaryEntry {
     aliasesJson: row.aliasesJson ?? undefined,
     firstAppearChapter: row.firstAppearChapter ?? undefined,
     relatedEntityIdsJson: row.relatedEntityIdsJson ?? undefined,
-    isCanonical: row.isCanonical > 0 ? 1 : 0,
+    isCanonical: (row.isCanonical ?? 0) > 0 ? 1 : 0,
     sortOrder: row.sortOrder || 0,
     createdAt: row.createdAt || '',
     updatedAt: row.updatedAt || '',

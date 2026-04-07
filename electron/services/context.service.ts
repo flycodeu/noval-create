@@ -356,7 +356,7 @@ function buildGlossaryContextSummary(
     .where(eq(glossary.novelId, novelId))
     .orderBy(asc(glossary.sortOrder), asc(glossary.id))
     .all()
-    .filter((row) => row.isCanonical > 0)
+    .filter((row) => (row.isCanonical ?? 0) > 0)
 
   const matched = rows.filter((row) => {
     const candidates = [row.term, ...parseGlossaryAliases(row.aliasesJson)]

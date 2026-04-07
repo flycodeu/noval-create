@@ -144,6 +144,15 @@ interface ModelQueueState {
 const abortControllers = new Map<number, AbortController>()
 const queuedTaskEntries = new Map<number, QueuedTaskEntry>()
 const modelQueueStates = new Map<number, ModelQueueState>()
+const RESUMABLE_WORKFLOW_TYPES = new Set<TaskType>([
+  'map_auto_generate',
+  'world_rules_auto_generate',
+  'character_auto_generate',
+  'item_auto_generate',
+  'timeline_auto_generate',
+  'story_thread_auto_generate',
+  'subplot_auto_generate',
+])
 const TASK_HEARTBEAT_INTERVAL_MS = 15_000
 const RATE_LIMIT_RETRY_LIMIT = 3
 const RATE_LIMIT_BASE_DELAY_MS = 1_500
@@ -949,12 +958,13 @@ export function cancelTask(taskId: number, sender?: WebContents): boolean {
       ...control,
       cancelRequested: true,
     })
+    const shouldPauseWorkflow = RESUMABLE_WORKFLOW_TYPES.has(task.type as TaskType)
 
     if (typeof task.currentChildTaskId !== 'number') {
-      updateTaskStatus(taskId, 'cancelled', sender, {
+      updateTaskStatus(taskId, shouldPauseWorkflow ? 'cancel_requested' : 'cancelled', sender, {
         controlJson: nextControlJson,
         currentChildTaskId: null,
-        errorMessage: '用户已取消',
+        errorMessage: shouldPauseWorkflow ? null : '用户已取消',
       })
       return true
     }

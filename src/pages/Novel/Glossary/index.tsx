@@ -220,8 +220,8 @@ export default function GlossaryPage({ novelId }: Props) {
       ) : null}
 
       <WorkspacePanel title="词典清单" description="左侧筛选，右侧编辑定义与别名。">
-        <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: 20 }}>
-          <div style={{ display: 'grid', gap: 12 }}>
+        <div className="novel-resource-workspace__layout">
+          <div className="novel-resource-workspace__sidebar">
             <Input.Search value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索术语、定义或别名" allowClear />
             <Select value={canonicalFilter} onChange={setCanonicalFilter} options={[
               { value: 'all', label: '全部' },
@@ -235,6 +235,7 @@ export default function GlossaryPage({ novelId }: Props) {
               locale={{ emptyText: '当前没有术语记录' }}
               renderItem={(item) => (
                 <List.Item
+                  className="novel-resource-workspace__list-item"
                   onClick={() => setSelectedId(item.id)}
                   style={{
                     cursor: 'pointer',
@@ -247,20 +248,24 @@ export default function GlossaryPage({ novelId }: Props) {
                 >
                   <List.Item.Meta
                     title={(
-                      <Space wrap>
-                        <strong>{item.term}</strong>
+                      <div className="novel-resource-workspace__title-row">
+                        <strong className="novel-resource-workspace__title-text" title={item.term}>{item.term}</strong>
                         <Tag>{GLOSSARY_CATEGORY_OPTIONS.find((option) => option.value === item.category)?.label || item.category}</Tag>
                         {item.isCanonical > 0 ? <Tag color="success">规范</Tag> : <Tag>废弃</Tag>}
-                      </Space>
+                      </div>
                     )}
-                    description={item.definition || '还没有定义。'}
+                    description={(
+                      <div className="novel-resource-workspace__desc" title={item.definition || '还没有定义。'}>
+                        {item.definition || '还没有定义。'}
+                      </div>
+                    )}
                   />
                 </List.Item>
               )}
             />
           </div>
 
-          <Form form={form} layout="vertical" initialValues={EMPTY_VALUES}>
+          <Form form={form} layout="vertical" initialValues={EMPTY_VALUES} className="novel-resource-workspace__content">
             <div className="guided-step__field-grid">
               <div className="guided-step__field-card">
                 <Form.Item name="term" label="术语" rules={[{ required: true, message: '请填写术语' }]}>

@@ -98,6 +98,20 @@ function stringifyNumberArray(raw: unknown): string {
     .filter((item): item is number => typeof item === 'number'))
 }
 
+function parseJsonNumberArray(raw?: string | null): number[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    return Array.isArray(parsed)
+      ? parsed
+        .map((item) => asNumber(item))
+        .filter((item): item is number => typeof item === 'number')
+      : []
+  } catch {
+    return []
+  }
+}
+
 function normalizePaging(page?: number, pageSize?: number, fallbackPageSize = 24) {
   const nextPageSize = Math.max(1, Math.min(pageSize || fallbackPageSize, 200))
   const nextPage = Math.max(1, page || 1)

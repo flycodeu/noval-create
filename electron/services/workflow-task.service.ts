@@ -320,14 +320,19 @@ async function runMapAutoGenerateWorkflow(taskId: number, sender?: WebContents) 
       let progress = toMapStatus(taskId, latestTask)
 
       if (control.cancelRequested) {
+        updateTaskControl(taskId, {
+          ...control,
+          cancelRequested: false,
+        })
         progress = {
           ...progress,
-          status: 'cancelled',
-          message: '地图自动生成已停止。',
+          status: 'paused',
+          lastError: '',
+          message: '地图自动生成已暂停，可随时继续。',
         }
         updateTaskProgress(taskId, progress, sender)
-        updateTaskStatus(taskId, 'cancelled', sender, {
-          errorMessage: '用户已取消',
+        updateTaskStatus(taskId, 'paused', sender, {
+          errorMessage: null,
           currentChildTaskId: null,
         })
         break
@@ -414,14 +419,19 @@ async function runMapAutoGenerateWorkflow(taskId: number, sender?: WebContents) 
         const isAbort = error instanceof Error && error.name === 'AbortError'
 
         if (isAbort || currentControl.cancelRequested) {
-          const cancelledProgress: MapAutoGenerateStatus = {
+          updateTaskControl(taskId, {
+            ...currentControl,
+            cancelRequested: false,
+          })
+          const pausedProgress: MapAutoGenerateStatus = {
             ...currentProgress,
-            status: 'cancelled',
-            message: '地图自动生成已停止。',
+            status: 'paused',
+            lastError: '',
+            message: '地图自动生成已暂停，可随时继续。',
           }
-          updateTaskProgress(taskId, cancelledProgress, sender)
-          updateTaskStatus(taskId, 'cancelled', sender, {
-            errorMessage: '用户已取消',
+          updateTaskProgress(taskId, pausedProgress, sender)
+          updateTaskStatus(taskId, 'paused', sender, {
+            errorMessage: null,
             currentChildTaskId: null,
           })
           break
