@@ -1511,6 +1511,7 @@ html[data-theme="light"] .ant-dropdown-menu {
   color: var(--workspace-ink-soft);
   font-size: 12px;
   line-height: 1.75;
+  display: none;
 }
 
 .novel-support-grid {

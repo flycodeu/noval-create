@@ -13,7 +13,7 @@ function getNodeTitle(value: React.ReactNode): string | undefined {
 export function WorkspacePage({
   eyebrow,
   title,
-  description,
+  description: _description,
   actions,
   metrics,
   contextSummary,
@@ -28,7 +28,7 @@ export function WorkspacePage({
 }: {
   eyebrow?: string
   title: string
-  description: string
+  description?: string
   actions?: React.ReactNode
   metrics?: React.ReactNode
   contextSummary?: React.ReactNode
@@ -49,7 +49,6 @@ export function WorkspacePage({
         <div className="novel-hero__copy">
           {eyebrow ? <div className="novel-hero__eyebrow">{eyebrow}</div> : null}
           <h1 className="novel-hero__title">{title}</h1>
-          <p className="novel-hero__description" title={getNodeTitle(description)}>{description}</p>
         </div>
         {actions ? <div className="novel-hero__actions">{actions}</div> : null}
         {contextSummary ? <div className="novel-hero__context">{contextSummary}</div> : null}
@@ -76,7 +75,7 @@ export function WorkspacePage({
 export function WorkspaceMetric({
   label,
   value,
-  hint,
+  hint: _hint,
   tone = 'default',
 }: {
   label: string
@@ -88,14 +87,13 @@ export function WorkspaceMetric({
     <div className={`novel-metric novel-metric--${tone}`}>
       <div className="novel-metric__label">{label}</div>
       <div className="novel-metric__value" title={getNodeTitle(value)}>{value}</div>
-      {hint ? <div className="novel-metric__hint" title={getNodeTitle(hint)}>{hint}</div> : null}
     </div>
   )
 }
 
 export function WorkspacePanel({
   title,
-  description,
+  description: _description,
   extra,
   className,
   bodyClassName,
@@ -110,12 +108,9 @@ export function WorkspacePanel({
 }) {
   return (
     <section className={joinClassNames('novel-panel', className)}>
-      {title || description || extra ? (
+      {title || extra ? (
         <div className="novel-panel__header">
-          <div>
-            {title ? <h2 className="novel-panel__title">{title}</h2> : null}
-            {description ? <div className="novel-panel__desc" title={getNodeTitle(description)}>{description}</div> : null}
-          </div>
+          {title ? <div><h2 className="novel-panel__title">{title}</h2></div> : null}
           {extra ? <div className="novel-panel__extra">{extra}</div> : null}
         </div>
       ) : null}
