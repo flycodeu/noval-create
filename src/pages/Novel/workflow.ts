@@ -13,9 +13,12 @@ export type WorkflowRecommendationKey =
   | 'story-design'
   | 'world-rules'
   | 'map'
+  | 'factions'
   | 'characters'
   | 'items'
+  | 'glossary'
   | 'threads'
+  | 'scene-templates'
   | 'outline'
   | 'structure'
   | 'timeline'
@@ -49,9 +52,12 @@ export type WorkflowRunnableStepKey =
 
 export interface WorkflowStats {
   mapCount: number
+  factionCount: number
   characterCount: number
   itemCount: number
+  glossaryCount: number
   threadCount: number
+  sceneTemplateCount: number
   outlineCount: number
   timelineCount: number
   revisionTaskCount: number
@@ -103,9 +109,12 @@ export const GUIDED_STEP_ORDER: GuidedWorkflowStepKey[] = [
 
 export const EMPTY_WORKFLOW_STATS: WorkflowStats = {
   mapCount: 0,
+  factionCount: 0,
   characterCount: 0,
   itemCount: 0,
+  glossaryCount: 0,
   threadCount: 0,
+  sceneTemplateCount: 0,
   outlineCount: 0,
   timelineCount: 0,
   revisionTaskCount: 0,
@@ -121,12 +130,15 @@ export const EMPTY_WORKFLOW_STATS: WorkflowStats = {
 }
 
 export async function loadWorkflowStats(novelId: number): Promise<WorkflowStats> {
-  const [baseStats, characterStats, itemStats, mapStats, threadStats, revisionStats, arcs, timelineStats, volumes, contextStatus] = await Promise.all([
+  const [baseStats, characterStats, itemStats, mapStats, factionStats, glossaryStats, threadStats, sceneTemplateStats, revisionStats, arcs, timelineStats, volumes, contextStatus] = await Promise.all([
     window.electron.novel.stats(novelId),
     window.electron.character.getStats({ novelId, page: 1, pageSize: 1 }),
     window.electron.item.getStats({ novelId, page: 1, pageSize: 1 }),
     window.electron.map.getStats(novelId),
+    window.electron.faction.getStats({ novelId }),
+    window.electron.glossary.getStats({ novelId }),
     window.electron.thread.getStats({ novelId, page: 1, pageSize: 1 }),
+    window.electron.sceneTemplate.getStats({ novelId }),
     window.electron.revision.getStats({ novelId, page: 1, pageSize: 1 }),
     window.electron.outline.getArcs(novelId),
     window.electron.timeline.getStats({ novelId }),
@@ -136,9 +148,12 @@ export async function loadWorkflowStats(novelId: number): Promise<WorkflowStats>
 
   return {
     mapCount: mapStats.total,
+    factionCount: factionStats.total,
     characterCount: characterStats.total,
     itemCount: itemStats.total,
+    glossaryCount: glossaryStats.total,
     threadCount: threadStats.total,
+    sceneTemplateCount: sceneTemplateStats.total,
     outlineCount: arcs.length,
     timelineCount: timelineStats.total,
     revisionTaskCount: revisionStats.openCount + revisionStats.inProgressCount,

@@ -28,6 +28,7 @@ function deriveNovelChangeReasons(
     settingsJson: string
     themeVoiceJson: string
     worldRulesJson: string
+    blurbJson: string
     expandedBackground: string
     modelConfigId: number
     styleTemplateId: number
@@ -110,6 +111,7 @@ export function getNovel(id: number) {
     settingsJson: novels.settingsJson,
     themeVoiceJson: novels.themeVoiceJson,
     worldRulesJson: novels.worldRulesJson,
+    blurbJson: novels.blurbJson,
     styleTemplateId: novels.styleTemplateId,
     worldTemplateId: novels.worldTemplateId,
     contextVersion: novels.contextVersion,
@@ -138,6 +140,7 @@ export function createNovel(data: {
   worldTemplateId?: number
   targetWords?: number
   modelConfigId?: number
+  blurbJson?: string
 }) {
   const db = getDb()
   const genre = data.genreId
@@ -166,10 +169,11 @@ export function updateNovel(id: number, data: Partial<{
     settingsJson: string
     themeVoiceJson: string
     worldRulesJson: string
+    blurbJson: string
     expandedBackground: string
     modelConfigId: number
   styleTemplateId: number
-  worldTemplateId: number
+    worldTemplateId: number
 }>) {
   const db = getDb()
   const current = db.select().from(novels).where(eq(novels.id, id)).all()[0]

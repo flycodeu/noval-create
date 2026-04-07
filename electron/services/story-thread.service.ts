@@ -526,6 +526,98 @@ export function getStoryThreadStats(filters: StoryThreadQueryFilters) {
   })
 }
 
+function isForeshadowCandidate(thread: typeof storyThreads.$inferSelect) {
+  return Boolean(
+    typeof thread.targetPayoffChapter === 'number'
+    || (thread.payoffCondition && thread.payoffCondition.trim())
+    || thread.threadType === 'mystery'
+    || thread.threadType === 'payoff'
+  )
+}
+
+function buildForeshadowCard(
+  thread: typeof storyThreads.$inferSelect,
+  currentChapterNum: number,
+) {
+  const plantedChapter = thread.plantedChapter ?? thread.startChapter ?? undefined
+  const targetPayoffChapter = thread.targetPayoffChapter ?? undefined
+  const currentDistance = typeof targetPayoffChapter === 'number'
+    ? targetPayoffChapter - currentChapterNum
+    : undefined
+  const relatedCharacterCount = parseJsonNumberArray(thread.relatedCharacterIdsJson).length
+  const isOverdue = typeof targetPayoffChapter === 'number'
+    && currentChapterNum > targetPayoffChapter
+    && thread.status !== 'resolved'
+    && thread.status !== 'abandoned'
+  const isDueSoon = typeof targetPayoffChapter === 'number'
+    && currentChapterNum >= targetPayoffChapter - 3
+    && currentChapterNum <= targetPayoffChapter
+    && thread.status !== 'resolved'
+    && thread.status !== 'abandoned'
+
+  return {
+    id: thread.id,
+    title: thread.title,
+    threadType: normalizeThreadType(thread.threadType),
+    status: normalizeStatus(thread.status),
+    priority: normalizePriority(thread.priority),
+    plantedChapter,
+    startChapter: thread.startChapter ?? undefined,
+    targetPayoffChapter,
+    currentDistance,
+    relatedCharacterCount,
+    payoffCondition: thread.payoffCondition ?? undefined,
+    summary: thread.summary ?? undefined,
+    currentState: thread.currentState ?? undefined,
+    warningText: isOverdue
+      ? '已超过目标回收章位，建议优先处理。'
+      : isDueSoon
+        ? '接近目标回收章位，建议尽快安排兑现。'
+        : undefined,
+  }
+}
+
+export function getForeshadowSnapshot(novelId: number) {
+  const currentChapterNum = getLatestChapterNum(novelId)
+  const snapshot = {
+    currentChapterNum,
+    pending: [] as Array<ReturnType<typeof buildForeshadowCard>>,
+    dueSoon: [] as Array<ReturnType<typeof buildForeshadowCard>>,
+    resolved: [] as Array<ReturnType<typeof buildForeshadowCard>>,
+    overdue: [] as Array<ReturnType<typeof buildForeshadowCard>>,
+  }
+
+  listStoryThreads(novelId)
+    .filter(isForeshadowCandidate)
+    .forEach((thread) => {
+      const card = buildForeshadowCard(thread, currentChapterNum)
+      if (card.status === 'resolved') {
+        snapshot.resolved.push(card)
+        return
+      }
+      if (card.status === 'abandoned') {
+        return
+      }
+      if (
+        typeof card.targetPayoffChapter === 'number'
+        && currentChapterNum > card.targetPayoffChapter
+      ) {
+        snapshot.overdue.push(card)
+        return
+      }
+      if (
+        typeof card.targetPayoffChapter === 'number'
+        && currentChapterNum >= card.targetPayoffChapter - 3
+      ) {
+        snapshot.dueSoon.push(card)
+        return
+      }
+      snapshot.pending.push(card)
+    })
+
+  return snapshot
+}
+
 export function createStoryThread(
   novelId: number,
   data: Partial<typeof storyThreads.$inferInsert>,

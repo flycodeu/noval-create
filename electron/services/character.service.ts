@@ -29,6 +29,10 @@ import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/ut
 import { buildCharacterRelationSummaryLine, normalizeCharacterRelationLevel } from '../../src/shared/character-relations'
 import { markNovelContextChanged } from './context-impact.service'
 import { runAssetQualityLoop, summarizeAssetQualityWarnings } from './asset-quality.service'
+import {
+  resolveFactionNamesFromReferences,
+  stringifyFactionReferences,
+} from './faction-reference.service'
 import { throwUserFacingError } from '../utils/user-facing-error'
 
 function asText(value: unknown): string {
@@ -116,6 +120,17 @@ function inferEntityType(species: string): string {
 
 function jsonStringifyArray(value: string[]): string {
   return JSON.stringify(cleanAiStringArray(value))
+}
+
+function stringifyFactionReferenceInput(novelId: number, input: unknown): string {
+  return novelId > 0 ? stringifyFactionReferences(novelId, input) : jsonStringifyArray(toStringArray(input))
+}
+
+function resolveFactionJson(novelId: number, raw?: string | null): string | undefined {
+  const names = novelId > 0
+    ? resolveFactionNamesFromReferences(novelId, raw)
+    : parseJsonArray(raw)
+  return names.length > 0 ? JSON.stringify(names) : undefined
 }
 
 function roleOrder(roleType?: string | null): number {
@@ -226,7 +241,7 @@ function buildCurrentProfileSummary(character: typeof characters.$inferSelect): 
   const traits = parseJsonArray(character.personalityTraitsJson).join('、')
   const flaws = parseJsonArray(character.flawsJson).join('、')
   const habits = parseJsonArray(character.habitsJson).join('、')
-  const factions = parseJsonArray(character.campFactionIdsJson).join('、')
+  const factions = resolveFactionNamesFromReferences(character.novelId, character.campFactionIdsJson).join('、')
   const powerSystems = parseJsonArray(character.powerSystemRefsJson).join('、')
   const contextHooks = parseJsonArray(character.contextHooksJson).join('、')
   return [
@@ -299,6 +314,7 @@ function characterSchemaHint(expectedCount?: number): string {
 function buildCharacterPayload(
   parsed: Record<string, unknown>,
   fallback: {
+    novelId?: number
     roleType?: string
     fullName?: string
     existing?: typeof characters.$inferSelect | null
@@ -325,11 +341,12 @@ function buildCharacterPayload(
     : parseJsonArray(fallback.existing?.habitsJson)
   const species = asText(sanitized.species) || fallback.existing?.species || ''
   const entityType = asText(sanitized.entity_type) || fallback.existing?.entityType || inferEntityType(species)
+  const factionNovelId = fallback.existing?.novelId ?? fallback.novelId ?? 0
   const factionNames = toStringArray(sanitized.faction_names).length > 0
     ? toStringArray(sanitized.faction_names)
     : toStringArray(sanitized.factions).length > 0
       ? toStringArray(sanitized.factions)
-      : parseJsonArray(fallback.existing?.campFactionIdsJson)
+      : resolveFactionNamesFromReferences(factionNovelId, fallback.existing?.campFactionIdsJson)
   const powerSystemNames = toStringArray(sanitized.power_system_names).length > 0
     ? toStringArray(sanitized.power_system_names)
     : toStringArray(sanitized.power_system_refs).length > 0
@@ -361,7 +378,7 @@ function buildCharacterPayload(
     personalityTraitsJson: jsonStringifyArray(personalityTraits),
     flawsJson: jsonStringifyArray(flaws),
     habitsJson: jsonStringifyArray(habits),
-    campFactionIdsJson: jsonStringifyArray(factionNames),
+    campFactionIdsJson: stringifyFactionReferenceInput(factionNovelId, factionNames),
     powerSystemRefsJson: jsonStringifyArray(powerSystemNames),
     contextHooksJson: jsonStringifyArray(contextHooks),
     goals: asText(sanitized.goals) || fallback.existing?.goals || '',
@@ -423,10 +440,18 @@ function buildPagedResult<T>(items: T[], page: number, pageSize: number, total: 
   }
 }
 
+function mapCharacterEntity(row: typeof characters.$inferSelect) {
+  return {
+    ...row,
+    campFactionIdsJson: resolveFactionJson(row.novelId, row.campFactionIdsJson),
+  }
+}
+
 function mapCharacterRecord(row: Record<string, unknown>) {
+  const novelId = Number(row.novel_id)
   return {
     id: Number(row.id),
-    novelId: Number(row.novel_id),
+    novelId,
     roleType: String(row.role_type || 'minor') as typeof characters.$inferSelect['roleType'],
     recordStatus: normalizeRecordStatus(row.record_status),
     entityType: typeof row.entity_type === 'string' ? row.entity_type : undefined,
@@ -444,7 +469,7 @@ function mapCharacterRecord(row: Record<string, unknown>) {
     personalityTraitsJson: typeof row.personality_traits_json === 'string' ? row.personality_traits_json : undefined,
     flawsJson: typeof row.flaws_json === 'string' ? row.flaws_json : undefined,
     habitsJson: typeof row.habits_json === 'string' ? row.habits_json : undefined,
-    campFactionIdsJson: typeof row.camp_faction_ids_json === 'string' ? row.camp_faction_ids_json : undefined,
+    campFactionIdsJson: resolveFactionJson(novelId, typeof row.camp_faction_ids_json === 'string' ? row.camp_faction_ids_json : undefined),
     powerSystemRefsJson: typeof row.power_system_refs_json === 'string' ? row.power_system_refs_json : undefined,
     contextHooksJson: typeof row.context_hooks_json === 'string' ? row.context_hooks_json : undefined,
     goals: typeof row.goals === 'string' ? row.goals : undefined,
@@ -688,7 +713,7 @@ function characterMatchesGraphFilters(
   if (filters.recordStatus && filters.recordStatus !== 'all' && recordStatus !== filters.recordStatus) return false
   if (filters.roleTypes && filters.roleTypes.length > 0 && !filters.roleTypes.includes(roleType as typeof characters.$inferSelect['roleType'])) return false
   if (filters.factionNames && filters.factionNames.length > 0) {
-    const factionNames = parseJsonArray(typeof row.camp_faction_ids_json === 'string' ? row.camp_faction_ids_json : '')
+    const factionNames = resolveFactionNamesFromReferences(filters.novelId, typeof row.camp_faction_ids_json === 'string' ? row.camp_faction_ids_json : '')
     if (!filters.factionNames.some((name) => factionNames.includes(name))) return false
   }
   return true
@@ -851,11 +876,13 @@ export function listCharacters(novelId: number) {
     .where(eq(characters.novelId, novelId))
     .orderBy(asc(characters.sortOrder), asc(characters.id))
     .all()
+    .map(mapCharacterEntity)
 }
 
 export function getCharacter(id: number) {
   const db = getDb()
-  return db.select().from(characters).where(eq(characters.id, id)).all()[0] || null
+  const row = db.select().from(characters).where(eq(characters.id, id)).all()[0]
+  return row ? mapCharacterEntity(row) : null
 }
 
 export function createCharacter(
@@ -864,11 +891,17 @@ export function createCharacter(
   options: { skipContextTracking?: boolean } = {},
 ) {
   const db = getDb()
+  const normalizedData = {
+    ...data,
+    ...(Object.prototype.hasOwnProperty.call(data, 'campFactionIdsJson')
+      ? { campFactionIdsJson: stringifyFactionReferenceInput(novelId, data.campFactionIdsJson) }
+      : {}),
+  }
   const result = db.insert(characters).values({
     novelId,
-    fullName: data.fullName || '未命名角色',
-    recordStatus: normalizeRecordStatus(data.recordStatus),
-    ...data,
+    fullName: normalizedData.fullName || '未命名角色',
+    recordStatus: normalizeRecordStatus(normalizedData.recordStatus),
+    ...normalizedData,
   }).run()
   const id = Number(result.lastInsertRowid)
   if (!options.skipContextTracking) {
@@ -883,13 +916,19 @@ export function updateCharacter(
   options: { skipContextTracking?: boolean } = {},
 ) {
   const db = getDb()
-  db.update(characters).set({
+  const current = db.select().from(characters).where(eq(characters.id, id)).all()[0]
+  const normalizedData = {
     ...data,
-    ...(data.recordStatus ? { recordStatus: normalizeRecordStatus(data.recordStatus) } : {}),
+    ...(current && Object.prototype.hasOwnProperty.call(data, 'campFactionIdsJson')
+      ? { campFactionIdsJson: stringifyFactionReferenceInput(current.novelId, data.campFactionIdsJson) }
+      : {}),
+  }
+  db.update(characters).set({
+    ...normalizedData,
+    ...(normalizedData.recordStatus ? { recordStatus: normalizeRecordStatus(normalizedData.recordStatus) } : {}),
     updatedAt: new Date().toISOString(),
   }).where(eq(characters.id, id)).run()
   if (!options.skipContextTracking) {
-    const current = getCharacter(id)
     if (current) {
       markNovelContextChanged(current.novelId, 'Character profiles changed')
     }
@@ -1114,6 +1153,7 @@ export async function generateProtagonist(novelId: number, opts: {
   }
 
   const payload = buildCharacterPayload(parsed, {
+    novelId,
     roleType: 'protagonist',
     recordStatus: 'confirmed',
   })
@@ -1297,6 +1337,7 @@ export async function generateCharacterBatchChunk(
         for (const char of parsed) {
           const fallbackRole = roleQueue[createdIds.length] || 'minor'
           const payload = buildCharacterPayload(char, {
+            novelId,
             roleType: normalizeRoleType(asText(char.role_type) || fallbackRole),
             recordStatus: 'confirmed',
           })
@@ -1500,6 +1541,7 @@ export async function batchGenerateCharacters(novelId: number, opts: {
       for (const char of parsed) {
         const fallbackRole = roleQueue[newIds.length] || 'minor'
         const payload = buildCharacterPayload(char, {
+          novelId,
           roleType: normalizeRoleType(asText(char.role_type) || fallbackRole),
           recordStatus: 'confirmed',
         })
@@ -1669,6 +1711,7 @@ export async function regenerateCharacter(id: number): Promise<typeof characters
 
   const parsed = acceptedCandidate || cleanAiValue(safeParseJson<Record<string, unknown>>(result))
   const payload = buildCharacterPayload(parsed, {
+    novelId: current.novelId,
     existing: current,
     fullName: current.fullName,
     roleType: current.roleType || 'minor',

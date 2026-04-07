@@ -4,7 +4,16 @@ import type {
   ThemeVoiceGenerationResult,
   ThemeVoiceGenerationStepResult,
 } from '../../src/shared/theme-voice-generation'
-import type { ThemeVoiceDocument, ThemeVoicePov, ThemeVoiceTense } from '../../src/shared/theme-voice'
+import type {
+  ThemeVoiceDocument,
+  ThemeVoiceFlashbackPolicy,
+  ThemeVoiceOpeningStyle,
+  ThemeVoiceParallelTimelines,
+  ThemeVoicePov,
+  ThemeVoiceProtagonistCount,
+  ThemeVoiceTense,
+  ThemeVoiceViewpointMode,
+} from '../../src/shared/theme-voice'
 import { parseThemeVoiceDocument } from '../../src/shared/theme-voice'
 import {
   WRITING_CONTRACT_PRESETS,
@@ -68,6 +77,36 @@ function normalizeTense(value: unknown): ThemeVoiceTense | '' {
   return ''
 }
 
+function normalizeProtagonistCount(value: unknown): ThemeVoiceProtagonistCount | '' {
+  const text = typeof value === 'string' ? value.trim() : ''
+  if (text === 'single' || text === 'dual' || text === 'ensemble') return text
+  return ''
+}
+
+function normalizeViewpointMode(value: unknown): ThemeVoiceViewpointMode | '' {
+  const text = typeof value === 'string' ? value.trim() : ''
+  if (text === 'fixed' || text === 'rotating' || text === 'free_switch') return text
+  return ''
+}
+
+function normalizeParallelTimelines(value: unknown): ThemeVoiceParallelTimelines | '' {
+  const text = typeof value === 'string' ? value.trim() : ''
+  if (text === 'none' || text === 'light' || text === 'heavy') return text
+  return ''
+}
+
+function normalizeOpeningStyle(value: unknown): ThemeVoiceOpeningStyle | '' {
+  const text = typeof value === 'string' ? value.trim() : ''
+  if (text === 'hook' || text === 'daily' || text === 'incident' || text === 'flashback') return text
+  return ''
+}
+
+function normalizeFlashbackPolicy(value: unknown): ThemeVoiceFlashbackPolicy | '' {
+  const text = typeof value === 'string' ? value.trim() : ''
+  if (text === 'forbidden' || text === 'limited' || text === 'allowed') return text
+  return ''
+}
+
 function normalizeBlockText(value: unknown): string {
   if (Array.isArray(value)) {
     return cleanAiStringArray(
@@ -89,6 +128,11 @@ function buildCurrentThemeVoiceSummary(document: ThemeVoiceDocument): string {
     document.emotionalCore ? `情感核心：${document.emotionalCore}` : '',
     document.pov ? `视角：${document.pov}` : '',
     document.tense ? `时态：${document.tense}` : '',
+    document.protagonistCount ? `主角格局：${document.protagonistCount}` : '',
+    document.viewpointMode ? `视角调度：${document.viewpointMode}` : '',
+    document.parallelTimelines ? `叙事线：${document.parallelTimelines}` : '',
+    document.openingStyle ? `开篇方式：${document.openingStyle}` : '',
+    document.flashbackPolicy ? `插叙策略：${document.flashbackPolicy}` : '',
     document.narratorDistance ? `叙述距离：${document.narratorDistance}` : '',
     document.voiceKeywords ? `口吻关键词：${document.voiceKeywords}` : '',
     document.styleRules ? `风格规则：${document.styleRules}` : '',
@@ -138,6 +182,11 @@ function buildThemeVoicePrompt(
       '- emotionalCore 写读者最稳定收到的情绪回报。',
       '- pov 只能是 first_person / third_limited / third_omniscient / multi_pov。',
       '- tense 只能是 past / present / mixed。',
+      '- protagonistCount 只能是 single / dual / ensemble。',
+      '- viewpointMode 只能是 fixed / rotating / free_switch。',
+      '- parallelTimelines 只能是 none / light / heavy。',
+      '- openingStyle 只能是 hook / daily / incident / flashback。',
+      '- flashbackPolicy 只能是 forbidden / limited / allowed。',
       '- narratorDistance 写叙述距离和解释密度。',
       '- voiceKeywords 写 4-8 个口吻关键词。',
       '- styleRules / dialogueRules / descriptionRules 都要写成可执行规则，建议每行一条。',
@@ -165,7 +214,7 @@ function buildThemeVoicePrompt(
       '如果需要给出禁用表达，优先写类型和模式，也可以补少量典型短句。',
     ])),
     '只输出 JSON，不要解释，不要 Markdown，不要代码块。',
-    '{"writingContractTags":["wish_fulfillment"],"theme":"","motifs":"每行一条","emotionalCore":"","pov":"third_limited","tense":"past","narratorDistance":"","voiceKeywords":"每行一条","styleRules":"每行一条","dialogueRules":"每行一条","descriptionRules":"每行一条","forbiddenPhrases":"每行一条"}',
+    '{"writingContractTags":["wish_fulfillment"],"theme":"","motifs":"每行一条","emotionalCore":"","pov":"third_limited","tense":"past","protagonistCount":"single","viewpointMode":"fixed","parallelTimelines":"none","openingStyle":"hook","flashbackPolicy":"limited","narratorDistance":"","voiceKeywords":"每行一条","styleRules":"每行一条","dialogueRules":"每行一条","descriptionRules":"每行一条","forbiddenPhrases":"每行一条"}',
   ])
 }
 
@@ -179,6 +228,11 @@ function parseGeneratedThemeVoice(text: string): ThemeVoiceDocument {
     emotionalCore: normalizeBlockText(parsed.emotionalCore ?? parsed.emotional_core),
     pov: normalizePov(parsed.pov),
     tense: normalizeTense(parsed.tense),
+    protagonistCount: normalizeProtagonistCount(parsed.protagonistCount ?? parsed.protagonist_count),
+    viewpointMode: normalizeViewpointMode(parsed.viewpointMode ?? parsed.viewpoint_mode),
+    parallelTimelines: normalizeParallelTimelines(parsed.parallelTimelines ?? parsed.parallel_timelines),
+    openingStyle: normalizeOpeningStyle(parsed.openingStyle ?? parsed.opening_style),
+    flashbackPolicy: normalizeFlashbackPolicy(parsed.flashbackPolicy ?? parsed.flashback_policy),
     narratorDistance: normalizeBlockText(parsed.narratorDistance ?? parsed.narrator_distance),
     voiceKeywords: normalizeBlockText(parsed.voiceKeywords ?? parsed.voice_keywords),
     styleRules: normalizeBlockText(parsed.styleRules ?? parsed.style_rules),

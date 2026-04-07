@@ -78,6 +78,7 @@ export function runMigrations(sqlite: Database.Database) {
       settings_json TEXT,
       theme_voice_json TEXT,
       world_rules_json TEXT,
+      blurb_json TEXT,
       style_template_id INTEGER,
       world_template_id INTEGER,
       context_version INTEGER DEFAULT 1,
@@ -260,6 +261,39 @@ export function runMigrations(sqlite: Database.Database) {
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS factions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      type TEXT DEFAULT 'faction',
+      goal TEXT,
+      resources TEXT,
+      territory_map_node_ids_json TEXT,
+      leader_character_id INTEGER REFERENCES characters(id) ON DELETE SET NULL,
+      member_policy TEXT,
+      current_phase TEXT,
+      external_relations_json TEXT,
+      notes TEXT,
+      sort_order INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS glossary (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+      term TEXT NOT NULL,
+      category TEXT DEFAULT 'custom',
+      definition TEXT,
+      aliases_json TEXT,
+      first_appear_chapter INTEGER,
+      related_entity_ids_json TEXT,
+      is_canonical INTEGER DEFAULT 1,
+      sort_order INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS character_relations (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       novel_id INTEGER NOT NULL,
@@ -423,6 +457,22 @@ export function runMigrations(sqlite: Database.Database) {
       is_builtin INTEGER DEFAULT 0,
       genre_compatibility_json TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS scene_templates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      novel_id INTEGER REFERENCES novels(id) ON DELETE CASCADE,
+      genre_id INTEGER REFERENCES genres(id) ON DELETE SET NULL,
+      name TEXT NOT NULL,
+      category TEXT DEFAULT 'conflict',
+      description TEXT,
+      typical_beats_json TEXT,
+      suggested_character_roles_json TEXT,
+      emotion_arc TEXT,
+      is_builtin INTEGER DEFAULT 0,
+      sort_order INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS prompt_overrides (
@@ -692,6 +742,73 @@ export function runMigrations(sqlite: Database.Database) {
     ensureColumn(sqlite, 'story_memory_checkpoints', 'thread_cards_json', 'TEXT')
   })
 
+  runMigrationStep(sqlite, '0013_asset_modules_and_blurbs', () => {
+    ensureColumn(sqlite, 'novels', 'blurb_json', 'TEXT')
+
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS factions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        type TEXT DEFAULT 'faction',
+        goal TEXT,
+        resources TEXT,
+        territory_map_node_ids_json TEXT,
+        leader_character_id INTEGER REFERENCES characters(id) ON DELETE SET NULL,
+        member_policy TEXT,
+        current_phase TEXT,
+        external_relations_json TEXT,
+        notes TEXT,
+        sort_order INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS glossary (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        term TEXT NOT NULL,
+        category TEXT DEFAULT 'custom',
+        definition TEXT,
+        aliases_json TEXT,
+        first_appear_chapter INTEGER,
+        related_entity_ids_json TEXT,
+        is_canonical INTEGER DEFAULT 1,
+        sort_order INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS scene_templates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER REFERENCES novels(id) ON DELETE CASCADE,
+        genre_id INTEGER REFERENCES genres(id) ON DELETE SET NULL,
+        name TEXT NOT NULL,
+        category TEXT DEFAULT 'conflict',
+        description TEXT,
+        typical_beats_json TEXT,
+        suggested_character_roles_json TEXT,
+        emotion_arc TEXT,
+        is_builtin INTEGER DEFAULT 0,
+        sort_order INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_factions_novel_sort
+      ON factions (novel_id, sort_order, id);
+
+      CREATE INDEX IF NOT EXISTS idx_glossary_novel_sort
+      ON glossary (novel_id, sort_order, id);
+
+      CREATE INDEX IF NOT EXISTS idx_glossary_term
+      ON glossary (novel_id, term, id);
+
+      CREATE INDEX IF NOT EXISTS idx_scene_templates_scope
+      ON scene_templates (novel_id, genre_id, is_builtin, sort_order, id);
+    `)
+  })
+
   runMigrationStep(sqlite, '0005_validate_schema', () => {
     validateRequiredSchema(sqlite)
   })
@@ -859,7 +976,7 @@ function getColumnNames(sqlite: Database.Database, tableName: string): Set<strin
 
 function validateRequiredSchema(sqlite: Database.Database) {
   const requirements = [
-    { tableName: 'novels', columns: ['project_brief_json', 'theme_voice_json'] },
+    { tableName: 'novels', columns: ['project_brief_json', 'theme_voice_json', 'blurb_json'] },
     {
       tableName: 'story_arcs',
       columns: ['growth_ledger', 'cost_ledger', 'progress_percent', 'stalled_chapter_count', 'last_progress_chapter_num'],
@@ -893,6 +1010,18 @@ function validateRequiredSchema(sqlite: Database.Database) {
     {
       tableName: 'story_memory_checkpoints',
       columns: ['character_cards_json', 'relation_cards_json', 'item_cards_json', 'timeline_cards_json', 'thread_cards_json'],
+    },
+    {
+      tableName: 'factions',
+      columns: ['novel_id', 'name', 'type', 'territory_map_node_ids_json', 'leader_character_id', 'external_relations_json', 'sort_order'],
+    },
+    {
+      tableName: 'glossary',
+      columns: ['novel_id', 'term', 'category', 'aliases_json', 'is_canonical', 'sort_order'],
+    },
+    {
+      tableName: 'scene_templates',
+      columns: ['name', 'category', 'typical_beats_json', 'suggested_character_roles_json', 'is_builtin', 'sort_order'],
     },
   ]
 
@@ -1467,5 +1596,100 @@ function seedBuiltinData(db: ReturnType<typeof drizzle>) {
   const newTemplates = allTemplates.filter((template) => !existingTemplateNames.has(template.name))
   if (newTemplates.length > 0) {
     db.insert(schema.templates).values(newTemplates).run()
+  }
+
+  const genreRows = db.select().from(schema.genres).all()
+  const genreIdByName = new Map(genreRows.map((row) => [row.name, row.id]))
+  const builtinSceneTemplates: Array<typeof schema.sceneTemplates.$inferInsert> = [
+    {
+      genreId: genreIdByName.get('末世求生'),
+      name: '搜物资',
+      category: 'crisis',
+      description: '围绕食水、药品、能源或关键零件展开的高压搜集场景。',
+      typicalBeatsJson: JSON.stringify(['锁定目标点', '路径风险评估', '遭遇资源争夺或环境威胁', '带着代价撤离']),
+      suggestedCharacterRolesJson: JSON.stringify(['带路者', '执行者', '拖后者', '风险制造者']),
+      emotionArc: '警觉 -> 压迫 -> 爆发 -> 撤离余震',
+      isBuiltin: 1,
+      sortOrder: 10,
+    },
+    {
+      genreId: genreIdByName.get('丧尸末日'),
+      name: '夜间突袭',
+      category: 'conflict',
+      description: '感染者或敌对幸存者在夜间逼近据点，迫使角色快速防守和取舍。',
+      typicalBeatsJson: JSON.stringify(['异常征兆', '防线失守点出现', '角色被迫分工', '压住局面但暴露新缺口']),
+      suggestedCharacterRolesJson: JSON.stringify(['守夜人', '决策者', '伤员', '冲动者']),
+      emotionArc: '不安 -> 混乱 -> 硬顶 -> 后怕',
+      isBuiltin: 1,
+      sortOrder: 20,
+    },
+    {
+      genreId: genreIdByName.get('玄幻修真'),
+      name: '宗门内争',
+      category: 'bonding',
+      description: '宗门、世家或师徒体系内部围绕资源、名额、立场发生摩擦。',
+      typicalBeatsJson: JSON.stringify(['利益冲突抛出', '话语试探', '潜规则曝光', '矛盾暂压但站队成形']),
+      suggestedCharacterRolesJson: JSON.stringify(['受压者', '掌权者', '旁观者', '调停者']),
+      emotionArc: '克制 -> 紧绷 -> 撕开表面 -> 余波扩散',
+      isBuiltin: 1,
+      sortOrder: 30,
+    },
+    {
+      genreId: genreIdByName.get('玄幻修真'),
+      name: '秘境试探',
+      category: 'revelation',
+      description: '角色进入未知地带，通过试探规则和付出代价换取线索或资源。',
+      typicalBeatsJson: JSON.stringify(['规则不明', '低成本试探', '触发反噬', '确认收益与风险边界']),
+      suggestedCharacterRolesJson: JSON.stringify(['探路者', '知识者', '贪心者', '收尾者']),
+      emotionArc: '好奇 -> 紧张 -> 受创 -> 明悟',
+      isBuiltin: 1,
+      sortOrder: 40,
+    },
+    {
+      genreId: genreIdByName.get('现代都市'),
+      name: '内部争执',
+      category: 'transition',
+      description: '团队、家庭或职场核心关系因利益、误解或压力出现明显裂缝。',
+      typicalBeatsJson: JSON.stringify(['压抑情绪累积', '导火索出现', '立场摊开', '暂时收口但信任受损']),
+      suggestedCharacterRolesJson: JSON.stringify(['压抑者', '逼问者', '和事佬', '沉默旁观者']),
+      emotionArc: '压抑 -> 对撞 -> 冷场 -> 隐性后果',
+      isBuiltin: 1,
+      sortOrder: 50,
+    },
+    {
+      genreId: genreIdByName.get('现代都市'),
+      name: '关系回温',
+      category: 'bonding',
+      description: '在小范围行动或照顾细节中，让紧张关系获得一次真实缓和。',
+      typicalBeatsJson: JSON.stringify(['共同处境', '微小照顾', '旧误会被轻触', '关系前进一步但仍留余白']),
+      suggestedCharacterRolesJson: JSON.stringify(['主动靠近者', '犹疑者', '旁观见证者']),
+      emotionArc: '别扭 -> 试探 -> 松动 -> 留白',
+      isBuiltin: 1,
+      sortOrder: 60,
+    },
+    {
+      genreId: genreIdByName.get('悬疑推理'),
+      name: '线索反转',
+      category: 'revelation',
+      description: '原本指向单一答案的线索被重新解释，迫使调查路径转向。',
+      typicalBeatsJson: JSON.stringify(['旧线索回看', '异常点被指出', '原推论崩塌', '新方向形成']),
+      suggestedCharacterRolesJson: JSON.stringify(['调查者', '质疑者', '信息提供者']),
+      emotionArc: '笃定 -> 怀疑 -> 失衡 -> 再聚焦',
+      isBuiltin: 1,
+      sortOrder: 70,
+    },
+  ]
+
+  const existingSceneTemplates = db.select().from(schema.sceneTemplates).all()
+  const existingSceneKeys = new Set(
+    existingSceneTemplates.map((template) => `${template.genreId || 0}:${template.name}`),
+  )
+  const sceneTemplatesToInsert = builtinSceneTemplates.filter((template) => {
+    if (!template.name) return false
+    return !existingSceneKeys.has(`${template.genreId || 0}:${template.name}`)
+  })
+
+  if (sceneTemplatesToInsert.length > 0) {
+    db.insert(schema.sceneTemplates).values(sceneTemplatesToInsert).run()
   }
 }

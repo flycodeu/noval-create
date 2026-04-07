@@ -38,6 +38,7 @@ import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/ut
 import { markNovelContextChanged } from './context-impact.service'
 import { runAssetQualityLoop, summarizeAssetQualityWarnings } from './asset-quality.service'
 import { appendVariationMessage } from './variation-control.service'
+import { resolveFactionNamesFromReferences } from './faction-reference.service'
 import { throwUserFacingError } from '../utils/user-facing-error'
 
 type StoryItemStatus = 'available' | 'consumed' | 'hidden' | 'destroyed'
@@ -113,6 +114,11 @@ function stringifyNumberArray(value: number[]): string {
 
 function stringifyStringArray(value: string[]): string {
   return JSON.stringify(cleanAiStringArray(value))
+}
+
+function resolveFactionJson(novelId: number, raw?: string | null): string | undefined {
+  const names = resolveFactionNamesFromReferences(novelId, raw)
+  return names.length > 0 ? JSON.stringify(names) : undefined
 }
 
 function normalizeLookup(input: string): string {
@@ -295,7 +301,7 @@ function mapMapNodeSummary(
     atmosphere: row.atmosphere ?? undefined,
     plotRelevance: row.plotRelevance ?? undefined,
     tagsJson: row.tagsJson ?? undefined,
-    affiliatedFactionIdsJson: row.affiliatedFactionIdsJson ?? undefined,
+    affiliatedFactionIdsJson: resolveFactionJson(row.novelId, row.affiliatedFactionIdsJson),
     dangerLevel: row.dangerLevel ?? undefined,
     sortOrder: row.sortOrder || 0,
     childCount: childCountByParentId.get(row.id) || 0,
@@ -354,7 +360,7 @@ function mapCharacterEntity(row: typeof characters.$inferSelect): AppCharacter {
     personalityTraitsJson: row.personalityTraitsJson ?? undefined,
     flawsJson: row.flawsJson ?? undefined,
     habitsJson: row.habitsJson ?? undefined,
-    campFactionIdsJson: row.campFactionIdsJson ?? undefined,
+    campFactionIdsJson: resolveFactionJson(row.novelId, row.campFactionIdsJson),
     powerSystemRefsJson: row.powerSystemRefsJson ?? undefined,
     contextHooksJson: row.contextHooksJson ?? undefined,
     goals: row.goals ?? undefined,

@@ -1,5 +1,5 @@
 import React from 'react'
-import { Button, Form, Input, InputNumber, Modal, Space, Spin, message } from 'antd'
+import { Button, Form, Input, InputNumber, Modal, Space, Spin, Tag, message } from 'antd'
 import {
   ApartmentOutlined,
   BranchesOutlined,
@@ -10,7 +10,9 @@ import {
   RobotOutlined,
 } from '@ant-design/icons'
 import AIGenerateButton from '../../../components/AIGenerateButton'
+import { parseSceneTemplateStringList } from '../../../shared/scene-templates'
 import { useNovelStore } from '../../../stores/novel.store'
+import type { SceneTemplate } from '../../../types'
 import { buildDraftMessages, normalizeOptionalNumber, parseDraftJson } from '../shared/ai-draft'
 import { usePlanningDraft } from '../shared/planning-draft'
 import {
@@ -60,6 +62,9 @@ export default function StructurePage({ novelId }: { novelId: number }) {
   const [batchCreateCount, setBatchCreateCount] = React.useState(3)
   const [plannerOpen, setPlannerOpen] = React.useState(false)
   const [plannerGenerating, setPlannerGenerating] = React.useState(false)
+  const [sceneTemplateOpen, setSceneTemplateOpen] = React.useState(false)
+  const [sceneTemplateLoading, setSceneTemplateLoading] = React.useState(false)
+  const [sceneTemplates, setSceneTemplates] = React.useState<SceneTemplate[]>([])
 
   const {
     chapterDetail,
@@ -164,6 +169,48 @@ export default function StructurePage({ novelId }: { novelId: number }) {
       focus: '',
     })
   }, [plannerForm])
+
+  const loadSceneTemplates = React.useCallback(async () => {
+    setSceneTemplateLoading(true)
+    try {
+      const result = await window.electron.sceneTemplate.query({
+        novelId,
+        genreId: currentNovel?.genreId,
+        page: 1,
+        pageSize: 60,
+      })
+      setSceneTemplates(result.items)
+    } catch (error) {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.loadFailed'))
+    } finally {
+      setSceneTemplateLoading(false)
+    }
+  }, [currentNovel?.genreId, novelId])
+
+  const applySceneTemplate = React.useCallback((template: SceneTemplate) => {
+    const beats = parseSceneTemplateStringList(template.typicalBeatsJson)
+    const currentValues = segmentForm.getFieldsValue(true)
+    const categoryToSegmentType: Record<SceneTemplate['category'], string> = {
+      conflict: 'scene',
+      transition: 'bridge',
+      revelation: 'reveal',
+      bonding: 'scene',
+      crisis: 'turn',
+      climax: 'climax',
+    }
+    segmentForm.setFieldsValue({
+      ...currentValues,
+      title: currentValues.title || template.name,
+      segmentType: currentValues.segmentType || categoryToSegmentType[template.category],
+      purpose: currentValues.purpose || template.description,
+      inputState: currentValues.inputState || beats[0] || '',
+      outputState: currentValues.outputState || beats.at(-1) || '',
+      summary: currentValues.summary || beats.join(' -> ') || template.description,
+    })
+    setSceneTemplateOpen(false)
+    message.success('场景模板已套用到当前场景草稿。')
+  }, [segmentForm])
 
   const applyHierarchyPlan = React.useCallback(async (values: StructurePlannerFormValues) => {
     setPlannerGenerating(true)
@@ -335,78 +382,88 @@ export default function StructurePage({ novelId }: { novelId: number }) {
   ) : null
 
   const segmentAiActions = segmentDetail ? (
-    <AIGenerateButton
-      label="AI 生成场景"
-      isJson
-      runGeneration={async (input) => {
-        const result = await generateStructureSegmentDraft(input, { genre: currentNovel?.genreName })
-        draftWarningsRef.current = result.warnings
-        draftObservabilityRef.current = result.observability
-        setDraftWarnings(result.warnings)
-        return result.outputs
-      }}
-      buildMessages={() => {
-        const values = segmentForm.getFieldsValue(true)
+    <Space wrap>
+      <Button
+        onClick={() => {
+          void loadSceneTemplates()
+          setSceneTemplateOpen(true)
+        }}
+      >
+        套用场景模板
+      </Button>
+      <AIGenerateButton
+        label="AI 生成场景"
+        isJson
+        runGeneration={async (input) => {
+          const result = await generateStructureSegmentDraft(input, { genre: currentNovel?.genreName })
+          draftWarningsRef.current = result.warnings
+          draftObservabilityRef.current = result.observability
+          setDraftWarnings(result.warnings)
+          return result.outputs
+        }}
+        buildMessages={() => {
+          const values = segmentForm.getFieldsValue(true)
 
-        return buildDraftMessages({
-          task: '场景结构草稿',
-          mode: 'replace',
-          context: [
-            { label: '书名', value: currentNovel?.title || '' },
-            { label: '题材', value: currentNovel?.genreName || '' },
-            { label: '小说简介', value: currentNovel?.synopsis || '' },
-            { label: '当前章节', value: getChapterLabel(chapterDetail) },
-            { label: '章节目标', value: chapterForm.getFieldValue('outline') },
-            { label: '当前场景序号', value: segmentDetail.segmentOrder },
-            { label: '同章场景列表', value: summarizeSegments(segments.items) },
-          ],
-          fields: [
-            { key: 'title', label: '场景标题', value: values.title, hint: '一句话点出场景焦点。' },
-            { key: 'segmentType', label: '片段类型', value: values.segmentType, hint: '只使用 scene、bridge、turn、reveal、climax 之一。' },
-            { key: 'purpose', label: '场景作用', value: values.purpose, hint: '写清这一场为什么存在。' },
-            { key: 'timeAnchor', label: '时间锚点', value: values.timeAnchor, hint: '写成可回查的时间描述。' },
-            { key: 'locationName', label: '地点', value: values.locationName, hint: '使用当前世界里真实可写的地点。' },
-            { key: 'inputState', label: '进入状态', value: values.inputState, hint: '角色进入场景前的状态。' },
-            { key: 'outputState', label: '离开状态', value: values.outputState, hint: '场景结束后的状态变化。' },
-            { key: 'summary', label: '片段摘要', value: values.summary, hint: '2-3 句写完因果。' },
-            { key: 'content', label: '场景正文', value: values.content, hint: '写成可直接进入正文的短场景。' },
-          ],
-          requirements: [
-            '正文必须自然，不要模板腔。',
-            '场景内容必须服务当前章节目标。',
-          ],
-        })
-      }}
-      onResult={(raw) => {
-        const draftPayload = parseDraftJson<{
-          title?: string
-          segmentType?: string
-          purpose?: string
-          timeAnchor?: string
-          locationName?: string
-          inputState?: string
-          outputState?: string
-          summary?: string
-          content?: string
-        }>(raw)
-        const currentValues = segmentForm.getFieldsValue(true)
-        const mergedDraft = {
-          ...currentValues,
-          title: typeof draftPayload.title === 'string' ? draftPayload.title : currentValues.title,
-          segmentType: typeof draftPayload.segmentType === 'string' ? draftPayload.segmentType : currentValues.segmentType,
-          purpose: typeof draftPayload.purpose === 'string' ? draftPayload.purpose : currentValues.purpose,
-          timeAnchor: typeof draftPayload.timeAnchor === 'string' ? draftPayload.timeAnchor : currentValues.timeAnchor,
-          locationName: typeof draftPayload.locationName === 'string' ? draftPayload.locationName : currentValues.locationName,
-          inputState: typeof draftPayload.inputState === 'string' ? draftPayload.inputState : currentValues.inputState,
-          outputState: typeof draftPayload.outputState === 'string' ? draftPayload.outputState : currentValues.outputState,
-          summary: typeof draftPayload.summary === 'string' ? draftPayload.summary : currentValues.summary,
-          content: typeof draftPayload.content === 'string' ? draftPayload.content : currentValues.content,
-          draftKind: 'segment',
-        }
-        applyStructureDraft(mergedDraft)
-        void saveAppliedDraft(mergedDraft, draftWarningsRef.current, 'structure', draftObservabilityRef.current || undefined).catch(console.error)
-      }}
-    />
+          return buildDraftMessages({
+            task: '场景结构草稿',
+            mode: 'replace',
+            context: [
+              { label: '书名', value: currentNovel?.title || '' },
+              { label: '题材', value: currentNovel?.genreName || '' },
+              { label: '小说简介', value: currentNovel?.synopsis || '' },
+              { label: '当前章节', value: getChapterLabel(chapterDetail) },
+              { label: '章节目标', value: chapterForm.getFieldValue('outline') },
+              { label: '当前场景序号', value: segmentDetail.segmentOrder },
+              { label: '同章场景列表', value: summarizeSegments(segments.items) },
+            ],
+            fields: [
+              { key: 'title', label: '场景标题', value: values.title, hint: '一句话点出场景焦点。' },
+              { key: 'segmentType', label: '片段类型', value: values.segmentType, hint: '只使用 scene、bridge、turn、reveal、climax 之一。' },
+              { key: 'purpose', label: '场景作用', value: values.purpose, hint: '写清这一场为什么存在。' },
+              { key: 'timeAnchor', label: '时间锚点', value: values.timeAnchor, hint: '写成可回查的时间描述。' },
+              { key: 'locationName', label: '地点', value: values.locationName, hint: '使用当前世界里真实可写的地点。' },
+              { key: 'inputState', label: '进入状态', value: values.inputState, hint: '角色进入场景前的状态。' },
+              { key: 'outputState', label: '离开状态', value: values.outputState, hint: '场景结束后的状态变化。' },
+              { key: 'summary', label: '片段摘要', value: values.summary, hint: '2-3 句写完因果。' },
+              { key: 'content', label: '场景正文', value: values.content, hint: '写成可直接进入正文的短场景。' },
+            ],
+            requirements: [
+              '正文必须自然，不要模板腔。',
+              '场景内容必须服务当前章节目标。',
+            ],
+          })
+        }}
+        onResult={(raw) => {
+          const draftPayload = parseDraftJson<{
+            title?: string
+            segmentType?: string
+            purpose?: string
+            timeAnchor?: string
+            locationName?: string
+            inputState?: string
+            outputState?: string
+            summary?: string
+            content?: string
+          }>(raw)
+          const currentValues = segmentForm.getFieldsValue(true)
+          const mergedDraft = {
+            ...currentValues,
+            title: typeof draftPayload.title === 'string' ? draftPayload.title : currentValues.title,
+            segmentType: typeof draftPayload.segmentType === 'string' ? draftPayload.segmentType : currentValues.segmentType,
+            purpose: typeof draftPayload.purpose === 'string' ? draftPayload.purpose : currentValues.purpose,
+            timeAnchor: typeof draftPayload.timeAnchor === 'string' ? draftPayload.timeAnchor : currentValues.timeAnchor,
+            locationName: typeof draftPayload.locationName === 'string' ? draftPayload.locationName : currentValues.locationName,
+            inputState: typeof draftPayload.inputState === 'string' ? draftPayload.inputState : currentValues.inputState,
+            outputState: typeof draftPayload.outputState === 'string' ? draftPayload.outputState : currentValues.outputState,
+            summary: typeof draftPayload.summary === 'string' ? draftPayload.summary : currentValues.summary,
+            content: typeof draftPayload.content === 'string' ? draftPayload.content : currentValues.content,
+            draftKind: 'segment',
+          }
+          applyStructureDraft(mergedDraft)
+          void saveAppliedDraft(mergedDraft, draftWarningsRef.current, 'structure', draftObservabilityRef.current || undefined).catch(console.error)
+        }}
+      />
+    </Space>
   ) : null
 
   return (
@@ -657,6 +714,44 @@ export default function StructurePage({ novelId }: { novelId: number }) {
             />
           </Form.Item>
         </Form>
+      </Modal>
+      <Modal
+        open={sceneTemplateOpen}
+        title="套用场景模板"
+        footer={null}
+        onCancel={() => setSceneTemplateOpen(false)}
+        width={720}
+      >
+        {sceneTemplateLoading ? (
+          <Spin />
+        ) : (
+          <div style={{ display: 'grid', gap: 12, maxHeight: 520, overflow: 'auto' }}>
+            {sceneTemplates.map((template) => {
+              const beats = parseSceneTemplateStringList(template.typicalBeatsJson)
+              return (
+                <section key={template.id} className="novel-panel" style={{ padding: 16 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
+                    <Space wrap>
+                      <strong>{template.name}</strong>
+                      <Tag>{template.category}</Tag>
+                      {template.isBuiltin > 0 ? <Tag color="gold">内置</Tag> : <Tag color="blue">自定义</Tag>}
+                    </Space>
+                    <Button type="primary" onClick={() => applySceneTemplate(template)}>套用</Button>
+                  </div>
+                  <div style={{ color: 'var(--workspace-ink-soft)', marginBottom: 8 }}>
+                    {template.description || '还没有模板说明。'}
+                  </div>
+                  {beats.length > 0 ? (
+                    <div style={{ fontSize: 13, color: 'var(--workspace-ink-soft)' }}>
+                      {`典型节拍：${beats.join(' -> ')}`}
+                    </div>
+                  ) : null}
+                </section>
+              )
+            })}
+            {sceneTemplates.length === 0 ? <div className="novel-empty">当前没有可用模板。</div> : null}
+          </div>
+        )}
       </Modal>
     </WorkspacePage>
   )

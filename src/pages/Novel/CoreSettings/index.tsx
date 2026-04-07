@@ -61,9 +61,12 @@ const MIN_SUBPLOT_BATCH_COUNT = 1
 const MAX_SUBPLOT_BATCH_COUNT = 20
 const EMPTY_STATS = {
   mapCount: 0,
+  factionCount: 0,
   characterCount: 0,
   itemCount: 0,
+  glossaryCount: 0,
   threadCount: 0,
+  sceneTemplateCount: 0,
   outlineCount: 0,
   timelineCount: 0,
   revisionTaskCount: 0,

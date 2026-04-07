@@ -1,11 +1,11 @@
 ﻿import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Checkbox, Form, Input, InputNumber, Modal, Pagination, Select, Space, Spin, Tag, message } from 'antd'
+import { Alert, Button, Checkbox, Form, Input, InputNumber, Modal, Pagination, Segmented, Select, Space, Spin, Tag, message } from 'antd'
 import VirtualList from 'rc-virtual-list'
 import { useRef } from 'react'
 import { ArrowRightOutlined, DeleteOutlined, PlusOutlined, RobotOutlined } from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
-import type { StoryThread } from '../../../types'
+import type { ForeshadowSnapshot, StoryThread } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
 import type { StoryThreadBatchGenerateOptions } from '../../../shared/story-thread-generation'
 import {
@@ -204,6 +204,48 @@ function parseRouteId(value: string | null): number | null {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null
 }
 
+function ForeshadowColumn({
+  title,
+  items,
+}: {
+  title: string
+  items: ForeshadowSnapshot['pending']
+}) {
+  return (
+    <div style={{ display: 'grid', gap: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <strong>{title}</strong>
+        <Tag color="blue">{items.length}</Tag>
+      </div>
+      {items.length === 0 ? (
+        <div className="novel-empty">当前为空。</div>
+      ) : (
+        items.map((item) => (
+          <section key={item.id} className="novel-panel" style={{ padding: 14 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
+              <strong>{item.title}</strong>
+              <Tag color={item.status === 'resolved' ? 'success' : item.warningText ? 'warning' : 'default'}>
+                {item.status}
+              </Tag>
+            </div>
+            <div style={{ color: 'var(--workspace-ink-soft)', marginBottom: 8 }}>
+              {item.summary || item.currentState || '这条伏笔还没有补足说明。'}
+            </div>
+            <div style={{ display: 'grid', gap: 4, fontSize: 13, color: 'var(--workspace-ink-soft)' }}>
+              <div>{`埋设：${formatChapter(item.plantedChapter || item.startChapter)}`}</div>
+              <div>{`目标回收：${formatChapter(item.targetPayoffChapter)}`}</div>
+              <div>{`当前距离：${typeof item.currentDistance === 'number' ? `${item.currentDistance} 章` : '未设定'}`}</div>
+              <div>{`关联角色：${item.relatedCharacterCount}`}</div>
+              {item.payoffCondition ? <div>{`回收条件：${item.payoffCondition}`}</div> : null}
+              {item.warningText ? <div style={{ color: '#ad6800' }}>{item.warningText}</div> : null}
+            </div>
+          </section>
+        ))
+      )}
+    </div>
+  )
+}
+
 export default function StoryThreadsPage({ novelId }: Props) {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
@@ -214,6 +256,13 @@ export default function StoryThreadsPage({ novelId }: Props) {
   const [threads, setThreads] = useState<StoryThread[]>([])
   const [threadTotal, setThreadTotal] = useState(0)
   const [stats, setStats] = useState({ total: 0, activeCount: 0, resolvedCount: 0, stalledCount: 0, overdueCount: 0 })
+  const [foreshadowSnapshot, setForeshadowSnapshot] = useState<ForeshadowSnapshot>({
+    currentChapterNum: 0,
+    pending: [],
+    dueSoon: [],
+    resolved: [],
+    overdue: [],
+  })
   const [workflowStats, setWorkflowStats] = useState<WorkflowStats>(EMPTY_WORKFLOW_STATS)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -226,6 +275,7 @@ export default function StoryThreadsPage({ novelId }: Props) {
   const [batchStatus, setBatchStatus] = useState<StoryThread['status']>('planned')
   const [batchPriority, setBatchPriority] = useState<StoryThread['priority']>('medium')
   const [page, setPage] = useState(1)
+  const [viewMode, setViewMode] = useState<'board' | 'foreshadow'>('board')
   const routeEditorRef = useRef<number | null>(null)
   const routeThreadId = useMemo(() => parseRouteId(searchParams.get('threadId')), [searchParams])
   const routeAction = useMemo(() => searchParams.get('action'), [searchParams])
@@ -237,14 +287,16 @@ export default function StoryThreadsPage({ novelId }: Props) {
   const refresh = useCallback(async () => {
     setLoading(true)
     try {
-      const [queryResult, nextStats, nextWorkflowStats] = await Promise.all([
+      const [queryResult, nextStats, nextForeshadowSnapshot, nextWorkflowStats] = await Promise.all([
         window.electron.thread.query({ novelId, page, pageSize: THREADS_PAGE_SIZE }),
         window.electron.thread.getStats({ novelId, page: 1, pageSize: 1 }),
+        window.electron.thread.getForeshadowSnapshot(novelId),
         loadWorkflowStats(novelId),
       ])
       setThreads(queryResult.items)
       setThreadTotal(queryResult.total)
       setStats(nextStats)
+      setForeshadowSnapshot(nextForeshadowSnapshot)
       setWorkflowStats(nextWorkflowStats)
     } catch (error) {
       console.error(error)
@@ -543,77 +595,105 @@ export default function StoryThreadsPage({ novelId }: Props) {
       </WorkspacePanel>
 
       <WorkspacePanel title="线程看板" description="可手工维护，也可以先批量生成再逐条修。">
-        {selectedRowKeys.length > 0 ? (
-          <div className="novel-filter-bar" style={{ marginBottom: 16 }}>
-            <div className="novel-filter-bar__row">
-              <Tag color="processing">{`已选 ${selectedRowKeys.length} 条`}</Tag>
-              <Select
-                value={batchStatus}
-                style={{ width: 160 }}
-                options={THREAD_STATUS_OPTIONS}
-                onChange={(value) => setBatchStatus(value)}
-              />
-              <Button onClick={() => void handleBatchStatusUpdate()}>批量改状态</Button>
-              <Select
-                value={batchPriority}
-                style={{ width: 160 }}
-                options={PRIORITY_OPTIONS}
-                onChange={(value) => setBatchPriority(value)}
-              />
-              <Button onClick={() => void handleBatchPriorityUpdate()}>批量改优先级</Button>
-              <Button danger onClick={handleBatchDelete}>批量删除</Button>
-            </div>
-            <div className="novel-filter-bar__summary">危险操作会自动创建恢复点，`Esc` 可清空当前批量选择。</div>
+        <div style={{ marginBottom: 16 }}>
+          <Segmented
+            value={viewMode}
+            onChange={(value) => setViewMode(value as 'board' | 'foreshadow')}
+            options={[
+              { value: 'board', label: '线程看板' },
+              { value: 'foreshadow', label: '伏笔追踪' },
+            ]}
+          />
+        </div>
+        {viewMode === 'foreshadow' ? (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
+            <Alert
+              style={{ gridColumn: '1 / -1' }}
+              type="info"
+              showIcon
+              message={`当前正文进度：第 ${foreshadowSnapshot.currentChapterNum || 0} 章`}
+              description="这里只显示具备回收目标、回收条件或承担悬念/回收职责的线程。"
+            />
+            <ForeshadowColumn title="待回收" items={foreshadowSnapshot.pending} />
+            <ForeshadowColumn title="即将到期" items={foreshadowSnapshot.dueSoon} />
+            <ForeshadowColumn title="已回收" items={foreshadowSnapshot.resolved} />
+            <ForeshadowColumn title="超期未收" items={foreshadowSnapshot.overdue} />
           </div>
-        ) : null}
-        {loading ? (
-          <div style={{ display: 'flex', justifyContent: 'center', padding: 48 }}><Spin /></div>
-        ) : threads.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: 48, color: 'var(--workspace-ink-soft)' }}>暂无线程数据</div>
         ) : (
           <>
-            <div className="story-threads__row story-threads__row--header">
-              <Checkbox
-                checked={selectedRowKeys.length === threads.length && threads.length > 0}
-                indeterminate={selectedRowKeys.length > 0 && selectedRowKeys.length < threads.length}
-                onChange={(e) => setSelectedRowKeys(e.target.checked ? threads.map((t) => t.id) : [])}
-              />
-              <span>线程</span>
-              <span>类型</span>
-              <span>状态</span>
-              <span>优先级</span>
-              <span>目标回收</span>
-              <span>操作</span>
-            </div>
-            <VirtualList data={threads} height={520} itemHeight={72} itemKey="id">
-              {(thread: StoryThread) => (
-                <StoryThreadRow
-                  key={thread.id}
-                  thread={thread}
-                  selected={selectedRowKeys.includes(thread.id)}
-                  onSelect={(id, checked) => {
-                    setSelectedRowKeys((prev) =>
-                      checked ? [...prev, id] : prev.filter((k) => k !== id),
-                    )
-                  }}
-                  onEdit={openEditor}
-                  onRegenerate={(t) => void handleRegenerate(t)}
-                  onDelete={handleDelete}
-                  regenerating={generating}
-                />
-              )}
-            </VirtualList>
-            {threadTotal > THREADS_PAGE_SIZE ? (
-              <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
-                <Pagination
-                  current={page}
-                  pageSize={THREADS_PAGE_SIZE}
-                  total={threadTotal}
-                  showSizeChanger={false}
-                  onChange={setPage}
-                />
+            {selectedRowKeys.length > 0 ? (
+              <div className="novel-filter-bar" style={{ marginBottom: 16 }}>
+                <div className="novel-filter-bar__row">
+                  <Tag color="processing">{`已选 ${selectedRowKeys.length} 条`}</Tag>
+                  <Select
+                    value={batchStatus}
+                    style={{ width: 160 }}
+                    options={THREAD_STATUS_OPTIONS}
+                    onChange={(value) => setBatchStatus(value)}
+                  />
+                  <Button onClick={() => void handleBatchStatusUpdate()}>批量改状态</Button>
+                  <Select
+                    value={batchPriority}
+                    style={{ width: 160 }}
+                    options={PRIORITY_OPTIONS}
+                    onChange={(value) => setBatchPriority(value)}
+                  />
+                  <Button onClick={() => void handleBatchPriorityUpdate()}>批量改优先级</Button>
+                  <Button danger onClick={handleBatchDelete}>批量删除</Button>
+                </div>
+                <div className="novel-filter-bar__summary">危险操作会自动创建恢复点，`Esc` 可清空当前批量选择。</div>
               </div>
             ) : null}
+            {loading ? (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: 48 }}><Spin /></div>
+            ) : threads.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: 48, color: 'var(--workspace-ink-soft)' }}>暂无线程数据</div>
+            ) : (
+              <>
+                <div className="story-threads__row story-threads__row--header">
+                  <Checkbox
+                    checked={selectedRowKeys.length === threads.length && threads.length > 0}
+                    indeterminate={selectedRowKeys.length > 0 && selectedRowKeys.length < threads.length}
+                    onChange={(e) => setSelectedRowKeys(e.target.checked ? threads.map((t) => t.id) : [])}
+                  />
+                  <span>线程</span>
+                  <span>类型</span>
+                  <span>状态</span>
+                  <span>优先级</span>
+                  <span>目标回收</span>
+                  <span>操作</span>
+                </div>
+                <VirtualList data={threads} height={520} itemHeight={72} itemKey="id">
+                  {(thread: StoryThread) => (
+                    <StoryThreadRow
+                      key={thread.id}
+                      thread={thread}
+                      selected={selectedRowKeys.includes(thread.id)}
+                      onSelect={(id, checked) => {
+                        setSelectedRowKeys((prev) =>
+                          checked ? [...prev, id] : prev.filter((k) => k !== id),
+                        )
+                      }}
+                      onEdit={openEditor}
+                      onRegenerate={(t) => void handleRegenerate(t)}
+                      onDelete={handleDelete}
+                      regenerating={generating}
+                    />
+                  )}
+                </VirtualList>
+                {threadTotal > THREADS_PAGE_SIZE ? (
+                  <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
+                    <Pagination
+                      current={page}
+                      pageSize={THREADS_PAGE_SIZE}
+                      total={threadTotal}
+                      showSizeChanger={false}
+                      onChange={setPage}
+                    />
+                  </div>
+                ) : null}
+              </>
+            )}
           </>
         )}
       </WorkspacePanel>

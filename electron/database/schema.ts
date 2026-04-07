@@ -24,6 +24,7 @@ export const novels = sqliteTable('novels', {
   settingsJson: text('settings_json'),
   themeVoiceJson: text('theme_voice_json'),
   worldRulesJson: text('world_rules_json'),
+  blurbJson: text('blurb_json'),
   styleTemplateId: integer('style_template_id'),
   worldTemplateId: integer('world_template_id'),
   contextVersion: integer('context_version').default(1),
@@ -160,6 +161,55 @@ export const storyThreads = sqliteTable('story_threads', {
   relatedItemIdsJson: text('related_item_ids_json'),
   relatedTimelineEventIdsJson: text('related_timeline_event_ids_json'),
   notes: text('notes'),
+  sortOrder: integer('sort_order').default(0),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
+export const factions = sqliteTable('factions', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  type: text('type').default('faction'),
+  goal: text('goal'),
+  resources: text('resources'),
+  territoryMapNodeIdsJson: text('territory_map_node_ids_json'),
+  leaderCharacterId: integer('leader_character_id').references(() => characters.id, { onDelete: 'set null' }),
+  memberPolicy: text('member_policy'),
+  currentPhase: text('current_phase'),
+  externalRelationsJson: text('external_relations_json'),
+  notes: text('notes'),
+  sortOrder: integer('sort_order').default(0),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
+export const glossary = sqliteTable('glossary', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  term: text('term').notNull(),
+  category: text('category').default('custom'),
+  definition: text('definition'),
+  aliasesJson: text('aliases_json'),
+  firstAppearChapter: integer('first_appear_chapter'),
+  relatedEntityIdsJson: text('related_entity_ids_json'),
+  isCanonical: integer('is_canonical').default(1),
+  sortOrder: integer('sort_order').default(0),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
+export const sceneTemplates = sqliteTable('scene_templates', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').references(() => novels.id, { onDelete: 'cascade' }),
+  genreId: integer('genre_id').references(() => genres.id, { onDelete: 'set null' }),
+  name: text('name').notNull(),
+  category: text('category').default('conflict'),
+  description: text('description'),
+  typicalBeatsJson: text('typical_beats_json'),
+  suggestedCharacterRolesJson: text('suggested_character_roles_json'),
+  emotionArc: text('emotion_arc'),
+  isBuiltin: integer('is_builtin').default(0),
   sortOrder: integer('sort_order').default(0),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
@@ -474,6 +524,12 @@ export type ChapterSegment = typeof chapterSegments.$inferSelect
 export type NewChapterSegment = typeof chapterSegments.$inferInsert
 export type StoryThread = typeof storyThreads.$inferSelect
 export type NewStoryThread = typeof storyThreads.$inferInsert
+export type Faction = typeof factions.$inferSelect
+export type NewFaction = typeof factions.$inferInsert
+export type GlossaryEntry = typeof glossary.$inferSelect
+export type NewGlossaryEntry = typeof glossary.$inferInsert
+export type SceneTemplate = typeof sceneTemplates.$inferSelect
+export type NewSceneTemplate = typeof sceneTemplates.$inferInsert
 export type Character = typeof characters.$inferSelect
 export type NewCharacter = typeof characters.$inferInsert
 export type CharacterRelation = typeof characterRelations.$inferSelect

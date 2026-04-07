@@ -30,9 +30,12 @@ import CoreSettings from './CoreSettings'
 import ProjectBriefPage from './ProjectBrief'
 import ThemeVoicePage from './ThemeVoice'
 import WorldRules from './WorldRules'
+import Factions from './Factions'
 import MapExplorer from './MapExplorer'
 import Characters from './Characters'
+import Glossary from './Glossary'
 import ItemsWorkspace from './ItemsWorkspace'
+import SceneTemplates from './SceneTemplates'
 import StoryThreadsPage from './StoryThreads'
 import Outline from './Outline'
 import Structure from './Structure'
@@ -61,9 +64,12 @@ type ProWorkspaceKey =
   | 'theme-voice'
   | 'world-rules'
   | 'map'
+  | 'factions'
   | 'characters'
   | 'items'
+  | 'glossary'
   | 'threads'
+  | 'scene-templates'
   | 'story-design'
   | 'outline'
   | 'structure'
@@ -108,9 +114,12 @@ const WORKSPACE_GROUPS: Array<{ title: string; items: WorkspaceItem[] }> = [
     items: [
       { key: 'world-rules', icon: <GlobalOutlined />, label: '世界规则', summary: '统一题材规则、时间制度和写作约束。' },
       { key: 'map', icon: <EnvironmentOutlined />, label: '地图结构', summary: '让地点能承载路线、冲突和代价。' },
+      { key: 'factions', icon: <ApartmentOutlined />, label: '势力系统', summary: '把角色归属和外部关系拆成结构化资产。' },
       { key: 'characters', icon: <TeamOutlined />, label: '角色系统', summary: '补齐主角与关键人物关系。' },
       { key: 'items', icon: <AppstoreOutlined />, label: '物品装备', summary: '补齐道具、资源和可回收线索。' },
+      { key: 'glossary', icon: <BarsOutlined />, label: '设定词典', summary: '固定术语、阶位、材料和专有名词。' },
       { key: 'threads', icon: <BarsOutlined />, label: '故事线程', summary: '把主线、支线和伏笔挂成可追踪线程。' },
+      { key: 'scene-templates', icon: <AppstoreOutlined />, label: '场景模板', summary: '沉淀高频场景的节拍和复用骨架。' },
     ],
   },
   {
@@ -246,9 +255,12 @@ export default function NovelRouter() {
       'theme-voice': guidedProgressMap['theme-voice'].isComplete,
       'world-rules': guidedProgressMap['world-foundation'].isComplete,
       map: guidedProgressMap['map-structure'].isComplete,
+      factions: workflowStats.factionCount > 0,
       characters: guidedProgressMap['character-roster'].isComplete,
       items: guidedProgressMap['items-equipment'].isComplete,
+      glossary: workflowStats.glossaryCount > 0,
       threads: guidedProgressMap['story-threads'].isComplete,
+      'scene-templates': workflowStats.sceneTemplateCount > 0,
       'story-design': guidedProgressMap['story-plot'].isComplete,
       outline: workflowStats.outlineCount > 0,
       structure: guidedProgressMap['volume-planning'].isComplete,
@@ -298,6 +310,10 @@ export default function NovelRouter() {
         label: formatCountState(workflowStats.mapCount, '处'),
         complete: guidedProgressMap['map-structure'].isComplete,
       },
+      factions: {
+        label: formatCountState(workflowStats.factionCount, '个'),
+        complete: workflowStats.factionCount > 0,
+      },
       characters: {
         label: workflowStats.characterCount > 0
           ? `${workflowStats.characterCount}人`
@@ -308,9 +324,17 @@ export default function NovelRouter() {
         label: formatCountState(workflowStats.itemCount, '项'),
         complete: guidedProgressMap['items-equipment'].isComplete,
       },
+      glossary: {
+        label: formatCountState(workflowStats.glossaryCount, '条'),
+        complete: workflowStats.glossaryCount > 0,
+      },
       threads: {
         label: formatCountState(workflowStats.threadCount, '条'),
         complete: guidedProgressMap['story-threads'].isComplete,
+      },
+      'scene-templates': {
+        label: formatCountState(workflowStats.sceneTemplateCount, '套'),
+        complete: workflowStats.sceneTemplateCount > 0,
       },
       'story-design': {
         label: guidedProgressMap['story-plot'].isComplete ? '已就绪' : `${guidedProgressMap['story-plot'].completedCount}/${guidedProgressMap['story-plot'].totalCount}`,
@@ -808,9 +832,12 @@ export default function NovelRouter() {
               <Route path="theme-voice" element={<ThemeVoicePage novelId={novelId} />} />
               <Route path="world-rules" element={<WorldRules novelId={novelId} />} />
               <Route path="map" element={<MapExplorer novelId={novelId} />} />
+              <Route path="factions" element={<Factions novelId={novelId} />} />
               <Route path="characters" element={<Characters novelId={novelId} />} />
               <Route path="items" element={<ItemsWorkspace novelId={novelId} />} />
+              <Route path="glossary" element={<Glossary novelId={novelId} />} />
               <Route path="threads" element={<StoryThreadsPage novelId={novelId} />} />
+              <Route path="scene-templates" element={<SceneTemplates novelId={novelId} />} />
               <Route path="story-design" element={<CoreSettings novelId={novelId} />} />
               <Route path="outline" element={<Outline novelId={novelId} />} />
               <Route path="structure" element={<Structure novelId={novelId} />} />

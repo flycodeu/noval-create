@@ -31,12 +31,23 @@ import type {
   ThemeVoiceGenerationRequest,
   ThemeVoiceGenerationResult,
 } from '../shared/theme-voice-generation'
+import type { FactionType } from '../shared/factions'
+import type { GlossaryCategory } from '../shared/glossary'
+import type { SceneTemplateCategory } from '../shared/scene-templates'
 
 export type {
   CoreSettingsGenerationProgressEvent,
   CoreSettingsGenerationRequest,
   CoreSettingsGenerationResult,
 } from '../shared/core-settings-generation'
+export type { NovelBlurbDocument } from '../shared/blurb'
+export type {
+  FactionExternalRelation,
+  FactionRelationType,
+  FactionType,
+} from '../shared/factions'
+export type { GlossaryCategory } from '../shared/glossary'
+export type { SceneTemplateCategory } from '../shared/scene-templates'
 export type {
   PremiseGenerationMode,
   PremiseGenerationProgressEvent,
@@ -88,6 +99,7 @@ export interface Novel {
   settingsJson?: string
   themeVoiceJson?: string
   worldRulesJson?: string
+  blurbJson?: string
   styleTemplateId?: number
   worldTemplateId?: number
   contextVersion?: number
@@ -344,6 +356,103 @@ export interface WorldMapItem {
   dangerLevel?: string
   sortOrder: number
   children?: WorldMapItem[]
+}
+
+export interface Faction {
+  id: number
+  novelId: number
+  name: string
+  type: FactionType
+  goal?: string
+  resources?: string
+  territoryMapNodeIdsJson?: string
+  leaderCharacterId?: number
+  memberPolicy?: string
+  currentPhase?: string
+  externalRelationsJson?: string
+  notes?: string
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface FactionQueryInput {
+  novelId: number
+  type?: FactionType
+  keyword?: string
+  page?: number
+  pageSize?: number
+}
+
+export interface FactionStats {
+  total: number
+  withLeaderCount: number
+  territoryBoundCount: number
+  relationCount: number
+}
+
+export interface GlossaryEntry {
+  id: number
+  novelId: number
+  term: string
+  category: GlossaryCategory
+  definition?: string
+  aliasesJson?: string
+  firstAppearChapter?: number
+  relatedEntityIdsJson?: string
+  isCanonical: 0 | 1
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface GlossaryQueryInput {
+  novelId: number
+  category?: GlossaryCategory
+  canonical?: 'all' | 'active' | 'deprecated'
+  keyword?: string
+  page?: number
+  pageSize?: number
+}
+
+export interface GlossaryStats {
+  total: number
+  canonicalCount: number
+  deprecatedCount: number
+  categoryCount: number
+}
+
+export interface SceneTemplate {
+  id: number
+  novelId?: number
+  genreId?: number
+  name: string
+  category: SceneTemplateCategory
+  description?: string
+  typicalBeatsJson?: string
+  suggestedCharacterRolesJson?: string
+  emotionArc?: string
+  isBuiltin: 0 | 1
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SceneTemplateQueryInput {
+  novelId?: number
+  genreId?: number
+  category?: SceneTemplateCategory
+  scope?: 'all' | 'builtin' | 'custom'
+  keyword?: string
+  page?: number
+  pageSize?: number
+}
+
+export interface SceneTemplateStats {
+  total: number
+  builtinCount: number
+  customCount: number
+  genreScopedCount: number
 }
 
 export interface MapNodeSummary {
@@ -966,6 +1075,31 @@ export interface StoryThreadStats {
   resolvedCount: number
   stalledCount: number
   overdueCount: number
+}
+
+export interface ForeshadowThreadCard {
+  id: number
+  title: string
+  threadType: StoryThread['threadType']
+  status: StoryThread['status']
+  priority: StoryThread['priority']
+  plantedChapter?: number
+  startChapter?: number
+  targetPayoffChapter?: number
+  currentDistance?: number
+  relatedCharacterCount: number
+  payoffCondition?: string
+  summary?: string
+  currentState?: string
+  warningText?: string
+}
+
+export interface ForeshadowSnapshot {
+  currentChapterNum: number
+  pending: ForeshadowThreadCard[]
+  dueSoon: ForeshadowThreadCard[]
+  resolved: ForeshadowThreadCard[]
+  overdue: ForeshadowThreadCard[]
 }
 
 export interface RevisionTask {
@@ -1635,6 +1769,7 @@ declare global {
         query: (filters: StoryThreadQueryInput) => Promise<PagedResult<StoryThread>>
         getStats: (filters: StoryThreadQueryInput) => Promise<StoryThreadStats>
         get: (id: number) => Promise<StoryThread | null>
+        getForeshadowSnapshot: (novelId: number) => Promise<ForeshadowSnapshot>
         generate: (novelId: number, options?: StoryThreadBatchGenerateOptions) => Promise<StoryThreadBatchGenerationResult>
         startAutoGenerate: (novelId: number, options?: StoryThreadBatchGenerateOptions) => Promise<number>
         getAutoGenerateStatus: (taskId: number) => Promise<StoryThreadAutoGenerateStatus | null>
@@ -1646,6 +1781,37 @@ declare global {
         batchUpdate: (ids: number[], data: Partial<Pick<StoryThread, 'status' | 'priority'>>) => Promise<number>
         batchDelete: (ids: number[]) => Promise<number>
         regenerate: (id: number, options?: EntityRegenerateOptions) => Promise<StoryThread | null>
+      }
+      faction: {
+        list: (novelId: number) => Promise<Faction[]>
+        query: (filters: FactionQueryInput) => Promise<PagedResult<Faction>>
+        getStats: (filters: { novelId: number }) => Promise<FactionStats>
+        get: (id: number) => Promise<Faction | null>
+        search: (novelId: number, keyword?: string, limit?: number) => Promise<Faction[]>
+        create: (novelId: number, data: Partial<Faction>) => Promise<number>
+        update: (id: number, data: Partial<Faction>) => Promise<void>
+        delete: (id: number) => Promise<void>
+        resolveNameOptions: (novelId: number) => Promise<string[]>
+      }
+      glossary: {
+        list: (novelId: number) => Promise<GlossaryEntry[]>
+        query: (filters: GlossaryQueryInput) => Promise<PagedResult<GlossaryEntry>>
+        getStats: (filters: { novelId: number }) => Promise<GlossaryStats>
+        get: (id: number) => Promise<GlossaryEntry | null>
+        search: (novelId: number, keyword?: string, limit?: number) => Promise<GlossaryEntry[]>
+        create: (novelId: number, data: Partial<GlossaryEntry>) => Promise<number>
+        update: (id: number, data: Partial<GlossaryEntry>) => Promise<void>
+        delete: (id: number) => Promise<void>
+      }
+      sceneTemplate: {
+        list: (filters: { novelId?: number; genreId?: number }) => Promise<SceneTemplate[]>
+        query: (filters: SceneTemplateQueryInput) => Promise<PagedResult<SceneTemplate>>
+        getStats: (filters: { novelId?: number; genreId?: number }) => Promise<SceneTemplateStats>
+        get: (id: number) => Promise<SceneTemplate | null>
+        search: (novelId: number, genreId?: number, keyword?: string, limit?: number) => Promise<SceneTemplate[]>
+        create: (data: Partial<SceneTemplate>) => Promise<number>
+        update: (id: number, data: Partial<SceneTemplate>) => Promise<void>
+        delete: (id: number) => Promise<void>
       }
       subplot: {
         generate: (request: SubplotAutoGenerateRequest) => Promise<SubPlotDraft[]>

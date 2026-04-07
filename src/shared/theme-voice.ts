@@ -5,6 +5,11 @@ import {
 
 export type ThemeVoicePov = 'first_person' | 'third_limited' | 'third_omniscient' | 'multi_pov'
 export type ThemeVoiceTense = 'past' | 'present' | 'mixed'
+export type ThemeVoiceProtagonistCount = 'single' | 'dual' | 'ensemble'
+export type ThemeVoiceViewpointMode = 'fixed' | 'rotating' | 'free_switch'
+export type ThemeVoiceParallelTimelines = 'none' | 'light' | 'heavy'
+export type ThemeVoiceOpeningStyle = 'hook' | 'daily' | 'incident' | 'flashback'
+export type ThemeVoiceFlashbackPolicy = 'forbidden' | 'limited' | 'allowed'
 
 export interface ThemeVoiceDocument {
   writingContractTags: string[]
@@ -13,6 +18,11 @@ export interface ThemeVoiceDocument {
   emotionalCore: string
   pov: ThemeVoicePov | ''
   tense: ThemeVoiceTense | ''
+  protagonistCount: ThemeVoiceProtagonistCount | ''
+  viewpointMode: ThemeVoiceViewpointMode | ''
+  parallelTimelines: ThemeVoiceParallelTimelines | ''
+  openingStyle: ThemeVoiceOpeningStyle | ''
+  flashbackPolicy: ThemeVoiceFlashbackPolicy | ''
   narratorDistance: string
   voiceKeywords: string
   styleRules: string
@@ -32,6 +42,11 @@ const EMPTY_THEME_VOICE: ThemeVoiceDocument = {
   emotionalCore: '',
   pov: '',
   tense: '',
+  protagonistCount: '',
+  viewpointMode: '',
+  parallelTimelines: '',
+  openingStyle: '',
+  flashbackPolicy: '',
   narratorDistance: '',
   voiceKeywords: '',
   styleRules: '',
@@ -51,6 +66,37 @@ const TENSE_LABELS: Record<ThemeVoiceTense, string> = {
   past: '过去时',
   present: '现在时',
   mixed: '混合时态',
+}
+
+const PROTAGONIST_COUNT_LABELS: Record<ThemeVoiceProtagonistCount, string> = {
+  single: '单主角',
+  dual: '双主角',
+  ensemble: '群像',
+}
+
+const VIEWPOINT_MODE_LABELS: Record<ThemeVoiceViewpointMode, string> = {
+  fixed: '固定视角',
+  rotating: '轮换视角',
+  free_switch: '自由切换',
+}
+
+const PARALLEL_TIMELINES_LABELS: Record<ThemeVoiceParallelTimelines, string> = {
+  none: '单线推进',
+  light: '轻度多线',
+  heavy: '重度多线',
+}
+
+const OPENING_STYLE_LABELS: Record<ThemeVoiceOpeningStyle, string> = {
+  hook: '钩子型开篇',
+  daily: '日常切入',
+  incident: '事件切入',
+  flashback: '倒叙开场',
+}
+
+const FLASHBACK_POLICY_LABELS: Record<ThemeVoiceFlashbackPolicy, string> = {
+  forbidden: '禁止插叙/倒叙',
+  limited: '有限使用',
+  allowed: '允许使用',
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -89,6 +135,11 @@ export function parseThemeVoiceDocument(raw?: string | null): ThemeVoiceDocument
     emotionalCore: asText(root.emotional_core ?? root.emotionalCore),
     pov: asText(root.pov) as ThemeVoicePov | '',
     tense: asText(root.tense) as ThemeVoiceTense | '',
+    protagonistCount: asText(root.protagonist_count ?? root.protagonistCount) as ThemeVoiceProtagonistCount | '',
+    viewpointMode: asText(root.viewpoint_mode ?? root.viewpointMode) as ThemeVoiceViewpointMode | '',
+    parallelTimelines: asText(root.parallel_timelines ?? root.parallelTimelines) as ThemeVoiceParallelTimelines | '',
+    openingStyle: asText(root.opening_style ?? root.openingStyle) as ThemeVoiceOpeningStyle | '',
+    flashbackPolicy: asText(root.flashback_policy ?? root.flashbackPolicy) as ThemeVoiceFlashbackPolicy | '',
     narratorDistance: asText(root.narrator_distance ?? root.narratorDistance),
     voiceKeywords: asText(root.voice_keywords ?? root.voiceKeywords),
     styleRules: asText(root.style_rules ?? root.styleRules),
@@ -135,6 +186,11 @@ export function buildThemeVoicePayload(
     emotional_core: next.emotionalCore,
     pov: next.pov,
     tense: next.tense,
+    protagonist_count: next.protagonistCount,
+    viewpoint_mode: next.viewpointMode,
+    parallel_timelines: next.parallelTimelines,
+    opening_style: next.openingStyle,
+    flashback_policy: next.flashbackPolicy,
     narrator_distance: next.narratorDistance,
     voice_keywords: next.voiceKeywords,
     style_rules: next.styleRules,
@@ -152,6 +208,11 @@ export function buildThemeVoiceSummary(themeVoice: ThemeVoiceDocument): string {
     themeVoice.emotionalCore ? `情感核心：${themeVoice.emotionalCore}` : '',
     themeVoice.pov ? `视角：${POV_LABELS[themeVoice.pov]}` : '',
     themeVoice.tense ? `时态：${TENSE_LABELS[themeVoice.tense]}` : '',
+    themeVoice.protagonistCount ? `主角格局：${PROTAGONIST_COUNT_LABELS[themeVoice.protagonistCount]}` : '',
+    themeVoice.viewpointMode ? `视角调度：${VIEWPOINT_MODE_LABELS[themeVoice.viewpointMode]}` : '',
+    themeVoice.parallelTimelines ? `叙事线：${PARALLEL_TIMELINES_LABELS[themeVoice.parallelTimelines]}` : '',
+    themeVoice.openingStyle ? `开篇方式：${OPENING_STYLE_LABELS[themeVoice.openingStyle]}` : '',
+    themeVoice.flashbackPolicy ? `插叙策略：${FLASHBACK_POLICY_LABELS[themeVoice.flashbackPolicy]}` : '',
     themeVoice.narratorDistance ? `叙述距离：${themeVoice.narratorDistance}` : '',
     themeVoice.voiceKeywords ? `口吻关键词：${themeVoice.voiceKeywords}` : '',
     themeVoice.styleRules ? `风格规则：${themeVoice.styleRules}` : '',

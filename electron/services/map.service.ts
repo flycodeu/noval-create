@@ -23,6 +23,10 @@ import type {
 } from '../../src/types'
 import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/utils/text'
 import { markNovelContextChanged } from './context-impact.service'
+import {
+  resolveFactionNamesFromReferences,
+  stringifyFactionReferences,
+} from './faction-reference.service'
 import { throwUserFacingError } from '../utils/user-facing-error'
 import { runAssetQualityLoop, summarizeAssetQualityWarnings } from './asset-quality.service'
 import { logError, logInfo, logWarn } from '../utils/runtime-log'
@@ -174,6 +178,17 @@ function toStringArray(value: unknown): string[] {
   }
   const text = asText(value)
   return text ? cleanAiStringArray(text.split(/[\n,，、]/)) : []
+}
+
+function stringifyFactionReferenceInput(novelId: number, input: unknown): string {
+  return novelId > 0 ? stringifyFactionReferences(novelId, input) : JSON.stringify(toStringArray(input))
+}
+
+function resolveFactionJson(novelId: number, raw?: string | null): string | undefined {
+  const names = novelId > 0
+    ? resolveFactionNamesFromReferences(novelId, raw)
+    : parseJsonStringArray(raw)
+  return names.length > 0 ? JSON.stringify(names) : undefined
 }
 
 function toGeneratedNodes(value: unknown): GeneratedMapNode[] {
@@ -396,7 +411,7 @@ function validateGeneratedNodes(nodes: GeneratedMapNode[], expectedCount: number
   }
 }
 
-function sanitizeMapPayload(data: Partial<typeof worldMap.$inferInsert>): Partial<typeof worldMap.$inferInsert> {
+function sanitizeMapPayload(novelId: number, data: Partial<typeof worldMap.$inferInsert>): Partial<typeof worldMap.$inferInsert> {
   const next: Partial<typeof worldMap.$inferInsert> = {}
   if (typeof data.level === 'number') next.level = Math.max(1, Math.round(data.level))
   if ('parentId' in data) next.parentId = data.parentId == null ? null : Number(data.parentId)
@@ -409,16 +424,17 @@ function sanitizeMapPayload(data: Partial<typeof worldMap.$inferInsert>): Partia
   if (typeof data.atmosphere === 'string') next.atmosphere = asText(data.atmosphere)
   if (typeof data.plotRelevance === 'string') next.plotRelevance = asText(data.plotRelevance)
   if (typeof data.tagsJson === 'string') next.tagsJson = data.tagsJson
-  if (typeof data.affiliatedFactionIdsJson === 'string') next.affiliatedFactionIdsJson = data.affiliatedFactionIdsJson
+  if ('affiliatedFactionIdsJson' in data) next.affiliatedFactionIdsJson = stringifyFactionReferenceInput(novelId, data.affiliatedFactionIdsJson)
   if (typeof data.dangerLevel === 'string') next.dangerLevel = asText(data.dangerLevel)
   if (typeof data.sortOrder === 'number') next.sortOrder = Math.max(0, Math.round(data.sortOrder))
   return next
 }
 
 function mapNodeSummaryRecord(row: Record<string, unknown>) {
+  const novelId = Number(row.novel_id)
   return {
     id: Number(row.id),
-    novelId: Number(row.novel_id),
+    novelId,
     level: Number(row.level),
     parentId: row.parent_id == null ? undefined : Number(row.parent_id),
     name: String(row.name || ''),
@@ -430,7 +446,7 @@ function mapNodeSummaryRecord(row: Record<string, unknown>) {
     atmosphere: typeof row.atmosphere === 'string' ? row.atmosphere : undefined,
     plotRelevance: typeof row.plot_relevance === 'string' ? row.plot_relevance : undefined,
     tagsJson: typeof row.tags_json === 'string' ? row.tags_json : undefined,
-    affiliatedFactionIdsJson: typeof row.affiliated_faction_ids_json === 'string' ? row.affiliated_faction_ids_json : undefined,
+    affiliatedFactionIdsJson: resolveFactionJson(novelId, typeof row.affiliated_faction_ids_json === 'string' ? row.affiliated_faction_ids_json : undefined),
     dangerLevel: typeof row.danger_level === 'string' ? row.danger_level : undefined,
     sortOrder: Number(row.sort_order || 0),
     childCount: Number(row.childCount || 0),
@@ -475,6 +491,8 @@ function buildMapGraphSummary(row: MapRow): string {
 }
 
 function buildMapGraphNode(row: MapRow, graphRole: MapGraphNode['graphRole'], childCount: number): MapGraphNode {
+  const affiliatedFactionIdsJson = resolveFactionJson(row.novelId, row.affiliatedFactionIdsJson)
+  const affiliatedFactions = resolveFactionNamesFromReferences(row.novelId, row.affiliatedFactionIdsJson)
   return {
     id: row.id,
     novelId: row.novelId,
@@ -489,13 +507,13 @@ function buildMapGraphNode(row: MapRow, graphRole: MapGraphNode['graphRole'], ch
     atmosphere: row.atmosphere || undefined,
     plotRelevance: row.plotRelevance || undefined,
     tagsJson: row.tagsJson || undefined,
-    affiliatedFactionIdsJson: row.affiliatedFactionIdsJson || undefined,
+    affiliatedFactionIdsJson,
     dangerLevel: row.dangerLevel || undefined,
     sortOrder: row.sortOrder || 0,
     childCount,
     graphRole,
     tags: parseJsonStringArray(row.tagsJson),
-    affiliatedFactions: parseJsonStringArray(row.affiliatedFactionIdsJson),
+    affiliatedFactions,
     summaryText: buildMapGraphSummary(row),
   }
 }
@@ -771,7 +789,7 @@ export function getMapTree(novelId: number): MapTreeNode[] {
         atmosphere: item.atmosphere,
         plotRelevance: item.plotRelevance,
         tagsJson: item.tagsJson,
-        affiliatedFactionIdsJson: item.affiliatedFactionIdsJson,
+        affiliatedFactionIdsJson: resolveFactionJson(item.novelId, item.affiliatedFactionIdsJson) || null,
         dangerLevel: item.dangerLevel,
         children: buildTree(item.id),
       }))
@@ -781,7 +799,7 @@ export function getMapTree(novelId: number): MapTreeNode[] {
 
 export function createMapItem(novelId: number, data: Partial<typeof worldMap.$inferInsert> & { level: number; name: string }, options: { skipContextTracking?: boolean } = {}) {
   const db = getDb()
-  const payload = sanitizeMapPayload(data)
+  const payload = sanitizeMapPayload(novelId, data)
   const result = db.insert(worldMap).values({
     ...payload,
     novelId,
@@ -870,9 +888,10 @@ export function deleteMapRelation(id: number) {
 
 export function updateMapItem(id: number, data: Partial<typeof worldMap.$inferInsert>, options: { skipContextTracking?: boolean } = {}) {
   const db = getDb()
-  db.update(worldMap).set(sanitizeMapPayload(data)).where(eq(worldMap.id, id)).run()
+  const current = db.select().from(worldMap).where(eq(worldMap.id, id)).all()[0]
+  if (!current) return
+  db.update(worldMap).set(sanitizeMapPayload(current.novelId, data)).where(eq(worldMap.id, id)).run()
   if (!options.skipContextTracking) {
-    const current = db.select().from(worldMap).where(eq(worldMap.id, id)).all()[0]
     if (current) markNovelContextChanged(current.novelId, 'Map structure changed')
   }
 }

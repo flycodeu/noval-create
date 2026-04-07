@@ -1,4 +1,5 @@
 export const USER_FACING_MESSAGES = {
+  'common.loadFailed': '加载失败，请稍后再试。',
   'common.saveFailed': '保存失败',
   'common.saveRetryLater': '保存失败，请稍后重试。',
   'common.deleteFailed': '删除失败',
@@ -42,6 +43,7 @@ export const USER_FACING_MESSAGES = {
   'novel.expandUnauthorizedNames': 'AI 扩写结果仍包含未授权命名：{{names}}。请在原始背景里先明确这些名字，或改用不带专名的描述后重试。',
   'overview.saved': '基础信息已保存。',
   'overview.saveFailed': '基础信息保存失败。',
+  'overview.aiDraftFailed': '基础信息 AI 草稿生成失败。',
   'prompt.loadFailed': '加载提示词失败',
   'prompt.keyRequired': '提示词键不能为空',
   'prompt.runtimeSaved': '运行时提示词已保存',

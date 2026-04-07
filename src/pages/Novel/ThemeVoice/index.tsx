@@ -6,8 +6,13 @@ import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-messa
 import {
   buildThemeVoicePayload,
   parseThemeVoiceSnapshot,
+  type ThemeVoiceFlashbackPolicy,
+  type ThemeVoiceOpeningStyle,
+  type ThemeVoiceParallelTimelines,
   type ThemeVoicePov,
+  type ThemeVoiceProtagonistCount,
   type ThemeVoiceTense,
+  type ThemeVoiceViewpointMode,
 } from '../../../shared/theme-voice'
 import {
   WRITING_CONTRACT_PRESETS,
@@ -40,6 +45,11 @@ interface ThemeVoiceFormValues {
   emotionalCore: string
   pov: ThemeVoicePov | ''
   tense: ThemeVoiceTense | ''
+  protagonistCount: ThemeVoiceProtagonistCount | ''
+  viewpointMode: ThemeVoiceViewpointMode | ''
+  parallelTimelines: ThemeVoiceParallelTimelines | ''
+  openingStyle: ThemeVoiceOpeningStyle | ''
+  flashbackPolicy: ThemeVoiceFlashbackPolicy | ''
   narratorDistance: string
   voiceKeywords: string
   styleRules: string
@@ -59,6 +69,37 @@ const TENSE_OPTIONS: Array<{ value: ThemeVoiceTense; label: string }> = [
   { value: 'past', label: '过去时' },
   { value: 'present', label: '现在时' },
   { value: 'mixed', label: '混合时态' },
+]
+
+const PROTAGONIST_COUNT_OPTIONS: Array<{ value: ThemeVoiceProtagonistCount; label: string }> = [
+  { value: 'single', label: '单主角' },
+  { value: 'dual', label: '双主角' },
+  { value: 'ensemble', label: '群像' },
+]
+
+const VIEWPOINT_MODE_OPTIONS: Array<{ value: ThemeVoiceViewpointMode; label: string }> = [
+  { value: 'fixed', label: '固定视角' },
+  { value: 'rotating', label: '轮换视角' },
+  { value: 'free_switch', label: '自由切换' },
+]
+
+const PARALLEL_TIMELINES_OPTIONS: Array<{ value: ThemeVoiceParallelTimelines; label: string }> = [
+  { value: 'none', label: '单线推进' },
+  { value: 'light', label: '轻度多线' },
+  { value: 'heavy', label: '重度多线' },
+]
+
+const OPENING_STYLE_OPTIONS: Array<{ value: ThemeVoiceOpeningStyle; label: string }> = [
+  { value: 'hook', label: '钩子型开篇' },
+  { value: 'daily', label: '日常切入' },
+  { value: 'incident', label: '事件切入' },
+  { value: 'flashback', label: '倒叙开场' },
+]
+
+const FLASHBACK_POLICY_OPTIONS: Array<{ value: ThemeVoiceFlashbackPolicy; label: string }> = [
+  { value: 'forbidden', label: '禁止插叙' },
+  { value: 'limited', label: '有限使用' },
+  { value: 'allowed', label: '允许使用' },
 ]
 
 function compactText(value?: string | null, max = 44): string {
@@ -83,6 +124,11 @@ function normalizeFormValues(values: ThemeVoiceFormValues): ThemeVoiceFormValues
     emotionalCore: normalizeText(values.emotionalCore),
     pov: values.pov,
     tense: values.tense,
+    protagonistCount: values.protagonistCount,
+    viewpointMode: values.viewpointMode,
+    parallelTimelines: values.parallelTimelines,
+    openingStyle: values.openingStyle,
+    flashbackPolicy: values.flashbackPolicy,
     narratorDistance: normalizeText(values.narratorDistance),
     voiceKeywords: normalizeText(values.voiceKeywords),
     styleRules: normalizeText(values.styleRules),
@@ -102,6 +148,11 @@ function buildCurrentFormValues(
     writingContractTags: normalizeWritingContractTags(formValues.writingContractTags ?? snapshot.writingContractTags),
     pov: formValues.pov ?? snapshot.pov,
     tense: formValues.tense ?? snapshot.tense,
+    protagonistCount: formValues.protagonistCount ?? snapshot.protagonistCount,
+    viewpointMode: formValues.viewpointMode ?? snapshot.viewpointMode,
+    parallelTimelines: formValues.parallelTimelines ?? snapshot.parallelTimelines,
+    openingStyle: formValues.openingStyle ?? snapshot.openingStyle,
+    flashbackPolicy: formValues.flashbackPolicy ?? snapshot.flashbackPolicy,
   }
 }
 
@@ -130,6 +181,11 @@ function mergeGeneratedValues(
     emotionalCore: pick(current.emotionalCore, result.emotionalCore),
     pov: mode === 'fill_blanks' && current.pov ? current.pov : (result.pov || current.pov),
     tense: mode === 'fill_blanks' && current.tense ? current.tense : (result.tense || current.tense),
+    protagonistCount: mode === 'fill_blanks' && current.protagonistCount ? current.protagonistCount : (result.protagonistCount || current.protagonistCount),
+    viewpointMode: mode === 'fill_blanks' && current.viewpointMode ? current.viewpointMode : (result.viewpointMode || current.viewpointMode),
+    parallelTimelines: mode === 'fill_blanks' && current.parallelTimelines ? current.parallelTimelines : (result.parallelTimelines || current.parallelTimelines),
+    openingStyle: mode === 'fill_blanks' && current.openingStyle ? current.openingStyle : (result.openingStyle || current.openingStyle),
+    flashbackPolicy: mode === 'fill_blanks' && current.flashbackPolicy ? current.flashbackPolicy : (result.flashbackPolicy || current.flashbackPolicy),
     narratorDistance: pick(current.narratorDistance, result.narratorDistance),
     voiceKeywords: pick(current.voiceKeywords, result.voiceKeywords),
     styleRules: pick(current.styleRules, result.styleRules),
@@ -184,6 +240,11 @@ export default function ThemeVoicePage({ novelId }: Props) {
   ].filter((value) => typeof value === 'string' ? isFilled(value) : Boolean(value)).length
   const detailCount = [
     currentValues.motifs,
+    currentValues.protagonistCount,
+    currentValues.viewpointMode,
+    currentValues.parallelTimelines,
+    currentValues.openingStyle,
+    currentValues.flashbackPolicy,
     currentValues.narratorDistance,
     currentValues.voiceKeywords,
     currentValues.descriptionRules,
@@ -309,7 +370,7 @@ export default function ThemeVoicePage({ novelId }: Props) {
       metrics={(
         <>
           <WorkspaceMetric label="基础约束" value={`${foundationCount}/7`} tone="warm" hint="阅读预期、主题、情感核心、视角、时态、风格、对白。" />
-          <WorkspaceMetric label="补充细则" value={`${detailCount}/5`} hint="母题、叙述距离、口吻词、描写规则、禁用表达。" />
+          <WorkspaceMetric label="补充细则" value={`${detailCount}/10`} hint="母题、叙事调度、叙述距离、口吻词、描写规则、禁用表达。" />
           <WorkspaceMetric label="修订压力" value={stats.revisionTaskCount} hint="规则越清楚，后面修订中心的返工越少。" />
         </>
       )}
@@ -416,6 +477,31 @@ export default function ThemeVoicePage({ novelId }: Props) {
             <div className="guided-step__field-card guided-step__field-card--compact">
               <Form.Item name="tense" label="时态" rules={[{ required: true, message: '请选择时态' }]}>
                 <Select options={TENSE_OPTIONS} placeholder="选择时态" />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card guided-step__field-card--compact">
+              <Form.Item name="protagonistCount" label="主角格局">
+                <Select options={PROTAGONIST_COUNT_OPTIONS} placeholder="选择主角格局" allowClear />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card guided-step__field-card--compact">
+              <Form.Item name="viewpointMode" label="视角调度">
+                <Select options={VIEWPOINT_MODE_OPTIONS} placeholder="选择视角调度" allowClear />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card guided-step__field-card--compact">
+              <Form.Item name="parallelTimelines" label="叙事线密度">
+                <Select options={PARALLEL_TIMELINES_OPTIONS} placeholder="选择叙事线密度" allowClear />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card guided-step__field-card--compact">
+              <Form.Item name="openingStyle" label="开篇方式">
+                <Select options={OPENING_STYLE_OPTIONS} placeholder="选择开篇方式" allowClear />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card guided-step__field-card--compact">
+              <Form.Item name="flashbackPolicy" label="插叙策略">
+                <Select options={FLASHBACK_POLICY_OPTIONS} placeholder="选择插叙策略" allowClear />
               </Form.Item>
             </div>
             <div className="guided-step__field-card guided-step__field-card--full">

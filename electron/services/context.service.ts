@@ -1,8 +1,10 @@
 ﻿import { asc, eq } from 'drizzle-orm'
 import { getDb } from '../database/db'
-import { chapters, characterRelations, characters, genres, novels, storyArcs, storyItems, storyThreads, templates, timelineEvents, worldMap } from '../database/schema'
+import { chapters, characterRelations, characters, factions, genres, glossary, novels, storyArcs, storyItems, storyThreads, templates, timelineEvents, worldMap } from '../database/schema'
 import { buildWorldRulesSummary, parseWorldRulesJson } from '../../src/shared/genre-system'
 import { buildProjectBriefSummary, parseProjectBriefDocument } from '../../src/shared/project-brief'
+import { parseFactionExternalRelations } from '../../src/shared/factions'
+import { parseGlossaryAliases } from '../../src/shared/glossary'
 import { findSimilarFragments } from './embedding.service'
 import { buildStyleFingerprintPromptSection, listStyleFingerprints } from './style-analysis.service'
 import {
@@ -32,6 +34,10 @@ import {
   renderTimelineCards,
   renderThreadCards,
 } from './context-cards'
+import {
+  buildFactionCatalog,
+  resolveFactionRowsByReferences,
+} from './faction-reference.service'
 
 /**
  * 改进的 token 估算：中文字符约 1 token/字，英文约 0.25 token/word (4 chars/token)，
@@ -332,6 +338,123 @@ function collectMentionedEntityNames(
       .sort((left, right) => right.length - left.length),
     limit,
   )
+}
+
+function buildGlossaryContextSummary(
+  novelId: number,
+  signalTexts: string[],
+  limit = 12,
+): string {
+  const signalText = signalTexts
+    .filter(Boolean)
+    .join('\n')
+    .trim()
+  if (!signalText) return ''
+
+  const db = getDb()
+  const rows = db.select().from(glossary)
+    .where(eq(glossary.novelId, novelId))
+    .orderBy(asc(glossary.sortOrder), asc(glossary.id))
+    .all()
+    .filter((row) => row.isCanonical > 0)
+
+  const matched = rows.filter((row) => {
+    const candidates = [row.term, ...parseGlossaryAliases(row.aliasesJson)]
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .sort((left, right) => right.length - left.length)
+    return candidates.some((candidate) => signalText.includes(candidate))
+  })
+
+  if (matched.length === 0) return ''
+
+  return [
+    '术语词典：',
+    ...matched.slice(0, limit).map((row) => {
+      const aliases = parseGlossaryAliases(row.aliasesJson).slice(0, 3)
+      const parts = [
+        row.category ? `[${row.category}]` : '',
+        row.definition || '',
+        typeof row.firstAppearChapter === 'number' ? `首见第${row.firstAppearChapter}章` : '',
+        aliases.length > 0 ? `别名：${aliases.join('、')}` : '',
+      ].filter(Boolean)
+      return `- ${row.term}${parts.length > 0 ? `：${parts.join('；')}` : ''}`
+    }),
+  ].join('\n')
+}
+
+function buildFactionContextSummary(
+  novelId: number,
+  mentionedCharacters: Array<typeof characters.$inferSelect>,
+  limit = 6,
+): string {
+  if (mentionedCharacters.length === 0) return ''
+
+  const catalog = buildFactionCatalog(novelId)
+  const selected = new Map<number, typeof factions.$inferSelect>()
+
+  mentionedCharacters.forEach((character) => {
+    resolveFactionRowsByReferences(novelId, character.campFactionIdsJson).forEach((row) => {
+      selected.set(row.id, row)
+    })
+  })
+
+  if (selected.size === 0) return ''
+
+  const baseIds = [...selected.keys()]
+  catalog.rows.forEach((row) => {
+    const relations = parseFactionExternalRelations(row.externalRelationsJson)
+    const directlyRelated = relations.some((relation) =>
+      (relation.relation === 'enemy' || relation.relation === 'subordinate')
+      && typeof relation.targetFactionId === 'number'
+      && baseIds.includes(relation.targetFactionId))
+    if (directlyRelated) {
+      selected.set(row.id, row)
+    }
+  })
+
+  baseIds.forEach((id) => {
+    const row = catalog.byId.get(id)
+    if (!row) return
+    parseFactionExternalRelations(row.externalRelationsJson).forEach((relation) => {
+      if (
+        (relation.relation === 'enemy' || relation.relation === 'subordinate')
+        && typeof relation.targetFactionId === 'number'
+      ) {
+        const target = catalog.byId.get(relation.targetFactionId)
+        if (target) selected.set(target.id, target)
+      }
+    })
+  })
+
+  const rows = [...selected.values()].slice(0, limit)
+  if (rows.length === 0) return ''
+
+  return [
+    '势力摘要：',
+    ...rows.map((row) => {
+      const relationSummary = parseFactionExternalRelations(row.externalRelationsJson)
+        .filter((relation) => relation.relation === 'enemy' || relation.relation === 'subordinate')
+        .slice(0, 3)
+        .map((relation) => {
+          const targetName = typeof relation.targetFactionId === 'number'
+            ? catalog.byId.get(relation.targetFactionId)?.name
+            : relation.targetFactionName
+          if (!targetName) return ''
+          return `${relation.relation === 'enemy' ? '敌对' : '从属'} ${targetName}`
+        })
+        .filter(Boolean)
+        .join('、')
+      const parts = [
+        row.type ? `[${row.type}]` : '',
+        row.goal || '',
+        row.currentPhase ? `当前阶段：${row.currentPhase}` : '',
+        row.resources ? `资源：${row.resources}` : '',
+        relationSummary ? `关系：${relationSummary}` : '',
+      ].filter(Boolean)
+      return `- ${row.name}${parts.length > 0 ? `：${parts.join('；')}` : ''}`
+    }),
+  ].join('\n')
 }
 
 function buildRecallQueryText(
@@ -1417,6 +1540,20 @@ export async function collectChapterContextRawData(
     .map((chapter) => `第${chapter.chapterNum}章：${chapter.summary}`)
     .join('\n')
 
+  const matchedCharacterRows = allCharacters.filter((character) =>
+    character.fullName && mentionedCharacterNames.has(character.fullName))
+  const glossaryContextSummary = buildGlossaryContextSummary(novelId, [
+    currentChapter?.title || '',
+    currentChapter?.outline || '',
+    previousSummaries,
+  ])
+  const factionContextSummary = buildFactionContextSummary(novelId, matchedCharacterRows)
+  const worldRulesContext = [
+    profile.worldRulesSummary,
+    glossaryContextSummary,
+    factionContextSummary,
+  ].filter(Boolean).join('\n\n')
+
   const relationSummary = buildStoryRelationSummary(
     novelId,
     allCharacters,
@@ -1448,7 +1585,7 @@ export async function collectChapterContextRawData(
       lastChapterEnding,
       openLoops: collectOpenLoops(continuityChapters),
       timelineOpenThreads: timelineContext.timelineOpenThreads,
-      worldRules: profile.worldRulesSummary,
+      worldRules: worldRulesContext,
       itemSummary,
       longTermMemory,
       characterStates: buildCharacterStates(allCharacters, recentChapters, mentionedCharacterNames),

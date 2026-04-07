@@ -34,6 +34,8 @@ import * as projectBriefService from './services/project-brief.service'
 import { buildOutlineGenerationContext, buildStoryProfile } from './services/context.service'
 import * as worldRulesService from './services/world-rules.service'
 import * as exportService from './services/export.service'
+import * as factionService from './services/faction.service'
+import * as glossaryService from './services/glossary.service'
 import * as qualityDashboardService from './services/quality-dashboard.service'
 import * as embeddingService from './services/embedding.service'
 import * as styleAnalysisService from './services/style-analysis.service'
@@ -52,6 +54,7 @@ import * as historyService from './services/history.service'
 import * as storyMemoryService from './services/story-memory.service'
 import * as promptOverrideService from './services/prompt-override.service'
 import * as revisionTaskService from './services/revision-task.service'
+import * as sceneTemplateService from './services/scene-template.service'
 import * as storyStructureService from './services/story-structure.service'
 import * as storyThreadService from './services/story-thread.service'
 import * as workflowTaskService from './services/workflow-task.service'
@@ -738,6 +741,7 @@ function registerIpcHandlers() {
   ipcMain.handle('thread:query', (_, filters) => storyThreadService.queryStoryThreads(filters))
   ipcMain.handle('thread:getStats', (_, filters) => storyThreadService.getStoryThreadStats(filters))
   ipcMain.handle('thread:get', (_, id) => storyThreadService.getStoryThread(id))
+  ipcMain.handle('thread:getForeshadowSnapshot', (_, novelId) => storyThreadService.getForeshadowSnapshot(requireId(novelId, 'novelId')))
   ipcMain.handle('thread:generate', (event, novelId, options) => batchWorkflowService.generateStoryThreadsViaWorkflow(novelId, options, event.sender))
   ipcMain.handle('thread:startAutoGenerate', (event, novelId, options) =>
     batchWorkflowService.startStoryThreadAutoGenerateWorkflow(novelId, options, event.sender))
@@ -753,6 +757,31 @@ function registerIpcHandlers() {
   ipcMain.handle('thread:batchUpdate', (_, ids, data) => storyThreadService.batchUpdateStoryThreads(requireIds(ids), data))
   ipcMain.handle('thread:batchDelete', (_, ids) => storyThreadService.batchDeleteStoryThreads(requireIds(ids)))
   ipcMain.handle('thread:regenerate', (_, id, options) => storyThreadService.regenerateStoryThread(id, options))
+  ipcMain.handle('faction:list', (_, novelId) => factionService.listFactions(requireId(novelId, 'novelId')))
+  ipcMain.handle('faction:query', (_, filters) => factionService.queryFactions(filters))
+  ipcMain.handle('faction:getStats', (_, filters) => factionService.getFactionStats(filters))
+  ipcMain.handle('faction:get', (_, id) => factionService.getFaction(requireId(id)))
+  ipcMain.handle('faction:search', (_, novelId, keyword, limit) => factionService.searchFactions(requireId(novelId, 'novelId'), keyword, limit))
+  ipcMain.handle('faction:create', (_, novelId, data) => factionService.createFaction(requireId(novelId, 'novelId'), data))
+  ipcMain.handle('faction:update', (_, id, data) => factionService.updateFaction(requireId(id), data))
+  ipcMain.handle('faction:delete', (_, id) => factionService.deleteFaction(requireId(id)))
+  ipcMain.handle('faction:resolveNameOptions', (_, novelId) => factionService.resolveFactionNameOptions(requireId(novelId, 'novelId')))
+  ipcMain.handle('glossary:list', (_, novelId) => glossaryService.listGlossary(requireId(novelId, 'novelId')))
+  ipcMain.handle('glossary:query', (_, filters) => glossaryService.queryGlossary(filters))
+  ipcMain.handle('glossary:getStats', (_, filters) => glossaryService.getGlossaryStats(filters))
+  ipcMain.handle('glossary:get', (_, id) => glossaryService.getGlossaryEntry(requireId(id)))
+  ipcMain.handle('glossary:search', (_, novelId, keyword, limit) => glossaryService.searchGlossary(requireId(novelId, 'novelId'), keyword, limit))
+  ipcMain.handle('glossary:create', (_, novelId, data) => glossaryService.createGlossaryEntry(requireId(novelId, 'novelId'), data))
+  ipcMain.handle('glossary:update', (_, id, data) => glossaryService.updateGlossaryEntry(requireId(id), data))
+  ipcMain.handle('glossary:delete', (_, id) => glossaryService.deleteGlossaryEntry(requireId(id)))
+  ipcMain.handle('sceneTemplate:list', (_, filters) => sceneTemplateService.listSceneTemplates(filters || {}))
+  ipcMain.handle('sceneTemplate:query', (_, filters) => sceneTemplateService.querySceneTemplates(filters || {}))
+  ipcMain.handle('sceneTemplate:getStats', (_, filters) => sceneTemplateService.getSceneTemplateStats(filters || {}))
+  ipcMain.handle('sceneTemplate:get', (_, id) => sceneTemplateService.getSceneTemplate(requireId(id)))
+  ipcMain.handle('sceneTemplate:search', (_, novelId, genreId, keyword, limit) => sceneTemplateService.searchSceneTemplates(requireId(novelId, 'novelId'), typeof genreId === 'number' ? genreId : undefined, keyword, limit))
+  ipcMain.handle('sceneTemplate:create', (_, data) => sceneTemplateService.createSceneTemplate(data))
+  ipcMain.handle('sceneTemplate:update', (_, id, data) => sceneTemplateService.updateSceneTemplate(requireId(id), data))
+  ipcMain.handle('sceneTemplate:delete', (_, id) => sceneTemplateService.deleteSceneTemplate(requireId(id)))
   ipcMain.handle('subplot:generate', (event, request) => batchWorkflowService.generateSubplotsViaWorkflow(request, event.sender))
   ipcMain.handle('subplot:startAutoGenerate', (event, request) =>
     batchWorkflowService.startSubplotAutoGenerateWorkflow(request, event.sender))
