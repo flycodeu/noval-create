@@ -22,6 +22,7 @@ import type {
   NovelConsistencyReport,
   NovelContextStatus,
   ParallelGenerationPlan,
+  QualityDashboardData,
   StoryItem,
   StoryMemorySnapshot,
   TimelineEvent,
@@ -49,6 +50,33 @@ interface ReviewNotes {
   human_language_repairs?: string[]
   genre_hollowing_risks: string[]
   revision_brief: string
+  protagonist_setback?: 'none' | 'minor' | 'major'
+  setback_summary?: string
+  cost_present?: boolean
+  cost_summary?: string
+  cost_resolution_state?: 'new' | 'ongoing' | 'resolved' | 'evaporated'
+  reversal_marker?: boolean
+  reversal_summary?: string
+  reversal_support_state?: 'supported' | 'weak' | 'forced'
+  pace_marker?: 'setup' | 'conflict' | 'reversal' | 'climax' | 'payoff' | 'breather'
+  reward_state?: 'none' | 'partial' | 'major'
+  protagonist_pressure?: number
+  dialogue_homogenization_risks?: string[]
+  dialogue_fingerprint_summary?: string
+  cross_character_similarity?: Array<{
+    characterAId: number
+    characterAName: string
+    characterBId: number
+    characterBName: string
+    similarity: number
+    reason: string
+  }>
+  dialogue_drift_alerts?: Array<{
+    characterId: number
+    characterName: string
+    driftRate: number
+    reason: string
+  }>
 }
 interface TextSelectionSnapshot {
   start: number
@@ -186,6 +214,7 @@ export default function Writing({ novelId }: Props) {
   const [storyItems, setStoryItems] = useState<StoryItem[]>([])
   const [chapterSegments, setChapterSegments] = useState<ChapterSegment[]>([])
   const [aiResult, setAiResult] = useState<AiCheckPayload | null>(null)
+  const [qualityDashboard, setQualityDashboard] = useState<QualityDashboardData | null>(null)
   const [contextStatus, setContextStatus] = useState<NovelContextStatus | null>(null)
   const [publishCheck, setPublishCheck] = useState<ChapterPublishCheck | null>(null)
   const [hoverChapterId, setHoverChapterId] = useState<number | null>(null)
@@ -266,6 +295,14 @@ export default function Writing({ novelId }: Props) {
     setConsistencyReport(report); setStoryMemory(memory)
   }, [novelId])
 
+  const refreshQualityDashboard = useCallback(async () => {
+    try {
+      setQualityDashboard(await window.electron.quality.getDashboard(novelId))
+    } catch (error) {
+      console.error('Failed to load quality dashboard snapshot', error)
+    }
+  }, [novelId])
+
   const refreshChapterLinks = useCallback(async (chapter?: Chapter | null) => {
     if (!chapter) {
       setTimelineEvents([])
@@ -332,10 +369,10 @@ export default function Writing({ novelId }: Props) {
     let alive = true
     void (async () => {
       setLoading(true)
-      try { await Promise.all([loadChapters(routeChapterId || undefined), refreshMeta(), refreshContextStatus()]) } finally { if (alive) setLoading(false) }
+      try { await Promise.all([loadChapters(routeChapterId || undefined), refreshMeta(), refreshContextStatus(), refreshQualityDashboard()]) } finally { if (alive) setLoading(false) }
     })()
     return () => { alive = false }
-  }, [loadChapters, refreshContextStatus, refreshMeta, routeChapterId])
+  }, [loadChapters, refreshContextStatus, refreshMeta, refreshQualityDashboard, routeChapterId])
 
   useEffect(() => {
     if (!routeChapterId || routeChapterFocusRef.current === routeChapterId) return
@@ -363,7 +400,7 @@ export default function Writing({ novelId }: Props) {
       const chapterId = currentChapter?.id
       setGenerating(false); setGeneratingTaskId(null); clearStream(stream.taskId)
       void (async () => {
-        await Promise.all([loadChapters(chapterId), refreshMeta()])
+        await Promise.all([loadChapters(chapterId), refreshMeta(), refreshQualityDashboard()])
         if (chapterId) await refreshChapter(chapterId)
         message.success(getUserFacingMessage('writing.pipelineCompleted'))
       })()
@@ -376,7 +413,7 @@ export default function Writing({ novelId }: Props) {
       setGenerating(false); setGeneratingTaskId(null); clearStream(stream.taskId)
       message.info(getUserFacingMessage('writing.generateCancelled'))
     }
-  }, [streams, generatingTaskId, currentChapter?.id, clearStream, loadChapters, refreshMeta, refreshChapter])
+  }, [streams, generatingTaskId, currentChapter?.id, clearStream, loadChapters, refreshMeta, refreshChapter, refreshQualityDashboard])
 
   useEffect(() => () => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
@@ -582,7 +619,11 @@ export default function Writing({ novelId }: Props) {
 
   const handleAiCheck = async () => {
     if (!currentChapter) return
-    try { setAiResult(await window.electron.chapter.aiCheck(currentChapter.id) as AiCheckPayload); setInsightTab('health') }
+    try {
+      setAiResult(await window.electron.chapter.aiCheck(currentChapter.id) as AiCheckPayload)
+      setInsightTab('health')
+      await refreshQualityDashboard()
+    }
     catch (error: unknown) {
       message.error(getUserFacingMessage('writing.aiCheckFailed', {
         detail: error instanceof Error ? error.message : '请稍后重试。',
@@ -764,6 +805,20 @@ export default function Writing({ novelId }: Props) {
     ...(reviewNotes?.language_risks || []).map((item) => `语言提示：${item}`),
     ...(reviewNotes?.human_language_repairs || []).map((item) => `语言替换：${item}`),
     ...(reviewNotes?.genre_hollowing_risks || []).map((item) => `体裁空心化：${item}`),
+    reviewNotes?.dialogue_fingerprint_summary ? `对白辨识度：${reviewNotes.dialogue_fingerprint_summary}` : '',
+    ...(reviewNotes?.dialogue_homogenization_risks || []).map((item) => `对白同质化：${item}`),
+    reviewNotes?.protagonist_setback && reviewNotes.protagonist_setback !== 'none'
+      ? `主角受挫：${reviewNotes.protagonist_setback}${reviewNotes.setback_summary ? ` · ${reviewNotes.setback_summary}` : ''}`
+      : '',
+    reviewNotes?.cost_present
+      ? `代价状态：${reviewNotes.cost_resolution_state || 'new'}${reviewNotes.cost_summary ? ` · ${reviewNotes.cost_summary}` : ''}`
+      : '',
+    reviewNotes?.reversal_marker
+      ? `反转判断：${reviewNotes.reversal_support_state || 'weak'}${reviewNotes.reversal_summary ? ` · ${reviewNotes.reversal_summary}` : ''}`
+      : '',
+    reviewNotes?.pace_marker ? `节奏标签：${reviewNotes.pace_marker}` : '',
+    reviewNotes?.reward_state && reviewNotes.reward_state !== 'none' ? `阶段回报：${reviewNotes.reward_state}` : '',
+    typeof reviewNotes?.protagonist_pressure === 'number' && reviewNotes.protagonist_pressure > 0 ? `主角压力：${reviewNotes.protagonist_pressure}` : '',
   ].filter((item): item is string => Boolean(item))
 
   const productionBriefItems = [
@@ -773,6 +828,12 @@ export default function Writing({ novelId }: Props) {
     ...(reviewNotes?.coherence_risks || []).slice(0, 2).map((item) => `读者易乱：${item}`),
     ...(reviewNotes?.reader_hook_risks || []).slice(0, 2).map((item) => `追读流失点：${item}`),
     ...(reviewNotes?.human_language_repairs || []).slice(0, 2).map((item) => `语言替换：${item}`),
+    ...(reviewNotes?.dialogue_homogenization_risks || []).slice(0, 2).map((item) => `对白区分：${item}`),
+    reviewNotes?.cost_resolution_state === 'evaporated' ? '代价延续：当前章节不能把重大损失快速抹平。' : '',
+    reviewNotes?.reversal_marker && reviewNotes?.reversal_support_state === 'forced' ? '反转支撑：补齐前文铺垫与触发链，再保留这次反转。' : '',
+    reviewNotes?.protagonist_setback === 'none' && (reviewNotes?.reward_state === 'partial' || reviewNotes?.reward_state === 'major') && !reviewNotes?.cost_present
+      ? '主角阻力：当前章偏顺推，建议补出真实失败、失误或代价。'
+      : '',
     ...((aiResult?.issues || []).slice(0, 2).map((issue) => `AI体检：${issue.suggestion}`)),
   ].filter((item): item is string => Boolean(item))
 
@@ -832,7 +893,7 @@ export default function Writing({ novelId }: Props) {
           items={[
             { label: '当前章节', value: currentChapter ? `第${currentChapter.chapterNum}章 ${currentChapter.title || ''}` : '未选择章节' },
             { label: '当前状态', value: currentStatusLabel },
-            { label: '长文记忆', value: storyMemory ? `${storyMemory.chapterCount} 章 · ${storyMemory.memoryMode === 'epic' ? '超长篇' : storyMemory.memoryMode === 'longform' ? '长篇' : '标准'}` : '尚未加载' },
+              { label: '长文记忆', value: storyMemory ? `${storyMemory.chapterCount} 章 · ${storyMemory.memoryMode === 'mega' ? '巨长篇' : storyMemory.memoryMode === 'epic' ? '超长篇' : storyMemory.memoryMode === 'longform' ? '长篇' : '标准'}` : '尚未加载' },
             { label: '上下文版本', value: contextStatus ? `v${contextStatus.contextVersion}` : '加载中' },
           ]}
         />
@@ -1035,6 +1096,7 @@ export default function Writing({ novelId }: Props) {
               <div className="novel-writing-shell__insight-stack">
                 <InsightCard title="阶段摘要" eyebrow={storyMemory?.coverageSummary || '长篇覆盖'} tone="soft"><StringList items={storyMemory?.phaseDigest || []} empty="章节量还不大，阶段摘要会在长篇推进后逐步显现。" /></InsightCard>
                 <InsightCard title="剧情里程碑" eyebrow="压缩摘要"><StringList items={storyMemory ? storyMemory.plotMilestones.slice(0, 12) : []} empty="长文记忆尚未生成。" /></InsightCard>
+                <InsightCard title="角色当前状态" eyebrow="状态机 v1" tone="soft"><CharacterStateMemoryCard storyMemory={storyMemory} /></InsightCard>
                 <InsightCard title="活跃线程" eyebrow="待持续追踪" tone="soft"><StringList items={storyMemory ? storyMemory.activeThreads.slice(0, 12) : []} empty="当前没有需要持续追踪的活跃线程。" /></InsightCard>
                 <InsightCard title="时间锚点" eyebrow="时序参照" tone="soft"><StringList items={storyMemory ? storyMemory.timelineAnchors.slice(0, 10) : []} empty="时间轴锚点会在这里同步展示。" /></InsightCard>
                 <InsightCard title="道具账本" eyebrow="状态同步" tone="soft"><StringList items={storyMemory ? storyMemory.itemLedger.slice(0, 10) : []} empty="关键道具与线索的状态变化会记录在这里。" /></InsightCard>
@@ -1058,6 +1120,15 @@ export default function Writing({ novelId }: Props) {
                         empty="当前没有发布前检查结果。"
                       />
                     ) : <div className="novel-copy-block">当前没有发布前检查结果。</div>}
+                  </InsightCard>
+                  <InsightCard title="最近恶化项" eyebrow="跨章节语言退化" tone="soft">
+                    <LanguageDriftHealthCard dashboard={qualityDashboard} currentChapter={currentChapter} />
+                  </InsightCard>
+                  <InsightCard title="角色对白辨识度" eyebrow="语音指纹" tone="soft">
+                    <DialogueFingerprintHealthCard dashboard={qualityDashboard} reviewNotes={reviewNotes} />
+                  </InsightCard>
+                  <InsightCard title="主角与节奏风险" eyebrow="跨章节结构告警" tone="soft">
+                    <StoryDynamicsHealthCard dashboard={qualityDashboard} currentChapter={currentChapter} reviewNotes={reviewNotes} />
                   </InsightCard>
                   <InsightCard title="AI 评分与复检" eyebrow="局部诊断" tone="soft">
                     <AIScorePanel
@@ -1191,6 +1262,319 @@ function ChapterFocusCard({
 
 function StringList({ items, empty }: { items: string[]; empty: string }) {
   return items.length > 0 ? <div className="novel-insight-list">{items.map((item, index) => <div key={`${item}-${index}`} className="novel-insight-list__item">{item}</div>)}</div> : <div className="novel-copy-block">{empty}</div>
+}
+
+function CharacterStateMemoryCard({ storyMemory }: { storyMemory: StoryMemorySnapshot | null }) {
+  if (!storyMemory) {
+    return <div className="novel-copy-block">先运行章节流水线或手动刷新记忆，这里会显示主要角色的当前状态与近期漂移告警。</div>
+  }
+
+  const stateItems = storyMemory.characterCurrentStates
+    .slice(0, 8)
+    .map((item) => {
+      const reason = item.changeReason && item.changeReason !== '延续前章状态，无新增显式变化'
+        ? ` · ${item.changeReason}`
+        : ''
+      return `${item.characterName}：${item.summaryText}${reason}`
+    })
+  const alertItems = storyMemory.characterStateAlerts
+    .slice(0, 4)
+    .map((item) => `${item.characterName}：${item.reasons.join('；')}`)
+
+  if (stateItems.length === 0 && alertItems.length === 0) {
+    return <div className="novel-copy-block">角色状态版本会在章节连续性刷新后写入，这里随后会开始累积“当前状态”和“跳变告警”。</div>
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 10 }}>
+      <StringList items={stateItems} empty="当前还没有可用的角色状态快照。" />
+      {alertItems.length > 0 ? (
+        <div className="novel-note-list">
+          {alertItems.map((item, index) => (
+            <div key={`${item}-${index}`} className="novel-note-list__item">状态漂移：{item}</div>
+          ))}
+        </div>
+      ) : (
+        <div className="novel-copy-block">最近没有命中的角色状态跳变告警。</div>
+      )}
+    </div>
+  )
+}
+
+function languageDriftStatusLabel(status: QualityDashboardData['recentLanguageDriftAlerts'][number]['status']) {
+  if (status === 'worsening') return '恶化中'
+  if (status === 'improving') return '改善中'
+  return '稳定'
+}
+
+function languageDriftStatusColor(status: QualityDashboardData['recentLanguageDriftAlerts'][number]['status']) {
+  if (status === 'worsening') return 'error'
+  if (status === 'improving') return 'success'
+  return 'default'
+}
+
+function formatSignedDriftDelta(value: number) {
+  return value > 0 ? `+${value}` : `${value}`
+}
+
+function storyAlertColor(severity: QualityDashboardData['storyPacingAlerts'][number]['severity']) {
+  return severity === 'blocker' ? 'error' : 'warning'
+}
+
+function storyAlertLabel(severity: QualityDashboardData['storyPacingAlerts'][number]['severity']) {
+  return severity === 'blocker' ? '高风险' : '提醒'
+}
+
+function paceMarkerLabel(marker?: NonNullable<ReviewNotes['pace_marker']>) {
+  if (marker === 'setup') return '铺垫'
+  if (marker === 'conflict') return '冲突'
+  if (marker === 'reversal') return '反转'
+  if (marker === 'climax') return '高潮'
+  if (marker === 'payoff') return '回收'
+  if (marker === 'breather') return '喘息'
+  return '未标注'
+}
+
+function LanguageDriftHealthCard({
+  dashboard,
+  currentChapter,
+}: {
+  dashboard: QualityDashboardData | null
+  currentChapter: Chapter | null
+}) {
+  if (!dashboard || dashboard.totalChaptersScored === 0) {
+    return <div className="novel-copy-block">先对多章运行 AI 体检，系统才会积累跨章节语言退化趋势。</div>
+  }
+
+  const alerts = dashboard.recentLanguageDriftAlerts.slice(0, 3)
+  const topRiskMetrics = dashboard.novelLanguageDriftSummary.topRiskMetrics.slice(0, 3)
+  const currentVolume = currentChapter?.volumeId
+    ? dashboard.volumeLanguageDrift.find((entry) => entry.volumeId === currentChapter.volumeId) || null
+    : null
+
+  return (
+    <div style={{ display: 'grid', gap: 10 }}>
+      {alerts.length > 0 ? (
+        <div className="novel-issue-list">
+          {alerts.map((alert) => (
+            <div key={alert.metric} className="novel-issue-item">
+              <div className="novel-issue-item__head">
+                <Tag color={languageDriftStatusColor(alert.status)}>{languageDriftStatusLabel(alert.status)}</Tag>
+                <strong>{alert.label}</strong>
+              </div>
+              <div className="novel-issue-item__desc">窗口均值 {alert.previousValue} → {alert.latestValue}</div>
+              <div className="novel-issue-item__suggestion">变化 {formatSignedDriftDelta(alert.delta)}，建议优先检查这类表达是否在连续章节里反复累积。</div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="novel-copy-block">
+          最近 {dashboard.novelLanguageDriftSummary.recentWindowSize || dashboard.totalChaptersScored} 章暂无明显恶化项。
+        </div>
+      )}
+
+      {currentVolume ? (
+        <div className="novel-note-list">
+          <div className="novel-note-list__item">
+            当前卷：{currentVolume.volumeName}（第{currentVolume.chapterStart}-{currentVolume.chapterEnd}章，共 {currentVolume.chapterCount} 章）
+          </div>
+          <div className="novel-note-list__item">
+            {currentVolume.topWorseningMetrics.length > 0
+              ? `卷内近期恶化：${currentVolume.topWorseningMetrics.map((item) => `${item.label} ${formatSignedDriftDelta(item.delta)}`).join('、')}`
+              : '卷内近期暂无明显恶化项。'}
+          </div>
+        </div>
+      ) : null}
+
+      {topRiskMetrics.length > 0 ? (
+        <div className="novel-note-list">
+          <div className="novel-note-list__item">
+            全书当前最高风险：{topRiskMetrics.map((item) => `${item.label} ${item.value}`).join('、')}
+          </div>
+          <div className="novel-note-list__item">
+            趋势状态：恶化 {dashboard.novelLanguageDriftSummary.statusBreakdown.worsening} 项，改善 {dashboard.novelLanguageDriftSummary.statusBreakdown.improving} 项，稳定 {dashboard.novelLanguageDriftSummary.statusBreakdown.stable} 项。
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function DialogueFingerprintHealthCard({
+  dashboard,
+  reviewNotes,
+}: {
+  dashboard: QualityDashboardData | null
+  reviewNotes: ReviewNotes | null
+}) {
+  const currentSimilarities = reviewNotes?.cross_character_similarity?.slice(0, 3) || []
+  const currentDrifts = reviewNotes?.dialogue_drift_alerts?.slice(0, 3) || []
+  const globalPairs = dashboard?.crossCharacterDialogueSimilarity.filter((pair) => pair.similarity >= 75).slice(0, 3) || []
+  const globalDrifts = dashboard?.dialogueDriftTrend.filter((entry) => entry.recentDriftRate >= 45).slice(0, 3) || []
+
+  if (
+    !reviewNotes?.dialogue_fingerprint_summary
+    && currentSimilarities.length === 0
+    && currentDrifts.length === 0
+    && (!dashboard || dashboard.dialogueFingerprintStats.eligibleCharacterCount === 0)
+  ) {
+    return <div className="novel-copy-block">章节里出现稳定对白样本后，这里会开始提示“谁说话太像”以及“谁正在偏离自己的声音”。</div>
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 10 }}>
+      {reviewNotes?.dialogue_fingerprint_summary ? (
+        <div className="novel-copy-block">{reviewNotes.dialogue_fingerprint_summary}</div>
+      ) : null}
+
+      {currentSimilarities.length > 0 || currentDrifts.length > 0 || (reviewNotes?.dialogue_homogenization_risks?.length || 0) > 0 ? (
+        <div className="novel-note-list">
+          {(reviewNotes?.dialogue_homogenization_risks || []).slice(0, 3).map((item, index) => (
+            <div key={`${item}-${index}`} className="novel-note-list__item">{item}</div>
+          ))}
+          {currentSimilarities.map((item) => (
+            <div key={`${item.characterAId}-${item.characterBId}`} className="novel-note-list__item">
+              当前章高相似：{item.characterAName} / {item.characterBName}（{item.similarity}）· {item.reason}
+            </div>
+          ))}
+          {currentDrifts.map((item) => (
+            <div key={`${item.characterId}-${item.driftRate}`} className="novel-note-list__item">
+              当前章漂移：{item.characterName}（{item.driftRate}）· {item.reason}
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {dashboard ? (
+        <div className="novel-note-list">
+          <div className="novel-note-list__item">
+            已建立 {dashboard.dialogueFingerprintStats.eligibleCharacterCount} 个角色语音指纹，累计识别对白 {dashboard.dialogueFingerprintStats.totalTurnCount} 段，其中归属成功 {dashboard.dialogueFingerprintStats.attributedTurnCount} 段。
+          </div>
+          <div className="novel-note-list__item">
+            全书平均跨角色相似度 {dashboard.dialogueFingerprintStats.averageCrossCharacterSimilarity}，高相似组合 {dashboard.dialogueFingerprintStats.highSimilarityPairCount} 对，近期漂移角色 {dashboard.dialogueFingerprintStats.driftingCharacterCount} 个。
+          </div>
+        </div>
+      ) : null}
+
+      {globalPairs.length > 0 ? (
+        <div className="novel-issue-list">
+          {globalPairs.map((pair) => (
+            <div key={`${pair.characterAId}-${pair.characterBId}`} className="novel-issue-item">
+              <div className="novel-issue-item__head">
+                <Tag color="warning">高相似</Tag>
+                <strong>{pair.characterAName} / {pair.characterBName}</strong>
+              </div>
+              <div className="novel-issue-item__desc">相似度 {pair.similarity}</div>
+              <div className="novel-issue-item__suggestion">{pair.reasons.join('、') || '句长、停顿和惯用短语接近。'}</div>
+            </div>
+          ))}
+        </div>
+      ) : globalDrifts.length > 0 ? null : (
+        <div className="novel-copy-block">全书当前没有达到高阈值的对白同质化组合。</div>
+      )}
+
+      {globalDrifts.length > 0 ? (
+        <div className="novel-note-list">
+          {globalDrifts.map((entry) => (
+            <div key={entry.characterId} className="novel-note-list__item">
+              近期漂移：{entry.characterName}（{entry.recentDriftRate}）· {entry.reasons.join('、') || '说话节奏正在偏移。'}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function StoryDynamicsHealthCard({
+  dashboard,
+  currentChapter,
+  reviewNotes,
+}: {
+  dashboard: QualityDashboardData | null
+  currentChapter: Chapter | null
+  reviewNotes: ReviewNotes | null
+}) {
+  const currentSignals = [
+    reviewNotes?.cost_resolution_state === 'evaporated'
+      ? '当前章代价疑似蒸发，建议把伤势、资源损耗或关系后果继续写下去。'
+      : '',
+    reviewNotes?.reversal_marker && reviewNotes?.reversal_support_state === 'forced'
+      ? '当前章反转支撑不足，建议补齐触发原因和前文铺垫。'
+      : '',
+    reviewNotes?.protagonist_setback === 'none' && (reviewNotes?.reward_state === 'partial' || reviewNotes?.reward_state === 'major') && !reviewNotes?.cost_present
+      ? '当前章主角偏顺推，建议补出失败、失误或阶段代价。'
+      : '',
+    typeof reviewNotes?.protagonist_pressure === 'number' && reviewNotes.protagonist_pressure >= 70 && reviewNotes?.reward_state === 'none'
+      ? '当前章压力很高但没有回报，建议安排一次缓冲、收获或反击兑现。'
+      : '',
+  ].filter((item): item is string => Boolean(item))
+
+  if (currentSignals.length === 0 && (!dashboard || dashboard.protagonistSetbackSummary.chapterCount === 0)) {
+    return <div className="novel-copy-block">运行新版章节审校后，这里会开始累积主角受挫、代价持续和反转节奏告警。</div>
+  }
+
+  const alerts = dashboard?.storyPacingAlerts.slice(0, 3) || []
+  const currentVolume = currentChapter?.volumeId
+    ? dashboard?.volumeStoryDynamics.find((entry) => entry.volumeId === currentChapter.volumeId) || null
+    : null
+
+  return (
+    <div style={{ display: 'grid', gap: 10 }}>
+      {currentSignals.length > 0 ? (
+        <div className="novel-note-list">
+          {currentSignals.map((item, index) => (
+            <div key={`${item}-${index}`} className="novel-note-list__item">{item}</div>
+          ))}
+          {reviewNotes?.pace_marker ? <div className="novel-note-list__item">当前章主节奏：{paceMarkerLabel(reviewNotes.pace_marker)}</div> : null}
+        </div>
+      ) : null}
+
+      {alerts.length > 0 ? (
+        <div className="novel-issue-list">
+          {alerts.map((alert, index) => (
+            <div key={`${alert.code}-${index}`} className="novel-issue-item">
+              <div className="novel-issue-item__head">
+                <Tag color={storyAlertColor(alert.severity)}>{storyAlertLabel(alert.severity)}</Tag>
+                <strong>{alert.title}</strong>
+              </div>
+              <div className="novel-issue-item__desc">{alert.detail}</div>
+              <div className="novel-issue-item__suggestion">涉及章节：{alert.chapterNums.join('、')}</div>
+            </div>
+          ))}
+        </div>
+      ) : dashboard ? (
+        <div className="novel-copy-block">
+          最近 {Math.min(20, dashboard.protagonistSetbackSummary.chapterCount)} 章暂无明显的主角与节奏结构告警。
+        </div>
+      ) : null}
+
+      {dashboard ? (
+        <div className="novel-note-list">
+          <div className="novel-note-list__item">
+            全书受挫率 {dashboard.protagonistSetbackSummary.protagonistSetbackRate}% ，重大受挫 {dashboard.protagonistSetbackSummary.majorSetbackRate}% ，平均压力 {dashboard.protagonistSetbackSummary.averagePressure}。
+          </div>
+          <div className="novel-note-list__item">
+            最长顺推 {dashboard.protagonistSetbackSummary.longestSmoothRun} 章，最长持续压抑 {dashboard.protagonistSetbackSummary.longestPressureRun} 章。
+          </div>
+          <div className="novel-note-list__item">
+            代价蒸发 {dashboard.costPersistenceSummary.evaporatedCostCount} 次，未解代价 {dashboard.costPersistenceSummary.unresolvedCostCount} 条。
+          </div>
+        </div>
+      ) : null}
+
+      {currentVolume ? (
+        <div className="novel-note-list">
+          <div className="novel-note-list__item">
+            当前卷：{currentVolume.volumeName} · 受挫率 {currentVolume.protagonistSetbackRate}% · 平均压力 {currentVolume.averagePressure}
+          </div>
+          <div className="novel-note-list__item">
+            卷内高潮：{currentVolume.climaxChapterNums.length > 0 ? currentVolume.climaxChapterNums.join('、') : '暂无'}；反转：{currentVolume.reversalChapterNums.length > 0 ? currentVolume.reversalChapterNums.join('、') : '暂无'}；代价蒸发 {currentVolume.evaporatedCostCount} 次。
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
 }
 
 function AiCheckResult({ result }: { result: AiCheckPayload }) {

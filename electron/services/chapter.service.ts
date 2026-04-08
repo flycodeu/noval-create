@@ -19,6 +19,7 @@ import {
   buildContinuityStatePrompt,
   buildScenePlanPrompt,
 } from './story-prompts'
+import { getQualityDashboardData } from './quality-dashboard.service'
 import { runChatTask, runStreamTask } from './task.service'
 import { buildConsistencyPromptSummary, buildNovelConsistencyReport } from './consistency.service'
 import { syncChapterTimelineStatuses } from './link-sync.service'
@@ -42,6 +43,11 @@ import {
 import { discoverEntitiesFromContent } from './entity-discovery.service'
 import { buildBatchKey, captureTimelineAnchorsForChapterIds, createOperationLog } from './history.service'
 import { enhanceAiScoreResult } from './ai-score.service'
+import {
+  analyzeChapterDialogueAgainstNovel,
+  scheduleDialogueFingerprintRefresh,
+} from './dialogue-fingerprint.service'
+import { refreshCharacterStateVersionsForChapter } from './character-state.service'
 
 interface ChapterSummaryData {
   summary: string
@@ -63,6 +69,11 @@ interface ScenePlanStep {
 }
 
 type ReviewSeverity = 'low' | 'medium' | 'high'
+type ProtagonistSetbackLevel = 'none' | 'minor' | 'major'
+type CostResolutionState = 'new' | 'ongoing' | 'resolved' | 'evaporated'
+type ReversalSupportState = 'supported' | 'weak' | 'forced'
+type ChapterPacingMarker = 'setup' | 'conflict' | 'reversal' | 'climax' | 'payoff' | 'breather'
+type RewardState = 'none' | 'partial' | 'major'
 
 interface ChapterReviewNotes {
   summary: string
@@ -81,6 +92,33 @@ interface ChapterReviewNotes {
   severity: ReviewSeverity
   rewrite_required: boolean
   revision_brief: string
+  protagonist_setback: ProtagonistSetbackLevel
+  setback_summary: string
+  cost_present: boolean
+  cost_summary: string
+  cost_resolution_state?: CostResolutionState
+  reversal_marker: boolean
+  reversal_summary: string
+  reversal_support_state?: ReversalSupportState
+  pace_marker?: ChapterPacingMarker
+  reward_state: RewardState
+  protagonist_pressure: number
+  dialogue_homogenization_risks: string[]
+  dialogue_fingerprint_summary: string
+  cross_character_similarity: Array<{
+    characterAId: number
+    characterAName: string
+    characterBId: number
+    characterBName: string
+    similarity: number
+    reason: string
+  }>
+  dialogue_drift_alerts: Array<{
+    characterId: number
+    characterName: string
+    driftRate: number
+    reason: string
+  }>
 }
 
 type ChapterGenerationStage = 'planning' | 'drafting' | 'reviewing' | 'rewriting' | 'completed' | 'failed'
@@ -212,6 +250,50 @@ function dedupeTextList(values: string[]): string[] {
 
 function normalizeReviewSeverity(value: unknown): ReviewSeverity {
   return value === 'high' || value === 'medium' || value === 'low' ? value : 'medium'
+}
+
+function normalizeBoolean(value: unknown): boolean {
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'number') return value !== 0
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase()
+    return normalized === 'true' || normalized === '1' || normalized === 'yes'
+  }
+  return false
+}
+
+function normalizeBoundedNumber(value: unknown, min: number, max: number, fallback = min): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback
+  return Math.max(min, Math.min(max, Math.round(value)))
+}
+
+function normalizeProtagonistSetback(value: unknown): ProtagonistSetbackLevel {
+  return value === 'major' || value === 'minor' || value === 'none' ? value : 'none'
+}
+
+function normalizeCostResolutionState(value: unknown): CostResolutionState | undefined {
+  return value === 'new' || value === 'ongoing' || value === 'resolved' || value === 'evaporated'
+    ? value
+    : undefined
+}
+
+function normalizeReversalSupportState(value: unknown): ReversalSupportState | undefined {
+  return value === 'supported' || value === 'weak' || value === 'forced' ? value : undefined
+}
+
+function normalizePaceMarker(value: unknown): ChapterPacingMarker | undefined {
+  return value === 'setup'
+    || value === 'conflict'
+    || value === 'reversal'
+    || value === 'climax'
+    || value === 'payoff'
+    || value === 'breather'
+    ? value
+    : undefined
+}
+
+function normalizeRewardState(value: unknown): RewardState {
+  return value === 'partial' || value === 'major' || value === 'none' ? value : 'none'
 }
 
 function mergeSeverity(current: ReviewSeverity, incoming: ReviewSeverity): ReviewSeverity {
@@ -553,6 +635,9 @@ function normalizeReviewNotes(raw: unknown): ChapterReviewNotes {
     ? raw as Record<string, unknown>
     : {}
 
+  const costPresent = normalizeBoolean(record.cost_present)
+  const reversalMarker = normalizeBoolean(record.reversal_marker)
+
   return {
     summary: asText(record.summary),
     critical_fixes: toStringArray(record.critical_fixes),
@@ -570,6 +655,49 @@ function normalizeReviewNotes(raw: unknown): ChapterReviewNotes {
     severity: normalizeReviewSeverity(record.severity),
     rewrite_required: record.rewrite_required === true,
     revision_brief: asText(record.revision_brief),
+    protagonist_setback: normalizeProtagonistSetback(record.protagonist_setback),
+    setback_summary: asText(record.setback_summary),
+    cost_present: costPresent,
+    cost_summary: asText(record.cost_summary),
+    cost_resolution_state: costPresent ? normalizeCostResolutionState(record.cost_resolution_state) : undefined,
+    reversal_marker: reversalMarker,
+    reversal_summary: asText(record.reversal_summary),
+    reversal_support_state: reversalMarker ? normalizeReversalSupportState(record.reversal_support_state) : undefined,
+    pace_marker: normalizePaceMarker(record.pace_marker),
+    reward_state: normalizeRewardState(record.reward_state),
+    protagonist_pressure: normalizeBoundedNumber(record.protagonist_pressure, 0, 100, 0),
+    dialogue_homogenization_risks: toStringArray(record.dialogue_homogenization_risks),
+    dialogue_fingerprint_summary: asText(record.dialogue_fingerprint_summary),
+    cross_character_similarity: Array.isArray(record.cross_character_similarity)
+      ? record.cross_character_similarity
+        .filter((item) => item && typeof item === 'object' && !Array.isArray(item))
+        .map((item) => {
+          const current = item as Record<string, unknown>
+          return {
+            characterAId: normalizeBoundedNumber(current.characterAId, 0, Number.MAX_SAFE_INTEGER, 0),
+            characterAName: asText(current.characterAName),
+            characterBId: normalizeBoundedNumber(current.characterBId, 0, Number.MAX_SAFE_INTEGER, 0),
+            characterBName: asText(current.characterBName),
+            similarity: normalizeBoundedNumber(current.similarity, 0, 100, 0),
+            reason: asText(current.reason),
+          }
+        })
+        .filter((item) => item.characterAId > 0 && item.characterBId > 0 && item.characterAName && item.characterBName)
+      : [],
+    dialogue_drift_alerts: Array.isArray(record.dialogue_drift_alerts)
+      ? record.dialogue_drift_alerts
+        .filter((item) => item && typeof item === 'object' && !Array.isArray(item))
+        .map((item) => {
+          const current = item as Record<string, unknown>
+          return {
+            characterId: normalizeBoundedNumber(current.characterId, 0, Number.MAX_SAFE_INTEGER, 0),
+            characterName: asText(current.characterName),
+            driftRate: normalizeBoundedNumber(current.driftRate, 0, 100, 0),
+            reason: asText(current.reason),
+          }
+        })
+        .filter((item) => item.characterId > 0 && item.characterName)
+      : [],
   }
 }
 
@@ -589,7 +717,22 @@ function hasReviewNotes(notes: ChapterReviewNotes): boolean {
     notes.missing_payoffs.length > 0 ||
     notes.strengths.length > 0 ||
     notes.rewrite_required ||
-    notes.revision_brief,
+    notes.revision_brief ||
+    notes.protagonist_setback !== 'none' ||
+    notes.setback_summary ||
+    notes.cost_present ||
+    notes.cost_summary ||
+    Boolean(notes.cost_resolution_state) ||
+    notes.reversal_marker ||
+    notes.reversal_summary ||
+    Boolean(notes.reversal_support_state) ||
+    Boolean(notes.pace_marker) ||
+    notes.reward_state !== 'none' ||
+    notes.protagonist_pressure > 0 ||
+    notes.dialogue_homogenization_risks.length > 0 ||
+    Boolean(notes.dialogue_fingerprint_summary) ||
+    notes.cross_character_similarity.length > 0 ||
+    notes.dialogue_drift_alerts.length > 0,
   )
 }
 
@@ -617,6 +760,21 @@ function buildFallbackReviewNotes(consistencyNotes: string): ChapterReviewNotes 
     severity: 'medium',
     rewrite_required: true,
     revision_brief: '保持当前剧情方向，重点修承接、人物状态、物品去向、代价落点和语言自然度。',
+    protagonist_setback: 'none',
+    setback_summary: '',
+    cost_present: false,
+    cost_summary: '',
+    cost_resolution_state: undefined,
+    reversal_marker: false,
+    reversal_summary: '',
+    reversal_support_state: undefined,
+    pace_marker: undefined,
+    reward_state: 'none',
+    protagonist_pressure: 0,
+    dialogue_homogenization_risks: [],
+    dialogue_fingerprint_summary: '',
+    cross_character_similarity: [],
+    dialogue_drift_alerts: [],
   }
 }
 
@@ -635,6 +793,26 @@ function formatReviewNotes(notes: ChapterReviewNotes): string {
     notes.genre_hollowing_risks.length > 0 ? `体裁空心化：\n- ${notes.genre_hollowing_risks.join('\n- ')}` : '',
     notes.missing_payoffs.length > 0 ? `缺失回收：\n- ${notes.missing_payoffs.join('\n- ')}` : '',
     notes.strengths.length > 0 ? `可保留优点：\n- ${notes.strengths.join('\n- ')}` : '',
+    notes.protagonist_setback !== 'none' || notes.setback_summary
+      ? `主角受挫：${notes.protagonist_setback}${notes.setback_summary ? ` · ${notes.setback_summary}` : ''}`
+      : '',
+    notes.cost_present
+      ? `代价状态：${notes.cost_resolution_state || 'new'}${notes.cost_summary ? ` · ${notes.cost_summary}` : ''}`
+      : '',
+    notes.reversal_marker
+      ? `反转判断：${notes.reversal_support_state || 'weak'}${notes.reversal_summary ? ` · ${notes.reversal_summary}` : ''}`
+      : '',
+    notes.pace_marker ? `章节节奏标签：${notes.pace_marker}` : '',
+    notes.reward_state !== 'none' ? `阶段回报：${notes.reward_state}` : '',
+    notes.protagonist_pressure > 0 ? `主角压力值：${notes.protagonist_pressure}` : '',
+    notes.dialogue_fingerprint_summary ? `角色对白辨识度：${notes.dialogue_fingerprint_summary}` : '',
+    notes.dialogue_homogenization_risks.length > 0 ? `对白同质化风险：\n- ${notes.dialogue_homogenization_risks.join('\n- ')}` : '',
+    notes.cross_character_similarity.length > 0
+      ? `高相似角色组合：\n- ${notes.cross_character_similarity.map((item) => `${item.characterAName}/${item.characterBName} (${item.similarity})：${item.reason}`).join('\n- ')}`
+      : '',
+    notes.dialogue_drift_alerts.length > 0
+      ? `角色语音漂移：\n- ${notes.dialogue_drift_alerts.map((item) => `${item.characterName} (${item.driftRate})：${item.reason}`).join('\n- ')}`
+      : '',
     `严重等级：${notes.severity}`,
     `是否需要重写：${notes.rewrite_required ? '是' : '否'}`,
     notes.revision_brief ? `修订摘要：${notes.revision_brief}` : '',
@@ -690,6 +868,83 @@ function appendRevisionBrief(base: string, additions: string[]): string {
   return merged.join('；').slice(0, 140)
 }
 
+function applyDialogueAnalysisToReviewNotes(
+  reviewNotes: ChapterReviewNotes,
+  novelId: number,
+  chapterNum: number,
+  content: string,
+): ChapterReviewNotes {
+  const analysis = analyzeChapterDialogueAgainstNovel(novelId, chapterNum, content)
+  if (
+    !analysis.fingerprintSummary
+    && analysis.risks.length === 0
+    && analysis.similarities.length === 0
+    && analysis.drifts.length === 0
+  ) {
+    return reviewNotes
+  }
+
+  return {
+    ...reviewNotes,
+    dialogue_homogenization_risks: dedupeTextList([
+      ...reviewNotes.dialogue_homogenization_risks,
+      ...analysis.risks,
+    ]),
+    dialogue_fingerprint_summary: analysis.fingerprintSummary || reviewNotes.dialogue_fingerprint_summary,
+    cross_character_similarity: analysis.similarities,
+    dialogue_drift_alerts: analysis.drifts,
+    language_risks: dedupeTextList([
+      ...reviewNotes.language_risks,
+      ...analysis.risks.filter((item) => item.includes('对白') || item.includes('语音画像')),
+    ]),
+    revision_brief: appendRevisionBrief(reviewNotes.revision_brief, [
+      analysis.similarities.length > 0 ? '拉开同场角色的句长、停顿和语气差异，避免多人同腔。' : '',
+      analysis.drifts.length > 0 ? '把漂移角色拉回既有称呼、停顿和重复短语习惯。' : '',
+    ]),
+  }
+}
+
+function buildStructuralAlertsSummary(
+  novelId: number,
+  chapterNum: number,
+  volumeId?: number | null,
+): string {
+  try {
+    const dashboard = getQualityDashboardData(novelId, { includeDialogueInsights: false })
+    const relevantAlerts = dashboard.storyPacingAlerts
+      .filter((alert) => alert.chapterNums.length === 0
+        || alert.chapterNums.includes(chapterNum)
+        || alert.chapterNums.some((num) => num >= chapterNum - 3 && num <= chapterNum))
+      .slice(0, 3)
+    const fallbackAlerts = relevantAlerts.length > 0
+      ? relevantAlerts
+      : dashboard.storyPacingAlerts.slice(0, 3)
+    const currentVolume = typeof volumeId === 'number'
+      ? dashboard.volumeStoryDynamics.find((entry) => entry.volumeId === volumeId) || null
+      : null
+
+    const lines = [
+      ...fallbackAlerts.map((alert) => `- ${alert.title}：${alert.detail}`),
+      dashboard.protagonistSetbackSummary.chapterCount > 0
+        ? `- 全书主角受挫率 ${dashboard.protagonistSetbackSummary.protagonistSetbackRate}% ，重大受挫 ${dashboard.protagonistSetbackSummary.majorSetbackRate}% ，最长顺推跨度 ${dashboard.protagonistSetbackSummary.longestSmoothRun} 章。`
+        : '',
+      dashboard.costPersistenceSummary.evaporatedCostCount > 0
+        ? `- 全书已检测到 ${dashboard.costPersistenceSummary.evaporatedCostCount} 次代价蒸发，重写时不要自动抹平重大损失。`
+        : '',
+      dashboard.reversalDistributionSummary.forcedReversalCount > 0
+        ? `- 已检测到 ${dashboard.reversalDistributionSummary.forcedReversalCount} 次强行反转，新增反转前先补齐铺垫与触发链。`
+        : '',
+      currentVolume
+        ? `- 当前卷 ${currentVolume.volumeName}：受挫率 ${currentVolume.protagonistSetbackRate}% ，高潮章节 ${currentVolume.climaxChapterNums.length > 0 ? currentVolume.climaxChapterNums.join('、') : '暂无'} ，代价蒸发 ${currentVolume.evaporatedCostCount} 次。`
+        : '',
+    ].filter(Boolean)
+
+    return lines.join('\n')
+  } catch {
+    return ''
+  }
+}
+
 function enhanceReviewNotesWithGuardrails(
   reviewNotes: ChapterReviewNotes,
   content: string,
@@ -717,7 +972,12 @@ function enhanceReviewNotesWithGuardrails(
     context_drift_risks: dedupeTextList(reviewNotes.context_drift_risks),
     realism_risks: dedupeTextList([...reviewNotes.realism_risks, ...realismFindings]),
     coherence_risks: dedupeTextList(reviewNotes.coherence_risks),
-    reader_hook_risks: dedupeTextList(reviewNotes.reader_hook_risks),
+    reader_hook_risks: dedupeTextList([
+      ...reviewNotes.reader_hook_risks,
+      ...(findings.some((finding) => finding.code === 'zero_cost_resolution')
+        ? ['本章关键冲突的结果代价不足，读者会感觉主角几乎无成本顺推。']
+        : []),
+    ]),
     language_risks: dedupeTextList([...reviewNotes.language_risks, ...languageFindings]),
     human_language_repairs: dedupeTextList(reviewNotes.human_language_repairs),
     genre_hollowing_risks: dedupeTextList([...reviewNotes.genre_hollowing_risks, ...genreHollowFindings]),
@@ -734,6 +994,13 @@ function enhanceReviewNotesWithGuardrails(
       languageFindings.length > 0 ? '删掉口号句、模板情绪和对象类别错配，改回自然中文。' : '',
       genreHollowFindings.length > 0 ? '把题材生态写回具体场景，补齐生存链、修行秩序或江湖规矩。' : '',
     ]),
+    cost_present: reviewNotes.cost_present || findings.some((finding) => finding.code === 'zero_cost_resolution'),
+    cost_summary: reviewNotes.cost_summary || (findings.some((finding) => finding.code === 'zero_cost_resolution')
+      ? '当前重大问题被写成了近乎无代价解决，需要补齐损失、伤势、资源消耗或秩序后果。'
+      : ''),
+    cost_resolution_state: findings.some((finding) => finding.code === 'zero_cost_resolution')
+      ? 'evaporated'
+      : reviewNotes.cost_resolution_state,
   }
 
   return next
@@ -887,6 +1154,7 @@ interface ChapterRepairInput {
   profile: Awaited<ReturnType<typeof buildStoryProfile>>
   scenePlanText: string
   consistencyNotes: string
+  structuralAlertsSummary: string
   reviewNotes: ChapterReviewNotes
   content: string
   lockedParagraphs: string[]
@@ -942,6 +1210,7 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
           longTermMemory: input.context.longTermMemory,
           recalledMemory: input.context.recalledMemory,
           consistencyNotes: input.consistencyNotes,
+          structuralAlertsSummary: input.structuralAlertsSummary,
           scenePlan: input.scenePlanText,
           draftContent: repairPromptDraftContent,
           reviewNotes: formatReviewNotes(repairNotes),
@@ -1018,6 +1287,7 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
               longTermMemory: input.context.longTermMemory,
               recalledMemory: input.context.recalledMemory,
               consistencyNotes: input.consistencyNotes,
+              structuralAlertsSummary: input.structuralAlertsSummary,
               scenePlan: input.scenePlanText,
               draftContent: secondPromptDraftContent,
               reviewNotes: formatReviewNotes(secondRepairNotes),
@@ -1202,6 +1472,7 @@ async function refreshChapterMemory(chapterId: number): Promise<{
   if (!chapter) throwUserFacingError('chapter.notFound')
   const summary = await updateChapterSummaryData(chapterId)
   const continuity = await updateChapterContinuityState(chapterId, summary)
+  refreshCharacterStateVersionsForChapter(chapterId)
   refreshStoryMemoryCheckpoints(chapter.novelId)
   markChapterContextCurrent(chapterId)
   return { summary, continuity }
@@ -1661,6 +1932,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
   const storyCore = buildStoryCore(profile, rewriteContext.storyCore || draftContext.storyCore || scenePlanContext.storyCore)
   const currentArcRow = rawContext.currentArc
   const latestArcProgressNote = getLatestArcProgressNote(chapter.novelId, currentArcRow, chapter.chapterNum)
+  const structuralAlertsSummary = buildStructuralAlertsSummary(chapter.novelId, chapter.chapterNum, chapter.volumeId)
 
   updateChapter(chapterId, {
     status: 'writing',
@@ -1779,6 +2051,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
           longTermMemory: draftContext.longTermMemory,
           recalledMemory: draftContext.recalledMemory,
           consistencyNotes: draftWritingGuidance,
+          structuralAlertsSummary,
           scenePlan: scenePlanText,
           draftContent: '',
           reviewNotes: '',
@@ -1832,6 +2105,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
             longTermMemory: reviewContext.longTermMemory,
             recalledMemory: reviewContext.recalledMemory,
             consistencyNotes,
+            structuralAlertsSummary,
             arcProgress: latestArcProgressNote,
             arcProgressStatus: buildArcProgressStatus(currentArcRow, chapter.chapterNum),
             arcProgressCheckpoint: buildArcProgressCheckpoint(currentArcRow, chapter.chapterNum),
@@ -1862,6 +2136,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
     }
 
     reviewNotes = enhanceReviewNotesWithGuardrails(reviewNotes, draftContent, profile.genre)
+    reviewNotes = applyDialogueAnalysisToReviewNotes(reviewNotes, chapter.novelId, chapter.chapterNum, draftContent)
     updateChapter(chapterId, { reviewNotesJson: JSON.stringify(reviewNotes) })
 
     sendGenerationProgress(sender, {
@@ -1899,6 +2174,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
       longTermMemory: rewriteContext.longTermMemory,
       recalledMemory: rewriteContext.recalledMemory,
       consistencyNotes: rewriteWritingGuidance,
+      structuralAlertsSummary,
       scenePlan: scenePlanText,
       draftContent: lockedParagraphContext.promptDraftContent,
       reviewNotes: formatReviewNotes(reviewNotes),
@@ -1935,17 +2211,25 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
           profile,
           scenePlanText,
           consistencyNotes: rewriteWritingGuidance,
+          structuralAlertsSummary,
           reviewNotes: protectedOutput.reviewNotes,
           content: protectedOutput.content,
           lockedParagraphs: lockedParagraphContext.lockedParagraphs,
           promptTier: complexity,
         })
+        const repairedReviewNotes = applyDialogueAnalysisToReviewNotes(
+          repaired.reviewNotes,
+          chapter.novelId,
+          chapter.chapterNum,
+          repaired.content,
+        )
 
-        if (repaired.reviewNotes !== reviewNotes) {
-          updateChapter(chapterId, { reviewNotesJson: JSON.stringify(repaired.reviewNotes) })
+        if (repairedReviewNotes !== reviewNotes) {
+          updateChapter(chapterId, { reviewNotesJson: JSON.stringify(repairedReviewNotes) })
         }
 
         const result = await finalizeGeneratedChapterContent(chapterId, repaired.content)
+        scheduleDialogueFingerprintRefresh(chapter.novelId, novel?.modelConfigId || undefined)
 
         // Async: generate embeddings for vector memory retrieval (non-blocking)
         const chapterRecord = getChapter(chapterId)
@@ -2022,8 +2306,10 @@ export async function aiCheckChapter(chapterId: number): Promise<unknown> {
       aiScoreJson: JSON.stringify(enhancedScore),
       updatedAt: new Date().toISOString(),
     }).where(eq(chapters.id, chapterId)).run()
+    scheduleDialogueFingerprintRefresh(chapter.novelId, novel?.modelConfigId || undefined)
     return enhancedScore
   } catch {
+    scheduleDialogueFingerprintRefresh(chapter.novelId, novel?.modelConfigId || undefined)
     return enhanceAiScoreResult({}, content)
   }
 }

@@ -201,6 +201,10 @@ export interface Character {
   relationshipTension?: string
   resonancePoint?: string
   characterArc?: string
+  speechPattern?: string
+  catchphrases?: string
+  vocabularyLevel?: string
+  dialectFeatures?: string
   appearanceJson?: string
   abilitiesJson?: string
   sourceContextJson?: string
@@ -1544,16 +1548,65 @@ export interface NovelConsistencyReport {
   issues: ConsistencyIssue[]
 }
 
+export interface CharacterStateVersion {
+  id: number
+  novelId: number
+  characterId: number
+  chapterId: number
+  chapterNum: number
+  injuryState?: string
+  resourceState?: string
+  stanceState?: string
+  mentalState?: string
+  relationshipHeatSummary?: string
+  goalState?: string
+  eventCause?: string
+  changeReason?: string
+  summaryText?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CharacterStateSummary {
+  characterId: number
+  characterName: string
+  roleType: Character['roleType']
+  chapterId: number
+  chapterNum: number
+  injuryState?: string
+  resourceState?: string
+  stanceState?: string
+  mentalState?: string
+  relationshipHeatSummary?: string
+  goalState?: string
+  eventCause?: string
+  changeReason?: string
+  summaryText: string
+  driftAlert?: string
+}
+
+export interface CharacterStateDriftAlert {
+  characterId: number
+  characterName: string
+  chapterId: number
+  chapterNum: number
+  driftScore: number
+  reasons: string[]
+  summary: string
+}
+
 export interface StoryMemorySnapshot {
   generatedAt: string
   chapterCount: number
   lastChapterNum: number
-  memoryMode: 'standard' | 'longform' | 'epic'
+  memoryMode: 'standard' | 'longform' | 'epic' | 'mega'
   coverageSummary: string
   phaseDigest: string[]
   plotMilestones: string[]
   arcSignals: string[]
   characterLedger: string[]
+  characterCurrentStates: CharacterStateSummary[]
+  characterStateAlerts: CharacterStateDriftAlert[]
   worldLedger: string[]
   activeThreads: string[]
   continuityDirectives: string[]
@@ -1579,6 +1632,135 @@ export interface LanguageDriftMetrics {
   nonHumanCollocationRate: number
 }
 
+export type ProtagonistSetbackLevel = 'none' | 'minor' | 'major'
+export type CostResolutionState = 'new' | 'ongoing' | 'resolved' | 'evaporated'
+export type ReversalSupportState = 'supported' | 'weak' | 'forced'
+export type ChapterPacingMarker = 'setup' | 'conflict' | 'reversal' | 'climax' | 'payoff' | 'breather'
+export type RewardState = 'none' | 'partial' | 'major'
+
+export interface ChapterStoryDynamics {
+  protagonistSetback: ProtagonistSetbackLevel
+  setbackSummary?: string
+  costPresent: boolean
+  costSummary?: string
+  costResolutionState?: CostResolutionState
+  reversalMarker: boolean
+  reversalSummary?: string
+  reversalSupportState?: ReversalSupportState
+  paceMarker?: ChapterPacingMarker
+  rewardState: RewardState
+  protagonistPressure: number
+}
+
+export interface StoryDynamicsAlert {
+  code: 'too_smooth' | 'cost_evaporation' | 'forced_reversal' | 'long_oppression_without_reward' | 'climax_overcrowded' | 'climax_gap_too_long'
+  severity: 'warning' | 'blocker'
+  title: string
+  detail: string
+  chapterNums: number[]
+}
+
+export interface StoryDynamicsTrendPoint {
+  chapterId: number
+  chapterNum: number
+  title: string
+  volumeId?: number
+  pressure: number
+  setbackLevel: 0 | 1 | 2
+  rewardLevel: 0 | 1 | 2
+  paceMarker?: ChapterPacingMarker
+  reversalMarker: boolean
+  climaxMarker: boolean
+}
+
+export interface CostDurationEntry {
+  startChapterNum: number
+  endChapterNum?: number
+  duration: number
+  status: 'ongoing' | 'resolved' | 'evaporated'
+  summary: string
+}
+
+export interface ProtagonistSetbackSummary {
+  chapterCount: number
+  protagonistSetbackRate: number
+  majorSetbackRate: number
+  averagePressure: number
+  longestSmoothRun: number
+  longestPressureRun: number
+}
+
+export interface CostPersistenceSummary {
+  averageCostDuration: number
+  evaporatedCostCount: number
+  unresolvedCostCount: number
+  activeCosts: CostDurationEntry[]
+}
+
+export interface ReversalDistributionSummary {
+  reversalChapterNums: number[]
+  climaxChapterNums: number[]
+  breatherChapterNums: number[]
+  payoffChapterNums: number[]
+  forcedReversalCount: number
+  weakReversalCount: number
+  climaxSpacing: number[]
+  paceMarkerCounts: Record<ChapterPacingMarker, number>
+}
+
+export type LanguageDriftTrendStatus = 'worsening' | 'stable' | 'improving'
+
+export interface LanguageDriftMetricSnapshot {
+  metric: keyof LanguageDriftMetrics
+  label: string
+  value: number
+}
+
+export interface LanguageDriftTrendSummary {
+  metric: keyof LanguageDriftMetrics
+  label: string
+  latestValue: number
+  previousValue: number
+  delta: number
+  status: LanguageDriftTrendStatus
+}
+
+export interface VolumeLanguageDriftEntry {
+  volumeId: number
+  volumeNumber: number
+  volumeName: string
+  chapterStart: number
+  chapterEnd: number
+  chapterCount: number
+  averageMetrics: LanguageDriftMetrics
+  topWorseningMetrics: LanguageDriftTrendSummary[]
+}
+
+export interface NovelLanguageDriftSummary {
+  chapterCount: number
+  recentWindowSize: number
+  statusBreakdown: Record<LanguageDriftTrendStatus, number>
+  topRiskMetrics: LanguageDriftMetricSnapshot[]
+}
+
+export interface VolumeStoryDynamicsEntry {
+  volumeId: number
+  volumeNumber: number
+  volumeName: string
+  chapterStart: number
+  chapterEnd: number
+  chapterCount: number
+  protagonistSetbackRate: number
+  majorSetbackRate: number
+  averagePressure: number
+  averageCostDuration: number
+  evaporatedCostCount: number
+  climaxChapterNums: number[]
+  reversalChapterNums: number[]
+  paceMarkerCounts: Record<ChapterPacingMarker, number>
+  alerts: StoryDynamicsAlert[]
+}
+
 export interface AIScoreResult {
   dimensions: AIScoreDimension[]
   ai_like_rate: number
@@ -1602,6 +1784,21 @@ export interface QualityDashboardData {
     nonHumanCollocationRate: Array<{ chapterNum: number; value: number }>
   }
   averageLanguageDrift: LanguageDriftMetrics
+  recentLanguageDriftAlerts: LanguageDriftTrendSummary[]
+  volumeLanguageDrift: VolumeLanguageDriftEntry[]
+  novelLanguageDriftSummary: NovelLanguageDriftSummary
+  dialogueFingerprintStats: DialogueFingerprintStats
+  characterDialogueSignatures: CharacterDialogueSignature[]
+  crossCharacterDialogueSimilarity: CrossCharacterDialogueSimilarity[]
+  dialogueDriftTrend: CharacterDialogueDriftEntry[]
+  volumeDialogueSimilarity: VolumeDialogueSimilarityEntry[]
+  recentDialogueAlerts: DialogueAlert[]
+  storyDynamicsTrend: StoryDynamicsTrendPoint[]
+  storyPacingAlerts: StoryDynamicsAlert[]
+  volumeStoryDynamics: VolumeStoryDynamicsEntry[]
+  protagonistSetbackSummary: ProtagonistSetbackSummary
+  costPersistenceSummary: CostPersistenceSummary
+  reversalDistributionSummary: ReversalDistributionSummary
   weakDimensionFrequency: Array<{ dimension: string; count: number }>
   chapterDetails: Array<{
     chapterId: number
@@ -1612,6 +1809,8 @@ export interface QualityDashboardData {
     weakDimensions: string[]
     dimensions: AIScoreDimension[]
     languageDriftMetrics?: LanguageDriftMetrics
+    dialogueReview?: ChapterDialogueReviewData
+    storyDynamics?: ChapterStoryDynamics
   }>
   totalChaptersScored: number
   averageOverallScore: number
@@ -1640,6 +1839,137 @@ export interface StyleFingerprintRecord {
   analysisModelId: string | null
   createdAt: string
   updatedAt: string
+}
+
+export interface DialogueTokenStat {
+  token: string
+  count: number
+}
+
+export interface CharacterDialogueFingerprint {
+  sampleCount: number
+  totalDialogueChars: number
+  avgSentenceLength: number
+  sentenceLengthVariance: number
+  shortSentenceRate: number
+  longSentenceRate: number
+  questionRate: number
+  exclamationRate: number
+  interruptionRate: number
+  ellipsisRate: number
+  dashRate: number
+  modalParticles: DialogueTokenStat[]
+  catchphraseCandidates: DialogueTokenStat[]
+  topTokens: DialogueTokenStat[]
+  sentencePatterns: string[]
+  recentSampleChapterNums: number[]
+}
+
+export interface CharacterDialogueSignature extends CharacterDialogueFingerprint {
+  characterId: number
+  characterName: string
+  roleType: Character['roleType']
+  sampleChapterStart?: number
+  sampleChapterEnd?: number
+  voiceProfile: string
+  distinctiveHabits: string[]
+  antiPatterns: string[]
+  compareHints: string[]
+}
+
+export interface CharacterDialogueFingerprintRecord {
+  id: number
+  novelId: number
+  characterId: number
+  sampleChapterStart: number | null
+  sampleChapterEnd: number | null
+  sampleCount: number
+  statsJson: string | null
+  summaryJson: string | null
+  analysisModelId: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CrossCharacterDialogueSimilarity {
+  characterAId: number
+  characterAName: string
+  characterBId: number
+  characterBName: string
+  similarity: number
+  reasons: string[]
+}
+
+export type DialogueTrendStatus = 'stable' | 'worsening' | 'improving'
+
+export interface CharacterDialogueDriftPoint {
+  chapterNum: number
+  value: number
+}
+
+export interface CharacterDialogueDriftEntry {
+  characterId: number
+  characterName: string
+  recentDriftRate: number
+  baselineWindowSize: number
+  recentWindowSize: number
+  reasons: string[]
+  status: DialogueTrendStatus
+  trend: CharacterDialogueDriftPoint[]
+}
+
+export interface DialogueFingerprintStats {
+  analyzedCharacterCount: number
+  eligibleCharacterCount: number
+  chapterCount: number
+  totalTurnCount: number
+  attributedTurnCount: number
+  unattributedTurnCount: number
+  averageCrossCharacterSimilarity: number
+  highSimilarityPairCount: number
+  driftingCharacterCount: number
+}
+
+export interface VolumeDialogueSimilarityEntry {
+  volumeId: number
+  volumeNumber: number
+  volumeName: string
+  chapterStart: number
+  chapterEnd: number
+  chapterCount: number
+  averageSimilarity: number
+  topPairs: CrossCharacterDialogueSimilarity[]
+}
+
+export interface DialogueAlert {
+  kind: 'similarity' | 'drift'
+  severity: 'info' | 'warning'
+  title: string
+  detail: string
+  relatedCharacterIds: number[]
+}
+
+export interface DialogueSimilarityWarning {
+  characterAId: number
+  characterAName: string
+  characterBId: number
+  characterBName: string
+  similarity: number
+  reason: string
+}
+
+export interface DialogueDriftWarning {
+  characterId: number
+  characterName: string
+  driftRate: number
+  reason: string
+}
+
+export interface ChapterDialogueReviewData {
+  fingerprintSummary?: string
+  risks: string[]
+  similarities: DialogueSimilarityWarning[]
+  drifts: DialogueDriftWarning[]
 }
 
 export interface ParallelSegmentGroup {

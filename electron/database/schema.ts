@@ -589,3 +589,41 @@ export const styleFingerprints = sqliteTable('style_fingerprints', {
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
 })
+
+export const characterDialogueFingerprints = sqliteTable('character_dialogue_fingerprints', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  characterId: integer('character_id').notNull().references(() => characters.id, { onDelete: 'cascade' }),
+  sampleChapterStart: integer('sample_chapter_start'),
+  sampleChapterEnd: integer('sample_chapter_end'),
+  sampleCount: integer('sample_count').notNull().default(0),
+  statsJson: text('stats_json'),
+  summaryJson: text('summary_json'),
+  analysisModelId: text('analysis_model_id'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
+export const characterStateVersions = sqliteTable('character_state_versions', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  characterId: integer('character_id').notNull().references(() => characters.id, { onDelete: 'cascade' }),
+  chapterId: integer('chapter_id').notNull().references(() => chapters.id, { onDelete: 'cascade' }),
+  chapterNum: integer('chapter_num').notNull(),
+  injuryState: text('injury_state'),
+  resourceState: text('resource_state'),
+  stanceState: text('stance_state'),
+  mentalState: text('mental_state'),
+  relationshipHeatSummary: text('relationship_heat_summary'),
+  goalState: text('goal_state'),
+  eventCause: text('event_cause'),
+  changeReason: text('change_reason'),
+  summaryText: text('summary_text'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
+export type CharacterDialogueFingerprint = typeof characterDialogueFingerprints.$inferSelect
+export type NewCharacterDialogueFingerprint = typeof characterDialogueFingerprints.$inferInsert
+export type CharacterStateVersion = typeof characterStateVersions.$inferSelect
+export type NewCharacterStateVersion = typeof characterStateVersions.$inferInsert

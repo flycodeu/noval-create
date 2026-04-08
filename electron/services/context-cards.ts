@@ -75,6 +75,12 @@ export interface CharacterStateEntry {
   entry: string
 }
 
+export interface CharacterStateCardHint {
+  currentState?: string
+  currentGoal?: string
+  hardConstraint?: string
+}
+
 interface TimelineCardMaps {
   chapterNumMap?: Map<number, number>
   arcNameMap?: Map<number, string>
@@ -86,6 +92,8 @@ interface CharacterCardOptions {
   allCharacters: CharacterRow[]
   relationRows: CharacterRelationRow[]
   recentStateEntries?: CharacterStateEntry[]
+  dialogueHintMap?: Map<number, string>
+  stateHintMap?: Map<number, CharacterStateCardHint>
   mentionedNames?: Set<string>
   limit?: number
 }
@@ -310,36 +318,41 @@ export function buildCharacterContextCards(options: CharacterCardOptions): Chara
   const protagonist = getCanonicalProtagonist(options.allCharacters)
   const recentStateEntries = options.recentStateEntries || []
 
-  return selectImportantCharacters(options.allCharacters, options.mentionedNames, options.limit || 15).map((character) => ({
-    name: normalizeInlineText(character.fullName, 24) || `角色#${character.id}`,
-    phaseOrAge: extractAppearancePhase(character),
-    identityOrCamp: joinCardValues([
-      character.socialIdentity,
-      character.occupation,
-      character.rankLevel,
-      character.species && character.species !== '人类' ? character.species : '',
-      !character.occupation && !character.socialIdentity ? character.roleType : '',
-    ], { maxLength: 56, perValueMaxLength: 24, limit: 3 }),
-    relationToProtagonist: buildRelationToProtagonist(protagonist?.id, character, options.relationRows),
-    currentState: extractRecentCharacterState(character.fullName, recentStateEntries),
-    currentGoal: joinCardValues([character.goals, character.surfaceDesire, character.deepNeed], {
-      maxLength: 64,
-      perValueMaxLength: 30,
-      limit: 2,
-    }),
-    speechStyle: joinCardValues([
-      character.speechPattern,
-      character.catchphrases ? `口头禅=${character.catchphrases}` : '',
-      character.vocabularyLevel ? `用词=${character.vocabularyLevel}` : '',
-      character.dialectFeatures ? `口音=${character.dialectFeatures}` : '',
-    ], { maxLength: 72, perValueMaxLength: 28, limit: 3 }),
-    hardConstraint: joinCardValues([
-      character.moralLine ? `底线=${character.moralLine}` : '',
-      character.coreFear ? `恐惧=${character.coreFear}` : '',
-      character.hiddenSecret ? `秘密=${character.hiddenSecret}` : '',
-      character.trauma ? `创伤=${character.trauma}` : '',
-    ], { maxLength: 72, perValueMaxLength: 28, limit: 2 }),
-  }))
+  return selectImportantCharacters(options.allCharacters, options.mentionedNames, options.limit || 15).map((character) => {
+    const stateHint = options.stateHintMap?.get(character.id)
+    return {
+      name: normalizeInlineText(character.fullName, 24) || `角色#${character.id}`,
+      phaseOrAge: extractAppearancePhase(character),
+      identityOrCamp: joinCardValues([
+        character.socialIdentity,
+        character.occupation,
+        character.rankLevel,
+        character.species && character.species !== '人类' ? character.species : '',
+        !character.occupation && !character.socialIdentity ? character.roleType : '',
+      ], { maxLength: 56, perValueMaxLength: 24, limit: 3 }),
+      relationToProtagonist: buildRelationToProtagonist(protagonist?.id, character, options.relationRows),
+      currentState: stateHint?.currentState || extractRecentCharacterState(character.fullName, recentStateEntries),
+      currentGoal: joinCardValues([stateHint?.currentGoal, character.goals, character.surfaceDesire, character.deepNeed], {
+        maxLength: 64,
+        perValueMaxLength: 30,
+        limit: 2,
+      }),
+      speechStyle: joinCardValues([
+        character.speechPattern,
+        character.catchphrases ? `口头禅=${character.catchphrases}` : '',
+        character.vocabularyLevel ? `用词=${character.vocabularyLevel}` : '',
+        character.dialectFeatures ? `口音=${character.dialectFeatures}` : '',
+        options.dialogueHintMap?.get(character.id) ? `画像=${options.dialogueHintMap.get(character.id)}` : '',
+      ], { maxLength: 72, perValueMaxLength: 28, limit: 3 }),
+      hardConstraint: joinCardValues([
+        stateHint?.hardConstraint,
+        character.moralLine ? `底线=${character.moralLine}` : '',
+        character.coreFear ? `恐惧=${character.coreFear}` : '',
+        character.hiddenSecret ? `秘密=${character.hiddenSecret}` : '',
+        character.trauma ? `创伤=${character.trauma}` : '',
+      ], { maxLength: 72, perValueMaxLength: 28, limit: 2 }),
+    }
+  })
 }
 
 export function buildRelationContextCards(options: RelationCardOptions): RelationContextCard[] {

@@ -1,60 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Empty, Modal, Progress, Spin, Tag, Tooltip } from 'antd'
 import VirtualList from 'rc-virtual-list'
+import type { LanguageDriftMetrics, QualityDashboardData } from '../../../types'
 import { WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
 
 interface Props { novelId: number }
 
-interface QualityDimensionScore {
-  name: string
-  score: number
-  feedback: string
-  suggestion: string
-}
-
-interface LanguageDriftMetrics {
-  abstractTokenDensity: number
-  sentencePatternRepeatRate: number
-  endingSummaryRate: number
-  ornamentOverloadRate: number
-  nonHumanCollocationRate: number
-}
-
-interface QualityChapterEntry {
-  chapterId: number
-  chapterNum: number
-  title: string
-  overallScore: number
-  aiLikeRate: number
-  weakDimensions: string[]
-  dimensions: QualityDimensionScore[]
-  languageDriftMetrics?: LanguageDriftMetrics
-}
-
-interface QualityHeatmapPoint {
-  chapterNum: number
-  dimension: string
-  score: number
-}
-
-interface QualityDashboardData {
-  heatmapData: QualityHeatmapPoint[]
-  overallScoreTrend: Array<{ chapterNum: number; score: number }>
-  aiLikeRateTrend: Array<{ chapterNum: number; rate: number }>
-  languageDriftTrends: {
-    abstractTokenDensity: Array<{ chapterNum: number; value: number }>
-    sentencePatternRepeatRate: Array<{ chapterNum: number; value: number }>
-    endingSummaryRate: Array<{ chapterNum: number; value: number }>
-    ornamentOverloadRate: Array<{ chapterNum: number; value: number }>
-    nonHumanCollocationRate: Array<{ chapterNum: number; value: number }>
-  }
-  averageLanguageDrift: LanguageDriftMetrics
-  weakDimensionFrequency: Array<{ dimension: string; count: number }>
-  chapterDetails: QualityChapterEntry[]
-  totalChaptersScored: number
-  averageOverallScore: number
-  averageAiLikeRate: number
-}
+type QualityChapterEntry = QualityDashboardData['chapterDetails'][number]
+type QualityHeatmapPoint = QualityDashboardData['heatmapData'][number]
 
 const DIMENSION_NAMES = [
   '文笔质量', '逻辑连贯', '节奏控制', '情感深度',
@@ -79,6 +32,69 @@ function heatmapCellColor(score: number): string {
   return '#f5222d'
 }
 
+function languageDriftRiskColor(value: number): string {
+  if (value >= 70) return '#f5222d'
+  if (value >= 50) return '#fa8c16'
+  if (value >= 30) return '#faad14'
+  return '#52c41a'
+}
+
+function languageDriftStatusLabel(status: QualityDashboardData['recentLanguageDriftAlerts'][number]['status']): string {
+  if (status === 'worsening') return '恶化中'
+  if (status === 'improving') return '改善中'
+  return '稳定'
+}
+
+function languageDriftStatusColor(status: QualityDashboardData['recentLanguageDriftAlerts'][number]['status']): string {
+  if (status === 'worsening') return 'error'
+  if (status === 'improving') return 'success'
+  return 'default'
+}
+
+function dialogueSimilarityColor(value: number): string {
+  if (value >= 85) return '#f5222d'
+  if (value >= 75) return '#fa8c16'
+  if (value >= 60) return '#faad14'
+  return '#52c41a'
+}
+
+function dialogueTrendLabel(status: QualityDashboardData['dialogueDriftTrend'][number]['status']): string {
+  if (status === 'worsening') return '漂移加剧'
+  if (status === 'improving') return '回稳中'
+  return '稳定'
+}
+
+function dialogueTrendColor(status: QualityDashboardData['dialogueDriftTrend'][number]['status']): string {
+  if (status === 'worsening') return 'error'
+  if (status === 'improving') return 'success'
+  return 'default'
+}
+
+function formatSignedValue(value: number): string {
+  return value > 0 ? `+${value}` : `${value}`
+}
+
+function storyAlertColor(severity: QualityDashboardData['storyPacingAlerts'][number]['severity']): string {
+  return severity === 'blocker' ? 'error' : 'warning'
+}
+
+function pressureColor(value: number): string {
+  if (value >= 80) return '#f5222d'
+  if (value >= 60) return '#fa8c16'
+  if (value >= 40) return '#faad14'
+  return '#52c41a'
+}
+
+function paceMarkerLabel(marker?: QualityDashboardData['storyDynamicsTrend'][number]['paceMarker']): string {
+  if (marker === 'setup') return '铺垫'
+  if (marker === 'conflict') return '冲突'
+  if (marker === 'reversal') return '反转'
+  if (marker === 'climax') return '高潮'
+  if (marker === 'payoff') return '回收'
+  if (marker === 'breather') return '喘息'
+  return '未标注'
+}
+
 export default function QualityDashboard({ novelId }: Props) {
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<QualityDashboardData | null>(null)
@@ -100,11 +116,15 @@ export default function QualityDashboard({ novelId }: Props) {
 
   if (loading) return <Spin style={{ display: 'flex', justifyContent: 'center', padding: 80 }} />
 
-  if (!data || data.totalChaptersScored === 0) {
+  const hasScoreData = Boolean(data && data.totalChaptersScored > 0)
+  const hasStoryDynamicsData = Boolean(data && data.protagonistSetbackSummary.chapterCount > 0)
+  const hasDialogueData = Boolean(data && data.dialogueFingerprintStats.eligibleCharacterCount > 0)
+
+  if (!data || (!hasScoreData && !hasStoryDynamicsData && !hasDialogueData)) {
     return (
       <WorkspacePage title="质量监控" description="查看各章节的AI评分与质量趋势。">
         <WorkspacePanel title="暂无数据">
-          <Empty description="还没有章节评分数据。先对章节运行AI评分后再来查看。" />
+          <Empty description="还没有可用的 AI 评分、对白指纹或结构节奏跟踪数据。先运行章节审校或 AI 评分后再来查看。" />
         </WorkspacePanel>
       </WorkspacePage>
     )
@@ -116,71 +136,107 @@ export default function QualityDashboard({ novelId }: Props) {
       description="查看各章节的AI评分与质量趋势。"
       metrics={[
         <WorkspaceMetric key="scored" label="已评分章节" value={data.totalChaptersScored} />,
-        <WorkspaceMetric key="avg" label="平均总分" value={`${data.averageOverallScore} / 10`} />,
-        <WorkspaceMetric key="ailike" label="平均AI味率" value={`${data.averageAiLikeRate}%`} />,
+        <WorkspaceMetric key="tracked" label="节奏追踪章节" value={data.protagonistSetbackSummary.chapterCount} />,
+        <WorkspaceMetric key="avg" label="平均总分 / 压力" value={hasScoreData ? `${data.averageOverallScore} / 10` : `${data.protagonistSetbackSummary.averagePressure}`} />,
       ]}
     >
-      <WorkspacePanel title="质量热力图" description="X=章节，Y=评分维度，颜色越绿越好。">
-        <HeatmapChart data={data.heatmapData} chapterNums={data.overallScoreTrend.map((d) => d.chapterNum)} />
-      </WorkspacePanel>
+      {hasScoreData ? (
+        <>
+          <WorkspacePanel title="质量热力图" description="X=章节，Y=评分维度，颜色越绿越好。">
+            <HeatmapChart data={data.heatmapData} chapterNums={data.overallScoreTrend.map((d) => d.chapterNum)} />
+          </WorkspacePanel>
 
-      <WorkspacePanel title="评分趋势" description="总分与AI味率逐章变化。">
-        <TrendChart
-          overallTrend={data.overallScoreTrend}
-          aiLikeTrend={data.aiLikeRateTrend}
+          <WorkspacePanel title="评分趋势" description="总分与AI味率逐章变化。">
+            <TrendChart
+              overallTrend={data.overallScoreTrend}
+              aiLikeTrend={data.aiLikeRateTrend}
+            />
+          </WorkspacePanel>
+
+          <WorkspacePanel title="AI味分解" description="拆开看语言退化由哪些问题构成。">
+            <LanguageDriftPanel
+              averages={data.averageLanguageDrift}
+              trends={data.languageDriftTrends}
+              recentAlerts={data.recentLanguageDriftAlerts}
+              volumeEntries={data.volumeLanguageDrift}
+              novelSummary={data.novelLanguageDriftSummary}
+            />
+          </WorkspacePanel>
+
+        </>
+      ) : null}
+
+      {data.dialogueFingerprintStats.eligibleCharacterCount > 0 ? (
+        <WorkspacePanel title="角色对白辨识度" description="查看角色之间是否越说越像，以及谁正在偏离自己的语音指纹。">
+          <DialogueFingerprintPanel
+            stats={data.dialogueFingerprintStats}
+            signatures={data.characterDialogueSignatures}
+            similarities={data.crossCharacterDialogueSimilarity}
+            driftEntries={data.dialogueDriftTrend}
+            volumeEntries={data.volumeDialogueSimilarity}
+            alerts={data.recentDialogueAlerts}
+          />
+        </WorkspacePanel>
+      ) : null}
+
+      <WorkspacePanel title="主角受挫与节奏" description="跨章节查看主角受挫、代价持续、反转与高潮分布。">
+        <StoryDynamicsPanel
+          trend={data.storyDynamicsTrend}
+          alerts={data.storyPacingAlerts}
+          protagonistSummary={data.protagonistSetbackSummary}
+          costSummary={data.costPersistenceSummary}
+          reversalSummary={data.reversalDistributionSummary}
+          volumeEntries={data.volumeStoryDynamics}
         />
       </WorkspacePanel>
 
-      <WorkspacePanel title="AI味分解" description="拆开看语言退化由哪些问题构成。">
-        <LanguageDriftPanel
-          averages={data.averageLanguageDrift}
-          trends={data.languageDriftTrends}
-        />
-      </WorkspacePanel>
+      {hasScoreData ? (
+        <>
+          <WorkspacePanel title="薄弱维度分析" description="各维度被标记为薄弱项的频次。">
+            <WeakDimensionChart data={data.weakDimensionFrequency} />
+          </WorkspacePanel>
 
-      <WorkspacePanel title="薄弱维度分析" description="各维度被标记为薄弱项的频次。">
-        <WeakDimensionChart data={data.weakDimensionFrequency} />
-      </WorkspacePanel>
-
-      <WorkspacePanel title="章节详情" description="点击查看某章完整评分。">
-        <div style={{ height: 480 }}>
-          <VirtualList data={data.chapterDetails} height={480} itemHeight={56} itemKey="chapterId">
-            {(entry: QualityChapterEntry) => (
-              <div
-                key={entry.chapterId}
-                className="quality-chapter-row"
-                onClick={() => setSelectedChapter(entry)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 12,
-                  padding: '8px 12px',
-                  cursor: 'pointer',
-                  borderBottom: '1px solid var(--color-border, rgba(255,255,255,0.08))',
-                }}
-              >
-                <span style={{ width: 60, fontWeight: 500 }}>第{entry.chapterNum}章</span>
-                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.title}</span>
-                <Progress
-                  type="circle"
-                  percent={entry.overallScore * 10}
-                  size={36}
-                  strokeColor={scoreColor(entry.overallScore)}
-                  format={() => entry.overallScore.toFixed(1)}
-                />
-                <Tag color={entry.aiLikeRate > 50 ? 'red' : entry.aiLikeRate > 30 ? 'orange' : 'green'}>
-                  AI味 {entry.aiLikeRate}%
-                </Tag>
-                {entry.weakDimensions.length > 0 ? (
-                  <Tooltip title={entry.weakDimensions.join('、')}>
-                    <Tag color="warning">{entry.weakDimensions.length} 项薄弱</Tag>
-                  </Tooltip>
-                ) : null}
-              </div>
-            )}
-          </VirtualList>
-        </div>
-      </WorkspacePanel>
+          <WorkspacePanel title="章节详情" description="点击查看某章完整评分。">
+            <div style={{ height: 480 }}>
+              <VirtualList data={data.chapterDetails} height={480} itemHeight={56} itemKey="chapterId">
+                {(entry: QualityChapterEntry) => (
+                  <div
+                    key={entry.chapterId}
+                    className="quality-chapter-row"
+                    onClick={() => setSelectedChapter(entry)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 12,
+                      padding: '8px 12px',
+                      cursor: 'pointer',
+                      borderBottom: '1px solid var(--color-border, rgba(255,255,255,0.08))',
+                    }}
+                  >
+                    <span style={{ width: 60, fontWeight: 500 }}>第{entry.chapterNum}章</span>
+                    <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.title}</span>
+                    <Progress
+                      type="circle"
+                      percent={entry.overallScore * 10}
+                      size={36}
+                      strokeColor={scoreColor(entry.overallScore)}
+                      format={() => entry.overallScore.toFixed(1)}
+                    />
+                    <Tag color={entry.aiLikeRate > 50 ? 'red' : entry.aiLikeRate > 30 ? 'orange' : 'green'}>
+                      AI味 {entry.aiLikeRate}%
+                    </Tag>
+                    {entry.weakDimensions.length > 0 ? (
+                      <Tooltip title={entry.weakDimensions.join('、')}>
+                        <Tag color="warning">{entry.weakDimensions.length} 项薄弱</Tag>
+                      </Tooltip>
+                    ) : null}
+                  </div>
+                )}
+              </VirtualList>
+            </div>
+          </WorkspacePanel>
+        </>
+      ) : null}
 
       <Modal
         title={selectedChapter ? `第${selectedChapter.chapterNum}章 · ${selectedChapter.title}` : '章节评分'}
@@ -228,6 +284,8 @@ export default function QualityDashboard({ novelId }: Props) {
               </div>
             ))}
             <LanguageDriftDetails metrics={selectedChapter.languageDriftMetrics} />
+            <DialogueReviewDetails review={selectedChapter.dialogueReview} />
+            <StoryDynamicsDetails dynamics={selectedChapter.storyDynamics} />
           </div>
         ) : null}
       </Modal>
@@ -366,18 +424,33 @@ const LANGUAGE_DRIFT_LABELS: Array<{ key: keyof LanguageDriftMetrics; label: str
   { key: 'nonHumanCollocationRate', label: '非人类搭配率' },
 ]
 
+function getTopLanguageDriftMetrics(metrics: LanguageDriftMetrics, limit = 3) {
+  return [...LANGUAGE_DRIFT_LABELS]
+    .map(({ key, label }) => ({ key, label, value: metrics[key] }))
+    .sort((left, right) => right.value - left.value || left.label.localeCompare(right.label))
+    .slice(0, limit)
+}
+
 function LanguageDriftPanel({
   averages,
   trends,
+  recentAlerts,
+  volumeEntries,
+  novelSummary,
 }: {
   averages: LanguageDriftMetrics
   trends: QualityDashboardData['languageDriftTrends']
+  recentAlerts: QualityDashboardData['recentLanguageDriftAlerts']
+  volumeEntries: QualityDashboardData['volumeLanguageDrift']
+  novelSummary: QualityDashboardData['novelLanguageDriftSummary']
 }) {
   const hasAnyData = LANGUAGE_DRIFT_LABELS.some(({ key }) => trends[key].length > 0)
   if (!hasAnyData) {
     return <Empty description="暂无 AI 味分解数据" />
   }
   const cards = LANGUAGE_DRIFT_LABELS.map(({ key, label }) => ({ key, label, value: averages[key] }))
+  const topRiskMetrics = novelSummary.topRiskMetrics.slice(0, 3)
+
   return (
     <div style={{ display: 'grid', gap: 16 }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
@@ -392,16 +465,144 @@ function LanguageDriftPanel({
             }}
           >
             <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>{card.label}</div>
-            <div style={{ fontSize: 22, fontWeight: 700, color: scoreColor(10 - card.value / 10) }}>{card.value}</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: languageDriftRiskColor(card.value) }}>{card.value}</div>
             <div style={{ fontSize: 11, opacity: 0.55, marginTop: 4 }}>平均风险值，越低越好</div>
           </div>
         ))}
       </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+        <div
+          style={{
+            padding: '12px 14px',
+            borderRadius: 10,
+            background: 'rgba(255,255,255,0.04)',
+            border: '1px solid rgba(255,255,255,0.08)',
+            display: 'grid',
+            gap: 10,
+          }}
+        >
+          <div style={{ fontSize: 12, opacity: 0.7 }}>全书级摘要</div>
+          <div style={{ fontSize: 13, fontWeight: 600 }}>
+            已纳入 {novelSummary.chapterCount} 章
+            {novelSummary.recentWindowSize > 0 ? ` · 最近窗口 ${novelSummary.recentWindowSize} 章` : ''}
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <Tag color="error">恶化 {novelSummary.statusBreakdown.worsening}</Tag>
+            <Tag color="success">改善 {novelSummary.statusBreakdown.improving}</Tag>
+            <Tag>稳定 {novelSummary.statusBreakdown.stable}</Tag>
+          </div>
+        </div>
+
+        <div
+          style={{
+            padding: '12px 14px',
+            borderRadius: 10,
+            background: 'rgba(255,255,255,0.04)',
+            border: '1px solid rgba(255,255,255,0.08)',
+            display: 'grid',
+            gap: 8,
+          }}
+        >
+          <div style={{ fontSize: 12, opacity: 0.7 }}>当前最高风险</div>
+          {topRiskMetrics.length > 0 ? topRiskMetrics.map((item) => (
+            <div key={item.metric} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
+              <span style={{ opacity: 0.85 }}>{item.label}</span>
+              <span style={{ fontWeight: 600, color: languageDriftRiskColor(item.value) }}>{item.value}</span>
+            </div>
+          )) : (
+            <div style={{ fontSize: 12, opacity: 0.6 }}>暂无分解数据</div>
+          )}
+        </div>
+
+        <div
+          style={{
+            padding: '12px 14px',
+            borderRadius: 10,
+            background: 'rgba(255,255,255,0.04)',
+            border: '1px solid rgba(255,255,255,0.08)',
+            display: 'grid',
+            gap: 8,
+          }}
+        >
+          <div style={{ fontSize: 12, opacity: 0.7 }}>最近恶化项</div>
+          {recentAlerts.length > 0 ? recentAlerts.slice(0, 3).map((alert) => (
+            <div key={alert.metric} style={{ display: 'grid', gap: 4 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                  <Tag color={languageDriftStatusColor(alert.status)} style={{ marginRight: 0 }}>
+                    {languageDriftStatusLabel(alert.status)}
+                  </Tag>
+                  <span style={{ fontSize: 12, opacity: 0.85 }}>{alert.label}</span>
+                </div>
+                <span style={{ fontSize: 12, fontWeight: 700, color: '#f5222d' }}>{formatSignedValue(alert.delta)}</span>
+              </div>
+              <div style={{ fontSize: 11, opacity: 0.6 }}>
+                窗口均值 {alert.previousValue} → {alert.latestValue}
+              </div>
+            </div>
+          )) : (
+            <div style={{ fontSize: 12, opacity: 0.6 }}>最近窗口内暂无明显恶化项。</div>
+          )}
+        </div>
+      </div>
+
       <div style={{ display: 'grid', gap: 10 }}>
         {LANGUAGE_DRIFT_LABELS.map(({ key, label }) => (
           <MiniTrendRow key={key} label={label} points={trends[key]} />
         ))}
       </div>
+
+      {volumeEntries.length > 0 ? (
+        <div style={{ display: 'grid', gap: 12 }}>
+          <div style={{ fontWeight: 600 }}>卷级语言退化</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+            {volumeEntries.map((volume) => {
+              const topMetrics = getTopLanguageDriftMetrics(volume.averageMetrics, 2)
+              return (
+                <div
+                  key={volume.volumeId}
+                  style={{
+                    padding: '12px 14px',
+                    borderRadius: 10,
+                    background: 'rgba(255,255,255,0.04)',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    display: 'grid',
+                    gap: 10,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 600 }}>{volume.volumeName}</div>
+                      <div style={{ fontSize: 11, opacity: 0.6 }}>
+                        第{volume.chapterStart}-{volume.chapterEnd}章 · {volume.chapterCount} 章
+                      </div>
+                    </div>
+                    <Tag color={volume.topWorseningMetrics.length > 0 ? 'warning' : 'success'} style={{ marginRight: 0 }}>
+                      {volume.topWorseningMetrics.length > 0 ? `${volume.topWorseningMetrics.length} 项恶化` : '近期稳定'}
+                    </Tag>
+                  </div>
+
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    {topMetrics.map((item) => (
+                      <div key={item.key} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
+                        <span style={{ opacity: 0.85 }}>{item.label}</span>
+                        <span style={{ fontWeight: 600, color: languageDriftRiskColor(item.value) }}>{item.value}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={{ fontSize: 11, opacity: 0.6 }}>
+                    {volume.topWorseningMetrics.length > 0
+                      ? `近期恶化：${volume.topWorseningMetrics.map((item) => `${item.label} ${formatSignedValue(item.delta)}`).join('、')}`
+                      : '最近窗口内暂无明显恶化项。'}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -437,10 +638,271 @@ function MiniTrendRow({
       <span style={{ fontSize: 12, opacity: 0.8 }}>{label}</span>
       <div style={{ overflowX: 'auto' }}>
         <svg width={width} height={height + 4} style={{ minWidth: 200 }}>
-          <path d={path} fill="none" stroke="#fa8c16" strokeWidth={2} />
+          <path d={path} fill="none" stroke={languageDriftRiskColor(latest)} strokeWidth={2} />
         </svg>
       </div>
-      <span style={{ fontSize: 12, fontWeight: 600, color: '#fa8c16' }}>{latest}</span>
+      <span style={{ fontSize: 12, fontWeight: 600, color: languageDriftRiskColor(latest) }}>{latest}</span>
+    </div>
+  )
+}
+
+function DialogueFingerprintPanel({
+  stats,
+  signatures,
+  similarities,
+  driftEntries,
+  volumeEntries,
+  alerts,
+}: {
+  stats: QualityDashboardData['dialogueFingerprintStats']
+  signatures: QualityDashboardData['characterDialogueSignatures']
+  similarities: QualityDashboardData['crossCharacterDialogueSimilarity']
+  driftEntries: QualityDashboardData['dialogueDriftTrend']
+  volumeEntries: QualityDashboardData['volumeDialogueSimilarity']
+  alerts: QualityDashboardData['recentDialogueAlerts']
+}) {
+  if (stats.eligibleCharacterCount === 0) {
+    return <Empty description="暂无足够的角色对白样本" />
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12 }}>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>已建角色指纹</div>
+          <div style={{ fontSize: 22, fontWeight: 700 }}>{stats.eligibleCharacterCount}</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>累计识别对白 {stats.totalTurnCount} 段</div>
+        </div>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>平均跨角色相似度</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: dialogueSimilarityColor(stats.averageCrossCharacterSimilarity) }}>{stats.averageCrossCharacterSimilarity}</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>越低越能拉开角色声音</div>
+        </div>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>高相似组合</div>
+          <div style={{ fontSize: 22, fontWeight: 700 }}>{stats.highSimilarityPairCount}</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>阈值 75 以上</div>
+        </div>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>漂移角色</div>
+          <div style={{ fontSize: 22, fontWeight: 700 }}>{stats.driftingCharacterCount}</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>近期漂移率 45 以上</div>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', display: 'grid', gap: 8 }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>近期告警</div>
+          {alerts.length > 0 ? alerts.map((alert, index) => (
+            <div key={`${alert.kind}-${index}`} style={{ display: 'grid', gap: 4 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Tag color={alert.severity === 'warning' ? 'warning' : 'default'} style={{ marginRight: 0 }}>
+                  {alert.kind === 'similarity' ? '同质化' : '漂移'}
+                </Tag>
+                <span style={{ fontSize: 12, fontWeight: 600 }}>{alert.title}</span>
+              </div>
+              <div style={{ fontSize: 11, opacity: 0.65 }}>{alert.detail}</div>
+            </div>
+          )) : <div style={{ fontSize: 12, opacity: 0.6 }}>最近没有新的对白指纹告警。</div>}
+        </div>
+
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', display: 'grid', gap: 8 }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>最高相似角色组合</div>
+          {similarities.length > 0 ? similarities.slice(0, 4).map((pair) => (
+            <div key={`${pair.characterAId}-${pair.characterBId}`} style={{ display: 'grid', gap: 3 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
+                <span>{pair.characterAName} / {pair.characterBName}</span>
+                <span style={{ color: dialogueSimilarityColor(pair.similarity), fontWeight: 700 }}>{pair.similarity}</span>
+              </div>
+              <div style={{ fontSize: 11, opacity: 0.6 }}>{pair.reasons.join('、') || '句长、停顿和惯用短语接近。'}</div>
+            </div>
+          )) : <div style={{ fontSize: 12, opacity: 0.6 }}>暂无跨角色相似度数据。</div>}
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
+        {signatures.slice(0, 6).map((signature) => (
+          <div
+            key={signature.characterId}
+            style={{
+              padding: '12px 14px',
+              borderRadius: 10,
+              background: 'rgba(255,255,255,0.04)',
+              border: '1px solid rgba(255,255,255,0.08)',
+              display: 'grid',
+              gap: 8,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <div>
+                <div style={{ fontWeight: 600 }}>{signature.characterName}</div>
+                <div style={{ fontSize: 11, opacity: 0.6 }}>
+                  {signature.sampleCount} 段对白 · {signature.totalDialogueChars} 字
+                </div>
+              </div>
+              <Tag style={{ marginRight: 0 }}>{signature.roleType}</Tag>
+            </div>
+            <div style={{ fontSize: 12, opacity: 0.9 }}>{signature.voiceProfile}</div>
+            {signature.distinctiveHabits.length > 0 ? (
+              <div style={{ fontSize: 11, opacity: 0.65 }}>特点：{signature.distinctiveHabits.join('、')}</div>
+            ) : null}
+            <div style={{ fontSize: 11, opacity: 0.65 }}>
+              句长 {signature.avgSentenceLength} · 追问 {signature.questionRate}% · 停顿 {signature.ellipsisRate}% · 重复短语 {signature.catchphraseCandidates.slice(0, 2).map((item) => item.token).join('、') || '暂无'}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {driftEntries.length > 0 ? (
+        <div style={{ display: 'grid', gap: 10 }}>
+          <div style={{ fontWeight: 600 }}>角色语音漂移趋势</div>
+          {driftEntries.slice(0, 5).map((entry) => (
+            <div key={entry.characterId} style={{ display: 'grid', gap: 6 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <strong>{entry.characterName}</strong>
+                  <Tag color={dialogueTrendColor(entry.status)} style={{ marginRight: 0 }}>{dialogueTrendLabel(entry.status)}</Tag>
+                </div>
+                <span style={{ color: dialogueSimilarityColor(entry.recentDriftRate), fontWeight: 700 }}>{entry.recentDriftRate}</span>
+              </div>
+              <MiniTrendRow label="漂移率" points={entry.trend.map((point) => ({ chapterNum: point.chapterNum, value: point.value }))} />
+              {entry.reasons.length > 0 ? <div style={{ fontSize: 11, opacity: 0.6 }}>{entry.reasons.join('、')}</div> : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {volumeEntries.length > 0 ? (
+        <div style={{ display: 'grid', gap: 12 }}>
+          <div style={{ fontWeight: 600 }}>卷级对白同质化</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+            {volumeEntries.map((volume) => (
+              <div key={volume.volumeId} style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', display: 'grid', gap: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                  <div>
+                    <div style={{ fontWeight: 600 }}>{volume.volumeName}</div>
+                    <div style={{ fontSize: 11, opacity: 0.6 }}>第{volume.chapterStart}-{volume.chapterEnd}章 · {volume.chapterCount} 章</div>
+                  </div>
+                  <span style={{ color: dialogueSimilarityColor(volume.averageSimilarity), fontWeight: 700 }}>{volume.averageSimilarity}</span>
+                </div>
+                <div style={{ fontSize: 11, opacity: 0.65 }}>
+                  {volume.topPairs.length > 0
+                    ? `最像：${volume.topPairs.map((pair) => `${pair.characterAName}/${pair.characterBName} ${pair.similarity}`).join('、')}`
+                    : '该卷暂无足够的对比样本。'}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function StoryDynamicsPanel({
+  trend,
+  alerts,
+  protagonistSummary,
+  costSummary,
+  reversalSummary,
+  volumeEntries,
+}: {
+  trend: QualityDashboardData['storyDynamicsTrend']
+  alerts: QualityDashboardData['storyPacingAlerts']
+  protagonistSummary: QualityDashboardData['protagonistSetbackSummary']
+  costSummary: QualityDashboardData['costPersistenceSummary']
+  reversalSummary: QualityDashboardData['reversalDistributionSummary']
+  volumeEntries: QualityDashboardData['volumeStoryDynamics']
+}) {
+  if (protagonistSummary.chapterCount === 0) {
+    return <Empty description="暂无主角受挫与节奏跟踪数据" />
+  }
+
+  const latestPressure = trend[trend.length - 1]?.pressure ?? 0
+
+  return (
+    <div style={{ display: 'grid', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>主角受挫率</div>
+          <div style={{ fontSize: 22, fontWeight: 700 }}>{protagonistSummary.protagonistSetbackRate}%</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>重大受挫 {protagonistSummary.majorSetbackRate}%</div>
+        </div>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>平均主角压力</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: pressureColor(protagonistSummary.averagePressure) }}>{protagonistSummary.averagePressure}</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>最新压力 {latestPressure}</div>
+        </div>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>顺推 / 压抑跨度</div>
+          <div style={{ fontSize: 22, fontWeight: 700 }}>{protagonistSummary.longestSmoothRun} / {protagonistSummary.longestPressureRun}</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>最长连续章节数</div>
+        </div>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>代价持续</div>
+          <div style={{ fontSize: 22, fontWeight: 700 }}>{costSummary.averageCostDuration}</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>蒸发 {costSummary.evaporatedCostCount} 次 · 未解 {costSummary.unresolvedCostCount} 条</div>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', display: 'grid', gap: 8 }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>节奏告警</div>
+          {alerts.length > 0 ? alerts.slice(0, 4).map((alert, index) => (
+            <div key={`${alert.code}-${index}`} style={{ display: 'grid', gap: 4 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Tag color={storyAlertColor(alert.severity)} style={{ marginRight: 0 }}>{alert.severity === 'blocker' ? '高风险' : '提醒'}</Tag>
+                <span style={{ fontSize: 12, fontWeight: 600 }}>{alert.title}</span>
+              </div>
+              <div style={{ fontSize: 11, opacity: 0.65 }}>{alert.detail}</div>
+            </div>
+          )) : <div style={{ fontSize: 12, opacity: 0.6 }}>最近窗口内暂无明显结构告警。</div>}
+        </div>
+
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', display: 'grid', gap: 8 }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>反转 / 高潮 / 喘息</div>
+          <div style={{ fontSize: 12 }}>反转：{reversalSummary.reversalChapterNums.length > 0 ? reversalSummary.reversalChapterNums.join('、') : '暂无'}</div>
+          <div style={{ fontSize: 12 }}>高潮：{reversalSummary.climaxChapterNums.length > 0 ? reversalSummary.climaxChapterNums.join('、') : '暂无'}</div>
+          <div style={{ fontSize: 12 }}>喘息：{reversalSummary.breatherChapterNums.length > 0 ? reversalSummary.breatherChapterNums.join('、') : '暂无'}</div>
+          <div style={{ fontSize: 11, opacity: 0.65 }}>强行反转 {reversalSummary.forcedReversalCount} 次，弱反转 {reversalSummary.weakReversalCount} 次，高潮间距 {reversalSummary.climaxSpacing.length > 0 ? reversalSummary.climaxSpacing.join('、') : '暂无'}。</div>
+        </div>
+
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', display: 'grid', gap: 8 }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>未解代价</div>
+          {costSummary.activeCosts.length > 0 ? costSummary.activeCosts.map((entry) => (
+            <div key={`${entry.startChapterNum}-${entry.summary}`} style={{ fontSize: 12 }}>
+              第{entry.startChapterNum}章起持续 {entry.duration} 章：{entry.summary}
+            </div>
+          )) : <div style={{ fontSize: 12, opacity: 0.6 }}>当前没有持续中的代价链。</div>}
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gap: 10 }}>
+        <div style={{ fontWeight: 600 }}>主角压力曲线</div>
+        <MiniTrendRow label="主角压力" points={trend.map((point) => ({ chapterNum: point.chapterNum, value: point.pressure }))} />
+      </div>
+
+      {volumeEntries.length > 0 ? (
+        <div style={{ display: 'grid', gap: 12 }}>
+          <div style={{ fontWeight: 600 }}>卷级结构摘要</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+            {volumeEntries.map((volume) => (
+              <div key={volume.volumeId} style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', display: 'grid', gap: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                  <div>
+                    <div style={{ fontWeight: 600 }}>{volume.volumeName}</div>
+                    <div style={{ fontSize: 11, opacity: 0.6 }}>第{volume.chapterStart}-{volume.chapterEnd}章 · {volume.chapterCount} 章</div>
+                  </div>
+                  <Tag color={volume.alerts.length > 0 ? 'warning' : 'success'} style={{ marginRight: 0 }}>{volume.alerts.length > 0 ? `${volume.alerts.length} 项告警` : '近期稳定'}</Tag>
+                </div>
+                <div style={{ fontSize: 12 }}>受挫率 {volume.protagonistSetbackRate}% · 重大受挫 {volume.majorSetbackRate}% · 平均压力 {volume.averagePressure}</div>
+                <div style={{ fontSize: 12 }}>代价持续 {volume.averageCostDuration} 章 · 蒸发 {volume.evaporatedCostCount} 次</div>
+                <div style={{ fontSize: 12 }}>高潮 {volume.climaxChapterNums.length > 0 ? volume.climaxChapterNums.join('、') : '暂无'} · 反转 {volume.reversalChapterNums.length > 0 ? volume.reversalChapterNums.join('、') : '暂无'}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -450,9 +912,7 @@ function LanguageDriftDetails({ metrics }: { metrics?: LanguageDriftMetrics }) {
     return <div style={{ fontSize: 12, opacity: 0.55 }}>暂无 AI 味分解数据</div>
   }
 
-  const ranked = [...LANGUAGE_DRIFT_LABELS]
-    .map(({ key, label }) => ({ key, label, value: metrics[key] }))
-    .sort((left, right) => right.value - left.value)
+  const ranked = getTopLanguageDriftMetrics(metrics, LANGUAGE_DRIFT_LABELS.length)
 
   return (
     <div style={{ display: 'grid', gap: 8 }}>
@@ -461,11 +921,54 @@ function LanguageDriftDetails({ metrics }: { metrics?: LanguageDriftMetrics }) {
         <div key={item.key} style={{ display: 'grid', gap: 4 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
             <span>{item.label}</span>
-            <span style={{ color: '#fa8c16', fontWeight: 600 }}>{item.value}</span>
+            <span style={{ color: languageDriftRiskColor(item.value), fontWeight: 600 }}>{item.value}</span>
           </div>
-          <Progress percent={item.value} showInfo={false} strokeColor="#fa8c16" size="small" />
+          <Progress percent={item.value} showInfo={false} strokeColor={languageDriftRiskColor(item.value)} size="small" />
         </div>
       ))}
+    </div>
+  )
+}
+
+function DialogueReviewDetails({ review }: { review?: QualityDashboardData['chapterDetails'][number]['dialogueReview'] }) {
+  if (!review) {
+    return <div style={{ fontSize: 12, opacity: 0.55 }}>暂无角色对白辨识度数据</div>
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 8 }}>
+      <div style={{ fontWeight: 600 }}>角色对白辨识度</div>
+      {review.fingerprintSummary ? <div style={{ fontSize: 12 }}>{review.fingerprintSummary}</div> : null}
+      {review.risks.length > 0 ? (
+        <div style={{ fontSize: 12 }}>风险：{review.risks.join('；')}</div>
+      ) : (
+        <div style={{ fontSize: 12, opacity: 0.7 }}>当前章暂无明确的对白同质化风险。</div>
+      )}
+      {review.similarities.length > 0 ? (
+        <div style={{ fontSize: 12 }}>
+          高相似：{review.similarities.map((item) => `${item.characterAName}/${item.characterBName} ${item.similarity}`).join('、')}
+        </div>
+      ) : null}
+      {review.drifts.length > 0 ? (
+        <div style={{ fontSize: 12 }}>
+          漂移：{review.drifts.map((item) => `${item.characterName} ${item.driftRate}`).join('、')}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function StoryDynamicsDetails({ dynamics }: { dynamics?: QualityDashboardData['chapterDetails'][number]['storyDynamics'] }) {
+  if (!dynamics) return null
+
+  return (
+    <div style={{ display: 'grid', gap: 8 }}>
+      <div style={{ fontWeight: 600 }}>主角与节奏</div>
+      <div style={{ fontSize: 12 }}>主角受挫：{dynamics.protagonistSetback}{dynamics.setbackSummary ? ` · ${dynamics.setbackSummary}` : ''}</div>
+      <div style={{ fontSize: 12 }}>主角压力：<span style={{ color: pressureColor(dynamics.protagonistPressure), fontWeight: 600 }}>{dynamics.protagonistPressure}</span></div>
+      <div style={{ fontSize: 12 }}>代价：{dynamics.costPresent ? `${dynamics.costResolutionState || 'new'}${dynamics.costSummary ? ` · ${dynamics.costSummary}` : ''}` : '无明确代价'}</div>
+      <div style={{ fontSize: 12 }}>反转：{dynamics.reversalMarker ? `${dynamics.reversalSupportState || 'weak'}${dynamics.reversalSummary ? ` · ${dynamics.reversalSummary}` : ''}` : '无'}</div>
+      <div style={{ fontSize: 12 }}>节奏标签：{paceMarkerLabel(dynamics.paceMarker)} · 阶段回报：{dynamics.rewardState}</div>
     </div>
   )
 }

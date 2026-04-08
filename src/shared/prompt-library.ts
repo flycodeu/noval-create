@@ -239,6 +239,7 @@ export interface ChapterReviewPromptInput {
   arcProgressCheckpoint?: string
   scenePlan: string
   draftContent: string
+  structuralAlertsSummary?: string
   protagonistReference: string
   protagonistRule: string
   promptTier?: PromptTier
@@ -271,6 +272,7 @@ export interface ChapterRewritePromptInput {
   scenePlan: string
   draftContent: string
   reviewNotes: string
+  structuralAlertsSummary?: string
   lockedParagraphs?: string[]
   activeThreads?: string
   recalledMemory?: string
@@ -1399,6 +1401,7 @@ export function buildChapterDraftPrompt(params: ChapterRewritePromptInput): stri
     section('长文压缩记忆', params.longTermMemory),
     section('向量召回记忆', params.recalledMemory),
     section('结构体检提醒', params.consistencyNotes),
+    section('近期结构告警', params.structuralAlertsSummary),
     section('初稿要求', [
       '只按场景计划推进，不跳场景，不漏 must_cover。',
       '先把行为、对话、信息交接和后果写清，再处理气氛。',
@@ -1406,6 +1409,7 @@ export function buildChapterDraftPrompt(params: ChapterRewritePromptInput): stri
       '让成长落在事件、关系和代价里，不要只在段尾用一句总结硬说人物成长。',
       '人物状态、物品去向、地点变换和事件顺序必须写准，避免后面大修。',
       '如果某段只有情绪没有动作或结果，补上能落地的外部承载。',
+      '如果近期结构告警提示主角太顺、代价蒸发、反转硬塞或高潮分布异常，必须在本章补出真实阻力、持续后果、铺垫兑现或节奏缓冲。',
       '叙事视角一致性：全篇保持同一叙事人称和视角限制。如果是第三人称限制视角，只能写视角角色能看到、听到、感受到的内容，不能偷跑到其他角色的内心。如果是第一人称，不能突然出现"他想着"这种第三人称描写。',
       '章节开头过渡：本章前 200 字必须自然衔接上章结尾的情境（时间、地点、情绪、未完成的动作），不能跳过不交代就进入新场景。',
       '只输出初稿正文，不要解释。',
@@ -1447,6 +1451,7 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
     section('长期记忆', params.longTermMemory),
     section('向量召回记忆', params.recalledMemory),
     section('结构体检提醒', params.consistencyNotes),
+    section('近期结构告警', params.structuralAlertsSummary),
     section('待审初稿', params.draftContent),
     section('输出规则', [
       '只保留真正值得修的问题。',
@@ -1455,20 +1460,28 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
       'arc_progress_risks 只写本章没有推进、反向推进、在关键检查点空转，或与当前故事弧目标脱节的问题。',
       'context_drift_risks 只写脱离既定背景、主题、世界规则或人物动机的问题。',
       'realism_risks 只写常识、科学、物理、资源、伤病、秩序或能力规则问题。',
+      'coherence_risks 只写叙事链条会让读者读乱的地方，例如视角滑移、过渡断层、因果跳跃、信息顺序失衡。',
+      'reader_hook_risks 只写会削弱追读欲的问题，例如冲突太轻、结果没代价、反转不成立、主角一路顺推。',
       'language_risks 只写 AI 腔、抽象化、搭配错误、空洞抒情或不自然表达。',
+      'human_language_repairs 只列最值得优先替换的 1 到 3 处生硬表达，格式尽量写成“原说法 -> 更自然说法”。',
       '如果对话无视人物关系、称呼层级、亲疏温度或潜台词，也要归入 language_risks 或 context_drift_risks。',
       '必须结合当前故事弧、本章目标、场景计划、待审初稿和本弧进度状态，判断本章是否真的在服务当前弧目标。',
       'genre_hollowing_risks 只写体裁生态被写空的问题，例如修仙只喊大道却没有境界资源和宗门秩序，末世只有丧尸却没有生存链，武侠只有打斗却没有江湖秩序。',
       '如果主角像功能人、体裁生态被写空，或成长只剩口号，也要明确指出。',
-      'narrative_voice_risks 只写叙事视角不一致的问题：第一人称突然跳到第三人称全知视角、限制视角突然读到不在场角色的心理、叙述人称在章节中途切换等。',
-      'transition_risks 只写章节开头与上一章结尾的衔接问题：时间跳跃不交代、地点突变无过渡、情绪断层（上章激烈冲突本章开头平静如无事发生）、遗忘上章末尾的悬念或动作。',
+      '主角受挫判断 protagonist_setback 只能是 none / minor / major，并给出 setback_summary 概括本章主角到底输了什么、失去了什么或被压制了什么。',
+      'cost_present 表示本章是否出现明确代价；cost_present=true 时必须同时给出 cost_summary 和 cost_resolution_state。cost_resolution_state 只能是 new / ongoing / resolved / evaporated。',
+      '如果本章把重大损失、风险或冲突一两段就抹平，cost_resolution_state 应判为 evaporated，而不是 resolved。',
+      'reversal_marker 表示本章是否发生明确反转；为 true 时必须同时给出 reversal_summary 和 reversal_support_state。reversal_support_state 只能是 supported / weak / forced。',
+      'pace_marker 只能选 setup / conflict / reversal / climax / payoff / breather 其中一个主标签。',
+      'reward_state 只能是 none / partial / major，用来区分持续压抑、部分回报和阶段性大回报。',
+      'protagonist_pressure 用 0-100 评估主角本章承受的结构压力；纯顺推爽章不要虚报高分。',
       'missing_payoffs 只写本章已经抛出但没有落地的铺垫。',
       'strengths 只写已经成立且应该保留的具体优点。',
       'severity 只能是 low / medium / high。',
       '出现 high 级问题时 rewrite_required 必须是 true，其余情况可以是 false。',
       'revision_brief 用 60 到 120 字中文写清修改方向。',
     ].join('\n')),
-    '只输出 JSON：{"summary":"总体判断","critical_fixes":["必改 1"],"continuity_risks":["连续性风险 1"],"arc_progress_risks":["故事弧推进风险 1"],"context_drift_risks":["漂移风险 1"],"realism_risks":["真实度风险 1"],"language_risks":["语言风险 1"],"genre_hollowing_risks":["体裁空心化风险 1"],"narrative_voice_risks":["视角风险 1"],"transition_risks":["过渡风险 1"],"missing_payoffs":["未落地伏笔 1"],"strengths":["优点 1"],"severity":"medium","rewrite_required":true,"revision_brief":"修订方向摘要"}',
+    '只输出 JSON：{"summary":"总体判断","critical_fixes":["必改 1"],"continuity_risks":["连续性风险 1"],"arc_progress_risks":["故事弧推进风险 1"],"context_drift_risks":["漂移风险 1"],"realism_risks":["真实度风险 1"],"coherence_risks":["连贯性风险 1"],"reader_hook_risks":["追读风险 1"],"language_risks":["语言风险 1"],"human_language_repairs":["原说法 -> 更自然说法"],"genre_hollowing_risks":["体裁空心化风险 1"],"missing_payoffs":["未落地伏笔 1"],"strengths":["优点 1"],"severity":"medium","rewrite_required":true,"revision_brief":"修订方向摘要","protagonist_setback":"minor","setback_summary":"主角在关键交锋中被压制","cost_present":true,"cost_summary":"主角失去可靠盟友与补给","cost_resolution_state":"ongoing","reversal_marker":true,"reversal_summary":"看似得手后被埋伏反制","reversal_support_state":"supported","pace_marker":"reversal","reward_state":"partial","protagonist_pressure":72}',
   ])
 }
 
@@ -1514,6 +1527,7 @@ export function buildChapterRewritePrompt(params: ChapterRewritePromptInput): st
     section('长期记忆', params.longTermMemory),
     section('向量召回记忆', params.recalledMemory),
     section('结构体检提醒', params.consistencyNotes),
+    section('近期结构告警', params.structuralAlertsSummary),
     section('重写要求', [
       '已经成立的段落可以保留，但凡是影响成稿质量的都要修。',
       '如果场景计划里的 must_cover 漏了，补上。',
@@ -1522,6 +1536,7 @@ export function buildChapterRewritePrompt(params: ChapterRewritePromptInput): st
       '把关系温度、权力差和潜台词写回称呼、打断、停顿和回避方式，不要让所有对白一个基调。',
       '把成长变化写回事件、关系、资源和代价，不要只靠总结句宣告人物成长。',
       '在同一轮里一起修好上下文漂移、常识失效、规则越界、零代价奇迹和 AI 腔。',
+      '如果近期结构告警提示主角太顺，就补出真实受挫、失误或代价；如果提示代价蒸发，就把后果延续到本章；如果提示反转硬塞，就补足前文呼应和触发链；如果提示高潮过密或过疏，就主动收束或蓄力。',
       '叙事视角一致性：检查并修正任何视角跳跃——限制视角不能写不在场角色的心理活动，第一人称不能突然变第三人称。如果初稿中有视角滑移，重写时修正为一致的视角。',
       '章节过渡：确保开头自然衔接上章结尾（参考"上章结尾"段），时间/地点/情绪过渡平滑，不能跳过未交代就进入新场景。',
       '作者锁定段落不得改写、删减、拆分、合并或替换措辞，只能改动周边段落来完成衔接。',

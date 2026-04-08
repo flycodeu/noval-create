@@ -919,6 +919,57 @@ export function runMigrations(sqlite: Database.Database) {
       CREATE INDEX IF NOT EXISTS idx_style_fingerprints_novel ON style_fingerprints(novel_id);
     `)
   })
+
+  runMigrationStep(sqlite, '0014_character_dialogue_fingerprints', () => {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS character_dialogue_fingerprints (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+        sample_chapter_start INTEGER,
+        sample_chapter_end INTEGER,
+        sample_count INTEGER NOT NULL DEFAULT 0,
+        stats_json TEXT,
+        summary_json TEXT,
+        analysis_model_id TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_character_dialogue_fingerprints_novel_character
+        ON character_dialogue_fingerprints(novel_id, character_id);
+      CREATE INDEX IF NOT EXISTS idx_character_dialogue_fingerprints_novel
+        ON character_dialogue_fingerprints(novel_id);
+    `)
+  })
+
+  runMigrationStep(sqlite, '0015_character_state_versions', () => {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS character_state_versions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+        chapter_id INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
+        chapter_num INTEGER NOT NULL,
+        injury_state TEXT,
+        resource_state TEXT,
+        stance_state TEXT,
+        mental_state TEXT,
+        relationship_heat_summary TEXT,
+        goal_state TEXT,
+        event_cause TEXT,
+        change_reason TEXT,
+        summary_text TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_character_state_versions_chapter_character
+        ON character_state_versions(chapter_id, character_id);
+      CREATE INDEX IF NOT EXISTS idx_character_state_versions_novel_character_chapter
+        ON character_state_versions(novel_id, character_id, chapter_num);
+      CREATE INDEX IF NOT EXISTS idx_character_state_versions_novel_chapter
+        ON character_state_versions(novel_id, chapter_num);
+    `)
+  })
 }
 
 function ensureMigrationTable(sqlite: Database.Database) {

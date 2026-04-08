@@ -40,6 +40,8 @@ import {
   buildFactionCatalog,
   resolveFactionRowsByReferences,
 } from './faction-reference.service'
+import { getCharacterDialogueHintMap } from './dialogue-fingerprint.service'
+import { getCharacterStateContextHintMap } from './character-state.service'
 
 /**
  * 改进的 token 估算：中文字符约 1 token/字，英文约 0.25 token/word (4 chars/token)，
@@ -1097,6 +1099,14 @@ function buildCharacterStates(
   const relationRows = typeof novelId === 'number'
     ? db.select().from(characterRelations).where(eq(characterRelations.novelId, novelId)).all()
     : []
+  const dialogueHintMap = typeof novelId === 'number' ? getCharacterDialogueHintMap(novelId) : undefined
+  const stateHintMap = typeof novelId === 'number'
+    ? getCharacterStateContextHintMap(novelId, {
+        upToChapterNum: recentChapters[recentChapters.length - 1]?.chapterNum,
+        mentionedNames,
+        limit: 15,
+      })
+    : undefined
   const cards = buildCharacterContextCards({
     allCharacters,
     relationRows,
@@ -1105,6 +1115,8 @@ function buildCharacterStates(
         chapterNum: chapter.chapterNum,
         entry,
       }))),
+    dialogueHintMap,
+    stateHintMap,
     mentionedNames,
     limit: 15,
   })

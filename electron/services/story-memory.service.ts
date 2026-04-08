@@ -42,6 +42,12 @@ import {
   stringifyThreadCards,
 } from './context-cards'
 import { throwUserFacingError } from '../utils/user-facing-error'
+import {
+  type CharacterStateDriftAlert,
+  type CharacterStateSummary,
+  listLatestCharacterStates,
+  listNovelCharacterStateAlerts,
+} from './character-state.service'
 
 const CHECKPOINT_CHAPTER_REFRESH_INTERVAL = 30
 const CHECKPOINT_TIME_REFRESH_MS = 7 * 24 * 60 * 60 * 1000
@@ -59,6 +65,8 @@ export interface StoryMemorySnapshot {
   plotMilestones: string[]
   arcSignals: string[]
   characterLedger: string[]
+  characterCurrentStates: CharacterStateSummary[]
+  characterStateAlerts: CharacterStateDriftAlert[]
   worldLedger: string[]
   activeThreads: string[]
   continuityDirectives: string[]
@@ -629,6 +637,8 @@ export function buildStoryMemorySnapshot(novelId: number): StoryMemorySnapshot {
   const targetWords = novel?.targetWords || 0
   const lastChapterNum = chapterRows.at(-1)?.chapterNum || 0
   const memoryMode = resolveStoryMemoryMode(targetWords, chapterRows.length)
+  const characterCurrentStates = listLatestCharacterStates(novelId, { limit: getModeLimit(memoryMode, 6, 8, 10, 12) })
+  const characterStateAlerts = listNovelCharacterStateAlerts(novelId, getModeLimit(memoryMode, 3, 4, 5, 6))
   const checkpoints = db.select().from(storyMemoryCheckpoints).where(eq(storyMemoryCheckpoints.novelId, novelId)).all()
   const partDigests = checkpoints
     .filter((checkpoint) => checkpoint.scopeType === 'part' && checkpoint.summary)
@@ -658,17 +668,19 @@ export function buildStoryMemorySnapshot(novelId: number): StoryMemorySnapshot {
       ...continuityRows.map((row) => row.summary ? `Ch.${row.chapterNum}: ${row.summary}` : '').filter(Boolean),
       ...continuityRows.flatMap((row) => row.continuity.plotProgress.map((entry) => `Ch.${row.chapterNum}: ${entry}`)),
     ], getModeLimit(memoryMode, 12, 16, 20)),
-    arcSignals: dedupe(continuityRows.map((row) =>
-      row.continuity.arcProgress ? `Ch.${row.chapterNum}: ${row.continuity.arcProgress}` : '').filter(Boolean),
-    getModeLimit(memoryMode, 10, 14, 18)),
-    characterLedger: dedupe(
-      continuityRows.flatMap((row) => row.continuity.characterStateChanges.map((entry) => `Ch.${row.chapterNum}: ${entry}`)),
-      getModeLimit(memoryMode, 12, 16, 20),
-    ),
-    worldLedger: dedupe(
-      continuityRows.flatMap((row) => row.continuity.worldStateChanges.map((entry) => `Ch.${row.chapterNum}: ${entry}`)),
-      getModeLimit(memoryMode, 10, 14, 18),
-    ),
+      arcSignals: dedupe(continuityRows.map((row) =>
+        row.continuity.arcProgress ? `Ch.${row.chapterNum}: ${row.continuity.arcProgress}` : '').filter(Boolean),
+      getModeLimit(memoryMode, 10, 14, 18)),
+      characterLedger: dedupe(
+        continuityRows.flatMap((row) => row.continuity.characterStateChanges.map((entry) => `Ch.${row.chapterNum}: ${entry}`)),
+        getModeLimit(memoryMode, 12, 16, 20),
+      ),
+      characterCurrentStates,
+      characterStateAlerts,
+      worldLedger: dedupe(
+        continuityRows.flatMap((row) => row.continuity.worldStateChanges.map((entry) => `Ch.${row.chapterNum}: ${entry}`)),
+        getModeLimit(memoryMode, 10, 14, 18),
+      ),
     activeThreads: dedupe([
       ...recentContinuityRows.flatMap((row) => row.continuity.openLoops),
       ...eventRows.flatMap((event) => parseStringArray(event.openThreadsJson)),
@@ -746,6 +758,12 @@ export function buildStoryMemoryPromptSummary(
     snapshot.coverageSummary,
     snapshot.phaseDigest.length > 0 ? `阶段摘要：\n- ${snapshot.phaseDigest.join('\n- ')}` : '',
     snapshot.plotMilestones.length > 0 ? `剧情里程碑：\n- ${snapshot.plotMilestones.join('\n- ')}` : '',
+    snapshot.characterCurrentStates.length > 0
+      ? `角色当前状态：\n- ${snapshot.characterCurrentStates.map((item) => `${item.characterName}：${item.summaryText}`).join('\n- ')}`
+      : '',
+    snapshot.characterStateAlerts.length > 0
+      ? `角色状态漂移告警：\n- ${snapshot.characterStateAlerts.map((item) => item.summary).join('\n- ')}`
+      : '',
     snapshot.activeThreads.length > 0 ? `未回收线程：\n- ${snapshot.activeThreads.join('\n- ')}` : '',
     snapshot.timelineAnchors.length > 0 ? `时间锚点：\n- ${snapshot.timelineAnchors.join('\n- ')}` : '',
     snapshot.itemLedger.length > 0 ? `物品账本：\n- ${snapshot.itemLedger.join('\n- ')}` : '',

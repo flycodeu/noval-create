@@ -12,6 +12,7 @@ import {
 } from '../database/schema'
 import { throwUserFacingError } from '../utils/user-facing-error'
 import { buildNovelConsistencyReport, type ConsistencyIssue } from './consistency.service'
+import { getQualityDashboardData } from './quality-dashboard.service'
 
 type AssetFreshnessKey = 'faction' | 'character' | 'item' | 'thread' | 'timeline'
 
@@ -70,16 +71,45 @@ function parseAiScore(raw?: string | null): number | null {
   }
 }
 
-function parseReviewState(raw?: string | null): { severity?: string; rewriteRequired: boolean } {
-  if (!raw) return { rewriteRequired: false }
+function parseReviewState(raw?: string | null): {
+  severity?: string
+  rewriteRequired: boolean
+  costEvaporation: boolean
+  forcedReversal: boolean
+  tooSmooth: boolean
+  highPressureNoReward: boolean
+} {
+  if (!raw) {
+    return {
+      rewriteRequired: false,
+      costEvaporation: false,
+      forcedReversal: false,
+      tooSmooth: false,
+      highPressureNoReward: false,
+    }
+  }
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>
+    const protagonistSetback = typeof parsed.protagonist_setback === 'string' ? parsed.protagonist_setback : 'none'
+    const rewardState = typeof parsed.reward_state === 'string' ? parsed.reward_state : 'none'
+    const costPresent = parsed.cost_present === true
+    const protagonistPressure = typeof parsed.protagonist_pressure === 'number' ? parsed.protagonist_pressure : 0
     return {
       severity: typeof parsed.severity === 'string' ? parsed.severity : undefined,
       rewriteRequired: parsed.rewrite_required === true,
+      costEvaporation: parsed.cost_resolution_state === 'evaporated',
+      forcedReversal: parsed.reversal_marker === true && parsed.reversal_support_state === 'forced',
+      tooSmooth: protagonistSetback === 'none' && (rewardState === 'partial' || rewardState === 'major') && !costPresent,
+      highPressureNoReward: (protagonistSetback === 'minor' || protagonistSetback === 'major' || protagonistPressure >= 60) && rewardState === 'none',
     }
   } catch {
-    return { rewriteRequired: false }
+    return {
+      rewriteRequired: false,
+      costEvaporation: false,
+      forcedReversal: false,
+      tooSmooth: false,
+      highPressureNoReward: false,
+    }
   }
 }
 
@@ -329,6 +359,10 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
   const mediumIssues = consistencyIssues.filter((issue) => issue.severity === 'medium')
   const aiScore = parseAiScore(chapter.aiScoreJson)
   const reviewState = parseReviewState(chapter.reviewNotesJson)
+  const qualityDashboard = getQualityDashboardData(chapter.novelId, { includeDialogueInsights: false })
+  const storyAlerts = qualityDashboard.storyPacingAlerts
+    .filter((alert) => alert.chapterNums.includes(chapter.chapterNum))
+    .slice(0, 3)
 
   const checklist: ChapterPublishCheckItem[] = [
     {
@@ -380,6 +414,28 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
       detail: reviewState.rewriteRequired || reviewState.severity === 'high'
         ? '当前审校结果仍建议重写或存在高风险意见。'
         : '当前没有需要强制处理的审校意见。',
+    },
+    {
+      key: 'story_dynamics',
+      label: '主角与节奏风险可控',
+      status: reviewState.costEvaporation
+        || reviewState.forcedReversal
+        || reviewState.tooSmooth
+        || reviewState.highPressureNoReward
+        || storyAlerts.length > 0
+        ? 'warning'
+        : 'pass',
+      detail: reviewState.costEvaporation
+        ? '当前章节存在代价蒸发迹象，建议把损失或后果延续写实。'
+        : reviewState.forcedReversal
+          ? '当前章节出现支撑不足的反转，建议补齐触发原因和前文铺垫。'
+          : reviewState.tooSmooth
+            ? '当前章节主角几乎无成本顺推，建议补出真实阻力、失误或损失。'
+            : reviewState.highPressureNoReward
+              ? '当前章节持续施压却没有阶段回报，建议补入喘息、收获或反击兑现。'
+              : storyAlerts.length > 0
+                ? storyAlerts.map((alert) => alert.title).join('；')
+                : '当前没有命中明显的主角与节奏结构告警。',
     },
     {
       key: 'scene_plan',
