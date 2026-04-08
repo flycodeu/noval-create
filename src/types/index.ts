@@ -31,7 +31,7 @@ import type {
   ThemeVoiceGenerationRequest,
   ThemeVoiceGenerationResult,
 } from '../shared/theme-voice-generation'
-import type { FactionType } from '../shared/factions'
+import type { FactionRelationType, FactionType } from '../shared/factions'
 import type { GlossaryCategory } from '../shared/glossary'
 import type { SceneTemplateCategory } from '../shared/scene-templates'
 
@@ -389,6 +389,57 @@ export interface FactionStats {
   withLeaderCount: number
   territoryBoundCount: number
   relationCount: number
+}
+
+export interface FactionBatchGenerationOptions {
+  count: number
+  batchSize: number
+  preferredTypes?: FactionType[]
+  relationshipDensity?: 'sparse' | 'balanced' | 'dense'
+  allowCharacterlessFactions?: boolean
+  preferExistingCharacters?: boolean
+  specialRequirements?: string
+}
+
+export interface FactionGraphQueryInput {
+  novelId: number
+  focusFactionId?: number
+}
+
+export interface FactionGraphNode {
+  id: string
+  entityType: 'faction' | 'character'
+  entityId: number
+  label: string
+  subLabel?: string
+  summary?: string
+  factionId?: number
+  color?: string
+}
+
+export interface FactionGraphEdge {
+  id: string
+  source: string
+  target: string
+  relationType: FactionRelationType | 'leader' | 'member' | 'associate'
+  relationLabel: string
+  note?: string
+  bilateral?: boolean
+  color?: string
+}
+
+export interface FactionGraphCharacterSummary {
+  id: number
+  fullName: string
+  roleType: Character['roleType']
+  occupation?: string
+  summary?: string
+}
+
+export interface FactionGraphPayload {
+  nodes: FactionGraphNode[]
+  edges: FactionGraphEdge[]
+  unalignedCharacters: FactionGraphCharacterSummary[]
 }
 
 export interface GlossaryEntry {
@@ -898,6 +949,7 @@ export interface CharacterAutoGenerateStatus extends EntityBatchAutoGenerateStat
   supportingGenerated: number
 }
 
+export type FactionAutoGenerateStatus = EntityBatchAutoGenerateStatus
 export type ItemAutoGenerateStatus = EntityBatchAutoGenerateStatus
 export type TimelineAutoGenerateStatus = EntityBatchAutoGenerateStatus
 
@@ -1788,9 +1840,15 @@ declare global {
         getStats: (filters: { novelId: number }) => Promise<FactionStats>
         get: (id: number) => Promise<Faction | null>
         search: (novelId: number, keyword?: string, limit?: number) => Promise<Faction[]>
+        getGraph: (filters: FactionGraphQueryInput) => Promise<FactionGraphPayload>
         create: (novelId: number, data: Partial<Faction>) => Promise<number>
         update: (id: number, data: Partial<Faction>) => Promise<void>
         delete: (id: number) => Promise<void>
+        batchGenerate: (novelId: number, opts: FactionBatchGenerationOptions) => Promise<number[]>
+        startAutoGenerate: (novelId: number, opts: FactionBatchGenerationOptions) => Promise<number>
+        getAutoGenerateStatus: (taskId: number) => Promise<FactionAutoGenerateStatus | null>
+        getLatestAutoGenerateTask: (novelId: number) => Promise<Task | null>
+        resumeAutoGenerate: (taskId: number) => Promise<number>
         resolveNameOptions: (novelId: number) => Promise<string[]>
       }
       glossary: {

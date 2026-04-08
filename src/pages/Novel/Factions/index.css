@@ -1,0 +1,194 @@
+.faction-workspace {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 18px;
+}
+
+.faction-workspace__main {
+  display: grid;
+  gap: 18px;
+}
+
+.faction-workspace__status {
+  margin-bottom: 18px;
+}
+
+.faction-workspace__empty {
+  min-height: 240px;
+  display: grid;
+  place-items: center;
+}
+
+.faction-workspace__orphans {
+  margin-top: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.faction-workspace__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.faction-list-card {
+  cursor: pointer;
+  border: 1px solid rgba(126, 97, 60, 0.15);
+  border-radius: 18px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  background: linear-gradient(180deg, rgba(255, 252, 246, 0.96), rgba(248, 242, 233, 0.96));
+  transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.faction-list-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(125, 89, 38, 0.28);
+  box-shadow: 0 12px 20px rgba(77, 55, 28, 0.08);
+}
+
+.faction-list-card--active {
+  border-color: rgba(104, 74, 31, 0.4);
+  box-shadow: 0 16px 28px rgba(82, 60, 35, 0.12);
+}
+
+.faction-list-card__title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.faction-list-card__desc {
+  color: rgba(78, 61, 43, 0.82);
+  line-height: 1.7;
+}
+
+.faction-editor {
+  display: grid;
+  gap: 18px;
+}
+
+.faction-editor__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 16px;
+}
+
+.faction-editor__relations {
+  display: grid;
+  gap: 12px;
+  grid-column: 1 / -1;
+}
+
+.faction-editor__relations-title {
+  font-weight: 700;
+  color: rgba(74, 55, 31, 0.9);
+}
+
+.faction-editor__relation-row {
+  display: grid;
+  grid-template-columns: 1.15fr 140px 1.4fr 80px;
+  gap: 10px;
+  align-items: start;
+}
+
+.faction-editor__meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.faction-editor__meta-block {
+  border: 1px solid rgba(126, 97, 60, 0.12);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(246, 239, 230, 0.94));
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.faction-graph-canvas {
+  height: 480px;
+  border: 1px solid rgba(132, 97, 59, 0.16);
+  border-radius: 24px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at top left, rgba(186, 156, 112, 0.1), transparent 36%),
+    linear-gradient(180deg, rgba(255, 250, 243, 0.98), rgba(243, 235, 225, 0.98));
+}
+
+.faction-graph-node {
+  border-radius: 20px;
+  padding: 14px 16px;
+  border: 1px solid rgba(137, 102, 64, 0.18);
+  box-shadow: 0 12px 24px rgba(79, 57, 30, 0.1);
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(10px);
+  transition: opacity 140ms ease, transform 140ms ease, box-shadow 140ms ease;
+}
+
+.faction-graph-node--faction {
+  background: linear-gradient(180deg, rgba(255, 251, 247, 0.97), rgba(248, 240, 229, 0.97));
+}
+
+.faction-graph-node--character {
+  background: linear-gradient(180deg, rgba(249, 252, 255, 0.95), rgba(236, 242, 246, 0.95));
+}
+
+.faction-graph-node--active {
+  transform: translateY(-2px);
+  box-shadow: 0 18px 30px rgba(90, 63, 28, 0.16);
+  border-color: rgba(110, 75, 28, 0.34);
+}
+
+.faction-graph-node--dimmed {
+  opacity: 0.4;
+}
+
+.faction-graph-node__eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(116, 85, 45, 0.72);
+  margin-bottom: 8px;
+}
+
+.faction-graph-node__title {
+  font-size: 16px;
+  font-weight: 800;
+  color: #49362a;
+}
+
+.faction-graph-node__meta {
+  font-size: 12px;
+  color: rgba(88, 67, 46, 0.78);
+  margin-top: 4px;
+}
+
+.faction-graph-node__summary {
+  margin-top: 10px;
+  color: rgba(80, 60, 40, 0.82);
+  line-height: 1.6;
+  font-size: 12px;
+}
+
+@media (max-width: 1280px) {
+  .faction-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .faction-editor__meta {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 860px) {
+  .faction-editor__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .faction-editor__relation-row {
+    grid-template-columns: 1fr;
+  }
+}

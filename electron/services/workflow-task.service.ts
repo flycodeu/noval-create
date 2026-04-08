@@ -42,6 +42,7 @@ const activeWorkflows = new Set<number>()
 const RESUMABLE_WORKFLOW_TYPES = new Set([
   'map_auto_generate',
   'world_rules_auto_generate',
+  'faction_auto_generate',
   'character_auto_generate',
   'item_auto_generate',
   'timeline_auto_generate',

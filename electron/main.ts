@@ -762,9 +762,20 @@ function registerIpcHandlers() {
   ipcMain.handle('faction:getStats', (_, filters) => factionService.getFactionStats(filters))
   ipcMain.handle('faction:get', (_, id) => factionService.getFaction(requireId(id)))
   ipcMain.handle('faction:search', (_, novelId, keyword, limit) => factionService.searchFactions(requireId(novelId, 'novelId'), keyword, limit))
+  ipcMain.handle('faction:getGraph', (_, filters) => factionService.getFactionGraph(filters))
   ipcMain.handle('faction:create', (_, novelId, data) => factionService.createFaction(requireId(novelId, 'novelId'), data))
   ipcMain.handle('faction:update', (_, id, data) => factionService.updateFaction(requireId(id), data))
   ipcMain.handle('faction:delete', (_, id) => factionService.deleteFaction(requireId(id)))
+  ipcMain.handle('faction:batchGenerate', (event, novelId, options) =>
+    batchWorkflowService.generateFactionsViaWorkflow(requireId(novelId, 'novelId'), options, event.sender))
+  ipcMain.handle('faction:startAutoGenerate', (event, novelId, options) =>
+    batchWorkflowService.startFactionAutoGenerateWorkflow(requireId(novelId, 'novelId'), options, event.sender))
+  ipcMain.handle('faction:getAutoGenerateStatus', (_, taskId) =>
+    batchWorkflowService.getFactionAutoGenerateStatus(requireId(taskId)))
+  ipcMain.handle('faction:getLatestAutoGenerateTask', (_, novelId) =>
+    batchWorkflowService.getLatestFactionAutoGenerateTask(requireId(novelId, 'novelId')))
+  ipcMain.handle('faction:resumeAutoGenerate', (event, taskId) =>
+    batchWorkflowService.resumeBatchAutoGenerateWorkflow(requireId(taskId), event.sender))
   ipcMain.handle('faction:resolveNameOptions', (_, novelId) => factionService.resolveFactionNameOptions(requireId(novelId, 'novelId')))
   ipcMain.handle('glossary:list', (_, novelId) => glossaryService.listGlossary(requireId(novelId, 'novelId')))
   ipcMain.handle('glossary:query', (_, filters) => glossaryService.queryGlossary(filters))

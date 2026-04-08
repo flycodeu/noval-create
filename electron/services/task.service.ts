@@ -25,10 +25,12 @@ export type TaskType =
   | 'review'
   | 'ai_check'
   | 'expand_background'
+  | 'faction_generate'
   | 'generate_relations'
   | 'generate_map'
   | 'map_auto_generate'
   | 'world_rules_auto_generate'
+  | 'faction_auto_generate'
   | 'character_auto_generate'
   | 'item_auto_generate'
   | 'timeline_auto_generate'
@@ -147,6 +149,7 @@ const modelQueueStates = new Map<number, ModelQueueState>()
 const RESUMABLE_WORKFLOW_TYPES = new Set<TaskType>([
   'map_auto_generate',
   'world_rules_auto_generate',
+  'faction_auto_generate',
   'character_auto_generate',
   'item_auto_generate',
   'timeline_auto_generate',

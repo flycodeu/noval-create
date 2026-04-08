@@ -7,7 +7,19 @@ export type FactionType =
   | 'government'
   | 'other'
 
-export type FactionRelationType = 'ally' | 'enemy' | 'neutral' | 'subordinate'
+export type FactionRelationType =
+  | 'ally'
+  | 'enemy'
+  | 'neutral'
+  | 'subordinate'
+  | 'trade'
+  | 'rival'
+  | 'patron'
+  | 'vassal'
+  | 'truce'
+  | 'manipulates'
+  | 'protects'
+  | 'infiltrates'
 
 export interface FactionExternalRelation {
   targetFactionId?: number
@@ -16,8 +28,23 @@ export interface FactionExternalRelation {
   note?: string
 }
 
+export const FACTION_RELATION_TYPE_OPTIONS: Array<{ value: FactionRelationType; label: string; color: string }> = [
+  { value: 'ally', label: '盟友', color: '#1f7a63' },
+  { value: 'enemy', label: '敌对', color: '#b14949' },
+  { value: 'neutral', label: '中立', color: '#7b6b59' },
+  { value: 'subordinate', label: '从属', color: '#4e6f95' },
+  { value: 'trade', label: '交易', color: '#9a6a24' },
+  { value: 'rival', label: '竞争', color: '#9d4f76' },
+  { value: 'patron', label: '资助', color: '#6a6fbc' },
+  { value: 'vassal', label: '附庸', color: '#4870a8' },
+  { value: 'truce', label: '休战', color: '#63856c' },
+  { value: 'manipulates', label: '操控', color: '#8a4b62' },
+  { value: 'protects', label: '庇护', color: '#4d8a70' },
+  { value: 'infiltrates', label: '渗透', color: '#7d5f92' },
+]
+
 function isFactionRelationType(value: string): value is FactionRelationType {
-  return value === 'ally' || value === 'enemy' || value === 'neutral' || value === 'subordinate'
+  return FACTION_RELATION_TYPE_OPTIONS.some((item) => item.value === value)
 }
 
 function asText(value: unknown): string {
@@ -70,4 +97,12 @@ export function buildFactionExternalRelationsPayload(relations: FactionExternalR
       }))
       .filter((relation) => relation.target_faction_id || relation.target_faction_name),
   )
+}
+
+export function getFactionRelationLabel(value?: string | null): string {
+  return FACTION_RELATION_TYPE_OPTIONS.find((item) => item.value === value)?.label || value || '未命名关系'
+}
+
+export function getFactionRelationColor(value?: string | null): string {
+  return FACTION_RELATION_TYPE_OPTIONS.find((item) => item.value === value)?.color || '#8a6f54'
 }

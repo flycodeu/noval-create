@@ -3,6 +3,8 @@ import { desc, eq } from 'drizzle-orm'
 import type {
   CharacterAutoGenerateStatus,
   CharacterBatchGenerationOptions,
+  FactionAutoGenerateStatus,
+  FactionBatchGenerationOptions,
   ItemAutoGenerateStatus,
   StoryItemGenerateOptions,
   StoryThreadAutoGenerateStatus,
@@ -16,6 +18,7 @@ import { getDb } from '../database/db'
 import { tasks } from '../database/schema'
 import { throwUserFacingError } from '../utils/user-facing-error'
 import { generateCharacterBatchChunk } from './character.service'
+import { generateFactionBatchChunk } from './faction.service'
 import { loadSubplotAutoGenerateContext, polishGeneratedSubplots, tryGenerateSubplotBatch } from './core-settings.service'
 import { generateStoryItemsBatchChunk } from './item.service'
 import { generateStoryThreadBatchChunk } from './story-thread.service'
@@ -41,6 +44,7 @@ function logWorkflowError(taskId: number) {
 
 type TaskRow = typeof tasks.$inferSelect
 type BatchWorkflowTaskType =
+  | 'faction_auto_generate'
   | 'character_auto_generate'
   | 'item_auto_generate'
   | 'timeline_auto_generate'
@@ -123,6 +127,21 @@ function parseCharacterOptions(raw?: string | null): CharacterBatchGenerationOpt
       : 'balanced',
     requiredItemLinks: asStringArray(record.requiredItemLinks),
     diversityConstraints: asStringArray(record.diversityConstraints),
+  }
+}
+
+function parseFactionOptions(raw?: string | null): FactionBatchGenerationOptions {
+  const record = asRecord(raw)
+  return {
+    count: clampPositiveInt(record.count, 8, 1, 24),
+    batchSize: clampPositiveInt(record.batchSize, 1, 1, 6),
+    preferredTypes: asStringArray(record.preferredTypes) as FactionBatchGenerationOptions['preferredTypes'],
+    relationshipDensity: record.relationshipDensity === 'sparse' || record.relationshipDensity === 'dense'
+      ? record.relationshipDensity
+      : 'balanced',
+    allowCharacterlessFactions: record.allowCharacterlessFactions !== false,
+    preferExistingCharacters: record.preferExistingCharacters !== false,
+    specialRequirements: typeof record.specialRequirements === 'string' ? record.specialRequirements : '',
   }
 }
 
@@ -231,6 +250,15 @@ function createInitialCharacterStatus(taskId: number, novelId: number, options: 
   }
 }
 
+function createInitialFactionStatus(taskId: number, novelId: number, options: FactionBatchGenerationOptions): FactionAutoGenerateStatus {
+  return createInitialEntityStatus(
+    taskId,
+    novelId,
+    clampPositiveInt(options.count, 8, 1, 24),
+    clampPositiveInt(options.batchSize, 1, 1, 6),
+  )
+}
+
 function toCharacterStatus(taskId: number, task: TaskRow): CharacterAutoGenerateStatus {
   const progress = parseTaskProgress<Partial<CharacterAutoGenerateStatus>>(task)
   const options = parseCharacterOptions(task.inputJson)
@@ -253,6 +281,14 @@ function toCharacterStatus(taskId: number, task: TaskRow): CharacterAutoGenerate
     antagonistGenerated: typeof progress.antagonistGenerated === 'number' ? progress.antagonistGenerated : 0,
     supportingGenerated: typeof progress.supportingGenerated === 'number' ? progress.supportingGenerated : 0,
   }
+}
+
+function toFactionStatus(taskId: number, task: TaskRow): FactionAutoGenerateStatus {
+  const options = parseFactionOptions(task.inputJson)
+  return toEntityStatus(taskId, task, {
+    requestedCount: options.count,
+    batchSize: options.batchSize,
+  })
 }
 
 function createInitialEntityStatus(
@@ -490,14 +526,17 @@ async function runCharacterAutoGenerateWorkflow(taskId: number, sender?: WebCont
 async function runSimpleEntityWorkflow(
   taskId: number,
   sender: WebContents | undefined,
-  type: 'item' | 'timeline' | 'thread',
+  type: 'faction' | 'item' | 'timeline' | 'thread',
 ) {
   if (!tryRegisterActiveBatchWorkflow(taskId)) return
 
   try {
     const task = getRunningTask(taskId, sender)
     if (!task.progressJson) {
-      if (type === 'item') {
+      if (type === 'faction') {
+        const opts = parseFactionOptions(task.inputJson)
+        updateTaskProgress(taskId, createInitialFactionStatus(taskId, task.novelId || 0, opts), sender)
+      } else if (type === 'item') {
         const opts = parseItemOptions(task.inputJson)
         updateTaskProgress(taskId, createInitialEntityStatus(taskId, task.novelId || 0, opts.count || 8, opts.batchSize || 4), sender)
       } else if (type === 'timeline') {
@@ -517,7 +556,9 @@ async function runSimpleEntityWorkflow(
         : toEntityStatus(
             taskId,
             latestTask,
-            type === 'item'
+            type === 'faction'
+              ? { requestedCount: parseFactionOptions(latestTask.inputJson).count || 8, batchSize: parseFactionOptions(latestTask.inputJson).batchSize || 1 }
+              : type === 'item'
               ? { requestedCount: parseItemOptions(latestTask.inputJson).count || 8, batchSize: parseItemOptions(latestTask.inputJson).batchSize || 4 }
               : { requestedCount: parseTimelineOptions(latestTask.inputJson).count || 10, batchSize: parseTimelineOptions(latestTask.inputJson).batchSize || 4 },
           )
@@ -550,7 +591,18 @@ async function runSimpleEntityWorkflow(
 
       try {
         const batchCount = Math.min(progress.batchSize, Math.max(0, progress.requestedCount - progress.generatedCount))
-        const result = type === 'item'
+        const result = type === 'faction'
+          ? await generateFactionBatchChunk(latestTask.novelId, {
+              ...parseFactionOptions(latestTask.inputJson),
+              count: batchCount,
+              batchSize: batchCount,
+            }, {
+              parentTaskId: taskId,
+              sender,
+              batchIndex: currentBatch,
+              totalBatches: progress.totalBatches,
+            })
+          : type === 'item'
           ? await generateStoryItemsBatchChunk(latestTask.novelId, {
               ...parseItemOptions(latestTask.inputJson),
               count: batchCount,
@@ -613,7 +665,9 @@ async function runSimpleEntityWorkflow(
           : toEntityStatus(
               taskId,
               currentTask,
-              type === 'item'
+              type === 'faction'
+                ? { requestedCount: parseFactionOptions(currentTask.inputJson).count || 8, batchSize: parseFactionOptions(currentTask.inputJson).batchSize || 1 }
+                : type === 'item'
                 ? { requestedCount: parseItemOptions(currentTask.inputJson).count || 8, batchSize: parseItemOptions(currentTask.inputJson).batchSize || 4 }
                 : { requestedCount: parseTimelineOptions(currentTask.inputJson).count || 10, batchSize: parseTimelineOptions(currentTask.inputJson).batchSize || 4 },
             )
@@ -756,11 +810,32 @@ async function waitForWorkflowTask(taskId: number) {
 }
 
 export function isBatchWorkflowType(type?: string | null): type is BatchWorkflowTaskType {
-  return type === 'character_auto_generate'
+  return type === 'faction_auto_generate'
+    || type === 'character_auto_generate'
     || type === 'item_auto_generate'
     || type === 'timeline_auto_generate'
     || type === 'story_thread_auto_generate'
     || type === 'subplot_auto_generate'
+}
+
+export async function startFactionAutoGenerateWorkflow(novelId: number, options: FactionBatchGenerationOptions, sender?: WebContents) {
+  const existing = reconcileStaleBatchWorkflowTask(getLatestWorkflowByType(novelId, 'faction_auto_generate'))
+  if (existing && ['pending', 'running', 'cancel_requested'].includes(existing.status || '')) return existing.id
+  if (existing?.status === 'paused') throwUserFacingError('batch.factionPausedExists')
+
+  const normalized = parseFactionOptions(JSON.stringify(options))
+  const initial = createInitialFactionStatus(0, novelId, normalized)
+  const taskId = await createTask({
+    type: 'faction_auto_generate',
+    novelId,
+    inputJson: JSON.stringify(normalized),
+    runnerType: 'workflow',
+    controlJson: JSON.stringify({ cancelRequested: false, maxRetries: DEFAULT_MAX_RETRIES, retryCount: 0 }),
+    progressJson: JSON.stringify(initial),
+  })
+  updateTaskProgress(taskId, { ...initial, taskId }, sender)
+  void runSimpleEntityWorkflow(taskId, sender, 'faction').catch(logWorkflowError(taskId))
+  return taskId
 }
 
 export async function startCharacterAutoGenerateWorkflow(novelId: number, options: CharacterBatchGenerationOptions, sender?: WebContents) {
@@ -868,6 +943,11 @@ export function getCharacterAutoGenerateStatus(taskId: number) {
   return task?.type === 'character_auto_generate' ? toCharacterStatus(taskId, task) : null
 }
 
+export function getFactionAutoGenerateStatus(taskId: number) {
+  const task = reconcileStaleBatchWorkflowTask(getTaskRecord(taskId))
+  return task?.type === 'faction_auto_generate' ? toFactionStatus(taskId, task) : null
+}
+
 export function getItemAutoGenerateStatus(taskId: number) {
   const task = reconcileStaleBatchWorkflowTask(getTaskRecord(taskId))
   return task?.type === 'item_auto_generate'
@@ -890,6 +970,10 @@ export function getStoryThreadAutoGenerateStatus(taskId: number) {
 export function getSubplotAutoGenerateStatus(taskId: number) {
   const task = reconcileStaleBatchWorkflowTask(getTaskRecord(taskId))
   return task?.type === 'subplot_auto_generate' ? toSubplotStatus(taskId, task) : null
+}
+
+export function getLatestFactionAutoGenerateTask(novelId: number) {
+  return reconcileStaleBatchWorkflowTask(getLatestWorkflowByType(novelId, 'faction_auto_generate'))
 }
 
 export function getLatestCharacterAutoGenerateTask(novelId: number) {
@@ -932,7 +1016,9 @@ async function resumeBatchWorkflow(taskId: number, sender: WebContents | undefin
     retryCount: 0,
   })
 
-  if (type === 'character_auto_generate') {
+  if (type === 'faction_auto_generate') {
+    void runSimpleEntityWorkflow(taskId, sender, 'faction').catch(logWorkflowError(taskId))
+  } else if (type === 'character_auto_generate') {
     void runCharacterAutoGenerateWorkflow(taskId, sender).catch(logWorkflowError(taskId))
   } else if (type === 'item_auto_generate') {
     void runSimpleEntityWorkflow(taskId, sender, 'item').catch(logWorkflowError(taskId))
@@ -952,6 +1038,13 @@ export async function resumeBatchAutoGenerateWorkflow(taskId: number, sender?: W
     throwUserFacingError('workflow.taskNotFound', { taskId })
   }
   return resumeBatchWorkflow(taskId, sender, task.type)
+}
+
+export async function generateFactionsViaWorkflow(novelId: number, options: FactionBatchGenerationOptions, sender?: WebContents) {
+  const taskId = await startFactionAutoGenerateWorkflow(novelId, options, sender)
+  const task = await waitForWorkflowTask(taskId)
+  ensureSuccessfulTask(task)
+  return getFactionAutoGenerateStatus(taskId)?.acceptedIds || []
 }
 
 export async function generateCharactersViaWorkflow(novelId: number, options: CharacterBatchGenerationOptions, sender?: WebContents) {

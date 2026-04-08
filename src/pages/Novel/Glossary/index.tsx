@@ -1,12 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Form, Input, List, Select, Space, Switch, Tag, message } from 'antd'
 import { DeleteOutlined, PlusOutlined, SaveOutlined } from '@ant-design/icons'
+import AIGenerateButton from '../../../components/AIGenerateButton'
 import { getErrorMessage } from '@/utils/user-facing-message'
 import type { GlossaryEntry } from '../../../types'
 import { parseGlossaryAliases, stringifyGlossaryAliases } from '../../../shared/glossary'
 import { useNovelStore } from '../../../stores/novel.store'
 import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
 import { loadWorkflowStats } from '../workflow'
+import { buildDraftMessages, normalizeOptionalNumber, normalizeStringArray, parseDraftJson } from '../shared/ai-draft'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 
 const GLOSSARY_CATEGORY_OPTIONS = [
@@ -182,6 +184,44 @@ export default function GlossaryPage({ novelId }: Props) {
       description="把术语、阶位、材料、事件和种族名词固定成可检索资产，减少章节生成和修订时的命名漂移。"
       actions={(
         <Space wrap>
+          <AIGenerateButton
+            label={selectedItem ? 'AI 补当前术语' : 'AI 生成术语草稿'}
+            isJson
+            buildMessages={() => {
+              const values = form.getFieldsValue(true)
+              return buildDraftMessages({
+                task: '设定词典条目',
+                mode: values.term ? 'optimize' : 'replace',
+                context: [
+                  { label: '书名', value: currentNovel?.title || '' },
+                  { label: '题材', value: currentNovel?.genreName || '' },
+                  { label: '简介', value: currentNovel?.synopsis || '' },
+                  { label: '扩展背景', value: currentNovel?.expandedBackground || '' },
+                  { label: '现有术语', value: items.filter((item) => item.id !== selectedId).slice(0, 10).map((item) => item.term).join('、') },
+                ],
+                fields: [
+                  { key: 'term', label: '术语名', value: values.term, hint: '要像作品内真实会反复出现的名词。' },
+                  { key: 'category', label: '分类', value: values.category, hint: '只用已有分类。' },
+                  { key: 'definition', label: '定义', value: values.definition, hint: '写清用途和边界，不要百科腔。' },
+                  { key: 'aliases', label: '别名', type: 'string[]', value: values.aliases, hint: '只保留确实会被使用的叫法。' },
+                  { key: 'firstAppearChapter', label: '首次出现章节', type: 'number', value: values.firstAppearChapter, hint: '不知道可留空。' },
+                ],
+                requirements: ['不要制造和现有术语冲突的新名词。', '定义要服务剧情与写作调用。'],
+              })
+            }}
+            onResult={(raw) => {
+              const values = form.getFieldsValue(true)
+              const draft = parseDraftJson<Record<string, unknown>>(raw)
+              form.setFieldsValue({
+                ...values,
+                term: typeof draft.term === 'string' ? draft.term : values.term,
+                category: typeof draft.category === 'string' ? draft.category as GlossaryEntry['category'] : values.category,
+                definition: typeof draft.definition === 'string' ? draft.definition : values.definition,
+                aliases: normalizeStringArray(draft.aliases).length > 0 ? normalizeStringArray(draft.aliases) : values.aliases,
+                firstAppearChapter: normalizeOptionalNumber(draft.firstAppearChapter ?? values.firstAppearChapter),
+              })
+            }}
+          />
           <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>
             保存术语
           </Button>
