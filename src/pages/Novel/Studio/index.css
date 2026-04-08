@@ -156,7 +156,8 @@
 .studio-readiness-card,
 .studio-action-card,
 .studio-link-button,
-.studio-issue-card {
+.studio-issue-card,
+.studio-freshness-card {
   transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
 }
 
@@ -174,7 +175,8 @@
 .studio-readiness-card:hover,
 .studio-action-card:hover,
 .studio-link-button:hover,
-.studio-issue-card:hover {
+.studio-issue-card:hover,
+.studio-freshness-card:hover {
   transform: translateY(-2px);
   box-shadow: 0 16px 28px rgba(24, 40, 58, 0.08);
 }
@@ -350,6 +352,121 @@
   font-size: 22px;
 }
 
+.studio-freshness-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+  margin-bottom: 14px;
+}
+
+.studio-freshness-meta span {
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.74);
+  border: 1px solid rgba(24, 40, 58, 0.1);
+  color: rgba(24, 40, 58, 0.72);
+  font-size: 12px;
+}
+
+.studio-freshness-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.studio-freshness-card {
+  display: grid;
+  gap: 10px;
+  min-height: 220px;
+  padding: 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(24, 40, 58, 0.08);
+  background:
+    radial-gradient(circle at top right, rgba(188, 108, 37, 0.12), transparent 32%),
+    rgba(255, 255, 255, 0.72);
+}
+
+.studio-freshness-card--ok {
+  border-color: rgba(75, 125, 94, 0.2);
+  background:
+    radial-gradient(circle at top right, rgba(75, 125, 94, 0.16), transparent 34%),
+    rgba(245, 252, 247, 0.88);
+}
+
+.studio-freshness-card--warn {
+  border-color: rgba(188, 108, 37, 0.22);
+  background:
+    radial-gradient(circle at top right, rgba(188, 108, 37, 0.18), transparent 34%),
+    rgba(255, 248, 241, 0.92);
+}
+
+.studio-freshness-card--stale {
+  border-color: rgba(180, 72, 58, 0.24);
+  background:
+    radial-gradient(circle at top right, rgba(180, 72, 58, 0.18), transparent 34%),
+    rgba(255, 243, 240, 0.92);
+}
+
+.studio-freshness-card__title {
+  color: rgba(24, 40, 58, 0.7);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.studio-freshness-card--ok .studio-freshness-card__title {
+  color: rgba(56, 108, 74, 0.88);
+}
+
+.studio-freshness-card--warn .studio-freshness-card__title,
+.studio-freshness-card--warn .studio-freshness-card__hint {
+  color: #9a5a13;
+}
+
+.studio-freshness-card--stale .studio-freshness-card__title,
+.studio-freshness-card--stale .studio-freshness-card__hint {
+  color: #a23f34;
+}
+
+.studio-freshness-card__value {
+  display: block;
+  color: var(--studio-ink);
+  font-size: 26px;
+  line-height: 1.15;
+}
+
+.studio-freshness-card__desc {
+  margin: 0;
+  color: rgba(24, 40, 58, 0.74);
+  line-height: 1.75;
+}
+
+.studio-freshness-card__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.studio-freshness-card__tag {
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(24, 40, 58, 0.08);
+  color: rgba(24, 40, 58, 0.78);
+  font-size: 12px;
+}
+
+.studio-freshness-card__hint {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid rgba(24, 40, 58, 0.08);
+  color: #8d4c10;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.75;
+}
+
 .studio-note-list {
   display: grid;
   gap: 12px;
@@ -424,7 +541,8 @@
 
 @media (max-width: 768px) {
   .studio-readiness-grid,
-  .studio-action-grid {
+  .studio-action-grid,
+  .studio-freshness-grid {
     grid-template-columns: 1fr;
   }
 

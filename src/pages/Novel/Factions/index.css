@@ -4,6 +4,11 @@
   gap: 18px;
 }
 
+.faction-workspace__sidebar .novel-panel__body {
+  display: grid;
+  gap: 12px;
+}
+
 .faction-workspace__main {
   display: grid;
   gap: 18px;
@@ -35,8 +40,8 @@
   cursor: pointer;
   border: 1px solid rgba(126, 97, 60, 0.15);
   border-radius: 18px;
-  padding: 10px 12px;
-  margin-bottom: 10px;
+  padding: 9px 11px;
+  margin-bottom: 8px;
   background: linear-gradient(180deg, rgba(255, 252, 246, 0.96), rgba(248, 242, 233, 0.96));
   transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
 }
@@ -61,7 +66,12 @@
 
 .faction-list-card__desc {
   color: rgba(78, 61, 43, 0.82);
-  line-height: 1.7;
+  font-size: 12px;
+  line-height: 1.55;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
 }
 
 .faction-editor {
@@ -109,7 +119,8 @@
 }
 
 .faction-graph-canvas {
-  height: 480px;
+  position: relative;
+  min-height: 560px;
   border: 1px solid rgba(132, 97, 59, 0.16);
   border-radius: 24px;
   overflow: hidden;
@@ -118,9 +129,37 @@
     linear-gradient(180deg, rgba(255, 250, 243, 0.98), rgba(243, 235, 225, 0.98));
 }
 
+.faction-graph-canvas__tools {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 4;
+  display: flex;
+  gap: 8px;
+}
+
+.faction-graph-canvas__tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(126, 97, 60, 0.18);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #5c4330;
+  cursor: pointer;
+  box-shadow: 0 10px 18px rgba(77, 55, 28, 0.08);
+}
+
+.faction-graph-canvas__tool:hover {
+  border-color: rgba(125, 89, 38, 0.28);
+  background: rgba(255, 252, 247, 0.98);
+}
+
 .faction-graph-node {
   border-radius: 20px;
-  padding: 14px 16px;
+  padding: 13px 15px;
   border: 1px solid rgba(137, 102, 64, 0.18);
   box-shadow: 0 12px 24px rgba(79, 57, 30, 0.1);
   background: rgba(255, 255, 255, 0.94);
@@ -163,14 +202,7 @@
 .faction-graph-node__meta {
   font-size: 12px;
   color: rgba(88, 67, 46, 0.78);
-  margin-top: 4px;
-}
-
-.faction-graph-node__summary {
-  margin-top: 10px;
-  color: rgba(80, 60, 40, 0.82);
-  line-height: 1.6;
-  font-size: 12px;
+  margin-top: 6px;
 }
 
 @media (max-width: 1280px) {

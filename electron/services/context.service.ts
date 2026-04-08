@@ -23,12 +23,14 @@ import { resolveModelRuntimeBudget } from './model.service'
 import { throwUserFacingError } from '../utils/user-facing-error'
 import {
   buildCharacterContextCards,
+  buildFactionContextCards,
   buildRelationContextCards,
   buildItemContextCards,
   buildTimelineContextCards,
   buildChapterThreadContextCards,
   buildGenericThreadCardsFromTexts,
   renderCharacterCards,
+  renderFactionCards,
   renderRelationCards,
   renderItemCards,
   renderTimelineCards,
@@ -429,32 +431,17 @@ function buildFactionContextSummary(
 
   const rows = [...selected.values()].slice(0, limit)
   if (rows.length === 0) return ''
+  const db = getDb()
+  const characterRows = db.select().from(characters).where(eq(characters.novelId, novelId)).all()
+  const locationRows = db.select().from(worldMap).where(eq(worldMap.novelId, novelId)).all()
+  const cards = buildFactionContextCards({
+    factions: rows,
+    characterNameMap: new Map(characterRows.map((row) => [row.id, row.fullName])),
+    locationNameMap: new Map(locationRows.map((row) => [row.id, row.name])),
+    limit,
+  })
 
-  return [
-    '势力摘要：',
-    ...rows.map((row) => {
-      const relationSummary = parseFactionExternalRelations(row.externalRelationsJson)
-        .filter((relation) => relation.relation === 'enemy' || relation.relation === 'subordinate')
-        .slice(0, 3)
-        .map((relation) => {
-          const targetName = typeof relation.targetFactionId === 'number'
-            ? catalog.byId.get(relation.targetFactionId)?.name
-            : relation.targetFactionName
-          if (!targetName) return ''
-          return `${relation.relation === 'enemy' ? '敌对' : '从属'} ${targetName}`
-        })
-        .filter(Boolean)
-        .join('、')
-      const parts = [
-        row.type ? `[${row.type}]` : '',
-        row.goal || '',
-        row.currentPhase ? `当前阶段：${row.currentPhase}` : '',
-        row.resources ? `资源：${row.resources}` : '',
-        relationSummary ? `关系：${relationSummary}` : '',
-      ].filter(Boolean)
-      return `- ${row.name}${parts.length > 0 ? `：${parts.join('；')}` : ''}`
-    }),
-  ].join('\n')
+  return cards.length > 0 ? `势力卡：\n${renderFactionCards(cards)}` : ''
 }
 
 function buildRecallQueryText(

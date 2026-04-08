@@ -21,13 +21,18 @@ import {
 } from './generation-history.service'
 import { createTask, executeChatTask, updateTask } from './task.service'
 import {
+  FACTION_TYPE_OPTIONS,
   FACTION_RELATION_TYPE_OPTIONS,
   buildFactionExternalRelationsPayload,
+  formatFactionTypeForPrompt,
   getFactionRelationColor,
   getFactionRelationLabel,
+  getFactionTypeLabel,
+  normalizeFactionTypeValue,
   parseFactionExternalRelations,
 } from '../../src/shared/factions'
 import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/utils/text'
+import { runAssetQualityLoop, summarizeAssetQualityWarnings } from './asset-quality.service'
 import { markNovelContextChanged } from './context-impact.service'
 import { appendVariationMessage } from './variation-control.service'
 import {
@@ -74,14 +79,38 @@ interface GeneratedFactionCandidate {
 const DEFAULT_BATCH_OPTIONS: FactionBatchGenerationOptions = {
   count: 8,
   batchSize: 1,
-  preferredTypes: ['faction', 'organization', 'family'],
+  preferredTypes: ['organization', 'sect', 'family'],
   relationshipDensity: 'balanced',
   allowCharacterlessFactions: true,
   preferExistingCharacters: true,
   specialRequirements: '',
 }
 
-const FACTION_TYPE_OPTIONS: AppFaction['type'][] = ['organization', 'faction', 'family', 'sect', 'company', 'government', 'other']
+const FACTION_ANIMAL_NAME_BLOCKLIST = new Set([
+  '穿山甲',
+  '老虎',
+  '狮子',
+  '狐狸',
+  '野狼',
+  '狼',
+  '熊猫',
+  '黑熊',
+  '棕熊',
+  '白鹭',
+  '乌鸦',
+  '猎豹',
+  '蟒蛇',
+  '海豚',
+  '鲨鱼',
+  '野猪',
+  '山羊',
+  '水牛',
+  '兔子',
+  '猫',
+  '狗',
+])
+
+const FACTION_ORGANIZATION_HINT_RE = /(会|盟|门|宗|派|帮|团|军|府|阁|宫|殿|司|局|部|署|院|台|厅|社|寨|族|国|朝|教|商会|公司|行|坊)$/
 
 function normalizePage(page?: number, pageSize?: number) {
   const nextPage = Math.max(1, page || 1)
@@ -115,8 +144,7 @@ function asNumber(value: unknown): number | null | undefined {
 }
 
 function normalizeFactionType(value: unknown, fallback: AppFaction['type'] = 'faction'): AppFaction['type'] {
-  const text = asText(value).toLowerCase()
-  return FACTION_TYPE_OPTIONS.includes(text as AppFaction['type']) ? text as AppFaction['type'] : fallback
+  return normalizeFactionTypeValue(asText(value), fallback)
 }
 
 function stringifyNumberArray(input: unknown): string {
@@ -153,6 +181,14 @@ function parseNumberArray(raw?: string | null): number[] {
 
 function normalizeName(value: string): string {
   return value.trim().replace(/\s+/g, '').toLowerCase()
+}
+
+function looksLikeNonFactionName(name: string): boolean {
+  const compact = name.trim().replace(/\s+/g, '')
+  if (!compact) return true
+  if (FACTION_ANIMAL_NAME_BLOCKLIST.has(compact)) return true
+  if (compact.length <= 4 && /(兽|鸟|鱼|虫)$/.test(compact) && !FACTION_ORGANIZATION_HINT_RE.test(compact)) return true
+  return false
 }
 
 function sanitizeFactionPayload(
@@ -314,7 +350,7 @@ function summarizeCurrentFactions(rows: AppFaction[]): string {
       .slice(0, 3)
       .map((relation) => `${relation.targetFactionName || `#${relation.targetFactionId}`}:${getFactionRelationLabel(relation.relation)}`)
       .join('、')
-    return `- ${row.name}（${normalizeFactionType(row.type)}）目标：${row.goal || '未写'}；资源：${row.resources || '未写'}；阶段：${row.currentPhase || '未写'}${relations ? `；关系：${relations}` : ''}`
+    return `- ${row.name}（${getFactionTypeLabel(row.type)}）目标：${row.goal || '未写'}；资源：${row.resources || '未写'}；阶段：${row.currentPhase || '未写'}${relations ? `；关系：${relations}` : ''}`
   }).join('\n')
 }
 
@@ -361,7 +397,7 @@ function buildFactionGenerationPrompt(input: {
   options: FactionBatchGenerationOptions
 }) {
   const relationOptions = FACTION_RELATION_TYPE_OPTIONS.map((item) => `${item.value}（${item.label}）`).join('、')
-  const preferredTypes = (input.options.preferredTypes || []).join('、')
+  const preferredTypes = (input.options.preferredTypes || []).map((item) => formatFactionTypeForPrompt(item)).filter(Boolean).join('、')
 
   return [
     `你是一名长篇小说世界观策划编辑，需要为《${input.novelTitle}》补齐可直接落库的势力系统。`,
@@ -373,7 +409,7 @@ function buildFactionGenerationPrompt(input: {
     `当前可引用人物：\n${input.characterSummary}`,
     `当前可引用地图节点：\n${input.mapSummary}`,
     `生成任务：当前总目标 ${input.totalCount} 个势力；本轮是第 ${input.batchIndex}/${input.totalBatches} 批，只生成 ${input.batchCount} 个。`,
-    '硬约束：\n- 只输出 JSON 数组，不要解释，不要 Markdown。\n- 每个势力都必须和题材、背景、世界规则、主题或主线冲突有关联，不能像随机资料库。\n- 不要用“好势力/坏势力”二元设计，要写利益、制度、历史、情感和秘密纠缠。\n- 势力之间必须形成关系网。如果当前已有势力，则新势力至少要和一个已有势力发生可叙事关系。\n- 有的人可以完全没有势力归属，不要为了凑数强行把所有人物塞进势力。\n- 如果绑定人物，只能从给定人物列表里选名字；如果不适合绑定人物，就返回空数组。\n- 如果绑定地图，只能从给定地图节点里选名字；如果不适合绑定地点，就返回空数组。\n- 外部关系 relation 只能使用这些值：' + relationOptions,
+    '硬约束：\n- 只输出 JSON 数组，不要解释，不要 Markdown。\n- 每个势力都必须是小说里的社会主体或组织主体，名称要像宗门、商会、军府、朝廷、帮派、家族、秘密网络、机构或统治集团。\n- 禁止把动物、种族、怪物、单个职业、单体人物、纯地名直接当成势力名，例如“穿山甲”这类生物名不能作为势力。\n- 每个势力都必须和题材、背景、世界规则、主题或主线冲突有关联，不能像随机资料库。\n- 不要用“好势力/坏势力”二元设计，要写利益、制度、历史、情感和秘密纠缠。\n- 势力之间必须形成关系网。如果当前已有势力，则新势力至少要和一个已有势力发生可叙事关系。\n- 有的人可以完全没有势力归属，不要为了凑数强行把所有人物塞进势力。\n- 如果绑定人物，只能从给定人物列表里选名字；如果不适合绑定人物，就返回空数组。\n- 如果绑定地图，只能从给定地图节点里选名字；如果不适合绑定地点，就返回空数组。\n- type 只能使用这些值：' + FACTION_TYPE_OPTIONS.map((item) => `${item.value}（${item.label}）`).join('、') + '\n- 外部关系 relation 只能使用这些值：' + relationOptions,
     preferredTypes ? `优先势力类型：${preferredTypes}` : '',
     input.options.allowCharacterlessFactions ? '允许没有领袖或没有明确成员的隐性势力。' : '尽量让每个势力都落到至少一个具体人物。',
     input.options.preferExistingCharacters === false ? '不必强行绑定现有人物，优先保证势力设计合理。' : '优先复用现有人物作为领袖、成员或外围合作者。',
@@ -390,6 +426,32 @@ function buildFactionGenerationPrompt(input: {
 function parseGeneratedFactions(raw: string): GeneratedFactionCandidate[] {
   const parsed = cleanAiValue(safeParseJson<GeneratedFactionCandidate[]>(raw))
   return Array.isArray(parsed) ? parsed : []
+}
+
+function factionSchemaHint(count: number): string {
+  return `只输出 JSON 数组，数组长度不超过 ${count}。每个对象必须保留 name、type、goal、resources、memberPolicy、currentPhase、notes、leaderName、territoryNames、linkedCharacterNames、externalRelations 这些字段。type 只能使用英文枚举值，不要输出中文类型值。`
+}
+
+function buildFactionReviewContext(input: {
+  profile: Awaited<ReturnType<typeof buildStoryProfile>>
+  existingFactions: string
+  characterSummary: string
+  mapSummary: string
+  options: FactionBatchGenerationOptions
+}): string {
+  return [
+    `题材：${input.profile.genre}`,
+    input.profile.background ? `背景：\n${input.profile.background}` : '',
+    input.profile.worldRulesSummary ? `世界规则：\n${input.profile.worldRulesSummary}` : '',
+    buildStoryCoreSummary(input.profile) ? `故事核心：\n${buildStoryCoreSummary(input.profile)}` : '',
+    `现有势力网络：\n${input.existingFactions}`,
+    `现有人物：\n${input.characterSummary}`,
+    `地图节点：\n${input.mapSummary}`,
+    input.options.preferredTypes && input.options.preferredTypes.length > 0
+      ? `偏好类型：${input.options.preferredTypes.map((item) => formatFactionTypeForPrompt(item)).join('、')}`
+      : '',
+    input.options.specialRequirements ? `额外要求：${input.options.specialRequirements}` : '',
+  ].filter(Boolean).join('\n\n')
 }
 
 function resolveRelationTarget(targetName: string, existingFactions: AppFaction[], createdNames: string[]): { id?: number; name?: string } {
@@ -412,6 +474,7 @@ function applyGeneratedFaction(
 ): number | null {
   const name = asText(generated.name)
   if (!name) return null
+  if (looksLikeNonFactionName(name)) return null
   if (existingFactions.some((row) => normalizeName(row.name) === normalizeName(name)) || createdNames.some((item) => normalizeName(item) === normalizeName(name))) {
     return null
   }
@@ -521,15 +584,15 @@ export function getFactionGraph(filters: FactionGraphQueryInput): FactionGraphPa
   const connectedCharacterIds = new Set<number>()
 
   factionRows.forEach((row) => {
-    nodes.set(`faction-${row.id}`, {
-      id: `faction-${row.id}`,
-      entityType: 'faction',
-      entityId: row.id,
-      label: row.name,
-      subLabel: row.type,
-      summary: row.currentPhase || row.goal || row.resources || row.notes || '等待补充势力说明。',
-      color: getFactionRelationColor('neutral'),
-    })
+        nodes.set(`faction-${row.id}`, {
+          id: `faction-${row.id}`,
+          entityType: 'faction',
+          entityId: row.id,
+          label: row.name,
+          subLabel: getFactionTypeLabel(row.type),
+          summary: row.currentPhase || row.goal || row.resources || row.notes || '等待补充势力说明。',
+          color: getFactionRelationColor('neutral'),
+        })
   })
 
   factionRows.forEach((row) => {
@@ -685,6 +748,16 @@ export async function generateFactionBatchChunk(
   const mapRows = db.select().from(worldMap).where(eq(worldMap.novelId, novelId)).all()
   const requestedCount = Math.max(1, Math.min(normalized.count || normalized.batchSize || 1, normalized.batchSize || 1))
   const profile = await buildStoryProfile(novelId)
+  const existingFactionsSummary = summarizeCurrentFactions(currentFactions)
+  const characterSummary = summarizeCurrentCharacters(characterRows)
+  const mapSummary = summarizeMapNodes(mapRows)
+  const reviewContext = buildFactionReviewContext({
+    profile,
+    existingFactions: existingFactionsSummary,
+    characterSummary,
+    mapSummary,
+    options: normalized,
+  })
   const historyEntityType = 'faction'
   const historyTaskType = 'faction_generate_batch'
   const attemptNumber = getAttemptCount(novelId, historyEntityType, null, historyTaskType) + 1
@@ -697,9 +770,9 @@ export async function generateFactionBatchChunk(
     background: profile.background,
     worldSummary: profile.worldRulesSummary,
     storyCore: buildStoryCoreSummary(profile),
-    existingFactions: summarizeCurrentFactions(currentFactions),
-    characterSummary: summarizeCurrentCharacters(characterRows),
-    mapSummary: summarizeMapNodes(mapRows),
+    existingFactions: existingFactionsSummary,
+    characterSummary,
+    mapSummary,
     totalCount: normalized.count,
     batchCount: requestedCount,
     batchIndex,
@@ -739,7 +812,37 @@ export async function generateFactionBatchChunk(
       messages,
       sender: runtime.sender,
       onSuccess: async (rawOutput) => {
-        const parsed = parseGeneratedFactions(rawOutput)
+        const historyId = recordGeneration(novelId, historyEntityType, null, historyTaskType, rawOutput, attemptNumber)
+        const quality = await runAssetQualityLoop({
+          targetType: 'faction',
+          novelId,
+          modelConfigId: novel.modelConfigId || undefined,
+          relatedEntityType: 'novel',
+          relatedEntityId: novelId,
+          parentTaskId: taskId,
+          sender: runtime.sender,
+          contextSummary: reviewContext,
+          generatedOutput: rawOutput,
+          schemaHint: factionSchemaHint(requestedCount),
+          reviewFocus: [
+            '势力不能只剩资料库式设定词，要能直接进入剧情与冲突。',
+            '重点检查模板腔、空泛目标、善恶二元、与人物和地图脱节的问题。',
+          ],
+          rewriteConstraints: [
+            '保持 JSON 数组结构稳定，不要改成说明文。',
+            '保持对象数量不超过当前批次目标，不要擅自扩写成整套百科。',
+          ],
+        })
+        if (quality.stage === 'rejected') {
+          markRejected(historyId)
+          resultPayload = {
+            ids: [],
+            warning: summarizeAssetQualityWarnings(quality) || `第 ${batchIndex}/${totalBatches} 批势力被审校拒收。`,
+          }
+          return resultPayload
+        }
+
+        const parsed = parseGeneratedFactions(quality.finalOutput)
         const createdIds: number[] = []
         const createdNames: string[] = []
 
@@ -753,10 +856,16 @@ export async function generateFactionBatchChunk(
           createdNames.push(nextFaction.name)
         })
 
+        if (createdIds.length === 0) {
+          markRejected(historyId)
+        }
+
         resultPayload = {
           ids: createdIds,
           batchDigest: createdNames.slice(0, 3).join('、'),
-          warning: createdIds.length > 0 ? '' : `第 ${batchIndex}/${totalBatches} 批没有生成可保存的势力。`,
+          warning: createdIds.length > 0
+            ? (summarizeAssetQualityWarnings(quality) || '')
+            : (summarizeAssetQualityWarnings(quality) || `第 ${batchIndex}/${totalBatches} 批没有生成可保存的势力。`),
         }
         return resultPayload
       },
@@ -770,18 +879,7 @@ export async function generateFactionBatchChunk(
       updateTask(runtime.parentTaskId, { currentChildTaskId: null })
     }
   }
-
-  const historyId = recordGeneration(
-    novelId,
-    historyEntityType,
-    null,
-    historyTaskType,
-    resultPayload.batchDigest || JSON.stringify(resultPayload.ids),
-    attemptNumber,
-  )
-  if (resultPayload.ids.length === 0) {
-    markRejected(historyId)
-  } else {
+  if (resultPayload.ids.length > 0) {
     markNovelContextChanged(novelId, 'Factions changed')
   }
   return resultPayload

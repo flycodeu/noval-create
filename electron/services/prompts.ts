@@ -683,6 +683,8 @@ function assetTargetLabel(targetType: AssetReviewTarget): string {
   switch (targetType) {
     case 'character':
       return '人物资产'
+    case 'faction':
+      return '势力资产'
     case 'item':
       return '物品资产'
     case 'thread':

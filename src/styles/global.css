@@ -1398,6 +1398,126 @@ html[data-theme="light"] .ant-dropdown-menu {
   line-height: 1.75;
 }
 
+.novel-freshness-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.novel-freshness-meta span {
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(122, 93, 52, 0.12);
+  color: rgba(86, 63, 35, 0.82);
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.novel-freshness-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.novel-freshness-grid--compact {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.novel-freshness-card {
+  display: grid;
+  gap: 10px;
+  min-height: 220px;
+  padding: 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(122, 93, 52, 0.12);
+  background:
+    radial-gradient(circle at top right, rgba(246, 202, 124, 0.16), transparent 32%),
+    rgba(255, 255, 255, 0.76);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+
+.novel-freshness-card--ok {
+  border-color: rgba(92, 128, 95, 0.22);
+  background:
+    radial-gradient(circle at top right, rgba(121, 182, 104, 0.16), transparent 34%),
+    rgba(244, 251, 242, 0.86);
+}
+
+.novel-freshness-card--warn {
+  border-color: rgba(188, 108, 37, 0.24);
+  background:
+    radial-gradient(circle at top right, rgba(188, 108, 37, 0.18), transparent 34%),
+    rgba(255, 248, 239, 0.9);
+}
+
+.novel-freshness-card--stale {
+  border-color: rgba(176, 68, 56, 0.24);
+  background:
+    radial-gradient(circle at top right, rgba(176, 68, 56, 0.16), transparent 34%),
+    rgba(255, 244, 242, 0.92);
+}
+
+.novel-freshness-card__title {
+  color: rgba(86, 63, 35, 0.78);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.novel-freshness-card--ok .novel-freshness-card__title {
+  color: rgba(58, 104, 61, 0.86);
+}
+
+.novel-freshness-card--warn .novel-freshness-card__title,
+.novel-freshness-card--warn .novel-freshness-card__hint {
+  color: #9a5a13;
+}
+
+.novel-freshness-card--stale .novel-freshness-card__title,
+.novel-freshness-card--stale .novel-freshness-card__hint {
+  color: #a23f34;
+}
+
+.novel-freshness-card__value {
+  display: block;
+  color: var(--workspace-ink);
+  font-size: 28px;
+  line-height: 1.15;
+}
+
+.novel-freshness-card__desc {
+  color: var(--workspace-ink-soft);
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+.novel-freshness-card__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.novel-freshness-card__tag {
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(122, 93, 52, 0.08);
+  color: rgba(86, 63, 35, 0.86);
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.novel-freshness-card__hint {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid rgba(122, 93, 52, 0.1);
+  color: rgba(141, 76, 16, 0.92);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.75;
+}
+
 .novel-stage-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -4064,6 +4184,55 @@ html[data-theme="dark"] .ant-card-actions > li {
 .task-center-detail {
   display: grid;
   gap: 16px;
+}
+
+.task-context-health-card {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(122, 93, 52, 0.14);
+  background:
+    linear-gradient(180deg, rgba(246, 202, 124, 0.1), rgba(255, 255, 255, 0.72)),
+    rgba(255, 255, 255, 0.72);
+}
+
+.task-context-health-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.task-context-health-card__title {
+  color: var(--workspace-ink);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.task-context-health-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.task-context-health-card__meta span {
+  padding: 7px 11px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.64);
+  border: 1px solid rgba(122, 93, 52, 0.12);
+  color: rgba(86, 63, 35, 0.8);
+  font-size: 12px;
+}
+
+.task-context-health-card__recovery {
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(122, 93, 52, 0.08);
+  color: var(--workspace-ink-soft);
+  font-size: 13px;
+  line-height: 1.75;
 }
 
 .task-center-detail__actions {
@@ -7679,17 +7848,17 @@ html[data-theme="dark"] .ant-card-actions > li {
   position: sticky;
   top: 0;
   align-self: start;
-  height: calc(100dvh - 2px);
-  max-height: calc(100dvh - 2px);
-  min-height: calc(100dvh - 2px);
+  height: 100dvh;
+  max-height: 100dvh;
+  min-height: 100dvh;
   overflow: hidden;
-  gap: 10px;
-  padding: 12px 14px 14px;
+  gap: 14px;
+  padding: 18px 16px 18px;
 }
 
 .novel-sidebar__title-block {
   display: grid;
-  gap: 4px;
+  gap: 8px;
   padding: 0 2px;
 }
 
@@ -7720,24 +7889,24 @@ html[data-theme="dark"] .ant-card-actions > li {
 }
 
 .novel-sidebar__title {
-  font-size: 22px;
-  line-height: 1.12;
+  font-size: 24px;
+  line-height: 1.16;
 }
 
 .novel-sidebar__summary-copy {
   color: rgba(248, 241, 230, 0.84);
-  font-size: 10.5px;
-  line-height: 1.45;
+  font-size: 11.5px;
+  line-height: 1.6;
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 1;
+  -webkit-line-clamp: 2;
 }
 
 .novel-sidebar__progress-card {
   display: grid;
-  gap: 6px;
-  padding: 10px 12px;
+  gap: 10px;
+  padding: 14px 14px;
   border: 1px solid rgba(240, 217, 176, 0.76);
   border-radius: 16px;
   background:
@@ -7762,28 +7931,29 @@ html[data-theme="dark"] .ant-card-actions > li {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  gap: 10px;
+  gap: 14px;
   padding-right: 2px;
-  padding-bottom: 12px;
+  padding-bottom: 18px;
 }
 
 .novel-sidebar__group-list {
-  gap: 7px;
+  gap: 10px;
 }
 
 .novel-sidebar__group-title {
   margin: 0 4px;
   color: rgba(255, 230, 177, 0.74);
-  font-size: 10px;
+  font-size: 10.5px;
   letter-spacing: 0.12em;
 }
 
 .novel-sidebar__nav-item {
   grid-template-columns: 18px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
-  padding: 10px 12px 10px 14px;
-  border-radius: 14px;
+  gap: 12px;
+  min-height: 52px;
+  padding: 12px 14px 12px 16px;
+  border-radius: 16px;
 }
 
 .novel-sidebar__nav-copy {
@@ -7791,7 +7961,7 @@ html[data-theme="dark"] .ant-card-actions > li {
 }
 
 .novel-sidebar__nav-copy strong {
-  font-size: 12.5px;
+  font-size: 13.5px;
 }
 
 .novel-sidebar__nav-copy small {
@@ -7802,7 +7972,7 @@ html[data-theme="dark"] .ant-card-actions > li {
   align-self: center;
   justify-self: end;
   min-width: 48px;
-  padding: 4px 8px;
+  padding: 5px 9px;
   border: 1px solid rgba(240, 217, 176, 0.72);
   border-radius: 999px;
   background: linear-gradient(180deg, rgba(247, 240, 226, 0.96), rgba(240, 229, 208, 0.96));
@@ -7911,6 +8081,10 @@ html[data-theme="dark"] .ant-card-actions > li {
   padding: 22px 20px 30px;
 }
 
+.novel-panel__desc {
+  display: none !important;
+}
+
 @media (max-width: 1180px) {
   .novel-route-shell,
   .novel-route-shell--single {
@@ -7925,9 +8099,9 @@ html[data-theme="dark"] .ant-card-actions > li {
 
 @media (max-height: 880px) {
   .novel-route-shell__sidebar {
-    height: calc(100dvh - 4px);
-    max-height: calc(100dvh - 4px);
-    min-height: calc(100dvh - 4px);
+    height: 100dvh;
+    max-height: 100dvh;
+    min-height: 100dvh;
   }
 
   .novel-sidebar__summary-copy {

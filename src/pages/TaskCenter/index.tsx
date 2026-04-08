@@ -10,7 +10,7 @@ import {
   StopOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
-import { AssetReviewObservability, PagedResult, Task, TaskQueryInput, TaskStats } from '../../types'
+import { AssetReviewObservability, NovelContextStatus, PagedResult, Task, TaskQueryInput, TaskStats } from '../../types'
 import { useTaskStore } from '../../stores/task.store'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { buildTaskRecoveryAction } from '../Novel/shared/workspace-navigation'
@@ -54,6 +54,7 @@ const STATUS_LABELS: Record<string, { label: string; color: string; icon: React.
 const TYPE_LABELS: Record<string, string> = {
   init: '初始化',
   character_gen: 'AI 生成人物',
+  faction_generate: 'AI 生成势力',
   chapter_scene_plan: 'AI 场景规划',
   chapter_draft: 'AI 草稿生成',
   chapter_outline: 'AI 章节细纲',
@@ -67,6 +68,7 @@ const TYPE_LABELS: Record<string, string> = {
   generate_relations: 'AI 生成人物关系',
   generate_map: 'AI 生成地图',
   map_auto_generate: 'AI 自动生成地图',
+  faction_auto_generate: 'AI 自动生成势力',
   generate_arcs: 'AI 生成故事弧',
   generate_items: 'AI 生成物品',
   item_auto_generate: 'AI 自动生成物品',
@@ -93,6 +95,7 @@ const RUNNER_LABELS: Record<string, string> = {
 }
 
 const RESUMABLE_WORKFLOW_TYPES = new Set([
+  'faction_auto_generate',
   'map_auto_generate',
   'world_rules_auto_generate',
   'character_auto_generate',
@@ -130,6 +133,57 @@ function getTaskRunnerLabel(task: Task): string {
   return RUNNER_LABELS[task.runnerType || 'chat'] || (task.runnerType || 'chat')
 }
 
+function getAssetReviewTargetLabel(value?: string): string {
+  switch (value) {
+    case 'character':
+      return '人物资产'
+    case 'faction':
+      return '势力资产'
+    case 'item':
+      return '物品资产'
+    case 'thread':
+      return '故事线程'
+    case 'timeline':
+      return '时间轴事件'
+    case 'subplot':
+      return '支线资产'
+    case 'map':
+      return '地图资产'
+    case 'world_rules':
+      return '世界规则分区'
+    default:
+      return value || '故事资产'
+  }
+}
+
+function getAssetReviewStageLabel(value?: string): string {
+  switch (value) {
+    case 'drafted':
+      return '已拿到初稿'
+    case 'reviewed':
+      return '已完成审校'
+    case 'rewritten':
+      return '正在重写'
+    case 'accepted':
+      return '已通过'
+    default:
+      return value || '未知阶段'
+  }
+}
+
+function getReviewSeverityLabel(value?: string): string {
+  switch (value) {
+    case 'high':
+      return '高'
+    case 'medium':
+      return '中'
+    case 'low':
+      return '低'
+    default:
+      return value || '未知'
+  }
+}
+
 function isTaskRetryable(task: Task): boolean {
   if (task.runnerType === 'workflow') return false
   if (task.type === 'chapter_write' && task.relatedEntityType === 'chapter' && task.relatedEntityId) return true
@@ -155,6 +209,11 @@ function getTaskSummary(task: Task, stream?: { content: string }): string {
   return '这条任务还没有可直接查看的结果摘要。'
 }
 
+function getFreshnessTags(labels: string[], visibleCount = 2) {
+  if (labels.length <= visibleCount) return labels
+  return [...labels.slice(0, visibleCount), `+${labels.length - visibleCount}`]
+}
+
 export default function TaskCenter() {
   const navigate = useNavigate()
   const loadVersionRef = useRef(0)
@@ -167,6 +226,7 @@ export default function TaskCenter() {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [selectedId, setSelectedId] = useState<number | null>(null)
+  const [selectedContextStatus, setSelectedContextStatus] = useState<NovelContextStatus | null>(null)
   const { streams, clearStream } = useTaskStore()
 
   const buildTaskQueryInput = useCallback((overrides: Partial<TaskQueryInput> = {}): TaskQueryInput => ({
@@ -239,6 +299,99 @@ export default function TaskCenter() {
     [selectedTask],
   )
   const selectedStream = selectedTask ? streams[selectedTask.id] : undefined
+  const isPausedWorkflowTask = Boolean(selectedTask && selectedTask.runnerType === 'workflow' && selectedTask.status === 'paused')
+  const selectedStaleAssetTags = getFreshnessTags(selectedContextStatus?.staleAssetLabels || [])
+  const selectedFreshnessCards = selectedTask?.novelId
+    ? [
+        {
+          title: '章节同步',
+          value: selectedContextStatus
+            ? selectedContextStatus.staleChapterCount > 0
+              ? `${selectedContextStatus.staleChapterCount} 章待同步`
+              : selectedContextStatus.totalChapterCount > 0
+                ? `已同步到第 ${selectedContextStatus.totalChapterCount} 章`
+                : '尚未生成章节'
+            : '加载中',
+          desc: selectedContextStatus
+            ? selectedContextStatus.staleChapterCount > 0
+              ? '当前任务关联小说里仍有章节挂着旧上下文。'
+              : '当前正文与最新设定保持一致。'
+            : '正在读取当前小说的章节同步状态。',
+          hint: selectedContextStatus
+            ? selectedContextStatus.staleChapterCount > 0
+              ? '继续相关任务前，建议先去修订中心或正文页回查。'
+              : '章节层不需要额外回补，可以继续当前任务。'
+            : '稍后会自动补全建议。',
+          tone: selectedContextStatus?.staleChapterCount ? 'stale' : 'ok',
+          tags: [] as string[],
+        },
+        {
+          title: '记忆检查点',
+          value: selectedContextStatus
+            ? selectedContextStatus.staleCheckpointCount > 0
+              ? `${selectedContextStatus.staleCheckpointCount} 份待刷新`
+              : '检查点已同步'
+            : '加载中',
+          desc: selectedContextStatus
+            ? selectedContextStatus.staleCheckpointCount > 0
+              ? '长期记忆还是旧版本，恢复流程后会继续引用旧长程记忆。'
+              : '长期记忆检查点已跟上当前设定。'
+            : '正在读取长期记忆检查点状态。',
+          hint: selectedContextStatus
+            ? selectedContextStatus.staleCheckpointCount > 0
+              ? '建议先刷新故事记忆，再继续后台流程。'
+              : '当前可以直接继续恢复或查看后续结果。'
+            : '稍后会自动补全建议。',
+          tone: selectedContextStatus?.staleCheckpointCount
+            ? (isPausedWorkflowTask ? 'stale' : 'warn')
+            : 'ok',
+          tags: [] as string[],
+        },
+        {
+          title: '资产校准',
+          value: selectedContextStatus
+            ? selectedContextStatus.staleAssetCount > 0
+              ? `${selectedContextStatus.staleAssetCount} 类待校准`
+              : '资产状态最新'
+            : '加载中',
+          desc: selectedContextStatus
+            ? selectedContextStatus.staleAssetCount > 0
+              ? '相关世界资产可能还挂着旧设定，继续流程会把旧资产带进后续结果。'
+              : '关键世界资产没有发现明显的设定滞后。'
+            : '正在读取资产新鲜度状态。',
+          hint: selectedContextStatus
+            ? selectedContextStatus.staleAssetCount > 0
+              ? '建议先回到对应页面重生成或手动校准。'
+              : '当前资产层可以继续支撑该任务。'
+            : '稍后会自动补全建议。',
+          tone: selectedContextStatus?.staleAssetCount
+            ? (isPausedWorkflowTask ? 'stale' : 'warn')
+            : 'ok',
+          tags: selectedContextStatus?.staleAssetCount ? selectedStaleAssetTags : [],
+        },
+      ]
+    : []
+
+  useEffect(() => {
+    let active = true
+    const novelId = selectedTask?.novelId
+    if (!novelId) {
+      setSelectedContextStatus(null)
+      return () => {
+        active = false
+      }
+    }
+
+    void window.electron.novel.getContextStatus(novelId).then((status) => {
+      if (active) setSelectedContextStatus(status)
+    }).catch(() => {
+      if (active) setSelectedContextStatus(null)
+    })
+
+    return () => {
+      active = false
+    }
+  }, [selectedTask?.novelId, selectedTask?.updatedAt])
 
   const handleStatusFilterChange = (value: 'all' | Task['status']) => {
     setStatusFilter(value)
@@ -378,10 +531,10 @@ export default function TaskCenter() {
       Array.isArray(draft?.warnings) && draft.warnings.length > 0 ? `生成提醒：${draft.warnings.join('；')}` : '',
       Array.isArray(draft?.lintWarnings) && draft.lintWarnings.length > 0 ? `语言 lint：${draft.lintWarnings.join('；')}` : '',
       Array.isArray(draft?.diffSummary) && draft.diffSummary.length > 0 ? `人工修改差异：${draft.diffSummary.join('；')}` : '',
-      assetReview?.targetType ? `资产类型：${assetReview.targetType}` : '',
-      assetReview?.stage ? `质检阶段：${assetReview.stage}` : '',
+      assetReview?.targetType ? `资产类型：${getAssetReviewTargetLabel(assetReview.targetType)}` : '',
+      assetReview?.stage ? `质检阶段：${getAssetReviewStageLabel(assetReview.stage)}` : '',
       assetReview?.reviewSummary ? `质检结论：${assetReview.reviewSummary}` : '',
-      assetReview?.severity ? `风险等级：${assetReview.severity}` : '',
+      assetReview?.severity ? `风险等级：${getReviewSeverityLabel(assetReview.severity)}` : '',
       Array.isArray(assetReview?.topFixes) && assetReview.topFixes.length > 0 ? `优先修法：${assetReview.topFixes.join('；')}` : '',
       Array.isArray(assetReview?.risks) && assetReview.risks.length > 0 ? `质检风险：${assetReview.risks.join('；')}` : '',
       Array.isArray(assetReview?.warnings) && assetReview.warnings.length > 0 ? `质检备注：${assetReview.warnings.join('；')}` : '',
@@ -607,6 +760,24 @@ export default function TaskCenter() {
                 />
               ) : null}
 
+              {selectedTask.runnerType === 'workflow' && selectedTask.status === 'paused' && selectedContextStatus?.staleCheckpointCount ? (
+                <Alert
+                  type="warning"
+                  showIcon
+                  message="恢复前建议先刷新故事记忆"
+                  description={`当前有 ${selectedContextStatus.staleCheckpointCount} 份长期记忆检查点待刷新。直接继续后台流程，会沿用旧的长程记忆。`}
+                />
+              ) : null}
+
+              {selectedTask.runnerType === 'workflow' && selectedTask.status === 'paused' && selectedContextStatus?.staleAssetCount ? (
+                <Alert
+                  type="warning"
+                  showIcon
+                  message="恢复前建议先校准相关世界资产"
+                  description={`这些资产可能还挂着旧设定：${selectedContextStatus.staleAssetLabels.join('、')}。直接继续流程会把旧资产继续写进后续结果。`}
+                />
+              ) : null}
+
               <div className="novel-note-list">
                 <div className="novel-note-list__item">{`任务 ID：${selectedTask.id}`}</div>
                 <div className="novel-note-list__item">{`执行方式：${getTaskRunnerLabel(selectedTask)}`}</div>
@@ -615,6 +786,42 @@ export default function TaskCenter() {
                 <div className="novel-note-list__item">{`耗时：${selectedTask.durationMs ? `${(selectedTask.durationMs / 1000).toFixed(1)}s` : '-'}`}</div>
                 <div className="novel-note-list__item">{`Token 消耗：${selectedTask.tokensUsed || '-'}`}</div>
               </div>
+
+              {selectedTask.novelId ? (
+                <div className="task-context-health-card">
+                  <div className="task-context-health-card__head">
+                    <div className="task-context-health-card__title">上下文健康</div>
+                    <div className="task-context-health-card__meta">
+                      <span>{`上下文版本 v${selectedContextStatus?.contextVersion ?? '--'}`}</span>
+                      <span>{selectedContextStatus?.totalChapterCount ? `已纳入 ${selectedContextStatus.totalChapterCount} 章正文` : '尚未生成正文章节'}</span>
+                    </div>
+                  </div>
+                  <div className="novel-freshness-grid novel-freshness-grid--compact">
+                    {selectedFreshnessCards.map((card) => (
+                      <section key={card.title} className={`novel-freshness-card novel-freshness-card--${card.tone}`}>
+                        <div className="novel-freshness-card__title">{card.title}</div>
+                        <strong className="novel-freshness-card__value">{card.value}</strong>
+                        <div className="novel-freshness-card__desc">{card.desc}</div>
+                        {card.tags.length > 0 ? (
+                          <div className="novel-freshness-card__tags">
+                            {card.tags.map((tag) => (
+                              <span key={`${card.title}-${tag}`} className="novel-freshness-card__tag">{tag}</span>
+                            ))}
+                          </div>
+                        ) : null}
+                        <div className="novel-freshness-card__hint">{card.hint}</div>
+                      </section>
+                    ))}
+                  </div>
+                  {isPausedWorkflowTask ? (
+                    <div className="task-context-health-card__recovery">
+                      {selectedContextStatus?.staleCheckpointCount || selectedContextStatus?.staleAssetCount || selectedContextStatus?.staleChapterCount
+                        ? '当前流程已暂停，恢复前最好先处理上面的滞后项，避免继续沿用旧上下文。'
+                        : '当前流程已暂停，但上下文仍稳定，可以直接恢复继续执行。'}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
 
               <Collapse
                 items={detailSections}

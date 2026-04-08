@@ -28,6 +28,41 @@ export interface FactionExternalRelation {
   note?: string
 }
 
+export const FACTION_TYPE_OPTIONS: Array<{ value: FactionType; label: string }> = [
+  { value: 'organization', label: '组织' },
+  { value: 'faction', label: '阵营' },
+  { value: 'family', label: '家族' },
+  { value: 'sect', label: '宗门' },
+  { value: 'company', label: '商会/公司' },
+  { value: 'government', label: '政权/机构' },
+  { value: 'other', label: '其他势力' },
+]
+
+const FACTION_TYPE_ALIASES: Record<string, FactionType> = {
+  organization: 'organization',
+  '组织': 'organization',
+  '组织势力': 'organization',
+  faction: 'faction',
+  '阵营': 'faction',
+  '势力': 'faction',
+  family: 'family',
+  '家族': 'family',
+  sect: 'sect',
+  '宗门': 'sect',
+  '门派': 'sect',
+  company: 'company',
+  '商会': 'company',
+  '公司': 'company',
+  '商会/公司': 'company',
+  government: 'government',
+  '政权': 'government',
+  '机构': 'government',
+  '政权/机构': 'government',
+  other: 'other',
+  '其他': 'other',
+  '其他势力': 'other',
+}
+
 export const FACTION_RELATION_TYPE_OPTIONS: Array<{ value: FactionRelationType; label: string; color: string }> = [
   { value: 'ally', label: '盟友', color: '#1f7a63' },
   { value: 'enemy', label: '敌对', color: '#b14949' },
@@ -42,6 +77,16 @@ export const FACTION_RELATION_TYPE_OPTIONS: Array<{ value: FactionRelationType; 
   { value: 'protects', label: '庇护', color: '#4d8a70' },
   { value: 'infiltrates', label: '渗透', color: '#7d5f92' },
 ]
+
+export const FACTION_RELATIONSHIP_DENSITY_OPTIONS: Array<{ value: 'sparse' | 'balanced' | 'dense'; label: string }> = [
+  { value: 'sparse', label: '克制' },
+  { value: 'balanced', label: '均衡' },
+  { value: 'dense', label: '高密度' },
+]
+
+function isFactionType(value: string): value is FactionType {
+  return FACTION_TYPE_OPTIONS.some((item) => item.value === value)
+}
 
 function isFactionRelationType(value: string): value is FactionRelationType {
   return FACTION_RELATION_TYPE_OPTIONS.some((item) => item.value === value)
@@ -99,10 +144,29 @@ export function buildFactionExternalRelationsPayload(relations: FactionExternalR
   )
 }
 
+export function getFactionTypeLabel(value?: string | null): string {
+  return FACTION_TYPE_OPTIONS.find((item) => item.value === value)?.label || value || '未命名势力类型'
+}
+
+export function normalizeFactionTypeValue(value?: string | null, fallback: FactionType = 'faction'): FactionType {
+  const text = asText(value).toLowerCase()
+  return FACTION_TYPE_ALIASES[text] || fallback
+}
+
+export function formatFactionTypeForPrompt(value?: string | null): string {
+  if (!value) return ''
+  const normalized = normalizeFactionTypeValue(value, 'faction')
+  return `${getFactionTypeLabel(normalized)}（${normalized}）`
+}
+
 export function getFactionRelationLabel(value?: string | null): string {
   return FACTION_RELATION_TYPE_OPTIONS.find((item) => item.value === value)?.label || value || '未命名关系'
 }
 
 export function getFactionRelationColor(value?: string | null): string {
   return FACTION_RELATION_TYPE_OPTIONS.find((item) => item.value === value)?.color || '#8a6f54'
+}
+
+export function getFactionRelationshipDensityLabel(value?: string | null): string {
+  return FACTION_RELATIONSHIP_DENSITY_OPTIONS.find((item) => item.value === value)?.label || value || '未命名密度'
 }

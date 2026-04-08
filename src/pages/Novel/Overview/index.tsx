@@ -483,7 +483,7 @@ export default function Overview({ novelId }: Props) {
                 })
                 const first = Array.isArray(outputs) ? outputs[0] : ''
                 if (!first) return
-                const parsed = JSON.parse(first) as Partial<PackagingDraft>
+                const parsed = parseDraftJson<PackagingDraft>(first)
                 setPackagingDraft((current) => ({
                   titleCandidates: Array.isArray(parsed.titleCandidates)
                     ? parsed.titleCandidates.filter((item): item is string => typeof item === 'string')
@@ -511,7 +511,7 @@ export default function Overview({ novelId }: Props) {
       >
         <div className="guided-step__field-grid">
           <div className="guided-step__field-card guided-step__field-card--full">
-            <div className="novel-panel__desc" style={{ marginBottom: 8 }}>书名候选</div>
+            <strong style={{ display: 'block', marginBottom: 8, color: 'var(--workspace-ink)' }}>书名候选</strong>
             <Select
               mode="tags"
               value={packagingDraft.titleCandidates}
@@ -521,7 +521,7 @@ export default function Overview({ novelId }: Props) {
             />
           </div>
           <div className="guided-step__field-card guided-step__field-card--full">
-            <div className="novel-panel__desc" style={{ marginBottom: 8 }}>一句话钩子</div>
+            <strong style={{ display: 'block', marginBottom: 8, color: 'var(--workspace-ink)' }}>一句话钩子</strong>
             <Input.TextArea
               rows={3}
               value={packagingDraft.oneLineHook}
@@ -530,7 +530,7 @@ export default function Overview({ novelId }: Props) {
             />
           </div>
           <div className="guided-step__field-card">
-            <div className="novel-panel__desc" style={{ marginBottom: 8 }}>起点版简介</div>
+            <strong style={{ display: 'block', marginBottom: 8, color: 'var(--workspace-ink)' }}>起点版简介</strong>
             <Input.TextArea
               rows={6}
               value={packagingDraft.platformBlurbs.qidian}
@@ -541,7 +541,7 @@ export default function Overview({ novelId }: Props) {
             />
           </div>
           <div className="guided-step__field-card">
-            <div className="novel-panel__desc" style={{ marginBottom: 8 }}>番茄版简介</div>
+            <strong style={{ display: 'block', marginBottom: 8, color: 'var(--workspace-ink)' }}>番茄版简介</strong>
             <Input.TextArea
               rows={6}
               value={packagingDraft.platformBlurbs.tomato}
@@ -552,7 +552,7 @@ export default function Overview({ novelId }: Props) {
             />
           </div>
           <div className="guided-step__field-card guided-step__field-card--full">
-            <div className="novel-panel__desc" style={{ marginBottom: 8 }}>出版版简介</div>
+            <strong style={{ display: 'block', marginBottom: 8, color: 'var(--workspace-ink)' }}>出版版简介</strong>
             <Input.TextArea
               rows={4}
               value={packagingDraft.platformBlurbs.publishing}
@@ -563,7 +563,7 @@ export default function Overview({ novelId }: Props) {
             />
           </div>
           <div className="guided-step__field-card guided-step__field-card--full">
-            <div className="novel-panel__desc" style={{ marginBottom: 8 }}>卷名风格</div>
+            <strong style={{ display: 'block', marginBottom: 8, color: 'var(--workspace-ink)' }}>卷名风格</strong>
             <Input.TextArea
               rows={3}
               value={packagingDraft.volumeNamingStyle}

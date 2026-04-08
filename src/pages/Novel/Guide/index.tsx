@@ -95,6 +95,11 @@ function getHealthTone(score: number) {
   return '先修关键冲突'
 }
 
+function getFreshnessTags(labels: string[], visibleCount = 2) {
+  if (labels.length <= visibleCount) return labels
+  return [...labels.slice(0, visibleCount), `+${labels.length - visibleCount}`]
+}
+
 export default function GuidePage({ novelId }: Props) {
   const navigate = useNavigate()
   const { currentNovel, setCurrentNovel } = useNovelStore()
@@ -363,11 +368,59 @@ export default function GuidePage({ novelId }: Props) {
     + characterPreset.supportingCount
     + characterPreset.minorCount
   const staleChapterCount = contextStatus?.staleChapterCount || 0
+  const staleCheckpointCount = contextStatus?.staleCheckpointCount || 0
+  const staleAssetCount = contextStatus?.staleAssetCount || 0
+  const staleAssetLabels = contextStatus?.staleAssetLabels || []
+  const staleAssetTagList = getFreshnessTags(staleAssetLabels)
   const writingContractLabel = formatWritingContractTags(themeVoice.writingContractTags) || '待设定'
   const protagonistRelationCount = consistencyReport?.metrics.protagonistRelationCount || 0
   const styledRelationCount = consistencyReport?.metrics.styledRelationCount || 0
   const subtextRelationCount = consistencyReport?.metrics.subtextRelationCount || 0
   const ratedRelationCount = consistencyReport?.metrics.ratedRelationCount || 0
+  const freshnessCards = contextStatus
+    ? [
+        {
+          title: '章节同步',
+          value: staleChapterCount > 0
+            ? `${staleChapterCount} 章待同步`
+            : contextStatus.totalChapterCount > 0
+              ? `已同步到第 ${contextStatus.totalChapterCount} 章`
+              : '尚未生成章节',
+          desc: staleChapterCount > 0
+            ? '最近的设定或结构变更已经影响现有章节承接。'
+            : '当前正文与最新设定保持一致，可以继续推进。',
+          hint: staleChapterCount > 0
+            ? '建议先去修订中心或正文页回查这些章节。'
+            : '继续批量生成前，不需要额外回补章节上下文。',
+          tone: staleChapterCount > 0 ? 'stale' : 'ok',
+          tags: [] as string[],
+        },
+        {
+          title: '记忆检查点',
+          value: staleCheckpointCount > 0 ? `${staleCheckpointCount} 份待刷新` : '检查点已同步',
+          desc: staleCheckpointCount > 0
+            ? '长期记忆检查点还是旧版本，后续大纲和正文会继续引用旧长程记忆。'
+            : '长期记忆检查点已跟上当前设定，不会继续放大长程失忆。',
+          hint: staleCheckpointCount > 0
+            ? '建议先刷新故事记忆，再继续跑大纲、时间轴或正文。'
+            : '可以直接继续推进后续编排和生成。',
+          tone: staleCheckpointCount > 0 ? 'warn' : 'ok',
+          tags: [] as string[],
+        },
+        {
+          title: '资产校准',
+          value: staleAssetCount > 0 ? `${staleAssetCount} 类待校准` : '资产状态最新',
+          desc: staleAssetCount > 0
+            ? '部分世界资产仍挂着旧设定，会持续污染后续时间轴、故事弧和正文。'
+            : '关键世界资产没有发现明显的设定滞后。',
+          hint: staleAssetCount > 0
+            ? '建议先回到对应页面重生成或手动校准。'
+            : '当前资产层可以继续支撑后续生成。',
+          tone: staleAssetCount > 0 ? 'warn' : 'ok',
+          tags: staleAssetCount > 0 ? staleAssetTagList : [],
+        },
+      ]
+    : []
 
   const steps: StepConfig[] = [
     {
@@ -661,6 +714,8 @@ export default function GuidePage({ novelId }: Props) {
               value: TIME_MODE_LABELS[worldRules.timelineConfig.calendarType] || worldRules.timelineConfig.calendarType,
             },
             { label: '待同步章节', value: staleChapterCount > 0 ? `${staleChapterCount} 章` : '全部最新' },
+            { label: '记忆检查点', value: staleCheckpointCount > 0 ? `${staleCheckpointCount} 份待刷新` : '已同步' },
+            { label: '资产新鲜度', value: staleAssetCount > 0 ? `${staleAssetCount} 类待校准` : '资产稳定' },
           ]}
         />
       )}
@@ -703,15 +758,26 @@ export default function GuidePage({ novelId }: Props) {
               title="上下文同步"
               description="当核心设定、世界规则、人物、地图、物品、线程、时间轴或大纲发生变化时，受影响章节会被标记为待同步。"
             >
-              <div className="novel-note-list">
-                <div className="novel-note-list__item">{`当前上下文版本：v${contextStatus.contextVersion}`}</div>
-                <div className="novel-note-list__item">{`章节总数：${contextStatus.totalChapterCount}`}</div>
-                <div className="novel-note-list__item">{`待同步章节：${contextStatus.staleChapterCount}`}</div>
-                <div className="novel-note-list__item">
-                  {contextStatus.staleChapterCount > 0
-                    ? '建议先去修订中心或正文页回查受影响章节，再继续批量生成后续内容。'
-                    : '当前章节上下文与最新设定保持一致，可以继续推进。'}
-                </div>
+              <div className="novel-freshness-meta">
+                <span>{`当前上下文版本 v${contextStatus.contextVersion}`}</span>
+                <span>{contextStatus.totalChapterCount > 0 ? `已纳入 ${contextStatus.totalChapterCount} 章正文` : '尚未生成正文章节'}</span>
+              </div>
+              <div className="novel-freshness-grid">
+                {freshnessCards.map((card) => (
+                  <section key={card.title} className={`novel-freshness-card novel-freshness-card--${card.tone}`}>
+                    <div className="novel-freshness-card__title">{card.title}</div>
+                    <strong className="novel-freshness-card__value">{card.value}</strong>
+                    <div className="novel-freshness-card__desc">{card.desc}</div>
+                    {card.tags.length > 0 ? (
+                      <div className="novel-freshness-card__tags">
+                        {card.tags.map((tag) => (
+                          <span key={`${card.title}-${tag}`} className="novel-freshness-card__tag">{tag}</span>
+                        ))}
+                      </div>
+                    ) : null}
+                    <div className="novel-freshness-card__hint">{card.hint}</div>
+                  </section>
+                ))}
               </div>
             </WorkspacePanel>
           )}
@@ -771,6 +837,26 @@ export default function GuidePage({ novelId }: Props) {
           showIcon
           message={`有 ${contextStatus.staleChapterCount} 章需要重新同步上下文`}
           description="最近的设定或结构变更已经影响到现有章节。继续批量生成前，建议先回到修订中心或正文页处理这些章节，避免后续文本承接旧设定。"
+        />
+      )}
+
+      {contextStatus && contextStatus.staleCheckpointCount > 0 && (
+        <Alert
+          className="novel-guide__alert"
+          type="warning"
+          showIcon
+          message={`有 ${contextStatus.staleCheckpointCount} 份长期记忆检查点待刷新`}
+          description="检查点还是旧版本时，后续大纲、时间轴和正文会继续引用过期的长程记忆。建议先刷新故事记忆，再继续批量推进。"
+        />
+      )}
+
+      {contextStatus && contextStatus.staleAssetCount > 0 && (
+        <Alert
+          className="novel-guide__alert"
+          type="warning"
+          showIcon
+          message={`这些世界资产可能还挂着旧设定：${contextStatus.staleAssetLabels.join('、')}`}
+          description="这类资产过期不会只影响展示，它会继续污染后续大纲、时间轴和正文生成。建议先回到对应页面校准或重生成。"
         />
       )}
 

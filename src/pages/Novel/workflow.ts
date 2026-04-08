@@ -68,6 +68,9 @@ export interface WorkflowStats {
   totalWords: number
   staleChapterCount: number
   contextVersion: number
+  staleCheckpointCount: number
+  staleAssetCount: number
+  staleAssetLabels: string[]
   hasProtagonist: boolean
   volumeCount: number
 }
@@ -125,6 +128,9 @@ export const EMPTY_WORKFLOW_STATS: WorkflowStats = {
   totalWords: 0,
   staleChapterCount: 0,
   contextVersion: 1,
+  staleCheckpointCount: 0,
+  staleAssetCount: 0,
+  staleAssetLabels: [],
   hasProtagonist: false,
   volumeCount: 0,
 }
@@ -164,6 +170,9 @@ export async function loadWorkflowStats(novelId: number): Promise<WorkflowStats>
     totalWords: baseStats.totalWords,
     staleChapterCount: contextStatus.staleChapterCount,
     contextVersion: contextStatus.contextVersion,
+    staleCheckpointCount: contextStatus.staleCheckpointCount,
+    staleAssetCount: contextStatus.staleAssetCount,
+    staleAssetLabels: contextStatus.staleAssetLabels,
     hasProtagonist: characterStats.protagonistCount > 0,
     volumeCount: Array.isArray(volumes) ? volumes.length : 0,
   }
@@ -475,6 +484,20 @@ export function getWorkflowBlockers(
     )
   }
 
+  const requireFreshAssets = (action: string) => {
+    pushIfMissing(
+      stats.staleAssetCount <= 0,
+      `这些世界资产可能还挂着旧设定：${stats.staleAssetLabels.join('、')}。建议先重新生成或手动校准，再${action}。`,
+    )
+  }
+
+  const requireFreshStoryMemory = (action: string) => {
+    pushIfMissing(
+      stats.staleCheckpointCount <= 0,
+      `当前有 ${stats.staleCheckpointCount} 份长期记忆检查点待刷新，请先同步故事记忆，再${action}。`,
+    )
+  }
+
   switch (step) {
     case 'world-rules':
       requireBasics('同步世界规则')
@@ -510,6 +533,7 @@ export function getWorkflowBlockers(
       break
     case 'outline':
       pushIfMissing(isStoryPlotReady(novel), '请先完成故事设计，再生成故事大纲。')
+      requireFreshAssets('生成故事大纲')
       requireRevisionBlockersCleared('生成故事大纲')
       break
     case 'timeline':
@@ -517,6 +541,7 @@ export function getWorkflowBlockers(
       requireMap('生成时间轴')
       requireCharacters('生成时间轴')
       requireItems('生成时间轴')
+      requireFreshAssets('生成时间轴')
       pushIfMissing(
         isStoryPlotReady(novel) || stats.outlineCount > 0,
         '请先完成故事设计，或先生成故事大纲，再生成时间轴。',
@@ -527,6 +552,8 @@ export function getWorkflowBlockers(
       requireThreads('开始正文写作')
       pushIfMissing(stats.outlineCount > 0, '请先生成故事大纲，再开始正文写作。')
       pushIfMissing(stats.timelineCount > 0, '请先补齐时间轴，再开始正文写作。')
+      requireFreshAssets('开始正文写作')
+      requireFreshStoryMemory('开始正文写作')
       requireFreshChapterContext('开始正文写作')
       requireRevisionBlockersCleared('开始正文写作')
       break

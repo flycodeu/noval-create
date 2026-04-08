@@ -1,8 +1,28 @@
 import { asc, eq } from 'drizzle-orm'
 import { getDb, getSqlite } from '../database/db'
-import { chapters, novels, storyItems, storyMemoryCheckpoints, timelineEvents } from '../database/schema'
+import {
+  chapters,
+  characters,
+  factions,
+  novels,
+  storyItems,
+  storyMemoryCheckpoints,
+  storyThreads,
+  timelineEvents,
+} from '../database/schema'
 import { throwUserFacingError } from '../utils/user-facing-error'
 import { buildNovelConsistencyReport, type ConsistencyIssue } from './consistency.service'
+
+type AssetFreshnessKey = 'faction' | 'character' | 'item' | 'thread' | 'timeline'
+
+const ASSET_FRESHNESS_GRACE_MS = 60 * 1000
+const ASSET_FRESHNESS_LABELS: Record<AssetFreshnessKey, string> = {
+  faction: '势力',
+  character: '人物',
+  item: '物品',
+  thread: '故事线程',
+  timeline: '时间轴',
+}
 
 function parseStringArray(raw?: string | null): string[] {
   if (!raw) return []
@@ -73,6 +93,24 @@ export interface NovelContextStatus {
   totalChapterCount: number
   staleChapterCount: number
   staleChapterIds: number[]
+  staleCheckpointCount: number
+  staleAssetCount: number
+  staleAssetKeys: AssetFreshnessKey[]
+  staleAssetLabels: string[]
+}
+
+function parseIsoTime(raw?: string | null): number | null {
+  if (!raw) return null
+  const parsed = Date.parse(raw)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function collectLatestUpdatedAt(rows: Array<{ updatedAt?: string | null }>): number | null {
+  return rows.reduce<number | null>((latest, row) => {
+    const next = parseIsoTime(row.updatedAt)
+    if (next === null) return latest
+    return latest === null ? next : Math.max(latest, next)
+  }, null)
 }
 
 export interface ChapterPublishCheckItem {
@@ -109,6 +147,25 @@ export function getNovelContextStatus(novelId: number): NovelContextStatus {
   const staleChapterIds = chapterRows
     .filter((chapter) => parseStringArray(chapter.staleReasonJson).length > 0)
     .map((chapter) => chapter.id)
+  const staleCheckpointCount = db.select().from(storyMemoryCheckpoints)
+    .where(eq(storyMemoryCheckpoints.novelId, novelId))
+    .all()
+    .filter((checkpoint) => checkpoint.stale === 1 || (checkpoint.version || 1) < (novel.contextVersion || 1))
+    .length
+  const novelUpdatedAt = parseIsoTime(novel.updatedAt)
+  const assetRows = {
+    faction: db.select().from(factions).where(eq(factions.novelId, novelId)).all(),
+    character: db.select().from(characters).where(eq(characters.novelId, novelId)).all(),
+    item: db.select().from(storyItems).where(eq(storyItems.novelId, novelId)).all(),
+    thread: db.select().from(storyThreads).where(eq(storyThreads.novelId, novelId)).all(),
+    timeline: db.select().from(timelineEvents).where(eq(timelineEvents.novelId, novelId)).all(),
+  }
+  const staleAssetKeys = (Object.keys(assetRows) as AssetFreshnessKey[]).filter((key) => {
+    if (assetRows[key].length === 0 || novelUpdatedAt === null) return false
+    const latestUpdatedAt = collectLatestUpdatedAt(assetRows[key])
+    if (latestUpdatedAt === null) return false
+    return (novelUpdatedAt - latestUpdatedAt) > ASSET_FRESHNESS_GRACE_MS
+  })
 
   return {
     novelId,
@@ -116,6 +173,10 @@ export function getNovelContextStatus(novelId: number): NovelContextStatus {
     totalChapterCount: chapterRows.length,
     staleChapterCount: staleChapterIds.length,
     staleChapterIds,
+    staleCheckpointCount,
+    staleAssetCount: staleAssetKeys.length,
+    staleAssetKeys,
+    staleAssetLabels: staleAssetKeys.map((key) => ASSET_FRESHNESS_LABELS[key]),
   }
 }
 

@@ -11,7 +11,7 @@ function getNodeTitle(value: React.ReactNode): string | undefined {
 }
 
 export function WorkspacePage({
-  eyebrow,
+  eyebrow: _eyebrow,
   title,
   description: _description,
   actions,
@@ -47,7 +47,6 @@ export function WorkspacePage({
     <div className={joinClassNames('novel-workspace', `novel-workspace--${layout}`, className)}>
       <section className={joinClassNames('novel-hero', heroVariant === 'compact' && 'novel-hero--compact')}>
         <div className="novel-hero__copy">
-          {eyebrow ? <div className="novel-hero__eyebrow">{eyebrow}</div> : null}
           <h1 className="novel-hero__title">{title}</h1>
         </div>
         {actions ? <div className="novel-hero__actions">{actions}</div> : null}

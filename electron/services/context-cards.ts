@@ -1,14 +1,21 @@
 import {
   characterRelations,
   characters,
+  factions,
   storyArcs,
   storyItems,
   storyThreads,
   timelineEvents,
 } from '../database/schema'
+import {
+  getFactionRelationLabel,
+  getFactionTypeLabel,
+  parseFactionExternalRelations,
+} from '../../src/shared/factions'
 
 type CharacterRow = typeof characters.$inferSelect
 type CharacterRelationRow = typeof characterRelations.$inferSelect
+type FactionRow = typeof factions.$inferSelect
 type StoryItemRow = typeof storyItems.$inferSelect
 type StoryThreadRow = typeof storyThreads.$inferSelect
 type TimelineEventRow = typeof timelineEvents.$inferSelect
@@ -54,6 +61,15 @@ export interface ThreadContextCard {
   nextTrigger: string
 }
 
+export interface FactionContextCard {
+  name: string
+  typeOrStructure: string
+  coreGoal: string
+  linkedPeople: string
+  territoryOrBase: string
+  externalPressure: string
+}
+
 export interface CharacterStateEntry {
   chapterNum: number
   entry: string
@@ -86,6 +102,13 @@ interface ItemCardOptions {
   characterNameMap: Map<number, string>
   locationNameMap: Map<number, string>
   preferredEventIds?: Set<number>
+  limit?: number
+}
+
+interface FactionCardOptions {
+  factions: FactionRow[]
+  characterNameMap: Map<number, string>
+  locationNameMap: Map<number, string>
   limit?: number
 }
 
@@ -400,6 +423,53 @@ export function buildItemContextCards(options: ItemCardOptions): ItemContextCard
   })
 }
 
+export function buildFactionContextCards(options: FactionCardOptions): FactionContextCard[] {
+  return options.factions.slice(0, options.limit || 8).map((faction) => {
+    const leaderName = typeof faction.leaderCharacterId === 'number'
+      ? options.characterNameMap.get(faction.leaderCharacterId) || `角色#${faction.leaderCharacterId}`
+      : ''
+    const territoryNames = parseNumberArray(faction.territoryMapNodeIdsJson)
+      .map((id) => options.locationNameMap.get(id) || `地点#${id}`)
+    const pressureLines = parseFactionExternalRelations(faction.externalRelationsJson)
+      .slice(0, 3)
+      .map((relation) => {
+        const targetName = relation.targetFactionName
+          || (typeof relation.targetFactionId === 'number' ? `势力#${relation.targetFactionId}` : '')
+        if (!targetName) return ''
+        return `${getFactionRelationLabel(relation.relation)}=${targetName}`
+      })
+      .filter(Boolean)
+
+    return {
+      name: normalizeInlineText(faction.name, 28) || `势力#${faction.id}`,
+      typeOrStructure: joinCardValues([
+        getFactionTypeLabel(faction.type),
+        faction.memberPolicy,
+      ], { maxLength: 72, perValueMaxLength: 30, limit: 2 }),
+      coreGoal: joinCardValues([
+        faction.goal,
+        faction.currentPhase ? `阶段=${faction.currentPhase}` : '',
+        faction.resources ? `资源=${faction.resources}` : '',
+      ], { maxLength: 84, perValueMaxLength: 34, limit: 3 }),
+      linkedPeople: joinCardValues([
+        leaderName ? `领袖=${leaderName}` : '',
+      ], { maxLength: 56, perValueMaxLength: 28, limit: 2 }),
+      territoryOrBase: joinCardValues(territoryNames, {
+        separator: '、',
+        maxLength: 56,
+        perValueMaxLength: 18,
+        limit: 3,
+      }),
+      externalPressure: joinCardValues(pressureLines, {
+        separator: '；',
+        maxLength: 84,
+        perValueMaxLength: 30,
+        limit: 3,
+      }),
+    }
+  })
+}
+
 function resolveTimelineChapterLabel(event: TimelineEventRow, chapterNumMap?: Map<number, number>): string {
   if (!chapterNumMap) return ''
   const start = event.chapterStartId ? chapterNumMap.get(event.chapterStartId) : undefined
@@ -631,6 +701,16 @@ export function renderThreadCards(cards: ThreadContextCard[]): string {
     ['状态', card.currentState],
     ['风险/价值', card.stakes],
     ['下一触发', card.nextTrigger],
+  ])).join('\n')
+}
+
+export function renderFactionCards(cards: FactionContextCard[]): string {
+  return cards.map((card) => renderCardLine(card.name, [
+    ['类型/结构', card.typeOrStructure],
+    ['目标/阶段', card.coreGoal],
+    ['关联人物', card.linkedPeople],
+    ['地盘', card.territoryOrBase],
+    ['外部压力', card.externalPressure],
   ])).join('\n')
 }
 

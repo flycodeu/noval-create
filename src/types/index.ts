@@ -760,6 +760,7 @@ export interface Task {
 
 export type AssetReviewTarget =
   | 'character'
+  | 'faction'
   | 'item'
   | 'thread'
   | 'timeline'
@@ -1024,6 +1025,10 @@ export interface NovelContextStatus {
   totalChapterCount: number
   staleChapterCount: number
   staleChapterIds: number[]
+  staleCheckpointCount: number
+  staleAssetCount: number
+  staleAssetKeys: string[]
+  staleAssetLabels: string[]
 }
 
 export interface ChapterPublishCheckItem {

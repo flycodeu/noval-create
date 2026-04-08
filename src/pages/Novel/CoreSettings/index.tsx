@@ -6,6 +6,7 @@ import {
   PlusOutlined,
   RobotOutlined,
   SaveOutlined,
+  StopOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
@@ -28,6 +29,7 @@ import {
   isStoryPlotReady,
   isWorldFoundationReady,
   loadWorkflowStats,
+  type WorkflowStats,
 } from '../workflow'
 import {
   WorkspaceContextSummary,
@@ -59,7 +61,7 @@ type SubplotLaneKey = 'setup' | 'escalation' | 'pressure' | 'payoff' | 'unschedu
 const DEFAULT_SUBPLOT_BATCH_COUNT = 8
 const MIN_SUBPLOT_BATCH_COUNT = 1
 const MAX_SUBPLOT_BATCH_COUNT = 20
-const EMPTY_STATS = {
+const EMPTY_STATS: WorkflowStats = {
   mapCount: 0,
   factionCount: 0,
   characterCount: 0,
@@ -77,6 +79,9 @@ const EMPTY_STATS = {
   totalWords: 0,
   staleChapterCount: 0,
   contextVersion: 1,
+  staleCheckpointCount: 0,
+  staleAssetCount: 0,
+  staleAssetLabels: [],
   hasProtagonist: false,
   volumeCount: 0,
 }
@@ -199,8 +204,9 @@ export default function CoreSettings({ novelId }: Props) {
   const [saving, setSaving] = useState(false)
   const [generatingMode, setGeneratingMode] = useState<GenerationMode | null>(null)
   const [generationProgress, setGenerationProgress] = useState<CoreSettingsGenerationProgressEvent | null>(null)
+  const [subplotTaskId, setSubplotTaskId] = useState<number | null>(null)
   const [selectedSubplotIndex, setSelectedSubplotIndex] = useState<number | null>(null)
-  const [stats, setStats] = useState(EMPTY_STATS)
+  const [stats, setStats] = useState<WorkflowStats>(EMPTY_STATS)
 
   const settings = useMemo(
     () => parseStorySettingsSnapshot(currentNovel?.settingsJson),
@@ -489,6 +495,7 @@ export default function CoreSettings({ novelId }: Props) {
           mainPlot: normalizeText(values.main_plot),
           requirements,
         })
+        setSubplotTaskId(taskId)
         const status = await waitForSubplotAutoGenerate(taskId)
         const nextSubplots = normalizeSubplots(status.subplots)
         setSubplots(nextSubplots)
@@ -548,6 +555,18 @@ export default function CoreSettings({ novelId }: Props) {
     } finally {
       setGeneratingMode(null)
       setGenerationProgress(null)
+      setSubplotTaskId(null)
+    }
+  }
+
+  const handleStopSubplotGenerate = async () => {
+    if (!subplotTaskId) return
+    try {
+      await window.electron.workflow.cancel(subplotTaskId)
+      message.success('支线自动分批已请求停止。')
+    } catch (error) {
+      console.error(error)
+      message.error(getErrorMessage(error, 'coreSettings.generateFailed'))
     }
   }
 
@@ -786,6 +805,11 @@ export default function CoreSettings({ novelId }: Props) {
             <Button icon={<RobotOutlined />} loading={generatingMode === 'subplots'} onClick={() => void handleGenerate('subplots')}>
               AI 重算支线
             </Button>
+            {generatingMode === 'subplots' && subplotTaskId ? (
+              <Button danger icon={<StopOutlined />} onClick={() => void handleStopSubplotGenerate()}>
+                停止
+              </Button>
+            ) : null}
             <Button icon={<PlusOutlined />} onClick={addSubplot}>
               新增支线
             </Button>

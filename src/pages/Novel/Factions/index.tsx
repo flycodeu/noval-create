@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Form, Input, InputNumber, List, Modal, Select, Space, Spin, Switch, Tag, message } from 'antd'
-import { DeleteOutlined, PlusOutlined, ReloadOutlined, RobotOutlined, SaveOutlined, ShareAltOutlined } from '@ant-design/icons'
+import { DeleteOutlined, PlusOutlined, ReloadOutlined, RobotOutlined, SaveOutlined, ShareAltOutlined, StopOutlined } from '@ant-design/icons'
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import type {
@@ -12,7 +12,15 @@ import type {
   MapNodeSummary,
   Task,
 } from '../../../types'
-import { FACTION_RELATION_TYPE_OPTIONS, buildFactionExternalRelationsPayload, parseFactionExternalRelations } from '../../../shared/factions'
+import {
+  FACTION_RELATION_TYPE_OPTIONS,
+  FACTION_RELATIONSHIP_DENSITY_OPTIONS,
+  FACTION_TYPE_OPTIONS,
+  buildFactionExternalRelationsPayload,
+  getFactionTypeLabel,
+  normalizeFactionTypeValue,
+  parseFactionExternalRelations,
+} from '../../../shared/factions'
 import { useNovelStore } from '../../../stores/novel.store'
 import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
 import { loadWorkflowStats } from '../workflow'
@@ -93,6 +101,17 @@ function parseStringArray(raw?: string | null): string[] {
   }
 }
 
+function buildFactionListSummary(item: Faction, leaderName?: string) {
+  const relationCount = parseFactionExternalRelations(item.externalRelationsJson).length
+  const territoryCount = parseNumberArray(item.territoryMapNodeIdsJson).length
+  return [
+    item.currentPhase ? `阶段：${item.currentPhase}` : '',
+    leaderName ? `领袖：${leaderName}` : '',
+    territoryCount > 0 ? `${territoryCount} 处地盘` : '',
+    relationCount > 0 ? `${relationCount} 条关系` : '',
+  ].filter(Boolean).join(' · ') || '仅保留基础设定，等待补齐关键关系。'
+}
+
 function buildFormValues(item?: Faction | null): FactionFormValues {
   if (!item) return EMPTY_VALUES
   return {
@@ -128,9 +147,14 @@ export default function FactionsPage({ novelId }: Props) {
   const [graphData, setGraphData] = useState<FactionGraphPayload>({ nodes: [], edges: [], unalignedCharacters: [] })
   const [autoTask, setAutoTask] = useState<Task | null>(null)
   const [autoStatus, setAutoStatus] = useState<FactionAutoGenerateStatus>(EMPTY_AUTO_STATUS)
+  const [autoStopping, setAutoStopping] = useState(false)
 
   const selectedItem = useMemo(() => items.find((item) => item.id === selectedId) || null, [items, selectedId])
   const selectedValues = Form.useWatch([], form) as FactionFormValues | undefined
+  const leaderNameMap = useMemo(
+    () => new Map(characterOptions.map((item) => [item.id, item.fullName])),
+    [characterOptions],
+  )
   const selectedCharacterIds = useMemo(() => {
     if (!selectedItem) return []
     const selectedName = selectedItem.name.trim()
@@ -245,7 +269,7 @@ export default function FactionsPage({ novelId }: Props) {
         memberPolicy: values.memberPolicy.trim(),
         currentPhase: values.currentPhase.trim(),
         externalRelationsJson: buildFactionExternalRelationsPayload(values.externalRelations || []),
-        notes: values.notes.trim(),
+        notes: values.notes?.trim() || '',
       }
 
       if (selectedId) {
@@ -305,6 +329,21 @@ export default function FactionsPage({ novelId }: Props) {
     }
   }
 
+  const handleStopAutoGenerate = async () => {
+    if (!autoTask?.id) return
+    setAutoStopping(true)
+    try {
+      await window.electron.workflow.cancel(autoTask.id)
+      await refreshAutoStatus()
+      message.success('势力自动分批已请求停止。')
+    } catch (error) {
+      console.error(error)
+      message.error('停止势力自动分批失败，请稍后重试。')
+    } finally {
+      setAutoStopping(false)
+    }
+  }
+
   const selectedTerritories = useMemo(
     () => mapOptions.filter((item) => (selectedValues?.territoryMapNodeIds || []).includes(item.id)),
     [mapOptions, selectedValues?.territoryMapNodeIds],
@@ -314,6 +353,7 @@ export default function FactionsPage({ novelId }: Props) {
     [characterOptions, selectedCharacterIds],
   )
   const selectedRelations = selectedValues?.externalRelations || []
+  const hasRunningAutoTask = autoTask?.status === 'running' || autoTask?.status === 'cancel_requested'
 
   return (
     <WorkspacePage
@@ -325,10 +365,11 @@ export default function FactionsPage({ novelId }: Props) {
       actions={(
         <Space wrap>
           <Button type="primary" icon={<RobotOutlined />} onClick={() => {
-            generateForm.setFieldsValue({ count: Math.max(1, 10 - items.length), batchSize: 1, relationshipDensity: 'balanced', allowCharacterlessFactions: true, preferExistingCharacters: true, preferredTypes: ['faction', 'organization'], specialRequirements: '' })
+            generateForm.setFieldsValue({ count: Math.max(1, 10 - items.length), batchSize: 1, relationshipDensity: 'balanced', allowCharacterlessFactions: true, preferExistingCharacters: true, preferredTypes: ['organization', 'sect', 'family'], specialRequirements: '势力必须像小说里的真实组织主体，服务人物归属、资源争夺或主线冲突。' })
             setGenerateOpen(true)
           }}>AI 分批生成</Button>
           {autoTask?.status === 'paused' ? <Button icon={<ShareAltOutlined />} onClick={() => void handleResumeAutoGenerate()}>继续任务</Button> : null}
+          {hasRunningAutoTask ? <Button danger icon={<StopOutlined />} loading={autoStopping} onClick={() => void handleStopAutoGenerate()}>停止任务</Button> : null}
           <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>保存势力</Button>
           <Button icon={<PlusOutlined />} onClick={handleCreate}>新建势力</Button>
           <Button icon={<ReloadOutlined />} onClick={() => { void refresh(); void refreshGraph(); void refreshAutoStatus() }}>刷新</Button>
@@ -357,7 +398,7 @@ export default function FactionsPage({ novelId }: Props) {
       {autoTask ? (
         <Alert
           className="faction-workspace__status"
-          type={autoTask.status === 'success' ? 'success' : autoTask.status === 'paused' ? 'warning' : 'info'}
+          type={autoTask.status === 'success' ? 'success' : autoTask.status === 'paused' || autoTask.status === 'cancelled' ? 'warning' : autoTask.status === 'failed' ? 'error' : 'info'}
           showIcon
           message={`后台任务：${autoStatus.message || '等待执行'}`}
           description={`已完成 ${autoStatus.generatedCount}/${autoStatus.requestedCount} 个；第 ${autoStatus.currentBatch}/${autoStatus.totalBatches} 批；最近摘要：${autoStatus.batchDigest || '暂无'}`}
@@ -375,8 +416,8 @@ export default function FactionsPage({ novelId }: Props) {
             renderItem={(item) => (
               <List.Item className={`faction-list-card ${selectedId === item.id ? 'faction-list-card--active' : ''}`} onClick={() => setSelectedId(item.id)}>
                 <List.Item.Meta
-                  title={<div className="faction-list-card__title"><strong>{item.name}</strong><Tag>{item.type}</Tag></div>}
-                  description={<div className="faction-list-card__desc">{item.currentPhase || item.goal || item.resources || '还没有明确定位。'}</div>}
+                  title={<div className="faction-list-card__title"><strong>{item.name}</strong><Tag>{getFactionTypeLabel(item.type)}</Tag></div>}
+                  description={<div className="faction-list-card__desc">{buildFactionListSummary(item, typeof item.leaderCharacterId === 'number' ? leaderNameMap.get(item.leaderCharacterId) : undefined)}</div>}
                 />
               </List.Item>
             )}
@@ -427,9 +468,8 @@ export default function FactionsPage({ novelId }: Props) {
                       { key: 'resources', label: '资源', value: selectedValues?.resources, hint: '写出真正能形成优势的资源。' },
                       { key: 'memberPolicy', label: '成员规则', value: selectedValues?.memberPolicy, hint: '写成员来源、晋升与控制结构。' },
                       { key: 'currentPhase', label: '当前阶段', value: selectedValues?.currentPhase, hint: '写当下压力、变化和临界点。' },
-                      { key: 'notes', label: '补充说明', value: selectedValues?.notes, hint: '说明它和主题、背景、人物、地图的真实联系。' },
                     ],
-                    requirements: ['不要写成善恶二元阵营。', '要让势力之间存在真实利益关系。', '不要改动已选中的人物和地图绑定。'],
+                    requirements: ['不要写成善恶二元阵营。', '要让势力之间存在真实利益关系。', '势力名称必须像组织主体，不要写成动物、种族或单体角色。', '不要改动已选中的人物和地图绑定。'],
                   })}
                   onResult={(raw) => {
                     const draft = parseDraftJson<Record<string, unknown>>(raw)
@@ -437,12 +477,13 @@ export default function FactionsPage({ novelId }: Props) {
                     form.setFieldsValue({
                       ...values,
                       name: typeof draft.name === 'string' ? draft.name : values.name,
-                      type: typeof draft.type === 'string' ? draft.type as Faction['type'] : values.type,
+                      type: typeof draft.type === 'string'
+                        ? normalizeFactionTypeValue(draft.type, values.type || 'faction')
+                        : values.type,
                       goal: typeof draft.goal === 'string' ? draft.goal : values.goal,
                       resources: typeof draft.resources === 'string' ? draft.resources : values.resources,
                       memberPolicy: typeof draft.memberPolicy === 'string' ? draft.memberPolicy : values.memberPolicy,
                       currentPhase: typeof draft.currentPhase === 'string' ? draft.currentPhase : values.currentPhase,
-                      notes: typeof draft.notes === 'string' ? draft.notes : values.notes,
                     })
                   }}
                 />
@@ -453,13 +494,22 @@ export default function FactionsPage({ novelId }: Props) {
             <Form form={form} layout="vertical" initialValues={EMPTY_VALUES} className="faction-editor">
               <div className="faction-editor__grid">
                 <Form.Item name="name" label="势力名称" rules={[{ required: true, message: '请填写势力名称' }]}><Input placeholder="例如：沉灯会 / 北陵军府 / 清川盐盟" /></Form.Item>
-                <Form.Item name="type" label="势力类型" rules={[{ required: true, message: '请选择势力类型' }]}><Select options={[...new Set(items.map((item) => item.type).concat(['organization', 'faction', 'family', 'sect', 'company', 'government', 'other']))].map((value) => ({ value, label: value }))} /></Form.Item>
+                <Form.Item
+                  name="type"
+                  label="势力类型"
+                  rules={[{ required: true, message: '请选择势力类型' }]}
+                >
+                  <Select
+                    options={[...new Set(items.map((item) => item.type).concat(FACTION_TYPE_OPTIONS.map((item) => item.value)))]
+                      .map((value) => ({ value, label: getFactionTypeLabel(value) }))}
+                  />
+                </Form.Item>
                 <Form.Item name="leaderCharacterId" label="领袖角色"><Select allowClear showSearch optionFilterProp="label" options={characterOptions.map((item) => ({ value: item.id, label: item.fullName }))} placeholder="可留空" /></Form.Item>
                 <Form.Item name="territoryMapNodeIds" label="地盘节点"><Select mode="multiple" allowClear optionFilterProp="label" options={mapOptions.map((item) => ({ value: item.id, label: item.name }))} /></Form.Item>
                 <Form.Item name="goal" label="目标"><Input.TextArea rows={3} /></Form.Item>
-                <Form.Item name="resources" label="资源"><Input.TextArea rows={3} /></Form.Item>
-                <Form.Item name="memberPolicy" label="成员规则"><Input.TextArea rows={3} /></Form.Item>
                 <Form.Item name="currentPhase" label="当前阶段"><Input.TextArea rows={3} /></Form.Item>
+                <Form.Item name="resources" label="资源"><Input.TextArea rows={2} /></Form.Item>
+                <Form.Item name="memberPolicy" label="成员规则"><Input.TextArea rows={2} /></Form.Item>
                 <Form.List name="externalRelations">
                   {(fields, { add, remove }) => (
                     <div className="faction-editor__relations">
@@ -476,7 +526,6 @@ export default function FactionsPage({ novelId }: Props) {
                     </div>
                   )}
                 </Form.List>
-                <Form.Item name="notes" label="补充说明"><Input.TextArea rows={4} /></Form.Item>
               </div>
             </Form>
 
@@ -493,8 +542,8 @@ export default function FactionsPage({ novelId }: Props) {
         <Form form={generateForm} layout="vertical">
           <Form.Item name="count" label="目标总数" rules={[{ required: true, message: '请输入目标总数' }]}><InputNumber min={1} max={24} style={{ width: '100%' }} /></Form.Item>
           <Form.Item name="batchSize" label="每批生成" rules={[{ required: true, message: '请输入每批数量' }]}><InputNumber min={1} max={6} style={{ width: '100%' }} /></Form.Item>
-          <Form.Item name="relationshipDensity" label="关系密度"><Select options={[{ value: 'sparse', label: '克制' }, { value: 'balanced', label: '均衡' }, { value: 'dense', label: '高密度' }]} /></Form.Item>
-          <Form.Item name="preferredTypes" label="优先类型"><Select mode="multiple" options={['organization', 'faction', 'family', 'sect', 'company', 'government', 'other'].map((value) => ({ value, label: value }))} /></Form.Item>
+          <Form.Item name="relationshipDensity" label="关系密度"><Select options={FACTION_RELATIONSHIP_DENSITY_OPTIONS} /></Form.Item>
+          <Form.Item name="preferredTypes" label="优先类型"><Select mode="multiple" options={FACTION_TYPE_OPTIONS} /></Form.Item>
           <Form.Item name="allowCharacterlessFactions" label="允许无人归属的隐性势力" valuePropName="checked"><Switch /></Form.Item>
           <Form.Item name="preferExistingCharacters" label="优先复用现有人物" valuePropName="checked"><Switch /></Form.Item>
           <Form.Item name="specialRequirements" label="额外要求"><Input.TextArea rows={4} placeholder="例如：强调商路、地下秩序、宗教化治理、家族继承危机等。" /></Form.Item>

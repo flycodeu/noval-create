@@ -90,6 +90,11 @@ function getStudioTone(score: number) {
   return '先修关键问题'
 }
 
+function getFreshnessTags(labels: string[], visibleCount = 2) {
+  if (labels.length <= visibleCount) return labels
+  return [...labels.slice(0, visibleCount), `+${labels.length - visibleCount}`]
+}
+
 export default function StudioPage({ novelId }: Props) {
   const navigate = useNavigate()
   const { currentNovel, setCurrentNovel } = useNovelStore()
@@ -561,6 +566,50 @@ export default function StudioPage({ novelId }: Props) {
     + storySettings.premiseReadyCount
     + storySettings.storyDesignReadyCount
   ) / 21 * 100)
+  const focusAreas = (consistencyReport?.focusAreas || []).slice(0, 3)
+  const staleAssetTagList = getFreshnessTags(contextStatus?.staleAssetLabels || [])
+  const freshnessCards = [
+    {
+      title: '剧情衔接',
+      value: contextStatus?.staleChapterCount
+        ? `${contextStatus.staleChapterCount} 章待同步`
+        : contextStatus?.totalChapterCount
+          ? `已同步到第 ${contextStatus.totalChapterCount} 章`
+          : '尚未生成章节',
+      desc: contextStatus?.staleChapterCount
+        ? '正文里还有章节挂着旧上下文，继续量产会放大承接断层。'
+        : '当前正文与最新设定基本一致，可以继续推进。',
+      hint: contextStatus?.staleChapterCount
+        ? '建议先去修订中心或正文页处理这些章节。'
+        : '当前不需要额外回补章节同步。',
+      tone: contextStatus?.staleChapterCount ? 'stale' : 'ok',
+      tags: [] as string[],
+    },
+    {
+      title: '记忆检查点',
+      value: contextStatus?.staleCheckpointCount ? `${contextStatus.staleCheckpointCount} 份待刷新` : '检查点已同步',
+      desc: contextStatus?.staleCheckpointCount
+        ? '长期记忆还是旧版本，继续跑大纲或正文会沿用旧长程记忆。'
+        : '长期记忆检查点已跟上当前设定。',
+      hint: contextStatus?.staleCheckpointCount
+        ? '建议先刷新故事记忆，再继续后台编排。'
+        : '可以直接继续后续编排动作。',
+      tone: contextStatus?.staleCheckpointCount ? 'warn' : 'ok',
+      tags: [] as string[],
+    },
+    {
+      title: '资产新鲜度',
+      value: contextStatus?.staleAssetCount ? `${contextStatus.staleAssetCount} 类待校准` : '资产状态最新',
+      desc: contextStatus?.staleAssetCount
+        ? '部分世界资产仍挂着旧设定，后续时间轴和故事弧会继续吃到旧上下文。'
+        : '关键世界资产没有发现明显的设定滞后。',
+      hint: contextStatus?.staleAssetCount
+        ? '建议先回到对应页面重生成或手动校准。'
+        : '当前资产层可继续支撑后续生成。',
+      tone: contextStatus?.staleAssetCount ? 'warn' : 'ok',
+      tags: contextStatus?.staleAssetCount ? staleAssetTagList : [],
+    },
+  ]
 
   return (
     <WorkspacePage
@@ -592,6 +641,8 @@ export default function StudioPage({ novelId }: Props) {
             { label: '当前焦点', value: nextAction?.title || '转入写作与修订' },
             { label: '主角状态', value: stats.hasProtagonist ? '已建立' : '待建立' },
             { label: '待同步章节', value: contextStatus?.staleChapterCount ? `${contextStatus.staleChapterCount} 章` : '无' },
+            { label: '记忆检查点', value: contextStatus?.staleCheckpointCount ? `${contextStatus.staleCheckpointCount} 份待刷新` : '已同步' },
+            { label: '资产新鲜度', value: contextStatus?.staleAssetCount ? `${contextStatus.staleAssetCount} 类待校准` : '资产稳定' },
           ]}
         />
       )}
@@ -618,14 +669,36 @@ export default function StudioPage({ novelId }: Props) {
               </div>
             </div>
 
-            <div className="studio-note-list">
-              {contextStatus?.staleChapterCount
-                ? <div className="studio-note-list__item">{`有 ${contextStatus.staleChapterCount} 章正文仍挂着旧上下文，建议在继续量产前先修订。`}</div>
-                : <div className="studio-note-list__item">正文与最新设定基本保持同步，可以继续推进。</div>}
-              {(consistencyReport?.focusAreas || []).slice(0, 3).map((focus) => (
-                <div key={focus} className="studio-note-list__item">{focus}</div>
+            <div className="studio-freshness-meta">
+              <span>{`当前上下文版本 v${contextStatus?.contextVersion ?? '--'}`}</span>
+              <span>{contextStatus?.totalChapterCount ? `已纳入 ${contextStatus.totalChapterCount} 章正文` : '尚未生成正文章节'}</span>
+            </div>
+
+            <div className="studio-freshness-grid">
+              {freshnessCards.map((card) => (
+                <section key={card.title} className={`studio-freshness-card studio-freshness-card--${card.tone}`}>
+                  <div className="studio-freshness-card__title">{card.title}</div>
+                  <strong className="studio-freshness-card__value">{card.value}</strong>
+                  <p className="studio-freshness-card__desc">{card.desc}</p>
+                  {card.tags.length > 0 ? (
+                    <div className="studio-freshness-card__tags">
+                      {card.tags.map((tag) => (
+                        <span key={`${card.title}-${tag}`} className="studio-freshness-card__tag">{tag}</span>
+                      ))}
+                    </div>
+                  ) : null}
+                  <div className="studio-freshness-card__hint">{card.hint}</div>
+                </section>
               ))}
             </div>
+
+            {focusAreas.length > 0 ? (
+              <div className="studio-note-list">
+                {focusAreas.map((focus) => (
+                  <div key={focus} className="studio-note-list__item">{focus}</div>
+                ))}
+              </div>
+            ) : null}
           </WorkspacePanel>
 
           <WorkspacePanel title="工作台跳转" description="统一入口负责编排，细修仍在专业页完成。">
@@ -660,6 +733,26 @@ export default function StudioPage({ novelId }: Props) {
           style={{ marginBottom: 20 }}
           message={`有 ${contextStatus.staleChapterCount} 章正文仍未同步到最新设定`}
           description="如果继续批量生成，旧上下文会继续放大问题。建议先去修订中心或正文页处理这些章节。"
+        />
+      ) : null}
+
+      {contextStatus?.staleCheckpointCount ? (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 20 }}
+          message={`有 ${contextStatus.staleCheckpointCount} 份长期记忆检查点待刷新`}
+          description="检查点过期时，后续大纲、时间轴和正文会继续引用旧的长期记忆。建议先刷新故事记忆，再继续批量推进。"
+        />
+      ) : null}
+
+      {contextStatus?.staleAssetCount ? (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 20 }}
+          message={`这些世界资产可能还挂着旧设定：${contextStatus.staleAssetLabels.join('、')}`}
+          description="资产层如果还停在旧设定上，后续时间轴、故事弧和正文会持续继承错误上下文。建议先回到对应页面重生成或手动校准。"
         />
       ) : null}
 
@@ -767,6 +860,12 @@ export default function StudioPage({ novelId }: Props) {
             </Tag>
             <Tag color={contextStatus?.staleChapterCount ? 'error' : 'success'} icon={<FireOutlined />}>
               {contextStatus?.staleChapterCount ? `上下文过期 ${contextStatus.staleChapterCount} 章` : '正文上下文稳定'}
+            </Tag>
+            <Tag color={contextStatus?.staleCheckpointCount ? 'warning' : 'success'} icon={<ClockCircleOutlined />}>
+              {contextStatus?.staleCheckpointCount ? `记忆待刷新 ${contextStatus.staleCheckpointCount} 份` : '长期记忆稳定'}
+            </Tag>
+            <Tag color={contextStatus?.staleAssetCount ? 'warning' : 'success'} icon={<CompassOutlined />}>
+              {contextStatus?.staleAssetCount ? `资产待校准 ${contextStatus.staleAssetCount} 类` : '世界资产稳定'}
             </Tag>
           </div>
         </div>

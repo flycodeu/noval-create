@@ -1,18 +1,18 @@
-import React, { useEffect, useMemo } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import 'reactflow/dist/style.css'
 import ReactFlow, {
   Background,
-  Controls,
   MarkerType,
-  MiniMap,
   Position,
   type Edge,
   type Node,
   type NodeProps,
+  type ReactFlowInstance,
   useEdgesState,
   useNodesState,
   Handle,
 } from 'reactflow'
+import { AimOutlined, MinusOutlined, PlusOutlined } from '@ant-design/icons'
 import type { FactionGraphPayload } from '../../../types'
 
 interface Props {
@@ -31,24 +31,33 @@ interface CanvasNodeData {
   dimmed: boolean
 }
 
-function truncate(text?: string, max = 70) {
-  if (!text) return ''
-  const normalized = text.replace(/\s+/g, ' ').trim()
-  return normalized.length <= max ? normalized : `${normalized.slice(0, max).trim()}...`
+interface LayoutResult {
+  nodes: Node<CanvasNodeData>[]
+  canvasHeight: number
 }
 
-function buildNodes(data: FactionGraphPayload) {
+function clampColumns(count: number, preferred: number) {
+  return Math.max(1, Math.min(preferred, count || 1))
+}
+
+function buildNodes(data: FactionGraphPayload): LayoutResult {
   const factions = data.nodes.filter((node) => node.entityType === 'faction')
   const characters = data.nodes.filter((node) => node.entityType === 'character')
   const nodes: Node<CanvasNodeData>[] = []
+  const factionColumns = clampColumns(factions.length, factions.length <= 2 ? 2 : factions.length <= 6 ? 3 : 4)
+  const factionRowCount = Math.max(1, Math.ceil(Math.max(factions.length, 1) / factionColumns))
+  const factionGapX = 300
+  const factionGapY = 166
+  const factionStartX = 40
+  const factionStartY = 44
 
   factions.forEach((node, index) => {
-    const column = index % 2
-    const row = Math.floor(index / 2)
+    const column = index % factionColumns
+    const row = Math.floor(index / factionColumns)
     nodes.push({
       id: node.id,
       type: 'factionNode',
-      position: { x: 30 + column * 340, y: 40 + row * 170 },
+      position: { x: factionStartX + column * factionGapX, y: factionStartY + row * factionGapY },
       data: {
         entityType: node.entityType,
         entityId: node.entityId,
@@ -58,17 +67,22 @@ function buildNodes(data: FactionGraphPayload) {
         active: false,
         dimmed: false,
       },
-      style: { width: 280 },
+      style: { width: 248 },
     })
   })
+
+  const characterStartY = factionStartY + factionRowCount * factionGapY + 92
+  const characterColumns = clampColumns(characters.length, characters.length <= 2 ? 2 : characters.length <= 6 ? 3 : 4)
+  const characterGapX = 260
+  const characterGapY = 142
 
   characters.forEach((node, index) => {
-    const column = index % 2
-    const row = Math.floor(index / 2)
+    const column = index % characterColumns
+    const row = Math.floor(index / characterColumns)
     nodes.push({
       id: node.id,
       type: 'factionNode',
-      position: { x: 760 + column * 280, y: 40 + row * 150 },
+      position: { x: factionStartX + column * characterGapX, y: characterStartY + row * characterGapY },
       data: {
         entityType: node.entityType,
         entityId: node.entityId,
@@ -78,11 +92,17 @@ function buildNodes(data: FactionGraphPayload) {
         active: false,
         dimmed: false,
       },
-      style: { width: 236 },
+      style: { width: 220 },
     })
   })
 
-  return nodes
+  const characterRowCount = characters.length > 0 ? Math.ceil(characters.length / characterColumns) : 0
+  const canvasHeight = Math.max(560, characterStartY + Math.max(characterRowCount, 1) * characterGapY + 140)
+
+  return {
+    nodes,
+    canvasHeight,
+  }
 }
 
 function buildEdges(data: FactionGraphPayload, selectedFactionId?: number | null): Edge[] {
@@ -172,7 +192,6 @@ function FactionNode({ data }: NodeProps<CanvasNodeData>) {
       <div className="faction-graph-node__eyebrow">{data.entityType === 'faction' ? '势力' : '人物'}</div>
       <div className="faction-graph-node__title">{data.label}</div>
       {data.subLabel ? <div className="faction-graph-node__meta">{data.subLabel}</div> : null}
-      <div className="faction-graph-node__summary">{truncate(data.summary || '等待补充上下文。')}</div>
     </div>
   )
 }
@@ -182,33 +201,81 @@ const nodeTypes = {
 }
 
 export default function FactionGraphCanvas({ data, selectedFactionId, onFactionSelect }: Props) {
-  const baseNodes = useMemo(() => buildNodes(data), [data])
+  const flowRef = useRef<ReactFlowInstance<CanvasNodeData> | null>(null)
+  const fittedRef = useRef(false)
+  const { nodes: baseNodes, canvasHeight } = useMemo(() => buildNodes(data), [data])
   const visualNodes = useMemo(() => decorateNodes(baseNodes, data.edges, selectedFactionId), [baseNodes, data.edges, selectedFactionId])
   const visualEdges = useMemo(() => buildEdges(data, selectedFactionId), [data, selectedFactionId])
   const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNodeData>(visualNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(visualEdges)
+  const graphSignature = useMemo(
+    () => `${data.nodes.map((node) => node.id).join('|')}::${data.edges.map((edge) => edge.id).join('|')}::${selectedFactionId || 'all'}`,
+    [data.edges, data.nodes, selectedFactionId],
+  )
 
   useEffect(() => { setNodes(visualNodes) }, [setNodes, visualNodes])
   useEffect(() => { setEdges(visualEdges) }, [setEdges, visualEdges])
 
+  useEffect(() => {
+    const flow = flowRef.current
+    if (!flow || nodes.length === 0) return
+    const delay = window.setTimeout(() => {
+      void flow.fitView({
+        padding: 0.18,
+        minZoom: 0.2,
+        maxZoom: 1.15,
+        duration: fittedRef.current ? 180 : 320,
+      })
+      fittedRef.current = true
+    }, 40)
+    return () => window.clearTimeout(delay)
+  }, [graphSignature, nodes.length])
+
+  const handleFit = useCallback(() => {
+    void flowRef.current?.fitView({ padding: 0.18, minZoom: 0.2, maxZoom: 1.15, duration: 220 })
+  }, [])
+
+  const handleZoomIn = useCallback(() => {
+    void flowRef.current?.zoomIn({ duration: 180 })
+  }, [])
+
+  const handleZoomOut = useCallback(() => {
+    void flowRef.current?.zoomOut({ duration: 180 })
+  }, [])
+
   return (
-    <div className="faction-graph-canvas">
+    <div className="faction-graph-canvas" style={{ height: canvasHeight }}>
+      <div className="faction-graph-canvas__tools">
+        <button type="button" className="faction-graph-canvas__tool" onClick={handleFit} title="重置视图">
+          <AimOutlined />
+        </button>
+        <button type="button" className="faction-graph-canvas__tool" onClick={handleZoomIn} title="放大">
+          <PlusOutlined />
+        </button>
+        <button type="button" className="faction-graph-canvas__tool" onClick={handleZoomOut} title="缩小">
+          <MinusOutlined />
+        </button>
+      </div>
       <ReactFlow
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
+        onInit={(instance) => {
+          flowRef.current = instance
+        }}
         onNodeClick={(_, node) => {
           if (node.data.entityType === 'faction') onFactionSelect?.(node.data.entityId)
         }}
-        fitView
-        minZoom={0.45}
+        fitView={false}
+        minZoom={0.2}
         maxZoom={1.4}
+        zoomOnScroll
+        zoomOnPinch
+        zoomOnDoubleClick={false}
       >
         <Background color="rgba(118, 86, 51, 0.12)" gap={22} />
-        <MiniMap pannable zoomable nodeColor={(node) => ((node.data as CanvasNodeData).entityType === 'faction' ? '#8d6734' : '#6a7c8a')} />
-        <Controls showInteractive={false} />
       </ReactFlow>
     </div>
   )

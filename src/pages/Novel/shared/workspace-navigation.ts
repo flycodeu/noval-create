@@ -107,6 +107,7 @@ export interface TaskRecoveryAction {
 }
 
 const RESUMABLE_WORKFLOW_TYPES = new Set([
+  'faction_auto_generate',
   'map_auto_generate',
   'world_rules_auto_generate',
   'character_auto_generate',
