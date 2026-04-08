@@ -1571,6 +1571,14 @@ export interface AIScoreDimension {
   suggestion: string
 }
 
+export interface LanguageDriftMetrics {
+  abstractTokenDensity: number
+  sentencePatternRepeatRate: number
+  endingSummaryRate: number
+  ornamentOverloadRate: number
+  nonHumanCollocationRate: number
+}
+
 export interface AIScoreResult {
   dimensions: AIScoreDimension[]
   ai_like_rate: number
@@ -1579,12 +1587,21 @@ export interface AIScoreResult {
   overall_feedback: string
   top_fixes: string[]
   weak_dimensions?: string[]
+  language_drift_metrics?: LanguageDriftMetrics
 }
 
 export interface QualityDashboardData {
   heatmapData: Array<{ chapterNum: number; dimension: string; score: number }>
   overallScoreTrend: Array<{ chapterNum: number; score: number }>
   aiLikeRateTrend: Array<{ chapterNum: number; rate: number }>
+  languageDriftTrends: {
+    abstractTokenDensity: Array<{ chapterNum: number; value: number }>
+    sentencePatternRepeatRate: Array<{ chapterNum: number; value: number }>
+    endingSummaryRate: Array<{ chapterNum: number; value: number }>
+    ornamentOverloadRate: Array<{ chapterNum: number; value: number }>
+    nonHumanCollocationRate: Array<{ chapterNum: number; value: number }>
+  }
+  averageLanguageDrift: LanguageDriftMetrics
   weakDimensionFrequency: Array<{ dimension: string; count: number }>
   chapterDetails: Array<{
     chapterId: number
@@ -1594,6 +1611,7 @@ export interface QualityDashboardData {
     aiLikeRate: number
     weakDimensions: string[]
     dimensions: AIScoreDimension[]
+    languageDriftMetrics?: LanguageDriftMetrics
   }>
   totalChaptersScored: number
   averageOverallScore: number

@@ -12,6 +12,14 @@ interface QualityDimensionScore {
   suggestion: string
 }
 
+interface LanguageDriftMetrics {
+  abstractTokenDensity: number
+  sentencePatternRepeatRate: number
+  endingSummaryRate: number
+  ornamentOverloadRate: number
+  nonHumanCollocationRate: number
+}
+
 interface QualityChapterEntry {
   chapterId: number
   chapterNum: number
@@ -20,6 +28,7 @@ interface QualityChapterEntry {
   aiLikeRate: number
   weakDimensions: string[]
   dimensions: QualityDimensionScore[]
+  languageDriftMetrics?: LanguageDriftMetrics
 }
 
 interface QualityHeatmapPoint {
@@ -32,6 +41,14 @@ interface QualityDashboardData {
   heatmapData: QualityHeatmapPoint[]
   overallScoreTrend: Array<{ chapterNum: number; score: number }>
   aiLikeRateTrend: Array<{ chapterNum: number; rate: number }>
+  languageDriftTrends: {
+    abstractTokenDensity: Array<{ chapterNum: number; value: number }>
+    sentencePatternRepeatRate: Array<{ chapterNum: number; value: number }>
+    endingSummaryRate: Array<{ chapterNum: number; value: number }>
+    ornamentOverloadRate: Array<{ chapterNum: number; value: number }>
+    nonHumanCollocationRate: Array<{ chapterNum: number; value: number }>
+  }
+  averageLanguageDrift: LanguageDriftMetrics
   weakDimensionFrequency: Array<{ dimension: string; count: number }>
   chapterDetails: QualityChapterEntry[]
   totalChaptersScored: number
@@ -111,6 +128,13 @@ export default function QualityDashboard({ novelId }: Props) {
         <TrendChart
           overallTrend={data.overallScoreTrend}
           aiLikeTrend={data.aiLikeRateTrend}
+        />
+      </WorkspacePanel>
+
+      <WorkspacePanel title="AI味分解" description="拆开看语言退化由哪些问题构成。">
+        <LanguageDriftPanel
+          averages={data.averageLanguageDrift}
+          trends={data.languageDriftTrends}
         />
       </WorkspacePanel>
 
@@ -203,6 +227,7 @@ export default function QualityDashboard({ novelId }: Props) {
                 {dim.suggestion ? <div style={{ fontSize: 12, opacity: 0.55 }}>{dim.suggestion}</div> : null}
               </div>
             ))}
+            <LanguageDriftDetails metrics={selectedChapter.languageDriftMetrics} />
           </div>
         ) : null}
       </Modal>
@@ -327,6 +352,118 @@ function WeakDimensionChart({ data }: { data: Array<{ dimension: string; count: 
             }} />
           </div>
           <span style={{ width: 40, fontSize: 12, opacity: 0.7 }}>{item.count} 次</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+const LANGUAGE_DRIFT_LABELS: Array<{ key: keyof LanguageDriftMetrics; label: string }> = [
+  { key: 'abstractTokenDensity', label: '抽象词密度' },
+  { key: 'sentencePatternRepeatRate', label: '句式重复率' },
+  { key: 'endingSummaryRate', label: '段尾升华率' },
+  { key: 'ornamentOverloadRate', label: '华丽词堆砌率' },
+  { key: 'nonHumanCollocationRate', label: '非人类搭配率' },
+]
+
+function LanguageDriftPanel({
+  averages,
+  trends,
+}: {
+  averages: LanguageDriftMetrics
+  trends: QualityDashboardData['languageDriftTrends']
+}) {
+  const hasAnyData = LANGUAGE_DRIFT_LABELS.some(({ key }) => trends[key].length > 0)
+  if (!hasAnyData) {
+    return <Empty description="暂无 AI 味分解数据" />
+  }
+  const cards = LANGUAGE_DRIFT_LABELS.map(({ key, label }) => ({ key, label, value: averages[key] }))
+  return (
+    <div style={{ display: 'grid', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
+        {cards.map((card) => (
+          <div
+            key={card.key}
+            style={{
+              padding: '12px 14px',
+              borderRadius: 10,
+              background: 'rgba(255,255,255,0.04)',
+              border: '1px solid rgba(255,255,255,0.08)',
+            }}
+          >
+            <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>{card.label}</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: scoreColor(10 - card.value / 10) }}>{card.value}</div>
+            <div style={{ fontSize: 11, opacity: 0.55, marginTop: 4 }}>平均风险值，越低越好</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: 'grid', gap: 10 }}>
+        {LANGUAGE_DRIFT_LABELS.map(({ key, label }) => (
+          <MiniTrendRow key={key} label={label} points={trends[key]} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function MiniTrendRow({
+  label,
+  points,
+}: {
+  label: string
+  points: Array<{ chapterNum: number; value: number }>
+}) {
+  if (points.length === 0) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, opacity: 0.7 }}>
+        <span>{label}</span>
+        <span>暂无分解数据</span>
+      </div>
+    )
+  }
+
+  const width = Math.max(200, points.length * 12)
+  const height = 36
+  const stepX = width / Math.max(points.length - 1, 1)
+  const path = points.map((point, index) => {
+    const x = index * stepX
+    const y = height - (Math.max(0, Math.min(100, point.value)) / 100) * height
+    return `${index === 0 ? 'M' : 'L'}${x},${y}`
+  }).join(' ')
+  const latest = points[points.length - 1]?.value ?? 0
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr 56px', gap: 12, alignItems: 'center' }}>
+      <span style={{ fontSize: 12, opacity: 0.8 }}>{label}</span>
+      <div style={{ overflowX: 'auto' }}>
+        <svg width={width} height={height + 4} style={{ minWidth: 200 }}>
+          <path d={path} fill="none" stroke="#fa8c16" strokeWidth={2} />
+        </svg>
+      </div>
+      <span style={{ fontSize: 12, fontWeight: 600, color: '#fa8c16' }}>{latest}</span>
+    </div>
+  )
+}
+
+function LanguageDriftDetails({ metrics }: { metrics?: LanguageDriftMetrics }) {
+  if (!metrics) {
+    return <div style={{ fontSize: 12, opacity: 0.55 }}>暂无 AI 味分解数据</div>
+  }
+
+  const ranked = [...LANGUAGE_DRIFT_LABELS]
+    .map(({ key, label }) => ({ key, label, value: metrics[key] }))
+    .sort((left, right) => right.value - left.value)
+
+  return (
+    <div style={{ display: 'grid', gap: 8 }}>
+      <div style={{ fontWeight: 600 }}>AI味分解</div>
+      {ranked.map((item) => (
+        <div key={item.key} style={{ display: 'grid', gap: 4 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+            <span>{item.label}</span>
+            <span style={{ color: '#fa8c16', fontWeight: 600 }}>{item.value}</span>
+          </div>
+          <Progress percent={item.value} showInfo={false} strokeColor="#fa8c16" size="small" />
         </div>
       ))}
     </div>

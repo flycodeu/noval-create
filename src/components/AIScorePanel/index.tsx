@@ -43,6 +43,15 @@ interface Props {
 const scoreColor = (s: number) => s >= 80 ? '#52c41a' : s >= 60 ? '#faad14' : '#ff4d4f'
 const riskColor = (r: string) => r === '高' ? 'error' : r === '中' ? 'warning' : 'success'
 const aiRateColor = (r: number) => r > 50 ? '#ff4d4f' : r > 30 ? '#faad14' : '#52c41a'
+type LanguageDriftKey = 'abstractTokenDensity' | 'sentencePatternRepeatRate' | 'endingSummaryRate' | 'ornamentOverloadRate' | 'nonHumanCollocationRate'
+
+const languageDriftLabels: Array<{ key: LanguageDriftKey; label: string }> = [
+  { key: 'abstractTokenDensity', label: '抽象词密度' },
+  { key: 'sentencePatternRepeatRate', label: '句式重复率' },
+  { key: 'endingSummaryRate', label: '段尾升华率' },
+  { key: 'ornamentOverloadRate', label: '华丽词堆砌率' },
+  { key: 'nonHumanCollocationRate', label: '非人类搭配率' },
+]
 
 export default function AIScorePanel({
   getContent,
@@ -282,6 +291,42 @@ export default function AIScorePanel({
                     AI痕迹：{result.ai_like_rate}%
                   </Tag>
                 </div>
+
+                {result.language_drift_metrics && (
+                  <div style={{
+                    marginTop: 10,
+                    paddingTop: 10,
+                    borderTop: '1px solid var(--border-color)',
+                    display: 'grid',
+                    gap: 6,
+                  }}>
+                    <div style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>
+                      AI味分解
+                    </div>
+                    {[...languageDriftLabels]
+                      .map((item) => ({
+                        ...item,
+                        value: result.language_drift_metrics?.[item.key] ?? 0,
+                      }))
+                      .sort((left, right) => right.value - left.value)
+                      .map((item) => (
+                        <div key={item.key} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ width: 90, color: 'var(--color-text-secondary)' }}>{item.label}</span>
+                          <Progress
+                            percent={item.value}
+                            size="small"
+                            showInfo={false}
+                            strokeColor="#fa8c16"
+                            trailColor="var(--border-color)"
+                            style={{ flex: 1, margin: 0 }}
+                          />
+                          <span style={{ width: 38, textAlign: 'right', color: '#fa8c16', fontWeight: 600 }}>
+                            {item.value}
+                          </span>
+                        </div>
+                      ))}
+                  </div>
+                )}
               </div>
             ),
           }]}

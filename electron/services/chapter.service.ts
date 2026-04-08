@@ -41,6 +41,7 @@ import {
 } from './story-structure.service'
 import { discoverEntitiesFromContent } from './entity-discovery.service'
 import { buildBatchKey, captureTimelineAnchorsForChapterIds, createOperationLog } from './history.service'
+import { enhanceAiScoreResult } from './ai-score.service'
 
 interface ChapterSummaryData {
   summary: string
@@ -2016,16 +2017,14 @@ export async function aiCheckChapter(chapterId: number): Promise<unknown> {
         stage: 'ai-check',
       },
     })
+    const enhancedScore = enhanceAiScoreResult(parsedResult.success ? parsedResult.data : {}, content)
     db.update(chapters).set({
-      aiScoreJson: result,
+      aiScoreJson: JSON.stringify(enhancedScore),
       updatedAt: new Date().toISOString(),
     }).where(eq(chapters.id, chapterId)).run()
-    if (parsedResult.success && parsedResult.data) {
-      return parsedResult.data
-    }
-    return { score: 0, issues: [], overall_feedback: result }
+    return enhancedScore
   } catch {
-    return { score: 0, issues: [], overall_feedback: result }
+    return enhanceAiScoreResult({}, content)
   }
 }
 

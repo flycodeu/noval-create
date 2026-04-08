@@ -76,6 +76,7 @@ import {
 import * as taskService from './services/task.service'
 import { safeParseJson } from './utils/json'
 import { getNovelContextStatus, markNovelContextChanged } from './services/context-impact.service'
+import { enhanceAiScoreResult } from './services/ai-score.service'
 import {
   appendVariationMessage,
   buildVariationDigest,
@@ -1158,7 +1159,7 @@ function registerIpcHandlers() {
       modelConfigId: data.modelConfigId,
     })
 
-    return safeParseJson(result)
+    return enhanceAiScoreResult(safeParseJson(result), data.content)
   })
 }
 
