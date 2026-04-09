@@ -135,6 +135,7 @@ export const storyArcs = sqliteTable('story_arcs', {
   arcSummary: text('arc_summary'),
   growthLedger: text('growth_ledger'),
   costLedger: text('cost_ledger'),
+  phaseTargetsJson: text('phase_targets_json'),
   targetWords: integer('target_words').notNull().default(0),
   progressPercent: integer('progress_percent').notNull().default(0),
   stalledChapterCount: integer('stalled_chapter_count').notNull().default(0),
@@ -623,7 +624,30 @@ export const characterStateVersions = sqliteTable('character_state_versions', {
   updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
 })
 
+export const worldStateVersions = sqliteTable('world_state_versions', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  entityType: text('entity_type').notNull(),
+  entityId: integer('entity_id').notNull(),
+  entityName: text('entity_name').notNull(),
+  chapterId: integer('chapter_id').notNull().references(() => chapters.id, { onDelete: 'cascade' }),
+  chapterNum: integer('chapter_num').notNull(),
+  stateKey: text('state_key').notNull(),
+  stateValue: text('state_value'),
+  normalizedValue: text('normalized_value'),
+  summaryText: text('summary_text'),
+  eventCause: text('event_cause'),
+  changeReason: text('change_reason'),
+  sourceKind: text('source_kind'),
+  sourceRef: text('source_ref'),
+  severity: text('severity').default('info'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
 export type CharacterDialogueFingerprint = typeof characterDialogueFingerprints.$inferSelect
 export type NewCharacterDialogueFingerprint = typeof characterDialogueFingerprints.$inferInsert
 export type CharacterStateVersion = typeof characterStateVersions.$inferSelect
 export type NewCharacterStateVersion = typeof characterStateVersions.$inferInsert
+export type WorldStateVersion = typeof worldStateVersions.$inferSelect
+export type NewWorldStateVersion = typeof worldStateVersions.$inferInsert

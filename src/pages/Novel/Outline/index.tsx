@@ -4,7 +4,13 @@ import { DeleteOutlined, EditOutlined, HolderOutlined, PlusOutlined, RobotOutlin
 import { DragDropContext, Draggable, Droppable, type DragDropContextProps, type DraggableProvidedDragHandleProps } from '@hello-pangea/dnd'
 import VirtualList from 'rc-virtual-list'
 import AIGenerateButton from '../../../components/AIGenerateButton'
-import type { Chapter, OutlineChapterBatchGenerationResult, StoryArc } from '../../../types'
+import type {
+  Chapter,
+  OutlineChapterBatchGenerationResult,
+  StoryArc,
+  StoryArcProgressPoint,
+  StoryArcProgressSnapshot,
+} from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
 import { buildDraftMessages, normalizeOptionalNumber, parseDraftJson } from '../shared/ai-draft'
 import { usePlanningDraft } from '../shared/planning-draft'
@@ -22,6 +28,14 @@ interface ArcFormValues {
   arcSummary?: string
   growthLedger?: string
   costLedger?: string
+  phase25Chapter?: number
+  phase25Beat?: string
+  phase50Chapter?: number
+  phase50Beat?: string
+  phase75Chapter?: number
+  phase75Beat?: string
+  phaseClosureChapter?: number
+  phaseClosureBeat?: string
 }
 
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
@@ -33,6 +47,76 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
 }
 
 const OUTLINE_CHAPTER_PAGE_SIZE = 50
+const PHASE_FIELD_CONFIG = [
+  { key: 'phase_25', label: '25%', ratio: 0.25, chapterField: 'phase25Chapter', beatField: 'phase25Beat' },
+  { key: 'phase_50', label: '50%', ratio: 0.5, chapterField: 'phase50Chapter', beatField: 'phase50Beat' },
+  { key: 'phase_75', label: '75%', ratio: 0.75, chapterField: 'phase75Chapter', beatField: 'phase75Beat' },
+  { key: 'phase_closure', label: '收束', ratio: 1, chapterField: 'phaseClosureChapter', beatField: 'phaseClosureBeat' },
+] as const
+
+function buildDefaultPhaseTargets(chapterStart?: number, chapterEnd?: number): Map<string, number> {
+  if (typeof chapterStart !== 'number' || typeof chapterEnd !== 'number' || chapterEnd < chapterStart) {
+    return new Map()
+  }
+
+  const total = Math.max(chapterEnd - chapterStart + 1, 1)
+  return new Map(PHASE_FIELD_CONFIG.map((phase) => [
+    phase.key,
+    phase.key === 'phase_closure'
+      ? chapterEnd
+      : chapterStart + Math.round((total - 1) * phase.ratio),
+  ]))
+}
+
+function parsePhaseTargetValues(arc?: StoryArc | null): Partial<ArcFormValues> {
+  if (!arc?.phaseTargetsJson?.trim()) return {}
+
+  try {
+    const parsed = JSON.parse(arc.phaseTargetsJson) as unknown
+    if (!Array.isArray(parsed)) return {}
+
+    return parsed.reduce<Partial<ArcFormValues>>((result, item) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return result
+      const record = item as Record<string, unknown>
+      const config = PHASE_FIELD_CONFIG.find((phase) => phase.key === record.key || phase.label === record.label)
+      if (!config) return result
+      if (typeof record.targetChapterNum === 'number') {
+        result[config.chapterField] = Math.max(1, Math.round(record.targetChapterNum))
+      }
+      if (typeof record.expectedBeat === 'string') {
+        result[config.beatField] = record.expectedBeat
+      }
+      return result
+    }, {})
+  } catch {
+    return {}
+  }
+}
+
+function buildPhaseTargetsOverrideJson(values: ArcFormValues): string | null {
+  const defaultTargets = buildDefaultPhaseTargets(values.chapterStart, values.chapterEnd)
+  const overrides = PHASE_FIELD_CONFIG
+    .map((phase) => {
+      const targetChapterNum = normalizeOptionalNumber(values[phase.chapterField])
+      const expectedBeat = typeof values[phase.beatField] === 'string' ? values[phase.beatField]?.trim() : ''
+      const defaultTarget = defaultTargets.get(phase.key)
+      const hasChapterOverride = typeof targetChapterNum === 'number'
+        ? targetChapterNum !== defaultTarget
+        : false
+      const hasBeatOverride = Boolean(expectedBeat)
+      if (!hasChapterOverride && !hasBeatOverride) return null
+      return {
+        key: phase.key,
+        label: phase.label,
+        targetRatio: phase.ratio,
+        targetChapterNum,
+        expectedBeat,
+      }
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item))
+
+  return overrides.length > 0 ? JSON.stringify(overrides) : null
+}
 
 export default function Outline({ novelId }: Props) {
   const { chapters, setChapters, currentNovel } = useNovelStore()
@@ -40,6 +124,7 @@ export default function Outline({ novelId }: Props) {
   const [arcs, setArcs] = useState<StoryArc[]>([])
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
+  const [arcProgressSnapshot, setArcProgressSnapshot] = useState<StoryArcProgressSnapshot | null>(null)
   const [arcForm] = Form.useForm<ArcFormValues>()
   const [arcModalOpen, setArcModalOpen] = useState(false)
   const [editingArc, setEditingArc] = useState<StoryArc | null>(null)
@@ -59,9 +144,14 @@ export default function Outline({ novelId }: Props) {
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [arcList, chapterList] = await Promise.all([window.electron.outline.getArcs(novelId), window.electron.chapter.list(novelId)])
+      const [arcList, chapterList, arcProgress] = await Promise.all([
+        window.electron.outline.getArcs(novelId),
+        window.electron.chapter.list(novelId),
+        window.electron.outline.getArcProgressSnapshot(novelId),
+      ])
       setArcs(arcList.sort((a, b) => a.arcOrder - b.arcOrder))
       setChapters(chapterList)
+      setArcProgressSnapshot(arcProgress)
     } finally {
       setLoading(false)
     }
@@ -71,11 +161,35 @@ export default function Outline({ novelId }: Props) {
 
   const openCreateModal = () => {
     setEditingArc(null)
-    arcForm.setFieldsValue({ arcName: '', chapterStart: undefined, chapterEnd: undefined, arcGoal: '', arcSummary: '', growthLedger: '', costLedger: '' })
+    arcForm.setFieldsValue({
+      arcName: '',
+      chapterStart: undefined,
+      chapterEnd: undefined,
+      arcGoal: '',
+      arcSummary: '',
+      growthLedger: '',
+      costLedger: '',
+      phase25Chapter: undefined,
+      phase25Beat: '',
+      phase50Chapter: undefined,
+      phase50Beat: '',
+      phase75Chapter: undefined,
+      phase75Beat: '',
+      phaseClosureChapter: undefined,
+      phaseClosureBeat: '',
+    })
     setArcModalOpen(true)
   }
 
   const openEditModal = (arc: StoryArc) => {
+    const summaryTargets = arcProgressSnapshot?.arcs.find((item) => item.arcId === arc.id)?.phaseTargets || []
+    const phaseFields = summaryTargets.reduce<Partial<ArcFormValues>>((result, target) => {
+      const config = PHASE_FIELD_CONFIG.find((phase) => phase.key === target.key)
+      if (!config) return result
+      result[config.chapterField] = target.targetChapterNum
+      result[config.beatField] = target.expectedBeat || ''
+      return result
+    }, parsePhaseTargetValues(arc))
     setEditingArc(arc)
     arcForm.setFieldsValue({
       arcName: arc.arcName,
@@ -85,6 +199,7 @@ export default function Outline({ novelId }: Props) {
       arcSummary: arc.arcSummary || '',
       growthLedger: arc.growthLedger || '',
       costLedger: arc.costLedger || '',
+      ...phaseFields,
     })
     setArcModalOpen(true)
   }
@@ -263,6 +378,16 @@ export default function Outline({ novelId }: Props) {
   const getMissingOutlineCount = useCallback((arc: StoryArc) => (
     getArcChapters(arc).filter((chapter) => !chapter.outline?.trim()).length
   ), [getArcChapters])
+  const arcProgressSummaryMap = useMemo(
+    () => new Map((arcProgressSnapshot?.arcs || []).map((summary) => [summary.arcId, summary] as const)),
+    [arcProgressSnapshot],
+  )
+  const arcPointMap = useMemo(
+    () => new Map((arcProgressSnapshot?.chapterPoints || []).map((point) => [`${point.arcId}:${point.chapterId}`, point] as const)),
+    [arcProgressSnapshot],
+  )
+  const expandedArcSummary = expandedArc ? arcProgressSummaryMap.get(expandedArc.id) : undefined
+  const expandedArcAlerts = expandedArcSummary?.alerts || []
 
   useEffect(() => {
     setExpandedChapterPage(1)
@@ -303,10 +428,20 @@ export default function Outline({ novelId }: Props) {
   })
   const handleSaveArc = useCallback(async () => {
     const values = await arcForm.validateFields()
+    const payload = {
+      arcName: values.arcName,
+      chapterStart: normalizeOptionalNumber(values.chapterStart),
+      chapterEnd: normalizeOptionalNumber(values.chapterEnd),
+      arcGoal: values.arcGoal,
+      arcSummary: values.arcSummary,
+      growthLedger: values.growthLedger,
+      costLedger: values.costLedger,
+      phaseTargetsJson: buildPhaseTargetsOverrideJson(values),
+    }
     if (editingArc) {
-      await window.electron.outline.updateArc(editingArc.id, values)
+      await window.electron.outline.updateArc(editingArc.id, payload)
     } else {
-      await window.electron.outline.createArc(novelId, { ...values, arcOrder: arcs.length + 1 })
+      await window.electron.outline.createArc(novelId, { ...payload, arcOrder: arcs.length + 1 })
     }
     await finalizeDraft(values)
     await clearDraft()
@@ -422,6 +557,7 @@ export default function Outline({ novelId }: Props) {
             <div className="novel-outline-track">
               {arcs.map((arc, index) => {
                 const arcChapters = getArcChapters(arc)
+                const arcSummary = arcProgressSummaryMap.get(arc.id)
                 const isExpanded = expandedArcId === arc.id
                 const completedCount = arcChapters.filter((chapter) => chapter.status === 'final').length
                 const progressPercent = arcChapters.length > 0 ? Math.round((completedCount / arcChapters.length) * 100) : 0
@@ -437,6 +573,20 @@ export default function Outline({ novelId }: Props) {
                       {arc.growthLedger ? <div className="novel-outline-arc__desc">成长账本：{arc.growthLedger}</div> : null}
                       {arc.costLedger ? <div className="novel-outline-arc__desc">代价账本：{arc.costLedger}</div> : null}
                       <div className="novel-outline-arc__desc">{missingOutlineCount > 0 ? `待补细纲：${missingOutlineCount} 章` : '当前故事弧细纲已补齐'}</div>
+                      {arcSummary ? (
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+                          <Tag color={arcSummary.progressRate >= 40 ? 'success' : arcSummary.progressRate >= 25 ? 'warning' : 'error'} style={{ marginRight: 0 }}>
+                            推进率 {arcSummary.progressRate}%
+                          </Tag>
+                          <Tag color={arcSummary.stallRate >= 70 ? 'error' : arcSummary.stallRate >= 50 ? 'warning' : 'default'} style={{ marginRight: 0 }}>
+                            空转率 {arcSummary.stallRate}%
+                          </Tag>
+                          <Tag color={arcSummary.missedPhaseCount > 0 ? 'error' : arcSummary.hitPhaseCount > 0 ? 'processing' : 'default'} style={{ marginRight: 0 }}>
+                            阶段 {arcSummary.hitPhaseCount}/{arcSummary.phaseTargets.length}
+                          </Tag>
+                          {arcSummary.alerts.length > 0 ? <Tag color="error" style={{ marginRight: 0 }}>{arcSummary.alerts.length} 条告警</Tag> : null}
+                        </div>
+                      ) : null}
                       <div className="novel-outline-arc__progress"><div style={{ width: `${progressPercent}%`, height: '100%', background: progressPercent === 100 ? '#4f8b64' : '#8f6330', transition: 'width 0.3s' }} /></div>
                       <div className="novel-outline-arc__progress-label">{completedCount}/{arcChapters.length} 章完成</div>
                       <div className="novel-outline-arc__actions" onClick={(event) => event.stopPropagation()}>
@@ -458,6 +608,57 @@ export default function Outline({ novelId }: Props) {
               <Empty description="当前故事弧下还没有章节。" image={Empty.PRESENTED_IMAGE_SIMPLE} />
             ) : (
               <>
+                {expandedArcSummary ? (
+                  <div style={{ display: 'grid', gap: 12, marginBottom: 16 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+                      <div className="novel-filter-card">
+                        <div className="novel-filter-card__label">已记录推进</div>
+                        <div className="novel-filter-card__value">{expandedArcSummary.progressPercent}%</div>
+                        <div className="novel-filter-card__hint">{expandedArcSummary.statusSummary}</div>
+                      </div>
+                      <div className="novel-filter-card">
+                        <div className="novel-filter-card__label">连续空转</div>
+                        <div className="novel-filter-card__value">{expandedArcSummary.stalledChapterCount}</div>
+                        <div className="novel-filter-card__hint">最长空转 {expandedArcSummary.longestStalledRun} 章</div>
+                      </div>
+                      <div className="novel-filter-card">
+                        <div className="novel-filter-card__label">阶段兑现</div>
+                        <div className="novel-filter-card__value">{expandedArcSummary.hitPhaseCount}/{expandedArcSummary.phaseTargets.length}</div>
+                        <div className="novel-filter-card__hint">未兑现 {expandedArcSummary.missedPhaseCount} 个</div>
+                      </div>
+                    </div>
+                    <div style={{ display: 'grid', gap: 8, padding: '12px 14px', borderRadius: 12, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                      <div style={{ fontWeight: 600 }}>阶段目标</div>
+                      <div style={{ display: 'grid', gap: 8 }}>
+                        {expandedArcSummary.phaseTargets.map((target) => (
+                          <div key={`${expandedArcSummary.arcId}-${target.key}`} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                              <Tag color={target.source === 'manual' ? 'processing' : 'default'} style={{ marginRight: 0 }}>{target.label}</Tag>
+                              <span style={{ fontSize: 12, opacity: 0.72 }}>目标章节：{target.targetChapterNum || '自动推导'}</span>
+                            </div>
+                            <span style={{ fontSize: 12, opacity: 0.82 }}>{target.expectedBeat || '未填写验收条件，默认按推进与兑现判断。'}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    {expandedArcAlerts.length > 0 ? (
+                      <div style={{ display: 'grid', gap: 8, padding: '12px 14px', borderRadius: 12, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                        <div style={{ fontWeight: 600 }}>推进告警</div>
+                        {expandedArcAlerts.slice(0, 4).map((alert, index) => (
+                          <div key={`${alert.code}-${index}`} style={{ display: 'grid', gap: 4 }}>
+                            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                              <Tag color={alert.severity === 'critical' ? 'error' : alert.severity === 'warning' ? 'warning' : 'default'} style={{ marginRight: 0 }}>
+                                {alert.severity === 'critical' ? '高风险' : alert.severity === 'warning' ? '提醒' : '信息'}
+                              </Tag>
+                              <span style={{ fontSize: 12, fontWeight: 600 }}>{alert.title}</span>
+                            </div>
+                            <div style={{ fontSize: 12, opacity: 0.72 }}>{alert.detail}</div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
                 {selectedChapterIds.length > 0 ? (
                   <div className="novel-filter-bar" style={{ marginBottom: 16 }}>
                     <div className="novel-filter-bar__row">
@@ -491,6 +692,7 @@ export default function Outline({ novelId }: Props) {
                               <div ref={prov.innerRef} {...prov.draggableProps} style={{ ...prov.draggableProps.style, opacity: snapshot.isDragging ? 0.82 : 1 }}>
                                 <ChapterCard
                                   chapter={chapter}
+                                  arcPoint={arcPointMap.get(`${expandedArc.id}:${chapter.id}`)}
                                   selected={selectedChapterIds.includes(chapter.id)}
                                   dragHandleProps={prov.dragHandleProps ?? undefined}
                                   onClick={(event) => handleChapterSelection(event, chapter, expandedArcChapters)}
@@ -511,6 +713,7 @@ export default function Outline({ novelId }: Props) {
                       <ChapterCard
                         key={chapter.id}
                         chapter={chapter}
+                        arcPoint={arcPointMap.get(`${expandedArc.id}:${chapter.id}`)}
                         selected={selectedChapterIds.includes(chapter.id)}
                         onClick={(event) => handleChapterSelection(event, chapter, expandedArcChapters)}
                       />
@@ -549,6 +752,23 @@ export default function Outline({ novelId }: Props) {
           <Form.Item name="arcSummary" label="本弧概述"><Input.TextArea rows={5} placeholder="写清起点、转折和阶段收束" /></Form.Item>
           <Form.Item name="growthLedger" label="成长账本"><Input.TextArea rows={4} placeholder="写清这一弧主角具体获得了什么变化" /></Form.Item>
           <Form.Item name="costLedger" label="代价账本"><Input.TextArea rows={4} placeholder="写清这一弧具体付出了什么代价" /></Form.Item>
+          <div style={{ display: 'grid', gap: 12 }}>
+            <div style={{ fontWeight: 600, fontSize: 13 }}>阶段目标覆盖</div>
+            <div style={{ fontSize: 12, opacity: 0.72 }}>默认按章节范围自动推导 25% / 50% / 75% / 收束；只有你填写的内容才会作为覆盖配置保存。</div>
+            {PHASE_FIELD_CONFIG.map((phase) => (
+              <div key={phase.key} style={{ display: 'grid', gap: 8, padding: '12px 14px', borderRadius: 12, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                <div style={{ fontWeight: 600 }}>{phase.label}</div>
+                <div style={{ display: 'flex', gap: 12 }}>
+                  <Form.Item name={phase.chapterField} label="目标章节" style={{ flex: 1, marginBottom: 0 }}>
+                    <InputNumber min={1} style={{ width: '100%' }} placeholder="留空则自动推导" />
+                  </Form.Item>
+                  <Form.Item name={phase.beatField} label="验收条件" style={{ flex: 2, marginBottom: 0 }}>
+                    <Input placeholder="例如：主线真相第一次被证实、关系彻底翻面" />
+                  </Form.Item>
+                </div>
+              </div>
+            ))}
+          </div>
         </Form>
       </Modal>
     </WorkspacePage>
@@ -557,11 +777,13 @@ export default function Outline({ novelId }: Props) {
 
 function ChapterCard({
   chapter,
+  arcPoint,
   selected,
   dragHandleProps,
   onClick,
 }: {
   chapter: Chapter
+  arcPoint?: StoryArcProgressPoint
   selected: boolean
   dragHandleProps?: DraggableProvidedDragHandleProps
   onClick: (event: React.MouseEvent<HTMLDivElement>) => void
@@ -580,6 +802,13 @@ function ChapterCard({
         </div>
         <div className="novel-outline-chapter-card__title">{chapter.title || `第 ${chapter.chapterNum} 章`}</div>
         {chapter.outline ? <div className="novel-outline-chapter-card__summary" style={{ overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{chapter.outline}</div> : null}
+        {arcPoint ? (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+            <Tag color={arcPoint.progressHit ? 'success' : 'default'} style={{ marginRight: 0 }}>{arcPoint.progressHit ? '推进章' : '空转章'}</Tag>
+            {arcPoint.checkpointPhaseLabels.map((label) => <Tag key={`${chapter.id}-${label}`} color={arcPoint.progressHit ? 'processing' : 'warning'} style={{ marginRight: 0 }}>{label}</Tag>)}
+            {arcPoint.alertDetails.length > 0 ? <Tag color="error" style={{ marginRight: 0 }}>{arcPoint.alertDetails.length} 条告警</Tag> : null}
+          </div>
+        ) : null}
         <div className="novel-outline-chapter-card__words" style={{ marginTop: 6 }}>{chapter.wordCount ?? 0} / {chapter.targetWords ?? 0} 字</div>
       </div>
     </div>

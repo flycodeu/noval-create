@@ -85,6 +85,19 @@ function pressureColor(value: number): string {
   return '#52c41a'
 }
 
+function arcProgressRateColor(value: number): string {
+  if (value >= 45) return '#52c41a'
+  if (value >= 30) return '#faad14'
+  if (value >= 15) return '#fa8c16'
+  return '#f5222d'
+}
+
+function arcAlertColor(severity: QualityDashboardData['storyArcProgressAlerts'][number]['severity']): string {
+  if (severity === 'critical') return 'error'
+  if (severity === 'warning') return 'warning'
+  return 'default'
+}
+
 function paceMarkerLabel(marker?: QualityDashboardData['storyDynamicsTrend'][number]['paceMarker']): string {
   if (marker === 'setup') return '铺垫'
   if (marker === 'conflict') return '冲突'
@@ -118,13 +131,16 @@ export default function QualityDashboard({ novelId }: Props) {
 
   const hasScoreData = Boolean(data && data.totalChaptersScored > 0)
   const hasStoryDynamicsData = Boolean(data && data.protagonistSetbackSummary.chapterCount > 0)
+  const hasArcProgressData = Boolean(data && (data.storyArcProgressSummary.trackedArcCount > 0 || data.storyArcProgressAlerts.length > 0))
   const hasDialogueData = Boolean(data && data.dialogueFingerprintStats.eligibleCharacterCount > 0)
+  const hasStateData = Boolean(data && (data.worldStateSummary.trackedEntityCount > 0 || data.recentWorldStateAlerts.length > 0))
+  const hasRecallData = Boolean(data && (data.recallSummary.analyzedChapterCount > 0 || data.recentRecallAlerts.length > 0))
 
-  if (!data || (!hasScoreData && !hasStoryDynamicsData && !hasDialogueData)) {
+  if (!data || (!hasScoreData && !hasStoryDynamicsData && !hasArcProgressData && !hasDialogueData && !hasStateData && !hasRecallData)) {
     return (
       <WorkspacePage title="质量监控" description="查看各章节的AI评分与质量趋势。">
         <WorkspacePanel title="暂无数据">
-          <Empty description="还没有可用的 AI 评分、对白指纹或结构节奏跟踪数据。先运行章节审校或 AI 评分后再来查看。" />
+          <Empty description="还没有可用的 AI 评分、对白指纹、状态稳定性或结构节奏跟踪数据。先运行章节审校或 AI 评分后再来查看。" />
         </WorkspacePanel>
       </WorkspacePage>
     )
@@ -137,6 +153,7 @@ export default function QualityDashboard({ novelId }: Props) {
       metrics={[
         <WorkspaceMetric key="scored" label="已评分章节" value={data.totalChaptersScored} />,
         <WorkspaceMetric key="tracked" label="节奏追踪章节" value={data.protagonistSetbackSummary.chapterCount} />,
+        <WorkspaceMetric key="arc" label="跟踪故事弧" value={data.storyArcProgressSummary.trackedArcCount} />,
         <WorkspaceMetric key="avg" label="平均总分 / 压力" value={hasScoreData ? `${data.averageOverallScore} / 10` : `${data.protagonistSetbackSummary.averagePressure}`} />,
       ]}
     >
@@ -189,6 +206,40 @@ export default function QualityDashboard({ novelId }: Props) {
           volumeEntries={data.volumeStoryDynamics}
         />
       </WorkspacePanel>
+
+      {hasArcProgressData ? (
+        <WorkspacePanel title="故事弧推进" description="查看每条故事弧的推进率、空转率、阶段兑现和卷级分布。">
+          <StoryArcProgressPanel
+            summary={data.storyArcProgressSummary}
+            trend={data.storyArcProgressTrend}
+            arcs={data.storyArcProgressArcs}
+            alerts={data.storyArcProgressAlerts}
+            volumeEntries={data.storyArcProgressVolumes}
+          />
+        </WorkspacePanel>
+      ) : null}
+
+      {hasRecallData ? (
+        <WorkspacePanel title="召回可靠性" description="查看历史片段召回是否过度依赖、以及是否命中过期信息。">
+          <RecallReliabilityPanel
+            summary={data.recallSummary}
+            alerts={data.recentRecallAlerts}
+            volumeEntries={data.volumeRecallDiagnostics}
+          />
+        </WorkspacePanel>
+      ) : null}
+
+      {hasStateData ? (
+        <WorkspacePanel title="状态稳定性" description="查看人物、物品、关系、势力与地点的跳变和冲突是否在放大。">
+          <WorldStateStabilityPanel
+            trend={data.worldStateTrend}
+            alerts={data.recentWorldStateAlerts}
+            conflictEntities={data.worldConflictEntities}
+            summary={data.worldStateSummary}
+            volumeEntries={data.volumeWorldStateStability}
+          />
+        </WorkspacePanel>
+      ) : null}
 
       {hasScoreData ? (
         <>
@@ -286,10 +337,91 @@ export default function QualityDashboard({ novelId }: Props) {
             <LanguageDriftDetails metrics={selectedChapter.languageDriftMetrics} />
             <DialogueReviewDetails review={selectedChapter.dialogueReview} />
             <StoryDynamicsDetails dynamics={selectedChapter.storyDynamics} />
+            <StoryArcProgressDetails progress={selectedChapter.storyArcProgress} />
+            <RecallDiagnosticsDetails diagnostics={selectedChapter.recallDiagnostics} />
+            <WorldStateAlertDetails alerts={selectedChapter.worldStateAlerts} />
           </div>
         ) : null}
       </Modal>
     </WorkspacePage>
+  )
+}
+
+function RecallReliabilityPanel({
+  summary,
+  alerts,
+  volumeEntries,
+}: {
+  summary: QualityDashboardData['recallSummary']
+  alerts: QualityDashboardData['recentRecallAlerts']
+  volumeEntries: QualityDashboardData['volumeRecallDiagnostics']
+}) {
+  if (summary.analyzedChapterCount === 0 && alerts.length === 0) {
+    return <Empty description="暂无召回可靠性数据" />
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>分析章节</div>
+          <div style={{ fontSize: 22, fontWeight: 700 }}>{summary.analyzedChapterCount}</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>已纳入召回可靠性诊断的章节数</div>
+        </div>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>召回依赖率</div>
+          <div style={{ fontSize: 22, fontWeight: 700 }}>{summary.recallDependencyRate}%</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>实际保留下来的背景补充片段占比</div>
+        </div>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>过期召回</div>
+          <div style={{ fontSize: 22, fontWeight: 700 }}>{summary.staleRecallCount}</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>被识别为疑似过期的历史片段</div>
+        </div>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>过期召回率</div>
+          <div style={{ fontSize: 22, fontWeight: 700 }}>{summary.staleRecallRate}%</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>本地回查命中里疑似过期片段的平均占比</div>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', display: 'grid', gap: 8 }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>近期过期召回章节</div>
+          {alerts.length > 0 ? alerts.map((alert) => (
+            <div key={alert.chapterId} style={{ display: 'grid', gap: 4 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Tag color="warning" style={{ marginRight: 0 }}>过期召回</Tag>
+                <span style={{ fontSize: 12, fontWeight: 600 }}>第{alert.chapterNum}章 · {alert.title}</span>
+              </div>
+              <div style={{ fontSize: 11, opacity: 0.65 }}>{alert.detail}</div>
+            </div>
+          )) : <div style={{ fontSize: 12, opacity: 0.6 }}>最近没有新的过期召回章节。</div>}
+        </div>
+
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', display: 'grid', gap: 8 }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>诊断说明</div>
+          <div style={{ fontSize: 12, opacity: 0.72 }}>质量看板里的召回可靠性采用本地关键词回查估算，只用于发现高风险章节。</div>
+          <div style={{ fontSize: 12, opacity: 0.72 }}>实际生成链路仍以硬约束和结构化状态为主，召回只作背景补充。</div>
+          <div style={{ fontSize: 12, opacity: 0.72 }}>当前保留片段 {summary.selectedHitCount} 条，本地兜底命中 {summary.fallbackHitCount} 条。</div>
+        </div>
+      </div>
+
+      {volumeEntries.length > 0 ? (
+        <div style={{ display: 'grid', gap: 12 }}>
+          <div style={{ fontWeight: 600 }}>卷级召回诊断</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+            {volumeEntries.map((volume) => (
+              <div key={volume.volumeId} style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', display: 'grid', gap: 8 }}>
+                <div style={{ fontWeight: 600 }}>{volume.volumeName}</div>
+                <div style={{ fontSize: 11, opacity: 0.6 }}>第{volume.chapterStart}-{volume.chapterEnd}章 · {volume.chapterCount} 章</div>
+                <div style={{ fontSize: 12 }}>依赖率 {volume.recallDependencyRate}% · 过期 {volume.staleRecallCount} · 过期率 {volume.staleRecallRate}%</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
   )
 }
 
@@ -907,6 +1039,237 @@ function StoryDynamicsPanel({
   )
 }
 
+function StoryArcProgressPanel({
+  summary,
+  trend,
+  arcs,
+  alerts,
+  volumeEntries,
+}: {
+  summary: QualityDashboardData['storyArcProgressSummary']
+  trend: QualityDashboardData['storyArcProgressTrend']
+  arcs: QualityDashboardData['storyArcProgressArcs']
+  alerts: QualityDashboardData['storyArcProgressAlerts']
+  volumeEntries: QualityDashboardData['storyArcProgressVolumes']
+}) {
+  if (summary.trackedArcCount === 0 && alerts.length === 0) {
+    return <Empty description="暂无故事弧推进数据" />
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>跟踪故事弧</div>
+          <div style={{ fontSize: 22, fontWeight: 700 }}>{summary.trackedArcCount}</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>已进入推进分析层的主线与支线</div>
+        </div>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>推进章 / 空转章</div>
+          <div style={{ fontSize: 22, fontWeight: 700 }}>{summary.progressChapterCount} / {summary.stalledChapterCount}</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>覆盖章节 {summary.coveredChapterCount}</div>
+        </div>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>停滞故事弧</div>
+          <div style={{ fontSize: 22, fontWeight: 700 }}>{summary.stalledArcCount}</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>连续空转过长或阶段未兑现</div>
+        </div>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>严重告警</div>
+          <div style={{ fontSize: 22, fontWeight: 700 }}>{summary.criticalAlertCount}</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>优先回查阶段收束和长段空转</div>
+        </div>
+      </div>
+
+      {trend.length > 0 ? (
+        <div style={{ display: 'grid', gap: 8 }}>
+          <div style={{ fontWeight: 600 }}>推进 / 空转曲线</div>
+          <MiniTrendRow label="推进章数" points={trend.map((point) => ({ chapterNum: point.chapterNum, value: point.progressCount }))} />
+          <MiniTrendRow label="空转章数" points={trend.map((point) => ({ chapterNum: point.chapterNum, value: point.stalledCount }))} />
+        </div>
+      ) : null}
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', display: 'grid', gap: 8 }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>近期推进告警</div>
+          {alerts.length > 0 ? alerts.slice(0, 6).map((alert, index) => (
+            <div key={`${alert.code}-${index}`} style={{ display: 'grid', gap: 4 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <Tag color={arcAlertColor(alert.severity)} style={{ marginRight: 0 }}>
+                  {alert.severity === 'critical' ? '高风险' : alert.severity === 'warning' ? '提醒' : '信息'}
+                </Tag>
+                <span style={{ fontSize: 12, fontWeight: 600 }}>{alert.arcName} · {alert.title}</span>
+              </div>
+              <div style={{ fontSize: 11, opacity: 0.65 }}>{alert.detail}</div>
+            </div>
+          )) : <div style={{ fontSize: 12, opacity: 0.6 }}>最近没有新的推进告警。</div>}
+        </div>
+
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', display: 'grid', gap: 8 }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>故事弧摘要</div>
+          {arcs.length > 0 ? arcs.slice(0, 6).map((arc) => (
+            <div key={arc.arcId} style={{ display: 'grid', gap: 4 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+                <div style={{ fontSize: 12, fontWeight: 600 }}>{arc.arcName}</div>
+                <span style={{ color: arcProgressRateColor(arc.progressRate), fontWeight: 700 }}>{arc.progressRate}%</span>
+              </div>
+              <div style={{ fontSize: 11, opacity: 0.65 }}>{arc.statusSummary}</div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <Tag color={arc.stallRate >= 70 ? 'error' : arc.stallRate >= 50 ? 'warning' : 'default'} style={{ marginRight: 0 }}>空转 {arc.stallRate}%</Tag>
+                <Tag color={arc.missedPhaseCount > 0 ? 'error' : arc.hitPhaseCount > 0 ? 'processing' : 'default'} style={{ marginRight: 0 }}>
+                  阶段 {arc.hitPhaseCount}/{arc.phaseTargets.length}
+                </Tag>
+              </div>
+            </div>
+          )) : <div style={{ fontSize: 12, opacity: 0.6 }}>尚未形成可分析的故事弧。</div>}
+        </div>
+      </div>
+
+      {volumeEntries.length > 0 ? (
+        <div style={{ display: 'grid', gap: 12 }}>
+          <div style={{ fontWeight: 600 }}>卷级推进摘要</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
+            {volumeEntries.map((volume) => (
+              <div key={volume.volumeId} style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', display: 'grid', gap: 8 }}>
+                <div style={{ fontWeight: 600 }}>{volume.volumeName}</div>
+                <div style={{ fontSize: 11, opacity: 0.6 }}>第{volume.chapterStart}-{volume.chapterEnd}章 · {volume.chapterCount} 章</div>
+                {volume.arcEntries.length > 0 ? volume.arcEntries.slice(0, 4).map((arcEntry) => (
+                  <div key={`${volume.volumeId}-${arcEntry.arcId}`} style={{ fontSize: 12 }}>
+                    {arcEntry.arcName}：推进 {arcEntry.progressRate}% · 空转 {arcEntry.stallRate}% · 阶段 {arcEntry.hitPhaseLabels.length}/{arcEntry.hitPhaseLabels.length + arcEntry.missedPhaseLabels.length}
+                  </div>
+                )) : <div style={{ fontSize: 12, opacity: 0.6 }}>本卷暂无故事弧覆盖数据。</div>}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function worldStateSeverityColor(severity: QualityDashboardData['recentWorldStateAlerts'][number]['severity']): string {
+  if (severity === 'critical') return 'red'
+  if (severity === 'warning') return 'orange'
+  return 'default'
+}
+
+function worldStateEntityLabel(entityType: QualityDashboardData['recentWorldStateAlerts'][number]['entityType']): string {
+  if (entityType === 'character') return '人物'
+  if (entityType === 'faction') return '势力'
+  if (entityType === 'item') return '物品'
+  if (entityType === 'relation') return '关系'
+  return '地点'
+}
+
+function WorldStateStabilityPanel({
+  trend,
+  alerts,
+  conflictEntities,
+  summary,
+  volumeEntries,
+}: {
+  trend: QualityDashboardData['worldStateTrend']
+  alerts: QualityDashboardData['recentWorldStateAlerts']
+  conflictEntities: QualityDashboardData['worldConflictEntities']
+  summary: QualityDashboardData['worldStateSummary']
+  volumeEntries: QualityDashboardData['volumeWorldStateStability']
+}) {
+  if (summary.trackedEntityCount === 0 && alerts.length === 0) {
+    return <Empty description="暂无状态稳定性数据" />
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>跟踪实体</div>
+          <div style={{ fontSize: 22, fontWeight: 700 }}>{summary.trackedEntityCount}</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>统一总账已接管的人物与世界实体</div>
+        </div>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>状态跳变</div>
+          <div style={{ fontSize: 22, fontWeight: 700 }}>{summary.driftAlertCount}</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>缺少事件承接的跨章节变化</div>
+        </div>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>状态冲突</div>
+          <div style={{ fontSize: 22, fontWeight: 700 }}>{summary.conflictAlertCount}</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>不可用物品、敌对关系等矛盾状态</div>
+        </div>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>预警快照</div>
+          <div style={{ fontSize: 22, fontWeight: 700 }}>{summary.warningCount}</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>账本中缺少原因或高风险状态的记录数</div>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', display: 'grid', gap: 8 }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>世界状态概览</div>
+          <div style={{ fontSize: 12, opacity: 0.72 }}>人物 {summary.trackedByType.character} · 势力 {summary.trackedByType.faction} · 物品 {summary.trackedByType.item}</div>
+          <div style={{ fontSize: 12, opacity: 0.72 }}>关系 {summary.trackedByType.relation} · 地点 {summary.trackedByType.location}</div>
+          <div style={{ fontSize: 12, opacity: 0.72 }}>冲突实体 {summary.conflictEntityCount} · 严重告警 {summary.criticalCount}</div>
+          {summary.recentConflictEntities.length > 0 ? (
+            <div style={{ fontSize: 11, opacity: 0.6 }}>近期命中：{summary.recentConflictEntities.join('、')}</div>
+          ) : (
+            <div style={{ fontSize: 11, opacity: 0.6 }}>最近没有新的冲突实体。</div>
+          )}
+        </div>
+
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', display: 'grid', gap: 8 }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>近期高风险实体</div>
+          {alerts.length > 0 ? alerts.slice(0, 5).map((alert, index) => (
+            <div key={`${alert.summary}-${index}`} style={{ display: 'grid', gap: 4 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Tag color={worldStateSeverityColor(alert.severity)} style={{ marginRight: 0 }}>{alert.alertType === 'conflict' ? '冲突' : '跳变'}</Tag>
+                <span style={{ fontSize: 12, fontWeight: 600 }}>{worldStateEntityLabel(alert.entityType)} · {alert.entityName}</span>
+              </div>
+              <div style={{ fontSize: 11, opacity: 0.65 }}>{alert.summary}</div>
+            </div>
+          )) : <div style={{ fontSize: 12, opacity: 0.6 }}>最近窗口内没有新的状态告警。</div>}
+        </div>
+
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', display: 'grid', gap: 8 }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>跨章节趋势</div>
+          <MiniTrendRow label="状态跳变" points={trend.map((point) => ({ chapterNum: point.chapterNum, value: point.driftCount }))} />
+          <MiniTrendRow label="状态冲突" points={trend.map((point) => ({ chapterNum: point.chapterNum, value: point.conflictCount }))} />
+          <MiniTrendRow label="预警快照" points={trend.map((point) => ({ chapterNum: point.chapterNum, value: point.warningCount }))} />
+        </div>
+
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', display: 'grid', gap: 8 }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>冲突实体列表</div>
+          {conflictEntities.length > 0 ? conflictEntities.slice(0, 5).map((entity, index) => (
+            <div key={`${entity.entityType}-${entity.entityId}-${index}`} style={{ display: 'grid', gap: 4 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Tag color={worldStateSeverityColor(entity.severity)} style={{ marginRight: 0 }}>
+                  {entity.conflictCount > 0 ? '冲突实体' : '跳变实体'}
+                </Tag>
+                <span style={{ fontSize: 12, fontWeight: 600 }}>{worldStateEntityLabel(entity.entityType)} · {entity.entityName}</span>
+              </div>
+              <div style={{ fontSize: 11, opacity: 0.65 }}>{entity.reasons.join('；') || entity.summaryText}</div>
+            </div>
+          )) : <div style={{ fontSize: 12, opacity: 0.6 }}>当前没有需要优先回查的冲突实体。</div>}
+        </div>
+      </div>
+
+      {volumeEntries.length > 0 ? (
+        <div style={{ display: 'grid', gap: 12 }}>
+          <div style={{ fontWeight: 600 }}>卷级状态摘要</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+            {volumeEntries.map((volume) => (
+              <div key={volume.volumeId} style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', display: 'grid', gap: 8 }}>
+                <div style={{ fontWeight: 600 }}>{volume.volumeName}</div>
+                <div style={{ fontSize: 11, opacity: 0.6 }}>第{volume.chapterStart}-{volume.chapterEnd}章 · {volume.chapterCount} 章</div>
+                <div style={{ fontSize: 12 }}>跳变 {volume.driftAlertCount} · 冲突 {volume.conflictAlertCount} · 预警 {volume.warningCount}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 function LanguageDriftDetails({ metrics }: { metrics?: LanguageDriftMetrics }) {
   if (!metrics) {
     return <div style={{ fontSize: 12, opacity: 0.55 }}>暂无 AI 味分解数据</div>
@@ -969,6 +1332,68 @@ function StoryDynamicsDetails({ dynamics }: { dynamics?: QualityDashboardData['c
       <div style={{ fontSize: 12 }}>代价：{dynamics.costPresent ? `${dynamics.costResolutionState || 'new'}${dynamics.costSummary ? ` · ${dynamics.costSummary}` : ''}` : '无明确代价'}</div>
       <div style={{ fontSize: 12 }}>反转：{dynamics.reversalMarker ? `${dynamics.reversalSupportState || 'weak'}${dynamics.reversalSummary ? ` · ${dynamics.reversalSummary}` : ''}` : '无'}</div>
       <div style={{ fontSize: 12 }}>节奏标签：{paceMarkerLabel(dynamics.paceMarker)} · 阶段回报：{dynamics.rewardState}</div>
+    </div>
+  )
+}
+
+function StoryArcProgressDetails({ progress }: { progress?: QualityDashboardData['chapterDetails'][number]['storyArcProgress'] }) {
+  if (!progress || progress.length === 0) {
+    return <div style={{ fontSize: 12, opacity: 0.55 }}>本章暂无故事弧推进数据</div>
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 8 }}>
+      <div style={{ fontWeight: 600 }}>故事弧推进</div>
+      {progress.map((entry) => (
+        <div key={`${entry.arcId}-${entry.chapterId}`} style={{ display: 'grid', gap: 4 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 12, fontWeight: 600 }}>{entry.arcName}</span>
+            <Tag color={entry.progressHit ? 'success' : 'default'} style={{ marginRight: 0 }}>{entry.progressHit ? '推进章' : '空转章'}</Tag>
+            {entry.checkpointPhaseLabels.map((label) => <Tag key={`${entry.arcId}-${label}`} color={entry.progressHit ? 'processing' : 'warning'} style={{ marginRight: 0 }}>{label}</Tag>)}
+          </div>
+          <div style={{ fontSize: 12 }}>推进度：{entry.progressPercent}%{entry.arcProgressText ? ` · ${entry.arcProgressText}` : ''}</div>
+          {entry.reviewRisks.length > 0 ? <div style={{ fontSize: 12 }}>审校风险：{entry.reviewRisks.join('；')}</div> : null}
+          {entry.alertDetails.length > 0 ? <div style={{ fontSize: 12, opacity: 0.72 }}>告警：{entry.alertDetails.join('；')}</div> : null}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function RecallDiagnosticsDetails({ diagnostics }: { diagnostics?: QualityDashboardData['chapterDetails'][number]['recallDiagnostics'] }) {
+  if (!diagnostics || diagnostics.totalHitCount === 0) {
+    return <div style={{ fontSize: 12, opacity: 0.55 }}>本章暂无召回可靠性数据</div>
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 8 }}>
+      <div style={{ fontWeight: 600 }}>召回可靠性</div>
+      <div style={{ fontSize: 12 }}>召回依赖率：{diagnostics.recallDependencyRate}% · 过期召回率：{diagnostics.staleRecallRate}%</div>
+      <div style={{ fontSize: 12 }}>可用片段：{diagnostics.selectedHitCount} · 过期片段：{diagnostics.staleRecallCount} · 兜底命中：{diagnostics.fallbackHitCount}</div>
+      {diagnostics.summaryLines.length > 0 ? (
+        <div style={{ fontSize: 12, opacity: 0.72 }}>{diagnostics.summaryLines.join(' ')}</div>
+      ) : null}
+    </div>
+  )
+}
+
+function WorldStateAlertDetails({ alerts }: { alerts?: QualityDashboardData['chapterDetails'][number]['worldStateAlerts'] }) {
+  if (!alerts || alerts.length === 0) {
+    return <div style={{ fontSize: 12, opacity: 0.55 }}>本章暂无状态稳定性告警</div>
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 8 }}>
+      <div style={{ fontWeight: 600 }}>状态稳定性</div>
+      {alerts.map((alert, index) => (
+        <div key={`${alert.summary}-${index}`} style={{ display: 'grid', gap: 4 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Tag color={worldStateSeverityColor(alert.severity)} style={{ marginRight: 0 }}>{alert.alertType === 'conflict' ? '冲突' : '跳变'}</Tag>
+            <span style={{ fontSize: 12, fontWeight: 600 }}>{worldStateEntityLabel(alert.entityType)} · {alert.entityName}</span>
+          </div>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>{alert.summary}</div>
+        </div>
+      ))}
     </div>
   )
 }

@@ -1035,6 +1035,95 @@ export interface NovelContextStatus {
   staleAssetLabels: string[]
 }
 
+export type ChapterContextComplexity = 'simple' | 'standard' | 'key'
+export type ChapterContextStage = 'scenePlan' | 'draft' | 'review' | 'rewrite'
+export type RecallBucketKey = 'character' | 'rule' | 'thread'
+export type RecallSearchMode = 'vector' | 'keyword'
+export type HardConstraintSourceLabel =
+  | 'chapterGoal'
+  | 'characterStates'
+  | 'worldStates'
+  | 'relationSummary'
+  | 'itemSummary'
+  | 'openLoops'
+  | 'continuityNotes'
+
+export interface HardConstraintEntryPreview {
+  label: HardConstraintSourceLabel
+  title: string
+  content: string
+  originalTokens: number
+  allocatedTokens: number
+  truncated: boolean
+}
+
+export interface SoftContextBudgetUsage {
+  budget: number
+  used: number
+  warningCount: number
+  droppedLabels: string[]
+  truncatedLabels: string[]
+}
+
+export interface ConstraintInjectionStatus {
+  promptProfile: ChapterContextStage
+  hardConstraintBudget: number
+  hardConstraintUsed: number
+  softContextBudget: number
+  softContextUsed: number
+  droppedConstraintCount: number
+  truncatedHardConstraintCount: number
+  injectedLabels: HardConstraintSourceLabel[]
+  truncatedLabels: HardConstraintSourceLabel[]
+}
+
+export interface RecallMemorySource {
+  bucket: RecallBucketKey
+  chapterId: number
+  chapterNum: number
+  fragmentType: string
+  similarity: number
+  searchMode: RecallSearchMode
+  sourceLabel: string
+  summary: string
+  stale: boolean
+  staleReasons: string[]
+  overriddenByConstraint: boolean
+}
+
+export interface RecallDiagnostics {
+  searchedBucketCount: number
+  selectedBucketCount: number
+  totalHitCount: number
+  selectedHitCount: number
+  staleRecallCount: number
+  staleRecallRate: number
+  recallDependencyRate: number
+  overriddenHitCount: number
+  fallbackHitCount: number
+  summaryLines: string[]
+}
+
+export interface ChapterContextPreviewStage {
+  stage: ChapterContextStage
+  hardConstraintContext: string
+  hardConstraintSummary: string
+  hardConstraintEntries: HardConstraintEntryPreview[]
+  constraintInjectionStatus: ConstraintInjectionStatus
+  softContextBudgetUsage: SoftContextBudgetUsage
+  droppedConstraintCount: number
+}
+
+export interface ChapterContextPreview {
+  chapterId: number
+  chapterNum: number
+  complexity: ChapterContextComplexity
+  recalledMemory: string
+  recallDiagnostics: RecallDiagnostics
+  recalledMemorySources: RecallMemorySource[]
+  stages: ChapterContextPreviewStage[]
+}
+
 export interface ChapterPublishCheckItem {
   key: string
   label: string
@@ -1074,10 +1163,99 @@ export interface StoryArc {
   arcSummary?: string
   growthLedger?: string
   costLedger?: string
+  phaseTargetsJson?: string
   targetWords?: number
   progressPercent?: number
   stalledChapterCount?: number
   lastProgressChapterNum?: number
+}
+
+export interface StoryArcPhaseTarget {
+  key: 'phase_25' | 'phase_50' | 'phase_75' | 'phase_closure' | string
+  label: string
+  targetRatio: number
+  targetChapterNum?: number
+  expectedBeat?: string
+  source: 'derived' | 'manual'
+}
+
+export interface StoryArcProgressAlert {
+  code: 'stalled_run' | 'phase_missed' | 'low_volume_progress'
+  severity: 'info' | 'warning' | 'critical'
+  arcId: number
+  arcName: string
+  chapterNum?: number
+  volumeId?: number
+  title: string
+  detail: string
+}
+
+export interface StoryArcProgressPoint {
+  arcId: number
+  arcName: string
+  chapterId: number
+  chapterNum: number
+  title: string
+  volumeId?: number
+  progressPercent: number
+  progressHit: boolean
+  stalled: boolean
+  arcProgressText?: string
+  reviewRisks: string[]
+  checkpointPhaseLabels: string[]
+  hitPhaseLabels: string[]
+  alertDetails: string[]
+}
+
+export interface StoryArcProgressSummary {
+  arcId: number
+  arcName: string
+  chapterStart?: number
+  chapterEnd?: number
+  totalChapters: number
+  coveredChapterCount: number
+  progressChapterCount: number
+  stalledChapterCount: number
+  progressRate: number
+  stallRate: number
+  progressPercent: number
+  longestStalledRun: number
+  lastProgressChapterNum?: number
+  phaseTargets: StoryArcPhaseTarget[]
+  hitPhaseCount: number
+  missedPhaseCount: number
+  alerts: StoryArcProgressAlert[]
+  statusSummary: string
+}
+
+export interface VolumeStoryArcProgressArcEntry {
+  arcId: number
+  arcName: string
+  coveredChapterCount: number
+  progressChapterCount: number
+  stalledChapterCount: number
+  progressRate: number
+  stallRate: number
+  hitPhaseLabels: string[]
+  missedPhaseLabels: string[]
+  alertCount: number
+}
+
+export interface VolumeArcProgressEntry {
+  volumeId: number
+  volumeNumber: number
+  volumeName: string
+  chapterStart: number
+  chapterEnd: number
+  chapterCount: number
+  arcEntries: VolumeStoryArcProgressArcEntry[]
+}
+
+export interface StoryArcProgressSnapshot {
+  arcs: StoryArcProgressSummary[]
+  chapterPoints: StoryArcProgressPoint[]
+  alerts: StoryArcProgressAlert[]
+  volumeEntries: VolumeArcProgressEntry[]
 }
 
 export interface StoryThread {
@@ -1513,11 +1691,11 @@ export interface OutlineChapterBatchGenerationResult {
 export interface ConsistencyIssue {
   id: string
   severity: 'high' | 'medium' | 'low'
-  category: 'character' | 'chapter' | 'timeline' | 'item' | 'map' | 'outline' | 'continuity' | 'thread' | 'voice' | 'relation'
+  category: 'character' | 'chapter' | 'timeline' | 'item' | 'map' | 'outline' | 'continuity' | 'thread' | 'voice' | 'relation' | 'worldState'
   title: string
   description: string
   suggestion: string
-  entityType?: 'character' | 'chapter' | 'timeline' | 'item' | 'map' | 'arc' | 'thread'
+  entityType?: 'character' | 'chapter' | 'timeline' | 'item' | 'map' | 'arc' | 'thread' | 'faction' | 'relation' | 'location'
   entityId?: number
   entityLabel?: string
 }
@@ -1544,6 +1722,9 @@ export interface NovelConsistencyReport {
     styledRelationCount: number
     subtextRelationCount: number
     ratedRelationCount: number
+    worldStateTrackedEntityCount: number
+    worldStateDriftAlertCount: number
+    worldStateConflictAlertCount: number
   }
   issues: ConsistencyIssue[]
 }
@@ -1595,6 +1776,108 @@ export interface CharacterStateDriftAlert {
   summary: string
 }
 
+export type WorldStateEntityType = 'character' | 'faction' | 'item' | 'relation' | 'location'
+export type WorldStateSeverity = 'info' | 'warning' | 'critical'
+export type WorldStateAlertType = 'drift' | 'conflict'
+
+export interface WorldStateVersion {
+  id: number
+  novelId: number
+  entityType: WorldStateEntityType
+  entityId: number
+  entityName: string
+  chapterId: number
+  chapterNum: number
+  stateKey: string
+  stateValue?: string
+  normalizedValue?: string
+  summaryText?: string
+  eventCause?: string
+  changeReason?: string
+  sourceKind?: string
+  sourceRef?: string
+  severity?: WorldStateSeverity
+  createdAt: string
+  updatedAt: string
+}
+
+export interface WorldStateSummary {
+  entityType: WorldStateEntityType
+  entityId: number
+  entityName: string
+  chapterId: number
+  chapterNum: number
+  summaryText: string
+  stateItems: string[]
+  eventCause?: string
+  changeReason?: string
+  severity: WorldStateSeverity
+}
+
+export interface WorldStateAlert {
+  alertType: WorldStateAlertType
+  entityType: WorldStateEntityType
+  entityId: number
+  entityName: string
+  chapterId: number
+  chapterNum: number
+  stateKey?: string
+  severity: WorldStateSeverity
+  score: number
+  reasons: string[]
+  summary: string
+}
+
+export interface WorldStateTrendPoint {
+  chapterNum: number
+  driftCount: number
+  conflictCount: number
+  warningCount: number
+}
+
+export interface WorldStateLedgerEntity extends WorldStateSummary {
+  alerts: WorldStateAlert[]
+  driftCount: number
+  conflictCount: number
+}
+
+export interface WorldStateLedgerConflictEntity {
+  entityType: WorldStateEntityType
+  entityId: number
+  entityName: string
+  severity: WorldStateSeverity
+  chapterId: number
+  chapterNum: number
+  summaryText: string
+  alertCount: number
+  driftCount: number
+  conflictCount: number
+  reasons: string[]
+}
+
+export interface WorldStateLedgerOverview {
+  trackedEntityCount: number
+  trackedByType: Record<WorldStateEntityType, number>
+  driftAlertCount: number
+  conflictAlertCount: number
+  warningCount: number
+  criticalCount: number
+  conflictEntityCount: number
+  recentConflictEntities: string[]
+}
+
+export interface WorldStateLedgerSnapshot {
+  generatedAt: string
+  upToChapterNum?: number
+  entities: WorldStateLedgerEntity[]
+  alerts: WorldStateAlert[]
+  conflictEntities: WorldStateLedgerConflictEntity[]
+  trend: WorldStateTrendPoint[]
+  trendSummary: string[]
+  overview: WorldStateLedgerOverview
+  worldStatesText: string
+}
+
 export interface StoryMemorySnapshot {
   generatedAt: string
   chapterCount: number
@@ -1607,6 +1890,12 @@ export interface StoryMemorySnapshot {
   characterLedger: string[]
   characterCurrentStates: CharacterStateSummary[]
   characterStateAlerts: CharacterStateDriftAlert[]
+  worldCurrentStates: WorldStateSummary[]
+  worldStateAlerts: WorldStateAlert[]
+  worldStateOverview: WorldStateLedgerOverview
+  worldConflictEntities: WorldStateLedgerConflictEntity[]
+  characterStateTrendSummary: string[]
+  worldStateTrendSummary: string[]
   worldLedger: string[]
   activeThreads: string[]
   continuityDirectives: string[]
@@ -1796,6 +2085,64 @@ export interface QualityDashboardData {
   storyDynamicsTrend: StoryDynamicsTrendPoint[]
   storyPacingAlerts: StoryDynamicsAlert[]
   volumeStoryDynamics: VolumeStoryDynamicsEntry[]
+  storyArcProgressSummary: {
+    trackedArcCount: number
+    coveredChapterCount: number
+    progressChapterCount: number
+    stalledChapterCount: number
+    stalledArcCount: number
+    criticalAlertCount: number
+  }
+  storyArcProgressTrend: Array<{
+    chapterNum: number
+    activeArcCount: number
+    progressCount: number
+    stalledCount: number
+  }>
+  storyArcProgressArcs: StoryArcProgressSummary[]
+  storyArcProgressAlerts: StoryArcProgressAlert[]
+  storyArcProgressVolumes: VolumeArcProgressEntry[]
+  worldStateTrend: WorldStateTrendPoint[]
+  recentWorldStateAlerts: WorldStateAlert[]
+  worldConflictEntities: WorldStateLedgerConflictEntity[]
+  recallSummary: {
+    analyzedChapterCount: number
+    recallDependencyRate: number
+    staleRecallCount: number
+    staleRecallRate: number
+    fallbackHitCount: number
+    selectedHitCount: number
+  }
+  recentRecallAlerts: Array<{
+    chapterId: number
+    chapterNum: number
+    title: string
+    staleRecallCount: number
+    detail: string
+  }>
+  volumeRecallDiagnostics: Array<{
+    volumeId: number
+    volumeNumber: number
+    volumeName: string
+    chapterStart: number
+    chapterEnd: number
+    chapterCount: number
+    recallDependencyRate: number
+    staleRecallCount: number
+    staleRecallRate: number
+  }>
+  volumeWorldStateStability: Array<{
+    volumeId: number
+    volumeNumber: number
+    volumeName: string
+    chapterStart: number
+    chapterEnd: number
+    chapterCount: number
+    driftAlertCount: number
+    conflictAlertCount: number
+    warningCount: number
+  }>
+  worldStateSummary: WorldStateLedgerOverview
   protagonistSetbackSummary: ProtagonistSetbackSummary
   costPersistenceSummary: CostPersistenceSummary
   reversalDistributionSummary: ReversalDistributionSummary
@@ -1811,6 +2158,9 @@ export interface QualityDashboardData {
     languageDriftMetrics?: LanguageDriftMetrics
     dialogueReview?: ChapterDialogueReviewData
     storyDynamics?: ChapterStoryDynamics
+    storyArcProgress?: StoryArcProgressPoint[]
+    worldStateAlerts?: WorldStateAlert[]
+    recallDiagnostics?: RecallDiagnostics
   }>
   totalChaptersScored: number
   averageOverallScore: number
@@ -2019,6 +2369,9 @@ declare global {
         stats: (id: number) => Promise<{ totalChapters: number; completedChapters: number; totalWords: number; characterCount: number }>
         runConsistencyCheck: (id: number) => Promise<NovelConsistencyReport>
         getStoryMemory: (id: number) => Promise<StoryMemorySnapshot>
+        getWorldStateSnapshot: (id: number, upToChapterNum?: number) => Promise<{ currentStates: WorldStateSummary[]; alerts: WorldStateAlert[]; worldStatesText: string; trendSummary: string[] }>
+        getWorldStateLedgerSnapshot: (id: number, upToChapterNum?: number) => Promise<WorldStateLedgerSnapshot>
+        getWorldStateHistory: (novelId: number, entityType: WorldStateEntityType, entityId: number, stateKey?: string, limit?: number) => Promise<WorldStateVersion[]>
         getContextStatus: (id: number) => Promise<NovelContextStatus>
       }
       structure: {
@@ -2065,6 +2418,7 @@ declare global {
         batchUpdate: (ids: number[], data: Partial<Pick<Chapter, 'status' | 'arcId'>>) => Promise<number>
         batchDelete: (ids: number[]) => Promise<number>
         batchRenumber: (ids: number[], startChapterNum: number) => Promise<number>
+        getContextPreview: (chapterId: number) => Promise<ChapterContextPreview>
         generateContent: (chapterId: number) => Promise<number>
         generateSummary: (chapterId: number) => Promise<void>
         aiCheck: (chapterId: number) => Promise<unknown>
@@ -2162,6 +2516,7 @@ declare global {
       }
       outline: {
         getArcs: (novelId: number) => Promise<StoryArc[]>
+        getArcProgressSnapshot: (novelId: number) => Promise<StoryArcProgressSnapshot>
         createArc: (novelId: number, data: unknown) => Promise<number>
         updateArc: (id: number, data: unknown) => Promise<void>
         deleteArc: (id: number) => Promise<void>

@@ -20,6 +20,10 @@ const api = {
     stats: (id: number) => ipcRenderer.invoke('novel:stats', id),
     runConsistencyCheck: (id: number) => ipcRenderer.invoke('novel:runConsistencyCheck', id),
     getStoryMemory: (id: number) => ipcRenderer.invoke('novel:getStoryMemory', id),
+    getWorldStateSnapshot: (id: number, upToChapterNum?: number) => ipcRenderer.invoke('novel:getWorldStateSnapshot', id, upToChapterNum),
+    getWorldStateLedgerSnapshot: (id: number, upToChapterNum?: number) => ipcRenderer.invoke('novel:getWorldStateLedgerSnapshot', id, upToChapterNum),
+    getWorldStateHistory: (novelId: number, entityType: string, entityId: number, stateKey?: string, limit?: number) =>
+      ipcRenderer.invoke('novel:getWorldStateHistory', novelId, entityType, entityId, stateKey, limit),
     getContextStatus: (id: number) => ipcRenderer.invoke('novel:getContextStatus', id),
   },
 
@@ -69,6 +73,7 @@ const api = {
     batchUpdate: (ids: number[], data: unknown) => ipcRenderer.invoke('chapter:batchUpdate', ids, data),
     batchDelete: (ids: number[]) => ipcRenderer.invoke('chapter:batchDelete', ids),
     batchRenumber: (ids: number[], startChapterNum: number) => ipcRenderer.invoke('chapter:batchRenumber', ids, startChapterNum),
+    getContextPreview: (chapterId: number) => ipcRenderer.invoke('chapter:getContextPreview', chapterId),
     generateContent: (chapterId: number) => ipcRenderer.invoke('chapter:generateContent', chapterId),
     generateSummary: (chapterId: number) => ipcRenderer.invoke('chapter:generateSummary', chapterId),
     aiCheck: (chapterId: number) => ipcRenderer.invoke('chapter:aiCheck', chapterId),
@@ -175,6 +180,7 @@ const api = {
   // Outline APIs
   outline: {
     getArcs: (novelId: number) => ipcRenderer.invoke('outline:getArcs', novelId),
+    getArcProgressSnapshot: (novelId: number) => ipcRenderer.invoke('outline:getArcProgressSnapshot', novelId),
     createArc: (novelId: number, data: unknown) => ipcRenderer.invoke('outline:createArc', novelId, data),
     updateArc: (id: number, data: unknown) => ipcRenderer.invoke('outline:updateArc', id, data),
     deleteArc: (id: number) => ipcRenderer.invoke('outline:deleteArc', id),

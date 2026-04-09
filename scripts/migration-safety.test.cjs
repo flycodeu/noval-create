@@ -85,6 +85,11 @@ function assertRequiredColumns(db) {
   assert.ok(getColumns(db, 'chapter_versions').has('word_count'))
   assert.ok(getColumns(db, 'operation_logs').has('summary'))
   assert.ok(getColumns(db, 'operation_logs').has('undo_payload_json'))
+  assert.ok(getColumns(db, 'world_state_versions').has('entity_type'))
+  assert.ok(getColumns(db, 'world_state_versions').has('entity_name'))
+  assert.ok(getColumns(db, 'world_state_versions').has('state_key'))
+  assert.ok(getColumns(db, 'world_state_versions').has('normalized_value'))
+  assert.ok(getColumns(db, 'world_state_versions').has('severity'))
 }
 
 function testFreshDbIsIdempotent() {
@@ -106,6 +111,10 @@ function testFreshDbIsIdempotent() {
       '0010_model_parameter_defaults',
       '0011_embedding_and_style_tables',
       '0012_story_memory_context_cards',
+      '0013_asset_modules_and_blurbs',
+      '0014_character_dialogue_fingerprints',
+      '0015_character_state_versions',
+      '0016_world_state_versions',
     ])
 
     runMigrations(db)
@@ -196,6 +205,10 @@ function testPartialSchemaCanResume() {
       '0010_model_parameter_defaults',
       '0011_embedding_and_style_tables',
       '0012_story_memory_context_cards',
+      '0013_asset_modules_and_blurbs',
+      '0014_character_dialogue_fingerprints',
+      '0015_character_state_versions',
+      '0016_world_state_versions',
     ])
 
     const configs = db.prepare(`

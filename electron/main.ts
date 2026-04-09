@@ -37,6 +37,7 @@ import * as exportService from './services/export.service'
 import * as factionService from './services/faction.service'
 import * as glossaryService from './services/glossary.service'
 import * as qualityDashboardService from './services/quality-dashboard.service'
+import * as storyArcProgressService from './services/story-arc-progress.service'
 import * as embeddingService from './services/embedding.service'
 import * as styleAnalysisService from './services/style-analysis.service'
 import * as parallelGenerationService from './services/parallel-generation.service'
@@ -52,6 +53,7 @@ import * as themeVoiceService from './services/theme-voice.service'
 import * as timelineService from './services/timeline.service'
 import * as historyService from './services/history.service'
 import * as storyMemoryService from './services/story-memory.service'
+import * as worldStateService from './services/world-state.service'
 import * as promptOverrideService from './services/prompt-override.service'
 import * as revisionTaskService from './services/revision-task.service'
 import * as sceneTemplateService from './services/scene-template.service'
@@ -273,6 +275,18 @@ function registerIpcHandlers() {
     parallelGenerationService.mergeParallelOutputs(segments as any))
   ipcMain.handle('novel:runConsistencyCheck', (_, id) => consistencyService.buildNovelConsistencyReport(id))
   ipcMain.handle('novel:getStoryMemory', (_, id) => storyMemoryService.buildStoryMemorySnapshot(id))
+  ipcMain.handle('novel:getWorldStateSnapshot', (_, novelId: number, upToChapterNum?: number) =>
+    worldStateService.getWorldStateContextSnapshot(requireId(novelId, 'novelId'), { upToChapterNum }))
+  ipcMain.handle('novel:getWorldStateLedgerSnapshot', (_, novelId: number, upToChapterNum?: number) =>
+    worldStateService.getWorldStateLedgerSnapshot(requireId(novelId, 'novelId'), { upToChapterNum }))
+  ipcMain.handle('novel:getWorldStateHistory', (_, novelId: number, entityType: string, entityId: number, stateKey?: string, limit?: number) =>
+    worldStateService.listWorldStateHistory(
+      requireId(novelId, 'novelId'),
+      requireString(entityType, 'entityType') as Parameters<typeof worldStateService.listWorldStateHistory>[1],
+      requireId(entityId, 'entityId'),
+      stateKey,
+      typeof limit === 'number' ? limit : 12,
+    ))
   ipcMain.handle('novel:getContextStatus', (_, id) => getNovelContextStatus(id))
 
   ipcMain.handle('structure:getTree', (_, novelId) => storyStructureService.listStoryStructure(novelId))
@@ -317,6 +331,8 @@ function registerIpcHandlers() {
   ipcMain.handle('chapter:batchUpdate', (_, ids, data) => chapterService.batchUpdateChapters(requireIds(ids), data))
   ipcMain.handle('chapter:batchDelete', (_, ids) => chapterService.batchDeleteChapters(requireIds(ids)))
   ipcMain.handle('chapter:batchRenumber', (_, ids, startChapterNum) => chapterService.batchRenumberChapters(requireIds(ids), startChapterNum))
+  ipcMain.handle('chapter:getContextPreview', (_, chapterId) =>
+    chapterService.getChapterContextPreview(requireId(chapterId, 'chapterId')))
   ipcMain.handle('chapter:generateContent', (event, chapterId) =>
     chapterService.generateChapterContent(chapterId, event.sender))
   ipcMain.handle('chapter:generateSummary', (_, chapterId) =>
@@ -444,6 +460,8 @@ function registerIpcHandlers() {
     const db = getDb()
     return db.select().from(storyArcs).where(eq(storyArcs.novelId, novelId)).all()
   })
+  ipcMain.handle('outline:getArcProgressSnapshot', (_, novelId) =>
+    storyArcProgressService.getStoryArcProgressSnapshot(requireId(novelId, 'novelId')))
 
   ipcMain.handle('outline:createArc', (_, novelId, data) => {
     requireId(novelId, 'novelId')

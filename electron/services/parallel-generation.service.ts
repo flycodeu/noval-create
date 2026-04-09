@@ -1,6 +1,7 @@
 import { asc, eq } from 'drizzle-orm'
 import { getDb } from '../database/db'
 import { chapters, storyArcs, storyThreads, characters } from '../database/schema'
+import { getWorldStateContextSnapshot } from './world-state.service'
 
 export interface ParallelSegmentGroup {
   id: string
@@ -206,27 +207,15 @@ export function buildSharedWorldState(
   novelId: number,
   atChapterNum: number,
 ): Record<string, unknown> {
-  const db = getDb()
-  const novel = db.select().from(chapters)
-    .where(eq(chapters.novelId, novelId))
-    .orderBy(asc(chapters.chapterNum))
-    .all()
-
-  const lastChapter = novel
-    .filter((c) => c.chapterNum < atChapterNum && c.continuityStateJson)
-    .pop()
-
-  if (!lastChapter?.continuityStateJson) {
-    return { chapterNum: atChapterNum, state: {} }
-  }
-
-  try {
-    return {
-      chapterNum: atChapterNum,
-      state: JSON.parse(lastChapter.continuityStateJson),
-    }
-  } catch {
-    return { chapterNum: atChapterNum, state: {} }
+  const snapshot = getWorldStateContextSnapshot(novelId, {
+    upToChapterNum: atChapterNum - 1,
+    limit: 12,
+  })
+  return {
+    chapterNum: atChapterNum,
+    currentStates: snapshot.currentStates,
+    alerts: snapshot.alerts,
+    text: snapshot.worldStatesText,
   }
 }
 

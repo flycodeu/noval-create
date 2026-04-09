@@ -632,6 +632,7 @@ export function runMigrations(sqlite: Database.Database) {
   ensureColumn(sqlite, 'timeline_events', 'anchor_invalid', 'INTEGER DEFAULT 0')
   ensureColumn(sqlite, 'story_arcs', 'growth_ledger', 'TEXT')
   ensureColumn(sqlite, 'story_arcs', 'cost_ledger', 'TEXT')
+  ensureColumn(sqlite, 'story_arcs', 'phase_targets_json', 'TEXT')
   ensureColumn(sqlite, 'story_threads', 'thread_type', "TEXT DEFAULT 'subplot'")
   ensureColumn(sqlite, 'story_threads', 'summary', 'TEXT')
   ensureColumn(sqlite, 'story_threads', 'premise', 'TEXT')
@@ -969,6 +970,41 @@ export function runMigrations(sqlite: Database.Database) {
       CREATE INDEX IF NOT EXISTS idx_character_state_versions_novel_chapter
         ON character_state_versions(novel_id, chapter_num);
     `)
+  })
+
+  runMigrationStep(sqlite, '0016_world_state_versions', () => {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS world_state_versions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        entity_type TEXT NOT NULL,
+        entity_id INTEGER NOT NULL,
+        entity_name TEXT NOT NULL,
+        chapter_id INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
+        chapter_num INTEGER NOT NULL,
+        state_key TEXT NOT NULL,
+        state_value TEXT,
+        normalized_value TEXT,
+        summary_text TEXT,
+        event_cause TEXT,
+        change_reason TEXT,
+        source_kind TEXT,
+        source_ref TEXT,
+        severity TEXT DEFAULT 'info',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_world_state_versions_chapter_entity_key
+        ON world_state_versions(chapter_id, entity_type, entity_id, state_key);
+      CREATE INDEX IF NOT EXISTS idx_world_state_versions_novel_entity_key_chapter
+        ON world_state_versions(novel_id, entity_type, entity_id, state_key, chapter_num);
+      CREATE INDEX IF NOT EXISTS idx_world_state_versions_novel_chapter
+        ON world_state_versions(novel_id, chapter_num);
+    `)
+  })
+
+  runMigrationStep(sqlite, '0017_story_arc_phase_targets', () => {
+    ensureColumn(sqlite, 'story_arcs', 'phase_targets_json', 'TEXT')
   })
 }
 

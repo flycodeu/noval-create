@@ -16,6 +16,7 @@ import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-messa
 import AIScorePanel from '../../../components/AIScorePanel'
 import type {
   Chapter,
+  ChapterContextPreview,
   ChapterSegment,
   ChapterVersion,
   ChapterPublishCheck,
@@ -216,6 +217,7 @@ export default function Writing({ novelId }: Props) {
   const [aiResult, setAiResult] = useState<AiCheckPayload | null>(null)
   const [qualityDashboard, setQualityDashboard] = useState<QualityDashboardData | null>(null)
   const [contextStatus, setContextStatus] = useState<NovelContextStatus | null>(null)
+  const [chapterContextPreview, setChapterContextPreview] = useState<ChapterContextPreview | null>(null)
   const [publishCheck, setPublishCheck] = useState<ChapterPublishCheck | null>(null)
   const [hoverChapterId, setHoverChapterId] = useState<number | null>(null)
   const [insightTab, setInsightTab] = useState<InsightTab>('chapter')
@@ -244,6 +246,7 @@ export default function Writing({ novelId }: Props) {
     setStoryItems([])
     setChapterSegments([])
     setAiResult(null)
+    setChapterContextPreview(null)
     setPublishCheck(null)
     setSelectedSnippet(null)
   }, [])
@@ -329,6 +332,19 @@ export default function Writing({ novelId }: Props) {
     setContextStatus(await window.electron.novel.getContextStatus(novelId))
   }, [novelId])
 
+  const refreshChapterContextPreview = useCallback(async (chapter?: Chapter | null) => {
+    if (!chapter) {
+      setChapterContextPreview(null)
+      return
+    }
+    try {
+      setChapterContextPreview(await window.electron.chapter.getContextPreview(chapter.id))
+    } catch (error) {
+      console.error('Failed to load chapter context preview', error)
+      setChapterContextPreview(null)
+    }
+  }, [])
+
   const refreshPublishCheck = useCallback(async (chapterId: number) => {
     setPublishCheck(await window.electron.chapter.runPublishCheck(chapterId))
   }, [])
@@ -350,8 +366,13 @@ export default function Writing({ novelId }: Props) {
     if (versionHistoryOpen) {
       await refreshVersionHistory(chapterId)
     }
-    await Promise.all([refreshPublishCheck(chapterId), refreshContextStatus(), refreshChapterLinks(full)])
-  }, [clearChapterArtifacts, refreshChapterLinks, refreshContextStatus, refreshPublishCheck, refreshVersionHistory, resetEditorHistory, updateChapter, versionHistoryOpen])
+    await Promise.all([
+      refreshPublishCheck(chapterId),
+      refreshContextStatus(),
+      refreshChapterLinks(full),
+      refreshChapterContextPreview(full),
+    ])
+  }, [clearChapterArtifacts, refreshChapterContextPreview, refreshChapterLinks, refreshContextStatus, refreshPublishCheck, refreshVersionHistory, resetEditorHistory, updateChapter, versionHistoryOpen])
 
   const loadChapters = useCallback(async (preferredChapterId?: number) => {
     const list = await window.electron.chapter.list(novelId)
@@ -1084,6 +1105,12 @@ export default function Writing({ novelId }: Props) {
                   </InsightCard>
                 </div>
                 <div className="novel-writing-shell__insight-stack">
+                  <InsightCard title="关键约束注入" eyebrow="本章关键约束已注入" tone="soft">
+                    <ConstraintInjectionCard preview={chapterContextPreview} />
+                  </InsightCard>
+                  <InsightCard title="召回补充层" eyebrow="背景补充 / 非事实源" tone="soft">
+                    <RecallDiagnosticsCard preview={chapterContextPreview} />
+                  </InsightCard>
                   <InsightCard title="生产摘要" eyebrow="AI 主写 / 人工定稿" tone="soft"><StringList items={productionBriefItems} empty="章节进入审校后，这里会先汇总最值得优先处理的定稿建议。" /></InsightCard>
                   <InsightCard title="关联线索" eyebrow="时间轴 / 道具" tone="soft"><StringList items={relatedInsightItems.slice(0, 12)} empty="当前章节暂未关联时间轴事件或关键道具。" /></InsightCard>
                   <InsightCard title="修订提示" eyebrow="复盘重点" tone="soft"><StringList items={reviewInsightItems} empty="运行审校或摘要更新后，这里会汇总需要回看的修订点。" /></InsightCard>
@@ -1096,7 +1123,7 @@ export default function Writing({ novelId }: Props) {
               <div className="novel-writing-shell__insight-stack">
                 <InsightCard title="阶段摘要" eyebrow={storyMemory?.coverageSummary || '长篇覆盖'} tone="soft"><StringList items={storyMemory?.phaseDigest || []} empty="章节量还不大，阶段摘要会在长篇推进后逐步显现。" /></InsightCard>
                 <InsightCard title="剧情里程碑" eyebrow="压缩摘要"><StringList items={storyMemory ? storyMemory.plotMilestones.slice(0, 12) : []} empty="长文记忆尚未生成。" /></InsightCard>
-                <InsightCard title="角色当前状态" eyebrow="状态机 v1" tone="soft"><CharacterStateMemoryCard storyMemory={storyMemory} /></InsightCard>
+                <InsightCard title="人物与世界状态" eyebrow="统一总账" tone="soft"><CharacterStateMemoryCard storyMemory={storyMemory} /></InsightCard>
                 <InsightCard title="活跃线程" eyebrow="待持续追踪" tone="soft"><StringList items={storyMemory ? storyMemory.activeThreads.slice(0, 12) : []} empty="当前没有需要持续追踪的活跃线程。" /></InsightCard>
                 <InsightCard title="时间锚点" eyebrow="时序参照" tone="soft"><StringList items={storyMemory ? storyMemory.timelineAnchors.slice(0, 10) : []} empty="时间轴锚点会在这里同步展示。" /></InsightCard>
                 <InsightCard title="道具账本" eyebrow="状态同步" tone="soft"><StringList items={storyMemory ? storyMemory.itemLedger.slice(0, 10) : []} empty="关键道具与线索的状态变化会记录在这里。" /></InsightCard>
@@ -1129,6 +1156,9 @@ export default function Writing({ novelId }: Props) {
                   </InsightCard>
                   <InsightCard title="主角与节奏风险" eyebrow="跨章节结构告警" tone="soft">
                     <StoryDynamicsHealthCard dashboard={qualityDashboard} currentChapter={currentChapter} reviewNotes={reviewNotes} />
+                  </InsightCard>
+                  <InsightCard title="世界状态概览" eyebrow="总账 / 冲突实体" tone="soft">
+                    <WorldStateHealthCard dashboard={qualityDashboard} />
                   </InsightCard>
                   <InsightCard title="AI 评分与复检" eyebrow="局部诊断" tone="soft">
                     <AIScorePanel
@@ -1234,6 +1264,82 @@ function InsightCard({
   )
 }
 
+function ConstraintInjectionCard({ preview }: { preview: ChapterContextPreview | null }) {
+  if (!preview || preview.stages.length === 0) {
+    return <div className="novel-copy-block">当前章节尚未生成上下文预览。切到具体章节后，这里会展示四个阶段的关键约束注入状态。</div>
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 10 }}>
+      {preview.stages.map((stage) => {
+        const injectedTitles = stage.hardConstraintEntries.map((entry) => entry.title)
+        const truncatedTitles = stage.hardConstraintEntries.filter((entry) => entry.truncated).map((entry) => entry.title)
+        const hasDrop = stage.droppedConstraintCount > 0
+        return (
+          <div key={stage.stage} className="novel-note-list">
+            <div className="novel-note-list__item">
+              <strong>{stage.stage}</strong>
+              {` · 复杂度 ${preview.complexity} · 硬约束 ${stage.constraintInjectionStatus.hardConstraintUsed}/${stage.constraintInjectionStatus.hardConstraintBudget} · 软上下文 ${stage.constraintInjectionStatus.softContextUsed}/${stage.constraintInjectionStatus.softContextBudget}`}
+            </div>
+            <div className="novel-note-list__item">{stage.hardConstraintSummary}</div>
+            <div className="novel-note-list__item">
+              已注入：{injectedTitles.length > 0 ? injectedTitles.join('、') : '无'}
+            </div>
+            <div className="novel-note-list__item">
+              {truncatedTitles.length > 0
+                ? `已压缩：${truncatedTitles.join('、')}`
+                : '硬约束未发生压缩。'}
+            </div>
+            <div className="novel-note-list__item">
+              {hasDrop
+                ? `警告：仍有 ${stage.droppedConstraintCount} 项关键约束未注入。`
+                : '关键约束未发生丢失。'}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function RecallDiagnosticsCard({ preview }: { preview: ChapterContextPreview | null }) {
+  if (!preview) {
+    return <div className="novel-copy-block">上下文预览生成后，这里会展示召回补充的来源、过期拦截和依赖率。</div>
+  }
+
+  const diagnostics = preview.recallDiagnostics
+  const freshSources = preview.recalledMemorySources.filter((source) => !source.stale && !source.overriddenByConstraint).slice(0, 4)
+  const staleSources = preview.recalledMemorySources.filter((source) => source.stale).slice(0, 4)
+
+  return (
+    <div style={{ display: 'grid', gap: 10 }}>
+      <div className="novel-insight-list">
+        <div className="novel-insight-list__item">召回依赖率 {diagnostics.recallDependencyRate}%</div>
+        <div className="novel-insight-list__item">过期召回率 {diagnostics.staleRecallRate}%</div>
+        <div className="novel-insight-list__item">可用片段 {diagnostics.selectedHitCount}</div>
+        <div className="novel-insight-list__item">过期拦截 {diagnostics.staleRecallCount}</div>
+      </div>
+      <StringList items={diagnostics.summaryLines} empty="当前还没有召回诊断摘要。" />
+      <StringList
+        items={freshSources.map((source) => `${source.sourceLabel}：${source.summary}`)}
+        empty="当前没有进入上下文的背景补充片段。"
+      />
+      {staleSources.length > 0 ? (
+        <div className="novel-note-list">
+          {staleSources.map((source, index) => (
+            <div key={`${source.sourceLabel}-${index}`} className="novel-note-list__item">
+              已拦截 · {source.sourceLabel}：{source.staleReasons.join('；')}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="novel-copy-block">当前没有命中过期召回片段。</div>
+      )}
+      {preview.recalledMemory ? <div className="novel-copy-block" style={{ whiteSpace: 'pre-wrap' }}>{preview.recalledMemory}</div> : null}
+    </div>
+  )
+}
+
 function ChapterFocusCard({
   summary,
   nextChapterSeed,
@@ -1266,10 +1372,10 @@ function StringList({ items, empty }: { items: string[]; empty: string }) {
 
 function CharacterStateMemoryCard({ storyMemory }: { storyMemory: StoryMemorySnapshot | null }) {
   if (!storyMemory) {
-    return <div className="novel-copy-block">先运行章节流水线或手动刷新记忆，这里会显示主要角色的当前状态与近期漂移告警。</div>
+    return <div className="novel-copy-block">先运行章节流水线或手动刷新记忆，这里会显示人物与世界实体的当前状态、近期跳变和冲突告警。</div>
   }
 
-  const stateItems = storyMemory.characterCurrentStates
+  const characterStateItems = storyMemory.characterCurrentStates
     .slice(0, 8)
     .map((item) => {
       const reason = item.changeReason && item.changeReason !== '延续前章状态，无新增显式变化'
@@ -1277,17 +1383,33 @@ function CharacterStateMemoryCard({ storyMemory }: { storyMemory: StoryMemorySna
         : ''
       return `${item.characterName}：${item.summaryText}${reason}`
     })
-  const alertItems = storyMemory.characterStateAlerts
+  const worldStateItems = storyMemory.worldCurrentStates
+    .slice(0, 6)
+    .map((item) => `${worldStateEntityLabel(item.entityType)} ${item.entityName}：${item.summaryText}`)
+  const conflictEntityItems = storyMemory.worldConflictEntities
     .slice(0, 4)
-    .map((item) => `${item.characterName}：${item.reasons.join('；')}`)
+    .map((item) => `${worldStateEntityLabel(item.entityType)} ${item.entityName}：${item.reasons.join('；')}`)
+  const alertItems = [
+    ...storyMemory.characterStateAlerts
+    .slice(0, 4)
+      .map((item) => `人物 ${item.characterName}：${item.reasons.join('；')}`),
+    ...storyMemory.worldStateAlerts
+      .slice(0, 4)
+      .map((item) => `${worldStateEntityLabel(item.entityType)} ${item.entityName}：${item.reasons.join('；')}`),
+  ]
+  const trendItems = [
+    ...storyMemory.characterStateTrendSummary.slice(0, 3),
+    ...storyMemory.worldStateTrendSummary.slice(0, 3),
+  ]
 
-  if (stateItems.length === 0 && alertItems.length === 0) {
-    return <div className="novel-copy-block">角色状态版本会在章节连续性刷新后写入，这里随后会开始累积“当前状态”和“跳变告警”。</div>
+  if (characterStateItems.length === 0 && worldStateItems.length === 0 && alertItems.length === 0 && conflictEntityItems.length === 0) {
+    return <div className="novel-copy-block">状态版本会在章节连续性刷新后写入，这里随后会开始累积“当前状态”“趋势摘要”和“跳变告警”。</div>
   }
 
   return (
     <div style={{ display: 'grid', gap: 10 }}>
-      <StringList items={stateItems} empty="当前还没有可用的角色状态快照。" />
+      <StringList items={characterStateItems} empty="当前还没有可用的人物状态快照。" />
+      <StringList items={worldStateItems} empty="当前还没有可用的世界状态快照。" />
       {alertItems.length > 0 ? (
         <div className="novel-note-list">
           {alertItems.map((item, index) => (
@@ -1295,10 +1417,20 @@ function CharacterStateMemoryCard({ storyMemory }: { storyMemory: StoryMemorySna
           ))}
         </div>
       ) : (
-        <div className="novel-copy-block">最近没有命中的角色状态跳变告警。</div>
+        <div className="novel-copy-block">最近没有命中的状态跳变或冲突告警。</div>
       )}
+      <StringList items={conflictEntityItems} empty="当前没有需要优先回查的冲突实体。" />
+      <StringList items={trendItems} empty="跨章节状态趋势会在这里汇总。" />
     </div>
   )
+}
+
+function worldStateEntityLabel(entityType: StoryMemorySnapshot['worldCurrentStates'][number]['entityType']) {
+  if (entityType === 'character') return '人物'
+  if (entityType === 'faction') return '势力'
+  if (entityType === 'item') return '物品'
+  if (entityType === 'relation') return '关系'
+  return '地点'
 }
 
 function languageDriftStatusLabel(status: QualityDashboardData['recentLanguageDriftAlerts'][number]['status']) {
@@ -1323,6 +1455,67 @@ function storyAlertColor(severity: QualityDashboardData['storyPacingAlerts'][num
 
 function storyAlertLabel(severity: QualityDashboardData['storyPacingAlerts'][number]['severity']) {
   return severity === 'blocker' ? '高风险' : '提醒'
+}
+
+function worldStateAlertColor(severity: QualityDashboardData['recentWorldStateAlerts'][number]['severity']) {
+  if (severity === 'critical') return 'error'
+  if (severity === 'warning') return 'warning'
+  return 'default'
+}
+
+function WorldStateHealthCard({ dashboard }: { dashboard: QualityDashboardData | null }) {
+  if (!dashboard) {
+    return <div className="novel-copy-block">加载质量看板后，这里会显示跨章节的状态稳定性趋势与近期冲突。</div>
+  }
+
+  const alerts = dashboard.recentWorldStateAlerts.slice(0, 4)
+  const trackedByType = dashboard.worldStateSummary.trackedByType
+  const overviewItems = [
+    `人物 ${trackedByType.character}`,
+    `势力 ${trackedByType.faction}`,
+    `物品 ${trackedByType.item}`,
+    `关系 ${trackedByType.relation}`,
+    `地点 ${trackedByType.location}`,
+    `冲突实体 ${dashboard.worldStateSummary.conflictEntityCount}`,
+  ]
+  const conflictEntities = dashboard.worldConflictEntities.slice(0, 4)
+  return (
+    <div style={{ display: 'grid', gap: 10 }}>
+      <div className="novel-insight-list">
+        <div className="novel-insight-list__item">跟踪实体 {dashboard.worldStateSummary.trackedEntityCount}</div>
+        <div className="novel-insight-list__item">漂移告警 {dashboard.worldStateSummary.driftAlertCount}</div>
+        <div className="novel-insight-list__item">冲突告警 {dashboard.worldStateSummary.conflictAlertCount}</div>
+        <div className="novel-insight-list__item">预警快照 {dashboard.worldStateSummary.warningCount}</div>
+      </div>
+      <StringList items={overviewItems} empty="当前没有可用的总账概览。" />
+      {conflictEntities.length > 0 ? (
+        <div className="novel-note-list">
+          {conflictEntities.map((entity, index) => (
+            <div key={`${entity.entityType}-${entity.entityId}-${index}`} className="novel-note-list__item">
+              <Tag color={worldStateAlertColor(entity.severity)} style={{ marginRight: 8 }}>
+                {entity.conflictCount > 0 ? '冲突实体' : '跳变实体'}
+              </Tag>
+              {worldStateEntityLabel(entity.entityType)} {entity.entityName}：{entity.reasons.join('；')}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="novel-copy-block">当前没有需要优先回查的冲突实体。</div>
+      )}
+      {alerts.length > 0 ? (
+        <div className="novel-note-list">
+          {alerts.map((alert, index) => (
+            <div key={`${alert.summary}-${index}`} className="novel-note-list__item">
+              <Tag color={worldStateAlertColor(alert.severity)} style={{ marginRight: 8 }}>{alert.alertType === 'conflict' ? '冲突' : '跳变'}</Tag>
+              {alert.summary}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="novel-copy-block">最近窗口内没有新的状态稳定性告警。</div>
+      )}
+    </div>
+  )
 }
 
 function paceMarkerLabel(marker?: NonNullable<ReviewNotes['pace_marker']>) {

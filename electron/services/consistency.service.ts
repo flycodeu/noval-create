@@ -13,17 +13,18 @@ import {
 } from '../database/schema'
 import { listLinkedItemIds, listLinkedTimelineEventIds } from './link-sync.service'
 import { parseThemeVoiceDocument } from '../../src/shared/theme-voice'
+import { getWorldStateLedgerSnapshot, type WorldStateSeverity } from './world-state.service'
 
 export type ConsistencySeverity = 'high' | 'medium' | 'low'
 
 export interface ConsistencyIssue {
   id: string
   severity: ConsistencySeverity
-  category: 'character' | 'chapter' | 'timeline' | 'item' | 'map' | 'outline' | 'continuity' | 'thread' | 'voice' | 'relation'
+  category: 'character' | 'chapter' | 'timeline' | 'item' | 'map' | 'outline' | 'continuity' | 'thread' | 'voice' | 'relation' | 'worldState'
   title: string
   description: string
   suggestion: string
-  entityType?: 'character' | 'chapter' | 'timeline' | 'item' | 'map' | 'arc' | 'thread'
+  entityType?: 'character' | 'chapter' | 'timeline' | 'item' | 'map' | 'arc' | 'thread' | 'faction' | 'relation' | 'location'
   entityId?: number
   entityLabel?: string
 }
@@ -50,6 +51,9 @@ export interface NovelConsistencyReport {
     styledRelationCount: number
     subtextRelationCount: number
     ratedRelationCount: number
+    worldStateTrackedEntityCount: number
+    worldStateDriftAlertCount: number
+    worldStateConflictAlertCount: number
   }
   issues: ConsistencyIssue[]
 }
@@ -120,6 +124,29 @@ function pushIssue(
   })
 }
 
+function mapWorldStateSeverity(severity: WorldStateSeverity): ConsistencySeverity {
+  if (severity === 'critical') return 'high'
+  if (severity === 'warning') return 'medium'
+  return 'low'
+}
+
+function worldStateEntityLabel(entityType: 'character' | 'faction' | 'item' | 'relation' | 'location'): string {
+  switch (entityType) {
+    case 'character':
+      return '人物'
+    case 'faction':
+      return '势力'
+    case 'item':
+      return '物品'
+    case 'relation':
+      return '关系'
+    case 'location':
+      return '地点'
+    default:
+      return entityType
+  }
+}
+
 function buildOverview(highCount: number, mediumCount: number, lowCount: number): string {
   if (highCount > 0) {
     return `当前存在 ${highCount} 个高优先级结构问题，建议先修关键冲突再继续批量生成。`
@@ -167,6 +194,11 @@ export function buildNovelConsistencyReport(novelId: number): NovelConsistencyRe
   const itemRows = db.select().from(storyItems).where(eq(storyItems.novelId, novelId)).all()
   const mapRows = db.select().from(worldMap).where(eq(worldMap.novelId, novelId)).all()
   const relationRows = db.select().from(characterRelations).where(eq(characterRelations.novelId, novelId)).all()
+  const worldStateLedger = getWorldStateLedgerSnapshot(novelId, {
+    entityLimit: 200,
+    alertLimit: 256,
+    conflictEntityLimit: 32,
+  })
 
   const latestChapterNum = chapterRows.reduce((maxValue, row) => Math.max(maxValue, row.chapterNum || 0), 0)
   const chapterNumMap = new Map(chapterRows.map((row) => [row.id, row.chapterNum]))
@@ -743,6 +775,33 @@ export function buildNovelConsistencyReport(novelId: number): NovelConsistencyRe
     }
   })
 
+  worldStateLedger.conflictEntities.forEach((entity) => {
+    const alert = worldStateLedger.alerts.find((item) => item.entityType === entity.entityType && item.entityId === entity.entityId)
+    const severity = mapWorldStateSeverity(entity.severity)
+    const issueTitle = entity.conflictCount > 0
+      ? `${worldStateEntityLabel(entity.entityType)}状态存在硬冲突`
+      : `${worldStateEntityLabel(entity.entityType)}状态存在跳变缺口`
+    const issueDescription = entity.reasons.length > 0
+      ? `${entity.entityName} 当前账本命中 ${entity.alertCount} 条状态告警：${entity.reasons.join('；')}。`
+      : `${entity.entityName} 当前账本存在 ${entity.alertCount} 条状态告警，需要补齐来源和承接。`
+    const suggestion = alert?.alertType === 'conflict'
+      ? '先修正该实体的当前事实，再回查相关章节、关系和挂点，确保总账与正文一致。'
+      : '补齐导致状态变化的事件原因，并确认章节承接里已经写明这次变化。'
+    pushIssue(
+      issues,
+      severity,
+      'worldState',
+      issueTitle,
+      issueDescription,
+      suggestion,
+      {
+        entityType: entity.entityType,
+        entityId: entity.entityId,
+        entityLabel: entity.entityName,
+      },
+    )
+  })
+
   const chaptersMissingSummary = chapterRows.filter((row) => asText(row.content) && !asText(row.summary)).length
   const chaptersMissingContinuity = chapterRows.filter((row) => asText(row.content) && !asText(row.continuityStateJson)).length
   const linkedTimelineCount = eventRows.filter((row) =>
@@ -784,6 +843,8 @@ export function buildNovelConsistencyReport(novelId: number): NovelConsistencyRe
           return '优先把写作类型翻译成节奏、对白和语言硬规则。'
         case 'relation':
           return '优先补主角关键关系的互动方式、潜台词和强弱等级。'
+        case 'worldState':
+          return '优先按世界状态总账回查冲突实体，统一修正物品、势力、关系和地点事实。'
         case 'chapter':
         case 'continuity':
           return '优先补摘要、连续性记忆和章节细纲。'
@@ -818,6 +879,9 @@ export function buildNovelConsistencyReport(novelId: number): NovelConsistencyRe
       styledRelationCount,
       subtextRelationCount,
       ratedRelationCount,
+      worldStateTrackedEntityCount: worldStateLedger.overview.trackedEntityCount,
+      worldStateDriftAlertCount: worldStateLedger.overview.driftAlertCount,
+      worldStateConflictAlertCount: worldStateLedger.overview.conflictAlertCount,
     },
     issues,
   }

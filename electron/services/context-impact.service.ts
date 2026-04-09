@@ -12,7 +12,7 @@ import {
 } from '../database/schema'
 import { throwUserFacingError } from '../utils/user-facing-error'
 import { buildNovelConsistencyReport, type ConsistencyIssue } from './consistency.service'
-import { getQualityDashboardData } from './quality-dashboard.service'
+import { buildHeuristicRecallDiagnostics, getQualityDashboardData } from './quality-dashboard.service'
 
 type AssetFreshnessKey = 'faction' | 'character' | 'item' | 'thread' | 'timeline'
 
@@ -360,6 +360,12 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
   const aiScore = parseAiScore(chapter.aiScoreJson)
   const reviewState = parseReviewState(chapter.reviewNotesJson)
   const qualityDashboard = getQualityDashboardData(chapter.novelId, { includeDialogueInsights: false })
+  const recallDiagnostics = buildHeuristicRecallDiagnostics(chapter.novelId, {
+    chapterNum: chapter.chapterNum,
+    title: chapter.title,
+    summary: chapter.summary,
+    outline: chapter.outline,
+  })
   const storyAlerts = qualityDashboard.storyPacingAlerts
     .filter((alert) => alert.chapterNums.includes(chapter.chapterNum))
     .slice(0, 3)
@@ -442,6 +448,14 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
       label: '场景计划可追溯',
       status: chapter.scenePlanJson?.trim() ? 'pass' : 'warning',
       detail: chapter.scenePlanJson?.trim() ? '可以追溯到当前章节的场景拆解。' : '当前缺少场景计划，后续排查承接问题会更难。',
+    },
+    {
+      key: 'recall',
+      label: '召回补充未依赖过期片段',
+      status: recallDiagnostics.staleRecallCount > 0 ? 'warning' : 'pass',
+      detail: recallDiagnostics.staleRecallCount > 0
+        ? `识别到 ${recallDiagnostics.staleRecallCount} 条疑似过期召回片段。召回只应作为背景补充，建议优先以硬约束和结构化状态回查。`
+        : '当前未识别到疑似过期的召回背景片段。',
     },
     {
       key: 'outline',

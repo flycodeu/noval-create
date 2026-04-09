@@ -48,6 +48,13 @@ import {
   listLatestCharacterStates,
   listNovelCharacterStateAlerts,
 } from './character-state.service'
+import {
+  type WorldStateAlert,
+  type WorldStateLedgerConflictEntity,
+  type WorldStateLedgerOverview,
+  type WorldStateSummary,
+  getWorldStateLedgerSnapshot,
+} from './world-state.service'
 
 const CHECKPOINT_CHAPTER_REFRESH_INTERVAL = 30
 const CHECKPOINT_TIME_REFRESH_MS = 7 * 24 * 60 * 60 * 1000
@@ -67,6 +74,12 @@ export interface StoryMemorySnapshot {
   characterLedger: string[]
   characterCurrentStates: CharacterStateSummary[]
   characterStateAlerts: CharacterStateDriftAlert[]
+  worldCurrentStates: WorldStateSummary[]
+  worldStateAlerts: WorldStateAlert[]
+  worldStateOverview: WorldStateLedgerOverview
+  worldConflictEntities: WorldStateLedgerConflictEntity[]
+  characterStateTrendSummary: string[]
+  worldStateTrendSummary: string[]
   worldLedger: string[]
   activeThreads: string[]
   continuityDirectives: string[]
@@ -639,6 +652,13 @@ export function buildStoryMemorySnapshot(novelId: number): StoryMemorySnapshot {
   const memoryMode = resolveStoryMemoryMode(targetWords, chapterRows.length)
   const characterCurrentStates = listLatestCharacterStates(novelId, { limit: getModeLimit(memoryMode, 6, 8, 10, 12) })
   const characterStateAlerts = listNovelCharacterStateAlerts(novelId, getModeLimit(memoryMode, 3, 4, 5, 6))
+  const worldStateLedger = getWorldStateLedgerSnapshot(novelId, {
+    entityLimit: getModeLimit(memoryMode, 6, 8, 10, 12),
+    alertLimit: getModeLimit(memoryMode, 4, 5, 6, 8),
+    conflictEntityLimit: getModeLimit(memoryMode, 4, 5, 6, 8),
+  })
+  const worldCurrentStates = worldStateLedger.entities
+  const worldStateAlerts = worldStateLedger.alerts
   const checkpoints = db.select().from(storyMemoryCheckpoints).where(eq(storyMemoryCheckpoints.novelId, novelId)).all()
   const partDigests = checkpoints
     .filter((checkpoint) => checkpoint.scopeType === 'part' && checkpoint.summary)
@@ -677,8 +697,18 @@ export function buildStoryMemorySnapshot(novelId: number): StoryMemorySnapshot {
       ),
       characterCurrentStates,
       characterStateAlerts,
+      worldCurrentStates,
+      worldStateAlerts,
+      worldStateOverview: worldStateLedger.overview,
+      worldConflictEntities: worldStateLedger.conflictEntities,
+      characterStateTrendSummary: characterStateAlerts.map((item) => `第${item.chapterNum}章 · ${item.summary}`),
+      worldStateTrendSummary: worldStateLedger.trendSummary,
       worldLedger: dedupe(
-        continuityRows.flatMap((row) => row.continuity.worldStateChanges.map((entry) => `Ch.${row.chapterNum}: ${entry}`)),
+        [
+          ...continuityRows.flatMap((row) => row.continuity.worldStateChanges.map((entry) => `Ch.${row.chapterNum}: ${entry}`)),
+          ...worldCurrentStates.map((item) => `Ch.${item.chapterNum}: ${entityLabel(item)} ${item.entityName} · ${item.summaryText}`),
+          ...worldStateLedger.conflictEntities.map((item) => `冲突 ${entityLabel(item)} ${item.entityName} · ${item.reasons.join('；')}`),
+        ],
         getModeLimit(memoryMode, 10, 14, 18),
       ),
     activeThreads: dedupe([
@@ -764,8 +794,31 @@ export function buildStoryMemoryPromptSummary(
     snapshot.characterStateAlerts.length > 0
       ? `角色状态漂移告警：\n- ${snapshot.characterStateAlerts.map((item) => item.summary).join('\n- ')}`
       : '',
+    snapshot.worldCurrentStates.length > 0
+      ? `世界当前状态：\n- ${snapshot.worldCurrentStates.map((item) => `${entityLabel(item)} ${item.entityName}：${item.summaryText}`).join('\n- ')}`
+      : '',
+    snapshot.worldStateAlerts.length > 0
+      ? `世界状态告警：\n- ${snapshot.worldStateAlerts.map((item) => item.summary).join('\n- ')}`
+      : '',
     snapshot.activeThreads.length > 0 ? `未回收线程：\n- ${snapshot.activeThreads.join('\n- ')}` : '',
     snapshot.timelineAnchors.length > 0 ? `时间锚点：\n- ${snapshot.timelineAnchors.join('\n- ')}` : '',
     snapshot.itemLedger.length > 0 ? `物品账本：\n- ${snapshot.itemLedger.join('\n- ')}` : '',
   ].filter(Boolean).join('\n\n')
+}
+
+function entityLabel(item: { entityType: WorldStateSummary['entityType'] }): string {
+  switch (item.entityType) {
+    case 'character':
+      return '人物'
+    case 'faction':
+      return '势力'
+    case 'item':
+      return '物品'
+    case 'relation':
+      return '关系'
+    case 'location':
+      return '地点'
+    default:
+      return item.entityType
+  }
 }

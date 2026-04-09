@@ -157,6 +157,7 @@ export interface ChapterWritingPromptInput {
   chapterNum: number
   chapterTitle: string
   chapterGoal: string
+  hardConstraintContext?: string
   plotPoints: string
   emotionTone: string
   targetWords: number
@@ -166,6 +167,7 @@ export interface ChapterWritingPromptInput {
   currentArc: string
   worldRules: string
   characterStates: string
+  worldStates?: string
   previousSummaries: string
   lastChapterEnding: string
   styleTemplate: string
@@ -188,6 +190,7 @@ export interface ScenePlanPromptInput {
   chapterNum: number
   chapterTitle: string
   chapterGoal: string
+  hardConstraintContext?: string
   plotPoints: string
   emotionTone: string
   targetWords: number
@@ -197,6 +200,7 @@ export interface ScenePlanPromptInput {
   currentArc: string
   worldRules: string
   characterStates: string
+  worldStates?: string
   itemSummary: string
   previousSummaries: string
   lastChapterEnding: string
@@ -221,12 +225,14 @@ export interface ChapterReviewPromptInput {
   chapterNum: number
   chapterTitle: string
   chapterGoal: string
+  hardConstraintContext?: string
   storyCore: string
   writingContractSummary?: string
   relationSummary?: string
   currentArc: string
   worldRules: string
   characterStates: string
+  worldStates?: string
   itemSummary: string
   continuitySummary: string
   openLoops: string
@@ -251,6 +257,7 @@ export interface ChapterRewritePromptInput {
   chapterNum: number
   chapterTitle: string
   chapterGoal: string
+  hardConstraintContext?: string
   emotionTone: string
   targetWords: number
   storyCore: string
@@ -259,6 +266,7 @@ export interface ChapterRewritePromptInput {
   currentArc: string
   worldRules: string
   characterStates: string
+  worldStates?: string
   itemSummary: string
   previousSummaries: string
   lastChapterEnding: string
@@ -1262,6 +1270,7 @@ export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
       extraRealityLines: ['优先处理章节任务和因果推进，不要为了花样强行加戏。'],
     }),
     section('本章目标', params.chapterGoal),
+    section('硬约束', params.hardConstraintContext),
     section('本章细纲', params.plotPoints),
     section('当前故事弧', params.currentArc),
     section('小说核心约束', params.storyCore),
@@ -1269,6 +1278,7 @@ export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
     section('关键人物关系', params.relationSummary),
     section('世界规则', params.worldRules),
     section('人物当前状态', params.characterStates),
+    section('当前世界状态', params.worldStates),
     section('关键物品与去向', params.itemSummary),
     section('上章结尾', params.lastChapterEnding),
     section('最近章节摘要', params.previousSummaries),
@@ -1330,6 +1340,7 @@ export function buildChapterWritingPrompt(params: ChapterWritingPromptInput): st
       extraRealityLines: ['遇到不准确搭配，优先改成读者最熟悉、最准确的常规说法。'],
     }),
     section('本章必须完成', params.chapterGoal || '按已定大纲执行'),
+    section('硬约束', params.hardConstraintContext),
     section('已定章节大纲', params.plotPoints),
     section('写作类型', params.writingContractSummary),
     section('关键人物关系', params.relationSummary),
@@ -1340,6 +1351,7 @@ export function buildChapterWritingPrompt(params: ChapterWritingPromptInput): st
     section('活跃支线与伏笔', params.activeThreads),
     section('上章结尾', params.lastChapterEnding),
     section('当前人物状态', params.characterStates),
+    section('当前世界状态', params.worldStates),
     section('当前故事弧', params.currentArc),
     section('小说核心约束', params.storyCore),
     section('世界规则与限制', params.worldRules),
@@ -1383,12 +1395,14 @@ export function buildChapterDraftPrompt(params: ChapterRewritePromptInput): stri
     }),
     section('场景计划', params.scenePlan),
     section('本章目标', params.chapterGoal),
+    section('硬约束', params.hardConstraintContext),
     section('当前故事弧', params.currentArc),
     section('小说核心约束', params.storyCore),
     section('写作类型', params.writingContractSummary),
     section('关键人物关系', params.relationSummary),
     section('世界规则', params.worldRules),
     section('人物当前状态', params.characterStates),
+    section('当前世界状态', params.worldStates),
     section('关键物品与去向', params.itemSummary),
     section('上章结尾', params.lastChapterEnding),
     section('最近章节摘要', params.previousSummaries),
@@ -1434,6 +1448,7 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
       extraQualityLines: ['优先给出具体修法，不要给空泛评论。'],
     }),
     section('本章目标', params.chapterGoal),
+    section('硬约束', params.hardConstraintContext),
     section('场景计划', params.scenePlan),
     section('小说核心', params.storyCore),
     section('写作类型', params.writingContractSummary),
@@ -1444,6 +1459,7 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
     section('弧检查点提醒', params.arcProgressCheckpoint),
     section('世界规则', params.worldRules),
     section('人物当前状态', params.characterStates),
+    section('当前世界状态', params.worldStates),
     section('关键物品与去向', params.itemSummary),
     section('连续性记忆', params.continuitySummary),
     section('未回收事项', params.openLoops),
@@ -1510,12 +1526,14 @@ export function buildChapterRewritePrompt(params: ChapterRewritePromptInput): st
     section('作者锁定段落（逐字保留）', params.lockedParagraphs?.join('\n\n')),
     section('审校意见', params.reviewNotes),
     section('本章目标', params.chapterGoal),
+    section('硬约束', params.hardConstraintContext),
     section('当前故事弧', params.currentArc),
     section('小说核心', params.storyCore),
     section('写作类型', params.writingContractSummary),
     section('关键人物关系', params.relationSummary),
     section('世界规则', params.worldRules),
     section('人物当前状态', params.characterStates),
+    section('当前世界状态', params.worldStates),
     section('关键物品与去向', params.itemSummary),
     section('上章结尾', params.lastChapterEnding),
     section('近章摘要', params.previousSummaries),
@@ -1648,10 +1666,12 @@ export function chapterWritingPrompt(params: {
   chapterNum: number
   chapterTitle: string
   chapterGoal: string
+  hardConstraintContext?: string
   plotPoints: string
   emotionTone: string
   worldRules: string
   characterStates: string
+  worldStates?: string
   previousSummaries: string
   lastChapterEnding: string
   styleTemplate: string
@@ -1673,6 +1693,7 @@ export function chapterWritingPrompt(params: {
     chapterNum: params.chapterNum,
     chapterTitle: params.chapterTitle,
     chapterGoal: params.chapterGoal,
+    hardConstraintContext: params.hardConstraintContext || '',
     plotPoints: params.plotPoints,
     emotionTone: params.emotionTone,
     targetWords: params.targetWords,
@@ -1681,6 +1702,7 @@ export function chapterWritingPrompt(params: {
     currentArc: params.currentArc || '',
     worldRules: params.worldRules,
     characterStates: params.characterStates,
+    worldStates: params.worldStates || '',
     previousSummaries: params.previousSummaries,
     lastChapterEnding: params.lastChapterEnding,
     styleTemplate: params.styleTemplate,

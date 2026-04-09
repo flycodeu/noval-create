@@ -498,7 +498,7 @@ function buildSignature(
   return {
     characterId: character.id,
     characterName: character.fullName,
-    roleType: character.roleType,
+    roleType: (character.roleType || 'minor') as 'protagonist' | 'major' | 'minor' | 'antagonist' | 'supporting',
     sampleChapterStart: fingerprint.recentSampleChapterNums[0],
     sampleChapterEnd: fingerprint.recentSampleChapterNums[fingerprint.recentSampleChapterNums.length - 1],
     voiceProfile: summary?.voiceProfile || buildHeuristicVoiceProfile(fingerprint),

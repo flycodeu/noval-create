@@ -3,6 +3,15 @@ import { getDb } from '../database/db'
 import { chapters, chapterEmbeddings } from '../database/schema'
 import { getDefaultAdapter, getAdapterById } from './model.service'
 
+export interface SimilarFragmentHit {
+  chapterId: number
+  chapterNum: number
+  fragmentType: string
+  fragmentText: string
+  similarity: number
+  searchMode: 'vector' | 'keyword'
+}
+
 function cosineSimilarity(a: number[], b: number[]): number {
   if (a.length !== b.length || a.length === 0) return 0
   let dot = 0
@@ -196,11 +205,20 @@ export async function findSimilarFragments(
   queryText: string,
   topK = 5,
   modelConfigId?: number,
-): Promise<Array<{ chapterId: number; fragmentType: string; fragmentText: string; similarity: number }>> {
+): Promise<SimilarFragmentHit[]> {
   const db = getDb()
   const allEmbeddings = db.select().from(chapterEmbeddings)
     .where(eq(chapterEmbeddings.novelId, novelId))
     .all()
+  const chapterNumById = new Map(
+    db.select({
+      id: chapters.id,
+      chapterNum: chapters.chapterNum,
+    }).from(chapters)
+      .where(eq(chapters.novelId, novelId))
+      .all()
+      .map((row) => [row.id, row.chapterNum] as const),
+  )
 
   if (allEmbeddings.length === 0) return []
 
@@ -237,9 +255,11 @@ export async function findSimilarFragments(
       const embedding = JSON.parse(e.embeddingJson!) as number[]
       return {
         chapterId: e.chapterId,
+        chapterNum: chapterNumById.get(e.chapterId) || 0,
         fragmentType: e.fragmentType,
         fragmentText: e.fragmentText,
         similarity: cosineSimilarity(queryEmbedding, embedding),
+        searchMode: 'vector' as const,
       }
     })
     .sort((a, b) => b.similarity - a.similarity)
@@ -251,7 +271,7 @@ export function fallbackKeywordSearch(
   novelId: number,
   queryText: string,
   topK = 5,
-): Array<{ chapterId: number; fragmentType: string; fragmentText: string; similarity: number }> {
+): SimilarFragmentHit[] {
   const db = getDb()
   const allEmbeddings = db.select().from(chapterEmbeddings)
     .where(eq(chapterEmbeddings.novelId, novelId))
@@ -261,6 +281,7 @@ export function fallbackKeywordSearch(
     // Fallback to chapter summaries
     const chapterRows = db.select({
       id: chapters.id,
+      chapterNum: chapters.chapterNum,
       summary: chapters.summary,
     })
       .from(chapters)
@@ -272,21 +293,34 @@ export function fallbackKeywordSearch(
     return chapterRows
       .map((c) => ({
         chapterId: c.id,
+        chapterNum: c.chapterNum || 0,
         fragmentType: 'summary' as const,
         fragmentText: c.summary!,
         similarity: keywordScore(c.summary!, keywords) / Math.max(keywords.length, 1),
+        searchMode: 'keyword' as const,
       }))
       .sort((a, b) => b.similarity - a.similarity)
       .slice(0, topK)
   }
 
+  const chapterNumById = new Map(
+    db.select({
+      id: chapters.id,
+      chapterNum: chapters.chapterNum,
+    }).from(chapters)
+      .where(eq(chapters.novelId, novelId))
+      .all()
+      .map((row) => [row.id, row.chapterNum] as const),
+  )
   const keywords = extractKeywords(queryText)
   return allEmbeddings
     .map((e) => ({
       chapterId: e.chapterId,
+      chapterNum: chapterNumById.get(e.chapterId) || 0,
       fragmentType: e.fragmentType,
       fragmentText: e.fragmentText,
       similarity: keywordScore(e.fragmentText, keywords) / Math.max(keywords.length, 1),
+      searchMode: 'keyword' as const,
     }))
     .sort((a, b) => b.similarity - a.similarity)
     .slice(0, topK)

@@ -8,6 +8,7 @@ import { aiCheckPrompt, chapterSummaryPrompt } from './prompts'
 import {
   allocateChapterContext,
   buildChapterContext,
+  ChapterContext,
   buildStoryProfile,
   collectChapterContextRawData,
   ContinuityState,
@@ -48,6 +49,14 @@ import {
   scheduleDialogueFingerprintRefresh,
 } from './dialogue-fingerprint.service'
 import { refreshCharacterStateVersionsForChapter } from './character-state.service'
+import { refreshWorldStateVersionsForChapter } from './world-state.service'
+import {
+  formatStoryArcCheckpointReminder,
+  formatStoryArcProgressStatus,
+  getStoryArcProgressSnapshot,
+  getStoryArcStatusContext,
+  getStoryArcWarningsForChapter,
+} from './story-arc-progress.service'
 
 interface ChapterSummaryData {
   summary: string
@@ -155,24 +164,6 @@ const EMPTY_CONTINUITY_STATE: ContinuityState = {
 }
 
 const MAX_CHAPTER_VERSION_COUNT = 20
-
-const ARC_PROGRESS_STALL_PATTERNS = [
-  /未推进/,
-  /没有推进/,
-  /无实质推进/,
-  /推进不足/,
-  /尚未推进/,
-  /尚未触及/,
-  /仍在铺垫/,
-  /空转/,
-  /停滞/,
-  /原地/,
-  /受阻/,
-  /搁置/,
-  /偏离/,
-  /反向/,
-  /倒退/,
-]
 
 function countChineseWords(text: string): number {
   const chinese = (text.match(/[\u4e00-\u9fff]/g) || []).length
@@ -548,47 +539,14 @@ function enforceLockedParagraphProtection(
   }
 }
 
-function extractArcProgressPercentHint(text: string): number {
-  const match = text.match(/(\d{1,3})\s*%/)
-  if (!match) return 0
-  return Math.max(0, Math.min(100, Math.round(Number(match[1]))))
-}
-
-function indicatesArcProgress(text: string): boolean {
-  const normalized = text.trim()
-  return Boolean(normalized) && !ARC_PROGRESS_STALL_PATTERNS.some((pattern) => pattern.test(normalized))
-}
-
-function getArcChapterRangeMetrics(
-  arc: typeof storyArcs.$inferSelect,
-  chapterNum: number,
-): { total: number; index: number; percent: number } | null {
-  if (typeof arc.chapterStart !== 'number' || typeof arc.chapterEnd !== 'number' || arc.chapterEnd < arc.chapterStart) {
-    return null
-  }
-
-  const total = Math.max(arc.chapterEnd - arc.chapterStart + 1, 1)
-  const index = Math.max(1, Math.min(total, chapterNum - arc.chapterStart + 1))
-  return {
-    total,
-    index,
-    percent: Math.max(0, Math.min(100, Math.round((index / total) * 100))),
-  }
-}
-
 function buildArcProgressStatus(
   arc: typeof storyArcs.$inferSelect | null,
   chapterNum: number,
 ): string {
   if (!arc) return ''
-
-  const metrics = getArcChapterRangeMetrics(arc, chapterNum)
-  return [
-    `已记录推进度：${arc.progressPercent || 0}%`,
-    metrics ? `当前章节位于本弧第 ${metrics.index} / ${metrics.total} 章` : '',
-    `连续未推进章节：${arc.stalledChapterCount || 0}`,
-    typeof arc.lastProgressChapterNum === 'number' ? `最近明确推进章节：第${arc.lastProgressChapterNum}章` : '最近明确推进章节：暂无记录',
-  ].filter(Boolean).join('\n')
+  const snapshot = getStoryArcProgressSnapshot(arc.novelId)
+  const { summary, point } = getStoryArcStatusContext(snapshot, arc.id, chapterNum)
+  return formatStoryArcProgressStatus(summary, point)
 }
 
 function buildArcProgressCheckpoint(
@@ -596,19 +554,9 @@ function buildArcProgressCheckpoint(
   chapterNum: number,
 ): string {
   if (!arc) return ''
-
-  const metrics = getArcChapterRangeMetrics(arc, chapterNum)
-  if (!metrics || metrics.total < 4 || typeof arc.chapterStart !== 'number') return ''
-
-  const checkpoints = [
-    { label: '25%', chapterNum: arc.chapterStart + Math.round((metrics.total - 1) * 0.25) },
-    { label: '50%', chapterNum: arc.chapterStart + Math.round((metrics.total - 1) * 0.5) },
-    { label: '75%', chapterNum: arc.chapterStart + Math.round((metrics.total - 1) * 0.75) },
-  ]
-  const current = checkpoints.find((checkpoint) => checkpoint.chapterNum === chapterNum)
-  if (!current) return ''
-
-  return `当前位于本弧 ${current.label} 检查点（第${metrics.index} / ${metrics.total}章），本章必须明确兑现本弧目标，不能只重复铺垫或转移注意力。`
+  const snapshot = getStoryArcProgressSnapshot(arc.novelId)
+  const { summary, point } = getStoryArcStatusContext(snapshot, arc.id, chapterNum)
+  return formatStoryArcCheckpointReminder(summary, point)
 }
 
 function formatScenePlan(scenePlan: ScenePlanStep[]): string {
@@ -1054,66 +1002,15 @@ function getLatestArcProgressNote(
 function computeStoryArcProgressState(
   arc: typeof storyArcs.$inferSelect,
   currentChapter: typeof chapters.$inferSelect,
-  currentContinuity: ContinuityState,
+  _currentContinuity: ContinuityState,
 ): { progressPercent: number; stalledChapterCount: number; lastProgressChapterNum: number | null; warnings: string[] } {
-  const db = getDb()
-  const arcChapters = db.select().from(chapters).where(eq(chapters.novelId, currentChapter.novelId)).all()
-    .filter((chapter) => {
-      if (chapter.arcId === arc.id) return true
-      if (typeof arc.chapterStart !== 'number' || typeof arc.chapterEnd !== 'number') return false
-      return chapter.chapterNum >= arc.chapterStart && chapter.chapterNum <= arc.chapterEnd
-    })
-    .sort((left, right) => left.chapterNum - right.chapterNum)
-
-  const relevantChapters = arcChapters.filter((chapter) => chapter.chapterNum <= currentChapter.chapterNum)
-  const continuityByChapterId = new Map<number, ContinuityState>()
-  continuityByChapterId.set(currentChapter.id, currentContinuity)
-
-  let lastProgressChapterNum: number | null = null
-  let hintedPercent = 0
-
-  for (const chapter of relevantChapters) {
-    const reviewNotes = parseStoredReviewNotes(chapter.reviewNotesJson)
-    const continuity = continuityByChapterId.get(chapter.id) || parseStoredContinuityState(chapter.continuityStateJson)
-    if (!continuity) continue
-
-    hintedPercent = Math.max(hintedPercent, extractArcProgressPercentHint(continuity.arcProgress))
-    if (reviewNotes.arc_progress_risks.length > 0) continue
-    if (indicatesArcProgress(continuity.arcProgress)) {
-      lastProgressChapterNum = chapter.chapterNum
-    }
-  }
-
-  let stalledChapterCount = 0
-  for (let index = relevantChapters.length - 1; index >= 0; index -= 1) {
-    const chapter = relevantChapters[index]
-    const reviewNotes = parseStoredReviewNotes(chapter.reviewNotesJson)
-    const continuity = continuityByChapterId.get(chapter.id) || parseStoredContinuityState(chapter.continuityStateJson)
-    if (continuity && reviewNotes.arc_progress_risks.length === 0 && indicatesArcProgress(continuity.arcProgress)) {
-      break
-    }
-    stalledChapterCount += 1
-  }
-
-  const metrics = typeof lastProgressChapterNum === 'number'
-    ? getArcChapterRangeMetrics(arc, lastProgressChapterNum)
-    : null
-  const progressPercent = Math.max(hintedPercent, metrics?.percent || 0)
-
-  const warnings = stalledChapterCount >= 5
-    ? [`故事弧“${arc.arcName}”已连续 ${stalledChapterCount} 章未见实质推进，需要让当前章节明确服务本弧目标，或立即调整弧设计与章节安排。`]
-    : []
-  const checkpointWarning = buildArcProgressCheckpoint(arc, currentChapter.chapterNum)
-  const currentReviewNotes = parseStoredReviewNotes(currentChapter.reviewNotesJson)
-  if (checkpointWarning && currentReviewNotes.arc_progress_risks.length > 0) {
-    warnings.push(`${checkpointWarning} 当前稿件仍未给出足够的弧推进。`)
-  }
-
+  const snapshot = getStoryArcProgressSnapshot(currentChapter.novelId)
+  const { summary } = getStoryArcStatusContext(snapshot, arc.id, currentChapter.chapterNum)
   return {
-    progressPercent,
-    stalledChapterCount,
-    lastProgressChapterNum,
-    warnings: dedupeTextList(warnings),
+    progressPercent: summary?.progressPercent || 0,
+    stalledChapterCount: summary?.stalledChapterCount || 0,
+    lastProgressChapterNum: summary?.lastProgressChapterNum ?? null,
+    warnings: getStoryArcWarningsForChapter(snapshot, arc.id, currentChapter.chapterNum),
   }
 }
 
@@ -1191,6 +1088,7 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
           chapterNum: input.chapter.chapterNum,
           chapterTitle: input.chapter.title || getDefaultChapterTitle(input.chapter.chapterNum),
           chapterGoal: input.context.chapterGoal,
+          hardConstraintContext: input.context.hardConstraintContext,
           emotionTone: input.chapter.emotionTone || '平稳',
           targetWords: input.chapter.targetWords || 3000,
           storyCore: input.storyCore,
@@ -1199,6 +1097,7 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
           currentArc: input.context.currentArc,
           worldRules: input.context.worldRules,
           characterStates: input.context.characterStates,
+          worldStates: input.context.worldStates,
           itemSummary: input.context.itemSummary,
           previousSummaries: input.context.previousSummaries,
           lastChapterEnding: input.context.lastChapterEnding,
@@ -1268,6 +1167,7 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
               chapterNum: input.chapter.chapterNum,
               chapterTitle: input.chapter.title || getDefaultChapterTitle(input.chapter.chapterNum),
               chapterGoal: input.context.chapterGoal,
+              hardConstraintContext: input.context.hardConstraintContext,
               emotionTone: input.chapter.emotionTone || '平稳',
               targetWords: input.chapter.targetWords || 3000,
               storyCore: input.storyCore,
@@ -1276,6 +1176,7 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
               currentArc: input.context.currentArc,
               worldRules: input.context.worldRules,
               characterStates: input.context.characterStates,
+              worldStates: input.context.worldStates,
               itemSummary: input.context.itemSummary,
               previousSummaries: input.context.previousSummaries,
               lastChapterEnding: input.context.lastChapterEnding,
@@ -1473,6 +1374,7 @@ async function refreshChapterMemory(chapterId: number): Promise<{
   const summary = await updateChapterSummaryData(chapterId)
   const continuity = await updateChapterContinuityState(chapterId, summary)
   refreshCharacterStateVersionsForChapter(chapterId)
+  refreshWorldStateVersionsForChapter(chapterId)
   refreshStoryMemoryCheckpoints(chapter.novelId)
   markChapterContextCurrent(chapterId)
   return { summary, continuity }
@@ -1809,6 +1711,18 @@ export function batchRenumberChapters(ids: number[], startChapterNum: number) {
 type ChapterComplexity = 'simple' | 'standard' | 'key'
 type ChapterContextStage = 'scenePlan' | 'draft' | 'review' | 'rewrite'
 
+function logConstraintInjectionStatus(stage: ChapterContextStage, context: ChapterContext) {
+  const status = context.constraintInjectionStatus
+  const injectedTitles = context.hardConstraintEntries.map((entry) => entry.title).join('、') || '无'
+  const truncatedTitles = context.hardConstraintEntries
+    .filter((entry) => entry.truncated)
+    .map((entry) => entry.title)
+    .join('、') || '无'
+  console.info(
+    `[chapter:context] stage=${stage} hard=${status.hardConstraintUsed}/${status.hardConstraintBudget} soft=${status.softContextUsed}/${status.softContextBudget} dropped=${status.droppedConstraintCount} injected=${injectedTitles} truncated=${truncatedTitles}`,
+  )
+}
+
 interface ChapterComplexityInput {
   chapter: typeof chapters.$inferSelect
   currentArc: typeof storyArcs.$inferSelect | null
@@ -1895,6 +1809,38 @@ function resolveContextBudgetForStage(
   return Math.max(7000, baseByStage[stage] + complexityOffset[complexity] + largeChapterOffset + novelScaleOffset)
 }
 
+function buildStageContextMap(
+  rawContext: Awaited<ReturnType<typeof collectChapterContextRawData>>,
+  chapter: typeof chapters.$inferSelect,
+): {
+  complexity: ChapterComplexity
+  contexts: Record<ChapterContextStage, ChapterContext>
+} {
+  const complexity = classifyChapterComplexity({
+    chapter,
+    currentArc: rawContext.currentArc,
+    chapterRows: rawContext.chapterRows,
+    outlineMentionedCharacterCount: rawContext.outlineMentionedCharacterCount,
+    activeThreadPressureCount: rawContext.activeThreadPressureCount,
+  })
+  const novelTargetWords = rawContext.novel.targetWords || 0
+  const buildStageContext = (promptProfile: ChapterContextStage) => allocateChapterContext(rawContext, {
+    promptProfile,
+    chapterComplexity: complexity,
+    totalBudget: resolveContextBudgetForStage(promptProfile, complexity, chapter.targetWords || 3000, novelTargetWords),
+  })
+
+  return {
+    complexity,
+    contexts: {
+      scenePlan: buildStageContext('scenePlan'),
+      draft: buildStageContext('draft'),
+      review: buildStageContext('review'),
+      rewrite: buildStageContext('rewrite'),
+    },
+  }
+}
+
 export async function generateChapterContent(chapterId: number, sender?: WebContents): Promise<number> {
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
@@ -1904,23 +1850,15 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
   const novel = rawContext.novel
   const profile = rawContext.profile
   const consistencyNotes = buildConsistencyPromptSummary(buildNovelConsistencyReport(chapter.novelId))
-  const complexity = classifyChapterComplexity({
-    chapter,
-    currentArc: rawContext.currentArc,
-    chapterRows: rawContext.chapterRows,
-    outlineMentionedCharacterCount: rawContext.outlineMentionedCharacterCount,
-    activeThreadPressureCount: rawContext.activeThreadPressureCount,
-  })
-  const novelTargetWords = novel.targetWords || 0
-  const stageContext = (promptProfile: ChapterContextStage) => allocateChapterContext(rawContext, {
-    promptProfile,
-    chapterComplexity: complexity,
-    totalBudget: resolveContextBudgetForStage(promptProfile, complexity, chapter.targetWords || 3000, novelTargetWords),
-  })
-  const scenePlanContext = stageContext('scenePlan')
-  const draftContext = stageContext('draft')
-  const reviewContext = stageContext('review')
-  const rewriteContext = stageContext('rewrite')
+  const { complexity, contexts } = buildStageContextMap(rawContext, chapter)
+  const scenePlanContext = contexts.scenePlan
+  const draftContext = contexts.draft
+  const reviewContext = contexts.review
+  const rewriteContext = contexts.rewrite
+  logConstraintInjectionStatus('scenePlan', scenePlanContext)
+  logConstraintInjectionStatus('draft', draftContext)
+  logConstraintInjectionStatus('review', reviewContext)
+  logConstraintInjectionStatus('rewrite', rewriteContext)
   const buildWritingGuidance = (styleTemplate: string) => [
     styleTemplate ? `Writing style guide:\n${styleTemplate}` : '',
     consistencyNotes,
@@ -1964,6 +1902,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
           chapterNum: chapter.chapterNum,
           chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
           chapterGoal: scenePlanContext.chapterGoal,
+          hardConstraintContext: scenePlanContext.hardConstraintContext,
           plotPoints: chapter.outline || '',
           emotionTone: chapter.emotionTone || '平稳',
           targetWords: chapter.targetWords || 3000,
@@ -1973,6 +1912,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
           currentArc: scenePlanContext.currentArc,
           worldRules: scenePlanContext.worldRules,
           characterStates: scenePlanContext.characterStates,
+          worldStates: scenePlanContext.worldStates,
           itemSummary: scenePlanContext.itemSummary,
           previousSummaries: scenePlanContext.previousSummaries,
           lastChapterEnding: scenePlanContext.lastChapterEnding,
@@ -2032,6 +1972,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
           chapterNum: chapter.chapterNum,
           chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
           chapterGoal: draftContext.chapterGoal,
+          hardConstraintContext: draftContext.hardConstraintContext,
           emotionTone: chapter.emotionTone || '平稳',
           targetWords: chapter.targetWords || 3000,
           storyCore,
@@ -2040,6 +1981,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
           currentArc: draftContext.currentArc,
           worldRules: draftContext.worldRules,
           characterStates: draftContext.characterStates,
+          worldStates: draftContext.worldStates,
           itemSummary: draftContext.itemSummary,
           previousSummaries: draftContext.previousSummaries,
           lastChapterEnding: draftContext.lastChapterEnding,
@@ -2092,12 +2034,14 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
             chapterNum: chapter.chapterNum,
             chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
             chapterGoal: reviewContext.chapterGoal,
+            hardConstraintContext: reviewContext.hardConstraintContext,
             storyCore,
             writingContractSummary: reviewContext.writingContractSummary,
             relationSummary: reviewContext.relationSummary,
             currentArc: reviewContext.currentArc,
             worldRules: reviewContext.worldRules,
             characterStates: reviewContext.characterStates,
+            worldStates: reviewContext.worldStates,
             itemSummary: reviewContext.itemSummary,
             continuitySummary: reviewContext.continuitySummary,
             openLoops: reviewContext.openLoops,
@@ -2155,6 +2099,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
       chapterNum: chapter.chapterNum,
       chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
       chapterGoal: rewriteContext.chapterGoal,
+      hardConstraintContext: rewriteContext.hardConstraintContext,
       emotionTone: chapter.emotionTone || '平稳',
       targetWords: chapter.targetWords || 3000,
       storyCore,
@@ -2163,6 +2108,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
       currentArc: rewriteContext.currentArc,
       worldRules: rewriteContext.worldRules,
       characterStates: rewriteContext.characterStates,
+      worldStates: rewriteContext.worldStates,
       itemSummary: rewriteContext.itemSummary,
       previousSummaries: rewriteContext.previousSummaries,
       lastChapterEnding: rewriteContext.lastChapterEnding,
@@ -2267,6 +2213,53 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
 
 export async function generateChapterSummary(chapterId: number): Promise<void> {
   await refreshChapterMemory(chapterId)
+}
+
+export async function getChapterContextPreview(chapterId: number): Promise<{
+  chapterId: number
+  chapterNum: number
+  complexity: ChapterComplexity
+  recalledMemory: string
+  recallDiagnostics: ChapterContext['recallDiagnostics']
+  recalledMemorySources: ChapterContext['recalledMemorySources']
+  stages: Array<{
+    stage: ChapterContextStage
+    hardConstraintContext: string
+    hardConstraintSummary: string
+    hardConstraintEntries: ChapterContext['hardConstraintEntries']
+    constraintInjectionStatus: ChapterContext['constraintInjectionStatus']
+    softContextBudgetUsage: ChapterContext['softContextBudgetUsage']
+    droppedConstraintCount: number
+  }>
+}> {
+  const db = getDb()
+  const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
+  if (!chapter) throwUserFacingError('chapter.notFoundWithId', { id: chapterId })
+
+  const rawContext = await collectChapterContextRawData(chapter.novelId, chapter.chapterNum)
+  const { complexity, contexts } = buildStageContextMap(rawContext, chapter)
+  const orderedStages: ChapterContextStage[] = ['scenePlan', 'draft', 'review', 'rewrite']
+
+  return {
+    chapterId: chapter.id,
+    chapterNum: chapter.chapterNum,
+    complexity,
+    recalledMemory: contexts.draft.recalledMemory,
+    recallDiagnostics: contexts.draft.recallDiagnostics,
+    recalledMemorySources: contexts.draft.recalledMemorySources,
+    stages: orderedStages.map((stage) => {
+      const context = contexts[stage]
+      return {
+        stage,
+        hardConstraintContext: context.hardConstraintContext,
+        hardConstraintSummary: context.hardConstraintSummary,
+        hardConstraintEntries: context.hardConstraintEntries,
+        constraintInjectionStatus: context.constraintInjectionStatus,
+        softContextBudgetUsage: context.softContextBudgetUsage,
+        droppedConstraintCount: context.droppedConstraintCount,
+      }
+    }),
+  }
 }
 
 export async function aiCheckChapter(chapterId: number): Promise<unknown> {

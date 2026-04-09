@@ -5,7 +5,7 @@ import { buildWorldRulesSummary, parseWorldRulesJson } from '../../src/shared/ge
 import { buildProjectBriefSummary, parseProjectBriefDocument } from '../../src/shared/project-brief'
 import { parseFactionExternalRelations } from '../../src/shared/factions'
 import { parseGlossaryAliases } from '../../src/shared/glossary'
-import { findSimilarFragments } from './embedding.service'
+import { findSimilarFragments, type SimilarFragmentHit } from './embedding.service'
 import { buildStyleFingerprintPromptSection, listStyleFingerprints } from './style-analysis.service'
 import {
   buildPremiseSummary,
@@ -41,7 +41,8 @@ import {
   resolveFactionRowsByReferences,
 } from './faction-reference.service'
 import { getCharacterDialogueHintMap } from './dialogue-fingerprint.service'
-import { getCharacterStateContextHintMap } from './character-state.service'
+import { getCharacterStateContextHintMap, listLatestCharacterStates } from './character-state.service'
+import { getWorldStateContextSnapshot } from './world-state.service'
 
 /**
  * 改进的 token 估算：中文字符约 1 token/字，英文约 0.25 token/word (4 chars/token)，
@@ -83,8 +84,22 @@ interface ContextPart {
   content: string
 }
 
+interface HardConstraintDraft {
+  label: HardConstraintSourceLabel
+  title: string
+  content: string
+}
+
 export type ChapterContextPromptProfile = 'scenePlan' | 'draft' | 'review' | 'rewrite'
 export type ChapterContextComplexity = 'simple' | 'standard' | 'key'
+export type HardConstraintSourceLabel =
+  | 'chapterGoal'
+  | 'characterStates'
+  | 'worldStates'
+  | 'relationSummary'
+  | 'itemSummary'
+  | 'openLoops'
+  | 'continuityNotes'
 
 export interface BuildChapterContextOptions {
   totalBudget?: number
@@ -154,16 +169,18 @@ export interface OutlineGenerationContext {
   arc: typeof storyArcs.$inferSelect
   previousSummary: string
   characterStates: string
+  worldStates: string
   continuitySummary: string
   openLoops: string
   worldRulesSummary: string
 }
 
-export interface ChapterContext {
+export interface ChapterContextParts {
   storyCore: string
   currentArc: string
   worldRules: string
   characterStates: string
+  worldStates: string
   itemSummary: string
   previousSummaries: string
   lastChapterEnding: string
@@ -181,7 +198,47 @@ export interface ChapterContext {
   recalledMemory: string
 }
 
-type ChapterContextLabel = keyof ChapterContext
+export interface HardConstraintEntry {
+  label: HardConstraintSourceLabel
+  title: string
+  content: string
+  originalTokens: number
+  allocatedTokens: number
+  truncated: boolean
+}
+
+export interface SoftContextBudgetUsage {
+  budget: number
+  used: number
+  warningCount: number
+  droppedLabels: string[]
+  truncatedLabels: string[]
+}
+
+export interface ConstraintInjectionStatus {
+  promptProfile: ChapterContextPromptProfile
+  hardConstraintBudget: number
+  hardConstraintUsed: number
+  softContextBudget: number
+  softContextUsed: number
+  droppedConstraintCount: number
+  truncatedHardConstraintCount: number
+  injectedLabels: HardConstraintSourceLabel[]
+  truncatedLabels: HardConstraintSourceLabel[]
+}
+
+export interface ChapterContext extends ChapterContextParts {
+  hardConstraintContext: string
+  hardConstraintSummary: string
+  hardConstraintEntries: HardConstraintEntry[]
+  constraintInjectionStatus: ConstraintInjectionStatus
+  softContextBudgetUsage: SoftContextBudgetUsage
+  droppedConstraintCount: number
+  recallDiagnostics: RecallDiagnostics
+  recalledMemorySources: RecallMemorySource[]
+}
+
+type ChapterContextLabel = keyof ChapterContextParts
 
 export interface ChapterContextRawData {
   novel: typeof novels.$inferSelect
@@ -191,7 +248,9 @@ export interface ChapterContextRawData {
   currentArc: typeof storyArcs.$inferSelect | null
   outlineMentionedCharacterCount: number
   activeThreadPressureCount: number
-  contextParts: ChapterContext
+  contextParts: ChapterContextParts
+  recallDiagnostics: RecallDiagnostics
+  recalledMemorySources: RecallMemorySource[]
 }
 
 interface ChapterWithContinuity {
@@ -269,6 +328,35 @@ function dedupe(values: string[], limit?: number): string[] {
 
 type RecallBucketKey = 'character' | 'rule' | 'thread'
 
+export type RecallSearchMode = 'vector' | 'keyword'
+
+export interface RecallMemorySource {
+  bucket: RecallBucketKey
+  chapterId: number
+  chapterNum: number
+  fragmentType: string
+  similarity: number
+  searchMode: RecallSearchMode
+  sourceLabel: string
+  summary: string
+  stale: boolean
+  staleReasons: string[]
+  overriddenByConstraint: boolean
+}
+
+export interface RecallDiagnostics {
+  searchedBucketCount: number
+  selectedBucketCount: number
+  totalHitCount: number
+  selectedHitCount: number
+  staleRecallCount: number
+  staleRecallRate: number
+  recallDependencyRate: number
+  overriddenHitCount: number
+  fallbackHitCount: number
+  summaryLines: string[]
+}
+
 interface RecallQueryBucket {
   bucket: RecallBucketKey
   query: string
@@ -287,6 +375,7 @@ interface RecallQueryBuildInput {
   worldRules: string
   relationSummary: string
   characterStates: string
+  worldStates?: string
   itemSummary: string
   timelineSummary: string
   timelineOpenThreads: string
@@ -299,12 +388,11 @@ interface RecallQueryBuildInput {
   mentionedLocations: string[]
 }
 
-interface RecallHit {
+interface RecallHit extends SimilarFragmentHit {
   bucket: RecallBucketKey
-  chapterId: number
-  fragmentType: string
-  fragmentText: string
-  similarity: number
+  stale: boolean
+  staleReasons: string[]
+  overriddenByConstraint: boolean
 }
 
 function compactRecallLine(text: string, maxLength = 96): string {
@@ -327,6 +415,214 @@ function splitRecallLines(text: string, maxLines = 4, maxLength = 96): string[] 
     .filter(Boolean)
   if (lines.length > 0) return dedupe(lines, maxLines)
   return dedupe([compactRecallLine(text, maxLength)].filter(Boolean), maxLines)
+}
+
+function containsAny(text: string, keywords: string[]): boolean {
+  const normalized = asText(text)
+  return normalized ? keywords.some((keyword) => normalized.includes(keyword)) : false
+}
+
+function buildConstraintSection(title: string, lines: string[]): string {
+  const normalizedLines = dedupe(lines.map((line) => compactRecallLine(line, 92)).filter(Boolean), 6)
+  if (normalizedLines.length === 0) return ''
+  return [`${title}:`, ...normalizedLines.map((line) => `- ${line}`)].join('\n')
+}
+
+const HARD_CONSTRAINT_SIGNAL_KEYWORDS = ['必须', '承接', '回收', '未清', '告警', '漂移', '冲突', '失效', '损坏', '伤势', '立场', '目标', '去向', '约束']
+const RELATION_CONSTRAINT_KEYWORDS = ['关系', '张力', '亲密', '敌对', '决裂', '背叛', '盟友', '称呼', '潜台词']
+const ITEM_CONSTRAINT_KEYWORDS = ['物品', '持有', '去向', '状态', '损坏', '失效', '遗失', '位置', '装备', '资源']
+
+function selectConstraintLines(
+  text: string,
+  options: {
+    keywords?: string[]
+    fallbackLines?: number
+    maxLines?: number
+    maxLength?: number
+  } = {},
+): string[] {
+  const lines = splitRecallLines(text, options.maxLines || 4, options.maxLength || 92)
+  if (lines.length === 0) return []
+  const matched = options.keywords?.length
+    ? lines.filter((line) => containsAny(line, options.keywords || []))
+    : lines
+  if (matched.length > 0) return matched.slice(0, options.maxLines || 4)
+  if (options.fallbackLines && options.fallbackLines > 0) return lines.slice(0, options.fallbackLines)
+  return []
+}
+
+function resolveHardConstraintBudget(
+  promptProfile: ChapterContextPromptProfile,
+  chapterComplexity: ChapterContextComplexity,
+  targetWords: number,
+): number {
+  const baseByProfile: Record<ChapterContextPromptProfile, number> = {
+    scenePlan: 1200,
+    draft: 1600,
+    review: 1400,
+    rewrite: 1700,
+  }
+  const complexityOffset: Record<ChapterContextComplexity, number> = {
+    simple: -180,
+    standard: 0,
+    key: 280,
+  }
+  const largeNovelOffset = targetWords >= 800000 ? 240 : targetWords >= 350000 ? 120 : 0
+  return Math.max(800, baseByProfile[promptProfile] + complexityOffset[chapterComplexity] + largeNovelOffset)
+}
+
+function buildHardConstraintDrafts(parts: ChapterContextParts): HardConstraintDraft[] {
+  const relationLines = selectConstraintLines(parts.relationSummary, {
+    keywords: RELATION_CONSTRAINT_KEYWORDS,
+    fallbackLines: 1,
+    maxLines: 2,
+  })
+  const itemLines = selectConstraintLines(parts.itemSummary, {
+    keywords: ITEM_CONSTRAINT_KEYWORDS,
+    fallbackLines: 1,
+    maxLines: 2,
+  })
+  const openLoopLines = selectConstraintLines(parts.openLoops, {
+    keywords: HARD_CONSTRAINT_SIGNAL_KEYWORDS,
+    maxLines: 3,
+  })
+  const continuityLines = selectConstraintLines(parts.continuityNotes, {
+    keywords: HARD_CONSTRAINT_SIGNAL_KEYWORDS,
+    fallbackLines: 1,
+    maxLines: 3,
+  })
+
+  const drafts: HardConstraintDraft[] = [
+    {
+      label: 'chapterGoal',
+      title: '章节目标',
+      content: buildConstraintSection('章节目标', [parts.chapterGoal]),
+    },
+    {
+      label: 'characterStates',
+      title: '人物当前状态',
+      content: buildConstraintSection('人物当前状态', selectConstraintLines(parts.characterStates, { fallbackLines: 4, maxLines: 4 })),
+    },
+    {
+      label: 'worldStates',
+      title: '当前世界状态',
+      content: buildConstraintSection('当前世界状态', selectConstraintLines(parts.worldStates, { fallbackLines: 4, maxLines: 4 })),
+    },
+    {
+      label: 'relationSummary',
+      title: '关键人物关系',
+      content: buildConstraintSection('关键人物关系', relationLines),
+    },
+    {
+      label: 'itemSummary',
+      title: '关键物品去向',
+      content: buildConstraintSection('关键物品去向', itemLines),
+    },
+    {
+      label: 'openLoops',
+      title: '必须回收事项',
+      content: buildConstraintSection('必须回收事项', openLoopLines),
+    },
+    {
+      label: 'continuityNotes',
+      title: '必须承接',
+      content: buildConstraintSection('必须承接', continuityLines),
+    },
+  ]
+
+  return drafts.filter((entry) => Boolean(entry.content))
+}
+
+function allocateHardConstraintEntries(
+  drafts: HardConstraintDraft[],
+  budget: number,
+): {
+  entries: HardConstraintEntry[]
+  text: string
+  used: number
+} {
+  if (drafts.length === 0 || budget <= 0) {
+    return { entries: [], text: '', used: 0 }
+  }
+
+  const originals = drafts.map((draft) => estimateTokens(draft.content))
+  const totalOriginal = originals.reduce((sum, value) => sum + value, 0)
+  let remainingBudget = Math.max(budget, drafts.length)
+  let remainingOriginal = totalOriginal
+  const allocations = drafts.map((draft, index) => {
+    const originalTokens = originals[index]
+    const remainingEntries = drafts.length - index
+    const minimumForRest = Math.max(remainingEntries - 1, 0)
+    const proportional = remainingOriginal > 0
+      ? Math.max(1, Math.floor((originalTokens / remainingOriginal) * remainingBudget))
+      : 1
+    const maxAllowed = Math.max(1, remainingBudget - minimumForRest)
+    const allocatedTokens = Math.min(originalTokens, Math.max(1, Math.min(maxAllowed, proportional)))
+    remainingBudget -= allocatedTokens
+    remainingOriginal -= originalTokens
+    return allocatedTokens
+  })
+
+  let distributable = remainingBudget
+  for (let index = 0; index < drafts.length && distributable > 0; index += 1) {
+    const originalTokens = originals[index]
+    const room = originalTokens - allocations[index]
+    if (room <= 0) continue
+    const extra = Math.min(room, distributable)
+    allocations[index] += extra
+    distributable -= extra
+  }
+
+  const entries = drafts.map((draft, index) => {
+    const originalTokens = originals[index]
+    const allocatedTokens = Math.max(1, allocations[index] || 1)
+    const content = truncateToTokens(draft.content, allocatedTokens)
+    return {
+      label: draft.label,
+      title: draft.title,
+      content,
+      originalTokens,
+      allocatedTokens: estimateTokens(content),
+      truncated: estimateTokens(content) < originalTokens,
+    }
+  })
+
+  return {
+    entries,
+    text: entries.map((entry) => entry.content).filter(Boolean).join('\n\n'),
+    used: entries.reduce((sum, entry) => sum + entry.allocatedTokens, 0),
+  }
+}
+
+const SOFT_CONTEXT_EXCLUDED_LABELS = new Set<ChapterContextLabel>([
+  'characterStates',
+  'worldStates',
+])
+
+function buildHardConstraintSummary(
+  entries: HardConstraintEntry[],
+  droppedConstraintCount: number,
+): string {
+  if (entries.length === 0) {
+    return droppedConstraintCount > 0
+      ? `关键约束注入失败，丢失 ${droppedConstraintCount} 项。`
+      : '当前章节没有额外关键约束。'
+  }
+
+  const injectedTitles = entries.map((entry) => entry.title)
+  const truncatedTitles = entries.filter((entry) => entry.truncated).map((entry) => entry.title)
+  const summaryParts = [
+    `已注入 ${entries.length} 项关键约束：${injectedTitles.join('、')}`,
+  ]
+
+  if (truncatedTitles.length > 0) {
+    summaryParts.push(`压缩 ${truncatedTitles.length} 项：${truncatedTitles.join('、')}`)
+  }
+  if (droppedConstraintCount > 0) {
+    summaryParts.push(`丢失 ${droppedConstraintCount} 项`)
+  }
+
+  return summaryParts.join('；')
 }
 
 function collectMentionedEntityNames(
@@ -576,33 +872,181 @@ function summarizeRecallHit(hit: RecallHit): string {
   return compactRecallLine((preferred.length > 0 ? preferred : lines).slice(0, 2).join('；'), 110)
 }
 
-function formatRecalledMemory(bucketResults: Array<{ bucket: RecallBucketKey; hits: RecallHit[] }>): string {
+function buildRecallEntityFreshnessMap(
+  novelId: number,
+  upToChapterNum?: number,
+): Map<string, number> {
+  const result = new Map<string, number>()
+  listLatestCharacterStates(novelId, { upToChapterNum, limit: 240 }).forEach((state) => {
+    if (state.characterName) {
+      result.set(state.characterName, state.chapterNum)
+    }
+  })
+  getWorldStateContextSnapshot(novelId, {
+    upToChapterNum,
+    limit: 240,
+  }).currentStates.forEach((state) => {
+    if (state.entityName) {
+      result.set(state.entityName, state.chapterNum)
+    }
+  })
+  return result
+}
+
+function enrichRecallHits(
+  hits: SimilarFragmentHit[],
+  bucket: RecallBucketKey,
+  currentChapterNum: number,
+  entityFreshnessMap: Map<string, number>,
+  constraintText: string,
+): RecallHit[] {
+  const candidateNames = [...entityFreshnessMap.keys()].sort((left, right) => right.length - left.length)
+
+  return hits.map((hit) => {
+    const staleReasons: string[] = []
+    const matchedNames = candidateNames.filter((name) => hit.fragmentText.includes(name)).slice(0, 4)
+    matchedNames.forEach((name) => {
+      const freshnessChapterNum = entityFreshnessMap.get(name) || 0
+      if (freshnessChapterNum > 0 && freshnessChapterNum > hit.chapterNum) {
+        staleReasons.push(`${name} 已在第${freshnessChapterNum}章后更新，旧片段不可直接当作当前事实`)
+      }
+    })
+    if (bucket !== 'thread' && hit.chapterNum >= currentChapterNum) {
+      staleReasons.push(`命中片段来自第${hit.chapterNum}章，不应反向作为当前章之前的历史依据`)
+    }
+    const overriddenByConstraint = matchedNames.length > 0
+      && matchedNames.some((name) => constraintText.includes(name))
+      && staleReasons.length > 0
+
+    return {
+      ...hit,
+      bucket,
+      stale: staleReasons.length > 0,
+      staleReasons: dedupe(staleReasons, 4),
+      overriddenByConstraint,
+    }
+  })
+}
+
+function buildEmptyRecallDiagnostics(summaryLines: string[] = []): RecallDiagnostics {
+  return {
+    searchedBucketCount: 0,
+    selectedBucketCount: 0,
+    totalHitCount: 0,
+    selectedHitCount: 0,
+    staleRecallCount: 0,
+    staleRecallRate: 0,
+    recallDependencyRate: 0,
+    overriddenHitCount: 0,
+    fallbackHitCount: 0,
+    summaryLines,
+  }
+}
+
+function formatRecalledMemory(sources: RecallMemorySource[]): string {
   const labels: Record<RecallBucketKey, string> = {
     character: '角色/关系召回',
     rule: '规则/主题召回',
     thread: '线程/伏笔召回',
   }
-  const lines: string[] = []
-  const seen = new Set<string>()
+  const selectedSources = sources
+    .filter((source) => !source.stale && !source.overriddenByConstraint)
+    .slice(0, 6)
+  if (selectedSources.length === 0) return ''
 
-  for (const result of bucketResults) {
-    const significant = result.hits.filter((hit) => hit.similarity > 0.08)
-    const selected = significant.length > 0
-      ? significant.slice(0, 2)
-      : result.hits.filter((hit) => hit.similarity > 0).slice(0, 1)
-
-    for (const hit of selected) {
-      const summary = summarizeRecallHit(hit)
-      if (!summary) continue
-      const dedupeKey = `${hit.fragmentType}:${summary}`
-      if (seen.has(dedupeKey)) continue
-      seen.add(dedupeKey)
-      lines.push(`[${labels[result.bucket]}·${hit.fragmentType}] ${summary}`)
-      if (lines.length >= 6) return lines.join('\n')
-    }
-  }
+  const lines = ['以下内容仅作背景补充，不定义当前事实。']
+  selectedSources.forEach((source) => {
+    lines.push(`[${labels[source.bucket]}·第${source.chapterNum}章·${source.fragmentType}] ${source.summary}`)
+  })
 
   return lines.join('\n')
+}
+
+function buildRecallSnapshot(
+  bucketResults: Array<{ bucket: RecallBucketKey; hits: RecallHit[] }>,
+): {
+  recalledMemory: string
+  recalledMemorySources: RecallMemorySource[]
+  recallDiagnostics: RecallDiagnostics
+} {
+  const sources: RecallMemorySource[] = []
+  const seen = new Set<string>()
+  const selectedKeys = new Set<string>()
+  let selectedBucketCount = 0
+
+  bucketResults.forEach((result) => {
+    const significant = result.hits.filter((hit) => !hit.stale && !hit.overriddenByConstraint && hit.similarity > 0.08)
+    const fallback = result.hits.filter((hit) => !hit.stale && !hit.overriddenByConstraint && hit.similarity > 0)
+    const selected = significant.length > 0 ? significant.slice(0, 2) : fallback.slice(0, 1)
+    if (selected.length > 0) {
+      selectedBucketCount += 1
+    }
+    selected.forEach((hit) => {
+      const summary = summarizeRecallHit(hit)
+      if (!summary) return
+      selectedKeys.add(`${result.bucket}:${hit.chapterId}:${hit.fragmentType}:${summary}`)
+    })
+
+    result.hits.forEach((hit) => {
+      const summary = summarizeRecallHit(hit)
+      if (!summary) return
+      const dedupeKey = `${result.bucket}:${hit.chapterId}:${hit.fragmentType}:${summary}`
+      if (seen.has(dedupeKey)) return
+      seen.add(dedupeKey)
+      sources.push({
+        bucket: result.bucket,
+        chapterId: hit.chapterId,
+        chapterNum: hit.chapterNum,
+        fragmentType: hit.fragmentType,
+        similarity: hit.similarity,
+        searchMode: hit.searchMode,
+        sourceLabel: `第${hit.chapterNum}章 · ${hit.fragmentType}`,
+        summary,
+        stale: hit.stale,
+        staleReasons: hit.staleReasons,
+        overriddenByConstraint: hit.overriddenByConstraint,
+      })
+    })
+  })
+
+  const searchedBucketCount = bucketResults.length
+  const totalHitCount = sources.length
+  const selectedHitCount = sources.filter((source) =>
+    selectedKeys.has(`${source.bucket}:${source.chapterId}:${source.fragmentType}:${source.summary}`)).length
+  const staleRecallCount = sources.filter((source) => source.stale).length
+  const overriddenHitCount = sources.filter((source) => source.overriddenByConstraint).length
+  const fallbackHitCount = sources.filter((source) => source.searchMode === 'keyword').length
+  const staleRecallRate = totalHitCount > 0 ? Math.round((staleRecallCount / totalHitCount) * 100) : 0
+  const recallDependencyRate = totalHitCount > 0 ? Math.round((selectedHitCount / totalHitCount) * 100) : 0
+  const recallDiagnostics: RecallDiagnostics = {
+    searchedBucketCount,
+    selectedBucketCount,
+    totalHitCount,
+    selectedHitCount,
+    staleRecallCount,
+    staleRecallRate,
+    recallDependencyRate,
+    overriddenHitCount,
+    fallbackHitCount,
+    summaryLines: [
+      '向量召回只作背景补充，当前事实以硬约束和结构化状态为准。',
+      searchedBucketCount > 0
+        ? `召回覆盖 ${selectedBucketCount}/${searchedBucketCount} 个查询桶，补充片段 ${selectedHitCount} 条。`
+        : '当前章节没有可用的召回查询桶。',
+      staleRecallCount > 0
+        ? `拦截过期召回 ${staleRecallCount} 条，过期召回率 ${staleRecallRate}%。`
+        : '最近召回片段未命中过期状态。',
+      overriddenHitCount > 0
+        ? `${overriddenHitCount} 条片段已被硬约束覆盖，不再参与当前事实定义。`
+        : '当前没有片段被硬约束直接覆盖。',
+    ].filter(Boolean),
+  }
+
+  return {
+    recalledMemory: formatRecalledMemory(sources),
+    recalledMemorySources: sources,
+    recallDiagnostics,
+  }
 }
 
 export interface TokenAllocationWarning {
@@ -756,6 +1200,7 @@ function createStagePriorityMap(
           continuityNotes: 0,
           openLoops: 0,
           characterStates: 0,
+          worldStates: 0,
           itemSummary: 1,
           lastChapterEnding: 1,
           continuitySummary: 2,
@@ -778,6 +1223,7 @@ function createStagePriorityMap(
           continuityNotes: 0,
           openLoops: 0,
           characterStates: 0,
+          worldStates: 0,
           itemSummary: 1,
           lastChapterEnding: 1,
           continuitySummary: 1,
@@ -800,6 +1246,7 @@ function createStagePriorityMap(
           continuityNotes: 1,
           openLoops: 0,
           characterStates: 0,
+          worldStates: 0,
           itemSummary: 1,
           lastChapterEnding: 2,
           continuitySummary: 0,
@@ -823,6 +1270,7 @@ function createStagePriorityMap(
           continuityNotes: 0,
           openLoops: 0,
           characterStates: 0,
+          worldStates: 0,
           itemSummary: 1,
           lastChapterEnding: 1,
           continuitySummary: 1,
@@ -1463,6 +1911,10 @@ export async function buildOutlineGenerationContext(arcId: number): Promise<Outl
     arc,
     previousSummary,
     characterStates: buildCharacterStates(allCharacters, recentChapters),
+    worldStates: getWorldStateContextSnapshot(novel.id, {
+      upToChapterNum: recentChapters[recentChapters.length - 1]?.chapterNum,
+      limit: 10,
+    }).worldStatesText,
     continuitySummary: continuityChapters.map(formatContinuityEntry).join('\n'),
     openLoops: collectOpenLoops(continuityChapters),
     worldRulesSummary: profile.worldRulesSummary,
@@ -1566,6 +2018,14 @@ export async function collectChapterContextRawData(
         previousChapter.nextChapterSeed ? `[衔接提示] ${previousChapter.nextChapterSeed}` : '',
       ].filter(Boolean).join('\n')
     : ''
+  const worldStateSnapshot = getWorldStateContextSnapshot(novelId, {
+    upToChapterNum: recentChapters[recentChapters.length - 1]?.chapterNum,
+    limit: 12,
+  })
+  const entityFreshnessMap = buildRecallEntityFreshnessMap(
+    novelId,
+    recentChapters[recentChapters.length - 1]?.chapterNum,
+  )
 
   const result = {
     novel,
@@ -1588,6 +2048,7 @@ export async function collectChapterContextRawData(
       itemSummary,
       longTermMemory,
       characterStates: buildCharacterStates(allCharacters, recentChapters, mentionedCharacterNames),
+      worldStates: worldStateSnapshot.worldStatesText,
       continuitySummary: continuityChapters.map(formatContinuityEntry).join('\n'),
       timelineSummary: timelineContext.timelineSummary,
       relationSummary,
@@ -1596,6 +2057,8 @@ export async function collectChapterContextRawData(
       previousSummaries,
       recalledMemory: '', // placeholder, filled below
     },
+    recallDiagnostics: buildEmptyRecallDiagnostics(['召回尚未执行。']),
+    recalledMemorySources: [] as RecallMemorySource[],
   }
 
   // 多信号向量召回：同时补足角色、规则、线程三类历史约束
@@ -1612,6 +2075,7 @@ export async function collectChapterContextRawData(
       worldRules: result.contextParts.worldRules,
       relationSummary,
       characterStates: result.contextParts.characterStates,
+      worldStates: result.contextParts.worldStates,
       itemSummary,
       timelineSummary: timelineContext.timelineSummary,
       timelineOpenThreads: timelineContext.timelineOpenThreads,
@@ -1625,20 +2089,30 @@ export async function collectChapterContextRawData(
     })
 
     if (recallBuckets.length > 0) {
+      const constraintText = [
+        result.contextParts.characterStates,
+        result.contextParts.worldStates,
+        relationSummary,
+        itemSummary,
+        result.contextParts.openLoops,
+        result.contextParts.continuityNotes,
+      ].filter(Boolean).join('\n')
       const bucketResults = await Promise.all(recallBuckets.map(async (bucket) => ({
         bucket: bucket.bucket,
         hits: (await findSimilarFragments(novelId, bucket.query, bucket.topK, novel.modelConfigId || undefined))
-          .map((hit) => ({
-            bucket: bucket.bucket,
-            chapterId: hit.chapterId,
-            fragmentType: hit.fragmentType,
-            fragmentText: hit.fragmentText,
-            similarity: hit.similarity,
-          })),
+          .filter((hit) => hit.chapterNum < chapterNum)
+          .map((hit) => enrichRecallHits([hit], bucket.bucket, chapterNum, entityFreshnessMap, constraintText)[0]),
       })))
-      result.contextParts.recalledMemory = formatRecalledMemory(bucketResults)
+      const recallSnapshot = buildRecallSnapshot(bucketResults)
+      result.contextParts.recalledMemory = recallSnapshot.recalledMemory
+      result.recallDiagnostics = recallSnapshot.recallDiagnostics
+      result.recalledMemorySources = recallSnapshot.recalledMemorySources
     }
-  } catch { /* vector recall failure is non-blocking */ }
+  } catch {
+    result.recallDiagnostics = buildEmptyRecallDiagnostics([
+      '向量召回当前不可用，已自动降级，不影响硬约束与结构化状态注入。',
+    ])
+  }
 
   return result
 }
@@ -1682,6 +2156,14 @@ export function allocateChapterContext(
     ? Math.max(0, remainingContextBudget)
     : Math.max(3600, remainingContextBudget)
   const priorityMap = createStagePriorityMap(promptProfile, chapterComplexity, targetWords, rawData.chapterRows.length)
+  const hardConstraintDrafts = buildHardConstraintDrafts(rawData.contextParts)
+  const desiredHardConstraintBudget = resolveHardConstraintBudget(promptProfile, chapterComplexity, targetWords)
+  const minimumSoftContextBudget = Math.min(2400, Math.max(1200, Math.floor(contextBudget * 0.28)))
+  const hardConstraintBudget = contextBudget <= minimumSoftContextBudget
+    ? contextBudget
+    : Math.min(desiredHardConstraintBudget, contextBudget - minimumSoftContextBudget)
+  const hardConstraintAllocation = allocateHardConstraintEntries(hardConstraintDrafts, hardConstraintBudget)
+  const softContextBudget = Math.max(0, contextBudget - hardConstraintAllocation.used)
 
   const partDefinitions = (Object.keys(rawData.contextParts) as ChapterContextLabel[]).map((label) => ({
     label,
@@ -1689,6 +2171,7 @@ export function allocateChapterContext(
   }))
 
   const parts = partDefinitions.reduce<ContextPart[]>((result, part) => {
+    if (SOFT_CONTEXT_EXCLUDED_LABELS.has(part.label)) return result
     const priority = priorityMap[part.label]
     if (typeof priority !== 'number' || !part.content) return result
     result.push({
@@ -1699,28 +2182,72 @@ export function allocateChapterContext(
     return result
   }, [])
 
-  const { allocated } = allocateTokens(parts, contextBudget)
+  const softAllocation = allocateTokens(parts, softContextBudget)
+  const truncatedHardConstraintLabels = hardConstraintAllocation.entries
+    .filter((entry) => entry.truncated)
+    .map((entry) => entry.label)
+  const droppedConstraintCount = Math.max(0, hardConstraintDrafts.length - hardConstraintAllocation.entries.length)
+  const constraintInjectionStatus: ConstraintInjectionStatus = {
+    promptProfile,
+    hardConstraintBudget,
+    hardConstraintUsed: hardConstraintAllocation.used,
+    softContextBudget,
+    softContextUsed: softAllocation.totalUsed,
+    droppedConstraintCount,
+    truncatedHardConstraintCount: truncatedHardConstraintLabels.length,
+    injectedLabels: hardConstraintAllocation.entries.map((entry) => entry.label),
+    truncatedLabels: truncatedHardConstraintLabels,
+  }
+  const softContextBudgetUsage: SoftContextBudgetUsage = {
+    budget: softContextBudget,
+    used: softAllocation.totalUsed,
+    warningCount: softAllocation.warnings.length,
+    droppedLabels: softAllocation.warnings
+      .filter((warning) => warning.reason === 'dropped')
+      .map((warning) => warning.label),
+    truncatedLabels: softAllocation.warnings
+      .filter((warning) => warning.reason === 'truncated')
+      .map((warning) => warning.label),
+  }
+  const hardConstraintSummary = buildHardConstraintSummary(hardConstraintAllocation.entries, droppedConstraintCount)
+
+  if (droppedConstraintCount > 0) {
+    console.error(`[context] 硬约束注入异常，丢失 ${droppedConstraintCount} 项:`,
+      hardConstraintDrafts
+        .map((draft) => draft.label)
+        .filter((label) => !constraintInjectionStatus.injectedLabels.includes(label))
+        .join(', '))
+  }
 
   return {
-    storyCore: allocated.storyCore || '',
-    currentArc: allocated.currentArc || '',
-    worldRules: allocated.worldRules || '',
-    characterStates: allocated.characterStates || '',
-    itemSummary: allocated.itemSummary || '',
-    previousSummaries: allocated.previousSummaries || '',
-    lastChapterEnding: allocated.lastChapterEnding || '',
-    styleTemplate: allocated.styleTemplate || '',
-    chapterGoal: allocated.chapterGoal || '',
-    continuitySummary: allocated.continuitySummary || '',
-    openLoops: allocated.openLoops || '',
-    continuityNotes: allocated.continuityNotes || '',
-    timelineSummary: allocated.timelineSummary || '',
-    timelineOpenThreads: allocated.timelineOpenThreads || '',
-    longTermMemory: allocated.longTermMemory || '',
-    activeThreads: allocated.activeThreads || '',
-    writingContractSummary: allocated.writingContractSummary || rawData.profile.writingContractSummary || '',
-    relationSummary: allocated.relationSummary || rawData.contextParts.relationSummary || '',
-    recalledMemory: allocated.recalledMemory || '',
+    storyCore: softAllocation.allocated.storyCore || '',
+    currentArc: softAllocation.allocated.currentArc || '',
+    worldRules: softAllocation.allocated.worldRules || '',
+    characterStates: softAllocation.allocated.characterStates || '',
+    worldStates: softAllocation.allocated.worldStates || '',
+    itemSummary: softAllocation.allocated.itemSummary || '',
+    previousSummaries: softAllocation.allocated.previousSummaries || '',
+    lastChapterEnding: softAllocation.allocated.lastChapterEnding || '',
+    styleTemplate: softAllocation.allocated.styleTemplate || '',
+    chapterGoal: softAllocation.allocated.chapterGoal || rawData.contextParts.chapterGoal || '',
+    continuitySummary: softAllocation.allocated.continuitySummary || '',
+    openLoops: softAllocation.allocated.openLoops || '',
+    continuityNotes: softAllocation.allocated.continuityNotes || '',
+    timelineSummary: softAllocation.allocated.timelineSummary || '',
+    timelineOpenThreads: softAllocation.allocated.timelineOpenThreads || '',
+    longTermMemory: softAllocation.allocated.longTermMemory || '',
+    activeThreads: softAllocation.allocated.activeThreads || '',
+    writingContractSummary: softAllocation.allocated.writingContractSummary || rawData.profile.writingContractSummary || '',
+    relationSummary: softAllocation.allocated.relationSummary || rawData.contextParts.relationSummary || '',
+    recalledMemory: softAllocation.allocated.recalledMemory || '',
+    hardConstraintContext: hardConstraintAllocation.text,
+    hardConstraintSummary,
+    hardConstraintEntries: hardConstraintAllocation.entries,
+    constraintInjectionStatus,
+    softContextBudgetUsage,
+    droppedConstraintCount,
+    recallDiagnostics: rawData.recallDiagnostics,
+    recalledMemorySources: rawData.recalledMemorySources,
   }
 }
 
