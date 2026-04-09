@@ -74,6 +74,10 @@ function assertRequiredColumns(db) {
   assert.ok(getColumns(db, 'story_arcs').has('progress_percent'))
   assert.ok(getColumns(db, 'story_arcs').has('stalled_chapter_count'))
   assert.ok(getColumns(db, 'story_arcs').has('last_progress_chapter_num'))
+  assert.ok(getColumns(db, 'story_threads').has('planted_chapter'))
+  assert.ok(getColumns(db, 'story_threads').has('last_referenced_chapter'))
+  assert.ok(getColumns(db, 'story_threads').has('resolved_chapter'))
+  assert.ok(getColumns(db, 'story_threads').has('reminder_interval'))
   assert.ok(getColumns(db, 'story_memory_checkpoints').has('character_cards_json'))
   assert.ok(getColumns(db, 'story_memory_checkpoints').has('relation_cards_json'))
   assert.ok(getColumns(db, 'story_memory_checkpoints').has('item_cards_json'))
@@ -115,6 +119,8 @@ function testFreshDbIsIdempotent() {
       '0014_character_dialogue_fingerprints',
       '0015_character_state_versions',
       '0016_world_state_versions',
+      '0017_story_arc_phase_targets',
+      '0018_story_thread_foreshadow_columns',
     ])
 
     runMigrations(db)
@@ -209,6 +215,8 @@ function testPartialSchemaCanResume() {
       '0014_character_dialogue_fingerprints',
       '0015_character_state_versions',
       '0016_world_state_versions',
+      '0017_story_arc_phase_targets',
+      '0018_story_thread_foreshadow_columns',
     ])
 
     const configs = db.prepare(`

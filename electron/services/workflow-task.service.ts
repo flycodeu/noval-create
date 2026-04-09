@@ -717,19 +717,19 @@ export async function startWorldRulesAutoGenerateWorkflow(
   options: WorldRulesAutoGenerateOptions,
   sender?: WebContents,
 ) {
-  const existing = getLatestWorldRulesWorkflow(novelId)
-  if (existing && ['pending', 'running', 'cancel_requested'].includes(existing.status || '')) {
-    return existing.id
-  }
-  if (existing?.status === 'paused') {
-    throwUserFacingError('workflow.worldRulesPausedExists')
-  }
-
   const safeOptions: WorldRulesAutoGenerateOptions = {
     currentRules: normalizeWorldRulesDraft(options.currentRules, options.currentRules?.genreProfile?.name),
     requirements: options.requirements,
     sectionOrder: sanitizeWorldRuleSectionOrder(options.sectionOrder),
     maxRetries: typeof options.maxRetries === 'number' ? options.maxRetries : undefined,
+  }
+
+  const existing = getLatestWorldRulesWorkflow(novelId)
+  if (existing && ['pending', 'running', 'cancel_requested'].includes(existing.status || '')) {
+    return existing.id
+  }
+  if (existing?.status === 'paused') {
+    return resumeWorldRulesAutoGenerateWorkflow(existing.id, safeOptions.currentRules, sender)
   }
 
   const taskId = await createTask({

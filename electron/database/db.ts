@@ -1015,6 +1015,13 @@ export function runMigrations(sqlite: Database.Database) {
   runMigrationStep(sqlite, '0017_story_arc_phase_targets', () => {
     ensureColumn(sqlite, 'story_arcs', 'phase_targets_json', 'TEXT')
   })
+
+  runMigrationStep(sqlite, '0018_story_thread_foreshadow_columns', () => {
+    ensureColumn(sqlite, 'story_threads', 'planted_chapter', 'INTEGER')
+    ensureColumn(sqlite, 'story_threads', 'last_referenced_chapter', 'INTEGER')
+    ensureColumn(sqlite, 'story_threads', 'resolved_chapter', 'INTEGER')
+    ensureColumn(sqlite, 'story_threads', 'reminder_interval', 'INTEGER DEFAULT 20')
+  })
 }
 
 function ensureMigrationTable(sqlite: Database.Database) {
