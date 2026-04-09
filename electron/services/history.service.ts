@@ -160,6 +160,7 @@ function toStoryThreadMutation(snapshot: StoryThread) {
     currentState: snapshot.currentState ?? null,
     plantedChapter: snapshot.plantedChapter ?? null,
     lastReferencedChapter: snapshot.lastReferencedChapter ?? null,
+    resolvedChapter: snapshot.resolvedChapter ?? null,
     reminderInterval: snapshot.reminderInterval ?? 20,
     relatedCharacterIdsJson: snapshot.relatedCharacterIdsJson ?? '[]',
     relatedItemIdsJson: snapshot.relatedItemIdsJson ?? '[]',

@@ -20,6 +20,7 @@ import type {
   ChapterSegment,
   ChapterVersion,
   ChapterPublishCheck,
+  ForeshadowSnapshot,
   NovelConsistencyReport,
   NovelContextStatus,
   ParallelGenerationPlan,
@@ -127,6 +128,7 @@ const parseContinuity = (raw?: string) => { try { return raw ? JSON.parse(raw) a
 const parseScenePlan = (raw?: string) => { try { const parsed = raw ? JSON.parse(raw) : []; return Array.isArray(parsed) ? parsed as ScenePlanStep[] : [] } catch { return [] } }
 const parseReviewNotes = (raw?: string) => { try { return raw ? JSON.parse(raw) as ReviewNotes : null } catch { return null } }
 const countWords = (text: string) => ((text.match(/[一-龥]/g) || []).length + (text.match(/\b[a-zA-Z]+\b/g) || []).length)
+const formatChapterNumber = (chapterNum?: number) => typeof chapterNum === 'number' ? `第${chapterNum}章` : '未设定'
 const getStatusLabel = (status?: Chapter['status']) => STATUS_OPTIONS.find((item) => item.value === status)?.label || '未设置'
 const getIssueColor = (severity: 'high' | 'medium' | 'low') => severity === 'high' ? 'error' : severity === 'medium' ? 'warning' : 'default'
 const getIssueLabel = (severity: 'high' | 'medium' | 'low') => severity === 'high' ? '高优先' : severity === 'medium' ? '中优先' : '低优先'
@@ -211,6 +213,7 @@ export default function Writing({ novelId }: Props) {
   const [generationProgress, setGenerationProgress] = useState<ChapterGenerationProgressEvent | null>(null)
   const [consistencyReport, setConsistencyReport] = useState<NovelConsistencyReport | null>(null)
   const [storyMemory, setStoryMemory] = useState<StoryMemorySnapshot | null>(null)
+  const [foreshadowSnapshot, setForeshadowSnapshot] = useState<ForeshadowSnapshot | null>(null)
   const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([])
   const [storyItems, setStoryItems] = useState<StoryItem[]>([])
   const [chapterSegments, setChapterSegments] = useState<ChapterSegment[]>([])
@@ -238,6 +241,13 @@ export default function Writing({ novelId }: Props) {
     () => chapterVersions.find((version) => version.id === selectedVersionId) || chapterVersions[0] || null,
     [chapterVersions, selectedVersionId],
   )
+  const dueForeshadowItems = useMemo(() => {
+    if (!foreshadowSnapshot) return []
+    return [
+      ...foreshadowSnapshot.overdue.map((item) => `超期 · ${item.title} · 目标 ${formatChapterNumber(item.targetPayoffChapter)}${item.payoffCondition ? ` · 条件：${item.payoffCondition}` : ''}${item.warningText ? ` · ${item.warningText}` : ''}`),
+      ...foreshadowSnapshot.dueSoon.map((item) => `到期 · ${item.title} · 目标 ${formatChapterNumber(item.targetPayoffChapter)}${item.payoffCondition ? ` · 条件：${item.payoffCondition}` : ''}`),
+    ].slice(0, 8)
+  }, [foreshadowSnapshot])
 
   useEffect(() => { currentChapterIdRef.current = currentChapterId }, [currentChapterId])
 
@@ -246,6 +256,7 @@ export default function Writing({ novelId }: Props) {
     setStoryItems([])
     setChapterSegments([])
     setAiResult(null)
+    setForeshadowSnapshot(null)
     setChapterContextPreview(null)
     setPublishCheck(null)
     setSelectedSnippet(null)
@@ -303,6 +314,19 @@ export default function Writing({ novelId }: Props) {
       setQualityDashboard(await window.electron.quality.getDashboard(novelId))
     } catch (error) {
       console.error('Failed to load quality dashboard snapshot', error)
+    }
+  }, [novelId])
+
+  const refreshForeshadowSnapshot = useCallback(async (chapter?: Chapter | null) => {
+    if (!chapter) {
+      setForeshadowSnapshot(null)
+      return
+    }
+    try {
+      setForeshadowSnapshot(await window.electron.thread.getForeshadowSnapshot(novelId, chapter.chapterNum))
+    } catch (error) {
+      console.error('Failed to load foreshadow snapshot', error)
+      setForeshadowSnapshot(null)
     }
   }, [novelId])
 
@@ -370,16 +394,17 @@ export default function Writing({ novelId }: Props) {
       refreshPublishCheck(chapterId),
       refreshContextStatus(),
       refreshChapterLinks(full),
+      refreshForeshadowSnapshot(full),
       refreshChapterContextPreview(full),
     ])
-  }, [clearChapterArtifacts, refreshChapterContextPreview, refreshChapterLinks, refreshContextStatus, refreshPublishCheck, refreshVersionHistory, resetEditorHistory, updateChapter, versionHistoryOpen])
+  }, [clearChapterArtifacts, refreshChapterContextPreview, refreshChapterLinks, refreshContextStatus, refreshForeshadowSnapshot, refreshPublishCheck, refreshVersionHistory, resetEditorHistory, updateChapter, versionHistoryOpen])
 
   const loadChapters = useCallback(async (preferredChapterId?: number) => {
     const list = await window.electron.chapter.list(novelId)
     setChapters(list)
     if (list.length === 0) {
       resetEditorHistory('')
-      setCurrentChapter(null); setCurrentChapterId(null); setContent(''); setWordCount(0); setPublishCheck(null); setChapterSegments([]); setTimelineEvents([]); setStoryItems([]); await refreshContextStatus(); return
+      setCurrentChapter(null); setCurrentChapterId(null); setContent(''); setWordCount(0); setPublishCheck(null); setChapterSegments([]); setTimelineEvents([]); setStoryItems([]); setForeshadowSnapshot(null); await refreshContextStatus(); return
     }
     const target = list.find((chapter) => chapter.id === (preferredChapterId ?? currentChapterIdRef.current)) || list[0]
     setCurrentChapterId(target.id)
@@ -1113,6 +1138,9 @@ export default function Writing({ novelId }: Props) {
                   </InsightCard>
                   <InsightCard title="生产摘要" eyebrow="AI 主写 / 人工定稿" tone="soft"><StringList items={productionBriefItems} empty="章节进入审校后，这里会先汇总最值得优先处理的定稿建议。" /></InsightCard>
                   <InsightCard title="关联线索" eyebrow="时间轴 / 道具" tone="soft"><StringList items={relatedInsightItems.slice(0, 12)} empty="当前章节暂未关联时间轴事件或关键道具。" /></InsightCard>
+                  <InsightCard title="本章应回收伏笔" eyebrow={foreshadowSnapshot ? `按第 ${foreshadowSnapshot.currentChapterNum} 章进度计算` : '即将到期 / 超期未收'} tone="soft">
+                    <StringList items={dueForeshadowItems} empty="当前章节附近没有到期或超期未收的伏笔债务。" />
+                  </InsightCard>
                   <InsightCard title="修订提示" eyebrow="复盘重点" tone="soft"><StringList items={reviewInsightItems} empty="运行审校或摘要更新后，这里会汇总需要回看的修订点。" /></InsightCard>
                   <InsightCard title="世界规则" eyebrow="写作边界" tone="soft"><StringList items={worldRulesSummary} empty={currentNovel?.worldRulesJson ? '当前世界规则已录入，但还没有提炼出本章相关边界。' : '先完善世界规则，这里会同步展示写作边界。'} /></InsightCard>
                 </div>

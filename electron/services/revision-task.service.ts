@@ -338,10 +338,16 @@ function renumberNovelChapters(novelId: number): void {
   threadRows.forEach((thread) => {
     const nextStart = remapChapterStart(existingNumbers, thread.startChapter)
     const nextPayoff = remapChapterEnd(existingNumbers, thread.targetPayoffChapter)
-    if ((thread.startChapter ?? null) === nextStart && (thread.targetPayoffChapter ?? null) === nextPayoff) return
+    const nextResolved = remapChapterEnd(existingNumbers, thread.resolvedChapter)
+    if (
+      (thread.startChapter ?? null) === nextStart
+      && (thread.targetPayoffChapter ?? null) === nextPayoff
+      && (thread.resolvedChapter ?? null) === nextResolved
+    ) return
     db.update(storyThreads).set({
       startChapter: nextStart,
       targetPayoffChapter: nextPayoff,
+      resolvedChapter: nextResolved,
       updatedAt: new Date().toISOString(),
     }).where(eq(storyThreads.id, thread.id)).run()
   })

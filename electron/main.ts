@@ -760,7 +760,8 @@ function registerIpcHandlers() {
   ipcMain.handle('thread:query', (_, filters) => storyThreadService.queryStoryThreads(filters))
   ipcMain.handle('thread:getStats', (_, filters) => storyThreadService.getStoryThreadStats(filters))
   ipcMain.handle('thread:get', (_, id) => storyThreadService.getStoryThread(id))
-  ipcMain.handle('thread:getForeshadowSnapshot', (_, novelId) => storyThreadService.getForeshadowSnapshot(requireId(novelId, 'novelId')))
+  ipcMain.handle('thread:getForeshadowSnapshot', (_, novelId, chapterNum) =>
+    storyThreadService.getForeshadowSnapshot(requireId(novelId, 'novelId'), typeof chapterNum === 'number' ? chapterNum : undefined))
   ipcMain.handle('thread:generate', (event, novelId, options) => batchWorkflowService.generateStoryThreadsViaWorkflow(novelId, options, event.sender))
   ipcMain.handle('thread:startAutoGenerate', (event, novelId, options) =>
     batchWorkflowService.startStoryThreadAutoGenerateWorkflow(novelId, options, event.sender))

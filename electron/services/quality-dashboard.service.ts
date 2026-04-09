@@ -1,7 +1,11 @@
 import { asc, eq } from 'drizzle-orm'
 import type {
-  ChapterDialogueReviewData,
   AIScoreDimension,
+  ChapterDialogueReviewData,
+  ChapterFunctionAlert,
+  ChapterFunctionRun,
+  ChapterFunctionSummary,
+  ChapterFunctionTag,
   ChapterPacingMarker,
   ChapterStoryDynamics,
   CostDurationEntry,
@@ -12,24 +16,31 @@ import type {
   LanguageDriftTrendStatus,
   LanguageDriftTrendSummary,
   NovelLanguageDriftSummary,
+  NovelQualityMetrics,
   ProtagonistSetbackLevel,
   ProtagonistSetbackSummary,
   QualityDashboardData,
+  QualityDashboardRiskItem,
+  QualityDashboardRiskKind,
+  QualityDashboardRiskSeverity,
+  RecallDiagnostics,
   ReversalDistributionSummary,
   ReversalSupportState,
   RewardState,
   StoryDynamicsAlert,
   StoryDynamicsTrendPoint,
   VolumeLanguageDriftEntry,
+  VolumeChapterFunctionEntry,
+  VolumeQualityMetrics,
   VolumeStoryDynamicsEntry,
   WorldStateAlert,
-  RecallDiagnostics,
-  } from '../../src/types'
+} from '../../src/types'
 import { getDb } from '../database/db'
 import { chapters, characterStateVersions, characters, storyVolumes, timelineEvents, worldStateVersions } from '../database/schema'
 import { getDialogueAnalyticsSnapshot, scheduleDialogueFingerprintRefresh } from './dialogue-fingerprint.service'
 import { fallbackKeywordSearch } from './embedding.service'
 import { getStoryArcProgressSnapshot } from './story-arc-progress.service'
+import { getForeshadowSnapshot } from './story-thread.service'
 import { getWorldStateLedgerSnapshot } from './world-state.service'
 
 interface QualityDimensionScore extends AIScoreDimension {}
@@ -56,6 +67,23 @@ interface StoryDynamicsChapterRecord {
   dynamics: ChapterStoryDynamics
 }
 
+interface ChapterFunctionParseResult {
+  primaryTag?: ChapterFunctionTag
+  tags: ChapterFunctionTag[]
+  explicit: boolean
+}
+
+interface ChapterFunctionChapterRecord {
+  chapterId: number
+  chapterNum: number
+  title: string
+  volumeId?: number
+  primaryTag?: ChapterFunctionTag
+  tags: ChapterFunctionTag[]
+  paceMarker?: ChapterPacingMarker
+  reversalMarker: boolean
+}
+
 interface MutableCostRecord {
   startChapterNum: number
   summary: string
@@ -78,6 +106,26 @@ type VolumeStoryAccumulator = {
   volumeName: string
   chapters: StoryDynamicsChapterRecord[]
 }
+type VolumeChapterFunctionAccumulator = {
+  volumeId: number
+  volumeNumber: number
+  volumeName: string
+  chapters: ChapterFunctionChapterRecord[]
+}
+type VolumeChapterRange = {
+  volumeId: number
+  volumeNumber: number
+  volumeName: string
+  chapterStart: number
+  chapterEnd: number
+  chapterCount: number
+}
+type ForeshadowCounts = {
+  pending: number
+  dueSoon: number
+  overdue: number
+  resolved: number
+}
 
 interface QualityDashboardOptions {
   includeDialogueInsights?: boolean
@@ -91,6 +139,17 @@ const LANGUAGE_DRIFT_METRICS: Array<{ key: LanguageDriftMetricKey; label: string
   { key: 'ornamentOverloadRate', label: '华丽词堆砌率' },
   { key: 'nonHumanCollocationRate', label: '非人类搭配率' },
 ]
+const CHAPTER_FUNCTION_TAGS: ChapterFunctionTag[] = ['setup', 'progression', 'reversal', 'payoff', 'breather', 'climax', 'exposition', 'closure']
+const CHAPTER_FUNCTION_WEAK_TAGS: ChapterFunctionTag[] = ['setup', 'exposition', 'breather']
+const QUALITY_RISK_LABELS: Record<QualityDashboardRiskKind, string> = {
+  language_drift: 'AI味退化',
+  story_dynamics: '主角与节奏',
+  chapter_function: '章节功能',
+  story_arc: '故事弧推进',
+  foreshadow_debt: '伏笔债务',
+  recall: '召回可靠性',
+  world_state: '状态稳定性',
+}
 const STORY_DYNAMICS_KEYS = ['protagonist_setback', 'setback_summary', 'cost_present', 'cost_summary', 'cost_resolution_state', 'reversal_marker', 'reversal_summary', 'reversal_support_state', 'pace_marker', 'reward_state', 'protagonist_pressure'] as const
 const RECENT_LANGUAGE_DRIFT_WINDOW = 20
 const LANGUAGE_DRIFT_DELTA_THRESHOLD = 5
@@ -98,6 +157,9 @@ const STORY_ALERT_WINDOW = 20
 const SMOOTH_RUN_THRESHOLD = 4
 const PRESSURE_RUN_THRESHOLD = 4
 const CLIMAX_GAP_THRESHOLD = 12
+const REPEATED_FUNCTION_RUN_THRESHOLD = 3
+const FUNCTION_DOMINANCE_WARNING_SHARE = 55
+const FUNCTION_DOMINANCE_BLOCKER_SHARE = 70
 
 type RecallFreshnessState = {
   entityUpdateMap: Map<string, number[]>
@@ -294,6 +356,24 @@ function normalizePaceMarker(value: unknown): ChapterPacingMarker | undefined {
     : undefined
 }
 
+function normalizeChapterFunctionTag(value: unknown): ChapterFunctionTag | undefined {
+  return value === 'setup'
+    || value === 'progression'
+    || value === 'reversal'
+    || value === 'payoff'
+    || value === 'breather'
+    || value === 'climax'
+    || value === 'exposition'
+    || value === 'closure'
+    ? value
+    : undefined
+}
+
+function normalizeChapterFunctionTags(value: unknown): ChapterFunctionTag[] {
+  if (!Array.isArray(value)) return []
+  return [...new Set(value.map((item) => normalizeChapterFunctionTag(item)).filter(Boolean))] as ChapterFunctionTag[]
+}
+
 function normalizeRewardState(value: unknown): RewardState {
   return value === 'partial' || value === 'major' || value === 'none' ? value : 'none'
 }
@@ -320,6 +400,191 @@ function emptyLanguageDriftSeries(): LanguageDriftSeries {
 
 function emptyPaceMarkerCounts(): Record<ChapterPacingMarker, number> {
   return { setup: 0, conflict: 0, reversal: 0, climax: 0, payoff: 0, breather: 0 }
+}
+
+function emptyChapterFunctionTagCounts(): Record<ChapterFunctionTag, number> {
+  return {
+    setup: 0,
+    progression: 0,
+    reversal: 0,
+    payoff: 0,
+    breather: 0,
+    climax: 0,
+    exposition: 0,
+    closure: 0,
+  }
+}
+
+function chapterFunctionLabel(tag?: ChapterFunctionTag): string {
+  if (tag === 'setup') return '铺垫'
+  if (tag === 'progression') return '推进'
+  if (tag === 'reversal') return '反转'
+  if (tag === 'payoff') return '回收'
+  if (tag === 'breather') return '喘息'
+  if (tag === 'climax') return '爆发'
+  if (tag === 'exposition') return '解释'
+  if (tag === 'closure') return '收束'
+  return '未标注'
+}
+
+function qualityRiskLabel(kind: QualityDashboardRiskKind): string {
+  return QUALITY_RISK_LABELS[kind]
+}
+
+function dashboardRiskSeverityRank(severity: QualityDashboardRiskSeverity): number {
+  if (severity === 'critical') return 3
+  if (severity === 'warning') return 2
+  return 1
+}
+
+function sortDashboardRisks(left: QualityDashboardRiskItem, right: QualityDashboardRiskItem): number {
+  const leftMax = left.chapterNums[left.chapterNums.length - 1] || 0
+  const rightMax = right.chapterNums[right.chapterNums.length - 1] || 0
+  return dashboardRiskSeverityRank(right.severity) - dashboardRiskSeverityRank(left.severity)
+    || rightMax - leftMax
+    || left.title.localeCompare(right.title)
+}
+
+function toDashboardSeverityFromStoryAlert(severity: StoryDynamicsAlert['severity']): QualityDashboardRiskSeverity {
+  return severity === 'blocker' ? 'critical' : 'warning'
+}
+
+function toDashboardSeverityFromChapterFunctionAlert(severity: ChapterFunctionAlert['severity']): QualityDashboardRiskSeverity {
+  return severity === 'blocker' ? 'critical' : 'warning'
+}
+
+function toDashboardSeverityFromArcAlert(severity: QualityDashboardData['storyArcProgressAlerts'][number]['severity']): QualityDashboardRiskSeverity {
+  if (severity === 'critical') return 'critical'
+  if (severity === 'warning') return 'warning'
+  return 'info'
+}
+
+function averageNumbers(values: number[]): number {
+  if (values.length === 0) return 0
+  return roundMetric(values.reduce((sum, value) => sum + value, 0) / values.length)
+}
+
+function buildVolumeChapterRanges(
+  volumeRows: Array<{ id: number; volumeNumber: number | null; title: string | null }>,
+  rows: Array<{ chapterNum: number; volumeId: number | null }>,
+): VolumeChapterRange[] {
+  return volumeRows
+    .map((volume) => {
+      const chapterNums = rows
+        .filter((row) => row.volumeId === volume.id)
+        .map((row) => row.chapterNum)
+      if (chapterNums.length === 0) return null
+      return {
+        volumeId: volume.id,
+        volumeNumber: volume.volumeNumber || volume.id,
+        volumeName: formatVolumeName(volume.id, volume.volumeNumber, volume.title),
+        chapterStart: Math.min(...chapterNums),
+        chapterEnd: Math.max(...chapterNums),
+        chapterCount: chapterNums.length,
+      }
+    })
+    .filter((item): item is VolumeChapterRange => Boolean(item))
+    .sort((left, right) => left.volumeNumber - right.volumeNumber || left.chapterStart - right.chapterStart)
+}
+
+function createDashboardRiskItem(
+  kind: QualityDashboardRiskKind,
+  severity: QualityDashboardRiskSeverity,
+  title: string,
+  detail: string,
+  chapterNums: number[],
+  volumeId?: number,
+): QualityDashboardRiskItem {
+  return {
+    kind,
+    severity,
+    title,
+    detail,
+    chapterNums: dedupeChapterNums(chapterNums),
+    volumeId,
+  }
+}
+
+function emptyForeshadowCounts(): ForeshadowCounts {
+  return { pending: 0, dueSoon: 0, overdue: 0, resolved: 0 }
+}
+
+function pickForeshadowChapterNum(card: {
+  targetPayoffChapter?: number
+  plantedChapter?: number
+  startChapter?: number
+}): number | undefined {
+  return typeof card.targetPayoffChapter === 'number'
+    ? card.targetPayoffChapter
+    : typeof card.plantedChapter === 'number'
+      ? card.plantedChapter
+      : typeof card.startChapter === 'number'
+        ? card.startChapter
+        : undefined
+}
+
+function buildForeshadowCountsByVolume(
+  snapshot: ReturnType<typeof getForeshadowSnapshot>,
+  volumeRanges: VolumeChapterRange[],
+): Map<number, ForeshadowCounts> {
+  const countsByVolume = new Map<number, ForeshadowCounts>()
+  const addToVolume = (volumeId: number, key: keyof ForeshadowCounts) => {
+    const current = countsByVolume.get(volumeId) || emptyForeshadowCounts()
+    current[key] += 1
+    countsByVolume.set(volumeId, current)
+  }
+
+  const assignCards = (
+    cards: Array<{ targetPayoffChapter?: number; plantedChapter?: number; startChapter?: number }>,
+    key: keyof ForeshadowCounts,
+  ) => {
+    cards.forEach((card) => {
+      const chapterNum = pickForeshadowChapterNum(card)
+      if (typeof chapterNum !== 'number') return
+      const range = volumeRanges.find((item) => chapterNum >= item.chapterStart && chapterNum <= item.chapterEnd)
+      if (!range) return
+      addToVolume(range.volumeId, key)
+    })
+  }
+
+  assignCards(snapshot.pending, 'pending')
+  assignCards(snapshot.dueSoon, 'dueSoon')
+  assignCards(snapshot.overdue, 'overdue')
+  assignCards(snapshot.resolved, 'resolved')
+  return countsByVolume
+}
+
+function clampHealthScore(value: number): number {
+  return clampNumber(value, 0, 100, 0)
+}
+
+function computeVolumeHealthScore(input: {
+  averageAiLikeRate: number
+  worseningMetricCount: number
+  stalledArcCount: number
+  criticalArcAlertCount: number
+  rhythmBalanceScore: number
+  repeatedFunctionRunCount: number
+  storyAlertCount: number
+  foreshadowDueSoonCount: number
+  foreshadowOverdueCount: number
+  staleRecallRate: number
+  worldWarningCount: number
+  worldConflictAlertCount: number
+}): number {
+  const aiPenalty = Math.min(24, input.averageAiLikeRate * 0.22 + input.worseningMetricCount * 4)
+  const arcPenalty = Math.min(20, input.stalledArcCount * 6 + input.criticalArcAlertCount * 8)
+  const rhythmPenalty = Math.min(20, Math.max(0, 75 - input.rhythmBalanceScore) * 0.25 + input.repeatedFunctionRunCount * 4 + input.storyAlertCount * 2)
+  const foreshadowPenalty = Math.min(18, input.foreshadowOverdueCount * 7 + input.foreshadowDueSoonCount * 2)
+  const recallPenalty = Math.min(8, input.staleRecallRate * 0.12)
+  const worldPenalty = Math.min(10, input.worldConflictAlertCount * 2 + input.worldWarningCount * 0.35)
+  return clampHealthScore(100 - aiPenalty - arcPenalty - rhythmPenalty - foreshadowPenalty - recallPenalty - worldPenalty)
+}
+
+function computeNovelHealthScore(volumeEntries: VolumeQualityMetrics[], criticalRiskCount: number, warningRiskCount: number): number {
+  if (volumeEntries.length === 0) return 0
+  const volumeAverage = averageNumbers(volumeEntries.map((entry) => entry.healthScore))
+  return clampHealthScore(volumeAverage - criticalRiskCount * 2 - warningRiskCount * 0.4)
 }
 
 function emptyStoryDynamics(): ChapterStoryDynamics {
@@ -525,6 +790,10 @@ function createVolumeStoryAccumulator(volumeId: number, volumeNumber: number, vo
   return { volumeId, volumeNumber, volumeName, chapters: [] }
 }
 
+function createVolumeChapterFunctionAccumulator(volumeId: number, volumeNumber: number, volumeName: string): VolumeChapterFunctionAccumulator {
+  return { volumeId, volumeNumber, volumeName, chapters: [] }
+}
+
 function parseStoryDynamics(raw?: string | null): StoryDynamicsParseResult {
   if (!raw?.trim()) return { dynamics: emptyStoryDynamics(), explicit: false }
   try {
@@ -552,6 +821,28 @@ function parseStoryDynamics(raw?: string | null): StoryDynamicsParseResult {
     }
   } catch {
     return { dynamics: emptyStoryDynamics(), explicit: false }
+  }
+}
+
+function parseChapterFunction(raw?: string | null): ChapterFunctionParseResult {
+  if (!raw?.trim()) return { primaryTag: undefined, tags: [], explicit: false }
+  try {
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { primaryTag: undefined, tags: [], explicit: false }
+    const record = parsed as Record<string, unknown>
+    const explicit = Object.prototype.hasOwnProperty.call(record, 'chapter_function_primary')
+      || Object.prototype.hasOwnProperty.call(record, 'chapter_function_tags')
+    const normalizedPrimaryTag = normalizeChapterFunctionTag(record.chapter_function_primary)
+    const tags = normalizeChapterFunctionTags(record.chapter_function_tags)
+    const primaryTag = normalizedPrimaryTag || tags[0]
+    if (primaryTag && !tags.includes(primaryTag)) tags.unshift(primaryTag)
+    return {
+      primaryTag,
+      tags,
+      explicit,
+    }
+  } catch {
+    return { primaryTag: undefined, tags: [], explicit: false }
   }
 }
 
@@ -855,6 +1146,203 @@ function buildStoryPacingAlerts(chaptersList: StoryDynamicsChapterRecord[], cost
   return alerts.sort(sortStoryAlerts)
 }
 
+function sortChapterFunctionAlerts(left: ChapterFunctionAlert, right: ChapterFunctionAlert): number {
+  const rank = (value: ChapterFunctionAlert['severity']) => (value === 'blocker' ? 2 : 1)
+  const leftMax = left.chapterNums[left.chapterNums.length - 1] || 0
+  const rightMax = right.chapterNums[right.chapterNums.length - 1] || 0
+  return rank(right.severity) - rank(left.severity) || rightMax - leftMax || left.title.localeCompare(right.title)
+}
+
+function isKeyFunctionChapter(chapter: ChapterFunctionChapterRecord): boolean {
+  return chapter.paceMarker === 'climax'
+    || chapter.paceMarker === 'reversal'
+    || chapter.paceMarker === 'payoff'
+    || chapter.reversalMarker
+}
+
+function chapterFunctionRunLengthPenalty(run: ChapterFunctionRun): number {
+  return Math.max(0, run.length - REPEATED_FUNCTION_RUN_THRESHOLD + 1) * 10
+}
+
+function dominantTagPenalty(share: number): number {
+  return Math.max(0, share - 40) * 0.9
+}
+
+function coveragePenalty(coverage: number): number {
+  return Math.max(0, 100 - coverage) * 0.35
+}
+
+function buildChapterFunctionTagCounts(chaptersList: ChapterFunctionChapterRecord[]): Record<ChapterFunctionTag, number> {
+  const counts = emptyChapterFunctionTagCounts()
+  for (const chapter of chaptersList) {
+    const tags = chapter.tags.length > 0
+      ? chapter.tags
+      : chapter.primaryTag
+        ? [chapter.primaryTag]
+        : []
+    for (const tag of tags) counts[tag] += 1
+  }
+  return counts
+}
+
+function buildPrimaryChapterFunctionCounts(chaptersList: ChapterFunctionChapterRecord[]): Record<ChapterFunctionTag, number> {
+  const counts = emptyChapterFunctionTagCounts()
+  for (const chapter of chaptersList) {
+    if (chapter.primaryTag) counts[chapter.primaryTag] += 1
+  }
+  return counts
+}
+
+function getDominantPrimaryTag(
+  counts: Record<ChapterFunctionTag, number>,
+  trackedChapterCount: number,
+): { dominantTag?: ChapterFunctionTag; dominantTagShare: number } {
+  if (trackedChapterCount === 0) return { dominantTag: undefined, dominantTagShare: 0 }
+  const dominantEntry = CHAPTER_FUNCTION_TAGS
+    .map((tag) => ({ tag, count: counts[tag] }))
+    .sort((left, right) => right.count - left.count || left.tag.localeCompare(right.tag))[0]
+  if (!dominantEntry || dominantEntry.count === 0) return { dominantTag: undefined, dominantTagShare: 0 }
+  return {
+    dominantTag: dominantEntry.tag,
+    dominantTagShare: roundMetric((dominantEntry.count / trackedChapterCount) * 100),
+  }
+}
+
+function collectChapterFunctionRuns(chaptersList: ChapterFunctionChapterRecord[], minLength = REPEATED_FUNCTION_RUN_THRESHOLD): ChapterFunctionRun[] {
+  const sorted = [...chaptersList].sort((left, right) => left.chapterNum - right.chapterNum)
+  const runs: ChapterFunctionRun[] = []
+  let currentTag: ChapterFunctionTag | undefined
+  let currentChapterNums: number[] = []
+  let lastChapterNum: number | null = null
+
+  const flush = () => {
+    if (currentTag && currentChapterNums.length >= minLength) {
+      runs.push({
+        primaryTag: currentTag,
+        startChapterNum: currentChapterNums[0],
+        endChapterNum: currentChapterNums[currentChapterNums.length - 1],
+        length: currentChapterNums.length,
+        chapterNums: [...currentChapterNums],
+      })
+    }
+  }
+
+  for (const chapter of sorted) {
+    const primaryTag = chapter.primaryTag
+    const contiguous = lastChapterNum !== null && chapter.chapterNum === lastChapterNum + 1
+    if (!primaryTag) {
+      flush()
+      currentTag = undefined
+      currentChapterNums = []
+      lastChapterNum = chapter.chapterNum
+      continue
+    }
+    if (currentTag === primaryTag && (currentChapterNums.length === 0 || contiguous)) {
+      currentChapterNums.push(chapter.chapterNum)
+    } else {
+      flush()
+      currentTag = primaryTag
+      currentChapterNums = [chapter.chapterNum]
+    }
+    lastChapterNum = chapter.chapterNum
+  }
+  flush()
+  return runs
+}
+
+function buildChapterFunctionRhythmBalanceScore(params: {
+  totalChapterCount: number
+  trackedChapterCount: number
+  repeatedRuns: ChapterFunctionRun[]
+  dominantTagShare: number
+  weakKeyChapterCount: number
+}): number {
+  if (params.totalChapterCount === 0 || params.trackedChapterCount === 0) return 0
+  const coverage = roundMetric((params.trackedChapterCount / params.totalChapterCount) * 100)
+  const repeatedPenalty = params.repeatedRuns.reduce((sum, run) => sum + chapterFunctionRunLengthPenalty(run), 0)
+  const score = 100
+    - coveragePenalty(coverage)
+    - repeatedPenalty
+    - dominantTagPenalty(params.dominantTagShare)
+    - (params.weakKeyChapterCount * 12)
+  return clampNumber(score, 0, 100, 0)
+}
+
+function buildRepeatedFunctionAlerts(runs: ChapterFunctionRun[]): ChapterFunctionAlert[] {
+  return runs.map((run) => ({
+    code: 'repeated_function_run',
+    severity: run.length >= 5 ? 'blocker' : 'warning',
+    title: `连续 ${run.length} 章重复承担${chapterFunctionLabel(run.primaryTag)}`,
+    detail: `第 ${run.startChapterNum} 到 ${run.endChapterNum} 章的主功能都偏向${chapterFunctionLabel(run.primaryTag)}，建议插入推进、回收、爆发或结构转向。`,
+    chapterNums: run.chapterNums,
+    primaryTag: run.primaryTag,
+  }))
+}
+
+function buildVolumeFunctionSkewAlert(volume: {
+  volumeId: number
+  volumeName: string
+  chapterStart: number
+  chapterEnd: number
+  dominantTag?: ChapterFunctionTag
+  dominantTagShare: number
+}): ChapterFunctionAlert[] {
+  if (!volume.dominantTag || volume.dominantTagShare < FUNCTION_DOMINANCE_WARNING_SHARE) return []
+  return [{
+    code: 'volume_function_skew',
+    severity: volume.dominantTagShare >= FUNCTION_DOMINANCE_BLOCKER_SHARE ? 'blocker' : 'warning',
+    title: `${volume.volumeName} 功能分布偏科`,
+    detail: `${volume.volumeName} 的主功能有 ${volume.dominantTagShare}% 都落在${chapterFunctionLabel(volume.dominantTag)}，容易出现同质推进或空转。`,
+    chapterNums: [volume.chapterStart, volume.chapterEnd],
+    volumeId: volume.volumeId,
+    primaryTag: volume.dominantTag,
+  }]
+}
+
+function buildWeakKeyFunctionAlerts(chaptersList: ChapterFunctionChapterRecord[]): ChapterFunctionAlert[] {
+  return chaptersList
+    .filter((chapter) => isKeyFunctionChapter(chapter) && (!chapter.primaryTag || CHAPTER_FUNCTION_WEAK_TAGS.includes(chapter.primaryTag)))
+    .map((chapter) => ({
+      code: 'weak_key_chapter_function' as const,
+      severity: 'warning' as const,
+      title: `第${chapter.chapterNum}章关键功能偏弱`,
+      detail: chapter.primaryTag
+        ? `该章已被标记为关键节奏节点，但主功能仍然只是${chapterFunctionLabel(chapter.primaryTag)}，建议补出推进、回收、反转或爆发。`
+        : '该章已被标记为关键节奏节点，但没有明确主功能标签，建议补出主功能并校正章节任务。',
+      chapterNums: [chapter.chapterNum],
+      volumeId: chapter.volumeId,
+      primaryTag: chapter.primaryTag,
+    }))
+}
+
+function buildChapterFunctionSummary(
+  chaptersList: ChapterFunctionChapterRecord[],
+  totalChapterCount: number,
+): ChapterFunctionSummary {
+  const trackedChapterCount = chaptersList.filter((chapter) => chapter.primaryTag || chapter.tags.length > 0).length
+  const tagCounts = buildChapterFunctionTagCounts(chaptersList)
+  const primaryCounts = buildPrimaryChapterFunctionCounts(chaptersList)
+  const repeatedRuns = collectChapterFunctionRuns(chaptersList)
+  const { dominantTag, dominantTagShare } = getDominantPrimaryTag(primaryCounts, trackedChapterCount)
+  const weakKeyChapterCount = buildWeakKeyFunctionAlerts(chaptersList).length
+  return {
+    trackedChapterCount,
+    chapterPurposeCoverage: totalChapterCount > 0 ? roundMetric((trackedChapterCount / totalChapterCount) * 100) : 0,
+    rhythmBalanceScore: buildChapterFunctionRhythmBalanceScore({
+      totalChapterCount,
+      trackedChapterCount,
+      repeatedRuns,
+      dominantTagShare,
+      weakKeyChapterCount,
+    }),
+    repeatedFunctionRunCount: repeatedRuns.length,
+    longestRepeatedFunctionRun: repeatedRuns.reduce((max, run) => Math.max(max, run.length), 0),
+    dominantTag,
+    dominantTagShare,
+    tagCounts,
+  }
+}
+
 export function getQualityDashboardData(novelId: number, options: QualityDashboardOptions = {}): QualityDashboardData {
   const db = getDb()
   const includeDialogueInsights = options.includeDialogueInsights !== false
@@ -903,8 +1391,16 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     aiScoreJson: chapters.aiScoreJson,
     reviewNotesJson: chapters.reviewNotesJson,
   }).from(chapters).where(eq(chapters.novelId, novelId)).orderBy(asc(chapters.chapterNum)).all()
+  const volumeChapterRanges = buildVolumeChapterRanges(volumeRows, rows)
+  const foreshadowSnapshot = getForeshadowSnapshot(novelId)
+  const foreshadowCountsByVolume = buildForeshadowCountsByVolume(foreshadowSnapshot, volumeChapterRanges)
 
   const chapterNumById = new Map(rows.map((row) => [row.id, row.chapterNum] as const))
+  const volumeIdByChapterNum = new Map(rows.flatMap((row) => (
+    typeof row.volumeId === 'number'
+      ? [[row.chapterNum, row.volumeId] as const]
+      : []
+  )))
   const timelineRows = db.select({
     eventType: timelineEvents.eventType,
     eventTitle: timelineEvents.eventTitle,
@@ -949,6 +1445,9 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
   const volumeAccumulators = new Map<number, VolumeAccumulator>()
   const trackedStoryChapters: StoryDynamicsChapterRecord[] = []
   const volumeStoryAccumulators = new Map<number, VolumeStoryAccumulator>()
+  const chapterFunctionChapters: ChapterFunctionChapterRecord[] = []
+  const volumeChapterFunctionAccumulators = new Map<number, VolumeChapterFunctionAccumulator>()
+  const chapterFunctionDetailsByChapterId = new Map<number, { primaryTag?: ChapterFunctionTag; tags: ChapterFunctionTag[] }>()
 
   let totalOverall = 0
   let totalAiLike = 0
@@ -958,6 +1457,33 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     const parsedStoryDynamics = parseStoryDynamics(row.reviewNotesJson)
     const storyDynamics = enhanceStoryDynamics(parsedStoryDynamics.dynamics, timelineHints.get(row.chapterNum))
     const hasStoryDynamics = parsedStoryDynamics.explicit || hasTimelineHint(timelineHints.get(row.chapterNum))
+    const parsedChapterFunction = parseChapterFunction(row.reviewNotesJson)
+
+    const chapterFunctionRecord: ChapterFunctionChapterRecord = {
+      chapterId: row.id,
+      chapterNum: row.chapterNum,
+      title: row.title || `第 ${row.chapterNum} 章`,
+      volumeId: typeof row.volumeId === 'number' ? row.volumeId : undefined,
+      primaryTag: parsedChapterFunction.primaryTag,
+      tags: parsedChapterFunction.tags,
+      paceMarker: storyDynamics.paceMarker,
+      reversalMarker: storyDynamics.reversalMarker,
+    }
+    chapterFunctionChapters.push(chapterFunctionRecord)
+    if (parsedChapterFunction.primaryTag || parsedChapterFunction.tags.length > 0) {
+      chapterFunctionDetailsByChapterId.set(row.id, {
+        primaryTag: parsedChapterFunction.primaryTag,
+        tags: parsedChapterFunction.tags,
+      })
+    }
+    if (typeof row.volumeId === 'number') {
+      const volumeMeta = volumeById.get(row.volumeId)
+      const volumeNumber = volumeMeta?.volumeNumber ?? row.volumeId
+      const volumeName = formatVolumeName(row.volumeId, volumeMeta?.volumeNumber, volumeMeta?.title)
+      const accumulator = volumeChapterFunctionAccumulators.get(row.volumeId) || createVolumeChapterFunctionAccumulator(row.volumeId, volumeNumber, volumeName)
+      accumulator.chapters.push(chapterFunctionRecord)
+      volumeChapterFunctionAccumulators.set(row.volumeId, accumulator)
+    }
 
     if (hasStoryDynamics) {
       const trackedChapter: StoryDynamicsChapterRecord = {
@@ -1006,10 +1532,12 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
 
     scores.dimensions.forEach((dim) => heatmapData.push({ chapterNum: row.chapterNum, dimension: dim.name, score: dim.score }))
     ;(scores.weak_dimensions || []).forEach((dimension) => weakDimFreq.set(dimension, (weakDimFreq.get(dimension) || 0) + 1))
+    const chapterFunctionDetail = chapterFunctionDetailsByChapterId.get(row.id)
     chapterDetails.push({
       chapterId: row.id,
       chapterNum: row.chapterNum,
       title: row.title || `第 ${row.chapterNum} 章`,
+      volumeId: typeof row.volumeId === 'number' ? row.volumeId : undefined,
       overallScore: scores.overall_score ?? 0,
       aiLikeRate: scores.ai_like_rate ?? 0,
       weakDimensions: scores.weak_dimensions ?? [],
@@ -1017,6 +1545,13 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
       languageDriftMetrics: languageDriftMetrics || undefined,
       dialogueReview,
       storyDynamics: hasStoryDynamics ? storyDynamics : undefined,
+      chapterFunction: chapterFunctionDetail
+        ? {
+          primaryTag: chapterFunctionDetail.primaryTag,
+          tags: chapterFunctionDetail.tags,
+          repeatedFunctionRunLength: 0,
+        }
+        : undefined,
       storyArcProgress: chapterArcProgressMap.get(row.id),
       worldStateAlerts: (worldStateAlertMap.get(row.chapterNum) || []).slice(0, 4),
       recallDiagnostics: recallDiagnosticsByChapterId.get(row.id),
@@ -1091,6 +1626,83 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
       alerts: buildStoryPacingAlerts(volume.chapters, volumeCost).slice(0, 3),
     }
   }).sort((left, right) => left.volumeNumber - right.volumeNumber || left.chapterStart - right.chapterStart)
+  const chapterFunctionSummary = buildChapterFunctionSummary(chapterFunctionChapters, rows.length)
+  const repeatedFunctionRuns = collectChapterFunctionRuns(chapterFunctionChapters)
+  const repeatedFunctionRunMap = repeatedFunctionRuns.reduce<Map<number, ChapterFunctionRun>>((result, run) => {
+    run.chapterNums.forEach((chapterNum) => result.set(chapterNum, run))
+    return result
+  }, new Map())
+  const weakKeyFunctionAlerts = buildWeakKeyFunctionAlerts(chapterFunctionChapters)
+  const weakKeyFunctionAlertMap = weakKeyFunctionAlerts.reduce<Map<number, ChapterFunctionAlert>>((result, alert) => {
+    const chapterNum = alert.chapterNums[0]
+    if (typeof chapterNum === 'number') result.set(chapterNum, alert)
+    return result
+  }, new Map())
+  chapterDetails.forEach((detail) => {
+    const current = detail.chapterFunction || {
+      primaryTag: undefined,
+      tags: [],
+      repeatedFunctionRunLength: 0,
+    }
+    const repeatedRun = repeatedFunctionRunMap.get(detail.chapterNum)
+    const weakKeyAlert = weakKeyFunctionAlertMap.get(detail.chapterNum)
+    if (!current.primaryTag && current.tags.length === 0 && !repeatedRun && !weakKeyAlert) return
+    detail.chapterFunction = {
+      primaryTag: current.primaryTag,
+      tags: current.tags,
+      repeatedFunctionRunLength: repeatedRun?.length || 0,
+      repeatedFunctionRange: repeatedRun,
+      keyChapterRisk: weakKeyAlert
+        ? (current.primaryTag ? 'weak_primary' : 'missing_primary')
+        : undefined,
+    }
+  })
+  const volumeChapterFunctions: VolumeChapterFunctionEntry[] = Array.from(volumeChapterFunctionAccumulators.values()).map((volume) => {
+    const summary = buildChapterFunctionSummary(volume.chapters, volume.chapters.length)
+    const repeatedRuns = collectChapterFunctionRuns(volume.chapters)
+    const alerts = [
+      ...buildRepeatedFunctionAlerts(repeatedRuns),
+      ...buildWeakKeyFunctionAlerts(volume.chapters),
+      ...buildVolumeFunctionSkewAlert({
+        volumeId: volume.volumeId,
+        volumeName: volume.volumeName,
+        chapterStart: volume.chapters[0]?.chapterNum || 0,
+        chapterEnd: volume.chapters[volume.chapters.length - 1]?.chapterNum || 0,
+        dominantTag: summary.dominantTag,
+        dominantTagShare: summary.dominantTagShare,
+      }),
+    ].sort(sortChapterFunctionAlerts)
+    return {
+      volumeId: volume.volumeId,
+      volumeNumber: volume.volumeNumber,
+      volumeName: volume.volumeName,
+      chapterStart: volume.chapters[0]?.chapterNum || 0,
+      chapterEnd: volume.chapters[volume.chapters.length - 1]?.chapterNum || 0,
+      chapterCount: volume.chapters.length,
+      trackedChapterCount: summary.trackedChapterCount,
+      rhythmBalanceScore: summary.rhythmBalanceScore,
+      dominantTag: summary.dominantTag,
+      dominantTagShare: summary.dominantTagShare,
+      tagCounts: summary.tagCounts,
+      repeatedRuns,
+      alerts: alerts.slice(0, 4),
+    }
+  }).sort((left, right) => left.volumeNumber - right.volumeNumber || left.chapterStart - right.chapterStart)
+  const chapterFunctionAlerts: ChapterFunctionAlert[] = [
+    ...buildRepeatedFunctionAlerts(repeatedFunctionRuns),
+    ...weakKeyFunctionAlerts,
+    ...(chapterFunctionSummary.dominantTag && chapterFunctionSummary.dominantTagShare >= FUNCTION_DOMINANCE_WARNING_SHARE
+      ? [{
+        code: 'volume_function_skew' as const,
+        severity: chapterFunctionSummary.dominantTagShare >= FUNCTION_DOMINANCE_BLOCKER_SHARE ? 'blocker' as const : 'warning' as const,
+        title: '全书功能分布偏科',
+        detail: `当前主功能有 ${chapterFunctionSummary.dominantTagShare}% 都落在${chapterFunctionLabel(chapterFunctionSummary.dominantTag)}，建议补出推进层次和章节任务差异。`,
+        chapterNums: rows.length > 0 ? [rows[0].chapterNum, rows[rows.length - 1].chapterNum] : [],
+        primaryTag: chapterFunctionSummary.dominantTag,
+      }]
+      : []),
+    ...volumeChapterFunctions.flatMap((entry) => entry.alerts.filter((alert) => alert.code === 'volume_function_skew')),
+  ].sort(sortChapterFunctionAlerts)
   const storyArcProgressTrend: QualityDashboardData['storyArcProgressTrend'] = rows
     .map((row) => {
       const points = chapterArcProgressMap.get(row.id) || []
@@ -1188,6 +1800,225 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     })
     .filter((item): item is NonNullable<QualityDashboardData['volumeRecallDiagnostics'][number]> => Boolean(item))
     .sort((left, right) => left.volumeNumber - right.volumeNumber || left.chapterStart - right.chapterStart)
+  const volumeLanguageDriftById = new Map(volumeLanguageDrift.map((entry) => [entry.volumeId, entry] as const))
+  const volumeStoryDynamicsById = new Map(volumeStoryDynamics.map((entry) => [entry.volumeId, entry] as const))
+  const volumeChapterFunctionById = new Map(volumeChapterFunctions.map((entry) => [entry.volumeId, entry] as const))
+  const volumeArcProgressById = new Map(storyArcProgressSnapshot.volumeEntries.map((entry) => [entry.volumeId, entry] as const))
+  const volumeRecallById = new Map(volumeRecallDiagnostics.map((entry) => [entry.volumeId, entry] as const))
+  const volumeWorldStateById = new Map(volumeWorldStateStability.map((entry) => [entry.volumeId, entry] as const))
+  const volumeQualityMetrics: VolumeQualityMetrics[] = volumeChapterRanges.map((volumeRange) => {
+    const chapterEntries = chapterDetails.filter((entry) => entry.volumeId === volumeRange.volumeId)
+    const languageEntry = volumeLanguageDriftById.get(volumeRange.volumeId)
+    const storyEntry = volumeStoryDynamicsById.get(volumeRange.volumeId)
+    const functionEntry = volumeChapterFunctionById.get(volumeRange.volumeId)
+    const arcEntry = volumeArcProgressById.get(volumeRange.volumeId)
+    const recallEntry = volumeRecallById.get(volumeRange.volumeId)
+    const worldEntry = volumeWorldStateById.get(volumeRange.volumeId)
+    const foreshadowCounts = foreshadowCountsByVolume.get(volumeRange.volumeId) || emptyForeshadowCounts()
+    const arcAlerts = storyArcProgressSnapshot.alerts.filter((alert) => alert.volumeId === volumeRange.volumeId)
+    const criticalArcAlertCount = arcAlerts.filter((alert) => alert.severity === 'critical').length
+    const stalledArcCount = (arcEntry?.arcEntries || []).filter((entry) => entry.stallRate >= 50 || entry.missedPhaseLabels.length > 0).length
+    const averageAiLikeRate = averageNumbers(chapterEntries.map((entry) => entry.aiLikeRate))
+    const averageOverallScore = averageNumbers(chapterEntries.map((entry) => entry.overallScore))
+    const worseningMetricCount = languageEntry?.topWorseningMetrics.length || 0
+    const rhythmBalanceScore = functionEntry?.rhythmBalanceScore || 0
+    const repeatedFunctionRunCount = functionEntry?.repeatedRuns.length || 0
+    const worldWarningCount = worldEntry?.warningCount || 0
+    const worldConflictAlertCount = worldEntry?.conflictAlertCount || 0
+    const staleRecallCount = recallEntry?.staleRecallCount || 0
+    const staleRecallRate = recallEntry?.staleRecallRate || 0
+    const topRisks: QualityDashboardRiskItem[] = [
+      ...(languageEntry?.topWorseningMetrics.slice(0, 2).map((metric) => createDashboardRiskItem(
+        'language_drift',
+        metric.delta >= 10 || metric.latestValue >= 60 ? 'critical' : 'warning',
+        `${volumeRange.volumeName} 语言退化`,
+        `${metric.label} 最近恶化 ${metric.delta > 0 ? `+${metric.delta}` : metric.delta}，当前值 ${metric.latestValue}。`,
+        [volumeRange.chapterStart, volumeRange.chapterEnd],
+        volumeRange.volumeId,
+      )) || []),
+      ...((storyEntry?.alerts || []).map((alert) => createDashboardRiskItem(
+        'story_dynamics',
+        toDashboardSeverityFromStoryAlert(alert.severity),
+        alert.title,
+        alert.detail,
+        alert.chapterNums,
+        volumeRange.volumeId,
+      ))),
+      ...((functionEntry?.alerts || []).map((alert) => createDashboardRiskItem(
+        'chapter_function',
+        toDashboardSeverityFromChapterFunctionAlert(alert.severity),
+        alert.title,
+        alert.detail,
+        alert.chapterNums,
+        volumeRange.volumeId,
+      ))),
+      ...arcAlerts.map((alert) => createDashboardRiskItem(
+        'story_arc',
+        toDashboardSeverityFromArcAlert(alert.severity),
+        alert.title,
+        alert.detail,
+        alert.chapterNum ? [alert.chapterNum] : [volumeRange.chapterStart, volumeRange.chapterEnd],
+        volumeRange.volumeId,
+      )),
+      ...(foreshadowCounts.overdue > 0
+        ? [createDashboardRiskItem(
+          'foreshadow_debt',
+          'critical',
+          `${volumeRange.volumeName} 有超期伏笔`,
+          `本卷有 ${foreshadowCounts.overdue} 条伏笔已超过目标回收章位，建议优先兑现或回收。`,
+          [volumeRange.chapterStart, volumeRange.chapterEnd],
+          volumeRange.volumeId,
+        )]
+        : foreshadowCounts.dueSoon > 0
+          ? [createDashboardRiskItem(
+            'foreshadow_debt',
+            'warning',
+            `${volumeRange.volumeName} 伏笔接近到期`,
+            `本卷有 ${foreshadowCounts.dueSoon} 条伏笔接近目标回收章位，建议尽快安排兑现。`,
+            [volumeRange.chapterStart, volumeRange.chapterEnd],
+            volumeRange.volumeId,
+          )]
+          : []),
+      ...(staleRecallCount > 0
+        ? [createDashboardRiskItem(
+          'recall',
+          staleRecallRate >= 35 ? 'critical' : 'warning',
+          `${volumeRange.volumeName} 存在过期召回`,
+          `本卷识别到 ${staleRecallCount} 条过期召回，平均过期率 ${staleRecallRate}%。`,
+          [volumeRange.chapterStart, volumeRange.chapterEnd],
+          volumeRange.volumeId,
+        )]
+        : []),
+      ...((worldEntry && (worldEntry.conflictAlertCount > 0 || worldEntry.warningCount > 0))
+        ? [createDashboardRiskItem(
+          'world_state',
+          worldEntry.conflictAlertCount > 0 ? 'critical' : 'warning',
+          `${volumeRange.volumeName} 状态稳定性波动`,
+          `本卷状态冲突 ${worldEntry.conflictAlertCount} 次，预警 ${worldEntry.warningCount} 次。`,
+          [volumeRange.chapterStart, volumeRange.chapterEnd],
+          volumeRange.volumeId,
+        )]
+        : []),
+    ].sort(sortDashboardRisks).slice(0, 6)
+    return {
+      volumeId: volumeRange.volumeId,
+      volumeNumber: volumeRange.volumeNumber,
+      volumeName: volumeRange.volumeName,
+      chapterStart: volumeRange.chapterStart,
+      chapterEnd: volumeRange.chapterEnd,
+      chapterCount: volumeRange.chapterCount,
+      analyzedChapterCount: chapterEntries.length,
+      healthScore: computeVolumeHealthScore({
+        averageAiLikeRate,
+        worseningMetricCount,
+        stalledArcCount,
+        criticalArcAlertCount,
+        rhythmBalanceScore,
+        repeatedFunctionRunCount,
+        storyAlertCount: storyEntry?.alerts.length || 0,
+        foreshadowDueSoonCount: foreshadowCounts.dueSoon,
+        foreshadowOverdueCount: foreshadowCounts.overdue,
+        staleRecallRate,
+        worldWarningCount,
+        worldConflictAlertCount,
+      }),
+      averageAiLikeRate,
+      averageOverallScore,
+      worseningMetricCount,
+      stalledArcCount,
+      criticalArcAlertCount,
+      rhythmBalanceScore,
+      repeatedFunctionRunCount,
+      foreshadowPendingCount: foreshadowCounts.pending,
+      foreshadowDueSoonCount: foreshadowCounts.dueSoon,
+      foreshadowOverdueCount: foreshadowCounts.overdue,
+      foreshadowResolvedCount: foreshadowCounts.resolved,
+      staleRecallCount,
+      staleRecallRate,
+      worldWarningCount,
+      worldConflictAlertCount,
+      topRisks,
+    }
+  }).sort((left, right) => left.volumeNumber - right.volumeNumber || left.chapterStart - right.chapterStart)
+  const globalRisks: QualityDashboardRiskItem[] = [
+    ...recentLanguageDriftAlerts.slice(0, 3).map((alert) => createDashboardRiskItem(
+      'language_drift',
+      alert.delta >= 10 || alert.latestValue >= 60 ? 'critical' : 'warning',
+      `全书${alert.label}恶化`,
+      `${alert.label} 最近恶化 ${alert.delta > 0 ? `+${alert.delta}` : alert.delta}，当前值 ${alert.latestValue}。`,
+      [],
+    )),
+    ...storyPacingAlerts.slice(0, 3).map((alert) => createDashboardRiskItem(
+      'story_dynamics',
+      toDashboardSeverityFromStoryAlert(alert.severity),
+      alert.title,
+      alert.detail,
+      alert.chapterNums,
+      volumeIdByChapterNum.get(alert.chapterNums[0] || 0),
+    )),
+    ...chapterFunctionAlerts
+      .filter((alert) => !alert.volumeId)
+      .slice(0, 3)
+      .map((alert) => createDashboardRiskItem(
+        'chapter_function',
+        toDashboardSeverityFromChapterFunctionAlert(alert.severity),
+        alert.title,
+        alert.detail,
+        alert.chapterNums,
+        volumeIdByChapterNum.get(alert.chapterNums[0] || 0),
+      )),
+    ...recentRecallAlerts.slice(0, 3).map((alert) => createDashboardRiskItem(
+      'recall',
+      alert.staleRecallCount >= 3 ? 'critical' : 'warning',
+      `第${alert.chapterNum}章召回风险`,
+      alert.detail,
+      [alert.chapterNum],
+      volumeIdByChapterNum.get(alert.chapterNum),
+    )),
+    ...recentWorldStateAlerts.slice(0, 3).map((alert) => createDashboardRiskItem(
+      'world_state',
+      alert.severity === 'critical' ? 'critical' : alert.severity === 'warning' ? 'warning' : 'info',
+      `${alert.entityName} 状态异常`,
+      alert.summary,
+      [alert.chapterNum],
+      volumeIdByChapterNum.get(alert.chapterNum),
+    )),
+  ]
+  const allRiskItems = [...volumeQualityMetrics.flatMap((entry) => entry.topRisks), ...globalRisks].sort(sortDashboardRisks)
+  const criticalRiskCount = allRiskItems.filter((item) => item.severity === 'critical').length
+  const warningRiskCount = allRiskItems.filter((item) => item.severity === 'warning').length
+  const foreshadowPendingCount = foreshadowSnapshot.pending.length
+  const foreshadowDueSoonCount = foreshadowSnapshot.dueSoon.length
+  const foreshadowOverdueCount = foreshadowSnapshot.overdue.length
+  const riskOverview = (Object.keys(QUALITY_RISK_LABELS) as QualityDashboardRiskKind[]).map((kind) => ({
+    kind,
+    label: qualityRiskLabel(kind),
+    count: allRiskItems.filter((item) => item.kind === kind).length,
+  }))
+  const novelQualityMetrics: NovelQualityMetrics = {
+    healthScore: computeNovelHealthScore(volumeQualityMetrics, criticalRiskCount, warningRiskCount),
+    totalVolumeCount: volumeQualityMetrics.length,
+    totalChapterCount: rows.length,
+    analyzedChapterCount: chapterDetails.length,
+    criticalRiskCount,
+    warningRiskCount,
+    foreshadowPendingCount,
+    foreshadowDueSoonCount,
+    foreshadowOverdueCount,
+    riskOverview,
+    topRisks: allRiskItems.slice(0, 8),
+    recommendedFocusVolumes: volumeQualityMetrics
+      .filter((entry) => entry.topRisks.length > 0 || entry.healthScore < 80)
+      .sort((left, right) => left.healthScore - right.healthScore || right.topRisks.length - left.topRisks.length)
+      .slice(0, 4)
+      .map((entry) => ({
+        volumeId: entry.volumeId,
+        volumeNumber: entry.volumeNumber,
+        volumeName: entry.volumeName,
+        healthScore: entry.healthScore,
+        summary: entry.topRisks[0]?.title || `${entry.volumeName} 当前健康分 ${entry.healthScore}，建议优先回查。`,
+      })),
+  }
 
   return {
     heatmapData,
@@ -1207,6 +2038,12 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     storyDynamicsTrend,
     storyPacingAlerts,
     volumeStoryDynamics,
+    volumeQualityMetrics,
+    novelQualityMetrics,
+    chapterFunctionSummary,
+    repeatedFunctionRuns,
+    chapterFunctionAlerts,
+    volumeChapterFunctions,
     storyArcProgressSummary,
     storyArcProgressTrend,
     storyArcProgressArcs: storyArcProgressSnapshot.arcs,

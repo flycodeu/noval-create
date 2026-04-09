@@ -31,6 +31,9 @@ import { throwUserFacingError } from '../utils/user-facing-error'
 type StoryThreadType = 'main' | 'subplot' | 'mystery' | 'payoff' | 'relationship'
 type StoryThreadStatus = 'planned' | 'active' | 'resolved' | 'stalled' | 'abandoned'
 type StoryThreadPriority = 'high' | 'medium' | 'low'
+type ForeshadowStatus = 'pending' | 'due' | 'overdue' | 'paid_off'
+
+const FORESHADOW_DUE_WINDOW = 3
 
 interface StoryThreadQueryFilters {
   novelId: number
@@ -150,6 +153,10 @@ function sanitizeStoryThreadPayload(
   if ('targetPayoffChapter' in data) next.targetPayoffChapter = asNumber(data.targetPayoffChapter)
   if (typeof data.payoffCondition === 'string') next.payoffCondition = asText(data.payoffCondition)
   if (typeof data.currentState === 'string') next.currentState = asText(data.currentState)
+  if ('plantedChapter' in data) next.plantedChapter = asNumber(data.plantedChapter)
+  if ('lastReferencedChapter' in data) next.lastReferencedChapter = asNumber(data.lastReferencedChapter)
+  if ('resolvedChapter' in data) next.resolvedChapter = asNumber(data.resolvedChapter)
+  if ('reminderInterval' in data) next.reminderInterval = asNumber(data.reminderInterval)
   if ('relatedCharacterIdsJson' in data) next.relatedCharacterIdsJson = stringifyNumberArray(data.relatedCharacterIdsJson)
   if ('relatedItemIdsJson' in data) next.relatedItemIdsJson = stringifyNumberArray(data.relatedItemIdsJson)
   if ('relatedTimelineEventIdsJson' in data) next.relatedTimelineEventIdsJson = stringifyNumberArray(data.relatedTimelineEventIdsJson)
@@ -157,6 +164,62 @@ function sanitizeStoryThreadPayload(
   if ('sortOrder' in data) next.sortOrder = asNumber(data.sortOrder) ?? 0
 
   return next
+}
+
+function hasOwn<T extends object>(value: T, key: keyof T): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key)
+}
+
+function isResolvedStatus(status?: StoryThreadStatus | null): boolean {
+  return status === 'resolved'
+}
+
+function buildStoryThreadLifecyclePatch(
+  novelId: number,
+  current: typeof storyThreads.$inferSelect | null,
+  payload: Partial<typeof storyThreads.$inferInsert>,
+): Partial<typeof storyThreads.$inferInsert> {
+  const patch: Partial<typeof storyThreads.$inferInsert> = {}
+  const latestChapterNum = getLatestChapterNum(novelId)
+  const nextStatus = normalizeStatus(payload.status ?? current?.status)
+  const nextStartChapter = hasOwn(payload, 'startChapter')
+    ? payload.startChapter ?? null
+    : current?.startChapter ?? null
+  const nextTargetPayoffChapter = hasOwn(payload, 'targetPayoffChapter')
+    ? payload.targetPayoffChapter ?? null
+    : current?.targetPayoffChapter ?? null
+  let nextPlantedChapter = hasOwn(payload, 'plantedChapter')
+    ? payload.plantedChapter ?? null
+    : current?.plantedChapter ?? null
+  let nextResolvedChapter = hasOwn(payload, 'resolvedChapter')
+    ? payload.resolvedChapter ?? null
+    : current?.resolvedChapter ?? null
+
+  if (nextPlantedChapter == null && typeof nextStartChapter === 'number' && nextStartChapter > 0) {
+    nextPlantedChapter = nextStartChapter
+    patch.plantedChapter = nextPlantedChapter
+  }
+
+  if (nextPlantedChapter == null && (nextStatus === 'active' || nextStatus === 'resolved')) {
+    const fallbackPlantedChapter = latestChapterNum > 0 ? latestChapterNum : null
+    if (fallbackPlantedChapter != null) {
+      nextPlantedChapter = fallbackPlantedChapter
+      patch.plantedChapter = fallbackPlantedChapter
+    }
+  }
+
+  if (isResolvedStatus(nextStatus)) {
+    if (nextResolvedChapter == null) {
+      nextResolvedChapter = latestChapterNum > 0
+        ? latestChapterNum
+        : nextTargetPayoffChapter ?? nextStartChapter ?? nextPlantedChapter ?? null
+      if (nextResolvedChapter != null) patch.resolvedChapter = nextResolvedChapter
+    }
+  } else if (nextResolvedChapter != null || hasOwn(payload, 'resolvedChapter')) {
+    patch.resolvedChapter = null
+  }
+
+  return patch
 }
 
 function getLatestChapterNum(novelId: number): number {
@@ -257,7 +320,9 @@ function buildThreadCurrentSummary(thread: typeof storyThreads.$inferSelect): st
     `状态：${thread.status || 'planned'}`,
     `优先级：${thread.priority || 'medium'}`,
     typeof thread.startChapter === 'number' ? `起始章：第${thread.startChapter}章` : '',
+    typeof thread.plantedChapter === 'number' ? `埋设章：第${thread.plantedChapter}章` : '',
     typeof thread.targetPayoffChapter === 'number' ? `目标回收章：第${thread.targetPayoffChapter}章` : '',
+    typeof thread.resolvedChapter === 'number' ? `实际回收章：第${thread.resolvedChapter}章` : '',
     thread.summary ? `摘要：${thread.summary}` : '',
     thread.premise ? `触发前提：${thread.premise}` : '',
     thread.payoffCondition ? `回收条件：${thread.payoffCondition}` : '',
@@ -549,50 +614,73 @@ function isForeshadowCandidate(thread: typeof storyThreads.$inferSelect) {
   )
 }
 
+function resolveForeshadowStatus(
+  thread: typeof storyThreads.$inferSelect,
+  currentChapterNum: number,
+): ForeshadowStatus {
+  if (thread.status === 'resolved') return 'paid_off'
+  if (thread.status === 'abandoned') return 'pending'
+  if (
+    typeof thread.targetPayoffChapter === 'number'
+    && currentChapterNum > thread.targetPayoffChapter
+  ) return 'overdue'
+  if (
+    typeof thread.targetPayoffChapter === 'number'
+    && currentChapterNum >= (thread.targetPayoffChapter - FORESHADOW_DUE_WINDOW)
+    && currentChapterNum <= thread.targetPayoffChapter
+  ) return 'due'
+  return 'pending'
+}
+
+function resolvePayoffSpan(thread: typeof storyThreads.$inferSelect): number | undefined {
+  const plantedChapter = thread.plantedChapter ?? thread.startChapter ?? undefined
+  if (typeof plantedChapter !== 'number' || typeof thread.resolvedChapter !== 'number') return undefined
+  return Math.max(0, thread.resolvedChapter - plantedChapter)
+}
+
 function buildForeshadowCard(
   thread: typeof storyThreads.$inferSelect,
   currentChapterNum: number,
 ) {
   const plantedChapter = thread.plantedChapter ?? thread.startChapter ?? undefined
   const targetPayoffChapter = thread.targetPayoffChapter ?? undefined
+  const resolvedChapter = thread.resolvedChapter ?? undefined
   const currentDistance = typeof targetPayoffChapter === 'number'
     ? targetPayoffChapter - currentChapterNum
     : undefined
   const relatedCharacterCount = parseJsonNumberArray(thread.relatedCharacterIdsJson).length
-  const isOverdue = typeof targetPayoffChapter === 'number'
-    && currentChapterNum > targetPayoffChapter
-    && thread.status !== 'resolved'
-    && thread.status !== 'abandoned'
-  const isDueSoon = typeof targetPayoffChapter === 'number'
-    && currentChapterNum >= targetPayoffChapter - 3
-    && currentChapterNum <= targetPayoffChapter
-    && thread.status !== 'resolved'
-    && thread.status !== 'abandoned'
+  const foreshadowStatus = resolveForeshadowStatus(thread, currentChapterNum)
+  const payoffSpan = resolvePayoffSpan(thread)
 
   return {
     id: thread.id,
     title: thread.title,
     threadType: normalizeThreadType(thread.threadType),
     status: normalizeStatus(thread.status),
+    foreshadowStatus,
     priority: normalizePriority(thread.priority),
     plantedChapter,
     startChapter: thread.startChapter ?? undefined,
     targetPayoffChapter,
+    resolvedChapter,
+    payoffSpan,
     currentDistance,
     relatedCharacterCount,
     payoffCondition: thread.payoffCondition ?? undefined,
     summary: thread.summary ?? undefined,
     currentState: thread.currentState ?? undefined,
-    warningText: isOverdue
+    warningText: foreshadowStatus === 'overdue'
       ? '已超过目标回收章位，建议优先处理。'
-      : isDueSoon
+      : foreshadowStatus === 'due'
         ? '接近目标回收章位，建议尽快安排兑现。'
         : undefined,
   }
 }
 
-export function getForeshadowSnapshot(novelId: number) {
-  const currentChapterNum = getLatestChapterNum(novelId)
+export function getForeshadowSnapshot(novelId: number, chapterNum?: number) {
+  const currentChapterNum = typeof chapterNum === 'number' && chapterNum > 0
+    ? Math.round(chapterNum)
+    : getLatestChapterNum(novelId)
   const snapshot = {
     currentChapterNum,
     pending: [] as Array<ReturnType<typeof buildForeshadowCard>>,
@@ -605,24 +693,18 @@ export function getForeshadowSnapshot(novelId: number) {
     .filter(isForeshadowCandidate)
     .forEach((thread) => {
       const card = buildForeshadowCard(thread, currentChapterNum)
-      if (card.status === 'resolved') {
+      if (card.foreshadowStatus === 'paid_off') {
         snapshot.resolved.push(card)
         return
       }
       if (card.status === 'abandoned') {
         return
       }
-      if (
-        typeof card.targetPayoffChapter === 'number'
-        && currentChapterNum > card.targetPayoffChapter
-      ) {
+      if (card.foreshadowStatus === 'overdue') {
         snapshot.overdue.push(card)
         return
       }
-      if (
-        typeof card.targetPayoffChapter === 'number'
-        && currentChapterNum >= card.targetPayoffChapter - 3
-      ) {
+      if (card.foreshadowStatus === 'due') {
         snapshot.dueSoon.push(card)
         return
       }
@@ -639,6 +721,8 @@ export function createStoryThread(
 ) {
   const db = getDb()
   const rows = listStoryThreads(novelId)
+  const sanitized = sanitizeStoryThreadPayload(data)
+  const lifecyclePatch = buildStoryThreadLifecyclePatch(novelId, null, sanitized)
   const result = db.insert(storyThreads).values({
     novelId,
     threadType: 'subplot',
@@ -649,7 +733,8 @@ export function createStoryThread(
     relatedItemIdsJson: '[]',
     relatedTimelineEventIdsJson: '[]',
     sortOrder: rows.length > 0 ? Math.max(...rows.map((thread) => thread.sortOrder || 0)) + 1 : 1,
-    ...sanitizeStoryThreadPayload(data),
+    ...sanitized,
+    ...lifecyclePatch,
   }).run()
 
   if (!options.skipContextTracking) {
@@ -667,8 +752,11 @@ export function updateStoryThread(
   const current = getStoryThread(id)
   if (!current) return
   const db = getDb()
+  const sanitized = sanitizeStoryThreadPayload(data)
+  const lifecyclePatch = buildStoryThreadLifecyclePatch(current.novelId, current, sanitized)
   db.update(storyThreads).set({
-    ...sanitizeStoryThreadPayload(data),
+    ...sanitized,
+    ...lifecyclePatch,
     updatedAt: new Date().toISOString(),
   }).where(eq(storyThreads.id, id)).run()
 

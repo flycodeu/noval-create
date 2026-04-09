@@ -157,6 +157,7 @@ export const storyThreads = sqliteTable('story_threads', {
   currentState: text('current_state'),
   plantedChapter: integer('planted_chapter'),
   lastReferencedChapter: integer('last_referenced_chapter'),
+  resolvedChapter: integer('resolved_chapter'),
   reminderInterval: integer('reminder_interval').default(20),
   relatedCharacterIdsJson: text('related_character_ids_json'),
   relatedItemIdsJson: text('related_item_ids_json'),

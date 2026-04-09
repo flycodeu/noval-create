@@ -1274,6 +1274,7 @@ export interface StoryThread {
   plantedChapter?: number
   lastReferencedChapter?: number
   reminderInterval?: number
+  resolvedChapter?: number
   relatedCharacterIdsJson?: string
   relatedItemIdsJson?: string
   relatedTimelineEventIdsJson?: string
@@ -1316,15 +1317,20 @@ export interface StoryThreadStats {
   overdueCount: number
 }
 
+export type ForeshadowStatus = 'pending' | 'due' | 'overdue' | 'paid_off'
+
 export interface ForeshadowThreadCard {
   id: number
   title: string
   threadType: StoryThread['threadType']
   status: StoryThread['status']
+  foreshadowStatus: ForeshadowStatus
   priority: StoryThread['priority']
   plantedChapter?: number
   startChapter?: number
   targetPayoffChapter?: number
+  resolvedChapter?: number
+  payoffSpan?: number
   currentDistance?: number
   relatedCharacterCount: number
   payoffCondition?: string
@@ -1926,6 +1932,7 @@ export type CostResolutionState = 'new' | 'ongoing' | 'resolved' | 'evaporated'
 export type ReversalSupportState = 'supported' | 'weak' | 'forced'
 export type ChapterPacingMarker = 'setup' | 'conflict' | 'reversal' | 'climax' | 'payoff' | 'breather'
 export type RewardState = 'none' | 'partial' | 'major'
+export type ChapterFunctionTag = 'setup' | 'progression' | 'reversal' | 'payoff' | 'breather' | 'climax' | 'exposition' | 'closure'
 
 export interface ChapterStoryDynamics {
   protagonistSetback: ProtagonistSetbackLevel
@@ -2050,6 +2057,131 @@ export interface VolumeStoryDynamicsEntry {
   alerts: StoryDynamicsAlert[]
 }
 
+export interface ChapterFunctionRun {
+  primaryTag: ChapterFunctionTag
+  startChapterNum: number
+  endChapterNum: number
+  length: number
+  chapterNums: number[]
+}
+
+export interface ChapterFunctionAlert {
+  code: 'repeated_function_run' | 'volume_function_skew' | 'weak_key_chapter_function'
+  severity: 'warning' | 'blocker'
+  title: string
+  detail: string
+  chapterNums: number[]
+  volumeId?: number
+  primaryTag?: ChapterFunctionTag
+}
+
+export interface ChapterFunctionSummary {
+  trackedChapterCount: number
+  chapterPurposeCoverage: number
+  rhythmBalanceScore: number
+  repeatedFunctionRunCount: number
+  longestRepeatedFunctionRun: number
+  dominantTag?: ChapterFunctionTag
+  dominantTagShare: number
+  tagCounts: Record<ChapterFunctionTag, number>
+}
+
+export interface VolumeChapterFunctionEntry {
+  volumeId: number
+  volumeNumber: number
+  volumeName: string
+  chapterStart: number
+  chapterEnd: number
+  chapterCount: number
+  trackedChapterCount: number
+  rhythmBalanceScore: number
+  dominantTag?: ChapterFunctionTag
+  dominantTagShare: number
+  tagCounts: Record<ChapterFunctionTag, number>
+  repeatedRuns: ChapterFunctionRun[]
+  alerts: ChapterFunctionAlert[]
+}
+
+export type QualityDashboardRiskKind =
+  | 'language_drift'
+  | 'story_dynamics'
+  | 'chapter_function'
+  | 'story_arc'
+  | 'foreshadow_debt'
+  | 'recall'
+  | 'world_state'
+
+export type QualityDashboardRiskSeverity = 'info' | 'warning' | 'critical'
+
+export interface QualityDashboardRiskItem {
+  kind: QualityDashboardRiskKind
+  severity: QualityDashboardRiskSeverity
+  title: string
+  detail: string
+  volumeId?: number
+  chapterNums: number[]
+}
+
+export interface VolumeQualityMetrics {
+  volumeId: number
+  volumeNumber: number
+  volumeName: string
+  chapterStart: number
+  chapterEnd: number
+  chapterCount: number
+  analyzedChapterCount: number
+  healthScore: number
+  averageAiLikeRate: number
+  averageOverallScore: number
+  worseningMetricCount: number
+  stalledArcCount: number
+  criticalArcAlertCount: number
+  rhythmBalanceScore: number
+  repeatedFunctionRunCount: number
+  foreshadowPendingCount: number
+  foreshadowDueSoonCount: number
+  foreshadowOverdueCount: number
+  foreshadowResolvedCount: number
+  staleRecallCount: number
+  staleRecallRate: number
+  worldWarningCount: number
+  worldConflictAlertCount: number
+  topRisks: QualityDashboardRiskItem[]
+}
+
+export interface NovelQualityMetrics {
+  healthScore: number
+  totalVolumeCount: number
+  totalChapterCount: number
+  analyzedChapterCount: number
+  criticalRiskCount: number
+  warningRiskCount: number
+  foreshadowPendingCount: number
+  foreshadowDueSoonCount: number
+  foreshadowOverdueCount: number
+  riskOverview: Array<{
+    kind: QualityDashboardRiskKind
+    label: string
+    count: number
+  }>
+  topRisks: QualityDashboardRiskItem[]
+  recommendedFocusVolumes: Array<{
+    volumeId: number
+    volumeNumber: number
+    volumeName: string
+    healthScore: number
+    summary: string
+  }>
+}
+
+export interface ChapterFunctionDetail {
+  primaryTag?: ChapterFunctionTag
+  tags: ChapterFunctionTag[]
+  repeatedFunctionRunLength: number
+  repeatedFunctionRange?: ChapterFunctionRun
+  keyChapterRisk?: 'weak_primary' | 'missing_primary'
+}
+
 export interface AIScoreResult {
   dimensions: AIScoreDimension[]
   ai_like_rate: number
@@ -2085,6 +2217,12 @@ export interface QualityDashboardData {
   storyDynamicsTrend: StoryDynamicsTrendPoint[]
   storyPacingAlerts: StoryDynamicsAlert[]
   volumeStoryDynamics: VolumeStoryDynamicsEntry[]
+  volumeQualityMetrics: VolumeQualityMetrics[]
+  novelQualityMetrics: NovelQualityMetrics
+  chapterFunctionSummary: ChapterFunctionSummary
+  repeatedFunctionRuns: ChapterFunctionRun[]
+  chapterFunctionAlerts: ChapterFunctionAlert[]
+  volumeChapterFunctions: VolumeChapterFunctionEntry[]
   storyArcProgressSummary: {
     trackedArcCount: number
     coveredChapterCount: number
@@ -2151,6 +2289,7 @@ export interface QualityDashboardData {
     chapterId: number
     chapterNum: number
     title: string
+    volumeId?: number
     overallScore: number
     aiLikeRate: number
     weakDimensions: string[]
@@ -2158,6 +2297,7 @@ export interface QualityDashboardData {
     languageDriftMetrics?: LanguageDriftMetrics
     dialogueReview?: ChapterDialogueReviewData
     storyDynamics?: ChapterStoryDynamics
+    chapterFunction?: ChapterFunctionDetail
     storyArcProgress?: StoryArcProgressPoint[]
     worldStateAlerts?: WorldStateAlert[]
     recallDiagnostics?: RecallDiagnostics
@@ -2529,7 +2669,7 @@ declare global {
         query: (filters: StoryThreadQueryInput) => Promise<PagedResult<StoryThread>>
         getStats: (filters: StoryThreadQueryInput) => Promise<StoryThreadStats>
         get: (id: number) => Promise<StoryThread | null>
-        getForeshadowSnapshot: (novelId: number) => Promise<ForeshadowSnapshot>
+        getForeshadowSnapshot: (novelId: number, chapterNum?: number) => Promise<ForeshadowSnapshot>
         generate: (novelId: number, options?: StoryThreadBatchGenerateOptions) => Promise<StoryThreadBatchGenerationResult>
         startAutoGenerate: (novelId: number, options?: StoryThreadBatchGenerateOptions) => Promise<number>
         getAutoGenerateStatus: (taskId: number) => Promise<StoryThreadAutoGenerateStatus | null>

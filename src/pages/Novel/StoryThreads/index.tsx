@@ -110,6 +110,20 @@ function getPriorityColor(priority: StoryThread['priority']) {
   return 'gold'
 }
 
+function getForeshadowStatusColor(status: ForeshadowSnapshot['pending'][number]['foreshadowStatus']) {
+  if (status === 'paid_off') return 'success'
+  if (status === 'overdue') return 'error'
+  if (status === 'due') return 'warning'
+  return 'default'
+}
+
+function getForeshadowStatusLabel(status: ForeshadowSnapshot['pending'][number]['foreshadowStatus']) {
+  if (status === 'paid_off') return '已回收'
+  if (status === 'overdue') return '超期未收'
+  if (status === 'due') return '即将到期'
+  return '待回收'
+}
+
 function buildEditorValues(thread?: StoryThread | null): StoryThreadFormValues {
   if (!thread) return EMPTY_EDITOR_VALUES
 
@@ -224,8 +238,8 @@ function ForeshadowColumn({
           <section key={item.id} className="novel-panel" style={{ padding: 14 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
               <strong>{item.title}</strong>
-              <Tag color={item.status === 'resolved' ? 'success' : item.warningText ? 'warning' : 'default'}>
-                {item.status}
+              <Tag color={getForeshadowStatusColor(item.foreshadowStatus)}>
+                {getForeshadowStatusLabel(item.foreshadowStatus)}
               </Tag>
             </div>
             <div style={{ color: 'var(--workspace-ink-soft)', marginBottom: 8 }}>
@@ -234,6 +248,8 @@ function ForeshadowColumn({
             <div style={{ display: 'grid', gap: 4, fontSize: 13, color: 'var(--workspace-ink-soft)' }}>
               <div>{`埋设：${formatChapter(item.plantedChapter || item.startChapter)}`}</div>
               <div>{`目标回收：${formatChapter(item.targetPayoffChapter)}`}</div>
+              {item.resolvedChapter ? <div>{`实际回收：${formatChapter(item.resolvedChapter)}`}</div> : null}
+              {typeof item.payoffSpan === 'number' ? <div>{`回收跨度：${item.payoffSpan} 章`}</div> : null}
               <div>{`当前距离：${typeof item.currentDistance === 'number' ? `${item.currentDistance} 章` : '未设定'}`}</div>
               <div>{`关联角色：${item.relatedCharacterCount}`}</div>
               {item.payoffCondition ? <div>{`回收条件：${item.payoffCondition}`}</div> : null}

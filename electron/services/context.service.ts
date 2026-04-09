@@ -188,6 +188,7 @@ export interface ChapterContextParts {
   chapterGoal: string
   continuitySummary: string
   openLoops: string
+  dueForeshadows: string
   continuityNotes: string
   timelineSummary: string
   timelineOpenThreads: string
@@ -381,6 +382,7 @@ interface RecallQueryBuildInput {
   timelineOpenThreads: string
   activeThreads: string
   openLoops: string
+  dueForeshadows: string
   continuityNotes: string
   storyThreadsSummary: string
   mentionedCharacters: string[]
@@ -837,6 +839,7 @@ function buildRecallQueryBuckets(input: RecallQueryBuildInput): RecallQueryBucke
       title: '待回收事项',
       lines: dedupe([
         ...splitRecallLines(input.openLoops, 4, 90),
+        ...splitRecallLines(input.dueForeshadows, 3, 90),
         ...splitRecallLines(input.timelineOpenThreads, 3, 90),
         ...splitRecallLines(input.continuityNotes, 3, 90),
       ], 6),
@@ -1199,6 +1202,7 @@ function createStagePriorityMap(
           worldRules: 0,
           continuityNotes: 0,
           openLoops: 0,
+          dueForeshadows: 0,
           characterStates: 0,
           worldStates: 0,
           itemSummary: 1,
@@ -1222,6 +1226,7 @@ function createStagePriorityMap(
           worldRules: 0,
           continuityNotes: 0,
           openLoops: 0,
+          dueForeshadows: 0,
           characterStates: 0,
           worldStates: 0,
           itemSummary: 1,
@@ -1245,6 +1250,7 @@ function createStagePriorityMap(
           worldRules: 0,
           continuityNotes: 1,
           openLoops: 0,
+          dueForeshadows: 0,
           characterStates: 0,
           worldStates: 0,
           itemSummary: 1,
@@ -1269,6 +1275,7 @@ function createStagePriorityMap(
           worldRules: 0,
           continuityNotes: 0,
           openLoops: 0,
+          dueForeshadows: 0,
           characterStates: 0,
           worldStates: 0,
           itemSummary: 1,
@@ -1760,6 +1767,87 @@ function buildActiveThreadsContextData(
   }
 }
 
+function isForeshadowThreadCandidate(thread: typeof storyThreads.$inferSelect): boolean {
+  return Boolean(
+    typeof thread.targetPayoffChapter === 'number'
+    || (thread.payoffCondition && thread.payoffCondition.trim())
+    || thread.threadType === 'mystery'
+    || thread.threadType === 'payoff',
+  )
+}
+
+function isCurrentArcThread(
+  thread: typeof storyThreads.$inferSelect,
+  currentArc?: typeof storyArcs.$inferSelect | null,
+): boolean {
+  if (!currentArc || typeof currentArc.chapterStart !== 'number' || typeof currentArc.chapterEnd !== 'number') return false
+  const spanStart = thread.startChapter || thread.plantedChapter || thread.lastReferencedChapter || 0
+  const spanEnd = thread.targetPayoffChapter || thread.lastReferencedChapter || thread.plantedChapter || thread.startChapter || 0
+  if (!spanStart && !spanEnd) return false
+  const rangeStart = spanStart || spanEnd
+  const rangeEnd = spanEnd || spanStart
+  return rangeStart <= currentArc.chapterEnd && rangeEnd >= currentArc.chapterStart
+}
+
+function threadPriorityRank(priority?: string | null): number {
+  if (priority === 'high') return 0
+  if (priority === 'medium') return 1
+  return 2
+}
+
+function buildDueForeshadowContext(
+  novelId: number,
+  chapterNum: number,
+  currentArc?: typeof storyArcs.$inferSelect | null,
+): string {
+  const db = getDb()
+  const rows = db.select().from(storyThreads)
+    .where(eq(storyThreads.novelId, novelId))
+    .orderBy(asc(storyThreads.sortOrder), asc(storyThreads.id))
+    .all()
+    .filter((thread) => thread.status !== 'resolved' && thread.status !== 'abandoned')
+    .filter(isForeshadowThreadCandidate)
+    .filter((thread) => typeof thread.targetPayoffChapter === 'number' && thread.targetPayoffChapter > 0)
+
+  if (rows.length === 0) return ''
+
+  return rows
+    .filter((thread) => {
+      const distance = thread.targetPayoffChapter! - chapterNum
+      return distance <= 0 || distance <= 3
+    })
+    .sort((left, right) => {
+      const leftOverdue = left.targetPayoffChapter! < chapterNum ? 0 : 1
+      const rightOverdue = right.targetPayoffChapter! < chapterNum ? 0 : 1
+      if (leftOverdue !== rightOverdue) return leftOverdue - rightOverdue
+
+      const leftArc = isCurrentArcThread(left, currentArc) ? 0 : 1
+      const rightArc = isCurrentArcThread(right, currentArc) ? 0 : 1
+      if (leftArc !== rightArc) return leftArc - rightArc
+
+      const leftDistance = Math.abs(left.targetPayoffChapter! - chapterNum)
+      const rightDistance = Math.abs(right.targetPayoffChapter! - chapterNum)
+      if (leftDistance !== rightDistance) return leftDistance - rightDistance
+
+      const leftPriority = threadPriorityRank(left.priority)
+      const rightPriority = threadPriorityRank(right.priority)
+      if (leftPriority !== rightPriority) return leftPriority - rightPriority
+
+      return (left.sortOrder || 0) - (right.sortOrder || 0)
+    })
+    .slice(0, 6)
+    .map((thread) => compactRecallLine([
+      thread.targetPayoffChapter! < chapterNum ? '超期' : '到期',
+      thread.title,
+      thread.plantedChapter || thread.startChapter ? `埋设=第${thread.plantedChapter || thread.startChapter}章` : '',
+      `目标=第${thread.targetPayoffChapter}章`,
+      thread.currentState || thread.summary || '',
+      thread.payoffCondition ? `条件=${thread.payoffCondition}` : '',
+    ].filter(Boolean).join(' · '), 120))
+    .filter(Boolean)
+    .join('\n')
+}
+
 function buildActiveThreadsContext(
   novelId: number,
   chapterNum: number,
@@ -2043,6 +2131,7 @@ export async function collectChapterContextRawData(
       continuityNotes: collectContinuityNotes(continuityChapters),
       lastChapterEnding,
       openLoops: collectOpenLoops(continuityChapters),
+      dueForeshadows: buildDueForeshadowContext(novelId, chapterNum, currentArc),
       timelineOpenThreads: timelineContext.timelineOpenThreads,
       worldRules: worldRulesContext,
       itemSummary,
@@ -2081,6 +2170,7 @@ export async function collectChapterContextRawData(
       timelineOpenThreads: timelineContext.timelineOpenThreads,
       activeThreads: activeThreadsContext.summary,
       openLoops: result.contextParts.openLoops,
+      dueForeshadows: result.contextParts.dueForeshadows,
       continuityNotes: result.contextParts.continuityNotes,
       storyThreadsSummary: profile.storyThreadsSummary,
       mentionedCharacters: [...mentionedCharacterNames],
@@ -2095,6 +2185,7 @@ export async function collectChapterContextRawData(
         relationSummary,
         itemSummary,
         result.contextParts.openLoops,
+        result.contextParts.dueForeshadows,
         result.contextParts.continuityNotes,
       ].filter(Boolean).join('\n')
       const bucketResults = await Promise.all(recallBuckets.map(async (bucket) => ({
@@ -2232,6 +2323,7 @@ export function allocateChapterContext(
     chapterGoal: softAllocation.allocated.chapterGoal || rawData.contextParts.chapterGoal || '',
     continuitySummary: softAllocation.allocated.continuitySummary || '',
     openLoops: softAllocation.allocated.openLoops || '',
+    dueForeshadows: softAllocation.allocated.dueForeshadows || rawData.contextParts.dueForeshadows || '',
     continuityNotes: softAllocation.allocated.continuityNotes || '',
     timelineSummary: softAllocation.allocated.timelineSummary || '',
     timelineOpenThreads: softAllocation.allocated.timelineOpenThreads || '',

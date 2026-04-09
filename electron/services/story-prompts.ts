@@ -88,6 +88,7 @@ export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
     '- 这份场景计划会直接进入 AI 主写流程，所以每段都必须可落成正文。',
     '- 先保证场景连贯、动作清楚、冲突具体，再考虑节奏和文气。',
     '- 场景说明用自然中文写，不要夹解释腔、策划黑话或翻译腔。',
+    '- 如果“本章应回收伏笔”里已有到期或超期线索，至少安排一个可见动作、对话或结果去推进它，而不是继续悬空。',
     '- 每章同时推进的活跃支线/伏笔不超过 3-5 条，避免信息过载——优先推进标注了[即将回收]的线索。',
     '- 如果"活跃支线与伏笔"中有标注[已N章未提及]的线索，至少用一个场景的细节或对话暗示来回顾它。',
     '- 每个场景必须包含：开场动作或悬念钩子、至少一个具体冲突或张力点、退出时留下未解决的问题或下一步悬念。',
@@ -158,6 +159,7 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
       '- human_language_repairs 只列最值得先改的 1 到 3 处生硬表达，尽量直接给出”原说法 -> 更自然说法”。',
       '- revision_brief 先讲承接和真实度，再讲语言和追读感。',
       '- 如果出现翻译腔、搭配不成立、伪文艺句或明显 AI 套话，要优先列进 language_risks 和 human_language_repairs。',
+      '- missing_payoffs 还要重点检查“本章应回收伏笔”里的到期或超期线索：如果正文没有推进、暗示或说明延期原因，要明确指出。',
       '- missing_payoffs 重点检查：活跃支线和伏笔中标注了[即将回收]或[已N章未提及]的线索，在本章是否有推进或至少暗示。',
       '- continuity_risks 必须检查：本章角色行为是否与人物当前状态中记录的性格、立场、伤势、能力等一致。',
       '- arc_progress_risks 只写本章没有推进当前故事弧目标、推进方向错误、关键检查点空转或连续多章偏离本弧的问题。',
@@ -168,6 +170,9 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
       '- pace_marker 只能保留一个主标签：setup / conflict / reversal / climax / payoff / breather。',
       '- reward_state 用来判断本章是否给了阶段性回报；持续受挫却没有回报要明确反映出来。',
       '- protagonist_pressure 用 0-100 反映结构压力，不要因为篇幅热闹就机械打高分。',
+      '- chapter_function_primary 只能选 setup / progression / reversal / payoff / breather / climax / exposition / closure 其中一个主功能。',
+      '- chapter_function_tags 只保留 1 到 3 个真正承担的叙事功能标签；如果 chapter_function_primary 已给出，必须包含在 tags 里。',
+      '- 关键章如果主功能仍然只是 setup / exposition / breather，要在 reader_hook_risks 或 critical_fixes 里明确指出它名义关键、实际过渡的问题。',
       ...(isEnhancedTier(promptTier)
         ? ['- 因果链检查：本章每个重大事件是否有合理的触发原因，结果是否产生了后续影响而非凭空出现凭空消失。']
         : []),
@@ -175,7 +180,7 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
         ? ['- 关键章节还要额外审查高潮是否兑现、代价是否落地、支线回收是否足够，避免只放大声量不推进结构。']
         : []),
     ]),
-    '只输出 JSON：{"summary":"总体判断","critical_fixes":["必改 1"],"continuity_risks":["连续性风险 1"],"arc_progress_risks":["故事弧推进风险 1"],"context_drift_risks":["漂移风险 1"],"realism_risks":["真实度风险 1"],"coherence_risks":["连贯性风险 1"],"reader_hook_risks":["追读风险 1"],"language_risks":["语言风险 1"],"human_language_repairs":["原说法 -> 更自然说法"],"genre_hollowing_risks":["体裁空心化风险 1"],"missing_payoffs":["未落地伏笔 1"],"strengths":["优点 1"],"severity":"medium","rewrite_required":true,"revision_brief":"修订方向摘要","protagonist_setback":"minor","setback_summary":"主角在关键交锋里被压制","cost_present":true,"cost_summary":"主角付出人手与资源损失","cost_resolution_state":"ongoing","reversal_marker":true,"reversal_summary":"看似得手后被埋伏反制","reversal_support_state":"supported","pace_marker":"reversal","reward_state":"partial","protagonist_pressure":72}',
+    '只输出 JSON：{"summary":"总体判断","critical_fixes":["必改 1"],"continuity_risks":["连续性风险 1"],"arc_progress_risks":["故事弧推进风险 1"],"context_drift_risks":["漂移风险 1"],"realism_risks":["真实度风险 1"],"coherence_risks":["连贯性风险 1"],"reader_hook_risks":["追读风险 1"],"language_risks":["语言风险 1"],"human_language_repairs":["原说法 -> 更自然说法"],"genre_hollowing_risks":["体裁空心化风险 1"],"missing_payoffs":["未落地伏笔 1"],"strengths":["优点 1"],"severity":"medium","rewrite_required":true,"revision_brief":"修订方向摘要","protagonist_setback":"minor","setback_summary":"主角在关键交锋里被压制","cost_present":true,"cost_summary":"主角付出人手与资源损失","cost_resolution_state":"ongoing","reversal_marker":true,"reversal_summary":"看似得手后被埋伏反制","reversal_support_state":"supported","pace_marker":"reversal","reward_state":"partial","protagonist_pressure":72,"chapter_function_primary":"reversal","chapter_function_tags":["progression","reversal"]}',
   )
   return applyPromptOverride('chapterReview', fallback, params as unknown as Record<string, unknown>)
 }

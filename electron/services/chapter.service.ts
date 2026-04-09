@@ -83,6 +83,7 @@ type CostResolutionState = 'new' | 'ongoing' | 'resolved' | 'evaporated'
 type ReversalSupportState = 'supported' | 'weak' | 'forced'
 type ChapterPacingMarker = 'setup' | 'conflict' | 'reversal' | 'climax' | 'payoff' | 'breather'
 type RewardState = 'none' | 'partial' | 'major'
+type ChapterFunctionTag = 'setup' | 'progression' | 'reversal' | 'payoff' | 'breather' | 'climax' | 'exposition' | 'closure'
 
 interface ChapterReviewNotes {
   summary: string
@@ -112,6 +113,8 @@ interface ChapterReviewNotes {
   pace_marker?: ChapterPacingMarker
   reward_state: RewardState
   protagonist_pressure: number
+  chapter_function_primary?: ChapterFunctionTag
+  chapter_function_tags: ChapterFunctionTag[]
   dialogue_homogenization_risks: string[]
   dialogue_fingerprint_summary: string
   cross_character_similarity: Array<{
@@ -285,6 +288,24 @@ function normalizePaceMarker(value: unknown): ChapterPacingMarker | undefined {
 
 function normalizeRewardState(value: unknown): RewardState {
   return value === 'partial' || value === 'major' || value === 'none' ? value : 'none'
+}
+
+function normalizeChapterFunctionTag(value: unknown): ChapterFunctionTag | undefined {
+  return value === 'setup'
+    || value === 'progression'
+    || value === 'reversal'
+    || value === 'payoff'
+    || value === 'breather'
+    || value === 'climax'
+    || value === 'exposition'
+    || value === 'closure'
+    ? value
+    : undefined
+}
+
+function normalizeChapterFunctionTags(value: unknown): ChapterFunctionTag[] {
+  if (!Array.isArray(value)) return []
+  return [...new Set(value.map((item) => normalizeChapterFunctionTag(item)).filter(Boolean))] as ChapterFunctionTag[]
 }
 
 function mergeSeverity(current: ReviewSeverity, incoming: ReviewSeverity): ReviewSeverity {
@@ -585,6 +606,11 @@ function normalizeReviewNotes(raw: unknown): ChapterReviewNotes {
 
   const costPresent = normalizeBoolean(record.cost_present)
   const reversalMarker = normalizeBoolean(record.reversal_marker)
+  const chapterFunctionPrimary = normalizeChapterFunctionTag(record.chapter_function_primary)
+  const chapterFunctionTags = normalizeChapterFunctionTags(record.chapter_function_tags)
+  if (chapterFunctionPrimary && !chapterFunctionTags.includes(chapterFunctionPrimary)) {
+    chapterFunctionTags.unshift(chapterFunctionPrimary)
+  }
 
   return {
     summary: asText(record.summary),
@@ -614,6 +640,8 @@ function normalizeReviewNotes(raw: unknown): ChapterReviewNotes {
     pace_marker: normalizePaceMarker(record.pace_marker),
     reward_state: normalizeRewardState(record.reward_state),
     protagonist_pressure: normalizeBoundedNumber(record.protagonist_pressure, 0, 100, 0),
+    chapter_function_primary: chapterFunctionPrimary,
+    chapter_function_tags: chapterFunctionTags,
     dialogue_homogenization_risks: toStringArray(record.dialogue_homogenization_risks),
     dialogue_fingerprint_summary: asText(record.dialogue_fingerprint_summary),
     cross_character_similarity: Array.isArray(record.cross_character_similarity)
@@ -677,6 +705,8 @@ function hasReviewNotes(notes: ChapterReviewNotes): boolean {
     Boolean(notes.pace_marker) ||
     notes.reward_state !== 'none' ||
     notes.protagonist_pressure > 0 ||
+    Boolean(notes.chapter_function_primary) ||
+    notes.chapter_function_tags.length > 0 ||
     notes.dialogue_homogenization_risks.length > 0 ||
     Boolean(notes.dialogue_fingerprint_summary) ||
     notes.cross_character_similarity.length > 0 ||
@@ -719,6 +749,8 @@ function buildFallbackReviewNotes(consistencyNotes: string): ChapterReviewNotes 
     pace_marker: undefined,
     reward_state: 'none',
     protagonist_pressure: 0,
+    chapter_function_primary: undefined,
+    chapter_function_tags: [],
     dialogue_homogenization_risks: [],
     dialogue_fingerprint_summary: '',
     cross_character_similarity: [],
@@ -753,6 +785,8 @@ function formatReviewNotes(notes: ChapterReviewNotes): string {
     notes.pace_marker ? `章节节奏标签：${notes.pace_marker}` : '',
     notes.reward_state !== 'none' ? `阶段回报：${notes.reward_state}` : '',
     notes.protagonist_pressure > 0 ? `主角压力值：${notes.protagonist_pressure}` : '',
+    notes.chapter_function_primary ? `章节主功能：${notes.chapter_function_primary}` : '',
+    notes.chapter_function_tags.length > 0 ? `章节功能标签：${notes.chapter_function_tags.join(' / ')}` : '',
     notes.dialogue_fingerprint_summary ? `角色对白辨识度：${notes.dialogue_fingerprint_summary}` : '',
     notes.dialogue_homogenization_risks.length > 0 ? `对白同质化风险：\n- ${notes.dialogue_homogenization_risks.join('\n- ')}` : '',
     notes.cross_character_similarity.length > 0
@@ -1103,6 +1137,7 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
           lastChapterEnding: input.context.lastChapterEnding,
           continuitySummary: input.context.continuitySummary,
           openLoops: input.context.openLoops,
+          dueForeshadows: input.context.dueForeshadows,
           continuityNotes: input.context.continuityNotes,
           timelineSummary: input.context.timelineSummary,
           timelineOpenThreads: input.context.timelineOpenThreads,
@@ -1182,6 +1217,7 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
               lastChapterEnding: input.context.lastChapterEnding,
               continuitySummary: input.context.continuitySummary,
               openLoops: input.context.openLoops,
+              dueForeshadows: input.context.dueForeshadows,
               continuityNotes: input.context.continuityNotes,
               timelineSummary: input.context.timelineSummary,
               timelineOpenThreads: input.context.timelineOpenThreads,
@@ -1918,6 +1954,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
           lastChapterEnding: scenePlanContext.lastChapterEnding,
           continuitySummary: scenePlanContext.continuitySummary,
           openLoops: scenePlanContext.openLoops,
+          dueForeshadows: scenePlanContext.dueForeshadows,
           continuityNotes: scenePlanContext.continuityNotes,
           timelineSummary: scenePlanContext.timelineSummary,
           timelineOpenThreads: scenePlanContext.timelineOpenThreads,
@@ -1987,6 +2024,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
           lastChapterEnding: draftContext.lastChapterEnding,
           continuitySummary: draftContext.continuitySummary,
           openLoops: draftContext.openLoops,
+          dueForeshadows: draftContext.dueForeshadows,
           continuityNotes: draftContext.continuityNotes,
           timelineSummary: draftContext.timelineSummary,
           timelineOpenThreads: draftContext.timelineOpenThreads,
@@ -2045,6 +2083,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
             itemSummary: reviewContext.itemSummary,
             continuitySummary: reviewContext.continuitySummary,
             openLoops: reviewContext.openLoops,
+            dueForeshadows: reviewContext.dueForeshadows,
             timelineSummary: reviewContext.timelineSummary,
             longTermMemory: reviewContext.longTermMemory,
             recalledMemory: reviewContext.recalledMemory,
@@ -2114,6 +2153,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
       lastChapterEnding: rewriteContext.lastChapterEnding,
       continuitySummary: rewriteContext.continuitySummary,
       openLoops: rewriteContext.openLoops,
+      dueForeshadows: rewriteContext.dueForeshadows,
       continuityNotes: rewriteContext.continuityNotes,
       timelineSummary: rewriteContext.timelineSummary,
       timelineOpenThreads: rewriteContext.timelineOpenThreads,

@@ -206,6 +206,10 @@ export function runMigrations(sqlite: Database.Database) {
       target_payoff_chapter INTEGER,
       payoff_condition TEXT,
       current_state TEXT,
+      planted_chapter INTEGER,
+      last_referenced_chapter INTEGER,
+      resolved_chapter INTEGER,
+      reminder_interval INTEGER DEFAULT 20,
       related_character_ids_json TEXT,
       related_item_ids_json TEXT,
       related_timeline_event_ids_json TEXT,
@@ -642,6 +646,10 @@ export function runMigrations(sqlite: Database.Database) {
   ensureColumn(sqlite, 'story_threads', 'target_payoff_chapter', 'INTEGER')
   ensureColumn(sqlite, 'story_threads', 'payoff_condition', 'TEXT')
   ensureColumn(sqlite, 'story_threads', 'current_state', 'TEXT')
+  ensureColumn(sqlite, 'story_threads', 'planted_chapter', 'INTEGER')
+  ensureColumn(sqlite, 'story_threads', 'last_referenced_chapter', 'INTEGER')
+  ensureColumn(sqlite, 'story_threads', 'resolved_chapter', 'INTEGER')
+  ensureColumn(sqlite, 'story_threads', 'reminder_interval', 'INTEGER DEFAULT 20')
   ensureColumn(sqlite, 'story_threads', 'related_character_ids_json', 'TEXT')
   ensureColumn(sqlite, 'story_threads', 'related_item_ids_json', 'TEXT')
   ensureColumn(sqlite, 'story_threads', 'related_timeline_event_ids_json', 'TEXT')
@@ -702,6 +710,7 @@ export function runMigrations(sqlite: Database.Database) {
   // P0: 伏笔追踪字段
   ensureColumn(sqlite, 'story_threads', 'planted_chapter', 'INTEGER')
   ensureColumn(sqlite, 'story_threads', 'last_referenced_chapter', 'INTEGER')
+  ensureColumn(sqlite, 'story_threads', 'resolved_chapter', 'INTEGER')
   ensureColumn(sqlite, 'story_threads', 'reminder_interval', 'INTEGER DEFAULT 20')
 
   // P0/P1: 角色语言画像字段
@@ -1076,6 +1085,10 @@ function validateRequiredSchema(sqlite: Database.Database) {
         'title',
         'status',
         'priority',
+        'planted_chapter',
+        'last_referenced_chapter',
+        'resolved_chapter',
+        'reminder_interval',
         'related_character_ids_json',
         'related_item_ids_json',
         'related_timeline_event_ids_json',

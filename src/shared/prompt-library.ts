@@ -173,6 +173,7 @@ export interface ChapterWritingPromptInput {
   styleTemplate: string
   continuitySummary: string
   openLoops: string
+  dueForeshadows?: string
   continuityNotes: string
   timelineSummary: string
   timelineOpenThreads: string
@@ -206,6 +207,7 @@ export interface ScenePlanPromptInput {
   lastChapterEnding: string
   continuitySummary: string
   openLoops: string
+  dueForeshadows?: string
   continuityNotes: string
   timelineSummary: string
   timelineOpenThreads: string
@@ -236,6 +238,7 @@ export interface ChapterReviewPromptInput {
   itemSummary: string
   continuitySummary: string
   openLoops: string
+  dueForeshadows?: string
   timelineSummary: string
   longTermMemory: string
   consistencyNotes: string
@@ -272,6 +275,7 @@ export interface ChapterRewritePromptInput {
   lastChapterEnding: string
   continuitySummary: string
   openLoops: string
+  dueForeshadows?: string
   continuityNotes: string
   timelineSummary: string
   timelineOpenThreads: string
@@ -1285,6 +1289,7 @@ export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
     section('连续性记忆', params.continuitySummary),
     section('必须承接', params.continuityNotes),
     section('未回收事项', params.openLoops),
+    section('本章应回收伏笔', params.dueForeshadows),
     section('时间轴锚点', params.timelineSummary),
     section('时间轴待回收', params.timelineOpenThreads),
     section('活跃支线与伏笔', params.activeThreads),
@@ -1346,6 +1351,7 @@ export function buildChapterWritingPrompt(params: ChapterWritingPromptInput): st
     section('关键人物关系', params.relationSummary),
     section('本章必须承接', params.continuityNotes),
     section('当前未回收事项', params.openLoops),
+    section('本章应回收伏笔', params.dueForeshadows),
     section('时间轴关键节点', params.timelineSummary),
     section('时间轴待回收事项', params.timelineOpenThreads),
     section('活跃支线与伏笔', params.activeThreads),
@@ -1409,6 +1415,7 @@ export function buildChapterDraftPrompt(params: ChapterRewritePromptInput): stri
     section('连续性记忆', params.continuitySummary),
     section('必须承接', params.continuityNotes),
     section('未回收事项', params.openLoops),
+    section('本章应回收伏笔', params.dueForeshadows),
     section('时间轴锚点', params.timelineSummary),
     section('时间轴待回收', params.timelineOpenThreads),
     section('活跃支线与伏笔', params.activeThreads),
@@ -1463,6 +1470,7 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
     section('关键物品与去向', params.itemSummary),
     section('连续性记忆', params.continuitySummary),
     section('未回收事项', params.openLoops),
+    section('本章应回收伏笔', params.dueForeshadows),
     section('时间轴锚点', params.timelineSummary),
     section('长期记忆', params.longTermMemory),
     section('向量召回记忆', params.recalledMemory),
@@ -1491,13 +1499,17 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
       'pace_marker 只能选 setup / conflict / reversal / climax / payoff / breather 其中一个主标签。',
       'reward_state 只能是 none / partial / major，用来区分持续压抑、部分回报和阶段性大回报。',
       'protagonist_pressure 用 0-100 评估主角本章承受的结构压力；纯顺推爽章不要虚报高分。',
+      'chapter_function_primary 只能选 setup / progression / reversal / payoff / breather / climax / exposition / closure 其中一个主功能。',
+      'chapter_function_tags 只保留 1 到 3 个真正承担的叙事功能标签，并且必须包含 chapter_function_primary。',
+      '如果关键章的主功能仍然只是 setup / exposition / breather，也要明确写进 critical_fixes 或 reader_hook_risks。',
+      '如果“本章应回收伏笔”里存在到期或超期线索，而正文没有推进、暗示或交代延期原因，要优先写进 missing_payoffs 或 critical_fixes。',
       'missing_payoffs 只写本章已经抛出但没有落地的铺垫。',
       'strengths 只写已经成立且应该保留的具体优点。',
       'severity 只能是 low / medium / high。',
       '出现 high 级问题时 rewrite_required 必须是 true，其余情况可以是 false。',
       'revision_brief 用 60 到 120 字中文写清修改方向。',
     ].join('\n')),
-    '只输出 JSON：{"summary":"总体判断","critical_fixes":["必改 1"],"continuity_risks":["连续性风险 1"],"arc_progress_risks":["故事弧推进风险 1"],"context_drift_risks":["漂移风险 1"],"realism_risks":["真实度风险 1"],"coherence_risks":["连贯性风险 1"],"reader_hook_risks":["追读风险 1"],"language_risks":["语言风险 1"],"human_language_repairs":["原说法 -> 更自然说法"],"genre_hollowing_risks":["体裁空心化风险 1"],"missing_payoffs":["未落地伏笔 1"],"strengths":["优点 1"],"severity":"medium","rewrite_required":true,"revision_brief":"修订方向摘要","protagonist_setback":"minor","setback_summary":"主角在关键交锋中被压制","cost_present":true,"cost_summary":"主角失去可靠盟友与补给","cost_resolution_state":"ongoing","reversal_marker":true,"reversal_summary":"看似得手后被埋伏反制","reversal_support_state":"supported","pace_marker":"reversal","reward_state":"partial","protagonist_pressure":72}',
+    '只输出 JSON：{"summary":"总体判断","critical_fixes":["必改 1"],"continuity_risks":["连续性风险 1"],"arc_progress_risks":["故事弧推进风险 1"],"context_drift_risks":["漂移风险 1"],"realism_risks":["真实度风险 1"],"coherence_risks":["连贯性风险 1"],"reader_hook_risks":["追读风险 1"],"language_risks":["语言风险 1"],"human_language_repairs":["原说法 -> 更自然说法"],"genre_hollowing_risks":["体裁空心化风险 1"],"missing_payoffs":["未落地伏笔 1"],"strengths":["优点 1"],"severity":"medium","rewrite_required":true,"revision_brief":"修订方向摘要","protagonist_setback":"minor","setback_summary":"主角在关键交锋中被压制","cost_present":true,"cost_summary":"主角失去可靠盟友与补给","cost_resolution_state":"ongoing","reversal_marker":true,"reversal_summary":"看似得手后被埋伏反制","reversal_support_state":"supported","pace_marker":"reversal","reward_state":"partial","protagonist_pressure":72,"chapter_function_primary":"reversal","chapter_function_tags":["progression","reversal"]}',
   ])
 }
 
@@ -1540,6 +1552,7 @@ export function buildChapterRewritePrompt(params: ChapterRewritePromptInput): st
     section('连续性记忆', params.continuitySummary),
     section('必须承接', params.continuityNotes),
     section('未回收事项', params.openLoops),
+    section('本章应回收伏笔', params.dueForeshadows),
     section('时间轴锚点', params.timelineSummary),
     section('时间轴待回收', params.timelineOpenThreads),
     section('长期记忆', params.longTermMemory),

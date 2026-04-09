@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Empty, Modal, Progress, Spin, Tag, Tooltip } from 'antd'
+import { Button, Empty, Modal, Progress, Spin, Tag, Tooltip } from 'antd'
 import VirtualList from 'rc-virtual-list'
 import type { LanguageDriftMetrics, QualityDashboardData } from '../../../types'
 import { WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
@@ -12,6 +12,16 @@ type QualityHeatmapPoint = QualityDashboardData['heatmapData'][number]
 const DIMENSION_NAMES = [
   '文笔质量', '逻辑连贯', '节奏控制', '情感深度',
   '人物塑造', '世界一致', '创新性', '追读欲',
+]
+const CHAPTER_FUNCTION_ORDER: Array<Exclude<QualityDashboardData['chapterFunctionSummary']['dominantTag'], undefined>> = [
+  'setup',
+  'progression',
+  'reversal',
+  'payoff',
+  'breather',
+  'climax',
+  'exposition',
+  'closure',
 ]
 
 function scoreColor(score: number): string {
@@ -108,10 +118,63 @@ function paceMarkerLabel(marker?: QualityDashboardData['storyDynamicsTrend'][num
   return '未标注'
 }
 
+function chapterFunctionLabel(tag?: QualityDashboardData['chapterFunctionSummary']['dominantTag']): string {
+  if (tag === 'setup') return '铺垫'
+  if (tag === 'progression') return '推进'
+  if (tag === 'reversal') return '反转'
+  if (tag === 'payoff') return '回收'
+  if (tag === 'breather') return '喘息'
+  if (tag === 'climax') return '爆发'
+  if (tag === 'exposition') return '解释'
+  if (tag === 'closure') return '收束'
+  return '未标注'
+}
+
+function chapterFunctionColor(tag?: QualityDashboardData['chapterFunctionSummary']['dominantTag']): string {
+  if (tag === 'setup') return '#6c8ebf'
+  if (tag === 'progression') return '#52c41a'
+  if (tag === 'reversal') return '#fa8c16'
+  if (tag === 'payoff') return '#13c2c2'
+  if (tag === 'breather') return '#8c8c8c'
+  if (tag === 'climax') return '#f5222d'
+  if (tag === 'exposition') return '#722ed1'
+  if (tag === 'closure') return '#2f54eb'
+  return '#8c8c8c'
+}
+
+function chapterFunctionAlertColor(severity: QualityDashboardData['chapterFunctionAlerts'][number]['severity']): string {
+  return severity === 'blocker' ? 'error' : 'warning'
+}
+
+function healthScoreColor(value: number): string {
+  if (value >= 85) return '#52c41a'
+  if (value >= 70) return '#13c2c2'
+  if (value >= 55) return '#faad14'
+  if (value >= 40) return '#fa8c16'
+  return '#f5222d'
+}
+
+function qualityRiskSeverityColor(severity: QualityDashboardData['novelQualityMetrics']['topRisks'][number]['severity']): string {
+  if (severity === 'critical') return 'error'
+  if (severity === 'warning') return 'warning'
+  return 'default'
+}
+
+function qualityRiskKindLabel(kind: QualityDashboardData['novelQualityMetrics']['riskOverview'][number]['kind']): string {
+  if (kind === 'language_drift') return 'AI味退化'
+  if (kind === 'story_dynamics') return '主角与节奏'
+  if (kind === 'chapter_function') return '章节功能'
+  if (kind === 'story_arc') return '故事弧推进'
+  if (kind === 'foreshadow_debt') return '伏笔债务'
+  if (kind === 'recall') return '召回风险'
+  return '状态稳定性'
+}
+
 export default function QualityDashboard({ novelId }: Props) {
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<QualityDashboardData | null>(null)
   const [selectedChapter, setSelectedChapter] = useState<QualityChapterEntry | null>(null)
+  const [selectedVolumeId, setSelectedVolumeId] = useState<number | null>(null)
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -126,6 +189,12 @@ export default function QualityDashboard({ novelId }: Props) {
   }, [novelId])
 
   useEffect(() => { void loadData() }, [loadData])
+  useEffect(() => {
+    if (!data || selectedVolumeId == null) return
+    if (!data.volumeQualityMetrics.some((entry) => entry.volumeId === selectedVolumeId)) {
+      setSelectedVolumeId(null)
+    }
+  }, [data, selectedVolumeId])
 
   if (loading) return <Spin style={{ display: 'flex', justifyContent: 'center', padding: 80 }} />
 
@@ -135,15 +204,83 @@ export default function QualityDashboard({ novelId }: Props) {
   const hasDialogueData = Boolean(data && data.dialogueFingerprintStats.eligibleCharacterCount > 0)
   const hasStateData = Boolean(data && (data.worldStateSummary.trackedEntityCount > 0 || data.recentWorldStateAlerts.length > 0))
   const hasRecallData = Boolean(data && (data.recallSummary.analyzedChapterCount > 0 || data.recentRecallAlerts.length > 0))
+  const hasChapterFunctionData = Boolean(data && (data.chapterFunctionSummary.trackedChapterCount > 0 || data.chapterFunctionAlerts.length > 0))
 
-  if (!data || (!hasScoreData && !hasStoryDynamicsData && !hasArcProgressData && !hasDialogueData && !hasStateData && !hasRecallData)) {
+  if (!data || (!hasScoreData && !hasStoryDynamicsData && !hasArcProgressData && !hasDialogueData && !hasStateData && !hasRecallData && !hasChapterFunctionData)) {
     return (
       <WorkspacePage title="质量监控" description="查看各章节的AI评分与质量趋势。">
         <WorkspacePanel title="暂无数据">
-          <Empty description="还没有可用的 AI 评分、对白指纹、状态稳定性或结构节奏跟踪数据。先运行章节审校或 AI 评分后再来查看。" />
+          <Empty description="还没有可用的 AI 评分、对白指纹、章节功能、状态稳定性或结构节奏跟踪数据。先运行章节审校或 AI 评分后再来查看。" />
         </WorkspacePanel>
       </WorkspacePage>
     )
+  }
+
+  const selectedVolumeMetrics = selectedVolumeId != null
+    ? data.volumeQualityMetrics.find((entry) => entry.volumeId === selectedVolumeId) || null
+    : null
+  const selectedVolumeChapterNums = selectedVolumeMetrics
+    ? new Set(
+      data.chapterDetails
+        .filter((entry) => entry.volumeId === selectedVolumeMetrics.volumeId)
+        .map((entry) => entry.chapterNum),
+    )
+    : null
+  const filteredChapterDetails = selectedVolumeMetrics
+    ? data.chapterDetails.filter((entry) => entry.volumeId === selectedVolumeMetrics.volumeId)
+    : data.chapterDetails
+  const filteredHeatmapData = selectedVolumeChapterNums
+    ? data.heatmapData.filter((entry) => selectedVolumeChapterNums.has(entry.chapterNum))
+    : data.heatmapData
+  const filteredOverallTrend = selectedVolumeChapterNums
+    ? data.overallScoreTrend.filter((entry) => selectedVolumeChapterNums.has(entry.chapterNum))
+    : data.overallScoreTrend
+  const filteredAiLikeTrend = selectedVolumeChapterNums
+    ? data.aiLikeRateTrend.filter((entry) => selectedVolumeChapterNums.has(entry.chapterNum))
+    : data.aiLikeRateTrend
+  const filteredLanguageVolumes = selectedVolumeMetrics
+    ? data.volumeLanguageDrift.filter((entry) => entry.volumeId === selectedVolumeMetrics.volumeId)
+    : data.volumeLanguageDrift
+  const filteredStoryVolumes = selectedVolumeMetrics
+    ? data.volumeStoryDynamics.filter((entry) => entry.volumeId === selectedVolumeMetrics.volumeId)
+    : data.volumeStoryDynamics
+  const filteredChapterFunctionRuns = selectedVolumeMetrics
+    ? data.repeatedFunctionRuns.filter((entry) => entry.chapterNums.some((chapterNum) => chapterNum >= selectedVolumeMetrics.chapterStart && chapterNum <= selectedVolumeMetrics.chapterEnd))
+    : data.repeatedFunctionRuns
+  const filteredChapterFunctionAlerts = selectedVolumeMetrics
+    ? data.chapterFunctionAlerts.filter((entry) => (
+      entry.volumeId === selectedVolumeMetrics.volumeId
+      || entry.chapterNums.some((chapterNum) => chapterNum >= selectedVolumeMetrics.chapterStart && chapterNum <= selectedVolumeMetrics.chapterEnd)
+    ))
+    : data.chapterFunctionAlerts
+  const filteredChapterFunctionVolumes = selectedVolumeMetrics
+    ? data.volumeChapterFunctions.filter((entry) => entry.volumeId === selectedVolumeMetrics.volumeId)
+    : data.volumeChapterFunctions
+  const filteredArcVolumes = selectedVolumeMetrics
+    ? data.storyArcProgressVolumes.filter((entry) => entry.volumeId === selectedVolumeMetrics.volumeId)
+    : data.storyArcProgressVolumes
+  const filteredRecallAlerts = selectedVolumeMetrics
+    ? data.recentRecallAlerts.filter((entry) => entry.chapterNum >= selectedVolumeMetrics.chapterStart && entry.chapterNum <= selectedVolumeMetrics.chapterEnd)
+    : data.recentRecallAlerts
+  const filteredRecallVolumes = selectedVolumeMetrics
+    ? data.volumeRecallDiagnostics.filter((entry) => entry.volumeId === selectedVolumeMetrics.volumeId)
+    : data.volumeRecallDiagnostics
+  const filteredWorldAlerts = selectedVolumeMetrics
+    ? data.recentWorldStateAlerts.filter((entry) => entry.chapterNum >= selectedVolumeMetrics.chapterStart && entry.chapterNum <= selectedVolumeMetrics.chapterEnd)
+    : data.recentWorldStateAlerts
+  const filteredWorldVolumes = selectedVolumeMetrics
+    ? data.volumeWorldStateStability.filter((entry) => entry.volumeId === selectedVolumeMetrics.volumeId)
+    : data.volumeWorldStateStability
+  const openChapterByNum = (chapterNum: number) => {
+    const matched = data.chapterDetails.find((entry) => entry.chapterNum === chapterNum)
+    if (!matched) return
+    if (typeof matched.volumeId === 'number') setSelectedVolumeId(matched.volumeId)
+    setSelectedChapter(matched)
+  }
+  const handleRiskSelect = (risk: QualityDashboardData['novelQualityMetrics']['topRisks'][number]) => {
+    if (typeof risk.volumeId === 'number') setSelectedVolumeId(risk.volumeId)
+    const chapterNum = risk.chapterNums[0]
+    if (typeof chapterNum === 'number') openChapterByNum(chapterNum)
   }
 
   return (
@@ -157,16 +294,37 @@ export default function QualityDashboard({ novelId }: Props) {
         <WorkspaceMetric key="avg" label="平均总分 / 压力" value={hasScoreData ? `${data.averageOverallScore} / 10` : `${data.protagonistSetbackSummary.averagePressure}`} />,
       ]}
     >
+      <WorkspacePanel title="全书健康总览" description="先判断全书当前最危险的卷和主要风险，再往下钻到卷级和章节级。">
+        <NovelHealthOverviewPanel
+          summary={data.novelQualityMetrics}
+          activeVolume={selectedVolumeMetrics}
+          onSelectVolume={setSelectedVolumeId}
+          onClearVolume={() => setSelectedVolumeId(null)}
+          onSelectRisk={handleRiskSelect}
+        />
+      </WorkspacePanel>
+
+      {data.volumeQualityMetrics.length > 0 ? (
+        <WorkspacePanel title="卷级健康面板" description="统一比较每一卷的 AI 味、故事弧推进、节奏结构、伏笔债务、召回和状态稳定性。">
+          <VolumeHealthPanel
+            volumes={data.volumeQualityMetrics}
+            activeVolumeId={selectedVolumeId}
+            onSelectVolume={setSelectedVolumeId}
+            onSelectRisk={handleRiskSelect}
+          />
+        </WorkspacePanel>
+      ) : null}
+
       {hasScoreData ? (
         <>
           <WorkspacePanel title="质量热力图" description="X=章节，Y=评分维度，颜色越绿越好。">
-            <HeatmapChart data={data.heatmapData} chapterNums={data.overallScoreTrend.map((d) => d.chapterNum)} />
+            <HeatmapChart data={filteredHeatmapData} chapterNums={filteredOverallTrend.map((d) => d.chapterNum)} />
           </WorkspacePanel>
 
           <WorkspacePanel title="评分趋势" description="总分与AI味率逐章变化。">
             <TrendChart
-              overallTrend={data.overallScoreTrend}
-              aiLikeTrend={data.aiLikeRateTrend}
+              overallTrend={filteredOverallTrend}
+              aiLikeTrend={filteredAiLikeTrend}
             />
           </WorkspacePanel>
 
@@ -175,7 +333,7 @@ export default function QualityDashboard({ novelId }: Props) {
               averages={data.averageLanguageDrift}
               trends={data.languageDriftTrends}
               recentAlerts={data.recentLanguageDriftAlerts}
-              volumeEntries={data.volumeLanguageDrift}
+              volumeEntries={filteredLanguageVolumes}
               novelSummary={data.novelLanguageDriftSummary}
             />
           </WorkspacePanel>
@@ -203,9 +361,20 @@ export default function QualityDashboard({ novelId }: Props) {
           protagonistSummary={data.protagonistSetbackSummary}
           costSummary={data.costPersistenceSummary}
           reversalSummary={data.reversalDistributionSummary}
-          volumeEntries={data.volumeStoryDynamics}
+          volumeEntries={filteredStoryVolumes}
         />
       </WorkspacePanel>
+
+      {hasChapterFunctionData ? (
+        <WorkspacePanel title="章节功能与节奏分布" description="查看章节主功能是否重复、卷内是否偏科，以及关键章节是否仍在原地过渡。">
+          <ChapterFunctionPanel
+            summary={data.chapterFunctionSummary}
+            runs={filteredChapterFunctionRuns}
+            alerts={filteredChapterFunctionAlerts}
+            volumeEntries={filteredChapterFunctionVolumes}
+          />
+        </WorkspacePanel>
+      ) : null}
 
       {hasArcProgressData ? (
         <WorkspacePanel title="故事弧推进" description="查看每条故事弧的推进率、空转率、阶段兑现和卷级分布。">
@@ -214,7 +383,7 @@ export default function QualityDashboard({ novelId }: Props) {
             trend={data.storyArcProgressTrend}
             arcs={data.storyArcProgressArcs}
             alerts={data.storyArcProgressAlerts}
-            volumeEntries={data.storyArcProgressVolumes}
+            volumeEntries={filteredArcVolumes}
           />
         </WorkspacePanel>
       ) : null}
@@ -223,8 +392,8 @@ export default function QualityDashboard({ novelId }: Props) {
         <WorkspacePanel title="召回可靠性" description="查看历史片段召回是否过度依赖、以及是否命中过期信息。">
           <RecallReliabilityPanel
             summary={data.recallSummary}
-            alerts={data.recentRecallAlerts}
-            volumeEntries={data.volumeRecallDiagnostics}
+            alerts={filteredRecallAlerts}
+            volumeEntries={filteredRecallVolumes}
           />
         </WorkspacePanel>
       ) : null}
@@ -233,10 +402,10 @@ export default function QualityDashboard({ novelId }: Props) {
         <WorkspacePanel title="状态稳定性" description="查看人物、物品、关系、势力与地点的跳变和冲突是否在放大。">
           <WorldStateStabilityPanel
             trend={data.worldStateTrend}
-            alerts={data.recentWorldStateAlerts}
+            alerts={filteredWorldAlerts}
             conflictEntities={data.worldConflictEntities}
             summary={data.worldStateSummary}
-            volumeEntries={data.volumeWorldStateStability}
+            volumeEntries={filteredWorldVolumes}
           />
         </WorkspacePanel>
       ) : null}
@@ -249,7 +418,7 @@ export default function QualityDashboard({ novelId }: Props) {
 
           <WorkspacePanel title="章节详情" description="点击查看某章完整评分。">
             <div style={{ height: 480 }}>
-              <VirtualList data={data.chapterDetails} height={480} itemHeight={56} itemKey="chapterId">
+              <VirtualList data={filteredChapterDetails} height={480} itemHeight={56} itemKey="chapterId">
                 {(entry: QualityChapterEntry) => (
                   <div
                     key={entry.chapterId}
@@ -337,6 +506,7 @@ export default function QualityDashboard({ novelId }: Props) {
             <LanguageDriftDetails metrics={selectedChapter.languageDriftMetrics} />
             <DialogueReviewDetails review={selectedChapter.dialogueReview} />
             <StoryDynamicsDetails dynamics={selectedChapter.storyDynamics} />
+            <ChapterFunctionDetails chapterFunction={selectedChapter.chapterFunction} />
             <StoryArcProgressDetails progress={selectedChapter.storyArcProgress} />
             <RecallDiagnosticsDetails diagnostics={selectedChapter.recallDiagnostics} />
             <WorldStateAlertDetails alerts={selectedChapter.worldStateAlerts} />
@@ -344,6 +514,133 @@ export default function QualityDashboard({ novelId }: Props) {
         ) : null}
       </Modal>
     </WorkspacePage>
+  )
+}
+
+function ChapterFunctionPanel({
+  summary,
+  runs,
+  alerts,
+  volumeEntries,
+}: {
+  summary: QualityDashboardData['chapterFunctionSummary']
+  runs: QualityDashboardData['repeatedFunctionRuns']
+  alerts: QualityDashboardData['chapterFunctionAlerts']
+  volumeEntries: QualityDashboardData['volumeChapterFunctions']
+}) {
+  if (summary.trackedChapterCount === 0 && alerts.length === 0) {
+    return <Empty description="暂无章节功能与节奏分布数据" />
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>已标注章节</div>
+          <div style={{ fontSize: 22, fontWeight: 700 }}>{summary.trackedChapterCount}</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>具备主功能或功能标签的章节数</div>
+        </div>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>功能覆盖率</div>
+          <div style={{ fontSize: 22, fontWeight: 700 }}>{summary.chapterPurposeCoverage}%</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>已被明确标注叙事职责的章节占比</div>
+        </div>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>节奏平衡分</div>
+          <div style={{ fontSize: 22, fontWeight: 700 }}>{summary.rhythmBalanceScore}</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>
+            主功能偏向 {summary.dominantTag ? `${chapterFunctionLabel(summary.dominantTag)} ${summary.dominantTagShare}%` : '暂无'}
+          </div>
+        </div>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>最长重复链</div>
+          <div style={{ fontSize: 22, fontWeight: 700 }}>{summary.longestRepeatedFunctionRun}</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>连续重复主功能区段 {summary.repeatedFunctionRunCount} 处</div>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gap: 12 }}>
+        <div style={{ fontWeight: 600 }}>功能覆盖分布</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
+          {CHAPTER_FUNCTION_ORDER.map((tag) => {
+            const count = summary.tagCounts[tag] || 0
+            const share = summary.trackedChapterCount > 0 ? Math.round((count / summary.trackedChapterCount) * 100) : 0
+            return (
+              <div key={tag} style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: `1px solid ${chapterFunctionColor(tag)}`, display: 'grid', gap: 6 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
+                  <span style={{ fontSize: 12, fontWeight: 600 }}>{chapterFunctionLabel(tag)}</span>
+                  <span style={{ fontSize: 12, color: chapterFunctionColor(tag) }}>{share}%</span>
+                </div>
+                <Progress percent={share} showInfo={false} strokeColor={chapterFunctionColor(tag)} size="small" />
+                <div style={{ fontSize: 11, opacity: 0.6 }}>覆盖 {count} 章</div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12 }}>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', display: 'grid', gap: 8 }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>重复功能区段</div>
+          {runs.length > 0 ? runs.slice(0, 8).map((run, index) => (
+            <div key={`${run.startChapterNum}-${run.primaryTag}-${index}`} style={{ display: 'grid', gap: 4 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <Tag color={run.length >= 5 ? 'error' : 'warning'} style={{ marginRight: 0 }}>{chapterFunctionLabel(run.primaryTag)}</Tag>
+                <span style={{ fontSize: 12, fontWeight: 600 }}>第{run.startChapterNum}-{run.endChapterNum}章</span>
+              </div>
+              <div style={{ fontSize: 11, opacity: 0.65 }}>连续 {run.length} 章都以 {chapterFunctionLabel(run.primaryTag)} 为主功能。</div>
+            </div>
+          )) : <div style={{ fontSize: 12, opacity: 0.6 }}>当前没有连续重复主功能的区段。</div>}
+        </div>
+
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', display: 'grid', gap: 8 }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>近期功能告警</div>
+          {alerts.length > 0 ? alerts.slice(0, 8).map((alert, index) => (
+            <div key={`${alert.code}-${index}-${alert.chapterNums.join('-')}`} style={{ display: 'grid', gap: 4 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <Tag color={chapterFunctionAlertColor(alert.severity)} style={{ marginRight: 0 }}>
+                  {alert.severity === 'blocker' ? '高风险' : '提醒'}
+                </Tag>
+                <span style={{ fontSize: 12, fontWeight: 600 }}>{alert.title}</span>
+              </div>
+              <div style={{ fontSize: 11, opacity: 0.65 }}>{alert.detail}</div>
+            </div>
+          )) : <div style={{ fontSize: 12, opacity: 0.6 }}>当前没有新的章节功能告警。</div>}
+        </div>
+      </div>
+
+      {volumeEntries.length > 0 ? (
+        <div style={{ display: 'grid', gap: 12 }}>
+          <div style={{ fontWeight: 600 }}>卷级功能摘要</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
+            {volumeEntries.map((volume) => (
+              <div key={volume.volumeId} style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', display: 'grid', gap: 8 }}>
+                <div style={{ fontWeight: 600 }}>{volume.volumeName}</div>
+                <div style={{ fontSize: 11, opacity: 0.6 }}>第{volume.chapterStart}-{volume.chapterEnd}章 · {volume.chapterCount} 章</div>
+                <div style={{ fontSize: 12 }}>
+                  覆盖 {volume.trackedChapterCount} 章 · 平衡分 {volume.rhythmBalanceScore}
+                </div>
+                <div style={{ fontSize: 12 }}>
+                  主功能偏向 {volume.dominantTag ? `${chapterFunctionLabel(volume.dominantTag)} ${volume.dominantTagShare}%` : '暂无'}
+                </div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {volume.repeatedRuns.slice(0, 2).map((run) => (
+                    <Tag key={`${volume.volumeId}-${run.startChapterNum}-${run.primaryTag}`} color={run.length >= 5 ? 'error' : 'warning'} style={{ marginRight: 0 }}>
+                      {chapterFunctionLabel(run.primaryTag)} {run.length}连
+                    </Tag>
+                  ))}
+                  {volume.alerts.filter((alert) => alert.code === 'volume_function_skew').slice(0, 1).map((alert, index) => (
+                    <Tag key={`${volume.volumeId}-skew-${index}`} color={chapterFunctionAlertColor(alert.severity)} style={{ marginRight: 0 }}>
+                      偏科
+                    </Tag>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
   )
 }
 
@@ -1332,6 +1629,45 @@ function StoryDynamicsDetails({ dynamics }: { dynamics?: QualityDashboardData['c
       <div style={{ fontSize: 12 }}>代价：{dynamics.costPresent ? `${dynamics.costResolutionState || 'new'}${dynamics.costSummary ? ` · ${dynamics.costSummary}` : ''}` : '无明确代价'}</div>
       <div style={{ fontSize: 12 }}>反转：{dynamics.reversalMarker ? `${dynamics.reversalSupportState || 'weak'}${dynamics.reversalSummary ? ` · ${dynamics.reversalSummary}` : ''}` : '无'}</div>
       <div style={{ fontSize: 12 }}>节奏标签：{paceMarkerLabel(dynamics.paceMarker)} · 阶段回报：{dynamics.rewardState}</div>
+    </div>
+  )
+}
+
+function ChapterFunctionDetails({ chapterFunction }: { chapterFunction?: QualityDashboardData['chapterDetails'][number]['chapterFunction'] }) {
+  if (!chapterFunction) {
+    return <div style={{ fontSize: 12, opacity: 0.55 }}>本章暂无章节功能标注</div>
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 8 }}>
+      <div style={{ fontWeight: 600 }}>章节功能</div>
+      <div style={{ fontSize: 12 }}>
+        主功能：{chapterFunction.primaryTag ? chapterFunctionLabel(chapterFunction.primaryTag) : '未标注'}
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        {chapterFunction.tags.length > 0 ? chapterFunction.tags.map((tag) => (
+          <Tag key={tag} color={chapterFunctionColor(tag)} style={{ marginRight: 0 }}>
+            {chapterFunctionLabel(tag)}
+          </Tag>
+        )) : <span style={{ fontSize: 12, opacity: 0.7 }}>暂无功能标签</span>}
+      </div>
+      <div style={{ fontSize: 12 }}>
+        重复链：{chapterFunction.repeatedFunctionRunLength > 0
+          ? `连续 ${chapterFunction.repeatedFunctionRunLength} 章`
+          : '当前不在重复主功能链中'}
+      </div>
+      {chapterFunction.repeatedFunctionRange ? (
+        <div style={{ fontSize: 12, opacity: 0.72 }}>
+          区段：第{chapterFunction.repeatedFunctionRange.startChapterNum}-{chapterFunction.repeatedFunctionRange.endChapterNum}章
+        </div>
+      ) : null}
+      {chapterFunction.keyChapterRisk ? (
+        <div style={{ fontSize: 12, color: '#faad14' }}>
+          {chapterFunction.keyChapterRisk === 'missing_primary'
+            ? '关键章节缺少主功能标签，建议补出本章真正承担的叙事职责。'
+            : '当前章节属于关键节奏节点，但主功能偏弱，建议补出推进、回收、反转或爆发。'}
+        </div>
+      ) : null}
     </div>
   )
 }
