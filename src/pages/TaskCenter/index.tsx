@@ -654,7 +654,30 @@ export default function TaskCenter() {
                             {task.tokensUsed ? <Tag>{`${task.tokensUsed} tokens`}</Tag> : null}
                           </div>
                         </div>
-                        <div className="task-center-card__summary">{getTaskSummary(task, stream)}</div>
+                        <div
+                          className="task-center-card__summary"
+                          style={
+                            task.errorMessage
+                              ? {
+                                  color: 'var(--color-error, #ff4d4f)',
+                                  borderLeft: '3px solid var(--color-error, #ff4d4f)',
+                                  paddingLeft: 10,
+                                  marginTop: 6,
+                                  whiteSpace: 'pre-wrap',
+                                  wordBreak: 'break-word',
+                                }
+                              : undefined
+                          }
+                        >
+                          {task.errorMessage ? (
+                            <>
+                              <strong style={{ marginRight: 6 }}>失败原因：</strong>
+                              {task.errorMessage}
+                            </>
+                          ) : (
+                            getTaskSummary(task, stream)
+                          )}
+                        </div>
                       </div>
                     </button>
                   )

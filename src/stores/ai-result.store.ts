@@ -1,13 +1,17 @@
 import { create } from 'zustand'
+import type { PremiseGenerationResult } from '../shared/premise-generation'
 
 export type AiResultTaskType = 'premise_generate'
 
-export interface PendingAiResult<T = unknown> {
+export type PremiseGenerationResultWithMeta = PremiseGenerationResult & {
+  missingFields?: string[]
+  draftTaskId?: number
+}
+
+interface PendingAiResultBase {
   key: string
-  taskType: AiResultTaskType
   novelId: number
   status: 'pending' | 'applied'
-  result: T
   warnings: string[]
   sourcePage?: string
   mode?: string
@@ -15,6 +19,11 @@ export interface PendingAiResult<T = unknown> {
   createdAt: string
   completedAt: string
   appliedAt?: string
+}
+
+export type PendingAiResult = PendingAiResultBase & {
+  taskType: 'premise_generate'
+  result: PremiseGenerationResultWithMeta
 }
 
 interface AiResultStore {

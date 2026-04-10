@@ -8355,3 +8355,78 @@ html[data-theme="dark"] .ant-card-actions > li {
     padding-right: 0;
   }
 }
+
+/* scroll-isolation-fix:start — 恢复小说工作区内层滚动，侧边栏固定 */
+.novel-route-shell {
+  height: 100%;
+  min-height: 0;
+  align-items: stretch;
+  grid-template-rows: minmax(0, 1fr);
+  grid-auto-rows: minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.novel-route-shell__sidebar {
+  position: relative;
+  top: auto;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  max-height: none;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.novel-sidebar__nav {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.novel-route-shell__content {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.novel-route-shell__content-frame {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  height: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.novel-route-shell__content-body {
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.novel-workspace {
+  height: auto;
+  min-height: 0;
+  overflow: visible;
+}
+
+@media (max-width: 960px) {
+  .novel-route-shell {
+    height: auto;
+    min-height: 100%;
+    overflow: visible;
+  }
+
+  .novel-route-shell__sidebar,
+  .novel-route-shell__content,
+  .novel-route-shell__content-body {
+    height: auto;
+    overflow: visible;
+  }
+}
+/* scroll-isolation-fix:end */

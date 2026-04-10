@@ -10,6 +10,7 @@ import {
   BulbOutlined,
 } from '@ant-design/icons'
 import { useThemeStore, Theme } from '../../stores/theme.store'
+import AppErrorBoundary from './AppErrorBoundary'
 
 const { Sider, Content } = Layout
 
@@ -61,7 +62,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const hideAppSidebar = isNovelWorkspace
 
   return (
-    <Layout style={{ minHeight: '100vh', height: '100dvh', background: 'var(--color-bg-primary)' }}>
+    <Layout style={{ height: '100dvh', minHeight: 0, background: 'var(--color-bg-primary)', overflow: 'hidden' }}>
       {!hideAppSidebar ? (
       <Sider
         width={236}
@@ -159,8 +160,12 @@ export default function AppLayout({ children }: AppLayoutProps) {
         display: 'flex',
         flexDirection: 'column',
         minWidth: 0,
+        minHeight: 0,
+        height: '100%',
       }}>
-        {children}
+        <AppErrorBoundary resetKey={location.pathname}>
+          {children}
+        </AppErrorBoundary>
       </Content>
     </Layout>
   )

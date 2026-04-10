@@ -28,7 +28,6 @@ import {
 import {
   buildAiResultKey,
   useAiResultStore,
-  type PendingAiResult,
 } from '../../../stores/ai-result.store'
 import {
   isCharacterRosterReady,
@@ -132,7 +131,7 @@ export default function PremisePage({ novelId }: Props) {
   const [stats, setStats] = useState(EMPTY_STATS)
   const aliveRef = useRef(true)
   const pendingResult = useAiResultStore(
-    (state) => state.results[pendingResultKey] as PendingAiResult<PremiseGenerationResultWithMeta> | undefined,
+    (state) => state.results[pendingResultKey],
   )
   const setPendingResult = useAiResultStore((state) => state.setPendingResult)
   const markApplied = useAiResultStore((state) => state.markApplied)
