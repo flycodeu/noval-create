@@ -367,7 +367,7 @@ export default function FactionsPage({ novelId }: Props) {
           <Button type="primary" icon={<RobotOutlined />} onClick={() => {
             generateForm.setFieldsValue({ count: Math.max(1, 10 - items.length), batchSize: 1, relationshipDensity: 'balanced', allowCharacterlessFactions: true, preferExistingCharacters: true, preferredTypes: ['organization', 'sect', 'family'], specialRequirements: '势力必须像小说里的真实组织主体，服务人物归属、资源争夺或主线冲突。' })
             setGenerateOpen(true)
-          }}>AI 分批生成</Button>
+          }}>AI 生成·分批势力</Button>
           {autoTask?.status === 'paused' ? <Button icon={<ShareAltOutlined />} onClick={() => void handleResumeAutoGenerate()}>继续任务</Button> : null}
           {hasRunningAutoTask ? <Button danger icon={<StopOutlined />} loading={autoStopping} onClick={() => void handleStopAutoGenerate()}>停止任务</Button> : null}
           <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>保存势力</Button>
@@ -538,7 +538,7 @@ export default function FactionsPage({ novelId }: Props) {
         </div>
       </div>
 
-      <Modal title="AI 分批生成势力" open={generateOpen} onCancel={() => setGenerateOpen(false)} onOk={() => void handleStartAutoGenerate()} okText="启动后台生成" destroyOnHidden>
+      <Modal title="AI 生成·分批势力" open={generateOpen} onCancel={() => setGenerateOpen(false)} onOk={() => void handleStartAutoGenerate()} okText="启动后台生成" destroyOnHidden>
         <Form form={generateForm} layout="vertical">
           <Form.Item name="count" label="目标总数" rules={[{ required: true, message: '请输入目标总数' }]}><InputNumber min={1} max={24} style={{ width: '100%' }} /></Form.Item>
           <Form.Item name="batchSize" label="每批生成" rules={[{ required: true, message: '请输入每批数量' }]}><InputNumber min={1} max={6} style={{ width: '100%' }} /></Form.Item>

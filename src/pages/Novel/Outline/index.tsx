@@ -457,7 +457,8 @@ export default function Outline({ novelId }: Props) {
   }, [arcModalOpen, handleSaveArc, registerSaveHandler])
   const arcDraftButton = (
     <AIGenerateButton
-      label="AI 起草故事弧"
+      label="AI 生成·故事弧草稿"
+      intent="generate"
       isJson
       runGeneration={async (input) => {
         const result = await generateOutlineArcDraft(input, arcs.map((item) => item.arcName), { genre: currentNovel?.genreName })
@@ -513,7 +514,7 @@ export default function Outline({ novelId }: Props) {
     <WorkspacePage
       eyebrow="故事大纲"
       title="故事大纲"
-      description="按故事弧组织章节，单条故事弧支持 AI 起草。"
+      description="按故事弧组织章节，单条故事弧支持 AI 生成草稿。"
       actions={(
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <Button icon={<RobotOutlined />} loading={generating} onClick={() => void handleGenerateArcs()}>AI 生成故事弧</Button>
@@ -530,7 +531,7 @@ export default function Outline({ novelId }: Props) {
       metrics={<><WorkspaceMetric label="故事弧" value={arcs.length} tone="warm" hint="按阶段组织长篇结构" /><WorkspaceMetric label="章节数" value={chapters.length} hint="当前小说全部章节" /><WorkspaceMetric label="已完成章节" value={totalCompletedChapters} tone="cool" hint="状态为 final 的章节" /><WorkspaceMetric label="当前展开" value={expandedArc?.arcName || '未选择'} hint="展开后查看章节细纲" /></>}
     >
       {draftWarnings.length > 0 ? (
-        <WorkspacePanel title="AI 提醒">
+        <WorkspacePanel title="AI 修补提示">
           <div className="novel-note-list">
             {draftWarnings.map((warning) => <div key={warning} className="novel-note-list__item">{warning}</div>)}
           </div>
@@ -648,7 +649,7 @@ export default function Outline({ novelId }: Props) {
                           <div key={`${alert.code}-${index}`} style={{ display: 'grid', gap: 4 }}>
                             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                               <Tag color={alert.severity === 'critical' ? 'error' : alert.severity === 'warning' ? 'warning' : 'default'} style={{ marginRight: 0 }}>
-                                {alert.severity === 'critical' ? '高风险' : alert.severity === 'warning' ? '提醒' : '信息'}
+                                {alert.severity === 'critical' ? '高优先' : alert.severity === 'warning' ? '中优先' : '低优先'}
                               </Tag>
                               <span style={{ fontSize: 12, fontWeight: 600 }}>{alert.title}</span>
                             </div>

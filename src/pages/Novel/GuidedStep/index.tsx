@@ -58,7 +58,7 @@ const STEP_META: Record<GuidedWorkflowStepKey, { eyebrow: string; title: string;
   basics: {
     eyebrow: '第 1 步 / 12',
     title: '先把作品底盘说清楚',
-    description: '这里只保留书名、简介和背景，不把别的功能堆进来。',
+    description: '维护书名、简介和背景。',
   },
   'project-brief': {
     eyebrow: '第 2 步 / 12',
@@ -248,7 +248,7 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         metrics={(
           <>
             <WorkspaceMetric label="完成度" value={`${progress.completedCount}/${progress.totalCount}`} tone="warm" hint="书名、简介、原始背景、扩展背景" />
-            <WorkspaceMetric label="当前字数" value={`${stats.totalWords.toLocaleString()} 字`} hint="这里只先定总目标，后面再拆卷部章。" />
+            <WorkspaceMetric label="当前字数" value={`${stats.totalWords.toLocaleString()} 字`} hint="显示当前累计字数。" />
           </>
         )}
       >
@@ -310,12 +310,12 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         metrics={(
           <>
             <WorkspaceMetric label="完成度" value={`${projectBrief.readyCount}/${progress.totalCount}`} tone="warm" hint="平台模式、赛道、读者、承诺、卖点、参考系" />
-            <WorkspaceMetric label="基础底盘" value={isBasicsReady(currentNovel) ? '已完成' : '待补齐'} hint="先把简介和背景写稳，再做立项，读者承诺才不会悬空。" />
+            <WorkspaceMetric label="基础底盘" value={isBasicsReady(currentNovel) ? '已完成' : '待补齐'} hint="显示基础信息状态。" />
           </>
         )}
       >
         {!isBasicsReady(currentNovel) ? (
-          <Alert type="warning" showIcon message="基础信息还没补齐。建议先把书名、简介和背景写稳，再统一项目立项。" />
+          <Alert type="warning" showIcon message="基础信息未完成" />
         ) : null}
 
         <WorkspacePanel title="立项检查">
@@ -369,12 +369,12 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         metrics={(
           <>
             <WorkspaceMetric label="完成度" value={`${progress.completedCount}/${progress.totalCount}`} tone="warm" hint="定位、核心信息、主角起点、约束" />
-            <WorkspaceMetric label="背景基础" value={isBasicsReady(currentNovel) ? '已就绪' : '待补齐'} hint="建议先写稳简介和背景，再整理基础设定。" />
+            <WorkspaceMetric label="背景基础" value={isBasicsReady(currentNovel) ? '已就绪' : '待补齐'} hint="显示背景信息状态。" />
           </>
         )}
       >
         {!isBasicsReady(currentNovel) ? (
-          <Alert type="warning" showIcon message="基础信息还没补齐。先把书名、简介和背景写稳，再整理基础设定。" />
+          <Alert type="warning" showIcon message="基础信息未完成" />
         ) : null}
 
         <WorkspacePanel title="基础设定检查">
@@ -428,12 +428,12 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         metrics={(
           <>
             <WorkspaceMetric label="完成度" value={`${themeVoice.readyCount}/${progress.totalCount}`} tone="warm" hint="主题、情感核心、视角、时态、风格规则、对白规则" />
-            <WorkspaceMetric label="立项前置" value={isProjectBriefReady(currentNovel) ? '已完成' : '建议先补'} hint="项目立项越清楚，主题与文风越贴近目标读者和产品承诺。" />
+            <WorkspaceMetric label="立项状态" value={isProjectBriefReady(currentNovel) ? '已完成' : '待补齐'} hint="显示项目立项状态。" />
           </>
         )}
       >
         {!isProjectBriefReady(currentNovel) ? (
-          <Alert type="info" showIcon message="建议先完成项目立项，再来定义文风。这样主题和口吻会更贴合目标读者。" />
+          <Alert type="info" showIcon message="项目立项未完成" />
         ) : null}
 
         <WorkspacePanel title="主题与文风检查">
@@ -487,7 +487,7 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         metrics={(
           <>
             <WorkspaceMetric label="规则状态" value={isWorldFoundationReady(currentNovel) ? '已就绪' : '待补齐'} tone="warm" hint="时间、势力、种族、等级和语言边界" />
-            <WorkspaceMetric label="前置依赖" value={isStoryCoreReady(currentNovel) ? '基础设定已齐' : '先补基础设定'} hint="先有基础设定，再统一世界口径。" />
+            <WorkspaceMetric label="准备状态" value={isStoryCoreReady(currentNovel) ? '基础设定已齐' : '基础设定未完成'} hint="显示基础设定状态。" />
           </>
         )}
       >
@@ -568,9 +568,9 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
           </>
         )}
       >
-        {!isMapStructureReady(stats) ? (
-          <Alert type="warning" showIcon message="建议先把地图骨架搭起来，再补人物网络。" />
-        ) : null}
+          {!isMapStructureReady(stats) ? (
+            <Alert type="warning" showIcon message="地图结构未完成" />
+          ) : null}
       </WorkspacePage>
     )
   }
@@ -602,9 +602,9 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
           </>
         )}
       >
-        {!isCharacterRosterReady(stats) ? (
-          <Alert type="warning" showIcon message="建议先把主角和关键角色补齐，再设计物品与装备。" />
-        ) : null}
+          {!isCharacterRosterReady(stats) ? (
+            <Alert type="warning" showIcon message="角色系统未完成" />
+          ) : null}
       </WorkspacePage>
     )
   }
@@ -636,9 +636,9 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
           </>
         )}
       >
-        {!isItemsEquipmentReady(stats) ? (
-          <Alert type="warning" showIcon message="建议先把关键物品与资源补齐，再整理故事线程。" />
-        ) : null}
+          {!isItemsEquipmentReady(stats) ? (
+            <Alert type="warning" showIcon message="物品资产未完成" />
+          ) : null}
 
         <WorkspacePanel title="线程页要解决的问题">
           <div className="guided-step__checklist">
@@ -739,16 +739,16 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
           </>
         )}
       >
-        {!isStoryPlotReady(currentNovel) ? (
-          <Alert type="warning" showIcon message="故事设计还没完成。建议先补齐目标、冲突、推进链和结局，再做卷册规划。" style={{ marginBottom: 16 }} />
-        ) : null}
+          {!isStoryPlotReady(currentNovel) ? (
+            <Alert type="warning" showIcon message="故事设计未完成" style={{ marginBottom: 16 }} />
+          ) : null}
 
         <WorkspacePanel title="卷册规划检查" description="长篇必须先拆卷，每卷有独立高潮和阶段目标。">
           <div className="guided-step__fact-grid">
             <div className="guided-step__fact-card">
               <span>卷数</span>
               <strong>{stats.volumeCount > 0 ? `${stats.volumeCount} 卷` : '未规划'}</strong>
-              <small>建议先在结构页创建卷，再分配弧线和字数预算。</small>
+                <small>当前尚未创建卷。</small>
             </div>
             <div className="guided-step__fact-card">
               <span>故事弧</span>
@@ -798,14 +798,14 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         <>
           <WorkspaceMetric label="大纲" value={stats.outlineCount} tone="warm" hint="先把故事弧和结构分层压稳。" />
           <WorkspaceMetric label="时间轴" value={stats.timelineCount} hint="记清谁在何时何地做了什么。" />
-          <WorkspaceMetric label="线程" value={stats.threadCount} hint={isStoryThreadsReady(stats) ? '主线、支线和回收线已经有统一挂点。' : '建议至少先建立第一批故事线程。'} />
+            <WorkspaceMetric label="线程" value={stats.threadCount} hint={isStoryThreadsReady(stats) ? '主线、支线和回收线已经有统一挂点。' : '当前还没有故事线程。'} />
           <WorkspaceMetric label="章节" value={stats.chapterCount} hint={stats.chapterCount > 0 ? '已经可以继续写正文。' : '还没有首章。'} />
         </>
       )}
     >
-      {!isStoryPlotReady(currentNovel) ? (
-        <Alert type="warning" showIcon message="故事设计还没完成。建议先补齐目标、冲突、推进链和结局，再进入结构与写作。" />
-      ) : null}
+        {!isStoryPlotReady(currentNovel) ? (
+          <Alert type="warning" showIcon message="故事设计未完成" />
+        ) : null}
 
       <WorkspacePanel title="开写前检查">
         <div className="guided-step__fact-grid">

@@ -283,7 +283,8 @@ export default function Overview({ novelId }: Props) {
       actions={(
         <Space wrap>
           <AIGenerateButton
-            label="AI 生成基础信息"
+            label="AI 生成·基础信息"
+            intent="generate"
             isJson
             runGeneration={async (input) => {
               const result = await generateOverviewDraft(input, { genre: currentNovel?.genreName })
@@ -369,9 +370,9 @@ export default function Overview({ novelId }: Props) {
             hint="地图、角色、物品、线程和时间轴总和"
           />
           <WorkspaceMetric
-            label="修订压力"
+            label="修订任务"
             value={stats.revisionTaskCount}
-            hint={stats.revisionTaskCount > 0 ? '建议先处理未闭环问题。' : '当前没有未处理修订任务。'}
+            hint={stats.revisionTaskCount > 0 ? '存在未闭环问题。' : '当前没有未处理修订任务。'}
           />
         </>
       )}
@@ -387,7 +388,7 @@ export default function Overview({ novelId }: Props) {
         <Alert
           type="info"
           showIcon
-          message="本轮 AI 草稿带有提醒"
+          message="本轮 AI 草稿附带修补提示"
           description={draftWarnings.map((warning) => <div key={warning}>{warning}</div>)}
         />
       ) : null}
@@ -400,7 +401,7 @@ export default function Overview({ novelId }: Props) {
         />
       ) : null}
 
-      <WorkspacePanel title="推进热度" description="先看进度。">
+      <WorkspacePanel title="推进热度" description="显示当前进度。">
         <div style={{ display: 'grid', gap: 16 }}>
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
@@ -419,7 +420,7 @@ export default function Overview({ novelId }: Props) {
         </div>
       </WorkspacePanel>
 
-      <WorkspacePanel title="基础信息" description="后续生成会直接继承这里的内容。">
+      <WorkspacePanel title="基础信息" description="编辑基础信息。">
         <Form form={form} layout="vertical">
           <div className="guided-step__field-grid guided-step__field-grid--basics">
             <div className="guided-step__field-card guided-step__field-card--compact">
@@ -452,8 +453,8 @@ export default function Overview({ novelId }: Props) {
       </WorkspacePanel>
 
       <WorkspacePanel
-        title="包装助手"
-        description="生成书名候选、平台简介和卷名风格。这里只影响包装展示，不进入章节写作上下文。"
+        title="包装信息"
+        description="生成书名候选、平台简介和卷名风格。"
         extra={(
           <Button
             loading={packagingGenerating}
@@ -574,7 +575,7 @@ export default function Overview({ novelId }: Props) {
         </div>
       </WorkspacePanel>
 
-      <WorkspacePanel title="故事底盘快照" description="只看关键底盘是否收口。">
+      <WorkspacePanel title="故事底盘状态" description="显示关键底盘状态。">
         <div className="guided-step__fact-grid">
           <div className="guided-step__fact-card">
             <span>项目立项</span>
@@ -599,7 +600,7 @@ export default function Overview({ novelId }: Props) {
         </div>
       </WorkspacePanel>
 
-      <WorkspacePanel title="工作流就绪度" description="优先补齐还没就绪的模块。">
+      <WorkspacePanel title="工作流就绪度" description="显示各模块状态。">
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
           {readinessItems.map((item) => (
             <button

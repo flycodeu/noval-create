@@ -240,7 +240,7 @@ const EXTRA_RUNTIME_PROMPTS: PromptCatalogEntry[] = [
   {
     key: 'chapterRewrite',
     name: '章节定稿',
-    description: '根据审校意见重写成可入库版本，重点修正上下文断裂、常识错配和 AI 味。',
+    description: '根据评审意见重写成可入库版本，重点修正上下文断裂、常识错配和 AI 味。',
     category: '正文编写',
     params: [
       { key: 'novelTitle', label: '小说标题' },
@@ -311,7 +311,7 @@ const PROMPT_FLOW_META: Record<string, PromptFlowMeta> = {
   continuityState: { lane: '正文生产', stage: '连续性提炼', goal: '提炼后文必须记住的硬事实。', risk: '容易把猜测和情绪误记成事实。' },
   chapterReview: { lane: '质量评审', stage: '自动审校', goal: '找出真正影响成稿质量和阅读体验的问题。', risk: '容易给空话建议，不给可执行修法。' },
   chapterRewrite: { lane: '正文生产', stage: '定稿重写', goal: '把初稿按审校意见压成可入稿版本。', risk: '容易只修句子，不修承接、代价和读者张力。' },
-  aiCheck: { lane: '质量评审', stage: 'AI 体检', goal: '检测 AI 痕迹、搭配错误和出戏点。', risk: '容易只抓表面模板句，漏掉更深层的不自然。' },
+  aiCheck: { lane: '质量评审', stage: 'AI 检测', goal: '检测 AI 痕迹、搭配错误和出戏点。', risk: '容易只抓表面模板句，漏掉更深层的不自然。' },
   rewriteParagraph: { lane: '质量评审', stage: '段落修复', goal: '保留事件信息，修掉人机味和生硬表达。', risk: '容易改出另一个意思或削弱上下文承接。' },
   contentScoring: { lane: '质量评审', stage: '编辑评分', goal: '从编辑和普通读者双视角给出改稿优先级。', risk: '如果维度太粗，会掩盖连贯性和追读欲问题。' },
   genericExpand: { lane: '剧情规划', stage: '资产扩写', goal: '把已有想法扩成可继续使用的创作资产。', risk: '容易越写越散，脱离当前项目边界。' },
@@ -503,12 +503,13 @@ export default function PromptManager() {
           <WorkspaceMetric label="总提示词" value={promptRows.length} tone="warm" hint="基础模板 + 运行时链路" />
           <WorkspaceMetric label="运行时覆盖" value={overrideCount} hint={overrideCount > 0 ? '这些模板已被本地覆盖并实时生效' : '当前全部使用默认模板'} />
           <WorkspaceMetric label="中文底板接入" value={chineseBaseCount} tone="cool" hint="已接入自然中文、真实度和输出质量公共护栏的模板数" />
-          <WorkspaceMetric label="质量评审链路" value={qualityPromptCount} tone="cool" hint="负责 AI 痕迹、读者感受和修订反馈" />
+          <WorkspaceMetric label="质量评审链路" value={qualityPromptCount} tone="cool" hint="负责 AI 检测、读者感受和修订反馈" />
         </>
       )}
     >
       <div className="prompt-manager-shell">
         <WorkspacePanel
+          scrollable
           className="prompt-manager-catalog"
           title="链路目录"
           description="先按生产阶段筛，再进具体模板。目录中的覆盖标记表示这条 prompt 已被本地改写。"
@@ -573,6 +574,7 @@ export default function PromptManager() {
 
         <div className="prompt-manager-inspector">
           <WorkspacePanel
+            scrollable
             className="prompt-manager-inspector-panel"
             title={selectedPromptRow ? selectedPromptRow.prompt.name : '未选择提示词'}
             description={selectedPromptRow ? selectedPromptRow.meta.goal : '从左侧选择一条提示词后，这里会显示它的运行时模板、风险和参数。'}

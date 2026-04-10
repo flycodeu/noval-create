@@ -16,7 +16,14 @@ import {
   WorkspaceMetric,
   WorkspacePage,
   WorkspacePanel,
+  WorkspaceStepGuide,
 } from '../components/WorkspaceShell'
+import {
+  getConsistencySeverityColor,
+  getConsistencySeverityLabel,
+  getRevisionSeverityColor,
+  getRevisionSeverityLabel,
+} from '../shared/revision-quality'
 
 interface Props {
   novelId: number
@@ -80,12 +87,6 @@ function getStatusColor(status: RevisionTask['status']) {
   return 'blue'
 }
 
-function getSeverityColor(severity: RevisionTask['severity']) {
-  if (severity === 'high') return 'error'
-  if (severity === 'low') return 'default'
-  return 'gold'
-}
-
 function getSourceColor(source: RevisionTask['taskSource']) {
   return source === 'system' ? 'purple' : 'cyan'
 }
@@ -98,13 +99,9 @@ function getStatusLabel(status: RevisionTask['status']) {
   return STATUS_OPTIONS.find((item) => item.value === status)?.label || status
 }
 
-function getSeverityLabel(severity: RevisionTask['severity']) {
-  return SEVERITY_OPTIONS.find((item) => item.value === severity)?.label || severity
-}
-
 function buildIssueSummary(report: NovelConsistencyReport | null) {
   if (!report || report.issues.length === 0) return '当前没有高价值诊断摘要。'
-  return report.issues.slice(0, 5).map((issue) => `${issue.severity}：${issue.title}`).join('\n')
+  return report.issues.slice(0, 5).map((issue) => `${getConsistencySeverityLabel(issue.severity)}：${issue.title}`).join('\n')
 }
 
 export default function RevisionCenterPage({ novelId }: Props) {
@@ -191,7 +188,8 @@ export default function RevisionCenterPage({ novelId }: Props) {
   })
   const taskDraftButton = (
     <AIGenerateButton
-      label="AI 起草任务"
+      label="AI 生成·修订任务"
+      intent="generate"
       isJson
       runGeneration={async (input) => {
         const result = await generateRevisionDraft(input, { genre: currentNovel?.genreName })
@@ -332,7 +330,7 @@ export default function RevisionCenterPage({ novelId }: Props) {
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <strong>{record.title}</strong>
             <Tag color={getSourceColor(record.taskSource)}>{getSourceLabel(record.taskSource)}</Tag>
-            <Tag color={getSeverityColor(record.severity)}>{getSeverityLabel(record.severity)}</Tag>
+            <Tag color={getRevisionSeverityColor(record.severity)}>{getRevisionSeverityLabel(record.severity)}</Tag>
             <Tag color={getStatusColor(record.status)}>{getStatusLabel(record.status)}</Tag>
           </div>
           <div style={{ marginTop: 6, color: 'var(--color-text-muted)', fontSize: 12 }}>
@@ -436,7 +434,8 @@ export default function RevisionCenterPage({ novelId }: Props) {
       heroVariant="compact"
       eyebrow="修订中心"
       title="修订中心"
-      description="系统诊断和人工修订任务放在同一张任务板里。"
+      description="把系统诊断、人工任务和 AI 修复统一挂到一张修订任务板里。"
+      asidePlacement="side"
       actions={(
         <Space wrap>
           <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>
@@ -468,10 +467,32 @@ export default function RevisionCenterPage({ novelId }: Props) {
           <WorkspaceMetric label="人工 / 系统" value={`${manualCount} / ${systemCount}`} hint="系统任务支持忽略、恢复和 AI 修复；人工任务支持自由编辑。" />
         </>
       )}
+      guide={(
+        <WorkspaceStepGuide
+          title="进入修订中心先做什么"
+          steps={[
+            {
+              title: '先清阻塞项',
+              description: '优先消掉会继续污染正文、时间轴和设定的阻塞任务。',
+              status: stats.blockerCount > 0 ? 'focus' : 'done',
+            },
+            {
+              title: '再看待同步章节',
+              description: '把仍在引用旧上下文的章节回查掉，避免修订任务继续基于旧设定。',
+              status: contextStatus?.staleChapterCount ? 'focus' : 'todo',
+            },
+            {
+              title: '最后补人工任务',
+              description: '把零散问题整理成可执行修订单，再分发到具体页面处理。',
+              status: 'todo',
+            },
+          ]}
+        />
+      )}
       aside={(
         <>
           {consistencyReport && (
-            <WorkspacePanel title="当前体检" description={consistencyReport.overview}>
+            <WorkspacePanel sticky title="当前体检" description={consistencyReport.overview}>
               <div className="novel-note-list">
                 <div className="novel-note-list__item">{`体检分数：${consistencyReport.readinessScore}`}</div>
                 <div className="novel-note-list__item">{`高优先：${consistencyReport.highCount}`}</div>
@@ -488,7 +509,7 @@ export default function RevisionCenterPage({ novelId }: Props) {
           type="warning"
           showIcon
           message={`当前有 ${stats.blockerCount} 个阻塞项需要优先处理`}
-          description="建议优先处理。"
+            description="这些阻塞项会影响后续写作和批量生成。"
         />
       ) : null}
 
@@ -497,14 +518,14 @@ export default function RevisionCenterPage({ novelId }: Props) {
           type="warning"
           showIcon
           message={`有 ${contextStatus.staleChapterCount} 章仍在引用旧上下文`}
-          description="建议先回查这些章节。"
+            description="这些章节仍在引用旧上下文。"
         />
       ) : null}
       {draftWarnings.length > 0 ? (
         <Alert
           type="info"
           showIcon
-          message="本轮 AI 草稿带有提醒"
+          message="本轮 AI 草稿附带修补提示"
           description={draftWarnings.map((warning) => <div key={warning}>{warning}</div>)}
         />
       ) : null}
@@ -517,7 +538,7 @@ export default function RevisionCenterPage({ novelId }: Props) {
         />
       ) : null}
 
-      <WorkspacePanel title="修订任务板" description="按来源、状态和关键词过滤。">
+      <WorkspacePanel title="修订任务板" description="按来源、状态和关键词过滤任务。">
         <div style={{ display: 'grid', gap: 16 }}>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
             <Select
@@ -564,12 +585,12 @@ export default function RevisionCenterPage({ novelId }: Props) {
       </WorkspacePanel>
 
       {consistencyReport ? (
-        <WorkspacePanel title="系统体检摘要" description="系统任务会根据这些结果自动生成。">
+        <WorkspacePanel title="系统体检摘要" description="显示当前体检结果。">
           <div className="novel-issue-list">
             {consistencyReport.issues.slice(0, 6).map((issue) => (
               <div key={issue.id} className="novel-issue-item">
                 <div className="novel-issue-item__head">
-                  <Tag color={getSeverityColor(issue.severity)}>{getSeverityLabel(issue.severity)}</Tag>
+                  <Tag color={getConsistencySeverityColor(issue.severity)}>{getConsistencySeverityLabel(issue.severity)}</Tag>
                   <strong>{issue.title}</strong>
                 </div>
                 <div className="novel-issue-item__desc">{issue.description}</div>

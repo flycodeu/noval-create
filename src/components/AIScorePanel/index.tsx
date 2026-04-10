@@ -172,7 +172,7 @@ export default function AIScorePanel({
           disabled={disabled}
           style={{ color: 'var(--color-text-muted)', fontSize: 12, paddingLeft: 0 }}
         >
-          AI 评分
+          AI 检测
         </Button>
 
         {result && (
@@ -182,7 +182,7 @@ export default function AIScorePanel({
               <span style={{ color: scoreColor(result.overall_score), fontWeight: 700 }}>
                 {result.overall_score}
               </span>
-              /100&nbsp;·&nbsp;AI味&nbsp;
+              /100&nbsp;·&nbsp;AI 味&nbsp;
               <span style={{ color: aiRateColor(result.ai_like_rate), fontWeight: 600 }}>
                 {result.ai_like_rate}%
               </span>
@@ -197,7 +197,7 @@ export default function AIScorePanel({
                 disabled={disabled}
                 style={{ color: 'var(--color-blue-light)', fontSize: 12 }}
               >
-                按评分优化重生成
+                按检测结果修复
               </Button>
             )}
           </>
@@ -288,7 +288,7 @@ export default function AIScorePanel({
                     重复风险：{result.repetition_risk}
                   </Tag>
                   <Tag color={result.ai_like_rate > 50 ? 'error' : result.ai_like_rate > 30 ? 'warning' : 'success'}>
-                    AI痕迹：{result.ai_like_rate}%
+                    AI 味：{result.ai_like_rate}%
                   </Tag>
                 </div>
 
@@ -301,7 +301,7 @@ export default function AIScorePanel({
                     gap: 6,
                   }}>
                     <div style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>
-                      AI味分解
+                      AI 味分解
                     </div>
                     {[...languageDriftLabels]
                       .map((item) => ({
@@ -333,7 +333,7 @@ export default function AIScorePanel({
         />
       )}
 
-      {/* 按评分重生成区域 */}
+      {/* 按检测结果修复区域 */}
       {result && onRegenerate && showRegen && (
         <div style={{
           marginTop: 8,
@@ -343,10 +343,10 @@ export default function AIScorePanel({
           borderRadius: 6,
         }}>
           <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 8, fontWeight: 600 }}>
-            按评分意见重新生成
+            按检测结果修复
           </div>
           <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 8, lineHeight: 1.6 }}>
-            AI 会结合评分反馈（主要问题 + 各维度改进建议）对原内容进行优化重写，
+            AI 会结合检测反馈（主要问题 + 各维度改进建议）对原内容进行局部修复，
             生成新版本后可选择应用或放弃。
           </div>
           <Input.TextArea
@@ -358,7 +358,8 @@ export default function AIScorePanel({
           />
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <AIGenerateButton
-              label="AI 优化重生成"
+              label="AI 修复·按检测改写"
+              intent="repair"
               buildMessages={buildRegenMessages}
               runGeneration={customRunGeneration}
               drawCount={drawCount}

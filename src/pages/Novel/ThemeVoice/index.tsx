@@ -331,7 +331,7 @@ export default function ThemeVoicePage({ novelId }: Props) {
       heroVariant="compact"
       eyebrow="主题与文风"
       title="主题与文风"
-      description="固定整本书的阅读预期、主题、情感核心、视角、时态和语言边界，减少 AI 痕迹与返工。"
+      description="维护主题、情感核心、视角、时态和语言规则。"
       actions={(
         <Space wrap>
           <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>
@@ -343,14 +343,14 @@ export default function ThemeVoicePage({ novelId }: Props) {
             disabled={Boolean(generatingMode)}
             onClick={() => void handleGenerate('replace')}
           >
-            AI 生成首版
+            AI 生成·首版
           </Button>
           <Button
             loading={generatingMode === 'fill_blanks'}
             disabled={Boolean(generatingMode)}
             onClick={() => void handleGenerate('fill_blanks')}
           >
-            AI 只补空白
+            AI 补全·空白字段
           </Button>
           <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/world-rules`)}>
             去世界规则
@@ -361,7 +361,7 @@ export default function ThemeVoicePage({ novelId }: Props) {
         <WorkspaceContextSummary
           items={[
             { label: '书名', value: currentNovel?.title || '未命名小说' },
-            { label: '项目立项', value: currentNovel?.projectBriefJson ? '已存在' : '建议先补项目立项' },
+            { label: '项目立项', value: currentNovel?.projectBriefJson ? '已存在' : '未设置' },
             { label: '写作类型', value: formatWritingContractTags(currentValues.writingContractTags) || '待设定' },
             { label: '背景摘要', value: compactText(currentNovel?.expandedBackground || currentNovel?.synopsis) },
           ]}
@@ -371,7 +371,7 @@ export default function ThemeVoicePage({ novelId }: Props) {
         <>
           <WorkspaceMetric label="基础约束" value={`${foundationCount}/7`} tone="warm" hint="阅读预期、主题、情感核心、视角、时态、风格、对白。" />
           <WorkspaceMetric label="补充细则" value={`${detailCount}/10`} hint="母题、叙事调度、叙述距离、口吻词、描写规则、禁用表达。" />
-          <WorkspaceMetric label="修订压力" value={stats.revisionTaskCount} hint="规则越清楚，后面修订中心的返工越少。" />
+          <WorkspaceMetric label="修订任务" value={stats.revisionTaskCount} hint="显示当前修订任务数量。" />
         </>
       )}
     >
@@ -379,7 +379,7 @@ export default function ThemeVoicePage({ novelId }: Props) {
         <Alert
           type="info"
           showIcon
-          message="建议先完成项目立项，再来定义主题与文风。这样写作类型和文风规则会更贴合目标读者与产品承诺。"
+          message="项目立项未完成"
         />
       ) : null}
 
@@ -387,7 +387,7 @@ export default function ThemeVoicePage({ novelId }: Props) {
         <Alert
           type="info"
           showIcon
-          message="本轮 AI 结果附带提醒"
+          message="本轮 AI 结果附带修补提示"
           description={(
             <div>
               {warnings.map((warning) => (
@@ -406,26 +406,9 @@ export default function ThemeVoicePage({ novelId }: Props) {
         />
       ) : null}
 
-      <WorkspacePanel title="使用原则" description="不要写空泛的审美判断，要写成正文生成时真的能执行的规则。">
-        <div className="guided-step__checklist">
-          <div className="guided-step__checkitem guided-step__checkitem--done">
-            <div className="guided-step__checkhead"><strong>先定整本书的阅读预期</strong></div>
-            <p>“爽文”“写实”“言情”不是标签墙，它们会直接决定节奏、对白、关系推进和读者期待。</p>
-          </div>
-          <div className="guided-step__checkitem guided-step__checkitem--done">
-            <div className="guided-step__checkhead"><strong>先定视角和时态</strong></div>
-            <p>长篇最容易在这里漂移。视角和时态不稳，后面的段落修订会越来越贵。</p>
-          </div>
-          <div className="guided-step__checkitem guided-step__checkitem--done">
-            <div className="guided-step__checkhead"><strong>规则要能判断</strong></div>
-            <p>少写“高级感”“文学性”，多写句式、解释比例、对白密度和禁用表达模式。</p>
-          </div>
-        </div>
-      </WorkspacePanel>
-
       <WorkspacePanel
         title="主题与文风表"
-        description="先生成到表单，再手动复核和保存。"
+        description="编辑主题与文风字段。"
         extra={<Tag color={generatingMode ? 'gold' : 'blue'}>{generatingMode ? 'AI 生成中' : '手动保存生效'}</Tag>}
       >
         <Form form={form} layout="vertical">
@@ -599,7 +582,7 @@ function StyleLearningPanel({ novelId }: { novelId: number }) {
   return (
     <WorkspacePanel
       title="风格学习"
-      description="粘贴1-3万字的参考文本（如喜欢的作家片段），AI将自动提取风格特征并应用到生成中。"
+      description="导入参考文本并生成风格指纹。"
     >
       <div style={{ display: 'grid', gap: 16 }}>
         <Input

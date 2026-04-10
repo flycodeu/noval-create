@@ -641,23 +641,8 @@ export default function CoreSettings({ novelId }: Props) {
         </>
       )}
       aside={(
-        <div className="story-design__side-list">
-          <WorkspacePanel title="前置依赖" description="故事设计不是背景复述，而是把现有资产组织成可执行剧情。">
-            <div className="premise-page__summary-grid">
-              <div className="premise-page__summary-card">
-                <span>基础设定</span>
-                <strong>{premiseReady ? '已齐' : '待补'}</strong>
-                <small>缺基础设定与写作边界时，主线会继续发散。</small>
-              </div>
-              <div className="premise-page__summary-card">
-                <span>世界资产</span>
-                <strong>{assetReadyCount}/4</strong>
-                <small>地图、人物、物品越完整，剧情越不容易空转。</small>
-              </div>
-            </div>
-          </WorkspacePanel>
-
-          <WorkspacePanel title="支线健康度" description="支线必须服务主线，不准游离。">
+          <div className="story-design__side-list">
+            <WorkspacePanel title="支线健康度" description="支线必须服务主线，不准游离。">
             <div className="premise-page__summary-grid">
               <div className="premise-page__summary-card premise-page__summary-card--accent">
                 <span>已挂主线</span>
@@ -678,7 +663,7 @@ export default function CoreSettings({ novelId }: Props) {
         <Alert
           type="warning"
           showIcon
-          message="基础设定还没写稳。建议先回基础设定页补齐关键约束与写作边界，再做故事设计。"
+          message="基础设定未完成"
         />
       ) : null}
 
@@ -718,7 +703,7 @@ export default function CoreSettings({ novelId }: Props) {
         <div className="guided-step__checklist">
           <div className="guided-step__checkitem guided-step__checkitem--done">
             <div className="guided-step__checkhead"><strong>只做骨架</strong></div>
-            <p>这里只写目标、冲突、推进链、支线作用和结局，不提前把每章剧情写满。</p>
+              <p>本页维护目标、冲突、推进链、支线作用和结局。</p>
           </div>
           <div className="guided-step__checkitem guided-step__checkitem--done">
             <div className="guided-step__checkhead"><strong>支线必须有用</strong></div>

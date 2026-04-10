@@ -389,9 +389,9 @@ export default function GuidePage({ novelId }: Props) {
           desc: staleChapterCount > 0
             ? '最近的设定或结构变更已经影响现有章节承接。'
             : '当前正文与最新设定保持一致，可以继续推进。',
-          hint: staleChapterCount > 0
-            ? '建议先去修订中心或正文页回查这些章节。'
-            : '继续批量生成前，不需要额外回补章节上下文。',
+            hint: staleChapterCount > 0
+              ? '这些章节需要回查。'
+              : '继续批量生成前，不需要额外回补章节上下文。',
           tone: staleChapterCount > 0 ? 'stale' : 'ok',
           tags: [] as string[],
         },
@@ -401,9 +401,9 @@ export default function GuidePage({ novelId }: Props) {
           desc: staleCheckpointCount > 0
             ? '长期记忆检查点还是旧版本，后续大纲和正文会继续引用旧长程记忆。'
             : '长期记忆检查点已跟上当前设定，不会继续放大长程失忆。',
-          hint: staleCheckpointCount > 0
-            ? '建议先刷新故事记忆，再继续跑大纲、时间轴或正文。'
-            : '可以直接继续推进后续编排和生成。',
+            hint: staleCheckpointCount > 0
+              ? '这些检查点需要刷新。'
+              : '可以直接继续推进后续编排和生成。',
           tone: staleCheckpointCount > 0 ? 'warn' : 'ok',
           tags: [] as string[],
         },
@@ -413,9 +413,9 @@ export default function GuidePage({ novelId }: Props) {
           desc: staleAssetCount > 0
             ? '部分世界资产仍挂着旧设定，会持续污染后续时间轴、故事弧和正文。'
             : '关键世界资产没有发现明显的设定滞后。',
-          hint: staleAssetCount > 0
-            ? '建议先回到对应页面重生成或手动校准。'
-            : '当前资产层可以继续支撑后续生成。',
+            hint: staleAssetCount > 0
+              ? '这些资产需要处理。'
+              : '当前资产可以继续支撑后续生成。',
           tone: staleAssetCount > 0 ? 'warn' : 'ok',
           tags: staleAssetCount > 0 ? staleAssetTagList : [],
         },
@@ -460,7 +460,7 @@ export default function GuidePage({ novelId }: Props) {
     {
       key: 'theme-voice',
       title: '主题与文风',
-      desc: '把主题、情感核心、叙事视角、时态、风格规则和对白规则固定下来，降低 AI 味和口吻漂移。',
+      desc: '维护主题、情感核心、叙事视角、时态、风格规则和对白规则。',
       status: isThemeVoiceReady(currentNovel) ? '已填写' : '待补全',
       count: `${themeVoice.readyCount}/6`,
       support: isThemeVoiceReady(currentNovel)
@@ -532,7 +532,7 @@ export default function GuidePage({ novelId }: Props) {
       action: (
         <Space wrap>
           <Button loading={runningKey === 'characters'} icon={<TeamOutlined />} onClick={generateCharacters}>
-            AI 批量生成
+            AI 生成·批量角色
           </Button>
           <Button type="link" onClick={() => navigate(`/novels/${novelId}/characters`)}>
             进入页面
@@ -554,7 +554,7 @@ export default function GuidePage({ novelId }: Props) {
       action: (
         <Space wrap>
           <Button loading={runningKey === 'items'} icon={<ShoppingOutlined />} onClick={generateItems}>
-            AI 生成首批
+            AI 生成·首批物品
           </Button>
           <Button type="link" onClick={() => navigate(`/novels/${novelId}/items`)}>
             进入页面
@@ -576,7 +576,7 @@ export default function GuidePage({ novelId }: Props) {
       action: (
         <Space wrap>
           <Button loading={runningKey === 'threads'} icon={<BarsOutlined />} onClick={generateThreads}>
-            AI 生成首批
+            AI 生成·首批线程
           </Button>
           <Button type="link" onClick={() => navigate(`/novels/${novelId}/threads`)}>
             进入页面
@@ -598,7 +598,7 @@ export default function GuidePage({ novelId }: Props) {
       action: (
         <Space wrap>
           <Button loading={runningKey === 'story-design'} icon={<BarsOutlined />} onClick={generateStoryDesign}>
-            AI 生成首版
+            AI 生成·首版设计
           </Button>
           <Button type="link" onClick={() => navigate(`/novels/${novelId}/story-design`)}>
             进入页面
@@ -620,7 +620,7 @@ export default function GuidePage({ novelId }: Props) {
       action: (
         <Space wrap>
           <Button loading={runningKey === 'outline'} icon={<BarsOutlined />} onClick={generateOutline}>
-            AI 生成首批
+            AI 生成·首批故事弧
           </Button>
           <Button type="link" onClick={() => navigate(`/novels/${novelId}/outline`)}>
             进入页面
@@ -642,7 +642,7 @@ export default function GuidePage({ novelId }: Props) {
       action: (
         <Space wrap>
           <Button loading={runningKey === 'timeline'} icon={<ClockCircleOutlined />} onClick={generateTimeline}>
-            AI 生成首批
+            AI 生成·首批事件
           </Button>
           <Button type="link" onClick={() => navigate(`/novels/${novelId}/timeline`)}>
             进入页面
@@ -745,7 +745,7 @@ export default function GuidePage({ novelId }: Props) {
             hint="后续结构页、时间轴和正文都应回查这些线程"
           />
           <WorkspaceMetric
-            label="修订压力"
+            label="修订任务"
             value={stats.revisionTaskCount}
             hint={stats.revisionTaskCount > 0 ? '建议开写前先处理未闭环问题' : '当前没有未处理修订任务'}
           />
@@ -781,18 +781,6 @@ export default function GuidePage({ novelId }: Props) {
               </div>
             </WorkspacePanel>
           )}
-
-          <WorkspacePanel title="设计底盘快照" description="这些模块越早钉住，后面的正文就越不容易出现 AI 味和断线问题。">
-            <div className="novel-note-list">
-              <div className="novel-note-list__item">{`项目立项：${projectBrief.readyCount}/6`}</div>
-              <div className="novel-note-list__item">{`基础设定：${storySettings.premiseReadyCount}/5`}</div>
-              <div className="novel-note-list__item">{`主题与文风：${themeVoice.readyCount}/6`}</div>
-              <div className="novel-note-list__item">{`写作类型：${writingContractLabel}`}</div>
-              <div className="novel-note-list__item">{`故事设计：${storySettings.storyDesignReadyCount}/4`}</div>
-              <div className="novel-note-list__item">{consistencyReport ? `主角关键关系：${protagonistRelationCount} 条` : '主角关键关系：检测中'}</div>
-              <div className="novel-note-list__item">{consistencyReport ? `已写互动方式：${styledRelationCount} 条，已写潜台词：${subtextRelationCount} 条，已写强弱等级：${ratedRelationCount} 条` : '关系对白底盘：检测中'}</div>
-            </div>
-          </WorkspacePanel>
 
           {consistencyReport && (
             <WorkspacePanel title="结构体检" description="全书级一致性校验器会自动检查人物、写作类型、关系对白、事件、时间轴、地图、物品和章节之间的冲突。">
@@ -836,7 +824,7 @@ export default function GuidePage({ novelId }: Props) {
           type="warning"
           showIcon
           message={`有 ${contextStatus.staleChapterCount} 章需要重新同步上下文`}
-          description="最近的设定或结构变更已经影响到现有章节。继续批量生成前，建议先回到修订中心或正文页处理这些章节，避免后续文本承接旧设定。"
+          description="最近的设定或结构变更已经影响到现有章节。"
         />
       )}
 
@@ -846,7 +834,7 @@ export default function GuidePage({ novelId }: Props) {
           type="warning"
           showIcon
           message={`有 ${contextStatus.staleCheckpointCount} 份长期记忆检查点待刷新`}
-          description="检查点还是旧版本时，后续大纲、时间轴和正文会继续引用过期的长程记忆。建议先刷新故事记忆，再继续批量推进。"
+          description="这些长期记忆检查点仍是旧版本。"
         />
       )}
 
@@ -856,7 +844,7 @@ export default function GuidePage({ novelId }: Props) {
           type="warning"
           showIcon
           message={`这些世界资产可能还挂着旧设定：${contextStatus.staleAssetLabels.join('、')}`}
-          description="这类资产过期不会只影响展示，它会继续污染后续大纲、时间轴和正文生成。建议先回到对应页面校准或重生成。"
+          description="这些世界资产仍在引用旧设定。"
         />
       )}
 
@@ -866,7 +854,7 @@ export default function GuidePage({ novelId }: Props) {
           type="warning"
           showIcon
           message="当前存在高优先级结构冲突"
-          description="建议优先修复高优先问题，再继续批量生成或长文写作，否则冲突会在后续章节中被不断放大。"
+          description="这些高优先问题会影响后续批量生成和写作。"
         />
       )}
 
@@ -876,7 +864,7 @@ export default function GuidePage({ novelId }: Props) {
           type="warning"
           showIcon
           message="整本书还没有写作类型锚点"
-          description="当前还没有明确“爽文 / 写实 / 言情”等全书级阅读预期。建议先去主题与文风页钉住写作类型，再继续批量生成故事设计和正文。"
+          description="当前还没有设置全书级写作类型。"
         />
       )}
 
@@ -886,7 +874,7 @@ export default function GuidePage({ novelId }: Props) {
           type="warning"
           showIcon
           message="主角还没有关键人物关系"
-          description="关系网为空时，后续对白、情感推进和冲突站位都会失去抓手。建议先补主角与家人、朋友、陌生人或对立者的核心关系。"
+          description="当前主角还没有关键人物关系。"
         />
       )}
 
@@ -896,13 +884,13 @@ export default function GuidePage({ novelId }: Props) {
           type="info"
           showIcon
           message="产品立项与文风底盘还没有钉稳"
-          description="如果这两层没有先收紧，后面的 AI 生成很容易出现人机味、空泛卖点和口吻漂移。"
+          description="产品立项与文风底盘尚未完成。"
         />
       )}
 
       <WorkspacePanel
         title="推荐推进顺序"
-        description="把主流程先压成一条清晰链路，只保留当前最值得推进的动作。"
+          description="显示当前主流程。"
         extra={<div className="novel-pill">{nextStep ? `下一步：${nextStep.title}` : '可进入正文'}</div>}
       >
         <div className="novel-guide__flow-head">

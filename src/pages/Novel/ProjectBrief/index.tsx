@@ -237,14 +237,14 @@ export default function ProjectBriefPage({ novelId }: Props) {
             disabled={Boolean(generatingMode)}
             onClick={() => void handleGenerate('replace')}
           >
-            AI 生成首版
+            AI 生成·首版
           </Button>
           <Button
             loading={generatingMode === 'fill_blanks'}
             disabled={Boolean(generatingMode)}
             onClick={() => void handleGenerate('fill_blanks')}
           >
-            AI 只补空白
+            AI 补全·空白字段
           </Button>
           <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/theme-voice`)}>
             去主题与文风
@@ -274,7 +274,7 @@ export default function ProjectBriefPage({ novelId }: Props) {
         <Alert
           type="warning"
           showIcon
-          message="当前小说还缺少一句话简介或扩展背景。建议先补一个简明背景，再生成项目立项，结果会更稳。"
+          message="缺少一句话简介或扩展背景"
         />
       ) : null}
 
@@ -282,7 +282,7 @@ export default function ProjectBriefPage({ novelId }: Props) {
         <Alert
           type="info"
           showIcon
-          message="本轮 AI 结果附带提醒"
+          message="本轮 AI 结果附带修补提示"
           description={(
             <div>
               {warnings.map((warning) => (
@@ -300,19 +300,6 @@ export default function ProjectBriefPage({ novelId }: Props) {
           description="当前项目立项表单包含最近一次已应用但尚未保存的 AI 结果。保存后会自动清除。"
         />
       ) : null}
-
-      <WorkspacePanel title="使用原则" description="这里讨论的是产品定位和读者预期，不是剧情梗概。">
-        <div className="guided-step__checklist">
-          <div className="guided-step__checkitem guided-step__checkitem--done">
-            <div className="guided-step__checkhead"><strong>先写读者回报</strong></div>
-            <p>告诉系统和作者：读者点开之后，稳定能得到什么情绪体验、冲突强度和叙事回报。</p>
-          </div>
-          <div className="guided-step__checkitem guided-step__checkitem--done">
-            <div className="guided-step__checkhead"><strong>卖点必须能执行</strong></div>
-            <p>卖点写成可落地的内容方向，不写成“人物立体”“节奏紧凑”这类空话。</p>
-          </div>
-        </div>
-      </WorkspacePanel>
 
       <WorkspacePanel
         title="项目立项表"

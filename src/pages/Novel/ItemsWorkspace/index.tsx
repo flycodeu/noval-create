@@ -768,7 +768,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
           <Button icon={<ReloadOutlined />} onClick={() => void refreshWorkspace()}>刷新</Button>
           <Button icon={<AppstoreAddOutlined />} onClick={() => handleNew('template')}>新建模板</Button>
           <Button icon={<InboxOutlined />} onClick={() => handleNew('instance')}>新建实例</Button>
-          <Button type="primary" icon={<ThunderboltOutlined />} onClick={() => void openGenerateModal()}>AI 批量生成</Button>
+          <Button type="primary" icon={<ThunderboltOutlined />} onClick={() => void openGenerateModal()}>AI 生成·批量物品</Button>
           <Button danger icon={<DeleteOutlined />} onClick={() => void handleClear()}>清空</Button>
         </Space>
       )}
@@ -918,7 +918,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
           extra={(
             <Space wrap>
               {aiActions}
-              {selectedItem ? <Button icon={<ReloadOutlined />} loading={generating} onClick={() => void handleRegenerate()}>AI 重生成</Button> : null}
+              {selectedItem ? <Button icon={<ReloadOutlined />} loading={generating} onClick={() => void handleRegenerate()}>AI 修复·重做当前物品</Button> : null}
               {selectedItem ? <Button danger icon={<DeleteOutlined />} onClick={() => void handleDelete()}>删除</Button> : null}
               <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>保存</Button>
             </Space>
@@ -1294,7 +1294,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
       </div>
 
       <Modal
-        title="AI 批量生成物品"
+        title="AI 生成·批量物品"
         open={generateOpen}
         forceRender
         onCancel={() => setGenerateOpen(false)}

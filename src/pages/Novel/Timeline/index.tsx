@@ -67,7 +67,8 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
   })
   const eventDraftButton = workspace.selectedEvent || workspace.creating ? (
     <AIGenerateButton
-      label="AI 草拟事件"
+      label="AI 生成·事件草稿"
+      intent="generate"
       isJson
       runGeneration={async (input) => {
         const result = await generateTimelineDraft(input, { genre: workspace.currentNovel?.genreName })
@@ -235,7 +236,7 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
         <Alert
           type="info"
           showIcon
-          message="本轮 AI 草稿带有提醒"
+          message="本轮 AI 草稿附带修补提示"
           description={draftWarnings.map((warning) => <div key={warning}>{warning}</div>)}
         />
       ) : null}

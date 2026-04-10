@@ -406,10 +406,9 @@ export default function PremisePage({ novelId }: Props) {
       className="novel-premise-page"
       layout="wide"
       heroVariant="compact"
-      asidePlacement="side"
       eyebrow="基础设定"
       title="基础设定"
-      description="这里先收口作品底盘，只处理背景定位、核心信息、主角起点、底层约束和写作边界。主线、支线、结局统一放到后面的故事设计。"
+      description="维护背景定位、核心信息、主角起点、底层约束和写作边界。"
       actions={(
         <Space wrap>
           <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>
@@ -421,14 +420,14 @@ export default function PremisePage({ novelId }: Props) {
             disabled={Boolean(generatingMode)}
             onClick={() => void handleGenerate('replace')}
           >
-            AI 生成基础设定
+            AI 生成·基础设定
           </Button>
           <Button
             loading={generatingMode === 'fill_blanks'}
             disabled={Boolean(generatingMode)}
             onClick={() => void handleGenerate('fill_blanks')}
           >
-            AI 只补空字段
+            AI 补全·空白字段
           </Button>
           <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/story-design`)}>
             进入故事设计
@@ -452,42 +451,9 @@ export default function PremisePage({ novelId }: Props) {
           <WorkspaceMetric label="世界资产" value={`${assetReadiness}/4`} hint="世界、地图、人物、物品就绪度" />
         </>
       )}
-      aside={(
-        <div className="premise-page__aside-stack">
-          <WorkspacePanel title="当前摘要" description="把最关键的边界稳定下来，后面的故事设计才不会发散。">
-            <div className="premise-page__summary-grid">
-              <div className="premise-page__summary-card">
-                <span>基础设定完成度</span>
-                <strong>{premiseFilledCount}/5</strong>
-                <small>{formValues.constraints?.trim() || '优先写清不能违背的代价和规则。'}</small>
-              </div>
-              <div className="premise-page__summary-card">
-                <span>去 AI 味规则</span>
-                <strong>{writingRuleCount}/3</strong>
-                <small>{formValues.antiAiFlavor?.trim() || '补充禁写句式，避免重复模板。'}</small>
-              </div>
-            </div>
-          </WorkspacePanel>
-
-          <WorkspacePanel title="AI 生成说明" description="生成结果会先填到表单，不会自动保存。">
-            <div className="premise-page__summary-grid">
-              <div className="premise-page__summary-card premise-page__summary-card--accent">
-                <span>首版生成</span>
-                <strong>重整当前表单</strong>
-                <small>适合刚开始搭底盘，统一措辞和边界。</small>
-              </div>
-              <div className="premise-page__summary-card">
-                <span>补空字段</span>
-                <strong>保留已写内容</strong>
-                <small>只填缺口，适合已有部分设定时继续补齐。</small>
-              </div>
-            </div>
-          </WorkspacePanel>
-        </div>
-      )}
     >
       {!currentNovel?.expandedBackground && !currentNovel?.synopsis ? (
-        <Alert type="warning" showIcon message="背景还没有补全。建议先在概览页把简介和扩展背景写稳，再回来整理基础设定。" />
+        <Alert type="warning" showIcon message="背景信息未补全" />
       ) : null}
 
       {generationProgress ? (
@@ -523,7 +489,7 @@ export default function PremisePage({ novelId }: Props) {
                 步
               </Tag>
               {pendingMissingFields.length > 0 ? <Tag color="red">缺少 {pendingMissingFields.length} 项</Tag> : null}
-              {pendingResult.warnings.length > 0 ? <Tag color="orange">{pendingResult.warnings.length} 条提醒</Tag> : <Tag color="blue">无额外提醒</Tag>}
+              {pendingResult.warnings.length > 0 ? <Tag color="orange">{pendingResult.warnings.length} 条修补提示</Tag> : <Tag color="blue">无额外提示</Tag>}
             </Space>
           </div>
 
@@ -558,19 +524,6 @@ export default function PremisePage({ novelId }: Props) {
           </div>
         </div>
       ) : null}
-
-      <WorkspacePanel title="本页职责" description="先把作品边界和语言规则说清楚，再进入情节设计。">
-        <div className="guided-step__checklist">
-          <div className="guided-step__checkitem guided-step__checkitem--done">
-            <div className="guided-step__checkhead"><strong>这里保留什么</strong></div>
-            <p>作品定位、核心信息、主角起点、底层约束，以及用于压住 AI 味和常识偏差的写作规则。</p>
-          </div>
-          <div className="guided-step__checkitem">
-            <div className="guided-step__checkhead"><strong>这里不写什么</strong></div>
-            <p>主线推进、支线框架、阶段转折和结局落点，统一放到故事设计页处理。</p>
-          </div>
-        </div>
-      </WorkspacePanel>
 
       <WorkspacePanel title="基础设定编辑器" description="优先填写后续所有模块都会反复引用的 5 个核心字段。">
         <Form form={form} layout="vertical">
@@ -646,35 +599,12 @@ export default function PremisePage({ novelId }: Props) {
         </Form>
       </WorkspacePanel>
 
-      <WorkspacePanel title="下一步建议" description="故事设计最好建立在世界资产已经准备好的基础上。">
-        <div className="guided-step__fact-grid">
-          <div className="guided-step__fact-card">
-            <span>世界规则</span>
-            <strong>{isWorldFoundationReady(currentNovel) ? '已就绪' : '待补齐'}</strong>
-            <small>先统一时间、规则、势力和语言边界。</small>
-          </div>
-          <div className="guided-step__fact-card">
-            <span>地图与空间</span>
-            <strong>{isMapStructureReady(stats) ? '已就绪' : '待补齐'}</strong>
-            <small>故事设计前先让地点和行动半径可见。</small>
-          </div>
-          <div className="guided-step__fact-card">
-            <span>人物资产</span>
-            <strong>{isCharacterRosterReady(stats) ? '已就绪' : '待补齐'}</strong>
-            <small>至少让主角和关键对位角色先落地。</small>
-          </div>
-          <div className="guided-step__fact-card">
-            <span>物品挂点</span>
-            <strong>{isItemsEquipmentReady(stats) ? '已就绪' : '待补齐'}</strong>
-            <small>关键物品和资源链补起来后，再做故事设计更稳。</small>
-          </div>
-        </div>
-        <div className="guided-step__panel-gap" />
+      <WorkspacePanel title="相关模块">
         <Space wrap>
           <Button icon={<GlobalOutlined />} onClick={() => navigate(`/novels/${novelId}/world-rules`)}>世界规则</Button>
           <Button icon={<EnvironmentOutlined />} onClick={() => navigate(`/novels/${novelId}/map`)}>地图</Button>
           <Button icon={<TeamOutlined />} onClick={() => navigate(`/novels/${novelId}/characters`)}>人物</Button>
-          <Button icon={<BarsOutlined />} type="primary" onClick={() => navigate(`/novels/${novelId}/story-design`)}>去做故事设计</Button>
+          <Button icon={<BarsOutlined />} type="primary" onClick={() => navigate(`/novels/${novelId}/story-design`)}>故事设计</Button>
         </Space>
       </WorkspacePanel>
     </WorkspacePage>

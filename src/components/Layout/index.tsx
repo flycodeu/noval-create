@@ -1,5 +1,5 @@
 import React from 'react'
-import { Layout, Menu, Tooltip } from 'antd'
+import { Layout, Menu } from 'antd'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
   BookOutlined,
@@ -45,10 +45,10 @@ const menuItems = [
   },
 ]
 
-const THEME_OPTIONS: { value: Theme; label: string; icon: string; tip: string }[] = [
-  { value: 'dark', label: '深色', icon: '🌙', tip: '深色主题' },
-  { value: 'light', label: '浅色', icon: '☀️', tip: '浅色主题（默认）' },
-  { value: 'soft', label: '柔和', icon: '🍵', tip: '柔和暖色主题' },
+const THEME_OPTIONS: { value: Theme; label: string; icon: string }[] = [
+  { value: 'dark', label: '深色', icon: '🌙' },
+  { value: 'light', label: '浅色', icon: '☀️' },
+  { value: 'soft', label: '柔和', icon: '🍵' },
 ]
 
 export default function AppLayout({ children }: AppLayoutProps) {
@@ -64,16 +64,17 @@ export default function AppLayout({ children }: AppLayoutProps) {
     <Layout style={{ minHeight: '100vh', height: '100dvh', background: 'var(--color-bg-primary)' }}>
       {!hideAppSidebar ? (
       <Sider
-        width={180}
+        width={236}
+        className="app-layout-sider"
         style={{
           background: 'var(--color-bg-secondary)',
           borderRight: '1px solid var(--border-color)',
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
+          minHeight: '100dvh',
         }}
       >
-        {/* Logo */}
         <div style={{
           padding: '20px 16px 16px',
           borderBottom: '1px solid var(--border-color)',
@@ -91,8 +92,8 @@ export default function AppLayout({ children }: AppLayoutProps) {
           </div>
         </div>
 
-        {/* 导航菜单 */}
         <Menu
+          className="app-layout-menu"
           mode="inline"
           selectedKeys={[selectedKey]}
           items={menuItems}
@@ -105,7 +106,6 @@ export default function AppLayout({ children }: AppLayoutProps) {
           }}
         />
 
-        {/* 主题切换 */}
         <div style={{
           padding: '12px 16px',
           borderTop: '1px solid var(--border-color)',
@@ -121,29 +121,31 @@ export default function AppLayout({ children }: AppLayoutProps) {
             <BulbOutlined style={{ fontSize: 11 }} />
             主题
           </div>
-          <div style={{ display: 'flex', gap: 6 }}>
+          <div style={{ display: 'grid', gap: 8 }}>
             {THEME_OPTIONS.map(opt => (
-              <Tooltip key={opt.value} title={opt.tip}>
-                <button
-                  onClick={() => setTheme(opt.value)}
-                  style={{
-                    flex: 1,
-                    height: 28,
-                    border: `2px solid ${theme === opt.value ? 'var(--color-blue-primary)' : 'var(--border-color)'}`,
-                    borderRadius: 4,
-                    background: theme === opt.value ? 'rgba(46,134,171,0.15)' : 'transparent',
-                    cursor: 'pointer',
-                    fontSize: 14,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    transition: 'border-color 0.15s',
-                    color: 'var(--color-text-primary)',
-                  }}
-                >
-                  {opt.icon}
-                </button>
-              </Tooltip>
+              <button
+                key={opt.value}
+                onClick={() => setTheme(opt.value)}
+                style={{
+                  width: '100%',
+                  minHeight: 36,
+                  border: `2px solid ${theme === opt.value ? 'var(--color-blue-primary)' : 'var(--border-color)'}`,
+                  borderRadius: 8,
+                  background: theme === opt.value ? 'rgba(46,134,171,0.15)' : 'transparent',
+                  cursor: 'pointer',
+                  fontSize: 13,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 10,
+                  transition: 'border-color 0.15s',
+                  color: 'var(--color-text-primary)',
+                  padding: '0 12px',
+                }}
+              >
+                <span>{opt.label}</span>
+                <span>{opt.icon}</span>
+              </button>
             ))}
           </div>
         </div>

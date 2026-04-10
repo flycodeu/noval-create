@@ -1,8 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Button, Empty, Modal, Progress, Spin, Tag, Tooltip } from 'antd'
+import { Button, Empty, Modal, Progress, Spin, Tag } from 'antd'
 import VirtualList from 'rc-virtual-list'
 import type { LanguageDriftMetrics, QualityDashboardData } from '../../../types'
-import { WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
+import { WorkspaceMetric, WorkspacePage, WorkspacePanel, WorkspaceStepGuide } from '../components/WorkspaceShell'
+import {
+  getQualityRiskSeverityColor,
+  getQualityRiskSeverityLabel,
+  getStoryArcSeverityColor,
+  getStoryArcSeverityLabel,
+  getStoryPacingSeverityColor,
+  getStoryPacingSeverityLabel,
+} from '../shared/revision-quality'
 
 interface Props { novelId: number }
 
@@ -84,10 +92,6 @@ function formatSignedValue(value: number): string {
   return value > 0 ? `+${value}` : `${value}`
 }
 
-function storyAlertColor(severity: QualityDashboardData['storyPacingAlerts'][number]['severity']): string {
-  return severity === 'blocker' ? 'error' : 'warning'
-}
-
 function pressureColor(value: number): string {
   if (value >= 80) return '#f5222d'
   if (value >= 60) return '#fa8c16'
@@ -100,12 +104,6 @@ function arcProgressRateColor(value: number): string {
   if (value >= 30) return '#faad14'
   if (value >= 15) return '#fa8c16'
   return '#f5222d'
-}
-
-function arcAlertColor(severity: QualityDashboardData['storyArcProgressAlerts'][number]['severity']): string {
-  if (severity === 'critical') return 'error'
-  if (severity === 'warning') return 'warning'
-  return 'default'
 }
 
 function paceMarkerLabel(marker?: QualityDashboardData['storyDynamicsTrend'][number]['paceMarker']): string {
@@ -154,14 +152,8 @@ function healthScoreColor(value: number): string {
   return '#f5222d'
 }
 
-function qualityRiskSeverityColor(severity: QualityDashboardData['novelQualityMetrics']['topRisks'][number]['severity']): string {
-  if (severity === 'critical') return 'error'
-  if (severity === 'warning') return 'warning'
-  return 'default'
-}
-
 function qualityRiskKindLabel(kind: QualityDashboardData['novelQualityMetrics']['riskOverview'][number]['kind']): string {
-  if (kind === 'language_drift') return 'AI味退化'
+  if (kind === 'language_drift') return 'AI 味退化'
   if (kind === 'story_dynamics') return '主角与节奏'
   if (kind === 'chapter_function') return '章节功能'
   if (kind === 'story_arc') return '故事弧推进'
@@ -208,9 +200,9 @@ export default function QualityDashboard({ novelId }: Props) {
 
   if (!data || (!hasScoreData && !hasStoryDynamicsData && !hasArcProgressData && !hasDialogueData && !hasStateData && !hasRecallData && !hasChapterFunctionData)) {
     return (
-      <WorkspacePage title="质量监控" description="查看各章节的AI评分与质量趋势。">
+      <WorkspacePage title="质量监控" description="查看各章节的 AI 检测结果与质量趋势。">
         <WorkspacePanel title="暂无数据">
-          <Empty description="还没有可用的 AI 评分、对白指纹、章节功能、状态稳定性或结构节奏跟踪数据。先运行章节审校或 AI 评分后再来查看。" />
+          <Empty description="还没有可用的 AI 检测、对白指纹、章节功能、状态稳定性或结构节奏跟踪数据。先运行章节审校或 AI 检测后再来查看。" />
         </WorkspacePanel>
       </WorkspacePage>
     )
@@ -286,13 +278,35 @@ export default function QualityDashboard({ novelId }: Props) {
   return (
     <WorkspacePage
       title="质量监控"
-      description="查看各章节的AI评分与质量趋势。"
+      description="查看各章节的 AI 检测结果、修补优先级和全书质量趋势。"
       metrics={[
         <WorkspaceMetric key="scored" label="已评分章节" value={data.totalChaptersScored} />,
         <WorkspaceMetric key="tracked" label="节奏追踪章节" value={data.protagonistSetbackSummary.chapterCount} />,
         <WorkspaceMetric key="arc" label="跟踪故事弧" value={data.storyArcProgressSummary.trackedArcCount} />,
         <WorkspaceMetric key="avg" label="平均总分 / 压力" value={hasScoreData ? `${data.averageOverallScore} / 10` : `${data.protagonistSetbackSummary.averagePressure}`} />,
       ]}
+      guide={(
+        <WorkspaceStepGuide
+          title="进入质量看板先看什么"
+          steps={[
+            {
+              title: '先找阻塞卷和章节',
+              description: '先看全书健康总览与卷级健康面板，定位最先该修的卷和章节。',
+              status: 'focus',
+            },
+            {
+              title: '再拆 AI 味来源',
+              description: '用趋势图和 AI 味分解确认问题来自语言退化、节奏还是结构承接。',
+              status: 'todo',
+            },
+            {
+              title: '最后回到修订中心',
+              description: '把发现的高优先问题转回修订中心或正文页处理，形成闭环。',
+              status: 'todo',
+            },
+          ]}
+        />
+      )}
     >
       <WorkspacePanel title="全书健康总览" description="先判断全书当前最危险的卷和主要风险，再往下钻到卷级和章节级。">
         <NovelHealthOverviewPanel
@@ -321,14 +335,14 @@ export default function QualityDashboard({ novelId }: Props) {
             <HeatmapChart data={filteredHeatmapData} chapterNums={filteredOverallTrend.map((d) => d.chapterNum)} />
           </WorkspacePanel>
 
-          <WorkspacePanel title="评分趋势" description="总分与AI味率逐章变化。">
+          <WorkspacePanel title="评分趋势" description="总分与 AI 味率逐章变化。">
             <TrendChart
               overallTrend={filteredOverallTrend}
               aiLikeTrend={filteredAiLikeTrend}
             />
           </WorkspacePanel>
 
-          <WorkspacePanel title="AI味分解" description="拆开看语言退化由哪些问题构成。">
+          <WorkspacePanel title="AI 味分解" description="拆开看语言退化由哪些问题构成。">
             <LanguageDriftPanel
               averages={data.averageLanguageDrift}
               trends={data.languageDriftTrends}
@@ -443,12 +457,10 @@ export default function QualityDashboard({ novelId }: Props) {
                       format={() => entry.overallScore.toFixed(1)}
                     />
                     <Tag color={entry.aiLikeRate > 50 ? 'red' : entry.aiLikeRate > 30 ? 'orange' : 'green'}>
-                      AI味 {entry.aiLikeRate}%
+                      AI 味 {entry.aiLikeRate}%
                     </Tag>
                     {entry.weakDimensions.length > 0 ? (
-                      <Tooltip title={entry.weakDimensions.join('、')}>
-                        <Tag color="warning">{entry.weakDimensions.length} 项薄弱</Tag>
-                      </Tooltip>
+                      <Tag color="warning">{`薄弱：${entry.weakDimensions.join('、')}`}</Tag>
                     ) : null}
                   </div>
                 )}
@@ -484,7 +496,7 @@ export default function QualityDashboard({ novelId }: Props) {
                   strokeColor={selectedChapter.aiLikeRate > 50 ? '#f5222d' : selectedChapter.aiLikeRate > 30 ? '#faad14' : '#52c41a'}
                   format={() => <span style={{ fontSize: 20 }}>{selectedChapter.aiLikeRate}%</span>}
                 />
-                <div style={{ marginTop: 4 }}>AI味率</div>
+                <div style={{ marginTop: 4 }}>AI 味率</div>
               </div>
             </div>
             {selectedChapter.dimensions.map((dim) => (
@@ -599,7 +611,7 @@ function ChapterFunctionPanel({
             <div key={`${alert.code}-${index}-${alert.chapterNums.join('-')}`} style={{ display: 'grid', gap: 4 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 <Tag color={chapterFunctionAlertColor(alert.severity)} style={{ marginRight: 0 }}>
-                  {alert.severity === 'blocker' ? '高风险' : '提醒'}
+                  {getStoryPacingSeverityLabel(alert.severity)}
                 </Tag>
                 <span style={{ fontSize: 12, fontWeight: 600 }}>{alert.title}</span>
               </div>
@@ -698,7 +710,7 @@ function RecallReliabilityPanel({
 
         <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', display: 'grid', gap: 8 }}>
           <div style={{ fontSize: 12, opacity: 0.7 }}>诊断说明</div>
-          <div style={{ fontSize: 12, opacity: 0.72 }}>质量看板里的召回可靠性采用本地关键词回查估算，只用于发现高风险章节。</div>
+          <div style={{ fontSize: 12, opacity: 0.72 }}>质量看板里的召回可靠性采用本地关键词回查估算，只用于发现阻塞章节。</div>
           <div style={{ fontSize: 12, opacity: 0.72 }}>实际生成链路仍以硬约束和结构化状态为主，召回只作背景补充。</div>
           <div style={{ fontSize: 12, opacity: 0.72 }}>当前保留片段 {summary.selectedHitCount} 条，本地兜底命中 {summary.fallbackHitCount} 条。</div>
         </div>
@@ -752,9 +764,9 @@ function HeatmapChart({ data, chapterNums }: { data: QualityHeatmapPoint[]; chap
             <div style={{ lineHeight: '24px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{dim}</div>
             {displayNums.map((num) => {
               const score = byDim.get(dim)?.get(num)
-              return (
-                <Tooltip key={num} title={score != null ? `${dim}: ${score}` : '无数据'}>
+                return (
                   <div
+                    key={num}
                     style={{
                       width: 24,
                       height: 24,
@@ -769,8 +781,7 @@ function HeatmapChart({ data, chapterNums }: { data: QualityHeatmapPoint[]; chap
                   >
                     {score != null ? score : ''}
                   </div>
-                </Tooltip>
-              )
+                )
             })}
           </React.Fragment>
         ))}
@@ -807,7 +818,7 @@ function TrendChart({ overallTrend, aiLikeTrend }: {
     <div style={{ overflowX: 'auto' }}>
       <div style={{ display: 'flex', gap: 16, marginBottom: 8, fontSize: 12 }}>
         <span><span style={{ display: 'inline-block', width: 12, height: 3, background: '#52c41a', marginRight: 4 }} />总分 (0-10)</span>
-        <span><span style={{ display: 'inline-block', width: 12, height: 3, background: '#f5222d', marginRight: 4 }} />AI味率 (0-100%)</span>
+        <span><span style={{ display: 'inline-block', width: 12, height: 3, background: '#f5222d', marginRight: 4 }} />AI 味率 (0-100%)</span>
       </div>
       <svg width={chartWidth} height={chartHeight + 20} style={{ minWidth: 400 }}>
         <path d={overallPath} fill="none" stroke="#52c41a" strokeWidth={2} />
@@ -933,7 +944,7 @@ function LanguageDriftPanel({
             gap: 8,
           }}
         >
-          <div style={{ fontSize: 12, opacity: 0.7 }}>当前最高风险</div>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>当前最高优先问题</div>
           {topRiskMetrics.length > 0 ? topRiskMetrics.map((item) => (
             <div key={item.metric} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
               <span style={{ opacity: 0.85 }}>{item.label}</span>
@@ -1280,7 +1291,7 @@ function StoryDynamicsPanel({
           {alerts.length > 0 ? alerts.slice(0, 4).map((alert, index) => (
             <div key={`${alert.code}-${index}`} style={{ display: 'grid', gap: 4 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Tag color={storyAlertColor(alert.severity)} style={{ marginRight: 0 }}>{alert.severity === 'blocker' ? '高风险' : '提醒'}</Tag>
+                <Tag color={getStoryPacingSeverityColor(alert.severity)} style={{ marginRight: 0 }}>{getStoryPacingSeverityLabel(alert.severity)}</Tag>
                 <span style={{ fontSize: 12, fontWeight: 600 }}>{alert.title}</span>
               </div>
               <div style={{ fontSize: 11, opacity: 0.65 }}>{alert.detail}</div>
@@ -1392,8 +1403,8 @@ function StoryArcProgressPanel({
           {alerts.length > 0 ? alerts.slice(0, 6).map((alert, index) => (
             <div key={`${alert.code}-${index}`} style={{ display: 'grid', gap: 4 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <Tag color={arcAlertColor(alert.severity)} style={{ marginRight: 0 }}>
-                  {alert.severity === 'critical' ? '高风险' : alert.severity === 'warning' ? '提醒' : '信息'}
+                <Tag color={getStoryArcSeverityColor(alert.severity)} style={{ marginRight: 0 }}>
+                  {getStoryArcSeverityLabel(alert.severity)}
                 </Tag>
                 <span style={{ fontSize: 12, fontWeight: 600 }}>{alert.arcName} · {alert.title}</span>
               </div>
@@ -1496,7 +1507,7 @@ function WorldStateStabilityPanel({
         <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
           <div style={{ fontSize: 12, opacity: 0.7 }}>预警快照</div>
           <div style={{ fontSize: 22, fontWeight: 700 }}>{summary.warningCount}</div>
-          <div style={{ fontSize: 11, opacity: 0.55 }}>账本中缺少原因或高风险状态的记录数</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>账本中缺少原因或阻塞状态的记录数</div>
         </div>
       </div>
 
@@ -1514,7 +1525,7 @@ function WorldStateStabilityPanel({
         </div>
 
         <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', display: 'grid', gap: 8 }}>
-          <div style={{ fontSize: 12, opacity: 0.7 }}>近期高风险实体</div>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>近期阻塞实体</div>
           {alerts.length > 0 ? alerts.slice(0, 5).map((alert, index) => (
             <div key={`${alert.summary}-${index}`} style={{ display: 'grid', gap: 4 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1576,7 +1587,7 @@ function LanguageDriftDetails({ metrics }: { metrics?: LanguageDriftMetrics }) {
 
   return (
     <div style={{ display: 'grid', gap: 8 }}>
-      <div style={{ fontWeight: 600 }}>AI味分解</div>
+      <div style={{ fontWeight: 600 }}>AI 味分解</div>
       {ranked.map((item) => (
         <div key={item.key} style={{ display: 'grid', gap: 4 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>

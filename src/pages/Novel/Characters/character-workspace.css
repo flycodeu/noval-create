@@ -1,16 +1,17 @@
 .novel-character-studio {
   display: grid;
-  grid-template-columns: minmax(340px, 0.84fr) minmax(0, 1.3fr);
+  grid-template-columns: minmax(280px, 320px) minmax(420px, 1fr) minmax(360px, 460px);
   gap: 22px;
+  align-items: start;
 }
 
-.novel-character-studio__main {
-  display: grid;
-  gap: 22px;
+.novel-character-studio__sidebar,
+.novel-character-studio__editor {
+  align-self: start;
 }
 
 .novel-character-studio__sidebar .novel-panel__body,
-.novel-character-studio__main .novel-panel__body {
+.novel-character-studio__editor .novel-panel__body {
   display: grid;
   gap: 18px;
 }
@@ -279,11 +280,28 @@
 
 @media (max-width: 1380px) {
   .novel-character-studio {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(280px, 320px) minmax(0, 1fr);
+  }
+
+  .novel-character-graph-panel {
+    grid-column: 2;
+  }
+
+  .novel-character-studio__editor {
+    grid-column: 1 / -1;
   }
 }
 
 @media (max-width: 960px) {
+  .novel-character-studio {
+    grid-template-columns: 1fr;
+  }
+
+  .novel-character-graph-panel,
+  .novel-character-studio__editor {
+    grid-column: auto;
+  }
+
   .novel-character-graph-panel__canvas,
   .character-graph-shell {
     min-height: 460px;

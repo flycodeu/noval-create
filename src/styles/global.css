@@ -7839,7 +7839,7 @@ html[data-theme="dark"] .ant-card-actions > li {
   width: 100%;
   height: auto;
   min-height: 100%;
-  grid-template-columns: 316px minmax(0, 1fr);
+  grid-template-columns: 368px minmax(0, 1fr);
   align-items: start;
   overflow: visible;
 }
@@ -7852,8 +7852,8 @@ html[data-theme="dark"] .ant-card-actions > li {
   max-height: 100dvh;
   min-height: 100dvh;
   overflow: hidden;
-  gap: 14px;
-  padding: 18px 16px 18px;
+  gap: 12px;
+  padding: 18px 18px 20px;
 }
 
 .novel-sidebar__title-block {
@@ -7931,9 +7931,9 @@ html[data-theme="dark"] .ant-card-actions > li {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  gap: 14px;
-  padding-right: 2px;
-  padding-bottom: 18px;
+  gap: 16px;
+  padding-right: 4px;
+  padding-bottom: 24px;
 }
 
 .novel-sidebar__group-list {
@@ -7949,27 +7949,34 @@ html[data-theme="dark"] .ant-card-actions > li {
 
 .novel-sidebar__nav-item {
   grid-template-columns: 18px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  min-height: 52px;
-  padding: 12px 14px 12px 16px;
+  align-items: start;
+  gap: 14px;
+  min-height: 68px;
+  padding: 14px 16px 14px 18px;
   border-radius: 16px;
 }
 
 .novel-sidebar__nav-copy {
-  gap: 2px;
+  gap: 6px;
 }
 
 .novel-sidebar__nav-copy strong {
-  font-size: 13.5px;
+  font-size: 14px;
+  line-height: 1.35;
 }
 
 .novel-sidebar__nav-copy small {
-  display: none;
+  display: -webkit-box;
+  overflow: hidden;
+  color: rgba(255, 243, 219, 0.74);
+  font-size: 11.5px;
+  line-height: 1.55;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .novel-sidebar__nav-state {
-  align-self: center;
+  align-self: start;
   justify-self: end;
   min-width: 48px;
   padding: 5px 9px;
@@ -8088,7 +8095,7 @@ html[data-theme="dark"] .ant-card-actions > li {
 @media (max-width: 1180px) {
   .novel-route-shell,
   .novel-route-shell--single {
-    grid-template-columns: 286px minmax(0, 1fr);
+    grid-template-columns: 320px minmax(0, 1fr);
   }
 
   .novel-sidebar__title-meta {
@@ -8145,6 +8152,26 @@ html[data-theme="dark"] .ant-card-actions > li {
 }
 /* novel-single-workspace-refresh:end */
 
+.app-layout-sider .ant-layout-sider-children {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+}
+
+.app-layout-menu .ant-menu-item {
+  min-height: 48px;
+  margin-block: 6px;
+  padding-inline: 18px !important;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  font-size: 14px;
+}
+
+.app-layout-menu .ant-menu-title-content {
+  font-weight: 600;
+}
+
 .novel-outline-chapter-card--selected {
   border-color: rgba(46, 134, 171, 0.6);
   box-shadow: 0 0 0 1px rgba(46, 134, 171, 0.24);
@@ -8155,4 +8182,176 @@ html[data-theme="dark"] .ant-card-actions > li {
   border-color: rgba(143, 99, 48, 0.42);
   box-shadow: 0 0 0 1px rgba(143, 99, 48, 0.18);
   background: rgba(143, 99, 48, 0.07);
+}
+
+.novel-route-shell {
+  --novel-sticky-offset: 112px;
+}
+
+.novel-hero__eyebrow {
+  color: rgba(128, 92, 48, 0.86);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.novel-hero__description {
+  margin: 8px 0 0;
+  max-width: 760px;
+  color: rgba(67, 51, 34, 0.82);
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+.novel-workspace__guide {
+  margin-bottom: 18px;
+}
+
+.novel-step-guide {
+  display: grid;
+  gap: 14px;
+  padding: 18px 20px;
+  border: 1px solid rgba(122, 93, 52, 0.12);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at top right, rgba(199, 155, 86, 0.14), transparent 36%),
+    linear-gradient(180deg, rgba(255, 251, 245, 0.98), rgba(246, 239, 229, 0.94));
+  box-shadow: 0 16px 30px rgba(71, 53, 28, 0.07);
+}
+
+.novel-step-guide__head {
+  display: grid;
+  gap: 6px;
+}
+
+.novel-step-guide__eyebrow {
+  color: rgba(128, 92, 48, 0.76);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.novel-step-guide__head strong {
+  color: #2b2016;
+  font-size: 18px;
+  line-height: 1.3;
+}
+
+.novel-step-guide__grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.novel-step-guide__item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+  padding: 14px 16px;
+  border: 1px solid rgba(122, 93, 52, 0.1);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.novel-step-guide__item--focus {
+  border-color: rgba(20, 108, 133, 0.2);
+  background: linear-gradient(180deg, rgba(225, 244, 248, 0.92), rgba(255, 255, 255, 0.9));
+}
+
+.novel-step-guide__item--done {
+  border-color: rgba(69, 154, 103, 0.2);
+  background: linear-gradient(180deg, rgba(231, 247, 236, 0.92), rgba(255, 255, 255, 0.88));
+}
+
+.novel-step-guide__index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  background: rgba(143, 99, 48, 0.1);
+  color: #7a5027;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.novel-step-guide__copy {
+  display: grid;
+  gap: 4px;
+}
+
+.novel-step-guide__copy strong {
+  color: #2a2017;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.novel-step-guide__copy span {
+  color: rgba(77, 60, 42, 0.78);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.novel-panel__copy {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.novel-panel__desc {
+  display: block !important;
+  color: rgba(77, 60, 42, 0.78);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.novel-panel--sticky {
+  position: sticky;
+  top: var(--novel-sticky-offset);
+}
+
+.novel-panel--scrollable {
+  overflow: hidden;
+}
+
+.novel-panel--scrollable .novel-panel__body {
+  overflow: auto;
+  max-height: calc(100dvh - var(--novel-sticky-offset) - 36px);
+  padding-right: 6px;
+}
+
+.novel-workspace--sectioned .novel-workspace__body {
+  align-items: start;
+}
+
+.novel-workspace--sectioned .novel-workspace__aside {
+  align-items: start;
+}
+
+.novel-workspace--document .novel-workspace__body,
+.novel-workspace--document .novel-workspace__main,
+.novel-workspace--document .novel-workspace__aside {
+  overflow: visible;
+}
+
+@media (max-width: 960px) {
+  .novel-route-shell {
+    --novel-sticky-offset: 16px;
+  }
+
+  .novel-panel--sticky {
+    position: relative;
+    top: auto;
+  }
+
+  .novel-panel--scrollable .novel-panel__body {
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
+  }
 }

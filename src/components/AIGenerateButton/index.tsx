@@ -6,6 +6,7 @@ import { cleanAiFieldText } from '../../utils/text'
 
 interface Props {
   label?: string
+  intent?: 'generate' | 'complete' | 'repair' | 'review'
   buildMessages: () => { role: 'user' | 'assistant'; content: string }[]
   runGeneration?: (input: {
     messages: { role: 'user' | 'assistant'; content: string }[]
@@ -25,8 +26,16 @@ function cleanOutput(text: string): string {
   return cleanAiFieldText(text)
 }
 
+function getDefaultLabel(intent: NonNullable<Props['intent']>) {
+  if (intent === 'complete') return 'AI 补全'
+  if (intent === 'repair') return 'AI 修复'
+  if (intent === 'review') return 'AI 评审'
+  return 'AI 生成'
+}
+
 export default function AIGenerateButton({
-  label = 'AI 生成',
+  label,
+  intent = 'generate',
   buildMessages,
   runGeneration,
   drawCount = 1,
@@ -37,6 +46,7 @@ export default function AIGenerateButton({
   type = 'default',
   isJson = false,
 }: Props) {
+  const resolvedLabel = label || getDefaultLabel(intent)
   const [loading, setLoading] = useState(false)
   const [pickOpen, setPickOpen] = useState(false)
   const [results, setResults] = useState<string[]>([])
@@ -88,11 +98,11 @@ export default function AIGenerateButton({
         disabled={disabled}
         onClick={handleGenerate}
       >
-        {drawCount > 1 ? `${label} ×${drawCount}` : label}
+        {drawCount > 1 ? `${resolvedLabel} ×${drawCount}` : resolvedLabel}
       </Button>
 
       <Modal
-        title="选择草稿"
+        title="选择 AI 候选草稿"
         open={pickOpen}
         onCancel={() => setPickOpen(false)}
         onOk={handleConfirmPick}

@@ -313,7 +313,7 @@ export function TimelineEditorPanel({
           <Space>
             {selectedEvent ? (
               <Button icon={<ReloadOutlined />} loading={regenerating} onClick={onRegenerate}>
-                AI 重生成
+                AI 修复·重做事件
               </Button>
             ) : null}
             {selectedEvent ? (

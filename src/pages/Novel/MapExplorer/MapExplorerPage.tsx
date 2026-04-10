@@ -8,7 +8,7 @@ import { useNovelStore } from '../../../stores/novel.store'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { getBlueprintLevelByDepth, getFactionNameOptions, getMapBlueprintDepth, getMapNodeTypeOptions, parseWorldRulesJson } from '../../../shared/genre-system'
 import { buildDraftMessages, normalizeStringArray, parseDraftJson } from '../shared/ai-draft'
-import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
+import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel, WorkspaceStepGuide } from '../components/WorkspaceShell'
 import '../components/boards.css'
 import './map-explorer.css'
 import MapGraphCanvas from './MapGraphCanvas'
@@ -845,7 +845,7 @@ export default function MapExplorerPage({ novelId }: Props) {
 
   const aiActions = selectedNode ? (
     <AIGenerateButton
-      label="AI 优化节点"
+      label="AI 补全·当前节点"
       isJson
       buildMessages={() => {
         const values = detailForm.getFieldsValue(true)
@@ -1048,12 +1048,21 @@ export default function MapExplorerPage({ novelId }: Props) {
       eyebrow="地图结构"
       title="地图结构"
       description="图谱默认显示整张地图树结构，优先保证全局可浏览、可定位、可查看；右侧检查器只负责节点和关系详情，不再主导主画布布局。"
+      guide={(
+        <WorkspaceStepGuide
+          steps={[
+            { title: '先定位层级或焦点节点', description: '优先从根层、路径或节点定位开始，不再先滚过整页表单再找地图位置。', status: 'focus' },
+            { title: '再看关系或节点详情', description: '图谱模式右侧检查器只负责焦点、关系、详情三件事；列表模式则固定在右侧编辑当前节点。', status: 'todo' },
+            { title: '最后再执行生成或修补', description: 'AI 入口只补当前节点或按层级生成，不直接挤占主画布。', status: 'todo' },
+          ]}
+        />
+      )}
       actions={(
         <Space wrap>
           <Button type={workspaceMode === 'list' ? 'primary' : 'default'} icon={<UnorderedListOutlined />} onClick={() => setWorkspaceMode('list')}>列表模式</Button>
           <Button type={workspaceMode === 'graph' ? 'primary' : 'default'} icon={<ShareAltOutlined />} onClick={() => setWorkspaceMode('graph')}>图谱模式</Button>
           <Button icon={<ReloadOutlined />} onClick={() => void refreshVisible({ preferredId: selectedNode?.id || null })}>刷新</Button>
-          <Button icon={<ApartmentOutlined />} onClick={openBatchModal}>按层级生成</Button>
+          <Button icon={<ApartmentOutlined />} onClick={openBatchModal}>AI 生成·层级骨架</Button>
           <Button icon={<PlusOutlined />} onClick={() => void handleAddRoot()}>添加根节点</Button>
           <Button danger icon={<DeleteOutlined />} onClick={() => void handleClear()}>清空</Button>
         </Space>
@@ -1197,7 +1206,7 @@ export default function MapExplorerPage({ novelId }: Props) {
               </div>
 
               {graphInspectorTab === 'focus' ? (
-                <WorkspacePanel className="map-graph-inspector-panel" bodyClassName="map-graph-inspector-panel__body" title="焦点概览" description="图谱默认保持整张树结构，这里只负责展示当前节点的定位、标签和关系摘要。">
+                <WorkspacePanel className="map-graph-inspector-panel" bodyClassName="map-graph-inspector-panel__body" title="焦点概览" description="显示当前节点的定位、标签和关系摘要。" scrollable sticky>
                   <div className="map-graph-focus-card">
                     <div className="map-graph-focus-card__title">
                       <div>
@@ -1269,6 +1278,8 @@ export default function MapExplorerPage({ novelId }: Props) {
                   bodyClassName="map-graph-inspector-panel__body"
                   title={selectedRelation ? `关系详情 · ${getRelationLabelText(selectedRelation)}` : selectedNode ? `节点关系 · ${selectedNode.name}` : '节点关系'}
                   description="维护选中节点的显式关系，并快速查看两端节点之间的连接说明。"
+                  scrollable
+                  sticky
                 >
                   {selectedNode ? (
                     <div className="map-graph-detail-actions">
@@ -1345,7 +1356,7 @@ export default function MapExplorerPage({ novelId }: Props) {
               ) : null}
 
               {graphInspectorTab === 'detail' ? (
-                <WorkspacePanel className="map-graph-inspector-panel" bodyClassName="map-graph-inspector-panel__body" title={selectedNode ? `节点详情 · ${selectedNode.name}` : '节点详情'} description="编辑焦点节点的基础信息，右侧表单不会再压缩主图谱视图。">
+                <WorkspacePanel className="map-graph-inspector-panel" bodyClassName="map-graph-inspector-panel__body" title={selectedNode ? `节点详情 · ${selectedNode.name}` : '节点详情'} description="编辑焦点节点的基础信息，右侧表单不会再压缩主图谱视图。" scrollable sticky>
                   <div className="map-graph-detail-actions">{detailActions}</div>
                   {!selectedNode ? (
                     <div className="novel-empty">从图谱中选择一个节点开始编辑。</div>
@@ -1361,6 +1372,7 @@ export default function MapExplorerPage({ novelId }: Props) {
             className="map-list-panel"
             title={isSearching ? '搜索结果' : '根节点'}
             description={isSearching ? '关键词会在全部地图节点中检索，结果仍可作为图谱焦点继续展开。' : '根节点决定地图的最高层级结构，适合先建立主区域、主基地或主城市。'}
+            scrollable
             extra={(
               <div className="novel-filter-bar">
                 <div className="novel-filter-bar__row">
@@ -1401,6 +1413,7 @@ export default function MapExplorerPage({ novelId }: Props) {
             className="map-list-panel"
             title={currentParent ? `分支下级 · ${currentParent.name}` : '分支下级'}
             description={currentParent ? '展示当前节点的直属下级，可继续下钻，也可直接在右侧编辑。' : '先从左侧选择一个根节点，再查看它的下级结构。'}
+            scrollable
             extra={branchPath.length > 0 ? (
               <Space wrap>
                 {branchPath.map((item, index) => <Button key={item.id} size="small" type={index === branchPath.length - 1 ? 'primary' : 'default'} onClick={() => void handleBreadcrumb(index)}>{item.name}</Button>)}
@@ -1436,7 +1449,7 @@ export default function MapExplorerPage({ novelId }: Props) {
             )}
           </WorkspacePanel>
 
-          <WorkspacePanel className="map-list-panel map-list-panel--detail" title={selectedNode ? `节点详情 · ${selectedNode.name}` : '节点详情'} description="图谱与列表共用同一套详情表单，方便随时补充简介、上下级和关系信息。" extra={detailActions}>
+          <WorkspacePanel className="map-list-panel map-list-panel--detail" title={selectedNode ? `节点详情 · ${selectedNode.name}` : '节点详情'} description="图谱与列表共用同一套详情表单，方便随时补充简介、上下级和关系信息。" extra={detailActions} scrollable sticky>
             {!selectedNode ? (
               <div className="novel-empty">从左侧选择一条节点记录，或先新建。</div>
             ) : (

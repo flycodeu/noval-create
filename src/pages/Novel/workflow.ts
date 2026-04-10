@@ -434,24 +434,24 @@ export function getWorkflowBlockers(
   const requireBasics = (action: string) => {
     pushIfMissing(
       isBasicsReady(novel),
-      `请先补齐书名、简介、用户背景和扩展背景，再${action}。`,
+      `缺少书名、简介、用户背景或扩展背景，无法${action}。`,
     )
   }
 
   const requireProjectBrief = (action: string) => {
-    pushIfMissing(isProjectBriefReady(novel), `请先补齐项目立项，再${action}。`)
+    pushIfMissing(isProjectBriefReady(novel), `缺少项目立项，无法${action}。`)
   }
 
   const requireStoryCore = (action: string) => {
-    pushIfMissing(isStoryCoreReady(novel), `请先补齐基础设定、核心钩子和底层约束，再${action}。`)
+    pushIfMissing(isStoryCoreReady(novel), `缺少基础设定、核心钩子或底层约束，无法${action}。`)
   }
 
   const requireThemeVoice = (action: string) => {
-    pushIfMissing(isThemeVoiceReady(novel), `请先补齐主题与文风，再${action}。`)
+    pushIfMissing(isThemeVoiceReady(novel), `缺少主题与文风，无法${action}。`)
   }
 
   const requireWorldRules = (action: string) => {
-    pushIfMissing(isWorldFoundationReady(novel), `请先补齐世界规则，再${action}。`)
+    pushIfMissing(isWorldFoundationReady(novel), `缺少世界规则，无法${action}。`)
   }
 
   const requireMap = (action: string) => {
@@ -463,7 +463,7 @@ export function getWorkflowBlockers(
   }
 
   const requireItems = (action: string) => {
-    pushIfMissing(isItemsEquipmentReady(stats), `请先补齐物品资产，再${action}。`)
+    pushIfMissing(isItemsEquipmentReady(stats), `缺少物品资产，无法${action}。`)
   }
 
   const requireThreads = (action: string) => {
@@ -487,7 +487,7 @@ export function getWorkflowBlockers(
   const requireFreshAssets = (action: string) => {
     pushIfMissing(
       stats.staleAssetCount <= 0,
-      `这些世界资产可能还挂着旧设定：${stats.staleAssetLabels.join('、')}。建议先重新生成或手动校准，再${action}。`,
+      `这些世界资产仍在引用旧设定：${stats.staleAssetLabels.join('、')}。处理后再${action}。`,
     )
   }
 
@@ -551,7 +551,7 @@ export function getWorkflowBlockers(
     case 'writing':
       requireThreads('开始正文写作')
       pushIfMissing(stats.outlineCount > 0, '请先生成故事大纲，再开始正文写作。')
-      pushIfMissing(stats.timelineCount > 0, '请先补齐时间轴，再开始正文写作。')
+      pushIfMissing(stats.timelineCount > 0, '缺少时间轴，无法开始正文写作。')
       requireFreshAssets('开始正文写作')
       requireFreshStoryMemory('开始正文写作')
       requireFreshChapterContext('开始正文写作')

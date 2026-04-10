@@ -33,6 +33,7 @@ import {
   WorkspaceMetric,
   WorkspacePage,
   WorkspacePanel,
+  WorkspaceStepGuide,
 } from '../components/WorkspaceShell'
 import {
   EMPTY_WORKFLOW_STATS,
@@ -579,9 +580,9 @@ export default function StudioPage({ novelId }: Props) {
       desc: contextStatus?.staleChapterCount
         ? '正文里还有章节挂着旧上下文，继续量产会放大承接断层。'
         : '当前正文与最新设定基本一致，可以继续推进。',
-      hint: contextStatus?.staleChapterCount
-        ? '建议先去修订中心或正文页处理这些章节。'
-        : '当前不需要额外回补章节同步。',
+        hint: contextStatus?.staleChapterCount
+          ? '这些章节需要处理。'
+          : '当前不需要额外回补章节同步。',
       tone: contextStatus?.staleChapterCount ? 'stale' : 'ok',
       tags: [] as string[],
     },
@@ -591,9 +592,9 @@ export default function StudioPage({ novelId }: Props) {
       desc: contextStatus?.staleCheckpointCount
         ? '长期记忆还是旧版本，继续跑大纲或正文会沿用旧长程记忆。'
         : '长期记忆检查点已跟上当前设定。',
-      hint: contextStatus?.staleCheckpointCount
-        ? '建议先刷新故事记忆，再继续后台编排。'
-        : '可以直接继续后续编排动作。',
+        hint: contextStatus?.staleCheckpointCount
+          ? '这些检查点需要刷新。'
+          : '可以直接继续后续编排动作。',
       tone: contextStatus?.staleCheckpointCount ? 'warn' : 'ok',
       tags: [] as string[],
     },
@@ -603,9 +604,9 @@ export default function StudioPage({ novelId }: Props) {
       desc: contextStatus?.staleAssetCount
         ? '部分世界资产仍挂着旧设定，后续时间轴和故事弧会继续吃到旧上下文。'
         : '关键世界资产没有发现明显的设定滞后。',
-      hint: contextStatus?.staleAssetCount
-        ? '建议先回到对应页面重生成或手动校准。'
-        : '当前资产层可继续支撑后续生成。',
+        hint: contextStatus?.staleAssetCount
+          ? '这些资产需要处理。'
+          : '当前资产可继续支撑后续生成。',
       tone: contextStatus?.staleAssetCount ? 'warn' : 'ok',
       tags: contextStatus?.staleAssetCount ? staleAssetTagList : [],
     },
@@ -619,6 +620,16 @@ export default function StudioPage({ novelId }: Props) {
       eyebrow="小说总控台"
       title="底盘、资产与质量统一编排"
       description="统一查看底盘完成度、资产生成状态和质量风险。"
+      guide={(
+        <WorkspaceStepGuide
+          title="进入总控台先做什么"
+          steps={[
+            { title: '先看下一步与阻塞项', description: '顶层先确认当前最缺的动作、上下文是否过期、是否还有高优先级修订任务。', status: 'focus' },
+            { title: '再决定跑批量动作还是进页面精修', description: '能直接编排就执行动作卡；遇到人物、地图、线程等复杂问题时直接跳转到专业页。', status: 'todo' },
+            { title: '最后处理系统修复闭环', description: '高优先级系统任务优先处理，避免旧上下文和旧资产继续污染后续生成。', status: 'todo' },
+          ]}
+        />
+      )}
       actions={(
         <Space wrap>
           <Button
@@ -656,7 +667,7 @@ export default function StudioPage({ novelId }: Props) {
       )}
       aside={(
         <>
-          <WorkspacePanel title="质量控制台" description="当前最值得优先处理的问题。">
+          <WorkspacePanel title="质量控制台" description="当前最值得优先处理的问题。" scrollable sticky>
             <div className="studio-health-card">
               <div className="studio-health-card__score">
                 <strong>{consistencyReport?.readinessScore ?? '--'}</strong>
@@ -732,7 +743,7 @@ export default function StudioPage({ novelId }: Props) {
           showIcon
           style={{ marginBottom: 20 }}
           message={`有 ${contextStatus.staleChapterCount} 章正文仍未同步到最新设定`}
-          description="如果继续批量生成，旧上下文会继续放大问题。建议先去修订中心或正文页处理这些章节。"
+        description="这些章节仍在引用旧上下文。"
         />
       ) : null}
 
@@ -742,7 +753,7 @@ export default function StudioPage({ novelId }: Props) {
           showIcon
           style={{ marginBottom: 20 }}
           message={`有 ${contextStatus.staleCheckpointCount} 份长期记忆检查点待刷新`}
-          description="检查点过期时，后续大纲、时间轴和正文会继续引用旧的长期记忆。建议先刷新故事记忆，再继续批量推进。"
+        description="这些长期记忆检查点仍是旧版本。"
         />
       ) : null}
 
@@ -752,7 +763,7 @@ export default function StudioPage({ novelId }: Props) {
           showIcon
           style={{ marginBottom: 20 }}
           message={`这些世界资产可能还挂着旧设定：${contextStatus.staleAssetLabels.join('、')}`}
-          description="资产层如果还停在旧设定上，后续时间轴、故事弧和正文会持续继承错误上下文。建议先回到对应页面重生成或手动校准。"
+        description="这些世界资产仍在引用旧设定。"
         />
       ) : null}
 
@@ -762,13 +773,13 @@ export default function StudioPage({ novelId }: Props) {
           showIcon
           style={{ marginBottom: 20 }}
           message="结构体检发现高优先风险"
-          description="这不一定阻止你继续创作，但会显著提高后续时间轴、正文和人物设定的冲突概率。"
+        description="这些问题会影响后续时间轴、正文和人物设定。"
         />
       ) : null}
 
       <WorkspacePanel
         title="故事底盘"
-        description="先确认立项、设定、文风和主线设计是否收口。"
+        description="显示立项、设定、文风和主线设计状态。"
         extra={<div className="studio-panel-pill">{`完成 ${readyReadinessCount}/${readinessCards.length}`}</div>}
       >
         <div className="studio-bible-board">
@@ -807,7 +818,7 @@ export default function StudioPage({ novelId }: Props) {
 
       <WorkspacePanel
         title="编排动作"
-        description="先跑最缺的那一步，也可以直接逐项修。每个动作都带着真实前置依赖，不会盲目乱跑。"
+          description="显示当前可执行动作。"
         extra={nextAction ? <div className="studio-panel-pill studio-panel-pill--warm">{`推荐下一步：${nextAction.title}`}</div> : null}
       >
         <div className="studio-action-grid">
@@ -839,7 +850,7 @@ export default function StudioPage({ novelId }: Props) {
         </div>
       </WorkspacePanel>
 
-      <WorkspacePanel title="质量预警" description="把重复、逻辑断裂和上下文污染提前暴露，不要等到正文里才发现。">
+      <WorkspacePanel title="质量预警" description="显示重复、逻辑断裂和上下文污染。">
         <div className="studio-quality-strip">
           <div className="studio-quality-strip__progress">
             <div className="studio-quality-strip__head">

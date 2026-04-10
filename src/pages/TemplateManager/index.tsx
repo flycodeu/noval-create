@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import {
-  Tabs, Button, Modal, Form, Input, Select, Card, Tag, message, Empty, Tooltip
+  Tabs, Button, Modal, Form, Input, Select, Card, Tag, message, Empty
 } from 'antd'
 import { PlusOutlined, DeleteOutlined, EditOutlined, LockOutlined } from '@ant-design/icons'
 import { Template } from '../../types'
@@ -108,16 +108,15 @@ export default function TemplateManager() {
               key={tmpl.id}
               style={{ background: 'var(--color-bg-card)', border: '1px solid var(--border-color)' }}
               actions={[
-                <Tooltip title={tmpl.isBuiltin ? '内置模板只读' : '编辑'} key="edit">
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<EditOutlined />}
-                    onClick={() => handleEdit(tmpl)}
-                  >
-                    {tmpl.isBuiltin ? '查看' : '编辑'}
-                  </Button>
-                </Tooltip>,
+                <Button
+                  key="edit"
+                  type="text"
+                  size="small"
+                  icon={<EditOutlined />}
+                  onClick={() => handleEdit(tmpl)}
+                >
+                  {tmpl.isBuiltin ? '查看' : '编辑'}
+                </Button>,
                 !tmpl.isBuiltin && (
                   <Button
                     key="delete"

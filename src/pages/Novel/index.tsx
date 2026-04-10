@@ -690,28 +690,6 @@ export default function NovelRouter() {
             <h1 className="novel-sidebar__title">{currentNovel?.title || '未命名小说'}</h1>
             <span className="novel-sidebar__title-meta">{`${workspaceReadyCount}/${workspaceTotalCount}`}</span>
           </div>
-          <div className="novel-sidebar__summary-copy">
-            {currentNovel?.synopsis?.trim() || '先补一句话简介和基础背景，后面的角色、世界和正文都会沿着这里展开。'}
-          </div>
-        </div>
-
-        <div className="novel-sidebar__progress-card">
-          <div className="novel-sidebar__progress-head">
-            <span className="novel-sidebar__progress-label">整体进度</span>
-            <span className="novel-sidebar__progress-value">{`${workspaceReadyCount}/${workspaceTotalCount}`}</span>
-          </div>
-          <div className="novel-sidebar__progress-copy">
-            {`${workspaceReadyCount} 个模块已就绪，当前继续沿主流程往下推进。`}
-          </div>
-          <button
-            type="button"
-            className="novel-sidebar__recommend"
-            disabled={currentPage === recommendedKey}
-            onClick={() => navigate(`/novels/${novelId}/${recommendedKey}`)}
-          >
-            <span>当前建议</span>
-            <strong>{recommendedPageMeta?.label || '继续推进'}</strong>
-          </button>
         </div>
 
         <div className="novel-sidebar__nav">
@@ -773,7 +751,6 @@ export default function NovelRouter() {
               <Button
                 icon={<RollbackOutlined />}
                 disabled={!latestUndoable}
-                title={latestUndoable?.summary || '没有可撤销的最近操作'}
                 onClick={() => {
                   if (!latestUndoable) return
                   void window.electron.history.undo(latestUndoable.id)

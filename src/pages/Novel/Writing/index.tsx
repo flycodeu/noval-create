@@ -31,7 +31,7 @@ import type {
 } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
 import { useTaskStore } from '../../../stores/task.store'
-import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage } from '../components/WorkspaceShell'
+import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspaceStepGuide } from '../components/WorkspaceShell'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import './index.css'
 
@@ -132,7 +132,7 @@ const formatChapterNumber = (chapterNum?: number) => typeof chapterNum === 'numb
 const getStatusLabel = (status?: Chapter['status']) => STATUS_OPTIONS.find((item) => item.value === status)?.label || '未设置'
 const getIssueColor = (severity: 'high' | 'medium' | 'low') => severity === 'high' ? 'error' : severity === 'medium' ? 'warning' : 'default'
 const getIssueLabel = (severity: 'high' | 'medium' | 'low') => severity === 'high' ? '高优先' : severity === 'medium' ? '中优先' : '低优先'
-const getHealthLabel = (score: number) => (score >= 80 ? '结构稳定' : score >= 60 ? '可继续推进' : '建议先修问题')
+const getHealthLabel = (score: number) => (score >= 80 ? '结构稳定' : score >= 60 ? '可继续推进' : '需要处理问题')
 const getPublishCheckAlertType = (check: ChapterPublishCheck | null) => {
   if (!check) return 'info'
   if (!check.ready) return 'error'
@@ -745,7 +745,7 @@ export default function Writing({ novelId }: Props) {
       if (nextPublishCheck.warningCount > 0) {
         const shouldContinue = await new Promise<boolean>((resolve) => {
           Modal.confirm({
-            title: '发布前仍有提醒项',
+            title: '发布前仍有待处理项',
             content: (
               <div className="novel-note-list" style={{ marginTop: 12 }}>
                 <div className="novel-note-list__item">{nextPublishCheck.summary}</div>
@@ -912,18 +912,29 @@ export default function Writing({ novelId }: Props) {
     <WorkspacePage
       className="novel-writing-page"
       layout="wide"
+      scrollMode="document"
       eyebrow="正文工作台"
       title="正文写作"
       description="在同一个工作台里完成场景计划、AI 主写、自动审校、修订定稿、长文记忆和一致性检查。"
       heroVariant="compact"
+      guide={(
+        <WorkspaceStepGuide
+          title="进入正文页先做什么"
+          steps={[
+            { title: '先切到当前要写的章节', description: '左侧章节列表保留独立切换，正文主编辑区继续采用长文阅读与编辑模式。', status: 'focus' },
+            { title: '再看流水线与审校提示', description: '本章先确认场景计划、审校结论、发布前检查，再决定是续写、局部修复还是回结构页。', status: 'todo' },
+            { title: '最后做局部重写或入库', description: '正文页优先做选区重写和本章修复，不把非正文页那种分栏规则强行套进长文编辑。', status: 'done' },
+          ]}
+        />
+      )}
       actions={(
         <>
           <Button icon={<PlusOutlined />} onClick={() => void handleAddChapter()}>新建章节</Button>
           {generating
-            ? <Button danger icon={<LoadingOutlined />} onClick={() => void handleCancelGenerate()}>取消流水线</Button>
-            : <Button type="primary" icon={<RobotOutlined />} disabled={!currentChapter} onClick={() => void handleGenerateContent()}>运行章节流水线</Button>}
-          <Button icon={<BulbOutlined />} disabled={!currentChapter} onClick={() => void handleGenerateSummary()}>更新记忆</Button>
-          <Button icon={<FileSearchOutlined />} disabled={!currentChapter} onClick={() => void handleAiCheck()}>AI 检测</Button>
+            ? <Button danger icon={<LoadingOutlined />} onClick={() => void handleCancelGenerate()}>停止 AI 流水线</Button>
+            : <Button type="primary" icon={<RobotOutlined />} disabled={!currentChapter} onClick={() => void handleGenerateContent()}>AI 生成·章节流水线</Button>}
+          <Button icon={<BulbOutlined />} disabled={!currentChapter} onClick={() => void handleGenerateSummary()}>AI 修复·更新记忆</Button>
+          <Button icon={<FileSearchOutlined />} disabled={!currentChapter} onClick={() => void handleAiCheck()}>AI 修复·章节检测</Button>
         </>
       )}
       metrics={(
@@ -1025,7 +1036,7 @@ export default function Writing({ novelId }: Props) {
                       type="warning"
                       style={{ marginBottom: 16 }}
                       message="当前章节上下文已过期"
-                      description={`受这些变更影响：${currentChapterStaleReasons.join('；')}。建议先刷新摘要/记忆，必要时重新生成或回查本章承接。`}
+                      description={`受这些变更影响：${currentChapterStaleReasons.join('；')}。需要刷新摘要或记忆，并检查本章承接。`}
                     />
                   ) : null}
                   {currentChapterStaleReasons.length === 0 && otherStaleChapterCount > 0 ? (
@@ -1043,7 +1054,7 @@ export default function Writing({ novelId }: Props) {
                       type={getPublishCheckAlertType(publishCheck)}
                       style={{ marginBottom: 16 }}
                       message={`发布前检查：${publishCheck.summary}`}
-                      description={`阻塞 ${publishCheck.blockerCount} 项，提醒 ${publishCheck.warningCount} 项。标记完成时会再次自动复检。`}
+                      description={`阻塞 ${publishCheck.blockerCount} 项，中优先 ${publishCheck.warningCount} 项。标记完成时会再次自动复检。`}
                     />
                   ) : null}
                   {hasMultiSegments ? (
@@ -1169,7 +1180,7 @@ export default function Writing({ novelId }: Props) {
                     {publishCheck ? (
                       <StringList
                         items={publishCheck.checklist.map((item) => {
-                          const prefix = item.status === 'pass' ? '通过' : item.status === 'warning' ? '提醒' : '阻塞'
+                          const prefix = item.status === 'pass' ? '通过' : item.status === 'warning' ? '中优先' : '阻塞'
                           return `${prefix} · ${item.label}：${item.detail}`
                         })}
                         empty="当前没有发布前检查结果。"
@@ -1188,7 +1199,7 @@ export default function Writing({ novelId }: Props) {
                   <InsightCard title="世界状态概览" eyebrow="总账 / 冲突实体" tone="soft">
                     <WorldStateHealthCard dashboard={qualityDashboard} />
                   </InsightCard>
-                  <InsightCard title="AI 评分与复检" eyebrow="局部诊断" tone="soft">
+                  <InsightCard title="AI 检测与复检" eyebrow="局部诊断" tone="soft">
                     <AIScorePanel
                       getContent={() => normalizeEditorText(editorRef.current?.innerText || content)}
                       contentType="chapter"
@@ -1482,7 +1493,7 @@ function storyAlertColor(severity: QualityDashboardData['storyPacingAlerts'][num
 }
 
 function storyAlertLabel(severity: QualityDashboardData['storyPacingAlerts'][number]['severity']) {
-  return severity === 'blocker' ? '高风险' : '提醒'
+  return severity === 'blocker' ? '阻塞' : '中优先'
 }
 
 function worldStateAlertColor(severity: QualityDashboardData['recentWorldStateAlerts'][number]['severity']) {
@@ -1610,7 +1621,7 @@ function LanguageDriftHealthCard({
       {topRiskMetrics.length > 0 ? (
         <div className="novel-note-list">
           <div className="novel-note-list__item">
-            全书当前最高风险：{topRiskMetrics.map((item) => `${item.label} ${item.value}`).join('、')}
+            全书当前最高优先问题：{topRiskMetrics.map((item) => `${item.label} ${item.value}`).join('、')}
           </div>
           <div className="novel-note-list__item">
             趋势状态：恶化 {dashboard.novelLanguageDriftSummary.statusBreakdown.worsening} 项，改善 {dashboard.novelLanguageDriftSummary.statusBreakdown.improving} 项，稳定 {dashboard.novelLanguageDriftSummary.statusBreakdown.stable} 项。

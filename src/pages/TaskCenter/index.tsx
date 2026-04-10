@@ -62,8 +62,8 @@ const TYPE_LABELS: Record<string, string> = {
   chapter_write: 'AI 章节正文',
   summary: '刷新章节记忆',
   continuity: '连续性检查',
-  review: 'AI 审校修订',
-  ai_check: 'AI 痕迹检测',
+  review: 'AI 评审·修订建议',
+  ai_check: 'AI 检测·AI 痕迹',
   expand_background: 'AI 扩展背景',
   generate_relations: 'AI 生成人物关系',
   generate_map: 'AI 生成地图',
@@ -319,9 +319,9 @@ export default function TaskCenter() {
             : '正在读取当前小说的章节同步状态。',
           hint: selectedContextStatus
             ? selectedContextStatus.staleChapterCount > 0
-              ? '继续相关任务前，建议先去修订中心或正文页回查。'
+              ? '需要先回查相关章节。'
               : '章节层不需要额外回补，可以继续当前任务。'
-            : '稍后会自动补全建议。',
+            : '稍后会自动补全状态。',
           tone: selectedContextStatus?.staleChapterCount ? 'stale' : 'ok',
           tags: [] as string[],
         },
@@ -339,9 +339,9 @@ export default function TaskCenter() {
             : '正在读取长期记忆检查点状态。',
           hint: selectedContextStatus
             ? selectedContextStatus.staleCheckpointCount > 0
-              ? '建议先刷新故事记忆，再继续后台流程。'
+              ? '需要先刷新故事记忆。'
               : '当前可以直接继续恢复或查看后续结果。'
-            : '稍后会自动补全建议。',
+            : '稍后会自动补全状态。',
           tone: selectedContextStatus?.staleCheckpointCount
             ? (isPausedWorkflowTask ? 'stale' : 'warn')
             : 'ok',
@@ -361,9 +361,9 @@ export default function TaskCenter() {
             : '正在读取资产新鲜度状态。',
           hint: selectedContextStatus
             ? selectedContextStatus.staleAssetCount > 0
-              ? '建议先回到对应页面重生成或手动校准。'
-              : '当前资产层可以继续支撑该任务。'
-            : '稍后会自动补全建议。',
+              ? '需要先处理相关资产。'
+              : '当前资产可以继续支撑该任务。'
+            : '稍后会自动补全状态。',
           tone: selectedContextStatus?.staleAssetCount
             ? (isPausedWorkflowTask ? 'stale' : 'warn')
             : 'ok',
@@ -528,7 +528,7 @@ export default function TaskCenter() {
       : null
     const observabilityLines = [
       typeof draft?.inputSummary === 'string' && draft.inputSummary.trim() ? `输入摘要：${draft.inputSummary.trim()}` : '',
-      Array.isArray(draft?.warnings) && draft.warnings.length > 0 ? `生成提醒：${draft.warnings.join('；')}` : '',
+      Array.isArray(draft?.warnings) && draft.warnings.length > 0 ? `生成修补提示：${draft.warnings.join('；')}` : '',
       Array.isArray(draft?.lintWarnings) && draft.lintWarnings.length > 0 ? `语言 lint：${draft.lintWarnings.join('；')}` : '',
       Array.isArray(draft?.diffSummary) && draft.diffSummary.length > 0 ? `人工修改差异：${draft.diffSummary.join('；')}` : '',
       assetReview?.targetType ? `资产类型：${getAssetReviewTargetLabel(assetReview.targetType)}` : '',
@@ -585,6 +585,7 @@ export default function TaskCenter() {
     >
       <div className="novel-split novel-split--sidebar">
         <WorkspacePanel
+          scrollable
           title="任务列表"
           description="左侧按状态和类型筛选并分页查看，右侧看完整输出、请求上下文和错误信息。"
           extra={(
@@ -675,6 +676,7 @@ export default function TaskCenter() {
         </WorkspacePanel>
 
         <WorkspacePanel
+          scrollable
           title={selectedTask ? `任务详情 · ${getTaskTypeLabel(selectedTask.type)}` : '任务详情'}
           description="集中查看状态、报错、流式输出和请求上下文。"
           extra={selectedTask ? (
@@ -764,7 +766,7 @@ export default function TaskCenter() {
                 <Alert
                   type="warning"
                   showIcon
-                  message="恢复前建议先刷新故事记忆"
+                  message="恢复前需刷新故事记忆"
                   description={`当前有 ${selectedContextStatus.staleCheckpointCount} 份长期记忆检查点待刷新。直接继续后台流程，会沿用旧的长程记忆。`}
                 />
               ) : null}
@@ -773,7 +775,7 @@ export default function TaskCenter() {
                 <Alert
                   type="warning"
                   showIcon
-                  message="恢复前建议先校准相关世界资产"
+                  message="恢复前需处理相关世界资产"
                   description={`这些资产可能还挂着旧设定：${selectedContextStatus.staleAssetLabels.join('、')}。直接继续流程会把旧资产继续写进后续结果。`}
                 />
               ) : null}

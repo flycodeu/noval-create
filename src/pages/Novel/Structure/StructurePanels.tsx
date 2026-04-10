@@ -155,12 +155,7 @@ export function StructureCheckpointsPanel({
 }
 
 export function StructureAsideTip() {
-  return (
-    <WorkspaceTip title="使用原则">
-      <div>卷负责阶段，部负责段落，章负责推进，场景负责最小可写单元。</div>
-      <div>改结构时优先改当前路径，不要一次展开整棵树。</div>
-    </WorkspaceTip>
-  )
+  return null
 }
 
 interface StructureVolumesPanelProps {

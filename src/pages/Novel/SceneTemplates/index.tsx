@@ -246,13 +246,13 @@ export default function SceneTemplatesPage({ novelId }: Props) {
                   <List.Item.Meta
                     title={(
                       <div className="novel-resource-workspace__title-row">
-                        <strong className="novel-resource-workspace__title-text" title={item.name}>{item.name}</strong>
+                        <strong className="novel-resource-workspace__title-text">{item.name}</strong>
                         <Tag>{CATEGORY_OPTIONS.find((option) => option.value === item.category)?.label || item.category}</Tag>
                         {item.isBuiltin > 0 ? <Tag color="gold">内置</Tag> : <Tag color="blue">自定义</Tag>}
                       </div>
                     )}
                     description={(
-                      <div className="novel-resource-workspace__desc" title={item.description || item.emotionArc || '还没有写清模板说明。'}>
+                      <div className="novel-resource-workspace__desc">
                         {item.description || item.emotionArc || '还没有写清模板说明。'}
                       </div>
                     )}

@@ -16,14 +16,12 @@ import {
   message,
 } from 'antd'
 import {
-  DownOutlined,
   DeleteOutlined,
   PlusOutlined,
   ReloadOutlined,
   RobotOutlined,
   SaveOutlined,
   StopOutlined,
-  UpOutlined,
 } from '@ant-design/icons'
 import type { Task, WorldRulesAutoGenerateStatus } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
@@ -113,57 +111,6 @@ function RuleListCard({
         {extra ? <div>{extra}</div> : null}
       </div>
       <div className="novel-subpanel__body">{children}</div>
-    </section>
-  )
-}
-
-function TaskStrip({
-  title,
-  summary,
-  actions,
-  tone = 'info',
-  children,
-}: {
-  title: string
-  summary: React.ReactNode
-  actions?: React.ReactNode
-  tone?: 'info' | 'success' | 'warning' | 'error'
-  children: React.ReactNode
-}) {
-  const [expanded, setExpanded] = useState(false)
-  const palette = {
-    info: { border: 'rgba(59, 109, 138, 0.22)', glow: 'rgba(18, 90, 124, 0.14)', pillBg: 'rgba(25, 112, 150, 0.12)', pillText: '#0C607B' },
-    success: { border: 'rgba(63, 138, 96, 0.22)', glow: 'rgba(42, 108, 77, 0.14)', pillBg: 'rgba(49, 136, 87, 0.12)', pillText: '#236C47' },
-    warning: { border: 'rgba(174, 124, 48, 0.22)', glow: 'rgba(136, 93, 30, 0.14)', pillBg: 'rgba(189, 137, 56, 0.14)', pillText: '#8E5E1B' },
-    error: { border: 'rgba(176, 68, 68, 0.22)', glow: 'rgba(124, 40, 40, 0.14)', pillBg: 'rgba(183, 68, 68, 0.14)', pillText: '#8A3131' },
-  }[tone]
-
-  return (
-    <section
-      style={{
-        border: `1px solid ${palette.border}`,
-        borderRadius: 24,
-        background: 'linear-gradient(180deg, rgba(255,255,255,0.96), rgba(247,241,232,0.92))',
-        boxShadow: `0 18px 34px ${palette.glow}`,
-        backdropFilter: 'blur(10px)',
-        padding: 18,
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-        <div style={{ minWidth: 0, flex: '1 1 420px', display: 'grid', gap: 10 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', padding: '5px 12px', borderRadius: 999, background: palette.pillBg, color: palette.pillText, fontSize: 12, fontWeight: 700 }}>{title}</span>
-            <div style={{ color: 'rgba(58, 45, 33, 0.86)', fontSize: 13, lineHeight: 1.7 }}>{summary}</div>
-          </div>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, flexWrap: 'wrap', flex: '0 1 auto' }}>
-          {actions}
-          <Button size="small" type="text" icon={expanded ? <UpOutlined /> : <DownOutlined />} onClick={() => setExpanded((current) => !current)}>
-            {expanded ? '收起详情' : '展开详情'}
-          </Button>
-        </div>
-      </div>
-      {expanded ? <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px dashed rgba(122, 93, 52, 0.16)' }}>{children}</div> : null}
     </section>
   )
 }
@@ -787,35 +734,23 @@ export default function WorldRules({ novelId }: Props) {
     },
   ]
 
-  const autoTaskTone = autoTask?.status === 'failed'
-    ? 'error'
-    : autoTask?.status === 'paused'
-      ? 'warning'
-      : autoTask?.status === 'success'
-        ? 'success'
-        : 'info'
-
   const autoTaskActions = (
     <Space wrap>
-      {!autoTask || !['running', 'cancel_requested', 'paused'].includes(autoTask.status || '') ? <Button type="primary" icon={<RobotOutlined />} loading={autoLoading} disabled={saving || isGenerating} onClick={() => void handleStartAutoGenerate()}>启动自动分批</Button> : null}
-      {autoTask?.status === 'paused' ? <Button icon={<ReloadOutlined />} loading={autoLoading} disabled={saving || isGenerating} onClick={() => void handleResumeAutoGenerate()}>继续</Button> : null}
-      {hasRunningAutoTask ? <Button danger icon={<StopOutlined />} loading={autoStopping} onClick={() => void handleStopAutoGenerate()}>停止</Button> : null}
+      {!autoTask || !['running', 'cancel_requested', 'paused'].includes(autoTask.status || '') ? <Button type="primary" icon={<RobotOutlined />} loading={autoLoading} disabled={saving || isGenerating} onClick={() => void handleStartAutoGenerate()}>后台连续生成</Button> : null}
+      {autoTask?.status === 'paused' ? <Button icon={<ReloadOutlined />} loading={autoLoading} disabled={saving || isGenerating} onClick={() => void handleResumeAutoGenerate()}>继续生成</Button> : null}
+      {hasRunningAutoTask ? <Button danger icon={<StopOutlined />} loading={autoStopping} onClick={() => void handleStopAutoGenerate()}>停止生成</Button> : null}
     </Space>
   )
-
-  const autoTaskSummary = autoTask
-    ? `状态 ${autoTask.status || 'idle'} · 当前分区 ${autoStatus.currentSectionLabel || '-'} · 已完成 ${autoStatus.completedSectionCount} · 待完成 ${autoStatus.pendingSectionCount}${autoStatus.lastError ? ` · ${autoStatus.lastError}` : ''}`
-    : '当前没有运行中的自动分批任务。启动后会按世界概览、力量体系、种族势力、人物生态、地图蓝图、时间规则、文风约束顺序持续补全草稿。'
 
   return (
     <WorkspacePage
       eyebrow="世界规则"
       title="世界规则"
-      description="基于背景、基础设定和题材，把世界运行逻辑拆成分区，再让 AI 逐步生成、暂停、继续和恢复草稿。"
+      description="按分区维护世界规则。"
       actions={(
         <Space wrap>
           <Button icon={<RobotOutlined />} loading={runningAction === 'all-generate'} disabled={saving || isGenerating || hasRunningAutoTask || autoTask?.status === 'paused'} onClick={() => void handleGenerateWorldRules('all', 'generate')}>
-            {'AI 分批生成'}
+            {'生成全部分区'}
           </Button>
           <Button icon={<ReloadOutlined />} loading={runningAction === 'section-generate'} disabled={saving || isGenerating || hasRunningAutoTask || autoTask?.status === 'paused'} onClick={() => void handleGenerateWorldRules('section', 'generate')}>
             {'生成当前分区'}
@@ -841,38 +776,6 @@ export default function WorldRules({ novelId }: Props) {
         </>
       )}
       contextSummary={<WorkspaceContextSummary items={[{ label: '题材', value: liveRules.genreProfile.name || currentNovel?.genreName || '未设置' }, { label: '当前分区', value: activeSectionMeta.label }, { label: '时间制度', value: calendarLabel }, { label: '文风约束', value: `${activeLanguageRules} 项硬约束 / ${liveRules.writingConstraints.forbiddenPhrases.length} 条禁用语` }]} />}
-      aside={(
-        <WorkspacePanel title="使用建议" description="先把核心上下文补齐，再让 AI 连续分步生成。">
-          <div className="novel-note-list">
-            <div className="novel-note-list__item">先补齐基础背景和核心设定，再生成世界规则。</div>
-            <div className="novel-note-list__item">建议优先生成世界概览、地图蓝图、时间规则和文风约束。</div>
-            <div className="novel-note-list__item">自动分批任务会把每一步结果持续写回当前草稿，但不会直接覆盖已保存规则。</div>
-            <div className="novel-note-list__item">暂停中的自动草稿支持继续；清空或保存时会同步清掉这份后台草稿。</div>
-          </div>
-        </WorkspacePanel>
-      )}
-      footerBar={(
-        <TaskStrip title="世界规则自动分批" summary={autoTaskSummary} actions={autoTask?.status === 'paused' || hasRunningAutoTask ? autoTaskActions : undefined} tone={autoTaskTone}>
-          <Alert
-            type={autoTask?.status === 'failed' ? 'error' : autoTask?.status === 'paused' ? 'warning' : autoTask?.status === 'success' ? 'success' : 'info'}
-            showIcon
-            message={autoTask ? (autoStatus.message || '世界规则自动任务正在处理当前分区。') : '当前还没有自动分批任务'}
-            description={autoTask ? (autoStatus.lastError || (autoStatus.currentSectionLabel ? `当前分区：${autoStatus.currentSectionLabel}` : '系统会逐步检查并继续执行剩余分区。')) : '点击上方按钮后，系统会按世界概览、力量体系、种族势力、人物生态、地图蓝图、时间规则、文风约束的顺序自动生成。'}
-          />
-          <div style={{ marginTop: 16, display: 'grid', gap: 16 }}>
-            <Progress percent={autoPercent} status={autoTask?.status === 'failed' ? 'exception' : autoTask?.status === 'success' ? 'success' : 'active'} />
-            <div className="novel-note-list">
-              <div className="novel-note-list__item">{`任务状态：${autoTask?.status || 'idle'}`}</div>
-              <div className="novel-note-list__item">{`当前分区：${autoStatus.currentSectionLabel || '-'}`}</div>
-              <div className="novel-note-list__item">{`已完成分区：${autoStatus.completedSectionCount}`}</div>
-              <div className="novel-note-list__item">{`待完成分区：${autoStatus.pendingSectionCount}`}</div>
-              <div className="novel-note-list__item">{`累计总分区：${autoStatus.totalSections}`}</div>
-              <div className="novel-note-list__item">{`当前重试次数：${autoStatus.retryCount}`}</div>
-            </div>
-            {autoStatus.failedSections.length > 0 ? <div className="novel-note-list">{autoStatus.failedSections.map((item) => <div key={item.key} className="novel-note-list__item">{`${item.label}：${item.error}`}</div>)}</div> : null}
-          </div>
-        </TaskStrip>
-      )}
     >
       {generationProgress ? (
         <Alert
@@ -887,6 +790,30 @@ export default function WorldRules({ novelId }: Props) {
       ) : (
         <div className="novel-pill" style={{ marginBottom: 18 }}>{tokenCount > 0 ? `当前规则体量约 ${tokenCount} token` : '当前规则体量尚未形成'}</div>
       )}
+      <WorkspacePanel title="后台连续生成" extra={autoTaskActions}>
+        <div style={{ display: 'grid', gap: 12 }}>
+          <Alert
+            type={autoTask?.status === 'failed' ? 'error' : autoTask?.status === 'paused' ? 'warning' : autoTask?.status === 'success' ? 'success' : 'info'}
+            showIcon
+            message={autoTask ? `状态：${autoTask.status || 'idle'}` : '当前没有后台任务'}
+            description={autoTask
+              ? [autoStatus.currentSectionLabel ? `当前分区：${autoStatus.currentSectionLabel}` : '', `已完成 ${autoStatus.completedSectionCount}/${autoStatus.totalSections || WORLD_RULE_SECTION_ORDER.length}`, autoStatus.lastError || autoStatus.message || '']
+                .filter(Boolean)
+                .join(' · ')
+              : '需要时再启动，系统会按分区连续生成当前草稿。'}
+          />
+          {autoTask ? (
+            <Progress percent={autoPercent} status={autoTask.status === 'failed' ? 'exception' : autoTask.status === 'success' ? 'success' : 'active'} />
+          ) : null}
+          {autoStatus.failedSections.length > 0 ? (
+            <div className="novel-note-list">
+              {autoStatus.failedSections.map((item) => (
+                <div key={item.key} className="novel-note-list__item">{`${item.label}：${item.error}`}</div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </WorkspacePanel>
       <WorkspacePanel title="分区编辑器" description="按分区维护世界规则，便于与地图、人物、时间轴持续联动。" extra={<div className="novel-pill">{`当前分区：${activeSectionMeta.label}`}</div>}>
         <Form form={form} layout="vertical" disabled={hasRunningAutoTask}>
           <Tabs className="novel-editor-tabs" items={tabItems} activeKey={activeTab} onChange={(key) => setActiveTab(key as WorldRuleSectionKey)} />
@@ -895,4 +822,3 @@ export default function WorldRules({ novelId }: Props) {
     </WorkspacePage>
   )
 }
-

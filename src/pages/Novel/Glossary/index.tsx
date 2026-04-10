@@ -289,13 +289,13 @@ export default function GlossaryPage({ novelId }: Props) {
                   <List.Item.Meta
                     title={(
                       <div className="novel-resource-workspace__title-row">
-                        <strong className="novel-resource-workspace__title-text" title={item.term}>{item.term}</strong>
+                        <strong className="novel-resource-workspace__title-text">{item.term}</strong>
                         <Tag>{GLOSSARY_CATEGORY_OPTIONS.find((option) => option.value === item.category)?.label || item.category}</Tag>
                         {item.isCanonical > 0 ? <Tag color="success">规范</Tag> : <Tag>废弃</Tag>}
                       </div>
                     )}
                     description={(
-                      <div className="novel-resource-workspace__desc" title={item.definition || '还没有定义。'}>
+                      <div className="novel-resource-workspace__desc">
                         {item.definition || '还没有定义。'}
                       </div>
                     )}

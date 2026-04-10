@@ -14,9 +14,8 @@ import {
   Select,
   Spin,
   Steps,
-  Tag,
-  Tooltip,
-  message,
+    Tag,
+    message,
 } from 'antd'
 import type { MenuProps } from 'antd'
 import {
@@ -358,7 +357,7 @@ export default function NovelList() {
           items={[
             { title: '题材与模板' },
             { title: '原始背景' },
-            { title: 'AI 扩写' },
+            { title: 'AI 补全背景' },
             { title: '最终确认' },
           ]}
           style={{ marginBottom: 32 }}
@@ -479,7 +478,7 @@ export default function NovelList() {
                 { required: true, message: '请输入故事背景' },
                 { min: 20, message: '至少写 20 个字' },
               ]}
-              extra="用你自己的话描述故事处境、冲突、氛围或关键设定，写得越具体，AI 扩写越稳。"
+              extra="用你自己的话描述故事处境、冲突、氛围或关键设定，写得越具体，AI 补全背景越稳。"
             >
               <Input.TextArea
                 rows={7}
@@ -492,7 +491,7 @@ export default function NovelList() {
           {wizardStep === 2 && (
             <div style={{ display: 'flex', gap: 20 }}>
               <div style={{ flex: 1 }}>
-                <Form.Item name="expandedBackground" label="AI 扩写背景（可编辑）">
+                <Form.Item name="expandedBackground" label="AI 补全背景（可编辑）">
                   <Input.TextArea rows={10} />
                 </Form.Item>
               </div>
@@ -507,7 +506,7 @@ export default function NovelList() {
                     ))}
                   </Radio.Group>
                 </Form.Item>
-                <Form.Item name="synopsis" label="AI 生成简介（可编辑）">
+                <Form.Item name="synopsis" label="AI 生成·简介（可编辑）">
                   <Input.TextArea rows={5} />
                 </Form.Item>
                 <Button
@@ -549,7 +548,7 @@ export default function NovelList() {
             loading={wizardLoading}
             icon={wizardLoading ? <LoadingOutlined /> : undefined}
           >
-            {wizardStep === 3 ? '创建小说' : wizardStep === 1 ? 'AI 扩写' : '下一步'}
+            {wizardStep === 3 ? '创建小说' : wizardStep === 1 ? 'AI 补全背景' : '下一步'}
           </Button>
         </div>
       </Modal>
@@ -693,8 +692,7 @@ function NovelCard({
 
         <div className="novel-home-card__synopsis">{synopsis}</div>
 
-        <div className="novel-home-card__progress">
-          <Tooltip title={`${novel.totalWords.toLocaleString()} / ${targetWords.toLocaleString()} 字`}>
+          <div className="novel-home-card__progress">
             <Progress
               percent={progress}
               size="small"
@@ -702,10 +700,9 @@ function NovelCard({
               trailColor="rgba(255,255,255,0.08)"
               showInfo={false}
             />
-          </Tooltip>
-          <div className="novel-home-card__progress-meta">
-            <span>目标 {formatWordCount(targetWords)}</span>
-            <strong>{progress}%</strong>
+            <div className="novel-home-card__progress-meta">
+              <span>目标 {formatWordCount(targetWords)}</span>
+              <strong>{progress}%</strong>
           </div>
         </div>
       </div>

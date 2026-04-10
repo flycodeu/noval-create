@@ -206,7 +206,7 @@ function StoryThreadRow({
       <span className="story-threads__row-chapter">{formatChapter(thread.targetPayoffChapter)}</span>
       <Space size={4}>
         <Button size="small" onClick={() => onEdit(thread)}>编辑</Button>
-        <Button size="small" loading={regenerating} onClick={() => onRegenerate(thread)}>AI 重生成</Button>
+        <Button size="small" loading={regenerating} onClick={() => onRegenerate(thread)}>AI 修复·重做线程</Button>
         <Button size="small" danger icon={<DeleteOutlined />} onClick={() => onDelete(thread)} />
       </Space>
     </div>
@@ -533,7 +533,7 @@ export default function StoryThreadsPage({ novelId }: Props) {
             新建线程
           </Button>
           <Button icon={<RobotOutlined />} loading={generating} onClick={() => void openGenerateModal()}>
-            AI 批量生成
+            AI 生成·批量线程
           </Button>
           <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/structure`)}>
             去结构页
@@ -544,7 +544,7 @@ export default function StoryThreadsPage({ novelId }: Props) {
         <WorkspaceContextSummary
           items={[
             { label: '书名', value: currentNovel?.title || '未命名小说' },
-            { label: '故事设计', value: currentNovel?.settingsJson ? '已存在' : '建议先补故事设计' },
+            { label: '故事设计', value: currentNovel?.settingsJson ? '已存在' : '未设置' },
             { label: '背景摘要', value: compactText(currentNovel?.expandedBackground || currentNovel?.synopsis) },
             { label: '线程总数', value: stats.total },
           ]}
@@ -578,7 +578,7 @@ export default function StoryThreadsPage({ novelId }: Props) {
         <Alert
           type="info"
           showIcon
-          message="建议先把故事设计页里的主线目标、核心冲突和结局落点写稳，再批量生成线程，结果会更贴合主推进链。"
+          message="故事设计未完成"
         />
       ) : null}
 
@@ -586,7 +586,7 @@ export default function StoryThreadsPage({ novelId }: Props) {
         <Alert
           type="warning"
           showIcon
-          message="最近一次批量生成带有提醒"
+          message="最近一次批量生成附带修补提示"
           description={(
             <div>
               {generationWarnings.map((warning) => (
@@ -596,19 +596,6 @@ export default function StoryThreadsPage({ novelId }: Props) {
           )}
         />
       ) : null}
-
-      <WorkspacePanel title="使用原则" description="每条线程都要有起点、当前状态和回收条件。">
-        <div className="guided-step__checklist">
-          <div className="guided-step__checkitem guided-step__checkitem--done">
-            <div className="guided-step__checkhead"><strong>线程必须服务主线</strong></div>
-            <p>如果一条线既不推动主线、也不压迫人物关系、也不承担悬念回收，就不该继续保留。</p>
-          </div>
-          <div className="guided-step__checkitem guided-step__checkitem--done">
-            <div className="guided-step__checkhead"><strong>回收条件要可判断</strong></div>
-            <p>不要只写“情绪到位”或“关系升温”，要写清楚什么事件发生后才算真正回收。</p>
-          </div>
-        </div>
-      </WorkspacePanel>
 
       <WorkspacePanel title="线程看板" description="可手工维护，也可以先批量生成再逐条修。">
         <div style={{ marginBottom: 16 }}>
@@ -628,7 +615,7 @@ export default function StoryThreadsPage({ novelId }: Props) {
               type="info"
               showIcon
               message={`当前正文进度：第 ${foreshadowSnapshot.currentChapterNum || 0} 章`}
-              description="这里只显示具备回收目标、回收条件或承担悬念/回收职责的线程。"
+              description="显示具备回收目标、回收条件或承担悬念/回收职责的线程。"
             />
             <ForeshadowColumn title="待回收" items={foreshadowSnapshot.pending} />
             <ForeshadowColumn title="即将到期" items={foreshadowSnapshot.dueSoon} />
@@ -789,7 +776,7 @@ export default function StoryThreadsPage({ novelId }: Props) {
       </Modal>
 
       <Modal
-        title="AI 批量生成故事线程"
+        title="AI 生成·批量故事线程"
         open={generateOpen}
         forceRender
         onCancel={() => setGenerateOpen(false)}

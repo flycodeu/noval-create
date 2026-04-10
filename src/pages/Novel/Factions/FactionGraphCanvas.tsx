@@ -245,17 +245,17 @@ export default function FactionGraphCanvas({ data, selectedFactionId, onFactionS
 
   return (
     <div className="faction-graph-canvas" style={{ height: canvasHeight }}>
-      <div className="faction-graph-canvas__tools">
-        <button type="button" className="faction-graph-canvas__tool" onClick={handleFit} title="重置视图">
-          <AimOutlined />
-        </button>
-        <button type="button" className="faction-graph-canvas__tool" onClick={handleZoomIn} title="放大">
-          <PlusOutlined />
-        </button>
-        <button type="button" className="faction-graph-canvas__tool" onClick={handleZoomOut} title="缩小">
-          <MinusOutlined />
-        </button>
-      </div>
+        <div className="faction-graph-canvas__tools">
+          <button type="button" className="faction-graph-canvas__tool" onClick={handleFit}>
+            <AimOutlined />
+          </button>
+          <button type="button" className="faction-graph-canvas__tool" onClick={handleZoomIn}>
+            <PlusOutlined />
+          </button>
+          <button type="button" className="faction-graph-canvas__tool" onClick={handleZoomOut}>
+            <MinusOutlined />
+          </button>
+        </div>
       <ReactFlow
         nodes={nodes}
         edges={edges}
