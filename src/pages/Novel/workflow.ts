@@ -511,6 +511,7 @@ export function getWorkflowBlockers(
     case 'characters':
       requireWorldRules('生成人物')
       requireMap('生成人物')
+      requireItems('生成人物')
       break
     case 'items':
       requireWorldRules('生成物品')

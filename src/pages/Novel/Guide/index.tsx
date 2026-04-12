@@ -201,7 +201,7 @@ export default function GuidePage({ novelId }: Props) {
       preferredSpecies: characterPreset.preferredSpecies,
       factionBias: factionOptions.slice(0, 3),
       helperRoles: characterPreset.helperRoles,
-      specialRequirements: '人物必须继承题材、背景、势力、地图和后续事件关系，避免只补数量。',
+      specialRequirements: '人物必须继承题材、背景、势力、地图、现有物品装备和后续事件关系，避免只补数量。',
       batchSize: 6,
     })
   }, [characterPreset, factionOptions, novelId, stats.hasProtagonist])
@@ -336,11 +336,11 @@ export default function GuidePage({ novelId }: Props) {
       if (!(await ensureStepReady('map'))) return
       await generateMapCore()
       await refreshWorkflowContext()
-      if (!(await ensureStepReady('characters'))) return
-      await generateCharactersCore()
-      await refreshWorkflowContext()
       if (!(await ensureStepReady('items'))) return
       await generateItemsCore()
+      await refreshWorkflowContext()
+      if (!(await ensureStepReady('characters'))) return
+      await generateCharactersCore()
       await refreshWorkflowContext()
       if (!(await ensureStepReady('threads'))) return
       await generateThreadsCore()
@@ -519,28 +519,6 @@ export default function GuidePage({ novelId }: Props) {
       ),
     },
     {
-      key: 'characters',
-      title: '人物批量生成',
-      desc: '按主角、主要人物、反派、功能角色和次要人物的配额先搭人物网，再逐个细修。',
-      status: stats.characterCount > 0 ? '已生成' : '待生成',
-      count: `${stats.characterCount} 位角色`,
-      support: stats.characterCount > 0
-        ? `当前题材建议优先补足这些功能位：${characterPreset.helperRoles.join('、')}。`
-        : '先把人物网络搭起来，时间轴、物品和大纲页面才有足够的挂点可以联动。',
-      ready: stats.characterCount > 0,
-      icon: <TeamOutlined />,
-      action: (
-        <Space wrap>
-          <Button loading={runningKey === 'characters'} icon={<TeamOutlined />} onClick={generateCharacters}>
-            AI 生成·批量角色
-          </Button>
-          <Button type="link" onClick={() => navigate(`/novels/${novelId}/characters`)}>
-            进入页面
-          </Button>
-        </Space>
-      ),
-    },
-    {
       key: 'items',
       title: '物品与装备',
       desc: '先生成符合题材的模板，再把具体物品挂到人物、地点和事件上，避免后期凭空补道具。',
@@ -548,7 +526,7 @@ export default function GuidePage({ novelId }: Props) {
       count: `${stats.itemCount} 条物品记录`,
       support: stats.itemCount > 0
         ? `当前题材的模板重心是“${itemProfile.title}”，会优先补齐常见流通链和剧情挂点。`
-        : '模板负责结构，实例负责落地。缺了这一层，很多剧情只会停留在口头设定。',
+        : '先把物品模板和装备池铺出来，后面角色生成才能直接继承资源、装备和争夺目标。',
       ready: stats.itemCount > 0,
       icon: <ShoppingOutlined />,
       action: (
@@ -557,6 +535,28 @@ export default function GuidePage({ novelId }: Props) {
             AI 生成·首批物品
           </Button>
           <Button type="link" onClick={() => navigate(`/novels/${novelId}/items`)}>
+            进入页面
+          </Button>
+        </Space>
+      ),
+    },
+    {
+      key: 'characters',
+      title: '人物批量生成',
+      desc: '建立在已有物品与装备基础上，按主角、主要人物、反派、功能角色和次要人物的配额先搭人物网，再逐个细修。',
+      status: stats.characterCount > 0 ? '已生成' : '待生成',
+      count: `${stats.characterCount} 位角色`,
+      support: stats.characterCount > 0
+        ? `当前题材建议优先补足这些功能位：${characterPreset.helperRoles.join('、')}。`
+        : '先把物品资产准备好，再生成人物，职业、资源和冲突才能直接挂到现有装备与道具。',
+      ready: stats.characterCount > 0,
+      icon: <TeamOutlined />,
+      action: (
+        <Space wrap>
+          <Button loading={runningKey === 'characters'} icon={<TeamOutlined />} onClick={generateCharacters}>
+            AI 生成·批量角色
+          </Button>
+          <Button type="link" onClick={() => navigate(`/novels/${novelId}/characters`)}>
             进入页面
           </Button>
         </Space>

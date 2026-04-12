@@ -32,6 +32,7 @@ import { getFactionNameOptions, getPowerSystemNameOptions, getSpeciesNameOptions
 import { CHARACTER_RELATION_PRESETS, getCharacterRelationLabel, normalizeCharacterRelationLevel } from '../../../shared/character-relations'
 import { buildDraftMessages, normalizeOptionalNumber, normalizeStringArray, parseDraftJson } from '../shared/ai-draft'
 import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel, WorkspaceTip } from '../components/WorkspaceShell'
+import { getWorkflowBlockers, loadWorkflowStats } from '../workflow'
 import '../components/boards.css'
 import './character-workspace.css'
 import CharacterGraphCanvas from './CharacterGraphCanvas'
@@ -544,7 +545,28 @@ export default function CharacterWorkspace({ novelId }: Props) {
     })
   }
 
+  const ensureCharacterGenerationReady = useCallback(async () => {
+    try {
+      const workflowStats = await loadWorkflowStats(novelId)
+      const blockers = getWorkflowBlockers('characters', currentNovel, workflowStats)
+
+      if (blockers.length > 0) {
+        message.warning(blockers.join('\n'))
+        return false
+      }
+
+      return true
+    } catch (error) {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.loadFailed'))
+      return false
+    }
+  }, [currentNovel, novelId])
+
   const handleGenerateProtagonist = async () => {
+    const ready = await ensureCharacterGenerationReady()
+    if (!ready) return
+
     const values = protagonistForm.getFieldsValue()
     setGenerating(true)
     try {
@@ -567,6 +589,9 @@ export default function CharacterWorkspace({ novelId }: Props) {
   }
 
   const handleBatchGenerate = async () => {
+    const ready = await ensureCharacterGenerationReady()
+    if (!ready) return
+
     const values = batchForm.getFieldsValue()
     setGenerating(true)
     try {
