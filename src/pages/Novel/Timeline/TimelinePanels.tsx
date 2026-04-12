@@ -57,7 +57,6 @@ export function TimelineBoardPanel({
       <div className="novel-panel__header">
         <div>
           <h2 className="novel-panel__title">{TIMELINE_TEXT.boardTitle}</h2>
-          <div className="novel-panel__desc">{TIMELINE_TEXT.boardDescription}</div>
         </div>
       </div>
       <div className="novel-panel__body">
@@ -161,7 +160,6 @@ export function TimelineListPanel({
       <div className="novel-panel__header">
         <div>
           <h2 className="novel-panel__title">{TIMELINE_TEXT.listTitle}</h2>
-          <div className="novel-panel__desc">{TIMELINE_TEXT.listDescription}</div>
         </div>
         <div className="novel-panel__extra">
           <div className="novel-filter-bar">
@@ -307,7 +305,6 @@ export function TimelineEditorPanel({
       <div className="novel-panel__header">
         <div>
           <h2 className="novel-panel__title">{panelTitle}</h2>
-          <div className="novel-panel__desc">{TIMELINE_TEXT.detailDescription}</div>
         </div>
         <div className="novel-panel__extra">
           <Space>
@@ -350,7 +347,6 @@ export function TimelineEditorPanel({
             <div className="novel-form-section">
               <div className="novel-form-section__header">
                 <div className="novel-form-section__title">{TIMELINE_TEXT.sectionTimeTitle}</div>
-                <div className="novel-form-section__desc">{TIMELINE_TEXT.sectionTimeDescription}</div>
               </div>
               <div className="novel-note-list" style={{ marginBottom: 14 }}>
                 <div className="novel-note-list__item">{`${modeLabel}${'\u5199\u6cd5\u5efa\u8bae\uff1a'}${timeModeHint}`}</div>
@@ -410,7 +406,6 @@ export function TimelineEditorPanel({
             <div className="novel-form-section">
               <div className="novel-form-section__header">
                 <div className="novel-form-section__title">{TIMELINE_TEXT.sectionStructureTitle}</div>
-                <div className="novel-form-section__desc">{TIMELINE_TEXT.sectionStructureDescription}</div>
               </div>
               <div className="novel-grid novel-grid--2">
                 <Form.Item name="volumeId" label={TIMELINE_TEXT.labelVolume}>
@@ -436,7 +431,6 @@ export function TimelineEditorPanel({
             <div className="novel-form-section">
               <div className="novel-form-section__header">
                 <div className="novel-form-section__title">{TIMELINE_TEXT.sectionPlotTitle}</div>
-                <div className="novel-form-section__desc">{TIMELINE_TEXT.sectionPlotDescription}</div>
               </div>
               <div className="novel-grid novel-grid--2">
                 <Form.Item name="arcId" label={TIMELINE_TEXT.labelArc}>
@@ -458,7 +452,6 @@ export function TimelineEditorPanel({
             <div className="novel-form-section">
               <div className="novel-form-section__header">
                 <div className="novel-form-section__title">{TIMELINE_TEXT.sectionCharacterTitle}</div>
-                <div className="novel-form-section__desc">{TIMELINE_TEXT.sectionCharacterDescription}</div>
               </div>
               <div className="novel-grid novel-grid--2">
                 <Form.Item name="presentCharacterIds" label={TIMELINE_TEXT.labelPresentCharacters}>
@@ -505,7 +498,6 @@ export function TimelineEditorPanel({
             <div className="novel-form-section">
               <div className="novel-form-section__header">
                 <div className="novel-form-section__title">{TIMELINE_TEXT.sectionCausalityTitle}</div>
-                <div className="novel-form-section__desc">{TIMELINE_TEXT.sectionCausalityDescription}</div>
               </div>
               <div className="novel-grid novel-grid--3">
                 <Form.Item name="eventCause" label={TIMELINE_TEXT.labelEventCause}>

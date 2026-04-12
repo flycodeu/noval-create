@@ -31,7 +31,7 @@ import { getCharacterBatchPreset } from '../../../shared/creation-tools'
 import { getFactionNameOptions, getPowerSystemNameOptions, getSpeciesNameOptions, parseWorldRulesJson } from '../../../shared/genre-system'
 import { CHARACTER_RELATION_PRESETS, getCharacterRelationLabel, normalizeCharacterRelationLevel } from '../../../shared/character-relations'
 import { buildDraftMessages, normalizeOptionalNumber, normalizeStringArray, parseDraftJson } from '../shared/ai-draft'
-import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel, WorkspaceStepGuide, WorkspaceTip } from '../components/WorkspaceShell'
+import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel, WorkspaceTip } from '../components/WorkspaceShell'
 import '../components/boards.css'
 import './character-workspace.css'
 import CharacterGraphCanvas from './CharacterGraphCanvas'
@@ -691,16 +691,6 @@ export default function CharacterWorkspace({ novelId }: Props) {
       layout="wide"
       eyebrow="角色系统"
       title="角色系统"
-      description="关系看板、角色档案和物品关联统一在一个工作区里处理。"
-      guide={(
-        <WorkspaceStepGuide
-          steps={[
-            { title: '先筛到当前要处理的人物', description: '先在左侧缩小到目标角色，再进入关系图和档案编辑，避免在大表单里来回找。', status: 'focus' },
-            { title: '再确认关系和资源绑定', description: '优先检查关系图谱、关联物品和草稿来源，先补当前人物真正会影响正文的冲突与资源。', status: 'todo' },
-            { title: '最后再做 AI 补全或保存转正', description: 'AI 入口只负责生成、补全、修复当前人物，不再要求你先通读整页再决定怎么改。', status: 'todo' },
-          ]}
-        />
-      )}
       actions={(
         <Space wrap>
           <Button type="primary" icon={<RobotOutlined />} loading={generating} onClick={() => setProtagonistOpen(true)}>AI 生成·主角</Button>
@@ -734,7 +724,6 @@ export default function CharacterWorkspace({ novelId }: Props) {
         <WorkspacePanel
           className="novel-character-studio__sidebar"
           title="人物列表"
-          description="先筛人，再看关系，再补档案和物品。"
           scrollable
           sticky
           extra={(
@@ -806,7 +795,6 @@ export default function CharacterWorkspace({ novelId }: Props) {
         <WorkspacePanel
           className="novel-character-graph-panel"
           title="人物关系看板"
-          description="中间只保留关系网络和关系统计，方便你在筛选列表与档案编辑之间保持上下文。"
           extra={(
             <Space wrap>
               <Select value={graphScope} options={[{ value: 'all', label: '全角色网络' }, { value: 'focus', label: '当前人物关系圈' }]} onChange={setGraphScope} style={{ minWidth: 148 }} />
@@ -839,7 +827,6 @@ export default function CharacterWorkspace({ novelId }: Props) {
         <WorkspacePanel
           className="novel-character-studio__editor"
           title={selectedCharacter ? `编辑：${selectedCharacter.fullName}` : creating ? '新建人物' : '人物档案'}
-          description="右侧固定为当前人物档案。这里优先处理身份、目标、关系、物品和 AI 修补，不再把关系图和长表单堆在同一列。"
           scrollable
           sticky
           extra={(

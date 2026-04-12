@@ -526,7 +526,6 @@ export default function StoryThreadsPage({ novelId }: Props) {
       heroVariant="compact"
       eyebrow="故事线程"
       title="故事线程"
-      description="把主线、支线、悬念、关系线和回收点统一管理成可追踪卡片。结构页、时间轴页和正文都应引用这些线程，而不是各写各的。"
       actions={(
         <Space wrap>
           <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>
@@ -597,7 +596,7 @@ export default function StoryThreadsPage({ novelId }: Props) {
         />
       ) : null}
 
-      <WorkspacePanel title="线程看板" description="可手工维护，也可以先批量生成再逐条修。">
+      <WorkspacePanel title="线程看板">
         <div style={{ marginBottom: 16 }}>
           <Segmented
             value={viewMode}
@@ -615,7 +614,6 @@ export default function StoryThreadsPage({ novelId }: Props) {
               type="info"
               showIcon
               message={`当前正文进度：第 ${foreshadowSnapshot.currentChapterNum || 0} 章`}
-              description="显示具备回收目标、回收条件或承担悬念/回收职责的线程。"
             />
             <ForeshadowColumn title="待回收" items={foreshadowSnapshot.pending} />
             <ForeshadowColumn title="即将到期" items={foreshadowSnapshot.dueSoon} />

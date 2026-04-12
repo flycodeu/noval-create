@@ -16,7 +16,6 @@ import {
   WorkspaceMetric,
   WorkspacePage,
   WorkspacePanel,
-  WorkspaceStepGuide,
 } from '../components/WorkspaceShell'
 import {
   getConsistencySeverityColor,
@@ -434,7 +433,6 @@ export default function RevisionCenterPage({ novelId }: Props) {
       heroVariant="compact"
       eyebrow="修订中心"
       title="修订中心"
-      description="把系统诊断、人工任务和 AI 修复统一挂到一张修订任务板里。"
       asidePlacement="side"
       actions={(
         <Space wrap>
@@ -466,28 +464,6 @@ export default function RevisionCenterPage({ novelId }: Props) {
           <WorkspaceMetric label="处理中" value={stats.inProgressCount} hint="正在回查和修正的任务。" />
           <WorkspaceMetric label="人工 / 系统" value={`${manualCount} / ${systemCount}`} hint="系统任务支持忽略、恢复和 AI 修复；人工任务支持自由编辑。" />
         </>
-      )}
-      guide={(
-        <WorkspaceStepGuide
-          title="进入修订中心先做什么"
-          steps={[
-            {
-              title: '先清阻塞项',
-              description: '优先消掉会继续污染正文、时间轴和设定的阻塞任务。',
-              status: stats.blockerCount > 0 ? 'focus' : 'done',
-            },
-            {
-              title: '再看待同步章节',
-              description: '把仍在引用旧上下文的章节回查掉，避免修订任务继续基于旧设定。',
-              status: contextStatus?.staleChapterCount ? 'focus' : 'todo',
-            },
-            {
-              title: '最后补人工任务',
-              description: '把零散问题整理成可执行修订单，再分发到具体页面处理。',
-              status: 'todo',
-            },
-          ]}
-        />
       )}
       aside={(
         <>
@@ -538,7 +514,7 @@ export default function RevisionCenterPage({ novelId }: Props) {
         />
       ) : null}
 
-      <WorkspacePanel title="修订任务板" description="按来源、状态和关键词过滤任务。">
+      <WorkspacePanel title="修订任务板">
         <div style={{ display: 'grid', gap: 16 }}>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
             <Select
@@ -585,7 +561,7 @@ export default function RevisionCenterPage({ novelId }: Props) {
       </WorkspacePanel>
 
       {consistencyReport ? (
-        <WorkspacePanel title="系统体检摘要" description="显示当前体检结果。">
+        <WorkspacePanel title="系统体检摘要">
           <div className="novel-issue-list">
             {consistencyReport.issues.slice(0, 6).map((issue) => (
               <div key={issue.id} className="novel-issue-item">

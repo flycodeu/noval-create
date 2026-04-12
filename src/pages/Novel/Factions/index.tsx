@@ -361,7 +361,6 @@ export default function FactionsPage({ novelId }: Props) {
       layout="wide"
       eyebrow="世界与资源"
       title="势力系统"
-      description="把组织、宗门、家族与隐性网络放进同一个关系工作台里。这里既能生成，也能看见势力之间与人物之间的牵连。"
       actions={(
         <Space wrap>
           <Button type="primary" icon={<RobotOutlined />} onClick={() => {
@@ -406,7 +405,7 @@ export default function FactionsPage({ novelId }: Props) {
       ) : null}
 
       <div className="faction-workspace">
-        <WorkspacePanel className="faction-workspace__sidebar" title="势力列表" description="先选势力，再看图谱与编辑区。">
+        <WorkspacePanel className="faction-workspace__sidebar" title="势力列表">
           <Input.Search value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索势力、目标、资源或阶段" allowClear />
           <List
             loading={loading}
@@ -427,7 +426,6 @@ export default function FactionsPage({ novelId }: Props) {
         <div className="faction-workspace__main">
           <WorkspacePanel
             title="势力关系图谱"
-            description="左侧是势力，右侧是被卷入势力网络的人物。支持查看当前势力的一跳关系。"
             extra={<Tag color="processing">{selectedId ? '当前聚焦已收窄' : '当前显示全局网络'}</Tag>}
           >
             {graphLoading ? <div className="faction-workspace__empty"><Spin /></div> : <FactionGraphCanvas data={graphData} selectedFactionId={selectedId} onFactionSelect={setSelectedId} />}
@@ -443,7 +441,6 @@ export default function FactionsPage({ novelId }: Props) {
 
           <WorkspacePanel
             title={selectedItem ? `编辑：${selectedItem.name}` : '新建势力'}
-            description="先定目标、资源、阶段和外部关系，再回填领袖、人物与地盘。"
             extra={(
               <Space wrap>
                 <AIGenerateButton

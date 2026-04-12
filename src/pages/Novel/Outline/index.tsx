@@ -514,7 +514,6 @@ export default function Outline({ novelId }: Props) {
     <WorkspacePage
       eyebrow="故事大纲"
       title="故事大纲"
-      description="按故事弧组织章节，单条故事弧支持 AI 生成草稿。"
       actions={(
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <Button icon={<RobotOutlined />} loading={generating} onClick={() => void handleGenerateArcs()}>AI 生成故事弧</Button>

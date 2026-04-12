@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button, Empty, Modal, Progress, Skeleton, Tabs, Tag } from 'antd'
 import VirtualList from 'rc-virtual-list'
 import type { LanguageDriftMetrics, QualityDashboardData } from '../../../types'
-import { WorkspaceMetric, WorkspacePage, WorkspacePanel, WorkspaceStepGuide } from '../components/WorkspaceShell'
+import { WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
 import {
   getQualityRiskSeverityColor,
   getQualityRiskSeverityLabel,
@@ -198,8 +198,8 @@ export default function QualityDashboard({ novelId }: Props) {
 
   if (loading) {
     return (
-      <WorkspacePage title="质量监控" description="查看各章节的 AI 检测结果与质量趋势。">
-        <WorkspacePanel title="正在汇总质量数据" description="热力图、语言漂移、故事结构和状态稳定性正在并发加载。">
+      <WorkspacePage title="质量监控">
+        <WorkspacePanel title="正在汇总质量数据">
           <Skeleton active paragraph={{ rows: 10 }} />
         </WorkspacePanel>
       </WorkspacePage>
@@ -216,7 +216,7 @@ export default function QualityDashboard({ novelId }: Props) {
 
   if (!data || (!hasScoreData && !hasStoryDynamicsData && !hasArcProgressData && !hasDialogueData && !hasStateData && !hasRecallData && !hasChapterFunctionData)) {
     return (
-      <WorkspacePage title="质量监控" description="查看各章节的 AI 检测结果与质量趋势。">
+      <WorkspacePage title="质量监控">
         <WorkspacePanel title="暂无数据">
           <Empty description="还没有可用的 AI 检测、对白指纹、章节功能、状态稳定性或结构节奏跟踪数据。先运行章节审校或 AI 检测后再来查看。" />
         </WorkspacePanel>
@@ -293,7 +293,7 @@ export default function QualityDashboard({ novelId }: Props) {
 
   const overviewContent = (
     <>
-      <WorkspacePanel title="全书健康总览" description="先判断全书当前最危险的卷和主要风险，再往下钻到卷级和章节级。">
+      <WorkspacePanel title="全书健康总览">
         <NovelHealthOverviewPanel
           summary={data.novelQualityMetrics}
           activeVolume={selectedVolumeMetrics}
@@ -304,7 +304,7 @@ export default function QualityDashboard({ novelId }: Props) {
       </WorkspacePanel>
 
       {data.volumeQualityMetrics.length > 0 ? (
-        <WorkspacePanel title="卷级健康面板" description="统一比较每一卷的 AI 味、故事弧推进、节奏结构、伏笔债务、召回和状态稳定性。">
+        <WorkspacePanel title="卷级健康面板">
           <VolumeHealthPanel
             volumes={data.volumeQualityMetrics}
             activeVolumeId={selectedVolumeId}
@@ -316,22 +316,22 @@ export default function QualityDashboard({ novelId }: Props) {
 
       {hasScoreData ? (
         <>
-          <WorkspacePanel title="质量热力图" description="X=章节，Y=评分维度，颜色越绿越好。">
+          <WorkspacePanel title="质量热力图">
             <HeatmapChart data={filteredHeatmapData} chapterNums={filteredOverallTrend.map((d) => d.chapterNum)} />
           </WorkspacePanel>
 
-          <WorkspacePanel title="评分趋势" description="总分与 AI 味率逐章变化。">
+          <WorkspacePanel title="评分趋势">
             <TrendChart
               overallTrend={filteredOverallTrend}
               aiLikeTrend={filteredAiLikeTrend}
             />
           </WorkspacePanel>
 
-          <WorkspacePanel title="薄弱维度分析" description="各维度被标记为薄弱项的频次。">
+          <WorkspacePanel title="薄弱维度分析">
             <WeakDimensionChart data={data.weakDimensionFrequency} />
           </WorkspacePanel>
 
-          <WorkspacePanel title="章节详情" description="点击查看某章完整评分。">
+          <WorkspacePanel title="章节详情">
             <div style={{ height: 480 }}>
               <VirtualList data={filteredChapterDetails} height={480} itemHeight={56} itemKey="chapterId">
                 {(entry: QualityChapterEntry) => (
@@ -376,7 +376,7 @@ export default function QualityDashboard({ novelId }: Props) {
   const languageContent = (
     <>
       {hasScoreData ? (
-        <WorkspacePanel title="AI 味分解" description="拆开看语言退化由哪些问题构成。">
+        <WorkspacePanel title="AI 味分解">
           <LanguageDriftPanel
             averages={data.averageLanguageDrift}
             trends={data.languageDriftTrends}
@@ -388,7 +388,7 @@ export default function QualityDashboard({ novelId }: Props) {
       ) : null}
 
       {data.dialogueFingerprintStats.eligibleCharacterCount > 0 ? (
-        <WorkspacePanel title="角色对白辨识度" description="查看角色之间是否越说越像，以及谁正在偏离自己的语音指纹。">
+        <WorkspacePanel title="角色对白辨识度">
           <DialogueFingerprintPanel
             stats={data.dialogueFingerprintStats}
             signatures={data.characterDialogueSignatures}
@@ -399,7 +399,7 @@ export default function QualityDashboard({ novelId }: Props) {
           />
         </WorkspacePanel>
       ) : (
-        <WorkspacePanel title="角色对白辨识度" description="查看角色之间是否越说越像，以及谁正在偏离自己的语音指纹。">
+        <WorkspacePanel title="角色对白辨识度">
           <Empty description="当前还没有足够的对白指纹数据。" />
         </WorkspacePanel>
       )}
@@ -408,7 +408,7 @@ export default function QualityDashboard({ novelId }: Props) {
 
   const structureContent = (
     <>
-      <WorkspacePanel title="主角受挫与节奏" description="跨章节查看主角受挫、代价持续、反转与高潮分布。">
+      <WorkspacePanel title="主角受挫与节奏">
         <StoryDynamicsPanel
           trend={data.storyDynamicsTrend}
           alerts={data.storyPacingAlerts}
@@ -420,7 +420,7 @@ export default function QualityDashboard({ novelId }: Props) {
       </WorkspacePanel>
 
       {hasChapterFunctionData ? (
-        <WorkspacePanel title="章节功能与节奏分布" description="查看章节主功能是否重复、卷内是否偏科，以及关键章节是否仍在原地过渡。">
+        <WorkspacePanel title="章节功能与节奏分布">
           <ChapterFunctionPanel
             summary={data.chapterFunctionSummary}
             runs={filteredChapterFunctionRuns}
@@ -431,7 +431,7 @@ export default function QualityDashboard({ novelId }: Props) {
       ) : null}
 
       {hasArcProgressData ? (
-        <WorkspacePanel title="故事弧推进" description="查看每条故事弧的推进率、空转率、阶段兑现和卷级分布。">
+        <WorkspacePanel title="故事弧推进">
           <StoryArcProgressPanel
             summary={data.storyArcProgressSummary}
             trend={data.storyArcProgressTrend}
@@ -447,7 +447,7 @@ export default function QualityDashboard({ novelId }: Props) {
   const stabilityContent = (
     <>
       {hasRecallData ? (
-        <WorkspacePanel title="召回可靠性" description="查看历史片段召回是否过度依赖、以及是否命中过期信息。">
+        <WorkspacePanel title="召回可靠性">
           <RecallReliabilityPanel
             summary={data.recallSummary}
             alerts={filteredRecallAlerts}
@@ -457,7 +457,7 @@ export default function QualityDashboard({ novelId }: Props) {
       ) : null}
 
       {hasStateData ? (
-        <WorkspacePanel title="状态稳定性" description="查看人物、物品、关系、势力与地点的跳变和冲突是否在放大。">
+        <WorkspacePanel title="状态稳定性">
           <WorldStateStabilityPanel
             trend={data.worldStateTrend}
             alerts={filteredWorldAlerts}
@@ -473,35 +473,12 @@ export default function QualityDashboard({ novelId }: Props) {
   return (
     <WorkspacePage
       title="质量监控"
-      description="查看各章节的 AI 检测结果、修补优先级和全书质量趋势。"
       metrics={[
         <WorkspaceMetric key="scored" label="已评分章节" value={data.totalChaptersScored} />,
         <WorkspaceMetric key="tracked" label="节奏追踪章节" value={data.protagonistSetbackSummary.chapterCount} />,
         <WorkspaceMetric key="arc" label="跟踪故事弧" value={data.storyArcProgressSummary.trackedArcCount} />,
         <WorkspaceMetric key="avg" label="平均总分 / 压力" value={hasScoreData ? `${data.averageOverallScore} / 10` : `${data.protagonistSetbackSummary.averagePressure}`} />,
       ]}
-      guide={(
-        <WorkspaceStepGuide
-          title="进入质量看板先看什么"
-          steps={[
-            {
-              title: '先找阻塞卷和章节',
-              description: '先看全书健康总览与卷级健康面板，定位最先该修的卷和章节。',
-              status: 'focus',
-            },
-            {
-              title: '再拆 AI 味来源',
-              description: '用趋势图和 AI 味分解确认问题来自语言退化、节奏还是结构承接。',
-              status: 'todo',
-            },
-            {
-              title: '最后回到修订中心',
-              description: '把发现的高优先问题转回修订中心或正文页处理，形成闭环。',
-              status: 'todo',
-            },
-          ]}
-        />
-      )}
     >
       <Tabs
         activeKey={activeTab}

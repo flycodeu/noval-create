@@ -57,7 +57,7 @@ export function StructureLinkedEventsPanel({
   onPageChange,
 }: StructureLinkedEventsPanelProps) {
   return (
-    <WorkspacePanel title="关联事件" description="当前路径下的时间轴事件。">
+    <WorkspacePanel title="关联事件">
       {linked.total === 0 ? (
         <div className="novel-empty">当前节点还没有关联事件。</div>
       ) : (
@@ -113,7 +113,7 @@ export function StructureCheckpointsPanel({
   onPageChange,
 }: StructureCheckpointsPanelProps) {
   return (
-    <WorkspacePanel title={title} description="当前工作层级的记忆检查点。">
+    <WorkspacePanel title={title}>
       {checkpoints.total === 0 ? (
         <div className="novel-empty">当前层级还没有检查点。</div>
       ) : (
@@ -188,7 +188,7 @@ export function StructureVolumesPanel({
   onDragEnd,
 }: StructureVolumesPanelProps) {
   return (
-    <WorkspacePanel title="卷" description="可拖拽排序。">
+    <WorkspacePanel title="卷">
       {volumes.length === 0 ? (
         <div className="novel-empty">先创建一卷。</div>
       ) : (
@@ -297,10 +297,7 @@ export function StructurePartsPanel({
   onDragEnd,
 }: StructurePartsPanelProps) {
   return (
-    <WorkspacePanel
-      title={currentVolume ? `部 · ${getVolumeLabel(currentVolume)}` : '部'}
-      description="当前卷下的部分。"
-    >
+    <WorkspacePanel title={currentVolume ? `部 · ${getVolumeLabel(currentVolume)}` : '部'}>
       {!currentVolume ? (
         <div className="novel-empty">先选择一卷。</div>
       ) : parts.total === 0 ? (
@@ -405,7 +402,6 @@ export function StructureChaptersPanel({
   return (
     <WorkspacePanel
       title={currentPart ? `章节 · ${getPartLabel(currentPart)}` : '章节'}
-      description="当前部下的章节。"
       extra={currentPart ? <Button icon={<PlusOutlined />} onClick={onAddChapter}>加章节</Button> : null}
     >
       {!currentPart ? (
@@ -477,7 +473,6 @@ export function StructureSegmentsPanel({
   return (
     <WorkspacePanel
       title={chapterDetail ? `场景 · 第 ${chapterDetail.chapterNum} 章` : '场景'}
-      description={chapterDetail ? '当前章节下的场景。' : '先选择章节。'}
       extra={chapterDetail ? (
         <Space size={8}>
           <Button icon={<PlusOutlined />} onClick={onAddSegment}>加场景</Button>
@@ -591,7 +586,6 @@ export function ChapterEditorPanel({
   return (
     <WorkspacePanel
       title={chapterDetail ? `章节编辑 · 第 ${chapterDetail.chapterNum} 章` : '章节编辑'}
-      description="只编辑当前章节。"
       extra={chapterDetail ? (
         <Space>
           {aiActions}
@@ -664,7 +658,6 @@ export function SegmentEditorPanel({
   return (
     <WorkspacePanel
       title={segmentDetail ? `场景编辑 · ${getSegmentLabel(segmentDetail)}` : '场景编辑'}
-      description="只编辑当前场景。"
       extra={segmentDetail ? (
         <Space>
           {aiActions}

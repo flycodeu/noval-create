@@ -176,7 +176,6 @@ export default function SceneTemplatesPage({ novelId }: Props) {
       heroVariant="compact"
       eyebrow="世界与资源"
       title="场景模板库"
-      description="把高频场景拆成可复用模板，供结构页的章节与场景规划直接套用，而不是每次从零起草。"
       actions={(
         <Space wrap>
           <Button type="primary" icon={<SaveOutlined />} loading={saving} disabled={selectedIsBuiltin} onClick={() => void handleSave()}>
@@ -216,7 +215,7 @@ export default function SceneTemplatesPage({ novelId }: Props) {
         />
       ) : null}
 
-      <WorkspacePanel title="模板清单" description="左侧筛选，右侧编辑节拍与角色功能位。">
+      <WorkspacePanel title="模板清单">
         <div className="novel-resource-workspace__layout">
           <div className="novel-resource-workspace__sidebar">
             <Input.Search value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索模板名、描述或情绪弧线" allowClear />

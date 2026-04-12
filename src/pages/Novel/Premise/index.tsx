@@ -407,7 +407,6 @@ export default function PremisePage({ novelId }: Props) {
       heroVariant="compact"
       eyebrow="基础设定"
       title="基础设定"
-      description="维护背景定位、核心信息、主角起点、底层约束和写作边界。"
       actions={(
         <Space wrap>
           <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>
@@ -524,7 +523,7 @@ export default function PremisePage({ novelId }: Props) {
         </div>
       ) : null}
 
-      <WorkspacePanel title="基础设定编辑器" description="优先填写后续所有模块都会反复引用的 5 个核心字段。">
+      <WorkspacePanel title="基础设定编辑器">
         <Form form={form} layout="vertical">
           <div className="guided-step__field-grid">
             <div className="guided-step__field-card">
@@ -556,7 +555,7 @@ export default function PremisePage({ novelId }: Props) {
         </Form>
       </WorkspacePanel>
 
-      <WorkspacePanel title="语言与写作边界" description="高频规则直接可见，高级规则收起，减少页面堆叠高度。">
+      <WorkspacePanel title="语言与写作边界">
         <Form form={form} layout="vertical">
           <Collapse
             ghost

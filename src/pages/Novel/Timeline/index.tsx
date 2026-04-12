@@ -177,7 +177,6 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
       className="novel-timeline-page"
       eyebrow={TIMELINE_TEXT.pageEyebrow}
       title={TIMELINE_TEXT.pageTitle}
-      description={TIMELINE_TEXT.pageDescription}
       actions={(
         <Space wrap>
           <Button icon={<ReloadOutlined />} onClick={() => void workspace.refreshPage()}>

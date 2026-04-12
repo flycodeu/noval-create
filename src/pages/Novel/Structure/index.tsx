@@ -472,7 +472,6 @@ export default function StructurePage({ novelId }: { novelId: number }) {
       layout="wide"
       eyebrow="结构工程"
       title="卷 / 部 / 章 / 场景"
-      description="按路径管理结构，再逐层补全章节和场景。"
       actions={(
         <Space wrap>
           <Button icon={<PlusOutlined />} onClick={() => void addVolume()}>
