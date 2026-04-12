@@ -225,7 +225,6 @@ export default function ProjectBriefPage({ novelId }: Props) {
       heroVariant="compact"
       eyebrow="项目立项"
       title="项目立项"
-      description="统一读者、承诺、卖点和禁区，后续设定、线索和正文都以这里为准。"
       actions={(
         <Space wrap>
           <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>
@@ -301,11 +300,7 @@ export default function ProjectBriefPage({ novelId }: Props) {
         />
       ) : null}
 
-      <WorkspacePanel
-        title="项目立项表"
-        description="先生成到表单，再手动复核和保存。"
-        extra={<Tag color={generatingMode ? 'gold' : 'blue'}>{generatingMode ? 'AI 生成中' : '手动保存生效'}</Tag>}
-      >
+      <WorkspacePanel extra={<Tag color={generatingMode ? 'gold' : 'blue'}>{generatingMode ? 'AI 生成中' : '手动保存生效'}</Tag>}>
         <Form form={form} layout="vertical">
           <div className="guided-step__field-grid">
             <div className="guided-step__field-card guided-step__field-card--compact">

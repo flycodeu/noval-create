@@ -373,19 +373,6 @@ export default function NovelRouter() {
     [guidedProgressMap, workflowStats, workspaceReadyCount, workspaceTotalCount],
   )
 
-  const recommendedPageMeta = useMemo(
-    () => workspaceItems.find((item) => item.key === recommendedKey) || workspaceItems[0],
-    [recommendedKey, workspaceItems],
-  )
-
-  const headerSummary = useMemo(() => {
-    if (!currentPageMeta) return '进入当前模块。'
-    if (recommendedPageMeta && currentPage !== recommendedKey) {
-      return `${currentPageMeta.summary} 当前建议优先推进「${recommendedPageMeta.label}」。`
-    }
-    return currentPageMeta.summary
-  }, [currentPage, currentPageMeta, recommendedKey, recommendedPageMeta])
-
   const refreshWorkflowStats = useCallback(async () => {
     if (!novelId) return
 
@@ -712,7 +699,6 @@ export default function NovelRouter() {
                       <span className="novel-sidebar__nav-icon">{item.icon}</span>
                       <span className="novel-sidebar__nav-copy">
                         <strong>{item.label}</strong>
-                        <small>{item.summary}</small>
                       </span>
                       <span className={`novel-sidebar__nav-state ${state.complete ? 'novel-sidebar__nav-state--done' : ''}`}>
                         {state.label}
@@ -736,7 +722,6 @@ export default function NovelRouter() {
               <div className="novel-route-shell__header-copy">
                 <div className="novel-route-shell__header-kicker">{currentNovel?.title || '当前小说'}</div>
                 <strong>{currentPageMeta?.label}</strong>
-                <span>{headerSummary}</span>
               </div>
             </div>
             <div className="novel-route-shell__header-actions">

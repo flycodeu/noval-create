@@ -233,7 +233,6 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         heroVariant="compact"
         eyebrow={stepMeta.eyebrow}
         title={stepMeta.title}
-        description={stepMeta.description}
         actions={(
           <Space wrap>
             <Button type="primary" icon={<SaveOutlined />} loading={savingBasics} onClick={() => void handleSaveBasics()}>
@@ -252,7 +251,7 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
           </>
         )}
       >
-        <WorkspacePanel title="这一步只做四件事" description="先把底盘写稳，后面的 AI 才有统一上下文。">
+        <WorkspacePanel>
           <Form form={form} layout="vertical">
             <div className="guided-step__field-grid guided-step__field-grid--basics">
               <div className="guided-step__field-card guided-step__field-card--compact">
@@ -295,7 +294,6 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         heroVariant="compact"
         eyebrow={stepMeta.eyebrow}
         title={stepMeta.title}
-        description={stepMeta.description}
         actions={(
           <Space wrap>
             <Button type="primary" icon={<AppstoreOutlined />} onClick={() => openProPage('project-brief')}>
@@ -318,25 +316,21 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
           <Alert type="warning" showIcon message="基础信息未完成" />
         ) : null}
 
-        <WorkspacePanel title="立项检查">
+        <WorkspacePanel>
           <div className="guided-step__fact-grid">
             <div className="guided-step__fact-card">
-              <span>平台模式</span>
               <strong>{projectBrief.platformMode ? '已填写' : '未填写'}</strong>
               <small>{projectBrief.platformMode || '先确定这本书是通用、网文长篇还是出版形态。'}</small>
             </div>
             <div className="guided-step__fact-card">
-              <span>目标赛道</span>
               <strong>{projectBrief.targetAudience ? '已填写' : '未填写'}</strong>
               <small>{projectBrief.targetAudience || '写清主要服务的赛道和阅读偏好。'}</small>
             </div>
             <div className="guided-step__fact-card">
-              <span>读者承诺</span>
               <strong>{projectBrief.readerPromise ? '已填写' : '未填写'}</strong>
               <small>{projectBrief.readerPromise || '告诉系统读者点开后会稳定得到什么体验。'}</small>
             </div>
             <div className="guided-step__fact-card">
-              <span>卖点 / 参考</span>
               <strong>{projectBrief.sellingPoints || projectBrief.compTitles ? '已填写' : '未填写'}</strong>
               <small>{projectBrief.sellingPoints || projectBrief.compTitles || '卖点必须可执行，参考系必须可对齐。'}</small>
             </div>
@@ -354,7 +348,6 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         heroVariant="compact"
         eyebrow={stepMeta.eyebrow}
         title={stepMeta.title}
-        description={stepMeta.description}
         actions={(
           <Space wrap>
             <Button type="primary" icon={<SettingOutlined />} onClick={() => openProPage('core-settings')}>
@@ -377,25 +370,21 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
           <Alert type="warning" showIcon message="基础信息未完成" />
         ) : null}
 
-        <WorkspacePanel title="基础设定检查">
+        <WorkspacePanel>
           <div className="guided-step__fact-grid">
             <div className="guided-step__fact-card">
-              <span>作品定位</span>
               <strong>{settings.premise.positioning ? '已填写' : '未填写'}</strong>
               <small>{settings.premise.positioning || '写背景和叙事方向，不写事件链。'}</small>
             </div>
             <div className="guided-step__fact-card">
-              <span>核心信息</span>
               <strong>{settings.premise.coreHook ? '已填写' : '未填写'}</strong>
               <small>{settings.premise.coreHook || '写为什么值得设计故事。'}</small>
             </div>
             <div className="guided-step__fact-card">
-              <span>主角起点</span>
               <strong>{settings.premise.protagonistStart ? '已填写' : '未填写'}</strong>
               <small>{settings.premise.protagonistStart || '写身份、处境、资源和限制。'}</small>
             </div>
             <div className="guided-step__fact-card">
-              <span>底层约束</span>
               <strong>{settings.premise.constraints ? '已填写' : '未填写'}</strong>
               <small>{settings.premise.constraints || '写不能违背的规则、代价和常识边界。'}</small>
             </div>
@@ -413,7 +402,6 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         heroVariant="compact"
         eyebrow={stepMeta.eyebrow}
         title={stepMeta.title}
-        description={stepMeta.description}
         actions={(
           <Space wrap>
             <Button type="primary" icon={<EditOutlined />} onClick={() => openProPage('theme-voice')}>
@@ -436,25 +424,21 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
           <Alert type="info" showIcon message="项目立项未完成" />
         ) : null}
 
-        <WorkspacePanel title="主题与文风检查">
+        <WorkspacePanel>
           <div className="guided-step__fact-grid">
             <div className="guided-step__fact-card">
-              <span>主题命题</span>
               <strong>{themeVoice.theme ? '已填写' : '未填写'}</strong>
               <small>{themeVoice.theme || '写这本书真正要持续回答的命题。'}</small>
             </div>
             <div className="guided-step__fact-card">
-              <span>情感核心</span>
               <strong>{themeVoice.emotionalCore ? '已填写' : '未填写'}</strong>
               <small>{themeVoice.emotionalCore || '写读者最稳定会收到的情感回报。'}</small>
             </div>
             <div className="guided-step__fact-card">
-              <span>视角 / 时态</span>
               <strong>{themeVoice.pov && themeVoice.tense ? '已填写' : '未填写'}</strong>
               <small>{[themeVoice.pov, themeVoice.tense].filter(Boolean).join(' / ') || '先固定叙事视角和时态，长篇口吻才不会漂移。'}</small>
             </div>
             <div className="guided-step__fact-card">
-              <span>语言规则</span>
               <strong>{themeVoice.styleRules && themeVoice.dialogueRules ? '已填写' : '未填写'}</strong>
               <small>{themeVoice.styleRules || themeVoice.dialogueRules || '把风格与对白约束写成可执行规则，而不是形容词。'}</small>
             </div>
@@ -472,7 +456,6 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         heroVariant="compact"
         eyebrow={stepMeta.eyebrow}
         title={stepMeta.title}
-        description={stepMeta.description}
         actions={(
           <Space wrap>
             <Button type="primary" icon={<GlobalOutlined />} onClick={() => openProPage('world-rules')}>
@@ -491,14 +474,12 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
           </>
         )}
       >
-        <WorkspacePanel title="这一页要解决的问题">
+        <WorkspacePanel>
           <div className="guided-step__checklist">
             <div className="guided-step__checkitem guided-step__checkitem--done">
-              <div className="guided-step__checkhead"><strong>统一世界口径</strong></div>
               <p>把时间制度、势力结构、地图蓝图和语言边界统一成一个口径。</p>
             </div>
             <div className="guided-step__checkitem">
-              <div className="guided-step__checkhead"><strong>服务后续资产</strong></div>
               <p>后面的角色、地图、时间轴和正文都会复用这里的规则。</p>
             </div>
           </div>
@@ -515,7 +496,6 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         heroVariant="compact"
         eyebrow={stepMeta.eyebrow}
         title={stepMeta.title}
-        description={stepMeta.description}
         actions={(
           <Space wrap>
             <Button type="primary" icon={<EnvironmentOutlined />} onClick={() => openProPage('map')}>
@@ -549,7 +529,6 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         heroVariant="compact"
         eyebrow={stepMeta.eyebrow}
         title={stepMeta.title}
-        description={stepMeta.description}
         actions={(
           <Space wrap>
             <Button type="primary" icon={<TeamOutlined />} onClick={() => openProPage('characters')}>
@@ -583,7 +562,6 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         heroVariant="compact"
         eyebrow={stepMeta.eyebrow}
         title={stepMeta.title}
-        description={stepMeta.description}
         actions={(
           <Space wrap>
             <Button type="primary" icon={<AppstoreOutlined />} onClick={() => openProPage('items')}>
@@ -617,7 +595,6 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         heroVariant="compact"
         eyebrow={stepMeta.eyebrow}
         title={stepMeta.title}
-        description={stepMeta.description}
         actions={(
           <Space wrap>
             <Button type="primary" icon={<BarsOutlined />} onClick={() => openProPage('threads')}>
@@ -640,14 +617,12 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
             <Alert type="warning" showIcon message="物品资产未完成" />
           ) : null}
 
-        <WorkspacePanel title="线程页要解决的问题">
+        <WorkspacePanel>
           <div className="guided-step__checklist">
             <div className="guided-step__checkitem guided-step__checkitem--done">
-              <div className="guided-step__checkhead"><strong>把长线写成对象</strong></div>
               <p>主线、支线、悬念、关系线都要写清开始点、当前状态、回收条件和目标章位。</p>
             </div>
             <div className="guided-step__checkitem">
-              <div className="guided-step__checkhead"><strong>为结构和正文供血</strong></div>
               <p>结构页、时间轴和正文都应该回查这些线程，而不是每一页各写各的推进链。</p>
             </div>
           </div>
@@ -664,7 +639,6 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         heroVariant="compact"
         eyebrow={stepMeta.eyebrow}
         title={stepMeta.title}
-        description={stepMeta.description}
         actions={(
           <Space wrap>
             <Button type="primary" icon={<BarsOutlined />} onClick={() => openProPage('story-design')}>
@@ -683,25 +657,21 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
           </>
         )}
       >
-        <WorkspacePanel title="故事设计检查">
+        <WorkspacePanel>
           <div className="guided-step__fact-grid">
             <div className="guided-step__fact-card">
-              <span>故事目标</span>
               <strong>{settings.storyGoal ? '已填写' : '未填写'}</strong>
               <small>{settings.storyGoal || '写最终要达到什么状态。'}</small>
             </div>
             <div className="guided-step__fact-card">
-              <span>核心冲突</span>
               <strong>{settings.coreConflict ? '已填写' : '未填写'}</strong>
               <small>{settings.coreConflict || '写目标为什么难实现。'}</small>
             </div>
             <div className="guided-step__fact-card">
-              <span>主推进链</span>
               <strong>{settings.mainPlot ? '已填写' : '未填写'}</strong>
               <small>{settings.mainPlot || '写主线如何一步步推进。'}</small>
             </div>
             <div className="guided-step__fact-card">
-              <span>结局落点</span>
               <strong>{settings.ending ? '已填写' : '未填写'}</strong>
               <small>{settings.ending || '写故事最终如何收束。'}</small>
             </div>
@@ -719,7 +689,6 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         heroVariant="compact"
         eyebrow={stepMeta.eyebrow}
         title={stepMeta.title}
-        description={stepMeta.description}
         actions={(
           <Space wrap>
             <Button type="primary" icon={<BarsOutlined />} onClick={() => openProPage('structure')}>
@@ -743,20 +712,17 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
             <Alert type="warning" showIcon message="故事设计未完成" style={{ marginBottom: 16 }} />
           ) : null}
 
-        <WorkspacePanel title="卷册规划检查" description="长篇必须先拆卷，每卷有独立高潮和阶段目标。">
+        <WorkspacePanel>
           <div className="guided-step__fact-grid">
             <div className="guided-step__fact-card">
-              <span>卷数</span>
               <strong>{stats.volumeCount > 0 ? `${stats.volumeCount} 卷` : '未规划'}</strong>
                 <small>当前尚未创建卷。</small>
             </div>
             <div className="guided-step__fact-card">
-              <span>故事弧</span>
               <strong>{stats.outlineCount > 0 ? `${stats.outlineCount} 条` : '未创建'}</strong>
               <small>每卷应分配 1-3 条主要弧线。</small>
             </div>
             <div className="guided-step__fact-card">
-              <span>线程覆盖</span>
               <strong>{stats.threadCount > 0 ? `${stats.threadCount} 条` : '未创建'}</strong>
               <small>确保每条线程都有卷级归属，不要悬空。</small>
             </div>
@@ -773,7 +739,6 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
       heroVariant="compact"
       eyebrow={stepMeta.eyebrow}
       title={stepMeta.title}
-      description={stepMeta.description}
       actions={(
         <Space wrap>
           {stats.chapterCount > 0 ? (
@@ -807,30 +772,25 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
           <Alert type="warning" showIcon message="故事设计未完成" />
         ) : null}
 
-      <WorkspacePanel title="开写前检查">
+      <WorkspacePanel>
         <div className="guided-step__fact-grid">
           <div className="guided-step__fact-card">
-            <span>基础设定</span>
             <strong>{isStoryCoreReady(currentNovel) ? '已完成' : '待补齐'}</strong>
             <small>先有基础设定，正文才不会一路跑偏。</small>
           </div>
           <div className="guided-step__fact-card">
-            <span>主题与文风</span>
             <strong>{themeVoice.readyCount > 0 ? `${themeVoice.readyCount}/6` : '待补齐'}</strong>
             <small>正文越长，越依赖稳定的视角、时态和语言边界。</small>
           </div>
           <div className="guided-step__fact-card">
-            <span>故事设计</span>
             <strong>{isStoryPlotReady(currentNovel) ? '已完成' : '待补齐'}</strong>
             <small>先有目标和冲突，结构页才有可拆内容。</small>
           </div>
           <div className="guided-step__fact-card">
-            <span>结构资产</span>
             <strong>{stats.outlineCount + stats.timelineCount + stats.threadCount}</strong>
             <small>大纲、时间轴和线程越完整，正文越稳。</small>
           </div>
           <div className="guided-step__fact-card">
-            <span>正文状态</span>
             <strong>{stats.chapterCount > 0 ? '可继续写' : '尚未开章'}</strong>
             <small>如果还没有章节，可以先创建首章。</small>
           </div>

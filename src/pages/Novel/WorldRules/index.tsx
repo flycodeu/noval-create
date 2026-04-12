@@ -742,12 +742,11 @@ export default function WorldRules({ novelId }: Props) {
     </Space>
   )
 
-  return (
-    <WorkspacePage
-      eyebrow="世界规则"
-      title="世界规则"
-      description="按分区维护世界规则。"
-      actions={(
+    return (
+      <WorkspacePage
+        eyebrow="世界规则"
+        title="世界规则"
+        actions={(
         <Space wrap>
           <Button icon={<RobotOutlined />} loading={runningAction === 'all-generate'} disabled={saving || isGenerating || hasRunningAutoTask || autoTask?.status === 'paused'} onClick={() => void handleGenerateWorldRules('all', 'generate')}>
             {'生成全部分区'}
@@ -814,7 +813,7 @@ export default function WorldRules({ novelId }: Props) {
           ) : null}
         </div>
       </WorkspacePanel>
-      <WorkspacePanel title="分区编辑器" description="按分区维护世界规则，便于与地图、人物、时间轴持续联动。" extra={<div className="novel-pill">{`当前分区：${activeSectionMeta.label}`}</div>}>
+      <WorkspacePanel title="分区编辑器" extra={<div className="novel-pill">{`当前分区：${activeSectionMeta.label}`}</div>}>
         <Form form={form} layout="vertical" disabled={hasRunningAutoTask}>
           <Tabs className="novel-editor-tabs" items={tabItems} activeKey={activeTab} onChange={(key) => setActiveTab(key as WorldRuleSectionKey)} />
         </Form>

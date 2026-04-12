@@ -331,7 +331,6 @@ export default function ThemeVoicePage({ novelId }: Props) {
       heroVariant="compact"
       eyebrow="主题与文风"
       title="主题与文风"
-      description="维护主题、情感核心、视角、时态和语言规则。"
       actions={(
         <Space wrap>
           <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>
@@ -406,11 +405,7 @@ export default function ThemeVoicePage({ novelId }: Props) {
         />
       ) : null}
 
-      <WorkspacePanel
-        title="主题与文风表"
-        description="编辑主题与文风字段。"
-        extra={<Tag color={generatingMode ? 'gold' : 'blue'}>{generatingMode ? 'AI 生成中' : '手动保存生效'}</Tag>}
-      >
+      <WorkspacePanel extra={<Tag color={generatingMode ? 'gold' : 'blue'}>{generatingMode ? 'AI 生成中' : '手动保存生效'}</Tag>}>
         <Form form={form} layout="vertical">
           <div className="guided-step__field-grid">
             <div className="guided-step__field-card guided-step__field-card--full">
@@ -582,7 +577,6 @@ function StyleLearningPanel({ novelId }: { novelId: number }) {
   return (
     <WorkspacePanel
       title="风格学习"
-      description="导入参考文本并生成风格指纹。"
     >
       <div style={{ display: 'grid', gap: 16 }}>
         <Input

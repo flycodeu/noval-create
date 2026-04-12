@@ -673,14 +673,6 @@ export default function GuidePage({ novelId }: Props) {
   const nextStep = steps.find((step) => !step.ready) || null
   const pendingSteps = steps.filter((step) => !step.ready)
   const queuedSteps = pendingSteps.slice(1, 4)
-  const nextStepNarrative = nextStep
-    ? nextStep.support
-    : '主要设计资产已经齐备，可以转去正文写作，也可以继续细修人物、地图、时间轴和大纲。'
-  const flowDigest = nextStep
-    ? queuedSteps.length > 0
-      ? '这一环补稳后，顺着继续推进 ' + queuedSteps.map((step) => step.title).join('、') + '。'
-      : '这一环完成后，就已经具备直接转入正文写作的条件。'
-    : '关键工作流已经就绪，已经具备直接开写的条件。'
 
   return (
     <WorkspacePage
@@ -688,7 +680,6 @@ export default function GuidePage({ novelId }: Props) {
       layout="wide"
       eyebrow="创作工作流"
       title="创作向导"
-      description="把产品立项、主题文风、世界资产、结构资产和修订前置统一管理，并在每一步都维持上下文继承和结构校验。"
       actions={(
         <Space wrap>
           <Button
@@ -756,7 +747,6 @@ export default function GuidePage({ novelId }: Props) {
           {contextStatus && (
             <WorkspacePanel
               title="上下文同步"
-              description="当核心设定、世界规则、人物、地图、物品、线程、时间轴或大纲发生变化时，受影响章节会被标记为待同步。"
             >
               <div className="novel-freshness-meta">
                 <span>{`当前上下文版本 v${contextStatus.contextVersion}`}</span>
@@ -783,7 +773,7 @@ export default function GuidePage({ novelId }: Props) {
           )}
 
           {consistencyReport && (
-            <WorkspacePanel title="结构体检" description="全书级一致性校验器会自动检查人物、写作类型、关系对白、事件、时间轴、地图、物品和章节之间的冲突。">
+            <WorkspacePanel title="结构体检">
               <div className="novel-health-board">
                 <div className="novel-health-score">
                   <strong>{consistencyReport.readinessScore}</strong>
@@ -824,7 +814,6 @@ export default function GuidePage({ novelId }: Props) {
           type="warning"
           showIcon
           message={`有 ${contextStatus.staleChapterCount} 章需要重新同步上下文`}
-          description="最近的设定或结构变更已经影响到现有章节。"
         />
       )}
 
@@ -834,7 +823,6 @@ export default function GuidePage({ novelId }: Props) {
           type="warning"
           showIcon
           message={`有 ${contextStatus.staleCheckpointCount} 份长期记忆检查点待刷新`}
-          description="这些长期记忆检查点仍是旧版本。"
         />
       )}
 
@@ -844,7 +832,6 @@ export default function GuidePage({ novelId }: Props) {
           type="warning"
           showIcon
           message={`这些世界资产可能还挂着旧设定：${contextStatus.staleAssetLabels.join('、')}`}
-          description="这些世界资产仍在引用旧设定。"
         />
       )}
 
@@ -854,7 +841,6 @@ export default function GuidePage({ novelId }: Props) {
           type="warning"
           showIcon
           message="当前存在高优先级结构冲突"
-          description="这些高优先问题会影响后续批量生成和写作。"
         />
       )}
 
@@ -864,7 +850,6 @@ export default function GuidePage({ novelId }: Props) {
           type="warning"
           showIcon
           message="整本书还没有写作类型锚点"
-          description="当前还没有设置全书级写作类型。"
         />
       )}
 
@@ -874,7 +859,6 @@ export default function GuidePage({ novelId }: Props) {
           type="warning"
           showIcon
           message="主角还没有关键人物关系"
-          description="当前主角还没有关键人物关系。"
         />
       )}
 
@@ -884,18 +868,15 @@ export default function GuidePage({ novelId }: Props) {
           type="info"
           showIcon
           message="产品立项与文风底盘还没有钉稳"
-          description="产品立项与文风底盘尚未完成。"
         />
       )}
 
       <WorkspacePanel
         title="推荐推进顺序"
-          description="显示当前主流程。"
         extra={<div className="novel-pill">{nextStep ? `下一步：${nextStep.title}` : '可进入正文'}</div>}
       >
         <div className="novel-guide__flow-head">
           <div className="novel-guide__flow-lead">
-            <div className="novel-kicker">{nextStep ? '当前建议' : '流程状态'}</div>
             <strong>{nextStep ? nextStep.title : '关键骨架已铺好'}</strong>
             <div className="novel-guide__flow-queue">
               <span className="novel-guide__flow-chip">{'已就绪 ' + structureReadyCount + '/' + steps.length}</span>
@@ -907,12 +888,8 @@ export default function GuidePage({ novelId }: Props) {
                 ))
                 : (
                   <span className="novel-guide__flow-chip novel-guide__flow-chip--muted">可转入正文写作</span>
-                )}
+              )}
             </div>
-          </div>
-          <div className="novel-guide__flow-note">
-            <div>{nextStepNarrative}</div>
-            <div className="novel-guide__flow-subnote">{flowDigest}</div>
           </div>
         </div>
         <div className="novel-stage-grid">
@@ -920,7 +897,6 @@ export default function GuidePage({ novelId }: Props) {
             <div key={step.key} className={`novel-stage-card ${step.ready ? 'novel-stage-card--ready' : ''}`}>
               <div className="novel-stage-card__header">
                 <div>
-                  <div className="novel-kicker">{`步骤 ${String(index + 1).padStart(2, '0')}`}</div>
                   <div className="novel-stage-card__title">
                     {step.icon}
                     {step.title}
@@ -931,10 +907,6 @@ export default function GuidePage({ novelId }: Props) {
                   <Tag color="blue">{step.count}</Tag>
                 </div>
               </div>
-              <div className="novel-stage-card__desc">{step.desc}</div>
-              {nextStep?.key === step.key ? (
-                <div className="novel-stage-card__focus">{step.support}</div>
-              ) : null}
               <div className="novel-stage-card__actions">{step.action}</div>
             </div>
           ))}
@@ -944,7 +916,6 @@ export default function GuidePage({ novelId }: Props) {
       {consistencyReport && (
         <WorkspacePanel
           title="全书级一致性校验器"
-          description={consistencyReport.overview}
           extra={<div className="novel-pill">{`共发现 ${consistencyReport.issueCount} 个问题`}</div>}
         >
           <div className="novel-issue-mini-grid">
