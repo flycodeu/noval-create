@@ -2,6 +2,10 @@
 import { desc, eq } from 'drizzle-orm'
 import type { GenreWorldRules } from '../../src/shared/genre-system'
 import {
+  hasResumableWorkflowCheckpoint,
+  RESUMABLE_WORKFLOW_TYPES as SHARED_RESUMABLE_WORKFLOW_TYPES,
+} from '../../src/shared/workflow-resilience'
+import {
   createEmptyWorldRules,
   normalizeWorldRulesDraft,
 } from '../../src/shared/world-rules-draft'
@@ -39,19 +43,14 @@ import { isBatchWorkflowType, resumeBatchAutoGenerateWorkflow } from './batch-wo
 
 const DEFAULT_MAX_RETRIES = 2
 const activeWorkflows = new Set<number>()
-const RESUMABLE_WORKFLOW_TYPES = new Set([
-  'map_auto_generate',
-  'world_rules_auto_generate',
-  'faction_auto_generate',
-  'character_auto_generate',
-  'item_auto_generate',
-  'timeline_auto_generate',
-  'story_thread_auto_generate',
-  'subplot_auto_generate',
-])
+const RESUMABLE_WORKFLOW_TYPES = new Set<string>(SHARED_RESUMABLE_WORKFLOW_TYPES)
 const WORLD_RULE_SECTION_LABELS = new Map(WORLD_RULE_SECTION_DEFINITIONS.map((item) => [item.key, item.label]))
 
 type TaskRow = typeof tasks.$inferSelect
+
+function logWorkflowError(taskId: number) {
+  return (err: unknown) => console.error(`[workflow] Unhandled error in task ${taskId}:`, err)
+}
 
 function parseMapOptions(raw?: string | null): MapBatchGenerateOptions {
   if (!raw) return {}
@@ -289,6 +288,110 @@ function upsertFailedWorldRuleSection(
   return [...rest, nextItem]
 }
 
+function settleMapWorkflowFatalError(task: TaskRow, sender: WebContents | undefined, error: unknown) {
+  const control = parseTaskControl(task)
+  const progress = toMapStatus(task.id, task)
+  const isAbort = error instanceof Error && error.name === 'AbortError'
+
+  updateTaskControl(task.id, {
+    ...control,
+    cancelRequested: false,
+  })
+
+  if (isAbort || control.cancelRequested) {
+    updateTaskProgress(task.id, {
+      ...progress,
+      status: 'paused',
+      retryCount: 0,
+      lastError: '',
+      message: '地图自动生成已暂停，可随时继续。',
+    }, sender)
+    updateTaskStatus(task.id, 'paused', sender, {
+      errorMessage: null,
+      currentChildTaskId: null,
+    })
+    return
+  }
+
+  const errorMessage = error instanceof Error ? error.message : '地图自动生成失败'
+  updateTaskProgress(task.id, {
+    ...progress,
+    status: 'paused',
+    retryCount: Math.max(progress.retryCount, control.retryCount || 0),
+    lastError: errorMessage,
+    message: progress.generatedNodeCount > 0 || progress.processedParentCount > 0 || progress.currentStage !== 'idle'
+      ? '地图自动生成发生异常，已保留当前进度，可随时继续。'
+      : '地图自动生成在准备阶段失败，任务已暂停，可随时继续。',
+  }, sender)
+  updateTaskStatus(task.id, 'paused', sender, {
+    errorMessage,
+    currentChildTaskId: null,
+  })
+}
+
+function settleWorldRulesWorkflowFatalError(task: TaskRow, sender: WebContents | undefined, error: unknown) {
+  const control = parseTaskControl(task)
+  const progress = toWorldRulesStatus(task.id, task)
+  const isAbort = error instanceof Error && error.name === 'AbortError'
+
+  updateTaskControl(task.id, {
+    ...control,
+    cancelRequested: false,
+  })
+
+  if (isAbort || control.cancelRequested) {
+    updateTaskProgress(task.id, {
+      ...progress,
+      status: 'cancelled',
+      currentSection: '',
+      currentSectionLabel: '',
+      retryCount: 0,
+      lastError: '',
+      message: '世界规则自动生成已停止。',
+    }, sender)
+    updateTaskStatus(task.id, 'cancelled', sender, {
+      errorMessage: '用户已取消',
+      currentChildTaskId: null,
+    })
+    return
+  }
+
+  const errorMessage = error instanceof Error ? error.message : '世界规则自动生成失败'
+  updateTaskProgress(task.id, {
+    ...progress,
+    status: 'paused',
+    retryCount: Math.max(progress.retryCount, control.retryCount || 0),
+    lastError: errorMessage,
+    message: progress.completedSectionCount > 0 || progress.failedSections.length > 0
+      ? '世界规则自动生成发生异常，已保留当前草稿，可继续。'
+      : '世界规则自动生成在准备阶段失败，任务已暂停，可继续。',
+  }, sender)
+  updateTaskStatus(task.id, 'paused', sender, {
+    errorMessage,
+    currentChildTaskId: null,
+  })
+}
+
+function settleWorkflowFatalError(taskId: number, sender: WebContents | undefined, error: unknown) {
+  const task = getTaskRecord(taskId)
+  if (!task || task.runnerType !== 'workflow') {
+    console.error(`[workflow] Fatal workflow recovery failed for task ${taskId}:`, error)
+    return
+  }
+
+  if (task.type === 'map_auto_generate') {
+    settleMapWorkflowFatalError(task, sender, error)
+    return
+  }
+
+  if (task.type === 'world_rules_auto_generate') {
+    settleWorldRulesWorkflowFatalError(task, sender, error)
+    return
+  }
+
+  console.error(`[workflow] Unsupported fatal workflow recovery for task ${taskId}:`, error)
+}
+
 async function runMapAutoGenerateWorkflow(taskId: number, sender?: WebContents) {
   if (activeWorkflows.has(taskId)) return
   activeWorkflows.add(taskId)
@@ -473,6 +576,8 @@ async function runMapAutoGenerateWorkflow(taskId: number, sender?: WebContents) 
         updateTaskProgress(taskId, retryProgress, sender)
       }
     }
+  } catch (error) {
+    settleWorkflowFatalError(taskId, sender, error)
   } finally {
     activeWorkflows.delete(taskId)
   }
@@ -675,6 +780,8 @@ async function runWorldRulesAutoGenerateWorkflow(taskId: number, sender?: WebCon
         updateTaskProgress(taskId, retryProgress, sender)
       }
     }
+  } catch (error) {
+    settleWorkflowFatalError(taskId, sender, error)
   } finally {
     activeWorkflows.delete(taskId)
   }
@@ -708,7 +815,7 @@ export async function startMapAutoGenerateWorkflow(
   })
 
   updateTaskProgress(taskId, createInitialMapStatus(taskId, novelId), sender)
-  void runMapAutoGenerateWorkflow(taskId, sender)
+  void runMapAutoGenerateWorkflow(taskId, sender).catch(logWorkflowError(taskId))
   return taskId
 }
 
@@ -746,7 +853,7 @@ export async function startWorldRulesAutoGenerateWorkflow(
   })
 
   updateTaskProgress(taskId, createInitialWorldRulesStatus(taskId, novelId, safeOptions), sender)
-  void runWorldRulesAutoGenerateWorkflow(taskId, sender)
+  void runWorldRulesAutoGenerateWorkflow(taskId, sender).catch(logWorkflowError(taskId))
   return taskId
 }
 
@@ -859,6 +966,9 @@ export async function resumeWorldRulesAutoGenerateWorkflow(
   if (!task || task.runnerType !== 'workflow' || task.type !== 'world_rules_auto_generate') {
     throwUserFacingError('workflow.taskNotFound', { taskId })
   }
+  if (task.status !== 'paused' || !hasResumableWorkflowCheckpoint(task)) {
+    throwUserFacingError('workflow.resumeUnsupported')
+  }
 
   updateTask(taskId, {
     status: 'pending',
@@ -870,21 +980,23 @@ export async function resumeWorldRulesAutoGenerateWorkflow(
     cancelRequested: false,
     retryCount: 0,
   })
+  const progress = toWorldRulesStatus(taskId, task)
+  updateTaskProgress(taskId, {
+    ...progress,
+    status: 'pending',
+    currentSection: '',
+    currentSectionLabel: '',
+    retryCount: 0,
+    lastError: '',
+    message: progress.pendingSections.length > 0
+      ? `准备继续生成 ${WORLD_RULE_SECTION_LABELS.get(progress.pendingSections[0]) || progress.pendingSections[0]}。`
+      : '准备继续执行。',
+    workingRules: currentRules
+      ? normalizeWorldRulesDraft(currentRules, currentRules.genreProfile?.name)
+      : progress.workingRules,
+  }, sender)
 
-  if (currentRules) {
-    const progress = toWorldRulesStatus(taskId, task)
-    updateTaskProgress(taskId, {
-      ...progress,
-      retryCount: 0,
-      lastError: '',
-      message: progress.pendingSections.length > 0
-        ? `准备继续生成 ${WORLD_RULE_SECTION_LABELS.get(progress.pendingSections[0]) || progress.pendingSections[0]}。`
-        : '准备继续执行。',
-      workingRules: normalizeWorldRulesDraft(currentRules, currentRules.genreProfile.name),
-    }, sender)
-  }
-
-  void runWorldRulesAutoGenerateWorkflow(taskId, sender)
+  void runWorldRulesAutoGenerateWorkflow(taskId, sender).catch(logWorkflowError(taskId))
   return taskId
 }
 
@@ -897,8 +1009,12 @@ export async function resumeWorkflowTask(taskId: number, sender?: WebContents) {
   if (!RESUMABLE_WORKFLOW_TYPES.has(task.type)) {
     throwUserFacingError('workflow.resumeUnsupported')
   }
+  if (task.status !== 'paused' || !hasResumableWorkflowCheckpoint(task)) {
+    throwUserFacingError('workflow.resumeUnsupported')
+  }
 
   if (task.type === 'map_auto_generate') {
+    const progress = toMapStatus(taskId, task)
     updateTask(taskId, {
       status: 'pending',
       errorMessage: null,
@@ -907,9 +1023,17 @@ export async function resumeWorkflowTask(taskId: number, sender?: WebContents) {
     updateTaskControl(taskId, {
       ...parseTaskControl(task),
       cancelRequested: false,
+      retryCount: 0,
     })
+    updateTaskProgress(taskId, {
+      ...progress,
+      status: 'pending',
+      retryCount: 0,
+      lastError: '',
+      message: '准备继续执行地图自动生成。',
+    }, sender)
 
-    void runMapAutoGenerateWorkflow(taskId, sender)
+    void runMapAutoGenerateWorkflow(taskId, sender).catch(logWorkflowError(taskId))
     return taskId
   }
 
@@ -922,5 +1046,9 @@ export async function resumeWorkflowTask(taskId: number, sender?: WebContents) {
   }
 
   throwUserFacingError('workflow.resumeUnsupported')
+}
+
+export const __testing = {
+  runWorldRulesAutoGenerateWorkflow,
 }
 

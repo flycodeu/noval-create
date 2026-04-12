@@ -26,7 +26,7 @@ import { getAdapterById, getDefaultAdapter } from './model.service'
 type CharacterRow = typeof characters.$inferSelect
 type ChapterRow = Pick<typeof chapters.$inferSelect, 'id' | 'chapterNum' | 'volumeId' | 'content'>
 
-interface DialogueTurn {
+export interface DialogueTurn {
   chapterId: number
   chapterNum: number
   volumeId?: number | null
@@ -279,7 +279,7 @@ function extractRepeatedPhrases(texts: string[], minLength: number, maxLength: n
   return mapToTopStats(counts, limit).filter((item) => item.count >= 2)
 }
 
-function buildSentencePatterns(stats: CharacterDialogueFingerprint): string[] {
+export function buildSentencePatterns(stats: CharacterDialogueFingerprint): string[] {
   const patterns: string[] = []
   if (stats.shortSentenceRate >= 55) patterns.push('短句密集')
   if (stats.longSentenceRate >= 35) patterns.push('长句偏多')
@@ -291,7 +291,7 @@ function buildSentencePatterns(stats: CharacterDialogueFingerprint): string[] {
   return patterns.slice(0, 4)
 }
 
-function buildFingerprintFromTurns(turns: DialogueTurn[]): CharacterDialogueFingerprint {
+export function buildFingerprintFromTurns(turns: DialogueTurn[]): CharacterDialogueFingerprint {
   const normalizedTurns = turns.map((turn) => normalizeDialogueText(turn.text)).filter(Boolean)
   if (normalizedTurns.length === 0) {
     return {
@@ -389,7 +389,7 @@ function buildSimilarityReasons(left: CharacterDialogueSignature, right: Charact
   return reasons.slice(0, 3)
 }
 
-function computeSimilarity(left: CharacterDialogueSignature, right: CharacterDialogueSignature): CrossCharacterDialogueSimilarity {
+export function computeSimilarity(left: CharacterDialogueSignature, right: CharacterDialogueSignature): CrossCharacterDialogueSimilarity {
   const metricScore = average([
     normalizeVectorSimilarity(left.avgSentenceLength, right.avgSentenceLength, 18),
     normalizeVectorSimilarity(left.shortSentenceRate, right.shortSentenceRate, 100),

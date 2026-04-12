@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Button, Empty, Modal, Progress, Spin, Tag } from 'antd'
+import { Button, Empty, Modal, Progress, Skeleton, Tabs, Tag } from 'antd'
 import VirtualList from 'rc-virtual-list'
 import type { LanguageDriftMetrics, QualityDashboardData } from '../../../types'
 import { WorkspaceMetric, WorkspacePage, WorkspacePanel, WorkspaceStepGuide } from '../components/WorkspaceShell'
@@ -16,6 +16,13 @@ interface Props { novelId: number }
 
 type QualityChapterEntry = QualityDashboardData['chapterDetails'][number]
 type QualityHeatmapPoint = QualityDashboardData['heatmapData'][number]
+type QualityRiskEntry = QualityDashboardData['novelQualityMetrics']['topRisks'][number]
+type VolumeQualityEntry = QualityDashboardData['volumeQualityMetrics'][number]
+
+const OverviewTab = React.lazy(() => import('./tabs/OverviewTab'))
+const LanguageTab = React.lazy(() => import('./tabs/LanguageTab'))
+const StructureTab = React.lazy(() => import('./tabs/StructureTab'))
+const StabilityTab = React.lazy(() => import('./tabs/StabilityTab'))
 
 const DIMENSION_NAMES = [
   '文笔质量', '逻辑连贯', '节奏控制', '情感深度',
@@ -167,6 +174,7 @@ export default function QualityDashboard({ novelId }: Props) {
   const [data, setData] = useState<QualityDashboardData | null>(null)
   const [selectedChapter, setSelectedChapter] = useState<QualityChapterEntry | null>(null)
   const [selectedVolumeId, setSelectedVolumeId] = useState<number | null>(null)
+  const [activeTab, setActiveTab] = useState('overview')
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -188,7 +196,15 @@ export default function QualityDashboard({ novelId }: Props) {
     }
   }, [data, selectedVolumeId])
 
-  if (loading) return <Spin style={{ display: 'flex', justifyContent: 'center', padding: 80 }} />
+  if (loading) {
+    return (
+      <WorkspacePage title="质量监控" description="查看各章节的 AI 检测结果与质量趋势。">
+        <WorkspacePanel title="正在汇总质量数据" description="热力图、语言漂移、故事结构和状态稳定性正在并发加载。">
+          <Skeleton active paragraph={{ rows: 10 }} />
+        </WorkspacePanel>
+      </WorkspacePage>
+    )
+  }
 
   const hasScoreData = Boolean(data && data.totalChaptersScored > 0)
   const hasStoryDynamicsData = Boolean(data && data.protagonistSetbackSummary.chapterCount > 0)
@@ -275,39 +291,8 @@ export default function QualityDashboard({ novelId }: Props) {
     if (typeof chapterNum === 'number') openChapterByNum(chapterNum)
   }
 
-  return (
-    <WorkspacePage
-      title="质量监控"
-      description="查看各章节的 AI 检测结果、修补优先级和全书质量趋势。"
-      metrics={[
-        <WorkspaceMetric key="scored" label="已评分章节" value={data.totalChaptersScored} />,
-        <WorkspaceMetric key="tracked" label="节奏追踪章节" value={data.protagonistSetbackSummary.chapterCount} />,
-        <WorkspaceMetric key="arc" label="跟踪故事弧" value={data.storyArcProgressSummary.trackedArcCount} />,
-        <WorkspaceMetric key="avg" label="平均总分 / 压力" value={hasScoreData ? `${data.averageOverallScore} / 10` : `${data.protagonistSetbackSummary.averagePressure}`} />,
-      ]}
-      guide={(
-        <WorkspaceStepGuide
-          title="进入质量看板先看什么"
-          steps={[
-            {
-              title: '先找阻塞卷和章节',
-              description: '先看全书健康总览与卷级健康面板，定位最先该修的卷和章节。',
-              status: 'focus',
-            },
-            {
-              title: '再拆 AI 味来源',
-              description: '用趋势图和 AI 味分解确认问题来自语言退化、节奏还是结构承接。',
-              status: 'todo',
-            },
-            {
-              title: '最后回到修订中心',
-              description: '把发现的高优先问题转回修订中心或正文页处理，形成闭环。',
-              status: 'todo',
-            },
-          ]}
-        />
-      )}
-    >
+  const overviewContent = (
+    <>
       <WorkspacePanel title="全书健康总览" description="先判断全书当前最危险的卷和主要风险，再往下钻到卷级和章节级。">
         <NovelHealthOverviewPanel
           summary={data.novelQualityMetrics}
@@ -342,90 +327,6 @@ export default function QualityDashboard({ novelId }: Props) {
             />
           </WorkspacePanel>
 
-          <WorkspacePanel title="AI 味分解" description="拆开看语言退化由哪些问题构成。">
-            <LanguageDriftPanel
-              averages={data.averageLanguageDrift}
-              trends={data.languageDriftTrends}
-              recentAlerts={data.recentLanguageDriftAlerts}
-              volumeEntries={filteredLanguageVolumes}
-              novelSummary={data.novelLanguageDriftSummary}
-            />
-          </WorkspacePanel>
-
-        </>
-      ) : null}
-
-      {data.dialogueFingerprintStats.eligibleCharacterCount > 0 ? (
-        <WorkspacePanel title="角色对白辨识度" description="查看角色之间是否越说越像，以及谁正在偏离自己的语音指纹。">
-          <DialogueFingerprintPanel
-            stats={data.dialogueFingerprintStats}
-            signatures={data.characterDialogueSignatures}
-            similarities={data.crossCharacterDialogueSimilarity}
-            driftEntries={data.dialogueDriftTrend}
-            volumeEntries={data.volumeDialogueSimilarity}
-            alerts={data.recentDialogueAlerts}
-          />
-        </WorkspacePanel>
-      ) : null}
-
-      <WorkspacePanel title="主角受挫与节奏" description="跨章节查看主角受挫、代价持续、反转与高潮分布。">
-        <StoryDynamicsPanel
-          trend={data.storyDynamicsTrend}
-          alerts={data.storyPacingAlerts}
-          protagonistSummary={data.protagonistSetbackSummary}
-          costSummary={data.costPersistenceSummary}
-          reversalSummary={data.reversalDistributionSummary}
-          volumeEntries={filteredStoryVolumes}
-        />
-      </WorkspacePanel>
-
-      {hasChapterFunctionData ? (
-        <WorkspacePanel title="章节功能与节奏分布" description="查看章节主功能是否重复、卷内是否偏科，以及关键章节是否仍在原地过渡。">
-          <ChapterFunctionPanel
-            summary={data.chapterFunctionSummary}
-            runs={filteredChapterFunctionRuns}
-            alerts={filteredChapterFunctionAlerts}
-            volumeEntries={filteredChapterFunctionVolumes}
-          />
-        </WorkspacePanel>
-      ) : null}
-
-      {hasArcProgressData ? (
-        <WorkspacePanel title="故事弧推进" description="查看每条故事弧的推进率、空转率、阶段兑现和卷级分布。">
-          <StoryArcProgressPanel
-            summary={data.storyArcProgressSummary}
-            trend={data.storyArcProgressTrend}
-            arcs={data.storyArcProgressArcs}
-            alerts={data.storyArcProgressAlerts}
-            volumeEntries={filteredArcVolumes}
-          />
-        </WorkspacePanel>
-      ) : null}
-
-      {hasRecallData ? (
-        <WorkspacePanel title="召回可靠性" description="查看历史片段召回是否过度依赖、以及是否命中过期信息。">
-          <RecallReliabilityPanel
-            summary={data.recallSummary}
-            alerts={filteredRecallAlerts}
-            volumeEntries={filteredRecallVolumes}
-          />
-        </WorkspacePanel>
-      ) : null}
-
-      {hasStateData ? (
-        <WorkspacePanel title="状态稳定性" description="查看人物、物品、关系、势力与地点的跳变和冲突是否在放大。">
-          <WorldStateStabilityPanel
-            trend={data.worldStateTrend}
-            alerts={filteredWorldAlerts}
-            conflictEntities={data.worldConflictEntities}
-            summary={data.worldStateSummary}
-            volumeEntries={filteredWorldVolumes}
-          />
-        </WorkspacePanel>
-      ) : null}
-
-      {hasScoreData ? (
-        <>
           <WorkspacePanel title="薄弱维度分析" description="各维度被标记为薄弱项的频次。">
             <WeakDimensionChart data={data.weakDimensionFrequency} />
           </WorkspacePanel>
@@ -469,6 +370,181 @@ export default function QualityDashboard({ novelId }: Props) {
           </WorkspacePanel>
         </>
       ) : null}
+    </>
+  )
+
+  const languageContent = (
+    <>
+      {hasScoreData ? (
+        <WorkspacePanel title="AI 味分解" description="拆开看语言退化由哪些问题构成。">
+          <LanguageDriftPanel
+            averages={data.averageLanguageDrift}
+            trends={data.languageDriftTrends}
+            recentAlerts={data.recentLanguageDriftAlerts}
+            volumeEntries={filteredLanguageVolumes}
+            novelSummary={data.novelLanguageDriftSummary}
+          />
+        </WorkspacePanel>
+      ) : null}
+
+      {data.dialogueFingerprintStats.eligibleCharacterCount > 0 ? (
+        <WorkspacePanel title="角色对白辨识度" description="查看角色之间是否越说越像，以及谁正在偏离自己的语音指纹。">
+          <DialogueFingerprintPanel
+            stats={data.dialogueFingerprintStats}
+            signatures={data.characterDialogueSignatures}
+            similarities={data.crossCharacterDialogueSimilarity}
+            driftEntries={data.dialogueDriftTrend}
+            volumeEntries={data.volumeDialogueSimilarity}
+            alerts={data.recentDialogueAlerts}
+          />
+        </WorkspacePanel>
+      ) : (
+        <WorkspacePanel title="角色对白辨识度" description="查看角色之间是否越说越像，以及谁正在偏离自己的语音指纹。">
+          <Empty description="当前还没有足够的对白指纹数据。" />
+        </WorkspacePanel>
+      )}
+    </>
+  )
+
+  const structureContent = (
+    <>
+      <WorkspacePanel title="主角受挫与节奏" description="跨章节查看主角受挫、代价持续、反转与高潮分布。">
+        <StoryDynamicsPanel
+          trend={data.storyDynamicsTrend}
+          alerts={data.storyPacingAlerts}
+          protagonistSummary={data.protagonistSetbackSummary}
+          costSummary={data.costPersistenceSummary}
+          reversalSummary={data.reversalDistributionSummary}
+          volumeEntries={filteredStoryVolumes}
+        />
+      </WorkspacePanel>
+
+      {hasChapterFunctionData ? (
+        <WorkspacePanel title="章节功能与节奏分布" description="查看章节主功能是否重复、卷内是否偏科，以及关键章节是否仍在原地过渡。">
+          <ChapterFunctionPanel
+            summary={data.chapterFunctionSummary}
+            runs={filteredChapterFunctionRuns}
+            alerts={filteredChapterFunctionAlerts}
+            volumeEntries={filteredChapterFunctionVolumes}
+          />
+        </WorkspacePanel>
+      ) : null}
+
+      {hasArcProgressData ? (
+        <WorkspacePanel title="故事弧推进" description="查看每条故事弧的推进率、空转率、阶段兑现和卷级分布。">
+          <StoryArcProgressPanel
+            summary={data.storyArcProgressSummary}
+            trend={data.storyArcProgressTrend}
+            arcs={data.storyArcProgressArcs}
+            alerts={data.storyArcProgressAlerts}
+            volumeEntries={filteredArcVolumes}
+          />
+        </WorkspacePanel>
+      ) : null}
+    </>
+  )
+
+  const stabilityContent = (
+    <>
+      {hasRecallData ? (
+        <WorkspacePanel title="召回可靠性" description="查看历史片段召回是否过度依赖、以及是否命中过期信息。">
+          <RecallReliabilityPanel
+            summary={data.recallSummary}
+            alerts={filteredRecallAlerts}
+            volumeEntries={filteredRecallVolumes}
+          />
+        </WorkspacePanel>
+      ) : null}
+
+      {hasStateData ? (
+        <WorkspacePanel title="状态稳定性" description="查看人物、物品、关系、势力与地点的跳变和冲突是否在放大。">
+          <WorldStateStabilityPanel
+            trend={data.worldStateTrend}
+            alerts={filteredWorldAlerts}
+            conflictEntities={data.worldConflictEntities}
+            summary={data.worldStateSummary}
+            volumeEntries={filteredWorldVolumes}
+          />
+        </WorkspacePanel>
+      ) : null}
+    </>
+  )
+
+  return (
+    <WorkspacePage
+      title="质量监控"
+      description="查看各章节的 AI 检测结果、修补优先级和全书质量趋势。"
+      metrics={[
+        <WorkspaceMetric key="scored" label="已评分章节" value={data.totalChaptersScored} />,
+        <WorkspaceMetric key="tracked" label="节奏追踪章节" value={data.protagonistSetbackSummary.chapterCount} />,
+        <WorkspaceMetric key="arc" label="跟踪故事弧" value={data.storyArcProgressSummary.trackedArcCount} />,
+        <WorkspaceMetric key="avg" label="平均总分 / 压力" value={hasScoreData ? `${data.averageOverallScore} / 10` : `${data.protagonistSetbackSummary.averagePressure}`} />,
+      ]}
+      guide={(
+        <WorkspaceStepGuide
+          title="进入质量看板先看什么"
+          steps={[
+            {
+              title: '先找阻塞卷和章节',
+              description: '先看全书健康总览与卷级健康面板，定位最先该修的卷和章节。',
+              status: 'focus',
+            },
+            {
+              title: '再拆 AI 味来源',
+              description: '用趋势图和 AI 味分解确认问题来自语言退化、节奏还是结构承接。',
+              status: 'todo',
+            },
+            {
+              title: '最后回到修订中心',
+              description: '把发现的高优先问题转回修订中心或正文页处理，形成闭环。',
+              status: 'todo',
+            },
+          ]}
+        />
+      )}
+    >
+      <Tabs
+        activeKey={activeTab}
+        onChange={setActiveTab}
+        items={[
+          {
+            key: 'overview',
+            label: '总览',
+            children: (
+              <React.Suspense fallback={<Skeleton active paragraph={{ rows: 8 }} />}>
+                <OverviewTab content={overviewContent} />
+              </React.Suspense>
+            ),
+          },
+          {
+            key: 'language',
+            label: '语言与对白',
+            children: (
+              <React.Suspense fallback={<Skeleton active paragraph={{ rows: 8 }} />}>
+                <LanguageTab content={languageContent} />
+              </React.Suspense>
+            ),
+          },
+          {
+            key: 'structure',
+            label: '结构与推进',
+            children: (
+              <React.Suspense fallback={<Skeleton active paragraph={{ rows: 8 }} />}>
+                <StructureTab content={structureContent} />
+              </React.Suspense>
+            ),
+          },
+          {
+            key: 'stability',
+            label: '召回与状态',
+            children: (
+              <React.Suspense fallback={<Skeleton active paragraph={{ rows: 8 }} />}>
+                <StabilityTab content={stabilityContent} />
+              </React.Suspense>
+            ),
+          },
+        ]}
+      />
 
       <Modal
         title={selectedChapter ? `第${selectedChapter.chapterNum}章 · ${selectedChapter.title}` : '章节评分'}
@@ -526,6 +602,246 @@ export default function QualityDashboard({ novelId }: Props) {
         ) : null}
       </Modal>
     </WorkspacePage>
+  )
+}
+
+function NovelHealthOverviewPanel({
+  summary,
+  activeVolume,
+  onSelectVolume,
+  onClearVolume,
+  onSelectRisk,
+}: {
+  summary: QualityDashboardData['novelQualityMetrics']
+  activeVolume: VolumeQualityEntry | null
+  onSelectVolume: (volumeId: number | null) => void
+  onClearVolume: () => void
+  onSelectRisk: (risk: QualityRiskEntry) => void
+}) {
+  return (
+    <div style={{ display: 'grid', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>全书健康分</div>
+          <div style={{ fontSize: 24, fontWeight: 700, color: healthScoreColor(summary.healthScore) }}>{summary.healthScore}</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>综合 AI 味、节奏、推进、召回与状态稳定性</div>
+        </div>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>已分析章节</div>
+          <div style={{ fontSize: 24, fontWeight: 700 }}>{summary.analyzedChapterCount} / {summary.totalChapterCount}</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>已纳入质量总览统计的章节数量</div>
+        </div>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>风险计数</div>
+          <div style={{ fontSize: 24, fontWeight: 700 }}>{summary.criticalRiskCount} / {summary.warningRiskCount}</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>高优先 / 中优先</div>
+        </div>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>伏笔债务</div>
+          <div style={{ fontSize: 24, fontWeight: 700 }}>{summary.foreshadowPendingCount}</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>
+            待回收 {summary.foreshadowPendingCount} · 即将到期 {summary.foreshadowDueSoonCount} · 已超期 {summary.foreshadowOverdueCount}
+          </div>
+        </div>
+      </div>
+
+      {activeVolume ? (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '12px 14px', borderRadius: 10, background: 'rgba(19,194,194,0.08)', border: '1px solid rgba(19,194,194,0.24)' }}>
+          <div style={{ display: 'grid', gap: 4 }}>
+            <div style={{ fontWeight: 600 }}>{`当前卷筛选：${activeVolume.volumeName}`}</div>
+            <div style={{ fontSize: 12, opacity: 0.72 }}>{`第${activeVolume.chapterStart}-${activeVolume.chapterEnd}章 · 健康分 ${activeVolume.healthScore}`}</div>
+          </div>
+          <Button size="small" onClick={onClearVolume}>清除卷筛选</Button>
+        </div>
+      ) : null}
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 1.1fr) minmax(320px, 1.4fr)', gap: 12 }}>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', display: 'grid', gap: 10 }}>
+          <div style={{ fontWeight: 600 }}>风险分布</div>
+          {summary.riskOverview.length > 0 ? summary.riskOverview.map((risk) => {
+            const share = summary.criticalRiskCount + summary.warningRiskCount > 0
+              ? Math.round((risk.count / Math.max(1, summary.criticalRiskCount + summary.warningRiskCount)) * 100)
+              : 0
+            return (
+              <div key={risk.kind} style={{ display: 'grid', gap: 4 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12 }}>
+                  <span>{risk.label || qualityRiskKindLabel(risk.kind)}</span>
+                  <span style={{ fontWeight: 600 }}>{risk.count}</span>
+                </div>
+                <Progress percent={share} showInfo={false} strokeColor={share >= 60 ? '#f5222d' : share >= 35 ? '#faad14' : '#52c41a'} size="small" />
+              </div>
+            )
+          }) : <div style={{ fontSize: 12, opacity: 0.6 }}>当前没有风险分布数据。</div>}
+        </div>
+
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', display: 'grid', gap: 10 }}>
+          <div style={{ fontWeight: 600 }}>建议先看的卷</div>
+          {summary.recommendedFocusVolumes.length > 0 ? summary.recommendedFocusVolumes.map((volume) => (
+            <button
+              key={volume.volumeId}
+              type="button"
+              onClick={() => onSelectVolume(volume.volumeId)}
+              style={{
+                border: activeVolume?.volumeId === volume.volumeId ? '1px solid rgba(19,194,194,0.45)' : '1px solid rgba(255,255,255,0.08)',
+                background: activeVolume?.volumeId === volume.volumeId ? 'rgba(19,194,194,0.08)' : 'rgba(255,255,255,0.02)',
+                borderRadius: 10,
+                padding: '12px 14px',
+                textAlign: 'left',
+                cursor: 'pointer',
+                display: 'grid',
+                gap: 6,
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
+                <strong>{volume.volumeName}</strong>
+                <Tag color={volume.healthScore < 55 ? 'error' : volume.healthScore < 70 ? 'warning' : 'success'} style={{ marginRight: 0 }}>
+                  健康分 {volume.healthScore}
+                </Tag>
+              </div>
+              <div style={{ fontSize: 12, opacity: 0.72 }}>{volume.summary}</div>
+            </button>
+          )) : <div style={{ fontSize: 12, opacity: 0.6 }}>当前没有推荐优先处理的卷。</div>}
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gap: 10 }}>
+        <div style={{ fontWeight: 600 }}>全书最高优先风险</div>
+        {summary.topRisks.length > 0 ? summary.topRisks.map((risk, index) => (
+          <button
+            key={`${risk.kind}-${risk.title}-${index}`}
+            type="button"
+            onClick={() => onSelectRisk(risk)}
+            style={{
+              border: '1px solid rgba(255,255,255,0.08)',
+              background: 'rgba(255,255,255,0.03)',
+              borderRadius: 10,
+              padding: '12px 14px',
+              textAlign: 'left',
+              cursor: 'pointer',
+              display: 'grid',
+              gap: 6,
+            }}
+          >
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <Tag color={getQualityRiskSeverityColor(risk.severity)} style={{ marginRight: 0 }}>
+                {getQualityRiskSeverityLabel(risk.severity)}
+              </Tag>
+              <Tag color="blue" style={{ marginRight: 0 }}>{qualityRiskKindLabel(risk.kind)}</Tag>
+              <strong>{risk.title}</strong>
+            </div>
+            <div style={{ fontSize: 12, opacity: 0.72 }}>{risk.detail}</div>
+            <div style={{ fontSize: 11, opacity: 0.55 }}>
+              {risk.chapterNums.length > 0 ? `涉及章节：${risk.chapterNums.map((chapterNum) => `第${chapterNum}章`).join('、')}` : '点击后会定位到对应卷和章节。'}
+            </div>
+          </button>
+        )) : <Empty description="当前没有需要优先定位的全书级风险" image={Empty.PRESENTED_IMAGE_SIMPLE} />}
+      </div>
+    </div>
+  )
+}
+
+function VolumeHealthPanel({
+  volumes,
+  activeVolumeId,
+  onSelectVolume,
+  onSelectRisk,
+}: {
+  volumes: QualityDashboardData['volumeQualityMetrics']
+  activeVolumeId: number | null
+  onSelectVolume: (volumeId: number | null) => void
+  onSelectRisk: (risk: QualityRiskEntry) => void
+}) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 12 }}>
+      {volumes.map((volume) => {
+        const isActive = activeVolumeId === volume.volumeId
+        return (
+          <div
+            key={volume.volumeId}
+            style={{
+              padding: '14px 16px',
+              borderRadius: 12,
+              background: isActive ? 'rgba(19,194,194,0.08)' : 'rgba(255,255,255,0.04)',
+              border: isActive ? '1px solid rgba(19,194,194,0.35)' : '1px solid rgba(255,255,255,0.08)',
+              display: 'grid',
+              gap: 12,
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
+              <div style={{ display: 'grid', gap: 4 }}>
+                <strong>{volume.volumeName}</strong>
+                <div style={{ fontSize: 12, opacity: 0.65 }}>{`第${volume.chapterStart}-${volume.chapterEnd}章 · ${volume.chapterCount} 章 · 已分析 ${volume.analyzedChapterCount} 章`}</div>
+              </div>
+              <Button size="small" type={isActive ? 'primary' : 'default'} onClick={() => onSelectVolume(isActive ? null : volume.volumeId)}>
+                {isActive ? '取消筛选' : '筛选此卷'}
+              </Button>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10 }}>
+              <div style={{ padding: '10px 12px', borderRadius: 10, background: 'rgba(255,255,255,0.03)' }}>
+                <div style={{ fontSize: 11, opacity: 0.65 }}>健康分</div>
+                <div style={{ fontSize: 22, fontWeight: 700, color: healthScoreColor(volume.healthScore) }}>{volume.healthScore}</div>
+              </div>
+              <div style={{ padding: '10px 12px', borderRadius: 10, background: 'rgba(255,255,255,0.03)' }}>
+                <div style={{ fontSize: 11, opacity: 0.65 }}>平均总分</div>
+                <div style={{ fontSize: 22, fontWeight: 700 }}>{volume.averageOverallScore}</div>
+              </div>
+              <div style={{ padding: '10px 12px', borderRadius: 10, background: 'rgba(255,255,255,0.03)' }}>
+                <div style={{ fontSize: 11, opacity: 0.65 }}>平均 AI 味</div>
+                <div style={{ fontSize: 22, fontWeight: 700 }}>{volume.averageAiLikeRate}%</div>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
+              <div style={{ padding: '10px 12px', borderRadius: 10, background: 'rgba(255,255,255,0.03)', display: 'grid', gap: 4, fontSize: 12 }}>
+                <div>{`语言恶化项：${volume.worseningMetricCount}`}</div>
+                <div>{`停滞故事弧：${volume.stalledArcCount}`}</div>
+                <div>{`高危弧告警：${volume.criticalArcAlertCount}`}</div>
+                <div>{`节奏平衡分：${volume.rhythmBalanceScore}`}</div>
+              </div>
+              <div style={{ padding: '10px 12px', borderRadius: 10, background: 'rgba(255,255,255,0.03)', display: 'grid', gap: 4, fontSize: 12 }}>
+                <div>{`伏笔待回收：${volume.foreshadowPendingCount}`}</div>
+                <div>{`伏笔已超期：${volume.foreshadowOverdueCount}`}</div>
+                <div>{`过期召回：${volume.staleRecallCount} (${volume.staleRecallRate}%)`}</div>
+                <div>{`世界冲突：${volume.worldConflictAlertCount} · 预警：${volume.worldWarningCount}`}</div>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gap: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
+                <div style={{ fontSize: 12, fontWeight: 600 }}>本卷最高优先风险</div>
+                {volume.repeatedFunctionRunCount > 0 ? <Tag color="warning" style={{ marginRight: 0 }}>{`重复功能 ${volume.repeatedFunctionRunCount}`}</Tag> : null}
+              </div>
+              {volume.topRisks.length > 0 ? volume.topRisks.slice(0, 3).map((risk, index) => (
+                <button
+                  key={`${volume.volumeId}-${risk.kind}-${index}`}
+                  type="button"
+                  onClick={() => onSelectRisk(risk)}
+                  style={{
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    background: 'rgba(255,255,255,0.02)',
+                    borderRadius: 10,
+                    padding: '10px 12px',
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    display: 'grid',
+                    gap: 4,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <Tag color={getQualityRiskSeverityColor(risk.severity)} style={{ marginRight: 0 }}>
+                      {getQualityRiskSeverityLabel(risk.severity)}
+                    </Tag>
+                    <span style={{ fontSize: 12, fontWeight: 600 }}>{risk.title}</span>
+                  </div>
+                  <div style={{ fontSize: 11, opacity: 0.68 }}>{risk.detail}</div>
+                </button>
+              )) : <div style={{ fontSize: 12, opacity: 0.6 }}>当前没有卷级高优先风险。</div>}
+            </div>
+          </div>
+        )
+      })}
+    </div>
   )
 }
 

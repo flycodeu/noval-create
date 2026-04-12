@@ -33,6 +33,8 @@ import {
   resolveFactionNamesFromReferences,
   stringifyFactionReferences,
 } from './faction-reference.service'
+import { cleanupCharacterSoftReferences } from './data-cascade.service'
+import { refreshWorldStateVersionsForNovel } from './world-state.service'
 import { throwUserFacingError } from '../utils/user-facing-error'
 
 function asText(value: unknown): string {
@@ -906,6 +908,7 @@ export function createCharacter(
   const id = Number(result.lastInsertRowid)
   if (!options.skipContextTracking) {
     markNovelContextChanged(novelId, 'Character profiles changed')
+    refreshWorldStateVersionsForNovel(novelId)
   }
   return id
 }
@@ -931,16 +934,23 @@ export function updateCharacter(
   if (!options.skipContextTracking) {
     if (current) {
       markNovelContextChanged(current.novelId, 'Character profiles changed')
+      refreshWorldStateVersionsForNovel(current.novelId)
     }
   }
 }
 
 export function deleteCharacter(id: number, options: { skipContextTracking?: boolean } = {}) {
   const db = getDb()
-  const current = getCharacter(id)
-  db.delete(characters).where(eq(characters.id, id)).run()
+  const current = db.select().from(characters).where(eq(characters.id, id)).all()[0]
+  getSqlite().transaction(() => {
+    if (current) {
+      cleanupCharacterSoftReferences(current.novelId, id)
+    }
+    db.delete(characters).where(eq(characters.id, id)).run()
+  })()
   if (!options.skipContextTracking && current) {
     markNovelContextChanged(current.novelId, 'Character profiles changed')
+    refreshWorldStateVersionsForNovel(current.novelId)
   }
 }
 
@@ -973,6 +983,7 @@ export function clearCharactersByNovel(novelId: number, options: { skipContextTr
   db.delete(characters).where(eq(characters.novelId, novelId)).run()
   if (!options.skipContextTracking) {
     markNovelContextChanged(novelId, 'Character profiles changed')
+    refreshWorldStateVersionsForNovel(novelId)
   }
 }
 
@@ -1020,6 +1031,7 @@ export function upsertRelation(data: {
 
   if (!options.skipContextTracking) {
     markNovelContextChanged(data.novelId, "Character relations changed")
+    refreshWorldStateVersionsForNovel(data.novelId)
   }
 }
 
@@ -1168,6 +1180,7 @@ export async function generateProtagonist(novelId: number, opts: {
     skipContextTracking: true,
   })
   markNovelContextChanged(novelId, 'Character profiles changed')
+  refreshWorldStateVersionsForNovel(novelId)
   return charId
 }
 
@@ -1364,6 +1377,7 @@ export async function generateCharacterBatchChunk(
         }
         if (createdIds.length > 0) {
           markNovelContextChanged(novelId, 'Character profiles changed')
+          refreshWorldStateVersionsForNovel(novelId)
         }
 
         resultPayload = {
@@ -1578,6 +1592,7 @@ export async function batchGenerateCharacters(novelId: number, opts: {
 
   if (newIds.length > 0) {
     markNovelContextChanged(novelId, 'Character profiles changed')
+    refreshWorldStateVersionsForNovel(novelId)
   }
 
   return newIds
@@ -1721,6 +1736,7 @@ export async function regenerateCharacter(id: number): Promise<typeof characters
 
   updateCharacter(current.id, payload, { skipContextTracking: true })
   markNovelContextChanged(current.novelId, 'Character profiles changed')
+  refreshWorldStateVersionsForNovel(current.novelId)
   return getCharacter(current.id)
 }
 
@@ -1770,6 +1786,7 @@ export async function generateCharacterRelations(novelId: number): Promise<void>
       }
     }
     markNovelContextChanged(novelId, 'Character relations changed')
+    refreshWorldStateVersionsForNovel(novelId)
   } catch (error) {
     console.error('关系解析失败:', error)
   }

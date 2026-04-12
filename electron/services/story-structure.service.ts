@@ -472,6 +472,7 @@ export function ensureStoryStructure(novelId: number): { volumeId: number; partI
     }
   }
 
+  normalizeChapterNumbers(novelId)
   syncChapterSegmentMetadata(novelId)
   syncPartRanges(novelId)
   return fallback

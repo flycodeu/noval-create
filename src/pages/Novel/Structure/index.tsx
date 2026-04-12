@@ -209,7 +209,7 @@ export default function StructurePage({ novelId }: { novelId: number }) {
       summary: currentValues.summary || beats.join(' -> ') || template.description,
     })
     setSceneTemplateOpen(false)
-    message.success('场景模板已套用到当前场景草稿。')
+    message.success(getUserFacingMessage('structure.sceneTemplateApplied'))
   }, [segmentForm])
 
   const applyHierarchyPlan = React.useCallback(async (values: StructurePlannerFormValues) => {

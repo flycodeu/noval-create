@@ -16,6 +16,8 @@ export interface StyleFingerprint {
   exampleExcerpts: string[]
 }
 
+const MAX_EXCERPT_LENGTH = 140
+
 const STYLE_ANALYSIS_PROMPT = `你是一位专业的文学风格分析师。请仔细阅读以下参考文本，提取其写作风格特征。
 
 请以严格JSON格式返回，包含以下字段：
@@ -66,7 +68,44 @@ export async function analyzeReferenceText(
   return mergeStyleResults(partialResults)
 }
 
-function parseStyleResult(raw: string): StyleFingerprint {
+function normalizeStyleStringArray(value: unknown, limit?: number): string[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const entry of value) {
+    if (typeof entry !== 'string') continue
+    const normalized = entry.trim()
+    if (!normalized || seen.has(normalized)) continue
+    seen.add(normalized)
+    result.push(normalized)
+    if (limit && result.length >= limit) break
+  }
+  return result
+}
+
+function normalizeExampleExcerpts(value: unknown, limit = 5): string[] {
+  return normalizeStyleStringArray(value)
+    .map((excerpt) => (excerpt.length > MAX_EXCERPT_LENGTH
+      ? `${excerpt.slice(0, MAX_EXCERPT_LENGTH - 3).trim()}...`
+      : excerpt))
+    .slice(0, limit)
+}
+
+function normalizeWordFrequencyProfile(value: unknown): Record<string, string[]> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const result: Record<string, string[]> = {}
+  for (const [key, words] of Object.entries(value)) {
+    const normalizedKey = key.trim()
+    if (!normalizedKey) continue
+    const normalizedWords = normalizeStyleStringArray(words, 10)
+    if (normalizedWords.length > 0) {
+      result[normalizedKey] = normalizedWords
+    }
+  }
+  return result
+}
+
+export function parseStyleResult(raw: string): StyleFingerprint {
   // Try to extract JSON from the response
   const jsonMatch = raw.match(/\{[\s\S]*\}/)
   if (!jsonMatch) {
@@ -76,22 +115,22 @@ function parseStyleResult(raw: string): StyleFingerprint {
     const parsed = JSON.parse(jsonMatch[0])
     return {
       avgSentenceLength: typeof parsed.avgSentenceLength === 'number' ? parsed.avgSentenceLength : 20,
-      sentencePatterns: Array.isArray(parsed.sentencePatterns) ? parsed.sentencePatterns : [],
-      wordFrequencyProfile: parsed.wordFrequencyProfile || {},
+      sentencePatterns: normalizeStyleStringArray(parsed.sentencePatterns, 10),
+      wordFrequencyProfile: normalizeWordFrequencyProfile(parsed.wordFrequencyProfile),
       narrativeTechniques: parsed.narrativeTechniques || '',
       dialogueStyle: parsed.dialogueStyle || '',
       descriptionDensity: parsed.descriptionDensity || '',
       paceProfile: parsed.paceProfile || '',
-      toneKeywords: Array.isArray(parsed.toneKeywords) ? parsed.toneKeywords : [],
-      forbiddenPatterns: Array.isArray(parsed.forbiddenPatterns) ? parsed.forbiddenPatterns : [],
-      exampleExcerpts: Array.isArray(parsed.exampleExcerpts) ? parsed.exampleExcerpts : [],
+      toneKeywords: normalizeStyleStringArray(parsed.toneKeywords, 12),
+      forbiddenPatterns: normalizeStyleStringArray(parsed.forbiddenPatterns, 12),
+      exampleExcerpts: normalizeExampleExcerpts(parsed.exampleExcerpts),
     }
   } catch {
     return getDefaultFingerprint()
   }
 }
 
-function getDefaultFingerprint(): StyleFingerprint {
+export function getDefaultFingerprint(): StyleFingerprint {
   return {
     avgSentenceLength: 20,
     sentencePatterns: [],
@@ -106,7 +145,7 @@ function getDefaultFingerprint(): StyleFingerprint {
   }
 }
 
-function mergeStyleResults(results: StyleFingerprint[]): StyleFingerprint {
+export function mergeStyleResults(results: StyleFingerprint[]): StyleFingerprint {
   if (results.length === 0) return getDefaultFingerprint()
   if (results.length === 1) return results[0]
 
@@ -114,10 +153,10 @@ function mergeStyleResults(results: StyleFingerprint[]): StyleFingerprint {
   merged.avgSentenceLength = Math.round(
     results.reduce((sum, r) => sum + r.avgSentenceLength, 0) / results.length,
   )
-  merged.sentencePatterns = [...new Set(results.flatMap((r) => r.sentencePatterns))]
-  merged.toneKeywords = [...new Set(results.flatMap((r) => r.toneKeywords))]
-  merged.forbiddenPatterns = [...new Set(results.flatMap((r) => r.forbiddenPatterns))]
-  merged.exampleExcerpts = results.flatMap((r) => r.exampleExcerpts).slice(0, 5)
+  merged.sentencePatterns = normalizeStyleStringArray(results.flatMap((r) => r.sentencePatterns), 12)
+  merged.toneKeywords = normalizeStyleStringArray(results.flatMap((r) => r.toneKeywords), 12)
+  merged.forbiddenPatterns = normalizeStyleStringArray(results.flatMap((r) => r.forbiddenPatterns), 12)
+  merged.exampleExcerpts = normalizeExampleExcerpts(results.flatMap((r) => r.exampleExcerpts))
 
   // Take from first non-empty result
   for (const r of results) {
@@ -130,9 +169,10 @@ function mergeStyleResults(results: StyleFingerprint[]): StyleFingerprint {
   // Merge word frequency profiles
   const freqKeys = new Set(results.flatMap((r) => Object.keys(r.wordFrequencyProfile)))
   for (const key of freqKeys) {
-    merged.wordFrequencyProfile[key] = [...new Set(
+    merged.wordFrequencyProfile[key] = normalizeStyleStringArray(
       results.flatMap((r) => r.wordFrequencyProfile[key] || []),
-    )].slice(0, 10)
+      10,
+    )
   }
 
   return merged

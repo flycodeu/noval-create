@@ -4,6 +4,14 @@ import { CheckOutlined, RobotOutlined } from '@ant-design/icons'
 import { getUserFacingMessage } from '@/utils/user-facing-message'
 import { cleanAiFieldText } from '../../utils/text'
 
+type AttemptStatus = 'running' | 'retrying' | 'failed' | 'succeeded'
+
+interface RetryConfig {
+  max: number
+  backoffMs?: number
+  shouldRetry?: (error: unknown) => boolean
+}
+
 interface Props {
   label?: string
   intent?: 'generate' | 'complete' | 'repair' | 'review'
@@ -20,6 +28,8 @@ interface Props {
   disabled?: boolean
   type?: 'default' | 'text' | 'primary' | 'dashed' | 'link'
   isJson?: boolean
+  retry?: RetryConfig
+  onAttemptChange?: (attempt: { current: number; max: number; status: AttemptStatus }) => void
 }
 
 function cleanOutput(text: string): string {
@@ -31,6 +41,37 @@ function getDefaultLabel(intent: NonNullable<Props['intent']>) {
   if (intent === 'repair') return 'AI 修复'
   if (intent === 'review') return 'AI 评审'
   return 'AI 生成'
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms)
+  })
+}
+
+function hasRetryableMessage(messageText: string) {
+  return /(timeout|timed out|network|fetch|socket|temporar|429|rate limit|503|502|504|econn|reset|unavailable|empty)/i.test(messageText)
+}
+
+function isRetryableGenerationError(error: unknown, shouldRetry?: RetryConfig['shouldRetry']) {
+  if (shouldRetry) return shouldRetry(error)
+  if (error instanceof Error) {
+    return hasRetryableMessage(error.message)
+  }
+  if (error && typeof error === 'object') {
+    const status = 'status' in error ? Number((error as { status?: unknown }).status) : NaN
+    const code = 'code' in error ? String((error as { code?: unknown }).code || '') : ''
+    const messageText = 'message' in error ? String((error as { message?: unknown }).message || '') : ''
+    if (Number.isFinite(status) && (status === 429 || status >= 500)) return true
+    return hasRetryableMessage(`${code} ${messageText}`)
+  }
+  return false
+}
+
+function resolveRetryConfig(intent: NonNullable<Props['intent']>, retry?: RetryConfig): RetryConfig | undefined {
+  if (retry) return retry
+  if (intent === 'repair') return { max: 2, backoffMs: 600 }
+  return undefined
 }
 
 export default function AIGenerateButton({
@@ -45,22 +86,74 @@ export default function AIGenerateButton({
   disabled,
   type = 'default',
   isJson = false,
+  retry,
+  onAttemptChange,
 }: Props) {
   const resolvedLabel = label || getDefaultLabel(intent)
   const [loading, setLoading] = useState(false)
   const [pickOpen, setPickOpen] = useState(false)
   const [results, setResults] = useState<string[]>([])
   const [picked, setPicked] = useState(0)
+  const [retryAttempt, setRetryAttempt] = useState<{ current: number; max: number } | null>(null)
 
   const handleGenerate = async () => {
     setLoading(true)
+    setRetryAttempt(null)
 
     try {
       const messages = buildMessages()
       const count = Math.max(1, Math.min(drawCount, 3))
-      const rawOutputs = runGeneration
-        ? await runGeneration({ messages, count, modelConfigId })
-        : await window.electron.ai.runPrompt({ messages, count, modelConfigId })
+      const retryConfig = resolveRetryConfig(intent, retry)
+      const maxRetries = Math.max(0, retryConfig?.max ?? 0)
+      const totalAttempts = maxRetries + 1
+      let rawOutputs: string[] = []
+      let resolvedAttempt = 1
+
+      for (let attemptIndex = 0; attemptIndex < totalAttempts; attemptIndex += 1) {
+        const currentAttempt = attemptIndex + 1
+        resolvedAttempt = currentAttempt
+        onAttemptChange?.({
+          current: currentAttempt,
+          max: totalAttempts,
+          status: attemptIndex === 0 ? 'running' : 'retrying',
+        })
+
+        try {
+          rawOutputs = runGeneration
+            ? await runGeneration({ messages, count, modelConfigId })
+            : await window.electron.ai.runPrompt({ messages, count, modelConfigId })
+          if (!Array.isArray(rawOutputs) || rawOutputs.length === 0 || rawOutputs.every((output) => !String(output || '').trim())) {
+            throw new Error(getUserFacingMessage('aiGenerate.empty'))
+          }
+          break
+        } catch (error) {
+          const canRetry = attemptIndex < maxRetries && isRetryableGenerationError(error, retryConfig?.shouldRetry)
+          if (!canRetry) {
+            onAttemptChange?.({
+              current: currentAttempt,
+              max: totalAttempts,
+              status: 'failed',
+            })
+            throw error
+          }
+
+          const nextRetryAttempt = attemptIndex + 1
+          setRetryAttempt({ current: nextRetryAttempt, max: maxRetries })
+          onAttemptChange?.({
+            current: currentAttempt,
+            max: totalAttempts,
+            status: 'retrying',
+          })
+          await sleep((retryConfig?.backoffMs ?? 600) * (2 ** attemptIndex))
+        }
+      }
+
+      setRetryAttempt(null)
+      onAttemptChange?.({
+        current: resolvedAttempt,
+        max: totalAttempts,
+        status: 'succeeded',
+      })
       const outputs = isJson ? rawOutputs : rawOutputs.map(cleanOutput)
 
       if (count === 1 || outputs.length <= 1) {
@@ -73,10 +166,12 @@ export default function AIGenerateButton({
       setPicked(0)
       setPickOpen(true)
     } catch (error) {
+      setRetryAttempt(null)
       message.error(getUserFacingMessage('aiGenerate.failed', {
         detail: error instanceof Error ? error.message : getUserFacingMessage('writing.configureModelFirst'),
       }))
     } finally {
+      setRetryAttempt(null)
       setLoading(false)
     }
   }
@@ -98,7 +193,11 @@ export default function AIGenerateButton({
         disabled={disabled}
         onClick={handleGenerate}
       >
-        {drawCount > 1 ? `${resolvedLabel} ×${drawCount}` : resolvedLabel}
+        {retryAttempt
+          ? `${resolvedLabel} · 重试中 (${retryAttempt.current}/${retryAttempt.max})`
+          : drawCount > 1
+            ? `${resolvedLabel} ×${drawCount}`
+            : resolvedLabel}
       </Button>
 
       <Modal

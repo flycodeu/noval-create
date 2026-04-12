@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Form, Input, List, Select, Space, Switch, Tag, message } from 'antd'
 import { DeleteOutlined, PlusOutlined, SaveOutlined } from '@ant-design/icons'
-import { getErrorMessage } from '@/utils/user-facing-message'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import type { SceneTemplate } from '../../../types'
 import { parseSceneTemplateStringList, stringifySceneTemplateStringList } from '../../../shared/scene-templates'
 import { useNovelStore } from '../../../stores/novel.store'
@@ -119,7 +119,7 @@ export default function SceneTemplatesPage({ novelId }: Props) {
 
   const handleSave = async () => {
     if (selectedIsBuiltin) {
-      message.warning('内置模板只读，请新建自定义模板后再编辑。')
+      message.warning(getUserFacingMessage('sceneTemplate.readonlyBuiltin'))
       return
     }
     const values = await form.validateFields()
@@ -138,11 +138,11 @@ export default function SceneTemplatesPage({ novelId }: Props) {
       }
       if (selectedId) {
         await window.electron.sceneTemplate.update(selectedId, payload)
-        message.success('场景模板已更新')
+        message.success(getUserFacingMessage('sceneTemplate.updated'))
       } else {
         const id = await window.electron.sceneTemplate.create(payload)
         setSelectedId(id)
-        message.success('场景模板已创建')
+        message.success(getUserFacingMessage('sceneTemplate.created'))
       }
       notifyWorkspaceMutation()
       await refresh()
@@ -158,7 +158,7 @@ export default function SceneTemplatesPage({ novelId }: Props) {
     if (!selectedItem || selectedIsBuiltin) return
     try {
       await window.electron.sceneTemplate.delete(selectedItem.id)
-      message.success('场景模板已删除')
+      message.success(getUserFacingMessage('sceneTemplate.deleted'))
       setSelectedId(null)
       form.setFieldsValue(EMPTY_VALUES)
       notifyWorkspaceMutation()

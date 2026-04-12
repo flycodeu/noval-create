@@ -11,7 +11,7 @@ import {
   PlusOutlined,
   RobotOutlined,
 } from '@ant-design/icons'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import AIScorePanel from '../../../components/AIScorePanel'
 import type {
@@ -31,6 +31,7 @@ import type {
 } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
 import { useTaskStore } from '../../../stores/task.store'
+import { useWritingViewStore, type WritingGenerationSnapshot, type WritingGenerationStage } from '../../../stores/writingView.store'
 import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspaceStepGuide } from '../components/WorkspaceShell'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import './index.css'
@@ -85,9 +86,13 @@ interface TextSelectionSnapshot {
   end: number
   text: string
 }
-type InsightTab = 'chapter' | 'memory' | 'health'
-type ChapterGenerationStage = 'planning' | 'drafting' | 'reviewing' | 'rewriting' | 'completed' | 'failed'
-interface ChapterGenerationProgressEvent { chapterId: number; stage: ChapterGenerationStage; label: string; detail?: string; completed: number; total: number; status: 'running' | 'success' | 'failed' }
+interface ChapterGenerationProgressEvent { chapterId: number; stage: WritingGenerationStage; label: string; detail?: string; completed: number; total: number; status: 'running' | 'success' | 'failed' }
+type WritingRouteKey = 'editor' | 'context' | 'review' | 'history'
+
+const WritingEditorRoute = React.lazy(() => import('./routes/EditorRoute'))
+const WritingContextRoute = React.lazy(() => import('./routes/ContextRoute'))
+const WritingReviewRoute = React.lazy(() => import('./routes/ReviewRoute'))
+const WritingHistoryRoute = React.lazy(() => import('./routes/HistoryRoute'))
 
 const STATUS_OPTIONS = [
   { value: 'outline', label: '待写' },
@@ -189,12 +194,54 @@ function chapterVersionSourceLabel(source: ChapterVersion['versionSource']) {
   return '手动保存'
 }
 
+function getGenerationTagMeta(snapshot: WritingGenerationSnapshot) {
+  if (snapshot.status === 'running') return { color: 'processing' as const, label: '生成中' }
+  if (snapshot.status === 'failed') return { color: 'error' as const, label: '失败' }
+  if (snapshot.status === 'cancelled') return { color: 'default' as const, label: '已取消' }
+  return { color: 'success' as const, label: '刚完成' }
+}
+
+function getGenerationAlertType(snapshot: WritingGenerationSnapshot): 'info' | 'success' | 'error' | 'warning' {
+  if (snapshot.status === 'failed') return 'error'
+  if (snapshot.status === 'cancelled') return 'warning'
+  if (snapshot.status === 'success') return 'success'
+  return 'info'
+}
+
+function getGenerationAlertMessage(snapshot: WritingGenerationSnapshot) {
+  if (snapshot.status === 'failed') return snapshot.label || '章节流水线执行失败'
+  if (snapshot.status === 'cancelled') return snapshot.label || '章节流水线已取消'
+  if (snapshot.status === 'success') {
+    return snapshot.detail?.includes('未产生新增内容')
+      ? '章节流水线已完成，但正文没有新增内容'
+      : (snapshot.label || '章节流水线已完成')
+  }
+  return snapshot.label || 'AI 正在处理当前章节'
+}
+
+function getGenerationAlertDescription(snapshot: WritingGenerationSnapshot) {
+  if (snapshot.status === 'failed') return snapshot.error || snapshot.detail || getUserFacingMessage('writing.generateFailed')
+  if (snapshot.status === 'cancelled') return snapshot.detail || getUserFacingMessage('writing.generateCancelled')
+  if (snapshot.status === 'success') return snapshot.detail || getUserFacingMessage('writing.pipelineCompleted')
+  return snapshot.detail || '正在同步最新阶段进度。'
+}
+
 export default function Writing({ novelId }: Props) {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
+  const location = useLocation()
   const { notifyWorkspaceMutation, registerEscapeHandler, registerSaveHandler } = useNovelWorkspaceActions()
   const { chapters, currentChapterId, currentNovel, setChapters, setCurrentChapterId, updateChapter } = useNovelStore()
   const { streams, clearStream } = useTaskStore()
+  const {
+    activeGeneration,
+    lastGenerationByChapter,
+    startGeneration,
+    updateGenerationTask,
+    updateGenerationStage,
+    completeGeneration,
+    clearChapterGenerationNotice,
+  } = useWritingViewStore()
   const editorRef = useRef<HTMLDivElement>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const currentChapterIdRef = useRef<number | null>(null)
@@ -203,14 +250,12 @@ export default function Writing({ novelId }: Props) {
   const redoStackRef = useRef<string[]>([])
   const historyBaselineRef = useRef('')
   const lastHistoryAtRef = useRef(0)
+  const generationBaselineRef = useRef('')
 
   const [loading, setLoading] = useState(true)
   const [currentChapter, setCurrentChapter] = useState<Chapter | null>(null)
   const [content, setContent] = useState('')
   const [wordCount, setWordCount] = useState(0)
-  const [generating, setGenerating] = useState(false)
-  const [generatingTaskId, setGeneratingTaskId] = useState<number | null>(null)
-  const [generationProgress, setGenerationProgress] = useState<ChapterGenerationProgressEvent | null>(null)
   const [consistencyReport, setConsistencyReport] = useState<NovelConsistencyReport | null>(null)
   const [storyMemory, setStoryMemory] = useState<StoryMemorySnapshot | null>(null)
   const [foreshadowSnapshot, setForeshadowSnapshot] = useState<ForeshadowSnapshot | null>(null)
@@ -223,20 +268,19 @@ export default function Writing({ novelId }: Props) {
   const [chapterContextPreview, setChapterContextPreview] = useState<ChapterContextPreview | null>(null)
   const [publishCheck, setPublishCheck] = useState<ChapterPublishCheck | null>(null)
   const [hoverChapterId, setHoverChapterId] = useState<number | null>(null)
-  const [insightTab, setInsightTab] = useState<InsightTab>('chapter')
   const [selectedSnippet, setSelectedSnippet] = useState<TextSelectionSnapshot | null>(null)
   const [rewriteModalOpen, setRewriteModalOpen] = useState(false)
   const [rewriteRequirements, setRewriteRequirements] = useState('')
   const [rewritingSelection, setRewritingSelection] = useState(false)
-  const [versionHistoryOpen, setVersionHistoryOpen] = useState(false)
   const [versionHistoryLoading, setVersionHistoryLoading] = useState(false)
   const [chapterVersions, setChapterVersions] = useState<ChapterVersion[]>([])
   const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null)
   const routeChapterId = useMemo(() => parseRouteId(searchParams.get('chapterId')), [searchParams])
-  const routeInsight = useMemo(() => {
-    const value = searchParams.get('insight')
-    return value === 'memory' || value === 'health' ? value : 'chapter'
-  }, [searchParams])
+  const activeWritingRoute = useMemo<WritingRouteKey>(() => {
+    const routeKey = location.pathname.split('/').filter(Boolean)[4]
+    return routeKey === 'context' || routeKey === 'review' || routeKey === 'history' ? routeKey : 'editor'
+  }, [location.pathname])
+  const isHistoryRoute = activeWritingRoute === 'history'
   const selectedVersion = useMemo(
     () => chapterVersions.find((version) => version.id === selectedVersionId) || chapterVersions[0] || null,
     [chapterVersions, selectedVersionId],
@@ -387,7 +431,7 @@ export default function Writing({ novelId }: Props) {
     resetEditorHistory(full.content || '')
     updateChapter(chapterId, full)
     if (editorRef.current) editorRef.current.innerHTML = (full.content || '').replace(/\n/g, '<br>')
-    if (versionHistoryOpen) {
+    if (isHistoryRoute) {
       await refreshVersionHistory(chapterId)
     }
     await Promise.all([
@@ -397,7 +441,7 @@ export default function Writing({ novelId }: Props) {
       refreshForeshadowSnapshot(full),
       refreshChapterContextPreview(full),
     ])
-  }, [clearChapterArtifacts, refreshChapterContextPreview, refreshChapterLinks, refreshContextStatus, refreshForeshadowSnapshot, refreshPublishCheck, refreshVersionHistory, resetEditorHistory, updateChapter, versionHistoryOpen])
+  }, [clearChapterArtifacts, isHistoryRoute, refreshChapterContextPreview, refreshChapterLinks, refreshContextStatus, refreshForeshadowSnapshot, refreshPublishCheck, refreshVersionHistory, resetEditorHistory, updateChapter])
 
   const loadChapters = useCallback(async (preferredChapterId?: number) => {
     const list = await window.electron.chapter.list(novelId)
@@ -427,44 +471,81 @@ export default function Writing({ novelId }: Props) {
   }, [loadChapters, routeChapterId])
 
   useEffect(() => {
-    setInsightTab(routeInsight)
-  }, [routeInsight])
-
-  useEffect(() => {
     const unsubscribe = window.electron.on('chapter:generation-progress', (data: unknown) => {
       const payload = data as ChapterGenerationProgressEvent
-      if (payload?.chapterId === currentChapterIdRef.current) setGenerationProgress(payload)
+      if (!payload?.chapterId) return
+      updateGenerationStage({
+        chapterId: payload.chapterId,
+        stage: payload.stage,
+        status: payload.status === 'failed' ? 'failed' : 'running',
+        label: payload.label,
+        detail: payload.detail,
+      })
     })
     return unsubscribe
-  }, [])
+  }, [updateGenerationStage])
 
   useEffect(() => {
-    if (!generatingTaskId) return
-    const stream = streams[generatingTaskId]
+    if (!isHistoryRoute || !currentChapter) return
+    void refreshVersionHistory(currentChapter.id)
+  }, [currentChapter, isHistoryRoute, refreshVersionHistory])
+
+  useEffect(() => {
+    if (!activeGeneration.taskId || !activeGeneration.chapterId) return
+    const stream = streams[activeGeneration.taskId]
     if (!stream) return
     if (stream.status === 'completed') {
-      const chapterId = currentChapter?.id
-      setGenerating(false); setGeneratingTaskId(null); clearStream(stream.taskId)
+      const chapterId = activeGeneration.chapterId
+      clearStream(stream.taskId)
       void (async () => {
         await Promise.all([loadChapters(chapterId), refreshMeta(), refreshQualityDashboard()])
         if (chapterId) await refreshChapter(chapterId)
+        const latestChapter = await window.electron.chapter.get(chapterId)
+        const latestContent = normalizeEditorText(latestChapter?.content || '')
+        const hasVisibleContentChange = latestContent !== generationBaselineRef.current
+        completeGeneration({
+          taskId: stream.taskId,
+          chapterId,
+          status: 'success',
+          stage: 'completed',
+          label: '章节流水线已完成',
+          detail: hasVisibleContentChange
+            ? getUserFacingMessage('writing.pipelineCompleted')
+            : '章节流水线已完成，但正文未产生新增内容。请优先检查场景计划与审校建议。',
+        })
         message.success(getUserFacingMessage('writing.pipelineCompleted'))
       })()
     }
     if (stream.status === 'failed') {
-      setGenerating(false); setGeneratingTaskId(null); clearStream(stream.taskId)
+      clearStream(stream.taskId)
+      completeGeneration({
+        taskId: stream.taskId,
+        chapterId: activeGeneration.chapterId,
+        status: 'failed',
+        stage: activeGeneration.stage,
+        label: '章节流水线执行失败',
+        detail: activeGeneration.detail || getUserFacingMessage('writing.generateFailed'),
+        error: activeGeneration.error || activeGeneration.detail || getUserFacingMessage('writing.generateFailed'),
+      })
       message.error(getUserFacingMessage('writing.generateFailed'))
     }
     if (stream.status === 'cancelled') {
-      setGenerating(false); setGeneratingTaskId(null); clearStream(stream.taskId)
+      clearStream(stream.taskId)
+      completeGeneration({
+        taskId: stream.taskId,
+        chapterId: activeGeneration.chapterId,
+        status: 'cancelled',
+        stage: activeGeneration.stage,
+        label: '章节流水线已取消',
+        detail: getUserFacingMessage('writing.generateCancelled'),
+      })
       message.info(getUserFacingMessage('writing.generateCancelled'))
     }
-  }, [streams, generatingTaskId, currentChapter?.id, clearStream, loadChapters, refreshMeta, refreshChapter, refreshQualityDashboard])
+  }, [activeGeneration, clearStream, completeGeneration, loadChapters, refreshChapter, refreshMeta, refreshQualityDashboard, streams])
 
   useEffect(() => () => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     clearChapterArtifacts()
-    setGenerationProgress(null)
   }, [clearChapterArtifacts])
 
   const saveNow = useCallback(async (
@@ -551,11 +632,19 @@ export default function Writing({ novelId }: Props) {
     applyChapterContent(next)
   }, [applyChapterContent, content, currentChapter?.segmentCount])
 
+  const navigateToWritingRoute = useCallback((routeKey: WritingRouteKey) => {
+    const search = searchParams.toString()
+    navigate({
+      pathname: `/novels/${novelId}/writing/${routeKey}`,
+      search: search ? `?${search}` : '',
+    })
+  }, [navigate, novelId, searchParams])
+
   const handleOpenVersionHistory = useCallback(async () => {
     if (!currentChapter) return
-    setVersionHistoryOpen(true)
+    navigateToWritingRoute('history')
     await refreshVersionHistory(currentChapter.id)
-  }, [currentChapter, refreshVersionHistory])
+  }, [currentChapter, navigateToWritingRoute, refreshVersionHistory])
 
   const handleRestoreVersion = useCallback(async () => {
     if (!selectedVersionId || !currentChapter) return
@@ -596,13 +685,13 @@ export default function Writing({ novelId }: Props) {
         setRewriteModalOpen(false)
         return
       }
-      if (versionHistoryOpen) {
-        setVersionHistoryOpen(false)
+      if (isHistoryRoute) {
+        navigateToWritingRoute('editor')
       }
     })
 
     return () => registerEscapeHandler(null)
-  }, [registerEscapeHandler, rewriteModalOpen, versionHistoryOpen])
+  }, [isHistoryRoute, navigateToWritingRoute, registerEscapeHandler, rewriteModalOpen])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -628,15 +717,43 @@ export default function Writing({ novelId }: Props) {
 
   const handleGenerateContent = async () => {
     if (!currentChapter) return message.warning(getUserFacingMessage('writing.selectChapterFirst'))
-    setGenerationProgress(null); setGenerating(true)
-    try { setGeneratingTaskId(await window.electron.chapter.generateContent(currentChapter.id)) }
-    catch (error: unknown) { setGenerating(false); message.error(getErrorMessage(error, 'writing.configureModelFirst')) }
+    generationBaselineRef.current = normalizeEditorText(currentChapter.content || content)
+    startGeneration({ chapterId: currentChapter.id })
+    updateGenerationStage({
+      chapterId: currentChapter.id,
+      stage: 'planning',
+      label: '正在启动章节流水线',
+      detail: '正在创建任务，并准备本章场景计划与上下文注入。',
+    })
+    try {
+      const taskId = await window.electron.chapter.generateContent(currentChapter.id)
+      updateGenerationTask({ chapterId: currentChapter.id, taskId })
+    } catch (error: unknown) {
+      const errorMessage = getErrorMessage(error, 'writing.configureModelFirst')
+      completeGeneration({
+        chapterId: currentChapter.id,
+        status: 'failed',
+        stage: 'planning',
+        label: '章节流水线启动失败',
+        detail: errorMessage,
+        error: errorMessage,
+      })
+      message.error(errorMessage)
+    }
   }
 
   const handleCancelGenerate = async () => {
-    if (!generatingTaskId) return
-    await window.electron.task.cancel(generatingTaskId)
-    setGenerating(false); setGeneratingTaskId(null); setGenerationProgress(null); clearStream(generatingTaskId)
+    if (!activeGeneration.taskId || !activeGeneration.chapterId) return
+    await window.electron.task.cancel(activeGeneration.taskId)
+    clearStream(activeGeneration.taskId)
+    completeGeneration({
+      taskId: activeGeneration.taskId,
+      chapterId: activeGeneration.chapterId,
+      status: 'cancelled',
+      stage: activeGeneration.stage,
+      label: '章节流水线已取消',
+      detail: getUserFacingMessage('writing.generateCancelled'),
+    })
   }
 
   const handleGenerateSummary = async () => {
@@ -667,7 +784,7 @@ export default function Writing({ novelId }: Props) {
     if (!currentChapter) return
     try {
       setAiResult(await window.electron.chapter.aiCheck(currentChapter.id) as AiCheckPayload)
-      setInsightTab('health')
+      navigateToWritingRoute('review')
       await refreshQualityDashboard()
     }
     catch (error: unknown) {
@@ -708,7 +825,7 @@ export default function Writing({ novelId }: Props) {
 
       applyChapterContent(`${before}${rewritten}${after}`, 'ai-rewrite')
       setRewriteModalOpen(false)
-      setInsightTab('health')
+      navigateToWritingRoute('review')
       message.success(getUserFacingMessage('writing.rewriteApplied'))
     } catch (error: unknown) {
       message.error(getUserFacingMessage('writing.rewriteFailed', {
@@ -883,10 +1000,20 @@ export default function Writing({ novelId }: Props) {
     ...((aiResult?.issues || []).slice(0, 2).map((issue) => `AI体检：${issue.suggestion}`)),
   ].filter((item): item is string => Boolean(item))
 
+  const currentChapterGeneration = currentChapter
+    ? (
+      activeGeneration.chapterId === currentChapter.id && activeGeneration.status !== 'idle'
+        ? activeGeneration
+        : lastGenerationByChapter[currentChapter.id] || null
+    )
+    : null
+  const currentChapterGenerating = currentChapterGeneration?.status === 'running'
+    && activeGeneration.chapterId === currentChapter?.id
   const pipelineStatus = PIPELINE_STAGES.map((stage, index) => {
-    const running = generationProgress?.status === 'running' && generationProgress.stage === stage.key
-    const failed = generationProgress?.status === 'failed' && generationProgress.stage === stage.key
-    const done = generationProgress?.stage === 'completed'
+    const running = currentChapterGeneration?.status === 'running' && currentChapterGeneration.stage === stage.key
+    const failed = currentChapterGeneration?.status === 'failed' && currentChapterGeneration.stage === stage.key
+    const done = currentChapterGeneration?.status === 'success'
+      || currentChapterGeneration?.stage === 'completed'
       || (stage.key === 'planning' && scenePlan.length > 0)
       || (stage.key === 'drafting' && Boolean(currentChapter?.content || reviewNotes))
       || (stage.key === 'reviewing' && Boolean(reviewNotes))
@@ -896,7 +1023,9 @@ export default function Writing({ novelId }: Props) {
 
   const currentStatusLabel = currentChapter ? getStatusLabel(currentChapter.status) : '未选择章节'
   const otherStaleChapterCount = Math.max(0, (contextStatus?.staleChapterCount || 0) - (currentChapterStaleReasons.length > 0 ? 1 : 0))
-  const streamContent = generatingTaskId ? streams[generatingTaskId]?.content || '' : ''
+  const streamContent = currentChapterGenerating && activeGeneration.taskId
+    ? streams[activeGeneration.taskId]?.content || ''
+    : ''
   const hasMultiSegments = (currentChapter?.segmentCount || 0) > 1
   const editorEyebrow = currentChapter ? `第 ${String(currentChapter.chapterNum).padStart(2, '0')} 章` : '写作编辑器'
   const editorTitle = currentChapter ? currentChapter.title || `第${currentChapter.chapterNum}章` : '请选择一个章节'
@@ -907,6 +1036,139 @@ export default function Writing({ novelId }: Props) {
   const resolvedEditorSubtitle = hasMultiSegments
     ? `当前状态：${currentStatusLabel} · 本章已拆成 ${currentChapter?.segmentCount || 0} 个场景，请优先在结构页维护场景后再编译整章。`
     : editorSubtitle
+
+  const chapterInsightContent = (
+    <>
+      <div className="novel-writing-shell__insight-spotlight">
+        <ChapterFocusCard
+          summary={currentChapter?.summary}
+          nextChapterSeed={currentChapter?.nextChapterSeed}
+          continuityItems={continuityItems}
+        />
+        <InsightCard title="场景拆解" eyebrow="执行顺序">
+          {scenePlan.length > 0 ? <div className="novel-scene-list">{scenePlan.map((scene) => <div key={`${scene.scene_order}-${scene.scene_title}`} className="novel-scene-card"><div className="novel-scene-card__header"><span>{`场景 ${String(scene.scene_order).padStart(2, '0')}`}</span><strong>{scene.scene_title}</strong></div><div className="novel-scene-card__body"><div>{scene.purpose}</div>{scene.location ? <div>地点：{scene.location}</div> : null}{scene.time_anchor ? <div>时间：{scene.time_anchor}</div> : null}{scene.present_characters?.length ? <div>人物：{scene.present_characters.join('、')}</div> : null}{scene.key_items?.length ? <div>道具：{scene.key_items.join('、')}</div> : null}{scene.must_cover?.length ? <div>必须覆盖：{scene.must_cover.join('、')}</div> : null}</div></div>)}</div> : <div className="novel-copy-block">先运行章节流水线后，这里会整理本章场景计划。</div>}
+        </InsightCard>
+      </div>
+      <div className="novel-writing-shell__insight-stack">
+        <InsightCard title="关键约束注入" eyebrow="本章关键约束已注入" tone="soft">
+          <ConstraintInjectionCard preview={chapterContextPreview} />
+        </InsightCard>
+        <InsightCard title="召回补充层" eyebrow="背景补充 / 非事实源" tone="soft">
+          <RecallDiagnosticsCard preview={chapterContextPreview} />
+        </InsightCard>
+        <InsightCard title="生产摘要" eyebrow="AI 主写 / 人工定稿" tone="soft"><StringList items={productionBriefItems} empty="章节进入审校后，这里会先汇总最值得优先处理的定稿建议。" /></InsightCard>
+        <InsightCard title="关联线索" eyebrow="时间轴 / 道具" tone="soft"><StringList items={relatedInsightItems.slice(0, 12)} empty="当前章节暂未关联时间轴事件或关键道具。" /></InsightCard>
+        <InsightCard title="本章应回收伏笔" eyebrow={foreshadowSnapshot ? `按第 ${foreshadowSnapshot.currentChapterNum} 章进度计算` : '即将到期 / 超期未收'} tone="soft">
+          <StringList items={dueForeshadowItems} empty="当前章节附近没有到期或超期未收的伏笔债务。" />
+        </InsightCard>
+        <InsightCard title="修订提示" eyebrow="复盘重点" tone="soft"><StringList items={reviewInsightItems} empty="运行审校或摘要更新后，这里会汇总需要回看的修订点。" /></InsightCard>
+        <InsightCard title="世界规则" eyebrow="写作边界" tone="soft"><StringList items={worldRulesSummary} empty={currentNovel?.worldRulesJson ? '当前世界规则已录入，但还没有提炼出本章相关边界。' : '先完善世界规则，这里会同步展示写作边界。'} /></InsightCard>
+      </div>
+    </>
+  )
+
+  const memoryInsightContent = (
+    <div className="novel-writing-shell__insight-stack">
+      <InsightCard title="阶段摘要" eyebrow={storyMemory?.coverageSummary || '长篇覆盖'} tone="soft"><StringList items={storyMemory?.phaseDigest || []} empty="章节量还不大，阶段摘要会在长篇推进后逐步显现。" /></InsightCard>
+      <InsightCard title="剧情里程碑" eyebrow="压缩摘要"><StringList items={storyMemory ? storyMemory.plotMilestones.slice(0, 12) : []} empty="长文记忆尚未生成。" /></InsightCard>
+      <InsightCard title="人物与世界状态" eyebrow="统一总账" tone="soft"><CharacterStateMemoryCard storyMemory={storyMemory} /></InsightCard>
+      <InsightCard title="活跃线程" eyebrow="待持续追踪" tone="soft"><StringList items={storyMemory ? storyMemory.activeThreads.slice(0, 12) : []} empty="当前没有需要持续追踪的活跃线程。" /></InsightCard>
+      <InsightCard title="时间锚点" eyebrow="时序参照" tone="soft"><StringList items={storyMemory ? storyMemory.timelineAnchors.slice(0, 10) : []} empty="时间轴锚点会在这里同步展示。" /></InsightCard>
+      <InsightCard title="道具账本" eyebrow="状态同步" tone="soft"><StringList items={storyMemory ? storyMemory.itemLedger.slice(0, 10) : []} empty="关键道具与线索的状态变化会记录在这里。" /></InsightCard>
+    </div>
+  )
+
+  const reviewInsightContent = (
+    <>
+      <div className="novel-writing-shell__insight-spotlight">
+        <InsightCard title="全书健康度" eyebrow="结构体检" tone="hero">{consistencyReport ? <div className="novel-health-board"><div className="novel-health-score"><strong>{consistencyReport.readinessScore}</strong><span>{getHealthLabel(consistencyReport.readinessScore)}</span></div><div className="novel-health-breakdown"><div><strong>{consistencyReport.highCount}</strong><span>高危</span></div><div><strong>{consistencyReport.mediumCount}</strong><span>中危</span></div><div><strong>{consistencyReport.lowCount}</strong><span>低危</span></div></div></div> : <div className="novel-copy-block">正在分析全书结构健康度。</div>}</InsightCard>
+        <InsightCard title="本章风险" eyebrow="优先修复">{chapterIssues.length > 0 ? <div className="novel-issue-list">{chapterIssues.slice(0, 8).map((issue) => <div key={issue.id} className="novel-issue-item"><div className="novel-issue-item__head"><Tag color={getIssueColor(issue.severity)}>{getIssueLabel(issue.severity)}</Tag><strong>{issue.title}</strong></div><div className="novel-issue-item__desc">{issue.description}</div><div className="novel-issue-item__suggestion">建议：{issue.suggestion}</div></div>)}</div> : <div className="novel-copy-block">当前章节没有被结构体检命中的明显风险。</div>}</InsightCard>
+      </div>
+      <div className="novel-writing-shell__insight-stack">
+        <InsightCard title="发布前检查" eyebrow="完成门槛" tone="soft">
+          {publishCheck ? (
+            <StringList
+              items={publishCheck.checklist.map((item) => {
+                const prefix = item.status === 'pass' ? '通过' : item.status === 'warning' ? '中优先' : '阻塞'
+                return `${prefix} · ${item.label}：${item.detail}`
+              })}
+              empty="当前没有发布前检查结果。"
+            />
+          ) : <div className="novel-copy-block">当前没有发布前检查结果。</div>}
+        </InsightCard>
+        <InsightCard title="最近恶化项" eyebrow="跨章节语言退化" tone="soft">
+          <LanguageDriftHealthCard dashboard={qualityDashboard} currentChapter={currentChapter} />
+        </InsightCard>
+        <InsightCard title="角色对白辨识度" eyebrow="语音指纹" tone="soft">
+          <DialogueFingerprintHealthCard dashboard={qualityDashboard} reviewNotes={reviewNotes} />
+        </InsightCard>
+        <InsightCard title="主角与节奏风险" eyebrow="跨章节结构告警" tone="soft">
+          <StoryDynamicsHealthCard dashboard={qualityDashboard} currentChapter={currentChapter} reviewNotes={reviewNotes} />
+        </InsightCard>
+        <InsightCard title="世界状态概览" eyebrow="总账 / 冲突实体" tone="soft">
+          <WorldStateHealthCard dashboard={qualityDashboard} />
+        </InsightCard>
+        <InsightCard title="AI 检测与复检" eyebrow="局部诊断" tone="soft">
+          <AIScorePanel
+            getContent={() => normalizeEditorText(editorRef.current?.innerText || content)}
+            contentType="chapter"
+            genreContext={currentNovel?.genreName || ''}
+            novelBackground={[currentNovel?.synopsis, currentNovel?.expandedBackground].filter(Boolean).join('\n')}
+            modelConfigId={currentNovel?.modelConfigId}
+            disabled={!currentChapter}
+            onRegenerate={applyChapterContent}
+            drawCount={1}
+          />
+          {aiResult ? <div style={{ marginTop: 12 }}><AiCheckResult result={aiResult} /></div> : <div className="novel-copy-block" style={{ marginTop: 12 }}>点击上方 AI 体检后，这里也会展示语义与表达层面的复检结果。</div>}
+        </InsightCard>
+        <InsightCard title="建议优先处理" eyebrow="下一步" tone="soft"><StringList items={consistencyReport?.focusAreas || []} empty="当前没有额外的优先处理建议。" /></InsightCard>
+      </div>
+    </>
+  )
+
+  const historyInsightContent = (
+    <div className="novel-writing-shell__insight-stack">
+      <InsightCard title="章节版本历史" eyebrow={currentChapter ? `${formatChapterNumber(currentChapter.chapterNum)} · 可恢复版本` : '选择章节后可查看'}>
+        {!currentChapter ? (
+          <div className="novel-copy-block">请先从左侧选择一个章节。</div>
+        ) : (
+          <div className="novel-split novel-split--sidebar">
+            <div className="novel-note-list">
+              {versionHistoryLoading ? <Spin size="small" /> : null}
+              {!versionHistoryLoading && chapterVersions.length === 0 ? (
+                <div className="novel-note-list__item">当前章节还没有可恢复的版本。</div>
+              ) : null}
+              {chapterVersions.map((version) => (
+                <button
+                  key={version.id}
+                  type="button"
+                  className={`novel-sidebar__nav-item ${selectedVersion?.id === version.id ? 'novel-sidebar__nav-item--active' : ''}`}
+                  style={{ width: '100%', textAlign: 'left' }}
+                  onClick={() => setSelectedVersionId(version.id)}
+                >
+                  <span className="novel-sidebar__nav-copy">
+                    <strong>{chapterVersionSourceLabel(version.versionSource)}</strong>
+                    <small>{`${version.wordCount || 0} 字 · ${new Date(version.createdAt).toLocaleString()}`}</small>
+                  </span>
+                </button>
+              ))}
+            </div>
+            <div style={{ display: 'grid', gap: 12 }}>
+              <div className="novel-copy-block" style={{ whiteSpace: 'pre-wrap', minHeight: 320 }}>
+                {selectedVersion?.content || '选择左侧版本后，这里会显示正文预览。'}
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                <Button onClick={() => navigateToWritingRoute('editor')}>返回编辑</Button>
+                <Button type="primary" disabled={!selectedVersion} onClick={() => void handleRestoreVersion()}>
+                  恢复所选版本
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+      </InsightCard>
+    </div>
+  )
 
   return (
     <WorkspacePage
@@ -930,7 +1192,7 @@ export default function Writing({ novelId }: Props) {
       actions={(
         <>
           <Button icon={<PlusOutlined />} onClick={() => void handleAddChapter()}>新建章节</Button>
-          {generating
+          {currentChapterGenerating
             ? <Button danger icon={<LoadingOutlined />} onClick={() => void handleCancelGenerate()}>停止 AI 流水线</Button>
             : <Button type="primary" icon={<RobotOutlined />} disabled={!currentChapter} onClick={() => void handleGenerateContent()}>AI 生成·章节流水线</Button>}
           <Button icon={<BulbOutlined />} disabled={!currentChapter} onClick={() => void handleGenerateSummary()}>AI 修复·更新记忆</Button>
@@ -966,23 +1228,32 @@ export default function Writing({ novelId }: Props) {
               <div className="novel-writing-shell__sidebar-meta">共 {chapters.length} 章</div>
             </div>
             <div className="novel-writing-shell__chapter-list">
-              {chapters.length > 0 ? chapters.map((chapter) => (
-                <div
-                  key={chapter.id}
-                  className={`novel-writing-shell__chapter-item ${currentChapterId === chapter.id ? 'novel-writing-shell__chapter-item--active' : ''}`}
-                  onClick={() => void refreshChapter(chapter.id).then(() => { setCurrentChapterId(chapter.id); setAiResult(null); setGenerationProgress(null) })}
-                  onMouseEnter={() => setHoverChapterId(chapter.id)}
-                  onMouseLeave={() => setHoverChapterId(null)}
-                >
-                  <div className="novel-writing-shell__chapter-copy">
-                    <div className="novel-writing-shell__chapter-number">第 {chapter.chapterNum} 章</div>
-                    <div className="novel-writing-shell__chapter-name">{chapter.title || `第${chapter.chapterNum}章`}</div>
-                    <div className="novel-writing-shell__chapter-words" style={{ color: STATUS_COLORS[chapter.status] || '#5c6378' }}>{chapter.wordCount} 字 · {getStatusLabel(chapter.status)}</div>
-                    {parseStringArray(chapter.staleReasonJson).length > 0 ? <Tag color="warning">待同步</Tag> : null}
+              {chapters.length > 0 ? chapters.map((chapter) => {
+                const chapterGeneration = activeGeneration.chapterId === chapter.id && activeGeneration.status !== 'idle'
+                  ? activeGeneration
+                  : lastGenerationByChapter[chapter.id]
+                const chapterGenerationMeta = chapterGeneration ? getGenerationTagMeta(chapterGeneration) : null
+                return (
+                  <div
+                    key={chapter.id}
+                    className={`novel-writing-shell__chapter-item ${currentChapterId === chapter.id ? 'novel-writing-shell__chapter-item--active' : ''}`}
+                    onClick={() => void refreshChapter(chapter.id).then(() => { setCurrentChapterId(chapter.id); setAiResult(null) })}
+                    onMouseEnter={() => setHoverChapterId(chapter.id)}
+                    onMouseLeave={() => setHoverChapterId(null)}
+                  >
+                    <div className="novel-writing-shell__chapter-copy">
+                      <div className="novel-writing-shell__chapter-number">第 {chapter.chapterNum} 章</div>
+                      <div className="novel-writing-shell__chapter-name">{chapter.title || `第${chapter.chapterNum}章`}</div>
+                      <div className="novel-writing-shell__chapter-words" style={{ color: STATUS_COLORS[chapter.status] || '#5c6378' }}>{chapter.wordCount} 字 · {getStatusLabel(chapter.status)}</div>
+                      <div className="novel-writing-page__chapter-tags">
+                        {parseStringArray(chapter.staleReasonJson).length > 0 ? <Tag color="warning">待同步</Tag> : null}
+                        {chapterGenerationMeta ? <Tag color={chapterGenerationMeta.color}>{chapterGenerationMeta.label}</Tag> : null}
+                      </div>
+                    </div>
+                    {hoverChapterId === chapter.id ? <Button type="text" size="small" danger className="novel-writing-shell__chapter-delete" icon={<DeleteOutlined />} onClick={(event) => handleDeleteChapter(chapter.id, event)} /> : null}
                   </div>
-                  {hoverChapterId === chapter.id ? <Button type="text" size="small" danger className="novel-writing-shell__chapter-delete" icon={<DeleteOutlined />} onClick={(event) => handleDeleteChapter(chapter.id, event)} /> : null}
-                </div>
-              )) : <Empty description="还没有章节，先创建一个。" />}
+                )
+              }) : <Empty description="还没有章节，先创建一个。" />}
             </div>
             <div className="novel-writing-shell__sidebar-footer">
               <Button type="dashed" icon={<PlusOutlined />} onClick={() => void handleAddChapter()} style={{ width: '100%' }}>新建章节</Button>
@@ -1013,7 +1284,31 @@ export default function Writing({ novelId }: Props) {
                       </div>
                     ))}
                   </div>
-                  {generationProgress ? <div className={`novel-writing-shell__generation-note novel-writing-shell__generation-note--${generationProgress.status}`}><strong>{generationProgress.label}</strong><span>{generationProgress.detail || '正在同步最新阶段进度。'}</span></div> : null}
+                  {currentChapterGeneration ? (
+                    <Alert
+                      showIcon
+                      type={getGenerationAlertType(currentChapterGeneration)}
+                      style={{ marginBottom: 16 }}
+                      message={getGenerationAlertMessage(currentChapterGeneration)}
+                      description={getGenerationAlertDescription(currentChapterGeneration)}
+                      action={currentChapterGeneration.status === 'running'
+                        ? undefined
+                        : (
+                          <div className="novel-writing-page__generation-actions">
+                            {(currentChapterGeneration.status === 'failed'
+                              || currentChapterGeneration.status === 'cancelled'
+                              || (currentChapterGeneration.status === 'success' && currentChapterGeneration.detail?.includes('未产生新增内容'))) ? (
+                                <Button size="small" type="primary" onClick={() => void handleGenerateContent()}>
+                                  重新生成
+                                </Button>
+                              ) : null}
+                            <Button size="small" onClick={() => clearChapterGenerationNotice(currentChapter.id)}>
+                              收起
+                            </Button>
+                          </div>
+                        )}
+                    />
+                  ) : null}
                   {productionBriefItems.length > 0 ? (
                     <section className="novel-writing-shell__review-strip">
                       <div className="novel-writing-shell__review-strip-head">
@@ -1080,7 +1375,7 @@ export default function Writing({ novelId }: Props) {
                       )}
                     />
                   ) : null}
-                  {generating ? (
+                  {currentChapterGenerating ? (
                     <div className="novel-writing-shell__editor-sheet novel-writing-shell__editor-sheet--streaming">
                       <div className="novel-writing-shell__editor-stream-head">AI 正在续写本章 <Spin size="small" /></div>
                       <div className="novel-writing-shell__editor-stream">{streamContent}<span className="streaming-cursor" /></div>
@@ -1121,139 +1416,30 @@ export default function Writing({ novelId }: Props) {
 
           <aside className="novel-writing-shell__insight">
             <div className="novel-writing-shell__insight-switch">
-              {(['chapter', 'memory', 'health'] as InsightTab[]).map((tab) => (
-                <button key={tab} type="button" className={insightTab === tab ? 'is-active' : ''} onClick={() => setInsightTab(tab)}>
-                  {tab === 'chapter' ? '本章链路' : tab === 'memory' ? '长文记忆' : '结构体检'}
+              {([
+                { key: 'editor', label: '编辑器' },
+                { key: 'context', label: '上下文' },
+                { key: 'review', label: '审校' },
+                { key: 'history', label: '历史' },
+              ] as Array<{ key: WritingRouteKey; label: string }>).map((tab) => (
+                <button key={tab.key} type="button" className={activeWritingRoute === tab.key ? 'is-active' : ''} onClick={() => navigateToWritingRoute(tab.key)}>
+                  {tab.label}
                 </button>
               ))}
             </div>
-
-            {insightTab === 'chapter' ? (
-              <>
-                <div className="novel-writing-shell__insight-spotlight">
-                  <ChapterFocusCard
-                    summary={currentChapter?.summary}
-                    nextChapterSeed={currentChapter?.nextChapterSeed}
-                    continuityItems={continuityItems}
-                  />
-                  <InsightCard title="场景拆解" eyebrow="执行顺序">
-                    {scenePlan.length > 0 ? <div className="novel-scene-list">{scenePlan.map((scene) => <div key={`${scene.scene_order}-${scene.scene_title}`} className="novel-scene-card"><div className="novel-scene-card__header"><span>{`场景 ${String(scene.scene_order).padStart(2, '0')}`}</span><strong>{scene.scene_title}</strong></div><div className="novel-scene-card__body"><div>{scene.purpose}</div>{scene.location ? <div>地点：{scene.location}</div> : null}{scene.time_anchor ? <div>时间：{scene.time_anchor}</div> : null}{scene.present_characters?.length ? <div>人物：{scene.present_characters.join('、')}</div> : null}{scene.key_items?.length ? <div>道具：{scene.key_items.join('、')}</div> : null}{scene.must_cover?.length ? <div>必须覆盖：{scene.must_cover.join('、')}</div> : null}</div></div>)}</div> : <div className="novel-copy-block">先运行章节流水线后，这里会整理本章场景计划。</div>}
-                  </InsightCard>
-                </div>
-                <div className="novel-writing-shell__insight-stack">
-                  <InsightCard title="关键约束注入" eyebrow="本章关键约束已注入" tone="soft">
-                    <ConstraintInjectionCard preview={chapterContextPreview} />
-                  </InsightCard>
-                  <InsightCard title="召回补充层" eyebrow="背景补充 / 非事实源" tone="soft">
-                    <RecallDiagnosticsCard preview={chapterContextPreview} />
-                  </InsightCard>
-                  <InsightCard title="生产摘要" eyebrow="AI 主写 / 人工定稿" tone="soft"><StringList items={productionBriefItems} empty="章节进入审校后，这里会先汇总最值得优先处理的定稿建议。" /></InsightCard>
-                  <InsightCard title="关联线索" eyebrow="时间轴 / 道具" tone="soft"><StringList items={relatedInsightItems.slice(0, 12)} empty="当前章节暂未关联时间轴事件或关键道具。" /></InsightCard>
-                  <InsightCard title="本章应回收伏笔" eyebrow={foreshadowSnapshot ? `按第 ${foreshadowSnapshot.currentChapterNum} 章进度计算` : '即将到期 / 超期未收'} tone="soft">
-                    <StringList items={dueForeshadowItems} empty="当前章节附近没有到期或超期未收的伏笔债务。" />
-                  </InsightCard>
-                  <InsightCard title="修订提示" eyebrow="复盘重点" tone="soft"><StringList items={reviewInsightItems} empty="运行审校或摘要更新后，这里会汇总需要回看的修订点。" /></InsightCard>
-                  <InsightCard title="世界规则" eyebrow="写作边界" tone="soft"><StringList items={worldRulesSummary} empty={currentNovel?.worldRulesJson ? '当前世界规则已录入，但还没有提炼出本章相关边界。' : '先完善世界规则，这里会同步展示写作边界。'} /></InsightCard>
-                </div>
-              </>
-            ) : null}
-
-            {insightTab === 'memory' ? (
-              <div className="novel-writing-shell__insight-stack">
-                <InsightCard title="阶段摘要" eyebrow={storyMemory?.coverageSummary || '长篇覆盖'} tone="soft"><StringList items={storyMemory?.phaseDigest || []} empty="章节量还不大，阶段摘要会在长篇推进后逐步显现。" /></InsightCard>
-                <InsightCard title="剧情里程碑" eyebrow="压缩摘要"><StringList items={storyMemory ? storyMemory.plotMilestones.slice(0, 12) : []} empty="长文记忆尚未生成。" /></InsightCard>
-                <InsightCard title="人物与世界状态" eyebrow="统一总账" tone="soft"><CharacterStateMemoryCard storyMemory={storyMemory} /></InsightCard>
-                <InsightCard title="活跃线程" eyebrow="待持续追踪" tone="soft"><StringList items={storyMemory ? storyMemory.activeThreads.slice(0, 12) : []} empty="当前没有需要持续追踪的活跃线程。" /></InsightCard>
-                <InsightCard title="时间锚点" eyebrow="时序参照" tone="soft"><StringList items={storyMemory ? storyMemory.timelineAnchors.slice(0, 10) : []} empty="时间轴锚点会在这里同步展示。" /></InsightCard>
-                <InsightCard title="道具账本" eyebrow="状态同步" tone="soft"><StringList items={storyMemory ? storyMemory.itemLedger.slice(0, 10) : []} empty="关键道具与线索的状态变化会记录在这里。" /></InsightCard>
-              </div>
-            ) : null}
-
-            {insightTab === 'health' ? (
-              <>
-                <div className="novel-writing-shell__insight-spotlight">
-                  <InsightCard title="全书健康度" eyebrow="结构体检" tone="hero">{consistencyReport ? <div className="novel-health-board"><div className="novel-health-score"><strong>{consistencyReport.readinessScore}</strong><span>{getHealthLabel(consistencyReport.readinessScore)}</span></div><div className="novel-health-breakdown"><div><strong>{consistencyReport.highCount}</strong><span>高危</span></div><div><strong>{consistencyReport.mediumCount}</strong><span>中危</span></div><div><strong>{consistencyReport.lowCount}</strong><span>低危</span></div></div></div> : <div className="novel-copy-block">正在分析全书结构健康度。</div>}</InsightCard>
-                  <InsightCard title="本章风险" eyebrow="优先修复">{chapterIssues.length > 0 ? <div className="novel-issue-list">{chapterIssues.slice(0, 8).map((issue) => <div key={issue.id} className="novel-issue-item"><div className="novel-issue-item__head"><Tag color={getIssueColor(issue.severity)}>{getIssueLabel(issue.severity)}</Tag><strong>{issue.title}</strong></div><div className="novel-issue-item__desc">{issue.description}</div><div className="novel-issue-item__suggestion">建议：{issue.suggestion}</div></div>)}</div> : <div className="novel-copy-block">当前章节没有被结构体检命中的明显风险。</div>}</InsightCard>
-                </div>
-                <div className="novel-writing-shell__insight-stack">
-                  <InsightCard title="发布前检查" eyebrow="完成门槛" tone="soft">
-                    {publishCheck ? (
-                      <StringList
-                        items={publishCheck.checklist.map((item) => {
-                          const prefix = item.status === 'pass' ? '通过' : item.status === 'warning' ? '中优先' : '阻塞'
-                          return `${prefix} · ${item.label}：${item.detail}`
-                        })}
-                        empty="当前没有发布前检查结果。"
-                      />
-                    ) : <div className="novel-copy-block">当前没有发布前检查结果。</div>}
-                  </InsightCard>
-                  <InsightCard title="最近恶化项" eyebrow="跨章节语言退化" tone="soft">
-                    <LanguageDriftHealthCard dashboard={qualityDashboard} currentChapter={currentChapter} />
-                  </InsightCard>
-                  <InsightCard title="角色对白辨识度" eyebrow="语音指纹" tone="soft">
-                    <DialogueFingerprintHealthCard dashboard={qualityDashboard} reviewNotes={reviewNotes} />
-                  </InsightCard>
-                  <InsightCard title="主角与节奏风险" eyebrow="跨章节结构告警" tone="soft">
-                    <StoryDynamicsHealthCard dashboard={qualityDashboard} currentChapter={currentChapter} reviewNotes={reviewNotes} />
-                  </InsightCard>
-                  <InsightCard title="世界状态概览" eyebrow="总账 / 冲突实体" tone="soft">
-                    <WorldStateHealthCard dashboard={qualityDashboard} />
-                  </InsightCard>
-                  <InsightCard title="AI 检测与复检" eyebrow="局部诊断" tone="soft">
-                    <AIScorePanel
-                      getContent={() => normalizeEditorText(editorRef.current?.innerText || content)}
-                      contentType="chapter"
-                      genreContext={currentNovel?.genreName || ''}
-                      novelBackground={[currentNovel?.synopsis, currentNovel?.expandedBackground].filter(Boolean).join('\n')}
-                      modelConfigId={currentNovel?.modelConfigId}
-                      disabled={!currentChapter}
-                      onRegenerate={applyChapterContent}
-                      drawCount={1}
-                    />
-                    {aiResult ? <div style={{ marginTop: 12 }}><AiCheckResult result={aiResult} /></div> : <div className="novel-copy-block" style={{ marginTop: 12 }}>点击上方 AI 体检后，这里也会展示语义与表达层面的复检结果。</div>}
-                  </InsightCard>
-                  <InsightCard title="建议优先处理" eyebrow="下一步" tone="soft"><StringList items={consistencyReport?.focusAreas || []} empty="当前没有额外的优先处理建议。" /></InsightCard>
-                </div>
-              </>
-            ) : null}
+            <React.Suspense fallback={<div className="novel-empty novel-empty--writing"><Spin /></div>}>
+              <Routes>
+                <Route index element={<Navigate replace to={location.search ? `editor${location.search}` : 'editor'} />} />
+                <Route path="editor" element={<WritingEditorRoute content={chapterInsightContent} />} />
+                <Route path="context" element={<WritingContextRoute content={memoryInsightContent} />} />
+                <Route path="review" element={<WritingReviewRoute content={reviewInsightContent} />} />
+                <Route path="history" element={<WritingHistoryRoute content={historyInsightContent} />} />
+                <Route path="*" element={<Navigate replace to={location.search ? `editor${location.search}` : 'editor'} />} />
+              </Routes>
+            </React.Suspense>
           </aside>
         </div>
       )}
-      <Modal
-        title="章节版本历史"
-        open={versionHistoryOpen}
-        onCancel={() => setVersionHistoryOpen(false)}
-        onOk={() => void handleRestoreVersion()}
-        okButtonProps={{ disabled: !selectedVersion }}
-        okText="恢复所选版本"
-        width={860}
-      >
-        <div className="novel-split novel-split--sidebar">
-          <div className="novel-note-list">
-            {versionHistoryLoading ? <Spin size="small" /> : null}
-            {!versionHistoryLoading && chapterVersions.length === 0 ? (
-              <div className="novel-note-list__item">当前章节还没有可恢复的版本。</div>
-            ) : null}
-            {chapterVersions.map((version) => (
-              <button
-                key={version.id}
-                type="button"
-                className={`novel-sidebar__nav-item ${selectedVersion?.id === version.id ? 'novel-sidebar__nav-item--active' : ''}`}
-                style={{ width: '100%', textAlign: 'left' }}
-                onClick={() => setSelectedVersionId(version.id)}
-              >
-                <span className="novel-sidebar__nav-copy">
-                  <strong>{chapterVersionSourceLabel(version.versionSource)}</strong>
-                  <small>{`${version.wordCount || 0} 字 · ${new Date(version.createdAt).toLocaleString()}`}</small>
-                </span>
-              </button>
-            ))}
-          </div>
-          <div className="novel-copy-block" style={{ whiteSpace: 'pre-wrap', minHeight: 320 }}>
-            {selectedVersion?.content || '选择左侧版本后，这里会显示正文预览。'}
-          </div>
-        </div>
-      </Modal>
       <Modal
         title="重写选中文段"
         open={rewriteModalOpen}
@@ -1314,11 +1500,26 @@ function ConstraintInjectionCard({ preview }: { preview: ChapterContextPreview |
         const injectedTitles = stage.hardConstraintEntries.map((entry) => entry.title)
         const truncatedTitles = stage.hardConstraintEntries.filter((entry) => entry.truncated).map((entry) => entry.title)
         const hasDrop = stage.droppedConstraintCount > 0
+        const report = stage.contextBudgetReport
+        const droppedByPriority = report.droppedByPriority
+          .filter((entry) => entry.count > 0)
+          .map((entry) => `P${entry.priority} ${entry.count}项`)
+          .join('，')
         return (
           <div key={stage.stage} className="novel-note-list">
             <div className="novel-note-list__item">
               <strong>{stage.stage}</strong>
               {` · 复杂度 ${preview.complexity} · 硬约束 ${stage.constraintInjectionStatus.hardConstraintUsed}/${stage.constraintInjectionStatus.hardConstraintBudget} · 软上下文 ${stage.constraintInjectionStatus.softContextUsed}/${stage.constraintInjectionStatus.softContextBudget}`}
+            </div>
+            <div className="novel-note-list__item">
+              {`预算：上下文 ${report.hardConstraintUsed + report.softContextUsed}/${report.availableContextBudget} · 总窗口 ${report.effectiveBudget} · 输出预留 ${report.reservedForOutput}`}
+            </div>
+            <div className="novel-note-list__item">
+              {report.overflowLevel === 'hard_failed'
+                ? '阻塞：关键约束已超出预算，当前阶段不能安全生成。'
+                : report.overflowLevel === 'soft_trimmed'
+                  ? '已降级：低优先级上下文已被自动裁剪。'
+                  : '预算充足，当前阶段未触发裁剪。'}
             </div>
             <div className="novel-note-list__item">{stage.hardConstraintSummary}</div>
             <div className="novel-note-list__item">
@@ -1333,6 +1534,16 @@ function ConstraintInjectionCard({ preview }: { preview: ChapterContextPreview |
               {hasDrop
                 ? `警告：仍有 ${stage.droppedConstraintCount} 项关键约束未注入。`
                 : '关键约束未发生丢失。'}
+            </div>
+            <div className="novel-note-list__item">
+              {report.droppedLabels.length > 0
+                ? `被踢出：${report.droppedLabels.join('、')}${droppedByPriority ? ` · ${droppedByPriority}` : ''}`
+                : '没有字段因预算被整体踢出。'}
+            </div>
+            <div className="novel-note-list__item">
+              {report.truncatedLabels.length > 0
+                ? `被压缩：${report.truncatedLabels.join('、')}`
+                : '没有字段因预算被截断。'}
             </div>
           </div>
         )

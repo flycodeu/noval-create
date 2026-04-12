@@ -1,6 +1,6 @@
 ﻿import { WebContents } from 'electron'
 import { asc, desc, eq, inArray } from 'drizzle-orm'
-import { getDb } from '../database/db'
+import { getDb, getSqlite } from '../database/db'
 import { chapterSegments, chapterVersions, chapters, novels, storyArcs } from '../database/schema'
 import { parseAiJsonResult } from '../utils/json'
 import { generateChapterEmbeddings } from './embedding.service'
@@ -9,9 +9,11 @@ import {
   allocateChapterContext,
   buildChapterContext,
   ChapterContext,
+  ContextOverflowError,
   buildStoryProfile,
   collectChapterContextRawData,
   ContinuityState,
+  HardConstraintOverflowError,
 } from './context.service'
 import {
   buildChapterDraftPrompt,
@@ -41,6 +43,7 @@ import {
   resolveDefaultStructure,
   syncChapterToSegments,
 } from './story-structure.service'
+import { syncTimelineStructureAnchors } from './timeline.service'
 import { discoverEntitiesFromContent } from './entity-discovery.service'
 import { buildBatchKey, captureTimelineAnchorsForChapterIds, createOperationLog } from './history.service'
 import { enhanceAiScoreResult } from './ai-score.service'
@@ -49,7 +52,15 @@ import {
   scheduleDialogueFingerprintRefresh,
 } from './dialogue-fingerprint.service'
 import { refreshCharacterStateVersionsForChapter } from './character-state.service'
-import { refreshWorldStateVersionsForChapter } from './world-state.service'
+import {
+  refreshWorldStateVersionsForChapter,
+  refreshWorldStateVersionsForNovel,
+  refreshWorldStateVersionsFromChapter,
+} from './world-state.service'
+import {
+  remapChapterNumberReferences,
+  deleteChapterSegmentsCascade,
+} from './data-cascade.service'
 import {
   formatStoryArcCheckpointReminder,
   formatStoryArcProgressStatus,
@@ -1565,14 +1576,65 @@ export function updateChapter(id: number, data: Partial<{
 export function deleteChapter(id: number) {
   const db = getDb()
   const current = db.select().from(chapters).where(eq(chapters.id, id)).all()[0]
-  db.delete(chapters).where(eq(chapters.id, id)).run()
   if (current) {
+    let affectedStartChapterId: number | null = null
+    let affectedStartChapterNum: number | null = null
+    let remainingChapterCount = 0
+
+    getSqlite().transaction(() => {
+      const beforeRows = db.select().from(chapters)
+        .where(eq(chapters.novelId, current.novelId))
+        .orderBy(asc(chapters.chapterNum), asc(chapters.id))
+        .all()
+      deleteChapterSegmentsCascade(id)
+      db.delete(chapters).where(eq(chapters.id, id)).run()
+      ensureStoryStructure(current.novelId)
+      const afterRows = db.select().from(chapters)
+        .where(eq(chapters.novelId, current.novelId))
+        .orderBy(asc(chapters.chapterNum), asc(chapters.id))
+        .all()
+      remainingChapterCount = afterRows.length
+
+      const nextChapterNumById = new Map(afterRows.map((row) => [row.id, row.chapterNum] as const))
+      const chapterNumberRemap = new Map<number, number | null>()
+      beforeRows.forEach((row) => {
+        chapterNumberRemap.set(row.chapterNum, row.id === id ? null : (nextChapterNumById.get(row.id) ?? null))
+      })
+      remapChapterNumberReferences(current.novelId, chapterNumberRemap)
+
+      const changedChapterNums = beforeRows
+        .filter((row) => row.id !== id)
+        .flatMap((row) => {
+          const nextChapterNum = nextChapterNumById.get(row.id)
+          return typeof nextChapterNum === 'number' && nextChapterNum !== row.chapterNum
+            ? [nextChapterNum]
+            : []
+        })
+
+      if (changedChapterNums.length > 0) {
+        affectedStartChapterNum = Math.min(...changedChapterNums)
+        affectedStartChapterId = afterRows.find((row) => row.chapterNum === affectedStartChapterNum)?.id ?? null
+      }
+      syncTimelineStructureAnchors(current.novelId)
+    })()
     markSubsequentChaptersStale(
       current.novelId,
-      current.chapterNum - 1,
+      Math.max(0, (affectedStartChapterNum ?? current.chapterNum) - 1),
       `第${current.chapterNum}章已删除，后续章节顺序已变更`,
     )
+    if (remainingChapterCount === 0) {
+      refreshWorldStateVersionsForNovel(current.novelId)
+    } else if (typeof affectedStartChapterId === 'number' && typeof affectedStartChapterNum === 'number') {
+      refreshCharacterStateVersionsForChapter(affectedStartChapterId)
+      refreshWorldStateVersionsFromChapter(current.novelId, affectedStartChapterNum)
+    } else {
+      refreshWorldStateVersionsForNovel(current.novelId)
+    }
+    refreshStoryMemoryCheckpoints(current.novelId)
+    scheduleDialogueFingerprintRefresh(current.novelId)
+    return
   }
+  db.delete(chapters).where(eq(chapters.id, id)).run()
 }
 
 export function listChapterVersions(chapterId: number) {
@@ -1749,13 +1811,14 @@ type ChapterContextStage = 'scenePlan' | 'draft' | 'review' | 'rewrite'
 
 function logConstraintInjectionStatus(stage: ChapterContextStage, context: ChapterContext) {
   const status = context.constraintInjectionStatus
+  const report = context.contextBudgetReport
   const injectedTitles = context.hardConstraintEntries.map((entry) => entry.title).join('、') || '无'
   const truncatedTitles = context.hardConstraintEntries
     .filter((entry) => entry.truncated)
     .map((entry) => entry.title)
     .join('、') || '无'
   console.info(
-    `[chapter:context] stage=${stage} hard=${status.hardConstraintUsed}/${status.hardConstraintBudget} soft=${status.softContextUsed}/${status.softContextBudget} dropped=${status.droppedConstraintCount} injected=${injectedTitles} truncated=${truncatedTitles}`,
+    `[chapter:context] stage=${stage} hard=${status.hardConstraintUsed}/${status.hardConstraintBudget} soft=${status.softContextUsed}/${status.softContextBudget} available=${report.availableContextBudget} requested=${report.requestedBudget} overflow=${report.overflowLevel} dropped=${status.droppedConstraintCount} injected=${injectedTitles} truncated=${truncatedTitles}`,
   )
 }
 
@@ -1860,11 +1923,64 @@ function buildStageContextMap(
     activeThreadPressureCount: rawContext.activeThreadPressureCount,
   })
   const novelTargetWords = rawContext.novel.targetWords || 0
-  const buildStageContext = (promptProfile: ChapterContextStage) => allocateChapterContext(rawContext, {
-    promptProfile,
-    chapterComplexity: complexity,
-    totalBudget: resolveContextBudgetForStage(promptProfile, complexity, chapter.targetWords || 3000, novelTargetWords),
+  const buildStageContext = (promptProfile: ChapterContextStage) => {
+    try {
+      return allocateChapterContext(rawContext, {
+        promptProfile,
+        chapterComplexity: complexity,
+        totalBudget: resolveContextBudgetForStage(promptProfile, complexity, chapter.targetWords || 3000, novelTargetWords),
+      })
+    } catch (error) {
+      if (error instanceof HardConstraintOverflowError) {
+        throw error
+      }
+      if (error instanceof ContextOverflowError) {
+        return error.context
+      }
+      throw error
+    }
+  }
+
+  return {
+    complexity,
+    contexts: {
+      scenePlan: buildStageContext('scenePlan'),
+      draft: buildStageContext('draft'),
+      review: buildStageContext('review'),
+      rewrite: buildStageContext('rewrite'),
+    },
+  }
+}
+
+function buildPreviewStageContextMap(
+  rawContext: Awaited<ReturnType<typeof collectChapterContextRawData>>,
+  chapter: typeof chapters.$inferSelect,
+): {
+  complexity: ChapterComplexity
+  contexts: Record<ChapterContextStage, ChapterContext>
+} {
+  const complexity = classifyChapterComplexity({
+    chapter,
+    currentArc: rawContext.currentArc,
+    chapterRows: rawContext.chapterRows,
+    outlineMentionedCharacterCount: rawContext.outlineMentionedCharacterCount,
+    activeThreadPressureCount: rawContext.activeThreadPressureCount,
   })
+  const novelTargetWords = rawContext.novel.targetWords || 0
+  const buildStageContext = (promptProfile: ChapterContextStage) => {
+    try {
+      return allocateChapterContext(rawContext, {
+        promptProfile,
+        chapterComplexity: complexity,
+        totalBudget: resolveContextBudgetForStage(promptProfile, complexity, chapter.targetWords || 3000, novelTargetWords),
+      })
+    } catch (error) {
+      if (error instanceof ContextOverflowError || error instanceof HardConstraintOverflowError) {
+        return error.context
+      }
+      throw error
+    }
+  }
 
   return {
     complexity,
@@ -1886,35 +2002,36 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
   const novel = rawContext.novel
   const profile = rawContext.profile
   const consistencyNotes = buildConsistencyPromptSummary(buildNovelConsistencyReport(chapter.novelId))
-  const { complexity, contexts } = buildStageContextMap(rawContext, chapter)
-  const scenePlanContext = contexts.scenePlan
-  const draftContext = contexts.draft
-  const reviewContext = contexts.review
-  const rewriteContext = contexts.rewrite
-  logConstraintInjectionStatus('scenePlan', scenePlanContext)
-  logConstraintInjectionStatus('draft', draftContext)
-  logConstraintInjectionStatus('review', reviewContext)
-  logConstraintInjectionStatus('rewrite', rewriteContext)
-  const buildWritingGuidance = (styleTemplate: string) => [
-    styleTemplate ? `Writing style guide:\n${styleTemplate}` : '',
-    consistencyNotes,
-  ].filter(Boolean).join('\n\n')
-  const draftWritingGuidance = buildWritingGuidance(draftContext.styleTemplate)
-  const rewriteWritingGuidance = buildWritingGuidance(rewriteContext.styleTemplate)
   const previousStatus = chapter.status || 'outline'
   const fallbackScenePlan = buildFallbackScenePlan(chapter)
-  const storyCore = buildStoryCore(profile, rewriteContext.storyCore || draftContext.storyCore || scenePlanContext.storyCore)
-  const currentArcRow = rawContext.currentArc
-  const latestArcProgressNote = getLatestArcProgressNote(chapter.novelId, currentArcRow, chapter.chapterNum)
-  const structuralAlertsSummary = buildStructuralAlertsSummary(chapter.novelId, chapter.chapterNum, chapter.volumeId)
-
-  updateChapter(chapterId, {
-    status: 'writing',
-    scenePlanJson: '',
-    reviewNotesJson: '',
-  })
 
   try {
+    const { complexity, contexts } = buildStageContextMap(rawContext, chapter)
+    const scenePlanContext = contexts.scenePlan
+    const draftContext = contexts.draft
+    const reviewContext = contexts.review
+    const rewriteContext = contexts.rewrite
+    logConstraintInjectionStatus('scenePlan', scenePlanContext)
+    logConstraintInjectionStatus('draft', draftContext)
+    logConstraintInjectionStatus('review', reviewContext)
+    logConstraintInjectionStatus('rewrite', rewriteContext)
+    const buildWritingGuidance = (styleTemplate: string) => [
+      styleTemplate ? `Writing style guide:\n${styleTemplate}` : '',
+      consistencyNotes,
+    ].filter(Boolean).join('\n\n')
+    const draftWritingGuidance = buildWritingGuidance(draftContext.styleTemplate)
+    const rewriteWritingGuidance = buildWritingGuidance(rewriteContext.styleTemplate)
+    const storyCore = buildStoryCore(profile, rewriteContext.storyCore || draftContext.storyCore || scenePlanContext.storyCore)
+    const currentArcRow = rawContext.currentArc
+    const latestArcProgressNote = getLatestArcProgressNote(chapter.novelId, currentArcRow, chapter.chapterNum)
+    const structuralAlertsSummary = buildStructuralAlertsSummary(chapter.novelId, chapter.chapterNum, chapter.volumeId)
+
+    updateChapter(chapterId, {
+      status: 'writing',
+      scenePlanJson: '',
+      reviewNotesJson: '',
+    })
+
     sendGenerationProgress(sender, {
       chapterId,
       stage: 'planning',
@@ -2269,6 +2386,7 @@ export async function getChapterContextPreview(chapterId: number): Promise<{
     hardConstraintEntries: ChapterContext['hardConstraintEntries']
     constraintInjectionStatus: ChapterContext['constraintInjectionStatus']
     softContextBudgetUsage: ChapterContext['softContextBudgetUsage']
+    contextBudgetReport: ChapterContext['contextBudgetReport']
     droppedConstraintCount: number
   }>
 }> {
@@ -2277,7 +2395,7 @@ export async function getChapterContextPreview(chapterId: number): Promise<{
   if (!chapter) throwUserFacingError('chapter.notFoundWithId', { id: chapterId })
 
   const rawContext = await collectChapterContextRawData(chapter.novelId, chapter.chapterNum)
-  const { complexity, contexts } = buildStageContextMap(rawContext, chapter)
+  const { complexity, contexts } = buildPreviewStageContextMap(rawContext, chapter)
   const orderedStages: ChapterContextStage[] = ['scenePlan', 'draft', 'review', 'rewrite']
 
   return {
@@ -2296,6 +2414,7 @@ export async function getChapterContextPreview(chapterId: number): Promise<{
         hardConstraintEntries: context.hardConstraintEntries,
         constraintInjectionStatus: context.constraintInjectionStatus,
         softContextBudgetUsage: context.softContextBudgetUsage,
+        contextBudgetReport: context.contextBudgetReport,
         droppedConstraintCount: context.droppedConstraintCount,
       }
     }),

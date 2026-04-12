@@ -1,4 +1,4 @@
-﻿import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import { desc, eq } from 'drizzle-orm'
@@ -79,6 +79,7 @@ import * as taskService from './services/task.service'
 import { safeParseJson } from './utils/json'
 import { getNovelContextStatus, markNovelContextChanged } from './services/context-impact.service'
 import { enhanceAiScoreResult } from './services/ai-score.service'
+import { wrapIpcHandler } from './utils/ipc-wrapper'
 import {
   appendVariationMessage,
   buildVariationDigest,
@@ -225,19 +226,25 @@ app.on('window-all-closed', () => {
 })
 
 function registerIpcHandlers() {
-  ipcMain.handle('novel:list', (_, filters) => novelService.listNovels(filters))
-  ipcMain.handle('novel:get', (_, id) => novelService.getNovel(requireId(id)))
-  ipcMain.handle('novel:create', (_, data) => novelService.createNovel(parseObjectPayload<NovelCreateInput>(data, 'data')))
-  ipcMain.handle('novel:update', (_, id, data) => novelService.updateNovel(requireId(id), data))
-  ipcMain.handle('novel:delete', (_, id) => novelService.deleteNovel(requireId(id)))
-  ipcMain.handle('novel:export', (_, id, format) => exportService.exportNovel(requireId(id), format))
-  ipcMain.handle('novel:stats', (_, id) => novelService.getNovelStats(requireId(id)))
+  const registerHandle = ipcMain.handle.bind(ipcMain)
+  const handle = (
+    channel: string,
+    listener: Parameters<typeof ipcMain.handle>[1],
+  ) => registerHandle(channel, wrapIpcHandler(channel, listener))
+
+  handle('novel:list', (_, filters) => novelService.listNovels(filters))
+  handle('novel:get', (_, id) => novelService.getNovel(requireId(id)))
+  handle('novel:create', (_, data) => novelService.createNovel(parseObjectPayload<NovelCreateInput>(data, 'data')))
+  handle('novel:update', (_, id, data) => novelService.updateNovel(requireId(id), data))
+  handle('novel:delete', (_, id) => novelService.deleteNovel(requireId(id)))
+  handle('novel:export', (_, id, format) => exportService.exportNovel(requireId(id), format))
+  handle('novel:stats', (_, id) => novelService.getNovelStats(requireId(id)))
 
   // Quality Dashboard
-  ipcMain.handle('quality:getDashboard', (_, novelId) => qualityDashboardService.getQualityDashboardData(novelId))
+  handle('quality:getDashboard', (_, novelId) => qualityDashboardService.getQualityDashboardData(novelId))
 
   // Embedding
-  ipcMain.handle('embedding:reindex', async (_, novelId: number) => {
+  handle('embedding:reindex', async (_, novelId: number) => {
     const db = getDb()
     const chapterList = db.select().from(chapters).where(eq(chapters.novelId, novelId)).all()
     let succeeded = 0
@@ -255,31 +262,31 @@ function registerIpcHandlers() {
   })
 
   // Style Analysis
-  ipcMain.handle('style:analyze', (_, text: string, modelConfigId?: number) =>
+  handle('style:analyze', (_, text: string, modelConfigId?: number) =>
     styleAnalysisService.analyzeReferenceText(text, modelConfigId))
-  ipcMain.handle('style:create', (_, novelId: number | null, name: string, text: string, modelConfigId?: number) =>
+  handle('style:create', (_, novelId: number | null, name: string, text: string, modelConfigId?: number) =>
     styleAnalysisService.createStyleFingerprint(novelId, name, text, modelConfigId))
-  ipcMain.handle('style:get', (_, id: number) =>
+  handle('style:get', (_, id: number) =>
     styleAnalysisService.getStyleFingerprint(id))
-  ipcMain.handle('style:list', (_, novelId?: number) =>
+  handle('style:list', (_, novelId?: number) =>
     styleAnalysisService.listStyleFingerprints(novelId))
-  ipcMain.handle('style:delete', (_, id: number) =>
+  handle('style:delete', (_, id: number) =>
     styleAnalysisService.deleteStyleFingerprint(requireId(id)))
 
   // Parallel Generation
-  ipcMain.handle('parallel:analyzePlan', (_, novelId: number, chapterStart: number, chapterEnd: number) =>
+  handle('parallel:analyzePlan', (_, novelId: number, chapterStart: number, chapterEnd: number) =>
     parallelGenerationService.identifyParallelizableSegments(novelId, chapterStart, chapterEnd))
-  ipcMain.handle('parallel:getWorldState', (_, novelId: number, atChapterNum: number) =>
+  handle('parallel:getWorldState', (_, novelId: number, atChapterNum: number) =>
     parallelGenerationService.buildSharedWorldState(novelId, atChapterNum))
-  ipcMain.handle('parallel:mergeOutputs', (_, segments: unknown[]) =>
+  handle('parallel:mergeOutputs', (_, segments: unknown[]) =>
     parallelGenerationService.mergeParallelOutputs(segments as any))
-  ipcMain.handle('novel:runConsistencyCheck', (_, id) => consistencyService.buildNovelConsistencyReport(id))
-  ipcMain.handle('novel:getStoryMemory', (_, id) => storyMemoryService.buildStoryMemorySnapshot(id))
-  ipcMain.handle('novel:getWorldStateSnapshot', (_, novelId: number, upToChapterNum?: number) =>
+  handle('novel:runConsistencyCheck', (_, id) => consistencyService.buildNovelConsistencyReport(id))
+  handle('novel:getStoryMemory', (_, id) => storyMemoryService.buildStoryMemorySnapshot(id))
+  handle('novel:getWorldStateSnapshot', (_, novelId: number, upToChapterNum?: number) =>
     worldStateService.getWorldStateContextSnapshot(requireId(novelId, 'novelId'), { upToChapterNum }))
-  ipcMain.handle('novel:getWorldStateLedgerSnapshot', (_, novelId: number, upToChapterNum?: number) =>
+  handle('novel:getWorldStateLedgerSnapshot', (_, novelId: number, upToChapterNum?: number) =>
     worldStateService.getWorldStateLedgerSnapshot(requireId(novelId, 'novelId'), { upToChapterNum }))
-  ipcMain.handle('novel:getWorldStateHistory', (_, novelId: number, entityType: string, entityId: number, stateKey?: string, limit?: number) =>
+  handle('novel:getWorldStateHistory', (_, novelId: number, entityType: string, entityId: number, stateKey?: string, limit?: number) =>
     worldStateService.listWorldStateHistory(
       requireId(novelId, 'novelId'),
       requireString(entityType, 'entityType') as Parameters<typeof worldStateService.listWorldStateHistory>[1],
@@ -287,183 +294,183 @@ function registerIpcHandlers() {
       stateKey,
       typeof limit === 'number' ? limit : 12,
     ))
-  ipcMain.handle('novel:getContextStatus', (_, id) => getNovelContextStatus(id))
+  handle('novel:getContextStatus', (_, id) => getNovelContextStatus(id))
 
-  ipcMain.handle('structure:getTree', (_, novelId) => storyStructureService.listStoryStructure(novelId))
-  ipcMain.handle('structure:listVolumes', (_, novelId) => storyStructureService.listStructureVolumes(novelId))
-  ipcMain.handle('structure:listPartsPage', (_, volumeId, page, pageSize) => storyStructureService.listStructurePartsPage(volumeId, page, pageSize))
-  ipcMain.handle('structure:listChaptersPage', (_, partId, page, pageSize) => storyStructureService.listStructureChaptersPage(partId, page, pageSize))
-  ipcMain.handle('structure:listSegments', (_, chapterId) => storyStructureService.listChapterSegments(chapterId))
-  ipcMain.handle('structure:getSegment', (_, id) => storyStructureService.getChapterSegment(id))
-  ipcMain.handle('structure:listSegmentsPage', (_, chapterId, page, pageSize) => storyStructureService.listChapterSegmentsPage(chapterId, page, pageSize))
-  ipcMain.handle('structure:listCheckpoints', (_, novelId) => storyStructureService.listStoryCheckpoints(novelId))
-  ipcMain.handle('structure:listCheckpointsPage', (_, filters, page, pageSize) => storyStructureService.listStoryCheckpointsPage(filters, page, pageSize))
-  ipcMain.handle('structure:listLinkedTimelineEvents', (_, filters) => timelineService.listLinkedTimelineEvents(filters))
-  ipcMain.handle('structure:listLinkedTimelineEventsPage', (_, filters, page, pageSize) => timelineService.listLinkedTimelineEventsPage(filters, page, pageSize))
-  ipcMain.handle('structure:resolvePath', (_, filters) => storyStructureService.resolveStructurePath(filters))
-  ipcMain.handle('structure:createVolume', (_, novelId, data) => storyStructureService.createStoryVolume(requireId(novelId, 'novelId'), data))
-  ipcMain.handle('structure:updateVolume', (_, id, data) => storyStructureService.updateStoryVolume(requireId(id), data))
-  ipcMain.handle('structure:deleteVolume', (_, id) => storyStructureService.deleteStoryVolume(requireId(id)))
-  ipcMain.handle('structure:reorderVolumes', (_, novelId, orderedIds) => storyStructureService.reorderStoryVolumes(requireId(novelId, 'novelId'), requireIds(orderedIds, 'orderedIds')))
-  ipcMain.handle('structure:createPart', (_, volumeId, data) => storyStructureService.createStoryPart(requireId(volumeId, 'volumeId'), data))
-  ipcMain.handle('structure:updatePart', (_, id, data) => storyStructureService.updateStoryPart(requireId(id), data))
-  ipcMain.handle('structure:deletePart', (_, id) => storyStructureService.deleteStoryPart(requireId(id)))
-  ipcMain.handle('structure:reorderParts', (_, novelId, operations) => storyStructureService.reorderStoryParts(requireId(novelId, 'novelId'), operations))
-  ipcMain.handle('structure:reorderPartsInVolume', (_, volumeId, orderedIds) => storyStructureService.reorderStoryPartsInVolume(requireId(volumeId, 'volumeId'), requireIds(orderedIds, 'orderedIds')))
-  ipcMain.handle('structure:assignChapter', (_, chapterId, partId) => storyStructureService.assignChapterToPart(requireId(chapterId, 'chapterId'), requireId(partId, 'partId')))
-  ipcMain.handle('structure:createSegment', (_, chapterId, data) => storyStructureService.createChapterSegment(requireId(chapterId, 'chapterId'), data))
-  ipcMain.handle('structure:updateSegment', (_, id, data) => storyStructureService.updateChapterSegment(requireId(id), data))
-  ipcMain.handle('structure:deleteSegment', (_, id) => storyStructureService.deleteChapterSegment(requireId(id)))
-  ipcMain.handle('structure:reorderSegments', (_, chapterId, orderedIds) => storyStructureService.reorderChapterSegments(requireId(chapterId, 'chapterId'), requireIds(orderedIds, 'orderedIds')))
-  ipcMain.handle('structure:compileChapter', (_, chapterId) => storyStructureService.compileChapterFromSegments(requireId(chapterId, 'chapterId')))
-  ipcMain.handle('structure:refreshCheckpoints', (_, novelId) => storyMemoryService.refreshStoryMemoryCheckpoints(requireId(novelId, 'novelId')))
-  ipcMain.handle('structure:applyBatchPlan', (_, novelId, plan) => storyStructureService.applyStructureBatchPlan(requireId(novelId, 'novelId'), plan))
-  ipcMain.handle('structure:previewBatchEdit', (_, novelId, operations) => storyStructureService.previewStructureBatchEdit(requireId(novelId, 'novelId'), operations))
-  ipcMain.handle('structure:applyBatchEdit', (_, novelId, operations) => storyStructureService.applyStructureBatchEdit(requireId(novelId, 'novelId'), operations))
+  handle('structure:getTree', (_, novelId) => storyStructureService.listStoryStructure(novelId))
+  handle('structure:listVolumes', (_, novelId) => storyStructureService.listStructureVolumes(novelId))
+  handle('structure:listPartsPage', (_, volumeId, page, pageSize) => storyStructureService.listStructurePartsPage(volumeId, page, pageSize))
+  handle('structure:listChaptersPage', (_, partId, page, pageSize) => storyStructureService.listStructureChaptersPage(partId, page, pageSize))
+  handle('structure:listSegments', (_, chapterId) => storyStructureService.listChapterSegments(chapterId))
+  handle('structure:getSegment', (_, id) => storyStructureService.getChapterSegment(id))
+  handle('structure:listSegmentsPage', (_, chapterId, page, pageSize) => storyStructureService.listChapterSegmentsPage(chapterId, page, pageSize))
+  handle('structure:listCheckpoints', (_, novelId) => storyStructureService.listStoryCheckpoints(novelId))
+  handle('structure:listCheckpointsPage', (_, filters, page, pageSize) => storyStructureService.listStoryCheckpointsPage(filters, page, pageSize))
+  handle('structure:listLinkedTimelineEvents', (_, filters) => timelineService.listLinkedTimelineEvents(filters))
+  handle('structure:listLinkedTimelineEventsPage', (_, filters, page, pageSize) => timelineService.listLinkedTimelineEventsPage(filters, page, pageSize))
+  handle('structure:resolvePath', (_, filters) => storyStructureService.resolveStructurePath(filters))
+  handle('structure:createVolume', (_, novelId, data) => storyStructureService.createStoryVolume(requireId(novelId, 'novelId'), data))
+  handle('structure:updateVolume', (_, id, data) => storyStructureService.updateStoryVolume(requireId(id), data))
+  handle('structure:deleteVolume', (_, id) => storyStructureService.deleteStoryVolume(requireId(id)))
+  handle('structure:reorderVolumes', (_, novelId, orderedIds) => storyStructureService.reorderStoryVolumes(requireId(novelId, 'novelId'), requireIds(orderedIds, 'orderedIds')))
+  handle('structure:createPart', (_, volumeId, data) => storyStructureService.createStoryPart(requireId(volumeId, 'volumeId'), data))
+  handle('structure:updatePart', (_, id, data) => storyStructureService.updateStoryPart(requireId(id), data))
+  handle('structure:deletePart', (_, id) => storyStructureService.deleteStoryPart(requireId(id)))
+  handle('structure:reorderParts', (_, novelId, operations) => storyStructureService.reorderStoryParts(requireId(novelId, 'novelId'), operations))
+  handle('structure:reorderPartsInVolume', (_, volumeId, orderedIds) => storyStructureService.reorderStoryPartsInVolume(requireId(volumeId, 'volumeId'), requireIds(orderedIds, 'orderedIds')))
+  handle('structure:assignChapter', (_, chapterId, partId) => storyStructureService.assignChapterToPart(requireId(chapterId, 'chapterId'), requireId(partId, 'partId')))
+  handle('structure:createSegment', (_, chapterId, data) => storyStructureService.createChapterSegment(requireId(chapterId, 'chapterId'), data))
+  handle('structure:updateSegment', (_, id, data) => storyStructureService.updateChapterSegment(requireId(id), data))
+  handle('structure:deleteSegment', (_, id) => storyStructureService.deleteChapterSegment(requireId(id)))
+  handle('structure:reorderSegments', (_, chapterId, orderedIds) => storyStructureService.reorderChapterSegments(requireId(chapterId, 'chapterId'), requireIds(orderedIds, 'orderedIds')))
+  handle('structure:compileChapter', (_, chapterId) => storyStructureService.compileChapterFromSegments(requireId(chapterId, 'chapterId')))
+  handle('structure:refreshCheckpoints', (_, novelId) => storyMemoryService.refreshStoryMemoryCheckpoints(requireId(novelId, 'novelId')))
+  handle('structure:applyBatchPlan', (_, novelId, plan) => storyStructureService.applyStructureBatchPlan(requireId(novelId, 'novelId'), plan))
+  handle('structure:previewBatchEdit', (_, novelId, operations) => storyStructureService.previewStructureBatchEdit(requireId(novelId, 'novelId'), operations))
+  handle('structure:applyBatchEdit', (_, novelId, operations) => storyStructureService.applyStructureBatchEdit(requireId(novelId, 'novelId'), operations))
 
-  ipcMain.handle('chapter:list', (_, novelId) => chapterService.listChapters(requireId(novelId, 'novelId')))
-  ipcMain.handle('chapter:get', (_, id) => chapterService.getChapter(requireId(id)))
-  ipcMain.handle('chapter:create', (_, novelId, data) => chapterService.createChapter(requireId(novelId, 'novelId'), data))
-  ipcMain.handle('chapter:update', (_, id, data, options) => chapterService.updateChapter(requireId(id), data, options))
-  ipcMain.handle('chapter:delete', (_, id) => chapterService.deleteChapter(requireId(id)))
-  ipcMain.handle('chapter:listVersions', (_, chapterId) => chapterService.listChapterVersions(requireId(chapterId, 'chapterId')))
-  ipcMain.handle('chapter:restoreVersion', (_, versionId) => chapterService.restoreChapterVersion(requireId(versionId, 'versionId')))
-  ipcMain.handle('chapter:batchUpdate', (_, ids, data) => chapterService.batchUpdateChapters(requireIds(ids), data))
-  ipcMain.handle('chapter:batchDelete', (_, ids) => chapterService.batchDeleteChapters(requireIds(ids)))
-  ipcMain.handle('chapter:batchRenumber', (_, ids, startChapterNum) => chapterService.batchRenumberChapters(requireIds(ids), startChapterNum))
-  ipcMain.handle('chapter:getContextPreview', (_, chapterId) =>
+  handle('chapter:list', (_, novelId) => chapterService.listChapters(requireId(novelId, 'novelId')))
+  handle('chapter:get', (_, id) => chapterService.getChapter(requireId(id)))
+  handle('chapter:create', (_, novelId, data) => chapterService.createChapter(requireId(novelId, 'novelId'), data))
+  handle('chapter:update', (_, id, data, options) => chapterService.updateChapter(requireId(id), data, options))
+  handle('chapter:delete', (_, id) => chapterService.deleteChapter(requireId(id)))
+  handle('chapter:listVersions', (_, chapterId) => chapterService.listChapterVersions(requireId(chapterId, 'chapterId')))
+  handle('chapter:restoreVersion', (_, versionId) => chapterService.restoreChapterVersion(requireId(versionId, 'versionId')))
+  handle('chapter:batchUpdate', (_, ids, data) => chapterService.batchUpdateChapters(requireIds(ids), data))
+  handle('chapter:batchDelete', (_, ids) => chapterService.batchDeleteChapters(requireIds(ids)))
+  handle('chapter:batchRenumber', (_, ids, startChapterNum) => chapterService.batchRenumberChapters(requireIds(ids), startChapterNum))
+  handle('chapter:getContextPreview', (_, chapterId) =>
     chapterService.getChapterContextPreview(requireId(chapterId, 'chapterId')))
-  ipcMain.handle('chapter:generateContent', (event, chapterId) =>
+  handle('chapter:generateContent', (event, chapterId) =>
     chapterService.generateChapterContent(chapterId, event.sender))
-  ipcMain.handle('chapter:generateSummary', (_, chapterId) =>
+  handle('chapter:generateSummary', (_, chapterId) =>
     chapterService.generateChapterSummary(chapterId))
-  ipcMain.handle('chapter:aiCheck', (_, chapterId) =>
+  handle('chapter:aiCheck', (_, chapterId) =>
     chapterService.aiCheckChapter(chapterId))
-  ipcMain.handle('chapter:runPublishCheck', (_, chapterId) =>
+  handle('chapter:runPublishCheck', (_, chapterId) =>
     chapterService.runChapterPublishCheck(chapterId))
 
-  ipcMain.handle('character:list', (_, novelId) => characterService.listCharacters(novelId))
-  ipcMain.handle('character:query', (_, filters) => characterService.queryCharacters(filters))
-  ipcMain.handle('character:getStats', (_, filters) => characterService.getCharacterStats(filters))
-  ipcMain.handle('character:getFilterOptions', (_, novelId) => characterService.getCharacterFilterOptions(novelId))
-  ipcMain.handle('character:get', (_, id) => characterService.getCharacter(id))
-  ipcMain.handle('character:search', (_, novelId, keyword, limit) => characterService.searchCharacters(novelId, keyword, limit))
-  ipcMain.handle('character:getGraph', (_, filters) => characterService.getCharacterGraph(filters))
-  ipcMain.handle('character:getDetailContext', (_, characterId) => characterService.getCharacterDetailContext(characterId))
-  ipcMain.handle('character:create', (_, novelId, data) => characterService.createCharacter(requireId(novelId, 'novelId'), data))
-  ipcMain.handle('character:update', (_, id, data) => characterService.updateCharacter(requireId(id), data))
-  ipcMain.handle('character:delete', (_, id) => characterService.deleteCharacter(requireId(id)))
-  ipcMain.handle('character:regenerate', (_, id) => characterService.regenerateCharacter(id))
-  ipcMain.handle('character:startAutoGenerate', (event, novelId, opts) =>
+  handle('character:list', (_, novelId) => characterService.listCharacters(novelId))
+  handle('character:query', (_, filters) => characterService.queryCharacters(filters))
+  handle('character:getStats', (_, filters) => characterService.getCharacterStats(filters))
+  handle('character:getFilterOptions', (_, novelId) => characterService.getCharacterFilterOptions(novelId))
+  handle('character:get', (_, id) => characterService.getCharacter(id))
+  handle('character:search', (_, novelId, keyword, limit) => characterService.searchCharacters(novelId, keyword, limit))
+  handle('character:getGraph', (_, filters) => characterService.getCharacterGraph(filters))
+  handle('character:getDetailContext', (_, characterId) => characterService.getCharacterDetailContext(characterId))
+  handle('character:create', (_, novelId, data) => characterService.createCharacter(requireId(novelId, 'novelId'), data))
+  handle('character:update', (_, id, data) => characterService.updateCharacter(requireId(id), data))
+  handle('character:delete', (_, id) => characterService.deleteCharacter(requireId(id)))
+  handle('character:regenerate', (_, id) => characterService.regenerateCharacter(id))
+  handle('character:startAutoGenerate', (event, novelId, opts) =>
     batchWorkflowService.startCharacterAutoGenerateWorkflow(novelId, opts, event.sender))
-  ipcMain.handle('character:getAutoGenerateStatus', (_, taskId) =>
+  handle('character:getAutoGenerateStatus', (_, taskId) =>
     batchWorkflowService.getCharacterAutoGenerateStatus(taskId))
-  ipcMain.handle('character:getLatestAutoGenerateTask', (_, novelId) =>
+  handle('character:getLatestAutoGenerateTask', (_, novelId) =>
     batchWorkflowService.getLatestCharacterAutoGenerateTask(novelId))
-  ipcMain.handle('character:resumeAutoGenerate', (event, taskId) =>
+  handle('character:resumeAutoGenerate', (event, taskId) =>
     batchWorkflowService.resumeBatchAutoGenerateWorkflow(taskId, event.sender))
-  ipcMain.handle('character:getRelations', (_, novelId) => characterService.getCharacterRelations(novelId))
-  ipcMain.handle('character:generateProtagonist', (_, novelId, opts) =>
+  handle('character:getRelations', (_, novelId) => characterService.getCharacterRelations(novelId))
+  handle('character:generateProtagonist', (_, novelId, opts) =>
     characterService.generateProtagonist(novelId, opts))
-  ipcMain.handle('character:batchGenerate', (event, novelId, opts) =>
+  handle('character:batchGenerate', (event, novelId, opts) =>
     batchWorkflowService.generateCharactersViaWorkflow(novelId, opts, event.sender))
-  ipcMain.handle('character:generateRelations', (_, novelId) =>
+  handle('character:generateRelations', (_, novelId) =>
     characterService.generateCharacterRelations(novelId))
-  ipcMain.handle('character:upsertRelation', (_, data) =>
+  handle('character:upsertRelation', (_, data) =>
     characterService.upsertRelation(parseObjectPayload<CharacterRelationInput>(data, 'data')))
-  ipcMain.handle('character:clear', (_, novelId) => characterService.clearCharactersByNovel(requireId(novelId, 'novelId')))
+  handle('character:clear', (_, novelId) => characterService.clearCharactersByNovel(requireId(novelId, 'novelId')))
 
-  ipcMain.handle('map:getTree', (_, novelId) => mapService.getMapTree(novelId))
-  ipcMain.handle('map:queryNodes', (_, filters) => mapService.queryMapNodes(filters))
-  ipcMain.handle('map:getGraph', (_, filters) => mapService.getMapGraph(filters))
-  ipcMain.handle('map:getRelations', (_, novelId, focusNodeId) => mapService.getMapRelations(novelId, focusNodeId))
-  ipcMain.handle('map:getStats', (_, novelId) => mapService.getMapStats(novelId))
-  ipcMain.handle('map:getNode', (_, id) => mapService.getMapNode(id))
-  ipcMain.handle('map:searchNodes', (_, novelId, keyword, limit) => mapService.searchMapNodes(novelId, keyword, limit))
-  ipcMain.handle('map:create', (_, novelId, data) => mapService.createMapItem(requireId(novelId, 'novelId'), data))
-  ipcMain.handle('map:update', (_, id, data) => mapService.updateMapItem(requireId(id), data))
-  ipcMain.handle('map:upsertRelation', (_, data) =>
+  handle('map:getTree', (_, novelId) => mapService.getMapTree(novelId))
+  handle('map:queryNodes', (_, filters) => mapService.queryMapNodes(filters))
+  handle('map:getGraph', (_, filters) => mapService.getMapGraph(filters))
+  handle('map:getRelations', (_, novelId, focusNodeId) => mapService.getMapRelations(novelId, focusNodeId))
+  handle('map:getStats', (_, novelId) => mapService.getMapStats(novelId))
+  handle('map:getNode', (_, id) => mapService.getMapNode(id))
+  handle('map:searchNodes', (_, novelId, keyword, limit) => mapService.searchMapNodes(novelId, keyword, limit))
+  handle('map:create', (_, novelId, data) => mapService.createMapItem(requireId(novelId, 'novelId'), data))
+  handle('map:update', (_, id, data) => mapService.updateMapItem(requireId(id), data))
+  handle('map:upsertRelation', (_, data) =>
     mapService.upsertMapRelation(parseObjectPayload<MapRelationInput>(data, 'data')))
-  ipcMain.handle('map:deleteRelation', (_, id) => mapService.deleteMapRelation(requireId(id)))
-  ipcMain.handle('map:delete', (_, id) => mapService.deleteMapItem(requireId(id)))
-  ipcMain.handle('map:batchGenerate', (_, novelId, structure) =>
+  handle('map:deleteRelation', (_, id) => mapService.deleteMapRelation(requireId(id)))
+  handle('map:delete', (_, id) => mapService.deleteMapItem(requireId(id)))
+  handle('map:batchGenerate', (_, novelId, structure) =>
     mapService.batchGenerateMap(novelId, structure))
-  ipcMain.handle('map:startAutoGenerate', (event, novelId, structure) =>
+  handle('map:startAutoGenerate', (event, novelId, structure) =>
     workflowTaskService.startMapAutoGenerateWorkflow(novelId, structure, event.sender))
-  ipcMain.handle('map:getAutoGenerateStatus', (_, taskId) =>
+  handle('map:getAutoGenerateStatus', (_, taskId) =>
     workflowTaskService.getMapAutoGenerateStatus(taskId))
-  ipcMain.handle('map:getLatestAutoGenerateTask', (_, novelId) =>
+  handle('map:getLatestAutoGenerateTask', (_, novelId) =>
     workflowTaskService.getLatestMapAutoGenerateTask(novelId))
-  ipcMain.handle('map:resumeAutoGenerate', (event, taskId) =>
+  handle('map:resumeAutoGenerate', (event, taskId) =>
     workflowTaskService.resumeWorkflowTask(taskId, event.sender))
-  ipcMain.handle('map:clear', (_, novelId) => mapService.clearMapByNovel(requireId(novelId, 'novelId')))
+  handle('map:clear', (_, novelId) => mapService.clearMapByNovel(requireId(novelId, 'novelId')))
 
-  ipcMain.handle('worldRules:startAutoGenerate', (event, novelId, options) =>
+  handle('worldRules:startAutoGenerate', (event, novelId, options) =>
     workflowTaskService.startWorldRulesAutoGenerateWorkflow(novelId, options, event.sender))
-  ipcMain.handle('worldRules:getAutoGenerateStatus', (_, taskId) =>
+  handle('worldRules:getAutoGenerateStatus', (_, taskId) =>
     workflowTaskService.getWorldRulesAutoGenerateStatus(taskId))
-  ipcMain.handle('worldRules:getLatestAutoGenerateTask', (_, novelId) =>
+  handle('worldRules:getLatestAutoGenerateTask', (_, novelId) =>
     workflowTaskService.getLatestWorldRulesAutoGenerateTask(novelId))
-  ipcMain.handle('worldRules:resumeAutoGenerate', (event, taskId, currentRules) =>
+  handle('worldRules:resumeAutoGenerate', (event, taskId, currentRules) =>
     workflowTaskService.resumeWorldRulesAutoGenerateWorkflow(taskId, currentRules, event.sender))
-  ipcMain.handle('worldRules:clearAutoGenerateDraft', (_, novelId) =>
+  handle('worldRules:clearAutoGenerateDraft', (_, novelId) =>
     workflowTaskService.clearWorldRulesAutoGenerateDraft(novelId))
 
-  ipcMain.handle('timeline:list', (_, novelId) => timelineService.listTimelineEvents(novelId))
-  ipcMain.handle('timeline:query', (_, filters) => timelineService.queryTimelineEvents(filters))
-  ipcMain.handle('timeline:search', (_, novelId, keyword, limit) => timelineService.searchTimelineEvents(novelId, keyword, limit))
-  ipcMain.handle('timeline:getStats', (_, filters) => timelineService.getTimelineStats(filters))
-  ipcMain.handle('timeline:getFilterOptions', (_, novelId) => timelineService.getTimelineFilterOptions(novelId))
-  ipcMain.handle('timeline:get', (_, id) => timelineService.getTimelineEvent(id))
-  ipcMain.handle('timeline:create', (_, novelId, data) => timelineService.createTimelineEvent(requireId(novelId, 'novelId'), data))
-  ipcMain.handle('timeline:update', (_, id, data) => timelineService.updateTimelineEvent(requireId(id), data))
-  ipcMain.handle('timeline:delete', (_, id) => timelineService.deleteTimelineEvent(requireId(id)))
-  ipcMain.handle('timeline:batchUpdate', (_, ids, data) => timelineService.batchUpdateTimelineEvents(requireIds(ids), data))
-  ipcMain.handle('timeline:batchDelete', (_, ids) => timelineService.batchDeleteTimelineEvents(requireIds(ids)))
-  ipcMain.handle('timeline:generate', (event, novelId, options) =>
+  handle('timeline:list', (_, novelId) => timelineService.listTimelineEvents(novelId))
+  handle('timeline:query', (_, filters) => timelineService.queryTimelineEvents(filters))
+  handle('timeline:search', (_, novelId, keyword, limit) => timelineService.searchTimelineEvents(novelId, keyword, limit))
+  handle('timeline:getStats', (_, filters) => timelineService.getTimelineStats(filters))
+  handle('timeline:getFilterOptions', (_, novelId) => timelineService.getTimelineFilterOptions(novelId))
+  handle('timeline:get', (_, id) => timelineService.getTimelineEvent(id))
+  handle('timeline:create', (_, novelId, data) => timelineService.createTimelineEvent(requireId(novelId, 'novelId'), data))
+  handle('timeline:update', (_, id, data) => timelineService.updateTimelineEvent(requireId(id), data))
+  handle('timeline:delete', (_, id) => timelineService.deleteTimelineEvent(requireId(id)))
+  handle('timeline:batchUpdate', (_, ids, data) => timelineService.batchUpdateTimelineEvents(requireIds(ids), data))
+  handle('timeline:batchDelete', (_, ids) => timelineService.batchDeleteTimelineEvents(requireIds(ids)))
+  handle('timeline:generate', (event, novelId, options) =>
     batchWorkflowService.generateTimelineViaWorkflow(novelId, options, event.sender))
-  ipcMain.handle('timeline:startAutoGenerate', (event, novelId, options) =>
+  handle('timeline:startAutoGenerate', (event, novelId, options) =>
     batchWorkflowService.startTimelineAutoGenerateWorkflow(novelId, options, event.sender))
-  ipcMain.handle('timeline:getAutoGenerateStatus', (_, taskId) =>
+  handle('timeline:getAutoGenerateStatus', (_, taskId) =>
     batchWorkflowService.getTimelineAutoGenerateStatus(taskId))
-  ipcMain.handle('timeline:getLatestAutoGenerateTask', (_, novelId) =>
+  handle('timeline:getLatestAutoGenerateTask', (_, novelId) =>
     batchWorkflowService.getLatestTimelineAutoGenerateTask(novelId))
-  ipcMain.handle('timeline:resumeAutoGenerate', (event, taskId) =>
+  handle('timeline:resumeAutoGenerate', (event, taskId) =>
     batchWorkflowService.resumeBatchAutoGenerateWorkflow(taskId, event.sender))
-  ipcMain.handle('timeline:regenerate', (_, id, options) => timelineService.regenerateTimelineEvent(id, options))
-  ipcMain.handle('timeline:clear', (_, novelId) => timelineService.clearTimelineByNovel(requireId(novelId, 'novelId')))
+  handle('timeline:regenerate', (_, id, options) => timelineService.regenerateTimelineEvent(id, options))
+  handle('timeline:clear', (_, novelId) => timelineService.clearTimelineByNovel(requireId(novelId, 'novelId')))
 
-  ipcMain.handle('item:list', (_, novelId) => itemService.listStoryItems(novelId))
-  ipcMain.handle('item:query', (_, filters) => itemService.queryStoryItems(filters))
-  ipcMain.handle('item:getStats', (_, filters) => itemService.getStoryItemStats(filters))
-  ipcMain.handle('item:getFilterOptions', (_, novelId) => itemService.getStoryItemFilterOptions(novelId))
-  ipcMain.handle('item:get', (_, id) => itemService.getStoryItem(id))
-  ipcMain.handle('item:getDetailContext', (_, id) => itemService.getStoryItemDetailContext(id))
-  ipcMain.handle('item:search', (_, novelId, keyword, itemKind, limit) => itemService.searchStoryItems(novelId, keyword, itemKind, limit))
-  ipcMain.handle('item:create', (_, novelId, data) => itemService.createStoryItem(requireId(novelId, 'novelId'), data))
-  ipcMain.handle('item:update', (_, id, data) => itemService.updateStoryItem(requireId(id), data))
-  ipcMain.handle('item:delete', (_, id) => itemService.deleteStoryItem(requireId(id)))
-  ipcMain.handle('item:generate', (event, novelId, options) => batchWorkflowService.generateItemsViaWorkflow(novelId, options, event.sender))
-  ipcMain.handle('item:startAutoGenerate', (event, novelId, options) =>
+  handle('item:list', (_, novelId) => itemService.listStoryItems(novelId))
+  handle('item:query', (_, filters) => itemService.queryStoryItems(filters))
+  handle('item:getStats', (_, filters) => itemService.getStoryItemStats(filters))
+  handle('item:getFilterOptions', (_, novelId) => itemService.getStoryItemFilterOptions(novelId))
+  handle('item:get', (_, id) => itemService.getStoryItem(id))
+  handle('item:getDetailContext', (_, id) => itemService.getStoryItemDetailContext(id))
+  handle('item:search', (_, novelId, keyword, itemKind, limit) => itemService.searchStoryItems(novelId, keyword, itemKind, limit))
+  handle('item:create', (_, novelId, data) => itemService.createStoryItem(requireId(novelId, 'novelId'), data))
+  handle('item:update', (_, id, data) => itemService.updateStoryItem(requireId(id), data))
+  handle('item:delete', (_, id) => itemService.deleteStoryItem(requireId(id)))
+  handle('item:generate', (event, novelId, options) => batchWorkflowService.generateItemsViaWorkflow(novelId, options, event.sender))
+  handle('item:startAutoGenerate', (event, novelId, options) =>
     batchWorkflowService.startItemAutoGenerateWorkflow(novelId, options, event.sender))
-  ipcMain.handle('item:getAutoGenerateStatus', (_, taskId) =>
+  handle('item:getAutoGenerateStatus', (_, taskId) =>
     batchWorkflowService.getItemAutoGenerateStatus(taskId))
-  ipcMain.handle('item:getLatestAutoGenerateTask', (_, novelId) =>
+  handle('item:getLatestAutoGenerateTask', (_, novelId) =>
     batchWorkflowService.getLatestItemAutoGenerateTask(novelId))
-  ipcMain.handle('item:resumeAutoGenerate', (event, taskId) =>
+  handle('item:resumeAutoGenerate', (event, taskId) =>
     batchWorkflowService.resumeBatchAutoGenerateWorkflow(taskId, event.sender))
-  ipcMain.handle('item:regenerate', (_, id, options) => itemService.regenerateStoryItem(id, options))
-  ipcMain.handle('item:clear', (_, novelId) => itemService.clearStoryItemsByNovel(requireId(novelId, 'novelId')))
+  handle('item:regenerate', (_, id, options) => itemService.regenerateStoryItem(id, options))
+  handle('item:clear', (_, novelId) => itemService.clearStoryItemsByNovel(requireId(novelId, 'novelId')))
 
-  ipcMain.handle('outline:getArcs', (_, novelId) => {
+  handle('outline:getArcs', (_, novelId) => {
     requireId(novelId, 'novelId')
     const db = getDb()
     return db.select().from(storyArcs).where(eq(storyArcs.novelId, novelId)).all()
   })
-  ipcMain.handle('outline:getArcProgressSnapshot', (_, novelId) =>
+  handle('outline:getArcProgressSnapshot', (_, novelId) =>
     storyArcProgressService.getStoryArcProgressSnapshot(requireId(novelId, 'novelId')))
 
-  ipcMain.handle('outline:createArc', (_, novelId, data) => {
+  handle('outline:createArc', (_, novelId, data) => {
     requireId(novelId, 'novelId')
     requireObject(data, 'data')
     const db = getDb()
@@ -483,7 +490,7 @@ function registerIpcHandlers() {
     return arcId
   })
 
-  ipcMain.handle('outline:updateArc', (_, id, data) => {
+  handle('outline:updateArc', (_, id, data) => {
     requireId(id)
     requireObject(data, 'data')
     const db = getDb()
@@ -504,7 +511,7 @@ function registerIpcHandlers() {
     }
   })
 
-  ipcMain.handle('outline:deleteArc', (_, id) => {
+  handle('outline:deleteArc', (_, id) => {
     requireId(id)
     const db = getDb()
     const current = db.select().from(storyArcs).where(eq(storyArcs.id, id)).all()[0]
@@ -514,7 +521,7 @@ function registerIpcHandlers() {
     }
   })
 
-  ipcMain.handle('outline:clear', (_, novelId) => {
+  handle('outline:clear', (_, novelId) => {
     requireId(novelId, 'novelId')
     const db = getDb()
     db.delete(storyArcs).where(eq(storyArcs.novelId, novelId)).run()
@@ -527,7 +534,7 @@ function registerIpcHandlers() {
     markNovelContextChanged(novelId, 'Story outline changed')
   })
 
-  ipcMain.handle('outline:generateArcs', async (_, novelId) => {
+  handle('outline:generateArcs', async (_, novelId) => {
     const db = getDb()
     const novel = db.select().from(novelsTable).where(eq(novelsTable.id, novelId)).all()[0]
     if (!novel) throwUserFacingError('novel.notFound')
@@ -593,7 +600,7 @@ function registerIpcHandlers() {
     return arcs
   })
 
-  ipcMain.handle('outline:generateChapterOutlines', async (_, arcId, options?: { batchSize?: number }) => {
+  handle('outline:generateChapterOutlines', async (_, arcId, options?: { batchSize?: number }) => {
     const db = getDb()
     const arc = db.select().from(storyArcs).where(eq(storyArcs.id, arcId)).all()[0]
     if (!arc) throwUserFacingError('storyArc.notFound')
@@ -756,88 +763,88 @@ function registerIpcHandlers() {
     }
   })
 
-  ipcMain.handle('thread:list', (_, novelId) => storyThreadService.listStoryThreads(novelId))
-  ipcMain.handle('thread:query', (_, filters) => storyThreadService.queryStoryThreads(filters))
-  ipcMain.handle('thread:getStats', (_, filters) => storyThreadService.getStoryThreadStats(filters))
-  ipcMain.handle('thread:get', (_, id) => storyThreadService.getStoryThread(id))
-  ipcMain.handle('thread:getForeshadowSnapshot', (_, novelId, chapterNum) =>
+  handle('thread:list', (_, novelId) => storyThreadService.listStoryThreads(novelId))
+  handle('thread:query', (_, filters) => storyThreadService.queryStoryThreads(filters))
+  handle('thread:getStats', (_, filters) => storyThreadService.getStoryThreadStats(filters))
+  handle('thread:get', (_, id) => storyThreadService.getStoryThread(id))
+  handle('thread:getForeshadowSnapshot', (_, novelId, chapterNum) =>
     storyThreadService.getForeshadowSnapshot(requireId(novelId, 'novelId'), typeof chapterNum === 'number' ? chapterNum : undefined))
-  ipcMain.handle('thread:generate', (event, novelId, options) => batchWorkflowService.generateStoryThreadsViaWorkflow(novelId, options, event.sender))
-  ipcMain.handle('thread:startAutoGenerate', (event, novelId, options) =>
+  handle('thread:generate', (event, novelId, options) => batchWorkflowService.generateStoryThreadsViaWorkflow(novelId, options, event.sender))
+  handle('thread:startAutoGenerate', (event, novelId, options) =>
     batchWorkflowService.startStoryThreadAutoGenerateWorkflow(novelId, options, event.sender))
-  ipcMain.handle('thread:getAutoGenerateStatus', (_, taskId) =>
+  handle('thread:getAutoGenerateStatus', (_, taskId) =>
     batchWorkflowService.getStoryThreadAutoGenerateStatus(taskId))
-  ipcMain.handle('thread:getLatestAutoGenerateTask', (_, novelId) =>
+  handle('thread:getLatestAutoGenerateTask', (_, novelId) =>
     batchWorkflowService.getLatestStoryThreadAutoGenerateTask(novelId))
-  ipcMain.handle('thread:resumeAutoGenerate', (event, taskId) =>
+  handle('thread:resumeAutoGenerate', (event, taskId) =>
     batchWorkflowService.resumeBatchAutoGenerateWorkflow(taskId, event.sender))
-  ipcMain.handle('thread:create', (_, novelId, data) => storyThreadService.createStoryThread(requireId(novelId, 'novelId'), data))
-  ipcMain.handle('thread:update', (_, id, data) => storyThreadService.updateStoryThread(requireId(id), data))
-  ipcMain.handle('thread:delete', (_, id) => storyThreadService.deleteStoryThread(requireId(id)))
-  ipcMain.handle('thread:batchUpdate', (_, ids, data) => storyThreadService.batchUpdateStoryThreads(requireIds(ids), data))
-  ipcMain.handle('thread:batchDelete', (_, ids) => storyThreadService.batchDeleteStoryThreads(requireIds(ids)))
-  ipcMain.handle('thread:regenerate', (_, id, options) => storyThreadService.regenerateStoryThread(id, options))
-  ipcMain.handle('faction:list', (_, novelId) => factionService.listFactions(requireId(novelId, 'novelId')))
-  ipcMain.handle('faction:query', (_, filters) => factionService.queryFactions(filters))
-  ipcMain.handle('faction:getStats', (_, filters) => factionService.getFactionStats(filters))
-  ipcMain.handle('faction:get', (_, id) => factionService.getFaction(requireId(id)))
-  ipcMain.handle('faction:search', (_, novelId, keyword, limit) => factionService.searchFactions(requireId(novelId, 'novelId'), keyword, limit))
-  ipcMain.handle('faction:getGraph', (_, filters) => factionService.getFactionGraph(filters))
-  ipcMain.handle('faction:create', (_, novelId, data) => factionService.createFaction(requireId(novelId, 'novelId'), data))
-  ipcMain.handle('faction:update', (_, id, data) => factionService.updateFaction(requireId(id), data))
-  ipcMain.handle('faction:delete', (_, id) => factionService.deleteFaction(requireId(id)))
-  ipcMain.handle('faction:batchGenerate', (event, novelId, options) =>
+  handle('thread:create', (_, novelId, data) => storyThreadService.createStoryThread(requireId(novelId, 'novelId'), data))
+  handle('thread:update', (_, id, data) => storyThreadService.updateStoryThread(requireId(id), data))
+  handle('thread:delete', (_, id) => storyThreadService.deleteStoryThread(requireId(id)))
+  handle('thread:batchUpdate', (_, ids, data) => storyThreadService.batchUpdateStoryThreads(requireIds(ids), data))
+  handle('thread:batchDelete', (_, ids) => storyThreadService.batchDeleteStoryThreads(requireIds(ids)))
+  handle('thread:regenerate', (_, id, options) => storyThreadService.regenerateStoryThread(id, options))
+  handle('faction:list', (_, novelId) => factionService.listFactions(requireId(novelId, 'novelId')))
+  handle('faction:query', (_, filters) => factionService.queryFactions(filters))
+  handle('faction:getStats', (_, filters) => factionService.getFactionStats(filters))
+  handle('faction:get', (_, id) => factionService.getFaction(requireId(id)))
+  handle('faction:search', (_, novelId, keyword, limit) => factionService.searchFactions(requireId(novelId, 'novelId'), keyword, limit))
+  handle('faction:getGraph', (_, filters) => factionService.getFactionGraph(filters))
+  handle('faction:create', (_, novelId, data) => factionService.createFaction(requireId(novelId, 'novelId'), data))
+  handle('faction:update', (_, id, data) => factionService.updateFaction(requireId(id), data))
+  handle('faction:delete', (_, id) => factionService.deleteFaction(requireId(id)))
+  handle('faction:batchGenerate', (event, novelId, options) =>
     batchWorkflowService.generateFactionsViaWorkflow(requireId(novelId, 'novelId'), options, event.sender))
-  ipcMain.handle('faction:startAutoGenerate', (event, novelId, options) =>
+  handle('faction:startAutoGenerate', (event, novelId, options) =>
     batchWorkflowService.startFactionAutoGenerateWorkflow(requireId(novelId, 'novelId'), options, event.sender))
-  ipcMain.handle('faction:getAutoGenerateStatus', (_, taskId) =>
+  handle('faction:getAutoGenerateStatus', (_, taskId) =>
     batchWorkflowService.getFactionAutoGenerateStatus(requireId(taskId)))
-  ipcMain.handle('faction:getLatestAutoGenerateTask', (_, novelId) =>
+  handle('faction:getLatestAutoGenerateTask', (_, novelId) =>
     batchWorkflowService.getLatestFactionAutoGenerateTask(requireId(novelId, 'novelId')))
-  ipcMain.handle('faction:resumeAutoGenerate', (event, taskId) =>
+  handle('faction:resumeAutoGenerate', (event, taskId) =>
     batchWorkflowService.resumeBatchAutoGenerateWorkflow(requireId(taskId), event.sender))
-  ipcMain.handle('faction:resolveNameOptions', (_, novelId) => factionService.resolveFactionNameOptions(requireId(novelId, 'novelId')))
-  ipcMain.handle('glossary:list', (_, novelId) => glossaryService.listGlossary(requireId(novelId, 'novelId')))
-  ipcMain.handle('glossary:query', (_, filters) => glossaryService.queryGlossary(filters))
-  ipcMain.handle('glossary:getStats', (_, filters) => glossaryService.getGlossaryStats(filters))
-  ipcMain.handle('glossary:get', (_, id) => glossaryService.getGlossaryEntry(requireId(id)))
-  ipcMain.handle('glossary:search', (_, novelId, keyword, limit) => glossaryService.searchGlossary(requireId(novelId, 'novelId'), keyword, limit))
-  ipcMain.handle('glossary:create', (_, novelId, data) => glossaryService.createGlossaryEntry(requireId(novelId, 'novelId'), data))
-  ipcMain.handle('glossary:update', (_, id, data) => glossaryService.updateGlossaryEntry(requireId(id), data))
-  ipcMain.handle('glossary:delete', (_, id) => glossaryService.deleteGlossaryEntry(requireId(id)))
-  ipcMain.handle('sceneTemplate:list', (_, filters) => sceneTemplateService.listSceneTemplates(filters || {}))
-  ipcMain.handle('sceneTemplate:query', (_, filters) => sceneTemplateService.querySceneTemplates(filters || {}))
-  ipcMain.handle('sceneTemplate:getStats', (_, filters) => sceneTemplateService.getSceneTemplateStats(filters || {}))
-  ipcMain.handle('sceneTemplate:get', (_, id) => sceneTemplateService.getSceneTemplate(requireId(id)))
-  ipcMain.handle('sceneTemplate:search', (_, novelId, genreId, keyword, limit) => sceneTemplateService.searchSceneTemplates(requireId(novelId, 'novelId'), typeof genreId === 'number' ? genreId : undefined, keyword, limit))
-  ipcMain.handle('sceneTemplate:create', (_, data) => sceneTemplateService.createSceneTemplate(data))
-  ipcMain.handle('sceneTemplate:update', (_, id, data) => sceneTemplateService.updateSceneTemplate(requireId(id), data))
-  ipcMain.handle('sceneTemplate:delete', (_, id) => sceneTemplateService.deleteSceneTemplate(requireId(id)))
-  ipcMain.handle('subplot:generate', (event, request) => batchWorkflowService.generateSubplotsViaWorkflow(request, event.sender))
-  ipcMain.handle('subplot:startAutoGenerate', (event, request) =>
+  handle('faction:resolveNameOptions', (_, novelId) => factionService.resolveFactionNameOptions(requireId(novelId, 'novelId')))
+  handle('glossary:list', (_, novelId) => glossaryService.listGlossary(requireId(novelId, 'novelId')))
+  handle('glossary:query', (_, filters) => glossaryService.queryGlossary(filters))
+  handle('glossary:getStats', (_, filters) => glossaryService.getGlossaryStats(filters))
+  handle('glossary:get', (_, id) => glossaryService.getGlossaryEntry(requireId(id)))
+  handle('glossary:search', (_, novelId, keyword, limit) => glossaryService.searchGlossary(requireId(novelId, 'novelId'), keyword, limit))
+  handle('glossary:create', (_, novelId, data) => glossaryService.createGlossaryEntry(requireId(novelId, 'novelId'), data))
+  handle('glossary:update', (_, id, data) => glossaryService.updateGlossaryEntry(requireId(id), data))
+  handle('glossary:delete', (_, id) => glossaryService.deleteGlossaryEntry(requireId(id)))
+  handle('sceneTemplate:list', (_, filters) => sceneTemplateService.listSceneTemplates(filters || {}))
+  handle('sceneTemplate:query', (_, filters) => sceneTemplateService.querySceneTemplates(filters || {}))
+  handle('sceneTemplate:getStats', (_, filters) => sceneTemplateService.getSceneTemplateStats(filters || {}))
+  handle('sceneTemplate:get', (_, id) => sceneTemplateService.getSceneTemplate(requireId(id)))
+  handle('sceneTemplate:search', (_, novelId, genreId, keyword, limit) => sceneTemplateService.searchSceneTemplates(requireId(novelId, 'novelId'), typeof genreId === 'number' ? genreId : undefined, keyword, limit))
+  handle('sceneTemplate:create', (_, data) => sceneTemplateService.createSceneTemplate(data))
+  handle('sceneTemplate:update', (_, id, data) => sceneTemplateService.updateSceneTemplate(requireId(id), data))
+  handle('sceneTemplate:delete', (_, id) => sceneTemplateService.deleteSceneTemplate(requireId(id)))
+  handle('subplot:generate', (event, request) => batchWorkflowService.generateSubplotsViaWorkflow(request, event.sender))
+  handle('subplot:startAutoGenerate', (event, request) =>
     batchWorkflowService.startSubplotAutoGenerateWorkflow(request, event.sender))
-  ipcMain.handle('subplot:getAutoGenerateStatus', (_, taskId) =>
+  handle('subplot:getAutoGenerateStatus', (_, taskId) =>
     batchWorkflowService.getSubplotAutoGenerateStatus(taskId))
-  ipcMain.handle('subplot:getLatestAutoGenerateTask', (_, novelId) =>
+  handle('subplot:getLatestAutoGenerateTask', (_, novelId) =>
     batchWorkflowService.getLatestSubplotAutoGenerateTask(novelId))
-  ipcMain.handle('subplot:resumeAutoGenerate', (event, taskId) =>
+  handle('subplot:resumeAutoGenerate', (event, taskId) =>
     batchWorkflowService.resumeBatchAutoGenerateWorkflow(taskId, event.sender))
 
-  ipcMain.handle('history:listRecent', (_, novelId, limit) => historyService.listRecentOperationLogs(novelId, limit))
-  ipcMain.handle('history:getLatestUndoable', (_, novelId) => historyService.getLatestUndoableOperation(novelId))
-  ipcMain.handle('history:undo', (_, logId) => historyService.undoOperation(logId))
+  handle('history:listRecent', (_, novelId, limit) => historyService.listRecentOperationLogs(novelId, limit))
+  handle('history:getLatestUndoable', (_, novelId) => historyService.getLatestUndoableOperation(novelId))
+  handle('history:undo', (_, logId) => historyService.undoOperation(logId))
 
-  ipcMain.handle('revision:list', (_, novelId) => revisionTaskService.listRevisionTasks(novelId))
-  ipcMain.handle('revision:query', (_, filters) => revisionTaskService.queryRevisionTasks(filters))
-  ipcMain.handle('revision:getStats', (_, filters) => revisionTaskService.getRevisionTaskStats(filters))
-  ipcMain.handle('revision:getSnapshot', (_, novelId) => revisionTaskService.getRevisionCenterSnapshot(novelId))
-  ipcMain.handle('revision:get', (_, id) => revisionTaskService.getRevisionTask(id))
-  ipcMain.handle('revision:create', (_, novelId, data) => revisionTaskService.createRevisionTask(requireId(novelId, 'novelId'), data))
-  ipcMain.handle('revision:update', (_, id, data) => revisionTaskService.updateRevisionTask(requireId(id), data))
-  ipcMain.handle('revision:delete', (_, id) => revisionTaskService.deleteRevisionTask(requireId(id)))
-  ipcMain.handle('revision:autoFix', (_, id) => revisionTaskService.autoFixRevisionTask(id))
+  handle('revision:list', (_, novelId) => revisionTaskService.listRevisionTasks(novelId))
+  handle('revision:query', (_, filters) => revisionTaskService.queryRevisionTasks(filters))
+  handle('revision:getStats', (_, filters) => revisionTaskService.getRevisionTaskStats(filters))
+  handle('revision:getSnapshot', (_, novelId) => revisionTaskService.getRevisionCenterSnapshot(novelId))
+  handle('revision:get', (_, id) => revisionTaskService.getRevisionTask(id))
+  handle('revision:create', (_, novelId, data) => revisionTaskService.createRevisionTask(requireId(novelId, 'novelId'), data))
+  handle('revision:update', (_, id, data) => revisionTaskService.updateRevisionTask(requireId(id), data))
+  handle('revision:delete', (_, id) => revisionTaskService.deleteRevisionTask(requireId(id)))
+  handle('revision:autoFix', (_, id) => revisionTaskService.autoFixRevisionTask(id))
 
-  ipcMain.handle('model:list', () => {
+  handle('model:list', () => {
     const db = getDb()
     return db.select().from(modelConfigs).all().map((config) => ({
       ...config,
@@ -849,7 +856,7 @@ function registerIpcHandlers() {
     }))
   })
 
-  ipcMain.handle('model:create', (_, data) => {
+  handle('model:create', (_, data) => {
     requireObject(data, 'data')
     const db = getDb()
     const encryptedKey = data.apiKey ? encryptApiKey(data.apiKey) : null
@@ -865,7 +872,7 @@ function registerIpcHandlers() {
     return Number(result.lastInsertRowid)
   })
 
-  ipcMain.handle('model:update', (_, id, data) => {
+  handle('model:update', (_, id, data) => {
     requireId(id)
     requireObject(data, 'data')
     const db = getDb()
@@ -893,22 +900,22 @@ function registerIpcHandlers() {
     db.update(modelConfigs).set(data).where(eq(modelConfigs.id, id)).run()
   })
 
-  ipcMain.handle('model:delete', (_, id) => {
+  handle('model:delete', (_, id) => {
     requireId(id)
     const db = getDb()
     db.delete(modelConfigs).where(eq(modelConfigs.id, id)).run()
   })
 
-  ipcMain.handle('model:setDefault', (_, id) => {
+  handle('model:setDefault', (_, id) => {
     requireId(id)
     const db = getDb()
     db.update(modelConfigs).set({ isDefault: 0 }).run()
     db.update(modelConfigs).set({ isDefault: 1 }).where(eq(modelConfigs.id, id)).run()
   })
 
-  ipcMain.handle('model:test', (_, id) => modelService.testAdapter(id))
+  handle('model:test', (_, id) => modelService.testAdapter(id))
 
-  ipcMain.handle('template:list', (_, type) => {
+  handle('template:list', (_, type) => {
     const db = getDb()
     if (type) {
       return db.select().from(templates).where(eq(templates.type, type)).all()
@@ -916,21 +923,21 @@ function registerIpcHandlers() {
     return db.select().from(templates).all()
   })
 
-  ipcMain.handle('template:create', (_, data) => {
+  handle('template:create', (_, data) => {
     requireObject(data, 'data')
     const db = getDb()
     const result = db.insert(templates).values(data).run()
     return Number(result.lastInsertRowid)
   })
 
-  ipcMain.handle('template:update', (_, id, data) => {
+  handle('template:update', (_, id, data) => {
     requireId(id)
     requireObject(data, 'data')
     const db = getDb()
     db.update(templates).set(data).where(eq(templates.id, id)).run()
   })
 
-  ipcMain.handle('template:delete', (_, id) => {
+  handle('template:delete', (_, id) => {
     requireId(id)
     const db = getDb()
     const template = db.select().from(templates).where(eq(templates.id, id)).all()[0]
@@ -938,28 +945,28 @@ function registerIpcHandlers() {
     db.delete(templates).where(eq(templates.id, id)).run()
   })
 
-  ipcMain.handle('prompt:list', () => promptOverrideService.listPromptOverrides())
-  ipcMain.handle('prompt:save', (_, key, content) => {
+  handle('prompt:list', () => promptOverrideService.listPromptOverrides())
+  handle('prompt:save', (_, key, content) => {
     requireString(key, 'key')
     return promptOverrideService.savePromptOverride(key, content)
   })
-  ipcMain.handle('prompt:delete', (_, key) => {
+  handle('prompt:delete', (_, key) => {
     requireString(key, 'key')
     return promptOverrideService.deletePromptOverride(key)
   })
 
-  ipcMain.handle('task:list', (_, novelId) => taskService.listTasks(novelId))
-  ipcMain.handle('task:query', (_, filters) => taskService.queryTasks(filters || {}))
-  ipcMain.handle('task:getStats', (_, novelId) => taskService.getTaskStats(novelId))
-  ipcMain.handle('task:clearHistory', (_, filters) => taskService.clearTaskHistory(filters || {}))
+  handle('task:list', (_, novelId) => taskService.listTasks(novelId))
+  handle('task:query', (_, filters) => taskService.queryTasks(filters || {}))
+  handle('task:getStats', (_, novelId) => taskService.getTaskStats(novelId))
+  handle('task:clearHistory', (_, filters) => taskService.clearTaskHistory(filters || {}))
 
-  ipcMain.handle('task:get', (_, id) => {
+  handle('task:get', (_, id) => {
     const db = getDb()
     return db.select().from(tasks).where(eq(tasks.id, id)).all()[0] || null
   })
 
-  ipcMain.handle('task:cancel', (event, id) => taskService.cancelTask(id, event.sender))
-  ipcMain.handle('task:retry', async (event, id) => {
+  handle('task:cancel', (event, id) => taskService.cancelTask(id, event.sender))
+  handle('task:retry', async (event, id) => {
     const db = getDb()
     const task = db.select().from(tasks).where(eq(tasks.id, id)).all()[0]
     if (!task) throwUserFacingError('task.notFound', { id })
@@ -975,18 +982,18 @@ function registerIpcHandlers() {
     return taskService.retryTask(id, event.sender)
   })
 
-  ipcMain.handle('workflow:list', (_, novelId) => workflowTaskService.listWorkflowTasks(novelId))
-  ipcMain.handle('workflow:get', (_, id) => workflowTaskService.getWorkflowTask(id))
-  ipcMain.handle('workflow:cancel', (event, id) => taskService.cancelTask(id, event.sender))
-  ipcMain.handle('workflow:resume', (event, id) => workflowTaskService.resumeWorkflowTask(id, event.sender))
+  handle('workflow:list', (_, novelId) => workflowTaskService.listWorkflowTasks(novelId))
+  handle('workflow:get', (_, id) => workflowTaskService.getWorkflowTask(id))
+  handle('workflow:cancel', (event, id) => taskService.cancelTask(id, event.sender))
+  handle('workflow:resume', (event, id) => workflowTaskService.resumeWorkflowTask(id, event.sender))
 
-  ipcMain.handle('premiseDraft:getLatest', (_, novelId: number) => premiseService.getLatestPremiseDraft(novelId))
-  ipcMain.handle('premiseDraft:markApplied', (_, taskId: number, appliedMode: 'replace' | 'fill_blanks') =>
+  handle('premiseDraft:getLatest', (_, novelId: number) => premiseService.getLatestPremiseDraft(novelId))
+  handle('premiseDraft:markApplied', (_, taskId: number, appliedMode: 'replace' | 'fill_blanks') =>
     premiseService.markPremiseDraftApplied(taskId, appliedMode))
-  ipcMain.handle('premiseDraft:clearAll', (_, novelId: number) => premiseService.clearPremiseDrafts(novelId))
-  ipcMain.handle('planningDraft:getLatest', (_, novelId: number, pageKey: PlanningDraftPageKey) =>
+  handle('premiseDraft:clearAll', (_, novelId: number) => premiseService.clearPremiseDrafts(novelId))
+  handle('planningDraft:getLatest', (_, novelId: number, pageKey: PlanningDraftPageKey) =>
     planningDraftService.getLatestPlanningDraft(novelId, pageKey))
-  ipcMain.handle('planningDraft:save', (_, data: {
+  handle('planningDraft:save', (_, data: {
     novelId: number
     pageKey: PlanningDraftPageKey
     data: Record<string, unknown>
@@ -997,14 +1004,14 @@ function registerIpcHandlers() {
     rawOutputs?: string[]
     rejectionReason?: string
   }) => planningDraftService.savePlanningDraft(data))
-  ipcMain.handle('planningDraft:markApplied', (_, taskId: number) =>
+  handle('planningDraft:markApplied', (_, taskId: number) =>
     planningDraftService.markPlanningDraftApplied(taskId))
-  ipcMain.handle('planningDraft:finalize', (_, taskId: number, finalData: Record<string, unknown>) =>
+  handle('planningDraft:finalize', (_, taskId: number, finalData: Record<string, unknown>) =>
     planningDraftService.finalizePlanningDraft(taskId, finalData))
-  ipcMain.handle('planningDraft:clear', (_, novelId: number, pageKey: PlanningDraftPageKey) =>
+  handle('planningDraft:clear', (_, novelId: number, pageKey: PlanningDraftPageKey) =>
     planningDraftService.clearPlanningDrafts(novelId, pageKey))
 
-  ipcMain.handle('ai:expandBackground', async (_, input: {
+  handle('ai:expandBackground', async (_, input: {
     userBackground: string
     genreId: number
     worldTemplateId?: number
@@ -1075,23 +1082,23 @@ function registerIpcHandlers() {
     return parsed
   })
 
-  ipcMain.handle('ai:generateCoreSettings', (event, data: CoreSettingsGenerationRequest) =>
+  handle('ai:generateCoreSettings', (event, data: CoreSettingsGenerationRequest) =>
     coreSettingsService.generateCoreSettings(data, event.sender))
-  ipcMain.handle('ai:generatePremise', (event, data: PremiseGenerationRequest) =>
+  handle('ai:generatePremise', (event, data: PremiseGenerationRequest) =>
     premiseService.generatePremise(data, event.sender))
-  ipcMain.handle('ai:generateProjectBrief', (_, data: ProjectBriefGenerationRequest) =>
+  handle('ai:generateProjectBrief', (_, data: ProjectBriefGenerationRequest) =>
     projectBriefService.generateProjectBrief(data))
-  ipcMain.handle('ai:generateThemeVoice', (_, data: ThemeVoiceGenerationRequest) =>
+  handle('ai:generateThemeVoice', (_, data: ThemeVoiceGenerationRequest) =>
     themeVoiceService.generateThemeVoice(data))
-  ipcMain.handle('ai:generateWorldRules', (event, data: WorldRulesGenerationRequest) =>
+  handle('ai:generateWorldRules', (event, data: WorldRulesGenerationRequest) =>
     worldRulesService.generateWorldRules(data, event.sender))
 
-  ipcMain.handle('ai:generateCharacter', (_, novelId, opts) =>
+  handle('ai:generateCharacter', (_, novelId, opts) =>
     characterService.generateProtagonist(novelId, opts))
-  ipcMain.handle('ai:generateRelations', (_, novelId) =>
+  handle('ai:generateRelations', (_, novelId) =>
     characterService.generateCharacterRelations(novelId))
 
-  ipcMain.handle('ai:rewriteParagraph', async (_, data: {
+  handle('ai:rewriteParagraph', async (_, data: {
     originalParagraph: string
     contextBefore: string
     specificRequirements: string
@@ -1114,11 +1121,11 @@ function registerIpcHandlers() {
     return result
   })
 
-  ipcMain.handle('ai:generateSubplotBatch', async (_, data: SubplotGenerationRequest) => {
+  handle('ai:generateSubplotBatch', async (_, data: SubplotGenerationRequest) => {
     return subplotService.generateSubplotBatch(data)
   })
 
-  ipcMain.handle('ai:runPrompt', async (_, data: {
+  handle('ai:runPrompt', async (_, data: {
     messages: { role: 'user' | 'assistant'; content: string }[]
     count?: number
     modelConfigId?: number
@@ -1161,7 +1168,7 @@ function registerIpcHandlers() {
     return accepted
   })
 
-  ipcMain.handle('ai:scoreContent', async (_, data: {
+  handle('ai:scoreContent', async (_, data: {
     contentType: string
     content: string
     genreContext: string
@@ -1181,6 +1188,7 @@ function registerIpcHandlers() {
     return enhanceAiScoreResult(safeParseJson(result), data.content)
   })
 }
+
 
 
 

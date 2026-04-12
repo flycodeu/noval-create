@@ -21,7 +21,7 @@ import {
   recordGeneration,
 } from './generation-history.service'
 import { createTask, executeChatTask, runChatTask, updateTask } from './task.service'
-import { removeStoryItemFromEvents, syncStoryItemTimelineLinks } from './link-sync.service'
+import { syncStoryItemTimelineLinks } from './link-sync.service'
 import {
   buildItemTemplateSummary,
   getItemGenerationProfile,
@@ -39,6 +39,8 @@ import { markNovelContextChanged } from './context-impact.service'
 import { runAssetQualityLoop, summarizeAssetQualityWarnings } from './asset-quality.service'
 import { appendVariationMessage } from './variation-control.service'
 import { resolveFactionNamesFromReferences } from './faction-reference.service'
+import { cleanupStoryItemSoftReferences } from './data-cascade.service'
+import { refreshWorldStateVersionsForNovel } from './world-state.service'
 import { throwUserFacingError } from '../utils/user-facing-error'
 
 type StoryItemStatus = 'available' | 'consumed' | 'hidden' | 'destroyed'
@@ -1128,6 +1130,7 @@ export function createStoryItem(
   syncStoryItemTimelineLinks(id)
   if (!options.skipContextTracking) {
     markNovelContextChanged(novelId, 'Story items changed')
+    refreshWorldStateVersionsForNovel(novelId)
   }
   return id
 }
@@ -1147,17 +1150,23 @@ export function updateStoryItem(
     const current = getStoryItem(id)
     if (current) {
       markNovelContextChanged(current.novelId, 'Story items changed')
+      refreshWorldStateVersionsForNovel(current.novelId)
     }
   }
 }
 
 export function deleteStoryItem(id: number, options: { skipContextTracking?: boolean } = {}) {
   const db = getDb()
-  const current = getStoryItem(id)
-  removeStoryItemFromEvents(id)
-  db.delete(storyItems).where(eq(storyItems.id, id)).run()
+  const current = db.select().from(storyItems).where(eq(storyItems.id, id)).all()[0]
+  getSqlite().transaction(() => {
+    if (current) {
+      cleanupStoryItemSoftReferences(current.novelId, id)
+    }
+    db.delete(storyItems).where(eq(storyItems.id, id)).run()
+  })()
   if (!options.skipContextTracking && current) {
     markNovelContextChanged(current.novelId, 'Story items changed')
+    refreshWorldStateVersionsForNovel(current.novelId)
   }
 }
 
@@ -1175,6 +1184,7 @@ export function clearStoryItemsByNovel(novelId: number, options: { skipContextTr
   db.delete(storyItems).where(eq(storyItems.novelId, novelId)).run()
   if (!options.skipContextTracking) {
     markNovelContextChanged(novelId, 'Story items changed')
+    refreshWorldStateVersionsForNovel(novelId)
   }
 }
 
@@ -1364,6 +1374,7 @@ export async function generateStoryItemsBatchChunk(
         }
         if (createdIds.length > 0) {
           markNovelContextChanged(novelId, 'Story items changed')
+          refreshWorldStateVersionsForNovel(novelId)
         }
 
         resultPayload = {
@@ -1551,6 +1562,7 @@ export async function generateStoryItems(
 
   if (createdIds.length > 0) {
     markNovelContextChanged(novelId, 'Story items changed')
+    refreshWorldStateVersionsForNovel(novelId)
   }
 
   return createdIds
@@ -1691,6 +1703,7 @@ export async function regenerateStoryItem(
 
   updateStoryItem(id, payload, { skipContextTracking: true })
   markNovelContextChanged(current.novelId, 'Story items changed')
+  refreshWorldStateVersionsForNovel(current.novelId)
   return getStoryItem(id)
 }
 

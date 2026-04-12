@@ -39,6 +39,7 @@ import {
   parseFactionReferenceArray,
   stringifyFactionReferences,
 } from './faction-reference.service'
+import { refreshWorldStateVersionsForNovel } from './world-state.service'
 import { throwUserFacingError } from '../utils/user-facing-error'
 
 interface FactionQueryFilters {
@@ -700,6 +701,7 @@ export function createFaction(
 
   if (!options.skipContextTracking) {
     markNovelContextChanged(novelId, 'Factions changed')
+    refreshWorldStateVersionsForNovel(novelId)
   }
   return Number(result.lastInsertRowid)
 }
@@ -719,6 +721,7 @@ export function updateFaction(
 
   if (!options.skipContextTracking) {
     markNovelContextChanged(current.novelId, 'Factions changed')
+    refreshWorldStateVersionsForNovel(current.novelId)
   }
 }
 
@@ -730,6 +733,7 @@ export function deleteFaction(id: number, options: { skipContextTracking?: boole
   db.delete(factions).where(eq(factions.id, id)).run()
   if (!options.skipContextTracking) {
     markNovelContextChanged(current.novelId, 'Factions changed')
+    refreshWorldStateVersionsForNovel(current.novelId)
   }
 }
 
@@ -881,6 +885,7 @@ export async function generateFactionBatchChunk(
   }
   if (resultPayload.ids.length > 0) {
     markNovelContextChanged(novelId, 'Factions changed')
+    refreshWorldStateVersionsForNovel(novelId)
   }
   return resultPayload
 }

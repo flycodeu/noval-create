@@ -278,7 +278,10 @@ function pushWorldStateInsert(
   })
 }
 
-function buildCharacterWorldStateInserts(novelId: number): WorldStateVersionInsert[] {
+function buildCharacterWorldStateInserts(
+  novelId: number,
+  options: { startChapterNum?: number } = {},
+): WorldStateVersionInsert[] {
   const db = getDb()
   const characterMap = new Map(
     db.select().from(characters)
@@ -290,6 +293,7 @@ function buildCharacterWorldStateInserts(novelId: number): WorldStateVersionInse
     .where(eq(characterStateVersions.novelId, novelId))
     .orderBy(asc(characterStateVersions.chapterNum), asc(characterStateVersions.id))
     .all()
+    .filter((row) => options.startChapterNum === undefined || row.chapterNum >= options.startChapterNum)
 
   const result: WorldStateVersionInsert[] = []
   rows.forEach((row) => {
@@ -505,6 +509,68 @@ export function refreshWorldStateVersionsForChapter(chapterId: number): void {
   if (nonCharacterInserts.length > 0) {
     db.insert(worldStateVersions).values(nonCharacterInserts).run()
   }
+}
+
+export function refreshWorldStateVersionsFromChapter(novelId: number, startChapterNum: number): void {
+  const db = getDb()
+  const normalizedStartChapterNum = Math.max(1, Math.round(startChapterNum || 1))
+  const chapterRows = db.select().from(chapters)
+    .where(eq(chapters.novelId, novelId))
+    .orderBy(asc(chapters.chapterNum), asc(chapters.id))
+    .all()
+
+  if (chapterRows.length === 0) {
+    db.delete(worldStateVersions).where(eq(worldStateVersions.novelId, novelId)).run()
+    return
+  }
+
+  const affectedChapters = chapterRows.filter((chapter) => chapter.chapterNum >= normalizedStartChapterNum)
+  if (affectedChapters.length === 0) return
+
+  const staleCharacterRows = db.select().from(worldStateVersions)
+    .where(eq(worldStateVersions.novelId, novelId))
+    .all()
+    .filter((row) => row.entityType === 'character' && row.chapterNum >= normalizedStartChapterNum)
+  if (staleCharacterRows.length > 0) {
+    db.delete(worldStateVersions).where(inArray(worldStateVersions.id, staleCharacterRows.map((row) => row.id))).run()
+  }
+
+  const characterInserts = buildCharacterWorldStateInserts(novelId, {
+    startChapterNum: normalizedStartChapterNum,
+  })
+  if (characterInserts.length > 0) {
+    db.insert(worldStateVersions).values(characterInserts).run()
+  }
+
+  const staleNonCharacterRows = db.select().from(worldStateVersions)
+    .where(eq(worldStateVersions.novelId, novelId))
+    .all()
+    .filter((row) => row.entityType !== 'character' && affectedChapters.some((chapter) => chapter.id === row.chapterId))
+  if (staleNonCharacterRows.length > 0) {
+    db.delete(worldStateVersions).where(inArray(worldStateVersions.id, staleNonCharacterRows.map((row) => row.id))).run()
+  }
+
+  affectedChapters.forEach((chapter) => {
+    const inserts = buildNonCharacterWorldStateInsertsForChapter(chapter)
+    if (inserts.length > 0) {
+      db.insert(worldStateVersions).values(inserts).run()
+    }
+  })
+}
+
+export function refreshWorldStateVersionsForNovel(novelId: number): void {
+  const db = getDb()
+  const latestChapter = db.select().from(chapters)
+    .where(eq(chapters.novelId, novelId))
+    .orderBy(desc(chapters.chapterNum), desc(chapters.id))
+    .all()[0]
+
+  if (!latestChapter) {
+    db.delete(worldStateVersions).where(eq(worldStateVersions.novelId, novelId)).run()
+    return
+  }
+
+  refreshWorldStateVersionsForChapter(latestChapter.id)
 }
 
 function summarizeEntityStateRows(rows: WorldStateVersionRow[]): WorldStateSummary | null {

@@ -459,6 +459,7 @@ function resolveTimelineAnchorState(
     segmentId: data.segmentId ?? null,
     anchorInvalid: typeof data.anchorInvalid === 'number' ? (data.anchorInvalid ? 1 : 0) : 0,
   }
+  const preserveInvalidFallback = next.anchorInvalid === 1
 
   if (next.segmentId) {
     const segment = segmentById.get(next.segmentId)
@@ -490,7 +491,7 @@ function resolveTimelineAnchorState(
     const part = partById.get(next.partId)
     if (part) {
       next.volumeId = part.volumeId
-      next.anchorInvalid = 0
+      next.anchorInvalid = preserveInvalidFallback ? 1 : 0
       return next
     }
     next.partId = null
@@ -498,7 +499,7 @@ function resolveTimelineAnchorState(
   }
 
   if (next.volumeId) {
-    next.anchorInvalid = 0
+    next.anchorInvalid = preserveInvalidFallback ? 1 : 0
   }
 
   return next

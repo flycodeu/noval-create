@@ -335,10 +335,10 @@ export default function FactionsPage({ novelId }: Props) {
     try {
       await window.electron.workflow.cancel(autoTask.id)
       await refreshAutoStatus()
-      message.success('势力自动分批已请求停止。')
+      message.success(getUserFacingMessage('faction.autoStopRequested'))
     } catch (error) {
       console.error(error)
-      message.error('停止势力自动分批失败，请稍后重试。')
+      message.error(getUserFacingMessage('faction.autoStopFailed'))
     } finally {
       setAutoStopping(false)
     }

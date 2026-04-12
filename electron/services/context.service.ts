@@ -107,6 +107,32 @@ export interface BuildChapterContextOptions {
   chapterComplexity?: ChapterContextComplexity
 }
 
+export type ContextBudgetOverflowLevel = 'none' | 'soft_trimmed' | 'hard_failed'
+
+export interface ContextBudgetWarningSummary {
+  priority: 0 | 1 | 2 | 3
+  count: number
+  labels: string[]
+}
+
+export interface ContextBudgetReport {
+  modelContextLimit: number
+  requestedBudget: number
+  effectiveBudget: number
+  promptFixedOverhead: number
+  reservedForOutput: number
+  availableContextBudget: number
+  hardConstraintBudget: number
+  hardConstraintUsed: number
+  softContextBudget: number
+  softContextUsed: number
+  overflowLevel: ContextBudgetOverflowLevel
+  warningCount: number
+  droppedLabels: string[]
+  truncatedLabels: string[]
+  droppedByPriority: ContextBudgetWarningSummary[]
+}
+
 export interface StorySubPlot {
   name: string
   characters: string
@@ -234,9 +260,29 @@ export interface ChapterContext extends ChapterContextParts {
   hardConstraintEntries: HardConstraintEntry[]
   constraintInjectionStatus: ConstraintInjectionStatus
   softContextBudgetUsage: SoftContextBudgetUsage
+  contextBudgetReport: ContextBudgetReport
   droppedConstraintCount: number
   recallDiagnostics: RecallDiagnostics
   recalledMemorySources: RecallMemorySource[]
+}
+
+export class ContextOverflowError extends Error {
+  readonly context: ChapterContext
+  readonly contextBudgetReport: ContextBudgetReport
+
+  constructor(message: string, context: ChapterContext, contextBudgetReport: ContextBudgetReport) {
+    super(message)
+    this.name = 'ContextOverflowError'
+    this.context = context
+    this.contextBudgetReport = contextBudgetReport
+  }
+}
+
+export class HardConstraintOverflowError extends ContextOverflowError {
+  constructor(message: string, context: ChapterContext, contextBudgetReport: ContextBudgetReport) {
+    super(message, context, contextBudgetReport)
+    this.name = 'HardConstraintOverflowError'
+  }
 }
 
 type ChapterContextLabel = keyof ChapterContextParts
@@ -1065,6 +1111,17 @@ export interface TokenAllocationResult {
   warnings: TokenAllocationWarning[]
   totalUsed: number
   totalBudget: number
+}
+
+function summarizeBudgetWarnings(warnings: TokenAllocationWarning[]): ContextBudgetWarningSummary[] {
+  return ([0, 1, 2, 3] as const).map((priority) => {
+    const matched = warnings.filter((warning) => warning.priority === priority && warning.reason === 'dropped')
+    return {
+      priority,
+      count: matched.length,
+      labels: matched.map((warning) => warning.label),
+    }
+  })
 }
 
 function allocateTokens(parts: ContextPart[], totalBudget: number): TokenAllocationResult {
@@ -2220,17 +2277,12 @@ export function allocateChapterContext(
   const chapterComplexity = normalizedOptions.chapterComplexity || 'standard'
   const targetWords = Number(rawData.novel.targetWords || 0)
   const modelRuntimeBudget = resolveModelRuntimeBudget(rawData.novel.modelConfigId)
-  const totalBudget = modelRuntimeBudget.maxContextTokens
-    ? Math.min(requestedBudget, modelRuntimeBudget.maxContextTokens)
-    : requestedBudget
-  const modelBudgetLimited = Boolean(
-    modelRuntimeBudget.maxContextTokens
-    && modelRuntimeBudget.maxContextTokens < requestedBudget,
-  )
-
-  const effectiveBudget = modelRuntimeBudget.maxContextTokens
-    ? Math.min(modelRuntimeBudget.maxContextTokens, resolveChapterBudgetFloor(targetWords, totalBudget))
-    : resolveChapterBudgetFloor(targetWords, totalBudget)
+  const modelContextLimit = modelRuntimeBudget.maxContextTokens && modelRuntimeBudget.maxContextTokens > 0
+    ? modelRuntimeBudget.maxContextTokens
+    : 32000
+  const totalBudget = Math.min(requestedBudget, modelContextLimit)
+  const modelBudgetLimited = modelContextLimit < requestedBudget
+  const effectiveBudget = Math.min(modelContextLimit, resolveChapterBudgetFloor(targetWords, totalBudget))
   const promptFixedOverhead = resolvePromptFixedOverhead(promptProfile, chapterComplexity, targetWords)
   const requestedOutputReserve = resolvePromptOutputReserve(promptProfile, chapterComplexity, targetWords)
   const configuredOutputLimit = modelRuntimeBudget.maxTokens && modelRuntimeBudget.maxTokens > 0
@@ -2250,9 +2302,13 @@ export function allocateChapterContext(
   const hardConstraintDrafts = buildHardConstraintDrafts(rawData.contextParts)
   const desiredHardConstraintBudget = resolveHardConstraintBudget(promptProfile, chapterComplexity, targetWords)
   const minimumSoftContextBudget = Math.min(2400, Math.max(1200, Math.floor(contextBudget * 0.28)))
-  const hardConstraintBudget = contextBudget <= minimumSoftContextBudget
+  const initialHardConstraintBudget = contextBudget <= minimumSoftContextBudget
     ? contextBudget
     : Math.min(desiredHardConstraintBudget, contextBudget - minimumSoftContextBudget)
+  const requiredHardConstraintTokens = hardConstraintDrafts.reduce((sum, draft) => sum + estimateTokens(draft.content), 0)
+  const hardConstraintBudget = requiredHardConstraintTokens <= contextBudget
+    ? Math.max(initialHardConstraintBudget, requiredHardConstraintTokens)
+    : contextBudget
   const hardConstraintAllocation = allocateHardConstraintEntries(hardConstraintDrafts, hardConstraintBudget)
   const softContextBudget = Math.max(0, contextBudget - hardConstraintAllocation.used)
 
@@ -2278,6 +2334,12 @@ export function allocateChapterContext(
     .filter((entry) => entry.truncated)
     .map((entry) => entry.label)
   const droppedConstraintCount = Math.max(0, hardConstraintDrafts.length - hardConstraintAllocation.entries.length)
+  const hardOverflowLabels = hardConstraintDrafts
+    .map((draft) => draft.label)
+    .filter((label) => !hardConstraintAllocation.entries.some((entry) => entry.label === label))
+  const hardConstraintFailed = droppedConstraintCount > 0
+    || truncatedHardConstraintLabels.length > 0
+    || softAllocation.warnings.some((warning) => warning.priority === 0)
   const constraintInjectionStatus: ConstraintInjectionStatus = {
     promptProfile,
     hardConstraintBudget,
@@ -2301,6 +2363,36 @@ export function allocateChapterContext(
       .map((warning) => warning.label),
   }
   const hardConstraintSummary = buildHardConstraintSummary(hardConstraintAllocation.entries, droppedConstraintCount)
+  const droppedLabels = [...new Set([
+    ...hardOverflowLabels,
+    ...softContextBudgetUsage.droppedLabels,
+  ])]
+  const truncatedLabels = [...new Set([
+    ...truncatedHardConstraintLabels,
+    ...softContextBudgetUsage.truncatedLabels,
+  ])]
+  const overflowLevel: ContextBudgetOverflowLevel = hardConstraintFailed
+    ? 'hard_failed'
+    : softAllocation.warnings.length > 0
+      ? 'soft_trimmed'
+      : 'none'
+  const contextBudgetReport: ContextBudgetReport = {
+    modelContextLimit,
+    requestedBudget,
+    effectiveBudget,
+    promptFixedOverhead,
+    reservedForOutput,
+    availableContextBudget: contextBudget,
+    hardConstraintBudget,
+    hardConstraintUsed: hardConstraintAllocation.used,
+    softContextBudget,
+    softContextUsed: softAllocation.totalUsed,
+    overflowLevel,
+    warningCount: softAllocation.warnings.length + droppedConstraintCount + truncatedHardConstraintLabels.length,
+    droppedLabels,
+    truncatedLabels,
+    droppedByPriority: summarizeBudgetWarnings(softAllocation.warnings),
+  }
 
   if (droppedConstraintCount > 0) {
     console.error(`[context] 硬约束注入异常，丢失 ${droppedConstraintCount} 项:`,
@@ -2309,8 +2401,7 @@ export function allocateChapterContext(
         .filter((label) => !constraintInjectionStatus.injectedLabels.includes(label))
         .join(', '))
   }
-
-  return {
+  const result: ChapterContext = {
     storyCore: softAllocation.allocated.storyCore || '',
     currentArc: softAllocation.allocated.currentArc || '',
     worldRules: softAllocation.allocated.worldRules || '',
@@ -2337,10 +2428,29 @@ export function allocateChapterContext(
     hardConstraintEntries: hardConstraintAllocation.entries,
     constraintInjectionStatus,
     softContextBudgetUsage,
+    contextBudgetReport,
     droppedConstraintCount,
     recallDiagnostics: rawData.recallDiagnostics,
     recalledMemorySources: rawData.recalledMemorySources,
   }
+
+  if (hardConstraintFailed) {
+    throw new HardConstraintOverflowError(
+      '当前章节上下文超出预算，关键约束无法完整注入。请缩小本章范围、减少必须承接项，或先拆分章节后再生成。',
+      result,
+      contextBudgetReport,
+    )
+  }
+
+  if (softAllocation.warnings.length > 0) {
+    throw new ContextOverflowError(
+      '当前章节上下文已超出推荐预算，系统已自动裁剪低优先级信息。',
+      result,
+      contextBudgetReport,
+    )
+  }
+
+  return result
 }
 
 export async function buildChapterContext(

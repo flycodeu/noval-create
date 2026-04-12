@@ -14,6 +14,7 @@ import type {
   TimelineGenerateOptions,
 } from '../../src/types'
 import type { StoryThreadBatchGenerateOptions, StoryThreadBatchGenerationResult } from '../../src/shared/story-thread-generation'
+import { hasResumableWorkflowCheckpoint } from '../../src/shared/workflow-resilience'
 import { getDb } from '../database/db'
 import { tasks } from '../database/schema'
 import { throwUserFacingError } from '../utils/user-facing-error'
@@ -413,6 +414,95 @@ function ensureSuccessfulTask(task: TaskRow) {
   throw new Error(message)
 }
 
+type BatchWorkflowProgress =
+  | CharacterAutoGenerateStatus
+  | FactionAutoGenerateStatus
+  | ItemAutoGenerateStatus
+  | TimelineAutoGenerateStatus
+  | StoryThreadAutoGenerateStatus
+  | SubplotAutoGenerateStatus
+
+function getBatchWorkflowProgress(taskId: number, task: TaskRow): BatchWorkflowProgress {
+  if (task.type === 'character_auto_generate') {
+    return toCharacterStatus(taskId, task)
+  }
+
+  if (task.type === 'faction_auto_generate') {
+    return toFactionStatus(taskId, task)
+  }
+
+  if (task.type === 'item_auto_generate') {
+    const options = parseItemOptions(task.inputJson)
+    return toEntityStatus(taskId, task, {
+      requestedCount: options.count || 8,
+      batchSize: options.batchSize || 4,
+    })
+  }
+
+  if (task.type === 'timeline_auto_generate') {
+    const options = parseTimelineOptions(task.inputJson)
+    return toEntityStatus(taskId, task, {
+      requestedCount: options.count || 10,
+      batchSize: options.batchSize || 4,
+    })
+  }
+
+  if (task.type === 'story_thread_auto_generate') {
+    return toThreadStatus(taskId, task)
+  }
+
+  return toSubplotStatus(taskId, task)
+}
+
+function settleBatchWorkflowFatalError(taskId: number, sender: WebContents | undefined, error: unknown) {
+  const task = getTaskRecord(taskId)
+  if (!task || task.runnerType !== 'workflow' || !isBatchWorkflowType(task.type)) {
+    console.error(`[batch-workflow] Fatal workflow recovery failed for task ${taskId}:`, error)
+    return
+  }
+
+  const control = parseTaskControl(task)
+  const progress = getBatchWorkflowProgress(taskId, task)
+  const isAbort = error instanceof Error && error.name === 'AbortError'
+
+  updateTaskControl(taskId, {
+    ...control,
+    cancelRequested: false,
+  })
+
+  if (isAbort || control.cancelRequested) {
+    updateTaskProgress(taskId, {
+      ...progress,
+      status: 'cancelled',
+      retryCount: 0,
+      lastError: '',
+      message: task.type === 'subplot_auto_generate' ? '支线批量生成已停止。' : '批量生成已停止。',
+    }, sender)
+    updateTaskStatus(taskId, 'cancelled', sender, {
+      errorMessage: '用户已取消',
+      currentChildTaskId: null,
+    })
+    return
+  }
+
+  const errorMessage = error instanceof Error ? error.message : '后台批量流程失败'
+  const resumeMessage = progress.generatedCount > 0 || progress.resumeCursor > 0
+    ? '后台批量流程发生异常，已保留当前进度，可继续。'
+    : '后台批量流程在准备阶段失败，任务已暂停，可继续。'
+
+  updateTaskProgress(taskId, {
+    ...progress,
+    status: 'paused',
+    retryCount: Math.max(progress.retryCount, control.retryCount || 0),
+    lastError: errorMessage,
+    message: resumeMessage,
+  }, sender)
+  updateTaskStatus(taskId, 'paused', sender, {
+    errorMessage,
+    currentChildTaskId: null,
+  })
+}
+
 async function runCharacterAutoGenerateWorkflow(taskId: number, sender?: WebContents) {
   if (!tryRegisterActiveBatchWorkflow(taskId)) return
 
@@ -518,6 +608,8 @@ async function runCharacterAutoGenerateWorkflow(taskId: number, sender?: WebCont
         }, sender)
       }
     }
+  } catch (error) {
+    settleBatchWorkflowFatalError(taskId, sender, error)
   } finally {
     unregisterActiveBatchWorkflow(taskId)
   }
@@ -694,6 +786,8 @@ async function runSimpleEntityWorkflow(
         }, sender)
       }
     }
+  } catch (error) {
+    settleBatchWorkflowFatalError(taskId, sender, error)
   } finally {
     unregisterActiveBatchWorkflow(taskId)
   }
@@ -705,10 +799,10 @@ async function runSubplotAutoGenerateWorkflow(taskId: number, sender?: WebConten
   try {
     const task = getRunningTask(taskId, sender)
     const request = parseSubplotRequest(task.inputJson)
-    const context = await loadSubplotAutoGenerateContext(request)
     if (!task.progressJson) {
       updateTaskProgress(taskId, createInitialSubplotStatus(taskId, request), sender)
     }
+    const context = await loadSubplotAutoGenerateContext(request)
 
     while (true) {
       const latestTask = getTaskRecord(taskId)
@@ -722,77 +816,153 @@ async function runSubplotAutoGenerateWorkflow(taskId: number, sender?: WebConten
         break
       }
 
-      if (progress.resumeCursor >= progress.totalBatches) {
-        const polished = await polishGeneratedSubplots(context, request.storyGoal, request.coreConflict, request.mainPlot, progress.subplots)
-        const success = polished.subplots.length > 0
-        const done: SubplotAutoGenerateStatus = {
-          ...progress,
-          status: success ? 'success' : 'failed',
-          completed: true,
-          subplots: polished.subplots,
-          warnings: mergeWarnings(progress.warnings, polished.warning),
-          generatedCount: polished.subplots.length,
-          message: success
-            ? `支线批量任务完成，已生成 ${polished.subplots.length}/${progress.requestedCount} 条支线。`
-            : '支线批量任务未产出可用结果。',
+      try {
+        if (progress.resumeCursor >= progress.totalBatches) {
+          const polished = await polishGeneratedSubplots(
+            context,
+            request.storyGoal,
+            request.coreConflict,
+            request.mainPlot,
+            progress.subplots,
+          )
+          const success = polished.subplots.length > 0
+          const done: SubplotAutoGenerateStatus = {
+            ...progress,
+            status: success ? 'success' : 'failed',
+            completed: true,
+            subplots: polished.subplots,
+            warnings: mergeWarnings(progress.warnings, polished.warning),
+            generatedCount: polished.subplots.length,
+            message: success
+              ? `支线批量任务完成，已生成 ${polished.subplots.length}/${progress.requestedCount} 条支线。`
+              : '支线批量任务未产出可用结果。',
+          }
+          updateTaskProgress(taskId, done, sender)
+          updateTaskStatus(taskId, success ? 'success' : 'failed', sender, {
+            outputText: done.message,
+            errorMessage: success ? null : done.message,
+            currentChildTaskId: null,
+          })
+          break
         }
-        updateTaskProgress(taskId, done, sender)
-        updateTaskStatus(taskId, success ? 'success' : 'failed', sender, {
-          outputText: done.message,
-          errorMessage: success ? null : done.message,
-          currentChildTaskId: null,
+
+        const currentBatch = progress.resumeCursor + 1
+        updateTaskProgress(taskId, {
+          ...progress,
+          status: 'running',
+          currentBatch,
+          message: `正在执行第 ${currentBatch}/${progress.totalBatches} 批支线生成。`,
+        }, sender)
+
+        const batchCount = Math.min(progress.batchSize, Math.max(0, progress.requestedCount - progress.generatedCount))
+        const { batchResult, warning } = await tryGenerateSubplotBatch(
+          context,
+          request.storyGoal,
+          request.coreConflict,
+          request.mainPlot,
+          batchCount,
+          progress.subplots,
+          currentBatch,
+          progress.totalBatches,
+          {
+            parentTaskId: taskId,
+            sender,
+          },
+        )
+
+        const nextSubplots = batchResult ? [...progress.subplots, ...batchResult.accepted] : progress.subplots
+        const nextWarnings = mergeWarnings(progress.warnings, [
+          warning || '',
+          batchResult?.warningMessage || '',
+        ].filter(Boolean))
+        const nextProgress: SubplotAutoGenerateStatus = {
+          ...progress,
+          status: 'running',
+          currentBatch,
+          resumeCursor: progress.resumeCursor + 1,
+          generatedCount: nextSubplots.length,
+          retryCount: 0,
+          lastError: '',
+          completed: progress.resumeCursor + 1 >= progress.totalBatches,
+          subplots: nextSubplots,
+          warnings: nextWarnings,
+          batchDigest: batchResult?.accepted.slice(0, 2).map((item) => item.name).join('、') || progress.batchDigest,
+          message: batchResult
+            ? `第 ${currentBatch}/${progress.totalBatches} 批已完成，新增 ${batchResult.accepted.length} 条支线。`
+            : (warning || `第 ${currentBatch}/${progress.totalBatches} 批未生成可用支线。`),
+        }
+        updateTaskControl(taskId, {
+          ...parseTaskControl(latestTask),
+          cancelRequested: false,
+          maxRetries: DEFAULT_MAX_RETRIES,
+          retryCount: 0,
         })
-        break
+        updateTaskProgress(taskId, nextProgress, sender)
+      } catch (error) {
+        const currentTask = getTaskRecord(taskId) || latestTask
+        const currentControl = parseTaskControl(currentTask)
+        const currentProgress = toSubplotStatus(taskId, currentTask)
+        const isAbort = error instanceof Error && error.name === 'AbortError'
+
+        if (isAbort || currentControl.cancelRequested) {
+          updateTaskControl(taskId, {
+            ...currentControl,
+            cancelRequested: false,
+          })
+          updateTaskProgress(taskId, {
+            ...currentProgress,
+            status: 'cancelled',
+            retryCount: 0,
+            lastError: '',
+            message: '支线批量生成已停止。',
+          }, sender)
+          updateTaskStatus(taskId, 'cancelled', sender, {
+            errorMessage: '用户已取消',
+            currentChildTaskId: null,
+          })
+          break
+        }
+
+        const nextRetryCount = (currentControl.retryCount || 0) + 1
+        const errorMessage = error instanceof Error ? error.message : '支线批量生成失败'
+        const exhaustedBatches = currentProgress.resumeCursor >= currentProgress.totalBatches
+
+        updateTaskControl(taskId, {
+          ...currentControl,
+          maxRetries: DEFAULT_MAX_RETRIES,
+          retryCount: nextRetryCount,
+        })
+
+        if (nextRetryCount > DEFAULT_MAX_RETRIES) {
+          updateTaskProgress(taskId, {
+            ...currentProgress,
+            status: 'paused',
+            retryCount: nextRetryCount,
+            lastError: errorMessage,
+            message: exhaustedBatches
+              ? `支线结果整理连续失败 ${nextRetryCount} 次，任务已暂停。`
+              : `当前支线批次连续失败 ${nextRetryCount} 次，任务已暂停。`,
+          }, sender)
+          updateTaskStatus(taskId, 'paused', sender, {
+            errorMessage,
+            currentChildTaskId: null,
+          })
+          break
+        }
+
+        updateTaskProgress(taskId, {
+          ...currentProgress,
+          status: 'running',
+          retryCount: nextRetryCount,
+          lastError: errorMessage,
+          message: exhaustedBatches
+            ? `支线结果整理失败，正在进行第 ${nextRetryCount} 次重试。`
+            : `当前支线批次失败，正在进行第 ${nextRetryCount} 次重试。`,
+        }, sender)
       }
-
-      const currentBatch = progress.resumeCursor + 1
-      updateTaskProgress(taskId, {
-        ...progress,
-        status: 'running',
-        currentBatch,
-        message: `正在执行第 ${currentBatch}/${progress.totalBatches} 批支线生成。`,
-      }, sender)
-
-      const batchCount = Math.min(progress.batchSize, Math.max(0, progress.requestedCount - progress.generatedCount))
-      const { batchResult, warning } = await tryGenerateSubplotBatch(
-        context,
-        request.storyGoal,
-        request.coreConflict,
-        request.mainPlot,
-        batchCount,
-        progress.subplots,
-        currentBatch,
-        progress.totalBatches,
-        {
-          parentTaskId: taskId,
-          sender,
-        },
-      )
-
-      const nextSubplots = batchResult ? [...progress.subplots, ...batchResult.accepted] : progress.subplots
-      const nextWarnings = mergeWarnings(progress.warnings, [
-        warning || '',
-        batchResult?.warningMessage || '',
-      ].filter(Boolean))
-      const nextProgress: SubplotAutoGenerateStatus = {
-        ...progress,
-        status: 'running',
-        currentBatch,
-        resumeCursor: progress.resumeCursor + 1,
-        generatedCount: nextSubplots.length,
-        retryCount: 0,
-        lastError: '',
-        completed: progress.resumeCursor + 1 >= progress.totalBatches,
-        subplots: nextSubplots,
-        warnings: nextWarnings,
-        batchDigest: batchResult?.accepted.slice(0, 2).map((item) => item.name).join('、') || progress.batchDigest,
-        message: batchResult
-          ? `第 ${currentBatch}/${progress.totalBatches} 批已完成，新增 ${batchResult.accepted.length} 条支线。`
-          : (warning || `第 ${currentBatch}/${progress.totalBatches} 批未生成可用支线。`),
-      }
-      updateTaskControl(taskId, { ...parseTaskControl(latestTask), cancelRequested: false, maxRetries: DEFAULT_MAX_RETRIES, retryCount: 0 })
-      updateTaskProgress(taskId, nextProgress, sender)
     }
+  } catch (error) {
+    settleBatchWorkflowFatalError(taskId, sender, error)
   } finally {
     unregisterActiveBatchWorkflow(taskId)
   }
@@ -1015,6 +1185,16 @@ async function resumeBatchWorkflow(taskId: number, sender: WebContents | undefin
     cancelRequested: false,
     retryCount: 0,
   })
+  const progress = getBatchWorkflowProgress(taskId, task)
+  updateTaskProgress(taskId, {
+    ...progress,
+    status: 'pending',
+    retryCount: 0,
+    lastError: '',
+    message: progress.resumeCursor >= progress.totalBatches
+      ? '准备继续执行后台流程。'
+      : `准备继续执行第 ${progress.resumeCursor + 1}/${progress.totalBatches} 批。`,
+  }, sender)
 
   if (type === 'faction_auto_generate') {
     void runSimpleEntityWorkflow(taskId, sender, 'faction').catch(logWorkflowError(taskId))
@@ -1036,6 +1216,9 @@ export async function resumeBatchAutoGenerateWorkflow(taskId: number, sender?: W
   const task = getTaskRecord(taskId)
   if (!task || !isBatchWorkflowType(task.type)) {
     throwUserFacingError('workflow.taskNotFound', { taskId })
+  }
+  if (task.status !== 'paused' || !hasResumableWorkflowCheckpoint(task)) {
+    throwUserFacingError('workflow.resumeUnsupported')
   }
   return resumeBatchWorkflow(taskId, sender, task.type)
 }
@@ -1089,4 +1272,8 @@ export async function generateSubplotsViaWorkflow(request: SubplotAutoGenerateRe
   const task = await waitForWorkflowTask(taskId)
   ensureSuccessfulTask(task)
   return getSubplotAutoGenerateStatus(taskId)?.subplots || []
+}
+
+export const __testing = {
+  runSubplotAutoGenerateWorkflow,
 }

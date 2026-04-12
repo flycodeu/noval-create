@@ -84,10 +84,6 @@ export const FACTION_RELATIONSHIP_DENSITY_OPTIONS: Array<{ value: 'sparse' | 'ba
   { value: 'dense', label: '高密度' },
 ]
 
-function isFactionType(value: string): value is FactionType {
-  return FACTION_TYPE_OPTIONS.some((item) => item.value === value)
-}
-
 function isFactionRelationType(value: string): value is FactionRelationType {
   return FACTION_RELATION_TYPE_OPTIONS.some((item) => item.value === value)
 }

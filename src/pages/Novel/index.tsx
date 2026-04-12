@@ -204,7 +204,8 @@ export default function NovelRouter() {
     () => workspaceGroups.flatMap((group) => group.items),
     [workspaceGroups],
   )
-  const pathSegment = location.pathname.split('/').filter(Boolean).at(-1) || ''
+  const pathSegments = location.pathname.split('/').filter(Boolean)
+  const pathSegment = pathSegments[2] || ''
   const legacyRouteTarget = useMemo(
     () => (
       Object.prototype.hasOwnProperty.call(LEGACY_ROUTE_REDIRECTS, pathSegment)
@@ -428,7 +429,7 @@ export default function NovelRouter() {
     const list = await ensureChapterListLoaded()
     const target = list.find((chapter) => chapter.id === chapterId)
     if (!target) return
-    navigate(`/novels/${novelId}/writing?chapterId=${chapterId}`)
+    navigate(`/novels/${novelId}/writing/editor?chapterId=${chapterId}`)
     setChapterJumpOpen(false)
   }, [ensureChapterListLoaded, navigate, novelId])
 
@@ -468,7 +469,7 @@ export default function NovelRouter() {
           type: 'chapter' as const,
           label: `第 ${chapter.chapterNum} 章 ${chapter.title || ''}`.trim(),
           description: chapter.summary || chapter.outline || '跳到正文写作页',
-          route: `/novels/${novelId}/writing?chapterId=${chapter.id}`,
+          route: `/novels/${novelId}/writing/editor?chapterId=${chapter.id}`,
         })),
         ...threadPage.items.map((thread) => ({
           id: `thread-${thread.id}`,
@@ -627,7 +628,7 @@ export default function NovelRouter() {
           const nextIndex = key === 'arrowleft' ? currentIndex - 1 : currentIndex + 1
           const nextChapter = list[nextIndex]
           if (nextChapter) {
-            navigate(`/novels/${novelId}/writing?chapterId=${nextChapter.id}`)
+            navigate(`/novels/${novelId}/writing/editor?chapterId=${nextChapter.id}`)
           }
         }).catch(console.error)
         return
@@ -819,7 +820,7 @@ export default function NovelRouter() {
               <Route path="outline" element={<Outline novelId={novelId} />} />
               <Route path="structure" element={<Structure novelId={novelId} />} />
               <Route path="timeline" element={<TimelinePage novelId={novelId} />} />
-              <Route path="writing" element={<Writing novelId={novelId} />} />
+              <Route path="writing/*" element={<Writing novelId={novelId} />} />
               <Route path="revision" element={<RevisionCenterPage novelId={novelId} />} />
               <Route path="quality" element={<QualityDashboard novelId={novelId} />} />
               <Route path="*" element={<Navigate replace to={`/novels/${novelId}/${recommendedKey}`} />} />

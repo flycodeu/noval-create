@@ -497,7 +497,7 @@ export default function Overview({ novelId }: Props) {
                   },
                   volumeNamingStyle: typeof parsed.volumeNamingStyle === 'string' ? parsed.volumeNamingStyle : current.volumeNamingStyle,
                 }))
-                message.success('包装文案已生成，可直接保存基础信息。')
+                message.success(getUserFacingMessage('overview.packagingGenerated'))
               } catch (error) {
                 console.error(error)
                 message.error(getErrorMessage(error, 'overview.aiDraftFailed'))

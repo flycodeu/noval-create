@@ -39,7 +39,7 @@ import {
   getSegmentLabel,
   getVolumeLabel,
 } from '../shared/workspace-utils'
-import { WorkspacePanel, WorkspaceTip } from '../components/WorkspaceShell'
+import { WorkspacePanel } from '../components/WorkspaceShell'
 import type { ChapterFormValues, SegmentFormValues } from './helpers'
 import { SEGMENT_STATUS_OPTIONS, SEGMENT_TYPE_OPTIONS, TIMELINE_STATUS_META, parseActiveThreadCount } from './helpers'
 

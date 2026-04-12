@@ -27,9 +27,14 @@
     "generate:icon": "python scripts/generate-app-icon.py",
     "setup:nsis-resources": "node scripts/setup-local-nsis-resources.cjs",
     "setup:win-tools": "npm run setup:nsis && npm run setup:nsis-resources",
+    "test": "npm run test:unit && npm run test:smoke",
+    "test:unit": "vitest run",
+    "test:watch": "vitest",
+    "test:smoke": "npm run test:prompt-guardrails && npm run test:workflow-resilience && npm run test:workspace-routing && npm run test:migrations",
     "test:subplot": "node scripts/subplot-framework.test.cjs",
     "test:migrations": "electron scripts/migration-safety.test.cjs",
     "test:prompt-guardrails": "node scripts/prompt-guardrails.test.cjs",
+    "test:workflow-resilience": "node scripts/workflow-resilience.test.cjs",
     "test:workspace-routing": "node scripts/workspace-routing.test.cjs",
     "typecheck:web": "tsc -p tsconfig.web.json --noEmit",
     "typecheck:node": "tsc -p tsconfig.node.json --noEmit",
@@ -72,7 +77,8 @@
     "globals": "^16.5.0",
     "typescript": "^5.4.0",
     "typescript-eslint": "^8.58.0",
-    "vite": "^5.2.0"
+    "vite": "^5.2.0",
+    "vitest": "^1.6.1"
   },
   "author": "FlyLabs"
 }

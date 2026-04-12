@@ -3,6 +3,7 @@ import { and, desc, eq, inArray } from 'drizzle-orm'
 import { getDb } from '../database/db'
 import { modelConfigs, tasks } from '../database/schema'
 import { BaseAdapter, Message, ChatOptions } from '../adapters/base.adapter'
+import { RESUMABLE_WORKFLOW_TYPES as SHARED_RESUMABLE_WORKFLOW_TYPES } from '../../src/shared/workflow-resilience'
 import {
   createAdapter,
   getDefaultModelConfigRecord,
@@ -146,16 +147,7 @@ interface ModelQueueState {
 const abortControllers = new Map<number, AbortController>()
 const queuedTaskEntries = new Map<number, QueuedTaskEntry>()
 const modelQueueStates = new Map<number, ModelQueueState>()
-const RESUMABLE_WORKFLOW_TYPES = new Set<TaskType>([
-  'map_auto_generate',
-  'world_rules_auto_generate',
-  'faction_auto_generate',
-  'character_auto_generate',
-  'item_auto_generate',
-  'timeline_auto_generate',
-  'story_thread_auto_generate',
-  'subplot_auto_generate',
-])
+const RESUMABLE_WORKFLOW_TYPES = new Set<TaskType>(SHARED_RESUMABLE_WORKFLOW_TYPES)
 const TASK_HEARTBEAT_INTERVAL_MS = 15_000
 const RATE_LIMIT_RETRY_LIMIT = 3
 const RATE_LIMIT_BASE_DELAY_MS = 1_500

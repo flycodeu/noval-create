@@ -12,6 +12,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 import { AssetReviewObservability, NovelContextStatus, PagedResult, Task, TaskQueryInput, TaskStats } from '../../types'
 import { useTaskStore } from '../../stores/task.store'
+import { hasResumableWorkflowCheckpoint } from '../../shared/workflow-resilience'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { buildTaskRecoveryAction } from '../Novel/shared/workspace-navigation'
 import {
@@ -93,17 +94,6 @@ const RUNNER_LABELS: Record<string, string> = {
   stream: '流式执行',
   workflow: '后台流程',
 }
-
-const RESUMABLE_WORKFLOW_TYPES = new Set([
-  'faction_auto_generate',
-  'map_auto_generate',
-  'world_rules_auto_generate',
-  'character_auto_generate',
-  'item_auto_generate',
-  'timeline_auto_generate',
-  'story_thread_auto_generate',
-  'subplot_auto_generate',
-])
 
 function formatTaskPayload(raw?: string): string {
   if (!raw) return ''
@@ -192,7 +182,7 @@ function isTaskRetryable(task: Task): boolean {
 }
 
 function isWorkflowResumable(task: Task): boolean {
-  return task.runnerType === 'workflow' && RESUMABLE_WORKFLOW_TYPES.has(task.type)
+  return hasResumableWorkflowCheckpoint(task)
 }
 
 function getTaskRetryabilityLabel(task: Task): string {

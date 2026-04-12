@@ -70,6 +70,17 @@
   line-height: 1.75;
 }
 
+.novel-writing-page .novel-writing-page__chapter-tags,
+.novel-writing-page .novel-writing-page__generation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.novel-writing-page .novel-writing-page__chapter-tags {
+  margin-top: 8px;
+}
+
 .novel-writing-page .novel-writing-shell__editor-sheet--readonly {
   opacity: 0.88;
   border-style: dashed;

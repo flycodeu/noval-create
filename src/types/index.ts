@@ -1065,6 +1065,32 @@ export interface SoftContextBudgetUsage {
   truncatedLabels: string[]
 }
 
+export type ContextBudgetOverflowLevel = 'none' | 'soft_trimmed' | 'hard_failed'
+
+export interface ContextBudgetWarningSummary {
+  priority: 0 | 1 | 2 | 3
+  count: number
+  labels: string[]
+}
+
+export interface ContextBudgetReport {
+  modelContextLimit: number
+  requestedBudget: number
+  effectiveBudget: number
+  promptFixedOverhead: number
+  reservedForOutput: number
+  availableContextBudget: number
+  hardConstraintBudget: number
+  hardConstraintUsed: number
+  softContextBudget: number
+  softContextUsed: number
+  overflowLevel: ContextBudgetOverflowLevel
+  warningCount: number
+  droppedLabels: string[]
+  truncatedLabels: string[]
+  droppedByPriority: ContextBudgetWarningSummary[]
+}
+
 export interface ConstraintInjectionStatus {
   promptProfile: ChapterContextStage
   hardConstraintBudget: number
@@ -1111,6 +1137,7 @@ export interface ChapterContextPreviewStage {
   hardConstraintEntries: HardConstraintEntryPreview[]
   constraintInjectionStatus: ConstraintInjectionStatus
   softContextBudgetUsage: SoftContextBudgetUsage
+  contextBudgetReport: ContextBudgetReport
   droppedConstraintCount: number
 }
 

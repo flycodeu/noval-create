@@ -391,24 +391,28 @@ function parseAiJsonInternal<T = unknown>(
     const parsed = JSON.parse(cleaned) as T
     assertExpectedRoot(parsed, expectedRoot, cleaned)
     return { data: parsed, strategy: 'raw' }
+  } catch (rawError) {
+    if (rawError instanceof SyntaxError && rawError.message.includes('AI JSON 根节点必须是')) {
+      throw rawError
+    }
+  }
+
+  const normalized = normalizeAiJsonText(cleaned, expectedRoot)
+
+  try {
+    const parsed = JSON.parse(normalized) as T
+    assertExpectedRoot(parsed, expectedRoot, normalized)
+    return { data: parsed, strategy: 'normalized' }
   } catch {
-    const normalized = normalizeAiJsonText(cleaned, expectedRoot)
+    const repaired = repairCommonAiJsonIssues(normalized)
 
     try {
-      const parsed = JSON.parse(normalized) as T
-      assertExpectedRoot(parsed, expectedRoot, normalized)
-      return { data: parsed, strategy: 'normalized' }
-    } catch {
-      const repaired = repairCommonAiJsonIssues(normalized)
-
-      try {
-        const parsed = JSON.parse(repaired) as T
-        assertExpectedRoot(parsed, expectedRoot, repaired)
-        return { data: parsed, strategy: 'repaired' }
-      } catch (repairError) {
-        const rawMessage = repairError instanceof Error ? repairError.message : 'JSON 解析失败'
-        throw buildParseError(`AI JSON 解析失败：${rawMessage}`, repaired)
-      }
+      const parsed = JSON.parse(repaired) as T
+      assertExpectedRoot(parsed, expectedRoot, repaired)
+      return { data: parsed, strategy: 'repaired' }
+    } catch (repairError) {
+      const rawMessage = repairError instanceof Error ? repairError.message : 'JSON 解析失败'
+      throw buildParseError(`AI JSON 解析失败：${rawMessage}`, repaired)
     }
   }
 }

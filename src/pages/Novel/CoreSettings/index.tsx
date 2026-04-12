@@ -1,5 +1,5 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Drawer, Form, Input, InputNumber, Modal, Select, Slider, Space, Tag, message } from 'antd'
+import { Alert, Button, Drawer, Form, Input, InputNumber, Modal, Select, Slider, Space, Tabs, Tag, message } from 'antd'
 import {
   ArrowRightOutlined,
   DeleteOutlined,
@@ -101,6 +101,10 @@ const ENDING_OPTIONS: Array<{ value: StoryEndingType; label: string }> = [
   { value: 'multi', label: '多线并收' },
   { value: 'HE_BE', label: '部分圆满，部分失去' },
 ]
+
+const AnchorsTab = React.lazy(() => import('./tabs/AnchorsTab'))
+const RhythmTab = React.lazy(() => import('./tabs/RhythmTab'))
+const SubplotsTab = React.lazy(() => import('./tabs/SubplotsTab'))
 
 function emptySubplot(): SubPlot {
   return {
@@ -206,6 +210,7 @@ export default function CoreSettings({ novelId }: Props) {
   const [generationProgress, setGenerationProgress] = useState<CoreSettingsGenerationProgressEvent | null>(null)
   const [subplotTaskId, setSubplotTaskId] = useState<number | null>(null)
   const [selectedSubplotIndex, setSelectedSubplotIndex] = useState<number | null>(null)
+  const [activeTab, setActiveTab] = useState('anchors')
   const [stats, setStats] = useState<WorkflowStats>(EMPTY_STATS)
 
   const settings = useMemo(
@@ -563,7 +568,7 @@ export default function CoreSettings({ novelId }: Props) {
     if (!subplotTaskId) return
     try {
       await window.electron.workflow.cancel(subplotTaskId)
-      message.success('支线自动分批已请求停止。')
+      message.success(getUserFacingMessage('coreSettings.subplotStopRequested'))
     } catch (error) {
       console.error(error)
       message.error(getErrorMessage(error, 'coreSettings.generateFailed'))
@@ -596,6 +601,187 @@ export default function CoreSettings({ novelId }: Props) {
   const openSubplot = (index: number) => {
     setSelectedSubplotIndex(index)
   }
+
+  const anchorsTabContent = (
+    <>
+      <WorkspacePanel title="设计原则" description="先把剧情骨架写硬，再继续拆结构、时间轴和正文。">
+        <div className="guided-step__checklist">
+          <div className="guided-step__checkitem guided-step__checkitem--done">
+            <div className="guided-step__checkhead"><strong>只做骨架</strong></div>
+            <p>本页维护目标、冲突、推进链、支线作用和结局。</p>
+          </div>
+          <div className="guided-step__checkitem guided-step__checkitem--done">
+            <div className="guided-step__checkhead"><strong>支线必须有用</strong></div>
+            <p>每条支线都要直接作用于主线、人物关系或主题压力，不能游离成无关故事。</p>
+          </div>
+          <div className="guided-step__checkitem guided-step__checkitem--done">
+            <div className="guided-step__checkhead"><strong>语言必须自然</strong></div>
+            <p>禁止口号式总结、生造词、万能情绪句和违背常识的推进方式。</p>
+          </div>
+        </div>
+      </WorkspacePanel>
+
+      <WorkspacePanel title="故事锚点" description="四个锚点先固定住，后面的结构页和时间轴页都围绕这里展开。">
+        <Form form={form} layout="vertical">
+          <div className="story-design__anchor-grid">
+            <div className="story-design__anchor-card">
+              <Form.Item name="story_goal" label="故事核心目标" rules={[{ required: true, message: '请写清故事核心目标' }]}>
+                <Input.TextArea rows={4} placeholder="写这部书最终要抵达什么状态，不写过程流水账。" />
+              </Form.Item>
+            </div>
+            <div className="story-design__anchor-card">
+              <Form.Item name="core_conflict" label="核心冲突" rules={[{ required: true, message: '请写清核心冲突' }]}>
+                <Input.TextArea rows={4} placeholder="写目标为什么难实现，谁在对抗，代价落在谁身上。" />
+              </Form.Item>
+            </div>
+            <div className="story-design__anchor-card story-design__anchor-card--full">
+              <Form.Item name="main_plot" label="主推进链" rules={[{ required: true, message: '请写清主推进链' }]}>
+                <Input.TextArea rows={5} placeholder="写主线如何一步步推进到结局，强调因果、升级和转折。" />
+              </Form.Item>
+            </div>
+            <div className="story-design__anchor-card story-design__anchor-card--compact">
+              <Form.Item name="ending_type" label="结局类型">
+                <Select allowClear options={ENDING_OPTIONS} placeholder="选择结局类型" />
+              </Form.Item>
+            </div>
+            <div className="story-design__anchor-card story-design__anchor-card--full">
+              <Form.Item name="ending" label="结局落点" rules={[{ required: true, message: '请写清结局落点' }]}>
+                <Input.TextArea rows={4} placeholder="写故事最终如何收束，主要矛盾如何落地，代价与余波如何留下。" />
+              </Form.Item>
+            </div>
+          </div>
+        </Form>
+      </WorkspacePanel>
+    </>
+  )
+
+  const rhythmTabContent = (
+    <WorkspacePanel
+      title="节奏与结局"
+      description="长篇不要只盯着章数，先把三段比例定下来。"
+      extra={<Tag color="gold">推荐先定比例，再拆卷部章</Tag>}
+    >
+      <Form form={form} layout="vertical">
+        <div className="story-design__ratio-grid">
+          <div className="story-design__ratio-card">
+            <Form.Item name="rhythm_setup" label="前段铺垫">
+              <Slider min={10} max={60} />
+            </Form.Item>
+            <small>负责立环境、立代价、立悬念。</small>
+          </div>
+          <div className="story-design__ratio-card">
+            <Form.Item name="rhythm_conflict" label="中段冲突">
+              <Slider min={20} max={70} />
+            </Form.Item>
+            <small>负责持续抬升压力与关系对抗。</small>
+          </div>
+          <div className="story-design__ratio-card">
+            <Form.Item name="rhythm_ending" label="后段回收">
+              <Slider min={10} max={40} />
+            </Form.Item>
+            <small>负责回收伏笔、兑现代价和后果。</small>
+          </div>
+        </div>
+      </Form>
+    </WorkspacePanel>
+  )
+
+  const subplotsTabContent = (
+    <WorkspacePanel
+      title="支线看板"
+      description="先把支线当成项目卡片管理，而不是堆成长文本。点击卡片可在右侧抽屉细修。"
+      extra={(
+        <div className="story-design__toolbar">
+          <Form form={form} component={false}>
+            <Form.Item name="subplot_batch_count" style={{ marginBottom: 0 }}>
+              <InputNumber min={MIN_SUBPLOT_BATCH_COUNT} max={MAX_SUBPLOT_BATCH_COUNT} />
+            </Form.Item>
+          </Form>
+          <Button icon={<RobotOutlined />} loading={generatingMode === 'subplots'} onClick={() => void handleGenerate('subplots')}>
+            AI 重算支线
+          </Button>
+          {generatingMode === 'subplots' && subplotTaskId ? (
+            <Button danger icon={<StopOutlined />} onClick={() => void handleStopSubplotGenerate()}>
+              停止
+            </Button>
+          ) : null}
+          <Button icon={<PlusOutlined />} onClick={addSubplot}>
+            新增支线
+          </Button>
+          <Button danger icon={<DeleteOutlined />} onClick={clearSubplots}>
+            一键清空支线
+          </Button>
+        </div>
+      )}
+    >
+      <div className="story-design__stats-grid">
+        <div className="guided-step__fact-card">
+          <span>本轮 AI 数量</span>
+          <strong>{batchCount}</strong>
+          <small>用于生成或重算支线时的目标数量。</small>
+        </div>
+        <div className="guided-step__fact-card">
+          <span>已挂主线</span>
+          <strong>{subplotLinkedCount}/{subplots.length}</strong>
+          <small>没有主线因果的支线，应优先删掉或改写。</small>
+        </div>
+        <div className="guided-step__fact-card">
+          <span>已排回收</span>
+          <strong>{subplotScheduledCount}/{subplots.length}</strong>
+          <small>未定回收章位越多，后期失控风险越高。</small>
+        </div>
+        <div className="guided-step__fact-card">
+          <span>预计全书长度</span>
+          <strong>{estimatedChapterTotal} 章</strong>
+          <small>按目标字数和支线回收章位粗估。</small>
+        </div>
+      </div>
+
+      <div className="story-design__board">
+        {subplotBoard.map((lane) => (
+          <section key={lane.key} className="story-design__lane">
+            <div className="story-design__lane-head">
+              <div className="story-design__lane-copy">
+                <strong>{lane.label}</strong>
+                <span>{lane.hint}</span>
+              </div>
+              <Tag>{lane.items.length}</Tag>
+            </div>
+
+            <div className="story-design__lane-body">
+              {lane.items.length === 0 ? (
+                <div className="story-design__lane-empty">当前还没有落在这一阶段的支线。</div>
+              ) : lane.items.map((subplot) => (
+                <button
+                  key={`${lane.key}-${subplot.index}`}
+                  type="button"
+                  className="story-design__card"
+                  onClick={() => openSubplot(subplot.index)}
+                >
+                  <div className="story-design__card-head">
+                    <strong>{subplot.name || `支线 ${subplot.index + 1}`}</strong>
+                    <Tag color={subplot.completeness === 100 ? 'success' : 'default'}>{subplot.completeness}%</Tag>
+                  </div>
+                  <div className="story-design__card-copy">
+                    {subplot.conflict || '还没有写清这条支线的核心冲突。'}
+                  </div>
+                  <div className="story-design__card-copy story-design__card-copy--soft">
+                    {subplot.mainlineLink || '还没有写清这条支线如何反作用于主线。'}
+                  </div>
+                  <div className="story-design__card-meta">
+                    {splitCharacterNames(subplot.characters).slice(0, 3).map((name) => (
+                      <Tag key={name}>{name}</Tag>
+                    ))}
+                    <Tag>{parseChapterMarker(subplot.endChapter) ? `第 ${parseChapterMarker(subplot.endChapter)} 章回收` : '未安排回收'}</Tag>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
+    </WorkspacePanel>
+  )
 
   return (
     <WorkspacePage
@@ -699,178 +885,39 @@ export default function CoreSettings({ novelId }: Props) {
         />
       ) : null}
 
-      <WorkspacePanel title="设计原则" description="先把剧情骨架写硬，再继续拆结构、时间轴和正文。">
-        <div className="guided-step__checklist">
-          <div className="guided-step__checkitem guided-step__checkitem--done">
-            <div className="guided-step__checkhead"><strong>只做骨架</strong></div>
-              <p>本页维护目标、冲突、推进链、支线作用和结局。</p>
-          </div>
-          <div className="guided-step__checkitem guided-step__checkitem--done">
-            <div className="guided-step__checkhead"><strong>支线必须有用</strong></div>
-            <p>每条支线都要直接作用于主线、人物关系或主题压力，不能游离成无关故事。</p>
-          </div>
-          <div className="guided-step__checkitem guided-step__checkitem--done">
-            <div className="guided-step__checkhead"><strong>语言必须自然</strong></div>
-            <p>禁止口号式总结、生造词、万能情绪句和违背常识的推进方式。</p>
-          </div>
-        </div>
-      </WorkspacePanel>
-
-      <WorkspacePanel title="故事锚点" description="四个锚点先固定住，后面的结构页和时间轴页都围绕这里展开。">
-        <Form form={form} layout="vertical">
-          <div className="story-design__anchor-grid">
-            <div className="story-design__anchor-card">
-              <Form.Item name="story_goal" label="故事核心目标" rules={[{ required: true, message: '请写清故事核心目标' }]}>
-                <Input.TextArea rows={4} placeholder="写这部书最终要抵达什么状态，不写过程流水账。" />
-              </Form.Item>
-            </div>
-            <div className="story-design__anchor-card">
-              <Form.Item name="core_conflict" label="核心冲突" rules={[{ required: true, message: '请写清核心冲突' }]}>
-                <Input.TextArea rows={4} placeholder="写目标为什么难实现，谁在对抗，代价落在谁身上。" />
-              </Form.Item>
-            </div>
-            <div className="story-design__anchor-card story-design__anchor-card--full">
-              <Form.Item name="main_plot" label="主推进链" rules={[{ required: true, message: '请写清主推进链' }]}>
-                <Input.TextArea rows={5} placeholder="写主线如何一步步推进到结局，强调因果、升级和转折。" />
-              </Form.Item>
-            </div>
-            <div className="story-design__anchor-card story-design__anchor-card--compact">
-              <Form.Item name="ending_type" label="结局类型">
-                <Select allowClear options={ENDING_OPTIONS} placeholder="选择结局类型" />
-              </Form.Item>
-            </div>
-            <div className="story-design__anchor-card story-design__anchor-card--full">
-              <Form.Item name="ending" label="结局落点" rules={[{ required: true, message: '请写清结局落点' }]}>
-                <Input.TextArea rows={4} placeholder="写故事最终如何收束，主要矛盾如何落地，代价与余波如何留下。" />
-              </Form.Item>
-            </div>
-          </div>
-        </Form>
-      </WorkspacePanel>
-
-      <WorkspacePanel
-        title="节奏与结局"
-        description="长篇不要只盯着章数，先把三段比例定下来。"
-        extra={<Tag color="gold">推荐先定比例，再拆卷部章</Tag>}
-      >
-        <Form form={form} layout="vertical">
-          <div className="story-design__ratio-grid">
-            <div className="story-design__ratio-card">
-              <Form.Item name="rhythm_setup" label="前段铺垫">
-                <Slider min={10} max={60} />
-              </Form.Item>
-              <small>负责立环境、立代价、立悬念。</small>
-            </div>
-            <div className="story-design__ratio-card">
-              <Form.Item name="rhythm_conflict" label="中段冲突">
-                <Slider min={20} max={70} />
-              </Form.Item>
-              <small>负责持续抬升压力与关系对抗。</small>
-            </div>
-            <div className="story-design__ratio-card">
-              <Form.Item name="rhythm_ending" label="后段回收">
-                <Slider min={10} max={40} />
-              </Form.Item>
-              <small>负责回收伏笔、兑现代价和后果。</small>
-            </div>
-          </div>
-        </Form>
-      </WorkspacePanel>
-
-      <WorkspacePanel
-        title="支线看板"
-        description="先把支线当成项目卡片管理，而不是堆成长文本。点击卡片可在右侧抽屉细修。"
-        extra={(
-          <div className="story-design__toolbar">
-            <Form form={form} component={false}>
-              <Form.Item name="subplot_batch_count" style={{ marginBottom: 0 }}>
-                <InputNumber min={MIN_SUBPLOT_BATCH_COUNT} max={MAX_SUBPLOT_BATCH_COUNT} />
-              </Form.Item>
-            </Form>
-            <Button icon={<RobotOutlined />} loading={generatingMode === 'subplots'} onClick={() => void handleGenerate('subplots')}>
-              AI 重算支线
-            </Button>
-            {generatingMode === 'subplots' && subplotTaskId ? (
-              <Button danger icon={<StopOutlined />} onClick={() => void handleStopSubplotGenerate()}>
-                停止
-              </Button>
-            ) : null}
-            <Button icon={<PlusOutlined />} onClick={addSubplot}>
-              新增支线
-            </Button>
-            <Button danger icon={<DeleteOutlined />} onClick={clearSubplots}>
-              一键清空支线
-            </Button>
-          </div>
-        )}
-      >
-        <div className="story-design__stats-grid">
-          <div className="guided-step__fact-card">
-            <span>本轮 AI 数量</span>
-            <strong>{batchCount}</strong>
-            <small>用于生成或重算支线时的目标数量。</small>
-          </div>
-          <div className="guided-step__fact-card">
-            <span>已挂主线</span>
-            <strong>{subplotLinkedCount}/{subplots.length}</strong>
-            <small>没有主线因果的支线，应优先删掉或改写。</small>
-          </div>
-          <div className="guided-step__fact-card">
-            <span>已排回收</span>
-            <strong>{subplotScheduledCount}/{subplots.length}</strong>
-            <small>未定回收章位越多，后期失控风险越高。</small>
-          </div>
-          <div className="guided-step__fact-card">
-            <span>预计全书长度</span>
-            <strong>{estimatedChapterTotal} 章</strong>
-            <small>按目标字数和支线回收章位粗估。</small>
-          </div>
-        </div>
-
-        <div className="story-design__board">
-          {subplotBoard.map((lane) => (
-            <section key={lane.key} className="story-design__lane">
-              <div className="story-design__lane-head">
-                <div className="story-design__lane-copy">
-                  <strong>{lane.label}</strong>
-                  <span>{lane.hint}</span>
-                </div>
-                <Tag>{lane.items.length}</Tag>
-              </div>
-
-              <div className="story-design__lane-body">
-                {lane.items.length === 0 ? (
-                  <div className="story-design__lane-empty">当前还没有落在这一阶段的支线。</div>
-                ) : lane.items.map((subplot) => (
-                  <button
-                    key={`${lane.key}-${subplot.index}`}
-                    type="button"
-                    className="story-design__card"
-                    onClick={() => openSubplot(subplot.index)}
-                  >
-                    <div className="story-design__card-head">
-                      <strong>{subplot.name || `支线 ${subplot.index + 1}`}</strong>
-                      <Tag color={subplot.completeness === 100 ? 'success' : 'default'}>{subplot.completeness}%</Tag>
-                    </div>
-                    <div className="story-design__card-copy">
-                      {subplot.conflict || '还没有写清这条支线的核心冲突。'}
-                    </div>
-                    <div className="story-design__card-copy story-design__card-copy--soft">
-                      {subplot.mainlineLink || '还没有写清这条支线如何反作用于主线。'}
-                    </div>
-                    <div className="story-design__card-meta">
-                      {splitCharacterNames(subplot.characters).slice(0, 3).map((name) => (
-                        <Tag key={name}>{name}</Tag>
-                      ))}
-                      <Tag>{parseChapterMarker(subplot.endChapter) ? `第 ${parseChapterMarker(subplot.endChapter)} 章回收` : '未安排回收'}</Tag>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </section>
-          ))}
-        </div>
-      </WorkspacePanel>
+      <Tabs
+        activeKey={activeTab}
+        onChange={setActiveTab}
+        items={[
+          {
+            key: 'anchors',
+            label: '锚点',
+            children: (
+              <React.Suspense fallback={<div className="novel-empty"><Tag>加载中</Tag></div>}>
+                <AnchorsTab content={anchorsTabContent} />
+              </React.Suspense>
+            ),
+          },
+          {
+            key: 'rhythm',
+            label: '节奏',
+            children: (
+              <React.Suspense fallback={<div className="novel-empty"><Tag>加载中</Tag></div>}>
+                <RhythmTab content={rhythmTabContent} />
+              </React.Suspense>
+            ),
+          },
+          {
+            key: 'subplots',
+            label: '支线',
+            children: (
+              <React.Suspense fallback={<div className="novel-empty"><Tag>加载中</Tag></div>}>
+                <SubplotsTab content={subplotsTabContent} />
+              </React.Suspense>
+            ),
+          },
+        ]}
+      />
 
       <Drawer
         title={selectedSubplot ? selectedSubplot.name || '支线编辑' : '支线编辑'}

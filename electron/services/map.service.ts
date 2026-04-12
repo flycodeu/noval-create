@@ -27,6 +27,8 @@ import {
   resolveFactionNamesFromReferences,
   stringifyFactionReferences,
 } from './faction-reference.service'
+import { cleanupMapSoftReferences } from './data-cascade.service'
+import { refreshWorldStateVersionsForNovel } from './world-state.service'
 import { throwUserFacingError } from '../utils/user-facing-error'
 import { runAssetQualityLoop, summarizeAssetQualityWarnings } from './asset-quality.service'
 import { logError, logInfo, logWarn } from '../utils/runtime-log'
@@ -807,7 +809,10 @@ export function createMapItem(novelId: number, data: Partial<typeof worldMap.$in
     name: payload.name ?? data.name,
   }).run()
   const id = Number(result.lastInsertRowid)
-  if (!options.skipContextTracking) markNovelContextChanged(novelId, 'Map structure changed')
+  if (!options.skipContextTracking) {
+    markNovelContextChanged(novelId, 'Map structure changed')
+    refreshWorldStateVersionsForNovel(novelId)
+  }
   return id
 }
 
@@ -877,13 +882,17 @@ export function upsertMapRelation(input: MapRelationInput) {
   }
 
   markNovelContextChanged(data.novelId, 'Map relations changed')
+  refreshWorldStateVersionsForNovel(data.novelId)
 }
 
 export function deleteMapRelation(id: number) {
   const db = getDb()
   const current = db.select().from(mapRelations).where(eq(mapRelations.id, id)).all()[0]
   db.delete(mapRelations).where(eq(mapRelations.id, id)).run()
-  if (current) markNovelContextChanged(current.novelId, 'Map relations changed')
+  if (current) {
+    markNovelContextChanged(current.novelId, 'Map relations changed')
+    refreshWorldStateVersionsForNovel(current.novelId)
+  }
 }
 
 export function updateMapItem(id: number, data: Partial<typeof worldMap.$inferInsert>, options: { skipContextTracking?: boolean } = {}) {
@@ -892,17 +901,33 @@ export function updateMapItem(id: number, data: Partial<typeof worldMap.$inferIn
   if (!current) return
   db.update(worldMap).set(sanitizeMapPayload(current.novelId, data)).where(eq(worldMap.id, id)).run()
   if (!options.skipContextTracking) {
-    if (current) markNovelContextChanged(current.novelId, 'Map structure changed')
+    if (current) {
+      markNovelContextChanged(current.novelId, 'Map structure changed')
+      refreshWorldStateVersionsForNovel(current.novelId)
+    }
   }
+}
+
+function deleteMapItemCascade(id: number): void {
+  const db = getDb()
+  const current = db.select().from(worldMap).where(eq(worldMap.id, id)).all()[0]
+  if (!current) return
+  const children = db.select().from(worldMap).where(eq(worldMap.parentId, id)).all()
+  for (const child of children) deleteMapItemCascade(child.id)
+  cleanupMapSoftReferences(current.novelId, id)
+  db.delete(worldMap).where(eq(worldMap.id, id)).run()
 }
 
 export function deleteMapItem(id: number, options: { skipContextTracking?: boolean } = {}) {
   const db = getDb()
   const current = db.select().from(worldMap).where(eq(worldMap.id, id)).all()[0]
-  const children = db.select().from(worldMap).where(eq(worldMap.parentId, id)).all()
-  for (const child of children) deleteMapItem(child.id, { skipContextTracking: true })
-  db.delete(worldMap).where(eq(worldMap.id, id)).run()
-  if (!options.skipContextTracking && current) markNovelContextChanged(current.novelId, 'Map structure changed')
+  getSqlite().transaction(() => {
+    deleteMapItemCascade(id)
+  })()
+  if (!options.skipContextTracking && current) {
+    markNovelContextChanged(current.novelId, 'Map structure changed')
+    refreshWorldStateVersionsForNovel(current.novelId)
+  }
 }
 
 export function clearMapByNovel(novelId: number, options: { skipContextTracking?: boolean } = {}) {
@@ -910,7 +935,10 @@ export function clearMapByNovel(novelId: number, options: { skipContextTracking?
   db.update(timelineEvents).set({ locationMapId: null, updatedAt: new Date().toISOString() }).where(eq(timelineEvents.novelId, novelId)).run()
   db.update(storyItems).set({ locationMapId: null, updatedAt: new Date().toISOString() }).where(eq(storyItems.novelId, novelId)).run()
   db.delete(worldMap).where(eq(worldMap.novelId, novelId)).run()
-  if (!options.skipContextTracking) markNovelContextChanged(novelId, 'Map structure changed')
+  if (!options.skipContextTracking) {
+    markNovelContextChanged(novelId, 'Map structure changed')
+    refreshWorldStateVersionsForNovel(novelId)
+  }
 }
 
 function getLayerCount(input: MapBatchGenerateOptions, depth: number, fallback: number): number {
@@ -1280,7 +1308,10 @@ export async function batchGenerateMap(novelId: number, structure: MapBatchGener
     })
     throw new Error(sanitizeMapErrorMessage(error, '地图生成结果解析失败，请重试'))
   }
-  if (generatedNodeCount > 0) markNovelContextChanged(novelId, 'Map structure changed')
+  if (generatedNodeCount > 0) {
+    markNovelContextChanged(novelId, 'Map structure changed')
+    refreshWorldStateVersionsForNovel(novelId)
+  }
   const nextState = findNextMapBatch(listMapRows(novelId), layerPlans, parentBatchSize)
   return {
     stage: nextBatch.stage,

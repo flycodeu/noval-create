@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Button, Form, Input, Modal, Pagination, Select, Space, Spin, Tag, message } from 'antd'
+import { Alert, Button, Form, Input, Modal, Pagination, Select, Space, Spin, Tabs, Tag, message } from 'antd'
 import {
   AppstoreAddOutlined,
   DeleteOutlined,
@@ -121,6 +121,10 @@ const STATUS_META: Record<StoryItem['status'], { label: string; color: string }>
 }
 
 const RARITY_OPTIONS = ['常见', '稀有', '核心', '禁用级']
+
+const OverviewTab = React.lazy(() => import('./tabs/OverviewTab'))
+const DetailsTab = React.lazy(() => import('./tabs/DetailsTab'))
+const ConnectionsTab = React.lazy(() => import('./tabs/ConnectionsTab'))
 
 function parseNumberArray(raw?: string | null): number[] {
   if (!raw) return []
@@ -330,6 +334,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
   const [detailContext, setDetailContext] = useState<StoryItemDetailContext>(EMPTY_DETAIL)
   const [selectedItem, setSelectedItem] = useState<StoryItem | null>(null)
   const [selectedId, setSelectedId] = useState<number | null>(null)
+  const [activeEditorTab, setActiveEditorTab] = useState('overview')
   const [listMode, setListMode] = useState<'template' | 'instance'>('template')
   const [recordStatusFilter, setRecordStatusFilter] = useState<'confirmed' | 'draft' | 'all'>('confirmed')
   const [categoryFilter, setCategoryFilter] = useState('all')
@@ -757,6 +762,335 @@ export default function ItemsWorkspace({ novelId }: Props) {
     ]
   }, [detailContext, selectedItem?.itemKind])
 
+  const overviewTabContent = (
+    <div className="novel-support-grid novel-items__support-grid">
+      <WorkspaceTip title="资产概览">
+        <div className="novel-items__tip-list">
+          <div className="novel-items__tip-item">
+            <strong>一句话说明</strong>
+            <span>{selectedItem?.summary || '还没有一句话摘要。'}</span>
+          </div>
+          <div className="novel-items__tip-item">
+            <strong>外观识别点</strong>
+            <span>{selectedItem?.appearance || '还没有补充外观。'}</span>
+          </div>
+          <div className="novel-items__tip-item">
+            <strong>分类定位</strong>
+            <span>{buildSummaryText(selectedItem?.category, selectedItem?.subType, selectedItem?.rarity) || '还没有分类定位。'}</span>
+          </div>
+          <div className="novel-items__tip-item">
+            <strong>主地点</strong>
+            <span>{buildLocationLabel(detailContext.location)}</span>
+          </div>
+        </div>
+      </WorkspaceTip>
+
+      <WorkspaceTip title="来源与流转">
+        <div className="novel-items__tip-list">
+          {detailContext.parentTemplate ? (
+            <button
+              type="button"
+              className="novel-items__linked-button"
+              onClick={() => void loadItemDetail(detailContext.parentTemplate!.id)}
+            >
+              查看来源模板 · {detailContext.parentTemplate.itemName}
+            </button>
+          ) : (
+            <div className="novel-items__tip-item">
+              <strong>来源模板</strong>
+              <span>{selectedItem?.itemKind === 'template' ? '当前记录本身就是模板。' : '这是一个独立实例。'}</span>
+            </div>
+          )}
+          <div className="novel-items__tip-item">
+            <strong>获取方式</strong>
+            <span>{selectedItem?.acquisitionMethod || '还没有写明如何获得。'}</span>
+          </div>
+          <div className="novel-items__tip-item">
+            <strong>使用方式</strong>
+            <span>{selectedItem?.usageMethod || '还没有写明如何使用。'}</span>
+          </div>
+          <div className="novel-items__tip-item">
+            <strong>代价 / 风险</strong>
+            <span>{buildSummaryText(selectedItem?.cost, selectedItem?.risk) || '还没有明确代价与风险。'}</span>
+          </div>
+          {detailContext.sourceContexts.length > 0 ? (
+            <div className="novel-items__tip-item">
+              <strong>自动发现来源</strong>
+              <span>{detailContext.sourceContexts.map(buildSourceLabel).join('；')}</span>
+            </div>
+          ) : null}
+        </div>
+      </WorkspaceTip>
+    </div>
+  )
+
+  const detailsTabContent = (
+    <Form form={form} layout="vertical">
+      <section className="novel-form-section">
+        <div className="novel-form-section__header">
+          <div className="novel-form-section__title">基础标识</div>
+          <div className="novel-form-section__desc">先把类型、名称、分类和状态定准，这决定它会如何进入模板 / 实例链路。</div>
+        </div>
+        <div className="novel-grid novel-grid--3">
+          <Form.Item name="itemKind" label="记录类型" rules={[{ required: true, message: '请选择记录类型' }]}>
+            <Select options={ITEM_KIND_OPTIONS as unknown as Array<{ value: StoryItem['itemKind']; label: string }>} />
+          </Form.Item>
+          <Form.Item name="category" label="主分类">
+            <Input placeholder="例如：武器、证据、药品、装备" />
+          </Form.Item>
+          <Form.Item name="subType" label="细分类">
+            <Input placeholder="进一步说明形态或用途" />
+          </Form.Item>
+        </div>
+        <div className="novel-grid novel-grid--3">
+          <Form.Item name="itemName" label="名称" rules={[{ required: true, message: '请输入物品名称' }]}>
+            <Input placeholder="写得像剧情里真实会出现的物品" />
+          </Form.Item>
+          <Form.Item name="rarity" label="稀有度">
+            <Select allowClear options={rarityOptions.map((value) => ({ value, label: value }))} />
+          </Form.Item>
+          <Form.Item name="status" label="状态">
+            <Select options={STATUS_OPTIONS as unknown as Array<{ value: StoryItem['status']; label: string }>} />
+          </Form.Item>
+        </div>
+      </section>
+
+      <section className="novel-form-section">
+        <div className="novel-form-section__header">
+          <div className="novel-form-section__title">叙事概览</div>
+          <div className="novel-form-section__desc">把“它是什么、长什么样、为什么重要”讲清楚，否则实例无法形成完整闭环。</div>
+        </div>
+        <div className="novel-grid novel-grid--2">
+          <Form.Item name="summary" label="一句话说明">
+            <Input.TextArea rows={3} placeholder="一句话说清它是什么" />
+          </Form.Item>
+          <Form.Item name="appearance" label="外观识别点">
+            <Input.TextArea rows={3} placeholder="写辨识点，不要堆砌形容词" />
+          </Form.Item>
+        </div>
+        <Form.Item name="plotFunction" label="剧情作用">
+          <Input.TextArea rows={3} placeholder="说清它推动哪条冲突、哪段转折或哪次回收" />
+        </Form.Item>
+      </section>
+
+      <section className="novel-form-section">
+        <div className="novel-form-section__header">
+          <div className="novel-form-section__title">流转与代价</div>
+          <div className="novel-form-section__desc">把得到方式、使用条件、代价和风险写全，才能避免物品只是“有名字没用法”。</div>
+        </div>
+        <div className="novel-grid novel-grid--2">
+          <Form.Item name="acquisitionMethod" label="获取方式">
+            <Input.TextArea rows={3} placeholder="是谁给的、在哪拿到、付出了什么" />
+          </Form.Item>
+          <Form.Item name="usageMethod" label="使用方式">
+            <Input.TextArea rows={3} placeholder="如何触发、如何维护、如何消耗" />
+          </Form.Item>
+        </div>
+        <div className="novel-grid novel-grid--2">
+          <Form.Item name="cost" label="代价">
+            <Input.TextArea rows={3} placeholder="明确资源消耗、身份代价或行动门槛" />
+          </Form.Item>
+          <Form.Item name="risk" label="风险">
+            <Input.TextArea rows={3} placeholder="明确副作用、暴露风险或后果" />
+          </Form.Item>
+        </div>
+      </section>
+
+      <section className="novel-form-section">
+        <div className="novel-form-section__header">
+          <div className="novel-form-section__title">关系与锚点</div>
+          <div className="novel-form-section__desc">这里决定它和人物、地点、事件的闭环关系。实例应尽量填满，模板至少留下可派生的锚点。</div>
+        </div>
+        {currentItemKind === 'instance' ? (
+          <div className="novel-grid novel-grid--3">
+            <Form.Item name="parentItemId" label="来源模板">
+              <Select
+                allowClear
+                showSearch
+                filterOption={false}
+                options={templateOptions.map((item) => ({ value: item.id, label: item.itemName }))}
+                onFocus={() => void searchTemplates('')}
+                onSearch={(value) => void searchTemplates(value)}
+                placeholder="实例可选择一个模板作为来源"
+              />
+            </Form.Item>
+            <Form.Item name="ownerCharacterId" label={ownerLabel}>
+              <Select
+                allowClear
+                showSearch
+                filterOption={false}
+                options={characterOptions.map((item) => ({ value: item.id, label: item.fullName }))}
+                onFocus={() => void searchCharacters('')}
+                onSearch={(value) => void searchCharacters(value)}
+              />
+            </Form.Item>
+            <Form.Item name="locationMapId" label={locationLabel}>
+              <Select
+                allowClear
+                showSearch
+                filterOption={false}
+                options={locationOptions.map((item) => ({ value: item.id, label: item.name }))}
+                onFocus={() => void searchLocations('')}
+                onSearch={(value) => void searchLocations(value)}
+              />
+            </Form.Item>
+          </div>
+        ) : (
+          <div className="novel-grid novel-grid--2">
+            <Form.Item name="ownerCharacterId" label={ownerLabel}>
+              <Select
+                allowClear
+                showSearch
+                filterOption={false}
+                options={characterOptions.map((item) => ({ value: item.id, label: item.fullName }))}
+                onFocus={() => void searchCharacters('')}
+                onSearch={(value) => void searchCharacters(value)}
+              />
+            </Form.Item>
+            <Form.Item name="locationMapId" label={locationLabel}>
+              <Select
+                allowClear
+                showSearch
+                filterOption={false}
+                options={locationOptions.map((item) => ({ value: item.id, label: item.name }))}
+                onFocus={() => void searchLocations('')}
+                onSearch={(value) => void searchLocations(value)}
+              />
+            </Form.Item>
+          </div>
+        )}
+        <div className="novel-grid novel-grid--2">
+          <Form.Item name="linkedCharacterIds" label={linkedCharactersLabel}>
+            <Select
+              mode="multiple"
+              allowClear
+              showSearch
+              filterOption={false}
+              options={characterOptions.map((item) => ({ value: item.id, label: item.fullName }))}
+              onFocus={() => void searchCharacters('')}
+              onSearch={(value) => void searchCharacters(value)}
+              placeholder="补充争夺者、线索角色、知情角色"
+            />
+          </Form.Item>
+          <Form.Item name="linkedTimelineEventIds" label={linkedEventsLabel}>
+            <Select
+              mode="multiple"
+              allowClear
+              showSearch
+              filterOption={false}
+              options={eventOptions.map((item) => ({ value: item.id, label: buildEventLabel(item) }))}
+              onFocus={() => void searchEvents('')}
+              onSearch={(value) => void searchEvents(value)}
+              placeholder="绑定首次出现、转手、丢失、回收等事件"
+            />
+          </Form.Item>
+        </div>
+        <div className="novel-grid novel-grid--2">
+          <Form.Item name="factionHint" label="关联势力">
+            <Input placeholder="例如：宗门库房、调查组、军械署" />
+          </Form.Item>
+          <Form.Item name="tags" label="标签">
+            <Select mode="tags" open={false} placeholder="输入后回车，例如：证据、禁物、回收伏笔" />
+          </Form.Item>
+        </div>
+      </section>
+    </Form>
+  )
+
+  const connectionsTabContent = (
+    <div className="novel-support-grid novel-items__support-grid" style={{ marginTop: 20 }}>
+      <WorkspaceTip title="关联人物">
+        {detailContext.ownerCharacter || detailContext.relatedCharacters.length > 0 ? (
+          <div className="novel-items__tip-list">
+            {detailContext.ownerCharacter ? (
+              <div className="novel-items__tip-item">
+                <strong>持有人</strong>
+                <span>{detailContext.ownerCharacter.fullName}</span>
+              </div>
+            ) : null}
+            {detailContext.relatedCharacters.map((character) => (
+              <div key={character.id} className="novel-items__tip-item">
+                <strong>{character.fullName}</strong>
+                <span>{buildSummaryText(character.occupation, character.rankLevel, character.background) || '与该物品直接相关的人物。'}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div>这条记录还没有绑定关键人物。</div>
+        )}
+      </WorkspaceTip>
+
+      <WorkspaceTip title="关联事件与故事弧">
+        {detailContext.relatedEvents.length > 0 || detailContext.relatedArcs.length > 0 || detailContext.relatedLocations.length > 0 ? (
+          <div className="novel-items__tip-list">
+            {detailContext.relatedEvents.map((event) => (
+              <div key={event.id} className="novel-items__tip-item">
+                <strong>{buildEventLabel(event)}</strong>
+                <span>{event.eventSummary || event.eventResult || event.eventProcess || '事件内容待补充。'}</span>
+              </div>
+            ))}
+            {detailContext.relatedArcs.map((arc) => (
+              <div key={arc.id} className="novel-items__tip-item">
+                <strong>{arc.arcName}</strong>
+                <span>{buildArcLabel(arc)}</span>
+              </div>
+            ))}
+            {detailContext.relatedLocations.map((location) => (
+              <div key={location.id} className="novel-items__tip-item">
+                <strong>{location.name}</strong>
+                <span>{buildSummaryText(location.nodeType, location.structureRole, location.plotRelevance) || '关联地点待补充。'}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div>还没有把这条物品挂到时间线或地点上。</div>
+        )}
+      </WorkspaceTip>
+
+      {selectedItem?.itemKind === 'template' ? (
+        <WorkspaceTip title="派生实例">
+          {detailContext.derivedInstances.length > 0 ? (
+            <div className="novel-items__link-grid">
+              {detailContext.derivedInstances.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className="novel-items__linked-card"
+                  onClick={() => void loadItemDetail(item.id)}
+                >
+                  <strong>{item.itemName}</strong>
+                  <span>{item.plotFunction || item.summary || '这个实例还没有补剧情说明。'}</span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div>这个模板还没有派生出实例。</div>
+          )}
+        </WorkspaceTip>
+      ) : (
+        <WorkspaceTip title="同模板实例">
+          {detailContext.siblingInstances.length > 0 ? (
+            <div className="novel-items__link-grid">
+              {detailContext.siblingInstances.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className="novel-items__linked-card"
+                  onClick={() => void loadItemDetail(item.id)}
+                >
+                  <strong>{item.itemName}</strong>
+                  <span>{item.plotFunction || item.summary || '这个实例还没有补剧情说明。'}</span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div>{detailContext.parentTemplate ? '同模板下暂时没有其他实例。' : '当前实例还没有来源模板。'}</div>
+          )}
+        </WorkspaceTip>
+      )}
+    </div>
+  )
+
   return (
     <WorkspacePage
       className="novel-items-page"
@@ -966,328 +1300,39 @@ export default function ItemsWorkspace({ novelId }: Props) {
                 />
               ) : null}
 
-              <div className="novel-support-grid novel-items__support-grid">
-                <WorkspaceTip title="资产概览">
-                  <div className="novel-items__tip-list">
-                    <div className="novel-items__tip-item">
-                      <strong>一句话说明</strong>
-                      <span>{selectedItem?.summary || '还没有一句话摘要。'}</span>
-                    </div>
-                    <div className="novel-items__tip-item">
-                      <strong>外观识别点</strong>
-                      <span>{selectedItem?.appearance || '还没有补充外观。'}</span>
-                    </div>
-                    <div className="novel-items__tip-item">
-                      <strong>分类定位</strong>
-                      <span>{buildSummaryText(selectedItem?.category, selectedItem?.subType, selectedItem?.rarity) || '还没有分类定位。'}</span>
-                    </div>
-                    <div className="novel-items__tip-item">
-                      <strong>主地点</strong>
-                      <span>{buildLocationLabel(detailContext.location)}</span>
-                    </div>
-                  </div>
-                </WorkspaceTip>
-
-                <WorkspaceTip title="来源与流转">
-                  <div className="novel-items__tip-list">
-                    {detailContext.parentTemplate ? (
-                      <button
-                        type="button"
-                        className="novel-items__linked-button"
-                        onClick={() => void loadItemDetail(detailContext.parentTemplate!.id)}
-                      >
-                        查看来源模板 · {detailContext.parentTemplate.itemName}
-                      </button>
-                    ) : (
-                      <div className="novel-items__tip-item">
-                        <strong>来源模板</strong>
-                        <span>{selectedItem?.itemKind === 'template' ? '当前记录本身就是模板。' : '这是一个独立实例。'}</span>
-                      </div>
-                    )}
-                    <div className="novel-items__tip-item">
-                      <strong>获取方式</strong>
-                      <span>{selectedItem?.acquisitionMethod || '还没有写明如何获得。'}</span>
-                    </div>
-                    <div className="novel-items__tip-item">
-                      <strong>使用方式</strong>
-                      <span>{selectedItem?.usageMethod || '还没有写明如何使用。'}</span>
-                    </div>
-                    <div className="novel-items__tip-item">
-                      <strong>代价 / 风险</strong>
-                      <span>{buildSummaryText(selectedItem?.cost, selectedItem?.risk) || '还没有明确代价与风险。'}</span>
-                    </div>
-                    {detailContext.sourceContexts.length > 0 ? (
-                      <div className="novel-items__tip-item">
-                        <strong>自动发现来源</strong>
-                        <span>{detailContext.sourceContexts.map(buildSourceLabel).join('；')}</span>
-                      </div>
-                    ) : null}
-                  </div>
-                </WorkspaceTip>
-              </div>
-
-              <Form form={form} layout="vertical">
-                <section className="novel-form-section">
-                  <div className="novel-form-section__header">
-                    <div className="novel-form-section__title">基础标识</div>
-                    <div className="novel-form-section__desc">先把类型、名称、分类和状态定准，这决定它会如何进入模板 / 实例链路。</div>
-                  </div>
-                  <div className="novel-grid novel-grid--3">
-                    <Form.Item name="itemKind" label="记录类型" rules={[{ required: true, message: '请选择记录类型' }]}>
-                      <Select options={ITEM_KIND_OPTIONS as unknown as Array<{ value: StoryItem['itemKind']; label: string }>} />
-                    </Form.Item>
-                    <Form.Item name="category" label="主分类">
-                      <Input placeholder="例如：武器、证据、药品、装备" />
-                    </Form.Item>
-                    <Form.Item name="subType" label="细分类">
-                      <Input placeholder="进一步说明形态或用途" />
-                    </Form.Item>
-                  </div>
-                  <div className="novel-grid novel-grid--3">
-                    <Form.Item name="itemName" label="名称" rules={[{ required: true, message: '请输入物品名称' }]}>
-                      <Input placeholder="写得像剧情里真实会出现的物品" />
-                    </Form.Item>
-                    <Form.Item name="rarity" label="稀有度">
-                      <Select allowClear options={rarityOptions.map((value) => ({ value, label: value }))} />
-                    </Form.Item>
-                    <Form.Item name="status" label="状态">
-                      <Select options={STATUS_OPTIONS as unknown as Array<{ value: StoryItem['status']; label: string }>} />
-                    </Form.Item>
-                  </div>
-                </section>
-
-                <section className="novel-form-section">
-                  <div className="novel-form-section__header">
-                    <div className="novel-form-section__title">叙事概览</div>
-                    <div className="novel-form-section__desc">把“它是什么、长什么样、为什么重要”讲清楚，否则实例无法形成完整闭环。</div>
-                  </div>
-                  <div className="novel-grid novel-grid--2">
-                    <Form.Item name="summary" label="一句话说明">
-                      <Input.TextArea rows={3} placeholder="一句话说清它是什么" />
-                    </Form.Item>
-                    <Form.Item name="appearance" label="外观识别点">
-                      <Input.TextArea rows={3} placeholder="写辨识点，不要堆砌形容词" />
-                    </Form.Item>
-                  </div>
-                  <Form.Item name="plotFunction" label="剧情作用">
-                    <Input.TextArea rows={3} placeholder="说清它推动哪条冲突、哪段转折或哪次回收" />
-                  </Form.Item>
-                </section>
-
-                <section className="novel-form-section">
-                  <div className="novel-form-section__header">
-                    <div className="novel-form-section__title">流转与代价</div>
-                    <div className="novel-form-section__desc">把得到方式、使用条件、代价和风险写全，才能避免物品只是“有名字没用法”。</div>
-                  </div>
-                  <div className="novel-grid novel-grid--2">
-                    <Form.Item name="acquisitionMethod" label="获取方式">
-                      <Input.TextArea rows={3} placeholder="是谁给的、在哪拿到、付出了什么" />
-                    </Form.Item>
-                    <Form.Item name="usageMethod" label="使用方式">
-                      <Input.TextArea rows={3} placeholder="如何触发、如何维护、如何消耗" />
-                    </Form.Item>
-                  </div>
-                  <div className="novel-grid novel-grid--2">
-                    <Form.Item name="cost" label="代价">
-                      <Input.TextArea rows={3} placeholder="明确资源消耗、身份代价或行动门槛" />
-                    </Form.Item>
-                    <Form.Item name="risk" label="风险">
-                      <Input.TextArea rows={3} placeholder="明确副作用、暴露风险或后果" />
-                    </Form.Item>
-                  </div>
-                </section>
-
-                <section className="novel-form-section">
-                  <div className="novel-form-section__header">
-                    <div className="novel-form-section__title">关系与锚点</div>
-                    <div className="novel-form-section__desc">这里决定它和人物、地点、事件的闭环关系。实例应尽量填满，模板至少留下可派生的锚点。</div>
-                  </div>
-                  {currentItemKind === 'instance' ? (
-                    <div className="novel-grid novel-grid--3">
-                      <Form.Item name="parentItemId" label="来源模板">
-                        <Select
-                          allowClear
-                          showSearch
-                          filterOption={false}
-                          options={templateOptions.map((item) => ({ value: item.id, label: item.itemName }))}
-                          onFocus={() => void searchTemplates('')}
-                          onSearch={(value) => void searchTemplates(value)}
-                          placeholder="实例可选择一个模板作为来源"
-                        />
-                      </Form.Item>
-                      <Form.Item name="ownerCharacterId" label={ownerLabel}>
-                        <Select
-                          allowClear
-                          showSearch
-                          filterOption={false}
-                          options={characterOptions.map((item) => ({ value: item.id, label: item.fullName }))}
-                          onFocus={() => void searchCharacters('')}
-                          onSearch={(value) => void searchCharacters(value)}
-                        />
-                      </Form.Item>
-                      <Form.Item name="locationMapId" label={locationLabel}>
-                        <Select
-                          allowClear
-                          showSearch
-                          filterOption={false}
-                          options={locationOptions.map((item) => ({ value: item.id, label: item.name }))}
-                          onFocus={() => void searchLocations('')}
-                          onSearch={(value) => void searchLocations(value)}
-                        />
-                      </Form.Item>
-                    </div>
-                  ) : (
-                    <div className="novel-grid novel-grid--2">
-                      <Form.Item name="ownerCharacterId" label={ownerLabel}>
-                        <Select
-                          allowClear
-                          showSearch
-                          filterOption={false}
-                          options={characterOptions.map((item) => ({ value: item.id, label: item.fullName }))}
-                          onFocus={() => void searchCharacters('')}
-                          onSearch={(value) => void searchCharacters(value)}
-                        />
-                      </Form.Item>
-                      <Form.Item name="locationMapId" label={locationLabel}>
-                        <Select
-                          allowClear
-                          showSearch
-                          filterOption={false}
-                          options={locationOptions.map((item) => ({ value: item.id, label: item.name }))}
-                          onFocus={() => void searchLocations('')}
-                          onSearch={(value) => void searchLocations(value)}
-                        />
-                      </Form.Item>
-                    </div>
-                  )}
-                  <div className="novel-grid novel-grid--2">
-                    <Form.Item name="linkedCharacterIds" label={linkedCharactersLabel}>
-                      <Select
-                        mode="multiple"
-                        allowClear
-                        showSearch
-                        filterOption={false}
-                        options={characterOptions.map((item) => ({ value: item.id, label: item.fullName }))}
-                        onFocus={() => void searchCharacters('')}
-                        onSearch={(value) => void searchCharacters(value)}
-                        placeholder="补充争夺者、线索角色、知情角色"
-                      />
-                    </Form.Item>
-                    <Form.Item name="linkedTimelineEventIds" label={linkedEventsLabel}>
-                      <Select
-                        mode="multiple"
-                        allowClear
-                        showSearch
-                        filterOption={false}
-                        options={eventOptions.map((item) => ({ value: item.id, label: buildEventLabel(item) }))}
-                        onFocus={() => void searchEvents('')}
-                        onSearch={(value) => void searchEvents(value)}
-                        placeholder="绑定首次出现、转手、丢失、回收等事件"
-                      />
-                    </Form.Item>
-                  </div>
-                  <div className="novel-grid novel-grid--2">
-                    <Form.Item name="factionHint" label="关联势力">
-                      <Input placeholder="例如：宗门库房、调查组、军械署" />
-                    </Form.Item>
-                    <Form.Item name="tags" label="标签">
-                      <Select mode="tags" open={false} placeholder="输入后回车，例如：证据、禁物、回收伏笔" />
-                    </Form.Item>
-                  </div>
-                </section>
-              </Form>
-
-              <div className="novel-support-grid novel-items__support-grid" style={{ marginTop: 20 }}>
-                <WorkspaceTip title="关联人物">
-                  {detailContext.ownerCharacter || detailContext.relatedCharacters.length > 0 ? (
-                    <div className="novel-items__tip-list">
-                      {detailContext.ownerCharacter ? (
-                        <div className="novel-items__tip-item">
-                          <strong>持有人</strong>
-                          <span>{detailContext.ownerCharacter.fullName}</span>
-                        </div>
-                      ) : null}
-                      {detailContext.relatedCharacters.map((character) => (
-                        <div key={character.id} className="novel-items__tip-item">
-                          <strong>{character.fullName}</strong>
-                          <span>{buildSummaryText(character.occupation, character.rankLevel, character.background) || '与该物品直接相关的人物。'}</span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div>这条记录还没有绑定关键人物。</div>
-                  )}
-                </WorkspaceTip>
-
-                <WorkspaceTip title="关联事件与故事弧">
-                  {detailContext.relatedEvents.length > 0 || detailContext.relatedArcs.length > 0 || detailContext.relatedLocations.length > 0 ? (
-                    <div className="novel-items__tip-list">
-                      {detailContext.relatedEvents.map((event) => (
-                        <div key={event.id} className="novel-items__tip-item">
-                          <strong>{buildEventLabel(event)}</strong>
-                          <span>{event.eventSummary || event.eventResult || event.eventProcess || '事件内容待补充。'}</span>
-                        </div>
-                      ))}
-                      {detailContext.relatedArcs.map((arc) => (
-                        <div key={arc.id} className="novel-items__tip-item">
-                          <strong>{arc.arcName}</strong>
-                          <span>{buildArcLabel(arc)}</span>
-                        </div>
-                      ))}
-                      {detailContext.relatedLocations.map((location) => (
-                        <div key={location.id} className="novel-items__tip-item">
-                          <strong>{location.name}</strong>
-                          <span>{buildSummaryText(location.nodeType, location.structureRole, location.plotRelevance) || '关联地点待补充。'}</span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div>还没有把这条物品挂到时间线或地点上。</div>
-                  )}
-                </WorkspaceTip>
-
-                {selectedItem?.itemKind === 'template' ? (
-                  <WorkspaceTip title="派生实例">
-                    {detailContext.derivedInstances.length > 0 ? (
-                      <div className="novel-items__link-grid">
-                        {detailContext.derivedInstances.map((item) => (
-                          <button
-                            key={item.id}
-                            type="button"
-                            className="novel-items__linked-card"
-                            onClick={() => void loadItemDetail(item.id)}
-                          >
-                            <strong>{item.itemName}</strong>
-                            <span>{item.plotFunction || item.summary || '这个实例还没有补剧情说明。'}</span>
-                          </button>
-                        ))}
-                      </div>
-                    ) : (
-                      <div>这个模板还没有派生出实例。</div>
-                    )}
-                  </WorkspaceTip>
-                ) : (
-                  <WorkspaceTip title="同模板实例">
-                    {detailContext.siblingInstances.length > 0 ? (
-                      <div className="novel-items__link-grid">
-                        {detailContext.siblingInstances.map((item) => (
-                          <button
-                            key={item.id}
-                            type="button"
-                            className="novel-items__linked-card"
-                            onClick={() => void loadItemDetail(item.id)}
-                          >
-                            <strong>{item.itemName}</strong>
-                            <span>{item.plotFunction || item.summary || '这个实例还没有补剧情说明。'}</span>
-                          </button>
-                        ))}
-                      </div>
-                    ) : (
-                      <div>{detailContext.parentTemplate ? '同模板下暂时没有其他实例。' : '当前实例还没有来源模板。'}</div>
-                    )}
-                  </WorkspaceTip>
-                )}
-              </div>
+              <Tabs
+                activeKey={activeEditorTab}
+                onChange={setActiveEditorTab}
+                items={[
+                  {
+                    key: 'overview',
+                    label: '概览',
+                    children: (
+                      <React.Suspense fallback={<div className="novel-empty"><Spin /></div>}>
+                        <OverviewTab content={overviewTabContent} />
+                      </React.Suspense>
+                    ),
+                  },
+                  {
+                    key: 'details',
+                    label: '字段编辑',
+                    children: (
+                      <React.Suspense fallback={<div className="novel-empty"><Spin /></div>}>
+                        <DetailsTab content={detailsTabContent} />
+                      </React.Suspense>
+                    ),
+                  },
+                  {
+                    key: 'connections',
+                    label: '关联上下文',
+                    children: (
+                      <React.Suspense fallback={<div className="novel-empty"><Spin /></div>}>
+                        <ConnectionsTab content={connectionsTabContent} />
+                      </React.Suspense>
+                    ),
+                  },
+                ]}
+              />
             </>
           )}
         </WorkspacePanel>

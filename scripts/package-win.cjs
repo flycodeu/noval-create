@@ -49,6 +49,19 @@ function runNodeScript(scriptPath, scriptArgs, options = {}) {
   return runProcess(process.execPath, [scriptPath, ...scriptArgs], options)
 }
 
+function runNpmScript(scriptName, options = {}) {
+  const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+  return runProcess(npmCommand, ['run', scriptName], options)
+}
+
+function runTestPreflight() {
+  process.stdout.write('[package:win] Running npm test before packaging.\n')
+  const result = runNpmScript('test')
+  if (result.status !== 0) {
+    process.exit(result.status || 1)
+  }
+}
+
 function hasNsisBundle(targetDir) {
   return fs.existsSync(path.join(targetDir, 'Bin', 'makensis.exe'))
     && fs.existsSync(path.join(targetDir, 'elevate.exe'))
@@ -215,6 +228,8 @@ function buildSigned() {
   signFiles(collectReleaseExecutables())
   process.exit(0)
 }
+
+runTestPreflight()
 
 if (signed) {
   buildSigned()

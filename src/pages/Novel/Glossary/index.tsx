@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Form, Input, List, Select, Space, Switch, Tag, message } from 'antd'
 import { DeleteOutlined, PlusOutlined, SaveOutlined } from '@ant-design/icons'
 import AIGenerateButton from '../../../components/AIGenerateButton'
-import { getErrorMessage } from '@/utils/user-facing-message'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import type { GlossaryEntry } from '../../../types'
 import { parseGlossaryAliases, stringifyGlossaryAliases } from '../../../shared/glossary'
 import { useNovelStore } from '../../../stores/novel.store'
@@ -138,11 +138,11 @@ export default function GlossaryPage({ novelId }: Props) {
       }
       if (selectedId) {
         await window.electron.glossary.update(selectedId, payload)
-        message.success('术语已更新')
+        message.success(getUserFacingMessage('glossary.updated'))
       } else {
         const id = await window.electron.glossary.create(novelId, payload)
         setSelectedId(id)
-        message.success('术语已创建')
+        message.success(getUserFacingMessage('glossary.created'))
       }
       notifyWorkspaceMutation()
       await refresh()
@@ -158,7 +158,7 @@ export default function GlossaryPage({ novelId }: Props) {
     if (!selectedItem) return
     try {
       await window.electron.glossary.delete(selectedItem.id)
-      message.success('术语已删除')
+      message.success(getUserFacingMessage('glossary.deleted'))
       setSelectedId(null)
       form.setFieldsValue(EMPTY_VALUES)
       notifyWorkspaceMutation()
