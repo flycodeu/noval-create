@@ -59,6 +59,7 @@ import * as revisionTaskService from './services/revision-task.service'
 import * as sceneTemplateService from './services/scene-template.service'
 import * as storyStructureService from './services/story-structure.service'
 import * as storyThreadService from './services/story-thread.service'
+import * as workspaceQualityService from './services/workspace-quality.service'
 import * as workflowTaskService from './services/workflow-task.service'
 import { discoverEntitiesFromContent } from './services/entity-discovery.service'
 import { parseObjectPayload, requireId, requireIds, requireObject, requireString } from './utils/ipc-validate'
@@ -1187,6 +1188,8 @@ function registerIpcHandlers() {
 
     return enhanceAiScoreResult(safeParseJson(result), data.content)
   })
+  handle('ai:analyzeWorkspaceQuality', (_, data) => workspaceQualityService.analyzeWorkspaceQuality(requireObject(data)))
+  handle('ai:repairWorkspaceQuality', (_, data) => workspaceQualityService.repairWorkspaceQuality(requireObject(data)))
 }
 
 

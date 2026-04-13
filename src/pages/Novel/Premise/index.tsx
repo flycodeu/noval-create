@@ -43,6 +43,10 @@ import {
   WorkspacePage,
   WorkspacePanel,
 } from '../components/WorkspaceShell'
+import {
+  type RegisteredWorkspaceQualityController,
+  useRegisterWorkspaceQualityController,
+} from '../workspace-quality-context'
 
 interface Props {
   novelId: number
@@ -285,6 +289,43 @@ export default function PremisePage({ novelId }: Props) {
     markApplied(pendingResultKey, mode)
     await syncDraftApplied(pendingResult.result, mode)
   }
+
+  const workspaceQualityController = useMemo<RegisteredWorkspaceQualityController>(() => ({
+    workspaceKey: 'core-settings',
+    getSnapshot: () => {
+      const values = form.getFieldsValue(true)
+      return {
+        scope: 'form',
+        fields: {
+          positioning: typeof values.positioning === 'string' ? values.positioning.trim() : '',
+          coreHook: typeof values.coreHook === 'string' ? values.coreHook.trim() : '',
+          protagonistStart: typeof values.protagonistStart === 'string' ? values.protagonistStart.trim() : '',
+          constraints: typeof values.constraints === 'string' ? values.constraints.trim() : '',
+          languageGuardrails: typeof values.languageGuardrails === 'string' ? values.languageGuardrails.trim() : '',
+          antiAiFlavor: typeof values.antiAiFlavor === 'string' ? values.antiAiFlavor.trim() : '',
+          commonSenseRules: typeof values.commonSenseRules === 'string' ? values.commonSenseRules.trim() : '',
+          bannedTerms: typeof values.bannedTerms === 'string' ? values.bannedTerms.trim() : '',
+        },
+      }
+    },
+    applySnapshot: async (nextSnapshot) => {
+      const fields = nextSnapshot.fields && typeof nextSnapshot.fields === 'object'
+        ? nextSnapshot.fields as Partial<PremiseFormValues>
+        : {}
+      form.setFieldsValue({
+        positioning: typeof fields.positioning === 'string' ? fields.positioning : undefined,
+        coreHook: typeof fields.coreHook === 'string' ? fields.coreHook : undefined,
+        protagonistStart: typeof fields.protagonistStart === 'string' ? fields.protagonistStart : undefined,
+        constraints: typeof fields.constraints === 'string' ? fields.constraints : undefined,
+        languageGuardrails: typeof fields.languageGuardrails === 'string' ? fields.languageGuardrails : undefined,
+        antiAiFlavor: typeof fields.antiAiFlavor === 'string' ? fields.antiAiFlavor : undefined,
+        commonSenseRules: typeof fields.commonSenseRules === 'string' ? fields.commonSenseRules : undefined,
+        bannedTerms: typeof fields.bannedTerms === 'string' ? fields.bannedTerms : undefined,
+      })
+    },
+  }), [form])
+
+  useRegisterWorkspaceQualityController(workspaceQualityController)
 
   const handleSave = async () => {
     const values = await form.validateFields()

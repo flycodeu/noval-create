@@ -44,6 +44,10 @@ import {
   WorkspacePage,
   WorkspacePanel,
 } from '../components/WorkspaceShell'
+import {
+  type RegisteredWorkspaceQualityController,
+  useRegisterWorkspaceQualityController,
+} from '../workspace-quality-context'
 
 interface Props {
   novelId: number
@@ -243,6 +247,19 @@ export default function WorldRules({ novelId }: Props) {
   const calendarLabel = CALENDAR_OPTIONS.find((item) => item.value === liveRules.timelineConfig.calendarType)?.label
     || liveRules.timelineConfig.calendarType
     || '未设置'
+
+  const workspaceQualityController = useMemo<RegisteredWorkspaceQualityController>(() => ({
+    workspaceKey: 'world-rules',
+    getSnapshot: () => ({
+      scope: 'form',
+      ...JSON.parse(JSON.stringify(liveRules)) as GenreWorldRules,
+    }),
+    applySnapshot: async (nextSnapshot) => {
+      form.setFieldsValue(normalizeFormRules(nextSnapshot, currentNovel?.genreName))
+    },
+  }), [currentNovel?.genreName, form, liveRules])
+
+  useRegisterWorkspaceQualityController(workspaceQualityController)
 
   const handleSave = async () => {
     setSaving(true)

@@ -44,6 +44,7 @@ import Writing from './Writing'
 import RevisionCenterPage from './RevisionCenter'
 import QualityDashboard from './QualityDashboard'
 import WorkspaceErrorBoundary from './components/WorkspaceErrorBoundary'
+import WorkspaceAIQualityBoard from './components/WorkspaceAIQualityBoard'
 import {
   EMPTY_WORKFLOW_STATS,
   getGuidedStepProgressMap,
@@ -54,6 +55,10 @@ import {
   type WorkflowStats,
 } from './workflow'
 import { NovelWorkspaceActionsProvider } from './workspace-shortcuts'
+import {
+  NovelWorkspaceQualityProvider,
+  type RegisteredWorkspaceQualityController,
+} from './workspace-quality-context'
 import type { Chapter, OperationLog } from '../../types'
 
 type ProWorkspaceKey =
@@ -197,6 +202,8 @@ export default function NovelRouter() {
   const [quickSearchResults, setQuickSearchResults] = useState<WorkspaceSearchResult[]>([])
   const [latestUndoable, setLatestUndoable] = useState<OperationLog | null>(null)
   const [workspaceMutationToken, setWorkspaceMutationToken] = useState(0)
+  const [qualityBoardOpen, setQualityBoardOpen] = useState(false)
+  const [workspaceQualityController, setWorkspaceQualityController] = useState<RegisteredWorkspaceQualityController | null>(null)
 
   const novelId = Number.parseInt(id || '0', 10)
   const workspaceGroups = useMemo(() => WORKSPACE_GROUPS, [])
@@ -237,6 +244,10 @@ export default function NovelRouter() {
   const nextPageMeta = currentPageIndex >= 0 && currentPageIndex < workspaceItems.length - 1
     ? workspaceItems[currentPageIndex + 1]
     : null
+  const currentChapter = useMemo(
+    () => chapters.find((chapter) => chapter.id === currentChapterId) || null,
+    [chapters, currentChapterId],
+  )
 
   const guidedProgressMap = useMemo(
     () => getGuidedStepProgressMap(currentNovel, workflowStats),
@@ -404,6 +415,12 @@ export default function NovelRouter() {
     setWorkspaceMutationToken((current) => current + 1)
     void Promise.all([refreshWorkflowStats(), refreshUndoable()])
   }, [refreshUndoable, refreshWorkflowStats])
+  const registerWorkspaceQualityController = useCallback((controller: RegisteredWorkspaceQualityController | null) => {
+    setWorkspaceQualityController(controller)
+    return () => {
+      setWorkspaceQualityController((current) => (current === controller ? null : current))
+    }
+  }, [])
 
   const ensureChapterListLoaded = useCallback(async (): Promise<Chapter[]> => {
     if (chapters.length > 0) return chapters
@@ -654,6 +671,15 @@ export default function NovelRouter() {
     }
   }, [legacyRouteTarget, loading, navigate, novelId, pathSegment, recommendedKey, workspaceItems])
 
+  useEffect(() => {
+    setQualityBoardOpen(false)
+  }, [currentPage])
+
+  const workspaceQuality = useMemo(() => ({
+    controller: workspaceQualityController,
+    registerController: registerWorkspaceQualityController,
+  }), [registerWorkspaceQualityController, workspaceQualityController])
+
   if (loading) {
     return (
       <div className="novel-route-shell novel-route-shell--loading">
@@ -670,6 +696,7 @@ export default function NovelRouter() {
         registerEscapeHandler,
         notifyWorkspaceMutation,
       }}>
+      <NovelWorkspaceQualityProvider value={workspaceQuality}>
       <div className="novel-route-shell novel-route-shell--single">
       <aside className="novel-route-shell__sidebar">
         <div className="novel-sidebar__title-block">
@@ -734,6 +761,11 @@ export default function NovelRouter() {
               <Button onClick={() => void ensureChapterListLoaded().then(() => setChapterJumpOpen(true)).catch(console.error)}>
                 跳转章节
               </Button>
+              {currentPage !== 'guide' && currentPage !== 'quality' ? (
+                <Button icon={<BarChartOutlined />} onClick={() => setQualityBoardOpen(true)}>
+                  AI质量看板
+                </Button>
+              ) : null}
               <Button
                 icon={<RollbackOutlined />}
                 disabled={!latestUndoable}
@@ -814,6 +846,20 @@ export default function NovelRouter() {
         </div>
       </main>
       </div>
+      {currentPage !== 'guide' && currentPage !== 'quality' ? (
+        <WorkspaceAIQualityBoard
+          open={qualityBoardOpen}
+          onClose={() => setQualityBoardOpen(false)}
+          workspaceKey={currentPage as Exclude<ProWorkspaceKey, 'guide' | 'quality'>}
+          workspaceLabel={currentPageMeta?.label || currentPage}
+          workspaceSummary={currentPageMeta?.summary || ''}
+          novelId={novelId}
+          currentNovel={currentNovel}
+          currentChapter={currentChapter}
+          controller={workspaceQualityController}
+          onApplied={notifyWorkspaceMutation}
+        />
+      ) : null}
       <Modal
         title="工作区搜索"
         open={quickSearchOpen}
@@ -898,6 +944,7 @@ export default function NovelRouter() {
           <div className="novel-note-list__item">正文写作页额外支持 `Ctrl/Cmd+Z` / `Ctrl/Cmd+Shift+Z` 本地撤销重做。</div>
         </div>
       </Modal>
+      </NovelWorkspaceQualityProvider>
       </NovelWorkspaceActionsProvider>
     </WorkspaceErrorBoundary>
   )

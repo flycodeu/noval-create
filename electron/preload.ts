@@ -417,6 +417,8 @@ const api = {
       novelBackground: string
       modelConfigId?: number
     }) => invokeIpc('ai:scoreContent', data),
+    analyzeWorkspaceQuality: (data: unknown) => invokeIpc('ai:analyzeWorkspaceQuality', data),
+    repairWorkspaceQuality: (data: unknown) => invokeIpc('ai:repairWorkspaceQuality', data),
   },
 
   // Event listeners

@@ -20,6 +20,10 @@ import {
   WorkspacePage,
   WorkspacePanel,
 } from '../components/WorkspaceShell'
+import {
+  type RegisteredWorkspaceQualityController,
+  useRegisterWorkspaceQualityController,
+} from '../workspace-quality-context'
 import { loadWorkflowStats } from '../workflow'
 
 interface Props {
@@ -158,6 +162,40 @@ export default function ProjectBriefPage({ novelId }: Props) {
     pageKey: 'project-brief',
     applyDraft: applyProjectBriefDraft,
   })
+
+  const workspaceQualityController = useMemo<RegisteredWorkspaceQualityController>(() => ({
+    workspaceKey: 'project-brief',
+    getSnapshot: () => ({
+      scope: 'form',
+      fields: normalizeFormValues(buildCurrentFormValues(snapshot, form.getFieldsValue(true))),
+    }),
+    applySnapshot: async (nextSnapshot) => {
+      const fields = nextSnapshot.fields && typeof nextSnapshot.fields === 'object'
+        ? nextSnapshot.fields as Partial<ProjectBriefFormValues>
+        : {}
+      applyProjectBriefDraft({
+        platformMode: fields.platformMode,
+        targetAudience: typeof fields.targetAudience === 'string' ? fields.targetAudience : undefined,
+        targetReader: typeof fields.targetReader === 'string' ? fields.targetReader : undefined,
+        readerPromise: typeof fields.readerPromise === 'string' ? fields.readerPromise : undefined,
+        sellingPoints: typeof fields.sellingPoints === 'string' ? fields.sellingPoints : undefined,
+        compTitles: typeof fields.compTitles === 'string' ? fields.compTitles : undefined,
+        tabooRules: typeof fields.tabooRules === 'string' ? fields.tabooRules : undefined,
+        deliveryRhythm: typeof fields.deliveryRhythm === 'string' ? fields.deliveryRhythm : undefined,
+      })
+    },
+    persistPreview: async (nextSnapshot, preview) => {
+      const fields = nextSnapshot.fields && typeof nextSnapshot.fields === 'object'
+        ? nextSnapshot.fields as Partial<ProjectBriefFormValues>
+        : {}
+      await saveAppliedDraft(normalizeFormValues(buildCurrentFormValues(snapshot, fields)), preview.warnings, 'project-brief', {
+        inputSummary: 'AI质量修复',
+        rawOutputs: [JSON.stringify(preview.patchedSnapshot)],
+      })
+    },
+  }), [form, saveAppliedDraft, snapshot])
+
+  useRegisterWorkspaceQualityController(workspaceQualityController)
 
   const handleSave = async () => {
     const values = normalizeFormValues(await form.validateFields())

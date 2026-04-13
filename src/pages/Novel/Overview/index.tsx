@@ -28,6 +28,10 @@ import {
   WorkspacePage,
   WorkspacePanel,
 } from '../components/WorkspaceShell'
+import {
+  type RegisteredWorkspaceQualityController,
+  useRegisterWorkspaceQualityController,
+} from '../workspace-quality-context'
 import { loadWorkflowStats } from '../workflow'
 
 interface Props {
@@ -227,6 +231,52 @@ export default function Overview({ novelId }: Props) {
     pageKey: 'overview',
     applyDraft: applyOverviewDraft,
   })
+
+  const workspaceQualityController = useMemo<RegisteredWorkspaceQualityController>(() => ({
+    workspaceKey: 'overview',
+    getSnapshot: () => {
+      const values = form.getFieldsValue(true)
+      return {
+        scope: 'form',
+        fields: {
+          title: values.title || '',
+          synopsis: values.synopsis || '',
+          userBackground: values.userBackground || '',
+          expandedBackground: values.expandedBackground || '',
+          targetWords: normalizeTargetWords(values.targetWords),
+        },
+      }
+    },
+    applySnapshot: async (nextSnapshot) => {
+      const fields = nextSnapshot.fields && typeof nextSnapshot.fields === 'object'
+        ? nextSnapshot.fields as Partial<OverviewFormValues>
+        : {}
+      applyOverviewDraft({
+        title: typeof fields.title === 'string' ? fields.title : undefined,
+        synopsis: typeof fields.synopsis === 'string' ? fields.synopsis : undefined,
+        userBackground: typeof fields.userBackground === 'string' ? fields.userBackground : undefined,
+        expandedBackground: typeof fields.expandedBackground === 'string' ? fields.expandedBackground : undefined,
+        targetWords: normalizeTargetWords(fields.targetWords),
+      })
+    },
+    persistPreview: async (nextSnapshot, preview) => {
+      const fields = nextSnapshot.fields && typeof nextSnapshot.fields === 'object'
+        ? nextSnapshot.fields as Partial<OverviewFormValues>
+        : {}
+      await saveAppliedDraft({
+        title: typeof fields.title === 'string' ? fields.title : '',
+        synopsis: typeof fields.synopsis === 'string' ? fields.synopsis : '',
+        userBackground: typeof fields.userBackground === 'string' ? fields.userBackground : '',
+        expandedBackground: typeof fields.expandedBackground === 'string' ? fields.expandedBackground : '',
+        targetWords: normalizeTargetWords(fields.targetWords),
+      }, preview.warnings, 'overview', {
+        inputSummary: 'AI质量修复',
+        rawOutputs: [JSON.stringify(preview.patchedSnapshot)],
+      })
+    },
+  }), [form, saveAppliedDraft])
+
+  useRegisterWorkspaceQualityController(workspaceQualityController)
 
   const handleApplyDraft = (raw: string) => {
     const parsedDraft = parseDraftJson<OverviewFormValues>(raw)

@@ -37,6 +37,10 @@ import {
   WorkspacePage,
   WorkspacePanel,
 } from '../components/WorkspaceShell'
+import {
+  type RegisteredWorkspaceQualityController,
+  useRegisterWorkspaceQualityController,
+} from '../workspace-quality-context'
 import { usePlanningDraft } from '../shared/planning-draft'
 
 interface Props {
@@ -303,6 +307,59 @@ export default function CoreSettings({ novelId }: Props) {
     pageKey: 'story-design',
     applyDraft: applyStoryDesignDraft,
   })
+
+  const workspaceQualityController = useMemo<RegisteredWorkspaceQualityController>(() => ({
+    workspaceKey: 'story-design',
+    getSnapshot: () => {
+      const values = form.getFieldsValue(true)
+      return {
+        scope: 'form',
+        fields: {
+          story_goal: typeof values.story_goal === 'string' ? values.story_goal.trim() : '',
+          core_conflict: typeof values.core_conflict === 'string' ? values.core_conflict.trim() : '',
+          main_plot: typeof values.main_plot === 'string' ? values.main_plot.trim() : '',
+          rhythm_setup: typeof values.rhythm_setup === 'number' ? values.rhythm_setup : settings.storyDesign.rhythmSetup ?? 30,
+          rhythm_conflict: typeof values.rhythm_conflict === 'number' ? values.rhythm_conflict : settings.storyDesign.rhythmConflict ?? 50,
+          rhythm_ending: typeof values.rhythm_ending === 'number' ? values.rhythm_ending : settings.storyDesign.rhythmEnding ?? 20,
+          ending_type: typeof values.ending_type === 'string' ? values.ending_type : '',
+          ending: typeof values.ending === 'string' ? values.ending.trim() : '',
+          subplot_batch_count: batchCount,
+        },
+        subplots: normalizeSubplots(subplots),
+      }
+    },
+    applySnapshot: async (nextSnapshot) => {
+      const fields = nextSnapshot.fields && typeof nextSnapshot.fields === 'object'
+        ? nextSnapshot.fields as Partial<StoryDesignFormValues>
+        : {}
+      applyStoryDesignDraft({
+        ...fields,
+        subplots: Array.isArray(nextSnapshot.subplots) ? nextSnapshot.subplots as SubPlot[] : undefined,
+      })
+    },
+    persistPreview: async (nextSnapshot, preview) => {
+      const fields = nextSnapshot.fields && typeof nextSnapshot.fields === 'object'
+        ? nextSnapshot.fields as Partial<StoryDesignFormValues>
+        : {}
+      await saveAppliedDraft({
+        story_goal: typeof fields.story_goal === 'string' ? fields.story_goal : '',
+        core_conflict: typeof fields.core_conflict === 'string' ? fields.core_conflict : '',
+        main_plot: typeof fields.main_plot === 'string' ? fields.main_plot : '',
+        rhythm_setup: typeof fields.rhythm_setup === 'number' ? fields.rhythm_setup : settings.storyDesign.rhythmSetup ?? 30,
+        rhythm_conflict: typeof fields.rhythm_conflict === 'number' ? fields.rhythm_conflict : settings.storyDesign.rhythmConflict ?? 50,
+        rhythm_ending: typeof fields.rhythm_ending === 'number' ? fields.rhythm_ending : settings.storyDesign.rhythmEnding ?? 20,
+        ending_type: typeof fields.ending_type === 'string' ? fields.ending_type : '',
+        ending: typeof fields.ending === 'string' ? fields.ending : '',
+        subplot_batch_count: typeof fields.subplot_batch_count === 'number' ? fields.subplot_batch_count : batchCount,
+        subplots: Array.isArray(nextSnapshot.subplots) ? normalizeSubplots(nextSnapshot.subplots as SubPlot[]) : normalizeSubplots(subplots),
+      }, preview.warnings, 'story-design', {
+        inputSummary: 'AI质量修复',
+        rawOutputs: [JSON.stringify(preview.patchedSnapshot)],
+      })
+    },
+  }), [batchCount, form, saveAppliedDraft, settings.storyDesign.rhythmConflict, settings.storyDesign.rhythmEnding, settings.storyDesign.rhythmSetup, subplots])
+
+  useRegisterWorkspaceQualityController(workspaceQualityController)
 
   const subplotBoard = useMemo(() => {
     const lanes = SUBPLOT_LANES.map((lane) => ({

@@ -32,6 +32,10 @@ import {
   WorkspacePage,
   WorkspacePanel,
 } from '../components/WorkspaceShell'
+import {
+  type RegisteredWorkspaceQualityController,
+  useRegisterWorkspaceQualityController,
+} from '../workspace-quality-context'
 import { loadWorkflowStats } from '../workflow'
 
 interface Props {
@@ -258,6 +262,49 @@ export default function ThemeVoicePage({ novelId }: Props) {
     pageKey: 'theme-voice',
     applyDraft: applyThemeVoiceDraft,
   })
+
+  const workspaceQualityController = useMemo<RegisteredWorkspaceQualityController>(() => ({
+    workspaceKey: 'theme-voice',
+    getSnapshot: () => ({
+      scope: 'form',
+      fields: normalizeFormValues(buildCurrentFormValues(snapshot, form.getFieldsValue(true))),
+    }),
+    applySnapshot: async (nextSnapshot) => {
+      const fields = nextSnapshot.fields && typeof nextSnapshot.fields === 'object'
+        ? nextSnapshot.fields as Partial<ThemeVoiceFormValues>
+        : {}
+      applyThemeVoiceDraft({
+        writingContractTags: Array.isArray(fields.writingContractTags) ? fields.writingContractTags : undefined,
+        theme: typeof fields.theme === 'string' ? fields.theme : undefined,
+        motifs: typeof fields.motifs === 'string' ? fields.motifs : undefined,
+        emotionalCore: typeof fields.emotionalCore === 'string' ? fields.emotionalCore : undefined,
+        pov: fields.pov,
+        tense: fields.tense,
+        protagonistCount: fields.protagonistCount,
+        viewpointMode: fields.viewpointMode,
+        parallelTimelines: fields.parallelTimelines,
+        openingStyle: fields.openingStyle,
+        flashbackPolicy: fields.flashbackPolicy,
+        narratorDistance: typeof fields.narratorDistance === 'string' ? fields.narratorDistance : undefined,
+        voiceKeywords: typeof fields.voiceKeywords === 'string' ? fields.voiceKeywords : undefined,
+        styleRules: typeof fields.styleRules === 'string' ? fields.styleRules : undefined,
+        dialogueRules: typeof fields.dialogueRules === 'string' ? fields.dialogueRules : undefined,
+        descriptionRules: typeof fields.descriptionRules === 'string' ? fields.descriptionRules : undefined,
+        forbiddenPhrases: typeof fields.forbiddenPhrases === 'string' ? fields.forbiddenPhrases : undefined,
+      })
+    },
+    persistPreview: async (nextSnapshot, preview) => {
+      const fields = nextSnapshot.fields && typeof nextSnapshot.fields === 'object'
+        ? nextSnapshot.fields as Partial<ThemeVoiceFormValues>
+        : {}
+      await saveAppliedDraft(normalizeFormValues(buildCurrentFormValues(snapshot, fields)), preview.warnings, 'theme-voice', {
+        inputSummary: 'AI质量修复',
+        rawOutputs: [JSON.stringify(preview.patchedSnapshot)],
+      })
+    },
+  }), [form, saveAppliedDraft, snapshot])
+
+  useRegisterWorkspaceQualityController(workspaceQualityController)
 
   const handleSave = async () => {
     const values = normalizeFormValues(await form.validateFields())

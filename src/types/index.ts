@@ -2220,6 +2220,122 @@ export interface AIScoreResult {
   language_drift_metrics?: LanguageDriftMetrics
 }
 
+export type WorkspaceQualityIssueKind =
+  | 'relevance_drift'
+  | 'workflow_misalignment'
+  | 'context_loss'
+  | 'ai_like_language'
+  | 'ornament_overload'
+  | 'fabricated_terms'
+  | 'incoherent_sentence'
+  | 'format_noise'
+  | 'flat_narration'
+
+export type WorkspaceQualitySeverity = 'info' | 'warning' | 'critical'
+export type WorkspaceQualityAiFlavorSeverity = 'low' | 'medium' | 'high'
+export type WorkspaceQualityPatchKind = 'field' | 'entity'
+
+export interface WorkspaceQualityIssue {
+  id: string
+  kind: WorkspaceQualityIssueKind
+  severity: WorkspaceQualitySeverity
+  title: string
+  description: string
+  suggestion: string
+  path?: string[]
+  entityId?: number
+  entityLabel?: string
+  excerpt?: string
+}
+
+export interface WorkspaceQualityFieldResult {
+  path: string[]
+  label: string
+  score: number
+  severity: WorkspaceQualitySeverity
+  issues: string[]
+  suggestions: string[]
+}
+
+export interface WorkspaceQualityEntityResult {
+  path: string[]
+  label: string
+  severity: WorkspaceQualitySeverity
+  summary: string
+  issues: string[]
+  suggestions: string[]
+  entityId?: number
+}
+
+export interface WorkspaceAiFlavorBreakdownItem {
+  key: string
+  label: string
+  value: number
+}
+
+export interface WorkspaceAiFlavorReport {
+  score: number
+  severity: WorkspaceQualityAiFlavorSeverity
+  summary: string
+  breakdown: WorkspaceAiFlavorBreakdownItem[]
+  sampleFindings: string[]
+  humanizationDirections: string[]
+}
+
+export interface WorkspaceQualityAnalyzeRequest {
+  novelId: number
+  workspaceKey: string
+  pageKey?: string
+  workspaceLabel?: string
+  workspaceSummary?: string
+  contentSnapshot: Record<string, unknown>
+  upstreamContext?: string
+  downstreamContext?: string
+  themeVoiceSummary?: string
+  projectBriefSummary?: string
+  backgroundSummary?: string
+  genreContext?: string
+  modelConfigId?: number
+}
+
+export interface WorkspaceQualityAnalyzeResult {
+  summary: string
+  severity: WorkspaceQualitySeverity
+  overallScore: number
+  aiFlavor: WorkspaceAiFlavorReport
+  globalIssues: WorkspaceQualityIssue[]
+  fieldResults: WorkspaceQualityFieldResult[]
+  entityResults: WorkspaceQualityEntityResult[]
+  repairPriority: string[]
+  warnings: string[]
+}
+
+export interface WorkspaceQualityPatch {
+  id: string
+  patchKind: WorkspaceQualityPatchKind
+  path: string[]
+  label: string
+  before: string
+  after: string
+  reason: string
+  entityId?: number
+  entityLabel?: string
+}
+
+export interface WorkspaceQualityRepairRequest extends WorkspaceQualityAnalyzeRequest {
+  extraRequirements?: string
+  issues?: WorkspaceQualityIssue[]
+}
+
+export interface WorkspaceQualityRepairPreview {
+  summary: string
+  warnings: string[]
+  aiFlavor: WorkspaceAiFlavorReport
+  fieldPatches: WorkspaceQualityPatch[]
+  entityPatches: WorkspaceQualityPatch[]
+  patchedSnapshot: Record<string, unknown>
+}
+
 export interface QualityDashboardData {
   heatmapData: Array<{ chapterNum: number; dimension: string; score: number }>
   overallScoreTrend: Array<{ chapterNum: number; score: number }>
@@ -2862,6 +2978,8 @@ declare global {
           novelBackground: string
           modelConfigId?: number
         }) => Promise<AIScoreResult>
+        analyzeWorkspaceQuality: (data: WorkspaceQualityAnalyzeRequest) => Promise<WorkspaceQualityAnalyzeResult>
+        repairWorkspaceQuality: (data: WorkspaceQualityRepairRequest) => Promise<WorkspaceQualityRepairPreview>
       }
       on: (channel: string, callback: (...args: unknown[]) => void) => () => void
       off: (channel: string, callback: (...args: unknown[]) => void) => void
