@@ -50,8 +50,18 @@ function runNodeScript(scriptPath, scriptArgs, options = {}) {
 }
 
 function runNpmScript(scriptName, options = {}) {
-  const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm'
-  return runProcess(npmCommand, ['run', scriptName], options)
+  const npmExecPath = process.env.npm_execpath
+  if (npmExecPath) {
+    return runProcess(process.execPath, [npmExecPath, 'run', scriptName], options)
+  }
+
+  if (process.platform === 'win32') {
+    const commandShell = process.env.ComSpec || 'cmd.exe'
+    // Directly spawning npm.cmd can fail with EINVAL on Windows in newer Node runtimes.
+    return runProcess(commandShell, ['/d', '/s', '/c', `npm run ${scriptName}`], options)
+  }
+
+  return runProcess('npm', ['run', scriptName], options)
 }
 
 function runTestPreflight() {
