@@ -34,6 +34,7 @@ import {
 import {
   EMPTY_WORKFLOW_STATS,
   getWorkflowBlockers,
+  isEndgameDesignReady,
   isProjectBriefReady,
   isStoryCoreReady,
   isStoryPlotReady,
@@ -494,6 +495,23 @@ export default function GuidePage({ novelId }: Props) {
             进入页面
           </Button>
         </Space>
+      ),
+    },
+    {
+      key: 'endgame',
+      title: '终局设计',
+      desc: '提前锁定最终冲突、主题答案、兑现承诺和最后一幕，避免后期只会扩写不会收束。',
+      status: isEndgameDesignReady(currentNovel) ? '已填写' : '待补全',
+      count: `${storySettings.endgameReadyCount}/8`,
+      support: isEndgameDesignReady(currentNovel)
+        ? '终局收束已经有了明确落点，后续地图、线程和故事设计更容易围绕同一终点推进。'
+        : '如果终局没有被提前锁死，长篇越往后越容易出现目标漂移、回收无力和结尾失焦。',
+      ready: isEndgameDesignReady(currentNovel),
+      icon: <BarsOutlined />,
+      action: (
+        <Button type="primary" ghost icon={<BarsOutlined />} onClick={() => navigate(`/novels/${novelId}/endgame`)}>
+          打开页面
+        </Button>
       ),
     },
     {

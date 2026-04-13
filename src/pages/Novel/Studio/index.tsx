@@ -38,6 +38,7 @@ import {
 import {
   EMPTY_WORKFLOW_STATS,
   getWorkflowBlockers,
+  isEndgameDesignReady,
   isProjectBriefReady,
   isStoryCoreReady,
   isStoryPlotReady,
@@ -443,6 +444,14 @@ export default function StudioPage({ novelId }: Props) {
       route: 'theme-voice',
     },
     {
+      key: 'endgame',
+      title: '终局设计',
+      value: `${storySettings.endgameReadyCount}/8`,
+      summary: storySettings.endgameDesign.lastScene || storySettings.endgameDesign.finalConflict || '提前锁定最终冲突、兑现承诺和最后一幕。',
+      ready: isEndgameDesignReady(currentNovel),
+      route: 'endgame',
+    },
+    {
       key: 'design',
       title: '故事设计',
       value: `${storySettings.storyDesignReadyCount}/4`,
@@ -565,8 +574,9 @@ export default function StudioPage({ novelId }: Props) {
     projectBrief.readyCount
     + themeVoice.readyCount
     + storySettings.premiseReadyCount
+    + storySettings.endgameReadyCount
     + storySettings.storyDesignReadyCount
-  ) / 21 * 100)
+  ) / 29 * 100)
   const focusAreas = (consistencyReport?.focusAreas || []).slice(0, 3)
   const staleAssetTagList = getFreshnessTags(contextStatus?.staleAssetLabels || [])
   const freshnessCards = [

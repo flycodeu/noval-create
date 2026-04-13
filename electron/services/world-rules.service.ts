@@ -157,6 +157,7 @@ function buildStoryCoreSummary(profile: Awaited<ReturnType<typeof buildStoryProf
     profile.background ? `基础背景：${profile.background}` : '',
     profile.premiseSummary,
     profile.storyDesignSummary,
+    profile.endgameDesignSummary,
     profile.writingRulesSummary,
     `主角指代：${profile.protagonistReference}`,
     `主角称呼规则：${profile.protagonistRule}`,

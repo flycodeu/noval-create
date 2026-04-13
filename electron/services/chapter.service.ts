@@ -358,6 +358,7 @@ function buildStoryCore(profile: Awaited<ReturnType<typeof buildStoryProfile>>, 
   return [
     profile.premiseSummary,
     profile.storyDesignSummary,
+    profile.endgameDesignSummary,
     profile.writingRulesSummary,
   ].filter(Boolean).join('\n\n')
 }

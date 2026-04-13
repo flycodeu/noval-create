@@ -174,6 +174,7 @@ function buildStoryCoreSummary(profile: Awaited<ReturnType<typeof buildStoryProf
   return [
     profile.premiseSummary,
     profile.storyDesignSummary,
+    profile.endgameDesignSummary,
     profile.writingRulesSummary,
   ].filter(Boolean).join('\n\n')
 }

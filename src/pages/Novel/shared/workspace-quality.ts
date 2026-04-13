@@ -16,6 +16,7 @@ import type {
 import { buildProjectBriefSummary, parseProjectBriefSnapshot } from '../../../shared/project-brief'
 import { parseWorldRulesDraftJson } from '../../../shared/world-rules-draft'
 import {
+  buildEndgameDesignSummary,
   buildPremiseSummary,
   buildStoryDesignSummary,
   parseStorySettingsSnapshot,
@@ -28,6 +29,7 @@ export type WorkspaceQualityRouteKey =
   | 'core-settings'
   | 'theme-voice'
   | 'world-rules'
+  | 'endgame'
   | 'map'
   | 'factions'
   | 'characters'
@@ -64,6 +66,7 @@ const WORKSPACE_SEQUENCE: Array<{ key: WorkspaceQualityRouteKey; label: string; 
   { key: 'core-settings', label: '基础设定', summary: '固定定位、主角起点和底层约束。' },
   { key: 'theme-voice', label: '主题与文风', summary: '固定主题、叙事口吻和语言边界。' },
   { key: 'world-rules', label: '世界规则', summary: '统一题材规则、时间制度和写作约束。' },
+  { key: 'endgame', label: '终局设计', summary: '提前锁定最终冲突、兑现承诺和最后一幕。' },
   { key: 'map', label: '地图结构', summary: '让地点能承载路线、冲突和代价。' },
   { key: 'factions', label: '势力系统', summary: '整理外部势力、资源与关系格局。' },
   { key: 'characters', label: '角色系统', summary: '补齐主角与关键人物关系。' },
@@ -430,6 +433,25 @@ const FALLBACK_ADAPTERS: Partial<Record<WorkspaceQualityRouteKey, FallbackWorksp
   'world-rules': {
     async fetchSnapshot(context) {
       return buildWorldRulesSnapshot(context.currentNovel)
+    },
+  },
+  endgame: {
+    async fetchSnapshot(context) {
+      const settings = parseStorySettingsSnapshot(context.currentNovel?.settingsJson)
+      return {
+        scope: 'form',
+        fields: {
+          endingMode: settings.endgameDesign.endingMode || '',
+          finalConflict: settings.endgameDesign.finalConflict,
+          themeAnswer: settings.endgameDesign.themeAnswer,
+          mustDeliverPromises: settings.endgameDesign.mustDeliverPromises,
+          payoffChecklist: settings.endgameDesign.payoffChecklist,
+          deliberateUnknowns: settings.endgameDesign.deliberateUnknowns,
+          finalImage: settings.endgameDesign.finalImage,
+          lastScene: settings.endgameDesign.lastScene,
+          summary: buildEndgameDesignSummary(settings.endgameDesign),
+        },
+      }
     },
   },
   'story-design': {

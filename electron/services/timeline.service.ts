@@ -214,6 +214,7 @@ function buildStoryCoreSummary(profile: Awaited<ReturnType<typeof buildStoryProf
   return [
     profile.premiseSummary,
     profile.storyDesignSummary,
+    profile.endgameDesignSummary,
     profile.writingRulesSummary,
   ].filter(Boolean).join('\n\n')
 }
@@ -361,6 +362,7 @@ function buildTimelineRepairPrompt(input: {
   coreConflict: string
   mainPlot: string
   ending: string
+  endgameDesignSummary: string
   arcSummary: string
   characterSummary: string
   locationSummary: string
@@ -379,6 +381,7 @@ function buildTimelineRepairPrompt(input: {
     `核心冲突：${input.coreConflict || '未提供'}`,
     `主线剧情：${input.mainPlot || '未提供'}`,
     `结局方向：${input.ending || '未提供'}`,
+    input.endgameDesignSummary ? `终局设计：${input.endgameDesignSummary}` : '',
     input.worldSummary ? `世界规则：${input.worldSummary}` : '',
     input.timelineRules ? `时间规则：${input.timelineRules}` : '',
     '',
@@ -1159,7 +1162,7 @@ export async function generateTimelineBatchChunk(
     mainPlot: profile.mainPlot,
     subPlots: profile.subPlots,
     ending: profile.ending,
-    worldRulesSummary: `${profile.worldRulesSummary}\n\n${storyCoreSummary}`,
+    worldRulesSummary: [profile.worldRulesSummary, profile.endgameDesignSummary, storyCoreSummary].filter(Boolean).join('\n\n'),
     timelineRules: timelineRulesSummary,
     arcSummary,
     characterSummary,
@@ -1358,7 +1361,7 @@ export async function generateTimelineEvents(
       mainPlot: profile.mainPlot,
       subPlots: profile.subPlots,
       ending: profile.ending,
-      worldRulesSummary: `${profile.worldRulesSummary}\n\n${storyCoreSummary}`,
+      worldRulesSummary: [profile.worldRulesSummary, profile.endgameDesignSummary, storyCoreSummary].filter(Boolean).join('\n\n'),
       timelineRules: timelineRulesSummary,
       arcSummary,
       characterSummary,
@@ -1520,6 +1523,7 @@ export async function regenerateTimelineEvent(
       coreConflict: profile.coreConflict,
       mainPlot: profile.mainPlot,
       ending: profile.ending,
+      endgameDesignSummary: profile.endgameDesignSummary,
       arcSummary: buildArcSummary(arcRows),
       characterSummary: buildCharacterSummary(characterRows),
       locationSummary: buildLocationSummary(mapRows),

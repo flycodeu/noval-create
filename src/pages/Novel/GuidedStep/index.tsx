@@ -56,62 +56,67 @@ interface BasicsFormValues {
 
 const STEP_META: Record<GuidedWorkflowStepKey, { eyebrow: string; title: string; description: string }> = {
   basics: {
-    eyebrow: '第 1 步 / 12',
+    eyebrow: '第 1 步 / 13',
     title: '先把作品底盘说清楚',
     description: '维护书名、简介和背景。',
   },
   'project-brief': {
-    eyebrow: '第 2 步 / 12',
+    eyebrow: '第 2 步 / 13',
     title: '先统一这本书的产品定义',
     description: '先写清服务谁、承诺什么、靠什么被点开，以及哪些东西绝对不能写偏。',
   },
   'story-core': {
-    eyebrow: '第 3 步 / 12',
+    eyebrow: '第 3 步 / 13',
     title: '基础设定先钉住',
     description: '先写基础设定、主角起点和底层约束，不提前写剧情。',
   },
   'theme-voice': {
-    eyebrow: '第 4 步 / 12',
+    eyebrow: '第 4 步 / 13',
     title: '把主题与文风钉成硬规则',
     description: '先固定主题、情感核心、视角、时态和语言禁区，减少口吻漂移与 AI 腔。',
   },
   'world-foundation': {
-    eyebrow: '第 5 步 / 12',
+    eyebrow: '第 5 步 / 13',
     title: '统一世界规则口径',
     description: '先把时间、势力、语言边界和题材规则定稳。',
   },
+  'endgame-design': {
+    eyebrow: '第 6 步 / 13',
+    title: '先把终局落点锁住',
+    description: '先确定最终冲突、兑现承诺和最后一幕，再让后续资产和结构往同一个终点收束。',
+  },
   'map-structure': {
-    eyebrow: '第 6 步 / 12',
+    eyebrow: '第 7 步 / 13',
     title: '先搭地点骨架',
     description: '先让人物和事件有真实落点，再去细化情节。',
   },
   'character-roster': {
-    eyebrow: '第 7 步 / 12',
+    eyebrow: '第 8 步 / 13',
     title: '补齐关键角色',
     description: '主角和关键对位角色先落地，别让剧情靠空气推进。',
   },
   'items-equipment': {
-    eyebrow: '第 8 步 / 12',
+    eyebrow: '第 9 步 / 13',
     title: '补关键物品与资源',
     description: '道具、资源和装备必须服务冲突，不是事后装饰。',
   },
   'story-threads': {
-    eyebrow: '第 9 步 / 12',
+    eyebrow: '第 10 步 / 13',
     title: '把长线推进整理成线程',
     description: '主线、支线、悬念和关系线都要挂成可追踪线程，后面的结构和正文才不会失忆。',
   },
   'story-plot': {
-    eyebrow: '第 10 步 / 12',
+    eyebrow: '第 11 步 / 13',
     title: '现在再做故事设计',
     description: '资产到位之后，再统一设计主线、支线、节奏和结局。',
   },
   'volume-planning': {
-    eyebrow: '第 11 步 / 12',
+    eyebrow: '第 12 步 / 13',
     title: '拆卷规划，分配节奏',
     description: '百万字长篇必须先拆卷，每卷有独立高潮和阶段目标，才不会写到中段失控。',
   },
   'write-start': {
-    eyebrow: '第 12 步 / 12',
+    eyebrow: '第 13 步 / 13',
     title: '转入结构与写作',
     description: '有了骨架和资产后，再进入结构页、时间轴和正文页。',
   },
@@ -481,6 +486,60 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
             </div>
             <div className="guided-step__checkitem">
               <p>后面的角色、地图、时间轴和正文都会复用这里的规则。</p>
+            </div>
+          </div>
+        </WorkspacePanel>
+      </WorkspacePage>
+    )
+  }
+
+  if (stepKey === 'endgame-design') {
+    return (
+      <WorkspacePage
+        className="guided-step guided-step--endgame-design"
+        layout="wide"
+        heroVariant="compact"
+        eyebrow={stepMeta.eyebrow}
+        title={stepMeta.title}
+        actions={(
+          <Space wrap>
+            <Button type="primary" icon={<BarsOutlined />} onClick={() => openProPage('endgame')}>
+              打开终局设计
+            </Button>
+            <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/map-structure`)}>
+              去地图结构
+            </Button>
+          </Space>
+        )}
+        contextSummary={contextSummary}
+        metrics={(
+          <>
+            <WorkspaceMetric label="完成度" value={`${progress.completedCount}/${progress.totalCount}`} tone="warm" hint="结局类型、最终冲突、主题答案、兑现承诺、回收清单、留白、意象、最后一幕" />
+            <WorkspaceMetric label="世界规则" value={isWorldFoundationReady(currentNovel) ? '已完成' : '待完成'} hint="终局设计最好建立在已明确的世界口径之上。" />
+          </>
+        )}
+      >
+        {!isWorldFoundationReady(currentNovel) ? (
+          <Alert type="warning" showIcon message="请先完成世界规则，再补终局设计。" />
+        ) : null}
+
+        <WorkspacePanel>
+          <div className="guided-step__fact-grid">
+            <div className="guided-step__fact-card">
+              <strong>{settings.endgameDesign.endingMode ? '已填写' : '未填写'}</strong>
+              <small>{settings.endgameDesign.endingMode || '先固定终局收束方式。'}</small>
+            </div>
+            <div className="guided-step__fact-card">
+              <strong>{settings.endgameDesign.finalConflict ? '已填写' : '未填写'}</strong>
+              <small>{settings.endgameDesign.finalConflict || '写清最后必须正面解决的核心对手、体制或真相。'}</small>
+            </div>
+            <div className="guided-step__fact-card">
+              <strong>{settings.endgameDesign.mustDeliverPromises ? '已填写' : '未填写'}</strong>
+              <small>{settings.endgameDesign.mustDeliverPromises || '把必须兑现的承诺拆成可核对条目。'}</small>
+            </div>
+            <div className="guided-step__fact-card">
+              <strong>{settings.endgameDesign.lastScene ? '已填写' : '未填写'}</strong>
+              <small>{settings.endgameDesign.lastScene || '写清最后一幕停在哪个画面上。'}</small>
             </div>
           </div>
         </WorkspacePanel>

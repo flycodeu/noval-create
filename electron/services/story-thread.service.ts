@@ -342,6 +342,7 @@ function buildStoryThreadRepairPrompt(params: {
     params.profile.projectBriefSummary,
     params.profile.premiseSummary,
     params.profile.storyDesignSummary,
+    params.profile.endgameDesignSummary,
     params.profile.themeVoiceSummary,
     params.profile.worldRulesSummary,
   ].filter(Boolean).join('\n\n')
@@ -385,6 +386,7 @@ function buildStoryThreadPrompt(params: {
     params.profile.projectBriefSummary,
     params.profile.premiseSummary,
     params.profile.storyDesignSummary,
+    params.profile.endgameDesignSummary,
     params.profile.themeVoiceSummary,
     params.profile.worldRulesSummary,
   ].filter(Boolean).join('\n\n')
@@ -471,6 +473,7 @@ function buildThreadReviewContext(params: {
     params.profile.projectBriefSummary,
     params.profile.premiseSummary,
     params.profile.storyDesignSummary,
+    params.profile.endgameDesignSummary,
     params.profile.themeVoiceSummary,
     params.profile.worldRulesSummary,
   ].filter(Boolean).join('\n\n')

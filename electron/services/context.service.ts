@@ -8,10 +8,12 @@ import { parseGlossaryAliases } from '../../src/shared/glossary'
 import { findSimilarFragments, type SimilarFragmentHit } from './embedding.service'
 import { buildStyleFingerprintPromptSection, listStyleFingerprints } from './style-analysis.service'
 import {
+  buildEndgameDesignSummary,
   buildPremiseSummary,
   buildStoryDesignSummary,
   buildWritingRulesSummary,
   parseStorySettingsDocument,
+  type StoryEndgameDesignSettings,
   type StoryPremiseSettings,
   type StoryWritingRulesSettings,
 } from '../../src/shared/story-settings'
@@ -143,6 +145,7 @@ export interface StorySubPlot {
 
 export interface StorySettings {
   premise: StoryPremiseSettings
+  endgameDesign: StoryEndgameDesignSettings
   writingRules: StoryWritingRulesSettings
   storyGoal: string
   coreConflict: string
@@ -153,6 +156,7 @@ export interface StorySettings {
   rhythmSetup?: number
   rhythmConflict?: number
   rhythmEnding?: number
+  endgameDesignSummary: string
 }
 
 export interface StoryProfile {
@@ -163,6 +167,7 @@ export interface StoryProfile {
   projectBriefSummary: string
   premiseSummary: string
   storyDesignSummary: string
+  endgameDesignSummary: string
   themeVoiceSummary: string
   writingContractSummary: string
   writingRulesSummary: string
@@ -1406,6 +1411,7 @@ export function parseStorySettings(raw?: string | null): StorySettings {
 
   return {
     premise: settings.premise,
+    endgameDesign: settings.endgameDesign,
     writingRules: settings.writingRules,
     storyGoal: settings.storyDesign.storyGoal,
     coreConflict: settings.storyDesign.coreConflict,
@@ -1416,6 +1422,7 @@ export function parseStorySettings(raw?: string | null): StorySettings {
     rhythmSetup: settings.storyDesign.rhythmSetup,
     rhythmConflict: settings.storyDesign.rhythmConflict,
     rhythmEnding: settings.storyDesign.rhythmEnding,
+    endgameDesignSummary: buildEndgameDesignSummary(settings.endgameDesign),
   }
 }
 
@@ -1573,6 +1580,7 @@ function buildStoryCoreText(profile: StoryProfile): string {
     profile.projectBriefSummary,
     profile.premiseSummary,
     profile.storyDesignSummary,
+    profile.endgameDesignSummary,
     profile.themeVoiceSummary,
     profile.writingContractSummary,
     profile.writingRulesSummary,
@@ -2005,6 +2013,7 @@ export async function buildStoryProfile(novelId: number): Promise<StoryProfile> 
       rhythmEnding: settings.rhythmEnding,
       ending: settings.ending,
     }),
+    endgameDesignSummary: settings.endgameDesignSummary,
     themeVoiceSummary: buildThemeVoiceSummary(themeVoice),
     writingContractSummary,
     writingRulesSummary: buildWritingRulesSummary(settings.writingRules),

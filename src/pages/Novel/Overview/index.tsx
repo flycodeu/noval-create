@@ -177,6 +177,14 @@ export default function Overview({ novelId }: Props) {
       action: () => navigate(`/novels/${novelId}/world-rules`),
     },
     {
+      key: 'endgame',
+      title: '终局设计',
+      ready: storySettings.endgameReadyCount >= 5,
+      summary: `${storySettings.endgameReadyCount}/8`,
+      icon: <BarsOutlined />,
+      action: () => navigate(`/novels/${novelId}/endgame`),
+    },
+    {
       key: 'map',
       title: '地图结构',
       ready: stats.mapCount > 0,

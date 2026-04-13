@@ -10,6 +10,7 @@ export type WorkflowRecommendationKey =
   | 'project-brief'
   | 'core-settings'
   | 'theme-voice'
+  | 'endgame'
   | 'story-design'
   | 'world-rules'
   | 'map'
@@ -31,6 +32,7 @@ export type GuidedWorkflowStepKey =
   | 'story-core'
   | 'theme-voice'
   | 'world-foundation'
+  | 'endgame-design'
   | 'map-structure'
   | 'character-roster'
   | 'items-equipment'
@@ -101,6 +103,7 @@ export const GUIDED_STEP_ORDER: GuidedWorkflowStepKey[] = [
   'story-core',
   'theme-voice',
   'world-foundation',
+  'endgame-design',
   'map-structure',
   'items-equipment',
   'character-roster',
@@ -238,6 +241,40 @@ export function isStoryPlotReady(novel: Pick<Novel, 'settingsJson'> | null | und
   )
 }
 
+export function getEndgameDesignProgress(
+  novel: Pick<Novel, 'settingsJson'> | null | undefined,
+): GuidedStepProgress {
+  const settings = parseStorySettings(novel?.settingsJson)
+  const completedCount = [
+    settings.endgameDesign.endingMode,
+    settings.endgameDesign.finalConflict,
+    settings.endgameDesign.themeAnswer,
+    settings.endgameDesign.mustDeliverPromises,
+    settings.endgameDesign.payoffChecklist,
+    settings.endgameDesign.deliberateUnknowns,
+    settings.endgameDesign.finalImage,
+    settings.endgameDesign.lastScene,
+  ].filter(Boolean).length
+
+  return {
+    completedCount,
+    totalCount: 8,
+    isComplete: Boolean(
+      settings.endgameDesign.endingMode
+      && settings.endgameDesign.finalConflict
+      && settings.endgameDesign.themeAnswer
+      && settings.endgameDesign.mustDeliverPromises
+      && settings.endgameDesign.lastScene
+    ),
+  }
+}
+
+export function isEndgameDesignReady(
+  novel: Pick<Novel, 'settingsJson'> | null | undefined,
+): boolean {
+  return getEndgameDesignProgress(novel).isComplete
+}
+
 export function isWorldFoundationReady(
   novel: Pick<Novel, 'worldRulesJson'> | null | undefined,
 ): boolean {
@@ -297,6 +334,7 @@ export function getGuidedStepProgressMap(
     settings.mainPlot,
     settings.ending,
   ].filter(Boolean).length
+  const endgameProgress = getEndgameDesignProgress(novel)
   const themeVoiceProgress = [
     themeVoice.theme,
     themeVoice.emotionalCore,
@@ -340,6 +378,7 @@ export function getGuidedStepProgressMap(
       totalCount: 1,
       isComplete: Boolean(novel?.worldRulesJson),
     },
+    'endgame-design': endgameProgress,
     'map-structure': {
       completedCount: stats.mapCount > 0 ? 1 : 0,
       totalCount: 1,
@@ -387,6 +426,7 @@ export function getRecommendedGuidedWorkflowStep(
   if (!isStoryCoreReady(novel)) return 'story-core'
   if (!isThemeVoiceReady(novel)) return 'theme-voice'
   if (!isWorldFoundationReady(novel)) return 'world-foundation'
+  if (!isEndgameDesignReady(novel)) return 'endgame-design'
   if (!isMapStructureReady(stats)) return 'map-structure'
   if (!isItemsEquipmentReady(stats)) return 'items-equipment'
   if (!isCharacterRosterReady(stats)) return 'character-roster'
@@ -405,6 +445,7 @@ export function getRecommendedWorkflowStep(
   if (!isStoryCoreReady(novel)) return 'core-settings'
   if (!isThemeVoiceReady(novel)) return 'theme-voice'
   if (!novel.worldRulesJson) return 'world-rules'
+  if (!isEndgameDesignReady(novel)) return 'endgame'
   if (stats.mapCount <= 0) return 'map'
   if (stats.itemCount <= 0) return 'items'
   if (stats.characterCount <= 0) return 'characters'

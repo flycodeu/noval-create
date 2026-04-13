@@ -1,6 +1,14 @@
 ﻿import type { SubPlotDraft } from './subplot-framework'
 
 export type StoryEndingType = 'HE' | 'BE' | 'open' | 'multi' | 'HE_BE'
+export type StoryEndgameMode =
+  | 'victory'
+  | 'hard_won'
+  | 'costly_victory'
+  | 'tragic'
+  | 'ironic'
+  | 'open'
+  | 'multi_line'
 
 export interface StoryPremiseSettings {
   positioning: string
@@ -23,6 +31,17 @@ export interface StoryDesignSettings {
   ending: string
 }
 
+export interface StoryEndgameDesignSettings {
+  endingMode?: StoryEndgameMode
+  finalConflict: string
+  themeAnswer: string
+  mustDeliverPromises: string
+  payoffChecklist: string
+  deliberateUnknowns: string
+  finalImage: string
+  lastScene: string
+}
+
 export interface StoryWritingRulesSettings {
   antiAiFlavor: string
   commonSenseRules: string
@@ -32,6 +51,7 @@ export interface StoryWritingRulesSettings {
 export interface StorySettingsDocument {
   premise: StoryPremiseSettings
   storyDesign: StoryDesignSettings
+  endgameDesign: StoryEndgameDesignSettings
   writingRules: StoryWritingRulesSettings
 }
 
@@ -43,6 +63,8 @@ export interface StorySettingsSnapshot extends StorySettingsDocument {
   subPlotCount: number
   premiseReadyCount: number
   storyDesignReadyCount: number
+  endgameReadyCount: number
+  endgameSummary: string
 }
 
 const EMPTY_PREMISE: StoryPremiseSettings = {
@@ -64,6 +86,17 @@ const EMPTY_STORY_DESIGN: StoryDesignSettings = {
   rhythmEnding: undefined,
   endingType: undefined,
   ending: '',
+}
+
+const EMPTY_ENDGAME_DESIGN: StoryEndgameDesignSettings = {
+  endingMode: undefined,
+  finalConflict: '',
+  themeAnswer: '',
+  mustDeliverPromises: '',
+  payoffChecklist: '',
+  deliberateUnknowns: '',
+  finalImage: '',
+  lastScene: '',
 }
 
 const EMPTY_WRITING_RULES: StoryWritingRulesSettings = {
@@ -113,6 +146,18 @@ function asEndingType(value: unknown): StoryEndingType | undefined {
     : undefined
 }
 
+function asEndgameMode(value: unknown): StoryEndgameMode | undefined {
+  return value === 'victory'
+    || value === 'hard_won'
+    || value === 'costly_victory'
+    || value === 'tragic'
+    || value === 'ironic'
+    || value === 'open'
+    || value === 'multi_line'
+    ? value
+    : undefined
+}
+
 function parseSubPlots(value: unknown): SubPlotDraft[] {
   if (!Array.isArray(value)) return []
 
@@ -146,6 +191,7 @@ export function parseStorySettingsDocument(raw?: string | null): StorySettingsDo
   const root = parseJsonObject(raw)
   const premise = asRecord(root.premise)
   const storyDesign = asRecord(root.story_design)
+  const endgameDesign = asRecord(root.endgame_design)
   const writingRules = asRecord(root.writing_rules)
 
   const nextPremise: StoryPremiseSettings = {
@@ -174,6 +220,17 @@ export function parseStorySettingsDocument(raw?: string | null): StorySettingsDo
     ending: asText(storyDesign.ending ?? root.ending),
   }
 
+  const nextEndgameDesign: StoryEndgameDesignSettings = {
+    endingMode: asEndgameMode(asText(endgameDesign.ending_mode ?? root.endgame_ending_mode)),
+    finalConflict: asText(endgameDesign.final_conflict ?? root.endgame_final_conflict),
+    themeAnswer: asText(endgameDesign.theme_answer ?? root.endgame_theme_answer),
+    mustDeliverPromises: asText(endgameDesign.must_deliver_promises ?? root.endgame_must_deliver_promises),
+    payoffChecklist: asText(endgameDesign.payoff_checklist ?? root.endgame_payoff_checklist),
+    deliberateUnknowns: asText(endgameDesign.deliberate_unknowns ?? root.endgame_deliberate_unknowns),
+    finalImage: asText(endgameDesign.final_image ?? root.endgame_final_image),
+    lastScene: asText(endgameDesign.last_scene ?? root.endgame_last_scene),
+  }
+
   const nextWritingRules: StoryWritingRulesSettings = {
     antiAiFlavor: asText(writingRules.anti_ai_flavor ?? root.anti_ai_flavor),
     commonSenseRules: asText(writingRules.common_sense_rules ?? root.common_sense_rules ?? nextPremise.languageGuardrails),
@@ -190,6 +247,7 @@ export function parseStorySettingsDocument(raw?: string | null): StorySettingsDo
   return {
     premise: { ...EMPTY_PREMISE, ...nextPremise },
     storyDesign: { ...EMPTY_STORY_DESIGN, ...nextStoryDesign },
+    endgameDesign: { ...EMPTY_ENDGAME_DESIGN, ...nextEndgameDesign },
     writingRules: { ...EMPTY_WRITING_RULES, ...nextWritingRules },
   }
 }
@@ -209,6 +267,16 @@ export function parseStorySettingsSnapshot(raw?: string | null): StorySettingsSn
     document.storyDesign.mainPlot,
     document.storyDesign.ending,
   ].filter(Boolean).length
+  const endgameReadyCount = [
+    document.endgameDesign.endingMode,
+    document.endgameDesign.finalConflict,
+    document.endgameDesign.themeAnswer,
+    document.endgameDesign.mustDeliverPromises,
+    document.endgameDesign.payoffChecklist,
+    document.endgameDesign.deliberateUnknowns,
+    document.endgameDesign.finalImage,
+    document.endgameDesign.lastScene,
+  ].filter(Boolean).length
 
   return {
     ...document,
@@ -219,6 +287,8 @@ export function parseStorySettingsSnapshot(raw?: string | null): StorySettingsSn
     subPlotCount: document.storyDesign.subPlotsList.length,
     premiseReadyCount,
     storyDesignReadyCount,
+    endgameReadyCount,
+    endgameSummary: buildEndgameDesignSummary(document.endgameDesign),
   }
 }
 
@@ -226,6 +296,7 @@ export function buildStorySettingsPayload(
   patch: {
     premise?: Partial<StoryPremiseSettings>
     storyDesign?: Partial<StoryDesignSettings>
+    endgameDesign?: Partial<StoryEndgameDesignSettings>
     writingRules?: Partial<StoryWritingRulesSettings>
   },
   existingRaw?: string | null,
@@ -234,6 +305,7 @@ export function buildStorySettingsPayload(
   const current = parseStorySettingsDocument(existingRaw)
   const premise = { ...current.premise, ...cleanPatch(patch.premise) }
   const storyDesign = { ...current.storyDesign, ...cleanPatch(patch.storyDesign) }
+  const endgameDesign = { ...current.endgameDesign, ...cleanPatch(patch.endgameDesign) }
   const writingRules = { ...current.writingRules, ...cleanPatch(patch.writingRules) }
 
   const payload: Record<string, unknown> = {
@@ -256,6 +328,16 @@ export function buildStorySettingsPayload(
       rhythm_ending: storyDesign.rhythmEnding,
       ending_type: storyDesign.endingType,
       ending: storyDesign.ending,
+    }),
+    endgame_design: compactObject({
+      ending_mode: endgameDesign.endingMode,
+      final_conflict: endgameDesign.finalConflict,
+      theme_answer: endgameDesign.themeAnswer,
+      must_deliver_promises: endgameDesign.mustDeliverPromises,
+      payoff_checklist: endgameDesign.payoffChecklist,
+      deliberate_unknowns: endgameDesign.deliberateUnknowns,
+      final_image: endgameDesign.finalImage,
+      last_scene: endgameDesign.lastScene,
     }),
     writing_rules: compactObject({
       anti_ai_flavor: writingRules.antiAiFlavor,
@@ -280,6 +362,14 @@ export function buildStorySettingsPayload(
     rhythm_ending: storyDesign.rhythmEnding,
     ending_type: storyDesign.endingType,
     ending: storyDesign.ending,
+    endgame_ending_mode: endgameDesign.endingMode,
+    endgame_final_conflict: endgameDesign.finalConflict,
+    endgame_theme_answer: endgameDesign.themeAnswer,
+    endgame_must_deliver_promises: endgameDesign.mustDeliverPromises,
+    endgame_payoff_checklist: endgameDesign.payoffChecklist,
+    endgame_deliberate_unknowns: endgameDesign.deliberateUnknowns,
+    endgame_final_image: endgameDesign.finalImage,
+    endgame_last_scene: endgameDesign.lastScene,
   }
 
   return compactObject(payload)
@@ -317,6 +407,31 @@ export function buildStoryDesignSummary(
   }
 
   return lines.filter(Boolean).join('\n')
+}
+
+export function buildEndgameDesignSummary(endgameDesign: StoryEndgameDesignSettings): string {
+  const endingModeLabel = endgameDesign.endingMode
+    ? ({
+      victory: '胜利式收束',
+      hard_won: '苦胜式收束',
+      costly_victory: '代价式胜利',
+      tragic: '悲剧式收束',
+      ironic: '反讽式收束',
+      open: '开放式收束',
+      multi_line: '多线并收',
+    } satisfies Record<StoryEndgameMode, string>)[endgameDesign.endingMode]
+    : ''
+
+  return [
+    endingModeLabel ? `终局类型：${endingModeLabel}` : '',
+    endgameDesign.finalConflict ? `最终冲突：${endgameDesign.finalConflict}` : '',
+    endgameDesign.themeAnswer ? `主题答案：${endgameDesign.themeAnswer}` : '',
+    endgameDesign.mustDeliverPromises ? `必须兑现的承诺：${endgameDesign.mustDeliverPromises}` : '',
+    endgameDesign.payoffChecklist ? `长线回收清单：${endgameDesign.payoffChecklist}` : '',
+    endgameDesign.deliberateUnknowns ? `故意保留的未解释项：${endgameDesign.deliberateUnknowns}` : '',
+    endgameDesign.finalImage ? `终章意象：${endgameDesign.finalImage}` : '',
+    endgameDesign.lastScene ? `最后一幕：${endgameDesign.lastScene}` : '',
+  ].filter(Boolean).join('\n')
 }
 
 export function buildWritingRulesSummary(writingRules: StoryWritingRulesSettings): string {

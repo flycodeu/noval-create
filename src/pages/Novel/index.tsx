@@ -30,6 +30,7 @@ import CoreSettings from './CoreSettings'
 import ProjectBriefPage from './ProjectBrief'
 import ThemeVoicePage from './ThemeVoice'
 import WorldRules from './WorldRules'
+import EndgamePage from './Endgame'
 import Factions from './Factions'
 import MapExplorer from './MapExplorer'
 import Characters from './Characters'
@@ -68,6 +69,7 @@ type ProWorkspaceKey =
   | 'core-settings'
   | 'theme-voice'
   | 'world-rules'
+  | 'endgame'
   | 'map'
   | 'factions'
   | 'characters'
@@ -118,6 +120,7 @@ const WORKSPACE_GROUPS: Array<{ title: string; items: WorkspaceItem[] }> = [
     title: '世界与资源',
     items: [
       { key: 'world-rules', icon: <GlobalOutlined />, label: '世界规则', summary: '统一题材规则、时间制度和写作约束。' },
+      { key: 'endgame', icon: <BarsOutlined />, label: '终局设计', summary: '提前锁定最终冲突、兑现承诺和最后一幕。' },
       { key: 'map', icon: <EnvironmentOutlined />, label: '地图结构', summary: '让地点能承载路线、冲突和代价。' },
       { key: 'factions', icon: <ApartmentOutlined />, label: '势力系统', summary: '把角色归属和外部关系拆成结构化资产。' },
       { key: 'characters', icon: <TeamOutlined />, label: '角色系统', summary: '补齐主角与关键人物关系。' },
@@ -147,6 +150,7 @@ const LEGACY_ROUTE_REDIRECTS: Record<GuidedWorkflowStepKey, ProWorkspaceKey> = {
   'story-core': 'core-settings',
   'theme-voice': 'theme-voice',
   'world-foundation': 'world-rules',
+  'endgame-design': 'endgame',
   'map-structure': 'map',
   'character-roster': 'characters',
   'items-equipment': 'items',
@@ -266,6 +270,7 @@ export default function NovelRouter() {
       'core-settings': guidedProgressMap['story-core'].isComplete,
       'theme-voice': guidedProgressMap['theme-voice'].isComplete,
       'world-rules': guidedProgressMap['world-foundation'].isComplete,
+      endgame: guidedProgressMap['endgame-design'].isComplete,
       map: guidedProgressMap['map-structure'].isComplete,
       factions: workflowStats.factionCount > 0,
       characters: guidedProgressMap['character-roster'].isComplete,
@@ -317,6 +322,10 @@ export default function NovelRouter() {
       'world-rules': {
         label: guidedProgressMap['world-foundation'].isComplete ? '已就绪' : '待补',
         complete: guidedProgressMap['world-foundation'].isComplete,
+      },
+      endgame: {
+        label: guidedProgressMap['endgame-design'].isComplete ? '已就绪' : `${guidedProgressMap['endgame-design'].completedCount}/${guidedProgressMap['endgame-design'].totalCount}`,
+        complete: guidedProgressMap['endgame-design'].isComplete,
       },
       map: {
         label: formatCountState(workflowStats.mapCount, '处'),
@@ -812,6 +821,7 @@ export default function NovelRouter() {
               <Route path="basics" element={<Navigate replace to={`/novels/${novelId}/overview`} />} />
               <Route path="story-core" element={<Navigate replace to={`/novels/${novelId}/core-settings`} />} />
               <Route path="world-foundation" element={<Navigate replace to={`/novels/${novelId}/world-rules`} />} />
+              <Route path="endgame-design" element={<Navigate replace to={`/novels/${novelId}/endgame`} />} />
               <Route path="map-structure" element={<Navigate replace to={`/novels/${novelId}/map`} />} />
               <Route path="character-roster" element={<Navigate replace to={`/novels/${novelId}/characters`} />} />
               <Route path="items-equipment" element={<Navigate replace to={`/novels/${novelId}/items`} />} />
@@ -826,6 +836,7 @@ export default function NovelRouter() {
               <Route path="core-settings" element={<PremisePage novelId={novelId} />} />
               <Route path="theme-voice" element={<ThemeVoicePage novelId={novelId} />} />
               <Route path="world-rules" element={<WorldRules novelId={novelId} />} />
+              <Route path="endgame" element={<EndgamePage novelId={novelId} />} />
               <Route path="map" element={<MapExplorer novelId={novelId} />} />
               <Route path="factions" element={<Factions novelId={novelId} />} />
               <Route path="characters" element={<Characters novelId={novelId} />} />
