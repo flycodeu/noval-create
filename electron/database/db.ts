@@ -1022,6 +1022,124 @@ export function runMigrations(sqlite: Database.Database) {
     ensureColumn(sqlite, 'story_threads', 'resolved_chapter', 'INTEGER')
     ensureColumn(sqlite, 'story_threads', 'reminder_interval', 'INTEGER DEFAULT 20')
   })
+
+  runMigrationStep(sqlite, '0019_endgame_assets_and_contracts', () => {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS endgame_commitments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        commitment_kind TEXT NOT NULL DEFAULT 'promise',
+        title TEXT NOT NULL,
+        description TEXT,
+        source_order INTEGER NOT NULL DEFAULT 0,
+        source_text TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active',
+        target_resolution_chapter INTEGER,
+        last_served_chapter INTEGER,
+        fulfilled_chapter INTEGER,
+        notes TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS foreshadow_ledger (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        detail TEXT,
+        source_chapter_id INTEGER REFERENCES chapters(id) ON DELETE SET NULL,
+        source_segment_id INTEGER REFERENCES chapter_segments(id) ON DELETE SET NULL,
+        plant_method TEXT,
+        salience_level TEXT NOT NULL DEFAULT 'medium',
+        target_payoff_chapter INTEGER,
+        payoff_method TEXT,
+        impact_scope TEXT NOT NULL DEFAULT 'global',
+        status TEXT NOT NULL DEFAULT 'draft',
+        linked_thread_id INTEGER REFERENCES story_threads(id) ON DELETE SET NULL,
+        linked_endgame_commitment_id INTEGER REFERENCES endgame_commitments(id) ON DELETE SET NULL,
+        linked_volume_id INTEGER REFERENCES story_volumes(id) ON DELETE SET NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS volume_designs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        volume_id INTEGER NOT NULL REFERENCES story_volumes(id) ON DELETE CASCADE,
+        volume_theme TEXT,
+        volume_promise TEXT,
+        main_conflict TEXT,
+        climax_plan TEXT,
+        end_state_shift TEXT,
+        must_add_clues_json TEXT,
+        must_resolve_clues_json TEXT,
+        reader_expectation TEXT,
+        linked_endgame_commitment_ids_json TEXT,
+        audit_status TEXT NOT NULL DEFAULT 'draft',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS chapter_contracts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        chapter_id INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
+        chapter_goal TEXT,
+        served_thread_ids_json TEXT,
+        required_arc_progress_json TEXT,
+        required_asset_refs_json TEXT,
+        required_endgame_commitment_ids_json TEXT,
+        required_foreshadow_ids_json TEXT,
+        hook_type TEXT,
+        forbidden_actions_json TEXT,
+        acceptance_notes_json TEXT,
+        status TEXT NOT NULL DEFAULT 'draft',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS scene_contracts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        chapter_id INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
+        segment_id INTEGER REFERENCES chapter_segments(id) ON DELETE SET NULL,
+        pov TEXT,
+        time_location TEXT,
+        scene_goal TEXT,
+        obstacle TEXT,
+        conflict_type TEXT,
+        emotion_shift TEXT,
+        reveal_payload_json TEXT,
+        result_state TEXT,
+        linkage_mode TEXT,
+        required_endgame_commitment_ids_json TEXT,
+        required_foreshadow_ids_json TEXT,
+        status TEXT NOT NULL DEFAULT 'draft',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_endgame_commitments_novel_kind_source
+        ON endgame_commitments(novel_id, commitment_kind, source_text);
+      CREATE INDEX IF NOT EXISTS idx_endgame_commitments_novel_status
+        ON endgame_commitments(novel_id, status, source_order, id);
+      CREATE INDEX IF NOT EXISTS idx_foreshadow_ledger_novel_status
+        ON foreshadow_ledger(novel_id, status, target_payoff_chapter, id);
+      CREATE INDEX IF NOT EXISTS idx_foreshadow_ledger_commitment
+        ON foreshadow_ledger(linked_endgame_commitment_id, novel_id, status);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_volume_designs_volume
+        ON volume_designs(volume_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_chapter_contracts_chapter
+        ON chapter_contracts(chapter_id);
+      CREATE INDEX IF NOT EXISTS idx_scene_contracts_chapter_segment
+        ON scene_contracts(chapter_id, segment_id, id);
+    `)
+  })
+
+  runMigrationStep(sqlite, '0020_backfill_endgame_assets_and_contracts', () => {
+    backfillEndgameAssets(sqlite)
+    backfillContractDefaults(sqlite)
+  })
 }
 
 function ensureMigrationTable(sqlite: Database.Database) {
@@ -1526,6 +1644,191 @@ function backfillPlanningWorkspaceData(sqlite: Database.Database) {
         status = COALESCE(NULLIF(status, ''), 'open'),
         severity = COALESCE(NULLIF(severity, ''), 'medium')
   `)
+}
+
+function splitMultilineEntries(raw?: string | null): string[] {
+  return (raw || '')
+    .split(/\r?\n+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function truncateAssetTitle(text: string, maxLength = 60): string {
+  return text.length <= maxLength ? text : `${text.slice(0, maxLength - 1).trim()}…`
+}
+
+function backfillEndgameAssets(sqlite: Database.Database) {
+  if (!hasTable(sqlite, 'endgame_commitments') || !hasTable(sqlite, 'foreshadow_ledger')) return
+
+  const novelsWithSettings = sqlite.prepare(`
+    SELECT id, settings_json
+    FROM novels
+    WHERE COALESCE(settings_json, '') <> ''
+  `).all() as Array<{ id: number; settings_json?: string | null }>
+
+  const selectCommitment = sqlite.prepare(`
+    SELECT id
+    FROM endgame_commitments
+    WHERE novel_id = ? AND commitment_kind = ? AND source_text = ?
+    LIMIT 1
+  `)
+  const insertCommitment = sqlite.prepare(`
+    INSERT INTO endgame_commitments (
+      novel_id,
+      commitment_kind,
+      title,
+      description,
+      source_order,
+      source_text,
+      status,
+      created_at,
+      updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)
+  `)
+  const updateCommitment = sqlite.prepare(`
+    UPDATE endgame_commitments
+    SET title = ?, description = ?, source_order = ?, status = 'active', updated_at = ?
+    WHERE id = ?
+  `)
+  const selectLinkedForeshadow = sqlite.prepare(`
+    SELECT id
+    FROM foreshadow_ledger
+    WHERE novel_id = ? AND linked_endgame_commitment_id = ?
+    LIMIT 1
+  `)
+  const insertForeshadow = sqlite.prepare(`
+    INSERT INTO foreshadow_ledger (
+      novel_id,
+      title,
+      detail,
+      salience_level,
+      impact_scope,
+      status,
+      linked_endgame_commitment_id,
+      created_at,
+      updated_at
+    ) VALUES (?, ?, ?, 'medium', 'ending', 'draft', ?, ?, ?)
+  `)
+  const updateForeshadow = sqlite.prepare(`
+    UPDATE foreshadow_ledger
+    SET title = ?, detail = ?, updated_at = ?
+    WHERE id = ?
+  `)
+
+  novelsWithSettings.forEach((row) => {
+    let parsed: Record<string, unknown> = {}
+    try {
+      parsed = JSON.parse(row.settings_json || '{}') as Record<string, unknown>
+    } catch {
+      parsed = {}
+    }
+
+    const root = parsed && typeof parsed === 'object' ? parsed : {}
+    const endgame = root.endgame_design && typeof root.endgame_design === 'object'
+      ? root.endgame_design as Record<string, unknown>
+      : {}
+    const promiseEntries = splitMultilineEntries(
+      typeof endgame.must_deliver_promises === 'string'
+        ? endgame.must_deliver_promises
+        : typeof root.endgame_must_deliver_promises === 'string'
+          ? root.endgame_must_deliver_promises
+          : '',
+    )
+    const payoffEntries = splitMultilineEntries(
+      typeof endgame.payoff_checklist === 'string'
+        ? endgame.payoff_checklist
+        : typeof root.endgame_payoff_checklist === 'string'
+          ? root.endgame_payoff_checklist
+          : '',
+    )
+    const timestamp = new Date().toISOString()
+    const syncCommitments = (entries: string[], kind: 'promise' | 'payoff') => {
+      if (entries.length > 0) {
+        const placeholders = entries.map(() => '?').join(', ')
+        sqlite.prepare(`
+          UPDATE endgame_commitments
+          SET status = 'waived', updated_at = ?
+          WHERE novel_id = ? AND commitment_kind = ? AND source_text NOT IN (${placeholders})
+        `).run(timestamp, row.id, kind, ...entries)
+      } else {
+        sqlite.prepare(`
+          UPDATE endgame_commitments
+          SET status = 'waived', updated_at = ?
+          WHERE novel_id = ? AND commitment_kind = ?
+        `).run(timestamp, row.id, kind)
+      }
+
+      entries.forEach((entry, index) => {
+        const title = truncateAssetTitle(entry)
+        const existing = selectCommitment.get(row.id, kind, entry) as { id?: number } | undefined
+        let commitmentId: number
+        if (existing?.id) {
+          updateCommitment.run(title, entry, index, timestamp, existing.id)
+          commitmentId = existing.id
+        } else {
+          const insertResult = insertCommitment.run(row.id, kind, title, entry, index, entry, timestamp, timestamp)
+          commitmentId = Number(insertResult.lastInsertRowid)
+        }
+
+        if (kind === 'payoff') {
+          const existingForeshadow = selectLinkedForeshadow.get(row.id, commitmentId) as { id?: number } | undefined
+          if (existingForeshadow?.id) {
+            updateForeshadow.run(title, entry, timestamp, existingForeshadow.id)
+          } else {
+            insertForeshadow.run(row.id, title, entry, commitmentId, timestamp, timestamp)
+          }
+        }
+      })
+    }
+
+    syncCommitments(promiseEntries, 'promise')
+    syncCommitments(payoffEntries, 'payoff')
+  })
+}
+
+function backfillContractDefaults(sqlite: Database.Database) {
+  if (hasTable(sqlite, 'volume_designs')) {
+    sqlite.exec(`
+      UPDATE volume_designs
+      SET must_add_clues_json = COALESCE(must_add_clues_json, '[]'),
+          must_resolve_clues_json = COALESCE(must_resolve_clues_json, '[]'),
+          linked_endgame_commitment_ids_json = COALESCE(linked_endgame_commitment_ids_json, '[]'),
+          audit_status = COALESCE(NULLIF(audit_status, ''), 'draft')
+    `)
+  }
+
+  if (hasTable(sqlite, 'chapter_contracts')) {
+    sqlite.exec(`
+      UPDATE chapter_contracts
+      SET served_thread_ids_json = COALESCE(served_thread_ids_json, '[]'),
+          required_arc_progress_json = COALESCE(required_arc_progress_json, '[]'),
+          required_asset_refs_json = COALESCE(required_asset_refs_json, '[]'),
+          required_endgame_commitment_ids_json = COALESCE(required_endgame_commitment_ids_json, '[]'),
+          required_foreshadow_ids_json = COALESCE(required_foreshadow_ids_json, '[]'),
+          forbidden_actions_json = COALESCE(forbidden_actions_json, '[]'),
+          acceptance_notes_json = COALESCE(acceptance_notes_json, '[]'),
+          status = COALESCE(NULLIF(status, ''), 'draft')
+    `)
+  }
+
+  if (hasTable(sqlite, 'scene_contracts')) {
+    sqlite.exec(`
+      UPDATE scene_contracts
+      SET reveal_payload_json = COALESCE(reveal_payload_json, '[]'),
+          required_endgame_commitment_ids_json = COALESCE(required_endgame_commitment_ids_json, '[]'),
+          required_foreshadow_ids_json = COALESCE(required_foreshadow_ids_json, '[]'),
+          status = COALESCE(NULLIF(status, ''), 'draft')
+    `)
+  }
+
+  if (hasTable(sqlite, 'foreshadow_ledger')) {
+    sqlite.exec(`
+      UPDATE foreshadow_ledger
+      SET salience_level = COALESCE(NULLIF(salience_level, ''), 'medium'),
+          impact_scope = COALESCE(NULLIF(impact_scope, ''), 'global'),
+          status = COALESCE(NULLIF(status, ''), 'draft')
+    `)
+  }
 }
 
 function seedBuiltinData(db: ReturnType<typeof drizzle>) {

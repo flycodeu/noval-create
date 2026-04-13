@@ -39,6 +39,8 @@ export type WorkspaceQualityRouteKey =
   | 'scene-templates'
   | 'story-design'
   | 'outline'
+  | 'volume-design'
+  | 'contracts'
   | 'structure'
   | 'timeline'
   | 'writing'
@@ -76,6 +78,8 @@ const WORKSPACE_SEQUENCE: Array<{ key: WorkspaceQualityRouteKey; label: string; 
   { key: 'scene-templates', label: '场景模板', summary: '沉淀高频场景的节拍和复用骨架。' },
   { key: 'story-design', label: '故事设计', summary: '统一设计主线、支线和结局。' },
   { key: 'outline', label: '故事大纲', summary: '按章节推进主线，落实关键转折。' },
+  { key: 'volume-design', label: '卷级设计', summary: '把终局压力和本卷闭环拆成可执行约束。' },
+  { key: 'contracts', label: '章节合同', summary: '把本章和场景约束变成显式合同。' },
   { key: 'structure', label: '结构规划', summary: '拆卷、拆部、拆章，稳住长篇节奏。' },
   { key: 'timeline', label: '时间轴', summary: '维护事件顺序、后果链和时间锚点。' },
   { key: 'writing', label: '正文写作', summary: '处理场景计划、主写、审校和定稿。' },

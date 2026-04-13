@@ -3,6 +3,7 @@ import { Alert, Button, Form, Input, Select, Space, Tag, message } from 'antd'
 import { ArrowRightOutlined, ImportOutlined, SaveOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { useNovelStore } from '../../../stores/novel.store'
+import type { EndgameAssetSummary } from '../../../types'
 import {
   buildStorySettingsPayload,
   parseStorySettingsSnapshot,
@@ -108,6 +109,7 @@ export default function EndgamePage({ novelId }: Props) {
   const { currentNovel, setCurrentNovel } = useNovelStore()
   const [form] = Form.useForm<EndgameFormValues>()
   const [saving, setSaving] = useState(false)
+  const [assetSummary, setAssetSummary] = useState<EndgameAssetSummary | null>(null)
 
   const settings = useMemo(
     () => parseStorySettingsSnapshot(currentNovel?.settingsJson),
@@ -127,6 +129,20 @@ export default function EndgamePage({ novelId }: Props) {
   useEffect(() => {
     form.setFieldsValue(snapshot)
   }, [form, snapshot])
+
+  useEffect(() => {
+    let cancelled = false
+    window.electron.endgameAsset.getSummary(novelId)
+      .then((summary) => {
+        if (!cancelled) setAssetSummary(summary)
+      })
+      .catch((error) => {
+        console.error(error)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [novelId, currentNovel?.settingsJson])
 
   const watchedValues = (Form.useWatch([], form) as Partial<EndgameFormValues> | undefined) || {}
   const currentValues = normalizeFormValues(buildCurrentFormValues(snapshot, watchedValues))
@@ -193,10 +209,12 @@ export default function EndgamePage({ novelId }: Props) {
       await window.electron.novel.update(novelId, {
         settingsJson: JSON.stringify(payload),
       })
+      const syncResult = await window.electron.endgameAsset.syncFromSettings(novelId, JSON.stringify(payload))
+      setAssetSummary(syncResult.summary)
 
       const updated = await window.electron.novel.get(novelId)
       if (updated) setCurrentNovel(updated)
-      message.success('终局设计已保存')
+      message.success(`终局设计已保存，并同步了 ${syncResult.summary.totalCount} 条终局资产`)
     } catch (error) {
       console.error(error)
       message.error(error instanceof Error ? error.message : '终局设计保存失败')
@@ -253,6 +271,7 @@ export default function EndgamePage({ novelId }: Props) {
             { label: '世界规则', value: currentNovel?.worldRulesJson ? '已就绪' : '未完成' },
             { label: '故事设计', value: `${settings.storyDesignReadyCount}/4` },
             { label: '结局方向', value: settings.storyDesign.endingType || '未设置' },
+            { label: '已同步资产', value: assetSummary ? `${assetSummary.totalCount} 条` : '未同步' },
           ]}
         />
       )}
@@ -261,6 +280,7 @@ export default function EndgamePage({ novelId }: Props) {
           <WorkspaceMetric label="终局清晰度" value={`${readyCount}/8`} tone="warm" hint="结局类型、最终冲突、主题答案、兑现承诺、回收清单、留白、意象、最后一幕。" />
           <WorkspaceMetric label="兑现承诺" value={promiseCount} hint="建议每行一条，写清必须兑现的读者承诺或前文承诺。" />
           <WorkspaceMetric label="回收清单" value={payoffCount} tone="cool" hint="建议每行一条，优先记录必须回收的长线伏笔或终章债务。" />
+          <WorkspaceMetric label="未绑定终局承诺" value={assetSummary?.unboundCount ?? 0} hint="尚未进入卷级设计、章节合同、场景合同或伏笔账本的终局项。" />
         </>
       )}
     >
@@ -279,6 +299,15 @@ export default function EndgamePage({ novelId }: Props) {
           showIcon
           message="故事设计里已经有结局方向"
           description="可以先用“从故事设计导入初始化”带入结局方向，再把最终冲突、主题答案和兑现清单补完整。"
+        />
+      ) : null}
+
+      {assetSummary && assetSummary.unboundCount > 0 ? (
+        <Alert
+          type="warning"
+          showIcon
+          message="存在未绑定的终局承诺"
+          description={`当前有 ${assetSummary.unboundCount} 条终局承诺还没有进入卷级设计、章节合同、场景合同或伏笔账本。保存终局设计后，请继续在后续页面完成绑定。`}
         />
       ) : null}
 

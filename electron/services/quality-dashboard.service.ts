@@ -39,6 +39,7 @@ import { getDb } from '../database/db'
 import { chapters, characterStateVersions, characters, storyVolumes, timelineEvents, worldStateVersions } from '../database/schema'
 import { getDialogueAnalyticsSnapshot, scheduleDialogueFingerprintRefresh } from './dialogue-fingerprint.service'
 import { fallbackKeywordSearch } from './embedding.service'
+import { getEndgameDebtSnapshot } from './endgame-asset.service'
 import { getStoryArcProgressSnapshot } from './story-arc-progress.service'
 import { getForeshadowSnapshot } from './story-thread.service'
 import { getWorldStateLedgerSnapshot } from './world-state.service'
@@ -147,6 +148,7 @@ const QUALITY_RISK_LABELS: Record<QualityDashboardRiskKind, string> = {
   chapter_function: '章节功能',
   story_arc: '故事弧推进',
   foreshadow_debt: '伏笔债务',
+  endgame_debt: '终局债务',
   recall: '召回可靠性',
   world_state: '状态稳定性',
 }
@@ -568,6 +570,8 @@ function computeVolumeHealthScore(input: {
   storyAlertCount: number
   foreshadowDueSoonCount: number
   foreshadowOverdueCount: number
+  endgameOverdueCount: number
+  endgameUnboundCount: number
   staleRecallRate: number
   worldWarningCount: number
   worldConflictAlertCount: number
@@ -576,9 +580,10 @@ function computeVolumeHealthScore(input: {
   const arcPenalty = Math.min(20, input.stalledArcCount * 6 + input.criticalArcAlertCount * 8)
   const rhythmPenalty = Math.min(20, Math.max(0, 75 - input.rhythmBalanceScore) * 0.25 + input.repeatedFunctionRunCount * 4 + input.storyAlertCount * 2)
   const foreshadowPenalty = Math.min(18, input.foreshadowOverdueCount * 7 + input.foreshadowDueSoonCount * 2)
+  const endgamePenalty = Math.min(18, input.endgameOverdueCount * 8 + input.endgameUnboundCount * 3)
   const recallPenalty = Math.min(8, input.staleRecallRate * 0.12)
   const worldPenalty = Math.min(10, input.worldConflictAlertCount * 2 + input.worldWarningCount * 0.35)
-  return clampHealthScore(100 - aiPenalty - arcPenalty - rhythmPenalty - foreshadowPenalty - recallPenalty - worldPenalty)
+  return clampHealthScore(100 - aiPenalty - arcPenalty - rhythmPenalty - foreshadowPenalty - endgamePenalty - recallPenalty - worldPenalty)
 }
 
 function computeNovelHealthScore(volumeEntries: VolumeQualityMetrics[], criticalRiskCount: number, warningRiskCount: number): number {
@@ -1394,6 +1399,10 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
   const volumeChapterRanges = buildVolumeChapterRanges(volumeRows, rows)
   const foreshadowSnapshot = getForeshadowSnapshot(novelId)
   const foreshadowCountsByVolume = buildForeshadowCountsByVolume(foreshadowSnapshot, volumeChapterRanges)
+  const endgameDebtSnapshot = getEndgameDebtSnapshot(novelId)
+  const endgameCountsByVolume = new Map(
+    [...endgameDebtSnapshot.countsByVolume.entries()].map(([volumeId, counts]) => [volumeId, counts] as const),
+  )
 
   const chapterNumById = new Map(rows.map((row) => [row.id, row.chapterNum] as const))
   const volumeIdByChapterNum = new Map(rows.flatMap((row) => (
@@ -1815,6 +1824,13 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     const recallEntry = volumeRecallById.get(volumeRange.volumeId)
     const worldEntry = volumeWorldStateById.get(volumeRange.volumeId)
     const foreshadowCounts = foreshadowCountsByVolume.get(volumeRange.volumeId) || emptyForeshadowCounts()
+    const endgameCounts = endgameCountsByVolume.get(volumeRange.volumeId) || {
+      pending: 0,
+      served: 0,
+      overdue: 0,
+      fulfilled: 0,
+      unbound: 0,
+    }
     const arcAlerts = storyArcProgressSnapshot.alerts.filter((alert) => alert.volumeId === volumeRange.volumeId)
     const criticalArcAlertCount = arcAlerts.filter((alert) => alert.severity === 'critical').length
     const stalledArcCount = (arcEntry?.arcEntries || []).filter((entry) => entry.stallRate >= 50 || entry.missedPhaseLabels.length > 0).length
@@ -1879,6 +1895,25 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
             volumeRange.volumeId,
           )]
           : []),
+      ...(endgameCounts.overdue > 0
+        ? [createDashboardRiskItem(
+          'endgame_debt',
+          'critical',
+          `${volumeRange.volumeName} 终局承诺失管`,
+          `本卷关联的终局承诺中有 ${endgameCounts.overdue} 条已过期，另有 ${endgameCounts.unbound} 条仍未进入执行链。`,
+          [volumeRange.chapterStart, volumeRange.chapterEnd],
+          volumeRange.volumeId,
+        )]
+        : endgameCounts.unbound > 0
+          ? [createDashboardRiskItem(
+            'endgame_debt',
+            'warning',
+            `${volumeRange.volumeName} 存在未绑定终局承诺`,
+            `本卷有 ${endgameCounts.unbound} 条终局承诺尚未被卷级设计、章节合同、场景合同或伏笔账本服务。`,
+            [volumeRange.chapterStart, volumeRange.chapterEnd],
+            volumeRange.volumeId,
+          )]
+          : []),
       ...(staleRecallCount > 0
         ? [createDashboardRiskItem(
           'recall',
@@ -1918,6 +1953,8 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
         storyAlertCount: storyEntry?.alerts.length || 0,
         foreshadowDueSoonCount: foreshadowCounts.dueSoon,
         foreshadowOverdueCount: foreshadowCounts.overdue,
+        endgameOverdueCount: endgameCounts.overdue,
+        endgameUnboundCount: endgameCounts.unbound,
         staleRecallRate,
         worldWarningCount,
         worldConflictAlertCount,
@@ -1933,6 +1970,10 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
       foreshadowDueSoonCount: foreshadowCounts.dueSoon,
       foreshadowOverdueCount: foreshadowCounts.overdue,
       foreshadowResolvedCount: foreshadowCounts.resolved,
+      endgamePendingCount: endgameCounts.pending,
+      endgameServedCount: endgameCounts.served,
+      endgameOverdueCount: endgameCounts.overdue,
+      endgameUnboundCount: endgameCounts.unbound,
       staleRecallCount,
       staleRecallRate,
       worldWarningCount,
@@ -1967,6 +2008,14 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
         alert.chapterNums,
         volumeIdByChapterNum.get(alert.chapterNums[0] || 0),
       )),
+    ...endgameDebtSnapshot.recentAlerts.slice(0, 3).map((alert) => createDashboardRiskItem(
+      'endgame_debt',
+      alert.severity,
+      alert.title,
+      alert.detail,
+      alert.targetResolutionChapter ? [alert.targetResolutionChapter] : [],
+      alert.volumeId,
+    )),
     ...recentRecallAlerts.slice(0, 3).map((alert) => createDashboardRiskItem(
       'recall',
       alert.staleRecallCount >= 3 ? 'critical' : 'warning',
@@ -1990,6 +2039,10 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
   const foreshadowPendingCount = foreshadowSnapshot.pending.length
   const foreshadowDueSoonCount = foreshadowSnapshot.dueSoon.length
   const foreshadowOverdueCount = foreshadowSnapshot.overdue.length
+  const recentEndgameDebtAlerts = endgameDebtSnapshot.recentAlerts.map((alert) => ({
+    ...alert,
+    severity: alert.severity as 'warning' | 'critical',
+  }))
   const riskOverview = (Object.keys(QUALITY_RISK_LABELS) as QualityDashboardRiskKind[]).map((kind) => ({
     kind,
     label: qualityRiskLabel(kind),
@@ -2005,6 +2058,10 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     foreshadowPendingCount,
     foreshadowDueSoonCount,
     foreshadowOverdueCount,
+    endgameActiveCount: endgameDebtSnapshot.overview.activeCount,
+    endgameServedCount: endgameDebtSnapshot.overview.servedCount,
+    endgameOverdueCount: endgameDebtSnapshot.overview.overdueCount,
+    endgameUnboundCount: endgameDebtSnapshot.overview.unboundCount,
     riskOverview,
     topRisks: allRiskItems.slice(0, 8),
     recommendedFocusVolumes: volumeQualityMetrics
@@ -2054,6 +2111,7 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     worldConflictEntities: worldStateLedger.conflictEntities,
     recallSummary,
     recentRecallAlerts,
+    recentEndgameDebtAlerts,
     volumeRecallDiagnostics,
     volumeWorldStateStability,
     worldStateSummary,

@@ -1561,6 +1561,151 @@ export interface StoryStructureSegmentSummary extends ChapterSegment {
   linkedTimelineEventCount: number
 }
 
+export type EndgameCommitmentKind = 'promise' | 'payoff'
+export type EndgameCommitmentStatus = 'active' | 'served' | 'fulfilled' | 'waived'
+
+export interface EndgameCommitment {
+  id: number
+  novelId: number
+  commitmentKind: EndgameCommitmentKind
+  title: string
+  description?: string
+  sourceOrder: number
+  sourceText: string
+  status: EndgameCommitmentStatus
+  derivedStatus: EndgameCommitmentStatus
+  targetResolutionChapter?: number
+  lastServedChapter?: number
+  fulfilledChapter?: number
+  notes?: string
+  referenceCount: number
+  referencedVolumeIds: number[]
+  referencedChapterIds: number[]
+  referencedSegmentIds: number[]
+  linkedForeshadowIds: number[]
+  overdue: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface EndgameAssetSummary {
+  totalCount: number
+  promiseCount: number
+  payoffCount: number
+  activeCount: number
+  servedCount: number
+  fulfilledCount: number
+  waivedCount: number
+  overdueCount: number
+  unboundCount: number
+  linkedForeshadowCount: number
+}
+
+export interface ForeshadowLedgerEntry {
+  id: number
+  novelId: number
+  title: string
+  detail?: string
+  sourceChapterId?: number
+  sourceSegmentId?: number
+  sourceChapterNum?: number
+  plantMethod?: string
+  salienceLevel: string
+  targetPayoffChapter?: number
+  payoffMethod?: string
+  impactScope: string
+  status: string
+  linkedThreadId?: number
+  linkedEndgameCommitmentId?: number
+  linkedEndgameCommitmentTitle?: string
+  linkedVolumeId?: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface VolumeDesignAsset {
+  id?: number
+  novelId: number
+  volumeId: number
+  volumeNumber: number
+  volumeName: string
+  volumeTheme: string
+  volumePromise: string
+  mainConflict: string
+  climaxPlan: string
+  endStateShift: string
+  mustAddClues: string[]
+  mustResolveClues: string[]
+  readerExpectation: string
+  linkedEndgameCommitmentIds: number[]
+  auditStatus: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ChapterContractAsset {
+  id?: number
+  novelId: number
+  chapterId: number
+  chapterNum: number
+  chapterTitle: string
+  chapterGoal: string
+  servedThreadIds: number[]
+  requiredArcProgress: string[]
+  requiredAssetRefs: string[]
+  requiredEndgameCommitmentIds: number[]
+  requiredForeshadowIds: number[]
+  hookType: string
+  forbiddenActions: string[]
+  acceptanceNotes: string[]
+  status: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SceneContractAsset {
+  id?: number
+  novelId: number
+  chapterId: number
+  chapterNum: number
+  chapterTitle: string
+  segmentId?: number
+  segmentOrder?: number
+  segmentTitle: string
+  pov: string
+  timeLocation: string
+  sceneGoal: string
+  obstacle: string
+  conflictType: string
+  emotionShift: string
+  revealPayload: string[]
+  resultState: string
+  linkageMode: string
+  requiredEndgameCommitmentIds: number[]
+  requiredForeshadowIds: number[]
+  status: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface EndgameDebtAlert {
+  commitmentId: number
+  title: string
+  description?: string
+  kind: EndgameCommitmentKind
+  status: EndgameCommitmentStatus
+  referenceCount: number
+  lastServedChapter?: number
+  targetResolutionChapter?: number
+  volumeId?: number
+  volumeName?: string
+  overdue: boolean
+  unbound: boolean
+  stale: boolean
+  severity: 'warning' | 'critical'
+  detail: string
+}
+
 export interface StoryCheckpointListFilters {
   novelId: number
   scopeType?: 'novel' | 'volume' | 'part'
@@ -2135,6 +2280,7 @@ export type QualityDashboardRiskKind =
   | 'chapter_function'
   | 'story_arc'
   | 'foreshadow_debt'
+  | 'endgame_debt'
   | 'recall'
   | 'world_state'
 
@@ -2169,6 +2315,10 @@ export interface VolumeQualityMetrics {
   foreshadowDueSoonCount: number
   foreshadowOverdueCount: number
   foreshadowResolvedCount: number
+  endgamePendingCount: number
+  endgameServedCount: number
+  endgameOverdueCount: number
+  endgameUnboundCount: number
   staleRecallCount: number
   staleRecallRate: number
   worldWarningCount: number
@@ -2186,6 +2336,10 @@ export interface NovelQualityMetrics {
   foreshadowPendingCount: number
   foreshadowDueSoonCount: number
   foreshadowOverdueCount: number
+  endgameActiveCount: number
+  endgameServedCount: number
+  endgameOverdueCount: number
+  endgameUnboundCount: number
   riskOverview: Array<{
     kind: QualityDashboardRiskKind
     label: string
@@ -2401,6 +2555,7 @@ export interface QualityDashboardData {
     staleRecallCount: number
     detail: string
   }>
+  recentEndgameDebtAlerts: EndgameDebtAlert[]
   volumeRecallDiagnostics: Array<{
     volumeId: number
     volumeNumber: number
@@ -2689,6 +2844,30 @@ declare global {
         applyBatchPlan: (novelId: number, plan: StructureBatchPlan) => Promise<StructureBatchApplyResult>
         previewBatchEdit: (novelId: number, operations: StructureBatchEditOperation[]) => Promise<StructureBatchPreview>
         applyBatchEdit: (novelId: number, operations: StructureBatchEditOperation[]) => Promise<StructureBatchApplyResult>
+      }
+      endgameAsset: {
+        listCommitments: (novelId: number) => Promise<EndgameCommitment[]>
+        getSummary: (novelId: number) => Promise<EndgameAssetSummary>
+        syncFromSettings: (novelId: number, settingsJson?: string | null) => Promise<{
+          commitments: EndgameCommitment[]
+          summary: EndgameAssetSummary
+        }>
+        updateCommitment: (id: number, data: Partial<Pick<EndgameCommitment, 'title' | 'description' | 'status' | 'targetResolutionChapter' | 'fulfilledChapter' | 'notes'>>) => Promise<EndgameCommitment | null>
+      }
+      foreshadow: {
+        listLedger: (novelId: number) => Promise<ForeshadowLedgerEntry[]>
+        upsertLedger: (novelId: number, data: Partial<ForeshadowLedgerEntry>) => Promise<ForeshadowLedgerEntry[]>
+      }
+      volumeDesign: {
+        list: (novelId: number) => Promise<VolumeDesignAsset[]>
+        getByVolume: (volumeId: number) => Promise<VolumeDesignAsset>
+        upsert: (volumeId: number, data: Partial<VolumeDesignAsset>) => Promise<VolumeDesignAsset>
+      }
+      contract: {
+        getChapter: (chapterId: number) => Promise<ChapterContractAsset>
+        upsertChapter: (chapterId: number, data: Partial<ChapterContractAsset>) => Promise<ChapterContractAsset>
+        listScenes: (chapterId: number) => Promise<SceneContractAsset[]>
+        upsertScene: (chapterId: number, segmentId: number | null, data: Partial<SceneContractAsset>) => Promise<SceneContractAsset[]>
       }
       chapter: {
         list: (novelId: number) => Promise<Chapter[]>

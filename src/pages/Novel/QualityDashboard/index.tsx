@@ -165,6 +165,7 @@ function qualityRiskKindLabel(kind: QualityDashboardData['novelQualityMetrics'][
   if (kind === 'chapter_function') return '章节功能'
   if (kind === 'story_arc') return '故事弧推进'
   if (kind === 'foreshadow_debt') return '伏笔债务'
+  if (kind === 'endgame_debt') return '终局债务'
   if (kind === 'recall') return '召回风险'
   return '状态稳定性'
 }
@@ -213,8 +214,9 @@ export default function QualityDashboard({ novelId }: Props) {
   const hasStateData = Boolean(data && (data.worldStateSummary.trackedEntityCount > 0 || data.recentWorldStateAlerts.length > 0))
   const hasRecallData = Boolean(data && (data.recallSummary.analyzedChapterCount > 0 || data.recentRecallAlerts.length > 0))
   const hasChapterFunctionData = Boolean(data && (data.chapterFunctionSummary.trackedChapterCount > 0 || data.chapterFunctionAlerts.length > 0))
+  const hasEndgameDebtData = Boolean(data && data.recentEndgameDebtAlerts.length > 0)
 
-  if (!data || (!hasScoreData && !hasStoryDynamicsData && !hasArcProgressData && !hasDialogueData && !hasStateData && !hasRecallData && !hasChapterFunctionData)) {
+  if (!data || (!hasScoreData && !hasStoryDynamicsData && !hasArcProgressData && !hasDialogueData && !hasStateData && !hasRecallData && !hasChapterFunctionData && !hasEndgameDebtData)) {
     return (
       <WorkspacePage title="质量监控">
         <WorkspacePanel title="暂无数据">
@@ -311,6 +313,12 @@ export default function QualityDashboard({ novelId }: Props) {
             onSelectVolume={setSelectedVolumeId}
             onSelectRisk={handleRiskSelect}
           />
+        </WorkspacePanel>
+      ) : null}
+
+      {data.recentEndgameDebtAlerts.length > 0 ? (
+        <WorkspacePanel title="终局债务预警">
+          <EndgameDebtPanel alerts={data.recentEndgameDebtAlerts} onSelectRisk={handleRiskSelect} />
         </WorkspacePanel>
       ) : null}
 
@@ -620,6 +628,13 @@ function NovelHealthOverviewPanel({
             待回收 {summary.foreshadowPendingCount} · 即将到期 {summary.foreshadowDueSoonCount} · 已超期 {summary.foreshadowOverdueCount}
           </div>
         </div>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>终局债务</div>
+          <div style={{ fontSize: 24, fontWeight: 700 }}>{summary.endgameActiveCount}</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>
+            已进入执行链 {summary.endgameServedCount} · 未绑定 {summary.endgameUnboundCount} · 已过期 {summary.endgameOverdueCount}
+          </div>
+        </div>
       </div>
 
       {activeVolume ? (
@@ -779,6 +794,12 @@ function VolumeHealthPanel({
               <div style={{ padding: '10px 12px', borderRadius: 10, background: 'rgba(255,255,255,0.03)', display: 'grid', gap: 4, fontSize: 12 }}>
                 <div>{`伏笔待回收：${volume.foreshadowPendingCount}`}</div>
                 <div>{`伏笔已超期：${volume.foreshadowOverdueCount}`}</div>
+                <div>{`终局待服务：${volume.endgamePendingCount}`}</div>
+                <div>{`终局已过期：${volume.endgameOverdueCount}`}</div>
+              </div>
+              <div style={{ padding: '10px 12px', borderRadius: 10, background: 'rgba(255,255,255,0.03)', display: 'grid', gap: 4, fontSize: 12 }}>
+                <div>{`终局已进入执行链：${volume.endgameServedCount}`}</div>
+                <div>{`终局未绑定：${volume.endgameUnboundCount}`}</div>
                 <div>{`过期召回：${volume.staleRecallCount} (${volume.staleRecallRate}%)`}</div>
                 <div>{`世界冲突：${volume.worldConflictAlertCount} · 预警：${volume.worldWarningCount}`}</div>
               </div>
@@ -818,6 +839,63 @@ function VolumeHealthPanel({
           </div>
         )
       })}
+    </div>
+  )
+}
+
+function EndgameDebtPanel({
+  alerts,
+  onSelectRisk,
+}: {
+  alerts: QualityDashboardData['recentEndgameDebtAlerts']
+  onSelectRisk: (risk: QualityRiskEntry) => void
+}) {
+  if (alerts.length <= 0) {
+    return <Empty description="当前没有终局债务预警" />
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 10 }}>
+      {alerts.map((alert) => (
+        <button
+          key={`endgame-debt-${alert.commitmentId}`}
+          type="button"
+          onClick={() => onSelectRisk({
+            kind: 'endgame_debt',
+            severity: alert.severity,
+            title: alert.title,
+            detail: alert.detail,
+            chapterNums: alert.targetResolutionChapter ? [alert.targetResolutionChapter] : [],
+            volumeId: alert.volumeId,
+          })}
+          style={{
+            border: '1px solid rgba(255,255,255,0.08)',
+            background: 'rgba(255,255,255,0.03)',
+            borderRadius: 10,
+            padding: '12px 14px',
+            textAlign: 'left',
+            cursor: 'pointer',
+            display: 'grid',
+            gap: 6,
+          }}
+        >
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <Tag color={getQualityRiskSeverityColor(alert.severity)} style={{ marginRight: 0 }}>
+              {getQualityRiskSeverityLabel(alert.severity)}
+            </Tag>
+            <Tag color="blue" style={{ marginRight: 0 }}>{alert.kind === 'payoff' ? '终局回收' : '终局承诺'}</Tag>
+            <strong>{alert.title}</strong>
+          </div>
+          <div style={{ fontSize: 12, opacity: 0.72 }}>{alert.detail}</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>
+            {[
+              alert.volumeName || '',
+              typeof alert.targetResolutionChapter === 'number' ? `目标章位：第${alert.targetResolutionChapter}章` : '',
+              `引用次数：${alert.referenceCount}`,
+            ].filter(Boolean).join(' · ')}
+          </div>
+        </button>
+      ))}
     </div>
   )
 }

@@ -168,6 +168,100 @@ export const storyThreads = sqliteTable('story_threads', {
   updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
 })
 
+export const endgameCommitments = sqliteTable('endgame_commitments', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  commitmentKind: text('commitment_kind').notNull().default('promise'),
+  title: text('title').notNull(),
+  description: text('description'),
+  sourceOrder: integer('source_order').notNull().default(0),
+  sourceText: text('source_text').notNull(),
+  status: text('status').notNull().default('active'),
+  targetResolutionChapter: integer('target_resolution_chapter'),
+  lastServedChapter: integer('last_served_chapter'),
+  fulfilledChapter: integer('fulfilled_chapter'),
+  notes: text('notes'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
+export const foreshadowLedger = sqliteTable('foreshadow_ledger', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  title: text('title').notNull(),
+  detail: text('detail'),
+  sourceChapterId: integer('source_chapter_id').references(() => chapters.id, { onDelete: 'set null' }),
+  sourceSegmentId: integer('source_segment_id').references(() => chapterSegments.id, { onDelete: 'set null' }),
+  plantMethod: text('plant_method'),
+  salienceLevel: text('salience_level').notNull().default('medium'),
+  targetPayoffChapter: integer('target_payoff_chapter'),
+  payoffMethod: text('payoff_method'),
+  impactScope: text('impact_scope').notNull().default('global'),
+  status: text('status').notNull().default('draft'),
+  linkedThreadId: integer('linked_thread_id').references(() => storyThreads.id, { onDelete: 'set null' }),
+  linkedEndgameCommitmentId: integer('linked_endgame_commitment_id').references(() => endgameCommitments.id, { onDelete: 'set null' }),
+  linkedVolumeId: integer('linked_volume_id').references(() => storyVolumes.id, { onDelete: 'set null' }),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
+export const volumeDesigns = sqliteTable('volume_designs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  volumeId: integer('volume_id').notNull().references(() => storyVolumes.id, { onDelete: 'cascade' }),
+  volumeTheme: text('volume_theme'),
+  volumePromise: text('volume_promise'),
+  mainConflict: text('main_conflict'),
+  climaxPlan: text('climax_plan'),
+  endStateShift: text('end_state_shift'),
+  mustAddCluesJson: text('must_add_clues_json'),
+  mustResolveCluesJson: text('must_resolve_clues_json'),
+  readerExpectation: text('reader_expectation'),
+  linkedEndgameCommitmentIdsJson: text('linked_endgame_commitment_ids_json'),
+  auditStatus: text('audit_status').notNull().default('draft'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
+export const chapterContracts = sqliteTable('chapter_contracts', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  chapterId: integer('chapter_id').notNull().references(() => chapters.id, { onDelete: 'cascade' }),
+  chapterGoal: text('chapter_goal'),
+  servedThreadIdsJson: text('served_thread_ids_json'),
+  requiredArcProgressJson: text('required_arc_progress_json'),
+  requiredAssetRefsJson: text('required_asset_refs_json'),
+  requiredEndgameCommitmentIdsJson: text('required_endgame_commitment_ids_json'),
+  requiredForeshadowIdsJson: text('required_foreshadow_ids_json'),
+  hookType: text('hook_type'),
+  forbiddenActionsJson: text('forbidden_actions_json'),
+  acceptanceNotesJson: text('acceptance_notes_json'),
+  status: text('status').notNull().default('draft'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
+export const sceneContracts = sqliteTable('scene_contracts', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  chapterId: integer('chapter_id').notNull().references(() => chapters.id, { onDelete: 'cascade' }),
+  segmentId: integer('segment_id').references(() => chapterSegments.id, { onDelete: 'set null' }),
+  pov: text('pov'),
+  timeLocation: text('time_location'),
+  sceneGoal: text('scene_goal'),
+  obstacle: text('obstacle'),
+  conflictType: text('conflict_type'),
+  emotionShift: text('emotion_shift'),
+  revealPayloadJson: text('reveal_payload_json'),
+  resultState: text('result_state'),
+  linkageMode: text('linkage_mode'),
+  requiredEndgameCommitmentIdsJson: text('required_endgame_commitment_ids_json'),
+  requiredForeshadowIdsJson: text('required_foreshadow_ids_json'),
+  status: text('status').notNull().default('draft'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
 export const factions = sqliteTable('factions', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
@@ -526,6 +620,16 @@ export type ChapterSegment = typeof chapterSegments.$inferSelect
 export type NewChapterSegment = typeof chapterSegments.$inferInsert
 export type StoryThread = typeof storyThreads.$inferSelect
 export type NewStoryThread = typeof storyThreads.$inferInsert
+export type EndgameCommitment = typeof endgameCommitments.$inferSelect
+export type NewEndgameCommitment = typeof endgameCommitments.$inferInsert
+export type ForeshadowLedgerEntry = typeof foreshadowLedger.$inferSelect
+export type NewForeshadowLedgerEntry = typeof foreshadowLedger.$inferInsert
+export type VolumeDesign = typeof volumeDesigns.$inferSelect
+export type NewVolumeDesign = typeof volumeDesigns.$inferInsert
+export type ChapterContract = typeof chapterContracts.$inferSelect
+export type NewChapterContract = typeof chapterContracts.$inferInsert
+export type SceneContract = typeof sceneContracts.$inferSelect
+export type NewSceneContract = typeof sceneContracts.$inferInsert
 export type Faction = typeof factions.$inferSelect
 export type NewFaction = typeof factions.$inferInsert
 export type GlossaryEntry = typeof glossary.$inferSelect

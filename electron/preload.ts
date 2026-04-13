@@ -103,6 +103,31 @@ const api = {
     applyBatchEdit: (novelId: number, operations: unknown[]) => invokeIpc('structure:applyBatchEdit', novelId, operations),
   },
 
+  endgameAsset: {
+    listCommitments: (novelId: number) => invokeIpc('endgameAsset:listCommitments', novelId),
+    getSummary: (novelId: number) => invokeIpc('endgameAsset:getSummary', novelId),
+    syncFromSettings: (novelId: number, settingsJson?: string | null) => invokeIpc('endgameAsset:syncFromSettings', novelId, settingsJson),
+    updateCommitment: (id: number, data: unknown) => invokeIpc('endgameAsset:updateCommitment', id, data),
+  },
+
+  foreshadow: {
+    listLedger: (novelId: number) => invokeIpc('foreshadow:listLedger', novelId),
+    upsertLedger: (novelId: number, data: unknown) => invokeIpc('foreshadow:upsertLedger', novelId, data),
+  },
+
+  volumeDesign: {
+    list: (novelId: number) => invokeIpc('volumeDesign:list', novelId),
+    getByVolume: (volumeId: number) => invokeIpc('volumeDesign:getByVolume', volumeId),
+    upsert: (volumeId: number, data: unknown) => invokeIpc('volumeDesign:upsert', volumeId, data),
+  },
+
+  contract: {
+    getChapter: (chapterId: number) => invokeIpc('contract:getChapter', chapterId),
+    upsertChapter: (chapterId: number, data: unknown) => invokeIpc('contract:upsertChapter', chapterId, data),
+    listScenes: (chapterId: number) => invokeIpc('contract:listScenes', chapterId),
+    upsertScene: (chapterId: number, segmentId: number | null, data: unknown) => invokeIpc('contract:upsertScene', chapterId, segmentId, data),
+  },
+
   // Chapter APIs
   chapter: {
     list: (novelId: number) => invokeIpc('chapter:list', novelId),

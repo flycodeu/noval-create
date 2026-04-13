@@ -39,6 +39,8 @@ import ItemsWorkspace from './ItemsWorkspace'
 import SceneTemplates from './SceneTemplates'
 import StoryThreadsPage from './StoryThreads'
 import Outline from './Outline'
+import VolumeDesignPage from './VolumeDesign'
+import ContractsPage from './Contracts'
 import Structure from './Structure'
 import TimelinePage from './Timeline'
 import Writing from './Writing'
@@ -79,6 +81,8 @@ type ProWorkspaceKey =
   | 'scene-templates'
   | 'story-design'
   | 'outline'
+  | 'volume-design'
+  | 'contracts'
   | 'structure'
   | 'timeline'
   | 'writing'
@@ -135,6 +139,8 @@ const WORKSPACE_GROUPS: Array<{ title: string; items: WorkspaceItem[] }> = [
     items: [
       { key: 'story-design', icon: <BarsOutlined />, label: '故事设计', summary: '在资产到位后统一设计主线、支线和结局。' },
       { key: 'outline', icon: <BarsOutlined />, label: '故事大纲', summary: '按章节推进主线，落实关键转折。' },
+      { key: 'volume-design', icon: <ApartmentOutlined />, label: '卷级设计', summary: '让每卷直接继承终局压力与本卷闭环目标。' },
+      { key: 'contracts', icon: <BarsOutlined />, label: '章节合同', summary: '把本章与场景约束变成显式写作合同。' },
       { key: 'structure', icon: <ApartmentOutlined />, label: '结构规划', summary: '拆卷、拆部、拆章，稳住长篇节奏。' },
       { key: 'timeline', icon: <ClockCircleOutlined />, label: '时间轴', summary: '维护事件顺序、后果链和时间锚点。' },
       { key: 'writing', icon: <EditOutlined />, label: '正文写作', summary: '集中处理场景计划、主写、审校和定稿。' },
@@ -280,6 +286,8 @@ export default function NovelRouter() {
       'scene-templates': workflowStats.sceneTemplateCount > 0,
       'story-design': guidedProgressMap['story-plot'].isComplete,
       outline: workflowStats.outlineCount > 0,
+      'volume-design': workflowStats.volumeCount > 0,
+      contracts: workflowStats.chapterCount > 0,
       structure: guidedProgressMap['volume-planning'].isComplete,
       timeline: workflowStats.timelineCount > 0,
       writing: isWritingStepReady(workflowStats),
@@ -364,6 +372,14 @@ export default function NovelRouter() {
       outline: {
         label: formatCountState(workflowStats.outlineCount, '条'),
         complete: workflowStats.outlineCount > 0,
+      },
+      'volume-design': {
+        label: workflowStats.volumeCount > 0 ? `${workflowStats.volumeCount}卷` : '待补',
+        complete: workflowStats.volumeCount > 0,
+      },
+      contracts: {
+        label: workflowStats.chapterCount > 0 ? `${workflowStats.chapterCount}章` : '待补',
+        complete: workflowStats.chapterCount > 0,
       },
       structure: {
         label: workflowStats.volumeCount > 0 ? `${workflowStats.volumeCount}卷` : '待补',
@@ -846,6 +862,8 @@ export default function NovelRouter() {
               <Route path="scene-templates" element={<SceneTemplates novelId={novelId} />} />
               <Route path="story-design" element={<CoreSettings novelId={novelId} />} />
               <Route path="outline" element={<Outline novelId={novelId} />} />
+              <Route path="volume-design" element={<VolumeDesignPage novelId={novelId} />} />
+              <Route path="contracts" element={<ContractsPage novelId={novelId} />} />
               <Route path="structure" element={<Structure novelId={novelId} />} />
               <Route path="timeline" element={<TimelinePage novelId={novelId} />} />
               <Route path="writing/*" element={<Writing novelId={novelId} />} />

@@ -45,6 +45,7 @@ import {
 import { getCharacterDialogueHintMap } from './dialogue-fingerprint.service'
 import { getCharacterStateContextHintMap, listLatestCharacterStates } from './character-state.service'
 import { getWorldStateContextSnapshot } from './world-state.service'
+import { getChapterContractContext } from './endgame-asset.service'
 
 /**
  * 改进的 token 估算：中文字符约 1 token/字，英文约 0.25 token/word (4 chars/token)，
@@ -479,6 +480,41 @@ function buildConstraintSection(title: string, lines: string[]): string {
   const normalizedLines = dedupe(lines.map((line) => compactRecallLine(line, 92)).filter(Boolean), 6)
   if (normalizedLines.length === 0) return ''
   return [`${title}:`, ...normalizedLines.map((line) => `- ${line}`)].join('\n')
+}
+
+function formatContractLine(label: string, values: string[]): string {
+  const normalized = dedupe(values.map((value) => compactRecallLine(value, 88)).filter(Boolean), 4)
+  if (normalized.length === 0) return ''
+  return `${label}：${normalized.join('；')}`
+}
+
+function buildSceneContractSummaryLines(sceneContracts: Array<{
+  segmentOrder?: number
+  segmentTitle: string
+  sceneGoal: string
+  obstacle: string
+  conflictType: string
+  emotionShift: string
+  revealPayload: string[]
+  resultState: string
+}>): string[] {
+  return sceneContracts
+    .map((scene) => {
+      const pieces = [
+        scene.sceneGoal ? `目标 ${compactRecallLine(scene.sceneGoal, 36)}` : '',
+        scene.obstacle ? `障碍 ${compactRecallLine(scene.obstacle, 28)}` : '',
+        scene.conflictType ? `冲突 ${compactRecallLine(scene.conflictType, 20)}` : '',
+        scene.emotionShift ? `情绪 ${compactRecallLine(scene.emotionShift, 20)}` : '',
+        scene.revealPayload.length > 0 ? `揭示 ${scene.revealPayload.slice(0, 2).map((item) => compactRecallLine(item, 18)).join('、')}` : '',
+        scene.resultState ? `结果 ${compactRecallLine(scene.resultState, 24)}` : '',
+      ].filter(Boolean)
+      if (pieces.length === 0) return ''
+      const sceneLabel = typeof scene.segmentOrder === 'number'
+        ? `场景${scene.segmentOrder}`
+        : scene.segmentTitle
+      return `${sceneLabel}：${pieces.join('；')}`
+    })
+    .filter(Boolean)
 }
 
 const HARD_CONSTRAINT_SIGNAL_KEYWORDS = ['必须', '承接', '回收', '未清', '告警', '漂移', '冲突', '失效', '损坏', '伤势', '立场', '目标', '去向', '约束']
@@ -2110,7 +2146,30 @@ export async function collectChapterContextRawData(
   const longTermMemory = buildStoryMemoryPromptSummary(novelId, { chapterId: currentChapter?.id })
   const itemSummary = buildItemSummary(novelId)
   const activeThreadsContext = buildActiveThreadsContextData(novelId, chapterNum, currentArc)
-  const chapterGoal = extractChapterGoal(currentChapter?.outline)
+  const contractContext = currentChapter ? getChapterContractContext(currentChapter.id) : null
+  const chapterContract = contractContext?.chapterContract || null
+  const chapterGoal = [
+    chapterContract?.chapterGoal || '',
+    extractChapterGoal(currentChapter?.outline),
+  ].filter(Boolean).join('\n')
+  const chapterContractRules = [
+    chapterContract?.hookType ? `本章钩子：${chapterContract.hookType}` : '',
+    formatContractLine('本章禁止', chapterContract?.forbiddenActions || []),
+    formatContractLine('验收要求', chapterContract?.acceptanceNotes || []),
+    formatContractLine('必须推进', chapterContract?.requiredArcProgress || []),
+    formatContractLine('必须出现资产', chapterContract?.requiredAssetRefs || []),
+  ].filter(Boolean)
+  const requiredCommitments = contractContext?.requiredCommitments || []
+  const requiredForeshadows = contractContext?.requiredForeshadows || []
+  const promiseCommitmentLines = requiredCommitments
+    .filter((item) => item.commitmentKind === 'promise')
+    .map((item) => `终局承诺：${compactRecallLine(item.title, 30)}${item.description ? ` · ${compactRecallLine(item.description, 44)}` : ''}`)
+  const payoffCommitmentLines = requiredCommitments
+    .filter((item) => item.commitmentKind === 'payoff')
+    .map((item) => `终局回收：${compactRecallLine(item.title, 30)}${item.description ? ` · ${compactRecallLine(item.description, 44)}` : ''}`)
+  const requiredForeshadowLines = requiredForeshadows
+    .map((item) => `合同伏笔：${compactRecallLine(item.title, 28)}${item.detail ? ` · ${compactRecallLine(item.detail, 44)}` : ''}`)
+  const sceneContractLines = buildSceneContractSummaryLines(contractContext?.sceneContracts || [])
 
   // 从当前章节任务相关文本里提取实体名，用于动态召回
   const recallSignalText = [
@@ -2192,12 +2251,26 @@ export async function collectChapterContextRawData(
     contextParts: {
       chapterGoal,
       storyCore: buildStoryCoreText(profile),
-      writingContractSummary: profile.writingContractSummary,
+      writingContractSummary: [
+        profile.writingContractSummary,
+        chapterContractRules.length > 0 ? `章节合同：${chapterContractRules.join('；')}` : '',
+      ].filter(Boolean).join('\n'),
       currentArc: formatArcContext(currentArc),
-      continuityNotes: collectContinuityNotes(continuityChapters),
+      continuityNotes: [
+        collectContinuityNotes(continuityChapters),
+        ...chapterContractRules,
+        ...sceneContractLines,
+      ].filter(Boolean).join('\n'),
       lastChapterEnding,
-      openLoops: collectOpenLoops(continuityChapters),
-      dueForeshadows: buildDueForeshadowContext(novelId, chapterNum, currentArc),
+      openLoops: [
+        collectOpenLoops(continuityChapters),
+        ...promiseCommitmentLines,
+      ].filter(Boolean).join('\n'),
+      dueForeshadows: [
+        buildDueForeshadowContext(novelId, chapterNum, currentArc),
+        ...payoffCommitmentLines,
+        ...requiredForeshadowLines,
+      ].filter(Boolean).join('\n'),
       timelineOpenThreads: timelineContext.timelineOpenThreads,
       worldRules: worldRulesContext,
       itemSummary,

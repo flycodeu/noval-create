@@ -1,0 +1,299 @@
+import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { Alert, Button, Form, Input, Select, Space, Spin, Tag, message } from 'antd'
+import { SaveOutlined, BarsOutlined } from '@ant-design/icons'
+import { useNovelStore } from '../../../stores/novel.store'
+import type { EndgameCommitment, StoryStructureVolumeSummary, VolumeDesignAsset } from '../../../types'
+import {
+  WorkspaceContextSummary,
+  WorkspaceMetric,
+  WorkspacePage,
+  WorkspacePanel,
+  WorkspaceStepGuide,
+} from '../components/WorkspaceShell'
+
+interface Props {
+  novelId: number
+}
+
+interface VolumeDesignFormValues {
+  volumeTheme: string
+  volumePromise: string
+  mainConflict: string
+  climaxPlan: string
+  endStateShift: string
+  mustAddCluesText: string
+  mustResolveCluesText: string
+  readerExpectation: string
+  linkedEndgameCommitmentIds: number[]
+  auditStatus: string
+}
+
+function splitLines(value?: string): string[] {
+  return (value || '')
+    .split(/\r?\n+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function buildFormValues(design?: VolumeDesignAsset | null): VolumeDesignFormValues {
+  return {
+    volumeTheme: design?.volumeTheme || '',
+    volumePromise: design?.volumePromise || '',
+    mainConflict: design?.mainConflict || '',
+    climaxPlan: design?.climaxPlan || '',
+    endStateShift: design?.endStateShift || '',
+    mustAddCluesText: (design?.mustAddClues || []).join('\n'),
+    mustResolveCluesText: (design?.mustResolveClues || []).join('\n'),
+    readerExpectation: design?.readerExpectation || '',
+    linkedEndgameCommitmentIds: design?.linkedEndgameCommitmentIds || [],
+    auditStatus: design?.auditStatus || 'draft',
+  }
+}
+
+export default function VolumeDesignPage({ novelId }: Props) {
+  const navigate = useNavigate()
+  const { currentNovel } = useNovelStore()
+  const [form] = Form.useForm<VolumeDesignFormValues>()
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [volumes, setVolumes] = useState<StoryStructureVolumeSummary[]>([])
+  const [designs, setDesigns] = useState<VolumeDesignAsset[]>([])
+  const [commitments, setCommitments] = useState<EndgameCommitment[]>([])
+  const [activeVolumeId, setActiveVolumeId] = useState<number | null>(null)
+
+  const loadData = async () => {
+    setLoading(true)
+    try {
+      const [volumeRows, designRows, commitmentRows] = await Promise.all([
+        window.electron.structure.listVolumes(novelId),
+        window.electron.volumeDesign.list(novelId),
+        window.electron.endgameAsset.listCommitments(novelId),
+      ])
+      setVolumes(volumeRows)
+      setDesigns(designRows)
+      setCommitments(commitmentRows.filter((item) => item.derivedStatus !== 'waived'))
+      setActiveVolumeId((current) => current ?? volumeRows[0]?.id ?? null)
+    } catch (error) {
+      console.error(error)
+      message.error('卷级设计加载失败')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void loadData()
+  }, [novelId])
+
+  const activeVolume = useMemo(
+    () => volumes.find((item) => item.id === activeVolumeId) || null,
+    [activeVolumeId, volumes],
+  )
+  const activeDesign = useMemo(
+    () => designs.find((item) => item.volumeId === activeVolumeId) || null,
+    [activeVolumeId, designs],
+  )
+
+  useEffect(() => {
+    form.setFieldsValue(buildFormValues(activeDesign))
+  }, [activeDesign, form])
+
+  const linkedCommitments = useMemo(
+    () => commitments.filter((item) => (activeDesign?.linkedEndgameCommitmentIds || []).includes(item.id)),
+    [activeDesign?.linkedEndgameCommitmentIds, commitments],
+  )
+
+  const handleSave = async () => {
+    if (!activeVolumeId) return
+    const values = await form.validateFields()
+    setSaving(true)
+    try {
+      await window.electron.volumeDesign.upsert(activeVolumeId, {
+        volumeTheme: values.volumeTheme,
+        volumePromise: values.volumePromise,
+        mainConflict: values.mainConflict,
+        climaxPlan: values.climaxPlan,
+        endStateShift: values.endStateShift,
+        mustAddClues: splitLines(values.mustAddCluesText),
+        mustResolveClues: splitLines(values.mustResolveCluesText),
+        readerExpectation: values.readerExpectation,
+        linkedEndgameCommitmentIds: values.linkedEndgameCommitmentIds,
+        auditStatus: values.auditStatus,
+      })
+      message.success('卷级设计已保存')
+      await loadData()
+    } catch (error) {
+      console.error(error)
+      message.error(error instanceof Error ? error.message : '卷级设计保存失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <WorkspacePage title="卷级设计中心">
+        <WorkspacePanel title="正在加载卷级设计">
+          <Spin />
+        </WorkspacePanel>
+      </WorkspacePage>
+    )
+  }
+
+  return (
+    <WorkspacePage
+      eyebrow="卷级设计中心"
+      title="卷级设计中心"
+      description="把终局承诺拆到各卷，让每卷都有自己的主题、闭环和必须服务的终局压力。"
+      actions={(
+        <Space wrap>
+          <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>
+            保存当前卷设计
+          </Button>
+          <Button icon={<BarsOutlined />} onClick={() => navigate(`/novels/${novelId}/contracts`)}>
+            去章节合同
+          </Button>
+        </Space>
+      )}
+      contextSummary={(
+        <WorkspaceContextSummary
+          items={[
+            { label: '书名', value: currentNovel?.title || '未命名小说' },
+            { label: '卷数量', value: volumes.length > 0 ? `${volumes.length} 卷` : '未拆卷' },
+            { label: '终局承诺', value: commitments.length > 0 ? `${commitments.length} 条` : '未同步' },
+            { label: '当前卷', value: activeVolume ? (activeVolume.title || `第${activeVolume.volumeNumber}卷`) : '未选择' },
+          ]}
+        />
+      )}
+      metrics={(
+        <>
+          <WorkspaceMetric label="已绑定终局承诺" value={activeDesign?.linkedEndgameCommitmentIds.length || 0} tone="warm" />
+          <WorkspaceMetric label="必须新增线索" value={activeDesign?.mustAddClues.length || 0} />
+          <WorkspaceMetric label="必须回收线索" value={activeDesign?.mustResolveClues.length || 0} tone="cool" />
+        </>
+      )}
+      guide={(
+        <WorkspaceStepGuide
+          steps={[
+            { title: '先选卷', description: '先确认当前在设计哪一卷，不要把全书目标和卷级目标混写。', status: 'focus' },
+            { title: '绑定终局承诺', description: '把这一卷明确要服务的终局承诺直接挂上，避免后期没人负责。', status: 'todo' },
+            { title: '写清本卷闭环', description: '至少把本卷承诺、主冲突、高潮和卷末状态变化写完整。', status: 'todo' },
+          ]}
+        />
+      )}
+    >
+      {commitments.length <= 0 ? (
+        <Alert
+          type="warning"
+          showIcon
+          message="还没有可引用的终局承诺"
+          description="先到终局设计页保存并同步承诺，再回来把各卷绑定到具体终局压力。"
+        />
+      ) : null}
+
+      <WorkspacePanel title="卷选择" description="每卷单独维护，避免全书级描述混入卷级目标。">
+        <Space wrap>
+          <Select
+            value={activeVolumeId ?? undefined}
+            onChange={(value) => setActiveVolumeId(value)}
+            style={{ minWidth: 240 }}
+            options={volumes.map((item) => ({
+              value: item.id,
+              label: `${item.title || `第${item.volumeNumber}卷`} · ${item.chapterCount}章`,
+            }))}
+            placeholder="选择要设计的卷"
+          />
+          {activeVolume ? <Tag color="blue">{`第${activeVolume.volumeNumber}卷 · ${activeVolume.chapterCount}章 · ${activeVolume.wordCount.toLocaleString()}字`}</Tag> : null}
+        </Space>
+      </WorkspacePanel>
+
+      <WorkspacePanel title="卷级闭环" description="写当前卷为什么值得读完，以及它怎么向终局继续施压。">
+        <Form form={form} layout="vertical">
+          <div className="guided-step__field-grid">
+            <div className="guided-step__field-card">
+              <Form.Item name="volumeTheme" label="本卷主题">
+                <Input.TextArea rows={3} placeholder="写这一卷真正反复验证的主题命题。" />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card">
+              <Form.Item name="volumePromise" label="本卷承诺">
+                <Input.TextArea rows={3} placeholder="写读者读完这一卷必须拿到的情绪收益或叙事兑现。" />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card">
+              <Form.Item name="mainConflict" label="本卷主冲突">
+                <Input.TextArea rows={4} placeholder="写本卷主要对手、压力结构或核心困局。" />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card">
+              <Form.Item name="climaxPlan" label="本卷高潮">
+                <Input.TextArea rows={4} placeholder="写这一卷最高压的冲突爆点和兑现方式。" />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card">
+              <Form.Item name="endStateShift" label="卷末状态变化">
+                <Input.TextArea rows={4} placeholder="写卷末人物、局势或资源格局发生了什么不可逆变化。" />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card">
+              <Form.Item name="readerExpectation" label="卷末读者期待">
+                <Input.TextArea rows={4} placeholder="写读者读完本卷后，下一卷最该等待什么。" />
+              </Form.Item>
+            </div>
+          </div>
+        </Form>
+      </WorkspacePanel>
+
+      <WorkspacePanel title="终局绑定与线索清单" description="这一卷必须新增什么，必须回收什么，以及它直接服务哪些终局承诺。">
+        <Form form={form} layout="vertical">
+          <div className="guided-step__field-grid">
+            <div className="guided-step__field-card guided-step__field-card--full">
+              <Form.Item name="linkedEndgameCommitmentIds" label="本卷绑定的终局承诺">
+                <Select
+                  mode="multiple"
+                  allowClear
+                  placeholder="选择本卷直接服务的终局承诺"
+                  options={commitments.map((item) => ({
+                    value: item.id,
+                    label: `${item.commitmentKind === 'payoff' ? '回收' : '承诺'} · ${item.title}`,
+                  }))}
+                />
+              </Form.Item>
+              {linkedCommitments.length > 0 ? (
+                <Space wrap>
+                  {linkedCommitments.map((item) => (
+                    <Tag key={item.id} color={item.commitmentKind === 'payoff' ? 'gold' : 'cyan'}>
+                      {`${item.commitmentKind === 'payoff' ? '回收' : '承诺'} · ${item.title}`}
+                    </Tag>
+                  ))}
+                </Space>
+              ) : null}
+            </div>
+            <div className="guided-step__field-card">
+              <Form.Item name="mustAddCluesText" label="本卷必须新增的线索">
+                <Input.TextArea rows={6} placeholder={'建议每行一条，例如：\n反派真正动机的新证据\n主角无法回避的新成本'} />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card">
+              <Form.Item name="mustResolveCluesText" label="本卷必须回收的线索">
+                <Input.TextArea rows={6} placeholder={'建议每行一条，例如：\n第一卷埋下的伤口来源\n本卷中段埋下的身份误判'} />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card guided-step__field-card--compact">
+              <Form.Item name="auditStatus" label="卷后审计状态">
+                <Select
+                  options={[
+                    { value: 'draft', label: '草稿' },
+                    { value: 'ready', label: '待审计' },
+                    { value: 'audited', label: '已审计' },
+                  ]}
+                />
+              </Form.Item>
+            </div>
+          </div>
+        </Form>
+      </WorkspacePanel>
+    </WorkspacePage>
+  )
+}

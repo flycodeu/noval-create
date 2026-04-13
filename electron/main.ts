@@ -57,6 +57,7 @@ import * as worldStateService from './services/world-state.service'
 import * as promptOverrideService from './services/prompt-override.service'
 import * as revisionTaskService from './services/revision-task.service'
 import * as sceneTemplateService from './services/scene-template.service'
+import * as endgameAssetService from './services/endgame-asset.service'
 import * as storyStructureService from './services/story-structure.service'
 import * as storyThreadService from './services/story-thread.service'
 import * as workspaceQualityService from './services/workspace-quality.service'
@@ -328,6 +329,19 @@ function registerIpcHandlers() {
   handle('structure:applyBatchPlan', (_, novelId, plan) => storyStructureService.applyStructureBatchPlan(requireId(novelId, 'novelId'), plan))
   handle('structure:previewBatchEdit', (_, novelId, operations) => storyStructureService.previewStructureBatchEdit(requireId(novelId, 'novelId'), operations))
   handle('structure:applyBatchEdit', (_, novelId, operations) => storyStructureService.applyStructureBatchEdit(requireId(novelId, 'novelId'), operations))
+  handle('endgameAsset:listCommitments', (_, novelId) => endgameAssetService.listEndgameCommitments(requireId(novelId, 'novelId')))
+  handle('endgameAsset:getSummary', (_, novelId) => endgameAssetService.getEndgameAssetSummary(requireId(novelId, 'novelId')))
+  handle('endgameAsset:syncFromSettings', (_, novelId, settingsJson) => endgameAssetService.syncEndgameCommitmentsFromSettings(requireId(novelId, 'novelId'), settingsJson))
+  handle('endgameAsset:updateCommitment', (_, id, data) => endgameAssetService.updateEndgameCommitment(requireId(id), data))
+  handle('foreshadow:listLedger', (_, novelId) => endgameAssetService.listForeshadowLedger(requireId(novelId, 'novelId')))
+  handle('foreshadow:upsertLedger', (_, novelId, data) => endgameAssetService.upsertForeshadowLedger(requireId(novelId, 'novelId'), data))
+  handle('volumeDesign:list', (_, novelId) => endgameAssetService.listVolumeDesigns(requireId(novelId, 'novelId')))
+  handle('volumeDesign:getByVolume', (_, volumeId) => endgameAssetService.getVolumeDesignByVolumeId(requireId(volumeId, 'volumeId')))
+  handle('volumeDesign:upsert', (_, volumeId, data) => endgameAssetService.upsertVolumeDesign(requireId(volumeId, 'volumeId'), data))
+  handle('contract:getChapter', (_, chapterId) => endgameAssetService.getChapterContract(requireId(chapterId, 'chapterId')))
+  handle('contract:upsertChapter', (_, chapterId, data) => endgameAssetService.upsertChapterContract(requireId(chapterId, 'chapterId'), data))
+  handle('contract:listScenes', (_, chapterId) => endgameAssetService.listSceneContracts(requireId(chapterId, 'chapterId')))
+  handle('contract:upsertScene', (_, chapterId, segmentId, data) => endgameAssetService.upsertSceneContract(requireId(chapterId, 'chapterId'), segmentId == null ? null : requireId(segmentId, 'segmentId'), data))
 
   handle('chapter:list', (_, novelId) => chapterService.listChapters(requireId(novelId, 'novelId')))
   handle('chapter:get', (_, id) => chapterService.getChapter(requireId(id)))
