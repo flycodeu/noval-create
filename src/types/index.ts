@@ -147,6 +147,7 @@ export interface Chapter {
   staleReasonJson?: string
   allowedFactIdsJson?: string
   revealedFactIdsJson?: string
+  contractAuditJson?: string
   createdAt: string
   updatedAt: string
 }
@@ -1418,6 +1419,27 @@ export interface ChapterPublishCheckItem {
   detail: string
 }
 
+export type ContractAuditStatus = 'pass' | 'warning' | 'blocker'
+
+export interface ContractAuditItem {
+  key: string
+  label: string
+  status: ContractAuditStatus
+  detail: string
+  source: 'chapter' | 'scene'
+  segmentId?: number
+  segmentTitle?: string
+}
+
+export interface ChapterContractAudit {
+  checkedAt: string
+  summary: string
+  blockerCount: number
+  warningCount: number
+  passCount: number
+  items: ContractAuditItem[]
+}
+
 export interface ChapterPublishCheck {
   chapterId: number
   chapterNum: number
@@ -1429,6 +1451,95 @@ export interface ChapterPublishCheck {
   chapterContextVersion: number
   novelContextVersion: number
   checklist: ChapterPublishCheckItem[]
+  contractAudit: ChapterContractAudit
+}
+
+export type ChapterWritebackAssetType =
+  | 'character'
+  | 'world'
+  | 'item'
+  | 'relation'
+  | 'thread'
+  | 'foreshadow'
+  | 'puzzle'
+  | 'timeline'
+
+export type ChapterWritebackRunStatus =
+  | 'draft'
+  | 'ready'
+  | 'applying'
+  | 'applied'
+  | 'partially_failed'
+  | 'failed'
+
+export type ChapterWritebackDecision = 'pending' | 'accepted' | 'rejected' | 'edited'
+
+export type ChapterWritebackStatus = 'pending' | 'applied' | 'failed' | 'skipped'
+
+export interface ChapterWritebackRun {
+  id: number
+  novelId: number
+  chapterId: number
+  status: ChapterWritebackRunStatus
+  triggerSource: string
+  summaryText?: string | null
+  startedAt?: string | null
+  completedAt?: string | null
+  failedAt?: string | null
+  errorMessage?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ChapterFactExtract {
+  id: number
+  runId: number
+  assetType: ChapterWritebackAssetType
+  sourceText?: string | null
+  factJson: string
+  confidence?: number | null
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ChapterWritebackDiff {
+  id: number
+  runId: number
+  assetType: ChapterWritebackAssetType
+  entityType: string
+  entityId?: number | null
+  beforeStateJson?: string | null
+  afterStateJson: string
+  diffReason?: string | null
+  confidence?: number | null
+  canonDecision: ChapterWritebackDecision
+  writebackStatus: ChapterWritebackStatus
+  writebackError?: string | null
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ChapterWritebackCoverageItem {
+  assetType: ChapterWritebackAssetType
+  extractCount: number
+  diffCount: number
+  acceptedCount: number
+  rejectedCount: number
+  editedCount: number
+  appliedCount: number
+  failedCount: number
+  pendingCount: number
+}
+
+export interface ChapterWritebackCenterData {
+  chapter: Chapter | null
+  runs: ChapterWritebackRun[]
+  activeRun: ChapterWritebackRun | null
+  extracts: ChapterFactExtract[]
+  diffs: ChapterWritebackDiff[]
+  coverage: ChapterWritebackCoverageItem[]
 }
 
 export interface Genre {
@@ -3372,6 +3483,22 @@ declare global {
         generateSummary: (chapterId: number) => Promise<void>
         aiCheck: (chapterId: number) => Promise<unknown>
         runPublishCheck: (chapterId: number) => Promise<ChapterPublishCheck>
+      }
+      writeback: {
+        prepareRun: (chapterId: number, triggerSource?: string) => Promise<ChapterWritebackRun>
+        getCenterData: (chapterId: number, runId?: number) => Promise<ChapterWritebackCenterData>
+        listRuns: (chapterId: number) => Promise<ChapterWritebackRun[]>
+        updateDecision: (diffId: number, patch: {
+          canonDecision?: ChapterWritebackDecision
+          afterStateJson?: string
+          diffReason?: string
+        }) => Promise<ChapterWritebackDiff>
+        bulkUpdateDecisions: (runId: number, patch: {
+          canonDecision: Exclude<ChapterWritebackDecision, 'pending'>
+          assetType?: ChapterWritebackAssetType
+        }) => Promise<ChapterWritebackDiff[]>
+        applyRun: (runId: number) => Promise<ChapterWritebackCenterData>
+        retryFailed: (runId: number) => Promise<ChapterWritebackCenterData>
       }
       character: {
         list: (novelId: number) => Promise<Character[]>

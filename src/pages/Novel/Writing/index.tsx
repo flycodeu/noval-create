@@ -16,10 +16,11 @@ import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-messa
 import AIScorePanel from '../../../components/AIScorePanel'
 import type {
   Chapter,
+  ChapterContractAudit,
   ChapterContextPreview,
+  ChapterPublishCheck,
   ChapterSegment,
   ChapterVersion,
-  ChapterPublishCheck,
   Character,
   ForeshadowLedgerEntry,
   ForeshadowSnapshot,
@@ -161,12 +162,29 @@ const parseCharacterKnowledgeJson = (raw?: string | null): StoryFactCharacterKno
 const parseContinuity = (raw?: string) => { try { return raw ? JSON.parse(raw) as ContinuityPayload : null } catch { return null } }
 const parseScenePlan = (raw?: string) => { try { const parsed = raw ? JSON.parse(raw) : []; return Array.isArray(parsed) ? parsed as ScenePlanStep[] : [] } catch { return [] } }
 const parseReviewNotes = (raw?: string) => { try { return raw ? JSON.parse(raw) as ReviewNotes : null } catch { return null } }
+const parseContractAudit = (raw?: string) => { try { return raw ? JSON.parse(raw) as ChapterContractAudit : null } catch { return null } }
 const countWords = (text: string) => ((text.match(/[一-龥]/g) || []).length + (text.match(/\b[a-zA-Z]+\b/g) || []).length)
 const formatChapterNumber = (chapterNum?: number) => typeof chapterNum === 'number' ? `第${chapterNum}章` : '未设定'
 const getStatusLabel = (status?: Chapter['status']) => STATUS_OPTIONS.find((item) => item.value === status)?.label || '未设置'
 const getIssueColor = (severity: 'high' | 'medium' | 'low') => severity === 'high' ? 'error' : severity === 'medium' ? 'warning' : 'default'
 const getIssueLabel = (severity: 'high' | 'medium' | 'low') => severity === 'high' ? '高优先' : severity === 'medium' ? '中优先' : '低优先'
 const getHealthLabel = (score: number) => (score >= 80 ? '结构稳定' : score >= 60 ? '可继续推进' : '需要处理问题')
+const formatPublishCheckItemText = (item: ChapterPublishCheck['checklist'][number]) => {
+  const prefix = item.status === 'pass' ? '通过' : item.status === 'warning' ? '中优先' : '阻塞'
+  return `${prefix} · ${item.label}：${item.detail}`
+}
+const formatContractAuditItemText = (item: ChapterContractAudit['items'][number]) => {
+  const prefix = item.status === 'pass' ? '通过' : item.status === 'warning' ? '中优先' : '阻塞'
+  return `${prefix} · ${item.label}：${item.detail}`
+}
+const collectPublishCheckMessages = (check: ChapterPublishCheck, status: 'warning' | 'blocker') => [
+  ...check.checklist
+    .filter((item) => item.status === status)
+    .map(formatPublishCheckItemText),
+  ...check.contractAudit.items
+    .filter((item) => item.status === status)
+    .map((item) => `合同对账 · ${formatContractAuditItemText(item)}`),
+]
 const getPublishCheckAlertType = (check: ChapterPublishCheck | null) => {
   if (!check) return 'info'
   if (!check.ready) return 'error'
@@ -517,7 +535,11 @@ export default function Writing({ novelId }: Props) {
   }, [])
 
   const refreshPublishCheck = useCallback(async (chapterId: number) => {
-    setPublishCheck(await window.electron.chapter.runPublishCheck(chapterId))
+    const nextCheck = await window.electron.chapter.runPublishCheck(chapterId)
+    setPublishCheck(nextCheck)
+    setCurrentChapter((current) => current && current.id === chapterId
+      ? { ...current, contractAuditJson: JSON.stringify(nextCheck.contractAudit) }
+      : current)
   }, [])
 
   const refreshChapter = useCallback(async (chapterId: number) => {
@@ -956,17 +978,19 @@ export default function Writing({ novelId }: Props) {
     if (status === 'final') {
       const nextPublishCheck = await window.electron.chapter.runPublishCheck(currentChapter.id)
       setPublishCheck(nextPublishCheck)
+      setCurrentChapter((current) => current && current.id === currentChapter.id
+        ? { ...current, contractAuditJson: JSON.stringify(nextPublishCheck.contractAudit) }
+        : current)
       await refreshContextStatus()
 
       if (!nextPublishCheck.ready) {
+        const blockerMessages = collectPublishCheckMessages(nextPublishCheck, 'blocker')
         Modal.error({
           title: '发布前检查未通过',
           content: (
             <div className="novel-note-list" style={{ marginTop: 12 }}>
               <div className="novel-note-list__item">{nextPublishCheck.summary}</div>
-              {nextPublishCheck.checklist
-                .filter((item) => item.status === 'blocker')
-                .map((item) => <div key={item.key} className="novel-note-list__item">{`${item.label}：${item.detail}`}</div>)}
+              {blockerMessages.map((item) => <div key={item} className="novel-note-list__item">{item}</div>)}
             </div>
           ),
           okText: '返回处理',
@@ -975,15 +999,14 @@ export default function Writing({ novelId }: Props) {
       }
 
       if (nextPublishCheck.warningCount > 0) {
+        const warningMessages = collectPublishCheckMessages(nextPublishCheck, 'warning')
         const shouldContinue = await new Promise<boolean>((resolve) => {
           Modal.confirm({
             title: '发布前仍有待处理项',
             content: (
               <div className="novel-note-list" style={{ marginTop: 12 }}>
                 <div className="novel-note-list__item">{nextPublishCheck.summary}</div>
-                {nextPublishCheck.checklist
-                  .filter((item) => item.status === 'warning')
-                  .map((item) => <div key={item.key} className="novel-note-list__item">{`${item.label}：${item.detail}`}</div>)}
+                {warningMessages.map((item) => <div key={item} className="novel-note-list__item">{item}</div>)}
               </div>
             ),
             okText: '仍标记完成',
@@ -1124,6 +1147,10 @@ export default function Writing({ novelId }: Props) {
   const continuity = useMemo(() => parseContinuity(currentChapter?.continuityStateJson), [currentChapter?.continuityStateJson])
   const scenePlan = useMemo(() => parseScenePlan(currentChapter?.scenePlanJson), [currentChapter?.scenePlanJson])
   const reviewNotes = useMemo(() => parseReviewNotes(currentChapter?.reviewNotesJson), [currentChapter?.reviewNotesJson])
+  const currentContractAudit = useMemo(
+    () => publishCheck?.contractAudit || parseContractAudit(currentChapter?.contractAuditJson),
+    [currentChapter?.contractAuditJson, publishCheck],
+  )
   const allowedRevealFactIds = useMemo(
     () => normalizeIdArray(parseNumberArray(currentChapter?.allowedFactIdsJson)),
     [currentChapter?.allowedFactIdsJson],
@@ -1343,13 +1370,30 @@ export default function Writing({ novelId }: Props) {
         <InsightCard title="发布前检查" eyebrow="完成门槛" tone="soft">
           {publishCheck ? (
             <StringList
-              items={publishCheck.checklist.map((item) => {
-                const prefix = item.status === 'pass' ? '通过' : item.status === 'warning' ? '中优先' : '阻塞'
-                return `${prefix} · ${item.label}：${item.detail}`
-              })}
+              items={publishCheck.checklist.map(formatPublishCheckItemText)}
               empty="当前没有发布前检查结果。"
             />
           ) : <div className="novel-copy-block">当前没有发布前检查结果。</div>}
+        </InsightCard>
+        <InsightCard title="合同对账" eyebrow="章节 / 场景合同" tone="soft">
+          {currentContractAudit ? (
+            <StringList
+              items={currentContractAudit.items.map(formatContractAuditItemText)}
+              empty="当前没有合同对账结果。"
+            />
+          ) : <div className="novel-copy-block">当前没有合同对账结果。</div>}
+        </InsightCard>
+        <InsightCard title="章后状态回写" eyebrow="Canon 确认 / 统一写回" tone="soft">
+          {currentChapter ? (
+            <div style={{ display: 'grid', gap: 10 }}>
+              <div className="novel-copy-block">写完本章后，在这里进入独立回写中心，先确认事实抽取和状态候选，再统一写回线程、伏笔、谜题、关系、物品与时间轴。</div>
+              <div>
+                <Button onClick={() => navigate(`/novels/${novelId}/writeback?chapterId=${currentChapter.id}`)}>
+                  打开章后状态回写中心
+                </Button>
+              </div>
+            </div>
+          ) : <div className="novel-copy-block">先选择章节，再进入章后状态回写中心。</div>}
         </InsightCard>
         <InsightCard title="最近恶化项" eyebrow="跨章节语言退化" tone="soft">
           <LanguageDriftHealthCard dashboard={qualityDashboard} currentChapter={currentChapter} />

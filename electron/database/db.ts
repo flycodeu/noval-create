@@ -1464,6 +1464,68 @@ export function runMigrations(sqlite: Database.Database) {
         ON reward_cost_events(track_id, resource_pool_id, chapter_num_snapshot, id);
     `)
   })
+
+  runMigrationStep(sqlite, '0025_chapter_contract_audit', () => {
+    ensureColumn(sqlite, 'chapters', 'contract_audit_json', 'TEXT')
+  })
+
+  runMigrationStep(sqlite, '0026_chapter_writeback_center', () => {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS chapter_writeback_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        chapter_id INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
+        status TEXT NOT NULL DEFAULT 'draft',
+        trigger_source TEXT NOT NULL DEFAULT 'manual',
+        summary_text TEXT,
+        started_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        completed_at TEXT,
+        failed_at TEXT,
+        error_message TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS chapter_fact_extracts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id INTEGER NOT NULL REFERENCES chapter_writeback_runs(id) ON DELETE CASCADE,
+        asset_type TEXT NOT NULL,
+        source_text TEXT,
+        fact_json TEXT NOT NULL,
+        confidence REAL DEFAULT 0,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS chapter_writeback_diffs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id INTEGER NOT NULL REFERENCES chapter_writeback_runs(id) ON DELETE CASCADE,
+        asset_type TEXT NOT NULL,
+        entity_type TEXT NOT NULL,
+        entity_id INTEGER,
+        before_state_json TEXT,
+        after_state_json TEXT NOT NULL,
+        diff_reason TEXT,
+        confidence REAL DEFAULT 0,
+        canon_decision TEXT NOT NULL DEFAULT 'pending',
+        writeback_status TEXT NOT NULL DEFAULT 'pending',
+        writeback_error TEXT,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_chapter_writeback_runs_chapter
+        ON chapter_writeback_runs(chapter_id, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_chapter_writeback_runs_novel_status
+        ON chapter_writeback_runs(novel_id, status, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_chapter_fact_extracts_run_asset
+        ON chapter_fact_extracts(run_id, asset_type, sort_order, id);
+      CREATE INDEX IF NOT EXISTS idx_chapter_writeback_diffs_run_asset
+        ON chapter_writeback_diffs(run_id, asset_type, canon_decision, writeback_status, sort_order, id);
+    `)
+  })
 }
 
 function ensureMigrationTable(sqlite: Database.Database) {

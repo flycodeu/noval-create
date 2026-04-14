@@ -191,6 +191,16 @@ const api = {
     runPublishCheck: (chapterId: number) => invokeIpc('chapter:runPublishCheck', chapterId),
   },
 
+  writeback: {
+    prepareRun: (chapterId: number, triggerSource?: string) => invokeIpc('writeback:prepareRun', chapterId, triggerSource),
+    getCenterData: (chapterId: number, runId?: number) => invokeIpc('writeback:getCenterData', chapterId, runId),
+    listRuns: (chapterId: number) => invokeIpc('writeback:listRuns', chapterId),
+    updateDecision: (diffId: number, patch: unknown) => invokeIpc('writeback:updateDecision', diffId, patch),
+    bulkUpdateDecisions: (runId: number, patch: unknown) => invokeIpc('writeback:bulkUpdateDecisions', runId, patch),
+    applyRun: (runId: number) => invokeIpc('writeback:applyRun', runId),
+    retryFailed: (runId: number) => invokeIpc('writeback:retryFailed', runId),
+  },
+
   // Character APIs
   character: {
     list: (novelId: number) => invokeIpc('character:list', novelId),

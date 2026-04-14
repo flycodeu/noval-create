@@ -46,6 +46,7 @@ import ContractsPage from './Contracts'
 import Structure from './Structure'
 import TimelinePage from './Timeline'
 import Writing from './Writing'
+import WritebackCenterPage from './WritebackCenter'
 import RevisionCenterPage from './RevisionCenter'
 import QualityDashboard from './QualityDashboard'
 import InfoGapBoardPage from './InfoGapBoard'
@@ -96,6 +97,7 @@ type ProWorkspaceKey =
   | 'foreshadow-ledger'
   | 'growth-system'
   | 'writing'
+  | 'writeback'
   | 'revision'
   | 'quality'
 
@@ -159,6 +161,7 @@ const WORKSPACE_GROUPS: Array<{ title: string; items: WorkspaceItem[] }> = [
       { key: 'foreshadow-ledger', icon: <BarsOutlined />, label: '伏笔回收账本', summary: '维护伏笔资产、埋设位置和回收状态。' },
       { key: 'growth-system', icon: <BarsOutlined />, label: '成长资源代价', summary: '统一管理成长轨道、资源稀缺和收益代价。' },
       { key: 'writing', icon: <EditOutlined />, label: '正文写作', summary: '集中处理场景计划、主写、审校和定稿。' },
+      { key: 'writeback', icon: <BarsOutlined />, label: '章后状态回写', summary: '把本章事实变成可确认、可回写的 Canon 候选。' },
       { key: 'revision', icon: <EditOutlined />, label: '修订中心', summary: '收口一致性问题和上下文同步任务。' },
       { key: 'quality', icon: <BarChartOutlined />, label: '质量监控', summary: '查看各章节评分热力图、趋势和薄弱维度。' },
     ],
@@ -311,6 +314,7 @@ export default function NovelRouter() {
       'foreshadow-ledger': workflowStats.chapterCount > 0,
       'growth-system': workflowStats.chapterCount > 0,
       writing: isWritingStepReady(workflowStats),
+      writeback: workflowStats.chapterCount > 0,
       quality: true,
     }),
     [guidedProgressMap, workflowStats],
@@ -440,6 +444,10 @@ export default function NovelRouter() {
             ? `${workflowStats.totalWords.toLocaleString()}字`
             : '未开写',
         complete: isWritingStepReady(workflowStats),
+      },
+      writeback: {
+        label: workflowStats.chapterCount > 0 ? `${workflowStats.chapterCount}章` : '待补',
+        complete: workflowStats.chapterCount > 0,
       },
       revision: {
         label: workflowStats.revisionTaskCount > 0 ? `${workflowStats.revisionTaskCount}项待处理` : '已清空',
@@ -916,6 +924,7 @@ export default function NovelRouter() {
               <Route path="foreshadow-ledger" element={<ForeshadowLedgerPage novelId={novelId} />} />
               <Route path="growth-system" element={<GrowthSystemPage novelId={novelId} />} />
               <Route path="writing/*" element={<Writing novelId={novelId} />} />
+              <Route path="writeback" element={<WritebackCenterPage novelId={novelId} />} />
               <Route path="revision" element={<RevisionCenterPage novelId={novelId} />} />
               <Route path="quality" element={<QualityDashboard novelId={novelId} />} />
               <Route path="*" element={<Navigate replace to={`/novels/${novelId}/${recommendedKey}`} />} />
@@ -924,11 +933,11 @@ export default function NovelRouter() {
         </div>
       </main>
       </div>
-      {currentPage !== 'guide' && currentPage !== 'quality' ? (
+      {currentPage !== 'guide' && currentPage !== 'quality' && currentPage !== 'writeback' ? (
         <WorkspaceAIQualityBoard
           open={qualityBoardOpen}
           onClose={() => setQualityBoardOpen(false)}
-          workspaceKey={currentPage as Exclude<ProWorkspaceKey, 'guide' | 'quality'>}
+          workspaceKey={currentPage as Exclude<ProWorkspaceKey, 'guide' | 'quality' | 'writeback'>}
           workspaceLabel={currentPageMeta?.label || currentPage}
           workspaceSummary={currentPageMeta?.summary || ''}
           novelId={novelId}

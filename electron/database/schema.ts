@@ -87,6 +87,7 @@ export const chapters = sqliteTable('chapters', {
   lockedParagraphsJson: text('locked_paragraphs_json'),
   allowedFactIdsJson: text('allowed_fact_ids_json').default('[]'),
   revealedFactIdsJson: text('revealed_fact_ids_json').default('[]'),
+  contractAuditJson: text('contract_audit_json'),
   contextVersion: integer('context_version').default(1),
   staleReasonJson: text('stale_reason_json'),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
@@ -702,6 +703,51 @@ export const storyMemoryCheckpoints = sqliteTable('story_memory_checkpoints', {
   updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
 })
 
+export const chapterWritebackRuns = sqliteTable('chapter_writeback_runs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  chapterId: integer('chapter_id').notNull().references(() => chapters.id, { onDelete: 'cascade' }),
+  status: text('status').notNull().default('draft'),
+  triggerSource: text('trigger_source').notNull().default('manual'),
+  summaryText: text('summary_text'),
+  startedAt: text('started_at').default(sql`CURRENT_TIMESTAMP`),
+  completedAt: text('completed_at'),
+  failedAt: text('failed_at'),
+  errorMessage: text('error_message'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
+export const chapterFactExtracts = sqliteTable('chapter_fact_extracts', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  runId: integer('run_id').notNull().references(() => chapterWritebackRuns.id, { onDelete: 'cascade' }),
+  assetType: text('asset_type').notNull(),
+  sourceText: text('source_text'),
+  factJson: text('fact_json').notNull(),
+  confidence: real('confidence').default(0),
+  sortOrder: integer('sort_order').notNull().default(0),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
+export const chapterWritebackDiffs = sqliteTable('chapter_writeback_diffs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  runId: integer('run_id').notNull().references(() => chapterWritebackRuns.id, { onDelete: 'cascade' }),
+  assetType: text('asset_type').notNull(),
+  entityType: text('entity_type').notNull(),
+  entityId: integer('entity_id'),
+  beforeStateJson: text('before_state_json'),
+  afterStateJson: text('after_state_json').notNull(),
+  diffReason: text('diff_reason'),
+  confidence: real('confidence').default(0),
+  canonDecision: text('canon_decision').notNull().default('pending'),
+  writebackStatus: text('writeback_status').notNull().default('pending'),
+  writebackError: text('writeback_error'),
+  sortOrder: integer('sort_order').notNull().default(0),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
 export const modelConfigs = sqliteTable('model_configs', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   name: text('name').notNull(),
@@ -842,6 +888,12 @@ export type TimelineEvent = typeof timelineEvents.$inferSelect
 export type StoryItem = typeof storyItems.$inferSelect
 export type StoryMemoryCheckpoint = typeof storyMemoryCheckpoints.$inferSelect
 export type NewStoryMemoryCheckpoint = typeof storyMemoryCheckpoints.$inferInsert
+export type ChapterWritebackRun = typeof chapterWritebackRuns.$inferSelect
+export type NewChapterWritebackRun = typeof chapterWritebackRuns.$inferInsert
+export type ChapterFactExtract = typeof chapterFactExtracts.$inferSelect
+export type NewChapterFactExtract = typeof chapterFactExtracts.$inferInsert
+export type ChapterWritebackDiff = typeof chapterWritebackDiffs.$inferSelect
+export type NewChapterWritebackDiff = typeof chapterWritebackDiffs.$inferInsert
 export type ModelConfig = typeof modelConfigs.$inferSelect
 export type Template = typeof templates.$inferSelect
 export type PromptOverride = typeof promptOverrides.$inferSelect

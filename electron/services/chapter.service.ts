@@ -36,6 +36,7 @@ import {
   markChapterContextCurrent,
   markSubsequentChaptersStale,
   runChapterPublishCheck,
+  validateChapterContractsForGeneration,
 } from './context-impact.service'
 import { refreshStoryMemoryCheckpoints } from './story-memory.service'
 import {
@@ -45,6 +46,7 @@ import {
 } from './story-structure.service'
 import { syncTimelineStructureAnchors } from './timeline.service'
 import { discoverEntitiesFromContent } from './entity-discovery.service'
+import { prepareChapterWritebackRun } from './chapter-writeback.service'
 import { buildBatchKey, captureTimelineAnchorsForChapterIds, createOperationLog } from './history.service'
 import { enhanceAiScoreResult } from './ai-score.service'
 import {
@@ -1455,6 +1457,9 @@ async function finalizeGeneratedChapterContent(chapterId: number, content: strin
       `第${chapter.chapterNum}章内容已更新`,
     )
     syncChapterTimelineStatuses(chapter.novelId, chapter.chapterNum)
+    void prepareChapterWritebackRun(chapter.id, 'pipeline-finalize').catch((error) => {
+      console.warn(`[chapter:warn] writeback-draft chapter=${chapter.id}`, error)
+    })
   }
 
   return {
@@ -1537,6 +1542,7 @@ export function updateChapter(id: number, data: Partial<{
   staleReasonJson: string
   allowedFactIdsJson: string
   revealedFactIdsJson: string
+  contractAuditJson: string
 }>, options: { skipStaleTracking?: boolean; versionSource?: ChapterVersionSource | false } = {}) {
   const db = getDb()
   const previous = db.select().from(chapters).where(eq(chapters.id, id)).all()[0]
@@ -2004,6 +2010,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
   if (!chapter) throwUserFacingError('chapter.notFoundWithId', { id: chapterId })
+  validateChapterContractsForGeneration(chapterId)
 
   const rawContext = await collectChapterContextRawData(chapter.novelId, chapter.chapterNum)
   const novel = rawContext.novel
@@ -2377,6 +2384,9 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
 
 export async function generateChapterSummary(chapterId: number): Promise<void> {
   await refreshChapterMemory(chapterId)
+  void prepareChapterWritebackRun(chapterId, 'summary-refresh').catch((error) => {
+    console.warn(`[chapter:warn] writeback-draft chapter=${chapterId}`, error)
+  })
 }
 
 export async function getChapterContextPreview(chapterId: number): Promise<{

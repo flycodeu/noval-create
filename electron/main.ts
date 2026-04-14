@@ -69,6 +69,7 @@ import * as storyStructureService from './services/story-structure.service'
 import * as storyThreadService from './services/story-thread.service'
 import * as storyFactService from './services/story-fact.service'
 import * as growthSystemService from './services/growth-system.service'
+import * as chapterWritebackService from './services/chapter-writeback.service'
 import * as workspaceQualityService from './services/workspace-quality.service'
 import * as workflowTaskService from './services/workflow-task.service'
 import { discoverEntitiesFromContent } from './services/entity-discovery.service'
@@ -405,6 +406,33 @@ function registerIpcHandlers() {
     chapterService.aiCheckChapter(chapterId))
   handle('chapter:runPublishCheck', (_, chapterId) =>
     chapterService.runChapterPublishCheck(chapterId))
+  handle('writeback:prepareRun', (_, chapterId, triggerSource) =>
+    chapterWritebackService.prepareChapterWritebackRun(requireId(chapterId, 'chapterId'), typeof triggerSource === 'string' ? triggerSource : 'manual'))
+  handle('writeback:getCenterData', (_, chapterId, runId) =>
+    chapterWritebackService.getChapterWritebackCenterData(requireId(chapterId, 'chapterId'), runId == null ? undefined : requireId(runId, 'runId')))
+  handle('writeback:listRuns', (_, chapterId) =>
+    chapterWritebackService.listChapterWritebackRuns(requireId(chapterId, 'chapterId')))
+  handle('writeback:updateDecision', (_, diffId, patch) =>
+    chapterWritebackService.updateChapterWritebackDecision(
+      requireId(diffId, 'diffId'),
+      parseObjectPayload<Record<string, unknown>>(patch, 'patch') as {
+        canonDecision?: 'pending' | 'accepted' | 'rejected' | 'edited'
+        afterStateJson?: string
+        diffReason?: string
+      },
+    ))
+  handle('writeback:bulkUpdateDecisions', (_, runId, patch) =>
+    chapterWritebackService.bulkUpdateChapterWritebackDecisions(
+      requireId(runId, 'runId'),
+      parseObjectPayload<Record<string, unknown>>(patch, 'patch') as {
+        canonDecision: 'accepted' | 'rejected' | 'edited'
+        assetType?: 'character' | 'world' | 'item' | 'relation' | 'thread' | 'foreshadow' | 'puzzle' | 'timeline'
+      },
+    ))
+  handle('writeback:applyRun', (_, runId) =>
+    chapterWritebackService.applyChapterWritebackRun(requireId(runId, 'runId')))
+  handle('writeback:retryFailed', (_, runId) =>
+    chapterWritebackService.retryFailedWritebackItems(requireId(runId, 'runId')))
 
   handle('character:list', (_, novelId) => characterService.listCharacters(novelId))
   handle('character:query', (_, filters) => characterService.queryCharacters(filters))
