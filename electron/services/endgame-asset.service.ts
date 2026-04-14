@@ -8,7 +8,10 @@ import {
   endgameCommitments,
   foreshadowLedger,
   novels,
+  resistanceTracks,
+  revisionTasks,
   sceneContracts,
+  storyArcs,
   storyVolumes,
   volumeDesigns,
 } from '../database/schema'
@@ -17,6 +20,8 @@ import { markNovelContextChanged } from './context-impact.service'
 import { ensureStoryStructure } from './story-structure.service'
 
 const ENDGAME_STALE_WINDOW = 12
+const VOLUME_CONSTRAINT_PREFIX = '[卷级约束]'
+const RESOLVED_LEDGER_STATUSES = new Set(['resolved', 'fulfilled', 'paid_off', 'payoff'])
 
 type CommitmentStatus = 'active' | 'served' | 'fulfilled' | 'waived'
 type CommitmentKind = 'promise' | 'payoff'
@@ -38,6 +43,53 @@ interface VolumeRange {
   chapterEnd: number
 }
 
+type VolumeAuditSeverity = 'high' | 'medium' | 'low'
+
+interface VolumeAuditFinding {
+  id: string
+  severity: VolumeAuditSeverity
+  category: 'design' | 'foreshadow' | 'endgame' | 'arc' | 'progress'
+  title: string
+  description: string
+  suggestedAction?: string
+  chapterId?: number
+  chapterNum?: number
+  arcId?: number
+  taskId?: number
+}
+
+interface VolumeAuditResult {
+  novelId: number
+  volumeId: number
+  volumeName: string
+  auditedAt: string
+  summary: {
+    chapterCount: number
+    contractCoveredChapterCount: number
+    unresolvedMustResolveClueCount: number
+    stalledArcCount: number
+    weakProgressChapterCount: number
+    totalFindings: number
+    highCount: number
+    mediumCount: number
+    lowCount: number
+    createdTaskCount: number
+  }
+  findings: VolumeAuditFinding[]
+}
+
+interface VolumeConstraintSyncResult {
+  novelId: number
+  volumeId: number
+  volumeName: string
+  syncedAt: string
+  chapterCount: number
+  createdContractCount: number
+  updatedContractCount: number
+  syncedConstraintCount: number
+  sampleConstraints: string[]
+}
+
 function asText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
@@ -46,6 +98,10 @@ function asNumber(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) return Math.round(value)
   if (typeof value === 'string' && value.trim() && !Number.isNaN(Number(value))) return Math.round(Number(value))
   return undefined
+}
+
+function asBoolean(value: unknown): boolean {
+  return value === true || value === 'true' || value === 1 || value === '1'
 }
 
 function parseJsonNumberArray(raw?: string | null): number[] {
@@ -80,6 +136,15 @@ function stringifyStringArray(values?: string[]): string {
   return JSON.stringify([...(values || [])]
     .map((value) => asText(value))
     .filter(Boolean))
+}
+
+function mergePrefixedLines(existing: string[], next: string[], prefix: string): string[] {
+  const cleaned = existing.filter((item) => !item.startsWith(prefix))
+  return [...cleaned, ...next]
+}
+
+function normalizeLedgerStatus(status?: string | null): string {
+  return asText(status).toLowerCase()
 }
 
 function splitMultilineEntries(value?: string | null): string[] {
@@ -708,6 +773,472 @@ export function upsertVolumeDesign(
   refreshCommitmentDerivedState(volume.novelId)
   markNovelContextChanged(volume.novelId, 'Volume design updated')
   return getVolumeDesignByVolumeId(volumeId)
+}
+
+function ensureVolumeDesignAudited(novelId: number, volumeId: number, auditedAt: string) {
+  const db = getDb()
+  const current = db.select().from(volumeDesigns).where(eq(volumeDesigns.volumeId, volumeId)).all()[0] || null
+  if (current) {
+    db.update(volumeDesigns).set({
+      auditStatus: 'audited',
+      updatedAt: auditedAt,
+    }).where(eq(volumeDesigns.id, current.id)).run()
+    return
+  }
+  db.insert(volumeDesigns).values({
+    novelId,
+    volumeId,
+    auditStatus: 'audited',
+    createdAt: auditedAt,
+    updatedAt: auditedAt,
+  }).run()
+}
+
+function buildVolumeConstraintRefs(
+  design: ReturnType<typeof getVolumeDesignByVolumeId>,
+  commitmentTitleById: Map<number, string>,
+  resistanceTitleById: Map<number, string>,
+) {
+  const refs = [
+    design.volumeTheme ? `${VOLUME_CONSTRAINT_PREFIX} 本卷主题：${design.volumeTheme}` : '',
+    design.volumePromise ? `${VOLUME_CONSTRAINT_PREFIX} 本卷承诺：${design.volumePromise}` : '',
+    design.mainConflict ? `${VOLUME_CONSTRAINT_PREFIX} 本卷主冲突：${design.mainConflict}` : '',
+    design.climaxPlan ? `${VOLUME_CONSTRAINT_PREFIX} 本卷高潮计划：${design.climaxPlan}` : '',
+    design.endStateShift ? `${VOLUME_CONSTRAINT_PREFIX} 卷末状态变化：${design.endStateShift}` : '',
+    ...design.mustAddClues.map((item) => `${VOLUME_CONSTRAINT_PREFIX} 必须新增线索：${item}`),
+    ...design.mustResolveClues.map((item) => `${VOLUME_CONSTRAINT_PREFIX} 必须回收线索：${item}`),
+    ...design.linkedEndgameCommitmentIds.map((id) => `${VOLUME_CONSTRAINT_PREFIX} 终局承诺绑定：#${id} ${commitmentTitleById.get(id) || '未命名承诺'}`),
+    ...design.linkedResistanceTrackIds.map((id) => `${VOLUME_CONSTRAINT_PREFIX} 阻力来源绑定：#${id} ${resistanceTitleById.get(id) || '未命名阻力'}`),
+  ].filter(Boolean)
+  const uniqueRefs = [...new Set(refs)]
+  if (uniqueRefs.length > 0) return uniqueRefs
+  return [`${VOLUME_CONSTRAINT_PREFIX} 当前卷级目标为空，请先补全卷级设计后再次同步。`]
+}
+
+function buildVolumeConstraintAcceptanceNote(
+  design: ReturnType<typeof getVolumeDesignByVolumeId>,
+  syncedConstraintCount: number,
+) {
+  const commitmentCount = design.linkedEndgameCommitmentIds.length
+  const clueCount = design.mustAddClues.length + design.mustResolveClues.length
+  return `${VOLUME_CONSTRAINT_PREFIX} 已同步卷级目标（约束${syncedConstraintCount}条，终局绑定${commitmentCount}条，线索约束${clueCount}条）。`
+}
+
+function createVolumeAuditTasks(
+  novelId: number,
+  volumeId: number,
+  volumeName: string,
+  findings: VolumeAuditFinding[],
+  createdAt: string,
+) {
+  const db = getDb()
+  const severityLabelMap: Record<VolumeAuditSeverity, string> = {
+    high: '高',
+    medium: '中',
+    low: '低',
+  }
+  const existingIssueKeys = new Set(
+    db.select({
+      issueKey: revisionTasks.issueKey,
+    }).from(revisionTasks)
+      .where(eq(revisionTasks.novelId, novelId))
+      .all()
+      .map((row) => asText(row.issueKey))
+      .filter(Boolean),
+  )
+  let createdTaskCount = 0
+  findings
+    .filter((item) => item.severity === 'high' || item.severity === 'medium')
+    .forEach((finding) => {
+      const issueKey = `volume_audit:${volumeId}:${finding.id}`
+      if (existingIssueKeys.has(issueKey)) return
+      const result = db.insert(revisionTasks).values({
+        novelId,
+        taskSource: 'system',
+        issueKey,
+        taskType: 'outline',
+        status: 'open',
+        severity: finding.severity,
+        title: `[卷末审计][${severityLabelMap[finding.severity]}] ${finding.title}`,
+        description: finding.description,
+        fixBrief: finding.suggestedAction || null,
+        relatedPage: 'volume-design',
+        entityType: 'volume',
+        entityId: volumeId,
+        chapterId: finding.chapterId ?? null,
+        originMetaJson: JSON.stringify({
+          issueCategory: 'volume_audit',
+          autoFixable: false,
+          entityLabel: volumeName,
+          suggestion: finding.suggestedAction || '',
+          sourceFindingId: finding.id,
+          severity: finding.severity,
+          volumeId,
+        }),
+        lastDetectedAt: createdAt,
+        createdAt,
+        updatedAt: createdAt,
+      }).run()
+      finding.taskId = Number(result.lastInsertRowid)
+      createdTaskCount += 1
+      existingIssueKeys.add(issueKey)
+    })
+  return createdTaskCount
+}
+
+export function syncVolumeDesignConstraintsToContracts(
+  volumeId: number,
+): VolumeConstraintSyncResult {
+  const db = getDb()
+  const volume = db.select().from(storyVolumes).where(eq(storyVolumes.id, volumeId)).all()[0]
+  if (!volume) throwUserFacingError('volume.notFound')
+
+  const design = getVolumeDesignByVolumeId(volumeId)
+  const chapterRows = db.select({
+    id: chapters.id,
+    chapterNum: chapters.chapterNum,
+  }).from(chapters)
+    .where(eq(chapters.volumeId, volumeId))
+    .orderBy(asc(chapters.chapterNum), asc(chapters.id))
+    .all()
+  const chapterIds = chapterRows.map((item) => item.id)
+  const chapterIdSet = new Set(chapterIds)
+  const now = new Date().toISOString()
+
+  const commitmentTitleById = new Map(
+    db.select({
+      id: endgameCommitments.id,
+      title: endgameCommitments.title,
+    }).from(endgameCommitments)
+      .where(eq(endgameCommitments.novelId, volume.novelId))
+      .all()
+      .map((item) => [item.id, item.title] as const),
+  )
+  const resistanceTitleById = new Map(
+    db.select({
+      id: resistanceTracks.id,
+      title: resistanceTracks.title,
+    }).from(resistanceTracks)
+      .where(eq(resistanceTracks.novelId, volume.novelId))
+      .all()
+      .map((item) => [item.id, item.title] as const),
+  )
+
+  const constraintRefs = buildVolumeConstraintRefs(design, commitmentTitleById, resistanceTitleById)
+  const acceptanceNote = buildVolumeConstraintAcceptanceNote(design, constraintRefs.length)
+  const existingContracts = db.select().from(chapterContracts)
+    .where(eq(chapterContracts.novelId, volume.novelId))
+    .all()
+    .filter((row) => chapterIdSet.has(row.chapterId))
+  const contractByChapterId = new Map(existingContracts.map((item) => [item.chapterId, item] as const))
+
+  let createdContractCount = 0
+  let updatedContractCount = 0
+
+  chapterRows.forEach((chapter) => {
+    const current = contractByChapterId.get(chapter.id)
+    if (current) {
+      const mergedRefs = mergePrefixedLines(
+        parseJsonStringArray(current.requiredAssetRefsJson),
+        constraintRefs,
+        VOLUME_CONSTRAINT_PREFIX,
+      )
+      const mergedNotes = mergePrefixedLines(
+        parseJsonStringArray(current.acceptanceNotesJson),
+        [acceptanceNote],
+        VOLUME_CONSTRAINT_PREFIX,
+      )
+      db.update(chapterContracts).set({
+        requiredAssetRefsJson: stringifyStringArray(mergedRefs),
+        acceptanceNotesJson: stringifyStringArray(mergedNotes),
+        updatedAt: now,
+      }).where(eq(chapterContracts.id, current.id)).run()
+      updatedContractCount += 1
+      return
+    }
+
+    db.insert(chapterContracts).values({
+      novelId: volume.novelId,
+      chapterId: chapter.id,
+      requiredAssetRefsJson: stringifyStringArray(constraintRefs),
+      acceptanceNotesJson: stringifyStringArray([acceptanceNote]),
+      status: 'draft',
+      createdAt: now,
+      updatedAt: now,
+    }).run()
+    createdContractCount += 1
+  })
+
+  refreshCommitmentDerivedState(volume.novelId)
+  markNovelContextChanged(volume.novelId, 'Volume constraints synced to chapter contracts')
+
+  return {
+    novelId: volume.novelId,
+    volumeId,
+    volumeName: volume.title?.trim() || `第${volume.volumeNumber}卷`,
+    syncedAt: now,
+    chapterCount: chapterRows.length,
+    createdContractCount,
+    updatedContractCount,
+    syncedConstraintCount: constraintRefs.length,
+    sampleConstraints: constraintRefs.slice(0, 5),
+  }
+}
+
+export function auditVolumeDesign(
+  volumeId: number,
+  options: Partial<{
+    createRevisionTasks: boolean
+  }> = {},
+): VolumeAuditResult {
+  const db = getDb()
+  const volume = db.select().from(storyVolumes).where(eq(storyVolumes.id, volumeId)).all()[0]
+  if (!volume) throwUserFacingError('volume.notFound')
+  const now = new Date().toISOString()
+  const design = getVolumeDesignByVolumeId(volumeId)
+
+  const chapterRows = db.select({
+    id: chapters.id,
+    chapterNum: chapters.chapterNum,
+    title: chapters.title,
+    outline: chapters.outline,
+    summary: chapters.summary,
+  }).from(chapters)
+    .where(eq(chapters.volumeId, volumeId))
+    .orderBy(asc(chapters.chapterNum), asc(chapters.id))
+    .all()
+  const chapterIds = chapterRows.map((item) => item.id)
+  const chapterIdSet = new Set(chapterIds)
+  const chapterStart = chapterRows.length > 0 ? Math.min(...chapterRows.map((item) => item.chapterNum)) : undefined
+  const chapterEnd = chapterRows.length > 0 ? Math.max(...chapterRows.map((item) => item.chapterNum)) : undefined
+
+  const contractRows = db.select().from(chapterContracts)
+    .where(eq(chapterContracts.novelId, volume.novelId))
+    .all()
+    .filter((row) => chapterIdSet.has(row.chapterId))
+  const contractByChapterId = new Map(contractRows.map((item) => [item.chapterId, item] as const))
+  const sceneRows = db.select().from(sceneContracts)
+    .where(eq(sceneContracts.novelId, volume.novelId))
+    .all()
+    .filter((row) => chapterIdSet.has(row.chapterId))
+
+  const foreshadowRows = db.select().from(foreshadowLedger)
+    .where(eq(foreshadowLedger.novelId, volume.novelId))
+    .all()
+  const inRangeForeshadowRows = foreshadowRows.filter((row) => {
+    if (row.linkedVolumeId === volumeId) return true
+    if (row.sourceChapterId && chapterIdSet.has(row.sourceChapterId)) return true
+    if (typeof row.targetPayoffChapter === 'number' && typeof chapterStart === 'number' && typeof chapterEnd === 'number') {
+      return row.targetPayoffChapter >= chapterStart && row.targetPayoffChapter <= chapterEnd
+    }
+    return false
+  })
+
+  const commitments = listEndgameCommitments(volume.novelId)
+  const commitmentById = new Map(commitments.map((item) => [item.id, item] as const))
+  const arcRows = db.select().from(storyArcs).where(eq(storyArcs.novelId, volume.novelId)).all()
+
+  const findings: VolumeAuditFinding[] = []
+  let findingCounter = 0
+  const pushFinding = (
+    finding: Omit<VolumeAuditFinding, 'id'>,
+  ) => {
+    findingCounter += 1
+    findings.push({
+      id: `vol-${volumeId}-${findingCounter}`,
+      ...finding,
+    })
+  }
+
+  const missingDesignFields = [
+    design.volumeTheme ? '' : '本卷主题',
+    design.volumePromise ? '' : '本卷承诺',
+    design.mainConflict ? '' : '本卷主冲突',
+    design.climaxPlan ? '' : '本卷高潮',
+    design.endStateShift ? '' : '卷末状态变化',
+  ].filter(Boolean)
+  if (missingDesignFields.length > 0) {
+    pushFinding({
+      severity: missingDesignFields.length >= 3 ? 'high' : 'medium',
+      category: 'design',
+      title: '卷级目标字段不完整',
+      description: `当前卷缺少：${missingDesignFields.join('、')}。`,
+      suggestedAction: '先补齐卷级闭环字段，再执行卷后审计与合同同步。',
+    })
+  }
+
+  if (chapterRows.length <= 0) {
+    pushFinding({
+      severity: 'high',
+      category: 'progress',
+      title: '本卷未分配章节',
+      description: '当前卷没有任何章节，无法形成可审计的卷级闭环。',
+      suggestedAction: '先在结构规划中为该卷分配章节，再回到卷级设计执行审计。',
+    })
+  }
+
+  if (chapterRows.length > 0 && contractRows.length <= 0) {
+    pushFinding({
+      severity: 'high',
+      category: 'progress',
+      title: '本卷章节合同覆盖为 0',
+      description: '当前卷章节尚未建立合同，卷级目标无法传导到执行层。',
+      suggestedAction: '先执行“同步为章节硬约束”，然后补全关键章节合同。',
+    })
+  }
+
+  let unresolvedMustResolveClueCount = 0
+  design.mustResolveClues.forEach((clue) => {
+    const keyword = clue.trim().toLowerCase()
+    if (!keyword) return
+    const matchedRows = inRangeForeshadowRows.filter((row) => {
+      const text = [row.title, row.detail, row.plantMethod, row.payoffMethod]
+        .map((item) => asText(item).toLowerCase())
+        .filter(Boolean)
+        .join(' ')
+      return text.includes(keyword)
+    })
+    const resolvedRows = matchedRows.filter((row) => RESOLVED_LEDGER_STATUSES.has(normalizeLedgerStatus(row.status)))
+    if (resolvedRows.length > 0) return
+    unresolvedMustResolveClueCount += 1
+    pushFinding({
+      severity: matchedRows.length > 0 ? 'medium' : 'high',
+      category: 'foreshadow',
+      title: `线索未完成回收：${clue}`,
+      description: matchedRows.length > 0
+        ? '该线索在本卷有命中记录，但尚未出现“已回收/已兑现”状态。'
+        : '该线索在本卷范围内未检索到对应账本记录，存在漏写或漏绑风险。',
+      suggestedAction: '补充回收章节并更新伏笔账本状态，或修正线索命名与绑定关系。',
+    })
+  })
+
+  design.linkedEndgameCommitmentIds.forEach((commitmentId) => {
+    const commitment = commitmentById.get(commitmentId)
+    if (!commitment) {
+      pushFinding({
+        severity: 'medium',
+        category: 'endgame',
+        title: `终局承诺不存在：#${commitmentId}`,
+        description: '卷级设计绑定了不存在的终局承诺，存在脏引用。',
+        suggestedAction: '清理无效绑定，或在终局设计页补建对应承诺。',
+      })
+      return
+    }
+
+    const servedInChapterContract = contractRows
+      .some((row) => parseJsonNumberArray(row.requiredEndgameCommitmentIdsJson).includes(commitmentId))
+    const servedInSceneContract = sceneRows
+      .some((row) => parseJsonNumberArray(row.requiredEndgameCommitmentIdsJson).includes(commitmentId))
+    const servedInForeshadowLedger = inRangeForeshadowRows
+      .some((row) => row.linkedEndgameCommitmentId === commitmentId)
+    const servedInVolume = servedInChapterContract || servedInSceneContract || servedInForeshadowLedger
+
+    if (!servedInVolume && commitment.derivedStatus !== 'fulfilled' && commitment.derivedStatus !== 'waived') {
+      pushFinding({
+        severity: 'high',
+        category: 'endgame',
+        title: `终局承诺缺少卷内执行链：${commitment.title}`,
+        description: '卷级绑定存在，但本卷章节合同/场景合同/伏笔账本均未服务该承诺。',
+        suggestedAction: '将该承诺同步进关键章节合同，并补充可验证的执行动作。',
+      })
+    }
+
+    if (commitment.overdue) {
+      pushFinding({
+        severity: 'high',
+        category: 'endgame',
+        title: `终局承诺已过期：${commitment.title}`,
+        description: `目标回收章位 ${commitment.targetResolutionChapter || '未设置'} 已超期，当前状态为 ${commitment.derivedStatus}。`,
+        suggestedAction: '优先安排回收章节或调整目标章位，避免终局债务继续累积。',
+      })
+    }
+  })
+
+  const intersectsVolume = (
+    arc: typeof storyArcs.$inferSelect,
+  ) => {
+    if (typeof chapterStart !== 'number' || typeof chapterEnd !== 'number') return false
+    const arcStart = arc.chapterStart ?? chapterStart
+    const arcEnd = arc.chapterEnd ?? chapterEnd
+    return arcStart <= chapterEnd && arcEnd >= chapterStart
+  }
+  const stalledArcs = arcRows.filter((arc) => intersectsVolume(arc) && (arc.stalledChapterCount || 0) >= 3)
+  stalledArcs.forEach((arc) => {
+    pushFinding({
+      severity: (arc.stalledChapterCount || 0) >= 5 ? 'high' : 'medium',
+      category: 'arc',
+      title: `弧线停滞：${arc.arcName}`,
+      description: `弧线停滞计数 ${arc.stalledChapterCount || 0}，最近推进章位 ${arc.lastProgressChapterNum || '未记录'}。`,
+      suggestedAction: '在本卷补一个可验证的弧线推进节点，并写入章节合同验收项。',
+      arcId: arc.id,
+    })
+  })
+
+  const weakProgressChapters = chapterRows.filter((chapter) => {
+    const contract = contractByChapterId.get(chapter.id)
+    const hasGoal = Boolean(asText(contract?.chapterGoal) || asText(chapter.summary) || asText(chapter.outline))
+    const hasConstraintRefs = contract
+      ? (
+        parseJsonStringArray(contract.requiredAssetRefsJson).length > 0
+        || parseJsonNumberArray(contract.requiredEndgameCommitmentIdsJson).length > 0
+        || parseJsonNumberArray(contract.requiredForeshadowIdsJson).length > 0
+      )
+      : false
+    return !hasGoal || !hasConstraintRefs
+  })
+  if (weakProgressChapters.length > 0) {
+    const preview = weakProgressChapters.slice(0, 8).map((item) => `第${item.chapterNum}章`).join('、')
+    pushFinding({
+      severity: weakProgressChapters.length >= Math.max(2, Math.ceil(chapterRows.length * 0.4)) ? 'high' : 'medium',
+      category: 'progress',
+      title: '本卷推进不足章节偏多',
+      description: `共 ${weakProgressChapters.length} 章缺少明确目标或缺少约束引用。示例：${preview}${weakProgressChapters.length > 8 ? '…' : ''}。`,
+      suggestedAction: '优先为这些章节补充章节目标与 requiredAssetRefs / 验收说明。',
+    })
+  }
+
+  findings.sort((left, right) => {
+    const rank = (severity: VolumeAuditSeverity) => (severity === 'high' ? 3 : severity === 'medium' ? 2 : 1)
+    return rank(right.severity) - rank(left.severity)
+  })
+
+  const shouldCreateRevisionTasks = asBoolean(options.createRevisionTasks)
+  const createdTaskCount = shouldCreateRevisionTasks
+    ? createVolumeAuditTasks(
+      volume.novelId,
+      volumeId,
+      volume.title?.trim() || `第${volume.volumeNumber}卷`,
+      findings,
+      now,
+    )
+    : 0
+
+  ensureVolumeDesignAudited(volume.novelId, volumeId, now)
+  markNovelContextChanged(volume.novelId, 'Volume audit executed')
+
+  const highCount = findings.filter((item) => item.severity === 'high').length
+  const mediumCount = findings.filter((item) => item.severity === 'medium').length
+  const lowCount = findings.filter((item) => item.severity === 'low').length
+
+  return {
+    novelId: volume.novelId,
+    volumeId,
+    volumeName: volume.title?.trim() || `第${volume.volumeNumber}卷`,
+    auditedAt: now,
+    summary: {
+      chapterCount: chapterRows.length,
+      contractCoveredChapterCount: contractRows.length,
+      unresolvedMustResolveClueCount,
+      stalledArcCount: stalledArcs.length,
+      weakProgressChapterCount: weakProgressChapters.length,
+      totalFindings: findings.length,
+      highCount,
+      mediumCount,
+      lowCount,
+      createdTaskCount,
+    },
+    findings,
+  }
 }
 
 function buildChapterContractView(

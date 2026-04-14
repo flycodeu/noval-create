@@ -348,6 +348,13 @@ function registerIpcHandlers() {
   handle('volumeDesign:list', (_, novelId) => endgameAssetService.listVolumeDesigns(requireId(novelId, 'novelId')))
   handle('volumeDesign:getByVolume', (_, volumeId) => endgameAssetService.getVolumeDesignByVolumeId(requireId(volumeId, 'volumeId')))
   handle('volumeDesign:upsert', (_, volumeId, data) => endgameAssetService.upsertVolumeDesign(requireId(volumeId, 'volumeId'), data))
+  handle('volumeDesign:auditVolume', (_, volumeId, options) =>
+    endgameAssetService.auditVolumeDesign(
+      requireId(volumeId, 'volumeId'),
+      options == null ? {} : parseObjectPayload<Record<string, unknown>>(options, 'options'),
+    ))
+  handle('volumeDesign:syncConstraints', (_, volumeId) =>
+    endgameAssetService.syncVolumeDesignConstraintsToContracts(requireId(volumeId, 'volumeId')))
   handle('contract:getChapter', (_, chapterId) => endgameAssetService.getChapterContract(requireId(chapterId, 'chapterId')))
   handle('contract:upsertChapter', (_, chapterId, data) => endgameAssetService.upsertChapterContract(requireId(chapterId, 'chapterId'), data))
   handle('contract:listScenes', (_, chapterId) => endgameAssetService.listSceneContracts(requireId(chapterId, 'chapterId')))

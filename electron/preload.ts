@@ -120,6 +120,8 @@ const api = {
     list: (novelId: number) => invokeIpc('volumeDesign:list', novelId),
     getByVolume: (volumeId: number) => invokeIpc('volumeDesign:getByVolume', volumeId),
     upsert: (volumeId: number, data: unknown) => invokeIpc('volumeDesign:upsert', volumeId, data),
+    auditVolume: (volumeId: number, options?: unknown) => invokeIpc('volumeDesign:auditVolume', volumeId, options),
+    syncConstraints: (volumeId: number) => invokeIpc('volumeDesign:syncConstraints', volumeId),
   },
 
   contract: {

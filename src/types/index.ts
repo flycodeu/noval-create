@@ -2018,6 +2018,53 @@ export interface VolumeDesignAsset {
   updatedAt: string
 }
 
+export type VolumeAuditSeverity = 'high' | 'medium' | 'low'
+
+export interface VolumeAuditFinding {
+  id: string
+  severity: VolumeAuditSeverity
+  category: 'design' | 'foreshadow' | 'endgame' | 'arc' | 'progress'
+  title: string
+  description: string
+  suggestedAction?: string
+  chapterId?: number
+  chapterNum?: number
+  arcId?: number
+  taskId?: number
+}
+
+export interface VolumeAuditResult {
+  novelId: number
+  volumeId: number
+  volumeName: string
+  auditedAt: string
+  summary: {
+    chapterCount: number
+    contractCoveredChapterCount: number
+    unresolvedMustResolveClueCount: number
+    stalledArcCount: number
+    weakProgressChapterCount: number
+    totalFindings: number
+    highCount: number
+    mediumCount: number
+    lowCount: number
+    createdTaskCount: number
+  }
+  findings: VolumeAuditFinding[]
+}
+
+export interface VolumeConstraintSyncResult {
+  novelId: number
+  volumeId: number
+  volumeName: string
+  syncedAt: string
+  chapterCount: number
+  createdContractCount: number
+  updatedContractCount: number
+  syncedConstraintCount: number
+  sampleConstraints: string[]
+}
+
 export interface ChapterContractAsset {
   id?: number
   novelId: number
@@ -3242,6 +3289,10 @@ declare global {
         list: (novelId: number) => Promise<VolumeDesignAsset[]>
         getByVolume: (volumeId: number) => Promise<VolumeDesignAsset>
         upsert: (volumeId: number, data: Partial<VolumeDesignAsset>) => Promise<VolumeDesignAsset>
+        auditVolume: (volumeId: number, options?: {
+          createRevisionTasks?: boolean
+        }) => Promise<VolumeAuditResult>
+        syncConstraints: (volumeId: number) => Promise<VolumeConstraintSyncResult>
       }
       contract: {
         getChapter: (chapterId: number) => Promise<ChapterContractAsset>

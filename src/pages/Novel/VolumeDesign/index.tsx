@@ -1,9 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Alert, Button, Form, Input, Select, Space, Spin, Tag, message } from 'antd'
-import { SaveOutlined, BarsOutlined } from '@ant-design/icons'
+import { Alert, Button, Form, Input, Select, Space, Spin, Switch, Tag, message } from 'antd'
+import { SaveOutlined, BarsOutlined, LinkOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
 import { useNovelStore } from '../../../stores/novel.store'
-import type { EndgameCommitment, ResistanceTrack, StoryStructureVolumeSummary, VolumeDesignAsset } from '../../../types'
+import type {
+  EndgameCommitment,
+  ResistanceTrack,
+  StoryStructureVolumeSummary,
+  VolumeAuditFinding,
+  VolumeAuditResult,
+  VolumeConstraintSyncResult,
+  VolumeDesignAsset,
+} from '../../../types'
 import {
   WorkspaceContextSummary,
   WorkspaceMetric,
@@ -53,6 +61,18 @@ function buildFormValues(design?: VolumeDesignAsset | null): VolumeDesignFormVal
   }
 }
 
+function getFindingTagColor(severity: VolumeAuditFinding['severity']): string {
+  if (severity === 'high') return 'red'
+  if (severity === 'medium') return 'orange'
+  return 'blue'
+}
+
+function getFindingSeverityLabel(severity: VolumeAuditFinding['severity']): string {
+  if (severity === 'high') return '高'
+  if (severity === 'medium') return '中'
+  return '低'
+}
+
 export default function VolumeDesignPage({ novelId }: Props) {
   const navigate = useNavigate()
   const { currentNovel } = useNovelStore()
@@ -64,6 +84,11 @@ export default function VolumeDesignPage({ novelId }: Props) {
   const [commitments, setCommitments] = useState<EndgameCommitment[]>([])
   const [resistanceTracks, setResistanceTracks] = useState<ResistanceTrack[]>([])
   const [activeVolumeId, setActiveVolumeId] = useState<number | null>(null)
+  const [auditing, setAuditing] = useState(false)
+  const [syncingConstraints, setSyncingConstraints] = useState(false)
+  const [createTasksOnAudit, setCreateTasksOnAudit] = useState(true)
+  const [lastAuditResult, setLastAuditResult] = useState<VolumeAuditResult | null>(null)
+  const [lastSyncResult, setLastSyncResult] = useState<VolumeConstraintSyncResult | null>(null)
 
   const loadData = async () => {
     setLoading(true)
@@ -104,6 +129,11 @@ export default function VolumeDesignPage({ novelId }: Props) {
     form.setFieldsValue(buildFormValues(activeDesign))
   }, [activeDesign, form])
 
+  useEffect(() => {
+    setLastAuditResult(null)
+    setLastSyncResult(null)
+  }, [activeVolumeId])
+
   const linkedCommitments = useMemo(
     () => commitments.filter((item) => (activeDesign?.linkedEndgameCommitmentIds || []).includes(item.id)),
     [activeDesign?.linkedEndgameCommitmentIds, commitments],
@@ -112,6 +142,7 @@ export default function VolumeDesignPage({ novelId }: Props) {
     () => resistanceTracks.filter((item) => (activeDesign?.linkedResistanceTrackIds || []).includes(item.id || -1)),
     [activeDesign?.linkedResistanceTrackIds, resistanceTracks],
   )
+  const hasAuditBlockingRisk = (lastAuditResult?.summary.highCount || 0) > 0
 
   const handleSave = async () => {
     if (!activeVolumeId) return
@@ -141,6 +172,43 @@ export default function VolumeDesignPage({ novelId }: Props) {
     }
   }
 
+  const handleRunAudit = async () => {
+    if (!activeVolumeId) return
+    setAuditing(true)
+    try {
+      const result = await window.electron.volumeDesign.auditVolume(activeVolumeId, {
+        createRevisionTasks: createTasksOnAudit,
+      })
+      setLastAuditResult(result)
+      if (result.summary.highCount > 0) {
+        message.warning(`审计完成：发现 ${result.summary.highCount} 条高风险，请优先处理。`)
+      } else {
+        message.success('卷后审计已完成')
+      }
+      await loadData()
+    } catch (error) {
+      console.error(error)
+      message.error(error instanceof Error ? error.message : '卷后审计失败')
+    } finally {
+      setAuditing(false)
+    }
+  }
+
+  const handleSyncConstraints = async () => {
+    if (!activeVolumeId) return
+    setSyncingConstraints(true)
+    try {
+      const result = await window.electron.volumeDesign.syncConstraints(activeVolumeId)
+      setLastSyncResult(result)
+      message.success(`硬约束已同步：${result.chapterCount} 章（新增 ${result.createdContractCount}，更新 ${result.updatedContractCount}）`)
+    } catch (error) {
+      console.error(error)
+      message.error(error instanceof Error ? error.message : '卷级硬约束同步失败')
+    } finally {
+      setSyncingConstraints(false)
+    }
+  }
+
   if (loading) {
     return (
       <WorkspacePage title="卷级设计中心">
@@ -160,6 +228,27 @@ export default function VolumeDesignPage({ novelId }: Props) {
         <Space wrap>
           <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>
             保存当前卷设计
+          </Button>
+          <Button
+            icon={<LinkOutlined />}
+            loading={syncingConstraints}
+            disabled={!activeVolumeId}
+            onClick={() => void handleSyncConstraints()}
+          >
+            同步为章节硬约束
+          </Button>
+          <Space size={4}>
+            <Switch size="small" checked={createTasksOnAudit} onChange={setCreateTasksOnAudit} />
+            <span style={{ fontSize: 12, opacity: 0.75 }}>审计后自动建修订任务</span>
+          </Space>
+          <Button
+            danger
+            icon={<SafetyCertificateOutlined />}
+            loading={auditing}
+            disabled={!activeVolumeId}
+            onClick={() => void handleRunAudit()}
+          >
+            卷后审计
           </Button>
           <Button icon={<BarsOutlined />} onClick={() => navigate(`/novels/${novelId}/contracts`)}>
             去章节合同
@@ -199,6 +288,16 @@ export default function VolumeDesignPage({ novelId }: Props) {
           showIcon
           message="还没有可引用的终局承诺"
           description="先到终局设计页保存并同步承诺，再回来把各卷绑定到具体终局压力。"
+        />
+      ) : null}
+
+      {hasAuditBlockingRisk ? (
+        <Alert
+          type="error"
+          showIcon
+          message="卷后审计发现高风险（不阻止操作）"
+          description={`当前卷有 ${lastAuditResult?.summary.highCount || 0} 条高风险。你仍可继续编辑和保存，但建议先处理红色问题。`}
+          style={{ marginTop: 12 }}
         />
       ) : null}
 
@@ -325,6 +424,58 @@ export default function VolumeDesignPage({ novelId }: Props) {
             </div>
           </div>
         </Form>
+      </WorkspacePanel>
+
+      <WorkspacePanel title="卷后审计结果" description="审计会输出未回收线索、弧线停滞和推进不足清单；可选自动生成修订任务。">
+        {lastAuditResult ? (
+          <Space direction="vertical" style={{ width: '100%' }} size={12}>
+            <Alert
+              type={lastAuditResult.summary.highCount > 0 ? 'error' : lastAuditResult.summary.mediumCount > 0 ? 'warning' : 'success'}
+              showIcon
+              message={`共 ${lastAuditResult.summary.totalFindings} 条发现（高 ${lastAuditResult.summary.highCount} / 中 ${lastAuditResult.summary.mediumCount} / 低 ${lastAuditResult.summary.lowCount}）`}
+              description={`覆盖章节 ${lastAuditResult.summary.contractCoveredChapterCount}/${lastAuditResult.summary.chapterCount}，未回收线索 ${lastAuditResult.summary.unresolvedMustResolveClueCount}，弧线停滞 ${lastAuditResult.summary.stalledArcCount}，推进不足 ${lastAuditResult.summary.weakProgressChapterCount}。自动任务 ${lastAuditResult.summary.createdTaskCount} 条。`}
+            />
+            <Space wrap>
+              {lastAuditResult.findings.length > 0 ? lastAuditResult.findings.map((finding) => (
+                <Tag key={finding.id} color={getFindingTagColor(finding.severity)}>
+                  {`[${getFindingSeverityLabel(finding.severity)}] ${finding.title}${finding.taskId ? ` · 任务#${finding.taskId}` : ''}`}
+                </Tag>
+              )) : <Tag color="success">未发现风险</Tag>}
+            </Space>
+          </Space>
+        ) : (
+          <Alert
+            type="info"
+            showIcon
+            message="尚未执行卷后审计"
+            description="点击顶部“卷后审计”后，这里会展示发现清单与自动任务回执。"
+          />
+        )}
+      </WorkspacePanel>
+
+      <WorkspacePanel title="硬约束同步回执" description="把卷级目标同步到本卷章节合同的 requiredAssetRefs 与 acceptanceNotes。">
+        {lastSyncResult ? (
+          <Space direction="vertical" style={{ width: '100%' }} size={12}>
+            <Alert
+              type="success"
+              showIcon
+              message={`同步完成：${lastSyncResult.chapterCount} 章（新增合同 ${lastSyncResult.createdContractCount}，更新合同 ${lastSyncResult.updatedContractCount}）`}
+              description={`本次写入卷级约束 ${lastSyncResult.syncedConstraintCount} 条。`}
+            />
+            <Space wrap>
+              {lastSyncResult.sampleConstraints.map((line) => (
+                <Tag key={line} color="cyan">{line}</Tag>
+              ))}
+            </Space>
+          </Space>
+        ) : (
+          <Alert
+            type="info"
+            showIcon
+            message="尚未执行硬约束同步"
+            description="点击顶部“同步为章节硬约束”后，这里会展示写入回执。"
+          />
+        )}
       </WorkspacePanel>
     </WorkspacePage>
   )
