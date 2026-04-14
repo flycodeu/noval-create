@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Alert, Button, Form, Input, Select, Space, Spin, Tag, message } from 'antd'
 import { SaveOutlined, BarsOutlined } from '@ant-design/icons'
 import { useNovelStore } from '../../../stores/novel.store'
-import type { EndgameCommitment, StoryStructureVolumeSummary, VolumeDesignAsset } from '../../../types'
+import type { EndgameCommitment, ResistanceTrack, StoryStructureVolumeSummary, VolumeDesignAsset } from '../../../types'
 import {
   WorkspaceContextSummary,
   WorkspaceMetric,
@@ -26,6 +26,7 @@ interface VolumeDesignFormValues {
   mustResolveCluesText: string
   readerExpectation: string
   linkedEndgameCommitmentIds: number[]
+  linkedResistanceTrackIds: number[]
   auditStatus: string
 }
 
@@ -47,6 +48,7 @@ function buildFormValues(design?: VolumeDesignAsset | null): VolumeDesignFormVal
     mustResolveCluesText: (design?.mustResolveClues || []).join('\n'),
     readerExpectation: design?.readerExpectation || '',
     linkedEndgameCommitmentIds: design?.linkedEndgameCommitmentIds || [],
+    linkedResistanceTrackIds: design?.linkedResistanceTrackIds || [],
     auditStatus: design?.auditStatus || 'draft',
   }
 }
@@ -60,19 +62,22 @@ export default function VolumeDesignPage({ novelId }: Props) {
   const [volumes, setVolumes] = useState<StoryStructureVolumeSummary[]>([])
   const [designs, setDesigns] = useState<VolumeDesignAsset[]>([])
   const [commitments, setCommitments] = useState<EndgameCommitment[]>([])
+  const [resistanceTracks, setResistanceTracks] = useState<ResistanceTrack[]>([])
   const [activeVolumeId, setActiveVolumeId] = useState<number | null>(null)
 
   const loadData = async () => {
     setLoading(true)
     try {
-      const [volumeRows, designRows, commitmentRows] = await Promise.all([
+      const [volumeRows, designRows, commitmentRows, resistanceDashboard] = await Promise.all([
         window.electron.structure.listVolumes(novelId),
         window.electron.volumeDesign.list(novelId),
         window.electron.endgameAsset.listCommitments(novelId),
+        window.electron.resistance.getDashboard(novelId),
       ])
       setVolumes(volumeRows)
       setDesigns(designRows)
       setCommitments(commitmentRows.filter((item) => item.derivedStatus !== 'waived'))
+      setResistanceTracks(resistanceDashboard.tracks)
       setActiveVolumeId((current) => current ?? volumeRows[0]?.id ?? null)
     } catch (error) {
       console.error(error)
@@ -103,6 +108,10 @@ export default function VolumeDesignPage({ novelId }: Props) {
     () => commitments.filter((item) => (activeDesign?.linkedEndgameCommitmentIds || []).includes(item.id)),
     [activeDesign?.linkedEndgameCommitmentIds, commitments],
   )
+  const linkedResistanceTracks = useMemo(
+    () => resistanceTracks.filter((item) => (activeDesign?.linkedResistanceTrackIds || []).includes(item.id || -1)),
+    [activeDesign?.linkedResistanceTrackIds, resistanceTracks],
+  )
 
   const handleSave = async () => {
     if (!activeVolumeId) return
@@ -119,6 +128,7 @@ export default function VolumeDesignPage({ novelId }: Props) {
         mustResolveClues: splitLines(values.mustResolveCluesText),
         readerExpectation: values.readerExpectation,
         linkedEndgameCommitmentIds: values.linkedEndgameCommitmentIds,
+        linkedResistanceTrackIds: values.linkedResistanceTrackIds,
         auditStatus: values.auditStatus,
       })
       message.success('卷级设计已保存')
@@ -169,7 +179,7 @@ export default function VolumeDesignPage({ novelId }: Props) {
       metrics={(
         <>
           <WorkspaceMetric label="已绑定终局承诺" value={activeDesign?.linkedEndgameCommitmentIds.length || 0} tone="warm" />
-          <WorkspaceMetric label="必须新增线索" value={activeDesign?.mustAddClues.length || 0} />
+          <WorkspaceMetric label="主阻力来源" value={activeDesign?.linkedResistanceTrackIds.length || 0} />
           <WorkspaceMetric label="必须回收线索" value={activeDesign?.mustResolveClues.length || 0} tone="cool" />
         </>
       )}
@@ -177,7 +187,7 @@ export default function VolumeDesignPage({ novelId }: Props) {
         <WorkspaceStepGuide
           steps={[
             { title: '先选卷', description: '先确认当前在设计哪一卷，不要把全书目标和卷级目标混写。', status: 'focus' },
-            { title: '绑定终局承诺', description: '把这一卷明确要服务的终局承诺直接挂上，避免后期没人负责。', status: 'todo' },
+            { title: '绑定终局与主阻力', description: '把这一卷明确要服务的终局承诺和主要阻力来源直接挂上。', status: 'todo' },
             { title: '写清本卷闭环', description: '至少把本卷承诺、主冲突、高潮和卷末状态变化写完整。', status: 'todo' },
           ]}
         />
@@ -245,7 +255,7 @@ export default function VolumeDesignPage({ novelId }: Props) {
         </Form>
       </WorkspacePanel>
 
-      <WorkspacePanel title="终局绑定与线索清单" description="这一卷必须新增什么，必须回收什么，以及它直接服务哪些终局承诺。">
+      <WorkspacePanel title="终局绑定与阻力清单" description="这一卷必须服务哪些终局承诺、主要阻力来源是什么，以及必须新增和回收哪些线索。">
         <Form form={form} layout="vertical">
           <div className="guided-step__field-grid">
             <div className="guided-step__field-card guided-step__field-card--full">
@@ -265,6 +275,28 @@ export default function VolumeDesignPage({ novelId }: Props) {
                   {linkedCommitments.map((item) => (
                     <Tag key={item.id} color={item.commitmentKind === 'payoff' ? 'gold' : 'cyan'}>
                       {`${item.commitmentKind === 'payoff' ? '回收' : '承诺'} · ${item.title}`}
+                    </Tag>
+                  ))}
+                </Space>
+              ) : null}
+            </div>
+            <div className="guided-step__field-card guided-step__field-card--full">
+              <Form.Item name="linkedResistanceTrackIds" label="本卷主要阻力来源">
+                <Select
+                  mode="multiple"
+                  allowClear
+                  placeholder="选择这一卷主要承受的阻力来源"
+                  options={resistanceTracks.map((item) => ({
+                    value: item.id,
+                    label: `${item.title} · ${item.sourceName}`,
+                  }))}
+                />
+              </Form.Item>
+              {linkedResistanceTracks.length > 0 ? (
+                <Space wrap>
+                  {linkedResistanceTracks.map((item) => (
+                    <Tag key={item.id} color="volcano">
+                      {`${item.title} · ${item.sourceName}`}
                     </Tag>
                   ))}
                 </Space>

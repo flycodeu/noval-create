@@ -728,6 +728,8 @@ export default function StudioPage({ novelId }: Props) {
                 ['project-brief', '项目立项'],
                 ['world-rules', '世界规则'],
                 ['characters', '角色系统'],
+                ['arc-center', '人物弧线'],
+                ['resistance', '反派与阻力'],
                 ['threads', '故事线程'],
                 ['timeline', '时间轴'],
                 ['writing', '正文写作'],
@@ -823,6 +825,75 @@ export default function StudioPage({ novelId }: Props) {
               </button>
             ))}
           </div>
+        </div>
+      </WorkspacePanel>
+
+      <WorkspacePanel
+        title="人物弧线概览"
+        description="快速检查主角弧、关键角色弧和关系弧是否已经建立。"
+        extra={<div className="studio-panel-pill">{`角色弧 ${stats.characterArcCount} / 关系弧 ${stats.relationshipArcCount}`}</div>}
+      >
+        <div className="studio-action-grid">
+          <section className={`studio-action-card ${stats.characterArcCount > 0 ? 'studio-action-card--ready' : ''}`}>
+            <div className="studio-action-card__top">
+              <div className="studio-action-card__eyebrow">主角与关键角色</div>
+              <div className="studio-action-card__icon"><TeamOutlined /></div>
+            </div>
+            <div className="studio-action-card__title-row">
+              <h3>角色弧线</h3>
+              <Tag color={stats.characterArcCount > 0 ? 'success' : 'default'}>{`${stats.characterArcCount} 条`}</Tag>
+            </div>
+            <p>{stats.characterArcCount > 0 ? '已经开始维护角色变化轨迹，可以继续补裂缝、转折和终点。' : '当前还没有建立角色弧，角色资料仍停留在静态档案层。'}</p>
+            <div className="studio-action-card__footer">
+              <Button type={stats.characterArcCount > 0 ? 'default' : 'primary'} onClick={() => navigate(`/novels/${novelId}/arc-center?tab=protagonist`)}>
+                {stats.characterArcCount > 0 ? '继续细化' : '立即补主角弧'}
+              </Button>
+            </div>
+          </section>
+          <section className={`studio-action-card ${stats.relationshipArcCount > 0 ? 'studio-action-card--ready' : ''}`}>
+            <div className="studio-action-card__top">
+              <div className="studio-action-card__eyebrow">双人关系变化</div>
+              <div className="studio-action-card__icon"><BarsOutlined /></div>
+            </div>
+            <div className="studio-action-card__title-row">
+              <h3>关系弧线</h3>
+              <Tag color={stats.relationshipArcCount > 0 ? 'success' : 'default'}>{`${stats.relationshipArcCount} 条`}</Tag>
+            </div>
+            <p>{stats.relationshipArcCount > 0 ? '关系弧已经可追踪，下一步在章节合同里绑定本章必须推进的关系变化。' : '重要关系还没有拆成阶段变化，后续章节容易只有互动没有关系位移。'}</p>
+            <div className="studio-action-card__footer">
+              <Button type={stats.relationshipArcCount > 0 ? 'default' : 'primary'} onClick={() => navigate(`/novels/${novelId}/arc-center?tab=relationships`)}>
+                {stats.relationshipArcCount > 0 ? '打开关系弧' : '立即建立关系弧'}
+              </Button>
+            </div>
+          </section>
+        </div>
+      </WorkspacePanel>
+
+      <WorkspacePanel
+        title="阻力概览"
+        description="快速检查主要阻力来源是否已经进入结构化维护，并能否回写到章节合同。"
+        extra={<div className="studio-panel-pill">{`阻力线 ${stats.resistanceTrackCount}`}</div>}
+      >
+        <div className="studio-action-grid">
+          <section className={`studio-action-card ${stats.resistanceTrackCount > 0 ? 'studio-action-card--ready' : ''}`}>
+            <div className="studio-action-card__top">
+              <div className="studio-action-card__eyebrow">人物 / 势力 / 环境 / 制度</div>
+              <div className="studio-action-card__icon"><ThunderboltOutlined /></div>
+            </div>
+            <div className="studio-action-card__title-row">
+              <h3>反派与阻力</h3>
+              <Tag color={stats.resistanceTrackCount > 0 ? 'success' : 'default'}>{`${stats.resistanceTrackCount} 条`}</Tag>
+            </div>
+            <p>{stats.resistanceTrackCount > 0 ? '阻力来源已经进入结构化维护，下一步把关键阻力线挂到卷级设计和章节合同。' : '当前还没有建立阻力线，后续章节容易只让主角推进，却没有持续升级的外部压力。'}</p>
+            <div className="studio-action-card__footer">
+              <Button type={stats.resistanceTrackCount > 0 ? 'default' : 'primary'} onClick={() => navigate(`/novels/${novelId}/resistance?tab=characters`)}>
+                {stats.resistanceTrackCount > 0 ? '继续细化' : '立即建立阻力线'}
+              </Button>
+              <Button type="link" onClick={() => navigate(`/novels/${novelId}/contracts`)}>
+                去登记本章出手
+              </Button>
+            </div>
+          </section>
         </div>
       </WorkspacePanel>
 

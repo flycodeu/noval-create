@@ -128,6 +128,24 @@ const api = {
     upsertScene: (chapterId: number, segmentId: number | null, data: unknown) => invokeIpc('contract:upsertScene', chapterId, segmentId, data),
   },
 
+  characterArc: {
+    listCharacterArcs: (novelId: number) => invokeIpc('characterArc:listCharacterArcs', novelId),
+    getCharacterArc: (arcId: number) => invokeIpc('characterArc:getCharacterArc', arcId),
+    upsertCharacterArc: (data: unknown) => invokeIpc('characterArc:upsertCharacterArc', data),
+    upsertCharacterArcBeat: (data: unknown) => invokeIpc('characterArc:upsertCharacterArcBeat', data),
+    listRelationshipArcs: (novelId: number) => invokeIpc('characterArc:listRelationshipArcs', novelId),
+    upsertRelationshipArc: (data: unknown) => invokeIpc('characterArc:upsertRelationshipArc', data),
+    getArcDashboard: (novelId: number) => invokeIpc('characterArc:getArcDashboard', novelId),
+  },
+
+  resistance: {
+    listTracks: (novelId: number) => invokeIpc('resistance:listTracks', novelId),
+    getTrack: (trackId: number) => invokeIpc('resistance:getTrack', trackId),
+    upsertTrack: (data: unknown) => invokeIpc('resistance:upsertTrack', data),
+    upsertBeat: (data: unknown) => invokeIpc('resistance:upsertBeat', data),
+    getDashboard: (novelId: number) => invokeIpc('resistance:getDashboard', novelId),
+  },
+
   // Chapter APIs
   chapter: {
     list: (novelId: number) => invokeIpc('chapter:list', novelId),

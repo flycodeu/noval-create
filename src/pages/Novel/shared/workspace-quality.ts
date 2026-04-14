@@ -33,6 +33,8 @@ export type WorkspaceQualityRouteKey =
   | 'map'
   | 'factions'
   | 'characters'
+  | 'arc-center'
+  | 'resistance'
   | 'items'
   | 'glossary'
   | 'threads'
@@ -72,6 +74,8 @@ const WORKSPACE_SEQUENCE: Array<{ key: WorkspaceQualityRouteKey; label: string; 
   { key: 'map', label: '地图结构', summary: '让地点能承载路线、冲突和代价。' },
   { key: 'factions', label: '势力系统', summary: '整理外部势力、资源与关系格局。' },
   { key: 'characters', label: '角色系统', summary: '补齐主角与关键人物关系。' },
+  { key: 'arc-center', label: '人物弧线', summary: '维护主角弧、关键角色弧和关系弧。' },
+  { key: 'resistance', label: '反派与阻力', summary: '维护人物反派、势力反派、环境阻力和制度阻力。' },
   { key: 'items', label: '物品装备', summary: '沉淀道具、资源和线索。' },
   { key: 'glossary', label: '设定词典', summary: '固定术语、阶位、材料和专有名词。' },
   { key: 'threads', label: '故事线程', summary: '把主线、支线和伏笔挂成可追踪线程。' },
@@ -484,6 +488,32 @@ const FALLBACK_ADAPTERS: Partial<Record<WorkspaceQualityRouteKey, FallbackWorksp
     },
     async applySnapshot(previous, next) {
       await applyCollectionSnapshot<Character>(previous, next, (id, data) => window.electron.character.update(id, data))
+    },
+  },
+  'arc-center': {
+    readonly: true,
+    async fetchSnapshot(context) {
+      const dashboard = await window.electron.characterArc.getArcDashboard(context.novelId)
+      return {
+        scope: 'character-arcs',
+        protagonistArc: cloneJson(dashboard.protagonistArc),
+        characterArcs: cloneJson(dashboard.characterArcs),
+        relationshipArcs: cloneJson(dashboard.relationshipArcs),
+      }
+    },
+  },
+  resistance: {
+    readonly: true,
+    async fetchSnapshot(context) {
+      const dashboard = await window.electron.resistance.getDashboard(context.novelId)
+      return {
+        scope: 'resistance-tracks',
+        tracks: cloneJson(dashboard.tracks),
+        characterTracks: cloneJson(dashboard.characterTracks),
+        factionTracks: cloneJson(dashboard.factionTracks),
+        environmentTracks: cloneJson(dashboard.environmentTracks),
+        institutionTracks: cloneJson(dashboard.institutionTracks),
+      }
     },
   },
   factions: {

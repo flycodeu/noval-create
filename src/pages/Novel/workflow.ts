@@ -16,6 +16,8 @@ export type WorkflowRecommendationKey =
   | 'map'
   | 'factions'
   | 'characters'
+  | 'arc-center'
+  | 'resistance'
   | 'items'
   | 'glossary'
   | 'threads'
@@ -56,6 +58,9 @@ export interface WorkflowStats {
   mapCount: number
   factionCount: number
   characterCount: number
+  characterArcCount: number
+  relationshipArcCount: number
+  resistanceTrackCount: number
   itemCount: number
   glossaryCount: number
   threadCount: number
@@ -117,6 +122,9 @@ export const EMPTY_WORKFLOW_STATS: WorkflowStats = {
   mapCount: 0,
   factionCount: 0,
   characterCount: 0,
+  characterArcCount: 0,
+  relationshipArcCount: 0,
+  resistanceTrackCount: 0,
   itemCount: 0,
   glossaryCount: 0,
   threadCount: 0,
@@ -139,7 +147,7 @@ export const EMPTY_WORKFLOW_STATS: WorkflowStats = {
 }
 
 export async function loadWorkflowStats(novelId: number): Promise<WorkflowStats> {
-  const [baseStats, characterStats, itemStats, mapStats, factionStats, glossaryStats, threadStats, sceneTemplateStats, revisionStats, arcs, timelineStats, volumes, contextStatus] = await Promise.all([
+  const [baseStats, characterStats, itemStats, mapStats, factionStats, glossaryStats, threadStats, sceneTemplateStats, revisionStats, arcs, timelineStats, volumes, contextStatus, arcDashboard, resistanceDashboard] = await Promise.all([
     window.electron.novel.stats(novelId),
     window.electron.character.getStats({ novelId, page: 1, pageSize: 1 }),
     window.electron.item.getStats({ novelId, page: 1, pageSize: 1 }),
@@ -153,12 +161,17 @@ export async function loadWorkflowStats(novelId: number): Promise<WorkflowStats>
     window.electron.timeline.getStats({ novelId }),
     window.electron.structure.listVolumes(novelId),
     window.electron.novel.getContextStatus(novelId),
+    window.electron.characterArc.getArcDashboard(novelId),
+    window.electron.resistance.getDashboard(novelId),
   ])
 
   return {
     mapCount: mapStats.total,
     factionCount: factionStats.total,
     characterCount: characterStats.total,
+    characterArcCount: arcDashboard.characterArcs.length,
+    relationshipArcCount: arcDashboard.relationshipArcs.length,
+    resistanceTrackCount: resistanceDashboard.tracks.length,
     itemCount: itemStats.total,
     glossaryCount: glossaryStats.total,
     threadCount: threadStats.total,

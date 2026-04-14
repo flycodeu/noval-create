@@ -9,10 +9,15 @@ import type { ThemeVoiceGenerationRequest } from '../src/shared/theme-voice-gene
 import type { WorldRulesGenerationRequest } from '../src/shared/world-rules-generation'
 import type { SubplotGenerationRequest } from '../src/shared/subplot-framework'
 import type {
+  CharacterArcBeatInput,
+  CharacterArcInput,
   CharacterRelationInput,
   MapRelationInput,
   NovelCreateInput,
   PlanningDraftPageKey,
+  ResistanceBeatInput,
+  ResistanceTrackInput,
+  RelationshipArcInput,
 } from '../src/types'
 import { closeDb, getDb, initDb } from './database/db'
 import {
@@ -26,6 +31,7 @@ import {
 } from './database/schema'
 import * as chapterService from './services/chapter.service'
 import * as characterService from './services/character.service'
+import * as characterArcService from './services/character-arc.service'
 import * as consistencyService from './services/consistency.service'
 import * as coreSettingsService from './services/core-settings.service'
 import * as premiseService from './services/premise.service'
@@ -56,6 +62,7 @@ import * as storyMemoryService from './services/story-memory.service'
 import * as worldStateService from './services/world-state.service'
 import * as promptOverrideService from './services/prompt-override.service'
 import * as revisionTaskService from './services/revision-task.service'
+import * as resistanceService from './services/resistance.service'
 import * as sceneTemplateService from './services/scene-template.service'
 import * as endgameAssetService from './services/endgame-asset.service'
 import * as storyStructureService from './services/story-structure.service'
@@ -394,6 +401,23 @@ function registerIpcHandlers() {
   handle('character:upsertRelation', (_, data) =>
     characterService.upsertRelation(parseObjectPayload<CharacterRelationInput>(data, 'data')))
   handle('character:clear', (_, novelId) => characterService.clearCharactersByNovel(requireId(novelId, 'novelId')))
+  handle('characterArc:listCharacterArcs', (_, novelId) => characterArcService.listCharacterArcs(requireId(novelId, 'novelId')))
+  handle('characterArc:getCharacterArc', (_, arcId) => characterArcService.getCharacterArc(requireId(arcId, 'arcId')))
+  handle('characterArc:upsertCharacterArc', (_, data) =>
+    characterArcService.upsertCharacterArc(parseObjectPayload<CharacterArcInput>(data, 'data')))
+  handle('characterArc:upsertCharacterArcBeat', (_, data) =>
+    characterArcService.upsertCharacterArcBeat(parseObjectPayload<CharacterArcBeatInput>(data, 'data')))
+  handle('characterArc:listRelationshipArcs', (_, novelId) => characterArcService.listRelationshipArcs(requireId(novelId, 'novelId')))
+  handle('characterArc:upsertRelationshipArc', (_, data) =>
+    characterArcService.upsertRelationshipArc(parseObjectPayload<RelationshipArcInput>(data, 'data')))
+  handle('characterArc:getArcDashboard', (_, novelId) => characterArcService.getArcDashboard(requireId(novelId, 'novelId')))
+  handle('resistance:listTracks', (_, novelId) => resistanceService.listTracks(requireId(novelId, 'novelId')))
+  handle('resistance:getTrack', (_, trackId) => resistanceService.getTrack(requireId(trackId, 'trackId')))
+  handle('resistance:upsertTrack', (_, data) =>
+    resistanceService.upsertTrack(parseObjectPayload<ResistanceTrackInput>(data, 'data')))
+  handle('resistance:upsertBeat', (_, data) =>
+    resistanceService.upsertBeat(parseObjectPayload<ResistanceBeatInput>(data, 'data')))
+  handle('resistance:getDashboard', (_, novelId) => resistanceService.getDashboard(requireId(novelId, 'novelId')))
 
   handle('map:getTree', (_, novelId) => mapService.getMapTree(novelId))
   handle('map:queryNodes', (_, filters) => mapService.queryMapNodes(filters))

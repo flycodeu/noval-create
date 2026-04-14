@@ -4,6 +4,7 @@ import {
   ApartmentOutlined,
   AppstoreOutlined,
   DeleteOutlined,
+  EditOutlined,
   ReloadOutlined,
   RobotOutlined,
   SaveOutlined,
@@ -11,7 +12,7 @@ import {
   UserAddOutlined,
 } from '@ant-design/icons'
 import AIGenerateButton from '../../../components/AIGenerateButton'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import type {
   Character,
   CharacterBatchGenerationOptions,
@@ -245,6 +246,7 @@ function buildRelationBody(relation: CharacterRelation) {
 }
 
 export default function CharacterWorkspace({ novelId }: Props) {
+  const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const { currentNovel, setCharacters } = useNovelStore()
   const [form] = Form.useForm<CharacterFormValues>()
@@ -721,6 +723,12 @@ export default function CharacterWorkspace({ novelId }: Props) {
           <Button type="primary" icon={<RobotOutlined />} loading={generating} onClick={() => setProtagonistOpen(true)}>AI 生成·主角</Button>
           <Button icon={<TeamOutlined />} loading={generating} onClick={() => { void searchItems(''); setBatchOpen(true) }}>AI 生成·人物网络</Button>
           <Button icon={<ApartmentOutlined />} loading={generating} onClick={handleGenerateRelations}>AI 修复·关系网络</Button>
+          <Button icon={<EditOutlined />} onClick={() => navigate(selectedCharacter ? `/novels/${novelId}/arc-center?tab=characters&characterId=${selectedCharacter.id}` : `/novels/${novelId}/arc-center`)}>
+            去人物弧线
+          </Button>
+          <Button icon={<EditOutlined />} onClick={() => navigate(selectedCharacter ? `/novels/${novelId}/resistance?tab=characters&characterId=${selectedCharacter.id}` : `/novels/${novelId}/resistance?tab=characters`)}>
+            去反派与阻力
+          </Button>
           <Button icon={<UserAddOutlined />} onClick={handleNew}>新建人物</Button>
           <Button icon={<ReloadOutlined />} onClick={() => { void loadPage(selectedId, page); void loadGraph() }}>刷新</Button>
           <Button danger icon={<DeleteOutlined />} loading={generating} onClick={() => void handleClear()}>清空人物</Button>

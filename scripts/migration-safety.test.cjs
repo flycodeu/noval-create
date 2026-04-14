@@ -94,6 +94,16 @@ function assertRequiredColumns(db) {
   assert.ok(getColumns(db, 'world_state_versions').has('state_key'))
   assert.ok(getColumns(db, 'world_state_versions').has('normalized_value'))
   assert.ok(getColumns(db, 'world_state_versions').has('severity'))
+  assert.ok(getColumns(db, 'chapter_contracts').has('required_character_arc_ids_json'))
+  assert.ok(getColumns(db, 'chapter_contracts').has('required_relationship_arc_ids_json'))
+  assert.ok(getColumns(db, 'chapter_contracts').has('required_resistance_track_ids_json'))
+  assert.ok(getColumns(db, 'chapter_contracts').has('required_resistance_actions_json'))
+  assert.ok(getColumns(db, 'volume_designs').has('linked_resistance_track_ids_json'))
+  assert.ok(getColumns(db, 'character_arcs').has('character_id'))
+  assert.ok(getColumns(db, 'character_arc_beats').has('arc_id'))
+  assert.ok(getColumns(db, 'relationship_arcs').has('char_a_id'))
+  assert.ok(getColumns(db, 'resistance_tracks').has('resistance_kind'))
+  assert.ok(getColumns(db, 'resistance_beats').has('track_id'))
 }
 
 function testFreshDbIsIdempotent() {
@@ -121,6 +131,10 @@ function testFreshDbIsIdempotent() {
       '0016_world_state_versions',
       '0017_story_arc_phase_targets',
       '0018_story_thread_foreshadow_columns',
+      '0019_endgame_assets_and_contracts',
+      '0020_backfill_endgame_assets_and_contracts',
+      '0021_character_arc_center',
+      '0022_resistance_system',
     ])
 
     runMigrations(db)
@@ -217,6 +231,10 @@ function testPartialSchemaCanResume() {
       '0016_world_state_versions',
       '0017_story_arc_phase_targets',
       '0018_story_thread_foreshadow_columns',
+      '0019_endgame_assets_and_contracts',
+      '0020_backfill_endgame_assets_and_contracts',
+      '0021_character_arc_center',
+      '0022_resistance_system',
     ])
 
     const configs = db.prepare(`

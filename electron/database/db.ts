@@ -1075,6 +1075,7 @@ export function runMigrations(sqlite: Database.Database) {
         must_resolve_clues_json TEXT,
         reader_expectation TEXT,
         linked_endgame_commitment_ids_json TEXT,
+        linked_resistance_track_ids_json TEXT,
         audit_status TEXT NOT NULL DEFAULT 'draft',
         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
         updated_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -1087,6 +1088,10 @@ export function runMigrations(sqlite: Database.Database) {
         chapter_goal TEXT,
         served_thread_ids_json TEXT,
         required_arc_progress_json TEXT,
+        required_character_arc_ids_json TEXT,
+        required_relationship_arc_ids_json TEXT,
+        required_resistance_track_ids_json TEXT,
+        required_resistance_actions_json TEXT,
         required_asset_refs_json TEXT,
         required_endgame_commitment_ids_json TEXT,
         required_foreshadow_ids_json TEXT,
@@ -1139,6 +1144,156 @@ export function runMigrations(sqlite: Database.Database) {
   runMigrationStep(sqlite, '0020_backfill_endgame_assets_and_contracts', () => {
     backfillEndgameAssets(sqlite)
     backfillContractDefaults(sqlite)
+  })
+
+  runMigrationStep(sqlite, '0021_character_arc_center', () => {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS character_arcs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+        start_state TEXT,
+        surface_want TEXT,
+        deep_need TEXT,
+        core_fear TEXT,
+        misbelief TEXT,
+        first_crack_chapter_id INTEGER REFERENCES chapters(id) ON DELETE SET NULL,
+        change_event TEXT,
+        change_timeline_event_id INTEGER REFERENCES timeline_events(id) ON DELETE SET NULL,
+        end_state TEXT,
+        current_status TEXT NOT NULL DEFAULT 'draft',
+        last_progress_chapter_id INTEGER REFERENCES chapters(id) ON DELETE SET NULL,
+        stalled_reason TEXT,
+        notes TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS character_arc_beats (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        arc_id INTEGER NOT NULL REFERENCES character_arcs(id) ON DELETE CASCADE,
+        beat_type TEXT NOT NULL DEFAULT 'progress-note',
+        chapter_id INTEGER REFERENCES chapters(id) ON DELETE SET NULL,
+        timeline_event_id INTEGER REFERENCES timeline_events(id) ON DELETE SET NULL,
+        title TEXT,
+        summary TEXT,
+        status TEXT NOT NULL DEFAULT 'planned',
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS relationship_arcs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        char_a_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+        char_b_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+        relation_label_snapshot TEXT,
+        relation_type_snapshot TEXT,
+        start_state TEXT,
+        crack_point TEXT,
+        change_event TEXT,
+        change_timeline_event_id INTEGER REFERENCES timeline_events(id) ON DELETE SET NULL,
+        end_state TEXT,
+        current_status TEXT NOT NULL DEFAULT 'draft',
+        last_progress_chapter_id INTEGER REFERENCES chapters(id) ON DELETE SET NULL,
+        stalled_reason TEXT,
+        notes TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_character_arcs_character
+        ON character_arcs(character_id);
+      CREATE INDEX IF NOT EXISTS idx_character_arcs_novel_status
+        ON character_arcs(novel_id, current_status, last_progress_chapter_id, id);
+      CREATE INDEX IF NOT EXISTS idx_character_arc_beats_arc_sort
+        ON character_arc_beats(arc_id, sort_order, id);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_relationship_arcs_pair
+        ON relationship_arcs(novel_id, char_a_id, char_b_id);
+      CREATE INDEX IF NOT EXISTS idx_relationship_arcs_status
+        ON relationship_arcs(novel_id, current_status, last_progress_chapter_id, id);
+    `)
+
+    ensureColumn(sqlite, 'chapter_contracts', 'required_character_arc_ids_json', 'TEXT')
+    ensureColumn(sqlite, 'chapter_contracts', 'required_relationship_arc_ids_json', 'TEXT')
+
+    backfillContractDefaults(sqlite)
+    sqlite.exec(`
+      UPDATE chapter_contracts
+      SET required_character_arc_ids_json = COALESCE(required_character_arc_ids_json, '[]'),
+          required_relationship_arc_ids_json = COALESCE(required_relationship_arc_ids_json, '[]')
+    `)
+  })
+
+  runMigrationStep(sqlite, '0022_resistance_system', () => {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS resistance_tracks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        source_type TEXT NOT NULL DEFAULT 'character',
+        source_id INTEGER,
+        resistance_kind TEXT NOT NULL DEFAULT 'antagonist',
+        title TEXT NOT NULL,
+        goal TEXT,
+        intel_source TEXT,
+        resource_pool TEXT,
+        escalation_plan TEXT,
+        hero_knowledge_shift TEXT,
+        stage_victory TEXT,
+        counter_move TEXT,
+        current_pressure_mode TEXT,
+        current_status TEXT NOT NULL DEFAULT 'draft',
+        last_action_chapter_id INTEGER REFERENCES chapters(id) ON DELETE SET NULL,
+        next_escalation_chapter_id INTEGER REFERENCES chapters(id) ON DELETE SET NULL,
+        linked_volume_id INTEGER REFERENCES story_volumes(id) ON DELETE SET NULL,
+        notes TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS resistance_beats (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        track_id INTEGER NOT NULL REFERENCES resistance_tracks(id) ON DELETE CASCADE,
+        beat_type TEXT NOT NULL DEFAULT 'status-note',
+        chapter_id INTEGER REFERENCES chapters(id) ON DELETE SET NULL,
+        timeline_event_id INTEGER REFERENCES timeline_events(id) ON DELETE SET NULL,
+        title TEXT,
+        summary TEXT,
+        action_mode TEXT,
+        success_level TEXT,
+        counter_response TEXT,
+        protagonist_impact TEXT,
+        status TEXT NOT NULL DEFAULT 'logged',
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_resistance_tracks_novel_kind
+        ON resistance_tracks(novel_id, resistance_kind, current_status, id);
+      CREATE INDEX IF NOT EXISTS idx_resistance_tracks_source
+        ON resistance_tracks(novel_id, source_type, source_id, id);
+      CREATE INDEX IF NOT EXISTS idx_resistance_beats_track_sort
+        ON resistance_beats(track_id, sort_order, id);
+    `)
+
+    ensureColumn(sqlite, 'volume_designs', 'linked_resistance_track_ids_json', 'TEXT')
+    ensureColumn(sqlite, 'chapter_contracts', 'required_resistance_track_ids_json', 'TEXT')
+    ensureColumn(sqlite, 'chapter_contracts', 'required_resistance_actions_json', 'TEXT')
+
+    backfillContractDefaults(sqlite)
+    sqlite.exec(`
+      UPDATE volume_designs
+      SET linked_resistance_track_ids_json = COALESCE(linked_resistance_track_ids_json, '[]')
+    `)
+    sqlite.exec(`
+      UPDATE chapter_contracts
+      SET required_resistance_track_ids_json = COALESCE(required_resistance_track_ids_json, '[]'),
+          required_resistance_actions_json = COALESCE(required_resistance_actions_json, '[]')
+    `)
   })
 }
 
@@ -1793,6 +1948,7 @@ function backfillContractDefaults(sqlite: Database.Database) {
       SET must_add_clues_json = COALESCE(must_add_clues_json, '[]'),
           must_resolve_clues_json = COALESCE(must_resolve_clues_json, '[]'),
           linked_endgame_commitment_ids_json = COALESCE(linked_endgame_commitment_ids_json, '[]'),
+          linked_resistance_track_ids_json = COALESCE(linked_resistance_track_ids_json, '[]'),
           audit_status = COALESCE(NULLIF(audit_status, ''), 'draft')
     `)
   }
@@ -1802,6 +1958,10 @@ function backfillContractDefaults(sqlite: Database.Database) {
       UPDATE chapter_contracts
       SET served_thread_ids_json = COALESCE(served_thread_ids_json, '[]'),
           required_arc_progress_json = COALESCE(required_arc_progress_json, '[]'),
+          required_character_arc_ids_json = COALESCE(required_character_arc_ids_json, '[]'),
+          required_relationship_arc_ids_json = COALESCE(required_relationship_arc_ids_json, '[]'),
+          required_resistance_track_ids_json = COALESCE(required_resistance_track_ids_json, '[]'),
+          required_resistance_actions_json = COALESCE(required_resistance_actions_json, '[]'),
           required_asset_refs_json = COALESCE(required_asset_refs_json, '[]'),
           required_endgame_commitment_ids_json = COALESCE(required_endgame_commitment_ids_json, '[]'),
           required_foreshadow_ids_json = COALESCE(required_foreshadow_ids_json, '[]'),

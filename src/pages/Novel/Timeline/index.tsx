@@ -1,6 +1,8 @@
 import React from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Alert, Button, Modal, Select, Space, Tag } from 'antd'
 import {
+  BarsOutlined,
   DeleteOutlined,
   PlusOutlined,
   ReloadOutlined,
@@ -27,6 +29,7 @@ import '../components/boards.css'
 import './index.css'
 
 export default function TimelinePage({ novelId }: TimelinePageProps) {
+  const navigate = useNavigate()
   const workspace = useTimelineWorkspace(novelId)
   const { mutationToken, notifyWorkspaceMutation, registerEscapeHandler, registerSaveHandler } = useNovelWorkspaceActions()
   const {
@@ -184,6 +187,9 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
           </Button>
           <Button icon={<PlusOutlined />} onClick={workspace.handleNew}>
             {TIMELINE_TEXT.create}
+          </Button>
+          <Button icon={<BarsOutlined />} onClick={() => navigate(`/novels/${novelId}/resistance`)}>
+            去反派与阻力
           </Button>
           {eventDraftButton}
           <Button

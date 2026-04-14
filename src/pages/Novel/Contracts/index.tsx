@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Alert, Button, Form, Input, Select, Space, Spin, Tag, message } from 'antd'
+import { Alert, Button, Form, Input, Modal, Select, Space, Spin, Tag, message } from 'antd'
 import { SaveOutlined, EditOutlined } from '@ant-design/icons'
 import { useNovelStore } from '../../../stores/novel.store'
 import type {
   Chapter,
+  CharacterArc,
   ChapterContractAsset,
   EndgameCommitment,
   ForeshadowLedgerEntry,
+  ResistanceTrack,
+  RelationshipArc,
   SceneContractAsset,
   StoryThread,
 } from '../../../types'
@@ -27,6 +30,10 @@ interface ChapterContractFormValues {
   chapterGoal: string
   servedThreadIds: number[]
   requiredArcProgressText: string
+  requiredCharacterArcIds: number[]
+  requiredRelationshipArcIds: number[]
+  requiredResistanceTrackIds: number[]
+  requiredResistanceActionsText: string
   requiredAssetRefsText: string
   requiredEndgameCommitmentIds: number[]
   requiredForeshadowIds: number[]
@@ -48,6 +55,10 @@ function buildChapterFormValues(contract?: ChapterContractAsset | null): Chapter
     chapterGoal: contract?.chapterGoal || '',
     servedThreadIds: contract?.servedThreadIds || [],
     requiredArcProgressText: (contract?.requiredArcProgress || []).join('\n'),
+    requiredCharacterArcIds: contract?.requiredCharacterArcIds || [],
+    requiredRelationshipArcIds: contract?.requiredRelationshipArcIds || [],
+    requiredResistanceTrackIds: contract?.requiredResistanceTrackIds || [],
+    requiredResistanceActionsText: (contract?.requiredResistanceActions || []).join('\n'),
     requiredAssetRefsText: (contract?.requiredAssetRefs || []).join('\n'),
     requiredEndgameCommitmentIds: contract?.requiredEndgameCommitmentIds || [],
     requiredForeshadowIds: contract?.requiredForeshadowIds || [],
@@ -67,21 +78,35 @@ export default function ContractsPage({ novelId }: Props) {
   const [sceneSavingId, setSceneSavingId] = useState<number | 'chapterless' | null>(null)
   const [chapters, setChapters] = useState<Chapter[]>([])
   const [threads, setThreads] = useState<StoryThread[]>([])
+  const [characterArcs, setCharacterArcs] = useState<CharacterArc[]>([])
+  const [relationshipArcs, setRelationshipArcs] = useState<RelationshipArc[]>([])
+  const [resistanceTracks, setResistanceTracks] = useState<ResistanceTrack[]>([])
   const [commitments, setCommitments] = useState<EndgameCommitment[]>([])
   const [foreshadows, setForeshadows] = useState<ForeshadowLedgerEntry[]>([])
   const [chapterContract, setChapterContract] = useState<ChapterContractAsset | null>(null)
   const [sceneContracts, setSceneContracts] = useState<SceneContractAsset[]>([])
   const [activeChapterId, setActiveChapterId] = useState<number | null>(null)
+  const [progressModalOpen, setProgressModalOpen] = useState(false)
+  const [progressMode, setProgressMode] = useState<'character' | 'relationship' | 'resistance'>('character')
+  const [progressTargetId, setProgressTargetId] = useState<number | null>(null)
+  const [progressNote, setProgressNote] = useState('')
+  const [progressSaving, setProgressSaving] = useState(false)
 
   const loadBaseData = async () => {
-    const [chapterRows, threadRows, commitmentRows, foreshadowRows] = await Promise.all([
+    const [chapterRows, threadRows, characterArcRows, relationshipArcRows, commitmentRows, foreshadowRows, resistanceDashboard] = await Promise.all([
       window.electron.chapter.list(novelId),
       window.electron.thread.list(novelId),
+      window.electron.characterArc.listCharacterArcs(novelId),
+      window.electron.characterArc.listRelationshipArcs(novelId),
       window.electron.endgameAsset.listCommitments(novelId),
       window.electron.foreshadow.listLedger(novelId),
+      window.electron.resistance.getDashboard(novelId),
     ])
     setChapters(chapterRows)
     setThreads(threadRows)
+    setCharacterArcs(characterArcRows)
+    setRelationshipArcs(relationshipArcRows)
+    setResistanceTracks(resistanceDashboard.tracks)
     setCommitments(commitmentRows.filter((item) => item.derivedStatus !== 'waived'))
     setForeshadows(foreshadowRows)
     setActiveChapterId((current) => current ?? chapterRows[0]?.id ?? null)
@@ -135,6 +160,10 @@ export default function ContractsPage({ novelId }: Props) {
         chapterGoal: values.chapterGoal,
         servedThreadIds: values.servedThreadIds,
         requiredArcProgress: splitLines(values.requiredArcProgressText),
+        requiredCharacterArcIds: values.requiredCharacterArcIds,
+        requiredRelationshipArcIds: values.requiredRelationshipArcIds,
+        requiredResistanceTrackIds: values.requiredResistanceTrackIds,
+        requiredResistanceActions: splitLines(values.requiredResistanceActionsText),
         requiredAssetRefs: splitLines(values.requiredAssetRefsText),
         requiredEndgameCommitmentIds: values.requiredEndgameCommitmentIds,
         requiredForeshadowIds: values.requiredForeshadowIds,
@@ -150,6 +179,72 @@ export default function ContractsPage({ novelId }: Props) {
       message.error(error instanceof Error ? error.message : '章节合同保存失败')
     } finally {
       setSavingChapter(false)
+    }
+  }
+
+  const openProgressModal = (mode: 'character' | 'relationship' | 'resistance', targetId: number, defaultNote: string) => {
+    setProgressMode(mode)
+    setProgressTargetId(targetId)
+    setProgressNote(defaultNote)
+    setProgressModalOpen(true)
+  }
+
+  const handleRecordProgress = async () => {
+    if (!activeChapter || !progressTargetId) return
+    setProgressSaving(true)
+    try {
+      if (progressMode === 'character') {
+        await window.electron.characterArc.upsertCharacterArcBeat({
+          novelId,
+          arcId: progressTargetId,
+          chapterId: activeChapter.id,
+          beatType: 'progress-note',
+          title: `第${activeChapter.chapterNum}章推进`,
+          summary: progressNote,
+          status: 'logged',
+        })
+      } else if (progressMode === 'resistance') {
+        await window.electron.resistance.upsertBeat({
+          novelId,
+          trackId: progressTargetId,
+          chapterId: activeChapter.id,
+          beatType: 'status-note',
+          title: `第${activeChapter.chapterNum}章阻力推进`,
+          summary: progressNote,
+          actionMode: progressNote,
+          status: 'logged',
+        })
+      } else {
+        const current = relationshipArcs.find((item) => item.id === progressTargetId)
+        if (!current) throw new Error('关系弧不存在')
+        await window.electron.characterArc.upsertRelationshipArc({
+          id: current.id,
+          novelId,
+          charAId: current.charAId,
+          charBId: current.charBId,
+          relationLabelSnapshot: current.relationLabelSnapshot,
+          relationTypeSnapshot: current.relationTypeSnapshot,
+          startState: current.startState,
+          crackPoint: current.crackPoint,
+          changeEvent: progressNote || current.changeEvent,
+          changeTimelineEventId: current.changeTimelineEventId,
+          endState: current.endState,
+          currentStatus: current.currentStatus === 'completed' ? 'completed' : 'active',
+          lastProgressChapterId: activeChapter.id,
+          stalledReason: current.stalledReason,
+          notes: current.notes,
+        })
+      }
+      message.success('本章推进已登记')
+      setProgressModalOpen(false)
+      setProgressTargetId(null)
+      setProgressNote('')
+      await loadBaseData()
+    } catch (error) {
+      console.error(error)
+      message.error(error instanceof Error ? error.message : '推进登记失败')
+    } finally {
+      setProgressSaving(false)
     }
   }
 
@@ -232,6 +327,7 @@ export default function ContractsPage({ novelId }: Props) {
           <WorkspaceMetric label="当前章节" value={activeChapter ? `第${activeChapter.chapterNum}章` : '未选择'} tone="warm" />
           <WorkspaceMetric label="场景合同数" value={sceneContracts.length} />
           <WorkspaceMetric label="章节绑定终局项" value={chapterContract?.requiredEndgameCommitmentIds.length || 0} tone="cool" />
+          <WorkspaceMetric label="章节绑定推进线" value={(chapterContract?.requiredCharacterArcIds.length || 0) + (chapterContract?.requiredRelationshipArcIds.length || 0) + (chapterContract?.requiredResistanceTrackIds.length || 0)} />
         </>
       )}
       guide={(
@@ -298,6 +394,50 @@ export default function ContractsPage({ novelId }: Props) {
               </Form.Item>
             </div>
             <div className="guided-step__field-card">
+              <Form.Item name="requiredCharacterArcIds" label="必须推进的人物弧">
+                <Select
+                  mode="multiple"
+                  allowClear
+                  placeholder="选择本章必须推进的角色弧"
+                  options={characterArcs.map((item) => ({
+                    value: item.id,
+                    label: `${item.characterName} · ${item.currentStatus}${item.lastProgressChapterLabel ? ` · 最近 ${item.lastProgressChapterLabel}` : ''}`,
+                  }))}
+                />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card">
+              <Form.Item name="requiredRelationshipArcIds" label="必须推进的关系弧">
+                <Select
+                  mode="multiple"
+                  allowClear
+                  placeholder="选择本章必须推进的关系弧"
+                  options={relationshipArcs.map((item) => ({
+                    value: item.id,
+                    label: `${item.charAName} × ${item.charBName}${item.lastProgressChapterLabel ? ` · 最近 ${item.lastProgressChapterLabel}` : ''}`,
+                  }))}
+                />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card">
+              <Form.Item name="requiredResistanceTrackIds" label="必须出手的阻力线">
+                <Select
+                  mode="multiple"
+                  allowClear
+                  placeholder="选择本章必须发生动作的阻力来源"
+                  options={resistanceTracks.map((item) => ({
+                    value: item.id,
+                    label: `${item.title} · ${item.sourceName}${item.lastActionChapterLabel ? ` · 最近 ${item.lastActionChapterLabel}` : ''}`,
+                  }))}
+                />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card">
+              <Form.Item name="requiredResistanceActionsText" label="本章阻力应如何出手">
+                <Input.TextArea rows={5} placeholder={'建议每行一条，例如：\n人物反派先试探再加码\n环境阻力逼主角付出时间成本'} />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card">
               <Form.Item name="requiredAssetRefsText" label="必须出现的资产 / 线索">
                 <Input.TextArea rows={5} placeholder={'建议每行一条，例如：\n旧城通行证\n失灵通讯器\n第八章留下的血迹'} />
               </Form.Item>
@@ -352,6 +492,59 @@ export default function ContractsPage({ novelId }: Props) {
           </div>
         </Form>
       </WorkspacePanel>
+
+      {activeChapter ? (
+        <WorkspacePanel title="本章推进回写" description="写完一章后，在这里把实际推进回写到人物弧线、关系弧和阻力线。">
+          <div style={{ display: 'grid', gap: 12 }}>
+            {(chapterContract?.requiredCharacterArcIds || []).map((arcId) => {
+              const arc = characterArcs.find((item) => item.id === arcId)
+              if (!arc) return null
+              return (
+                <div key={`character-${arcId}`} className="novel-note-list__item">
+                  <strong>{arc.characterName}</strong>
+                  <div>{arc.lastProgressChapterLabel || '还没有推进记录'}</div>
+                  <Button size="small" onClick={() => openProgressModal('character', arcId, arc.changeEvent || '')}>
+                    登记本章推进
+                  </Button>
+                </div>
+              )
+            })}
+            {(chapterContract?.requiredRelationshipArcIds || []).map((arcId) => {
+              const arc = relationshipArcs.find((item) => item.id === arcId)
+              if (!arc) return null
+              return (
+                <div key={`relationship-${arcId}`} className="novel-note-list__item">
+                  <strong>{`${arc.charAName} × ${arc.charBName}`}</strong>
+                  <div>{arc.lastProgressChapterLabel || '还没有推进记录'}</div>
+                  <Button size="small" onClick={() => openProgressModal('relationship', arcId, arc.changeEvent || '')}>
+                    登记本章推进
+                  </Button>
+                </div>
+              )
+            })}
+            {(chapterContract?.requiredResistanceTrackIds || []).map((trackId) => {
+              const track = resistanceTracks.find((item) => item.id === trackId)
+              if (!track) return null
+              return (
+                <div key={`resistance-${trackId}`} className="novel-note-list__item">
+                  <strong>{track.title}</strong>
+                  <div>{track.lastActionChapterLabel || '还没有出手记录'}</div>
+                  <Button size="small" onClick={() => openProgressModal('resistance', trackId, (chapterContract?.requiredResistanceActions || []).join('；') || track.currentPressureMode || '')}>
+                    登记本章出手
+                  </Button>
+                </div>
+              )
+            })}
+            {(
+              (chapterContract?.requiredCharacterArcIds.length || 0)
+              + (chapterContract?.requiredRelationshipArcIds.length || 0)
+              + (chapterContract?.requiredResistanceTrackIds.length || 0)
+            ) <= 0 ? (
+              <Alert type="info" showIcon message="当前章节还没绑定推进目标" description="先在上面的章节合同里选择本章必须推进的人物弧、关系弧或阻力线。" />
+            ) : null}
+          </div>
+        </WorkspacePanel>
+      ) : null}
 
       <WorkspacePanel title="场景合同" description="按场景锁 POV、目标、障碍、揭示和结果状态。">
         {sceneContracts.length <= 0 ? (
@@ -478,6 +671,21 @@ export default function ContractsPage({ novelId }: Props) {
           </div>
         )}
       </WorkspacePanel>
+
+      <Modal
+        title={progressMode === 'resistance' ? '登记本章阻力出手' : '登记本章弧线推进'}
+        open={progressModalOpen}
+        onCancel={() => setProgressModalOpen(false)}
+        onOk={() => void handleRecordProgress()}
+        confirmLoading={progressSaving}
+      >
+        <Input.TextArea
+          rows={5}
+          value={progressNote}
+          onChange={(event) => setProgressNote(event.target.value)}
+          placeholder={progressMode === 'resistance' ? '写清这一章阻力是如何出手、是否得手、给主角造成了什么压力。' : '写清这一章实际让角色或关系发生了什么变化。'}
+        />
+      </Modal>
     </WorkspacePage>
   )
 }

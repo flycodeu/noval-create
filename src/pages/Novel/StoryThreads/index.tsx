@@ -2,7 +2,7 @@
 import { Alert, Button, Checkbox, Form, Input, InputNumber, Modal, Pagination, Segmented, Select, Space, Spin, Tag, message } from 'antd'
 import VirtualList from 'rc-virtual-list'
 import { useRef } from 'react'
-import { ArrowRightOutlined, DeleteOutlined, PlusOutlined, RobotOutlined } from '@ant-design/icons'
+import { ArrowRightOutlined, BarsOutlined, DeleteOutlined, PlusOutlined, RobotOutlined } from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import type { ForeshadowSnapshot, StoryThread } from '../../../types'
@@ -533,6 +533,9 @@ export default function StoryThreadsPage({ novelId }: Props) {
           </Button>
           <Button icon={<RobotOutlined />} loading={generating} onClick={() => void openGenerateModal()}>
             AI 生成·批量线程
+          </Button>
+          <Button icon={<BarsOutlined />} onClick={() => navigate(`/novels/${novelId}/resistance`)}>
+            去反派与阻力
           </Button>
           <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/novels/${novelId}/structure`)}>
             去结构页

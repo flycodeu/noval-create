@@ -34,6 +34,8 @@ import EndgamePage from './Endgame'
 import Factions from './Factions'
 import MapExplorer from './MapExplorer'
 import Characters from './Characters'
+import CharacterArcCenterPage from './CharacterArcCenter'
+import ResistancePage from './Resistance'
 import Glossary from './Glossary'
 import ItemsWorkspace from './ItemsWorkspace'
 import SceneTemplates from './SceneTemplates'
@@ -75,6 +77,8 @@ type ProWorkspaceKey =
   | 'map'
   | 'factions'
   | 'characters'
+  | 'arc-center'
+  | 'resistance'
   | 'items'
   | 'glossary'
   | 'threads'
@@ -128,6 +132,8 @@ const WORKSPACE_GROUPS: Array<{ title: string; items: WorkspaceItem[] }> = [
       { key: 'map', icon: <EnvironmentOutlined />, label: '地图结构', summary: '让地点能承载路线、冲突和代价。' },
       { key: 'factions', icon: <ApartmentOutlined />, label: '势力系统', summary: '把角色归属和外部关系拆成结构化资产。' },
       { key: 'characters', icon: <TeamOutlined />, label: '角色系统', summary: '补齐主角与关键人物关系。' },
+      { key: 'arc-center', icon: <BarsOutlined />, label: '人物弧线', summary: '维护主角弧、关键角色弧和关系弧。' },
+      { key: 'resistance', icon: <BarsOutlined />, label: '反派与阻力', summary: '统一维护人物反派、势力反派和环境制度阻力。' },
       { key: 'items', icon: <AppstoreOutlined />, label: '物品装备', summary: '补齐道具、资源和可回收线索。' },
       { key: 'glossary', icon: <BarsOutlined />, label: '设定词典', summary: '固定术语、阶位、材料和专有名词。' },
       { key: 'threads', icon: <BarsOutlined />, label: '故事线程', summary: '把主线、支线和伏笔挂成可追踪线程。' },
@@ -280,6 +286,8 @@ export default function NovelRouter() {
       map: guidedProgressMap['map-structure'].isComplete,
       factions: workflowStats.factionCount > 0,
       characters: guidedProgressMap['character-roster'].isComplete,
+      'arc-center': workflowStats.characterArcCount > 0 || workflowStats.relationshipArcCount > 0,
+      resistance: workflowStats.resistanceTrackCount > 0,
       items: guidedProgressMap['items-equipment'].isComplete,
       glossary: workflowStats.glossaryCount > 0,
       threads: guidedProgressMap['story-threads'].isComplete,
@@ -348,6 +356,18 @@ export default function NovelRouter() {
           ? `${workflowStats.characterCount}人`
           : '待补',
         complete: guidedProgressMap['character-roster'].isComplete,
+      },
+      'arc-center': {
+        label: workflowStats.characterArcCount > 0 || workflowStats.relationshipArcCount > 0
+          ? `${workflowStats.characterArcCount}/${workflowStats.relationshipArcCount}`
+          : '待补',
+        complete: workflowStats.characterArcCount > 0 || workflowStats.relationshipArcCount > 0,
+      },
+      resistance: {
+        label: workflowStats.resistanceTrackCount > 0
+          ? `${workflowStats.resistanceTrackCount}条`
+          : '待补',
+        complete: workflowStats.resistanceTrackCount > 0,
       },
       items: {
         label: formatCountState(workflowStats.itemCount, '项'),
@@ -856,6 +876,8 @@ export default function NovelRouter() {
               <Route path="map" element={<MapExplorer novelId={novelId} />} />
               <Route path="factions" element={<Factions novelId={novelId} />} />
               <Route path="characters" element={<Characters novelId={novelId} />} />
+              <Route path="arc-center" element={<CharacterArcCenterPage novelId={novelId} />} />
+              <Route path="resistance" element={<ResistancePage novelId={novelId} />} />
               <Route path="items" element={<ItemsWorkspace novelId={novelId} />} />
               <Route path="glossary" element={<Glossary novelId={novelId} />} />
               <Route path="threads" element={<StoryThreadsPage novelId={novelId} />} />

@@ -603,6 +603,7 @@ function buildVolumeDesignView(
     mustResolveClues: parseJsonStringArray(design?.mustResolveCluesJson),
     readerExpectation: design?.readerExpectation || '',
     linkedEndgameCommitmentIds: parseJsonNumberArray(design?.linkedEndgameCommitmentIdsJson),
+    linkedResistanceTrackIds: parseJsonNumberArray(design?.linkedResistanceTrackIdsJson),
     auditStatus: design?.auditStatus || 'draft',
     createdAt: design?.createdAt || volume.createdAt,
     updatedAt: design?.updatedAt || volume.updatedAt,
@@ -643,6 +644,7 @@ export function upsertVolumeDesign(
     mustResolveClues: string[]
     readerExpectation: string
     linkedEndgameCommitmentIds: number[]
+    linkedResistanceTrackIds: number[]
     auditStatus: string
   }>,
 ) {
@@ -663,6 +665,7 @@ export function upsertVolumeDesign(
       mustResolveCluesJson: data.mustResolveClues !== undefined ? stringifyStringArray(data.mustResolveClues) : current.mustResolveCluesJson,
       readerExpectation: data.readerExpectation !== undefined ? asText(data.readerExpectation) : current.readerExpectation,
       linkedEndgameCommitmentIdsJson: data.linkedEndgameCommitmentIds !== undefined ? stringifyNumberArray(data.linkedEndgameCommitmentIds) : current.linkedEndgameCommitmentIdsJson,
+      linkedResistanceTrackIdsJson: data.linkedResistanceTrackIds !== undefined ? stringifyNumberArray(data.linkedResistanceTrackIds) : current.linkedResistanceTrackIdsJson,
       auditStatus: data.auditStatus !== undefined ? asText(data.auditStatus) || current.auditStatus : current.auditStatus,
       updatedAt: timestamp,
     }).where(eq(volumeDesigns.id, current.id)).run()
@@ -679,6 +682,7 @@ export function upsertVolumeDesign(
       mustResolveCluesJson: stringifyStringArray(data.mustResolveClues),
       readerExpectation: asText(data.readerExpectation),
       linkedEndgameCommitmentIdsJson: stringifyNumberArray(data.linkedEndgameCommitmentIds),
+      linkedResistanceTrackIdsJson: stringifyNumberArray(data.linkedResistanceTrackIds),
       auditStatus: asText(data.auditStatus) || 'draft',
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -703,6 +707,10 @@ function buildChapterContractView(
     chapterGoal: contract?.chapterGoal || '',
     servedThreadIds: parseJsonNumberArray(contract?.servedThreadIdsJson),
     requiredArcProgress: parseJsonStringArray(contract?.requiredArcProgressJson),
+    requiredCharacterArcIds: parseJsonNumberArray(contract?.requiredCharacterArcIdsJson),
+    requiredRelationshipArcIds: parseJsonNumberArray(contract?.requiredRelationshipArcIdsJson),
+    requiredResistanceTrackIds: parseJsonNumberArray(contract?.requiredResistanceTrackIdsJson),
+    requiredResistanceActions: parseJsonStringArray(contract?.requiredResistanceActionsJson),
     requiredAssetRefs: parseJsonStringArray(contract?.requiredAssetRefsJson),
     requiredEndgameCommitmentIds: parseJsonNumberArray(contract?.requiredEndgameCommitmentIdsJson),
     requiredForeshadowIds: parseJsonNumberArray(contract?.requiredForeshadowIdsJson),
@@ -729,6 +737,10 @@ export function upsertChapterContract(
     chapterGoal: string
     servedThreadIds: number[]
     requiredArcProgress: string[]
+    requiredCharacterArcIds: number[]
+    requiredRelationshipArcIds: number[]
+    requiredResistanceTrackIds: number[]
+    requiredResistanceActions: string[]
     requiredAssetRefs: string[]
     requiredEndgameCommitmentIds: number[]
     requiredForeshadowIds: number[]
@@ -749,6 +761,10 @@ export function upsertChapterContract(
       chapterGoal: data.chapterGoal !== undefined ? asText(data.chapterGoal) : current.chapterGoal,
       servedThreadIdsJson: data.servedThreadIds !== undefined ? stringifyNumberArray(data.servedThreadIds) : current.servedThreadIdsJson,
       requiredArcProgressJson: data.requiredArcProgress !== undefined ? stringifyStringArray(data.requiredArcProgress) : current.requiredArcProgressJson,
+      requiredCharacterArcIdsJson: data.requiredCharacterArcIds !== undefined ? stringifyNumberArray(data.requiredCharacterArcIds) : current.requiredCharacterArcIdsJson,
+      requiredRelationshipArcIdsJson: data.requiredRelationshipArcIds !== undefined ? stringifyNumberArray(data.requiredRelationshipArcIds) : current.requiredRelationshipArcIdsJson,
+      requiredResistanceTrackIdsJson: data.requiredResistanceTrackIds !== undefined ? stringifyNumberArray(data.requiredResistanceTrackIds) : current.requiredResistanceTrackIdsJson,
+      requiredResistanceActionsJson: data.requiredResistanceActions !== undefined ? stringifyStringArray(data.requiredResistanceActions) : current.requiredResistanceActionsJson,
       requiredAssetRefsJson: data.requiredAssetRefs !== undefined ? stringifyStringArray(data.requiredAssetRefs) : current.requiredAssetRefsJson,
       requiredEndgameCommitmentIdsJson: data.requiredEndgameCommitmentIds !== undefined ? stringifyNumberArray(data.requiredEndgameCommitmentIds) : current.requiredEndgameCommitmentIdsJson,
       requiredForeshadowIdsJson: data.requiredForeshadowIds !== undefined ? stringifyNumberArray(data.requiredForeshadowIds) : current.requiredForeshadowIdsJson,
@@ -765,6 +781,10 @@ export function upsertChapterContract(
       chapterGoal: asText(data.chapterGoal),
       servedThreadIdsJson: stringifyNumberArray(data.servedThreadIds),
       requiredArcProgressJson: stringifyStringArray(data.requiredArcProgress),
+      requiredCharacterArcIdsJson: stringifyNumberArray(data.requiredCharacterArcIds),
+      requiredRelationshipArcIdsJson: stringifyNumberArray(data.requiredRelationshipArcIds),
+      requiredResistanceTrackIdsJson: stringifyNumberArray(data.requiredResistanceTrackIds),
+      requiredResistanceActionsJson: stringifyStringArray(data.requiredResistanceActions),
       requiredAssetRefsJson: stringifyStringArray(data.requiredAssetRefs),
       requiredEndgameCommitmentIdsJson: stringifyNumberArray(data.requiredEndgameCommitmentIds),
       requiredForeshadowIdsJson: stringifyNumberArray(data.requiredForeshadowIds),

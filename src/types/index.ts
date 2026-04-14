@@ -244,6 +244,264 @@ export interface CharacterRelationInput {
   subtextRule?: string
 }
 
+export type CharacterArcStatus = 'draft' | 'active' | 'stalled' | 'completed'
+
+export type CharacterArcBeatType = 'start' | 'crack' | 'turn' | 'change' | 'end' | 'progress-note'
+
+export interface CharacterArcBeat {
+  id?: number
+  novelId: number
+  arcId: number
+  beatType: CharacterArcBeatType
+  chapterId?: number
+  chapterNum?: number
+  chapterLabel?: string
+  timelineEventId?: number
+  timelineEventLabel?: string
+  title: string
+  summary: string
+  status: string
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CharacterArc {
+  id?: number
+  novelId: number
+  characterId: number
+  characterName: string
+  roleType?: Character['roleType']
+  startState: string
+  surfaceWant: string
+  deepNeed: string
+  coreFear: string
+  misbelief: string
+  firstCrackChapterId?: number
+  firstCrackChapterNum?: number
+  firstCrackChapterLabel?: string
+  changeEvent: string
+  changeTimelineEventId?: number
+  changeTimelineEventLabel?: string
+  endState: string
+  currentStatus: CharacterArcStatus
+  lastProgressChapterId?: number
+  lastProgressChapterNum?: number
+  lastProgressChapterLabel?: string
+  stalledReason: string
+  notes: string
+  beatCount: number
+  latestBeatSummary?: string
+  createdAt: string
+  updatedAt: string
+  beats: CharacterArcBeat[]
+}
+
+export interface RelationshipArc {
+  id?: number
+  novelId: number
+  charAId: number
+  charBId: number
+  charAName: string
+  charBName: string
+  relationLabelSnapshot: string
+  relationTypeSnapshot?: string
+  startState: string
+  crackPoint: string
+  changeEvent: string
+  changeTimelineEventId?: number
+  changeTimelineEventLabel?: string
+  endState: string
+  currentStatus: CharacterArcStatus
+  lastProgressChapterId?: number
+  lastProgressChapterNum?: number
+  lastProgressChapterLabel?: string
+  stalledReason: string
+  notes: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CharacterArcDashboard {
+  protagonistArc: CharacterArc | null
+  characterArcs: CharacterArc[]
+  relationshipArcs: RelationshipArc[]
+  availableCharacters: Character[]
+  availableRelations: CharacterRelation[]
+  chapters: Array<{ id: number; chapterNum: number; title: string }>
+  timelineEvents: Array<{ id: number; eventTitle: string; timeLabel: string; chapterStartId?: number; chapterEndId?: number }>
+  stalledCharacterCount: number
+  stalledRelationshipCount: number
+}
+
+export interface CharacterArcInput {
+  id?: number
+  novelId: number
+  characterId: number
+  startState?: string
+  surfaceWant?: string
+  deepNeed?: string
+  coreFear?: string
+  misbelief?: string
+  firstCrackChapterId?: number
+  changeEvent?: string
+  changeTimelineEventId?: number
+  endState?: string
+  currentStatus?: CharacterArcStatus
+  lastProgressChapterId?: number
+  stalledReason?: string
+  notes?: string
+}
+
+export interface CharacterArcBeatInput {
+  id?: number
+  novelId: number
+  arcId: number
+  beatType?: CharacterArcBeatType
+  chapterId?: number
+  timelineEventId?: number
+  title?: string
+  summary?: string
+  status?: string
+  sortOrder?: number
+}
+
+export interface RelationshipArcInput {
+  id?: number
+  novelId: number
+  charAId: number
+  charBId: number
+  relationLabelSnapshot?: string
+  relationTypeSnapshot?: string
+  startState?: string
+  crackPoint?: string
+  changeEvent?: string
+  changeTimelineEventId?: number
+  endState?: string
+  currentStatus?: CharacterArcStatus
+  lastProgressChapterId?: number
+  stalledReason?: string
+  notes?: string
+}
+
+export type ResistanceSourceType = 'character' | 'faction' | 'environment' | 'institution'
+
+export type ResistanceKind = 'antagonist' | 'faction' | 'environment' | 'institution'
+
+export type ResistanceTrackStatus = 'draft' | 'active' | 'stalled' | 'contained' | 'resolved'
+
+export type ResistanceBeatType = 'setup' | 'strike' | 'victory' | 'setback' | 'escalation' | 'counter' | 'status-note'
+
+export interface ResistanceBeat {
+  id?: number
+  novelId: number
+  trackId: number
+  beatType: ResistanceBeatType
+  chapterId?: number
+  chapterNum?: number
+  chapterLabel?: string
+  timelineEventId?: number
+  timelineEventLabel?: string
+  title: string
+  summary: string
+  actionMode: string
+  successLevel: string
+  counterResponse: string
+  protagonistImpact: string
+  status: string
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ResistanceTrack {
+  id?: number
+  novelId: number
+  sourceType: ResistanceSourceType
+  sourceId?: number
+  sourceName: string
+  resistanceKind: ResistanceKind
+  title: string
+  goal: string
+  intelSource: string
+  resourcePool: string
+  escalationPlan: string
+  heroKnowledgeShift: string
+  stageVictory: string
+  counterMove: string
+  currentPressureMode: string
+  currentStatus: ResistanceTrackStatus
+  lastActionChapterId?: number
+  lastActionChapterNum?: number
+  lastActionChapterLabel?: string
+  nextEscalationChapterId?: number
+  nextEscalationChapterNum?: number
+  nextEscalationChapterLabel?: string
+  linkedVolumeId?: number
+  linkedVolumeLabel?: string
+  notes: string
+  beatCount: number
+  latestBeatSummary?: string
+  createdAt: string
+  updatedAt: string
+  beats: ResistanceBeat[]
+}
+
+export interface ResistanceDashboard {
+  tracks: ResistanceTrack[]
+  characterTracks: ResistanceTrack[]
+  factionTracks: ResistanceTrack[]
+  environmentTracks: ResistanceTrack[]
+  institutionTracks: ResistanceTrack[]
+  availableCharacters: Character[]
+  availableFactions: Faction[]
+  chapters: Array<{ id: number; chapterNum: number; title: string }>
+  timelineEvents: Array<{ id: number; eventTitle: string; timeLabel: string; chapterStartId?: number; chapterEndId?: number }>
+  volumes: Array<{ id: number; volumeNumber: number; title: string }>
+  activeTrackCount: number
+  stalledTrackCount: number
+  resolvedTrackCount: number
+}
+
+export interface ResistanceTrackInput {
+  id?: number
+  novelId: number
+  sourceType: ResistanceSourceType
+  sourceId?: number
+  resistanceKind?: ResistanceKind
+  title?: string
+  goal?: string
+  intelSource?: string
+  resourcePool?: string
+  escalationPlan?: string
+  heroKnowledgeShift?: string
+  stageVictory?: string
+  counterMove?: string
+  currentPressureMode?: string
+  currentStatus?: ResistanceTrackStatus
+  lastActionChapterId?: number
+  nextEscalationChapterId?: number
+  linkedVolumeId?: number
+  notes?: string
+}
+
+export interface ResistanceBeatInput {
+  id?: number
+  novelId: number
+  trackId: number
+  beatType?: ResistanceBeatType
+  chapterId?: number
+  timelineEventId?: number
+  title?: string
+  summary?: string
+  actionMode?: string
+  successLevel?: string
+  counterResponse?: string
+  protagonistImpact?: string
+  status?: string
+  sortOrder?: number
+}
+
 export interface CharacterQueryInput {
   novelId: number
   roleType?: Character['roleType']
@@ -1638,6 +1896,7 @@ export interface VolumeDesignAsset {
   mustResolveClues: string[]
   readerExpectation: string
   linkedEndgameCommitmentIds: number[]
+  linkedResistanceTrackIds: number[]
   auditStatus: string
   createdAt: string
   updatedAt: string
@@ -1652,6 +1911,10 @@ export interface ChapterContractAsset {
   chapterGoal: string
   servedThreadIds: number[]
   requiredArcProgress: string[]
+  requiredCharacterArcIds: number[]
+  requiredRelationshipArcIds: number[]
+  requiredResistanceTrackIds: number[]
+  requiredResistanceActions: string[]
   requiredAssetRefs: string[]
   requiredEndgameCommitmentIds: number[]
   requiredForeshadowIds: number[]
@@ -2868,6 +3131,22 @@ declare global {
         upsertChapter: (chapterId: number, data: Partial<ChapterContractAsset>) => Promise<ChapterContractAsset>
         listScenes: (chapterId: number) => Promise<SceneContractAsset[]>
         upsertScene: (chapterId: number, segmentId: number | null, data: Partial<SceneContractAsset>) => Promise<SceneContractAsset[]>
+      }
+      characterArc: {
+        listCharacterArcs: (novelId: number) => Promise<CharacterArc[]>
+        getCharacterArc: (arcId: number) => Promise<CharacterArc | null>
+        upsertCharacterArc: (data: CharacterArcInput) => Promise<CharacterArc>
+        upsertCharacterArcBeat: (data: CharacterArcBeatInput) => Promise<CharacterArcBeat>
+        listRelationshipArcs: (novelId: number) => Promise<RelationshipArc[]>
+        upsertRelationshipArc: (data: RelationshipArcInput) => Promise<RelationshipArc>
+        getArcDashboard: (novelId: number) => Promise<CharacterArcDashboard>
+      }
+      resistance: {
+        listTracks: (novelId: number) => Promise<ResistanceTrack[]>
+        getTrack: (trackId: number) => Promise<ResistanceTrack | null>
+        upsertTrack: (data: ResistanceTrackInput) => Promise<ResistanceTrack>
+        upsertBeat: (data: ResistanceBeatInput) => Promise<ResistanceBeat>
+        getDashboard: (novelId: number) => Promise<ResistanceDashboard>
       }
       chapter: {
         list: (novelId: number) => Promise<Chapter[]>
