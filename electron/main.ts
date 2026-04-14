@@ -343,6 +343,7 @@ function registerIpcHandlers() {
   handle('endgameAsset:updateCommitment', (_, id, data) => endgameAssetService.updateEndgameCommitment(requireId(id), data))
   handle('foreshadow:listLedger', (_, novelId) => endgameAssetService.listForeshadowLedger(requireId(novelId, 'novelId')))
   handle('foreshadow:upsertLedger', (_, novelId, data) => endgameAssetService.upsertForeshadowLedger(requireId(novelId, 'novelId'), data))
+  handle('foreshadow:deleteLedger', (_, novelId, id) => endgameAssetService.deleteForeshadowLedger(requireId(novelId, 'novelId'), requireId(id, 'id')))
   handle('volumeDesign:list', (_, novelId) => endgameAssetService.listVolumeDesigns(requireId(novelId, 'novelId')))
   handle('volumeDesign:getByVolume', (_, volumeId) => endgameAssetService.getVolumeDesignByVolumeId(requireId(volumeId, 'volumeId')))
   handle('volumeDesign:upsert', (_, volumeId, data) => endgameAssetService.upsertVolumeDesign(requireId(volumeId, 'volumeId'), data))

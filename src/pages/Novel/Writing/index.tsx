@@ -1,5 +1,5 @@
 ﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Button, Checkbox, Empty, Input, Modal, Progress, Select, Spin, Tag, message } from 'antd'
+import { Alert, Button, Checkbox, Empty, Input, InputNumber, Modal, Progress, Select, Spin, Tag, message } from 'antd'
 import {
   ApartmentOutlined,
   BranchesOutlined,
@@ -21,6 +21,7 @@ import type {
   ChapterVersion,
   ChapterPublishCheck,
   Character,
+  ForeshadowLedgerEntry,
   ForeshadowSnapshot,
   NovelConsistencyReport,
   NovelContextStatus,
@@ -331,6 +332,7 @@ export default function Writing({ novelId }: Props) {
   const [consistencyReport, setConsistencyReport] = useState<NovelConsistencyReport | null>(null)
   const [storyMemory, setStoryMemory] = useState<StoryMemorySnapshot | null>(null)
   const [foreshadowSnapshot, setForeshadowSnapshot] = useState<ForeshadowSnapshot | null>(null)
+  const [foreshadowLedger, setForeshadowLedger] = useState<ForeshadowLedgerEntry[]>([])
   const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([])
   const [storyItems, setStoryItems] = useState<StoryItem[]>([])
   const [chapterSegments, setChapterSegments] = useState<ChapterSegment[]>([])
@@ -338,6 +340,7 @@ export default function Writing({ novelId }: Props) {
   const [storyVolumes, setStoryVolumes] = useState<StoryVolume[]>([])
   const [chapterCharacters, setChapterCharacters] = useState<Character[]>([])
   const [updatingRevealConstraints, setUpdatingRevealConstraints] = useState(false)
+  const [updatingForeshadowWriteback, setUpdatingForeshadowWriteback] = useState(false)
   const [aiResult, setAiResult] = useState<AiCheckPayload | null>(null)
   const [qualityDashboard, setQualityDashboard] = useState<QualityDashboardData | null>(null)
   const [contextStatus, setContextStatus] = useState<NovelContextStatus | null>(null)
@@ -465,6 +468,15 @@ export default function Writing({ novelId }: Props) {
     }
   }, [novelId])
 
+  const refreshForeshadowLedger = useCallback(async () => {
+    try {
+      setForeshadowLedger(await window.electron.foreshadow.listLedger(novelId))
+    } catch (error) {
+      console.error('Failed to load foreshadow ledger', error)
+      setForeshadowLedger([])
+    }
+  }, [novelId])
+
   const refreshChapterLinks = useCallback(async (chapter?: Chapter | null) => {
     if (!chapter) {
       setTimelineEvents([])
@@ -530,9 +542,10 @@ export default function Writing({ novelId }: Props) {
       refreshContextStatus(),
       refreshChapterLinks(full),
       refreshForeshadowSnapshot(full),
+      refreshForeshadowLedger(),
       refreshChapterContextPreview(full),
     ])
-  }, [clearChapterArtifacts, isHistoryRoute, refreshChapterContextPreview, refreshChapterLinks, refreshContextStatus, refreshForeshadowSnapshot, refreshPublishCheck, refreshVersionHistory, resetEditorHistory, updateChapter])
+  }, [clearChapterArtifacts, isHistoryRoute, refreshChapterContextPreview, refreshChapterLinks, refreshContextStatus, refreshForeshadowLedger, refreshForeshadowSnapshot, refreshPublishCheck, refreshVersionHistory, resetEditorHistory, updateChapter])
 
   const loadChapters = useCallback(async (preferredChapterId?: number) => {
     const list = await window.electron.chapter.list(novelId)
@@ -557,13 +570,14 @@ export default function Writing({ novelId }: Props) {
           refreshContextStatus(),
           refreshQualityDashboard(),
           refreshInfoGapAssets(),
+          refreshForeshadowLedger(),
         ])
       } finally {
         if (alive) setLoading(false)
       }
     })()
     return () => { alive = false }
-  }, [loadChapters, refreshContextStatus, refreshInfoGapAssets, refreshMeta, refreshQualityDashboard, routeChapterId])
+  }, [loadChapters, refreshContextStatus, refreshForeshadowLedger, refreshInfoGapAssets, refreshMeta, refreshQualityDashboard, routeChapterId])
 
   useEffect(() => {
     if (!routeChapterId || routeChapterFocusRef.current === routeChapterId) return
@@ -1042,6 +1056,71 @@ export default function Writing({ novelId }: Props) {
     }
   }, [currentChapter, updateChapter])
 
+  const handleCreateForeshadowWriteback = useCallback(async (data: Partial<ForeshadowLedgerEntry>) => {
+    if (!currentChapter) return
+    setUpdatingForeshadowWriteback(true)
+    try {
+      const nextRows = await window.electron.foreshadow.upsertLedger(novelId, {
+        ...data,
+        sourceChapterId: currentChapter.id,
+      })
+      setForeshadowLedger(nextRows)
+      await refreshForeshadowSnapshot(currentChapter)
+      notifyWorkspaceMutation()
+      message.success('已回写本章新伏笔。')
+    } catch (error) {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.saveFailed'))
+      throw error
+    } finally {
+      setUpdatingForeshadowWriteback(false)
+    }
+  }, [currentChapter, novelId, notifyWorkspaceMutation, refreshForeshadowSnapshot])
+
+  const handlePatchForeshadowWriteback = useCallback(async (id: number, data: Partial<ForeshadowLedgerEntry>) => {
+    if (!currentChapter) return
+    setUpdatingForeshadowWriteback(true)
+    try {
+      const nextRows = await window.electron.foreshadow.upsertLedger(novelId, {
+        id,
+        ...data,
+      })
+      setForeshadowLedger(nextRows)
+      await refreshForeshadowSnapshot(currentChapter)
+      notifyWorkspaceMutation()
+      message.success('伏笔回写已更新。')
+    } catch (error) {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.saveFailed'))
+    } finally {
+      setUpdatingForeshadowWriteback(false)
+    }
+  }, [currentChapter, novelId, notifyWorkspaceMutation, refreshForeshadowSnapshot])
+
+  const handleDeleteForeshadowWriteback = useCallback((entry: ForeshadowLedgerEntry) => {
+    Modal.confirm({
+      title: `删除伏笔「${entry.title}」`,
+      content: '删除后会从伏笔账本移除，本章回写记录也会同步消失。',
+      okType: 'danger',
+      onOk: async () => {
+        if (!currentChapter) return
+        setUpdatingForeshadowWriteback(true)
+        try {
+          const nextRows = await window.electron.foreshadow.deleteLedger(novelId, entry.id)
+          setForeshadowLedger(nextRows)
+          await refreshForeshadowSnapshot(currentChapter)
+          notifyWorkspaceMutation()
+          message.success('伏笔已删除。')
+        } catch (error) {
+          console.error(error)
+          message.error(getErrorMessage(error, 'common.saveFailed'))
+        } finally {
+          setUpdatingForeshadowWriteback(false)
+        }
+      },
+    })
+  }, [currentChapter, novelId, notifyWorkspaceMutation, refreshForeshadowSnapshot])
+
   const continuity = useMemo(() => parseContinuity(currentChapter?.continuityStateJson), [currentChapter?.continuityStateJson])
   const scenePlan = useMemo(() => parseScenePlan(currentChapter?.scenePlanJson), [currentChapter?.scenePlanJson])
   const reviewNotes = useMemo(() => parseReviewNotes(currentChapter?.reviewNotesJson), [currentChapter?.reviewNotesJson])
@@ -1220,6 +1299,18 @@ export default function Writing({ novelId }: Props) {
             saving={updatingRevealConstraints}
             onUpdate={handleUpdateRevealConstraints}
             onOpenBoard={() => navigate(`/novels/${novelId}/info-gap-board`)}
+          />
+        </InsightCard>
+        <InsightCard title="本章伏笔回写" eyebrow="新增埋设 / 已回收登记" tone="soft">
+          <ChapterForeshadowWritebackCard
+            chapter={currentChapter}
+            chapterSegments={chapterSegments}
+            ledger={foreshadowLedger}
+            saving={updatingForeshadowWriteback}
+            onCreate={handleCreateForeshadowWriteback}
+            onPatch={handlePatchForeshadowWriteback}
+            onDelete={handleDeleteForeshadowWriteback}
+            onOpenLedger={() => navigate(`/novels/${novelId}/foreshadow-ledger`)}
           />
         </InsightCard>
         <InsightCard title="本章应回收伏笔" eyebrow={foreshadowSnapshot ? `按第 ${foreshadowSnapshot.currentChapterNum} 章进度计算` : '即将到期 / 超期未收'} tone="soft">
@@ -1633,6 +1724,209 @@ export default function Writing({ novelId }: Props) {
 
 function formatRatioPercent(value: number): string {
   return `${Math.round(value * 100)}%`
+}
+
+function ChapterForeshadowWritebackCard({
+  chapter,
+  chapterSegments,
+  ledger,
+  saving,
+  onCreate,
+  onPatch,
+  onDelete,
+  onOpenLedger,
+}: {
+  chapter: Chapter | null
+  chapterSegments: ChapterSegment[]
+  ledger: ForeshadowLedgerEntry[]
+  saving: boolean
+  onCreate: (data: Partial<ForeshadowLedgerEntry>) => Promise<void>
+  onPatch: (id: number, data: Partial<ForeshadowLedgerEntry>) => Promise<void>
+  onDelete: (entry: ForeshadowLedgerEntry) => void
+  onOpenLedger: () => void
+}) {
+  const [title, setTitle] = useState('')
+  const [detail, setDetail] = useState('')
+  const [sourceSegmentId, setSourceSegmentId] = useState<number | undefined>(undefined)
+  const [targetPayoffChapter, setTargetPayoffChapter] = useState<number | null>(null)
+  const [plantMethod, setPlantMethod] = useState('')
+  const [salienceLevel, setSalienceLevel] = useState('medium')
+  const [impactScope, setImpactScope] = useState('global')
+
+  const chapterEntries = useMemo(
+    () => ledger
+      .filter((item) => chapter && item.sourceChapterId === chapter.id)
+      .sort((left, right) => right.id - left.id),
+    [chapter, ledger],
+  )
+  const segmentById = useMemo(
+    () => new Map(chapterSegments.map((segment) => [segment.id, segment] as const)),
+    [chapterSegments],
+  )
+
+  if (!chapter) {
+    return <div className="novel-copy-block">先选择章节后再执行“本章伏笔回写”。</div>
+  }
+
+  const handleCreate = async () => {
+    const normalizedTitle = title.trim()
+    if (!normalizedTitle) {
+      message.warning('请先填写本章新伏笔标题。')
+      return
+    }
+    await onCreate({
+      title: normalizedTitle,
+      detail: detail.trim() || undefined,
+      sourceSegmentId: sourceSegmentId || null,
+      plantMethod: plantMethod.trim() || undefined,
+      salienceLevel,
+      targetPayoffChapter: targetPayoffChapter || null,
+      impactScope,
+      status: 'active',
+    })
+    setTitle('')
+    setDetail('')
+    setSourceSegmentId(undefined)
+    setTargetPayoffChapter(null)
+    setPlantMethod('')
+    setSalienceLevel('medium')
+    setImpactScope('global')
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="novel-insight-list">
+          <div className="novel-insight-list__item">{`当前章节：第${chapter.chapterNum}章`}</div>
+          <div className="novel-insight-list__item">{`本章已回写：${chapterEntries.length} 条`}</div>
+        </div>
+        <Button size="small" onClick={onOpenLedger}>打开伏笔回收账本</Button>
+      </div>
+      <div className="novel-note-list">
+        <div className="novel-note-list__item" style={{ display: 'grid', gap: 8 }}>
+          <strong>新增本章伏笔</strong>
+          <Input
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            placeholder="伏笔标题，例如：断裂的族徽纹章"
+            disabled={saving}
+          />
+          <Input.TextArea
+            value={detail}
+            rows={2}
+            onChange={(event) => setDetail(event.target.value)}
+            placeholder="伏笔说明（可选）"
+            disabled={saving}
+          />
+          <Input
+            value={plantMethod}
+            onChange={(event) => setPlantMethod(event.target.value)}
+            placeholder="埋设方式（可选），例如：对话暗示 / 道具特写"
+            disabled={saving}
+          />
+          <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
+            <Select
+              allowClear
+              value={sourceSegmentId}
+              onChange={(value) => setSourceSegmentId(value)}
+              placeholder="埋设场景（可选）"
+              options={chapterSegments.map((segment) => ({
+                value: segment.id,
+                label: `场景${String(segment.segmentOrder || 0).padStart(2, '0')} · ${segment.title || '未命名场景'}`,
+              }))}
+              disabled={saving}
+            />
+            <InputNumber
+              min={1}
+              precision={0}
+              value={targetPayoffChapter}
+              onChange={(value) => setTargetPayoffChapter(typeof value === 'number' ? value : null)}
+              style={{ width: '100%' }}
+              placeholder="目标回收章位"
+              disabled={saving}
+            />
+            <Select
+              value={salienceLevel}
+              onChange={(value) => setSalienceLevel(value)}
+              options={[
+                { value: 'low', label: '低显著' },
+                { value: 'medium', label: '中显著' },
+                { value: 'high', label: '高显著' },
+              ]}
+              disabled={saving}
+            />
+            <Select
+              value={impactScope}
+              onChange={(value) => setImpactScope(value)}
+              options={[
+                { value: 'local', label: '局部' },
+                { value: 'character', label: '人物线' },
+                { value: 'world', label: '世界观线' },
+                { value: 'global', label: '全局主线' },
+              ]}
+              disabled={saving}
+            />
+          </div>
+          <div>
+            <Button type="primary" icon={<PlusOutlined />} loading={saving} onClick={() => void handleCreate()}>
+              回写为本章新伏笔
+            </Button>
+          </div>
+        </div>
+      </div>
+      {chapterEntries.length <= 0 ? (
+        <div className="novel-copy-block">当前章节还没有回写伏笔。你可以先新增，或去账本页导入现有伏笔。</div>
+      ) : (
+        <div className="novel-note-list">
+          {chapterEntries.map((entry) => {
+            const segment = entry.sourceSegmentId ? segmentById.get(entry.sourceSegmentId) : null
+            return (
+              <div key={entry.id} className="novel-note-list__item" style={{ display: 'grid', gap: 6 }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <strong>{entry.title}</strong>
+                  <Tag color={entry.status === 'resolved' ? 'success' : entry.status === 'active' ? 'processing' : 'default'}>
+                    {entry.status || 'draft'}
+                  </Tag>
+                  {typeof entry.targetPayoffChapter === 'number' ? <Tag>{`目标第${entry.targetPayoffChapter}章`}</Tag> : null}
+                </div>
+                <div style={{ opacity: 0.85 }}>
+                  {segment ? `场景：${segment.title || `场景${segment.segmentOrder}`}` : '场景：未设置'}
+                  {entry.plantMethod ? ` · 埋设：${entry.plantMethod}` : ''}
+                </div>
+                {entry.detail ? <div>{entry.detail}</div> : null}
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <Select
+                    size="small"
+                    value={entry.status || 'draft'}
+                    style={{ width: 128 }}
+                    disabled={saving}
+                    onChange={(value) => void onPatch(entry.id, { status: value })}
+                    options={[
+                      { value: 'draft', label: '草稿' },
+                      { value: 'active', label: '进行中' },
+                      { value: 'resolved', label: '已回收' },
+                      { value: 'archived', label: '归档' },
+                    ]}
+                  />
+                  <Button
+                    size="small"
+                    loading={saving}
+                    onClick={() => void onPatch(entry.id, { status: 'resolved' })}
+                    disabled={entry.status === 'resolved'}
+                  >
+                    标记已回收
+                  </Button>
+                  <Button size="small" danger icon={<DeleteOutlined />} onClick={() => onDelete(entry)}>
+                    删除
+                  </Button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
 }
 
 function ChapterRevealConstraintCard({

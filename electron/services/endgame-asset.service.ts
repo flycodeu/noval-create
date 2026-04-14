@@ -584,6 +584,22 @@ export function upsertForeshadowLedger(
   return listForeshadowLedger(novelId)
 }
 
+export function deleteForeshadowLedger(
+  novelId: number,
+  foreshadowId: number,
+) {
+  const db = getDb()
+  findNovelById(novelId)
+  const existing = db.select().from(foreshadowLedger).where(eq(foreshadowLedger.id, foreshadowId)).all()[0]
+  if (!existing || existing.novelId !== novelId) {
+    throwUserFacingError('novel.notFound')
+  }
+  db.delete(foreshadowLedger).where(eq(foreshadowLedger.id, foreshadowId)).run()
+  refreshCommitmentDerivedState(novelId)
+  markNovelContextChanged(novelId, 'Foreshadow ledger deleted')
+  return listForeshadowLedger(novelId)
+}
+
 function buildVolumeDesignView(
   volume: typeof storyVolumes.$inferSelect,
   design?: typeof volumeDesigns.$inferSelect | null,

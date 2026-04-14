@@ -113,6 +113,7 @@ const api = {
   foreshadow: {
     listLedger: (novelId: number) => invokeIpc('foreshadow:listLedger', novelId),
     upsertLedger: (novelId: number, data: unknown) => invokeIpc('foreshadow:upsertLedger', novelId, data),
+    deleteLedger: (novelId: number, id: number) => invokeIpc('foreshadow:deleteLedger', novelId, id),
   },
 
   volumeDesign: {

@@ -1895,20 +1895,20 @@ export interface ForeshadowLedgerEntry {
   id: number
   novelId: number
   title: string
-  detail?: string
-  sourceChapterId?: number
-  sourceSegmentId?: number
-  sourceChapterNum?: number
-  plantMethod?: string
+  detail?: string | null
+  sourceChapterId?: number | null
+  sourceSegmentId?: number | null
+  sourceChapterNum?: number | null
+  plantMethod?: string | null
   salienceLevel: string
-  targetPayoffChapter?: number
-  payoffMethod?: string
+  targetPayoffChapter?: number | null
+  payoffMethod?: string | null
   impactScope: string
   status: string
-  linkedThreadId?: number
-  linkedEndgameCommitmentId?: number
-  linkedEndgameCommitmentTitle?: string
-  linkedVolumeId?: number
+  linkedThreadId?: number | null
+  linkedEndgameCommitmentId?: number | null
+  linkedEndgameCommitmentTitle?: string | null
+  linkedVolumeId?: number | null
   createdAt: string
   updatedAt: string
 }
@@ -3152,6 +3152,7 @@ declare global {
       foreshadow: {
         listLedger: (novelId: number) => Promise<ForeshadowLedgerEntry[]>
         upsertLedger: (novelId: number, data: Partial<ForeshadowLedgerEntry>) => Promise<ForeshadowLedgerEntry[]>
+        deleteLedger: (novelId: number, id: number) => Promise<ForeshadowLedgerEntry[]>
       }
       volumeDesign: {
         list: (novelId: number) => Promise<VolumeDesignAsset[]>
