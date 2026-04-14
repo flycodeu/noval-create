@@ -50,6 +50,7 @@ import RevisionCenterPage from './RevisionCenter'
 import QualityDashboard from './QualityDashboard'
 import InfoGapBoardPage from './InfoGapBoard'
 import ForeshadowLedgerPage from './ForeshadowLedger'
+import GrowthSystemPage from './GrowthSystem'
 import WorkspaceErrorBoundary from './components/WorkspaceErrorBoundary'
 import WorkspaceAIQualityBoard from './components/WorkspaceAIQualityBoard'
 import {
@@ -93,6 +94,7 @@ type ProWorkspaceKey =
   | 'timeline'
   | 'info-gap-board'
   | 'foreshadow-ledger'
+  | 'growth-system'
   | 'writing'
   | 'revision'
   | 'quality'
@@ -155,6 +157,7 @@ const WORKSPACE_GROUPS: Array<{ title: string; items: WorkspaceItem[] }> = [
       { key: 'timeline', icon: <ClockCircleOutlined />, label: '时间轴', summary: '维护事件顺序、后果链和时间锚点。' },
       { key: 'info-gap-board', icon: <BarsOutlined />, label: '信息差谜题板', summary: '管理谜题/线索/真相与视角已知信息。' },
       { key: 'foreshadow-ledger', icon: <BarsOutlined />, label: '伏笔回收账本', summary: '维护伏笔资产、埋设位置和回收状态。' },
+      { key: 'growth-system', icon: <BarsOutlined />, label: '成长资源代价', summary: '统一管理成长轨道、资源稀缺和收益代价。' },
       { key: 'writing', icon: <EditOutlined />, label: '正文写作', summary: '集中处理场景计划、主写、审校和定稿。' },
       { key: 'revision', icon: <EditOutlined />, label: '修订中心', summary: '收口一致性问题和上下文同步任务。' },
       { key: 'quality', icon: <BarChartOutlined />, label: '质量监控', summary: '查看各章节评分热力图、趋势和薄弱维度。' },
@@ -306,6 +309,7 @@ export default function NovelRouter() {
       timeline: workflowStats.timelineCount > 0,
       'info-gap-board': workflowStats.volumeCount > 0,
       'foreshadow-ledger': workflowStats.chapterCount > 0,
+      'growth-system': workflowStats.chapterCount > 0,
       writing: isWritingStepReady(workflowStats),
       quality: true,
     }),
@@ -422,6 +426,10 @@ export default function NovelRouter() {
         complete: workflowStats.volumeCount > 0,
       },
       'foreshadow-ledger': {
+        label: workflowStats.chapterCount > 0 ? `${workflowStats.chapterCount}章` : '待补',
+        complete: workflowStats.chapterCount > 0,
+      },
+      'growth-system': {
         label: workflowStats.chapterCount > 0 ? `${workflowStats.chapterCount}章` : '待补',
         complete: workflowStats.chapterCount > 0,
       },
@@ -906,6 +914,7 @@ export default function NovelRouter() {
               <Route path="timeline" element={<TimelinePage novelId={novelId} />} />
               <Route path="info-gap-board" element={<InfoGapBoardPage novelId={novelId} />} />
               <Route path="foreshadow-ledger" element={<ForeshadowLedgerPage novelId={novelId} />} />
+              <Route path="growth-system" element={<GrowthSystemPage novelId={novelId} />} />
               <Route path="writing/*" element={<Writing novelId={novelId} />} />
               <Route path="revision" element={<RevisionCenterPage novelId={novelId} />} />
               <Route path="quality" element={<QualityDashboard novelId={novelId} />} />

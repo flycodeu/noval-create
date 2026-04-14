@@ -137,6 +137,21 @@ const api = {
     delete: (id: number) => invokeIpc('storyFact:delete', id),
   },
 
+  growthSystem: {
+    getDashboard: (novelId: number) => invokeIpc('growthSystem:getDashboard', novelId),
+    listTracks: (novelId: number) => invokeIpc('growthSystem:listTracks', novelId),
+    upsertTrack: (novelId: number, data: unknown) => invokeIpc('growthSystem:upsertTrack', novelId, data),
+    deleteTrack: (novelId: number, id: number) => invokeIpc('growthSystem:deleteTrack', novelId, id),
+    listPools: (novelId: number) => invokeIpc('growthSystem:listPools', novelId),
+    upsertPool: (novelId: number, data: unknown) => invokeIpc('growthSystem:upsertPool', novelId, data),
+    deletePool: (novelId: number, id: number) => invokeIpc('growthSystem:deletePool', novelId, id),
+    listEvents: (novelId: number) => invokeIpc('growthSystem:listEvents', novelId),
+    upsertEvent: (novelId: number, data: unknown) => invokeIpc('growthSystem:upsertEvent', novelId, data),
+    deleteEvent: (novelId: number, id: number) => invokeIpc('growthSystem:deleteEvent', novelId, id),
+    bindChapterContract: (novelId: number, data: unknown) => invokeIpc('growthSystem:bindChapterContract', novelId, data),
+    bindVolumeDesign: (novelId: number, data: unknown) => invokeIpc('growthSystem:bindVolumeDesign', novelId, data),
+  },
+
   characterArc: {
     listCharacterArcs: (novelId: number) => invokeIpc('characterArc:listCharacterArcs', novelId),
     getCharacterArc: (arcId: number) => invokeIpc('characterArc:getCharacterArc', arcId),

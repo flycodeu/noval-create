@@ -1387,6 +1387,83 @@ export function runMigrations(sqlite: Database.Database) {
           revealed_fact_ids_json = COALESCE(revealed_fact_ids_json, '[]')
     `)
   })
+
+  runMigrationStep(sqlite, '0024_growth_resource_cost_system', () => {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS growth_tracks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        track_type TEXT NOT NULL DEFAULT 'character',
+        source_entity_type TEXT,
+        source_entity_id INTEGER,
+        source_entity_label TEXT,
+        title TEXT NOT NULL,
+        current_tier TEXT,
+        stage_goal TEXT,
+        next_goal TEXT,
+        bottleneck TEXT,
+        scarce_resource TEXT,
+        acquire_path TEXT,
+        consumption_rule TEXT,
+        failure_cost TEXT,
+        reward_cadence TEXT,
+        linked_volume_id INTEGER REFERENCES story_volumes(id) ON DELETE SET NULL,
+        linked_chapter_id INTEGER REFERENCES chapters(id) ON DELETE SET NULL,
+        status TEXT NOT NULL DEFAULT 'active',
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS resource_pools (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        pool_type TEXT NOT NULL DEFAULT 'material',
+        scarcity_level TEXT NOT NULL DEFAULT 'balanced',
+        current_reserve TEXT,
+        unit TEXT,
+        replenish_path TEXT,
+        consumption_rule TEXT,
+        failure_cost TEXT,
+        pressure_source TEXT,
+        linked_volume_id INTEGER REFERENCES story_volumes(id) ON DELETE SET NULL,
+        notes TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS reward_cost_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        chapter_id INTEGER REFERENCES chapters(id) ON DELETE SET NULL,
+        chapter_num_snapshot INTEGER,
+        event_type TEXT NOT NULL DEFAULT 'reward',
+        title TEXT NOT NULL,
+        summary TEXT,
+        track_id INTEGER REFERENCES growth_tracks(id) ON DELETE SET NULL,
+        resource_pool_id INTEGER REFERENCES resource_pools(id) ON DELETE SET NULL,
+        delta_value TEXT,
+        cost_resolution_state TEXT DEFAULT 'new',
+        reward_level TEXT DEFAULT 'none',
+        next_bottleneck TEXT,
+        linked_volume_id INTEGER REFERENCES story_volumes(id) ON DELETE SET NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_growth_tracks_novel_type_status
+        ON growth_tracks(novel_id, track_type, status, id);
+      CREATE INDEX IF NOT EXISTS idx_growth_tracks_source
+        ON growth_tracks(source_entity_type, source_entity_id, novel_id, id);
+      CREATE INDEX IF NOT EXISTS idx_resource_pools_novel_scarcity
+        ON resource_pools(novel_id, scarcity_level, id);
+      CREATE INDEX IF NOT EXISTS idx_reward_cost_events_novel_chapter
+        ON reward_cost_events(novel_id, chapter_num_snapshot, event_type, id);
+      CREATE INDEX IF NOT EXISTS idx_reward_cost_events_track_pool
+        ON reward_cost_events(track_id, resource_pool_id, chapter_num_snapshot, id);
+    `)
+  })
 }
 
 function ensureMigrationTable(sqlite: Database.Database) {

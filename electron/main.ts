@@ -68,6 +68,7 @@ import * as endgameAssetService from './services/endgame-asset.service'
 import * as storyStructureService from './services/story-structure.service'
 import * as storyThreadService from './services/story-thread.service'
 import * as storyFactService from './services/story-fact.service'
+import * as growthSystemService from './services/growth-system.service'
 import * as workspaceQualityService from './services/workspace-quality.service'
 import * as workflowTaskService from './services/workflow-task.service'
 import { discoverEntitiesFromContent } from './services/entity-discovery.service'
@@ -364,6 +365,18 @@ function registerIpcHandlers() {
       parseObjectPayload<Record<string, unknown>>(data, 'data'),
     ))
   handle('storyFact:delete', (_, id) => storyFactService.deleteStoryFact(requireId(id)))
+  handle('growthSystem:getDashboard', (_, novelId) => growthSystemService.getGrowthSystemDashboard(requireId(novelId, 'novelId')))
+  handle('growthSystem:listTracks', (_, novelId) => growthSystemService.listGrowthTracks(requireId(novelId, 'novelId')))
+  handle('growthSystem:upsertTrack', (_, novelId, data) => growthSystemService.upsertGrowthTrack(requireId(novelId, 'novelId'), parseObjectPayload<Record<string, unknown>>(data, 'data')))
+  handle('growthSystem:deleteTrack', (_, novelId, id) => growthSystemService.deleteGrowthTrack(requireId(novelId, 'novelId'), requireId(id, 'id')))
+  handle('growthSystem:listPools', (_, novelId) => growthSystemService.listResourcePools(requireId(novelId, 'novelId')))
+  handle('growthSystem:upsertPool', (_, novelId, data) => growthSystemService.upsertResourcePool(requireId(novelId, 'novelId'), parseObjectPayload<Record<string, unknown>>(data, 'data')))
+  handle('growthSystem:deletePool', (_, novelId, id) => growthSystemService.deleteResourcePool(requireId(novelId, 'novelId'), requireId(id, 'id')))
+  handle('growthSystem:listEvents', (_, novelId) => growthSystemService.listRewardCostEvents(requireId(novelId, 'novelId')))
+  handle('growthSystem:upsertEvent', (_, novelId, data) => growthSystemService.upsertRewardCostEvent(requireId(novelId, 'novelId'), parseObjectPayload<Record<string, unknown>>(data, 'data')))
+  handle('growthSystem:deleteEvent', (_, novelId, id) => growthSystemService.deleteRewardCostEvent(requireId(novelId, 'novelId'), requireId(id, 'id')))
+  handle('growthSystem:bindChapterContract', (_, novelId, data) => growthSystemService.bindGrowthAssetsToChapterContract(requireId(novelId, 'novelId'), parseObjectPayload<Record<string, unknown>>(data, 'data') as { chapterId: number; trackIds: number[]; poolIds: number[]; eventIds: number[] }))
+  handle('growthSystem:bindVolumeDesign', (_, novelId, data) => growthSystemService.bindGrowthAssetsToVolumeDesign(requireId(novelId, 'novelId'), parseObjectPayload<Record<string, unknown>>(data, 'data') as { volumeId: number; trackIds: number[]; poolIds: number[]; rewardCadence?: string }))
 
   handle('chapter:list', (_, novelId) => chapterService.listChapters(requireId(novelId, 'novelId')))
   handle('chapter:get', (_, id) => chapterService.getChapter(requireId(id)))

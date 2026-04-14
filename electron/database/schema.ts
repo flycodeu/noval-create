@@ -291,6 +291,68 @@ export const sceneContracts = sqliteTable('scene_contracts', {
   updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
 })
 
+export const growthTracks = sqliteTable('growth_tracks', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  trackType: text('track_type').notNull().default('character'),
+  sourceEntityType: text('source_entity_type'),
+  sourceEntityId: integer('source_entity_id'),
+  sourceEntityLabel: text('source_entity_label'),
+  title: text('title').notNull(),
+  currentTier: text('current_tier'),
+  stageGoal: text('stage_goal'),
+  nextGoal: text('next_goal'),
+  bottleneck: text('bottleneck'),
+  scarceResource: text('scarce_resource'),
+  acquirePath: text('acquire_path'),
+  consumptionRule: text('consumption_rule'),
+  failureCost: text('failure_cost'),
+  rewardCadence: text('reward_cadence'),
+  linkedVolumeId: integer('linked_volume_id').references(() => storyVolumes.id, { onDelete: 'set null' }),
+  linkedChapterId: integer('linked_chapter_id').references(() => chapters.id, { onDelete: 'set null' }),
+  status: text('status').notNull().default('active'),
+  sortOrder: integer('sort_order').notNull().default(0),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
+export const resourcePools = sqliteTable('resource_pools', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  poolType: text('pool_type').notNull().default('material'),
+  scarcityLevel: text('scarcity_level').notNull().default('balanced'),
+  currentReserve: text('current_reserve'),
+  unit: text('unit'),
+  replenishPath: text('replenish_path'),
+  consumptionRule: text('consumption_rule'),
+  failureCost: text('failure_cost'),
+  pressureSource: text('pressure_source'),
+  linkedVolumeId: integer('linked_volume_id').references(() => storyVolumes.id, { onDelete: 'set null' }),
+  notes: text('notes'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
+export const rewardCostEvents = sqliteTable('reward_cost_events', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  chapterId: integer('chapter_id').references(() => chapters.id, { onDelete: 'set null' }),
+  chapterNumSnapshot: integer('chapter_num_snapshot'),
+  eventType: text('event_type').notNull().default('reward'),
+  title: text('title').notNull(),
+  summary: text('summary'),
+  trackId: integer('track_id').references(() => growthTracks.id, { onDelete: 'set null' }),
+  resourcePoolId: integer('resource_pool_id').references(() => resourcePools.id, { onDelete: 'set null' }),
+  deltaValue: text('delta_value'),
+  costResolutionState: text('cost_resolution_state').default('new'),
+  rewardLevel: text('reward_level').default('none'),
+  nextBottleneck: text('next_bottleneck'),
+  linkedVolumeId: integer('linked_volume_id').references(() => storyVolumes.id, { onDelete: 'set null' }),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
 export const factions = sqliteTable('factions', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
@@ -760,6 +822,12 @@ export type ChapterContract = typeof chapterContracts.$inferSelect
 export type NewChapterContract = typeof chapterContracts.$inferInsert
 export type SceneContract = typeof sceneContracts.$inferSelect
 export type NewSceneContract = typeof sceneContracts.$inferInsert
+export type GrowthTrack = typeof growthTracks.$inferSelect
+export type NewGrowthTrack = typeof growthTracks.$inferInsert
+export type ResourcePool = typeof resourcePools.$inferSelect
+export type NewResourcePool = typeof resourcePools.$inferInsert
+export type RewardCostEvent = typeof rewardCostEvents.$inferSelect
+export type NewRewardCostEvent = typeof rewardCostEvents.$inferInsert
 export type Faction = typeof factions.$inferSelect
 export type NewFaction = typeof factions.$inferInsert
 export type GlossaryEntry = typeof glossary.$inferSelect

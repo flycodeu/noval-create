@@ -1600,6 +1600,90 @@ export interface StoryFact {
   updatedAt: string
 }
 
+export type GrowthTrackType = 'character' | 'organization' | 'relationship'
+export type ResourcePoolType = 'material' | 'authority' | 'relationship' | 'knowledge' | 'time'
+export type ScarcityLevel = 'abundant' | 'balanced' | 'scarce' | 'critical'
+export type RewardCostEventType = 'reward' | 'cost' | 'bottleneck'
+
+export interface GrowthTrack {
+  id: number
+  novelId: number
+  trackType: GrowthTrackType
+  sourceEntityType?: string | null
+  sourceEntityId?: number | null
+  sourceEntityLabel?: string | null
+  title: string
+  currentTier?: string | null
+  stageGoal?: string | null
+  nextGoal?: string | null
+  bottleneck?: string | null
+  scarceResource?: string | null
+  acquirePath?: string | null
+  consumptionRule?: string | null
+  failureCost?: string | null
+  rewardCadence?: string | null
+  linkedVolumeId?: number | null
+  linkedChapterId?: number | null
+  status: string
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ResourcePool {
+  id: number
+  novelId: number
+  name: string
+  poolType: ResourcePoolType
+  scarcityLevel: ScarcityLevel
+  currentReserve?: string | null
+  unit?: string | null
+  replenishPath?: string | null
+  consumptionRule?: string | null
+  failureCost?: string | null
+  pressureSource?: string | null
+  linkedVolumeId?: number | null
+  notes?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface RewardCostEvent {
+  id: number
+  novelId: number
+  chapterId?: number | null
+  chapterNumSnapshot?: number | null
+  eventType: RewardCostEventType
+  title: string
+  summary?: string | null
+  trackId?: number | null
+  resourcePoolId?: number | null
+  deltaValue?: string | null
+  costResolutionState?: 'new' | 'ongoing' | 'resolved' | 'evaporated' | null
+  rewardLevel?: 'none' | 'partial' | 'major' | null
+  nextBottleneck?: string | null
+  linkedVolumeId?: number | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface GrowthSystemDashboard {
+  tracks: GrowthTrack[]
+  pools: ResourcePool[]
+  events: RewardCostEvent[]
+  chapters: Array<{ id: number; chapterNum: number; title?: string | null }>
+  volumes: Array<{ id: number; volumeNumber: number; title?: string | null }>
+  summary: {
+    trackCount: number
+    characterTrackCount: number
+    organizationTrackCount: number
+    relationshipTrackCount: number
+    criticalPoolCount: number
+    unresolvedCostCount: number
+    chapterWritebackCoverage: number
+  }
+}
+
 export interface OperationLog {
   id: number
   novelId: number
@@ -3171,6 +3255,39 @@ declare global {
         create: (novelId: number, data: Partial<StoryFact>) => Promise<number>
         update: (id: number, data: Partial<StoryFact>) => Promise<void>
         delete: (id: number) => Promise<void>
+      }
+      growthSystem: {
+        getDashboard: (novelId: number) => Promise<GrowthSystemDashboard>
+        listTracks: (novelId: number) => Promise<GrowthTrack[]>
+        upsertTrack: (novelId: number, data: Partial<GrowthTrack>) => Promise<GrowthTrack[]>
+        deleteTrack: (novelId: number, id: number) => Promise<GrowthTrack[]>
+        listPools: (novelId: number) => Promise<ResourcePool[]>
+        upsertPool: (novelId: number, data: Partial<ResourcePool>) => Promise<ResourcePool[]>
+        deletePool: (novelId: number, id: number) => Promise<ResourcePool[]>
+        listEvents: (novelId: number) => Promise<RewardCostEvent[]>
+        upsertEvent: (novelId: number, data: Partial<RewardCostEvent>) => Promise<RewardCostEvent[]>
+        deleteEvent: (novelId: number, id: number) => Promise<RewardCostEvent[]>
+        bindChapterContract: (novelId: number, data: {
+          chapterId: number
+          trackIds: number[]
+          poolIds: number[]
+          eventIds: number[]
+        }) => Promise<{
+          chapterId: number
+          boundTrackCount: number
+          boundPoolCount: number
+          boundEventCount: number
+        }>
+        bindVolumeDesign: (novelId: number, data: {
+          volumeId: number
+          trackIds: number[]
+          poolIds: number[]
+          rewardCadence?: string
+        }) => Promise<{
+          volumeId: number
+          boundTrackCount: number
+          boundPoolCount: number
+        }>
       }
       characterArc: {
         listCharacterArcs: (novelId: number) => Promise<CharacterArc[]>

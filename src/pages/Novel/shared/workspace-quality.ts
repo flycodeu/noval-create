@@ -47,6 +47,7 @@ export type WorkspaceQualityRouteKey =
   | 'timeline'
   | 'info-gap-board'
   | 'foreshadow-ledger'
+  | 'growth-system'
   | 'writing'
   | 'revision'
 
@@ -90,6 +91,7 @@ const WORKSPACE_SEQUENCE: Array<{ key: WorkspaceQualityRouteKey; label: string; 
   { key: 'timeline', label: '时间轴', summary: '维护事件顺序、后果链和时间锚点。' },
   { key: 'info-gap-board', label: '信息差谜题板', summary: '管理谜题、线索、真相和信息揭示顺序。' },
   { key: 'foreshadow-ledger', label: '伏笔回收账本', summary: '维护伏笔资产、埋设位置、回收方式和兑现状态。' },
+  { key: 'growth-system', label: '成长资源代价', summary: '统一维护成长轨道、资源稀缺和收益代价回写。' },
   { key: 'writing', label: '正文写作', summary: '处理场景计划、主写、审校和定稿。' },
   { key: 'revision', label: '修订中心', summary: '收口一致性问题和上下文同步任务。' },
 ]
