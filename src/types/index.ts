@@ -145,6 +145,8 @@ export interface Chapter {
   segmentCount?: number
   contextVersion?: number
   staleReasonJson?: string
+  allowedFactIdsJson?: string
+  revealedFactIdsJson?: string
   createdAt: string
   updatedAt: string
 }
@@ -1569,6 +1571,35 @@ export interface StoryThread {
   updatedAt: string
 }
 
+export type StoryFactKind = 'puzzle' | 'clue' | 'truth' | 'red_herring'
+export type StoryFactStatus = 'introduced' | 'partial_reveal' | 'pending_payoff' | 'explained'
+
+export interface StoryFactCharacterKnowledge {
+  characterId: number
+  knownChapterId?: number | null
+}
+
+export interface StoryFact {
+  id: number
+  novelId: number
+  volumeId?: number | null
+  relatedPuzzleId?: number | null
+  kind: StoryFactKind
+  title: string
+  summary?: string
+  status: StoryFactStatus
+  readerKnownChapterId?: number | null
+  protagonistKnownChapterId?: number | null
+  characterKnowledgeJson?: string
+  forbiddenBeforeVolume?: number | null
+  plannedRevealVolume?: number | null
+  targetRevealChapterId?: number | null
+  isKeyTruth: number
+  notes?: string
+  createdAt: string
+  updatedAt: string
+}
+
 export interface OperationLog {
   id: number
   novelId: number
@@ -1694,6 +1725,7 @@ export interface StoryVolume {
   title?: string
   summary?: string
   targetWords: number
+  maxTruthRevealRatio?: number | null
   status: 'planning' | 'draft' | 'locked'
   createdAt: string
   updatedAt: string
@@ -3131,6 +3163,13 @@ declare global {
         upsertChapter: (chapterId: number, data: Partial<ChapterContractAsset>) => Promise<ChapterContractAsset>
         listScenes: (chapterId: number) => Promise<SceneContractAsset[]>
         upsertScene: (chapterId: number, segmentId: number | null, data: Partial<SceneContractAsset>) => Promise<SceneContractAsset[]>
+      }
+      storyFact: {
+        list: (novelId: number) => Promise<StoryFact[]>
+        get: (id: number) => Promise<StoryFact | null>
+        create: (novelId: number, data: Partial<StoryFact>) => Promise<number>
+        update: (id: number, data: Partial<StoryFact>) => Promise<void>
+        delete: (id: number) => Promise<void>
       }
       characterArc: {
         listCharacterArcs: (novelId: number) => Promise<CharacterArc[]>

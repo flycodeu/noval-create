@@ -40,6 +40,7 @@ export const storyVolumes = sqliteTable('story_volumes', {
   title: text('title'),
   summary: text('summary'),
   targetWords: integer('target_words').notNull().default(0),
+  maxTruthRevealRatio: real('max_truth_reveal_ratio'),
   status: text('status').default('planning'),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
@@ -84,6 +85,8 @@ export const chapters = sqliteTable('chapters', {
   segmentCount: integer('segment_count').default(0),
   qualityScoresJson: text('quality_scores_json'),
   lockedParagraphsJson: text('locked_paragraphs_json'),
+  allowedFactIdsJson: text('allowed_fact_ids_json').default('[]'),
+  revealedFactIdsJson: text('revealed_fact_ids_json').default('[]'),
   contextVersion: integer('context_version').default(1),
   staleReasonJson: text('stale_reason_json'),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
@@ -164,6 +167,27 @@ export const storyThreads = sqliteTable('story_threads', {
   relatedTimelineEventIdsJson: text('related_timeline_event_ids_json'),
   notes: text('notes'),
   sortOrder: integer('sort_order').default(0),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
+export const storyFacts = sqliteTable('story_facts', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  volumeId: integer('volume_id').references(() => storyVolumes.id, { onDelete: 'set null' }),
+  relatedPuzzleId: integer('related_puzzle_id'),
+  kind: text('kind').notNull().default('clue'),
+  title: text('title').notNull(),
+  summary: text('summary'),
+  status: text('status').notNull().default('introduced'),
+  readerKnownChapterId: integer('reader_known_chapter_id').references(() => chapters.id, { onDelete: 'set null' }),
+  protagonistKnownChapterId: integer('protagonist_known_chapter_id').references(() => chapters.id, { onDelete: 'set null' }),
+  characterKnowledgeJson: text('character_knowledge_json').default('[]'),
+  forbiddenBeforeVolume: integer('forbidden_before_volume'),
+  plannedRevealVolume: integer('planned_reveal_volume'),
+  targetRevealChapterId: integer('target_reveal_chapter_id').references(() => chapters.id, { onDelete: 'set null' }),
+  isKeyTruth: integer('is_key_truth').notNull().default(1),
+  notes: text('notes'),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
 })
@@ -724,6 +748,8 @@ export type ChapterSegment = typeof chapterSegments.$inferSelect
 export type NewChapterSegment = typeof chapterSegments.$inferInsert
 export type StoryThread = typeof storyThreads.$inferSelect
 export type NewStoryThread = typeof storyThreads.$inferInsert
+export type StoryFact = typeof storyFacts.$inferSelect
+export type NewStoryFact = typeof storyFacts.$inferInsert
 export type EndgameCommitment = typeof endgameCommitments.$inferSelect
 export type NewEndgameCommitment = typeof endgameCommitments.$inferInsert
 export type ForeshadowLedgerEntry = typeof foreshadowLedger.$inferSelect

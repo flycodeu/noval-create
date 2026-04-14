@@ -1,5 +1,5 @@
 ﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Button, Empty, Input, Modal, Progress, Select, Spin, Tag, message } from 'antd'
+import { Alert, Button, Checkbox, Empty, Input, Modal, Progress, Select, Spin, Tag, message } from 'antd'
 import {
   ApartmentOutlined,
   BranchesOutlined,
@@ -20,13 +20,17 @@ import type {
   ChapterSegment,
   ChapterVersion,
   ChapterPublishCheck,
+  Character,
   ForeshadowSnapshot,
   NovelConsistencyReport,
   NovelContextStatus,
   ParallelGenerationPlan,
   QualityDashboardData,
+  StoryFact,
+  StoryFactCharacterKnowledge,
   StoryItem,
   StoryMemorySnapshot,
+  StoryVolume,
   TimelineEvent,
 } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
@@ -129,6 +133,30 @@ const parseStringArray = (raw?: string | null) => {
     return []
   }
 }
+const parseCharacterKnowledgeJson = (raw?: string | null): StoryFactCharacterKnowledge[] => {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    const normalized: StoryFactCharacterKnowledge[] = []
+    parsed.forEach((entry) => {
+      if (!entry || typeof entry !== 'object') return
+      const record = entry as Record<string, unknown>
+      const characterId = Number(record.characterId)
+      if (!Number.isFinite(characterId) || characterId <= 0) return
+      const knownChapterId = Number(record.knownChapterId)
+      normalized.push({
+        characterId,
+        knownChapterId: Number.isFinite(knownChapterId) && knownChapterId > 0
+          ? knownChapterId
+          : null,
+      })
+    })
+    return normalized
+  } catch {
+    return []
+  }
+}
 const parseContinuity = (raw?: string) => { try { return raw ? JSON.parse(raw) as ContinuityPayload : null } catch { return null } }
 const parseScenePlan = (raw?: string) => { try { const parsed = raw ? JSON.parse(raw) : []; return Array.isArray(parsed) ? parsed as ScenePlanStep[] : [] } catch { return [] } }
 const parseReviewNotes = (raw?: string) => { try { return raw ? JSON.parse(raw) as ReviewNotes : null } catch { return null } }
@@ -155,6 +183,50 @@ const getWorldRulesSummary = (raw?: string) => {
       Array.isArray(rules.forbidden_elements) && rules.forbidden_elements.length > 0 ? `禁用元素：${rules.forbidden_elements.slice(0, 3).join('、')}` : '',
     ].filter(Boolean)
   } catch { return [] }
+}
+
+function normalizeIdArray(values: number[]): number[] {
+  return [...new Set(values.filter((value) => Number.isFinite(value) && value > 0))]
+}
+
+function getCurrentVolumeNumber(chapter: Chapter | null, volumes: StoryVolume[]): number | null {
+  if (!chapter?.volumeId) return null
+  const currentVolume = volumes.find((volume) => volume.id === chapter.volumeId) || null
+  return currentVolume?.volumeNumber || null
+}
+
+function computeVolumeTruthRevealStats(
+  chapter: Chapter | null,
+  volumes: StoryVolume[],
+  facts: StoryFact[],
+) {
+  const volumeNumber = getCurrentVolumeNumber(chapter, volumes)
+  if (!volumeNumber) {
+    return {
+      volumeName: '未绑定卷',
+      volumeNumber: null,
+      totalTruths: 0,
+      plannedTruths: 0,
+      ratio: 0,
+      limit: null as number | null,
+      overLimit: false,
+    }
+  }
+  const currentVolume = volumes.find((volume) => volume.volumeNumber === volumeNumber) || null
+  const truthFacts = facts.filter((fact) => fact.kind === 'truth' && fact.isKeyTruth !== 0)
+  const totalTruths = truthFacts.length
+  const plannedTruths = truthFacts.filter((fact) => fact.plannedRevealVolume === volumeNumber).length
+  const ratio = totalTruths > 0 ? plannedTruths / totalTruths : 0
+  const limit = typeof currentVolume?.maxTruthRevealRatio === 'number' ? currentVolume.maxTruthRevealRatio : null
+  return {
+    volumeName: currentVolume?.title?.trim() || `第${volumeNumber}卷`,
+    volumeNumber,
+    totalTruths,
+    plannedTruths,
+    ratio,
+    limit,
+    overLimit: limit !== null && ratio > limit,
+  }
 }
 
 function normalizeEditorText(value?: string | null): string {
@@ -262,6 +334,10 @@ export default function Writing({ novelId }: Props) {
   const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([])
   const [storyItems, setStoryItems] = useState<StoryItem[]>([])
   const [chapterSegments, setChapterSegments] = useState<ChapterSegment[]>([])
+  const [storyFacts, setStoryFacts] = useState<StoryFact[]>([])
+  const [storyVolumes, setStoryVolumes] = useState<StoryVolume[]>([])
+  const [chapterCharacters, setChapterCharacters] = useState<Character[]>([])
+  const [updatingRevealConstraints, setUpdatingRevealConstraints] = useState(false)
   const [aiResult, setAiResult] = useState<AiCheckPayload | null>(null)
   const [qualityDashboard, setQualityDashboard] = useState<QualityDashboardData | null>(null)
   const [contextStatus, setContextStatus] = useState<NovelContextStatus | null>(null)
@@ -358,6 +434,21 @@ export default function Writing({ novelId }: Props) {
       setQualityDashboard(await window.electron.quality.getDashboard(novelId))
     } catch (error) {
       console.error('Failed to load quality dashboard snapshot', error)
+    }
+  }, [novelId])
+
+  const refreshInfoGapAssets = useCallback(async () => {
+    try {
+      const [factRows, volumeRows, characterRows] = await Promise.all([
+        window.electron.storyFact.list(novelId),
+        window.electron.structure.listVolumes(novelId),
+        window.electron.character.list(novelId),
+      ])
+      setStoryFacts(factRows)
+      setStoryVolumes(volumeRows)
+      setChapterCharacters(characterRows)
+    } catch (error) {
+      console.error('Failed to load info-gap board assets', error)
     }
   }, [novelId])
 
@@ -459,10 +550,20 @@ export default function Writing({ novelId }: Props) {
     let alive = true
     void (async () => {
       setLoading(true)
-      try { await Promise.all([loadChapters(routeChapterId || undefined), refreshMeta(), refreshContextStatus(), refreshQualityDashboard()]) } finally { if (alive) setLoading(false) }
+      try {
+        await Promise.all([
+          loadChapters(routeChapterId || undefined),
+          refreshMeta(),
+          refreshContextStatus(),
+          refreshQualityDashboard(),
+          refreshInfoGapAssets(),
+        ])
+      } finally {
+        if (alive) setLoading(false)
+      }
     })()
     return () => { alive = false }
-  }, [loadChapters, refreshContextStatus, refreshMeta, refreshQualityDashboard, routeChapterId])
+  }, [loadChapters, refreshContextStatus, refreshInfoGapAssets, refreshMeta, refreshQualityDashboard, routeChapterId])
 
   useEffect(() => {
     if (!routeChapterId || routeChapterFocusRef.current === routeChapterId) return
@@ -904,9 +1005,58 @@ export default function Writing({ novelId }: Props) {
     })
   }
 
+  const handleUpdateRevealConstraints = useCallback(async (
+    nextAllowedIds: number[],
+    nextRevealedIds: number[],
+  ) => {
+    if (!currentChapter) return
+    const normalizedAllowed = normalizeIdArray(nextAllowedIds)
+    const normalizedRevealed = normalizeIdArray(nextRevealedIds.filter((id) => normalizedAllowed.includes(id)))
+    setUpdatingRevealConstraints(true)
+    try {
+      await window.electron.chapter.update(currentChapter.id, {
+        allowedFactIdsJson: JSON.stringify(normalizedAllowed),
+        revealedFactIdsJson: JSON.stringify(normalizedRevealed),
+      }, {
+        skipStaleTracking: true,
+        versionSource: false,
+      })
+      setCurrentChapter((previous) => (
+        previous && previous.id === currentChapter.id
+          ? {
+              ...previous,
+              allowedFactIdsJson: JSON.stringify(normalizedAllowed),
+              revealedFactIdsJson: JSON.stringify(normalizedRevealed),
+            }
+          : previous
+      ))
+      updateChapter(currentChapter.id, {
+        allowedFactIdsJson: JSON.stringify(normalizedAllowed),
+        revealedFactIdsJson: JSON.stringify(normalizedRevealed),
+      })
+    } catch (error) {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.saveFailed'))
+    } finally {
+      setUpdatingRevealConstraints(false)
+    }
+  }, [currentChapter, updateChapter])
+
   const continuity = useMemo(() => parseContinuity(currentChapter?.continuityStateJson), [currentChapter?.continuityStateJson])
   const scenePlan = useMemo(() => parseScenePlan(currentChapter?.scenePlanJson), [currentChapter?.scenePlanJson])
   const reviewNotes = useMemo(() => parseReviewNotes(currentChapter?.reviewNotesJson), [currentChapter?.reviewNotesJson])
+  const allowedRevealFactIds = useMemo(
+    () => normalizeIdArray(parseNumberArray(currentChapter?.allowedFactIdsJson)),
+    [currentChapter?.allowedFactIdsJson],
+  )
+  const revealedFactIds = useMemo(
+    () => normalizeIdArray(parseNumberArray(currentChapter?.revealedFactIdsJson)),
+    [currentChapter?.revealedFactIdsJson],
+  )
+  const currentVolumeTruthStats = useMemo(
+    () => computeVolumeTruthRevealStats(currentChapter, storyVolumes, storyFacts),
+    [currentChapter, storyFacts, storyVolumes],
+  )
   const currentChapterStaleReasons = useMemo(() => parseStringArray(currentChapter?.staleReasonJson), [currentChapter?.staleReasonJson])
   const worldRulesSummary = useMemo(() => getWorldRulesSummary(currentNovel?.worldRulesJson), [currentNovel?.worldRulesJson])
   const chapterIdToNum = useMemo(() => new Map(chapters.map((chapter) => [chapter.id, chapter.chapterNum])), [chapters])
@@ -1058,6 +1208,20 @@ export default function Writing({ novelId }: Props) {
         </InsightCard>
         <InsightCard title="生产摘要" eyebrow="AI 主写 / 人工定稿" tone="soft"><StringList items={productionBriefItems} empty="章节进入审校后，这里会先汇总最值得优先处理的定稿建议。" /></InsightCard>
         <InsightCard title="关联线索" eyebrow="时间轴 / 道具" tone="soft"><StringList items={relatedInsightItems.slice(0, 12)} empty="当前章节暂未关联时间轴事件或关键道具。" /></InsightCard>
+        <InsightCard title="本章信息揭示控制" eyebrow="允许揭示 / 已揭示" tone="soft">
+          <ChapterRevealConstraintCard
+            chapter={currentChapter}
+            facts={storyFacts}
+            volumes={storyVolumes}
+            characters={chapterCharacters}
+            allowedFactIds={allowedRevealFactIds}
+            revealedFactIds={revealedFactIds}
+            truthStats={currentVolumeTruthStats}
+            saving={updatingRevealConstraints}
+            onUpdate={handleUpdateRevealConstraints}
+            onOpenBoard={() => navigate(`/novels/${novelId}/info-gap-board`)}
+          />
+        </InsightCard>
         <InsightCard title="本章应回收伏笔" eyebrow={foreshadowSnapshot ? `按第 ${foreshadowSnapshot.currentChapterNum} 章进度计算` : '即将到期 / 超期未收'} tone="soft">
           <StringList items={dueForeshadowItems} empty="当前章节附近没有到期或超期未收的伏笔债务。" />
         </InsightCard>
@@ -1464,6 +1628,180 @@ export default function Writing({ novelId }: Props) {
 
       <ParallelGenerationModal novelId={novelId} chapters={chapters} />
     </WorkspacePage>
+  )
+}
+
+function formatRatioPercent(value: number): string {
+  return `${Math.round(value * 100)}%`
+}
+
+function ChapterRevealConstraintCard({
+  chapter,
+  facts,
+  volumes,
+  characters,
+  allowedFactIds,
+  revealedFactIds,
+  truthStats,
+  saving,
+  onUpdate,
+  onOpenBoard,
+}: {
+  chapter: Chapter | null
+  facts: StoryFact[]
+  volumes: StoryVolume[]
+  characters: Character[]
+  allowedFactIds: number[]
+  revealedFactIds: number[]
+  truthStats: ReturnType<typeof computeVolumeTruthRevealStats>
+  saving: boolean
+  onUpdate: (nextAllowedIds: number[], nextRevealedIds: number[]) => Promise<void>
+  onOpenBoard: () => void
+}) {
+  const [kind, setKind] = useState<'truth' | 'clue' | 'red_herring'>('truth')
+  const chapterVolumeNumber = useMemo(
+    () => getCurrentVolumeNumber(chapter, volumes),
+    [chapter, volumes],
+  )
+  const puzzleTitleById = useMemo(() => {
+    const map = new Map<number, string>()
+    facts
+      .filter((fact) => fact.kind === 'puzzle')
+      .forEach((fact) => {
+        map.set(fact.id, fact.title)
+      })
+    return map
+  }, [facts])
+  const characterNameById = useMemo(() => {
+    const map = new Map<number, string>()
+    characters.forEach((character) => {
+      map.set(character.id, character.fullName)
+    })
+    return map
+  }, [characters])
+  const candidateFacts = useMemo(
+    () => facts
+      .filter((fact) => fact.kind === kind)
+      .sort((left, right) => {
+        const leftVolume = left.plannedRevealVolume || 999
+        const rightVolume = right.plannedRevealVolume || 999
+        if (leftVolume !== rightVolume) return leftVolume - rightVolume
+        return left.id - right.id
+      }),
+    [facts, kind],
+  )
+  const allowedSet = useMemo(() => new Set(allowedFactIds), [allowedFactIds])
+  const revealedSet = useMemo(() => new Set(revealedFactIds), [revealedFactIds])
+  const volumeLabel = chapterVolumeNumber ? `第${chapterVolumeNumber}卷` : '未绑定卷'
+  const ratioLabel = `${truthStats.plannedTruths}/${truthStats.totalTruths}`
+
+  if (!chapter) {
+    return <div className="novel-copy-block">先选择章节后再设置“本章允许揭示什么”。</div>
+  }
+
+  const handleAllowedToggle = (fact: StoryFact, checked: boolean) => {
+    const nextAllowed = checked
+      ? normalizeIdArray([...allowedFactIds, fact.id])
+      : allowedFactIds.filter((id) => id !== fact.id)
+    const nextRevealed = checked
+      ? revealedFactIds
+      : revealedFactIds.filter((id) => id !== fact.id)
+    void onUpdate(nextAllowed, nextRevealed)
+    if (checked && fact.kind === 'truth' && truthStats.overLimit) {
+      message.warning(`当前卷真相揭示比例已超限（${formatRatioPercent(truthStats.ratio)}）。系统允许继续，但请留意节奏失衡风险。`)
+    }
+  }
+
+  const handleRevealedToggle = (fact: StoryFact, checked: boolean) => {
+    const withAllowed = checked
+      ? normalizeIdArray([...allowedFactIds, fact.id])
+      : allowedFactIds
+    const nextRevealed = checked
+      ? normalizeIdArray([...revealedFactIds, fact.id])
+      : revealedFactIds.filter((id) => id !== fact.id)
+    void onUpdate(withAllowed, nextRevealed)
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 10 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="novel-insight-list">
+          <div className="novel-insight-list__item">{`当前卷：${volumeLabel}`}</div>
+          <div className="novel-insight-list__item">{`真相揭示：${ratioLabel}（${formatRatioPercent(truthStats.ratio)}）`}</div>
+          <div className="novel-insight-list__item">
+            {truthStats.limit == null ? '卷级上限：未设置' : `卷级上限：${formatRatioPercent(truthStats.limit)}`}
+          </div>
+        </div>
+        <Button size="small" onClick={onOpenBoard}>打开信息差谜题板</Button>
+      </div>
+      {truthStats.overLimit ? (
+        <Alert
+          showIcon
+          type="warning"
+          message="当前卷真相揭示比例超限"
+          description="系统不会阻止勾选，但建议回到“信息差谜题板”调整计划揭示卷。"
+        />
+      ) : null}
+      <Select
+        value={kind}
+        onChange={(value) => setKind(value as 'truth' | 'clue' | 'red_herring')}
+        options={[
+          { value: 'truth', label: '真相' },
+          { value: 'clue', label: '线索' },
+          { value: 'red_herring', label: '假线索' },
+        ]}
+      />
+      {candidateFacts.length <= 0 ? (
+        <div className="novel-copy-block">当前分类下暂无可选条目。</div>
+      ) : (
+        <div className="novel-note-list">
+          {candidateFacts.map((fact) => {
+            const locked = typeof fact.forbiddenBeforeVolume === 'number'
+              && (!chapterVolumeNumber || chapterVolumeNumber < fact.forbiddenBeforeVolume)
+            const relatedPuzzle = fact.relatedPuzzleId ? puzzleTitleById.get(fact.relatedPuzzleId) : null
+            const characterKnowledge = parseCharacterKnowledgeJson(fact.characterKnowledgeJson)
+              .map((entry) => characterNameById.get(entry.characterId) || `角色#${entry.characterId}`)
+            return (
+              <div key={fact.id} className="novel-note-list__item">
+                <div style={{ display: 'grid', gap: 6 }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <strong>{fact.title}</strong>
+                    <Tag color={fact.kind === 'truth' ? 'gold' : fact.kind === 'red_herring' ? 'volcano' : 'processing'}>
+                      {fact.kind === 'truth' ? '真相' : fact.kind === 'red_herring' ? '假线索' : '线索'}
+                    </Tag>
+                    {fact.plannedRevealVolume ? <Tag>{`计划揭示：第${fact.plannedRevealVolume}卷`}</Tag> : null}
+                    {locked ? <Tag color="warning">{`锁定到第${fact.forbiddenBeforeVolume}卷`}</Tag> : null}
+                  </div>
+                  {fact.summary ? <div>{fact.summary}</div> : null}
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {relatedPuzzle ? <span>{`关联谜题：${relatedPuzzle}`}</span> : null}
+                    {characterKnowledge.length > 0 ? <span>{`角色已知：${characterKnowledge.join('、')}`}</span> : null}
+                    {fact.readerKnownChapterId ? <span>{`读者已知章节ID：${fact.readerKnownChapterId}`}</span> : null}
+                    {fact.protagonistKnownChapterId ? <span>{`主角已知章节ID：${fact.protagonistKnownChapterId}`}</span> : null}
+                  </div>
+                  <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                    <Checkbox
+                      checked={allowedSet.has(fact.id)}
+                      disabled={saving || locked}
+                      onChange={(event) => handleAllowedToggle(fact, event.target.checked)}
+                    >
+                      本章允许揭示
+                    </Checkbox>
+                    <Checkbox
+                      checked={revealedSet.has(fact.id)}
+                      disabled={saving || !allowedSet.has(fact.id)}
+                      onChange={(event) => handleRevealedToggle(fact, event.target.checked)}
+                    >
+                      本章已揭示
+                    </Checkbox>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
   )
 }
 

@@ -128,6 +128,14 @@ const api = {
     upsertScene: (chapterId: number, segmentId: number | null, data: unknown) => invokeIpc('contract:upsertScene', chapterId, segmentId, data),
   },
 
+  storyFact: {
+    list: (novelId: number) => invokeIpc('storyFact:list', novelId),
+    get: (id: number) => invokeIpc('storyFact:get', id),
+    create: (novelId: number, data: unknown) => invokeIpc('storyFact:create', novelId, data),
+    update: (id: number, data: unknown) => invokeIpc('storyFact:update', id, data),
+    delete: (id: number) => invokeIpc('storyFact:delete', id),
+  },
+
   characterArc: {
     listCharacterArcs: (novelId: number) => invokeIpc('characterArc:listCharacterArcs', novelId),
     getCharacterArc: (arcId: number) => invokeIpc('characterArc:getCharacterArc', arcId),

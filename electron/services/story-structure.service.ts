@@ -86,6 +86,19 @@ function asText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
+function asRatio(value: unknown): number | null | undefined {
+  if (value === null) return null
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const normalized = Math.max(0, Math.min(1, value))
+    return Number(normalized.toFixed(4))
+  }
+  if (typeof value === 'string' && value.trim() && !Number.isNaN(Number(value))) {
+    const normalized = Math.max(0, Math.min(1, Number(value)))
+    return Number(normalized.toFixed(4))
+  }
+  return undefined
+}
+
 function toStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return []
   return value
@@ -580,6 +593,7 @@ export function createStoryVolume(
     title: string
     summary: string
     targetWords: number
+    maxTruthRevealRatio: number | null
     status: StructureStatus
   }>,
 ) {
@@ -591,6 +605,7 @@ export function createStoryVolume(
     title: asText(data.title) || getDefaultVolumeTitle(nextNumber),
     summary: asText(data.summary),
     targetWords: typeof data.targetWords === 'number' ? data.targetWords : 0,
+    maxTruthRevealRatio: asRatio(data.maxTruthRevealRatio) ?? null,
     status: data.status || 'planning',
   }).run()
   markNovelContextChanged(novelId, 'Story structure changed')
@@ -603,6 +618,7 @@ export function updateStoryVolume(
     title: string
     summary: string
     targetWords: number
+    maxTruthRevealRatio: number | null
     status: StructureStatus
   }>,
 ) {
@@ -613,6 +629,9 @@ export function updateStoryVolume(
     title: data.title !== undefined ? asText(data.title) : current.title,
     summary: data.summary !== undefined ? asText(data.summary) : current.summary,
     targetWords: typeof data.targetWords === 'number' ? data.targetWords : current.targetWords,
+    maxTruthRevealRatio: data.maxTruthRevealRatio !== undefined
+      ? (asRatio(data.maxTruthRevealRatio) ?? null)
+      : current.maxTruthRevealRatio,
     status: data.status || current.status,
     updatedAt: new Date().toISOString(),
   }).where(eq(storyVolumes.id, id)).run()
@@ -943,6 +962,7 @@ export function listStructureVolumes(novelId: number) {
       v.title AS title,
       v.summary AS summary,
       v.target_words AS targetWords,
+      v.max_truth_reveal_ratio AS maxTruthRevealRatio,
       v.status AS status,
       v.created_at AS createdAt,
       v.updated_at AS updatedAt,
@@ -961,6 +981,7 @@ export function listStructureVolumes(novelId: number) {
     novelId: Number(row.novelId),
     volumeNumber: Number(row.volumeNumber),
     targetWords: Number(row.targetWords || 0),
+    maxTruthRevealRatio: row.maxTruthRevealRatio == null ? undefined : Number(row.maxTruthRevealRatio),
     wordCount: Number(row.wordCount || 0),
     partCount: Number(row.partCount || 0),
     chapterCount: Number(row.chapterCount || 0),

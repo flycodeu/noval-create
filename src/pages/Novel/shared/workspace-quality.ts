@@ -45,6 +45,7 @@ export type WorkspaceQualityRouteKey =
   | 'contracts'
   | 'structure'
   | 'timeline'
+  | 'info-gap-board'
   | 'writing'
   | 'revision'
 
@@ -86,6 +87,7 @@ const WORKSPACE_SEQUENCE: Array<{ key: WorkspaceQualityRouteKey; label: string; 
   { key: 'contracts', label: '章节合同', summary: '把本章和场景约束变成显式合同。' },
   { key: 'structure', label: '结构规划', summary: '拆卷、拆部、拆章，稳住长篇节奏。' },
   { key: 'timeline', label: '时间轴', summary: '维护事件顺序、后果链和时间锚点。' },
+  { key: 'info-gap-board', label: '信息差谜题板', summary: '管理谜题、线索、真相和信息揭示顺序。' },
   { key: 'writing', label: '正文写作', summary: '处理场景计划、主写、审校和定稿。' },
   { key: 'revision', label: '修订中心', summary: '收口一致性问题和上下文同步任务。' },
 ]

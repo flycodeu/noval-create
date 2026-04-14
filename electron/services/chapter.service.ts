@@ -1489,6 +1489,8 @@ export function createChapter(novelId: number, data: Partial<{
   arcId: number
   volumeId: number
   partId: number
+  allowedFactIdsJson: string
+  revealedFactIdsJson: string
 }>) {
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
@@ -1502,6 +1504,8 @@ export function createChapter(novelId: number, data: Partial<{
     chapterNum,
     compiledFromSegments: 0,
     segmentCount: 0,
+    allowedFactIdsJson: data.allowedFactIdsJson || '[]',
+    revealedFactIdsJson: data.revealedFactIdsJson || '[]',
     contextVersion: novel?.contextVersion || 1,
     staleReasonJson: JSON.stringify([]),
   }).run()
@@ -1531,6 +1535,8 @@ export function updateChapter(id: number, data: Partial<{
   segmentCount: number
   contextVersion: number
   staleReasonJson: string
+  allowedFactIdsJson: string
+  revealedFactIdsJson: string
 }>, options: { skipStaleTracking?: boolean; versionSource?: ChapterVersionSource | false } = {}) {
   const db = getDb()
   const previous = db.select().from(chapters).where(eq(chapters.id, id)).all()[0]

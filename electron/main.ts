@@ -67,6 +67,7 @@ import * as sceneTemplateService from './services/scene-template.service'
 import * as endgameAssetService from './services/endgame-asset.service'
 import * as storyStructureService from './services/story-structure.service'
 import * as storyThreadService from './services/story-thread.service'
+import * as storyFactService from './services/story-fact.service'
 import * as workspaceQualityService from './services/workspace-quality.service'
 import * as workflowTaskService from './services/workflow-task.service'
 import { discoverEntitiesFromContent } from './services/entity-discovery.service'
@@ -349,6 +350,19 @@ function registerIpcHandlers() {
   handle('contract:upsertChapter', (_, chapterId, data) => endgameAssetService.upsertChapterContract(requireId(chapterId, 'chapterId'), data))
   handle('contract:listScenes', (_, chapterId) => endgameAssetService.listSceneContracts(requireId(chapterId, 'chapterId')))
   handle('contract:upsertScene', (_, chapterId, segmentId, data) => endgameAssetService.upsertSceneContract(requireId(chapterId, 'chapterId'), segmentId == null ? null : requireId(segmentId, 'segmentId'), data))
+  handle('storyFact:list', (_, novelId) => storyFactService.listStoryFacts(requireId(novelId, 'novelId')))
+  handle('storyFact:get', (_, id) => storyFactService.getStoryFact(requireId(id)))
+  handle('storyFact:create', (_, novelId, data) =>
+    storyFactService.createStoryFact(
+      requireId(novelId, 'novelId'),
+      parseObjectPayload<Record<string, unknown>>(data, 'data'),
+    ))
+  handle('storyFact:update', (_, id, data) =>
+    storyFactService.updateStoryFact(
+      requireId(id),
+      parseObjectPayload<Record<string, unknown>>(data, 'data'),
+    ))
+  handle('storyFact:delete', (_, id) => storyFactService.deleteStoryFact(requireId(id)))
 
   handle('chapter:list', (_, novelId) => chapterService.listChapters(requireId(novelId, 'novelId')))
   handle('chapter:get', (_, id) => chapterService.getChapter(requireId(id)))

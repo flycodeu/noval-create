@@ -94,6 +94,7 @@ export function runMigrations(sqlite: Database.Database) {
       title TEXT,
       summary TEXT,
       target_words INTEGER DEFAULT 0,
+      max_truth_reveal_ratio REAL,
       status TEXT DEFAULT 'planning',
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -136,6 +137,8 @@ export function runMigrations(sqlite: Database.Database) {
       emotion_tone TEXT,
       compiled_from_segments INTEGER DEFAULT 0,
       segment_count INTEGER DEFAULT 0,
+      allowed_fact_ids_json TEXT DEFAULT '[]',
+      revealed_fact_ids_json TEXT DEFAULT '[]',
       context_version INTEGER DEFAULT 1,
       stale_reason_json TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -261,6 +264,27 @@ export function runMigrations(sqlite: Database.Database) {
       abilities_json TEXT,
       appear_chapter INTEGER,
       sort_order INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS story_facts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+      volume_id INTEGER REFERENCES story_volumes(id) ON DELETE SET NULL,
+      related_puzzle_id INTEGER REFERENCES story_facts(id) ON DELETE SET NULL,
+      kind TEXT NOT NULL DEFAULT 'clue',
+      title TEXT NOT NULL,
+      summary TEXT,
+      status TEXT NOT NULL DEFAULT 'introduced',
+      reader_known_chapter_id INTEGER REFERENCES chapters(id) ON DELETE SET NULL,
+      protagonist_known_chapter_id INTEGER REFERENCES chapters(id) ON DELETE SET NULL,
+      character_knowledge_json TEXT DEFAULT '[]',
+      forbidden_before_volume INTEGER,
+      planned_reveal_volume INTEGER,
+      target_reveal_chapter_id INTEGER REFERENCES chapters(id) ON DELETE SET NULL,
+      is_key_truth INTEGER NOT NULL DEFAULT 1,
+      notes TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
@@ -552,6 +576,7 @@ export function runMigrations(sqlite: Database.Database) {
   runMigrationStep(sqlite, '0002_additive_schema', () => {
   ensureColumn(sqlite, 'story_volumes', 'summary', 'TEXT')
   ensureColumn(sqlite, 'story_volumes', 'target_words', 'INTEGER DEFAULT 0')
+  ensureColumn(sqlite, 'story_volumes', 'max_truth_reveal_ratio', 'REAL')
   ensureColumn(sqlite, 'story_volumes', 'status', "TEXT DEFAULT 'planning'")
   ensureColumn(sqlite, 'story_volumes', 'created_at', 'TEXT')
   ensureColumn(sqlite, 'story_volumes', 'updated_at', 'TEXT')
@@ -569,6 +594,8 @@ export function runMigrations(sqlite: Database.Database) {
   ensureColumn(sqlite, 'chapters', 'part_id', 'INTEGER')
   ensureColumn(sqlite, 'chapters', 'compiled_from_segments', 'INTEGER DEFAULT 0')
   ensureColumn(sqlite, 'chapters', 'segment_count', 'INTEGER DEFAULT 0')
+  ensureColumn(sqlite, 'chapters', 'allowed_fact_ids_json', "TEXT DEFAULT '[]'")
+  ensureColumn(sqlite, 'chapters', 'revealed_fact_ids_json', "TEXT DEFAULT '[]'")
   ensureColumn(sqlite, 'novels', 'project_brief_json', 'TEXT')
   ensureColumn(sqlite, 'novels', 'theme_voice_json', 'TEXT')
   ensureColumn(sqlite, 'novels', 'context_version', 'INTEGER DEFAULT 1')
@@ -726,6 +753,29 @@ export function runMigrations(sqlite: Database.Database) {
   // P3: 章节质量评分字段
   ensureColumn(sqlite, 'chapters', 'quality_scores_json', 'TEXT')
   ensureColumn(sqlite, 'chapters', 'locked_paragraphs_json', 'TEXT')
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS story_facts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+      volume_id INTEGER REFERENCES story_volumes(id) ON DELETE SET NULL,
+      related_puzzle_id INTEGER REFERENCES story_facts(id) ON DELETE SET NULL,
+      kind TEXT NOT NULL DEFAULT 'clue',
+      title TEXT NOT NULL,
+      summary TEXT,
+      status TEXT NOT NULL DEFAULT 'introduced',
+      reader_known_chapter_id INTEGER REFERENCES chapters(id) ON DELETE SET NULL,
+      protagonist_known_chapter_id INTEGER REFERENCES chapters(id) ON DELETE SET NULL,
+      character_knowledge_json TEXT DEFAULT '[]',
+      forbidden_before_volume INTEGER,
+      planned_reveal_volume INTEGER,
+      target_reveal_chapter_id INTEGER REFERENCES chapters(id) ON DELETE SET NULL,
+      is_key_truth INTEGER NOT NULL DEFAULT 1,
+      notes TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
   })
 
   runMigrationStep(sqlite, '0003_indexes', () => {
@@ -1293,6 +1343,48 @@ export function runMigrations(sqlite: Database.Database) {
       UPDATE chapter_contracts
       SET required_resistance_track_ids_json = COALESCE(required_resistance_track_ids_json, '[]'),
           required_resistance_actions_json = COALESCE(required_resistance_actions_json, '[]')
+    `)
+  })
+
+  runMigrationStep(sqlite, '0023_info_gap_and_puzzle_board', () => {
+    ensureColumn(sqlite, 'story_volumes', 'max_truth_reveal_ratio', 'REAL')
+    ensureColumn(sqlite, 'chapters', 'allowed_fact_ids_json', "TEXT DEFAULT '[]'")
+    ensureColumn(sqlite, 'chapters', 'revealed_fact_ids_json', "TEXT DEFAULT '[]'")
+
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS story_facts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        volume_id INTEGER REFERENCES story_volumes(id) ON DELETE SET NULL,
+        related_puzzle_id INTEGER REFERENCES story_facts(id) ON DELETE SET NULL,
+        kind TEXT NOT NULL DEFAULT 'clue',
+        title TEXT NOT NULL,
+        summary TEXT,
+        status TEXT NOT NULL DEFAULT 'introduced',
+        reader_known_chapter_id INTEGER REFERENCES chapters(id) ON DELETE SET NULL,
+        protagonist_known_chapter_id INTEGER REFERENCES chapters(id) ON DELETE SET NULL,
+        character_knowledge_json TEXT DEFAULT '[]',
+        forbidden_before_volume INTEGER,
+        planned_reveal_volume INTEGER,
+        target_reveal_chapter_id INTEGER REFERENCES chapters(id) ON DELETE SET NULL,
+        is_key_truth INTEGER NOT NULL DEFAULT 1,
+        notes TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_story_facts_novel_kind
+        ON story_facts(novel_id, kind, status, id);
+      CREATE INDEX IF NOT EXISTS idx_story_facts_novel_volume
+        ON story_facts(novel_id, volume_id, planned_reveal_volume, id);
+      CREATE INDEX IF NOT EXISTS idx_story_facts_related_puzzle
+        ON story_facts(related_puzzle_id, kind, id);
+    `)
+
+    sqlite.exec(`
+      UPDATE chapters
+      SET allowed_fact_ids_json = COALESCE(allowed_fact_ids_json, '[]'),
+          revealed_fact_ids_json = COALESCE(revealed_fact_ids_json, '[]')
     `)
   })
 }
