@@ -86,9 +86,131 @@
   border-style: dashed;
 }
 
+.novel-writing-page .novel-gate-report {
+  display: grid;
+  gap: 14px;
+}
+
+.novel-writing-page .novel-gate-report__summary,
+.novel-writing-page .novel-gate-report__item,
+.novel-writing-page .novel-gate-report__score-card {
+  border-radius: 18px;
+  border: 1px solid rgba(122, 93, 52, 0.12);
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.novel-writing-page .novel-gate-report__summary {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px;
+}
+
+.novel-writing-page .novel-gate-report__summary-copy,
+.novel-writing-page .novel-gate-report__actions,
+.novel-writing-page .novel-gate-report__sections,
+.novel-writing-page .novel-gate-report__item-list,
+.novel-writing-page .novel-gate-report__meta-card,
+.novel-writing-page .novel-gate-report__history-list {
+  display: grid;
+  gap: 10px;
+}
+
+.novel-writing-page .novel-gate-report__headline,
+.novel-writing-page .novel-gate-report__counts,
+.novel-writing-page .novel-gate-report__actions,
+.novel-writing-page .novel-gate-report__item-head,
+.novel-writing-page .novel-gate-report__item-title {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.novel-writing-page .novel-gate-report__counts,
+.novel-writing-page .novel-gate-report__section-head,
+.novel-writing-page .novel-gate-report__item-detail,
+.novel-writing-page .novel-gate-report__item-hint,
+.novel-writing-page .novel-gate-report__meta-copy,
+.novel-writing-page .novel-gate-report__history-list {
+  color: var(--workspace-ink-soft);
+  font-size: 12px;
+  line-height: 1.75;
+}
+
+.novel-writing-page .novel-gate-report__meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.novel-writing-page .novel-gate-report__meta-card {
+  padding: 12px 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(122, 93, 52, 0.12);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.novel-writing-page .novel-gate-report__meta-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.novel-writing-page .novel-gate-report__meta-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.novel-writing-page .novel-gate-report__score-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: 10px;
+}
+
+.novel-writing-page .novel-gate-report__score-card {
+  padding: 12px 14px;
+  display: grid;
+  gap: 6px;
+}
+
+.novel-writing-page .novel-gate-report__score-card span {
+  color: var(--workspace-ink-soft);
+  font-size: 12px;
+}
+
+.novel-writing-page .novel-gate-report__score-card strong {
+  font-size: 20px;
+}
+
+.novel-writing-page .novel-gate-report__section {
+  display: grid;
+  gap: 10px;
+}
+
+.novel-writing-page .novel-gate-report__section-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.novel-writing-page .novel-gate-report__item {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+}
+
 @media (max-width: 960px) {
   .novel-writing-page .novel-writing-shell__segment-board-head {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .novel-writing-page .novel-gate-report__summary {
+    flex-direction: column;
   }
 }

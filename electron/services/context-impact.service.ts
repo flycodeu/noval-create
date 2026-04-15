@@ -1,6 +1,7 @@
 import { asc, eq } from 'drizzle-orm'
 import { getDb, getSqlite } from '../database/db'
 import {
+  chapterGateRuns,
   chapterContracts,
   chapterSegments,
   chapters,
@@ -10,6 +11,7 @@ import {
   factions,
   foreshadowLedger,
   novels,
+  revisionTasks,
   relationshipArcs,
   resistanceBeats,
   resistanceTracks,
@@ -17,11 +19,22 @@ import {
   storyItems,
   storyMemoryCheckpoints,
   storyThreads,
+  storyVolumes,
   timelineEvents,
+  volumeDesigns,
 } from '../database/schema'
+import { parseThemeVoiceDocument } from '../../src/shared/theme-voice'
 import { throwUserFacingError } from '../utils/user-facing-error'
+import {
+  buildChapterGateDriftSummary,
+  compareChapterGateSnapshots,
+  normalizeChapterGateScoreBreakdown,
+  safeParseChapterGateScoreBreakdown,
+  safeParseStringArray,
+} from './chapter-gate-utils'
 import { buildNovelConsistencyReport, type ConsistencyIssue } from './consistency.service'
 import { buildHeuristicRecallDiagnostics, getQualityDashboardData } from './quality-dashboard.service'
+import { getStoryArcProgressSnapshot, getStoryArcWarningsForChapter } from './story-arc-progress.service'
 
 type AssetFreshnessKey = 'faction' | 'character' | 'item' | 'thread' | 'timeline'
 
@@ -80,6 +93,41 @@ function parseAiScore(raw?: string | null): number | null {
   }
 }
 
+function parseUnknownStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return [...new Set(value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter(Boolean))]
+}
+
+interface ReviewStateSnapshot {
+  severity?: string
+  rewriteRequired: boolean
+  costEvaporation: boolean
+  forcedReversal: boolean
+  tooSmooth: boolean
+  highPressureNoReward: boolean
+  criticalFixes: string[]
+  continuityRisks: string[]
+  contextDriftRisks: string[]
+  realismRisks: string[]
+  coherenceRisks: string[]
+  readerHookRisks: string[]
+  arcProgressRisks: string[]
+  languageRisks: string[]
+  humanLanguageRepairs: string[]
+  genreHollowingRisks: string[]
+  missingPayoffs: string[]
+  dialogueHomogenizationRisks: string[]
+  dialogueDriftAlerts: string[]
+  crossCharacterSimilarity: string[]
+  chapterFunctionPrimary: string
+  chapterFunctionTags: string[]
+  revisionBrief: string
+  paceMarker: string
+}
+
 function parseReviewState(raw?: string | null): {
   severity?: string
   rewriteRequired: boolean
@@ -87,15 +135,52 @@ function parseReviewState(raw?: string | null): {
   forcedReversal: boolean
   tooSmooth: boolean
   highPressureNoReward: boolean
+  criticalFixes: string[]
+  continuityRisks: string[]
+  contextDriftRisks: string[]
+  realismRisks: string[]
+  coherenceRisks: string[]
+  readerHookRisks: string[]
+  arcProgressRisks: string[]
+  languageRisks: string[]
+  humanLanguageRepairs: string[]
+  genreHollowingRisks: string[]
+  missingPayoffs: string[]
+  dialogueHomogenizationRisks: string[]
+  dialogueDriftAlerts: string[]
+  crossCharacterSimilarity: string[]
+  chapterFunctionPrimary: string
+  chapterFunctionTags: string[]
+  revisionBrief: string
+  paceMarker: string
 } {
+  const fallback: ReviewStateSnapshot = {
+    rewriteRequired: false,
+    costEvaporation: false,
+    forcedReversal: false,
+    tooSmooth: false,
+    highPressureNoReward: false,
+    criticalFixes: [],
+    continuityRisks: [],
+    contextDriftRisks: [],
+    realismRisks: [],
+    coherenceRisks: [],
+    readerHookRisks: [],
+    arcProgressRisks: [],
+    languageRisks: [],
+    humanLanguageRepairs: [],
+    genreHollowingRisks: [],
+    missingPayoffs: [],
+    dialogueHomogenizationRisks: [],
+    dialogueDriftAlerts: [],
+    crossCharacterSimilarity: [],
+    chapterFunctionPrimary: '',
+    chapterFunctionTags: [],
+    revisionBrief: '',
+    paceMarker: '',
+  }
   if (!raw) {
-    return {
-      rewriteRequired: false,
-      costEvaporation: false,
-      forcedReversal: false,
-      tooSmooth: false,
-      highPressureNoReward: false,
-    }
+    return fallback
   }
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>
@@ -104,21 +189,46 @@ function parseReviewState(raw?: string | null): {
     const costPresent = parsed.cost_present === true
     const protagonistPressure = typeof parsed.protagonist_pressure === 'number' ? parsed.protagonist_pressure : 0
     return {
+      ...fallback,
       severity: typeof parsed.severity === 'string' ? parsed.severity : undefined,
       rewriteRequired: parsed.rewrite_required === true,
       costEvaporation: parsed.cost_resolution_state === 'evaporated',
       forcedReversal: parsed.reversal_marker === true && parsed.reversal_support_state === 'forced',
       tooSmooth: protagonistSetback === 'none' && (rewardState === 'partial' || rewardState === 'major') && !costPresent,
       highPressureNoReward: (protagonistSetback === 'minor' || protagonistSetback === 'major' || protagonistPressure >= 60) && rewardState === 'none',
+      criticalFixes: parseUnknownStringArray(parsed.critical_fixes),
+      continuityRisks: parseUnknownStringArray(parsed.continuity_risks),
+      contextDriftRisks: parseUnknownStringArray(parsed.context_drift_risks),
+      realismRisks: parseUnknownStringArray(parsed.realism_risks),
+      coherenceRisks: parseUnknownStringArray(parsed.coherence_risks),
+      readerHookRisks: parseUnknownStringArray(parsed.reader_hook_risks),
+      arcProgressRisks: parseUnknownStringArray(parsed.arc_progress_risks),
+      languageRisks: parseUnknownStringArray(parsed.language_risks),
+      humanLanguageRepairs: parseUnknownStringArray(parsed.human_language_repairs),
+      genreHollowingRisks: parseUnknownStringArray(parsed.genre_hollowing_risks),
+      missingPayoffs: parseUnknownStringArray(parsed.missing_payoffs),
+      dialogueHomogenizationRisks: parseUnknownStringArray(parsed.dialogue_homogenization_risks),
+      dialogueDriftAlerts: Array.isArray(parsed.dialogue_drift_alerts)
+        ? parsed.dialogue_drift_alerts
+          .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+          .map((item) =>
+            normalizeText(typeof item.reason === 'string' ? item.reason : undefined)
+            || normalizeText(typeof item.characterName === 'string' ? item.characterName : undefined))
+          .filter(Boolean)
+        : [],
+      crossCharacterSimilarity: Array.isArray(parsed.cross_character_similarity)
+        ? parsed.cross_character_similarity
+          .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+          .map((item) => normalizeText(typeof item.reason === 'string' ? item.reason : undefined))
+          .filter(Boolean)
+        : [],
+      chapterFunctionPrimary: normalizeText(parsed.chapter_function_primary as string | undefined),
+      chapterFunctionTags: parseUnknownStringArray(parsed.chapter_function_tags),
+      revisionBrief: normalizeText(parsed.revision_brief as string | undefined),
+      paceMarker: normalizeText(parsed.pace_marker as string | undefined),
     }
   } catch {
-    return {
-      rewriteRequired: false,
-      costEvaporation: false,
-      forcedReversal: false,
-      tooSmooth: false,
-      highPressureNoReward: false,
-    }
+    return fallback
   }
 }
 
@@ -127,6 +237,85 @@ function mergeReasons(raw: string | null | undefined, reasons: string[]): string
 }
 
 type ContractAuditStatus = 'pass' | 'warning' | 'blocker'
+type ChapterGateLevel = 'pass' | 'warning' | 'blocker' | 'rewrite'
+type ChapterGateScoreBand = 'stable' | 'attention' | 'risky' | 'unstable'
+type ChapterPublishCheckSource = 'chapter' | 'scene' | 'contract' | 'review' | 'thread' | 'volume'
+type ChapterPublishRelatedPage = 'writing' | 'structure' | 'contracts' | 'revision' | 'volume-design' | 'threads'
+
+export interface ChapterRewriteTarget {
+  kind: 'chapter' | 'segment' | 'selection'
+  chapterId: number
+  segmentId?: number
+  segmentTitle?: string
+  reason: string
+  relatedPage: ChapterPublishRelatedPage
+}
+
+export interface ChapterPublishCheckScoreBreakdown {
+  totalScore: number
+  continuityScore: number
+  coherenceScore: number
+  dialogueVoiceScore: number
+  hookStrengthScore: number
+  storyDynamicsScore: number
+  languageNaturalnessScore: number
+  contractScore: number
+  hookScore: number
+  povPurityScore: number
+  threadProgressScore: number
+  volumeAlignmentScore: number
+}
+
+export interface ChapterGateDimensionDelta {
+  key: string
+  label: string
+  score: number
+  previousScore: number
+  delta: number
+}
+
+export interface ChapterGateHistoryEntry {
+  id: number
+  novelId: number
+  chapterId: number
+  chapterNum: number
+  gateLevel: ChapterGateLevel
+  ready: boolean
+  summary: string
+  rewriteCount: number
+  blockerCount: number
+  warningCount: number
+  generatedTaskCount: number
+  topIssueKeys: string[]
+  scoreBreakdown: ChapterPublishCheckScoreBreakdown
+  createdAt: string
+}
+
+export interface ChapterGateDriftSummary {
+  status: 'worsening' | 'improving' | 'stable'
+  scoreBand: ChapterGateScoreBand
+  currentScore: number
+  previousScore?: number
+  scoreDelta: number
+  currentGateLevel: ChapterGateLevel
+  previousGateLevel?: ChapterGateLevel
+  topDimensions: ChapterGateDimensionDelta[]
+  summary: string
+  createdAt: string
+}
+
+export interface ChapterPublishCheckItem {
+  key: string
+  label: string
+  status: ChapterGateLevel
+  detail: string
+  source: ChapterPublishCheckSource
+  segmentId?: number
+  segmentTitle?: string
+  relatedPage?: ChapterPublishRelatedPage
+  fixHint?: string
+  taskId?: number
+}
 
 export interface ContractAuditItem {
   key: string
@@ -145,6 +334,28 @@ export interface ChapterContractAudit {
   warningCount: number
   passCount: number
   items: ContractAuditItem[]
+}
+
+export interface ChapterPublishCheck {
+  chapterId: number
+  chapterNum: number
+  gateLevel: ChapterGateLevel
+  ready: boolean
+  summary: string
+  blockerCount: number
+  warningCount: number
+  rewriteCount: number
+  staleReasons: string[]
+  chapterContextVersion: number
+  novelContextVersion: number
+  rewriteRecommended: boolean
+  rewriteTarget?: ChapterRewriteTarget
+  scoreBreakdown: ChapterPublishCheckScoreBreakdown
+  history: ChapterGateHistoryEntry[]
+  drift?: ChapterGateDriftSummary
+  generatedTaskCount: number
+  checklist: ChapterPublishCheckItem[]
+  contractAudit: ChapterContractAudit
 }
 
 interface ChapterContractAuditSceneSnapshot {
@@ -170,9 +381,12 @@ interface ChapterContractAuditContext {
   chapterContractRow: typeof chapterContracts.$inferSelect | null
   chapterContract: {
     chapterGoal: string
+    servedThreadIds: number[]
+    requiredArcProgress: string[]
     requiredCharacterArcIds: number[]
     requiredRelationshipArcIds: number[]
     requiredResistanceTrackIds: number[]
+    requiredEndgameCommitmentIds: number[]
     requiredForeshadowIds: number[]
     hookType: string
     acceptanceNotes: string[]
@@ -310,6 +524,9 @@ function loadChapterContractAuditContext(chapterId: number): ChapterContractAudi
   const requiredCharacterArcIds = parseNumberArray(chapterContractRow?.requiredCharacterArcIdsJson)
   const requiredRelationshipArcIds = parseNumberArray(chapterContractRow?.requiredRelationshipArcIdsJson)
   const requiredResistanceTrackIds = parseNumberArray(chapterContractRow?.requiredResistanceTrackIdsJson)
+  const servedThreadIds = parseNumberArray(chapterContractRow?.servedThreadIdsJson)
+  const requiredArcProgress = parseStringArray(chapterContractRow?.requiredArcProgressJson)
+  const requiredEndgameCommitmentIds = parseNumberArray(chapterContractRow?.requiredEndgameCommitmentIdsJson)
   const requiredForeshadowIds = parseNumberArray(chapterContractRow?.requiredForeshadowIdsJson)
 
   const characterArcRows = requiredCharacterArcIds.length > 0
@@ -346,9 +563,12 @@ function loadChapterContractAuditContext(chapterId: number): ChapterContractAudi
     chapterContractRow,
     chapterContract: {
       chapterGoal: normalizeText(chapterContractRow?.chapterGoal),
+      servedThreadIds,
+      requiredArcProgress,
       requiredCharacterArcIds,
       requiredRelationshipArcIds,
       requiredResistanceTrackIds,
+      requiredEndgameCommitmentIds,
       requiredForeshadowIds,
       hookType: normalizeText(chapterContractRow?.hookType),
       acceptanceNotes: parseStringArray(chapterContractRow?.acceptanceNotesJson),
@@ -616,6 +836,595 @@ function buildChapterContractAudit(chapterId: number): ChapterContractAudit {
   }
 }
 
+interface ScenePlanSnapshot {
+  sceneTitle: string
+  exitHook: string
+}
+
+interface ChapterGateTaskDraft {
+  issueKey: string
+  severity: 'high' | 'medium' | 'low'
+  title: string
+  description: string
+  fixBrief: string
+  relatedPage: ChapterPublishRelatedPage
+  chapterId: number
+  itemKey: string
+  originMeta: Record<string, unknown>
+}
+
+function makePublishCheckItem(
+  item: Omit<ChapterPublishCheckItem, 'source'> & { source?: ChapterPublishCheckSource },
+): ChapterPublishCheckItem {
+  return {
+    source: item.source || 'chapter',
+    ...item,
+  }
+}
+
+function parseScenePlanSnapshots(raw?: string | null): ScenePlanSnapshot[] {
+  if (!raw?.trim()) return []
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+      .map((item) => ({
+        sceneTitle: normalizeText((item.scene_title ?? item.sceneTitle) as string | undefined),
+        exitHook: normalizeText((item.exit_hook ?? item.exitHook) as string | undefined),
+      }))
+      .filter((item) => item.sceneTitle || item.exitHook)
+  } catch {
+    return []
+  }
+}
+
+function normalizeTaskStatus(value: unknown): 'open' | 'in_progress' | 'resolved' | 'ignored' {
+  const status = normalizeText(typeof value === 'string' ? value : '')
+  if (status === 'in_progress' || status === 'resolved' || status === 'ignored') return status
+  return 'open'
+}
+
+function parseOriginMetaJson(raw?: string | null): Record<string, unknown> {
+  if (!raw) return {}
+  try {
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}
+  } catch {
+    return {}
+  }
+}
+
+function serializeOriginMetaJson(meta: Record<string, unknown>): string {
+  return JSON.stringify(meta)
+}
+
+function gateScoreForStatus(status: ChapterGateLevel | ContractAuditStatus): number {
+  if (status === 'pass') return 100
+  if (status === 'warning') return 70
+  if (status === 'blocker') return 30
+  return 0
+}
+
+function getChecklistCount(items: ChapterPublishCheckItem[], status: ChapterGateLevel): number {
+  return items.filter((item) => item.status === status).length
+}
+
+function buildChapterGateSummary(
+  gateLevel: ChapterGateLevel,
+  rewriteCount: number,
+  blockerCount: number,
+  warningCount: number,
+): string {
+  if (gateLevel === 'rewrite') {
+    return `章节验收要求退回重写，命中 ${rewriteCount} 项重写、${blockerCount} 项阻塞、${warningCount} 项预警。`
+  }
+  if (gateLevel === 'blocker') {
+    return `章节验收未通过，命中 ${blockerCount} 项阻塞、${warningCount} 项预警。`
+  }
+  if (gateLevel === 'warning') {
+    return `章节验收可通过，但仍有 ${warningCount} 项预警。`
+  }
+  return '章节验收通过。'
+}
+
+interface PublishCheckScoreContext {
+  contractAudit: ChapterContractAudit
+  checklist: ChapterPublishCheckItem[]
+  reviewState: ReturnType<typeof parseReviewState>
+  aiScore: number | null
+  highIssues: ConsistencyIssue[]
+  mediumIssues: ConsistencyIssue[]
+  staleReasons: string[]
+  recallStaleCount: number
+  sceneHookCount: number
+  weakFunction: boolean
+  blockerCount: number
+  warningCount: number
+  rewriteCount: number
+}
+
+function averageScores(values: number[], fallback = 70): number {
+  if (values.length === 0) return fallback
+  return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length)
+}
+
+function scoreChecklistItem(
+  checklist: ChapterPublishCheckItem[],
+  key: string,
+  fallback: ChapterGateLevel | ContractAuditStatus = 'warning',
+): number {
+  return gateScoreForStatus(checklist.find((item) => item.key === key)?.status || fallback)
+}
+
+function clampGateScore(value: number): number {
+  return Math.max(0, Math.min(100, Math.round(value)))
+}
+
+function reduceGateScore(base: number, penalties: number[]): number {
+  return clampGateScore(base - penalties.reduce((sum, penalty) => sum + penalty, 0))
+}
+
+function buildPublishCheckScoreBreakdown(
+  context: PublishCheckScoreContext,
+): ChapterPublishCheckScoreBreakdown {
+  const {
+    contractAudit,
+    checklist,
+    reviewState,
+    aiScore,
+    highIssues,
+    mediumIssues,
+    staleReasons,
+    recallStaleCount,
+    sceneHookCount,
+    weakFunction,
+    blockerCount,
+    warningCount,
+    rewriteCount,
+  } = context
+  const contractTotal = Math.max(contractAudit.items.length, 1)
+  let contractScore = Math.round(contractAudit.items.reduce((sum, item) => sum + gateScoreForStatus(item.status), 0) / contractTotal)
+  if (contractAudit.blockerCount > 0) {
+    contractScore = Math.min(contractScore, 59)
+  } else if (contractAudit.warningCount > 0) {
+    contractScore = Math.min(contractScore, 79)
+  }
+  const hookScore = scoreChecklistItem(checklist, 'hook_strength')
+  const povPurityScore = scoreChecklistItem(checklist, 'pov_purity')
+  const threadStatuses = checklist
+    .filter((item) => item.key === 'thread_progress' || item.key === 'line_progress')
+    .map((item) => gateScoreForStatus(item.status))
+  const threadProgressScore = threadStatuses.length > 0
+    ? Math.round(threadStatuses.reduce((sum, item) => sum + item, 0) / threadStatuses.length)
+    : 70
+  const volumeAlignmentScore = scoreChecklistItem(checklist, 'volume_alignment')
+
+  const continuityScore = reduceGateScore(
+    averageScores([
+      scoreChecklistItem(checklist, 'context'),
+      scoreChecklistItem(checklist, 'continuity'),
+      scoreChecklistItem(checklist, 'consistency'),
+      contractScore,
+      threadProgressScore,
+    ]),
+    [
+      Math.min(staleReasons.length, 2) * 12,
+      Math.min(reviewState.continuityRisks.length, 3) * 9,
+      Math.min(reviewState.contextDriftRisks.length, 2) * 10,
+      Math.min(recallStaleCount, 3) * 6,
+      Math.min(highIssues.length, 2) * 8,
+      Math.min(mediumIssues.length, 3) * 4,
+    ],
+  )
+
+  const coherenceScore = reduceGateScore(
+    averageScores([
+      scoreChecklistItem(checklist, 'summary'),
+      scoreChecklistItem(checklist, 'scene_plan'),
+      scoreChecklistItem(checklist, 'outline'),
+      scoreChecklistItem(checklist, 'consistency'),
+      contractScore,
+      povPurityScore,
+    ]),
+    [
+      Math.min(reviewState.coherenceRisks.length, 3) * 8,
+      Math.min(reviewState.realismRisks.length, 2) * 7,
+      Math.min(reviewState.criticalFixes.length, 3) * 5,
+      Math.min(mediumIssues.length, 3) * 3,
+    ],
+  )
+
+  const dialogueVoiceScore = reduceGateScore(
+    averageScores([
+      scoreChecklistItem(checklist, 'dialogue_voice'),
+      scoreChecklistItem(checklist, 'review'),
+      typeof aiScore === 'number' ? clampGateScore(aiScore) : 72,
+    ]),
+    [
+      Math.min(reviewState.dialogueHomogenizationRisks.length, 3) * 9,
+      Math.min(reviewState.dialogueDriftAlerts.length, 2) * 11,
+      Math.min(reviewState.crossCharacterSimilarity.length, 2) * 10,
+      Math.min(reviewState.humanLanguageRepairs.length, 2) * 4,
+    ],
+  )
+
+  const hookStrengthScore = reduceGateScore(
+    averageScores([
+      hookScore,
+      scoreChecklistItem(checklist, 'line_progress'),
+      scoreChecklistItem(checklist, 'story_dynamics'),
+    ]),
+    [
+      Math.min(reviewState.readerHookRisks.length, 3) * 10,
+      sceneHookCount === 0 ? 8 : 0,
+      weakFunction ? 6 : 0,
+    ],
+  )
+
+  const storyDynamicsScore = reduceGateScore(
+    averageScores([
+      scoreChecklistItem(checklist, 'story_dynamics'),
+      scoreChecklistItem(checklist, 'line_progress'),
+      threadProgressScore,
+      volumeAlignmentScore,
+      contractScore,
+    ]),
+    [
+      Math.min(reviewState.arcProgressRisks.length, 3) * 9,
+      Math.min(reviewState.missingPayoffs.length, 2) * 12,
+      reviewState.costEvaporation ? 14 : 0,
+      reviewState.forcedReversal ? 14 : 0,
+      reviewState.tooSmooth ? 10 : 0,
+      reviewState.highPressureNoReward ? 10 : 0,
+    ],
+  )
+
+  const languageNaturalnessScore = reduceGateScore(
+    averageScores([
+      scoreChecklistItem(checklist, 'review'),
+      scoreChecklistItem(checklist, 'ai_score'),
+      typeof aiScore === 'number' ? clampGateScore(aiScore) : 72,
+      dialogueVoiceScore,
+    ]),
+    [
+      Math.min(reviewState.languageRisks.length, 3) * 9,
+      Math.min(reviewState.humanLanguageRepairs.length, 3) * 7,
+      Math.min(reviewState.genreHollowingRisks.length, 2) * 8,
+      Math.min(reviewState.coherenceRisks.length, 2) * 4,
+    ],
+  )
+
+  let totalScore = clampGateScore(
+    continuityScore * 0.22
+    + coherenceScore * 0.18
+    + dialogueVoiceScore * 0.14
+    + hookStrengthScore * 0.12
+    + storyDynamicsScore * 0.20
+    + languageNaturalnessScore * 0.14,
+  )
+
+  if (rewriteCount > 0) {
+    totalScore = Math.min(totalScore, 39)
+  } else if (blockerCount > 0) {
+    totalScore = Math.min(totalScore, 59)
+  } else if (warningCount > 0) {
+    totalScore = Math.min(totalScore, 79)
+  }
+
+  return normalizeChapterGateScoreBreakdown({
+    totalScore,
+    continuityScore,
+    coherenceScore,
+    dialogueVoiceScore,
+    hookStrengthScore,
+    storyDynamicsScore,
+    languageNaturalnessScore,
+    contractScore,
+    hookScore,
+    povPurityScore,
+    threadProgressScore,
+    volumeAlignmentScore,
+  })
+}
+
+function sortChapterGateHistory(left: ChapterGateHistoryEntry, right: ChapterGateHistoryEntry): number {
+  const leftTime = Date.parse(left.createdAt || '')
+  const rightTime = Date.parse(right.createdAt || '')
+  if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
+    return rightTime - leftTime
+  }
+  return right.id - left.id
+}
+
+function buildChapterGateTopIssueKeys(
+  checklist: ChapterPublishCheckItem[],
+  contractAudit: ChapterContractAudit,
+): string[] {
+  const issueKeys = [
+    ...checklist.filter((item) => item.status === 'rewrite').map((item) => item.key),
+    ...checklist.filter((item) => item.status === 'blocker').map((item) => item.key),
+    ...contractAudit.items.filter((item) => item.status === 'blocker').map((item) => `contract:${item.key}`),
+    ...checklist.filter((item) => item.status === 'warning').map((item) => item.key),
+    ...contractAudit.items.filter((item) => item.status === 'warning').map((item) => `contract:${item.key}`),
+  ]
+  return [...new Set(issueKeys)].slice(0, 8)
+}
+
+function mapChapterGateRunRow(row: typeof chapterGateRuns.$inferSelect): ChapterGateHistoryEntry {
+  return {
+    id: row.id,
+    novelId: row.novelId,
+    chapterId: row.chapterId,
+    chapterNum: row.chapterNum || 0,
+    gateLevel: (normalizeText(row.gateLevel) || 'warning') as ChapterGateLevel,
+    ready: row.ready === 1,
+    summary: row.summary || '',
+    rewriteCount: row.rewriteCount || 0,
+    blockerCount: row.blockerCount || 0,
+    warningCount: row.warningCount || 0,
+    generatedTaskCount: row.generatedTaskCount || 0,
+    topIssueKeys: safeParseStringArray(row.topIssueKeysJson),
+    scoreBreakdown: safeParseChapterGateScoreBreakdown(row.scoreBreakdownJson) || normalizeChapterGateScoreBreakdown(),
+    createdAt: row.createdAt || new Date(0).toISOString(),
+  }
+}
+
+export function listChapterGateHistory(
+  novelId: number,
+  options: { chapterId?: number; limit?: number } = {},
+): ChapterGateHistoryEntry[] {
+  const db = getDb()
+  const rows = db.select().from(chapterGateRuns)
+    .where(eq(chapterGateRuns.novelId, novelId))
+    .all()
+    .filter((row) => options.chapterId == null || row.chapterId === options.chapterId)
+    .map(mapChapterGateRunRow)
+    .sort(sortChapterGateHistory)
+
+  return typeof options.limit === 'number' ? rows.slice(0, options.limit) : rows
+}
+
+function persistChapterGateRun(params: {
+  novelId: number
+  chapterId: number
+  chapterNum: number
+  gateLevel: ChapterGateLevel
+  ready: boolean
+  summary: string
+  rewriteCount: number
+  blockerCount: number
+  warningCount: number
+  generatedTaskCount: number
+  scoreBreakdown: ChapterPublishCheckScoreBreakdown
+  topIssueKeys: string[]
+}): { history: ChapterGateHistoryEntry[]; drift?: ChapterGateDriftSummary } {
+  const db = getDb()
+  const latestHistory = listChapterGateHistory(params.novelId, { chapterId: params.chapterId, limit: 6 })
+  const latest = latestHistory[0]
+  const snapshot: ChapterGateHistoryEntry = {
+    id: 0,
+    novelId: params.novelId,
+    chapterId: params.chapterId,
+    chapterNum: params.chapterNum,
+    gateLevel: params.gateLevel,
+    ready: params.ready,
+    summary: params.summary,
+    rewriteCount: params.rewriteCount,
+    blockerCount: params.blockerCount,
+    warningCount: params.warningCount,
+    generatedTaskCount: params.generatedTaskCount,
+    topIssueKeys: [...params.topIssueKeys],
+    scoreBreakdown: normalizeChapterGateScoreBreakdown(params.scoreBreakdown),
+    createdAt: new Date().toISOString(),
+  }
+
+  if (latest && compareChapterGateSnapshots(snapshot as ChapterGateHistoryEntry, latest)) {
+    return {
+      history: latestHistory,
+      drift: latestHistory.length > 1 ? buildChapterGateDriftSummary(latestHistory[0], latestHistory[1]) : undefined,
+    }
+  }
+
+  const createdAt = new Date().toISOString()
+  const result = db.insert(chapterGateRuns).values({
+    novelId: params.novelId,
+    chapterId: params.chapterId,
+    chapterNum: params.chapterNum,
+    gateLevel: params.gateLevel,
+    ready: params.ready ? 1 : 0,
+    summary: params.summary,
+    rewriteCount: params.rewriteCount,
+    blockerCount: params.blockerCount,
+    warningCount: params.warningCount,
+    scoreBreakdownJson: JSON.stringify(normalizeChapterGateScoreBreakdown(params.scoreBreakdown)),
+    topIssueKeysJson: JSON.stringify(params.topIssueKeys),
+    generatedTaskCount: params.generatedTaskCount,
+    createdAt,
+  }).run()
+
+  const currentEntry: ChapterGateHistoryEntry = {
+    ...snapshot,
+    id: Number(result.lastInsertRowid),
+    createdAt,
+  }
+  const history = [currentEntry, ...latestHistory].sort(sortChapterGateHistory).slice(0, 6)
+  return {
+    history,
+    drift: history.length > 1 ? buildChapterGateDriftSummary(history[0], history[1]) : undefined,
+  }
+}
+
+function buildRewriteTarget(
+  chapterId: number,
+  items: ChapterPublishCheckItem[],
+): ChapterRewriteTarget | undefined {
+  const rewriteItem = items.find((item) => item.status === 'rewrite')
+  if (!rewriteItem) return undefined
+  if (typeof rewriteItem.segmentId === 'number') {
+    return {
+      kind: 'segment',
+      chapterId,
+      segmentId: rewriteItem.segmentId,
+      segmentTitle: rewriteItem.segmentTitle,
+      reason: rewriteItem.detail,
+      relatedPage: rewriteItem.relatedPage || 'structure',
+    }
+  }
+  return {
+    kind: rewriteItem.relatedPage === 'writing' ? 'selection' : 'chapter',
+    chapterId,
+    reason: rewriteItem.detail,
+    relatedPage: rewriteItem.relatedPage || 'writing',
+  }
+}
+
+function syncChapterGateRevisionTasks(
+  novelId: number,
+  chapterId: number,
+  chapterNum: number,
+  checklist: ChapterPublishCheckItem[],
+  contractAudit: ChapterContractAudit,
+): { taskIdByItemKey: Map<string, number>; generatedTaskCount: number } {
+  const db = getDb()
+  const now = new Date().toISOString()
+  const chapterLabel = `第 ${chapterNum} 章`
+  const drafts: ChapterGateTaskDraft[] = [
+    ...checklist
+      .filter((item) => item.status === 'blocker' || item.status === 'rewrite')
+      .map((item) => ({
+        issueKey: `chapter_gate:${chapterId}:check:${item.key}`,
+        severity: item.status === 'rewrite' ? 'high' as const : 'medium' as const,
+        title: `[章节验收门][${item.status === 'rewrite' ? '退回重写' : '阻塞'}] ${item.label}`,
+        description: item.detail,
+        fixBrief: item.fixHint || item.detail,
+        relatedPage: (item.relatedPage || (item.segmentId ? 'structure' : 'writing')) as ChapterPublishRelatedPage,
+        chapterId,
+        itemKey: item.key,
+        originMeta: {
+          issueCategory: 'chapter_gate',
+          gateLevel: item.status,
+          checkKey: item.key,
+          source: item.source,
+          segmentId: item.segmentId ?? null,
+          segmentTitle: item.segmentTitle || '',
+          rewriteTarget: item.status === 'rewrite'
+            ? (item.segmentId ? 'segment' : item.relatedPage === 'writing' ? 'selection' : 'chapter')
+            : '',
+          entityLabel: chapterLabel,
+          suggestion: item.fixHint || item.detail,
+        },
+      })),
+    ...contractAudit.items
+      .filter((item) => item.status === 'blocker')
+      .map((item) => ({
+        issueKey: `chapter_gate:${chapterId}:contract:${item.key}`,
+        severity: 'medium' as const,
+        title: `[章节验收门][合同阻塞] ${item.label}`,
+        description: item.detail,
+        fixBrief: item.detail,
+        relatedPage: (item.source === 'scene' ? 'structure' : 'contracts') as ChapterPublishRelatedPage,
+        chapterId,
+        itemKey: `contract:${item.key}`,
+        originMeta: {
+          issueCategory: 'chapter_gate',
+          gateLevel: 'blocker',
+          checkKey: item.key,
+          source: item.source,
+          segmentId: item.segmentId ?? null,
+          segmentTitle: item.segmentTitle || '',
+          entityLabel: chapterLabel,
+          suggestion: item.detail,
+        },
+      })),
+  ]
+
+  const existingRows = db.select().from(revisionTasks)
+    .where(eq(revisionTasks.novelId, novelId))
+    .all()
+    .filter((row) => normalizeText(row.taskSource) === 'system')
+    .filter((row) => normalizeText(row.issueKey).startsWith(`chapter_gate:${chapterId}:`))
+  const existingByKey = new Map(existingRows.map((row) => [normalizeText(row.issueKey), row] as const))
+  const activeKeys = new Set<string>()
+  const taskIdByItemKey = new Map<string, number>()
+
+  drafts.forEach((draft) => {
+    activeKeys.add(draft.issueKey)
+    const existing = existingByKey.get(draft.issueKey)
+    if (!existing) {
+      const result = db.insert(revisionTasks).values({
+        novelId,
+        taskSource: 'system',
+        issueKey: draft.issueKey,
+        taskType: draft.relatedPage === 'structure' ? 'outline' : 'continuity',
+        status: 'open',
+        severity: draft.severity,
+        title: draft.title,
+        description: draft.description,
+        fixBrief: draft.fixBrief,
+        relatedPage: draft.relatedPage,
+        entityType: 'chapter',
+        entityId: chapterId,
+        chapterId,
+        originMetaJson: serializeOriginMetaJson(draft.originMeta),
+        lastDetectedAt: now,
+        resolvedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      }).run()
+      taskIdByItemKey.set(draft.itemKey, Number(result.lastInsertRowid))
+      return
+    }
+
+    const previousStatus = normalizeTaskStatus(existing.status)
+    const nextStatus = previousStatus === 'ignored'
+      ? 'ignored'
+      : previousStatus === 'resolved'
+        ? 'open'
+        : previousStatus
+    db.update(revisionTasks).set({
+      taskType: draft.relatedPage === 'structure' ? 'outline' : 'continuity',
+      status: nextStatus,
+      severity: draft.severity,
+      title: draft.title,
+      description: draft.description,
+      fixBrief: draft.fixBrief,
+      relatedPage: draft.relatedPage,
+      entityType: 'chapter',
+      entityId: chapterId,
+      chapterId,
+      originMetaJson: serializeOriginMetaJson({
+        ...parseOriginMetaJson(existing.originMetaJson),
+        ...draft.originMeta,
+      }),
+      lastDetectedAt: now,
+      resolvedAt: null,
+      updatedAt: now,
+    }).where(eq(revisionTasks.id, existing.id)).run()
+    taskIdByItemKey.set(draft.itemKey, existing.id)
+  })
+
+  existingRows
+    .filter((row) => {
+      const issueKey = normalizeText(row.issueKey)
+      return issueKey && !activeKeys.has(issueKey)
+    })
+    .forEach((row) => {
+      const previousStatus = normalizeTaskStatus(row.status)
+      if (previousStatus === 'ignored' || previousStatus === 'resolved') return
+      db.update(revisionTasks).set({
+        status: 'resolved',
+        resolvedAt: now,
+        updatedAt: now,
+      }).where(eq(revisionTasks.id, row.id)).run()
+    })
+
+  return {
+    taskIdByItemKey,
+    generatedTaskCount: drafts.length,
+  }
+}
+
 export interface NovelContextStatus {
   novelId: number
   contextVersion: number
@@ -640,27 +1449,6 @@ function collectLatestUpdatedAt(rows: Array<{ updatedAt?: string | null }>): num
     if (next === null) return latest
     return latest === null ? next : Math.max(latest, next)
   }, null)
-}
-
-export interface ChapterPublishCheckItem {
-  key: string
-  label: string
-  status: 'pass' | 'warning' | 'blocker'
-  detail: string
-}
-
-export interface ChapterPublishCheck {
-  chapterId: number
-  chapterNum: number
-  ready: boolean
-  summary: string
-  blockerCount: number
-  warningCount: number
-  staleReasons: string[]
-  chapterContextVersion: number
-  novelContextVersion: number
-  checklist: ChapterPublishCheckItem[]
-  contractAudit: ChapterContractAudit
 }
 
 export function getNovelContextStatus(novelId: number): NovelContextStatus {
@@ -859,6 +1647,7 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
   const mediumIssues = consistencyIssues.filter((issue) => issue.severity === 'medium')
   const aiScore = parseAiScore(chapter.aiScoreJson)
   const reviewState = parseReviewState(chapter.reviewNotesJson)
+  const contractContext = loadChapterContractAuditContext(chapterId)
   const qualityDashboard = getQualityDashboardData(chapter.novelId, { includeDialogueInsights: false })
   const recallDiagnostics = buildHeuristicRecallDiagnostics(chapter.novelId, {
     chapterNum: chapter.chapterNum,
@@ -873,62 +1662,197 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
       contractAuditJson,
     }).where(eq(chapters.id, chapterId)).run()
   }
+  const themeVoice = parseThemeVoiceDocument(novel.themeVoiceJson)
+  const storyArcSnapshot = typeof chapter.arcId === 'number'
+    ? getStoryArcProgressSnapshot(chapter.novelId)
+    : null
+  const arcWarnings = storyArcSnapshot && typeof chapter.arcId === 'number'
+    ? getStoryArcWarningsForChapter(storyArcSnapshot, chapter.arcId, chapter.chapterNum)
+    : []
+  const scenePlanSnapshots = parseScenePlanSnapshots(chapter.scenePlanJson)
+  const threadRows = db.select().from(storyThreads)
+    .where(eq(storyThreads.novelId, chapter.novelId))
+    .orderBy(asc(storyThreads.sortOrder), asc(storyThreads.id))
+    .all()
+  const currentVolume = typeof chapter.volumeId === 'number'
+    ? db.select().from(storyVolumes).where(eq(storyVolumes.id, chapter.volumeId)).all()[0] || null
+    : null
+  const currentVolumeDesign = typeof chapter.volumeId === 'number'
+    ? db.select().from(volumeDesigns).where(eq(volumeDesigns.volumeId, chapter.volumeId)).all()[0] || null
+    : null
   const storyAlerts = qualityDashboard.storyPacingAlerts
     .filter((alert) => alert.chapterNums.includes(chapter.chapterNum))
     .slice(0, 3)
 
-  const checklist: ChapterPublishCheckItem[] = [
-    {
+  const chapterContract = contractContext.chapterContract
+  const contractBindingCount =
+    chapterContract.servedThreadIds.length
+    + chapterContract.requiredArcProgress.length
+    + chapterContract.requiredCharacterArcIds.length
+    + chapterContract.requiredRelationshipArcIds.length
+    + chapterContract.requiredResistanceTrackIds.length
+    + chapterContract.requiredEndgameCommitmentIds.length
+    + chapterContract.requiredForeshadowIds.length
+  const weakFunction = ['setup', 'exposition', 'breather'].includes(reviewState.chapterFunctionPrimary)
+    || reviewState.chapterFunctionTags.some((tag) => tag === 'setup' || tag === 'exposition' || tag === 'breather')
+  const scenePovRows = contractContext.sceneSnapshots.filter((scene) => scene.pov)
+  const uniqueScenePovs = [...new Set(scenePovRows.map((scene) => scene.pov))]
+  const missingScenePovs = contractContext.sceneSnapshots.filter((scene) => !scene.pov)
+  const fixedNovelPov = Boolean(themeVoice.pov && themeVoice.pov !== 'multi_pov')
+  const conflictingPovScene = fixedNovelPov && uniqueScenePovs.length > 1
+    ? contractContext.sceneSnapshots.find((scene) => scene.pov && scene.pov !== uniqueScenePovs[0])
+    : null
+  const sceneHookCount = scenePlanSnapshots.filter((item) => item.exitHook).length
+  const requiredThreads = chapterContract.servedThreadIds
+    .map((threadId) => threadRows.find((row) => row.id === threadId) || null)
+  const missingRequiredThreads = chapterContract.servedThreadIds.filter((threadId) => !requiredThreads.some((row) => row?.id === threadId))
+  const untouchedRequiredThreads = requiredThreads
+    .filter((row): row is NonNullable<typeof row> => Boolean(row))
+    .filter((row) =>
+      row.lastReferencedChapter !== chapter.chapterNum
+      && row.plantedChapter !== chapter.chapterNum
+      && row.resolvedChapter !== chapter.chapterNum)
+  const overdueThreads = threadRows.filter((row) =>
+    normalizeText(row.status) !== 'resolved'
+    && normalizeText(row.status) !== 'archived'
+    && typeof row.targetPayoffChapter === 'number'
+    && row.targetPayoffChapter <= chapter.chapterNum
+    && row.resolvedChapter !== chapter.chapterNum
+    && row.lastReferencedChapter !== chapter.chapterNum
+    && row.plantedChapter !== chapter.chapterNum)
+  const volumeSignals = currentVolumeDesign
+    ? [
+        normalizeText(currentVolumeDesign.volumeTheme),
+        normalizeText(currentVolumeDesign.volumePromise),
+        normalizeText(currentVolumeDesign.mainConflict),
+        normalizeText(currentVolumeDesign.climaxPlan),
+        normalizeText(currentVolumeDesign.endStateShift),
+        normalizeText(currentVolumeDesign.readerExpectation),
+        ...parseStringArray(currentVolumeDesign.mustAddCluesJson),
+        ...parseStringArray(currentVolumeDesign.mustResolveCluesJson),
+      ].filter(Boolean)
+    : []
+  const strictVolumeDesign = normalizeText(currentVolumeDesign?.auditStatus) === 'locked'
+    || normalizeText(currentVolumeDesign?.auditStatus) === 'ready'
+
+  const contractDeliveryStatus: ChapterGateLevel = contractAudit.blockerCount > 0
+    ? 'blocker'
+    : contractAudit.warningCount > 0
+      ? 'warning'
+      : 'pass'
+  const dialogueSignalCount =
+    reviewState.dialogueHomogenizationRisks.length
+    + reviewState.dialogueDriftAlerts.length
+    + reviewState.crossCharacterSimilarity.length
+  const dialogueVoiceStatus: ChapterGateLevel = dialogueSignalCount >= 3
+    || (reviewState.dialogueDriftAlerts.length > 0 && reviewState.crossCharacterSimilarity.length > 0 && reviewState.severity === 'high')
+    ? 'blocker'
+    : dialogueSignalCount > 0
+      ? 'warning'
+      : 'pass'
+  const povPurityStatus: ChapterGateLevel = fixedNovelPov && uniqueScenePovs.length > 1
+    ? 'rewrite'
+    : missingScenePovs.length > 0
+      ? (fixedNovelPov ? 'blocker' : 'warning')
+      : uniqueScenePovs.length > 1
+        ? 'warning'
+        : 'pass'
+  const hookStrengthStatus: ChapterGateLevel = !chapterContract.hookType && sceneHookCount === 0 && reviewState.readerHookRisks.length > 0 && weakFunction
+    ? 'blocker'
+    : (!chapterContract.hookType || sceneHookCount === 0 || reviewState.readerHookRisks.length > 0)
+      ? 'warning'
+      : 'pass'
+  const threadProgressStatus: ChapterGateLevel = missingRequiredThreads.length > 0 || untouchedRequiredThreads.length > 0
+    ? 'blocker'
+    : overdueThreads.length > 0
+      ? 'warning'
+      : 'pass'
+  const volumeAlignmentStatus: ChapterGateLevel = !currentVolume || volumeSignals.length === 0
+    ? 'pass'
+    : contractBindingCount === 0 && (weakFunction || reviewState.arcProgressRisks.length > 0)
+      ? (strictVolumeDesign ? 'blocker' : 'warning')
+      : 'pass'
+  const lineProgressStatus: ChapterGateLevel = contractBindingCount > 0 && (arcWarnings.length > 0 || reviewState.arcProgressRisks.length > 0)
+    ? 'blocker'
+    : arcWarnings.length > 0 || reviewState.arcProgressRisks.length > 0 || (contractBindingCount === 0 && weakFunction && reviewState.chapterFunctionPrimary)
+      ? 'warning'
+      : 'pass'
+
+  const structuralRewriteReasons = [
+    povPurityStatus === 'rewrite' ? '当前章节存在多场景 POV 混杂，已经超出固定视角作品可接受范围。' : '',
+    reviewState.rewriteRequired && (contractAudit.blockerCount > 0 || highIssues.length > 0 || lineProgressStatus === 'blocker' || threadProgressStatus === 'blocker' || volumeAlignmentStatus === 'blocker')
+      ? '审校已经建议重写，且命中了合同/推进/结构类硬问题，单纯润色不足以解决。'
+      : '',
+  ].filter(Boolean)
+  const rewriteTargetSource = conflictingPovScene || missingScenePovs[0] || null
+  const rawChecklist: ChapterPublishCheckItem[] = [
+    makePublishCheckItem({
       key: 'content',
       label: '正文已完成',
       status: chapter.content?.trim() ? 'pass' : 'blocker',
       detail: chapter.content?.trim() ? '当前章节已有正文。' : '当前章节还没有正文内容。',
-    },
-    {
+      relatedPage: 'writing',
+      fixHint: '先补完正文，再执行章节验收。',
+    }),
+    makePublishCheckItem({
       key: 'summary',
       label: '摘要已刷新',
       status: chapter.summary?.trim() ? 'pass' : 'blocker',
       detail: chapter.summary?.trim() ? '章节摘要已经生成。' : '需要先刷新摘要和后续承接信息。',
-    },
-    {
+      relatedPage: 'writing',
+      fixHint: '先刷新摘要与后续承接，再重新验收。',
+    }),
+    makePublishCheckItem({
       key: 'continuity',
       label: '连续性记忆已更新',
       status: chapter.continuityStateJson?.trim() ? 'pass' : 'blocker',
       detail: chapter.continuityStateJson?.trim() ? '连续性记忆可用于后文承接。' : '需要先补齐连续性记忆。',
-    },
-    {
+      relatedPage: 'writing',
+      fixHint: '先执行摘要/记忆更新，再验收章节。',
+    }),
+    makePublishCheckItem({
       key: 'context',
       label: '上下文未过期',
       status: staleReasons.length === 0 && (chapter.contextVersion || 1) === (novel.contextVersion || 1) ? 'pass' : 'blocker',
       detail: staleReasons.length === 0 && (chapter.contextVersion || 1) === (novel.contextVersion || 1)
         ? '章节上下文与当前全书版本一致。'
         : `需要先处理这些过期原因：${staleReasons.join('；') || '上下文版本落后于当前设定。'}`,
-    },
-    {
+      relatedPage: 'writing',
+      fixHint: '回到正文页先刷新摘要、连续性记忆和相关上下文。',
+    }),
+    makePublishCheckItem({
       key: 'consistency',
       label: '无高优先级结构风险',
       status: highIssues.length === 0 ? 'pass' : 'blocker',
       detail: highIssues.length === 0
         ? '没有命中当前章节的高优先级结构问题。'
         : highIssues.slice(0, 3).map((issue) => issue.title).join('；'),
-    },
-    {
+      relatedPage: 'revision',
+      fixHint: '先处理高优先级结构风险，再尝试标记完成。',
+    }),
+    makePublishCheckItem({
       key: 'ai_score',
       label: 'AI 体检已完成',
       status: typeof aiScore === 'number' ? (aiScore >= 60 ? 'pass' : 'warning') : 'warning',
       detail: typeof aiScore === 'number'
         ? `当前 AI 体检分数为 ${aiScore}。`
         : '还没有执行 AI 体检，建议在发布前跑一次。',
-    },
-    {
+      source: 'review',
+      relatedPage: 'writing',
+      fixHint: '补跑 AI 检测，确认表达与结构风险。',
+    }),
+    makePublishCheckItem({
       key: 'review',
-      label: '审校意见已处理',
+      label: '审校意见已收敛',
       status: reviewState.rewriteRequired || reviewState.severity === 'high' ? 'warning' : 'pass',
       detail: reviewState.rewriteRequired || reviewState.severity === 'high'
-        ? '当前审校结果仍建议重写或存在高风险意见。'
+        ? reviewState.revisionBrief || '当前审校结果仍建议重写或存在高风险意见。'
         : '当前没有需要强制处理的审校意见。',
-    },
-    {
+      source: 'review',
+      relatedPage: 'writing',
+      fixHint: '先消化审校结论，再决定是否进入完成态。',
+    }),
+    makePublishCheckItem({
       key: 'story_dynamics',
       label: '主角与节奏风险可控',
       status: reviewState.costEvaporation
@@ -949,56 +1873,244 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
               : storyAlerts.length > 0
                 ? storyAlerts.map((alert) => alert.title).join('；')
                 : '当前没有命中明显的主角与节奏结构告警。',
-    },
-    {
+      source: 'review',
+      relatedPage: 'writing',
+      fixHint: '回到正文处理节奏、代价或回报问题。',
+    }),
+    makePublishCheckItem({
       key: 'scene_plan',
       label: '场景计划可追溯',
       status: chapter.scenePlanJson?.trim() ? 'pass' : 'warning',
       detail: chapter.scenePlanJson?.trim() ? '可以追溯到当前章节的场景拆解。' : '当前缺少场景计划，后续排查承接问题会更难。',
-    },
-    {
+      source: 'scene',
+      relatedPage: 'structure',
+      fixHint: '先补齐场景计划或结构拆解，再做验收。',
+    }),
+    makePublishCheckItem({
       key: 'recall',
       label: '召回补充未依赖过期片段',
       status: recallDiagnostics.staleRecallCount > 0 ? 'warning' : 'pass',
       detail: recallDiagnostics.staleRecallCount > 0
         ? `识别到 ${recallDiagnostics.staleRecallCount} 条疑似过期召回片段。召回只应作为背景补充，建议优先以硬约束和结构化状态回查。`
         : '当前未识别到疑似过期的召回背景片段。',
-    },
-    {
+      relatedPage: 'writing',
+      fixHint: '回查结构化状态和硬约束，避免继续依赖旧召回片段。',
+    }),
+    makePublishCheckItem({
       key: 'outline',
       label: '章节大纲存在',
       status: chapter.outline?.trim() ? 'pass' : 'warning',
       detail: chapter.outline?.trim() ? '章节大纲已保留。' : '当前章节缺少明确大纲，建议补齐后再标记完成。',
-    },
-    {
+      relatedPage: 'writing',
+      fixHint: '补齐本章大纲或明确推进目标。',
+    }),
+    makePublishCheckItem({
       key: 'medium_issues',
       label: '中优先级风险可控',
       status: mediumIssues.length <= 2 ? 'pass' : 'warning',
       detail: mediumIssues.length <= 2
         ? '没有堆积过多中优先级结构问题。'
         : mediumIssues.slice(0, 3).map((issue) => issue.title).join('；'),
-    },
+      relatedPage: 'revision',
+      fixHint: '优先清掉当前章节堆积的中风险问题。',
+    }),
+    makePublishCheckItem({
+      key: 'contract_delivery',
+      label: '合同兑现率',
+      status: contractDeliveryStatus,
+      detail: contractDeliveryStatus === 'pass'
+        ? '章节合同与场景合同当前已对齐。'
+        : contractAudit.summary,
+      source: 'contract',
+      relatedPage: 'contracts',
+      fixHint: '回到章节合同与场景合同页补齐绑定、推进记录和结果状态。',
+    }),
+    makePublishCheckItem({
+      key: 'dialogue_voice',
+      label: '角色口吻一致性',
+      status: dialogueVoiceStatus,
+      detail: dialogueVoiceStatus === 'pass'
+        ? '当前没有命中明显的对白漂移或角色同声化风险。'
+        : [
+            ...reviewState.dialogueHomogenizationRisks,
+            ...reviewState.dialogueDriftAlerts,
+            ...reviewState.crossCharacterSimilarity,
+          ].slice(0, 3).join('；'),
+      source: 'review',
+      relatedPage: 'revision',
+      fixHint: '回看对白指纹与审校提示，按角色差异化修对白。',
+    }),
+    makePublishCheckItem({
+      key: 'pov_purity',
+      label: 'POV 纯度',
+      status: povPurityStatus,
+      detail: povPurityStatus === 'rewrite'
+        ? `当前作品已固定为 ${themeVoice.pov || '单一视角'}，但本章场景 POV 混用了 ${uniqueScenePovs.join('、')}。`
+        : missingScenePovs.length > 0
+          ? `仍有 ${missingScenePovs.length} 个场景缺少 POV 标注，当前无法确认视角纯度。`
+          : uniqueScenePovs.length > 1
+            ? `当前章节涉及 ${uniqueScenePovs.length} 个场景 POV，建议确认是否真的需要多视角切换。`
+            : fixedNovelPov && uniqueScenePovs.length === 1
+              ? `当前章节已维持固定视角口径：${uniqueScenePovs[0]}。`
+              : '当前没有识别到明显的 POV 纯度问题。',
+      source: rewriteTargetSource?.segmentId ? 'scene' : 'contract',
+      segmentId: rewriteTargetSource?.segmentId,
+      segmentTitle: rewriteTargetSource ? getSceneSnapshotLabel(rewriteTargetSource) : undefined,
+      relatedPage: rewriteTargetSource?.segmentId ? 'structure' : 'contracts',
+      fixHint: povPurityStatus === 'rewrite'
+        ? '退回对应场景，统一 POV 后再重新验收。'
+        : '补齐场景 POV 标注，并确认章节没有不必要的视角切换。',
+    }),
+    makePublishCheckItem({
+      key: 'hook_strength',
+      label: '钩子强度',
+      status: hookStrengthStatus,
+      detail: hookStrengthStatus === 'pass'
+        ? `已配置章节钩子${chapterContract.hookType ? `（${chapterContract.hookType}）` : ''}，且当前没有明显追读流失风险。`
+        : !chapterContract.hookType && sceneHookCount === 0
+          ? '章节合同没有钩子定义，场景计划也没有明确 exit hook，当前章尾承接力不足。'
+          : reviewState.readerHookRisks.slice(0, 2).join('；') || '当前章节的追读钩子仍偏弱，建议补强章尾承接。',
+      source: 'review',
+      relatedPage: 'contracts',
+      fixHint: '补齐章节钩子定义，并回看场景 exit hook 是否真的把读者推进下一章。',
+    }),
+    makePublishCheckItem({
+      key: 'thread_progress',
+      label: '线索 / 线程推进度',
+      status: threadProgressStatus,
+      detail: threadProgressStatus === 'blocker'
+        ? missingRequiredThreads.length > 0
+          ? `章节合同绑定的故事线程缺失：${missingRequiredThreads.join('、')}。`
+          : `章节合同要求服务的线程，本章还没有留下推进痕迹：${untouchedRequiredThreads.slice(0, 3).map((item) => item.title).join('、')}。`
+        : threadProgressStatus === 'warning'
+          ? `当前存在到期或超期未推进的线程：${overdueThreads.slice(0, 3).map((item) => item.title).join('、')}。`
+          : chapterContract.servedThreadIds.length > 0
+            ? `本章已触达 ${chapterContract.servedThreadIds.length} 条合同绑定线程。`
+            : '当前没有命中明显的线程推进缺口。',
+      source: 'thread',
+      relatedPage: 'threads',
+      fixHint: '回到故事线程或伏笔账本，确认本章真的推进、埋设或回收了对应条目。',
+    }),
+    makePublishCheckItem({
+      key: 'volume_alignment',
+      label: '卷目标一致性',
+      status: volumeAlignmentStatus,
+      detail: volumeAlignmentStatus === 'pass'
+        ? currentVolume && volumeSignals.length > 0
+          ? `${currentVolume.title || `第${currentVolume.volumeNumber}卷`} 的目标当前已有章节绑定承接。`
+          : '当前章节未绑定明确卷目标，或卷设计尚未形成约束。'
+        : `${currentVolume?.title || `第${currentVolume?.volumeNumber || '?' }卷`} 已设有卷目标，但本章没有形成有效承接。`,
+      source: 'volume',
+      relatedPage: 'volume-design',
+      fixHint: '回到卷级设计确认本章该服务的承诺、冲突或线索，并把绑定落到章节合同。',
+    }),
+    makePublishCheckItem({
+      key: 'line_progress',
+      label: '本章是否真的推进了某条线',
+      status: lineProgressStatus,
+      detail: lineProgressStatus === 'blocker'
+        ? [...arcWarnings, ...reviewState.arcProgressRisks].slice(0, 3).join('；') || '本章合同要求推进，但当前没有足够的推进证据。'
+        : lineProgressStatus === 'warning'
+          ? [...arcWarnings, ...reviewState.arcProgressRisks].slice(0, 3).join('；') || '当前没有识别到明确的主线推进痕迹。'
+          : '当前章节具备可识别的弧线或线程推进。',
+      source: 'thread',
+      relatedPage: 'contracts',
+      fixHint: '先确认本章要推进哪条弧线/线程，再补上清晰的推进记录或正文兑现。',
+    }),
+    makePublishCheckItem({
+      key: 'rewrite_path',
+      label: '润色可解 / 必须重写',
+      status: structuralRewriteReasons.length > 0
+        ? 'rewrite'
+        : reviewState.rewriteRequired || reviewState.severity === 'high'
+          ? 'warning'
+          : 'pass',
+      detail: structuralRewriteReasons.length > 0
+        ? structuralRewriteReasons.join('；')
+        : reviewState.rewriteRequired || reviewState.severity === 'high'
+          ? '当前更适合先做定向重写或局部返工，再决定是否标记完成。'
+          : '当前问题仍可通过局部修订、润色和补记录解决。',
+      source: 'review',
+      segmentId: rewriteTargetSource?.segmentId,
+      segmentTitle: rewriteTargetSource ? getSceneSnapshotLabel(rewriteTargetSource) : undefined,
+      relatedPage: rewriteTargetSource?.segmentId ? 'structure' : 'writing',
+      fixHint: structuralRewriteReasons.length > 0
+        ? '优先退回对应场景或章节重写，不要只做表层润色。'
+        : '先在正文页做局部修订，再复检章节验收门。',
+    }),
   ]
 
-  const blockerCount = checklist.filter((item) => item.status === 'blocker').length + contractAudit.blockerCount
-  const warningCount = checklist.filter((item) => item.status === 'warning').length + contractAudit.warningCount
+  const { taskIdByItemKey, generatedTaskCount } = syncChapterGateRevisionTasks(
+    chapter.novelId,
+    chapter.id,
+    chapter.chapterNum,
+    rawChecklist,
+    contractAudit,
+  )
+  const checklist = rawChecklist.map((item) => {
+    const taskId = taskIdByItemKey.get(item.key)
+    return typeof taskId === 'number'
+      ? { ...item, taskId }
+      : item
+  })
+  const rewriteCount = getChecklistCount(checklist, 'rewrite')
+  const blockerCount = getChecklistCount(checklist, 'blocker') + contractAudit.blockerCount
+  const warningCount = getChecklistCount(checklist, 'warning') + contractAudit.warningCount
+  const gateLevel: ChapterGateLevel = rewriteCount > 0
+    ? 'rewrite'
+    : blockerCount > 0
+      ? 'blocker'
+      : warningCount > 0
+        ? 'warning'
+        : 'pass'
+  const scoreBreakdown = buildPublishCheckScoreBreakdown({
+    contractAudit,
+    checklist,
+    reviewState,
+    aiScore,
+    highIssues,
+    mediumIssues,
+    staleReasons,
+    recallStaleCount: recallDiagnostics.staleRecallCount || 0,
+    sceneHookCount,
+    weakFunction,
+    blockerCount,
+    warningCount,
+    rewriteCount,
+  })
+  const { history, drift } = persistChapterGateRun({
+    novelId: chapter.novelId,
+    chapterId: chapter.id,
+    chapterNum: chapter.chapterNum,
+    gateLevel,
+    ready: gateLevel === 'pass' || gateLevel === 'warning',
+    summary: buildChapterGateSummary(gateLevel, rewriteCount, blockerCount, warningCount),
+    rewriteCount,
+    blockerCount,
+    warningCount,
+    generatedTaskCount,
+    scoreBreakdown,
+    topIssueKeys: buildChapterGateTopIssueKeys(checklist, contractAudit),
+  })
 
   return {
     chapterId: chapter.id,
     chapterNum: chapter.chapterNum,
-    ready: blockerCount === 0,
-    summary: blockerCount === 0
-      ? warningCount === 0
-        ? '当前章节可以直接标记为完成。'
-        : '当前章节可以发布，但还有若干建议先处理的风险。'
-      : contractAudit.blockerCount > 0
-        ? '当前章节还不能标记为完成，请先处理合同对账或其他阻塞项。'
-        : '当前章节还不能标记为完成，请先处理阻塞项。',
+    gateLevel,
+    ready: gateLevel === 'pass' || gateLevel === 'warning',
+    summary: buildChapterGateSummary(gateLevel, rewriteCount, blockerCount, warningCount),
     blockerCount,
     warningCount,
+    rewriteCount,
     staleReasons,
     chapterContextVersion: chapter.contextVersion || 1,
     novelContextVersion: novel.contextVersion || 1,
+    rewriteRecommended: gateLevel === 'rewrite',
+    rewriteTarget: buildRewriteTarget(chapter.id, checklist),
+    scoreBreakdown,
+    history,
+    drift,
+    generatedTaskCount,
     checklist,
     contractAudit,
   }

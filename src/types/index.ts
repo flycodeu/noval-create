@@ -1415,11 +1415,21 @@ export interface ChapterContextPreview {
 export interface ChapterPublishCheckItem {
   key: string
   label: string
-  status: 'pass' | 'warning' | 'blocker'
+  status: 'pass' | 'warning' | 'blocker' | 'rewrite'
   detail: string
+  source: 'chapter' | 'scene' | 'contract' | 'review' | 'thread' | 'volume'
+  segmentId?: number
+  segmentTitle?: string
+  relatedPage?: 'writing' | 'structure' | 'contracts' | 'revision' | 'volume-design' | 'threads'
+  fixHint?: string
+  taskId?: number
 }
 
 export type ContractAuditStatus = 'pass' | 'warning' | 'blocker'
+
+export type ChapterGateLevel = 'pass' | 'warning' | 'blocker' | 'rewrite'
+
+export type ChapterGateScoreBand = 'stable' | 'attention' | 'risky' | 'unstable'
 
 export interface ContractAuditItem {
   key: string
@@ -1440,16 +1450,130 @@ export interface ChapterContractAudit {
   items: ContractAuditItem[]
 }
 
+export interface ChapterRewriteTarget {
+  kind: 'chapter' | 'segment' | 'selection'
+  chapterId: number
+  segmentId?: number
+  segmentTitle?: string
+  reason: string
+  relatedPage: 'writing' | 'structure' | 'contracts' | 'revision' | 'volume-design' | 'threads'
+}
+
+export interface ChapterPublishCheckScoreBreakdown {
+  totalScore: number
+  continuityScore: number
+  coherenceScore: number
+  dialogueVoiceScore: number
+  hookStrengthScore: number
+  storyDynamicsScore: number
+  languageNaturalnessScore: number
+  contractScore: number
+  hookScore: number
+  povPurityScore: number
+  threadProgressScore: number
+  volumeAlignmentScore: number
+}
+
+export interface ChapterGateDimensionDelta {
+  key: string
+  label: string
+  score: number
+  previousScore: number
+  delta: number
+}
+
+export interface ChapterGateHistoryEntry {
+  id: number
+  novelId: number
+  chapterId: number
+  chapterNum: number
+  gateLevel: ChapterGateLevel
+  ready: boolean
+  summary: string
+  rewriteCount: number
+  blockerCount: number
+  warningCount: number
+  generatedTaskCount: number
+  topIssueKeys: string[]
+  scoreBreakdown: ChapterPublishCheckScoreBreakdown
+  createdAt: string
+}
+
+export interface ChapterGateDriftSummary {
+  status: 'worsening' | 'improving' | 'stable'
+  scoreBand: ChapterGateScoreBand
+  currentScore: number
+  previousScore?: number
+  scoreDelta: number
+  currentGateLevel: ChapterGateLevel
+  previousGateLevel?: ChapterGateLevel
+  topDimensions: ChapterGateDimensionDelta[]
+  summary: string
+  createdAt: string
+}
+
+export interface ChapterGateTrendPoint {
+  chapterId: number
+  chapterNum: number
+  totalScore: number
+  gateLevel: ChapterGateLevel
+  scoreBand: ChapterGateScoreBand
+  createdAt: string
+}
+
+export interface ChapterGateHeatmapPoint {
+  chapterId: number
+  chapterNum: number
+  dimension: string
+  score: number
+  gateLevel: ChapterGateLevel
+  scoreBand: ChapterGateScoreBand
+  createdAt: string
+}
+
+export interface ChapterGateDriftAlert extends ChapterGateDriftSummary {
+  chapterId: number
+  chapterNum: number
+  title: string
+  detail: string
+}
+
+export interface ChapterGateSummary {
+  coveredChapterCount: number
+  snapshotCount: number
+  averageTotalScore: number
+  stableCount: number
+  attentionCount: number
+  riskyCount: number
+  unstableCount: number
+  worseningAlertCount: number
+  latestLevelCounts: Record<ChapterGateLevel, number>
+}
+
+export interface ChapterGateChapterDetail {
+  latest?: ChapterGateHistoryEntry
+  history: ChapterGateHistoryEntry[]
+  drift?: ChapterGateDriftSummary
+}
+
 export interface ChapterPublishCheck {
   chapterId: number
   chapterNum: number
+  gateLevel: ChapterGateLevel
   ready: boolean
   summary: string
   blockerCount: number
   warningCount: number
+  rewriteCount: number
   staleReasons: string[]
   chapterContextVersion: number
   novelContextVersion: number
+  rewriteRecommended: boolean
+  rewriteTarget?: ChapterRewriteTarget
+  scoreBreakdown: ChapterPublishCheckScoreBreakdown
+  history: ChapterGateHistoryEntry[]
+  drift?: ChapterGateDriftSummary
+  generatedTaskCount: number
   checklist: ChapterPublishCheckItem[]
   contractAudit: ChapterContractAudit
 }
@@ -3031,6 +3155,10 @@ export interface QualityDashboardData {
   heatmapData: Array<{ chapterNum: number; dimension: string; score: number }>
   overallScoreTrend: Array<{ chapterNum: number; score: number }>
   aiLikeRateTrend: Array<{ chapterNum: number; rate: number }>
+  chapterGateTrend: ChapterGateTrendPoint[]
+  chapterGateHeatmap: ChapterGateHeatmapPoint[]
+  chapterGateSummary: ChapterGateSummary
+  chapterGateDriftAlerts: ChapterGateDriftAlert[]
   languageDriftTrends: {
     abstractTokenDensity: Array<{ chapterNum: number; value: number }>
     sentencePatternRepeatRate: Array<{ chapterNum: number; value: number }>
@@ -3136,6 +3264,7 @@ export interface QualityDashboardData {
     storyArcProgress?: StoryArcProgressPoint[]
     worldStateAlerts?: WorldStateAlert[]
     recallDiagnostics?: RecallDiagnostics
+    chapterGate?: ChapterGateChapterDetail
   }>
   totalChaptersScored: number
   averageOverallScore: number

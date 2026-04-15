@@ -718,6 +718,23 @@ export const chapterWritebackRuns = sqliteTable('chapter_writeback_runs', {
   updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
 })
 
+export const chapterGateRuns = sqliteTable('chapter_gate_runs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  chapterId: integer('chapter_id').notNull().references(() => chapters.id, { onDelete: 'cascade' }),
+  chapterNum: integer('chapter_num').notNull().default(0),
+  gateLevel: text('gate_level').notNull().default('warning'),
+  ready: integer('ready').notNull().default(0),
+  summary: text('summary'),
+  rewriteCount: integer('rewrite_count').notNull().default(0),
+  blockerCount: integer('blocker_count').notNull().default(0),
+  warningCount: integer('warning_count').notNull().default(0),
+  scoreBreakdownJson: text('score_breakdown_json'),
+  topIssueKeysJson: text('top_issue_keys_json'),
+  generatedTaskCount: integer('generated_task_count').notNull().default(0),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
 export const chapterFactExtracts = sqliteTable('chapter_fact_extracts', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   runId: integer('run_id').notNull().references(() => chapterWritebackRuns.id, { onDelete: 'cascade' }),
@@ -890,6 +907,8 @@ export type StoryMemoryCheckpoint = typeof storyMemoryCheckpoints.$inferSelect
 export type NewStoryMemoryCheckpoint = typeof storyMemoryCheckpoints.$inferInsert
 export type ChapterWritebackRun = typeof chapterWritebackRuns.$inferSelect
 export type NewChapterWritebackRun = typeof chapterWritebackRuns.$inferInsert
+export type ChapterGateRun = typeof chapterGateRuns.$inferSelect
+export type NewChapterGateRun = typeof chapterGateRuns.$inferInsert
 export type ChapterFactExtract = typeof chapterFactExtracts.$inferSelect
 export type NewChapterFactExtract = typeof chapterFactExtracts.$inferInsert
 export type ChapterWritebackDiff = typeof chapterWritebackDiffs.$inferSelect

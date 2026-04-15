@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Alert, Button, Form, Input, Modal, Select, Space, Spin, Tag, message } from 'antd'
 import { SaveOutlined, EditOutlined } from '@ant-design/icons'
 import { useNovelStore } from '../../../stores/novel.store'
@@ -71,6 +71,7 @@ function buildChapterFormValues(contract?: ChapterContractAsset | null): Chapter
 
 export default function ContractsPage({ novelId }: Props) {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const { currentNovel } = useNovelStore()
   const [form] = Form.useForm<ChapterContractFormValues>()
   const [loading, setLoading] = useState(true)
@@ -91,6 +92,10 @@ export default function ContractsPage({ novelId }: Props) {
   const [progressTargetId, setProgressTargetId] = useState<number | null>(null)
   const [progressNote, setProgressNote] = useState('')
   const [progressSaving, setProgressSaving] = useState(false)
+  const routeChapterId = useMemo(() => {
+    const parsed = Number(searchParams.get('chapterId'))
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+  }, [searchParams])
 
   const loadBaseData = async () => {
     const [chapterRows, threadRows, characterArcRows, relationshipArcRows, commitmentRows, foreshadowRows, resistanceDashboard] = await Promise.all([
@@ -109,7 +114,7 @@ export default function ContractsPage({ novelId }: Props) {
     setResistanceTracks(resistanceDashboard.tracks)
     setCommitments(commitmentRows.filter((item) => item.derivedStatus !== 'waived'))
     setForeshadows(foreshadowRows)
-    setActiveChapterId((current) => current ?? chapterRows[0]?.id ?? null)
+    setActiveChapterId((current) => current ?? chapterRows.find((item) => item.id === routeChapterId)?.id ?? chapterRows[0]?.id ?? null)
   }
 
   const loadChapterData = async (chapterId: number) => {
@@ -136,7 +141,14 @@ export default function ContractsPage({ novelId }: Props) {
 
   useEffect(() => {
     void refreshAll()
-  }, [novelId])
+  }, [novelId, routeChapterId])
+
+  useEffect(() => {
+    if (!routeChapterId) return
+    if (!chapters.some((item) => item.id === routeChapterId)) return
+    if (activeChapterId === routeChapterId) return
+    setActiveChapterId(routeChapterId)
+  }, [activeChapterId, chapters, routeChapterId])
 
   useEffect(() => {
     if (!activeChapterId) return

@@ -159,6 +159,62 @@ function healthScoreColor(value: number): string {
   return '#f5222d'
 }
 
+function chapterGateLevelLabel(level: QualityDashboardData['chapterGateTrend'][number]['gateLevel']): string {
+  if (level === 'rewrite') return '退回重写'
+  if (level === 'blocker') return '阻塞'
+  if (level === 'warning') return '预警'
+  return '通过'
+}
+
+function chapterGateLevelColor(level: QualityDashboardData['chapterGateTrend'][number]['gateLevel']): string {
+  if (level === 'rewrite') return 'red'
+  if (level === 'blocker') return 'error'
+  if (level === 'warning') return 'warning'
+  return 'success'
+}
+
+function chapterGateBandLabel(band: QualityDashboardData['chapterGateTrend'][number]['scoreBand']): string {
+  if (band === 'stable') return '稳定'
+  if (band === 'attention') return '关注'
+  if (band === 'risky') return '风险'
+  return '失稳'
+}
+
+function chapterGateScoreBand(score: number): QualityDashboardData['chapterGateTrend'][number]['scoreBand'] {
+  if (score >= 80) return 'stable'
+  if (score >= 60) return 'attention'
+  if (score >= 40) return 'risky'
+  return 'unstable'
+}
+
+function chapterGateBandColor(band: QualityDashboardData['chapterGateTrend'][number]['scoreBand']): string {
+  if (band === 'stable') return 'success'
+  if (band === 'attention') return 'processing'
+  if (band === 'risky') return 'warning'
+  return 'error'
+}
+
+function chapterGateAlertColor(status: QualityDashboardData['chapterGateDriftAlerts'][number]['status']): string {
+  if (status === 'worsening') return 'error'
+  if (status === 'improving') return 'success'
+  return 'default'
+}
+
+function chapterGateAlertLabel(status: QualityDashboardData['chapterGateDriftAlerts'][number]['status']): string {
+  if (status === 'worsening') return '恶化'
+  if (status === 'improving') return '改善'
+  return '稳定'
+}
+
+function chapterGateHeatmapColor(score: number): string {
+  if (score >= 85) return '#237804'
+  if (score >= 70) return '#52c41a'
+  if (score >= 60) return '#13c2c2'
+  if (score >= 45) return '#faad14'
+  if (score >= 30) return '#fa8c16'
+  return '#f5222d'
+}
+
 function qualityRiskKindLabel(kind: QualityDashboardData['novelQualityMetrics']['riskOverview'][number]['kind']): string {
   if (kind === 'language_drift') return 'AI 味退化'
   if (kind === 'story_dynamics') return '主角与节奏'
@@ -208,6 +264,7 @@ export default function QualityDashboard({ novelId }: Props) {
   }
 
   const hasScoreData = Boolean(data && data.totalChaptersScored > 0)
+  const hasChapterGateData = Boolean(data && data.chapterGateSummary.coveredChapterCount > 0)
   const hasStoryDynamicsData = Boolean(data && data.protagonistSetbackSummary.chapterCount > 0)
   const hasArcProgressData = Boolean(data && (data.storyArcProgressSummary.trackedArcCount > 0 || data.storyArcProgressAlerts.length > 0))
   const hasDialogueData = Boolean(data && data.dialogueFingerprintStats.eligibleCharacterCount > 0)
@@ -216,7 +273,7 @@ export default function QualityDashboard({ novelId }: Props) {
   const hasChapterFunctionData = Boolean(data && (data.chapterFunctionSummary.trackedChapterCount > 0 || data.chapterFunctionAlerts.length > 0))
   const hasEndgameDebtData = Boolean(data && data.recentEndgameDebtAlerts.length > 0)
 
-  if (!data || (!hasScoreData && !hasStoryDynamicsData && !hasArcProgressData && !hasDialogueData && !hasStateData && !hasRecallData && !hasChapterFunctionData && !hasEndgameDebtData)) {
+  if (!data || (!hasScoreData && !hasChapterGateData && !hasStoryDynamicsData && !hasArcProgressData && !hasDialogueData && !hasStateData && !hasRecallData && !hasChapterFunctionData && !hasEndgameDebtData)) {
     return (
       <WorkspacePage title="质量监控">
         <WorkspacePanel title="暂无数据">
@@ -242,6 +299,15 @@ export default function QualityDashboard({ novelId }: Props) {
   const filteredHeatmapData = selectedVolumeChapterNums
     ? data.heatmapData.filter((entry) => selectedVolumeChapterNums.has(entry.chapterNum))
     : data.heatmapData
+  const filteredChapterGateTrend = selectedVolumeChapterNums
+    ? data.chapterGateTrend.filter((entry) => selectedVolumeChapterNums.has(entry.chapterNum))
+    : data.chapterGateTrend
+  const filteredChapterGateHeatmap = selectedVolumeChapterNums
+    ? data.chapterGateHeatmap.filter((entry) => selectedVolumeChapterNums.has(entry.chapterNum))
+    : data.chapterGateHeatmap
+  const filteredChapterGateAlerts = selectedVolumeMetrics
+    ? data.chapterGateDriftAlerts.filter((entry) => entry.chapterNum >= selectedVolumeMetrics.chapterStart && entry.chapterNum <= selectedVolumeMetrics.chapterEnd)
+    : data.chapterGateDriftAlerts
   const filteredOverallTrend = selectedVolumeChapterNums
     ? data.overallScoreTrend.filter((entry) => selectedVolumeChapterNums.has(entry.chapterNum))
     : data.overallScoreTrend
@@ -416,6 +482,19 @@ export default function QualityDashboard({ novelId }: Props) {
 
   const structureContent = (
     <>
+      {hasChapterGateData ? (
+        <WorkspacePanel title="章节验收门">
+          <ChapterGatePanel
+            summary={data.chapterGateSummary}
+            trend={filteredChapterGateTrend}
+            heatmap={filteredChapterGateHeatmap}
+            alerts={filteredChapterGateAlerts}
+            selectedVolumeLabel={selectedVolumeMetrics?.volumeName}
+            onSelectChapter={openChapterByNum}
+          />
+        </WorkspacePanel>
+      ) : null}
+
       <WorkspacePanel title="主角受挫与节奏">
         <StoryDynamicsPanel
           trend={data.storyDynamicsTrend}
@@ -483,6 +562,7 @@ export default function QualityDashboard({ novelId }: Props) {
       title="质量监控"
       metrics={[
         <WorkspaceMetric key="scored" label="已评分章节" value={data.totalChaptersScored} />,
+        <WorkspaceMetric key="gate" label="章节门覆盖" value={data.chapterGateSummary.coveredChapterCount} />,
         <WorkspaceMetric key="tracked" label="节奏追踪章节" value={data.protagonistSetbackSummary.chapterCount} />,
         <WorkspaceMetric key="arc" label="跟踪故事弧" value={data.storyArcProgressSummary.trackedArcCount} />,
         <WorkspaceMetric key="avg" label="平均总分 / 压力" value={hasScoreData ? `${data.averageOverallScore} / 10` : `${data.protagonistSetbackSummary.averagePressure}`} />,
@@ -576,6 +656,7 @@ export default function QualityDashboard({ novelId }: Props) {
                 {dim.suggestion ? <div style={{ fontSize: 12, opacity: 0.55 }}>{dim.suggestion}</div> : null}
               </div>
             ))}
+            <ChapterGateDetails chapterGate={selectedChapter.chapterGate} />
             <LanguageDriftDetails metrics={selectedChapter.languageDriftMetrics} />
             <DialogueReviewDetails review={selectedChapter.dialogueReview} />
             <StoryDynamicsDetails dynamics={selectedChapter.storyDynamics} />
@@ -587,6 +668,193 @@ export default function QualityDashboard({ novelId }: Props) {
         ) : null}
       </Modal>
     </WorkspacePage>
+  )
+}
+
+function ChapterGatePanel({
+  summary,
+  trend,
+  heatmap,
+  alerts,
+  selectedVolumeLabel,
+  onSelectChapter,
+}: {
+  summary: QualityDashboardData['chapterGateSummary']
+  trend: QualityDashboardData['chapterGateTrend']
+  heatmap: QualityDashboardData['chapterGateHeatmap']
+  alerts: QualityDashboardData['chapterGateDriftAlerts']
+  selectedVolumeLabel?: string
+  onSelectChapter: (chapterNum: number) => void
+}) {
+  if (summary.coveredChapterCount === 0 || trend.length === 0) {
+    return <Empty description="暂无章节验收门历史快照" />
+  }
+
+  const averageVisibleScore = trend.length > 0
+    ? Math.round((trend.reduce((sum, entry) => sum + entry.totalScore, 0) / trend.length) * 10) / 10
+    : 0
+  const bandCounts = trend.reduce<Record<QualityDashboardData['chapterGateTrend'][number]['scoreBand'], number>>((result, entry) => {
+    result[entry.scoreBand] += 1
+    return result
+  }, { stable: 0, attention: 0, risky: 0, unstable: 0 })
+  const levelCounts = trend.reduce<Record<QualityDashboardData['chapterGateTrend'][number]['gateLevel'], number>>((result, entry) => {
+    result[entry.gateLevel] += 1
+    return result
+  }, { pass: 0, warning: 0, blocker: 0, rewrite: 0 })
+  const visibleAlerts = alerts.filter((alert) => alert.status !== 'stable').slice(0, 6)
+  const dimensions = Array.from(new Set(heatmap.map((entry) => entry.dimension)))
+  const chapterNums = trend.map((entry) => entry.chapterNum)
+  const heatmapValueMap = new Map(heatmap.map((entry) => [`${entry.chapterNum}:${entry.dimension}`, entry] as const))
+  const recentTrend = trend.slice(-8).reverse()
+
+  return (
+    <div style={{ display: 'grid', gap: 16 }}>
+      {selectedVolumeLabel ? (
+        <div style={{ padding: '10px 12px', borderRadius: 10, background: 'rgba(19,194,194,0.08)', border: '1px solid rgba(19,194,194,0.24)', fontSize: 12 }}>
+          当前按卷筛选：{selectedVolumeLabel}。章节验收门趋势、热力图和漂移告警已同步收窄到该卷。
+        </div>
+      ) : null}
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>平均门分</div>
+          <div style={{ fontSize: 24, fontWeight: 700, color: chapterGateHeatmapColor(averageVisibleScore) }}>{averageVisibleScore}</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>当前视图下最近快照的总分均值</div>
+        </div>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>稳定 / 关注</div>
+          <div style={{ fontSize: 24, fontWeight: 700 }}>{bandCounts.stable} / {bandCounts.attention}</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>80+ 稳定，60-79 需要关注</div>
+        </div>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>风险 / 失稳</div>
+          <div style={{ fontSize: 24, fontWeight: 700 }}>{bandCounts.risky} / {bandCounts.unstable}</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>40-59 风险，40 以下失稳</div>
+        </div>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>最近恶化</div>
+          <div style={{ fontSize: 24, fontWeight: 700, color: visibleAlerts.length > 0 ? '#f5222d' : '#52c41a' }}>{visibleAlerts.filter((alert) => alert.status === 'worsening').length}</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>门级恶化或总分明显回落的章节数</div>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(320px, 1.2fr) minmax(280px, 1fr)', gap: 12 }}>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', display: 'grid', gap: 10 }}>
+          <div style={{ fontWeight: 600 }}>章节门趋势</div>
+          <MiniTrendRow label="总分" points={trend.map((entry) => ({ chapterNum: entry.chapterNum, value: entry.totalScore }))} />
+          <MiniTrendRow
+            label="门级压力"
+            points={trend.map((entry) => ({
+              chapterNum: entry.chapterNum,
+              value: entry.gateLevel === 'rewrite' ? 100 : entry.gateLevel === 'blocker' ? 72 : entry.gateLevel === 'warning' ? 38 : 10,
+            }))}
+          />
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <Tag color={chapterGateLevelColor('pass')} style={{ marginRight: 0 }}>{`通过 ${levelCounts.pass}`}</Tag>
+            <Tag color={chapterGateLevelColor('warning')} style={{ marginRight: 0 }}>{`预警 ${levelCounts.warning}`}</Tag>
+            <Tag color={chapterGateLevelColor('blocker')} style={{ marginRight: 0 }}>{`阻塞 ${levelCounts.blocker}`}</Tag>
+            <Tag color={chapterGateLevelColor('rewrite')} style={{ marginRight: 0 }}>{`重写 ${levelCounts.rewrite}`}</Tag>
+          </div>
+        </div>
+
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', display: 'grid', gap: 10 }}>
+          <div style={{ fontWeight: 600 }}>最近漂移告警</div>
+          {visibleAlerts.length > 0 ? visibleAlerts.map((alert) => (
+            <button
+              key={`${alert.chapterId}-${alert.createdAt}`}
+              type="button"
+              onClick={() => onSelectChapter(alert.chapterNum)}
+              style={{
+                textAlign: 'left',
+                border: '1px solid rgba(255,255,255,0.08)',
+                background: 'rgba(255,255,255,0.02)',
+                borderRadius: 10,
+                padding: '10px 12px',
+                cursor: 'pointer',
+                display: 'grid',
+                gap: 6,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <Tag color={chapterGateAlertColor(alert.status)} style={{ marginRight: 0 }}>{chapterGateAlertLabel(alert.status)}</Tag>
+                <Tag color={chapterGateLevelColor(alert.currentGateLevel)} style={{ marginRight: 0 }}>{chapterGateLevelLabel(alert.currentGateLevel)}</Tag>
+                <strong>{alert.title}</strong>
+              </div>
+              <div style={{ fontSize: 12, opacity: 0.78 }}>{alert.detail}</div>
+            </button>
+          )) : <div style={{ fontSize: 12, opacity: 0.6 }}>当前视图内最近没有明显的门级恶化或回升。</div>}
+        </div>
+      </div>
+
+      <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', display: 'grid', gap: 10 }}>
+        <div style={{ fontWeight: 600 }}>维度热力图</div>
+        <div style={{ overflowX: 'auto' }}>
+          <div style={{ minWidth: Math.max(640, chapterNums.length * 64), display: 'grid', gap: 8 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: `120px repeat(${chapterNums.length}, minmax(44px, 1fr))`, gap: 6, fontSize: 11, opacity: 0.65 }}>
+              <div>维度 / 章节</div>
+              {chapterNums.map((chapterNum) => <div key={`head-${chapterNum}`} style={{ textAlign: 'center' }}>{chapterNum}</div>)}
+            </div>
+            {dimensions.map((dimension) => (
+              <div key={dimension} style={{ display: 'grid', gridTemplateColumns: `120px repeat(${chapterNums.length}, minmax(44px, 1fr))`, gap: 6, alignItems: 'center' }}>
+                <div style={{ fontSize: 12, fontWeight: 600 }}>{dimension}</div>
+                {chapterNums.map((chapterNum) => {
+                  const entry = heatmapValueMap.get(`${chapterNum}:${dimension}`)
+                  const score = entry?.score || 0
+                  return (
+                    <button
+                      key={`${chapterNum}-${dimension}`}
+                      type="button"
+                      onClick={() => onSelectChapter(chapterNum)}
+                      style={{
+                        border: 'none',
+                        borderRadius: 8,
+                        padding: '8px 0',
+                        cursor: 'pointer',
+                        background: chapterGateHeatmapColor(score),
+                        color: '#fff',
+                        fontSize: 11,
+                        fontWeight: 700,
+                      }}
+                    >
+                      {score}
+                    </button>
+                  )
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gap: 10 }}>
+        <div style={{ fontWeight: 600 }}>最近章节快照</div>
+        {recentTrend.map((entry) => (
+          <button
+            key={`${entry.chapterId}-${entry.createdAt}`}
+            type="button"
+            onClick={() => onSelectChapter(entry.chapterNum)}
+            style={{
+              border: '1px solid rgba(255,255,255,0.08)',
+              background: 'rgba(255,255,255,0.03)',
+              borderRadius: 10,
+              padding: '12px 14px',
+              textAlign: 'left',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              flexWrap: 'wrap',
+            }}
+          >
+            <strong style={{ minWidth: 72 }}>{`第${entry.chapterNum}章`}</strong>
+            <Tag color={chapterGateLevelColor(entry.gateLevel)} style={{ marginRight: 0 }}>{chapterGateLevelLabel(entry.gateLevel)}</Tag>
+            <Tag color={chapterGateBandColor(entry.scoreBand)} style={{ marginRight: 0 }}>{chapterGateBandLabel(entry.scoreBand)}</Tag>
+            <span style={{ fontWeight: 700, color: chapterGateHeatmapColor(entry.totalScore) }}>{entry.totalScore}</span>
+            <span style={{ fontSize: 12, opacity: 0.65 }}>{new Date(entry.createdAt).toLocaleString()}</span>
+          </button>
+        ))}
+      </div>
+    </div>
   )
 }
 
@@ -1943,6 +2211,61 @@ function WorldStateStabilityPanel({
               </div>
             ))}
           </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function ChapterGateDetails({ chapterGate }: { chapterGate?: QualityDashboardData['chapterDetails'][number]['chapterGate'] }) {
+  if (!chapterGate?.latest) {
+    return <div style={{ fontSize: 12, opacity: 0.55 }}>本章暂无章节验收门历史</div>
+  }
+
+  const latest = chapterGate.latest
+  const drift = chapterGate.drift
+  const dimensions = [
+    { label: '连续性', value: latest.scoreBreakdown.continuityScore },
+    { label: '结构连贯', value: latest.scoreBreakdown.coherenceScore },
+    { label: '对白辨识', value: latest.scoreBreakdown.dialogueVoiceScore },
+    { label: '钩子强度', value: latest.scoreBreakdown.hookStrengthScore },
+    { label: '主角与节奏', value: latest.scoreBreakdown.storyDynamicsScore },
+    { label: '语言自然度', value: latest.scoreBreakdown.languageNaturalnessScore },
+  ]
+
+  return (
+    <div style={{ display: 'grid', gap: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <strong>章节验收门</strong>
+        <Tag color={chapterGateLevelColor(latest.gateLevel)} style={{ marginRight: 0 }}>{chapterGateLevelLabel(latest.gateLevel)}</Tag>
+        <Tag color={chapterGateBandColor(chapterGateScoreBand(latest.scoreBreakdown.totalScore))} style={{ marginRight: 0 }}>
+          {chapterGateBandLabel(chapterGateScoreBand(latest.scoreBreakdown.totalScore))}
+        </Tag>
+        <span style={{ fontWeight: 700, color: chapterGateHeatmapColor(latest.scoreBreakdown.totalScore) }}>{`总分 ${latest.scoreBreakdown.totalScore}`}</span>
+      </div>
+      <div style={{ fontSize: 12 }}>{latest.summary}</div>
+      {drift ? (
+        <div style={{ fontSize: 12, color: drift.status === 'worsening' ? '#ff7875' : drift.status === 'improving' ? '#95de64' : 'rgba(255,255,255,0.72)' }}>
+          {drift.summary}
+        </div>
+      ) : null}
+      {dimensions.map((dimension) => (
+        <div key={dimension.label} style={{ display: 'grid', gap: 4 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+            <span>{dimension.label}</span>
+            <span style={{ fontWeight: 600, color: chapterGateHeatmapColor(dimension.value) }}>{dimension.value}</span>
+          </div>
+          <Progress percent={dimension.value} showInfo={false} strokeColor={chapterGateHeatmapColor(dimension.value)} size="small" />
+        </div>
+      ))}
+      {chapterGate.history.length > 1 ? (
+        <div style={{ display: 'grid', gap: 6 }}>
+          <div style={{ fontWeight: 600, fontSize: 12 }}>最近门变更</div>
+          {chapterGate.history.slice(0, 3).map((entry) => (
+            <div key={`${entry.id}-${entry.createdAt}`} style={{ fontSize: 12, opacity: 0.78 }}>
+              {new Date(entry.createdAt).toLocaleString()} · {chapterGateLevelLabel(entry.gateLevel)} · 总分 {entry.scoreBreakdown.totalScore}
+            </div>
+          ))}
         </div>
       ) : null}
     </div>

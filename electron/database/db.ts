@@ -1526,6 +1526,32 @@ export function runMigrations(sqlite: Database.Database) {
         ON chapter_writeback_diffs(run_id, asset_type, canon_decision, writeback_status, sort_order, id);
     `)
   })
+
+  runMigrationStep(sqlite, '0027_chapter_gate_runs', () => {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS chapter_gate_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        chapter_id INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
+        chapter_num INTEGER NOT NULL DEFAULT 0,
+        gate_level TEXT NOT NULL DEFAULT 'warning',
+        ready INTEGER NOT NULL DEFAULT 0,
+        summary TEXT,
+        rewrite_count INTEGER NOT NULL DEFAULT 0,
+        blocker_count INTEGER NOT NULL DEFAULT 0,
+        warning_count INTEGER NOT NULL DEFAULT 0,
+        score_breakdown_json TEXT,
+        top_issue_keys_json TEXT,
+        generated_task_count INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_chapter_gate_runs_chapter
+        ON chapter_gate_runs(chapter_id, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_chapter_gate_runs_novel_chapter
+        ON chapter_gate_runs(novel_id, chapter_num, id DESC);
+    `)
+  })
 }
 
 function ensureMigrationTable(sqlite: Database.Database) {

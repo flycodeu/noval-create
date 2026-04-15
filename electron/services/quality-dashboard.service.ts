@@ -1,6 +1,7 @@
 import { asc, eq } from 'drizzle-orm'
 import type {
   AIScoreDimension,
+  ChapterGateHistoryEntry,
   ChapterDialogueReviewData,
   ChapterFunctionAlert,
   ChapterFunctionRun,
@@ -36,7 +37,16 @@ import type {
   WorldStateAlert,
 } from '../../src/types'
 import { getDb } from '../database/db'
-import { chapters, characterStateVersions, characters, storyVolumes, timelineEvents, worldStateVersions } from '../database/schema'
+import { chapterGateRuns, chapters, characterStateVersions, characters, storyVolumes, timelineEvents, worldStateVersions } from '../database/schema'
+import {
+  buildChapterGateDriftAlert,
+  buildChapterGateDriftSummary,
+  getChapterGatePrimaryDimensions,
+  getChapterGateScoreBand,
+  normalizeChapterGateScoreBreakdown,
+  safeParseChapterGateScoreBreakdown,
+  safeParseStringArray,
+} from './chapter-gate-utils'
 import { getDialogueAnalyticsSnapshot, scheduleDialogueFingerprintRefresh } from './dialogue-fingerprint.service'
 import { fallbackKeywordSearch } from './embedding.service'
 import { getEndgameDebtSnapshot } from './endgame-asset.service'
@@ -127,6 +137,7 @@ type ForeshadowCounts = {
   overdue: number
   resolved: number
 }
+type ChapterGateRunRow = typeof chapterGateRuns.$inferSelect
 
 interface QualityDashboardOptions {
   includeDialogueInsights?: boolean
@@ -170,6 +181,34 @@ type RecallFreshnessState = {
 
 function dedupeNumbers(values: number[]): number[] {
   return [...new Set(values)].sort((left, right) => left - right)
+}
+
+function sortChapterGateHistoryEntries(left: ChapterGateHistoryEntry, right: ChapterGateHistoryEntry): number {
+  const leftTime = Date.parse(left.createdAt || '')
+  const rightTime = Date.parse(right.createdAt || '')
+  if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
+    return rightTime - leftTime
+  }
+  return right.id - left.id
+}
+
+function mapChapterGateRunRow(row: ChapterGateRunRow): ChapterGateHistoryEntry {
+  return {
+    id: row.id,
+    novelId: row.novelId,
+    chapterId: row.chapterId,
+    chapterNum: row.chapterNum || 0,
+    gateLevel: (row.gateLevel || 'warning') as ChapterGateHistoryEntry['gateLevel'],
+    ready: row.ready === 1,
+    summary: row.summary || '',
+    rewriteCount: row.rewriteCount || 0,
+    blockerCount: row.blockerCount || 0,
+    warningCount: row.warningCount || 0,
+    generatedTaskCount: row.generatedTaskCount || 0,
+    topIssueKeys: safeParseStringArray(row.topIssueKeysJson),
+    scoreBreakdown: safeParseChapterGateScoreBreakdown(row.scoreBreakdownJson) || normalizeChapterGateScoreBreakdown(),
+    createdAt: row.createdAt || new Date(0).toISOString(),
+  }
 }
 
 function buildRecallFreshnessState(novelId: number): RecallFreshnessState {
@@ -1396,6 +1435,74 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     aiScoreJson: chapters.aiScoreJson,
     reviewNotesJson: chapters.reviewNotesJson,
   }).from(chapters).where(eq(chapters.novelId, novelId)).orderBy(asc(chapters.chapterNum)).all()
+  const chapterGateHistoryByChapterId = db.select().from(chapterGateRuns)
+    .where(eq(chapterGateRuns.novelId, novelId))
+    .all()
+    .map(mapChapterGateRunRow)
+    .reduce<Map<number, ChapterGateHistoryEntry[]>>((result, entry) => {
+      const current = result.get(entry.chapterId) || []
+      current.push(entry)
+      current.sort(sortChapterGateHistoryEntries)
+      result.set(entry.chapterId, current)
+      return result
+    }, new Map())
+  const latestChapterGateEntries = Array.from(chapterGateHistoryByChapterId.values())
+    .map((history) => history[0])
+    .filter((entry): entry is ChapterGateHistoryEntry => Boolean(entry))
+    .sort((left, right) => left.chapterNum - right.chapterNum || sortChapterGateHistoryEntries(left, right))
+  const chapterGateTrend: QualityDashboardData['chapterGateTrend'] = latestChapterGateEntries.map((entry) => ({
+    chapterId: entry.chapterId,
+    chapterNum: entry.chapterNum,
+    totalScore: entry.scoreBreakdown.totalScore,
+    gateLevel: entry.gateLevel,
+    scoreBand: getChapterGateScoreBand(entry.scoreBreakdown.totalScore),
+    createdAt: entry.createdAt,
+  }))
+  const chapterGateHeatmap: QualityDashboardData['chapterGateHeatmap'] = latestChapterGateEntries.flatMap((entry) => (
+    getChapterGatePrimaryDimensions(entry.scoreBreakdown).map((dimension) => ({
+      chapterId: entry.chapterId,
+      chapterNum: entry.chapterNum,
+      dimension: dimension.label,
+      score: dimension.score,
+      gateLevel: entry.gateLevel,
+      scoreBand: getChapterGateScoreBand(entry.scoreBreakdown.totalScore),
+      createdAt: entry.createdAt,
+    }))
+  ))
+  const chapterGateDriftAlerts: QualityDashboardData['chapterGateDriftAlerts'] = Array.from(chapterGateHistoryByChapterId.values())
+    .filter((history) => history.length > 1)
+    .map((history) => buildChapterGateDriftAlert(history[0], history[1]))
+    .sort((left, right) => Date.parse(right.createdAt || '') - Date.parse(left.createdAt || '') || right.chapterNum - left.chapterNum)
+  const chapterGateSummary: QualityDashboardData['chapterGateSummary'] = latestChapterGateEntries.reduce<QualityDashboardData['chapterGateSummary']>((result, entry) => {
+    const band = getChapterGateScoreBand(entry.scoreBreakdown.totalScore)
+    result.coveredChapterCount += 1
+    result.snapshotCount += chapterGateHistoryByChapterId.get(entry.chapterId)?.length || 0
+    result.averageTotalScore += entry.scoreBreakdown.totalScore
+    result.latestLevelCounts[entry.gateLevel] += 1
+    if (band === 'stable') result.stableCount += 1
+    if (band === 'attention') result.attentionCount += 1
+    if (band === 'risky') result.riskyCount += 1
+    if (band === 'unstable') result.unstableCount += 1
+    return result
+  }, {
+    coveredChapterCount: 0,
+    snapshotCount: 0,
+    averageTotalScore: 0,
+    stableCount: 0,
+    attentionCount: 0,
+    riskyCount: 0,
+    unstableCount: 0,
+    worseningAlertCount: chapterGateDriftAlerts.filter((alert) => alert.status === 'worsening').length,
+    latestLevelCounts: {
+      pass: 0,
+      warning: 0,
+      blocker: 0,
+      rewrite: 0,
+    },
+  })
+  if (chapterGateSummary.coveredChapterCount > 0) {
+    chapterGateSummary.averageTotalScore = roundMetric(chapterGateSummary.averageTotalScore / chapterGateSummary.coveredChapterCount)
+  }
   const volumeChapterRanges = buildVolumeChapterRanges(volumeRows, rows)
   const foreshadowSnapshot = getForeshadowSnapshot(novelId)
   const foreshadowCountsByVolume = buildForeshadowCountsByVolume(foreshadowSnapshot, volumeChapterRanges)
@@ -1515,43 +1622,56 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
 
     const scores = safeParseScores(row.aiScoreJson)
     const dialogueReview = parseDialogueReview(row.reviewNotesJson) || undefined
-    if (!scores) continue
+    let overallScore = 0
+    let aiLikeRate = 0
+    let weakDimensions: string[] = []
+    let dimensions: AIScoreDimension[] = []
+    let languageDriftMetrics: LanguageDriftMetrics | undefined
 
-    scoredCount += 1
-    totalOverall += scores.overall_score ?? 0
-    totalAiLike += scores.ai_like_rate ?? 0
-    overallScoreTrend.push({ chapterNum: row.chapterNum, score: scores.overall_score ?? 0 })
-    aiLikeRateTrend.push({ chapterNum: row.chapterNum, rate: scores.ai_like_rate ?? 0 })
+    if (scores) {
+      scoredCount += 1
+      overallScore = scores.overall_score ?? 0
+      aiLikeRate = scores.ai_like_rate ?? 0
+      weakDimensions = scores.weak_dimensions ?? []
+      dimensions = scores.dimensions
+      totalOverall += overallScore
+      totalAiLike += aiLikeRate
+      overallScoreTrend.push({ chapterNum: row.chapterNum, score: overallScore })
+      aiLikeRateTrend.push({ chapterNum: row.chapterNum, rate: aiLikeRate })
 
-    const languageDriftMetrics = normalizeLanguageDrift(scores.language_drift_metrics)
-    if (languageDriftMetrics) {
-      languageMetricsList.push(languageDriftMetrics)
-      pushLanguageDriftMetrics(languageDriftTrends, row.chapterNum, languageDriftMetrics)
-      if (typeof row.volumeId === 'number') {
-        const volumeMeta = volumeById.get(row.volumeId)
-        const volumeNumber = volumeMeta?.volumeNumber ?? row.volumeId
-        const volumeName = formatVolumeName(row.volumeId, volumeMeta?.volumeNumber, volumeMeta?.title)
-        const accumulator = volumeAccumulators.get(row.volumeId) || createVolumeAccumulator(row.volumeId, volumeNumber, volumeName)
-        accumulator.chapterNums.push(row.chapterNum)
-        accumulator.metricsList.push(languageDriftMetrics)
-        pushLanguageDriftMetrics(accumulator.trends, row.chapterNum, languageDriftMetrics)
-        volumeAccumulators.set(row.volumeId, accumulator)
+      languageDriftMetrics = normalizeLanguageDrift(scores.language_drift_metrics) || undefined
+      if (languageDriftMetrics) {
+        languageMetricsList.push(languageDriftMetrics)
+        pushLanguageDriftMetrics(languageDriftTrends, row.chapterNum, languageDriftMetrics)
+        if (typeof row.volumeId === 'number') {
+          const volumeMeta = volumeById.get(row.volumeId)
+          const volumeNumber = volumeMeta?.volumeNumber ?? row.volumeId
+          const volumeName = formatVolumeName(row.volumeId, volumeMeta?.volumeNumber, volumeMeta?.title)
+          const accumulator = volumeAccumulators.get(row.volumeId) || createVolumeAccumulator(row.volumeId, volumeNumber, volumeName)
+          accumulator.chapterNums.push(row.chapterNum)
+          accumulator.metricsList.push(languageDriftMetrics)
+          pushLanguageDriftMetrics(accumulator.trends, row.chapterNum, languageDriftMetrics)
+          volumeAccumulators.set(row.volumeId, accumulator)
+        }
       }
+
+      scores.dimensions.forEach((dim) => heatmapData.push({ chapterNum: row.chapterNum, dimension: dim.name, score: dim.score }))
+      ;(scores.weak_dimensions || []).forEach((dimension) => weakDimFreq.set(dimension, (weakDimFreq.get(dimension) || 0) + 1))
     }
 
-    scores.dimensions.forEach((dim) => heatmapData.push({ chapterNum: row.chapterNum, dimension: dim.name, score: dim.score }))
-    ;(scores.weak_dimensions || []).forEach((dimension) => weakDimFreq.set(dimension, (weakDimFreq.get(dimension) || 0) + 1))
     const chapterFunctionDetail = chapterFunctionDetailsByChapterId.get(row.id)
+    const chapterGateHistory = chapterGateHistoryByChapterId.get(row.id) || []
+    const latestChapterGate = chapterGateHistory[0]
     chapterDetails.push({
       chapterId: row.id,
       chapterNum: row.chapterNum,
       title: row.title || `第 ${row.chapterNum} 章`,
       volumeId: typeof row.volumeId === 'number' ? row.volumeId : undefined,
-      overallScore: scores.overall_score ?? 0,
-      aiLikeRate: scores.ai_like_rate ?? 0,
-      weakDimensions: scores.weak_dimensions ?? [],
-      dimensions: scores.dimensions,
-      languageDriftMetrics: languageDriftMetrics || undefined,
+      overallScore: overallScore || (latestChapterGate ? roundMetric(latestChapterGate.scoreBreakdown.totalScore / 10) : 0),
+      aiLikeRate,
+      weakDimensions,
+      dimensions,
+      languageDriftMetrics,
       dialogueReview,
       storyDynamics: hasStoryDynamics ? storyDynamics : undefined,
       chapterFunction: chapterFunctionDetail
@@ -1564,6 +1684,13 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
       storyArcProgress: chapterArcProgressMap.get(row.id),
       worldStateAlerts: (worldStateAlertMap.get(row.chapterNum) || []).slice(0, 4),
       recallDiagnostics: recallDiagnosticsByChapterId.get(row.id),
+      chapterGate: latestChapterGate
+        ? {
+          latest: latestChapterGate,
+          history: chapterGateHistory.slice(0, 6),
+          drift: chapterGateHistory.length > 1 ? buildChapterGateDriftSummary(chapterGateHistory[0], chapterGateHistory[1]) : undefined,
+        }
+        : undefined,
     })
   }
 
@@ -1817,6 +1944,7 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
   const volumeWorldStateById = new Map(volumeWorldStateStability.map((entry) => [entry.volumeId, entry] as const))
   const volumeQualityMetrics: VolumeQualityMetrics[] = volumeChapterRanges.map((volumeRange) => {
     const chapterEntries = chapterDetails.filter((entry) => entry.volumeId === volumeRange.volumeId)
+    const scoredChapterEntries = chapterEntries.filter((entry) => entry.dimensions.length > 0)
     const languageEntry = volumeLanguageDriftById.get(volumeRange.volumeId)
     const storyEntry = volumeStoryDynamicsById.get(volumeRange.volumeId)
     const functionEntry = volumeChapterFunctionById.get(volumeRange.volumeId)
@@ -1834,8 +1962,8 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     const arcAlerts = storyArcProgressSnapshot.alerts.filter((alert) => alert.volumeId === volumeRange.volumeId)
     const criticalArcAlertCount = arcAlerts.filter((alert) => alert.severity === 'critical').length
     const stalledArcCount = (arcEntry?.arcEntries || []).filter((entry) => entry.stallRate >= 50 || entry.missedPhaseLabels.length > 0).length
-    const averageAiLikeRate = averageNumbers(chapterEntries.map((entry) => entry.aiLikeRate))
-    const averageOverallScore = averageNumbers(chapterEntries.map((entry) => entry.overallScore))
+    const averageAiLikeRate = averageNumbers(scoredChapterEntries.map((entry) => entry.aiLikeRate))
+    const averageOverallScore = averageNumbers(scoredChapterEntries.map((entry) => entry.overallScore))
     const worseningMetricCount = languageEntry?.topWorseningMetrics.length || 0
     const rhythmBalanceScore = functionEntry?.rhythmBalanceScore || 0
     const repeatedFunctionRunCount = functionEntry?.repeatedRuns.length || 0
@@ -1942,7 +2070,7 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
       chapterStart: volumeRange.chapterStart,
       chapterEnd: volumeRange.chapterEnd,
       chapterCount: volumeRange.chapterCount,
-      analyzedChapterCount: chapterEntries.length,
+      analyzedChapterCount: scoredChapterEntries.length,
       healthScore: computeVolumeHealthScore({
         averageAiLikeRate,
         worseningMetricCount,
@@ -2052,7 +2180,7 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     healthScore: computeNovelHealthScore(volumeQualityMetrics, criticalRiskCount, warningRiskCount),
     totalVolumeCount: volumeQualityMetrics.length,
     totalChapterCount: rows.length,
-    analyzedChapterCount: chapterDetails.length,
+    analyzedChapterCount: scoredCount,
     criticalRiskCount,
     warningRiskCount,
     foreshadowPendingCount,
@@ -2081,6 +2209,10 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     heatmapData,
     overallScoreTrend,
     aiLikeRateTrend,
+    chapterGateTrend,
+    chapterGateHeatmap,
+    chapterGateSummary,
+    chapterGateDriftAlerts,
     languageDriftTrends,
     averageLanguageDrift: averageLanguageDriftMetrics,
     recentLanguageDriftAlerts,

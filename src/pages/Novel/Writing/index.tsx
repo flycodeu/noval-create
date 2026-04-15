@@ -169,27 +169,69 @@ const getStatusLabel = (status?: Chapter['status']) => STATUS_OPTIONS.find((item
 const getIssueColor = (severity: 'high' | 'medium' | 'low') => severity === 'high' ? 'error' : severity === 'medium' ? 'warning' : 'default'
 const getIssueLabel = (severity: 'high' | 'medium' | 'low') => severity === 'high' ? '高优先' : severity === 'medium' ? '中优先' : '低优先'
 const getHealthLabel = (score: number) => (score >= 80 ? '结构稳定' : score >= 60 ? '可继续推进' : '需要处理问题')
+const getPublishCheckStatusLabel = (status: ChapterPublishCheck['checklist'][number]['status']) => {
+  if (status === 'rewrite') return '退回重写'
+  if (status === 'blocker') return '阻塞'
+  if (status === 'warning') return '预警'
+  return '通过'
+}
+const getPublishCheckStatusTagColor = (status: ChapterPublishCheck['checklist'][number]['status']) => {
+  if (status === 'rewrite') return 'red'
+  if (status === 'blocker') return 'error'
+  if (status === 'warning') return 'warning'
+  return 'success'
+}
 const formatPublishCheckItemText = (item: ChapterPublishCheck['checklist'][number]) => {
-  const prefix = item.status === 'pass' ? '通过' : item.status === 'warning' ? '中优先' : '阻塞'
-  return `${prefix} · ${item.label}：${item.detail}`
+  const sourceLabel = item.segmentTitle
+    ? ` · ${item.segmentTitle}`
+    : item.source === 'scene'
+      ? ' · 场景'
+      : item.source === 'contract'
+        ? ' · 合同'
+        : item.source === 'review'
+          ? ' · 审校'
+          : item.source === 'thread'
+            ? ' · 线程'
+            : item.source === 'volume'
+              ? ' · 卷目标'
+              : ''
+  return `${getPublishCheckStatusLabel(item.status)} · ${item.label}${sourceLabel}：${item.detail}`
 }
 const formatContractAuditItemText = (item: ChapterContractAudit['items'][number]) => {
   const prefix = item.status === 'pass' ? '通过' : item.status === 'warning' ? '中优先' : '阻塞'
   return `${prefix} · ${item.label}：${item.detail}`
 }
-const collectPublishCheckMessages = (check: ChapterPublishCheck, status: 'warning' | 'blocker') => [
+const collectPublishCheckMessages = (check: ChapterPublishCheck, status: 'warning' | 'blocker' | 'rewrite') => [
   ...check.checklist
     .filter((item) => item.status === status)
     .map(formatPublishCheckItemText),
-  ...check.contractAudit.items
-    .filter((item) => item.status === status)
-    .map((item) => `合同对账 · ${formatContractAuditItemText(item)}`),
+  ...(status === 'rewrite'
+    ? []
+    : check.contractAudit.items
+      .filter((item) => item.status === status)
+      .map((item) => `合同对账 · ${formatContractAuditItemText(item)}`)),
 ]
 const getPublishCheckAlertType = (check: ChapterPublishCheck | null) => {
   if (!check) return 'info'
-  if (!check.ready) return 'error'
-  if (check.warningCount > 0) return 'warning'
+  if (check.gateLevel === 'rewrite' || check.gateLevel === 'blocker') return 'error'
+  if (check.gateLevel === 'warning') return 'warning'
   return 'success'
+}
+const getPublishCheckScoreTagColor = (score: number) => {
+  if (score >= 80) return 'success'
+  if (score >= 60) return 'processing'
+  if (score >= 40) return 'warning'
+  return 'error'
+}
+const getPublishCheckDriftLabel = (status?: 'worsening' | 'improving' | 'stable') => {
+  if (status === 'worsening') return '恶化'
+  if (status === 'improving') return '改善'
+  return '稳定'
+}
+const getPublishCheckDriftTagColor = (status?: 'worsening' | 'improving' | 'stable') => {
+  if (status === 'worsening') return 'error'
+  if (status === 'improving') return 'success'
+  return 'default'
 }
 const getWorldRulesSummary = (raw?: string) => {
   if (!raw) return []
@@ -364,6 +406,7 @@ export default function Writing({ novelId }: Props) {
   const [contextStatus, setContextStatus] = useState<NovelContextStatus | null>(null)
   const [chapterContextPreview, setChapterContextPreview] = useState<ChapterContextPreview | null>(null)
   const [publishCheck, setPublishCheck] = useState<ChapterPublishCheck | null>(null)
+  const [gateReportExpanded, setGateReportExpanded] = useState(false)
   const [hoverChapterId, setHoverChapterId] = useState<number | null>(null)
   const [selectedSnippet, setSelectedSnippet] = useState<TextSelectionSnapshot | null>(null)
   const [rewriteModalOpen, setRewriteModalOpen] = useState(false)
@@ -392,6 +435,13 @@ export default function Writing({ novelId }: Props) {
 
   useEffect(() => { currentChapterIdRef.current = currentChapterId }, [currentChapterId])
 
+  useEffect(() => {
+    if (!publishCheck) return
+    if (publishCheck.gateLevel !== 'pass') {
+      setGateReportExpanded(true)
+    }
+  }, [publishCheck])
+
   const clearChapterArtifacts = useCallback(() => {
     setTimelineEvents([])
     setStoryItems([])
@@ -400,6 +450,7 @@ export default function Writing({ novelId }: Props) {
     setForeshadowSnapshot(null)
     setChapterContextPreview(null)
     setPublishCheck(null)
+    setGateReportExpanded(false)
     setSelectedSnippet(null)
   }, [])
 
@@ -973,6 +1024,36 @@ export default function Writing({ novelId }: Props) {
     }
   }
 
+  const handleOpenGateIssue = useCallback((item: ChapterPublishCheck['checklist'][number]) => {
+    if (!currentChapter) return
+    if (item.relatedPage === 'structure') {
+      const params = new URLSearchParams({ chapterId: String(currentChapter.id) })
+      if (typeof item.segmentId === 'number') params.set('segmentId', String(item.segmentId))
+      navigate(`/novels/${novelId}/structure?${params.toString()}`)
+      return
+    }
+    if (item.relatedPage === 'contracts') {
+      navigate(`/novels/${novelId}/contracts?chapterId=${currentChapter.id}`)
+      return
+    }
+    if (item.relatedPage === 'revision') {
+      navigate(`/novels/${novelId}/revision`)
+      return
+    }
+    if (item.relatedPage === 'volume-design') {
+      navigate(`/novels/${novelId}/volume-design`)
+      return
+    }
+    if (item.relatedPage === 'threads') {
+      navigate(`/novels/${novelId}/threads`)
+      return
+    }
+    navigateToWritingRoute('editor')
+    message.info(item.status === 'rewrite'
+      ? '回到正文后先处理重写项，再重新执行章节验收。'
+      : '回到正文页处理当前验收问题。')
+  }, [currentChapter, navigate, navigateToWritingRoute, novelId])
+
   const handleStatusChange = async (status: string) => {
     if (!currentChapter) return
     if (status === 'final') {
@@ -983,26 +1064,55 @@ export default function Writing({ novelId }: Props) {
         : current)
       await refreshContextStatus()
 
-      if (!nextPublishCheck.ready) {
+      if (nextPublishCheck.gateLevel === 'rewrite') {
+        const rewriteMessages = collectPublishCheckMessages(nextPublishCheck, 'rewrite')
+        const rewriteItem = nextPublishCheck.checklist.find((item) => item.status === 'rewrite')
+        Modal.confirm({
+          title: '章节必须退回重写',
+          content: (
+            <div className="novel-note-list" style={{ marginTop: 12 }}>
+              <div className="novel-note-list__item">{nextPublishCheck.summary}</div>
+              {rewriteMessages.map((item) => <div key={item} className="novel-note-list__item">{item}</div>)}
+            </div>
+          ),
+          okText: '去处理',
+          cancelText: '留在当前页',
+          onOk: () => {
+            if (rewriteItem) handleOpenGateIssue(rewriteItem)
+          },
+        })
+        return
+      }
+
+      if (!nextPublishCheck.ready || nextPublishCheck.gateLevel === 'blocker') {
         const blockerMessages = collectPublishCheckMessages(nextPublishCheck, 'blocker')
-        Modal.error({
-          title: '发布前检查未通过',
+        Modal.confirm({
+          title: '章节验收未通过',
           content: (
             <div className="novel-note-list" style={{ marginTop: 12 }}>
               <div className="novel-note-list__item">{nextPublishCheck.summary}</div>
               {blockerMessages.map((item) => <div key={item} className="novel-note-list__item">{item}</div>)}
             </div>
           ),
-          okText: '返回处理',
+          okText: '去处理',
+          cancelText: '留在当前页',
+          onOk: () => {
+            const blockerItem = nextPublishCheck.checklist.find((item) => item.status === 'blocker')
+            if (blockerItem) {
+              handleOpenGateIssue(blockerItem)
+              return
+            }
+            navigate(`/novels/${novelId}/contracts?chapterId=${currentChapter.id}`)
+          },
         })
         return
       }
 
-      if (nextPublishCheck.warningCount > 0) {
+      if (nextPublishCheck.gateLevel === 'warning' && nextPublishCheck.warningCount > 0) {
         const warningMessages = collectPublishCheckMessages(nextPublishCheck, 'warning')
         const shouldContinue = await new Promise<boolean>((resolve) => {
           Modal.confirm({
-            title: '发布前仍有待处理项',
+            title: '章节验收仍有预警',
             content: (
               <div className="novel-note-list" style={{ marginTop: 12 }}>
                 <div className="novel-note-list__item">{nextPublishCheck.summary}</div>
@@ -1256,6 +1366,45 @@ export default function Writing({ novelId }: Props) {
     ...((aiResult?.issues || []).slice(0, 2).map((issue) => `AI体检：${issue.suggestion}`)),
   ].filter((item): item is string => Boolean(item))
 
+  const publishCheckSections = useMemo(() => {
+    if (!publishCheck) return []
+    return [
+      { key: 'rewrite', title: '退回重写', items: publishCheck.checklist.filter((item) => item.status === 'rewrite') },
+      { key: 'blocker', title: '阻塞项', items: publishCheck.checklist.filter((item) => item.status === 'blocker') },
+      { key: 'warning', title: '预警项', items: publishCheck.checklist.filter((item) => item.status === 'warning') },
+      { key: 'pass', title: '已通过', items: publishCheck.checklist.filter((item) => item.status === 'pass') },
+    ].filter((section) => section.items.length > 0)
+  }, [publishCheck])
+
+  const publishCheckScores = useMemo(() => {
+    if (!publishCheck) return []
+    return [
+      { label: '总分', value: publishCheck.scoreBreakdown.totalScore },
+      { label: '连续性', value: publishCheck.scoreBreakdown.continuityScore },
+      { label: '结构连贯', value: publishCheck.scoreBreakdown.coherenceScore },
+      { label: '对白辨识', value: publishCheck.scoreBreakdown.dialogueVoiceScore },
+      { label: '钩子强度', value: publishCheck.scoreBreakdown.hookStrengthScore },
+      { label: '主角与节奏', value: publishCheck.scoreBreakdown.storyDynamicsScore },
+      { label: '语言自然度', value: publishCheck.scoreBreakdown.languageNaturalnessScore },
+    ]
+  }, [publishCheck])
+
+  const publishCheckDriftHighlights = useMemo(() => {
+    if (!publishCheck?.drift) return []
+    return publishCheck.drift.topDimensions
+      .filter((item) => item.delta !== 0)
+      .slice(0, 3)
+      .map((item) => `${item.label}${item.delta > 0 ? '+' : ''}${item.delta}`)
+  }, [publishCheck])
+
+  const publishCheckHistoryItems = useMemo(() => {
+    if (!publishCheck?.history?.length) return []
+    return publishCheck.history.slice(0, 3).map((entry) => ({
+      id: entry.id,
+      text: `${entry.createdAt ? new Date(entry.createdAt).toLocaleString() : ''} · ${entry.gateLevel === 'rewrite' ? '退回重写' : entry.gateLevel === 'blocker' ? '阻塞' : entry.gateLevel === 'warning' ? '预警' : '通过'} · 总分 ${entry.scoreBreakdown.totalScore}`,
+    }))
+  }, [publishCheck])
+
   const currentChapterGeneration = currentChapter
     ? (
       activeGeneration.chapterId === currentChapter.id && activeGeneration.status !== 'idle'
@@ -1369,10 +1518,122 @@ export default function Writing({ novelId }: Props) {
       <div className="novel-writing-shell__insight-stack">
         <InsightCard title="发布前检查" eyebrow="完成门槛" tone="soft">
           {publishCheck ? (
-            <StringList
-              items={publishCheck.checklist.map(formatPublishCheckItemText)}
-              empty="当前没有发布前检查结果。"
-            />
+            <div className="novel-gate-report">
+              <div className="novel-gate-report__summary">
+                <div className="novel-gate-report__summary-copy">
+                  <div className="novel-gate-report__headline">
+                    <Tag color={getPublishCheckAlertType(publishCheck) === 'success' ? 'success' : getPublishCheckAlertType(publishCheck) === 'warning' ? 'warning' : 'error'}>
+                      {publishCheck.gateLevel === 'rewrite' ? '退回重写' : publishCheck.gateLevel === 'blocker' ? '阻塞' : publishCheck.gateLevel === 'warning' ? '预警' : '通过'}
+                    </Tag>
+                    <strong>{publishCheck.summary}</strong>
+                    <Tag color={getPublishCheckScoreTagColor(publishCheck.scoreBreakdown.totalScore)}>{`总分 ${publishCheck.scoreBreakdown.totalScore}`}</Tag>
+                    {publishCheck.drift ? (
+                      <Tag color={getPublishCheckDriftTagColor(publishCheck.drift.status)}>
+                        {`${getPublishCheckDriftLabel(publishCheck.drift.status)} ${publishCheck.drift.scoreDelta > 0 ? `+${publishCheck.drift.scoreDelta}` : publishCheck.drift.scoreDelta}`}
+                      </Tag>
+                    ) : null}
+                  </div>
+                  <div className="novel-gate-report__counts">
+                    <span>{`重写 ${publishCheck.rewriteCount}`}</span>
+                    <span>{`阻塞 ${publishCheck.blockerCount}`}</span>
+                    <span>{`预警 ${publishCheck.warningCount}`}</span>
+                    {publishCheck.generatedTaskCount > 0 ? <span>{`任务 ${publishCheck.generatedTaskCount}`}</span> : null}
+                  </div>
+                </div>
+                <div className="novel-gate-report__actions">
+                  {publishCheck.rewriteTarget ? (
+                    <Button
+                      size="small"
+                      type="primary"
+                      danger={publishCheck.gateLevel === 'rewrite'}
+                      onClick={() => {
+                        const rewriteItem = publishCheck.checklist.find((item) => item.status === 'rewrite')
+                        if (rewriteItem) handleOpenGateIssue(rewriteItem)
+                      }}
+                    >
+                      打开重写目标
+                    </Button>
+                  ) : null}
+                  <Button size="small" onClick={() => setGateReportExpanded((current) => !current)}>
+                    {gateReportExpanded ? '收起报告' : '展开报告'}
+                  </Button>
+                  <Button size="small" onClick={() => navigate(`/novels/${novelId}/quality`)}>
+                    去质量看板
+                  </Button>
+                </div>
+              </div>
+              {publishCheck.drift || publishCheckHistoryItems.length > 0 ? (
+                <div className="novel-gate-report__meta-grid">
+                  {publishCheck.drift ? (
+                    <div className="novel-gate-report__meta-card">
+                      <div className="novel-gate-report__meta-head">
+                        <strong>较上次验收</strong>
+                        <span>{publishCheck.drift.previousScore != null ? `上次 ${publishCheck.drift.previousScore}` : '首次记录'}</span>
+                      </div>
+                      <div className="novel-gate-report__meta-copy">{publishCheck.drift.summary}</div>
+                      {publishCheckDriftHighlights.length > 0 ? (
+                        <div className="novel-gate-report__meta-tags">
+                          {publishCheckDriftHighlights.map((item) => <Tag key={item}>{item}</Tag>)}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {publishCheckHistoryItems.length > 0 ? (
+                    <div className="novel-gate-report__meta-card">
+                      <div className="novel-gate-report__meta-head">
+                        <strong>最近门记录</strong>
+                        <span>{`${publishCheck.history.length} 次快照`}</span>
+                      </div>
+                      <div className="novel-gate-report__history-list">
+                        {publishCheckHistoryItems.map((item) => <div key={item.id}>{item.text}</div>)}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+              <div className="novel-gate-report__score-grid">
+                {publishCheckScores.map((item) => (
+                  <div key={item.label} className="novel-gate-report__score-card">
+                    <span>{item.label}</span>
+                    <strong>{item.value}</strong>
+                  </div>
+                ))}
+              </div>
+              <div className="novel-copy-block">合同对账：{publishCheck.contractAudit.summary}</div>
+              {gateReportExpanded ? (
+                <div className="novel-gate-report__sections">
+                  {publishCheckSections.map((section) => (
+                    <section key={section.key} className="novel-gate-report__section">
+                      <div className="novel-gate-report__section-head">
+                        <strong>{section.title}</strong>
+                        <span>{section.items.length} 项</span>
+                      </div>
+                      <div className="novel-gate-report__item-list">
+                        {section.items.map((item) => (
+                          <div key={item.key} className="novel-gate-report__item">
+                            <div className="novel-gate-report__item-head">
+                              <div className="novel-gate-report__item-title">
+                                <Tag color={getPublishCheckStatusTagColor(item.status)}>{getPublishCheckStatusLabel(item.status)}</Tag>
+                                <strong>{item.label}</strong>
+                                {item.segmentTitle ? <span>{item.segmentTitle}</span> : null}
+                                {typeof item.taskId === 'number' ? <Tag color="blue">{`任务 #${item.taskId}`}</Tag> : null}
+                              </div>
+                              {item.status !== 'pass' ? (
+                                <Button size="small" onClick={() => handleOpenGateIssue(item)}>
+                                  去处理
+                                </Button>
+                              ) : null}
+                            </div>
+                            <div className="novel-gate-report__item-detail">{item.detail}</div>
+                            {item.fixHint ? <div className="novel-gate-report__item-hint">{`建议：${item.fixHint}`}</div> : null}
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  ))}
+                </div>
+              ) : null}
+            </div>
           ) : <div className="novel-copy-block">当前没有发布前检查结果。</div>}
         </InsightCard>
         <InsightCard title="合同对账" eyebrow="章节 / 场景合同" tone="soft">
@@ -1647,8 +1908,8 @@ export default function Writing({ novelId }: Props) {
                       showIcon
                       type={getPublishCheckAlertType(publishCheck)}
                       style={{ marginBottom: 16 }}
-                      message={`发布前检查：${publishCheck.summary}`}
-                      description={`阻塞 ${publishCheck.blockerCount} 项，中优先 ${publishCheck.warningCount} 项。标记完成时会再次自动复检。`}
+                      message={`章节验收：${publishCheck.summary}`}
+                      description={`重写 ${publishCheck.rewriteCount} 项，阻塞 ${publishCheck.blockerCount} 项，预警 ${publishCheck.warningCount} 项。标记完成时会再次自动复检。`}
                     />
                   ) : null}
                   {hasMultiSegments ? (
