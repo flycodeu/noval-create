@@ -1377,6 +1377,48 @@ export interface SoftContextBudgetUsage {
   truncatedLabels: string[]
 }
 
+export type PreviousChapterSampleSegmentType =
+  | 'full_text'
+  | 'opening'
+  | 'summary'
+  | 'continuity'
+  | 'scene_anchor'
+  | 'review'
+  | 'writeback'
+  | 'seed'
+  | 'tail'
+
+export interface PreviousChapterSampleSegment {
+  type: PreviousChapterSampleSegmentType
+  label: string
+  text: string
+  chars: number
+}
+
+export interface PreviousChapterSampleReport {
+  sourceChapterId: number | null
+  sourceChapterNum: number | null
+  sourceChapterChars: number
+  sampledChars: number
+  coverageRate: number
+  segmentCount: number
+  fullyInjected: boolean
+  segments: PreviousChapterSampleSegment[]
+}
+
+export type ContextDecisionStatus = 'kept' | 'truncated' | 'dropped'
+export type ContextDecisionReason = 'budget_fit' | 'budget_insufficient' | 'covered_by_hard_constraint'
+
+export interface ContextDecisionEntry {
+  label: string
+  title: string
+  priority: 0 | 1 | 2 | 3 | 'hard'
+  originalTokens: number
+  allocatedTokens: number
+  status: ContextDecisionStatus
+  reason: ContextDecisionReason
+}
+
 export type ContextBudgetOverflowLevel = 'none' | 'soft_trimmed' | 'hard_failed'
 
 export interface ContextBudgetWarningSummary {
@@ -1450,6 +1492,7 @@ export interface ChapterContextPreviewStage {
   constraintInjectionStatus: ConstraintInjectionStatus
   softContextBudgetUsage: SoftContextBudgetUsage
   contextBudgetReport: ContextBudgetReport
+  softContextDecisions: ContextDecisionEntry[]
   droppedConstraintCount: number
 }
 
@@ -1457,6 +1500,8 @@ export interface ChapterContextPreview {
   chapterId: number
   chapterNum: number
   complexity: ChapterContextComplexity
+  previousChapterContext: string
+  previousChapterSampleReport: PreviousChapterSampleReport
   recalledMemory: string
   recallDiagnostics: RecallDiagnostics
   recalledMemorySources: RecallMemorySource[]
@@ -3263,6 +3308,8 @@ export interface QualityDashboardData {
     staleRecallRate: number
     fallbackHitCount: number
     selectedHitCount: number
+    previousChapterFeedCoverageRate: number
+    previousChapterFeedChars: number
   }
   recentRecallAlerts: Array<{
     chapterId: number
@@ -3282,6 +3329,8 @@ export interface QualityDashboardData {
     recallDependencyRate: number
     staleRecallCount: number
     staleRecallRate: number
+    previousChapterFeedCoverageRate: number
+    previousChapterFeedChars: number
   }>
   volumeWorldStateStability: Array<{
     volumeId: number
@@ -3660,6 +3709,7 @@ declare global {
         batchRenumber: (ids: number[], startChapterNum: number) => Promise<number>
         getContextPreview: (chapterId: number) => Promise<ChapterContextPreview>
         generateContent: (chapterId: number) => Promise<number>
+        resumeContent: (taskId: number) => Promise<number>
         generateSummary: (chapterId: number) => Promise<void>
         aiCheck: (chapterId: number) => Promise<unknown>
         runPublishCheck: (chapterId: number) => Promise<ChapterPublishCheck>

@@ -38,6 +38,7 @@ import type {
 } from '../../src/types'
 import { getDb } from '../database/db'
 import { chapterGateRuns, chapters, characterStateVersions, characters, storyVolumes, timelineEvents, worldStateVersions } from '../database/schema'
+import { buildPreviousChapterContextFeed } from './context.service'
 import {
   buildChapterGateDriftAlert,
   buildChapterGateDriftSummary,
@@ -1894,6 +1895,13 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
       outline: row.outline,
     }, recallFreshnessState),
   }))
+  const previousChapterFeedReportsByChapterId = new Map(rows.map((row, index) => [
+    row.id,
+    buildPreviousChapterContextFeed(index > 0 ? rows[index - 1] : null).previousChapterSampleReport,
+  ] as const))
+  const previousChapterFeedReports = recallEntries
+    .map((entry) => previousChapterFeedReportsByChapterId.get(entry.chapterId))
+    .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry && entry.sourceChapterId))
   const analyzedRecallEntries = recallEntries.filter((entry) => entry.diagnostics.totalHitCount > 0)
   const recallSummary: QualityDashboardData['recallSummary'] = {
     analyzedChapterCount: analyzedRecallEntries.length,
@@ -1906,6 +1914,12 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
       : 0,
     fallbackHitCount: analyzedRecallEntries.reduce((sum, entry) => sum + entry.diagnostics.fallbackHitCount, 0),
     selectedHitCount: analyzedRecallEntries.reduce((sum, entry) => sum + entry.diagnostics.selectedHitCount, 0),
+    previousChapterFeedCoverageRate: previousChapterFeedReports.length > 0
+      ? roundMetric(previousChapterFeedReports.reduce((sum, entry) => sum + entry.coverageRate, 0) / previousChapterFeedReports.length)
+      : 0,
+    previousChapterFeedChars: previousChapterFeedReports.length > 0
+      ? roundMetric(previousChapterFeedReports.reduce((sum, entry) => sum + entry.sampledChars, 0) / previousChapterFeedReports.length)
+      : 0,
   }
   const recentRecallAlerts: QualityDashboardData['recentRecallAlerts'] = recallEntries
     .filter((entry) => entry.diagnostics.staleRecallCount > 0)
@@ -1932,6 +1946,22 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
         recallDependencyRate: roundMetric(entries.reduce((sum, entry) => sum + entry.diagnostics.recallDependencyRate, 0) / entries.length),
         staleRecallCount: entries.reduce((sum, entry) => sum + entry.diagnostics.staleRecallCount, 0),
         staleRecallRate: roundMetric(entries.reduce((sum, entry) => sum + entry.diagnostics.staleRecallRate, 0) / entries.length),
+        previousChapterFeedCoverageRate: (() => {
+          const feedReports = entries
+            .map((entry) => previousChapterFeedReportsByChapterId.get(entry.chapterId))
+            .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry && entry.sourceChapterId))
+          return feedReports.length > 0
+            ? roundMetric(feedReports.reduce((sum, entry) => sum + entry.coverageRate, 0) / feedReports.length)
+            : 0
+        })(),
+        previousChapterFeedChars: (() => {
+          const feedReports = entries
+            .map((entry) => previousChapterFeedReportsByChapterId.get(entry.chapterId))
+            .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry && entry.sourceChapterId))
+          return feedReports.length > 0
+            ? roundMetric(feedReports.reduce((sum, entry) => sum + entry.sampledChars, 0) / feedReports.length)
+            : 0
+        })(),
       }
     })
     .filter((item): item is NonNullable<QualityDashboardData['volumeRecallDiagnostics'][number]> => Boolean(item))

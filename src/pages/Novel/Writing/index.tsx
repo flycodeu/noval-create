@@ -107,6 +107,9 @@ interface WritingPipelineRoleState {
   canonRunId?: number
   durationMs?: number
   tokensUsed?: number
+  failureCode?: string
+  rewriteScope?: string
+  targetSegmentId?: number | null
 }
 
 interface WritingPipelineSnapshot {
@@ -122,6 +125,9 @@ interface WritingPipelineSnapshot {
   canonRunId?: number
   totalTokensUsed: number
   totalDurationMs: number
+  failureCode?: string
+  rewriteScope?: string
+  targetSegmentId?: number | null
   roles: Record<WritingPipelineRole, WritingPipelineRoleState>
 }
 
@@ -1607,7 +1613,7 @@ export default function Writing({ novelId }: Props) {
           {currentPipelineSnapshot ? (
             <div style={{ display: 'grid', gap: 12 }}>
               <div className="novel-copy-block">
-                {`当前阶段：${currentPipelineSnapshot.currentRole ? currentPipelineSnapshot.roles[currentPipelineSnapshot.currentRole]?.label || currentPipelineSnapshot.currentRole : '待启动'} · 合同版本 ${currentPipelineSnapshot.contractVersion || '未记录'} · 总耗时 ${currentPipelineSnapshot.totalDurationMs ? `${(currentPipelineSnapshot.totalDurationMs / 1000).toFixed(1)}s` : '-'} · 总 tokens ${currentPipelineSnapshot.totalTokensUsed || 0}`}
+                {`当前阶段：${currentPipelineSnapshot.currentRole ? currentPipelineSnapshot.roles[currentPipelineSnapshot.currentRole]?.label || currentPipelineSnapshot.currentRole : '待启动'} · 合同版本 ${currentPipelineSnapshot.contractVersion || '未记录'} · 总耗时 ${currentPipelineSnapshot.totalDurationMs ? `${(currentPipelineSnapshot.totalDurationMs / 1000).toFixed(1)}s` : '-'} · 总 tokens ${currentPipelineSnapshot.totalTokensUsed || 0}${currentPipelineSnapshot.failureCode ? ` · 退出码 ${currentPipelineSnapshot.failureCode}` : ''}`}
               </div>
               <div style={{ display: 'grid', gap: 8 }}>
                 {pipelineRoleItems.map((item) => (
@@ -1622,7 +1628,7 @@ export default function Writing({ novelId }: Props) {
                     </div>
                     <div className="novel-issue-item__desc">{item.detail || item.summary}</div>
                     <div className="novel-issue-item__suggestion">
-                      {`预算：${item.durationMs ? `${(item.durationMs / 1000).toFixed(1)}s` : '-'} / ${item.tokensUsed || 0} tokens`}
+                      {`预算：${item.durationMs ? `${(item.durationMs / 1000).toFixed(1)}s` : '-'} / ${item.tokensUsed || 0} tokens${item.failureCode ? ` · ${item.failureCode}` : ''}${item.rewriteScope ? ` · ${item.rewriteScope}` : ''}${typeof item.targetSegmentId === 'number' ? ` · scene#${item.targetSegmentId}` : ''}`}
                     </div>
                   </div>
                 ))}
@@ -1635,6 +1641,9 @@ export default function Writing({ novelId }: Props) {
         </InsightCard>
         <InsightCard title="关键约束注入" eyebrow="本章关键约束已注入" tone="soft">
           <ConstraintInjectionCard preview={chapterContextPreview} />
+        </InsightCard>
+        <InsightCard title="上一章关键先验" eyebrow="承接上一章的真实输入" tone="soft">
+          <PreviousChapterFeedCard preview={chapterContextPreview} />
         </InsightCard>
         <InsightCard title="召回补充层" eyebrow="背景补充 / 非事实源" tone="soft">
           <RecallDiagnosticsCard preview={chapterContextPreview} />
@@ -2620,6 +2629,16 @@ function ConstraintInjectionCard({ preview }: { preview: ChapterContextPreview |
           .filter((entry) => entry.count > 0)
           .map((entry) => `P${entry.priority} ${entry.count}项`)
           .join('，')
+        const decisionLines = stage.softContextDecisions
+          .filter((entry) => entry.status !== 'kept' || entry.reason === 'covered_by_hard_constraint')
+          .map((entry) => {
+            if (entry.reason === 'covered_by_hard_constraint') {
+              return `${entry.title}：走硬约束通道${entry.status === 'truncated' ? `，已压缩到 ${entry.allocatedTokens}/${entry.originalTokens} tokens` : '，未占用软预算'}`
+            }
+            return `${entry.title}：${entry.status === 'dropped'
+              ? `被踢出（${entry.originalTokens} tokens）`
+              : `被压缩 ${entry.originalTokens}→${entry.allocatedTokens} tokens`}`
+          })
         return (
           <div key={stage.stage} className="novel-note-list">
             <div className="novel-note-list__item">
@@ -2660,9 +2679,40 @@ function ConstraintInjectionCard({ preview }: { preview: ChapterContextPreview |
                 ? `被压缩：${report.truncatedLabels.join('、')}`
                 : '没有字段因预算被截断。'}
             </div>
+            <div className="novel-note-list__item">
+              {decisionLines.length > 0
+                ? `软预算决策：${decisionLines.join('；')}`
+                : '软上下文没有额外裁剪，也没有字段改走硬约束。'}
+            </div>
           </div>
         )
       })}
+    </div>
+  )
+}
+
+function PreviousChapterFeedCard({ preview }: { preview: ChapterContextPreview | null }) {
+  if (!preview) {
+    return <div className="novel-copy-block">上下文预览生成后，这里会展示上一章先验采样、覆盖率和实际喂给模型的承接文本。</div>
+  }
+
+  const report = preview.previousChapterSampleReport
+  const segmentSummary = report.segments.map((segment) => `${segment.label} ${segment.chars}字`)
+
+  return (
+    <div style={{ display: 'grid', gap: 10 }}>
+      <div className="novel-insight-list">
+        <div className="novel-insight-list__item">
+          {report.sourceChapterNum ? `来源第${report.sourceChapterNum}章` : '当前还没有上一章可供采样'}
+        </div>
+        <div className="novel-insight-list__item">采样 {report.sampledChars} 字</div>
+        <div className="novel-insight-list__item">覆盖率 {report.coverageRate}%</div>
+        <div className="novel-insight-list__item">{report.fullyInjected ? '短章全文注入' : `片段 ${report.segmentCount} 段`}</div>
+      </div>
+      <StringList items={segmentSummary} empty="当前没有上一章先验片段。" />
+      {preview.previousChapterContext
+        ? <div className="novel-copy-block" style={{ whiteSpace: 'pre-wrap' }}>{preview.previousChapterContext}</div>
+        : <div className="novel-copy-block">当前章节前没有可注入的上一章先验。</div>}
     </div>
   )
 }

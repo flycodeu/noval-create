@@ -169,6 +169,7 @@ export interface ChapterWritingPromptInput {
   characterStates: string
   worldStates?: string
   previousSummaries: string
+  previousChapterContext: string
   lastChapterEnding: string
   styleTemplate: string
   continuitySummary: string
@@ -204,6 +205,7 @@ export interface ScenePlanPromptInput {
   worldStates?: string
   itemSummary: string
   previousSummaries: string
+  previousChapterContext: string
   lastChapterEnding: string
   continuitySummary: string
   openLoops: string
@@ -236,6 +238,7 @@ export interface ChapterReviewPromptInput {
   characterStates: string
   worldStates?: string
   itemSummary: string
+  previousChapterContext: string
   continuitySummary: string
   openLoops: string
   dueForeshadows?: string
@@ -272,6 +275,7 @@ export interface ChapterRewritePromptInput {
   worldStates?: string
   itemSummary: string
   previousSummaries: string
+  previousChapterContext: string
   lastChapterEnding: string
   continuitySummary: string
   openLoops: string
@@ -1284,6 +1288,7 @@ export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
     section('人物当前状态', params.characterStates),
     section('当前世界状态', params.worldStates),
     section('关键物品与去向', params.itemSummary),
+    section('上一章关键先验', params.previousChapterContext),
     section('上章结尾', params.lastChapterEnding),
     section('最近章节摘要', params.previousSummaries),
     section('连续性记忆', params.continuitySummary),
@@ -1355,6 +1360,7 @@ export function buildChapterWritingPrompt(params: ChapterWritingPromptInput): st
     section('时间轴关键节点', params.timelineSummary),
     section('时间轴待回收事项', params.timelineOpenThreads),
     section('活跃支线与伏笔', params.activeThreads),
+    section('上一章关键先验', params.previousChapterContext),
     section('上章结尾', params.lastChapterEnding),
     section('当前人物状态', params.characterStates),
     section('当前世界状态', params.worldStates),
@@ -1410,6 +1416,7 @@ export function buildChapterDraftPrompt(params: ChapterRewritePromptInput): stri
     section('人物当前状态', params.characterStates),
     section('当前世界状态', params.worldStates),
     section('关键物品与去向', params.itemSummary),
+    section('上一章关键先验', params.previousChapterContext),
     section('上章结尾', params.lastChapterEnding),
     section('最近章节摘要', params.previousSummaries),
     section('连续性记忆', params.continuitySummary),
@@ -1468,6 +1475,7 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
     section('人物当前状态', params.characterStates),
     section('当前世界状态', params.worldStates),
     section('关键物品与去向', params.itemSummary),
+    section('上一章关键先验', params.previousChapterContext),
     section('连续性记忆', params.continuitySummary),
     section('未回收事项', params.openLoops),
     section('本章应回收伏笔', params.dueForeshadows),
@@ -1547,6 +1555,7 @@ export function buildChapterRewritePrompt(params: ChapterRewritePromptInput): st
     section('人物当前状态', params.characterStates),
     section('当前世界状态', params.worldStates),
     section('关键物品与去向', params.itemSummary),
+    section('上一章关键先验', params.previousChapterContext),
     section('上章结尾', params.lastChapterEnding),
     section('近章摘要', params.previousSummaries),
     section('连续性记忆', params.continuitySummary),
@@ -1686,6 +1695,7 @@ export function chapterWritingPrompt(params: {
   characterStates: string
   worldStates?: string
   previousSummaries: string
+  previousChapterContext: string
   lastChapterEnding: string
   styleTemplate: string
   targetWords: number
@@ -1717,6 +1727,7 @@ export function chapterWritingPrompt(params: {
     characterStates: params.characterStates,
     worldStates: params.worldStates || '',
     previousSummaries: params.previousSummaries,
+    previousChapterContext: params.previousChapterContext,
     lastChapterEnding: params.lastChapterEnding,
     styleTemplate: params.styleTemplate,
     continuitySummary: params.continuitySummary || '',
@@ -2092,6 +2103,7 @@ export const PROMPT_CATALOG: PromptCatalogEntry[] = [
       { key: 'worldRules', label: '世界规则' },
       { key: 'characterStates', label: '人物状态' },
       { key: 'previousSummaries', label: '近章摘要' },
+      { key: 'previousChapterContext', label: '上一章关键先验' },
       { key: 'lastChapterEnding', label: '上章结尾' },
       { key: 'styleTemplate', label: '文风参考' },
       { key: 'continuitySummary', label: '连续性记忆' },
@@ -2116,6 +2128,7 @@ export const PROMPT_CATALOG: PromptCatalogEntry[] = [
       worldRules: placeholder('worldRules'),
       characterStates: placeholder('characterStates'),
       previousSummaries: placeholder('previousSummaries'),
+      previousChapterContext: placeholder('previousChapterContext'),
       lastChapterEnding: placeholder('lastChapterEnding'),
       styleTemplate: placeholder('styleTemplate'),
       continuitySummary: placeholder('continuitySummary'),

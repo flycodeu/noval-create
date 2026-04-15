@@ -217,6 +217,14 @@ function isWorkflowResumable(task: Task): boolean {
   return hasResumableWorkflowCheckpoint(task)
 }
 
+function isChapterPipelineResumeSupported(task: Task, recoveryAction: ReturnType<typeof buildTaskRecoveryAction> | null): boolean {
+  return Boolean(
+    recoveryAction?.kind === 'resume'
+    && task.relatedEntityType === 'chapter'
+    && (task.type === 'chapter_write' || task.parentTaskId),
+  )
+}
+
 function getTaskRetryabilityLabel(task: Task): string {
   return isTaskRetryable(task) ? '支持安全重试' : '需回到功能页重新发起'
 }
@@ -448,9 +456,15 @@ export default function TaskCenter() {
     }
   }
 
-  const handleResume = async (taskId: number) => {
+  const handleResume = async (task: Task, recoveryAction?: ReturnType<typeof buildTaskRecoveryAction> | null) => {
     try {
-      await window.electron.workflow.resume(taskId)
+      if (task.runnerType === 'workflow' && task.status === 'paused' && isWorkflowResumable(task)) {
+        await window.electron.workflow.resume(task.id)
+      } else if (isChapterPipelineResumeSupported(task, recoveryAction || null)) {
+        await window.electron.chapter.resumeContent(task.id)
+      } else {
+        return
+      }
       message.success(getUserFacingMessage('taskCenter.resumed'))
       await loadTasks({ silent: true })
     } catch (error) {
@@ -555,6 +569,9 @@ export default function TaskCenter() {
       typeof pipeline?.message === 'string' && pipeline.message.trim() ? `流水线摘要：${pipeline.message.trim()}` : '',
       typeof pipeline?.currentRole === 'string' ? `当前角色：${PIPELINE_ROLE_LABELS[pipeline.currentRole] || pipeline.currentRole}` : '',
       typeof pipeline?.contractVersion === 'string' && pipeline.contractVersion.trim() ? `合同版本：${pipeline.contractVersion.trim()}` : '',
+      typeof pipeline?.failureCode === 'string' ? `失败退出码：${pipeline.failureCode}` : '',
+      typeof pipeline?.rewriteScope === 'string' ? `重写粒度：${pipeline.rewriteScope}` : '',
+      typeof pipeline?.targetSegmentId === 'number' ? `目标场景：#${pipeline.targetSegmentId}` : '',
       typeof pipeline?.canonRunId === 'number' ? `Canon Run：#${pipeline.canonRunId}` : '',
       typeof pipeline?.totalDurationMs === 'number' && pipeline.totalDurationMs > 0 ? `总耗时：${(pipeline.totalDurationMs / 1000).toFixed(1)}s` : '',
       typeof pipeline?.totalTokensUsed === 'number' && pipeline.totalTokensUsed > 0 ? `总 tokens：${pipeline.totalTokensUsed}` : '',
@@ -577,7 +594,10 @@ export default function TaskCenter() {
           const label = typeof item.label === 'string' ? item.label : (typeof item.role === 'string' ? (PIPELINE_ROLE_LABELS[item.role] || item.role) : '阶段')
           const status = typeof item.status === 'string' ? (PIPELINE_STAGE_LABELS[item.status] || item.status) : '未知'
           const detail = typeof item.detail === 'string' ? item.detail : ''
-          return detail ? `${label}：${status} · ${detail}` : `${label}：${status}`
+          const failureCode = typeof item.failureCode === 'string' ? ` · ${item.failureCode}` : ''
+          const rewriteScope = typeof item.rewriteScope === 'string' ? ` · ${item.rewriteScope}` : ''
+          const segment = typeof item.targetSegmentId === 'number' ? ` · scene#${item.targetSegmentId}` : ''
+          return detail ? `${label}：${status}${failureCode}${rewriteScope}${segment} · ${detail}` : `${label}：${status}${failureCode}${rewriteScope}${segment}`
         })
       : []
 
@@ -752,8 +772,9 @@ export default function TaskCenter() {
                   取消
                 </Button>
               ) : null}
-              {selectedTask.status === 'paused' && isWorkflowResumable(selectedTask) ? (
-                <Button icon={<ReloadOutlined />} onClick={() => void handleResume(selectedTask.id)}>
+              {(selectedTask.status === 'paused' && isWorkflowResumable(selectedTask))
+                || isChapterPipelineResumeSupported(selectedTask, selectedRecoveryAction) ? (
+                <Button icon={<ReloadOutlined />} onClick={() => void handleResume(selectedTask, selectedRecoveryAction)}>
                   继续
                 </Button>
               ) : null}

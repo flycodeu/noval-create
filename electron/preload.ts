@@ -186,6 +186,7 @@ const api = {
     batchRenumber: (ids: number[], startChapterNum: number) => invokeIpc('chapter:batchRenumber', ids, startChapterNum),
     getContextPreview: (chapterId: number) => invokeIpc('chapter:getContextPreview', chapterId),
     generateContent: (chapterId: number) => invokeIpc('chapter:generateContent', chapterId),
+    resumeContent: (taskId: number) => invokeIpc('chapter:resumeContent', taskId),
     generateSummary: (chapterId: number) => invokeIpc('chapter:generateSummary', chapterId),
     aiCheck: (chapterId: number) => invokeIpc('chapter:aiCheck', chapterId),
     runPublishCheck: (chapterId: number) => invokeIpc('chapter:runPublishCheck', chapterId),

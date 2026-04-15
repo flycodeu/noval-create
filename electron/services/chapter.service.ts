@@ -160,6 +160,15 @@ interface ChapterReviewNotes {
 type ChapterPipelineRole = 'planner' | 'writer' | 'critic' | 'rewriter' | 'canonizer' | 'finalize'
 type ChapterPipelineRoleStatus = 'pending' | 'running' | 'success' | 'failed' | 'blocked'
 type ChapterGenerationStage = 'planning' | 'drafting' | 'reviewing' | 'rewriting' | 'canonizing' | 'completed' | 'failed'
+type ChapterPipelineFailureCode =
+  | 'contract_blocked'
+  | 'context_overflow'
+  | 'anti_ai_failed'
+  | 'gate_rewrite_required'
+  | 'canon_pending'
+  | 'canon_failed'
+  | 'human_review_required'
+type ChapterRewriteScope = 'paragraph_patch' | 'scene_rewrite' | 'chapter_rewrite' | 'contract_replan'
 
 interface ChapterPipelineRoleState {
   role: ChapterPipelineRole
@@ -176,6 +185,9 @@ interface ChapterPipelineRoleState {
   durationMs?: number
   tokensUsed?: number
   recoveryHint?: TaskRecoveryHint
+  failureCode?: ChapterPipelineFailureCode
+  rewriteScope?: ChapterRewriteScope
+  targetSegmentId?: number | null
 }
 
 interface ChapterPipelineSnapshot {
@@ -192,6 +204,10 @@ interface ChapterPipelineSnapshot {
   totalTokensUsed: number
   totalDurationMs: number
   recoveryHint?: TaskRecoveryHint
+  failureCode?: ChapterPipelineFailureCode
+  rewriteScope?: ChapterRewriteScope
+  targetSegmentId?: number | null
+  lastFailureRole?: ChapterPipelineRole
   roles: Record<ChapterPipelineRole, ChapterPipelineRoleState>
 }
 
@@ -207,6 +223,34 @@ interface ChapterGenerationProgressEvent {
   total: number
   status: 'running' | 'success' | 'failed' | 'cancelled'
   pipeline?: ChapterPipelineSnapshot
+}
+
+class ChapterPipelineStageError extends Error {
+  code: ChapterPipelineFailureCode
+  blocked: boolean
+  rewriteScope?: ChapterRewriteScope
+  targetSegmentId?: number | null
+  outputText?: string
+
+  constructor(
+    code: ChapterPipelineFailureCode,
+    message: string,
+    options: {
+      blocked?: boolean
+      rewriteScope?: ChapterRewriteScope
+      targetSegmentId?: number | null
+      outputText?: string
+      cause?: unknown
+    } = {},
+  ) {
+    super(message, options.cause ? { cause: options.cause } : undefined)
+    this.name = 'ChapterPipelineStageError'
+    this.code = code
+    this.blocked = Boolean(options.blocked)
+    this.rewriteScope = options.rewriteScope
+    this.targetSegmentId = options.targetSegmentId
+    this.outputText = options.outputText
+  }
 }
 
 interface LockedParagraphContext {
@@ -419,7 +463,39 @@ function buildChapterPipelineRecoveryHint(
   novelId: number,
   chapterId: number,
   role: ChapterPipelineRole,
+  failureCode?: ChapterPipelineFailureCode,
 ): TaskRecoveryHint {
+  if (
+    failureCode === 'context_overflow'
+    || failureCode === 'anti_ai_failed'
+    || failureCode === 'gate_rewrite_required'
+    || failureCode === 'human_review_required'
+  ) {
+    return {
+      kind: 'resume',
+      label: '继续章节流水线',
+      description: '从当前失败阶段重新拉起整条章节流水线，并重新读取最新合同、上下文版本和锁定段落。',
+    }
+  }
+
+  if (failureCode === 'contract_blocked') {
+    return {
+      kind: 'open_page',
+      label: '重跑章节合同',
+      description: '打开章节合同页，先修正合同或场景约束，再重新启动正文流水线。',
+      path: buildChapterWorkspacePath(novelId, 'contracts', chapterId),
+    }
+  }
+
+  if (failureCode === 'canon_failed' || failureCode === 'canon_pending') {
+    return {
+      kind: 'open_page',
+      label: '重做 Canon 回写',
+      description: '打开章后状态回写中心，检查 Canon 候选并重新生成或处理失败项。',
+      path: buildChapterWorkspacePath(novelId, 'writeback', chapterId),
+    }
+  }
+
   switch (role) {
     case 'planner':
       return {
@@ -463,6 +539,76 @@ function buildChapterPipelineRecoveryHint(
 
 function serializeTaskRecoveryHint(hint?: TaskRecoveryHint): string | undefined {
   return hint ? JSON.stringify(hint) : undefined
+}
+
+function buildPipelineFailureOutput(
+  code: ChapterPipelineFailureCode,
+  detail: string,
+  options: {
+    rewriteScope?: ChapterRewriteScope
+    targetSegmentId?: number | null
+  } = {},
+) {
+  const scopeText = options.rewriteScope ? `rewrite_scope: ${options.rewriteScope}` : ''
+  const segmentText = typeof options.targetSegmentId === 'number' ? `target_segment_id: ${options.targetSegmentId}` : ''
+  return [
+    `exit_code: ${code}`,
+    `detail: ${detail}`,
+    scopeText,
+    segmentText,
+  ].filter(Boolean).join('\n')
+}
+
+function classifyChapterPipelineFailure(
+  role: ChapterPipelineRole,
+  error: unknown,
+): {
+  code?: ChapterPipelineFailureCode
+  blocked: boolean
+  rewriteScope?: ChapterRewriteScope
+  targetSegmentId?: number | null
+  outputText?: string
+} {
+  if (error instanceof ChapterPipelineStageError) {
+    return {
+      code: error.code,
+      blocked: error.blocked,
+      rewriteScope: error.rewriteScope,
+      targetSegmentId: error.targetSegmentId,
+      outputText: error.outputText,
+    }
+  }
+
+  if (error instanceof HardConstraintOverflowError || error instanceof ContextOverflowError) {
+    const detail = error.message || '上下文超预算，无法完整注入本章硬约束。'
+    return {
+      code: 'context_overflow',
+      blocked: true,
+      outputText: buildPipelineFailureOutput('context_overflow', detail),
+    }
+  }
+
+  const detail = error instanceof Error ? error.message : ''
+  if (/合同校验未通过|章节合同|场景合同|缺少章节合同摘要|缺少 Planner 产出的场景计划/u.test(detail)) {
+    return {
+      code: 'contract_blocked',
+      blocked: true,
+      rewriteScope: 'contract_replan',
+      outputText: buildPipelineFailureOutput('contract_blocked', detail, { rewriteScope: 'contract_replan' }),
+    }
+  }
+
+  if (/Canon/u.test(detail) || role === 'canonizer') {
+    return {
+      code: 'canon_failed',
+      blocked: true,
+      outputText: buildPipelineFailureOutput('canon_failed', detail || 'Canon 草案生成失败。'),
+    }
+  }
+
+  return {
+    blocked: false,
+  }
 }
 
 function getPipelineRoleLabel(role: ChapterPipelineRole): string {
@@ -534,7 +680,7 @@ function createPipelineRoleState(role: ChapterPipelineRole): ChapterPipelineRole
 function createInitialChapterPipelineSnapshot(
   chapterId: number,
   workflowTaskId: number,
-  contractVersion: string,
+  contractVersion?: string,
 ): ChapterPipelineSnapshot {
   return {
     kind: 'chapter_pipeline',
@@ -1459,6 +1605,7 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
           worldStates: input.context.worldStates,
           itemSummary: input.context.itemSummary,
           previousSummaries: input.context.previousSummaries,
+          previousChapterContext: input.context.previousChapterContext,
           lastChapterEnding: input.context.lastChapterEnding,
           continuitySummary: input.context.continuitySummary,
           openLoops: input.context.openLoops,
@@ -1539,6 +1686,7 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
               worldStates: input.context.worldStates,
               itemSummary: input.context.itemSummary,
               previousSummaries: input.context.previousSummaries,
+              previousChapterContext: input.context.previousChapterContext,
               lastChapterEnding: input.context.lastChapterEnding,
               continuitySummary: input.context.continuitySummary,
               openLoops: input.context.openLoops,
@@ -2318,7 +2466,6 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
   if (!chapter) throwUserFacingError('chapter.notFoundWithId', { id: chapterId })
-  validateChapterContractsForGeneration(chapterId)
 
   const rawContext = await collectChapterContextRawData(chapter.novelId, chapter.chapterNum)
   const novel = rawContext.novel
@@ -2326,7 +2473,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
   const consistencyNotes = buildConsistencyPromptSummary(buildNovelConsistencyReport(chapter.novelId))
   const previousStatus = chapter.status || 'outline'
   const fallbackScenePlan = buildFallbackScenePlan(chapter)
-  const contractVersion = buildChapterContractVersion(chapterId)
+  let contractVersion = ''
   const workflowTaskId = await createTask({
     type: 'chapter_write',
     novelId: chapter.novelId,
@@ -2336,7 +2483,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
     runnerType: 'workflow',
     pipelineRole: 'planner',
     pipelineStage: 'pending',
-    contractVersion,
+    contractVersion: undefined,
     controlJson: JSON.stringify({ cancelRequested: false }),
     progressJson: '{}',
     retryable: false,
@@ -2479,9 +2626,16 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
           detail,
           finishedAt: new Date().toISOString(),
           recoveryHint: undefined,
+          failureCode: undefined,
+          rewriteScope: undefined,
+          targetSegmentId: undefined,
           ...extra,
         },
       },
+      failureCode: undefined,
+      rewriteScope: undefined,
+      targetSegmentId: undefined,
+      lastFailureRole: undefined,
     }
     updateTask(taskId, {
       pipelineStage: 'success',
@@ -2505,14 +2659,23 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
   ): never => {
     const aborted = isChapterPipelineAbortError(workflowTaskId, error) || (typeof taskId === 'number' && isChapterPipelineAbortError(taskId, error))
     const detail = error instanceof Error ? error.message : `${getPipelineRoleLabel(role)} 执行失败`
-    const recoveryHint = buildChapterPipelineRecoveryHint(chapter.novelId, chapterId, role)
+    const failure = classifyChapterPipelineFailure(role, error)
+    const blocked = options.blocked || failure.blocked
+    const recoveryHint = buildChapterPipelineRecoveryHint(chapter.novelId, chapterId, role, failure.code)
+    const outputText = failure.outputText || (failure.code
+      ? buildPipelineFailureOutput(failure.code, detail, {
+        rewriteScope: failure.rewriteScope,
+        targetSegmentId: failure.targetSegmentId,
+      })
+      : undefined)
 
     if (typeof taskId === 'number') {
       updateTask(taskId, {
-        pipelineStage: options.blocked ? 'blocked' : 'failed',
+        pipelineStage: blocked ? 'blocked' : 'failed',
         recoveryHintJson: serializeTaskRecoveryHint(recoveryHint),
         contractVersion: snapshot.contractVersion,
         canonRunId: snapshot.canonRunId,
+        outputText,
       })
       snapshot = refreshPipelineRoleMetrics(snapshot, role, taskId)
     }
@@ -2525,15 +2688,22 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
       message: detail,
       streamTaskId: undefined,
       recoveryHint,
+      failureCode: failure.code,
+      rewriteScope: failure.rewriteScope,
+      targetSegmentId: failure.targetSegmentId,
+      lastFailureRole: role,
       roles: {
         ...snapshot.roles,
         [role]: {
           ...snapshot.roles[role],
-          status: options.blocked ? 'blocked' : 'failed',
+          status: blocked ? 'blocked' : 'failed',
           detail,
           taskId: taskId ?? snapshot.roles[role].taskId,
           finishedAt: new Date().toISOString(),
           recoveryHint,
+          failureCode: failure.code,
+          rewriteScope: failure.rewriteScope,
+          targetSegmentId: failure.targetSegmentId,
         },
       },
     }
@@ -2547,7 +2717,8 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
     setWorkflowTaskStatus(aborted ? 'cancelled' : 'failed', {
       currentChildTaskId: null,
       errorMessage: aborted ? '用户已取消' : detail,
-      pipelineStage: options.blocked ? 'blocked' : 'failed',
+      pipelineStage: blocked ? 'blocked' : 'failed',
+      outputText,
     })
     sendPipelineProgress(sender, snapshot, {
       stage: getPipelineRoleStage(role),
@@ -2612,6 +2783,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
         worldStates: scenePlanContext.worldStates,
         itemSummary: scenePlanContext.itemSummary,
         previousSummaries: scenePlanContext.previousSummaries,
+        previousChapterContext: scenePlanContext.previousChapterContext,
         lastChapterEnding: scenePlanContext.lastChapterEnding,
         continuitySummary: scenePlanContext.continuitySummary,
         openLoops: scenePlanContext.openLoops,
@@ -2632,6 +2804,38 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
       inputJson: JSON.stringify(plannerMessages),
       runnerType: 'chat',
     })
+    try {
+      validateChapterContractsForGeneration(chapterId)
+      contractVersion = buildChapterContractVersion(chapterId)
+      snapshot = {
+        ...snapshot,
+        contractVersion,
+        roles: {
+          ...snapshot.roles,
+          planner: {
+            ...snapshot.roles.planner,
+            contractVersion,
+          },
+        },
+      }
+      syncWorkflowTask()
+      updateTask(plannerTaskId, { contractVersion })
+    } catch (error) {
+      failRoleTask('planner', plannerTaskId, new ChapterPipelineStageError(
+        'contract_blocked',
+        error instanceof Error ? error.message : '章节流水线启动前合同校验未通过。',
+        {
+          blocked: true,
+          rewriteScope: 'contract_replan',
+          outputText: buildPipelineFailureOutput(
+            'contract_blocked',
+            error instanceof Error ? error.message : '章节流水线启动前合同校验未通过。',
+            { rewriteScope: 'contract_replan' },
+          ),
+          cause: error,
+        },
+      ), { blocked: true })
+    }
     const scenePlanResult = await executeChatTask(plannerTaskId, {
       type: 'chapter_planner',
       novelId: chapter.novelId,
@@ -2680,6 +2884,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
         worldStates: draftContext.worldStates,
         itemSummary: draftContext.itemSummary,
         previousSummaries: draftContext.previousSummaries,
+        previousChapterContext: draftContext.previousChapterContext,
         lastChapterEnding: draftContext.lastChapterEnding,
         continuitySummary: draftContext.continuitySummary,
         openLoops: draftContext.openLoops,
@@ -2746,6 +2951,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
         characterStates: reviewContext.characterStates,
         worldStates: reviewContext.worldStates,
         itemSummary: reviewContext.itemSummary,
+        previousChapterContext: reviewContext.previousChapterContext,
         continuitySummary: reviewContext.continuitySummary,
         openLoops: reviewContext.openLoops,
         dueForeshadows: reviewContext.dueForeshadows,
@@ -2823,11 +3029,12 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
       currentArc: rewriteContext.currentArc,
       worldRules: rewriteContext.worldRules,
       characterStates: rewriteContext.characterStates,
-      worldStates: rewriteContext.worldStates,
-      itemSummary: rewriteContext.itemSummary,
-      previousSummaries: rewriteContext.previousSummaries,
-      lastChapterEnding: rewriteContext.lastChapterEnding,
-      continuitySummary: rewriteContext.continuitySummary,
+        worldStates: rewriteContext.worldStates,
+        itemSummary: rewriteContext.itemSummary,
+        previousSummaries: rewriteContext.previousSummaries,
+        previousChapterContext: rewriteContext.previousChapterContext,
+        lastChapterEnding: rewriteContext.lastChapterEnding,
+        continuitySummary: rewriteContext.continuitySummary,
       openLoops: rewriteContext.openLoops,
       dueForeshadows: rewriteContext.dueForeshadows,
       continuityNotes: rewriteContext.continuityNotes,
@@ -2899,6 +3106,21 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
       chapter.chapterNum,
       repaired.content,
     )
+    const remainingGuardrailFindings = collectQualityGuardrailFindings(repaired.content, profile.genre)
+    if (remainingGuardrailFindings.length > 0 && shouldForceRepair(remainingGuardrailFindings)) {
+      failRoleTask('rewriter', rewriterTaskId, new ChapterPipelineStageError(
+        'anti_ai_failed',
+        'Rewriter 二次修复后仍存在高风险 AI 味或模板化表达，需人工介入复核。',
+        {
+          rewriteScope: 'chapter_rewrite',
+          outputText: buildPipelineFailureOutput(
+            'anti_ai_failed',
+            'Rewriter 二次修复后仍存在高风险 AI 味或模板化表达，需人工介入复核。',
+            { rewriteScope: 'chapter_rewrite' },
+          ),
+        },
+      ))
+    }
 
     updateChapter(chapterId, {
       content: repaired.content,
@@ -2909,6 +3131,45 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
       versionSource: false,
     })
     hasCommittedContent = true
+    const publishCheck = runChapterPublishCheck(chapterId)
+    if (publishCheck.gateLevel === 'rewrite') {
+      failRoleTask('rewriter', rewriterTaskId, new ChapterPipelineStageError(
+        'gate_rewrite_required',
+        `章节门要求重写：${publishCheck.summary}`,
+        {
+          blocked: true,
+          rewriteScope: publishCheck.rewriteTarget?.kind === 'segment' ? 'scene_rewrite' : 'chapter_rewrite',
+          targetSegmentId: publishCheck.rewriteTarget?.kind === 'segment' ? publishCheck.rewriteTarget.segmentId : null,
+          outputText: buildPipelineFailureOutput(
+            'gate_rewrite_required',
+            `章节门要求重写：${publishCheck.summary}`,
+            {
+              rewriteScope: publishCheck.rewriteTarget?.kind === 'segment' ? 'scene_rewrite' : 'chapter_rewrite',
+              targetSegmentId: publishCheck.rewriteTarget?.kind === 'segment' ? publishCheck.rewriteTarget.segmentId : null,
+            },
+          ),
+        },
+      ), { blocked: true })
+    }
+    if (!publishCheck.ready) {
+      failRoleTask('rewriter', rewriterTaskId, new ChapterPipelineStageError(
+        'human_review_required',
+        `章节门未通过：${publishCheck.summary}`,
+        {
+          blocked: true,
+          rewriteScope: publishCheck.rewriteTarget?.kind === 'segment' ? 'scene_rewrite' : 'chapter_rewrite',
+          targetSegmentId: publishCheck.rewriteTarget?.kind === 'segment' ? publishCheck.rewriteTarget.segmentId : null,
+          outputText: buildPipelineFailureOutput(
+            'human_review_required',
+            `章节门未通过：${publishCheck.summary}`,
+            {
+              rewriteScope: publishCheck.rewriteTarget?.kind === 'segment' ? 'scene_rewrite' : 'chapter_rewrite',
+              targetSegmentId: publishCheck.rewriteTarget?.kind === 'segment' ? publishCheck.rewriteTarget.segmentId : null,
+            },
+          ),
+        },
+      ), { blocked: true })
+    }
     finishRoleTask('rewriter', rewriterTaskId, '正文已完成重写，准备生成 Canon 差异草案。')
 
     const canonizerTaskId = await startRoleTask('canonizer', 'chapter_canonizer', 'Canonizer 正在为本章准备可确认的状态差异草案。', {
@@ -3008,10 +3269,32 @@ export async function generateChapterSummary(chapterId: number): Promise<void> {
   })
 }
 
+export async function resumeChapterPipeline(taskId: number, sender?: WebContents): Promise<number> {
+  const task = getTaskRecord(taskId)
+  if (!task) throwUserFacingError('task.notFound', { id: taskId })
+
+  const rootTask = task.type === 'chapter_write'
+    ? task
+    : task.parentTaskId
+      ? getTaskRecord(task.parentTaskId)
+      : null
+
+  if (!rootTask || rootTask.type !== 'chapter_write' || rootTask.relatedEntityType !== 'chapter' || !rootTask.relatedEntityId) {
+    throwUserFacingError('workflow.resumeUnsupported')
+  }
+  if (['pending', 'running', 'cancel_requested'].includes(rootTask.status || '')) {
+    throwUserFacingError('workflow.taskRunningCannotResume', { taskId: rootTask.id })
+  }
+
+  return generateChapterContent(rootTask.relatedEntityId, sender)
+}
+
 export async function getChapterContextPreview(chapterId: number): Promise<{
   chapterId: number
   chapterNum: number
   complexity: ChapterComplexity
+  previousChapterContext: string
+  previousChapterSampleReport: ChapterContext['previousChapterSampleReport']
   recalledMemory: string
   recallDiagnostics: ChapterContext['recallDiagnostics']
   recalledMemorySources: ChapterContext['recalledMemorySources']
@@ -3023,6 +3306,7 @@ export async function getChapterContextPreview(chapterId: number): Promise<{
     constraintInjectionStatus: ChapterContext['constraintInjectionStatus']
     softContextBudgetUsage: ChapterContext['softContextBudgetUsage']
     contextBudgetReport: ChapterContext['contextBudgetReport']
+    softContextDecisions: ChapterContext['softContextDecisions']
     droppedConstraintCount: number
   }>
 }> {
@@ -3038,6 +3322,8 @@ export async function getChapterContextPreview(chapterId: number): Promise<{
     chapterId: chapter.id,
     chapterNum: chapter.chapterNum,
     complexity,
+    previousChapterContext: rawContext.contextParts.previousChapterContext,
+    previousChapterSampleReport: rawContext.previousChapterSampleReport,
     recalledMemory: contexts.draft.recalledMemory,
     recallDiagnostics: contexts.draft.recallDiagnostics,
     recalledMemorySources: contexts.draft.recalledMemorySources,
@@ -3051,6 +3337,7 @@ export async function getChapterContextPreview(chapterId: number): Promise<{
         constraintInjectionStatus: context.constraintInjectionStatus,
         softContextBudgetUsage: context.softContextBudgetUsage,
         contextBudgetReport: context.contextBudgetReport,
+        softContextDecisions: context.softContextDecisions,
         droppedConstraintCount: context.droppedConstraintCount,
       }
     }),

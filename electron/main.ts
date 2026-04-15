@@ -400,6 +400,8 @@ function registerIpcHandlers() {
     chapterService.getChapterContextPreview(requireId(chapterId, 'chapterId')))
   handle('chapter:generateContent', (event, chapterId) =>
     chapterService.generateChapterContent(chapterId, event.sender))
+  handle('chapter:resumeContent', (event, taskId) =>
+    chapterService.resumeChapterPipeline(taskId, event.sender))
   handle('chapter:generateSummary', (_, chapterId) =>
     chapterService.generateChapterSummary(chapterId))
   handle('chapter:aiCheck', (_, chapterId) =>
@@ -1076,7 +1078,7 @@ function registerIpcHandlers() {
     if (!task) throwUserFacingError('task.notFound', { id })
 
     if (task.type === 'chapter_write' && task.relatedEntityType === 'chapter' && task.relatedEntityId) {
-      return chapterService.generateChapterContent(task.relatedEntityId, event.sender)
+      return chapterService.resumeChapterPipeline(id, event.sender)
     }
 
     if (task.type === 'subplot_framework') {

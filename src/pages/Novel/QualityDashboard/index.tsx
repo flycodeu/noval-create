@@ -1372,6 +1372,16 @@ function RecallReliabilityPanel({
           <div style={{ fontSize: 22, fontWeight: 700 }}>{summary.staleRecallRate}%</div>
           <div style={{ fontSize: 11, opacity: 0.55 }}>本地回查命中里疑似过期片段的平均占比</div>
         </div>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>上章先验覆盖率</div>
+          <div style={{ fontSize: 22, fontWeight: 700 }}>{summary.previousChapterFeedCoverageRate}%</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>上一章先验采样覆盖上一章正文的平均比例</div>
+        </div>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>上章先验字数</div>
+          <div style={{ fontSize: 22, fontWeight: 700 }}>{summary.previousChapterFeedChars}</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>每章平均喂入的上一章先验文本长度</div>
+        </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
@@ -1393,6 +1403,7 @@ function RecallReliabilityPanel({
           <div style={{ fontSize: 12, opacity: 0.72 }}>质量看板里的召回可靠性采用本地关键词回查估算，只用于发现阻塞章节。</div>
           <div style={{ fontSize: 12, opacity: 0.72 }}>实际生成链路仍以硬约束和结构化状态为主，召回只作背景补充。</div>
           <div style={{ fontSize: 12, opacity: 0.72 }}>当前保留片段 {summary.selectedHitCount} 条，本地兜底命中 {summary.fallbackHitCount} 条。</div>
+          <div style={{ fontSize: 12, opacity: 0.72 }}>上一章先验平均覆盖 {summary.previousChapterFeedCoverageRate}% ，平均采样 {summary.previousChapterFeedChars} 字。</div>
         </div>
       </div>
 
@@ -1405,6 +1416,7 @@ function RecallReliabilityPanel({
                 <div style={{ fontWeight: 600 }}>{volume.volumeName}</div>
                 <div style={{ fontSize: 11, opacity: 0.6 }}>第{volume.chapterStart}-{volume.chapterEnd}章 · {volume.chapterCount} 章</div>
                 <div style={{ fontSize: 12 }}>依赖率 {volume.recallDependencyRate}% · 过期 {volume.staleRecallCount} · 过期率 {volume.staleRecallRate}%</div>
+                <div style={{ fontSize: 12 }}>上章先验覆盖 {volume.previousChapterFeedCoverageRate}% · 平均 {volume.previousChapterFeedChars} 字</div>
               </div>
             ))}
           </div>

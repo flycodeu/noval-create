@@ -135,6 +135,7 @@ const EXTRA_RUNTIME_PROMPTS: PromptCatalogEntry[] = [
       { key: 'plotPoints', label: '章节大纲' },
       { key: 'emotionTone', label: '情绪基调' },
       { key: 'targetWords', label: '目标字数' },
+      { key: 'previousChapterContext', label: '上一章关键先验' },
     ],
     template: buildScenePlanPrompt({
       novelTitle: placeholder('novelTitle'),
@@ -150,6 +151,7 @@ const EXTRA_RUNTIME_PROMPTS: PromptCatalogEntry[] = [
       characterStates: placeholder('characterStates'),
       itemSummary: placeholder('itemSummary'),
       previousSummaries: placeholder('previousSummaries'),
+      previousChapterContext: placeholder('previousChapterContext'),
       lastChapterEnding: placeholder('lastChapterEnding'),
       continuitySummary: placeholder('continuitySummary'),
       openLoops: placeholder('openLoops'),
@@ -174,6 +176,7 @@ const EXTRA_RUNTIME_PROMPTS: PromptCatalogEntry[] = [
       { key: 'chapterGoal', label: '本章目标' },
       { key: 'scenePlan', label: '场景计划' },
       { key: 'targetWords', label: '目标字数' },
+      { key: 'previousChapterContext', label: '上一章关键先验' },
     ],
     template: buildChapterDraftPrompt({
       novelTitle: placeholder('novelTitle'),
@@ -188,6 +191,7 @@ const EXTRA_RUNTIME_PROMPTS: PromptCatalogEntry[] = [
       characterStates: placeholder('characterStates'),
       itemSummary: placeholder('itemSummary'),
       previousSummaries: placeholder('previousSummaries'),
+      previousChapterContext: placeholder('previousChapterContext'),
       lastChapterEnding: placeholder('lastChapterEnding'),
       continuitySummary: placeholder('continuitySummary'),
       openLoops: placeholder('openLoops'),
@@ -215,6 +219,7 @@ const EXTRA_RUNTIME_PROMPTS: PromptCatalogEntry[] = [
       { key: 'chapterGoal', label: '本章目标' },
       { key: 'scenePlan', label: '场景计划' },
       { key: 'draftContent', label: '章节初稿' },
+      { key: 'previousChapterContext', label: '上一章关键先验' },
     ],
     template: buildChapterReviewPrompt({
       novelTitle: placeholder('novelTitle'),
@@ -226,6 +231,7 @@ const EXTRA_RUNTIME_PROMPTS: PromptCatalogEntry[] = [
       worldRules: placeholder('worldRules'),
       characterStates: placeholder('characterStates'),
       itemSummary: placeholder('itemSummary'),
+      previousChapterContext: placeholder('previousChapterContext'),
       continuitySummary: placeholder('continuitySummary'),
       openLoops: placeholder('openLoops'),
       timelineSummary: placeholder('timelineSummary'),
@@ -250,6 +256,7 @@ const EXTRA_RUNTIME_PROMPTS: PromptCatalogEntry[] = [
       { key: 'scenePlan', label: '场景计划' },
       { key: 'draftContent', label: '章节初稿' },
       { key: 'reviewNotes', label: '审校意见' },
+      { key: 'previousChapterContext', label: '上一章关键先验' },
     ],
     template: buildChapterRewritePrompt({
       novelTitle: placeholder('novelTitle'),
@@ -264,6 +271,7 @@ const EXTRA_RUNTIME_PROMPTS: PromptCatalogEntry[] = [
       characterStates: placeholder('characterStates'),
       itemSummary: placeholder('itemSummary'),
       previousSummaries: placeholder('previousSummaries'),
+      previousChapterContext: placeholder('previousChapterContext'),
       lastChapterEnding: placeholder('lastChapterEnding'),
       continuitySummary: placeholder('continuitySummary'),
       openLoops: placeholder('openLoops'),
