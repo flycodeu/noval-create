@@ -1017,10 +1017,61 @@ export interface Task {
   retryable?: number
   parentTaskId?: number
   currentChildTaskId?: number
+  pipelineRole?: TaskPipelineRole
+  pipelineStage?: TaskPipelineStage
+  upstreamTaskId?: number
+  contractVersion?: string
+  canonRunId?: number
+  recoveryHintJson?: string
   controlJson?: string
   progressJson?: string
   createdAt: string
   updatedAt: string
+}
+
+export type TaskPipelineRole =
+  | 'planner'
+  | 'writer'
+  | 'critic'
+  | 'rewriter'
+  | 'canonizer'
+  | 'finalize'
+
+export type TaskPipelineStage =
+  | 'pending'
+  | 'running'
+  | 'paused'
+  | 'failed'
+  | 'success'
+  | 'blocked'
+
+export interface TaskRecoveryHint {
+  kind: 'open_page' | 'resume'
+  label: string
+  description: string
+  path?: string
+}
+
+export interface TaskPipelineRoleStat {
+  role: TaskPipelineRole
+  total: number
+  successCount: number
+  failedCount: number
+  runningCount: number
+  pausedCount: number
+  blockedCount: number
+  avgDurationMs: number
+  tokensUsedTotal: number
+}
+
+export interface TaskPipelineStats {
+  totalPipelineCount: number
+  activePipelineCount: number
+  roleStats: TaskPipelineRoleStat[]
+  commonRecoveryHints: Array<{
+    label: string
+    count: number
+  }>
 }
 
 export type AssetReviewTarget =
@@ -3830,6 +3881,8 @@ declare global {
         list: (novelId?: number) => Promise<Task[]>
         query: (filters: TaskQueryInput) => Promise<PagedResult<Task>>
         getStats: (novelId?: number) => Promise<TaskStats>
+        getPipelineStats: (novelId?: number) => Promise<TaskPipelineStats>
+        getLatestChapterPipeline: (chapterId: number) => Promise<Task | null>
         clearHistory: (filters?: TaskHistoryClearInput) => Promise<TaskHistoryClearResult>
         get: (id: number) => Promise<Task | null>
         cancel: (id: number) => Promise<boolean>

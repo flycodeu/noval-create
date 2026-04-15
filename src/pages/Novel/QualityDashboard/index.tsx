@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button, Empty, Modal, Progress, Skeleton, Tabs, Tag } from 'antd'
 import VirtualList from 'rc-virtual-list'
-import type { LanguageDriftMetrics, QualityDashboardData } from '../../../types'
+import type { LanguageDriftMetrics, QualityDashboardData, TaskPipelineStats } from '../../../types'
 import { WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
 import {
   getQualityRiskSeverityColor,
@@ -229,6 +229,7 @@ function qualityRiskKindLabel(kind: QualityDashboardData['novelQualityMetrics'][
 export default function QualityDashboard({ novelId }: Props) {
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<QualityDashboardData | null>(null)
+  const [pipelineStats, setPipelineStats] = useState<TaskPipelineStats | null>(null)
   const [selectedChapter, setSelectedChapter] = useState<QualityChapterEntry | null>(null)
   const [selectedVolumeId, setSelectedVolumeId] = useState<number | null>(null)
   const [activeTab, setActiveTab] = useState('overview')
@@ -236,10 +237,15 @@ export default function QualityDashboard({ novelId }: Props) {
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const result = await window.electron.quality.getDashboard(novelId)
+      const [result, nextPipelineStats] = await Promise.all([
+        window.electron.quality.getDashboard(novelId),
+        window.electron.task.getPipelineStats(novelId),
+      ])
       setData(result)
+      setPipelineStats(nextPipelineStats)
     } catch (error) {
       console.error('Failed to load quality dashboard', error)
+      setPipelineStats(null)
     } finally {
       setLoading(false)
     }
@@ -272,8 +278,9 @@ export default function QualityDashboard({ novelId }: Props) {
   const hasRecallData = Boolean(data && (data.recallSummary.analyzedChapterCount > 0 || data.recentRecallAlerts.length > 0))
   const hasChapterFunctionData = Boolean(data && (data.chapterFunctionSummary.trackedChapterCount > 0 || data.chapterFunctionAlerts.length > 0))
   const hasEndgameDebtData = Boolean(data && data.recentEndgameDebtAlerts.length > 0)
+  const hasPipelineData = Boolean(pipelineStats && pipelineStats.totalPipelineCount > 0)
 
-  if (!data || (!hasScoreData && !hasChapterGateData && !hasStoryDynamicsData && !hasArcProgressData && !hasDialogueData && !hasStateData && !hasRecallData && !hasChapterFunctionData && !hasEndgameDebtData)) {
+  if (!data || (!hasScoreData && !hasChapterGateData && !hasStoryDynamicsData && !hasArcProgressData && !hasDialogueData && !hasStateData && !hasRecallData && !hasChapterFunctionData && !hasEndgameDebtData && !hasPipelineData)) {
     return (
       <WorkspacePage title="质量监控">
         <WorkspacePanel title="暂无数据">
@@ -370,6 +377,39 @@ export default function QualityDashboard({ novelId }: Props) {
           onSelectRisk={handleRiskSelect}
         />
       </WorkspacePanel>
+
+      {pipelineStats ? (
+        <WorkspacePanel title="长篇写作架构">
+          <div style={{ display: 'grid', gap: 16 }}>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              <Tag color={pipelineStats.activePipelineCount > 0 ? 'processing' : 'success'}>
+                {pipelineStats.activePipelineCount > 0
+                  ? `运行中 ${pipelineStats.activePipelineCount} 条`
+                  : '当前无运行中的正文流水线'}
+              </Tag>
+              <Tag color="blue">{`累计流水线 ${pipelineStats.totalPipelineCount} 条`}</Tag>
+              {pipelineStats.commonRecoveryHints.map((item) => (
+                <Tag key={item.label} color="warning">{`${item.label} × ${item.count}`}</Tag>
+              ))}
+            </div>
+            <div style={{ display: 'grid', gap: 10 }}>
+              {pipelineStats.roleStats.map((item) => (
+                <div key={item.role} className="quality-card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+                    <strong>{item.role === 'planner' ? 'Planner' : item.role === 'writer' ? 'Writer' : item.role === 'critic' ? 'Critic' : item.role === 'rewriter' ? 'Rewriter' : item.role === 'canonizer' ? 'Canonizer' : 'Finalize'}</strong>
+                    <Tag color={item.failedCount > 0 ? 'error' : item.runningCount > 0 ? 'processing' : 'success'}>
+                      {`成功 ${item.successCount} / 失败 ${item.failedCount} / 运行中 ${item.runningCount}`}
+                    </Tag>
+                  </div>
+                  <div style={{ fontSize: 12, opacity: 0.7, marginTop: 6 }}>
+                    {`平均耗时 ${item.avgDurationMs ? `${(item.avgDurationMs / 1000).toFixed(1)}s` : '-'}，累计 tokens ${item.tokensUsedTotal || 0}，阻断 ${item.blockedCount} 条`}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </WorkspacePanel>
+      ) : null}
 
       {data.volumeQualityMetrics.length > 0 ? (
         <WorkspacePanel title="卷级健康面板">
@@ -565,6 +605,7 @@ export default function QualityDashboard({ novelId }: Props) {
         <WorkspaceMetric key="gate" label="章节门覆盖" value={data.chapterGateSummary.coveredChapterCount} />,
         <WorkspaceMetric key="tracked" label="节奏追踪章节" value={data.protagonistSetbackSummary.chapterCount} />,
         <WorkspaceMetric key="arc" label="跟踪故事弧" value={data.storyArcProgressSummary.trackedArcCount} />,
+        <WorkspaceMetric key="pipeline" label="正文流水线" value={pipelineStats?.totalPipelineCount || 0} />,
         <WorkspaceMetric key="avg" label="平均总分 / 压力" value={hasScoreData ? `${data.averageOverallScore} / 10` : `${data.protagonistSetbackSummary.averagePressure}`} />,
       ]}
     >

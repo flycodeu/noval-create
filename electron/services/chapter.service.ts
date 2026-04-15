@@ -1,7 +1,7 @@
 ﻿import { WebContents } from 'electron'
 import { asc, desc, eq, inArray } from 'drizzle-orm'
 import { getDb, getSqlite } from '../database/db'
-import { chapterSegments, chapterVersions, chapters, novels, storyArcs } from '../database/schema'
+import { chapterContracts, chapterSegments, chapterVersions, chapters, novels, sceneContracts, storyArcs, tasks } from '../database/schema'
 import { parseAiJsonResult } from '../utils/json'
 import { generateChapterEmbeddings } from './embedding.service'
 import { aiCheckPrompt, chapterSummaryPrompt } from './prompts'
@@ -23,7 +23,18 @@ import {
   buildScenePlanPrompt,
 } from './story-prompts'
 import { getQualityDashboardData } from './quality-dashboard.service'
-import { runChatTask, runStreamTask } from './task.service'
+import {
+  createTask,
+  executeChatTask,
+  executeStreamTask,
+  getTaskRecord,
+  parseTaskControl,
+  runChatTask,
+  TaskRecoveryHint,
+  updateTask,
+  updateTaskProgress,
+  updateTaskStatus,
+} from './task.service'
 import { buildConsistencyPromptSummary, buildNovelConsistencyReport } from './consistency.service'
 import { syncChapterTimelineStatuses } from './link-sync.service'
 import { throwUserFacingError } from '../utils/user-facing-error'
@@ -146,16 +157,56 @@ interface ChapterReviewNotes {
   }>
 }
 
-type ChapterGenerationStage = 'planning' | 'drafting' | 'reviewing' | 'rewriting' | 'completed' | 'failed'
+type ChapterPipelineRole = 'planner' | 'writer' | 'critic' | 'rewriter' | 'canonizer' | 'finalize'
+type ChapterPipelineRoleStatus = 'pending' | 'running' | 'success' | 'failed' | 'blocked'
+type ChapterGenerationStage = 'planning' | 'drafting' | 'reviewing' | 'rewriting' | 'canonizing' | 'completed' | 'failed'
+
+interface ChapterPipelineRoleState {
+  role: ChapterPipelineRole
+  label: string
+  summary: string
+  status: ChapterPipelineRoleStatus
+  detail?: string
+  taskId?: number
+  upstreamTaskId?: number
+  contractVersion?: string
+  canonRunId?: number
+  startedAt?: string
+  finishedAt?: string
+  durationMs?: number
+  tokensUsed?: number
+  recoveryHint?: TaskRecoveryHint
+}
+
+interface ChapterPipelineSnapshot {
+  kind: 'chapter_pipeline'
+  chapterId: number
+  workflowTaskId: number
+  currentRole: ChapterPipelineRole | null
+  currentStage: ChapterGenerationStage | null
+  status: 'pending' | 'running' | 'success' | 'failed' | 'cancelled'
+  message?: string
+  streamTaskId?: number
+  contractVersion?: string
+  canonRunId?: number
+  totalTokensUsed: number
+  totalDurationMs: number
+  recoveryHint?: TaskRecoveryHint
+  roles: Record<ChapterPipelineRole, ChapterPipelineRoleState>
+}
 
 interface ChapterGenerationProgressEvent {
   chapterId: number
+  taskId?: number
+  streamTaskId?: number
+  role?: ChapterPipelineRole
   stage: ChapterGenerationStage
   label: string
   detail?: string
   completed: number
   total: number
-  status: 'running' | 'success' | 'failed'
+  status: 'running' | 'success' | 'failed' | 'cancelled'
+  pipeline?: ChapterPipelineSnapshot
 }
 
 interface LockedParagraphContext {
@@ -352,6 +403,266 @@ function sendGenerationProgress(
 ) {
   if (sender && !sender.isDestroyed()) {
     sender.send('chapter:generation-progress', payload)
+  }
+}
+
+function buildChapterWorkspacePath(novelId: number, page: string, chapterId: number, extra?: Record<string, string | number | undefined>) {
+  const params = new URLSearchParams({ chapterId: String(chapterId) })
+  Object.entries(extra || {}).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === '') return
+    params.set(key, String(value))
+  })
+  return `/novels/${novelId}/${page}?${params.toString()}`
+}
+
+function buildChapterPipelineRecoveryHint(
+  novelId: number,
+  chapterId: number,
+  role: ChapterPipelineRole,
+): TaskRecoveryHint {
+  switch (role) {
+    case 'planner':
+      return {
+        kind: 'open_page',
+        label: '重跑章节合同',
+        description: '打开章节合同页，先修正合同或场景约束，再重新启动正文流水线。',
+        path: buildChapterWorkspacePath(novelId, 'contracts', chapterId),
+      }
+    case 'canonizer':
+      return {
+        kind: 'open_page',
+        label: '重做 Canon 回写',
+        description: '打开章后状态回写中心，检查 Canon 候选并重新生成或处理失败项。',
+        path: buildChapterWorkspacePath(novelId, 'writeback', chapterId),
+      }
+    case 'critic':
+      return {
+        kind: 'open_page',
+        label: '回到审校视图',
+        description: '返回正文写作页，重点检查审校建议、验收门和当前章节风险。',
+        path: buildChapterWorkspacePath(novelId, 'writing', chapterId, { insight: 'review' }),
+      }
+    case 'finalize':
+      return {
+        kind: 'open_page',
+        label: '回到写作页复核',
+        description: '返回正文写作页，重新检查章节内容、摘要与连续性状态，再重新运行流水线。',
+        path: buildChapterWorkspacePath(novelId, 'writing', chapterId),
+      }
+    case 'writer':
+    case 'rewriter':
+    default:
+      return {
+        kind: 'open_page',
+        label: '重写正文',
+        description: '返回正文写作页，调整当前章节内容或提示后重新启动流水线。',
+        path: buildChapterWorkspacePath(novelId, 'writing', chapterId),
+      }
+  }
+}
+
+function serializeTaskRecoveryHint(hint?: TaskRecoveryHint): string | undefined {
+  return hint ? JSON.stringify(hint) : undefined
+}
+
+function getPipelineRoleLabel(role: ChapterPipelineRole): string {
+  switch (role) {
+    case 'planner':
+      return 'Planner'
+    case 'writer':
+      return 'Writer'
+    case 'critic':
+      return 'Critic'
+    case 'rewriter':
+      return 'Rewriter'
+    case 'canonizer':
+      return 'Canonizer'
+    case 'finalize':
+      return 'Finalize'
+    default:
+      return role
+  }
+}
+
+function getPipelineRoleSummary(role: ChapterPipelineRole): string {
+  switch (role) {
+    case 'planner':
+      return '固化章节合同与场景执行链。'
+    case 'writer':
+      return '只按合同与场景计划写正文。'
+    case 'critic':
+      return '检查连续性、节奏、口吻与 AI 味。'
+    case 'rewriter':
+      return '按审校结论修正文稿。'
+    case 'canonizer':
+      return '把正文变成可确认的 Canon 差异草案。'
+    case 'finalize':
+      return '刷新摘要、连续性与记忆写回。'
+    default:
+      return ''
+  }
+}
+
+function getPipelineRoleStage(role: ChapterPipelineRole): ChapterGenerationStage {
+  switch (role) {
+    case 'planner':
+      return 'planning'
+    case 'writer':
+      return 'drafting'
+    case 'critic':
+      return 'reviewing'
+    case 'rewriter':
+      return 'rewriting'
+    case 'canonizer':
+      return 'canonizing'
+    case 'finalize':
+      return 'canonizing'
+    default:
+      return 'planning'
+  }
+}
+
+function createPipelineRoleState(role: ChapterPipelineRole): ChapterPipelineRoleState {
+  return {
+    role,
+    label: getPipelineRoleLabel(role),
+    summary: getPipelineRoleSummary(role),
+    status: 'pending',
+  }
+}
+
+function createInitialChapterPipelineSnapshot(
+  chapterId: number,
+  workflowTaskId: number,
+  contractVersion: string,
+): ChapterPipelineSnapshot {
+  return {
+    kind: 'chapter_pipeline',
+    chapterId,
+    workflowTaskId,
+    currentRole: null,
+    currentStage: 'planning',
+    status: 'pending',
+    contractVersion,
+    totalTokensUsed: 0,
+    totalDurationMs: 0,
+    roles: {
+      planner: createPipelineRoleState('planner'),
+      writer: createPipelineRoleState('writer'),
+      critic: createPipelineRoleState('critic'),
+      rewriter: createPipelineRoleState('rewriter'),
+      canonizer: createPipelineRoleState('canonizer'),
+      finalize: createPipelineRoleState('finalize'),
+    },
+  }
+}
+
+function getCompletedPipelineRoleCount(snapshot: ChapterPipelineSnapshot): number {
+  return Object.values(snapshot.roles).filter((role) => role.status === 'success').length
+}
+
+function sendPipelineProgress(
+  sender: WebContents | undefined,
+  snapshot: ChapterPipelineSnapshot,
+  payload: Pick<ChapterGenerationProgressEvent, 'stage' | 'label' | 'detail' | 'status'> & { role?: ChapterPipelineRole },
+) {
+  sendGenerationProgress(sender, {
+    chapterId: snapshot.chapterId,
+    taskId: snapshot.workflowTaskId,
+    streamTaskId: snapshot.streamTaskId,
+    role: payload.role ?? snapshot.currentRole ?? undefined,
+    stage: payload.stage,
+    label: payload.label,
+    detail: payload.detail,
+    completed: Math.min(getCompletedPipelineRoleCount(snapshot), 5),
+    total: 5,
+    status: payload.status,
+    pipeline: snapshot,
+  })
+}
+
+function refreshPipelineRoleMetrics(
+  snapshot: ChapterPipelineSnapshot,
+  role: ChapterPipelineRole,
+  taskId: number,
+) {
+  const task = getTaskRecord(taskId)
+  if (!task) return snapshot
+  const roleState = snapshot.roles[role]
+  const nextDuration = typeof task.durationMs === 'number' && task.durationMs > 0 ? task.durationMs : roleState.durationMs
+  const nextTokens = typeof task.tokensUsed === 'number' && task.tokensUsed > 0 ? task.tokensUsed : roleState.tokensUsed
+  const nextRoles = {
+    ...snapshot.roles,
+    [role]: {
+      ...roleState,
+      taskId,
+      durationMs: nextDuration,
+      tokensUsed: nextTokens,
+    },
+  }
+  return {
+    ...snapshot,
+    roles: nextRoles,
+    totalDurationMs: Object.values(nextRoles).reduce((sum, item) => sum + (item.durationMs || 0), 0),
+    totalTokensUsed: Object.values(nextRoles).reduce((sum, item) => sum + (item.tokensUsed || 0), 0),
+  }
+}
+
+function isChapterPipelineAbortError(taskId: number, error: unknown): boolean {
+  if (error instanceof Error && error.name === 'AbortError') return true
+  const task = getTaskRecord(taskId)
+  return Boolean(task && parseTaskControl(task).cancelRequested)
+}
+
+function assertChapterPipelineActive(taskId: number) {
+  const task = getTaskRecord(taskId)
+  if (!task) throwUserFacingError('task.notFound', { id: taskId })
+  if (parseTaskControl(task).cancelRequested) {
+    const error = new Error('用户已取消')
+    error.name = 'AbortError'
+    throw error
+  }
+}
+
+function buildChapterContractVersion(chapterId: number): string {
+  const db = getDb()
+  const chapterContract = db.select().from(chapterContracts).where(eq(chapterContracts.chapterId, chapterId)).all()[0] || null
+  const sceneRows = db.select().from(sceneContracts)
+    .where(eq(sceneContracts.chapterId, chapterId))
+    .orderBy(asc(sceneContracts.id))
+    .all()
+
+  if (!chapterContract) {
+    throw new Error('当前章节缺少可执行的章节合同，无法启动合同驱动写作。')
+  }
+
+  const sceneVersion = sceneRows
+    .map((row) => `${row.id}:${row.status || 'draft'}:${row.updatedAt || row.createdAt || ''}`)
+    .join('|')
+
+  return [
+    `chapter:${chapterContract.id}`,
+    chapterContract.status || 'draft',
+    chapterContract.updatedAt || chapterContract.createdAt || '',
+    `scenes:${sceneRows.length}`,
+    sceneVersion,
+  ].join('#')
+}
+
+function assertContractDrivenWriterInputs(
+  role: Exclude<ChapterPipelineRole, 'planner' | 'canonizer' | 'finalize'>,
+  contractVersion: string,
+  writingContractSummary: string,
+  scenePlanText: string,
+) {
+  if (!contractVersion.trim()) {
+    throw new Error(`${getPipelineRoleLabel(role)} 缺少合同版本，已阻断本次写作。`)
+  }
+  if (!writingContractSummary.trim()) {
+    throw new Error(`${getPipelineRoleLabel(role)} 缺少章节合同摘要，无法继续生成正文。`)
+  }
+  if (!scenePlanText.trim()) {
+    throw new Error(`${getPipelineRoleLabel(role)} 缺少 Planner 产出的场景计划，无法继续生成正文。`)
   }
 }
 
@@ -1457,9 +1768,6 @@ async function finalizeGeneratedChapterContent(chapterId: number, content: strin
       `第${chapter.chapterNum}章内容已更新`,
     )
     syncChapterTimelineStatuses(chapter.novelId, chapter.chapterNum)
-    void prepareChapterWritebackRun(chapter.id, 'pipeline-finalize').catch((error) => {
-      console.warn(`[chapter:warn] writeback-draft chapter=${chapter.id}`, error)
-    })
   }
 
   return {
@@ -2018,6 +2326,238 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
   const consistencyNotes = buildConsistencyPromptSummary(buildNovelConsistencyReport(chapter.novelId))
   const previousStatus = chapter.status || 'outline'
   const fallbackScenePlan = buildFallbackScenePlan(chapter)
+  const contractVersion = buildChapterContractVersion(chapterId)
+  const workflowTaskId = await createTask({
+    type: 'chapter_write',
+    novelId: chapter.novelId,
+    modelConfigId: novel.modelConfigId || undefined,
+    relatedEntityType: 'chapter',
+    relatedEntityId: chapterId,
+    runnerType: 'workflow',
+    pipelineRole: 'planner',
+    pipelineStage: 'pending',
+    contractVersion,
+    controlJson: JSON.stringify({ cancelRequested: false }),
+    progressJson: '{}',
+    retryable: false,
+    status: 'pending',
+  })
+  let snapshot = createInitialChapterPipelineSnapshot(chapterId, workflowTaskId, contractVersion)
+  let previousRoleTaskId: number | undefined
+  let hasCommittedContent = false
+
+  const getWorkflowPipelineStage = () => {
+    if (snapshot.currentRole) {
+      const currentRoleState = snapshot.roles[snapshot.currentRole]
+      if (currentRoleState.status === 'blocked') return 'blocked'
+      if (currentRoleState.status === 'failed') return 'failed'
+      if (currentRoleState.status === 'success') return 'success'
+      return currentRoleState.status === 'pending' ? 'pending' : 'running'
+    }
+    if (snapshot.status === 'success') return 'success'
+    if (snapshot.status === 'failed' || snapshot.status === 'cancelled') return 'failed'
+    return snapshot.status === 'pending' ? 'pending' : 'running'
+  }
+
+  const syncWorkflowTask = (extra: Partial<typeof tasks.$inferInsert> = {}) => {
+    updateTaskProgress(workflowTaskId, snapshot, sender)
+    updateTask(workflowTaskId, {
+      pipelineRole: snapshot.currentRole || undefined,
+      pipelineStage: getWorkflowPipelineStage(),
+      contractVersion: snapshot.contractVersion,
+      canonRunId: snapshot.canonRunId,
+      recoveryHintJson: serializeTaskRecoveryHint(snapshot.recoveryHint),
+      progressJson: JSON.stringify(snapshot),
+      ...extra,
+    })
+  }
+
+  const setWorkflowTaskStatus = (
+    status: 'running' | 'success' | 'failed' | 'cancelled',
+    extra: Partial<typeof tasks.$inferInsert> = {},
+  ) => {
+    updateTaskStatus(workflowTaskId, status, sender, {
+      pipelineRole: snapshot.currentRole || undefined,
+      pipelineStage: getWorkflowPipelineStage(),
+      contractVersion: snapshot.contractVersion,
+      canonRunId: snapshot.canonRunId,
+      recoveryHintJson: serializeTaskRecoveryHint(snapshot.recoveryHint),
+      progressJson: JSON.stringify(snapshot),
+      ...extra,
+    })
+  }
+
+  const startRoleTask = async (
+    role: ChapterPipelineRole,
+    type: 'chapter_planner' | 'chapter_writer' | 'chapter_critic' | 'chapter_rewriter' | 'chapter_canonizer' | 'chapter_finalize',
+    detail: string,
+    options: {
+      inputJson?: string
+      runnerType?: 'chat' | 'stream' | 'workflow'
+      canonRunId?: number
+    } = {},
+  ) => {
+    assertChapterPipelineActive(workflowTaskId)
+    const childTaskId = await createTask({
+      type,
+      novelId: chapter.novelId,
+      modelConfigId: novel.modelConfigId || undefined,
+      relatedEntityType: 'chapter',
+      relatedEntityId: chapterId,
+      inputJson: options.inputJson,
+      runnerType: options.runnerType || 'chat',
+      retryable: false,
+      parentTaskId: workflowTaskId,
+      pipelineRole: role,
+      pipelineStage: 'pending',
+      upstreamTaskId: previousRoleTaskId,
+      contractVersion,
+      canonRunId: options.canonRunId,
+      recoveryHintJson: serializeTaskRecoveryHint(buildChapterPipelineRecoveryHint(chapter.novelId, chapterId, role)),
+      status: 'pending',
+    })
+    const now = new Date().toISOString()
+    snapshot = {
+      ...snapshot,
+      currentRole: role,
+      currentStage: getPipelineRoleStage(role),
+      status: 'running',
+      message: detail,
+      streamTaskId: role === 'rewriter' ? childTaskId : undefined,
+      recoveryHint: undefined,
+      roles: {
+        ...snapshot.roles,
+        [role]: {
+          ...snapshot.roles[role],
+          status: 'running',
+          detail,
+          taskId: childTaskId,
+          upstreamTaskId: previousRoleTaskId,
+          contractVersion,
+          canonRunId: options.canonRunId,
+          startedAt: now,
+          finishedAt: undefined,
+          durationMs: undefined,
+          tokensUsed: undefined,
+          recoveryHint: undefined,
+        },
+      },
+    }
+    syncWorkflowTask({
+      currentChildTaskId: childTaskId,
+      errorMessage: null,
+    })
+    updateTask(childTaskId, { pipelineStage: 'running' })
+    sendPipelineProgress(sender, snapshot, {
+      stage: getPipelineRoleStage(role),
+      label: snapshot.roles[role].label,
+      detail,
+      status: 'running',
+      role,
+    })
+    return childTaskId
+  }
+
+  const finishRoleTask = (
+    role: ChapterPipelineRole,
+    taskId: number,
+    detail: string,
+    extra: Partial<ChapterPipelineRoleState> = {},
+  ) => {
+    snapshot = refreshPipelineRoleMetrics(snapshot, role, taskId)
+    snapshot = {
+      ...snapshot,
+      message: detail,
+      streamTaskId: role === 'rewriter' ? undefined : snapshot.streamTaskId,
+      canonRunId: extra.canonRunId ?? snapshot.canonRunId,
+      recoveryHint: undefined,
+      roles: {
+        ...snapshot.roles,
+        [role]: {
+          ...snapshot.roles[role],
+          status: 'success',
+          detail,
+          finishedAt: new Date().toISOString(),
+          recoveryHint: undefined,
+          ...extra,
+        },
+      },
+    }
+    updateTask(taskId, {
+      pipelineStage: 'success',
+      canonRunId: snapshot.canonRunId,
+      recoveryHintJson: null,
+      contractVersion: snapshot.contractVersion,
+    })
+    syncWorkflowTask({
+      currentChildTaskId: null,
+      errorMessage: null,
+      recoveryHintJson: null,
+    })
+    previousRoleTaskId = taskId
+  }
+
+  const failRoleTask = (
+    role: ChapterPipelineRole,
+    taskId: number | undefined,
+    error: unknown,
+    options: { blocked?: boolean } = {},
+  ): never => {
+    const aborted = isChapterPipelineAbortError(workflowTaskId, error) || (typeof taskId === 'number' && isChapterPipelineAbortError(taskId, error))
+    const detail = error instanceof Error ? error.message : `${getPipelineRoleLabel(role)} 执行失败`
+    const recoveryHint = buildChapterPipelineRecoveryHint(chapter.novelId, chapterId, role)
+
+    if (typeof taskId === 'number') {
+      updateTask(taskId, {
+        pipelineStage: options.blocked ? 'blocked' : 'failed',
+        recoveryHintJson: serializeTaskRecoveryHint(recoveryHint),
+        contractVersion: snapshot.contractVersion,
+        canonRunId: snapshot.canonRunId,
+      })
+      snapshot = refreshPipelineRoleMetrics(snapshot, role, taskId)
+    }
+
+    snapshot = {
+      ...snapshot,
+      currentRole: role,
+      currentStage: getPipelineRoleStage(role),
+      status: aborted ? 'cancelled' : 'failed',
+      message: detail,
+      streamTaskId: undefined,
+      recoveryHint,
+      roles: {
+        ...snapshot.roles,
+        [role]: {
+          ...snapshot.roles[role],
+          status: options.blocked ? 'blocked' : 'failed',
+          detail,
+          taskId: taskId ?? snapshot.roles[role].taskId,
+          finishedAt: new Date().toISOString(),
+          recoveryHint,
+        },
+      },
+    }
+
+    if (!hasCommittedContent) {
+      updateChapter(chapterId, { status: previousStatus }, { versionSource: false })
+    } else {
+      updateChapter(chapterId, { status: 'draft' }, { skipStaleTracking: true, versionSource: false })
+    }
+
+    setWorkflowTaskStatus(aborted ? 'cancelled' : 'failed', {
+      currentChildTaskId: null,
+      errorMessage: aborted ? '用户已取消' : detail,
+      pipelineStage: options.blocked ? 'blocked' : 'failed',
+    })
+    sendPipelineProgress(sender, snapshot, {
+      stage: getPipelineRoleStage(role),
+      label: aborted ? '章节流水线已取消' : `${snapshot.roles[role].label} 失败`,
+      detail,
+      status: aborted ? 'cancelled' : 'failed',
+      role,
+    })
+    throw error instanceof Error ? error : new Error(detail)
+  }
 
   try {
     const { complexity, contexts } = buildStageContextMap(rawContext, chapter)
@@ -2044,61 +2584,63 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
       status: 'writing',
       scenePlanJson: '',
       reviewNotesJson: '',
+    }, { versionSource: false })
+    updateTaskProgress(workflowTaskId, snapshot, sender)
+    setWorkflowTaskStatus('running', {
+      currentChildTaskId: null,
+      errorMessage: null,
     })
 
-    sendGenerationProgress(sender, {
-      chapterId,
-      stage: 'planning',
-      label: '场景规划',
-      detail: '先把本章拆成可执行的场景链。',
-      completed: 1,
-      total: 4,
-      status: 'running',
+    const plannerMessages = [{
+      role: 'user' as const,
+      content: buildScenePlanPrompt({
+        novelTitle: novel.title,
+        genre: profile.genre,
+        chapterNum: chapter.chapterNum,
+        chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
+        chapterGoal: scenePlanContext.chapterGoal,
+        hardConstraintContext: scenePlanContext.hardConstraintContext,
+        plotPoints: chapter.outline || '',
+        emotionTone: chapter.emotionTone || '平稳',
+        targetWords: chapter.targetWords || 3000,
+        storyCore,
+        writingContractSummary: scenePlanContext.writingContractSummary,
+        relationSummary: scenePlanContext.relationSummary,
+        currentArc: scenePlanContext.currentArc,
+        worldRules: scenePlanContext.worldRules,
+        characterStates: scenePlanContext.characterStates,
+        worldStates: scenePlanContext.worldStates,
+        itemSummary: scenePlanContext.itemSummary,
+        previousSummaries: scenePlanContext.previousSummaries,
+        lastChapterEnding: scenePlanContext.lastChapterEnding,
+        continuitySummary: scenePlanContext.continuitySummary,
+        openLoops: scenePlanContext.openLoops,
+        dueForeshadows: scenePlanContext.dueForeshadows,
+        continuityNotes: scenePlanContext.continuityNotes,
+        timelineSummary: scenePlanContext.timelineSummary,
+        timelineOpenThreads: scenePlanContext.timelineOpenThreads,
+        longTermMemory: scenePlanContext.longTermMemory,
+        recalledMemory: scenePlanContext.recalledMemory,
+        consistencyNotes,
+        activeThreads: scenePlanContext.activeThreads,
+        protagonistReference: profile.protagonistReference,
+        protagonistRule: profile.protagonistRule,
+        promptTier: complexity,
+      }),
+    }]
+    const plannerTaskId = await startRoleTask('planner', 'chapter_planner', '先把章节合同落成可执行的场景链。', {
+      inputJson: JSON.stringify(plannerMessages),
+      runnerType: 'chat',
     })
-
-    const scenePlanResult = await runChatTask({
-      type: 'chapter_scene_plan',
+    const scenePlanResult = await executeChatTask(plannerTaskId, {
+      type: 'chapter_planner',
       novelId: chapter.novelId,
       relatedEntityType: 'chapter',
       relatedEntityId: chapterId,
-      messages: [{
-        role: 'user',
-        content: buildScenePlanPrompt({
-          novelTitle: novel.title,
-          genre: profile.genre,
-          chapterNum: chapter.chapterNum,
-          chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
-          chapterGoal: scenePlanContext.chapterGoal,
-          hardConstraintContext: scenePlanContext.hardConstraintContext,
-          plotPoints: chapter.outline || '',
-          emotionTone: chapter.emotionTone || '平稳',
-          targetWords: chapter.targetWords || 3000,
-          storyCore,
-          writingContractSummary: scenePlanContext.writingContractSummary,
-          relationSummary: scenePlanContext.relationSummary,
-          currentArc: scenePlanContext.currentArc,
-          worldRules: scenePlanContext.worldRules,
-          characterStates: scenePlanContext.characterStates,
-          worldStates: scenePlanContext.worldStates,
-          itemSummary: scenePlanContext.itemSummary,
-          previousSummaries: scenePlanContext.previousSummaries,
-          lastChapterEnding: scenePlanContext.lastChapterEnding,
-          continuitySummary: scenePlanContext.continuitySummary,
-          openLoops: scenePlanContext.openLoops,
-          dueForeshadows: scenePlanContext.dueForeshadows,
-          continuityNotes: scenePlanContext.continuityNotes,
-          timelineSummary: scenePlanContext.timelineSummary,
-          timelineOpenThreads: scenePlanContext.timelineOpenThreads,
-          longTermMemory: scenePlanContext.longTermMemory,
-          recalledMemory: scenePlanContext.recalledMemory,
-          consistencyNotes,
-          activeThreads: scenePlanContext.activeThreads,
-          protagonistReference: profile.protagonistReference,
-          protagonistRule: profile.protagonistRule,
-          promptTier: complexity,
-        }),
-      }],
+      inputJson: JSON.stringify(plannerMessages),
+      messages: plannerMessages,
       modelConfigId: novel.modelConfigId || undefined,
+      sender,
     })
     const scenePlanParse = parseAiJsonResult<unknown>(scenePlanResult, 'array', {
       channel: 'chapter',
@@ -2116,152 +2658,155 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
 
     updateChapter(chapterId, { scenePlanJson: JSON.stringify(scenePlan) })
     const scenePlanText = formatScenePlan(scenePlan)
+    finishRoleTask('planner', plannerTaskId, `场景计划已固化 ${scenePlan.length} 段。`)
 
-    sendGenerationProgress(sender, {
-      chapterId,
-      stage: 'drafting',
-      label: '正文初稿',
-      detail: '按场景计划生成第一版正文。',
-      completed: 2,
-      total: 4,
-      status: 'running',
+    const writerMessages = [{
+      role: 'user' as const,
+      content: buildChapterDraftPrompt({
+        novelTitle: novel.title,
+        genre: profile.genre,
+        chapterNum: chapter.chapterNum,
+        chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
+        chapterGoal: draftContext.chapterGoal,
+        hardConstraintContext: draftContext.hardConstraintContext,
+        emotionTone: chapter.emotionTone || '平稳',
+        targetWords: chapter.targetWords || 3000,
+        storyCore,
+        writingContractSummary: draftContext.writingContractSummary,
+        relationSummary: draftContext.relationSummary,
+        currentArc: draftContext.currentArc,
+        worldRules: draftContext.worldRules,
+        characterStates: draftContext.characterStates,
+        worldStates: draftContext.worldStates,
+        itemSummary: draftContext.itemSummary,
+        previousSummaries: draftContext.previousSummaries,
+        lastChapterEnding: draftContext.lastChapterEnding,
+        continuitySummary: draftContext.continuitySummary,
+        openLoops: draftContext.openLoops,
+        dueForeshadows: draftContext.dueForeshadows,
+        continuityNotes: draftContext.continuityNotes,
+        timelineSummary: draftContext.timelineSummary,
+        timelineOpenThreads: draftContext.timelineOpenThreads,
+        longTermMemory: draftContext.longTermMemory,
+        recalledMemory: draftContext.recalledMemory,
+        consistencyNotes: draftWritingGuidance,
+        structuralAlertsSummary,
+        scenePlan: scenePlanText,
+        draftContent: '',
+        reviewNotes: '',
+        activeThreads: draftContext.activeThreads,
+        protagonistReference: profile.protagonistReference,
+        protagonistRule: profile.protagonistRule,
+        promptTier: complexity,
+      }),
+    }]
+    const writerTaskId = await startRoleTask('writer', 'chapter_writer', 'Writer 正在按章节合同与场景计划生成正文初稿。', {
+      inputJson: JSON.stringify(writerMessages),
+      runnerType: 'chat',
     })
-
-    const draftContent = await runChatTask({
-      type: 'chapter_draft',
+    try {
+      assertContractDrivenWriterInputs('writer', contractVersion, draftContext.writingContractSummary, scenePlanText)
+    } catch (error) {
+      updateTaskStatus(writerTaskId, 'failed', sender, {
+        pipelineStage: 'blocked',
+        errorMessage: error instanceof Error ? error.message : 'Writer 缺少合同输入',
+        recoveryHintJson: serializeTaskRecoveryHint(buildChapterPipelineRecoveryHint(chapter.novelId, chapterId, 'writer')),
+      })
+      failRoleTask('writer', writerTaskId, error, { blocked: true })
+    }
+    const draftContent = await executeChatTask(writerTaskId, {
+      type: 'chapter_writer',
       novelId: chapter.novelId,
       relatedEntityType: 'chapter',
       relatedEntityId: chapterId,
-      messages: [{
-        role: 'user',
-        content: buildChapterDraftPrompt({
-          novelTitle: novel.title,
-          genre: profile.genre,
-          chapterNum: chapter.chapterNum,
-          chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
-          chapterGoal: draftContext.chapterGoal,
-          hardConstraintContext: draftContext.hardConstraintContext,
-          emotionTone: chapter.emotionTone || '平稳',
-          targetWords: chapter.targetWords || 3000,
-          storyCore,
-          writingContractSummary: draftContext.writingContractSummary,
-          relationSummary: draftContext.relationSummary,
-          currentArc: draftContext.currentArc,
-          worldRules: draftContext.worldRules,
-          characterStates: draftContext.characterStates,
-          worldStates: draftContext.worldStates,
-          itemSummary: draftContext.itemSummary,
-          previousSummaries: draftContext.previousSummaries,
-          lastChapterEnding: draftContext.lastChapterEnding,
-          continuitySummary: draftContext.continuitySummary,
-          openLoops: draftContext.openLoops,
-          dueForeshadows: draftContext.dueForeshadows,
-          continuityNotes: draftContext.continuityNotes,
-          timelineSummary: draftContext.timelineSummary,
-          timelineOpenThreads: draftContext.timelineOpenThreads,
-          longTermMemory: draftContext.longTermMemory,
-          recalledMemory: draftContext.recalledMemory,
-          consistencyNotes: draftWritingGuidance,
-          structuralAlertsSummary,
-          scenePlan: scenePlanText,
-          draftContent: '',
-          reviewNotes: '',
-          activeThreads: draftContext.activeThreads,
-          protagonistReference: profile.protagonistReference,
-          protagonistRule: profile.protagonistRule,
-          promptTier: complexity,
-        }),
-      }],
+      inputJson: JSON.stringify(writerMessages),
+      messages: writerMessages,
       modelConfigId: novel.modelConfigId || undefined,
+      sender,
     })
+    finishRoleTask('writer', writerTaskId, '正文初稿已生成，等待 Critic 审校。')
     const lockedParagraphContext = buildLockedParagraphContext(chapter, draftContent)
-
-    sendGenerationProgress(sender, {
-      chapterId,
-      stage: 'reviewing',
-      label: '自动审校',
-      detail: '检查承接、事件顺序和语言问题。',
-      completed: 3,
-      total: 4,
-      status: 'running',
-    })
 
     let reviewNotes = buildFallbackReviewNotes(consistencyNotes)
 
-    {
-      // 所有章节都启用AI审校，确保百万字规模下质量一致
-      const reviewResult = await runChatTask({
-        type: 'chapter_review',
+    const criticMessages = [{
+      role: 'user' as const,
+      content: buildChapterReviewPrompt({
+        novelTitle: novel.title,
+        genre: profile.genre,
+        chapterNum: chapter.chapterNum,
+        chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
+        chapterGoal: reviewContext.chapterGoal,
+        hardConstraintContext: reviewContext.hardConstraintContext,
+        storyCore,
+        writingContractSummary: reviewContext.writingContractSummary,
+        relationSummary: reviewContext.relationSummary,
+        currentArc: reviewContext.currentArc,
+        worldRules: reviewContext.worldRules,
+        characterStates: reviewContext.characterStates,
+        worldStates: reviewContext.worldStates,
+        itemSummary: reviewContext.itemSummary,
+        continuitySummary: reviewContext.continuitySummary,
+        openLoops: reviewContext.openLoops,
+        dueForeshadows: reviewContext.dueForeshadows,
+        timelineSummary: reviewContext.timelineSummary,
+        longTermMemory: reviewContext.longTermMemory,
+        recalledMemory: reviewContext.recalledMemory,
+        consistencyNotes,
+        structuralAlertsSummary,
+        arcProgress: latestArcProgressNote,
+        arcProgressStatus: buildArcProgressStatus(currentArcRow, chapter.chapterNum),
+        arcProgressCheckpoint: buildArcProgressCheckpoint(currentArcRow, chapter.chapterNum),
+        scenePlan: scenePlanText,
+        draftContent,
+        protagonistReference: profile.protagonistReference,
+        protagonistRule: profile.protagonistRule,
+        promptTier: complexity,
+      }),
+    }]
+    const criticTaskId = await startRoleTask('critic', 'chapter_critic', 'Critic 正在检查连续性、节奏、角色口吻与语言问题。', {
+      inputJson: JSON.stringify(criticMessages),
+      runnerType: 'chat',
+    })
+    try {
+      assertContractDrivenWriterInputs('critic', contractVersion, reviewContext.writingContractSummary, scenePlanText)
+    } catch (error) {
+      updateTaskStatus(criticTaskId, 'failed', sender, {
+        pipelineStage: 'blocked',
+        errorMessage: error instanceof Error ? error.message : 'Critic 缺少合同输入',
+        recoveryHintJson: serializeTaskRecoveryHint(buildChapterPipelineRecoveryHint(chapter.novelId, chapterId, 'critic')),
+      })
+      failRoleTask('critic', criticTaskId, error, { blocked: true })
+    }
+    const reviewResult = await executeChatTask(criticTaskId, {
+      type: 'chapter_critic',
+      novelId: chapter.novelId,
+      relatedEntityType: 'chapter',
+      relatedEntityId: chapterId,
+      inputJson: JSON.stringify(criticMessages),
+      messages: criticMessages,
+      modelConfigId: novel.modelConfigId || undefined,
+      sender,
+    })
+    const reviewParse = parseAiJsonResult<unknown>(reviewResult, 'object', {
+      channel: 'chapter',
+      message: '章节审校 JSON 解析失败，已回退到后备审校意见继续生成。',
+      consoleSummary: `[chapter:warn] review-json-fallback chapter=${chapterId}`,
+      context: {
+        chapterId,
         novelId: chapter.novelId,
-        relatedEntityType: 'chapter',
-        relatedEntityId: chapterId,
-        messages: [{
-          role: 'user',
-          content: buildChapterReviewPrompt({
-            novelTitle: novel.title,
-            genre: profile.genre,
-            chapterNum: chapter.chapterNum,
-            chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
-            chapterGoal: reviewContext.chapterGoal,
-            hardConstraintContext: reviewContext.hardConstraintContext,
-            storyCore,
-            writingContractSummary: reviewContext.writingContractSummary,
-            relationSummary: reviewContext.relationSummary,
-            currentArc: reviewContext.currentArc,
-            worldRules: reviewContext.worldRules,
-            characterStates: reviewContext.characterStates,
-            worldStates: reviewContext.worldStates,
-            itemSummary: reviewContext.itemSummary,
-            continuitySummary: reviewContext.continuitySummary,
-            openLoops: reviewContext.openLoops,
-            dueForeshadows: reviewContext.dueForeshadows,
-            timelineSummary: reviewContext.timelineSummary,
-            longTermMemory: reviewContext.longTermMemory,
-            recalledMemory: reviewContext.recalledMemory,
-            consistencyNotes,
-            structuralAlertsSummary,
-            arcProgress: latestArcProgressNote,
-            arcProgressStatus: buildArcProgressStatus(currentArcRow, chapter.chapterNum),
-            arcProgressCheckpoint: buildArcProgressCheckpoint(currentArcRow, chapter.chapterNum),
-            scenePlan: scenePlanText,
-            draftContent,
-            protagonistReference: profile.protagonistReference,
-            protagonistRule: profile.protagonistRule,
-            promptTier: complexity,
-          }),
-        }],
-        modelConfigId: novel.modelConfigId || undefined,
-      })
-
-      const reviewParse = parseAiJsonResult<unknown>(reviewResult, 'object', {
-        channel: 'chapter',
-        message: '章节审校 JSON 解析失败，已回退到后备审校意见继续生成。',
-        consoleSummary: `[chapter:warn] review-json-fallback chapter=${chapterId}`,
-        context: {
-          chapterId,
-          novelId: chapter.novelId,
-          stage: 'review',
-        },
-      })
-      if (reviewParse.success) {
-        const normalizedNotes = normalizeReviewNotes(reviewParse.data)
-        reviewNotes = hasReviewNotes(normalizedNotes) ? normalizedNotes : reviewNotes
-      }
+        stage: 'review',
+      },
+    })
+    if (reviewParse.success) {
+      const normalizedNotes = normalizeReviewNotes(reviewParse.data)
+      reviewNotes = hasReviewNotes(normalizedNotes) ? normalizedNotes : reviewNotes
     }
 
     reviewNotes = enhanceReviewNotesWithGuardrails(reviewNotes, draftContent, profile.genre)
     reviewNotes = applyDialogueAnalysisToReviewNotes(reviewNotes, chapter.novelId, chapter.chapterNum, draftContent)
     updateChapter(chapterId, { reviewNotesJson: JSON.stringify(reviewNotes) })
-
-    sendGenerationProgress(sender, {
-      chapterId,
-      stage: 'rewriting',
-      label: '定稿润色',
-      detail: '根据审校意见重写成可直接入稿的版本。',
-      completed: 4,
-      total: 4,
-      status: 'running',
-    })
+    finishRoleTask('critic', criticTaskId, 'Critic 审校完成，已生成本章修订意见。')
 
     const prompt = buildChapterRewritePrompt({
       novelTitle: novel.title,
@@ -2303,9 +2848,22 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
     })
 
     const messages = [{ role: 'user' as const, content: prompt }]
-
-    return runStreamTask({
-      type: 'chapter_write',
+    const rewriterTaskId = await startRoleTask('rewriter', 'chapter_rewriter', 'Rewriter 正在按 Critic 结论修正文稿。', {
+      inputJson: JSON.stringify(messages),
+      runnerType: 'stream',
+    })
+    try {
+      assertContractDrivenWriterInputs('rewriter', contractVersion, rewriteContext.writingContractSummary, scenePlanText)
+    } catch (error) {
+      updateTaskStatus(rewriterTaskId, 'failed', sender, {
+        pipelineStage: 'blocked',
+        errorMessage: error instanceof Error ? error.message : 'Rewriter 缺少合同输入',
+        recoveryHintJson: serializeTaskRecoveryHint(buildChapterPipelineRecoveryHint(chapter.novelId, chapterId, 'rewriter')),
+      })
+      failRoleTask('rewriter', rewriterTaskId, error, { blocked: true })
+    }
+    const rewriteResult = await executeStreamTask(rewriterTaskId, {
+      type: 'chapter_rewriter',
       novelId: chapter.novelId,
       relatedEntityType: 'chapter',
       relatedEntityId: chapterId,
@@ -2313,72 +2871,133 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
       messages,
       modelConfigId: novel.modelConfigId || undefined,
       sender,
-      onSuccess: async (output) => {
-        const protectedOutput = enforceLockedParagraphProtection(
-          output,
-          lockedParagraphContext.lockedParagraphs,
-          lockedParagraphContext.initialFallbackContent,
-          reviewNotes,
-        )
-        const repaired = await repairChapterOutputIfNeeded({
-          chapter,
-          novel,
-          context: rewriteContext,
-          storyCore,
-          profile,
-          scenePlanText,
-          consistencyNotes: rewriteWritingGuidance,
-          structuralAlertsSummary,
-          reviewNotes: protectedOutput.reviewNotes,
-          content: protectedOutput.content,
-          lockedParagraphs: lockedParagraphContext.lockedParagraphs,
-          promptTier: complexity,
-        })
-        const repairedReviewNotes = applyDialogueAnalysisToReviewNotes(
-          repaired.reviewNotes,
-          chapter.novelId,
-          chapter.chapterNum,
-          repaired.content,
-        )
-
-        if (repairedReviewNotes !== reviewNotes) {
-          updateChapter(chapterId, { reviewNotesJson: JSON.stringify(repairedReviewNotes) })
-        }
-
-        const result = await finalizeGeneratedChapterContent(chapterId, repaired.content)
-        scheduleDialogueFingerprintRefresh(chapter.novelId, novel?.modelConfigId || undefined)
-
-        // Async: generate embeddings for vector memory retrieval (non-blocking)
-        const chapterRecord = getChapter(chapterId)
-        if (chapterRecord) {
-          generateChapterEmbeddings(chapterRecord.novelId, chapterId, novel?.modelConfigId || undefined)
-            .catch((err) => console.warn('[embedding] 向量生成失败（不影响主流程）:', err))
-        }
-
-        sendGenerationProgress(sender, {
-          chapterId,
-          stage: 'completed',
-          label: '完成入稿',
-          detail: '章节已完成自动修订，并写入摘要与连续性记忆。',
-          completed: 4,
-          total: 4,
-          status: 'success',
-        })
-        return result
-      },
     })
+
+    const protectedOutput = enforceLockedParagraphProtection(
+      rewriteResult.output,
+      lockedParagraphContext.lockedParagraphs,
+      lockedParagraphContext.initialFallbackContent,
+      reviewNotes,
+    )
+    const repaired = await repairChapterOutputIfNeeded({
+      chapter,
+      novel,
+      context: rewriteContext,
+      storyCore,
+      profile,
+      scenePlanText,
+      consistencyNotes: rewriteWritingGuidance,
+      structuralAlertsSummary,
+      reviewNotes: protectedOutput.reviewNotes,
+      content: protectedOutput.content,
+      lockedParagraphs: lockedParagraphContext.lockedParagraphs,
+      promptTier: complexity,
+    })
+    const repairedReviewNotes = applyDialogueAnalysisToReviewNotes(
+      repaired.reviewNotes,
+      chapter.novelId,
+      chapter.chapterNum,
+      repaired.content,
+    )
+
+    updateChapter(chapterId, {
+      content: repaired.content,
+      reviewNotesJson: JSON.stringify(repairedReviewNotes),
+      status: 'draft',
+    }, {
+      skipStaleTracking: true,
+      versionSource: false,
+    })
+    hasCommittedContent = true
+    finishRoleTask('rewriter', rewriterTaskId, '正文已完成重写，准备生成 Canon 差异草案。')
+
+    const canonizerTaskId = await startRoleTask('canonizer', 'chapter_canonizer', 'Canonizer 正在为本章准备可确认的状态差异草案。', {
+      runnerType: 'workflow',
+    })
+    updateTaskStatus(canonizerTaskId, 'running', sender, {
+      pipelineStage: 'running',
+      contractVersion,
+    })
+    const canonRun = await prepareChapterWritebackRun(chapterId, 'pipeline-canonizer')
+    if (canonRun.status === 'failed') {
+      updateTaskStatus(canonizerTaskId, 'failed', sender, {
+        pipelineStage: 'failed',
+        contractVersion,
+        canonRunId: canonRun.id,
+        errorMessage: canonRun.errorMessage || 'Canon 草案生成失败',
+        recoveryHintJson: serializeTaskRecoveryHint(buildChapterPipelineRecoveryHint(chapter.novelId, chapterId, 'canonizer')),
+      })
+      failRoleTask('canonizer', canonizerTaskId, new Error(canonRun.errorMessage || 'Canon 草案生成失败'))
+    }
+    const canonDetail = canonRun.summaryText?.trim() || 'Canon 差异草案已生成，可进入章后状态回写中心确认。'
+    updateTaskStatus(canonizerTaskId, 'success', sender, {
+      pipelineStage: 'success',
+      contractVersion,
+      canonRunId: canonRun.id,
+      outputText: canonDetail,
+      errorMessage: null,
+      recoveryHintJson: null,
+    })
+    finishRoleTask('canonizer', canonizerTaskId, canonDetail, { canonRunId: canonRun.id })
+
+    const finalizeTaskId = await startRoleTask('finalize', 'chapter_finalize', '正在刷新摘要、连续性与故事记忆。', {
+      runnerType: 'workflow',
+      canonRunId: canonRun.id,
+    })
+    updateTaskStatus(finalizeTaskId, 'running', sender, {
+      pipelineStage: 'running',
+      contractVersion,
+      canonRunId: canonRun.id,
+    })
+    const result = await finalizeGeneratedChapterContent(chapterId, repaired.content)
+    scheduleDialogueFingerprintRefresh(chapter.novelId, novel?.modelConfigId || undefined)
+
+    const chapterRecord = getChapter(chapterId)
+    if (chapterRecord) {
+      generateChapterEmbeddings(chapterRecord.novelId, chapterId, novel?.modelConfigId || undefined)
+        .catch((err) => console.warn('[embedding] 向量生成失败（不影响主流程）:', err))
+    }
+
+    const finalizeDetail = '章节已入稿，并刷新摘要、连续性与长期记忆。'
+    updateTaskStatus(finalizeTaskId, 'success', sender, {
+      pipelineStage: 'success',
+      contractVersion,
+      canonRunId: canonRun.id,
+      outputText: finalizeDetail,
+      errorMessage: null,
+      recoveryHintJson: null,
+    })
+    finishRoleTask('finalize', finalizeTaskId, finalizeDetail, { canonRunId: canonRun.id })
+
+    snapshot = {
+      ...snapshot,
+      currentRole: 'finalize',
+      currentStage: 'completed',
+      status: 'success',
+      message: '章节已完成角色化流水线，并落成 Canon 草案。',
+      recoveryHint: undefined,
+    }
+    setWorkflowTaskStatus('success', {
+      currentChildTaskId: null,
+      outputText: `第${chapter.chapterNum}章流水线完成。${result.summary ? ` 摘要：${result.summary}` : ''}`,
+      errorMessage: null,
+      recoveryHintJson: null,
+    })
+    sendPipelineProgress(sender, snapshot, {
+      stage: 'completed',
+      label: '完成入稿',
+      detail: '章节已完成角色化流水线，并写入摘要、连续性与 Canon 草案。',
+      status: 'success',
+      role: 'finalize',
+    })
+    return workflowTaskId
   } catch (error) {
-    updateChapter(chapterId, { status: previousStatus })
-    sendGenerationProgress(sender, {
-      chapterId,
-      stage: 'failed',
-      label: '生成失败',
-      detail: error instanceof Error ? error.message : '章节生成中断',
-      completed: 0,
-      total: 4,
-      status: 'failed',
-    })
-    throw error
+    const workflowTask = getTaskRecord(workflowTaskId)
+    if (workflowTask?.status === 'failed' || workflowTask?.status === 'cancelled') {
+      throw error
+    }
+    failRoleTask(snapshot.currentRole || 'planner', snapshot.currentRole ? snapshot.roles[snapshot.currentRole].taskId : undefined, error)
+    throw error instanceof Error ? error : new Error('章节生成中断')
   }
 }
 

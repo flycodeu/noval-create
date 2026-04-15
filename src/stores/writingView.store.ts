@@ -1,11 +1,12 @@
 import { create } from 'zustand'
 
 export type WritingGenerationStatus = 'idle' | 'running' | 'success' | 'failed' | 'cancelled'
-export type WritingGenerationStage = 'planning' | 'drafting' | 'reviewing' | 'rewriting' | 'completed' | 'failed'
+export type WritingGenerationStage = 'planning' | 'drafting' | 'reviewing' | 'rewriting' | 'canonizing' | 'completed' | 'failed'
 
 export interface WritingGenerationSnapshot {
   chapterId: number | null
   taskId: number | null
+  streamTaskId: number | null
   stage: WritingGenerationStage | null
   status: WritingGenerationStatus
   error: string | null
@@ -22,6 +23,7 @@ interface StartGenerationInput {
 
 interface UpdateGenerationStageInput {
   taskId?: number | null
+  streamTaskId?: number | null
   chapterId?: number | null
   stage: WritingGenerationStage
   status?: 'running' | 'failed'
@@ -53,6 +55,7 @@ interface WritingViewStore {
 const idleGeneration: WritingGenerationSnapshot = {
   chapterId: null,
   taskId: null,
+  streamTaskId: null,
   stage: null,
   status: 'idle',
   error: null,
@@ -69,6 +72,7 @@ function buildRunningSnapshot(
   return {
     chapterId: input.chapterId,
     taskId: input.taskId ?? previous.taskId ?? null,
+    streamTaskId: previous.status === 'running' ? previous.streamTaskId : null,
     stage: previous.stage && previous.status === 'running' ? previous.stage : null,
     status: 'running',
     error: null,
@@ -86,6 +90,7 @@ function buildFinishedSnapshot(
   return {
     chapterId: input.chapterId,
     taskId: input.taskId ?? previous.taskId ?? null,
+    streamTaskId: previous.streamTaskId ?? null,
     stage: input.stage ?? previous.stage ?? null,
     status: input.status,
     error: input.error ?? null,
@@ -133,6 +138,7 @@ export const useWritingViewStore = create<WritingViewStore>((set) => ({
       ? {
         ...state.activeGeneration,
         taskId: input.taskId ?? state.activeGeneration.taskId,
+        streamTaskId: input.streamTaskId ?? state.activeGeneration.streamTaskId,
         stage: input.stage,
         status: input.status === 'failed' ? 'failed' : 'running',
         label: input.label ?? state.activeGeneration.label,
@@ -147,6 +153,7 @@ export const useWritingViewStore = create<WritingViewStore>((set) => ({
       ...previousChapterSnapshot,
       chapterId: resolvedChapterId,
       taskId: input.taskId ?? previousChapterSnapshot.taskId,
+      streamTaskId: input.streamTaskId ?? previousChapterSnapshot.streamTaskId,
       stage: input.stage,
       status: input.status === 'failed' ? 'failed' : 'running',
       label: input.label ?? previousChapterSnapshot.label,

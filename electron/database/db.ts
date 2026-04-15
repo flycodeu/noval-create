@@ -1552,6 +1552,15 @@ export function runMigrations(sqlite: Database.Database) {
         ON chapter_gate_runs(novel_id, chapter_num, id DESC);
     `)
   })
+
+  runMigrationStep(sqlite, '0028_task_pipeline_metadata', () => {
+    ensureColumn(sqlite, 'tasks', 'pipeline_role', 'TEXT')
+    ensureColumn(sqlite, 'tasks', 'pipeline_stage', 'TEXT')
+    ensureColumn(sqlite, 'tasks', 'upstream_task_id', 'INTEGER')
+    ensureColumn(sqlite, 'tasks', 'contract_version', 'TEXT')
+    ensureColumn(sqlite, 'tasks', 'canon_run_id', 'INTEGER')
+    ensureColumn(sqlite, 'tasks', 'recovery_hint_json', 'TEXT')
+  })
 }
 
 function ensureMigrationTable(sqlite: Database.Database) {
@@ -1638,7 +1647,20 @@ function validateRequiredSchema(sqlite: Database.Database) {
     },
     {
       tableName: 'tasks',
-      columns: ['runner_type', 'retryable', 'parent_task_id', 'current_child_task_id', 'control_json', 'progress_json'],
+      columns: [
+        'runner_type',
+        'retryable',
+        'parent_task_id',
+        'current_child_task_id',
+        'pipeline_role',
+        'pipeline_stage',
+        'upstream_task_id',
+        'contract_version',
+        'canon_run_id',
+        'recovery_hint_json',
+        'control_json',
+        'progress_json',
+      ],
     },
     {
       tableName: 'map_relations',

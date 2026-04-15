@@ -1060,6 +1060,8 @@ function registerIpcHandlers() {
   handle('task:list', (_, novelId) => taskService.listTasks(novelId))
   handle('task:query', (_, filters) => taskService.queryTasks(filters || {}))
   handle('task:getStats', (_, novelId) => taskService.getTaskStats(novelId))
+  handle('task:getPipelineStats', (_, novelId) => taskService.getTaskPipelineStats(novelId))
+  handle('task:getLatestChapterPipeline', (_, chapterId) => taskService.getLatestChapterPipelineTask(chapterId))
   handle('task:clearHistory', (_, filters) => taskService.clearTaskHistory(filters || {}))
 
   handle('task:get', (_, id) => {

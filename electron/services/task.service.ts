@@ -16,6 +16,12 @@ import { throwUserFacingError } from '../utils/user-facing-error'
 export type TaskType =
   | 'init'
   | 'character_gen'
+  | 'chapter_planner'
+  | 'chapter_writer'
+  | 'chapter_critic'
+  | 'chapter_rewriter'
+  | 'chapter_canonizer'
+  | 'chapter_finalize'
   | 'chapter_scene_plan'
   | 'chapter_draft'
   | 'chapter_outline'
@@ -60,6 +66,29 @@ export type TaskStatus =
   | 'paused'
   | 'cancel_requested'
 
+export type TaskPipelineRole =
+  | 'planner'
+  | 'writer'
+  | 'critic'
+  | 'rewriter'
+  | 'canonizer'
+  | 'finalize'
+
+export type TaskPipelineStage =
+  | 'pending'
+  | 'running'
+  | 'paused'
+  | 'failed'
+  | 'success'
+  | 'blocked'
+
+export interface TaskRecoveryHint {
+  kind: 'open_page' | 'resume'
+  label: string
+  description: string
+  path?: string
+}
+
 export interface TaskControlState {
   cancelRequested?: boolean
   maxRetries?: number
@@ -93,6 +122,28 @@ export interface TaskStats {
   cancelledCount: number
 }
 
+export interface TaskPipelineRoleStat {
+  role: TaskPipelineRole
+  total: number
+  successCount: number
+  failedCount: number
+  runningCount: number
+  pausedCount: number
+  blockedCount: number
+  avgDurationMs: number
+  tokensUsedTotal: number
+}
+
+export interface TaskPipelineStats {
+  totalPipelineCount: number
+  activePipelineCount: number
+  roleStats: TaskPipelineRoleStat[]
+  commonRecoveryHints: Array<{
+    label: string
+    count: number
+  }>
+}
+
 export interface ClearTaskHistoryResult {
   deletedCount: number
   deletedTaskIds: number[]
@@ -109,6 +160,12 @@ interface CreateTaskOptions {
   retryable?: boolean
   parentTaskId?: number
   currentChildTaskId?: number
+  pipelineRole?: TaskPipelineRole
+  pipelineStage?: TaskPipelineStage
+  upstreamTaskId?: number
+  contractVersion?: string
+  canonRunId?: number
+  recoveryHintJson?: string
   controlJson?: string
   progressJson?: string
   status?: TaskStatus
@@ -154,6 +211,7 @@ const RATE_LIMIT_BASE_DELAY_MS = 1_500
 const RATE_LIMIT_MAX_DELAY_MS = 12_000
 const ENDED_TASK_STATUSES: TaskStatus[] = ['success', 'failed', 'cancelled']
 const MAX_STREAM_OUTPUT_LENGTH = 524_288 // ~512K 字符安全上限
+const CHAPTER_PIPELINE_ROLES: TaskPipelineRole[] = ['planner', 'writer', 'critic', 'rewriter', 'canonizer', 'finalize']
 
 function normalizePaging(page?: number, pageSize?: number, fallbackPageSize = 10) {
   const nextPageSize = Math.max(1, Math.min(pageSize || fallbackPageSize, 200))
@@ -388,6 +446,28 @@ function parseJsonObject<T extends object>(raw?: string | null): T {
   }
 }
 
+function parseTaskRecoveryHint(raw?: string | null): TaskRecoveryHint | null {
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+    const record = parsed as Record<string, unknown>
+    const kind = record.kind === 'resume' ? 'resume' : record.kind === 'open_page' ? 'open_page' : null
+    const label = typeof record.label === 'string' ? record.label.trim() : ''
+    const description = typeof record.description === 'string' ? record.description.trim() : ''
+    const path = typeof record.path === 'string' ? record.path.trim() : ''
+    if (!kind || !label || !description) return null
+    return {
+      kind,
+      label,
+      description,
+      path: path || undefined,
+    }
+  } catch {
+    return null
+  }
+}
+
 function isAbortError(error: unknown): boolean {
   return error instanceof Error
     && (error.name === 'AbortError' || /abort|cancel|取消/i.test(error.message))
@@ -598,6 +678,12 @@ export async function createTask(opts: CreateTaskOptions): Promise<number> {
     retryable: opts.retryable ? 1 : 0,
     parentTaskId: opts.parentTaskId,
     currentChildTaskId: opts.currentChildTaskId,
+    pipelineRole: opts.pipelineRole,
+    pipelineStage: opts.pipelineStage,
+    upstreamTaskId: opts.upstreamTaskId,
+    contractVersion: opts.contractVersion,
+    canonRunId: opts.canonRunId,
+    recoveryHintJson: opts.recoveryHintJson,
     controlJson: opts.controlJson,
     progressJson: opts.progressJson,
     status: opts.status || 'pending',
@@ -645,6 +731,65 @@ export function getTaskStats(novelId?: number): TaskStats {
   })
 }
 
+export function getTaskPipelineStats(novelId?: number): TaskPipelineStats {
+  const rows = listTaskRows({ novelId })
+  const chapterPipelineTasks = rows.filter((task) => task.type === 'chapter_write' && task.runnerType === 'workflow')
+  const roleTasks = rows.filter((task) => (
+    task.relatedEntityType === 'chapter'
+    && typeof task.pipelineRole === 'string'
+    && (typeof task.parentTaskId === 'number' || task.type !== 'chapter_write' || task.runnerType !== 'workflow')
+  ))
+  const recoveryCounts = new Map<string, number>()
+
+  const roleStats = CHAPTER_PIPELINE_ROLES.map<TaskPipelineRoleStat>((role) => {
+    const scoped = roleTasks.filter((task) => task.pipelineRole === role)
+    let durationCount = 0
+    let durationSum = 0
+    let tokensUsedTotal = 0
+
+    scoped.forEach((task) => {
+      if (typeof task.durationMs === 'number' && task.durationMs > 0) {
+        durationCount += 1
+        durationSum += task.durationMs
+      }
+      if (typeof task.tokensUsed === 'number' && task.tokensUsed > 0) {
+        tokensUsedTotal += task.tokensUsed
+      }
+      const recoveryHint = parseTaskRecoveryHint(task.recoveryHintJson)
+      if (recoveryHint && (task.status === 'failed' || task.status === 'paused')) {
+        recoveryCounts.set(recoveryHint.label, (recoveryCounts.get(recoveryHint.label) || 0) + 1)
+      }
+    })
+
+    return {
+      role,
+      total: scoped.length,
+      successCount: scoped.filter((task) => task.status === 'success').length,
+      failedCount: scoped.filter((task) => task.status === 'failed').length,
+      runningCount: scoped.filter((task) => task.status === 'running' || task.status === 'cancel_requested').length,
+      pausedCount: scoped.filter((task) => task.status === 'paused').length,
+      blockedCount: scoped.filter((task) => task.pipelineStage === 'blocked').length,
+      avgDurationMs: durationCount > 0 ? Math.round(durationSum / durationCount) : 0,
+      tokensUsedTotal,
+    }
+  })
+
+  return {
+    totalPipelineCount: chapterPipelineTasks.length,
+    activePipelineCount: chapterPipelineTasks.filter((task) => (
+      task.status === 'pending'
+      || task.status === 'running'
+      || task.status === 'paused'
+      || task.status === 'cancel_requested'
+    )).length,
+    roleStats,
+    commonRecoveryHints: [...recoveryCounts.entries()]
+      .sort((left, right) => right[1] - left[1])
+      .slice(0, 5)
+      .map(([label, count]) => ({ label, count })),
+  }
+}
+
 export function clearTaskHistory(filters: TaskHistoryClearFilters = {}): ClearTaskHistoryResult {
   const rows = listTaskRows(filters)
     .filter((task) => ENDED_TASK_STATUSES.includes(task.status as TaskStatus))
@@ -669,6 +814,16 @@ export function clearTaskHistory(filters: TaskHistoryClearFilters = {}): ClearTa
 export function getTaskRecord(taskId: number) {
   const db = getDb()
   return db.select().from(tasks).where(eq(tasks.id, taskId)).all()[0] || null
+}
+
+export function getLatestChapterPipelineTask(chapterId: number) {
+  return listTaskRows({})
+    .filter((task) => (
+      task.type === 'chapter_write'
+      && task.runnerType === 'workflow'
+      && task.relatedEntityType === 'chapter'
+      && task.relatedEntityId === chapterId
+    ))[0] || null
 }
 
 export function parseTaskControl(task: Pick<typeof tasks.$inferSelect, 'controlJson'> | null | undefined): TaskControlState {
@@ -745,6 +900,95 @@ export function updateTaskControl(taskId: number, control: TaskControlState) {
   })
 }
 
+export async function executeStreamTask(taskId: number, opts: RunTaskOptions): Promise<{ output: string; result?: unknown }> {
+  const controller = new AbortController()
+  abortControllers.set(taskId, controller)
+
+  const startTime = Date.now()
+  let fullOutput = ''
+  let outputLimitExceeded = false
+  let stopHeartbeat = () => {}
+  let release = () => {}
+
+  try {
+    const acquired = await acquireModelSlot(taskId, opts.modelConfigId, controller.signal)
+    release = acquired.release
+    updateTaskStatus(taskId, 'running', opts.sender)
+    stopHeartbeat = startTaskHeartbeat(taskId)
+
+    await executeStreamWithRateLimitRetries(acquired.runtime.adapter, opts.messages, {
+      temperature: acquired.runtime.temperature,
+      maxTokens: acquired.runtime.maxTokens,
+      ...opts.chatOpts,
+      signal: controller.signal,
+      onStream: (chunk) => {
+        fullOutput += chunk
+        if (fullOutput.length > MAX_STREAM_OUTPUT_LENGTH) {
+          outputLimitExceeded = true
+          controller.abort()
+          return
+        }
+        safeSend(opts.sender, 'task:stream-chunk', { taskId, chunk })
+      },
+    })
+
+    const result = opts.onSuccess ? await opts.onSuccess(fullOutput, taskId) : undefined
+    const durationMs = Date.now() - startTime
+    const tokensUsed = acquired.runtime.adapter.countTokens(fullOutput)
+
+    updateTask(taskId, {
+      status: 'success',
+      outputText: fullOutput,
+      durationMs,
+      tokensUsed,
+    })
+
+    notifyComplete(opts.sender, {
+      taskId,
+      status: 'success',
+      output: fullOutput,
+      result,
+    })
+
+    return { output: fullOutput, result }
+  } catch (error: unknown) {
+    if (outputLimitExceeded) {
+      const limitMsg = `流式输出超过最大限制 (${MAX_STREAM_OUTPUT_LENGTH} 字符)，已中止任务`
+      updateTask(taskId, {
+        status: 'failed',
+        errorMessage: limitMsg,
+        outputText: fullOutput || null,
+        durationMs: Date.now() - startTime,
+      })
+      notifyComplete(opts.sender, { taskId, status: 'failed', error: limitMsg })
+      throw new Error(limitMsg)
+    }
+    const currentTask = getTaskRecord(taskId)
+    const aborted = isAbortError(error) || currentTask?.status === 'cancel_requested'
+    const status: TaskStatus = isAbortError(error) ? 'cancelled' : 'failed'
+    const errorMessage = normalizeTaskErrorMessage(error)
+
+    updateTask(taskId, {
+      status: aborted ? 'cancelled' : status,
+      errorMessage: aborted ? '用户已取消' : errorMessage,
+      outputText: fullOutput || null,
+      durationMs: Date.now() - startTime,
+    })
+
+    notifyComplete(opts.sender, {
+      taskId,
+      status: aborted ? 'cancelled' : status,
+      error: errorMessage,
+    })
+
+    throw error
+  } finally {
+    stopHeartbeat()
+    release()
+    abortControllers.delete(taskId)
+  }
+}
+
 export async function runStreamTask(opts: RunTaskOptions): Promise<number> {
   const inputJson = opts.inputJson || JSON.stringify(opts.messages)
   const taskId = await createTask({
@@ -753,90 +997,11 @@ export async function runStreamTask(opts: RunTaskOptions): Promise<number> {
     runnerType: 'stream',
     retryable: opts.retryable ?? true,
   })
-  const controller = new AbortController()
-  abortControllers.set(taskId, controller)
 
-  const startTime = Date.now()
-  let fullOutput = ''
-  let outputLimitExceeded = false
-
-  ;(async () => {
-    let stopHeartbeat = () => {}
-    let release = () => {}
-    try {
-      const acquired = await acquireModelSlot(taskId, opts.modelConfigId, controller.signal)
-      release = acquired.release
-      updateTaskStatus(taskId, 'running', opts.sender)
-      stopHeartbeat = startTaskHeartbeat(taskId)
-
-      await executeStreamWithRateLimitRetries(acquired.runtime.adapter, opts.messages, {
-        temperature: acquired.runtime.temperature,
-        maxTokens: acquired.runtime.maxTokens,
-        ...opts.chatOpts,
-        signal: controller.signal,
-        onStream: (chunk) => {
-          fullOutput += chunk
-          if (fullOutput.length > MAX_STREAM_OUTPUT_LENGTH) {
-            outputLimitExceeded = true
-            controller.abort()
-            return
-          }
-          safeSend(opts.sender, 'task:stream-chunk', { taskId, chunk })
-        },
-      })
-
-      const result = opts.onSuccess ? await opts.onSuccess(fullOutput, taskId) : undefined
-      const durationMs = Date.now() - startTime
-      const tokensUsed = acquired.runtime.adapter.countTokens(fullOutput)
-
-      updateTask(taskId, {
-        status: 'success',
-        outputText: fullOutput,
-        durationMs,
-        tokensUsed,
-      })
-
-      notifyComplete(opts.sender, {
-        taskId,
-        status: 'success',
-        output: fullOutput,
-        result,
-      })
-    } catch (error: unknown) {
-      if (outputLimitExceeded) {
-        const limitMsg = `流式输出超过最大限制 (${MAX_STREAM_OUTPUT_LENGTH} 字符)，已中止任务`
-        updateTask(taskId, {
-          status: 'failed',
-          errorMessage: limitMsg,
-          outputText: fullOutput || null,
-          durationMs: Date.now() - startTime,
-        })
-        notifyComplete(opts.sender, { taskId, status: 'failed', error: limitMsg })
-        return
-      }
-      const currentTask = getTaskRecord(taskId)
-      const aborted = isAbortError(error) || currentTask?.status === 'cancel_requested'
-      const status: TaskStatus = isAbortError(error) ? 'cancelled' : 'failed'
-      const errorMessage = normalizeTaskErrorMessage(error)
-
-      updateTask(taskId, {
-        status: aborted ? 'cancelled' : status,
-        errorMessage: aborted ? '用户已取消' : errorMessage,
-        outputText: fullOutput || null,
-        durationMs: Date.now() - startTime,
-      })
-
-      notifyComplete(opts.sender, {
-        taskId,
-        status: aborted ? 'cancelled' : status,
-        error: errorMessage,
-      })
-    } finally {
-      stopHeartbeat()
-      release()
-      abortControllers.delete(taskId)
-    }
-  })().catch((err) => {
+  void executeStreamTask(taskId, {
+    ...opts,
+    inputJson,
+  }).catch((err) => {
     console.error(`[runStreamTask] Unhandled error in task ${taskId}:`, err)
   })
 
@@ -1068,6 +1233,13 @@ export async function retryTask(taskId: number, sender?: WebContents): Promise<n
     messages: retryMessages,
     sender,
     retryable: Boolean(task.retryable),
+    parentTaskId: task.parentTaskId || undefined,
+    pipelineRole: task.pipelineRole as TaskPipelineRole | undefined,
+    pipelineStage: task.pipelineStage as TaskPipelineStage | undefined,
+    upstreamTaskId: task.upstreamTaskId || undefined,
+    contractVersion: task.contractVersion || undefined,
+    canonRunId: task.canonRunId || undefined,
+    recoveryHintJson: task.recoveryHintJson || undefined,
     chatOpts: { temperature },
     controlJson: JSON.stringify(controlState),
   }

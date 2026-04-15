@@ -3,6 +3,7 @@ import { parseProjectBriefSnapshot } from '../../shared/project-brief'
 import { parseStorySettingsSnapshot } from '../../shared/story-settings'
 import type { StorySettingsSnapshot } from '../../shared/story-settings'
 import { parseThemeVoiceSnapshot } from '../../shared/theme-voice'
+import type { TaskPipelineStats } from '../../types'
 
 export type WorkflowRecommendationKey =
   | 'guide'
@@ -80,6 +81,7 @@ export interface WorkflowStats {
   staleAssetLabels: string[]
   hasProtagonist: boolean
   volumeCount: number
+  writingPipelineStats?: TaskPipelineStats
 }
 
 export interface GuidedStepProgress {
@@ -147,7 +149,7 @@ export const EMPTY_WORKFLOW_STATS: WorkflowStats = {
 }
 
 export async function loadWorkflowStats(novelId: number): Promise<WorkflowStats> {
-  const [baseStats, characterStats, itemStats, mapStats, factionStats, glossaryStats, threadStats, sceneTemplateStats, revisionStats, arcs, timelineStats, volumes, contextStatus, arcDashboard, resistanceDashboard] = await Promise.all([
+  const [baseStats, characterStats, itemStats, mapStats, factionStats, glossaryStats, threadStats, sceneTemplateStats, revisionStats, arcs, timelineStats, volumes, contextStatus, arcDashboard, resistanceDashboard, writingPipelineStats] = await Promise.all([
     window.electron.novel.stats(novelId),
     window.electron.character.getStats({ novelId, page: 1, pageSize: 1 }),
     window.electron.item.getStats({ novelId, page: 1, pageSize: 1 }),
@@ -163,6 +165,7 @@ export async function loadWorkflowStats(novelId: number): Promise<WorkflowStats>
     window.electron.novel.getContextStatus(novelId),
     window.electron.characterArc.getArcDashboard(novelId),
     window.electron.resistance.getDashboard(novelId),
+    window.electron.task.getPipelineStats(novelId),
   ])
 
   return {
@@ -191,6 +194,7 @@ export async function loadWorkflowStats(novelId: number): Promise<WorkflowStats>
     staleAssetLabels: contextStatus.staleAssetLabels,
     hasProtagonist: characterStats.protagonistCount > 0,
     volumeCount: Array.isArray(volumes) ? volumes.length : 0,
+    writingPipelineStats,
   }
 }
 

@@ -19,6 +19,28 @@ function parseTaskProgress(raw?: string): Record<string, unknown> {
   }
 }
 
+function parseTaskRecoveryHint(raw?: string): { kind: 'open_page' | 'resume'; label: string; description: string; path?: string } | null {
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+    const record = parsed as Record<string, unknown>
+    const kind = record.kind === 'resume' ? 'resume' : record.kind === 'open_page' ? 'open_page' : null
+    const label = typeof record.label === 'string' ? record.label.trim() : ''
+    const description = typeof record.description === 'string' ? record.description.trim() : ''
+    const path = typeof record.path === 'string' ? record.path.trim() : ''
+    if (!kind || !label || !description) return null
+    return {
+      kind,
+      label,
+      description,
+      path: path || undefined,
+    }
+  } catch {
+    return null
+  }
+}
+
 function getFallbackPage(taskType?: string): string {
   switch (taskType) {
     case 'timeline':
@@ -100,7 +122,7 @@ export function buildRevisionTaskTargetPath(novelId: number, task: RevisionTask)
 }
 
 export interface TaskRecoveryAction {
-  kind: 'resume' | 'recover_draft'
+  kind: 'resume' | 'recover_draft' | 'open_page'
   label: string
   description: string
   path?: string
@@ -119,6 +141,11 @@ const RESUMABLE_WORKFLOW_TYPES = new Set([
 
 export function buildTaskRecoveryAction(task: Task): TaskRecoveryAction | null {
   if (!task.novelId) return null
+
+  const explicitRecovery = parseTaskRecoveryHint(task.recoveryHintJson)
+  if (explicitRecovery) {
+    return explicitRecovery
+  }
 
   if (task.runnerType === 'workflow' && task.status === 'paused' && RESUMABLE_WORKFLOW_TYPES.has(task.type)) {
     return {

@@ -931,6 +931,38 @@ export default function StudioPage({ novelId }: Props) {
         </div>
       </WorkspacePanel>
 
+      {stats.writingPipelineStats ? (
+        <WorkspacePanel title="长篇写作架构" description="按角色查看最近章节流水线的失败分布、预算与恢复入口。">
+          <div className="studio-quality-strip">
+            <div className="studio-quality-strip__badges">
+              <Tag color={stats.writingPipelineStats.activePipelineCount > 0 ? 'processing' : 'success'}>
+                {stats.writingPipelineStats.activePipelineCount > 0
+                  ? `运行中 ${stats.writingPipelineStats.activePipelineCount} 条`
+                  : '当前无运行中的正文流水线'}
+              </Tag>
+              <Tag color="blue">{`累计流水线 ${stats.writingPipelineStats.totalPipelineCount} 条`}</Tag>
+              {stats.writingPipelineStats.commonRecoveryHints.slice(0, 2).map((item) => (
+                <Tag key={item.label} color="warning">{`${item.label} × ${item.count}`}</Tag>
+              ))}
+            </div>
+          </div>
+          <div className="studio-issue-list" style={{ marginTop: 16 }}>
+            {stats.writingPipelineStats.roleStats.map((item) => (
+              <div key={item.role} className="studio-issue-card">
+                <div className="studio-issue-card__head">
+                  <Tag color={item.failedCount > 0 ? 'error' : item.runningCount > 0 ? 'processing' : 'success'}>
+                    {item.role === 'planner' ? 'Planner' : item.role === 'writer' ? 'Writer' : item.role === 'critic' ? 'Critic' : item.role === 'rewriter' ? 'Rewriter' : item.role === 'canonizer' ? 'Canonizer' : 'Finalize'}
+                  </Tag>
+                  <strong>{`成功 ${item.successCount} / 失败 ${item.failedCount} / 运行中 ${item.runningCount}`}</strong>
+                </div>
+                <div className="studio-issue-card__desc">{`平均耗时 ${item.avgDurationMs ? `${(item.avgDurationMs / 1000).toFixed(1)}s` : '-'}，累计 tokens ${item.tokensUsedTotal || 0}`}</div>
+                <div className="studio-issue-card__fix">{item.blockedCount > 0 ? `当前还有 ${item.blockedCount} 条被合同或恢复链阻断。` : '当前没有角色级阻断项。'}</div>
+              </div>
+            ))}
+          </div>
+        </WorkspacePanel>
+      ) : null}
+
       <WorkspacePanel title="质量预警" description="显示重复、逻辑断裂和上下文污染。">
         <div className="studio-quality-strip">
           <div className="studio-quality-strip__progress">

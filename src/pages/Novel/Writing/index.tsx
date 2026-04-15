@@ -20,6 +20,7 @@ import type {
   ChapterContextPreview,
   ChapterPublishCheck,
   ChapterSegment,
+  Task,
   ChapterVersion,
   Character,
   ForeshadowLedgerEntry,
@@ -92,7 +93,51 @@ interface TextSelectionSnapshot {
   end: number
   text: string
 }
-interface ChapterGenerationProgressEvent { chapterId: number; stage: WritingGenerationStage; label: string; detail?: string; completed: number; total: number; status: 'running' | 'success' | 'failed' }
+type WritingPipelineRole = 'planner' | 'writer' | 'critic' | 'rewriter' | 'canonizer' | 'finalize'
+
+interface WritingPipelineRoleState {
+  role: WritingPipelineRole
+  label: string
+  summary: string
+  status: 'pending' | 'running' | 'success' | 'failed' | 'blocked'
+  detail?: string
+  taskId?: number
+  upstreamTaskId?: number
+  contractVersion?: string
+  canonRunId?: number
+  durationMs?: number
+  tokensUsed?: number
+}
+
+interface WritingPipelineSnapshot {
+  kind: 'chapter_pipeline'
+  chapterId: number
+  workflowTaskId: number
+  currentRole: WritingPipelineRole | null
+  currentStage: WritingGenerationStage | null
+  status: 'pending' | 'running' | 'success' | 'failed' | 'cancelled'
+  message?: string
+  streamTaskId?: number
+  contractVersion?: string
+  canonRunId?: number
+  totalTokensUsed: number
+  totalDurationMs: number
+  roles: Record<WritingPipelineRole, WritingPipelineRoleState>
+}
+
+interface ChapterGenerationProgressEvent {
+  chapterId: number
+  taskId?: number
+  streamTaskId?: number
+  role?: WritingPipelineRole
+  stage: WritingGenerationStage
+  label: string
+  detail?: string
+  completed: number
+  total: number
+  status: 'running' | 'success' | 'failed' | 'cancelled'
+  pipeline?: WritingPipelineSnapshot
+}
 type WritingRouteKey = 'editor' | 'context' | 'review' | 'history'
 
 const WritingEditorRoute = React.lazy(() => import('./routes/EditorRoute'))
@@ -113,6 +158,7 @@ const PIPELINE_STAGES = [
   { key: 'drafting', title: '正文初稿', summary: '按计划生成初稿。' },
   { key: 'reviewing', title: '自动审校', summary: '检查连续性和语言问题。' },
   { key: 'rewriting', title: '修订定稿', summary: '按审校意见重写入库。' },
+  { key: 'canonizing', title: 'Canon 草案', summary: '把正文转成可确认的 Canon 差异。' },
 ] as const
 
 const STATUS_COLORS: Record<string, string> = { outline: '#5c6378', writing: '#2e86ab', draft: '#d48806', reviewing: '#c25f0a', final: '#389e0d' }
@@ -133,6 +179,17 @@ const parseStringArray = (raw?: string | null) => {
       : []
   } catch {
     return []
+  }
+}
+const parsePipelineSnapshot = (task?: Task | null): WritingPipelineSnapshot | null => {
+  if (!task?.progressJson) return null
+  try {
+    const parsed = JSON.parse(task.progressJson) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+    const record = parsed as Record<string, unknown>
+    return record.kind === 'chapter_pipeline' ? record as unknown as WritingPipelineSnapshot : null
+  } catch {
+    return null
   }
 }
 const parseCharacterKnowledgeJson = (raw?: string | null): StoryFactCharacterKnowledge[] => {
@@ -406,6 +463,8 @@ export default function Writing({ novelId }: Props) {
   const [contextStatus, setContextStatus] = useState<NovelContextStatus | null>(null)
   const [chapterContextPreview, setChapterContextPreview] = useState<ChapterContextPreview | null>(null)
   const [publishCheck, setPublishCheck] = useState<ChapterPublishCheck | null>(null)
+  const [latestPipelineTask, setLatestPipelineTask] = useState<Task | null>(null)
+  const [livePipelineSnapshot, setLivePipelineSnapshot] = useState<WritingPipelineSnapshot | null>(null)
   const [gateReportExpanded, setGateReportExpanded] = useState(false)
   const [hoverChapterId, setHoverChapterId] = useState<number | null>(null)
   const [selectedSnippet, setSelectedSnippet] = useState<TextSelectionSnapshot | null>(null)
@@ -593,8 +652,21 @@ export default function Writing({ novelId }: Props) {
       : current)
   }, [])
 
+  const refreshLatestPipelineTask = useCallback(async (chapterId?: number) => {
+    if (!chapterId) {
+      setLatestPipelineTask(null)
+      return
+    }
+    try {
+      setLatestPipelineTask(await window.electron.task.getLatestChapterPipeline(chapterId))
+    } catch {
+      setLatestPipelineTask(null)
+    }
+  }, [])
+
   const refreshChapter = useCallback(async (chapterId: number) => {
     clearChapterArtifacts()
+    setLivePipelineSnapshot(null)
     const [full, segments] = await Promise.all([
       window.electron.chapter.get(chapterId),
       window.electron.structure.listSegments(chapterId),
@@ -617,15 +689,16 @@ export default function Writing({ novelId }: Props) {
       refreshForeshadowSnapshot(full),
       refreshForeshadowLedger(),
       refreshChapterContextPreview(full),
+      refreshLatestPipelineTask(chapterId),
     ])
-  }, [clearChapterArtifacts, isHistoryRoute, refreshChapterContextPreview, refreshChapterLinks, refreshContextStatus, refreshForeshadowLedger, refreshForeshadowSnapshot, refreshPublishCheck, refreshVersionHistory, resetEditorHistory, updateChapter])
+  }, [clearChapterArtifacts, isHistoryRoute, refreshChapterContextPreview, refreshChapterLinks, refreshContextStatus, refreshForeshadowLedger, refreshForeshadowSnapshot, refreshLatestPipelineTask, refreshPublishCheck, refreshVersionHistory, resetEditorHistory, updateChapter])
 
   const loadChapters = useCallback(async (preferredChapterId?: number) => {
     const list = await window.electron.chapter.list(novelId)
     setChapters(list)
     if (list.length === 0) {
       resetEditorHistory('')
-      setCurrentChapter(null); setCurrentChapterId(null); setContent(''); setWordCount(0); setPublishCheck(null); setChapterSegments([]); setTimelineEvents([]); setStoryItems([]); setForeshadowSnapshot(null); await refreshContextStatus(); return
+      setCurrentChapter(null); setCurrentChapterId(null); setContent(''); setWordCount(0); setPublishCheck(null); setLatestPipelineTask(null); setLivePipelineSnapshot(null); setChapterSegments([]); setTimelineEvents([]); setStoryItems([]); setForeshadowSnapshot(null); await refreshContextStatus(); return
     }
     const target = list.find((chapter) => chapter.id === (preferredChapterId ?? currentChapterIdRef.current)) || list[0]
     setCurrentChapterId(target.id)
@@ -662,16 +735,72 @@ export default function Writing({ novelId }: Props) {
     const unsubscribe = window.electron.on('chapter:generation-progress', (data: unknown) => {
       const payload = data as ChapterGenerationProgressEvent
       if (!payload?.chapterId) return
+      if (payload.pipeline) setLivePipelineSnapshot(payload.pipeline)
+      if (payload.taskId) {
+        updateGenerationTask({ chapterId: payload.chapterId, taskId: payload.taskId })
+      }
       updateGenerationStage({
         chapterId: payload.chapterId,
+        taskId: payload.taskId,
+        streamTaskId: payload.streamTaskId,
         stage: payload.stage,
         status: payload.status === 'failed' ? 'failed' : 'running',
         label: payload.label,
         detail: payload.detail,
       })
+
+      if (payload.status === 'success' && payload.stage === 'completed') {
+        if (payload.streamTaskId) clearStream(payload.streamTaskId)
+        void (async () => {
+          await Promise.all([
+            loadChapters(payload.chapterId),
+            refreshMeta(),
+            refreshQualityDashboard(),
+            refreshLatestPipelineTask(payload.chapterId),
+          ])
+          await refreshChapter(payload.chapterId)
+          const latestChapter = await window.electron.chapter.get(payload.chapterId)
+          const latestContent = normalizeEditorText(latestChapter?.content || '')
+          const hasVisibleContentChange = latestContent !== generationBaselineRef.current
+          completeGeneration({
+            taskId: payload.taskId,
+            chapterId: payload.chapterId,
+            status: 'success',
+            stage: 'completed',
+            label: payload.label || '章节流水线已完成',
+            detail: hasVisibleContentChange
+              ? getUserFacingMessage('writing.pipelineCompleted')
+              : '章节流水线已完成，但正文未产生新增内容。请优先检查合同、审校意见与 Canon 草案。',
+          })
+          message.success(getUserFacingMessage('writing.pipelineCompleted'))
+        })()
+        return
+      }
+
+      if (payload.status === 'failed' || payload.status === 'cancelled') {
+        if (payload.streamTaskId) clearStream(payload.streamTaskId)
+        completeGeneration({
+          taskId: payload.taskId,
+          chapterId: payload.chapterId,
+          status: payload.status === 'cancelled' ? 'cancelled' : 'failed',
+          stage: payload.stage,
+          label: payload.status === 'cancelled' ? '章节流水线已取消' : '章节流水线执行失败',
+          detail: payload.detail || (payload.status === 'cancelled'
+            ? getUserFacingMessage('writing.generateCancelled')
+            : getUserFacingMessage('writing.generateFailed')),
+          error: payload.status === 'failed'
+            ? (payload.detail || getUserFacingMessage('writing.generateFailed'))
+            : null,
+        })
+        if (payload.status === 'cancelled') {
+          message.info(getUserFacingMessage('writing.generateCancelled'))
+        } else {
+          message.error(getUserFacingMessage('writing.generateFailed'))
+        }
+      }
     })
     return unsubscribe
-  }, [updateGenerationStage])
+  }, [clearStream, completeGeneration, loadChapters, refreshChapter, refreshLatestPipelineTask, refreshMeta, refreshQualityDashboard, updateGenerationStage, updateGenerationTask])
 
   useEffect(() => {
     if (!isHistoryRoute || !currentChapter) return
@@ -933,7 +1062,7 @@ export default function Writing({ novelId }: Props) {
   const handleCancelGenerate = async () => {
     if (!activeGeneration.taskId || !activeGeneration.chapterId) return
     await window.electron.task.cancel(activeGeneration.taskId)
-    clearStream(activeGeneration.taskId)
+    if (activeGeneration.streamTaskId) clearStream(activeGeneration.streamTaskId)
     completeGeneration({
       taskId: activeGeneration.taskId,
       chapterId: activeGeneration.chapterId,
@@ -1405,6 +1534,20 @@ export default function Writing({ novelId }: Props) {
     }))
   }, [publishCheck])
 
+  const persistedPipelineSnapshot = useMemo(
+    () => parsePipelineSnapshot(latestPipelineTask),
+    [latestPipelineTask],
+  )
+  const currentPipelineSnapshot = useMemo(() => {
+    if (livePipelineSnapshot && currentChapter && livePipelineSnapshot.chapterId === currentChapter.id) {
+      return livePipelineSnapshot
+    }
+    if (persistedPipelineSnapshot && currentChapter && persistedPipelineSnapshot.chapterId === currentChapter.id) {
+      return persistedPipelineSnapshot
+    }
+    return null
+  }, [currentChapter, livePipelineSnapshot, persistedPipelineSnapshot])
+
   const currentChapterGeneration = currentChapter
     ? (
       activeGeneration.chapterId === currentChapter.id && activeGeneration.status !== 'idle'
@@ -1423,13 +1566,18 @@ export default function Writing({ novelId }: Props) {
       || (stage.key === 'drafting' && Boolean(currentChapter?.content || reviewNotes))
       || (stage.key === 'reviewing' && Boolean(reviewNotes))
       || (stage.key === 'rewriting' && Boolean(currentChapter?.content))
+      || (stage.key === 'canonizing' && Boolean(currentPipelineSnapshot?.canonRunId))
     return { ...stage, index, status: failed ? 'failed' : running ? 'running' : done ? 'done' : 'pending' }
   })
+  const pipelineRoleItems = useMemo(() => {
+    const order: WritingPipelineRole[] = ['planner', 'writer', 'critic', 'rewriter', 'canonizer']
+    return order.map((role) => currentPipelineSnapshot?.roles[role]).filter(Boolean) as WritingPipelineRoleState[]
+  }, [currentPipelineSnapshot])
 
   const currentStatusLabel = currentChapter ? getStatusLabel(currentChapter.status) : '未选择章节'
   const otherStaleChapterCount = Math.max(0, (contextStatus?.staleChapterCount || 0) - (currentChapterStaleReasons.length > 0 ? 1 : 0))
-  const streamContent = currentChapterGenerating && activeGeneration.taskId
-    ? streams[activeGeneration.taskId]?.content || ''
+  const streamContent = currentChapterGenerating && activeGeneration.streamTaskId
+    ? streams[activeGeneration.streamTaskId]?.content || ''
     : ''
   const hasMultiSegments = (currentChapter?.segmentCount || 0) > 1
   const editorEyebrow = currentChapter ? `第 ${String(currentChapter.chapterNum).padStart(2, '0')} 章` : '写作编辑器'
@@ -1455,6 +1603,36 @@ export default function Writing({ novelId }: Props) {
         </InsightCard>
       </div>
       <div className="novel-writing-shell__insight-stack">
+        <InsightCard title="长篇写作架构" eyebrow="Planner / Writer / Critic / Rewriter / Canonizer" tone="soft">
+          {currentPipelineSnapshot ? (
+            <div style={{ display: 'grid', gap: 12 }}>
+              <div className="novel-copy-block">
+                {`当前阶段：${currentPipelineSnapshot.currentRole ? currentPipelineSnapshot.roles[currentPipelineSnapshot.currentRole]?.label || currentPipelineSnapshot.currentRole : '待启动'} · 合同版本 ${currentPipelineSnapshot.contractVersion || '未记录'} · 总耗时 ${currentPipelineSnapshot.totalDurationMs ? `${(currentPipelineSnapshot.totalDurationMs / 1000).toFixed(1)}s` : '-'} · 总 tokens ${currentPipelineSnapshot.totalTokensUsed || 0}`}
+              </div>
+              <div style={{ display: 'grid', gap: 8 }}>
+                {pipelineRoleItems.map((item) => (
+                  <div key={item.role} className="novel-issue-item">
+                    <div className="novel-issue-item__head">
+                      <Tag color={item.status === 'success' ? 'success' : item.status === 'running' ? 'processing' : item.status === 'blocked' ? 'warning' : item.status === 'failed' ? 'error' : 'default'}>
+                        {item.status === 'success' ? '已完成' : item.status === 'running' ? '执行中' : item.status === 'blocked' ? '已阻断' : item.status === 'failed' ? '失败' : '待执行'}
+                      </Tag>
+                      <strong>{item.label}</strong>
+                      {item.taskId ? <Tag color="blue">{`任务 #${item.taskId}`}</Tag> : null}
+                      {item.canonRunId ? <Tag color="geekblue">{`Canon #${item.canonRunId}`}</Tag> : null}
+                    </div>
+                    <div className="novel-issue-item__desc">{item.detail || item.summary}</div>
+                    <div className="novel-issue-item__suggestion">
+                      {`预算：${item.durationMs ? `${(item.durationMs / 1000).toFixed(1)}s` : '-'} / ${item.tokensUsed || 0} tokens`}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {currentPipelineSnapshot.canonRunId ? (
+                <div className="novel-copy-block">{`Canonizer 已生成回写草案 #${currentPipelineSnapshot.canonRunId}，可直接进入章后状态回写中心确认。`}</div>
+              ) : null}
+            </div>
+          ) : <div className="novel-copy-block">当前章节还没有最近一次角色化流水线快照。</div>}
+        </InsightCard>
         <InsightCard title="关键约束注入" eyebrow="本章关键约束已注入" tone="soft">
           <ConstraintInjectionCard preview={chapterContextPreview} />
         </InsightCard>

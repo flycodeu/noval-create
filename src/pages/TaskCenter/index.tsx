@@ -56,6 +56,12 @@ const TYPE_LABELS: Record<string, string> = {
   init: '初始化',
   character_gen: 'AI 生成人物',
   faction_generate: 'AI 生成势力',
+  chapter_planner: 'Planner · 合同规划',
+  chapter_writer: 'Writer · 正文初稿',
+  chapter_critic: 'Critic · 审校结论',
+  chapter_rewriter: 'Rewriter · 修正文稿',
+  chapter_canonizer: 'Canonizer · 回写草案',
+  chapter_finalize: 'Finalize · 刷新记忆',
   chapter_scene_plan: 'AI 场景规划',
   chapter_draft: 'AI 草稿生成',
   chapter_outline: 'AI 章节细纲',
@@ -95,6 +101,24 @@ const RUNNER_LABELS: Record<string, string> = {
   workflow: '后台流程',
 }
 
+const PIPELINE_ROLE_LABELS: Record<string, string> = {
+  planner: 'Planner',
+  writer: 'Writer',
+  critic: 'Critic',
+  rewriter: 'Rewriter',
+  canonizer: 'Canonizer',
+  finalize: 'Finalize',
+}
+
+const PIPELINE_STAGE_LABELS: Record<string, string> = {
+  pending: '待执行',
+  running: '执行中',
+  paused: '已暂停',
+  failed: '失败',
+  success: '已完成',
+  blocked: '已阻断',
+}
+
 function formatTaskPayload(raw?: string): string {
   if (!raw) return ''
 
@@ -121,6 +145,14 @@ function getTaskTypeLabel(type: string): string {
 
 function getTaskRunnerLabel(task: Task): string {
   return RUNNER_LABELS[task.runnerType || 'chat'] || (task.runnerType || 'chat')
+}
+
+function getTaskPipelineRoleLabel(task: Task): string {
+  return task.pipelineRole ? (PIPELINE_ROLE_LABELS[task.pipelineRole] || task.pipelineRole) : ''
+}
+
+function getTaskPipelineStageLabel(task: Task): string {
+  return task.pipelineStage ? (PIPELINE_STAGE_LABELS[task.pipelineStage] || task.pipelineStage) : ''
 }
 
 function getAssetReviewTargetLabel(value?: string): string {
@@ -516,7 +548,16 @@ export default function TaskCenter() {
     const assetReview = progress.assetReview && typeof progress.assetReview === 'object' && !Array.isArray(progress.assetReview)
       ? progress.assetReview as AssetReviewObservability
       : null
+    const pipeline = progress.kind === 'chapter_pipeline' && progress.roles && typeof progress.roles === 'object'
+      ? progress as Record<string, unknown>
+      : null
     const observabilityLines = [
+      typeof pipeline?.message === 'string' && pipeline.message.trim() ? `流水线摘要：${pipeline.message.trim()}` : '',
+      typeof pipeline?.currentRole === 'string' ? `当前角色：${PIPELINE_ROLE_LABELS[pipeline.currentRole] || pipeline.currentRole}` : '',
+      typeof pipeline?.contractVersion === 'string' && pipeline.contractVersion.trim() ? `合同版本：${pipeline.contractVersion.trim()}` : '',
+      typeof pipeline?.canonRunId === 'number' ? `Canon Run：#${pipeline.canonRunId}` : '',
+      typeof pipeline?.totalDurationMs === 'number' && pipeline.totalDurationMs > 0 ? `总耗时：${(pipeline.totalDurationMs / 1000).toFixed(1)}s` : '',
+      typeof pipeline?.totalTokensUsed === 'number' && pipeline.totalTokensUsed > 0 ? `总 tokens：${pipeline.totalTokensUsed}` : '',
       typeof draft?.inputSummary === 'string' && draft.inputSummary.trim() ? `输入摘要：${draft.inputSummary.trim()}` : '',
       Array.isArray(draft?.warnings) && draft.warnings.length > 0 ? `生成修补提示：${draft.warnings.join('；')}` : '',
       Array.isArray(draft?.lintWarnings) && draft.lintWarnings.length > 0 ? `语言 lint：${draft.lintWarnings.join('；')}` : '',
@@ -529,12 +570,22 @@ export default function TaskCenter() {
       Array.isArray(assetReview?.risks) && assetReview.risks.length > 0 ? `质检风险：${assetReview.risks.join('；')}` : '',
       Array.isArray(assetReview?.warnings) && assetReview.warnings.length > 0 ? `质检备注：${assetReview.warnings.join('；')}` : '',
     ].filter(Boolean)
+    const pipelineRoleLines = pipeline && pipeline.roles && typeof pipeline.roles === 'object'
+      ? Object.values(pipeline.roles as Record<string, unknown>)
+        .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object' && !Array.isArray(item)))
+        .map((item) => {
+          const label = typeof item.label === 'string' ? item.label : (typeof item.role === 'string' ? (PIPELINE_ROLE_LABELS[item.role] || item.role) : '阶段')
+          const status = typeof item.status === 'string' ? (PIPELINE_STAGE_LABELS[item.status] || item.status) : '未知'
+          const detail = typeof item.detail === 'string' ? item.detail : ''
+          return detail ? `${label}：${status} · ${detail}` : `${label}：${status}`
+        })
+      : []
 
-    if (observabilityLines.length > 0) {
+    if (observabilityLines.length > 0 || pipelineRoleLines.length > 0) {
       items.push({
         key: 'observability',
         label: '草稿观测',
-        children: <div className="task-center-code">{observabilityLines.join('\n\n')}</div>,
+        children: <div className="task-center-code">{[...observabilityLines, ...pipelineRoleLines].join('\n\n')}</div>,
       })
     }
 
@@ -639,6 +690,8 @@ export default function TaskCenter() {
                               {status.label}
                             </Tag>
                             <Tag>{getTaskRunnerLabel(task)}</Tag>
+                            {task.pipelineRole ? <Tag color="geekblue">{getTaskPipelineRoleLabel(task)}</Tag> : null}
+                            {task.pipelineStage ? <Tag color={task.pipelineStage === 'failed' ? 'red' : task.pipelineStage === 'blocked' ? 'warning' : task.pipelineStage === 'running' ? 'processing' : 'default'}>{getTaskPipelineStageLabel(task)}</Tag> : null}
                             {isTaskRetryable(task) ? <Tag color="processing">可重试</Tag> : null}
                             {task.durationMs ? <Tag>{`${(task.durationMs / 1000).toFixed(1)}s`}</Tag> : null}
                             {task.tokensUsed ? <Tag>{`${task.tokensUsed} tokens`}</Tag> : null}
@@ -704,7 +757,7 @@ export default function TaskCenter() {
                   继续
                 </Button>
               ) : null}
-              {selectedRecoveryAction?.kind === 'recover_draft' ? (
+              {selectedRecoveryAction?.kind === 'recover_draft' || selectedRecoveryAction?.kind === 'open_page' ? (
                 <Button icon={<ReloadOutlined />} onClick={() => handleRecoverDraft(selectedRecoveryAction.path)}>
                   {selectedRecoveryAction.label}
                 </Button>
@@ -766,7 +819,7 @@ export default function TaskCenter() {
                 />
               ) : null}
 
-              {selectedRecoveryAction?.kind === 'recover_draft' ? (
+              {selectedRecoveryAction?.kind === 'recover_draft' || selectedRecoveryAction?.kind === 'open_page' ? (
                 <Alert
                   type="info"
                   showIcon
@@ -796,6 +849,11 @@ export default function TaskCenter() {
               <div className="novel-note-list">
                 <div className="novel-note-list__item">{`任务 ID：${selectedTask.id}`}</div>
                 <div className="novel-note-list__item">{`执行方式：${getTaskRunnerLabel(selectedTask)}`}</div>
+                {selectedTask.pipelineRole ? <div className="novel-note-list__item">{`角色：${getTaskPipelineRoleLabel(selectedTask)}`}</div> : null}
+                {selectedTask.pipelineStage ? <div className="novel-note-list__item">{`阶段：${getTaskPipelineStageLabel(selectedTask)}`}</div> : null}
+                {selectedTask.upstreamTaskId ? <div className="novel-note-list__item">{`上游任务：#${selectedTask.upstreamTaskId}`}</div> : null}
+                {selectedTask.contractVersion ? <div className="novel-note-list__item">{`合同版本：${selectedTask.contractVersion}`}</div> : null}
+                {selectedTask.canonRunId ? <div className="novel-note-list__item">{`Canon Run：#${selectedTask.canonRunId}`}</div> : null}
                 <div className="novel-note-list__item">{`重试能力：${getTaskRetryabilityLabel(selectedTask)}`}</div>
                 <div className="novel-note-list__item">{`模型配置：${selectedTask.modelConfigId || '-'}`}</div>
                 <div className="novel-note-list__item">{`耗时：${selectedTask.durationMs ? `${(selectedTask.durationMs / 1000).toFixed(1)}s` : '-'}`}</div>
