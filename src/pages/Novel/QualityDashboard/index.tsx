@@ -226,6 +226,16 @@ function qualityRiskKindLabel(kind: QualityDashboardData['novelQualityMetrics'][
   return '状态稳定性'
 }
 
+function recallSnapshotSourceLabel(source?: QualityDashboardData['chapterDetails'][number]['recallSnapshotSource']): string | null {
+  if (source === 'runtime') return '真实运行快照'
+  if (source === 'backfilled') return '历史回填快照'
+  return null
+}
+
+function recallSnapshotSourceColor(source?: QualityDashboardData['chapterDetails'][number]['recallSnapshotSource']): string {
+  return source === 'backfilled' ? 'gold' : 'cyan'
+}
+
 export default function QualityDashboard({ novelId }: Props) {
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<QualityDashboardData | null>(null)
@@ -237,6 +247,11 @@ export default function QualityDashboard({ novelId }: Props) {
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
+      try {
+        await window.electron.quality.backfillRecallSnapshots(novelId)
+      } catch (error) {
+        console.warn('Failed to backfill recall runtime snapshots before loading quality dashboard', error)
+      }
       const [result, nextPipelineStats] = await Promise.all([
         window.electron.quality.getDashboard(novelId),
         window.electron.task.getPipelineStats(novelId),
@@ -497,6 +512,13 @@ export default function QualityDashboard({ novelId }: Props) {
             recentAlerts={data.recentLanguageDriftAlerts}
             volumeEntries={filteredLanguageVolumes}
             novelSummary={data.novelLanguageDriftSummary}
+            antiAiRecurrence={selectedVolumeMetrics
+              ? {
+                ...data.antiAiRecurrence,
+                recentAlerts: data.antiAiRecurrence.recentAlerts.filter((entry) => entry.chapterNums.some((chapterNum) => chapterNum >= selectedVolumeMetrics.chapterStart && chapterNum <= selectedVolumeMetrics.chapterEnd)),
+                volumeEntries: data.antiAiRecurrence.volumeEntries.filter((entry) => entry.volumeId === selectedVolumeMetrics.volumeId),
+              }
+              : data.antiAiRecurrence}
           />
         </WorkspacePanel>
       ) : null}
@@ -699,11 +721,16 @@ export default function QualityDashboard({ novelId }: Props) {
             ))}
             <ChapterGateDetails chapterGate={selectedChapter.chapterGate} />
             <LanguageDriftDetails metrics={selectedChapter.languageDriftMetrics} />
+            <AntiAiRuleHitDetails hits={selectedChapter.antiAiRuleHits} />
             <DialogueReviewDetails review={selectedChapter.dialogueReview} />
             <StoryDynamicsDetails dynamics={selectedChapter.storyDynamics} />
             <ChapterFunctionDetails chapterFunction={selectedChapter.chapterFunction} />
             <StoryArcProgressDetails progress={selectedChapter.storyArcProgress} />
-            <RecallDiagnosticsDetails diagnostics={selectedChapter.recallDiagnostics} />
+            <RecallDiagnosticsDetails
+              diagnostics={selectedChapter.recallDiagnostics}
+              snapshot={selectedChapter.recallSnapshot}
+              recallSnapshotSource={selectedChapter.recallSnapshotSource}
+            />
             <WorldStateAlertDetails alerts={selectedChapter.worldStateAlerts} />
           </div>
         ) : null}
@@ -914,6 +941,9 @@ function NovelHealthOverviewPanel({
 }) {
   return (
     <div style={{ display: 'grid', gap: 16 }}>
+      <div style={{ fontSize: 12, opacity: 0.68 }}>
+        质量面板会优先展示章节级召回快照：先读真实运行快照，其次读旧任务兼容快照；老章节若无历史任务快照，会先回填当前状态快照，并显式标记来源。只有结构化快照完全缺失时才回退到启发式诊断。
+      </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
         <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
           <div style={{ fontSize: 12, opacity: 0.7 }}>全书健康分</div>
@@ -1363,6 +1393,16 @@ function RecallReliabilityPanel({
           <div style={{ fontSize: 11, opacity: 0.55 }}>实际保留下来的背景补充片段占比</div>
         </div>
         <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>召回可用率</div>
+          <div style={{ fontSize: 22, fontWeight: 700 }}>{summary.recallAvailabilityRate}%</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>最终 prompt 实际使用召回补充的章节占比</div>
+        </div>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>平均命中数</div>
+          <div style={{ fontSize: 22, fontWeight: 700 }}>{summary.averageHitCount}</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>每章平均召回到的历史片段数</div>
+        </div>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
           <div style={{ fontSize: 12, opacity: 0.7 }}>过期召回</div>
           <div style={{ fontSize: 22, fontWeight: 700 }}>{summary.staleRecallCount}</div>
           <div style={{ fontSize: 11, opacity: 0.55 }}>被识别为疑似过期的历史片段</div>
@@ -1378,31 +1418,47 @@ function RecallReliabilityPanel({
           <div style={{ fontSize: 11, opacity: 0.55 }}>上一章先验采样覆盖上一章正文的平均比例</div>
         </div>
         <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>Bucket 覆盖率</div>
+          <div style={{ fontSize: 22, fontWeight: 700 }}>{summary.bucketCoverageRate}%</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>角色 / 规则 / 线程三个桶的平均命中覆盖</div>
+        </div>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
           <div style={{ fontSize: 12, opacity: 0.7 }}>上章先验字数</div>
           <div style={{ fontSize: 22, fontWeight: 700 }}>{summary.previousChapterFeedChars}</div>
           <div style={{ fontSize: 11, opacity: 0.55 }}>每章平均喂入的上一章先验文本长度</div>
+        </div>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>连续降级章节</div>
+          <div style={{ fontSize: 22, fontWeight: 700 }}>{summary.consecutiveFallbackChapters}</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>{summary.latestFallbackReason ? `最近原因：${summary.latestFallbackReason}` : '当前没有持续召回降级。'}</div>
         </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
         <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', display: 'grid', gap: 8 }}>
-          <div style={{ fontSize: 12, opacity: 0.7 }}>近期过期召回章节</div>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>近期召回降级章节</div>
           {alerts.length > 0 ? alerts.map((alert) => (
             <div key={alert.chapterId} style={{ display: 'grid', gap: 4 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Tag color="warning" style={{ marginRight: 0 }}>过期召回</Tag>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <Tag color={alert.degraded ? 'error' : 'warning'} style={{ marginRight: 0 }}>{alert.degraded ? '召回降级' : '过期召回'}</Tag>
+                {alert.recallSnapshotSource ? (
+                  <Tag color={recallSnapshotSourceColor(alert.recallSnapshotSource)} style={{ marginRight: 0 }}>
+                    {recallSnapshotSourceLabel(alert.recallSnapshotSource)}
+                  </Tag>
+                ) : null}
                 <span style={{ fontSize: 12, fontWeight: 600 }}>第{alert.chapterNum}章 · {alert.title}</span>
               </div>
               <div style={{ fontSize: 11, opacity: 0.65 }}>{alert.detail}</div>
             </div>
-          )) : <div style={{ fontSize: 12, opacity: 0.6 }}>最近没有新的过期召回章节。</div>}
+          )) : <div style={{ fontSize: 12, opacity: 0.6 }}>最近没有新的召回降级章节。</div>}
         </div>
 
         <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', display: 'grid', gap: 8 }}>
           <div style={{ fontSize: 12, opacity: 0.7 }}>诊断说明</div>
-          <div style={{ fontSize: 12, opacity: 0.72 }}>质量看板里的召回可靠性采用本地关键词回查估算，只用于发现阻塞章节。</div>
+          <div style={{ fontSize: 12, opacity: 0.72 }}>质量看板会优先读取章节级持久化召回快照；旧任务快照会被兼容导入，老章节缺少快照时会自动回填当前状态，并区分真实运行与历史回填来源。</div>
           <div style={{ fontSize: 12, opacity: 0.72 }}>实际生成链路仍以硬约束和结构化状态为主，召回只作背景补充。</div>
           <div style={{ fontSize: 12, opacity: 0.72 }}>当前保留片段 {summary.selectedHitCount} 条，本地兜底命中 {summary.fallbackHitCount} 条。</div>
+          <div style={{ fontSize: 12, opacity: 0.72 }}>召回可用率 {summary.recallAvailabilityRate}% ，平均命中 {summary.averageHitCount} 条，Bucket 覆盖 {summary.bucketCoverageRate}% 。</div>
           <div style={{ fontSize: 12, opacity: 0.72 }}>上一章先验平均覆盖 {summary.previousChapterFeedCoverageRate}% ，平均采样 {summary.previousChapterFeedChars} 字。</div>
         </div>
       </div>
@@ -1415,7 +1471,9 @@ function RecallReliabilityPanel({
               <div key={volume.volumeId} style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', display: 'grid', gap: 8 }}>
                 <div style={{ fontWeight: 600 }}>{volume.volumeName}</div>
                 <div style={{ fontSize: 11, opacity: 0.6 }}>第{volume.chapterStart}-{volume.chapterEnd}章 · {volume.chapterCount} 章</div>
+                <div style={{ fontSize: 12 }}>可用率 {volume.recallAvailabilityRate}% · 平均命中 {volume.averageHitCount} · Bucket {volume.bucketCoverageRate}%</div>
                 <div style={{ fontSize: 12 }}>依赖率 {volume.recallDependencyRate}% · 过期 {volume.staleRecallCount} · 过期率 {volume.staleRecallRate}%</div>
+                <div style={{ fontSize: 12 }}>降级 {volume.degradedChapterCount} 章{volume.latestFallbackReason ? ` · 最近原因 ${volume.latestFallbackReason}` : ''}</div>
                 <div style={{ fontSize: 12 }}>上章先验覆盖 {volume.previousChapterFeedCoverageRate}% · 平均 {volume.previousChapterFeedChars} 字</div>
               </div>
             ))}
@@ -1569,12 +1627,14 @@ function LanguageDriftPanel({
   recentAlerts,
   volumeEntries,
   novelSummary,
+  antiAiRecurrence,
 }: {
   averages: LanguageDriftMetrics
   trends: QualityDashboardData['languageDriftTrends']
   recentAlerts: QualityDashboardData['recentLanguageDriftAlerts']
   volumeEntries: QualityDashboardData['volumeLanguageDrift']
   novelSummary: QualityDashboardData['novelLanguageDriftSummary']
+  antiAiRecurrence: QualityDashboardData['antiAiRecurrence']
 }) {
   const hasAnyData = LANGUAGE_DRIFT_LABELS.some(({ key }) => trends[key].length > 0)
   if (!hasAnyData) {
@@ -1679,6 +1739,106 @@ function LanguageDriftPanel({
         </div>
       </div>
 
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
+        {[
+          { label: '命中章节', value: antiAiRecurrence.hitChapterCount, note: '至少命中过一次 anti-AI 规则的章节' },
+          { label: '复现规则', value: antiAiRecurrence.recurringRuleCount, note: '跨章重复出现的问题类型' },
+          { label: '已升级硬约束', value: antiAiRecurrence.promotedRuleCount, note: '连续 2 章命中后自动升级' },
+          { label: '5章高风险', value: antiAiRecurrence.highRiskRuleCount, note: '5 章窗口内至少 3 次复现' },
+        ].map((card) => (
+          <div
+            key={card.label}
+            style={{
+              padding: '12px 14px',
+              borderRadius: 10,
+              background: 'rgba(255,255,255,0.04)',
+              border: '1px solid rgba(255,255,255,0.08)',
+            }}
+          >
+            <div style={{ fontSize: 12, opacity: 0.7 }}>{card.label}</div>
+            <div style={{ fontSize: 22, fontWeight: 700 }}>{card.value}</div>
+            <div style={{ fontSize: 11, opacity: 0.55, marginTop: 4 }}>{card.note}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
+        <div
+          style={{
+            padding: '12px 14px',
+            borderRadius: 10,
+            background: 'rgba(255,255,255,0.04)',
+            border: '1px solid rgba(255,255,255,0.08)',
+            display: 'grid',
+            gap: 8,
+          }}
+        >
+          <div style={{ fontSize: 12, opacity: 0.7 }}>跨章高频问题</div>
+          {antiAiRecurrence.topRepeatedRules.length > 0 ? antiAiRecurrence.topRepeatedRules.slice(0, 4).map((item) => (
+            <div key={item.ruleCode} style={{ display: 'grid', gap: 4 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+                <span style={{ fontSize: 12, fontWeight: 600 }}>{item.ruleTitle}</span>
+                <Tag color={item.severity === 'high' ? 'error' : item.severity === 'medium' ? 'warning' : 'default'} style={{ marginRight: 0 }}>
+                  {`第 ${item.lastChapterNum} 章`}
+                </Tag>
+              </div>
+              <div style={{ fontSize: 11, opacity: 0.65 }}>
+                {`命中 ${item.hitCount} 次 / 覆盖 ${item.chapterCount} 章`}
+                {item.promotedCount > 0 ? ` · 已升级 ${item.promotedCount} 次` : ''}
+              </div>
+            </div>
+          )) : <div style={{ fontSize: 12, opacity: 0.6 }}>当前还没有跨章复现的 anti-AI 规则。</div>}
+        </div>
+
+        <div
+          style={{
+            padding: '12px 14px',
+            borderRadius: 10,
+            background: 'rgba(255,255,255,0.04)',
+            border: '1px solid rgba(255,255,255,0.08)',
+            display: 'grid',
+            gap: 8,
+          }}
+        >
+          <div style={{ fontSize: 12, opacity: 0.7 }}>已升级为下一章硬约束</div>
+          {antiAiRecurrence.promotedRules.length > 0 ? antiAiRecurrence.promotedRules.slice(0, 4).map((item) => (
+            <div key={item.ruleCode} style={{ display: 'grid', gap: 4 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                <span style={{ fontSize: 12, fontWeight: 600 }}>{item.ruleTitle}</span>
+                <Tag color="gold" style={{ marginRight: 0 }}>已前置</Tag>
+              </div>
+              <div style={{ fontSize: 11, opacity: 0.65 }}>
+                {`触发章节：${item.chapterNums.map((chapterNum) => `第${chapterNum}章`).join('、')}`}
+              </div>
+            </div>
+          )) : <div style={{ fontSize: 12, opacity: 0.6 }}>最近没有新的连续两章复现问题。</div>}
+        </div>
+
+        <div
+          style={{
+            padding: '12px 14px',
+            borderRadius: 10,
+            background: 'rgba(255,255,255,0.04)',
+            border: '1px solid rgba(255,255,255,0.08)',
+            display: 'grid',
+            gap: 8,
+          }}
+        >
+          <div style={{ fontSize: 12, opacity: 0.7 }}>近期告警</div>
+          {antiAiRecurrence.recentAlerts.length > 0 ? antiAiRecurrence.recentAlerts.slice(0, 4).map((alert) => (
+            <div key={`${alert.ruleCode}-${alert.lastChapterNum}`} style={{ display: 'grid', gap: 4 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+                <span style={{ fontSize: 12, fontWeight: 600 }}>{alert.ruleTitle}</span>
+                <Tag color={alert.severity === 'critical' ? 'error' : 'warning'} style={{ marginRight: 0 }}>
+                  {alert.severity === 'critical' ? '需回查' : '已升级'}
+                </Tag>
+              </div>
+              <div style={{ fontSize: 11, opacity: 0.65 }}>{alert.detail}</div>
+            </div>
+          )) : <div style={{ fontSize: 12, opacity: 0.6 }}>当前没有新的 anti-AI 复现告警。</div>}
+        </div>
+      </div>
+
       <div style={{ display: 'grid', gap: 10 }}>
         {LANGUAGE_DRIFT_LABELS.map(({ key, label }) => (
           <MiniTrendRow key={key} label={label} points={trends[key]} />
@@ -1732,6 +1892,32 @@ function LanguageDriftPanel({
                 </div>
               )
             })}
+          </div>
+        </div>
+      ) : null}
+
+      {antiAiRecurrence.volumeEntries.length > 0 ? (
+        <div style={{ display: 'grid', gap: 12 }}>
+          <div style={{ fontWeight: 600 }}>卷级 anti-AI 复现</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+            {antiAiRecurrence.volumeEntries.map((volume) => (
+              <div
+                key={volume.volumeId}
+                style={{
+                  padding: '12px 14px',
+                  borderRadius: 10,
+                  background: 'rgba(255,255,255,0.04)',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  display: 'grid',
+                  gap: 8,
+                }}
+              >
+                <div style={{ fontWeight: 600 }}>{volume.volumeName}</div>
+                <div style={{ fontSize: 11, opacity: 0.6 }}>{`第${volume.chapterStart}-${volume.chapterEnd}章 · ${volume.chapterCount} 章`}</div>
+                <div style={{ fontSize: 12 }}>{`命中章节 ${volume.hitChapterCount} · 复现规则 ${volume.recurringRuleCount}`}</div>
+                <div style={{ fontSize: 12 }}>{`已升级 ${volume.promotedRuleCount} · 高风险 ${volume.highRiskRuleCount}`}</div>
+              </div>
+            ))}
           </div>
         </div>
       ) : null}
@@ -2348,6 +2534,33 @@ function LanguageDriftDetails({ metrics }: { metrics?: LanguageDriftMetrics }) {
   )
 }
 
+function AntiAiRuleHitDetails({ hits }: { hits?: QualityDashboardData['chapterDetails'][number]['antiAiRuleHits'] }) {
+  if (!hits || hits.length === 0) {
+    return <div style={{ fontSize: 12, opacity: 0.55 }}>本章暂无持久化 anti-AI 命中</div>
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 8 }}>
+      <div style={{ fontWeight: 600 }}>本章 anti-AI 命中</div>
+      {hits.map((hit) => (
+        <div key={`${hit.ruleCode}-${hit.excerpt}`} style={{ display: 'grid', gap: 4 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <Tag color={hit.severity === 'high' ? 'error' : hit.severity === 'medium' ? 'warning' : 'default'} style={{ marginRight: 0 }}>
+              {hit.severity === 'high' ? '高' : hit.severity === 'medium' ? '中' : '低'}
+            </Tag>
+            <span style={{ fontSize: 12, fontWeight: 600 }}>{hit.ruleTitle}</span>
+            <Tag color={hit.source === 'language_drift' ? 'blue' : 'purple'} style={{ marginRight: 0 }}>
+              {hit.source === 'language_drift' ? '漂移' : '护栏'}
+            </Tag>
+            {hit.promotedToHardConstraint ? <Tag color="gold" style={{ marginRight: 0 }}>已升级硬约束</Tag> : null}
+          </div>
+          {hit.excerpt ? <div style={{ fontSize: 12, opacity: 0.72 }}>{hit.excerpt}</div> : null}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function DialogueReviewDetails({ review }: { review?: QualityDashboardData['chapterDetails'][number]['dialogueReview'] }) {
   if (!review) {
     return <div style={{ fontSize: 12, opacity: 0.55 }}>暂无角色对白辨识度数据</div>
@@ -2454,17 +2667,43 @@ function StoryArcProgressDetails({ progress }: { progress?: QualityDashboardData
   )
 }
 
-function RecallDiagnosticsDetails({ diagnostics }: { diagnostics?: QualityDashboardData['chapterDetails'][number]['recallDiagnostics'] }) {
-  if (!diagnostics || diagnostics.totalHitCount === 0) {
+function RecallDiagnosticsDetails({
+  diagnostics,
+  snapshot,
+  recallSnapshotSource,
+}: {
+  diagnostics?: QualityDashboardData['chapterDetails'][number]['recallDiagnostics']
+  snapshot?: QualityDashboardData['chapterDetails'][number]['recallSnapshot']
+  recallSnapshotSource?: QualityDashboardData['chapterDetails'][number]['recallSnapshotSource']
+}) {
+  if (!diagnostics && !snapshot) {
     return <div style={{ fontSize: 12, opacity: 0.55 }}>本章暂无召回可靠性数据</div>
   }
 
   return (
     <div style={{ display: 'grid', gap: 8 }}>
-      <div style={{ fontWeight: 600 }}>召回可靠性</div>
-      <div style={{ fontSize: 12 }}>召回依赖率：{diagnostics.recallDependencyRate}% · 过期召回率：{diagnostics.staleRecallRate}%</div>
-      <div style={{ fontSize: 12 }}>可用片段：{diagnostics.selectedHitCount} · 过期片段：{diagnostics.staleRecallCount} · 兜底命中：{diagnostics.fallbackHitCount}</div>
-      {diagnostics.summaryLines.length > 0 ? (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ fontWeight: 600 }}>召回可靠性</div>
+        {recallSnapshotSource ? (
+          <Tag color={recallSnapshotSourceColor(recallSnapshotSource)} style={{ marginRight: 0 }}>
+            {recallSnapshotSourceLabel(recallSnapshotSource)}
+          </Tag>
+        ) : null}
+      </div>
+      {snapshot ? (
+        <div style={{ fontSize: 12 }}>
+          运行结果：{snapshot.retrievalUsed ? '实际使用召回' : '未实际使用召回'}
+          {snapshot.degraded ? ` · 已降级${snapshot.fallbackReason ? `：${snapshot.fallbackReason}` : ''}` : ' · 未降级'}
+          {' '}· 总命中：{snapshot.hitCount}
+        </div>
+      ) : null}
+      {diagnostics ? (
+        <div style={{ fontSize: 12 }}>召回依赖率：{diagnostics.recallDependencyRate}% · 过期召回率：{diagnostics.staleRecallRate}%</div>
+      ) : null}
+      {diagnostics ? (
+        <div style={{ fontSize: 12 }}>可用片段：{diagnostics.selectedHitCount} · 过期片段：{diagnostics.staleRecallCount} · 兜底命中：{diagnostics.fallbackHitCount}</div>
+      ) : null}
+      {diagnostics && diagnostics.summaryLines.length > 0 ? (
         <div style={{ fontSize: 12, opacity: 0.72 }}>{diagnostics.summaryLines.join(' ')}</div>
       ) : null}
     </div>

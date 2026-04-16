@@ -3,7 +3,63 @@ const fs = require('node:fs')
 const path = require('node:path')
 const Module = require('node:module')
 const ts = require('typescript')
-const Database = require('better-sqlite3')
+
+function describeRuntime() {
+  const nodeVersion = process.version
+  const abiVersion = process.versions.modules || 'unknown'
+  if (process.versions.electron) {
+    return `electron ${process.versions.electron} / node ${nodeVersion} / abi ${abiVersion}`
+  }
+  return `node ${nodeVersion} / abi ${abiVersion}`
+}
+
+function isAbiMismatchError(error) {
+  const message = error instanceof Error ? error.message : String(error || '')
+  return message.includes('NODE_MODULE_VERSION') || message.includes('better_sqlite3.node')
+}
+
+function printAbiMismatchGuidance(error) {
+  const message = error instanceof Error ? error.message : String(error || '')
+  const lines = [
+    '[migration-safety] better-sqlite3 原生模块加载失败。',
+    `当前运行时: ${describeRuntime()}`,
+    '',
+    '原因：better-sqlite3 的已编译原生模块 ABI 与当前运行时不匹配。',
+    '这通常发生在以下情况：',
+    '- 直接使用 `node scripts/migration-safety.test.cjs` 运行，而当前 node_modules 是按 Electron 运行时重建的。',
+    '- 切换了 Node / Electron 版本后，没有重新重建原生依赖。',
+    '',
+    '本项目 migration safety 的正式入口是：',
+    '- `npm run test:migrations`',
+    '',
+    '本机恢复顺序：',
+    '- `npm run rebuild:native`',
+    '- 如果仍失败，重新安装依赖后再执行 `npm run rebuild:native`',
+    '- 最后执行 `npm run test:migrations` 验证',
+    '',
+    process.versions.electron
+      ? '你当前已经在 Electron runtime 下运行；这通常说明本地 native 依赖需要重新重建。'
+      : '你当前是在纯 Node runtime 下运行；如果只是想跑迁移安全测试，请改用 `npm run test:migrations`。',
+    '',
+    '原始错误：',
+    message,
+  ]
+  console.error(lines.join('\n'))
+}
+
+function loadBetterSqlite3() {
+  try {
+    return require('better-sqlite3')
+  } catch (error) {
+    if (isAbiMismatchError(error)) {
+      printAbiMismatchGuidance(error)
+      process.exit(1)
+    }
+    throw error
+  }
+}
+
+const Database = loadBetterSqlite3()
 
 const workspaceRoot = path.resolve(__dirname, '..')
 const tempRoot = path.join(workspaceRoot, '.tmp-tests')
@@ -53,7 +109,16 @@ function prepareTempDir() {
 
 function openDb(name) {
   const dbPath = path.join(tempRoot, name)
-  const db = new Database(dbPath)
+  let db
+  try {
+    db = new Database(dbPath)
+  } catch (error) {
+    if (isAbiMismatchError(error)) {
+      printAbiMismatchGuidance(error)
+      process.exit(1)
+    }
+    throw error
+  }
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
   return db
@@ -99,6 +164,15 @@ function assertRequiredColumns(db) {
   assert.ok(getColumns(db, 'chapter_contracts').has('required_resistance_track_ids_json'))
   assert.ok(getColumns(db, 'chapter_contracts').has('required_resistance_actions_json'))
   assert.ok(getColumns(db, 'volume_designs').has('linked_resistance_track_ids_json'))
+  assert.ok(getColumns(db, 'chapter_recall_runtime_snapshots').has('snapshot_json'))
+  assert.ok(getColumns(db, 'chapter_recall_runtime_snapshots').has('diagnostics_json'))
+  assert.ok(getColumns(db, 'chapter_recall_runtime_snapshots').has('source'))
+  assert.ok(getColumns(db, 'chapter_recall_runtime_snapshots').has('context_version'))
+  assert.ok(getColumns(db, 'anti_ai_rule_hits').has('rule_code'))
+  assert.ok(getColumns(db, 'anti_ai_rule_hits').has('scope'))
+  assert.ok(getColumns(db, 'anti_ai_rule_hits').has('severity'))
+  assert.ok(getColumns(db, 'anti_ai_rule_hits').has('source'))
+  assert.ok(getColumns(db, 'anti_ai_rule_hits').has('promoted_to_hard_constraint'))
   assert.ok(getColumns(db, 'character_arcs').has('character_id'))
   assert.ok(getColumns(db, 'character_arc_beats').has('arc_id'))
   assert.ok(getColumns(db, 'relationship_arcs').has('char_a_id'))
@@ -135,6 +209,14 @@ function testFreshDbIsIdempotent() {
       '0020_backfill_endgame_assets_and_contracts',
       '0021_character_arc_center',
       '0022_resistance_system',
+      '0023_info_gap_and_puzzle_board',
+      '0024_growth_resource_cost_system',
+      '0025_chapter_contract_audit',
+      '0026_chapter_writeback_center',
+      '0027_chapter_gate_runs',
+      '0028_task_pipeline_metadata',
+      '0029_chapter_recall_runtime_snapshots',
+      '0030_anti_ai_rule_hits',
     ])
 
     runMigrations(db)
@@ -235,6 +317,14 @@ function testPartialSchemaCanResume() {
       '0020_backfill_endgame_assets_and_contracts',
       '0021_character_arc_center',
       '0022_resistance_system',
+      '0023_info_gap_and_puzzle_board',
+      '0024_growth_resource_cost_system',
+      '0025_chapter_contract_audit',
+      '0026_chapter_writeback_center',
+      '0027_chapter_gate_runs',
+      '0028_task_pipeline_metadata',
+      '0029_chapter_recall_runtime_snapshots',
+      '0030_anti_ai_rule_hits',
     ])
 
     const configs = db.prepare(`

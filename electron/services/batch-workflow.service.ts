@@ -1,6 +1,8 @@
 import type { WebContents } from 'electron'
 import { desc, eq } from 'drizzle-orm'
 import type {
+  ChapterBatchAutoGenerateStatus,
+  ChapterBatchGenerateOptions,
   CharacterAutoGenerateStatus,
   CharacterBatchGenerationOptions,
   FactionAutoGenerateStatus,
@@ -18,7 +20,9 @@ import { hasResumableWorkflowCheckpoint } from '../../src/shared/workflow-resili
 import { getDb } from '../database/db'
 import { tasks } from '../database/schema'
 import { throwUserFacingError } from '../utils/user-facing-error'
+import { generateChapterContent, getChapter } from './chapter.service'
 import { generateCharacterBatchChunk } from './character.service'
+import { runChapterPublishCheck } from './context-impact.service'
 import { generateFactionBatchChunk } from './faction.service'
 import { loadSubplotAutoGenerateContext, polishGeneratedSubplots, tryGenerateSubplotBatch } from './core-settings.service'
 import { generateStoryItemsBatchChunk } from './item.service'
@@ -36,6 +40,7 @@ import {
 import { generateTimelineBatchChunk } from './timeline.service'
 
 const DEFAULT_MAX_RETRIES = 2
+const CHAPTER_BATCH_RECALL_PAUSE_THRESHOLD = 3
 const activeBatchWorkflows = new Set<number>()
 const ACTIVE_BATCH_WORKFLOW_RUNNING_STATUSES = new Set(['pending', 'running', 'cancel_requested'])
 
@@ -51,6 +56,7 @@ type BatchWorkflowTaskType =
   | 'timeline_auto_generate'
   | 'story_thread_auto_generate'
   | 'subplot_auto_generate'
+  | 'chapter_batch_generate'
 
 function isActiveBatchWorkflowStatus(status?: string | null): boolean {
   return ACTIVE_BATCH_WORKFLOW_RUNNING_STATUSES.has(status || '')
@@ -184,6 +190,56 @@ function parseSubplotRequest(raw?: string | null): SubplotAutoGenerateRequest {
     coreConflict: typeof record.coreConflict === 'string' ? record.coreConflict : '',
     mainPlot: typeof record.mainPlot === 'string' ? record.mainPlot : '',
     requirements: typeof record.requirements === 'string' ? record.requirements : undefined,
+  }
+}
+
+function parseChapterBatchOptions(raw?: string | null): ChapterBatchGenerateOptions {
+  const record = asRecord(raw)
+  const chapterIds = [...new Set(
+    asNumberArray(record.chapterIds)
+      .map((item) => Math.round(item))
+      .filter((item) => item > 0),
+  )]
+  return {
+    chapterIds,
+    batchSize: 1,
+  }
+}
+
+function appendUniqueNumber(values: number[], next?: number | null): number[] {
+  if (typeof next !== 'number' || !Number.isFinite(next)) return values
+  return values.includes(next) ? values : [...values, next]
+}
+
+function appendUniqueStrings(values: string[], next?: string | string[] | null): string[] {
+  const entries = Array.isArray(next) ? next : next ? [next] : []
+  const seen = new Set(values)
+  const appended = [...values]
+  for (const entry of entries) {
+    const normalized = typeof entry === 'string' ? entry.trim() : ''
+    if (!normalized || seen.has(normalized)) continue
+    seen.add(normalized)
+    appended.push(normalized)
+  }
+  return appended
+}
+
+function readChapterPipelineSignals(task: TaskRow | null | undefined): {
+  recallDegraded: boolean
+  failureCode?: string
+  lastFailureRole?: string
+} {
+  const progress = parseTaskProgress<Record<string, unknown>>(task)
+  const recallSnapshot = progress.recallSnapshot
+  return {
+    recallDegraded: Boolean(
+      recallSnapshot
+      && typeof recallSnapshot === 'object'
+      && !Array.isArray(recallSnapshot)
+      && (recallSnapshot as Record<string, unknown>).degraded === true,
+    ),
+    failureCode: typeof progress.failureCode === 'string' ? progress.failureCode : undefined,
+    lastFailureRole: typeof progress.lastFailureRole === 'string' ? progress.lastFailureRole : undefined,
   }
 }
 
@@ -386,6 +442,49 @@ function toSubplotStatus(taskId: number, task: TaskRow): SubplotAutoGenerateStat
   }
 }
 
+function createInitialChapterBatchStatus(taskId: number, novelId: number, options: ChapterBatchGenerateOptions): ChapterBatchAutoGenerateStatus {
+  const requestedCount = options.chapterIds.length
+  return {
+    ...createBaseStatus(taskId, novelId, requestedCount, 1, Math.max(1, requestedCount)),
+    chapterIds: [...options.chapterIds],
+    completedChapterIds: [],
+    failedChapterIds: [],
+    warnings: [],
+    consecutiveRecallFallbackChapters: 0,
+    message: requestedCount <= 0 ? '当前没有需要批量生成的章节。' : '等待开始章节批量生成。',
+  }
+}
+
+function toChapterBatchStatus(taskId: number, task: TaskRow): ChapterBatchAutoGenerateStatus {
+  const progress = parseTaskProgress<Partial<ChapterBatchAutoGenerateStatus>>(task)
+  const fallback = createInitialChapterBatchStatus(taskId, task.novelId || 0, parseChapterBatchOptions(task.inputJson))
+  return {
+    ...fallback,
+    status: task.status as ChapterBatchAutoGenerateStatus['status'],
+    currentBatch: typeof progress.currentBatch === 'number' ? progress.currentBatch : fallback.currentBatch,
+    totalBatches: typeof progress.totalBatches === 'number' ? progress.totalBatches : fallback.totalBatches,
+    resumeCursor: typeof progress.resumeCursor === 'number' ? progress.resumeCursor : fallback.resumeCursor,
+    generatedCount: typeof progress.generatedCount === 'number' ? progress.generatedCount : fallback.generatedCount,
+    retryCount: typeof progress.retryCount === 'number' ? progress.retryCount : fallback.retryCount,
+    lastError: typeof progress.lastError === 'string' ? progress.lastError : fallback.lastError,
+    completed: progress.completed === true || fallback.completed,
+    message: typeof progress.message === 'string' ? progress.message : fallback.message,
+    batchDigest: typeof progress.batchDigest === 'string' ? progress.batchDigest : fallback.batchDigest,
+    chapterIds: asNumberArray(progress.chapterIds).length > 0 ? asNumberArray(progress.chapterIds) : fallback.chapterIds,
+    completedChapterIds: asNumberArray(progress.completedChapterIds),
+    failedChapterIds: asNumberArray(progress.failedChapterIds),
+    warnings: asStringArray(progress.warnings),
+    currentChapterId: typeof progress.currentChapterId === 'number' ? progress.currentChapterId : undefined,
+    currentChapterNum: typeof progress.currentChapterNum === 'number' ? progress.currentChapterNum : undefined,
+    pauseReason: typeof progress.pauseReason === 'string' ? progress.pauseReason : undefined,
+    blockedChapterId: typeof progress.blockedChapterId === 'number' ? progress.blockedChapterId : undefined,
+    blockedTaskId: typeof progress.blockedTaskId === 'number' ? progress.blockedTaskId : undefined,
+    consecutiveRecallFallbackChapters: typeof progress.consecutiveRecallFallbackChapters === 'number'
+      ? progress.consecutiveRecallFallbackChapters
+      : 0,
+  }
+}
+
 function mergeWarnings(current: string[], next?: string | string[] | null): string[] {
   const values = Array.isArray(next) ? next : next ? [next] : []
   return [...current, ...values.filter((item) => item.trim())]
@@ -421,6 +520,7 @@ type BatchWorkflowProgress =
   | TimelineAutoGenerateStatus
   | StoryThreadAutoGenerateStatus
   | SubplotAutoGenerateStatus
+  | ChapterBatchAutoGenerateStatus
 
 function getBatchWorkflowProgress(taskId: number, task: TaskRow): BatchWorkflowProgress {
   if (task.type === 'character_auto_generate') {
@@ -449,6 +549,10 @@ function getBatchWorkflowProgress(taskId: number, task: TaskRow): BatchWorkflowP
 
   if (task.type === 'story_thread_auto_generate') {
     return toThreadStatus(taskId, task)
+  }
+
+  if (task.type === 'chapter_batch_generate') {
+    return toChapterBatchStatus(taskId, task)
   }
 
   return toSubplotStatus(taskId, task)
@@ -793,6 +897,204 @@ async function runSimpleEntityWorkflow(
   }
 }
 
+function pauseChapterBatchWorkflow(
+  taskId: number,
+  sender: WebContents | undefined,
+  progress: ChapterBatchAutoGenerateStatus,
+  options: {
+    message: string
+    errorMessage: string
+    chapterId?: number
+    chapterNum?: number
+    childTaskId?: number
+    warnings?: string | string[]
+    consecutiveRecallFallbackChapters?: number
+  },
+) {
+  const nextProgress: ChapterBatchAutoGenerateStatus = {
+    ...progress,
+    status: 'paused',
+    currentBatch: Math.min(progress.totalBatches, progress.resumeCursor + 1),
+    completed: false,
+    lastError: options.errorMessage,
+    message: options.message,
+    pauseReason: options.message,
+    blockedChapterId: options.chapterId,
+    blockedTaskId: options.childTaskId,
+    currentChapterId: options.chapterId ?? progress.currentChapterId,
+    currentChapterNum: options.chapterNum ?? progress.currentChapterNum,
+    failedChapterIds: appendUniqueNumber(progress.failedChapterIds, options.chapterId),
+    warnings: appendUniqueStrings(progress.warnings, options.warnings),
+    consecutiveRecallFallbackChapters: typeof options.consecutiveRecallFallbackChapters === 'number'
+      ? options.consecutiveRecallFallbackChapters
+      : progress.consecutiveRecallFallbackChapters,
+  }
+  updateTaskProgress(taskId, nextProgress, sender)
+  updateTaskStatus(taskId, 'paused', sender, {
+    errorMessage: options.errorMessage,
+    currentChildTaskId: null,
+  })
+}
+
+async function runChapterBatchGenerateWorkflow(taskId: number, sender?: WebContents) {
+  if (!tryRegisterActiveBatchWorkflow(taskId)) return
+
+  try {
+    const task = getRunningTask(taskId, sender)
+    const options = parseChapterBatchOptions(task.inputJson)
+    if (!task.progressJson) {
+      updateTaskProgress(taskId, createInitialChapterBatchStatus(taskId, task.novelId || 0, options), sender)
+    }
+
+    while (true) {
+      const latestTask = getTaskRecord(taskId)
+      if (!latestTask || !latestTask.novelId) break
+      const control = parseTaskControl(latestTask)
+      const progress = toChapterBatchStatus(taskId, latestTask)
+
+      if (control.cancelRequested) {
+        updateTaskProgress(taskId, {
+          ...progress,
+          status: 'cancelled',
+          message: '章节批量生成已停止。',
+        }, sender)
+        updateTaskStatus(taskId, 'cancelled', sender, { errorMessage: '用户已取消', currentChildTaskId: null })
+        break
+      }
+
+      if (progress.completed || progress.resumeCursor >= progress.totalBatches || progress.resumeCursor >= progress.chapterIds.length) {
+        const done: ChapterBatchAutoGenerateStatus = {
+          ...progress,
+          status: 'success',
+          completed: true,
+          currentChapterId: undefined,
+          currentChapterNum: undefined,
+          blockedChapterId: undefined,
+          blockedTaskId: undefined,
+          pauseReason: undefined,
+          message: `章节批量任务完成，已完成 ${progress.completedChapterIds.length}/${progress.chapterIds.length} 章。`,
+        }
+        updateTaskProgress(taskId, done, sender)
+        updateTaskStatus(taskId, 'success', sender, { outputText: done.message, errorMessage: null, currentChildTaskId: null })
+        break
+      }
+
+      const chapterId = progress.chapterIds[progress.resumeCursor]
+      const chapter = typeof chapterId === 'number' ? getChapter(chapterId) : null
+      const currentBatch = progress.resumeCursor + 1
+
+      if (!chapter || chapter.novelId !== latestTask.novelId) {
+        pauseChapterBatchWorkflow(taskId, sender, progress, {
+          chapterId,
+          message: `第 ${currentBatch}/${progress.totalBatches} 章缺失或不属于当前作品，任务已暂停。`,
+          errorMessage: '章节不存在或归属作品不匹配',
+        })
+        break
+      }
+
+      const chapterNum = chapter.chapterNum
+      updateTaskProgress(taskId, {
+        ...progress,
+        status: 'running',
+        currentBatch,
+        currentChapterId: chapterId,
+        currentChapterNum: chapterNum,
+        blockedChapterId: undefined,
+        blockedTaskId: undefined,
+        pauseReason: undefined,
+        message: `正在生成第 ${currentBatch}/${progress.totalBatches} 章（第 ${chapterNum} 章）。`,
+      }, sender)
+
+      const childTaskId = await generateChapterContent(chapterId, sender)
+      updateTask(taskId, { currentChildTaskId: childTaskId })
+      const childTask = await waitForWorkflowTask(childTaskId)
+      const childSignals = readChapterPipelineSignals(childTask)
+
+      if (childTask.status !== 'success') {
+        const childError = childTask.errorMessage || (typeof childTask.outputText === 'string' && childTask.outputText.trim()) || '章节流水线未成功完成'
+        const childReason = childSignals.failureCode
+          ? `${childError}（${childSignals.failureCode}${childSignals.lastFailureRole ? ` / ${childSignals.lastFailureRole}` : ''}）`
+          : childError
+        pauseChapterBatchWorkflow(taskId, sender, progress, {
+          chapterId,
+          chapterNum,
+          childTaskId,
+          message: `第 ${chapterNum} 章流水线未完成，章节批量任务已暂停：${childReason}`,
+          errorMessage: childError,
+        })
+        break
+      }
+
+      const publishCheck = runChapterPublishCheck(chapterId)
+      if (publishCheck.gateLevel === 'blocker') {
+        pauseChapterBatchWorkflow(taskId, sender, progress, {
+          chapterId,
+          chapterNum,
+          childTaskId,
+          message: `第 ${chapterNum} 章章节门阻断，章节批量任务已暂停：${publishCheck.summary}`,
+          errorMessage: publishCheck.summary,
+        })
+        break
+      }
+
+      const nextRecallStreak = childSignals.recallDegraded
+        ? progress.consecutiveRecallFallbackChapters + 1
+        : 0
+      if (nextRecallStreak >= CHAPTER_BATCH_RECALL_PAUSE_THRESHOLD) {
+        pauseChapterBatchWorkflow(taskId, sender, progress, {
+          chapterId,
+          chapterNum,
+          childTaskId,
+          message: `最近已连续 ${nextRecallStreak} 章召回降级，章节批量任务已在第 ${chapterNum} 章后自动暂停。`,
+          errorMessage: '连续召回降级达到暂停阈值',
+          warnings: `第 ${chapterNum} 章召回已降级，连续 ${nextRecallStreak} 章触发自动暂停。`,
+          consecutiveRecallFallbackChapters: nextRecallStreak,
+        })
+        break
+      }
+
+      const nextWarnings = appendUniqueStrings(progress.warnings, [
+        publishCheck.gateLevel === 'warning' ? `第 ${chapterNum} 章章节门告警：${publishCheck.summary}` : '',
+        childSignals.recallDegraded ? `第 ${chapterNum} 章召回已降级，但未达到自动暂停阈值。` : '',
+      ])
+      const nextProgress: ChapterBatchAutoGenerateStatus = {
+        ...progress,
+        status: 'running',
+        currentBatch,
+        resumeCursor: progress.resumeCursor + 1,
+        generatedCount: progress.generatedCount + 1,
+        retryCount: 0,
+        lastError: '',
+        completed: progress.resumeCursor + 1 >= progress.totalBatches,
+        chapterIds: progress.chapterIds,
+        completedChapterIds: appendUniqueNumber(progress.completedChapterIds, chapterId),
+        failedChapterIds: progress.failedChapterIds,
+        warnings: nextWarnings,
+        currentChapterId: chapterId,
+        currentChapterNum: chapterNum,
+        blockedChapterId: undefined,
+        blockedTaskId: undefined,
+        pauseReason: undefined,
+        consecutiveRecallFallbackChapters: nextRecallStreak,
+        batchDigest: chapter.title || `第${chapterNum}章`,
+        message: `第 ${chapterNum} 章已完成，可继续处理下一章。`,
+      }
+      updateTaskControl(taskId, {
+        ...parseTaskControl(latestTask),
+        cancelRequested: false,
+        maxRetries: DEFAULT_MAX_RETRIES,
+        retryCount: 0,
+      })
+      updateTaskProgress(taskId, nextProgress, sender)
+      updateTask(taskId, { currentChildTaskId: null })
+    }
+  } catch (error) {
+    settleBatchWorkflowFatalError(taskId, sender, error)
+  } finally {
+    unregisterActiveBatchWorkflow(taskId)
+  }
+}
+
 async function runSubplotAutoGenerateWorkflow(taskId: number, sender?: WebContents) {
   if (!tryRegisterActiveBatchWorkflow(taskId)) return
 
@@ -986,6 +1288,7 @@ export function isBatchWorkflowType(type?: string | null): type is BatchWorkflow
     || type === 'timeline_auto_generate'
     || type === 'story_thread_auto_generate'
     || type === 'subplot_auto_generate'
+    || type === 'chapter_batch_generate'
 }
 
 export async function startFactionAutoGenerateWorkflow(novelId: number, options: FactionBatchGenerationOptions, sender?: WebContents) {
@@ -1108,6 +1411,26 @@ export async function startSubplotAutoGenerateWorkflow(request: SubplotAutoGener
   return taskId
 }
 
+export async function startChapterBatchGenerateWorkflow(novelId: number, options: ChapterBatchGenerateOptions, sender?: WebContents) {
+  const existing = reconcileStaleBatchWorkflowTask(getLatestWorkflowByType(novelId, 'chapter_batch_generate'))
+  if (existing && ['pending', 'running', 'cancel_requested'].includes(existing.status || '')) return existing.id
+  if (existing?.status === 'paused') throwUserFacingError('batch.chapterPausedExists')
+
+  const normalized = parseChapterBatchOptions(JSON.stringify(options))
+  const initial = createInitialChapterBatchStatus(0, novelId, normalized)
+  const taskId = await createTask({
+    type: 'chapter_batch_generate',
+    novelId,
+    inputJson: JSON.stringify(normalized),
+    runnerType: 'workflow',
+    controlJson: JSON.stringify({ cancelRequested: false, maxRetries: DEFAULT_MAX_RETRIES, retryCount: 0 }),
+    progressJson: JSON.stringify(initial),
+  })
+  updateTaskProgress(taskId, { ...initial, taskId }, sender)
+  void runChapterBatchGenerateWorkflow(taskId, sender).catch(logWorkflowError(taskId))
+  return taskId
+}
+
 export function getCharacterAutoGenerateStatus(taskId: number) {
   const task = reconcileStaleBatchWorkflowTask(getTaskRecord(taskId))
   return task?.type === 'character_auto_generate' ? toCharacterStatus(taskId, task) : null
@@ -1142,6 +1465,11 @@ export function getSubplotAutoGenerateStatus(taskId: number) {
   return task?.type === 'subplot_auto_generate' ? toSubplotStatus(taskId, task) : null
 }
 
+export function getChapterBatchAutoGenerateStatus(taskId: number) {
+  const task = reconcileStaleBatchWorkflowTask(getTaskRecord(taskId))
+  return task?.type === 'chapter_batch_generate' ? toChapterBatchStatus(taskId, task) : null
+}
+
 export function getLatestFactionAutoGenerateTask(novelId: number) {
   return reconcileStaleBatchWorkflowTask(getLatestWorkflowByType(novelId, 'faction_auto_generate'))
 }
@@ -1164,6 +1492,10 @@ export function getLatestStoryThreadAutoGenerateTask(novelId: number) {
 
 export function getLatestSubplotAutoGenerateTask(novelId: number) {
   return reconcileStaleBatchWorkflowTask(getLatestWorkflowByType(novelId, 'subplot_auto_generate'))
+}
+
+export function getLatestChapterBatchAutoGenerateTask(novelId: number) {
+  return reconcileStaleBatchWorkflowTask(getLatestWorkflowByType(novelId, 'chapter_batch_generate'))
 }
 
 async function resumeBatchWorkflow(taskId: number, sender: WebContents | undefined, type: BatchWorkflowTaskType) {
@@ -1206,6 +1538,8 @@ async function resumeBatchWorkflow(taskId: number, sender: WebContents | undefin
     void runSimpleEntityWorkflow(taskId, sender, 'timeline').catch(logWorkflowError(taskId))
   } else if (type === 'story_thread_auto_generate') {
     void runSimpleEntityWorkflow(taskId, sender, 'thread').catch(logWorkflowError(taskId))
+  } else if (type === 'chapter_batch_generate') {
+    void runChapterBatchGenerateWorkflow(taskId, sender).catch(logWorkflowError(taskId))
   } else {
     void runSubplotAutoGenerateWorkflow(taskId, sender).catch(logWorkflowError(taskId))
   }
@@ -1275,5 +1609,9 @@ export async function generateSubplotsViaWorkflow(request: SubplotAutoGenerateRe
 }
 
 export const __testing = {
+  createInitialChapterBatchStatus,
+  parseChapterBatchOptions,
+  runChapterBatchGenerateWorkflow,
+  toChapterBatchStatus,
   runSubplotAutoGenerateWorkflow,
 }

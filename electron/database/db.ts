@@ -1561,6 +1561,58 @@ export function runMigrations(sqlite: Database.Database) {
     ensureColumn(sqlite, 'tasks', 'canon_run_id', 'INTEGER')
     ensureColumn(sqlite, 'tasks', 'recovery_hint_json', 'TEXT')
   })
+
+  runMigrationStep(sqlite, '0029_chapter_recall_runtime_snapshots', () => {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS chapter_recall_runtime_snapshots (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        chapter_id INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
+        snapshot_json TEXT NOT NULL,
+        diagnostics_json TEXT NOT NULL,
+        source TEXT NOT NULL DEFAULT 'runtime',
+        source_task_id INTEGER,
+        context_version INTEGER DEFAULT 1,
+        computed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_chapter_recall_runtime_snapshots_chapter
+        ON chapter_recall_runtime_snapshots(chapter_id);
+      CREATE INDEX IF NOT EXISTS idx_chapter_recall_runtime_snapshots_novel
+        ON chapter_recall_runtime_snapshots(novel_id, chapter_id);
+    `)
+  })
+
+  runMigrationStep(sqlite, '0030_anti_ai_rule_hits', () => {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS anti_ai_rule_hits (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        chapter_id INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
+        chapter_num INTEGER NOT NULL,
+        rule_code TEXT NOT NULL,
+        rule_title TEXT,
+        scope TEXT NOT NULL DEFAULT 'structure',
+        severity TEXT NOT NULL DEFAULT 'medium',
+        excerpt TEXT,
+        source TEXT NOT NULL DEFAULT 'guardrail',
+        detail TEXT,
+        promoted_to_hard_constraint INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_anti_ai_rule_hits_chapter
+        ON anti_ai_rule_hits(chapter_id, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_anti_ai_rule_hits_novel_rule
+        ON anti_ai_rule_hits(novel_id, rule_code, chapter_num DESC);
+      CREATE INDEX IF NOT EXISTS idx_anti_ai_rule_hits_novel_promoted
+        ON anti_ai_rule_hits(novel_id, promoted_to_hard_constraint, chapter_num DESC);
+    `)
+    validateWorkflowRuntimeSchema(sqlite)
+  })
 }
 
 function ensureMigrationTable(sqlite: Database.Database) {
@@ -1652,12 +1704,6 @@ function validateRequiredSchema(sqlite: Database.Database) {
         'retryable',
         'parent_task_id',
         'current_child_task_id',
-        'pipeline_role',
-        'pipeline_stage',
-        'upstream_task_id',
-        'contract_version',
-        'canon_run_id',
-        'recovery_hint_json',
         'control_json',
         'progress_json',
       ],
@@ -1702,6 +1748,50 @@ function validateRequiredSchema(sqlite: Database.Database) {
 
   if (missing.length > 0) {
     throw new Error(`数据库结构迁移未完成，缺少：${missing.join(', ')}`)
+  }
+}
+
+function validateWorkflowRuntimeSchema(sqlite: Database.Database) {
+  const requirements = [
+    {
+      tableName: 'tasks',
+      columns: [
+        'pipeline_role',
+        'pipeline_stage',
+        'upstream_task_id',
+        'contract_version',
+        'canon_run_id',
+        'recovery_hint_json',
+      ],
+    },
+    {
+      tableName: 'chapter_recall_runtime_snapshots',
+      columns: ['snapshot_json', 'diagnostics_json', 'source', 'context_version'],
+    },
+    {
+      tableName: 'anti_ai_rule_hits',
+      columns: ['rule_code', 'scope', 'severity', 'source', 'promoted_to_hard_constraint'],
+    },
+  ]
+
+  const missing: string[] = []
+
+  requirements.forEach(({ tableName, columns }) => {
+    if (!hasTable(sqlite, tableName)) {
+      missing.push(`table ${tableName}`)
+      return
+    }
+
+    const existing = getColumnNames(sqlite, tableName)
+    columns.forEach((columnName) => {
+      if (!existing.has(columnName)) {
+        missing.push(`column ${tableName}.${columnName}`)
+      }
+    })
+  })
+
+  if (missing.length > 0) {
+    throw new Error(`数据库工作流运行时结构迁移未完成，缺少：${missing.join(', ')}`)
   }
 }
 

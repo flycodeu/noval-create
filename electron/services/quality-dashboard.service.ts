@@ -1,4 +1,4 @@
-import { asc, eq } from 'drizzle-orm'
+import { asc, desc, eq } from 'drizzle-orm'
 import type {
   AIScoreDimension,
   ChapterGateHistoryEntry,
@@ -25,6 +25,8 @@ import type {
   QualityDashboardRiskKind,
   QualityDashboardRiskSeverity,
   RecallDiagnostics,
+  RecallFallbackReason,
+  RecallSnapshot,
   ReversalDistributionSummary,
   ReversalSupportState,
   RewardState,
@@ -51,9 +53,11 @@ import {
 import { getDialogueAnalyticsSnapshot, scheduleDialogueFingerprintRefresh } from './dialogue-fingerprint.service'
 import { fallbackKeywordSearch } from './embedding.service'
 import { getEndgameDebtSnapshot } from './endgame-asset.service'
+import { listChapterRecallRuntimeMap } from './chapter-recall-runtime.service'
 import { getStoryArcProgressSnapshot } from './story-arc-progress.service'
 import { getForeshadowSnapshot } from './story-thread.service'
 import { getWorldStateLedgerSnapshot } from './world-state.service'
+import { getAntiAiDashboardSummary } from './anti-ai-rule.service'
 
 interface QualityDimensionScore extends AIScoreDimension {}
 
@@ -340,6 +344,50 @@ export function buildHeuristicRecallDiagnostics(
   }
 }
 
+function buildRecallBucketCoverageRate(snapshot?: RecallSnapshot): number {
+  if (!snapshot) return 0
+  const buckets = Object.values(snapshot.bucketStats || {})
+  if (buckets.length === 0) return 0
+  const covered = buckets.filter((bucket) => bucket.hitCount > 0).length
+  return roundMetric((covered / buckets.length) * 100)
+}
+
+function pickLatestRecallFallbackReason(
+  snapshots: Array<RecallSnapshot | undefined>,
+): RecallFallbackReason | undefined {
+  return snapshots
+    .map((snapshot) => snapshot?.fallbackReason)
+    .find((reason): reason is RecallFallbackReason => Boolean(reason))
+}
+
+function getConsecutiveRecallFallbackCount(entries: Array<{ snapshot?: RecallSnapshot }>): number {
+  let count = 0
+  for (const entry of entries) {
+    if (!entry.snapshot?.degraded) break
+    count += 1
+  }
+  return count
+}
+
+function formatRecallFallbackReason(reason?: RecallFallbackReason): string {
+  switch (reason) {
+    case 'embedding_service_failed':
+      return '嵌入服务失败'
+    case 'query_embedding_failed':
+      return '查询向量失败'
+    case 'disabled_by_config':
+      return '向量能力未启用'
+    case 'budget_trimmed':
+      return '召回被预算裁剪'
+    case 'only_stale_hits':
+      return '仅命中过期片段'
+    case 'no_hits':
+      return '没有命中历史片段'
+    default:
+      return '未记录'
+  }
+}
+
 function safeParseScores(json: string | null | undefined): {
   dimensions: QualityDimensionScore[]
   ai_like_rate: number
@@ -504,6 +552,14 @@ function toDashboardSeverityFromArcAlert(severity: QualityDashboardData['storyAr
 function averageNumbers(values: number[]): number {
   if (values.length === 0) return 0
   return roundMetric(values.reduce((sum, value) => sum + value, 0) / values.length)
+}
+
+function hasThreeRuleHitsWithinFiveChapters(chapterNums: number[]): boolean {
+  const sorted = [...new Set(chapterNums)].sort((left, right) => left - right)
+  for (let index = 0; index <= sorted.length - 3; index += 1) {
+    if (sorted[index + 2] - sorted[index] <= 4) return true
+  }
+  return false
 }
 
 function buildVolumeChapterRanges(
@@ -1535,16 +1591,30 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     conflictEntityLimit: 12,
   })
   const recallFreshnessState = buildRecallFreshnessState(novelId)
-  const recallDiagnosticsByChapterId = new Map(rows.map((row) => [
+  const recallRuntimeByChapterId = listChapterRecallRuntimeMap(novelId)
+  const recallSnapshotByChapterId = new Map(rows.map((row) => [
     row.id,
-    buildHeuristicRecallDiagnostics(novelId, {
-      chapterNum: row.chapterNum,
-      title: row.title,
-      summary: row.summary,
-      outline: row.outline,
-    }, recallFreshnessState),
+    recallRuntimeByChapterId.get(row.id)?.recallSnapshot,
   ] as const))
+  const recallSnapshotSourceByChapterId = new Map(rows.map((row) => [
+    row.id,
+    recallRuntimeByChapterId.get(row.id)?.recallSnapshotSource,
+  ] as const))
+  const recallDiagnosticsByChapterId = new Map(rows.map((row) => {
+    const persisted = recallRuntimeByChapterId.get(row.id)
+    return [
+      row.id,
+      persisted?.recallDiagnostics || buildHeuristicRecallDiagnostics(novelId, {
+        chapterNum: row.chapterNum,
+        title: row.title,
+        summary: row.summary,
+        outline: row.outline,
+      }, recallFreshnessState),
+    ] as const
+  }))
   const recentWorldStateAlerts = worldStateLedger.alerts.slice(0, 8)
+  const antiAiSummary = getAntiAiDashboardSummary(novelId)
+  const antiAiSignalByChapterId = new Map(antiAiSummary.chapterSignals.map((entry) => [entry.chapterId, entry] as const))
   const worldStateAlertMap = worldStateLedger.alerts.reduce<Map<number, WorldStateAlert[]>>((result, alert) => {
     const current = result.get(alert.chapterNum) || []
     current.push(alert)
@@ -1673,6 +1743,7 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
       weakDimensions,
       dimensions,
       languageDriftMetrics,
+      antiAiRuleHits: antiAiSignalByChapterId.get(row.id)?.rules,
       dialogueReview,
       storyDynamics: hasStoryDynamics ? storyDynamics : undefined,
       chapterFunction: chapterFunctionDetail
@@ -1684,6 +1755,8 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
         : undefined,
       storyArcProgress: chapterArcProgressMap.get(row.id),
       worldStateAlerts: (worldStateAlertMap.get(row.chapterNum) || []).slice(0, 4),
+      recallSnapshot: recallSnapshotByChapterId.get(row.id),
+      recallSnapshotSource: recallSnapshotSourceByChapterId.get(row.id),
       recallDiagnostics: recallDiagnosticsByChapterId.get(row.id),
       chapterGate: latestChapterGate
         ? {
@@ -1888,6 +1961,8 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     chapterNum: row.chapterNum,
     title: row.title || `第 ${row.chapterNum} 章`,
     volumeId: row.volumeId,
+    snapshot: recallSnapshotByChapterId.get(row.id),
+    recallSnapshotSource: recallSnapshotSourceByChapterId.get(row.id),
     diagnostics: recallDiagnosticsByChapterId.get(row.id) || buildHeuristicRecallDiagnostics(novelId, {
       chapterNum: row.chapterNum,
       title: row.title,
@@ -1902,9 +1977,42 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
   const previousChapterFeedReports = recallEntries
     .map((entry) => previousChapterFeedReportsByChapterId.get(entry.chapterId))
     .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry && entry.sourceChapterId))
-  const analyzedRecallEntries = recallEntries.filter((entry) => entry.diagnostics.totalHitCount > 0)
+  const analyzedRecallEntries = recallEntries.filter((entry) =>
+    Boolean(entry.snapshot) || entry.diagnostics.searchedBucketCount > 0 || entry.diagnostics.totalHitCount > 0)
+  const recallAvailabilityCount = analyzedRecallEntries.filter((entry) =>
+    entry.snapshot
+      ? entry.snapshot.retrievalUsed
+      : entry.diagnostics.selectedHitCount > 0).length
+  const averageHitCount = analyzedRecallEntries.length > 0
+    ? roundMetric(analyzedRecallEntries.reduce((sum, entry) => sum + (entry.snapshot?.hitCount ?? entry.diagnostics.totalHitCount), 0) / analyzedRecallEntries.length)
+    : 0
+  const bucketCoverageRate = analyzedRecallEntries.length > 0
+    ? roundMetric(analyzedRecallEntries.reduce((sum, entry) => sum + (
+      entry.snapshot
+        ? buildRecallBucketCoverageRate(entry.snapshot)
+        : (entry.diagnostics.searchedBucketCount > 0
+            ? Math.round((entry.diagnostics.selectedBucketCount / entry.diagnostics.searchedBucketCount) * 100)
+            : 0)
+    ), 0) / analyzedRecallEntries.length)
+    : 0
+  const consecutiveFallbackChapters = getConsecutiveRecallFallbackCount(
+    [...recallEntries]
+      .sort((left, right) => right.chapterNum - left.chapterNum),
+  )
+  const latestFallbackReason = pickLatestRecallFallbackReason(
+    [...recallEntries]
+      .sort((left, right) => right.chapterNum - left.chapterNum)
+      .map((entry) => entry.snapshot),
+  )
   const recallSummary: QualityDashboardData['recallSummary'] = {
     analyzedChapterCount: analyzedRecallEntries.length,
+    recallAvailabilityRate: analyzedRecallEntries.length > 0
+      ? roundMetric((recallAvailabilityCount / analyzedRecallEntries.length) * 100)
+      : 0,
+    averageHitCount,
+    bucketCoverageRate,
+    consecutiveFallbackChapters,
+    latestFallbackReason,
     recallDependencyRate: analyzedRecallEntries.length > 0
       ? roundMetric(analyzedRecallEntries.reduce((sum, entry) => sum + entry.diagnostics.recallDependencyRate, 0) / analyzedRecallEntries.length)
       : 0,
@@ -1922,27 +2030,56 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
       : 0,
   }
   const recentRecallAlerts: QualityDashboardData['recentRecallAlerts'] = recallEntries
-    .filter((entry) => entry.diagnostics.staleRecallCount > 0)
+    .filter((entry) => entry.diagnostics.staleRecallCount > 0 || entry.snapshot?.degraded)
     .sort((left, right) => right.chapterNum - left.chapterNum || right.diagnostics.staleRecallCount - left.diagnostics.staleRecallCount)
     .slice(0, 8)
     .map((entry) => ({
       chapterId: entry.chapterId,
       chapterNum: entry.chapterNum,
       title: entry.title,
+      degraded: Boolean(entry.snapshot?.degraded),
+      retrievalUsed: Boolean(entry.snapshot?.retrievalUsed),
+      recallSnapshotSource: entry.recallSnapshotSource,
+      fallbackReason: entry.snapshot?.fallbackReason,
+      consecutiveFallbackChapters: entry.snapshot?.degraded
+        ? getConsecutiveRecallFallbackCount(
+          recallEntries
+            .filter((candidate) => candidate.chapterNum <= entry.chapterNum && Boolean(candidate.snapshot))
+            .sort((left, right) => right.chapterNum - left.chapterNum),
+        )
+        : undefined,
       staleRecallCount: entry.diagnostics.staleRecallCount,
-      detail: entry.diagnostics.summaryLines.at(-1) || `识别到 ${entry.diagnostics.staleRecallCount} 条疑似过期片段。`,
+      detail: entry.snapshot?.degraded
+        ? `召回已降级：${formatRecallFallbackReason(entry.snapshot.fallbackReason)}。${entry.diagnostics.staleRecallCount > 0 ? ` 并识别到 ${entry.diagnostics.staleRecallCount} 条疑似过期片段。` : ''}`
+        : (entry.diagnostics.summaryLines.at(-1) || `识别到 ${entry.diagnostics.staleRecallCount} 条疑似过期片段。`),
     }))
   const volumeRecallDiagnostics: QualityDashboardData['volumeRecallDiagnostics'] = volumeRows
-    .map((volume) => {
+    .reduce<QualityDashboardData['volumeRecallDiagnostics']>((result, volume) => {
       const entries = recallEntries.filter((entry) => entry.volumeId === volume.id)
-      if (entries.length === 0) return null
-      return {
+      if (entries.length === 0) return result
+      const entrySnapshots = entries.map((entry) => entry.snapshot)
+      result.push({
         volumeId: volume.id,
         volumeNumber: volume.volumeNumber || volume.id,
         volumeName: formatVolumeName(volume.id, volume.volumeNumber, volume.title),
         chapterStart: entries[0]?.chapterNum || 0,
         chapterEnd: entries[entries.length - 1]?.chapterNum || 0,
         chapterCount: entries.length,
+        recallAvailabilityRate: roundMetric((entries.filter((entry) => entry.snapshot?.retrievalUsed).length / entries.length) * 100),
+        averageHitCount: roundMetric(entries.reduce((sum, entry) => sum + (entry.snapshot?.hitCount ?? entry.diagnostics.totalHitCount), 0) / entries.length),
+        bucketCoverageRate: roundMetric(entries.reduce((sum, entry) => sum + (
+          entry.snapshot
+            ? buildRecallBucketCoverageRate(entry.snapshot)
+            : (entry.diagnostics.searchedBucketCount > 0
+                ? Math.round((entry.diagnostics.selectedBucketCount / entry.diagnostics.searchedBucketCount) * 100)
+                : 0)
+        ), 0) / entries.length),
+        degradedChapterCount: entries.filter((entry) => entry.snapshot?.degraded).length,
+        latestFallbackReason: pickLatestRecallFallbackReason(
+          entrySnapshots
+            .filter(Boolean)
+            .reverse(),
+        ),
         recallDependencyRate: roundMetric(entries.reduce((sum, entry) => sum + entry.diagnostics.recallDependencyRate, 0) / entries.length),
         staleRecallCount: entries.reduce((sum, entry) => sum + entry.diagnostics.staleRecallCount, 0),
         staleRecallRate: roundMetric(entries.reduce((sum, entry) => sum + entry.diagnostics.staleRecallRate, 0) / entries.length),
@@ -1962,9 +2099,9 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
             ? roundMetric(feedReports.reduce((sum, entry) => sum + entry.sampledChars, 0) / feedReports.length)
             : 0
         })(),
-      }
-    })
-    .filter((item): item is NonNullable<QualityDashboardData['volumeRecallDiagnostics'][number]> => Boolean(item))
+      })
+      return result
+    }, [])
     .sort((left, right) => left.volumeNumber - right.volumeNumber || left.chapterStart - right.chapterStart)
   const volumeLanguageDriftById = new Map(volumeLanguageDrift.map((entry) => [entry.volumeId, entry] as const))
   const volumeStoryDynamicsById = new Map(volumeStoryDynamics.map((entry) => [entry.volumeId, entry] as const))
@@ -1972,6 +2109,40 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
   const volumeArcProgressById = new Map(storyArcProgressSnapshot.volumeEntries.map((entry) => [entry.volumeId, entry] as const))
   const volumeRecallById = new Map(volumeRecallDiagnostics.map((entry) => [entry.volumeId, entry] as const))
   const volumeWorldStateById = new Map(volumeWorldStateStability.map((entry) => [entry.volumeId, entry] as const))
+  const antiAiVolumeEntries: QualityDashboardData['antiAiRecurrence']['volumeEntries'] = volumeRows
+    .reduce<QualityDashboardData['antiAiRecurrence']['volumeEntries']>((result, volume) => {
+      const chapterEntries = rows.filter((row) => row.volumeId === volume.id)
+      if (chapterEntries.length === 0) return result
+      const chapterIdSet = new Set(chapterEntries.map((row) => row.id))
+      const signals = antiAiSummary.chapterSignals.filter((entry) => chapterIdSet.has(entry.chapterId))
+      const ruleToChapterNums = new Map<string, number[]>()
+      const promotedRuleSet = new Set<string>()
+      signals.forEach((signal) => {
+        signal.rules.forEach((rule) => {
+          const current = ruleToChapterNums.get(rule.ruleCode) || []
+          if (!current.includes(signal.chapterNum)) current.push(signal.chapterNum)
+          current.sort((left, right) => left - right)
+          ruleToChapterNums.set(rule.ruleCode, current)
+          if (rule.promotedToHardConstraint) promotedRuleSet.add(rule.ruleCode)
+        })
+      })
+      const recurringRuleCount = [...ruleToChapterNums.values()].filter((chapterNums) => chapterNums.length >= 2).length
+      const highRiskRuleCount = [...ruleToChapterNums.values()].filter((chapterNums) => hasThreeRuleHitsWithinFiveChapters(chapterNums)).length
+      result.push({
+        volumeId: volume.id,
+        volumeNumber: volume.volumeNumber || volume.id,
+        volumeName: formatVolumeName(volume.id, volume.volumeNumber, volume.title),
+        chapterStart: chapterEntries[0]?.chapterNum || 0,
+        chapterEnd: chapterEntries[chapterEntries.length - 1]?.chapterNum || 0,
+        chapterCount: chapterEntries.length,
+        hitChapterCount: signals.length,
+        recurringRuleCount,
+        promotedRuleCount: promotedRuleSet.size,
+        highRiskRuleCount,
+      })
+      return result
+    }, [])
+    .sort((left, right) => left.volumeNumber - right.volumeNumber || left.chapterStart - right.chapterStart)
   const volumeQualityMetrics: VolumeQualityMetrics[] = volumeChapterRanges.map((volumeRange) => {
     const chapterEntries = chapterDetails.filter((entry) => entry.volumeId === volumeRange.volumeId)
     const scoredChapterEntries = chapterEntries.filter((entry) => entry.dimensions.length > 0)
@@ -2248,6 +2419,17 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     recentLanguageDriftAlerts,
     volumeLanguageDrift,
     novelLanguageDriftSummary,
+    antiAiRecurrence: {
+      totalHitCount: antiAiSummary.overview.totalHitCount,
+      hitChapterCount: antiAiSummary.overview.hitChapterCount,
+      recurringRuleCount: antiAiSummary.overview.recurringRuleCount,
+      promotedRuleCount: antiAiSummary.overview.promotedRuleCount,
+      highRiskRuleCount: antiAiSummary.overview.highRiskRuleCount,
+      topRepeatedRules: antiAiSummary.topRepeatedRules,
+      promotedRules: antiAiSummary.promotedRules,
+      recentAlerts: antiAiSummary.recentAlerts,
+      volumeEntries: antiAiVolumeEntries,
+    },
     dialogueFingerprintStats: dialogueSnapshot.dialogueFingerprintStats,
     characterDialogueSignatures: dialogueSnapshot.characterDialogueSignatures,
     crossCharacterDialogueSimilarity: dialogueSnapshot.crossCharacterDialogueSimilarity,

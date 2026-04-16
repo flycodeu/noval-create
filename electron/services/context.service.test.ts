@@ -6,6 +6,9 @@ vi.mock('../database/db', () => ({
 
 vi.mock('./embedding.service', () => ({
   findSimilarFragments: vi.fn(async () => []),
+  searchSimilarFragments: vi.fn(async () => ({
+    hits: [],
+  })),
 }))
 
 vi.mock('./style-analysis.service', () => ({
@@ -75,6 +78,7 @@ import type {
   ChapterContextParts,
   ChapterContextRawData,
   RecallDiagnostics,
+  RecallSnapshot,
 } from './context.service'
 import {
   allocateChapterContext,
@@ -97,6 +101,22 @@ function createRecallDiagnostics(): RecallDiagnostics {
     overriddenHitCount: 0,
     fallbackHitCount: 0,
     summaryLines: [],
+  }
+}
+
+function createRecallSnapshot(): RecallSnapshot {
+  return {
+    retrievalUsed: false,
+    degraded: false,
+    hitCount: 0,
+    selectedHitCount: 0,
+    staleRecallCount: 0,
+    fallbackHitCount: 0,
+    bucketStats: {
+      character: { hitCount: 0, selectedHitCount: 0, staleCount: 0, fallbackHitCount: 0 },
+      rule: { hitCount: 0, selectedHitCount: 0, staleCount: 0, fallbackHitCount: 0 },
+      thread: { hitCount: 0, selectedHitCount: 0, staleCount: 0, fallbackHitCount: 0 },
+    },
   }
 }
 
@@ -133,6 +153,7 @@ function createRawData(
     novel?: Record<string, unknown>
     profile?: Record<string, unknown>
     chapterRows?: Array<Record<string, unknown>>
+    recallSnapshot?: Partial<RecallSnapshot>
   } = {},
 ): ChapterContextRawData {
   const contextParts = {
@@ -170,6 +191,10 @@ function createRawData(
       segmentCount: 4,
       fullyInjected: false,
       segments: [],
+    },
+    recallSnapshot: {
+      ...createRecallSnapshot(),
+      ...options.recallSnapshot,
     },
     recallDiagnostics: createRecallDiagnostics(),
     recalledMemorySources: [],
@@ -211,6 +236,68 @@ describe('allocateChapterContext', () => {
     expect(context.hardConstraintEntries.length).toBeGreaterThan(0)
     expect(context.constraintInjectionStatus.injectedLabels).toContain('chapterGoal')
     expect(context.softContextDecisions.some((entry) => entry.reason === 'covered_by_hard_constraint')).toBe(true)
+  })
+
+  it('injects anti-ai hard constraints from settings and consecutive recurrence hits', () => {
+    vi.mocked(getDb).mockReturnValue({
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            orderBy: () => ({
+              all: () => ([
+                {
+                  id: 1,
+                  chapterId: 2,
+                  chapterNum: 2,
+                  ruleCode: 'ai_ending_summary',
+                  ruleTitle: '总结式章尾',
+                  scope: 'structure',
+                  severity: 'medium',
+                  excerpt: '而这一切才刚刚开始',
+                  source: 'guardrail',
+                  detail: '不要用总结句收尾。',
+                  promotedToHardConstraint: 0,
+                },
+                {
+                  id: 2,
+                  chapterId: 3,
+                  chapterNum: 3,
+                  ruleCode: 'ai_ending_summary',
+                  ruleTitle: '总结式章尾',
+                  scope: 'structure',
+                  severity: 'medium',
+                  excerpt: '故事远没有结束',
+                  source: 'guardrail',
+                  detail: '不要用总结句收尾。',
+                  promotedToHardConstraint: 1,
+                },
+              ]),
+            }),
+          }),
+        }),
+      }),
+    } as never)
+
+    const context = allocateChapterContext(createRawData({
+      novel: {
+        settingsJson: JSON.stringify({
+          writing_rules: {
+            anti_ai_flavor: '不要在段尾替角色总结意义。',
+            banned_terms: '命运的齿轮，某种无法言说',
+          },
+        }),
+      },
+    }), {
+      totalBudget: 10000,
+      promptProfile: 'draft',
+      chapterComplexity: 'standard',
+    })
+
+    expect(context.hardConstraintContext).toContain('【必须避免-禁用表达】')
+    expect(context.hardConstraintContext).toContain('本书禁用：命运的齿轮')
+    expect(context.hardConstraintContext).toContain('本书自定义：不要在段尾替角色总结意义。')
+    expect(context.hardConstraintContext).toContain('本书近章复现')
+    expect(context.constraintInjectionStatus.injectedLabels).toContain('antiAiRules')
   })
 
   it('compresses the effective budget to the model context limit', () => {
@@ -361,6 +448,32 @@ describe('allocateChapterContext', () => {
     expect(feed.previousChapterContext).toContain('Canon / 状态回写')
   })
 
+  it('measures sampled chars and coverage only from source-derived text windows', () => {
+    vi.mocked(getDb).mockReturnValue(createMockSelectDb([[], []]) as never)
+
+    const previousChapter = {
+      id: 10,
+      chapterNum: 10,
+      content: `${'A'.repeat(400)}${'B'.repeat(400)}${'C'.repeat(400)}`,
+      nextChapterSeed: '',
+      summary: '',
+      continuityStateJson: '',
+      scenePlanJson: '',
+      reviewNotesJson: '',
+    } as never
+
+    const feed = buildPreviousChapterContextFeed(previousChapter)
+    const sourceSegments = feed.previousChapterSampleReport.segments
+      .filter((segment) => ['opening', 'middle', 'tail'].includes(segment.type))
+    const sourceSampledChars = sourceSegments.reduce((sum, segment) => sum + segment.chars, 0)
+
+    expect(feed.previousChapterSampleReport.segments.map((segment) => segment.type)).toContain('middle')
+    expect(feed.previousChapterSampleReport.sampledChars).toBe(sourceSampledChars)
+    expect(feed.previousChapterSampleReport.sampledChars).toBe(740)
+    expect(feed.previousChapterSampleReport.coverageRate).toBe(61.7)
+    expect(feed.previousChapterContext.length).toBeGreaterThan(feed.previousChapterSampleReport.sampledChars)
+  })
+
   it('keeps previous-chapter prior ahead of summary memory under a tight draft budget', () => {
     const rawData = createRawData({
       contextParts: {
@@ -387,6 +500,42 @@ describe('allocateChapterContext', () => {
       expect(overflow.context.previousChapterContext.length).toBeGreaterThan(0)
       expect(previousChapterDecision?.status).not.toBe('dropped')
       expect(previousSummaryDecision?.status).not.toBe('kept')
+    }
+  })
+
+  it('marks recall as budget-trimmed when selected recall is dropped from final context', () => {
+    const rawData = createRawData({
+      contextParts: {
+        recalledMemory: '召回片段'.repeat(2600),
+        previousChapterContext: '先验'.repeat(420),
+        previousSummaries: '摘要'.repeat(2400),
+        longTermMemory: '长期'.repeat(2200),
+        continuitySummary: '连续'.repeat(1800),
+      },
+      recallSnapshot: {
+        retrievalUsed: true,
+        degraded: false,
+        hitCount: 6,
+        selectedHitCount: 2,
+        staleRecallCount: 0,
+        fallbackHitCount: 0,
+      },
+    })
+
+    try {
+      allocateChapterContext(rawData, {
+        totalBudget: 10000,
+        promptProfile: 'draft',
+        chapterComplexity: 'standard',
+      })
+      throw new Error('expected ContextOverflowError')
+    } catch (error) {
+      expect(error).toBeInstanceOf(ContextOverflowError)
+      const overflow = error as ContextOverflowError
+      expect(overflow.context.recalledMemory).toBe('')
+      expect(overflow.context.recallSnapshot.retrievalUsed).toBe(false)
+      expect(overflow.context.recallSnapshot.degraded).toBe(true)
+      expect(overflow.context.recallSnapshot.fallbackReason).toBe('budget_trimmed')
     }
   })
 })

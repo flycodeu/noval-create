@@ -192,6 +192,13 @@ const api = {
     runPublishCheck: (chapterId: number) => invokeIpc('chapter:runPublishCheck', chapterId),
   },
 
+  chapterBatch: {
+    startAutoGenerate: (novelId: number, options: unknown) => invokeIpc('chapterBatch:startAutoGenerate', novelId, options),
+    getAutoGenerateStatus: (taskId: number) => invokeIpc('chapterBatch:getAutoGenerateStatus', taskId),
+    getLatestAutoGenerateTask: (novelId: number) => invokeIpc('chapterBatch:getLatestAutoGenerateTask', novelId),
+    resumeAutoGenerate: (taskId: number) => invokeIpc('chapterBatch:resumeAutoGenerate', taskId),
+  },
+
   writeback: {
     prepareRun: (chapterId: number, triggerSource?: string) => invokeIpc('writeback:prepareRun', chapterId, triggerSource),
     getCenterData: (chapterId: number, runId?: number) => invokeIpc('writeback:getCenterData', chapterId, runId),
@@ -453,6 +460,7 @@ const api = {
   // Quality Dashboard
   quality: {
     getDashboard: (novelId: number) => invokeIpc('quality:getDashboard', novelId),
+    backfillRecallSnapshots: (novelId: number) => invokeIpc('quality:backfillRecallSnapshots', novelId),
   },
 
   // Embedding / Vector Memory

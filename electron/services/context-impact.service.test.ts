@@ -24,8 +24,21 @@ vi.mock('./quality-dashboard.service', () => ({
     storyPacingAlerts: [],
   })),
   buildHeuristicRecallDiagnostics: vi.fn(() => ({
+    searchedBucketCount: 0,
+    selectedBucketCount: 0,
+    totalHitCount: 0,
+    selectedHitCount: 0,
     staleRecallCount: 0,
+    staleRecallRate: 0,
+    recallDependencyRate: 0,
+    overriddenHitCount: 0,
+    fallbackHitCount: 0,
+    summaryLines: [],
   })),
+}))
+
+vi.mock('./chapter-recall-runtime.service', () => ({
+  listChapterRecallRuntimeMap: vi.fn(() => new Map()),
 }))
 
 import { getDb } from '../database/db'
@@ -43,6 +56,8 @@ import {
   volumeDesigns,
 } from '../database/schema'
 import { buildNovelConsistencyReport } from './consistency.service'
+import { listChapterRecallRuntimeMap } from './chapter-recall-runtime.service'
+import { buildHeuristicRecallDiagnostics } from './quality-dashboard.service'
 import { runChapterPublishCheck } from './context-impact.service'
 
 type TableRows = Map<unknown, Array<Record<string, unknown>>>
@@ -125,7 +140,7 @@ function createBaseRows() {
       title: '第十二章',
       summary: '本章摘要',
       outline: '本章大纲',
-      content: '这是已经完成的正文内容。',
+      content: '夜晚的北门外，林远假意盘问守卫，继续追查失窃药箱。守卫追查他的来路，两人几乎动手。林远趁乱确认药箱被转去旧仓，主线因此向前推进一步，线索也随之升级。\n\n他刚转身，门外又传来急促脚步声，像是有人已经知道了他的发现。',
       continuityStateJson: JSON.stringify({ arc_progress: '主线推进 60%' }),
       reviewNotesJson: reviewNotes,
       aiScoreJson: JSON.stringify({ overall_score: 82 }),
@@ -435,5 +450,152 @@ describe('runChapterPublishCheck', () => {
     expect(result.gateLevel).toBe('blocker')
     expect(result.scoreBreakdown.contractScore).toBeLessThan(80)
     expect(result.scoreBreakdown.totalScore).toBeLessThanOrEqual(59)
+  })
+
+  it('uses正文合同验证 to block chapters that only have structure records but no textual delivery evidence', () => {
+    const rows = createBaseRows()
+    Object.assign((rows.get(chapters) || [])[0], {
+      content: '夜色很沉，林远站在北门外想起失窃药箱，却没有继续行动。守卫看了他一眼，气氛发冷。\n\n他最终只是回了客栈睡下。',
+    })
+
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+    vi.mocked(buildNovelConsistencyReport).mockReturnValue({ issues: [] } as never)
+
+    const result = runChapterPublishCheck(10)
+
+    expect(result.checklist.find((item) => item.key === 'contract_delivery')?.status).toBe('blocker')
+    expect(result.contractValidation?.status).toBe('blocker')
+    expect(result.contractValidation?.summary).toContain('正文合同验证命中')
+    expect(result.history[0]?.topIssueKeys.some((item) => item.startsWith('contract_delivery:'))).toBe(true)
+  })
+
+  it('blocks publish when recall degradation has continued for three chapters', () => {
+    const rows = createBaseRows()
+    const chapterRows = rows.get(chapters) || []
+    chapterRows.push(
+      { ...chapterRows[0], id: 9, chapterNum: 11, title: '第十一章' },
+      { ...chapterRows[0], id: 8, chapterNum: 10, title: '第十章' },
+    )
+
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+    vi.mocked(buildNovelConsistencyReport).mockReturnValue({ issues: [] } as never)
+    vi.mocked(listChapterRecallRuntimeMap).mockReturnValue(new Map([
+      [10, {
+        chapterId: 10,
+        novelId: 1,
+        recallSnapshot: {
+          retrievalUsed: false,
+          degraded: true,
+          hitCount: 4,
+          selectedHitCount: 0,
+          staleRecallCount: 0,
+          fallbackHitCount: 4,
+          fallbackReason: 'query_embedding_failed',
+          bucketStats: {
+            character: { hitCount: 2, selectedHitCount: 0, staleCount: 0, fallbackHitCount: 2, fallbackReason: 'query_embedding_failed' },
+            rule: { hitCount: 1, selectedHitCount: 0, staleCount: 0, fallbackHitCount: 1, fallbackReason: 'query_embedding_failed' },
+            thread: { hitCount: 1, selectedHitCount: 0, staleCount: 0, fallbackHitCount: 1, fallbackReason: 'query_embedding_failed' },
+          },
+        },
+        recallDiagnostics: {
+          searchedBucketCount: 3,
+          selectedBucketCount: 0,
+          totalHitCount: 4,
+          selectedHitCount: 0,
+          staleRecallCount: 0,
+          staleRecallRate: 0,
+          recallDependencyRate: 0,
+          overriddenHitCount: 0,
+          fallbackHitCount: 4,
+          summaryLines: ['召回降级'],
+        },
+      }],
+      [9, {
+        chapterId: 9,
+        novelId: 1,
+        recallSnapshot: {
+          retrievalUsed: false,
+          degraded: true,
+          hitCount: 3,
+          selectedHitCount: 0,
+          staleRecallCount: 0,
+          fallbackHitCount: 3,
+          fallbackReason: 'query_embedding_failed',
+          bucketStats: {
+            character: { hitCount: 1, selectedHitCount: 0, staleCount: 0, fallbackHitCount: 1, fallbackReason: 'query_embedding_failed' },
+            rule: { hitCount: 1, selectedHitCount: 0, staleCount: 0, fallbackHitCount: 1, fallbackReason: 'query_embedding_failed' },
+            thread: { hitCount: 1, selectedHitCount: 0, staleCount: 0, fallbackHitCount: 1, fallbackReason: 'query_embedding_failed' },
+          },
+        },
+      }],
+      [8, {
+        chapterId: 8,
+        novelId: 1,
+        recallSnapshot: {
+          retrievalUsed: false,
+          degraded: true,
+          hitCount: 2,
+          selectedHitCount: 0,
+          staleRecallCount: 0,
+          fallbackHitCount: 2,
+          fallbackReason: 'query_embedding_failed',
+          bucketStats: {
+            character: { hitCount: 1, selectedHitCount: 0, staleCount: 0, fallbackHitCount: 1, fallbackReason: 'query_embedding_failed' },
+            rule: { hitCount: 1, selectedHitCount: 0, staleCount: 0, fallbackHitCount: 1, fallbackReason: 'query_embedding_failed' },
+            thread: { hitCount: 0, selectedHitCount: 0, staleCount: 0, fallbackHitCount: 0, fallbackReason: 'query_embedding_failed' },
+          },
+        },
+      }],
+    ]))
+
+    const result = runChapterPublishCheck(10)
+
+    expect(result.gateLevel).toBe('blocker')
+    expect(result.checklist.find((item) => item.key === 'recall')?.status).toBe('blocker')
+  })
+
+  it('uses persisted chapter recall runtime snapshots before heuristic fallback', () => {
+    const rows = createBaseRows()
+
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+    vi.mocked(buildNovelConsistencyReport).mockReturnValue({ issues: [] } as never)
+    vi.mocked(listChapterRecallRuntimeMap).mockReturnValue(new Map([
+      [10, {
+        chapterId: 10,
+        novelId: 1,
+        recallSnapshot: {
+          retrievalUsed: false,
+          degraded: true,
+          hitCount: 1,
+          selectedHitCount: 0,
+          staleRecallCount: 0,
+          fallbackHitCount: 1,
+          fallbackReason: 'budget_trimmed',
+          bucketStats: {
+            character: { hitCount: 1, selectedHitCount: 0, staleCount: 0, fallbackHitCount: 1, fallbackReason: 'budget_trimmed' },
+            rule: { hitCount: 0, selectedHitCount: 0, staleCount: 0, fallbackHitCount: 0 },
+            thread: { hitCount: 0, selectedHitCount: 0, staleCount: 0, fallbackHitCount: 0 },
+          },
+        },
+        recallDiagnostics: {
+          searchedBucketCount: 3,
+          selectedBucketCount: 0,
+          totalHitCount: 1,
+          selectedHitCount: 0,
+          staleRecallCount: 0,
+          staleRecallRate: 0,
+          recallDependencyRate: 0,
+          overriddenHitCount: 0,
+          fallbackHitCount: 1,
+          summaryLines: ['历史回填快照'],
+        },
+        recallSnapshotSource: 'backfilled',
+      }],
+    ]))
+
+    const result = runChapterPublishCheck(10)
+
+    expect(buildHeuristicRecallDiagnostics).not.toHaveBeenCalled()
+    expect(result.checklist.find((item) => item.key === 'recall')?.detail).toContain('召回被预算裁剪')
   })
 })

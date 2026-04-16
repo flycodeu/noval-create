@@ -24,6 +24,15 @@ interface GenreHollowRule {
   maxConcreteHits: number
 }
 
+export type AntiAiPromptRuleBucket = 'expression' | 'sentence' | 'structure'
+
+export interface AntiAiPromptRule {
+  code: string
+  bucket: AntiAiPromptRuleBucket
+  avoid: string
+  prefer?: string
+}
+
 const LANGUAGE_PATTERN_RULES: PatternRule[] = [
   // === 高严重度：必须修复 ===
   {
@@ -177,6 +186,122 @@ const GENRE_HOLLOW_RULES: Partial<Record<string, GenreHollowRule>> = {
   },
 }
 
+const BUILTIN_ANTI_AI_PROMPT_RULES: AntiAiPromptRule[] = [
+  {
+    code: 'ai_slogan',
+    bucket: 'expression',
+    avoid: '不要写“命运的齿轮、某种无法言说、灵魂深处、这就是所谓的”这类口号化空词。',
+    prefer: '把情绪和判断落到动作、代价、选择或现场细节里。',
+  },
+  {
+    code: 'ai_opener',
+    bucket: 'sentence',
+    avoid: '不要用“突然、这一刻、就在这时、顷刻之间”做万能起手。',
+    prefer: '直接从可见动作、异常声响、人物决策或场景阻力切入。',
+  },
+  {
+    code: 'ai_action_cliche',
+    bucket: 'sentence',
+    avoid: '不要反复写“深吸一口气、瞳孔骤缩、浑身一震、双拳紧握”这类模板动作。',
+    prefer: '改成角色独有的习惯动作、失误、停顿或身体代价。',
+  },
+  {
+    code: 'ai_emotional_cliche',
+    bucket: 'sentence',
+    avoid: '不要写“心中涌起一股、百感交集、热泪盈眶、心头一紧”这类抽象情绪模板。',
+    prefer: '改成眼神、呼吸、姿势、说话方式或下一步选择。',
+  },
+  {
+    code: 'ai_description_cliche',
+    bucket: 'expression',
+    avoid: '不要堆“阳光洒在、月光洒在、空气中弥漫着、阴影笼罩、光影交错”这类空泛环境描写。',
+    prefer: '只保留影响行动或气氛判断的具体物理细节。',
+  },
+  {
+    code: 'ai_dialogue_filler',
+    bucket: 'sentence',
+    avoid: '不要让对白靠“你知道吗、说实话、事实上、坦白说”这类空话起势。',
+    prefer: '让对白直接带试探、回避、压价、命令或信息交换。',
+  },
+  {
+    code: 'abstract_emotion_packaging',
+    bucket: 'expression',
+    avoid: '不要用“复杂情绪、宿命感、安全感、压迫感、某种情绪”代替真实反应。',
+    prefer: '把情绪拆成身体反应、场景感官和现实后果。',
+  },
+  {
+    code: 'relation_labelization',
+    bucket: 'structure',
+    avoid: '不要只用“宿敌、盟友、恋人、师徒”这种标签直接说明关系。',
+    prefer: '用称呼变化、利益冲突、站位和潜台词去证明关系。',
+  },
+  {
+    code: 'world_rules_hollowing',
+    bucket: 'structure',
+    avoid: '不要只说“制度森严、法则完善、体系严密”而不落到执行方式和代价。',
+    prefer: '写出规则如何约束行动、资源和惩罚。',
+  },
+  {
+    code: 'ai_symmetry',
+    bucket: 'sentence',
+    avoid: '不要滥用“一方面…另一方面… / 既是…也是…更是…”这种刻意对称句式。',
+    prefer: '让句子跟随人物思路自然偏斜，不强做排比平衡。',
+  },
+  {
+    code: 'ai_pseudo_philosophy',
+    bucket: 'structure',
+    avoid: '不要用“或许，这就是 / 也许，这便是 / 这一刻他终于明白”做硬升华。',
+    prefer: '让事件结果和人物余波自己收尾，不替读者总结哲理。',
+  },
+  {
+    code: 'ai_transition_cliche',
+    bucket: 'sentence',
+    avoid: '不要依赖“与此同时、在另一边、不知过了多久、就这样”这类万能转场。',
+    prefer: '用时间节点、空间变化、人物视线或动作承接完成转场。',
+  },
+  {
+    code: 'ai_ending_summary',
+    bucket: 'structure',
+    avoid: '不要用“而这一切才刚刚开始、故事远没有结束、新的篇章即将开始”这类总结式段尾。',
+    prefer: '用未完成动作、风险余波或下一步选择收尾。',
+  },
+]
+
+const GENRE_ANTI_AI_PROMPT_RULES: Partial<Record<string, AntiAiPromptRule[]>> = {
+  zombie: [
+    {
+      code: 'genre_hollowing',
+      bucket: 'structure',
+      avoid: '末世段不要只写绝望气氛和尸潮压迫，不补食水、药品、感染、路线、噪声和守夜细节。',
+      prefer: '把生存链、补给链和信任分配写到决策层。',
+    },
+  ],
+  xianxia: [
+    {
+      code: 'genre_hollowing',
+      bucket: 'structure',
+      avoid: '修仙段不要只喊大道、飞升、机缘，不补境界、资源、宗门秩序和凡俗牵连。',
+      prefer: '把境界差、灵石消耗、门规和修行生态落到情节里。',
+    },
+  ],
+  'modern-mystery': [
+    {
+      code: 'genre_hollowing',
+      bucket: 'structure',
+      avoid: '悬疑段不要只写压抑和诡异，不补证据载体、调查路径、机构阻力和时间线。',
+      prefer: '让线索入口、验证动作和排除过程进入现场。',
+    },
+  ],
+  wuxia: [
+    {
+      code: 'genre_hollowing',
+      bucket: 'structure',
+      avoid: '武侠段不要只写招式和气势，不补江湖规矩、师承门第、名声与行路成本。',
+      prefer: '把门规、人情、盘缠、官府和伤药写进冲突后果。',
+    },
+  ],
+}
+
 function findExcerpt(text: string, pattern: RegExp): string {
   const match = text.match(pattern)
   return match?.[0]?.trim() || ''
@@ -259,6 +384,18 @@ function collectHighFrequencyRepetitions(text: string): TextGuardrailFinding | n
     message: '某些描写词组在本章中高频重复出现，建议替换为同义表达或删减。',
     excerpt: repeated.map(([phrase, count]) => `"${phrase}"×${count}`).join('、'),
   }
+}
+
+export function getBuiltinAntiAiPromptRules(genre?: string): AntiAiPromptRule[] {
+  const genreKey = getBuiltinGenreRules(genre).genreProfile.key
+  const genreRules = GENRE_ANTI_AI_PROMPT_RULES[genreKey] || []
+  const deduped = new Map<string, AntiAiPromptRule>()
+  ;[...BUILTIN_ANTI_AI_PROMPT_RULES, ...genreRules].forEach((rule) => {
+    if (!deduped.has(rule.code)) {
+      deduped.set(rule.code, rule)
+    }
+  })
+  return [...deduped.values()]
 }
 
 export function collectQualityGuardrailFindings(text: string, genre?: string): TextGuardrailFinding[] {

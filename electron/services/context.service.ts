@@ -5,7 +5,11 @@ import { buildWorldRulesSummary, parseWorldRulesJson } from '../../src/shared/ge
 import { buildProjectBriefSummary, parseProjectBriefDocument } from '../../src/shared/project-brief'
 import { parseFactionExternalRelations } from '../../src/shared/factions'
 import { parseGlossaryAliases } from '../../src/shared/glossary'
-import { findSimilarFragments, type SimilarFragmentHit } from './embedding.service'
+import {
+  searchSimilarFragments,
+  type SimilarFragmentFallbackReason,
+  type SimilarFragmentHit,
+} from './embedding.service'
 import { buildStyleFingerprintPromptSection, listStyleFingerprints } from './style-analysis.service'
 import {
   buildEndgameDesignSummary,
@@ -20,6 +24,7 @@ import {
 import { buildThemeVoiceSummary, parseThemeVoiceDocument } from '../../src/shared/theme-voice'
 import { buildWritingContractSummary } from '../../src/shared/writing-contract'
 import { buildStoryMemoryPromptSummary } from './story-memory.service'
+import { buildAntiAiHardConstraintContext, getPromotedAntiAiRulesForChapter } from './anti-ai-rule.service'
 import { ensureStoryStructure } from './story-structure.service'
 import { resolveModelRuntimeBudget } from './model.service'
 import { throwUserFacingError } from '../utils/user-facing-error'
@@ -103,6 +108,7 @@ export type HardConstraintSourceLabel =
   | 'itemSummary'
   | 'openLoops'
   | 'continuityNotes'
+  | 'antiAiRules'
 
 export interface BuildChapterContextOptions {
   totalBudget?: number
@@ -244,6 +250,7 @@ export interface HardConstraintEntry {
 export type PreviousChapterSampleSegmentType =
   | 'full_text'
   | 'opening'
+  | 'middle'
   | 'summary'
   | 'continuity'
   | 'scene_anchor'
@@ -324,6 +331,7 @@ export interface ChapterContext extends ChapterContextParts {
   droppedConstraintCount: number
   previousChapterSampleReport: PreviousChapterSampleReport
   softContextDecisions: ContextDecisionEntry[]
+  recallSnapshot: RecallSnapshot
   recallDiagnostics: RecallDiagnostics
   recalledMemorySources: RecallMemorySource[]
 }
@@ -359,6 +367,7 @@ export interface ChapterContextRawData {
   activeThreadPressureCount: number
   contextParts: ChapterContextParts
   previousChapterSampleReport: PreviousChapterSampleReport
+  recallSnapshot: RecallSnapshot
   recallDiagnostics: RecallDiagnostics
   recalledMemorySources: RecallMemorySource[]
 }
@@ -436,9 +445,14 @@ function dedupe(values: string[], limit?: number): string[] {
   return result
 }
 
-type RecallBucketKey = 'character' | 'rule' | 'thread'
+export type RecallBucketKey = 'character' | 'rule' | 'thread'
 
 export type RecallSearchMode = 'vector' | 'keyword'
+
+export type RecallFallbackReason =
+  | SimilarFragmentFallbackReason
+  | 'only_stale_hits'
+  | 'budget_trimmed'
 
 export interface RecallMemorySource {
   bucket: RecallBucketKey
@@ -465,6 +479,25 @@ export interface RecallDiagnostics {
   overriddenHitCount: number
   fallbackHitCount: number
   summaryLines: string[]
+}
+
+export interface RecallBucketStats {
+  hitCount: number
+  selectedHitCount: number
+  staleCount: number
+  fallbackHitCount: number
+  fallbackReason?: RecallFallbackReason
+}
+
+export interface RecallSnapshot {
+  retrievalUsed: boolean
+  degraded: boolean
+  hitCount: number
+  selectedHitCount: number
+  staleRecallCount: number
+  fallbackHitCount: number
+  fallbackReason?: RecallFallbackReason
+  bucketStats: Record<RecallBucketKey, RecallBucketStats>
 }
 
 interface RecallQueryBucket {
@@ -617,7 +650,8 @@ function resolveHardConstraintBudget(
   return Math.max(800, baseByProfile[promptProfile] + complexityOffset[chapterComplexity] + largeNovelOffset)
 }
 
-function buildHardConstraintDrafts(parts: ChapterContextParts): HardConstraintDraft[] {
+function buildHardConstraintDrafts(rawData: ChapterContextRawData): HardConstraintDraft[] {
+  const { contextParts: parts } = rawData
   const relationLines = selectConstraintLines(parts.relationSummary, {
     keywords: RELATION_CONSTRAINT_KEYWORDS,
     fallbackLines: 1,
@@ -636,6 +670,13 @@ function buildHardConstraintDrafts(parts: ChapterContextParts): HardConstraintDr
     keywords: HARD_CONSTRAINT_SIGNAL_KEYWORDS,
     fallbackLines: 1,
     maxLines: 3,
+  })
+  const antiAiConstraintText = buildAntiAiHardConstraintContext({
+    genre: rawData.profile.genre,
+    settingsJson: rawData.novel.settingsJson,
+    promotedRules: rawData.currentChapter?.chapterNum
+      ? getPromotedAntiAiRulesForChapter(rawData.novel.id, rawData.currentChapter.chapterNum)
+      : [],
   })
 
   const drafts: HardConstraintDraft[] = [
@@ -673,6 +714,11 @@ function buildHardConstraintDrafts(parts: ChapterContextParts): HardConstraintDr
       label: 'continuityNotes',
       title: '必须承接',
       content: buildConstraintSection('必须承接', continuityLines),
+    },
+    {
+      label: 'antiAiRules',
+      title: '反 AI 味硬约束',
+      content: antiAiConstraintText,
     },
   ]
 
@@ -1090,6 +1136,56 @@ function buildEmptyRecallDiagnostics(summaryLines: string[] = []): RecallDiagnos
   }
 }
 
+function createEmptyRecallBucketStats(): Record<RecallBucketKey, RecallBucketStats> {
+  return {
+    character: {
+      hitCount: 0,
+      selectedHitCount: 0,
+      staleCount: 0,
+      fallbackHitCount: 0,
+    },
+    rule: {
+      hitCount: 0,
+      selectedHitCount: 0,
+      staleCount: 0,
+      fallbackHitCount: 0,
+    },
+    thread: {
+      hitCount: 0,
+      selectedHitCount: 0,
+      staleCount: 0,
+      fallbackHitCount: 0,
+    },
+  }
+}
+
+function createEmptyRecallSnapshot(fallbackReason?: RecallFallbackReason): RecallSnapshot {
+  return {
+    retrievalUsed: false,
+    degraded: Boolean(fallbackReason),
+    hitCount: 0,
+    selectedHitCount: 0,
+    staleRecallCount: 0,
+    fallbackHitCount: 0,
+    fallbackReason,
+    bucketStats: createEmptyRecallBucketStats(),
+  }
+}
+
+function pickRecallFallbackReason(reasons: Array<RecallFallbackReason | undefined>): RecallFallbackReason | undefined {
+  const rank: Record<RecallFallbackReason, number> = {
+    embedding_service_failed: 6,
+    query_embedding_failed: 5,
+    disabled_by_config: 4,
+    budget_trimmed: 3,
+    only_stale_hits: 2,
+    no_hits: 1,
+  }
+  return reasons
+    .filter((reason): reason is RecallFallbackReason => Boolean(reason))
+    .sort((left, right) => rank[right] - rank[left])[0]
+}
+
 function formatRecalledMemory(sources: RecallMemorySource[]): string {
   const labels: Record<RecallBucketKey, string> = {
     character: '角色/关系召回',
@@ -1110,21 +1206,30 @@ function formatRecalledMemory(sources: RecallMemorySource[]): string {
 }
 
 function buildRecallSnapshot(
-  bucketResults: Array<{ bucket: RecallBucketKey; hits: RecallHit[] }>,
+  bucketResults: Array<{ bucket: RecallBucketKey; hits: RecallHit[]; fallbackReason?: RecallFallbackReason }>,
 ): {
   recalledMemory: string
   recalledMemorySources: RecallMemorySource[]
   recallDiagnostics: RecallDiagnostics
+  recallSnapshot: RecallSnapshot
 } {
   const sources: RecallMemorySource[] = []
   const seen = new Set<string>()
   const selectedKeys = new Set<string>()
+  const bucketStats = createEmptyRecallBucketStats()
   let selectedBucketCount = 0
 
   bucketResults.forEach((result) => {
     const significant = result.hits.filter((hit) => !hit.stale && !hit.overriddenByConstraint && hit.similarity > 0.08)
     const fallback = result.hits.filter((hit) => !hit.stale && !hit.overriddenByConstraint && hit.similarity > 0)
     const selected = significant.length > 0 ? significant.slice(0, 2) : fallback.slice(0, 1)
+    bucketStats[result.bucket] = {
+      hitCount: result.hits.length,
+      selectedHitCount: selected.length,
+      staleCount: result.hits.filter((hit) => hit.stale).length,
+      fallbackHitCount: result.hits.filter((hit) => hit.searchMode === 'keyword').length,
+      fallbackReason: result.fallbackReason,
+    }
     if (selected.length > 0) {
       selectedBucketCount += 1
     }
@@ -1165,6 +1270,12 @@ function buildRecallSnapshot(
   const fallbackHitCount = sources.filter((source) => source.searchMode === 'keyword').length
   const staleRecallRate = totalHitCount > 0 ? Math.round((staleRecallCount / totalHitCount) * 100) : 0
   const recallDependencyRate = totalHitCount > 0 ? Math.round((selectedHitCount / totalHitCount) * 100) : 0
+  const recalledMemory = formatRecalledMemory(sources)
+  const fallbackReason = pickRecallFallbackReason([
+    ...bucketResults.map((result) => result.fallbackReason),
+    selectedHitCount === 0 && staleRecallCount > 0 ? 'only_stale_hits' : undefined,
+    totalHitCount === 0 ? 'no_hits' : undefined,
+  ])
   const recallDiagnostics: RecallDiagnostics = {
     searchedBucketCount,
     selectedBucketCount,
@@ -1188,11 +1299,33 @@ function buildRecallSnapshot(
         : '当前没有片段被硬约束直接覆盖。',
     ].filter(Boolean),
   }
+  const recallSnapshot: RecallSnapshot = {
+    retrievalUsed: Boolean(recalledMemory.trim()),
+    degraded: Boolean(fallbackReason),
+    hitCount: totalHitCount,
+    selectedHitCount,
+    staleRecallCount,
+    fallbackHitCount,
+    fallbackReason,
+    bucketStats,
+  }
 
   return {
-    recalledMemory: formatRecalledMemory(sources),
+    recalledMemory,
     recalledMemorySources: sources,
     recallDiagnostics,
+    recallSnapshot,
+  }
+}
+
+function finalizeRecallSnapshot(snapshot: RecallSnapshot, recalledMemory: string): RecallSnapshot {
+  if (!snapshot.retrievalUsed) return snapshot
+  if (recalledMemory.trim()) return snapshot
+  return {
+    ...snapshot,
+    retrievalUsed: false,
+    degraded: true,
+    fallbackReason: 'budget_trimmed',
   }
 }
 
@@ -2240,6 +2373,21 @@ function formatPreviousChapterContextText(segments: PreviousChapterSampleSegment
     .trim()
 }
 
+const SOURCE_DERIVED_PREVIOUS_CHAPTER_SEGMENT_TYPES = new Set<PreviousChapterSampleSegmentType>([
+  'full_text',
+  'opening',
+  'middle',
+  'tail',
+])
+
+function calculatePreviousChapterSampledChars(segments: PreviousChapterSampleSegment[]): number {
+  return segments.reduce((sum, segment) => (
+    SOURCE_DERIVED_PREVIOUS_CHAPTER_SEGMENT_TYPES.has(segment.type)
+      ? sum + segment.chars
+      : sum
+  ), 0)
+}
+
 export function buildPreviousChapterContextFeed(previousChapter?: PreviousChapterFeedSource | null): {
   previousChapterContext: string
   lastChapterEnding: string
@@ -2316,7 +2464,7 @@ export function buildPreviousChapterContextFeed(previousChapter?: PreviousChapte
 
     let composed = formatPreviousChapterContextText(segments)
     if (composed.length < 1000 && sourceChars > 0) {
-      pushSegment('scene_anchor', '上章中段片段', extractTextWindow(sourceText, 'middle', 220))
+      pushSegment('middle', '上章中段片段', extractTextWindow(sourceText, 'middle', 220))
       composed = formatPreviousChapterContextText(segments)
     }
     if (composed.length > 1800) {
@@ -2336,7 +2484,7 @@ export function buildPreviousChapterContextFeed(previousChapter?: PreviousChapte
     extractTextWindow(sourceText, 'tail', 300),
     seedText,
   ].filter(Boolean).join('\n')
-  const sampledChars = previousChapterContext.length
+  const sampledChars = calculatePreviousChapterSampledChars(segments)
   const coverageBase = sourceChars > 0
     ? Math.min(sampledChars, sourceChars)
     : 0
@@ -2631,6 +2779,7 @@ export async function collectChapterContextRawData(
       recalledMemory: '', // placeholder, filled below
     },
     previousChapterSampleReport: previousChapterFeed.previousChapterSampleReport,
+    recallSnapshot: createEmptyRecallSnapshot(),
     recallDiagnostics: buildEmptyRecallDiagnostics(['召回尚未执行。']),
     recalledMemorySources: [] as RecallMemorySource[],
   }
@@ -2673,18 +2822,29 @@ export async function collectChapterContextRawData(
         result.contextParts.dueForeshadows,
         result.contextParts.continuityNotes,
       ].filter(Boolean).join('\n')
-      const bucketResults = await Promise.all(recallBuckets.map(async (bucket) => ({
-        bucket: bucket.bucket,
-        hits: (await findSimilarFragments(novelId, bucket.query, bucket.topK, novel.modelConfigId || undefined))
-          .filter((hit) => hit.chapterNum < chapterNum)
-          .map((hit) => enrichRecallHits([hit], bucket.bucket, chapterNum, entityFreshnessMap, constraintText)[0]),
-      })))
+      const bucketResults = await Promise.all(recallBuckets.map(async (bucket) => {
+        const searchResult = await searchSimilarFragments(novelId, bucket.query, bucket.topK, novel.modelConfigId || undefined)
+        return {
+          bucket: bucket.bucket,
+          fallbackReason: searchResult.fallbackReason,
+          hits: searchResult.hits
+            .filter((hit) => hit.chapterNum < chapterNum)
+            .map((hit) => enrichRecallHits([hit], bucket.bucket, chapterNum, entityFreshnessMap, constraintText)[0]),
+        }
+      }))
       const recallSnapshot = buildRecallSnapshot(bucketResults)
       result.contextParts.recalledMemory = recallSnapshot.recalledMemory
+      result.recallSnapshot = recallSnapshot.recallSnapshot
       result.recallDiagnostics = recallSnapshot.recallDiagnostics
       result.recalledMemorySources = recallSnapshot.recalledMemorySources
+    } else {
+      result.recallSnapshot = createEmptyRecallSnapshot('no_hits')
+      result.recallDiagnostics = buildEmptyRecallDiagnostics([
+        '当前章节没有形成可执行的召回查询桶，召回已跳过。',
+      ])
     }
   } catch {
+    result.recallSnapshot = createEmptyRecallSnapshot('embedding_service_failed')
     result.recallDiagnostics = buildEmptyRecallDiagnostics([
       '向量召回当前不可用，已自动降级，不影响硬约束与结构化状态注入。',
     ])
@@ -2727,7 +2887,7 @@ export function allocateChapterContext(
     ? Math.max(0, remainingContextBudget)
     : Math.max(3600, remainingContextBudget)
   const priorityMap = createStagePriorityMap(promptProfile, chapterComplexity, targetWords, rawData.chapterRows.length)
-  const hardConstraintDrafts = buildHardConstraintDrafts(rawData.contextParts)
+  const hardConstraintDrafts = buildHardConstraintDrafts(rawData)
   const desiredHardConstraintBudget = resolveHardConstraintBudget(promptProfile, chapterComplexity, targetWords)
   const minimumSoftContextBudget = Math.min(2400, Math.max(1200, Math.floor(contextBudget * 0.28)))
   const initialHardConstraintBudget = contextBudget <= minimumSoftContextBudget
@@ -2873,6 +3033,7 @@ export function allocateChapterContext(
     droppedConstraintCount,
     previousChapterSampleReport: rawData.previousChapterSampleReport,
     softContextDecisions,
+    recallSnapshot: finalizeRecallSnapshot(rawData.recallSnapshot, softAllocation.allocated.recalledMemory || ''),
     recallDiagnostics: rawData.recallDiagnostics,
     recalledMemorySources: rawData.recalledMemorySources,
   }

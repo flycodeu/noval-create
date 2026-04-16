@@ -17,6 +17,7 @@ import AIScorePanel from '../../../components/AIScorePanel'
 import type {
   Chapter,
   ChapterContractAudit,
+  ChapterContractValidationResult,
   ChapterContextPreview,
   ChapterPublishCheck,
   ChapterSegment,
@@ -87,6 +88,7 @@ interface ReviewNotes {
     driftRate: number
     reason: string
   }>
+  contract_validation?: ChapterContractValidationResult
 }
 interface TextSelectionSnapshot {
   start: number
@@ -1459,6 +1461,7 @@ export default function Writing({ novelId }: Props) {
   const reviewInsightItems = [
     reviewNotes?.summary ? `摘要回看：${reviewNotes.summary}` : '',
     reviewNotes?.revision_brief ? `修订摘要：${reviewNotes.revision_brief}` : '',
+    reviewNotes?.contract_validation?.summary ? `合同兑现：${reviewNotes.contract_validation.summary}` : '',
     ...(reviewNotes?.critical_fixes || []).map((item) => `关键修订：${item}`),
     ...(reviewNotes?.continuity_risks || []).map((item) => `连续性风险：${item}`),
     ...(reviewNotes?.arc_progress_risks || []).map((item) => `弧推进风险：${item}`),
@@ -1471,6 +1474,10 @@ export default function Writing({ novelId }: Props) {
     ...(reviewNotes?.genre_hollowing_risks || []).map((item) => `体裁空心化：${item}`),
     reviewNotes?.dialogue_fingerprint_summary ? `对白辨识度：${reviewNotes.dialogue_fingerprint_summary}` : '',
     ...(reviewNotes?.dialogue_homogenization_risks || []).map((item) => `对白同质化：${item}`),
+    ...(reviewNotes?.contract_validation?.itemResults || [])
+      .filter((item) => item.verdict !== 'pass')
+      .slice(0, 3)
+      .map((item) => `合同缺口：${item.segmentTitle ? `${item.segmentTitle} · ` : ''}${item.expected}`),
     reviewNotes?.protagonist_setback && reviewNotes.protagonist_setback !== 'none'
       ? `主角受挫：${reviewNotes.protagonist_setback}${reviewNotes.setback_summary ? ` · ${reviewNotes.setback_summary}` : ''}`
       : '',
@@ -1487,6 +1494,7 @@ export default function Writing({ novelId }: Props) {
 
   const productionBriefItems = [
     reviewNotes?.revision_brief ? `定稿方向：${reviewNotes.revision_brief}` : '',
+    ...(reviewNotes?.contract_validation?.rewriteHints || []).slice(0, 2).map((item) => `合同修补：${item}`),
     ...(reviewNotes?.critical_fixes || []).slice(0, 2).map((item) => `先改：${item}`),
     ...(reviewNotes?.arc_progress_risks || []).slice(0, 2).map((item) => `弧推进：${item}`),
     ...(reviewNotes?.coherence_risks || []).slice(0, 2).map((item) => `读者易乱：${item}`),
@@ -1787,6 +1795,9 @@ export default function Writing({ novelId }: Props) {
                 ))}
               </div>
               <div className="novel-copy-block">合同对账：{publishCheck.contractAudit.summary}</div>
+              {publishCheck.contractValidation?.summary ? (
+                <div className="novel-copy-block">正文兑现：{publishCheck.contractValidation.summary}</div>
+              ) : null}
               {gateReportExpanded ? (
                 <div className="novel-gate-report__sections">
                   {publishCheckSections.map((section) => (
@@ -2723,17 +2734,29 @@ function RecallDiagnosticsCard({ preview }: { preview: ChapterContextPreview | n
   }
 
   const diagnostics = preview.recallDiagnostics
+  const snapshot = preview.recallSnapshot
   const freshSources = preview.recalledMemorySources.filter((source) => !source.stale && !source.overriddenByConstraint).slice(0, 4)
   const staleSources = preview.recalledMemorySources.filter((source) => source.stale).slice(0, 4)
+  const bucketLines = Object.entries(snapshot.bucketStats)
+    .map(([bucket, stats]) => `${bucket}：命中 ${stats.hitCount} / 采用 ${stats.selectedHitCount}${stats.fallbackReason ? ` / ${stats.fallbackReason}` : ''}`)
 
   return (
     <div style={{ display: 'grid', gap: 10 }}>
       <div className="novel-insight-list">
+        <div className="novel-insight-list__item">{snapshot.retrievalUsed ? '本章已实际使用召回' : '本章未实际使用召回'}</div>
+        <div className="novel-insight-list__item">命中 {snapshot.hitCount}</div>
         <div className="novel-insight-list__item">召回依赖率 {diagnostics.recallDependencyRate}%</div>
         <div className="novel-insight-list__item">过期召回率 {diagnostics.staleRecallRate}%</div>
         <div className="novel-insight-list__item">可用片段 {diagnostics.selectedHitCount}</div>
         <div className="novel-insight-list__item">过期拦截 {diagnostics.staleRecallCount}</div>
       </div>
+      <StringList
+        items={[
+          snapshot.fallbackReason ? `降级原因：${snapshot.fallbackReason}` : '当前未记录召回降级原因。',
+          ...bucketLines,
+        ]}
+        empty="当前还没有召回桶统计。"
+      />
       <StringList items={diagnostics.summaryLines} empty="当前还没有召回诊断摘要。" />
       <StringList
         items={freshSources.map((source) => `${source.sourceLabel}：${source.summary}`)}

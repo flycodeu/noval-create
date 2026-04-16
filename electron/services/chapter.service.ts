@@ -49,6 +49,10 @@ import {
   runChapterPublishCheck,
   validateChapterContractsForGeneration,
 } from './context-impact.service'
+import {
+  normalizeChapterContractValidationResult,
+  validateChapterContractDelivery,
+} from './chapter-contract-validator.service'
 import { refreshStoryMemoryCheckpoints } from './story-memory.service'
 import {
   ensureStoryStructure,
@@ -81,6 +85,9 @@ import {
   getStoryArcStatusContext,
   getStoryArcWarningsForChapter,
 } from './story-arc-progress.service'
+import { persistChapterRecallRuntimeSnapshot } from './chapter-recall-runtime.service'
+import { persistAntiAiRuleHits } from './anti-ai-rule.service'
+import type { ChapterContractValidationResult } from '../../src/types'
 
 interface ChapterSummaryData {
   summary: string
@@ -155,6 +162,7 @@ interface ChapterReviewNotes {
     driftRate: number
     reason: string
   }>
+  contract_validation?: ChapterContractValidationResult
 }
 
 type ChapterPipelineRole = 'planner' | 'writer' | 'critic' | 'rewriter' | 'canonizer' | 'finalize'
@@ -203,6 +211,8 @@ interface ChapterPipelineSnapshot {
   canonRunId?: number
   totalTokensUsed: number
   totalDurationMs: number
+  recallSnapshot?: ChapterContext['recallSnapshot']
+  recallDiagnostics?: ChapterContext['recallDiagnostics']
   recoveryHint?: TaskRecoveryHint
   failureCode?: ChapterPipelineFailureCode
   rewriteScope?: ChapterRewriteScope
@@ -1145,6 +1155,7 @@ function normalizeReviewNotes(raw: unknown): ChapterReviewNotes {
         })
         .filter((item) => item.characterId > 0 && item.characterName)
       : [],
+    contract_validation: normalizeChapterContractValidationResult(record.contract_validation) || undefined,
   }
 }
 
@@ -1181,7 +1192,8 @@ function hasReviewNotes(notes: ChapterReviewNotes): boolean {
     notes.dialogue_homogenization_risks.length > 0 ||
     Boolean(notes.dialogue_fingerprint_summary) ||
     notes.cross_character_similarity.length > 0 ||
-    notes.dialogue_drift_alerts.length > 0,
+    notes.dialogue_drift_alerts.length > 0 ||
+    Boolean(notes.contract_validation && notes.contract_validation.itemResults.length > 0),
   )
 }
 
@@ -1226,6 +1238,7 @@ function buildFallbackReviewNotes(consistencyNotes: string): ChapterReviewNotes 
     dialogue_fingerprint_summary: '',
     cross_character_similarity: [],
     dialogue_drift_alerts: [],
+    contract_validation: undefined,
   }
 }
 
@@ -1266,10 +1279,65 @@ function formatReviewNotes(notes: ChapterReviewNotes): string {
     notes.dialogue_drift_alerts.length > 0
       ? `角色语音漂移：\n- ${notes.dialogue_drift_alerts.map((item) => `${item.characterName} (${item.driftRate})：${item.reason}`).join('\n- ')}`
       : '',
+    notes.contract_validation?.summary ? `合同兑现验证：${notes.contract_validation.summary}` : '',
+    notes.contract_validation && notes.contract_validation.itemResults.some((item) => item.verdict !== 'pass')
+      ? `合同失败项：\n- ${notes.contract_validation.itemResults
+        .filter((item) => item.verdict !== 'pass')
+        .slice(0, 6)
+        .map((item) => `${item.segmentTitle ? `${item.segmentTitle} · ` : ''}${item.expected} [${item.verdict}]${item.evidenceExcerpt ? `：${item.evidenceExcerpt}` : ''}`)
+        .join('\n- ')}`
+      : '',
+    notes.contract_validation?.rewriteHints.length
+      ? `合同重写提示：\n- ${notes.contract_validation.rewriteHints.join('\n- ')}`
+      : '',
     `严重等级：${notes.severity}`,
     `是否需要重写：${notes.rewrite_required ? '是' : '否'}`,
     notes.revision_brief ? `修订摘要：${notes.revision_brief}` : '',
   ].filter(Boolean).join('\n\n')
+}
+
+function applyContractValidationToReviewNotes(
+  reviewNotes: ChapterReviewNotes,
+  contractValidation: ChapterContractValidationResult,
+): ChapterReviewNotes {
+  const failedItems = contractValidation.itemResults.filter((item) => item.verdict !== 'pass')
+  const criticalFixes = failedItems
+    .filter((item) => item.verdict === 'missing' || item.verdict === 'contradicted')
+    .map((item) => item.rewriteHint)
+  const arcRisks = failedItems
+    .filter((item) => item.contractItemType === 'chapter_goal' || item.contractItemType === 'story_thread_progress')
+    .map((item) => `${item.expected}：${item.verdict === 'weak' ? '正文只有提及，没有形成明确推进。' : '正文还没有形成可验证的兑现证据。'}`)
+  const hookRisks = failedItems
+    .filter((item) => item.contractItemType === 'chapter_hook')
+    .map((item) => '章尾钩子偏弱或缺失，收束过平，追读驱动力不足。')
+  const missingPayoffs = failedItems
+    .filter((item) => item.contractItemType === 'foreshadow_delivery')
+    .map((item) => `${item.expected}：${item.verdict === 'weak' ? '目前只有提及，没有埋设/推进/回收或延期说明。' : '正文未处理该伏笔。'}`)
+  const coherenceRisks = failedItems
+    .filter((item) => item.contractItemType === 'scene_result_state')
+    .map((item) => `${item.segmentTitle || '场景'} 缺少清晰结果状态，场景结尾没有把变化落地。`)
+  const realismRisks = failedItems
+    .filter((item) => item.contractItemType === 'scene_conflict')
+    .map((item) => `${item.segmentTitle || '场景'} 冲突不够可见，阻力更像说明而不是事件。`)
+
+  return {
+    ...reviewNotes,
+    critical_fixes: dedupeTextList([...criticalFixes, ...reviewNotes.critical_fixes]),
+    arc_progress_risks: dedupeTextList([...reviewNotes.arc_progress_risks, ...arcRisks]),
+    reader_hook_risks: dedupeTextList([...reviewNotes.reader_hook_risks, ...hookRisks]),
+    missing_payoffs: dedupeTextList([...reviewNotes.missing_payoffs, ...missingPayoffs]),
+    coherence_risks: dedupeTextList([...reviewNotes.coherence_risks, ...coherenceRisks]),
+    realism_risks: dedupeTextList([...reviewNotes.realism_risks, ...realismRisks]),
+    summary: reviewNotes.summary || contractValidation.summary,
+    severity: contractValidation.status === 'blocker'
+      ? mergeSeverity(reviewNotes.severity, 'high')
+      : contractValidation.status === 'warning'
+        ? mergeSeverity(reviewNotes.severity, 'medium')
+        : reviewNotes.severity,
+    rewrite_required: reviewNotes.rewrite_required || contractValidation.status === 'blocker',
+    revision_brief: appendRevisionBrief(reviewNotes.revision_brief, contractValidation.rewriteHints),
+    contract_validation: contractValidation,
+  }
 }
 
 function findingSeverityToReviewSeverity(severity: 'low' | 'medium' | 'high'): ReviewSeverity {
@@ -2750,6 +2818,24 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
     const currentArcRow = rawContext.currentArc
     const latestArcProgressNote = getLatestArcProgressNote(chapter.novelId, currentArcRow, chapter.chapterNum)
     const structuralAlertsSummary = buildStructuralAlertsSummary(chapter.novelId, chapter.chapterNum, chapter.volumeId)
+    snapshot = {
+      ...snapshot,
+      recallSnapshot: draftContext.recallSnapshot,
+      recallDiagnostics: draftContext.recallDiagnostics,
+    }
+    try {
+      persistChapterRecallRuntimeSnapshot({
+        novelId: chapter.novelId,
+        chapterId,
+        recallSnapshot: draftContext.recallSnapshot,
+        recallDiagnostics: draftContext.recallDiagnostics,
+        source: 'runtime',
+        sourceTaskId: workflowTaskId,
+        contextVersion: chapter.contextVersion || novel.contextVersion || 1,
+      })
+    } catch (error) {
+      console.warn(`[chapter] failed to persist recall runtime snapshot for chapter ${chapterId}:`, error)
+    }
 
     updateChapter(chapterId, {
       status: 'writing',
@@ -3011,6 +3097,11 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
 
     reviewNotes = enhanceReviewNotesWithGuardrails(reviewNotes, draftContent, profile.genre)
     reviewNotes = applyDialogueAnalysisToReviewNotes(reviewNotes, chapter.novelId, chapter.chapterNum, draftContent)
+    reviewNotes = applyContractValidationToReviewNotes(reviewNotes, validateChapterContractDelivery({
+      chapterId,
+      content: draftContent,
+      reviewNotes,
+    }))
     updateChapter(chapterId, { reviewNotesJson: JSON.stringify(reviewNotes) })
     finishRoleTask('critic', criticTaskId, 'Critic 审校完成，已生成本章修订意见。')
 
@@ -3106,6 +3197,18 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
       chapter.chapterNum,
       repaired.content,
     )
+    const finalReviewNotes = applyContractValidationToReviewNotes(repairedReviewNotes, validateChapterContractDelivery({
+      chapterId,
+      content: repaired.content,
+      reviewNotes: repairedReviewNotes,
+    }))
+    persistAntiAiRuleHits({
+      novelId: chapter.novelId,
+      chapterId,
+      chapterNum: chapter.chapterNum,
+      content: repaired.content,
+      genre: profile.genre,
+    })
     const remainingGuardrailFindings = collectQualityGuardrailFindings(repaired.content, profile.genre)
     if (remainingGuardrailFindings.length > 0 && shouldForceRepair(remainingGuardrailFindings)) {
       failRoleTask('rewriter', rewriterTaskId, new ChapterPipelineStageError(
@@ -3124,7 +3227,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
 
     updateChapter(chapterId, {
       content: repaired.content,
-      reviewNotesJson: JSON.stringify(repairedReviewNotes),
+      reviewNotesJson: JSON.stringify(finalReviewNotes),
       status: 'draft',
     }, {
       skipStaleTracking: true,
@@ -3296,6 +3399,7 @@ export async function getChapterContextPreview(chapterId: number): Promise<{
   previousChapterContext: string
   previousChapterSampleReport: ChapterContext['previousChapterSampleReport']
   recalledMemory: string
+  recallSnapshot: ChapterContext['recallSnapshot']
   recallDiagnostics: ChapterContext['recallDiagnostics']
   recalledMemorySources: ChapterContext['recalledMemorySources']
   stages: Array<{
@@ -3325,6 +3429,7 @@ export async function getChapterContextPreview(chapterId: number): Promise<{
     previousChapterContext: rawContext.contextParts.previousChapterContext,
     previousChapterSampleReport: rawContext.previousChapterSampleReport,
     recalledMemory: contexts.draft.recalledMemory,
+    recallSnapshot: contexts.draft.recallSnapshot,
     recallDiagnostics: contexts.draft.recallDiagnostics,
     recalledMemorySources: contexts.draft.recalledMemorySources,
     stages: orderedStages.map((stage) => {

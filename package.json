@@ -2,6 +2,9 @@
   "name": "novelforge",
   "version": "1.0.0",
   "description": "AI 小说智能创作平台",
+  "novelforgeRuntimeNotes": {
+    "nativeScripts": "Migration safety should be run via `npm run test:migrations` (Electron runtime). Direct `node scripts/migration-safety.test.cjs` execution is diagnostic-only and may hit better-sqlite3 ABI mismatch."
+  },
   "main": "out/main/main.js",
   "scripts": {
     "dev": "electron-vite dev",

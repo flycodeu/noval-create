@@ -43,6 +43,7 @@ export type TaskType =
   | 'timeline_auto_generate'
   | 'story_thread_auto_generate'
   | 'subplot_auto_generate'
+  | 'chapter_batch_generate'
   | 'generate_arcs'
   | 'generate_items'
   | 'generate_timeline'

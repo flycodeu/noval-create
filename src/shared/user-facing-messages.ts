@@ -377,6 +377,7 @@ export const USER_FACING_MESSAGES = {
   'batch.timelinePausedExists': '当前已有暂停中的时间轴批量任务，请先继续或取消。',
   'batch.threadPausedExists': '当前已有暂停中的故事线程批量任务，请先继续或取消。',
   'batch.subplotPausedExists': '当前已有暂停中的支线批量任务，请先继续或取消。',
+  'batch.chapterPausedExists': '当前已有暂停中的章节批量任务，请先继续或取消。',
 } as const
 
 export type UserFacingMessageKey = keyof typeof USER_FACING_MESSAGES

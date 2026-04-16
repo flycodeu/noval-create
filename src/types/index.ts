@@ -1275,6 +1275,24 @@ export interface StoryThreadAutoGenerateStatus extends BatchAutoGenerateStatusBa
   warnings: string[]
 }
 
+export interface ChapterBatchGenerateOptions {
+  chapterIds: number[]
+  batchSize?: number
+}
+
+export interface ChapterBatchAutoGenerateStatus extends BatchAutoGenerateStatusBase {
+  chapterIds: number[]
+  completedChapterIds: number[]
+  failedChapterIds: number[]
+  warnings: string[]
+  currentChapterId?: number
+  currentChapterNum?: number
+  pauseReason?: string
+  blockedChapterId?: number
+  blockedTaskId?: number
+  consecutiveRecallFallbackChapters: number
+}
+
 export interface SubplotAutoGenerateRequest {
   novelId: number
   subplotCount: number
@@ -1380,6 +1398,7 @@ export interface SoftContextBudgetUsage {
 export type PreviousChapterSampleSegmentType =
   | 'full_text'
   | 'opening'
+  | 'middle'
   | 'summary'
   | 'continuity'
   | 'scene_anchor'
@@ -1484,6 +1503,44 @@ export interface RecallDiagnostics {
   summaryLines: string[]
 }
 
+export type RecallFallbackReason =
+  | 'embedding_service_failed'
+  | 'query_embedding_failed'
+  | 'no_hits'
+  | 'only_stale_hits'
+  | 'budget_trimmed'
+  | 'disabled_by_config'
+
+export interface RecallBucketStats {
+  hitCount: number
+  selectedHitCount: number
+  staleCount: number
+  fallbackHitCount: number
+  fallbackReason?: RecallFallbackReason
+}
+
+export interface RecallSnapshot {
+  retrievalUsed: boolean
+  degraded: boolean
+  hitCount: number
+  selectedHitCount: number
+  staleRecallCount: number
+  fallbackHitCount: number
+  fallbackReason?: RecallFallbackReason
+  bucketStats: Record<RecallBucketKey, RecallBucketStats>
+}
+
+export type RecallRuntimeSnapshotSource = 'runtime' | 'backfilled'
+
+export interface ChapterRecallRuntimeBackfillResult {
+  novelId: number
+  totalChapterCount: number
+  persistedTaskRuntimeCount: number
+  backfilledCount: number
+  skippedCount: number
+  failedChapterIds: number[]
+}
+
 export interface ChapterContextPreviewStage {
   stage: ChapterContextStage
   hardConstraintContext: string
@@ -1503,6 +1560,7 @@ export interface ChapterContextPreview {
   previousChapterContext: string
   previousChapterSampleReport: PreviousChapterSampleReport
   recalledMemory: string
+  recallSnapshot: RecallSnapshot
   recallDiagnostics: RecallDiagnostics
   recalledMemorySources: RecallMemorySource[]
   stages: ChapterContextPreviewStage[]
@@ -1544,6 +1602,26 @@ export interface ChapterContractAudit {
   warningCount: number
   passCount: number
   items: ContractAuditItem[]
+}
+
+export type ContractValidationVerdict = 'pass' | 'weak' | 'missing' | 'contradicted' | 'overdelivered'
+
+export interface ContractValidationItem {
+  contractItemType: string
+  contractItemId?: number
+  expected: string
+  verdict: ContractValidationVerdict
+  evidenceExcerpt: string
+  segmentId?: number
+  segmentTitle?: string
+  rewriteHint: string
+}
+
+export interface ChapterContractValidationResult {
+  status: 'pass' | 'warning' | 'blocker'
+  summary: string
+  itemResults: ContractValidationItem[]
+  rewriteHints: string[]
 }
 
 export interface ChapterRewriteTarget {
@@ -1672,6 +1750,7 @@ export interface ChapterPublishCheck {
   generatedTaskCount: number
   checklist: ChapterPublishCheckItem[]
   contractAudit: ChapterContractAudit
+  contractValidation?: ChapterContractValidationResult
 }
 
 export type ChapterWritebackAssetType =
@@ -3031,6 +3110,60 @@ export interface VolumeChapterFunctionEntry {
   alerts: ChapterFunctionAlert[]
 }
 
+export interface AntiAiRuleHitDetail {
+  ruleCode: string
+  ruleTitle: string
+  severity: 'low' | 'medium' | 'high'
+  source: 'guardrail' | 'language_drift'
+  excerpt: string
+  promotedToHardConstraint: boolean
+}
+
+export interface AntiAiRuleTrendSummary {
+  ruleCode: string
+  ruleTitle: string
+  scope: 'expression' | 'sentence' | 'structure' | 'genre' | 'drift' | 'quality'
+  severity: 'low' | 'medium' | 'high'
+  chapterCount: number
+  hitCount: number
+  promotedCount: number
+  chapterNums: number[]
+  lastChapterNum: number
+  sourceBreakdown: Record<'guardrail' | 'language_drift', number>
+  detail: string
+}
+
+export interface AntiAiPromotedRuleSummary {
+  ruleCode: string
+  ruleTitle: string
+  scope: 'expression' | 'sentence' | 'structure' | 'genre' | 'drift' | 'quality'
+  chapterNums: number[]
+  avoid: string
+  prefer?: string
+}
+
+export interface AntiAiRecentAlert {
+  ruleCode: string
+  ruleTitle: string
+  severity: 'warning' | 'critical'
+  chapterNums: number[]
+  lastChapterNum: number
+  detail: string
+}
+
+export interface VolumeAntiAiRecurrenceEntry {
+  volumeId: number
+  volumeNumber: number
+  volumeName: string
+  chapterStart: number
+  chapterEnd: number
+  chapterCount: number
+  hitChapterCount: number
+  recurringRuleCount: number
+  promotedRuleCount: number
+  highRiskRuleCount: number
+}
+
 export type QualityDashboardRiskKind =
   | 'language_drift'
   | 'story_dynamics'
@@ -3266,6 +3399,17 @@ export interface QualityDashboardData {
   recentLanguageDriftAlerts: LanguageDriftTrendSummary[]
   volumeLanguageDrift: VolumeLanguageDriftEntry[]
   novelLanguageDriftSummary: NovelLanguageDriftSummary
+  antiAiRecurrence: {
+    totalHitCount: number
+    hitChapterCount: number
+    recurringRuleCount: number
+    promotedRuleCount: number
+    highRiskRuleCount: number
+    topRepeatedRules: AntiAiRuleTrendSummary[]
+    promotedRules: AntiAiPromotedRuleSummary[]
+    recentAlerts: AntiAiRecentAlert[]
+    volumeEntries: VolumeAntiAiRecurrenceEntry[]
+  }
   dialogueFingerprintStats: DialogueFingerprintStats
   characterDialogueSignatures: CharacterDialogueSignature[]
   crossCharacterDialogueSimilarity: CrossCharacterDialogueSimilarity[]
@@ -3303,6 +3447,11 @@ export interface QualityDashboardData {
   worldConflictEntities: WorldStateLedgerConflictEntity[]
   recallSummary: {
     analyzedChapterCount: number
+    recallAvailabilityRate: number
+    averageHitCount: number
+    bucketCoverageRate: number
+    consecutiveFallbackChapters: number
+    latestFallbackReason?: RecallFallbackReason
     recallDependencyRate: number
     staleRecallCount: number
     staleRecallRate: number
@@ -3315,6 +3464,11 @@ export interface QualityDashboardData {
     chapterId: number
     chapterNum: number
     title: string
+    degraded: boolean
+    retrievalUsed: boolean
+    recallSnapshotSource?: RecallRuntimeSnapshotSource
+    fallbackReason?: RecallFallbackReason
+    consecutiveFallbackChapters?: number
     staleRecallCount: number
     detail: string
   }>
@@ -3326,6 +3480,11 @@ export interface QualityDashboardData {
     chapterStart: number
     chapterEnd: number
     chapterCount: number
+    recallAvailabilityRate: number
+    averageHitCount: number
+    bucketCoverageRate: number
+    degradedChapterCount: number
+    latestFallbackReason?: RecallFallbackReason
     recallDependencyRate: number
     staleRecallCount: number
     staleRecallRate: number
@@ -3358,11 +3517,14 @@ export interface QualityDashboardData {
     weakDimensions: string[]
     dimensions: AIScoreDimension[]
     languageDriftMetrics?: LanguageDriftMetrics
+    antiAiRuleHits?: AntiAiRuleHitDetail[]
     dialogueReview?: ChapterDialogueReviewData
     storyDynamics?: ChapterStoryDynamics
     chapterFunction?: ChapterFunctionDetail
     storyArcProgress?: StoryArcProgressPoint[]
     worldStateAlerts?: WorldStateAlert[]
+    recallSnapshot?: RecallSnapshot
+    recallSnapshotSource?: RecallRuntimeSnapshotSource
     recallDiagnostics?: RecallDiagnostics
     chapterGate?: ChapterGateChapterDetail
   }>
@@ -3714,6 +3876,12 @@ declare global {
         aiCheck: (chapterId: number) => Promise<unknown>
         runPublishCheck: (chapterId: number) => Promise<ChapterPublishCheck>
       }
+      chapterBatch: {
+        startAutoGenerate: (novelId: number, options: ChapterBatchGenerateOptions) => Promise<number>
+        getAutoGenerateStatus: (taskId: number) => Promise<ChapterBatchAutoGenerateStatus | null>
+        getLatestAutoGenerateTask: (novelId: number) => Promise<Task | null>
+        resumeAutoGenerate: (taskId: number) => Promise<number>
+      }
       writeback: {
         prepareRun: (chapterId: number, triggerSource?: string) => Promise<ChapterWritebackRun>
         getCenterData: (chapterId: number, runId?: number) => Promise<ChapterWritebackCenterData>
@@ -3968,6 +4136,7 @@ declare global {
       }
       quality: {
         getDashboard: (novelId: number) => Promise<QualityDashboardData>
+        backfillRecallSnapshots: (novelId: number) => Promise<ChapterRecallRuntimeBackfillResult>
       }
       embedding: {
         reindex: (novelId: number) => Promise<{ reindexed: number }>

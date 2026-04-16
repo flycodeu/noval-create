@@ -735,6 +735,37 @@ export const chapterGateRuns = sqliteTable('chapter_gate_runs', {
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
 })
 
+export const chapterRecallRuntimeSnapshots = sqliteTable('chapter_recall_runtime_snapshots', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  chapterId: integer('chapter_id').notNull().references(() => chapters.id, { onDelete: 'cascade' }),
+  snapshotJson: text('snapshot_json').notNull(),
+  diagnosticsJson: text('diagnostics_json').notNull(),
+  source: text('source').notNull().default('runtime'),
+  sourceTaskId: integer('source_task_id'),
+  contextVersion: integer('context_version').default(1),
+  computedAt: text('computed_at').default(sql`CURRENT_TIMESTAMP`),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
+export const antiAiRuleHits = sqliteTable('anti_ai_rule_hits', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  chapterId: integer('chapter_id').notNull().references(() => chapters.id, { onDelete: 'cascade' }),
+  chapterNum: integer('chapter_num').notNull(),
+  ruleCode: text('rule_code').notNull(),
+  ruleTitle: text('rule_title'),
+  scope: text('scope').notNull().default('structure'),
+  severity: text('severity').notNull().default('medium'),
+  excerpt: text('excerpt'),
+  source: text('source').notNull().default('guardrail'),
+  detail: text('detail'),
+  promotedToHardConstraint: integer('promoted_to_hard_constraint').notNull().default(0),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
 export const chapterFactExtracts = sqliteTable('chapter_fact_extracts', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   runId: integer('run_id').notNull().references(() => chapterWritebackRuns.id, { onDelete: 'cascade' }),
@@ -915,6 +946,10 @@ export type ChapterWritebackRun = typeof chapterWritebackRuns.$inferSelect
 export type NewChapterWritebackRun = typeof chapterWritebackRuns.$inferInsert
 export type ChapterGateRun = typeof chapterGateRuns.$inferSelect
 export type NewChapterGateRun = typeof chapterGateRuns.$inferInsert
+export type ChapterRecallRuntimeSnapshot = typeof chapterRecallRuntimeSnapshots.$inferSelect
+export type NewChapterRecallRuntimeSnapshot = typeof chapterRecallRuntimeSnapshots.$inferInsert
+export type AntiAiRuleHit = typeof antiAiRuleHits.$inferSelect
+export type NewAntiAiRuleHit = typeof antiAiRuleHits.$inferInsert
 export type ChapterFactExtract = typeof chapterFactExtracts.$inferSelect
 export type NewChapterFactExtract = typeof chapterFactExtracts.$inferInsert
 export type ChapterWritebackDiff = typeof chapterWritebackDiffs.$inferSelect

@@ -1,4 +1,10 @@
-import { asc, eq } from 'drizzle-orm'
+import { asc, desc, eq } from 'drizzle-orm'
+import type {
+  ChapterContractValidationResult,
+  RecallDiagnostics,
+  RecallFallbackReason,
+  RecallSnapshot,
+} from '../../src/types'
 import { getDb, getSqlite } from '../database/db'
 import {
   chapterGateRuns,
@@ -33,8 +39,13 @@ import {
   safeParseStringArray,
 } from './chapter-gate-utils'
 import { buildNovelConsistencyReport, type ConsistencyIssue } from './consistency.service'
+import { listChapterRecallRuntimeMap } from './chapter-recall-runtime.service'
 import { buildHeuristicRecallDiagnostics, getQualityDashboardData } from './quality-dashboard.service'
 import { getStoryArcProgressSnapshot, getStoryArcWarningsForChapter } from './story-arc-progress.service'
+import {
+  getContractValidationScore,
+  validateChapterContractDelivery,
+} from './chapter-contract-validator.service'
 
 type AssetFreshnessKey = 'faction' | 'character' | 'item' | 'thread' | 'timeline'
 
@@ -63,6 +74,64 @@ function parseStringArray(raw?: string | null): string[] {
 
 function stringifyStringArray(values: string[]): string {
   return JSON.stringify([...new Set(values.map((item) => item.trim()).filter(Boolean))])
+}
+
+function formatRecallFallbackReason(reason?: RecallFallbackReason): string {
+  switch (reason) {
+    case 'embedding_service_failed':
+      return '嵌入服务失败'
+    case 'query_embedding_failed':
+      return '查询向量失败'
+    case 'disabled_by_config':
+      return '向量能力未启用'
+    case 'budget_trimmed':
+      return '召回被预算裁剪'
+    case 'only_stale_hits':
+      return '仅命中过期片段'
+    case 'no_hits':
+      return '没有命中历史片段'
+    default:
+      return '未记录原因'
+  }
+}
+
+function buildLatestRecallRuntimeMap(novelId: number): Map<number, {
+  recallSnapshot?: RecallSnapshot
+  recallDiagnostics?: RecallDiagnostics
+}> {
+  return Array.from(listChapterRecallRuntimeMap(novelId).entries()).reduce<Map<number, {
+    recallSnapshot?: RecallSnapshot
+    recallDiagnostics?: RecallDiagnostics
+  }>>((result, [chapterId, runtime]) => {
+    result.set(chapterId, {
+      recallSnapshot: runtime.recallSnapshot,
+      recallDiagnostics: runtime.recallDiagnostics,
+    })
+    return result
+  }, new Map())
+}
+
+function getRecallFallbackStreak(
+  novelId: number,
+  currentChapterNum: number,
+  runtimeByChapterId: Map<number, { recallSnapshot?: RecallSnapshot }>,
+): number {
+  const db = getDb()
+  const orderedChapters = db.select({
+    id: chapters.id,
+    chapterNum: chapters.chapterNum,
+  }).from(chapters)
+    .where(eq(chapters.novelId, novelId))
+    .orderBy(desc(chapters.chapterNum))
+    .all()
+    .filter((row) => row.chapterNum <= currentChapterNum)
+
+  let streak = 0
+  for (const row of orderedChapters) {
+    if (!runtimeByChapterId.get(row.id)?.recallSnapshot?.degraded) break
+    streak += 1
+  }
+  return streak
 }
 
 function parseNumberArray(raw?: string | null): number[] {
@@ -356,6 +425,7 @@ export interface ChapterPublishCheck {
   generatedTaskCount: number
   checklist: ChapterPublishCheckItem[]
   contractAudit: ChapterContractAudit
+  contractValidation?: ChapterContractValidationResult
 }
 
 interface ChapterContractAuditSceneSnapshot {
@@ -930,6 +1000,7 @@ function buildChapterGateSummary(
 
 interface PublishCheckScoreContext {
   contractAudit: ChapterContractAudit
+  contractValidation?: ChapterContractValidationResult | null
   checklist: ChapterPublishCheckItem[]
   reviewState: ReturnType<typeof parseReviewState>
   aiScore: number | null
@@ -965,11 +1036,23 @@ function reduceGateScore(base: number, penalties: number[]): number {
   return clampGateScore(base - penalties.reduce((sum, penalty) => sum + penalty, 0))
 }
 
+function calculateContractAuditScore(contractAudit: ChapterContractAudit): number {
+  const contractTotal = Math.max(contractAudit.items.length, 1)
+  let contractScore = Math.round(contractAudit.items.reduce((sum, item) => sum + gateScoreForStatus(item.status), 0) / contractTotal)
+  if (contractAudit.blockerCount > 0) {
+    contractScore = Math.min(contractScore, 59)
+  } else if (contractAudit.warningCount > 0) {
+    contractScore = Math.min(contractScore, 79)
+  }
+  return contractScore
+}
+
 function buildPublishCheckScoreBreakdown(
   context: PublishCheckScoreContext,
 ): ChapterPublishCheckScoreBreakdown {
   const {
     contractAudit,
+    contractValidation,
     checklist,
     reviewState,
     aiScore,
@@ -983,10 +1066,17 @@ function buildPublishCheckScoreBreakdown(
     warningCount,
     rewriteCount,
   } = context
-  const contractTotal = Math.max(contractAudit.items.length, 1)
-  let contractScore = Math.round(contractAudit.items.reduce((sum, item) => sum + gateScoreForStatus(item.status), 0) / contractTotal)
-  if (contractAudit.blockerCount > 0) {
+  const auditContractScore = calculateContractAuditScore(contractAudit)
+  const validationContractScore = getContractValidationScore(contractValidation)
+  let contractScore = validationContractScore == null
+    ? auditContractScore
+    : Math.round((auditContractScore + validationContractScore) / 2)
+  if (contractValidation?.status === 'blocker') {
+    contractScore = Math.min(contractScore, 49)
+  } else if (contractAudit.blockerCount > 0) {
     contractScore = Math.min(contractScore, 59)
+  } else if (contractValidation?.status === 'warning') {
+    contractScore = Math.min(contractScore, 79)
   } else if (contractAudit.warningCount > 0) {
     contractScore = Math.min(contractScore, 79)
   }
@@ -1140,13 +1230,20 @@ function sortChapterGateHistory(left: ChapterGateHistoryEntry, right: ChapterGat
 function buildChapterGateTopIssueKeys(
   checklist: ChapterPublishCheckItem[],
   contractAudit: ChapterContractAudit,
+  contractValidation?: ChapterContractValidationResult | null,
 ): string[] {
   const issueKeys = [
     ...checklist.filter((item) => item.status === 'rewrite').map((item) => item.key),
     ...checklist.filter((item) => item.status === 'blocker').map((item) => item.key),
     ...contractAudit.items.filter((item) => item.status === 'blocker').map((item) => `contract:${item.key}`),
+    ...(contractValidation?.itemResults || [])
+      .filter((item) => item.verdict === 'missing' || item.verdict === 'contradicted')
+      .map((item) => `contract_delivery:${item.contractItemType}:${item.contractItemId || item.segmentId || item.expected}`),
     ...checklist.filter((item) => item.status === 'warning').map((item) => item.key),
     ...contractAudit.items.filter((item) => item.status === 'warning').map((item) => `contract:${item.key}`),
+    ...(contractValidation?.itemResults || [])
+      .filter((item) => item.verdict === 'weak' || item.verdict === 'overdelivered')
+      .map((item) => `contract_delivery:${item.contractItemType}:${item.contractItemId || item.segmentId || item.expected}`),
   ]
   return [...new Set(issueKeys)].slice(0, 8)
 }
@@ -1649,13 +1746,24 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
   const reviewState = parseReviewState(chapter.reviewNotesJson)
   const contractContext = loadChapterContractAuditContext(chapterId)
   const qualityDashboard = getQualityDashboardData(chapter.novelId, { includeDialogueInsights: false })
-  const recallDiagnostics = buildHeuristicRecallDiagnostics(chapter.novelId, {
+  const recallRuntimeByChapterId = buildLatestRecallRuntimeMap(chapter.novelId)
+  const recallRuntime = recallRuntimeByChapterId.get(chapterId)
+  const recallDiagnostics = recallRuntime?.recallDiagnostics || buildHeuristicRecallDiagnostics(chapter.novelId, {
     chapterNum: chapter.chapterNum,
     title: chapter.title,
     summary: chapter.summary,
     outline: chapter.outline,
   })
+  const recallFallbackStreak = getRecallFallbackStreak(chapter.novelId, chapter.chapterNum, recallRuntimeByChapterId)
+  const recallSnapshot = recallRuntime?.recallSnapshot
   const contractAudit = buildChapterContractAudit(chapterId)
+  const contractValidation = chapter.content?.trim()
+    ? validateChapterContractDelivery({
+      chapterId,
+      content: chapter.content,
+      reviewNotes: chapter.reviewNotesJson,
+    })
+    : null
   const contractAuditJson = JSON.stringify(contractAudit)
   if (chapter.contractAuditJson !== contractAuditJson) {
     db.update(chapters).set({
@@ -1735,11 +1843,13 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
   const strictVolumeDesign = normalizeText(currentVolumeDesign?.auditStatus) === 'locked'
     || normalizeText(currentVolumeDesign?.auditStatus) === 'ready'
 
-  const contractDeliveryStatus: ChapterGateLevel = contractAudit.blockerCount > 0
-    ? 'blocker'
-    : contractAudit.warningCount > 0
-      ? 'warning'
-      : 'pass'
+  const contractDeliveryStatus: ChapterGateLevel = contractValidation
+    ? contractValidation.status
+    : contractAudit.blockerCount > 0
+      ? 'blocker'
+      : contractAudit.warningCount > 0
+        ? 'warning'
+        : 'pass'
   const dialogueSignalCount =
     reviewState.dialogueHomogenizationRisks.length
     + reviewState.dialogueDriftAlerts.length
@@ -1782,6 +1892,9 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
     povPurityStatus === 'rewrite' ? '当前章节存在多场景 POV 混杂，已经超出固定视角作品可接受范围。' : '',
     reviewState.rewriteRequired && (contractAudit.blockerCount > 0 || highIssues.length > 0 || lineProgressStatus === 'blocker' || threadProgressStatus === 'blocker' || volumeAlignmentStatus === 'blocker')
       ? '审校已经建议重写，且命中了合同/推进/结构类硬问题，单纯润色不足以解决。'
+      : '',
+    contractValidation?.status === 'blocker'
+      ? '正文合同验证仍有关键缺口，当前稿件没有兑现章节目标、场景结果或必要支线/伏笔。'
       : '',
   ].filter(Boolean)
   const rewriteTargetSource = conflictingPovScene || missingScenePovs[0] || null
@@ -1889,10 +2002,18 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
     makePublishCheckItem({
       key: 'recall',
       label: '召回补充未依赖过期片段',
-      status: recallDiagnostics.staleRecallCount > 0 ? 'warning' : 'pass',
-      detail: recallDiagnostics.staleRecallCount > 0
-        ? `识别到 ${recallDiagnostics.staleRecallCount} 条疑似过期召回片段。召回只应作为背景补充，建议优先以硬约束和结构化状态回查。`
-        : '当前未识别到疑似过期的召回背景片段。',
+      status: recallFallbackStreak >= 3
+        ? 'blocker'
+        : (recallDiagnostics.staleRecallCount > 0 || recallSnapshot?.degraded)
+            ? 'warning'
+            : 'pass',
+      detail: recallFallbackStreak >= 3
+        ? `最近已连续 ${recallFallbackStreak} 章发生召回降级，本章继续生成会放大连续性风险。当前原因：${formatRecallFallbackReason(recallSnapshot?.fallbackReason)}。`
+        : recallSnapshot?.degraded
+          ? `本章召回已降级：${formatRecallFallbackReason(recallSnapshot.fallbackReason)}。${recallSnapshot.retrievalUsed ? '当前仅保留降级后的背景补充。' : '当前 prompt 未实际使用召回补充。'}`
+          : recallDiagnostics.staleRecallCount > 0
+            ? `识别到 ${recallDiagnostics.staleRecallCount} 条疑似过期召回片段。召回只应作为背景补充，建议优先以硬约束和结构化状态回查。`
+            : '当前未识别到疑似过期的召回背景片段。',
       relatedPage: 'writing',
       fixHint: '回查结构化状态和硬约束，避免继续依赖旧召回片段。',
     }),
@@ -1919,11 +2040,13 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
       label: '合同兑现率',
       status: contractDeliveryStatus,
       detail: contractDeliveryStatus === 'pass'
-        ? '章节合同与场景合同当前已对齐。'
-        : contractAudit.summary,
+        ? (contractValidation?.summary || '章节合同与场景合同当前已对齐。')
+        : (contractValidation?.summary || contractAudit.summary),
       source: 'contract',
-      relatedPage: 'contracts',
-      fixHint: '回到章节合同与场景合同页补齐绑定、推进记录和结果状态。',
+      relatedPage: contractValidation?.itemResults.some((item) => typeof item.segmentId === 'number')
+        ? 'structure'
+        : 'contracts',
+      fixHint: contractValidation?.rewriteHints[0] || '回到章节合同与场景合同页补齐绑定、推进记录和结果状态。',
     }),
     makePublishCheckItem({
       key: 'dialogue_voice',
@@ -2065,6 +2188,7 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
         : 'pass'
   const scoreBreakdown = buildPublishCheckScoreBreakdown({
     contractAudit,
+    contractValidation,
     checklist,
     reviewState,
     aiScore,
@@ -2090,7 +2214,7 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
     warningCount,
     generatedTaskCount,
     scoreBreakdown,
-    topIssueKeys: buildChapterGateTopIssueKeys(checklist, contractAudit),
+    topIssueKeys: buildChapterGateTopIssueKeys(checklist, contractAudit, contractValidation),
   })
 
   return {
@@ -2113,5 +2237,6 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
     generatedTaskCount,
     checklist,
     contractAudit,
+    contractValidation: contractValidation || undefined,
   }
 }

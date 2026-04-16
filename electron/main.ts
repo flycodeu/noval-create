@@ -43,6 +43,7 @@ import * as exportService from './services/export.service'
 import * as factionService from './services/faction.service'
 import * as glossaryService from './services/glossary.service'
 import * as qualityDashboardService from './services/quality-dashboard.service'
+import * as chapterRecallRuntimeService from './services/chapter-recall-runtime.service'
 import * as storyArcProgressService from './services/story-arc-progress.service'
 import * as embeddingService from './services/embedding.service'
 import * as styleAnalysisService from './services/style-analysis.service'
@@ -254,6 +255,7 @@ function registerIpcHandlers() {
 
   // Quality Dashboard
   handle('quality:getDashboard', (_, novelId) => qualityDashboardService.getQualityDashboardData(novelId))
+  handle('quality:backfillRecallSnapshots', (_, novelId) => chapterRecallRuntimeService.backfillMissingChapterRecallRuntimeSnapshots(novelId))
 
   // Embedding
   handle('embedding:reindex', async (_, novelId: number) => {
@@ -408,6 +410,14 @@ function registerIpcHandlers() {
     chapterService.aiCheckChapter(chapterId))
   handle('chapter:runPublishCheck', (_, chapterId) =>
     chapterService.runChapterPublishCheck(chapterId))
+  handle('chapterBatch:startAutoGenerate', (event, novelId, options) =>
+    batchWorkflowService.startChapterBatchGenerateWorkflow(requireId(novelId, 'novelId'), options, event.sender))
+  handle('chapterBatch:getAutoGenerateStatus', (_, taskId) =>
+    batchWorkflowService.getChapterBatchAutoGenerateStatus(requireId(taskId, 'taskId')))
+  handle('chapterBatch:getLatestAutoGenerateTask', (_, novelId) =>
+    batchWorkflowService.getLatestChapterBatchAutoGenerateTask(requireId(novelId, 'novelId')))
+  handle('chapterBatch:resumeAutoGenerate', (event, taskId) =>
+    batchWorkflowService.resumeBatchAutoGenerateWorkflow(requireId(taskId, 'taskId'), event.sender))
   handle('writeback:prepareRun', (_, chapterId, triggerSource) =>
     chapterWritebackService.prepareChapterWritebackRun(requireId(chapterId, 'chapterId'), typeof triggerSource === 'string' ? triggerSource : 'manual'))
   handle('writeback:getCenterData', (_, chapterId, runId) =>

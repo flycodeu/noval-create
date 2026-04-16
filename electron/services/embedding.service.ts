@@ -12,6 +12,17 @@ export interface SimilarFragmentHit {
   searchMode: 'vector' | 'keyword'
 }
 
+export type SimilarFragmentFallbackReason =
+  | 'embedding_service_failed'
+  | 'query_embedding_failed'
+  | 'no_hits'
+  | 'disabled_by_config'
+
+export interface SimilarFragmentSearchResult {
+  hits: SimilarFragmentHit[]
+  fallbackReason?: SimilarFragmentFallbackReason
+}
+
 function cosineSimilarity(a: number[], b: number[]): number {
   if (a.length !== b.length || a.length === 0) return 0
   let dot = 0
@@ -200,12 +211,12 @@ export async function generateChapterEmbeddings(
   }
 }
 
-export async function findSimilarFragments(
+export async function searchSimilarFragments(
   novelId: number,
   queryText: string,
   topK = 5,
   modelConfigId?: number,
-): Promise<SimilarFragmentHit[]> {
+): Promise<SimilarFragmentSearchResult> {
   const db = getDb()
   const allEmbeddings = db.select().from(chapterEmbeddings)
     .where(eq(chapterEmbeddings.novelId, novelId))
@@ -220,13 +231,22 @@ export async function findSimilarFragments(
       .map((row) => [row.id, row.chapterNum] as const),
   )
 
-  if (allEmbeddings.length === 0) return []
+  if (allEmbeddings.length === 0) {
+    return {
+      hits: [],
+      fallbackReason: 'no_hits',
+    }
+  }
 
   // Check if we have vector embeddings
   const hasVectors = allEmbeddings.some((e) => e.embeddingJson)
 
   if (!hasVectors) {
-    return fallbackKeywordSearch(novelId, queryText, topK)
+    const hits = fallbackKeywordSearch(novelId, queryText, topK)
+    return {
+      hits,
+      fallbackReason: hits.length > 0 ? 'disabled_by_config' : 'no_hits',
+    }
   }
 
   // Get query embedding
@@ -234,11 +254,18 @@ export async function findSimilarFragments(
   try {
     adapter = modelConfigId ? await getAdapterById(modelConfigId) : await getDefaultAdapter()
   } catch {
-    return fallbackKeywordSearch(novelId, queryText, topK)
+    return {
+      hits: fallbackKeywordSearch(novelId, queryText, topK),
+      fallbackReason: 'embedding_service_failed',
+    }
   }
 
   if (!adapter.embed) {
-    return fallbackKeywordSearch(novelId, queryText, topK)
+    const hits = fallbackKeywordSearch(novelId, queryText, topK)
+    return {
+      hits,
+      fallbackReason: hits.length > 0 ? 'disabled_by_config' : 'no_hits',
+    }
   }
 
   let queryEmbedding: number[]
@@ -246,7 +273,10 @@ export async function findSimilarFragments(
     const result = await adapter.embed([queryText])
     queryEmbedding = result[0]
   } catch {
-    return fallbackKeywordSearch(novelId, queryText, topK)
+    return {
+      hits: fallbackKeywordSearch(novelId, queryText, topK),
+      fallbackReason: 'query_embedding_failed',
+    }
   }
 
   const scored = allEmbeddings
@@ -264,7 +294,20 @@ export async function findSimilarFragments(
     })
     .sort((a, b) => b.similarity - a.similarity)
 
-  return scored.slice(0, topK)
+  const hits = scored.slice(0, topK)
+  return {
+    hits,
+    fallbackReason: hits.length > 0 ? undefined : 'no_hits',
+  }
+}
+
+export async function findSimilarFragments(
+  novelId: number,
+  queryText: string,
+  topK = 5,
+  modelConfigId?: number,
+): Promise<SimilarFragmentHit[]> {
+  return (await searchSimilarFragments(novelId, queryText, topK, modelConfigId)).hits
 }
 
 export function fallbackKeywordSearch(
