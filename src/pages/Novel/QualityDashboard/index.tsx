@@ -217,6 +217,8 @@ function chapterGateHeatmapColor(score: number): string {
 
 function qualityRiskKindLabel(kind: QualityDashboardData['novelQualityMetrics']['riskOverview'][number]['kind']): string {
   if (kind === 'language_drift') return 'AI 味退化'
+  if (kind === 'feedback_recurrence') return '审校复现'
+  if (kind === 'style_compliance') return '风格硬约束'
   if (kind === 'story_dynamics') return '主角与节奏'
   if (kind === 'chapter_function') return '章节功能'
   if (kind === 'story_arc') return '故事弧推进'
@@ -519,6 +521,13 @@ export default function QualityDashboard({ novelId }: Props) {
                 volumeEntries: data.antiAiRecurrence.volumeEntries.filter((entry) => entry.volumeId === selectedVolumeMetrics.volumeId),
               }
               : data.antiAiRecurrence}
+            feedbackRecurrence={selectedVolumeMetrics
+              ? {
+                ...data.feedbackRecurrence,
+                recentAlerts: data.feedbackRecurrence.recentAlerts.filter((entry) => entry.chapterNums.some((chapterNum) => chapterNum >= selectedVolumeMetrics.chapterStart && chapterNum <= selectedVolumeMetrics.chapterEnd)),
+                volumeEntries: data.feedbackRecurrence.volumeEntries.filter((entry) => entry.volumeId === selectedVolumeMetrics.volumeId),
+              }
+              : data.feedbackRecurrence}
           />
         </WorkspacePanel>
       ) : null}
@@ -625,6 +634,7 @@ export default function QualityDashboard({ novelId }: Props) {
       metrics={[
         <WorkspaceMetric key="scored" label="已评分章节" value={data.totalChaptersScored} />,
         <WorkspaceMetric key="gate" label="章节门覆盖" value={data.chapterGateSummary.coveredChapterCount} />,
+        <WorkspaceMetric key="style" label="风格预警" value={data.styleCompliance.warningCount + data.styleCompliance.rewriteCount} />,
         <WorkspaceMetric key="tracked" label="节奏追踪章节" value={data.protagonistSetbackSummary.chapterCount} />,
         <WorkspaceMetric key="arc" label="跟踪故事弧" value={data.storyArcProgressSummary.trackedArcCount} />,
         <WorkspaceMetric key="pipeline" label="正文流水线" value={pipelineStats?.totalPipelineCount || 0} />,
@@ -722,6 +732,8 @@ export default function QualityDashboard({ novelId }: Props) {
             <ChapterGateDetails chapterGate={selectedChapter.chapterGate} />
             <LanguageDriftDetails metrics={selectedChapter.languageDriftMetrics} />
             <AntiAiRuleHitDetails hits={selectedChapter.antiAiRuleHits} />
+            <FeedbackRecurrenceDetails hits={selectedChapter.feedbackRecurrenceHits} />
+            <StyleComplianceDetails styleCompliance={selectedChapter.styleCompliance} />
             <DialogueReviewDetails review={selectedChapter.dialogueReview} />
             <StoryDynamicsDetails dynamics={selectedChapter.storyDynamics} />
             <ChapterFunctionDetails chapterFunction={selectedChapter.chapterFunction} />
@@ -1628,6 +1640,7 @@ function LanguageDriftPanel({
   volumeEntries,
   novelSummary,
   antiAiRecurrence,
+  feedbackRecurrence,
 }: {
   averages: LanguageDriftMetrics
   trends: QualityDashboardData['languageDriftTrends']
@@ -1635,6 +1648,7 @@ function LanguageDriftPanel({
   volumeEntries: QualityDashboardData['volumeLanguageDrift']
   novelSummary: QualityDashboardData['novelLanguageDriftSummary']
   antiAiRecurrence: QualityDashboardData['antiAiRecurrence']
+  feedbackRecurrence: QualityDashboardData['feedbackRecurrence']
 }) {
   const hasAnyData = LANGUAGE_DRIFT_LABELS.some(({ key }) => trends[key].length > 0)
   if (!hasAnyData) {
@@ -1921,6 +1935,138 @@ function LanguageDriftPanel({
           </div>
         </div>
       ) : null}
+
+      <div style={{ display: 'grid', gap: 12 }}>
+        <div style={{ fontWeight: 600 }}>审校反哺与复现闭环</div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
+          {[
+            { label: '命中章节', value: feedbackRecurrence.hitChapterCount, note: '至少出现一次通用复现问题的章节' },
+            { label: '复现问题', value: feedbackRecurrence.recurringIssueCount, note: '跨章重复出现的问题类型' },
+            { label: '已升级硬约束', value: feedbackRecurrence.promotedIssueCount, note: '连续 2 章或窗口高风险后自动前置' },
+            { label: '建议暂停', value: feedbackRecurrence.pauseSuggestedIssueCount, note: '结构/连续性类高风险复现，建议暂停批量' },
+          ].map((card) => (
+            <div
+              key={card.label}
+              style={{
+                padding: '12px 14px',
+                borderRadius: 10,
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.08)',
+              }}
+            >
+              <div style={{ fontSize: 12, opacity: 0.7 }}>{card.label}</div>
+              <div style={{ fontSize: 22, fontWeight: 700 }}>{card.value}</div>
+              <div style={{ fontSize: 11, opacity: 0.55, marginTop: 4 }}>{card.note}</div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
+          <div
+            style={{
+              padding: '12px 14px',
+              borderRadius: 10,
+              background: 'rgba(255,255,255,0.04)',
+              border: '1px solid rgba(255,255,255,0.08)',
+              display: 'grid',
+              gap: 8,
+            }}
+          >
+            <div style={{ fontSize: 12, opacity: 0.7 }}>跨章高频问题</div>
+            {feedbackRecurrence.topRepeatedIssues.length > 0 ? feedbackRecurrence.topRepeatedIssues.slice(0, 4).map((item) => (
+              <div key={item.issueType} style={{ display: 'grid', gap: 4 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+                  <span style={{ fontSize: 12, fontWeight: 600 }}>{item.title}</span>
+                  <Tag color={item.severity === 'high' ? 'error' : item.severity === 'medium' ? 'warning' : 'default'} style={{ marginRight: 0 }}>
+                    {`第 ${item.lastChapterNum} 章`}
+                  </Tag>
+                </div>
+                <div style={{ fontSize: 11, opacity: 0.65 }}>
+                  {`命中 ${item.hitCount} 次 / 覆盖 ${item.chapterCount} 章`}
+                  {item.promotedCount > 0 ? ` · 已升级 ${item.promotedCount} 次` : ''}
+                </div>
+              </div>
+            )) : <div style={{ fontSize: 12, opacity: 0.6 }}>当前还没有跨章复现的通用审校问题。</div>}
+          </div>
+
+          <div
+            style={{
+              padding: '12px 14px',
+              borderRadius: 10,
+              background: 'rgba(255,255,255,0.04)',
+              border: '1px solid rgba(255,255,255,0.08)',
+              display: 'grid',
+              gap: 8,
+            }}
+          >
+            <div style={{ fontSize: 12, opacity: 0.7 }}>已升级为下一章硬约束</div>
+            {feedbackRecurrence.promotedIssues.length > 0 ? feedbackRecurrence.promotedIssues.slice(0, 4).map((item) => (
+              <div key={item.issueType} style={{ display: 'grid', gap: 4 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                  <span style={{ fontSize: 12, fontWeight: 600 }}>{item.title}</span>
+                  <Tag color={item.pauseSuggested ? 'error' : 'gold'} style={{ marginRight: 0 }}>
+                    {item.pauseSuggested ? '高风险前置' : '已前置'}
+                  </Tag>
+                </div>
+                <div style={{ fontSize: 11, opacity: 0.65 }}>
+                  {`触发章节：${item.chapterNums.map((chapterNum) => `第${chapterNum}章`).join('、')}`}
+                </div>
+              </div>
+            )) : <div style={{ fontSize: 12, opacity: 0.6 }}>最近没有新的审校复现硬约束。</div>}
+          </div>
+
+          <div
+            style={{
+              padding: '12px 14px',
+              borderRadius: 10,
+              background: 'rgba(255,255,255,0.04)',
+              border: '1px solid rgba(255,255,255,0.08)',
+              display: 'grid',
+              gap: 8,
+            }}
+          >
+            <div style={{ fontSize: 12, opacity: 0.7 }}>近期告警</div>
+            {feedbackRecurrence.recentAlerts.length > 0 ? feedbackRecurrence.recentAlerts.slice(0, 4).map((alert) => (
+              <div key={`${alert.issueType}-${alert.lastChapterNum}`} style={{ display: 'grid', gap: 4 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+                  <span style={{ fontSize: 12, fontWeight: 600 }}>{alert.title}</span>
+                  <Tag color={alert.pauseSuggested ? 'error' : alert.severity === 'critical' ? 'warning' : 'default'} style={{ marginRight: 0 }}>
+                    {alert.pauseSuggested ? '建议暂停' : alert.severity === 'critical' ? '需回查' : '已升级'}
+                  </Tag>
+                </div>
+                <div style={{ fontSize: 11, opacity: 0.65 }}>{alert.detail}</div>
+              </div>
+            )) : <div style={{ fontSize: 12, opacity: 0.6 }}>当前没有新的审校复现告警。</div>}
+          </div>
+        </div>
+
+        {feedbackRecurrence.volumeEntries.length > 0 ? (
+          <div style={{ display: 'grid', gap: 12 }}>
+            <div style={{ fontWeight: 600 }}>卷级审校复现</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+              {feedbackRecurrence.volumeEntries.map((volume) => (
+                <div
+                  key={volume.volumeId}
+                  style={{
+                    padding: '12px 14px',
+                    borderRadius: 10,
+                    background: 'rgba(255,255,255,0.04)',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    display: 'grid',
+                    gap: 8,
+                  }}
+                >
+                  <div style={{ fontWeight: 600 }}>{volume.volumeName}</div>
+                  <div style={{ fontSize: 11, opacity: 0.6 }}>{`第${volume.chapterStart}-${volume.chapterEnd}章 · ${volume.chapterCount} 章`}</div>
+                  <div style={{ fontSize: 12 }}>{`命中章节 ${volume.hitChapterCount} · 复现问题 ${volume.recurringIssueCount}`}</div>
+                  <div style={{ fontSize: 12 }}>{`已升级 ${volume.promotedIssueCount} · 高风险 ${volume.highRiskIssueCount}`}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </div>
     </div>
   )
 }
@@ -2557,6 +2703,69 @@ function AntiAiRuleHitDetails({ hits }: { hits?: QualityDashboardData['chapterDe
           {hit.excerpt ? <div style={{ fontSize: 12, opacity: 0.72 }}>{hit.excerpt}</div> : null}
         </div>
       ))}
+    </div>
+  )
+}
+
+function FeedbackRecurrenceDetails({ hits }: { hits?: QualityDashboardData['chapterDetails'][number]['feedbackRecurrenceHits'] }) {
+  if (!hits || hits.length === 0) {
+    return <div style={{ fontSize: 12, opacity: 0.55 }}>本章暂无通用复现问题</div>
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 8 }}>
+      <div style={{ fontWeight: 600 }}>本章审校复现信号</div>
+      {hits.map((hit) => (
+        <div key={`${hit.issueType}-${hit.source}`} style={{ display: 'grid', gap: 4 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <Tag color={hit.severity === 'high' ? 'error' : hit.severity === 'medium' ? 'warning' : 'default'} style={{ marginRight: 0 }}>
+              {hit.severity === 'high' ? '高' : hit.severity === 'medium' ? '中' : '低'}
+            </Tag>
+            <span style={{ fontSize: 12, fontWeight: 600 }}>{hit.title}</span>
+            <Tag color={hit.source === 'chapter_gate' ? 'purple' : hit.source === 'contract_validation' ? 'blue' : hit.source === 'anti_ai' ? 'gold' : 'default'} style={{ marginRight: 0 }}>
+              {hit.source === 'chapter_gate' ? '章节门' : hit.source === 'contract_validation' ? '合同校验' : hit.source === 'anti_ai' ? 'anti-AI' : '审校'}
+            </Tag>
+            {hit.promotedToHardConstraint ? <Tag color="gold" style={{ marginRight: 0 }}>已升级硬约束</Tag> : null}
+            {hit.pauseSuggested ? <Tag color="error" style={{ marginRight: 0 }}>建议暂停</Tag> : null}
+          </div>
+          <div style={{ fontSize: 12, opacity: 0.72 }}>{hit.detail}</div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function StyleComplianceDetails({ styleCompliance }: { styleCompliance?: QualityDashboardData['chapterDetails'][number]['styleCompliance'] }) {
+  if (!styleCompliance) {
+    return <div style={{ fontSize: 12, opacity: 0.55 }}>本章未启用风格硬约束校验</div>
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ fontWeight: 600 }}>风格硬约束</div>
+        <Tag color={styleCompliance.status === 'rewrite' ? 'error' : styleCompliance.status === 'warning' ? 'warning' : 'success'} style={{ marginRight: 0 }}>
+          {styleCompliance.status === 'rewrite' ? '重写' : styleCompliance.status === 'warning' ? '预警' : '通过'}
+        </Tag>
+        <span style={{ fontSize: 12, fontWeight: 600 }}>{`得分 ${styleCompliance.score}`}</span>
+      </div>
+      <div style={{ fontSize: 12 }}>{styleCompliance.summary}</div>
+      <div style={{ fontSize: 12 }}>
+        指标：
+        {` 句长 ${styleCompliance.actualMetrics.avgSentenceLength}/${styleCompliance.referenceMetrics.avgSentenceLength}`}
+        {` · 段长 ${styleCompliance.actualMetrics.avgParagraphLength}/${styleCompliance.referenceMetrics.avgParagraphLength}`}
+        {` · 对话占比 ${styleCompliance.actualMetrics.dialogueLineRate}%/${styleCompliance.referenceMetrics.dialogueLineRate}%`}
+        {` · 抽象词 ${styleCompliance.actualMetrics.abstractTokenDensity}%/${styleCompliance.referenceMetrics.abstractTokenDensity}%`}
+      </div>
+      {styleCompliance.deviations.length > 0 ? (
+        <div style={{ fontSize: 12 }}>偏移：{styleCompliance.deviations.join('；')}</div>
+      ) : null}
+      {styleCompliance.matchedForbiddenPatterns.length > 0 ? (
+        <div style={{ fontSize: 12 }}>禁用表达：{styleCompliance.matchedForbiddenPatterns.join('、')}</div>
+      ) : null}
+      {styleCompliance.rewriteHints.length > 0 ? (
+        <div style={{ fontSize: 12 }}>修正：{styleCompliance.rewriteHints.join('；')}</div>
+      ) : null}
     </div>
   )
 }

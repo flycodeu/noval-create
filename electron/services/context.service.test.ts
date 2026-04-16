@@ -13,6 +13,7 @@ vi.mock('./embedding.service', () => ({
 
 vi.mock('./style-analysis.service', () => ({
   buildStyleFingerprintPromptSection: vi.fn(() => ''),
+  buildStyleHardGuardPromptSection: vi.fn(() => ''),
   listStyleFingerprints: vi.fn(() => []),
 }))
 
@@ -87,7 +88,12 @@ import {
   HardConstraintOverflowError,
 } from './context.service'
 import { getDb } from '../database/db'
+import { antiAiRuleHits, chapterGateRuns, chapters } from '../database/schema'
 import { resolveModelRuntimeBudget } from './model.service'
+import {
+  buildStyleHardGuardPromptSection,
+  listStyleFingerprints,
+} from './style-analysis.service'
 
 function createRecallDiagnostics(): RecallDiagnostics {
   return {
@@ -215,9 +221,30 @@ function createMockSelectDb<T>(responses: T[][]) {
   }
 }
 
+function createTableAwareDbMock(rowsByTable: Map<unknown, unknown[]>) {
+  return {
+    select: () => ({
+      from: (table: unknown) => ({
+        where: () => ({
+          orderBy: () => ({
+            all: () => rowsByTable.get(table) || [],
+          }),
+          all: () => rowsByTable.get(table) || [],
+        }),
+        orderBy: () => ({
+          all: () => rowsByTable.get(table) || [],
+        }),
+        all: () => rowsByTable.get(table) || [],
+      }),
+    }),
+  }
+}
+
 describe('allocateChapterContext', () => {
   beforeEach(() => {
     vi.mocked(getDb).mockReset()
+    vi.mocked(listStyleFingerprints).mockReturnValue([])
+    vi.mocked(buildStyleHardGuardPromptSection).mockReturnValue('')
     vi.mocked(resolveModelRuntimeBudget).mockReturnValue({
       maxContextTokens: 32000,
       maxTokens: 4096,
@@ -298,6 +325,70 @@ describe('allocateChapterContext', () => {
     expect(context.hardConstraintContext).toContain('本书自定义：不要在段尾替角色总结意义。')
     expect(context.hardConstraintContext).toContain('本书近章复现')
     expect(context.constraintInjectionStatus.injectedLabels).toContain('antiAiRules')
+  })
+
+  it('injects style hard-guard constraints when the novel has a style fingerprint', () => {
+    vi.mocked(listStyleFingerprints).mockReturnValue([
+      {
+        id: 8,
+        novelId: 1,
+        name: '冷硬短句',
+        sourceText: null,
+        fingerprintJson: '{}',
+        analysisModelId: null,
+        createdAt: '',
+        updatedAt: '',
+      },
+    ] as never)
+    vi.mocked(buildStyleHardGuardPromptSection).mockReturnValue(
+      '【风格硬约束 · 冷硬短句】\n- 句长尽量维持在 14-24 字。\n- 抽象词密度不高于 12%。',
+    )
+
+    const context = allocateChapterContext(createRawData(), {
+      totalBudget: 10000,
+      promptProfile: 'draft',
+      chapterComplexity: 'standard',
+    })
+
+    expect(context.hardConstraintContext).toContain('【风格硬约束 · 冷硬短句】')
+    expect(context.constraintInjectionStatus.injectedLabels).toContain('styleHardGuard')
+  })
+
+  it('injects generic feedback recurrence hard constraints from recent review loops', () => {
+    vi.mocked(getDb).mockReturnValue(createTableAwareDbMock(new Map<unknown, unknown[]>([
+      [chapters, [
+        {
+          id: 2,
+          chapterNum: 2,
+          reviewNotesJson: JSON.stringify({
+            severity: 'high',
+            cost_resolution_state: 'evaporated',
+            cost_summary: '上一章的伤势和补给损耗被写得太轻。',
+          }),
+        },
+        {
+          id: 3,
+          chapterNum: 3,
+          reviewNotesJson: JSON.stringify({
+            severity: 'high',
+            cost_resolution_state: 'evaporated',
+            cost_summary: '补给损耗在收束时再次被冲淡。',
+          }),
+        },
+      ]],
+      [chapterGateRuns, []],
+      [antiAiRuleHits, []],
+    ])) as never)
+
+    const context = allocateChapterContext(createRawData(), {
+      totalBudget: 10000,
+      promptProfile: 'draft',
+      chapterComplexity: 'standard',
+    })
+
+    expect(context.hardConstraintContext).toContain('【近章必须避免】')
+    expect(context.hardConstraintContext).toContain('代价蒸发')
+    expect(context.constraintInjectionStatus.injectedLabels).toContain('feedbackRecurrence')
   })
 
   it('compresses the effective budget to the model context limit', () => {

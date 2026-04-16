@@ -18,6 +18,7 @@ const PRIMARY_DIMENSIONS = [
   { key: 'hookStrengthScore', label: '钩子强度' },
   { key: 'storyDynamicsScore', label: '主角与节奏' },
   { key: 'languageNaturalnessScore', label: '语言自然度' },
+  { key: 'styleComplianceScore', label: '风格硬约束' },
 ] as const
 
 type PrimaryDimensionKey = typeof PRIMARY_DIMENSIONS[number]['key']
@@ -90,6 +91,7 @@ export function normalizeChapterGateScoreBreakdown(
   const hookStrengthScore = clampChapterGateScore(asFiniteNumber(raw?.hookStrengthScore, hookScore))
   const storyDynamicsScore = clampChapterGateScore(asFiniteNumber(raw?.storyDynamicsScore, averageScores([threadProgressScore, volumeAlignmentScore])))
   const languageNaturalnessScore = clampChapterGateScore(asFiniteNumber(raw?.languageNaturalnessScore, averageScores([dialogueVoiceScore, coherenceScore])))
+  const styleComplianceScore = clampChapterGateScore(asFiniteNumber(raw?.styleComplianceScore, averageScores([languageNaturalnessScore, dialogueVoiceScore])))
   const totalScore = clampChapterGateScore(asFiniteNumber(raw?.totalScore, averageScores([
     continuityScore,
     coherenceScore,
@@ -97,6 +99,7 @@ export function normalizeChapterGateScoreBreakdown(
     hookStrengthScore,
     storyDynamicsScore,
     languageNaturalnessScore,
+    styleComplianceScore,
   ])))
 
   return {
@@ -107,6 +110,7 @@ export function normalizeChapterGateScoreBreakdown(
     hookStrengthScore,
     storyDynamicsScore,
     languageNaturalnessScore,
+    styleComplianceScore,
     contractScore,
     hookScore,
     povPurityScore,

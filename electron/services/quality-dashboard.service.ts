@@ -32,6 +32,7 @@ import type {
   RewardState,
   StoryDynamicsAlert,
   StoryDynamicsTrendPoint,
+  StyleComplianceResult,
   VolumeLanguageDriftEntry,
   VolumeChapterFunctionEntry,
   VolumeQualityMetrics,
@@ -58,6 +59,7 @@ import { getStoryArcProgressSnapshot } from './story-arc-progress.service'
 import { getForeshadowSnapshot } from './story-thread.service'
 import { getWorldStateLedgerSnapshot } from './world-state.service'
 import { getAntiAiDashboardSummary } from './anti-ai-rule.service'
+import { getFeedbackRecurrenceDashboardSummary } from './feedback-recurrence.service'
 
 interface QualityDimensionScore extends AIScoreDimension {}
 
@@ -160,6 +162,8 @@ const CHAPTER_FUNCTION_TAGS: ChapterFunctionTag[] = ['setup', 'progression', 're
 const CHAPTER_FUNCTION_WEAK_TAGS: ChapterFunctionTag[] = ['setup', 'exposition', 'breather']
 const QUALITY_RISK_LABELS: Record<QualityDashboardRiskKind, string> = {
   language_drift: 'AI味退化',
+  feedback_recurrence: '审校复现',
+  style_compliance: '风格硬约束',
   story_dynamics: '主角与节奏',
   chapter_function: '章节功能',
   story_arc: '故事弧推进',
@@ -794,6 +798,49 @@ function parseDialogueReview(raw?: string | null): ChapterDialogueReviewData | n
       risks,
       similarities,
       drifts,
+    }
+  } catch {
+    return null
+  }
+}
+
+function parseStyleCompliance(raw?: string | null): StyleComplianceResult | null {
+  if (!raw?.trim()) return null
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    const current = parsed.style_compliance
+    if (!current || typeof current !== 'object' || Array.isArray(current)) return null
+    const record = current as Record<string, unknown>
+    const deviations = Array.isArray(record.deviations) ? record.deviations.map(asText).filter(Boolean) : []
+    const rewriteHints = Array.isArray(record.rewriteHints) ? record.rewriteHints.map(asText).filter(Boolean) : []
+    const matchedForbiddenPatterns = Array.isArray(record.matchedForbiddenPatterns)
+      ? record.matchedForbiddenPatterns.map(asText).filter(Boolean)
+      : []
+    const score = clampNumber(record.score, 0, 100, 0)
+    const summary = asText(record.summary)
+    if (!summary && deviations.length === 0 && rewriteHints.length === 0 && matchedForbiddenPatterns.length === 0 && score <= 0) {
+      return null
+    }
+    return {
+      status: record.status === 'rewrite' ? 'rewrite' : record.status === 'warning' ? 'warning' : 'pass',
+      score,
+      summary,
+      deviations,
+      rewriteHints,
+      matchedForbiddenPatterns,
+      forbiddenPatternHitCount: clampNumber(record.forbiddenPatternHitCount, 0, 999, matchedForbiddenPatterns.length),
+      referenceMetrics: {
+        avgSentenceLength: clampNumber((record.referenceMetrics as Record<string, unknown> | undefined)?.avgSentenceLength, 0, 9999, 0),
+        avgParagraphLength: clampNumber((record.referenceMetrics as Record<string, unknown> | undefined)?.avgParagraphLength, 0, 9999, 0),
+        dialogueLineRate: clampNumber((record.referenceMetrics as Record<string, unknown> | undefined)?.dialogueLineRate, 0, 100, 0),
+        abstractTokenDensity: clampNumber((record.referenceMetrics as Record<string, unknown> | undefined)?.abstractTokenDensity, 0, 100, 0),
+      },
+      actualMetrics: {
+        avgSentenceLength: clampNumber((record.actualMetrics as Record<string, unknown> | undefined)?.avgSentenceLength, 0, 9999, 0),
+        avgParagraphLength: clampNumber((record.actualMetrics as Record<string, unknown> | undefined)?.avgParagraphLength, 0, 9999, 0),
+        dialogueLineRate: clampNumber((record.actualMetrics as Record<string, unknown> | undefined)?.dialogueLineRate, 0, 100, 0),
+        abstractTokenDensity: clampNumber((record.actualMetrics as Record<string, unknown> | undefined)?.abstractTokenDensity, 0, 100, 0),
+      },
     }
   } catch {
     return null
@@ -1615,6 +1662,8 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
   const recentWorldStateAlerts = worldStateLedger.alerts.slice(0, 8)
   const antiAiSummary = getAntiAiDashboardSummary(novelId)
   const antiAiSignalByChapterId = new Map(antiAiSummary.chapterSignals.map((entry) => [entry.chapterId, entry] as const))
+  const feedbackSummary = getFeedbackRecurrenceDashboardSummary(novelId)
+  const feedbackSignalByChapterId = new Map(feedbackSummary.chapterSignals.map((entry) => [entry.chapterId, entry] as const))
   const worldStateAlertMap = worldStateLedger.alerts.reduce<Map<number, WorldStateAlert[]>>((result, alert) => {
     const current = result.get(alert.chapterNum) || []
     current.push(alert)
@@ -1693,6 +1742,7 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
 
     const scores = safeParseScores(row.aiScoreJson)
     const dialogueReview = parseDialogueReview(row.reviewNotesJson) || undefined
+    const styleCompliance = parseStyleCompliance(row.reviewNotesJson) || undefined
     let overallScore = 0
     let aiLikeRate = 0
     let weakDimensions: string[] = []
@@ -1744,6 +1794,8 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
       dimensions,
       languageDriftMetrics,
       antiAiRuleHits: antiAiSignalByChapterId.get(row.id)?.rules,
+      feedbackRecurrenceHits: feedbackSignalByChapterId.get(row.id)?.issues,
+      styleCompliance,
       dialogueReview,
       storyDynamics: hasStoryDynamics ? storyDynamics : undefined,
       chapterFunction: chapterFunctionDetail
@@ -1772,6 +1824,27 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     ...DIMENSION_NAMES.map((dimension) => ({ dimension, count: weakDimFreq.get(dimension) || 0 })),
     ...Array.from(weakDimFreq.entries()).filter(([dimension]) => !DIMENSION_NAMES.includes(dimension)).map(([dimension, count]) => ({ dimension, count })),
   ].sort((left, right) => right.count - left.count || left.dimension.localeCompare(right.dimension))
+  const styleComplianceEntries = chapterDetails
+    .filter((entry): entry is QualityDashboardData['chapterDetails'][number] & { styleCompliance: StyleComplianceResult } => Boolean(entry.styleCompliance))
+  const styleComplianceAlerts: QualityDashboardData['styleCompliance']['recentAlerts'] = styleComplianceEntries
+    .filter((entry) => entry.styleCompliance.status !== 'pass')
+    .map((entry) => ({
+      chapterId: entry.chapterId,
+      chapterNum: entry.chapterNum,
+      title: entry.title,
+      status: (entry.styleCompliance.status === 'rewrite' ? 'rewrite' : 'warning') as 'rewrite' | 'warning',
+      score: entry.styleCompliance.score,
+      summary: entry.styleCompliance.summary || entry.styleCompliance.deviations[0] || '风格硬约束出现偏移。',
+    }))
+    .sort((left, right) => left.score - right.score || right.chapterNum - left.chapterNum)
+  const styleComplianceSummary: QualityDashboardData['styleCompliance'] = {
+    analyzedChapterCount: styleComplianceEntries.length,
+    passCount: styleComplianceEntries.filter((entry) => entry.styleCompliance.status === 'pass').length,
+    warningCount: styleComplianceEntries.filter((entry) => entry.styleCompliance.status === 'warning').length,
+    rewriteCount: styleComplianceEntries.filter((entry) => entry.styleCompliance.status === 'rewrite').length,
+    averageScore: roundMetric(averageNumbers(styleComplianceEntries.map((entry) => entry.styleCompliance.score))),
+    recentAlerts: styleComplianceAlerts.slice(0, 6),
+  }
 
   const averageLanguageDriftMetrics = averageLanguageDrift(languageMetricsList)
   const languageDriftTrendSummaries = LANGUAGE_DRIFT_METRICS.map(({ key, label }) => summarizeTrend(key, label, languageDriftTrends[key]))
@@ -2109,6 +2182,47 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
   const volumeArcProgressById = new Map(storyArcProgressSnapshot.volumeEntries.map((entry) => [entry.volumeId, entry] as const))
   const volumeRecallById = new Map(volumeRecallDiagnostics.map((entry) => [entry.volumeId, entry] as const))
   const volumeWorldStateById = new Map(volumeWorldStateStability.map((entry) => [entry.volumeId, entry] as const))
+  const feedbackVolumeEntries: QualityDashboardData['feedbackRecurrence']['volumeEntries'] = volumeRows
+    .reduce<QualityDashboardData['feedbackRecurrence']['volumeEntries']>((result, volume) => {
+      const chapterEntries = rows.filter((row) => row.volumeId === volume.id)
+      if (chapterEntries.length === 0) return result
+      const chapterIdSet = new Set(chapterEntries.map((row) => row.id))
+      const signals = feedbackSummary.chapterSignals.filter((entry) => chapterIdSet.has(entry.chapterId))
+      const issueToChapterNums = new Map<string, number[]>()
+      const promotedIssueSet = new Set<string>()
+      const highRiskIssueSet = new Set<string>()
+      const pauseSuggestedIssueSet = new Set<string>()
+      signals.forEach((signal) => {
+        signal.issues.forEach((issue) => {
+          const current = issueToChapterNums.get(issue.issueType) || []
+          if (!current.includes(signal.chapterNum)) current.push(signal.chapterNum)
+          current.sort((left, right) => left - right)
+          issueToChapterNums.set(issue.issueType, current)
+          if (issue.promotedToHardConstraint) promotedIssueSet.add(issue.issueType)
+          if (issue.pauseSuggested) pauseSuggestedIssueSet.add(issue.issueType)
+        })
+      })
+      feedbackSummary.recentAlerts
+        .filter((alert) => alert.severity === 'critical')
+        .filter((alert) => alert.chapterNums.some((chapterNum) => chapterNum >= (chapterEntries[0]?.chapterNum || 0) && chapterNum <= (chapterEntries[chapterEntries.length - 1]?.chapterNum || 0)))
+        .forEach((alert) => highRiskIssueSet.add(alert.issueType))
+      result.push({
+        volumeId: volume.id,
+        volumeNumber: volume.volumeNumber || volume.id,
+        volumeName: formatVolumeName(volume.id, volume.volumeNumber, volume.title),
+        chapterStart: chapterEntries[0]?.chapterNum || 0,
+        chapterEnd: chapterEntries[chapterEntries.length - 1]?.chapterNum || 0,
+        chapterCount: chapterEntries.length,
+        hitChapterCount: signals.length,
+        recurringIssueCount: [...issueToChapterNums.values()].filter((chapterNums) => chapterNums.length >= 2).length,
+        promotedIssueCount: promotedIssueSet.size,
+        highRiskIssueCount: highRiskIssueSet.size,
+        pauseSuggestedIssueCount: pauseSuggestedIssueSet.size,
+      })
+      return result
+    }, [])
+    .sort((left, right) => left.volumeNumber - right.volumeNumber || left.chapterStart - right.chapterStart)
+  const feedbackVolumeById = new Map(feedbackVolumeEntries.map((entry) => [entry.volumeId, entry] as const))
   const antiAiVolumeEntries: QualityDashboardData['antiAiRecurrence']['volumeEntries'] = volumeRows
     .reduce<QualityDashboardData['antiAiRecurrence']['volumeEntries']>((result, volume) => {
       const chapterEntries = rows.filter((row) => row.volumeId === volume.id)
@@ -2146,6 +2260,9 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
   const volumeQualityMetrics: VolumeQualityMetrics[] = volumeChapterRanges.map((volumeRange) => {
     const chapterEntries = chapterDetails.filter((entry) => entry.volumeId === volumeRange.volumeId)
     const scoredChapterEntries = chapterEntries.filter((entry) => entry.dimensions.length > 0)
+    const volumeStyleComplianceEntries = chapterEntries
+      .filter((entry): entry is typeof chapterEntries[number] & { styleCompliance: StyleComplianceResult } => Boolean(entry.styleCompliance))
+    const volumeStyleComplianceAlerts = volumeStyleComplianceEntries.filter((entry) => entry.styleCompliance.status !== 'pass')
     const languageEntry = volumeLanguageDriftById.get(volumeRange.volumeId)
     const storyEntry = volumeStoryDynamicsById.get(volumeRange.volumeId)
     const functionEntry = volumeChapterFunctionById.get(volumeRange.volumeId)
@@ -2263,6 +2380,26 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
           volumeRange.volumeId,
         )]
         : []),
+      ...((feedbackVolumeById.get(volumeRange.volumeId)?.highRiskIssueCount || 0) > 0
+        ? [createDashboardRiskItem(
+          'feedback_recurrence',
+          (feedbackVolumeById.get(volumeRange.volumeId)?.pauseSuggestedIssueCount || 0) > 0 ? 'critical' : 'warning',
+          `${volumeRange.volumeName} 审校复现升温`,
+          `本卷已有 ${feedbackVolumeById.get(volumeRange.volumeId)?.highRiskIssueCount || 0} 类问题在 5 章窗口内高风险复现。`,
+          [volumeRange.chapterStart, volumeRange.chapterEnd],
+          volumeRange.volumeId,
+        )]
+        : []),
+      ...(volumeStyleComplianceAlerts.length > 0
+        ? [createDashboardRiskItem(
+          'style_compliance',
+          volumeStyleComplianceAlerts.some((entry) => entry.styleCompliance.status === 'rewrite') ? 'critical' : 'warning',
+          `${volumeRange.volumeName} 文风硬约束漂移`,
+          `本卷有 ${volumeStyleComplianceAlerts.filter((entry) => entry.styleCompliance.status === 'rewrite').length} 章达到重写阈值，${volumeStyleComplianceAlerts.filter((entry) => entry.styleCompliance.status === 'warning').length} 章出现预警。`,
+          volumeStyleComplianceAlerts.map((entry) => entry.chapterNum),
+          volumeRange.volumeId,
+        )]
+        : []),
     ].sort(sortDashboardRisks).slice(0, 6)
     return {
       volumeId: volumeRange.volumeId,
@@ -2361,7 +2498,25 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
       [alert.chapterNum],
       volumeIdByChapterNum.get(alert.chapterNum),
     )),
+    ...feedbackSummary.recentAlerts.slice(0, 3).map((alert) => createDashboardRiskItem(
+      'feedback_recurrence',
+      alert.pauseSuggested ? 'critical' : alert.severity === 'critical' ? 'warning' : 'info',
+      `${alert.title} 复现预警`,
+      alert.detail,
+      alert.chapterNums,
+      volumeIdByChapterNum.get(alert.chapterNums.at(-1) || 0),
+    )),
   ]
+  globalRisks.push(
+    ...styleComplianceAlerts.slice(0, 3).map((alert) => createDashboardRiskItem(
+      'style_compliance',
+      alert.status === 'rewrite' ? 'critical' : 'warning',
+      `第${alert.chapterNum}章文风偏移`,
+      alert.summary,
+      [alert.chapterNum],
+      volumeIdByChapterNum.get(alert.chapterNum),
+    )),
+  )
   const allRiskItems = [...volumeQualityMetrics.flatMap((entry) => entry.topRisks), ...globalRisks].sort(sortDashboardRisks)
   const criticalRiskCount = allRiskItems.filter((item) => item.severity === 'critical').length
   const warningRiskCount = allRiskItems.filter((item) => item.severity === 'warning').length
@@ -2430,6 +2585,19 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
       recentAlerts: antiAiSummary.recentAlerts,
       volumeEntries: antiAiVolumeEntries,
     },
+    feedbackRecurrence: {
+      totalHitCount: feedbackSummary.overview.totalHitCount,
+      hitChapterCount: feedbackSummary.overview.hitChapterCount,
+      recurringIssueCount: feedbackSummary.overview.recurringIssueCount,
+      promotedIssueCount: feedbackSummary.overview.promotedIssueCount,
+      highRiskIssueCount: feedbackSummary.overview.highRiskIssueCount,
+      pauseSuggestedIssueCount: feedbackSummary.overview.pauseSuggestedIssueCount,
+      topRepeatedIssues: feedbackSummary.topRepeatedIssues,
+      promotedIssues: feedbackSummary.promotedIssues,
+      recentAlerts: feedbackSummary.recentAlerts,
+      volumeEntries: feedbackVolumeEntries,
+    },
+    styleCompliance: styleComplianceSummary,
     dialogueFingerprintStats: dialogueSnapshot.dialogueFingerprintStats,
     characterDialogueSignatures: dialogueSnapshot.characterDialogueSignatures,
     crossCharacterDialogueSimilarity: dialogueSnapshot.crossCharacterDialogueSimilarity,

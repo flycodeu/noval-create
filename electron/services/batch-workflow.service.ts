@@ -23,6 +23,7 @@ import { throwUserFacingError } from '../utils/user-facing-error'
 import { generateChapterContent, getChapter } from './chapter.service'
 import { generateCharacterBatchChunk } from './character.service'
 import { runChapterPublishCheck } from './context-impact.service'
+import { getFeedbackRecurrenceBatchPauseSignal } from './feedback-recurrence.service'
 import { generateFactionBatchChunk } from './faction.service'
 import { loadSubplotAutoGenerateContext, polishGeneratedSubplots, tryGenerateSubplotBatch } from './core-settings.service'
 import { generateStoryItemsBatchChunk } from './item.service'
@@ -1033,6 +1034,19 @@ async function runChapterBatchGenerateWorkflow(taskId: number, sender?: WebConte
           childTaskId,
           message: `第 ${chapterNum} 章章节门阻断，章节批量任务已暂停：${publishCheck.summary}`,
           errorMessage: publishCheck.summary,
+        })
+        break
+      }
+
+      const feedbackPauseSignal = getFeedbackRecurrenceBatchPauseSignal(chapter.novelId, chapterNum)
+      if (feedbackPauseSignal) {
+        pauseChapterBatchWorkflow(taskId, sender, progress, {
+          chapterId,
+          chapterNum,
+          childTaskId,
+          message: `第 ${chapterNum} 章触发审校复现闭环暂停：${feedbackPauseSignal.detail}`,
+          errorMessage: feedbackPauseSignal.detail,
+          warnings: `审校复现高风险：${feedbackPauseSignal.title}`,
         })
         break
       }

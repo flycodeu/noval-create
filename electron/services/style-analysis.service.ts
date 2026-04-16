@@ -1,28 +1,22 @@
 import { eq } from 'drizzle-orm'
+import type { StyleFingerprint, StyleHardGuard } from '../../src/types'
 import { getDb } from '../database/db'
 import { styleFingerprints } from '../database/schema'
 import { getDefaultAdapter, getAdapterById } from './model.service'
 
-export interface StyleFingerprint {
-  avgSentenceLength: number
-  sentencePatterns: string[]
-  wordFrequencyProfile: Record<string, string[]>
-  narrativeTechniques: string
-  dialogueStyle: string
-  descriptionDensity: string
-  paceProfile: string
-  toneKeywords: string[]
-  forbiddenPatterns: string[]
-  exampleExcerpts: string[]
-}
+export type { StyleFingerprint, StyleHardGuard }
 
 const MAX_EXCERPT_LENGTH = 140
+const MAX_ANALYSIS_WINDOW_COUNT = 6
 
 const STYLE_ANALYSIS_PROMPT = `你是一位专业的文学风格分析师。请仔细阅读以下参考文本，提取其写作风格特征。
 
 请以严格JSON格式返回，包含以下字段：
 {
   "avgSentenceLength": <数字，平均句子字数>,
+  "avgParagraphLength": <数字，平均段落字数>,
+  "dialogueLineRate": <数字，对话段占比百分比>,
+  "abstractTokenDensity": <数字，抽象词密度百分比>,
   "sentencePatterns": [<字符串数组，如"短长交替","多用破折号">],
   "wordFrequencyProfile": {"高频动词": [...], "偏好形容词": [...], "特色词汇": [...]},
   "narrativeTechniques": "<叙事技巧描述，如'以动作驱动，少用心理独白'>",
@@ -36,18 +30,42 @@ const STYLE_ANALYSIS_PROMPT = `你是一位专业的文学风格分析师。请�
 
 注意：只返回JSON，不要添加额外说明。`
 
+function clampPercentage(value: unknown, fallback: number): number {
+  const numeric = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(numeric)) return fallback
+  return Math.max(0, Math.min(100, Math.round(numeric)))
+}
+
+function normalizePositiveNumber(value: unknown, fallback: number): number {
+  const numeric = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(numeric) || numeric <= 0) return fallback
+  return Math.round(numeric)
+}
+
+function buildRepresentativeChunks(text: string, maxChunkSize = 8000): string[] {
+  if (text.length <= maxChunkSize) return [text]
+  const maxWindows = Math.min(MAX_ANALYSIS_WINDOW_COUNT, Math.ceil(text.length / maxChunkSize))
+  const maxStart = Math.max(0, text.length - maxChunkSize)
+  const seen = new Set<number>()
+  const chunks: string[] = []
+
+  for (let index = 0; index < maxWindows; index += 1) {
+    const ratio = maxWindows === 1 ? 0 : index / (maxWindows - 1)
+    const start = Math.min(maxStart, Math.max(0, Math.round(maxStart * ratio)))
+    if (seen.has(start)) continue
+    seen.add(start)
+    chunks.push(text.slice(start, start + maxChunkSize))
+  }
+
+  return chunks
+}
+
 export async function analyzeReferenceText(
   text: string,
   modelConfigId?: number,
 ): Promise<StyleFingerprint> {
   const adapter = modelConfigId ? await getAdapterById(modelConfigId) : await getDefaultAdapter()
-
-  // Split text into chunks if too long
-  const maxChunkSize = 8000
-  const chunks: string[] = []
-  for (let i = 0; i < text.length; i += maxChunkSize) {
-    chunks.push(text.slice(i, i + maxChunkSize))
-  }
+  const chunks = buildRepresentativeChunks(text)
 
   if (chunks.length === 1) {
     const result = await adapter.chat([
@@ -58,7 +76,7 @@ export async function analyzeReferenceText(
 
   // Multi-chunk: analyze each, then merge
   const partialResults: StyleFingerprint[] = []
-  for (const chunk of chunks.slice(0, 4)) { // Cap at 4 chunks (32000 chars)
+  for (const chunk of chunks) {
     const result = await adapter.chat([
       { role: 'user', content: `${STYLE_ANALYSIS_PROMPT}\n\n---\n参考文本片段：\n${chunk}` },
     ], { temperature: 0.3, maxTokens: 4096 })
@@ -114,7 +132,10 @@ export function parseStyleResult(raw: string): StyleFingerprint {
   try {
     const parsed = JSON.parse(jsonMatch[0])
     return {
-      avgSentenceLength: typeof parsed.avgSentenceLength === 'number' ? parsed.avgSentenceLength : 20,
+      avgSentenceLength: normalizePositiveNumber(parsed.avgSentenceLength, 20),
+      avgParagraphLength: normalizePositiveNumber(parsed.avgParagraphLength, 85),
+      dialogueLineRate: clampPercentage(parsed.dialogueLineRate, 25),
+      abstractTokenDensity: clampPercentage(parsed.abstractTokenDensity, 8),
       sentencePatterns: normalizeStyleStringArray(parsed.sentencePatterns, 10),
       wordFrequencyProfile: normalizeWordFrequencyProfile(parsed.wordFrequencyProfile),
       narrativeTechniques: parsed.narrativeTechniques || '',
@@ -124,6 +145,7 @@ export function parseStyleResult(raw: string): StyleFingerprint {
       toneKeywords: normalizeStyleStringArray(parsed.toneKeywords, 12),
       forbiddenPatterns: normalizeStyleStringArray(parsed.forbiddenPatterns, 12),
       exampleExcerpts: normalizeExampleExcerpts(parsed.exampleExcerpts),
+      styleHardGuard: undefined,
     }
   } catch {
     return getDefaultFingerprint()
@@ -133,6 +155,9 @@ export function parseStyleResult(raw: string): StyleFingerprint {
 export function getDefaultFingerprint(): StyleFingerprint {
   return {
     avgSentenceLength: 20,
+    avgParagraphLength: 85,
+    dialogueLineRate: 25,
+    abstractTokenDensity: 8,
     sentencePatterns: [],
     wordFrequencyProfile: {},
     narrativeTechniques: '',
@@ -152,6 +177,17 @@ export function mergeStyleResults(results: StyleFingerprint[]): StyleFingerprint
   const merged = getDefaultFingerprint()
   merged.avgSentenceLength = Math.round(
     results.reduce((sum, r) => sum + r.avgSentenceLength, 0) / results.length,
+  )
+  merged.avgParagraphLength = Math.round(
+    results.reduce((sum, r) => sum + r.avgParagraphLength, 0) / results.length,
+  )
+  merged.dialogueLineRate = clampPercentage(
+    results.reduce((sum, r) => sum + r.dialogueLineRate, 0) / results.length,
+    25,
+  )
+  merged.abstractTokenDensity = clampPercentage(
+    results.reduce((sum, r) => sum + r.abstractTokenDensity, 0) / results.length,
+    8,
   )
   merged.sentencePatterns = normalizeStyleStringArray(results.flatMap((r) => r.sentencePatterns), 12)
   merged.toneKeywords = normalizeStyleStringArray(results.flatMap((r) => r.toneKeywords), 12)
@@ -176,6 +212,67 @@ export function mergeStyleResults(results: StyleFingerprint[]): StyleFingerprint
   }
 
   return merged
+}
+
+function buildNumericRange(target: number, minRatio: number, maxRatio: number, floor: number, ceil = Number.MAX_SAFE_INTEGER) {
+  const normalizedTarget = Math.max(floor, Math.min(ceil, Math.round(target)))
+  const min = Math.max(floor, Math.min(ceil, Math.round(normalizedTarget * minRatio)))
+  const max = Math.max(min, Math.min(ceil, Math.round(normalizedTarget * maxRatio)))
+  return { min, max, target: normalizedTarget }
+}
+
+function parseStoredFingerprint(raw?: string | null): StyleFingerprint | null {
+  if (!raw?.trim()) return null
+  try {
+    return {
+      ...getDefaultFingerprint(),
+      ...parseStyleResult(raw),
+    }
+  } catch {
+    return null
+  }
+}
+
+export function buildStyleHardGuard(fingerprint: StyleFingerprint): StyleHardGuard {
+  const sentenceLengthRange = buildNumericRange(fingerprint.avgSentenceLength || 20, 0.72, 1.32, 6)
+  const paragraphLengthRange = buildNumericRange(fingerprint.avgParagraphLength || 85, 0.68, 1.38, 24)
+  const dialogueLineRateRange = buildNumericRange(fingerprint.dialogueLineRate || 25, 0.6, 1.4, 0, 100)
+  const abstractTokenDensityMax = Math.max(2, Math.min(100, Math.round((fingerprint.abstractTokenDensity || 8) + 4)))
+
+  const hardRules = [
+    sentenceLengthRange.target > 0
+      ? `句长尽量维持在 ${sentenceLengthRange.min}-${sentenceLengthRange.max} 字，目标值约 ${sentenceLengthRange.target} 字。`
+      : '',
+    paragraphLengthRange.target > 0
+      ? `单段长度尽量维持在 ${paragraphLengthRange.min}-${paragraphLengthRange.max} 字，避免连续大段解释。`
+      : '',
+    `对话段占比控制在 ${dialogueLineRateRange.min}% - ${dialogueLineRateRange.max}% 之间，避免整章口播或整章无对白。`,
+    `抽象词密度不高于 ${abstractTokenDensityMax}% ，优先用动作、反应、物理细节落地。`,
+    fingerprint.narrativeTechniques ? `叙事执行：${fingerprint.narrativeTechniques}` : '',
+    fingerprint.dialogueStyle ? `对白执行：${fingerprint.dialogueStyle}` : '',
+    fingerprint.descriptionDensity ? `描写密度：${fingerprint.descriptionDensity}` : '',
+    fingerprint.paceProfile ? `节奏要求：${fingerprint.paceProfile}` : '',
+    fingerprint.sentencePatterns.length > 0 ? `句式骨架：${fingerprint.sentencePatterns.join('、')}` : '',
+    fingerprint.toneKeywords.length > 0 ? `语气边界：${fingerprint.toneKeywords.join('、')}` : '',
+  ].filter(Boolean)
+
+  const rewriteTriggers = [
+    fingerprint.forbiddenPatterns.length > 0 ? `命中禁用模式：${fingerprint.forbiddenPatterns.join('；')}` : '',
+    `平均句长偏离目标超过 ${Math.max(6, Math.round(sentenceLengthRange.target * 0.45))} 字。`,
+    `段落长度持续偏离目标，出现大段解释或碎段堆砌。`,
+    `对话段占比偏离参考超过 18 个百分点。`,
+    `抽象词密度显著高于参考线。`,
+  ].filter(Boolean)
+
+  return {
+    summary: `句长约 ${sentenceLengthRange.target} 字，段长约 ${paragraphLengthRange.target} 字，对话段占比约 ${dialogueLineRateRange.target}%，抽象词密度不高于 ${abstractTokenDensityMax}%。`,
+    sentenceLengthRange,
+    paragraphLengthRange,
+    dialogueLineRateRange,
+    abstractTokenDensityMax,
+    hardRules,
+    rewriteTriggers,
+  }
 }
 
 export async function createStyleFingerprint(
@@ -203,6 +300,14 @@ export function getStyleFingerprint(id: number) {
   return db.select().from(styleFingerprints).where(eq(styleFingerprints.id, id)).all()[0] || null
 }
 
+export function getStyleFingerprintPayload(id: number): { record: ReturnType<typeof getStyleFingerprint>; fingerprint: StyleFingerprint } | null {
+  const record = getStyleFingerprint(id)
+  if (!record) return null
+  const fingerprint = parseStoredFingerprint(record.fingerprintJson)
+  if (!fingerprint) return null
+  return { record, fingerprint }
+}
+
 export function listStyleFingerprints(novelId?: number) {
   const db = getDb()
   if (novelId) {
@@ -219,20 +324,17 @@ export function deleteStyleFingerprint(id: number) {
 }
 
 export function buildStyleFingerprintPromptSection(fingerprintId: number): string {
-  const record = getStyleFingerprint(fingerprintId)
-  if (!record || !record.fingerprintJson) return ''
-
-  let fp: StyleFingerprint
-  try {
-    fp = JSON.parse(record.fingerprintJson)
-  } catch {
-    return ''
-  }
+  const payload = getStyleFingerprintPayload(fingerprintId)
+  if (!payload) return ''
+  const { record, fingerprint: fp } = payload
 
   const parts: string[] = []
   parts.push(`【目标风格指纹 · ${record.name}】`)
 
   if (fp.avgSentenceLength) parts.push(`平均句长：${fp.avgSentenceLength}字`)
+  if (fp.avgParagraphLength) parts.push(`平均段长：${fp.avgParagraphLength}字`)
+  parts.push(`对话段占比：${fp.dialogueLineRate}%`)
+  parts.push(`抽象词密度参考上限：${fp.abstractTokenDensity}%`)
   if (fp.sentencePatterns.length > 0) parts.push(`句式偏好：${fp.sentencePatterns.join('，')}`)
   if (fp.narrativeTechniques) parts.push(`叙事技巧：${fp.narrativeTechniques}`)
   if (fp.dialogueStyle) parts.push(`对话风格：${fp.dialogueStyle}`)
@@ -248,4 +350,35 @@ export function buildStyleFingerprintPromptSection(fingerprintId: number): strin
   }
 
   return parts.join('\n')
+}
+
+export function buildStyleHardGuardPromptSection(fingerprintId: number): string {
+  const payload = getStyleFingerprintPayload(fingerprintId)
+  if (!payload) return ''
+  const guard = buildStyleHardGuard(payload.fingerprint)
+
+  const parts = [
+    `【风格硬约束 · ${payload.record.name}】`,
+    guard.summary,
+    ...guard.hardRules.map((item) => `- ${item}`),
+    guard.rewriteTriggers.length > 0 ? '触发重写条件：' : '',
+    ...guard.rewriteTriggers.map((item) => `- ${item}`),
+  ].filter(Boolean)
+
+  return parts.join('\n')
+}
+
+export function getLatestStyleFingerprintForNovel(novelId: number): {
+  record: ReturnType<typeof getStyleFingerprint>
+  fingerprint: StyleFingerprint
+} | null {
+  const fingerprints = listStyleFingerprints(novelId)
+  const latest = fingerprints[fingerprints.length - 1]
+  if (!latest) return null
+  const fingerprint = parseStoredFingerprint(latest.fingerprintJson)
+  if (!fingerprint) return null
+  return {
+    record: latest,
+    fingerprint,
+  }
 }

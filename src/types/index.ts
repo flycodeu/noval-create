@@ -1377,6 +1377,9 @@ export type HardConstraintSourceLabel =
   | 'itemSummary'
   | 'openLoops'
   | 'continuityNotes'
+  | 'feedbackRecurrence'
+  | 'antiAiRules'
+  | 'styleHardGuard'
 
 export interface HardConstraintEntryPreview {
   label: HardConstraintSourceLabel
@@ -1641,6 +1644,7 @@ export interface ChapterPublishCheckScoreBreakdown {
   hookStrengthScore: number
   storyDynamicsScore: number
   languageNaturalnessScore: number
+  styleComplianceScore: number
   contractScore: number
   hookScore: number
   povPurityScore: number
@@ -3164,8 +3168,83 @@ export interface VolumeAntiAiRecurrenceEntry {
   highRiskRuleCount: number
 }
 
+export type FeedbackRecurrenceIssueType =
+  | 'cost_evaporation'
+  | 'forced_reversal'
+  | 'too_smooth'
+  | 'ai_slogan'
+  | 'template_emotion'
+  | 'pov_drift'
+  | 'thread_stalled'
+  | 'dialogue_homogenized'
+
+export type FeedbackRecurrenceSource =
+  | 'review'
+  | 'chapter_gate'
+  | 'contract_validation'
+  | 'anti_ai'
+
+export interface FeedbackRecurrenceIssueDetail {
+  issueType: FeedbackRecurrenceIssueType
+  title: string
+  severity: 'low' | 'medium' | 'high'
+  source: FeedbackRecurrenceSource
+  detail: string
+  promotedToHardConstraint: boolean
+  pauseSuggested: boolean
+}
+
+export interface FeedbackRecurrenceTrendSummary {
+  issueType: FeedbackRecurrenceIssueType
+  title: string
+  severity: 'low' | 'medium' | 'high'
+  chapterCount: number
+  hitCount: number
+  promotedCount: number
+  chapterNums: number[]
+  lastChapterNum: number
+  sourceBreakdown: Record<FeedbackRecurrenceSource, number>
+  detail: string
+  pauseSuggested: boolean
+}
+
+export interface FeedbackRecurrencePromotedIssueSummary {
+  issueType: FeedbackRecurrenceIssueType
+  title: string
+  chapterNums: number[]
+  avoid: string
+  prefer?: string
+  pauseSuggested: boolean
+}
+
+export interface FeedbackRecurrenceAlert {
+  issueType: FeedbackRecurrenceIssueType
+  title: string
+  severity: 'warning' | 'critical'
+  chapterNums: number[]
+  lastChapterNum: number
+  detail: string
+  pauseSuggested: boolean
+}
+
+export interface VolumeFeedbackRecurrenceEntry {
+  volumeId: number
+  volumeNumber: number
+  volumeName: string
+  chapterStart: number
+  chapterEnd: number
+  chapterCount: number
+  hitChapterCount: number
+  recurringIssueCount: number
+  promotedIssueCount: number
+  highRiskIssueCount: number
+  pauseSuggestedIssueCount: number
+}
+
 export type QualityDashboardRiskKind =
   | 'language_drift'
+  | 'feedback_recurrence'
+  | 'style_compliance'
   | 'story_dynamics'
   | 'chapter_function'
   | 'story_arc'
@@ -3410,6 +3489,33 @@ export interface QualityDashboardData {
     recentAlerts: AntiAiRecentAlert[]
     volumeEntries: VolumeAntiAiRecurrenceEntry[]
   }
+  feedbackRecurrence: {
+    totalHitCount: number
+    hitChapterCount: number
+    recurringIssueCount: number
+    promotedIssueCount: number
+    highRiskIssueCount: number
+    pauseSuggestedIssueCount: number
+    topRepeatedIssues: FeedbackRecurrenceTrendSummary[]
+    promotedIssues: FeedbackRecurrencePromotedIssueSummary[]
+    recentAlerts: FeedbackRecurrenceAlert[]
+    volumeEntries: VolumeFeedbackRecurrenceEntry[]
+  }
+  styleCompliance: {
+    analyzedChapterCount: number
+    passCount: number
+    warningCount: number
+    rewriteCount: number
+    averageScore: number
+    recentAlerts: Array<{
+      chapterId: number
+      chapterNum: number
+      title: string
+      status: 'warning' | 'rewrite'
+      score: number
+      summary: string
+    }>
+  }
   dialogueFingerprintStats: DialogueFingerprintStats
   characterDialogueSignatures: CharacterDialogueSignature[]
   crossCharacterDialogueSimilarity: CrossCharacterDialogueSimilarity[]
@@ -3518,6 +3624,8 @@ export interface QualityDashboardData {
     dimensions: AIScoreDimension[]
     languageDriftMetrics?: LanguageDriftMetrics
     antiAiRuleHits?: AntiAiRuleHitDetail[]
+    feedbackRecurrenceHits?: FeedbackRecurrenceIssueDetail[]
+    styleCompliance?: StyleComplianceResult
     dialogueReview?: ChapterDialogueReviewData
     storyDynamics?: ChapterStoryDynamics
     chapterFunction?: ChapterFunctionDetail
@@ -3533,8 +3641,52 @@ export interface QualityDashboardData {
   averageAiLikeRate: number
 }
 
+export interface StyleHardGuard {
+  summary: string
+  sentenceLengthRange: {
+    min: number
+    max: number
+    target: number
+  }
+  paragraphLengthRange: {
+    min: number
+    max: number
+    target: number
+  }
+  dialogueLineRateRange: {
+    min: number
+    max: number
+    target: number
+  }
+  abstractTokenDensityMax: number
+  hardRules: string[]
+  rewriteTriggers: string[]
+}
+
+export interface StyleComplianceMetricSnapshot {
+  avgSentenceLength: number
+  avgParagraphLength: number
+  dialogueLineRate: number
+  abstractTokenDensity: number
+}
+
+export interface StyleComplianceResult {
+  status: 'pass' | 'warning' | 'rewrite'
+  score: number
+  summary: string
+  deviations: string[]
+  rewriteHints: string[]
+  matchedForbiddenPatterns: string[]
+  forbiddenPatternHitCount: number
+  referenceMetrics: StyleComplianceMetricSnapshot
+  actualMetrics: StyleComplianceMetricSnapshot
+}
+
 export interface StyleFingerprint {
   avgSentenceLength: number
+  avgParagraphLength: number
+  dialogueLineRate: number
+  abstractTokenDensity: number
   sentencePatterns: string[]
   wordFrequencyProfile: Record<string, string[]>
   narrativeTechniques: string
@@ -3544,6 +3696,7 @@ export interface StyleFingerprint {
   toneKeywords: string[]
   forbiddenPatterns: string[]
   exampleExcerpts: string[]
+  styleHardGuard?: StyleHardGuard
 }
 
 export interface StyleFingerprintRecord {

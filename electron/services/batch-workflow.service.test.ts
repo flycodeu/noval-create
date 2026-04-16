@@ -41,6 +41,12 @@ const taskRows = new Map<number, MockTask>()
 const chapterRows = new Map<number, ChapterRow>()
 const chapterScenarios = new Map<number, ChapterScenario[]>()
 const publishChecks = new Map<number, PublishCheck[]>()
+const feedbackPauseSignals = new Map<number, {
+  issueType: string
+  title: string
+  detail: string
+  chapterNums: number[]
+}>()
 let nextTaskId = 1000
 
 function getProgress(taskId: number) {
@@ -102,6 +108,10 @@ vi.mock('./context-impact.service', () => ({
       summary: '通过',
     }
   }),
+}))
+
+vi.mock('./feedback-recurrence.service', () => ({
+  getFeedbackRecurrenceBatchPauseSignal: vi.fn((_novelId: number, chapterNum: number) => feedbackPauseSignals.get(chapterNum) || null),
 }))
 
 vi.mock('./chapter.service', () => ({
@@ -208,6 +218,7 @@ describe('chapter batch workflow', () => {
     chapterRows.clear()
     chapterScenarios.clear()
     publishChecks.clear()
+    feedbackPauseSignals.clear()
     nextTaskId = 1000
   })
 
@@ -291,6 +302,28 @@ describe('chapter batch workflow', () => {
       completedChapterIds: [101, 102],
       consecutiveRecallFallbackChapters: 3,
     })
+  })
+
+  it('pauses when generic feedback recurrence reaches a blocking threshold', async () => {
+    chapterRows.set(101, { id: 101, novelId: 1, chapterNum: 9, title: '第九章' })
+    setScenario(101, { status: 'success' })
+    setPublishChecks(101, { gateLevel: 'pass', ready: true, summary: '通过' })
+    feedbackPauseSignals.set(9, {
+      issueType: 'forced_reversal',
+      title: '强行反转',
+      detail: '强行反转在 5 章窗口内已至少出现 3 次，建议暂停批量生成并回查第5章、第7章、第9章。',
+      chapterNums: [5, 7, 9],
+    })
+    createBatchTask(6, [101])
+
+    await __testing.runChapterBatchGenerateWorkflow(6)
+
+    expect(taskRows.get(6)?.status).toBe('paused')
+    expect(getProgress(6)).toMatchObject({
+      blockedChapterId: 101,
+      failedChapterIds: [101],
+    })
+    expect(taskRows.get(6)?.errorMessage).toContain('强行反转')
   })
 
   it('continues from resumeCursor without rerunning completed chapters', async () => {

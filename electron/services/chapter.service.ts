@@ -68,6 +68,7 @@ import {
   analyzeChapterDialogueAgainstNovel,
   scheduleDialogueFingerprintRefresh,
 } from './dialogue-fingerprint.service'
+import { analyzeNovelStyleCompliance } from './style-compliance.service'
 import { refreshCharacterStateVersionsForChapter } from './character-state.service'
 import {
   refreshWorldStateVersionsForChapter,
@@ -87,7 +88,12 @@ import {
 } from './story-arc-progress.service'
 import { persistChapterRecallRuntimeSnapshot } from './chapter-recall-runtime.service'
 import { persistAntiAiRuleHits } from './anti-ai-rule.service'
-import type { ChapterContractValidationResult } from '../../src/types'
+import { syncFeedbackRecurrenceState } from './feedback-recurrence.service'
+import type {
+  ChapterContractValidationResult,
+  StyleComplianceMetricSnapshot,
+  StyleComplianceResult,
+} from '../../src/types'
 
 interface ChapterSummaryData {
   summary: string
@@ -162,12 +168,16 @@ interface ChapterReviewNotes {
     driftRate: number
     reason: string
   }>
+  style_compliance?: StyleComplianceResult
   contract_validation?: ChapterContractValidationResult
 }
 
 type ChapterPipelineRole = 'planner' | 'writer' | 'critic' | 'rewriter' | 'canonizer' | 'finalize'
 type ChapterPipelineRoleStatus = 'pending' | 'running' | 'success' | 'failed' | 'blocked'
 type ChapterGenerationStage = 'planning' | 'drafting' | 'reviewing' | 'rewriting' | 'canonizing' | 'completed' | 'failed'
+
+const STYLE_COMPLIANCE_RISK_PREFIX = '风格硬约束：'
+const STYLE_COMPLIANCE_FIX_PREFIX = '风格修正：'
 type ChapterPipelineFailureCode =
   | 'contract_blocked'
   | 'context_overflow'
@@ -1155,6 +1165,7 @@ function normalizeReviewNotes(raw: unknown): ChapterReviewNotes {
         })
         .filter((item) => item.characterId > 0 && item.characterName)
       : [],
+    style_compliance: normalizeStyleComplianceResult(record.style_compliance),
     contract_validation: normalizeChapterContractValidationResult(record.contract_validation) || undefined,
   }
 }
@@ -1193,6 +1204,7 @@ function hasReviewNotes(notes: ChapterReviewNotes): boolean {
     Boolean(notes.dialogue_fingerprint_summary) ||
     notes.cross_character_similarity.length > 0 ||
     notes.dialogue_drift_alerts.length > 0 ||
+    Boolean(notes.style_compliance) ||
     Boolean(notes.contract_validation && notes.contract_validation.itemResults.length > 0),
   )
 }
@@ -1238,6 +1250,7 @@ function buildFallbackReviewNotes(consistencyNotes: string): ChapterReviewNotes 
     dialogue_fingerprint_summary: '',
     cross_character_similarity: [],
     dialogue_drift_alerts: [],
+    style_compliance: undefined,
     contract_validation: undefined,
   }
 }
@@ -1278,6 +1291,18 @@ function formatReviewNotes(notes: ChapterReviewNotes): string {
       : '',
     notes.dialogue_drift_alerts.length > 0
       ? `角色语音漂移：\n- ${notes.dialogue_drift_alerts.map((item) => `${item.characterName} (${item.driftRate})：${item.reason}`).join('\n- ')}`
+      : '',
+    notes.style_compliance
+      ? `风格合规：${notes.style_compliance.status} · ${notes.style_compliance.score} 分${notes.style_compliance.summary ? ` · ${notes.style_compliance.summary}` : ''}`
+      : '',
+    notes.style_compliance && notes.style_compliance.deviations.length > 0
+      ? `风格偏移：\n- ${notes.style_compliance.deviations.join('\n- ')}`
+      : '',
+    notes.style_compliance && notes.style_compliance.matchedForbiddenPatterns.length > 0
+      ? `命中文风禁用：\n- ${notes.style_compliance.matchedForbiddenPatterns.join('\n- ')}`
+      : '',
+    notes.style_compliance && notes.style_compliance.rewriteHints.length > 0
+      ? `风格修正提示：\n- ${notes.style_compliance.rewriteHints.join('\n- ')}`
       : '',
     notes.contract_validation?.summary ? `合同兑现验证：${notes.contract_validation.summary}` : '',
     notes.contract_validation && notes.contract_validation.itemResults.some((item) => item.verdict !== 'pass')
@@ -1422,6 +1447,101 @@ function applyDialogueAnalysisToReviewNotes(
       analysis.similarities.length > 0 ? '拉开同场角色的句长、停顿和语气差异，避免多人同腔。' : '',
       analysis.drifts.length > 0 ? '把漂移角色拉回既有称呼、停顿和重复短语习惯。' : '',
     ]),
+  }
+}
+
+function normalizeStyleComplianceMetrics(raw: unknown): StyleComplianceMetricSnapshot {
+  const record = raw && typeof raw === 'object' && !Array.isArray(raw)
+    ? raw as Record<string, unknown>
+    : {}
+  return {
+    avgSentenceLength: normalizeBoundedNumber(record.avgSentenceLength, 0, 9999, 0),
+    avgParagraphLength: normalizeBoundedNumber(record.avgParagraphLength, 0, 9999, 0),
+    dialogueLineRate: normalizeBoundedNumber(record.dialogueLineRate, 0, 100, 0),
+    abstractTokenDensity: normalizeBoundedNumber(record.abstractTokenDensity, 0, 100, 0),
+  }
+}
+
+function normalizeStyleComplianceStatus(raw: unknown): StyleComplianceResult['status'] {
+  if (raw === 'rewrite') return 'rewrite'
+  if (raw === 'warning') return 'warning'
+  return 'pass'
+}
+
+function normalizeStyleComplianceResult(raw: unknown): StyleComplianceResult | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const record = raw as Record<string, unknown>
+  const deviations = toStringArray(record.deviations)
+  const rewriteHints = toStringArray(record.rewriteHints)
+  const matchedForbiddenPatterns = toStringArray(record.matchedForbiddenPatterns)
+  const score = normalizeBoundedNumber(record.score, 0, 100, 0)
+  const summary = asText(record.summary)
+  if (!summary && deviations.length === 0 && rewriteHints.length === 0 && matchedForbiddenPatterns.length === 0 && score <= 0) {
+    return undefined
+  }
+  return {
+    status: normalizeStyleComplianceStatus(record.status),
+    score,
+    summary,
+    deviations,
+    rewriteHints,
+    matchedForbiddenPatterns,
+    forbiddenPatternHitCount: normalizeBoundedNumber(
+      record.forbiddenPatternHitCount,
+      0,
+      999,
+      matchedForbiddenPatterns.length,
+    ),
+    referenceMetrics: normalizeStyleComplianceMetrics(record.referenceMetrics),
+    actualMetrics: normalizeStyleComplianceMetrics(record.actualMetrics),
+  }
+}
+
+function replacePrefixedNotes(existing: string[], prefix: string, additions: string[]): string[] {
+  const normalizedAdditions = additions
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => `${prefix}${item}`)
+  return dedupeTextList([
+    ...existing.filter((item) => !item.startsWith(prefix)),
+    ...normalizedAdditions,
+  ])
+}
+
+function applyStyleComplianceToReviewNotes(
+  reviewNotes: ChapterReviewNotes,
+  novelId: number,
+  content: string,
+): ChapterReviewNotes {
+  const compliance = analyzeNovelStyleCompliance(novelId, content)
+  if (!compliance) {
+    return {
+      ...reviewNotes,
+      style_compliance: undefined,
+    }
+  }
+
+  const prefixedDeviations = compliance.status === 'pass' ? [] : compliance.deviations
+  const prefixedHints = compliance.status === 'pass' ? [] : compliance.rewriteHints
+
+  return {
+    ...reviewNotes,
+    style_compliance: compliance,
+    language_risks: replacePrefixedNotes(reviewNotes.language_risks, STYLE_COMPLIANCE_RISK_PREFIX, prefixedDeviations),
+    human_language_repairs: replacePrefixedNotes(reviewNotes.human_language_repairs, STYLE_COMPLIANCE_FIX_PREFIX, prefixedHints),
+    critical_fixes: replacePrefixedNotes(
+      reviewNotes.critical_fixes,
+      STYLE_COMPLIANCE_FIX_PREFIX,
+      compliance.status === 'rewrite' ? compliance.rewriteHints : [],
+    ),
+    summary: reviewNotes.summary || (compliance.status !== 'pass' ? compliance.summary : ''),
+    severity: compliance.status === 'rewrite'
+      ? mergeSeverity(reviewNotes.severity, 'high')
+      : compliance.status === 'warning'
+        ? mergeSeverity(reviewNotes.severity, 'medium')
+        : reviewNotes.severity,
+    rewrite_required: reviewNotes.rewrite_required || compliance.status === 'rewrite',
+    revision_brief: appendRevisionBrief(reviewNotes.revision_brief, compliance.rewriteHints),
   }
 }
 
@@ -3097,6 +3217,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
 
     reviewNotes = enhanceReviewNotesWithGuardrails(reviewNotes, draftContent, profile.genre)
     reviewNotes = applyDialogueAnalysisToReviewNotes(reviewNotes, chapter.novelId, chapter.chapterNum, draftContent)
+    reviewNotes = applyStyleComplianceToReviewNotes(reviewNotes, chapter.novelId, draftContent)
     reviewNotes = applyContractValidationToReviewNotes(reviewNotes, validateChapterContractDelivery({
       chapterId,
       content: draftContent,
@@ -3197,10 +3318,15 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
       chapter.chapterNum,
       repaired.content,
     )
-    const finalReviewNotes = applyContractValidationToReviewNotes(repairedReviewNotes, validateChapterContractDelivery({
+    const repairedStyleReviewNotes = applyStyleComplianceToReviewNotes(
+      repairedReviewNotes,
+      chapter.novelId,
+      repaired.content,
+    )
+    const finalReviewNotes = applyContractValidationToReviewNotes(repairedStyleReviewNotes, validateChapterContractDelivery({
       chapterId,
       content: repaired.content,
-      reviewNotes: repairedReviewNotes,
+      reviewNotes: repairedStyleReviewNotes,
     }))
     persistAntiAiRuleHits({
       novelId: chapter.novelId,
@@ -3235,6 +3361,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
     })
     hasCommittedContent = true
     const publishCheck = runChapterPublishCheck(chapterId)
+    syncFeedbackRecurrenceState(chapter.novelId)
     if (publishCheck.gateLevel === 'rewrite') {
       failRoleTask('rewriter', rewriterTaskId, new ChapterPipelineStageError(
         'gate_rewrite_required',

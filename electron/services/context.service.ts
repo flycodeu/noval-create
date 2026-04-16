@@ -10,7 +10,11 @@ import {
   type SimilarFragmentFallbackReason,
   type SimilarFragmentHit,
 } from './embedding.service'
-import { buildStyleFingerprintPromptSection, listStyleFingerprints } from './style-analysis.service'
+import {
+  buildStyleFingerprintPromptSection,
+  buildStyleHardGuardPromptSection,
+  listStyleFingerprints,
+} from './style-analysis.service'
 import {
   buildEndgameDesignSummary,
   buildPremiseSummary,
@@ -25,6 +29,7 @@ import { buildThemeVoiceSummary, parseThemeVoiceDocument } from '../../src/share
 import { buildWritingContractSummary } from '../../src/shared/writing-contract'
 import { buildStoryMemoryPromptSummary } from './story-memory.service'
 import { buildAntiAiHardConstraintContext, getPromotedAntiAiRulesForChapter } from './anti-ai-rule.service'
+import { buildFeedbackRecurrenceHardConstraintContext, getPromotedFeedbackIssuesForChapter } from './feedback-recurrence.service'
 import { ensureStoryStructure } from './story-structure.service'
 import { resolveModelRuntimeBudget } from './model.service'
 import { throwUserFacingError } from '../utils/user-facing-error'
@@ -108,7 +113,9 @@ export type HardConstraintSourceLabel =
   | 'itemSummary'
   | 'openLoops'
   | 'continuityNotes'
+  | 'feedbackRecurrence'
   | 'antiAiRules'
+  | 'styleHardGuard'
 
 export interface BuildChapterContextOptions {
   totalBudget?: number
@@ -678,6 +685,12 @@ function buildHardConstraintDrafts(rawData: ChapterContextRawData): HardConstrai
       ? getPromotedAntiAiRulesForChapter(rawData.novel.id, rawData.currentChapter.chapterNum)
       : [],
   })
+  const feedbackConstraintText = buildFeedbackRecurrenceHardConstraintContext({
+    promotedIssues: rawData.currentChapter?.chapterNum
+      ? getPromotedFeedbackIssuesForChapter(rawData.novel.id, rawData.currentChapter.chapterNum)
+      : [],
+  })
+  const styleHardGuardText = buildStyleHardConstraintForNovel(rawData.novel.id)
 
   const drafts: HardConstraintDraft[] = [
     {
@@ -714,6 +727,16 @@ function buildHardConstraintDrafts(rawData: ChapterContextRawData): HardConstrai
       label: 'continuityNotes',
       title: '必须承接',
       content: buildConstraintSection('必须承接', continuityLines),
+    },
+    {
+      label: 'feedbackRecurrence',
+      title: '审校复现硬约束',
+      content: feedbackConstraintText,
+    },
+    {
+      label: 'styleHardGuard',
+      title: '文风硬约束',
+      content: styleHardGuardText,
     },
     {
       label: 'antiAiRules',
@@ -1815,6 +1838,17 @@ function enrichStyleTemplateWithFingerprint(baseTemplate: string, novelId: numbe
     return baseTemplate ? `${baseTemplate}\n\n${section}` : section
   } catch {
     return baseTemplate
+  }
+}
+
+function buildStyleHardConstraintForNovel(novelId: number): string {
+  try {
+    const fingerprints = listStyleFingerprints(novelId)
+    if (fingerprints.length === 0) return ''
+    const latest = fingerprints[fingerprints.length - 1]
+    return buildStyleHardGuardPromptSection(latest.id)
+  } catch {
+    return ''
   }
 }
 

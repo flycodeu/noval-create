@@ -195,6 +195,12 @@ interface ReviewStateSnapshot {
   chapterFunctionTags: string[]
   revisionBrief: string
   paceMarker: string
+  styleComplianceChecked: boolean
+  styleComplianceStatus: 'pass' | 'warning' | 'rewrite'
+  styleComplianceScore?: number
+  styleComplianceSummary: string
+  styleComplianceDeviations: string[]
+  styleComplianceForbiddenPatterns: string[]
 }
 
 function parseReviewState(raw?: string | null): {
@@ -222,6 +228,12 @@ function parseReviewState(raw?: string | null): {
   chapterFunctionTags: string[]
   revisionBrief: string
   paceMarker: string
+  styleComplianceChecked: boolean
+  styleComplianceStatus: 'pass' | 'warning' | 'rewrite'
+  styleComplianceScore?: number
+  styleComplianceSummary: string
+  styleComplianceDeviations: string[]
+  styleComplianceForbiddenPatterns: string[]
 } {
   const fallback: ReviewStateSnapshot = {
     rewriteRequired: false,
@@ -247,6 +259,12 @@ function parseReviewState(raw?: string | null): {
     chapterFunctionTags: [],
     revisionBrief: '',
     paceMarker: '',
+    styleComplianceChecked: false,
+    styleComplianceStatus: 'pass',
+    styleComplianceScore: undefined,
+    styleComplianceSummary: '',
+    styleComplianceDeviations: [],
+    styleComplianceForbiddenPatterns: [],
   }
   if (!raw) {
     return fallback
@@ -257,6 +275,9 @@ function parseReviewState(raw?: string | null): {
     const rewardState = typeof parsed.reward_state === 'string' ? parsed.reward_state : 'none'
     const costPresent = parsed.cost_present === true
     const protagonistPressure = typeof parsed.protagonist_pressure === 'number' ? parsed.protagonist_pressure : 0
+    const styleCompliance = parsed.style_compliance && typeof parsed.style_compliance === 'object' && !Array.isArray(parsed.style_compliance)
+      ? parsed.style_compliance as Record<string, unknown>
+      : null
     return {
       ...fallback,
       severity: typeof parsed.severity === 'string' ? parsed.severity : undefined,
@@ -295,6 +316,16 @@ function parseReviewState(raw?: string | null): {
       chapterFunctionTags: parseUnknownStringArray(parsed.chapter_function_tags),
       revisionBrief: normalizeText(parsed.revision_brief as string | undefined),
       paceMarker: normalizeText(parsed.pace_marker as string | undefined),
+      styleComplianceChecked: Boolean(styleCompliance),
+      styleComplianceStatus: styleCompliance?.status === 'rewrite'
+        ? 'rewrite'
+        : styleCompliance?.status === 'warning'
+          ? 'warning'
+          : 'pass',
+      styleComplianceScore: typeof styleCompliance?.score === 'number' ? Math.max(0, Math.min(100, styleCompliance.score)) : undefined,
+      styleComplianceSummary: normalizeText(typeof styleCompliance?.summary === 'string' ? styleCompliance.summary : undefined),
+      styleComplianceDeviations: parseUnknownStringArray(styleCompliance?.deviations),
+      styleComplianceForbiddenPatterns: parseUnknownStringArray(styleCompliance?.matchedForbiddenPatterns),
     }
   } catch {
     return fallback
@@ -328,6 +359,7 @@ export interface ChapterPublishCheckScoreBreakdown {
   hookStrengthScore: number
   storyDynamicsScore: number
   languageNaturalnessScore: number
+  styleComplianceScore: number
   contractScore: number
   hookScore: number
   povPurityScore: number
@@ -1185,13 +1217,36 @@ function buildPublishCheckScoreBreakdown(
     ],
   )
 
+  const styleComplianceBaseScore = reviewState.styleComplianceChecked
+    ? scoreChecklistItem(checklist, 'style_compliance')
+    : 72
+  let styleComplianceScore = reviewState.styleComplianceChecked
+    ? reduceGateScore(
+      averageScores([
+        styleComplianceBaseScore,
+        languageNaturalnessScore,
+        dialogueVoiceScore,
+      ]),
+      [
+        Math.min(reviewState.styleComplianceDeviations.length, 3) * 8,
+        Math.min(reviewState.styleComplianceForbiddenPatterns.length, 2) * 12,
+      ],
+    )
+    : averageScores([languageNaturalnessScore, dialogueVoiceScore], 72)
+  if (reviewState.styleComplianceStatus === 'rewrite') {
+    styleComplianceScore = Math.min(styleComplianceScore, 49)
+  } else if (reviewState.styleComplianceStatus === 'warning') {
+    styleComplianceScore = Math.min(styleComplianceScore, 79)
+  }
+
   let totalScore = clampGateScore(
-    continuityScore * 0.22
-    + coherenceScore * 0.18
-    + dialogueVoiceScore * 0.14
-    + hookStrengthScore * 0.12
-    + storyDynamicsScore * 0.20
-    + languageNaturalnessScore * 0.14,
+    continuityScore * 0.20
+    + coherenceScore * 0.16
+    + dialogueVoiceScore * 0.12
+    + hookStrengthScore * 0.10
+    + storyDynamicsScore * 0.17
+    + languageNaturalnessScore * 0.13
+    + styleComplianceScore * 0.12,
   )
 
   if (rewriteCount > 0) {
@@ -1210,6 +1265,7 @@ function buildPublishCheckScoreBreakdown(
     hookStrengthScore,
     storyDynamicsScore,
     languageNaturalnessScore,
+    styleComplianceScore,
     contractScore,
     hookScore,
     povPurityScore,
@@ -1964,6 +2020,25 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
       source: 'review',
       relatedPage: 'writing',
       fixHint: '先消化审校结论，再决定是否进入完成态。',
+    }),
+    makePublishCheckItem({
+      key: 'style_compliance',
+      label: '文风硬约束符合度',
+      status: !reviewState.styleComplianceChecked ? 'pass' : reviewState.styleComplianceStatus,
+      detail: !reviewState.styleComplianceChecked
+        ? '当前小说未配置可用的文风指纹，本章暂不执行风格硬约束校验。'
+        : reviewState.styleComplianceStatus === 'pass'
+          ? (reviewState.styleComplianceSummary || '当前章节未命中文风硬约束偏离。')
+          : [
+              reviewState.styleComplianceSummary,
+              ...reviewState.styleComplianceDeviations,
+              ...(reviewState.styleComplianceForbiddenPatterns.length > 0
+                ? [`命中禁用表达：${reviewState.styleComplianceForbiddenPatterns.join('、')}`]
+                : []),
+            ].filter(Boolean).slice(0, 3).join('；'),
+      source: 'review',
+      relatedPage: 'revision',
+      fixHint: '按文风指纹回调句长、段长、对白密度，并删除禁用表达后再验收。',
     }),
     makePublishCheckItem({
       key: 'story_dynamics',

@@ -598,4 +598,49 @@ describe('runChapterPublishCheck', () => {
     expect(buildHeuristicRecallDiagnostics).not.toHaveBeenCalled()
     expect(result.checklist.find((item) => item.key === 'recall')?.detail).toContain('召回被预算裁剪')
   })
+
+  it('marks style compliance as rewrite when review notes persist severe style drift', () => {
+    const rows = createBaseRows()
+    Object.assign((rows.get(chapters) || [])[0], {
+      reviewNotesJson: JSON.stringify({
+        severity: 'medium',
+        rewrite_required: true,
+        reader_hook_risks: [],
+        arc_progress_risks: [],
+        chapter_function_primary: 'progression',
+        chapter_function_tags: ['progression'],
+        style_compliance: {
+          status: 'rewrite',
+          score: 42,
+          summary: '风格偏离已达到重写阈值。',
+          deviations: ['平均句长偏离明显。'],
+          rewriteHints: ['把句长拉回参考区间。'],
+          matchedForbiddenPatterns: ['命运的齿轮'],
+          forbiddenPatternHitCount: 1,
+          referenceMetrics: {
+            avgSentenceLength: 18,
+            avgParagraphLength: 80,
+            dialogueLineRate: 35,
+            abstractTokenDensity: 6,
+          },
+          actualMetrics: {
+            avgSentenceLength: 34,
+            avgParagraphLength: 140,
+            dialogueLineRate: 8,
+            abstractTokenDensity: 15,
+          },
+        },
+      }),
+    })
+
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+    vi.mocked(buildNovelConsistencyReport).mockReturnValue({ issues: [] } as never)
+
+    const result = runChapterPublishCheck(10)
+
+    expect(result.gateLevel).toBe('rewrite')
+    expect(result.checklist.find((item) => item.key === 'style_compliance')?.status).toBe('rewrite')
+    expect(result.scoreBreakdown.styleComplianceScore).toBeLessThanOrEqual(49)
+    expect(result.checklist.some((item) => item.key === 'style_compliance' && item.status === 'rewrite')).toBe(true)
+  })
 })
