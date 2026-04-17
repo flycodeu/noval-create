@@ -70,6 +70,8 @@ type ParsedReviewState = {
   dialogueHomogenizationRisks: string[]
   dialogueDriftAlerts: string[]
   crossCharacterSimilarity: string[]
+  dialogueFillerRisks: string[]
+  dialogueInfoDensityRisks: string[]
   contractValidationStatus?: 'pass' | 'warning' | 'blocker'
 }
 
@@ -126,7 +128,7 @@ const FEEDBACK_DESCRIPTOR_MAP: Record<FeedbackRecurrenceIssueType, FeedbackDescr
   dialogue_homogenized: {
     title: '对白同质化',
     avoid: '不要让角色对白在句长、口气和用词上越来越像同一个人。',
-    prefer: '按身份、关系和处境拆开对白节奏与潜台词。',
+    prefer: '按身份、关系和处境拆开对白节奏与潜台词，并把高风险角色升级为下一章 voice lock。',
     pauseOnBatch: false,
     relatedPage: 'writing',
   },
@@ -257,6 +259,8 @@ function parseReviewState(raw?: string | null): ParsedReviewState {
     dialogueHomogenizationRisks: [],
     dialogueDriftAlerts: [],
     crossCharacterSimilarity: [],
+    dialogueFillerRisks: [],
+    dialogueInfoDensityRisks: [],
   }
   if (!raw) return fallback
   try {
@@ -289,6 +293,8 @@ function parseReviewState(raw?: string | null): ParsedReviewState {
           .map((item) => item && typeof item === 'object' ? asText((item as Record<string, unknown>).reason) : '')
           .filter(Boolean)
         : [],
+      dialogueFillerRisks: parseUnknownStringArray(parsed.dialogue_filler_risks),
+      dialogueInfoDensityRisks: parseUnknownStringArray(parsed.dialogue_info_density_risks),
       contractValidationStatus: contractValidation?.status === 'pass' || contractValidation?.status === 'warning' || contractValidation?.status === 'blocker'
         ? contractValidation.status
         : undefined,
@@ -404,6 +410,8 @@ function buildChapterHits(params: {
     ...review.dialogueHomogenizationRisks,
     ...review.dialogueDriftAlerts,
     ...review.crossCharacterSimilarity,
+    ...review.dialogueFillerRisks,
+    ...review.dialogueInfoDensityRisks,
   ]
   if (gateIssueSet.has('dialogue_voice') || dialogueSignals.length > 0) {
     pushHit(hits, {

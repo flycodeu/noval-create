@@ -39,6 +39,10 @@ import {
   updateTaskStatus,
 } from './task.service'
 import { generateTimelineBatchChunk } from './timeline.service'
+import {
+  createChapterBatchSnapshot,
+  markChapterBatchSnapshotCompleted,
+} from './batch-workbench.service'
 
 const DEFAULT_MAX_RETRIES = 2
 const CHAPTER_BATCH_RECALL_PAUSE_THRESHOLD = 3
@@ -452,6 +456,7 @@ function createInitialChapterBatchStatus(taskId: number, novelId: number, option
     failedChapterIds: [],
     warnings: [],
     consecutiveRecallFallbackChapters: 0,
+    snapshotId: undefined,
     message: requestedCount <= 0 ? '当前没有需要批量生成的章节。' : '等待开始章节批量生成。',
   }
 }
@@ -483,6 +488,7 @@ function toChapterBatchStatus(taskId: number, task: TaskRow): ChapterBatchAutoGe
     consecutiveRecallFallbackChapters: typeof progress.consecutiveRecallFallbackChapters === 'number'
       ? progress.consecutiveRecallFallbackChapters
       : 0,
+    snapshotId: typeof progress.snapshotId === 'number' ? progress.snapshotId : undefined,
   }
 }
 
@@ -964,6 +970,9 @@ async function runChapterBatchGenerateWorkflow(taskId: number, sender?: WebConte
       }
 
       if (progress.completed || progress.resumeCursor >= progress.totalBatches || progress.resumeCursor >= progress.chapterIds.length) {
+        if (typeof progress.snapshotId === 'number') {
+          markChapterBatchSnapshotCompleted(progress.snapshotId)
+        }
         const done: ChapterBatchAutoGenerateStatus = {
           ...progress,
           status: 'success',
@@ -1440,7 +1449,28 @@ export async function startChapterBatchGenerateWorkflow(novelId: number, options
     controlJson: JSON.stringify({ cancelRequested: false, maxRetries: DEFAULT_MAX_RETRIES, retryCount: 0 }),
     progressJson: JSON.stringify(initial),
   })
-  updateTaskProgress(taskId, { ...initial, taskId }, sender)
+  let snapshotId: number | undefined
+  try {
+    if (normalized.chapterIds.length > 0) {
+      snapshotId = createChapterBatchSnapshot(novelId, taskId, normalized.chapterIds).id
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : '批次快照创建失败'
+    updateTaskProgress(taskId, {
+      ...initial,
+      taskId,
+      status: 'failed',
+      completed: true,
+      lastError: errorMessage,
+      message: `批次快照创建失败，章节批量任务未启动：${errorMessage}`,
+    }, sender)
+    updateTaskStatus(taskId, 'failed', sender, {
+      errorMessage,
+      currentChildTaskId: null,
+    })
+    throw error
+  }
+  updateTaskProgress(taskId, { ...initial, taskId, snapshotId }, sender)
   void runChapterBatchGenerateWorkflow(taskId, sender).catch(logWorkflowError(taskId))
   return taskId
 }

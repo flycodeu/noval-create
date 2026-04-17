@@ -10,6 +10,8 @@ import type {
   DialogueDriftWarning,
   DialogueFingerprintStats,
   DialogueSimilarityWarning,
+  DialogueVoiceLock,
+  DialogueVoiceLockCandidate,
   DialogueTokenStat,
   VolumeDialogueSimilarityEntry,
 } from '../../src/types'
@@ -17,6 +19,7 @@ import { getDb, getSqlite } from '../database/db'
 import {
   chapters,
   characterDialogueFingerprints,
+  characterRelations,
   characters,
   novels,
   storyVolumes,
@@ -55,6 +58,17 @@ interface DialogueAnalyticsSnapshot {
   dialogueDriftTrend: CharacterDialogueDriftEntry[]
   volumeDialogueSimilarity: VolumeDialogueSimilarityEntry[]
   recentDialogueAlerts: DialogueAlert[]
+  requiredDialogueVoiceLocks: DialogueVoiceLockCandidate[]
+}
+
+interface ChapterDialogueVoiceLockOptions {
+  chapterNum?: number
+  chapterGoal?: string
+  outline?: string
+  scenePlan?: string
+  relationSummary?: string
+  continuityNotes?: string
+  limit?: number
 }
 
 const QUOTE_REGEX = /[“「『"]([\s\S]{1,180}?)[”」』"]/gu
@@ -74,6 +88,17 @@ const MAX_TOP_PHRASES = 6
 const MAX_TOP_PARTICLES = 5
 const MAX_LLM_SAMPLES = 6
 const SUMMARY_MAX_CHARACTERS = 4
+const VOICE_LOCK_LIMIT = 4
+const LOW_SIGNAL_DIALOGUE_PATTERNS = [
+  /^(?:啊|呀|哦|嗯|呃|唔|欸|诶|哼|哈|呵)+$/u,
+  /^(?:行|好|知道了?|明白了?|算了|走吧|继续|别闹|快点|等等)[啊呀吧吗呢嘛]?$/u,
+  /^(?:怎么了|怎么会|真的假的|什么意思|然后呢|再说一次)[啊呀吗呢嘛]?$/u,
+]
+const CONCRETE_INFO_PATTERNS = [
+  /\d/u,
+  /(?:第[一二三四五六七八九十百千万0-9]+章|今晚|今夜|明早|凌晨|天亮前|三号楼|北门|仓库|药箱|钥匙|名单|账本|伤口|车|枪|刀|信|尸体|封锁线|补给)/u,
+  /(?:东|西|南|北|上|下|左|右|前|后|门|楼|街|巷|站|桥|河|井|塔|房|车|船|票|药|血|火|水|粮)/u,
+]
 
 const pendingRefreshes = new Set<number>()
 
@@ -135,6 +160,18 @@ function dedupeStrings(values: string[], limit?: number): string[] {
   return result
 }
 
+function dedupeNumbers(values: number[], limit?: number): number[] {
+  const result: number[] = []
+  const seen = new Set<number>()
+  for (const value of values) {
+    if (!Number.isFinite(value) || seen.has(value)) continue
+    seen.add(value)
+    result.push(value)
+    if (limit && result.length >= limit) break
+  }
+  return result
+}
+
 function pushCount(map: Map<string, number>, key: string, amount = 1) {
   if (!key) return
   map.set(key, (map.get(key) || 0) + amount)
@@ -152,6 +189,10 @@ function normalizeDialogueText(text: string): string {
     .replace(/\s+/gu, ' ')
     .replace(/[“”「」『』]/gu, '')
     .trim()
+}
+
+function normalizeSearchText(text: string): string {
+  return asText(text).replace(/\s+/gu, ' ')
 }
 
 function splitSentences(text: string): string[] {
@@ -184,6 +225,17 @@ function buildCharacterAliases(rows: CharacterRow[]): CharacterAlias[] {
   })
 
   return aliases.sort((left, right) => right.alias.length - left.alias.length || left.alias.localeCompare(right.alias, 'zh-Hans-CN'))
+}
+
+function extractMentionedCharacterIds(texts: string[], rows: CharacterRow[]): number[] {
+  const combined = texts.map(normalizeSearchText).filter(Boolean).join('\n')
+  if (!combined) return []
+  const aliases = buildCharacterAliases(rows)
+  const result: number[] = []
+  aliases.forEach((alias) => {
+    if (combined.includes(alias.alias)) result.push(alias.id)
+  })
+  return dedupeNumbers(result)
 }
 
 function scoreAliasMatch(before: string, after: string, alias: CharacterAlias): number {
@@ -430,6 +482,193 @@ function buildHeuristicVoiceProfile(stats: CharacterDialogueFingerprint): string
   return parts.slice(0, 3).join('，') || '对白样本偏少，当前仅能确认其语气节奏较稳定。'
 }
 
+function parseScenePlanText(raw?: string): string {
+  const text = asText(raw)
+  if (!text) return ''
+  if (!text.startsWith('[') && !text.startsWith('{')) return text
+  try {
+    const parsed = JSON.parse(text)
+    if (Array.isArray(parsed)) {
+      return parsed.map((item) => {
+        if (!item || typeof item !== 'object') return ''
+        const record = item as Record<string, unknown>
+        return [
+          asText(record.scene_title),
+          asText(record.purpose),
+          asText(record.conflict),
+          asText(record.beat),
+          Array.isArray(record.present_characters) ? record.present_characters.map(asText).filter(Boolean).join('、') : '',
+        ].filter(Boolean).join('；')
+      }).filter(Boolean).join('\n')
+    }
+    return text
+  } catch {
+    return text
+  }
+}
+
+function findRelationToneLine(characterName: string, relationSummary?: string): string {
+  const lines = asText(relationSummary)
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+  return lines.find((line) => line.includes(characterName)) || ''
+}
+
+function buildRolePriority(character: CharacterRow): number {
+  if (character.roleType === 'protagonist') return 0
+  if (character.roleType === 'major') return 1
+  if (character.roleType === 'antagonist') return 2
+  if (character.roleType === 'supporting') return 3
+  return 4
+}
+
+function buildFallbackMustAvoid(signature?: CharacterDialogueSignature | null): string[] {
+  if (!signature) return ['不要和同场角色共享一模一样的句长、停顿和称呼。']
+  const items: string[] = ['不要把她/他说成和同场角色一个句长一个口气。']
+  if (signature.shortSentenceRate >= 55) items.push('不要把原本短促的回合拖成长段解释。')
+  if (signature.longSentenceRate >= 35) items.push('不要把原本成段铺陈压扁成碎句。')
+  if (signature.questionRate >= 30) items.push('不要删光追问、反问或逼问感。')
+  if (signature.ellipsisRate >= 20 || signature.dashRate >= 12) items.push('不要抹掉停顿、打断和犹疑感。')
+  return dedupeStrings(items, 3)
+}
+
+function buildRelationTone(
+  character: CharacterRow,
+  relationRows: Array<typeof characterRelations.$inferSelect>,
+  relationSummary?: string,
+): string {
+  const summaryLine = findRelationToneLine(character.fullName, relationSummary)
+  if (summaryLine) return summaryLine
+  const related = relationRows.find((row) => row.charAId === character.id || row.charBId === character.id)
+  if (!related) return '按当前场景关系温度说话，不要脱离亲疏、权力差和潜台词。'
+  return [
+    asText(related.relationLabel),
+    asText(related.interactionStyle),
+    asText(related.subtextRule),
+    asText(related.description),
+  ].filter(Boolean).join('；') || '按当前关系温度说话，不要突然改口成陌生语气。'
+}
+
+function buildDialogueVoiceLock(
+  character: CharacterRow,
+  relationRows: Array<typeof characterRelations.$inferSelect>,
+  signature?: CharacterDialogueSignature | null,
+  relationSummary?: string,
+): DialogueVoiceLock | null {
+  const mustKeep = dedupeStrings([
+    asText(character.speechPattern),
+    asText(character.catchphrases) ? `保留口头禅/称呼：${asText(character.catchphrases)}` : '',
+    asText(character.vocabularyLevel) ? `用词层级：${asText(character.vocabularyLevel)}` : '',
+    asText(character.dialectFeatures) ? `口音/地方感：${asText(character.dialectFeatures)}` : '',
+    ...(signature?.distinctiveHabits || []),
+    ...(signature?.sentencePatterns || []).map((item) => `句式：${item}`),
+  ], 5)
+  const mustAvoid = dedupeStrings([
+    ...(signature?.antiPatterns || []),
+    ...buildFallbackMustAvoid(signature),
+  ], 4)
+  const relationTone = buildRelationTone(character, relationRows, relationSummary)
+  const sampleHint = dedupeStrings([
+    signature?.voiceProfile || '',
+    ...(signature?.compareHints || []),
+  ], 2).join('；')
+
+  if (mustKeep.length === 0 && mustAvoid.length === 0 && !relationTone && !sampleHint) return null
+  return {
+    characterId: character.id,
+    characterName: character.fullName,
+    mustKeep,
+    mustAvoid,
+    relationTone,
+    sampleHint,
+  }
+}
+
+function upsertVoiceLockCandidate(
+  map: Map<number, DialogueVoiceLockCandidate>,
+  candidate: DialogueVoiceLockCandidate,
+) {
+  const existing = map.get(candidate.characterId)
+  const rank = (value: DialogueVoiceLockCandidate['severity']) => (value === 'critical' ? 2 : 1)
+  if (!existing || rank(candidate.severity) > rank(existing.severity)) {
+    map.set(candidate.characterId, candidate)
+    return
+  }
+  if (existing && existing.reason.length < candidate.reason.length) {
+    map.set(candidate.characterId, candidate)
+  }
+}
+
+function buildDialogueVoiceLockCandidates(
+  similarities: CrossCharacterDialogueSimilarity[],
+  drifts: CharacterDialogueDriftEntry[],
+): DialogueVoiceLockCandidate[] {
+  const map = new Map<number, DialogueVoiceLockCandidate>()
+  similarities
+    .filter((pair) => pair.similarity >= WATCH_SIMILARITY_THRESHOLD)
+    .slice(0, 8)
+    .forEach((pair) => {
+      const severity: DialogueVoiceLockCandidate['severity'] = pair.similarity >= HIGH_SIMILARITY_THRESHOLD ? 'critical' : 'warning'
+      upsertVoiceLockCandidate(map, {
+        characterId: pair.characterAId,
+        characterName: pair.characterAName,
+        severity,
+        reason: `与 ${pair.characterBName} 的对白相似度 ${pair.similarity}，${pair.reasons.join('、') || '需拉开句长、停顿和称呼。'}`,
+      })
+      upsertVoiceLockCandidate(map, {
+        characterId: pair.characterBId,
+        characterName: pair.characterBName,
+        severity,
+        reason: `与 ${pair.characterAName} 的对白相似度 ${pair.similarity}，${pair.reasons.join('、') || '需拉开句长、停顿和称呼。'}`,
+      })
+    })
+  drifts
+    .filter((entry) => entry.recentDriftRate >= DRIFT_ALERT_THRESHOLD)
+    .slice(0, 8)
+    .forEach((entry) => {
+      upsertVoiceLockCandidate(map, {
+        characterId: entry.characterId,
+        characterName: entry.characterName,
+        severity: entry.recentDriftRate >= DRIFT_HIGH_THRESHOLD ? 'critical' : 'warning',
+        reason: `近期漂移率 ${entry.recentDriftRate}，${entry.reasons.join('、') || '需拉回既有口吻。'}`,
+      })
+    })
+
+  return Array.from(map.values())
+    .sort((left, right) =>
+      (left.severity === 'critical' ? -1 : 1) - (right.severity === 'critical' ? -1 : 1)
+      || left.characterName.localeCompare(right.characterName, 'zh-Hans-CN'))
+    .slice(0, 8)
+}
+
+function countLowSignalTokenHits(text: string): number {
+  let hits = 0
+  LOW_SIGNAL_PHRASES.forEach((phrase) => {
+    if (text.includes(phrase)) hits += 1
+  })
+  return hits
+}
+
+function isLowSignalDialogueTurn(text: string): boolean {
+  const normalized = normalizeDialogueText(text)
+  if (!normalized) return false
+  if (LOW_SIGNAL_DIALOGUE_PATTERNS.some((pattern) => pattern.test(normalized))) return true
+  const compact = normalized.replace(/[^\p{Script=Han}A-Za-z0-9]/gu, '')
+  if (compact.length <= 4) return true
+  return countLowSignalTokenHits(normalized) >= 3 && compact.length <= 12
+}
+
+function hasConcreteInfoSignal(text: string): boolean {
+  return CONCRETE_INFO_PATTERNS.some((pattern) => pattern.test(text))
+}
+
+function isThinInfoDialogueTurn(text: string): boolean {
+  const normalized = normalizeDialogueText(text)
+  if (!normalized || hasConcreteInfoSignal(normalized)) return false
+  return normalized.length >= 8 && countLowSignalTokenHits(normalized) >= 2
+}
+
 function parseSummaryJson(raw?: string | null): DialogueSummaryPayload | null {
   if (!raw) return null
   try {
@@ -601,12 +840,14 @@ function emptyDialogueSnapshot(): DialogueAnalyticsSnapshot {
       averageCrossCharacterSimilarity: 0,
       highSimilarityPairCount: 0,
       driftingCharacterCount: 0,
+      voiceLockCandidateCount: 0,
     },
     characterDialogueSignatures: [],
     crossCharacterDialogueSimilarity: [],
     dialogueDriftTrend: [],
     volumeDialogueSimilarity: [],
     recentDialogueAlerts: [],
+    requiredDialogueVoiceLocks: [],
   }
 }
 
@@ -647,9 +888,13 @@ function buildSummaryPreview(record: CharacterDialogueFingerprintRecord): string
 function createChapterDialogueReviewData(): ChapterDialogueReviewData {
   return {
     fingerprintSummary: '',
+    voiceLockSummary: '',
     risks: [],
     similarities: [],
     drifts: [],
+    fillerRisks: [],
+    infoDensityRisks: [],
+    requiredVoiceLockCharacterIds: [],
   }
 }
 
@@ -812,7 +1057,10 @@ function buildNovelDialogueAnalytics(novelId: number): DialogueAnalyticsSnapshot
     averageCrossCharacterSimilarity: similarityPairs.length > 0 ? roundMetric(average(similarityPairs.map((pair) => pair.similarity))) : 0,
     highSimilarityPairCount: similarityPairs.filter((pair) => pair.similarity >= HIGH_SIMILARITY_THRESHOLD).length,
     driftingCharacterCount: driftEntries.filter((entry) => entry.recentDriftRate >= DRIFT_ALERT_THRESHOLD).length,
+    voiceLockCandidateCount: 0,
   }
+  const requiredDialogueVoiceLocks = buildDialogueVoiceLockCandidates(similarityPairs, driftEntries)
+  stats.voiceLockCandidateCount = requiredDialogueVoiceLocks.length
 
   return {
     dialogueFingerprintStats: stats,
@@ -821,6 +1069,7 @@ function buildNovelDialogueAnalytics(novelId: number): DialogueAnalyticsSnapshot
     dialogueDriftTrend: driftEntries.slice(0, 12),
     volumeDialogueSimilarity,
     recentDialogueAlerts,
+    requiredDialogueVoiceLocks,
   }
 }
 
@@ -1018,6 +1267,56 @@ export function getCharacterDialogueHintMap(novelId: number): Map<number, string
   return hints
 }
 
+export function getChapterDialogueVoiceLocks(
+  novelId: number,
+  options: ChapterDialogueVoiceLockOptions = {},
+): DialogueVoiceLock[] {
+  const db = getDb()
+  const allCharacters = db.select()
+    .from(characters)
+    .where(eq(characters.novelId, novelId))
+    .orderBy(asc(characters.sortOrder), asc(characters.id))
+    .all()
+  if (allCharacters.length === 0) return []
+
+  const relationRows = db.select()
+    .from(characterRelations)
+    .where(eq(characterRelations.novelId, novelId))
+    .all()
+  const snapshot = buildNovelDialogueAnalytics(novelId)
+  const signatureById = new Map(snapshot.characterDialogueSignatures.map((item) => [item.characterId, item] as const))
+  const textSignals = [
+    asText(options.chapterGoal),
+    asText(options.outline),
+    parseScenePlanText(options.scenePlan),
+    asText(options.relationSummary),
+    asText(options.continuityNotes),
+  ]
+  const mentionedCharacterIds = extractMentionedCharacterIds(textSignals, allCharacters)
+  const requiredCandidateIds = snapshot.requiredDialogueVoiceLocks.map((item) => item.characterId)
+  const fallbackIds = allCharacters
+    .slice()
+    .sort((left, right) =>
+      buildRolePriority(left) - buildRolePriority(right)
+      || (signatureById.get(right.id)?.sampleCount || 0) - (signatureById.get(left.id)?.sampleCount || 0)
+      || (left.sortOrder ?? 0) - (right.sortOrder ?? 0))
+    .map((item) => item.id)
+  const selectedIds = dedupeNumbers([
+    ...mentionedCharacterIds,
+    ...requiredCandidateIds,
+    ...fallbackIds,
+  ], Math.max(1, options.limit || VOICE_LOCK_LIMIT))
+
+  return selectedIds
+    .map((characterId) => {
+      const character = allCharacters.find((item) => item.id === characterId)
+      if (!character) return null
+      return buildDialogueVoiceLock(character, relationRows, signatureById.get(characterId), options.relationSummary)
+    })
+    .filter((item): item is DialogueVoiceLock => Boolean(item))
+    .slice(0, Math.max(1, options.limit || VOICE_LOCK_LIMIT))
+}
+
 export function analyzeChapterDialogueAgainstNovel(
   novelId: number,
   chapterNum: number,
@@ -1107,6 +1406,24 @@ export function analyzeChapterDialogueAgainstNovel(
   result.fingerprintSummary = `本章识别出 ${grouped.size} 位说话角色。${topVoices.join('；')}`
   result.similarities = similarities.slice(0, 4)
   result.drifts = drifts.slice(0, 4)
+  const lowSignalTurns = turns.filter((turn) => isLowSignalDialogueTurn(turn.text))
+  const thinInfoTurns = turns.filter((turn) => isThinInfoDialogueTurn(turn.text))
+  if (turns.length >= 6 && lowSignalTurns.length / turns.length >= 0.35) {
+    result.fillerRisks.push(`本章对白里空转回合偏多（${lowSignalTurns.length}/${turns.length}），建议删减“知道了/怎么会/然后呢”一类填充句，改成带动作或立场的回应。`)
+  }
+  if (turns.length >= 6 && thinInfoTurns.length / turns.length >= 0.45) {
+    result.infoDensityRisks.push(`本章对白信息推进密度偏低（${thinInfoTurns.length}/${turns.length}），建议让关键对话明确携带地点、目标、筹码、证据或下一步动作。`)
+  }
+  result.requiredVoiceLockCharacterIds = dedupeNumbers([
+    ...result.similarities.flatMap((item) => [item.characterAId, item.characterBId]),
+    ...result.drifts.map((item) => item.characterId),
+  ], VOICE_LOCK_LIMIT)
+  if (result.requiredVoiceLockCharacterIds.length > 0) {
+    const focusNames = result.requiredVoiceLockCharacterIds
+      .map((characterId) => allCharacters.find((item) => item.id === characterId)?.fullName || '')
+      .filter(Boolean)
+    result.voiceLockSummary = `建议本章生成前对 ${focusNames.join('、')} 启用 voice lock，优先锁定称呼、句长、停顿和关系温度，避免同腔或口吻漂移。`
+  }
   result.risks = [
     ...result.similarities
       .filter((item) => item.similarity >= HIGH_SIMILARITY_THRESHOLD)

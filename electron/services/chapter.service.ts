@@ -1,10 +1,11 @@
 ﻿import { WebContents } from 'electron'
 import { asc, desc, eq, inArray } from 'drizzle-orm'
 import { getDb, getSqlite } from '../database/db'
-import { chapterContracts, chapterSegments, chapterVersions, chapters, novels, sceneContracts, storyArcs, tasks } from '../database/schema'
+import { chapterContracts, chapterSegments, chapterVersions, chapters, characters, novels, revisionTasks, sceneContracts, storyArcs, tasks } from '../database/schema'
 import { parseAiJsonResult } from '../utils/json'
 import { generateChapterEmbeddings } from './embedding.service'
 import { aiCheckPrompt, chapterSummaryPrompt } from './prompts'
+import { parseThemeVoiceDocument } from '../../src/shared/theme-voice'
 import {
   allocateChapterContext,
   buildChapterContext,
@@ -69,6 +70,10 @@ import {
   scheduleDialogueFingerprintRefresh,
 } from './dialogue-fingerprint.service'
 import { analyzeNovelStyleCompliance } from './style-compliance.service'
+import {
+  analyzeNarrativeControls,
+  type NarrativeControlSceneSnapshot,
+} from './narrative-control.service'
 import { refreshCharacterStateVersionsForChapter } from './character-state.service'
 import {
   refreshWorldStateVersionsForChapter,
@@ -90,6 +95,7 @@ import { persistChapterRecallRuntimeSnapshot } from './chapter-recall-runtime.se
 import { persistAntiAiRuleHits } from './anti-ai-rule.service'
 import { syncFeedbackRecurrenceState } from './feedback-recurrence.service'
 import type {
+  ChapterRewriteScope,
   ChapterContractValidationResult,
   StyleComplianceMetricSnapshot,
   StyleComplianceResult,
@@ -154,6 +160,10 @@ interface ChapterReviewNotes {
   chapter_function_tags: ChapterFunctionTag[]
   dialogue_homogenization_risks: string[]
   dialogue_fingerprint_summary: string
+  dialogue_voice_lock_summary: string
+  dialogue_filler_risks: string[]
+  dialogue_info_density_risks: string[]
+  required_voice_lock_character_ids: number[]
   cross_character_similarity: Array<{
     characterAId: number
     characterAName: string
@@ -186,7 +196,6 @@ type ChapterPipelineFailureCode =
   | 'canon_pending'
   | 'canon_failed'
   | 'human_review_required'
-type ChapterRewriteScope = 'paragraph_patch' | 'scene_rewrite' | 'chapter_rewrite' | 'contract_replan'
 
 interface ChapterPipelineRoleState {
   role: ChapterPipelineRole
@@ -354,6 +363,43 @@ function createChapterVersionSnapshot(chapterId: number, source: ChapterVersionS
   return Number(result.lastInsertRowid)
 }
 
+function loadNarrativeControlSceneSnapshots(chapterId: number): NarrativeControlSceneSnapshot[] {
+  const db = getDb()
+  const segmentRows = db.select().from(chapterSegments)
+    .where(eq(chapterSegments.chapterId, chapterId))
+    .orderBy(asc(chapterSegments.segmentOrder), asc(chapterSegments.id))
+    .all()
+  const sceneRows = db.select().from(sceneContracts)
+    .where(eq(sceneContracts.chapterId, chapterId))
+    .orderBy(asc(sceneContracts.segmentId), asc(sceneContracts.id))
+    .all()
+  const sceneBySegmentId = new Map<number, typeof sceneContracts.$inferSelect>()
+  sceneRows.forEach((row) => {
+    if (typeof row.segmentId === 'number' && !sceneBySegmentId.has(row.segmentId)) {
+      sceneBySegmentId.set(row.segmentId, row)
+    }
+  })
+
+  return [
+    ...segmentRows.map((segment) => {
+      const scene = sceneBySegmentId.get(segment.id)
+      return {
+        segmentId: segment.id,
+        segmentOrder: segment.segmentOrder,
+        segmentTitle: segment.title || `场景 ${segment.segmentOrder}`,
+        pov: scene?.pov || '',
+      }
+    }),
+    ...sceneRows
+      .filter((row) => row.segmentId == null || !segmentRows.some((segment) => segment.id === row.segmentId))
+      .map((scene) => ({
+        segmentId: scene.segmentId ?? undefined,
+        segmentTitle: `场景合同 ${scene.id}`,
+        pov: scene.pov || '',
+      })),
+  ]
+}
+
 function toStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return []
   return value
@@ -362,12 +408,23 @@ function toStringArray(value: unknown): string[] {
     .filter(Boolean)
 }
 
+function toNumberArray(value: unknown): number[] {
+  if (!Array.isArray(value)) return []
+  return [...new Set(value
+    .map((item) => (typeof item === 'number' && Number.isFinite(item) ? item : Number(item)))
+    .filter((item) => Number.isFinite(item) && item > 0))]
+}
+
 function asText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
 function dedupeTextList(values: string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))]
+}
+
+function contentReportLine(summary: string): string {
+  return summary ? `当前检测：${summary}` : ''
 }
 
 function normalizeReviewSeverity(value: unknown): ReviewSeverity {
@@ -577,6 +634,21 @@ function buildPipelineFailureOutput(
     scopeText,
     segmentText,
   ].filter(Boolean).join('\n')
+}
+
+function getPublishCheckRewriteFailureMeta(publishCheck: ReturnType<typeof runChapterPublishCheck>): {
+  rewriteScope: ChapterRewriteScope
+  targetSegmentId?: number | null
+} {
+  return {
+    rewriteScope: publishCheck.rewritePlan?.scope
+      || (publishCheck.rewriteTarget?.kind === 'segment' ? 'scene_rewrite' : 'chapter_rewrite'),
+    targetSegmentId: typeof publishCheck.rewritePlan?.targetSegmentId === 'number'
+      ? publishCheck.rewritePlan.targetSegmentId
+      : publishCheck.rewriteTarget?.kind === 'segment'
+        ? publishCheck.rewriteTarget.segmentId
+        : null,
+  }
 }
 
 function classifyChapterPipelineFailure(
@@ -1135,6 +1207,10 @@ function normalizeReviewNotes(raw: unknown): ChapterReviewNotes {
     chapter_function_tags: chapterFunctionTags,
     dialogue_homogenization_risks: toStringArray(record.dialogue_homogenization_risks),
     dialogue_fingerprint_summary: asText(record.dialogue_fingerprint_summary),
+    dialogue_voice_lock_summary: asText(record.dialogue_voice_lock_summary),
+    dialogue_filler_risks: toStringArray(record.dialogue_filler_risks),
+    dialogue_info_density_risks: toStringArray(record.dialogue_info_density_risks),
+    required_voice_lock_character_ids: toNumberArray(record.required_voice_lock_character_ids),
     cross_character_similarity: Array.isArray(record.cross_character_similarity)
       ? record.cross_character_similarity
         .filter((item) => item && typeof item === 'object' && !Array.isArray(item))
@@ -1202,6 +1278,10 @@ function hasReviewNotes(notes: ChapterReviewNotes): boolean {
     notes.chapter_function_tags.length > 0 ||
     notes.dialogue_homogenization_risks.length > 0 ||
     Boolean(notes.dialogue_fingerprint_summary) ||
+    Boolean(notes.dialogue_voice_lock_summary) ||
+    notes.dialogue_filler_risks.length > 0 ||
+    notes.dialogue_info_density_risks.length > 0 ||
+    notes.required_voice_lock_character_ids.length > 0 ||
     notes.cross_character_similarity.length > 0 ||
     notes.dialogue_drift_alerts.length > 0 ||
     Boolean(notes.style_compliance) ||
@@ -1248,6 +1328,10 @@ function buildFallbackReviewNotes(consistencyNotes: string): ChapterReviewNotes 
     chapter_function_tags: [],
     dialogue_homogenization_risks: [],
     dialogue_fingerprint_summary: '',
+    dialogue_voice_lock_summary: '',
+    dialogue_filler_risks: [],
+    dialogue_info_density_risks: [],
+    required_voice_lock_character_ids: [],
     cross_character_similarity: [],
     dialogue_drift_alerts: [],
     style_compliance: undefined,
@@ -1285,7 +1369,11 @@ function formatReviewNotes(notes: ChapterReviewNotes): string {
     notes.chapter_function_primary ? `章节主功能：${notes.chapter_function_primary}` : '',
     notes.chapter_function_tags.length > 0 ? `章节功能标签：${notes.chapter_function_tags.join(' / ')}` : '',
     notes.dialogue_fingerprint_summary ? `角色对白辨识度：${notes.dialogue_fingerprint_summary}` : '',
+    notes.dialogue_voice_lock_summary ? `本章 Voice Lock：${notes.dialogue_voice_lock_summary}` : '',
     notes.dialogue_homogenization_risks.length > 0 ? `对白同质化风险：\n- ${notes.dialogue_homogenization_risks.join('\n- ')}` : '',
+    notes.dialogue_filler_risks.length > 0 ? `对白空转风险：\n- ${notes.dialogue_filler_risks.join('\n- ')}` : '',
+    notes.dialogue_info_density_risks.length > 0 ? `对白信息推进风险：\n- ${notes.dialogue_info_density_risks.join('\n- ')}` : '',
+    notes.required_voice_lock_character_ids.length > 0 ? `需强制 Voice Lock 角色：${notes.required_voice_lock_character_ids.join('、')}` : '',
     notes.cross_character_similarity.length > 0
       ? `高相似角色组合：\n- ${notes.cross_character_similarity.map((item) => `${item.characterAName}/${item.characterBName} (${item.similarity})：${item.reason}`).join('\n- ')}`
       : '',
@@ -1423,9 +1511,13 @@ function applyDialogueAnalysisToReviewNotes(
   const analysis = analyzeChapterDialogueAgainstNovel(novelId, chapterNum, content)
   if (
     !analysis.fingerprintSummary
+    && !analysis.voiceLockSummary
     && analysis.risks.length === 0
     && analysis.similarities.length === 0
     && analysis.drifts.length === 0
+    && analysis.fillerRisks.length === 0
+    && analysis.infoDensityRisks.length === 0
+    && analysis.requiredVoiceLockCharacterIds.length === 0
   ) {
     return reviewNotes
   }
@@ -1437,17 +1529,161 @@ function applyDialogueAnalysisToReviewNotes(
       ...analysis.risks,
     ]),
     dialogue_fingerprint_summary: analysis.fingerprintSummary || reviewNotes.dialogue_fingerprint_summary,
+    dialogue_voice_lock_summary: analysis.voiceLockSummary || reviewNotes.dialogue_voice_lock_summary,
+    dialogue_filler_risks: dedupeTextList([
+      ...reviewNotes.dialogue_filler_risks,
+      ...analysis.fillerRisks,
+    ]),
+    dialogue_info_density_risks: dedupeTextList([
+      ...reviewNotes.dialogue_info_density_risks,
+      ...analysis.infoDensityRisks,
+    ]),
+    required_voice_lock_character_ids: [...new Set([
+      ...reviewNotes.required_voice_lock_character_ids,
+      ...analysis.requiredVoiceLockCharacterIds,
+    ])],
     cross_character_similarity: analysis.similarities,
     dialogue_drift_alerts: analysis.drifts,
     language_risks: dedupeTextList([
       ...reviewNotes.language_risks,
       ...analysis.risks.filter((item) => item.includes('对白') || item.includes('语音画像')),
+      ...analysis.fillerRisks,
+      ...analysis.infoDensityRisks,
     ]),
     revision_brief: appendRevisionBrief(reviewNotes.revision_brief, [
       analysis.similarities.length > 0 ? '拉开同场角色的句长、停顿和语气差异，避免多人同腔。' : '',
       analysis.drifts.length > 0 ? '把漂移角色拉回既有称呼、停顿和重复短语习惯。' : '',
+      analysis.fillerRisks.length > 0 ? '删掉对白里的空转接话，让角色回应带立场、动作或筹码。' : '',
+      analysis.infoDensityRisks.length > 0 ? '让关键对白明确交代地点、目标、证据、筹码或下一步动作。' : '',
     ]),
   }
+}
+
+function syncDialogueDriftRevisionTasks(novelId: number): number {
+  const db = getDb()
+  const now = new Date().toISOString()
+  const chapterRows = db.select({
+    id: chapters.id,
+    chapterNum: chapters.chapterNum,
+    reviewNotesJson: chapters.reviewNotesJson,
+  }).from(chapters)
+    .where(eq(chapters.novelId, novelId))
+    .orderBy(asc(chapters.chapterNum))
+    .all()
+  const characterNameById = new Map(
+    db.select({
+      id: characters.id,
+      fullName: characters.fullName,
+    }).from(characters)
+      .where(eq(characters.novelId, novelId))
+      .all()
+      .map((row) => [row.id, row.fullName || `角色#${row.id}`] as const),
+  )
+  const activeDriftMap = new Map<number, { chapterNums: number[]; severity: 'medium' | 'high'; detail: string }>()
+
+  for (let index = 1; index < chapterRows.length; index += 1) {
+    const previous = chapterRows[index - 1]
+    const current = chapterRows[index]
+    if (current.chapterNum - previous.chapterNum !== 1) continue
+    const previousNotes = parseStoredReviewNotes(previous.reviewNotesJson)
+    const currentNotes = parseStoredReviewNotes(current.reviewNotesJson)
+    const previousByCharacter = new Map(previousNotes.dialogue_drift_alerts.map((item) => [item.characterId, item] as const))
+    currentNotes.dialogue_drift_alerts.forEach((item) => {
+      const prior = previousByCharacter.get(item.characterId)
+      if (!prior) return
+      activeDriftMap.set(item.characterId, {
+        chapterNums: [previous.chapterNum, current.chapterNum],
+        severity: item.driftRate >= 60 || prior.driftRate >= 60 ? 'high' : 'medium',
+        detail: `第${previous.chapterNum}章与第${current.chapterNum}章连续检测到${item.characterName}口吻漂移：${item.reason || prior.reason || '需要回看称呼、句长、停顿和口头禅。'}`,
+      })
+    })
+  }
+
+  const existingRows = db.select().from(revisionTasks)
+    .where(eq(revisionTasks.novelId, novelId))
+    .all()
+    .filter((row) => asText(row.taskSource) === 'system')
+    .filter((row) => asText(row.issueKey).startsWith('dialogue_drift:'))
+  const existingByKey = new Map(existingRows.map((row) => [asText(row.issueKey), row] as const))
+  const activeKeys = new Set<string>()
+
+  activeDriftMap.forEach((entry, characterId) => {
+    const characterName = characterNameById.get(characterId) || `角色#${characterId}`
+    const issueKey = `dialogue_drift:${characterId}`
+    const title = `[对白漂移] ${characterName} 连续两章口吻偏移`
+    const fixBrief = `回查 ${entry.chapterNums.map((chapterNum) => `第${chapterNum}章`).join('、')}，补人物卡 speechPattern / catchphrases / dialectFeatures，并把 ${characterName} 的 voice lock 升级到下一章硬约束。`
+    const originMetaJson = JSON.stringify({
+      issueCategory: 'dialogue_drift',
+      characterId,
+      characterName,
+      chapterNums: entry.chapterNums,
+      suggestion: fixBrief,
+    })
+    const existing = existingByKey.get(issueKey)
+    activeKeys.add(issueKey)
+
+    if (!existing) {
+      db.insert(revisionTasks).values({
+        novelId,
+        taskSource: 'system',
+        issueKey,
+        taskType: 'continuity',
+        status: 'open',
+        severity: entry.severity,
+        title,
+        description: entry.detail,
+        fixBrief,
+        relatedPage: 'writing',
+        entityType: 'character',
+        entityId: characterId,
+        chapterId: null,
+        originMetaJson,
+        lastDetectedAt: now,
+        resolvedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      }).run()
+      return
+    }
+
+    const nextStatus = asText(existing.status) === 'ignored'
+      ? 'ignored'
+      : asText(existing.status) === 'resolved'
+        ? 'open'
+        : asText(existing.status) || 'open'
+    db.update(revisionTasks).set({
+      status: nextStatus,
+      severity: entry.severity,
+      title,
+      description: entry.detail,
+      fixBrief,
+      relatedPage: 'writing',
+      entityType: 'character',
+      entityId: characterId,
+      chapterId: null,
+      originMetaJson,
+      lastDetectedAt: now,
+      resolvedAt: null,
+      updatedAt: now,
+    }).where(eq(revisionTasks.id, existing.id)).run()
+  })
+
+  existingRows
+    .filter((row) => {
+      const issueKey = asText(row.issueKey)
+      return issueKey && !activeKeys.has(issueKey)
+    })
+    .forEach((row) => {
+      const currentStatus = asText(row.status)
+      if (currentStatus === 'ignored' || currentStatus === 'resolved') return
+      db.update(revisionTasks).set({
+        status: 'resolved',
+        resolvedAt: now,
+        updatedAt: now,
+      }).where(eq(revisionTasks.id, row.id)).run()
+    })
+
+  return activeKeys.size
 }
 
 function normalizeStyleComplianceMetrics(raw: unknown): StyleComplianceMetricSnapshot {
@@ -1782,6 +2018,7 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
           chapterTitle: input.chapter.title || getDefaultChapterTitle(input.chapter.chapterNum),
           chapterGoal: input.context.chapterGoal,
           hardConstraintContext: input.context.hardConstraintContext,
+          dialogueVoiceLocks: input.context.dialogueVoiceLocks,
           emotionTone: input.chapter.emotionTone || '平稳',
           targetWords: input.chapter.targetWords || 3000,
           storyCore: input.storyCore,
@@ -1863,6 +2100,7 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
               chapterTitle: input.chapter.title || getDefaultChapterTitle(input.chapter.chapterNum),
               chapterGoal: input.context.chapterGoal,
               hardConstraintContext: input.context.hardConstraintContext,
+              dialogueVoiceLocks: input.context.dialogueVoiceLocks,
               emotionTone: input.chapter.emotionTone || '平稳',
               targetWords: input.chapter.targetWords || 3000,
               storyCore: input.storyCore,
@@ -2658,6 +2896,8 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
   const rawContext = await collectChapterContextRawData(chapter.novelId, chapter.chapterNum)
   const novel = rawContext.novel
   const profile = rawContext.profile
+  const themeVoice = parseThemeVoiceDocument(novel.themeVoiceJson)
+  const narrativeSceneSnapshots = loadNarrativeControlSceneSnapshots(chapterId)
   const consistencyNotes = buildConsistencyPromptSummary(buildNovelConsistencyReport(chapter.novelId))
   const previousStatus = chapter.status || 'outline'
   const fallbackScenePlan = buildFallbackScenePlan(chapter)
@@ -2938,6 +3178,41 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
     const currentArcRow = rawContext.currentArc
     const latestArcProgressNote = getLatestArcProgressNote(chapter.novelId, currentArcRow, chapter.chapterNum)
     const structuralAlertsSummary = buildStructuralAlertsSummary(chapter.novelId, chapter.chapterNum, chapter.volumeId)
+    const buildNarrativeControlReport = (
+      chapterGoal: string,
+      content?: string,
+      chapterFunction?: string,
+    ) => analyzeNarrativeControls({
+      themeVoice,
+      sceneSnapshots: narrativeSceneSnapshots,
+      content,
+      chapterGoal,
+      emotionTone: chapter.emotionTone || '平稳',
+      chapterFunction,
+      genre: profile.genre,
+    })
+    const formatNarrativePromptFields = (report: ReturnType<typeof buildNarrativeControlReport>) => ({
+      povGuidance: [
+        report.promptGuidance.povGuidance,
+        contentReportLine(report.pov.summary),
+        report.pov.status !== 'pass' ? `修正方向：${report.pov.fixHint}` : '',
+      ].filter(Boolean).join('\n'),
+      sensoryGuidance: [
+        report.promptGuidance.sensoryGuidance,
+        contentReportLine(report.sensory.summary),
+        report.sensory.status !== 'pass' ? `修正方向：${report.sensory.fixHint}` : '',
+      ].filter(Boolean).join('\n'),
+      narrativeRatioGuidance: [
+        report.promptGuidance.narrativeRatioGuidance,
+        contentReportLine(report.narrativeRatio.summary),
+        report.narrativeRatio.deviationReasons.length > 0
+          ? `当前偏移：${report.narrativeRatio.deviationReasons.slice(0, 3).join('；')}`
+          : '',
+        report.narrativeRatio.status !== 'pass' ? `修正方向：${report.narrativeRatio.fixHint}` : '',
+      ].filter(Boolean).join('\n'),
+    })
+    const plannerNarrativeFields = formatNarrativePromptFields(buildNarrativeControlReport(scenePlanContext.chapterGoal))
+    const draftNarrativeFields = formatNarrativePromptFields(buildNarrativeControlReport(draftContext.chapterGoal))
     snapshot = {
       ...snapshot,
       recallSnapshot: draftContext.recallSnapshot,
@@ -2977,6 +3252,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
         chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
         chapterGoal: scenePlanContext.chapterGoal,
         hardConstraintContext: scenePlanContext.hardConstraintContext,
+        dialogueVoiceLocks: scenePlanContext.dialogueVoiceLocks,
         plotPoints: chapter.outline || '',
         emotionTone: chapter.emotionTone || '平稳',
         targetWords: chapter.targetWords || 3000,
@@ -3001,6 +3277,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
         recalledMemory: scenePlanContext.recalledMemory,
         consistencyNotes,
         activeThreads: scenePlanContext.activeThreads,
+        ...plannerNarrativeFields,
         protagonistReference: profile.protagonistReference,
         protagonistRule: profile.protagonistRule,
         promptTier: complexity,
@@ -3079,6 +3356,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
         chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
         chapterGoal: draftContext.chapterGoal,
         hardConstraintContext: draftContext.hardConstraintContext,
+        dialogueVoiceLocks: draftContext.dialogueVoiceLocks,
         emotionTone: chapter.emotionTone || '平稳',
         targetWords: chapter.targetWords || 3000,
         storyCore,
@@ -3106,6 +3384,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
         draftContent: '',
         reviewNotes: '',
         activeThreads: draftContext.activeThreads,
+        ...draftNarrativeFields,
         protagonistReference: profile.protagonistReference,
         protagonistRule: profile.protagonistRule,
         promptTier: complexity,
@@ -3137,6 +3416,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
     })
     finishRoleTask('writer', writerTaskId, '正文初稿已生成，等待 Critic 审校。')
     const lockedParagraphContext = buildLockedParagraphContext(chapter, draftContent)
+    const reviewNarrativeFields = formatNarrativePromptFields(buildNarrativeControlReport(reviewContext.chapterGoal, draftContent))
 
     let reviewNotes = buildFallbackReviewNotes(consistencyNotes)
 
@@ -3149,6 +3429,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
         chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
         chapterGoal: reviewContext.chapterGoal,
         hardConstraintContext: reviewContext.hardConstraintContext,
+        dialogueVoiceLocks: reviewContext.dialogueVoiceLocks,
         storyCore,
         writingContractSummary: reviewContext.writingContractSummary,
         relationSummary: reviewContext.relationSummary,
@@ -3171,6 +3452,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
         arcProgressCheckpoint: buildArcProgressCheckpoint(currentArcRow, chapter.chapterNum),
         scenePlan: scenePlanText,
         draftContent,
+        ...reviewNarrativeFields,
         protagonistReference: profile.protagonistReference,
         protagonistRule: profile.protagonistRule,
         promptTier: complexity,
@@ -3225,6 +3507,11 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
     }))
     updateChapter(chapterId, { reviewNotesJson: JSON.stringify(reviewNotes) })
     finishRoleTask('critic', criticTaskId, 'Critic 审校完成，已生成本章修订意见。')
+    const rewriteNarrativeFields = formatNarrativePromptFields(buildNarrativeControlReport(
+      rewriteContext.chapterGoal,
+      lockedParagraphContext.promptDraftContent,
+      reviewNotes.chapter_function_primary || reviewNotes.pace_marker,
+    ))
 
     const prompt = buildChapterRewritePrompt({
       novelTitle: novel.title,
@@ -3233,6 +3520,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
       chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
       chapterGoal: rewriteContext.chapterGoal,
       hardConstraintContext: rewriteContext.hardConstraintContext,
+      dialogueVoiceLocks: rewriteContext.dialogueVoiceLocks,
       emotionTone: chapter.emotionTone || '平稳',
       targetWords: chapter.targetWords || 3000,
       storyCore,
@@ -3261,6 +3549,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
       reviewNotes: formatReviewNotes(reviewNotes),
       lockedParagraphs: lockedParagraphContext.lockedParagraphs,
       activeThreads: rewriteContext.activeThreads,
+      ...rewriteNarrativeFields,
       protagonistReference: profile.protagonistReference,
       protagonistRule: profile.protagonistRule,
       promptTier: complexity,
@@ -3361,21 +3650,23 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
     })
     hasCommittedContent = true
     const publishCheck = runChapterPublishCheck(chapterId)
+    const publishCheckFailureMeta = getPublishCheckRewriteFailureMeta(publishCheck)
     syncFeedbackRecurrenceState(chapter.novelId)
+    syncDialogueDriftRevisionTasks(chapter.novelId)
     if (publishCheck.gateLevel === 'rewrite') {
       failRoleTask('rewriter', rewriterTaskId, new ChapterPipelineStageError(
         'gate_rewrite_required',
         `章节门要求重写：${publishCheck.summary}`,
         {
           blocked: true,
-          rewriteScope: publishCheck.rewriteTarget?.kind === 'segment' ? 'scene_rewrite' : 'chapter_rewrite',
-          targetSegmentId: publishCheck.rewriteTarget?.kind === 'segment' ? publishCheck.rewriteTarget.segmentId : null,
+          rewriteScope: publishCheckFailureMeta.rewriteScope,
+          targetSegmentId: publishCheckFailureMeta.targetSegmentId,
           outputText: buildPipelineFailureOutput(
             'gate_rewrite_required',
             `章节门要求重写：${publishCheck.summary}`,
             {
-              rewriteScope: publishCheck.rewriteTarget?.kind === 'segment' ? 'scene_rewrite' : 'chapter_rewrite',
-              targetSegmentId: publishCheck.rewriteTarget?.kind === 'segment' ? publishCheck.rewriteTarget.segmentId : null,
+              rewriteScope: publishCheckFailureMeta.rewriteScope,
+              targetSegmentId: publishCheckFailureMeta.targetSegmentId,
             },
           ),
         },
@@ -3387,14 +3678,14 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
         `章节门未通过：${publishCheck.summary}`,
         {
           blocked: true,
-          rewriteScope: publishCheck.rewriteTarget?.kind === 'segment' ? 'scene_rewrite' : 'chapter_rewrite',
-          targetSegmentId: publishCheck.rewriteTarget?.kind === 'segment' ? publishCheck.rewriteTarget.segmentId : null,
+          rewriteScope: publishCheckFailureMeta.rewriteScope,
+          targetSegmentId: publishCheckFailureMeta.targetSegmentId,
           outputText: buildPipelineFailureOutput(
             'human_review_required',
             `章节门未通过：${publishCheck.summary}`,
             {
-              rewriteScope: publishCheck.rewriteTarget?.kind === 'segment' ? 'scene_rewrite' : 'chapter_rewrite',
-              targetSegmentId: publishCheck.rewriteTarget?.kind === 'segment' ? publishCheck.rewriteTarget.segmentId : null,
+              rewriteScope: publishCheckFailureMeta.rewriteScope,
+              targetSegmentId: publishCheckFailureMeta.targetSegmentId,
             },
           ),
         },

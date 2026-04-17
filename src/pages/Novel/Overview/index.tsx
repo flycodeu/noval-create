@@ -28,6 +28,7 @@ import {
   WorkspacePage,
   WorkspacePanel,
 } from '../components/WorkspaceShell'
+import type { QualityDashboardData } from '../../../types'
 import {
   type RegisteredWorkspaceQualityController,
   useRegisterWorkspaceQualityController,
@@ -91,6 +92,7 @@ export default function Overview({ novelId }: Props) {
   const [draftWarnings, setDraftWarnings] = useState<string[]>([])
   const [packagingDraft, setPackagingDraft] = useState<PackagingDraft>(parseNovelBlurbDocument(currentNovel?.blurbJson))
   const [packagingGenerating, setPackagingGenerating] = useState(false)
+  const [qualitySummary, setQualitySummary] = useState<Pick<QualityDashboardData, 'productionReadiness' | 'batchHealth' | 'continuityHealth'> | null>(null)
   const draftWarningsRef = useRef<string[]>([])
   const draftObservabilityRef = useRef<{ inputSummary: string; lintWarnings: string[]; rawOutputs: string[] } | null>(null)
 
@@ -114,6 +116,20 @@ export default function Overview({ novelId }: Props) {
     void loadWorkflowStats(novelId).then((workflowStats) => {
       if (active) setStats(workflowStats)
     })
+
+    void window.electron.quality.getDashboard(novelId)
+      .then((result) => {
+        if (!active) return
+        setQualitySummary({
+          productionReadiness: result.productionReadiness,
+          batchHealth: result.batchHealth,
+          continuityHealth: result.continuityHealth,
+        })
+      })
+      .catch((error) => {
+        console.warn('Failed to load overview quality summary', error)
+        if (active) setQualitySummary(null)
+      })
 
     return () => {
       active = false
@@ -477,6 +493,28 @@ export default function Overview({ novelId }: Props) {
           </div>
         </div>
       </WorkspacePanel>
+
+      {qualitySummary ? (
+        <WorkspacePanel title="百万字健康速览" description="继续扩批前先看生产、回写和连续性。">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+            <div className="guided-step__fact-card">
+              <span>生产就绪度</span>
+              <strong>{qualitySummary.productionReadiness.readyRate}%</strong>
+              <small>{qualitySummary.productionReadiness.summary}</small>
+            </div>
+            <div className="guided-step__fact-card">
+              <span>最近批次</span>
+              <strong>{qualitySummary.batchHealth.chapterIds.length > 0 ? `${qualitySummary.batchHealth.chapterIds.length} 章` : '空闲'}</strong>
+              <small>{qualitySummary.batchHealth.summary}</small>
+            </div>
+            <div className="guided-step__fact-card">
+              <span>连续性健康</span>
+              <strong>{`${qualitySummary.continuityHealth.staleCheckpointCount} / ${qualitySummary.continuityHealth.worldConflictCount}`}</strong>
+              <small>{`检查点待刷新 ${qualitySummary.continuityHealth.staleCheckpointCount}，世界冲突 ${qualitySummary.continuityHealth.worldConflictCount}。`}</small>
+            </div>
+          </div>
+        </WorkspacePanel>
+      ) : null}
 
       <WorkspacePanel title="基础信息" description="编辑基础信息。">
         <Form form={form} layout="vertical">

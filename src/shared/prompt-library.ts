@@ -158,6 +158,7 @@ export interface ChapterWritingPromptInput {
   chapterTitle: string
   chapterGoal: string
   hardConstraintContext?: string
+  dialogueVoiceLocks?: string
   plotPoints: string
   emotionTone: string
   targetWords: number
@@ -180,6 +181,9 @@ export interface ChapterWritingPromptInput {
   timelineOpenThreads: string
   activeThreads?: string
   recalledMemory?: string
+  povGuidance?: string
+  sensoryGuidance?: string
+  narrativeRatioGuidance?: string
   protagonistReference: string
   protagonistRule: string
   promptTier?: PromptTier
@@ -193,6 +197,7 @@ export interface ScenePlanPromptInput {
   chapterTitle: string
   chapterGoal: string
   hardConstraintContext?: string
+  dialogueVoiceLocks?: string
   plotPoints: string
   emotionTone: string
   targetWords: number
@@ -217,6 +222,9 @@ export interface ScenePlanPromptInput {
   consistencyNotes: string
   activeThreads?: string
   recalledMemory?: string
+  povGuidance?: string
+  sensoryGuidance?: string
+  narrativeRatioGuidance?: string
   protagonistReference: string
   protagonistRule: string
   promptTier?: PromptTier
@@ -230,6 +238,7 @@ export interface ChapterReviewPromptInput {
   chapterTitle: string
   chapterGoal: string
   hardConstraintContext?: string
+  dialogueVoiceLocks?: string
   storyCore: string
   writingContractSummary?: string
   relationSummary?: string
@@ -249,6 +258,9 @@ export interface ChapterReviewPromptInput {
   arcProgress?: string
   arcProgressStatus?: string
   arcProgressCheckpoint?: string
+  povGuidance?: string
+  sensoryGuidance?: string
+  narrativeRatioGuidance?: string
   scenePlan: string
   draftContent: string
   structuralAlertsSummary?: string
@@ -264,6 +276,7 @@ export interface ChapterRewritePromptInput {
   chapterTitle: string
   chapterGoal: string
   hardConstraintContext?: string
+  dialogueVoiceLocks?: string
   emotionTone: string
   targetWords: number
   storyCore: string
@@ -292,6 +305,9 @@ export interface ChapterRewritePromptInput {
   lockedParagraphs?: string[]
   activeThreads?: string
   recalledMemory?: string
+  povGuidance?: string
+  sensoryGuidance?: string
+  narrativeRatioGuidance?: string
   protagonistReference: string
   protagonistRule: string
   promptTier?: PromptTier
@@ -1279,6 +1295,7 @@ export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
     }),
     section('本章目标', params.chapterGoal),
     section('硬约束', params.hardConstraintContext),
+    section('角色 Voice Lock', params.dialogueVoiceLocks),
     section('本章细纲', params.plotPoints),
     section('当前故事弧', params.currentArc),
     section('小说核心约束', params.storyCore),
@@ -1298,6 +1315,9 @@ export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
     section('时间轴锚点', params.timelineSummary),
     section('时间轴待回收', params.timelineOpenThreads),
     section('活跃支线与伏笔', params.activeThreads),
+    section('POV 约束', params.povGuidance),
+    section('感官雷达', params.sensoryGuidance),
+    section('叙事比例', params.narrativeRatioGuidance),
     section('长文压缩记忆', params.longTermMemory),
     section('向量召回记忆', params.recalledMemory),
     section('当前结构体检提醒', params.consistencyNotes),
@@ -1351,6 +1371,7 @@ export function buildChapterWritingPrompt(params: ChapterWritingPromptInput): st
     }),
     section('本章必须完成', params.chapterGoal || '按已定大纲执行'),
     section('硬约束', params.hardConstraintContext),
+    section('角色 Voice Lock', params.dialogueVoiceLocks),
     section('已定章节大纲', params.plotPoints),
     section('写作类型', params.writingContractSummary),
     section('关键人物关系', params.relationSummary),
@@ -1360,6 +1381,9 @@ export function buildChapterWritingPrompt(params: ChapterWritingPromptInput): st
     section('时间轴关键节点', params.timelineSummary),
     section('时间轴待回收事项', params.timelineOpenThreads),
     section('活跃支线与伏笔', params.activeThreads),
+    section('POV 约束', params.povGuidance),
+    section('感官雷达', params.sensoryGuidance),
+    section('叙事比例', params.narrativeRatioGuidance),
     section('上一章关键先验', params.previousChapterContext),
     section('上章结尾', params.lastChapterEnding),
     section('当前人物状态', params.characterStates),
@@ -1408,6 +1432,7 @@ export function buildChapterDraftPrompt(params: ChapterRewritePromptInput): stri
     section('场景计划', params.scenePlan),
     section('本章目标', params.chapterGoal),
     section('硬约束', params.hardConstraintContext),
+    section('角色 Voice Lock', params.dialogueVoiceLocks),
     section('当前故事弧', params.currentArc),
     section('小说核心约束', params.storyCore),
     section('写作类型', params.writingContractSummary),
@@ -1426,6 +1451,9 @@ export function buildChapterDraftPrompt(params: ChapterRewritePromptInput): stri
     section('时间轴锚点', params.timelineSummary),
     section('时间轴待回收', params.timelineOpenThreads),
     section('活跃支线与伏笔', params.activeThreads),
+    section('POV 约束', params.povGuidance),
+    section('感官雷达', params.sensoryGuidance),
+    section('叙事比例', params.narrativeRatioGuidance),
     section('长文压缩记忆', params.longTermMemory),
     section('向量召回记忆', params.recalledMemory),
     section('结构体检提醒', params.consistencyNotes),
@@ -1463,6 +1491,7 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
     }),
     section('本章目标', params.chapterGoal),
     section('硬约束', params.hardConstraintContext),
+    section('角色 Voice Lock', params.dialogueVoiceLocks),
     section('场景计划', params.scenePlan),
     section('小说核心', params.storyCore),
     section('写作类型', params.writingContractSummary),
@@ -1482,6 +1511,9 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
     section('时间轴锚点', params.timelineSummary),
     section('长期记忆', params.longTermMemory),
     section('向量召回记忆', params.recalledMemory),
+    section('POV 约束', params.povGuidance),
+    section('感官雷达', params.sensoryGuidance),
+    section('叙事比例', params.narrativeRatioGuidance),
     section('结构体检提醒', params.consistencyNotes),
     section('近期结构告警', params.structuralAlertsSummary),
     section('待审初稿', params.draftContent),
@@ -1497,6 +1529,10 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
       'language_risks 只写 AI 腔、抽象化、搭配错误、空洞抒情或不自然表达。',
       'human_language_repairs 只列最值得优先替换的 1 到 3 处生硬表达，格式尽量写成“原说法 -> 更自然说法”。',
       '如果对话无视人物关系、称呼层级、亲疏温度或潜台词，也要归入 language_risks 或 context_drift_risks。',
+      'dialogue_filler_risks 只写对白空转、打哈哈、重复问答却没有立场和动作承载的问题。',
+      'dialogue_info_density_risks 只写对白信息推进不足的问题，要明确指出该补地点、目标、证据、筹码或下一步动作。',
+      'dialogue_voice_lock_summary 用一句话概括本章生成前要锁哪些角色的声音。',
+      'required_voice_lock_character_ids 只保留本章生成前必须启用 voice lock 的角色 id。',
       '必须结合当前故事弧、本章目标、场景计划、待审初稿和本弧进度状态，判断本章是否真的在服务当前弧目标。',
       'genre_hollowing_risks 只写体裁生态被写空的问题，例如修仙只喊大道却没有境界资源和宗门秩序，末世只有丧尸却没有生存链，武侠只有打斗却没有江湖秩序。',
       '如果主角像功能人、体裁生态被写空，或成长只剩口号，也要明确指出。',
@@ -1517,7 +1553,7 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
       '出现 high 级问题时 rewrite_required 必须是 true，其余情况可以是 false。',
       'revision_brief 用 60 到 120 字中文写清修改方向。',
     ].join('\n')),
-    '只输出 JSON：{"summary":"总体判断","critical_fixes":["必改 1"],"continuity_risks":["连续性风险 1"],"arc_progress_risks":["故事弧推进风险 1"],"context_drift_risks":["漂移风险 1"],"realism_risks":["真实度风险 1"],"coherence_risks":["连贯性风险 1"],"reader_hook_risks":["追读风险 1"],"language_risks":["语言风险 1"],"human_language_repairs":["原说法 -> 更自然说法"],"genre_hollowing_risks":["体裁空心化风险 1"],"missing_payoffs":["未落地伏笔 1"],"strengths":["优点 1"],"severity":"medium","rewrite_required":true,"revision_brief":"修订方向摘要","protagonist_setback":"minor","setback_summary":"主角在关键交锋中被压制","cost_present":true,"cost_summary":"主角失去可靠盟友与补给","cost_resolution_state":"ongoing","reversal_marker":true,"reversal_summary":"看似得手后被埋伏反制","reversal_support_state":"supported","pace_marker":"reversal","reward_state":"partial","protagonist_pressure":72,"chapter_function_primary":"reversal","chapter_function_tags":["progression","reversal"]}',
+    '只输出 JSON：{"summary":"总体判断","critical_fixes":["必改 1"],"continuity_risks":["连续性风险 1"],"arc_progress_risks":["故事弧推进风险 1"],"context_drift_risks":["漂移风险 1"],"realism_risks":["真实度风险 1"],"coherence_risks":["连贯性风险 1"],"reader_hook_risks":["追读风险 1"],"language_risks":["语言风险 1"],"human_language_repairs":["原说法 -> 更自然说法"],"genre_hollowing_risks":["体裁空心化风险 1"],"missing_payoffs":["未落地伏笔 1"],"strengths":["优点 1"],"severity":"medium","rewrite_required":true,"revision_brief":"修订方向摘要","protagonist_setback":"minor","setback_summary":"主角在关键交锋中被压制","cost_present":true,"cost_summary":"主角失去可靠盟友与补给","cost_resolution_state":"ongoing","reversal_marker":true,"reversal_summary":"看似得手后被埋伏反制","reversal_support_state":"supported","pace_marker":"reversal","reward_state":"partial","protagonist_pressure":72,"chapter_function_primary":"reversal","chapter_function_tags":["progression","reversal"],"dialogue_filler_risks":["对白空话 1"],"dialogue_info_density_risks":["信息推进不足 1"],"dialogue_voice_lock_summary":"本章需锁定林远与赵临的称呼和句长差异","required_voice_lock_character_ids":[1,2]}',
   ])
 }
 
@@ -1547,6 +1583,7 @@ export function buildChapterRewritePrompt(params: ChapterRewritePromptInput): st
     section('审校意见', params.reviewNotes),
     section('本章目标', params.chapterGoal),
     section('硬约束', params.hardConstraintContext),
+    section('角色 Voice Lock', params.dialogueVoiceLocks),
     section('当前故事弧', params.currentArc),
     section('小说核心', params.storyCore),
     section('写作类型', params.writingContractSummary),
@@ -1566,6 +1603,9 @@ export function buildChapterRewritePrompt(params: ChapterRewritePromptInput): st
     section('时间轴待回收', params.timelineOpenThreads),
     section('长期记忆', params.longTermMemory),
     section('向量召回记忆', params.recalledMemory),
+    section('POV 约束', params.povGuidance),
+    section('感官雷达', params.sensoryGuidance),
+    section('叙事比例', params.narrativeRatioGuidance),
     section('结构体检提醒', params.consistencyNotes),
     section('近期结构告警', params.structuralAlertsSummary),
     section('重写要求', [
@@ -1689,6 +1729,7 @@ export function chapterWritingPrompt(params: {
   chapterTitle: string
   chapterGoal: string
   hardConstraintContext?: string
+  dialogueVoiceLocks?: string
   plotPoints: string
   emotionTone: string
   worldRules: string
@@ -1717,6 +1758,7 @@ export function chapterWritingPrompt(params: {
     chapterTitle: params.chapterTitle,
     chapterGoal: params.chapterGoal,
     hardConstraintContext: params.hardConstraintContext || '',
+    dialogueVoiceLocks: params.dialogueVoiceLocks || '',
     plotPoints: params.plotPoints,
     emotionTone: params.emotionTone,
     targetWords: params.targetWords,

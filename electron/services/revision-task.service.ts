@@ -1,9 +1,9 @@
 import { and, asc, desc, eq } from 'drizzle-orm'
 import { getDb } from '../database/db'
 import { chapters, revisionTasks, storyArcs, storyThreads, worldMap } from '../database/schema'
-import type { RevisionAutoFixResult, RevisionTask } from '../../src/types'
+import type { ChapterGateLevel, RevisionAutoFixResult, RevisionTask, RewritePlan } from '../../src/types'
 import { buildNovelConsistencyReport } from './consistency.service'
-import { getNovelContextStatus, markNovelContextChanged } from './context-impact.service'
+import { getNovelContextStatus, markNovelContextChanged, runChapterPublishCheck } from './context-impact.service'
 import * as chapterService from './chapter.service'
 import * as characterService from './character.service'
 import * as itemService from './item.service'
@@ -22,12 +22,19 @@ interface RevisionTaskQueryFilters {
   pageSize?: number
 }
 
-interface RevisionOriginMeta {
+interface RevisionOriginMeta extends Record<string, unknown> {
   issueCategory?: string
   autoFixable?: boolean
   entityLabel?: string
   suggestion?: string
   lastError?: string
+  rewritePlan?: RewritePlan
+  recheckItems?: string[]
+  rewriteAttempts?: number
+  maxRewriteAttempts?: number
+  lastRecheckFailedItems?: string[]
+  lastRecheckGateLevel?: ChapterGateLevel
+  lastRecheckAt?: string
 }
 
 interface SystemRevisionDraft {
@@ -184,26 +191,68 @@ function isAutoFixableTask(
   return false
 }
 
+function parseStringArrayValue(value: unknown): string[] {
+  return Array.isArray(value)
+    ? [...new Set(value
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => item.trim())
+      .filter(Boolean))]
+    : []
+}
+
+function normalizeOriginMetaRewritePlan(value: unknown): RewritePlan | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const scope = typeof record.scope === 'string'
+    ? record.scope
+    : ''
+  if (
+    scope !== 'paragraph_patch'
+    && scope !== 'scene_rewrite'
+    && scope !== 'chapter_rewrite'
+    && scope !== 'contract_replan'
+  ) {
+    return undefined
+  }
+  return {
+    scope,
+    targetSegmentId: typeof record.targetSegmentId === 'number' ? record.targetSegmentId : undefined,
+    targetExcerpt: typeof record.targetExcerpt === 'string' ? record.targetExcerpt.trim() : undefined,
+    goals: parseStringArrayValue(record.goals),
+    preserve: parseStringArrayValue(record.preserve),
+    recheckItems: parseStringArrayValue(record.recheckItems),
+  }
+}
+
 function serializeOriginMeta(meta: RevisionOriginMeta): string {
-  return JSON.stringify({
-    issueCategory: meta.issueCategory || '',
-    autoFixable: Boolean(meta.autoFixable),
-    entityLabel: meta.entityLabel || '',
-    suggestion: meta.suggestion || '',
-    lastError: meta.lastError || '',
-  })
+  return JSON.stringify(meta)
 }
 
 function parseOriginMeta(raw?: string | null): RevisionOriginMeta {
   if (!raw) return {}
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
     return {
+      ...parsed,
       issueCategory: typeof parsed.issueCategory === 'string' ? parsed.issueCategory : undefined,
       autoFixable: typeof parsed.autoFixable === 'boolean' ? parsed.autoFixable : undefined,
       entityLabel: typeof parsed.entityLabel === 'string' ? parsed.entityLabel : undefined,
       suggestion: typeof parsed.suggestion === 'string' ? parsed.suggestion : undefined,
       lastError: typeof parsed.lastError === 'string' ? parsed.lastError : undefined,
+      rewritePlan: normalizeOriginMetaRewritePlan(parsed.rewritePlan),
+      recheckItems: parseStringArrayValue(parsed.recheckItems),
+      rewriteAttempts: typeof parsed.rewriteAttempts === 'number' ? parsed.rewriteAttempts : undefined,
+      maxRewriteAttempts: typeof parsed.maxRewriteAttempts === 'number' ? parsed.maxRewriteAttempts : undefined,
+      lastRecheckFailedItems: parseStringArrayValue(parsed.lastRecheckFailedItems),
+      lastRecheckGateLevel:
+        parsed.lastRecheckGateLevel === 'pass'
+        || parsed.lastRecheckGateLevel === 'warning'
+        || parsed.lastRecheckGateLevel === 'blocker'
+        || parsed.lastRecheckGateLevel === 'rewrite'
+          ? parsed.lastRecheckGateLevel
+          : undefined,
+      lastRecheckAt: typeof parsed.lastRecheckAt === 'string' ? parsed.lastRecheckAt : undefined,
     }
   } catch {
     return {}
@@ -367,6 +416,96 @@ async function repairChapterTask(task: typeof revisionTasks.$inferSelect): Promi
 
   const current = chapterService.getChapter(chapterId)
   if (!current) throwUserFacingError('chapter.notFound')
+  const originMeta = parseOriginMeta(task.originMetaJson)
+
+  if (originMeta.issueCategory === 'chapter_gate' && originMeta.rewritePlan) {
+    const rewritePlan = originMeta.rewritePlan
+    const recheckItems = originMeta.recheckItems && originMeta.recheckItems.length > 0
+      ? originMeta.recheckItems
+      : rewritePlan.recheckItems
+    const maxRewriteAttempts = Math.max(1, originMeta.maxRewriteAttempts || 2)
+    const rewriteAttempts = Math.max(0, originMeta.rewriteAttempts || 0)
+
+    if (rewritePlan.scope === 'contract_replan') {
+      updateOriginMeta(task.id, (meta) => ({
+        ...meta,
+        autoFixable: false,
+      }))
+      throw new Error('当前章节门问题需要先退回章节/场景合同重排，暂不支持自动正文重写。')
+    }
+
+    if (rewriteAttempts >= maxRewriteAttempts) {
+      updateOriginMeta(task.id, (meta) => ({
+        ...meta,
+        autoFixable: false,
+      }))
+      throw new Error(`章节门自动重写已连续失败 ${rewriteAttempts} 次，已转人工确认。`)
+    }
+
+    updateOriginMeta(task.id, (meta) => ({
+      ...meta,
+      rewriteAttempts: rewriteAttempts + 1,
+      maxRewriteAttempts,
+      lastRecheckAt: new Date().toISOString(),
+      lastRecheckFailedItems: [],
+    }))
+
+    try {
+      await chapterService.generateChapterContent(chapterId)
+      const publishCheck = runChapterPublishCheck(chapterId)
+      const failedItems = publishCheck.checklist
+        .filter((item) => recheckItems.includes(item.key))
+        .filter((item) => item.status === 'blocker' || item.status === 'rewrite')
+        .map((item) => item.label)
+
+      updateOriginMeta(task.id, (meta) => ({
+        ...meta,
+        lastRecheckAt: new Date().toISOString(),
+        lastRecheckGateLevel: publishCheck.gateLevel,
+        lastRecheckFailedItems: failedItems,
+        autoFixable: failedItems.length > 0 && rewriteAttempts + 1 >= maxRewriteAttempts
+          ? false
+          : meta.autoFixable,
+      }))
+
+      if (failedItems.length > 0) {
+        if (rewriteAttempts + 1 >= maxRewriteAttempts) {
+          throw new Error(`章节门重写后仍未通过：${failedItems.join('、')}。已转人工确认。`)
+        }
+        throw new Error(`章节门重写后仍未通过：${failedItems.join('、')}。`)
+      }
+
+      return
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '章节门自动重写失败。'
+      let failedItems: string[] = originMeta.lastRecheckFailedItems || []
+      let gateLevel: ChapterGateLevel | undefined
+
+      try {
+        const publishCheck = runChapterPublishCheck(chapterId)
+        failedItems = publishCheck.checklist
+          .filter((item) => recheckItems.includes(item.key))
+          .filter((item) => item.status === 'blocker' || item.status === 'rewrite')
+          .map((item) => item.label)
+        gateLevel = publishCheck.gateLevel
+      } catch {
+        // ignore secondary gate read failure
+      }
+
+      updateOriginMeta(task.id, (meta) => ({
+        ...meta,
+        lastRecheckAt: new Date().toISOString(),
+        lastRecheckGateLevel: gateLevel || meta.lastRecheckGateLevel,
+        lastRecheckFailedItems: failedItems,
+        autoFixable: rewriteAttempts + 1 >= maxRewriteAttempts ? false : meta.autoFixable,
+      }))
+
+      if (rewriteAttempts + 1 >= maxRewriteAttempts) {
+        throw new Error(`${message} 已达到自动重写上限，转人工确认。`)
+      }
+      throw error instanceof Error ? error : new Error(message)
+    }
+  }
 
   const title = task.title || ''
   const needsMemoryRefresh =

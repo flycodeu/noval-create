@@ -1291,6 +1291,160 @@ export interface ChapterBatchAutoGenerateStatus extends BatchAutoGenerateStatusB
   blockedChapterId?: number
   blockedTaskId?: number
   consecutiveRecallFallbackChapters: number
+  snapshotId?: number
+}
+
+export type ProductionReadinessStatus = 'ready' | 'warning' | 'blocked'
+export type BatchSnapshotStatus = 'active' | 'completed' | 'rolled_back'
+export type BatchInspectionStatus = 'pass' | 'warning' | 'blocked'
+export type BatchInspectionCategory = 'flow' | 'ai' | 'voice' | 'thread' | 'hook' | 'continuity'
+export type BatchRollbackMode = 'chapter_rollback' | 'batch_content_rollback' | 'batch_full_rollback'
+
+export interface ProductionReadinessSummary {
+  status: ProductionReadinessStatus
+  summary: string
+  blockers: string[]
+  warnings: string[]
+  suggestedActions: string[]
+  readyRate: number
+  contractBlockerCount: number
+  writebackPendingCount: number
+  writebackFailedCount: number
+  aiRecurrenceHighRiskCount: number
+  feedbackPauseSuggestedCount: number
+  consecutiveRecallFallbackChapters: number
+  activeBatchTaskId?: number
+  latestBatchSnapshotId?: number
+}
+
+export interface BatchHealthSummary {
+  latestBatchTaskId?: number
+  latestBatchSnapshotId?: number
+  status: 'idle' | 'pending' | 'running' | 'paused' | 'success' | 'failed' | 'cancelled'
+  chapterIds: number[]
+  chapterStart?: number
+  chapterEnd?: number
+  completedChapterCount: number
+  failedChapterCount: number
+  warningCount: number
+  rewriteTaskCount: number
+  pendingWritebackCount: number
+  pendingRevisionCount: number
+  pausedReason?: string
+  canContinue: boolean
+  summary: string
+}
+
+export interface ContinuityHealthSummary {
+  staleCheckpointCount: number
+  latestCheckpointChapterGap: number
+  recallDegradedChapterCount: number
+  consecutiveRecallFallbackChapters: number
+  worldConflictCount: number
+  writebackPendingCount: number
+  writebackFailedCount: number
+}
+
+export interface ContractDeliverySummary {
+  readyRate: number
+  blockerCount: number
+  warningCount: number
+  storyThreadAdvanceRate: number
+  storyThreadMentionOnlyCount: number
+  foreshadowBlockedCount: number
+  foreshadowStaleCount: number
+}
+
+export interface BatchReviewSummary {
+  latestBatchSnapshotId?: number
+  latestBatchTaskId?: number
+  chapterStart?: number
+  chapterEnd?: number
+  chapterCount: number
+  passedChapterCount: number
+  rewrittenChapterCount: number
+  failedChapterCount: number
+  pendingWritebackCount: number
+  recurringIssues: string[]
+  recallAlerts: string[]
+  avoidNextBatch: string[]
+  summary: string
+}
+
+export interface GlobalLockLibrary {
+  novelId: number
+  lockedCanonFacts: string[]
+  lockedParagraphs: string[]
+  lockedStyleRules: string[]
+  lockedCharacterVoice: string[]
+  updatedAt: string
+}
+
+export interface BatchInspectionRecord {
+  id: number
+  snapshotId: number
+  chapterId?: number
+  chapterNum?: number
+  category: BatchInspectionCategory
+  status: BatchInspectionStatus
+  note: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface BatchSnapshotSummary {
+  id: number
+  novelId: number
+  workflowTaskId?: number
+  title: string
+  status: BatchSnapshotStatus
+  chapterIds: number[]
+  chapterNums: number[]
+  chapterStart?: number
+  chapterEnd?: number
+  summary: string
+  latestTaskStatus?: Task['status']
+  latestTaskMessage?: string
+  latestRollbackMode?: BatchRollbackMode
+  rolledBackAt?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface BatchRollbackImpactPreview {
+  snapshotId: number
+  mode: BatchRollbackMode
+  chapterCount: number
+  affectedChapters: Array<{
+    chapterId: number
+    chapterNum: number
+    title: string
+  }>
+  affectedCounts: Record<string, number>
+  warnings: string[]
+}
+
+export interface BatchRollbackRecord {
+  id: number
+  snapshotId: number
+  mode: BatchRollbackMode
+  summary: string
+  impact: BatchRollbackImpactPreview
+  restoredCounts: Record<string, number>
+  createdAt: string
+}
+
+export interface BatchRollbackResult {
+  snapshot: BatchSnapshotSummary
+  rollback: BatchRollbackRecord
+}
+
+export interface BatchWorkbenchData {
+  snapshots: BatchSnapshotSummary[]
+  activeSnapshot: BatchSnapshotSummary | null
+  inspections: BatchInspectionRecord[]
+  rollbacks: BatchRollbackRecord[]
+  globalLockLibrary: GlobalLockLibrary
 }
 
 export interface SubplotAutoGenerateRequest {
@@ -1608,12 +1762,15 @@ export interface ChapterContractAudit {
 }
 
 export type ContractValidationVerdict = 'pass' | 'weak' | 'missing' | 'contradicted' | 'overdelivered'
+export type ThreadProgressSemanticState = 'missing' | 'mentioned' | 'advanced' | 'blocked' | 'paid_off' | 'stale'
 
 export interface ContractValidationItem {
   contractItemType: string
   contractItemId?: number
   expected: string
   verdict: ContractValidationVerdict
+  semanticState?: ThreadProgressSemanticState
+  semanticReason?: string
   evidenceExcerpt: string
   segmentId?: number
   segmentTitle?: string
@@ -1636,6 +1793,17 @@ export interface ChapterRewriteTarget {
   relatedPage: 'writing' | 'structure' | 'contracts' | 'revision' | 'volume-design' | 'threads'
 }
 
+export type ChapterRewriteScope = 'paragraph_patch' | 'scene_rewrite' | 'chapter_rewrite' | 'contract_replan'
+
+export interface RewritePlan {
+  scope: ChapterRewriteScope
+  targetSegmentId?: number
+  targetExcerpt?: string
+  goals: string[]
+  preserve: string[]
+  recheckItems: string[]
+}
+
 export interface ChapterPublishCheckScoreBreakdown {
   totalScore: number
   continuityScore: number
@@ -1645,6 +1813,9 @@ export interface ChapterPublishCheckScoreBreakdown {
   storyDynamicsScore: number
   languageNaturalnessScore: number
   styleComplianceScore: number
+  povBoundaryScore: number
+  sensoryCoverageScore: number
+  narrativeRatioScore: number
   contractScore: number
   hookScore: number
   povPurityScore: number
@@ -1748,6 +1919,7 @@ export interface ChapterPublishCheck {
   novelContextVersion: number
   rewriteRecommended: boolean
   rewriteTarget?: ChapterRewriteTarget
+  rewritePlan?: RewritePlan
   scoreBreakdown: ChapterPublishCheckScoreBreakdown
   history: ChapterGateHistoryEntry[]
   drift?: ChapterGateDriftSummary
@@ -2148,6 +2320,10 @@ export interface ForeshadowThreadCard {
   currentDistance?: number
   relatedCharacterCount: number
   payoffCondition?: string
+  payoffSceneAction?: string
+  requiredEvidence?: string
+  readerVisibleOutcome?: string
+  allowedDelayReason?: string
   summary?: string
   currentState?: string
   warningText?: string
@@ -2401,6 +2577,10 @@ export interface ForeshadowLedgerEntry {
   salienceLevel: string
   targetPayoffChapter?: number | null
   payoffMethod?: string | null
+  payoffSceneAction?: string | null
+  requiredEvidence?: string | null
+  readerVisibleOutcome?: string | null
+  allowedDelayReason?: string | null
   impactScope: string
   status: string
   linkedThreadId?: number | null
@@ -3305,6 +3485,10 @@ export interface NovelQualityMetrics {
   foreshadowPendingCount: number
   foreshadowDueSoonCount: number
   foreshadowOverdueCount: number
+  foreshadowBlockedCount: number
+  foreshadowStaleCount: number
+  storyThreadAdvanceRate: number
+  storyThreadMentionOnlyCount: number
   endgameActiveCount: number
   endgameServedCount: number
   endgameOverdueCount: number
@@ -3522,11 +3706,17 @@ export interface QualityDashboardData {
   dialogueDriftTrend: CharacterDialogueDriftEntry[]
   volumeDialogueSimilarity: VolumeDialogueSimilarityEntry[]
   recentDialogueAlerts: DialogueAlert[]
+  requiredDialogueVoiceLocks: DialogueVoiceLockCandidate[]
   storyDynamicsTrend: StoryDynamicsTrendPoint[]
   storyPacingAlerts: StoryDynamicsAlert[]
   volumeStoryDynamics: VolumeStoryDynamicsEntry[]
   volumeQualityMetrics: VolumeQualityMetrics[]
   novelQualityMetrics: NovelQualityMetrics
+  productionReadiness: ProductionReadinessSummary
+  batchHealth: BatchHealthSummary
+  continuityHealth: ContinuityHealthSummary
+  contractDelivery: ContractDeliverySummary
+  batchReview: BatchReviewSummary
   chapterFunctionSummary: ChapterFunctionSummary
   repeatedFunctionRuns: ChapterFunctionRun[]
   chapterFunctionAlerts: ChapterFunctionAlert[]
@@ -3787,6 +3977,22 @@ export interface CharacterDialogueDriftEntry {
   trend: CharacterDialogueDriftPoint[]
 }
 
+export interface DialogueVoiceLock {
+  characterId: number
+  characterName: string
+  mustKeep: string[]
+  mustAvoid: string[]
+  relationTone: string
+  sampleHint: string
+}
+
+export interface DialogueVoiceLockCandidate {
+  characterId: number
+  characterName: string
+  reason: string
+  severity: 'warning' | 'critical'
+}
+
 export interface DialogueFingerprintStats {
   analyzedCharacterCount: number
   eligibleCharacterCount: number
@@ -3797,6 +4003,7 @@ export interface DialogueFingerprintStats {
   averageCrossCharacterSimilarity: number
   highSimilarityPairCount: number
   driftingCharacterCount: number
+  voiceLockCandidateCount: number
 }
 
 export interface VolumeDialogueSimilarityEntry {
@@ -3836,9 +4043,13 @@ export interface DialogueDriftWarning {
 
 export interface ChapterDialogueReviewData {
   fingerprintSummary?: string
+  voiceLockSummary?: string
   risks: string[]
   similarities: DialogueSimilarityWarning[]
   drifts: DialogueDriftWarning[]
+  fillerRisks: string[]
+  infoDensityRisks: string[]
+  requiredVoiceLockCharacterIds: number[]
 }
 
 export interface ParallelSegmentGroup {
@@ -4290,6 +4501,20 @@ declare global {
       quality: {
         getDashboard: (novelId: number) => Promise<QualityDashboardData>
         backfillRecallSnapshots: (novelId: number) => Promise<ChapterRecallRuntimeBackfillResult>
+      }
+      batchWorkbench: {
+        getData: (novelId: number, snapshotId?: number) => Promise<BatchWorkbenchData>
+        createInspection: (snapshotId: number, data: {
+          chapterId?: number
+          chapterNum?: number
+          category: BatchInspectionCategory
+          status: BatchInspectionStatus
+          note: string
+        }) => Promise<BatchInspectionRecord>
+        previewRollback: (snapshotId: number, mode: BatchRollbackMode) => Promise<BatchRollbackImpactPreview>
+        applyRollback: (snapshotId: number, mode: BatchRollbackMode) => Promise<BatchRollbackResult>
+        getGlobalLockLibrary: (novelId: number) => Promise<GlobalLockLibrary>
+        updateGlobalLockLibrary: (novelId: number, patch: Partial<GlobalLockLibrary>) => Promise<GlobalLockLibrary>
       }
       embedding: {
         reindex: (novelId: number) => Promise<{ reindexed: number }>

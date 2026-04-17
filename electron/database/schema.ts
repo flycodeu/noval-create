@@ -221,6 +221,10 @@ export const foreshadowLedger = sqliteTable('foreshadow_ledger', {
   salienceLevel: text('salience_level').notNull().default('medium'),
   targetPayoffChapter: integer('target_payoff_chapter'),
   payoffMethod: text('payoff_method'),
+  payoffSceneAction: text('payoff_scene_action'),
+  requiredEvidence: text('required_evidence'),
+  readerVisibleOutcome: text('reader_visible_outcome'),
+  allowedDelayReason: text('allowed_delay_reason'),
   impactScope: text('impact_scope').notNull().default('global'),
   status: text('status').notNull().default('draft'),
   linkedThreadId: integer('linked_thread_id').references(() => storyThreads.id, { onDelete: 'set null' }),
@@ -880,6 +884,53 @@ export const tasks = sqliteTable('tasks', {
   updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
 })
 
+export const chapterBatchSnapshots = sqliteTable('chapter_batch_snapshots', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  workflowTaskId: integer('workflow_task_id').references(() => tasks.id, { onDelete: 'set null' }),
+  title: text('title').notNull(),
+  status: text('status').notNull().default('active'),
+  summaryText: text('summary_text'),
+  chapterIdsJson: text('chapter_ids_json').notNull(),
+  chapterNumsJson: text('chapter_nums_json').notNull(),
+  snapshotJson: text('snapshot_json').notNull(),
+  rolledBackAt: text('rolled_back_at'),
+  latestRollbackMode: text('latest_rollback_mode'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
+export const chapterBatchInspections = sqliteTable('chapter_batch_inspections', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  snapshotId: integer('snapshot_id').notNull().references(() => chapterBatchSnapshots.id, { onDelete: 'cascade' }),
+  chapterId: integer('chapter_id').references(() => chapters.id, { onDelete: 'set null' }),
+  chapterNum: integer('chapter_num'),
+  category: text('category').notNull().default('continuity'),
+  status: text('status').notNull().default('pass'),
+  note: text('note').notNull(),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
+export const chapterBatchRollbacks = sqliteTable('chapter_batch_rollbacks', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  snapshotId: integer('snapshot_id').notNull().references(() => chapterBatchSnapshots.id, { onDelete: 'cascade' }),
+  mode: text('mode').notNull(),
+  summary: text('summary').notNull(),
+  impactJson: text('impact_json').notNull(),
+  restoredCountsJson: text('restored_counts_json').notNull(),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
+export const globalLockLibraries = sqliteTable('global_lock_libraries', {
+  novelId: integer('novel_id').primaryKey().references(() => novels.id, { onDelete: 'cascade' }),
+  lockedCanonFactsJson: text('locked_canon_facts_json').notNull().default('[]'),
+  lockedParagraphsJson: text('locked_paragraphs_json').notNull().default('[]'),
+  lockedStyleRulesJson: text('locked_style_rules_json').notNull().default('[]'),
+  lockedCharacterVoiceJson: text('locked_character_voice_json').notNull().default('[]'),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
 export const operationLogs = sqliteTable('operation_logs', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
@@ -961,6 +1012,14 @@ export type RevisionTask = typeof revisionTasks.$inferSelect
 export type NewRevisionTask = typeof revisionTasks.$inferInsert
 export type Task = typeof tasks.$inferSelect
 export type NewTask = typeof tasks.$inferInsert
+export type ChapterBatchSnapshot = typeof chapterBatchSnapshots.$inferSelect
+export type NewChapterBatchSnapshot = typeof chapterBatchSnapshots.$inferInsert
+export type ChapterBatchInspection = typeof chapterBatchInspections.$inferSelect
+export type NewChapterBatchInspection = typeof chapterBatchInspections.$inferInsert
+export type ChapterBatchRollback = typeof chapterBatchRollbacks.$inferSelect
+export type NewChapterBatchRollback = typeof chapterBatchRollbacks.$inferInsert
+export type GlobalLockLibraryRow = typeof globalLockLibraries.$inferSelect
+export type NewGlobalLockLibraryRow = typeof globalLockLibraries.$inferInsert
 export type OperationLog = typeof operationLogs.$inferSelect
 export type NewOperationLog = typeof operationLogs.$inferInsert
 export type Genre = typeof genres.$inferSelect

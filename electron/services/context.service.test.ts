@@ -61,6 +61,7 @@ vi.mock('./faction-reference.service', () => ({
 
 vi.mock('./dialogue-fingerprint.service', () => ({
   getCharacterDialogueHintMap: vi.fn(() => new Map()),
+  getChapterDialogueVoiceLocks: vi.fn(() => []),
 }))
 
 vi.mock('./character-state.service', () => ({
@@ -149,6 +150,7 @@ function createBaseContextParts(): ChapterContextParts {
     activeThreads: '活跃线程：副手随时可能倒向对方。',
     writingContractSummary: '写作契约：动作先行，情绪落在反应里。',
     relationSummary: '关系约束：主角与副手处于临界失信状态。',
+    dialogueVoiceLocks: '副手：- 必保留：短句反问；- 必避免：长段解释。',
     recalledMemory: '召回片段：过去的误判仍在影响当前决策。',
   }
 }

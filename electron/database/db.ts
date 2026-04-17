@@ -1103,6 +1103,10 @@ export function runMigrations(sqlite: Database.Database) {
         salience_level TEXT NOT NULL DEFAULT 'medium',
         target_payoff_chapter INTEGER,
         payoff_method TEXT,
+        payoff_scene_action TEXT,
+        required_evidence TEXT,
+        reader_visible_outcome TEXT,
+        allowed_delay_reason TEXT,
         impact_scope TEXT NOT NULL DEFAULT 'global',
         status TEXT NOT NULL DEFAULT 'draft',
         linked_thread_id INTEGER REFERENCES story_threads(id) ON DELETE SET NULL,
@@ -1612,6 +1616,73 @@ export function runMigrations(sqlite: Database.Database) {
         ON anti_ai_rule_hits(novel_id, promoted_to_hard_constraint, chapter_num DESC);
     `)
     validateWorkflowRuntimeSchema(sqlite)
+  })
+
+  runMigrationStep(sqlite, '0031_foreshadow_actionized_payoff_fields', () => {
+    ensureColumn(sqlite, 'foreshadow_ledger', 'payoff_scene_action', 'TEXT')
+    ensureColumn(sqlite, 'foreshadow_ledger', 'required_evidence', 'TEXT')
+    ensureColumn(sqlite, 'foreshadow_ledger', 'reader_visible_outcome', 'TEXT')
+    ensureColumn(sqlite, 'foreshadow_ledger', 'allowed_delay_reason', 'TEXT')
+  })
+
+  runMigrationStep(sqlite, '0032_chapter_batch_workbench', () => {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS chapter_batch_snapshots (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        workflow_task_id INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+        title TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active',
+        summary_text TEXT,
+        chapter_ids_json TEXT NOT NULL,
+        chapter_nums_json TEXT NOT NULL,
+        snapshot_json TEXT NOT NULL,
+        rolled_back_at TEXT,
+        latest_rollback_mode TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS chapter_batch_inspections (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        snapshot_id INTEGER NOT NULL REFERENCES chapter_batch_snapshots(id) ON DELETE CASCADE,
+        chapter_id INTEGER REFERENCES chapters(id) ON DELETE SET NULL,
+        chapter_num INTEGER,
+        category TEXT NOT NULL DEFAULT 'continuity',
+        status TEXT NOT NULL DEFAULT 'pass',
+        note TEXT NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS chapter_batch_rollbacks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        snapshot_id INTEGER NOT NULL REFERENCES chapter_batch_snapshots(id) ON DELETE CASCADE,
+        mode TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        impact_json TEXT NOT NULL,
+        restored_counts_json TEXT NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS global_lock_libraries (
+        novel_id INTEGER PRIMARY KEY REFERENCES novels(id) ON DELETE CASCADE,
+        locked_canon_facts_json TEXT NOT NULL DEFAULT '[]',
+        locked_paragraphs_json TEXT NOT NULL DEFAULT '[]',
+        locked_style_rules_json TEXT NOT NULL DEFAULT '[]',
+        locked_character_voice_json TEXT NOT NULL DEFAULT '[]',
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_chapter_batch_snapshots_task
+        ON chapter_batch_snapshots(workflow_task_id);
+      CREATE INDEX IF NOT EXISTS idx_chapter_batch_snapshots_novel_created
+        ON chapter_batch_snapshots(novel_id, created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_chapter_batch_inspections_snapshot
+        ON chapter_batch_inspections(snapshot_id, created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_chapter_batch_rollbacks_snapshot
+        ON chapter_batch_rollbacks(snapshot_id, created_at DESC, id DESC);
+    `)
   })
 }
 

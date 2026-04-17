@@ -288,6 +288,7 @@ describe('runChapterPublishCheck', () => {
     expect(result.checklist.find((item) => item.key === 'thread_progress')?.status).toBe('blocker')
     expect((rows.get(revisionTasks) || []).length).toBe(1)
     expect(result.checklist.find((item) => item.key === 'thread_progress')?.taskId).toBe(1)
+    expect(JSON.parse(String((rows.get(revisionTasks) || [])[0].originMetaJson || '{}')).rewritePlan?.recheckItems).toContain('thread_progress')
   })
 
   it('returns rewrite and points at the conflicting segment when fixed POV chapter mixes scene POVs', () => {
@@ -321,12 +322,52 @@ describe('runChapterPublishCheck', () => {
     vi.mocked(buildNovelConsistencyReport).mockReturnValue({ issues: [] } as never)
 
     const result = runChapterPublishCheck(10)
+    const taskRow = (rows.get(revisionTasks) || []).find((row) => row.issueKey === 'chapter_gate:10:check:pov_purity')
+    const taskMeta = JSON.parse(String(taskRow?.originMetaJson || '{}'))
 
     expect(result.gateLevel).toBe('rewrite')
     expect(result.rewriteRecommended).toBe(true)
     expect(result.rewriteTarget?.kind).toBe('segment')
     expect(result.rewriteTarget?.segmentId).toBe(1002)
+    expect(result.rewritePlan?.scope).toBe('scene_rewrite')
+    expect(result.rewritePlan?.targetSegmentId).toBe(1002)
     expect(result.checklist.find((item) => item.key === 'pov_purity')?.status).toBe('rewrite')
+    expect(taskMeta.rewritePlan?.scope).toBe('scene_rewrite')
+    expect(taskMeta.rewritePlan?.recheckItems).toContain('pov_purity')
+  })
+
+  it('returns rewrite when fixed POV content directly reads another character mind', () => {
+    const rows = createBaseRows()
+    Object.assign((rows.get(chapters) || [])[0], {
+      content: '林远贴着墙根往前挪。赵临心里已经认定他在撒谎。守卫心中甚至开始盘算要不要先下手。',
+    })
+
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+    vi.mocked(buildNovelConsistencyReport).mockReturnValue({ issues: [] } as never)
+
+    const result = runChapterPublishCheck(10)
+
+    expect(result.gateLevel).toBe('rewrite')
+    expect(result.rewriteTarget?.kind).toBe('selection')
+    expect(result.checklist.find((item) => item.key === 'pov_boundary')?.status).toBe('rewrite')
+  })
+
+  it('returns rewrite when chapter falls into all-dialogue ratio drift', () => {
+    const rows = createBaseRows()
+    Object.assign((rows.get(chapters) || [])[0], {
+      content: '“你来了？”“我来了。”“现在怎么办？”“先等。”\n“别说话。”“那你倒是给个主意。”“没有主意。”“那就继续等。”',
+    })
+
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+    vi.mocked(buildNovelConsistencyReport).mockReturnValue({ issues: [] } as never)
+
+    const result = runChapterPublishCheck(10)
+
+    expect(result.gateLevel).toBe('rewrite')
+    expect(result.checklist.find((item) => item.key === 'narrative_ratio')?.status).toBe('rewrite')
+    expect(result.rewritePlan?.scope).toBe('paragraph_patch')
+    expect(result.rewritePlan?.recheckItems).toContain('narrative_ratio')
+    expect(result.scoreBreakdown.narrativeRatioScore).toBeLessThanOrEqual(49)
   })
 
   it('does not create duplicate gate revision tasks for the same unresolved blocker', () => {
@@ -462,10 +503,15 @@ describe('runChapterPublishCheck', () => {
     vi.mocked(buildNovelConsistencyReport).mockReturnValue({ issues: [] } as never)
 
     const result = runChapterPublishCheck(10)
+    const taskRow = (rows.get(revisionTasks) || []).find((row) => row.issueKey === 'chapter_gate:10:check:contract_delivery')
+    const taskMeta = JSON.parse(String(taskRow?.originMetaJson || '{}'))
 
     expect(result.checklist.find((item) => item.key === 'contract_delivery')?.status).toBe('blocker')
     expect(result.contractValidation?.status).toBe('blocker')
     expect(result.contractValidation?.summary).toContain('正文合同验证命中')
+    expect(result.rewritePlan?.scope).toBe('scene_rewrite')
+    expect(result.rewritePlan?.recheckItems).toContain('contract_delivery')
+    expect(taskMeta.rewritePlan?.scope).toBe('scene_rewrite')
     expect(result.history[0]?.topIssueKeys.some((item) => item.startsWith('contract_delivery:'))).toBe(true)
   })
 

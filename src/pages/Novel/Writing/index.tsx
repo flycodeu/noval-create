@@ -74,6 +74,10 @@ interface ReviewNotes {
   protagonist_pressure?: number
   dialogue_homogenization_risks?: string[]
   dialogue_fingerprint_summary?: string
+  dialogue_voice_lock_summary?: string
+  dialogue_filler_risks?: string[]
+  dialogue_info_density_risks?: string[]
+  required_voice_lock_character_ids?: number[]
   cross_character_similarity?: Array<{
     characterAId: number
     characterAName: string
@@ -2397,6 +2401,10 @@ function ChapterForeshadowWritebackCard({
                   {entry.plantMethod ? ` · 埋设：${entry.plantMethod}` : ''}
                 </div>
                 {entry.detail ? <div>{entry.detail}</div> : null}
+                {entry.payoffSceneAction ? <div style={{ opacity: 0.85 }}>{`回收动作：${entry.payoffSceneAction}`}</div> : null}
+                {entry.requiredEvidence ? <div style={{ opacity: 0.85 }}>{`可见证据：${entry.requiredEvidence}`}</div> : null}
+                {entry.readerVisibleOutcome ? <div style={{ opacity: 0.85 }}>{`读者结果：${entry.readerVisibleOutcome}`}</div> : null}
+                {entry.allowedDelayReason ? <div style={{ opacity: 0.72 }}>{`允许延期：${entry.allowedDelayReason}`}</div> : null}
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   <Select
                     size="small"
@@ -3058,7 +3066,16 @@ function DialogueFingerprintHealthCard({
         <div className="novel-copy-block">{reviewNotes.dialogue_fingerprint_summary}</div>
       ) : null}
 
-      {currentSimilarities.length > 0 || currentDrifts.length > 0 || (reviewNotes?.dialogue_homogenization_risks?.length || 0) > 0 ? (
+      {reviewNotes?.dialogue_voice_lock_summary ? (
+        <div className="novel-copy-block">{reviewNotes.dialogue_voice_lock_summary}</div>
+      ) : null}
+
+      {currentSimilarities.length > 0
+      || currentDrifts.length > 0
+      || (reviewNotes?.dialogue_homogenization_risks?.length || 0) > 0
+      || (reviewNotes?.dialogue_filler_risks?.length || 0) > 0
+      || (reviewNotes?.dialogue_info_density_risks?.length || 0) > 0
+      || (reviewNotes?.required_voice_lock_character_ids?.length || 0) > 0 ? (
         <div className="novel-note-list">
           {(reviewNotes?.dialogue_homogenization_risks || []).slice(0, 3).map((item, index) => (
             <div key={`${item}-${index}`} className="novel-note-list__item">{item}</div>
@@ -3073,6 +3090,21 @@ function DialogueFingerprintHealthCard({
               当前章漂移：{item.characterName}（{item.driftRate}）· {item.reason}
             </div>
           ))}
+          {(reviewNotes?.dialogue_filler_risks || []).slice(0, 2).map((item, index) => (
+            <div key={`filler-${index}`} className="novel-note-list__item">
+              对白空转：{item}
+            </div>
+          ))}
+          {(reviewNotes?.dialogue_info_density_risks || []).slice(0, 2).map((item, index) => (
+            <div key={`density-${index}`} className="novel-note-list__item">
+              信息推进：{item}
+            </div>
+          ))}
+          {(reviewNotes?.required_voice_lock_character_ids || []).length > 0 ? (
+            <div className="novel-note-list__item">
+              需强制 Voice Lock 角色 ID：{(reviewNotes?.required_voice_lock_character_ids || []).join('、')}
+            </div>
+          ) : null}
         </div>
       ) : null}
 

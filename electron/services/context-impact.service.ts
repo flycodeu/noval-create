@@ -1,9 +1,11 @@
 import { asc, desc, eq } from 'drizzle-orm'
 import type {
   ChapterContractValidationResult,
+  ChapterRewriteScope,
   RecallDiagnostics,
   RecallFallbackReason,
   RecallSnapshot,
+  RewritePlan,
 } from '../../src/types'
 import { getDb, getSqlite } from '../database/db'
 import {
@@ -46,6 +48,7 @@ import {
   getContractValidationScore,
   validateChapterContractDelivery,
 } from './chapter-contract-validator.service'
+import { analyzeNarrativeControls } from './narrative-control.service'
 
 type AssetFreshnessKey = 'faction' | 'character' | 'item' | 'thread' | 'timeline'
 
@@ -191,6 +194,9 @@ interface ReviewStateSnapshot {
   dialogueHomogenizationRisks: string[]
   dialogueDriftAlerts: string[]
   crossCharacterSimilarity: string[]
+  dialogueFillerRisks: string[]
+  dialogueInfoDensityRisks: string[]
+  dialogueVoiceLockSummary: string
   chapterFunctionPrimary: string
   chapterFunctionTags: string[]
   revisionBrief: string
@@ -224,6 +230,9 @@ function parseReviewState(raw?: string | null): {
   dialogueHomogenizationRisks: string[]
   dialogueDriftAlerts: string[]
   crossCharacterSimilarity: string[]
+  dialogueFillerRisks: string[]
+  dialogueInfoDensityRisks: string[]
+  dialogueVoiceLockSummary: string
   chapterFunctionPrimary: string
   chapterFunctionTags: string[]
   revisionBrief: string
@@ -255,6 +264,9 @@ function parseReviewState(raw?: string | null): {
     dialogueHomogenizationRisks: [],
     dialogueDriftAlerts: [],
     crossCharacterSimilarity: [],
+    dialogueFillerRisks: [],
+    dialogueInfoDensityRisks: [],
+    dialogueVoiceLockSummary: '',
     chapterFunctionPrimary: '',
     chapterFunctionTags: [],
     revisionBrief: '',
@@ -298,6 +310,9 @@ function parseReviewState(raw?: string | null): {
       genreHollowingRisks: parseUnknownStringArray(parsed.genre_hollowing_risks),
       missingPayoffs: parseUnknownStringArray(parsed.missing_payoffs),
       dialogueHomogenizationRisks: parseUnknownStringArray(parsed.dialogue_homogenization_risks),
+      dialogueFillerRisks: parseUnknownStringArray(parsed.dialogue_filler_risks),
+      dialogueInfoDensityRisks: parseUnknownStringArray(parsed.dialogue_info_density_risks),
+      dialogueVoiceLockSummary: normalizeText(parsed.dialogue_voice_lock_summary as string | undefined),
       dialogueDriftAlerts: Array.isArray(parsed.dialogue_drift_alerts)
         ? parsed.dialogue_drift_alerts
           .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
@@ -360,6 +375,9 @@ export interface ChapterPublishCheckScoreBreakdown {
   storyDynamicsScore: number
   languageNaturalnessScore: number
   styleComplianceScore: number
+  povBoundaryScore: number
+  sensoryCoverageScore: number
+  narrativeRatioScore: number
   contractScore: number
   hookScore: number
   povPurityScore: number
@@ -451,6 +469,7 @@ export interface ChapterPublishCheck {
   novelContextVersion: number
   rewriteRecommended: boolean
   rewriteTarget?: ChapterRewriteTarget
+  rewritePlan?: RewritePlan
   scoreBreakdown: ChapterPublishCheckScoreBreakdown
   history: ChapterGateHistoryEntry[]
   drift?: ChapterGateDriftSummary
@@ -955,6 +974,19 @@ interface ChapterGateTaskDraft {
   originMeta: Record<string, unknown>
 }
 
+const CHAPTER_GATE_NON_REWRITEABLE_KEYS = new Set([
+  'content',
+  'summary',
+  'continuity',
+  'context',
+  'scene_plan',
+  'outline',
+  'medium_issues',
+  'hook_strength',
+  'story_dynamics',
+  'recall',
+])
+
 function makePublishCheckItem(
   item: Omit<ChapterPublishCheckItem, 'source'> & { source?: ChapterPublishCheckSource },
 ): ChapterPublishCheckItem {
@@ -1114,6 +1146,9 @@ function buildPublishCheckScoreBreakdown(
   }
   const hookScore = scoreChecklistItem(checklist, 'hook_strength')
   const povPurityScore = scoreChecklistItem(checklist, 'pov_purity')
+  const povBoundaryScore = scoreChecklistItem(checklist, 'pov_boundary')
+  const sensoryCoverageScore = scoreChecklistItem(checklist, 'sensory_coverage')
+  const narrativeRatioScore = scoreChecklistItem(checklist, 'narrative_ratio')
   const threadStatuses = checklist
     .filter((item) => item.key === 'thread_progress' || item.key === 'line_progress')
     .map((item) => gateScoreForStatus(item.status))
@@ -1148,6 +1183,8 @@ function buildPublishCheckScoreBreakdown(
       scoreChecklistItem(checklist, 'consistency'),
       contractScore,
       povPurityScore,
+      povBoundaryScore,
+      sensoryCoverageScore,
     ]),
     [
       Math.min(reviewState.coherenceRisks.length, 3) * 8,
@@ -1162,6 +1199,7 @@ function buildPublishCheckScoreBreakdown(
       scoreChecklistItem(checklist, 'dialogue_voice'),
       scoreChecklistItem(checklist, 'review'),
       typeof aiScore === 'number' ? clampGateScore(aiScore) : 72,
+      narrativeRatioScore,
     ]),
     [
       Math.min(reviewState.dialogueHomogenizationRisks.length, 3) * 9,
@@ -1176,6 +1214,7 @@ function buildPublishCheckScoreBreakdown(
       hookScore,
       scoreChecklistItem(checklist, 'line_progress'),
       scoreChecklistItem(checklist, 'story_dynamics'),
+      narrativeRatioScore,
     ]),
     [
       Math.min(reviewState.readerHookRisks.length, 3) * 10,
@@ -1191,6 +1230,7 @@ function buildPublishCheckScoreBreakdown(
       threadProgressScore,
       volumeAlignmentScore,
       contractScore,
+      narrativeRatioScore,
     ]),
     [
       Math.min(reviewState.arcProgressRisks.length, 3) * 9,
@@ -1208,6 +1248,9 @@ function buildPublishCheckScoreBreakdown(
       scoreChecklistItem(checklist, 'ai_score'),
       typeof aiScore === 'number' ? clampGateScore(aiScore) : 72,
       dialogueVoiceScore,
+      povBoundaryScore,
+      sensoryCoverageScore,
+      narrativeRatioScore,
     ]),
     [
       Math.min(reviewState.languageRisks.length, 3) * 9,
@@ -1226,13 +1269,15 @@ function buildPublishCheckScoreBreakdown(
         styleComplianceBaseScore,
         languageNaturalnessScore,
         dialogueVoiceScore,
+        povBoundaryScore,
+        narrativeRatioScore,
       ]),
       [
         Math.min(reviewState.styleComplianceDeviations.length, 3) * 8,
         Math.min(reviewState.styleComplianceForbiddenPatterns.length, 2) * 12,
       ],
     )
-    : averageScores([languageNaturalnessScore, dialogueVoiceScore], 72)
+    : averageScores([languageNaturalnessScore, dialogueVoiceScore, povBoundaryScore], 72)
   if (reviewState.styleComplianceStatus === 'rewrite') {
     styleComplianceScore = Math.min(styleComplianceScore, 49)
   } else if (reviewState.styleComplianceStatus === 'warning') {
@@ -1240,13 +1285,16 @@ function buildPublishCheckScoreBreakdown(
   }
 
   let totalScore = clampGateScore(
-    continuityScore * 0.20
-    + coherenceScore * 0.16
-    + dialogueVoiceScore * 0.12
-    + hookStrengthScore * 0.10
-    + storyDynamicsScore * 0.17
-    + languageNaturalnessScore * 0.13
-    + styleComplianceScore * 0.12,
+    continuityScore * 0.18
+    + coherenceScore * 0.14
+    + dialogueVoiceScore * 0.11
+    + hookStrengthScore * 0.09
+    + storyDynamicsScore * 0.14
+    + languageNaturalnessScore * 0.11
+    + styleComplianceScore * 0.10
+    + povBoundaryScore * 0.06
+    + sensoryCoverageScore * 0.04
+    + narrativeRatioScore * 0.03,
   )
 
   if (rewriteCount > 0) {
@@ -1266,6 +1314,9 @@ function buildPublishCheckScoreBreakdown(
     storyDynamicsScore,
     languageNaturalnessScore,
     styleComplianceScore,
+    povBoundaryScore,
+    sensoryCoverageScore,
+    narrativeRatioScore,
     contractScore,
     hookScore,
     povPurityScore,
@@ -1411,7 +1462,27 @@ function persistChapterGateRun(params: {
 function buildRewriteTarget(
   chapterId: number,
   items: ChapterPublishCheckItem[],
+  rewritePlan?: RewritePlan,
 ): ChapterRewriteTarget | undefined {
+  if (rewritePlan) {
+    if (typeof rewritePlan.targetSegmentId === 'number') {
+      const matchedItem = items.find((item) => item.segmentId === rewritePlan.targetSegmentId)
+      return {
+        kind: 'segment',
+        chapterId,
+        segmentId: rewritePlan.targetSegmentId,
+        segmentTitle: matchedItem?.segmentTitle,
+        reason: rewritePlan.goals[0] || rewritePlan.targetExcerpt || matchedItem?.detail || '需要重写对应场景。',
+        relatedPage: matchedItem?.relatedPage || 'structure',
+      }
+    }
+    return {
+      kind: rewritePlan.scope === 'paragraph_patch' ? 'selection' : 'chapter',
+      chapterId,
+      reason: rewritePlan.goals[0] || rewritePlan.targetExcerpt || '需要按章节验收计划重写。',
+      relatedPage: rewritePlan.scope === 'contract_replan' ? 'contracts' : 'writing',
+    }
+  }
   const rewriteItem = items.find((item) => item.status === 'rewrite')
   if (!rewriteItem) return undefined
   if (typeof rewriteItem.segmentId === 'number') {
@@ -1432,12 +1503,240 @@ function buildRewriteTarget(
   }
 }
 
+function dedupeTextList(values: Array<string | undefined | null | false>): string[] {
+  return [...new Set(values
+    .map((value) => normalizeText(typeof value === 'string' ? value : ''))
+    .filter(Boolean))]
+}
+
+function buildRewriteGoals(
+  item: ChapterPublishCheckItem,
+  reviewState: ReturnType<typeof parseReviewState>,
+  contractValidation?: ChapterContractValidationResult | null,
+): string[] {
+  const contractFocus = (contractValidation?.itemResults || [])
+    .filter((entry) =>
+      entry.verdict === 'missing'
+      || entry.verdict === 'contradicted'
+      || entry.verdict === 'weak')
+    .slice(0, 2)
+
+  return dedupeTextList([
+    item.fixHint,
+    item.detail,
+    reviewState.revisionBrief,
+    ...contractFocus.map((entry) => entry.rewriteHint),
+    reviewState.criticalFixes[0],
+    reviewState.missingPayoffs[0],
+  ]).slice(0, 5)
+}
+
+function buildRewritePreserve(scope: ChapterRewriteScope, item: ChapterPublishCheckItem): string[] {
+  return dedupeTextList([
+    '作者锁定段落必须逐字保留。',
+    '章节目标、世界规则和已确定关系状态不得被改写成另一条线。',
+    '已经成立且无问题的段落只做最小衔接性改动。',
+    scope === 'scene_rewrite' && typeof item.segmentId === 'number'
+      ? '非目标场景优先保持不动，只修与目标场景衔接的过渡。'
+      : '',
+    scope === 'contract_replan'
+      ? '若合同本身冲突，先重排合同，再决定正文如何改写。'
+      : '',
+  ])
+}
+
+function buildRewriteRecheckItems(
+  item: ChapterPublishCheckItem,
+  checklist: ChapterPublishCheckItem[],
+  contractValidation?: ChapterContractValidationResult | null,
+): string[] {
+  const activeRewriteKeys = checklist
+    .filter((entry) => (entry.status === 'rewrite' || entry.status === 'blocker') && !CHAPTER_GATE_NON_REWRITEABLE_KEYS.has(entry.key))
+    .map((entry) => entry.key)
+
+  if (item.key === 'rewrite_path') {
+    return dedupeTextList([
+      ...activeRewriteKeys,
+      contractValidation?.status === 'blocker' ? 'contract_delivery' : '',
+    ])
+  }
+
+  switch (item.key) {
+    case 'contract_delivery':
+      return dedupeTextList([
+        'contract_delivery',
+        'thread_progress',
+        'line_progress',
+        'volume_alignment',
+      ])
+    case 'pov_purity':
+    case 'pov_boundary':
+      return ['pov_purity', 'pov_boundary']
+    case 'dialogue_voice':
+      return ['dialogue_voice', 'review']
+    case 'style_compliance':
+      return ['style_compliance', 'review', 'ai_score']
+    case 'ai_score':
+    case 'review':
+      return ['ai_score', 'review']
+    case 'sensory_coverage':
+      return ['sensory_coverage', 'review']
+    case 'narrative_ratio':
+      return ['narrative_ratio', 'review', 'ai_score']
+    case 'thread_progress':
+    case 'line_progress':
+      return ['thread_progress', 'line_progress', 'contract_delivery']
+    case 'volume_alignment':
+      return ['volume_alignment', 'contract_delivery', 'line_progress']
+    case 'consistency':
+      return dedupeTextList([...activeRewriteKeys, 'contract_delivery'])
+    default:
+      return dedupeTextList(activeRewriteKeys.length > 0 ? activeRewriteKeys : [item.key])
+  }
+}
+
+function getRewriteScopeForItem(
+  item: ChapterPublishCheckItem,
+  contractValidation?: ChapterContractValidationResult | null,
+): ChapterRewriteScope {
+  if (item.key === 'contract_delivery') {
+    const blockingItems = (contractValidation?.itemResults || [])
+      .filter((entry) => entry.verdict === 'missing' || entry.verdict === 'contradicted')
+    if (blockingItems.some((entry) => entry.verdict === 'contradicted')) return 'contract_replan'
+    if (blockingItems.some((entry) => typeof entry.segmentId === 'number')) return 'scene_rewrite'
+    return 'chapter_rewrite'
+  }
+
+  if (
+    item.key === 'pov_purity'
+    || item.key === 'thread_progress'
+    || item.key === 'line_progress'
+    || item.key === 'volume_alignment'
+    || item.key === 'consistency'
+    || item.key === 'rewrite_path'
+  ) {
+    return typeof item.segmentId === 'number' ? 'scene_rewrite' : 'chapter_rewrite'
+  }
+
+  if (item.key === 'pov_boundary') {
+    return typeof item.segmentId === 'number' ? 'scene_rewrite' : 'paragraph_patch'
+  }
+
+  if (
+    item.key === 'dialogue_voice'
+    || item.key === 'style_compliance'
+    || item.key === 'review'
+    || item.key === 'ai_score'
+    || item.key === 'sensory_coverage'
+    || item.key === 'narrative_ratio'
+  ) {
+    return 'paragraph_patch'
+  }
+
+  return item.status === 'rewrite' && typeof item.segmentId === 'number'
+    ? 'scene_rewrite'
+    : 'chapter_rewrite'
+}
+
+function buildRewriteTargetExcerpt(
+  item: ChapterPublishCheckItem,
+  reviewState: ReturnType<typeof parseReviewState>,
+  contractValidation?: ChapterContractValidationResult | null,
+): string | undefined {
+  const contractEvidence = (contractValidation?.itemResults || [])
+    .find((entry) =>
+      (entry.verdict === 'missing' || entry.verdict === 'contradicted' || entry.verdict === 'weak')
+      && (item.key === 'contract_delivery' || entry.segmentId === item.segmentId))
+
+  return dedupeTextList([
+    contractEvidence?.evidenceExcerpt,
+    contractEvidence?.rewriteHint,
+    item.segmentTitle ? `${item.segmentTitle}：${item.detail}` : '',
+    item.detail,
+    reviewState.dialogueDriftAlerts[0],
+    reviewState.crossCharacterSimilarity[0],
+    reviewState.languageRisks[0],
+  ])[0]
+}
+
+function buildRewritePlanForItem(params: {
+  item: ChapterPublishCheckItem
+  checklist: ChapterPublishCheckItem[]
+  reviewState: ReturnType<typeof parseReviewState>
+  contractValidation?: ChapterContractValidationResult | null
+}): RewritePlan | undefined {
+  const { item, checklist, reviewState, contractValidation } = params
+  if (CHAPTER_GATE_NON_REWRITEABLE_KEYS.has(item.key)) return undefined
+  if (item.status !== 'rewrite' && item.status !== 'blocker') return undefined
+
+  const scope = getRewriteScopeForItem(item, contractValidation)
+  const recheckItems = buildRewriteRecheckItems(item, checklist, contractValidation)
+  if (recheckItems.length === 0) return undefined
+  const contractTargetSegmentId = (contractValidation?.itemResults || [])
+    .find((entry) =>
+      typeof entry.segmentId === 'number'
+      && (entry.verdict === 'missing' || entry.verdict === 'contradicted' || entry.verdict === 'weak'))
+    ?.segmentId
+
+  return {
+    scope,
+    targetSegmentId: typeof item.segmentId === 'number'
+      ? item.segmentId
+      : item.key === 'contract_delivery'
+        ? contractTargetSegmentId
+        : undefined,
+    targetExcerpt: buildRewriteTargetExcerpt(item, reviewState, contractValidation),
+    goals: buildRewriteGoals(item, reviewState, contractValidation),
+    preserve: buildRewritePreserve(scope, item),
+    recheckItems,
+  }
+}
+
+function getRewritePlanPriority(plan: RewritePlan | undefined, item: ChapterPublishCheckItem): number {
+  if (!plan) return 0
+  if (item.key === 'rewrite_path') return 20
+  if (plan.scope === 'contract_replan') return 400
+  if (item.key === 'contract_delivery') return 160
+  if (item.key === 'narrative_ratio') return 280
+  if (plan.scope === 'scene_rewrite') return 300
+  if (plan.scope === 'paragraph_patch') return 240
+  if (plan.scope === 'chapter_rewrite') return 180
+  return 100
+}
+
+function buildChapterRewritePlan(params: {
+  checklist: ChapterPublishCheckItem[]
+  reviewState: ReturnType<typeof parseReviewState>
+  contractValidation?: ChapterContractValidationResult | null
+}): RewritePlan | undefined {
+  let selected: { item: ChapterPublishCheckItem; plan: RewritePlan } | null = null
+  const hasSpecificRewrite = params.checklist.some((item) => item.status === 'rewrite' && item.key !== 'rewrite_path')
+
+  for (const item of params.checklist) {
+    if (hasSpecificRewrite && (item.key === 'rewrite_path' || item.key === 'contract_delivery')) continue
+    const plan = buildRewritePlanForItem({
+      item,
+      checklist: params.checklist,
+      reviewState: params.reviewState,
+      contractValidation: params.contractValidation,
+    })
+    if (!plan) continue
+    if (!selected || getRewritePlanPriority(plan, item) > getRewritePlanPriority(selected.plan, selected.item)) {
+      selected = { item, plan }
+    }
+  }
+
+  return selected ? selected.plan : undefined
+}
+
 function syncChapterGateRevisionTasks(
   novelId: number,
   chapterId: number,
   chapterNum: number,
   checklist: ChapterPublishCheckItem[],
   contractAudit: ChapterContractAudit,
+  reviewState: ReturnType<typeof parseReviewState>,
+  contractValidation?: ChapterContractValidationResult | null,
 ): { taskIdByItemKey: Map<string, number>; generatedTaskCount: number } {
   const db = getDb()
   const now = new Date().toISOString()
@@ -1456,6 +1755,12 @@ function syncChapterGateRevisionTasks(
         itemKey: item.key,
         originMeta: {
           issueCategory: 'chapter_gate',
+          autoFixable: buildRewritePlanForItem({
+            item,
+            checklist,
+            reviewState,
+            contractValidation,
+          })?.scope !== 'contract_replan' ? undefined : false,
           gateLevel: item.status,
           checkKey: item.key,
           source: item.source,
@@ -1466,6 +1771,12 @@ function syncChapterGateRevisionTasks(
             : '',
           entityLabel: chapterLabel,
           suggestion: item.fixHint || item.detail,
+          rewritePlan: buildRewritePlanForItem({
+            item,
+            checklist,
+            reviewState,
+            contractValidation,
+          }),
         },
       })),
     ...contractAudit.items
@@ -1481,6 +1792,7 @@ function syncChapterGateRevisionTasks(
         itemKey: `contract:${item.key}`,
         originMeta: {
           issueCategory: 'chapter_gate',
+          autoFixable: false,
           gateLevel: 'blocker',
           checkKey: item.key,
           source: item.source,
@@ -1488,6 +1800,17 @@ function syncChapterGateRevisionTasks(
           segmentTitle: item.segmentTitle || '',
           entityLabel: chapterLabel,
           suggestion: item.detail,
+          rewritePlan: {
+            scope: 'contract_replan' as ChapterRewriteScope,
+            targetSegmentId: item.segmentId ?? undefined,
+            targetExcerpt: item.segmentTitle ? `${item.segmentTitle}：${item.detail}` : item.detail,
+            goals: dedupeTextList([
+              item.detail,
+              '先回到章节合同/场景合同修正冲突，再决定正文如何改写。',
+            ]),
+            preserve: ['正文锁定段落和已成立事件先不动，优先修合同定义。'],
+            recheckItems: ['contract_delivery'],
+          },
         },
       })),
   ]
@@ -1866,6 +2189,14 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
   const conflictingPovScene = fixedNovelPov && uniqueScenePovs.length > 1
     ? contractContext.sceneSnapshots.find((scene) => scene.pov && scene.pov !== uniqueScenePovs[0])
     : null
+  const narrativeControlReport = analyzeNarrativeControls({
+    themeVoice,
+    sceneSnapshots: contractContext.sceneSnapshots,
+    content: chapter.content,
+    chapterFunction: reviewState.chapterFunctionPrimary || reviewState.paceMarker,
+    chapterGoal: chapterContract.chapterGoal || chapter.outline || '',
+    emotionTone: chapter.emotionTone || '',
+  })
   const sceneHookCount = scenePlanSnapshots.filter((item) => item.exitHook).length
   const requiredThreads = chapterContract.servedThreadIds
     .map((threadId) => threadRows.find((row) => row.id === threadId) || null)
@@ -1910,6 +2241,9 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
     reviewState.dialogueHomogenizationRisks.length
     + reviewState.dialogueDriftAlerts.length
     + reviewState.crossCharacterSimilarity.length
+    + reviewState.dialogueFillerRisks.length
+    + reviewState.dialogueInfoDensityRisks.length
+    + (reviewState.dialogueVoiceLockSummary ? 1 : 0)
   const dialogueVoiceStatus: ChapterGateLevel = dialogueSignalCount >= 3
     || (reviewState.dialogueDriftAlerts.length > 0 && reviewState.crossCharacterSimilarity.length > 0 && reviewState.severity === 'high')
     ? 'blocker'
@@ -1923,6 +2257,9 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
       : uniqueScenePovs.length > 1
         ? 'warning'
         : 'pass'
+  const povBoundaryStatus: ChapterGateLevel = narrativeControlReport.pov.status
+  const sensoryCoverageStatus: ChapterGateLevel = narrativeControlReport.sensory.status
+  const narrativeRatioStatus: ChapterGateLevel = narrativeControlReport.narrativeRatio.status
   const hookStrengthStatus: ChapterGateLevel = !chapterContract.hookType && sceneHookCount === 0 && reviewState.readerHookRisks.length > 0 && weakFunction
     ? 'blocker'
     : (!chapterContract.hookType || sceneHookCount === 0 || reviewState.readerHookRisks.length > 0)
@@ -1946,6 +2283,9 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
 
   const structuralRewriteReasons = [
     povPurityStatus === 'rewrite' ? '当前章节存在多场景 POV 混杂，已经超出固定视角作品可接受范围。' : '',
+    povBoundaryStatus === 'rewrite' ? narrativeControlReport.pov.summary : '',
+    sensoryCoverageStatus === 'rewrite' ? narrativeControlReport.sensory.summary : '',
+    narrativeRatioStatus === 'rewrite' ? narrativeControlReport.narrativeRatio.summary : '',
     reviewState.rewriteRequired && (contractAudit.blockerCount > 0 || highIssues.length > 0 || lineProgressStatus === 'blocker' || threadProgressStatus === 'blocker' || volumeAlignmentStatus === 'blocker')
       ? '审校已经建议重写，且命中了合同/推进/结构类硬问题，单纯润色不足以解决。'
       : '',
@@ -2131,12 +2471,15 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
         ? '当前没有命中明显的对白漂移或角色同声化风险。'
         : [
             ...reviewState.dialogueHomogenizationRisks,
+            ...reviewState.dialogueFillerRisks,
+            ...reviewState.dialogueInfoDensityRisks,
             ...reviewState.dialogueDriftAlerts,
             ...reviewState.crossCharacterSimilarity,
+            reviewState.dialogueVoiceLockSummary,
           ].slice(0, 3).join('；'),
       source: 'review',
       relatedPage: 'revision',
-      fixHint: '回看对白指纹与审校提示，按角色差异化修对白。',
+      fixHint: '回看对白指纹、voice lock 与审校提示，分别修句长/停顿差异、空转对白和信息推进密度。',
     }),
     makePublishCheckItem({
       key: 'pov_purity',
@@ -2158,6 +2501,53 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
       fixHint: povPurityStatus === 'rewrite'
         ? '退回对应场景，统一 POV 后再重新验收。'
         : '补齐场景 POV 标注，并确认章节没有不必要的视角切换。',
+    }),
+    makePublishCheckItem({
+      key: 'pov_boundary',
+      label: 'POV 可知边界',
+      status: povBoundaryStatus,
+      detail: narrativeControlReport.pov.status === 'warning' || narrativeControlReport.pov.status === 'rewrite'
+        ? [
+            narrativeControlReport.pov.summary,
+            narrativeControlReport.pov.directMindReadingHits.length > 0
+              ? `越界心理描写：${narrativeControlReport.pov.directMindReadingHits.join('；')}`
+              : '',
+            narrativeControlReport.pov.impossibleKnowledgeHits.length > 0
+              ? `全知泄露信号：${narrativeControlReport.pov.impossibleKnowledgeHits.join('；')}`
+              : '',
+          ].filter(Boolean).join('；')
+        : narrativeControlReport.pov.summary,
+      source: 'review',
+      relatedPage: 'writing',
+      fixHint: narrativeControlReport.pov.fixHint,
+    }),
+    makePublishCheckItem({
+      key: 'sensory_coverage',
+      label: '五感覆盖',
+      status: sensoryCoverageStatus,
+      detail: [
+        narrativeControlReport.sensory.summary,
+        `当前覆盖：${narrativeControlReport.sensory.coveredSenses.map((key) => narrativeControlReport.sensory.breakdown.find((entry) => entry.key === key)?.label || key).join('、') || '无'}`,
+        narrativeControlReport.sensory.missingSenses.length > 0
+          ? `当前缺口：${narrativeControlReport.sensory.missingSenses.map((key) => narrativeControlReport.sensory.breakdown.find((entry) => entry.key === key)?.label || key).join('、')}`
+          : '',
+        narrativeControlReport.sensory.focusSummary,
+      ].filter(Boolean).join('；'),
+      source: 'review',
+      relatedPage: 'writing',
+      fixHint: narrativeControlReport.sensory.fixHint,
+    }),
+    makePublishCheckItem({
+      key: 'narrative_ratio',
+      label: '动作 / 对话 / 内心 / 环境 / 解释比例',
+      status: narrativeRatioStatus,
+      detail: [
+        narrativeControlReport.narrativeRatio.summary,
+        ...narrativeControlReport.narrativeRatio.deviationReasons.slice(0, 3),
+      ].filter(Boolean).join('；'),
+      source: 'review',
+      relatedPage: 'writing',
+      fixHint: narrativeControlReport.narrativeRatio.fixHint,
     }),
     makePublishCheckItem({
       key: 'hook_strength',
@@ -2238,12 +2628,19 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
     }),
   ]
 
+  const rewritePlan = buildChapterRewritePlan({
+    checklist: rawChecklist,
+    reviewState,
+    contractValidation,
+  })
   const { taskIdByItemKey, generatedTaskCount } = syncChapterGateRevisionTasks(
     chapter.novelId,
     chapter.id,
     chapter.chapterNum,
     rawChecklist,
     contractAudit,
+    reviewState,
+    contractValidation,
   )
   const checklist = rawChecklist.map((item) => {
     const taskId = taskIdByItemKey.get(item.key)
@@ -2305,7 +2702,8 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
     chapterContextVersion: chapter.contextVersion || 1,
     novelContextVersion: novel.contextVersion || 1,
     rewriteRecommended: gateLevel === 'rewrite',
-    rewriteTarget: buildRewriteTarget(chapter.id, checklist),
+    rewriteTarget: buildRewriteTarget(chapter.id, checklist, rewritePlan),
+    rewritePlan,
     scoreBreakdown,
     history,
     drift,

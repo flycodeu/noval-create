@@ -3,6 +3,7 @@ import type {
   ChapterContractValidationResult,
   ContractValidationItem,
   ContractValidationVerdict,
+  ThreadProgressSemanticState,
 } from '../../src/types'
 import { getDb } from '../database/db'
 import {
@@ -14,6 +15,7 @@ import {
   storyThreads,
 } from '../database/schema'
 import { throwUserFacingError } from '../utils/user-facing-error'
+import { analyzeForeshadowProgress, analyzeStoryThreadProgress } from './thread-progress.service'
 
 interface ChapterContractValidationSceneSnapshot {
   segmentId?: number
@@ -24,6 +26,7 @@ interface ChapterContractValidationSceneSnapshot {
 }
 
 interface ContractValidationContext {
+  currentChapterNum: number
   chapterGoal: string
   hookType: string
   sceneSnapshots: ChapterContractValidationSceneSnapshot[]
@@ -109,18 +112,6 @@ const HOOK_MARKERS = [
   '背后',
   '?',
   '？',
-]
-
-const DELAY_MARKERS = [
-  '暂缓',
-  '押后',
-  '以后',
-  '改日',
-  '之后',
-  '容后',
-  '先不',
-  '暂时',
-  '还不是时候',
 ]
 
 function normalizeText(value?: string | null): string {
@@ -307,6 +298,8 @@ function normalizeContractValidationItem(raw: unknown): ContractValidationItem |
     contractItemId: typeof record.contractItemId === 'number' ? record.contractItemId : undefined,
     expected: normalizeText(typeof record.expected === 'string' ? record.expected : ''),
     verdict,
+    semanticState: normalizeText(typeof record.semanticState === 'string' ? record.semanticState : '') as ThreadProgressSemanticState || undefined,
+    semanticReason: normalizeText(typeof record.semanticReason === 'string' ? record.semanticReason : ''),
     evidenceExcerpt: normalizeText(typeof record.evidenceExcerpt === 'string' ? record.evidenceExcerpt : ''),
     segmentId: typeof record.segmentId === 'number' ? record.segmentId : undefined,
     segmentTitle: normalizeText(typeof record.segmentTitle === 'string' ? record.segmentTitle : '') || undefined,
@@ -420,6 +413,7 @@ function loadValidationContext(chapterId: number): ContractValidationContext {
     : []
 
   return {
+    currentChapterNum: chapter.chapterNum,
     chapterGoal: normalizeText(chapterContractRow?.chapterGoal),
     hookType: normalizeText(chapterContractRow?.hookType),
     sceneSnapshots,
@@ -510,54 +504,90 @@ function validateSceneResult(
 function validateThreadProgress(
   row: typeof storyThreads.$inferSelect,
   paragraphs: string[],
+  currentChapterNum: number,
 ): ContractValidationItem {
-  const keywords = buildKeywordCandidates(row.title, row.currentState, row.payoffCondition, row.summary)
-  const evidence = findBestEvidence(paragraphs, keywords, PROGRESS_MARKERS)
-  const mentionHits = evidence.hitCount
-  const progressHits = paragraphs.reduce((count, paragraph) =>
-    count + (countMatchedKeywords(paragraph, keywords) > 0 ? countMarkers(paragraph, PROGRESS_MARKERS) : 0), 0)
-  const verdict: ContractValidationVerdict = mentionHits > 0 && progressHits > 0
+  const semantic = analyzeStoryThreadProgress({
+    title: row.title,
+    currentState: row.currentState,
+    payoffCondition: row.payoffCondition,
+    summary: row.summary,
+    targetPayoffChapter: row.targetPayoffChapter,
+    currentChapterNum,
+    paragraphs,
+  })
+  const verdict: ContractValidationVerdict = semantic.state === 'advanced' || semantic.state === 'paid_off'
     ? 'pass'
-    : mentionHits > 0
+    : semantic.state === 'mentioned' || semantic.state === 'blocked'
       ? 'weak'
       : 'missing'
+  const label = normalizeText(row.title) || `支线 #${row.id}`
   return makeItem({
     contractItemType: 'story_thread_progress',
     contractItemId: row.id,
-    expected: normalizeText(row.title) || `支线 #${row.id} 需要推进`,
+    expected: label,
     verdict,
-    evidenceExcerpt: evidence.excerpt,
+    semanticState: semantic.state,
+    semanticReason: semantic.reason,
+    evidenceExcerpt: semantic.evidenceExcerpt,
     rewriteHint: verdict === 'pass'
       ? ''
-      : `不要只提到“${normalizeText(row.title) || `支线 #${row.id}` }”，补一个会改变局面的推进动作、发现或关系后果。`,
+      : semantic.state === 'blocked'
+        ? `“${label}”本章只写了受阻或延期，仍未形成真实推进。补出新的行动、发现或关系后果，或者把它移出本章必须推进项。`
+        : semantic.state === 'mentioned'
+          ? `“${label}”本章只提及未推进。补一个会改变局面的动作、发现或关系后果，不要只点名。`
+          : semantic.state === 'stale'
+            ? `“${label}”已经超期且没有有效推进。下一版必须回收、实质推进，或重设目标章位。`
+            : `补上“${label}”的真实推进动作，不要让它停留在背景提及。`,
   })
 }
 
 function validateForeshadowDelivery(
   row: typeof foreshadowLedger.$inferSelect,
   paragraphs: string[],
+  currentChapterNum: number,
 ): ContractValidationItem {
-  const keywords = buildKeywordCandidates(row.title, row.detail, row.plantMethod, row.payoffMethod)
-  const evidence = findBestEvidence(paragraphs, keywords, [...PROGRESS_MARKERS, ...DELAY_MARKERS])
-  const mentionHits = evidence.hitCount
-  const progressHits = paragraphs.reduce((count, paragraph) =>
-    count + (countMatchedKeywords(paragraph, keywords) > 0 ? countMarkers(paragraph, PROGRESS_MARKERS) : 0), 0)
-  const delayHits = paragraphs.reduce((count, paragraph) =>
-    count + (countMatchedKeywords(paragraph, keywords) > 0 ? countMarkers(paragraph, DELAY_MARKERS) : 0), 0)
-  const verdict: ContractValidationVerdict = mentionHits > 0 && (progressHits > 0 || delayHits > 0)
+  const semantic = analyzeForeshadowProgress({
+    title: row.title,
+    detail: row.detail,
+    plantMethod: row.plantMethod,
+    payoffMethod: row.payoffMethod,
+    payoffSceneAction: row.payoffSceneAction,
+    requiredEvidence: row.requiredEvidence,
+    readerVisibleOutcome: row.readerVisibleOutcome,
+    allowedDelayReason: row.allowedDelayReason,
+    targetPayoffChapter: row.targetPayoffChapter,
+    currentChapterNum,
+    paragraphs,
+  })
+  const verdict: ContractValidationVerdict = semantic.state === 'advanced' || semantic.state === 'paid_off' || semantic.state === 'blocked'
     ? 'pass'
-    : mentionHits > 0
-      ? 'weak'
+    : semantic.state === 'mentioned'
+      ? semantic.overdue ? 'missing' : 'weak'
       : 'missing'
+  const label = normalizeText(row.title) || `伏笔 #${row.id}`
+  const expected = [
+    label,
+    row.payoffSceneAction ? `动作=${normalizeText(row.payoffSceneAction)}` : '',
+    row.requiredEvidence ? `证据=${normalizeText(row.requiredEvidence)}` : '',
+    row.readerVisibleOutcome ? `结果=${normalizeText(row.readerVisibleOutcome)}` : '',
+  ].filter(Boolean).join(' · ')
   return makeItem({
     contractItemType: 'foreshadow_delivery',
     contractItemId: row.id,
-    expected: normalizeText(row.title) || `伏笔 #${row.id} 需要处理`,
+    expected: expected || label,
     verdict,
-    evidenceExcerpt: evidence.excerpt,
+    semanticState: semantic.state,
+    semanticReason: semantic.reason,
+    evidenceExcerpt: semantic.evidenceExcerpt,
     rewriteHint: verdict === 'pass'
       ? ''
-      : `对“${normalizeText(row.title) || `伏笔 #${row.id}` }”至少给出一次埋设、推进、回收，或明确说明延期原因。`,
+      : semantic.state === 'mentioned'
+        ? semantic.overdue
+          ? `“${label}”已经超期，但本章只提及未回收。必须兑现动作/证据/结果，或明确写出允许的延期原因。`
+          : `“${label}”本章只提及未推进。补出具体回收动作、可见证据或读者可确认的结果。`
+        : semantic.state === 'stale'
+          ? `“${label}”已经超期且没有有效延期理由。下一版必须回收，或在账本里重设目标章位并补延期原因。`
+          : `对“${label}”补一次可见处理：回收动作、证据结果，或明确延期原因。`,
   })
 }
 
@@ -613,11 +643,11 @@ export function validateChapterContractDelivery(input: {
   })
 
   context.threadRows.forEach((row) => {
-    items.push(validateThreadProgress(row, paragraphs))
+    items.push(validateThreadProgress(row, paragraphs, context.currentChapterNum))
   })
 
   context.foreshadowRows.forEach((row) => {
-    items.push(validateForeshadowDelivery(row, paragraphs))
+    items.push(validateForeshadowDelivery(row, paragraphs, context.currentChapterNum))
   })
 
   items.push(validateChapterHook(paragraphs, context, reviewSignals))

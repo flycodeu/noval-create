@@ -595,6 +595,10 @@ export function upsertForeshadowLedger(
     salienceLevel: string
     targetPayoffChapter: number | null
     payoffMethod: string
+    payoffSceneAction: string
+    requiredEvidence: string
+    readerVisibleOutcome: string
+    allowedDelayReason: string
     impactScope: string
     status: string
     linkedThreadId: number | null
@@ -617,6 +621,10 @@ export function upsertForeshadowLedger(
       salienceLevel: data.salienceLevel !== undefined ? asText(data.salienceLevel) || current.salienceLevel : current.salienceLevel,
       targetPayoffChapter: data.targetPayoffChapter !== undefined ? data.targetPayoffChapter : current.targetPayoffChapter,
       payoffMethod: data.payoffMethod !== undefined ? asText(data.payoffMethod) : current.payoffMethod,
+      payoffSceneAction: data.payoffSceneAction !== undefined ? asText(data.payoffSceneAction) : current.payoffSceneAction,
+      requiredEvidence: data.requiredEvidence !== undefined ? asText(data.requiredEvidence) : current.requiredEvidence,
+      readerVisibleOutcome: data.readerVisibleOutcome !== undefined ? asText(data.readerVisibleOutcome) : current.readerVisibleOutcome,
+      allowedDelayReason: data.allowedDelayReason !== undefined ? asText(data.allowedDelayReason) : current.allowedDelayReason,
       impactScope: data.impactScope !== undefined ? asText(data.impactScope) || current.impactScope : current.impactScope,
       status: data.status !== undefined ? asText(data.status) || current.status : current.status,
       linkedThreadId: data.linkedThreadId !== undefined ? data.linkedThreadId : current.linkedThreadId,
@@ -635,6 +643,10 @@ export function upsertForeshadowLedger(
       salienceLevel: asText(data.salienceLevel) || 'medium',
       targetPayoffChapter: data.targetPayoffChapter ?? null,
       payoffMethod: asText(data.payoffMethod),
+      payoffSceneAction: asText(data.payoffSceneAction),
+      requiredEvidence: asText(data.requiredEvidence),
+      readerVisibleOutcome: asText(data.readerVisibleOutcome),
+      allowedDelayReason: asText(data.allowedDelayReason),
       impactScope: asText(data.impactScope) || 'global',
       status: asText(data.status) || 'draft',
       linkedThreadId: data.linkedThreadId ?? null,
@@ -1092,7 +1104,15 @@ export function auditVolumeDesign(
     const keyword = clue.trim().toLowerCase()
     if (!keyword) return
     const matchedRows = inRangeForeshadowRows.filter((row) => {
-      const text = [row.title, row.detail, row.plantMethod, row.payoffMethod]
+      const text = [
+        row.title,
+        row.detail,
+        row.plantMethod,
+        row.payoffMethod,
+        row.payoffSceneAction,
+        row.requiredEvidence,
+        row.readerVisibleOutcome,
+      ]
         .map((item) => asText(item).toLowerCase())
         .filter(Boolean)
         .join(' ')

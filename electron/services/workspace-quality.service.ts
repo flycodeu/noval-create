@@ -15,6 +15,7 @@ import { analyzeLanguageDrift } from '../../src/shared/language-drift'
 import { collectQualityGuardrailFindings } from '../../src/shared/content-guardrails'
 import * as taskService from './task.service'
 import { safeParseJson } from '../utils/json'
+import { analyzeNarrativeControls } from './narrative-control.service'
 
 const ISSUE_KIND_LABELS: Record<WorkspaceQualityIssueKind, string> = {
   relevance_drift: '内容跑题',
@@ -210,6 +211,7 @@ function analyzeAiFlavor(text: string): WorkspaceAiFlavorReport {
   const drift = analyzeLanguageDrift(normalized)
   const sentences = splitSentences(normalized)
   const guardrailFindings = collectQualityGuardrailFindings(normalized)
+  const narrativeControlReport = analyzeNarrativeControls({ content: normalized })
   const templateConnectorRate = countTokenRate(sentences, TEMPLATE_CONNECTORS)
   const explanatoryNarrationRate = countTokenRate(sentences, EXPLANATORY_TOKENS)
   const sensoryAnchorWeakRate = clampPercent(
@@ -232,8 +234,29 @@ function analyzeAiFlavor(text: string): WorkspaceAiFlavorReport {
     { key: 'explanatoryNarrationRate', label: '解释腔占比', value: explanatoryNarrationRate },
     { key: 'sensoryAnchorWeakRate', label: '缺少动作感官锚点', value: sensoryAnchorWeakRate },
     { key: 'stanceWeakRate', label: '缺少人物立场', value: stanceWeakRate },
+    { key: 'povBoundaryRiskRate', label: 'POV 越界风险', value: narrativeControlReport.pov.riskRate },
+    { key: 'sensoryCoverageGapRate', label: '五感缺口率', value: narrativeControlReport.sensory.gapRate },
+    { key: 'dialogueRatio', label: '对白占比', value: narrativeControlReport.narrativeRatio.ratios.dialogue },
+    { key: 'interiorRatio', label: '内心占比', value: narrativeControlReport.narrativeRatio.ratios.interior },
+    { key: 'environmentExpositionRatio', label: '环境/解释占比', value: clampPercent(
+      narrativeControlReport.narrativeRatio.ratios.environment + narrativeControlReport.narrativeRatio.ratios.exposition,
+    ) },
   ]
-  const averageRisk = breakdown.reduce((total, item) => total + item.value, 0) / Math.max(breakdown.length, 1)
+  const riskBreakdown = [
+    drift.abstractTokenDensity,
+    drift.sentencePatternRepeatRate,
+    drift.endingSummaryRate,
+    drift.ornamentOverloadRate,
+    drift.nonHumanCollocationRate,
+    templateConnectorRate,
+    explanatoryNarrationRate,
+    sensoryAnchorWeakRate,
+    stanceWeakRate,
+    narrativeControlReport.pov.riskRate,
+    narrativeControlReport.sensory.gapRate,
+    narrativeControlReport.narrativeRatio.imbalanceRate,
+  ]
+  const averageRisk = riskBreakdown.reduce((total, item) => total + item, 0) / Math.max(riskBreakdown.length, 1)
   const score = Math.max(0, Math.round(100 - averageRisk * 0.9 - guardrailFindings.length * 4))
   const severity = score <= 45 ? 'high' : score <= 70 ? 'medium' : 'low'
   const sampleFindings: string[] = []
@@ -242,6 +265,9 @@ function analyzeAiFlavor(text: string): WorkspaceAiFlavorReport {
   if (drift.ornamentOverloadRate >= 35) sampleFindings.push('辞藻和虚词过多，实感被冲淡。')
   if (sensoryAnchorWeakRate >= 60) sampleFindings.push('很多句子缺少动作、触感和现场锚点。')
   if (stanceWeakRate >= 60) sampleFindings.push('人物立场不够明显，像在做平叙说明。')
+  if (narrativeControlReport.pov.status !== 'pass') sampleFindings.push(narrativeControlReport.pov.summary)
+  if (narrativeControlReport.sensory.status !== 'pass') sampleFindings.push(narrativeControlReport.sensory.summary)
+  if (narrativeControlReport.narrativeRatio.status !== 'pass') sampleFindings.push(narrativeControlReport.narrativeRatio.summary)
   if (guardrailFindings.some((finding) => finding.code === 'ai_slogan' || finding.code === 'template_emotion')) {
     sampleFindings.push('存在口号句或模板情绪表达。')
   }
@@ -251,6 +277,9 @@ function analyzeAiFlavor(text: string): WorkspaceAiFlavorReport {
   if (sensoryAnchorWeakRate >= 60) humanizationDirections.push('补人物动作、环境反应和感官细节，让句子落地。')
   if (stanceWeakRate >= 60) humanizationDirections.push('让句子更贴人物视角，而不是站在场外总结。')
   if (drift.ornamentOverloadRate >= 35) humanizationDirections.push('压掉空转修辞，只保留能推进信息的描述。')
+  if (narrativeControlReport.pov.status !== 'pass') humanizationDirections.push(narrativeControlReport.pov.fixHint)
+  if (narrativeControlReport.sensory.status !== 'pass') humanizationDirections.push(narrativeControlReport.sensory.fixHint)
+  if (narrativeControlReport.narrativeRatio.status !== 'pass') humanizationDirections.push(narrativeControlReport.narrativeRatio.fixHint)
 
   return {
     score,

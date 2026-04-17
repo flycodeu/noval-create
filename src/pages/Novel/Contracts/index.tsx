@@ -475,7 +475,11 @@ export default function ContractsPage({ novelId }: Props) {
                   placeholder="选择本章必须埋设或回收的伏笔"
                   options={foreshadows.map((item) => ({
                     value: item.id,
-                    label: item.title,
+                    label: [
+                      item.title,
+                      item.payoffSceneAction ? `动作:${item.payoffSceneAction}` : '',
+                      item.requiredEvidence ? `证据:${item.requiredEvidence}` : '',
+                    ].filter(Boolean).join(' · '),
                   }))}
                 />
               </Form.Item>
@@ -661,7 +665,11 @@ export default function ContractsPage({ novelId }: Props) {
                       onChange={(value) => handleSceneChange(scene.segmentId, { requiredForeshadowIds: value })}
                       options={foreshadows.map((item) => ({
                         value: item.id,
-                        label: item.title,
+                        label: [
+                          item.title,
+                          item.payoffSceneAction ? `动作:${item.payoffSceneAction}` : '',
+                          item.requiredEvidence ? `证据:${item.requiredEvidence}` : '',
+                        ].filter(Boolean).join(' · '),
                       }))}
                     />
                   </div>

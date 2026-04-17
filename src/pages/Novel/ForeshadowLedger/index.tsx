@@ -47,6 +47,10 @@ interface ForeshadowFormValues {
   salienceLevel: string
   targetPayoffChapter?: number
   payoffMethod: string
+  payoffSceneAction: string
+  requiredEvidence: string
+  readerVisibleOutcome: string
+  allowedDelayReason: string
   impactScope: string
   status: string
   linkedThreadId?: number
@@ -83,6 +87,10 @@ const DEFAULT_FORM_VALUES: ForeshadowFormValues = {
   salienceLevel: 'medium',
   targetPayoffChapter: undefined,
   payoffMethod: '',
+  payoffSceneAction: '',
+  requiredEvidence: '',
+  readerVisibleOutcome: '',
+  allowedDelayReason: '',
   impactScope: 'global',
   status: 'draft',
   linkedThreadId: undefined,
@@ -105,6 +113,10 @@ function toFormValues(entry?: ForeshadowLedgerEntry | null): ForeshadowFormValue
     salienceLevel: entry.salienceLevel || 'medium',
     targetPayoffChapter: entry.targetPayoffChapter || undefined,
     payoffMethod: entry.payoffMethod || '',
+    payoffSceneAction: entry.payoffSceneAction || '',
+    requiredEvidence: entry.requiredEvidence || '',
+    readerVisibleOutcome: entry.readerVisibleOutcome || '',
+    allowedDelayReason: entry.allowedDelayReason || '',
     impactScope: entry.impactScope || 'global',
     status: entry.status || 'draft',
     linkedThreadId: entry.linkedThreadId || undefined,
@@ -120,6 +132,10 @@ function normalizeFormValues(values: ForeshadowFormValues): ForeshadowFormValues
     detail: normalizeText(values.detail),
     plantMethod: normalizeText(values.plantMethod),
     payoffMethod: normalizeText(values.payoffMethod),
+    payoffSceneAction: normalizeText(values.payoffSceneAction),
+    requiredEvidence: normalizeText(values.requiredEvidence),
+    readerVisibleOutcome: normalizeText(values.readerVisibleOutcome),
+    allowedDelayReason: normalizeText(values.allowedDelayReason),
   }
 }
 
@@ -285,6 +301,10 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
         salienceLevel: values.salienceLevel || 'medium',
         targetPayoffChapter: values.targetPayoffChapter || null,
         payoffMethod: values.payoffMethod || undefined,
+        payoffSceneAction: values.payoffSceneAction || undefined,
+        requiredEvidence: values.requiredEvidence || undefined,
+        readerVisibleOutcome: values.readerVisibleOutcome || undefined,
+        allowedDelayReason: values.allowedDelayReason || undefined,
         impactScope: values.impactScope || 'global',
         status: values.status || 'draft',
         linkedThreadId: values.linkedThreadId || null,
@@ -500,6 +520,8 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
                   <div style={{ display: 'grid', gap: 4 }}>
                     <strong>{record.title}</strong>
                     {record.detail ? <span style={{ opacity: 0.85 }}>{record.detail}</span> : null}
+                    {record.payoffSceneAction ? <span style={{ opacity: 0.72 }}>{`动作：${record.payoffSceneAction}`}</span> : null}
+                    {record.requiredEvidence ? <span style={{ opacity: 0.72 }}>{`证据：${record.requiredEvidence}`}</span> : null}
                   </div>
                 ),
               },
@@ -650,6 +672,26 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
             <div className="guided-step__field-card">
               <Form.Item name="payoffMethod" label="回收方式">
                 <Input.TextArea rows={3} placeholder="例如：庭审反转时作为关键证据揭示。 " />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card">
+              <Form.Item name="payoffSceneAction" label="回收动作">
+                <Input.TextArea rows={3} placeholder="正文里必须发生的具体动作，例如：当众出示戒指并逼出供词。" />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card">
+              <Form.Item name="requiredEvidence" label="可见证据">
+                <Input.TextArea rows={3} placeholder="读者必须看到的证据，例如：戒指内圈刻字、监控残片、伤口特征。" />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card">
+              <Form.Item name="readerVisibleOutcome" label="读者可见结果">
+                <Input.TextArea rows={3} placeholder="本章结束后读者明确知道了什么。" />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card">
+              <Form.Item name="allowedDelayReason" label="允许延期理由">
+                <Input.TextArea rows={3} placeholder="如果本章不回收，正文允许写出的延期原因。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card guided-step__field-card--compact">

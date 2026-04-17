@@ -199,6 +199,15 @@ const api = {
     resumeAutoGenerate: (taskId: number) => invokeIpc('chapterBatch:resumeAutoGenerate', taskId),
   },
 
+  batchWorkbench: {
+    getData: (novelId: number, snapshotId?: number) => invokeIpc('batchWorkbench:getData', novelId, snapshotId),
+    createInspection: (snapshotId: number, data: unknown) => invokeIpc('batchWorkbench:createInspection', snapshotId, data),
+    previewRollback: (snapshotId: number, mode: string) => invokeIpc('batchWorkbench:previewRollback', snapshotId, mode),
+    applyRollback: (snapshotId: number, mode: string) => invokeIpc('batchWorkbench:applyRollback', snapshotId, mode),
+    getGlobalLockLibrary: (novelId: number) => invokeIpc('batchWorkbench:getGlobalLockLibrary', novelId),
+    updateGlobalLockLibrary: (novelId: number, patch: unknown) => invokeIpc('batchWorkbench:updateGlobalLockLibrary', novelId, patch),
+  },
+
   writeback: {
     prepareRun: (chapterId: number, triggerSource?: string) => invokeIpc('writeback:prepareRun', chapterId, triggerSource),
     getCenterData: (chapterId: number, runId?: number) => invokeIpc('writeback:getCenterData', chapterId, runId),

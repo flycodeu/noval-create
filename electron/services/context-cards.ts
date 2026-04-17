@@ -583,6 +583,26 @@ function buildThreadCard(
   }
 }
 
+function pickFocusedThreads(ordered: StoryThreadRow[], maxFocusCount: number): StoryThreadRow[] {
+  if (ordered.length <= maxFocusCount) return ordered
+  const focus: StoryThreadRow[] = []
+  const seen = new Set<number>()
+
+  const push = (thread?: StoryThreadRow) => {
+    if (!thread || seen.has(thread.id) || focus.length >= maxFocusCount) return
+    focus.push(thread)
+    seen.add(thread.id)
+  }
+
+  push(ordered.find((thread) => thread.threadType === 'main'))
+  ordered.forEach((thread) => {
+    if (thread.threadType === 'main') return
+    push(thread)
+  })
+  ordered.forEach((thread) => push(thread))
+  return focus
+}
+
 export function buildChapterThreadContextCards(options: ChapterThreadCardOptions): { cards: ThreadContextCard[]; pressureCount: number } {
   const rows = options.threads.filter((thread) => thread.status === 'active')
   if (rows.length === 0) return { cards: [], pressureCount: 0 }
@@ -614,10 +634,11 @@ export function buildChapterThreadContextCards(options: ChapterThreadCardOptions
 
       return (left.sortOrder || 0) - (right.sortOrder || 0)
     })
-    .slice(0, options.limit || 10)
+  const maxFocusCount = Math.min(Math.max(options.limit || 3, 1), 3)
+  const focused = pickFocusedThreads(ordered, maxFocusCount)
 
   return {
-    cards: ordered.map((thread) => buildThreadCard(thread, {
+    cards: focused.map((thread) => buildThreadCard(thread, {
       chapterNum: options.chapterNum,
       isArcPriority: isArcPriority(thread, options.currentArc),
       isUrgent: urgent.includes(thread),

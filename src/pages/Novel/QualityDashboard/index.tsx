@@ -228,6 +228,19 @@ function qualityRiskKindLabel(kind: QualityDashboardData['novelQualityMetrics'][
   return '状态稳定性'
 }
 
+function readinessStatusColor(status: QualityDashboardData['productionReadiness']['status']): string {
+  if (status === 'ready') return 'success'
+  if (status === 'warning') return 'warning'
+  return 'error'
+}
+
+function batchStatusColor(status: QualityDashboardData['batchHealth']['status']): string {
+  if (status === 'success' || status === 'idle') return 'success'
+  if (status === 'paused') return 'warning'
+  if (status === 'failed' || status === 'cancelled') return 'error'
+  return 'processing'
+}
+
 function recallSnapshotSourceLabel(source?: QualityDashboardData['chapterDetails'][number]['recallSnapshotSource']): string | null {
   if (source === 'runtime') return '真实运行快照'
   if (source === 'backfilled') return '历史回填快照'
@@ -385,6 +398,72 @@ export default function QualityDashboard({ novelId }: Props) {
 
   const overviewContent = (
     <>
+      <WorkspacePanel title="百万字健康指标" description="把继续扩批前最关键的生产、连续性、合同和批次回查信号收在一起。">
+        <div style={{ display: 'grid', gap: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+            <div className="quality-card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+                <strong>生产就绪度</strong>
+                <Tag color={readinessStatusColor(data.productionReadiness.status)}>{`${data.productionReadiness.readyRate}%`}</Tag>
+              </div>
+              <div style={{ marginTop: 8, fontSize: 12, opacity: 0.8 }}>{data.productionReadiness.summary}</div>
+            </div>
+            <div className="quality-card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+                <strong>批次健康</strong>
+                <Tag color={batchStatusColor(data.batchHealth.status)}>{data.batchHealth.status}</Tag>
+              </div>
+              <div style={{ marginTop: 8, fontSize: 12, opacity: 0.8 }}>{data.batchHealth.summary}</div>
+            </div>
+            <div className="quality-card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+                <strong>连续性健康</strong>
+                <Tag color={data.continuityHealth.staleCheckpointCount > 0 || data.continuityHealth.worldConflictCount > 0 ? 'warning' : 'success'}>
+                  {`检查点 ${data.continuityHealth.staleCheckpointCount}`}
+                </Tag>
+              </div>
+              <div style={{ marginTop: 8, fontSize: 12, opacity: 0.8 }}>
+                {`召回降级 ${data.continuityHealth.recallDegradedChapterCount} 章，世界冲突 ${data.continuityHealth.worldConflictCount} 处，最新检查点落后 ${data.continuityHealth.latestCheckpointChapterGap} 章。`}
+              </div>
+            </div>
+            <div className="quality-card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+                <strong>合同交付</strong>
+                <Tag color={data.contractDelivery.blockerCount > 0 ? 'error' : data.contractDelivery.warningCount > 0 ? 'warning' : 'success'}>
+                  {`${data.contractDelivery.readyRate}%`}
+                </Tag>
+              </div>
+              <div style={{ marginTop: 8, fontSize: 12, opacity: 0.8 }}>
+                {`阻断 ${data.contractDelivery.blockerCount}，预警 ${data.contractDelivery.warningCount}，线程推进率 ${data.contractDelivery.storyThreadAdvanceRate}%。`}
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
+            <div className="quality-card">
+              <strong>继续下一批前</strong>
+              <div style={{ display: 'grid', gap: 8, marginTop: 10, fontSize: 12, opacity: 0.82 }}>
+                {(data.productionReadiness.blockers.length > 0
+                  ? data.productionReadiness.blockers
+                  : data.productionReadiness.suggestedActions.slice(0, 3)
+                ).map((item) => (
+                  <div key={item}>{item}</div>
+                ))}
+              </div>
+            </div>
+            <div className="quality-card">
+              <strong>最近批次回查</strong>
+              <div style={{ marginTop: 10, fontSize: 12, opacity: 0.82 }}>{data.batchReview.summary}</div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+                <Tag color="blue">{`通过 ${data.batchReview.passedChapterCount}`}</Tag>
+                <Tag color="gold">{`重写 ${data.batchReview.rewrittenChapterCount}`}</Tag>
+                <Tag color="red">{`失败 ${data.batchReview.failedChapterCount}`}</Tag>
+                <Tag color="purple">{`回写待处理 ${data.batchReview.pendingWritebackCount}`}</Tag>
+              </div>
+            </div>
+          </div>
+        </div>
+      </WorkspacePanel>
+
       <WorkspacePanel title="全书健康总览">
         <NovelHealthOverviewPanel
           summary={data.novelQualityMetrics}
@@ -541,6 +620,7 @@ export default function QualityDashboard({ novelId }: Props) {
             driftEntries={data.dialogueDriftTrend}
             volumeEntries={data.volumeDialogueSimilarity}
             alerts={data.recentDialogueAlerts}
+            voiceLockCandidates={data.requiredDialogueVoiceLocks}
           />
         </WorkspacePanel>
       ) : (
@@ -632,6 +712,8 @@ export default function QualityDashboard({ novelId }: Props) {
     <WorkspacePage
       title="质量监控"
       metrics={[
+        <WorkspaceMetric key="ready" label="生产就绪度" value={`${data.productionReadiness.readyRate}%`} tone="warm" />,
+        <WorkspaceMetric key="batch" label="最近批次" value={data.batchHealth.chapterIds.length > 0 ? `${data.batchHealth.chapterIds.length}章` : '空闲'} />,
         <WorkspaceMetric key="scored" label="已评分章节" value={data.totalChaptersScored} />,
         <WorkspaceMetric key="gate" label="章节门覆盖" value={data.chapterGateSummary.coveredChapterCount} />,
         <WorkspaceMetric key="style" label="风格预警" value={data.styleCompliance.warningCount + data.styleCompliance.rewriteCount} />,
@@ -977,6 +1059,16 @@ function NovelHealthOverviewPanel({
           <div style={{ fontSize: 24, fontWeight: 700 }}>{summary.foreshadowPendingCount}</div>
           <div style={{ fontSize: 11, opacity: 0.55 }}>
             待回收 {summary.foreshadowPendingCount} · 即将到期 {summary.foreshadowDueSoonCount} · 已超期 {summary.foreshadowOverdueCount}
+          </div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>
+            延期说明 {summary.foreshadowBlockedCount} · 超期失管 {summary.foreshadowStaleCount}
+          </div>
+        </div>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>支线兑现率</div>
+          <div style={{ fontSize: 24, fontWeight: 700 }}>{summary.storyThreadAdvanceRate}%</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>
+            提及未推进 {summary.storyThreadMentionOnlyCount} · 只按真实推进/回收计入兑现
           </div>
         </div>
         <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
@@ -2117,6 +2209,7 @@ function DialogueFingerprintPanel({
   driftEntries,
   volumeEntries,
   alerts,
+  voiceLockCandidates,
 }: {
   stats: QualityDashboardData['dialogueFingerprintStats']
   signatures: QualityDashboardData['characterDialogueSignatures']
@@ -2124,6 +2217,7 @@ function DialogueFingerprintPanel({
   driftEntries: QualityDashboardData['dialogueDriftTrend']
   volumeEntries: QualityDashboardData['volumeDialogueSimilarity']
   alerts: QualityDashboardData['recentDialogueAlerts']
+  voiceLockCandidates: QualityDashboardData['requiredDialogueVoiceLocks']
 }) {
   if (stats.eligibleCharacterCount === 0) {
     return <Empty description="暂无足够的角色对白样本" />
@@ -2151,6 +2245,11 @@ function DialogueFingerprintPanel({
           <div style={{ fontSize: 12, opacity: 0.7 }}>漂移角色</div>
           <div style={{ fontSize: 22, fontWeight: 700 }}>{stats.driftingCharacterCount}</div>
           <div style={{ fontSize: 11, opacity: 0.55 }}>近期漂移率 45 以上</div>
+        </div>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>需 Voice Lock 角色</div>
+          <div style={{ fontSize: 22, fontWeight: 700 }}>{stats.voiceLockCandidateCount}</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>连续漂移或同声化预警</div>
         </div>
       </div>
 
@@ -2181,6 +2280,21 @@ function DialogueFingerprintPanel({
               <div style={{ fontSize: 11, opacity: 0.6 }}>{pair.reasons.join('、') || '句长、停顿和惯用短语接近。'}</div>
             </div>
           )) : <div style={{ fontSize: 12, opacity: 0.6 }}>暂无跨角色相似度数据。</div>}
+        </div>
+
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', display: 'grid', gap: 8 }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>需要 Voice Lock 的角色</div>
+          {voiceLockCandidates.length > 0 ? voiceLockCandidates.slice(0, 5).map((candidate) => (
+            <div key={`${candidate.characterId}-${candidate.severity}`} style={{ display: 'grid', gap: 3 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                <strong style={{ fontSize: 12 }}>{candidate.characterName}</strong>
+                <Tag color={candidate.severity === 'critical' ? 'error' : 'warning'} style={{ marginRight: 0 }}>
+                  {candidate.severity === 'critical' ? '强制' : '建议'}
+                </Tag>
+              </div>
+              <div style={{ fontSize: 11, opacity: 0.65 }}>{candidate.reason}</div>
+            </div>
+          )) : <div style={{ fontSize: 12, opacity: 0.6 }}>当前没有需要升级为 voice lock 的角色。</div>}
         </div>
       </div>
 
@@ -2779,11 +2893,21 @@ function DialogueReviewDetails({ review }: { review?: QualityDashboardData['chap
     <div style={{ display: 'grid', gap: 8 }}>
       <div style={{ fontWeight: 600 }}>角色对白辨识度</div>
       {review.fingerprintSummary ? <div style={{ fontSize: 12 }}>{review.fingerprintSummary}</div> : null}
+      {review.voiceLockSummary ? <div style={{ fontSize: 12 }}>Voice Lock：{review.voiceLockSummary}</div> : null}
       {review.risks.length > 0 ? (
         <div style={{ fontSize: 12 }}>风险：{review.risks.join('；')}</div>
       ) : (
         <div style={{ fontSize: 12, opacity: 0.7 }}>当前章暂无明确的对白同质化风险。</div>
       )}
+      {review.fillerRisks.length > 0 ? (
+        <div style={{ fontSize: 12 }}>空转：{review.fillerRisks.join('；')}</div>
+      ) : null}
+      {review.infoDensityRisks.length > 0 ? (
+        <div style={{ fontSize: 12 }}>信息密度：{review.infoDensityRisks.join('；')}</div>
+      ) : null}
+      {review.requiredVoiceLockCharacterIds.length > 0 ? (
+        <div style={{ fontSize: 12 }}>需锁角色 ID：{review.requiredVoiceLockCharacterIds.join('、')}</div>
+      ) : null}
       {review.similarities.length > 0 ? (
         <div style={{ fontSize: 12 }}>
           高相似：{review.similarities.map((item) => `${item.characterAName}/${item.characterBName} ${item.similarity}`).join('、')}

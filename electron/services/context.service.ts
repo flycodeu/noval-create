@@ -52,10 +52,11 @@ import {
   buildFactionCatalog,
   resolveFactionRowsByReferences,
 } from './faction-reference.service'
-import { getCharacterDialogueHintMap } from './dialogue-fingerprint.service'
+import { getCharacterDialogueHintMap, getChapterDialogueVoiceLocks } from './dialogue-fingerprint.service'
 import { getCharacterStateContextHintMap, listLatestCharacterStates } from './character-state.service'
 import { getWorldStateContextSnapshot } from './world-state.service'
-import { getChapterContractContext } from './endgame-asset.service'
+import { getChapterContractContext, listForeshadowLedger } from './endgame-asset.service'
+import { buildGlobalLockContext } from './batch-workbench.service'
 
 /**
  * 改进的 token 估算：中文字符约 1 token/字，英文约 0.25 token/word (4 chars/token)，
@@ -242,6 +243,7 @@ export interface ChapterContextParts {
   activeThreads: string
   writingContractSummary: string
   relationSummary: string
+  dialogueVoiceLocks: string
   recalledMemory: string
 }
 
@@ -1391,6 +1393,7 @@ function resolveContextLabelTitle(label: ChapterContextLabel): string {
     activeThreads: '活跃支线与伏笔',
     writingContractSummary: '写作类型',
     relationSummary: '关键人物关系',
+    dialogueVoiceLocks: '角色 Voice Lock',
     recalledMemory: '向量召回记忆',
   }
   return titleMap[label]
@@ -1613,6 +1616,7 @@ function createStagePriorityMap(
           styleTemplate: 3,
           writingContractSummary: 1,
           relationSummary: 1,
+          dialogueVoiceLocks: 1,
           recalledMemory: 2,
         }
       case 'draft':
@@ -1638,6 +1642,7 @@ function createStagePriorityMap(
           styleTemplate: 2,
           writingContractSummary: 1,
           relationSummary: 1,
+          dialogueVoiceLocks: 1,
           recalledMemory: 2,
         }
       case 'review':
@@ -1663,6 +1668,7 @@ function createStagePriorityMap(
           styleTemplate: null,
           writingContractSummary: 1,
           relationSummary: 1,
+          dialogueVoiceLocks: 1,
           recalledMemory: 2,
         }
       case 'rewrite':
@@ -1689,6 +1695,7 @@ function createStagePriorityMap(
           styleTemplate: 2,
           writingContractSummary: 1,
           relationSummary: 1,
+          dialogueVoiceLocks: 1,
           recalledMemory: 2,
         }
     }
@@ -1993,6 +2000,23 @@ function buildCharacterStates(
   return renderCharacterCards(cards)
 }
 
+function formatDialogueVoiceLocksSection(locks: Array<{
+  characterName: string
+  mustKeep: string[]
+  mustAvoid: string[]
+  relationTone: string
+  sampleHint: string
+}>): string {
+  if (locks.length === 0) return ''
+  return locks.map((lock) => [
+    `${lock.characterName}`,
+    lock.mustKeep.length > 0 ? `- 必保留：${lock.mustKeep.join('；')}` : '',
+    lock.mustAvoid.length > 0 ? `- 必避免：${lock.mustAvoid.join('；')}` : '',
+    lock.relationTone ? `- 当前关系语气：${lock.relationTone}` : '',
+    lock.sampleHint ? `- 差异化抓手：${lock.sampleHint}` : '',
+  ].filter(Boolean).join('\n')).join('\n\n')
+}
+
 function extractChapterGoal(outline?: string | null): string {
   if (!outline) return ''
   const match = outline.match(/(?:^|\n)(?:目标|本章目标)[:：]?\s*(.+)/)
@@ -2216,17 +2240,61 @@ function buildDueForeshadowContext(
   currentArc?: typeof storyArcs.$inferSelect | null,
 ): string {
   const db = getDb()
-  const rows = db.select().from(storyThreads)
+  const threadRows = db.select().from(storyThreads)
     .where(eq(storyThreads.novelId, novelId))
     .orderBy(asc(storyThreads.sortOrder), asc(storyThreads.id))
     .all()
+  const threadById = new Map(threadRows.map((thread) => [thread.id, thread] as const))
+  const ledgerLines = listForeshadowLedger(novelId)
+    .filter((entry) => entry.status !== 'resolved' && entry.status !== 'archived')
+    .filter((entry) => typeof entry.targetPayoffChapter === 'number' && entry.targetPayoffChapter > 0)
+    .filter((thread) => {
+      const distance = thread.targetPayoffChapter! - chapterNum
+      return distance <= 0 || distance <= 3
+    })
+    .sort((left, right) => {
+      const leftOverdue = left.targetPayoffChapter! < chapterNum ? 0 : 1
+      const rightOverdue = right.targetPayoffChapter! < chapterNum ? 0 : 1
+      if (leftOverdue !== rightOverdue) return leftOverdue - rightOverdue
+
+      const leftThread = typeof left.linkedThreadId === 'number' ? threadById.get(left.linkedThreadId) : null
+      const rightThread = typeof right.linkedThreadId === 'number' ? threadById.get(right.linkedThreadId) : null
+      const leftArc = leftThread && isCurrentArcThread(leftThread, currentArc) ? 0 : 1
+      const rightArc = rightThread && isCurrentArcThread(rightThread, currentArc) ? 0 : 1
+      if (leftArc !== rightArc) return leftArc - rightArc
+
+      const leftDistance = Math.abs(left.targetPayoffChapter! - chapterNum)
+      const rightDistance = Math.abs(right.targetPayoffChapter! - chapterNum)
+      if (leftDistance !== rightDistance) return leftDistance - rightDistance
+
+      const leftPriority = threadPriorityRank(leftThread?.priority)
+      const rightPriority = threadPriorityRank(rightThread?.priority)
+      if (leftPriority !== rightPriority) return leftPriority - rightPriority
+
+      return left.id - right.id
+    })
+    .slice(0, 2)
+    .map((entry) => compactRecallLine([
+      entry.targetPayoffChapter! < chapterNum ? '超期必处理' : '到期必处理',
+      entry.title,
+      entry.sourceChapterNum ? `埋设=第${entry.sourceChapterNum}章` : '',
+      `目标=第${entry.targetPayoffChapter}章`,
+      entry.payoffSceneAction ? `动作=${entry.payoffSceneAction}` : '',
+      entry.requiredEvidence ? `证据=${entry.requiredEvidence}` : '',
+      entry.readerVisibleOutcome ? `结果=${entry.readerVisibleOutcome}` : entry.payoffMethod ? `回收=${entry.payoffMethod}` : '',
+      entry.allowedDelayReason ? `仅可延期=${entry.allowedDelayReason}` : '',
+    ].filter(Boolean).join(' · '), 120))
+    .filter(Boolean)
+
+  const coveredThreadIds = new Set(listForeshadowLedger(novelId)
+    .map((entry) => entry.linkedThreadId)
+    .filter((id): id is number => typeof id === 'number'))
+
+  const threadLines = threadRows
     .filter((thread) => thread.status !== 'resolved' && thread.status !== 'abandoned')
     .filter(isForeshadowThreadCandidate)
+    .filter((thread) => !coveredThreadIds.has(thread.id))
     .filter((thread) => typeof thread.targetPayoffChapter === 'number' && thread.targetPayoffChapter > 0)
-
-  if (rows.length === 0) return ''
-
-  return rows
     .filter((thread) => {
       const distance = thread.targetPayoffChapter! - chapterNum
       return distance <= 0 || distance <= 3
@@ -2250,9 +2318,9 @@ function buildDueForeshadowContext(
 
       return (left.sortOrder || 0) - (right.sortOrder || 0)
     })
-    .slice(0, 6)
+    .slice(0, Math.max(0, 2 - ledgerLines.length))
     .map((thread) => compactRecallLine([
-      thread.targetPayoffChapter! < chapterNum ? '超期' : '到期',
+      thread.targetPayoffChapter! < chapterNum ? '超期必处理' : '到期必处理',
       thread.title,
       thread.plantedChapter || thread.startChapter ? `埋设=第${thread.plantedChapter || thread.startChapter}章` : '',
       `目标=第${thread.targetPayoffChapter}章`,
@@ -2260,6 +2328,9 @@ function buildDueForeshadowContext(
       thread.payoffCondition ? `条件=${thread.payoffCondition}` : '',
     ].filter(Boolean).join(' · '), 120))
     .filter(Boolean)
+
+  return [...ledgerLines, ...threadLines]
+    .slice(0, 2)
     .join('\n')
 }
 
@@ -2700,7 +2771,14 @@ export async function collectChapterContextRawData(
     .filter((item) => item.commitmentKind === 'payoff')
     .map((item) => `终局回收：${compactRecallLine(item.title, 30)}${item.description ? ` · ${compactRecallLine(item.description, 44)}` : ''}`)
   const requiredForeshadowLines = requiredForeshadows
-    .map((item) => `合同伏笔：${compactRecallLine(item.title, 28)}${item.detail ? ` · ${compactRecallLine(item.detail, 44)}` : ''}`)
+    .map((item) => `合同伏笔：${compactRecallLine([
+      item.title,
+      item.detail || '',
+      item.payoffSceneAction ? `动作=${item.payoffSceneAction}` : '',
+      item.requiredEvidence ? `证据=${item.requiredEvidence}` : '',
+      item.readerVisibleOutcome ? `结果=${item.readerVisibleOutcome}` : item.payoffMethod ? `回收=${item.payoffMethod}` : '',
+      item.allowedDelayReason ? `延期=${item.allowedDelayReason}` : '',
+    ].filter(Boolean).join(' · '), 120)}`)
   const sceneContractLines = buildSceneContractSummaryLines(contractContext?.sceneContracts || [])
 
   // 从当前章节任务相关文本里提取实体名，用于动态召回
@@ -2755,12 +2833,22 @@ export async function collectChapterContextRawData(
     allCharacters,
     [currentChapter?.outline, currentArc?.arcSummary, currentArc?.arcGoal, previousSummaries].filter(Boolean).join("\n"),
   )
+  const dialogueVoiceLocks = formatDialogueVoiceLocksSection(getChapterDialogueVoiceLocks(novelId, {
+    chapterNum,
+    chapterGoal,
+    outline: currentChapter?.outline || '',
+    scenePlan: currentChapter?.scenePlanJson || '',
+    relationSummary,
+    continuityNotes: collectContinuityNotes(continuityChapters),
+    limit: 4,
+  }))
 
   const previousChapterFeed = buildPreviousChapterContextFeed(previousRows[previousRows.length - 1])
   const worldStateSnapshot = getWorldStateContextSnapshot(novelId, {
     upToChapterNum: recentChapters[recentChapters.length - 1]?.chapterNum,
     limit: 12,
   })
+  const globalLockContext = buildGlobalLockContext(novelId)
   const entityFreshnessMap = buildRecallEntityFreshnessMap(
     novelId,
     recentChapters[recentChapters.length - 1]?.chapterNum,
@@ -2780,12 +2868,15 @@ export async function collectChapterContextRawData(
       writingContractSummary: [
         profile.writingContractSummary,
         chapterContractRules.length > 0 ? `章节合同：${chapterContractRules.join('；')}` : '',
+        globalLockContext.canonFactSummary,
+        globalLockContext.styleRuleSummary,
       ].filter(Boolean).join('\n'),
       currentArc: formatArcContext(currentArc),
       continuityNotes: [
         collectContinuityNotes(continuityChapters),
         ...chapterContractRules,
         ...sceneContractLines,
+        globalLockContext.lockedParagraphSummary,
       ].filter(Boolean).join('\n'),
       previousChapterContext: previousChapterFeed.previousChapterContext,
       lastChapterEnding: previousChapterFeed.lastChapterEnding,
@@ -2807,6 +2898,10 @@ export async function collectChapterContextRawData(
       continuitySummary: continuityChapters.map(formatContinuityEntry).join('\n'),
       timelineSummary: timelineContext.timelineSummary,
       relationSummary,
+      dialogueVoiceLocks: [
+        dialogueVoiceLocks,
+        globalLockContext.characterVoiceSummary,
+      ].filter(Boolean).join('\n'),
       activeThreads: activeThreadsContext.summary,
       styleTemplate: enrichStyleTemplateWithFingerprint(profile.styleTemplateSummary, novelId),
       previousSummaries,
@@ -3057,6 +3152,7 @@ export function allocateChapterContext(
     activeThreads: softAllocation.allocated.activeThreads || '',
     writingContractSummary: softAllocation.allocated.writingContractSummary || rawData.profile.writingContractSummary || '',
     relationSummary: softAllocation.allocated.relationSummary || rawData.contextParts.relationSummary || '',
+    dialogueVoiceLocks: softAllocation.allocated.dialogueVoiceLocks || rawData.contextParts.dialogueVoiceLocks || '',
     recalledMemory: softAllocation.allocated.recalledMemory || '',
     hardConstraintContext: hardConstraintAllocation.text,
     hardConstraintSummary,

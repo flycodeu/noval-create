@@ -27,6 +27,7 @@ import { createTask, executeChatTask, runChatTask, updateTask } from './task.ser
 import { runAssetQualityLoop, summarizeAssetQualityWarnings } from './asset-quality.service'
 import { appendVariationMessage } from './variation-control.service'
 import { throwUserFacingError } from '../utils/user-facing-error'
+import { listForeshadowLedger } from './endgame-asset.service'
 
 type StoryThreadType = 'main' | 'subplot' | 'mystery' | 'payoff' | 'relationship'
 type StoryThreadStatus = 'planned' | 'active' | 'resolved' | 'stalled' | 'abandoned'
@@ -673,9 +674,70 @@ function buildForeshadowCard(
     summary: thread.summary ?? undefined,
     currentState: thread.currentState ?? undefined,
     warningText: foreshadowStatus === 'overdue'
-      ? '已超过目标回收章位，建议优先处理。'
+      ? '已超过目标回收章位，下一章必须回收或重设目标章位。'
       : foreshadowStatus === 'due'
-        ? '接近目标回收章位，建议尽快安排兑现。'
+        ? '接近目标回收章位，本章需回收或给出延期说明。'
+        : undefined,
+  }
+}
+
+function normalizeLedgerStatus(status?: string | null): typeof storyThreads.$inferSelect['status'] {
+  if (status === 'resolved' || status === 'archived') return 'resolved'
+  return 'active'
+}
+
+function buildLedgerForeshadowCard(
+  entry: ReturnType<typeof listForeshadowLedger>[number],
+  linkedThread: typeof storyThreads.$inferSelect | null,
+  currentChapterNum: number,
+) {
+  const targetPayoffChapter = entry.targetPayoffChapter ?? undefined
+  const plantedChapter = entry.sourceChapterNum ?? linkedThread?.plantedChapter ?? linkedThread?.startChapter ?? undefined
+  const resolvedChapter = entry.status === 'resolved' || entry.status === 'archived'
+    ? targetPayoffChapter
+    : linkedThread?.resolvedChapter ?? undefined
+  const currentDistance = typeof targetPayoffChapter === 'number'
+    ? targetPayoffChapter - currentChapterNum
+    : undefined
+  const foreshadowStatus: ForeshadowStatus = entry.status === 'resolved' || entry.status === 'archived'
+    ? 'paid_off'
+    : typeof targetPayoffChapter === 'number' && currentChapterNum > targetPayoffChapter
+      ? 'overdue'
+      : typeof targetPayoffChapter === 'number'
+        && currentChapterNum >= (targetPayoffChapter - FORESHADOW_DUE_WINDOW)
+        && currentChapterNum <= targetPayoffChapter
+        ? 'due'
+        : 'pending'
+
+  return {
+    id: entry.id,
+    title: entry.title,
+    threadType: normalizeThreadType(linkedThread?.threadType || 'payoff'),
+    status: normalizeStatus(linkedThread?.status || normalizeLedgerStatus(entry.status)),
+    foreshadowStatus,
+    priority: normalizePriority(linkedThread?.priority || 'medium'),
+    plantedChapter,
+    startChapter: linkedThread?.startChapter ?? plantedChapter,
+    targetPayoffChapter,
+    resolvedChapter,
+    payoffSpan: typeof plantedChapter === 'number' && typeof resolvedChapter === 'number'
+      ? Math.max(0, resolvedChapter - plantedChapter)
+      : undefined,
+    currentDistance,
+    relatedCharacterCount: parseJsonNumberArray(linkedThread?.relatedCharacterIdsJson).length,
+    payoffCondition: linkedThread?.payoffCondition ?? entry.payoffMethod ?? undefined,
+    payoffSceneAction: entry.payoffSceneAction ?? undefined,
+    requiredEvidence: entry.requiredEvidence ?? undefined,
+    readerVisibleOutcome: entry.readerVisibleOutcome ?? undefined,
+    allowedDelayReason: entry.allowedDelayReason ?? undefined,
+    summary: linkedThread?.summary ?? entry.detail ?? undefined,
+    currentState: linkedThread?.currentState ?? entry.detail ?? undefined,
+    warningText: foreshadowStatus === 'overdue'
+      ? entry.allowedDelayReason
+        ? `已超期，若本章仍不回收，必须明确写出延期原因：${entry.allowedDelayReason}`
+        : '已超期，下一章必须回收或重设目标章位。'
+      : foreshadowStatus === 'due'
+        ? '接近目标回收章位，本章需回收或给出延期说明。'
         : undefined,
   }
 }
@@ -691,9 +753,38 @@ export function getForeshadowSnapshot(novelId: number, chapterNum?: number) {
     resolved: [] as Array<ReturnType<typeof buildForeshadowCard>>,
     overdue: [] as Array<ReturnType<typeof buildForeshadowCard>>,
   }
+  const threadRows = listStoryThreads(novelId)
+  const threadById = new Map(threadRows.map((thread) => [thread.id, thread] as const))
+  const coveredThreadIds = new Set<number>()
 
-  listStoryThreads(novelId)
+  listForeshadowLedger(novelId).forEach((entry) => {
+    const linkedThread = typeof entry.linkedThreadId === 'number'
+      ? threadById.get(entry.linkedThreadId) || null
+      : null
+    if (linkedThread) coveredThreadIds.add(linkedThread.id)
+    const card = buildLedgerForeshadowCard(entry, linkedThread, currentChapterNum)
+    if (card.foreshadowStatus === 'paid_off') {
+      snapshot.resolved.push(card)
+      return
+    }
+    if (entry.status === 'archived') {
+      snapshot.resolved.push(card)
+      return
+    }
+    if (card.foreshadowStatus === 'overdue') {
+      snapshot.overdue.push(card)
+      return
+    }
+    if (card.foreshadowStatus === 'due') {
+      snapshot.dueSoon.push(card)
+      return
+    }
+    snapshot.pending.push(card)
+  })
+
+  threadRows
     .filter(isForeshadowCandidate)
+    .filter((thread) => !coveredThreadIds.has(thread.id))
     .forEach((thread) => {
       const card = buildForeshadowCard(thread, currentChapterNum)
       if (card.foreshadowStatus === 'paid_off') {

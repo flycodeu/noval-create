@@ -71,6 +71,7 @@ import * as storyThreadService from './services/story-thread.service'
 import * as storyFactService from './services/story-fact.service'
 import * as growthSystemService from './services/growth-system.service'
 import * as chapterWritebackService from './services/chapter-writeback.service'
+import * as batchWorkbenchService from './services/batch-workbench.service'
 import * as workspaceQualityService from './services/workspace-quality.service'
 import * as workflowTaskService from './services/workflow-task.service'
 import { discoverEntitiesFromContent } from './services/entity-discovery.service'
@@ -418,6 +419,36 @@ function registerIpcHandlers() {
     batchWorkflowService.getLatestChapterBatchAutoGenerateTask(requireId(novelId, 'novelId')))
   handle('chapterBatch:resumeAutoGenerate', (event, taskId) =>
     batchWorkflowService.resumeBatchAutoGenerateWorkflow(requireId(taskId, 'taskId'), event.sender))
+  handle('batchWorkbench:getData', (_, novelId, snapshotId) =>
+    batchWorkbenchService.getBatchWorkbenchData(
+      requireId(novelId, 'novelId'),
+      snapshotId == null ? undefined : requireId(snapshotId, 'snapshotId'),
+    ))
+  handle('batchWorkbench:createInspection', (_, snapshotId, data) =>
+    batchWorkbenchService.createBatchInspection(requireId(snapshotId, 'snapshotId'), parseObjectPayload<{
+      chapterId?: number
+      chapterNum?: number
+      category: 'flow' | 'ai' | 'voice' | 'thread' | 'hook' | 'continuity'
+      status: 'pass' | 'warning' | 'blocked'
+      note: string
+    }>(data, 'data')))
+  handle('batchWorkbench:previewRollback', (_, snapshotId, mode) =>
+    batchWorkbenchService.previewBatchRollback(
+      requireId(snapshotId, 'snapshotId'),
+      requireString(mode, 'mode') as 'chapter_rollback' | 'batch_content_rollback' | 'batch_full_rollback',
+    ))
+  handle('batchWorkbench:applyRollback', (_, snapshotId, mode) =>
+    batchWorkbenchService.applyBatchRollback(
+      requireId(snapshotId, 'snapshotId'),
+      requireString(mode, 'mode') as 'chapter_rollback' | 'batch_content_rollback' | 'batch_full_rollback',
+    ))
+  handle('batchWorkbench:getGlobalLockLibrary', (_, novelId) =>
+    batchWorkbenchService.getGlobalLockLibrary(requireId(novelId, 'novelId')))
+  handle('batchWorkbench:updateGlobalLockLibrary', (_, novelId, patch) =>
+    batchWorkbenchService.updateGlobalLockLibrary(
+      requireId(novelId, 'novelId'),
+      parseObjectPayload<Record<string, unknown>>(patch, 'patch'),
+    ))
   handle('writeback:prepareRun', (_, chapterId, triggerSource) =>
     chapterWritebackService.prepareChapterWritebackRun(requireId(chapterId, 'chapterId'), typeof triggerSource === 'string' ? triggerSource : 'manual'))
   handle('writeback:getCenterData', (_, chapterId, runId) =>

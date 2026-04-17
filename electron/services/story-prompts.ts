@@ -172,6 +172,10 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
       '- protagonist_pressure 用 0-100 反映结构压力，不要因为篇幅热闹就机械打高分。',
       '- chapter_function_primary 只能选 setup / progression / reversal / payoff / breather / climax / exposition / closure 其中一个主功能。',
       '- chapter_function_tags 只保留 1 到 3 个真正承担的叙事功能标签；如果 chapter_function_primary 已给出，必须包含在 tags 里。',
+      '- dialogue_filler_risks 只写对白空转、互相接话却没有立场和动作承载的问题。',
+      '- dialogue_info_density_risks 只写对白里该给而没给的地点、目标、证据、筹码或下一步动作。',
+      '- dialogue_voice_lock_summary 用一句话说明本章生成前要锁谁的声音。',
+      '- required_voice_lock_character_ids 只保留本章需要强制启用 voice lock 的角色 id。',
       '- 关键章如果主功能仍然只是 setup / exposition / breather，要在 reader_hook_risks 或 critical_fixes 里明确指出它名义关键、实际过渡的问题。',
       ...(isEnhancedTier(promptTier)
         ? ['- 因果链检查：本章每个重大事件是否有合理的触发原因，结果是否产生了后续影响而非凭空出现凭空消失。']
@@ -180,7 +184,7 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
         ? ['- 关键章节还要额外审查高潮是否兑现、代价是否落地、支线回收是否足够，避免只放大声量不推进结构。']
         : []),
     ]),
-    '只输出 JSON：{"summary":"总体判断","critical_fixes":["必改 1"],"continuity_risks":["连续性风险 1"],"arc_progress_risks":["故事弧推进风险 1"],"context_drift_risks":["漂移风险 1"],"realism_risks":["真实度风险 1"],"coherence_risks":["连贯性风险 1"],"reader_hook_risks":["追读风险 1"],"language_risks":["语言风险 1"],"human_language_repairs":["原说法 -> 更自然说法"],"genre_hollowing_risks":["体裁空心化风险 1"],"missing_payoffs":["未落地伏笔 1"],"strengths":["优点 1"],"severity":"medium","rewrite_required":true,"revision_brief":"修订方向摘要","protagonist_setback":"minor","setback_summary":"主角在关键交锋里被压制","cost_present":true,"cost_summary":"主角付出人手与资源损失","cost_resolution_state":"ongoing","reversal_marker":true,"reversal_summary":"看似得手后被埋伏反制","reversal_support_state":"supported","pace_marker":"reversal","reward_state":"partial","protagonist_pressure":72,"chapter_function_primary":"reversal","chapter_function_tags":["progression","reversal"]}',
+    '只输出 JSON：{"summary":"总体判断","critical_fixes":["必改 1"],"continuity_risks":["连续性风险 1"],"arc_progress_risks":["故事弧推进风险 1"],"context_drift_risks":["漂移风险 1"],"realism_risks":["真实度风险 1"],"coherence_risks":["连贯性风险 1"],"reader_hook_risks":["追读风险 1"],"language_risks":["语言风险 1"],"human_language_repairs":["原说法 -> 更自然说法"],"genre_hollowing_risks":["体裁空心化风险 1"],"missing_payoffs":["未落地伏笔 1"],"strengths":["优点 1"],"severity":"medium","rewrite_required":true,"revision_brief":"修订方向摘要","protagonist_setback":"minor","setback_summary":"主角在关键交锋里被压制","cost_present":true,"cost_summary":"主角付出人手与资源损失","cost_resolution_state":"ongoing","reversal_marker":true,"reversal_summary":"看似得手后被埋伏反制","reversal_support_state":"supported","pace_marker":"reversal","reward_state":"partial","protagonist_pressure":72,"chapter_function_primary":"reversal","chapter_function_tags":["progression","reversal"],"dialogue_filler_risks":["对白空话 1"],"dialogue_info_density_risks":["信息推进不足 1"],"dialogue_voice_lock_summary":"本章需锁定林远与赵临的称呼和句长差异","required_voice_lock_character_ids":[1,2]}',
   )
   return applyPromptOverride('chapterReview', fallback, params as unknown as Record<string, unknown>)
 }

@@ -19,6 +19,9 @@ const PRIMARY_DIMENSIONS = [
   { key: 'storyDynamicsScore', label: '主角与节奏' },
   { key: 'languageNaturalnessScore', label: '语言自然度' },
   { key: 'styleComplianceScore', label: '风格硬约束' },
+  { key: 'povBoundaryScore', label: 'POV边界' },
+  { key: 'sensoryCoverageScore', label: '感官覆盖' },
+  { key: 'narrativeRatioScore', label: '叙事比例' },
 ] as const
 
 type PrimaryDimensionKey = typeof PRIMARY_DIMENSIONS[number]['key']
@@ -90,8 +93,11 @@ export function normalizeChapterGateScoreBreakdown(
   const dialogueVoiceScore = clampChapterGateScore(asFiniteNumber(raw?.dialogueVoiceScore, 70))
   const hookStrengthScore = clampChapterGateScore(asFiniteNumber(raw?.hookStrengthScore, hookScore))
   const storyDynamicsScore = clampChapterGateScore(asFiniteNumber(raw?.storyDynamicsScore, averageScores([threadProgressScore, volumeAlignmentScore])))
-  const languageNaturalnessScore = clampChapterGateScore(asFiniteNumber(raw?.languageNaturalnessScore, averageScores([dialogueVoiceScore, coherenceScore])))
-  const styleComplianceScore = clampChapterGateScore(asFiniteNumber(raw?.styleComplianceScore, averageScores([languageNaturalnessScore, dialogueVoiceScore])))
+  const povBoundaryScore = clampChapterGateScore(asFiniteNumber(raw?.povBoundaryScore, averageScores([povPurityScore, coherenceScore])))
+  const narrativeRatioScore = clampChapterGateScore(asFiniteNumber(raw?.narrativeRatioScore, averageScores([storyDynamicsScore, hookStrengthScore])))
+  const sensoryCoverageScore = clampChapterGateScore(asFiniteNumber(raw?.sensoryCoverageScore, averageScores([coherenceScore, povBoundaryScore])))
+  const languageNaturalnessScore = clampChapterGateScore(asFiniteNumber(raw?.languageNaturalnessScore, averageScores([dialogueVoiceScore, coherenceScore, narrativeRatioScore])))
+  const styleComplianceScore = clampChapterGateScore(asFiniteNumber(raw?.styleComplianceScore, averageScores([languageNaturalnessScore, dialogueVoiceScore, povBoundaryScore])))
   const totalScore = clampChapterGateScore(asFiniteNumber(raw?.totalScore, averageScores([
     continuityScore,
     coherenceScore,
@@ -100,6 +106,9 @@ export function normalizeChapterGateScoreBreakdown(
     storyDynamicsScore,
     languageNaturalnessScore,
     styleComplianceScore,
+    povBoundaryScore,
+    sensoryCoverageScore,
+    narrativeRatioScore,
   ])))
 
   return {
@@ -111,6 +120,9 @@ export function normalizeChapterGateScoreBreakdown(
     storyDynamicsScore,
     languageNaturalnessScore,
     styleComplianceScore,
+    povBoundaryScore,
+    sensoryCoverageScore,
+    narrativeRatioScore,
     contractScore,
     hookScore,
     povPurityScore,

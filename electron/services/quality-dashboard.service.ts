@@ -1,6 +1,7 @@
 import { asc, desc, eq } from 'drizzle-orm'
 import type {
   AIScoreDimension,
+  ChapterBatchAutoGenerateStatus,
   ChapterGateHistoryEntry,
   ChapterDialogueReviewData,
   ChapterFunctionAlert,
@@ -40,7 +41,21 @@ import type {
   WorldStateAlert,
 } from '../../src/types'
 import { getDb } from '../database/db'
-import { chapterGateRuns, chapters, characterStateVersions, characters, storyVolumes, timelineEvents, worldStateVersions } from '../database/schema'
+import {
+  chapterBatchInspections,
+  chapterBatchSnapshots,
+  chapterGateRuns,
+  chapterWritebackRuns,
+  chapters,
+  characterStateVersions,
+  characters,
+  revisionTasks,
+  storyMemoryCheckpoints,
+  storyVolumes,
+  tasks,
+  timelineEvents,
+  worldStateVersions,
+} from '../database/schema'
 import { buildPreviousChapterContextFeed } from './context.service'
 import {
   buildChapterGateDriftAlert,
@@ -60,6 +75,8 @@ import { getForeshadowSnapshot } from './story-thread.service'
 import { getWorldStateLedgerSnapshot } from './world-state.service'
 import { getAntiAiDashboardSummary } from './anti-ai-rule.service'
 import { getFeedbackRecurrenceDashboardSummary } from './feedback-recurrence.service'
+import { parseChapterContractValidationFromReviewNotes } from './chapter-contract-validator.service'
+import { parseTaskProgress } from './task.service'
 
 interface QualityDimensionScore extends AIScoreDimension {}
 
@@ -656,6 +673,114 @@ function buildForeshadowCountsByVolume(
   return countsByVolume
 }
 
+function collectContractProgressMetrics(rows: Array<{ reviewNotesJson?: string | null }>) {
+  let threadItemCount = 0
+  let threadAdvanceCount = 0
+  let threadMentionOnlyCount = 0
+  let foreshadowBlockedCount = 0
+  let foreshadowStaleCount = 0
+
+  rows.forEach((row) => {
+    const validation = parseChapterContractValidationFromReviewNotes(row.reviewNotesJson)
+    if (!validation) return
+
+    validation.itemResults.forEach((item) => {
+      if (item.contractItemType === 'story_thread_progress') {
+        threadItemCount += 1
+        if (item.semanticState === 'advanced' || item.semanticState === 'paid_off' || item.verdict === 'pass') {
+          threadAdvanceCount += 1
+        } else if (item.semanticState === 'mentioned' || item.verdict === 'weak') {
+          threadMentionOnlyCount += 1
+        }
+      }
+
+      if (item.contractItemType === 'foreshadow_delivery') {
+        if (item.semanticState === 'blocked') foreshadowBlockedCount += 1
+        if (item.semanticState === 'stale') foreshadowStaleCount += 1
+      }
+    })
+  })
+
+  return {
+    storyThreadAdvanceRate: threadItemCount > 0 ? Math.round((threadAdvanceCount / threadItemCount) * 100) : 0,
+    storyThreadMentionOnlyCount: threadMentionOnlyCount,
+    foreshadowBlockedCount,
+    foreshadowStaleCount,
+  }
+}
+
+function summarizeBatchRange(chapterNums: number[]): string {
+  const normalized = dedupeNumbers(chapterNums)
+  if (normalized.length === 0) return '未记录章节范围'
+  if (normalized.length === 1) return `第${normalized[0]}章`
+  return `第${normalized[0]}-${normalized[normalized.length - 1]}章`
+}
+
+function parseNumberArrayJson(raw?: string | null): number[] {
+  if (!raw?.trim()) return []
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .map((item) => (typeof item === 'number' ? item : Number(item)))
+      .filter((item) => Number.isFinite(item))
+      .map((item) => Math.trunc(item))
+  } catch {
+    return []
+  }
+}
+
+function getLatestWritebackRunMap(novelId: number) {
+  return getDb()
+    .select()
+    .from(chapterWritebackRuns)
+    .where(eq(chapterWritebackRuns.novelId, novelId))
+    .orderBy(desc(chapterWritebackRuns.updatedAt), desc(chapterWritebackRuns.id))
+    .all()
+    .reduce<Map<number, typeof chapterWritebackRuns.$inferSelect>>((result, row) => {
+      if (!result.has(row.chapterId)) {
+        result.set(row.chapterId, row)
+      }
+      return result
+    }, new Map())
+}
+
+function classifyWritebackStatus(status?: string | null): 'pending' | 'failed' | 'applied' {
+  if (status === 'failed' || status === 'partially_failed') return 'failed'
+  if (status === 'applied') return 'applied'
+  return 'pending'
+}
+
+function getLatestChapterBatchTask(novelId: number): typeof tasks.$inferSelect | null {
+  return getDb()
+    .select()
+    .from(tasks)
+    .where(eq(tasks.novelId, novelId))
+    .orderBy(desc(tasks.updatedAt), desc(tasks.id))
+    .all()
+    .find((task) => task.type === 'chapter_batch_generate' && task.runnerType === 'workflow') || null
+}
+
+function summarizeReadinessStatus(input: {
+  contractBlockerCount: number
+  writebackFailedCount: number
+  feedbackPauseSuggestedCount: number
+  consecutiveRecallFallbackChapters: number
+  warningCount: number
+  readyRate: number
+}): QualityDashboardData['productionReadiness']['status'] {
+  if (
+    input.contractBlockerCount > 0
+    || input.writebackFailedCount > 0
+    || input.feedbackPauseSuggestedCount > 0
+    || input.consecutiveRecallFallbackChapters >= 3
+  ) {
+    return 'blocked'
+  }
+  if (input.warningCount > 0 || input.readyRate < 85) return 'warning'
+  return 'ready'
+}
+
 function clampHealthScore(value: number): number {
   return clampNumber(value, 0, 100, 0)
 }
@@ -757,8 +882,20 @@ function parseDialogueReview(raw?: string | null): ChapterDialogueReviewData | n
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>
     const fingerprintSummary = asText(parsed.dialogue_fingerprint_summary)
+    const voiceLockSummary = asText(parsed.dialogue_voice_lock_summary)
     const risks = Array.isArray(parsed.dialogue_homogenization_risks)
       ? parsed.dialogue_homogenization_risks.map(asText).filter(Boolean)
+      : []
+    const fillerRisks = Array.isArray(parsed.dialogue_filler_risks)
+      ? parsed.dialogue_filler_risks.map(asText).filter(Boolean)
+      : []
+    const infoDensityRisks = Array.isArray(parsed.dialogue_info_density_risks)
+      ? parsed.dialogue_info_density_risks.map(asText).filter(Boolean)
+      : []
+    const requiredVoiceLockCharacterIds = Array.isArray(parsed.required_voice_lock_character_ids)
+      ? parsed.required_voice_lock_character_ids
+        .map((item) => (typeof item === 'number' ? item : Number(item)))
+        .filter((item) => Number.isFinite(item) && item > 0)
       : []
     const similarities = Array.isArray(parsed.cross_character_similarity)
       ? parsed.cross_character_similarity
@@ -790,14 +927,27 @@ function parseDialogueReview(raw?: string | null): ChapterDialogueReviewData | n
         })
         .filter((item) => item.characterId > 0 && item.characterName)
       : []
-    if (!fingerprintSummary && risks.length === 0 && similarities.length === 0 && drifts.length === 0) {
+    if (
+      !fingerprintSummary
+      && !voiceLockSummary
+      && risks.length === 0
+      && fillerRisks.length === 0
+      && infoDensityRisks.length === 0
+      && requiredVoiceLockCharacterIds.length === 0
+      && similarities.length === 0
+      && drifts.length === 0
+    ) {
       return null
     }
     return {
       fingerprintSummary,
+      voiceLockSummary,
       risks,
       similarities,
       drifts,
+      fillerRisks,
+      infoDensityRisks,
+      requiredVoiceLockCharacterIds,
     }
   } catch {
     return null
@@ -1505,12 +1655,14 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
       averageCrossCharacterSimilarity: 0,
       highSimilarityPairCount: 0,
       driftingCharacterCount: 0,
+      voiceLockCandidateCount: 0,
     },
     characterDialogueSignatures: [],
     crossCharacterDialogueSimilarity: [],
     dialogueDriftTrend: [],
     volumeDialogueSimilarity: [],
     recentDialogueAlerts: [],
+    requiredDialogueVoiceLocks: [],
   }
   if (includeDialogueInsights) {
     scheduleDialogueFingerprintRefresh(novelId)
@@ -1539,6 +1691,55 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     aiScoreJson: chapters.aiScoreJson,
     reviewNotesJson: chapters.reviewNotesJson,
   }).from(chapters).where(eq(chapters.novelId, novelId)).orderBy(asc(chapters.chapterNum)).all()
+  const batchChapterNumById = new Map(rows.map((row) => [row.id, row.chapterNum] as const))
+  const latestWritebackRunMap = getLatestWritebackRunMap(novelId)
+  const latestWritebackRuns = [...latestWritebackRunMap.values()]
+  const writebackPendingCount = latestWritebackRuns.filter((row) => classifyWritebackStatus(row.status) === 'pending').length
+  const writebackFailedCount = latestWritebackRuns.filter((row) => classifyWritebackStatus(row.status) === 'failed').length
+  const latestBatchTask = getLatestChapterBatchTask(novelId)
+  const latestBatchProgress = latestBatchTask
+    ? parseTaskProgress<Partial<ChapterBatchAutoGenerateStatus>>(latestBatchTask)
+    : {}
+  const latestBatchSnapshot = db.select().from(chapterBatchSnapshots)
+    .where(eq(chapterBatchSnapshots.novelId, novelId))
+    .orderBy(desc(chapterBatchSnapshots.createdAt), desc(chapterBatchSnapshots.id))
+    .all()[0] || null
+  const latestBatchSnapshotId = latestBatchSnapshot?.id
+  const latestBatchTaskId = latestBatchTask?.id
+  const batchChapterIds = dedupeNumbers(
+    Array.isArray(latestBatchProgress.chapterIds)
+      ? latestBatchProgress.chapterIds
+          .map((item) => Number(item))
+          .filter((item) => Number.isFinite(item))
+      : parseNumberArrayJson(latestBatchSnapshot?.chapterIdsJson),
+  )
+  const batchChapterNums = dedupeNumbers(
+    batchChapterIds.length > 0
+      ? batchChapterIds
+          .map((chapterId) => batchChapterNumById.get(chapterId) || 0)
+          .filter((chapterNum) => chapterNum > 0)
+      : parseNumberArrayJson(latestBatchSnapshot?.chapterNumsJson),
+  )
+  const batchChapterIdSet = new Set(batchChapterIds)
+  const batchRevisionRows = db.select().from(revisionTasks)
+    .where(eq(revisionTasks.novelId, novelId))
+    .all()
+    .filter((row) => batchChapterIdSet.size === 0 || (typeof row.chapterId === 'number' && batchChapterIdSet.has(row.chapterId)))
+  const pendingRevisionCount = batchRevisionRows.filter((row) => (row.status || 'open') !== 'resolved' && (row.status || 'open') !== 'closed').length
+  const rewriteTaskCount = batchRevisionRows.filter((row) => (row.taskType || '') === 'rewrite' || (row.severity || '') === 'critical').length
+  const batchPendingWritebackCount = latestWritebackRuns.filter((row) =>
+    batchChapterIdSet.size > 0
+    && batchChapterIdSet.has(row.chapterId)
+    && classifyWritebackStatus(row.status) === 'pending').length
+  const checkpointRows = db.select().from(storyMemoryCheckpoints)
+    .where(eq(storyMemoryCheckpoints.novelId, novelId))
+    .all()
+  const staleCheckpointCount = checkpointRows.filter((row) => row.stale === 1).length
+  const latestNovelCheckpoint = checkpointRows.find((row) => row.scopeType === 'novel' && (row.scopeId ?? null) === null) || null
+  const latestChapterNum = rows.at(-1)?.chapterNum || 0
+  const latestCheckpointChapterGap = latestChapterNum > 0
+    ? Math.max(0, latestChapterNum - (latestNovelCheckpoint?.lastRefreshedChapterNum || 0))
+    : 0
   const chapterGateHistoryByChapterId = db.select().from(chapterGateRuns)
     .where(eq(chapterGateRuns.novelId, novelId))
     .all()
@@ -2523,6 +2724,7 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
   const foreshadowPendingCount = foreshadowSnapshot.pending.length
   const foreshadowDueSoonCount = foreshadowSnapshot.dueSoon.length
   const foreshadowOverdueCount = foreshadowSnapshot.overdue.length
+  const contractProgressMetrics = collectContractProgressMetrics(rows)
   const recentEndgameDebtAlerts = endgameDebtSnapshot.recentAlerts.map((alert) => ({
     ...alert,
     severity: alert.severity as 'warning' | 'critical',
@@ -2542,6 +2744,10 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     foreshadowPendingCount,
     foreshadowDueSoonCount,
     foreshadowOverdueCount,
+    foreshadowBlockedCount: contractProgressMetrics.foreshadowBlockedCount,
+    foreshadowStaleCount: contractProgressMetrics.foreshadowStaleCount,
+    storyThreadAdvanceRate: contractProgressMetrics.storyThreadAdvanceRate,
+    storyThreadMentionOnlyCount: contractProgressMetrics.storyThreadMentionOnlyCount,
     endgameActiveCount: endgameDebtSnapshot.overview.activeCount,
     endgameServedCount: endgameDebtSnapshot.overview.servedCount,
     endgameOverdueCount: endgameDebtSnapshot.overview.overdueCount,
@@ -2559,6 +2765,183 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
         healthScore: entry.healthScore,
         summary: entry.topRisks[0]?.title || `${entry.volumeName} 当前健康分 ${entry.healthScore}，建议优先回查。`,
       })),
+  }
+  const batchChapterNumSet = new Set(batchChapterNums)
+  const batchGateEntries = latestChapterGateEntries.filter((entry) =>
+    batchChapterNumSet.size > 0 && batchChapterNumSet.has(entry.chapterNum))
+  const latestBatchInspections = latestBatchSnapshotId
+    ? db.select().from(chapterBatchInspections)
+      .where(eq(chapterBatchInspections.snapshotId, latestBatchSnapshotId))
+      .orderBy(desc(chapterBatchInspections.createdAt), desc(chapterBatchInspections.id))
+      .all()
+    : []
+  const inspectionBlockedCount = latestBatchInspections.filter((row) => row.status === 'blocked').length
+  const inspectionWarningCount = latestBatchInspections.filter((row) => row.status === 'warning').length
+  const inspectionPassedChapters = new Set(
+    latestBatchInspections
+      .filter((row) => row.status === 'pass')
+      .map((row) => row.chapterNum || batchChapterNumById.get(row.chapterId || 0) || 0)
+      .filter((chapterNum) => chapterNum > 0),
+  )
+  const recallDegradedChapterCount = rows.reduce((count, row) => {
+    const snapshot = recallRuntimeByChapterId.get(row.id)?.recallSnapshot
+    return count + (snapshot?.degraded ? 1 : 0)
+  }, 0)
+  const latestCompletedChapterNums = dedupeNumbers(
+    Array.isArray(latestBatchProgress.completedChapterIds)
+      ? latestBatchProgress.completedChapterIds
+          .map((chapterId) => batchChapterNumById.get(chapterId) || 0)
+          .filter((chapterNum) => chapterNum > 0)
+      : [],
+  )
+  let trailingRecallFallbackCount = 0
+  for (const chapterNum of [...latestCompletedChapterNums].sort((left, right) => right - left)) {
+    const entry = chapterDetails.find((item) => item.chapterNum === chapterNum)
+    if (!entry?.recallSnapshot?.degraded) break
+    trailingRecallFallbackCount += 1
+  }
+  const latestBatchConsecutiveRecallFallbackChapters = typeof latestBatchProgress.consecutiveRecallFallbackChapters === 'number'
+    ? latestBatchProgress.consecutiveRecallFallbackChapters
+    : trailingRecallFallbackCount
+  const contractValidationStatuses = rows.reduce<NonNullable<ReturnType<typeof parseChapterContractValidationFromReviewNotes>>[]>((result, row) => {
+    const parsed = parseChapterContractValidationFromReviewNotes(row.reviewNotesJson)
+    if (parsed) result.push(parsed)
+    return result
+  }, [])
+  const contractBlockerCount = contractValidationStatuses.filter((item) => item.status === 'blocker').length
+  const contractWarningCount = contractValidationStatuses.filter((item) => item.status === 'warning').length
+  const contractReadyRate = contractValidationStatuses.length > 0
+    ? Math.round((contractValidationStatuses.filter((item) => item.status === 'pass').length / contractValidationStatuses.length) * 100)
+    : 0
+  const productionWarnings = [
+    writebackPendingCount > 0 ? `仍有 ${writebackPendingCount} 章章后回写未闭环。` : '',
+    contractWarningCount > 0 ? `有 ${contractWarningCount} 章合同交付处于预警状态。` : '',
+    latestBatchConsecutiveRecallFallbackChapters > 0 ? `最近连续 ${latestBatchConsecutiveRecallFallbackChapters} 章召回降级。` : '',
+    latestBatchTask?.status === 'paused' && latestBatchTask.errorMessage ? latestBatchTask.errorMessage : '',
+  ].filter(Boolean)
+  const productionBlockers = [
+    contractBlockerCount > 0 ? `有 ${contractBlockerCount} 章合同交付被章节门阻断。` : '',
+    writebackFailedCount > 0 ? `有 ${writebackFailedCount} 章章后回写失败。` : '',
+    feedbackSummary.overview.pauseSuggestedIssueCount > 0 ? `审校复现已有 ${feedbackSummary.overview.pauseSuggestedIssueCount} 项建议暂停继续批量生成。` : '',
+    latestBatchConsecutiveRecallFallbackChapters >= 3 ? `连续召回降级已达到 ${latestBatchConsecutiveRecallFallbackChapters} 章，需先恢复记忆链路。` : '',
+  ].filter(Boolean)
+  const productionReadyRate = clampHealthScore(
+    100
+    - contractBlockerCount * 18
+    - writebackFailedCount * 14
+    - Math.min(writebackPendingCount, 6) * 4
+    - feedbackSummary.overview.pauseSuggestedIssueCount * 12
+    - antiAiSummary.overview.highRiskRuleCount * 5
+    - Math.min(latestBatchConsecutiveRecallFallbackChapters, 5) * 6,
+  )
+  const productionReadinessStatus = summarizeReadinessStatus({
+    contractBlockerCount,
+    writebackFailedCount,
+    feedbackPauseSuggestedCount: feedbackSummary.overview.pauseSuggestedIssueCount,
+    consecutiveRecallFallbackChapters: latestBatchConsecutiveRecallFallbackChapters,
+    warningCount: productionWarnings.length,
+    readyRate: productionReadyRate,
+  })
+  const productionReadiness: QualityDashboardData['productionReadiness'] = {
+    status: productionReadinessStatus,
+    summary: productionReadinessStatus === 'ready'
+      ? `当前产线可继续推进，综合就绪度 ${productionReadyRate}%。`
+      : productionReadinessStatus === 'warning'
+        ? `当前产线可谨慎继续，综合就绪度 ${productionReadyRate}%，建议先清理预警。`
+        : `当前产线不宜继续扩批，综合就绪度 ${productionReadyRate}%，请先处理阻断项。`,
+    blockers: productionBlockers,
+    warnings: productionWarnings,
+    suggestedActions: [
+      contractBlockerCount > 0 ? '先回到章节合同与章节验收门，处理 blocker 章节。' : '',
+      writebackPendingCount > 0 || writebackFailedCount > 0 ? '进入章后状态回写中心，清掉 pending/failed run。' : '',
+      feedbackSummary.overview.pauseSuggestedIssueCount > 0 ? '先在质量仪表盘检查复现问题，再启动下一批。' : '',
+      latestBatchSnapshotId ? '下一批之前先在回滚工作台登记批次检查结论并补齐作者锁定项。' : '',
+    ].filter(Boolean),
+    readyRate: productionReadyRate,
+    contractBlockerCount,
+    writebackPendingCount,
+    writebackFailedCount,
+    aiRecurrenceHighRiskCount: antiAiSummary.overview.highRiskRuleCount,
+    feedbackPauseSuggestedCount: feedbackSummary.overview.pauseSuggestedIssueCount,
+    consecutiveRecallFallbackChapters: latestBatchConsecutiveRecallFallbackChapters,
+    activeBatchTaskId: latestBatchTask?.status === 'running' || latestBatchTask?.status === 'pending' ? latestBatchTask.id : undefined,
+    latestBatchSnapshotId,
+  }
+  const batchStatus = (
+    latestBatchTask?.status === 'cancel_requested'
+      ? 'running'
+      : (latestBatchTask?.status || 'idle')
+  ) as QualityDashboardData['batchHealth']['status']
+  const batchHealth: QualityDashboardData['batchHealth'] = {
+    latestBatchTaskId,
+    latestBatchSnapshotId,
+    status: batchStatus,
+    chapterIds: batchChapterIds,
+    chapterStart: batchChapterNums[0],
+    chapterEnd: batchChapterNums[batchChapterNums.length - 1],
+    completedChapterCount: Array.isArray(latestBatchProgress.completedChapterIds) ? latestBatchProgress.completedChapterIds.length : 0,
+    failedChapterCount: Array.isArray(latestBatchProgress.failedChapterIds) ? latestBatchProgress.failedChapterIds.length : 0,
+    warningCount: Array.isArray(latestBatchProgress.warnings) ? latestBatchProgress.warnings.length : 0,
+    rewriteTaskCount,
+    pendingWritebackCount: batchPendingWritebackCount,
+    pendingRevisionCount,
+    pausedReason: typeof latestBatchProgress.pauseReason === 'string' && latestBatchProgress.pauseReason.trim()
+      ? latestBatchProgress.pauseReason
+      : (latestBatchTask?.errorMessage || undefined),
+    canContinue: batchStatus === 'paused',
+    summary: batchStatus === 'idle'
+      ? '当前没有运行中的章节批次。'
+      : `${summarizeBatchRange(batchChapterNums)} 批次状态：${batchStatus}，已完成 ${Array.isArray(latestBatchProgress.completedChapterIds) ? latestBatchProgress.completedChapterIds.length : 0}/${batchChapterIds.length || batchChapterNums.length} 章。`,
+  }
+  const continuityHealth: QualityDashboardData['continuityHealth'] = {
+    staleCheckpointCount,
+    latestCheckpointChapterGap,
+    recallDegradedChapterCount,
+    consecutiveRecallFallbackChapters: latestBatchConsecutiveRecallFallbackChapters,
+    worldConflictCount: worldStateLedger.conflictEntities.length,
+    writebackPendingCount,
+    writebackFailedCount,
+  }
+  const contractDelivery: QualityDashboardData['contractDelivery'] = {
+    readyRate: contractReadyRate,
+    blockerCount: contractBlockerCount,
+    warningCount: contractWarningCount,
+    storyThreadAdvanceRate: contractProgressMetrics.storyThreadAdvanceRate,
+    storyThreadMentionOnlyCount: contractProgressMetrics.storyThreadMentionOnlyCount,
+    foreshadowBlockedCount: contractProgressMetrics.foreshadowBlockedCount,
+    foreshadowStaleCount: contractProgressMetrics.foreshadowStaleCount,
+  }
+  const batchReview: QualityDashboardData['batchReview'] = {
+    latestBatchSnapshotId,
+    latestBatchTaskId,
+    chapterStart: batchChapterNums[0],
+    chapterEnd: batchChapterNums[batchChapterNums.length - 1],
+    chapterCount: batchChapterNums.length,
+    passedChapterCount: inspectionPassedChapters.size,
+    rewrittenChapterCount: batchGateEntries.filter((entry) => entry.rewriteCount > 0 || entry.gateLevel === 'warning').length,
+    failedChapterCount: Math.max(
+      inspectionBlockedCount,
+      batchGateEntries.filter((entry) => entry.gateLevel === 'blocker').length,
+      Array.isArray(latestBatchProgress.failedChapterIds) ? latestBatchProgress.failedChapterIds.length : 0,
+    ),
+    pendingWritebackCount: batchPendingWritebackCount,
+    recurringIssues: [
+      ...antiAiSummary.topRepeatedRules.slice(0, 2).map((item) => `反 AI 复现：${item.ruleTitle}`),
+      ...feedbackSummary.topRepeatedIssues.slice(0, 2).map((item) => `审校复现：${item.title}`),
+    ].slice(0, 4),
+    recallAlerts: recentRecallAlerts
+      .filter((alert) => batchChapterNumSet.size > 0 && batchChapterNumSet.has(alert.chapterNum))
+      .slice(0, 3)
+      .map((alert) => `第${alert.chapterNum}章：${alert.detail}`),
+    avoidNextBatch: [
+      inspectionBlockedCount > 0 ? '先处理本批 blocked 检查记录，再开下一批。' : '',
+      inspectionWarningCount > 0 ? '先清理批次 warning 项，再推进下一批。' : '',
+      batchPendingWritebackCount > 0 ? '回写未闭环前不要继续扩批，避免状态漂移叠加。' : '',
+      latestBatchConsecutiveRecallFallbackChapters > 0 ? '召回降级未恢复前，避免继续拉长批量生成跨度。' : '',
+    ].filter(Boolean),
+    summary: latestBatchSnapshotId
+      ? `${summarizeBatchRange(batchChapterNums)} 已登记 ${latestBatchInspections.length} 条批次检查，${inspectionBlockedCount} 条阻断，${inspectionWarningCount} 条预警。`
+      : '当前还没有可回查的章节批次快照。',
   }
 
   return {
@@ -2604,11 +2987,17 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     dialogueDriftTrend: dialogueSnapshot.dialogueDriftTrend,
     volumeDialogueSimilarity: dialogueSnapshot.volumeDialogueSimilarity,
     recentDialogueAlerts: dialogueSnapshot.recentDialogueAlerts,
+    requiredDialogueVoiceLocks: dialogueSnapshot.requiredDialogueVoiceLocks,
     storyDynamicsTrend,
     storyPacingAlerts,
     volumeStoryDynamics,
     volumeQualityMetrics,
     novelQualityMetrics,
+    productionReadiness,
+    batchHealth,
+    continuityHealth,
+    contractDelivery,
+    batchReview,
     chapterFunctionSummary,
     repeatedFunctionRuns,
     chapterFunctionAlerts,
