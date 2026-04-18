@@ -6,6 +6,7 @@ import { parseAiJsonResult } from '../utils/json'
 import { generateChapterEmbeddings } from './embedding.service'
 import { aiCheckPrompt, chapterSummaryPrompt } from './prompts'
 import { parseThemeVoiceDocument } from '../../src/shared/theme-voice'
+import type { HumanizationSignal } from '../../src/types'
 import {
   allocateChapterContext,
   buildChapterContext,
@@ -74,6 +75,7 @@ import {
   analyzeNarrativeControls,
   type NarrativeControlSceneSnapshot,
 } from './narrative-control.service'
+import { analyzeWorkspaceAiFlavor } from './workspace-quality.service'
 import { refreshCharacterStateVersionsForChapter } from './character-state.service'
 import {
   refreshWorldStateVersionsForChapter,
@@ -178,6 +180,7 @@ interface ChapterReviewNotes {
     driftRate: number
     reason: string
   }>
+  humanization_signals: HumanizationSignal[]
   style_compliance?: StyleComplianceResult
   contract_validation?: ChapterContractValidationResult
 }
@@ -188,6 +191,22 @@ type ChapterGenerationStage = 'planning' | 'drafting' | 'reviewing' | 'rewriting
 
 const STYLE_COMPLIANCE_RISK_PREFIX = '风格硬约束：'
 const STYLE_COMPLIANCE_FIX_PREFIX = '风格修正：'
+const HUMANIZATION_SIGNAL_TYPES = new Set<HumanizationSignal['issueType']>([
+  'ai_slogan',
+  'template_emotion',
+  'template_connector',
+  'explanatory_narration',
+  'ornament_overload',
+  'sensory_anchor_missing',
+  'weak_stance',
+])
+const HUMANIZATION_REVIEW_SIGNAL_TYPES = new Set<HumanizationSignal['issueType']>([
+  'template_connector',
+  'explanatory_narration',
+  'ornament_overload',
+  'sensory_anchor_missing',
+  'weak_stance',
+])
 type ChapterPipelineFailureCode =
   | 'contract_blocked'
   | 'context_overflow'
@@ -1174,6 +1193,31 @@ function normalizeReviewNotes(raw: unknown): ChapterReviewNotes {
   if (chapterFunctionPrimary && !chapterFunctionTags.includes(chapterFunctionPrimary)) {
     chapterFunctionTags.unshift(chapterFunctionPrimary)
   }
+  const normalizeHumanizationSignalSeverity = (value: unknown): HumanizationSignal['severity'] => (
+    value === 'high' || value === 'medium' || value === 'low' ? value : 'medium'
+  )
+  const humanizationSignals: HumanizationSignal[] = Array.isArray(record.humanization_signals)
+    ? record.humanization_signals
+      .filter((item) => item && typeof item === 'object' && !Array.isArray(item))
+      .reduce<HumanizationSignal[]>((result, item) => {
+        const current = item as Record<string, unknown>
+        const issueType = asText(current.issueType) as HumanizationSignal['issueType']
+        if (!HUMANIZATION_SIGNAL_TYPES.has(issueType)) return result
+        result.push({
+          issueType,
+          title: asText(current.title) || issueType,
+          severity: normalizeHumanizationSignalSeverity(current.severity),
+          detail: asText(current.detail),
+          avoid: asText(current.avoid),
+          prefer: asText(current.prefer) || undefined,
+          metricKey: asText(current.metricKey) || undefined,
+          metricValue: typeof current.metricValue === 'number'
+            ? normalizeBoundedNumber(current.metricValue, 0, 1000, 0)
+            : undefined,
+        })
+        return result
+      }, [])
+    : []
 
   return {
     summary: asText(record.summary),
@@ -1241,6 +1285,7 @@ function normalizeReviewNotes(raw: unknown): ChapterReviewNotes {
         })
         .filter((item) => item.characterId > 0 && item.characterName)
       : [],
+    humanization_signals: humanizationSignals,
     style_compliance: normalizeStyleComplianceResult(record.style_compliance),
     contract_validation: normalizeChapterContractValidationResult(record.contract_validation) || undefined,
   }
@@ -1284,6 +1329,7 @@ function hasReviewNotes(notes: ChapterReviewNotes): boolean {
     notes.required_voice_lock_character_ids.length > 0 ||
     notes.cross_character_similarity.length > 0 ||
     notes.dialogue_drift_alerts.length > 0 ||
+    notes.humanization_signals.length > 0 ||
     Boolean(notes.style_compliance) ||
     Boolean(notes.contract_validation && notes.contract_validation.itemResults.length > 0),
   )
@@ -1334,6 +1380,7 @@ function buildFallbackReviewNotes(consistencyNotes: string): ChapterReviewNotes 
     required_voice_lock_character_ids: [],
     cross_character_similarity: [],
     dialogue_drift_alerts: [],
+    humanization_signals: [],
     style_compliance: undefined,
     contract_validation: undefined,
   }
@@ -1379,6 +1426,9 @@ function formatReviewNotes(notes: ChapterReviewNotes): string {
       : '',
     notes.dialogue_drift_alerts.length > 0
       ? `角色语音漂移：\n- ${notes.dialogue_drift_alerts.map((item) => `${item.characterName} (${item.driftRate})：${item.reason}`).join('\n- ')}`
+      : '',
+    notes.humanization_signals.length > 0
+      ? `去 AI 味风险：\n- ${notes.humanization_signals.map((item) => `${item.title}：${item.detail}`).join('\n- ')}`
       : '',
     notes.style_compliance
       ? `风格合规：${notes.style_compliance.status} · ${notes.style_compliance.score} 分${notes.style_compliance.summary ? ` · ${notes.style_compliance.summary}` : ''}`
@@ -1500,6 +1550,55 @@ function appendRevisionBrief(base: string, additions: string[]): string {
   const merged = dedupeTextList([base, ...additions])
   if (merged.length === 0) return ''
   return merged.join('；').slice(0, 140)
+}
+
+function applyHumanizationAnalysisToReviewNotes(
+  reviewNotes: ChapterReviewNotes,
+  content: string,
+  genre?: string,
+): ChapterReviewNotes {
+  const aiFlavor = analyzeWorkspaceAiFlavor(content, genre)
+  const signals = aiFlavor.humanizationSignals.filter((item) => HUMANIZATION_REVIEW_SIGNAL_TYPES.has(item.issueType))
+  if (signals.length === 0 && aiFlavor.humanizationDirections.length === 0) {
+    return reviewNotes
+  }
+
+  const signalDetails = signals.map((item) => `${item.title}：${item.detail}`)
+  const criticalSignals = signals
+    .filter((item) => item.severity === 'high')
+    .map((item) => `${item.title}：${item.prefer || item.avoid}`)
+  const languageRisks = signals
+    .filter((item) => item.issueType === 'template_connector' || item.issueType === 'explanatory_narration' || item.issueType === 'ornament_overload')
+    .map((item) => item.detail)
+  const coherenceRisks = signals
+    .filter((item) => item.issueType === 'sensory_anchor_missing' || item.issueType === 'weak_stance')
+    .map((item) => item.detail)
+  const reviewSignalMap = new Map(reviewNotes.humanization_signals.map((item) => [item.issueType, item] as const))
+  signals.forEach((item) => {
+    const existing = reviewSignalMap.get(item.issueType)
+    if (!existing || (existing.severity !== 'high' && item.severity === 'high')) {
+      reviewSignalMap.set(item.issueType, item)
+    }
+  })
+
+  return {
+    ...reviewNotes,
+    critical_fixes: dedupeTextList([...reviewNotes.critical_fixes, ...criticalSignals]),
+    language_risks: dedupeTextList([...reviewNotes.language_risks, ...languageRisks]),
+    coherence_risks: dedupeTextList([...reviewNotes.coherence_risks, ...coherenceRisks]),
+    human_language_repairs: dedupeTextList([...reviewNotes.human_language_repairs, ...aiFlavor.humanizationDirections]),
+    summary: reviewNotes.summary || aiFlavor.summary,
+    severity: signals.reduce(
+      (current, item) => mergeSeverity(current, item.severity === 'high' ? 'high' : item.severity === 'medium' ? 'medium' : 'low'),
+      reviewNotes.severity,
+    ),
+    rewrite_required: reviewNotes.rewrite_required || signals.some((item) => item.severity === 'high'),
+    revision_brief: appendRevisionBrief(reviewNotes.revision_brief, [
+      ...signalDetails,
+      ...aiFlavor.humanizationDirections.slice(0, 3),
+    ]),
+    humanization_signals: [...reviewSignalMap.values()],
+  }
 }
 
 function applyDialogueAnalysisToReviewNotes(
@@ -2000,7 +2099,11 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
     }
   }
 
-  const repairNotes = enhanceReviewNotesWithGuardrails(input.reviewNotes, originalContent, input.profile.genre, findings)
+  const repairNotes = applyHumanizationAnalysisToReviewNotes(
+    enhanceReviewNotesWithGuardrails(input.reviewNotes, originalContent, input.profile.genre, findings),
+    originalContent,
+    input.profile.genre,
+  )
 
   try {
     const repairPromptDraftContent = markLockedParagraphsInContent(originalContent, input.lockedParagraphs)
@@ -2078,11 +2181,15 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
     const finalFindings = collectQualityGuardrailFindings(protectedRepaired.content, input.profile.genre)
     if (finalFindings.length > 0 && shouldForceRepair(finalFindings)) {
       // 第二轮修复：首轮修复后仍有强制修复触发，再做一次
-      const secondRepairNotes = enhanceReviewNotesWithGuardrails(
-        protectedRepaired.reviewNotes,
+      const secondRepairNotes = applyHumanizationAnalysisToReviewNotes(
+        enhanceReviewNotesWithGuardrails(
+          protectedRepaired.reviewNotes,
+          protectedRepaired.content,
+          input.profile.genre,
+          finalFindings,
+        ),
         protectedRepaired.content,
         input.profile.genre,
-        finalFindings,
       )
       try {
         const secondPromptDraftContent = markLockedParagraphsInContent(protectedRepaired.content, input.lockedParagraphs)
@@ -2154,8 +2261,12 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
     return {
       content: protectedRepaired.content,
       reviewNotes: finalFindings.length > 0
-        ? enhanceReviewNotesWithGuardrails(protectedRepaired.reviewNotes, protectedRepaired.content, input.profile.genre, finalFindings)
-        : protectedRepaired.reviewNotes,
+        ? applyHumanizationAnalysisToReviewNotes(
+          enhanceReviewNotesWithGuardrails(protectedRepaired.reviewNotes, protectedRepaired.content, input.profile.genre, finalFindings),
+          protectedRepaired.content,
+          input.profile.genre,
+        )
+        : applyHumanizationAnalysisToReviewNotes(protectedRepaired.reviewNotes, protectedRepaired.content, input.profile.genre),
     }
   } catch {
     return {
@@ -3498,6 +3609,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
     }
 
     reviewNotes = enhanceReviewNotesWithGuardrails(reviewNotes, draftContent, profile.genre)
+    reviewNotes = applyHumanizationAnalysisToReviewNotes(reviewNotes, draftContent, profile.genre)
     reviewNotes = applyDialogueAnalysisToReviewNotes(reviewNotes, chapter.novelId, chapter.chapterNum, draftContent)
     reviewNotes = applyStyleComplianceToReviewNotes(reviewNotes, chapter.novelId, draftContent)
     reviewNotes = applyContractValidationToReviewNotes(reviewNotes, validateChapterContractDelivery({
@@ -3601,8 +3713,13 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
       lockedParagraphs: lockedParagraphContext.lockedParagraphs,
       promptTier: complexity,
     })
-    const repairedReviewNotes = applyDialogueAnalysisToReviewNotes(
+    const repairedHumanizedReviewNotes = applyHumanizationAnalysisToReviewNotes(
       repaired.reviewNotes,
+      repaired.content,
+      profile.genre,
+    )
+    const repairedReviewNotes = applyDialogueAnalysisToReviewNotes(
+      repairedHumanizedReviewNotes,
       chapter.novelId,
       chapter.chapterNum,
       repaired.content,

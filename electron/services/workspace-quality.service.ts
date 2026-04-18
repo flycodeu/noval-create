@@ -1,4 +1,5 @@
 import type {
+  HumanizationSignal,
   WorkspaceAiFlavorReport,
   WorkspaceQualityAnalyzeRequest,
   WorkspaceQualityAnalyzeResult,
@@ -86,6 +87,48 @@ const STANCE_TOKENS = [
   '主角',
   '角色',
 ]
+
+const HUMANIZATION_SIGNAL_DESCRIPTORS: Record<HumanizationSignal['issueType'], {
+  title: string
+  avoid: string
+  prefer: string
+}> = {
+  ai_slogan: {
+    title: '口号化升华',
+    avoid: '不要让口号化判断、伪哲学总结和抽象升华替代叙事本身。',
+    prefer: '把判断落到动作、代价和可验证后果。',
+  },
+  template_emotion: {
+    title: '模板情绪',
+    avoid: '不要用通用情绪句和模板动作包办人物反应。',
+    prefer: '改成角色特有的身体反应、说话方式和即时选择。',
+  },
+  template_connector: {
+    title: '模板衔接',
+    avoid: '不要用“然而、与此同时、某种”等模板连接词替代自然承接。',
+    prefer: '让承接落在动作、因果和现场反馈上。',
+  },
+  explanatory_narration: {
+    title: '解释腔',
+    avoid: '不要用“意味着、说明了、体现了”式解释替角色和事件下结论。',
+    prefer: '把判断落到动作、细节和即时选择上。',
+  },
+  ornament_overload: {
+    title: '空转修辞',
+    avoid: '不要用堆叠形容和空转修辞制造假文采。',
+    prefer: '只保留能推进情绪、动作或信息的描写。',
+  },
+  sensory_anchor_missing: {
+    title: '锚点不足',
+    avoid: '不要连续用抽象判断和悬浮描述跳过现场动作。',
+    prefer: '补人物动作、环境反应和触感声音，让场景落地。',
+  },
+  weak_stance: {
+    title: '立场发虚',
+    avoid: '不要站在场外替人物总结处境和意义。',
+    prefer: '让句子贴回 POV 角色的观察、偏见和即时判断。',
+  },
+}
 
 function cleanText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
@@ -206,11 +249,38 @@ function countTokenRate(sentences: string[], tokens: string[]): number {
   return clampPercent((hits / sentences.length) * 100)
 }
 
-function analyzeAiFlavor(text: string): WorkspaceAiFlavorReport {
+function buildHumanizationSignal(
+  issueType: HumanizationSignal['issueType'],
+  severity: WorkspaceQualitySeverity | HumanizationSignal['severity'],
+  detail: string,
+  metricKey?: string,
+  metricValue?: number,
+): HumanizationSignal {
+  const descriptor = HUMANIZATION_SIGNAL_DESCRIPTORS[issueType]
+  const normalizedSeverity: HumanizationSignal['severity'] = severity === 'critical'
+    ? 'high'
+    : severity === 'warning' || severity === 'medium'
+      ? 'medium'
+      : severity === 'info'
+        ? 'low'
+        : severity
+  return {
+    issueType,
+    title: descriptor.title,
+    severity: normalizedSeverity,
+    detail,
+    avoid: descriptor.avoid,
+    prefer: descriptor.prefer,
+    metricKey,
+    metricValue,
+  }
+}
+
+export function analyzeWorkspaceAiFlavor(text: string, genre?: string): WorkspaceAiFlavorReport {
   const normalized = text.replace(/\r\n/g, '\n').trim()
   const drift = analyzeLanguageDrift(normalized)
   const sentences = splitSentences(normalized)
-  const guardrailFindings = collectQualityGuardrailFindings(normalized)
+  const guardrailFindings = collectQualityGuardrailFindings(normalized, genre)
   const narrativeControlReport = analyzeNarrativeControls({ content: normalized })
   const templateConnectorRate = countTokenRate(sentences, TEMPLATE_CONNECTORS)
   const explanatoryNarrationRate = countTokenRate(sentences, EXPLANATORY_TOKENS)
@@ -259,17 +329,79 @@ function analyzeAiFlavor(text: string): WorkspaceAiFlavorReport {
   const averageRisk = riskBreakdown.reduce((total, item) => total + item, 0) / Math.max(riskBreakdown.length, 1)
   const score = Math.max(0, Math.round(100 - averageRisk * 0.9 - guardrailFindings.length * 4))
   const severity = score <= 45 ? 'high' : score <= 70 ? 'medium' : 'low'
+  const humanizationSignals: HumanizationSignal[] = []
   const sampleFindings: string[] = []
+  if (templateConnectorRate >= 35) {
+    humanizationSignals.push(buildHumanizationSignal(
+      'template_connector',
+      templateConnectorRate >= 50 ? 'high' : 'medium',
+      `模板连接词占比 ${templateConnectorRate}%，承接开始像自动拼接。`,
+      'templateConnectorRate',
+      templateConnectorRate,
+    ))
+  }
   if (templateConnectorRate >= 35) sampleFindings.push('模板连接词密度偏高，读起来像自动拼接。')
+  if (explanatoryNarrationRate >= 30) {
+    humanizationSignals.push(buildHumanizationSignal(
+      'explanatory_narration',
+      explanatoryNarrationRate >= 45 ? 'high' : 'medium',
+      `解释腔占比 ${explanatoryNarrationRate}%，像旁白在替作者说明。`,
+      'explanatoryNarrationRate',
+      explanatoryNarrationRate,
+    ))
+  }
   if (explanatoryNarrationRate >= 30) sampleFindings.push('解释腔偏重，像旁白在替作者说明。')
+  if (drift.ornamentOverloadRate >= 35) {
+    humanizationSignals.push(buildHumanizationSignal(
+      'ornament_overload',
+      drift.ornamentOverloadRate >= 50 ? 'high' : 'medium',
+      `空转修辞占比 ${clampPercent(drift.ornamentOverloadRate)}%，实感被修辞冲淡。`,
+      'ornamentOverloadRate',
+      clampPercent(drift.ornamentOverloadRate),
+    ))
+  }
   if (drift.ornamentOverloadRate >= 35) sampleFindings.push('辞藻和虚词过多，实感被冲淡。')
+  if (sensoryAnchorWeakRate >= 60) {
+    humanizationSignals.push(buildHumanizationSignal(
+      'sensory_anchor_missing',
+      sensoryAnchorWeakRate >= 75 ? 'high' : 'medium',
+      `动作/感官锚点不足率 ${sensoryAnchorWeakRate}%，场景落地感偏弱。`,
+      'sensoryAnchorWeakRate',
+      sensoryAnchorWeakRate,
+    ))
+  }
   if (sensoryAnchorWeakRate >= 60) sampleFindings.push('很多句子缺少动作、触感和现场锚点。')
+  if (stanceWeakRate >= 60) {
+    humanizationSignals.push(buildHumanizationSignal(
+      'weak_stance',
+      stanceWeakRate >= 75 ? 'high' : 'medium',
+      `人物立场信号不足率 ${stanceWeakRate}%，句子像场外平叙说明。`,
+      'stanceWeakRate',
+      stanceWeakRate,
+    ))
+  }
   if (stanceWeakRate >= 60) sampleFindings.push('人物立场不够明显，像在做平叙说明。')
   if (narrativeControlReport.pov.status !== 'pass') sampleFindings.push(narrativeControlReport.pov.summary)
   if (narrativeControlReport.sensory.status !== 'pass') sampleFindings.push(narrativeControlReport.sensory.summary)
   if (narrativeControlReport.narrativeRatio.status !== 'pass') sampleFindings.push(narrativeControlReport.narrativeRatio.summary)
   if (guardrailFindings.some((finding) => finding.code === 'ai_slogan' || finding.code === 'template_emotion')) {
     sampleFindings.push('存在口号句或模板情绪表达。')
+  }
+  if (guardrailFindings.some((finding) => finding.code === 'ai_slogan')) {
+    humanizationSignals.push(buildHumanizationSignal(
+      'ai_slogan',
+      guardrailFindings.some((finding) => finding.code === 'ai_slogan' && finding.severity === 'high') ? 'high' : 'medium',
+      '存在口号句、伪哲学总结或抽象升华，正在替事件本身说话。',
+      'guardrail:ai_slogan',
+    ))
+  }
+  if (guardrailFindings.some((finding) => finding.code === 'template_emotion')) {
+    humanizationSignals.push(buildHumanizationSignal(
+      'template_emotion',
+      guardrailFindings.some((finding) => finding.code === 'template_emotion' && finding.severity === 'high') ? 'high' : 'medium',
+      '存在模板情绪句或套路反应，角色反应开始同质化。',
+      'guardrail:template_emotion',
+    ))
   }
   const humanizationDirections: string[] = []
   if (drift.abstractTokenDensity >= 30) humanizationDirections.push('把抽象判断改回具体动作、关系和代价。')
@@ -292,7 +424,12 @@ function analyzeAiFlavor(text: string): WorkspaceAiFlavorReport {
     breakdown,
     sampleFindings,
     humanizationDirections,
+    humanizationSignals,
   }
+}
+
+function analyzeAiFlavor(text: string): WorkspaceAiFlavorReport {
+  return analyzeWorkspaceAiFlavor(text)
 }
 
 function buildFallbackIssue(kind: WorkspaceQualityIssueKind, severity: WorkspaceQualitySeverity, description: string): WorkspaceQualityIssue {

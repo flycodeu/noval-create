@@ -604,6 +604,12 @@ export default function QualityDashboard({ novelId }: Props) {
               ? {
                 ...data.feedbackRecurrence,
                 recentAlerts: data.feedbackRecurrence.recentAlerts.filter((entry) => entry.chapterNums.some((chapterNum) => chapterNum >= selectedVolumeMetrics.chapterStart && chapterNum <= selectedVolumeMetrics.chapterEnd)),
+                humanization: {
+                  ...data.feedbackRecurrence.humanization,
+                  topRepeatedIssues: data.feedbackRecurrence.humanization.topRepeatedIssues.filter((entry) => entry.chapterNums.some((chapterNum) => chapterNum >= selectedVolumeMetrics.chapterStart && chapterNum <= selectedVolumeMetrics.chapterEnd)),
+                  promotedIssues: data.feedbackRecurrence.humanization.promotedIssues.filter((entry) => entry.chapterNums.some((chapterNum) => chapterNum >= selectedVolumeMetrics.chapterStart && chapterNum <= selectedVolumeMetrics.chapterEnd)),
+                  recentAlerts: data.feedbackRecurrence.humanization.recentAlerts.filter((entry) => entry.chapterNums.some((chapterNum) => chapterNum >= selectedVolumeMetrics.chapterStart && chapterNum <= selectedVolumeMetrics.chapterEnd)),
+                },
                 volumeEntries: data.feedbackRecurrence.volumeEntries.filter((entry) => entry.volumeId === selectedVolumeMetrics.volumeId),
               }
               : data.feedbackRecurrence}
@@ -2054,6 +2060,29 @@ function LanguageDriftPanel({
           ))}
         </div>
 
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
+          {[
+            { label: '人味命中章节', value: feedbackRecurrence.humanization.hitChapterCount, note: '模板衔接、解释腔、锚点不足、立场发虚等' },
+            { label: '人味复现问题', value: feedbackRecurrence.humanization.recurringIssueCount, note: '跨章重复出现的人味问题类型' },
+            { label: '人味已前置', value: feedbackRecurrence.humanization.promotedIssueCount, note: '下一章会作为硬约束注入的去 AI 味问题' },
+            { label: '人味高风险', value: feedbackRecurrence.humanization.highRiskIssueCount, note: '5 章窗口内高频复现的人味问题' },
+          ].map((card) => (
+            <div
+              key={card.label}
+              style={{
+                padding: '12px 14px',
+                borderRadius: 10,
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.08)',
+              }}
+            >
+              <div style={{ fontSize: 12, opacity: 0.7 }}>{card.label}</div>
+              <div style={{ fontSize: 22, fontWeight: 700 }}>{card.value}</div>
+              <div style={{ fontSize: 11, opacity: 0.55, marginTop: 4 }}>{card.note}</div>
+            </div>
+          ))}
+        </div>
+
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
           <div
             style={{
@@ -2130,6 +2159,40 @@ function LanguageDriftPanel({
                 <div style={{ fontSize: 11, opacity: 0.65 }}>{alert.detail}</div>
               </div>
             )) : <div style={{ fontSize: 12, opacity: 0.6 }}>当前没有新的审校复现告警。</div>}
+          </div>
+
+          <div
+            style={{
+              padding: '12px 14px',
+              borderRadius: 10,
+              background: 'rgba(255,255,255,0.04)',
+              border: '1px solid rgba(255,255,255,0.08)',
+              display: 'grid',
+              gap: 8,
+            }}
+          >
+            <div style={{ fontSize: 12, opacity: 0.7 }}>人味前置约束</div>
+            {feedbackRecurrence.humanization.promotedIssues.length > 0 ? feedbackRecurrence.humanization.promotedIssues.slice(0, 4).map((item) => (
+              <div key={`humanization-${item.issueType}`} style={{ display: 'grid', gap: 4 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                  <span style={{ fontSize: 12, fontWeight: 600 }}>{item.title}</span>
+                  <Tag color={item.pauseSuggested ? 'error' : 'gold'} style={{ marginRight: 0 }}>
+                    {item.pauseSuggested ? '高风险前置' : '已前置'}
+                  </Tag>
+                </div>
+                <div style={{ fontSize: 11, opacity: 0.65 }}>{item.avoid}</div>
+              </div>
+            )) : feedbackRecurrence.humanization.topRepeatedIssues.length > 0 ? feedbackRecurrence.humanization.topRepeatedIssues.slice(0, 4).map((item) => (
+              <div key={`humanization-trend-${item.issueType}`} style={{ display: 'grid', gap: 4 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+                  <span style={{ fontSize: 12, fontWeight: 600 }}>{item.title}</span>
+                  <Tag color={item.severity === 'high' ? 'error' : 'warning'} style={{ marginRight: 0 }}>
+                    {`第 ${item.lastChapterNum} 章`}
+                  </Tag>
+                </div>
+                <div style={{ fontSize: 11, opacity: 0.65 }}>{item.detail}</div>
+              </div>
+            )) : <div style={{ fontSize: 12, opacity: 0.6 }}>当前没有进入硬约束的人味复现问题。</div>}
           </div>
         </div>
 

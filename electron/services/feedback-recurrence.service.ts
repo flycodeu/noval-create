@@ -6,6 +6,7 @@ import type {
   FeedbackRecurrencePromotedIssueSummary,
   FeedbackRecurrenceSource,
   FeedbackRecurrenceTrendSummary,
+  HumanizationSignal,
 } from '../../src/types'
 import { getDb } from '../database/db'
 import { antiAiRuleHits, chapterGateRuns, chapters, revisionTasks } from '../database/schema'
@@ -17,7 +18,7 @@ type FeedbackDescriptor = {
   title: string
   avoid: string
   prefer?: string
-  pauseOnBatch: boolean
+  pauseRule: 'never' | 'window' | 'high_window'
   relatedPage: 'writing' | 'contracts' | 'threads'
 }
 
@@ -54,6 +55,17 @@ export interface FeedbackRecurrenceDashboardSummary {
   promotedIssues: FeedbackRecurrencePromotedIssueSummary[]
   recentAlerts: FeedbackRecurrenceAlert[]
   chapterSignals: FeedbackRecurrenceChapterSignal[]
+  humanizationSummary: {
+    totalHitCount: number
+    hitChapterCount: number
+    recurringIssueCount: number
+    promotedIssueCount: number
+    highRiskIssueCount: number
+    pauseSuggestedIssueCount: number
+    topRepeatedIssues: FeedbackRecurrenceTrendSummary[]
+    promotedIssues: FeedbackRecurrencePromotedIssueSummary[]
+    recentAlerts: FeedbackRecurrenceAlert[]
+  }
 }
 
 type ParsedReviewState = {
@@ -72,6 +84,11 @@ type ParsedReviewState = {
   crossCharacterSimilarity: string[]
   dialogueFillerRisks: string[]
   dialogueInfoDensityRisks: string[]
+  humanizationSignals: Array<{
+    issueType: HumanizationSignal['issueType']
+    severity: ReviewSeverity
+    detail: string
+  }>
   contractValidationStatus?: 'pass' | 'warning' | 'blocker'
 }
 
@@ -80,59 +97,104 @@ const FEEDBACK_DESCRIPTOR_MAP: Record<FeedbackRecurrenceIssueType, FeedbackDescr
     title: '代价蒸发',
     avoid: '不要把伤势、资源损耗或关系裂痕写成无后果收束。',
     prefer: '让代价继续挤压角色选择，并在行动里兑现余波。',
-    pauseOnBatch: true,
+    pauseRule: 'window',
     relatedPage: 'writing',
   },
   forced_reversal: {
     title: '强行反转',
     avoid: '不要先抛反转结果，再回头补理由。',
     prefer: '先补触发链、铺垫证据和角色误判，再推反转。',
-    pauseOnBatch: true,
+    pauseRule: 'window',
     relatedPage: 'writing',
   },
   too_smooth: {
     title: '过度顺滑',
     avoid: '不要让主角在几乎无受挫、无代价的情况下连续拿到回报。',
     prefer: '补出阻力、失误、交换成本或延迟兑现。',
-    pauseOnBatch: false,
+    pauseRule: 'never',
     relatedPage: 'writing',
   },
   ai_slogan: {
     title: '口号化升华',
     avoid: '不要让口号化判断、伪哲学总结和抽象升华替代叙事本身。',
     prefer: '把判断落到动作、代价和可验证后果。',
-    pauseOnBatch: false,
+    pauseRule: 'high_window',
     relatedPage: 'writing',
   },
   template_emotion: {
     title: '模板情绪',
     avoid: '不要用通用情绪句和模板动作包办人物反应。',
     prefer: '改成角色特有的身体反应、说话方式和即时选择。',
-    pauseOnBatch: false,
+    pauseRule: 'high_window',
+    relatedPage: 'writing',
+  },
+  template_connector: {
+    title: '模板衔接',
+    avoid: '不要用“然而、与此同时、某种”等模板连接词替代自然承接。',
+    prefer: '让承接落在动作、因果和现场反馈上。',
+    pauseRule: 'high_window',
+    relatedPage: 'writing',
+  },
+  explanatory_narration: {
+    title: '解释腔',
+    avoid: '不要用“意味着、说明了、体现了”式解释替角色和事件下结论。',
+    prefer: '把判断落到动作、细节和即时选择上。',
+    pauseRule: 'high_window',
+    relatedPage: 'writing',
+  },
+  ornament_overload: {
+    title: '空转修辞',
+    avoid: '不要用堆叠形容和空转修辞制造假文采。',
+    prefer: '只保留能推进情绪、动作或信息的描写。',
+    pauseRule: 'high_window',
+    relatedPage: 'writing',
+  },
+  sensory_anchor_missing: {
+    title: '锚点不足',
+    avoid: '不要连续用抽象判断和悬浮描述跳过现场动作。',
+    prefer: '补人物动作、环境反应和触感声音，让场景落地。',
+    pauseRule: 'high_window',
+    relatedPage: 'writing',
+  },
+  weak_stance: {
+    title: '立场发虚',
+    avoid: '不要站在场外替人物总结处境和意义。',
+    prefer: '让句子贴回 POV 角色的观察、偏见和即时判断。',
+    pauseRule: 'high_window',
     relatedPage: 'writing',
   },
   pov_drift: {
     title: '视角漂移',
     avoid: '不要在固定视角作品中混用 POV、越权读取他人认知或跳出当前视点。',
     prefer: '把信息限制在当前视角能看到、听到、推断到的范围内。',
-    pauseOnBatch: true,
+    pauseRule: 'window',
     relatedPage: 'contracts',
   },
   thread_stalled: {
     title: '线程停滞',
     avoid: '不要让已承诺的主线、伏笔或章节目标停在只提及不推进的状态。',
     prefer: '让线索、冲突或兑现状态产生可验证变化。',
-    pauseOnBatch: true,
+    pauseRule: 'window',
     relatedPage: 'threads',
   },
   dialogue_homogenized: {
     title: '对白同质化',
     avoid: '不要让角色对白在句长、口气和用词上越来越像同一个人。',
     prefer: '按身份、关系和处境拆开对白节奏与潜台词，并把高风险角色升级为下一章 voice lock。',
-    pauseOnBatch: false,
+    pauseRule: 'never',
     relatedPage: 'writing',
   },
 }
+
+const HUMANIZATION_ISSUE_TYPES = new Set<FeedbackRecurrenceIssueType>([
+  'ai_slogan',
+  'template_emotion',
+  'template_connector',
+  'explanatory_narration',
+  'ornament_overload',
+  'sensory_anchor_missing',
+  'weak_stance',
+])
 
 const POV_KEYWORDS = ['POV', '视角', '视点', '人称', '认知', '越权', '旁白']
 const AI_SLOGAN_RULE_CODES = new Set([
@@ -229,6 +291,18 @@ function hasThreeHitsWithinFiveChapters(chapterNums: number[]): boolean {
   return false
 }
 
+function shouldPauseOnBatch(
+  issueType: FeedbackRecurrenceIssueType,
+  chapterNums: number[],
+  severity: ReviewSeverity,
+): boolean {
+  const descriptor = FEEDBACK_DESCRIPTOR_MAP[issueType]
+  if (!hasThreeHitsWithinFiveChapters(chapterNums)) return false
+  if (descriptor.pauseRule === 'window') return true
+  if (descriptor.pauseRule === 'high_window') return severity === 'high'
+  return false
+}
+
 function isPromotedForUpcomingChapter(chapterNums: number[], targetChapterNum: number): boolean {
   const sorted = [...new Set(chapterNums.filter((num) => num < targetChapterNum))].sort((left, right) => left - right)
   if (sorted.includes(targetChapterNum - 1) && sorted.includes(targetChapterNum - 2)) return true
@@ -261,6 +335,7 @@ function parseReviewState(raw?: string | null): ParsedReviewState {
     crossCharacterSimilarity: [],
     dialogueFillerRisks: [],
     dialogueInfoDensityRisks: [],
+    humanizationSignals: [],
   }
   if (!raw) return fallback
   try {
@@ -295,6 +370,21 @@ function parseReviewState(raw?: string | null): ParsedReviewState {
         : [],
       dialogueFillerRisks: parseUnknownStringArray(parsed.dialogue_filler_risks),
       dialogueInfoDensityRisks: parseUnknownStringArray(parsed.dialogue_info_density_risks),
+      humanizationSignals: Array.isArray(parsed.humanization_signals)
+        ? parsed.humanization_signals
+          .filter((item) => item && typeof item === 'object' && !Array.isArray(item))
+          .map((item) => {
+            const current = item as Record<string, unknown>
+            const issueType = asText(current.issueType) as HumanizationSignal['issueType']
+            if (!HUMANIZATION_ISSUE_TYPES.has(issueType)) return null
+            return {
+              issueType,
+              severity: normalizeSeverity(current.severity),
+              detail: asText(current.detail) || asText(current.title),
+            }
+          })
+          .filter((item): item is ParsedReviewState['humanizationSignals'][number] => Boolean(item))
+        : [],
       contractValidationStatus: contractValidation?.status === 'pass' || contractValidation?.status === 'warning' || contractValidation?.status === 'blocker'
         ? contractValidation.status
         : undefined,
@@ -427,6 +517,18 @@ function buildChapterHits(params: {
     })
   }
 
+  review.humanizationSignals.forEach((signal) => {
+    pushHit(hits, {
+      chapterId,
+      chapterNum,
+      issueType: signal.issueType,
+      title: FEEDBACK_DESCRIPTOR_MAP[signal.issueType].title,
+      severity: signal.severity,
+      source: 'review',
+      detail: signal.detail || FEEDBACK_DESCRIPTOR_MAP[signal.issueType].avoid,
+    })
+  })
+
   params.antiAiRows.forEach((row) => {
     const issueType = mapAntiAiRuleCodeToIssueType(asText(row.ruleCode))
     if (!issueType) return
@@ -490,7 +592,7 @@ export function summarizeFeedbackRecurrenceHits(rows: FeedbackRecurrenceHitRowLi
     currentSummary.lastChapterNum = Math.max(currentSummary.lastChapterNum, chapterNum)
     if (severityRank(row.severity) > severityRank(currentSummary.severity)) currentSummary.severity = row.severity
     if (!currentSummary.detail) currentSummary.detail = row.detail || descriptor.avoid
-    currentSummary.pauseSuggested = descriptor.pauseOnBatch && hasThreeHitsWithinFiveChapters(currentSummary.chapterNums)
+    currentSummary.pauseSuggested = shouldPauseOnBatch(row.issueType, currentSummary.chapterNums, currentSummary.severity)
     grouped.set(row.issueType, currentSummary)
 
     const currentChapter = chapterSignals.get(chapterId) || {
@@ -522,7 +624,7 @@ export function summarizeFeedbackRecurrenceHits(rows: FeedbackRecurrenceHitRowLi
     .map((summary) => ({
       ...summary,
       promotedCount: countConsecutivePromotions(summary.chapterNums),
-      pauseSuggested: FEEDBACK_DESCRIPTOR_MAP[summary.issueType].pauseOnBatch && hasThreeHitsWithinFiveChapters(summary.chapterNums),
+      pauseSuggested: shouldPauseOnBatch(summary.issueType, summary.chapterNums, summary.severity),
     }))
     .sort((left, right) => right.chapterCount - left.chapterCount || right.lastChapterNum - left.lastChapterNum || left.title.localeCompare(right.title))
 
@@ -536,7 +638,7 @@ export function summarizeFeedbackRecurrenceHits(rows: FeedbackRecurrenceHitRowLi
         chapterNums: summary.chapterNums.slice(-5),
         avoid: descriptor.avoid,
         prefer: descriptor.prefer,
-        pauseSuggested: descriptor.pauseOnBatch && hasThreeHitsWithinFiveChapters(summary.chapterNums),
+        pauseSuggested: shouldPauseOnBatch(summary.issueType, summary.chapterNums, summary.severity),
       }
     })
     .slice(0, 6)
@@ -545,7 +647,7 @@ export function summarizeFeedbackRecurrenceHits(rows: FeedbackRecurrenceHitRowLi
     .filter((summary) => summary.promotedCount > 0 || hasThreeHitsWithinFiveChapters(summary.chapterNums))
     .map<FeedbackRecurrenceAlert>((summary) => {
       const highRisk = hasThreeHitsWithinFiveChapters(summary.chapterNums)
-      const pauseSuggested = FEEDBACK_DESCRIPTOR_MAP[summary.issueType].pauseOnBatch && highRisk
+      const pauseSuggested = shouldPauseOnBatch(summary.issueType, summary.chapterNums, summary.severity)
       return {
         issueType: summary.issueType,
         title: summary.title,
@@ -569,7 +671,7 @@ export function summarizeFeedbackRecurrenceHits(rows: FeedbackRecurrenceHitRowLi
           const summary = grouped.get(issue.issueType)
           const chapterNums = summary?.chapterNums || []
           const promotedToHardConstraint = chapterNums.includes(signal.chapterNum) && chapterNums.includes(signal.chapterNum - 1)
-          const pauseSuggested = FEEDBACK_DESCRIPTOR_MAP[issue.issueType].pauseOnBatch && hasThreeHitsWithinFiveChapters(chapterNums)
+          const pauseSuggested = shouldPauseOnBatch(issue.issueType, chapterNums, summary?.severity || issue.severity)
           return {
             ...issue,
             promotedToHardConstraint,
@@ -591,6 +693,9 @@ export function summarizeFeedbackRecurrenceHits(rows: FeedbackRecurrenceHitRowLi
 
   const highRiskIssueCount = summaries.filter((summary) => hasThreeHitsWithinFiveChapters(summary.chapterNums)).length
   const pauseSuggestedIssueCount = summaries.filter((summary) => summary.pauseSuggested).length
+  const humanizationSummaries = summaries.filter((summary) => HUMANIZATION_ISSUE_TYPES.has(summary.issueType))
+  const humanizationAlerts = recentAlerts.filter((alert) => HUMANIZATION_ISSUE_TYPES.has(alert.issueType))
+  const humanizationPromoted = promotedIssues.filter((issue) => HUMANIZATION_ISSUE_TYPES.has(issue.issueType))
 
   return {
     overview: {
@@ -605,6 +710,17 @@ export function summarizeFeedbackRecurrenceHits(rows: FeedbackRecurrenceHitRowLi
     promotedIssues,
     recentAlerts: recentAlerts.slice(0, 8),
     chapterSignals: chapterSignalList,
+    humanizationSummary: {
+      totalHitCount: rows.filter((row) => HUMANIZATION_ISSUE_TYPES.has(row.issueType)).length,
+      hitChapterCount: new Set(chapterSignalList.filter((signal) => signal.issues.some((issue) => HUMANIZATION_ISSUE_TYPES.has(issue.issueType))).map((signal) => signal.chapterNum)).size,
+      recurringIssueCount: humanizationSummaries.filter((summary) => summary.chapterCount >= 2).length,
+      promotedIssueCount: humanizationSummaries.filter((summary) => summary.promotedCount > 0).length,
+      highRiskIssueCount: humanizationSummaries.filter((summary) => hasThreeHitsWithinFiveChapters(summary.chapterNums)).length,
+      pauseSuggestedIssueCount: humanizationSummaries.filter((summary) => summary.pauseSuggested).length,
+      topRepeatedIssues: humanizationSummaries.slice(0, 6),
+      promotedIssues: humanizationPromoted.slice(0, 6),
+      recentAlerts: humanizationAlerts.slice(0, 6),
+    },
   }
 }
 
@@ -683,7 +799,11 @@ export function getPromotedFeedbackIssuesForChapter(
         chapterNums: issue.chapterNums.filter((num) => num < chapterNum).slice(-5),
         avoid: descriptor.avoid,
         prefer: descriptor.prefer,
-        pauseSuggested: descriptor.pauseOnBatch && hasThreeHitsWithinFiveChapters(issue.chapterNums.filter((num) => num < chapterNum)),
+        pauseSuggested: shouldPauseOnBatch(
+          issue.issueType,
+          issue.chapterNums.filter((num) => num < chapterNum),
+          issue.severity,
+        ),
       }
     })
     .slice(0, 6)

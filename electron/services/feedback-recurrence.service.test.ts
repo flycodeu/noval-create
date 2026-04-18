@@ -80,4 +80,71 @@ describe('feedback-recurrence.service', () => {
     expect(text).toContain('【近章纠偏重点】')
     expect(text).toContain('让代价继续挤压角色选择')
   })
+
+  it('tracks humanization recurrence separately and only pauses on high-risk windows', () => {
+    const summary = summarizeFeedbackRecurrenceHits([
+      {
+        chapterId: 3,
+        chapterNum: 3,
+        issueType: 'template_connector',
+        title: '模板衔接',
+        severity: 'high',
+        source: 'review',
+        detail: '模板连接词占比 52%，承接像自动拼接。',
+      },
+      {
+        chapterId: 5,
+        chapterNum: 5,
+        issueType: 'template_connector',
+        title: '模板衔接',
+        severity: 'high',
+        source: 'review',
+        detail: '模板连接词占比 55%，承接仍然发飘。',
+      },
+      {
+        chapterId: 7,
+        chapterNum: 7,
+        issueType: 'template_connector',
+        title: '模板衔接',
+        severity: 'high',
+        source: 'review',
+        detail: '模板连接词占比 51%，依旧像自动补句。',
+      },
+      {
+        chapterId: 8,
+        chapterNum: 8,
+        issueType: 'weak_stance',
+        title: '立场发虚',
+        severity: 'medium',
+        source: 'review',
+        detail: '人物立场信号不足率 63%。',
+      },
+      {
+        chapterId: 9,
+        chapterNum: 9,
+        issueType: 'weak_stance',
+        title: '立场发虚',
+        severity: 'medium',
+        source: 'review',
+        detail: '句子仍像场外平叙。',
+      },
+      {
+        chapterId: 10,
+        chapterNum: 10,
+        issueType: 'weak_stance',
+        title: '立场发虚',
+        severity: 'medium',
+        source: 'review',
+        detail: '人物偏见和即时判断还是不够。',
+      },
+    ])
+
+    expect(summary.humanizationSummary.hitChapterCount).toBe(6)
+    expect(summary.humanizationSummary.recurringIssueCount).toBe(2)
+    expect(summary.humanizationSummary.promotedIssueCount).toBe(1)
+    expect(summary.humanizationSummary.highRiskIssueCount).toBe(2)
+    expect(summary.humanizationSummary.pauseSuggestedIssueCount).toBe(1)
+    expect(summary.humanizationSummary.promotedIssues.some((item) => item.issueType === 'template_connector' && item.pauseSuggested)).toBe(true)
+    expect(summary.humanizationSummary.promotedIssues.some((item) => item.issueType === 'weak_stance' && item.pauseSuggested)).toBe(false)
+  })
 })

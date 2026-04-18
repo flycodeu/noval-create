@@ -3354,6 +3354,11 @@ export type FeedbackRecurrenceIssueType =
   | 'too_smooth'
   | 'ai_slogan'
   | 'template_emotion'
+  | 'template_connector'
+  | 'explanatory_narration'
+  | 'ornament_overload'
+  | 'sensory_anchor_missing'
+  | 'weak_stance'
   | 'pov_drift'
   | 'thread_stalled'
   | 'dialogue_homogenized'
@@ -3419,6 +3424,24 @@ export interface VolumeFeedbackRecurrenceEntry {
   promotedIssueCount: number
   highRiskIssueCount: number
   pauseSuggestedIssueCount: number
+}
+
+export interface HumanizationSignal {
+  issueType:
+    | 'ai_slogan'
+    | 'template_emotion'
+    | 'template_connector'
+    | 'explanatory_narration'
+    | 'ornament_overload'
+    | 'sensory_anchor_missing'
+    | 'weak_stance'
+  title: string
+  severity: 'low' | 'medium' | 'high'
+  detail: string
+  avoid: string
+  prefer?: string
+  metricKey?: string
+  metricValue?: number
 }
 
 export type QualityDashboardRiskKind =
@@ -3587,6 +3610,7 @@ export interface WorkspaceAiFlavorReport {
   breakdown: WorkspaceAiFlavorBreakdownItem[]
   sampleFindings: string[]
   humanizationDirections: string[]
+  humanizationSignals: HumanizationSignal[]
 }
 
 export interface WorkspaceQualityAnalyzeRequest {
@@ -3683,6 +3707,17 @@ export interface QualityDashboardData {
     topRepeatedIssues: FeedbackRecurrenceTrendSummary[]
     promotedIssues: FeedbackRecurrencePromotedIssueSummary[]
     recentAlerts: FeedbackRecurrenceAlert[]
+    humanization: {
+      totalHitCount: number
+      hitChapterCount: number
+      recurringIssueCount: number
+      promotedIssueCount: number
+      highRiskIssueCount: number
+      pauseSuggestedIssueCount: number
+      topRepeatedIssues: FeedbackRecurrenceTrendSummary[]
+      promotedIssues: FeedbackRecurrencePromotedIssueSummary[]
+      recentAlerts: FeedbackRecurrenceAlert[]
+    }
     volumeEntries: VolumeFeedbackRecurrenceEntry[]
   }
   styleCompliance: {

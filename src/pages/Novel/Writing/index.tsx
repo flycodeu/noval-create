@@ -92,6 +92,14 @@ interface ReviewNotes {
     driftRate: number
     reason: string
   }>
+  humanization_signals?: Array<{
+    issueType: string
+    title: string
+    severity: 'low' | 'medium' | 'high'
+    detail: string
+    avoid: string
+    prefer?: string
+  }>
   contract_validation?: ChapterContractValidationResult
 }
 interface TextSelectionSnapshot {
@@ -1861,6 +1869,9 @@ export default function Writing({ novelId }: Props) {
         <InsightCard title="最近恶化项" eyebrow="跨章节语言退化" tone="soft">
           <LanguageDriftHealthCard dashboard={qualityDashboard} currentChapter={currentChapter} />
         </InsightCard>
+        <InsightCard title="人味硬约束" eyebrow="模板 / 解释 / 立场" tone="soft">
+          <HumanizationHealthCard dashboard={qualityDashboard} reviewNotes={reviewNotes} />
+        </InsightCard>
         <InsightCard title="角色对白辨识度" eyebrow="语音指纹" tone="soft">
           <DialogueFingerprintHealthCard dashboard={qualityDashboard} reviewNotes={reviewNotes} />
         </InsightCard>
@@ -3032,6 +3043,60 @@ function LanguageDriftHealthCard({
           </div>
           <div className="novel-note-list__item">
             趋势状态：恶化 {dashboard.novelLanguageDriftSummary.statusBreakdown.worsening} 项，改善 {dashboard.novelLanguageDriftSummary.statusBreakdown.improving} 项，稳定 {dashboard.novelLanguageDriftSummary.statusBreakdown.stable} 项。
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function HumanizationHealthCard({
+  dashboard,
+  reviewNotes,
+}: {
+  dashboard: QualityDashboardData | null
+  reviewNotes: ReviewNotes | null
+}) {
+  const currentSignals = reviewNotes?.humanization_signals?.slice(0, 4) || []
+  const promotedIssues = dashboard?.feedbackRecurrence.humanization.promotedIssues.slice(0, 3) || []
+  const recentAlerts = dashboard?.feedbackRecurrence.humanization.recentAlerts.slice(0, 3) || []
+
+  if (currentSignals.length === 0 && promotedIssues.length === 0 && recentAlerts.length === 0) {
+    return <div className="novel-copy-block">解释腔、模板衔接、空转修辞和立场发虚开始跨章复现后，这里会直接提示下一章该避免什么。</div>
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 10 }}>
+      {currentSignals.length > 0 ? (
+        <div className="novel-note-list">
+          {currentSignals.map((item) => (
+            <div key={`${item.issueType}-${item.detail}`} className="novel-note-list__item">
+              当前章 {item.title}：{item.detail}
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {promotedIssues.length > 0 ? (
+        <div className="novel-copy-block">
+          下一章硬约束：{promotedIssues.map((item) => `${item.title} -> ${item.avoid}`).join('；')}
+        </div>
+      ) : null}
+
+      {recentAlerts.length > 0 ? (
+        <div className="novel-note-list">
+          {recentAlerts.map((alert) => (
+            <div key={`${alert.issueType}-${alert.lastChapterNum}`} className="novel-note-list__item">
+              {alert.pauseSuggested ? '批次预警' : '复现预警'}：{alert.detail}
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {dashboard ? (
+        <div className="novel-note-list">
+          <div className="novel-note-list__item">
+            近章人味问题覆盖 {dashboard.feedbackRecurrence.humanization.hitChapterCount} 章，已升级硬约束 {dashboard.feedbackRecurrence.humanization.promotedIssueCount} 项，高风险 {dashboard.feedbackRecurrence.humanization.highRiskIssueCount} 项。
           </div>
         </div>
       ) : null}

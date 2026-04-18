@@ -393,6 +393,53 @@ describe('allocateChapterContext', () => {
     expect(context.constraintInjectionStatus.injectedLabels).toContain('feedbackRecurrence')
   })
 
+  it('injects humanization recurrence hard constraints from stored review-note signals', () => {
+    vi.mocked(getDb).mockReturnValue(createTableAwareDbMock(new Map<unknown, unknown[]>([
+      [chapters, [
+        {
+          id: 2,
+          chapterNum: 2,
+          reviewNotesJson: JSON.stringify({
+            humanization_signals: [{
+              issueType: 'template_connector',
+              title: '模板衔接',
+              severity: 'high',
+              detail: '模板连接词占比 52%，承接像自动拼接。',
+              avoid: '不要用“然而、与此同时、某种”等模板连接词替代自然承接。',
+              prefer: '让承接落在动作、因果和现场反馈上。',
+            }],
+          }),
+        },
+        {
+          id: 3,
+          chapterNum: 3,
+          reviewNotesJson: JSON.stringify({
+            humanization_signals: [{
+              issueType: 'template_connector',
+              title: '模板衔接',
+              severity: 'high',
+              detail: '模板连接词占比 54%，承接依旧发飘。',
+              avoid: '不要用“然而、与此同时、某种”等模板连接词替代自然承接。',
+              prefer: '让承接落在动作、因果和现场反馈上。',
+            }],
+          }),
+        },
+      ]],
+      [chapterGateRuns, []],
+      [antiAiRuleHits, []],
+    ])) as never)
+
+    const context = allocateChapterContext(createRawData(), {
+      totalBudget: 10000,
+      promptProfile: 'draft',
+      chapterComplexity: 'standard',
+    })
+
+    expect(context.hardConstraintContext).toContain('模板衔接')
+    expect(context.hardConstraintContext).toContain('不要用“然而、与此同时、某种”等模板连接词替代自然承接。')
+    expect(context.hardConstraintContext).toContain('让承接落在动作、因果和现场反馈上。')
+  })
+
   it('compresses the effective budget to the model context limit', () => {
     vi.mocked(resolveModelRuntimeBudget).mockReturnValue({
       maxContextTokens: 9000,
