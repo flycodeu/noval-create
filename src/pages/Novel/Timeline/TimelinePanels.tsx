@@ -162,7 +162,7 @@ export function TimelineListPanel({
           <h2 className="novel-panel__title">{TIMELINE_TEXT.listTitle}</h2>
         </div>
         <div className="novel-panel__extra">
-          <div className="novel-filter-bar">
+          <div className="novel-filter-bar novel-timeline-page__filter-bar">
             <div className="novel-filter-bar__row">
               <Select value={statusFilter} options={statusOptions} onChange={onStatusChange} />
               <Select value={typeFilter} options={eventTypeOptions} onChange={onTypeChange} />
@@ -194,8 +194,8 @@ export function TimelineListPanel({
         ) : pageData.total === 0 ? (
           <div className="novel-empty">{TIMELINE_TEXT.listEmpty}</div>
         ) : (
-          <div style={{ display: 'grid', gap: 12 }}>
-            <VirtualList data={pageData.items} height={560} itemHeight={126} itemKey="id">
+          <div className="novel-timeline-page__list-shell">
+            <VirtualList data={pageData.items} height={480} itemHeight={118} itemKey="id">
               {(event: TimelineEvent) => (
                 <button
                   key={event.id}
@@ -333,7 +333,7 @@ export function TimelineEditorPanel({
         {!selectedEvent && !creating && !loading ? (
           <div className="novel-empty">{TIMELINE_TEXT.selectEventHint}</div>
         ) : (
-          <Form form={form} layout="vertical" onValuesChange={onValuesChange}>
+          <Form className="novel-timeline-page__editor-form" form={form} layout="vertical" onValuesChange={onValuesChange}>
             {selectedEvent?.anchorInvalid ? (
               <Alert
                 style={{ marginBottom: 16 }}
@@ -389,7 +389,7 @@ export function TimelineEditorPanel({
                 <Form.Item name="eventType" label={TIMELINE_TEXT.labelEventType}>
                   <Select allowClear showSearch options={filterOptions.eventTypes.map((item) => ({ value: item, label: item }))} />
                 </Form.Item>
-                <div className="novel-grid novel-grid--2" style={{ alignItems: 'start' }}>
+                <div className="novel-grid novel-grid--2 novel-timeline-page__boolean-grid">
                   <Form.Item name="isMajorEvent" label={TIMELINE_TEXT.labelMajor} valuePropName="checked" style={{ marginBottom: 0 }}>
                     <Switch />
                   </Form.Item>

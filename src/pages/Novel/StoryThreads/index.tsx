@@ -667,7 +667,7 @@ export default function StoryThreadsPage({ novelId }: Props) {
                   <span>目标回收</span>
                   <span>操作</span>
                 </div>
-                <VirtualList data={threads} height={520} itemHeight={72} itemKey="id">
+                <VirtualList data={threads} height={460} itemHeight={72} itemKey="id">
                   {(thread: StoryThread) => (
                     <StoryThreadRow
                       key={thread.id}

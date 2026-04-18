@@ -88,6 +88,7 @@ export default function Overview({ novelId }: Props) {
   const { currentNovel, setCurrentNovel } = useNovelStore()
   const [form] = Form.useForm<OverviewFormValues>()
   const [saving, setSaving] = useState(false)
+  const [packagingSaving, setPackagingSaving] = useState(false)
   const [stats, setStats] = useState<OverviewStats>(EMPTY_STATS)
   const [draftWarnings, setDraftWarnings] = useState<string[]>([])
   const [packagingDraft, setPackagingDraft] = useState<PackagingDraft>(parseNovelBlurbDocument(currentNovel?.blurbJson))
@@ -152,6 +153,15 @@ export default function Overview({ novelId }: Props) {
     () => parseWorldRulesJson(currentNovel?.worldRulesJson, currentNovel?.genreName),
     [currentNovel?.genreName, currentNovel?.worldRulesJson],
   )
+  const packagingPayload = useMemo(
+    () => buildNovelBlurbPayload(packagingDraft, currentNovel?.blurbJson),
+    [currentNovel?.blurbJson, packagingDraft],
+  )
+  const persistedPackagingPayload = useMemo(
+    () => buildNovelBlurbPayload(parseNovelBlurbDocument(currentNovel?.blurbJson), currentNovel?.blurbJson),
+    [currentNovel?.blurbJson],
+  )
+  const packagingDirty = packagingPayload !== persistedPackagingPayload
 
   const targetWords = currentNovel?.targetWords ?? 0
   const wordProgress = targetWords > 0 ? Math.min(100, Math.round((stats.totalWords / targetWords) * 100)) : 0
@@ -343,6 +353,22 @@ export default function Overview({ novelId }: Props) {
       message.error(getErrorMessage(error, 'overview.saveFailed'))
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleSavePackaging = async () => {
+    setPackagingSaving(true)
+
+    try {
+      await window.electron.novel.update(novelId, { blurbJson: packagingPayload })
+      const updated = await window.electron.novel.get(novelId)
+      if (updated) setCurrentNovel(updated)
+      message.success('包装信息已保存')
+    } catch (error) {
+      console.error(error)
+      message.error('包装信息保存失败')
+    } finally {
+      setPackagingSaving(false)
     }
   }
 
@@ -550,63 +576,74 @@ export default function Overview({ novelId }: Props) {
 
       <WorkspacePanel
         title="包装信息"
-        description="生成书名候选、平台简介和卷名风格。"
+        description="生成后可单独保存，不受基础信息必填校验影响。"
         extra={(
-          <Button
-            loading={packagingGenerating}
-            onClick={() => void (async () => {
-              setPackagingGenerating(true)
-              try {
-                const outputs = await window.electron.ai.runPrompt({
-                  modelConfigId: currentNovel?.modelConfigId,
-                  messages: [{
-                    role: 'user',
-                    content: [
-                      '你是中文网络小说包装编辑，只输出 JSON，不要解释，不要 Markdown。',
-                      `书名：${form.getFieldValue('title') || currentNovel?.title || ''}`,
-                      `一句话简介：${form.getFieldValue('synopsis') || currentNovel?.synopsis || ''}`,
-                      `扩展背景：${form.getFieldValue('expandedBackground') || currentNovel?.expandedBackground || ''}`,
-                      projectBrief.readyCount > 0 ? `项目立项：${buildProjectBriefSummary(projectBrief)}` : '',
-                      storySettings.storyDesign.mainPlot ? `故事设计：${buildStoryDesignSummary(storySettings.storyDesign)}` : '',
-                      themeVoice.readyCount > 0 ? `主题与文风：${buildThemeVoiceSummary(themeVoice)}` : '',
-                      '返回：',
-                      '- titleCandidates: 5 个可上架书名候选',
-                      '- oneLineHook: 1 句导语',
-                      '- platformBlurbs.qidian / tomato / publishing: 3 种平台简介',
-                      '- volumeNamingStyle: 卷名风格规范',
-                      '{"titleCandidates":[""],"oneLineHook":"","platformBlurbs":{"qidian":"","tomato":"","publishing":""},"volumeNamingStyle":""}',
-                    ].filter(Boolean).join('\n'),
-                  }],
-                })
-                const first = Array.isArray(outputs) ? outputs[0] : ''
-                if (!first) return
-                const parsed = parseDraftJson<PackagingDraft>(first)
-                setPackagingDraft((current) => ({
-                  titleCandidates: Array.isArray(parsed.titleCandidates)
-                    ? parsed.titleCandidates.filter((item): item is string => typeof item === 'string')
-                    : current.titleCandidates,
-                  oneLineHook: typeof parsed.oneLineHook === 'string' ? parsed.oneLineHook : current.oneLineHook,
-                  platformBlurbs: {
-                    qidian: typeof parsed.platformBlurbs?.qidian === 'string' ? parsed.platformBlurbs.qidian : current.platformBlurbs.qidian,
-                    tomato: typeof parsed.platformBlurbs?.tomato === 'string' ? parsed.platformBlurbs.tomato : current.platformBlurbs.tomato,
-                    publishing: typeof parsed.platformBlurbs?.publishing === 'string' ? parsed.platformBlurbs.publishing : current.platformBlurbs.publishing,
-                  },
-                  volumeNamingStyle: typeof parsed.volumeNamingStyle === 'string' ? parsed.volumeNamingStyle : current.volumeNamingStyle,
-                }))
-                message.success(getUserFacingMessage('overview.packagingGenerated'))
-              } catch (error) {
-                console.error(error)
-                message.error(getErrorMessage(error, 'overview.aiDraftFailed'))
-              } finally {
-                setPackagingGenerating(false)
-              }
-            })()}
-          >
-            生成包装文案
-          </Button>
+          <Space wrap>
+            <Button
+              loading={packagingGenerating}
+              onClick={() => void (async () => {
+                setPackagingGenerating(true)
+                try {
+                  const outputs = await window.electron.ai.runPrompt({
+                    modelConfigId: currentNovel?.modelConfigId,
+                    messages: [{
+                      role: 'user',
+                      content: [
+                        '你是中文网络小说包装编辑，只输出 JSON，不要解释，不要 Markdown。',
+                        `书名：${form.getFieldValue('title') || currentNovel?.title || ''}`,
+                        `一句话简介：${form.getFieldValue('synopsis') || currentNovel?.synopsis || ''}`,
+                        `扩展背景：${form.getFieldValue('expandedBackground') || currentNovel?.expandedBackground || ''}`,
+                        projectBrief.readyCount > 0 ? `项目立项：${buildProjectBriefSummary(projectBrief)}` : '',
+                        storySettings.storyDesign.mainPlot ? `故事设计：${buildStoryDesignSummary(storySettings.storyDesign)}` : '',
+                        themeVoice.readyCount > 0 ? `主题与文风：${buildThemeVoiceSummary(themeVoice)}` : '',
+                        '返回：',
+                        '- titleCandidates: 5 个可上架书名候选',
+                        '- oneLineHook: 1 句导语',
+                        '- platformBlurbs.qidian / tomato / publishing: 3 种平台简介',
+                        '- volumeNamingStyle: 卷名风格规范',
+                        '{"titleCandidates":[""],"oneLineHook":"","platformBlurbs":{"qidian":"","tomato":"","publishing":""},"volumeNamingStyle":""}',
+                      ].filter(Boolean).join('\n'),
+                    }],
+                  })
+                  const first = Array.isArray(outputs) ? outputs[0] : ''
+                  if (!first) return
+                  const parsed = parseDraftJson<PackagingDraft>(first)
+                  setPackagingDraft((current) => ({
+                    titleCandidates: Array.isArray(parsed.titleCandidates)
+                      ? parsed.titleCandidates.filter((item): item is string => typeof item === 'string')
+                      : current.titleCandidates,
+                    oneLineHook: typeof parsed.oneLineHook === 'string' ? parsed.oneLineHook : current.oneLineHook,
+                    platformBlurbs: {
+                      qidian: typeof parsed.platformBlurbs?.qidian === 'string' ? parsed.platformBlurbs.qidian : current.platformBlurbs.qidian,
+                      tomato: typeof parsed.platformBlurbs?.tomato === 'string' ? parsed.platformBlurbs.tomato : current.platformBlurbs.tomato,
+                      publishing: typeof parsed.platformBlurbs?.publishing === 'string' ? parsed.platformBlurbs.publishing : current.platformBlurbs.publishing,
+                    },
+                    volumeNamingStyle: typeof parsed.volumeNamingStyle === 'string' ? parsed.volumeNamingStyle : current.volumeNamingStyle,
+                  }))
+                  message.success(getUserFacingMessage('overview.packagingGenerated'))
+                } catch (error) {
+                  console.error(error)
+                  message.error(getErrorMessage(error, 'overview.aiDraftFailed'))
+                } finally {
+                  setPackagingGenerating(false)
+                }
+              })()}
+            >
+              生成包装文案
+            </Button>
+            <Button
+              type="primary"
+              icon={<SaveOutlined />}
+              loading={packagingSaving}
+              disabled={!packagingDirty}
+              onClick={() => void handleSavePackaging()}
+            >
+              保存包装信息
+            </Button>
+          </Space>
         )}
       >
-        <div className="guided-step__field-grid">
+        <div className="guided-step__field-grid novel-overview-page__packaging-grid">
           <div className="guided-step__field-card guided-step__field-card--full">
             <strong style={{ display: 'block', marginBottom: 8, color: 'var(--workspace-ink)' }}>书名候选</strong>
             <Select
@@ -629,7 +666,7 @@ export default function Overview({ novelId }: Props) {
           <div className="guided-step__field-card">
             <strong style={{ display: 'block', marginBottom: 8, color: 'var(--workspace-ink)' }}>起点版简介</strong>
             <Input.TextArea
-              rows={6}
+              rows={5}
               value={packagingDraft.platformBlurbs.qidian}
               onChange={(event) => setPackagingDraft((current) => ({
                 ...current,
@@ -640,7 +677,7 @@ export default function Overview({ novelId }: Props) {
           <div className="guided-step__field-card">
             <strong style={{ display: 'block', marginBottom: 8, color: 'var(--workspace-ink)' }}>番茄版简介</strong>
             <Input.TextArea
-              rows={6}
+              rows={5}
               value={packagingDraft.platformBlurbs.tomato}
               onChange={(event) => setPackagingDraft((current) => ({
                 ...current,

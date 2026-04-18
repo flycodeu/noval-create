@@ -410,7 +410,7 @@ export function StructureChaptersPanel({
         <Empty description="当前部还没有章节。" />
       ) : (
         <div style={{ display: 'grid', gap: 12 }}>
-          <VirtualList data={chapters.items} height={420} itemHeight={118} itemKey="id">
+          <VirtualList data={chapters.items} height={380} itemHeight={112} itemKey="id">
             {(chapter: StoryStructureChapterSummary) => (
               <button
                 key={chapter.id}
@@ -514,7 +514,7 @@ export function StructureSegmentsPanel({
             </DragDropContext>
           ) : (
             <>
-              <VirtualList data={segments.items} height={360} itemHeight={118} itemKey="id">
+              <VirtualList data={segments.items} height={340} itemHeight={112} itemKey="id">
                 {(segment: StoryStructureSegmentSummary) => (
                   <button
                     key={segment.id}

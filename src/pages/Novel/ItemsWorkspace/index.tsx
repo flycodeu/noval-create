@@ -1200,7 +1200,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
             <div className="novel-empty">当前筛选下还没有记录。</div>
           ) : (
             <div style={{ display: 'grid', gap: 12 }}>
-              <VirtualList data={pageData.items} height={560} itemHeight={142} itemKey="id">
+              <VirtualList data={pageData.items} height={480} itemHeight={136} itemKey="id">
                 {(item: StoryItem) => {
                   const relatedCharacterCount = parseNumberArray(item.linkedCharacterIdsJson).length + (item.ownerCharacterId ? 1 : 0)
                   const relatedEventCount = parseNumberArray(item.linkedTimelineEventIdsJson).length

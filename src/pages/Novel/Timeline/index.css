@@ -1,2 +1,15 @@
-﻿.novel-timeline-page .novel-timeline-structure-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.novel-timeline-page .novel-timeline-structure-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .novel-timeline-page .novel-timeline-structure-tags .ant-tag { margin-inline-end: 0; }
+.novel-timeline-page .novel-panel__extra { max-width: 100%; }
+.novel-timeline-page__filter-bar { width: min(100%, 980px); }
+.novel-timeline-page__list-shell { display: grid; gap: 10px; }
+.novel-timeline-page__editor-form { display: grid; gap: 12px; }
+.novel-timeline-page__editor-form .novel-form-section { margin-bottom: 0; }
+.novel-timeline-page__editor-form .novel-grid--2,
+.novel-timeline-page__editor-form .novel-grid--3,
+.novel-timeline-page__boolean-grid { align-items: start; }
+.novel-timeline-page .rc-virtual-list-holder { padding-right: 2px; }
+
+@media (max-width: 1280px) {
+  .novel-timeline-page__filter-bar { width: 100%; }
+}
