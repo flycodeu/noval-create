@@ -7858,39 +7858,53 @@ html[data-theme="dark"] .ant-card-actions > li {
 
 .novel-sidebar__title-block {
   display: grid;
-  gap: 8px;
-  padding: 0 2px;
+  gap: 10px;
+  padding: 0 2px 2px;
 }
 
 .novel-sidebar__eyebrow {
-  color: rgba(255, 227, 169, 0.94);
+  color: rgba(136, 91, 35, 0.92);
   font-size: 10px;
+  font-weight: 700;
   letter-spacing: 0.14em;
+  text-shadow: 0 1px 0 rgba(255, 250, 242, 0.5);
 }
 
 .novel-sidebar__title-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 8px;
+  gap: 12px;
+  min-width: 0;
 }
 
 .novel-sidebar__title-meta {
   flex: 0 0 auto;
   min-width: 44px;
-  padding: 5px 8px;
+  padding: 6px 9px;
+  border: 1px solid rgba(184, 132, 59, 0.28);
   border-radius: 999px;
-  background: rgba(246, 202, 124, 0.2);
-  color: #ffefc8;
+  background:
+    linear-gradient(180deg, rgba(248, 225, 176, 0.9), rgba(239, 205, 136, 0.78));
+  color: #65431a;
+  box-shadow: 0 8px 18px rgba(122, 85, 34, 0.12);
   font-size: 10.5px;
   font-weight: 700;
   line-height: 1;
   text-align: center;
+  white-space: nowrap;
 }
 
 .novel-sidebar__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
   font-size: 24px;
-  line-height: 1.16;
+  line-height: 1.18;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .novel-sidebar__summary-copy {
@@ -8063,17 +8077,94 @@ html[data-theme="dark"] .ant-card-actions > li {
 }
 
 .novel-route-shell__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px 20px;
+  flex-wrap: wrap;
   position: sticky;
   top: 0;
   z-index: 6;
 }
 
+.novel-route-shell__header-main {
+  flex: 1 1 360px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 14px;
+  min-width: 0;
+}
+
+.novel-route-shell__header-main .ant-btn {
+  min-height: 40px;
+  padding-inline: 14px;
+  white-space: nowrap;
+}
+
+.novel-route-shell__header-copy {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.novel-route-shell__header-title {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--workspace-ink);
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.22;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.novel-route-shell__header-title > span {
+  display: inline;
+  max-width: none;
+  overflow: visible;
+  font-size: inherit;
+  line-height: inherit;
+  white-space: inherit;
+  -webkit-box-orient: initial;
+  -webkit-line-clamp: unset;
+}
+
+.novel-route-shell__header-kicker {
+  color: rgba(124, 86, 39, 0.9);
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.novel-route-shell__header-separator {
+  margin: 0 0.45em;
+  color: rgba(124, 86, 39, 0.9);
+}
+
+.novel-route-shell__header-step {
+  color: var(--workspace-ink);
+}
+
+.novel-route-shell__header--compact .novel-route-shell__header-copy strong {
+  font-size: 20px;
+}
+
 .novel-route-shell__header-actions {
+  flex: 0 1 auto;
   align-items: center;
+  justify-content: flex-end;
+  gap: 8px 10px;
+  min-width: 0;
 }
 
 .novel-route-shell__header-actions .ant-btn {
+  flex: 0 0 auto;
   min-height: 40px;
+  padding-inline: 14px;
+  white-space: nowrap;
 }
 
 .novel-route-shell__content-body {
@@ -8101,6 +8192,19 @@ html[data-theme="dark"] .ant-card-actions > li {
   .novel-sidebar__title-meta {
     min-width: 42px;
     padding-inline: 7px;
+  }
+
+  .novel-route-shell__header {
+    align-items: stretch;
+  }
+
+  .novel-route-shell__header-main,
+  .novel-route-shell__header-actions {
+    width: 100%;
+  }
+
+  .novel-route-shell__header-actions {
+    justify-content: flex-start;
   }
 }
 
@@ -8143,7 +8247,21 @@ html[data-theme="dark"] .ant-card-actions > li {
   }
 
   .novel-route-shell__header {
+    flex-direction: column;
+    align-items: stretch;
     position: relative;
+  }
+
+  .novel-route-shell__header-main {
+    grid-template-columns: 1fr;
+  }
+
+  .novel-route-shell__header-title {
+    font-size: 18px;
+  }
+
+  .novel-route-shell__header-actions {
+    justify-content: flex-start;
   }
 
   .novel-route-shell__content-body {

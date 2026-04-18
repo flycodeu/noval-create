@@ -832,8 +832,11 @@ export default function NovelRouter() {
                 返回项目列表
               </Button>
               <div className="novel-route-shell__header-copy">
-                <div className="novel-route-shell__header-kicker">{currentNovel?.title || '当前小说'}</div>
-                <strong>{currentPageMeta?.label}</strong>
+                <strong className="novel-route-shell__header-title">
+                  <span className="novel-route-shell__header-kicker">{currentNovel?.title || '当前小说'}</span>
+                  <span className="novel-route-shell__header-separator" aria-hidden="true">·</span>
+                  <span className="novel-route-shell__header-step">{currentPageMeta?.label}</span>
+                </strong>
               </div>
             </div>
             <div className="novel-route-shell__header-actions">
