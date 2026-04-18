@@ -4168,6 +4168,13 @@ declare global {
         reorderSegments: (chapterId: number, orderedIds: number[]) => Promise<void>
         compileChapter: (chapterId: number) => Promise<Chapter | null>
         refreshCheckpoints: (novelId: number) => Promise<StoryMemoryCheckpoint[]>
+        clear: (novelId: number) => Promise<{
+          volumesCleared: number
+          partsCleared: number
+          chaptersCleared: number
+          segmentsCleared: number
+          checkpointsCleared: number
+        }>
         applyBatchPlan: (novelId: number, plan: StructureBatchPlan) => Promise<StructureBatchApplyResult>
         previewBatchEdit: (novelId: number, operations: StructureBatchEditOperation[]) => Promise<StructureBatchPreview>
         applyBatchEdit: (novelId: number, operations: StructureBatchEditOperation[]) => Promise<StructureBatchApplyResult>
@@ -4413,6 +4420,7 @@ declare global {
         delete: (id: number) => Promise<void>
         batchUpdate: (ids: number[], data: Partial<Pick<StoryThread, 'status' | 'priority'>>) => Promise<number>
         batchDelete: (ids: number[]) => Promise<number>
+        clear: (novelId: number) => Promise<number>
         regenerate: (id: number, options?: EntityRegenerateOptions) => Promise<StoryThread | null>
       }
       faction: {
@@ -4425,6 +4433,7 @@ declare global {
         create: (novelId: number, data: Partial<Faction>) => Promise<number>
         update: (id: number, data: Partial<Faction>) => Promise<void>
         delete: (id: number) => Promise<void>
+        clear: (novelId: number) => Promise<number>
         batchGenerate: (novelId: number, opts: FactionBatchGenerationOptions) => Promise<number[]>
         startAutoGenerate: (novelId: number, opts: FactionBatchGenerationOptions) => Promise<number>
         getAutoGenerateStatus: (taskId: number) => Promise<FactionAutoGenerateStatus | null>

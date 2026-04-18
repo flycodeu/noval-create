@@ -10,6 +10,7 @@ import {
   BarsOutlined,
   ClockCircleOutlined,
   DashboardOutlined,
+  DeleteOutlined,
   EditOutlined,
   EnvironmentOutlined,
   GlobalOutlined,
@@ -221,6 +222,7 @@ export default function NovelRouter() {
   } = useNovelStore()
   const { mode, setMode } = useWorkspaceStore()
   const saveHandlerRef = useRef<(() => void) | null>(null)
+  const clearHandlerRef = useRef<(() => void) | null>(null)
   const escapeHandlerRef = useRef<(() => void) | null>(null)
   const [loading, setLoading] = useState(true)
   const [workflowStats, setWorkflowStats] = useState<WorkflowStats>(EMPTY_WORKFLOW_STATS)
@@ -233,6 +235,7 @@ export default function NovelRouter() {
   const [quickSearchResults, setQuickSearchResults] = useState<WorkspaceSearchResult[]>([])
   const [latestUndoable, setLatestUndoable] = useState<OperationLog | null>(null)
   const [workspaceMutationToken, setWorkspaceMutationToken] = useState(0)
+  const [hasRegisteredClearHandler, setHasRegisteredClearHandler] = useState(false)
   const [qualityBoardOpen, setQualityBoardOpen] = useState(false)
   const [workspaceQualityController, setWorkspaceQualityController] = useState<RegisteredWorkspaceQualityController | null>(null)
 
@@ -490,6 +493,11 @@ export default function NovelRouter() {
 
   const registerSaveHandler = useCallback((handler: (() => void) | null) => {
     saveHandlerRef.current = handler
+  }, [])
+
+  const registerClearHandler = useCallback((handler: (() => void) | null) => {
+    clearHandlerRef.current = handler
+    setHasRegisteredClearHandler(Boolean(handler))
   }, [])
 
   const registerEscapeHandler = useCallback((handler: (() => void) | null) => {
@@ -778,6 +786,7 @@ export default function NovelRouter() {
       <NovelWorkspaceActionsProvider value={{
         mutationToken: workspaceMutationToken,
         registerSaveHandler,
+        registerClearHandler,
         registerEscapeHandler,
         notifyWorkspaceMutation,
       }}>
@@ -840,6 +849,15 @@ export default function NovelRouter() {
               </div>
             </div>
             <div className="novel-route-shell__header-actions">
+              {hasRegisteredClearHandler ? (
+                <Button
+                  danger
+                  icon={<DeleteOutlined />}
+                  onClick={() => clearHandlerRef.current?.()}
+                >
+                  清空当前步骤
+                </Button>
+              ) : null}
               <Button icon={<SearchOutlined />} onClick={() => setQuickSearchOpen(true)}>
                 全局搜索
               </Button>

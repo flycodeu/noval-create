@@ -14,7 +14,7 @@ import {
   timelineEvents,
 } from '../database/schema'
 import { markNovelContextChanged, markStoryMemoryCheckpointsDirty } from './context-impact.service'
-import { markTimelineEventsSegmentAnchorInvalid, syncTimelineStructureAnchors } from './timeline.service'
+import { syncTimelineStructureAnchors } from './timeline.service'
 import {
   applyStructureBatchEdit as applyStructureBatchEditTransactional,
   applyStructureBatchPlan as applyStructureBatchPlanTransactional,
@@ -492,7 +492,6 @@ export function ensureStoryStructure(novelId: number): { volumeId: number; partI
 }
 
 export function listStoryStructure(novelId: number): StoryStructureTree {
-  ensureStoryStructure(novelId)
   const volumeRows = getVolumeRows(novelId)
   const partRows = getPartRows(novelId)
   const chapterRows = getChapterRows(novelId)
@@ -568,7 +567,6 @@ export function getChapterSegment(id: number): StoryStructureSegmentView | null 
 }
 
 export function listStoryCheckpoints(novelId: number) {
-  ensureStoryStructure(novelId)
   return getCheckpointRows(novelId)
 }
 
@@ -952,7 +950,6 @@ function findPageByIndex(index: number, pageSize: number) {
 }
 
 export function listStructureVolumes(novelId: number) {
-  ensureStoryStructure(novelId)
   const sqlite = getSqlite()
   const rows = sqlite.prepare(`
     SELECT
@@ -1168,7 +1165,6 @@ export function listStoryCheckpointsPage(
 }
 
 export function resolveStructurePath(filters: StructurePathInput) {
-  ensureStoryStructure(filters.novelId)
   const volumes = getVolumeRows(filters.novelId)
   const parts = getPartRows(filters.novelId)
   const chaptersByNovel = getChapterRows(filters.novelId)
@@ -1178,6 +1174,24 @@ export function resolveStructurePath(filters: StructurePathInput) {
   const partPageSize = 30
   const chapterPageSize = 50
   const segmentPageSize = 80
+
+  if (volumes.length === 0) {
+    return {
+      novelId: filters.novelId,
+      volumeId: null,
+      volumeIndex: -1,
+      partId: null,
+      partPage: 1,
+      partPageSize,
+      chapterId: null,
+      chapterPage: 1,
+      chapterPageSize,
+      segmentId: null,
+      segmentPage: 1,
+      segmentPageSize,
+      resolvedLevel: 'novel' as const,
+    }
+  }
 
   let volumeId = filters.volumeId ?? null
   let partId = filters.partId ?? null
@@ -1267,5 +1281,50 @@ export function resolveStructurePath(filters: StructurePathInput) {
     segmentPage: findPageByIndex(segmentRows.findIndex((item) => item.id === segmentId), segmentPageSize),
     segmentPageSize,
     resolvedLevel,
+  }
+}
+
+export function clearStoryStructure(novelId: number) {
+  const sqlite = getSqlite()
+  const db = getDb()
+  const existingVolumeCount = getVolumeRows(novelId).length
+  const existingPartCount = getPartRows(novelId).length
+  const existingChapterCount = getChapterRows(novelId).length
+  const existingSegmentCount = getSegmentRowsByNovel(novelId).length
+  const existingCheckpointCount = getCheckpointRows(novelId).length
+  const hasStructureData = existingVolumeCount > 0
+    || existingPartCount > 0
+    || existingChapterCount > 0
+    || existingSegmentCount > 0
+    || existingCheckpointCount > 0
+
+  if (!hasStructureData) {
+    syncTimelineStructureAnchors(novelId)
+    return {
+      volumesCleared: 0,
+      partsCleared: 0,
+      chaptersCleared: 0,
+      segmentsCleared: 0,
+      checkpointsCleared: 0,
+    }
+  }
+
+  sqlite.transaction(() => {
+    db.delete(chapterSegments).where(eq(chapterSegments.novelId, novelId)).run()
+    db.delete(chapters).where(eq(chapters.novelId, novelId)).run()
+    db.delete(storyParts).where(eq(storyParts.novelId, novelId)).run()
+    db.delete(storyVolumes).where(eq(storyVolumes.novelId, novelId)).run()
+    db.delete(storyMemoryCheckpoints).where(eq(storyMemoryCheckpoints.novelId, novelId)).run()
+  })()
+
+  syncTimelineStructureAnchors(novelId)
+  markNovelContextChanged(novelId, 'Story structure changed')
+
+  return {
+    volumesCleared: existingVolumeCount,
+    partsCleared: existingPartCount,
+    chaptersCleared: existingChapterCount,
+    segmentsCleared: existingSegmentCount,
+    checkpointsCleared: existingCheckpointCount,
   }
 }

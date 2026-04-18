@@ -1,11 +1,12 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Form, Input, Select, Space, Tag, message } from 'antd'
+import { Alert, Button, Form, Input, Modal, Select, Space, Tag, message } from 'antd'
 import { ArrowRightOutlined, RobotOutlined, SaveOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import type { ProjectPlatformMode } from '../../../shared/project-brief'
 import {
   buildProjectBriefPayload,
+  parseProjectBriefDocument,
   parseProjectBriefSnapshot,
 } from '../../../shared/project-brief'
 import type {
@@ -24,6 +25,7 @@ import {
   type RegisteredWorkspaceQualityController,
   useRegisterWorkspaceQualityController,
 } from '../workspace-quality-context'
+import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import { loadWorkflowStats } from '../workflow'
 
 interface Props {
@@ -46,6 +48,17 @@ const PLATFORM_OPTIONS: Array<{ value: ProjectPlatformMode; label: string }> = [
   { value: 'web_serial', label: '网文连载' },
   { value: 'publishing', label: '出版小说' },
 ]
+
+const EMPTY_PROJECT_BRIEF_VALUES: ProjectBriefFormValues = {
+  platformMode: '',
+  targetAudience: '',
+  targetReader: '',
+  readerPromise: '',
+  sellingPoints: '',
+  compTitles: '',
+  tabooRules: '',
+  deliveryRhythm: '',
+}
 
 function compactText(value?: string | null, max = 44): string {
   const text = value?.trim() || ''
@@ -111,6 +124,7 @@ function mergeGeneratedValues(
 export default function ProjectBriefPage({ novelId }: Props) {
   const navigate = useNavigate()
   const { currentNovel, setCurrentNovel } = useNovelStore()
+  const { notifyWorkspaceMutation, registerClearHandler } = useNovelWorkspaceActions()
   const [form] = Form.useForm<ProjectBriefFormValues>()
   const [saving, setSaving] = useState(false)
   const [generatingMode, setGeneratingMode] = useState<ProjectBriefGenerationMode | null>(null)
@@ -255,6 +269,35 @@ export default function ProjectBriefPage({ novelId }: Props) {
       setGeneratingMode(null)
     }
   }
+
+  const handleClear = () => {
+    Modal.confirm({
+      title: '清空项目立项？',
+      content: '会清空当前立项表单，并直接保存为空白基线。',
+      okText: '确认清空',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        const nextPayload = buildProjectBriefPayload(EMPTY_PROJECT_BRIEF_VALUES, currentNovel?.projectBriefJson)
+        await window.electron.novel.update(novelId, {
+          projectBriefJson: nextPayload,
+        })
+
+        const updated = await window.electron.novel.get(novelId)
+        if (updated) setCurrentNovel(updated)
+        form.setFieldsValue(parseProjectBriefDocument(nextPayload))
+        setWarnings([])
+        await clearDraft()
+        notifyWorkspaceMutation()
+        message.success('项目立项已清空')
+      },
+    })
+  }
+
+  useEffect(() => {
+    registerClearHandler(handleClear)
+    return () => registerClearHandler(null)
+  }, [registerClearHandler, currentNovel?.projectBriefJson])
 
   return (
     <WorkspacePage

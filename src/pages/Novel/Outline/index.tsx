@@ -120,7 +120,13 @@ function buildPhaseTargetsOverrideJson(values: ArcFormValues): string | null {
 
 export default function Outline({ novelId }: Props) {
   const { chapters, setChapters, currentNovel } = useNovelStore()
-  const { mutationToken, notifyWorkspaceMutation, registerEscapeHandler, registerSaveHandler } = useNovelWorkspaceActions()
+  const {
+    mutationToken,
+    notifyWorkspaceMutation,
+    registerClearHandler,
+    registerEscapeHandler,
+    registerSaveHandler,
+  } = useNovelWorkspaceActions()
   const [arcs, setArcs] = useState<StoryArc[]>([])
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
@@ -277,7 +283,13 @@ export default function Outline({ novelId }: Props) {
       content: '会删除全部故事弧和章节细纲归属，但不会删除正文。',
       okType: 'danger',
       okText: '确认清空',
-      onOk: async () => { await window.electron.outline.clear(novelId); setExpandedArcId(null); await loadData(); message.success(getUserFacingMessage('outline.cleared')) },
+      onOk: async () => {
+        await window.electron.outline.clear(novelId)
+        setExpandedArcId(null)
+        await loadData()
+        notifyWorkspaceMutation()
+        message.success(getUserFacingMessage('outline.cleared'))
+      },
     })
   }
 
@@ -408,6 +420,13 @@ export default function Outline({ novelId }: Props) {
 
     return () => registerEscapeHandler(null)
   }, [registerEscapeHandler])
+
+  useEffect(() => {
+    registerClearHandler(() => {
+      void handleClear()
+    })
+    return () => registerClearHandler(null)
+  }, [handleClear, registerClearHandler])
   const applyOutlineDraft = useCallback((draft: Partial<ArcFormValues>) => {
     const currentValues = arcForm.getFieldsValue(true)
     arcForm.setFieldsValue({

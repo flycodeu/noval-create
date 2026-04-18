@@ -2,6 +2,7 @@ import { createContext, useContext } from 'react'
 
 export interface NovelWorkspaceActions {
   registerSaveHandler: (handler: (() => void) | null) => void
+  registerClearHandler: (handler: (() => void) | null) => void
   registerEscapeHandler: (handler: (() => void) | null) => void
   notifyWorkspaceMutation: () => void
   mutationToken: number
@@ -9,6 +10,7 @@ export interface NovelWorkspaceActions {
 
 const DEFAULT_ACTIONS: NovelWorkspaceActions = {
   registerSaveHandler: () => {},
+  registerClearHandler: () => {},
   registerEscapeHandler: () => {},
   notifyWorkspaceMutation: () => {},
   mutationToken: 0,

@@ -41,6 +41,7 @@ import {
   type RegisteredWorkspaceQualityController,
   useRegisterWorkspaceQualityController,
 } from '../workspace-quality-context'
+import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import { usePlanningDraft } from '../shared/planning-draft'
 
 interface Props {
@@ -210,6 +211,7 @@ function normalizeSubplots(list: Array<Partial<SubPlot> | null | undefined>): Su
 export default function CoreSettings({ novelId }: Props) {
   const navigate = useNavigate()
   const { currentNovel, setCurrentNovel } = useNovelStore()
+  const { registerClearHandler } = useNovelWorkspaceActions()
   const [form] = Form.useForm<StoryDesignFormValues>()
   const [subplots, setSubplots] = useState<SubPlot[]>([])
   const [saving, setSaving] = useState(false)
@@ -471,6 +473,11 @@ export default function CoreSettings({ novelId }: Props) {
       },
     })
   }
+
+  useEffect(() => {
+    registerClearHandler(clearStoryDesign)
+    return () => registerClearHandler(null)
+  }, [registerClearHandler, currentNovel?.settingsJson, subplots.length])
 
   const applyGeneratedResult = (result: CoreSettingsGenerationResult) => {
     form.setFieldsValue({

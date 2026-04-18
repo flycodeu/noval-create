@@ -339,6 +339,7 @@ function registerIpcHandlers() {
   handle('structure:reorderSegments', (_, chapterId, orderedIds) => storyStructureService.reorderChapterSegments(requireId(chapterId, 'chapterId'), requireIds(orderedIds, 'orderedIds')))
   handle('structure:compileChapter', (_, chapterId) => storyStructureService.compileChapterFromSegments(requireId(chapterId, 'chapterId')))
   handle('structure:refreshCheckpoints', (_, novelId) => storyMemoryService.refreshStoryMemoryCheckpoints(requireId(novelId, 'novelId')))
+  handle('structure:clear', (_, novelId) => storyStructureService.clearStoryStructure(requireId(novelId, 'novelId')))
   handle('structure:applyBatchPlan', (_, novelId, plan) => storyStructureService.applyStructureBatchPlan(requireId(novelId, 'novelId'), plan))
   handle('structure:previewBatchEdit', (_, novelId, operations) => storyStructureService.previewStructureBatchEdit(requireId(novelId, 'novelId'), operations))
   handle('structure:applyBatchEdit', (_, novelId, operations) => storyStructureService.applyStructureBatchEdit(requireId(novelId, 'novelId'), operations))
@@ -928,6 +929,7 @@ function registerIpcHandlers() {
   handle('thread:delete', (_, id) => storyThreadService.deleteStoryThread(requireId(id)))
   handle('thread:batchUpdate', (_, ids, data) => storyThreadService.batchUpdateStoryThreads(requireIds(ids), data))
   handle('thread:batchDelete', (_, ids) => storyThreadService.batchDeleteStoryThreads(requireIds(ids)))
+  handle('thread:clear', (_, novelId) => storyThreadService.clearStoryThreads(requireId(novelId, 'novelId')))
   handle('thread:regenerate', (_, id, options) => storyThreadService.regenerateStoryThread(id, options))
   handle('faction:list', (_, novelId) => factionService.listFactions(requireId(novelId, 'novelId')))
   handle('faction:query', (_, filters) => factionService.queryFactions(filters))
@@ -938,6 +940,7 @@ function registerIpcHandlers() {
   handle('faction:create', (_, novelId, data) => factionService.createFaction(requireId(novelId, 'novelId'), data))
   handle('faction:update', (_, id, data) => factionService.updateFaction(requireId(id), data))
   handle('faction:delete', (_, id) => factionService.deleteFaction(requireId(id)))
+  handle('faction:clear', (_, novelId) => factionService.clearFactions(requireId(novelId, 'novelId')))
   handle('faction:batchGenerate', (event, novelId, options) =>
     batchWorkflowService.generateFactionsViaWorkflow(requireId(novelId, 'novelId'), options, event.sender))
   handle('faction:startAutoGenerate', (event, novelId, options) =>

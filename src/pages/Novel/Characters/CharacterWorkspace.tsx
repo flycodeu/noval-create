@@ -33,6 +33,7 @@ import { getFactionNameOptions, getPowerSystemNameOptions, getSpeciesNameOptions
 import { CHARACTER_RELATION_PRESETS, getCharacterRelationLabel, normalizeCharacterRelationLevel } from '../../../shared/character-relations'
 import { buildDraftMessages, normalizeOptionalNumber, normalizeStringArray, parseDraftJson } from '../shared/ai-draft'
 import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel, WorkspaceTip } from '../components/WorkspaceShell'
+import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import { getWorkflowBlockers, loadWorkflowStats } from '../workflow'
 import '../components/boards.css'
 import './character-workspace.css'
@@ -247,6 +248,7 @@ function buildRelationBody(relation: CharacterRelation) {
 
 export default function CharacterWorkspace({ novelId }: Props) {
   const navigate = useNavigate()
+  const { notifyWorkspaceMutation, registerClearHandler } = useNovelWorkspaceActions()
   const [searchParams] = useSearchParams()
   const { currentNovel, setCharacters } = useNovelStore()
   const [form] = Form.useForm<CharacterFormValues>()
@@ -703,10 +705,18 @@ export default function CharacterWorkspace({ novelId }: Props) {
         setDetailContext(EMPTY_DETAIL)
         setCreating(false)
         await Promise.all([loadPage(null, 1), loadGraph()])
+        notifyWorkspaceMutation()
         message.success(getUserFacingMessage('character.cleared'))
       },
     })
   }
+
+  useEffect(() => {
+    registerClearHandler(() => {
+      void handleClear()
+    })
+    return () => registerClearHandler(null)
+  }, [handleClear, registerClearHandler])
 
   const sourceContexts = useMemo(() => parseSourceContexts(selectedCharacter?.sourceContextJson), [selectedCharacter?.sourceContextJson])
   const graphCharacterCount = graphData.characters.length

@@ -9,6 +9,7 @@ import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-messa
 import { getBlueprintLevelByDepth, getFactionNameOptions, getMapBlueprintDepth, getMapNodeTypeOptions, parseWorldRulesJson } from '../../../shared/genre-system'
 import { buildDraftMessages, normalizeStringArray, parseDraftJson } from '../shared/ai-draft'
 import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel, WorkspaceStepGuide } from '../components/WorkspaceShell'
+import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import '../components/boards.css'
 import './map-explorer.css'
 import MapGraphCanvas from './MapGraphCanvas'
@@ -151,6 +152,7 @@ function TaskStrip({
 }
 
 export default function MapExplorerPage({ novelId }: Props) {
+  const { notifyWorkspaceMutation, registerClearHandler } = useNovelWorkspaceActions()
   const [searchParams] = useSearchParams()
   const { currentNovel } = useNovelStore()
   const [detailForm] = Form.useForm<DetailFormValues>()
@@ -695,10 +697,18 @@ export default function MapExplorerPage({ novelId }: Props) {
         } finally {
           setLoading(false)
         }
+        notifyWorkspaceMutation()
         message.success(getUserFacingMessage('map.cleared'))
       },
     })
   }
+
+  useEffect(() => {
+    registerClearHandler(() => {
+      void handleClear()
+    })
+    return () => registerClearHandler(null)
+  }, [handleClear, registerClearHandler])
 
   const handleStartAutoGenerate = async () => {
     setAutoLoading(true)

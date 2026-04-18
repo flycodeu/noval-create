@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Button, Collapse, Form, Input, Space, Tag, message, notification } from 'antd'
+import { Alert, Button, Collapse, Form, Input, Modal, Space, Tag, message, notification } from 'antd'
 import {
   ArrowRightOutlined,
   BarsOutlined,
@@ -47,6 +47,7 @@ import {
   type RegisteredWorkspaceQualityController,
   useRegisterWorkspaceQualityController,
 } from '../workspace-quality-context'
+import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 
 interface Props {
   novelId: number
@@ -127,6 +128,7 @@ function mergeGeneratedValues(
 export default function PremisePage({ novelId }: Props) {
   const navigate = useNavigate()
   const { currentNovel, setCurrentNovel } = useNovelStore()
+  const { notifyWorkspaceMutation, registerClearHandler } = useNovelWorkspaceActions()
   const pendingResultKey = useMemo(() => buildAiResultKey('premise_generate', novelId), [novelId])
   const [form] = Form.useForm<PremiseFormValues>()
   const [saving, setSaving] = useState(false)
@@ -440,6 +442,58 @@ export default function PremisePage({ novelId }: Props) {
       }
     }
   }
+
+  const handleClear = () => {
+    Modal.confirm({
+      title: '清空基础设定？',
+      content: '会清空当前基础设定与写作边界字段，并直接保存为空白基线。',
+      okText: '确认清空',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        const payload = buildStorySettingsPayload({
+          premise: {
+            positioning: '',
+            coreHook: '',
+            protagonistStart: '',
+            constraints: '',
+            languageGuardrails: '',
+          },
+          writingRules: {
+            antiAiFlavor: '',
+            commonSenseRules: '',
+            bannedTerms: '',
+          },
+        }, currentNovel?.settingsJson)
+
+        await window.electron.novel.update(novelId, {
+          settingsJson: JSON.stringify(payload),
+        })
+
+        const updated = await window.electron.novel.get(novelId)
+        if (updated) setCurrentNovel(updated)
+        form.setFieldsValue({
+          positioning: '',
+          coreHook: '',
+          protagonistStart: '',
+          constraints: '',
+          languageGuardrails: '',
+          antiAiFlavor: '',
+          commonSenseRules: '',
+          bannedTerms: '',
+        })
+        await clearPersistedDrafts()
+        clearPendingResult(pendingResultKey)
+        notifyWorkspaceMutation()
+        message.success('基础设定已清空')
+      },
+    })
+  }
+
+  useEffect(() => {
+    registerClearHandler(handleClear)
+    return () => registerClearHandler(null)
+  }, [registerClearHandler, currentNovel?.settingsJson, pendingResultKey])
 
   return (
     <WorkspacePage

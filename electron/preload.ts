@@ -98,6 +98,7 @@ const api = {
     reorderSegments: (chapterId: number, orderedIds: number[]) => invokeIpc('structure:reorderSegments', chapterId, orderedIds),
     compileChapter: (chapterId: number) => invokeIpc('structure:compileChapter', chapterId),
     refreshCheckpoints: (novelId: number) => invokeIpc('structure:refreshCheckpoints', novelId),
+    clear: (novelId: number) => invokeIpc('structure:clear', novelId),
     applyBatchPlan: (novelId: number, plan: unknown) => invokeIpc('structure:applyBatchPlan', novelId, plan),
     previewBatchEdit: (novelId: number, operations: unknown[]) => invokeIpc('structure:previewBatchEdit', novelId, operations),
     applyBatchEdit: (novelId: number, operations: unknown[]) => invokeIpc('structure:applyBatchEdit', novelId, operations),
@@ -343,6 +344,7 @@ const api = {
     delete: (id: number) => invokeIpc('thread:delete', id),
     batchUpdate: (ids: number[], data: unknown) => invokeIpc('thread:batchUpdate', ids, data),
     batchDelete: (ids: number[]) => invokeIpc('thread:batchDelete', ids),
+    clear: (novelId: number) => invokeIpc('thread:clear', novelId),
     regenerate: (id: number, options?: unknown) => invokeIpc('thread:regenerate', id, options),
   },
   faction: {
@@ -355,6 +357,7 @@ const api = {
     create: (novelId: number, data: unknown) => invokeIpc('faction:create', novelId, data),
     update: (id: number, data: unknown) => invokeIpc('faction:update', id, data),
     delete: (id: number) => invokeIpc('faction:delete', id),
+    clear: (novelId: number) => invokeIpc('faction:clear', novelId),
     batchGenerate: (novelId: number, opts: unknown) => invokeIpc('faction:batchGenerate', novelId, opts),
     startAutoGenerate: (novelId: number, opts: unknown) => invokeIpc('faction:startAutoGenerate', novelId, opts),
     getAutoGenerateStatus: (taskId: number) => invokeIpc('faction:getAutoGenerateStatus', taskId),

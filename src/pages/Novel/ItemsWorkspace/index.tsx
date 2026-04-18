@@ -33,6 +33,7 @@ import {
   WorkspacePanel,
   WorkspaceTip,
 } from '../components/WorkspaceShell'
+import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import { EMPTY_WORKFLOW_STATS, getWorkflowBlockers, loadWorkflowStats, type WorkflowStats } from '../workflow'
 
 interface Props {
@@ -322,6 +323,7 @@ function pickCurrentItemKind(
 export default function ItemsWorkspace({ novelId }: Props) {
   const [searchParams] = useSearchParams()
   const { currentNovel } = useNovelStore()
+  const { notifyWorkspaceMutation, registerClearHandler } = useNovelWorkspaceActions()
   const [form] = Form.useForm<ItemFormValues>()
   const [generateForm] = Form.useForm<GenerateFormValues>()
   const [loading, setLoading] = useState(true)
@@ -647,10 +649,18 @@ export default function ItemsWorkspace({ novelId }: Props) {
         setDetailContext(EMPTY_DETAIL)
         form.resetFields()
         await loadPage(null, 1, { preserveCreating: false })
+        notifyWorkspaceMutation()
         message.success(getUserFacingMessage('item.cleared'))
       },
     })
   }
+
+  useEffect(() => {
+    registerClearHandler(() => {
+      void handleClear()
+    })
+    return () => registerClearHandler(null)
+  }, [handleClear, registerClearHandler])
 
   const aiActions = selectedItem || creating ? (
     <AIGenerateButton

@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Form, Input, List, Select, Space, Tag, message } from 'antd'
+import { Alert, Button, Form, Input, List, Modal, Select, Space, Tag, message } from 'antd'
 import { ArrowRightOutlined, DeleteOutlined, RobotOutlined, SaveOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import {
   buildThemeVoicePayload,
+  parseThemeVoiceDocument,
   parseThemeVoiceSnapshot,
   type ThemeVoiceFlashbackPolicy,
   type ThemeVoiceOpeningStyle,
@@ -36,6 +37,7 @@ import {
   type RegisteredWorkspaceQualityController,
   useRegisterWorkspaceQualityController,
 } from '../workspace-quality-context'
+import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import { loadWorkflowStats } from '../workflow'
 
 interface Props {
@@ -105,6 +107,26 @@ const FLASHBACK_POLICY_OPTIONS: Array<{ value: ThemeVoiceFlashbackPolicy; label:
   { value: 'limited', label: '有限使用' },
   { value: 'allowed', label: '允许使用' },
 ]
+
+const EMPTY_THEME_VOICE_VALUES: ThemeVoiceFormValues = {
+  writingContractTags: [],
+  theme: '',
+  motifs: '',
+  emotionalCore: '',
+  pov: '',
+  tense: '',
+  protagonistCount: '',
+  viewpointMode: '',
+  parallelTimelines: '',
+  openingStyle: '',
+  flashbackPolicy: '',
+  narratorDistance: '',
+  voiceKeywords: '',
+  styleRules: '',
+  dialogueRules: '',
+  descriptionRules: '',
+  forbiddenPhrases: '',
+}
 
 function compactText(value?: string | null, max = 44): string {
   const text = value?.trim() || ''
@@ -202,6 +224,7 @@ function mergeGeneratedValues(
 export default function ThemeVoicePage({ novelId }: Props) {
   const navigate = useNavigate()
   const { currentNovel, setCurrentNovel } = useNovelStore()
+  const { notifyWorkspaceMutation, registerClearHandler } = useNovelWorkspaceActions()
   const [form] = Form.useForm<ThemeVoiceFormValues>()
   const [saving, setSaving] = useState(false)
   const [generatingMode, setGeneratingMode] = useState<ThemeVoiceGenerationMode | null>(null)
@@ -370,6 +393,37 @@ export default function ThemeVoicePage({ novelId }: Props) {
       setGeneratingMode(null)
     }
   }
+
+  const handleClear = useCallback(() => {
+    Modal.confirm({
+      title: '清空主题与文风？',
+      content: '会清空当前文风规则、视角时态和写作约束，并直接保存为空白基线。',
+      okText: '确认清空',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        const nextPayload = buildThemeVoicePayload(EMPTY_THEME_VOICE_VALUES, currentNovel?.themeVoiceJson)
+        await window.electron.novel.update(novelId, {
+          themeVoiceJson: nextPayload,
+        })
+
+        const updated = await window.electron.novel.get(novelId)
+        if (updated) setCurrentNovel(updated)
+        form.setFieldsValue(parseThemeVoiceDocument(nextPayload))
+        setWarnings([])
+        await clearDraft()
+        notifyWorkspaceMutation()
+        message.success('主题与文风已清空')
+      },
+    })
+  }, [clearDraft, currentNovel?.themeVoiceJson, form, novelId, notifyWorkspaceMutation, setCurrentNovel])
+
+  useEffect(() => {
+    registerClearHandler(() => {
+      handleClear()
+    })
+    return () => registerClearHandler(null)
+  }, [handleClear, registerClearHandler])
 
   return (
     <WorkspacePage

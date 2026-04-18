@@ -48,6 +48,7 @@ import {
   type RegisteredWorkspaceQualityController,
   useRegisterWorkspaceQualityController,
 } from '../workspace-quality-context'
+import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 
 interface Props {
   novelId: number
@@ -132,6 +133,7 @@ function getProgressType(progress: WorldRulesGenerationProgressEvent | null): 'i
 
 export default function WorldRules({ novelId }: Props) {
   const { currentNovel, setCurrentNovel } = useNovelStore()
+  const { registerClearHandler } = useNovelWorkspaceActions()
   const [form] = Form.useForm<GenreWorldRules>()
   const [saving, setSaving] = useState(false)
   const [activeTab, setActiveTab] = useState<WorldRuleSectionKey>('overview')
@@ -303,6 +305,13 @@ export default function WorldRules({ novelId }: Props) {
       onOk: resetWorldRulesEditor,
     })
   }, [hasRunningAutoTask, isGenerating, resetWorldRulesEditor])
+
+  useEffect(() => {
+    registerClearHandler(() => {
+      handleClearCurrentFlow()
+    })
+    return () => registerClearHandler(null)
+  }, [handleClearCurrentFlow, registerClearHandler])
 
   const handleGenerateWorldRules = useCallback(async (mode: 'all' | 'section', action: 'generate' | 'expand') => {
     if (hasRunningAutoTask) {

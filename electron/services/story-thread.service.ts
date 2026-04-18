@@ -946,6 +946,36 @@ export function batchDeleteStoryThreads(ids: number[]) {
   return rows.length
 }
 
+export function clearStoryThreads(novelId: number) {
+  const db = getDb()
+  const rows = db.select().from(storyThreads)
+    .where(eq(storyThreads.novelId, novelId))
+    .orderBy(asc(storyThreads.sortOrder), asc(storyThreads.id))
+    .all()
+  if (rows.length === 0) return 0
+
+  db.delete(storyThreads).where(eq(storyThreads.novelId, novelId)).run()
+
+  createOperationLog({
+    novelId,
+    entityType: 'thread',
+    entityIds: rows.map((row) => row.id),
+    operationType: 'batch_delete',
+    summary: `清空 ${rows.length} 条故事线程`,
+    batchKey: buildBatchKey('thread-clear'),
+    before: rows,
+    after: [],
+    undoPayload: {
+      kind: 'thread.batch_delete',
+      novelId,
+      threads: rows,
+    },
+  })
+
+  markNovelContextChanged(novelId, 'Story threads changed')
+  return rows.length
+}
+
 export async function generateStoryThreadBatchChunk(
   novelId: number,
   options: StoryThreadBatchGenerateOptions = {},

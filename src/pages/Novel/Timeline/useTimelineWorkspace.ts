@@ -65,7 +65,13 @@ const EMPTY_FILTER_OPTIONS: TimelineFilterOptions = {
   eventTypes: [],
 }
 
-export function useTimelineWorkspace(novelId: number) {
+export function useTimelineWorkspace(
+  novelId: number,
+  options?: {
+    onCleared?: () => void
+  },
+) {
+  const onCleared = options?.onCleared
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const route = useMemo(() => parseTimelineRoute(searchParams), [searchParams])
@@ -785,10 +791,11 @@ export function useTimelineWorkspace(novelId: number) {
         setSelectedEvent(null)
         setCreating(false)
         await refreshPage(null)
+        onCleared?.()
         message.success(getUserFacingMessage('timeline.cleared'))
       },
     })
-  }, [form, novelId, refreshPage])
+  }, [form, novelId, onCleared, refreshPage])
 
   const openSelectedEventInStructure = useCallback(() => {
     if (!selectedEvent) return

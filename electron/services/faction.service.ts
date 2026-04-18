@@ -737,6 +737,23 @@ export function deleteFaction(id: number, options: { skipContextTracking?: boole
   }
 }
 
+export function clearFactions(novelId: number) {
+  const db = getDb()
+  const rows = db.select().from(factions)
+    .where(eq(factions.novelId, novelId))
+    .orderBy(asc(factions.sortOrder), asc(factions.id))
+    .all()
+  if (rows.length === 0) return 0
+
+  rows.forEach((row) => {
+    cleanupFactionReferences(row.id, row.novelId, row.name)
+  })
+  db.delete(factions).where(eq(factions.novelId, novelId)).run()
+  markNovelContextChanged(novelId, 'Factions changed')
+  refreshWorldStateVersionsForNovel(novelId)
+  return rows.length
+}
+
 export async function generateFactionBatchChunk(
   novelId: number,
   options: FactionBatchGenerationOptions = DEFAULT_BATCH_OPTIONS,

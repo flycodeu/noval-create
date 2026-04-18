@@ -30,8 +30,10 @@ import './index.css'
 
 export default function TimelinePage({ novelId }: TimelinePageProps) {
   const navigate = useNavigate()
-  const workspace = useTimelineWorkspace(novelId)
-  const { mutationToken, notifyWorkspaceMutation, registerEscapeHandler, registerSaveHandler } = useNovelWorkspaceActions()
+  const { mutationToken, notifyWorkspaceMutation, registerClearHandler, registerEscapeHandler, registerSaveHandler } = useNovelWorkspaceActions()
+  const workspace = useTimelineWorkspace(novelId, {
+    onCleared: notifyWorkspaceMutation,
+  })
   const {
     clearSelection,
     creating,
@@ -139,6 +141,13 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
     })
     return () => registerEscapeHandler(null)
   }, [clearSelection, registerEscapeHandler])
+
+  React.useEffect(() => {
+    registerClearHandler(() => {
+      workspace.handleClear()
+    })
+    return () => registerClearHandler(null)
+  }, [registerClearHandler, workspace.handleClear])
 
   React.useEffect(() => {
     void refreshPage()

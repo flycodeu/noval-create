@@ -35,6 +35,7 @@ import {
 import { useStructureWorkspace } from './useStructureWorkspace'
 import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage } from '../components/WorkspaceShell'
 import { getChapterLabel, getPartLabel, getSegmentLabel, getVolumeLabel } from '../shared/workspace-utils'
+import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import './index.css'
 
 function summarizeSegments(items: Array<{ segmentOrder: number; title?: string | null; purpose?: string | null }>) {
@@ -55,6 +56,7 @@ interface StructurePlannerFormValues {
 export default function StructurePage({ novelId }: { novelId: number }) {
   const workspace = useStructureWorkspace(novelId)
   const { currentNovel } = useNovelStore()
+  const { notifyWorkspaceMutation, registerClearHandler } = useNovelWorkspaceActions()
   const [plannerForm] = Form.useForm<StructurePlannerFormValues>()
   const [draftWarnings, setDraftWarnings] = React.useState<string[]>([])
   const draftWarningsRef = React.useRef<string[]>([])
@@ -465,6 +467,39 @@ export default function StructurePage({ novelId }: { novelId: number }) {
       />
     </Space>
   ) : null
+
+  const handleClear = React.useCallback(() => {
+    Modal.confirm({
+      title: '清空整套结构？',
+      content: '会删除当前小说下的全部卷、部、章、场景和结构检查点。正文不会被删除，但结构锚点会被清空。',
+      okText: '确认清空',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await window.electron.structure.clear(novelId)
+          await window.electron.planningDraft.clear(novelId, 'structure')
+          setDraftWarnings([])
+          draftWarningsRef.current = []
+          draftObservabilityRef.current = null
+          await clearDraft()
+          await refreshStructure()
+          notifyWorkspaceMutation()
+          message.success(getUserFacingMessage('structure.cleared'))
+        } catch (error) {
+          console.error(error)
+          message.error(getErrorMessage(error, 'common.deleteFailed'))
+        }
+      },
+    })
+  }, [clearDraft, novelId, notifyWorkspaceMutation, refreshStructure])
+
+  React.useEffect(() => {
+    registerClearHandler(() => {
+      handleClear()
+    })
+    return () => registerClearHandler(null)
+  }, [handleClear, registerClearHandler])
 
   return (
     <WorkspacePage

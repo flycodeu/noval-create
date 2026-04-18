@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Form, Input, Select, Space, Tag, message } from 'antd'
+import { Alert, Button, Form, Input, Modal, Select, Space, Tag, message } from 'antd'
 import { ArrowRightOutlined, ImportOutlined, SaveOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { useNovelStore } from '../../../stores/novel.store'
@@ -20,6 +20,7 @@ import {
   type RegisteredWorkspaceQualityController,
   useRegisterWorkspaceQualityController,
 } from '../workspace-quality-context'
+import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 
 interface Props {
   novelId: number
@@ -45,6 +46,17 @@ const ENDGAME_MODE_OPTIONS: Array<{ value: StoryEndgameMode; label: string }> = 
   { value: 'open', label: '开放式收束' },
   { value: 'multi_line', label: '多线并收' },
 ]
+
+const EMPTY_ENDGAME_VALUES: EndgameFormValues = {
+  endingMode: '',
+  finalConflict: '',
+  themeAnswer: '',
+  mustDeliverPromises: '',
+  payoffChecklist: '',
+  deliberateUnknowns: '',
+  finalImage: '',
+  lastScene: '',
+}
 
 function normalizeText(value?: string | null): string {
   return value?.trim() || ''
@@ -107,6 +119,7 @@ function mapLegacyEndingTypeToEndgameMode(endingType?: StoryEndingType): StoryEn
 export default function EndgamePage({ novelId }: Props) {
   const navigate = useNavigate()
   const { currentNovel, setCurrentNovel } = useNovelStore()
+  const { notifyWorkspaceMutation, registerClearHandler } = useNovelWorkspaceActions()
   const [form] = Form.useForm<EndgameFormValues>()
   const [saving, setSaving] = useState(false)
   const [assetSummary, setAssetSummary] = useState<EndgameAssetSummary | null>(null)
@@ -242,6 +255,47 @@ export default function EndgamePage({ novelId }: Props) {
     applyDraft(nextValues)
     message.success('已从故事设计导入可复用字段')
   }
+
+  const handleClear = useMemo(() => () => {
+    Modal.confirm({
+      title: '清空终局设计？',
+      content: '会清空当前终局表单，并同步删除对应的终局承诺资产。',
+      okText: '确认清空',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        const payload = buildStorySettingsPayload({
+          endgameDesign: {
+            endingMode: undefined,
+            finalConflict: '',
+            themeAnswer: '',
+            mustDeliverPromises: '',
+            payoffChecklist: '',
+            deliberateUnknowns: '',
+            finalImage: '',
+            lastScene: '',
+          },
+        }, currentNovel?.settingsJson)
+
+        await window.electron.novel.update(novelId, {
+          settingsJson: JSON.stringify(payload),
+        })
+        const syncResult = await window.electron.endgameAsset.syncFromSettings(novelId, JSON.stringify(payload))
+        setAssetSummary(syncResult.summary)
+
+        const updated = await window.electron.novel.get(novelId)
+        if (updated) setCurrentNovel(updated)
+        form.setFieldsValue(EMPTY_ENDGAME_VALUES)
+        notifyWorkspaceMutation()
+        message.success('终局设计已清空')
+      },
+    })
+  }, [currentNovel?.settingsJson, form, novelId, notifyWorkspaceMutation, setCurrentNovel])
+
+  useEffect(() => {
+    registerClearHandler(handleClear)
+    return () => registerClearHandler(null)
+  }, [handleClear, registerClearHandler])
 
   return (
     <WorkspacePage

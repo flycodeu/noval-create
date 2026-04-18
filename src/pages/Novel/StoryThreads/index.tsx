@@ -265,7 +265,7 @@ function ForeshadowColumn({
 export default function StoryThreadsPage({ novelId }: Props) {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
-  const { mutationToken, notifyWorkspaceMutation, registerEscapeHandler, registerSaveHandler } = useNovelWorkspaceActions()
+  const { mutationToken, notifyWorkspaceMutation, registerClearHandler, registerEscapeHandler, registerSaveHandler } = useNovelWorkspaceActions()
   const { currentNovel } = useNovelStore()
   const [editorForm] = Form.useForm<StoryThreadFormValues>()
   const [generateForm] = Form.useForm<GenerateFormValues>()
@@ -422,6 +422,39 @@ export default function StoryThreadsPage({ novelId }: Props) {
     })
     return () => registerEscapeHandler(null)
   }, [registerEscapeHandler])
+
+  const handleClear = useCallback(() => {
+    Modal.confirm({
+      title: '清空故事线程？',
+      content: '会删除当前小说的全部故事线程与伏笔追踪记录，但不会删除正文和结构内容。',
+      okText: '确认清空',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await window.electron.thread.clear(novelId)
+          setSelectedRowKeys([])
+          setPage(1)
+          setEditorOpen(false)
+          setEditingThread(null)
+          editorForm.resetFields()
+          await refresh()
+          notifyWorkspaceMutation()
+          message.success(getUserFacingMessage('storyThread.cleared'))
+        } catch (error) {
+          console.error(error)
+          message.error(getErrorMessage(error, 'storyThread.deleteFailed'))
+        }
+      },
+    })
+  }, [editorForm, novelId, notifyWorkspaceMutation, refresh])
+
+  useEffect(() => {
+    registerClearHandler(() => {
+      handleClear()
+    })
+    return () => registerClearHandler(null)
+  }, [handleClear, registerClearHandler])
 
   const handleBatchStatusUpdate = async () => {
     if (selectedRowKeys.length === 0) return

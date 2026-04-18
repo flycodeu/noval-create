@@ -132,7 +132,7 @@ function buildFormValues(item?: Faction | null): FactionFormValues {
 export default function FactionsPage({ novelId }: Props) {
   const navigate = useNavigate()
   const { currentNovel } = useNovelStore()
-  const { mutationToken, notifyWorkspaceMutation, registerSaveHandler } = useNovelWorkspaceActions()
+  const { mutationToken, notifyWorkspaceMutation, registerClearHandler, registerSaveHandler } = useNovelWorkspaceActions()
   const [form] = Form.useForm<FactionFormValues>()
   const [generateForm] = Form.useForm<FactionBatchGenerationOptions>()
   const [items, setItems] = useState<Faction[]>([])
@@ -305,6 +305,42 @@ export default function FactionsPage({ novelId }: Props) {
       message.error(getErrorMessage(error, 'common.deleteFailed'))
     }
   }
+
+  const handleClear = useCallback(() => {
+    Modal.confirm({
+      title: '清空势力系统？',
+      content: '会删除当前小说下的全部势力、势力关系和相关绑定引用，请确认。',
+      okText: '确认清空',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          if (autoTask?.id && (autoTask.status === 'running' || autoTask.status === 'cancel_requested')) {
+            await window.electron.workflow.cancel(autoTask.id)
+          }
+          await window.electron.faction.clear(novelId)
+          setSelectedId(null)
+          form.setFieldsValue(EMPTY_VALUES)
+          setGraphData({ nodes: [], edges: [], unalignedCharacters: [] })
+          setAutoTask(null)
+          setAutoStatus(EMPTY_AUTO_STATUS)
+          notifyWorkspaceMutation()
+          await Promise.all([refresh(), refreshAutoStatus()])
+          message.success(getUserFacingMessage('faction.cleared'))
+        } catch (error) {
+          console.error(error)
+          message.error(getErrorMessage(error, 'common.deleteFailed'))
+        }
+      },
+    })
+  }, [autoTask, form, novelId, notifyWorkspaceMutation, refresh, refreshAutoStatus])
+
+  useEffect(() => {
+    registerClearHandler(() => {
+      handleClear()
+    })
+    return () => registerClearHandler(null)
+  }, [handleClear, registerClearHandler])
 
   const handleStartAutoGenerate = async () => {
     try {

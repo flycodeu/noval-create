@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Button, Form, Input, InputNumber, Progress, Select, Space, message } from 'antd'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Alert, Button, Form, Input, InputNumber, Modal, Progress, Select, Space, message } from 'antd'
 import {
   BarsOutlined,
   ClockCircleOutlined,
@@ -33,6 +33,7 @@ import {
   type RegisteredWorkspaceQualityController,
   useRegisterWorkspaceQualityController,
 } from '../workspace-quality-context'
+import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import { loadWorkflowStats } from '../workflow'
 
 interface Props {
@@ -77,6 +78,13 @@ const EMPTY_STATS: OverviewStats = {
 
 type PackagingDraft = NovelBlurbDocument
 
+const EMPTY_PACKAGING_DRAFT: PackagingDraft = {
+  titleCandidates: [],
+  oneLineHook: '',
+  platformBlurbs: {},
+  volumeNamingStyle: '',
+}
+
 function normalizeTargetWords(value: unknown): number {
   const next = normalizeOptionalNumber(value)
   if (!next) return 200000
@@ -86,6 +94,7 @@ function normalizeTargetWords(value: unknown): number {
 export default function Overview({ novelId }: Props) {
   const navigate = useNavigate()
   const { currentNovel, setCurrentNovel } = useNovelStore()
+  const { notifyWorkspaceMutation, registerClearHandler } = useNovelWorkspaceActions()
   const [form] = Form.useForm<OverviewFormValues>()
   const [saving, setSaving] = useState(false)
   const [packagingSaving, setPackagingSaving] = useState(false)
@@ -371,6 +380,51 @@ export default function Overview({ novelId }: Props) {
       setPackagingSaving(false)
     }
   }
+
+  const handleClear = useCallback(() => {
+    Modal.confirm({
+      title: '清空基础信息？',
+      content: '会清空书名、简介、背景、目标字数和包装信息，并直接保存为空白基线。',
+      okText: '确认清空',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        const clearedPayload = {
+          title: '',
+          synopsis: '',
+          userBackground: '',
+          expandedBackground: '',
+          targetWords: 200000,
+          blurbJson: buildNovelBlurbPayload(EMPTY_PACKAGING_DRAFT, currentNovel?.blurbJson),
+        }
+
+        await window.electron.novel.update(novelId, clearedPayload)
+        const updated = await window.electron.novel.get(novelId)
+        if (updated) setCurrentNovel(updated)
+        form.setFieldsValue({
+          title: '',
+          synopsis: '',
+          userBackground: '',
+          expandedBackground: '',
+          targetWords: 200000,
+        })
+        setPackagingDraft(EMPTY_PACKAGING_DRAFT)
+        setDraftWarnings([])
+        draftWarningsRef.current = []
+        draftObservabilityRef.current = null
+        await clearDraft()
+        notifyWorkspaceMutation()
+        message.success('基础信息已清空')
+      },
+    })
+  }, [clearDraft, currentNovel?.blurbJson, form, novelId, notifyWorkspaceMutation, setCurrentNovel])
+
+  useEffect(() => {
+    registerClearHandler(() => {
+      handleClear()
+    })
+    return () => registerClearHandler(null)
+  }, [handleClear, registerClearHandler])
 
   return (
     <WorkspacePage
