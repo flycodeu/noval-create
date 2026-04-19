@@ -33,6 +33,7 @@ import { buildFeedbackRecurrenceHardConstraintContext, getPromotedFeedbackIssues
 import { ensureStoryStructure } from './story-structure.service'
 import { resolveModelRuntimeBudget } from './model.service'
 import { throwUserFacingError } from '../utils/user-facing-error'
+import type { AssetChangeImpact, WritingContextUsageSnapshot } from '../../src/types'
 import {
   buildCharacterContextCards,
   buildFactionContextCards,
@@ -96,6 +97,25 @@ interface ContextPart {
   priority: 0 | 1 | 2 | 3
   label: string
   content: string
+}
+
+type ContextAssemblyStage = 'base' | 'recall' | 'allocation'
+
+interface BaseChapterContextParts {
+  assemblyStage: Extract<ContextAssemblyStage, 'base'>
+  contextParts: ChapterContextParts
+  previousChapterSampleReport: PreviousChapterSampleReport
+  recallSnapshot: RecallSnapshot
+  recallDiagnostics: RecallDiagnostics
+  recalledMemorySources: RecallMemorySource[]
+}
+
+interface RecallAugmentationResult {
+  assemblyStage: Extract<ContextAssemblyStage, 'recall'>
+  recalledMemory: string
+  recallSnapshot: RecallSnapshot
+  recallDiagnostics: RecallDiagnostics
+  recalledMemorySources: RecallMemorySource[]
 }
 
 interface HardConstraintDraft {
@@ -299,6 +319,7 @@ export interface PreviousChapterFeedSource {
 
 export type ContextDecisionStatus = 'kept' | 'truncated' | 'dropped'
 export type ContextDecisionReason = 'budget_fit' | 'budget_insufficient' | 'covered_by_hard_constraint'
+export type ContextDecisionSourceKind = 'hard_constraint' | 'previous_chapter' | 'recent_summary' | 'vector_recall'
 
 export interface ContextDecisionEntry {
   label: string
@@ -308,6 +329,7 @@ export interface ContextDecisionEntry {
   allocatedTokens: number
   status: ContextDecisionStatus
   reason: ContextDecisionReason
+  sourceKind?: ContextDecisionSourceKind
 }
 
 export interface SoftContextBudgetUsage {
@@ -397,6 +419,15 @@ function asLooseText(value: unknown): string {
   if (typeof value === 'string') return value.trim()
   if (typeof value === 'number' && Number.isFinite(value)) return String(value)
   return ''
+}
+
+function splitContextLines(value?: string | null, limit = 6): string[] {
+  if (!value) return []
+  return [...new Set(value
+    .split('\n')
+    .map((item) => item.trim())
+    .filter(Boolean))]
+    .slice(0, limit)
 }
 
 function asNumber(value: unknown): number | undefined {
@@ -506,6 +537,7 @@ export interface RecallSnapshot {
   staleRecallCount: number
   fallbackHitCount: number
   fallbackReason?: RecallFallbackReason
+  assemblyStage?: 'base_recall' | 'unified_recall'
   bucketStats: Record<RecallBucketKey, RecallBucketStats>
 }
 
@@ -1193,6 +1225,7 @@ function createEmptyRecallSnapshot(fallbackReason?: RecallFallbackReason): Recal
     staleRecallCount: 0,
     fallbackHitCount: 0,
     fallbackReason,
+    assemblyStage: 'base_recall',
     bucketStats: createEmptyRecallBucketStats(),
   }
 }
@@ -1332,6 +1365,7 @@ function buildRecallSnapshot(
     staleRecallCount,
     fallbackHitCount,
     fallbackReason,
+    assemblyStage: 'base_recall',
     bucketStats,
   }
 
@@ -1354,6 +1388,123 @@ function finalizeRecallSnapshot(snapshot: RecallSnapshot, recalledMemory: string
   }
 }
 
+function buildBaseChapterContextParts(input: {
+  contextParts: Omit<ChapterContextParts, 'recalledMemory'>
+  previousChapterSampleReport: PreviousChapterSampleReport
+}): BaseChapterContextParts {
+  return {
+    assemblyStage: 'base',
+    contextParts: {
+      ...input.contextParts,
+      recalledMemory: '',
+    },
+    previousChapterSampleReport: input.previousChapterSampleReport,
+    recallSnapshot: createEmptyRecallSnapshot(),
+    recallDiagnostics: buildEmptyRecallDiagnostics(['召回尚未执行。']),
+    recalledMemorySources: [],
+  }
+}
+
+async function runRecallAugmentation(input: {
+  novelId: number
+  chapterNum: number
+  modelConfigId?: number | null
+  entityFreshnessMap: ReturnType<typeof buildRecallEntityFreshnessMap>
+  constraintText: string
+  chapterGoal: string
+  outline: string
+  arcGoal: string
+  arcSummary: string
+  storyGoal: string
+  coreConflict: string
+  mainPlot: string
+  themeVoiceSummary: string
+  worldRules: string
+  relationSummary: string
+  characterStates: string
+  worldStates: string
+  itemSummary: string
+  timelineSummary: string
+  timelineOpenThreads: string
+  activeThreads: string
+  openLoops: string
+  dueForeshadows: string
+  continuityNotes: string
+  storyThreadsSummary: string
+  mentionedCharacters: string[]
+  mentionedItems: string[]
+  mentionedLocations: string[]
+}): Promise<RecallAugmentationResult> {
+  const recallBuckets = buildRecallQueryBuckets({
+    chapterGoal: input.chapterGoal,
+    outline: input.outline,
+    arcGoal: input.arcGoal,
+    arcSummary: input.arcSummary,
+    storyGoal: input.storyGoal,
+    coreConflict: input.coreConflict,
+    mainPlot: input.mainPlot,
+    themeVoiceSummary: input.themeVoiceSummary,
+    worldRules: input.worldRules,
+    relationSummary: input.relationSummary,
+    characterStates: input.characterStates,
+    worldStates: input.worldStates,
+    itemSummary: input.itemSummary,
+    timelineSummary: input.timelineSummary,
+    timelineOpenThreads: input.timelineOpenThreads,
+    activeThreads: input.activeThreads,
+    openLoops: input.openLoops,
+    dueForeshadows: input.dueForeshadows,
+    continuityNotes: input.continuityNotes,
+    storyThreadsSummary: input.storyThreadsSummary,
+    mentionedCharacters: input.mentionedCharacters,
+    mentionedItems: input.mentionedItems,
+    mentionedLocations: input.mentionedLocations,
+  })
+
+  if (recallBuckets.length === 0) {
+    return {
+      assemblyStage: 'recall',
+      recalledMemory: '',
+      recallSnapshot: createEmptyRecallSnapshot('no_hits'),
+      recallDiagnostics: buildEmptyRecallDiagnostics([
+        '当前章节没有形成可执行的召回查询桶，召回已跳过。',
+      ]),
+      recalledMemorySources: [],
+    }
+  }
+
+  try {
+    const bucketResults = await Promise.all(recallBuckets.map(async (bucket) => {
+      const searchResult = await searchSimilarFragments(input.novelId, bucket.query, bucket.topK, input.modelConfigId || undefined)
+      return {
+        bucket: bucket.bucket,
+        fallbackReason: searchResult.fallbackReason,
+        hits: searchResult.hits
+          .filter((hit) => hit.chapterNum < input.chapterNum)
+          .map((hit) => enrichRecallHits([hit], bucket.bucket, input.chapterNum, input.entityFreshnessMap, input.constraintText)[0]),
+      }
+    }))
+    const recallSnapshot = buildRecallSnapshot(bucketResults)
+    return {
+      assemblyStage: 'recall',
+      recalledMemory: recallSnapshot.recalledMemory,
+      recallSnapshot: recallSnapshot.recallSnapshot,
+      recallDiagnostics: recallSnapshot.recallDiagnostics,
+      recalledMemorySources: recallSnapshot.recalledMemorySources,
+    }
+  } catch {
+    return {
+      assemblyStage: 'recall',
+      recalledMemory: '',
+      recallSnapshot: createEmptyRecallSnapshot('embedding_service_failed'),
+      recallDiagnostics: buildEmptyRecallDiagnostics([
+        '向量召回当前不可用，已自动降级，不影响硬约束与结构化状态注入。',
+      ]),
+      recalledMemorySources: [],
+    }
+  }
+}
+
 export interface TokenAllocationWarning {
   label: string
   priority: number
@@ -1368,6 +1519,28 @@ export interface TokenAllocationResult {
   decisions: ContextDecisionEntry[]
   totalUsed: number
   totalBudget: number
+}
+
+function resolveContextSourceKind(label: ChapterContextLabel | string): ContextDecisionSourceKind | undefined {
+  switch (label) {
+    case 'chapterGoal':
+    case 'continuityNotes':
+    case 'dueForeshadows':
+    case 'characterStates':
+    case 'worldStates':
+    case 'dialogueVoiceLocks':
+    case 'writingContractSummary':
+      return 'hard_constraint'
+    case 'previousChapterContext':
+    case 'lastChapterEnding':
+      return 'previous_chapter'
+    case 'previousSummaries':
+      return 'recent_summary'
+    case 'recalledMemory':
+      return 'vector_recall'
+    default:
+      return undefined
+  }
 }
 
 function resolveContextLabelTitle(label: ChapterContextLabel): string {
@@ -1429,6 +1602,7 @@ function allocateTokens(parts: ContextPart[], totalBudget: number): TokenAllocat
       allocatedTokens: originalTokens,
       status: 'kept',
       reason: 'budget_fit',
+      sourceKind: resolveContextSourceKind(part.label),
     })
   }
 
@@ -1450,6 +1624,7 @@ function allocateTokens(parts: ContextPart[], totalBudget: number): TokenAllocat
         allocatedTokens,
         status: allocatedTokens < originalTokens ? 'truncated' : 'kept',
         reason: allocatedTokens < originalTokens ? 'budget_insufficient' : 'budget_fit',
+        sourceKind: resolveContextSourceKind(part.label),
       })
       if (allocatedTokens < originalTokens) {
         warnings.push({ label: part.label, priority: 0, originalTokens, allocatedTokens, reason: 'truncated' })
@@ -1467,6 +1642,7 @@ function allocateTokens(parts: ContextPart[], totalBudget: number): TokenAllocat
           allocatedTokens: 0,
           status: 'dropped',
           reason: 'budget_insufficient',
+          sourceKind: resolveContextSourceKind(part.label),
         })
         warnings.push({ label: part.label, priority: part.priority, originalTokens, allocatedTokens: 0, reason: 'dropped' })
       }
@@ -1485,15 +1661,16 @@ function allocateTokens(parts: ContextPart[], totalBudget: number): TokenAllocat
       if (budget <= 0) {
         result[part.label] = ''
         if (needed > 0) {
-          decisions.set(part.label, {
-            label: part.label,
-            title: resolveContextLabelTitle(part.label as ChapterContextLabel),
-            priority,
-            originalTokens: needed,
-            allocatedTokens: 0,
-            status: 'dropped',
-            reason: 'budget_insufficient',
-          })
+        decisions.set(part.label, {
+          label: part.label,
+          title: resolveContextLabelTitle(part.label as ChapterContextLabel),
+          priority,
+          originalTokens: needed,
+          allocatedTokens: 0,
+          status: 'dropped',
+          reason: 'budget_insufficient',
+          sourceKind: resolveContextSourceKind(part.label),
+        })
           warnings.push({ label: part.label, priority, originalTokens: needed, allocatedTokens: 0, reason: 'dropped' })
         }
       } else if (needed <= budget) {
@@ -1506,6 +1683,7 @@ function allocateTokens(parts: ContextPart[], totalBudget: number): TokenAllocat
           allocatedTokens: needed,
           status: 'kept',
           reason: 'budget_fit',
+          sourceKind: resolveContextSourceKind(part.label),
         })
         budget -= needed
       } else {
@@ -1519,6 +1697,7 @@ function allocateTokens(parts: ContextPart[], totalBudget: number): TokenAllocat
           allocatedTokens,
           status: 'truncated',
           reason: 'budget_insufficient',
+          sourceKind: resolveContextSourceKind(part.label),
         })
         warnings.push({ label: part.label, priority, originalTokens: needed, allocatedTokens, reason: 'truncated' })
         budget = 0
@@ -2854,14 +3033,7 @@ export async function collectChapterContextRawData(
     recentChapters[recentChapters.length - 1]?.chapterNum,
   )
 
-  const result = {
-    novel,
-    profile,
-    chapterRows,
-    currentChapter,
-    currentArc,
-    outlineMentionedCharacterCount,
-    activeThreadPressureCount: activeThreadsContext.pressureCount,
+  const baseContext = buildBaseChapterContextParts({
     contextParts: {
       chapterGoal,
       storyCore: buildStoryCoreText(profile),
@@ -2905,81 +3077,66 @@ export async function collectChapterContextRawData(
       activeThreads: activeThreadsContext.summary,
       styleTemplate: enrichStyleTemplateWithFingerprint(profile.styleTemplateSummary, novelId),
       previousSummaries,
-      recalledMemory: '', // placeholder, filled below
     },
     previousChapterSampleReport: previousChapterFeed.previousChapterSampleReport,
-    recallSnapshot: createEmptyRecallSnapshot(),
-    recallDiagnostics: buildEmptyRecallDiagnostics(['召回尚未执行。']),
-    recalledMemorySources: [] as RecallMemorySource[],
-  }
+  })
 
-  // 多信号向量召回：同时补足角色、规则、线程三类历史约束
-  try {
-    const recallBuckets = buildRecallQueryBuckets({
-      chapterGoal,
-      outline: currentChapter?.outline || '',
-      arcGoal: currentArc?.arcGoal || '',
-      arcSummary: currentArc?.arcSummary || '',
-      storyGoal: profile.storyGoal,
-      coreConflict: profile.coreConflict,
-      mainPlot: profile.mainPlot,
-      themeVoiceSummary: profile.themeVoiceSummary,
-      worldRules: result.contextParts.worldRules,
+  const recallAugmentation = await runRecallAugmentation({
+    novelId,
+    chapterNum,
+    modelConfigId: novel.modelConfigId,
+    entityFreshnessMap,
+    constraintText: [
+      baseContext.contextParts.characterStates,
+      baseContext.contextParts.worldStates,
       relationSummary,
-      characterStates: result.contextParts.characterStates,
-      worldStates: result.contextParts.worldStates,
       itemSummary,
-      timelineSummary: timelineContext.timelineSummary,
-      timelineOpenThreads: timelineContext.timelineOpenThreads,
-      activeThreads: activeThreadsContext.summary,
-      openLoops: result.contextParts.openLoops,
-      dueForeshadows: result.contextParts.dueForeshadows,
-      continuityNotes: result.contextParts.continuityNotes,
-      storyThreadsSummary: profile.storyThreadsSummary,
-      mentionedCharacters: [...mentionedCharacterNames],
-      mentionedItems: mentionedItemNames,
-      mentionedLocations: mentionedLocationNames,
-    })
+      baseContext.contextParts.openLoops,
+      baseContext.contextParts.dueForeshadows,
+      baseContext.contextParts.continuityNotes,
+    ].filter(Boolean).join('\n'),
+    chapterGoal,
+    outline: currentChapter?.outline || '',
+    arcGoal: currentArc?.arcGoal || '',
+    arcSummary: currentArc?.arcSummary || '',
+    storyGoal: profile.storyGoal,
+    coreConflict: profile.coreConflict,
+    mainPlot: profile.mainPlot,
+    themeVoiceSummary: profile.themeVoiceSummary,
+    worldRules: baseContext.contextParts.worldRules,
+    relationSummary,
+    characterStates: baseContext.contextParts.characterStates,
+    worldStates: baseContext.contextParts.worldStates,
+    itemSummary,
+    timelineSummary: timelineContext.timelineSummary,
+    timelineOpenThreads: timelineContext.timelineOpenThreads,
+    activeThreads: activeThreadsContext.summary,
+    openLoops: baseContext.contextParts.openLoops,
+    dueForeshadows: baseContext.contextParts.dueForeshadows,
+    continuityNotes: baseContext.contextParts.continuityNotes,
+    storyThreadsSummary: profile.storyThreadsSummary,
+    mentionedCharacters: [...mentionedCharacterNames],
+    mentionedItems: mentionedItemNames,
+    mentionedLocations: mentionedLocationNames,
+  })
 
-    if (recallBuckets.length > 0) {
-      const constraintText = [
-        result.contextParts.characterStates,
-        result.contextParts.worldStates,
-        relationSummary,
-        itemSummary,
-        result.contextParts.openLoops,
-        result.contextParts.dueForeshadows,
-        result.contextParts.continuityNotes,
-      ].filter(Boolean).join('\n')
-      const bucketResults = await Promise.all(recallBuckets.map(async (bucket) => {
-        const searchResult = await searchSimilarFragments(novelId, bucket.query, bucket.topK, novel.modelConfigId || undefined)
-        return {
-          bucket: bucket.bucket,
-          fallbackReason: searchResult.fallbackReason,
-          hits: searchResult.hits
-            .filter((hit) => hit.chapterNum < chapterNum)
-            .map((hit) => enrichRecallHits([hit], bucket.bucket, chapterNum, entityFreshnessMap, constraintText)[0]),
-        }
-      }))
-      const recallSnapshot = buildRecallSnapshot(bucketResults)
-      result.contextParts.recalledMemory = recallSnapshot.recalledMemory
-      result.recallSnapshot = recallSnapshot.recallSnapshot
-      result.recallDiagnostics = recallSnapshot.recallDiagnostics
-      result.recalledMemorySources = recallSnapshot.recalledMemorySources
-    } else {
-      result.recallSnapshot = createEmptyRecallSnapshot('no_hits')
-      result.recallDiagnostics = buildEmptyRecallDiagnostics([
-        '当前章节没有形成可执行的召回查询桶，召回已跳过。',
-      ])
-    }
-  } catch {
-    result.recallSnapshot = createEmptyRecallSnapshot('embedding_service_failed')
-    result.recallDiagnostics = buildEmptyRecallDiagnostics([
-      '向量召回当前不可用，已自动降级，不影响硬约束与结构化状态注入。',
-    ])
+  return {
+    novel,
+    profile,
+    chapterRows,
+    currentChapter,
+    currentArc,
+    outlineMentionedCharacterCount,
+    activeThreadPressureCount: activeThreadsContext.pressureCount,
+    contextParts: {
+      ...baseContext.contextParts,
+      recalledMemory: recallAugmentation.recalledMemory,
+    },
+    previousChapterSampleReport: baseContext.previousChapterSampleReport,
+    recallSnapshot: recallAugmentation.recallSnapshot,
+    recallDiagnostics: recallAugmentation.recallDiagnostics,
+    recalledMemorySources: recallAugmentation.recalledMemorySources,
   }
-
-  return result
 }
 
 export function allocateChapterContext(
@@ -3089,6 +3246,7 @@ export function allocateChapterContext(
       allocatedTokens: entry.allocatedTokens,
       status: entry.truncated ? 'truncated' : 'kept',
       reason: 'covered_by_hard_constraint',
+      sourceKind: resolveContextSourceKind(entry.label),
     }))
   const softContextDecisions = [...hardCoveredDecisions, ...softAllocation.decisions]
   const hardConstraintSummary = buildHardConstraintSummary(hardConstraintAllocation.entries, droppedConstraintCount)
@@ -3185,6 +3343,55 @@ export function allocateChapterContext(
   }
 
   return result
+}
+
+export function buildWritingContextUsageSnapshot(
+  rawData: ChapterContextRawData,
+  context: ChapterContext,
+  linkedImpacts: AssetChangeImpact[] = [],
+): WritingContextUsageSnapshot {
+  const usedAssets = [...new Set([
+    context.characterStates ? '人物状态与角色设定' : '',
+    context.worldStates ? '世界状态总账' : '',
+    context.itemSummary ? '关键物品账本' : '',
+    context.timelineSummary ? '时间轴锚点' : '',
+    context.activeThreads ? '活跃线程' : '',
+    context.dueForeshadows ? '伏笔与到期回收' : '',
+    ...rawData.recalledMemorySources
+      .filter((item) => !item.stale && !item.overriddenByConstraint)
+      .slice(0, 4)
+      .map((item) => item.sourceLabel),
+  ].filter(Boolean))]
+
+  const usedContracts = [...new Set([
+    ...context.hardConstraintEntries.map((entry) => entry.title),
+    context.writingContractSummary ? '写作合同摘要' : '',
+    context.dialogueVoiceLocks ? '角色对白锁' : '',
+  ].filter(Boolean))]
+
+  const ignoredConstraints = [...new Set([
+    ...context.hardConstraintEntries
+      .filter((entry) => entry.truncated)
+      .map((entry) => `${entry.title} 已压缩`),
+    ...context.contextBudgetReport.droppedLabels.map((label) => `${label} 已被裁剪`),
+    ...context.softContextDecisions
+      .filter((entry) => entry.status !== 'kept')
+      .map((entry) => `${entry.title}：${entry.status === 'dropped' ? '已忽略' : '已压缩'}`),
+  ])].slice(0, 8)
+
+  const recentStateChanges = [...new Set([
+    ...splitContextLines(rawData.contextParts.continuitySummary, 4),
+    ...splitContextLines(rawData.contextParts.continuityNotes, 3),
+    ...splitContextLines(rawData.contextParts.worldStates, 2),
+  ])].slice(0, 8)
+
+  return {
+    usedAssets,
+    usedContracts,
+    ignoredConstraints,
+    recentStateChanges,
+    linkedImpacts: linkedImpacts.slice(0, 6),
+  }
 }
 
 export async function buildChapterContext(

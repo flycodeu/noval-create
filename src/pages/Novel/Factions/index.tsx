@@ -483,6 +483,7 @@ export default function FactionsPage({ novelId }: Props) {
             extra={(
               <Space wrap>
                 <AIGenerateButton
+                  novelId={novelId}
                   label={selectedItem ? 'AI 补当前势力' : 'AI 生成势力草稿'}
                   isJson
                   buildMessages={() => buildDraftMessages({

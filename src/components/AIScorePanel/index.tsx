@@ -10,6 +10,7 @@ type RunGenerationInput = {
   messages: Message[]
   count: number
   modelConfigId?: number
+  novelId?: number
 }
 
 interface Props {
@@ -19,6 +20,7 @@ interface Props {
   novelBackground?: string
   genreContext?: string
   modelConfigId?: number
+  novelId?: number
   disabled?: boolean
   /** 重新生成后的回调，将新内容（已去除 Markdown）应用到字段 */
   onRegenerate?: (newContent: string) => void
@@ -59,6 +61,7 @@ export default function AIScorePanel({
   novelBackground = '',
   genreContext = '',
   modelConfigId,
+  novelId,
   disabled = false,
   onRegenerate,
   drawCount = 1,
@@ -371,6 +374,7 @@ export default function AIScorePanel({
                 message.success(getUserFacingMessage('aiScore.optimizedApplied'))
               }}
               modelConfigId={modelConfigId}
+              novelId={novelId}
               type="primary"
               size="small"
             />

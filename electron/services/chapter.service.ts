@@ -10,6 +10,7 @@ import type { HumanizationSignal } from '../../src/types'
 import {
   allocateChapterContext,
   buildChapterContext,
+  buildWritingContextUsageSnapshot,
   ChapterContext,
   ContextOverflowError,
   buildStoryProfile,
@@ -65,6 +66,7 @@ import { syncTimelineStructureAnchors } from './timeline.service'
 import { discoverEntitiesFromContent } from './entity-discovery.service'
 import { prepareChapterWritebackRun } from './chapter-writeback.service'
 import { buildBatchKey, captureTimelineAnchorsForChapterIds, createOperationLog } from './history.service'
+import { listActiveImpactsForChapter } from './asset-impact.service'
 import { enhanceAiScoreResult } from './ai-score.service'
 import {
   analyzeChapterDialogueAgainstNovel,
@@ -76,7 +78,16 @@ import {
   type NarrativeControlSceneSnapshot,
 } from './narrative-control.service'
 import { analyzeWorkspaceAiFlavor } from './workspace-quality.service'
+import {
+  buildAiExplainabilityReport,
+  buildAiModelRouteReport,
+  buildAiStageExecutionReport,
+  buildAuthorStyleLockSummary,
+  buildChatOptionsFromRoute,
+  resolveAiExecutionMode,
+} from './ai-engine.service'
 import { refreshCharacterStateVersionsForChapter } from './character-state.service'
+import { syncCharacterArcsFromChapterState } from './character-arc.service'
 import {
   refreshWorldStateVersionsForChapter,
   refreshWorldStateVersionsForNovel,
@@ -97,6 +108,11 @@ import { persistChapterRecallRuntimeSnapshot } from './chapter-recall-runtime.se
 import { persistAntiAiRuleHits } from './anti-ai-rule.service'
 import { syncFeedbackRecurrenceState } from './feedback-recurrence.service'
 import type {
+  AiContextAssemblyReport,
+  AiExecutionMode,
+  AiExplainabilityReport,
+  AiStageExecutionReport,
+  AuthorStyleLockSummary,
   ChapterRewriteScope,
   ChapterContractValidationResult,
   StyleComplianceMetricSnapshot,
@@ -245,12 +261,16 @@ interface ChapterPipelineSnapshot {
   status: 'pending' | 'running' | 'success' | 'failed' | 'cancelled'
   message?: string
   streamTaskId?: number
+  executionMode?: AiExecutionMode
   contractVersion?: string
   canonRunId?: number
   totalTokensUsed: number
   totalDurationMs: number
   recallSnapshot?: ChapterContext['recallSnapshot']
   recallDiagnostics?: ChapterContext['recallDiagnostics']
+  contextAssemblyReport?: AiContextAssemblyReport
+  authorStyleLock?: AuthorStyleLockSummary
+  generationExplainability?: AiExplainabilityReport
   recoveryHint?: TaskRecoveryHint
   failureCode?: ChapterPipelineFailureCode
   rewriteScope?: ChapterRewriteScope
@@ -812,6 +832,148 @@ function createInitialChapterPipelineSnapshot(
       finalize: createPipelineRoleState('finalize'),
     },
   }
+}
+
+function buildChapterContextAssemblyReport(
+  context: Pick<ChapterContext, 'recalledMemorySources' | 'recallSnapshot' | 'timelineSummary' | 'timelineOpenThreads' | 'hardConstraintEntries'>,
+  usageSnapshot: import('../../src/types').WritingContextUsageSnapshot,
+): AiContextAssemblyReport {
+  const graphItems = usageSnapshot.usedAssets.length
+  const timelineItems = [
+    context.timelineSummary,
+    context.timelineOpenThreads,
+    ...usageSnapshot.recentStateChanges,
+  ].filter(Boolean).length
+  const contractItems = usageSnapshot.usedContracts.length + context.hardConstraintEntries.length
+
+  return {
+    assemblyVersion: 'v2-unified',
+    summary: `统一上下文组装器已合并资产图谱、时间线索与合同硬约束，本章共装配 ${graphItems + timelineItems + contractItems} 个有效上下文入口。`,
+    layers: [
+      {
+        key: 'graph_recall',
+        label: '图谱召回',
+        itemCount: graphItems,
+        summary: graphItems > 0
+          ? `命中 ${graphItems} 个已使用资产，并补入 ${context.recalledMemorySources.filter((item) => !item.stale).length} 条召回片段。`
+          : '当前没有命中的资产图谱引用。',
+      },
+      {
+        key: 'timeline_recall',
+        label: '时间召回',
+        itemCount: timelineItems,
+        summary: timelineItems > 0
+          ? '已把时间轴、开放线索和近期状态变化共同纳入写作上下文。'
+          : '当前章节没有额外时间召回补充。',
+      },
+      {
+        key: 'contract_recall',
+        label: '合同召回',
+        itemCount: contractItems,
+        summary: contractItems > 0
+          ? `硬约束 ${context.hardConstraintEntries.length} 项，显式合同引用 ${usageSnapshot.usedContracts.length} 项。`
+          : '当前没有识别到显式合同约束。',
+      },
+    ],
+    notes: [
+      context.recallSnapshot.assemblyStage === 'unified_recall'
+        ? '召回层已进入 unified_recall，并与合同约束联合裁剪。'
+        : '召回层仍以基础召回为主，但已统一呈现在 v2 解释报告中。',
+      usageSnapshot.ignoredConstraints.length > 0
+        ? `存在 ${usageSnapshot.ignoredConstraints.length} 项约束被压缩或忽略，已列入低置信度提示。`
+        : '本次没有检测到被忽略的硬约束。',
+    ],
+  }
+}
+
+function buildChapterAiStageReports(
+  executionMode: AiExecutionMode,
+  resolutionSource: 'request_override' | 'global_default' | 'fallback_default',
+  modelConfigId?: number | null,
+): AiStageExecutionReport[] {
+  const plannerRoute = buildAiModelRouteReport({
+    taskKind: 'chapter_planning',
+    stageLabel: 'Planner',
+    executionMode,
+    resolutionSource,
+    modelConfigId,
+  })
+  const writerRoute = buildAiModelRouteReport({
+    taskKind: 'chapter_generation',
+    stageLabel: 'Writer',
+    executionMode,
+    resolutionSource,
+    modelConfigId,
+  })
+  const criticRoute = buildAiModelRouteReport({
+    taskKind: 'chapter_review',
+    stageLabel: 'Critic',
+    executionMode,
+    resolutionSource,
+    modelConfigId,
+  })
+  const rewriterRoute = buildAiModelRouteReport({
+    taskKind: 'chapter_rewrite',
+    stageLabel: 'Rewriter',
+    executionMode,
+    resolutionSource,
+    modelConfigId,
+  })
+  const finalizeRoute = buildAiModelRouteReport({
+    taskKind: 'chapter_finalize',
+    stageLabel: 'Canon / Finalize',
+    executionMode,
+    resolutionSource,
+    modelConfigId,
+  })
+
+  return [
+    buildAiStageExecutionReport({
+      stageKey: 'planner',
+      stageLabel: 'Planner',
+      taskKind: 'chapter_planning',
+      executionMode,
+      outputShape: 'json',
+      summary: '先输出场景计划 JSON，再渲染为可读场景链。',
+      route: plannerRoute,
+    }),
+    buildAiStageExecutionReport({
+      stageKey: 'writer',
+      stageLabel: 'Writer',
+      taskKind: 'chapter_generation',
+      executionMode,
+      outputShape: 'text',
+      summary: '基于章节合同、场景计划与统一上下文生成正文初稿。',
+      route: writerRoute,
+    }),
+    buildAiStageExecutionReport({
+      stageKey: 'critic',
+      stageLabel: 'Critic',
+      taskKind: 'chapter_review',
+      executionMode,
+      outputShape: 'json',
+      summary: '输出结构化审校意见，再回写为 reviewNotes。',
+      route: criticRoute,
+    }),
+    buildAiStageExecutionReport({
+      stageKey: 'rewriter',
+      stageLabel: 'Rewriter',
+      taskKind: 'chapter_rewrite',
+      executionMode,
+      outputShape: 'text',
+      summary: '按审校结论修正文稿，并保留人味与合同兑现检查。',
+      route: rewriterRoute,
+    }),
+    buildAiStageExecutionReport({
+      stageKey: 'canon-finalize',
+      stageLabel: 'Canon / Finalize',
+      taskKind: 'chapter_finalize',
+      executionMode,
+      outputShape: 'workflow',
+      summary: '生成 Canon 差异草案，并刷新摘要、连续性与记忆写回。',
+      route: finalizeRoute,
+    }),
+  ]
 }
 
 function getCompletedPipelineRoleCount(snapshot: ChapterPipelineSnapshot): number {
@@ -2420,6 +2582,7 @@ async function refreshChapterMemory(chapterId: number): Promise<{
   const summary = await updateChapterSummaryData(chapterId)
   const continuity = await updateChapterContinuityState(chapterId, summary)
   refreshCharacterStateVersionsForChapter(chapterId)
+  syncCharacterArcsFromChapterState(chapterId)
   refreshWorldStateVersionsForChapter(chapterId)
   refreshStoryMemoryCheckpoints(chapter.novelId)
   markChapterContextCurrent(chapterId)
@@ -2632,6 +2795,7 @@ export function deleteChapter(id: number) {
       refreshWorldStateVersionsForNovel(current.novelId)
     } else if (typeof affectedStartChapterId === 'number' && typeof affectedStartChapterNum === 'number') {
       refreshCharacterStateVersionsForChapter(affectedStartChapterId)
+      syncCharacterArcsFromChapterState(affectedStartChapterId)
       refreshWorldStateVersionsFromChapter(current.novelId, affectedStartChapterNum)
     } else {
       refreshWorldStateVersionsForNovel(current.novelId)
@@ -2999,7 +3163,11 @@ function buildPreviewStageContextMap(
   }
 }
 
-export async function generateChapterContent(chapterId: number, sender?: WebContents): Promise<number> {
+export async function generateChapterContent(
+  chapterId: number,
+  sender?: WebContents,
+  options: { executionMode?: AiExecutionMode } = {},
+): Promise<number> {
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
   if (!chapter) throwUserFacingError('chapter.notFoundWithId', { id: chapterId })
@@ -3012,6 +3180,10 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
   const consistencyNotes = buildConsistencyPromptSummary(buildNovelConsistencyReport(chapter.novelId))
   const previousStatus = chapter.status || 'outline'
   const fallbackScenePlan = buildFallbackScenePlan(chapter)
+  const executionModeResolution = resolveAiExecutionMode({
+    explicitMode: options.executionMode,
+    settingsJson: novel.settingsJson,
+  })
   let contractVersion = ''
   const workflowTaskId = await createTask({
     type: 'chapter_write',
@@ -3029,6 +3201,10 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
     status: 'pending',
   })
   let snapshot = createInitialChapterPipelineSnapshot(chapterId, workflowTaskId, contractVersion)
+  snapshot = {
+    ...snapshot,
+    executionMode: executionModeResolution.mode,
+  }
   let previousRoleTaskId: number | undefined
   let hasCommittedContent = false
 
@@ -3275,6 +3451,32 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
     const draftContext = contexts.draft
     const reviewContext = contexts.review
     const rewriteContext = contexts.rewrite
+    const linkedImpacts = listActiveImpactsForChapter(chapter.novelId, chapter.id)
+    const usageSnapshot = buildWritingContextUsageSnapshot(rawContext, draftContext, linkedImpacts)
+    const contextAssemblyReport = buildChapterContextAssemblyReport(draftContext, usageSnapshot)
+    const authorStyleLock = buildAuthorStyleLockSummary(chapter.novelId, novel.themeVoiceJson)
+    const stageReports = buildChapterAiStageReports(
+      executionModeResolution.mode,
+      executionModeResolution.source,
+      novel.modelConfigId || undefined,
+    )
+    const plannerChatOpts = buildChatOptionsFromRoute(stageReports[0].route)
+    const writerChatOpts = buildChatOptionsFromRoute(stageReports[1].route)
+    const criticChatOpts = buildChatOptionsFromRoute(stageReports[2].route)
+    const rewriterChatOpts = buildChatOptionsFromRoute(stageReports[3].route)
+    const generationExplainability = buildAiExplainabilityReport({
+      taskKind: 'chapter_generation',
+      executionMode: executionModeResolution.mode,
+      usageSnapshot,
+      stageReports,
+      contextAssemblyReport,
+      authorStyleLock,
+      structuredOutputs: [
+        '场景计划 JSON',
+        '审校意见 JSON',
+        'Canon 差异草案',
+      ],
+    })
     logConstraintInjectionStatus('scenePlan', scenePlanContext)
     logConstraintInjectionStatus('draft', draftContext)
     logConstraintInjectionStatus('review', reviewContext)
@@ -3328,6 +3530,9 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
       ...snapshot,
       recallSnapshot: draftContext.recallSnapshot,
       recallDiagnostics: draftContext.recallDiagnostics,
+      contextAssemblyReport,
+      authorStyleLock,
+      generationExplainability,
     }
     try {
       persistChapterRecallRuntimeSnapshot({
@@ -3438,6 +3643,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
       inputJson: JSON.stringify(plannerMessages),
       messages: plannerMessages,
       modelConfigId: novel.modelConfigId || undefined,
+      chatOpts: plannerChatOpts,
       sender,
     })
     const scenePlanParse = parseAiJsonResult<unknown>(scenePlanResult, 'array', {
@@ -3523,6 +3729,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
       inputJson: JSON.stringify(writerMessages),
       messages: writerMessages,
       modelConfigId: novel.modelConfigId || undefined,
+      chatOpts: writerChatOpts,
       sender,
     })
     finishRoleTask('writer', writerTaskId, '正文初稿已生成，等待 Critic 审校。')
@@ -3591,6 +3798,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
       inputJson: JSON.stringify(criticMessages),
       messages: criticMessages,
       modelConfigId: novel.modelConfigId || undefined,
+      chatOpts: criticChatOpts,
       sender,
     })
     const reviewParse = parseAiJsonResult<unknown>(reviewResult, 'object', {
@@ -3690,6 +3898,7 @@ export async function generateChapterContent(chapterId: number, sender?: WebCont
       inputJson: JSON.stringify(messages),
       messages,
       modelConfigId: novel.modelConfigId || undefined,
+      chatOpts: rewriterChatOpts,
       sender,
     })
 
@@ -3927,28 +4136,10 @@ export async function resumeChapterPipeline(taskId: number, sender?: WebContents
   return generateChapterContent(rootTask.relatedEntityId, sender)
 }
 
-export async function getChapterContextPreview(chapterId: number): Promise<{
-  chapterId: number
-  chapterNum: number
-  complexity: ChapterComplexity
-  previousChapterContext: string
-  previousChapterSampleReport: ChapterContext['previousChapterSampleReport']
-  recalledMemory: string
-  recallSnapshot: ChapterContext['recallSnapshot']
-  recallDiagnostics: ChapterContext['recallDiagnostics']
-  recalledMemorySources: ChapterContext['recalledMemorySources']
-  stages: Array<{
-    stage: ChapterContextStage
-    hardConstraintContext: string
-    hardConstraintSummary: string
-    hardConstraintEntries: ChapterContext['hardConstraintEntries']
-    constraintInjectionStatus: ChapterContext['constraintInjectionStatus']
-    softContextBudgetUsage: ChapterContext['softContextBudgetUsage']
-    contextBudgetReport: ChapterContext['contextBudgetReport']
-    softContextDecisions: ChapterContext['softContextDecisions']
-    droppedConstraintCount: number
-  }>
-}> {
+export async function getChapterContextPreview(
+  chapterId: number,
+  options: { executionMode?: AiExecutionMode } = {},
+): Promise<import('../../src/types').ChapterContextPreview> {
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
   if (!chapter) throwUserFacingError('chapter.notFoundWithId', { id: chapterId })
@@ -3956,17 +4147,52 @@ export async function getChapterContextPreview(chapterId: number): Promise<{
   const rawContext = await collectChapterContextRawData(chapter.novelId, chapter.chapterNum)
   const { complexity, contexts } = buildPreviewStageContextMap(rawContext, chapter)
   const orderedStages: ChapterContextStage[] = ['scenePlan', 'draft', 'review', 'rewrite']
+  const linkedImpacts = listActiveImpactsForChapter(chapter.novelId, chapter.id)
+  const usageSnapshot = buildWritingContextUsageSnapshot(rawContext, contexts.draft, linkedImpacts)
+  const executionModeResolution = resolveAiExecutionMode({
+    explicitMode: options.executionMode,
+    settingsJson: rawContext.novel.settingsJson,
+  })
+  const contextAssemblyReport = buildChapterContextAssemblyReport(contexts.draft, usageSnapshot)
+  const authorStyleLock = buildAuthorStyleLockSummary(chapter.novelId, rawContext.novel.themeVoiceJson)
+  const stageReports = buildChapterAiStageReports(
+    executionModeResolution.mode,
+    executionModeResolution.source,
+    rawContext.novel.modelConfigId || undefined,
+  )
+  const generationExplainability = buildAiExplainabilityReport({
+    taskKind: 'chapter_generation',
+    executionMode: executionModeResolution.mode,
+    usageSnapshot,
+    stageReports,
+    contextAssemblyReport,
+    authorStyleLock,
+    structuredOutputs: [
+      '场景计划 JSON',
+      '审校意见 JSON',
+      'Canon 差异草案',
+    ],
+  })
 
   return {
     chapterId: chapter.id,
     chapterNum: chapter.chapterNum,
     complexity,
+    assemblyVersion: 'v2-unified',
+    assemblyNotes: [
+      '统一上下文组装器：图谱召回、时间召回与合同召回已合并调度。',
+      '解释报告会同步展示执行模式、结构化输出与低置信度事实。',
+    ],
+    contextAssemblyReport,
+    authorStyleLock,
+    generationExplainability,
     previousChapterContext: rawContext.contextParts.previousChapterContext,
     previousChapterSampleReport: rawContext.previousChapterSampleReport,
     recalledMemory: contexts.draft.recalledMemory,
     recallSnapshot: contexts.draft.recallSnapshot,
     recallDiagnostics: contexts.draft.recallDiagnostics,
     recalledMemorySources: contexts.draft.recalledMemorySources,
+    usageSnapshot,
     stages: orderedStages.map((stage) => {
       const context = contexts[stage]
       return {

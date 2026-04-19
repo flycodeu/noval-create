@@ -1,4 +1,5 @@
 import type { RevisionTask } from '../../../types'
+import type { AiExecutionMode } from '../../../shared/ai-execution'
 import { normalizeOptionalNumber, normalizeStringArray, parseDraftJson } from './ai-draft'
 import { buildPlanningLintWarnings, summarizeDraftMessages } from './planning-observability'
 
@@ -7,6 +8,8 @@ type GenerationInput = {
   messages: Message[]
   count: number
   modelConfigId?: number
+  novelId?: number
+  executionMode?: AiExecutionMode
 }
 
 interface DraftGenerationOptions {

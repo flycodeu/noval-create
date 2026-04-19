@@ -3,6 +3,7 @@ import { Button, Modal, message } from 'antd'
 import { CheckOutlined, RobotOutlined } from '@ant-design/icons'
 import { getUserFacingMessage } from '@/utils/user-facing-message'
 import { cleanAiFieldText } from '../../utils/text'
+import type { AiExecutionMode } from '../../shared/ai-execution'
 
 type AttemptStatus = 'running' | 'retrying' | 'failed' | 'succeeded'
 
@@ -20,10 +21,14 @@ interface Props {
     messages: { role: 'user' | 'assistant'; content: string }[]
     count: number
     modelConfigId?: number
+    novelId?: number
+    executionMode?: AiExecutionMode
   }) => Promise<string[]>
   drawCount?: number
   onResult: (content: string) => void
   modelConfigId?: number
+  novelId?: number
+  executionMode?: AiExecutionMode
   size?: 'small' | 'middle' | 'large'
   disabled?: boolean
   type?: 'default' | 'text' | 'primary' | 'dashed' | 'link'
@@ -82,6 +87,8 @@ export default function AIGenerateButton({
   drawCount = 1,
   onResult,
   modelConfigId,
+  novelId,
+  executionMode,
   size = 'small',
   disabled,
   type = 'default',
@@ -120,8 +127,8 @@ export default function AIGenerateButton({
 
         try {
           rawOutputs = runGeneration
-            ? await runGeneration({ messages, count, modelConfigId })
-            : await window.electron.ai.runPrompt({ messages, count, modelConfigId })
+            ? await runGeneration({ messages, count, modelConfigId, novelId, executionMode })
+            : await window.electron.ai.runPrompt({ messages, count, modelConfigId, novelId, executionMode })
           if (!Array.isArray(rawOutputs) || rawOutputs.length === 0 || rawOutputs.every((output) => !String(output || '').trim())) {
             throw new Error(getUserFacingMessage('aiGenerate.empty'))
           }

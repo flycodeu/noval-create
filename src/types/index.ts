@@ -34,6 +34,10 @@ import type {
 import type { FactionRelationType, FactionType } from '../shared/factions'
 import type { GlossaryCategory } from '../shared/glossary'
 import type { SceneTemplateCategory } from '../shared/scene-templates'
+import type {
+  AiExecutionMode,
+  AiTaskKind,
+} from '../shared/ai-execution'
 
 export type {
   CoreSettingsGenerationProgressEvent,
@@ -78,6 +82,10 @@ export type {
   ThemeVoiceSnapshot,
 } from '../shared/theme-voice'
 export type {
+  AiExecutionMode,
+  AiTaskKind,
+} from '../shared/ai-execution'
+export type {
   ThemeVoiceGenerationRequest,
   ThemeVoiceGenerationResult,
 } from '../shared/theme-voice-generation'
@@ -87,6 +95,7 @@ export interface Novel {
   title: string
   synopsis?: string
   genreId?: number
+  launchMode?: NovelLaunchMode
   genreName?: string
   genreColorTag?: string
   status: 'draft' | 'writing' | 'completed' | 'archived'
@@ -108,10 +117,13 @@ export interface Novel {
   updatedAt: string
 }
 
+export type NovelLaunchMode = 'professional_longform' | 'fast_launch'
+
 export interface NovelCreateInput {
   title: string
   synopsis?: string
   genreId?: number
+  launchMode?: NovelLaunchMode
   userBackground?: string
   expandedBackground?: string
   projectBriefJson?: string
@@ -1517,6 +1529,157 @@ export interface NovelContextStatus {
   staleAssetCount: number
   staleAssetKeys: string[]
   staleAssetLabels: string[]
+  pendingImpactCount: number
+  pendingManualConfirmationCount: number
+  latestImpactEventAt?: string | null
+}
+
+export type AssetChangeOperation = 'create' | 'update' | 'delete' | 'sync'
+export type AssetImpactLevel = 'low' | 'medium' | 'high'
+export type AssetImpactTargetType =
+  | 'chapter'
+  | 'chapter_contract'
+  | 'scene_contract'
+  | 'thread'
+  | 'timeline'
+  | 'foreshadow'
+  | 'character_state'
+  | 'world_state'
+  | 'volume_design'
+export type AssetImpactResolutionStatus = 'pending' | 'reviewed' | 'resolved' | 'ignored'
+
+export interface AssetChangeEvent {
+  id: number
+  novelId: number
+  assetType: string
+  assetId?: number | null
+  assetLabel: string
+  operation: AssetChangeOperation
+  changeReason?: string | null
+  impactLevel: AssetImpactLevel
+  triggeredBy?: string | null
+  payloadJson?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AssetChangeImpact {
+  id: number
+  eventId: number
+  novelId: number
+  targetType: AssetImpactTargetType
+  targetId?: number | null
+  chapterId?: number | null
+  targetLabel: string
+  impactReason: string
+  detail?: string | null
+  confidence?: number | null
+  resolutionStatus: AssetImpactResolutionStatus
+  relatedTaskId?: number | null
+  eventAssetType?: string
+  eventAssetId?: number | null
+  eventAssetLabel?: string
+  eventOperation?: AssetChangeOperation
+  eventCreatedAt?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AssetImpactSummary {
+  novelId: number
+  totalEventCount: number
+  pendingImpactCount: number
+  pendingManualConfirmationCount: number
+  affectedChapterCount: number
+  latestImpactEventAt?: string | null
+  topImpactLabels: string[]
+}
+
+export interface WritingContextUsageSnapshot {
+  usedAssets: string[]
+  usedContracts: string[]
+  ignoredConstraints: string[]
+  recentStateChanges: string[]
+  linkedImpacts: AssetChangeImpact[]
+}
+
+export interface AiExecutionSettings {
+  defaultMode?: AiExecutionMode
+}
+
+export interface AiModelRouteReport {
+  taskKind: AiTaskKind
+  stageLabel: string
+  executionMode: AiExecutionMode
+  resolutionSource: 'request_override' | 'global_default' | 'fallback_default'
+  modelConfigId?: number
+  modelLabel: string
+  provider?: string
+  temperature: number
+  maxTokens: number
+  contextStrategy: 'trimmed' | 'balanced' | 'max_coverage'
+  reviewDepth: 'lite' | 'standard' | 'deep'
+  reasons: string[]
+}
+
+export interface AiStageExecutionReport {
+  stageKey: string
+  stageLabel: string
+  taskKind: AiTaskKind
+  executionMode: AiExecutionMode
+  outputShape: 'json' | 'text' | 'workflow'
+  summary: string
+  route: AiModelRouteReport
+}
+
+export interface AiContextAssemblyLayerReport {
+  key: 'graph_recall' | 'timeline_recall' | 'contract_recall'
+  label: string
+  itemCount: number
+  summary: string
+}
+
+export interface AiContextAssemblyReport {
+  assemblyVersion: 'v2-unified'
+  summary: string
+  layers: AiContextAssemblyLayerReport[]
+  notes: string[]
+}
+
+export interface AuthorStyleLockSummary {
+  enabled: boolean
+  sourceLabel: string
+  sentenceLengthHint?: string
+  dialogueRhythmHint?: string
+  narrativeDensityHint?: string
+  paceHint?: string
+  toneKeywords: string[]
+  preferredLexicon: string[]
+  forbiddenPatterns: string[]
+  hardRules: string[]
+}
+
+export interface AiInferenceFact {
+  label: string
+  detail: string
+  confidence: 'high' | 'medium' | 'low'
+  source: 'model_inference' | 'constraint_gap' | 'impact_sync' | 'state_writeback'
+  needsConfirmation: boolean
+}
+
+export interface AiExplainabilityReport {
+  taskKind: AiTaskKind
+  executionMode: AiExecutionMode
+  routeSummary: string
+  structuredOutputs: string[]
+  usedAssets: string[]
+  usedContracts: string[]
+  ignoredConstraints: string[]
+  inferredFacts: AiInferenceFact[]
+  lowConfidenceFacts: AiInferenceFact[]
+  stageReports: AiStageExecutionReport[]
+  contextAssemblyReport?: AiContextAssemblyReport
+  authorStyleLock?: AuthorStyleLockSummary
 }
 
 export type ChapterContextComplexity = 'simple' | 'standard' | 'key'
@@ -1584,6 +1747,7 @@ export interface PreviousChapterSampleReport {
 
 export type ContextDecisionStatus = 'kept' | 'truncated' | 'dropped'
 export type ContextDecisionReason = 'budget_fit' | 'budget_insufficient' | 'covered_by_hard_constraint'
+export type ContextDecisionSourceKind = 'hard_constraint' | 'previous_chapter' | 'recent_summary' | 'vector_recall'
 
 export interface ContextDecisionEntry {
   label: string
@@ -1593,6 +1757,7 @@ export interface ContextDecisionEntry {
   allocatedTokens: number
   status: ContextDecisionStatus
   reason: ContextDecisionReason
+  sourceKind?: ContextDecisionSourceKind
 }
 
 export type ContextBudgetOverflowLevel = 'none' | 'soft_trimmed' | 'hard_failed'
@@ -1684,6 +1849,7 @@ export interface RecallSnapshot {
   staleRecallCount: number
   fallbackHitCount: number
   fallbackReason?: RecallFallbackReason
+  assemblyStage?: 'base_recall' | 'unified_recall'
   bucketStats: Record<RecallBucketKey, RecallBucketStats>
 }
 
@@ -1714,12 +1880,18 @@ export interface ChapterContextPreview {
   chapterId: number
   chapterNum: number
   complexity: ChapterContextComplexity
+  assemblyVersion?: 'v1-base' | 'v2-unified'
+  assemblyNotes?: string[]
+  contextAssemblyReport?: AiContextAssemblyReport
+  authorStyleLock?: AuthorStyleLockSummary
+  generationExplainability?: AiExplainabilityReport
   previousChapterContext: string
   previousChapterSampleReport: PreviousChapterSampleReport
   recalledMemory: string
   recallSnapshot: RecallSnapshot
   recallDiagnostics: RecallDiagnostics
   recalledMemorySources: RecallMemorySource[]
+  usageSnapshot: WritingContextUsageSnapshot
   stages: ChapterContextPreviewStage[]
 }
 
@@ -1950,6 +2122,7 @@ export type ChapterWritebackRunStatus =
 export type ChapterWritebackDecision = 'pending' | 'accepted' | 'rejected' | 'edited'
 
 export type ChapterWritebackStatus = 'pending' | 'applied' | 'failed' | 'skipped'
+export type WritebackVerificationStatus = 'auto_ready' | 'needs_review' | 'conflicted'
 
 export interface ChapterWritebackRun {
   id: number
@@ -1973,6 +2146,7 @@ export interface ChapterFactExtract {
   sourceText?: string | null
   factJson: string
   confidence?: number | null
+  verificationStatus: WritebackVerificationStatus
   sortOrder: number
   createdAt: string
   updatedAt: string
@@ -1988,6 +2162,7 @@ export interface ChapterWritebackDiff {
   afterStateJson: string
   diffReason?: string | null
   confidence?: number | null
+  verificationStatus: WritebackVerificationStatus
   canonDecision: ChapterWritebackDecision
   writebackStatus: ChapterWritebackStatus
   writebackError?: string | null
@@ -2375,6 +2550,9 @@ export interface RevisionTaskQueryInput {
   status?: RevisionTask['status']
   severity?: RevisionTask['severity']
   keyword?: string
+  relatedPage?: string
+  entityType?: string
+  entityId?: number
   page?: number
   pageSize?: number
 }
@@ -2942,8 +3120,20 @@ export interface CharacterStateVersion {
   eventCause?: string
   changeReason?: string
   summaryText?: string
+  triggerEventId?: number
+  sourceSegmentId?: number
+  stateDeltaJson?: string
   createdAt: string
   updatedAt: string
+}
+
+export interface StateDeltaEntry {
+  field: string
+  before?: string
+  after?: string
+  cause?: string
+  persistencePolicy: 'temporary' | 'ongoing' | 'resolved' | 'unknown'
+  reversible?: boolean
 }
 
 export interface CharacterStateSummary {
@@ -2962,6 +3152,9 @@ export interface CharacterStateSummary {
   changeReason?: string
   summaryText: string
   driftAlert?: string
+  triggerEventId?: number
+  sourceSegmentId?: number
+  stateDeltaJson?: string
 }
 
 export interface CharacterStateDriftAlert {
@@ -2995,6 +3188,9 @@ export interface WorldStateVersion {
   sourceKind?: string
   sourceRef?: string
   severity?: WorldStateSeverity
+  triggerEventId?: number
+  sourceSegmentId?: number
+  stateDeltaJson?: string
   createdAt: string
   updatedAt: string
 }
@@ -3010,6 +3206,9 @@ export interface WorldStateSummary {
   eventCause?: string
   changeReason?: string
   severity: WorldStateSeverity
+  triggerEventId?: number
+  sourceSegmentId?: number
+  stateDeltaJson?: string
 }
 
 export interface WorldStateAlert {
@@ -3445,9 +3644,12 @@ export interface HumanizationSignal {
 }
 
 export type QualityDashboardRiskKind =
+  | 'commitment_delivery'
   | 'language_drift'
   | 'feedback_recurrence'
   | 'style_compliance'
+  | 'voice_distinction'
+  | 'growth_cost_balance'
   | 'story_dynamics'
   | 'chapter_function'
   | 'story_arc'
@@ -3455,8 +3657,82 @@ export type QualityDashboardRiskKind =
   | 'endgame_debt'
   | 'recall'
   | 'world_state'
+  | 'info_reveal_pacing'
 
 export type QualityDashboardRiskSeverity = 'info' | 'warning' | 'critical'
+export type QualityRepairMetricKey =
+  | 'commitment_delivery'
+  | 'voice_distinction'
+  | 'growth_cost_balance'
+  | 'foreshadow_debt'
+  | 'world_state_drift'
+  | 'info_reveal_pacing'
+export type QualityRepairActionType =
+  | 'create_revision_task'
+  | 'open_chapter_rewrite'
+  | 'open_bridge_patch'
+  | 'sync_timeline'
+  | 'sync_character_state'
+  | 'allow_deviation'
+
+export interface QualityRepairTaskDraft {
+  issueKey?: string
+  taskType: string
+  severity: 'high' | 'medium' | 'low'
+  title: string
+  description: string
+  fixBrief?: string
+  relatedPage: string
+  entityType?: string
+  entityId?: number
+  chapterId?: number
+  originMeta?: Record<string, unknown>
+}
+
+export interface QualityRepairAction {
+  id: string
+  label: string
+  description: string
+  actionType: QualityRepairActionType
+  metricKey: QualityRepairMetricKey
+  targetPage: string
+  safeToExecute: boolean
+  chapterId?: number
+  chapterNum?: number
+  entityType?: string
+  entityId?: number
+  navigationQuery?: Record<string, string>
+  taskDraft?: QualityRepairTaskDraft
+}
+
+export interface QualityRepairActionResult {
+  actionId: string
+  status: 'task_created' | 'executed' | 'unsupported' | 'failed'
+  message: string
+  taskId?: number
+  relatedPage?: string
+  chapterId?: number
+  entityType?: string
+  entityId?: number
+  navigationQuery?: Record<string, string>
+}
+
+export interface QualityRepairMetricSummary {
+  key: QualityRepairMetricKey
+  label: string
+  score: number
+  summary: string
+  riskCount: number
+  focusLabels: string[]
+}
+
+export interface QualityRepairActionSummary {
+  actionableRiskCount: number
+  taskActionCount: number
+  directExecutableActionCount: number
+  allowDeviationCount: number
+  topPriorityActions: string[]
+}
 
 export interface QualityDashboardRiskItem {
   kind: QualityDashboardRiskKind
@@ -3465,6 +3741,10 @@ export interface QualityDashboardRiskItem {
   detail: string
   volumeId?: number
   chapterNums: number[]
+  metricKey?: QualityRepairMetricKey
+  whyItHappened: string
+  howToFix: string
+  suggestedActions: QualityRepairAction[]
 }
 
 export interface VolumeQualityMetrics {
@@ -3668,6 +3948,10 @@ export interface WorkspaceQualityRepairPreview {
 }
 
 export interface QualityDashboardData {
+  dashboardVersion?: 'v1-health' | 'v2-repair'
+  dashboardNotes?: string[]
+  repairActionSummary: QualityRepairActionSummary
+  repairMetrics: QualityRepairMetricSummary[]
   heatmapData: Array<{ chapterNum: number; dimension: string; score: number }>
   overallScoreTrend: Array<{ chapterNum: number; score: number }>
   aiLikeRateTrend: Array<{ chapterNum: number; rate: number }>
@@ -4138,6 +4422,8 @@ declare global {
         getWorldStateLedgerSnapshot: (id: number, upToChapterNum?: number) => Promise<WorldStateLedgerSnapshot>
         getWorldStateHistory: (novelId: number, entityType: WorldStateEntityType, entityId: number, stateKey?: string, limit?: number) => Promise<WorldStateVersion[]>
         getContextStatus: (id: number) => Promise<NovelContextStatus>
+        getImpactSummary: (id: number) => Promise<AssetImpactSummary>
+        listImpactEvents: (id: number) => Promise<AssetChangeEvent[]>
       }
       structure: {
         getTree: (novelId: number) => Promise<StoryStructureTree>
@@ -4275,8 +4561,8 @@ declare global {
         batchUpdate: (ids: number[], data: Partial<Pick<Chapter, 'status' | 'arcId'>>) => Promise<number>
         batchDelete: (ids: number[]) => Promise<number>
         batchRenumber: (ids: number[], startChapterNum: number) => Promise<number>
-        getContextPreview: (chapterId: number) => Promise<ChapterContextPreview>
-        generateContent: (chapterId: number) => Promise<number>
+        getContextPreview: (chapterId: number, options?: { executionMode?: AiExecutionMode }) => Promise<ChapterContextPreview>
+        generateContent: (chapterId: number, options?: { executionMode?: AiExecutionMode }) => Promise<number>
         resumeContent: (taskId: number) => Promise<number>
         generateSummary: (chapterId: number) => Promise<void>
         aiCheck: (chapterId: number) => Promise<unknown>
@@ -4545,6 +4831,8 @@ declare global {
       quality: {
         getDashboard: (novelId: number) => Promise<QualityDashboardData>
         backfillRecallSnapshots: (novelId: number) => Promise<ChapterRecallRuntimeBackfillResult>
+        createRepairTask: (novelId: number, action: QualityRepairAction) => Promise<QualityRepairActionResult>
+        executeRepairAction: (novelId: number, action: QualityRepairAction) => Promise<QualityRepairActionResult>
       }
       batchWorkbench: {
         getData: (novelId: number, snapshotId?: number) => Promise<BatchWorkbenchData>
@@ -4585,8 +4873,21 @@ declare global {
         generateCharacter: (novelId: number, opts: CharacterGenerationOptions) => Promise<number>
         generateRelations: (novelId: number) => Promise<void>
         generateSubplotBatch: (data: SubplotGenerationRequest) => Promise<SubplotGenerationResult>
-        rewriteParagraph: (data: unknown) => Promise<string>
-        runPrompt: (data: { messages: unknown[]; count?: number; modelConfigId?: number }) => Promise<string[]>
+        rewriteParagraph: (data: {
+          originalParagraph: string
+          contextBefore: string
+          specificRequirements: string
+          modelConfigId?: number
+          novelId?: number
+          executionMode?: AiExecutionMode
+        }) => Promise<string>
+        runPrompt: (data: {
+          messages: unknown[]
+          count?: number
+          modelConfigId?: number
+          novelId?: number
+          executionMode?: AiExecutionMode
+        }) => Promise<string[]>
         scoreContent: (data: {
           contentType: string
           content: string

@@ -72,6 +72,7 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
   })
   const eventDraftButton = workspace.selectedEvent || workspace.creating ? (
     <AIGenerateButton
+      novelId={novelId}
       label="AI 生成·事件草稿"
       intent="generate"
       isJson

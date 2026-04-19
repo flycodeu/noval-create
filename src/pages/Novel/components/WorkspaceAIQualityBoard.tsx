@@ -20,6 +20,7 @@ import {
   ReloadOutlined,
   RobotOutlined,
 } from '@ant-design/icons'
+import { useNavigate } from 'react-router-dom'
 import type {
   Chapter,
   Novel,
@@ -148,6 +149,7 @@ export default function WorkspaceAIQualityBoard({
   onClose,
   onApplied,
 }: Props) {
+  const navigate = useNavigate()
   const setCurrentNovel = useNovelStore((state) => state.setCurrentNovel)
   const [snapshotLoading, setSnapshotLoading] = React.useState(false)
   const [snapshot, setSnapshot] = React.useState<Record<string, unknown> | null>(null)
@@ -346,13 +348,27 @@ export default function WorkspaceAIQualityBoard({
       )}
     >
       {!canFetch ? (
-        <Empty description="当前工作区暂未接入 AI 质量看板。" />
+        <Empty description="当前页没有局部质量快照，直接去全局质量监控看风险、修法和修复动作。">
+          <Button
+            type="primary"
+            onClick={() => {
+              onClose()
+              navigate(`/novels/${novelId}/quality`)
+            }}
+          >
+            打开质量监控
+          </Button>
+        </Empty>
       ) : null}
 
       {canFetch && snapshotLoading ? <Spin /> : null}
 
       {canFetch && !snapshotLoading && !snapshot ? (
-        <Empty description="当前工作区没有可分析的内容。" />
+        <Empty description="当前页还没有形成可分析快照。先补内容，或切到已落地数据的工作区再分析。">
+          <Button icon={<ReloadOutlined />} onClick={() => void loadSnapshot()}>
+            重新加载
+          </Button>
+        </Empty>
       ) : null}
 
       {snapshot ? (
@@ -439,7 +455,7 @@ export default function WorkspaceAIQualityBoard({
                   <Tag>{analysis.globalIssues.length}</Tag>
                 </div>
                 <div className="novel-subpanel__body" style={{ display: 'grid', gap: 8 }}>
-                  {analysis.globalIssues.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前没有命中的明显问题。" /> : null}
+                  {analysis.globalIssues.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前快照没有命中明显问题，可继续推进本页工作。" /> : null}
                   {analysis.globalIssues.map((issue) => (
                     <div key={issue.id} className="novel-note-list__item">
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>

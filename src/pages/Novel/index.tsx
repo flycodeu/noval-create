@@ -57,10 +57,11 @@ import GrowthSystemPage from './GrowthSystem'
 import WorkspaceErrorBoundary from './components/WorkspaceErrorBoundary'
 import WorkspaceAIQualityBoard from './components/WorkspaceAIQualityBoard'
 import {
+  getAssetBloatSignal,
   EMPTY_WORKFLOW_STATS,
   getGuidedStepProgressMap,
+  getNextChapterReadiness,
   getRecommendedWorkflowStep,
-  isWritingStepReady,
   loadWorkflowStats,
   type GuidedWorkflowStepKey,
   type WorkflowStats,
@@ -117,6 +118,14 @@ interface WorkspaceSearchResult {
   label: string
   description: string
   route: string
+}
+
+interface WorkspaceGroupSummary {
+  title: string
+  completedCount: number
+  totalCount: number
+  blocker: string
+  isActive: boolean
 }
 
 const WORKSPACE_GROUPS: Array<{ title: string; items: WorkspaceItem[] }> = [
@@ -238,6 +247,7 @@ export default function NovelRouter() {
   const [hasRegisteredClearHandler, setHasRegisteredClearHandler] = useState(false)
   const [qualityBoardOpen, setQualityBoardOpen] = useState(false)
   const [workspaceQualityController, setWorkspaceQualityController] = useState<RegisteredWorkspaceQualityController | null>(null)
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({})
 
   const novelId = Number.parseInt(id || '0', 10)
   const workspaceGroups = useMemo(() => WORKSPACE_GROUPS, [])
@@ -267,6 +277,10 @@ export default function NovelRouter() {
   const currentPageMeta = useMemo(
     () => workspaceItems.find((item) => item.key === currentPage) || workspaceItems[0],
     [workspaceItems, currentPage],
+  )
+  const currentGroupTitle = useMemo(
+    () => workspaceGroups.find((group) => group.items.some((item) => item.key === currentPage))?.title || workspaceGroups[0]?.title || '总览',
+    [currentPage, workspaceGroups],
   )
 
   const currentPageIndex = useMemo(
@@ -319,7 +333,13 @@ export default function NovelRouter() {
       'info-gap-board': workflowStats.volumeCount > 0,
       'foreshadow-ledger': workflowStats.chapterCount > 0,
       'growth-system': workflowStats.chapterCount > 0,
-      writing: isWritingStepReady(workflowStats),
+      writing: workflowStats.outlineCount > 0
+        && workflowStats.timelineCount > 0
+        && workflowStats.threadCount > 0
+        && workflowStats.revisionBlockerCount <= 0
+        && workflowStats.staleChapterCount <= 0
+        && workflowStats.staleAssetCount <= 0
+        && workflowStats.staleCheckpointCount <= 0,
       writeback: workflowStats.chapterCount > 0,
       'batch-workbench': workflowStats.chapterCount > 0,
       quality: true,
@@ -334,6 +354,14 @@ export default function NovelRouter() {
   const workspaceTotalCount = useMemo(
     () => Object.keys(readinessMap).length,
     [readinessMap],
+  )
+  const nextChapterReadiness = useMemo(
+    () => getNextChapterReadiness(workflowStats),
+    [workflowStats],
+  )
+  const assetBloatSignal = useMemo(
+    () => getAssetBloatSignal(workflowStats),
+    [workflowStats],
   )
 
   const workspaceStateMap = useMemo<Record<ProWorkspaceKey, { label: string; complete: boolean }>>(
@@ -445,12 +473,8 @@ export default function NovelRouter() {
         complete: workflowStats.chapterCount > 0,
       },
       writing: {
-        label: workflowStats.chapterCount > 0
-          ? `${workflowStats.chapterCount}章`
-          : workflowStats.totalWords > 0
-            ? `${workflowStats.totalWords.toLocaleString()}字`
-            : '未开写',
-        complete: isWritingStepReady(workflowStats),
+        label: nextChapterReadiness.label,
+        complete: nextChapterReadiness.ready,
       },
       writeback: {
         label: workflowStats.chapterCount > 0 ? `${workflowStats.chapterCount}章` : '待补',
@@ -469,7 +493,32 @@ export default function NovelRouter() {
         complete: true,
       },
     }),
-    [guidedProgressMap, workflowStats, workspaceReadyCount, workspaceTotalCount],
+    [guidedProgressMap, nextChapterReadiness, workflowStats, workspaceReadyCount, workspaceTotalCount],
+  )
+  const workspaceGroupSummaries = useMemo<WorkspaceGroupSummary[]>(
+    () => workspaceGroups.map((group) => {
+      const totalCount = group.items.length
+      const completedCount = group.items
+        .filter((item) => workspaceStateMap[item.key]?.complete)
+        .length
+      const firstIncomplete = group.items.find((item) => !workspaceStateMap[item.key]?.complete)
+      const blocker = group.title === '推进'
+        ? nextChapterReadiness.reason
+        : assetBloatSignal.risk !== 'none' && group.title === '世界与资源'
+          ? assetBloatSignal.reason
+          : firstIncomplete
+            ? `待补：${firstIncomplete.label}`
+            : '当前阶段已就绪'
+
+      return {
+        title: group.title,
+        completedCount,
+        totalCount,
+        blocker,
+        isActive: group.items.some((item) => item.key === currentPage),
+      }
+    }),
+    [assetBloatSignal, currentPage, nextChapterReadiness.reason, workspaceGroups, workspaceStateMap],
   )
 
   const refreshWorkflowStats = useCallback(async () => {
@@ -801,35 +850,85 @@ export default function NovelRouter() {
           </div>
         </div>
 
-        <div className="novel-sidebar__nav">
-          {workspaceGroups.map((group) => (
-            <section key={group.title} className="novel-sidebar__group">
-              <div className="novel-sidebar__group-title">{group.title}</div>
-              <div className="novel-sidebar__group-list">
-                {group.items.map((item) => {
-                  const isActive = currentPage === item.key
-                  const state = workspaceStateMap[item.key]
+        <div className="novel-sidebar__progress-card">
+          <div className="novel-sidebar__progress-head">
+            <div>
+              <div className="novel-sidebar__progress-label">是否可写下一章</div>
+              <div className="novel-sidebar__progress-value">{nextChapterReadiness.label}</div>
+            </div>
+            <span className={`novel-sidebar__title-meta ${nextChapterReadiness.ready ? 'novel-sidebar__title-meta--ready' : 'novel-sidebar__title-meta--pending'}`}>
+              {nextChapterReadiness.ready ? '已就绪' : '待处理'}
+            </span>
+          </div>
+          <div className="novel-sidebar__summary-copy">{nextChapterReadiness.reason}</div>
+          {assetBloatSignal.risk !== 'none' ? (
+            <button
+              type="button"
+              className="novel-sidebar__recommend"
+              onClick={() => navigate(`/novels/${novelId}/${workflowStats.outlineCount > 0 ? 'writing' : 'outline'}`)}
+            >
+              <span>{assetBloatSignal.risk === 'high' ? '资产膨胀' : '资产过快'}</span>
+              <strong>{workflowStats.outlineCount > 0 ? '停止补资产，直接进入正文' : '先把现有资产压到大纲'}</strong>
+            </button>
+          ) : null}
+        </div>
 
-                  return (
-                    <button
-                      key={item.key}
-                      type="button"
-                      className={`novel-sidebar__nav-item ${isActive ? 'novel-sidebar__nav-item--active' : ''}`}
-                      onClick={() => navigate(`/novels/${novelId}/${item.key}`)}
-                    >
-                      <span className="novel-sidebar__nav-icon">{item.icon}</span>
-                      <span className="novel-sidebar__nav-copy">
-                        <strong>{item.label}</strong>
-                      </span>
-                      <span className={`novel-sidebar__nav-state ${state.complete ? 'novel-sidebar__nav-state--done' : ''}`}>
-                        {state.label}
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
-            </section>
-          ))}
+        <div className="novel-sidebar__nav">
+          {workspaceGroups.map((group) => {
+            const summary = workspaceGroupSummaries.find((item) => item.title === group.title)
+            const expanded = Object.prototype.hasOwnProperty.call(collapsedGroups, group.title)
+              ? !collapsedGroups[group.title]
+              : group.title === currentGroupTitle
+
+            return (
+              <section key={group.title} className={`novel-sidebar__group ${expanded ? 'novel-sidebar__group--expanded' : 'novel-sidebar__group--collapsed'}`}>
+                <button
+                  type="button"
+                  className={`novel-sidebar__group-toggle ${summary?.isActive ? 'novel-sidebar__group-toggle--active' : ''}`}
+                  onClick={() => setCollapsedGroups((current) => ({
+                    ...current,
+                    [group.title]: expanded,
+                  }))}
+                >
+                  <span className="novel-sidebar__group-toggle-copy">
+                    <strong>{group.title}</strong>
+                    <small>{summary?.blocker || '当前阶段已就绪'}</small>
+                  </span>
+                  <span className="novel-sidebar__group-toggle-meta">
+                    <span className="novel-sidebar__group-toggle-count">{`${summary?.completedCount || 0}/${summary?.totalCount || group.items.length}`}</span>
+                    <RightOutlined className={`novel-sidebar__group-toggle-arrow ${expanded ? 'novel-sidebar__group-toggle-arrow--expanded' : ''}`} />
+                  </span>
+                </button>
+
+                {expanded ? (
+                  <div className="novel-sidebar__group-list">
+                    {group.items.map((item) => {
+                      const isActive = currentPage === item.key
+                      const state = workspaceStateMap[item.key]
+
+                      return (
+                        <button
+                          key={item.key}
+                          type="button"
+                          className={`novel-sidebar__nav-item ${isActive ? 'novel-sidebar__nav-item--active' : ''}`}
+                          onClick={() => navigate(`/novels/${novelId}/${item.key}`)}
+                        >
+                          <span className="novel-sidebar__nav-icon">{item.icon}</span>
+                          <span className="novel-sidebar__nav-copy">
+                            <strong>{item.label}</strong>
+                            <small>{item.summary}</small>
+                          </span>
+                          <span className={`novel-sidebar__nav-state ${state.complete ? 'novel-sidebar__nav-state--done' : ''}`}>
+                            {state.label}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                ) : null}
+              </section>
+            )
+          })}
         </div>
       </aside>
 

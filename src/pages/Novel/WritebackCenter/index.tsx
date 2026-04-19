@@ -94,6 +94,18 @@ function writebackLabel(value: ChapterWritebackDiff['writebackStatus']): string 
   return '待写回'
 }
 
+function verificationColor(value: ChapterWritebackDiff['verificationStatus'] | ChapterFactExtract['verificationStatus']): string {
+  if (value === 'auto_ready') return 'green'
+  if (value === 'needs_review') return 'gold'
+  return 'red'
+}
+
+function verificationLabel(value: ChapterWritebackDiff['verificationStatus'] | ChapterFactExtract['verificationStatus']): string {
+  if (value === 'auto_ready') return '自动通过'
+  if (value === 'needs_review') return '待人工确认'
+  return '冲突'
+}
+
 function runStatusColor(status?: string | null): string {
   if (status === 'applied') return 'green'
   if (status === 'partially_failed') return 'orange'
@@ -132,6 +144,7 @@ export default function WritebackCenterPage({ novelId }: Props) {
   const [assetFilter, setAssetFilter] = useState<'all' | ChapterWritebackAssetType>('all')
   const [decisionFilter, setDecisionFilter] = useState<'all' | ChapterWritebackDiff['canonDecision']>('all')
   const [statusFilter, setStatusFilter] = useState<'all' | ChapterWritebackDiff['writebackStatus']>('all')
+  const [verificationFilter, setVerificationFilter] = useState<'all' | ChapterWritebackDiff['verificationStatus']>('all')
   const [editingDiff, setEditingDiff] = useState<ChapterWritebackDiff | null>(null)
   const [editingAfterState, setEditingAfterState] = useState('')
   const [editingReason, setEditingReason] = useState('')
@@ -174,12 +187,15 @@ export default function WritebackCenterPage({ novelId }: Props) {
     return rows.filter((item) => (assetFilter === 'all' || item.assetType === assetFilter))
       .filter((item) => (decisionFilter === 'all' || item.canonDecision === decisionFilter))
       .filter((item) => (statusFilter === 'all' || item.writebackStatus === statusFilter))
-  }, [assetFilter, centerData?.diffs, decisionFilter, statusFilter])
+      .filter((item) => (verificationFilter === 'all' || item.verificationStatus === verificationFilter))
+  }, [assetFilter, centerData?.diffs, decisionFilter, statusFilter, verificationFilter])
 
   const filteredExtracts = useMemo(() => {
     const rows = centerData?.extracts || []
-    return rows.filter((item) => assetFilter === 'all' || item.assetType === assetFilter)
-  }, [assetFilter, centerData?.extracts])
+    return rows
+      .filter((item) => assetFilter === 'all' || item.assetType === assetFilter)
+      .filter((item) => verificationFilter === 'all' || item.verificationStatus === verificationFilter)
+  }, [assetFilter, centerData?.extracts, verificationFilter])
 
   const coverageMap = useMemo(
     () => new Map((centerData?.coverage || []).map((item) => [item.assetType, item] as const)),
@@ -227,6 +243,11 @@ export default function WritebackCenterPage({ novelId }: Props) {
           <span style={{ color: '#6b7280' }}>{row.diffReason || '未填写原因'}</span>
         </div>
       ),
+    },
+    {
+      title: '验证',
+      width: 120,
+      render: (_value: unknown, row: ChapterWritebackDiff) => <Tag color={verificationColor(row.verificationStatus)}>{verificationLabel(row.verificationStatus)}</Tag>,
     },
     {
       title: 'Canon',
@@ -302,6 +323,7 @@ export default function WritebackCenterPage({ novelId }: Props) {
           <WorkspaceMetric label="事实抽取" value={centerData?.extracts.length || 0} tone="cool" />
           <WorkspaceMetric label="回写候选" value={centerData?.diffs.length || 0} />
           <WorkspaceMetric label="待确认" value={(centerData?.diffs || []).filter((item) => item.canonDecision === 'pending').length} tone="warm" />
+          <WorkspaceMetric label="人工确认" value={(centerData?.diffs || []).filter((item) => item.canonDecision === 'pending' && item.verificationStatus !== 'auto_ready').length} tone="warm" />
           <WorkspaceMetric label="已写回" value={(centerData?.diffs || []).filter((item) => item.writebackStatus === 'applied').length} />
           <WorkspaceMetric label="失败项" value={(centerData?.diffs || []).filter((item) => item.writebackStatus === 'failed').length} tone="warm" />
         </>
@@ -356,6 +378,16 @@ export default function WritebackCenterPage({ novelId }: Props) {
               ]}
               onChange={(value) => setStatusFilter(value as typeof statusFilter)}
             />
+            <Select
+              value={verificationFilter}
+              options={[
+                { value: 'all', label: '全部验证状态' },
+                { value: 'auto_ready', label: '自动通过' },
+                { value: 'needs_review', label: '待人工确认' },
+                { value: 'conflicted', label: '冲突' },
+              ]}
+              onChange={(value) => setVerificationFilter(value as typeof verificationFilter)}
+            />
           </div>
           {activeRun ? (
             <div style={{ marginTop: 12 }}>
@@ -391,7 +423,10 @@ export default function WritebackCenterPage({ novelId }: Props) {
                 <div key={extract.id} className="novel-note-list__item" style={{ display: 'grid', gap: 6 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
                     <strong>{resolveExtractTitle(extract)}</strong>
-                    <Tag color="geekblue">{assetLabel(extract.assetType)}</Tag>
+                    <Space size={6}>
+                      <Tag color="geekblue">{assetLabel(extract.assetType)}</Tag>
+                      <Tag color={verificationColor(extract.verificationStatus)}>{verificationLabel(extract.verificationStatus)}</Tag>
+                    </Space>
                   </div>
                   {extract.sourceText ? <div style={{ color: '#6b7280' }}>{extract.sourceText}</div> : null}
                   <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 12 }}>{prettyJson(extract.factJson)}</pre>

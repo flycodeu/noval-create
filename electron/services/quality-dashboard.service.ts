@@ -25,6 +25,8 @@ import type {
   QualityDashboardRiskItem,
   QualityDashboardRiskKind,
   QualityDashboardRiskSeverity,
+  QualityRepairAction,
+  QualityRepairMetricKey,
   RecallDiagnostics,
   RecallFallbackReason,
   RecallSnapshot,
@@ -50,6 +52,7 @@ import {
   characterStateVersions,
   characters,
   revisionTasks,
+  storyFacts,
   storyMemoryCheckpoints,
   storyVolumes,
   tasks,
@@ -178,9 +181,12 @@ const LANGUAGE_DRIFT_METRICS: Array<{ key: LanguageDriftMetricKey; label: string
 const CHAPTER_FUNCTION_TAGS: ChapterFunctionTag[] = ['setup', 'progression', 'reversal', 'payoff', 'breather', 'climax', 'exposition', 'closure']
 const CHAPTER_FUNCTION_WEAK_TAGS: ChapterFunctionTag[] = ['setup', 'exposition', 'breather']
 const QUALITY_RISK_LABELS: Record<QualityDashboardRiskKind, string> = {
+  commitment_delivery: '承诺兑现率',
   language_drift: 'AI味退化',
   feedback_recurrence: '审校复现',
   style_compliance: '风格硬约束',
+  voice_distinction: '角色声音区分度',
+  growth_cost_balance: '成长-代价平衡',
   story_dynamics: '主角与节奏',
   chapter_function: '章节功能',
   story_arc: '故事弧推进',
@@ -188,6 +194,15 @@ const QUALITY_RISK_LABELS: Record<QualityDashboardRiskKind, string> = {
   endgame_debt: '终局债务',
   recall: '召回可靠性',
   world_state: '状态稳定性',
+  info_reveal_pacing: '信息揭示节奏',
+}
+const QUALITY_REPAIR_METRIC_LABELS: Record<QualityRepairMetricKey, string> = {
+  commitment_delivery: '承诺兑现率',
+  voice_distinction: '角色声音区分度',
+  growth_cost_balance: '成长-代价平衡',
+  foreshadow_debt: '伏笔债务压力',
+  world_state_drift: '世界状态漂移',
+  info_reveal_pacing: '信息揭示节奏',
 }
 const STORY_DYNAMICS_KEYS = ['protagonist_setback', 'setback_summary', 'cost_present', 'cost_summary', 'cost_resolution_state', 'reversal_marker', 'reversal_summary', 'reversal_support_state', 'pace_marker', 'reward_state', 'protagonist_pressure'] as const
 const RECENT_LANGUAGE_DRIFT_WINDOW = 20
@@ -556,6 +571,27 @@ function sortDashboardRisks(left: QualityDashboardRiskItem, right: QualityDashbo
     || left.title.localeCompare(right.title)
 }
 
+function buildDashboardRiskIdentity(item: QualityDashboardRiskItem): string {
+  return [
+    item.metricKey || '',
+    item.kind,
+    item.severity,
+    item.volumeId || '',
+    item.title,
+    item.detail,
+    item.chapterNums.join(','),
+  ].join('::')
+}
+
+function dedupeDashboardRiskItems(items: QualityDashboardRiskItem[]): QualityDashboardRiskItem[] {
+  const seen = new Map<string, QualityDashboardRiskItem>()
+  items.forEach((item) => {
+    const key = buildDashboardRiskIdentity(item)
+    if (!seen.has(key)) seen.set(key, item)
+  })
+  return [...seen.values()]
+}
+
 function toDashboardSeverityFromStoryAlert(severity: StoryDynamicsAlert['severity']): QualityDashboardRiskSeverity {
   return severity === 'blocker' ? 'critical' : 'warning'
 }
@@ -606,6 +642,170 @@ function buildVolumeChapterRanges(
     .sort((left, right) => left.volumeNumber - right.volumeNumber || left.chapterStart - right.chapterStart)
 }
 
+function defaultMetricKeyForRisk(kind: QualityDashboardRiskKind): QualityRepairMetricKey | undefined {
+  switch (kind) {
+    case 'commitment_delivery':
+    case 'endgame_debt':
+      return 'commitment_delivery'
+    case 'voice_distinction':
+      return 'voice_distinction'
+    case 'growth_cost_balance':
+    case 'story_dynamics':
+      return 'growth_cost_balance'
+    case 'foreshadow_debt':
+      return 'foreshadow_debt'
+    case 'world_state':
+      return 'world_state_drift'
+    case 'info_reveal_pacing':
+      return 'info_reveal_pacing'
+    default:
+      return undefined
+  }
+}
+
+function defaultRelatedPageForRisk(kind: QualityDashboardRiskKind): string {
+  switch (kind) {
+    case 'world_state':
+      return 'timeline'
+    case 'foreshadow_debt':
+    case 'endgame_debt':
+    case 'commitment_delivery':
+      return 'outline'
+    default:
+      return 'writing'
+  }
+}
+
+function qualityRepairMetricLabel(metricKey: QualityRepairMetricKey): string {
+  return QUALITY_REPAIR_METRIC_LABELS[metricKey]
+}
+
+function toRepairTaskSeverity(severity: QualityDashboardRiskSeverity): 'high' | 'medium' | 'low' {
+  if (severity === 'critical') return 'high'
+  if (severity === 'warning') return 'medium'
+  return 'low'
+}
+
+function buildDefaultRiskWhyItHappened(kind: QualityDashboardRiskKind, detail: string): string {
+  switch (kind) {
+    case 'commitment_delivery':
+    case 'endgame_debt':
+      return detail || '承诺没有稳定进入卷级设计、章节合同和实际正文执行链，导致兑现节点开始漂移。'
+    case 'voice_distinction':
+      return detail || '对白指纹、角色声音锁和近期审校信号出现重叠，角色说话方式开始同质化。'
+    case 'growth_cost_balance':
+    case 'story_dynamics':
+      return detail || '成长收益、主角受挫和代价持续性没有保持同步，导致剧情推进出现“只拿收益”或“只压不收”的失衡。'
+    case 'foreshadow_debt':
+      return detail || '伏笔已进入应回收窗口，但合同推进、桥段铺设或延期说明没有及时跟上。'
+    case 'world_state':
+      return detail || '正文状态变更、章后回写和状态总账之间没有保持一致，出现漂移或冲突。'
+    case 'info_reveal_pacing':
+      return detail || '事实的读者知情、主角知情与计划揭示节奏发生错位，导致揭示过早或过晚。'
+    case 'recall':
+      return detail || '章节生成依赖的历史片段出现降级、缺失或过期，当前上下文稳定性不足。'
+    default:
+      return detail || '当前指标已经跨过预警阈值，需要把问题定位到具体章节和修复链路。'
+  }
+}
+
+function buildDefaultRiskHowToFix(kind: QualityDashboardRiskKind): string {
+  switch (kind) {
+    case 'commitment_delivery':
+    case 'endgame_debt':
+      return '先补齐卷承诺与章节合同绑定，再把兑现或推进动作落到具体章节任务。'
+    case 'voice_distinction':
+      return '优先回查相关章节的对白，把角色目标、词汇偏好和语气差异重新写实。'
+    case 'growth_cost_balance':
+    case 'story_dynamics':
+      return '补出代价留痕、收益交换或反转支撑，让主角成长与付出重新对应。'
+    case 'foreshadow_debt':
+      return '决定是补写回收桥段、显式延期说明，还是把伏笔转移到新的兑现节点。'
+    case 'world_state':
+      return '核对正文、时间轴和状态版本，优先同步冲突状态，再明确哪些偏移是作者允许的。'
+    case 'info_reveal_pacing':
+      return '把信息揭示重新绑定到目标章节，必要时补桥段或后移暴露点。'
+    case 'recall':
+      return '先恢复召回链路或缩窄上下文依赖，再继续基于旧片段推进后续章节。'
+    default:
+      return '把风险落成修订任务，先处理受影响最大的章节或资产，再回看指标是否恢复。'
+  }
+}
+
+function slugifyRiskActionId(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
+function createRepairAction(params: {
+  metricKey: QualityRepairMetricKey
+  actionType: QualityRepairAction['actionType']
+  label: string
+  description: string
+  targetPage: string
+  severity?: QualityDashboardRiskSeverity
+  safeToExecute?: boolean
+  issueKey?: string
+  taskType?: string
+  taskTitle?: string
+  taskDescription?: string
+  fixBrief?: string
+  chapterId?: number
+  chapterNum?: number
+  entityType?: string
+  entityId?: number
+  navigationQuery?: Record<string, string>
+  originMeta?: Record<string, unknown>
+}): QualityRepairAction {
+  const suffix = slugifyRiskActionId([
+    params.metricKey,
+    params.actionType,
+    params.chapterId || params.chapterNum || '',
+    params.entityType || '',
+    params.entityId || '',
+    params.issueKey || params.label,
+  ].join('-'))
+  return {
+    id: suffix,
+    label: params.label,
+    description: params.description,
+    actionType: params.actionType,
+    metricKey: params.metricKey,
+    targetPage: params.targetPage,
+    safeToExecute: params.safeToExecute === true,
+    chapterId: params.chapterId,
+    chapterNum: params.chapterNum,
+    entityType: params.entityType,
+    entityId: params.entityId,
+    navigationQuery: params.navigationQuery,
+    taskDraft: params.taskType && params.taskTitle && params.taskDescription
+      ? {
+        issueKey: params.issueKey,
+        taskType: params.taskType,
+        severity: toRepairTaskSeverity(params.severity || 'warning'),
+        title: params.taskTitle,
+        description: params.taskDescription,
+        fixBrief: params.fixBrief,
+        relatedPage: params.targetPage,
+        entityType: params.entityType,
+        entityId: params.entityId,
+        chapterId: params.chapterId,
+        originMeta: params.originMeta,
+      }
+      : undefined,
+  }
+}
+
+interface DashboardRiskItemExtras {
+  metricKey?: QualityRepairMetricKey
+  whyItHappened?: string
+  howToFix?: string
+  suggestedActions?: QualityRepairAction[]
+}
+
 function createDashboardRiskItem(
   kind: QualityDashboardRiskKind,
   severity: QualityDashboardRiskSeverity,
@@ -613,14 +813,40 @@ function createDashboardRiskItem(
   detail: string,
   chapterNums: number[],
   volumeId?: number,
+  extras: DashboardRiskItemExtras = {},
 ): QualityDashboardRiskItem {
+  const normalizedChapterNums = dedupeChapterNums(chapterNums)
+  const metricKey = extras.metricKey || defaultMetricKeyForRisk(kind)
+  const suggestedActions = extras.suggestedActions || (
+    metricKey
+      ? [createRepairAction({
+        metricKey,
+        actionType: 'create_revision_task',
+        label: '生成修订建议',
+        description: '将该风险落为修订任务，进入后续修复链路。',
+        targetPage: defaultRelatedPageForRisk(kind),
+        severity,
+        safeToExecute: true,
+        issueKey: `${metricKey}:${title}`,
+        taskType: 'continuity',
+        taskTitle: title,
+        taskDescription: detail,
+        fixBrief: buildDefaultRiskHowToFix(kind),
+        chapterNum: normalizedChapterNums[0],
+      })]
+      : []
+  )
   return {
     kind,
     severity,
     title,
     detail,
-    chapterNums: dedupeChapterNums(chapterNums),
+    chapterNums: normalizedChapterNums,
     volumeId,
+    metricKey,
+    whyItHappened: extras.whyItHappened || buildDefaultRiskWhyItHappened(kind, detail),
+    howToFix: extras.howToFix || buildDefaultRiskHowToFix(kind),
+    suggestedActions,
   }
 }
 
@@ -783,6 +1009,231 @@ function summarizeReadinessStatus(input: {
 
 function clampHealthScore(value: number): number {
   return clampNumber(value, 0, 100, 0)
+}
+
+interface ProductionReadinessInputs {
+  latestBatchTask: typeof tasks.$inferSelect | null
+  latestBatchSnapshotId?: number
+  contractBlockerCount: number
+  contractWarningCount: number
+  writebackPendingCount: number
+  writebackFailedCount: number
+  aiRecurrenceHighRiskCount: number
+  feedbackPauseSuggestedCount: number
+  latestBatchConsecutiveRecallFallbackChapters: number
+}
+
+interface BatchHealthBundleInputs {
+  latestBatchTask: typeof tasks.$inferSelect | null
+  latestBatchTaskId?: number
+  latestBatchSnapshotId?: number
+  latestBatchProgress: Partial<ChapterBatchAutoGenerateStatus>
+  batchChapterIds: number[]
+  batchChapterNums: number[]
+  rewriteTaskCount: number
+  batchPendingWritebackCount: number
+  pendingRevisionCount: number
+  staleCheckpointCount: number
+  latestCheckpointChapterGap: number
+  recallDegradedChapterCount: number
+  latestBatchConsecutiveRecallFallbackChapters: number
+  worldConflictCount: number
+  writebackPendingCount: number
+  writebackFailedCount: number
+  contractReadyRate: number
+  contractBlockerCount: number
+  contractWarningCount: number
+  contractProgressMetrics: {
+    storyThreadAdvanceRate: number
+    storyThreadMentionOnlyCount: number
+    foreshadowBlockedCount: number
+    foreshadowStaleCount: number
+  }
+  inspectionPassedChapterCount: number
+  rewrittenChapterCount: number
+  inspectionBlockedCount: number
+  inspectionWarningCount: number
+  batchGateBlockedCount: number
+  latestBatchFailedChapterCount: number
+  latestBatchInspectionsCount: number
+  recentBatchRecallAlerts: string[]
+}
+
+interface BatchHealthBundle {
+  batchHealth: QualityDashboardData['batchHealth']
+  continuityHealth: QualityDashboardData['continuityHealth']
+  contractDelivery: QualityDashboardData['contractDelivery']
+  batchReview: QualityDashboardData['batchReview']
+}
+
+interface MillionWordDashboardSummary extends BatchHealthBundle {
+  dashboardVersion: 'v1-health'
+  dashboardNotes: string[]
+  productionReadiness: QualityDashboardData['productionReadiness']
+}
+
+function buildProductionReadinessSummary(input: ProductionReadinessInputs): QualityDashboardData['productionReadiness'] {
+  const productionWarnings = [
+    input.writebackPendingCount > 0 ? `仍有 ${input.writebackPendingCount} 章章后回写未闭环。` : '',
+    input.contractWarningCount > 0 ? `有 ${input.contractWarningCount} 章合同交付处于预警状态。` : '',
+    input.latestBatchConsecutiveRecallFallbackChapters > 0 ? `最近连续 ${input.latestBatchConsecutiveRecallFallbackChapters} 章召回降级。` : '',
+    input.latestBatchTask?.status === 'paused' && input.latestBatchTask.errorMessage ? input.latestBatchTask.errorMessage : '',
+  ].filter(Boolean)
+  const productionBlockers = [
+    input.contractBlockerCount > 0 ? `有 ${input.contractBlockerCount} 章合同交付被章节门阻断。` : '',
+    input.writebackFailedCount > 0 ? `有 ${input.writebackFailedCount} 章章后回写失败。` : '',
+    input.feedbackPauseSuggestedCount > 0 ? `审校复现已有 ${input.feedbackPauseSuggestedCount} 项建议暂停继续批量生成。` : '',
+    input.latestBatchConsecutiveRecallFallbackChapters >= 3 ? `连续召回降级已达到 ${input.latestBatchConsecutiveRecallFallbackChapters} 章，需先恢复记忆链路。` : '',
+  ].filter(Boolean)
+  const productionReadyRate = clampHealthScore(
+    100
+    - input.contractBlockerCount * 18
+    - input.writebackFailedCount * 14
+    - Math.min(input.writebackPendingCount, 6) * 4
+    - input.feedbackPauseSuggestedCount * 12
+    - input.aiRecurrenceHighRiskCount * 5
+    - Math.min(input.latestBatchConsecutiveRecallFallbackChapters, 5) * 6,
+  )
+  const productionReadinessStatus = summarizeReadinessStatus({
+    contractBlockerCount: input.contractBlockerCount,
+    writebackFailedCount: input.writebackFailedCount,
+    feedbackPauseSuggestedCount: input.feedbackPauseSuggestedCount,
+    consecutiveRecallFallbackChapters: input.latestBatchConsecutiveRecallFallbackChapters,
+    warningCount: productionWarnings.length,
+    readyRate: productionReadyRate,
+  })
+  return {
+    status: productionReadinessStatus,
+    summary: productionReadinessStatus === 'ready'
+      ? `当前产线可继续推进，综合就绪度 ${productionReadyRate}%。`
+      : productionReadinessStatus === 'warning'
+        ? `当前产线可谨慎继续，综合就绪度 ${productionReadyRate}%，建议先清理预警。`
+        : `当前产线不宜继续扩批，综合就绪度 ${productionReadyRate}%，请先处理阻断项。`,
+    blockers: productionBlockers,
+    warnings: productionWarnings,
+    suggestedActions: [
+      input.contractBlockerCount > 0 ? '先回到章节合同与章节验收门，处理 blocker 章节。' : '',
+      input.writebackPendingCount > 0 || input.writebackFailedCount > 0 ? '进入章后状态回写中心，清掉 pending/failed run。' : '',
+      input.feedbackPauseSuggestedCount > 0 ? '先在质量仪表盘检查复现问题，再启动下一批。' : '',
+      input.latestBatchSnapshotId ? '下一批之前先在回滚工作台登记批次检查结论并补齐作者锁定项。' : '',
+    ].filter(Boolean),
+    readyRate: productionReadyRate,
+    contractBlockerCount: input.contractBlockerCount,
+    writebackPendingCount: input.writebackPendingCount,
+    writebackFailedCount: input.writebackFailedCount,
+    aiRecurrenceHighRiskCount: input.aiRecurrenceHighRiskCount,
+    feedbackPauseSuggestedCount: input.feedbackPauseSuggestedCount,
+    consecutiveRecallFallbackChapters: input.latestBatchConsecutiveRecallFallbackChapters,
+    activeBatchTaskId: input.latestBatchTask?.status === 'running' || input.latestBatchTask?.status === 'pending' ? input.latestBatchTask.id : undefined,
+    latestBatchSnapshotId: input.latestBatchSnapshotId,
+  }
+}
+
+function buildBatchHealthSummaryBundle(input: BatchHealthBundleInputs): BatchHealthBundle {
+  const batchStatus = (
+    input.latestBatchTask?.status === 'cancel_requested'
+      ? 'running'
+      : (input.latestBatchTask?.status || 'idle')
+  ) as QualityDashboardData['batchHealth']['status']
+  const completedChapterCount = Array.isArray(input.latestBatchProgress.completedChapterIds)
+    ? input.latestBatchProgress.completedChapterIds.length
+    : 0
+  const failedChapterCount = Array.isArray(input.latestBatchProgress.failedChapterIds)
+    ? input.latestBatchProgress.failedChapterIds.length
+    : 0
+  const warningCount = Array.isArray(input.latestBatchProgress.warnings)
+    ? input.latestBatchProgress.warnings.length
+    : 0
+  const batchHealth: QualityDashboardData['batchHealth'] = {
+    latestBatchTaskId: input.latestBatchTaskId,
+    latestBatchSnapshotId: input.latestBatchSnapshotId,
+    status: batchStatus,
+    chapterIds: input.batchChapterIds,
+    chapterStart: input.batchChapterNums[0],
+    chapterEnd: input.batchChapterNums[input.batchChapterNums.length - 1],
+    completedChapterCount,
+    failedChapterCount,
+    warningCount,
+    rewriteTaskCount: input.rewriteTaskCount,
+    pendingWritebackCount: input.batchPendingWritebackCount,
+    pendingRevisionCount: input.pendingRevisionCount,
+    pausedReason: typeof input.latestBatchProgress.pauseReason === 'string' && input.latestBatchProgress.pauseReason.trim()
+      ? input.latestBatchProgress.pauseReason
+      : (input.latestBatchTask?.errorMessage || undefined),
+    canContinue: batchStatus === 'paused',
+    summary: batchStatus === 'idle'
+      ? '当前没有运行中的章节批次。'
+      : `${summarizeBatchRange(input.batchChapterNums)} 批次状态：${batchStatus}，已完成 ${completedChapterCount}/${input.batchChapterIds.length || input.batchChapterNums.length} 章。`,
+  }
+  const continuityHealth: QualityDashboardData['continuityHealth'] = {
+    staleCheckpointCount: input.staleCheckpointCount,
+    latestCheckpointChapterGap: input.latestCheckpointChapterGap,
+    recallDegradedChapterCount: input.recallDegradedChapterCount,
+    consecutiveRecallFallbackChapters: input.latestBatchConsecutiveRecallFallbackChapters,
+    worldConflictCount: input.worldConflictCount,
+    writebackPendingCount: input.writebackPendingCount,
+    writebackFailedCount: input.writebackFailedCount,
+  }
+  const contractDelivery: QualityDashboardData['contractDelivery'] = {
+    readyRate: input.contractReadyRate,
+    blockerCount: input.contractBlockerCount,
+    warningCount: input.contractWarningCount,
+    storyThreadAdvanceRate: input.contractProgressMetrics.storyThreadAdvanceRate,
+    storyThreadMentionOnlyCount: input.contractProgressMetrics.storyThreadMentionOnlyCount,
+    foreshadowBlockedCount: input.contractProgressMetrics.foreshadowBlockedCount,
+    foreshadowStaleCount: input.contractProgressMetrics.foreshadowStaleCount,
+  }
+  const batchReview: QualityDashboardData['batchReview'] = {
+    latestBatchSnapshotId: input.latestBatchSnapshotId,
+    latestBatchTaskId: input.latestBatchTaskId,
+    chapterStart: input.batchChapterNums[0],
+    chapterEnd: input.batchChapterNums[input.batchChapterNums.length - 1],
+    chapterCount: input.batchChapterNums.length,
+    passedChapterCount: input.inspectionPassedChapterCount,
+    rewrittenChapterCount: input.rewrittenChapterCount,
+    failedChapterCount: Math.max(
+      input.inspectionBlockedCount,
+      input.batchGateBlockedCount,
+      input.latestBatchFailedChapterCount,
+    ),
+    pendingWritebackCount: input.batchPendingWritebackCount,
+    recurringIssues: [],
+    recallAlerts: input.recentBatchRecallAlerts,
+    avoidNextBatch: [
+      input.inspectionBlockedCount > 0 ? '先处理本批 blocked 检查记录，再开下一批。' : '',
+      input.inspectionWarningCount > 0 ? '先清理批次 warning 项，再推进下一批。' : '',
+      input.batchPendingWritebackCount > 0 ? '回写未闭环前不要继续扩批，避免状态漂移叠加。' : '',
+      input.latestBatchConsecutiveRecallFallbackChapters > 0 ? '召回降级未恢复前，避免继续拉长批量生成跨度。' : '',
+    ].filter(Boolean),
+    summary: input.latestBatchSnapshotId
+      ? `${summarizeBatchRange(input.batchChapterNums)} 已登记 ${input.latestBatchInspectionsCount} 条批次检查，${input.inspectionBlockedCount} 条阻断，${input.inspectionWarningCount} 条预警。`
+      : '当前还没有可回查的章节批次快照。',
+  }
+
+  return {
+    batchHealth,
+    continuityHealth,
+    contractDelivery,
+    batchReview,
+  }
+}
+
+function buildMillionWordDashboardSummary(input: ProductionReadinessInputs & BatchHealthBundleInputs & {
+  recurringIssues: string[]
+}): MillionWordDashboardSummary {
+  const productionReadiness = buildProductionReadinessSummary(input)
+  const batchBundle = buildBatchHealthSummaryBundle(input)
+  batchBundle.batchReview.recurringIssues = input.recurringIssues
+
+  return {
+    dashboardVersion: 'v1-health',
+    dashboardNotes: [
+      '当前版本负责“是否继续下一批”的健康汇总与批次复盘。',
+      '解释原因、修法建议和动作入口统一归入质量修复引擎阶段。',
+    ],
+    productionReadiness,
+    ...batchBundle,
+  }
 }
 
 function computeVolumeHealthScore(input: {
@@ -2046,6 +2497,33 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     averageScore: roundMetric(averageNumbers(styleComplianceEntries.map((entry) => entry.styleCompliance.score))),
     recentAlerts: styleComplianceAlerts.slice(0, 6),
   }
+  const contractValidationStatuses = rows.reduce<NonNullable<ReturnType<typeof parseChapterContractValidationFromReviewNotes>>[]>((result, row) => {
+    const parsed = parseChapterContractValidationFromReviewNotes(row.reviewNotesJson)
+    if (parsed) result.push(parsed)
+    return result
+  }, [])
+  const contractBlockerCount = contractValidationStatuses.filter((item) => item.status === 'blocker').length
+  const contractWarningCount = contractValidationStatuses.filter((item) => item.status === 'warning').length
+  const contractReadyRate = contractValidationStatuses.length > 0
+    ? Math.round((contractValidationStatuses.filter((item) => item.status === 'pass').length / contractValidationStatuses.length) * 100)
+    : 0
+  const contractProgressMetrics = collectContractProgressMetrics(rows)
+  const contractStatusEntries = rows.reduce<Array<{
+    chapterId: number
+    chapterNum: number
+    volumeId: number | null
+    validation: NonNullable<ReturnType<typeof parseChapterContractValidationFromReviewNotes>>
+  }>>((result, row) => {
+    const validation = parseChapterContractValidationFromReviewNotes(row.reviewNotesJson)
+    if (!validation) return result
+    result.push({
+      chapterId: row.id,
+      chapterNum: row.chapterNum,
+      volumeId: row.volumeId,
+      validation,
+    })
+    return result
+  }, [])
 
   const averageLanguageDriftMetrics = averageLanguageDrift(languageMetricsList)
   const languageDriftTrendSummaries = LANGUAGE_DRIFT_METRICS.map(({ key, label }) => summarizeTrend(key, label, languageDriftTrends[key]))
@@ -2648,6 +3126,493 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
       topRisks,
     }
   }).sort((left, right) => left.volumeNumber - right.volumeNumber || left.chapterStart - right.chapterStart)
+  const chapterDetailById = new Map(chapterDetails.map((entry) => [entry.chapterId, entry] as const))
+  const chapterDetailByNum = new Map(chapterDetails.map((entry) => [entry.chapterNum, entry] as const))
+  const volumeNumberById = new Map(volumeRows.map((row) => [row.id, row.volumeNumber || row.id] as const))
+  const storyFactRows = db.select({
+    id: storyFacts.id,
+    title: storyFacts.title,
+    volumeId: storyFacts.volumeId,
+    readerKnownChapterId: storyFacts.readerKnownChapterId,
+    protagonistKnownChapterId: storyFacts.protagonistKnownChapterId,
+    targetRevealChapterId: storyFacts.targetRevealChapterId,
+    forbiddenBeforeVolume: storyFacts.forbiddenBeforeVolume,
+    plannedRevealVolume: storyFacts.plannedRevealVolume,
+  }).from(storyFacts).where(eq(storyFacts.novelId, novelId)).all()
+  const repairRiskItems: QualityDashboardRiskItem[] = []
+  const addRepairRisk = (risk: QualityDashboardRiskItem | null | undefined) => {
+    if (!risk) return
+    repairRiskItems.push(risk)
+  }
+  const createChapterNavigationQuery = (chapterId?: number, chapterNum?: number) => {
+    const query: Record<string, string> = {}
+    if (typeof chapterId === 'number') query.chapterId = String(chapterId)
+    if (typeof chapterNum === 'number') query.chapterNum = String(chapterNum)
+    return Object.keys(query).length > 0 ? query : undefined
+  }
+
+  const contractBlockerChapters = contractStatusEntries.filter((entry) => entry.validation.status === 'blocker')
+  const firstContractBlocker = contractBlockerChapters[0]
+  if (contractBlockerCount > 0 || endgameDebtSnapshot.overview.overdueCount > 0 || endgameDebtSnapshot.overview.unboundCount > 0 || contractProgressMetrics.storyThreadMentionOnlyCount > 0) {
+    const chapterNums = dedupeChapterNums([
+      ...contractBlockerChapters.slice(0, 3).map((entry) => entry.chapterNum),
+      ...endgameDebtSnapshot.recentAlerts.slice(0, 2)
+        .map((alert) => alert.targetResolutionChapter)
+        .filter((chapterNum): chapterNum is number => typeof chapterNum === 'number'),
+    ])
+    addRepairRisk(createDashboardRiskItem(
+      'commitment_delivery',
+      contractBlockerCount > 0 || endgameDebtSnapshot.overview.overdueCount > 0 ? 'critical' : 'warning',
+      contractBlockerCount > 0
+        ? '章节承诺兑现被阻断'
+        : '承诺兑现链开始失衡',
+      `合同通过率 ${contractReadyRate}%，blocker ${contractBlockerCount}，提及未推进 ${contractProgressMetrics.storyThreadMentionOnlyCount}，终局过期 ${endgameDebtSnapshot.overview.overdueCount}，未绑定 ${endgameDebtSnapshot.overview.unboundCount}。`,
+      chapterNums,
+      volumeIdByChapterNum.get(chapterNums[0] || 0),
+      {
+        metricKey: 'commitment_delivery',
+        whyItHappened: '卷承诺、章节合同与终局资产之间的绑定不够稳定，导致“写到了但没推进”和“承诺存在但无人服务”同时出现。',
+        howToFix: '先清掉 blocker 章节，再把未绑定终局承诺和只提及未推进的线程补进合同或桥接场景。',
+        suggestedActions: [
+          createRepairAction({
+            metricKey: 'commitment_delivery',
+            actionType: 'create_revision_task',
+            label: '生成兑现修订任务',
+            description: '把承诺兑现缺口落为修订任务，统一进入修订中心。',
+            targetPage: 'revision',
+            severity: contractBlockerCount > 0 ? 'critical' : 'warning',
+            safeToExecute: true,
+            issueKey: `commitment-delivery-${firstContractBlocker?.chapterNum || 'global'}`,
+            taskType: 'continuity',
+            taskTitle: '补齐承诺兑现链',
+            taskDescription: `处理合同 blocker、终局过期/未绑定和线程只提及未推进的问题。${chapterNums.length > 0 ? `重点回查章节：第${chapterNums.join('、')}章。` : ''}`,
+            fixBrief: '先修 blocker 章节，再补卷级绑定和桥接推进。',
+            chapterId: firstContractBlocker?.chapterId,
+            chapterNum: firstContractBlocker?.chapterNum,
+            navigationQuery: createChapterNavigationQuery(firstContractBlocker?.chapterId, firstContractBlocker?.chapterNum),
+          }),
+          createRepairAction({
+            metricKey: 'commitment_delivery',
+            actionType: 'open_chapter_rewrite',
+            label: firstContractBlocker ? `重写第${firstContractBlocker.chapterNum}章` : '打开兑现缺口章节',
+            description: '定位首个 blocker 章节，直接进入正文修订。',
+            targetPage: 'writing',
+            severity: 'critical',
+            issueKey: `commitment-rewrite-${firstContractBlocker?.chapterNum || 'global'}`,
+            taskType: 'rewrite',
+            taskTitle: firstContractBlocker ? `重写第${firstContractBlocker.chapterNum}章以兑现章节合同` : '重写章节以兑现章节合同',
+            taskDescription: '围绕合同未兑现项补足推进、回收和代价落地。',
+            fixBrief: '优先让章节完成既定承诺，不再停留在“提及但未推进”。',
+            chapterId: firstContractBlocker?.chapterId,
+            chapterNum: firstContractBlocker?.chapterNum,
+            navigationQuery: createChapterNavigationQuery(firstContractBlocker?.chapterId, firstContractBlocker?.chapterNum),
+          }),
+        ],
+      },
+    ))
+  }
+
+  const dialogueRiskChapters = chapterDetails.filter((entry) =>
+    Boolean(entry.dialogueReview) && (
+      (entry.dialogueReview?.similarities.length || 0) > 0
+      || (entry.dialogueReview?.drifts.length || 0) > 0
+      || (entry.dialogueReview?.risks.length || 0) > 0
+    ))
+  const firstDialogueRiskChapter = dialogueRiskChapters[0]
+  if (dialogueSnapshot.dialogueFingerprintStats.highSimilarityPairCount > 0 || dialogueSnapshot.dialogueFingerprintStats.driftingCharacterCount > 0 || dialogueSnapshot.requiredDialogueVoiceLocks.length > 0) {
+    const topPair = dialogueSnapshot.crossCharacterDialogueSimilarity[0]
+    addRepairRisk(createDashboardRiskItem(
+      'voice_distinction',
+      dialogueSnapshot.dialogueFingerprintStats.highSimilarityPairCount >= 2 ? 'critical' : 'warning',
+      topPair
+        ? `${topPair.characterAName} / ${topPair.characterBName} 对白趋同`
+        : '角色声音区分度下降',
+      `高相似角色对 ${dialogueSnapshot.dialogueFingerprintStats.highSimilarityPairCount} 组，漂移角色 ${dialogueSnapshot.dialogueFingerprintStats.driftingCharacterCount} 名，待加 voice lock ${dialogueSnapshot.requiredDialogueVoiceLocks.length} 名。`,
+      dialogueRiskChapters.slice(0, 4).map((entry) => entry.chapterNum),
+      firstDialogueRiskChapter?.volumeId,
+      {
+        metricKey: 'voice_distinction',
+        whyItHappened: '对白层面的语气、词汇和关系张力没有持续分化，近期章节开始把多个角色写成同一种发声方式。',
+        howToFix: '优先回查最近有对白漂移的章节，补角色声音锁，再重写关键对白段落。',
+        suggestedActions: [
+          createRepairAction({
+            metricKey: 'voice_distinction',
+            actionType: 'create_revision_task',
+            label: '生成对白修订任务',
+            description: '把角色声音同质化问题落到修订中心。',
+            targetPage: 'revision',
+            severity: dialogueSnapshot.dialogueFingerprintStats.highSimilarityPairCount >= 2 ? 'critical' : 'warning',
+            safeToExecute: true,
+            issueKey: `voice-distinction-${topPair?.characterAId || 'global'}-${topPair?.characterBId || ''}`,
+            taskType: 'continuity',
+            taskTitle: '修复角色对白同质化',
+            taskDescription: `处理高相似角色对白、角色声音漂移和 voice lock 缺失。${topPair ? `重点角色：${topPair.characterAName} / ${topPair.characterBName}。` : ''}`,
+            fixBrief: '为关键角色补声音锁，并重写受影响对白。',
+            chapterId: firstDialogueRiskChapter?.chapterId,
+            chapterNum: firstDialogueRiskChapter?.chapterNum,
+            navigationQuery: createChapterNavigationQuery(firstDialogueRiskChapter?.chapterId, firstDialogueRiskChapter?.chapterNum),
+          }),
+          createRepairAction({
+            metricKey: 'voice_distinction',
+            actionType: 'open_chapter_rewrite',
+            label: firstDialogueRiskChapter ? `重写第${firstDialogueRiskChapter.chapterNum}章对白` : '打开对白问题章节',
+            description: '直接进入最近有对白漂移的章节处理对白段落。',
+            targetPage: 'writing',
+            severity: 'warning',
+            issueKey: `voice-rewrite-${firstDialogueRiskChapter?.chapterNum || 'global'}`,
+            taskType: 'rewrite',
+            taskTitle: firstDialogueRiskChapter ? `重写第${firstDialogueRiskChapter.chapterNum}章对白层` : '重写对白层',
+            taskDescription: '按角色声音锁重写对白，拉开角色语气和表达习惯差异。',
+            fixBrief: '减少同质句式，强化角色专属表达和关系张力。',
+            chapterId: firstDialogueRiskChapter?.chapterId,
+            chapterNum: firstDialogueRiskChapter?.chapterNum,
+            navigationQuery: createChapterNavigationQuery(firstDialogueRiskChapter?.chapterId, firstDialogueRiskChapter?.chapterNum),
+          }),
+        ],
+      },
+    ))
+  }
+
+  const growthAlertChapterNums = dedupeChapterNums(storyPacingAlerts.flatMap((alert) => alert.chapterNums).slice(0, 6))
+  const firstGrowthChapter = chapterDetailByNum.get(growthAlertChapterNums[0] || 0)
+  if (protagonistSetbackSummary.longestSmoothRun >= SMOOTH_RUN_THRESHOLD || costPersistenceState.evaporatedCostCount > 0 || costPersistenceState.unresolvedCostCount > 0) {
+    addRepairRisk(createDashboardRiskItem(
+      'growth_cost_balance',
+      costPersistenceState.evaporatedCostCount > 0 || protagonistSetbackSummary.longestSmoothRun >= SMOOTH_RUN_THRESHOLD + 1 ? 'critical' : 'warning',
+      protagonistSetbackSummary.longestSmoothRun >= SMOOTH_RUN_THRESHOLD
+        ? '主角成长开始脱离代价'
+        : '代价回收链条松动',
+      `最长顺滑连跑 ${protagonistSetbackSummary.longestSmoothRun} 章，代价蒸发 ${costPersistenceState.evaporatedCostCount} 条，未收束代价 ${costPersistenceState.unresolvedCostCount} 条。`,
+      growthAlertChapterNums,
+      firstGrowthChapter?.volumeId,
+      {
+        metricKey: 'growth_cost_balance',
+        whyItHappened: '收益、代价和反转的相互制衡开始失步，近期推进更像单向给奖励或单向施压。',
+        howToFix: '补出代价留痕、反转支撑或阶段性回报，避免主角只拿收益或长时间只有压制没有兑现。',
+        suggestedActions: [
+          createRepairAction({
+            metricKey: 'growth_cost_balance',
+            actionType: 'create_revision_task',
+            label: '生成成长平衡修订',
+            description: '把成长收益与代价失衡问题落为修订任务。',
+            targetPage: 'revision',
+            severity: costPersistenceState.evaporatedCostCount > 0 ? 'critical' : 'warning',
+            safeToExecute: true,
+            issueKey: `growth-cost-balance-${firstGrowthChapter?.chapterNum || 'global'}`,
+            taskType: 'continuity',
+            taskTitle: '修复成长-代价失衡',
+            taskDescription: '补齐代价持续、阶段回报与反转支撑，让主角成长重新有代价锚点。',
+            fixBrief: '先处理最近顺滑连跑和代价蒸发章节。',
+            chapterId: firstGrowthChapter?.chapterId,
+            chapterNum: firstGrowthChapter?.chapterNum,
+            navigationQuery: createChapterNavigationQuery(firstGrowthChapter?.chapterId, firstGrowthChapter?.chapterNum),
+          }),
+          createRepairAction({
+            metricKey: 'growth_cost_balance',
+            actionType: 'open_bridge_patch',
+            label: firstGrowthChapter ? `补写第${firstGrowthChapter.chapterNum}章过桥` : '补写过桥段',
+            description: '为最近失衡段落补代价留痕或阶段回报。',
+            targetPage: 'writing',
+            severity: 'warning',
+            issueKey: `growth-bridge-${firstGrowthChapter?.chapterNum || 'global'}`,
+            taskType: 'bridge_patch',
+            taskTitle: firstGrowthChapter ? `补写第${firstGrowthChapter.chapterNum}章过桥段` : '补写成长过桥段',
+            taskDescription: '补出代价延续、反转支撑或收益交换桥段。',
+            fixBrief: '在不推翻主线的情况下把代价和奖励重新挂钩。',
+            chapterId: firstGrowthChapter?.chapterId,
+            chapterNum: firstGrowthChapter?.chapterNum,
+            navigationQuery: createChapterNavigationQuery(firstGrowthChapter?.chapterId, firstGrowthChapter?.chapterNum),
+          }),
+        ],
+      },
+    ))
+  }
+
+  const overdueForeshadowChapterNums = dedupeChapterNums(foreshadowSnapshot.overdue.slice(0, 4).flatMap((card) => {
+    const values = [card.targetPayoffChapter, card.plantedChapter, card.startChapter]
+    return values.filter((chapterNum): chapterNum is number => typeof chapterNum === 'number')
+  }))
+  const firstForeshadowChapter = chapterDetailByNum.get(overdueForeshadowChapterNums[0] || 0)
+  if (foreshadowSnapshot.overdue.length > 0 || contractProgressMetrics.foreshadowBlockedCount > 0 || contractProgressMetrics.foreshadowStaleCount > 0) {
+    addRepairRisk(createDashboardRiskItem(
+      'foreshadow_debt',
+      foreshadowSnapshot.overdue.length > 0 ? 'critical' : 'warning',
+      foreshadowSnapshot.overdue.length > 0 ? '伏笔已进入超期区' : '伏笔债务开始堆积',
+      `待回收 ${foreshadowSnapshot.pending.length}，即将到期 ${foreshadowSnapshot.dueSoon.length}，已超期 ${foreshadowSnapshot.overdue.length}，合同阻塞 ${contractProgressMetrics.foreshadowBlockedCount}，失管 ${contractProgressMetrics.foreshadowStaleCount}。`,
+      overdueForeshadowChapterNums,
+      firstForeshadowChapter?.volumeId,
+      {
+        metricKey: 'foreshadow_debt',
+        whyItHappened: '伏笔进入计划兑现窗口后，没有被章节合同、桥段铺设或延期说明及时接住。',
+        howToFix: '判断每条伏笔是立即回收、补桥延期，还是显式标记允许偏移，不要继续无声拖延。',
+        suggestedActions: [
+          createRepairAction({
+            metricKey: 'foreshadow_debt',
+            actionType: 'create_revision_task',
+            label: '生成伏笔修订任务',
+            description: '把超期或失管伏笔打包进入修订中心。',
+            targetPage: 'revision',
+            severity: foreshadowSnapshot.overdue.length > 0 ? 'critical' : 'warning',
+            safeToExecute: true,
+            issueKey: `foreshadow-debt-${firstForeshadowChapter?.chapterNum || 'global'}`,
+            taskType: 'continuity',
+            taskTitle: '清理伏笔债务',
+            taskDescription: '处理超期伏笔、合同阻塞和延期说明缺失。',
+            fixBrief: '优先回收超期伏笔，再处理 due soon 和阻塞项。',
+            chapterId: firstForeshadowChapter?.chapterId,
+            chapterNum: firstForeshadowChapter?.chapterNum,
+            navigationQuery: createChapterNavigationQuery(firstForeshadowChapter?.chapterId, firstForeshadowChapter?.chapterNum),
+          }),
+          createRepairAction({
+            metricKey: 'foreshadow_debt',
+            actionType: 'open_bridge_patch',
+            label: firstForeshadowChapter ? `补写第${firstForeshadowChapter.chapterNum}章桥段` : '补写伏笔过桥',
+            description: '为超期伏笔补过桥段或兑现动作。',
+            targetPage: 'writing',
+            severity: 'warning',
+            issueKey: `foreshadow-bridge-${firstForeshadowChapter?.chapterNum || 'global'}`,
+            taskType: 'bridge_patch',
+            taskTitle: firstForeshadowChapter ? `补写第${firstForeshadowChapter.chapterNum}章伏笔过桥` : '补写伏笔过桥',
+            taskDescription: '补一段能承接伏笔回收或显式延期的桥接场景。',
+            fixBrief: '不要只口头提及，必须让读者能感知推进。',
+            chapterId: firstForeshadowChapter?.chapterId,
+            chapterNum: firstForeshadowChapter?.chapterNum,
+            navigationQuery: createChapterNavigationQuery(firstForeshadowChapter?.chapterId, firstForeshadowChapter?.chapterNum),
+          }),
+          createRepairAction({
+            metricKey: 'foreshadow_debt',
+            actionType: 'allow_deviation',
+            label: '标记允许偏移',
+            description: '如果伏笔延后是作者有意决策，显式记录为允许偏移。',
+            targetPage: 'revision',
+            severity: 'info',
+            issueKey: `foreshadow-deviation-${firstForeshadowChapter?.chapterNum || 'global'}`,
+            taskType: 'continuity',
+            taskTitle: '确认伏笔延期为允许偏移',
+            taskDescription: '记录该伏笔延期的作者意图与新的回收节点。',
+            fixBrief: '只有明确记录过的新节点，系统才不再继续提示为失管。',
+            chapterId: firstForeshadowChapter?.chapterId,
+            chapterNum: firstForeshadowChapter?.chapterNum,
+            navigationQuery: createChapterNavigationQuery(firstForeshadowChapter?.chapterId, firstForeshadowChapter?.chapterNum),
+          }),
+        ],
+      },
+    ))
+  }
+
+  const firstWorldAlert = recentWorldStateAlerts[0]
+  if (recentWorldStateAlerts.length > 0 || writebackPendingCount > 0 || writebackFailedCount > 0) {
+    addRepairRisk(createDashboardRiskItem(
+      'world_state',
+      recentWorldStateAlerts.some((alert) => alert.severity === 'critical') || writebackFailedCount > 0 ? 'critical' : 'warning',
+      firstWorldAlert ? `${firstWorldAlert.entityName} 状态需要同步` : '世界状态漂移加剧',
+      `状态告警 ${recentWorldStateAlerts.length} 条，回写待处理 ${writebackPendingCount}，回写失败 ${writebackFailedCount}。`,
+      dedupeChapterNums(recentWorldStateAlerts.slice(0, 4).map((alert) => alert.chapterNum)),
+      firstWorldAlert ? volumeIdByChapterNum.get(firstWorldAlert.chapterNum) : undefined,
+      {
+        metricKey: 'world_state_drift',
+        whyItHappened: '正文变更已经发生，但章后回写、时间轴或角色状态版本没有及时同步，导致总账与正文脱节。',
+        howToFix: '先处理冲突实体和失败回写，再决定是同步状态，还是把该偏移登记为作者允许。',
+        suggestedActions: firstWorldAlert
+          ? [
+            createRepairAction({
+              metricKey: 'world_state_drift',
+              actionType: firstWorldAlert.entityType === 'character' ? 'sync_character_state' : 'sync_timeline',
+              label: firstWorldAlert.entityType === 'character' ? '同步角色状态' : '同步时间轴',
+              description: '把世界状态风险落成同步任务。',
+              targetPage: firstWorldAlert.entityType === 'character' ? 'characters' : 'timeline',
+              severity: firstWorldAlert.severity === 'critical' ? 'critical' : 'warning',
+              issueKey: `world-state-${firstWorldAlert.entityType}-${firstWorldAlert.entityId}-${firstWorldAlert.chapterNum}`,
+              taskType: firstWorldAlert.entityType === 'character' ? 'character_state_sync' : 'timeline_sync',
+              taskTitle: `同步${firstWorldAlert.entityName}状态`,
+              taskDescription: firstWorldAlert.summary,
+              fixBrief: '统一正文、状态版本与时间轴记录。',
+              chapterId: firstWorldAlert.chapterId,
+              chapterNum: firstWorldAlert.chapterNum,
+              entityType: firstWorldAlert.entityType,
+              entityId: firstWorldAlert.entityId,
+              navigationQuery: {
+                ...(createChapterNavigationQuery(firstWorldAlert.chapterId, firstWorldAlert.chapterNum) || {}),
+                ...(firstWorldAlert.entityType === 'character' ? { characterId: String(firstWorldAlert.entityId) } : {}),
+              },
+            }),
+            createRepairAction({
+              metricKey: 'world_state_drift',
+              actionType: 'allow_deviation',
+              label: '标记允许偏移',
+              description: '如果这是作者刻意偏移，显式记录为允许状态变更。',
+              targetPage: 'revision',
+              severity: 'info',
+              issueKey: `world-state-deviation-${firstWorldAlert.entityType}-${firstWorldAlert.entityId}-${firstWorldAlert.chapterNum}`,
+              taskType: 'continuity',
+              taskTitle: `确认${firstWorldAlert.entityName}状态偏移`,
+              taskDescription: `确认 ${firstWorldAlert.entityName} 在第${firstWorldAlert.chapterNum}章的状态偏移属于有意设定。`,
+              fixBrief: '记录偏移原因和后续一致性约束。',
+              chapterId: firstWorldAlert.chapterId,
+              chapterNum: firstWorldAlert.chapterNum,
+              entityType: firstWorldAlert.entityType,
+              entityId: firstWorldAlert.entityId,
+              navigationQuery: createChapterNavigationQuery(firstWorldAlert.chapterId, firstWorldAlert.chapterNum),
+            }),
+          ]
+          : [],
+      },
+    ))
+  }
+
+  const revealFactSignals = storyFactRows.reduce<{
+    early: Array<{ factId: number; title: string; chapterId: number; chapterNum: number; volumeId?: number }>
+    forbidden: Array<{ factId: number; title: string; chapterId: number; chapterNum: number; volumeId?: number }>
+    late: Array<{ factId: number; title: string; chapterId: number; chapterNum: number; volumeId?: number }>
+  }>((result, fact) => {
+    const readerKnownChapter = typeof fact.readerKnownChapterId === 'number' ? chapterDetailById.get(fact.readerKnownChapterId) : undefined
+    const targetRevealChapter = typeof fact.targetRevealChapterId === 'number' ? chapterDetailById.get(fact.targetRevealChapterId) : undefined
+    const readerKnownVolumeNumber = readerKnownChapter?.volumeId ? volumeNumberById.get(readerKnownChapter.volumeId) : undefined
+
+    if (readerKnownChapter && targetRevealChapter && readerKnownChapter.chapterNum < targetRevealChapter.chapterNum) {
+      result.early.push({
+        factId: fact.id,
+        title: fact.title,
+        chapterId: readerKnownChapter.chapterId,
+        chapterNum: readerKnownChapter.chapterNum,
+        volumeId: readerKnownChapter.volumeId,
+      })
+    }
+    if (readerKnownChapter && typeof fact.forbiddenBeforeVolume === 'number' && typeof readerKnownVolumeNumber === 'number' && readerKnownVolumeNumber < fact.forbiddenBeforeVolume) {
+      result.forbidden.push({
+        factId: fact.id,
+        title: fact.title,
+        chapterId: readerKnownChapter.chapterId,
+        chapterNum: readerKnownChapter.chapterNum,
+        volumeId: readerKnownChapter.volumeId,
+      })
+    }
+    if (!readerKnownChapter && targetRevealChapter && targetRevealChapter.chapterNum < latestChapterNum) {
+      result.late.push({
+        factId: fact.id,
+        title: fact.title,
+        chapterId: targetRevealChapter.chapterId,
+        chapterNum: targetRevealChapter.chapterNum,
+        volumeId: targetRevealChapter.volumeId,
+      })
+    }
+    return result
+  }, { early: [], forbidden: [], late: [] })
+  const firstRevealRisk = revealFactSignals.forbidden[0] || revealFactSignals.early[0] || revealFactSignals.late[0]
+  if (firstRevealRisk) {
+    addRepairRisk(createDashboardRiskItem(
+      'info_reveal_pacing',
+      revealFactSignals.forbidden.length > 0 || revealFactSignals.early.length > 0 ? 'critical' : 'warning',
+      revealFactSignals.forbidden.length > 0 ? '关键信息过早暴露' : '信息揭示节奏开始失步',
+      `提前揭示 ${revealFactSignals.early.length} 条，禁区前暴露 ${revealFactSignals.forbidden.length} 条，超计划未揭示 ${revealFactSignals.late.length} 条。`,
+      dedupeChapterNums([
+        ...revealFactSignals.forbidden.slice(0, 2).map((entry) => entry.chapterNum),
+        ...revealFactSignals.early.slice(0, 2).map((entry) => entry.chapterNum),
+        ...revealFactSignals.late.slice(0, 2).map((entry) => entry.chapterNum),
+      ]),
+      firstRevealRisk.volumeId,
+      {
+        metricKey: 'info_reveal_pacing',
+        whyItHappened: '事实的计划揭示节点、读者知情节点和主角知情节点没有维持同一节奏，信息差板开始失效。',
+        howToFix: '决定是补桥推迟揭示、重写提前暴露场景，还是把目标揭示节点重新登记到正确章节。',
+        suggestedActions: [
+          createRepairAction({
+            metricKey: 'info_reveal_pacing',
+            actionType: 'open_bridge_patch',
+            label: firstRevealRisk ? `补写第${firstRevealRisk.chapterNum}章桥段` : '补写信息过桥',
+            description: '补一段承接信息揭示节奏的桥接场景。',
+            targetPage: 'writing',
+            severity: revealFactSignals.forbidden.length > 0 || revealFactSignals.early.length > 0 ? 'critical' : 'warning',
+            issueKey: `info-reveal-bridge-${firstRevealRisk?.factId || 'global'}`,
+            taskType: 'bridge_patch',
+            taskTitle: firstRevealRisk ? `修补第${firstRevealRisk.chapterNum}章信息揭示节奏` : '修补信息揭示节奏',
+            taskDescription: `围绕「${firstRevealRisk?.title || '关键信息'}」补桥，调整读者和主角的知情节奏。`,
+            fixBrief: '让揭示回到目标章节附近，并保留必要信息差。',
+            chapterId: firstRevealRisk?.chapterId,
+            chapterNum: firstRevealRisk?.chapterNum,
+            navigationQuery: createChapterNavigationQuery(firstRevealRisk?.chapterId, firstRevealRisk?.chapterNum),
+          }),
+          createRepairAction({
+            metricKey: 'info_reveal_pacing',
+            actionType: 'create_revision_task',
+            label: '生成揭示节奏修订',
+            description: '把揭示过早/过晚问题落入修订中心。',
+            targetPage: 'revision',
+            severity: revealFactSignals.forbidden.length > 0 || revealFactSignals.early.length > 0 ? 'critical' : 'warning',
+            safeToExecute: true,
+            issueKey: `info-reveal-task-${firstRevealRisk?.factId || 'global'}`,
+            taskType: 'continuity',
+            taskTitle: '修复信息揭示节奏',
+            taskDescription: '调整信息差谜题板中的揭示时机，避免过早暴露或过度拖延。',
+            fixBrief: '必要时同时更新目标揭示章节和读者可知范围。',
+            chapterId: firstRevealRisk?.chapterId,
+            chapterNum: firstRevealRisk?.chapterNum,
+            navigationQuery: createChapterNavigationQuery(firstRevealRisk?.chapterId, firstRevealRisk?.chapterNum),
+          }),
+        ],
+      },
+    ))
+  }
+
+  const buildRepairMetricSummary = (metricKey: QualityRepairMetricKey, score: number, summary: string): QualityDashboardData['repairMetrics'][number] => {
+    const metricRisks = repairRiskItems.filter((item) => item.metricKey === metricKey)
+    return {
+      key: metricKey,
+      label: qualityRepairMetricLabel(metricKey),
+      score: clampHealthScore(score),
+      summary,
+      riskCount: metricRisks.length,
+      focusLabels: metricRisks.slice(0, 3).map((item) => item.title),
+    }
+  }
+  const repairMetrics: QualityDashboardData['repairMetrics'] = [
+    buildRepairMetricSummary(
+      'commitment_delivery',
+      100 - contractBlockerCount * 18 - contractWarningCount * 6 - endgameDebtSnapshot.overview.overdueCount * 10 - endgameDebtSnapshot.overview.unboundCount * 8 - Math.min(contractProgressMetrics.storyThreadMentionOnlyCount, 6) * 3,
+      `合同通过率 ${contractReadyRate}%，终局过期 ${endgameDebtSnapshot.overview.overdueCount}，线程只提及未推进 ${contractProgressMetrics.storyThreadMentionOnlyCount}。`,
+    ),
+    buildRepairMetricSummary(
+      'voice_distinction',
+      100 - Math.round(dialogueSnapshot.dialogueFingerprintStats.averageCrossCharacterSimilarity * 0.6) - dialogueSnapshot.dialogueFingerprintStats.highSimilarityPairCount * 8 - dialogueSnapshot.dialogueFingerprintStats.driftingCharacterCount * 6 - dialogueSnapshot.requiredDialogueVoiceLocks.length * 4,
+      `高相似角色对 ${dialogueSnapshot.dialogueFingerprintStats.highSimilarityPairCount}，漂移角色 ${dialogueSnapshot.dialogueFingerprintStats.driftingCharacterCount}。`,
+    ),
+    buildRepairMetricSummary(
+      'growth_cost_balance',
+      100 - protagonistSetbackSummary.longestSmoothRun * 8 - costPersistenceState.evaporatedCostCount * 10 - costPersistenceState.unresolvedCostCount * 5 - Math.max(0, protagonistSetbackSummary.longestPressureRun - PRESSURE_RUN_THRESHOLD) * 4,
+      `最长顺滑连跑 ${protagonistSetbackSummary.longestSmoothRun} 章，代价蒸发 ${costPersistenceState.evaporatedCostCount}。`,
+    ),
+    buildRepairMetricSummary(
+      'foreshadow_debt',
+      100 - foreshadowSnapshot.overdue.length * 12 - foreshadowSnapshot.dueSoon.length * 5 - contractProgressMetrics.foreshadowBlockedCount * 6 - contractProgressMetrics.foreshadowStaleCount * 8,
+      `超期伏笔 ${foreshadowSnapshot.overdue.length}，即将到期 ${foreshadowSnapshot.dueSoon.length}，合同失管 ${contractProgressMetrics.foreshadowStaleCount}。`,
+    ),
+    buildRepairMetricSummary(
+      'world_state_drift',
+      100 - recentWorldStateAlerts.filter((alert) => alert.severity === 'critical').length * 12 - recentWorldStateAlerts.filter((alert) => alert.severity === 'warning').length * 5 - writebackPendingCount * 4 - writebackFailedCount * 10,
+      `状态告警 ${recentWorldStateAlerts.length}，回写待处理 ${writebackPendingCount}，回写失败 ${writebackFailedCount}。`,
+    ),
+    buildRepairMetricSummary(
+      'info_reveal_pacing',
+      100 - revealFactSignals.early.length * 12 - revealFactSignals.forbidden.length * 15 - revealFactSignals.late.length * 8,
+      `过早揭示 ${revealFactSignals.early.length}，禁区前暴露 ${revealFactSignals.forbidden.length}，超计划未揭示 ${revealFactSignals.late.length}。`,
+    ),
+  ]
+  const repairActionSummary: QualityDashboardData['repairActionSummary'] = {
+    actionableRiskCount: repairRiskItems.filter((item) => item.suggestedActions.length > 0).length,
+    taskActionCount: repairRiskItems.flatMap((item) => item.suggestedActions).filter((action) => Boolean(action.taskDraft)).length,
+    directExecutableActionCount: repairRiskItems.flatMap((item) => item.suggestedActions).filter((action) => action.safeToExecute).length,
+    allowDeviationCount: repairRiskItems.flatMap((item) => item.suggestedActions).filter((action) => action.actionType === 'allow_deviation').length,
+    topPriorityActions: repairRiskItems
+      .flatMap((item) => item.suggestedActions.slice(0, 1).map((action) => action.label))
+      .slice(0, 4),
+  }
+  const volumeQualityMetricsWithRepairs: VolumeQualityMetrics[] = volumeQualityMetrics.map((volume) => ({
+    ...volume,
+    topRisks: dedupeDashboardRiskItems([
+      ...volume.topRisks,
+      ...repairRiskItems.filter((item) => item.volumeId === volume.volumeId),
+    ]).sort(sortDashboardRisks).slice(0, 6),
+  }))
   const globalRisks: QualityDashboardRiskItem[] = [
     ...recentLanguageDriftAlerts.slice(0, 3).map((alert) => createDashboardRiskItem(
       'language_drift',
@@ -2718,13 +3683,16 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
       volumeIdByChapterNum.get(alert.chapterNum),
     )),
   )
-  const allRiskItems = [...volumeQualityMetrics.flatMap((entry) => entry.topRisks), ...globalRisks].sort(sortDashboardRisks)
+  const allRiskItems = dedupeDashboardRiskItems([
+    ...volumeQualityMetricsWithRepairs.flatMap((entry) => entry.topRisks),
+    ...globalRisks,
+    ...repairRiskItems,
+  ]).sort(sortDashboardRisks)
   const criticalRiskCount = allRiskItems.filter((item) => item.severity === 'critical').length
   const warningRiskCount = allRiskItems.filter((item) => item.severity === 'warning').length
   const foreshadowPendingCount = foreshadowSnapshot.pending.length
   const foreshadowDueSoonCount = foreshadowSnapshot.dueSoon.length
   const foreshadowOverdueCount = foreshadowSnapshot.overdue.length
-  const contractProgressMetrics = collectContractProgressMetrics(rows)
   const recentEndgameDebtAlerts = endgameDebtSnapshot.recentAlerts.map((alert) => ({
     ...alert,
     severity: alert.severity as 'warning' | 'critical',
@@ -2735,8 +3703,8 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     count: allRiskItems.filter((item) => item.kind === kind).length,
   }))
   const novelQualityMetrics: NovelQualityMetrics = {
-    healthScore: computeNovelHealthScore(volumeQualityMetrics, criticalRiskCount, warningRiskCount),
-    totalVolumeCount: volumeQualityMetrics.length,
+    healthScore: computeNovelHealthScore(volumeQualityMetricsWithRepairs, criticalRiskCount, warningRiskCount),
+    totalVolumeCount: volumeQualityMetricsWithRepairs.length,
     totalChapterCount: rows.length,
     analyzedChapterCount: scoredCount,
     criticalRiskCount,
@@ -2754,7 +3722,7 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     endgameUnboundCount: endgameDebtSnapshot.overview.unboundCount,
     riskOverview,
     topRisks: allRiskItems.slice(0, 8),
-    recommendedFocusVolumes: volumeQualityMetrics
+    recommendedFocusVolumes: volumeQualityMetricsWithRepairs
       .filter((entry) => entry.topRisks.length > 0 || entry.healthScore < 80)
       .sort((left, right) => left.healthScore - right.healthScore || right.topRisks.length - left.topRisks.length)
       .slice(0, 4)
@@ -2762,8 +3730,8 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
         volumeId: entry.volumeId,
         volumeNumber: entry.volumeNumber,
         volumeName: entry.volumeName,
-        healthScore: entry.healthScore,
-        summary: entry.topRisks[0]?.title || `${entry.volumeName} 当前健康分 ${entry.healthScore}，建议优先回查。`,
+          healthScore: entry.healthScore,
+          summary: entry.topRisks[0]?.title || `${entry.volumeName} 当前健康分 ${entry.healthScore}，建议优先回查。`,
       })),
   }
   const batchChapterNumSet = new Set(batchChapterNums)
@@ -2803,148 +3771,55 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
   const latestBatchConsecutiveRecallFallbackChapters = typeof latestBatchProgress.consecutiveRecallFallbackChapters === 'number'
     ? latestBatchProgress.consecutiveRecallFallbackChapters
     : trailingRecallFallbackCount
-  const contractValidationStatuses = rows.reduce<NonNullable<ReturnType<typeof parseChapterContractValidationFromReviewNotes>>[]>((result, row) => {
-    const parsed = parseChapterContractValidationFromReviewNotes(row.reviewNotesJson)
-    if (parsed) result.push(parsed)
-    return result
-  }, [])
-  const contractBlockerCount = contractValidationStatuses.filter((item) => item.status === 'blocker').length
-  const contractWarningCount = contractValidationStatuses.filter((item) => item.status === 'warning').length
-  const contractReadyRate = contractValidationStatuses.length > 0
-    ? Math.round((contractValidationStatuses.filter((item) => item.status === 'pass').length / contractValidationStatuses.length) * 100)
-    : 0
-  const productionWarnings = [
-    writebackPendingCount > 0 ? `仍有 ${writebackPendingCount} 章章后回写未闭环。` : '',
-    contractWarningCount > 0 ? `有 ${contractWarningCount} 章合同交付处于预警状态。` : '',
-    latestBatchConsecutiveRecallFallbackChapters > 0 ? `最近连续 ${latestBatchConsecutiveRecallFallbackChapters} 章召回降级。` : '',
-    latestBatchTask?.status === 'paused' && latestBatchTask.errorMessage ? latestBatchTask.errorMessage : '',
-  ].filter(Boolean)
-  const productionBlockers = [
-    contractBlockerCount > 0 ? `有 ${contractBlockerCount} 章合同交付被章节门阻断。` : '',
-    writebackFailedCount > 0 ? `有 ${writebackFailedCount} 章章后回写失败。` : '',
-    feedbackSummary.overview.pauseSuggestedIssueCount > 0 ? `审校复现已有 ${feedbackSummary.overview.pauseSuggestedIssueCount} 项建议暂停继续批量生成。` : '',
-    latestBatchConsecutiveRecallFallbackChapters >= 3 ? `连续召回降级已达到 ${latestBatchConsecutiveRecallFallbackChapters} 章，需先恢复记忆链路。` : '',
-  ].filter(Boolean)
-  const productionReadyRate = clampHealthScore(
-    100
-    - contractBlockerCount * 18
-    - writebackFailedCount * 14
-    - Math.min(writebackPendingCount, 6) * 4
-    - feedbackSummary.overview.pauseSuggestedIssueCount * 12
-    - antiAiSummary.overview.highRiskRuleCount * 5
-    - Math.min(latestBatchConsecutiveRecallFallbackChapters, 5) * 6,
-  )
-  const productionReadinessStatus = summarizeReadinessStatus({
-    contractBlockerCount,
-    writebackFailedCount,
-    feedbackPauseSuggestedCount: feedbackSummary.overview.pauseSuggestedIssueCount,
-    consecutiveRecallFallbackChapters: latestBatchConsecutiveRecallFallbackChapters,
-    warningCount: productionWarnings.length,
-    readyRate: productionReadyRate,
-  })
-  const productionReadiness: QualityDashboardData['productionReadiness'] = {
-    status: productionReadinessStatus,
-    summary: productionReadinessStatus === 'ready'
-      ? `当前产线可继续推进，综合就绪度 ${productionReadyRate}%。`
-      : productionReadinessStatus === 'warning'
-        ? `当前产线可谨慎继续，综合就绪度 ${productionReadyRate}%，建议先清理预警。`
-        : `当前产线不宜继续扩批，综合就绪度 ${productionReadyRate}%，请先处理阻断项。`,
-    blockers: productionBlockers,
-    warnings: productionWarnings,
-    suggestedActions: [
-      contractBlockerCount > 0 ? '先回到章节合同与章节验收门，处理 blocker 章节。' : '',
-      writebackPendingCount > 0 || writebackFailedCount > 0 ? '进入章后状态回写中心，清掉 pending/failed run。' : '',
-      feedbackSummary.overview.pauseSuggestedIssueCount > 0 ? '先在质量仪表盘检查复现问题，再启动下一批。' : '',
-      latestBatchSnapshotId ? '下一批之前先在回滚工作台登记批次检查结论并补齐作者锁定项。' : '',
-    ].filter(Boolean),
-    readyRate: productionReadyRate,
-    contractBlockerCount,
-    writebackPendingCount,
-    writebackFailedCount,
-    aiRecurrenceHighRiskCount: antiAiSummary.overview.highRiskRuleCount,
-    feedbackPauseSuggestedCount: feedbackSummary.overview.pauseSuggestedIssueCount,
-    consecutiveRecallFallbackChapters: latestBatchConsecutiveRecallFallbackChapters,
-    activeBatchTaskId: latestBatchTask?.status === 'running' || latestBatchTask?.status === 'pending' ? latestBatchTask.id : undefined,
-    latestBatchSnapshotId,
-  }
-  const batchStatus = (
-    latestBatchTask?.status === 'cancel_requested'
-      ? 'running'
-      : (latestBatchTask?.status || 'idle')
-  ) as QualityDashboardData['batchHealth']['status']
-  const batchHealth: QualityDashboardData['batchHealth'] = {
+  const millionWordDashboard = buildMillionWordDashboardSummary({
+    latestBatchTask,
     latestBatchTaskId,
     latestBatchSnapshotId,
-    status: batchStatus,
-    chapterIds: batchChapterIds,
-    chapterStart: batchChapterNums[0],
-    chapterEnd: batchChapterNums[batchChapterNums.length - 1],
-    completedChapterCount: Array.isArray(latestBatchProgress.completedChapterIds) ? latestBatchProgress.completedChapterIds.length : 0,
-    failedChapterCount: Array.isArray(latestBatchProgress.failedChapterIds) ? latestBatchProgress.failedChapterIds.length : 0,
-    warningCount: Array.isArray(latestBatchProgress.warnings) ? latestBatchProgress.warnings.length : 0,
+    latestBatchProgress,
+    batchChapterIds,
+    batchChapterNums,
     rewriteTaskCount,
-    pendingWritebackCount: batchPendingWritebackCount,
+    batchPendingWritebackCount,
     pendingRevisionCount,
-    pausedReason: typeof latestBatchProgress.pauseReason === 'string' && latestBatchProgress.pauseReason.trim()
-      ? latestBatchProgress.pauseReason
-      : (latestBatchTask?.errorMessage || undefined),
-    canContinue: batchStatus === 'paused',
-    summary: batchStatus === 'idle'
-      ? '当前没有运行中的章节批次。'
-      : `${summarizeBatchRange(batchChapterNums)} 批次状态：${batchStatus}，已完成 ${Array.isArray(latestBatchProgress.completedChapterIds) ? latestBatchProgress.completedChapterIds.length : 0}/${batchChapterIds.length || batchChapterNums.length} 章。`,
-  }
-  const continuityHealth: QualityDashboardData['continuityHealth'] = {
     staleCheckpointCount,
     latestCheckpointChapterGap,
     recallDegradedChapterCount,
-    consecutiveRecallFallbackChapters: latestBatchConsecutiveRecallFallbackChapters,
+    latestBatchConsecutiveRecallFallbackChapters,
     worldConflictCount: worldStateLedger.conflictEntities.length,
     writebackPendingCount,
     writebackFailedCount,
-  }
-  const contractDelivery: QualityDashboardData['contractDelivery'] = {
-    readyRate: contractReadyRate,
-    blockerCount: contractBlockerCount,
-    warningCount: contractWarningCount,
-    storyThreadAdvanceRate: contractProgressMetrics.storyThreadAdvanceRate,
-    storyThreadMentionOnlyCount: contractProgressMetrics.storyThreadMentionOnlyCount,
-    foreshadowBlockedCount: contractProgressMetrics.foreshadowBlockedCount,
-    foreshadowStaleCount: contractProgressMetrics.foreshadowStaleCount,
-  }
-  const batchReview: QualityDashboardData['batchReview'] = {
-    latestBatchSnapshotId,
-    latestBatchTaskId,
-    chapterStart: batchChapterNums[0],
-    chapterEnd: batchChapterNums[batchChapterNums.length - 1],
-    chapterCount: batchChapterNums.length,
-    passedChapterCount: inspectionPassedChapters.size,
+    contractReadyRate,
+    contractBlockerCount,
+    contractWarningCount,
+    contractProgressMetrics,
+    inspectionPassedChapterCount: inspectionPassedChapters.size,
     rewrittenChapterCount: batchGateEntries.filter((entry) => entry.rewriteCount > 0 || entry.gateLevel === 'warning').length,
-    failedChapterCount: Math.max(
-      inspectionBlockedCount,
-      batchGateEntries.filter((entry) => entry.gateLevel === 'blocker').length,
-      Array.isArray(latestBatchProgress.failedChapterIds) ? latestBatchProgress.failedChapterIds.length : 0,
-    ),
-    pendingWritebackCount: batchPendingWritebackCount,
+    inspectionBlockedCount,
+    inspectionWarningCount,
+    batchGateBlockedCount: batchGateEntries.filter((entry) => entry.gateLevel === 'blocker').length,
+    latestBatchFailedChapterCount: Array.isArray(latestBatchProgress.failedChapterIds) ? latestBatchProgress.failedChapterIds.length : 0,
+    latestBatchInspectionsCount: latestBatchInspections.length,
+    recentBatchRecallAlerts: recentRecallAlerts
+      .filter((alert) => batchChapterNumSet.size > 0 && batchChapterNumSet.has(alert.chapterNum))
+      .slice(0, 3)
+      .map((alert) => `第${alert.chapterNum}章：${alert.detail}`),
     recurringIssues: [
       ...antiAiSummary.topRepeatedRules.slice(0, 2).map((item) => `反 AI 复现：${item.ruleTitle}`),
       ...feedbackSummary.topRepeatedIssues.slice(0, 2).map((item) => `审校复现：${item.title}`),
     ].slice(0, 4),
-    recallAlerts: recentRecallAlerts
-      .filter((alert) => batchChapterNumSet.size > 0 && batchChapterNumSet.has(alert.chapterNum))
-      .slice(0, 3)
-      .map((alert) => `第${alert.chapterNum}章：${alert.detail}`),
-    avoidNextBatch: [
-      inspectionBlockedCount > 0 ? '先处理本批 blocked 检查记录，再开下一批。' : '',
-      inspectionWarningCount > 0 ? '先清理批次 warning 项，再推进下一批。' : '',
-      batchPendingWritebackCount > 0 ? '回写未闭环前不要继续扩批，避免状态漂移叠加。' : '',
-      latestBatchConsecutiveRecallFallbackChapters > 0 ? '召回降级未恢复前，避免继续拉长批量生成跨度。' : '',
-    ].filter(Boolean),
-    summary: latestBatchSnapshotId
-      ? `${summarizeBatchRange(batchChapterNums)} 已登记 ${latestBatchInspections.length} 条批次检查，${inspectionBlockedCount} 条阻断，${inspectionWarningCount} 条预警。`
-      : '当前还没有可回查的章节批次快照。',
-  }
+    aiRecurrenceHighRiskCount: antiAiSummary.overview.highRiskRuleCount,
+    feedbackPauseSuggestedCount: feedbackSummary.overview.pauseSuggestedIssueCount,
+  })
 
   return {
+    dashboardVersion: 'v2-repair',
+    dashboardNotes: [
+      ...millionWordDashboard.dashboardNotes,
+      '当前版本已升级为质量修复引擎：每个高价值风险都会给出原因、修法和直接动作。',
+      '安全动作会直接落任务，其他动作会保留定位信息并引导到对应页面处理。',
+    ],
+    repairActionSummary,
+    repairMetrics,
     heatmapData,
     overallScoreTrend,
     aiLikeRateTrend,
@@ -3002,13 +3877,13 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     storyDynamicsTrend,
     storyPacingAlerts,
     volumeStoryDynamics,
-    volumeQualityMetrics,
+    volumeQualityMetrics: volumeQualityMetricsWithRepairs,
     novelQualityMetrics,
-    productionReadiness,
-    batchHealth,
-    continuityHealth,
-    contractDelivery,
-    batchReview,
+    productionReadiness: millionWordDashboard.productionReadiness,
+    batchHealth: millionWordDashboard.batchHealth,
+    continuityHealth: millionWordDashboard.continuityHealth,
+    contractDelivery: millionWordDashboard.contractDelivery,
+    batchReview: millionWordDashboard.batchReview,
     chapterFunctionSummary,
     repeatedFunctionRuns,
     chapterFunctionAlerts,

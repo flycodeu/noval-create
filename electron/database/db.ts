@@ -68,6 +68,7 @@ export function runMigrations(sqlite: Database.Database) {
       title TEXT NOT NULL,
       synopsis TEXT,
       genre_id INTEGER REFERENCES genres(id),
+      launch_mode TEXT DEFAULT 'professional_longform',
       status TEXT DEFAULT 'draft',
       total_words INTEGER DEFAULT 0,
       target_words INTEGER DEFAULT 200000,
@@ -1683,6 +1684,67 @@ export function runMigrations(sqlite: Database.Database) {
       CREATE INDEX IF NOT EXISTS idx_chapter_batch_rollbacks_snapshot
         ON chapter_batch_rollbacks(snapshot_id, created_at DESC, id DESC);
     `)
+  })
+
+  runMigrationStep(sqlite, '0033_novel_launch_mode', () => {
+    ensureColumn(sqlite, 'novels', 'launch_mode', "TEXT DEFAULT 'professional_longform'")
+  })
+
+  runMigrationStep(sqlite, '0034_asset_change_impacts_and_writeback_verification', () => {
+    ensureColumn(sqlite, 'chapter_fact_extracts', 'verification_status', "TEXT NOT NULL DEFAULT 'auto_ready'")
+    ensureColumn(sqlite, 'chapter_writeback_diffs', 'verification_status', "TEXT NOT NULL DEFAULT 'auto_ready'")
+
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS asset_change_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        asset_type TEXT NOT NULL,
+        asset_id INTEGER,
+        asset_label TEXT NOT NULL,
+        operation TEXT NOT NULL DEFAULT 'update',
+        change_reason TEXT,
+        impact_level TEXT NOT NULL DEFAULT 'medium',
+        triggered_by TEXT,
+        payload_json TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS asset_change_impacts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_id INTEGER NOT NULL REFERENCES asset_change_events(id) ON DELETE CASCADE,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        target_type TEXT NOT NULL,
+        target_id INTEGER,
+        chapter_id INTEGER REFERENCES chapters(id) ON DELETE SET NULL,
+        target_label TEXT NOT NULL,
+        impact_reason TEXT NOT NULL,
+        detail TEXT,
+        confidence REAL DEFAULT 0,
+        resolution_status TEXT NOT NULL DEFAULT 'pending',
+        related_task_id INTEGER,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_asset_change_events_novel_created
+        ON asset_change_events(novel_id, created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_asset_change_events_asset
+        ON asset_change_events(novel_id, asset_type, asset_id, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_asset_change_impacts_novel_status
+        ON asset_change_impacts(novel_id, resolution_status, chapter_id, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_asset_change_impacts_event
+        ON asset_change_impacts(event_id, target_type, target_id, id DESC);
+    `)
+  })
+
+  runMigrationStep(sqlite, '0035_state_anchor_and_delta', () => {
+    ensureColumn(sqlite, 'character_state_versions', 'trigger_event_id', 'INTEGER REFERENCES timeline_events(id) ON DELETE SET NULL')
+    ensureColumn(sqlite, 'character_state_versions', 'source_segment_id', 'INTEGER REFERENCES chapter_segments(id) ON DELETE SET NULL')
+    ensureColumn(sqlite, 'character_state_versions', 'state_delta_json', 'TEXT')
+    ensureColumn(sqlite, 'world_state_versions', 'trigger_event_id', 'INTEGER REFERENCES timeline_events(id) ON DELETE SET NULL')
+    ensureColumn(sqlite, 'world_state_versions', 'source_segment_id', 'INTEGER REFERENCES chapter_segments(id) ON DELETE SET NULL')
+    ensureColumn(sqlite, 'world_state_versions', 'state_delta_json', 'TEXT')
   })
 }
 

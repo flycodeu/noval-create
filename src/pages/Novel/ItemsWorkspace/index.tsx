@@ -664,6 +664,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
 
   const aiActions = selectedItem || creating ? (
     <AIGenerateButton
+      novelId={novelId}
       label={currentItemKind === 'instance' ? 'AI 生成实例内容' : 'AI 生成模板内容'}
       isJson
       buildMessages={() => {

@@ -185,6 +185,7 @@ export default function GlossaryPage({ novelId }: Props) {
       actions={(
         <Space wrap>
           <AIGenerateButton
+            novelId={novelId}
             label={selectedItem ? 'AI 补当前术语' : 'AI 生成术语草稿'}
             isJson
             buildMessages={() => {

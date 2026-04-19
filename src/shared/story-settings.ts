@@ -1,4 +1,8 @@
-﻿import type { SubPlotDraft } from './subplot-framework'
+import type { SubPlotDraft } from './subplot-framework'
+import {
+  normalizeAiExecutionMode,
+  type AiExecutionMode,
+} from './ai-execution'
 
 export type StoryEndingType = 'HE' | 'BE' | 'open' | 'multi' | 'HE_BE'
 export type StoryEndgameMode =
@@ -48,11 +52,16 @@ export interface StoryWritingRulesSettings {
   bannedTerms: string
 }
 
+export interface StoryAiEngineSettings {
+  defaultMode?: AiExecutionMode
+}
+
 export interface StorySettingsDocument {
   premise: StoryPremiseSettings
   storyDesign: StoryDesignSettings
   endgameDesign: StoryEndgameDesignSettings
   writingRules: StoryWritingRulesSettings
+  aiEngine: StoryAiEngineSettings
 }
 
 export interface StorySettingsSnapshot extends StorySettingsDocument {
@@ -65,6 +74,7 @@ export interface StorySettingsSnapshot extends StorySettingsDocument {
   storyDesignReadyCount: number
   endgameReadyCount: number
   endgameSummary: string
+  aiDefaultMode: AiExecutionMode
 }
 
 const EMPTY_PREMISE: StoryPremiseSettings = {
@@ -103,6 +113,10 @@ const EMPTY_WRITING_RULES: StoryWritingRulesSettings = {
   antiAiFlavor: '',
   commonSenseRules: '',
   bannedTerms: '',
+}
+
+const EMPTY_AI_ENGINE: StoryAiEngineSettings = {
+  defaultMode: 'balanced',
 }
 
 function parseJsonObject(raw?: string | null): Record<string, unknown> {
@@ -193,6 +207,7 @@ export function parseStorySettingsDocument(raw?: string | null): StorySettingsDo
   const storyDesign = asRecord(root.story_design)
   const endgameDesign = asRecord(root.endgame_design)
   const writingRules = asRecord(root.writing_rules)
+  const aiEngine = asRecord(root.ai_engine)
 
   const nextPremise: StoryPremiseSettings = {
     positioning: asText(premise.positioning ?? root.premise_positioning),
@@ -237,6 +252,10 @@ export function parseStorySettingsDocument(raw?: string | null): StorySettingsDo
     bannedTerms: asText(writingRules.banned_terms ?? root.banned_terms),
   }
 
+  const nextAiEngine: StoryAiEngineSettings = {
+    defaultMode: normalizeAiExecutionMode(aiEngine.default_mode ?? root.ai_default_mode) || EMPTY_AI_ENGINE.defaultMode,
+  }
+
   if (!nextPremise.positioning && nextStoryDesign.storyGoal) {
     nextPremise.positioning = nextStoryDesign.storyGoal
   }
@@ -249,6 +268,7 @@ export function parseStorySettingsDocument(raw?: string | null): StorySettingsDo
     storyDesign: { ...EMPTY_STORY_DESIGN, ...nextStoryDesign },
     endgameDesign: { ...EMPTY_ENDGAME_DESIGN, ...nextEndgameDesign },
     writingRules: { ...EMPTY_WRITING_RULES, ...nextWritingRules },
+    aiEngine: { ...EMPTY_AI_ENGINE, ...nextAiEngine },
   }
 }
 
@@ -289,6 +309,7 @@ export function parseStorySettingsSnapshot(raw?: string | null): StorySettingsSn
     storyDesignReadyCount,
     endgameReadyCount,
     endgameSummary: buildEndgameDesignSummary(document.endgameDesign),
+    aiDefaultMode: document.aiEngine.defaultMode || EMPTY_AI_ENGINE.defaultMode || 'balanced',
   }
 }
 
@@ -298,6 +319,7 @@ export function buildStorySettingsPayload(
     storyDesign?: Partial<StoryDesignSettings>
     endgameDesign?: Partial<StoryEndgameDesignSettings>
     writingRules?: Partial<StoryWritingRulesSettings>
+    aiEngine?: Partial<StoryAiEngineSettings>
   },
   existingRaw?: string | null,
 ): Record<string, unknown> {
@@ -307,6 +329,11 @@ export function buildStorySettingsPayload(
   const storyDesign = { ...current.storyDesign, ...cleanPatch(patch.storyDesign) }
   const endgameDesign = { ...current.endgameDesign, ...cleanPatch(patch.endgameDesign) }
   const writingRules = { ...current.writingRules, ...cleanPatch(patch.writingRules) }
+  const aiEngine = {
+    ...current.aiEngine,
+    ...cleanPatch(patch.aiEngine),
+    defaultMode: normalizeAiExecutionMode(patch.aiEngine?.defaultMode ?? current.aiEngine.defaultMode) || EMPTY_AI_ENGINE.defaultMode,
+  }
 
   const payload: Record<string, unknown> = {
     ...legacyRoot,
@@ -344,6 +371,9 @@ export function buildStorySettingsPayload(
       common_sense_rules: writingRules.commonSenseRules,
       banned_terms: writingRules.bannedTerms,
     }),
+    ai_engine: compactObject({
+      default_mode: aiEngine.defaultMode,
+    }),
     premise_positioning: premise.positioning,
     premise_core_hook: premise.coreHook,
     protagonist_start: premise.protagonistStart,
@@ -370,6 +400,7 @@ export function buildStorySettingsPayload(
     endgame_deliberate_unknowns: endgameDesign.deliberateUnknowns,
     endgame_final_image: endgameDesign.finalImage,
     endgame_last_scene: endgameDesign.lastScene,
+    ai_default_mode: aiEngine.defaultMode,
   }
 
   return compactObject(payload)

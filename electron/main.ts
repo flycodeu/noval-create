@@ -8,6 +8,7 @@ import type { ProjectBriefGenerationRequest } from '../src/shared/project-brief-
 import type { ThemeVoiceGenerationRequest } from '../src/shared/theme-voice-generation'
 import type { WorldRulesGenerationRequest } from '../src/shared/world-rules-generation'
 import type { SubplotGenerationRequest } from '../src/shared/subplot-framework'
+import type { AiExecutionMode } from '../src/shared/ai-execution'
 import type {
   CharacterArcBeatInput,
   CharacterArcInput,
@@ -43,6 +44,7 @@ import * as exportService from './services/export.service'
 import * as factionService from './services/faction.service'
 import * as glossaryService from './services/glossary.service'
 import * as qualityDashboardService from './services/quality-dashboard.service'
+import * as qualityRepairService from './services/quality-repair.service'
 import * as chapterRecallRuntimeService from './services/chapter-recall-runtime.service'
 import * as storyArcProgressService from './services/story-arc-progress.service'
 import * as embeddingService from './services/embedding.service'
@@ -71,7 +73,13 @@ import * as storyThreadService from './services/story-thread.service'
 import * as storyFactService from './services/story-fact.service'
 import * as growthSystemService from './services/growth-system.service'
 import * as chapterWritebackService from './services/chapter-writeback.service'
+import * as assetImpactService from './services/asset-impact.service'
 import * as batchWorkbenchService from './services/batch-workbench.service'
+import {
+  buildAiModelRouteReport,
+  buildChatOptionsFromRoute,
+  resolveAiExecutionMode,
+} from './services/ai-engine.service'
 import * as workspaceQualityService from './services/workspace-quality.service'
 import * as workflowTaskService from './services/workflow-task.service'
 import { discoverEntitiesFromContent } from './services/entity-discovery.service'
@@ -257,6 +265,16 @@ function registerIpcHandlers() {
   // Quality Dashboard
   handle('quality:getDashboard', (_, novelId) => qualityDashboardService.getQualityDashboardData(novelId))
   handle('quality:backfillRecallSnapshots', (_, novelId) => chapterRecallRuntimeService.backfillMissingChapterRecallRuntimeSnapshots(novelId))
+  handle('quality:createRepairTask', (_, novelId, action) =>
+    qualityRepairService.createQualityRepairTask(
+      requireId(novelId, 'novelId'),
+      parseObjectPayload(action, 'action') as Parameters<typeof qualityRepairService.createQualityRepairTask>[1],
+    ))
+  handle('quality:executeRepairAction', (_, novelId, action) =>
+    qualityRepairService.executeQualityRepairAction(
+      requireId(novelId, 'novelId'),
+      parseObjectPayload(action, 'action') as Parameters<typeof qualityRepairService.executeQualityRepairAction>[1],
+    ))
 
   // Embedding
   handle('embedding:reindex', async (_, novelId: number) => {
@@ -310,6 +328,8 @@ function registerIpcHandlers() {
       typeof limit === 'number' ? limit : 12,
     ))
   handle('novel:getContextStatus', (_, id) => getNovelContextStatus(id))
+  handle('novel:getImpactSummary', (_, id) => assetImpactService.getNovelAssetImpactSummary(requireId(id)))
+  handle('novel:listImpactEvents', (_, id) => assetImpactService.listAssetChangeEvents(requireId(id)))
 
   handle('structure:getTree', (_, novelId) => storyStructureService.listStoryStructure(novelId))
   handle('structure:listVolumes', (_, novelId) => storyStructureService.listStructureVolumes(novelId))
@@ -400,10 +420,10 @@ function registerIpcHandlers() {
   handle('chapter:batchUpdate', (_, ids, data) => chapterService.batchUpdateChapters(requireIds(ids), data))
   handle('chapter:batchDelete', (_, ids) => chapterService.batchDeleteChapters(requireIds(ids)))
   handle('chapter:batchRenumber', (_, ids, startChapterNum) => chapterService.batchRenumberChapters(requireIds(ids), startChapterNum))
-  handle('chapter:getContextPreview', (_, chapterId) =>
-    chapterService.getChapterContextPreview(requireId(chapterId, 'chapterId')))
-  handle('chapter:generateContent', (event, chapterId) =>
-    chapterService.generateChapterContent(chapterId, event.sender))
+  handle('chapter:getContextPreview', (_, chapterId, options) =>
+    chapterService.getChapterContextPreview(requireId(chapterId, 'chapterId'), options))
+  handle('chapter:generateContent', (event, chapterId, options) =>
+    chapterService.generateChapterContent(chapterId, event.sender, options))
   handle('chapter:resumeContent', (event, taskId) =>
     chapterService.resumeChapterPipeline(taskId, event.sender))
   handle('chapter:generateSummary', (_, chapterId) =>
@@ -1253,7 +1273,23 @@ function registerIpcHandlers() {
     contextBefore: string
     specificRequirements: string
     modelConfigId?: number
+    novelId?: number
+    executionMode?: AiExecutionMode
   }) => {
+    const novel = typeof data.novelId === 'number'
+      ? getDb().select().from(novelsTable).where(eq(novelsTable.id, data.novelId)).all()[0]
+      : null
+    const executionMode = resolveAiExecutionMode({
+      explicitMode: data.executionMode,
+      settingsJson: novel?.settingsJson,
+    })
+    const route = buildAiModelRouteReport({
+      taskKind: 'paragraph_rewrite',
+      stageLabel: 'Paragraph Rewrite',
+      executionMode: executionMode.mode,
+      resolutionSource: executionMode.source,
+      modelConfigId: data.modelConfigId ?? novel?.modelConfigId,
+    })
     const result = await taskService.runChatTask({
       type: 'review',
       retryable: true,
@@ -1265,7 +1301,8 @@ function registerIpcHandlers() {
           specificRequirements: data.specificRequirements,
         }),
       }],
-      modelConfigId: data.modelConfigId,
+      modelConfigId: route.modelConfigId,
+      chatOpts: buildChatOptionsFromRoute(route),
     })
 
     return result
@@ -1279,8 +1316,24 @@ function registerIpcHandlers() {
     messages: { role: 'user' | 'assistant'; content: string }[]
     count?: number
     modelConfigId?: number
+    novelId?: number
+    executionMode?: AiExecutionMode
   }) => {
     const count = Math.min(Math.max(data.count || 1, 1), 3)
+    const novel = typeof data.novelId === 'number'
+      ? getDb().select().from(novelsTable).where(eq(novelsTable.id, data.novelId)).all()[0]
+      : null
+    const executionMode = resolveAiExecutionMode({
+      explicitMode: data.executionMode,
+      settingsJson: novel?.settingsJson,
+    })
+    const route = buildAiModelRouteReport({
+      taskKind: 'generic_prompt',
+      stageLabel: 'Generic Prompt',
+      executionMode: executionMode.mode,
+      resolutionSource: executionMode.source,
+      modelConfigId: data.modelConfigId ?? novel?.modelConfigId,
+    })
     const accepted: string[] = []
     const rejectedDigests: string[] = []
     const maxAttempts = Math.max(count, count * 3)
@@ -1298,7 +1351,8 @@ function registerIpcHandlers() {
         type: 'review',
         retryable: true,
         messages,
-        modelConfigId: data.modelConfigId,
+        modelConfigId: route.modelConfigId,
+        chatOpts: buildChatOptionsFromRoute(route),
       })
 
       lastOutput = output

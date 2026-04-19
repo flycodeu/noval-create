@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Alert, Button, Empty, Input, Modal, Select, Space, Spin, Tag, message } from 'antd'
-import { EditOutlined, PlusOutlined, ReloadOutlined, SaveOutlined, TeamOutlined } from '@ant-design/icons'
+import { ArrowRightOutlined, EditOutlined, PlusOutlined, ReloadOutlined, SaveOutlined, TeamOutlined } from '@ant-design/icons'
 import type {
   Character,
   CharacterArcBeatInput,
@@ -286,6 +286,22 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
             <div style={{ display: 'grid', gap: 12 }}>
               {selectedCharacter ? <Button icon={<TeamOutlined />} onClick={() => navigate(`/novels/${novelId}/characters?characterId=${selectedCharacter.id}`)}>打开当前人物档案</Button> : null}
               <Button icon={<EditOutlined />} onClick={() => navigate(`/novels/${novelId}/contracts`)}>去章节合同绑定弧线目标</Button>
+              <Button
+                icon={<ArrowRightOutlined />}
+                onClick={() => {
+                  if (tab === 'relationships' && selectedRelation?.id) {
+                    navigate(`/novels/${novelId}/revision?relatedPage=characters&entityType=relation&entityId=${selectedRelation.id}`)
+                    return
+                  }
+                  if (selectedCharacter) {
+                    navigate(`/novels/${novelId}/revision?relatedPage=characters&entityType=character&entityId=${selectedCharacter.id}`)
+                    return
+                  }
+                  navigate(`/novels/${novelId}/revision?relatedPage=characters`)
+                }}
+              >
+                打开相关修订任务
+              </Button>
             </div>
           </WorkspacePanel>
         </div>

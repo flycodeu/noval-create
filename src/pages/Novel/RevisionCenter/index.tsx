@@ -2,7 +2,7 @@
 import { Alert, Button, Form, Input, Modal, Select, Space, Table, Tag, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { PlusOutlined, ReloadOutlined, DeleteOutlined, ArrowRightOutlined } from '@ant-design/icons'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import type { NovelConsistencyReport, NovelContextStatus, RevisionTask } from '../../../types'
@@ -99,12 +99,13 @@ function getStatusLabel(status: RevisionTask['status']) {
 }
 
 function buildIssueSummary(report: NovelConsistencyReport | null) {
-  if (!report || report.issues.length === 0) return '当前没有高价值诊断摘要。'
+  if (!report || report.issues.length === 0) return '最近一轮诊断没有拉出高价值摘要。'
   return report.issues.slice(0, 5).map((issue) => `${getConsistencySeverityLabel(issue.severity)}：${issue.title}`).join('\n')
 }
 
 export default function RevisionCenterPage({ novelId }: Props) {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const { currentNovel } = useNovelStore()
   const [form] = Form.useForm<RevisionTaskFormValues>()
   const [tasks, setTasks] = useState<RevisionTask[]>([])
@@ -124,6 +125,17 @@ export default function RevisionCenterPage({ novelId }: Props) {
   const [draftWarnings, setDraftWarnings] = useState<string[]>([])
   const draftWarningsRef = React.useRef<string[]>([])
   const draftObservabilityRef = React.useRef<{ inputSummary: string; lintWarnings: string[]; rawOutputs: string[] } | null>(null)
+  const relatedPageFilter = searchParams.get('relatedPage')?.trim() || undefined
+  const entityTypeFilter = searchParams.get('entityType')?.trim() || undefined
+  const entityIdFilter = (() => {
+    const raw = searchParams.get('entityId')
+    if (!raw) return undefined
+    const numeric = Number(raw)
+    return Number.isFinite(numeric) && numeric > 0 ? Math.round(numeric) : undefined
+  })()
+  const scopedFilterSummary = [relatedPageFilter ? `页面=${relatedPageFilter}` : '', entityTypeFilter ? `实体=${entityTypeFilter}${entityIdFilter ? `#${entityIdFilter}` : ''}` : '']
+    .filter(Boolean)
+    .join('，')
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -136,6 +148,9 @@ export default function RevisionCenterPage({ novelId }: Props) {
           taskSource: sourceFilter === 'all' ? undefined : sourceFilter,
           status: statusFilter === 'all' ? undefined : statusFilter,
           keyword: keyword.trim() || undefined,
+          relatedPage: relatedPageFilter,
+          entityType: entityTypeFilter,
+          entityId: entityIdFilter,
         }),
         window.electron.revision.getStats({ novelId }),
         window.electron.novel.getContextStatus(novelId),
@@ -152,7 +167,7 @@ export default function RevisionCenterPage({ novelId }: Props) {
     } finally {
       setLoading(false)
     }
-  }, [keyword, novelId, page, sourceFilter, statusFilter])
+  }, [entityIdFilter, entityTypeFilter, keyword, novelId, page, relatedPageFilter, sourceFilter, statusFilter])
 
   useEffect(() => {
     void refresh()
@@ -160,7 +175,7 @@ export default function RevisionCenterPage({ novelId }: Props) {
 
   useEffect(() => {
     setPage(1)
-  }, [keyword, sourceFilter, statusFilter])
+  }, [entityIdFilter, entityTypeFilter, keyword, relatedPageFilter, sourceFilter, statusFilter])
 
   const manualCount = useMemo(
     () => tasks.filter((task) => task.taskSource === 'manual').length,
@@ -187,6 +202,7 @@ export default function RevisionCenterPage({ novelId }: Props) {
   })
   const taskDraftButton = (
     <AIGenerateButton
+      novelId={novelId}
       label="AI 生成·修订任务"
       intent="generate"
       isJson
@@ -486,6 +502,15 @@ export default function RevisionCenterPage({ novelId }: Props) {
           showIcon
           message={`当前有 ${stats.blockerCount} 个阻塞项需要优先处理`}
             description="这些阻塞项会影响后续写作和批量生成。"
+        />
+      ) : null}
+
+      {scopedFilterSummary ? (
+        <Alert
+          type="info"
+          showIcon
+          message="当前按定向筛选打开"
+          description={`只显示与 ${scopedFilterSummary} 相关的修订任务。`}
         />
       ) : null}
 

@@ -14,6 +14,7 @@ import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/ut
 import { getDb } from '../database/db'
 import { chapters, novels, storyThreads } from '../database/schema'
 import { safeParseAiJson } from '../utils/json'
+import { recordAssetChangeEvent } from './asset-impact.service'
 import { markNovelContextChanged } from './context-impact.service'
 import { buildStoryProfile } from './context.service'
 import { buildBatchKey, createOperationLog } from './history.service'
@@ -833,6 +834,17 @@ export function createStoryThread(
 
   if (!options.skipContextTracking) {
     markNovelContextChanged(novelId, 'Story threads changed')
+    recordAssetChangeEvent({
+      novelId,
+      assetType: 'thread',
+      assetId: Number(result.lastInsertRowid),
+      assetLabel: sanitized.title || data.title || '未命名线程',
+      operation: 'create',
+      changeReason: 'Story threads changed',
+      impactLevel: 'high',
+      triggeredBy: 'story-thread.service',
+      payload: sanitized,
+    })
   }
 
   return Number(result.lastInsertRowid)
@@ -856,6 +868,17 @@ export function updateStoryThread(
 
   if (!options.skipContextTracking) {
     markNovelContextChanged(current.novelId, 'Story threads changed')
+    recordAssetChangeEvent({
+      novelId: current.novelId,
+      assetType: 'thread',
+      assetId: id,
+      assetLabel: sanitized.title || current.title,
+      operation: 'update',
+      changeReason: 'Story threads changed',
+      impactLevel: 'high',
+      triggeredBy: 'story-thread.service',
+      payload: sanitized,
+    })
   }
 }
 
@@ -867,6 +890,16 @@ export function deleteStoryThread(id: number, options: { skipContextTracking?: b
 
   if (!options.skipContextTracking) {
     markNovelContextChanged(current.novelId, 'Story threads changed')
+    recordAssetChangeEvent({
+      novelId: current.novelId,
+      assetType: 'thread',
+      assetId: id,
+      assetLabel: current.title,
+      operation: 'delete',
+      changeReason: 'Story threads changed',
+      impactLevel: 'high',
+      triggeredBy: 'story-thread.service',
+    })
   }
 }
 

@@ -236,7 +236,7 @@ function getTaskSummary(task: Task, stream?: { content: string }): string {
   if (stream?.content) return stream.content.slice(0, 140)
   if (task.outputText) return task.outputText.slice(0, 140)
   if (task.inputJson) return formatTaskPayload(task.inputJson).slice(0, 140)
-  return '这条任务还没有可直接查看的结果摘要。'
+  return '任务已创建，但当前阶段还没产出可展示结果。先看状态、恢复入口和请求上下文。'
 }
 
 function getFreshnessTags(labels: string[], visibleCount = 2) {
@@ -684,7 +684,26 @@ export default function TaskCenter() {
           {loading ? (
             <div className="novel-empty"><LoadingOutlined spin /></div>
           ) : pageData.items.length === 0 ? (
-            <Empty description="当前筛选下暂无任务记录" style={{ paddingTop: 40 }} />
+            <Empty
+              description={
+                statusFilter !== 'all' || typeFilter !== 'all'
+                  ? '当前筛选下没有匹配任务，清空筛选后再看完整记录。'
+                  : '这里还没有任务记录，去创作页发起生成、审校或批处理后会在这里汇总。'
+              }
+              style={{ paddingTop: 40 }}
+            >
+              {statusFilter !== 'all' || typeFilter !== 'all' ? (
+                <Button
+                  onClick={() => {
+                    setStatusFilter('all')
+                    setTypeFilter('all')
+                    setPage(1)
+                  }}
+                >
+                  查看全部任务
+                </Button>
+              ) : null}
+            </Empty>
           ) : (
             <>
               <div className="task-center-list">
@@ -792,7 +811,10 @@ export default function TaskCenter() {
           ) : null}
         >
           {!selectedTask ? (
-            <div className="novel-empty">从左侧选择一条任务，这里会显示完整详情。</div>
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description="先从左侧选择一条任务，右侧会集中显示状态、恢复入口和请求上下文。"
+            />
           ) : (
             <div className="task-center-detail">
               <div className="task-center-detail__header">

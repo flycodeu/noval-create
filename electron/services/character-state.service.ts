@@ -2,16 +2,20 @@ import { asc, desc, eq, inArray } from 'drizzle-orm'
 import { getDb } from '../database/db'
 import {
   chapters,
+  chapterSegments,
   characterRelations,
   characters,
   characterStateVersions,
+  timelineEvents,
 } from '../database/schema'
 
 type CharacterRow = typeof characters.$inferSelect
 type CharacterRelationRow = typeof characterRelations.$inferSelect
 type ChapterRow = typeof chapters.$inferSelect
+type ChapterSegmentRow = typeof chapterSegments.$inferSelect
 type CharacterStateVersionRow = typeof characterStateVersions.$inferSelect
 type CharacterStateVersionInsert = typeof characterStateVersions.$inferInsert
+type TimelineEventRow = typeof timelineEvents.$inferSelect
 
 interface ContinuityStateLike {
   plotProgress: string[]
@@ -35,6 +39,18 @@ interface CharacterStateVersionLike {
   eventCause?: string | null
   changeReason?: string | null
   summaryText?: string | null
+  triggerEventId?: number | null
+  sourceSegmentId?: number | null
+  stateDeltaJson?: string | null
+}
+
+interface StateDeltaRecord {
+  field: string
+  before?: string
+  after?: string
+  cause?: string
+  persistencePolicy: 'temporary' | 'ongoing' | 'resolved' | 'unknown'
+  reversible: boolean
 }
 
 interface CharacterSignalBundle {
@@ -59,6 +75,9 @@ export interface CharacterStateSummary {
   changeReason?: string
   summaryText: string
   driftAlert?: string
+  triggerEventId?: number
+  sourceSegmentId?: number
+  stateDeltaJson?: string
 }
 
 export interface CharacterStateDriftAlert {
@@ -85,6 +104,9 @@ const RELATIONSHIP_KEYWORDS = ['关系', '信任', '亲近', '疏远', '和解',
 const GOAL_KEYWORDS = ['目标', '决定', '打算', '计划', '准备', '想要', '必须', '誓要', '追查', '寻找', '营救', '复仇', '保护', '放弃']
 const RESOURCE_PRESSURE_KEYWORDS = ['不足', '短缺', '见底', '耗尽', '匮乏', '紧张', '欠债', '损坏']
 const STATE_CAUSE_KEYWORDS = ['因为', '因此', '所以', '受', '经历', '之后', '决定', '被迫', '转而', '改为', '恢复', '和解', '决裂', '得知', '目睹']
+const RESOLVED_STATE_KEYWORDS = ['恢复', '痊愈', '解除', '放下', '稳定', '复原', '和解', '归还', '补足']
+const TEMPORARY_STATE_KEYWORDS = ['暂时', '片刻', '短暂', '一时', '临时', '缓一缓']
+const HARD_LOCK_STATE_KEYWORDS = ['决裂', '背叛', '覆灭', '死亡', '失明', '残废', '永久']
 
 function asText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
@@ -111,6 +133,19 @@ function dedupeStrings(values: string[], limit?: number): string[] {
     if (limit && result.length >= limit) break
   }
   return result
+}
+
+function parseNumberArray(raw?: string | null): number[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .map((value) => (typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : Number(value)))
+      .filter((value) => Number.isFinite(value) && value > 0)
+  } catch {
+    return []
+  }
 }
 
 function joinCompact(
@@ -337,6 +372,117 @@ function isFieldChanged(previous?: string | null, current?: string | null): bool
   return true
 }
 
+function inferPersistencePolicy(before?: string | null, after?: string | null, cause?: string | null): StateDeltaRecord['persistencePolicy'] {
+  const combined = joinCompact([after, cause], { maxLength: 120, perValueMaxLength: 48, limit: 3 })
+  if (!toComparableText(after) && toComparableText(before)) return 'resolved'
+  if (containsAny(combined, RESOLVED_STATE_KEYWORDS)) return 'resolved'
+  if (containsAny(combined, TEMPORARY_STATE_KEYWORDS)) return 'temporary'
+  if (toComparableText(after)) return 'ongoing'
+  return 'unknown'
+}
+
+function inferDeltaReversible(before?: string | null, after?: string | null, cause?: string | null): boolean {
+  const combined = joinCompact([before, after, cause], { maxLength: 120, perValueMaxLength: 48, limit: 4 })
+  if (!combined) return true
+  return !containsAny(combined, HARD_LOCK_STATE_KEYWORDS)
+}
+
+function buildCharacterStateDeltas(
+  previous: CharacterStateVersionLike | undefined,
+  current: CharacterStateVersionLike,
+  signals: CharacterSignalBundle,
+): StateDeltaRecord[] {
+  const fields: Array<{ key: keyof CharacterStateVersionLike; label: string; keywords: string[] }> = [
+    { key: 'injuryState', label: 'injury', keywords: INJURY_KEYWORDS },
+    { key: 'resourceState', label: 'resource', keywords: RESOURCE_KEYWORDS },
+    { key: 'stanceState', label: 'stance', keywords: STANCE_KEYWORDS },
+    { key: 'mentalState', label: 'mental', keywords: MENTAL_KEYWORDS },
+    { key: 'relationshipHeatSummary', label: 'relationship_heat', keywords: RELATIONSHIP_KEYWORDS },
+    { key: 'goalState', label: 'goal', keywords: GOAL_KEYWORDS },
+  ]
+
+  return fields.flatMap((field) => {
+    const before = asText(previous?.[field.key])
+    const after = asText(current[field.key])
+    if (!isFieldChanged(before, after)) return []
+    const cause = pickLatestFieldEntry(signals.sourceEntries, field.keywords) || asText(current.changeReason) || asText(current.eventCause)
+    return [{
+      field: field.label,
+      before: before || undefined,
+      after: after || undefined,
+      cause: cause || undefined,
+      persistencePolicy: inferPersistencePolicy(before, after, cause),
+      reversible: inferDeltaReversible(before, after, cause),
+    }]
+  })
+}
+
+function resolveCharacterStateAnchor(
+  chapter: ChapterRow,
+  characterId: number,
+  segmentRows: ChapterSegmentRow[],
+  eventRows: TimelineEventRow[],
+): { triggerEventId: number | null; sourceSegmentId: number | null } {
+  const matchingEvent = [...eventRows]
+    .filter((event) => (
+      parseNumberArray(event.affectedCharacterIdsJson).includes(characterId)
+      || parseNumberArray(event.presentCharacterIdsJson).includes(characterId)
+    ))
+    .sort((left, right) => {
+      const leftOrder = (left.segmentId || 0) * 10000 + (left.sortOrder || 0)
+      const rightOrder = (right.segmentId || 0) * 10000 + (right.sortOrder || 0)
+      return rightOrder - leftOrder || right.id - left.id
+    })[0] || null
+
+  const matchingSegment = segmentRows.find((segment) => parseNumberArray(segment.presentCharacterIdsJson).includes(characterId)) || null
+
+  return {
+    triggerEventId: matchingEvent?.id || null,
+    sourceSegmentId: matchingEvent?.segmentId || matchingSegment?.id || null,
+  }
+}
+
+function parseStateDeltas(raw?: string | null): StateDeltaRecord[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    const result: StateDeltaRecord[] = []
+    parsed.forEach((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return
+      const record = entry as Record<string, unknown>
+      const field = asText(record.field)
+      if (!field) return
+      const persistencePolicy = asText(record.persistencePolicy)
+      result.push({
+        field,
+        before: asText(record.before) || undefined,
+        after: asText(record.after) || undefined,
+        cause: asText(record.cause) || undefined,
+        persistencePolicy: (
+          persistencePolicy === 'temporary'
+          || persistencePolicy === 'ongoing'
+          || persistencePolicy === 'resolved'
+          || persistencePolicy === 'unknown'
+        ) ? persistencePolicy : 'unknown',
+        reversible: typeof record.reversible === 'boolean' ? record.reversible : true,
+      })
+    })
+    return result
+  } catch {
+    return []
+  }
+}
+
+function summarizeStateDeltas(raw?: string | null): string {
+  const deltas = parseStateDeltas(raw)
+  if (deltas.length === 0) return ''
+  return joinCompact(
+    deltas.map((delta) => `${delta.field}:${delta.before || '空'}→${delta.after || '空'}`),
+    { maxLength: 96, perValueMaxLength: 30, limit: 3 },
+  )
+}
+
 function hasExplicitCause(latest: CharacterStateVersionLike): boolean {
   return containsAny(joinCompact([latest.changeReason, latest.eventCause], { maxLength: 120 }), STATE_CAUSE_KEYWORDS)
 }
@@ -440,6 +586,9 @@ function toStateLike(row: CharacterStateVersionInsert): CharacterStateVersionLik
     eventCause: asText(row.eventCause),
     changeReason: asText(row.changeReason),
     summaryText: asText(row.summaryText),
+    triggerEventId: typeof row.triggerEventId === 'number' ? row.triggerEventId : null,
+    sourceSegmentId: typeof row.sourceSegmentId === 'number' ? row.sourceSegmentId : null,
+    stateDeltaJson: asText(row.stateDeltaJson) || null,
   }
 }
 
@@ -449,6 +598,8 @@ export function buildCharacterStateSnapshotForChapter(input: {
   previousStateMap: Map<number, CharacterStateVersionLike>
   relationRows: CharacterRelationRow[]
   allCharacterNames: string[]
+  chapterSegmentRows: ChapterSegmentRow[]
+  chapterTimelineEvents: TimelineEventRow[]
 }): CharacterStateVersionInsert[] {
   const continuity = parseContinuityState(input.chapter.continuityStateJson)
   const nameMap = new Map(input.trackedCharacters.map((character) => [character.id, character.fullName]))
@@ -503,6 +654,13 @@ export function buildCharacterStateSnapshotForChapter(input: {
       eventCause,
       changeReason,
     }
+    const stateDeltas = buildCharacterStateDeltas(previous, stateLike, signals)
+    const anchor = resolveCharacterStateAnchor(
+      input.chapter,
+      character.id,
+      input.chapterSegmentRows,
+      input.chapterTimelineEvents,
+    )
 
     result.push({
       novelId: input.chapter.novelId,
@@ -518,6 +676,9 @@ export function buildCharacterStateSnapshotForChapter(input: {
       eventCause: eventCause || null,
       changeReason: changeReason || null,
       summaryText: composeSummaryText(stateLike),
+      triggerEventId: anchor.triggerEventId,
+      sourceSegmentId: anchor.sourceSegmentId,
+      stateDeltaJson: stateDeltas.length > 0 ? JSON.stringify(stateDeltas) : null,
       createdAt: now,
       updatedAt: now,
     })
@@ -544,6 +705,28 @@ export function refreshCharacterStateVersionsForChapter(chapterId: number): void
   const relationRows = db.select().from(characterRelations)
     .where(eq(characterRelations.novelId, targetChapter.novelId))
     .all()
+  const segmentRows = db.select().from(chapterSegments)
+    .where(eq(chapterSegments.novelId, targetChapter.novelId))
+    .orderBy(asc(chapterSegments.chapterId), asc(chapterSegments.segmentOrder), asc(chapterSegments.id))
+    .all()
+  const timelineRows = db.select().from(timelineEvents)
+    .where(eq(timelineEvents.novelId, targetChapter.novelId))
+    .orderBy(asc(timelineEvents.chapterStartId), asc(timelineEvents.segmentId), asc(timelineEvents.sortOrder), asc(timelineEvents.id))
+    .all()
+  const segmentRowsByChapter = segmentRows.reduce<Map<number, ChapterSegmentRow[]>>((result, row) => {
+    const list = result.get(row.chapterId) || []
+    list.push(row)
+    result.set(row.chapterId, list)
+    return result
+  }, new Map())
+  const timelineRowsByChapter = timelineRows.reduce<Map<number, TimelineEventRow[]>>((result, row) => {
+    const chapterId = row.chapterEndId || row.chapterStartId
+    if (!chapterId) return result
+    const list = result.get(chapterId) || []
+    list.push(row)
+    result.set(chapterId, list)
+    return result
+  }, new Map())
   const trackedCharacterIds = trackedCharacters.map((character) => character.id)
   const trackedCharacterIdSet = new Set(trackedCharacterIds)
   const startChapterNum = resolveRebuildStartChapterNum(
@@ -579,6 +762,8 @@ export function refreshCharacterStateVersionsForChapter(chapterId: number): void
         previousStateMap,
         relationRows,
         allCharacterNames,
+        chapterSegmentRows: segmentRowsByChapter.get(chapter.id) || [],
+        chapterTimelineEvents: timelineRowsByChapter.get(chapter.id) || [],
       })
       if (snapshots.length === 0) return
       db.insert(characterStateVersions).values(snapshots).run()
@@ -610,6 +795,9 @@ function buildCharacterStateSummary(
     changeReason: asText(row.changeReason),
     summaryText: asText(row.summaryText) || composeSummaryText(row),
     driftAlert: driftAlert?.summary,
+    triggerEventId: typeof row.triggerEventId === 'number' ? row.triggerEventId : undefined,
+    sourceSegmentId: typeof row.sourceSegmentId === 'number' ? row.sourceSegmentId : undefined,
+    stateDeltaJson: asText(row.stateDeltaJson) || undefined,
   }
 }
 
@@ -719,25 +907,47 @@ export function getCharacterStateContextHintMap(
   } = {},
 ): Map<number, CharacterStateContextHint> {
   const latestStates = listLatestCharacterStates(novelId, options)
+  const db = getDb()
+  const eventMap = new Map(
+    db.select().from(timelineEvents)
+      .where(eq(timelineEvents.novelId, novelId))
+      .all()
+      .map((row) => [row.id, row] as const),
+  )
+  const segmentMap = new Map(
+    db.select().from(chapterSegments)
+      .where(eq(chapterSegments.novelId, novelId))
+      .all()
+      .map((row) => [row.id, row] as const),
+  )
   const driftAlertMap = new Map(
     listNovelCharacterStateAlerts(novelId, latestStates.length || 6).map((alert) => [alert.characterId, alert]),
   )
 
   return new Map(latestStates.map((state) => {
     const driftAlert = driftAlertMap.get(state.characterId)
+    const triggerEvent = state.triggerEventId ? eventMap.get(state.triggerEventId) : null
+    const sourceSegment = state.sourceSegmentId ? segmentMap.get(state.sourceSegmentId) : null
+    const anchorSummary = joinCompact([
+      triggerEvent ? triggerEvent.eventTitle : '',
+      sourceSegment ? sourceSegment.title || `场景${sourceSegment.segmentOrder}` : '',
+    ], { maxLength: 56, perValueMaxLength: 24, limit: 2 })
+    const deltaSummary = summarizeStateDeltas(state.stateDeltaJson)
     return [
       state.characterId,
       {
         currentState: joinCompact([
           `第${state.chapterNum}章`,
           state.summaryText,
+          deltaSummary ? `变化=${deltaSummary}` : '',
+          anchorSummary ? `锚点=${anchorSummary}` : '',
           state.changeReason && state.changeReason !== '延续前章状态，无新增显式变化'
             ? `变更=${state.changeReason}`
             : '',
         ], {
-          maxLength: 104,
-          perValueMaxLength: 44,
-          limit: 3,
+          maxLength: 132,
+          perValueMaxLength: 46,
+          limit: 4,
         }),
         currentGoal: asText(state.goalState),
         hardConstraint: buildStateConstraintSummary(state, driftAlert),

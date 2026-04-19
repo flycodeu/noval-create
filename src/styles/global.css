@@ -7895,6 +7895,17 @@ html[data-theme="dark"] .ant-card-actions > li {
   white-space: nowrap;
 }
 
+.novel-sidebar__title-meta--ready {
+  border-color: rgba(124, 182, 104, 0.34);
+  background:
+    linear-gradient(180deg, rgba(225, 245, 208, 0.96), rgba(197, 232, 170, 0.92));
+  color: #2f5724;
+}
+
+.novel-sidebar__title-meta--pending {
+  border-color: rgba(184, 132, 59, 0.28);
+}
+
 .novel-sidebar__title {
   flex: 1 1 auto;
   min-width: 0;
@@ -7952,6 +7963,68 @@ html[data-theme="dark"] .ant-card-actions > li {
 
 .novel-sidebar__group-list {
   gap: 10px;
+}
+
+.novel-sidebar__group-toggle {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px 8px 6px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.novel-sidebar__group-toggle--active {
+  border-radius: 12px;
+  background: rgba(255, 249, 239, 0.08);
+}
+
+.novel-sidebar__group-toggle-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.novel-sidebar__group-toggle-copy strong {
+  color: rgba(255, 236, 198, 0.86);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+}
+
+.novel-sidebar__group-toggle-copy small {
+  color: rgba(255, 243, 219, 0.7);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.novel-sidebar__group-toggle-meta {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.novel-sidebar__group-toggle-count {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(255, 245, 227, 0.14);
+  color: rgba(255, 241, 212, 0.86);
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+.novel-sidebar__group-toggle-arrow {
+  color: rgba(255, 240, 208, 0.72);
+  font-size: 12px;
+  transition: transform 180ms ease;
+}
+
+.novel-sidebar__group-toggle-arrow--expanded {
+  transform: rotate(90deg);
 }
 
 .novel-sidebar__group-title {

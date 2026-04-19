@@ -14,6 +14,15 @@ import {
 import { Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import AIScorePanel from '../../../components/AIScorePanel'
+import {
+  AI_EXECUTION_MODE_OPTIONS,
+  getAiExecutionModeLabel,
+  type AiExecutionMode,
+} from '../../../shared/ai-execution'
+import {
+  buildStorySettingsPayload,
+  parseStorySettingsSnapshot,
+} from '../../../shared/story-settings'
 import type {
   Chapter,
   ChapterContractAudit,
@@ -135,6 +144,7 @@ interface WritingPipelineSnapshot {
   status: 'pending' | 'running' | 'success' | 'failed' | 'cancelled'
   message?: string
   streamTaskId?: number
+  executionMode?: AiExecutionMode
   contractVersion?: string
   canonRunId?: number
   totalTokensUsed: number
@@ -241,7 +251,7 @@ const parseScenePlan = (raw?: string) => { try { const parsed = raw ? JSON.parse
 const parseReviewNotes = (raw?: string) => { try { return raw ? JSON.parse(raw) as ReviewNotes : null } catch { return null } }
 const parseContractAudit = (raw?: string) => { try { return raw ? JSON.parse(raw) as ChapterContractAudit : null } catch { return null } }
 const countWords = (text: string) => ((text.match(/[一-龥]/g) || []).length + (text.match(/\b[a-zA-Z]+\b/g) || []).length)
-const formatChapterNumber = (chapterNum?: number) => typeof chapterNum === 'number' ? `第${chapterNum}章` : '未设定'
+const formatChapterNumber = (chapterNum?: number) => typeof chapterNum === 'number' ? `第${chapterNum}章` : '章节号待补'
 const getStatusLabel = (status?: Chapter['status']) => STATUS_OPTIONS.find((item) => item.value === status)?.label || '未设置'
 const getIssueColor = (severity: 'high' | 'medium' | 'low') => severity === 'high' ? 'error' : severity === 'medium' ? 'warning' : 'default'
 const getIssueLabel = (severity: 'high' | 'medium' | 'low') => severity === 'high' ? '高优先' : severity === 'medium' ? '中优先' : '低优先'
@@ -341,7 +351,7 @@ function computeVolumeTruthRevealStats(
   const volumeNumber = getCurrentVolumeNumber(chapter, volumes)
   if (!volumeNumber) {
     return {
-      volumeName: '未绑定卷',
+      volumeName: '待绑定卷',
       volumeNumber: null,
       totalTruths: 0,
       plannedTruths: 0,
@@ -433,7 +443,7 @@ function getGenerationAlertDescription(snapshot: WritingGenerationSnapshot) {
   if (snapshot.status === 'failed') return snapshot.error || snapshot.detail || getUserFacingMessage('writing.generateFailed')
   if (snapshot.status === 'cancelled') return snapshot.detail || getUserFacingMessage('writing.generateCancelled')
   if (snapshot.status === 'success') return snapshot.detail || getUserFacingMessage('writing.pipelineCompleted')
-  return snapshot.detail || '正在同步最新阶段进度。'
+  return snapshot.detail || '正在推进当前章的流水线阶段。'
 }
 
 export default function Writing({ novelId }: Props) {
@@ -441,7 +451,7 @@ export default function Writing({ novelId }: Props) {
   const navigate = useNavigate()
   const location = useLocation()
   const { notifyWorkspaceMutation, registerEscapeHandler, registerSaveHandler } = useNovelWorkspaceActions()
-  const { chapters, currentChapterId, currentNovel, setChapters, setCurrentChapterId, updateChapter } = useNovelStore()
+  const { chapters, currentChapterId, currentNovel, setChapters, setCurrentChapterId, setCurrentNovel, updateChapter } = useNovelStore()
   const { streams, clearStream } = useTaskStore()
   const {
     activeGeneration,
@@ -482,6 +492,8 @@ export default function Writing({ novelId }: Props) {
   const [qualityDashboard, setQualityDashboard] = useState<QualityDashboardData | null>(null)
   const [contextStatus, setContextStatus] = useState<NovelContextStatus | null>(null)
   const [chapterContextPreview, setChapterContextPreview] = useState<ChapterContextPreview | null>(null)
+  const [generationExecutionModeOverride, setGenerationExecutionModeOverride] = useState<AiExecutionMode | 'follow_default'>('follow_default')
+  const [savingAiMode, setSavingAiMode] = useState(false)
   const [publishCheck, setPublishCheck] = useState<ChapterPublishCheck | null>(null)
   const [latestPipelineTask, setLatestPipelineTask] = useState<Task | null>(null)
   const [livePipelineSnapshot, setLivePipelineSnapshot] = useState<WritingPipelineSnapshot | null>(null)
@@ -499,6 +511,14 @@ export default function Writing({ novelId }: Props) {
     const routeKey = location.pathname.split('/').filter(Boolean)[4]
     return routeKey === 'context' || routeKey === 'review' || routeKey === 'history' ? routeKey : 'editor'
   }, [location.pathname])
+  const storySettings = useMemo(
+    () => parseStorySettingsSnapshot(currentNovel?.settingsJson),
+    [currentNovel?.settingsJson],
+  )
+  const defaultAiExecutionMode = storySettings.aiDefaultMode
+  const effectiveAiExecutionMode = generationExecutionModeOverride === 'follow_default'
+    ? defaultAiExecutionMode
+    : generationExecutionModeOverride
   const isHistoryRoute = activeWritingRoute === 'history'
   const selectedVersion = useMemo(
     () => chapterVersions.find((version) => version.id === selectedVersionId) || chapterVersions[0] || null,
@@ -657,12 +677,14 @@ export default function Writing({ novelId }: Props) {
       return
     }
     try {
-      setChapterContextPreview(await window.electron.chapter.getContextPreview(chapter.id))
+      setChapterContextPreview(await window.electron.chapter.getContextPreview(chapter.id, {
+        executionMode: effectiveAiExecutionMode,
+      }))
     } catch (error) {
       console.error('Failed to load chapter context preview', error)
       setChapterContextPreview(null)
     }
-  }, [])
+  }, [effectiveAiExecutionMode])
 
   const refreshPublishCheck = useCallback(async (chapterId: number) => {
     const nextCheck = await window.electron.chapter.runPublishCheck(chapterId)
@@ -826,6 +848,11 @@ export default function Writing({ novelId }: Props) {
     if (!isHistoryRoute || !currentChapter) return
     void refreshVersionHistory(currentChapter.id)
   }, [currentChapter, isHistoryRoute, refreshVersionHistory])
+
+  useEffect(() => {
+    if (!currentChapter) return
+    void refreshChapterContextPreview(currentChapter)
+  }, [currentChapter, effectiveAiExecutionMode, refreshChapterContextPreview])
 
   useEffect(() => {
     if (!activeGeneration.taskId || !activeGeneration.chapterId) return
@@ -1060,10 +1087,12 @@ export default function Writing({ novelId }: Props) {
       chapterId: currentChapter.id,
       stage: 'planning',
       label: '正在启动章节流水线',
-      detail: '正在创建任务，并准备本章场景计划与上下文注入。',
+      detail: `正在创建任务，并按「${getAiExecutionModeLabel(effectiveAiExecutionMode)}」模式准备本章场景计划与上下文注入。`,
     })
     try {
-      const taskId = await window.electron.chapter.generateContent(currentChapter.id)
+      const taskId = await window.electron.chapter.generateContent(currentChapter.id, {
+        executionMode: effectiveAiExecutionMode,
+      })
       updateGenerationTask({ chapterId: currentChapter.id, taskId })
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error, 'writing.configureModelFirst')
@@ -1078,6 +1107,31 @@ export default function Writing({ novelId }: Props) {
       message.error(errorMessage)
     }
   }
+
+  const handleDefaultAiModeChange = useCallback(async (mode: AiExecutionMode) => {
+    if (!currentNovel) return
+    setSavingAiMode(true)
+    try {
+      const payload = buildStorySettingsPayload({
+        aiEngine: {
+          defaultMode: mode,
+        },
+      }, currentNovel.settingsJson)
+      await window.electron.novel.update(currentNovel.id, {
+        settingsJson: JSON.stringify(payload),
+      })
+      setCurrentNovel({
+        ...currentNovel,
+        settingsJson: JSON.stringify(payload),
+      })
+      message.success(`默认 AI 模式已切换为「${getAiExecutionModeLabel(mode)}」。`)
+    } catch (error) {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.saveFailed'))
+    } finally {
+      setSavingAiMode(false)
+    }
+  }, [currentNovel, setCurrentNovel])
 
   const handleCancelGenerate = async () => {
     if (!activeGeneration.taskId || !activeGeneration.chapterId) return
@@ -1153,6 +1207,8 @@ export default function Writing({ novelId }: Props) {
         contextBefore: before.slice(-800),
         specificRequirements: rewriteRequirements.trim() || '保持事件与设定不变，重点修语言自然度、逻辑衔接和人类表达。',
         modelConfigId: currentNovel?.modelConfigId,
+        novelId,
+        executionMode: effectiveAiExecutionMode,
       }) as string)
 
       if (!rewritten.trim()) {
@@ -1625,7 +1681,7 @@ export default function Writing({ novelId }: Props) {
           continuityItems={continuityItems}
         />
         <InsightCard title="场景拆解" eyebrow="执行顺序">
-          {scenePlan.length > 0 ? <div className="novel-scene-list">{scenePlan.map((scene) => <div key={`${scene.scene_order}-${scene.scene_title}`} className="novel-scene-card"><div className="novel-scene-card__header"><span>{`场景 ${String(scene.scene_order).padStart(2, '0')}`}</span><strong>{scene.scene_title}</strong></div><div className="novel-scene-card__body"><div>{scene.purpose}</div>{scene.location ? <div>地点：{scene.location}</div> : null}{scene.time_anchor ? <div>时间：{scene.time_anchor}</div> : null}{scene.present_characters?.length ? <div>人物：{scene.present_characters.join('、')}</div> : null}{scene.key_items?.length ? <div>道具：{scene.key_items.join('、')}</div> : null}{scene.must_cover?.length ? <div>必须覆盖：{scene.must_cover.join('、')}</div> : null}</div></div>)}</div> : <div className="novel-copy-block">先运行章节流水线后，这里会整理本章场景计划。</div>}
+          {scenePlan.length > 0 ? <div className="novel-scene-list">{scenePlan.map((scene) => <div key={`${scene.scene_order}-${scene.scene_title}`} className="novel-scene-card"><div className="novel-scene-card__header"><span>{`场景 ${String(scene.scene_order).padStart(2, '0')}`}</span><strong>{scene.scene_title}</strong></div><div className="novel-scene-card__body"><div>{scene.purpose}</div>{scene.location ? <div>地点：{scene.location}</div> : null}{scene.time_anchor ? <div>时间：{scene.time_anchor}</div> : null}{scene.present_characters?.length ? <div>人物：{scene.present_characters.join('、')}</div> : null}{scene.key_items?.length ? <div>道具：{scene.key_items.join('、')}</div> : null}{scene.must_cover?.length ? <div>必须覆盖：{scene.must_cover.join('、')}</div> : null}</div></div>)}</div> : <div className="novel-copy-block">先运行章节流水线，系统会按合同拆出场景计划后在这里核对。</div>}
         </InsightCard>
       </div>
       <div className="novel-writing-shell__insight-stack">
@@ -1633,7 +1689,7 @@ export default function Writing({ novelId }: Props) {
           {currentPipelineSnapshot ? (
             <div style={{ display: 'grid', gap: 12 }}>
               <div className="novel-copy-block">
-                {`当前阶段：${currentPipelineSnapshot.currentRole ? currentPipelineSnapshot.roles[currentPipelineSnapshot.currentRole]?.label || currentPipelineSnapshot.currentRole : '待启动'} · 合同版本 ${currentPipelineSnapshot.contractVersion || '未记录'} · 总耗时 ${currentPipelineSnapshot.totalDurationMs ? `${(currentPipelineSnapshot.totalDurationMs / 1000).toFixed(1)}s` : '-'} · 总 tokens ${currentPipelineSnapshot.totalTokensUsed || 0}${currentPipelineSnapshot.failureCode ? ` · 退出码 ${currentPipelineSnapshot.failureCode}` : ''}`}
+                {`当前阶段：${currentPipelineSnapshot.currentRole ? currentPipelineSnapshot.roles[currentPipelineSnapshot.currentRole]?.label || currentPipelineSnapshot.currentRole : '待启动'} · AI 模式 ${currentPipelineSnapshot.executionMode ? getAiExecutionModeLabel(currentPipelineSnapshot.executionMode) : '未记录'} · 合同版本 ${currentPipelineSnapshot.contractVersion || '未记录'} · 总耗时 ${currentPipelineSnapshot.totalDurationMs ? `${(currentPipelineSnapshot.totalDurationMs / 1000).toFixed(1)}s` : '-'} · 总 tokens ${currentPipelineSnapshot.totalTokensUsed || 0}${currentPipelineSnapshot.failureCode ? ` · 退出码 ${currentPipelineSnapshot.failureCode}` : ''}`}
               </div>
               <div style={{ display: 'grid', gap: 8 }}>
                 {pipelineRoleItems.map((item) => (
@@ -1668,7 +1724,13 @@ export default function Writing({ novelId }: Props) {
         <InsightCard title="召回补充层" eyebrow="背景补充 / 非事实源" tone="soft">
           <RecallDiagnosticsCard preview={chapterContextPreview} />
         </InsightCard>
-        <InsightCard title="生产摘要" eyebrow="AI 主写 / 人工定稿" tone="soft"><StringList items={productionBriefItems} empty="章节进入审校后，这里会先汇总最值得优先处理的定稿建议。" /></InsightCard>
+        <InsightCard title="资产影响与注入" eyebrow="本次实际使用 / 待同步影响" tone="soft">
+          <ContextUsageImpactCard preview={chapterContextPreview} />
+        </InsightCard>
+        <InsightCard title="AI 生成解释" eyebrow={`当前模式 · ${getAiExecutionModeLabel(effectiveAiExecutionMode)}`} tone="soft">
+          <AiExplainabilityCard preview={chapterContextPreview} />
+        </InsightCard>
+        <InsightCard title="生产摘要" eyebrow="AI 主写 / 人工定稿" tone="soft"><StringList items={productionBriefItems} empty="先完成审校或刷新摘要，再回到这里收口定稿优先级。" /></InsightCard>
         <InsightCard title="关联线索" eyebrow="时间轴 / 道具" tone="soft"><StringList items={relatedInsightItems.slice(0, 12)} empty="当前章节暂未关联时间轴事件或关键道具。" /></InsightCard>
         <InsightCard title="本章信息揭示控制" eyebrow="允许揭示 / 已揭示" tone="soft">
           <ChapterRevealConstraintCard
@@ -1699,8 +1761,8 @@ export default function Writing({ novelId }: Props) {
         <InsightCard title="本章应回收伏笔" eyebrow={foreshadowSnapshot ? `按第 ${foreshadowSnapshot.currentChapterNum} 章进度计算` : '即将到期 / 超期未收'} tone="soft">
           <StringList items={dueForeshadowItems} empty="当前章节附近没有到期或超期未收的伏笔债务。" />
         </InsightCard>
-        <InsightCard title="修订提示" eyebrow="复盘重点" tone="soft"><StringList items={reviewInsightItems} empty="运行审校或摘要更新后，这里会汇总需要回看的修订点。" /></InsightCard>
-        <InsightCard title="世界规则" eyebrow="写作边界" tone="soft"><StringList items={worldRulesSummary} empty={currentNovel?.worldRulesJson ? '当前世界规则已录入，但还没有提炼出本章相关边界。' : '先完善世界规则，这里会同步展示写作边界。'} /></InsightCard>
+        <InsightCard title="修订提示" eyebrow="复盘重点" tone="soft"><StringList items={reviewInsightItems} empty="先运行审校或刷新摘要，再集中处理需要回看的修订点。" /></InsightCard>
+        <InsightCard title="世界规则" eyebrow="写作边界" tone="soft"><StringList items={worldRulesSummary} empty={currentNovel?.worldRulesJson ? '本章暂未命中明确的世界边界。' : '先完善世界规则，再回来校对本章边界。'} /></InsightCard>
       </div>
     </>
   )
@@ -1708,9 +1770,9 @@ export default function Writing({ novelId }: Props) {
   const memoryInsightContent = (
     <div className="novel-writing-shell__insight-stack">
       <InsightCard title="阶段摘要" eyebrow={storyMemory?.coverageSummary || '长篇覆盖'} tone="soft"><StringList items={storyMemory?.phaseDigest || []} empty="章节量还不大，阶段摘要会在长篇推进后逐步显现。" /></InsightCard>
-      <InsightCard title="剧情里程碑" eyebrow="压缩摘要"><StringList items={storyMemory ? storyMemory.plotMilestones.slice(0, 12) : []} empty="长文记忆尚未生成。" /></InsightCard>
+      <InsightCard title="剧情里程碑" eyebrow="压缩摘要"><StringList items={storyMemory ? storyMemory.plotMilestones.slice(0, 12) : []} empty="长篇记忆还没刷新到可复盘里程碑。" /></InsightCard>
       <InsightCard title="人物与世界状态" eyebrow="统一总账" tone="soft"><CharacterStateMemoryCard storyMemory={storyMemory} /></InsightCard>
-      <InsightCard title="活跃线程" eyebrow="待持续追踪" tone="soft"><StringList items={storyMemory ? storyMemory.activeThreads.slice(0, 12) : []} empty="当前没有需要持续追踪的活跃线程。" /></InsightCard>
+      <InsightCard title="活跃线程" eyebrow="待持续追踪" tone="soft"><StringList items={storyMemory ? storyMemory.activeThreads.slice(0, 12) : []} empty="当前章没有命中持续追踪线程，适合回查线程挂载是否缺失。" /></InsightCard>
       <InsightCard title="时间锚点" eyebrow="时序参照" tone="soft"><StringList items={storyMemory ? storyMemory.timelineAnchors.slice(0, 10) : []} empty="时间轴锚点会在这里同步展示。" /></InsightCard>
       <InsightCard title="道具账本" eyebrow="状态同步" tone="soft"><StringList items={storyMemory ? storyMemory.itemLedger.slice(0, 10) : []} empty="关键道具与线索的状态变化会记录在这里。" /></InsightCard>
     </div>
@@ -1844,15 +1906,15 @@ export default function Writing({ novelId }: Props) {
                 </div>
               ) : null}
             </div>
-          ) : <div className="novel-copy-block">当前没有发布前检查结果。</div>}
+          ) : <div className="novel-copy-block">先运行发布前检查，再决定是否可定稿。</div>}
         </InsightCard>
         <InsightCard title="合同对账" eyebrow="章节 / 场景合同" tone="soft">
           {currentContractAudit ? (
             <StringList
               items={currentContractAudit.items.map(formatContractAuditItemText)}
-              empty="当前没有合同对账结果。"
+              empty="先生成或刷新合同对账，再看当前缺口。"
             />
-          ) : <div className="novel-copy-block">当前没有合同对账结果。</div>}
+          ) : <div className="novel-copy-block">先生成或刷新合同对账，再看当前缺口。</div>}
         </InsightCard>
         <InsightCard title="章后状态回写" eyebrow="Canon 确认 / 统一写回" tone="soft">
           {currentChapter ? (
@@ -1888,13 +1950,14 @@ export default function Writing({ novelId }: Props) {
             genreContext={currentNovel?.genreName || ''}
             novelBackground={[currentNovel?.synopsis, currentNovel?.expandedBackground].filter(Boolean).join('\n')}
             modelConfigId={currentNovel?.modelConfigId}
+            novelId={novelId}
             disabled={!currentChapter}
             onRegenerate={applyChapterContent}
             drawCount={1}
           />
           {aiResult ? <div style={{ marginTop: 12 }}><AiCheckResult result={aiResult} /></div> : <div className="novel-copy-block" style={{ marginTop: 12 }}>点击上方 AI 体检后，这里也会展示语义与表达层面的复检结果。</div>}
         </InsightCard>
-        <InsightCard title="建议优先处理" eyebrow="下一步" tone="soft"><StringList items={consistencyReport?.focusAreas || []} empty="当前没有额外的优先处理建议。" /></InsightCard>
+        <InsightCard title="建议优先处理" eyebrow="下一步" tone="soft"><StringList items={consistencyReport?.focusAreas || []} empty="最近没有新的高优先项，继续推进正文即可。" /></InsightCard>
       </div>
     </>
   )
@@ -1928,7 +1991,7 @@ export default function Writing({ novelId }: Props) {
             </div>
             <div style={{ display: 'grid', gap: 12 }}>
               <div className="novel-copy-block" style={{ whiteSpace: 'pre-wrap', minHeight: 320 }}>
-                {selectedVersion?.content || '选择左侧版本后，这里会显示正文预览。'}
+                {selectedVersion?.content || '先从左侧选择版本，再比较正文差异。'}
               </div>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
                 <Button onClick={() => navigateToWritingRoute('editor')}>返回编辑</Button>
@@ -1965,9 +2028,38 @@ export default function Writing({ novelId }: Props) {
       actions={(
         <>
           <Button icon={<PlusOutlined />} onClick={() => void handleAddChapter()}>新建章节</Button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <Select
+              size="small"
+              style={{ width: 144 }}
+              value={defaultAiExecutionMode}
+              loading={savingAiMode}
+              options={AI_EXECUTION_MODE_OPTIONS.map((item) => ({
+                value: item.value,
+                label: `默认·${item.label}`,
+              }))}
+              onChange={(value) => void handleDefaultAiModeChange(value)}
+            />
+            <Select
+              size="small"
+              style={{ width: 160 }}
+              value={generationExecutionModeOverride}
+              options={[
+                {
+                  value: 'follow_default',
+                  label: `本次跟随默认（${getAiExecutionModeLabel(defaultAiExecutionMode)}）`,
+                },
+                ...AI_EXECUTION_MODE_OPTIONS.map((item) => ({
+                  value: item.value,
+                  label: `本次覆盖·${item.label}`,
+                })),
+              ]}
+              onChange={(value) => setGenerationExecutionModeOverride(value)}
+            />
+          </div>
           {currentChapterGenerating
             ? <Button danger icon={<LoadingOutlined />} onClick={() => void handleCancelGenerate()}>停止 AI 流水线</Button>
-            : <Button type="primary" icon={<RobotOutlined />} disabled={!currentChapter} onClick={() => void handleGenerateContent()}>AI 生成·章节流水线</Button>}
+            : <Button type="primary" icon={<RobotOutlined />} disabled={!currentChapter} onClick={() => void handleGenerateContent()}>{`AI 生成·章节流水线（${getAiExecutionModeLabel(effectiveAiExecutionMode)}）`}</Button>}
           <Button icon={<BulbOutlined />} disabled={!currentChapter} onClick={() => void handleGenerateSummary()}>AI 修复·更新记忆</Button>
           <Button icon={<FileSearchOutlined />} disabled={!currentChapter} onClick={() => void handleAiCheck()}>AI 修复·章节检测</Button>
         </>
@@ -1977,7 +2069,7 @@ export default function Writing({ novelId }: Props) {
           <WorkspaceMetric label="章节总数" value={chapters.length} tone="warm" hint="左侧列表可快速切章" />
           <WorkspaceMetric label="当前字数" value={`${wordCount} 字`} hint={currentChapter ? `章节状态：${currentStatusLabel}` : '先选择章节'} />
           <WorkspaceMetric label="结构体检" value={consistencyReport ? `${consistencyReport.readinessScore} 分` : '加载中'} tone="cool" hint={consistencyReport ? getHealthLabel(consistencyReport.readinessScore) : '正在分析全书结构'} />
-          <WorkspaceMetric label="待同步章节" value={contextStatus ? contextStatus.staleChapterCount : '加载中'} hint={contextStatus?.staleChapterCount ? '最近的设定或前文变动已影响后续章节' : '当前没有受上下文变更影响的章节'} />
+          <WorkspaceMetric label="待同步章节" value={contextStatus ? contextStatus.staleChapterCount : '加载中'} hint={contextStatus?.staleChapterCount ? '最近的设定或前文变动已影响后续章节' : '当前上下文与正文已对齐'} />
         </>
       )}
       contextSummary={(
@@ -2508,7 +2600,7 @@ function ChapterRevealConstraintCard({
   )
   const allowedSet = useMemo(() => new Set(allowedFactIds), [allowedFactIds])
   const revealedSet = useMemo(() => new Set(revealedFactIds), [revealedFactIds])
-  const volumeLabel = chapterVolumeNumber ? `第${chapterVolumeNumber}卷` : '未绑定卷'
+  const volumeLabel = chapterVolumeNumber ? `第${chapterVolumeNumber}卷` : '待绑定卷'
   const ratioLabel = `${truthStats.plannedTruths}/${truthStats.totalTruths}`
 
   if (!chapter) {
@@ -2568,7 +2660,7 @@ function ChapterRevealConstraintCard({
         ]}
       />
       {candidateFacts.length <= 0 ? (
-        <div className="novel-copy-block">当前分类下暂无可选条目。</div>
+        <div className="novel-copy-block">当前分类下没有命中可调度条目。</div>
       ) : (
         <div className="novel-note-list">
           {candidateFacts.map((fact) => {
@@ -2645,7 +2737,7 @@ function InsightCard({
 
 function ConstraintInjectionCard({ preview }: { preview: ChapterContextPreview | null }) {
   if (!preview || preview.stages.length === 0) {
-    return <div className="novel-copy-block">当前章节尚未生成上下文预览。切到具体章节后，这里会展示四个阶段的关键约束注入状态。</div>
+    return <div className="novel-copy-block">先切到具体章节并生成上下文预览，再核对四个阶段的约束注入状态。</div>
   }
 
   return (
@@ -2723,7 +2815,7 @@ function ConstraintInjectionCard({ preview }: { preview: ChapterContextPreview |
 
 function PreviousChapterFeedCard({ preview }: { preview: ChapterContextPreview | null }) {
   if (!preview) {
-    return <div className="novel-copy-block">上下文预览生成后，这里会展示上一章先验采样、覆盖率和实际喂给模型的承接文本。</div>
+    return <div className="novel-copy-block">先生成上下文预览，再核对上一章承接采样、覆盖率和实际喂给模型的文本。</div>
   }
 
   const report = preview.previousChapterSampleReport
@@ -2739,7 +2831,7 @@ function PreviousChapterFeedCard({ preview }: { preview: ChapterContextPreview |
         <div className="novel-insight-list__item">覆盖率 {report.coverageRate}%</div>
         <div className="novel-insight-list__item">{report.fullyInjected ? '短章全文注入' : `片段 ${report.segmentCount} 段`}</div>
       </div>
-      <StringList items={segmentSummary} empty="当前没有上一章先验片段。" />
+      <StringList items={segmentSummary} empty="上一章没有命中可直接注入的承接片段。" />
       {preview.previousChapterContext
         ? <div className="novel-copy-block" style={{ whiteSpace: 'pre-wrap' }}>{preview.previousChapterContext}</div>
         : <div className="novel-copy-block">当前章节前没有可注入的上一章先验。</div>}
@@ -2749,7 +2841,7 @@ function PreviousChapterFeedCard({ preview }: { preview: ChapterContextPreview |
 
 function RecallDiagnosticsCard({ preview }: { preview: ChapterContextPreview | null }) {
   if (!preview) {
-    return <div className="novel-copy-block">上下文预览生成后，这里会展示召回补充的来源、过期拦截和依赖率。</div>
+    return <div className="novel-copy-block">先生成上下文预览，再核对召回来源、过期拦截和依赖率。</div>
   }
 
   const diagnostics = preview.recallDiagnostics
@@ -2779,7 +2871,7 @@ function RecallDiagnosticsCard({ preview }: { preview: ChapterContextPreview | n
       <StringList items={diagnostics.summaryLines} empty="当前还没有召回诊断摘要。" />
       <StringList
         items={freshSources.map((source) => `${source.sourceLabel}：${source.summary}`)}
-        empty="当前没有进入上下文的背景补充片段。"
+        empty="本次没有额外背景补充片段进入上下文。"
       />
       {staleSources.length > 0 ? (
         <div className="novel-note-list">
@@ -2790,9 +2882,102 @@ function RecallDiagnosticsCard({ preview }: { preview: ChapterContextPreview | n
           ))}
         </div>
       ) : (
-        <div className="novel-copy-block">当前没有命中过期召回片段。</div>
+        <div className="novel-copy-block">本次没有命中过期召回片段。</div>
       )}
       {preview.recalledMemory ? <div className="novel-copy-block" style={{ whiteSpace: 'pre-wrap' }}>{preview.recalledMemory}</div> : null}
+    </div>
+  )
+}
+
+function ContextUsageImpactCard({ preview }: { preview: ChapterContextPreview | null }) {
+  if (!preview) {
+    return <div className="novel-copy-block">先生成上下文预览，再核对本次真正用了哪些资产、合同约束，以及当前章节挂着哪些待同步影响。</div>
+  }
+
+  const snapshot = preview.usageSnapshot
+  const linkedImpactLines = snapshot.linkedImpacts.map((item) => {
+    const prefix = item.eventAssetLabel ? `${item.eventAssetLabel} -> ` : ''
+    return `${prefix}${item.targetLabel}：${item.impactReason}`
+  })
+
+  return (
+    <div style={{ display: 'grid', gap: 10 }}>
+      <StringList items={snapshot.usedAssets} empty="本次生成还没记录到实际命中的关键资产。" />
+      <StringList items={snapshot.usedContracts} empty="本次生成还没记录到注入的合同与硬约束。" />
+      <StringList items={snapshot.recentStateChanges} empty="本次生成没有新增状态变化汇总。" />
+      {snapshot.ignoredConstraints.length > 0 ? (
+        <div className="novel-note-list">
+          {snapshot.ignoredConstraints.map((item, index) => (
+            <div key={`${item}-${index}`} className="novel-note-list__item">忽略 / 压缩：{item}</div>
+          ))}
+        </div>
+      ) : (
+        <div className="novel-copy-block">本次没有约束被压缩或忽略。</div>
+      )}
+      {snapshot.linkedImpacts.length > 0 ? (
+        <div style={{ display: 'grid', gap: 8 }}>
+          <StringList items={linkedImpactLines} empty="当前章节没有挂起的影响项。" />
+          <div className="novel-insight-list">
+            {snapshot.linkedImpacts.map((item) => (
+              <div key={item.id} className="novel-insight-list__item">
+                {item.resolutionStatus === 'pending' ? '待同步' : '已复核'} · {item.targetType}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="novel-copy-block">当前章节没有挂起的资产影响任务。</div>
+      )}
+    </div>
+  )
+}
+
+function AiExplainabilityCard({ preview }: { preview: ChapterContextPreview | null }) {
+  const explainability = preview?.generationExplainability
+  if (!preview || !explainability) {
+    return <div className="novel-copy-block">先生成上下文预览，再查看模型路由、结构化输出、风格锁和低置信度事实。</div>
+  }
+
+  const routeLines = explainability.stageReports.map((stage) => {
+    const route = stage.route
+    return `${stage.stageLabel}：${route.modelLabel} · 温度 ${route.temperature.toFixed(2)} · 输出 ${route.maxTokens} · ${route.reviewDepth}`
+  })
+  const structuredLines = explainability.structuredOutputs
+  const inferredLines = explainability.inferredFacts.map((item) => `${item.label}：${item.detail}${item.needsConfirmation ? ' · 待确认' : ''}`)
+  const lowConfidenceLines = explainability.lowConfidenceFacts.map((item) => `${item.label}：${item.detail}`)
+  const assemblyLayers = explainability.contextAssemblyReport?.layers.map((layer) => `${layer.label} · ${layer.itemCount} 项：${layer.summary}`) || []
+  const styleLock = explainability.authorStyleLock
+  const styleLockLines = styleLock?.enabled
+    ? [
+        styleLock.sourceLabel ? `来源：${styleLock.sourceLabel}` : '',
+        styleLock.sentenceLengthHint ? `句长：${styleLock.sentenceLengthHint}` : '',
+        styleLock.dialogueRhythmHint ? `对白：${styleLock.dialogueRhythmHint}` : '',
+        styleLock.narrativeDensityHint ? `密度：${styleLock.narrativeDensityHint}` : '',
+        styleLock.paceHint ? `节奏：${styleLock.paceHint}` : '',
+        styleLock.toneKeywords.length > 0 ? `语调：${styleLock.toneKeywords.join('、')}` : '',
+        styleLock.preferredLexicon.length > 0 ? `偏好词汇：${styleLock.preferredLexicon.join('、')}` : '',
+        styleLock.forbiddenPatterns.length > 0 ? `禁用表达：${styleLock.forbiddenPatterns.join('、')}` : '',
+        styleLock.hardRules.length > 0 ? `硬约束：${styleLock.hardRules.join('；')}` : '',
+      ].filter(Boolean)
+    : []
+
+  return (
+    <div style={{ display: 'grid', gap: 10 }}>
+      <div className="novel-copy-block">{explainability.routeSummary}</div>
+      <StringList items={routeLines} empty="当前还没有模型路由记录。" />
+      <StringList items={structuredLines} empty="本次没有新增结构化输出节点记录。" />
+      <StringList items={assemblyLayers} empty="当前还没有上下文组装层说明。" />
+      <StringList items={styleLockLines} empty="还没有作者风格锁，可去主题与文风页补样本。" />
+      <StringList items={inferredLines} empty="本次没有新增推断候选。" />
+      {lowConfidenceLines.length > 0 ? (
+        <div className="novel-note-list">
+          {lowConfidenceLines.map((item, index) => (
+            <div key={`${item}-${index}`} className="novel-note-list__item">低置信度：{item}</div>
+          ))}
+        </div>
+      ) : (
+        <div className="novel-copy-block">本次没有低置信度事实或被压缩约束。</div>
+      )}
     </div>
   )
 }
@@ -2818,7 +3003,7 @@ function ChapterFocusCard({
           {hasNextChapterSeed ? <section className="novel-writing-shell__focus-block novel-writing-shell__focus-block--accent"><div className="novel-writing-shell__focus-label">下一章引子</div><div className="novel-writing-shell__focus-copy">{nextChapterSeed}</div></section> : null}
           {hasContinuity ? <section className="novel-writing-shell__focus-notes"><div className="novel-writing-shell__focus-label">连续性提醒</div><div className="novel-insight-list">{continuityItems.map((item, index) => <div key={`${item}-${index}`} className="novel-insight-list__item novel-insight-list__item--compact">{item}</div>)}</div></section> : null}
         </div>
-      ) : <div className="novel-copy-block">章节流水线完成后，这里会自动汇总本章摘要、承接提醒与下一章引子。</div>}
+      ) : <div className="novel-copy-block">章节流水线完成后，会在这里收束本章摘要、承接提醒与下一章引子。</div>}
     </InsightCard>
   )
 }
@@ -2829,7 +3014,7 @@ function StringList({ items, empty }: { items: string[]; empty: string }) {
 
 function CharacterStateMemoryCard({ storyMemory }: { storyMemory: StoryMemorySnapshot | null }) {
   if (!storyMemory) {
-    return <div className="novel-copy-block">先运行章节流水线或手动刷新记忆，这里会显示人物与世界实体的当前状态、近期跳变和冲突告警。</div>
+    return <div className="novel-copy-block">先运行章节流水线或刷新记忆，再核对人物与世界实体的当前状态、近期跳变和冲突告警。</div>
   }
 
   const characterStateItems = storyMemory.characterCurrentStates
@@ -2876,7 +3061,7 @@ function CharacterStateMemoryCard({ storyMemory }: { storyMemory: StoryMemorySna
       ) : (
         <div className="novel-copy-block">最近没有命中的状态跳变或冲突告警。</div>
       )}
-      <StringList items={conflictEntityItems} empty="当前没有需要优先回查的冲突实体。" />
+      <StringList items={conflictEntityItems} empty="没有发现需要优先回查的冲突实体。" />
       <StringList items={trendItems} empty="跨章节状态趋势会在这里汇总。" />
     </div>
   )
@@ -2922,7 +3107,7 @@ function worldStateAlertColor(severity: QualityDashboardData['recentWorldStateAl
 
 function WorldStateHealthCard({ dashboard }: { dashboard: QualityDashboardData | null }) {
   if (!dashboard) {
-    return <div className="novel-copy-block">加载质量看板后，这里会显示跨章节的状态稳定性趋势与近期冲突。</div>
+    return <div className="novel-copy-block">先加载质量数据，再看跨章节的状态稳定性趋势与近期冲突。</div>
   }
 
   const alerts = dashboard.recentWorldStateAlerts.slice(0, 4)
@@ -2944,7 +3129,7 @@ function WorldStateHealthCard({ dashboard }: { dashboard: QualityDashboardData |
         <div className="novel-insight-list__item">冲突告警 {dashboard.worldStateSummary.conflictAlertCount}</div>
         <div className="novel-insight-list__item">预警快照 {dashboard.worldStateSummary.warningCount}</div>
       </div>
-      <StringList items={overviewItems} empty="当前没有可用的总账概览。" />
+      <StringList items={overviewItems} empty="状态总账还没形成可读概览。" />
       {conflictEntities.length > 0 ? (
         <div className="novel-note-list">
           {conflictEntities.map((entity, index) => (
@@ -2957,7 +3142,7 @@ function WorldStateHealthCard({ dashboard }: { dashboard: QualityDashboardData |
           ))}
         </div>
       ) : (
-        <div className="novel-copy-block">当前没有需要优先回查的冲突实体。</div>
+        <div className="novel-copy-block">世界状态暂时稳定，没有需要优先回查的冲突实体。</div>
       )}
       {alerts.length > 0 ? (
         <div className="novel-note-list">
@@ -3019,7 +3204,7 @@ function LanguageDriftHealthCard({
         </div>
       ) : (
         <div className="novel-copy-block">
-          最近 {dashboard.novelLanguageDriftSummary.recentWindowSize || dashboard.totalChaptersScored} 章暂无明显恶化项。
+          最近 {dashboard.novelLanguageDriftSummary.recentWindowSize || dashboard.totalChaptersScored} 章保持稳定，没有明显恶化项。
         </div>
       )}
 
@@ -3031,7 +3216,7 @@ function LanguageDriftHealthCard({
           <div className="novel-note-list__item">
             {currentVolume.topWorseningMetrics.length > 0
               ? `卷内近期恶化：${currentVolume.topWorseningMetrics.map((item) => `${item.label} ${formatSignedDriftDelta(item.delta)}`).join('、')}`
-              : '卷内近期暂无明显恶化项。'}
+              : '卷内近期保持稳定。'}
           </div>
         </div>
       ) : null}
@@ -3062,7 +3247,7 @@ function HumanizationHealthCard({
   const recentAlerts = dashboard?.feedbackRecurrence.humanization.recentAlerts.slice(0, 3) || []
 
   if (currentSignals.length === 0 && promotedIssues.length === 0 && recentAlerts.length === 0) {
-    return <div className="novel-copy-block">解释腔、模板衔接、空转修辞和立场发虚开始跨章复现后，这里会直接提示下一章该避免什么。</div>
+    return <div className="novel-copy-block">语言风险一旦开始跨章复现，系统会直接提示下一章该避免什么。</div>
   }
 
   return (
@@ -3122,7 +3307,7 @@ function DialogueFingerprintHealthCard({
     && currentDrifts.length === 0
     && (!dashboard || dashboard.dialogueFingerprintStats.eligibleCharacterCount === 0)
   ) {
-    return <div className="novel-copy-block">章节里出现稳定对白样本后，这里会开始提示“谁说话太像”以及“谁正在偏离自己的声音”。</div>
+    return <div className="novel-copy-block">等章节里出现稳定对白样本后，就会提示“谁说话太像”以及“谁正在偏离自己的声音”。</div>
   }
 
   return (
@@ -3198,7 +3383,7 @@ function DialogueFingerprintHealthCard({
           ))}
         </div>
       ) : globalDrifts.length > 0 ? null : (
-        <div className="novel-copy-block">全书当前没有达到高阈值的对白同质化组合。</div>
+        <div className="novel-copy-block">全书对白同质化目前没有达到高阈值。</div>
       )}
 
       {globalDrifts.length > 0 ? (
@@ -3239,7 +3424,7 @@ function StoryDynamicsHealthCard({
   ].filter((item): item is string => Boolean(item))
 
   if (currentSignals.length === 0 && (!dashboard || dashboard.protagonistSetbackSummary.chapterCount === 0)) {
-    return <div className="novel-copy-block">运行新版章节审校后，这里会开始累积主角受挫、代价持续和反转节奏告警。</div>
+    return <div className="novel-copy-block">运行新版章节审校后，就会累计主角受挫、代价持续和反转节奏告警。</div>
   }
 
   const alerts = dashboard?.storyPacingAlerts.slice(0, 3) || []
@@ -3273,7 +3458,7 @@ function StoryDynamicsHealthCard({
         </div>
       ) : dashboard ? (
         <div className="novel-copy-block">
-          最近 {Math.min(20, dashboard.protagonistSetbackSummary.chapterCount)} 章暂无明显的主角与节奏结构告警。
+          最近 {Math.min(20, dashboard.protagonistSetbackSummary.chapterCount)} 章保持稳定，没有明显的主角与节奏结构告警。
         </div>
       ) : null}
 
@@ -3297,7 +3482,7 @@ function StoryDynamicsHealthCard({
             当前卷：{currentVolume.volumeName} · 受挫率 {currentVolume.protagonistSetbackRate}% · 平均压力 {currentVolume.averagePressure}
           </div>
           <div className="novel-note-list__item">
-            卷内高潮：{currentVolume.climaxChapterNums.length > 0 ? currentVolume.climaxChapterNums.join('、') : '暂无'}；反转：{currentVolume.reversalChapterNums.length > 0 ? currentVolume.reversalChapterNums.join('、') : '暂无'}；代价蒸发 {currentVolume.evaporatedCostCount} 次。
+            卷内高潮：{currentVolume.climaxChapterNums.length > 0 ? currentVolume.climaxChapterNums.join('、') : '未记录'}；反转：{currentVolume.reversalChapterNums.length > 0 ? currentVolume.reversalChapterNums.join('、') : '未记录'}；代价蒸发 {currentVolume.evaporatedCostCount} 次。
           </div>
         </div>
       ) : null}

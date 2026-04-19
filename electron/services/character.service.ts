@@ -27,6 +27,7 @@ import {
 import { createTask, executeChatTask, runChatTask, updateTask } from './task.service'
 import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/utils/text'
 import { buildCharacterRelationSummaryLine, normalizeCharacterRelationLevel } from '../../src/shared/character-relations'
+import { recordAssetChangeEvent } from './asset-impact.service'
 import { markNovelContextChanged } from './context-impact.service'
 import { runAssetQualityLoop, summarizeAssetQualityWarnings } from './asset-quality.service'
 import {
@@ -910,6 +911,17 @@ export function createCharacter(
   if (!options.skipContextTracking) {
     markNovelContextChanged(novelId, 'Character profiles changed')
     refreshWorldStateVersionsForNovel(novelId)
+    recordAssetChangeEvent({
+      novelId,
+      assetType: 'character',
+      assetId: id,
+      assetLabel: normalizedData.fullName || '未命名角色',
+      operation: 'create',
+      changeReason: 'Character profiles changed',
+      impactLevel: 'medium',
+      triggeredBy: 'character.service',
+      payload: normalizedData,
+    })
   }
   return id
 }
@@ -936,6 +948,17 @@ export function updateCharacter(
     if (current) {
       markNovelContextChanged(current.novelId, 'Character profiles changed')
       refreshWorldStateVersionsForNovel(current.novelId)
+      recordAssetChangeEvent({
+        novelId: current.novelId,
+        assetType: 'character',
+        assetId: id,
+        assetLabel: normalizedData.fullName || current.fullName,
+        operation: 'update',
+        changeReason: 'Character profiles changed',
+        impactLevel: 'medium',
+        triggeredBy: 'character.service',
+        payload: normalizedData,
+      })
     }
   }
 }
@@ -952,6 +975,16 @@ export function deleteCharacter(id: number, options: { skipContextTracking?: boo
   if (!options.skipContextTracking && current) {
     markNovelContextChanged(current.novelId, 'Character profiles changed')
     refreshWorldStateVersionsForNovel(current.novelId)
+    recordAssetChangeEvent({
+      novelId: current.novelId,
+      assetType: 'character',
+      assetId: id,
+      assetLabel: current.fullName,
+      operation: 'delete',
+      changeReason: 'Character profiles changed',
+      impactLevel: 'medium',
+      triggeredBy: 'character.service',
+    })
   }
 }
 

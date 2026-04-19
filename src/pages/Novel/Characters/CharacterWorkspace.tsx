@@ -875,6 +875,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
           extra={(
             <Space wrap>
               <AIGenerateButton
+                novelId={novelId}
                 label={selectedCharacter ? 'AI 补全·当前人物' : 'AI 生成·人物草稿'}
                   isJson
                   disabled={!selectedCharacter && !creating}

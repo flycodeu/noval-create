@@ -49,6 +49,7 @@ import {
   validateChapterContractDelivery,
 } from './chapter-contract-validator.service'
 import { analyzeNarrativeControls } from './narrative-control.service'
+import { getNovelAssetImpactSummary } from './asset-impact.service'
 
 type AssetFreshnessKey = 'faction' | 'character' | 'item' | 'thread' | 'timeline'
 
@@ -1911,6 +1912,9 @@ export interface NovelContextStatus {
   staleAssetCount: number
   staleAssetKeys: AssetFreshnessKey[]
   staleAssetLabels: string[]
+  pendingImpactCount: number
+  pendingManualConfirmationCount: number
+  latestImpactEventAt?: string | null
 }
 
 function parseIsoTime(raw?: string | null): number | null {
@@ -1960,6 +1964,7 @@ export function getNovelContextStatus(novelId: number): NovelContextStatus {
     if (latestUpdatedAt === null) return false
     return (novelUpdatedAt - latestUpdatedAt) > ASSET_FRESHNESS_GRACE_MS
   })
+  const impactSummary = getNovelAssetImpactSummary(novelId)
 
   return {
     novelId,
@@ -1971,6 +1976,9 @@ export function getNovelContextStatus(novelId: number): NovelContextStatus {
     staleAssetCount: staleAssetKeys.length,
     staleAssetKeys,
     staleAssetLabels: staleAssetKeys.map((key) => ASSET_FRESHNESS_LABELS[key]),
+    pendingImpactCount: impactSummary.pendingImpactCount,
+    pendingManualConfirmationCount: impactSummary.pendingManualConfirmationCount,
+    latestImpactEventAt: impactSummary.latestImpactEventAt,
   }
 }
 

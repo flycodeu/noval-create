@@ -8,6 +8,7 @@ import type {
   ChapterWritebackDecision,
   ChapterWritebackDiff as AppChapterWritebackDiff,
   ChapterWritebackRun as AppChapterWritebackRun,
+  WritebackVerificationStatus,
 } from '../../src/types'
 import { getDb, getSqlite } from '../database/db'
 import {
@@ -17,6 +18,7 @@ import {
   chapters,
   characters,
   novels,
+  revisionTasks,
 } from '../database/schema'
 import { listLatestCharacterStates } from './character-state.service'
 import { listLatestWorldStates } from './world-state.service'
@@ -36,6 +38,7 @@ import * as timelineService from './timeline.service'
 import * as itemService from './item.service'
 import * as characterArcService from './character-arc.service'
 import * as revisionTaskService from './revision-task.service'
+import { resolveChapterAssetImpacts } from './asset-impact.service'
 
 type ChapterRow = typeof chapters.$inferSelect
 type NovelRow = typeof novels.$inferSelect
@@ -247,6 +250,30 @@ function normalizeDecision(value: unknown): ChapterWritebackDecision {
   return 'pending'
 }
 
+function deriveVerificationStatus(confidence: unknown, hint?: string | null): WritebackVerificationStatus {
+  const normalized = typeof confidence === 'number' && Number.isFinite(confidence) ? confidence : 0
+  const reason = asText(hint).toLowerCase()
+  if (/(冲突|矛盾|不一致|conflict|contradict)/.test(reason)) return 'conflicted'
+  if (normalized >= 0.82) return 'auto_ready'
+  if (normalized >= 0.58) return 'needs_review'
+  return 'conflicted'
+}
+
+function verificationTaskIssueKey(runId: number, diffId: number): string {
+  return `chapter-writeback-review:${runId}:${diffId}`
+}
+
+function resolveVerificationTask(runId: number, diffId: number): void {
+  const db = getDb()
+  const task = db.select().from(revisionTasks).where(eq(revisionTasks.issueKey, verificationTaskIssueKey(runId, diffId))).all()[0]
+  if (!task || task.status === 'resolved') return
+  db.update(revisionTasks).set({
+    status: 'resolved',
+    resolvedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  }).where(eq(revisionTasks.id, task.id)).run()
+}
+
 function mapRunRow(row: ChapterWritebackRunRow): AppChapterWritebackRun {
   return {
     id: row.id,
@@ -272,6 +299,7 @@ function mapExtractRow(row: ChapterFactExtractRow): AppChapterFactExtract {
     sourceText: row.sourceText,
     factJson: row.factJson,
     confidence: row.confidence,
+    verificationStatus: (asText(row.verificationStatus) || deriveVerificationStatus(row.confidence, row.sourceText)) as WritebackVerificationStatus,
     sortOrder: row.sortOrder || 0,
     createdAt: row.createdAt || '',
     updatedAt: row.updatedAt || '',
@@ -289,6 +317,7 @@ function mapDiffRow(row: ChapterWritebackDiffRow): AppChapterWritebackDiff {
     afterStateJson: row.afterStateJson,
     diffReason: row.diffReason,
     confidence: row.confidence,
+    verificationStatus: (asText(row.verificationStatus) || deriveVerificationStatus(row.confidence, row.diffReason)) as WritebackVerificationStatus,
     canonDecision: normalizeDecision(row.canonDecision),
     writebackStatus: (asText(row.writebackStatus) || 'pending') as AppChapterWritebackDiff['writebackStatus'],
     writebackError: row.writebackError,
@@ -390,6 +419,9 @@ function buildCharacterStateRecord(state: CharacterStateLike): Record<string, un
     eventCause: state.eventCause || '',
     changeReason: state.changeReason || '',
     summaryText: state.summaryText || '',
+    triggerEventId: state.triggerEventId || null,
+    sourceSegmentId: state.sourceSegmentId || null,
+    stateDeltaJson: state.stateDeltaJson || null,
   }
 }
 
@@ -405,6 +437,9 @@ function buildWorldStateRecord(state: WorldStateLike): Record<string, unknown> {
     eventCause: state.eventCause || '',
     changeReason: state.changeReason || '',
     severity: state.severity,
+    triggerEventId: state.triggerEventId || null,
+    sourceSegmentId: state.sourceSegmentId || null,
+    stateDeltaJson: state.stateDeltaJson || null,
   }
 }
 
@@ -986,6 +1021,35 @@ function createWritebackFailureTask(run: ChapterWritebackRunRow, diff: ChapterWr
   })
 }
 
+function createWritebackVerificationTask(run: ChapterWritebackRunRow, diff: ChapterWritebackDiffRow, chapter: ChapterRow): void {
+  const verificationStatus = deriveVerificationStatus(diff.confidence, diff.diffReason)
+  if (verificationStatus !== 'conflicted') return
+  revisionTaskService.createRevisionTask(chapter.novelId, {
+    taskSource: 'system',
+    taskType: 'continuity',
+    status: 'open',
+    severity: 'high',
+    title: `章后事实冲突待确认：${resolveDiffTitle(mapDiffRow(diff))}`,
+    description: [
+      `第${chapter.chapterNum}章的 ${diff.assetType} 回写候选存在冲突或低置信度推断。`,
+      diff.diffReason || '',
+      '请先人工确认，再决定接受、编辑或拒绝。',
+    ].filter(Boolean).join('\n'),
+    relatedPage: 'writeback',
+    entityType: diff.assetType,
+    entityId: diff.entityId,
+    chapterId: chapter.id,
+    issueKey: verificationTaskIssueKey(run.id, diff.id),
+    originMetaJson: safeStringify({
+      runId: run.id,
+      diffId: diff.id,
+      assetType: diff.assetType,
+      entityType: diff.entityType,
+      verificationStatus,
+    }),
+  })
+}
+
 function applySingleDiff(row: ChapterWritebackDiffRow, chapter: ChapterRow): number | null {
   if (row.assetType === 'character' || row.assetType === 'world') return row.entityId || null
   if (row.assetType === 'thread') return applyThreadDiff(row, chapter)
@@ -1029,6 +1093,7 @@ export async function prepareChapterWritebackRun(chapterId: number, triggerSourc
           sourceText: item.sourceText,
           factJson: safeStringify(item.fact),
           confidence: item.confidence,
+          verificationStatus: deriveVerificationStatus(item.confidence, item.sourceText),
           sortOrder: index + 1,
           createdAt: now,
           updatedAt: now,
@@ -1044,6 +1109,7 @@ export async function prepareChapterWritebackRun(chapterId: number, triggerSourc
           afterStateJson: safeStringify(item.afterState),
           diffReason: item.diffReason,
           confidence: item.confidence,
+          verificationStatus: deriveVerificationStatus(item.confidence, item.diffReason),
           canonDecision: 'pending',
           writebackStatus: 'pending',
           sortOrder: index + 1,
@@ -1058,6 +1124,10 @@ export async function prepareChapterWritebackRun(chapterId: number, triggerSourc
       }).where(eq(chapterWritebackRuns.id, runId)).run()
     })()
     refreshRunSummary(runId)
+    const persistedRun = getRunRow(runId)
+    loadDiffRows(runId).forEach((diff) => {
+      createWritebackVerificationTask(persistedRun, diff, chapter)
+    })
   } catch (error) {
     db.update(chapterWritebackRuns).set({
       status: 'failed',
@@ -1109,6 +1179,9 @@ export async function updateChapterWritebackDecision(
     diffReason: patch.diffReason !== undefined ? asText(patch.diffReason) : current.diffReason,
     updatedAt: new Date().toISOString(),
   }).where(eq(chapterWritebackDiffs.id, diffId)).run()
+  if (patch.canonDecision && patch.canonDecision !== 'pending') {
+    resolveVerificationTask(current.runId, current.id)
+  }
   refreshRunSummary(current.runId)
   const updated = getDb().select().from(chapterWritebackDiffs).where(eq(chapterWritebackDiffs.id, diffId)).all()[0]
   if (!updated) throwUserFacingError('common.notFound')
@@ -1127,6 +1200,7 @@ export async function bulkUpdateChapterWritebackDecisions(
       canonDecision: patch.canonDecision,
       updatedAt: new Date().toISOString(),
     }).where(eq(chapterWritebackDiffs.id, row.id)).run()
+    resolveVerificationTask(row.runId, row.id)
   })
   refreshRunSummary(runId)
   return loadDiffRows(runId).map(mapDiffRow)
@@ -1190,6 +1264,9 @@ async function executeRunApply(runId: number, retryFailedOnly = false): Promise<
     errorMessage: failedCount > 0 ? `共有 ${failedCount} 条回写失败` : null,
     updatedAt: new Date().toISOString(),
   }).where(eq(chapterWritebackRuns.id, run.id)).run()
+  if (appliedCount > 0) {
+    resolveChapterAssetImpacts(chapter.novelId, chapter.id, 'resolved')
+  }
   refreshRunSummary(run.id)
   return getChapterWritebackCenterData(run.chapterId, run.id)
 }

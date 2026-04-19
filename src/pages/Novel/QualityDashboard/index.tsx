@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Button, Empty, Modal, Progress, Skeleton, Tabs, Tag } from 'antd'
+import { Button, Empty, Modal, Progress, Skeleton, Tabs, Tag, message } from 'antd'
 import VirtualList from 'rc-virtual-list'
-import type { LanguageDriftMetrics, QualityDashboardData, TaskPipelineStats } from '../../../types'
+import { useNavigate } from 'react-router-dom'
+import type { LanguageDriftMetrics, QualityDashboardData, QualityRepairAction, QualityRepairActionResult, TaskPipelineStats } from '../../../types'
 import { WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
 import {
   getQualityRiskSeverityColor,
@@ -216,16 +217,48 @@ function chapterGateHeatmapColor(score: number): string {
 }
 
 function qualityRiskKindLabel(kind: QualityDashboardData['novelQualityMetrics']['riskOverview'][number]['kind']): string {
+  if (kind === 'commitment_delivery') return '承诺兑现率'
   if (kind === 'language_drift') return 'AI 味退化'
   if (kind === 'feedback_recurrence') return '审校复现'
   if (kind === 'style_compliance') return '风格硬约束'
+  if (kind === 'voice_distinction') return '角色声音区分度'
+  if (kind === 'growth_cost_balance') return '成长-代价平衡'
   if (kind === 'story_dynamics') return '主角与节奏'
   if (kind === 'chapter_function') return '章节功能'
   if (kind === 'story_arc') return '故事弧推进'
   if (kind === 'foreshadow_debt') return '伏笔债务'
   if (kind === 'endgame_debt') return '终局债务'
   if (kind === 'recall') return '召回风险'
+  if (kind === 'info_reveal_pacing') return '信息揭示节奏'
   return '状态稳定性'
+}
+
+function qualityRepairMetricLabel(key: QualityRepairAction['metricKey']): string {
+  if (key === 'commitment_delivery') return '承诺兑现率'
+  if (key === 'voice_distinction') return '角色声音区分度'
+  if (key === 'growth_cost_balance') return '成长-代价平衡'
+  if (key === 'foreshadow_debt') return '伏笔债务压力'
+  if (key === 'world_state_drift') return '世界状态漂移'
+  return '信息揭示节奏'
+}
+
+function buildWorkspacePath(novelId: number, page: string, query?: Record<string, string>): string {
+  const params = new URLSearchParams()
+  Object.entries(query || {}).forEach(([key, value]) => {
+    if (value) params.set(key, value)
+  })
+  const queryString = params.toString()
+  return `/novels/${novelId}/${page}${queryString ? `?${queryString}` : ''}`
+}
+
+function buildRepairActionTargetPath(novelId: number, page?: string, query?: Record<string, string>): string | null {
+  if (!page) return null
+  return buildWorkspacePath(novelId, page, query)
+}
+
+function buildRepairResultTargetPath(novelId: number, result: QualityRepairActionResult): string | null {
+  if (!result.relatedPage) return null
+  return buildWorkspacePath(novelId, result.relatedPage, result.navigationQuery)
 }
 
 function readinessStatusColor(status: QualityDashboardData['productionReadiness']['status']): string {
@@ -252,12 +285,14 @@ function recallSnapshotSourceColor(source?: QualityDashboardData['chapterDetails
 }
 
 export default function QualityDashboard({ novelId }: Props) {
+  const navigate = useNavigate()
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<QualityDashboardData | null>(null)
   const [pipelineStats, setPipelineStats] = useState<TaskPipelineStats | null>(null)
   const [selectedChapter, setSelectedChapter] = useState<QualityChapterEntry | null>(null)
   const [selectedVolumeId, setSelectedVolumeId] = useState<number | null>(null)
   const [activeTab, setActiveTab] = useState('overview')
+  const [repairingActionId, setRepairingActionId] = useState<string | null>(null)
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -313,8 +348,12 @@ export default function QualityDashboard({ novelId }: Props) {
   if (!data || (!hasScoreData && !hasChapterGateData && !hasStoryDynamicsData && !hasArcProgressData && !hasDialogueData && !hasStateData && !hasRecallData && !hasChapterFunctionData && !hasEndgameDebtData && !hasPipelineData)) {
     return (
       <WorkspacePage title="质量监控">
-        <WorkspacePanel title="暂无数据">
-          <Empty description="还没有可用的 AI 检测、对白指纹、章节功能、状态稳定性或结构节奏跟踪数据。先运行章节审校或 AI 检测后再来查看。" />
+        <WorkspacePanel title="先产出首轮检测">
+          <Empty description="先在正文页运行章节审校、AI 体检或写作流水线，质量页才会开始累计趋势、风险和修复动作。">
+            <Button type="primary" onClick={() => navigate(`/novels/${novelId}/writing`)}>
+              进入正文写作
+            </Button>
+          </Empty>
         </WorkspacePanel>
       </WorkspacePage>
     )
@@ -395,6 +434,31 @@ export default function QualityDashboard({ novelId }: Props) {
     const chapterNum = risk.chapterNums[0]
     if (typeof chapterNum === 'number') openChapterByNum(chapterNum)
   }
+  const handleRepairAction = useCallback(async (action: QualityRepairAction) => {
+    setRepairingActionId(action.id)
+    try {
+      const result = await window.electron.quality.executeRepairAction(novelId, action)
+      if (result.status === 'failed') {
+        message.error(result.message)
+        return
+      }
+      if (result.status === 'unsupported') {
+        message.warning(result.message)
+      } else {
+        message.success(result.message)
+      }
+
+      const targetPath = buildRepairResultTargetPath(novelId, result)
+        || buildRepairActionTargetPath(novelId, action.targetPage, action.navigationQuery)
+      if (targetPath) navigate(targetPath)
+      await loadData()
+    } catch (error) {
+      console.error(error)
+      message.error('执行修复动作失败。')
+    } finally {
+      setRepairingActionId(null)
+    }
+  }, [loadData, navigate, novelId])
 
   const overviewContent = (
     <>
@@ -464,6 +528,49 @@ export default function QualityDashboard({ novelId }: Props) {
         </div>
       </WorkspacePanel>
 
+      <WorkspacePanel title="修复引擎摘要" description="把六类高价值质量指标压缩成可执行动作，优先处理最影响正文继续推进的问题。">
+        <div style={{ display: 'grid', gap: 16 }}>
+          {data.dashboardNotes?.length ? (
+            <div style={{ display: 'grid', gap: 6, fontSize: 12, opacity: 0.78 }}>
+              {data.dashboardNotes.map((note) => <div key={note}>{note}</div>)}
+            </div>
+          ) : null}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+            {data.repairMetrics.map((metric) => (
+              <div key={metric.key} className="quality-card">
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
+                  <strong>{metric.label}</strong>
+                  <Tag color={metric.score >= 80 ? 'success' : metric.score >= 60 ? 'warning' : 'error'}>{metric.score}</Tag>
+                </div>
+                <div style={{ marginTop: 8, fontSize: 12, opacity: 0.8 }}>{metric.summary}</div>
+                <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <Tag color={metric.riskCount > 0 ? 'orange' : 'success'}>{`风险 ${metric.riskCount}`}</Tag>
+                  {metric.focusLabels.slice(0, 2).map((label) => <Tag key={`${metric.key}-${label}`}>{label}</Tag>)}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="quality-card" style={{ display: 'grid', gap: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
+              <strong>动作汇总</strong>
+              <Tag color={data.repairActionSummary.actionableRiskCount > 0 ? 'processing' : 'success'}>
+                {`可动作风险 ${data.repairActionSummary.actionableRiskCount}`}
+              </Tag>
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <Tag color="blue">{`任务动作 ${data.repairActionSummary.taskActionCount}`}</Tag>
+              <Tag color="gold">{`安全直落 ${data.repairActionSummary.directExecutableActionCount}`}</Tag>
+              <Tag color="purple">{`允许偏移 ${data.repairActionSummary.allowDeviationCount}`}</Tag>
+            </div>
+            <div style={{ display: 'grid', gap: 6, fontSize: 12, opacity: 0.78 }}>
+              {data.repairActionSummary.topPriorityActions.length > 0
+                ? data.repairActionSummary.topPriorityActions.map((item) => <div key={item}>{item}</div>)
+                : <div>当前总灯允许继续推进，先盯住新增章节和最新批次即可。</div>}
+            </div>
+          </div>
+        </div>
+      </WorkspacePanel>
+
       <WorkspacePanel title="全书健康总览">
         <NovelHealthOverviewPanel
           summary={data.novelQualityMetrics}
@@ -471,6 +578,8 @@ export default function QualityDashboard({ novelId }: Props) {
           onSelectVolume={setSelectedVolumeId}
           onClearVolume={() => setSelectedVolumeId(null)}
           onSelectRisk={handleRiskSelect}
+          onRunAction={handleRepairAction}
+          repairingActionId={repairingActionId}
         />
       </WorkspacePanel>
 
@@ -514,6 +623,8 @@ export default function QualityDashboard({ novelId }: Props) {
             activeVolumeId={selectedVolumeId}
             onSelectVolume={setSelectedVolumeId}
             onSelectRisk={handleRiskSelect}
+            onRunAction={handleRepairAction}
+            repairingActionId={repairingActionId}
           />
         </WorkspacePanel>
       ) : null}
@@ -855,7 +966,7 @@ function ChapterGatePanel({
   onSelectChapter: (chapterNum: number) => void
 }) {
   if (summary.coveredChapterCount === 0 || trend.length === 0) {
-    return <Empty description="暂无章节验收门历史快照" />
+    return <Empty description="先跑一轮章节验收门，历史快照会从这里累计" />
   }
 
   const averageVisibleScore = trend.length > 0
@@ -1026,18 +1137,80 @@ function ChapterGatePanel({
   )
 }
 
+function RepairRiskCard({
+  risk,
+  onSelectRisk,
+  onRunAction,
+  repairingActionId,
+  compact = false,
+}: {
+  risk: QualityRiskEntry
+  onSelectRisk: (risk: QualityRiskEntry) => void
+  onRunAction: (action: QualityRepairAction) => void
+  repairingActionId: string | null
+  compact?: boolean
+}) {
+  return (
+    <div
+      style={{
+        border: '1px solid rgba(255,255,255,0.08)',
+        background: 'rgba(255,255,255,0.03)',
+        borderRadius: 10,
+        padding: '12px 14px',
+        display: 'grid',
+        gap: 8,
+      }}
+    >
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <Tag color={getQualityRiskSeverityColor(risk.severity)} style={{ marginRight: 0 }}>
+          {getQualityRiskSeverityLabel(risk.severity)}
+        </Tag>
+        <Tag color="blue" style={{ marginRight: 0 }}>{qualityRiskKindLabel(risk.kind)}</Tag>
+        {risk.metricKey ? <Tag color="purple" style={{ marginRight: 0 }}>{qualityRepairMetricLabel(risk.metricKey)}</Tag> : null}
+        <strong>{risk.title}</strong>
+      </div>
+      <div style={{ fontSize: 12, opacity: 0.78 }}>{risk.detail}</div>
+      <div style={{ display: 'grid', gap: 4, fontSize: 12 }}>
+        <div><strong>原因：</strong>{risk.whyItHappened}</div>
+        <div><strong>修法：</strong>{risk.howToFix}</div>
+      </div>
+      <div style={{ fontSize: 11, opacity: 0.58 }}>
+        {risk.chapterNums.length > 0 ? `涉及章节：${risk.chapterNums.map((chapterNum) => `第${chapterNum}章`).join('、')}` : '当前风险没有绑定具体章节。'}
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <Button size="small" onClick={() => onSelectRisk(risk)}>定位风险</Button>
+        {risk.suggestedActions.slice(0, compact ? 2 : 3).map((action) => (
+          <Button
+            key={action.id}
+            size="small"
+            type={action.safeToExecute ? 'primary' : 'default'}
+            loading={repairingActionId === action.id}
+            onClick={() => onRunAction(action)}
+          >
+            {action.label}
+          </Button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function NovelHealthOverviewPanel({
   summary,
   activeVolume,
   onSelectVolume,
   onClearVolume,
   onSelectRisk,
+  onRunAction,
+  repairingActionId,
 }: {
   summary: QualityDashboardData['novelQualityMetrics']
   activeVolume: VolumeQualityEntry | null
   onSelectVolume: (volumeId: number | null) => void
   onClearVolume: () => void
   onSelectRisk: (risk: QualityRiskEntry) => void
+  onRunAction: (action: QualityRepairAction) => void
+  repairingActionId: string | null
 }) {
   return (
     <div style={{ display: 'grid', gap: 16 }}>
@@ -1112,7 +1285,7 @@ function NovelHealthOverviewPanel({
                 <Progress percent={share} showInfo={false} strokeColor={share >= 60 ? '#f5222d' : share >= 35 ? '#faad14' : '#52c41a'} size="small" />
               </div>
             )
-          }) : <div style={{ fontSize: 12, opacity: 0.6 }}>当前没有风险分布数据。</div>}
+          }) : <div style={{ fontSize: 12, opacity: 0.6 }}>风险分布目前稳定，暂时没有聚集型问题。</div>}
         </div>
 
         <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', display: 'grid', gap: 10 }}>
@@ -1141,41 +1314,21 @@ function NovelHealthOverviewPanel({
               </div>
               <div style={{ fontSize: 12, opacity: 0.72 }}>{volume.summary}</div>
             </button>
-          )) : <div style={{ fontSize: 12, opacity: 0.6 }}>当前没有推荐优先处理的卷。</div>}
+          )) : <div style={{ fontSize: 12, opacity: 0.6 }}>各卷风险接近，可先处理正在写的卷。</div>}
         </div>
       </div>
 
       <div style={{ display: 'grid', gap: 10 }}>
         <div style={{ fontWeight: 600 }}>全书最高优先风险</div>
         {summary.topRisks.length > 0 ? summary.topRisks.map((risk, index) => (
-          <button
+          <RepairRiskCard
             key={`${risk.kind}-${risk.title}-${index}`}
-            type="button"
-            onClick={() => onSelectRisk(risk)}
-            style={{
-              border: '1px solid rgba(255,255,255,0.08)',
-              background: 'rgba(255,255,255,0.03)',
-              borderRadius: 10,
-              padding: '12px 14px',
-              textAlign: 'left',
-              cursor: 'pointer',
-              display: 'grid',
-              gap: 6,
-            }}
-          >
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <Tag color={getQualityRiskSeverityColor(risk.severity)} style={{ marginRight: 0 }}>
-                {getQualityRiskSeverityLabel(risk.severity)}
-              </Tag>
-              <Tag color="blue" style={{ marginRight: 0 }}>{qualityRiskKindLabel(risk.kind)}</Tag>
-              <strong>{risk.title}</strong>
-            </div>
-            <div style={{ fontSize: 12, opacity: 0.72 }}>{risk.detail}</div>
-            <div style={{ fontSize: 11, opacity: 0.55 }}>
-              {risk.chapterNums.length > 0 ? `涉及章节：${risk.chapterNums.map((chapterNum) => `第${chapterNum}章`).join('、')}` : '点击后会定位到对应卷和章节。'}
-            </div>
-          </button>
-        )) : <Empty description="当前没有需要优先定位的全书级风险" image={Empty.PRESENTED_IMAGE_SIMPLE} />}
+            risk={risk}
+            onSelectRisk={onSelectRisk}
+            onRunAction={onRunAction}
+            repairingActionId={repairingActionId}
+          />
+        )) : <Empty description="当前全书级风险已压到可继续推进" image={Empty.PRESENTED_IMAGE_SIMPLE} />}
       </div>
     </div>
   )
@@ -1186,11 +1339,15 @@ function VolumeHealthPanel({
   activeVolumeId,
   onSelectVolume,
   onSelectRisk,
+  onRunAction,
+  repairingActionId,
 }: {
   volumes: QualityDashboardData['volumeQualityMetrics']
   activeVolumeId: number | null
   onSelectVolume: (volumeId: number | null) => void
   onSelectRisk: (risk: QualityRiskEntry) => void
+  onRunAction: (action: QualityRepairAction) => void
+  repairingActionId: string | null
 }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 12 }}>
@@ -1260,30 +1417,15 @@ function VolumeHealthPanel({
                 {volume.repeatedFunctionRunCount > 0 ? <Tag color="warning" style={{ marginRight: 0 }}>{`重复功能 ${volume.repeatedFunctionRunCount}`}</Tag> : null}
               </div>
               {volume.topRisks.length > 0 ? volume.topRisks.slice(0, 3).map((risk, index) => (
-                <button
+                <RepairRiskCard
                   key={`${volume.volumeId}-${risk.kind}-${index}`}
-                  type="button"
-                  onClick={() => onSelectRisk(risk)}
-                  style={{
-                    border: '1px solid rgba(255,255,255,0.08)',
-                    background: 'rgba(255,255,255,0.02)',
-                    borderRadius: 10,
-                    padding: '10px 12px',
-                    textAlign: 'left',
-                    cursor: 'pointer',
-                    display: 'grid',
-                    gap: 4,
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <Tag color={getQualityRiskSeverityColor(risk.severity)} style={{ marginRight: 0 }}>
-                      {getQualityRiskSeverityLabel(risk.severity)}
-                    </Tag>
-                    <span style={{ fontSize: 12, fontWeight: 600 }}>{risk.title}</span>
-                  </div>
-                  <div style={{ fontSize: 11, opacity: 0.68 }}>{risk.detail}</div>
-                </button>
-              )) : <div style={{ fontSize: 12, opacity: 0.6 }}>当前没有卷级高优先风险。</div>}
+                  risk={risk}
+                  onSelectRisk={onSelectRisk}
+                  onRunAction={onRunAction}
+                  repairingActionId={repairingActionId}
+                  compact
+                />
+              )) : <div style={{ fontSize: 12, opacity: 0.6 }}>该卷暂未暴露高优先风险，适合继续写作或做局部修订。</div>}
             </div>
           </div>
         )
@@ -1300,7 +1442,7 @@ function EndgameDebtPanel({
   onSelectRisk: (risk: QualityRiskEntry) => void
 }) {
   if (alerts.length <= 0) {
-    return <Empty description="当前没有终局债务预警" />
+    return <Empty description="终局承诺暂时没有新增债务" />
   }
 
   return (
@@ -1316,6 +1458,10 @@ function EndgameDebtPanel({
             detail: alert.detail,
             chapterNums: alert.targetResolutionChapter ? [alert.targetResolutionChapter] : [],
             volumeId: alert.volumeId,
+            metricKey: 'commitment_delivery',
+            whyItHappened: '终局承诺已经接近计划兑现节点，但仍未被稳定服务或进入执行链。',
+            howToFix: '补卷级绑定、章节合同或兑现桥段，并明确新的兑现节点。',
+            suggestedActions: [],
           })}
           style={{
             border: '1px solid rgba(255,255,255,0.08)',
@@ -1361,7 +1507,7 @@ function ChapterFunctionPanel({
   volumeEntries: QualityDashboardData['volumeChapterFunctions']
 }) {
   if (summary.trackedChapterCount === 0 && alerts.length === 0) {
-    return <Empty description="暂无章节功能与节奏分布数据" />
+    return <Empty description="先完成章节功能分析，节奏分布会在这里展开" />
   }
 
   return (
@@ -1381,7 +1527,7 @@ function ChapterFunctionPanel({
           <div style={{ fontSize: 12, opacity: 0.7 }}>节奏平衡分</div>
           <div style={{ fontSize: 22, fontWeight: 700 }}>{summary.rhythmBalanceScore}</div>
           <div style={{ fontSize: 11, opacity: 0.55 }}>
-            主功能偏向 {summary.dominantTag ? `${chapterFunctionLabel(summary.dominantTag)} ${summary.dominantTagShare}%` : '暂无'}
+            主功能偏向 {summary.dominantTag ? `${chapterFunctionLabel(summary.dominantTag)} ${summary.dominantTagShare}%` : '待分析'}
           </div>
         </div>
         <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
@@ -1422,7 +1568,7 @@ function ChapterFunctionPanel({
               </div>
               <div style={{ fontSize: 11, opacity: 0.65 }}>连续 {run.length} 章都以 {chapterFunctionLabel(run.primaryTag)} 为主功能。</div>
             </div>
-          )) : <div style={{ fontSize: 12, opacity: 0.6 }}>当前没有连续重复主功能的区段。</div>}
+          )) : <div style={{ fontSize: 12, opacity: 0.6 }}>章节主功能没有出现连续空转。</div>}
         </div>
 
         <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', display: 'grid', gap: 8 }}>
@@ -1437,7 +1583,7 @@ function ChapterFunctionPanel({
               </div>
               <div style={{ fontSize: 11, opacity: 0.65 }}>{alert.detail}</div>
             </div>
-          )) : <div style={{ fontSize: 12, opacity: 0.6 }}>当前没有新的章节功能告警。</div>}
+          )) : <div style={{ fontSize: 12, opacity: 0.6 }}>近期没有新的章节功能偏移。</div>}
         </div>
       </div>
 
@@ -1453,7 +1599,7 @@ function ChapterFunctionPanel({
                   覆盖 {volume.trackedChapterCount} 章 · 平衡分 {volume.rhythmBalanceScore}
                 </div>
                 <div style={{ fontSize: 12 }}>
-                  主功能偏向 {volume.dominantTag ? `${chapterFunctionLabel(volume.dominantTag)} ${volume.dominantTagShare}%` : '暂无'}
+                  主功能偏向 {volume.dominantTag ? `${chapterFunctionLabel(volume.dominantTag)} ${volume.dominantTagShare}%` : '待分析'}
                 </div>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                   {volume.repeatedRuns.slice(0, 2).map((run) => (
@@ -1486,7 +1632,7 @@ function RecallReliabilityPanel({
   volumeEntries: QualityDashboardData['volumeRecallDiagnostics']
 }) {
   if (summary.analyzedChapterCount === 0 && alerts.length === 0) {
-    return <Empty description="暂无召回可靠性数据" />
+    return <Empty description="先产出召回样本，可靠性数据会在这里汇总" />
   }
 
   return (
@@ -1540,7 +1686,7 @@ function RecallReliabilityPanel({
         <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
           <div style={{ fontSize: 12, opacity: 0.7 }}>连续降级章节</div>
           <div style={{ fontSize: 22, fontWeight: 700 }}>{summary.consecutiveFallbackChapters}</div>
-          <div style={{ fontSize: 11, opacity: 0.55 }}>{summary.latestFallbackReason ? `最近原因：${summary.latestFallbackReason}` : '当前没有持续召回降级。'}</div>
+          <div style={{ fontSize: 11, opacity: 0.55 }}>{summary.latestFallbackReason ? `最近原因：${summary.latestFallbackReason}` : '召回链路目前稳定。'}</div>
         </div>
       </div>
 
@@ -1654,7 +1800,7 @@ function TrendChart({ overallTrend, aiLikeTrend }: {
   overallTrend: Array<{ chapterNum: number; score: number }>
   aiLikeTrend: Array<{ chapterNum: number; rate: number }>
 }) {
-  if (overallTrend.length === 0) return <Empty description="暂无趋势数据" />
+  if (overallTrend.length === 0) return <Empty description="当前样本还不足以形成趋势" />
 
   const maxScore = 10
   const maxRate = 100
@@ -1691,7 +1837,7 @@ function TrendChart({ overallTrend, aiLikeTrend }: {
 
 function WeakDimensionChart({ data }: { data: Array<{ dimension: string; count: number }> }) {
   const filtered = data.filter((d) => d.count > 0)
-  if (filtered.length === 0) return <Empty description="暂无薄弱维度" />
+  if (filtered.length === 0) return <Empty description="当前维度表现稳定，没有持续走弱项" />
 
   const maxCount = Math.max(...filtered.map((d) => d.count), 1)
 
@@ -1750,7 +1896,7 @@ function LanguageDriftPanel({
 }) {
   const hasAnyData = LANGUAGE_DRIFT_LABELS.some(({ key }) => trends[key].length > 0)
   if (!hasAnyData) {
-    return <Empty description="暂无 AI 味分解数据" />
+    return <Empty description="先生成 AI 味分解，才能判断问题来源" />
   }
   const cards = LANGUAGE_DRIFT_LABELS.map(({ key, label }) => ({ key, label, value: averages[key] }))
   const topRiskMetrics = novelSummary.topRiskMetrics.slice(0, 3)
@@ -1815,7 +1961,7 @@ function LanguageDriftPanel({
               <span style={{ fontWeight: 600, color: languageDriftRiskColor(item.value) }}>{item.value}</span>
             </div>
           )) : (
-            <div style={{ fontSize: 12, opacity: 0.6 }}>暂无分解数据</div>
+            <div style={{ fontSize: 12, opacity: 0.6 }}>等待分解结果</div>
           )}
         </div>
 
@@ -1846,7 +1992,7 @@ function LanguageDriftPanel({
               </div>
             </div>
           )) : (
-            <div style={{ fontSize: 12, opacity: 0.6 }}>最近窗口内暂无明显恶化项。</div>
+            <div style={{ fontSize: 12, opacity: 0.6 }}>最近窗口内没有明显恶化项。</div>
           )}
         </div>
       </div>
@@ -1947,7 +2093,7 @@ function LanguageDriftPanel({
               </div>
               <div style={{ fontSize: 11, opacity: 0.65 }}>{alert.detail}</div>
             </div>
-          )) : <div style={{ fontSize: 12, opacity: 0.6 }}>当前没有新的 anti-AI 复现告警。</div>}
+          )) : <div style={{ fontSize: 12, opacity: 0.6 }}>近期没有新的 anti-AI 复现。</div>}
         </div>
       </div>
 
@@ -1999,7 +2145,7 @@ function LanguageDriftPanel({
                   <div style={{ fontSize: 11, opacity: 0.6 }}>
                     {volume.topWorseningMetrics.length > 0
                       ? `近期恶化：${volume.topWorseningMetrics.map((item) => `${item.label} ${formatSignedValue(item.delta)}`).join('、')}`
-                      : '最近窗口内暂无明显恶化项。'}
+                      : '最近窗口内没有明显恶化项。'}
                   </div>
                 </div>
               )
@@ -2158,7 +2304,7 @@ function LanguageDriftPanel({
                 </div>
                 <div style={{ fontSize: 11, opacity: 0.65 }}>{alert.detail}</div>
               </div>
-            )) : <div style={{ fontSize: 12, opacity: 0.6 }}>当前没有新的审校复现告警。</div>}
+            )) : <div style={{ fontSize: 12, opacity: 0.6 }}>近期没有新的审校复现。</div>}
           </div>
 
           <div
@@ -2192,7 +2338,7 @@ function LanguageDriftPanel({
                 </div>
                 <div style={{ fontSize: 11, opacity: 0.65 }}>{item.detail}</div>
               </div>
-            )) : <div style={{ fontSize: 12, opacity: 0.6 }}>当前没有进入硬约束的人味复现问题。</div>}
+            )) : <div style={{ fontSize: 12, opacity: 0.6 }}>风格硬约束目前稳定。</div>}
           </div>
         </div>
 
@@ -2237,7 +2383,7 @@ function MiniTrendRow({
     return (
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, opacity: 0.7 }}>
         <span>{label}</span>
-        <span>暂无分解数据</span>
+        <span>等待分解结果</span>
       </div>
     )
   }
@@ -2283,7 +2429,7 @@ function DialogueFingerprintPanel({
   voiceLockCandidates: QualityDashboardData['requiredDialogueVoiceLocks']
 }) {
   if (stats.eligibleCharacterCount === 0) {
-    return <Empty description="暂无足够的角色对白样本" />
+    return <Empty description="对白样本还不够，继续累积章节后再比对" />
   }
 
   return (
@@ -2342,7 +2488,7 @@ function DialogueFingerprintPanel({
               </div>
               <div style={{ fontSize: 11, opacity: 0.6 }}>{pair.reasons.join('、') || '句长、停顿和惯用短语接近。'}</div>
             </div>
-          )) : <div style={{ fontSize: 12, opacity: 0.6 }}>暂无跨角色相似度数据。</div>}
+          )) : <div style={{ fontSize: 12, opacity: 0.6 }}>当前样本还不足以计算跨角色相似度。</div>}
         </div>
 
         <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', display: 'grid', gap: 8 }}>
@@ -2357,7 +2503,7 @@ function DialogueFingerprintPanel({
               </div>
               <div style={{ fontSize: 11, opacity: 0.65 }}>{candidate.reason}</div>
             </div>
-          )) : <div style={{ fontSize: 12, opacity: 0.6 }}>当前没有需要升级为 voice lock 的角色。</div>}
+          )) : <div style={{ fontSize: 12, opacity: 0.6 }}>当前角色声音区分度足够，不需要新增 voice lock。</div>}
         </div>
       </div>
 
@@ -2388,7 +2534,7 @@ function DialogueFingerprintPanel({
               <div style={{ fontSize: 11, opacity: 0.65 }}>特点：{signature.distinctiveHabits.join('、')}</div>
             ) : null}
             <div style={{ fontSize: 11, opacity: 0.65 }}>
-              句长 {signature.avgSentenceLength} · 追问 {signature.questionRate}% · 停顿 {signature.ellipsisRate}% · 重复短语 {signature.catchphraseCandidates.slice(0, 2).map((item) => item.token).join('、') || '暂无'}
+              句长 {signature.avgSentenceLength} · 追问 {signature.questionRate}% · 停顿 {signature.ellipsisRate}% · 重复短语 {signature.catchphraseCandidates.slice(0, 2).map((item) => item.token).join('、') || '未捕捉'}
             </div>
           </div>
         ))}
@@ -2429,7 +2575,7 @@ function DialogueFingerprintPanel({
                 <div style={{ fontSize: 11, opacity: 0.65 }}>
                   {volume.topPairs.length > 0
                     ? `最像：${volume.topPairs.map((pair) => `${pair.characterAName}/${pair.characterBName} ${pair.similarity}`).join('、')}`
-                    : '该卷暂无足够的对比样本。'}
+                    : '该卷样本还不够，暂时无法做稳定对比。'}
                 </div>
               </div>
             ))}
@@ -2456,7 +2602,7 @@ function StoryDynamicsPanel({
   volumeEntries: QualityDashboardData['volumeStoryDynamics']
 }) {
   if (protagonistSummary.chapterCount === 0) {
-    return <Empty description="暂无主角受挫与节奏跟踪数据" />
+    return <Empty description="先积累主角受挫与高潮样本，再看节奏跟踪" />
   }
 
   const latestPressure = trend[trend.length - 1]?.pressure ?? 0
@@ -2497,15 +2643,15 @@ function StoryDynamicsPanel({
               </div>
               <div style={{ fontSize: 11, opacity: 0.65 }}>{alert.detail}</div>
             </div>
-          )) : <div style={{ fontSize: 12, opacity: 0.6 }}>最近窗口内暂无明显结构告警。</div>}
+          )) : <div style={{ fontSize: 12, opacity: 0.6 }}>最近窗口内没有明显结构告警。</div>}
         </div>
 
         <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', display: 'grid', gap: 8 }}>
           <div style={{ fontSize: 12, opacity: 0.7 }}>反转 / 高潮 / 喘息</div>
-          <div style={{ fontSize: 12 }}>反转：{reversalSummary.reversalChapterNums.length > 0 ? reversalSummary.reversalChapterNums.join('、') : '暂无'}</div>
-          <div style={{ fontSize: 12 }}>高潮：{reversalSummary.climaxChapterNums.length > 0 ? reversalSummary.climaxChapterNums.join('、') : '暂无'}</div>
-          <div style={{ fontSize: 12 }}>喘息：{reversalSummary.breatherChapterNums.length > 0 ? reversalSummary.breatherChapterNums.join('、') : '暂无'}</div>
-          <div style={{ fontSize: 11, opacity: 0.65 }}>强行反转 {reversalSummary.forcedReversalCount} 次，弱反转 {reversalSummary.weakReversalCount} 次，高潮间距 {reversalSummary.climaxSpacing.length > 0 ? reversalSummary.climaxSpacing.join('、') : '暂无'}。</div>
+          <div style={{ fontSize: 12 }}>反转：{reversalSummary.reversalChapterNums.length > 0 ? reversalSummary.reversalChapterNums.join('、') : '未记录'}</div>
+          <div style={{ fontSize: 12 }}>高潮：{reversalSummary.climaxChapterNums.length > 0 ? reversalSummary.climaxChapterNums.join('、') : '未记录'}</div>
+          <div style={{ fontSize: 12 }}>喘息：{reversalSummary.breatherChapterNums.length > 0 ? reversalSummary.breatherChapterNums.join('、') : '未记录'}</div>
+          <div style={{ fontSize: 11, opacity: 0.65 }}>强行反转 {reversalSummary.forcedReversalCount} 次，弱反转 {reversalSummary.weakReversalCount} 次，高潮间距 {reversalSummary.climaxSpacing.length > 0 ? reversalSummary.climaxSpacing.join('、') : '未记录'}。</div>
         </div>
 
         <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', display: 'grid', gap: 8 }}>
@@ -2514,7 +2660,7 @@ function StoryDynamicsPanel({
             <div key={`${entry.startChapterNum}-${entry.summary}`} style={{ fontSize: 12 }}>
               第{entry.startChapterNum}章起持续 {entry.duration} 章：{entry.summary}
             </div>
-          )) : <div style={{ fontSize: 12, opacity: 0.6 }}>当前没有持续中的代价链。</div>}
+          )) : <div style={{ fontSize: 12, opacity: 0.6 }}>代价链目前都已收口或转入稳定阶段。</div>}
         </div>
       </div>
 
@@ -2538,7 +2684,7 @@ function StoryDynamicsPanel({
                 </div>
                 <div style={{ fontSize: 12 }}>受挫率 {volume.protagonistSetbackRate}% · 重大受挫 {volume.majorSetbackRate}% · 平均压力 {volume.averagePressure}</div>
                 <div style={{ fontSize: 12 }}>代价持续 {volume.averageCostDuration} 章 · 蒸发 {volume.evaporatedCostCount} 次</div>
-                <div style={{ fontSize: 12 }}>高潮 {volume.climaxChapterNums.length > 0 ? volume.climaxChapterNums.join('、') : '暂无'} · 反转 {volume.reversalChapterNums.length > 0 ? volume.reversalChapterNums.join('、') : '暂无'}</div>
+                <div style={{ fontSize: 12 }}>高潮 {volume.climaxChapterNums.length > 0 ? volume.climaxChapterNums.join('、') : '未记录'} · 反转 {volume.reversalChapterNums.length > 0 ? volume.reversalChapterNums.join('、') : '未记录'}</div>
               </div>
             ))}
           </div>
@@ -2562,7 +2708,7 @@ function StoryArcProgressPanel({
   volumeEntries: QualityDashboardData['storyArcProgressVolumes']
 }) {
   if (summary.trackedArcCount === 0 && alerts.length === 0) {
-    return <Empty description="暂无故事弧推进数据" />
+    return <Empty description="先积累故事弧推进样本，再看覆盖情况" />
   }
 
   return (
@@ -2646,7 +2792,7 @@ function StoryArcProgressPanel({
                   <div key={`${volume.volumeId}-${arcEntry.arcId}`} style={{ fontSize: 12 }}>
                     {arcEntry.arcName}：推进 {arcEntry.progressRate}% · 空转 {arcEntry.stallRate}% · 阶段 {arcEntry.hitPhaseLabels.length}/{arcEntry.hitPhaseLabels.length + arcEntry.missedPhaseLabels.length}
                   </div>
-                )) : <div style={{ fontSize: 12, opacity: 0.6 }}>本卷暂无故事弧覆盖数据。</div>}
+                )) : <div style={{ fontSize: 12, opacity: 0.6 }}>本卷还没有足够的故事弧覆盖数据。</div>}
               </div>
             ))}
           </div>
@@ -2684,7 +2830,7 @@ function WorldStateStabilityPanel({
   volumeEntries: QualityDashboardData['volumeWorldStateStability']
 }) {
   if (summary.trackedEntityCount === 0 && alerts.length === 0) {
-    return <Empty description="暂无状态稳定性数据" />
+    return <Empty description="先积累状态回写样本，再看稳定性数据" />
   }
 
   return (
@@ -2757,7 +2903,7 @@ function WorldStateStabilityPanel({
               </div>
               <div style={{ fontSize: 11, opacity: 0.65 }}>{entity.reasons.join('；') || entity.summaryText}</div>
             </div>
-          )) : <div style={{ fontSize: 12, opacity: 0.6 }}>当前没有需要优先回查的冲突实体。</div>}
+          )) : <div style={{ fontSize: 12, opacity: 0.6 }}>世界状态目前没有需要优先回查的冲突实体。</div>}
         </div>
       </div>
 
@@ -2781,7 +2927,7 @@ function WorldStateStabilityPanel({
 
 function ChapterGateDetails({ chapterGate }: { chapterGate?: QualityDashboardData['chapterDetails'][number]['chapterGate'] }) {
   if (!chapterGate?.latest) {
-    return <div style={{ fontSize: 12, opacity: 0.55 }}>本章暂无章节验收门历史</div>
+    return <div style={{ fontSize: 12, opacity: 0.55 }}>本章还没有章节验收门历史</div>
   }
 
   const latest = chapterGate.latest
@@ -2836,7 +2982,7 @@ function ChapterGateDetails({ chapterGate }: { chapterGate?: QualityDashboardDat
 
 function LanguageDriftDetails({ metrics }: { metrics?: LanguageDriftMetrics }) {
   if (!metrics) {
-    return <div style={{ fontSize: 12, opacity: 0.55 }}>暂无 AI 味分解数据</div>
+    return <div style={{ fontSize: 12, opacity: 0.55 }}>本章还没有 AI 味分解数据</div>
   }
 
   const ranked = getTopLanguageDriftMetrics(metrics, LANGUAGE_DRIFT_LABELS.length)
@@ -2859,7 +3005,7 @@ function LanguageDriftDetails({ metrics }: { metrics?: LanguageDriftMetrics }) {
 
 function AntiAiRuleHitDetails({ hits }: { hits?: QualityDashboardData['chapterDetails'][number]['antiAiRuleHits'] }) {
   if (!hits || hits.length === 0) {
-    return <div style={{ fontSize: 12, opacity: 0.55 }}>本章暂无持久化 anti-AI 命中</div>
+    return <div style={{ fontSize: 12, opacity: 0.55 }}>本章没有持久化 anti-AI 命中</div>
   }
 
   return (
@@ -2886,7 +3032,7 @@ function AntiAiRuleHitDetails({ hits }: { hits?: QualityDashboardData['chapterDe
 
 function FeedbackRecurrenceDetails({ hits }: { hits?: QualityDashboardData['chapterDetails'][number]['feedbackRecurrenceHits'] }) {
   if (!hits || hits.length === 0) {
-    return <div style={{ fontSize: 12, opacity: 0.55 }}>本章暂无通用复现问题</div>
+    return <div style={{ fontSize: 12, opacity: 0.55 }}>本章没有通用复现问题</div>
   }
 
   return (
@@ -2949,7 +3095,7 @@ function StyleComplianceDetails({ styleCompliance }: { styleCompliance?: Quality
 
 function DialogueReviewDetails({ review }: { review?: QualityDashboardData['chapterDetails'][number]['dialogueReview'] }) {
   if (!review) {
-    return <div style={{ fontSize: 12, opacity: 0.55 }}>暂无角色对白辨识度数据</div>
+    return <div style={{ fontSize: 12, opacity: 0.55 }}>本章对白样本不足，暂时无法评估辨识度</div>
   }
 
   return (
@@ -2960,7 +3106,7 @@ function DialogueReviewDetails({ review }: { review?: QualityDashboardData['chap
       {review.risks.length > 0 ? (
         <div style={{ fontSize: 12 }}>风险：{review.risks.join('；')}</div>
       ) : (
-        <div style={{ fontSize: 12, opacity: 0.7 }}>当前章暂无明确的对白同质化风险。</div>
+        <div style={{ fontSize: 12, opacity: 0.7 }}>当前章没有明确的对白同质化风险。</div>
       )}
       {review.fillerRisks.length > 0 ? (
         <div style={{ fontSize: 12 }}>空转：{review.fillerRisks.join('；')}</div>
@@ -3002,7 +3148,7 @@ function StoryDynamicsDetails({ dynamics }: { dynamics?: QualityDashboardData['c
 
 function ChapterFunctionDetails({ chapterFunction }: { chapterFunction?: QualityDashboardData['chapterDetails'][number]['chapterFunction'] }) {
   if (!chapterFunction) {
-    return <div style={{ fontSize: 12, opacity: 0.55 }}>本章暂无章节功能标注</div>
+    return <div style={{ fontSize: 12, opacity: 0.55 }}>本章还没有章节功能标注</div>
   }
 
   return (
@@ -3016,7 +3162,7 @@ function ChapterFunctionDetails({ chapterFunction }: { chapterFunction?: Quality
           <Tag key={tag} color={chapterFunctionColor(tag)} style={{ marginRight: 0 }}>
             {chapterFunctionLabel(tag)}
           </Tag>
-        )) : <span style={{ fontSize: 12, opacity: 0.7 }}>暂无功能标签</span>}
+        )) : <span style={{ fontSize: 12, opacity: 0.7 }}>待标注</span>}
       </div>
       <div style={{ fontSize: 12 }}>
         重复链：{chapterFunction.repeatedFunctionRunLength > 0
@@ -3041,7 +3187,7 @@ function ChapterFunctionDetails({ chapterFunction }: { chapterFunction?: Quality
 
 function StoryArcProgressDetails({ progress }: { progress?: QualityDashboardData['chapterDetails'][number]['storyArcProgress'] }) {
   if (!progress || progress.length === 0) {
-    return <div style={{ fontSize: 12, opacity: 0.55 }}>本章暂无故事弧推进数据</div>
+    return <div style={{ fontSize: 12, opacity: 0.55 }}>本章还没有故事弧推进数据</div>
   }
 
   return (
@@ -3073,7 +3219,7 @@ function RecallDiagnosticsDetails({
   recallSnapshotSource?: QualityDashboardData['chapterDetails'][number]['recallSnapshotSource']
 }) {
   if (!diagnostics && !snapshot) {
-    return <div style={{ fontSize: 12, opacity: 0.55 }}>本章暂无召回可靠性数据</div>
+    return <div style={{ fontSize: 12, opacity: 0.55 }}>本章还没有召回可靠性数据</div>
   }
 
   return (
@@ -3108,7 +3254,7 @@ function RecallDiagnosticsDetails({
 
 function WorldStateAlertDetails({ alerts }: { alerts?: QualityDashboardData['chapterDetails'][number]['worldStateAlerts'] }) {
   if (!alerts || alerts.length === 0) {
-    return <div style={{ fontSize: 12, opacity: 0.55 }}>本章暂无状态稳定性告警</div>
+    return <div style={{ fontSize: 12, opacity: 0.55 }}>本章没有状态稳定性告警</div>
   }
 
   return (

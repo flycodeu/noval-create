@@ -67,6 +67,8 @@ const api = {
     getWorldStateHistory: (novelId: number, entityType: string, entityId: number, stateKey?: string, limit?: number) =>
       invokeIpc('novel:getWorldStateHistory', novelId, entityType, entityId, stateKey, limit),
     getContextStatus: (id: number) => invokeIpc('novel:getContextStatus', id),
+    getImpactSummary: (id: number) => invokeIpc('novel:getImpactSummary', id),
+    listImpactEvents: (id: number) => invokeIpc('novel:listImpactEvents', id),
   },
 
   structure: {
@@ -185,8 +187,8 @@ const api = {
     batchUpdate: (ids: number[], data: unknown) => invokeIpc('chapter:batchUpdate', ids, data),
     batchDelete: (ids: number[]) => invokeIpc('chapter:batchDelete', ids),
     batchRenumber: (ids: number[], startChapterNum: number) => invokeIpc('chapter:batchRenumber', ids, startChapterNum),
-    getContextPreview: (chapterId: number) => invokeIpc('chapter:getContextPreview', chapterId),
-    generateContent: (chapterId: number) => invokeIpc('chapter:generateContent', chapterId),
+    getContextPreview: (chapterId: number, options?: { executionMode?: import('../src/shared/ai-execution').AiExecutionMode }) => invokeIpc('chapter:getContextPreview', chapterId, options),
+    generateContent: (chapterId: number, options?: { executionMode?: import('../src/shared/ai-execution').AiExecutionMode }) => invokeIpc('chapter:generateContent', chapterId, options),
     resumeContent: (taskId: number) => invokeIpc('chapter:resumeContent', taskId),
     generateSummary: (chapterId: number) => invokeIpc('chapter:generateSummary', chapterId),
     aiCheck: (chapterId: number) => invokeIpc('chapter:aiCheck', chapterId),
@@ -473,6 +475,8 @@ const api = {
   quality: {
     getDashboard: (novelId: number) => invokeIpc('quality:getDashboard', novelId),
     backfillRecallSnapshots: (novelId: number) => invokeIpc('quality:backfillRecallSnapshots', novelId),
+    createRepairTask: (novelId: number, action: unknown) => invokeIpc('quality:createRepairTask', novelId, action),
+    executeRepairAction: (novelId: number, action: unknown) => invokeIpc('quality:executeRepairAction', novelId, action),
   },
 
   // Embedding / Vector Memory
@@ -507,9 +511,22 @@ const api = {
     generateCharacter: (novelId: number, opts: unknown) => invokeIpc('ai:generateCharacter', novelId, opts),
     generateRelations: (novelId: number) => invokeIpc('ai:generateRelations', novelId),
     generateSubplotBatch: (data: SubplotGenerationRequest) => invokeIpc('ai:generateSubplotBatch', data),
-    rewriteParagraph: (data: unknown) => invokeIpc('ai:rewriteParagraph', data),
+    rewriteParagraph: (data: {
+      originalParagraph: string
+      contextBefore: string
+      specificRequirements: string
+      modelConfigId?: number
+      novelId?: number
+      executionMode?: import('../src/shared/ai-execution').AiExecutionMode
+    }) => invokeIpc('ai:rewriteParagraph', data),
     // Story structure and planning generation
-    runPrompt: (data: { messages: unknown[]; count?: number; modelConfigId?: number }) =>
+    runPrompt: (data: {
+      messages: unknown[]
+      count?: number
+      modelConfigId?: number
+      novelId?: number
+      executionMode?: import('../src/shared/ai-execution').AiExecutionMode
+    }) =>
       invokeIpc('ai:runPrompt', data),
     // Content scoring
     scoreContent: (data: {

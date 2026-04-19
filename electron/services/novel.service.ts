@@ -4,6 +4,7 @@ import { normalizeWorldRulesDraft, stringifyWorldRulesDraft } from '../../src/sh
 import { getDb } from '../database/db'
 import { chapters, characters, genres, novels } from '../database/schema'
 import { throwUserFacingError } from '../utils/user-facing-error'
+import { recordAssetChangeEvent } from './asset-impact.service'
 import { getNovelContextStatus, markNovelContextChanged } from './context-impact.service'
 
 function normalizeWorldRulesJson(raw: string, genreName?: string) {
@@ -20,6 +21,7 @@ function deriveNovelChangeReasons(
     title: string
     synopsis: string
     genreId: number
+    launchMode: string
     userBackground: string
     status: string
     totalWords: number
@@ -78,6 +80,7 @@ export function listNovels(filters?: { status?: string; genreId?: number; search
     title: novels.title,
     synopsis: novels.synopsis,
     genreId: novels.genreId,
+    launchMode: novels.launchMode,
     status: novels.status,
     totalWords: novels.totalWords,
     targetWords: novels.targetWords,
@@ -101,6 +104,7 @@ export function getNovel(id: number) {
     title: novels.title,
     synopsis: novels.synopsis,
     genreId: novels.genreId,
+    launchMode: novels.launchMode,
     status: novels.status,
     totalWords: novels.totalWords,
     targetWords: novels.targetWords,
@@ -133,6 +137,7 @@ export function createNovel(data: {
   title: string
   synopsis?: string
   genreId?: number
+  launchMode?: string
   userBackground?: string
   expandedBackground?: string
   projectBriefJson?: string
@@ -161,6 +166,7 @@ export function updateNovel(id: number, data: Partial<{
   title: string
   synopsis: string
   genreId: number
+    launchMode: string
     userBackground: string
     status: string
     totalWords: number
@@ -208,6 +214,17 @@ export function updateNovel(id: number, data: Partial<{
 
   if (changeReasons.length > 0) {
     markNovelContextChanged(id, changeReasons)
+    recordAssetChangeEvent({
+      novelId: id,
+      assetType: 'novel',
+      assetId: id,
+      assetLabel: data.title || current.title,
+      operation: 'update',
+      changeReason: changeReasons.join('；'),
+      impactLevel: 'high',
+      triggeredBy: 'novel.service',
+      payload: data,
+    })
   }
 }
 

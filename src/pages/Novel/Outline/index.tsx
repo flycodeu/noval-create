@@ -476,6 +476,7 @@ export default function Outline({ novelId }: Props) {
   }, [arcModalOpen, handleSaveArc, registerSaveHandler])
   const arcDraftButton = (
     <AIGenerateButton
+      novelId={novelId}
       label="AI 生成·故事弧草稿"
       intent="generate"
       isJson

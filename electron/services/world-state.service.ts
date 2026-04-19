@@ -2,6 +2,7 @@ import { asc, desc, eq, inArray } from 'drizzle-orm'
 import { getDb } from '../database/db'
 import {
   chapters,
+  chapterSegments,
   characterRelations,
   characterStateVersions,
   characters,
@@ -13,6 +14,7 @@ import {
 } from '../database/schema'
 
 type ChapterRow = typeof chapters.$inferSelect
+type ChapterSegmentRow = typeof chapterSegments.$inferSelect
 type CharacterRow = typeof characters.$inferSelect
 type CharacterRelationRow = typeof characterRelations.$inferSelect
 type CharacterStateVersionRow = typeof characterStateVersions.$inferSelect
@@ -38,6 +40,9 @@ export interface WorldStateSummary {
   eventCause?: string
   changeReason?: string
   severity: WorldStateSeverity
+  triggerEventId?: number
+  sourceSegmentId?: number
+  stateDeltaJson?: string
 }
 
 export interface WorldStateAlert {
@@ -117,6 +122,9 @@ const CAUSE_KEYWORDS = ['因为', '因此', '所以', '受', '经历', '之后',
 const ITEM_UNAVAILABLE_KEYWORDS = ['损坏', '损毁', '破损', '失效', '遗失', '耗尽', '报废', '断裂', '不可用', '丢失']
 const FACTION_COLLAPSE_KEYWORDS = ['覆灭', '瓦解', '崩溃', '溃散', '灭亡', '解散']
 const RELATION_HOSTILE_KEYWORDS = ['决裂', '敌对', '背叛', '仇恨', '死敌', '追杀']
+const TEMPORARY_STATE_KEYWORDS = ['暂时', '片刻', '短暂', '一时', '临时', '缓一缓']
+const RESOLVED_STATE_KEYWORDS = ['恢复', '痊愈', '解除', '放下', '稳定', '复原', '和解', '归还', '补足']
+const HARD_LOCK_STATE_KEYWORDS = ['决裂', '背叛', '覆灭', '死亡', '失明', '残废', '永久']
 
 function asText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
@@ -257,6 +265,47 @@ function inferEventCause(chapter: ChapterRow, fallback?: string | null): string 
   return normalizeInlineText(chapter.summary || fallback || '', 84)
 }
 
+function inferPersistencePolicy(before?: string | null, after?: string | null, cause?: string | null): 'temporary' | 'ongoing' | 'resolved' | 'unknown' {
+  const combined = joinCompact([after, cause], { maxLength: 120, perValueMaxLength: 48, limit: 3 })
+  if (!normalizeComparableText(after) && normalizeComparableText(before)) return 'resolved'
+  if (containsAny(combined, RESOLVED_STATE_KEYWORDS)) return 'resolved'
+  if (containsAny(combined, TEMPORARY_STATE_KEYWORDS)) return 'temporary'
+  if (normalizeComparableText(after)) return 'ongoing'
+  return 'unknown'
+}
+
+function inferDeltaReversible(before?: string | null, after?: string | null, cause?: string | null): boolean {
+  const combined = joinCompact([before, after, cause], { maxLength: 120, perValueMaxLength: 48, limit: 4 })
+  if (!combined) return true
+  return !containsAny(combined, HARD_LOCK_STATE_KEYWORDS)
+}
+
+function buildStateDeltaJson(field: string, before?: string | null, after?: string | null, cause?: string | null): string | null {
+  if (normalizeComparableText(before) === normalizeComparableText(after)) return null
+  return JSON.stringify([{
+    field,
+    before: before || undefined,
+    after: after || undefined,
+    cause: cause || undefined,
+    persistencePolicy: inferPersistencePolicy(before, after, cause),
+    reversible: inferDeltaReversible(before, after, cause),
+  }])
+}
+
+function parseStateDeltaSummary(raw?: string | null): string {
+  if (!raw) return ''
+  try {
+    const parsed = JSON.parse(raw) as Array<Record<string, unknown>>
+    if (!Array.isArray(parsed)) return ''
+    return joinCompact(
+      parsed.map((item) => `${asText(item.field)}:${asText(item.before) || '空'}→${asText(item.after) || '空'}`),
+      { maxLength: 96, perValueMaxLength: 28, limit: 3 },
+    )
+  } catch {
+    return ''
+  }
+}
+
 function buildStateSummaryText(name: string, stateKey: string, stateValue: string): string {
   return `${name}：${stateKeyLabel(stateKey)}=${stateValue}`
 }
@@ -266,6 +315,7 @@ function pushWorldStateInsert(
   base: Omit<WorldStateVersionInsert, 'stateKey' | 'stateValue' | 'normalizedValue' | 'summaryText'>,
   stateKey: string,
   stateValue?: string | null,
+  previousValue?: string | null,
 ): void {
   const normalizedValue = normalizeComparableText(stateValue)
   if (!normalizedValue) return
@@ -275,6 +325,7 @@ function pushWorldStateInsert(
     stateValue: stateValue || null,
     normalizedValue,
     summaryText: buildStateSummaryText(String(base.entityName), stateKey, String(stateValue)),
+    stateDeltaJson: buildStateDeltaJson(stateKey, previousValue, stateValue, asText(base.changeReason) || asText(base.eventCause)),
   })
 }
 
@@ -296,6 +347,7 @@ function buildCharacterWorldStateInserts(
     .filter((row) => options.startChapterNum === undefined || row.chapterNum >= options.startChapterNum)
 
   const result: WorldStateVersionInsert[] = []
+  const previousValueByKey = new Map<string, string>()
   rows.forEach((row) => {
     const entityName = characterMap.get(row.characterId) || `角色#${row.characterId}`
     const base = {
@@ -310,15 +362,23 @@ function buildCharacterWorldStateInserts(
       sourceKind: 'character_state_version',
       sourceRef: String(row.id),
       severity: inferSeverity(row.eventCause, row.changeReason),
+      triggerEventId: typeof row.triggerEventId === 'number' ? row.triggerEventId : null,
+      sourceSegmentId: typeof row.sourceSegmentId === 'number' ? row.sourceSegmentId : null,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     }
-    pushWorldStateInsert(result, base, 'injury', row.injuryState)
-    pushWorldStateInsert(result, base, 'resource', row.resourceState)
-    pushWorldStateInsert(result, base, 'stance', row.stanceState)
-    pushWorldStateInsert(result, base, 'mental', row.mentalState)
-    pushWorldStateInsert(result, base, 'relationship_heat', row.relationshipHeatSummary)
-    pushWorldStateInsert(result, base, 'goal', row.goalState)
+    const pushWithPrevious = (stateKey: string, value?: string | null) => {
+      const previousKey = `${row.characterId}:${stateKey}`
+      pushWorldStateInsert(result, base, stateKey, value, previousValueByKey.get(previousKey))
+      const normalized = normalizeComparableText(value)
+      if (normalized) previousValueByKey.set(previousKey, value || '')
+    }
+    pushWithPrevious('injury', row.injuryState)
+    pushWithPrevious('resource', row.resourceState)
+    pushWithPrevious('stance', row.stanceState)
+    pushWithPrevious('mental', row.mentalState)
+    pushWithPrevious('relationship_heat', row.relationshipHeatSummary)
+    pushWithPrevious('goal', row.goalState)
   })
 
   return result
@@ -350,6 +410,11 @@ function buildNonCharacterWorldStateInsertsForChapter(targetChapter: ChapterRow)
   const db = getDb()
   const novelId = targetChapter.novelId
   const now = new Date().toISOString()
+  const chapterSegmentRows = db.select().from(chapterSegments)
+    .where(eq(chapterSegments.chapterId, targetChapter.id))
+    .orderBy(asc(chapterSegments.segmentOrder), asc(chapterSegments.id))
+    .all()
+  const fallbackSegment = chapterSegmentRows[0] || null
   const characterMap = new Map(
     db.select().from(characters)
       .where(eq(characters.novelId, novelId))
@@ -365,7 +430,17 @@ function buildNonCharacterWorldStateInsertsForChapter(targetChapter: ChapterRow)
       .map((row) => [row.id, row.chapterNum] as const),
   )
   const eventRows = db.select().from(timelineEvents).where(eq(timelineEvents.novelId, novelId)).all()
+  const previousRows = db.select().from(worldStateVersions)
+    .where(eq(worldStateVersions.novelId, novelId))
+    .orderBy(desc(worldStateVersions.chapterNum), desc(worldStateVersions.id))
+    .all()
+    .filter((row) => row.chapterNum < targetChapter.chapterNum)
   const result: WorldStateVersionInsert[] = []
+  const previousValueByKey = new Map<string, string>()
+  previousRows.forEach((row) => {
+    const key = `${row.entityType}:${row.entityId}:${row.stateKey}`
+    if (!previousValueByKey.has(key)) previousValueByKey.set(key, row.stateValue || '')
+  })
 
   const itemRows = db.select().from(storyItems).where(eq(storyItems.novelId, novelId)).all()
   itemRows
@@ -389,12 +464,14 @@ function buildNonCharacterWorldStateInsertsForChapter(targetChapter: ChapterRow)
         sourceKind: 'item_record',
         sourceRef: String(item.id),
         severity: inferSeverity(linkedEvent?.eventSummary, item.acquisitionMethod || item.usageMethod || item.cost || item.risk),
+        triggerEventId: linkedEvent?.id || null,
+        sourceSegmentId: linkedEvent?.segmentId || fallbackSegment?.id || null,
         createdAt: now,
         updatedAt: now,
       }
-      pushWorldStateInsert(result, base, 'item_condition', joinCompact([item.status, item.limitations, item.risk], { maxLength: 72, perValueMaxLength: 28, limit: 3 }))
-      pushWorldStateInsert(result, base, 'item_holder', characterMap.get(item.ownerCharacterId || 0) || '')
-      pushWorldStateInsert(result, base, 'item_location', mapNameById.get(item.locationMapId || 0) || '')
+      pushWorldStateInsert(result, base, 'item_condition', joinCompact([item.status, item.limitations, item.risk], { maxLength: 72, perValueMaxLength: 28, limit: 3 }), previousValueByKey.get(`item:${item.id}:item_condition`))
+      pushWorldStateInsert(result, base, 'item_holder', characterMap.get(item.ownerCharacterId || 0) || '', previousValueByKey.get(`item:${item.id}:item_holder`))
+      pushWorldStateInsert(result, base, 'item_location', mapNameById.get(item.locationMapId || 0) || '', previousValueByKey.get(`item:${item.id}:item_location`))
     })
 
   const relationRows = db.select().from(characterRelations).where(eq(characterRelations.novelId, novelId)).all()
@@ -414,6 +491,8 @@ function buildNonCharacterWorldStateInsertsForChapter(targetChapter: ChapterRow)
       sourceKind: 'relation_record',
       sourceRef: String(relation.id),
       severity: inferSeverity(targetChapter.summary, relation.description || relation.interactionStyle),
+      triggerEventId: null,
+      sourceSegmentId: fallbackSegment?.id || null,
       createdAt: now,
       updatedAt: now,
     }
@@ -421,7 +500,7 @@ function buildNonCharacterWorldStateInsertsForChapter(targetChapter: ChapterRow)
       relation.relationLabel || relation.relationType || '',
       typeof relation.intimacyLevel === 'number' ? `亲密${relation.intimacyLevel}` : '',
       typeof relation.tensionLevel === 'number' ? `张力${relation.tensionLevel}` : '',
-    ], { maxLength: 72, perValueMaxLength: 24, limit: 3 }))
+    ], { maxLength: 72, perValueMaxLength: 24, limit: 3 }), previousValueByKey.get(`relation:${relation.id}:relation_status`))
   })
 
   const factionRows = db.select().from(factions).where(eq(factions.novelId, novelId)).all()
@@ -439,6 +518,8 @@ function buildNonCharacterWorldStateInsertsForChapter(targetChapter: ChapterRow)
       sourceKind: 'faction_record',
       sourceRef: String(faction.id),
       severity: inferSeverity(targetChapter.summary, faction.currentPhase || faction.goal || faction.resources),
+      triggerEventId: null,
+      sourceSegmentId: fallbackSegment?.id || null,
       createdAt: now,
       updatedAt: now,
     }
@@ -447,7 +528,7 @@ function buildNonCharacterWorldStateInsertsForChapter(targetChapter: ChapterRow)
       faction.goal,
       faction.resources,
       leaderName ? `首领=${leaderName}` : '',
-    ], { maxLength: 80, perValueMaxLength: 28, limit: 3 }))
+    ], { maxLength: 80, perValueMaxLength: 28, limit: 3 }), previousValueByKey.get(`faction:${faction.id}:faction_alignment`))
   })
 
   mapRows.forEach((node) => {
@@ -466,6 +547,8 @@ function buildNonCharacterWorldStateInsertsForChapter(targetChapter: ChapterRow)
       sourceKind: 'location_record',
       sourceRef: String(node.id),
       severity: inferSeverity(targetChapter.summary, node.plotRelevance || node.description),
+      triggerEventId: null,
+      sourceSegmentId: fallbackSegment?.id || null,
       createdAt: now,
       updatedAt: now,
     }
@@ -473,7 +556,7 @@ function buildNonCharacterWorldStateInsertsForChapter(targetChapter: ChapterRow)
       affiliatedFactionNames.length > 0 ? `势力=${affiliatedFactionNames.join('、')}` : '',
       node.plotRelevance,
       node.atmosphere,
-    ], { maxLength: 80, perValueMaxLength: 32, limit: 3 }))
+    ], { maxLength: 80, perValueMaxLength: 32, limit: 3 }), previousValueByKey.get(`location:${node.id}:location_control`))
   })
 
   return result
@@ -595,6 +678,9 @@ function summarizeEntityStateRows(rows: WorldStateVersionRow[]): WorldStateSumma
     eventCause: latestRows.map((row) => asText(row.eventCause)).find(Boolean) || '',
     changeReason: latestRows.map((row) => asText(row.changeReason)).find(Boolean) || '',
     severity,
+    triggerEventId: latestRows.find((row) => typeof row.triggerEventId === 'number')?.triggerEventId || undefined,
+    sourceSegmentId: latestRows.find((row) => typeof row.sourceSegmentId === 'number')?.sourceSegmentId || undefined,
+    stateDeltaJson: latestRows.map((row) => asText(row.stateDeltaJson)).find(Boolean) || undefined,
   }
 }
 
@@ -1014,9 +1100,34 @@ export function getWorldStateLedgerSnapshot(
     .slice(0, options.conflictEntityLimit ?? 8)
   const trendSummary = getWorldStateTrendSummary(novelId, { upToChapterNum: options.upToChapterNum })
   const overview = buildWorldStateLedgerOverview(allStates, allAlerts, trendSummary.trend)
+  const eventMap = new Map(
+    getDb().select().from(timelineEvents)
+      .where(eq(timelineEvents.novelId, novelId))
+      .all()
+      .map((row) => [row.id, row] as const),
+  )
+  const segmentMap = new Map(
+    getDb().select().from(chapterSegments)
+      .where(eq(chapterSegments.novelId, novelId))
+      .all()
+      .map((row) => [row.id, row] as const),
+  )
   const worldStatesText = [
     filteredEntities.length > 0
-      ? filteredEntities.map((item) => `${entityTypeLabel(item.entityType)} ${item.entityName}：${item.summaryText}`).join('\n')
+      ? filteredEntities.map((item) => {
+        const triggerEvent = item.triggerEventId ? eventMap.get(item.triggerEventId) : null
+        const sourceSegment = item.sourceSegmentId ? segmentMap.get(item.sourceSegmentId) : null
+        const anchorText = joinCompact([
+          triggerEvent ? triggerEvent.eventTitle : '',
+          sourceSegment ? sourceSegment.title || `场景${sourceSegment.segmentOrder}` : '',
+        ], { maxLength: 48, perValueMaxLength: 22, limit: 2 })
+        const deltaText = parseStateDeltaSummary(item.stateDeltaJson)
+        return `${entityTypeLabel(item.entityType)} ${item.entityName}：${joinCompact([
+          item.summaryText,
+          deltaText ? `变化=${deltaText}` : '',
+          anchorText ? `锚点=${anchorText}` : '',
+        ], { separator: ' | ', maxLength: 160, perValueMaxLength: 64, limit: 4 })}`
+      }).join('\n')
       : '',
     filteredAlerts.length > 0
       ? `告警：\n${filteredAlerts.map((item) => `- ${item.summary}`).join('\n')}`

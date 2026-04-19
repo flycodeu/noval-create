@@ -331,6 +331,7 @@ export default function StructurePage({ novelId }: { novelId: number }) {
 
   const chapterAiActions = chapterDetail ? (
     <AIGenerateButton
+      novelId={novelId}
       label="AI 生成章节"
       isJson
       runGeneration={async (input) => {
@@ -394,6 +395,7 @@ export default function StructurePage({ novelId }: { novelId: number }) {
         套用场景模板
       </Button>
       <AIGenerateButton
+        novelId={novelId}
         label="AI 生成场景"
         isJson
         runGeneration={async (input) => {

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Space, Tag, message } from 'antd'
+import { Alert, Button, Collapse, Space, Tag, message, type CollapseProps } from 'antd'
 import {
   BarsOutlined,
   ClockCircleOutlined,
@@ -11,8 +11,9 @@ import {
   ThunderboltOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
-import type { NovelConsistencyReport, NovelContextStatus } from '../../../types'
+import type { NovelConsistencyReport, NovelContextStatus, QualityDashboardData } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
+import { useAuthorWorkModeStore } from '../../../stores/author-work-mode.store'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { getCharacterBatchPreset, getItemGenerationProfile } from '../../../shared/creation-tools'
 import { parseProjectBriefSnapshot } from '../../../shared/project-brief'
@@ -32,7 +33,16 @@ import {
   WorkspacePanel,
 } from '../components/WorkspaceShell'
 import {
+  buildAuthorWorkflowSummary,
+  getAuthorWorkModeLabel,
+  resolveAuthorWorkflowHref,
+  resolveSuggestedAuthorWorkMode,
+  type AuthorWorkMode,
+} from '../author-workflow'
+import {
   EMPTY_WORKFLOW_STATS,
+  getAssetBloatSignal,
+  getNextChapterReadiness,
   getWorkflowBlockers,
   isEndgameDesignReady,
   isProjectBriefReady,
@@ -107,7 +117,13 @@ export default function GuidePage({ novelId }: Props) {
   const [stats, setStats] = useState<WorkflowStats>(EMPTY_WORKFLOW_STATS)
   const [consistencyReport, setConsistencyReport] = useState<NovelConsistencyReport | null>(null)
   const [contextStatus, setContextStatus] = useState<NovelContextStatus | null>(null)
+  const [qualitySummary, setQualitySummary] = useState<Pick<QualityDashboardData, 'productionReadiness' | 'batchHealth' | 'continuityHealth'> | null>(null)
   const [runningKey, setRunningKey] = useState<string | null>(null)
+  const authorMode = useAuthorWorkModeStore((state) => state.mode)
+  const authorModeSource = useAuthorWorkModeStore((state) => state.source)
+  const setManualAuthorMode = useAuthorWorkModeStore((state) => state.setManualMode)
+  const syncSuggestedAuthorMode = useAuthorWorkModeStore((state) => state.syncSuggestedMode)
+  const resetAuthorModeToAuto = useAuthorWorkModeStore((state) => state.resetToAuto)
 
   const projectBrief = useMemo(
     () => parseProjectBriefSnapshot(currentNovel?.projectBriefJson),
@@ -135,6 +151,7 @@ export default function GuidePage({ novelId }: Props) {
     () => getItemGenerationProfile(currentNovel?.genreName),
     [currentNovel?.genreName],
   )
+  const assetBloat = useMemo(() => getAssetBloatSignal(stats), [stats])
 
   const refreshWorkflowContext = useCallback(async () => {
     const [nextNovel, nextStats] = await Promise.all([
@@ -155,12 +172,21 @@ export default function GuidePage({ novelId }: Props) {
   }, [novelId, setCurrentNovel])
 
   const refreshDiagnostics = useCallback(async () => {
-    const [report, nextContextStatus] = await Promise.all([
+    const [report, nextContextStatus, nextQualitySummary] = await Promise.all([
       window.electron.novel.runConsistencyCheck(novelId),
       window.electron.novel.getContextStatus(novelId),
+      window.electron.quality.getDashboard(novelId).then((result) => ({
+        productionReadiness: result.productionReadiness,
+        batchHealth: result.batchHealth,
+        continuityHealth: result.continuityHealth,
+      })).catch((error) => {
+        console.warn('Failed to load guide quality summary', error)
+        return null
+      }),
     ])
     setConsistencyReport(report)
     setContextStatus(nextContextStatus)
+    setQualitySummary(nextQualitySummary)
   }, [novelId])
 
   useEffect(() => {
@@ -673,10 +699,10 @@ export default function GuidePage({ novelId }: Props) {
       title: '修订中心',
       desc: '把一致性问题、待同步章节和人工修订任务集中到一个入口，避免问题散落在各页。',
       status: stats.revisionTaskCount > 0 ? '待处理' : '已稳定',
-      count: stats.revisionTaskCount > 0 ? `${stats.revisionTaskCount} 条待处理` : '当前无未处理任务',
+      count: stats.revisionTaskCount > 0 ? `${stats.revisionTaskCount} 条待处理` : '已收口',
       support: stats.revisionTaskCount > 0
-        ? '这里会汇总系统体检结果、上下文变更影响和人工修订项，适合作为开写前的最后一道检查。'
-        : '当前没有未处理修订任务，可以继续写作或继续细修结构资产。',
+        ? '先在这里清掉待同步章节、上下文影响和人工确认项，再继续正文会更稳。'
+        : '当前链路没有待修订阻塞，可以回到正文推进或继续补强关键资产。',
       ready: stats.revisionTaskCount <= 0,
       icon: <EditOutlined />,
       action: (
@@ -691,6 +717,99 @@ export default function GuidePage({ novelId }: Props) {
   const nextStep = steps.find((step) => !step.ready) || null
   const pendingSteps = steps.filter((step) => !step.ready)
   const queuedSteps = pendingSteps.slice(1, 4)
+  const nextChapterReadiness = useMemo(() => getNextChapterReadiness(stats), [stats])
+  const suggestedAuthorMode = useMemo(
+    () => resolveSuggestedAuthorWorkMode(currentNovel, stats, qualitySummary),
+    [currentNovel, qualitySummary, stats],
+  )
+  const selectedAuthorMode: AuthorWorkMode = authorMode || suggestedAuthorMode.mode
+  const authorWorkflow = useMemo(
+    () => buildAuthorWorkflowSummary(currentNovel, stats, qualitySummary, selectedAuthorMode),
+    [currentNovel, qualitySummary, selectedAuthorMode, stats],
+  )
+
+  useEffect(() => {
+    syncSuggestedAuthorMode(suggestedAuthorMode.mode)
+  }, [suggestedAuthorMode.mode, syncSuggestedAuthorMode])
+
+  const workflowPhases = useMemo(() => ([
+    {
+      key: 'foundation',
+      title: '底盘定标',
+      summary: '先把立项、基础设定、文风和世界规则压稳。',
+      stepKeys: ['project-brief', 'core-settings', 'theme-voice', 'world-rules'],
+    },
+    {
+      key: 'structure',
+      title: '资产承接',
+      summary: '把地图、角色、物品、线程、剧情和时间轴接到可写结构上。',
+      stepKeys: ['map', 'items', 'characters', 'threads', 'story-design', 'outline', 'timeline'],
+    },
+    {
+      key: 'closure',
+      title: '收口校准',
+      summary: '在开写前确认修订积压、同步任务和正文入口已经收口。',
+      stepKeys: ['revision'],
+    },
+  ] as const), [])
+
+  const currentPhaseKey = useMemo(() => (
+    workflowPhases.find((phase) => phase.stepKeys.some((stepKey) => !steps.find((step) => step.key === stepKey)?.ready))?.key
+      || workflowPhases[workflowPhases.length - 1].key
+  ), [steps, workflowPhases])
+
+  const phaseCollapseItems = useMemo<NonNullable<CollapseProps['items']>>(() => workflowPhases.map((phase) => {
+    const phaseSteps = phase.stepKeys
+      .map((stepKey) => steps.find((step) => step.key === stepKey) || null)
+      .filter((step): step is StepConfig => Boolean(step))
+    const readyCount = phaseSteps.filter((step) => step.ready).length
+    const isCurrentPhase = phase.key === currentPhaseKey
+
+    return {
+      key: phase.key,
+      label: (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, width: '100%' }}>
+          <div style={{ display: 'grid', gap: 4 }}>
+            <strong>{phase.title}</strong>
+            <span style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>{phase.summary}</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Tag color={readyCount >= phaseSteps.length ? 'success' : isCurrentPhase ? 'processing' : 'default'}>
+              {readyCount >= phaseSteps.length ? '已完成' : isCurrentPhase ? '当前阶段' : '后续阶段'}
+            </Tag>
+            <Tag color="blue">{`${readyCount}/${phaseSteps.length}`}</Tag>
+          </div>
+        </div>
+      ),
+      children: (
+        <div className="novel-stage-grid">
+          {phaseSteps.map((step) => (
+            <div key={step.key} className={`novel-stage-card ${step.ready ? 'novel-stage-card--ready' : ''}`}>
+              <div className="novel-stage-card__header">
+                <div>
+                  <div className="novel-stage-card__title">
+                    {step.icon}
+                    {step.title}
+                  </div>
+                  <div style={{ marginTop: 6, fontSize: 13, color: 'var(--color-text-secondary)', lineHeight: 1.7 }}>
+                    {step.desc}
+                  </div>
+                </div>
+                <div className="novel-stage-card__meta">
+                  <Tag color={step.ready ? 'success' : 'default'}>{step.status}</Tag>
+                  <Tag color="blue">{step.count}</Tag>
+                </div>
+              </div>
+              <div style={{ marginBottom: 12, fontSize: 12, color: 'var(--color-text-secondary)', lineHeight: 1.7 }}>
+                {step.support}
+              </div>
+              <div className="novel-stage-card__actions">{step.action}</div>
+            </div>
+          ))}
+        </div>
+      ),
+    }
+  }), [currentPhaseKey, steps, workflowPhases])
 
   return (
     <WorkspacePage
@@ -702,6 +821,12 @@ export default function GuidePage({ novelId }: Props) {
         <Space wrap>
           <Button
             type="primary"
+            icon={<ThunderboltOutlined />}
+            onClick={() => navigate(resolveAuthorWorkflowHref(novelId, authorWorkflow.primaryTask.entryPage))}
+          >
+            {authorWorkflow.primaryTask.actionLabel}
+          </Button>
+          <Button
             icon={<ThunderboltOutlined />}
             loading={Boolean(runningKey)}
             onClick={runPipeline}
@@ -717,6 +842,7 @@ export default function GuidePage({ novelId }: Props) {
         <WorkspaceContextSummary
           items={[
             { label: '题材', value: currentNovel?.genreName || '未设置' },
+            { label: '开书路径', value: currentNovel?.launchMode === 'fast_launch' ? '极速开书' : '专业长篇' },
             { label: '结构完成度', value: `${structureReadyCount}/${steps.length} 步就绪` },
             {
               label: '时间制度',
@@ -754,9 +880,15 @@ export default function GuidePage({ novelId }: Props) {
             hint="后续结构页、时间轴和正文都应回查这些线程"
           />
           <WorkspaceMetric
+            label="下一章状态"
+            value={nextChapterReadiness.label}
+            tone={nextChapterReadiness.ready ? 'cool' : 'warm'}
+            hint={nextChapterReadiness.reason}
+          />
+          <WorkspaceMetric
             label="修订任务"
             value={stats.revisionTaskCount}
-            hint={stats.revisionTaskCount > 0 ? '建议开写前先处理未闭环问题' : '当前没有未处理修订任务'}
+            hint={stats.revisionTaskCount > 0 ? '建议开写前先处理未闭环问题' : '当前链路没有待修订阻塞'}
           />
         </>
       )}
@@ -853,6 +985,21 @@ export default function GuidePage({ novelId }: Props) {
         />
       )}
 
+      {assetBloat.risk !== 'none' && (
+        <Alert
+          className="novel-guide__alert"
+          type={assetBloat.risk === 'high' ? 'warning' : 'info'}
+          showIcon
+          message={assetBloat.risk === 'high' ? '首章前资产已经开始膨胀' : '当前资产增长过快'}
+          description={assetBloat.reason}
+          action={(
+            <Button size="small" onClick={() => navigate(`/novels/${novelId}/${stats.outlineCount > 0 ? 'writing' : 'outline'}`)}>
+              {stats.outlineCount > 0 ? '直接开写' : '先压成大纲'}
+            </Button>
+          )}
+        />
+      )}
+
       {consistencyReport && consistencyReport.highCount > 0 && (
         <Alert
           className="novel-guide__alert"
@@ -890,12 +1037,108 @@ export default function GuidePage({ novelId }: Props) {
       )}
 
       <WorkspacePanel
+        title="作者工作模式"
+        extra={<div className="novel-pill">{authorModeSource === 'manual' ? '手动选择' : '系统推荐'}</div>}
+      >
+        <div style={{ display: 'grid', gap: 16 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {(['quick_start', 'asset_building', 'daily_push', 'revision_closure'] as AuthorWorkMode[]).map((mode) => (
+              <Button
+                key={mode}
+                type={selectedAuthorMode === mode ? 'primary' : 'default'}
+                ghost={selectedAuthorMode !== mode}
+                onClick={() => setManualAuthorMode(mode)}
+              >
+                {getAuthorWorkModeLabel(mode)}
+              </Button>
+            ))}
+            {authorModeSource === 'manual' ? (
+              <Button onClick={() => resetAuthorModeToAuto(suggestedAuthorMode.mode)}>
+                恢复系统推荐
+              </Button>
+            ) : null}
+          </div>
+          <div className="novel-note-list">
+            <div className="novel-note-list__item">{`当前模式：${getAuthorWorkModeLabel(selectedAuthorMode)}`}</div>
+            <div className="novel-note-list__item">{authorWorkflow.modeReason}</div>
+          </div>
+        </div>
+      </WorkspacePanel>
+
+      <WorkspacePanel
+        title="今天最该做什么"
+        extra={<div className="novel-pill">{`${authorWorkflow.primaryTask.estimatedMinutes} 分钟`}</div>}
+      >
+        <div style={{ display: 'grid', gap: 16 }}>
+          <div className="guided-step__action-card">
+            <div className="guided-step__action-head">
+              <div className="guided-step__action-copy">
+                <strong>{authorWorkflow.primaryTask.title}</strong>
+                <span>{authorWorkflow.primaryTask.reason}</span>
+              </div>
+              <Button type="primary" onClick={() => navigate(resolveAuthorWorkflowHref(novelId, authorWorkflow.primaryTask.entryPage))}>
+                {authorWorkflow.primaryTask.actionLabel}
+              </Button>
+            </div>
+            <div className="guided-step__action-meta">{`完成后解锁：${authorWorkflow.primaryTask.unlocks.join('、')}`}</div>
+          </div>
+
+          {authorWorkflow.alternateTasks.length > 0 ? (
+            <div className="guided-step__action-grid">
+              {authorWorkflow.alternateTasks.map((task) => (
+                <div key={task.id} className="guided-step__action-card">
+                  <div className="guided-step__action-copy">
+                    <strong>{task.title}</strong>
+                    <span>{task.reason}</span>
+                  </div>
+                  <div className="guided-step__action-foot">{`${task.estimatedMinutes} 分钟 · ${task.unlocks.join('、')}`}</div>
+                  <Button onClick={() => navigate(resolveAuthorWorkflowHref(novelId, task.entryPage))}>
+                    {task.actionLabel}
+                  </Button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          {authorWorkflow.blockers.length > 0 ? (
+            <div className="novel-issue-list">
+              {authorWorkflow.blockers.map((blocker) => (
+                <div key={blocker.id} className="novel-issue-item">
+                  <div className="novel-issue-item__head">
+                    <Tag color={getSeverityColor(blocker.severity)}>{getSeverityLabel(blocker.severity)}</Tag>
+                    <strong>{blocker.title}</strong>
+                  </div>
+                  <div className="novel-issue-item__desc">{blocker.reason}</div>
+                  <Button size="small" onClick={() => navigate(resolveAuthorWorkflowHref(novelId, blocker.entryPage))}>
+                    {blocker.actionLabel}
+                  </Button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          {authorWorkflow.impactNotices.length > 0 ? (
+            <div className="novel-note-list">
+              {authorWorkflow.impactNotices.map((notice) => (
+                <div key={notice.id} className="novel-note-list__item">
+                  {`${notice.title}：${notice.reason}（影响 ${notice.affectedKinds.join(' / ')}）`}
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </WorkspacePanel>
+
+      <WorkspacePanel
         title="推荐推进顺序"
-        extra={<div className="novel-pill">{nextStep ? `下一步：${nextStep.title}` : '可进入正文'}</div>}
+        extra={<div className="novel-pill">{nextChapterReadiness.label}</div>}
       >
         <div className="novel-guide__flow-head">
           <div className="novel-guide__flow-lead">
             <strong>{nextStep ? nextStep.title : '关键骨架已铺好'}</strong>
+            <div style={{ marginTop: 6, fontSize: 13, color: 'var(--color-text-secondary)' }}>
+              {nextChapterReadiness.reason}
+            </div>
             <div className="novel-guide__flow-queue">
               <span className="novel-guide__flow-chip">{'已就绪 ' + structureReadyCount + '/' + steps.length}</span>
               {queuedSteps.length > 0
@@ -910,25 +1153,7 @@ export default function GuidePage({ novelId }: Props) {
             </div>
           </div>
         </div>
-        <div className="novel-stage-grid">
-          {steps.map((step, index) => (
-            <div key={step.key} className={`novel-stage-card ${step.ready ? 'novel-stage-card--ready' : ''}`}>
-              <div className="novel-stage-card__header">
-                <div>
-                  <div className="novel-stage-card__title">
-                    {step.icon}
-                    {step.title}
-                  </div>
-                </div>
-                <div className="novel-stage-card__meta">
-                  <Tag color={step.ready ? 'success' : 'default'}>{step.status}</Tag>
-                  <Tag color="blue">{step.count}</Tag>
-                </div>
-              </div>
-              <div className="novel-stage-card__actions">{step.action}</div>
-            </div>
-          ))}
-        </div>
+        <Collapse defaultActiveKey={[currentPhaseKey]} items={phaseCollapseItems} />
       </WorkspacePanel>
 
       {consistencyReport && (

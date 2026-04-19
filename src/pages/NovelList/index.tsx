@@ -34,16 +34,18 @@ import { getErrorMessage, getUserFacingMessage, isUserFacingMessage } from '@/ut
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 import 'dayjs/locale/zh-cn'
-import type { Novel, Template } from '../../types'
+import type { Novel, NovelLaunchMode, Template } from '../../types'
 import { useNovelStore } from '../../stores/novel.store'
 import { buildThemeVoicePayload } from '../../shared/theme-voice'
 import { WRITING_CONTRACT_PRESETS, getWritingContractValidationError, normalizeWritingContractTags } from '../../shared/writing-contract'
+import { buildFastLaunchBootstrapPlan, NOVEL_LAUNCH_MODE_OPTIONS } from './fast-launch'
 
 dayjs.extend(relativeTime)
 dayjs.locale('zh-cn')
 
 interface WizardFormValues {
   genreId: number
+  launchMode: NovelLaunchMode
   styleTemplateId?: number
   worldTemplateId?: number
   modelConfigId?: number
@@ -53,6 +55,11 @@ interface WizardFormValues {
   synopsis: string
   title: string
   targetWords: number
+  protagonistStart: string
+  coreHook: string
+  coreConflict: string
+  tabooRules: string
+  endgameDirection: string
 }
 
 interface ExpandBackgroundResult {
@@ -114,6 +121,22 @@ function normalizeTargetWords(value?: number | null) {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0
 }
 
+function getWizardStepItems(launchMode: NovelLaunchMode) {
+  if (launchMode === 'fast_launch') {
+    return [
+      { title: '路径与题材' },
+      { title: '极速开书字段' },
+    ]
+  }
+
+  return [
+    { title: '题材与模板' },
+    { title: '原始背景' },
+    { title: 'AI 补全背景' },
+    { title: '最终确认' },
+  ]
+}
+
 export default function NovelList() {
   const navigate = useNavigate()
   const { novels, setNovels } = useNovelStore()
@@ -130,6 +153,7 @@ export default function NovelList() {
   const [wizardForm] = Form.useForm<WizardFormValues>()
   const [expandedData, setExpandedData] = useState<ExpandBackgroundResult | null>(null)
   const [selectedGenreId, setSelectedGenreId] = useState<number | null>(null)
+  const selectedLaunchMode = Form.useWatch('launchMode', wizardForm) || 'professional_longform'
 
   const resetWizard = useCallback(() => {
     setWizardOpen(false)
@@ -138,7 +162,7 @@ export default function NovelList() {
     setExpandedData(null)
     setSelectedGenreId(null)
     wizardForm.resetFields()
-    wizardForm.setFieldsValue({ targetWords: 200000 })
+    wizardForm.setFieldsValue({ launchMode: 'professional_longform', targetWords: 200000 })
   }, [wizardForm])
 
   const loadNovels = useCallback(async () => {
@@ -158,7 +182,7 @@ export default function NovelList() {
     void window.electron.template.list('style').then(setStyleTemplates)
     void window.electron.template.list('world').then(setWorldTemplates)
     void window.electron.model.list().then(setModelConfigs)
-    wizardForm.setFieldsValue({ targetWords: 200000 })
+    wizardForm.setFieldsValue({ launchMode: 'professional_longform', targetWords: 200000 })
   }, [loadNovels, wizardForm])
 
   const filteredNovels = useMemo(() => {
@@ -207,7 +231,123 @@ export default function NovelList() {
     }
   }
 
+  const handleFastLaunchCreate = useCallback(async () => {
+    const values = await wizardForm.validateFields([
+      'genreId',
+      'protagonistStart',
+      'coreHook',
+      'coreConflict',
+      'tabooRules',
+      'endgameDirection',
+    ])
+    const allValues = wizardForm.getFieldsValue(true) as Partial<WizardFormValues>
+    const writingContractTags = normalizeWritingContractTags(allValues.writingContractTags)
+    const writingContractError = getWritingContractValidationError(writingContractTags)
+    if (writingContractError) {
+      message.error(writingContractError)
+      return
+    }
+
+    const genreLabel = GENRE_OPTIONS.find((option) => option.value === values.genreId)?.label || '未分类'
+    const targetWords = allValues.targetWords || 200000
+    const plan = buildFastLaunchBootstrapPlan({
+      genreLabel,
+      protagonistStart: values.protagonistStart.trim(),
+      coreHook: values.coreHook.trim(),
+      coreConflict: values.coreConflict.trim(),
+      tabooRules: values.tabooRules.trim(),
+      endgameDirection: values.endgameDirection.trim(),
+      targetWords,
+      writingContractTags,
+    })
+
+    setWizardLoading(true)
+    try {
+      const novelId = await window.electron.novel.create({
+        title: plan.novel.title,
+        synopsis: plan.novel.synopsis,
+        genreId: values.genreId,
+        launchMode: 'fast_launch',
+        userBackground: plan.novel.userBackground,
+        expandedBackground: plan.novel.expandedBackground,
+        projectBriefJson: plan.novel.projectBriefJson,
+        styleTemplateId: allValues.styleTemplateId,
+        worldTemplateId: allValues.worldTemplateId,
+        modelConfigId: allValues.modelConfigId,
+        targetWords: plan.novel.targetWords,
+      })
+
+      await window.electron.novel.update(novelId, {
+        title: plan.novel.title,
+        synopsis: plan.novel.synopsis,
+        userBackground: plan.novel.userBackground,
+        expandedBackground: plan.novel.expandedBackground,
+        projectBriefJson: plan.novel.projectBriefJson,
+        settingsJson: plan.novel.settingsJson,
+        themeVoiceJson: plan.novel.themeVoiceJson,
+        targetWords: plan.novel.targetWords,
+      })
+
+      const volumeId = await window.electron.structure.createVolume(novelId, plan.volume)
+      const arcId = await window.electron.outline.createArc(novelId, plan.outlineArc)
+
+      await Promise.all([
+        window.electron.character.create(novelId, plan.protagonist),
+        window.electron.character.create(novelId, plan.antagonist),
+        window.electron.thread.create(novelId, {
+          threadType: 'main',
+          title: plan.thread.title,
+          summary: plan.thread.summary,
+          premise: plan.thread.premise,
+          status: 'planned',
+          priority: 'high',
+          currentState: '前三章内必须完成主线起势。',
+        }),
+      ])
+
+      for (const chapter of plan.chapters) {
+        await window.electron.chapter.create(novelId, {
+          ...chapter,
+          status: 'outline',
+          volumeId,
+          arcId,
+        })
+      }
+
+      for (const event of plan.timelineEvents) {
+        await window.electron.timeline.create(novelId, {
+          ...event,
+          timeMode: 'relative-disaster',
+          volumeId,
+          isMajorEvent: 1,
+          protagonistPresent: 1,
+        })
+      }
+
+      await loadNovels()
+      resetWizard()
+      navigate(`/novels/${novelId}/overview`)
+      message.success('已按极速开书路径创建项目，并自动补出第一卷与前三章骨架。')
+    } catch (error) {
+      console.error(error)
+      message.error(getErrorMessage(error, 'novel.createFailed'))
+    } finally {
+      setWizardLoading(false)
+    }
+  }, [loadNovels, navigate, resetWizard, wizardForm])
+
   const handleWizardNext = async () => {
+    if (selectedLaunchMode === 'fast_launch') {
+      if (wizardStep === 0) {
+        await wizardForm.validateFields(['genreId', 'writingContractTags'])
+        setWizardStep(1)
+        return
+      }
+
+      await handleFastLaunchCreate()
+      return
+    }
+
     if (wizardStep === 0) {
       await wizardForm.validateFields(['genreId', 'writingContractTags'])
       setWizardStep(1)
@@ -260,6 +400,7 @@ export default function NovelList() {
         title: values.title.trim(),
         synopsis: values.synopsis.trim(),
         genreId: allValues.genreId,
+        launchMode: 'professional_longform',
         userBackground: allValues.userBackground?.trim(),
         expandedBackground: allValues.expandedBackground?.trim(),
         styleTemplateId: allValues.styleTemplateId,
@@ -280,6 +421,11 @@ export default function NovelList() {
       message.error(getErrorMessage(error, 'novel.createFailed'))
     }
   }
+
+  const wizardSteps = useMemo(
+    () => getWizardStepItems(selectedLaunchMode),
+    [selectedLaunchMode],
+  )
 
   return (
     <div style={{ padding: '20px 24px', height: '100%', overflow: 'auto' }}>
@@ -354,18 +500,52 @@ export default function NovelList() {
       >
         <Steps
           current={wizardStep}
-          items={[
-            { title: '题材与模板' },
-            { title: '原始背景' },
-            { title: 'AI 补全背景' },
-            { title: '最终确认' },
-          ]}
+          items={wizardSteps}
           style={{ marginBottom: 32 }}
         />
 
         <Form form={wizardForm} layout="vertical">
           {wizardStep === 0 && (
             <>
+              <Form.Item
+                name="launchMode"
+                label="开书路径"
+                rules={[{ required: true, message: '请选择开书路径' }]}
+              >
+                <Row gutter={[12, 12]}>
+                  {NOVEL_LAUNCH_MODE_OPTIONS.map((option) => {
+                    const active = selectedLaunchMode === option.value
+                    return (
+                      <Col span={12} key={option.value}>
+                        <div
+                          onClick={() => wizardForm.setFieldValue('launchMode', option.value)}
+                          style={{
+                            padding: '14px 16px',
+                            borderRadius: 14,
+                            cursor: 'pointer',
+                            border: active ? '1px solid #2E86AB' : '1px solid rgba(255,255,255,0.08)',
+                            background: active
+                              ? 'linear-gradient(135deg, rgba(46,134,171,0.18), rgba(30,58,95,0.22))'
+                              : 'rgba(255,255,255,0.03)',
+                            minHeight: 110,
+                            display: 'grid',
+                            gap: 10,
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+                            <strong style={{ color: 'var(--color-text)' }}>{option.label}</strong>
+                            <Tag color={active ? 'processing' : 'default'}>{option.badge}</Tag>
+                          </div>
+                          <div style={{ fontSize: 13, color: 'var(--color-text-secondary)', lineHeight: 1.7 }}>
+                            {option.description}
+                          </div>
+                        </div>
+                      </Col>
+                    )
+                  })}
+                </Row>
+              </Form.Item>
+
               <Form.Item
                 name="genreId"
                 label="选择题材"
@@ -448,7 +628,9 @@ export default function NovelList() {
               <Form.Item
                 name="writingContractTags"
                 label="写作类型"
-                extra="“爽文 / 写实”只能选一个；其余标签可叠加，自定义标签只作为弱提示。"
+                extra={selectedLaunchMode === 'fast_launch'
+                  ? '极速开书会把这些标签直接压进文风护栏与前三章骨架。'
+                  : '“爽文 / 写实”只能选一个；其余标签可叠加，自定义标签只作为弱提示。'}
                 rules={[{
                   validator: async (_, value?: string[]) => {
                     const error = getWritingContractValidationError(normalizeWritingContractTags(value))
@@ -470,7 +652,7 @@ export default function NovelList() {
             </>
           )}
 
-          {wizardStep === 1 && (
+          {selectedLaunchMode === 'professional_longform' && wizardStep === 1 && (
             <Form.Item
               name="userBackground"
               label="故事背景"
@@ -488,7 +670,81 @@ export default function NovelList() {
             </Form.Item>
           )}
 
-          {wizardStep === 2 && (
+          {selectedLaunchMode === 'fast_launch' && wizardStep === 1 && (
+            <>
+              <Row gutter={12}>
+                <Col span={12}>
+                  <Form.Item
+                    name="protagonistStart"
+                    label="主角起点"
+                    rules={[{ required: true, message: '请填写主角起点' }]}
+                    extra="写主角现在处于什么处境、身份或困局。"
+                  >
+                    <Input.TextArea rows={4} placeholder="例如：被逐出主城的维修员，只能靠黑市零工维生。" />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item
+                    name="coreHook"
+                    label="核心钩子"
+                    rules={[{ required: true, message: '请填写核心钩子' }]}
+                    extra="开篇立刻抓住读者的异常事件、秘密或倒计时。"
+                  >
+                    <Input.TextArea rows={4} placeholder="例如：他修复的一枚芯片里，藏着主城即将熄火的真相。" />
+                  </Form.Item>
+                </Col>
+              </Row>
+
+              <Row gutter={12}>
+                <Col span={12}>
+                  <Form.Item
+                    name="coreConflict"
+                    label="核心冲突"
+                    rules={[{ required: true, message: '请填写核心冲突' }]}
+                    extra="写主角必须面对的主线阻力，而不是泛泛主题。"
+                  >
+                    <Input.TextArea rows={4} placeholder="例如：想救城就必须和曾经出卖他的旧同伴合作。 " />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item
+                    name="tabooRules"
+                    label="禁区"
+                    rules={[{ required: true, message: '请填写禁区' }]}
+                    extra="用于自动生成文风护栏和剧情边界。"
+                  >
+                    <Input.TextArea rows={4} placeholder="例如：禁止全知旁白解释；禁止一章解决主线；禁止爽点无代价。" />
+                  </Form.Item>
+                </Col>
+              </Row>
+
+              <Form.Item
+                name="endgameDirection"
+                label="终局方向"
+                rules={[{ required: true, message: '请填写终局方向' }]}
+                extra="先给一个方向，不要求现在就写完整终局。"
+              >
+                <Input.TextArea rows={4} placeholder="例如：主角救下主城，但必须放弃原本想夺回的身份和归属。" />
+              </Form.Item>
+
+              <div
+                style={{
+                  marginTop: 8,
+                  padding: '14px 16px',
+                  borderRadius: 14,
+                  background: 'rgba(255,255,255,0.04)',
+                  border: '1px solid rgba(255,255,255,0.06)',
+                  color: 'var(--color-text-secondary)',
+                  lineHeight: 1.7,
+                  fontSize: 13,
+                }}
+              >
+                系统会自动补出：基础立项、文风护栏、第一卷目标、前三章骨架、主角/反派简版卡，以及可直接进入写作的最小结构。
+              </div>
+            </>
+          )}
+
+          {selectedLaunchMode === 'professional_longform' && wizardStep === 2 && (
             <div style={{ display: 'flex', gap: 20 }}>
               <div style={{ flex: 1 }}>
                 <Form.Item name="expandedBackground" label="AI 补全背景（可编辑）">
@@ -523,7 +779,7 @@ export default function NovelList() {
             </div>
           )}
 
-          {wizardStep === 3 && (
+          {selectedLaunchMode === 'professional_longform' && wizardStep === 3 && (
             <>
               <Form.Item name="title" label="最终标题" rules={[{ required: true, message: '请填写标题' }]}>
                 <Input placeholder="小说标题" />
@@ -548,7 +804,9 @@ export default function NovelList() {
             loading={wizardLoading}
             icon={wizardLoading ? <LoadingOutlined /> : undefined}
           >
-            {wizardStep === 3 ? '创建小说' : wizardStep === 1 ? 'AI 补全背景' : '下一步'}
+            {selectedLaunchMode === 'fast_launch'
+              ? (wizardStep === wizardSteps.length - 1 ? '创建并生成骨架' : '下一步')
+              : (wizardStep === 3 ? '创建小说' : wizardStep === 1 ? 'AI 补全背景' : '下一步')}
           </Button>
         </div>
       </Modal>

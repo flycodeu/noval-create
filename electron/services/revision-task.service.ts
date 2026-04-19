@@ -18,6 +18,9 @@ interface RevisionTaskQueryFilters {
   status?: 'open' | 'in_progress' | 'resolved' | 'ignored'
   severity?: 'high' | 'medium' | 'low'
   keyword?: string
+  relatedPage?: string
+  entityType?: string
+  entityId?: number
   page?: number
   pageSize?: number
 }
@@ -813,6 +816,9 @@ export function queryRevisionTasks(filters: RevisionTaskQueryFilters) {
     .filter((task) => !filters.taskSource || task.taskSource === filters.taskSource)
     .filter((task) => !filters.status || task.status === filters.status)
     .filter((task) => !filters.severity || task.severity === filters.severity)
+    .filter((task) => !filters.relatedPage || task.relatedPage === filters.relatedPage)
+    .filter((task) => !filters.entityType || task.entityType === filters.entityType)
+    .filter((task) => filters.entityId === undefined || task.entityId === filters.entityId)
     .filter((task) => {
       if (!keyword) return true
       const haystack = [

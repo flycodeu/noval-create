@@ -22,6 +22,7 @@ import {
 } from './generation-history.service'
 import { createTask, executeChatTask, runChatTask, updateTask } from './task.service'
 import { syncStoryItemTimelineLinks } from './link-sync.service'
+import { recordAssetChangeEvent } from './asset-impact.service'
 import {
   buildItemTemplateSummary,
   getItemGenerationProfile,
@@ -1131,6 +1132,17 @@ export function createStoryItem(
   if (!options.skipContextTracking) {
     markNovelContextChanged(novelId, 'Story items changed')
     refreshWorldStateVersionsForNovel(novelId)
+    recordAssetChangeEvent({
+      novelId,
+      assetType: 'item',
+      assetId: id,
+      assetLabel: payload.itemName || data.itemName || 'Unnamed item',
+      operation: 'create',
+      changeReason: 'Story items changed',
+      impactLevel: 'medium',
+      triggeredBy: 'item.service',
+      payload,
+    })
   }
   return id
 }
@@ -1151,6 +1163,17 @@ export function updateStoryItem(
     if (current) {
       markNovelContextChanged(current.novelId, 'Story items changed')
       refreshWorldStateVersionsForNovel(current.novelId)
+      recordAssetChangeEvent({
+        novelId: current.novelId,
+        assetType: 'item',
+        assetId: id,
+        assetLabel: (typeof data.itemName === 'string' && data.itemName.trim()) ? data.itemName.trim() : current.itemName,
+        operation: 'update',
+        changeReason: 'Story items changed',
+        impactLevel: 'medium',
+        triggeredBy: 'item.service',
+        payload: data,
+      })
     }
   }
 }
@@ -1167,6 +1190,16 @@ export function deleteStoryItem(id: number, options: { skipContextTracking?: boo
   if (!options.skipContextTracking && current) {
     markNovelContextChanged(current.novelId, 'Story items changed')
     refreshWorldStateVersionsForNovel(current.novelId)
+    recordAssetChangeEvent({
+      novelId: current.novelId,
+      assetType: 'item',
+      assetId: id,
+      assetLabel: current.itemName,
+      operation: 'delete',
+      changeReason: 'Story items changed',
+      impactLevel: 'medium',
+      triggeredBy: 'item.service',
+    })
   }
 }
 

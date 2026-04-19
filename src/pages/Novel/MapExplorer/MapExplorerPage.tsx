@@ -855,6 +855,7 @@ export default function MapExplorerPage({ novelId }: Props) {
 
   const aiActions = selectedNode ? (
     <AIGenerateButton
+      novelId={novelId}
       label="AI 补全·当前节点"
       isJson
       buildMessages={() => {

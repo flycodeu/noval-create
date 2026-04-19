@@ -19,6 +19,7 @@ import { buildProjectBriefSummary, parseProjectBriefSnapshot } from '../../../sh
 import { buildPremiseSummary, buildStoryDesignSummary, parseStorySettingsSnapshot } from '../../../shared/story-settings'
 import { buildThemeVoiceSummary, parseThemeVoiceSnapshot } from '../../../shared/theme-voice'
 import { useNovelStore } from '../../../stores/novel.store'
+import { useAuthorWorkModeStore } from '../../../stores/author-work-mode.store'
 import { buildDraftMessages, normalizeOptionalNumber, parseDraftJson } from '../shared/ai-draft'
 import { usePlanningDraft } from '../shared/planning-draft'
 import { generateOverviewDraft } from '../shared/planning-ai-service'
@@ -30,11 +31,21 @@ import {
 } from '../components/WorkspaceShell'
 import type { QualityDashboardData } from '../../../types'
 import {
+  buildAuthorWorkflowSummary,
+  getAuthorWorkModeLabel,
+  resolveAuthorWorkflowHref,
+  resolveSuggestedAuthorWorkMode,
+} from '../author-workflow'
+import {
+  OVERVIEW_ZERO_STATE_ACTIONS,
+  resolveOverviewDisplayState,
+} from '../overview-presentation'
+import {
   type RegisteredWorkspaceQualityController,
   useRegisterWorkspaceQualityController,
 } from '../workspace-quality-context'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
-import { loadWorkflowStats } from '../workflow'
+import { EMPTY_WORKFLOW_STATS, getAssetBloatSignal, loadWorkflowStats, type WorkflowStats } from '../workflow'
 
 interface Props {
   novelId: number
@@ -46,34 +57,6 @@ interface OverviewFormValues {
   userBackground: string
   expandedBackground: string
   targetWords: number
-}
-
-interface OverviewStats {
-  mapCount: number
-  characterCount: number
-  itemCount: number
-  threadCount: number
-  outlineCount: number
-  timelineCount: number
-  revisionTaskCount: number
-  chapterCount: number
-  completedChapterCount: number
-  totalWords: number
-  hasProtagonist: boolean
-}
-
-const EMPTY_STATS: OverviewStats = {
-  mapCount: 0,
-  characterCount: 0,
-  itemCount: 0,
-  threadCount: 0,
-  outlineCount: 0,
-  timelineCount: 0,
-  revisionTaskCount: 0,
-  chapterCount: 0,
-  completedChapterCount: 0,
-  totalWords: 0,
-  hasProtagonist: false,
 }
 
 type PackagingDraft = NovelBlurbDocument
@@ -98,13 +81,16 @@ export default function Overview({ novelId }: Props) {
   const [form] = Form.useForm<OverviewFormValues>()
   const [saving, setSaving] = useState(false)
   const [packagingSaving, setPackagingSaving] = useState(false)
-  const [stats, setStats] = useState<OverviewStats>(EMPTY_STATS)
+  const [stats, setStats] = useState<WorkflowStats>(EMPTY_WORKFLOW_STATS)
   const [draftWarnings, setDraftWarnings] = useState<string[]>([])
   const [packagingDraft, setPackagingDraft] = useState<PackagingDraft>(parseNovelBlurbDocument(currentNovel?.blurbJson))
   const [packagingGenerating, setPackagingGenerating] = useState(false)
   const [qualitySummary, setQualitySummary] = useState<Pick<QualityDashboardData, 'productionReadiness' | 'batchHealth' | 'continuityHealth'> | null>(null)
   const draftWarningsRef = useRef<string[]>([])
   const draftObservabilityRef = useRef<{ inputSummary: string; lintWarnings: string[]; rawOutputs: string[] } | null>(null)
+  const authorMode = useAuthorWorkModeStore((state) => state.mode)
+  const authorModeSource = useAuthorWorkModeStore((state) => state.source)
+  const syncSuggestedAuthorMode = useAuthorWorkModeStore((state) => state.syncSuggestedMode)
 
   useEffect(() => {
     form.setFieldsValue({
@@ -253,8 +239,43 @@ export default function Overview({ novelId }: Props) {
     },
   ]
 
-  const nextFocus = readinessItems.find((item) => !item.ready)?.title
-    || (stats.revisionTaskCount > 0 ? '修订中心' : '正文写作')
+  const suggestedAuthorMode = useMemo(
+    () => resolveSuggestedAuthorWorkMode(currentNovel, stats, qualitySummary),
+    [currentNovel, qualitySummary, stats],
+  )
+  const selectedAuthorMode = authorMode || suggestedAuthorMode.mode
+  const authorWorkflow = useMemo(
+    () => buildAuthorWorkflowSummary(currentNovel, stats, qualitySummary, selectedAuthorMode),
+    [currentNovel, qualitySummary, selectedAuthorMode, stats],
+  )
+  const displayState = useMemo(
+    () => resolveOverviewDisplayState(stats, authorWorkflow),
+    [authorWorkflow, stats],
+  )
+  const assetBloat = useMemo(() => getAssetBloatSignal(stats), [stats])
+  const nextFocus = authorWorkflow.primaryTask.title
+  const readyCount = readinessItems.filter((item) => item.ready).length
+  const keyGapCount = readinessItems.length - readyCount
+  const hasContextLag = stats.staleChapterCount > 0 || stats.staleCheckpointCount > 0 || stats.staleAssetCount > 0
+  const writingStageValue = displayState.isZeroState
+    ? '未开写'
+    : stats.chapterCount > 0
+      ? `已写 ${stats.completedChapterCount}/${stats.chapterCount} 章`
+      : '已开写'
+  const contextStatusValue = displayState.isZeroState
+    ? '未建立'
+    : hasContextLag
+      ? '待同步'
+      : '稳定'
+  const revisionRiskValue = authorWorkflow.blockers.some((item) => item.severity === 'high')
+    ? '有阻塞'
+    : stats.revisionTaskCount > 0
+      ? '待清理'
+      : '稳定'
+
+  useEffect(() => {
+    syncSuggestedAuthorMode(suggestedAuthorMode.mode)
+  }, [suggestedAuthorMode.mode, syncSuggestedAuthorMode])
 
   const applyOverviewDraft = (draft: Partial<OverviewFormValues>) => {
     const currentValues = form.getFieldsValue(true)
@@ -435,103 +456,59 @@ export default function Overview({ novelId }: Props) {
       title="项目总览"
       description="统一查看底盘、资产和下一步重点。"
       actions={(
-        <Space wrap>
-          <AIGenerateButton
-            label="AI 生成·基础信息"
-            intent="generate"
-            isJson
-            runGeneration={async (input) => {
-              const result = await generateOverviewDraft(input, { genre: currentNovel?.genreName })
-              draftWarningsRef.current = result.warnings
-              draftObservabilityRef.current = result.observability
-              setDraftWarnings(result.warnings)
-              return result.outputs
-            }}
-            buildMessages={() => {
-              const values = form.getFieldsValue(true)
-
-              return buildDraftMessages({
-                task: '小说基础信息',
-                mode: 'replace',
-                context: [
-                  { label: '题材', value: currentNovel?.genreName || '' },
-                  { label: '项目立项', value: buildProjectBriefSummary(projectBrief) },
-                  { label: '基础设定', value: buildPremiseSummary(storySettings.premise) },
-                  { label: '故事设计', value: buildStoryDesignSummary(storySettings.storyDesign) },
-                  { label: '主题与文风', value: buildThemeVoiceSummary(themeVoice) },
-                  {
-                    label: '世界规则',
-                    value: [
-                      worldRules.mapBlueprint.overview,
-                      worldRules.factionSystem.length > 0 ? `${worldRules.factionSystem.length} 个势力` : '',
-                      worldRules.speciesSystem.length > 0 ? `${worldRules.speciesSystem.length} 个种族` : '',
-                    ].filter(Boolean).join('；'),
-                  },
-                ],
-                fields: [
-                  { key: 'title', label: '书名', value: values.title, hint: '能体现题材和冲突，不要像占位名。' },
-                  { key: 'synopsis', label: '一句话简介', value: values.synopsis, hint: '一句话交代主角处境、目标和最大阻碍。' },
-                  { key: 'userBackground', label: '原始背景', value: values.userBackground, hint: '保留灵感来源，写清氛围和人物起点。' },
-                  { key: 'expandedBackground', label: '扩展背景', value: values.expandedBackground, hint: '补齐资源、制度、环境压力和社会结构。' },
-                  { key: 'targetWords', label: '目标字数', type: 'number', value: values.targetWords, hint: '给出适合当前题材的合理整数。' },
-                ],
-                requirements: [
-                  '不要另起一套故事。',
-                  '不要写口号和平台宣传语。',
-                ],
-              })
-            }}
-            onResult={handleApplyDraft}
-          />
-          <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>
-            保存基础信息
-          </Button>
-          <Button
-            icon={<EditOutlined />}
-            onClick={() => navigate(`/novels/${novelId}/${stats.revisionTaskCount > 0 ? 'revision' : 'writing'}`)}
-          >
-            {stats.revisionTaskCount > 0 ? '打开修订中心' : '进入正文写作'}
-          </Button>
-        </Space>
+        <Button
+          type="primary"
+          icon={<EditOutlined />}
+          onClick={() => navigate(resolveAuthorWorkflowHref(novelId, authorWorkflow.primaryTask.entryPage))}
+        >
+            {authorWorkflow.primaryTask.actionLabel}
+        </Button>
       )}
       contextSummary={(
         <WorkspaceContextSummary
           items={[
             { label: '题材', value: currentNovel?.genreName || '未设置' },
-            { label: '当前重点', value: nextFocus },
-            { label: '章节', value: `${stats.completedChapterCount}/${stats.chapterCount || 0}` },
-            { label: '目标字数', value: `${targetWords.toLocaleString()} 字` },
+            { label: '开书路径', value: currentNovel?.launchMode === 'fast_launch' ? '极速开书' : '专业长篇' },
+            { label: '当前模式', value: getAuthorWorkModeLabel(selectedAuthorMode) },
+            { label: '当前主任务', value: nextFocus },
+            { label: '正文阶段', value: displayState.isZeroState ? '首章前' : '正文推进中' },
           ]}
         />
       )}
       metrics={(
         <>
           <WorkspaceMetric
-            label="累计字数"
-            value={`${stats.totalWords.toLocaleString()} 字`}
+            label="正文阶段"
+            value={writingStageValue}
             tone="warm"
-            hint={targetWords > 0 ? `目标 ${targetWords.toLocaleString()} 字` : '还没有设置目标字数'}
+            hint={displayState.isZeroState ? '当前优先进入首章启动动作。' : `累计 ${stats.totalWords.toLocaleString()} 字`}
           />
           <WorkspaceMetric
-            label="章节进度"
-            value={`${stats.completedChapterCount}/${stats.chapterCount || 0}`}
-            hint={`完成率 ${chapterProgress}%`}
+            label="结构承接"
+            value={`${readyCount}/${readinessItems.length}`}
+            hint={keyGapCount > 0 ? `仍有 ${keyGapCount} 个关键底盘位待补齐` : '关键底盘已基本就绪'}
           />
           <WorkspaceMetric
-            label="结构资产"
-            value={stats.mapCount + stats.characterCount + stats.itemCount + stats.threadCount + stats.timelineCount}
+            label="上下文状态"
+            value={contextStatusValue}
             tone="cool"
-            hint="地图、角色、物品、线程和时间轴总和"
+            hint={displayState.isZeroState
+              ? '正文与长程记忆尚未建立，不展示连续性噪音。'
+              : hasContextLag
+                ? '存在待同步章节、检查点或资产。'
+                : '当前正文与上下文状态保持一致。'}
           />
-          <WorkspaceMetric
-            label="修订任务"
-            value={stats.revisionTaskCount}
-            hint={stats.revisionTaskCount > 0 ? '存在未闭环问题。' : '当前没有未处理修订任务。'}
-          />
+          {displayState.showRevisionMetric ? (
+            <WorkspaceMetric
+              label="修订风险"
+              value={revisionRiskValue}
+              hint={stats.revisionTaskCount > 0 ? `当前有 ${stats.revisionTaskCount} 条修订任务待处理` : '当前链路稳定，可继续推进正文或结构收口'}
+            />
+          ) : null}
         </>
       )}
     >
-      {!currentNovel?.synopsis || !currentNovel?.expandedBackground ? (
+      {!displayState.isZeroState && (!currentNovel?.synopsis || !currentNovel?.expandedBackground) ? (
         <Alert
           type="warning"
           showIcon
@@ -554,28 +531,163 @@ export default function Overview({ novelId }: Props) {
           description="当前表单包含最近一次已应用但尚未保存的 Overview 草稿。保存基础信息后会自动清除。"
         />
       ) : null}
+      {assetBloat.risk !== 'none' ? (
+        <Alert
+          type={assetBloat.risk === 'high' ? 'warning' : 'info'}
+          showIcon
+          message="资产膨胀提示"
+          description={assetBloat.reason}
+          action={(
+            <Button size="small" onClick={() => navigate(`/novels/${novelId}/${stats.outlineCount > 0 ? 'writing' : 'outline'}`)}>
+              {stats.outlineCount > 0 ? '进入正文' : '压成大纲'}
+            </Button>
+          )}
+        />
+      ) : null}
 
-      <WorkspacePanel title="推进热度" description="显示当前进度。">
+      <WorkspacePanel
+        title={displayState.isZeroState ? '首章启动' : '今天最该做什么'}
+        description={displayState.isZeroState
+          ? '当前处于 0 章 / 0 字阶段，先给启动动作，再给统计与管理信息。'
+          : '总览页只保留当前最值钱的下一步；详细模式切换仍放在创作向导。'}
+        extra={<div className="novel-pill">{getAuthorWorkModeLabel(selectedAuthorMode)}</div>}
+      >
         <div style={{ display: 'grid', gap: 16 }}>
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-              <strong>字数进度</strong>
-              <span>{wordProgress}%</span>
+          <div className="guided-step__action-card">
+            <div className="guided-step__action-head">
+              <div className="guided-step__action-copy">
+                <strong>{authorWorkflow.primaryTask.title}</strong>
+                <span>{authorWorkflow.primaryTask.reason}</span>
+              </div>
+              <Space wrap>
+                <Button type="primary" onClick={() => navigate(resolveAuthorWorkflowHref(novelId, authorWorkflow.primaryTask.entryPage))}>
+                  {authorWorkflow.primaryTask.actionLabel}
+                </Button>
+                <Button onClick={() => navigate(`/novels/${novelId}/guide`)}>
+                  打开创作向导
+                </Button>
+              </Space>
             </div>
-            <Progress percent={wordProgress} showInfo={false} />
+            <div className="guided-step__action-meta">{`完成后解锁：${authorWorkflow.primaryTask.unlocks.join('、')}`}</div>
           </div>
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-              <strong>章节进度</strong>
-              <span>{chapterProgress}%</span>
+
+          <div className="novel-note-list">
+            <div className="novel-note-list__item">{authorWorkflow.modeReason}</div>
+            <div className="novel-note-list__item">
+              {authorModeSource === 'manual'
+                ? '当前沿用你在创作向导中手动选择的模式。'
+                : '当前采用系统自动推荐模式。'}
             </div>
-            <Progress percent={chapterProgress} showInfo={false} />
+            {displayState.isZeroState ? (
+              <div className="novel-note-list__item">先按最短起步路径进入第一章，再逐步补资产，不必先理解全部模块结构。</div>
+            ) : null}
           </div>
         </div>
       </WorkspacePanel>
 
-      {qualitySummary ? (
-        <WorkspacePanel title="百万字健康速览" description="继续扩批前先看生产、回写和连续性。">
+      {displayState.isZeroState ? (
+        <WorkspacePanel
+          title="首章启动路径"
+          description="先给动作，再给统计；新项目优先在这里落成第一章入口。"
+        >
+          <div className="guided-step__action-grid">
+            {OVERVIEW_ZERO_STATE_ACTIONS.map((task) => (
+              <div key={task.id} className="guided-step__action-card">
+                <div className="guided-step__action-copy">
+                  <strong>{task.title}</strong>
+                  <span>{task.description}</span>
+                </div>
+                <Button onClick={() => navigate(resolveAuthorWorkflowHref(novelId, task.entryPage))}>
+                  {task.actionLabel}
+                </Button>
+              </div>
+            ))}
+          </div>
+        </WorkspacePanel>
+      ) : authorWorkflow.alternateTasks.length > 0 ? (
+        <WorkspacePanel
+          title="备选路径"
+          description="如果你不打算执行当前主任务，可以从这两个次优动作继续推进。"
+        >
+          <div className="guided-step__action-grid">
+            {authorWorkflow.alternateTasks.slice(0, 2).map((task) => (
+              <div key={task.id} className="guided-step__action-card">
+                <div className="guided-step__action-copy">
+                  <strong>{task.title}</strong>
+                  <span>{task.reason}</span>
+                </div>
+                <div className="guided-step__action-foot">{`${task.estimatedMinutes} 分钟 · ${task.unlocks.join('、')}`}</div>
+                <Button onClick={() => navigate(resolveAuthorWorkflowHref(novelId, task.entryPage))}>
+                  {task.actionLabel}
+                </Button>
+              </div>
+            ))}
+          </div>
+        </WorkspacePanel>
+      ) : null}
+
+      {displayState.showBlockersPanel ? (
+        <WorkspacePanel
+          title="当前阻塞项"
+          description="这里回答为什么现在不建议继续下一步，并给出直接处理入口。"
+        >
+          <div className="novel-issue-list">
+            {authorWorkflow.blockers.slice(0, 2).map((blocker) => (
+              <div key={blocker.id} className="novel-issue-item">
+                <div className="novel-issue-item__head">
+                  <strong>{blocker.title}</strong>
+                </div>
+                <div className="novel-issue-item__desc">{blocker.reason}</div>
+                <Button size="small" onClick={() => navigate(resolveAuthorWorkflowHref(novelId, blocker.entryPage))}>
+                  {blocker.actionLabel}
+                </Button>
+              </div>
+            ))}
+          </div>
+        </WorkspacePanel>
+      ) : null}
+
+      {displayState.showImpactPanel ? (
+        <WorkspacePanel
+          title="风险和影响"
+          description="这里回答最近的变更正在波及什么，避免作者靠记忆自己回查。"
+        >
+          <div className="novel-note-list">
+            {authorWorkflow.impactNotices.slice(0, 2).map((notice) => (
+              <div key={notice.id} className="novel-note-list__item">
+                {`${notice.title}：${notice.reason}（影响 ${notice.affectedKinds.join(' / ')}）`}
+              </div>
+            ))}
+          </div>
+        </WorkspacePanel>
+      ) : null}
+
+      {displayState.showProgressPanel ? (
+        <WorkspacePanel title="推进热度" description="进入正文后再看字数与章节进度，避免起步阶段被弱信息占住视线。">
+          <div style={{ display: 'grid', gap: 16 }}>
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                <strong>字数进度</strong>
+                <span>{wordProgress}%</span>
+              </div>
+              <Progress percent={wordProgress} showInfo={false} />
+            </div>
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                <strong>章节进度</strong>
+                <span>{chapterProgress}%</span>
+              </div>
+              <Progress percent={chapterProgress} showInfo={false} />
+            </div>
+          </div>
+        </WorkspacePanel>
+      ) : null}
+
+      {displayState.showHealthPanel && qualitySummary ? (
+        <WorkspacePanel
+          title={authorWorkflow.blockers.length > 0 ? '继续扩批前先看这些风险' : '百万字健康速览'}
+          description="健康信息降为次级区，只在进入正文后帮助你判断能否继续扩批。"
+        >
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
             <div className="guided-step__fact-card">
               <span>生产就绪度</span>
@@ -596,7 +708,65 @@ export default function Overview({ novelId }: Props) {
         </WorkspacePanel>
       ) : null}
 
-      <WorkspacePanel title="基础信息" description="编辑基础信息。">
+      <WorkspacePanel
+        title="基础信息"
+        description="基础信息已降到次级区；需要时再集中编辑，而不是一进来先管理表单。"
+        extra={(
+          <Space wrap>
+            <AIGenerateButton
+              novelId={novelId}
+              label="AI 生成·基础信息"
+              intent="generate"
+              isJson
+              runGeneration={async (input) => {
+                const result = await generateOverviewDraft(input, { genre: currentNovel?.genreName })
+                draftWarningsRef.current = result.warnings
+                draftObservabilityRef.current = result.observability
+                setDraftWarnings(result.warnings)
+                return result.outputs
+              }}
+              buildMessages={() => {
+                const values = form.getFieldsValue(true)
+
+                return buildDraftMessages({
+                  task: '小说基础信息',
+                  mode: 'replace',
+                  context: [
+                    { label: '题材', value: currentNovel?.genreName || '' },
+                    { label: '项目立项', value: buildProjectBriefSummary(projectBrief) },
+                    { label: '基础设定', value: buildPremiseSummary(storySettings.premise) },
+                    { label: '故事设计', value: buildStoryDesignSummary(storySettings.storyDesign) },
+                    { label: '主题与文风', value: buildThemeVoiceSummary(themeVoice) },
+                    {
+                      label: '世界规则',
+                      value: [
+                        worldRules.mapBlueprint.overview,
+                        worldRules.factionSystem.length > 0 ? `${worldRules.factionSystem.length} 个势力` : '',
+                        worldRules.speciesSystem.length > 0 ? `${worldRules.speciesSystem.length} 个种族` : '',
+                      ].filter(Boolean).join('；'),
+                    },
+                  ],
+                  fields: [
+                    { key: 'title', label: '书名', value: values.title, hint: '能体现题材和冲突，不要像占位名。' },
+                    { key: 'synopsis', label: '一句话简介', value: values.synopsis, hint: '一句话交代主角处境、目标和最大阻碍。' },
+                    { key: 'userBackground', label: '原始背景', value: values.userBackground, hint: '保留灵感来源，写清氛围和人物起点。' },
+                    { key: 'expandedBackground', label: '扩展背景', value: values.expandedBackground, hint: '补齐资源、制度、环境压力和社会结构。' },
+                    { key: 'targetWords', label: '目标字数', type: 'number', value: values.targetWords, hint: '给出适合当前题材的合理整数。' },
+                  ],
+                  requirements: [
+                    '不要另起一套故事。',
+                    '不要写口号和平台宣传语。',
+                  ],
+                })
+              }}
+              onResult={handleApplyDraft}
+            />
+            <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>
+              保存基础信息
+            </Button>
+          </Space>
+        )}
+      >
         <Form form={form} layout="vertical">
           <div className="guided-step__field-grid guided-step__field-grid--basics">
             <div className="guided-step__field-card guided-step__field-card--compact">
@@ -639,6 +809,7 @@ export default function Overview({ novelId }: Props) {
                 setPackagingGenerating(true)
                 try {
                   const outputs = await window.electron.ai.runPrompt({
+                    novelId,
                     modelConfigId: currentNovel?.modelConfigId,
                     messages: [{
                       role: 'user',
@@ -762,57 +933,60 @@ export default function Overview({ novelId }: Props) {
         </div>
       </WorkspacePanel>
 
-      <WorkspacePanel title="故事底盘状态" description="显示关键底盘状态。">
-        <div className="guided-step__fact-grid">
-          <div className="guided-step__fact-card">
-            <span>项目立项</span>
-            <strong>{projectBrief.readyCount}/6</strong>
-            <small>{projectBrief.readerPromise || '还没有写清读者承诺。'}</small>
+      <WorkspacePanel title="项目底盘概览" description="把底盘摘要和关键入口收在一个次级区，避免总览重复展示多层状态卡。">
+        <div style={{ display: 'grid', gap: 20 }}>
+          <div className="guided-step__fact-grid">
+            <div className="guided-step__fact-card">
+              <span>项目立项</span>
+              <strong>{projectBrief.readyCount}/6</strong>
+              <small>{projectBrief.readerPromise || '还没有写清读者承诺。'}</small>
+            </div>
+            <div className="guided-step__fact-card">
+              <span>基础设定</span>
+              <strong>{storySettings.premiseReadyCount}/5</strong>
+              <small>{storySettings.premise.constraints || '还没有写清底层约束。'}</small>
+            </div>
+            <div className="guided-step__fact-card">
+              <span>主题与文风</span>
+              <strong>{themeVoice.readyCount}/6</strong>
+              <small>{themeVoice.styleRules || '还没有固定文风与句式规则。'}</small>
+            </div>
+            <div className="guided-step__fact-card">
+              <span>世界规则</span>
+              <strong>{currentNovel?.worldRulesJson ? '已建立' : '待建立'}</strong>
+              <small>{worldRules.mapBlueprint.overview || '还没有统一地点层级和行动边界。'}</small>
+            </div>
           </div>
-          <div className="guided-step__fact-card">
-            <span>基础设定</span>
-            <strong>{storySettings.premiseReadyCount}/5</strong>
-            <small>{storySettings.premise.constraints || '还没有写清底层约束。'}</small>
-          </div>
-          <div className="guided-step__fact-card">
-            <span>主题与文风</span>
-            <strong>{themeVoice.readyCount}/6</strong>
-            <small>{themeVoice.styleRules || '还没有固定文风与句式规则。'}</small>
-          </div>
-          <div className="guided-step__fact-card">
-            <span>世界规则</span>
-            <strong>{currentNovel?.worldRulesJson ? '已建立' : '待建立'}</strong>
-            <small>{worldRules.mapBlueprint.overview || '还没有统一地点层级和行动边界。'}</small>
-          </div>
-        </div>
-      </WorkspacePanel>
 
-      <WorkspacePanel title="工作流就绪度" description="显示各模块状态。">
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
-          {readinessItems.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              onClick={item.action}
-              style={{
-                textAlign: 'left',
-                border: '1px solid rgba(15, 23, 42, 0.08)',
-                borderRadius: 16,
-                padding: 16,
-                background: '#fff',
-                cursor: 'pointer',
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                <strong>{item.title}</strong>
-                <span>{item.icon}</span>
-              </div>
-              <div style={{ fontSize: 12, color: item.ready ? '#0f766e' : '#b45309', marginBottom: 8 }}>
-                {item.ready ? '已就绪' : '待补齐'}
-              </div>
-              <div style={{ fontSize: 12, color: '#64748b' }}>{item.summary}</div>
-            </button>
-          ))}
+          <div style={{ display: 'grid', gap: 12 }}>
+            <strong style={{ color: 'var(--workspace-ink)' }}>关键入口</strong>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+              {readinessItems.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={item.action}
+                  style={{
+                    textAlign: 'left',
+                    border: '1px solid rgba(15, 23, 42, 0.08)',
+                    borderRadius: 16,
+                    padding: 16,
+                    background: '#fff',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                    <strong>{item.title}</strong>
+                    <span>{item.icon}</span>
+                  </div>
+                  <div style={{ fontSize: 12, color: item.ready ? '#0f766e' : '#b45309', marginBottom: 8 }}>
+                    {item.ready ? '已就绪' : '待补齐'}
+                  </div>
+                  <div style={{ fontSize: 12, color: '#64748b' }}>{item.summary}</div>
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </WorkspacePanel>
     </WorkspacePage>

@@ -24,6 +24,7 @@ import {
 } from './generation-history.service'
 import { createTask, executeChatTask, runChatTask, updateTask } from './task.service'
 import { removeTimelineEventFromItems, syncTimelineEventItemLinks } from './link-sync.service'
+import { recordAssetChangeEvent } from './asset-impact.service'
 import {
   buildTimelineConfigSummary,
   parseWorldRulesJson,
@@ -977,6 +978,17 @@ export function createTimelineEvent(
   syncTimelineEventItemLinks(id)
   if (!options.skipContextTracking) {
     markNovelContextChanged(novelId, 'Timeline events changed')
+    recordAssetChangeEvent({
+      novelId,
+      assetType: 'timeline',
+      assetId: id,
+      assetLabel: data.eventTitle || '未命名事件',
+      operation: 'create',
+      changeReason: 'Timeline events changed',
+      impactLevel: 'high',
+      triggeredBy: 'timeline.service',
+      payload: data,
+    })
   }
   return id
 }
@@ -997,6 +1009,17 @@ export function updateTimelineEvent(
   syncTimelineEventItemLinks(id)
   if (!options.skipContextTracking) {
     markNovelContextChanged(current.novelId, 'Timeline events changed')
+    recordAssetChangeEvent({
+      novelId: current.novelId,
+      assetType: 'timeline',
+      assetId: id,
+      assetLabel: (typeof data.eventTitle === 'string' && data.eventTitle.trim()) ? data.eventTitle.trim() : current.eventTitle,
+      operation: 'update',
+      changeReason: 'Timeline events changed',
+      impactLevel: 'high',
+      triggeredBy: 'timeline.service',
+      payload: data,
+    })
   }
 }
 
@@ -1007,6 +1030,16 @@ export function deleteTimelineEvent(id: number, options: { skipContextTracking?:
   db.delete(timelineEvents).where(eq(timelineEvents.id, id)).run()
   if (!options.skipContextTracking && current) {
     markNovelContextChanged(current.novelId, 'Timeline events changed')
+    recordAssetChangeEvent({
+      novelId: current.novelId,
+      assetType: 'timeline',
+      assetId: id,
+      assetLabel: current.eventTitle,
+      operation: 'delete',
+      changeReason: 'Timeline events changed',
+      impactLevel: 'high',
+      triggeredBy: 'timeline.service',
+    })
   }
 }
 

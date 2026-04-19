@@ -55,6 +55,8 @@ export type WorkflowRunnableStepKey =
   | 'timeline'
   | 'writing'
 
+export type AssetBloatRiskLevel = 'none' | 'warning' | 'high'
+
 export interface WorkflowStats {
   mapCount: number
   factionCount: number
@@ -82,6 +84,18 @@ export interface WorkflowStats {
   hasProtagonist: boolean
   volumeCount: number
   writingPipelineStats?: TaskPipelineStats
+}
+
+export interface AssetBloatSignal {
+  totalAssetCount: number
+  risk: AssetBloatRiskLevel
+  reason: string
+}
+
+export interface NextChapterReadiness {
+  ready: boolean
+  label: string
+  reason: string
 }
 
 export interface GuidedStepProgress {
@@ -327,6 +341,157 @@ export function isWritingStepReady(
     && stats.timelineCount > 0
     && stats.threadCount > 0
     && (stats.chapterCount > 0 || stats.totalWords > 0)
+}
+
+export function getWorkflowAssetCount(
+  stats: Pick<
+  WorkflowStats,
+  | 'mapCount'
+  | 'factionCount'
+  | 'characterCount'
+  | 'characterArcCount'
+  | 'relationshipArcCount'
+  | 'resistanceTrackCount'
+  | 'itemCount'
+  | 'glossaryCount'
+  | 'threadCount'
+  | 'sceneTemplateCount'
+  | 'outlineCount'
+  | 'timelineCount'
+  | 'volumeCount'
+  >
+): number {
+  return stats.mapCount
+    + stats.factionCount
+    + stats.characterCount
+    + stats.characterArcCount
+    + stats.relationshipArcCount
+    + stats.resistanceTrackCount
+    + stats.itemCount
+    + stats.glossaryCount
+    + stats.threadCount
+    + stats.sceneTemplateCount
+    + stats.outlineCount
+    + stats.timelineCount
+    + stats.volumeCount
+}
+
+export function getAssetBloatSignal(
+  stats: Pick<
+  WorkflowStats,
+  | 'mapCount'
+  | 'factionCount'
+  | 'characterCount'
+  | 'characterArcCount'
+  | 'relationshipArcCount'
+  | 'resistanceTrackCount'
+  | 'itemCount'
+  | 'glossaryCount'
+  | 'threadCount'
+  | 'sceneTemplateCount'
+  | 'outlineCount'
+  | 'timelineCount'
+  | 'volumeCount'
+  | 'chapterCount'
+  | 'totalWords'
+  >,
+): AssetBloatSignal {
+  const totalAssetCount = getWorkflowAssetCount(stats)
+  const hasStartedWriting = stats.chapterCount > 0 || stats.totalWords > 0
+  const structuralCoverage = [stats.threadCount > 0, stats.outlineCount > 0, stats.timelineCount > 0, stats.volumeCount > 0]
+    .filter(Boolean)
+    .length
+
+  if (hasStartedWriting || totalAssetCount < 12) {
+    return {
+      totalAssetCount,
+      risk: 'none',
+      reason: '当前资产规模仍在首章前可控范围内。',
+    }
+  }
+
+  if (totalAssetCount >= 24 && structuralCoverage <= 2) {
+    return {
+      totalAssetCount,
+      risk: 'high',
+      reason: `首章前已经堆积 ${totalAssetCount} 项资产，但结构承接位仍不足，继续补资产的边际价值很低。`,
+    }
+  }
+
+  if (totalAssetCount >= 16) {
+    return {
+      totalAssetCount,
+      risk: 'warning',
+      reason: `首章前资产已达到 ${totalAssetCount} 项，建议优先把现有资产压到卷级设计、大纲或正文。`,
+    }
+  }
+
+  return {
+    totalAssetCount,
+    risk: 'none',
+    reason: '当前资产规模仍在首章前可控范围内。',
+  }
+}
+
+export function getNextChapterReadiness(
+  stats: Pick<
+  WorkflowStats,
+  | 'outlineCount'
+  | 'timelineCount'
+  | 'threadCount'
+  | 'chapterCount'
+  | 'totalWords'
+  | 'revisionBlockerCount'
+  | 'staleChapterCount'
+  | 'staleAssetCount'
+  | 'staleCheckpointCount'
+  >,
+): NextChapterReadiness {
+  if (stats.revisionBlockerCount > 0) {
+    return {
+      ready: false,
+      label: '先清 blocker',
+      reason: `当前有 ${stats.revisionBlockerCount} 个高优先修订问题，继续写会放大返工。`,
+    }
+  }
+
+  if (stats.staleChapterCount > 0 || stats.staleAssetCount > 0 || stats.staleCheckpointCount > 0) {
+    return {
+      ready: false,
+      label: '待同步',
+      reason: '上下文、章节或长期记忆仍未对齐，建议先回写和同步。',
+    }
+  }
+
+  if (stats.outlineCount <= 0) {
+    return {
+      ready: false,
+      label: '缺大纲',
+      reason: '至少先有可承接的故事大纲，再开始写下一章。',
+    }
+  }
+
+  if (stats.threadCount <= 0) {
+    return {
+      ready: false,
+      label: '缺线程',
+      reason: '主线和支线还没挂成线程，正文很容易只剩局部段落推进。',
+    }
+  }
+
+  if (stats.timelineCount <= 0) {
+    return {
+      ready: false,
+      label: '缺时间轴',
+      reason: '关键事件顺序还没钉住，继续写会增加后续对齐成本。',
+    }
+  }
+
+  return {
+    ready: true,
+    label: stats.chapterCount > 0 || stats.totalWords > 0 ? '可写下一章' : '可写第一章',
+    reason: '当前结构、线程和时间锚点已具备最小可写条件，可以直接进入正文。',
+  }
 }
 
 export function getGuidedStepProgressMap(
