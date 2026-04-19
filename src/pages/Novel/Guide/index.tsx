@@ -883,7 +883,6 @@ export default function GuidePage({ novelId }: Props) {
             label="下一章状态"
             value={nextChapterReadiness.label}
             tone={nextChapterReadiness.ready ? 'cool' : 'warm'}
-            hint={nextChapterReadiness.reason}
           />
           <WorkspaceMetric
             label="修订任务"
@@ -991,7 +990,6 @@ export default function GuidePage({ novelId }: Props) {
           type={assetBloat.risk === 'high' ? 'warning' : 'info'}
           showIcon
           message={assetBloat.risk === 'high' ? '首章前资产已经开始膨胀' : '当前资产增长过快'}
-          description={assetBloat.reason}
           action={(
             <Button size="small" onClick={() => navigate(`/novels/${novelId}/${stats.outlineCount > 0 ? 'writing' : 'outline'}`)}>
               {stats.outlineCount > 0 ? '直接开写' : '先压成大纲'}
@@ -1060,7 +1058,6 @@ export default function GuidePage({ novelId }: Props) {
           </div>
           <div className="novel-note-list">
             <div className="novel-note-list__item">{`当前模式：${getAuthorWorkModeLabel(selectedAuthorMode)}`}</div>
-            <div className="novel-note-list__item">{authorWorkflow.modeReason}</div>
           </div>
         </div>
       </WorkspacePanel>
@@ -1074,7 +1071,6 @@ export default function GuidePage({ novelId }: Props) {
             <div className="guided-step__action-head">
               <div className="guided-step__action-copy">
                 <strong>{authorWorkflow.primaryTask.title}</strong>
-                <span>{authorWorkflow.primaryTask.reason}</span>
               </div>
               <Button type="primary" onClick={() => navigate(resolveAuthorWorkflowHref(novelId, authorWorkflow.primaryTask.entryPage))}>
                 {authorWorkflow.primaryTask.actionLabel}
@@ -1089,7 +1085,6 @@ export default function GuidePage({ novelId }: Props) {
                 <div key={task.id} className="guided-step__action-card">
                   <div className="guided-step__action-copy">
                     <strong>{task.title}</strong>
-                    <span>{task.reason}</span>
                   </div>
                   <div className="guided-step__action-foot">{`${task.estimatedMinutes} 分钟 · ${task.unlocks.join('、')}`}</div>
                   <Button onClick={() => navigate(resolveAuthorWorkflowHref(novelId, task.entryPage))}>
@@ -1108,7 +1103,6 @@ export default function GuidePage({ novelId }: Props) {
                     <Tag color={getSeverityColor(blocker.severity)}>{getSeverityLabel(blocker.severity)}</Tag>
                     <strong>{blocker.title}</strong>
                   </div>
-                  <div className="novel-issue-item__desc">{blocker.reason}</div>
                   <Button size="small" onClick={() => navigate(resolveAuthorWorkflowHref(novelId, blocker.entryPage))}>
                     {blocker.actionLabel}
                   </Button>
@@ -1120,9 +1114,7 @@ export default function GuidePage({ novelId }: Props) {
           {authorWorkflow.impactNotices.length > 0 ? (
             <div className="novel-note-list">
               {authorWorkflow.impactNotices.map((notice) => (
-                <div key={notice.id} className="novel-note-list__item">
-                  {`${notice.title}：${notice.reason}（影响 ${notice.affectedKinds.join(' / ')}）`}
-                </div>
+                <div key={notice.id} className="novel-note-list__item">{notice.title}</div>
               ))}
             </div>
           ) : null}
@@ -1136,9 +1128,6 @@ export default function GuidePage({ novelId }: Props) {
         <div className="novel-guide__flow-head">
           <div className="novel-guide__flow-lead">
             <strong>{nextStep ? nextStep.title : '关键骨架已铺好'}</strong>
-            <div style={{ marginTop: 6, fontSize: 13, color: 'var(--color-text-secondary)' }}>
-              {nextChapterReadiness.reason}
-            </div>
             <div className="novel-guide__flow-queue">
               <span className="novel-guide__flow-chip">{'已就绪 ' + structureReadyCount + '/' + steps.length}</span>
               {queuedSteps.length > 0

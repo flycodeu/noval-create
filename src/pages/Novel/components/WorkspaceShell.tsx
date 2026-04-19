@@ -5,7 +5,7 @@ function joinClassNames(...values: Array<string | false | null | undefined>) {
 }
 
 export function WorkspacePage({
-  eyebrow,
+  eyebrow: _eyebrow,
   title,
   description,
   actions,
@@ -52,7 +52,6 @@ export function WorkspacePage({
     >
       <section className={joinClassNames('novel-hero', heroVariant === 'compact' && 'novel-hero--compact')}>
         <div className="novel-hero__copy">
-          {eyebrow ? <div className="novel-hero__eyebrow">{eyebrow}</div> : null}
           <h1 className="novel-hero__title">{title}</h1>
           {description ? <p className="novel-hero__description">{description}</p> : null}
         </div>

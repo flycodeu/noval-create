@@ -124,7 +124,6 @@ interface WorkspaceGroupSummary {
   title: string
   completedCount: number
   totalCount: number
-  blocker: string
   isActive: boolean
 }
 
@@ -247,10 +246,9 @@ export default function NovelRouter() {
   const [hasRegisteredClearHandler, setHasRegisteredClearHandler] = useState(false)
   const [qualityBoardOpen, setQualityBoardOpen] = useState(false)
   const [workspaceQualityController, setWorkspaceQualityController] = useState<RegisteredWorkspaceQualityController | null>(null)
-  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({})
+  const workspaceGroups = useMemo(() => WORKSPACE_GROUPS, [])
 
   const novelId = Number.parseInt(id || '0', 10)
-  const workspaceGroups = useMemo(() => WORKSPACE_GROUPS, [])
   const workspaceItems = useMemo(
     () => workspaceGroups.flatMap((group) => group.items),
     [workspaceGroups],
@@ -277,10 +275,6 @@ export default function NovelRouter() {
   const currentPageMeta = useMemo(
     () => workspaceItems.find((item) => item.key === currentPage) || workspaceItems[0],
     [workspaceItems, currentPage],
-  )
-  const currentGroupTitle = useMemo(
-    () => workspaceGroups.find((group) => group.items.some((item) => item.key === currentPage))?.title || workspaceGroups[0]?.title || '总览',
-    [currentPage, workspaceGroups],
   )
 
   const currentPageIndex = useMemo(
@@ -501,24 +495,15 @@ export default function NovelRouter() {
       const completedCount = group.items
         .filter((item) => workspaceStateMap[item.key]?.complete)
         .length
-      const firstIncomplete = group.items.find((item) => !workspaceStateMap[item.key]?.complete)
-      const blocker = group.title === '推进'
-        ? nextChapterReadiness.reason
-        : assetBloatSignal.risk !== 'none' && group.title === '世界与资源'
-          ? assetBloatSignal.reason
-          : firstIncomplete
-            ? `待补：${firstIncomplete.label}`
-            : '当前阶段已就绪'
 
       return {
         title: group.title,
         completedCount,
         totalCount,
-        blocker,
         isActive: group.items.some((item) => item.key === currentPage),
       }
     }),
-    [assetBloatSignal, currentPage, nextChapterReadiness.reason, workspaceGroups, workspaceStateMap],
+    [currentPage, workspaceGroups, workspaceStateMap],
   )
 
   const refreshWorkflowStats = useCallback(async () => {
@@ -860,14 +845,12 @@ export default function NovelRouter() {
               {nextChapterReadiness.ready ? '已就绪' : '待处理'}
             </span>
           </div>
-          <div className="novel-sidebar__summary-copy">{nextChapterReadiness.reason}</div>
           {assetBloatSignal.risk !== 'none' ? (
             <button
               type="button"
               className="novel-sidebar__recommend"
               onClick={() => navigate(`/novels/${novelId}/${workflowStats.outlineCount > 0 ? 'writing' : 'outline'}`)}
             >
-              <span>{assetBloatSignal.risk === 'high' ? '资产膨胀' : '资产过快'}</span>
               <strong>{workflowStats.outlineCount > 0 ? '停止补资产，直接进入正文' : '先把现有资产压到大纲'}</strong>
             </button>
           ) : null}
@@ -876,56 +859,42 @@ export default function NovelRouter() {
         <div className="novel-sidebar__nav">
           {workspaceGroups.map((group) => {
             const summary = workspaceGroupSummaries.find((item) => item.title === group.title)
-            const expanded = Object.prototype.hasOwnProperty.call(collapsedGroups, group.title)
-              ? !collapsedGroups[group.title]
-              : group.title === currentGroupTitle
 
             return (
-              <section key={group.title} className={`novel-sidebar__group ${expanded ? 'novel-sidebar__group--expanded' : 'novel-sidebar__group--collapsed'}`}>
-                <button
-                  type="button"
-                  className={`novel-sidebar__group-toggle ${summary?.isActive ? 'novel-sidebar__group-toggle--active' : ''}`}
-                  onClick={() => setCollapsedGroups((current) => ({
-                    ...current,
-                    [group.title]: expanded,
-                  }))}
-                >
-                  <span className="novel-sidebar__group-toggle-copy">
+              <section key={group.title} className={`novel-sidebar__group ${summary?.isActive ? 'novel-sidebar__group--active' : ''}`}>
+                <div className={`novel-sidebar__group-header ${summary?.isActive ? 'novel-sidebar__group-header--active' : ''}`}>
+                  <span className="novel-sidebar__group-header-copy">
                     <strong>{group.title}</strong>
-                    <small>{summary?.blocker || '当前阶段已就绪'}</small>
                   </span>
-                  <span className="novel-sidebar__group-toggle-meta">
-                    <span className="novel-sidebar__group-toggle-count">{`${summary?.completedCount || 0}/${summary?.totalCount || group.items.length}`}</span>
-                    <RightOutlined className={`novel-sidebar__group-toggle-arrow ${expanded ? 'novel-sidebar__group-toggle-arrow--expanded' : ''}`} />
+                  <span className="novel-sidebar__group-header-meta">
+                    <span className="novel-sidebar__group-header-count">{`${summary?.completedCount || 0}/${summary?.totalCount || group.items.length}`}</span>
                   </span>
-                </button>
+                </div>
 
-                {expanded ? (
-                  <div className="novel-sidebar__group-list">
-                    {group.items.map((item) => {
-                      const isActive = currentPage === item.key
-                      const state = workspaceStateMap[item.key]
+                <div className="novel-sidebar__group-list">
+                  {group.items.map((item) => {
+                    const isActive = currentPage === item.key
+                    const state = workspaceStateMap[item.key]
 
-                      return (
-                        <button
-                          key={item.key}
-                          type="button"
-                          className={`novel-sidebar__nav-item ${isActive ? 'novel-sidebar__nav-item--active' : ''}`}
-                          onClick={() => navigate(`/novels/${novelId}/${item.key}`)}
-                        >
-                          <span className="novel-sidebar__nav-icon">{item.icon}</span>
-                          <span className="novel-sidebar__nav-copy">
-                            <strong>{item.label}</strong>
-                            <small>{item.summary}</small>
-                          </span>
-                          <span className={`novel-sidebar__nav-state ${state.complete ? 'novel-sidebar__nav-state--done' : ''}`}>
-                            {state.label}
-                          </span>
-                        </button>
-                      )
-                    })}
-                  </div>
-                ) : null}
+                    return (
+                      <button
+                        key={item.key}
+                        type="button"
+                        className={`novel-sidebar__nav-item ${isActive ? 'novel-sidebar__nav-item--active' : ''}`}
+                        onClick={() => navigate(`/novels/${novelId}/${item.key}`)}
+                      >
+                        <span className="novel-sidebar__nav-icon">{item.icon}</span>
+                        <span className="novel-sidebar__nav-copy">
+                          <strong>{item.label}</strong>
+                          <small>{item.summary}</small>
+                        </span>
+                        <span className={`novel-sidebar__nav-state ${state.complete ? 'novel-sidebar__nav-state--done' : ''}`}>
+                          {state.label}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
               </section>
             )
           })}
@@ -941,8 +910,6 @@ export default function NovelRouter() {
               </Button>
               <div className="novel-route-shell__header-copy">
                 <strong className="novel-route-shell__header-title">
-                  <span className="novel-route-shell__header-kicker">{currentNovel?.title || '当前小说'}</span>
-                  <span className="novel-route-shell__header-separator" aria-hidden="true">·</span>
                   <span className="novel-route-shell__header-step">{currentPageMeta?.label}</span>
                 </strong>
               </div>

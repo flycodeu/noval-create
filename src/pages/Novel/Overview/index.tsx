@@ -536,7 +536,6 @@ export default function Overview({ novelId }: Props) {
           type={assetBloat.risk === 'high' ? 'warning' : 'info'}
           showIcon
           message="资产膨胀提示"
-          description={assetBloat.reason}
           action={(
             <Button size="small" onClick={() => navigate(`/novels/${novelId}/${stats.outlineCount > 0 ? 'writing' : 'outline'}`)}>
               {stats.outlineCount > 0 ? '进入正文' : '压成大纲'}
@@ -557,7 +556,6 @@ export default function Overview({ novelId }: Props) {
             <div className="guided-step__action-head">
               <div className="guided-step__action-copy">
                 <strong>{authorWorkflow.primaryTask.title}</strong>
-                <span>{authorWorkflow.primaryTask.reason}</span>
               </div>
               <Space wrap>
                 <Button type="primary" onClick={() => navigate(resolveAuthorWorkflowHref(novelId, authorWorkflow.primaryTask.entryPage))}>
@@ -572,7 +570,6 @@ export default function Overview({ novelId }: Props) {
           </div>
 
           <div className="novel-note-list">
-            <div className="novel-note-list__item">{authorWorkflow.modeReason}</div>
             <div className="novel-note-list__item">
               {authorModeSource === 'manual'
                 ? '当前沿用你在创作向导中手动选择的模式。'
@@ -614,7 +611,6 @@ export default function Overview({ novelId }: Props) {
               <div key={task.id} className="guided-step__action-card">
                 <div className="guided-step__action-copy">
                   <strong>{task.title}</strong>
-                  <span>{task.reason}</span>
                 </div>
                 <div className="guided-step__action-foot">{`${task.estimatedMinutes} 分钟 · ${task.unlocks.join('、')}`}</div>
                 <Button onClick={() => navigate(resolveAuthorWorkflowHref(novelId, task.entryPage))}>
@@ -637,7 +633,6 @@ export default function Overview({ novelId }: Props) {
                 <div className="novel-issue-item__head">
                   <strong>{blocker.title}</strong>
                 </div>
-                <div className="novel-issue-item__desc">{blocker.reason}</div>
                 <Button size="small" onClick={() => navigate(resolveAuthorWorkflowHref(novelId, blocker.entryPage))}>
                   {blocker.actionLabel}
                 </Button>
@@ -654,9 +649,7 @@ export default function Overview({ novelId }: Props) {
         >
           <div className="novel-note-list">
             {authorWorkflow.impactNotices.slice(0, 2).map((notice) => (
-              <div key={notice.id} className="novel-note-list__item">
-                {`${notice.title}：${notice.reason}（影响 ${notice.affectedKinds.join(' / ')}）`}
-              </div>
+              <div key={notice.id} className="novel-note-list__item">{notice.title}</div>
             ))}
           </div>
         </WorkspacePanel>
