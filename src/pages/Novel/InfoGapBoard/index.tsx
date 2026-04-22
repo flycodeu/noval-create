@@ -14,7 +14,7 @@ import {
   message,
 } from 'antd'
 import { DeleteOutlined, PlusOutlined, SaveOutlined } from '@ant-design/icons'
-import { getErrorMessage } from '@/utils/user-facing-message'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import type {
   Chapter,
   Character,
@@ -320,7 +320,7 @@ export default function InfoGapBoardPage({ novelId }: Props) {
     const rawValues = await form.validateFields()
     const values = normalizeValues(rawValues)
     if (!values.title) {
-      message.warning('请先填写信息点标题。')
+      message.warning(getUserFacingMessage('infoGapBoard.titleRequired'))
       return
     }
     setSaving(true)
@@ -351,7 +351,7 @@ export default function InfoGapBoardPage({ novelId }: Props) {
       closeEditor()
       await refresh()
       notifyWorkspaceMutation()
-      message.success(editingFact ? '信息点已更新。' : '信息点已创建。')
+      message.success(getUserFacingMessage(editingFact ? 'infoGapBoard.updated' : 'infoGapBoard.created'))
     } catch (error) {
       console.error(error)
       message.error(getErrorMessage(error, 'common.saveFailed'))
@@ -372,7 +372,7 @@ export default function InfoGapBoardPage({ novelId }: Props) {
       })
       await refresh()
       notifyWorkspaceMutation()
-      message.success('卷级真相揭示比例已更新。')
+      message.success(getUserFacingMessage('infoGapBoard.ratioUpdated'))
     } catch (error) {
       console.error(error)
       message.error(getErrorMessage(error, 'common.saveFailed'))

@@ -28,6 +28,7 @@ import type {
   WorkspaceQualityPatch,
   WorkspaceQualityRepairPreview,
 } from '../../../types'
+import { getUserFacingMessage } from '@/utils/user-facing-message'
 import { useNovelStore } from '../../../stores/novel.store'
 import type { RegisteredWorkspaceQualityController } from '../workspace-quality-context'
 import {
@@ -235,7 +236,7 @@ export default function WorkspaceAIQualityBoard({
       setSelectedPatchIds([])
     } catch (error) {
       console.error(error)
-      message.error('加载工作区快照失败。')
+      message.error(getUserFacingMessage('workspaceQuality.snapshotLoadFailed'))
     } finally {
       setSnapshotLoading(false)
     }
@@ -261,7 +262,7 @@ export default function WorkspaceAIQualityBoard({
       setSelectedPatchIds([])
     } catch (error) {
       console.error(error)
-      message.error('AI 分析失败。')
+      message.error(getUserFacingMessage('workspaceQuality.analysisFailed'))
     } finally {
       setAnalysisLoading(false)
     }
@@ -284,7 +285,7 @@ export default function WorkspaceAIQualityBoard({
       setSelectedPatchIds(allPatchIds)
     } catch (error) {
       console.error(error)
-      message.error('AI 修复预览生成失败。')
+      message.error(getUserFacingMessage('workspaceQuality.previewFailed'))
     } finally {
       setRepairLoading(false)
     }
@@ -309,11 +310,11 @@ export default function WorkspaceAIQualityBoard({
       }
 
       onApplied?.()
-      message.success('AI 修复预览已应用。')
+      message.success(getUserFacingMessage('workspaceQuality.previewApplied'))
       await loadSnapshot()
     } catch (error) {
       console.error(error)
-      message.error('应用修复失败。')
+      message.error(getUserFacingMessage('workspaceQuality.applyFailed'))
     }
   }, [
     activeController,

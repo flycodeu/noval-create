@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import {
   Button, Form, Input, Select, Slider, message, Spin,
-  Modal, InputNumber, Empty
+  Modal, InputNumber, Empty, Skeleton
 } from 'antd'
 import {
   PlusOutlined, DeleteOutlined, CheckCircleOutlined, CloseCircleOutlined,
@@ -9,6 +9,7 @@ import {
 } from '@ant-design/icons'
 import { ModelConfig } from '../../types'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
+import { WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../Novel/components/WorkspaceShell'
 
 const DEFAULT_MODEL_MAX_TOKENS = 65536
 const MAX_MODEL_MAX_TOKENS = 1000000
@@ -148,97 +149,100 @@ export default function ModelManager() {
   }
 
   const currentProviderModels = PROVIDER_OPTIONS.find(p => p.value === selectedProvider)?.models || []
+  const defaultCount = configs.filter((config) => config.isDefault === 1).length
+  const providerCount = new Set(configs.map((config) => config.provider)).size
 
   return (
-    <div style={{ display: 'flex', height: '100%' }}>
-      {/* 左侧配置列表 */}
-      <div style={{
-        width: 240,
-        borderRight: '1px solid var(--border-color)',
-        background: 'var(--color-bg-secondary)',
-        display: 'flex',
-        flexDirection: 'column',
-      }}>
-        <div style={{
-          padding: '12px 16px',
-          borderBottom: '1px solid var(--border-color)',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-        }}>
-          <span style={{ fontWeight: 600 }}>模型配置</span>
-          <Button size="small" type="primary" icon={<PlusOutlined />} onClick={handleNew}>
-            新建
-          </Button>
+    <WorkspacePage
+      className="admin-page model-manager-page"
+      layout="wide"
+      heroVariant="compact"
+      eyebrow="模型与连接"
+      title="模型管理"
+      description="集中维护模型提供商、上下文窗口、默认配置和连接测试。左侧看配置清单，右侧编辑可立即生效的运行参数。"
+      actions={(
+        <div className="admin-toolbar">
+          <div className="novel-pill">{`已配置 ${configs.length} 套模型，默认 ${defaultCount} 套`}</div>
+          <div className="admin-toolbar__actions">
+            <Button type="primary" icon={<PlusOutlined />} onClick={handleNew}>
+              新建配置
+            </Button>
+          </div>
         </div>
-
-        <div style={{ flex: 1, overflow: 'auto' }}>
+      )}
+      metrics={(
+        <>
+          <WorkspaceMetric label="模型配置" value={configs.length} tone="cool" />
+          <WorkspaceMetric label="默认配置" value={defaultCount} />
+          <WorkspaceMetric label="接入厂商" value={providerCount} tone="warm" />
+          <WorkspaceMetric label="当前状态" value={selected || isNew ? '正在编辑' : '待选择'} />
+        </>
+      )}
+    >
+      <div className="novel-split novel-split--sidebar">
+        <WorkspacePanel
+          scrollable
+          title="配置列表"
+          description="默认模型会带星标，点击左侧即可切换编辑对象。"
+          extra={<Button size="small" type="primary" icon={<PlusOutlined />} onClick={handleNew}>新建</Button>}
+        >
           {loading ? (
-            <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+            <Skeleton active paragraph={{ rows: 8 }} />
           ) : configs.length === 0 && !isNew ? (
-            <Empty description="暂无配置" image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ margin: '40px 0' }} />
+            <div className="admin-empty-panel">
+              <Empty description="暂无配置" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            </div>
           ) : (
-            <>
-              {configs.map(config => (
-                <div
+            <div className="admin-sidebar-list">
+              {configs.map((config) => (
+                <button
                   key={config.id}
+                  type="button"
+                  className={`admin-sidebar-item ${selected?.id === config.id ? 'admin-sidebar-item--active' : ''}`}
                   onClick={() => handleSelect(config)}
-                  style={{
-                    padding: '10px 16px',
-                    cursor: 'pointer',
-                    background: selected?.id === config.id ? 'rgba(46,134,171,0.15)' : 'transparent',
-                    borderLeft: selected?.id === config.id ? '3px solid #2E86AB' : '3px solid transparent',
-                  }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <span style={{ flex: 1, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {config.name}
                     </span>
-                    {config.isDefault === 1 && <StarFilled style={{ color: '#faad14', fontSize: 12 }} />}
+                    {config.isDefault === 1 ? <StarFilled style={{ color: '#faad14', fontSize: 12 }} /> : null}
                   </div>
-                  <div style={{ color: 'var(--color-text-muted)', fontSize: 11 }}>
-                    {PROVIDER_OPTIONS.find(p => p.value === config.provider)?.label}
+                  <div className="admin-sidebar-item__meta">
+                    {PROVIDER_OPTIONS.find((item) => item.value === config.provider)?.label}
                     {' · '}
                     {config.modelId}
                   </div>
-                </div>
+                </button>
               ))}
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* 右侧编辑表单 */}
-      <div style={{ flex: 1, padding: 24, overflow: 'auto' }}>
-        {(selected || isNew) ? (
-          <>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 24 }}>
-              <h2 style={{ color: 'var(--color-text-primary)', margin: 0 }}>
-                {isNew ? '新建模型配置' : `编辑：${selected?.name}`}
-              </h2>
-              <div style={{ display: 'flex', gap: 8 }}>
-                {!isNew && selected && (
-                  <>
-                    <Button
-                      icon={selected.isDefault ? <StarFilled /> : <StarOutlined />}
-                      onClick={() => handleSetDefault(selected)}
-                      style={{ color: selected.isDefault ? '#faad14' : undefined }}
-                    >
-                      {selected.isDefault ? '已设为默认' : '设为默认'}
-                    </Button>
-                    <Button
-                      icon={<DeleteOutlined />}
-                      danger
-                      onClick={() => handleDelete(selected)}
-                    >
-                      删除
-                    </Button>
-                  </>
-                )}
-                <Button loading={saving} type="primary" onClick={handleSave}>保存</Button>
-              </div>
             </div>
+          )}
+        </WorkspacePanel>
 
+        <WorkspacePanel
+          title={(selected || isNew) ? (isNew ? '新建模型配置' : `编辑：${selected?.name}`) : '配置详情'}
+          description={(selected || isNew) ? '修改后会直接影响运行时可用模型、默认连接与上下文预算。' : '先从左侧选择一套模型配置，或直接新建一套配置。'}
+          extra={(selected || isNew) ? (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {!isNew && selected ? (
+                <>
+                  <Button
+                    icon={selected.isDefault ? <StarFilled /> : <StarOutlined />}
+                    onClick={() => handleSetDefault(selected)}
+                    style={{ color: selected.isDefault ? '#faad14' : undefined }}
+                  >
+                    {selected.isDefault ? '已设为默认' : '设为默认'}
+                  </Button>
+                  <Button icon={<DeleteOutlined />} danger onClick={() => handleDelete(selected)}>
+                    删除
+                  </Button>
+                </>
+              ) : null}
+              <Button loading={saving} type="primary" onClick={handleSave}>保存</Button>
+            </div>
+          ) : null}
+        >
+          {(selected || isNew) ? (
+            <div className="admin-detail-stack">
             <Form form={form} layout="vertical" style={{ maxWidth: 560 }}>
               <Form.Item name="name" label="配置名称" rules={[{ required: true }]}>
                 <Input placeholder="例如：GPT-4o 主力模型" />
@@ -326,13 +330,14 @@ export default function ModelManager() {
                 </div>
               )}
             </Form>
-          </>
-        ) : (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-            <Empty description="选择左侧配置进行编辑，或点击「新建」创建配置" />
-          </div>
-        )}
+            </div>
+          ) : (
+            <div className="admin-empty-panel">
+              <Empty description="选择左侧配置进行编辑，或点击“新建配置”创建配置" />
+            </div>
+          )}
+        </WorkspacePanel>
       </div>
-    </div>
+    </WorkspacePage>
   )
 }

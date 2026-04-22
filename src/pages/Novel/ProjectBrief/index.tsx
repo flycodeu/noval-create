@@ -289,7 +289,7 @@ export default function ProjectBriefPage({ novelId }: Props) {
         setWarnings([])
         await clearDraft()
         notifyWorkspaceMutation()
-        message.success('项目立项已清空')
+        message.success(getUserFacingMessage('projectBrief.cleared'))
       },
     })
   }

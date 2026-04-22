@@ -19,6 +19,7 @@ import {
   WorkspacePanel,
   WorkspaceStepGuide,
 } from '../components/WorkspaceShell'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 
 interface Props {
   novelId: number
@@ -106,7 +107,7 @@ export default function VolumeDesignPage({ novelId }: Props) {
       setActiveVolumeId((current) => current ?? volumeRows[0]?.id ?? null)
     } catch (error) {
       console.error(error)
-      message.error('卷级设计加载失败')
+      message.error(getUserFacingMessage('volumeDesign.loadFailed'))
     } finally {
       setLoading(false)
     }
@@ -162,11 +163,11 @@ export default function VolumeDesignPage({ novelId }: Props) {
         linkedResistanceTrackIds: values.linkedResistanceTrackIds,
         auditStatus: values.auditStatus,
       })
-      message.success('卷级设计已保存')
+      message.success(getUserFacingMessage('volumeDesign.saved'))
       await loadData()
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '卷级设计保存失败')
+      message.error(getErrorMessage(error, 'common.saveFailed'))
     } finally {
       setSaving(false)
     }
@@ -181,14 +182,14 @@ export default function VolumeDesignPage({ novelId }: Props) {
       })
       setLastAuditResult(result)
       if (result.summary.highCount > 0) {
-        message.warning(`审计完成：发现 ${result.summary.highCount} 条高风险，请优先处理。`)
+        message.warning(getUserFacingMessage('volumeDesign.auditFoundHighRisk', { count: result.summary.highCount }))
       } else {
-        message.success('卷后审计已完成')
+        message.success(getUserFacingMessage('volumeDesign.auditCompleted'))
       }
       await loadData()
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '卷后审计失败')
+      message.error(getErrorMessage(error, 'volumeDesign.auditFailed'))
     } finally {
       setAuditing(false)
     }
@@ -200,10 +201,14 @@ export default function VolumeDesignPage({ novelId }: Props) {
     try {
       const result = await window.electron.volumeDesign.syncConstraints(activeVolumeId)
       setLastSyncResult(result)
-      message.success(`硬约束已同步：${result.chapterCount} 章（新增 ${result.createdContractCount}，更新 ${result.updatedContractCount}）`)
+      message.success(getUserFacingMessage('volumeDesign.constraintsSynced', {
+        chapterCount: result.chapterCount,
+        createdCount: result.createdContractCount,
+        updatedCount: result.updatedContractCount,
+      }))
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '卷级硬约束同步失败')
+      message.error(getErrorMessage(error, 'volumeDesign.constraintsSyncFailed'))
     } finally {
       setSyncingConstraints(false)
     }

@@ -1124,7 +1124,7 @@ export default function Writing({ novelId }: Props) {
         ...currentNovel,
         settingsJson: JSON.stringify(payload),
       })
-      message.success(`默认 AI 模式已切换为「${getAiExecutionModeLabel(mode)}」。`)
+      message.success(getUserFacingMessage('writing.defaultModeChanged', { mode: getAiExecutionModeLabel(mode) }))
     } catch (error) {
       console.error(error)
       message.error(getErrorMessage(error, 'common.saveFailed'))
@@ -1405,7 +1405,7 @@ export default function Writing({ novelId }: Props) {
       setForeshadowLedger(nextRows)
       await refreshForeshadowSnapshot(currentChapter)
       notifyWorkspaceMutation()
-      message.success('已回写本章新伏笔。')
+      message.success(getUserFacingMessage('writing.foreshadowCreated'))
     } catch (error) {
       console.error(error)
       message.error(getErrorMessage(error, 'common.saveFailed'))
@@ -1426,7 +1426,7 @@ export default function Writing({ novelId }: Props) {
       setForeshadowLedger(nextRows)
       await refreshForeshadowSnapshot(currentChapter)
       notifyWorkspaceMutation()
-      message.success('伏笔回写已更新。')
+      message.success(getUserFacingMessage('writing.foreshadowUpdated'))
     } catch (error) {
       console.error(error)
       message.error(getErrorMessage(error, 'common.saveFailed'))
@@ -1448,7 +1448,7 @@ export default function Writing({ novelId }: Props) {
           setForeshadowLedger(nextRows)
           await refreshForeshadowSnapshot(currentChapter)
           notifyWorkspaceMutation()
-          message.success('伏笔已删除。')
+          message.success(getUserFacingMessage('writing.foreshadowDeleted'))
         } catch (error) {
           console.error(error)
           message.error(getErrorMessage(error, 'common.saveFailed'))
@@ -2381,7 +2381,7 @@ function ChapterForeshadowWritebackCard({
   const handleCreate = async () => {
     const normalizedTitle = title.trim()
     if (!normalizedTitle) {
-      message.warning('请先填写本章新伏笔标题。')
+      message.warning(getUserFacingMessage('writing.foreshadowTitleRequired'))
       return
     }
     await onCreate({
@@ -2616,7 +2616,7 @@ function ChapterRevealConstraintCard({
       : revealedFactIds.filter((id) => id !== fact.id)
     void onUpdate(nextAllowed, nextRevealed)
     if (checked && fact.kind === 'truth' && truthStats.overLimit) {
-      message.warning(`当前卷真相揭示比例已超限（${formatRatioPercent(truthStats.ratio)}）。系统允许继续，但请留意节奏失衡风险。`)
+      message.warning(getUserFacingMessage('writing.truthRatioExceeded', { ratio: formatRatioPercent(truthStats.ratio) }))
     }
   }
 

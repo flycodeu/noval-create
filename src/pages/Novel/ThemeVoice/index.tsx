@@ -413,7 +413,7 @@ export default function ThemeVoicePage({ novelId }: Props) {
         setWarnings([])
         await clearDraft()
         notifyWorkspaceMutation()
-        message.success('主题与文风已清空')
+        message.success(getUserFacingMessage('themeVoice.cleared'))
       },
     })
   }, [clearDraft, currentNovel?.themeVoiceJson, form, novelId, notifyWorkspaceMutation, setCurrentNovel])

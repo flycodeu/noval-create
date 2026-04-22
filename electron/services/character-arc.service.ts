@@ -655,7 +655,7 @@ export function upsertCharacterArcBeat(data: CharacterArcBeatInput): CharacterAr
   markNovelContextChanged(arc.novelId, 'Character arcs changed')
   const nextArc = getCharacterArc(arc.id)
   const nextBeat = nextArc?.beats.find((item) => item.id === data.id) || nextArc?.beats.at(-1)
-  if (!nextBeat) throw new Error('人物弧线推进保存失败')
+  if (!nextBeat) throwUserFacingError('characterArc.beatSaveFailed')
   return nextBeat
 }
 

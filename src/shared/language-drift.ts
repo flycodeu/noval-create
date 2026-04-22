@@ -93,7 +93,7 @@ function detectSentencePattern(sentence: string): string {
   const lengthBucket = len <= 12 ? 'short' : len <= 24 ? 'medium' : len <= 40 ? 'long' : 'xlong'
   const opener = /^(他|她|他们|她们|我|我们|此刻|这一刻|就在这时|突然|与此同时|然而|于是)/u.exec(trimmed)?.[0] || 'other'
   const hasDialogue = /[“”"'「」『』]/u.test(trimmed) ? 'dialogue' : 'plain'
-  const ending = /(了|着|吗|呢|吧|啊|了。?)$/u.exec(trimmed)?.[0] || 'plain'
+  const ending = /((?:了(?:。)?)|着|吗|呢|吧|啊)$/u.exec(trimmed)?.[0] || 'plain'
   return `${lengthBucket}:${opener}:${hasDialogue}:${ending}`
 }
 

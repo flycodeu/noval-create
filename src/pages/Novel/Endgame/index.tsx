@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Form, Input, Modal, Select, Space, Tag, message } from 'antd'
 import { ArrowRightOutlined, ImportOutlined, SaveOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { useNovelStore } from '../../../stores/novel.store'
 import type { EndgameAssetSummary } from '../../../types'
 import {
@@ -227,10 +228,10 @@ export default function EndgamePage({ novelId }: Props) {
 
       const updated = await window.electron.novel.get(novelId)
       if (updated) setCurrentNovel(updated)
-      message.success(`终局设计已保存，并同步了 ${syncResult.summary.totalCount} 条终局资产`)
+      message.success(getUserFacingMessage('endgame.savedWithAssets', { count: syncResult.summary.totalCount }))
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '终局设计保存失败')
+      message.error(getErrorMessage(error, 'common.saveFailed'))
     } finally {
       setSaving(false)
     }
@@ -248,12 +249,12 @@ export default function EndgamePage({ novelId }: Props) {
     }
 
     if (Object.keys(nextValues).length <= 0) {
-      message.info('当前没有可导入的空字段')
+      message.info(getUserFacingMessage('endgame.importNothing'))
       return
     }
 
     applyDraft(nextValues)
-    message.success('已从故事设计导入可复用字段')
+    message.success(getUserFacingMessage('endgame.importedReusableFields'))
   }
 
   const handleClear = useMemo(() => () => {
@@ -287,7 +288,7 @@ export default function EndgamePage({ novelId }: Props) {
         if (updated) setCurrentNovel(updated)
         form.setFieldsValue(EMPTY_ENDGAME_VALUES)
         notifyWorkspaceMutation()
-        message.success('终局设计已清空')
+        message.success(getUserFacingMessage('endgame.cleared'))
       },
     })
   }, [currentNovel?.settingsJson, form, novelId, notifyWorkspaceMutation, setCurrentNovel])

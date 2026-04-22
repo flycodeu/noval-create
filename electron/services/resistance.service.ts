@@ -389,14 +389,14 @@ export function upsertTrack(data: ResistanceTrackInput): ResistanceTrack {
   markNovelContextChanged(novelId, 'Resistance tracks changed')
   const tracks = listTracks(novelId)
   const matched = tracks.find((item) => item.id === persistedTrackId)
-  if (!matched) throw new Error('阻力线保存失败')
+  if (!matched) throwUserFacingError('common.saveFailed')
   return matched
 }
 
 export function upsertBeat(data: ResistanceBeatInput): ResistanceBeat {
   const db = getDb()
   const track = db.select().from(resistanceTracks).where(eq(resistanceTracks.id, data.trackId)).all()[0]
-  if (!track) throw new Error('阻力线不存在')
+  if (!track) throwUserFacingError('common.notFound')
   const current = data.id
     ? db.select().from(resistanceBeats).where(and(eq(resistanceBeats.id, data.id), eq(resistanceBeats.trackId, data.trackId))).all()[0] || null
     : null
@@ -458,7 +458,7 @@ export function upsertBeat(data: ResistanceBeatInput): ResistanceBeat {
   markNovelContextChanged(track.novelId, 'Resistance tracks changed')
   const nextTrack = getTrack(track.id)
   const nextBeat = nextTrack?.beats.find((item) => item.id === data.id) || nextTrack?.beats.at(-1)
-  if (!nextBeat) throw new Error('阻力推进保存失败')
+  if (!nextBeat) throwUserFacingError('common.saveFailed')
   return nextBeat
 }
 

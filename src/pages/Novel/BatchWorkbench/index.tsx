@@ -128,7 +128,7 @@ export default function BatchWorkbench({ novelId }: Props) {
       })
       setLockDraft(result)
       await loadData(activeSnapshot?.id)
-      message.success('全局锁定库已保存。')
+      message.success(getUserFacingMessage('batchWorkbench.lockLibrarySaved'))
     } catch (error) {
       console.error(error)
       message.error(getErrorMessage(error, 'common.saveFailed'))
@@ -140,7 +140,7 @@ export default function BatchWorkbench({ novelId }: Props) {
   const handleCreateInspection = async () => {
     if (!activeSnapshot) return
     if (!inspectionNote.trim()) {
-      message.warning('先填写批次检查说明。')
+      message.warning(getUserFacingMessage('batchWorkbench.inspectionNoteRequired'))
       return
     }
     setSubmittingInspection(true)
@@ -153,7 +153,7 @@ export default function BatchWorkbench({ novelId }: Props) {
       })
       setInspectionNote('')
       await loadData(activeSnapshot.id)
-      message.success('批次检查记录已保存。')
+      message.success(getUserFacingMessage('batchWorkbench.inspectionSaved'))
     } catch (error) {
       console.error(error)
       message.error(getErrorMessage(error, 'common.saveFailed'))
@@ -188,7 +188,7 @@ export default function BatchWorkbench({ novelId }: Props) {
         try {
           await window.electron.batchWorkbench.applyRollback(activeSnapshot.id, rollbackMode)
           await loadData(activeSnapshot.id)
-          message.success('批次回滚已执行。')
+          message.success(getUserFacingMessage('batchWorkbench.rollbackApplied'))
         } catch (error) {
           console.error(error)
           message.error(getErrorMessage(error, 'common.saveFailed'))

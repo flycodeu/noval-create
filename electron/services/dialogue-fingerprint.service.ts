@@ -91,8 +91,8 @@ const SUMMARY_MAX_CHARACTERS = 4
 const VOICE_LOCK_LIMIT = 4
 const LOW_SIGNAL_DIALOGUE_PATTERNS = [
   /^(?:啊|呀|哦|嗯|呃|唔|欸|诶|哼|哈|呵)+$/u,
-  /^(?:行|好|知道了?|明白了?|算了|走吧|继续|别闹|快点|等等)[啊呀吧吗呢嘛]?$/u,
-  /^(?:怎么了|怎么会|真的假的|什么意思|然后呢|再说一次)[啊呀吗呢嘛]?$/u,
+  /^(?:行|好|知道(?:了)?|明白(?:了)?|算了|走吧|继续|别闹|快点|等等)(?:啊|呀|吧|吗|呢|嘛)?$/u,
+  /^(?:怎么了|怎么会|真的假的|什么意思|然后呢|再说一次)(?:啊|呀|吗|呢|嘛)?$/u,
 ]
 const CONCRETE_INFO_PATTERNS = [
   /\d/u,
@@ -387,7 +387,7 @@ export function buildFingerprintFromTurns(turns: DialogueTurn[]): CharacterDialo
     sentenceLengthVariance,
     shortSentenceRate: roundPercent((sentenceLengths.filter((length) => length <= 8).length / Math.max(sentenceLengths.length, 1)) * 100),
     longSentenceRate: roundPercent((sentenceLengths.filter((length) => length >= 20).length / Math.max(sentenceLengths.length, 1)) * 100),
-    questionRate: roundPercent((normalizedTurns.filter((turn) => /[？?]/u.test(turn)).length / normalizedTurns.length) * 100),
+    questionRate: roundPercent((normalizedTurns.filter((turn) => /[?？]/u.test(turn)).length / normalizedTurns.length) * 100),
     exclamationRate: roundPercent((normalizedTurns.filter((turn) => /[！!]/u.test(turn)).length / normalizedTurns.length) * 100),
     interruptionRate: roundPercent((normalizedTurns.filter((turn) => /(——|--|……|\.{3,})/u.test(turn) || !/[。！？!?]$/u.test(turn)).length / normalizedTurns.length) * 100),
     ellipsisRate: roundPercent((normalizedTurns.filter((turn) => /(……|\.{3,})/u.test(turn)).length / normalizedTurns.length) * 100),

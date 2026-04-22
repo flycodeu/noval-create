@@ -11,6 +11,7 @@ import type {
   ResistanceTrackStatus,
 } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import {
   WorkspaceContextSummary,
   WorkspaceMetric,
@@ -141,7 +142,7 @@ export default function ResistancePage({ novelId }: Props) {
       setDashboard(await window.electron.resistance.getDashboard(novelId))
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '反派与阻力数据加载失败')
+      message.error(getErrorMessage(error, 'common.loadFailed'))
     } finally {
       setLoading(false)
     }
@@ -238,12 +239,12 @@ export default function ResistancePage({ novelId }: Props) {
     setSaving(true)
     try {
       const saved = await window.electron.resistance.upsertTrack(draft)
-      message.success('阻力线已保存')
+      message.success(getUserFacingMessage('resistance.saved'))
       if (saved.id) setSelectedTrackId(saved.id)
       await refresh()
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '阻力线保存失败')
+      message.error(getErrorMessage(error, 'common.saveFailed'))
     } finally {
       setSaving(false)
     }
@@ -254,7 +255,7 @@ export default function ResistancePage({ novelId }: Props) {
     setBeatSaving(true)
     try {
       await window.electron.resistance.upsertBeat({ ...beatDraft, novelId, trackId: selectedTrack.id })
-      message.success('阻力推进已登记')
+      message.success(getUserFacingMessage('resistance.progressSaved'))
       setBeatOpen(false)
       setBeatDraft({
         novelId,
@@ -271,7 +272,7 @@ export default function ResistancePage({ novelId }: Props) {
       await refresh()
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '阻力推进登记失败')
+      message.error(getErrorMessage(error, 'common.saveFailed'))
     } finally {
       setBeatSaving(false)
     }

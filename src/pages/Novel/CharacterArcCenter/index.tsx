@@ -12,6 +12,7 @@ import type {
   RelationshipArcInput,
 } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel, WorkspaceStepGuide } from '../components/WorkspaceShell'
 
 interface Props { novelId: number }
@@ -94,7 +95,7 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
       setDashboard(await window.electron.characterArc.getArcDashboard(novelId))
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '人物弧线数据加载失败')
+      message.error(getErrorMessage(error, 'common.loadFailed'))
     } finally {
       setLoading(false)
     }
@@ -141,16 +142,16 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
       if (tab === 'relationships') {
         if (!relationshipDraft) return
         await window.electron.characterArc.upsertRelationshipArc(relationshipDraft)
-        message.success('关系弧已保存')
+        message.success(getUserFacingMessage('characterArc.relationshipSaved'))
       } else {
         if (!characterDraft) return
         await window.electron.characterArc.upsertCharacterArc(characterDraft)
-        message.success('人物弧已保存')
+        message.success(getUserFacingMessage('characterArc.characterSaved'))
       }
       await refresh()
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '保存失败')
+      message.error(getErrorMessage(error, 'common.saveFailed'))
     } finally {
       setSaving(false)
     }
@@ -161,13 +162,13 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
     setBeatSaving(true)
     try {
       await window.electron.characterArc.upsertCharacterArcBeat({ ...beatDraft, novelId, arcId: selectedArc.id })
-      message.success('推进节点已登记')
+      message.success(getUserFacingMessage('characterArc.progressSaved'))
       setBeatOpen(false)
       setBeatDraft({ novelId, arcId: selectedArc.id, beatType: 'progress-note', title: '', summary: '', status: 'logged' })
       await refresh()
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '推进登记失败')
+      message.error(getErrorMessage(error, 'characterArc.beatSaveFailed'))
     } finally {
       setBeatSaving(false)
     }

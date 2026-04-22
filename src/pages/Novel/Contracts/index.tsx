@@ -21,6 +21,7 @@ import {
   WorkspacePanel,
   WorkspaceStepGuide,
 } from '../components/WorkspaceShell'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 
 interface Props {
   novelId: number
@@ -133,7 +134,7 @@ export default function ContractsPage({ novelId }: Props) {
       await loadBaseData()
     } catch (error) {
       console.error(error)
-      message.error('合同数据加载失败')
+      message.error(getErrorMessage(error, 'common.loadFailed'))
     } finally {
       setLoading(false)
     }
@@ -154,7 +155,7 @@ export default function ContractsPage({ novelId }: Props) {
     if (!activeChapterId) return
     void loadChapterData(activeChapterId).catch((error) => {
       console.error(error)
-      message.error('章节合同加载失败')
+      message.error(getErrorMessage(error, 'common.loadFailed'))
     })
   }, [activeChapterId])
 
@@ -185,10 +186,10 @@ export default function ContractsPage({ novelId }: Props) {
         status: values.status,
       })
       setChapterContract(result)
-      message.success('章节合同已保存')
+      message.success(getUserFacingMessage('contracts.chapterSaved'))
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '章节合同保存失败')
+      message.error(getErrorMessage(error, 'common.saveFailed'))
     } finally {
       setSavingChapter(false)
     }
@@ -228,7 +229,7 @@ export default function ContractsPage({ novelId }: Props) {
         })
       } else {
         const current = relationshipArcs.find((item) => item.id === progressTargetId)
-        if (!current) throw new Error('关系弧不存在')
+        if (!current) throw new Error(getUserFacingMessage('contracts.relationshipArcNotFound'))
         await window.electron.characterArc.upsertRelationshipArc({
           id: current.id,
           novelId,
@@ -247,14 +248,14 @@ export default function ContractsPage({ novelId }: Props) {
           notes: current.notes,
         })
       }
-      message.success('本章推进已登记')
+      message.success(getUserFacingMessage('contracts.progressSaved'))
       setProgressModalOpen(false)
       setProgressTargetId(null)
       setProgressNote('')
       await loadBaseData()
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '推进登记失败')
+      message.error(getErrorMessage(error, 'common.saveFailed'))
     } finally {
       setProgressSaving(false)
     }
@@ -290,10 +291,12 @@ export default function ContractsPage({ novelId }: Props) {
         status: scene.status,
       })
       setSceneContracts(result)
-      message.success(`场景合同已保存${scene.segmentOrder ? ` · 场景 ${scene.segmentOrder}` : ''}`)
+      message.success(getUserFacingMessage('contracts.sceneSaved', {
+        segmentLabel: scene.segmentOrder ? ` · 场景 ${scene.segmentOrder}` : '',
+      }))
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : '场景合同保存失败')
+      message.error(getErrorMessage(error, 'common.saveFailed'))
     } finally {
       setSceneSavingId(null)
     }

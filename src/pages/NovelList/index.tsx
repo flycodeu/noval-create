@@ -12,6 +12,7 @@ import {
   Radio,
   Row,
   Select,
+  Skeleton,
   Spin,
   Steps,
     Tag,
@@ -39,6 +40,7 @@ import { useNovelStore } from '../../stores/novel.store'
 import { buildThemeVoicePayload } from '../../shared/theme-voice'
 import { WRITING_CONTRACT_PRESETS, getWritingContractValidationError, normalizeWritingContractTags } from '../../shared/writing-contract'
 import { buildFastLaunchBootstrapPlan, NOVEL_LAUNCH_MODE_OPTIONS } from './fast-launch'
+import { WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../Novel/components/WorkspaceShell'
 
 dayjs.extend(relativeTime)
 dayjs.locale('zh-cn')
@@ -327,7 +329,7 @@ export default function NovelList() {
       await loadNovels()
       resetWizard()
       navigate(`/novels/${novelId}/overview`)
-      message.success('已按极速开书路径创建项目，并自动补出第一卷与前三章骨架。')
+        message.success(getUserFacingMessage('novel.fastLaunchCreated'))
     } catch (error) {
       console.error(error)
       message.error(getErrorMessage(error, 'novel.createFailed'))
@@ -426,69 +428,103 @@ export default function NovelList() {
     () => getWizardStepItems(selectedLaunchMode),
     [selectedLaunchMode],
   )
+  const totalWordCount = useMemo(
+    () => novels.reduce((sum, novel) => sum + normalizeTargetWords(novel.totalWords), 0),
+    [novels],
+  )
+  const writingCount = useMemo(
+    () => novels.filter((novel) => novel.status === 'writing').length,
+    [novels],
+  )
+  const completedCount = useMemo(
+    () => novels.filter((novel) => novel.status === 'completed').length,
+    [novels],
+  )
 
   return (
-    <div style={{ padding: '20px 24px', height: '100%', overflow: 'auto' }}>
-      <div style={{ display: 'flex', gap: 12, marginBottom: 20, alignItems: 'center' }}>
-        <Input
-          prefix={<SearchOutlined />}
-          placeholder="搜索小说..."
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          style={{ width: 260 }}
-          allowClear
-        />
-        <Select
-          value={statusFilter}
-          onChange={setStatusFilter}
-          style={{ width: 140 }}
-          options={[
-            { value: 'all', label: '全部状态' },
-            { value: 'draft', label: '草稿' },
-            { value: 'writing', label: '写作中' },
-            { value: 'completed', label: '已完成' },
-            { value: 'archived', label: '已归档' },
-          ]}
-        />
-        <Select
-          value={sortBy}
-          onChange={setSortBy}
-          style={{ width: 150 }}
-          options={[
-            { value: 'updatedAt', label: '最近修改' },
-            { value: 'totalWords', label: '按字数排序' },
-            { value: 'title', label: '按标题排序' },
-          ]}
-        />
-        <div style={{ flex: 1 }} />
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setWizardOpen(true)}>
-          新建小说
-        </Button>
-      </div>
-
-      {loading ? (
-        <div style={{ textAlign: 'center', padding: 80 }}>
-          <Spin size="large" />
-        </div>
-      ) : filteredNovels.length === 0 ? (
-        <Empty
-          description={search ? '没有找到匹配的小说。' : '还没有小说，点击“新建小说”开始创作。'}
-          style={{ paddingTop: 80 }}
-        />
-      ) : (
-        <Row gutter={[16, 16]}>
-          {filteredNovels.map((novel) => (
-            <Col key={novel.id} xs={24} sm={12} md={8} lg={6}>
-              <NovelCard
-                novel={novel}
-                onClick={() => navigate(`/novels/${novel.id}/overview`)}
-                onDelete={() => void handleDelete(novel.id, novel.title)}
-                onExport={(format) => void handleExport(novel.id, format)}
-              />
-            </Col>
-          ))}
-        </Row>
-      )}
+    <>
+      <WorkspacePage
+        className="admin-page novel-library-page"
+        layout="wide"
+        heroVariant="compact"
+        eyebrow="项目入口"
+        title="我的小说"
+        description="集中查看项目状态、字数进度与最近修改时间，从同一入口继续创作、导出或快速开书。"
+        actions={(
+          <div className="admin-toolbar">
+            <Input
+              className="admin-toolbar__grow"
+              prefix={<SearchOutlined />}
+              placeholder="搜索小说、简介或题材"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              style={{ width: 280, maxWidth: '100%' }}
+              allowClear
+            />
+            <Select
+              value={statusFilter}
+              onChange={setStatusFilter}
+              style={{ width: 150 }}
+              options={[
+                { value: 'all', label: '全部状态' },
+                { value: 'draft', label: '草稿' },
+                { value: 'writing', label: '写作中' },
+                { value: 'completed', label: '已完成' },
+                { value: 'archived', label: '已归档' },
+              ]}
+            />
+            <Select
+              value={sortBy}
+              onChange={setSortBy}
+              style={{ width: 160 }}
+              options={[
+                { value: 'updatedAt', label: '最近修改' },
+                { value: 'totalWords', label: '按字数排序' },
+                { value: 'title', label: '按标题排序' },
+              ]}
+            />
+            <div className="admin-toolbar__actions">
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => setWizardOpen(true)}>
+                新建小说
+              </Button>
+            </div>
+          </div>
+        )}
+        metrics={(
+          <>
+            <WorkspaceMetric label="项目总数" value={novels.length} tone="cool" />
+            <WorkspaceMetric label="写作中" value={writingCount} />
+            <WorkspaceMetric label="已完结" value={completedCount} tone="warm" />
+            <WorkspaceMetric label="总字数" value={formatWordCount(totalWordCount)} />
+          </>
+        )}
+      >
+        <WorkspacePanel
+          title="项目列表"
+          description="支持按状态、关键字和排序方式快速筛选。卡片内可直接继续创作、导出或删除项目。"
+        >
+          {loading ? (
+            <Skeleton active paragraph={{ rows: 8 }} />
+          ) : filteredNovels.length === 0 ? (
+            <Empty
+              description={search ? '没有找到匹配的小说。' : '还没有小说，点击“新建小说”开始创作。'}
+              style={{ paddingTop: 80 }}
+            />
+          ) : (
+            <div className="admin-card-grid">
+              {filteredNovels.map((novel) => (
+                <NovelCard
+                  key={novel.id}
+                  novel={novel}
+                  onClick={() => navigate(`/novels/${novel.id}/overview`)}
+                  onDelete={() => void handleDelete(novel.id, novel.title)}
+                  onExport={(format) => void handleExport(novel.id, format)}
+                />
+              ))}
+            </div>
+          )}
+        </WorkspacePanel>
+      </WorkspacePage>
 
       <Modal
         title="新建小说"
@@ -810,7 +846,7 @@ export default function NovelList() {
           </Button>
         </div>
       </Modal>
-    </div>
+    </>
   )
 }
 

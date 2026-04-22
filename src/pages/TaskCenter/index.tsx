@@ -648,7 +648,6 @@ export default function TaskCenter() {
         <WorkspacePanel
           scrollable
           title="任务列表"
-          description="左侧按状态和类型筛选并分页查看，右侧看完整输出、请求上下文和错误信息。"
           extra={(
             <div className="novel-filter-bar">
               <div className="novel-filter-bar__row">
@@ -674,9 +673,6 @@ export default function TaskCenter() {
                     ...Object.entries(TYPE_LABELS).map(([value, label]) => ({ value, label })),
                   ]}
                 />
-              </div>
-              <div className="novel-filter-bar__summary">
-                同类任务可以集中查看失败原因和重试结果；当前按每页 10 / 20 / 50 条分页查看。
               </div>
             </div>
           )}

@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import {
-  Tabs, Button, Modal, Form, Input, Select, Card, Tag, message, Empty
+  Tabs, Button, Modal, Form, Input, Select, Card, Tag, message, Empty, Skeleton
 } from 'antd'
 import { PlusOutlined, DeleteOutlined, EditOutlined, LockOutlined } from '@ant-design/icons'
 import { Template } from '../../types'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
+import { WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../Novel/components/WorkspaceShell'
 
 const TYPE_LABELS: Record<string, string> = {
   style: '文风模板',
@@ -14,6 +15,7 @@ const TYPE_LABELS: Record<string, string> = {
 
 export default function TemplateManager() {
   const [templates, setTemplates] = useState<Template[]>([])
+  const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('style')
   const [editOpen, setEditOpen] = useState(false)
   const [editing, setEditing] = useState<Template | null>(null)
@@ -21,13 +23,20 @@ export default function TemplateManager() {
   const [saving, setSaving] = useState(false)
 
   const loadTemplates = useCallback(async () => {
-    const list = await window.electron.template.list()
-    setTemplates(list)
+    setLoading(true)
+    try {
+      const list = await window.electron.template.list()
+      setTemplates(list)
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
   useEffect(() => { loadTemplates() }, [loadTemplates])
 
   const filteredTemplates = templates.filter(t => t.type === activeTab)
+  const builtinCount = templates.filter((template) => template.isBuiltin === 1).length
+  const customCount = templates.length - builtinCount
 
   const handleEdit = (tmpl: Template) => {
     setEditing(tmpl)
@@ -99,8 +108,14 @@ export default function TemplateManager() {
     key,
     label,
     children: (
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
-        {filteredTemplates.length === 0 ? (
+      <div className="admin-card-grid">
+        {loading ? (
+          Array.from({ length: 6 }).map((_, index) => (
+            <Card key={index} style={{ background: 'var(--color-bg-card)', border: '1px solid var(--border-color)' }}>
+              <Skeleton active paragraph={{ rows: 4 }} />
+            </Card>
+          ))
+        ) : filteredTemplates.length === 0 ? (
           <Empty description="暂无模板" style={{ gridColumn: '1/-1' }} />
         ) : (
           filteredTemplates.map(tmpl => (
@@ -150,19 +165,44 @@ export default function TemplateManager() {
   }))
 
   return (
-    <div style={{ padding: 24, height: '100%', overflow: 'auto' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20 }}>
-        <h2 style={{ color: 'var(--color-text-primary)', margin: 0 }}>模板系统</h2>
-        <Button type="primary" icon={<PlusOutlined />} onClick={handleNew}>
-          新建模板
-        </Button>
-      </div>
-
-      <Tabs
-        activeKey={activeTab}
-        onChange={setActiveTab}
-        items={tabItems}
-      />
+    <>
+      <WorkspacePage
+        className="admin-page template-manager-page"
+        layout="wide"
+        heroVariant="compact"
+        eyebrow="复用资产"
+        title="模板系统"
+        description="统一维护文风模板、世界观模板和运行辅助模板，区分内置模板与可编辑自定义模板。"
+        actions={(
+          <div className="admin-toolbar">
+            <div className="novel-pill">{`当前查看：${TYPE_LABELS[activeTab]}`}</div>
+            <div className="admin-toolbar__actions">
+              <Button type="primary" icon={<PlusOutlined />} onClick={handleNew}>
+                新建模板
+              </Button>
+            </div>
+          </div>
+        )}
+        metrics={(
+          <>
+            <WorkspaceMetric label="模板总数" value={templates.length} tone="cool" />
+            <WorkspaceMetric label="内置模板" value={builtinCount} />
+            <WorkspaceMetric label="自定义模板" value={customCount} tone="warm" />
+            <WorkspaceMetric label="当前分类" value={TYPE_LABELS[activeTab]} />
+          </>
+        )}
+      >
+        <WorkspacePanel
+          title="模板目录"
+          description="内置模板只读，自定义模板可以直接编辑或删除。切换标签后会同步筛选当前卡片列表。"
+        >
+          <Tabs
+            activeKey={activeTab}
+            onChange={setActiveTab}
+            items={tabItems}
+          />
+        </WorkspacePanel>
+      </WorkspacePage>
 
       <Modal
         title={editing ? (editing.isBuiltin ? '查看模板' : '编辑模板') : '新建模板'}
@@ -196,6 +236,6 @@ export default function TemplateManager() {
           </Form.Item>
         </Form>
       </Modal>
-    </div>
+    </>
   )
 }

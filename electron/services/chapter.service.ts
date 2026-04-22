@@ -1052,7 +1052,7 @@ function buildChapterContractVersion(chapterId: number): string {
     .all()
 
   if (!chapterContract) {
-    throw new Error('当前章节缺少可执行的章节合同，无法启动合同驱动写作。')
+    throwUserFacingError('chapter.contractRequiredForPipeline')
   }
 
   const sceneVersion = sceneRows
@@ -1075,13 +1075,13 @@ function assertContractDrivenWriterInputs(
   scenePlanText: string,
 ) {
   if (!contractVersion.trim()) {
-    throw new Error(`${getPipelineRoleLabel(role)} 缺少合同版本，已阻断本次写作。`)
+    throwUserFacingError('chapter.pipelineMissingContractVersion', { role: getPipelineRoleLabel(role) })
   }
   if (!writingContractSummary.trim()) {
-    throw new Error(`${getPipelineRoleLabel(role)} 缺少章节合同摘要，无法继续生成正文。`)
+    throwUserFacingError('chapter.pipelineMissingContractSummary', { role: getPipelineRoleLabel(role) })
   }
   if (!scenePlanText.trim()) {
-    throw new Error(`${getPipelineRoleLabel(role)} 缺少 Planner 产出的场景计划，无法继续生成正文。`)
+    throwUserFacingError('chapter.pipelineMissingScenePlan', { role: getPipelineRoleLabel(role) })
   }
 }
 

@@ -4,6 +4,7 @@ import VirtualList from 'rc-virtual-list'
 import { useNavigate } from 'react-router-dom'
 import type { LanguageDriftMetrics, QualityDashboardData, QualityRepairAction, QualityRepairActionResult, TaskPipelineStats } from '../../../types'
 import { WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
+import { getUserFacingMessage } from '@/utils/user-facing-message'
 import {
   getQualityRiskSeverityColor,
   getQualityRiskSeverityLabel,
@@ -454,7 +455,7 @@ export default function QualityDashboard({ novelId }: Props) {
       await loadData()
     } catch (error) {
       console.error(error)
-      message.error('执行修复动作失败。')
+      message.error(getUserFacingMessage('qualityDashboard.repairFailed'))
     } finally {
       setRepairingActionId(null)
     }

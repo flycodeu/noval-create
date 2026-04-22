@@ -485,7 +485,7 @@ export default function PremisePage({ novelId }: Props) {
         await clearPersistedDrafts()
         clearPendingResult(pendingResultKey)
         notifyWorkspaceMutation()
-        message.success('基础设定已清空')
+        message.success(getUserFacingMessage('premise.cleared'))
       },
     })
   }

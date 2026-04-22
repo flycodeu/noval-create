@@ -922,7 +922,7 @@ function refreshRunSummary(runId: number): void {
 
 function parseAfterState(row: ChapterWritebackDiffRow): Record<string, unknown> {
   const parsed = parseJsonObject(row.afterStateJson)
-  if (!parsed) throw new Error('回写候选 afterStateJson 无法解析')
+  if (!parsed) throwUserFacingError('chapterWriteback.afterStateJsonParseFailed')
   return parsed
 }
 
@@ -941,7 +941,7 @@ function resolveDiffTitle(diff: DraftDiff | AppChapterWritebackDiff): string {
 function applyThreadDiff(row: ChapterWritebackDiffRow, chapter: ChapterRow): number | null {
   const context = buildExistingAssetContext(chapter)
   const afterState = sanitizeAiThreadState(parseAfterState(row), chapter)
-  if (!afterState) throw new Error('线程候选缺少 title')
+  if (!afterState) throwUserFacingError('chapterWriteback.threadCandidateTitleMissing')
   const targetId = row.entityId || resolveExistingEntityId('thread', afterState as unknown as Record<string, unknown>, context)
   if (targetId) {
     storyThreadService.updateStoryThread(targetId, afterState)
@@ -953,7 +953,7 @@ function applyThreadDiff(row: ChapterWritebackDiffRow, chapter: ChapterRow): num
 function applyForeshadowDiff(row: ChapterWritebackDiffRow, chapter: ChapterRow): number | null {
   const context = buildExistingAssetContext(chapter)
   const afterState = sanitizeAiForeshadowState(parseAfterState(row), chapter, context)
-  if (!afterState) throw new Error('伏笔候选缺少 title')
+  if (!afterState) throwUserFacingError('chapterWriteback.foreshadowCandidateTitleMissing')
   const payload: ForeshadowPatch = {
     id: row.entityId || asPositiveNumber(parseAfterState(row).id) || undefined,
     ...afterState,
@@ -964,7 +964,7 @@ function applyForeshadowDiff(row: ChapterWritebackDiffRow, chapter: ChapterRow):
 
 function applyFactDiff(row: ChapterWritebackDiffRow, chapter: ChapterRow): number | null {
   const afterState = sanitizeAiFactState(parseAfterState(row), chapter)
-  if (!afterState) throw new Error('谜题/信息点候选缺少 title')
+  if (!afterState) throwUserFacingError('chapterWriteback.infoGapCandidateTitleMissing')
   if (row.entityId) {
     storyFactService.updateStoryFact(row.entityId, afterState)
     return row.entityId
@@ -974,7 +974,7 @@ function applyFactDiff(row: ChapterWritebackDiffRow, chapter: ChapterRow): numbe
 
 function applyTimelineDiff(row: ChapterWritebackDiffRow, chapter: ChapterRow): number | null {
   const afterState = sanitizeAiTimelineState(parseAfterState(row), chapter)
-  if (!afterState) throw new Error('时间轴候选缺少 eventTitle')
+  if (!afterState) throwUserFacingError('chapterWriteback.timelineCandidateEventTitleMissing')
   if (row.entityId) {
     timelineService.updateTimelineEvent(row.entityId, afterState)
     return row.entityId
@@ -985,7 +985,7 @@ function applyTimelineDiff(row: ChapterWritebackDiffRow, chapter: ChapterRow): n
 function applyItemDiff(row: ChapterWritebackDiffRow, chapter: ChapterRow): number | null {
   const context = buildExistingAssetContext(chapter)
   const afterState = sanitizeAiItemState(parseAfterState(row), chapter, context)
-  if (!afterState) throw new Error('物品候选缺少 itemName')
+  if (!afterState) throwUserFacingError('chapterWriteback.itemCandidateNameMissing')
   if (row.entityId) {
     itemService.updateStoryItem(row.entityId, afterState)
     return row.entityId
@@ -996,7 +996,7 @@ function applyItemDiff(row: ChapterWritebackDiffRow, chapter: ChapterRow): numbe
 function applyRelationshipDiff(row: ChapterWritebackDiffRow, chapter: ChapterRow): number | null {
   const context = buildExistingAssetContext(chapter)
   const afterState = sanitizeAiRelationshipState(parseAfterState(row), chapter, context)
-  if (!afterState) throw new Error('关系候选缺少有效角色对')
+  if (!afterState) throwUserFacingError('chapterWriteback.relationCandidatePairMissing')
   const result = characterArcService.upsertRelationshipArc({
     ...afterState,
     id: row.entityId || afterState.id,
@@ -1170,7 +1170,7 @@ export async function updateChapterWritebackDecision(
   if (!current) throwUserFacingError('common.notFound')
   let nextAfterStateJson = current.afterStateJson
   if (patch.afterStateJson !== undefined) {
-    if (!parseJsonObject(patch.afterStateJson)) throw new Error('afterStateJson 必须是合法 JSON 对象')
+    if (!parseJsonObject(patch.afterStateJson)) throwUserFacingError('chapterWriteback.afterStateJsonObjectRequired')
     nextAfterStateJson = patch.afterStateJson
   }
   db.update(chapterWritebackDiffs).set({

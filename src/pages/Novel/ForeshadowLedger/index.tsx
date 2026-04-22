@@ -13,7 +13,7 @@ import {
   message,
 } from 'antd'
 import { DeleteOutlined, PlusOutlined, SaveOutlined } from '@ant-design/icons'
-import { getErrorMessage } from '@/utils/user-facing-message'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import type {
   Chapter,
   ChapterSegment,
@@ -287,7 +287,7 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
     const rawValues = await form.validateFields()
     const values = normalizeFormValues(rawValues)
     if (!values.title) {
-      message.warning('请先填写伏笔标题。')
+      message.warning(getUserFacingMessage('foreshadow.titleRequired'))
       return
     }
     setSaving(true)
@@ -318,7 +318,7 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
       closeEditor()
       await refresh()
       notifyWorkspaceMutation()
-      message.success(editingEntry ? '伏笔账本已更新。' : '伏笔账本已新增。')
+      message.success(getUserFacingMessage(editingEntry ? 'foreshadow.updated' : 'foreshadow.created'))
     } catch (error) {
       console.error(error)
       message.error(getErrorMessage(error, 'common.saveFailed'))
@@ -337,7 +337,7 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
           await window.electron.foreshadow.deleteLedger(novelId, entry.id)
           await refresh()
           notifyWorkspaceMutation()
-          message.success('伏笔已删除。')
+          message.success(getUserFacingMessage('foreshadow.deleted'))
         } catch (error) {
           console.error(error)
           message.error(getErrorMessage(error, 'common.saveFailed'))

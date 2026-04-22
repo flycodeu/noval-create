@@ -434,7 +434,7 @@ async function repairChapterTask(task: typeof revisionTasks.$inferSelect): Promi
         ...meta,
         autoFixable: false,
       }))
-      throw new Error('当前章节门问题需要先退回章节/场景合同重排，暂不支持自动正文重写。')
+      throwUserFacingError('revision.chapterGateManualOnly')
     }
 
     if (rewriteAttempts >= maxRewriteAttempts) {
@@ -442,7 +442,7 @@ async function repairChapterTask(task: typeof revisionTasks.$inferSelect): Promi
         ...meta,
         autoFixable: false,
       }))
-      throw new Error(`章节门自动重写已连续失败 ${rewriteAttempts} 次，已转人工确认。`)
+      throwUserFacingError('revision.chapterGateRewriteFailedMax', { count: rewriteAttempts })
     }
 
     updateOriginMeta(task.id, (meta) => ({
@@ -473,9 +473,9 @@ async function repairChapterTask(task: typeof revisionTasks.$inferSelect): Promi
 
       if (failedItems.length > 0) {
         if (rewriteAttempts + 1 >= maxRewriteAttempts) {
-          throw new Error(`章节门重写后仍未通过：${failedItems.join('、')}。已转人工确认。`)
+          throwUserFacingError('revision.chapterGateRewriteStillFailingManual', { items: failedItems.join('、') })
         }
-        throw new Error(`章节门重写后仍未通过：${failedItems.join('、')}。`)
+        throwUserFacingError('revision.chapterGateRewriteStillFailing', { items: failedItems.join('、') })
       }
 
       return
@@ -504,7 +504,7 @@ async function repairChapterTask(task: typeof revisionTasks.$inferSelect): Promi
       }))
 
       if (rewriteAttempts + 1 >= maxRewriteAttempts) {
-        throw new Error(`${message} 已达到自动重写上限，转人工确认。`)
+        throwUserFacingError('revision.chapterGateRewriteMaxReached', { message })
       }
       throw error instanceof Error ? error : new Error(message)
     }

@@ -393,10 +393,10 @@ export default function Overview({ novelId }: Props) {
       await window.electron.novel.update(novelId, { blurbJson: packagingPayload })
       const updated = await window.electron.novel.get(novelId)
       if (updated) setCurrentNovel(updated)
-      message.success('包装信息已保存')
+      message.success(getUserFacingMessage('overview.packagingSaved'))
     } catch (error) {
       console.error(error)
-      message.error('包装信息保存失败')
+      message.error(getUserFacingMessage('overview.packagingSaveFailed'))
     } finally {
       setPackagingSaving(false)
     }
@@ -435,7 +435,7 @@ export default function Overview({ novelId }: Props) {
         draftObservabilityRef.current = null
         await clearDraft()
         notifyWorkspaceMutation()
-        message.success('基础信息已清空')
+        message.success(getUserFacingMessage('overview.cleared'))
       },
     })
   }, [clearDraft, currentNovel?.blurbJson, form, novelId, notifyWorkspaceMutation, setCurrentNovel])

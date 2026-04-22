@@ -828,7 +828,6 @@ export default function NovelRouter() {
       <div className="novel-route-shell novel-route-shell--single">
       <aside className="novel-route-shell__sidebar">
         <div className="novel-sidebar__title-block">
-          <div className="novel-sidebar__eyebrow">小说工作台</div>
           <div className="novel-sidebar__title-row">
             <h1 className="novel-sidebar__title">{currentNovel?.title || '未命名小说'}</h1>
             <span className="novel-sidebar__title-meta">{`${workspaceReadyCount}/${workspaceTotalCount}`}</span>
@@ -883,13 +882,15 @@ export default function NovelRouter() {
                         className={`novel-sidebar__nav-item ${isActive ? 'novel-sidebar__nav-item--active' : ''}`}
                         onClick={() => navigate(`/novels/${novelId}/${item.key}`)}
                       >
-                        <span className="novel-sidebar__nav-icon">{item.icon}</span>
+                        <span className="novel-sidebar__nav-card-head">
+                          <span className="novel-sidebar__nav-icon">{item.icon}</span>
+                          <span className={`novel-sidebar__nav-state ${state.complete ? 'novel-sidebar__nav-state--done' : ''}`}>
+                            {state.label}
+                          </span>
+                        </span>
                         <span className="novel-sidebar__nav-copy">
                           <strong>{item.label}</strong>
                           <small>{item.summary}</small>
-                        </span>
-                        <span className={`novel-sidebar__nav-state ${state.complete ? 'novel-sidebar__nav-state--done' : ''}`}>
-                          {state.label}
                         </span>
                       </button>
                     )
