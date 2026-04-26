@@ -1,16 +1,52 @@
-import { asc, eq, lte, lt } from 'drizzle-orm'
-import type { ExpressionDedupHit, ExpressionDedupReport } from '../../src/types'
+import { asc, eq } from 'drizzle-orm'
+import type { ExpressionDedupHit, ExpressionDedupMode, ExpressionDedupReport } from '../../src/types'
 import { getDb } from '../database/db'
-import { chapters } from '../database/schema'
+import { chapters, novels } from '../database/schema'
 
 type ChapterRow = typeof chapters.$inferSelect
+
+type ExpressionDedupWindowStrategy = Pick<
+  ExpressionDedupReport,
+  'mode' | 'recentWindowSize' | 'volumeWindowSize' | 'globalSampleWindowSize'
+>
+
+type ExpressionDedupReportBase = Omit<ExpressionDedupReport, 'guidance' | 'summary' | 'updatedAt'>
 
 const LOW_SIGNAL_FRAGMENTS = [
   '什么', '怎么', '不是', '可以', '知道', '自己', '然后', '于是', '就是', '但是',
 ]
 
+const OPENING_ROTATION_SUGGESTIONS = ['动作直入', '对话直入', '物件特写', '时间跳切']
+const CLOSING_ROTATION_SUGGESTIONS = ['行动中断', '第三人入场', '画面定格', '环境归静']
+const CLIMAX_ROTATION_SUGGESTIONS = ['平静揭露', '旁观者切入', '感官先行', '对话推进后动作爆发']
+
 function asText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
+}
+
+function dedupeStrings(values: string[], limit?: number): string[] {
+  const result: string[] = []
+  const seen = new Set<string>()
+  values.forEach((value) => {
+    const normalized = asText(value)
+    if (!normalized || seen.has(normalized)) return
+    seen.add(normalized)
+    result.push(normalized)
+  })
+  return typeof limit === 'number' ? result.slice(0, limit) : result
+}
+
+function dedupeChapterNums(values: number[]): number[] {
+  return [...new Set(values.filter((value) => Number.isFinite(value) && value > 0))].sort((left, right) => left - right)
+}
+
+function dedupeRows(rows: ChapterRow[]): ChapterRow[] {
+  const seen = new Set<number>()
+  return rows.filter((row) => {
+    if (seen.has(row.id)) return false
+    seen.add(row.id)
+    return true
+  })
 }
 
 function normalizeClause(value: string): string {
@@ -34,29 +70,27 @@ function isLowSignal(fragment: string): boolean {
   return uniqueChars.size <= 2
 }
 
-function collectPhraseHits(rows: ChapterRow[]): ExpressionDedupHit[] {
-  const phraseMap = new Map<string, { count: number; chapterNums: Set<number> }>()
-  rows.forEach((row) => {
-    const chapterNum = row.chapterNum || 0
-    splitClauses(asText(row.content))
-      .filter((fragment) => !isLowSignal(fragment))
-      .slice(0, 120)
-      .forEach((fragment) => {
-        const entry = phraseMap.get(fragment) || { count: 0, chapterNums: new Set<number>() }
-        entry.count += 1
-        entry.chapterNums.add(chapterNum)
-        phraseMap.set(fragment, entry)
-      })
-  })
-  return [...phraseMap.entries()]
-    .map(([phrase, entry]) => ({
-      phrase,
-      count: entry.count,
-      chapterNums: [...entry.chapterNums].sort((left, right) => left - right),
-    }))
-    .filter((entry) => entry.chapterNums.length >= 2 && entry.count >= 2)
-    .sort((left, right) => right.count - left.count || right.chapterNums.length - left.chapterNums.length || left.phrase.localeCompare(right.phrase, 'zh-Hans-CN'))
-    .slice(0, 8)
+function resolveMode(targetWords: number, chapterCount: number): ExpressionDedupMode {
+  return targetWords >= 350000 || chapterCount >= 80 ? 'longform' : 'short'
+}
+
+function resolveWindowStrategy(targetWords: number, chapterCount: number): ExpressionDedupWindowStrategy {
+  if (targetWords >= 1500000 || chapterCount >= 600) {
+    return { mode: 'longform', recentWindowSize: 24, volumeWindowSize: 48, globalSampleWindowSize: 96 }
+  }
+  if (targetWords >= 1000000 || chapterCount >= 400) {
+    return { mode: 'longform', recentWindowSize: 22, volumeWindowSize: 40, globalSampleWindowSize: 84 }
+  }
+  if (targetWords >= 800000 || chapterCount >= 280) {
+    return { mode: 'longform', recentWindowSize: 20, volumeWindowSize: 36, globalSampleWindowSize: 72 }
+  }
+  if (targetWords >= 500000 || chapterCount >= 180) {
+    return { mode: 'longform', recentWindowSize: 18, volumeWindowSize: 30, globalSampleWindowSize: 60 }
+  }
+  if (resolveMode(targetWords, chapterCount) === 'longform') {
+    return { mode: 'longform', recentWindowSize: 15, volumeWindowSize: 24, globalSampleWindowSize: 48 }
+  }
+  return { mode: 'short', recentWindowSize: 10, volumeWindowSize: 12, globalSampleWindowSize: 20 }
 }
 
 function buildOpeningSignature(content: string): string {
@@ -96,6 +130,54 @@ function deriveStructurePattern(content: string): string[] {
   ].filter(Boolean)
 }
 
+function collectPhraseHits(rows: ChapterRow[]): ExpressionDedupHit[] {
+  const phraseMap = new Map<string, { count: number; chapterNums: Set<number> }>()
+  rows.forEach((row) => {
+    const chapterNum = row.chapterNum || 0
+    splitClauses(asText(row.content))
+      .filter((fragment) => !isLowSignal(fragment))
+      .slice(0, 120)
+      .forEach((fragment) => {
+        const entry = phraseMap.get(fragment) || { count: 0, chapterNums: new Set<number>() }
+        entry.count += 1
+        entry.chapterNums.add(chapterNum)
+        phraseMap.set(fragment, entry)
+      })
+  })
+  return [...phraseMap.entries()]
+    .map(([phrase, entry]) => ({
+      phrase,
+      count: entry.count,
+      chapterNums: [...entry.chapterNums].sort((left, right) => left - right),
+    }))
+    .filter((entry) => entry.chapterNums.length >= 2 && entry.count >= 2)
+    .sort((left, right) => right.count - left.count || right.chapterNums.length - left.chapterNums.length || left.phrase.localeCompare(right.phrase, 'zh-Hans-CN'))
+    .slice(0, 8)
+}
+
+function mergePhraseHits(...lists: ExpressionDedupHit[][]): ExpressionDedupHit[] {
+  const merged = new Map<string, ExpressionDedupHit>()
+  lists.flat().forEach((entry) => {
+    const current = merged.get(entry.phrase)
+    if (!current) {
+      merged.set(entry.phrase, {
+        phrase: entry.phrase,
+        count: entry.count,
+        chapterNums: dedupeChapterNums(entry.chapterNums),
+      })
+      return
+    }
+    merged.set(entry.phrase, {
+      phrase: entry.phrase,
+      count: Math.max(current.count, entry.count),
+      chapterNums: dedupeChapterNums([...current.chapterNums, ...entry.chapterNums]),
+    })
+  })
+  return [...merged.values()]
+    .sort((left, right) => right.count - left.count || right.chapterNums.length - left.chapterNums.length || left.phrase.localeCompare(right.phrase, 'zh-Hans-CN'))
+    .slice(0, 8)
+}
+
 function collectRepeatedSignatures(rows: ChapterRow[], pick: (content: string) => string): string[] {
   const counts = new Map<string, number>()
   rows.forEach((row) => {
@@ -124,63 +206,224 @@ function collectRepeatedStructures(rows: ChapterRow[]): string[] {
     .map(([pattern]) => pattern)
 }
 
+function isClimaxLikeRow(row: ChapterRow): boolean {
+  const haystack = `${asText(row.emotionTone)} ${asText(row.outline)}`
+  return /climax|reversal|高潮|决战|爆发|反转|翻盘|揭露/u.test(haystack)
+}
+
+function collectRepeatedClimaxPatterns(rows: ChapterRow[]): string[] {
+  const climaxRows = rows.filter(isClimaxLikeRow)
+  if (climaxRows.length < 2) return []
+  return collectRepeatedStructures(climaxRows)
+}
+
+function buildWindowPatternSummary(
+  repeatedOpenings: string[],
+  repeatedClosings: string[],
+  repeatedStructures: string[],
+  repeatedClimaxPatterns: string[],
+): string[] {
+  return dedupeStrings([
+    ...repeatedStructures,
+    ...repeatedClimaxPatterns.map((item) => `高潮：${item}`),
+    ...repeatedOpenings.map((item) => `章首：${item}`),
+    ...repeatedClosings.map((item) => `章尾：${item}`),
+  ], 6)
+}
+
 function buildRiskLevel(
   repeatedPhrases: ExpressionDedupHit[],
   repeatedStructures: string[],
+  repeatedClimaxPatterns: string[],
 ): ExpressionDedupReport['riskLevel'] {
-  if (repeatedPhrases.filter((item) => item.count >= 3).length >= 2 || repeatedStructures.length >= 2) return 'high'
-  if (repeatedPhrases.length > 0 || repeatedStructures.length > 0) return 'medium'
+  const strongPhraseCount = repeatedPhrases.filter((item) => item.count >= 3 || item.chapterNums.length >= 3).length
+  if (strongPhraseCount >= 2 || repeatedStructures.length >= 2 || repeatedClimaxPatterns.length >= 2) return 'high'
+  if (repeatedPhrases.length > 0 || repeatedStructures.length > 0 || repeatedClimaxPatterns.length > 0) return 'medium'
   return 'low'
 }
 
-function toSummary(report: Omit<ExpressionDedupReport, 'summary' | 'updatedAt'>): string {
-  if (report.riskLevel === 'low') return '最近章节没有明显的跨章表达复用。'
-  const topPhrase = report.repeatedPhrases[0]
-  if (topPhrase) {
-    return `最近章节出现跨章表达复用，最高频短句“${topPhrase.phrase}”已覆盖 ${topPhrase.chapterNums.length} 章。`
+function sampleRowsAcrossHistory(rows: ChapterRow[], maxSize: number): ChapterRow[] {
+  if (rows.length <= maxSize) return rows
+  const tailKeep = Math.max(4, Math.min(10, Math.floor(maxSize / 3)))
+  const historyBudget = Math.max(maxSize - tailKeep, 0)
+  const headRows = rows.slice(0, Math.max(rows.length - tailKeep, 0))
+  const tailRows = rows.slice(-tailKeep)
+  if (historyBudget <= 0 || headRows.length === 0) return tailRows
+
+  const sampledHead: ChapterRow[] = []
+  if (historyBudget === 1) {
+    sampledHead.push(headRows[0])
+  } else {
+    for (let index = 0; index < historyBudget; index += 1) {
+      const sampleIndex = Math.floor((index * Math.max(headRows.length - 1, 0)) / Math.max(historyBudget - 1, 1))
+      sampledHead.push(headRows[sampleIndex])
+    }
   }
-  return '最近章节出现结构层复用，建议轮换章首/章尾和高潮写法。'
+  return dedupeRows([...sampledHead, ...tailRows]).sort((left, right) => left.chapterNum - right.chapterNum)
 }
 
-function listRowsForWindow(novelId: number, chapterNum: number, includeCurrent: boolean): ChapterRow[] {
+function selectRecentRows(rows: ChapterRow[], strategy: ExpressionDedupWindowStrategy): ChapterRow[] {
+  return rows.slice(-strategy.recentWindowSize)
+}
+
+function selectVolumeRows(
+  rows: ChapterRow[],
+  currentVolumeId: number | null,
+  strategy: ExpressionDedupWindowStrategy,
+): ChapterRow[] {
+  const scopedRows = typeof currentVolumeId === 'number'
+    ? rows.filter((row) => row.volumeId === currentVolumeId)
+    : rows
+  return scopedRows.slice(-strategy.volumeWindowSize)
+}
+
+function selectGlobalRows(rows: ChapterRow[], strategy: ExpressionDedupWindowStrategy): ChapterRow[] {
+  return sampleRowsAcrossHistory(rows, strategy.globalSampleWindowSize)
+}
+
+function listRowsForAnalysis(
+  novelId: number,
+  referenceChapterNum: number,
+  options: {
+    includeCurrent?: boolean
+    currentVolumeId?: number | null
+  } = {},
+): {
+  rows: ChapterRow[]
+  currentVolumeId: number | null
+  strategy: ExpressionDedupWindowStrategy
+} {
   const db = getDb()
-  const rows = db.select().from(chapters)
+  const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0] || null
+  const allRows = db.select().from(chapters)
     .where(eq(chapters.novelId, novelId))
     .orderBy(asc(chapters.chapterNum))
     .all()
-    .filter((row) => includeCurrent ? row.chapterNum <= chapterNum : row.chapterNum < chapterNum)
+  const rows = allRows
+    .filter((row) => options.includeCurrent ? row.chapterNum <= referenceChapterNum : row.chapterNum < referenceChapterNum)
     .filter((row) => asText(row.content))
-  return rows.slice(-10)
+  const currentChapter = allRows.find((row) => row.chapterNum === referenceChapterNum) || null
+  const currentVolumeId = typeof options.currentVolumeId === 'number'
+    ? options.currentVolumeId
+    : currentChapter?.volumeId ?? rows.at(-1)?.volumeId ?? null
+  const strategy = resolveWindowStrategy(Number(novel?.targetWords || 0), rows.length)
+  return { rows, currentVolumeId, strategy }
+}
+
+function selectBannedExpressions(
+  mode: ExpressionDedupMode,
+  recentPhraseHits: ExpressionDedupHit[],
+  volumePhraseHits: ExpressionDedupHit[],
+  globalPhraseHits: ExpressionDedupHit[],
+): string[] {
+  return dedupeStrings([
+    ...recentPhraseHits.filter((item) => item.count >= 2).map((item) => item.phrase),
+    ...volumePhraseHits.filter((item) => item.count >= 3 || item.chapterNums.length >= 3).map((item) => item.phrase),
+    ...(mode === 'longform'
+      ? globalPhraseHits.filter((item) => item.chapterNums.length >= 4).map((item) => item.phrase)
+      : []),
+  ], 6)
+}
+
+function toSummary(report: ExpressionDedupReportBase): string {
+  const modeSummary = report.mode === 'longform'
+    ? `长篇模式已启用（近章 ${report.recentWindowSize} / 当前卷 ${report.volumeWindowSize} / 全书采样 ${report.globalSampleWindowSize}）。`
+    : `当前按最近 ${report.recentWindowSize} 章执行短篇去重。`
+  if (report.riskLevel === 'low') return `${modeSummary} 最近没有明显的跨章表达复用。`
+  const topPhrase = report.repeatedPhrases[0]
+  if (topPhrase) {
+    return `${modeSummary} 最高频短句“${topPhrase.phrase}”已覆盖 ${topPhrase.chapterNums.length} 章。`
+  }
+  return `${modeSummary} 最近结构层复用偏高，建议轮换章首、章尾和高潮写法。`
+}
+
+function buildGuidance(report: ExpressionDedupReportBase): string[] {
+  return [
+    report.mode === 'longform'
+      ? `当前为长篇去重模式：近章 ${report.recentWindowSize} 章直接禁复用，当前卷 ${report.volumeWindowSize} 章做轮换提醒，全书采样 ${report.globalSampleWindowSize} 章只记长期同质化风险。`
+      : `当前为短篇去重模式：重点盯最近 ${report.recentWindowSize} 章，避免临近章节直接复用表达。`,
+    report.bannedExpressions.length > 0
+      ? `本章必须避免复用这些已高频出现的表达：${report.bannedExpressions.join('、')}`
+      : '',
+    report.repeatedStructuralPatterns.length > 0
+      ? `最近结构复用偏高：${report.repeatedStructuralPatterns.join('、')}，本章请主动换开场、推进和收尾节拍。`
+      : '',
+    report.repeatedOpenings.length > 0
+      ? `最近章首起手偏同质：${report.repeatedOpenings.join('、')}。本章优先改用 ${OPENING_ROTATION_SUGGESTIONS.join('、')}。`
+      : '',
+    report.repeatedClosings.length > 0
+      ? `最近章尾收束偏同质：${report.repeatedClosings.join('、')}。本章优先改用 ${CLOSING_ROTATION_SUGGESTIONS.join('、')}。`
+      : '',
+    report.repeatedClimaxPatterns.length > 0
+      ? `高潮结构近章/卷内复用偏高：${report.repeatedClimaxPatterns.join('、')}。本章高潮优先改用 ${CLIMAX_ROTATION_SUGGESTIONS.join('、')}。`
+      : '',
+    report.mode === 'longform' && report.volumeRepeatedPatterns.length > 0
+      ? `当前卷同质化重点：${report.volumeRepeatedPatterns.join('、')}。卷内优先轮换这些写法。`
+      : '',
+    report.mode === 'longform' && report.globalRepeatedPatterns.length > 0
+      ? `全书级同质化提示：${report.globalRepeatedPatterns.join('、')}。这类写法不要在后续批次继续累积。`
+      : '',
+  ].filter(Boolean)
 }
 
 export function analyzeExpressionDedupForGeneration(
   novelId: number,
   chapterNum: number,
+  options: {
+    currentVolumeId?: number | null
+    includeCurrent?: boolean
+  } = {},
 ): ExpressionDedupReport {
-  const rows = listRowsForWindow(novelId, chapterNum, false)
-  const repeatedPhrases = collectPhraseHits(rows)
-  const repeatedOpenings = collectRepeatedSignatures(rows, buildOpeningSignature)
-  const repeatedClosings = collectRepeatedSignatures(rows, buildClosingSignature)
-  const repeatedStructuralPatterns = collectRepeatedStructures(rows)
-  const riskLevel = buildRiskLevel(repeatedPhrases, repeatedStructuralPatterns)
-  const bannedExpressions = repeatedPhrases.filter((item) => item.count >= 3).slice(0, 5).map((item) => item.phrase)
-  const guidance = [
-    bannedExpressions.length > 0 ? `本章避免复用这些已高频出现的表达：${bannedExpressions.join('、')}` : '',
-    repeatedStructuralPatterns.length > 0 ? `最近结构复用偏高：${repeatedStructuralPatterns.join('、')}，本章请主动换开场/收尾节拍。` : '',
-    repeatedOpenings.length > 0 ? `最近章首起手偏同质：${repeatedOpenings.join('、')}。` : '',
-    repeatedClosings.length > 0 ? `最近章尾收束偏同质：${repeatedClosings.join('、')}。` : '',
-  ].filter(Boolean)
+  const analysis = listRowsForAnalysis(novelId, chapterNum, options)
+  const recentRows = selectRecentRows(analysis.rows, analysis.strategy)
+  const volumeRows = selectVolumeRows(analysis.rows, analysis.currentVolumeId, analysis.strategy)
+  const globalRows = selectGlobalRows(analysis.rows, analysis.strategy)
+
+  const recentPhraseHits = collectPhraseHits(recentRows)
+  const volumePhraseHits = collectPhraseHits(volumeRows)
+  const globalPhraseHits = collectPhraseHits(globalRows)
+  const repeatedPhrases = mergePhraseHits(recentPhraseHits, volumePhraseHits, globalPhraseHits)
+
+  const recentOpenings = collectRepeatedSignatures(recentRows, buildOpeningSignature)
+  const recentClosings = collectRepeatedSignatures(recentRows, buildClosingSignature)
+  const volumeOpenings = collectRepeatedSignatures(volumeRows, buildOpeningSignature)
+  const volumeClosings = collectRepeatedSignatures(volumeRows, buildClosingSignature)
+  const globalOpenings = collectRepeatedSignatures(globalRows, buildOpeningSignature)
+  const globalClosings = collectRepeatedSignatures(globalRows, buildClosingSignature)
+
+  const recentStructuralPatterns = collectRepeatedStructures(recentRows)
+  const volumeStructuralPatterns = collectRepeatedStructures(volumeRows)
+  const globalStructuralPatterns = collectRepeatedStructures(globalRows)
+  const recentClimaxPatterns = collectRepeatedClimaxPatterns(recentRows)
+  const volumeClimaxPatterns = collectRepeatedClimaxPatterns(volumeRows)
+  const globalClimaxPatterns = collectRepeatedClimaxPatterns(globalRows)
+
+  const repeatedOpenings = dedupeStrings([...recentOpenings, ...volumeOpenings], 4)
+  const repeatedClosings = dedupeStrings([...recentClosings, ...volumeClosings], 4)
+  const repeatedStructuralPatterns = dedupeStrings([...recentStructuralPatterns, ...volumeStructuralPatterns], 6)
+  const repeatedClimaxPatterns = dedupeStrings([...recentClimaxPatterns, ...volumeClimaxPatterns], 4)
+  const volumeRepeatedPatterns = buildWindowPatternSummary(volumeOpenings, volumeClosings, volumeStructuralPatterns, volumeClimaxPatterns)
+  const globalRepeatedPatterns = buildWindowPatternSummary(globalOpenings, globalClosings, globalStructuralPatterns, globalClimaxPatterns)
+  const bannedExpressions = selectBannedExpressions(analysis.strategy.mode, recentPhraseHits, volumePhraseHits, globalPhraseHits)
+  const riskLevel = buildRiskLevel(repeatedPhrases, repeatedStructuralPatterns, repeatedClimaxPatterns)
   const reportBase = {
+    mode: analysis.strategy.mode,
+    recentWindowSize: analysis.strategy.recentWindowSize,
+    volumeWindowSize: analysis.strategy.volumeWindowSize,
+    globalSampleWindowSize: analysis.strategy.globalSampleWindowSize,
     riskLevel,
     repeatedPhrases,
     repeatedOpenings,
     repeatedClosings,
     repeatedStructuralPatterns,
+    repeatedClimaxPatterns,
+    volumeRepeatedPatterns,
+    globalRepeatedPatterns,
     bannedExpressions,
-    guidance,
   }
   return {
     ...reportBase,
+    guidance: buildGuidance(reportBase),
     summary: toSummary(reportBase),
     updatedAt: new Date().toISOString(),
   }
@@ -190,16 +433,21 @@ export function analyzeExpressionDedupForChapter(chapterId: number): ExpressionD
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
   if (!chapter) return null
-  return analyzeExpressionDedupForGeneration(chapter.novelId, chapter.chapterNum + 1)
+  return analyzeExpressionDedupForGeneration(chapter.novelId, chapter.chapterNum, {
+    currentVolumeId: chapter.volumeId ?? null,
+    includeCurrent: true,
+  })
 }
 
 export function formatExpressionDedupGuidance(report: ExpressionDedupReport | null | undefined): string {
   if (!report) return ''
   return [
     `跨章表达风险：${report.riskLevel}`,
+    `当前策略：${report.mode === 'longform' ? '长篇' : '短篇'}（近章 ${report.recentWindowSize} / 当前卷 ${report.volumeWindowSize} / 全书采样 ${report.globalSampleWindowSize}）`,
     report.summary,
     report.bannedExpressions.length > 0 ? `禁复用表达：${report.bannedExpressions.join('、')}` : '',
     report.repeatedStructuralPatterns.length > 0 ? `高频结构：${report.repeatedStructuralPatterns.join('、')}` : '',
+    report.repeatedClimaxPatterns.length > 0 ? `高潮复用：${report.repeatedClimaxPatterns.join('、')}` : '',
     ...report.guidance,
   ].filter(Boolean).join('\n')
 }

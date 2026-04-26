@@ -705,6 +705,7 @@ export default function QualityDashboard({ novelId }: Props) {
             recentAlerts={data.recentLanguageDriftAlerts}
             volumeEntries={filteredLanguageVolumes}
             novelSummary={data.novelLanguageDriftSummary}
+            expressionDedupSummary={data.expressionDedupSummary}
             antiAiRecurrence={selectedVolumeMetrics
               ? {
                 ...data.antiAiRecurrence,
@@ -1884,6 +1885,7 @@ function LanguageDriftPanel({
   recentAlerts,
   volumeEntries,
   novelSummary,
+  expressionDedupSummary,
   antiAiRecurrence,
   feedbackRecurrence,
 }: {
@@ -1892,6 +1894,7 @@ function LanguageDriftPanel({
   recentAlerts: QualityDashboardData['recentLanguageDriftAlerts']
   volumeEntries: QualityDashboardData['volumeLanguageDrift']
   novelSummary: QualityDashboardData['novelLanguageDriftSummary']
+  expressionDedupSummary: QualityDashboardData['expressionDedupSummary']
   antiAiRecurrence: QualityDashboardData['antiAiRecurrence']
   feedbackRecurrence: QualityDashboardData['feedbackRecurrence']
 }) {
@@ -2180,6 +2183,94 @@ function LanguageDriftPanel({
           </div>
         </div>
       ) : null}
+
+      <div style={{ display: 'grid', gap: 12 }}>
+        <div style={{ fontWeight: 600 }}>跨章表达去重</div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
+          {[
+            {
+              label: '当前模式',
+              value: expressionDedupSummary.currentMode === 'longform' ? '长篇' : '短篇',
+              note: expressionDedupSummary.currentMode === 'longform' ? '启用近章 / 当前卷 / 全书采样三级窗口' : '重点盯最近窗口内的直接复用',
+            },
+            { label: '高风险章节', value: expressionDedupSummary.highRiskChapterCount, note: '跨章表达或结构复用已进入高风险的章节数' },
+            { label: '近章窗口', value: expressionDedupSummary.recentWindowSize || '-', note: '直接进入禁复用判断的最近章节数' },
+            {
+              label: '卷/全书窗口',
+              value: `${expressionDedupSummary.volumeWindowSize || 0}/${expressionDedupSummary.globalSampleWindowSize || 0}`,
+              note: '卷内轮换提醒 / 全书级稀疏采样窗口',
+            },
+          ].map((card) => (
+            <div
+              key={card.label}
+              style={{
+                padding: '12px 14px',
+                borderRadius: 10,
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.08)',
+              }}
+            >
+              <div style={{ fontSize: 12, opacity: 0.7 }}>{card.label}</div>
+              <div style={{ fontSize: 22, fontWeight: 700 }}>{card.value}</div>
+              <div style={{ fontSize: 11, opacity: 0.55, marginTop: 4 }}>{card.note}</div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
+          <div
+            style={{
+              padding: '12px 14px',
+              borderRadius: 10,
+              background: 'rgba(255,255,255,0.04)',
+              border: '1px solid rgba(255,255,255,0.08)',
+              display: 'grid',
+              gap: 8,
+            }}
+          >
+            <div style={{ fontSize: 12, opacity: 0.7 }}>高频复用表达</div>
+            {expressionDedupSummary.topRepeatedPhrases.length > 0 ? expressionDedupSummary.topRepeatedPhrases.slice(0, 4).map((item) => (
+              <div key={item.phrase} style={{ display: 'grid', gap: 4 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+                  <span style={{ fontSize: 12, fontWeight: 600 }}>{item.phrase}</span>
+                  <Tag style={{ marginRight: 0 }}>{`${item.chapterNums.length} 章`}</Tag>
+                </div>
+                <div style={{ fontSize: 11, opacity: 0.65 }}>{`命中 ${item.count} 次 · 覆盖 ${item.chapterNums.map((chapterNum) => `第${chapterNum}章`).join('、')}`}</div>
+              </div>
+            )) : <div style={{ fontSize: 12, opacity: 0.6 }}>当前还没有稳定复现的高频表达。</div>}
+          </div>
+
+          <div
+            style={{
+              padding: '12px 14px',
+              borderRadius: 10,
+              background: 'rgba(255,255,255,0.04)',
+              border: '1px solid rgba(255,255,255,0.08)',
+              display: 'grid',
+              gap: 8,
+            }}
+          >
+            <div style={{ fontSize: 12, opacity: 0.7 }}>结构同质化</div>
+            <div style={{ fontSize: 11, opacity: 0.65 }}>{expressionDedupSummary.summary}</div>
+            <div style={{ fontSize: 12 }}>
+              {expressionDedupSummary.repeatedOpeningPatterns.length > 0 ? `章首：${expressionDedupSummary.repeatedOpeningPatterns.join('、')}` : '章首暂无明显同质化'}
+            </div>
+            <div style={{ fontSize: 12 }}>
+              {expressionDedupSummary.repeatedClosingPatterns.length > 0 ? `章尾：${expressionDedupSummary.repeatedClosingPatterns.join('、')}` : '章尾暂无明显同质化'}
+            </div>
+            <div style={{ fontSize: 12 }}>
+              {expressionDedupSummary.repeatedClimaxPatterns.length > 0 ? `高潮：${expressionDedupSummary.repeatedClimaxPatterns.join('、')}` : '高潮结构暂无明显复用'}
+            </div>
+            {expressionDedupSummary.currentMode === 'longform' ? (
+              <div style={{ fontSize: 11, opacity: 0.6 }}>
+                {expressionDedupSummary.volumeRepeatedPatterns.length > 0 ? `当前卷：${expressionDedupSummary.volumeRepeatedPatterns.join('、')}` : '当前卷暂无稳定同质化模式。'}
+                {expressionDedupSummary.globalRepeatedPatterns.length > 0 ? ` 全书：${expressionDedupSummary.globalRepeatedPatterns.join('、')}` : ''}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
 
       <div style={{ display: 'grid', gap: 12 }}>
         <div style={{ fontWeight: 600 }}>审校反哺与复现闭环</div>

@@ -220,12 +220,21 @@ export interface ExpressionDedupHit {
   chapterNums: number[]
 }
 
+export type ExpressionDedupMode = 'short' | 'longform'
+
 export interface ExpressionDedupReport {
+  mode: ExpressionDedupMode
+  recentWindowSize: number
+  volumeWindowSize: number
+  globalSampleWindowSize: number
   riskLevel: 'low' | 'medium' | 'high'
   repeatedPhrases: ExpressionDedupHit[]
   repeatedOpenings: string[]
   repeatedClosings: string[]
   repeatedStructuralPatterns: string[]
+  repeatedClimaxPatterns: string[]
+  volumeRepeatedPatterns: string[]
+  globalRepeatedPatterns: string[]
   bannedExpressions: string[]
   guidance: string[]
   summary: string
@@ -4245,10 +4254,19 @@ export interface QualityDashboardData {
   worldConflictEntities: WorldStateLedgerConflictEntity[]
   expressionDedupSummary: {
     analyzedChapterCount: number
+    currentMode: ExpressionDedupMode
+    recentWindowSize: number
+    volumeWindowSize: number
+    globalSampleWindowSize: number
     highRiskChapterCount: number
     recentHighRiskChapterNums: number[]
     topRepeatedPhrases: ExpressionDedupHit[]
+    repeatedOpeningPatterns: string[]
+    repeatedClosingPatterns: string[]
     repeatedStructuralPatterns: string[]
+    repeatedClimaxPatterns: string[]
+    volumeRepeatedPatterns: string[]
+    globalRepeatedPatterns: string[]
     summary: string
   }
   summaryHealthSummary: {

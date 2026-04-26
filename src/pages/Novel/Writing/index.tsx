@@ -1557,7 +1557,13 @@ export default function Writing({ novelId }: Props) {
   const qualityFocusItems = [
     summaryHealth ? `摘要健康：${summaryHealth.status} · 密度 ${summaryHealth.densityScore} / 实体 ${summaryHealth.entityCoverageScore} / 事件 ${summaryHealth.eventCoverageScore}` : '',
     summaryHealth?.warnings?.[0] ? `摘要提醒：${summaryHealth.warnings[0]}` : '',
+    expressionDedup?.mode
+      ? `表达去重：${expressionDedup.mode === 'longform' ? '长篇' : '短篇'}窗口 · 近章 ${expressionDedup.recentWindowSize || 0} / 当前卷 ${expressionDedup.volumeWindowSize || 0} / 全书采样 ${expressionDedup.globalSampleWindowSize || 0}`
+      : '',
     expressionDedup?.summary ? `跨章复用：${expressionDedup.summary}` : '',
+    expressionDedup?.repeatedClimaxPatterns?.length ? `高潮复用：${expressionDedup.repeatedClimaxPatterns.slice(0, 3).join('、')}` : '',
+    expressionDedup?.repeatedOpenings?.length ? `章首同质：${expressionDedup.repeatedOpenings.slice(0, 2).join('、')}` : '',
+    expressionDedup?.repeatedClosings?.length ? `章尾同质：${expressionDedup.repeatedClosings.slice(0, 2).join('、')}` : '',
     hookContinuity?.warning ? `钩子连续性：${hookContinuity.warning}` : (hookContinuity ? `钩子强度：${hookContinuity.hookStrengthScore}` : ''),
     qualityDashboard?.voiceEvolutionSummary?.summary || '',
   ].filter(Boolean)

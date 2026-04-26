@@ -5,6 +5,7 @@ import type {
   ChapterGateHistoryEntry,
   ChapterDialogueReviewData,
   ExpressionDedupHit,
+  ExpressionDedupMode,
   ChapterFunctionAlert,
   ChapterFunctionRun,
   ChapterFunctionSummary,
@@ -497,9 +498,18 @@ function parseSummaryHealthReport(raw: string | null | undefined): SummaryHealth
 }
 
 function parseExpressionDedupJson(raw: string | null | undefined): {
+  mode: ExpressionDedupMode
+  recentWindowSize: number
+  volumeWindowSize: number
+  globalSampleWindowSize: number
   riskLevel: 'low' | 'medium' | 'high'
   repeatedPhrases: ExpressionDedupHit[]
+  repeatedOpenings: string[]
+  repeatedClosings: string[]
   repeatedStructuralPatterns: string[]
+  repeatedClimaxPatterns: string[]
+  volumeRepeatedPatterns: string[]
+  globalRepeatedPatterns: string[]
   summary: string
 } | null {
   const parsed = parseJsonObject<Record<string, unknown>>(raw)
@@ -523,9 +533,18 @@ function parseExpressionDedupJson(raw: string | null | undefined): {
     ? parsed.riskLevel
     : 'low'
   return {
+    mode: parsed.mode === 'longform' ? 'longform' : 'short',
+    recentWindowSize: clampNumber(parsed.recentWindowSize, 0, 999, 0),
+    volumeWindowSize: clampNumber(parsed.volumeWindowSize, 0, 999, 0),
+    globalSampleWindowSize: clampNumber(parsed.globalSampleWindowSize, 0, 999, 0),
     riskLevel,
     repeatedPhrases,
+    repeatedOpenings: safeParseStringArray(JSON.stringify(parsed.repeatedOpenings ?? [])),
+    repeatedClosings: safeParseStringArray(JSON.stringify(parsed.repeatedClosings ?? [])),
     repeatedStructuralPatterns: safeParseStringArray(JSON.stringify(parsed.repeatedStructuralPatterns ?? [])),
+    repeatedClimaxPatterns: safeParseStringArray(JSON.stringify(parsed.repeatedClimaxPatterns ?? [])),
+    volumeRepeatedPatterns: safeParseStringArray(JSON.stringify(parsed.volumeRepeatedPatterns ?? [])),
+    globalRepeatedPatterns: safeParseStringArray(JSON.stringify(parsed.globalRepeatedPatterns ?? [])),
     summary: asText(parsed.summary),
   }
 }
@@ -3934,6 +3953,10 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
   }, new Map())
   const expressionDedupSummary: QualityDashboardData['expressionDedupSummary'] = {
     analyzedChapterCount: expressionDedupReports.length,
+    currentMode: expressionDedupReports.at(-1)?.report.mode || 'short',
+    recentWindowSize: expressionDedupReports.at(-1)?.report.recentWindowSize || 0,
+    volumeWindowSize: expressionDedupReports.at(-1)?.report.volumeWindowSize || 0,
+    globalSampleWindowSize: expressionDedupReports.at(-1)?.report.globalSampleWindowSize || 0,
     highRiskChapterCount: expressionDedupReports.filter((entry) => entry.report.riskLevel === 'high').length,
     recentHighRiskChapterNums: dedupeChapterNums(
       expressionDedupReports
@@ -3944,9 +3967,14 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     topRepeatedPhrases: [...expressionPhraseMap.values()]
       .sort((left, right) => right.count - left.count || right.chapterNums.length - left.chapterNums.length)
       .slice(0, 6),
+    repeatedOpeningPatterns: dedupeStrings(expressionDedupReports.flatMap((entry) => entry.report.repeatedOpenings), 6),
+    repeatedClosingPatterns: dedupeStrings(expressionDedupReports.flatMap((entry) => entry.report.repeatedClosings), 6),
     repeatedStructuralPatterns: dedupeStrings(expressionDedupReports.flatMap((entry) => entry.report.repeatedStructuralPatterns), 6),
+    repeatedClimaxPatterns: dedupeStrings(expressionDedupReports.flatMap((entry) => entry.report.repeatedClimaxPatterns), 6),
+    volumeRepeatedPatterns: dedupeStrings(expressionDedupReports.flatMap((entry) => entry.report.volumeRepeatedPatterns), 6),
+    globalRepeatedPatterns: dedupeStrings(expressionDedupReports.flatMap((entry) => entry.report.globalRepeatedPatterns), 6),
     summary: expressionDedupReports.length > 0
-      ? `已分析 ${expressionDedupReports.length} 章的跨章表达复用；高风险章节 ${expressionDedupReports.filter((entry) => entry.report.riskLevel === 'high').length} 章。`
+      ? `${expressionDedupReports.at(-1)?.report.mode === 'longform' ? '当前按长篇策略' : '当前按短篇策略'}分析跨章表达复用；高风险章节 ${expressionDedupReports.filter((entry) => entry.report.riskLevel === 'high').length} 章。`
       : '当前还没有可用的跨章表达复用数据。',
   }
   const summaryHealthReports = rows

@@ -3559,7 +3559,9 @@ export async function generateChapterContent(
       snapshotValue.weakHookStreak > 0 ? `连续弱钩子：${snapshotValue.weakHookStreak} 章` : '',
       snapshotValue.warning || '',
     ].filter(Boolean).join('\n')
-    const generationExpressionDedup = analyzeExpressionDedupForGeneration(chapter.novelId, chapter.chapterNum)
+    const generationExpressionDedup = analyzeExpressionDedupForGeneration(chapter.novelId, chapter.chapterNum, {
+      currentVolumeId: chapter.volumeId ?? null,
+    })
     const previousSummaryHealth = chapterBridgePlan?.sourceChapterId
       ? analyzeSummaryHealthForChapter(chapterBridgePlan.sourceChapterId)
       : null
