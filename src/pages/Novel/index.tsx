@@ -1,29 +1,31 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { Button, Input, Modal, Spin, message } from 'antd'
-import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
+import { Button, Dropdown, Input, Modal, Spin, message } from 'antd'
+import type { MenuProps } from 'antd'
+import { getErrorMessage, getUserFacingMessage, isUserFacingMessage } from '@/utils/user-facing-message'
 import {
-  ApartmentOutlined,
-  AppstoreOutlined,
-  ArrowLeftOutlined,
   BarChartOutlined,
-  BarsOutlined,
-  ClockCircleOutlined,
-  DashboardOutlined,
   DeleteOutlined,
-  EditOutlined,
-  EnvironmentOutlined,
-  GlobalOutlined,
+  EllipsisOutlined,
   LeftOutlined,
   RightOutlined,
-  SettingOutlined,
-  TeamOutlined,
   RollbackOutlined,
   SearchOutlined,
   QuestionCircleOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons'
+import ProjectSidebar from '../../components/novel/layout/ProjectSidebar'
+import ProjectTopbar from '../../components/novel/layout/ProjectTopbar'
 import { useNovelStore } from '../../stores/novel.store'
 import { useWorkspaceStore } from '../../stores/workspace.store'
+import {
+  ALL_WORKSPACE_ROUTE_KEYS,
+  WORKSPACE_MODULE_DEFINITIONS,
+  getWorkspaceNavKey,
+  getWorkspaceSnapshot,
+  type WorkspaceRouteKey,
+  type WorkspaceViewMode,
+} from '../../shared/novel-workspace'
 import StudioPage from './Studio'
 import Overview from './Overview'
 import PremisePage from './Premise'
@@ -57,11 +59,7 @@ import GrowthSystemPage from './GrowthSystem'
 import WorkspaceErrorBoundary from './components/WorkspaceErrorBoundary'
 import WorkspaceAIQualityBoard from './components/WorkspaceAIQualityBoard'
 import {
-  getAssetBloatSignal,
   EMPTY_WORKFLOW_STATS,
-  getGuidedStepProgressMap,
-  getNextChapterReadiness,
-  getRecommendedWorkflowStep,
   loadWorkflowStats,
   type GuidedWorkflowStepKey,
   type WorkflowStats,
@@ -73,44 +71,7 @@ import {
 } from './workspace-quality-context'
 import type { Chapter, OperationLog } from '../../types'
 
-type ProWorkspaceKey =
-  | 'guide'
-  | 'overview'
-  | 'project-brief'
-  | 'core-settings'
-  | 'theme-voice'
-  | 'world-rules'
-  | 'endgame'
-  | 'map'
-  | 'factions'
-  | 'characters'
-  | 'arc-center'
-  | 'resistance'
-  | 'items'
-  | 'glossary'
-  | 'threads'
-  | 'scene-templates'
-  | 'story-design'
-  | 'outline'
-  | 'volume-design'
-  | 'contracts'
-  | 'structure'
-  | 'timeline'
-  | 'info-gap-board'
-  | 'foreshadow-ledger'
-  | 'growth-system'
-  | 'writing'
-  | 'writeback'
-  | 'batch-workbench'
-  | 'revision'
-  | 'quality'
-
-interface WorkspaceItem {
-  key: ProWorkspaceKey
-  icon: React.ReactNode
-  label: string
-  summary: string
-}
+type ProWorkspaceKey = WorkspaceRouteKey
 
 interface WorkspaceSearchResult {
   id: string
@@ -119,66 +80,6 @@ interface WorkspaceSearchResult {
   description: string
   route: string
 }
-
-interface WorkspaceGroupSummary {
-  title: string
-  completedCount: number
-  totalCount: number
-  isActive: boolean
-}
-
-const WORKSPACE_GROUPS: Array<{ title: string; items: WorkspaceItem[] }> = [
-  {
-    title: '总览',
-    items: [
-      { key: 'guide', icon: <DashboardOutlined />, label: '创作总览', summary: '先看整体进度、风险和下一步。' },
-      { key: 'overview', icon: <AppstoreOutlined />, label: '基础信息', summary: '维护书名、简介、背景和目标字数。' },
-    ],
-  },
-  {
-    title: '底盘',
-    items: [
-      { key: 'project-brief', icon: <AppstoreOutlined />, label: '项目立项', summary: '先定读者承诺、卖点和禁区。' },
-      { key: 'core-settings', icon: <SettingOutlined />, label: '基础设定', summary: '固定定位、主角起点和底层约束。' },
-      { key: 'theme-voice', icon: <EditOutlined />, label: '主题与文风', summary: '固定主题、叙事口吻和语言边界。' },
-    ],
-  },
-  {
-    title: '世界与资源',
-    items: [
-      { key: 'world-rules', icon: <GlobalOutlined />, label: '世界规则', summary: '统一题材规则、时间制度和写作约束。' },
-      { key: 'endgame', icon: <BarsOutlined />, label: '终局设计', summary: '提前锁定最终冲突、兑现承诺和最后一幕。' },
-      { key: 'map', icon: <EnvironmentOutlined />, label: '地图结构', summary: '让地点能承载路线、冲突和代价。' },
-      { key: 'factions', icon: <ApartmentOutlined />, label: '势力系统', summary: '把角色归属和外部关系拆成结构化资产。' },
-      { key: 'characters', icon: <TeamOutlined />, label: '角色系统', summary: '补齐主角与关键人物关系。' },
-      { key: 'arc-center', icon: <BarsOutlined />, label: '人物弧线', summary: '维护主角弧、关键角色弧和关系弧。' },
-      { key: 'resistance', icon: <BarsOutlined />, label: '反派与阻力', summary: '统一维护人物反派、势力反派和环境制度阻力。' },
-      { key: 'items', icon: <AppstoreOutlined />, label: '物品装备', summary: '补齐道具、资源和可回收线索。' },
-      { key: 'glossary', icon: <BarsOutlined />, label: '设定词典', summary: '固定术语、阶位、材料和专有名词。' },
-      { key: 'threads', icon: <BarsOutlined />, label: '故事线程', summary: '把主线、支线和伏笔挂成可追踪线程。' },
-      { key: 'scene-templates', icon: <AppstoreOutlined />, label: '场景模板', summary: '沉淀高频场景的节拍和复用骨架。' },
-    ],
-  },
-  {
-    title: '推进',
-    items: [
-      { key: 'story-design', icon: <BarsOutlined />, label: '故事设计', summary: '在资产到位后统一设计主线、支线和结局。' },
-      { key: 'outline', icon: <BarsOutlined />, label: '故事大纲', summary: '按章节推进主线，落实关键转折。' },
-      { key: 'volume-design', icon: <ApartmentOutlined />, label: '卷级设计', summary: '让每卷直接继承终局压力与本卷闭环目标。' },
-      { key: 'contracts', icon: <BarsOutlined />, label: '章节合同', summary: '把本章与场景约束变成显式写作合同。' },
-      { key: 'structure', icon: <ApartmentOutlined />, label: '结构规划', summary: '拆卷、拆部、拆章，稳住长篇节奏。' },
-      { key: 'timeline', icon: <ClockCircleOutlined />, label: '时间轴', summary: '维护事件顺序、后果链和时间锚点。' },
-      { key: 'info-gap-board', icon: <BarsOutlined />, label: '信息差谜题板', summary: '管理谜题/线索/真相与视角已知信息。' },
-      { key: 'foreshadow-ledger', icon: <BarsOutlined />, label: '伏笔回收账本', summary: '维护伏笔资产、埋设位置和回收状态。' },
-      { key: 'growth-system', icon: <BarsOutlined />, label: '成长资源代价', summary: '统一管理成长轨道、资源稀缺和收益代价。' },
-      { key: 'writing', icon: <EditOutlined />, label: '正文写作', summary: '集中处理场景计划、主写、审校和定稿。' },
-      { key: 'writeback', icon: <BarsOutlined />, label: '章后状态回写', summary: '把本章事实变成可确认、可回写的 Canon 候选。' },
-      { key: 'batch-workbench', icon: <RollbackOutlined />, label: '回滚工作台', summary: '为批量生成保存快照、人工锁定和全量回滚入口。' },
-      { key: 'revision', icon: <EditOutlined />, label: '修订中心', summary: '收口一致性问题和上下文同步任务。' },
-      { key: 'quality', icon: <BarChartOutlined />, label: '质量监控', summary: '查看各章节评分热力图、趋势和薄弱维度。' },
-    ],
-  },
-]
 
 const LEGACY_ROUTE_REDIRECTS: Record<GuidedWorkflowStepKey, ProWorkspaceKey> = {
   basics: 'overview',
@@ -196,10 +97,8 @@ const LEGACY_ROUTE_REDIRECTS: Record<GuidedWorkflowStepKey, ProWorkspaceKey> = {
   'write-start': 'writing',
 }
 
-function formatCountState(count: number, singularUnit: string, emptyLabel = '待补') {
-  if (count <= 0) return emptyLabel
-  return `${count}${singularUnit}`
-}
+const WORKSPACE_VIEW_MODE_STORAGE_KEY = 'novelforge-workbench-view-mode'
+const WORKSPACE_PAGE_META = new Map(WORKSPACE_MODULE_DEFINITIONS.map((item) => [item.key, item] as const))
 
 function isEditableTarget(target: EventTarget | null): boolean {
   const element = target as HTMLElement | null
@@ -246,13 +145,14 @@ export default function NovelRouter() {
   const [hasRegisteredClearHandler, setHasRegisteredClearHandler] = useState(false)
   const [qualityBoardOpen, setQualityBoardOpen] = useState(false)
   const [workspaceQualityController, setWorkspaceQualityController] = useState<RegisteredWorkspaceQualityController | null>(null)
-  const workspaceGroups = useMemo(() => WORKSPACE_GROUPS, [])
+  const [workspaceViewMode, setWorkspaceViewMode] = useState<WorkspaceViewMode>(() => {
+    const stored = typeof localStorage !== 'undefined'
+      ? localStorage.getItem(WORKSPACE_VIEW_MODE_STORAGE_KEY)
+      : null
+    return stored === 'quick' || stored === 'professional' ? stored : 'professional'
+  })
 
   const novelId = Number.parseInt(id || '0', 10)
-  const workspaceItems = useMemo(
-    () => workspaceGroups.flatMap((group) => group.items),
-    [workspaceGroups],
-  )
   const pathSegments = location.pathname.split('/').filter(Boolean)
   const pathSegment = pathSegments[2] || ''
   const legacyRouteTarget = useMemo(
@@ -265,246 +165,66 @@ export default function NovelRouter() {
   )
 
   const currentPage = useMemo<ProWorkspaceKey>(() => {
-    if (workspaceItems.some((item) => item.key === pathSegment)) {
+    if (ALL_WORKSPACE_ROUTE_KEYS.includes(pathSegment as WorkspaceRouteKey)) {
       return pathSegment as ProWorkspaceKey
     }
 
-    return workspaceItems[0]?.key || 'guide'
-  }, [pathSegment, workspaceItems])
-
-  const currentPageMeta = useMemo(
-    () => workspaceItems.find((item) => item.key === currentPage) || workspaceItems[0],
-    [workspaceItems, currentPage],
-  )
-
-  const currentPageIndex = useMemo(
-    () => workspaceItems.findIndex((item) => item.key === currentPage),
-    [workspaceItems, currentPage],
-  )
-
-  const previousPageMeta = currentPageIndex > 0 ? workspaceItems[currentPageIndex - 1] : null
-  const nextPageMeta = currentPageIndex >= 0 && currentPageIndex < workspaceItems.length - 1
-    ? workspaceItems[currentPageIndex + 1]
-    : null
+    return 'guide'
+  }, [pathSegment])
   const currentChapter = useMemo(
     () => chapters.find((chapter) => chapter.id === currentChapterId) || null,
     [chapters, currentChapterId],
   )
-
-  const guidedProgressMap = useMemo(
-    () => getGuidedStepProgressMap(currentNovel, workflowStats),
-    [currentNovel, workflowStats],
+  const workspaceSnapshot = useMemo(
+    () => getWorkspaceSnapshot(currentNovel, workflowStats, { viewMode: workspaceViewMode }),
+    [currentNovel, workflowStats, workspaceViewMode],
   )
-
-  const recommendedKey = useMemo(
-    () => getRecommendedWorkflowStep(currentNovel, workflowStats) || 'guide',
-    [currentNovel, workflowStats],
+  const recommendedRoute = useMemo(
+    () => (workspaceSnapshot.nextStep.targetPage === 'writing'
+      ? 'writing/editor'
+      : workspaceSnapshot.nextStep.targetPage),
+    [workspaceSnapshot.nextStep.targetPage],
   )
-
-  const readinessMap = useMemo<Record<Exclude<ProWorkspaceKey, 'guide' | 'revision'>, boolean>>(
-    () => ({
-      overview: guidedProgressMap.basics.isComplete,
-      'project-brief': guidedProgressMap['project-brief'].isComplete,
-      'core-settings': guidedProgressMap['story-core'].isComplete,
-      'theme-voice': guidedProgressMap['theme-voice'].isComplete,
-      'world-rules': guidedProgressMap['world-foundation'].isComplete,
-      endgame: guidedProgressMap['endgame-design'].isComplete,
-      map: guidedProgressMap['map-structure'].isComplete,
-      factions: workflowStats.factionCount > 0,
-      characters: guidedProgressMap['character-roster'].isComplete,
-      'arc-center': workflowStats.characterArcCount > 0 || workflowStats.relationshipArcCount > 0,
-      resistance: workflowStats.resistanceTrackCount > 0,
-      items: guidedProgressMap['items-equipment'].isComplete,
-      glossary: workflowStats.glossaryCount > 0,
-      threads: guidedProgressMap['story-threads'].isComplete,
-      'scene-templates': workflowStats.sceneTemplateCount > 0,
-      'story-design': guidedProgressMap['story-plot'].isComplete,
-      outline: workflowStats.outlineCount > 0,
-      'volume-design': workflowStats.volumeCount > 0,
-      contracts: workflowStats.chapterCount > 0,
-      structure: guidedProgressMap['volume-planning'].isComplete,
-      timeline: workflowStats.timelineCount > 0,
-      'info-gap-board': workflowStats.volumeCount > 0,
-      'foreshadow-ledger': workflowStats.chapterCount > 0,
-      'growth-system': workflowStats.chapterCount > 0,
-      writing: workflowStats.outlineCount > 0
-        && workflowStats.timelineCount > 0
-        && workflowStats.threadCount > 0
-        && workflowStats.revisionBlockerCount <= 0
-        && workflowStats.staleChapterCount <= 0
-        && workflowStats.staleAssetCount <= 0
-        && workflowStats.staleCheckpointCount <= 0,
-      writeback: workflowStats.chapterCount > 0,
-      'batch-workbench': workflowStats.chapterCount > 0,
-      quality: true,
-    }),
-    [guidedProgressMap, workflowStats],
+  const currentNavKey = useMemo(
+    () => getWorkspaceNavKey(currentPage, location.search),
+    [currentPage, location.search],
   )
-
-  const workspaceReadyCount = useMemo(
-    () => Object.values(readinessMap).filter(Boolean).length,
-    [readinessMap],
+  const orderedPages = useMemo<ProWorkspaceKey[]>(
+    () => ['guide', ...workspaceSnapshot.modules.map((item) => item.key)],
+    [workspaceSnapshot.modules],
   )
-  const workspaceTotalCount = useMemo(
-    () => Object.keys(readinessMap).length,
-    [readinessMap],
+  const currentPageIndex = useMemo(
+    () => orderedPages.findIndex((item) => item === currentPage),
+    [currentPage, orderedPages],
   )
-  const nextChapterReadiness = useMemo(
-    () => getNextChapterReadiness(workflowStats),
-    [workflowStats],
-  )
-  const assetBloatSignal = useMemo(
-    () => getAssetBloatSignal(workflowStats),
-    [workflowStats],
-  )
-
-  const workspaceStateMap = useMemo<Record<ProWorkspaceKey, { label: string; complete: boolean }>>(
-    () => ({
-      guide: {
-        label: `${workspaceReadyCount}/${workspaceTotalCount}`,
-        complete: workspaceReadyCount >= workspaceTotalCount,
-      },
-      overview: {
-        label: guidedProgressMap.basics.isComplete ? '已就绪' : `${guidedProgressMap.basics.completedCount}/${guidedProgressMap.basics.totalCount}`,
-        complete: guidedProgressMap.basics.isComplete,
-      },
-      'project-brief': {
-        label: guidedProgressMap['project-brief'].isComplete ? '已就绪' : `${guidedProgressMap['project-brief'].completedCount}/${guidedProgressMap['project-brief'].totalCount}`,
-        complete: guidedProgressMap['project-brief'].isComplete,
-      },
-      'core-settings': {
-        label: guidedProgressMap['story-core'].isComplete ? '已就绪' : `${guidedProgressMap['story-core'].completedCount}/${guidedProgressMap['story-core'].totalCount}`,
-        complete: guidedProgressMap['story-core'].isComplete,
-      },
-      'theme-voice': {
-        label: guidedProgressMap['theme-voice'].isComplete ? '已就绪' : `${guidedProgressMap['theme-voice'].completedCount}/${guidedProgressMap['theme-voice'].totalCount}`,
-        complete: guidedProgressMap['theme-voice'].isComplete,
-      },
-      'world-rules': {
-        label: guidedProgressMap['world-foundation'].isComplete ? '已就绪' : '待补',
-        complete: guidedProgressMap['world-foundation'].isComplete,
-      },
-      endgame: {
-        label: guidedProgressMap['endgame-design'].isComplete ? '已就绪' : `${guidedProgressMap['endgame-design'].completedCount}/${guidedProgressMap['endgame-design'].totalCount}`,
-        complete: guidedProgressMap['endgame-design'].isComplete,
-      },
-      map: {
-        label: formatCountState(workflowStats.mapCount, '处'),
-        complete: guidedProgressMap['map-structure'].isComplete,
-      },
-      factions: {
-        label: formatCountState(workflowStats.factionCount, '个'),
-        complete: workflowStats.factionCount > 0,
-      },
-      characters: {
-        label: workflowStats.characterCount > 0
-          ? `${workflowStats.characterCount}人`
-          : '待补',
-        complete: guidedProgressMap['character-roster'].isComplete,
-      },
-      'arc-center': {
-        label: workflowStats.characterArcCount > 0 || workflowStats.relationshipArcCount > 0
-          ? `${workflowStats.characterArcCount}/${workflowStats.relationshipArcCount}`
-          : '待补',
-        complete: workflowStats.characterArcCount > 0 || workflowStats.relationshipArcCount > 0,
-      },
-      resistance: {
-        label: workflowStats.resistanceTrackCount > 0
-          ? `${workflowStats.resistanceTrackCount}条`
-          : '待补',
-        complete: workflowStats.resistanceTrackCount > 0,
-      },
-      items: {
-        label: formatCountState(workflowStats.itemCount, '项'),
-        complete: guidedProgressMap['items-equipment'].isComplete,
-      },
-      glossary: {
-        label: formatCountState(workflowStats.glossaryCount, '条'),
-        complete: workflowStats.glossaryCount > 0,
-      },
-      threads: {
-        label: formatCountState(workflowStats.threadCount, '条'),
-        complete: guidedProgressMap['story-threads'].isComplete,
-      },
-      'scene-templates': {
-        label: formatCountState(workflowStats.sceneTemplateCount, '套'),
-        complete: workflowStats.sceneTemplateCount > 0,
-      },
-      'story-design': {
-        label: guidedProgressMap['story-plot'].isComplete ? '已就绪' : `${guidedProgressMap['story-plot'].completedCount}/${guidedProgressMap['story-plot'].totalCount}`,
-        complete: guidedProgressMap['story-plot'].isComplete,
-      },
-      outline: {
-        label: formatCountState(workflowStats.outlineCount, '条'),
-        complete: workflowStats.outlineCount > 0,
-      },
-      'volume-design': {
-        label: workflowStats.volumeCount > 0 ? `${workflowStats.volumeCount}卷` : '待补',
-        complete: workflowStats.volumeCount > 0,
-      },
-      contracts: {
-        label: workflowStats.chapterCount > 0 ? `${workflowStats.chapterCount}章` : '待补',
-        complete: workflowStats.chapterCount > 0,
-      },
-      structure: {
-        label: workflowStats.volumeCount > 0 ? `${workflowStats.volumeCount}卷` : '待补',
-        complete: guidedProgressMap['volume-planning'].isComplete,
-      },
-      timeline: {
-        label: formatCountState(workflowStats.timelineCount, '项'),
-        complete: workflowStats.timelineCount > 0,
-      },
-      'info-gap-board': {
-        label: workflowStats.volumeCount > 0 ? `${workflowStats.volumeCount}卷` : '待补',
-        complete: workflowStats.volumeCount > 0,
-      },
-      'foreshadow-ledger': {
-        label: workflowStats.chapterCount > 0 ? `${workflowStats.chapterCount}章` : '待补',
-        complete: workflowStats.chapterCount > 0,
-      },
-      'growth-system': {
-        label: workflowStats.chapterCount > 0 ? `${workflowStats.chapterCount}章` : '待补',
-        complete: workflowStats.chapterCount > 0,
-      },
-      writing: {
-        label: nextChapterReadiness.label,
-        complete: nextChapterReadiness.ready,
-      },
-      writeback: {
-        label: workflowStats.chapterCount > 0 ? `${workflowStats.chapterCount}章` : '待补',
-        complete: workflowStats.chapterCount > 0,
-      },
-      'batch-workbench': {
-        label: workflowStats.chapterCount > 0 ? '可用' : '待补',
-        complete: workflowStats.chapterCount > 0,
-      },
-      revision: {
-        label: workflowStats.revisionTaskCount > 0 ? `${workflowStats.revisionTaskCount}项待处理` : '已清空',
-        complete: workflowStats.revisionTaskCount <= 0,
-      },
-      quality: {
-        label: '查看',
-        complete: true,
-      },
-    }),
-    [guidedProgressMap, nextChapterReadiness, workflowStats, workspaceReadyCount, workspaceTotalCount],
-  )
-  const workspaceGroupSummaries = useMemo<WorkspaceGroupSummary[]>(
-    () => workspaceGroups.map((group) => {
-      const totalCount = group.items.length
-      const completedCount = group.items
-        .filter((item) => workspaceStateMap[item.key]?.complete)
-        .length
-
+  const resolvePageMeta = useCallback((pageKey: ProWorkspaceKey) => {
+    if (pageKey === 'guide') {
       return {
-        title: group.title,
-        completedCount,
-        totalCount,
-        isActive: group.items.some((item) => item.key === currentPage),
+        key: 'guide' as const,
+        label: '创作总控台',
+        summary: '总览当前阶段、blocker 和推荐下一步。',
+        route: 'guide',
       }
-    }),
-    [currentPage, workspaceGroups, workspaceStateMap],
+    }
+
+    const meta = WORKSPACE_PAGE_META.get(pageKey)
+    return {
+      key: pageKey,
+      label: meta?.label || pageKey,
+      summary: meta?.description || '',
+      route: pageKey === 'writing' ? 'writing/editor' : pageKey,
+    }
+  }, [])
+  const currentPageMeta = useMemo(
+    () => resolvePageMeta(currentPage),
+    [currentPage, resolvePageMeta],
   )
+  const previousPageMeta = currentPageIndex > 0
+    ? resolvePageMeta(orderedPages[currentPageIndex - 1])
+    : null
+  const nextPageMeta = currentPageIndex >= 0 && currentPageIndex < orderedPages.length - 1
+    ? resolvePageMeta(orderedPages[currentPageIndex + 1])
+    : null
 
   const refreshWorkflowStats = useCallback(async () => {
     if (!novelId) return
@@ -522,6 +242,17 @@ export default function NovelRouter() {
       setLatestUndoable(await window.electron.history.getLatestUndoable(novelId))
     } catch (error) {
       console.error(error)
+    }
+  }, [novelId])
+
+  const handleWorkspaceExport = useCallback(async (format: string) => {
+    try {
+      const filePath = await window.electron.novel.export(novelId, format)
+      message.success(getUserFacingMessage('novel.exportedTo', { path: filePath }))
+    } catch (error) {
+      if (!isUserFacingMessage(error, 'common.userCancelled')) {
+        message.error(getErrorMessage(error, 'novel.exportFailed'))
+      }
     }
   }, [novelId])
 
@@ -663,6 +394,20 @@ export default function NovelRouter() {
   }, [mode, setMode])
 
   useEffect(() => {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(WORKSPACE_VIEW_MODE_STORAGE_KEY, workspaceViewMode)
+    }
+  }, [workspaceViewMode])
+
+  useEffect(() => {
+    if (!currentNovel || typeof localStorage === 'undefined') return
+    if (localStorage.getItem(WORKSPACE_VIEW_MODE_STORAGE_KEY)) return
+    if (currentNovel.launchMode === 'fast_launch') {
+      setWorkspaceViewMode('quick')
+    }
+  }, [currentNovel, setWorkspaceViewMode])
+
+  useEffect(() => {
     if (!novelId) return
 
     let alive = true
@@ -792,11 +537,11 @@ export default function NovelRouter() {
       return
     }
 
-    const validPath = workspaceItems.some((item) => item.key === pathSegment)
+    const validPath = ALL_WORKSPACE_ROUTE_KEYS.includes(pathSegment as WorkspaceRouteKey)
     if (!validPath) {
-      navigate(`/novels/${novelId}/${recommendedKey}`, { replace: true })
+      navigate(`/novels/${novelId}/${recommendedRoute}`, { replace: true })
     }
-  }, [legacyRouteTarget, loading, navigate, novelId, pathSegment, recommendedKey, workspaceItems])
+  }, [legacyRouteTarget, loading, navigate, novelId, pathSegment, recommendedRoute])
 
   useEffect(() => {
     setQualityBoardOpen(false)
@@ -827,158 +572,118 @@ export default function NovelRouter() {
       <NovelWorkspaceQualityProvider value={workspaceQuality}>
       <div className="novel-route-shell novel-route-shell--single">
       <aside className="novel-route-shell__sidebar">
-        <div className="novel-sidebar__title-block">
-          <div className="novel-sidebar__title-row">
-            <h1 className="novel-sidebar__title">{currentNovel?.title || '未命名小说'}</h1>
-            <span className="novel-sidebar__title-meta">{`${workspaceReadyCount}/${workspaceTotalCount}`}</span>
-          </div>
-        </div>
-
-        <div className="novel-sidebar__progress-card">
-          <div className="novel-sidebar__progress-head">
-            <div>
-              <div className="novel-sidebar__progress-label">是否可写下一章</div>
-              <div className="novel-sidebar__progress-value">{nextChapterReadiness.label}</div>
-            </div>
-            <span className={`novel-sidebar__title-meta ${nextChapterReadiness.ready ? 'novel-sidebar__title-meta--ready' : 'novel-sidebar__title-meta--pending'}`}>
-              {nextChapterReadiness.ready ? '已就绪' : '待处理'}
-            </span>
-          </div>
-          {assetBloatSignal.risk !== 'none' ? (
-            <button
-              type="button"
-              className="novel-sidebar__recommend"
-              onClick={() => navigate(`/novels/${novelId}/${workflowStats.outlineCount > 0 ? 'writing' : 'outline'}`)}
-            >
-              <strong>{workflowStats.outlineCount > 0 ? '停止补资产，直接进入正文' : '先把现有资产压到大纲'}</strong>
-            </button>
-          ) : null}
-        </div>
-
-        <div className="novel-sidebar__nav">
-          {workspaceGroups.map((group) => {
-            const summary = workspaceGroupSummaries.find((item) => item.title === group.title)
-
-            return (
-              <section key={group.title} className={`novel-sidebar__group ${summary?.isActive ? 'novel-sidebar__group--active' : ''}`}>
-                <div className={`novel-sidebar__group-header ${summary?.isActive ? 'novel-sidebar__group-header--active' : ''}`}>
-                  <span className="novel-sidebar__group-header-copy">
-                    <strong>{group.title}</strong>
-                  </span>
-                  <span className="novel-sidebar__group-header-meta">
-                    <span className="novel-sidebar__group-header-count">{`${summary?.completedCount || 0}/${summary?.totalCount || group.items.length}`}</span>
-                  </span>
-                </div>
-
-                <div className="novel-sidebar__group-list">
-                  {group.items.map((item) => {
-                    const isActive = currentPage === item.key
-                    const state = workspaceStateMap[item.key]
-
-                    return (
-                      <button
-                        key={item.key}
-                        type="button"
-                        className={`novel-sidebar__nav-item ${isActive ? 'novel-sidebar__nav-item--active' : ''}`}
-                        onClick={() => navigate(`/novels/${novelId}/${item.key}`)}
-                      >
-                        <span className="novel-sidebar__nav-card-head">
-                          <span className="novel-sidebar__nav-icon">{item.icon}</span>
-                          <span className={`novel-sidebar__nav-state ${state.complete ? 'novel-sidebar__nav-state--done' : ''}`}>
-                            {state.label}
-                          </span>
-                        </span>
-                        <span className="novel-sidebar__nav-copy">
-                          <strong>{item.label}</strong>
-                          <small>{item.summary}</small>
-                        </span>
-                      </button>
-                    )
-                  })}
-                </div>
-              </section>
-            )
-          })}
-        </div>
+        <ProjectSidebar
+          title={currentNovel?.title || '未命名小说'}
+          stageLabel={workspaceSnapshot.stage.label}
+          progressText={`${workspaceSnapshot.moduleDoneCount}/${workspaceSnapshot.moduleTotalCount}`}
+          currentTask={workspaceSnapshot.nextStep.title}
+          navGroups={workspaceSnapshot.navGroups}
+          activeKey={currentNavKey}
+          mode={workspaceViewMode}
+          onModeChange={setWorkspaceViewMode}
+          onNavigate={(route) => navigate(`/novels/${novelId}/${route}`)}
+        />
       </aside>
 
       <main className="novel-route-shell__content">
         <div className="novel-route-shell__content-frame">
-          <div className="novel-route-shell__header novel-route-shell__header--compact">
-            <div className="novel-route-shell__header-main">
-              <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/novels')}>
-                返回项目列表
-              </Button>
-              <div className="novel-route-shell__header-copy">
-                <strong className="novel-route-shell__header-title">
-                  <span className="novel-route-shell__header-step">{currentPageMeta?.label}</span>
-                </strong>
-              </div>
-            </div>
-            <div className="novel-route-shell__header-actions">
-              {hasRegisteredClearHandler ? (
-                <Button
-                  danger
-                  icon={<DeleteOutlined />}
-                  onClick={() => clearHandlerRef.current?.()}
-                >
-                  清空当前步骤
-                </Button>
-              ) : null}
-              <Button icon={<SearchOutlined />} onClick={() => setQuickSearchOpen(true)}>
-                全局搜索
-              </Button>
-              <Button icon={<QuestionCircleOutlined />} onClick={() => setShortcutHelpOpen(true)}>
-                快捷键
-              </Button>
-              <Button onClick={() => void ensureChapterListLoaded().then(() => setChapterJumpOpen(true)).catch(console.error)}>
-                跳转章节
-              </Button>
-              {currentPage !== 'guide' && currentPage !== 'quality' && currentPage !== 'batch-workbench' ? (
-                <Button icon={<BarChartOutlined />} onClick={() => setQualityBoardOpen(true)}>
-                  AI质量看板
-                </Button>
-              ) : null}
-              <Button
-                icon={<RollbackOutlined />}
-                disabled={!latestUndoable}
-                onClick={() => {
-                  if (!latestUndoable) return
-                  void window.electron.history.undo(latestUndoable.id)
-                    .then(() => {
-                      message.success(getUserFacingMessage('common.undoSucceeded', { summary: latestUndoable.summary }))
-                      notifyWorkspaceMutation()
-                    })
-                    .catch((error) => {
-                      console.error(error)
-                      message.error(getErrorMessage(error, 'common.undoFailed'))
-                    })
-                }}
-              >
-                撤销最近操作
-              </Button>
-              {currentPage !== recommendedKey ? (
-                <Button onClick={() => navigate(`/novels/${novelId}/${recommendedKey}`)}>
-                  推荐下一步
-                </Button>
-              ) : null}
-              <Button
-                icon={<LeftOutlined />}
-                disabled={!previousPageMeta}
-                onClick={() => previousPageMeta && navigate(`/novels/${novelId}/${previousPageMeta.key}`)}
-              >
-                上一步
-              </Button>
-              <Button
-                type="primary"
-                icon={<RightOutlined />}
-                disabled={!nextPageMeta}
-                onClick={() => nextPageMeta && navigate(`/novels/${novelId}/${nextPageMeta.key}`)}
-              >
-                下一步
-              </Button>
-            </div>
-          </div>
+          <ProjectTopbar
+            pageTitle={currentPageMeta.label}
+            onBack={() => navigate('/novels')}
+            onSearch={() => setQuickSearchOpen(true)}
+            onQuality={() => setQualityBoardOpen(true)}
+            onNextStep={() => navigate(`/novels/${novelId}/${recommendedRoute}`)}
+            nextStepLabel="推荐下一步"
+            showQuality={currentPage !== 'guide' && currentPage !== 'quality' && currentPage !== 'batch-workbench'}
+            showNextStep={currentPage !== workspaceSnapshot.nextStep.targetPage}
+            moreMenu={{
+              items: [
+                hasRegisteredClearHandler ? {
+                  key: 'clear',
+                  icon: <DeleteOutlined />,
+                  label: '清空当前步骤',
+                  danger: true,
+                  onClick: () => clearHandlerRef.current?.(),
+                } : null,
+                {
+                  key: 'shortcuts',
+                  icon: <QuestionCircleOutlined />,
+                  label: '快捷键',
+                  onClick: () => setShortcutHelpOpen(true),
+                },
+                {
+                  key: 'jump-chapter',
+                  label: '跳转章节',
+                  onClick: () => void ensureChapterListLoaded().then(() => setChapterJumpOpen(true)).catch(console.error),
+                },
+                {
+                  key: 'undo',
+                  icon: <RollbackOutlined />,
+                  label: '撤销最近操作',
+                  disabled: !latestUndoable,
+                  onClick: () => {
+                    if (!latestUndoable) return
+                    void window.electron.history.undo(latestUndoable.id)
+                      .then(() => {
+                        message.success(getUserFacingMessage('common.undoSucceeded', { summary: latestUndoable.summary }))
+                        notifyWorkspaceMutation()
+                      })
+                      .catch((error: unknown) => {
+                        console.error(error)
+                        message.error(getErrorMessage(error, 'common.undoFailed'))
+                      })
+                  },
+                },
+                { type: 'divider' as const },
+                {
+                  key: 'export',
+                  label: '导出',
+                  children: [
+                    {
+                      key: 'export-txt',
+                      label: '导出 TXT',
+                      onClick: () => void handleWorkspaceExport('txt'),
+                    },
+                    {
+                      key: 'export-md',
+                      label: '导出 Markdown',
+                      onClick: () => void handleWorkspaceExport('md'),
+                    },
+                    {
+                      key: 'export-docx',
+                      label: '导出 DOCX',
+                      onClick: () => void handleWorkspaceExport('docx'),
+                    },
+                    {
+                      key: 'export-epub',
+                      label: '导出 EPUB',
+                      onClick: () => void handleWorkspaceExport('epub'),
+                    },
+                  ],
+                },
+                {
+                  key: 'settings',
+                  label: '设置',
+                  onClick: () => navigate(`/novels/${novelId}/overview`),
+                },
+                { type: 'divider' as const },
+                {
+                  key: 'prev',
+                  icon: <LeftOutlined />,
+                  label: `上一步${previousPageMeta ? `：${previousPageMeta.label}` : ''}`,
+                  disabled: !previousPageMeta,
+                  onClick: () => previousPageMeta && navigate(`/novels/${novelId}/${previousPageMeta.route}`),
+                },
+                {
+                  key: 'next',
+                  icon: <RightOutlined />,
+                  label: `下一步${nextPageMeta ? `：${nextPageMeta.label}` : ''}`,
+                  disabled: !nextPageMeta,
+                  onClick: () => nextPageMeta && navigate(`/novels/${novelId}/${nextPageMeta.route}`),
+                },
+              ].filter(Boolean) as MenuProps['items'],
+            }}
+          />
 
           <div className="novel-route-shell__content-body">
             <Routes>
@@ -1024,7 +729,7 @@ export default function NovelRouter() {
               <Route path="batch-workbench" element={<BatchWorkbenchPage novelId={novelId} />} />
               <Route path="revision" element={<RevisionCenterPage novelId={novelId} />} />
               <Route path="quality" element={<QualityDashboard novelId={novelId} />} />
-              <Route path="*" element={<Navigate replace to={`/novels/${novelId}/${recommendedKey}`} />} />
+              <Route path="*" element={<Navigate replace to={`/novels/${novelId}/${recommendedRoute}`} />} />
             </Routes>
           </div>
         </div>

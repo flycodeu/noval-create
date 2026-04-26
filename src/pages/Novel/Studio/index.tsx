@@ -1,1037 +1,524 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Progress, Space, Tag, message } from 'antd'
+import { Alert, Button, Empty, Spin, Tag } from 'antd'
 import {
-  BarsOutlined,
-  CheckCircleOutlined,
+  ArrowRightOutlined,
   ClockCircleOutlined,
-  CompassOutlined,
-  EditOutlined,
-  EnvironmentOutlined,
-  FireOutlined,
-  GlobalOutlined,
-  RobotOutlined,
-  ShoppingOutlined,
-  TeamOutlined,
+  ExclamationCircleOutlined,
+  FileSearchOutlined,
+  HistoryOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons'
-import { useNavigate } from 'react-router-dom'
-import type { NovelConsistencyReport, NovelContextStatus, RevisionCenterSnapshot, RevisionTask } from '../../../types'
+import dayjs from 'dayjs'
+import relativeTime from 'dayjs/plugin/relativeTime'
+import 'dayjs/locale/zh-cn'
+import { useLocation, useNavigate } from 'react-router-dom'
+import type {
+  NovelConsistencyReport,
+  NovelContextStatus,
+  OperationLog,
+  QualityDashboardData,
+  RevisionCenterSnapshot,
+} from '../../../types'
+import MetricCard from '../../../components/novel/cards/MetricCard'
+import BlockerCard from '../../../components/novel/cards/BlockerCard'
+import SectionHeader from '../../../components/novel/common/SectionHeader'
+import ActionBar from '../../../components/novel/common/ActionBar'
+import NextStepPanel from '../../../components/novel/workflow/NextStepPanel'
+import ReadinessMeter from '../../../components/novel/workflow/ReadinessMeter'
+import StatusTag from '../../../components/novel/common/StatusTag'
 import { useNovelStore } from '../../../stores/novel.store'
-import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
-import { getCharacterBatchPreset, getItemGenerationProfile } from '../../../shared/creation-tools'
-import { parseProjectBriefSnapshot } from '../../../shared/project-brief'
-import { buildStorySettingsPayload, parseStorySettingsSnapshot } from '../../../shared/story-settings'
 import {
-  getFactionNameOptions,
-  getSpeciesNameOptions,
-  parseWorldRulesJson,
-  stringifyWorldRules,
-} from '../../../shared/genre-system'
-import { parseThemeVoiceSnapshot } from '../../../shared/theme-voice'
-import {
-  WorkspaceContextSummary,
-  WorkspaceMetric,
-  WorkspacePage,
-  WorkspacePanel,
-  WorkspaceStepGuide,
-} from '../components/WorkspaceShell'
-import {
-  EMPTY_WORKFLOW_STATS,
-  getWorkflowBlockers,
-  isEndgameDesignReady,
-  isProjectBriefReady,
-  isStoryCoreReady,
-  isStoryPlotReady,
-  isThemeVoiceReady,
-  loadWorkflowStats,
-  type WorkflowRunnableStepKey,
-  type WorkflowStats,
-} from '../workflow'
-import './index.css'
+  getWorkspaceSnapshot,
+  type WorkspaceSnapshot,
+} from '../../../shared/novel-workspace'
+import type { ProjectBlocker } from '../../../shared/workspace-types'
+import { EMPTY_WORKFLOW_STATS, loadWorkflowStats, type WorkflowStats } from '../workflow'
+
+dayjs.extend(relativeTime)
+dayjs.locale('zh-cn')
 
 interface Props {
   novelId: number
 }
 
-interface ReadinessCard {
-  key: string
+type QualitySummary = Pick<QualityDashboardData, 'productionReadiness' | 'batchHealth' | 'continuityHealth'> | null
+
+interface CurrentTaskCard {
   title: string
-  value: string
-  summary: string
-  ready: boolean
-  route: string
+  reason: string
+  affectedModules: string[]
+  actionLabel: string
+  targetRoute: string
+  impactedRoute?: string
+  canIgnoreOnce: boolean
+  blocker?: ProjectBlocker
 }
 
-interface StudioActionCard {
-  key: WorkflowRunnableStepKey
-  title: string
-  eyebrow: string
-  count: string
-  summary: string
-  ready: boolean
-  icon: React.ReactNode
-  run: () => Promise<void>
-  route: string
+function resolveWorkspaceRoute(targetPage: string) {
+  return targetPage === 'writing' ? 'writing/editor' : targetPage
 }
 
-function getIssueTagColor(severity: 'high' | 'medium' | 'low') {
-  if (severity === 'high') return 'error'
-  if (severity === 'medium') return 'warning'
+function stageDescription(groupKey: WorkspaceSnapshot['groups'][number]['key']) {
+  if (groupKey === 'foundation') return '立项、设定和文风底盘'
+  if (groupKey === 'world-assets') return '人物、地点、势力和道具资产'
+  if (groupKey === 'story-structure') return '线程、大纲、卷章结构和时间轴'
+  if (groupKey === 'chapter-production') return '合同、正文和章后回写'
+  if (groupKey === 'quality-control') return '修订闭环与持续质量监控'
+  return '项目状态'
+}
+
+function activityTone(log: OperationLog) {
+  if (log.operationType.includes('delete')) return 'danger'
+  if (log.operationType.includes('update') || log.operationType.includes('reindex')) return 'warm'
   return 'default'
-}
-
-function getIssueLabel(severity: 'high' | 'medium' | 'low') {
-  if (severity === 'high') return '高优先'
-  if (severity === 'medium') return '中优先'
-  return '低优先'
-}
-
-function getStudioTone(score: number) {
-  if (score >= 80) return '稳态'
-  if (score >= 60) return '可推进'
-  return '先修关键问题'
-}
-
-function getFreshnessTags(labels: string[], visibleCount = 2) {
-  if (labels.length <= visibleCount) return labels
-  return [...labels.slice(0, visibleCount), `+${labels.length - visibleCount}`]
 }
 
 export default function StudioPage({ novelId }: Props) {
   const navigate = useNavigate()
+  const location = useLocation()
   const { currentNovel, setCurrentNovel } = useNovelStore()
+  const [loading, setLoading] = useState(true)
   const [stats, setStats] = useState<WorkflowStats>(EMPTY_WORKFLOW_STATS)
   const [consistencyReport, setConsistencyReport] = useState<NovelConsistencyReport | null>(null)
   const [contextStatus, setContextStatus] = useState<NovelContextStatus | null>(null)
+  const [qualitySummary, setQualitySummary] = useState<QualitySummary>(null)
   const [revisionSnapshot, setRevisionSnapshot] = useState<RevisionCenterSnapshot | null>(null)
-  const [runningKey, setRunningKey] = useState<string | null>(null)
-  const [taskActionKey, setTaskActionKey] = useState<string | null>(null)
+  const [recentActivities, setRecentActivities] = useState<OperationLog[]>([])
+  const [ignoredBlockerIds, setIgnoredBlockerIds] = useState<string[]>([])
 
-  const projectBrief = useMemo(
-    () => parseProjectBriefSnapshot(currentNovel?.projectBriefJson),
-    [currentNovel?.projectBriefJson],
-  )
-  const themeVoice = useMemo(
-    () => parseThemeVoiceSnapshot(currentNovel?.themeVoiceJson),
-    [currentNovel?.themeVoiceJson],
-  )
-  const storySettings = useMemo(
-    () => parseStorySettingsSnapshot(currentNovel?.settingsJson),
-    [currentNovel?.settingsJson],
-  )
-  const worldRules = useMemo(
-    () => parseWorldRulesJson(currentNovel?.worldRulesJson, currentNovel?.genreName),
-    [currentNovel?.genreName, currentNovel?.worldRulesJson],
-  )
-  const speciesOptions = useMemo(() => getSpeciesNameOptions(worldRules), [worldRules])
-  const factionOptions = useMemo(() => getFactionNameOptions(worldRules), [worldRules])
-  const characterPreset = useMemo(
-    () => getCharacterBatchPreset(currentNovel?.genreName, speciesOptions),
-    [currentNovel?.genreName, speciesOptions],
-  )
-  const itemProfile = useMemo(
-    () => getItemGenerationProfile(currentNovel?.genreName),
-    [currentNovel?.genreName],
-  )
+  const refreshConsole = useCallback(async () => {
+    setLoading(true)
+    try {
+      const [novel, workflowStats, report, nextContextStatus, qualityDashboard, revisions, activities] = await Promise.all([
+        window.electron.novel.get(novelId),
+        loadWorkflowStats(novelId),
+        window.electron.novel.runConsistencyCheck(novelId),
+        window.electron.novel.getContextStatus(novelId),
+        window.electron.quality.getDashboard(novelId).catch(() => null),
+        window.electron.revision.getSnapshot(novelId).catch(() => null),
+        window.electron.history.listRecent(novelId, 8).catch(() => []),
+      ])
 
-  const refreshWorkflowContext = useCallback(async () => {
-    const [nextNovel, nextStats] = await Promise.all([
-      window.electron.novel.get(novelId),
-      loadWorkflowStats(novelId),
-    ])
+      if (novel) {
+        setCurrentNovel(novel)
+      }
 
-    if (nextNovel) setCurrentNovel(nextNovel)
-    setStats(nextStats)
-
-    return {
-      novel: nextNovel,
-      stats: nextStats,
+      setStats(workflowStats)
+      setConsistencyReport(report)
+      setContextStatus(nextContextStatus)
+      setRevisionSnapshot(revisions)
+      setRecentActivities(activities)
+      setQualitySummary(qualityDashboard ? {
+        productionReadiness: qualityDashboard.productionReadiness,
+        batchHealth: qualityDashboard.batchHealth,
+        continuityHealth: qualityDashboard.continuityHealth,
+      } : null)
+    } finally {
+      setLoading(false)
     }
   }, [novelId, setCurrentNovel])
 
-  const refreshDiagnostics = useCallback(async () => {
-    const [report, nextContextStatus, snapshot] = await Promise.all([
-      window.electron.novel.runConsistencyCheck(novelId),
-      window.electron.novel.getContextStatus(novelId),
-      window.electron.revision.getSnapshot(novelId),
-    ])
-
-    setConsistencyReport(report)
-    setContextStatus(nextContextStatus)
-    setRevisionSnapshot(snapshot)
-  }, [novelId])
-
   useEffect(() => {
-    void Promise.all([refreshWorkflowContext(), refreshDiagnostics()])
-  }, [refreshDiagnostics, refreshWorkflowContext])
+    void refreshConsole()
+  }, [refreshConsole])
 
-  const syncWorldRulesCore = useCallback(async () => {
-    const normalized = parseWorldRulesJson(currentNovel?.worldRulesJson, currentNovel?.genreName)
-    await window.electron.novel.update(novelId, {
-      worldRulesJson: stringifyWorldRules(normalized),
-    })
+  const workspaceSnapshot = useMemo(
+    () => getWorkspaceSnapshot(currentNovel, stats, {
+      viewMode: currentNovel?.launchMode === 'fast_launch' ? 'quick' : 'professional',
+      qualitySummary: qualitySummary || undefined,
+    }),
+    [currentNovel, qualitySummary, stats],
+  )
 
-    const updated = await window.electron.novel.get(novelId)
-    if (updated) setCurrentNovel(updated)
-  }, [currentNovel?.genreName, currentNovel?.worldRulesJson, novelId, setCurrentNovel])
+  const visibleBlockers = useMemo(
+    () => workspaceSnapshot.blockers.filter((item) => !ignoredBlockerIds.includes(item.id)),
+    [ignoredBlockerIds, workspaceSnapshot.blockers],
+  )
 
-  const generateMapCore = useCallback(async () => {
-    const layerCounts = [...worldRules.mapBlueprint.levels]
-      .sort((left, right) => left.depth - right.depth)
-      .map((level) => level.suggestedCount)
+  const currentBlocker = visibleBlockers[0] || null
+  const queryPanel = useMemo(
+    () => new URLSearchParams(location.search).get('panel'),
+    [location.search],
+  )
 
-    await window.electron.map.batchGenerate(novelId, {
-      layerCounts,
-      parentBatchSize: 1,
-    })
-  }, [novelId, worldRules.mapBlueprint.levels])
+  const moduleLabelRouteMap = useMemo(() => {
+    const pairs = workspaceSnapshot.modules.flatMap((item) => [
+      [item.label, item.route] as const,
+      [item.key, item.route] as const,
+    ])
+    return new Map<string, string>(pairs)
+  }, [workspaceSnapshot.modules])
 
-  const generateCharactersCore = useCallback(async () => {
-    if (!stats.hasProtagonist) {
-      await window.electron.character.generateProtagonist(novelId, { forceDifferentFromExisting: true })
-    }
-
-    await window.electron.character.batchGenerate(novelId, {
-      majorCount: characterPreset.majorCount,
-      minorCount: characterPreset.minorCount,
-      antagonistCount: characterPreset.antagonistCount,
-      supportingCount: characterPreset.supportingCount,
-      genderRatio: characterPreset.genderRatio,
-      preferredSpecies: characterPreset.preferredSpecies,
-      factionBias: factionOptions.slice(0, 3),
-      helperRoles: characterPreset.helperRoles,
-      specialRequirements: '人物必须补剧情功能位，且与现有名字、冲突功能、关系站位明显区分。',
-      batchSize: 6,
-      diversityConstraints: [
-        '姓名来源不要集中在同一套字面风格',
-        '功能位不能重复',
-        '核心恐惧、利益立场和关系张力不能批量同质化',
-      ],
-    })
-  }, [characterPreset, factionOptions, novelId, stats.hasProtagonist])
-
-  const generateItemsCore = useCallback(async () => {
-    await window.electron.item.generate(novelId, {
-      count: itemProfile.defaultBatch,
-      templateOnly: false,
-      refreshTemplates: true,
-      batchSize: 4,
-      focus: '优先生成能绑定人物、地点、事件和资源流转的具体物品，避免纯装饰道具。',
-    })
-  }, [itemProfile.defaultBatch, novelId])
-
-  const generateThreadsCore = useCallback(async () => {
-    const result = await window.electron.thread.generate(novelId, {
-      count: 8,
-      batchSize: 4,
-      focus: '优先补主线压力、关系拉扯、悬念回收和结局回响，避免功能重复。',
-    })
-
-    if (result.createdCount <= 0) {
-      throw new Error(result.warnings[0] || getUserFacingMessage('studio.threadGenerationEmpty'))
-    }
-  }, [novelId])
-
-  const generateStoryDesignCore = useCallback(async () => {
-    const result = await window.electron.ai.generateCoreSettings({
-      novelId,
-      subplotCount: 8,
-      requirements: '故事设计必须建立在已有世界规则、地图、人物、物品和线程之上，减少重复模板与空泛口号。',
-    })
-
-    const payload = buildStorySettingsPayload({
-      storyDesign: {
-        storyGoal: result.story_goal,
-        coreConflict: result.core_conflict,
-        mainPlot: result.main_plot,
-        subPlotsList: result.sub_plots_list,
-        rhythmSetup: result.rhythm_setup,
-        rhythmConflict: result.rhythm_conflict,
-        rhythmEnding: result.rhythm_ending,
-        endingType: result.ending_type,
-        ending: result.ending,
-      },
-    }, currentNovel?.settingsJson)
-
-    await window.electron.novel.update(novelId, {
-      settingsJson: JSON.stringify(payload),
-    })
-
-    const updated = await window.electron.novel.get(novelId)
-    if (updated) setCurrentNovel(updated)
-  }, [currentNovel?.settingsJson, novelId, setCurrentNovel])
-
-  const generateOutlineCore = useCallback(async () => {
-    await window.electron.outline.generateArcs(novelId)
-  }, [novelId])
-
-  const generateTimelineCore = useCallback(async () => {
-    await window.electron.timeline.generate(novelId, {
-      count: 12,
-      batchSize: 4,
-      focus: '优先围绕主角、关键地点、关键物品和主要冲突生成可回查的事件链。',
-    })
-  }, [novelId])
-
-  const runStep = useCallback(async (
-    key: string,
-    action: () => Promise<void>,
-    successText: string,
-  ) => {
-    setRunningKey(key)
-
-    try {
-      await action()
-      await Promise.all([refreshWorkflowContext(), refreshDiagnostics()])
-      message.success(successText)
-    } catch (error) {
-      console.error(error)
-      message.error(getErrorMessage(error, 'studio.runFailed'))
-    } finally {
-      setRunningKey(null)
-    }
-  }, [refreshDiagnostics, refreshWorkflowContext])
-
-  const ensureStepReady = useCallback(async (step: WorkflowRunnableStepKey) => {
-    const workflowContext = await refreshWorkflowContext()
-    const blockers = getWorkflowBlockers(step, workflowContext.novel, workflowContext.stats)
-
-    if (blockers.length > 0) {
-      message.warning(blockers.join('\n'))
-      return false
-    }
-
-    return true
-  }, [refreshWorkflowContext])
-
-  const runGuardedStep = useCallback(async (
-    step: WorkflowRunnableStepKey,
-    action: () => Promise<void>,
-    successText: string,
-  ) => {
-    const ready = await ensureStepReady(step)
-    if (!ready) return
-    await runStep(step, action, successText)
-  }, [ensureStepReady, runStep])
-
-  const runPipeline = useCallback(async () => {
-    setRunningKey('pipeline')
-
-    try {
-      if (!(await ensureStepReady('world-rules'))) return
-      await syncWorldRulesCore()
-      await refreshWorkflowContext()
-      if (!(await ensureStepReady('map'))) return
-      await generateMapCore()
-      await refreshWorkflowContext()
-      if (!(await ensureStepReady('characters'))) return
-      await generateCharactersCore()
-      await refreshWorkflowContext()
-      if (!(await ensureStepReady('items'))) return
-      await generateItemsCore()
-      await refreshWorkflowContext()
-      if (!(await ensureStepReady('threads'))) return
-      await generateThreadsCore()
-      await refreshWorkflowContext()
-      if (!(await ensureStepReady('story-design'))) return
-      await generateStoryDesignCore()
-      await refreshWorkflowContext()
-      if (!(await ensureStepReady('outline'))) return
-      await generateOutlineCore()
-      await refreshWorkflowContext()
-      if (!(await ensureStepReady('timeline'))) return
-      await generateTimelineCore()
-      await Promise.all([refreshWorkflowContext(), refreshDiagnostics()])
-      message.success(getUserFacingMessage('studio.pipelineSucceeded'))
-    } catch (error) {
-      console.error(error)
-      message.error(getErrorMessage(error, 'studio.pipelineFailed'))
-    } finally {
-      setRunningKey(null)
-    }
-  }, [
-    ensureStepReady,
-    generateCharactersCore,
-    generateItemsCore,
-    generateMapCore,
-    generateOutlineCore,
-    generateStoryDesignCore,
-    generateThreadsCore,
-    generateTimelineCore,
-    refreshDiagnostics,
-    refreshWorkflowContext,
-    syncWorldRulesCore,
-  ])
-
-  const systemIssueTasks = useMemo(() => (
-    (revisionSnapshot?.tasks || [])
-      .filter((task) => task.taskSource === 'system' && task.status !== 'resolved' && task.status !== 'ignored')
-      .slice(0, 6)
-  ), [revisionSnapshot])
-
-  const openRelatedTaskPage = useCallback((task: RevisionTask) => {
-    navigate(`/novels/${novelId}/${task.relatedPage || 'revision'}`)
-  }, [navigate, novelId])
-
-  const handleTaskStatus = useCallback(async (task: RevisionTask, status: RevisionTask['status']) => {
-    setTaskActionKey(`status:${task.id}:${status}`)
-    try {
-      await window.electron.revision.update(task.id, { status })
-      await refreshDiagnostics()
-      message.success(getUserFacingMessage(
-        status === 'ignored'
-          ? 'revision.statusIgnored'
-          : status === 'open'
-            ? 'revision.statusReopened'
-            : 'revision.statusUpdated',
-      ))
-    } catch (error) {
-      console.error(error)
-      message.error(getErrorMessage(error, 'revision.statusUpdateFailed'))
-    } finally {
-      setTaskActionKey(null)
-    }
-  }, [refreshDiagnostics])
-
-  const handleAutoFixTask = useCallback(async (task: RevisionTask) => {
-    setTaskActionKey(`autofix:${task.id}`)
-    try {
-      const result = await window.electron.revision.autoFix(task.id)
-      await refreshDiagnostics()
-      if (result.status === 'unsupported') {
-        message.warning(result.message)
-        if (result.relatedPage) {
-          navigate(`/novels/${novelId}/${result.relatedPage}`)
-        }
-        return
+  const currentTask = useMemo<CurrentTaskCard>(() => {
+    if (!currentBlocker) {
+      return {
+        title: workspaceSnapshot.nextStep.title,
+        reason: workspaceSnapshot.nextStep.reason,
+        affectedModules: [workspaceSnapshot.stage.label],
+        actionLabel: workspaceSnapshot.nextStep.actionLabel,
+        targetRoute: resolveWorkspaceRoute(workspaceSnapshot.nextStep.targetPage),
+        canIgnoreOnce: false,
       }
-      if (result.status === 'failed') {
-        message.error(result.message)
-        return
-      }
-      message.success(result.message)
-    } catch (error) {
-      console.error(error)
-      message.error(getErrorMessage(error, 'revision.autofixFailed'))
-    } finally {
-      setTaskActionKey(null)
     }
-  }, [navigate, novelId, refreshDiagnostics])
 
-  const readinessCards = useMemo<ReadinessCard[]>(() => ([
-    {
-      key: 'brief',
-      title: '项目立项',
-      value: `${projectBrief.readyCount}/6`,
-      summary: projectBrief.readerPromise || '先钉读者承诺、赛道和禁区。',
-      ready: isProjectBriefReady(currentNovel),
-      route: 'project-brief',
-    },
-    {
-      key: 'premise',
-      title: '基础设定',
-      value: `${storySettings.premiseReadyCount}/5`,
-      summary: storySettings.premise.constraints || '主角起点和底层约束还没收紧。',
-      ready: isStoryCoreReady(currentNovel),
-      route: 'core-settings',
-    },
-    {
-      key: 'voice',
-      title: '主题与文风',
-      value: `${themeVoice.readyCount}/6`,
-      summary: themeVoice.styleRules || '先把主题、时态、视角和禁写规则写成硬边界。',
-      ready: isThemeVoiceReady(currentNovel),
-      route: 'theme-voice',
-    },
-    {
-      key: 'endgame',
-      title: '终局设计',
-      value: `${storySettings.endgameReadyCount}/8`,
-      summary: storySettings.endgameDesign.lastScene || storySettings.endgameDesign.finalConflict || '提前锁定最终冲突、兑现承诺和最后一幕。',
-      ready: isEndgameDesignReady(currentNovel),
-      route: 'endgame',
-    },
-    {
-      key: 'design',
-      title: '故事设计',
-      value: `${storySettings.storyDesignReadyCount}/4`,
-      summary: storySettings.storyDesign.mainPlot || '目标、冲突、推进链和结局还未闭合。',
-      ready: isStoryPlotReady(currentNovel),
-      route: 'story-design',
-    },
-  ]), [currentNovel, projectBrief, storySettings, themeVoice])
+    const impactedRoute = currentBlocker.affectedModules
+      .map((item) => moduleLabelRouteMap.get(item))
+      .find(Boolean)
+    return {
+      title: currentBlocker.title,
+      reason: currentBlocker.reason,
+      affectedModules: currentBlocker.affectedModules,
+      actionLabel: currentBlocker.suggestedAction.label,
+      targetRoute: resolveWorkspaceRoute(currentBlocker.suggestedAction.targetPage),
+      impactedRoute: impactedRoute || resolveWorkspaceRoute(currentBlocker.suggestedAction.targetPage),
+      canIgnoreOnce: currentBlocker.canIgnoreOnce,
+      blocker: currentBlocker,
+    }
+  }, [currentBlocker, moduleLabelRouteMap, workspaceSnapshot.nextStep, workspaceSnapshot.stage.label])
 
-  const actionCards = useMemo<StudioActionCard[]>(() => ([
-    {
-      key: 'world-rules',
-      title: '同步世界规则',
-      eyebrow: '故事底盘',
-      count: `${speciesOptions.length} 种族 / ${factionOptions.length} 势力`,
-      summary: '统一题材规则、势力结构、地图蓝图和时间制度，后面的角色与事件都从这里取口径。',
-      ready: Boolean(currentNovel?.worldRulesJson),
-      icon: <GlobalOutlined />,
-      run: syncWorldRulesCore,
-      route: 'world-rules',
-    },
-    {
-      key: 'map',
-      title: '铺地图骨架',
-      eyebrow: '资产图谱',
-      count: `${stats.mapCount} 个地点节点`,
-      summary: '先给角色和事件真实落点，减少“空气里推进剧情”。',
-      ready: stats.mapCount > 0,
-      icon: <EnvironmentOutlined />,
-      run: generateMapCore,
-      route: 'map',
-    },
-    {
-      key: 'characters',
-      title: '生成人物网络',
-      eyebrow: '人物系统',
-      count: `${stats.characterCount} 人 / 主角${stats.hasProtagonist ? '已建' : '未建'}`,
-      summary: '优先补功能位、对立位和关系张力，严格避开已拒绝方案和撞名结果。',
-      ready: stats.characterCount > 0 && stats.hasProtagonist,
-      icon: <TeamOutlined />,
-      run: generateCharactersCore,
-      route: 'characters',
-    },
-    {
-      key: 'items',
-      title: '补物品资产',
-      eyebrow: '资产图谱',
-      count: `${stats.itemCount} 个物品`,
-      summary: '道具必须可追踪、可绑定、可回收，不能只是装饰性的“神奇物件”。',
-      ready: stats.itemCount > 0,
-      icon: <ShoppingOutlined />,
-      run: generateItemsCore,
-      route: 'items',
-    },
-    {
-      key: 'threads',
-      title: '挂故事线程',
-      eyebrow: '结构推进',
-      count: `${stats.threadCount} 条线程`,
-      summary: '把主线、支线、悬念和关系推进写成可回查对象，不让后续正文失忆。',
-      ready: stats.threadCount > 0,
-      icon: <BarsOutlined />,
-      run: generateThreadsCore,
-      route: 'threads',
-    },
-    {
-      key: 'story-design',
-      title: '收主线设计',
-      eyebrow: '结构推进',
-      count: `${storySettings.storyDesignReadyCount}/4`,
-      summary: '在世界、人物、物品、线程齐备后再统一主线设计，避免空想式剧情。',
-      ready: isStoryPlotReady(currentNovel),
-      icon: <CompassOutlined />,
-      run: generateStoryDesignCore,
-      route: 'story-design',
-    },
-    {
-      key: 'outline',
-      title: '拆故事弧',
-      eyebrow: '长篇推进',
-      count: `${stats.outlineCount} 条故事弧`,
-      summary: '把长篇推进拆成稳定的结构骨架，为卷章规划和正文铺路。',
-      ready: stats.outlineCount > 0,
-      icon: <EditOutlined />,
-      run: generateOutlineCore,
-      route: 'outline',
-    },
-    {
-      key: 'timeline',
-      title: '补时间轴',
-      eyebrow: '长篇推进',
-      count: `${stats.timelineCount} 个事件`,
-      summary: '让谁在何时何地做了什么可以回查，压低长篇中段跑偏概率。',
-      ready: stats.timelineCount > 0,
-      icon: <ClockCircleOutlined />,
-      run: generateTimelineCore,
-      route: 'timeline',
-    },
-  ]), [
-    currentNovel,
-    factionOptions.length,
-    generateCharactersCore,
-    generateItemsCore,
-    generateMapCore,
-    generateOutlineCore,
-    generateStoryDesignCore,
-    generateThreadsCore,
-    generateTimelineCore,
-    speciesOptions.length,
-    stats,
-    storySettings.storyDesignReadyCount,
-    syncWorldRulesCore,
-  ])
+  const stageGroups = useMemo(
+    () => workspaceSnapshot.groups.filter((group) => group.key !== 'project-status'),
+    [workspaceSnapshot.groups],
+  )
 
-  const nextAction = actionCards.find((card) => !card.ready) || null
-  const readyReadinessCount = readinessCards.filter((card) => card.ready).length
-  const nextReadinessCard = readinessCards.find((card) => !card.ready) || null
-  const readinessPercent = Math.round((actionCards.filter((card) => card.ready).length / Math.max(actionCards.length, 1)) * 100)
-  const storyBibleScore = Math.round((
-    projectBrief.readyCount
-    + themeVoice.readyCount
-    + storySettings.premiseReadyCount
-    + storySettings.endgameReadyCount
-    + storySettings.storyDesignReadyCount
-  ) / 29 * 100)
-  const focusAreas = (consistencyReport?.focusAreas || []).slice(0, 3)
-  const staleAssetTagList = getFreshnessTags(contextStatus?.staleAssetLabels || [])
-  const freshnessCards = [
-    {
-      title: '剧情衔接',
-      value: contextStatus?.staleChapterCount
-        ? `${contextStatus.staleChapterCount} 章待同步`
-        : contextStatus?.totalChapterCount
-          ? `已同步到第 ${contextStatus.totalChapterCount} 章`
-          : '尚未生成章节',
-      desc: contextStatus?.staleChapterCount
-        ? '正文里还有章节挂着旧上下文，继续量产会放大承接断层。'
-        : '当前正文与最新设定基本一致，可以继续推进。',
-        hint: contextStatus?.staleChapterCount
-          ? '这些章节需要处理。'
-          : '当前不需要额外回补章节同步。',
-      tone: contextStatus?.staleChapterCount ? 'stale' : 'ok',
-      tags: [] as string[],
-    },
-    {
-      title: '记忆检查点',
-      value: contextStatus?.staleCheckpointCount ? `${contextStatus.staleCheckpointCount} 份待刷新` : '检查点已同步',
-      desc: contextStatus?.staleCheckpointCount
-        ? '长期记忆还是旧版本，继续跑大纲或正文会沿用旧长程记忆。'
-        : '长期记忆检查点已跟上当前设定。',
-        hint: contextStatus?.staleCheckpointCount
-          ? '这些检查点需要刷新。'
-          : '可以直接继续后续编排动作。',
-      tone: contextStatus?.staleCheckpointCount ? 'warn' : 'ok',
-      tags: [] as string[],
-    },
-    {
-      title: '资产新鲜度',
-      value: contextStatus?.staleAssetCount ? `${contextStatus.staleAssetCount} 类待校准` : '资产状态最新',
-      desc: contextStatus?.staleAssetCount
-        ? '部分世界资产仍挂着旧设定，后续时间轴和故事弧会继续吃到旧上下文。'
-        : '关键世界资产没有发现明显的设定滞后。',
-        hint: contextStatus?.staleAssetCount
-          ? '这些资产需要处理。'
-          : '当前资产可继续支撑后续生成。',
-      tone: contextStatus?.staleAssetCount ? 'warn' : 'ok',
-      tags: contextStatus?.staleAssetCount ? staleAssetTagList : [],
-    },
-  ]
+  const riskItems = useMemo(() => {
+    const items = [
+      ...(qualitySummary?.productionReadiness.blockers || []).map((item) => `生产阻塞：${item}`),
+      ...(qualitySummary?.productionReadiness.warnings || []).map((item) => `生产预警：${item}`),
+      ...(consistencyReport?.focusAreas || []).map((item) => `结构关注：${item}`),
+      contextStatus?.staleChapterCount
+        ? `上下文待同步：${contextStatus.staleChapterCount} 章仍引用旧上下文。`
+        : '',
+      contextStatus?.staleCheckpointCount
+        ? `长期记忆检查点：${contextStatus.staleCheckpointCount} 份待刷新。`
+        : '',
+    ].filter(Boolean)
+
+    return items.slice(0, 6)
+  }, [consistencyReport?.focusAreas, contextStatus?.staleChapterCount, contextStatus?.staleCheckpointCount, qualitySummary?.productionReadiness.blockers, qualitySummary?.productionReadiness.warnings])
+
+  const topRevisionTasks = useMemo(
+    () => (revisionSnapshot?.tasks || [])
+      .filter((task) => task.status !== 'resolved' && task.status !== 'ignored')
+      .slice(0, 5),
+    [revisionSnapshot?.tasks],
+  )
+
+  const keyEntrances = useMemo(() => ([
+    { key: 'contracts', label: '章节合同', route: 'contracts', hint: '先把章节约束压稳' },
+    { key: 'writing', label: '正文写作', route: 'writing/editor', hint: '进入章节生产台' },
+    { key: 'writeback', label: '章后回写', route: 'writeback', hint: '同步人物、伏笔与时间轴' },
+    { key: 'revision', label: '修订中心', route: 'revision', hint: '处理系统反推任务' },
+    { key: 'quality', label: '质量监控', route: 'quality', hint: '检查生产健康和趋势' },
+  ]), [])
+
+  if (loading) {
+    return (
+      <div className="novel-dashboard__loading">
+        <Spin size="large" />
+      </div>
+    )
+  }
 
   return (
-    <WorkspacePage
-      className="studio-page"
-      layout="wide"
-      heroVariant="compact"
-      eyebrow="小说总控台"
-      title="底盘、资产与质量统一编排"
-      description="统一查看底盘完成度、资产生成状态和质量风险。"
-      guide={(
-        <WorkspaceStepGuide
-          title="进入总控台先做什么"
-          steps={[
-            { title: '先看下一步与阻塞项', description: '顶层先确认当前最缺的动作、上下文是否过期、是否还有高优先级修订任务。', status: 'focus' },
-            { title: '再决定跑批量动作还是进页面精修', description: '能直接编排就执行动作卡；遇到人物、地图、线程等复杂问题时直接跳转到专业页。', status: 'todo' },
-            { title: '最后处理系统修复闭环', description: '高优先级系统任务优先处理，避免旧上下文和旧资产继续污染后续生成。', status: 'todo' },
-          ]}
+    <div className="novel-dashboard">
+      <div className="novel-dashboard__hero">
+        <section className="novel-dashboard__task-card">
+          <SectionHeader
+            eyebrow="当前任务"
+            title={currentBlocker ? '当前最该处理：先清 blocker' : `当前最该处理：${currentTask.title}`}
+            description={currentTask.reason}
+            extra={currentBlocker ? <Tag color="volcano">阻塞中</Tag> : <Tag color="gold">可推进</Tag>}
+          />
+          <div className="novel-dashboard__task-meta">
+            <div className="novel-dashboard__task-row">
+              <span>原因</span>
+              <strong>{currentTask.reason}</strong>
+            </div>
+            <div className="novel-dashboard__task-row">
+              <span>影响范围</span>
+              <strong>{currentTask.affectedModules.join('、')}</strong>
+            </div>
+            <div className="novel-dashboard__task-row">
+              <span>当前阶段</span>
+              <strong>{workspaceSnapshot.stage.label}</strong>
+            </div>
+          </div>
+          <ActionBar align="start">
+            <Button
+              type="primary"
+              icon={<ThunderboltOutlined />}
+              onClick={() => navigate(`/novels/${novelId}/${currentTask.targetRoute}`)}
+            >
+              {currentTask.actionLabel}
+            </Button>
+            <Button
+              icon={<FileSearchOutlined />}
+              onClick={() => navigate(`/novels/${novelId}/${currentTask.impactedRoute || currentTask.targetRoute}`)}
+            >
+              查看影响
+            </Button>
+            {currentTask.canIgnoreOnce && currentTask.blocker ? (
+              <Button onClick={() => {
+                if (!currentTask.blocker) return
+                setIgnoredBlockerIds((current) => [...current, currentTask.blocker!.id])
+              }}>
+                暂时忽略
+              </Button>
+            ) : null}
+          </ActionBar>
+        </section>
+
+        <ReadinessMeter readiness={workspaceSnapshot.readiness} />
+      </div>
+
+      <div className="novel-dashboard__metrics">
+        <MetricCard
+          label="当前阶段"
+          value={workspaceSnapshot.stage.label}
+          hint={workspaceSnapshot.stage.description}
+          tone="warm"
         />
-      )}
-      actions={(
-        <Space wrap>
-          <Button
-            type="primary"
-            icon={<RobotOutlined />}
-            loading={runningKey === 'pipeline'}
-            onClick={() => void runPipeline()}
-          >
-            运行首版骨架编排
-          </Button>
-          <Button icon={<ThunderboltOutlined />} onClick={() => navigate(`/novels/${novelId}/${nextAction?.route || 'writing'}`)}>
-            {nextAction ? `处理下一步：${nextAction.title}` : '进入正文写作'}
-          </Button>
-        </Space>
-      )}
-      contextSummary={(
-        <WorkspaceContextSummary
-          items={[
-            { label: '题材', value: currentNovel?.genreName || '未设置' },
-            { label: '当前焦点', value: nextAction?.title || '转入写作与修订' },
-            { label: '主角状态', value: stats.hasProtagonist ? '已建立' : '待建立' },
-            { label: '待同步章节', value: contextStatus?.staleChapterCount ? `${contextStatus.staleChapterCount} 章` : '无' },
-            { label: '记忆检查点', value: contextStatus?.staleCheckpointCount ? `${contextStatus.staleCheckpointCount} 份待刷新` : '已同步' },
-            { label: '资产新鲜度', value: contextStatus?.staleAssetCount ? `${contextStatus.staleAssetCount} 类待校准` : '资产稳定' },
-          ]}
+        <MetricCard
+          label="模块完成度"
+          value={`${workspaceSnapshot.moduleDoneCount}/${workspaceSnapshot.moduleTotalCount}`}
+          hint={currentNovel?.launchMode === 'fast_launch' ? '快速模式 8 个关键步骤' : '专业模式完整链路'}
         />
-      )}
-      metrics={(
-        <>
-          <WorkspaceMetric label="故事底盘" value={`${storyBibleScore}%`} tone="warm" hint="项目立项、基础设定、主题文风、故事设计的综合完成度" />
-          <WorkspaceMetric label="资产图谱" value={stats.mapCount + stats.characterCount + stats.itemCount + stats.threadCount + stats.timelineCount} tone="cool" hint="地点、人物、物品、线程、时间轴总数" />
-          <WorkspaceMetric label="结构体检" value={consistencyReport ? `${consistencyReport.readinessScore} 分` : '加载中'} hint={consistencyReport ? getStudioTone(consistencyReport.readinessScore) : '正在分析全书健康度'} />
-          <WorkspaceMetric label="编排进度" value={`${readinessPercent}%`} hint={`${actionCards.filter((card) => card.ready).length}/${actionCards.length} 个关键环节已就绪`} />
-        </>
-      )}
-      aside={(
-        <>
-          <WorkspacePanel title="质量控制台" description="当前最值得优先处理的问题。" scrollable sticky>
-            <div className="studio-health-card">
-              <div className="studio-health-card__score">
-                <strong>{consistencyReport?.readinessScore ?? '--'}</strong>
-                <span>{consistencyReport ? getStudioTone(consistencyReport.readinessScore) : '分析中'}</span>
+        <MetricCard
+          label="高优先风险"
+          value={visibleBlockers.length}
+          hint={visibleBlockers.length > 0 ? '建议先清 blocker 再推进正文' : '当前没有 blocker'}
+          tone={visibleBlockers.length > 0 ? 'danger' : 'success'}
+        />
+        <MetricCard
+          label="上下文版本"
+          value={contextStatus ? `v${contextStatus.contextVersion}` : '未建立'}
+          hint={contextStatus?.staleChapterCount ? `${contextStatus.staleChapterCount} 章待同步` : '当前上下文稳定'}
+        />
+        <MetricCard
+          label="待回写"
+          value={qualitySummary?.productionReadiness.writebackPendingCount || 0}
+          hint={qualitySummary?.productionReadiness.writebackFailedCount
+            ? `${qualitySummary.productionReadiness.writebackFailedCount} 章回写失败`
+            : '资产总账闭环情况'}
+          tone={(qualitySummary?.productionReadiness.writebackPendingCount || 0) > 0 ? 'warm' : 'default'}
+        />
+      </div>
+
+      <section className="novel-dashboard__panel">
+        <SectionHeader
+          eyebrow="阶段进度"
+          title="项目阶段面板"
+          description="进入项目后先看当前推进到哪个阶段，再决定补底盘还是进入章节生产。"
+        />
+        <div className="novel-dashboard__stage-grid">
+          {stageGroups.map((group) => (
+            <button
+              key={group.key}
+              type="button"
+              className={`novel-dashboard__stage-card ${workspaceSnapshot.stage.key === group.key ? 'is-active' : ''}`}
+              onClick={() => navigate(`/novels/${novelId}/${group.route}`)}
+            >
+              <div className="novel-dashboard__stage-card-head">
+                <strong>{group.title}</strong>
+                <StatusTag status={group.status} size="small" />
               </div>
-              <div className="studio-health-card__stats">
-                <div><strong>{consistencyReport?.highCount ?? 0}</strong><span>高优先</span></div>
-                <div><strong>{consistencyReport?.mediumCount ?? 0}</strong><span>中优先</span></div>
-                <div><strong>{consistencyReport?.lowCount ?? 0}</strong><span>低优先</span></div>
+              <div className="novel-dashboard__stage-card-value">{`${group.completedCount}/${group.totalCount}`}</div>
+              <div className="novel-dashboard__stage-card-copy">
+                <span>{stageDescription(group.key)}</span>
+                <span>{group.blockerCount > 0 ? `${group.blockerCount} 个 blocker` : '当前无 blocker'}</span>
               </div>
-            </div>
+            </button>
+          ))}
+        </div>
+      </section>
 
-            <div className="studio-freshness-meta">
-              <span>{`当前上下文版本 v${contextStatus?.contextVersion ?? '--'}`}</span>
-              <span>{contextStatus?.totalChapterCount ? `已纳入 ${contextStatus.totalChapterCount} 章正文` : '尚未生成正文章节'}</span>
-            </div>
-
-            <div className="studio-freshness-grid">
-              {freshnessCards.map((card) => (
-                <section key={card.title} className={`studio-freshness-card studio-freshness-card--${card.tone}`}>
-                  <div className="studio-freshness-card__title">{card.title}</div>
-                  <strong className="studio-freshness-card__value">{card.value}</strong>
-                  <p className="studio-freshness-card__desc">{card.desc}</p>
-                  {card.tags.length > 0 ? (
-                    <div className="studio-freshness-card__tags">
-                      {card.tags.map((tag) => (
-                        <span key={`${card.title}-${tag}`} className="studio-freshness-card__tag">{tag}</span>
-                      ))}
-                    </div>
-                  ) : null}
-                  <div className="studio-freshness-card__hint">{card.hint}</div>
-                </section>
-              ))}
-            </div>
-
-            {focusAreas.length > 0 ? (
-              <div className="studio-note-list">
-                {focusAreas.map((focus) => (
-                  <div key={focus} className="studio-note-list__item">{focus}</div>
+      <div className="novel-dashboard__main-grid">
+        <div className="novel-dashboard__main-stack">
+          <section className={`novel-dashboard__panel ${queryPanel === 'blockers' ? 'is-focused' : ''}`}>
+            <SectionHeader
+              eyebrow="当前阻塞"
+              title="Blocker 列表"
+              description="每个 blocker 都给出原因、影响范围和处理入口。"
+              extra={visibleBlockers.length > 0 ? <Tag color="volcano">{`${visibleBlockers.length} 个`}</Tag> : null}
+            />
+            {visibleBlockers.length > 0 ? (
+              <div className="novel-dashboard__blocker-list">
+                {visibleBlockers.map((blocker) => (
+                  <BlockerCard
+                    key={blocker.id}
+                    blocker={blocker}
+                    onOpen={(item) => navigate(`/novels/${novelId}/${resolveWorkspaceRoute(item.suggestedAction.targetPage)}`)}
+                    onIgnore={blocker.canIgnoreOnce
+                      ? (item) => setIgnoredBlockerIds((current) => [...current, item.id])
+                      : undefined}
+                  />
                 ))}
               </div>
-            ) : null}
-          </WorkspacePanel>
+            ) : (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description="当前没有 blocker，可以直接按推荐下一步推进。"
+              />
+            )}
+          </section>
 
-          <WorkspacePanel title="工作台跳转" description="统一入口负责编排，细修仍在专业页完成。">
-            <div className="studio-link-stack">
-              {[
-                ['project-brief', '项目立项'],
-                ['world-rules', '世界规则'],
-                ['characters', '角色系统'],
-                ['arc-center', '人物弧线'],
-                ['resistance', '反派与阻力'],
-                ['threads', '故事线程'],
-                ['timeline', '时间轴'],
-                ['writing', '正文写作'],
-              ].map(([route, label]) => (
+          <section className="novel-dashboard__panel">
+            <SectionHeader
+              eyebrow="最近活动"
+              title="项目活动流"
+              description="最近的修改、生成、修订和回滚都会汇总在这里。"
+            />
+            {recentActivities.length > 0 ? (
+              <div className="novel-dashboard__activity-list">
+                {recentActivities.map((activity) => (
+                  <article
+                    key={activity.id}
+                    className={`novel-dashboard__activity-card tone-${activityTone(activity)}`}
+                  >
+                    <div className="novel-dashboard__activity-head">
+                      <strong>{activity.summary}</strong>
+                      <span>{dayjs(activity.createdAt).fromNow()}</span>
+                    </div>
+                    <div className="novel-dashboard__activity-meta">
+                      <span>{activity.entityType}</span>
+                      <span>{activity.operationType}</span>
+                      <span>{new Date(activity.createdAt).toLocaleString()}</span>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <div className="novel-dashboard__empty-copy">当前还没有最近活动记录。</div>
+            )}
+          </section>
+        </div>
+
+        <div className="novel-dashboard__side-stack">
+          <section className={`novel-dashboard__panel ${queryPanel === 'next-step' ? 'is-focused' : ''}`}>
+            <NextStepPanel
+              nextStep={workspaceSnapshot.nextStep}
+              onOpen={() => navigate(`/novels/${novelId}/${resolveWorkspaceRoute(workspaceSnapshot.nextStep.targetPage)}`)}
+            />
+          </section>
+
+          <section className="novel-dashboard__panel">
+            <SectionHeader
+              eyebrow="风险提示"
+              title="当前风险"
+              description="这里汇总结构体检、上下文同步和质量监控给出的高价值信号。"
+            />
+            {riskItems.length > 0 ? (
+              <div className="novel-dashboard__risk-list">
+                {riskItems.map((item) => (
+                  <div key={item} className="novel-dashboard__risk-item">
+                    <ExclamationCircleOutlined />
+                    <span>{item}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <Alert
+                type="success"
+                showIcon
+                message="当前没有新的高优先风险"
+                description="可以直接按推荐下一步推进章节生产或修订。"
+              />
+            )}
+          </section>
+
+          <section className="novel-dashboard__panel">
+            <SectionHeader
+              eyebrow="修订反推"
+              title="质量问题回推任务"
+              description="修订中心里最该先处理的问题会直接出现在这里。"
+            />
+            {topRevisionTasks.length > 0 ? (
+              <div className="novel-dashboard__revision-list">
+                {topRevisionTasks.map((task) => (
+                  <button
+                    key={task.id}
+                    type="button"
+                    className="novel-dashboard__revision-card"
+                    onClick={() => navigate(`/novels/${novelId}/${task.relatedPage || 'revision'}`)}
+                  >
+                    <div className="novel-dashboard__revision-head">
+                      <strong>{task.title}</strong>
+                      <Tag color={task.severity === 'high' ? 'volcano' : task.severity === 'medium' ? 'gold' : 'default'}>
+                        {task.severity === 'high' ? '高优先' : task.severity === 'medium' ? '中优先' : '低优先'}
+                      </Tag>
+                    </div>
+                    <span>{task.description || task.fixBrief || '跳回对应页面处理。'}</span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="novel-dashboard__empty-copy">当前没有新的修订反推任务。</div>
+            )}
+          </section>
+
+          <section className="novel-dashboard__panel">
+            <SectionHeader
+              eyebrow="关键入口"
+              title="常用控制入口"
+              description="这里保留最常用的生产链路入口，不再把大量主操作堆到顶部。"
+            />
+            <div className="novel-dashboard__entry-grid">
+              {keyEntrances.map((item) => (
                 <button
-                  key={route}
+                  key={item.key}
                   type="button"
-                  className="studio-link-button"
-                  onClick={() => navigate(`/novels/${novelId}/${route}`)}
+                  className="novel-dashboard__entry-card"
+                  onClick={() => navigate(`/novels/${novelId}/${item.route}`)}
                 >
-                  <span>{label}</span>
-                  <CheckCircleOutlined />
+                  <strong>{item.label}</strong>
+                  <span>{item.hint}</span>
+                  <ArrowRightOutlined />
                 </button>
               ))}
             </div>
-          </WorkspacePanel>
-        </>
-      )}
-    >
-      {contextStatus?.staleChapterCount ? (
-        <Alert
-          type="warning"
-          showIcon
-          style={{ marginBottom: 20 }}
-          message={`有 ${contextStatus.staleChapterCount} 章正文仍未同步到最新设定`}
-        description="这些章节仍在引用旧上下文。"
-        />
-      ) : null}
-
-      {contextStatus?.staleCheckpointCount ? (
-        <Alert
-          type="warning"
-          showIcon
-          style={{ marginBottom: 20 }}
-          message={`有 ${contextStatus.staleCheckpointCount} 份长期记忆检查点待刷新`}
-        description="这些长期记忆检查点仍是旧版本。"
-        />
-      ) : null}
-
-      {contextStatus?.staleAssetCount ? (
-        <Alert
-          type="warning"
-          showIcon
-          style={{ marginBottom: 20 }}
-          message={`这些世界资产可能还挂着旧设定：${contextStatus.staleAssetLabels.join('、')}`}
-        description="这些世界资产仍在引用旧设定。"
-        />
-      ) : null}
-
-      {consistencyReport && consistencyReport.highCount > 0 ? (
-        <Alert
-          type="info"
-          showIcon
-          style={{ marginBottom: 20 }}
-          message="结构体检发现高优先风险"
-        description="这些问题会影响后续时间轴、正文和人物设定。"
-        />
-      ) : null}
-
-      <WorkspacePanel
-        title="故事底盘"
-        description="显示立项、设定、文风和主线设计状态。"
-        extra={<div className="studio-panel-pill">{`完成 ${readyReadinessCount}/${readinessCards.length}`}</div>}
-      >
-        <div className="studio-bible-board">
-          <section className="studio-bible-overview">
-            <div className="studio-bible-overview__eyebrow">底盘完成度</div>
-            <strong className="studio-bible-overview__score">{storyBibleScore}%</strong>
-            <Progress percent={storyBibleScore} showInfo={false} strokeColor="#bc6c25" trailColor="rgba(24, 40, 58, 0.12)" />
-            <p className="studio-bible-overview__copy">项目立项、基础设定、主题文风和故事设计的综合完成度。</p>
-            <div className="studio-bible-overview__focus">
-              <span>当前短板</span>
-              <strong>{nextReadinessCard?.title || '底盘已齐'}</strong>
-              <small>{nextReadinessCard?.summary || '可以转入资产生成或质量修订。'}</small>
-            </div>
-          </section>
-
-          <div className="studio-readiness-grid studio-readiness-grid--dense">
-            {readinessCards.map((card) => (
-              <button
-                key={card.key}
-                type="button"
-                className={`studio-readiness-card ${card.ready ? 'studio-readiness-card--ready' : ''}`}
-                onClick={() => navigate(`/novels/${novelId}/${card.route}`)}
-              >
-                <div className="studio-readiness-card__head">
-                  <span>{card.title}</span>
-                  <Tag color={card.ready ? 'success' : 'default'}>{card.ready ? '已就绪' : '待补齐'}</Tag>
-                </div>
-                <strong>{card.value}</strong>
-                <p className="studio-readiness-card__summary">{card.summary}</p>
-                <div className="studio-readiness-card__foot">{card.ready ? '继续细化' : '立即补齐'}</div>
-              </button>
-            ))}
-          </div>
-        </div>
-      </WorkspacePanel>
-
-      <WorkspacePanel
-        title="人物弧线概览"
-        description="快速检查主角弧、关键角色弧和关系弧是否已经建立。"
-        extra={<div className="studio-panel-pill">{`角色弧 ${stats.characterArcCount} / 关系弧 ${stats.relationshipArcCount}`}</div>}
-      >
-        <div className="studio-action-grid">
-          <section className={`studio-action-card ${stats.characterArcCount > 0 ? 'studio-action-card--ready' : ''}`}>
-            <div className="studio-action-card__top">
-              <div className="studio-action-card__eyebrow">主角与关键角色</div>
-              <div className="studio-action-card__icon"><TeamOutlined /></div>
-            </div>
-            <div className="studio-action-card__title-row">
-              <h3>角色弧线</h3>
-              <Tag color={stats.characterArcCount > 0 ? 'success' : 'default'}>{`${stats.characterArcCount} 条`}</Tag>
-            </div>
-            <p>{stats.characterArcCount > 0 ? '已经开始维护角色变化轨迹，可以继续补裂缝、转折和终点。' : '当前还没有建立角色弧，角色资料仍停留在静态档案层。'}</p>
-            <div className="studio-action-card__footer">
-              <Button type={stats.characterArcCount > 0 ? 'default' : 'primary'} onClick={() => navigate(`/novels/${novelId}/arc-center?tab=protagonist`)}>
-                {stats.characterArcCount > 0 ? '继续细化' : '立即补主角弧'}
-              </Button>
-            </div>
-          </section>
-          <section className={`studio-action-card ${stats.relationshipArcCount > 0 ? 'studio-action-card--ready' : ''}`}>
-            <div className="studio-action-card__top">
-              <div className="studio-action-card__eyebrow">双人关系变化</div>
-              <div className="studio-action-card__icon"><BarsOutlined /></div>
-            </div>
-            <div className="studio-action-card__title-row">
-              <h3>关系弧线</h3>
-              <Tag color={stats.relationshipArcCount > 0 ? 'success' : 'default'}>{`${stats.relationshipArcCount} 条`}</Tag>
-            </div>
-            <p>{stats.relationshipArcCount > 0 ? '关系弧已经可追踪，下一步在章节合同里绑定本章必须推进的关系变化。' : '重要关系还没有拆成阶段变化，后续章节容易只有互动没有关系位移。'}</p>
-            <div className="studio-action-card__footer">
-              <Button type={stats.relationshipArcCount > 0 ? 'default' : 'primary'} onClick={() => navigate(`/novels/${novelId}/arc-center?tab=relationships`)}>
-                {stats.relationshipArcCount > 0 ? '打开关系弧' : '立即建立关系弧'}
-              </Button>
-            </div>
           </section>
         </div>
-      </WorkspacePanel>
+      </div>
 
-      <WorkspacePanel
-        title="阻力概览"
-        description="快速检查主要阻力来源是否已经进入结构化维护，并能否回写到章节合同。"
-        extra={<div className="studio-panel-pill">{`阻力线 ${stats.resistanceTrackCount}`}</div>}
-      >
-        <div className="studio-action-grid">
-          <section className={`studio-action-card ${stats.resistanceTrackCount > 0 ? 'studio-action-card--ready' : ''}`}>
-            <div className="studio-action-card__top">
-              <div className="studio-action-card__eyebrow">人物 / 势力 / 环境 / 制度</div>
-              <div className="studio-action-card__icon"><ThunderboltOutlined /></div>
+      <section className="novel-dashboard__panel">
+        <SectionHeader
+          eyebrow="控制台状态"
+          title="写作准备与生产健康"
+          description="从写作条件、连续性和批量生产健康三个维度看当前项目是否适合继续推进。"
+        />
+        <div className="novel-dashboard__health-grid">
+          <div className="novel-dashboard__health-card">
+            <div className="novel-dashboard__health-head">
+              <ClockCircleOutlined />
+              <strong>写作准备</strong>
             </div>
-            <div className="studio-action-card__title-row">
-              <h3>反派与阻力</h3>
-              <Tag color={stats.resistanceTrackCount > 0 ? 'success' : 'default'}>{`${stats.resistanceTrackCount} 条`}</Tag>
-            </div>
-            <p>{stats.resistanceTrackCount > 0 ? '阻力来源已经进入结构化维护，下一步把关键阻力线挂到卷级设计和章节合同。' : '当前还没有建立阻力线，后续章节容易只让主角推进，却没有持续升级的外部压力。'}</p>
-            <div className="studio-action-card__footer">
-              <Button type={stats.resistanceTrackCount > 0 ? 'default' : 'primary'} onClick={() => navigate(`/novels/${novelId}/resistance?tab=characters`)}>
-                {stats.resistanceTrackCount > 0 ? '继续细化' : '立即建立阻力线'}
-              </Button>
-              <Button type="link" onClick={() => navigate(`/novels/${novelId}/contracts`)}>
-                去登记本章出手
-              </Button>
-            </div>
-          </section>
-        </div>
-      </WorkspacePanel>
-
-      <WorkspacePanel
-        title="编排动作"
-          description="显示当前可执行动作。"
-        extra={nextAction ? <div className="studio-panel-pill studio-panel-pill--warm">{`推荐下一步：${nextAction.title}`}</div> : null}
-      >
-        <div className="studio-action-grid">
-          {actionCards.map((card) => (
-            <section key={card.key} className={`studio-action-card ${card.ready ? 'studio-action-card--ready' : ''}`}>
-              <div className="studio-action-card__top">
-                <div className="studio-action-card__eyebrow">{card.eyebrow}</div>
-                <div className="studio-action-card__icon">{card.icon}</div>
-              </div>
-              <div className="studio-action-card__title-row">
-                <h3>{card.title}</h3>
-                <Tag color={card.ready ? 'success' : 'processing'}>{card.count}</Tag>
-              </div>
-              <p>{card.summary}</p>
-              <div className="studio-action-card__footer">
-                <Button
-                  type={nextAction?.key === card.key ? 'primary' : 'default'}
-                  loading={runningKey === card.key}
-                  onClick={() => void runGuardedStep(card.key, card.run, `${card.title}完成。`)}
-                >
-                  {card.ready ? '重新生成' : '立即执行'}
-                </Button>
-                <Button type="link" onClick={() => navigate(`/novels/${novelId}/${card.route}`)}>
-                  打开页内精修
-                </Button>
-              </div>
-            </section>
-          ))}
-        </div>
-      </WorkspacePanel>
-
-      {stats.writingPipelineStats ? (
-        <WorkspacePanel title="长篇写作架构" description="按角色查看最近章节流水线的失败分布、预算与恢复入口。">
-          <div className="studio-quality-strip">
-            <div className="studio-quality-strip__badges">
-              <Tag color={stats.writingPipelineStats.activePipelineCount > 0 ? 'processing' : 'success'}>
-                {stats.writingPipelineStats.activePipelineCount > 0
-                  ? `运行中 ${stats.writingPipelineStats.activePipelineCount} 条`
-                  : '当前无运行中的正文流水线'}
-              </Tag>
-              <Tag color="blue">{`累计流水线 ${stats.writingPipelineStats.totalPipelineCount} 条`}</Tag>
-              {stats.writingPipelineStats.commonRecoveryHints.slice(0, 2).map((item) => (
-                <Tag key={item.label} color="warning">{`${item.label} × ${item.count}`}</Tag>
-              ))}
-            </div>
+            <span>{qualitySummary?.productionReadiness.summary || '当前没有质量看板摘要。'}</span>
           </div>
-          <div className="studio-issue-list" style={{ marginTop: 16 }}>
-            {stats.writingPipelineStats.roleStats.map((item) => (
-              <div key={item.role} className="studio-issue-card">
-                <div className="studio-issue-card__head">
-                  <Tag color={item.failedCount > 0 ? 'error' : item.runningCount > 0 ? 'processing' : 'success'}>
-                    {item.role === 'planner' ? 'Planner' : item.role === 'writer' ? 'Writer' : item.role === 'critic' ? 'Critic' : item.role === 'rewriter' ? 'Rewriter' : item.role === 'canonizer' ? 'Canonizer' : 'Finalize'}
-                  </Tag>
-                  <strong>{`成功 ${item.successCount} / 失败 ${item.failedCount} / 运行中 ${item.runningCount}`}</strong>
-                </div>
-                <div className="studio-issue-card__desc">{`平均耗时 ${item.avgDurationMs ? `${(item.avgDurationMs / 1000).toFixed(1)}s` : '-'}，累计 tokens ${item.tokensUsedTotal || 0}`}</div>
-                <div className="studio-issue-card__fix">{item.blockedCount > 0 ? `当前还有 ${item.blockedCount} 条被合同或恢复链阻断。` : '当前没有角色级阻断项。'}</div>
-              </div>
-            ))}
-          </div>
-        </WorkspacePanel>
-      ) : null}
-
-      <WorkspacePanel title="质量预警" description="显示重复、逻辑断裂和上下文污染。">
-        <div className="studio-quality-strip">
-          <div className="studio-quality-strip__progress">
-            <div className="studio-quality-strip__head">
-              <strong>当前健康度</strong>
-              <span>{consistencyReport ? `${consistencyReport.readinessScore}%` : '--'}</span>
+          <div className="novel-dashboard__health-card">
+            <div className="novel-dashboard__health-head">
+              <HistoryOutlined />
+              <strong>连续性</strong>
             </div>
-            <Progress percent={consistencyReport?.readinessScore || 0} showInfo={false} strokeColor="#bc6c25" trailColor="rgba(24, 40, 58, 0.12)" />
+            <span>
+              {contextStatus
+                ? `待同步章节 ${contextStatus.staleChapterCount}，待刷新检查点 ${contextStatus.staleCheckpointCount}。`
+                : '当前没有连续性状态数据。'}
+            </span>
           </div>
-          <div className="studio-quality-strip__badges">
-            <Tag color={stats.hasProtagonist ? 'success' : 'warning'} icon={<TeamOutlined />}>
-              {stats.hasProtagonist ? '主角已建立' : '主角缺失'}
-            </Tag>
-            <Tag color={stats.threadCount > 0 ? 'success' : 'warning'} icon={<BarsOutlined />}>
-              {stats.threadCount > 0 ? '线程可追踪' : '线程缺失'}
-            </Tag>
-            <Tag color={stats.timelineCount > 0 ? 'success' : 'warning'} icon={<ClockCircleOutlined />}>
-              {stats.timelineCount > 0 ? '时间轴已挂点' : '时间轴未建立'}
-            </Tag>
-            <Tag color={contextStatus?.staleChapterCount ? 'error' : 'success'} icon={<FireOutlined />}>
-              {contextStatus?.staleChapterCount ? `上下文过期 ${contextStatus.staleChapterCount} 章` : '正文上下文稳定'}
-            </Tag>
-            <Tag color={contextStatus?.staleCheckpointCount ? 'warning' : 'success'} icon={<ClockCircleOutlined />}>
-              {contextStatus?.staleCheckpointCount ? `记忆待刷新 ${contextStatus.staleCheckpointCount} 份` : '长期记忆稳定'}
-            </Tag>
-            <Tag color={contextStatus?.staleAssetCount ? 'warning' : 'success'} icon={<CompassOutlined />}>
-              {contextStatus?.staleAssetCount ? `资产待校准 ${contextStatus.staleAssetCount} 类` : '世界资产稳定'}
-            </Tag>
+          <div className="novel-dashboard__health-card">
+            <div className="novel-dashboard__health-head">
+              <ThunderboltOutlined />
+              <strong>结构体检</strong>
+            </div>
+            <span>
+              {consistencyReport
+                ? `总分 ${consistencyReport.readinessScore}，高危 ${consistencyReport.highCount}，中危 ${consistencyReport.mediumCount}。`
+                : '当前没有结构体检结果。'}
+            </span>
           </div>
         </div>
-
-        <div className="studio-issue-list">
-          {systemIssueTasks.map((task) => (
-            <div key={task.id} className="studio-issue-card">
-              <div className="studio-issue-card__head">
-                <Tag color={getIssueTagColor(task.severity)}>{getIssueLabel(task.severity)}</Tag>
-                <strong>{task.title}</strong>
-              </div>
-              <div className="studio-issue-card__desc">{task.description || '当前没有额外说明。'}</div>
-              <div className="studio-issue-card__fix">{task.fixBrief || '建议前往对应页面处理。'}</div>
-              <Space wrap style={{ marginTop: 12 }}>
-                {task.autoFixable ? (
-                  <Button
-                    size="small"
-                    type="primary"
-                    loading={taskActionKey === `autofix:${task.id}`}
-                    onClick={() => void handleAutoFixTask(task)}
-                  >
-                    AI 修复
-                  </Button>
-                ) : null}
-                <Button size="small" onClick={() => openRelatedTaskPage(task)}>
-                  打开页面
-                </Button>
-                <Button
-                  size="small"
-                  loading={taskActionKey === `status:${task.id}:ignored`}
-                  onClick={() => void handleTaskStatus(task, 'ignored')}
-                >
-                  忽略
-                </Button>
-              </Space>
-            </div>
-          ))}
-          {systemIssueTasks.length === 0 ? (
-            <div className="studio-empty-state">当前没有未解决的系统问题，可以继续推进结构和正文。</div>
-          ) : null}
-        </div>
-      </WorkspacePanel>
-    </WorkspacePage>
+      </section>
+    </div>
   )
 }

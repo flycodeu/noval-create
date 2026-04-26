@@ -14,11 +14,18 @@ import {
 import { Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import AIScorePanel from '../../../components/AIScorePanel'
+import ActionBar from '../../../components/novel/common/ActionBar'
+import SectionHeader from '../../../components/novel/common/SectionHeader'
+import ContractPanel, { type ContractPanelSection } from '../../../components/novel/writing/ContractPanel'
+import ContextPanel, { type ContextPanelSection } from '../../../components/novel/writing/ContextPanel'
+import PipelineBar, { type PipelineBarItem } from '../../../components/novel/writing/PipelineBar'
+import VersionTimeline from '../../../components/novel/writing/VersionTimeline'
 import {
   AI_EXECUTION_MODE_OPTIONS,
   getAiExecutionModeLabel,
   type AiExecutionMode,
 } from '../../../shared/ai-execution'
+import { getChapterWritabilitySummary } from '../../../shared/novel-workspace'
 import {
   buildStorySettingsPayload,
   parseStorySettingsSnapshot,
@@ -848,6 +855,15 @@ export default function Writing({ novelId }: Props) {
     if (!isHistoryRoute || !currentChapter) return
     void refreshVersionHistory(currentChapter.id)
   }, [currentChapter, isHistoryRoute, refreshVersionHistory])
+
+  useEffect(() => {
+    if (!currentChapter) {
+      setChapterVersions([])
+      setSelectedVersionId(null)
+      return
+    }
+    void refreshVersionHistory(currentChapter.id)
+  }, [currentChapter, refreshVersionHistory])
 
   useEffect(() => {
     if (!currentChapter) return
@@ -2006,227 +2022,564 @@ export default function Writing({ novelId }: Props) {
     </div>
   )
 
-  return (
-    <WorkspacePage
-      className="novel-writing-page"
-      layout="wide"
-      scrollMode="document"
-      eyebrow="正文工作台"
-      title="正文写作"
-      description="在同一个工作台里完成场景计划、AI 主写、自动审校、修订定稿、长文记忆和一致性检查。"
-      heroVariant="compact"
-      guide={(
-        <WorkspaceStepGuide
-          title="进入正文页先做什么"
-          steps={[
-            { title: '先切到当前要写的章节', description: '左侧章节列表保留独立切换，正文主编辑区继续采用长文阅读与编辑模式。', status: 'focus' },
-            { title: '再看流水线与审校提示', description: '本章先确认场景计划、审校结论、发布前检查，再决定是续写、局部修复还是回结构页。', status: 'todo' },
-            { title: '最后做局部重写或入库', description: '正文页优先做选区重写和本章修复，不把非正文页那种分栏规则强行套进长文编辑。', status: 'done' },
-          ]}
-        />
-      )}
-      actions={(
-        <>
-          <Button icon={<PlusOutlined />} onClick={() => void handleAddChapter()}>新建章节</Button>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <Select
-              size="small"
-              style={{ width: 144 }}
-              value={defaultAiExecutionMode}
-              loading={savingAiMode}
-              options={AI_EXECUTION_MODE_OPTIONS.map((item) => ({
-                value: item.value,
-                label: `默认·${item.label}`,
-              }))}
-              onChange={(value) => void handleDefaultAiModeChange(value)}
-            />
-            <Select
-              size="small"
-              style={{ width: 160 }}
-              value={generationExecutionModeOverride}
-              options={[
-                {
-                  value: 'follow_default',
-                  label: `本次跟随默认（${getAiExecutionModeLabel(defaultAiExecutionMode)}）`,
-                },
-                ...AI_EXECUTION_MODE_OPTIONS.map((item) => ({
-                  value: item.value,
-                  label: `本次覆盖·${item.label}`,
-                })),
-              ]}
-              onChange={(value) => setGenerationExecutionModeOverride(value)}
-            />
-          </div>
-          {currentChapterGenerating
-            ? <Button danger icon={<LoadingOutlined />} onClick={() => void handleCancelGenerate()}>停止 AI 流水线</Button>
-            : <Button type="primary" icon={<RobotOutlined />} disabled={!currentChapter} onClick={() => void handleGenerateContent()}>{`AI 生成·章节流水线（${getAiExecutionModeLabel(effectiveAiExecutionMode)}）`}</Button>}
-          <Button icon={<BulbOutlined />} disabled={!currentChapter} onClick={() => void handleGenerateSummary()}>AI 修复·更新记忆</Button>
-          <Button icon={<FileSearchOutlined />} disabled={!currentChapter} onClick={() => void handleAiCheck()}>AI 修复·章节检测</Button>
-        </>
-      )}
-      metrics={(
-        <>
-          <WorkspaceMetric label="章节总数" value={chapters.length} tone="warm" hint="左侧列表可快速切章" />
-          <WorkspaceMetric label="当前字数" value={`${wordCount} 字`} hint={currentChapter ? `章节状态：${currentStatusLabel}` : '先选择章节'} />
-          <WorkspaceMetric label="结构体检" value={consistencyReport ? `${consistencyReport.readinessScore} 分` : '加载中'} tone="cool" hint={consistencyReport ? getHealthLabel(consistencyReport.readinessScore) : '正在分析全书结构'} />
-          <WorkspaceMetric label="待同步章节" value={contextStatus ? contextStatus.staleChapterCount : '加载中'} hint={contextStatus?.staleChapterCount ? '最近的设定或前文变动已影响后续章节' : '当前上下文与正文已对齐'} />
-        </>
-      )}
-      contextSummary={(
-        <WorkspaceContextSummary
-          items={[
-            { label: '当前章节', value: currentChapter ? `第${currentChapter.chapterNum}章 ${currentChapter.title || ''}` : '未选择章节' },
-            { label: '当前状态', value: currentStatusLabel },
-              { label: '长文记忆', value: storyMemory ? `${storyMemory.chapterCount} 章 · ${storyMemory.memoryMode === 'mega' ? '巨长篇' : storyMemory.memoryMode === 'epic' ? '超长篇' : storyMemory.memoryMode === 'longform' ? '长篇' : '标准'}` : '尚未加载' },
-            { label: '上下文版本', value: contextStatus ? `v${contextStatus.contextVersion}` : '加载中' },
-          ]}
-        />
-      )}
-    >
-      {loading ? (
-        <div className="novel-empty novel-empty--writing"><Spin /></div>
-      ) : (
-        <div className="novel-writing-shell">
-          <aside className="novel-writing-shell__sidebar">
-            <div className="novel-writing-shell__sidebar-header">
-              <div className="novel-writing-shell__sidebar-title">章节列表</div>
-              <div className="novel-writing-shell__sidebar-meta">共 {chapters.length} 章</div>
-            </div>
-            <div className="novel-writing-shell__chapter-list">
-              {chapters.length > 0 ? chapters.map((chapter) => {
-                const chapterGeneration = activeGeneration.chapterId === chapter.id && activeGeneration.status !== 'idle'
-                  ? activeGeneration
-                  : lastGenerationByChapter[chapter.id]
-                const chapterGenerationMeta = chapterGeneration ? getGenerationTagMeta(chapterGeneration) : null
-                return (
-                  <div
-                    key={chapter.id}
-                    className={`novel-writing-shell__chapter-item ${currentChapterId === chapter.id ? 'novel-writing-shell__chapter-item--active' : ''}`}
-                    onClick={() => void refreshChapter(chapter.id).then(() => { setCurrentChapterId(chapter.id); setAiResult(null) })}
-                    onMouseEnter={() => setHoverChapterId(chapter.id)}
-                    onMouseLeave={() => setHoverChapterId(null)}
-                  >
-                    <div className="novel-writing-shell__chapter-copy">
-                      <div className="novel-writing-shell__chapter-number">第 {chapter.chapterNum} 章</div>
-                      <div className="novel-writing-shell__chapter-name">{chapter.title || `第${chapter.chapterNum}章`}</div>
-                      <div className="novel-writing-shell__chapter-words" style={{ color: STATUS_COLORS[chapter.status] || '#5c6378' }}>{chapter.wordCount} 字 · {getStatusLabel(chapter.status)}</div>
-                      <div className="novel-writing-page__chapter-tags">
-                        {parseStringArray(chapter.staleReasonJson).length > 0 ? <Tag color="warning">待同步</Tag> : null}
-                        {chapterGenerationMeta ? <Tag color={chapterGenerationMeta.color}>{chapterGenerationMeta.label}</Tag> : null}
-                      </div>
-                    </div>
-                    {hoverChapterId === chapter.id ? <Button type="text" size="small" danger className="novel-writing-shell__chapter-delete" icon={<DeleteOutlined />} onClick={(event) => handleDeleteChapter(chapter.id, event)} /> : null}
-                  </div>
-                )
-              }) : <Empty description="还没有章节，先创建一个。" />}
-            </div>
-            <div className="novel-writing-shell__sidebar-footer">
-              <Button type="dashed" icon={<PlusOutlined />} onClick={() => void handleAddChapter()} style={{ width: '100%' }}>新建章节</Button>
-            </div>
-          </aside>
+  const chapterWritability = useMemo(() => getChapterWritabilitySummary({
+    chapter: currentChapter,
+    publishCheck,
+    scenePlanCount: scenePlan.length,
+    chapterSegmentCount: chapterSegments.length,
+    threadCount: storyMemory?.activeThreads.length || 0,
+    chapterCharactersCount: chapterCharacters.length,
+    relatedEventCount: relatedEvents.length,
+    staleReasonCount: currentChapterStaleReasons.length,
+    dueForeshadowCount: dueForeshadowItems.length,
+    revisionBlockerCount: publishCheck?.blockerCount || 0,
+    staleAssetCount: contextStatus?.staleAssetCount || 0,
+    staleCheckpointCount: contextStatus?.staleCheckpointCount || 0,
+  }), [
+    chapterSegments.length,
+    chapterCharacters.length,
+    contextStatus?.staleAssetCount,
+    contextStatus?.staleCheckpointCount,
+    currentChapter,
+    currentChapterStaleReasons.length,
+    dueForeshadowItems.length,
+    publishCheck,
+    relatedEvents.length,
+    scenePlan.length,
+    storyMemory?.activeThreads.length,
+  ])
 
-          <section className="novel-writing-shell__editor">
-            <div className="novel-writing-shell__editor-header">
-              <div className="novel-writing-shell__editor-title-block">
-                <div className="novel-writing-shell__editor-kicker">{editorEyebrow}</div>
-                <div className="novel-writing-shell__editor-title">{editorTitle}</div>
-                <div className="novel-writing-shell__editor-subtitle">{resolvedEditorSubtitle}</div>
-              </div>
-              <div className="novel-writing-shell__editor-tools">
-                {currentChapter ? <Select value={currentChapter.status} onChange={(value) => void handleStatusChange(value)} className="novel-writing-shell__editor-select" size="small" style={{ width: 156 }} options={STATUS_OPTIONS} /> : null}
-                <div className="novel-writing-shell__editor-meta"><span className="novel-writing-shell__editor-meta-label">正文体量</span><strong>{wordCount} 字</strong></div>
-              </div>
-            </div>
-            <div className="novel-writing-shell__editor-stage">
-              {currentChapter ? (
-                <div className="novel-writing-shell__editor-stage-inner">
-                  <div className="novel-writing-shell__pipeline">
-                    {pipelineStatus.map((stage) => (
-                      <div key={stage.key} className={`novel-pipeline-stage novel-pipeline-stage--${stage.status}`}>
-                        <div className="novel-pipeline-stage__eyebrow">{`阶段 ${String(stage.index + 1).padStart(2, '0')}`}</div>
-                        <div className="novel-pipeline-stage__title">{stage.title}</div>
-                        <div className="novel-pipeline-stage__summary">{stage.summary}</div>
-                      </div>
-                    ))}
+  const sceneListItems = useMemo(
+    () => scenePlan.map((scene) => `${scene.scene_title} · ${scene.purpose}`),
+    [scenePlan],
+  )
+
+  const sceneContractSections = useMemo<ContractPanelSection[]>(() => (
+    scenePlan.slice(0, 6).map((scene) => ({
+      key: `${scene.scene_order}-${scene.scene_title}`,
+      title: `场景 ${String(scene.scene_order).padStart(2, '0')} · ${scene.scene_title}`,
+      items: [
+        scene.purpose ? `目的：${scene.purpose}` : '',
+        scene.location ? `地点：${scene.location}` : '',
+        scene.time_anchor ? `时间：${scene.time_anchor}` : '',
+        scene.present_characters?.length ? `人物：${scene.present_characters.join('、')}` : '',
+        scene.key_items?.length ? `道具：${scene.key_items.join('、')}` : '',
+        scene.must_cover?.length ? `必须覆盖：${scene.must_cover.join('、')}` : '',
+      ].filter(Boolean),
+      tone: 'soft',
+    }))
+  ), [scenePlan])
+
+  const chapterContractSections = useMemo<ContractPanelSection[]>(() => {
+    const sections: ContractPanelSection[] = [
+      {
+        key: 'goal',
+        title: '本章目标',
+        items: [
+          currentChapter?.summary ? `摘要：${currentChapter.summary}` : '',
+          currentChapter?.outline ? `大纲：${currentChapter.outline}` : '',
+          currentChapter?.targetWords ? `目标字数：${currentChapter.targetWords} 字` : '',
+          currentChapter?.nextChapterSeed ? `下一章接力：${currentChapter.nextChapterSeed}` : '',
+        ].filter(Boolean),
+        tone: 'soft',
+      },
+      {
+        key: 'scene-list',
+        title: '场景列表',
+        items: sceneListItems,
+      },
+      {
+        key: 'threads',
+        title: '必须推进的线程',
+        items: (storyMemory?.activeThreads || []).slice(0, 6),
+      },
+      {
+        key: 'foreshadow',
+        title: '必须服务的伏笔',
+        items: dueForeshadowItems.slice(0, 6),
+      },
+      {
+        key: 'forbidden',
+        title: '禁止事项',
+        items: [
+          currentVolumeTruthStats.overLimit
+            ? `当前卷真相揭示比例超限，避免提前泄露关键真相。`
+            : '',
+          ...currentChapterStaleReasons.map((item) => `上下文未同步：${item}`),
+          ...(publishCheck?.checklist || [])
+            .filter((item) => item.status === 'blocker' || item.status === 'rewrite')
+            .slice(0, 4)
+            .map((item) => `${item.label}：${item.detail}`),
+        ].filter(Boolean),
+        tone: 'danger',
+      },
+      {
+        key: 'acceptance',
+        title: '验收标准',
+        items: [
+          currentContractAudit?.summary ? `合同对账：${currentContractAudit.summary}` : '',
+          ...(currentContractAudit?.items || []).slice(0, 4).map((item) => `${item.label}：${item.detail}`),
+          ...(publishCheck?.contractValidation?.rewriteHints || []).slice(0, 3).map((item) => `补齐：${item}`),
+        ].filter(Boolean),
+      },
+    ]
+
+    return sections
+  }, [
+    currentChapter?.nextChapterSeed,
+    currentChapter?.outline,
+    currentChapter?.summary,
+    currentChapter?.targetWords,
+    currentChapterStaleReasons,
+    currentContractAudit,
+    currentVolumeTruthStats.overLimit,
+    dueForeshadowItems,
+    publishCheck?.checklist,
+    publishCheck?.contractValidation?.rewriteHints,
+    sceneListItems,
+    storyMemory?.activeThreads,
+  ])
+
+  const locationStatusItems = useMemo(() => {
+    const values = [
+      ...scenePlan.map((scene) => scene.location || ''),
+      ...relatedEvents.map((event) => event.timeLabel && event.eventTitle ? `${event.timeLabel} · ${event.eventTitle}` : event.eventTitle),
+    ].filter(Boolean)
+    return [...new Set(values)].slice(0, 6)
+  }, [relatedEvents, scenePlan])
+
+  const worldFactItems = useMemo(() => {
+    const factPool = storyFacts.filter((fact) => (
+      allowedRevealFactIds.includes(fact.id)
+      || revealedFactIds.includes(fact.id)
+      || (fact.targetRevealChapterId != null && fact.targetRevealChapterId === currentChapter?.id)
+    ))
+    return (factPool.length > 0 ? factPool : storyFacts.filter((fact) => fact.isKeyTruth !== 0)).slice(0, 6).map((fact) => (
+      `${fact.title}${fact.summary ? ` · ${fact.summary}` : ''}`
+    ))
+  }, [allowedRevealFactIds, currentChapter?.id, revealedFactIds, storyFacts])
+
+  const puzzleItems = useMemo(
+    () => storyFacts
+      .filter((fact) => fact.relatedPuzzleId != null)
+      .slice(0, 6)
+      .map((fact) => `${fact.title}${fact.notes ? ` · ${fact.notes}` : ''}`),
+    [storyFacts],
+  )
+
+  const characterStateItems = useMemo(
+    () => chapterCharacters.slice(0, 6).map((character) => (
+      `${character.fullName} · ${character.goals || character.surfaceDesire || character.innerConflict || character.background || '已载入人物状态'}`
+    )),
+    [chapterCharacters],
+  )
+
+  const recallItems = useMemo(() => (
+    chapterContextPreview?.recalledMemorySources.slice(0, 6).map((item) => (
+      `${item.sourceLabel} · ${item.summary}${item.stale ? ' · 已过期' : ''}`
+    )) || chapterContextPreview?.recallDiagnostics.summaryLines.slice(0, 6) || []
+  ), [chapterContextPreview?.recalledMemorySources, chapterContextPreview?.recallDiagnostics.summaryLines])
+
+  const qualityIssueItems = useMemo(() => ([
+    ...(publishCheck?.checklist || [])
+      .filter((item) => item.status === 'rewrite' || item.status === 'blocker' || item.status === 'warning')
+      .slice(0, 6)
+      .map((item) => `${item.label}：${item.detail}`),
+    ...chapterIssues.slice(0, 4).map((issue) => `${issue.title}：${issue.description || issue.suggestion || '需要修订'}`),
+    ...(aiResult?.issues || []).slice(0, 4).map((issue) => `${issue.type}：${issue.suggestion}`),
+  ]), [aiResult?.issues, chapterIssues, publishCheck?.checklist])
+
+  const contextSections = useMemo<ContextPanelSection[]>(() => ([
+    {
+      key: 'recall',
+      title: '上下文召回',
+      items: recallItems,
+    },
+    {
+      key: 'characters',
+      title: '相关人物状态',
+      items: characterStateItems,
+    },
+    {
+      key: 'locations',
+      title: '地点状态',
+      items: locationStatusItems,
+    },
+    {
+      key: 'facts',
+      title: '世界事实',
+      items: worldFactItems,
+    },
+    {
+      key: 'foreshadow',
+      title: '伏笔快照',
+      items: dueForeshadowItems.slice(0, 6),
+    },
+    {
+      key: 'puzzles',
+      title: '谜题信息',
+      items: puzzleItems,
+    },
+    {
+      key: 'timeline',
+      title: '时间轴锚点',
+      items: relatedEvents.slice(0, 6).map((event) => `${event.timeLabel || '时间未标注'} · ${event.eventTitle}`),
+    },
+    {
+      key: 'quality',
+      title: '质量问题',
+      items: qualityIssueItems,
+      tone: 'danger',
+    },
+  ]), [
+    characterStateItems,
+    dueForeshadowItems,
+    locationStatusItems,
+    puzzleItems,
+    qualityIssueItems,
+    recallItems,
+    relatedEvents,
+    worldFactItems,
+  ])
+
+  const pipelineItems = useMemo<PipelineBarItem[]>(() => {
+    const roleKeyOrder: WritingPipelineRole[] = ['planner', 'writer', 'critic', 'rewriter', 'canonizer', 'finalize']
+    const roleLabelMap: Record<WritingPipelineRole, string> = {
+      planner: 'Planner',
+      writer: 'Writer',
+      critic: 'Critic',
+      rewriter: 'Rewriter',
+      canonizer: 'Canonizer',
+      finalize: 'Finalize',
+    }
+
+    return roleKeyOrder.map((role) => {
+      const roleState = currentPipelineSnapshot?.roles[role]
+      const status = roleState?.status || (role === 'planner' && scenePlan.length > 0
+        ? 'success'
+        : role === 'writer' && Boolean(currentChapter?.content)
+          ? 'success'
+          : role === 'critic' && Boolean(reviewNotes)
+            ? 'success'
+            : role === 'rewriter' && Boolean(currentChapter?.content && reviewNotes)
+              ? 'success'
+              : role === 'canonizer' && Boolean(currentPipelineSnapshot?.canonRunId)
+                ? 'success'
+                : role === 'finalize' && currentChapter?.status === 'final'
+                  ? 'success'
+                  : 'pending')
+
+      return {
+        key: role,
+        label: roleLabelMap[role],
+        status,
+        detail: roleState?.detail || roleState?.summary || (
+          role === 'finalize'
+            ? '确认终稿并进入章后回写。'
+            : '等待进入该阶段。'
+        ),
+        taskId: roleState?.taskId || currentPipelineSnapshot?.workflowTaskId,
+        contractVersion: roleState?.contractVersion || currentPipelineSnapshot?.contractVersion,
+        durationMs: roleState?.durationMs,
+        tokensUsed: roleState?.tokensUsed,
+        error: roleState?.failureCode,
+        canRetry: status === 'failed' || status === 'blocked',
+        onRetry: status === 'failed' || status === 'blocked'
+          ? (() => void handleGenerateContent())
+          : undefined,
+      }
+    })
+  }, [
+    currentChapter?.content,
+    currentChapter?.status,
+    currentPipelineSnapshot,
+    handleGenerateContent,
+    reviewNotes,
+    scenePlan.length,
+  ])
+
+  const acceptanceCards = useMemo(() => ([
+    { label: '合同对账', value: currentContractAudit?.summary || '待检查' },
+    { label: '连续性检查', value: publishCheck ? `${publishCheck.scoreBreakdown.continuityScore} 分` : '待检查' },
+    { label: 'AI 味检查', value: aiResult ? `${aiResult.score} 分` : '待检查' },
+    { label: '节奏检查', value: reviewNotes?.pace_marker || '待检查' },
+    { label: '人物一致性', value: publishCheck ? `${publishCheck.scoreBreakdown.storyDynamicsScore} 分` : '待检查' },
+    { label: '世界规则一致性', value: publishCheck ? `${publishCheck.scoreBreakdown.coherenceScore} 分` : '待检查' },
+    { label: '章节功能达成', value: publishCheck?.contractValidation?.summary || '待检查' },
+  ]), [aiResult, currentContractAudit?.summary, publishCheck, reviewNotes?.pace_marker])
+
+  const pipelineMetaItems = useMemo(() => ([
+    {
+      label: '当前任务 ID',
+      value: currentPipelineSnapshot?.workflowTaskId ? `#${currentPipelineSnapshot.workflowTaskId}` : '未运行',
+    },
+    {
+      label: '合同版本',
+      value: currentPipelineSnapshot?.contractVersion || '未记录',
+    },
+    {
+      label: 'Token 消耗',
+      value: currentPipelineSnapshot?.totalTokensUsed ? `${currentPipelineSnapshot.totalTokensUsed} tok` : '0 tok',
+    },
+    {
+      label: '耗时',
+      value: currentPipelineSnapshot?.totalDurationMs ? `${(currentPipelineSnapshot.totalDurationMs / 1000).toFixed(1)}s` : '-',
+    },
+    {
+      label: '失败原因',
+      value: currentPipelineSnapshot?.failureCode || '当前无失败',
+    },
+    {
+      label: '恢复提示',
+      value: currentPipelineSnapshot?.status === 'failed'
+        ? '先检查合同、上下文召回与审校提示，再重试流水线。'
+        : '当前无需恢复操作。',
+    },
+  ]), [currentPipelineSnapshot])
+
+  return (
+    <>
+      <div className="chapter-console-page">
+        {loading ? (
+          <div className="chapter-console-page__loading"><Spin size="large" /></div>
+        ) : (
+          <>
+            <div className="chapter-console-page__hero">
+              <section className="chapter-console-page__panel chapter-console-page__hero-card">
+                <SectionHeader
+                  eyebrow="章节选择区"
+                  title={currentChapter ? `${formatChapterNumber(currentChapter.chapterNum)} · ${currentChapter.title || '未命名章节'}` : '请选择一个章节'}
+                  description={currentChapter
+                    ? `当前卷：${currentVolumeTruthStats.volumeName} · 状态：${currentStatusLabel} · ${wordCount} 字`
+                    : '先从左侧章节列表选择当前要生产的一章。'}
+                  extra={currentChapter ? <Tag color={currentChapter.status === 'final' ? 'success' : 'blue'}>{currentStatusLabel}</Tag> : null}
+                />
+                <div className="chapter-console-page__hero-meta">
+                  <div><span>当前卷</span><strong>{currentVolumeTruthStats.volumeName}</strong></div>
+                  <div><span>当前章</span><strong>{currentChapter ? formatChapterNumber(currentChapter.chapterNum) : '未选择'}</strong></div>
+                  <div><span>版本状态</span><strong>{chapterVersions.length > 0 ? `${chapterVersions.length} 个版本` : '暂无历史版本'}</strong></div>
+                  <div><span>可写性评分</span><strong>{`${chapterWritability.score}% · ${chapterWritability.label}`}</strong></div>
+                </div>
+              </section>
+
+              <section className="chapter-console-page__panel chapter-console-page__writability-card">
+                <SectionHeader
+                  eyebrow="可写性判断"
+                  title={`第 ${currentChapter?.chapterNum || '-'} 章可写性：${chapterWritability.label}`}
+                  description={chapterWritability.summary}
+                  extra={chapterWritability.ready ? <Tag color="success">可直接开写</Tag> : <Tag color="gold">建议先补缺口</Tag>}
+                />
+                <div className="chapter-console-page__writability-checks">
+                  {chapterWritability.checks.map((item) => (
+                    <div key={item.key} className={`chapter-console-page__writability-item ${item.ready ? 'is-ready' : 'is-risk'}`}>
+                      <strong>{item.label}</strong>
+                      <span>{item.detail}</span>
+                    </div>
+                  ))}
+                </div>
+                {chapterWritability.risks.length > 0 ? (
+                  <div className="chapter-console-page__risk-note">
+                    <strong>主要风险</strong>
+                    <span>{chapterWritability.risks.slice(0, 2).join('；')}</span>
                   </div>
-                  {currentChapterGeneration ? (
-                    <Alert
-                      showIcon
-                      type={getGenerationAlertType(currentChapterGeneration)}
-                      style={{ marginBottom: 16 }}
-                      message={getGenerationAlertMessage(currentChapterGeneration)}
-                      description={getGenerationAlertDescription(currentChapterGeneration)}
-                      action={currentChapterGeneration.status === 'running'
-                        ? undefined
-                        : (
-                          <div className="novel-writing-page__generation-actions">
-                            {(currentChapterGeneration.status === 'failed'
-                              || currentChapterGeneration.status === 'cancelled'
-                              || (currentChapterGeneration.status === 'success' && currentChapterGeneration.detail?.includes('未产生新增内容'))) ? (
-                                <Button size="small" type="primary" onClick={() => void handleGenerateContent()}>
-                                  重新生成
-                                </Button>
-                              ) : null}
-                            <Button size="small" onClick={() => clearChapterGenerationNotice(currentChapter.id)}>
-                              收起
-                            </Button>
+                ) : null}
+              </section>
+            </div>
+
+            <div className="chapter-console-page__grid">
+              <aside className="chapter-console-page__column chapter-console-page__column--left">
+                <section className="chapter-console-page__panel">
+                  <SectionHeader
+                    eyebrow="章节生产"
+                    title="章节列表"
+                    description={`共 ${chapters.length} 章，优先从这里切到当前正在生产的章节。`}
+                  />
+                  <div className="chapter-console-page__chapter-list">
+                    {chapters.length > 0 ? chapters.map((chapter) => {
+                      const chapterGeneration = activeGeneration.chapterId === chapter.id && activeGeneration.status !== 'idle'
+                        ? activeGeneration
+                        : lastGenerationByChapter[chapter.id]
+                      const chapterGenerationMeta = chapterGeneration ? getGenerationTagMeta(chapterGeneration) : null
+                      return (
+                        <div
+                          key={chapter.id}
+                          className={`chapter-console-page__chapter-card ${currentChapterId === chapter.id ? 'is-active' : ''}`}
+                          onClick={() => void refreshChapter(chapter.id).then(() => { setCurrentChapterId(chapter.id); setAiResult(null) })}
+                          onMouseEnter={() => setHoverChapterId(chapter.id)}
+                          onMouseLeave={() => setHoverChapterId(null)}
+                        >
+                          <div className="chapter-console-page__chapter-copy">
+                            <strong>{formatChapterNumber(chapter.chapterNum)}</strong>
+                            <span>{chapter.title || `第${chapter.chapterNum}章`}</span>
+                            <small>{`${chapter.wordCount} 字 · ${getStatusLabel(chapter.status)}`}</small>
+                            <div className="chapter-console-page__chapter-tags">
+                              {parseStringArray(chapter.staleReasonJson).length > 0 ? <Tag color="warning">待同步</Tag> : null}
+                              {chapterGenerationMeta ? <Tag color={chapterGenerationMeta.color}>{chapterGenerationMeta.label}</Tag> : null}
+                            </div>
                           </div>
-                        )}
-                    />
-                  ) : null}
-                  {productionBriefItems.length > 0 ? (
-                    <section className="novel-writing-shell__review-strip">
-                      <div className="novel-writing-shell__review-strip-head">
-                        <div>
-                          <div className="novel-kicker">AI 定稿摘要</div>
-                          <strong>本章最值得先处理的问题已经汇总到这里</strong>
+                          {hoverChapterId === chapter.id ? (
+                            <Button
+                              type="text"
+                              size="small"
+                              danger
+                              icon={<DeleteOutlined />}
+                              onClick={(event) => handleDeleteChapter(chapter.id, event)}
+                            />
+                          ) : null}
                         </div>
-                        {reviewNotes?.revision_brief ? <Tag color="gold">审校已生成</Tag> : null}
-                      </div>
-                      <div className="novel-writing-shell__review-strip-list">
-                        {productionBriefItems.map((item, index) => (
-                          <div key={`${item}-${index}`} className="novel-writing-shell__review-strip-item">{item}</div>
-                        ))}
-                      </div>
-                    </section>
+                      )
+                    }) : <Empty description="还没有章节，先创建一个。" image={Empty.PRESENTED_IMAGE_SIMPLE} />}
+                  </div>
+                  <ActionBar align="between">
+                    <Button type="dashed" icon={<PlusOutlined />} onClick={() => void handleAddChapter()}>
+                      新建章节
+                    </Button>
+                    <Select
+                      size="small"
+                      style={{ width: 208 }}
+                      value={generationExecutionModeOverride}
+                      options={[
+                        { value: 'follow_default', label: `跟随默认（${getAiExecutionModeLabel(defaultAiExecutionMode)}）` },
+                        ...AI_EXECUTION_MODE_OPTIONS.map((item) => ({
+                          value: item.value,
+                          label: `本次覆盖·${item.label}`,
+                        })),
+                      ]}
+                      onChange={(value) => setGenerationExecutionModeOverride(value)}
+                    />
+                  </ActionBar>
+                </section>
+
+                <ContractPanel
+                  title="章节合同"
+                  subtitle="本章目标、线程、伏笔、禁越界事项和验收口径。"
+                  sections={chapterContractSections}
+                />
+
+                <ContractPanel
+                  title="场景合同"
+                  subtitle={sceneContractSections.length > 0 ? `已挂 ${sceneContractSections.length} 个场景约束。` : '当前还没有稳定的场景合同。'}
+                  sections={sceneContractSections.length > 0 ? sceneContractSections : [{
+                    key: 'empty-scene',
+                    title: '场景合同缺失',
+                    items: ['建议先补场景计划，避免正文只剩大段泛写。'],
+                    tone: 'danger',
+                  }]}
+                />
+              </aside>
+
+              <section className="chapter-console-page__column chapter-console-page__column--center">
+                <section className="chapter-console-page__panel chapter-console-page__editor-card">
+                  <SectionHeader
+                    eyebrow="正文编辑器"
+                    title={editorTitle}
+                    description={resolvedEditorSubtitle}
+                    extra={currentChapter ? <Tag color="default">{`字数 ${wordCount}`}</Tag> : null}
+                  />
+                  <ActionBar align="between">
+                    <div className="chapter-console-page__editor-status">
+                      <Select
+                        size="small"
+                        style={{ width: 140 }}
+                        value={defaultAiExecutionMode}
+                        loading={savingAiMode}
+                        options={AI_EXECUTION_MODE_OPTIONS.map((item) => ({
+                          value: item.value,
+                          label: `默认·${item.label}`,
+                        }))}
+                        onChange={(value) => void handleDefaultAiModeChange(value)}
+                      />
+                      {selectedSnippet?.text ? <span>{`已选 ${selectedSnippet.text.length} 字`}</span> : null}
+                    </div>
+                    <div className="chapter-console-page__editor-actions">
+                      <Button
+                        onClick={() => {
+                          if (!currentChapter || (currentChapter.segmentCount || 0) > 1) return
+                          const latestText = normalizeEditorText(editorRef.current?.innerText || content)
+                          void saveNow(currentChapter.id, latestText).then(() => {
+                            message.success(getUserFacingMessage('writing.saved'))
+                          }).catch((error) => {
+                            console.error(error)
+                            message.error(getErrorMessage(error, 'writing.saveFailed'))
+                          })
+                        }}
+                        disabled={!currentChapter || hasMultiSegments}
+                      >
+                        保存
+                      </Button>
+                      {currentChapterGenerating ? (
+                        <Button danger icon={<LoadingOutlined />} onClick={() => void handleCancelGenerate()}>
+                          停止
+                        </Button>
+                      ) : (
+                        <Button
+                          type="primary"
+                          icon={<RobotOutlined />}
+                          disabled={!currentChapter}
+                          onClick={() => void handleGenerateContent()}
+                        >
+                          生成
+                        </Button>
+                      )}
+                      <Button
+                        icon={<RobotOutlined />}
+                        disabled={!currentChapter || hasMultiSegments || !selectedSnippet?.text}
+                        loading={rewritingSelection}
+                        onClick={handleOpenRewriteModal}
+                      >
+                        重写
+                      </Button>
+                      <Button icon={<FileSearchOutlined />} disabled={!currentChapter} onClick={() => void handleAiCheck()}>
+                        审校
+                      </Button>
+                      <Button icon={<CheckOutlined />} disabled={!currentChapter} onClick={() => void handleStatusChange('final')}>
+                        定稿
+                      </Button>
+                    </div>
+                  </ActionBar>
+
+                  {currentChapterGenerating ? (
+                    <div className="chapter-console-page__stream">
+                      <div className="chapter-console-page__stream-head">AI 正在生产本章 <Spin size="small" /></div>
+                      <div className="chapter-console-page__stream-body">{streamContent}<span className="streaming-cursor" /></div>
+                    </div>
                   ) : null}
+
+                  {productionBriefItems.length > 0 ? (
+                    <div className="chapter-console-page__brief-strip">
+                      {productionBriefItems.slice(0, 4).map((item) => (
+                        <div key={item} className="chapter-console-page__brief-chip">{item}</div>
+                      ))}
+                    </div>
+                  ) : null}
+
                   {currentChapterStaleReasons.length > 0 ? (
                     <Alert
                       showIcon
                       type="warning"
-                      style={{ marginBottom: 16 }}
                       message="当前章节上下文已过期"
-                      description={`受这些变更影响：${currentChapterStaleReasons.join('；')}。需要刷新摘要或记忆，并检查本章承接。`}
+                      description={`受这些变更影响：${currentChapterStaleReasons.join('；')}。建议先同步后再继续写。`}
                     />
                   ) : null}
-                  {currentChapterStaleReasons.length === 0 && otherStaleChapterCount > 0 ? (
-                    <Alert
-                      showIcon
-                      type="info"
-                      style={{ marginBottom: 16 }}
-                      message={`还有 ${otherStaleChapterCount} 章待同步`}
-                      description="当前章节本身是最新的，但小说里还有其他章节受设定变更影响。继续推进后文前，建议回到这些章节逐一复查。"
-                    />
-                  ) : null}
+
                   {publishCheck ? (
                     <Alert
                       showIcon
                       type={getPublishCheckAlertType(publishCheck)}
-                      style={{ marginBottom: 16 }}
                       message={`章节验收：${publishCheck.summary}`}
-                      description={`重写 ${publishCheck.rewriteCount} 项，阻塞 ${publishCheck.blockerCount} 项，预警 ${publishCheck.warningCount} 项。标记完成时会再次自动复检。`}
+                      description={`重写 ${publishCheck.rewriteCount} 项，阻塞 ${publishCheck.blockerCount} 项，预警 ${publishCheck.warningCount} 项。`}
                     />
                   ) : null}
+
                   {hasMultiSegments ? (
                     <Alert
                       showIcon
                       type="info"
-                      style={{ marginBottom: 16 }}
                       message="当前章节处于多场景结构模式"
                       description={(
                         <div className="novel-writing-shell__segment-alert">
                           <div className="novel-writing-shell__segment-alert-copy">
-                            该章节已经拆成多个场景。为避免整章直改破坏场景顺序和上下文链路，正文区改为只读预览。
+                            该章节已经拆成多个场景。请优先维护场景合同，再重新编译整章。
                           </div>
                           <div className="novel-writing-shell__segment-alert-actions">
                             <Button size="small" icon={<ApartmentOutlined />} onClick={() => navigate(`/novels/${novelId}/structure`)}>
@@ -2240,71 +2593,148 @@ export default function Writing({ novelId }: Props) {
                       )}
                     />
                   ) : null}
-                  {currentChapterGenerating ? (
-                    <div className="novel-writing-shell__editor-sheet novel-writing-shell__editor-sheet--streaming">
-                      <div className="novel-writing-shell__editor-stream-head">AI 正在续写本章 <Spin size="small" /></div>
-                      <div className="novel-writing-shell__editor-stream">{streamContent}<span className="streaming-cursor" /></div>
-                    </div>
-                  ) : hasMultiSegments ? (
-                    <div className="novel-writing-shell__segment-preview">
-                      <SegmentBoardPreview
-                        segments={chapterSegments}
-                        onOpenStructure={() => navigate(`/novels/${novelId}/structure`)}
-                        onCompile={() => void handleCompileCurrentChapter()}
-                      />
-                      <div className="novel-writing-shell__editor-sheet novel-writing-shell__editor-sheet--readonly" dangerouslySetInnerHTML={{ __html: content.replace(/\n/g, '<br>') }} />
+
+                  <div className="chapter-console-page__editor-sheet-wrap">
+                    {currentChapter ? (
+                      hasMultiSegments ? (
+                        <div className="novel-writing-shell__segment-preview">
+                          <SegmentBoardPreview
+                            segments={chapterSegments}
+                            onOpenStructure={() => navigate(`/novels/${novelId}/structure`)}
+                            onCompile={() => void handleCompileCurrentChapter()}
+                          />
+                          <div
+                            className="novel-writing-shell__editor-sheet novel-writing-shell__editor-sheet--readonly"
+                            dangerouslySetInnerHTML={{ __html: content.replace(/\n/g, '<br>') }}
+                          />
+                        </div>
+                      ) : (
+                        <div
+                          ref={editorRef}
+                          contentEditable
+                          suppressContentEditableWarning
+                          onInput={handleContentChange}
+                          onMouseUp={syncSelectedSnippet}
+                          onKeyUp={syncSelectedSnippet}
+                          className="novel-writing-shell__editor-sheet"
+                          dangerouslySetInnerHTML={{ __html: content.replace(/\n/g, '<br>') }}
+                        />
+                      )
+                    ) : (
+                      <div className="novel-empty novel-empty--writing">请选择左侧章节，或先创建一个新章节开始写作。</div>
+                    )}
+                  </div>
+                </section>
+
+                <section className="chapter-console-page__panel">
+                  <SectionHeader
+                    eyebrow="审校与验收"
+                    title="章节验收面板"
+                    description="这里统一看合同兑现、连续性、AI 味、节奏、人物一致性和世界规则一致性。"
+                  />
+                  <div className="chapter-console-page__acceptance-grid">
+                    {acceptanceCards.map((item) => (
+                      <div key={item.label} className="chapter-console-page__acceptance-card">
+                        <span>{item.label}</span>
+                        <strong>{item.value}</strong>
+                      </div>
+                    ))}
+                  </div>
+                  {qualityIssueItems.length > 0 ? (
+                    <div className="chapter-console-page__quality-list">
+                      {qualityIssueItems.slice(0, 8).map((item) => (
+                        <div key={item} className="chapter-console-page__quality-item">{item}</div>
+                      ))}
                     </div>
                   ) : (
-                    <div
-                      ref={editorRef}
-                      contentEditable
-                      suppressContentEditableWarning
-                      onInput={handleContentChange}
-                      onMouseUp={syncSelectedSnippet}
-                      onKeyUp={syncSelectedSnippet}
-                      className="novel-writing-shell__editor-sheet"
-                      dangerouslySetInnerHTML={{ __html: content.replace(/\n/g, '<br>') }}
-                    />
+                    <div className="chapter-console-page__empty-copy">当前还没有新的审校问题。</div>
                   )}
-                </div>
-              ) : <div className="novel-empty novel-empty--writing">请选择左侧章节，或先创建一个新章节开始写作。</div>}
-            </div>
-            <div className="novel-writing-shell__editor-footer">
-              <Button disabled={!currentChapter} onClick={() => void handleOpenVersionHistory()}>版本历史</Button>
-              <Button icon={<BulbOutlined />} disabled={!currentChapter} onClick={() => void handleGenerateSummary()}>更新摘要</Button>
-              <Button icon={<FileSearchOutlined />} disabled={!currentChapter} onClick={() => void handleAiCheck()}>AI 体检</Button>
-              <Button icon={<RobotOutlined />} disabled={!currentChapter || hasMultiSegments || !selectedSnippet?.text} loading={rewritingSelection} onClick={handleOpenRewriteModal}>重写选中文段</Button>
-              {selectedSnippet?.text ? <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>{`已选 ${selectedSnippet.text.length} 字`}</span> : null}
-              <Button icon={<CheckOutlined />} disabled={!currentChapter} onClick={() => void handleStatusChange('final')} style={{ marginLeft: 'auto' }}>标记完成</Button>
-            </div>
-          </section>
+                </section>
+              </section>
 
-          <aside className="novel-writing-shell__insight">
-            <div className="novel-writing-shell__insight-switch">
-              {([
-                { key: 'editor', label: '编辑器' },
-                { key: 'context', label: '上下文' },
-                { key: 'review', label: '审校' },
-                { key: 'history', label: '历史' },
-              ] as Array<{ key: WritingRouteKey; label: string }>).map((tab) => (
-                <button key={tab.key} type="button" className={activeWritingRoute === tab.key ? 'is-active' : ''} onClick={() => navigateToWritingRoute(tab.key)}>
-                  {tab.label}
-                </button>
-              ))}
+              <aside className="chapter-console-page__column chapter-console-page__column--right">
+                <section className="chapter-console-page__panel">
+                  <SectionHeader
+                    eyebrow="视图焦点"
+                    title="右侧辅助面板"
+                    description="保留兼容路由，但现在统一汇总上下文、审校、历史和回写入口。"
+                  />
+                  <div className="chapter-console-page__route-switch">
+                    {([
+                      { key: 'editor', label: '生产台' },
+                      { key: 'context', label: '召回' },
+                      { key: 'review', label: '审校' },
+                      { key: 'history', label: '历史' },
+                    ] as Array<{ key: WritingRouteKey; label: string }>).map((tab) => (
+                      <button
+                        key={tab.key}
+                        type="button"
+                        className={activeWritingRoute === tab.key ? 'is-active' : ''}
+                        onClick={() => navigateToWritingRoute(tab.key)}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+                </section>
+
+                <ContextPanel
+                  title="上下文与 Canon"
+                  sections={contextSections}
+                />
+
+                <section className="chapter-console-page__panel">
+                  <SectionHeader
+                    eyebrow="章后回写"
+                    title="回写候选入口"
+                    description="正文定稿后，把事实、人物状态、伏笔、时间轴变化回写到资产总账。"
+                  />
+                  <div className="chapter-console-page__writeback-card">
+                    <strong>{(qualityDashboard?.productionReadiness.writebackPendingCount || 0) > 0 ? `当前有 ${qualityDashboard?.productionReadiness.writebackPendingCount || 0} 章待回写` : '当前章可随时进入回写'}</strong>
+                    <span>{qualityDashboard?.productionReadiness.summary || '回写完成后，质量监控和修订中心会基于新 Canon 继续反推任务。'}</span>
+                    <ActionBar align="start">
+                      <Button type="primary" onClick={() => navigate(`/novels/${novelId}/writeback`)}>
+                        进入章后回写
+                      </Button>
+                      <Button onClick={() => navigate(`/novels/${novelId}/revision`)}>
+                        打开修订中心
+                      </Button>
+                    </ActionBar>
+                  </div>
+                </section>
+              </aside>
             </div>
-            <React.Suspense fallback={<div className="novel-empty novel-empty--writing"><Spin /></div>}>
-              <Routes>
-                <Route index element={<Navigate replace to={location.search ? `editor${location.search}` : 'editor'} />} />
-                <Route path="editor" element={<WritingEditorRoute content={chapterInsightContent} />} />
-                <Route path="context" element={<WritingContextRoute content={memoryInsightContent} />} />
-                <Route path="review" element={<WritingReviewRoute content={reviewInsightContent} />} />
-                <Route path="history" element={<WritingHistoryRoute content={historyInsightContent} />} />
-                <Route path="*" element={<Navigate replace to={location.search ? `editor${location.search}` : 'editor'} />} />
-              </Routes>
-            </React.Suspense>
-          </aside>
-        </div>
-      )}
+
+            <div className="chapter-console-page__footer">
+              <PipelineBar items={pipelineItems} />
+              <div className="chapter-console-page__footer-grid">
+                <section className="chapter-console-page__panel">
+                  <SectionHeader
+                    eyebrow="流水线元数据"
+                    title="执行记录"
+                    description="任务、合同版本、Token 消耗、耗时和恢复提示都收在这里。"
+                  />
+                  <div className="chapter-console-page__meta-grid">
+                    {pipelineMetaItems.map((item) => (
+                      <div key={item.label} className="chapter-console-page__meta-card">
+                        <span>{item.label}</span>
+                        <strong>{item.value}</strong>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <VersionTimeline
+                  versions={chapterVersions}
+                  selectedVersionId={selectedVersionId}
+                  onSelect={setSelectedVersionId}
+                  onRestore={() => void handleRestoreVersion()}
+                />
+              </div>
+            </div>
+          </>
+        )}
+      </div>
       <Modal
         title="重写选中文段"
         open={rewriteModalOpen}
@@ -2328,7 +2758,7 @@ export default function Writing({ novelId }: Props) {
       </Modal>
 
       <ParallelGenerationModal novelId={novelId} chapters={chapters} />
-    </WorkspacePage>
+    </>
   )
 }
 

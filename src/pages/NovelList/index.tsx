@@ -1,49 +1,36 @@
 ﻿import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Button,
-  Card,
   Col,
-  Dropdown,
   Empty,
   Form,
   Input,
   Modal,
-  Progress,
   Radio,
   Row,
   Select,
   Skeleton,
-  Spin,
   Steps,
-    Tag,
-    message,
+  Tag,
+  message,
 } from 'antd'
-import type { MenuProps } from 'antd'
 import {
   CheckOutlined,
-  DeleteOutlined,
-  EditOutlined,
-  ExportOutlined,
   LoadingOutlined,
-  MoreOutlined,
   PlusOutlined,
   ReloadOutlined,
   SearchOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { getErrorMessage, getUserFacingMessage, isUserFacingMessage } from '@/utils/user-facing-message'
-import dayjs from 'dayjs'
-import relativeTime from 'dayjs/plugin/relativeTime'
-import 'dayjs/locale/zh-cn'
 import type { Novel, NovelLaunchMode, Template } from '../../types'
+import ProjectCard from '../../components/novel/cards/ProjectCard'
 import { useNovelStore } from '../../stores/novel.store'
+import { getWorkspaceSnapshot, type WorkspaceSnapshot } from '../../shared/novel-workspace'
 import { buildThemeVoicePayload } from '../../shared/theme-voice'
 import { WRITING_CONTRACT_PRESETS, getWritingContractValidationError, normalizeWritingContractTags } from '../../shared/writing-contract'
+import { EMPTY_WORKFLOW_STATS, loadWorkflowStats } from '../Novel/workflow'
 import { buildFastLaunchBootstrapPlan, NOVEL_LAUNCH_MODE_OPTIONS } from './fast-launch'
-import { WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../Novel/components/WorkspaceShell'
-
-dayjs.extend(relativeTime)
-dayjs.locale('zh-cn')
 
 interface WizardFormValues {
   genreId: number
@@ -68,13 +55,6 @@ interface ExpandBackgroundResult {
   expanded_background: string
   titles: string[]
   synopsis: string
-}
-
-const STATUS_LABELS: Record<string, { label: string; color: string }> = {
-  draft: { label: '草稿', color: '#5c6378' },
-  writing: { label: '写作中', color: '#2E86AB' },
-  completed: { label: '已完成', color: '#52c41a' },
-  archived: { label: '已归档', color: '#3d4155' },
 }
 
 const GENRE_OPTIONS = [
@@ -143,6 +123,7 @@ export default function NovelList() {
   const navigate = useNavigate()
   const { novels, setNovels } = useNovelStore()
   const [loading, setLoading] = useState(true)
+  const [workspaceSnapshots, setWorkspaceSnapshots] = useState<Record<number, WorkspaceSnapshot>>({})
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [sortBy, setSortBy] = useState<string>('updatedAt')
@@ -167,17 +148,42 @@ export default function NovelList() {
     wizardForm.setFieldsValue({ launchMode: 'professional_longform', targetWords: 200000 })
   }, [wizardForm])
 
+  const loadWorkspaceSnapshots = useCallback(async (sourceNovels: Novel[]) => {
+    const entries = await Promise.all(sourceNovels.map(async (novel) => {
+      try {
+        const stats = await loadWorkflowStats(novel.id)
+        return [
+          novel.id,
+          getWorkspaceSnapshot(novel, stats, {
+            viewMode: novel.launchMode === 'fast_launch' ? 'quick' : 'professional',
+          }),
+        ] as const
+      } catch (error) {
+        console.error('Failed to load novel workspace snapshot', novel.id, error)
+        return [
+          novel.id,
+          getWorkspaceSnapshot(novel, {
+            ...EMPTY_WORKFLOW_STATS,
+          }),
+        ] as const
+      }
+    }))
+
+    setWorkspaceSnapshots(Object.fromEntries(entries))
+  }, [])
+
   const loadNovels = useCallback(async () => {
     setLoading(true)
     try {
       const list = await window.electron.novel.list()
       setNovels(list)
+      await loadWorkspaceSnapshots(list)
     } catch (error) {
       message.error(getErrorMessage(error, 'novel.listLoadFailed'))
     } finally {
       setLoading(false)
     }
-  }, [setNovels])
+  }, [loadWorkspaceSnapshots, setNovels])
 
   useEffect(() => {
     void loadNovels()
@@ -440,31 +446,89 @@ export default function NovelList() {
     () => novels.filter((novel) => novel.status === 'completed').length,
     [novels],
   )
+  const totalBlockerCount = useMemo(
+    () => Object.values(workspaceSnapshots).reduce((sum, snapshot) => sum + snapshot.blockers.length, 0),
+    [workspaceSnapshots],
+  )
+  const readyToWriteCount = useMemo(
+    () => Object.values(workspaceSnapshots).filter((snapshot) => snapshot.nextStep.targetPage === 'writing').length,
+    [workspaceSnapshots],
+  )
 
   return (
     <>
-      <WorkspacePage
-        className="admin-page novel-library-page"
-        layout="wide"
-        heroVariant="compact"
-        eyebrow="项目入口"
-        title="我的小说"
-        description="集中查看项目状态、字数进度与最近修改时间，从同一入口继续创作、导出或快速开书。"
-        actions={(
-          <div className="admin-toolbar">
+      <div style={{ height: '100%', overflow: 'auto', padding: 24, background: 'var(--bg-page)' }}>
+        <div style={{ maxWidth: 1520, margin: '0 auto', display: 'grid', gap: 18 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+            <div style={{ display: 'grid', gap: 6 }}>
+              <h1 style={{ margin: 0, fontSize: 28, lineHeight: 1.15, fontWeight: 700, color: 'var(--text-main)' }}>
+                我的小说
+              </h1>
+              <span style={{ fontSize: 13, color: 'var(--text-sub)' }}>
+                面向长篇与系列小说的创作控制台。
+              </span>
+            </div>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setWizardOpen(true)}>
+              新建小说
+            </Button>
+          </div>
+
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+              gap: 12,
+            }}
+          >
+            {[
+              { label: '项目总数', value: `${novels.length} 部`, hint: '当前库内小说项目' },
+              { label: '写作中', value: `${writingCount} 部`, hint: '已经进入章节生产' },
+              { label: '已完结', value: `${completedCount} 部`, hint: '已进入收尾状态' },
+              { label: '可直接开写', value: `${readyToWriteCount} 部`, hint: '下一步已指向正文写作' },
+              { label: '待清 blocker', value: `${totalBlockerCount} 个`, hint: '需要先处理的高优先风险' },
+              { label: '累计字数', value: formatWordCount(totalWordCount), hint: '全部项目总字数' },
+            ].map((item) => (
+              <div
+                key={item.label}
+                style={{
+                  display: 'grid',
+                  gap: 6,
+                  padding: '14px 16px',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--border-light)',
+                  background: '#fff',
+                }}
+              >
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{item.label}</span>
+                <strong style={{ fontSize: 20, lineHeight: 1.1, color: 'var(--text-main)' }}>{item.value}</strong>
+                <span style={{ fontSize: 11, color: 'var(--text-sub)' }}>{item.hint}</span>
+              </div>
+            ))}
+          </div>
+
+          <div
+            style={{
+              display: 'flex',
+              gap: 8,
+              flexWrap: 'wrap',
+              padding: 14,
+              borderRadius: 'var(--radius-md)',
+              border: '1px solid var(--border-light)',
+              background: '#fff',
+            }}
+          >
             <Input
-              className="admin-toolbar__grow"
               prefix={<SearchOutlined />}
               placeholder="搜索小说、简介或题材"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              style={{ width: 280, maxWidth: '100%' }}
+              style={{ width: 280 }}
               allowClear
             />
             <Select
               value={statusFilter}
               onChange={setStatusFilter}
-              style={{ width: 150 }}
+              style={{ width: 140 }}
               options={[
                 { value: 'all', label: '全部状态' },
                 { value: 'draft', label: '草稿' },
@@ -476,55 +540,53 @@ export default function NovelList() {
             <Select
               value={sortBy}
               onChange={setSortBy}
-              style={{ width: 160 }}
+              style={{ width: 150 }}
               options={[
                 { value: 'updatedAt', label: '最近修改' },
                 { value: 'totalWords', label: '按字数排序' },
                 { value: 'title', label: '按标题排序' },
               ]}
             />
-            <div className="admin-toolbar__actions">
-              <Button type="primary" icon={<PlusOutlined />} onClick={() => setWizardOpen(true)}>
-                新建小说
-              </Button>
-            </div>
           </div>
-        )}
-        metrics={(
-          <>
-            <WorkspaceMetric label="项目总数" value={novels.length} tone="cool" />
-            <WorkspaceMetric label="写作中" value={writingCount} />
-            <WorkspaceMetric label="已完结" value={completedCount} tone="warm" />
-            <WorkspaceMetric label="总字数" value={formatWordCount(totalWordCount)} />
-          </>
-        )}
-      >
-        <WorkspacePanel
-          title="项目列表"
-          description="支持按状态、关键字和排序方式快速筛选。卡片内可直接继续创作、导出或删除项目。"
-        >
+
           {loading ? (
-            <Skeleton active paragraph={{ rows: 8 }} />
+            <Skeleton active paragraph={{ rows: 10 }} />
           ) : filteredNovels.length === 0 ? (
             <Empty
               description={search ? '没有找到匹配的小说。' : '还没有小说，点击“新建小说”开始创作。'}
-              style={{ paddingTop: 80 }}
+              style={{ paddingTop: 96 }}
             />
           ) : (
-            <div className="admin-card-grid">
-              {filteredNovels.map((novel) => (
-                <NovelCard
-                  key={novel.id}
-                  novel={novel}
-                  onClick={() => navigate(`/novels/${novel.id}/overview`)}
-                  onDelete={() => void handleDelete(novel.id, novel.title)}
-                  onExport={(format) => void handleExport(novel.id, format)}
-                />
-              ))}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))',
+                gap: 16,
+              }}
+            >
+              {filteredNovels.map((novel) => {
+                const snapshot = workspaceSnapshots[novel.id] || getWorkspaceSnapshot(novel, EMPTY_WORKFLOW_STATS, {
+                  viewMode: novel.launchMode === 'fast_launch' ? 'quick' : 'professional',
+                })
+                const target = snapshot.nextStep.targetPage === 'writing'
+                  ? 'writing/editor'
+                  : snapshot.nextStep.targetPage
+
+                return (
+                  <ProjectCard
+                    key={novel.id}
+                    novel={novel}
+                    snapshot={snapshot}
+                    onOpen={() => navigate(`/novels/${novel.id}/${target}`)}
+                    onDelete={() => void handleDelete(novel.id, novel.title)}
+                    onExport={(format) => void handleExport(novel.id, format)}
+                  />
+                )
+              })}
             </div>
           )}
-        </WorkspacePanel>
-      </WorkspacePage>
+        </div>
+      </div>
 
       <Modal
         title="新建小说"
@@ -847,159 +909,5 @@ export default function NovelList() {
         </div>
       </Modal>
     </>
-  )
-}
-
-function NovelCard({
-  novel,
-  onClick,
-  onDelete,
-  onExport,
-}: {
-  novel: Novel
-  onClick: () => void
-  onDelete: () => void
-  onExport: (format: string) => void
-}) {
-  const status = STATUS_LABELS[novel.status] || STATUS_LABELS.draft
-  const targetWords = normalizeTargetWords(novel.targetWords)
-  const progress = targetWords > 0
-    ? Math.min(100, Math.round((novel.totalWords / targetWords) * 100))
-    : 0
-  const gradient = GENRE_GRADIENTS[novel.genreName || ''] || 'linear-gradient(135deg, #1a1d27, #252840)'
-  const synopsis = novel.synopsis?.trim()
-    || novel.expandedBackground?.trim()
-    || novel.userBackground?.trim()
-    || '还没有补充简介，进入工作台后可以继续完善背景、设定和结构。'
-
-  const menuItems: MenuProps['items'] = [
-    {
-      key: 'edit',
-      icon: <EditOutlined />,
-      label: '继续创作',
-      onClick,
-    },
-    {
-      key: 'export-txt',
-      icon: <ExportOutlined />,
-      label: '导出 TXT',
-      onClick: () => onExport('txt'),
-    },
-    {
-      key: 'export-md',
-      icon: <ExportOutlined />,
-      label: '导出 Markdown',
-      onClick: () => onExport('md'),
-    },
-    {
-      key: 'export-docx',
-      icon: <ExportOutlined />,
-      label: '导出 DOCX',
-      onClick: () => onExport('docx'),
-    },
-    {
-      key: 'export-epub',
-      icon: <ExportOutlined />,
-      label: '导出 EPUB',
-      onClick: () => onExport('epub'),
-    },
-    { type: 'divider' },
-    {
-      key: 'delete',
-      icon: <DeleteOutlined />,
-      label: '删除',
-      danger: true,
-      onClick: onDelete,
-    },
-  ]
-
-  return (
-    <Card
-      className="novel-home-card"
-      hoverable
-      styles={{ body: { padding: 0 } }}
-      style={{
-        background: 'var(--color-bg-card)',
-        border: '1px solid var(--border-color)',
-        borderRadius: 'var(--radius-md)',
-        overflow: 'hidden',
-        cursor: 'pointer',
-      }}
-      onClick={onClick}
-    >
-      <div
-        className="novel-home-card__cover"
-        style={{
-          height: 156,
-          background: gradient,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          position: 'relative',
-        }}
-      >
-        <span style={{ fontSize: 40, opacity: 0.3 }}>✦</span>
-        <div style={{ position: 'absolute', top: 8, right: 8 }} onClick={(event) => event.stopPropagation()}>
-          <Dropdown menu={{ items: menuItems }} trigger={['click']}>
-            <Button
-              type="text"
-              size="small"
-              icon={<MoreOutlined style={{ color: 'white' }} />}
-              style={{ background: 'rgba(0, 0, 0, 0.3)' }}
-            />
-          </Dropdown>
-        </div>
-        <Tag
-          style={{
-            position: 'absolute',
-            bottom: 8,
-            left: 8,
-            background: 'rgba(0, 0, 0, 0.4)',
-            border: 'none',
-            color: 'white',
-            fontSize: 11,
-          }}
-        >
-          {novel.genreName || '未分类'}
-        </Tag>
-      </div>
-
-      <div className="novel-home-card__body">
-        <div className="novel-home-card__title">{novel.title}</div>
-
-        <div className="novel-home-card__meta">
-          <Tag
-            style={{
-              background: 'transparent',
-              border: `1px solid ${status.color}`,
-              color: status.color,
-              fontSize: 11,
-              padding: '0 6px',
-            }}
-          >
-            {status.label}
-          </Tag>
-          <span className="novel-home-card__meta-copy">{formatWordCount(novel.totalWords)}</span>
-          <span style={{ flex: 1 }} />
-          <span className="novel-home-card__meta-copy">{dayjs(novel.updatedAt).fromNow()}</span>
-        </div>
-
-        <div className="novel-home-card__synopsis">{synopsis}</div>
-
-          <div className="novel-home-card__progress">
-            <Progress
-              percent={progress}
-              size="small"
-              strokeColor="var(--color-blue-primary)"
-              trailColor="rgba(255,255,255,0.08)"
-              showInfo={false}
-            />
-            <div className="novel-home-card__progress-meta">
-              <span>目标 {formatWordCount(targetWords)}</span>
-              <strong>{progress}%</strong>
-          </div>
-        </div>
-      </div>
-    </Card>
   )
 }
