@@ -558,3 +558,34 @@
     grid-template-columns: 1fr;
   }
 }
+
+[data-theme="dark"] .studio-page {
+  --studio-ink: #eef2f7;
+  --studio-panel: linear-gradient(180deg, rgba(30, 36, 49, 0.94) 0%, rgba(23, 28, 39, 0.92) 100%);
+  --studio-panel-strong: linear-gradient(145deg, rgba(20, 28, 41, 0.98) 0%, rgba(44, 64, 87, 0.94) 100%);
+  --studio-accent: #d19a5d;
+  --studio-accent-soft: rgba(209, 154, 93, 0.14);
+  --studio-border: rgba(212, 193, 161, 0.14);
+  --studio-shadow: 0 20px 40px rgba(4, 8, 18, 0.32);
+}
+
+[data-theme="dark"] .studio-page .novel-hero {
+  border-color: rgba(212, 193, 161, 0.14);
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.06), transparent 38%),
+    linear-gradient(135deg, rgba(37, 44, 59, 0.96) 0%, rgba(28, 35, 48, 0.94) 52%, rgba(20, 26, 37, 0.96) 100%);
+}
+
+[data-theme="dark"] .studio-page .studio-bible-overview,
+[data-theme="dark"] .studio-page .studio-readiness-card,
+[data-theme="dark"] .studio-page .studio-action-card,
+[data-theme="dark"] .studio-page .studio-quality-strip__progress,
+[data-theme="dark"] .studio-page .studio-freshness-meta span,
+[data-theme="dark"] .studio-page .studio-freshness-card,
+[data-theme="dark"] .studio-page .studio-note-list__item,
+[data-theme="dark"] .studio-page .studio-empty-state,
+[data-theme="dark"] .studio-page .studio-link-button,
+[data-theme="dark"] .studio-page .studio-issue-card {
+  border-color: rgba(212, 193, 161, 0.14);
+  background: rgba(28, 34, 47, 0.88);
+}

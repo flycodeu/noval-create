@@ -3,6 +3,7 @@ import { CaretDownFilled, CaretRightFilled, ThunderboltOutlined } from '@ant-des
 import type { WorkspaceNavGroup } from '../../../shared/workspace-types'
 import { type WorkspaceViewMode, getWorkspaceModeOptions } from '../../../shared/novel-workspace'
 import StatusTag from '../common/StatusTag'
+import './ProjectSidebar.css'
 
 interface ProjectSidebarProps {
   title: string
@@ -40,59 +41,22 @@ export default function ProjectSidebar({
   }, [activeGroup])
 
   return (
-    <div
-      style={{
-        display: 'grid',
-        gridTemplateRows: 'auto auto minmax(0, 1fr)',
-        gap: 16,
-        height: '100%',
-        padding: 16,
-      }}
-    >
-      <div
-        style={{
-          display: 'grid',
-          gap: 12,
-          padding: 16,
-          borderRadius: 'var(--radius-md)',
-          border: '1px solid var(--border-light)',
-          background: '#fff',
-        }}
-      >
-        <div style={{ display: 'grid', gap: 6 }}>
-          <strong style={{ fontSize: 18, lineHeight: 1.35, color: 'var(--text-main)' }}>{title}</strong>
-          <span style={{ fontSize: 12, color: 'var(--text-sub)' }}>{`当前阶段：${stageLabel}`}</span>
-          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{`模块完成：${progressText}`}</span>
+    <div className="project-sidebar">
+      <div className="project-sidebar__card project-sidebar__header">
+        <div className="project-sidebar__title-block">
+          <strong className="project-sidebar__title">{title}</strong>
+          <span className="project-sidebar__meta">{`当前阶段：${stageLabel}`}</span>
+          <span className="project-sidebar__meta project-sidebar__meta--muted">{`模块完成：${progressText}`}</span>
         </div>
-        <div
-          style={{
-            display: 'grid',
-            gap: 8,
-            padding: 12,
-            borderRadius: 'var(--radius-sm)',
-            background: 'var(--bg-soft)',
-            border: '1px solid rgba(166, 106, 43, 0.16)',
-          }}
-        >
-          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--primary)' }}>当前主任务</span>
-          <strong style={{ fontSize: 13, lineHeight: 1.5, color: 'var(--text-main)' }}>{currentTask}</strong>
+        <div className="project-sidebar__task">
+          <span className="project-sidebar__task-label">当前主任务</span>
+          <strong className="project-sidebar__task-value">{currentTask}</strong>
         </div>
       </div>
 
-      <div
-        style={{
-          display: 'grid',
-          gap: 8,
-          padding: 12,
-          borderRadius: 'var(--radius-md)',
-          border: '1px solid var(--border-light)',
-          background: '#fff',
-        }}
-      >
-        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-          工作模式
-        </div>
-        <div style={{ display: 'grid', gap: 8 }}>
+      <div className="project-sidebar__card project-sidebar__mode">
+        <div className="project-sidebar__section-label">工作模式</div>
+        <div className="project-sidebar__mode-list">
           {modeOptions.map((option) => {
             const active = mode === option.value
 
@@ -101,69 +65,41 @@ export default function ProjectSidebar({
                 key={option.value}
                 type="button"
                 onClick={() => onModeChange(option.value)}
-                style={{
-                  display: 'grid',
-                  gap: 4,
-                  padding: '10px 12px',
-                  textAlign: 'left',
-                  borderRadius: 'var(--radius-sm)',
-                  border: `1px solid ${active ? 'rgba(166, 106, 43, 0.32)' : 'var(--border-light)'}`,
-                  background: active ? 'var(--primary-soft)' : '#fff',
-                  cursor: 'pointer',
-                }}
+                className={`project-sidebar__mode-button${active ? ' is-active' : ''}`}
               >
-                <strong style={{ fontSize: 13, color: active ? 'var(--primary)' : 'var(--text-main)' }}>{option.label}</strong>
-                <span style={{ fontSize: 11, lineHeight: 1.6, color: 'var(--text-muted)' }}>{option.description}</span>
+                <strong className="project-sidebar__mode-button-label">{option.label}</strong>
+                <span className="project-sidebar__mode-button-copy">{option.description}</span>
               </button>
             )
           })}
         </div>
       </div>
 
-      <div style={{ display: 'grid', gap: 10, minHeight: 0, overflowY: 'auto', paddingRight: 4 }}>
+      <div className="project-sidebar__groups">
         {navGroups.map((group) => {
           const isOpen = openGroups[group.key] ?? group.key === activeGroup
           const canCollapse = group.items.length > 0
 
           return (
-            <section
-              key={group.key}
-              style={{
-                display: 'grid',
-                gap: 10,
-                padding: 12,
-                borderRadius: 'var(--radius-md)',
-                border: '1px solid var(--border-light)',
-                background: '#fff',
-              }}
-            >
+            <section key={group.key} className="project-sidebar__card project-sidebar__group">
               <button
                 type="button"
                 onClick={() => canCollapse && setOpenGroups((current) => ({ ...current, [group.key]: !isOpen }))}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 12,
-                  border: 'none',
-                  background: 'transparent',
-                  padding: 0,
-                  cursor: canCollapse ? 'pointer' : 'default',
-                }}
+                className={`project-sidebar__group-toggle${canCollapse ? '' : ' is-static'}`}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  {canCollapse ? (isOpen ? <CaretDownFilled /> : <CaretRightFilled />) : <ThunderboltOutlined />}
-                  <strong style={{ fontSize: 13, color: 'var(--text-main)' }}>{group.title}</strong>
+                <div className="project-sidebar__group-toggle-main">
+                  <span className="project-sidebar__group-toggle-icon">
+                    {canCollapse ? (isOpen ? <CaretDownFilled /> : <CaretRightFilled />) : <ThunderboltOutlined />}
+                  </span>
+                  <strong className="project-sidebar__group-title">{group.title}</strong>
                 </div>
                 {group.progress ? (
-                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)' }}>
-                    {`${group.progress.done}/${group.progress.total}`}
-                  </span>
+                  <span className="project-sidebar__group-progress">{`${group.progress.done}/${group.progress.total}`}</span>
                 ) : null}
               </button>
 
               {isOpen ? (
-                <div style={{ display: 'grid', gap: 6 }}>
+                <div className="project-sidebar__group-items">
                   {group.items.map((item) => {
                     const active = item.key === activeKey
 
@@ -172,23 +108,14 @@ export default function ProjectSidebar({
                         key={item.key}
                         type="button"
                         onClick={() => onNavigate(item.route)}
-                        style={{
-                          display: 'grid',
-                          gap: 6,
-                          padding: '10px 12px',
-                          borderRadius: 'var(--radius-sm)',
-                          border: `1px solid ${active ? 'rgba(166, 106, 43, 0.28)' : 'var(--border-light)'}`,
-                          background: active ? 'var(--primary-soft)' : '#fff',
-                          cursor: 'pointer',
-                          textAlign: 'left',
-                        }}
+                        className={`project-sidebar__group-item${active ? ' is-active' : ''}`}
                       >
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-main)' }}>{item.label}</span>
+                        <div className="project-sidebar__group-item-head">
+                          <span className="project-sidebar__group-item-label">{item.label}</span>
                           <StatusTag status={item.status} size="small" />
                         </div>
                         {item.meta ? (
-                          <span style={{ fontSize: 11, lineHeight: 1.5, color: item.hasBlocker ? 'var(--danger)' : 'var(--text-muted)' }}>
+                          <span className={`project-sidebar__group-item-meta${item.hasBlocker ? ' is-danger' : ''}`}>
                             {item.meta}
                           </span>
                         ) : null}

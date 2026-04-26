@@ -284,6 +284,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
   const [recordStatusFilter, setRecordStatusFilter] = useState<'confirmed' | 'draft' | 'all'>('confirmed')
   const [graphScope, setGraphScope] = useState<'all' | 'focus'>('all')
   const [graphRelationFilter, setGraphRelationFilter] = useState<string>('all')
+  const [workspaceView, setWorkspaceView] = useState<'list' | 'graph'>(() => (searchParams.get('view') === 'graph' ? 'graph' : 'list'))
 
   const worldRules = useMemo(() => parseWorldRulesJson(currentNovel?.worldRulesJson, currentNovel?.genreName), [currentNovel?.genreName, currentNovel?.worldRulesJson])
   const speciesOptions = useMemo(() => getSpeciesNameOptions(worldRules), [worldRules])
@@ -732,7 +733,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
         <Space wrap>
           <Button type="primary" icon={<RobotOutlined />} loading={generating} onClick={() => setProtagonistOpen(true)}>AI 生成·主角</Button>
           <Button icon={<TeamOutlined />} loading={generating} onClick={() => { void searchItems(''); setBatchOpen(true) }}>AI 生成·人物网络</Button>
-          <Button icon={<ApartmentOutlined />} loading={generating} onClick={handleGenerateRelations}>AI 修复·关系网络</Button>
+          <Button icon={<ApartmentOutlined />} loading={generating} onClick={() => { setWorkspaceView('graph'); void handleGenerateRelations() }}>AI 修复·关系网络</Button>
           <Button icon={<EditOutlined />} onClick={() => navigate(selectedCharacter ? `/novels/${novelId}/arc-center?tab=characters&characterId=${selectedCharacter.id}` : `/novels/${novelId}/arc-center`)}>
             去人物弧线
           </Button>
@@ -763,117 +764,109 @@ export default function CharacterWorkspace({ novelId }: Props) {
         </>
       )}
     >
-      <div className="novel-character-studio">
-        <WorkspacePanel
-          className="novel-character-studio__sidebar"
-          title="人物列表"
-          scrollable
-          sticky
-          extra={(
-            <div className="novel-filter-bar">
-              <div className="novel-filter-bar__row">
-                <Input.Search allowClear placeholder="搜索姓名、目标、职业或矛盾" value={keyword} onChange={(event) => setKeyword(event.target.value)} onSearch={setKeyword} />
-              </div>
-              <div className="novel-filter-bar__row">
-                <Select value={roleFilter} options={[{ value: 'all', label: '全部角色' }, ...ROLE_OPTIONS]} onChange={setRoleFilter} />
-                <Select value={recordStatusFilter} options={[{ value: 'confirmed', label: '正式' }, { value: 'draft', label: '草稿' }, { value: 'all', label: '全部状态' }]} onChange={setRecordStatusFilter} />
-              </div>
-              <div className="novel-filter-bar__row">
-                <Select value={entityTypeFilter} options={[{ value: 'all', label: '全部实体' }, ...availableEntityTypes.map((item) => ({ value: item, label: ENTITY_TYPE_OPTIONS.find((option) => option.value === item)?.label || item }))]} onChange={setEntityTypeFilter} />
-                <Select value={speciesFilter} options={[{ value: 'all', label: '全部种类' }, ...availableSpecies.map((item) => ({ value: item, label: item }))]} onChange={setSpeciesFilter} />
-              </div>
-            </div>
-          )}
-        >
-          {stats.draftCount ? (
-            <Alert
-              className="novel-character-alert"
-              type="info"
-              showIcon
-              message={`当前有 ${stats.draftCount} 个待确认角色草稿`}
-              description="保存草稿角色会自动转为正式角色；如果正文或大纲新发现了物品，请到物品页继续完善。"
-            />
-          ) : null}
+      <div className="novel-character-studio-shell">
+        <div className="novel-character-studio__view-switch" role="tablist" aria-label="角色工作区视图">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={workspaceView === 'list'}
+            className={`novel-character-studio__view-tab${workspaceView === 'list' ? ' is-active' : ''}`}
+            onClick={() => setWorkspaceView('list')}
+          >
+            <TeamOutlined />
+            <span>人物列表</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={workspaceView === 'graph'}
+            className={`novel-character-studio__view-tab${workspaceView === 'graph' ? ' is-active' : ''}`}
+            onClick={() => setWorkspaceView('graph')}
+          >
+            <ApartmentOutlined />
+            <span>关系网络</span>
+          </button>
+        </div>
 
-          {loading ? <div className="novel-empty"><Spin /></div> : pageData.total === 0 ? <div className="novel-empty">当前筛选下还没有角色。</div> : (
-            <div style={{ display: 'grid', gap: 12 }}>
-              {pageData.items.map((character) => (
-                <button
-                  key={character.id}
-                  type="button"
-                  className={`novel-list-card ${selectedId === character.id ? 'novel-list-card--active' : ''}`}
-                  onClick={() => void loadCharacterDetail(character.id)}
-                  style={{ textAlign: 'left', cursor: 'pointer' }}
-                >
-                  <div className="novel-list-card__title">
-                    <span>{character.fullName}</span>
-                    {character.recordStatus === 'draft' ? <Tag color="processing">草稿</Tag> : null}
+        {workspaceView === 'list' ? (
+          <div className="novel-character-studio novel-character-studio--list">
+            <WorkspacePanel
+              className="novel-character-studio__sidebar"
+              title="人物列表"
+              scrollable
+              sticky
+              extra={(
+                <div className="novel-filter-bar">
+                  <div className="novel-filter-bar__row">
+                    <Input.Search allowClear placeholder="搜索姓名、目标、职业或矛盾" value={keyword} onChange={(event) => setKeyword(event.target.value)} onSearch={setKeyword} />
                   </div>
-                  <div className="novel-list-card__meta">
-                    <Tag color={ROLE_META[character.roleType].color}>{ROLE_META[character.roleType].label}</Tag>
-                    {character.species ? <Tag>{character.species}</Tag> : null}
-                    {character.occupation ? <Tag color="blue">{character.occupation}</Tag> : null}
+                  <div className="novel-filter-bar__row">
+                    <Select value={roleFilter} options={[{ value: 'all', label: '全部角色' }, ...ROLE_OPTIONS]} onChange={setRoleFilter} />
+                    <Select value={recordStatusFilter} options={[{ value: 'confirmed', label: '正式' }, { value: 'draft', label: '草稿' }, { value: 'all', label: '全部状态' }]} onChange={setRecordStatusFilter} />
                   </div>
-                  <div className="novel-list-card__desc">{character.innerConflict || character.goals || character.firstImpression || character.background || '这个角色还没有核心信息。'}</div>
-                </button>
-              ))}
-              <Pagination current={pageData.page} pageSize={pageData.pageSize} total={pageData.total} size="small" showSizeChanger={false} onChange={setPage} />
-            </div>
-          )}
+                  <div className="novel-filter-bar__row">
+                    <Select value={entityTypeFilter} options={[{ value: 'all', label: '全部实体' }, ...availableEntityTypes.map((item) => ({ value: item, label: ENTITY_TYPE_OPTIONS.find((option) => option.value === item)?.label || item }))]} onChange={setEntityTypeFilter} />
+                    <Select value={speciesFilter} options={[{ value: 'all', label: '全部种类' }, ...availableSpecies.map((item) => ({ value: item, label: item }))]} onChange={setSpeciesFilter} />
+                  </div>
+                </div>
+              )}
+            >
+              {stats.draftCount ? (
+                <Alert
+                  className="novel-character-alert"
+                  type="info"
+                  showIcon
+                  message={`当前有 ${stats.draftCount} 个待确认角色草稿`}
+                  description="保存草稿角色会自动转为正式角色；如果正文或大纲新发现了物品，请到物品页继续完善。"
+                />
+              ) : null}
 
-          {draftRoster.length > 0 ? (
-            <div className="novel-character-draft-strip">
-              <div className="novel-character-draft-strip__title">本页草稿</div>
-              <div className="novel-character-draft-strip__body">
-                {draftRoster.slice(0, 4).map((item) => (
-                  <button key={item.id} type="button" className="novel-character-draft-chip" onClick={() => void loadCharacterDetail(item.id)}>
-                    {item.fullName}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
-        </WorkspacePanel>
+              {loading ? <div className="novel-empty"><Spin /></div> : pageData.total === 0 ? <div className="novel-empty">当前筛选下还没有角色。</div> : (
+                <div className="novel-character-list">
+                  {pageData.items.map((character) => (
+                    <button
+                      key={character.id}
+                      type="button"
+                      className={`novel-list-card novel-character-list-card ${selectedId === character.id ? 'novel-list-card--active' : ''}`}
+                      onClick={() => void loadCharacterDetail(character.id)}
+                    >
+                      <div className="novel-list-card__title">
+                        <span>{character.fullName}</span>
+                        {character.recordStatus === 'draft' ? <Tag color="processing">草稿</Tag> : null}
+                      </div>
+                      <div className="novel-list-card__meta">
+                        <Tag color={ROLE_META[character.roleType].color}>{ROLE_META[character.roleType].label}</Tag>
+                        {character.species ? <Tag>{character.species}</Tag> : null}
+                        {character.occupation ? <Tag color="blue">{character.occupation}</Tag> : null}
+                      </div>
+                      <div className="novel-list-card__desc">{character.innerConflict || character.goals || character.firstImpression || character.background || '这个角色还没有核心信息。'}</div>
+                    </button>
+                  ))}
+                  <Pagination current={pageData.page} pageSize={pageData.pageSize} total={pageData.total} size="small" showSizeChanger={false} onChange={setPage} />
+                </div>
+              )}
 
-        <WorkspacePanel
-          className="novel-character-graph-panel"
-          title="人物关系看板"
-          extra={(
-            <Space wrap>
-              <Select value={graphScope} options={[{ value: 'all', label: '全角色网络' }, { value: 'focus', label: '当前人物关系圈' }]} onChange={setGraphScope} style={{ minWidth: 148 }} />
-              <Select value={graphRelationFilter} options={RELATION_OPTIONS} onChange={setGraphRelationFilter} style={{ minWidth: 148 }} />
-            </Space>
-          )}
-        >
-          <div className="novel-character-graph-panel__stats">
-            {relationStats.length === 0 ? <span className="novel-character-graph-panel__empty">还没有可视关系。</span> : relationStats.map(([type, count]) => (
-              <div key={type} className="novel-character-graph-stat">
-                <strong>{count}</strong>
-                <span>{relationLabel(type)}</span>
-              </div>
-            ))}
-          </div>
-          <div className="novel-character-graph-panel__canvas">
-            {graphLoading ? <div className="novel-empty"><Spin /></div> : (
-              <CharacterGraphCanvas
-                data={graphData}
-                selectedCharacterId={selectedId}
-                onCharacterSelect={(characterId) => { void loadCharacterDetail(characterId) }}
-                onCanvasClick={() => {
-                  if (graphScope === 'focus') setGraphScope('all')
-                }}
-              />
-            )}
-          </div>
-        </WorkspacePanel>
+              {draftRoster.length > 0 ? (
+                <div className="novel-character-draft-strip">
+                  <div className="novel-character-draft-strip__title">本页草稿</div>
+                  <div className="novel-character-draft-strip__body">
+                    {draftRoster.slice(0, 4).map((item) => (
+                      <button key={item.id} type="button" className="novel-character-draft-chip" onClick={() => void loadCharacterDetail(item.id)}>
+                        {item.fullName}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </WorkspacePanel>
 
-        <WorkspacePanel
-          className="novel-character-studio__editor"
-          title={selectedCharacter ? `编辑：${selectedCharacter.fullName}` : creating ? '新建人物' : '人物档案'}
-          scrollable
-          sticky
-          extra={(
-            <Space wrap>
+            <WorkspacePanel
+              className="novel-character-studio__editor"
+              title={selectedCharacter ? `编辑：${selectedCharacter.fullName}` : creating ? '新建人物' : '人物档案'}
+              scrollable
+              sticky
+              extra={(
+                <Space wrap>
               <AIGenerateButton
                 novelId={novelId}
                 label={selectedCharacter ? 'AI 补全·当前人物' : 'AI 生成·人物草稿'}
@@ -944,15 +937,15 @@ export default function CharacterWorkspace({ novelId }: Props) {
                     })
                   }}
                 />
-                {selectedCharacter ? <Button icon={<ReloadOutlined />} loading={generating} onClick={() => void handleRegenerate()}>AI 修复·重做人物</Button> : null}
-                {selectedCharacter ? <Button icon={<ApartmentOutlined />} onClick={() => { void openRelationModal() }}>编辑关系</Button> : null}
-                {selectedCharacter ? <Button danger icon={<DeleteOutlined />} onClick={() => void handleDelete()}>删除</Button> : null}
-                <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>保存并确认</Button>
-            </Space>
-          )}
-        >
-          {!selectedCharacter && !creating && !loading ? <div className="novel-empty">从左侧选中一个角色后再编辑。</div> : (
-            <>
+                  {selectedCharacter ? <Button icon={<ReloadOutlined />} loading={generating} onClick={() => void handleRegenerate()}>AI 修复·重做人物</Button> : null}
+                  {selectedCharacter ? <Button icon={<ApartmentOutlined />} onClick={() => { void openRelationModal() }}>编辑关系</Button> : null}
+                  {selectedCharacter ? <Button danger icon={<DeleteOutlined />} onClick={() => void handleDelete()}>删除</Button> : null}
+                  <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>保存并确认</Button>
+                </Space>
+              )}
+            >
+              {!selectedCharacter && !creating && !loading ? <div className="novel-empty">从左侧选中一个角色后再编辑。</div> : (
+                <>
               <div className="novel-characters__editor-intro">
                 <div className="novel-characters__editor-intro-copy">
                   <div className="novel-kicker">{selectedCharacter?.recordStatus === 'draft' ? '待确认草稿' : selectedCharacter ? '当前人物' : '新建档案'}</div>
@@ -988,7 +981,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
                 <div className="novel-grid novel-grid--3">
                   <Form.Item name="fullName" label="姓名" rules={[{ required: true, message: '请输入姓名' }]}><Input /></Form.Item>
                   <Form.Item name="gender" label="性别"><Input placeholder="可留空" /></Form.Item>
-                  <Form.Item name="age" label="年龄"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
+                  <Form.Item name="age" label="年龄"><InputNumber min={0} className="novel-character-full-width-number" /></Form.Item>
                 </div>
                 <div className="novel-grid novel-grid--3">
                   <Form.Item name="occupation" label="职业 / 身份"><Input /></Form.Item>
@@ -1025,7 +1018,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
               </Form>
 
               {selectedCharacter ? (
-                <div className="novel-support-grid" style={{ marginTop: 20 }}>
+                <div className="novel-support-grid novel-character-support-grid">
                   <WorkspaceTip title="关联物品">
                     {detailContext.relatedItems.length === 0 ? <div>这个角色还没有绑定关键物品。</div> : detailContext.relatedItems.map((item) => (
                       <div key={item.id} className="novel-character-linked-row">
@@ -1038,8 +1031,8 @@ export default function CharacterWorkspace({ novelId }: Props) {
                     {detailContext.relatedRelations.length === 0 ? <div>这个角色还没有关系链。</div> : detailContext.relatedRelations.map((relation) => {
                       const other = detailContext.relatedCharacters.find((item) => item.id === (relation.charAId === selectedCharacter.id ? relation.charBId : relation.charAId))
                       return (
-                        <div key={relation.id} className="novel-character-linked-row" style={{ display: 'grid', gap: 6 }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
+                        <div key={relation.id} className="novel-character-linked-row novel-character-linked-row--stacked">
+                          <div className="novel-character-linked-row__head">
                             <strong>{other?.fullName || '未知人物'} · {relation.relationLabel || relationLabel(relation.relationType)}</strong>
                             <Button type="link" size="small" onClick={() => { void openRelationModal(relation) }}>编辑</Button>
                           </div>
@@ -1050,9 +1043,49 @@ export default function CharacterWorkspace({ novelId }: Props) {
                   </WorkspaceTip>
                 </div>
               ) : null}
-            </>
-          )}
-        </WorkspacePanel>
+                </>
+              )}
+            </WorkspacePanel>
+          </div>
+        ) : (
+          <div className="novel-character-studio novel-character-studio--graph">
+            <WorkspacePanel
+              className="novel-character-graph-panel novel-character-graph-panel--full"
+              title="人物关系看板"
+              extra={(
+                <Space wrap className="novel-character-graph-panel__controls">
+                  <Select className="novel-character-graph-panel__select" value={graphScope} options={[{ value: 'all', label: '全角色网络' }, { value: 'focus', label: '当前人物关系圈' }]} onChange={setGraphScope} />
+                  <Select className="novel-character-graph-panel__select" value={graphRelationFilter} options={RELATION_OPTIONS} onChange={setGraphRelationFilter} />
+                  <Button size="small" onClick={() => setWorkspaceView('list')}>返回人物档案</Button>
+                </Space>
+              )}
+            >
+              <div className="novel-character-graph-panel__stats">
+                {relationStats.length === 0 ? <span className="novel-character-graph-panel__empty">还没有可视关系。</span> : relationStats.map(([type, count]) => (
+                  <div key={type} className="novel-character-graph-stat">
+                    <strong>{count}</strong>
+                    <span>{relationLabel(type)}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="novel-character-graph-panel__canvas">
+                {graphLoading ? <div className="novel-empty"><Spin /></div> : (
+                  <CharacterGraphCanvas
+                    data={graphData}
+                    selectedCharacterId={selectedId}
+                    onCharacterSelect={(characterId) => {
+                      setWorkspaceView('list')
+                      void loadCharacterDetail(characterId)
+                    }}
+                    onCanvasClick={() => {
+                      if (graphScope === 'focus') setGraphScope('all')
+                    }}
+                  />
+                )}
+              </div>
+            </WorkspacePanel>
+          </div>
+        )}
       </div>
 
       <Modal
@@ -1090,8 +1123,8 @@ export default function CharacterWorkspace({ novelId }: Props) {
           <Form.Item name="relationLabel" label="关系简称"><Input placeholder="例如：旧同桌、表面同盟、点头之交" /></Form.Item>
           <Form.Item name="description" label="当前关系状态"><Input.TextArea rows={3} placeholder="用一句话写清这两个人目前怎么拉扯。" /></Form.Item>
           <div className="novel-grid novel-grid--2">
-            <Form.Item name="intimacyLevel" label="亲密度 1-5"><InputNumber min={1} max={5} style={{ width: "100%" }} /></Form.Item>
-            <Form.Item name="tensionLevel" label="张力度 1-5"><InputNumber min={1} max={5} style={{ width: "100%" }} /></Form.Item>
+            <Form.Item name="intimacyLevel" label="亲密度 1-5"><InputNumber min={1} max={5} className="novel-character-full-width-number" /></Form.Item>
+            <Form.Item name="tensionLevel" label="张力度 1-5"><InputNumber min={1} max={5} className="novel-character-full-width-number" /></Form.Item>
           </div>
           <Form.Item name="interactionStyle" label="互动方式"><Input.TextArea rows={2} placeholder="例如：嘴硬、互相打断、很少直视对方、称呼始终很客气。" /></Form.Item>
           <Form.Item name="subtextRule" label="潜台词规则"><Input.TextArea rows={2} placeholder="例如：明明在关心，但谁都不先承认；永远不直接提旧事。" /></Form.Item>

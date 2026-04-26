@@ -1306,14 +1306,14 @@ export default function Writing({ novelId }: Props) {
       if (nextPublishCheck.gateLevel === 'rewrite') {
         const rewriteMessages = collectPublishCheckMessages(nextPublishCheck, 'rewrite')
         const rewriteItem = nextPublishCheck.checklist.find((item) => item.status === 'rewrite')
-        Modal.confirm({
-          title: '章节必须退回重写',
-          content: (
-            <div className="novel-note-list" style={{ marginTop: 12 }}>
-              <div className="novel-note-list__item">{nextPublishCheck.summary}</div>
-              {rewriteMessages.map((item) => <div key={item} className="novel-note-list__item">{item}</div>)}
-            </div>
-          ),
+          Modal.confirm({
+            title: '章节必须退回重写',
+            content: (
+              <div className="novel-note-list novel-note-list--spaced-top">
+                <div className="novel-note-list__item">{nextPublishCheck.summary}</div>
+                {rewriteMessages.map((item) => <div key={item} className="novel-note-list__item">{item}</div>)}
+              </div>
+            ),
           okText: '去处理',
           cancelText: '留在当前页',
           onOk: () => {
@@ -1328,7 +1328,7 @@ export default function Writing({ novelId }: Props) {
         Modal.confirm({
           title: '章节验收未通过',
           content: (
-            <div className="novel-note-list" style={{ marginTop: 12 }}>
+            <div className="novel-note-list novel-note-list--spaced-top">
               <div className="novel-note-list__item">{nextPublishCheck.summary}</div>
               {blockerMessages.map((item) => <div key={item} className="novel-note-list__item">{item}</div>)}
             </div>
@@ -1353,7 +1353,7 @@ export default function Writing({ novelId }: Props) {
           Modal.confirm({
             title: '章节验收仍有预警',
             content: (
-              <div className="novel-note-list" style={{ marginTop: 12 }}>
+              <div className="novel-note-list novel-note-list--spaced-top">
                 <div className="novel-note-list__item">{nextPublishCheck.summary}</div>
                 {warningMessages.map((item) => <div key={item} className="novel-note-list__item">{item}</div>)}
               </div>
@@ -1754,11 +1754,11 @@ export default function Writing({ novelId }: Props) {
       <div className="novel-writing-shell__insight-stack">
         <InsightCard title="长篇写作架构" eyebrow="Planner / Writer / Critic / Rewriter / Canonizer" tone="soft">
           {currentPipelineSnapshot ? (
-            <div style={{ display: 'grid', gap: 12 }}>
+            <div className="writing-layout-stack">
               <div className="novel-copy-block">
                 {`当前阶段：${currentPipelineSnapshot.currentRole ? currentPipelineSnapshot.roles[currentPipelineSnapshot.currentRole]?.label || currentPipelineSnapshot.currentRole : '待启动'} · AI 模式 ${currentPipelineSnapshot.executionMode ? getAiExecutionModeLabel(currentPipelineSnapshot.executionMode) : '未记录'} · 合同版本 ${currentPipelineSnapshot.contractVersion || '未记录'} · 总耗时 ${currentPipelineSnapshot.totalDurationMs ? `${(currentPipelineSnapshot.totalDurationMs / 1000).toFixed(1)}s` : '-'} · 总 tokens ${currentPipelineSnapshot.totalTokensUsed || 0}${currentPipelineSnapshot.failureCode ? ` · 退出码 ${currentPipelineSnapshot.failureCode}` : ''}`}
               </div>
-              <div style={{ display: 'grid', gap: 8 }}>
+              <div className="writing-layout-stack writing-layout-stack--xs">
                 {pipelineRoleItems.map((item) => (
                   <div key={item.role} className="novel-issue-item">
                     <div className="novel-issue-item__head">
@@ -1985,7 +1985,7 @@ export default function Writing({ novelId }: Props) {
         </InsightCard>
         <InsightCard title="章后状态回写" eyebrow="Canon 确认 / 统一写回" tone="soft">
           {currentChapter ? (
-            <div style={{ display: 'grid', gap: 10 }}>
+            <div className="writing-layout-stack writing-layout-stack--sm">
               <div className="novel-copy-block">写完本章后，在这里进入独立回写中心，先确认事实抽取和状态候选，再统一写回线程、伏笔、谜题、关系、物品与时间轴。</div>
               <div>
                 <Button onClick={() => navigate(`/novels/${novelId}/writeback?chapterId=${currentChapter.id}`)}>
@@ -2022,7 +2022,7 @@ export default function Writing({ novelId }: Props) {
             onRegenerate={applyChapterContent}
             drawCount={1}
           />
-          {aiResult ? <div style={{ marginTop: 12 }}><AiCheckResult result={aiResult} /></div> : <div className="novel-copy-block" style={{ marginTop: 12 }}>点击上方 AI 体检后，这里也会展示语义与表达层面的复检结果。</div>}
+          {aiResult ? <div className="writing-layout-note-space-top"><AiCheckResult result={aiResult} /></div> : <div className="novel-copy-block writing-layout-note-space-top">点击上方 AI 体检后，这里也会展示语义与表达层面的复检结果。</div>}
         </InsightCard>
         <InsightCard title="建议优先处理" eyebrow="下一步" tone="soft"><StringList items={consistencyReport?.focusAreas || []} empty="最近没有新的高优先项，继续推进正文即可。" /></InsightCard>
       </div>
@@ -2045,8 +2045,7 @@ export default function Writing({ novelId }: Props) {
                 <button
                   key={version.id}
                   type="button"
-                  className={`novel-sidebar__nav-item ${selectedVersion?.id === version.id ? 'novel-sidebar__nav-item--active' : ''}`}
-                  style={{ width: '100%', textAlign: 'left' }}
+                  className={`novel-sidebar__nav-item chapter-console-page__version-button ${selectedVersion?.id === version.id ? 'novel-sidebar__nav-item--active' : ''}`}
                   onClick={() => setSelectedVersionId(version.id)}
                 >
                   <span className="novel-sidebar__nav-copy">
@@ -2056,11 +2055,11 @@ export default function Writing({ novelId }: Props) {
                 </button>
               ))}
             </div>
-            <div style={{ display: 'grid', gap: 12 }}>
-              <div className="novel-copy-block" style={{ whiteSpace: 'pre-wrap', minHeight: 320 }}>
+            <div className="writing-layout-stack">
+              <div className="novel-copy-block writing-layout-copy-prewrap writing-layout-copy-tall">
                 {selectedVersion?.content || '先从左侧选择版本，再比较正文差异。'}
               </div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <div className="writing-layout-row writing-layout-row--end writing-layout-row--wrap">
                 <Button onClick={() => navigateToWritingRoute('editor')}>返回编辑</Button>
                 <Button type="primary" disabled={!selectedVersion} onClick={() => void handleRestoreVersion()}>
                   恢复所选版本
@@ -2414,6 +2413,10 @@ export default function Writing({ novelId }: Props) {
           <div className="chapter-console-page__loading"><Spin size="large" /></div>
         ) : (
           <>
+            <div className="chapter-console-page__pipeline">
+              <PipelineBar items={pipelineItems} />
+            </div>
+
             <div className="chapter-console-page__hero">
               <section className="chapter-console-page__panel chapter-console-page__hero-card">
                 <SectionHeader
@@ -2506,7 +2509,7 @@ export default function Writing({ novelId }: Props) {
                     </Button>
                     <Select
                       size="small"
-                      style={{ width: 208 }}
+                      className="writing-layout-select-generation"
                       value={generationExecutionModeOverride}
                       options={[
                         { value: 'follow_default', label: `跟随默认（${getAiExecutionModeLabel(defaultAiExecutionMode)}）` },
@@ -2550,7 +2553,7 @@ export default function Writing({ novelId }: Props) {
                     <div className="chapter-console-page__editor-status">
                       <Select
                         size="small"
-                        style={{ width: 140 }}
+                        className="writing-layout-select-default"
                         value={defaultAiExecutionMode}
                         loading={savingAiMode}
                         options={AI_EXECUTION_MODE_OPTIONS.map((item) => ({
@@ -2735,15 +2738,15 @@ export default function Writing({ novelId }: Props) {
                 <section className="chapter-console-page__panel">
                   <SectionHeader
                     eyebrow="视图焦点"
-                    title="右侧辅助面板"
-                    description="保留兼容路由，但现在统一汇总上下文、审校、历史和回写入口。"
+                    title="右侧焦点侧栏"
+                    description="把合同、上下文、版本和审校入口收在同一条侧栏路径里。"
                   />
                   <div className="chapter-console-page__route-switch">
                     {([
-                      { key: 'editor', label: '生产台' },
-                      { key: 'context', label: '召回' },
+                      { key: 'editor', label: '合同 / 生产' },
+                      { key: 'context', label: '上下文' },
+                      { key: 'history', label: '版本' },
                       { key: 'review', label: '审校' },
-                      { key: 'history', label: '历史' },
                     ] as Array<{ key: WritingRouteKey; label: string }>).map((tab) => (
                       <button
                         key={tab.key}
@@ -2785,7 +2788,6 @@ export default function Writing({ novelId }: Props) {
             </div>
 
             <div className="chapter-console-page__footer">
-              <PipelineBar items={pipelineItems} />
               <div className="chapter-console-page__footer-grid">
                 <section className="chapter-console-page__panel">
                   <SectionHeader
@@ -2822,13 +2824,13 @@ export default function Writing({ novelId }: Props) {
         confirmLoading={rewritingSelection}
         okText="应用重写"
       >
-        <div className="novel-note-list" style={{ marginBottom: 12 }}>
+        <div className="novel-note-list writing-layout-note-space-bottom">
           <div className="novel-note-list__item">AI 只会重写当前选中的文段，不会改动其他正文。</div>
           <div className="novel-note-list__item">默认保留事件与设定，优先修正语言、逻辑和衔接。</div>
         </div>
         <Input.TextArea value={selectedSnippet?.text || ''} rows={6} readOnly />
         <Input.TextArea
-          style={{ marginTop: 12 }}
+          className="writing-layout-note-space-top"
           value={rewriteRequirements}
           rows={3}
           onChange={(event) => setRewriteRequirements(event.target.value)}
@@ -2913,8 +2915,8 @@ function ChapterForeshadowWritebackCard({
   }
 
   return (
-    <div style={{ display: 'grid', gap: 12 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+    <div className="writing-layout-stack">
+      <div className="writing-layout-row writing-layout-row--between writing-layout-row--wrap">
         <div className="novel-insight-list">
           <div className="novel-insight-list__item">{`当前章节：第${chapter.chapterNum}章`}</div>
           <div className="novel-insight-list__item">{`本章已回写：${chapterEntries.length} 条`}</div>
@@ -2922,7 +2924,7 @@ function ChapterForeshadowWritebackCard({
         <Button size="small" onClick={onOpenLedger}>打开伏笔回收账本</Button>
       </div>
       <div className="novel-note-list">
-        <div className="novel-note-list__item" style={{ display: 'grid', gap: 8 }}>
+        <div className="novel-note-list__item writing-layout-stack writing-layout-stack--xs">
           <strong>新增本章伏笔</strong>
           <Input
             value={title}
@@ -2943,7 +2945,7 @@ function ChapterForeshadowWritebackCard({
             placeholder="埋设方式（可选），例如：对话暗示 / 道具特写"
             disabled={saving}
           />
-          <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
+          <div className="writing-layout-field-grid">
             <Select
               allowClear
               value={sourceSegmentId}
@@ -2960,7 +2962,7 @@ function ChapterForeshadowWritebackCard({
               precision={0}
               value={targetPayoffChapter}
               onChange={(value) => setTargetPayoffChapter(typeof value === 'number' ? value : null)}
-              style={{ width: '100%' }}
+              className="writing-layout-width-full"
               placeholder="目标回收章位"
               disabled={saving}
             />
@@ -3000,28 +3002,28 @@ function ChapterForeshadowWritebackCard({
           {chapterEntries.map((entry) => {
             const segment = entry.sourceSegmentId ? segmentById.get(entry.sourceSegmentId) : null
             return (
-              <div key={entry.id} className="novel-note-list__item" style={{ display: 'grid', gap: 6 }}>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <div key={entry.id} className="novel-note-list__item writing-layout-stack writing-layout-stack--xs">
+                <div className="writing-layout-row writing-layout-row--wrap">
                   <strong>{entry.title}</strong>
                   <Tag color={entry.status === 'resolved' ? 'success' : entry.status === 'active' ? 'processing' : 'default'}>
                     {entry.status || 'draft'}
                   </Tag>
                   {typeof entry.targetPayoffChapter === 'number' ? <Tag>{`目标第${entry.targetPayoffChapter}章`}</Tag> : null}
                 </div>
-                <div style={{ opacity: 0.85 }}>
+                <div className="writing-layout-copy-muted">
                   {segment ? `场景：${segment.title || `场景${segment.segmentOrder}`}` : '场景：未设置'}
                   {entry.plantMethod ? ` · 埋设：${entry.plantMethod}` : ''}
                 </div>
                 {entry.detail ? <div>{entry.detail}</div> : null}
-                {entry.payoffSceneAction ? <div style={{ opacity: 0.85 }}>{`回收动作：${entry.payoffSceneAction}`}</div> : null}
-                {entry.requiredEvidence ? <div style={{ opacity: 0.85 }}>{`可见证据：${entry.requiredEvidence}`}</div> : null}
-                {entry.readerVisibleOutcome ? <div style={{ opacity: 0.85 }}>{`读者结果：${entry.readerVisibleOutcome}`}</div> : null}
-                {entry.allowedDelayReason ? <div style={{ opacity: 0.72 }}>{`允许延期：${entry.allowedDelayReason}`}</div> : null}
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {entry.payoffSceneAction ? <div className="writing-layout-copy-muted">{`回收动作：${entry.payoffSceneAction}`}</div> : null}
+                {entry.requiredEvidence ? <div className="writing-layout-copy-muted">{`可见证据：${entry.requiredEvidence}`}</div> : null}
+                {entry.readerVisibleOutcome ? <div className="writing-layout-copy-muted">{`读者结果：${entry.readerVisibleOutcome}`}</div> : null}
+                {entry.allowedDelayReason ? <div className="writing-layout-copy-faint">{`允许延期：${entry.allowedDelayReason}`}</div> : null}
+                <div className="writing-layout-row writing-layout-row--wrap">
                   <Select
                     size="small"
                     value={entry.status || 'draft'}
-                    style={{ width: 128 }}
+                    className="writing-layout-status-select"
                     disabled={saving}
                     onChange={(value) => void onPatch(entry.id, { status: value })}
                     options={[
@@ -3140,8 +3142,8 @@ function ChapterRevealConstraintCard({
   }
 
   return (
-    <div style={{ display: 'grid', gap: 10 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+    <div className="writing-layout-stack writing-layout-stack--sm">
+      <div className="writing-layout-row writing-layout-row--between writing-layout-row--wrap">
         <div className="novel-insight-list">
           <div className="novel-insight-list__item">{`当前卷：${volumeLabel}`}</div>
           <div className="novel-insight-list__item">{`真相揭示：${ratioLabel}（${formatRatioPercent(truthStats.ratio)}）`}</div>
@@ -3180,8 +3182,8 @@ function ChapterRevealConstraintCard({
               .map((entry) => characterNameById.get(entry.characterId) || `角色#${entry.characterId}`)
             return (
               <div key={fact.id} className="novel-note-list__item">
-                <div style={{ display: 'grid', gap: 6 }}>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <div className="writing-layout-stack writing-layout-stack--xs">
+                  <div className="writing-layout-row writing-layout-row--wrap">
                     <strong>{fact.title}</strong>
                     <Tag color={fact.kind === 'truth' ? 'gold' : fact.kind === 'red_herring' ? 'volcano' : 'processing'}>
                       {fact.kind === 'truth' ? '真相' : fact.kind === 'red_herring' ? '假线索' : '线索'}
@@ -3190,13 +3192,13 @@ function ChapterRevealConstraintCard({
                     {locked ? <Tag color="warning">{`锁定到第${fact.forbiddenBeforeVolume}卷`}</Tag> : null}
                   </div>
                   {fact.summary ? <div>{fact.summary}</div> : null}
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <div className="writing-layout-row writing-layout-row--wrap">
                     {relatedPuzzle ? <span>{`关联谜题：${relatedPuzzle}`}</span> : null}
                     {characterKnowledge.length > 0 ? <span>{`角色已知：${characterKnowledge.join('、')}`}</span> : null}
                     {fact.readerKnownChapterId ? <span>{`读者已知章节ID：${fact.readerKnownChapterId}`}</span> : null}
                     {fact.protagonistKnownChapterId ? <span>{`主角已知章节ID：${fact.protagonistKnownChapterId}`}</span> : null}
                   </div>
-                  <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                  <div className="writing-layout-row writing-layout-row--wrap">
                     <Checkbox
                       checked={allowedSet.has(fact.id)}
                       disabled={saving || locked}
@@ -3250,7 +3252,7 @@ function ConstraintInjectionCard({ preview }: { preview: ChapterContextPreview |
   }
 
   return (
-    <div style={{ display: 'grid', gap: 10 }}>
+    <div className="writing-layout-stack writing-layout-stack--sm">
       {preview.stages.map((stage) => {
         const injectedTitles = stage.hardConstraintEntries.map((entry) => entry.title)
         const truncatedTitles = stage.hardConstraintEntries.filter((entry) => entry.truncated).map((entry) => entry.title)
@@ -3331,7 +3333,7 @@ function PreviousChapterFeedCard({ preview }: { preview: ChapterContextPreview |
   const segmentSummary = report.segments.map((segment) => `${segment.label} ${segment.chars}字`)
 
   return (
-    <div style={{ display: 'grid', gap: 10 }}>
+    <div className="writing-layout-stack writing-layout-stack--sm">
       <div className="novel-insight-list">
         <div className="novel-insight-list__item">
           {report.sourceChapterNum ? `来源第${report.sourceChapterNum}章` : '当前还没有上一章可供采样'}
@@ -3342,7 +3344,7 @@ function PreviousChapterFeedCard({ preview }: { preview: ChapterContextPreview |
       </div>
       <StringList items={segmentSummary} empty="上一章没有命中可直接注入的承接片段。" />
       {preview.previousChapterContext
-        ? <div className="novel-copy-block" style={{ whiteSpace: 'pre-wrap' }}>{preview.previousChapterContext}</div>
+        ? <div className="novel-copy-block writing-layout-copy-prewrap">{preview.previousChapterContext}</div>
         : <div className="novel-copy-block">当前章节前没有可注入的上一章先验。</div>}
     </div>
   )
@@ -3361,7 +3363,7 @@ function RecallDiagnosticsCard({ preview }: { preview: ChapterContextPreview | n
     .map(([bucket, stats]) => `${bucket}：命中 ${stats.hitCount} / 采用 ${stats.selectedHitCount}${stats.fallbackReason ? ` / ${stats.fallbackReason}` : ''}`)
 
   return (
-    <div style={{ display: 'grid', gap: 10 }}>
+    <div className="writing-layout-stack writing-layout-stack--sm">
       <div className="novel-insight-list">
         <div className="novel-insight-list__item">{snapshot.retrievalUsed ? '本章已实际使用召回' : '本章未实际使用召回'}</div>
         <div className="novel-insight-list__item">命中 {snapshot.hitCount}</div>
@@ -3393,7 +3395,7 @@ function RecallDiagnosticsCard({ preview }: { preview: ChapterContextPreview | n
       ) : (
         <div className="novel-copy-block">本次没有命中过期召回片段。</div>
       )}
-      {preview.recalledMemory ? <div className="novel-copy-block" style={{ whiteSpace: 'pre-wrap' }}>{preview.recalledMemory}</div> : null}
+      {preview.recalledMemory ? <div className="novel-copy-block writing-layout-copy-prewrap">{preview.recalledMemory}</div> : null}
     </div>
   )
 }
@@ -3410,7 +3412,7 @@ function ContextUsageImpactCard({ preview }: { preview: ChapterContextPreview | 
   })
 
   return (
-    <div style={{ display: 'grid', gap: 10 }}>
+    <div className="writing-layout-stack writing-layout-stack--sm">
       <StringList items={snapshot.usedAssets} empty="本次生成还没记录到实际命中的关键资产。" />
       <StringList items={snapshot.usedContracts} empty="本次生成还没记录到注入的合同与硬约束。" />
       <StringList items={snapshot.recentStateChanges} empty="本次生成没有新增状态变化汇总。" />
@@ -3424,7 +3426,7 @@ function ContextUsageImpactCard({ preview }: { preview: ChapterContextPreview | 
         <div className="novel-copy-block">本次没有约束被压缩或忽略。</div>
       )}
       {snapshot.linkedImpacts.length > 0 ? (
-        <div style={{ display: 'grid', gap: 8 }}>
+        <div className="writing-layout-stack writing-layout-stack--xs">
           <StringList items={linkedImpactLines} empty="当前章节没有挂起的影响项。" />
           <div className="novel-insight-list">
             {snapshot.linkedImpacts.map((item) => (
@@ -3472,7 +3474,7 @@ function AiExplainabilityCard({ preview }: { preview: ChapterContextPreview | nu
     : []
 
   return (
-    <div style={{ display: 'grid', gap: 10 }}>
+    <div className="writing-layout-stack writing-layout-stack--sm">
       <div className="novel-copy-block">{explainability.routeSummary}</div>
       <StringList items={routeLines} empty="当前还没有模型路由记录。" />
       <StringList items={overrideLines} empty="当前没有启用章节 Prompt Override。" />
@@ -3568,7 +3570,7 @@ function CharacterStateMemoryCard({ storyMemory }: { storyMemory: StoryMemorySna
   }
 
   return (
-    <div style={{ display: 'grid', gap: 10 }}>
+    <div className="writing-layout-stack writing-layout-stack--sm">
       <StringList items={characterStateItems} empty="当前还没有可用的人物状态快照。" />
       <StringList items={worldStateItems} empty="当前还没有可用的世界状态快照。" />
       {alertItems.length > 0 ? (
@@ -3641,7 +3643,7 @@ function WorldStateHealthCard({ dashboard }: { dashboard: QualityDashboardData |
   ]
   const conflictEntities = dashboard.worldConflictEntities.slice(0, 4)
   return (
-    <div style={{ display: 'grid', gap: 10 }}>
+    <div className="writing-layout-stack writing-layout-stack--sm">
       <div className="novel-insight-list">
         <div className="novel-insight-list__item">跟踪实体 {dashboard.worldStateSummary.trackedEntityCount}</div>
         <div className="novel-insight-list__item">漂移告警 {dashboard.worldStateSummary.driftAlertCount}</div>
@@ -3653,7 +3655,7 @@ function WorldStateHealthCard({ dashboard }: { dashboard: QualityDashboardData |
         <div className="novel-note-list">
           {conflictEntities.map((entity, index) => (
             <div key={`${entity.entityType}-${entity.entityId}-${index}`} className="novel-note-list__item">
-              <Tag color={worldStateAlertColor(entity.severity)} style={{ marginRight: 8 }}>
+              <Tag color={worldStateAlertColor(entity.severity)}>
                 {entity.conflictCount > 0 ? '冲突实体' : '跳变实体'}
               </Tag>
               {worldStateEntityLabel(entity.entityType)} {entity.entityName}：{entity.reasons.join('；')}
@@ -3667,7 +3669,7 @@ function WorldStateHealthCard({ dashboard }: { dashboard: QualityDashboardData |
         <div className="novel-note-list">
           {alerts.map((alert, index) => (
             <div key={`${alert.summary}-${index}`} className="novel-note-list__item">
-              <Tag color={worldStateAlertColor(alert.severity)} style={{ marginRight: 8 }}>{alert.alertType === 'conflict' ? '冲突' : '跳变'}</Tag>
+              <Tag color={worldStateAlertColor(alert.severity)}>{alert.alertType === 'conflict' ? '冲突' : '跳变'}</Tag>
               {alert.summary}
             </div>
           ))}
@@ -3707,7 +3709,7 @@ function LanguageDriftHealthCard({
     : null
 
   return (
-    <div style={{ display: 'grid', gap: 10 }}>
+    <div className="writing-layout-stack writing-layout-stack--sm">
       {alerts.length > 0 ? (
         <div className="novel-issue-list">
           {alerts.map((alert) => (
@@ -3770,7 +3772,7 @@ function HumanizationHealthCard({
   }
 
   return (
-    <div style={{ display: 'grid', gap: 10 }}>
+    <div className="writing-layout-stack writing-layout-stack--sm">
       {currentSignals.length > 0 ? (
         <div className="novel-note-list">
           {currentSignals.map((item) => (
@@ -3830,7 +3832,7 @@ function DialogueFingerprintHealthCard({
   }
 
   return (
-    <div style={{ display: 'grid', gap: 10 }}>
+    <div className="writing-layout-stack writing-layout-stack--sm">
       {reviewNotes?.dialogue_fingerprint_summary ? (
         <div className="novel-copy-block">{reviewNotes.dialogue_fingerprint_summary}</div>
       ) : null}
@@ -3952,7 +3954,7 @@ function StoryDynamicsHealthCard({
     : null
 
   return (
-    <div style={{ display: 'grid', gap: 10 }}>
+    <div className="writing-layout-stack writing-layout-stack--sm">
       {currentSignals.length > 0 ? (
         <div className="novel-note-list">
           {currentSignals.map((item, index) => (
@@ -4014,7 +4016,7 @@ function AiCheckResult({ result }: { result: AiCheckPayload }) {
   return (
     <div className="novel-ai-score">
       <div className="novel-ai-score__summary">
-        <Progress type="circle" percent={result.score} size={86} strokeColor={scoreColor} trailColor="rgba(143, 99, 48, 0.12)" format={(percent) => <span style={{ color: scoreColor, fontSize: 18, fontWeight: 700 }}>{percent}</span>} />
+        <Progress type="circle" percent={result.score} size={86} strokeColor={scoreColor} trailColor="rgba(143, 99, 48, 0.12)" format={(percent) => <span className="writing-layout-ai-score-value" style={{ color: scoreColor }}>{percent}</span>} />
         <div className="novel-ai-score__feedback">{result.overall_feedback}</div>
       </div>
       <div className="novel-insight-list">
@@ -4097,7 +4099,7 @@ function ParallelGenerationModal({ novelId, chapters: chapterList }: { novelId: 
 
   return (
     <>
-      <div style={{ position: 'fixed', bottom: 20, right: 20, zIndex: 10 }}>
+      <div className="writing-layout-floating-entry">
         <Button
           icon={<BranchesOutlined />}
           onClick={() => setOpen(true)}
@@ -4113,8 +4115,8 @@ function ParallelGenerationModal({ novelId, chapters: chapterList }: { novelId: 
         footer={null}
         width={640}
       >
-        <div style={{ marginBottom: 16 }}>
-          <p style={{ opacity: 0.7 }}>
+        <div className="writing-layout-parallel-intro">
+          <p className="writing-layout-parallel-copy">
             分析故事弧中哪些叙事线可以并行生成。独立叙事线（无共享角色和线索）可以同时生成以加速创作。
           </p>
           <Button
@@ -4128,8 +4130,8 @@ function ParallelGenerationModal({ novelId, chapters: chapterList }: { novelId: 
         </div>
 
         {plan ? (
-          <div style={{ display: 'grid', gap: 16 }}>
-            <div style={{ display: 'flex', gap: 24 }}>
+          <div className="writing-layout-stack writing-layout-stack--lg">
+            <div className="writing-layout-parallel-tags">
               <Tag color="blue">预计加速 {plan.estimatedSpeedup}x</Tag>
               <Tag color="green">{plan.parallelGroups.length} 组可并行</Tag>
               <Tag>{plan.sequentialSegments.length} 段需串行</Tag>
@@ -4137,15 +4139,15 @@ function ParallelGenerationModal({ novelId, chapters: chapterList }: { novelId: 
 
             {plan.parallelGroups.length > 0 ? (
               <div>
-                <div style={{ fontWeight: 500, marginBottom: 8 }}>可并行组</div>
+                <div className="writing-layout-parallel-section-title">可并行组</div>
                 {plan.parallelGroups.map((group, gi) => (
-                  <div key={gi} style={{ marginBottom: 12, padding: 12, background: 'rgba(255,255,255,0.04)', borderRadius: 8 }}>
-                    <div style={{ fontSize: 12, opacity: 0.6, marginBottom: 4 }}>并行组 {gi + 1}</div>
+                  <div key={gi} className="writing-layout-parallel-group">
+                    <div className="writing-layout-parallel-group-label">并行组 {gi + 1}</div>
                     {group.map((seg) => (
-                      <div key={seg.id} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4 }}>
+                      <div key={seg.id} className="writing-layout-row writing-layout-row--wrap">
                         <Tag color="processing">{seg.arcName}</Tag>
-                        <span style={{ fontSize: 12 }}>第{seg.chapterRange[0]}-{seg.chapterRange[1]}章</span>
-                        <span style={{ fontSize: 11, opacity: 0.5 }}>
+                        <span className="writing-layout-parallel-meta">第{seg.chapterRange[0]}-{seg.chapterRange[1]}章</span>
+                        <span className="writing-layout-parallel-meta writing-layout-parallel-meta--tiny">
                           {seg.primaryCharacterNames.slice(0, 3).join('、')}
                         </span>
                       </div>
@@ -4159,8 +4161,8 @@ function ParallelGenerationModal({ novelId, chapters: chapterList }: { novelId: 
 
             {plan.convergencePoints.length > 0 ? (
               <div>
-                <div style={{ fontWeight: 500, marginBottom: 4 }}>汇合点</div>
-                <div style={{ fontSize: 12, opacity: 0.7 }}>
+                <div className="writing-layout-parallel-section-title">汇合点</div>
+                <div className="writing-layout-parallel-copy writing-layout-parallel-meta">
                   并行生成完成后需在以下章节做状态合并：
                   {plan.convergencePoints.map((cp) => `第${cp}章`).join('、')}
                 </div>
@@ -4169,11 +4171,11 @@ function ParallelGenerationModal({ novelId, chapters: chapterList }: { novelId: 
 
             {plan.sequentialSegments.length > 0 ? (
               <div>
-                <div style={{ fontWeight: 500, marginBottom: 4 }}>需串行</div>
+                <div className="writing-layout-parallel-section-title">需串行</div>
                 {plan.sequentialSegments.map((seg) => (
-                  <div key={seg.id} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4 }}>
+                  <div key={seg.id} className="writing-layout-row writing-layout-row--wrap">
                     <Tag>{seg.arcName}</Tag>
-                    <span style={{ fontSize: 12 }}>第{seg.chapterRange[0]}-{seg.chapterRange[1]}章</span>
+                    <span className="writing-layout-parallel-meta">第{seg.chapterRange[0]}-{seg.chapterRange[1]}章</span>
                   </div>
                 ))}
               </div>

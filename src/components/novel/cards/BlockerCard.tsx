@@ -1,6 +1,7 @@
 import React from 'react'
 import { Button, Tag } from 'antd'
 import { BLOCKER_LEVEL_CONFIG, type ProjectBlocker } from '../../../shared/workspace-types'
+import './cards.css'
 
 interface BlockerCardProps {
   blocker: ProjectBlocker
@@ -12,33 +13,24 @@ export default function BlockerCard({ blocker, onOpen, onIgnore }: BlockerCardPr
   const level = BLOCKER_LEVEL_CONFIG[blocker.level]
 
   return (
-    <article
-      style={{
-        display: 'grid',
-        gap: 12,
-        padding: 16,
-        borderRadius: 'var(--radius-md)',
-        border: `1px solid ${level.color}22`,
-        background: '#fff',
-      }}
-    >
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+    <article className={`novel-blocker-card novel-blocker-card--${blocker.level}`}>
+      <div className="novel-blocker-card__head">
         <Tag color={blocker.level === 'fatal' ? 'error' : blocker.level === 'high' ? 'volcano' : blocker.level === 'medium' ? 'gold' : 'default'}>
           {level.label}
         </Tag>
-        <strong style={{ fontSize: 14, color: 'var(--text-main)' }}>{blocker.title}</strong>
+        <strong className="novel-blocker-card__title">{blocker.title}</strong>
       </div>
 
-      <div style={{ display: 'grid', gap: 8 }}>
-        <div style={{ fontSize: 12, lineHeight: 1.7, color: 'var(--text-sub)' }}>
+      <div className="novel-blocker-card__body">
+        <div className="novel-blocker-card__reason">
           {blocker.reason}
         </div>
-        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+        <div className="novel-blocker-card__meta">
           影响范围：{blocker.affectedModules.join('、')}
         </div>
       </div>
 
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+      <div className="novel-blocker-card__actions">
         <Button size="small" type="primary" onClick={() => onOpen?.(blocker)}>
           {blocker.suggestedAction.label}
         </Button>
@@ -48,7 +40,7 @@ export default function BlockerCard({ blocker, onOpen, onIgnore }: BlockerCardPr
           </Button>
         ) : null}
         {blocker.suggestedAction.actionType !== 'open_page' ? (
-          <Tag style={{ margin: 0 }}>
+          <Tag className="novel-blocker-card__hint-tag">
             {blocker.suggestedAction.actionType === 'auto_fix' ? '支持 AI 自动修复' : '支持 AI 生成草稿'}
           </Tag>
         ) : null}

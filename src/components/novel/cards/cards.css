@@ -1,0 +1,306 @@
+.novel-project-card,
+.novel-metric-card,
+.novel-blocker-card {
+  --novel-card-surface: var(--color-bg-secondary, var(--bg-panel));
+  --novel-card-border: var(--border-color, var(--border-light));
+  --novel-card-text: var(--color-text-primary, var(--text-main));
+  --novel-card-text-secondary: var(--color-text-secondary, var(--text-sub));
+  --novel-card-text-muted: var(--color-text-muted, var(--text-muted));
+  --novel-card-accent: var(--color-orange, var(--primary));
+  --novel-card-accent-soft: var(--primary-soft, var(--bg-soft));
+  --novel-card-shadow: var(--shadow-card, 0 2px 8px rgba(0, 0, 0, 0.06));
+}
+
+.novel-project-card {
+  display: grid;
+  gap: 14px;
+  min-height: 0;
+  padding: 18px;
+  border: 1px solid var(--novel-card-border);
+  border-radius: var(--radius-md, 12px);
+  background:
+    radial-gradient(circle at top right, rgba(166, 106, 43, 0.08), transparent 34%),
+    var(--novel-card-surface);
+  box-shadow: var(--novel-card-shadow);
+  cursor: pointer;
+  transition:
+    transform var(--transition-fast, 150ms ease),
+    box-shadow var(--transition-fast, 150ms ease),
+    border-color var(--transition-fast, 150ms ease);
+}
+
+.novel-project-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 30px rgba(37, 31, 24, 0.12);
+  border-color: rgba(166, 106, 43, 0.22);
+}
+
+.novel-project-card__head,
+.novel-project-card__tag-row,
+.novel-project-card__progress-meta,
+.novel-project-card__actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.novel-project-card__head {
+  justify-content: space-between;
+}
+
+.novel-project-card__title-block,
+.novel-project-card__progress,
+.novel-project-card__next-step {
+  display: grid;
+}
+
+.novel-project-card__title-block {
+  min-width: 0;
+  gap: 8px;
+}
+
+.novel-project-card__title {
+  font-size: 16px;
+  line-height: 1.35;
+  font-weight: 700;
+  color: var(--novel-card-text);
+  word-break: break-word;
+}
+
+.novel-project-card__tag-row {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.novel-project-card__tag,
+.novel-blocker-card__hint-tag {
+  margin: 0;
+}
+
+.novel-project-card__status-tag {
+  margin: 0;
+  border-width: 1px;
+}
+
+.novel-project-card__status-tag--draft {
+  color: #6b7280;
+  border-color: rgba(107, 114, 128, 0.22);
+  background: rgba(107, 114, 128, 0.1);
+}
+
+.novel-project-card__status-tag--writing {
+  color: #2563eb;
+  border-color: rgba(37, 99, 235, 0.22);
+  background: rgba(37, 99, 235, 0.1);
+}
+
+.novel-project-card__status-tag--completed {
+  color: #2f855a;
+  border-color: rgba(47, 133, 90, 0.22);
+  background: rgba(47, 133, 90, 0.1);
+}
+
+.novel-project-card__status-tag--archived {
+  color: #9ca3af;
+  border-color: rgba(156, 163, 175, 0.24);
+  background: rgba(156, 163, 175, 0.12);
+}
+
+.novel-project-card__summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  font-size: 12px;
+  color: var(--novel-card-text-secondary);
+}
+
+.novel-project-card__summary strong,
+.novel-project-card__progress-value {
+  color: var(--novel-card-text);
+}
+
+.novel-project-card__progress {
+  gap: 8px;
+}
+
+.novel-project-card__progress-meta {
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.novel-project-card__progress-label {
+  color: var(--novel-card-text-muted);
+}
+
+.novel-project-card__progress-value {
+  font-weight: 600;
+}
+
+.novel-project-card__next-step {
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid rgba(166, 106, 43, 0.14);
+  border-radius: var(--radius-sm, 8px);
+  background: var(--novel-card-accent-soft);
+}
+
+.novel-project-card__next-step-label {
+  font-size: 11px;
+  line-height: 1.2;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--novel-card-accent);
+}
+
+.novel-project-card__next-step-title {
+  font-size: 14px;
+  line-height: 1.4;
+  font-weight: 700;
+  color: var(--novel-card-text);
+}
+
+.novel-project-card__next-step-copy {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--novel-card-text-secondary);
+}
+
+.novel-project-card__actions {
+  margin-top: auto;
+  gap: 8px;
+}
+
+.novel-metric-card {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 16px 18px;
+  border: 1px solid var(--novel-card-border);
+  border-radius: var(--radius-md, 12px);
+  background: var(--novel-card-surface);
+}
+
+.novel-metric-card--warm {
+  border-color: rgba(166, 106, 43, 0.22);
+  background: var(--novel-card-accent-soft);
+}
+
+.novel-metric-card--success {
+  border-color: rgba(47, 133, 90, 0.2);
+  background: rgba(47, 133, 90, 0.08);
+}
+
+.novel-metric-card--danger {
+  border-color: rgba(194, 65, 12, 0.22);
+  background: rgba(194, 65, 12, 0.08);
+}
+
+.novel-metric-card__label,
+.novel-metric-card__hint {
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.novel-metric-card__label {
+  font-weight: 600;
+  color: var(--novel-card-text-secondary);
+}
+
+.novel-metric-card__value {
+  font-size: 24px;
+  line-height: 1.1;
+  color: var(--novel-card-text);
+}
+
+.novel-metric-card--warm .novel-metric-card__value {
+  color: var(--novel-card-accent);
+}
+
+.novel-metric-card--success .novel-metric-card__value {
+  color: var(--success);
+}
+
+.novel-metric-card--danger .novel-metric-card__value {
+  color: var(--danger);
+}
+
+.novel-metric-card__hint {
+  color: var(--novel-card-text-muted);
+}
+
+.novel-blocker-card {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid rgba(166, 106, 43, 0.14);
+  border-radius: var(--radius-md, 12px);
+  background: var(--novel-card-surface);
+  box-shadow: var(--novel-card-shadow);
+}
+
+.novel-blocker-card--fatal {
+  border-color: rgba(194, 65, 12, 0.3);
+}
+
+.novel-blocker-card--high {
+  border-color: rgba(234, 88, 12, 0.28);
+}
+
+.novel-blocker-card--medium {
+  border-color: rgba(183, 121, 31, 0.28);
+}
+
+.novel-blocker-card--low {
+  border-color: rgba(156, 163, 175, 0.28);
+}
+
+.novel-blocker-card__head,
+.novel-blocker-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.novel-blocker-card__title {
+  font-size: 14px;
+  line-height: 1.45;
+  font-weight: 700;
+  color: var(--novel-card-text);
+}
+
+.novel-blocker-card__body {
+  display: grid;
+  gap: 8px;
+}
+
+.novel-blocker-card__reason {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--novel-card-text-secondary);
+}
+
+.novel-blocker-card__meta {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--novel-card-text-muted);
+}
+
+[data-theme="dark"] .novel-project-card,
+[data-theme="dark"] .novel-metric-card,
+[data-theme="dark"] .novel-blocker-card {
+  box-shadow: 0 20px 36px rgba(0, 0, 0, 0.28);
+}
+
+[data-theme="dark"] .novel-project-card__next-step {
+  border-color: rgba(230, 126, 34, 0.24);
+  background: rgba(230, 126, 34, 0.14);
+}
+
+@media (max-width: 720px) {
+  .novel-project-card__summary {
+    grid-template-columns: 1fr;
+  }
+}

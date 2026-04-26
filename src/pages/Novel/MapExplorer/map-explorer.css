@@ -664,3 +664,31 @@
     grid-template-columns: 1fr;
   }
 }
+
+[data-theme="dark"] .novel-map-page .map-graph-stage-brief,
+[data-theme="dark"] .novel-map-page .map-graph-stage-pill,
+[data-theme="dark"] .novel-map-page .map-graph-empty,
+[data-theme="dark"] .novel-map-page .map-graph-node,
+[data-theme="dark"] .novel-map-page .map-graph-focus-card,
+[data-theme="dark"] .novel-map-page .map-graph-stat,
+[data-theme="dark"] .novel-map-page .map-graph-switch,
+[data-theme="dark"] .novel-map-page .map-graph-relation-item,
+[data-theme="dark"] .novel-map-page .map-graph-detail-grid__item {
+  border-color: rgba(210, 190, 156, 0.14);
+  background: rgba(28, 34, 47, 0.88);
+  color: var(--workspace-ink);
+}
+
+[data-theme="dark"] .novel-map-page .map-graph-shell,
+[data-theme="dark"] .novel-map-page .map-graph-stage--fullscreen {
+  border-color: rgba(210, 190, 156, 0.16);
+  background:
+    radial-gradient(circle at top left, rgba(188, 108, 37, 0.16), transparent 30%),
+    radial-gradient(circle at bottom right, rgba(62, 105, 136, 0.16), transparent 26%),
+    linear-gradient(180deg, rgba(25, 31, 43, 0.96), rgba(18, 23, 33, 0.96));
+}
+
+[data-theme="dark"] .novel-map-page .map-graph-node--focus,
+[data-theme="dark"] .novel-map-page .map-graph-relation-item--active {
+  background: linear-gradient(180deg, rgba(35, 63, 74, 0.9), rgba(28, 34, 47, 0.92));
+}

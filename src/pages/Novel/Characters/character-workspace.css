@@ -1,3 +1,42 @@
+.novel-character-studio-shell {
+  display: grid;
+  gap: 18px;
+}
+
+.novel-character-studio__view-switch {
+  display: inline-flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.novel-character-studio__view-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1px solid rgba(122, 93, 52, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.88);
+  color: rgba(61, 48, 37, 0.82);
+  cursor: pointer;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    background 180ms ease;
+}
+
+.novel-character-studio__view-tab.is-active {
+  border-color: rgba(46, 134, 171, 0.28);
+  background: rgba(232, 244, 247, 0.94);
+  color: #1f4f63;
+  box-shadow: 0 14px 26px rgba(31, 79, 99, 0.12);
+}
+
+.novel-character-studio__view-tab:hover {
+  transform: translateY(-1px);
+}
+
 .novel-character-studio {
   display: grid;
   grid-template-columns: minmax(280px, 320px) minmax(420px, 1fr) minmax(360px, 460px);
@@ -5,9 +44,27 @@
   align-items: start;
 }
 
+.novel-character-studio--list {
+  grid-template-columns: minmax(280px, 320px) minmax(0, 1fr);
+}
+
+.novel-character-studio--graph {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .novel-character-studio__sidebar,
 .novel-character-studio__editor {
   align-self: start;
+}
+
+.novel-character-list {
+  display: grid;
+  gap: 12px;
+}
+
+.novel-character-list-card {
+  text-align: left;
+  cursor: pointer;
 }
 
 .novel-character-studio__sidebar .novel-panel__body,
@@ -57,6 +114,14 @@
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
+}
+
+.novel-character-graph-panel__controls {
+  gap: 8px;
+}
+
+.novel-character-graph-panel__select {
+  min-width: 148px;
 }
 
 .novel-character-graph-stat {
@@ -271,6 +336,25 @@
   line-height: 1.7;
 }
 
+.novel-character-linked-row--stacked {
+  gap: 6px;
+}
+
+.novel-character-linked-row__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+}
+
+.novel-character-support-grid {
+  margin-top: 20px;
+}
+
+.novel-character-full-width-number {
+  width: 100%;
+}
+
 .novel-characters-page .novel-list-card__title {
   display: flex;
   align-items: center;
@@ -290,6 +374,14 @@
   .novel-character-studio__editor {
     grid-column: 1 / -1;
   }
+
+  .novel-character-studio--list {
+    grid-template-columns: minmax(280px, 320px) minmax(0, 1fr);
+  }
+
+  .novel-character-studio--graph {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 960px) {
@@ -307,6 +399,10 @@
     min-height: 460px;
   }
 
+  .novel-character-studio__view-switch {
+    width: 100%;
+  }
+
   .character-graph-shell__legend {
     right: 14px;
     left: 14px;
@@ -314,4 +410,43 @@
     bottom: 14px;
     max-width: none;
   }
+}
+
+[data-theme="dark"] .novel-characters-page .novel-character-studio__view-tab,
+[data-theme="dark"] .novel-characters-page .novel-character-draft-chip,
+[data-theme="dark"] .novel-characters-page .novel-character-graph-stat,
+[data-theme="dark"] .novel-characters-page .character-graph-shell__fit,
+[data-theme="dark"] .novel-characters-page .character-graph-shell__legend,
+[data-theme="dark"] .novel-characters-page .character-graph-node {
+  border-color: rgba(210, 190, 156, 0.16);
+  background: rgba(31, 38, 52, 0.9);
+  color: var(--workspace-ink);
+}
+
+[data-theme="dark"] .novel-characters-page .novel-character-studio__view-tab.is-active {
+  border-color: rgba(120, 169, 198, 0.3);
+  background: rgba(29, 50, 63, 0.9);
+  color: #cbe7f2;
+  box-shadow: 0 14px 26px rgba(5, 10, 19, 0.24);
+}
+
+[data-theme="dark"] .novel-characters-page .novel-character-alert,
+[data-theme="dark"] .novel-characters-page .novel-character-draft-strip,
+[data-theme="dark"] .novel-characters-page .novel-character-graph-panel__canvas {
+  border-color: rgba(210, 190, 156, 0.16);
+  background:
+    radial-gradient(circle at top left, rgba(120, 169, 198, 0.14), transparent 36%),
+    linear-gradient(180deg, rgba(28, 34, 47, 0.94), rgba(22, 28, 39, 0.94));
+}
+
+[data-theme="dark"] .novel-characters-page .character-graph-node--protagonist {
+  background: linear-gradient(180deg, rgba(41, 68, 83, 0.94), rgba(27, 35, 48, 0.96));
+}
+
+[data-theme="dark"] .novel-characters-page .character-graph-node--major {
+  background: linear-gradient(180deg, rgba(92, 73, 42, 0.94), rgba(27, 35, 48, 0.96));
+}
+
+[data-theme="dark"] .novel-characters-page .character-graph-node--antagonist {
+  background: linear-gradient(180deg, rgba(89, 47, 47, 0.94), rgba(27, 35, 48, 0.96));
 }

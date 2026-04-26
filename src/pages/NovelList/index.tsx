@@ -31,6 +31,7 @@ import { buildThemeVoicePayload } from '../../shared/theme-voice'
 import { WRITING_CONTRACT_PRESETS, getWritingContractValidationError, normalizeWritingContractTags } from '../../shared/writing-contract'
 import { EMPTY_WORKFLOW_STATS, loadWorkflowStats } from '../Novel/workflow'
 import { buildFastLaunchBootstrapPlan, NOVEL_LAUNCH_MODE_OPTIONS } from './fast-launch'
+import './index.css'
 
 interface WizardFormValues {
   genreId: number
@@ -457,29 +458,19 @@ export default function NovelList() {
 
   return (
     <>
-      <div style={{ height: '100%', overflow: 'auto', padding: 24, background: 'var(--bg-page)' }}>
-        <div style={{ maxWidth: 1520, margin: '0 auto', display: 'grid', gap: 18 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-            <div style={{ display: 'grid', gap: 6 }}>
-              <h1 style={{ margin: 0, fontSize: 28, lineHeight: 1.15, fontWeight: 700, color: 'var(--text-main)' }}>
-                我的小说
-              </h1>
-              <span style={{ fontSize: 13, color: 'var(--text-sub)' }}>
-                面向长篇与系列小说的创作控制台。
-              </span>
+      <div className="novel-list-page">
+        <div className="novel-list-page__shell">
+          <div className="novel-list-page__header">
+            <div className="novel-list-page__copy">
+              <h1 className="novel-list-page__title">我的小说</h1>
+              <span className="novel-list-page__subtitle">面向长篇与系列小说的创作控制台。</span>
             </div>
             <Button type="primary" icon={<PlusOutlined />} onClick={() => setWizardOpen(true)}>
               新建小说
             </Button>
           </div>
 
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-              gap: 12,
-            }}
-          >
+          <div className="novel-list-page__stats">
             {[
               { label: '项目总数', value: `${novels.length} 部`, hint: '当前库内小说项目' },
               { label: '写作中', value: `${writingCount} 部`, hint: '已经进入章节生产' },
@@ -488,82 +479,59 @@ export default function NovelList() {
               { label: '待清 blocker', value: `${totalBlockerCount} 个`, hint: '需要先处理的高优先风险' },
               { label: '累计字数', value: formatWordCount(totalWordCount), hint: '全部项目总字数' },
             ].map((item) => (
-              <div
-                key={item.label}
-                style={{
-                  display: 'grid',
-                  gap: 6,
-                  padding: '14px 16px',
-                  borderRadius: 'var(--radius-md)',
-                  border: '1px solid var(--border-light)',
-                  background: '#fff',
-                }}
-              >
-                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{item.label}</span>
-                <strong style={{ fontSize: 20, lineHeight: 1.1, color: 'var(--text-main)' }}>{item.value}</strong>
-                <span style={{ fontSize: 11, color: 'var(--text-sub)' }}>{item.hint}</span>
+              <div key={item.label} className="novel-list-page__stat-card">
+                <span className="novel-list-page__stat-label">{item.label}</span>
+                <strong className="novel-list-page__stat-value">{item.value}</strong>
+                <span className="novel-list-page__stat-hint">{item.hint}</span>
               </div>
             ))}
           </div>
 
-          <div
-            style={{
-              display: 'flex',
-              gap: 8,
-              flexWrap: 'wrap',
-              padding: 14,
-              borderRadius: 'var(--radius-md)',
-              border: '1px solid var(--border-light)',
-              background: '#fff',
-            }}
-          >
-            <Input
-              prefix={<SearchOutlined />}
-              placeholder="搜索小说、简介或题材"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              style={{ width: 280 }}
-              allowClear
-            />
-            <Select
-              value={statusFilter}
-              onChange={setStatusFilter}
-              style={{ width: 140 }}
-              options={[
-                { value: 'all', label: '全部状态' },
-                { value: 'draft', label: '草稿' },
-                { value: 'writing', label: '写作中' },
-                { value: 'completed', label: '已完成' },
-                { value: 'archived', label: '已归档' },
-              ]}
-            />
-            <Select
-              value={sortBy}
-              onChange={setSortBy}
-              style={{ width: 150 }}
-              options={[
-                { value: 'updatedAt', label: '最近修改' },
-                { value: 'totalWords', label: '按字数排序' },
-                { value: 'title', label: '按标题排序' },
-              ]}
-            />
+          <div className="novel-list-page__toolbar">
+            <div className="novel-list-page__toolbar-field novel-list-page__toolbar-field--search">
+              <Input
+                prefix={<SearchOutlined />}
+                placeholder="搜索小说、简介或题材"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                allowClear
+              />
+            </div>
+            <div className="novel-list-page__toolbar-field novel-list-page__toolbar-field--status">
+              <Select
+                value={statusFilter}
+                onChange={setStatusFilter}
+                options={[
+                  { value: 'all', label: '全部状态' },
+                  { value: 'draft', label: '草稿' },
+                  { value: 'writing', label: '写作中' },
+                  { value: 'completed', label: '已完成' },
+                  { value: 'archived', label: '已归档' },
+                ]}
+              />
+            </div>
+            <div className="novel-list-page__toolbar-field novel-list-page__toolbar-field--sort">
+              <Select
+                value={sortBy}
+                onChange={setSortBy}
+                options={[
+                  { value: 'updatedAt', label: '最近修改' },
+                  { value: 'totalWords', label: '按字数排序' },
+                  { value: 'title', label: '按标题排序' },
+                ]}
+              />
+            </div>
           </div>
 
           {loading ? (
             <Skeleton active paragraph={{ rows: 10 }} />
           ) : filteredNovels.length === 0 ? (
             <Empty
+              className="novel-list-page__empty"
               description={search ? '没有找到匹配的小说。' : '还没有小说，点击“新建小说”开始创作。'}
-              style={{ paddingTop: 96 }}
             />
           ) : (
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))',
-                gap: 16,
-              }}
-            >
+            <div className="novel-list-page__grid">
               {filteredNovels.map((novel) => {
                 const snapshot = workspaceSnapshots[novel.id] || getWorkspaceSnapshot(novel, EMPTY_WORKFLOW_STATS, {
                   viewMode: novel.launchMode === 'fast_launch' ? 'quick' : 'professional',
@@ -599,7 +567,7 @@ export default function NovelList() {
         <Steps
           current={wizardStep}
           items={wizardSteps}
-          style={{ marginBottom: 32 }}
+          className="novel-list-page__wizard-steps"
         />
 
         <Form form={wizardForm} layout="vertical">
@@ -610,38 +578,24 @@ export default function NovelList() {
                 label="开书路径"
                 rules={[{ required: true, message: '请选择开书路径' }]}
               >
-                <Row gutter={[12, 12]}>
+                <div className="novel-list-page__launch-grid">
                   {NOVEL_LAUNCH_MODE_OPTIONS.map((option) => {
                     const active = selectedLaunchMode === option.value
                     return (
-                      <Col span={12} key={option.value}>
-                        <div
-                          onClick={() => wizardForm.setFieldValue('launchMode', option.value)}
-                          style={{
-                            padding: '14px 16px',
-                            borderRadius: 14,
-                            cursor: 'pointer',
-                            border: active ? '1px solid #2E86AB' : '1px solid rgba(255,255,255,0.08)',
-                            background: active
-                              ? 'linear-gradient(135deg, rgba(46,134,171,0.18), rgba(30,58,95,0.22))'
-                              : 'rgba(255,255,255,0.03)',
-                            minHeight: 110,
-                            display: 'grid',
-                            gap: 10,
-                          }}
-                        >
-                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
-                            <strong style={{ color: 'var(--color-text)' }}>{option.label}</strong>
+                      <div
+                        key={option.value}
+                        onClick={() => wizardForm.setFieldValue('launchMode', option.value)}
+                        className={`novel-list-page__launch-card${active ? ' is-active' : ''}`}
+                      >
+                        <div className="novel-list-page__launch-card-head">
+                            <strong className="novel-list-page__launch-card-title">{option.label}</strong>
                             <Tag color={active ? 'processing' : 'default'}>{option.badge}</Tag>
-                          </div>
-                          <div style={{ fontSize: 13, color: 'var(--color-text-secondary)', lineHeight: 1.7 }}>
-                            {option.description}
-                          </div>
                         </div>
-                      </Col>
+                        <div className="novel-list-page__launch-card-copy">{option.description}</div>
+                      </div>
                     )
                   })}
-                </Row>
+                </div>
               </Form.Item>
 
               <Form.Item
@@ -650,46 +604,28 @@ export default function NovelList() {
                 rules={[{ required: true, message: '请选择题材' }]}
               >
                 <div>
-                  <Row gutter={[10, 10]}>
+                  <div className="novel-list-page__genre-grid">
                     {GENRE_OPTIONS.map((genre) => {
                       const isSelected = selectedGenreId === genre.value
                       const gradient = GENRE_GRADIENTS[genre.label] || 'linear-gradient(135deg, #1a1d27, #252840)'
 
                       return (
-                        <Col span={8} key={genre.value}>
-                          <div
-                            onClick={() => {
-                              setSelectedGenreId(genre.value)
-                              wizardForm.setFieldValue('genreId', genre.value)
-                            }}
-                            style={{
-                              background: gradient,
-                              borderRadius: 10,
-                              padding: '12px 14px',
-                              cursor: 'pointer',
-                              border: isSelected ? '2px solid #2E86AB' : '2px solid transparent',
-                              position: 'relative',
-                              minHeight: 90,
-                            }}
-                          >
-                            {isSelected ? (
-                              <CheckOutlined style={{
-                                position: 'absolute',
-                                top: 8,
-                                right: 8,
-                                color: '#fff',
-                                fontSize: 14,
-                              }} />
-                            ) : null}
-                            <div style={{ fontWeight: 600, color: '#fff', marginBottom: 6 }}>{genre.label}</div>
-                            <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.72)', lineHeight: 1.5 }}>
-                              {genre.description}
-                            </div>
-                          </div>
-                        </Col>
+                        <div
+                          key={genre.value}
+                          onClick={() => {
+                            setSelectedGenreId(genre.value)
+                            wizardForm.setFieldValue('genreId', genre.value)
+                          }}
+                          className={`novel-list-page__genre-card${isSelected ? ' is-selected' : ''}`}
+                          style={{ background: gradient }}
+                        >
+                          {isSelected ? <CheckOutlined className="novel-list-page__genre-check" /> : null}
+                          <div className="novel-list-page__genre-title">{genre.label}</div>
+                          <div className="novel-list-page__genre-copy">{genre.description}</div>
+                        </div>
                       )
                     })}
-                  </Row>
+                  </div>
                 </div>
               </Form.Item>
 
@@ -825,36 +761,25 @@ export default function NovelList() {
                 <Input.TextArea rows={4} placeholder="例如：主角救下主城，但必须放弃原本想夺回的身份和归属。" />
               </Form.Item>
 
-              <div
-                style={{
-                  marginTop: 8,
-                  padding: '14px 16px',
-                  borderRadius: 14,
-                  background: 'rgba(255,255,255,0.04)',
-                  border: '1px solid rgba(255,255,255,0.06)',
-                  color: 'var(--color-text-secondary)',
-                  lineHeight: 1.7,
-                  fontSize: 13,
-                }}
-              >
+              <div className="novel-list-page__fast-note">
                 系统会自动补出：基础立项、文风护栏、第一卷目标、前三章骨架、主角/反派简版卡，以及可直接进入写作的最小结构。
               </div>
             </>
           )}
 
           {selectedLaunchMode === 'professional_longform' && wizardStep === 2 && (
-            <div style={{ display: 'flex', gap: 20 }}>
-              <div style={{ flex: 1 }}>
+            <div className="novel-list-page__expanded-layout">
+              <div className="novel-list-page__expanded-main">
                 <Form.Item name="expandedBackground" label="AI 补全背景（可编辑）">
                   <Input.TextArea rows={10} />
                 </Form.Item>
               </div>
-              <div style={{ width: 280 }}>
-                <div style={{ marginBottom: 8, color: 'var(--color-text-secondary)', fontSize: 12 }}>标题建议</div>
+              <div className="novel-list-page__expanded-side">
+                <div className="novel-list-page__side-caption">标题建议</div>
                 <Form.Item name="title">
-                  <Radio.Group style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <Radio.Group className="novel-list-page__title-radio-group">
                     {expandedData?.titles.map((title) => (
-                      <Radio key={title} value={title} style={{ whiteSpace: 'normal', lineHeight: 1.5 }}>
+                      <Radio key={title} value={title} className="novel-list-page__title-radio">
                         {title}
                       </Radio>
                     ))}
@@ -892,7 +817,7 @@ export default function NovelList() {
           )}
         </Form>
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 24 }}>
+        <div className="novel-list-page__wizard-footer">
           {wizardStep > 0 ? (
             <Button onClick={() => setWizardStep((step) => step - 1)}>上一步</Button>
           ) : null}
