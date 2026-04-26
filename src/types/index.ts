@@ -146,6 +146,7 @@ export interface Chapter {
   wordCount: number
   summary?: string
   nextChapterSeed?: string
+  bridgePlanJson?: string
   continuityStateJson?: string
   reviewNotesJson?: string
   status: 'outline' | 'writing' | 'draft' | 'reviewing' | 'final'
@@ -160,8 +161,111 @@ export interface Chapter {
   allowedFactIdsJson?: string
   revealedFactIdsJson?: string
   contractAuditJson?: string
+  summaryHealthJson?: string
+  expressionDedupJson?: string
+  hookContinuityJson?: string
+  writebackStatusJson?: string
   createdAt: string
   updatedAt: string
+}
+
+export interface ChapterBridgePlan {
+  sourceChapterId?: number
+  sourceChapterNum?: number
+  locationTransition: string
+  timeJump: string
+  emotionCarry: string
+  openingMove: string
+  firstSceneConstraint: string
+  allowedPov: string
+  infoGapGuard: string
+  bridgeWarnings: string[]
+  createdAt?: string
+}
+
+export interface PovRotationPlan {
+  recommendedPov: string
+  previousPov?: string
+  reason: string
+  infoGapGuard: string
+  shouldRotate: boolean
+  warnings: string[]
+}
+
+export interface HookContinuitySnapshot {
+  hookType: string
+  hookStrengthScore: number
+  unresolvedHookChain: string[]
+  weakHookStreak: number
+  recentHookTypes: string[]
+  warning?: string
+  updatedAt?: string
+}
+
+export interface StoryPacingCurve {
+  label: string
+  targetMarker: string
+  actualMarker?: string
+  shouldBreather: boolean
+  shouldEscalate: boolean
+  recentClimaxSpacing: number[]
+  warning?: string
+  guidance: string
+  updatedAt?: string
+}
+
+export interface ExpressionDedupHit {
+  phrase: string
+  count: number
+  chapterNums: number[]
+}
+
+export interface ExpressionDedupReport {
+  riskLevel: 'low' | 'medium' | 'high'
+  repeatedPhrases: ExpressionDedupHit[]
+  repeatedOpenings: string[]
+  repeatedClosings: string[]
+  repeatedStructuralPatterns: string[]
+  bannedExpressions: string[]
+  guidance: string[]
+  summary: string
+  updatedAt?: string
+}
+
+export interface SummaryHealthReport {
+  status: 'healthy' | 'warning' | 'degraded'
+  densityScore: number
+  entityCoverageScore: number
+  eventCoverageScore: number
+  recentWindowSize: number
+  warnings: string[]
+  triggeredRecompression: boolean
+  recompressionReason?: string
+  focusEntities: string[]
+  summaryPreview?: string
+  updatedAt?: string
+}
+
+export interface VoiceEvolutionProfile {
+  characterId: number
+  characterName: string
+  stageLabel: string
+  allowedChanges: string[]
+  stableAnchors: string[]
+  riskyChanges: string[]
+  summary: string
+}
+
+export interface WritebackSyncStatus {
+  phase: 'idle' | 'preparing' | 'ready' | 'applying' | 'applied' | 'failed'
+  runId?: number
+  retryCount: number
+  lastError?: string
+  blockedGeneration: boolean
+  readyForNextChapter: boolean
+  contextVersion?: number
+  lastAttemptAt?: string
+  updatedAt?: string
 }
 
 export interface ChapterUpdateOptions {
@@ -980,9 +1084,58 @@ export interface StoryItemDetailContext {
   relatedEvents: TimelineEvent[]
   relatedArcs: StoryArc[]
   relatedLocations: MapNodeSummary[]
+  relatedSegments: StoryItemLinkedSegmentSummary[]
   derivedInstances: StoryItem[]
   siblingInstances: StoryItem[]
   sourceContexts: StoryItemSourceContext[]
+}
+
+export interface StoryItemLinkedSegmentSummary {
+  segmentId: number
+  chapterId: number
+  chapterNum: number
+  chapterTitle: string
+  segmentOrder: number
+  title: string
+  purpose?: string
+  summary?: string
+  locationName?: string
+}
+
+export interface StoryItemEventLinkRecommendation {
+  eventId: number
+  eventTitle: string
+  timeLabel: string
+  score: number
+  reason: string
+  alreadyLinked: boolean
+}
+
+export interface StoryItemSegmentLinkRecommendation {
+  segmentId: number
+  chapterId: number
+  chapterNum: number
+  chapterTitle: string
+  segmentOrder: number
+  segmentTitle: string
+  score: number
+  reason: string
+  alreadyLinked: boolean
+}
+
+export interface StoryItemLinkRecommendationResult {
+  itemId: number
+  generatedAt: string
+  summary: string
+  events: StoryItemEventLinkRecommendation[]
+  segments: StoryItemSegmentLinkRecommendation[]
+}
+
+export interface StoryItemLinkApplyResult {
+  itemId: number
+  linkedEventCount: number
+  linkedSegmentCount: number
+  message: string
 }
 
 export interface ModelConfig {
@@ -1304,6 +1457,7 @@ export interface ChapterBatchAutoGenerateStatus extends BatchAutoGenerateStatusB
   blockedTaskId?: number
   consecutiveRecallFallbackChapters: number
   snapshotId?: number
+  currentWritebackStatus?: WritebackSyncStatus
 }
 
 export type ProductionReadinessStatus = 'ready' | 'warning' | 'blocked'
@@ -2131,6 +2285,9 @@ export interface ChapterWritebackRun {
   status: ChapterWritebackRunStatus
   triggerSource: string
   summaryText?: string | null
+  retryCount?: number
+  lastAttemptAt?: string | null
+  sourceChapterVersion?: number | null
   startedAt?: string | null
   completedAt?: string | null
   failedAt?: string | null
@@ -2701,6 +2858,32 @@ export interface StoryStructureChapterSummary extends Chapter {
 
 export interface StoryStructureSegmentSummary extends ChapterSegment {
   linkedTimelineEventCount: number
+}
+
+export interface StructureLinkageSummary {
+  chapterCount: number
+  segmentCount: number
+  timelineEventCount: number
+  missingChapterContractCount: number
+  missingSceneContractCount: number
+  uncoveredChapterCount: number
+  uncoveredSegmentCount: number
+  anchorInvalidEventCount: number
+  totalGapCount: number
+  missingChapterContractLabels: string[]
+  missingSceneContractLabels: string[]
+  uncoveredChapterLabels: string[]
+  uncoveredSegmentLabels: string[]
+  anchorInvalidEventTitles: string[]
+  summary: string
+}
+
+export interface StructureLinkageSyncResult {
+  createdChapterContractCount: number
+  createdSceneContractCount: number
+  createdTimelineEventCount: number
+  message: string
+  summary: StructureLinkageSummary
 }
 
 export type EndgameCommitmentKind = 'promise' | 'payoff'
@@ -4060,6 +4243,42 @@ export interface QualityDashboardData {
   worldStateTrend: WorldStateTrendPoint[]
   recentWorldStateAlerts: WorldStateAlert[]
   worldConflictEntities: WorldStateLedgerConflictEntity[]
+  expressionDedupSummary: {
+    analyzedChapterCount: number
+    highRiskChapterCount: number
+    recentHighRiskChapterNums: number[]
+    topRepeatedPhrases: ExpressionDedupHit[]
+    repeatedStructuralPatterns: string[]
+    summary: string
+  }
+  summaryHealthSummary: {
+    analyzedChapterCount: number
+    degradedChapterCount: number
+    averageDensityScore: number
+    averageEntityCoverageScore: number
+    averageEventCoverageScore: number
+    recentAlerts: Array<{
+      chapterId: number
+      chapterNum: number
+      status: SummaryHealthReport['status']
+      summary: string
+    }>
+    summary: string
+  }
+  hookContinuitySummary: {
+    analyzedChapterCount: number
+    weakHookChapterCount: number
+    weakHookStreak: number
+    averageHookStrengthScore: number
+    recentHookTypes: string[]
+    summary: string
+  }
+  voiceEvolutionSummary: {
+    trackedCharacterCount: number
+    driftingCharacterCount: number
+    profiles: VoiceEvolutionProfile[]
+    summary: string
+  }
   recallSummary: {
     analyzedChapterCount: number
     recallAvailabilityRate: number
@@ -4454,6 +4673,8 @@ declare global {
         reorderSegments: (chapterId: number, orderedIds: number[]) => Promise<void>
         compileChapter: (chapterId: number) => Promise<Chapter | null>
         refreshCheckpoints: (novelId: number) => Promise<StoryMemoryCheckpoint[]>
+        getLinkageSummary: (novelId: number) => Promise<StructureLinkageSummary>
+        syncLinkage: (novelId: number) => Promise<StructureLinkageSyncResult>
         clear: (novelId: number) => Promise<{
           volumesCleared: number
           partsCleared: number
@@ -4678,6 +4899,11 @@ declare global {
         getLatestAutoGenerateTask: (novelId: number) => Promise<Task | null>
         resumeAutoGenerate: (taskId: number) => Promise<number>
         regenerate: (id: number, options?: EntityRegenerateOptions) => Promise<StoryItem | null>
+        getLinkRecommendations: (itemId: number) => Promise<StoryItemLinkRecommendationResult>
+        applyLinkRecommendations: (itemId: number, data: {
+          eventIds?: number[]
+          segmentIds?: number[]
+        }) => Promise<StoryItemLinkApplyResult>
         clear: (novelId: number) => Promise<void>
       }
       outline: {

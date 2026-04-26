@@ -6,6 +6,7 @@ export type WorldRuleSectionKey =
   | 'species'
   | 'ecology'
   | 'map'
+  | 'dynamics'
   | 'timeline'
   | 'language'
 
@@ -65,6 +66,7 @@ export const WORLD_RULE_SECTION_DEFINITIONS: Array<{
   { key: 'species', label: '种族势力' },
   { key: 'ecology', label: '人物生态' },
   { key: 'map', label: '地图蓝图' },
+  { key: 'dynamics', label: '气候与经济' },
   { key: 'timeline', label: '时间规则' },
   { key: 'language', label: '文风约束' },
 ]

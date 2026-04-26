@@ -8,6 +8,7 @@ import type {
   ChapterWritebackDecision,
   ChapterWritebackDiff as AppChapterWritebackDiff,
   ChapterWritebackRun as AppChapterWritebackRun,
+  WritebackSyncStatus,
   WritebackVerificationStatus,
 } from '../../src/types'
 import { getDb, getSqlite } from '../database/db'
@@ -250,6 +251,68 @@ function normalizeDecision(value: unknown): ChapterWritebackDecision {
   return 'pending'
 }
 
+function parseWritebackSyncStatus(raw: string | null | undefined, contextVersion = 1): WritebackSyncStatus {
+  if (!raw) {
+    return {
+      phase: 'idle',
+      retryCount: 0,
+      blockedGeneration: false,
+      readyForNextChapter: true,
+      contextVersion,
+      updatedAt: new Date().toISOString(),
+    }
+  }
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    const phase = parsed.phase === 'idle'
+      || parsed.phase === 'preparing'
+      || parsed.phase === 'ready'
+      || parsed.phase === 'applying'
+      || parsed.phase === 'applied'
+      || parsed.phase === 'failed'
+      ? parsed.phase
+      : 'idle'
+    return {
+      phase,
+      runId: asPositiveNumber(parsed.runId) || undefined,
+      retryCount: asPositiveNumber(parsed.retryCount) || 0,
+      lastError: asText(parsed.lastError) || undefined,
+      blockedGeneration: asBooleanNumber(parsed.blockedGeneration, 0) === 1,
+      readyForNextChapter: asBooleanNumber(parsed.readyForNextChapter, 1) === 1,
+      contextVersion: asPositiveNumber(parsed.contextVersion) || contextVersion,
+      lastAttemptAt: asText(parsed.lastAttemptAt) || undefined,
+      updatedAt: asText(parsed.updatedAt) || new Date().toISOString(),
+    }
+  } catch {
+    return {
+      phase: 'idle',
+      retryCount: 0,
+      blockedGeneration: false,
+      readyForNextChapter: true,
+      contextVersion,
+      updatedAt: new Date().toISOString(),
+    }
+  }
+}
+
+function updateChapterWritebackSyncStatus(chapterId: number, patch: Partial<WritebackSyncStatus>): WritebackSyncStatus {
+  const db = getDb()
+  const chapter = getChapterRow(chapterId)
+  const current = parseWritebackSyncStatus(chapter.writebackStatusJson, chapter.contextVersion || 1)
+  const next: WritebackSyncStatus = {
+    ...current,
+    ...patch,
+    retryCount: typeof patch.retryCount === 'number' ? patch.retryCount : current.retryCount,
+    contextVersion: patch.contextVersion ?? current.contextVersion ?? chapter.contextVersion ?? 1,
+    updatedAt: new Date().toISOString(),
+  }
+  db.update(chapters).set({
+    writebackStatusJson: safeStringify(next),
+    updatedAt: new Date().toISOString(),
+  }).where(eq(chapters.id, chapterId)).run()
+  return next
+}
+
 function deriveVerificationStatus(confidence: unknown, hint?: string | null): WritebackVerificationStatus {
   const normalized = typeof confidence === 'number' && Number.isFinite(confidence) ? confidence : 0
   const reason = asText(hint).toLowerCase()
@@ -282,6 +345,9 @@ function mapRunRow(row: ChapterWritebackRunRow): AppChapterWritebackRun {
     status: row.status as AppChapterWritebackRun['status'],
     triggerSource: row.triggerSource,
     summaryText: row.summaryText,
+    retryCount: row.retryCount,
+    lastAttemptAt: row.lastAttemptAt,
+    sourceChapterVersion: row.sourceChapterVersion,
     startedAt: row.startedAt,
     completedAt: row.completedAt,
     failedAt: row.failedAt,
@@ -1065,11 +1131,25 @@ export async function prepareChapterWritebackRun(chapterId: number, triggerSourc
   const db = getDb()
   const chapter = getChapterRow(chapterId)
   const now = new Date().toISOString()
+  const currentSyncStatus = parseWritebackSyncStatus(chapter.writebackStatusJson, chapter.contextVersion || 1)
+  updateChapterWritebackSyncStatus(chapterId, {
+    phase: 'preparing',
+    runId: undefined,
+    blockedGeneration: true,
+    readyForNextChapter: false,
+    lastError: undefined,
+    lastAttemptAt: now,
+    retryCount: currentSyncStatus.retryCount,
+    contextVersion: chapter.contextVersion || 1,
+  })
   const insert = db.insert(chapterWritebackRuns).values({
     novelId: chapter.novelId,
     chapterId: chapter.id,
     status: 'draft',
     triggerSource: asText(triggerSource) || 'manual',
+    retryCount: currentSyncStatus.retryCount,
+    lastAttemptAt: now,
+    sourceChapterVersion: chapter.contextVersion || 1,
     startedAt: now,
     createdAt: now,
     updatedAt: now,
@@ -1120,24 +1200,64 @@ export async function prepareChapterWritebackRun(chapterId: number, triggerSourc
       db.update(chapterWritebackRuns).set({
         status: 'ready',
         completedAt: new Date().toISOString(),
+        lastAttemptAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       }).where(eq(chapterWritebackRuns.id, runId)).run()
     })()
     refreshRunSummary(runId)
     const persistedRun = getRunRow(runId)
+    updateChapterWritebackSyncStatus(chapterId, {
+      phase: 'ready',
+      runId,
+      blockedGeneration: false,
+      readyForNextChapter: true,
+      lastError: undefined,
+      lastAttemptAt: new Date().toISOString(),
+      retryCount: currentSyncStatus.retryCount,
+      contextVersion: chapter.contextVersion || 1,
+    })
     loadDiffRows(runId).forEach((diff) => {
       createWritebackVerificationTask(persistedRun, diff, chapter)
     })
   } catch (error) {
+    const nextRetryCount = currentSyncStatus.retryCount + 1
     db.update(chapterWritebackRuns).set({
       status: 'failed',
+      retryCount: nextRetryCount,
+      lastAttemptAt: new Date().toISOString(),
       failedAt: new Date().toISOString(),
       errorMessage: error instanceof Error ? error.message : '章后回写草案生成失败',
       updatedAt: new Date().toISOString(),
     }).where(eq(chapterWritebackRuns.id, runId)).run()
+    updateChapterWritebackSyncStatus(chapterId, {
+      phase: 'failed',
+      runId,
+      blockedGeneration: true,
+      readyForNextChapter: false,
+      lastError: error instanceof Error ? error.message : '章后回写草案生成失败',
+      lastAttemptAt: new Date().toISOString(),
+      retryCount: nextRetryCount,
+      contextVersion: chapter.contextVersion || 1,
+    })
   }
 
   return mapRunRow(getRunRow(runId))
+}
+
+export async function prepareChapterWritebackRunWithRetry(
+  chapterId: number,
+  triggerSource = 'manual',
+  maxAttempts = 3,
+): Promise<AppChapterWritebackRun> {
+  let lastRun: AppChapterWritebackRun | null = null
+  for (let attempt = 1; attempt <= Math.max(1, maxAttempts); attempt += 1) {
+    lastRun = await prepareChapterWritebackRun(chapterId, triggerSource)
+    if (lastRun.status !== 'failed') return lastRun
+  }
+  if (!lastRun) {
+    throw new Error('章后回写草案生成失败')
+  }
+  return lastRun
 }
 
 export async function listChapterWritebackRuns(chapterId: number): Promise<AppChapterWritebackRun[]> {
@@ -1210,8 +1330,19 @@ async function executeRunApply(runId: number, retryFailedOnly = false): Promise<
   const db = getDb()
   const run = getRunRow(runId)
   const chapter = getChapterRow(run.chapterId)
+  updateChapterWritebackSyncStatus(chapter.id, {
+    phase: 'applying',
+    runId: run.id,
+    blockedGeneration: true,
+    readyForNextChapter: false,
+    lastError: undefined,
+    lastAttemptAt: new Date().toISOString(),
+    retryCount: run.retryCount || 0,
+    contextVersion: chapter.contextVersion || 1,
+  })
   db.update(chapterWritebackRuns).set({
     status: 'applying',
+    lastAttemptAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   }).where(eq(chapterWritebackRuns.id, run.id)).run()
 
@@ -1259,11 +1390,23 @@ async function executeRunApply(runId: number, retryFailedOnly = false): Promise<
 
   db.update(chapterWritebackRuns).set({
     status: failedCount === 0 ? 'applied' : appliedCount > 0 ? 'partially_failed' : 'failed',
+    retryCount: run.retryCount || 0,
+    lastAttemptAt: new Date().toISOString(),
     completedAt: new Date().toISOString(),
     failedAt: failedCount > 0 ? new Date().toISOString() : null,
     errorMessage: failedCount > 0 ? `共有 ${failedCount} 条回写失败` : null,
     updatedAt: new Date().toISOString(),
   }).where(eq(chapterWritebackRuns.id, run.id)).run()
+  updateChapterWritebackSyncStatus(chapter.id, {
+    phase: failedCount === 0 ? 'applied' : 'failed',
+    runId: run.id,
+    blockedGeneration: failedCount > 0,
+    readyForNextChapter: failedCount === 0,
+    lastError: failedCount > 0 ? `共有 ${failedCount} 条回写失败` : undefined,
+    lastAttemptAt: new Date().toISOString(),
+    retryCount: run.retryCount || 0,
+    contextVersion: chapter.contextVersion || 1,
+  })
   if (appliedCount > 0) {
     resolveChapterAssetImpacts(chapter.novelId, chapter.id, 'resolved')
   }

@@ -5,13 +5,18 @@ import type {
   EntityRegenerateOptions,
   MapNodeSummary,
   StoryArc as AppStoryArc,
+  StoryItemEventLinkRecommendation,
+  StoryItemLinkApplyResult,
+  StoryItemLinkRecommendationResult,
+  StoryItemLinkedSegmentSummary,
+  StoryItemSegmentLinkRecommendation,
   StoryItem as AppStoryItem,
   StoryItemDetailContext,
   StoryItemSourceContext,
   TimelineEvent as AppTimelineEvent,
 } from '../../src/types'
 import { getDb, getSqlite } from '../database/db'
-import { characters, novels, storyArcs, storyItems, timelineEvents, worldMap } from '../database/schema'
+import { chapterSegments, chapters, characters, novels, storyArcs, storyItems, timelineEvents, worldMap } from '../database/schema'
 import { safeParseJson } from '../utils/json'
 import { buildStoryProfile } from './context.service'
 import {
@@ -449,9 +454,198 @@ function buildEmptyStoryItemDetailContext(): StoryItemDetailContext {
     relatedEvents: [],
     relatedArcs: [],
     relatedLocations: [],
+    relatedSegments: [],
     derivedInstances: [],
     siblingInstances: [],
     sourceContexts: [],
+  }
+}
+
+function normalizeMatchText(value?: string | null): string {
+  return (value || '').replace(/\s+/g, '').trim().toLowerCase()
+}
+
+function buildMatchTokens(values: Array<string | null | undefined>): string[] {
+  const tokens = values.flatMap((value) => {
+    const text = cleanAiFieldText(value || '')
+    if (!text) return []
+    const parts = text
+      .split(/[\s,，。；、\/|（）()：:《》“”"'‘’\[\]【】\n\r\t-]+/)
+      .map((item) => cleanAiFieldText(item))
+      .filter((item) => item.length >= 2)
+    return [text, ...parts]
+  })
+
+  return [...new Set(tokens.map((item) => normalizeMatchText(item)).filter((item) => item.length >= 2))]
+}
+
+function buildReasonSummary(reasons: string[]): string {
+  return [...new Set(reasons.filter(Boolean))].join('；')
+}
+
+function clipMatchText(value?: string | null, maxLength = 72): string {
+  const text = cleanAiFieldText(value || '')
+  if (!text) return ''
+  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text
+}
+
+function buildSegmentLabel(chapterNum: number, segmentOrder: number, title?: string | null): string {
+  const base = `第${chapterNum}章 · 场景${String(segmentOrder).padStart(2, '0')}`
+  return title?.trim() ? `${base} · ${title.trim()}` : base
+}
+
+function mapStoryItemLinkedSegmentSummary(
+  segment: typeof chapterSegments.$inferSelect,
+  chapter: typeof chapters.$inferSelect | undefined,
+): StoryItemLinkedSegmentSummary {
+  const chapterNum = chapter?.chapterNum || 0
+  return {
+    segmentId: segment.id,
+    chapterId: segment.chapterId,
+    chapterNum,
+    chapterTitle: chapter?.title?.trim() || `第${chapterNum}章`,
+    segmentOrder: segment.segmentOrder,
+    title: segment.title?.trim() || buildSegmentLabel(chapterNum, segment.segmentOrder, ''),
+    purpose: segment.purpose ?? undefined,
+    summary: segment.summary ?? undefined,
+    locationName: segment.locationName ?? undefined,
+  }
+}
+
+function scoreStoryItemEventRecommendation(input: {
+  item: AppStoryItem
+  event: AppTimelineEvent
+  ownerName: string
+  locationName: string
+  directTokens: string[]
+  detailTokens: string[]
+  eventCharacterNames: string[]
+  eventLocationName: string
+  alreadyLinked: boolean
+}): StoryItemEventLinkRecommendation | null {
+  if (input.alreadyLinked) return null
+
+  const eventText = [
+    input.event.eventTitle,
+    input.event.eventSummary,
+    input.event.eventCause,
+    input.event.eventProcess,
+    input.event.eventResult,
+    input.event.notes,
+    input.eventLocationName,
+    ...input.eventCharacterNames,
+  ].filter(Boolean).join('\n')
+  const normalizedEventText = normalizeMatchText(eventText)
+  if (!normalizedEventText) return null
+
+  let score = 0
+  const reasons: string[] = []
+
+  for (const token of input.directTokens) {
+    if (!token || !normalizedEventText.includes(token)) continue
+    score += 60
+    reasons.push(`物品名命中“${input.item.itemName}”`)
+    break
+  }
+
+  const detailHits = input.detailTokens.filter((token) => token && normalizedEventText.includes(token))
+  if (detailHits.length > 0) {
+    score += Math.min(detailHits.length * 12, 36)
+    reasons.push(`剧情说明命中 ${detailHits.length} 处`)
+  }
+
+  const normalizedOwner = normalizeMatchText(input.ownerName)
+  if (normalizedOwner && input.eventCharacterNames.some((name) => normalizeMatchText(name) === normalizedOwner)) {
+    score += 20
+    reasons.push(`角色共现：${input.ownerName}`)
+  }
+
+  const normalizedLocation = normalizeMatchText(input.locationName)
+  if (normalizedLocation && (normalizeMatchText(input.eventLocationName) === normalizedLocation || normalizedEventText.includes(normalizedLocation))) {
+    score += 16
+    reasons.push(`地点共现：${input.locationName}`)
+  }
+
+  if (score < 28) return null
+
+  return {
+    eventId: input.event.id,
+    eventTitle: input.event.eventTitle,
+    timeLabel: input.event.timeLabel,
+    score,
+    reason: buildReasonSummary(reasons) || '与当前物品的文本线索高度重叠。',
+    alreadyLinked: false,
+  }
+}
+
+function scoreStoryItemSegmentRecommendation(input: {
+  item: AppStoryItem
+  segment: typeof chapterSegments.$inferSelect
+  chapter: typeof chapters.$inferSelect | undefined
+  ownerName: string
+  locationName: string
+  directTokens: string[]
+  detailTokens: string[]
+  segmentCharacterNames: string[]
+  alreadyLinked: boolean
+}): StoryItemSegmentLinkRecommendation | null {
+  if (input.alreadyLinked) return null
+
+  const segmentText = [
+    input.segment.title,
+    input.segment.purpose,
+    input.segment.summary,
+    input.segment.content,
+    input.segment.inputState,
+    input.segment.outputState,
+    input.segment.timeAnchor,
+    input.segment.locationName,
+    ...input.segmentCharacterNames,
+  ].filter(Boolean).join('\n')
+  const normalizedSegmentText = normalizeMatchText(segmentText)
+  if (!normalizedSegmentText) return null
+
+  let score = 0
+  const reasons: string[] = []
+
+  for (const token of input.directTokens) {
+    if (!token || !normalizedSegmentText.includes(token)) continue
+    score += 60
+    reasons.push(`物品名命中“${input.item.itemName}”`)
+    break
+  }
+
+  const detailHits = input.detailTokens.filter((token) => token && normalizedSegmentText.includes(token))
+  if (detailHits.length > 0) {
+    score += Math.min(detailHits.length * 12, 36)
+    reasons.push(`剧情说明命中 ${detailHits.length} 处`)
+  }
+
+  const normalizedOwner = normalizeMatchText(input.ownerName)
+  if (normalizedOwner && input.segmentCharacterNames.some((name) => normalizeMatchText(name) === normalizedOwner)) {
+    score += 20
+    reasons.push(`角色共现：${input.ownerName}`)
+  }
+
+  const normalizedLocation = normalizeMatchText(input.locationName)
+  if (normalizedLocation && normalizeMatchText(input.segment.locationName) === normalizedLocation) {
+    score += 16
+    reasons.push(`地点共现：${input.locationName}`)
+  }
+
+  if (score < 28) return null
+
+  const chapterNum = input.chapter?.chapterNum || 0
+  return {
+    segmentId: input.segment.id,
+    chapterId: input.segment.chapterId,
+    chapterNum,
+    chapterTitle: input.chapter?.title?.trim() || `第${chapterNum}章`,
+    segmentOrder: input.segment.segmentOrder,
+    segmentTitle: input.segment.title?.trim() || buildSegmentLabel(chapterNum, input.segment.segmentOrder, ''),
+    score,
+    reason: buildReasonSummary(reasons) || '与当前物品的文本线索高度重叠。',
+    alreadyLinked: false,
   }
 }
 
@@ -1022,7 +1216,7 @@ export function getStoryItemDetailContext(id: number): StoryItemDetailContext {
   }
 
   const db = getDb()
-  const [itemRows, characterRows, eventRows, arcRows, mapRows] = [
+  const [itemRows, characterRows, eventRows, arcRows, mapRows, chapterRows, segmentRows] = [
     db.select().from(storyItems)
       .where(eq(storyItems.novelId, current.novelId))
       .orderBy(asc(storyItems.itemKind), asc(storyItems.sortOrder), asc(storyItems.id))
@@ -1043,6 +1237,14 @@ export function getStoryItemDetailContext(id: number): StoryItemDetailContext {
       .where(eq(worldMap.novelId, current.novelId))
       .orderBy(asc(worldMap.level), asc(worldMap.parentId), asc(worldMap.sortOrder), asc(worldMap.id))
       .all(),
+    db.select().from(chapters)
+      .where(eq(chapters.novelId, current.novelId))
+      .orderBy(asc(chapters.chapterNum), asc(chapters.id))
+      .all(),
+    db.select().from(chapterSegments)
+      .where(eq(chapterSegments.novelId, current.novelId))
+      .orderBy(asc(chapterSegments.chapterId), asc(chapterSegments.segmentOrder), asc(chapterSegments.id))
+      .all(),
   ]
 
   const mappedCurrent = mapStoryItemEntity(current)
@@ -1055,6 +1257,7 @@ export function getStoryItemDetailContext(id: number): StoryItemDetailContext {
   const eventById = new Map(mappedEvents.map((row) => [row.id, row]))
   const arcById = new Map(mappedArcs.map((row) => [row.id, row]))
   const mapById = new Map(mapRows.map((row) => [row.id, row]))
+  const chapterById = new Map(chapterRows.map((row) => [row.id, row]))
   const childCountByParentId = new Map<number, number>()
 
   mapRows.forEach((row) => {
@@ -1088,6 +1291,9 @@ export function getStoryItemDetailContext(id: number): StoryItemDetailContext {
   const siblingInstances = mappedCurrent.itemKind === 'instance' && typeof mappedCurrent.parentItemId === 'number'
     ? mappedItems.filter((row) => row.itemKind === 'instance' && row.parentItemId === mappedCurrent.parentItemId && row.id !== mappedCurrent.id)
     : []
+  const relatedSegments = segmentRows
+    .filter((segment) => parseJsonNumberArray(segment.linkedItemIdsJson).includes(mappedCurrent.id))
+    .map((segment) => mapStoryItemLinkedSegmentSummary(segment, chapterById.get(segment.chapterId)))
 
   return {
     item: mappedCurrent,
@@ -1101,9 +1307,206 @@ export function getStoryItemDetailContext(id: number): StoryItemDetailContext {
     relatedEvents,
     relatedArcs,
     relatedLocations,
+    relatedSegments,
     derivedInstances,
     siblingInstances,
     sourceContexts: parseSourceContexts(mappedCurrent.sourceContextJson),
+  }
+}
+
+export function getStoryItemLinkRecommendations(id: number): StoryItemLinkRecommendationResult {
+  const current = getStoryItem(id)
+  if (!current) {
+    throwUserFacingError('common.loadFailed')
+  }
+
+  const db = getDb()
+  const [characterRows, eventRows, mapRows, chapterRows, segmentRows] = [
+    db.select().from(characters)
+      .where(eq(characters.novelId, current.novelId))
+      .orderBy(asc(characters.sortOrder), asc(characters.id))
+      .all(),
+    db.select().from(timelineEvents)
+      .where(eq(timelineEvents.novelId, current.novelId))
+      .orderBy(asc(timelineEvents.timeSortValue), asc(timelineEvents.sortOrder), asc(timelineEvents.id))
+      .all(),
+    db.select().from(worldMap)
+      .where(eq(worldMap.novelId, current.novelId))
+      .orderBy(asc(worldMap.level), asc(worldMap.parentId), asc(worldMap.sortOrder), asc(worldMap.id))
+      .all(),
+    db.select().from(chapters)
+      .where(eq(chapters.novelId, current.novelId))
+      .orderBy(asc(chapters.chapterNum), asc(chapters.id))
+      .all(),
+    db.select().from(chapterSegments)
+      .where(eq(chapterSegments.novelId, current.novelId))
+      .orderBy(asc(chapterSegments.chapterId), asc(chapterSegments.segmentOrder), asc(chapterSegments.id))
+      .all(),
+  ]
+
+  const item = mapStoryItemEntity(current)
+  const characterById = new Map(characterRows.map((row) => [row.id, row]))
+  const mapById = new Map(mapRows.map((row) => [row.id, row]))
+  const chapterById = new Map(chapterRows.map((row) => [row.id, row]))
+  const linkedEventIds = new Set(parseJsonNumberArray(item.linkedTimelineEventIdsJson))
+  const ownerName = typeof item.ownerCharacterId === 'number' ? characterById.get(item.ownerCharacterId)?.fullName || '' : ''
+  const locationName = typeof item.locationMapId === 'number' ? mapById.get(item.locationMapId)?.name || '' : ''
+  const directTokens = buildMatchTokens([item.itemName])
+  const detailTokens = buildMatchTokens([
+    item.category,
+    item.subType,
+    item.summary,
+    item.plotFunction,
+    item.acquisitionMethod,
+    item.usageMethod,
+    item.cost,
+    item.risk,
+    item.factionHint,
+    ...parseSourceContexts(item.sourceContextJson).map((source) => source.label || source.page || ''),
+  ])
+
+  const eventRecommendations = eventRows
+    .map((event) => {
+      const presentIds = parseJsonNumberArray(event.presentCharacterIdsJson)
+      const affectedIds = parseJsonNumberArray(event.affectedCharacterIdsJson)
+      const eventCharacterNames = [...new Set([...presentIds, ...affectedIds]
+        .map((characterId) => characterById.get(characterId)?.fullName || '')
+        .filter(Boolean))]
+      return scoreStoryItemEventRecommendation({
+        item,
+        event: mapTimelineEventEntity(event),
+        ownerName,
+        locationName,
+        directTokens,
+        detailTokens,
+        eventCharacterNames,
+        eventLocationName: typeof event.locationMapId === 'number' ? mapById.get(event.locationMapId)?.name || '' : '',
+        alreadyLinked: linkedEventIds.has(event.id),
+      })
+    })
+    .filter((event): event is StoryItemEventLinkRecommendation => Boolean(event))
+    .sort((left, right) => right.score - left.score || left.eventId - right.eventId)
+    .slice(0, 8)
+
+  const segmentRecommendations = segmentRows
+    .map((segment) => {
+      const presentIds = parseJsonNumberArray(segment.presentCharacterIdsJson)
+      const segmentCharacterNames = [...new Set(presentIds
+        .map((characterId) => characterById.get(characterId)?.fullName || '')
+        .filter(Boolean))]
+      return scoreStoryItemSegmentRecommendation({
+        item,
+        segment,
+        chapter: chapterById.get(segment.chapterId),
+        ownerName,
+        locationName,
+        directTokens,
+        detailTokens,
+        segmentCharacterNames,
+        alreadyLinked: parseJsonNumberArray(segment.linkedItemIdsJson).includes(item.id),
+      })
+    })
+    .filter((segment): segment is StoryItemSegmentLinkRecommendation => Boolean(segment))
+    .sort((left, right) => right.score - left.score || left.chapterNum - right.chapterNum || left.segmentOrder - right.segmentOrder)
+    .slice(0, 10)
+
+  const summaryParts = [
+    eventRecommendations.length > 0 ? `${eventRecommendations.length} 条事件推荐` : '',
+    segmentRecommendations.length > 0 ? `${segmentRecommendations.length} 个场景推荐` : '',
+  ].filter(Boolean)
+
+  return {
+    itemId: item.id,
+    generatedAt: new Date().toISOString(),
+    summary: summaryParts.length > 0
+      ? `根据名称、剧情作用、角色和地点共现，筛出 ${summaryParts.join('，')}。`
+      : `暂时没有命中的剧情关联推荐，可先补充 ${clipMatchText(item.plotFunction || item.summary || item.itemName, 24) || '剧情作用'} 后再刷新。`,
+    events: eventRecommendations,
+    segments: segmentRecommendations,
+  }
+}
+
+export function applyStoryItemLinkRecommendations(
+  id: number,
+  data: {
+    eventIds?: number[]
+    segmentIds?: number[]
+  },
+): StoryItemLinkApplyResult {
+  const current = getStoryItem(id)
+  if (!current) {
+    throwUserFacingError('common.loadFailed')
+  }
+
+  const db = getDb()
+  const timestamp = new Date().toISOString()
+  const acceptedEventIds = uniqueNumberArray(data.eventIds || [])
+  const acceptedSegmentIds = uniqueNumberArray(data.segmentIds || [])
+  let linkedEventCount = 0
+  let linkedSegmentCount = 0
+
+  if (acceptedEventIds.length > 0) {
+    const currentEventIds = new Set(parseJsonNumberArray(current.linkedTimelineEventIdsJson))
+    acceptedEventIds.forEach((eventId) => {
+      if (currentEventIds.has(eventId)) return
+      currentEventIds.add(eventId)
+      linkedEventCount += 1
+    })
+
+    if (linkedEventCount > 0) {
+      db.update(storyItems).set({
+        linkedTimelineEventIdsJson: stringifyNumberArray([...currentEventIds]),
+        updatedAt: timestamp,
+      }).where(eq(storyItems.id, id)).run()
+      syncStoryItemTimelineLinks(id)
+    }
+  }
+
+  if (acceptedSegmentIds.length > 0) {
+    const segments = db.select().from(chapterSegments)
+      .where(eq(chapterSegments.novelId, current.novelId))
+      .orderBy(asc(chapterSegments.chapterId), asc(chapterSegments.segmentOrder), asc(chapterSegments.id))
+      .all()
+      .filter((segment) => acceptedSegmentIds.includes(segment.id))
+
+    segments.forEach((segment) => {
+      const currentItemIds = new Set(parseJsonNumberArray(segment.linkedItemIdsJson))
+      if (currentItemIds.has(id)) return
+      currentItemIds.add(id)
+      linkedSegmentCount += 1
+      db.update(chapterSegments).set({
+        linkedItemIdsJson: stringifyNumberArray([...currentItemIds]),
+        updatedAt: timestamp,
+      }).where(eq(chapterSegments.id, segment.id)).run()
+    })
+  }
+
+  if (linkedEventCount > 0 || linkedSegmentCount > 0) {
+    markNovelContextChanged(current.novelId, 'Story item links changed')
+    refreshWorldStateVersionsForNovel(current.novelId)
+    recordAssetChangeEvent({
+      novelId: current.novelId,
+      assetType: 'item',
+      assetId: id,
+      assetLabel: current.itemName,
+      operation: 'update',
+      changeReason: 'Story item links changed',
+      impactLevel: linkedSegmentCount > 0 ? 'high' : 'medium',
+      triggeredBy: 'item.service',
+      payload: {
+        eventIds: acceptedEventIds,
+        segmentIds: acceptedSegmentIds,
+      },
+    })
+  }
+
+  return {
+    itemId: id,
+    linkedEventCount,
+    linkedSegmentCount,
+    message: linkedEventCount > 0 || linkedSegmentCount > 0
+      ? `已接受 ${linkedEventCount} 条事件推荐、${linkedSegmentCount} 个场景推荐。`
+      : '没有新增可写入的推荐关联。',
   }
 }
 

@@ -64,7 +64,7 @@ import {
 } from './story-structure.service'
 import { syncTimelineStructureAnchors } from './timeline.service'
 import { discoverEntitiesFromContent } from './entity-discovery.service'
-import { prepareChapterWritebackRun } from './chapter-writeback.service'
+import { prepareChapterWritebackRun, prepareChapterWritebackRunWithRetry } from './chapter-writeback.service'
 import { buildBatchKey, captureTimelineAnchorsForChapterIds, createOperationLog } from './history.service'
 import { listActiveImpactsForChapter } from './asset-impact.service'
 import { enhanceAiScoreResult } from './ai-score.service'
@@ -72,6 +72,20 @@ import {
   analyzeChapterDialogueAgainstNovel,
   scheduleDialogueFingerprintRefresh,
 } from './dialogue-fingerprint.service'
+import {
+  buildChapterBridgePlan,
+  buildHookContinuitySnapshot,
+  buildPovRotationPlan,
+  buildStoryPacingCurve,
+  buildVoiceEvolutionProfiles,
+  formatChapterBridgePlan,
+} from './generation-integrity.service'
+import {
+  analyzeExpressionDedupForChapter,
+  analyzeExpressionDedupForGeneration,
+  formatExpressionDedupGuidance,
+} from './expression-dedup.service'
+import { analyzeSummaryHealthForChapter, refreshSummaryHealth } from './summary-decay.service'
 import { analyzeNovelStyleCompliance } from './style-compliance.service'
 import {
   analyzeNarrativeControls,
@@ -113,10 +127,17 @@ import type {
   AiExplainabilityReport,
   AiStageExecutionReport,
   AuthorStyleLockSummary,
+  ChapterBridgePlan,
   ChapterRewriteScope,
   ChapterContractValidationResult,
+  ExpressionDedupReport,
+  HookContinuitySnapshot,
+  PovRotationPlan,
+  StoryPacingCurve,
   StyleComplianceMetricSnapshot,
   StyleComplianceResult,
+  SummaryHealthReport,
+  VoiceEvolutionProfile,
 } from '../../src/types'
 
 interface ChapterSummaryData {
@@ -2575,18 +2596,20 @@ async function updateChapterSummaryData(chapterId: number): Promise<ChapterSumma
 async function refreshChapterMemory(chapterId: number): Promise<{
   summary: ChapterSummaryData
   continuity: ContinuityState
+  summaryHealth: SummaryHealthReport | null
 }> {
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
   if (!chapter) throwUserFacingError('chapter.notFound')
   const summary = await updateChapterSummaryData(chapterId)
   const continuity = await updateChapterContinuityState(chapterId, summary)
+  const summaryHealth = refreshSummaryHealth(chapterId)
   refreshCharacterStateVersionsForChapter(chapterId)
   syncCharacterArcsFromChapterState(chapterId)
   refreshWorldStateVersionsForChapter(chapterId)
   refreshStoryMemoryCheckpoints(chapter.novelId)
   markChapterContextCurrent(chapterId)
-  return { summary, continuity }
+  return { summary, continuity, summaryHealth }
 }
 
 async function finalizeGeneratedChapterContent(chapterId: number, content: string) {
@@ -2669,6 +2692,14 @@ export function createChapter(novelId: number, data: Partial<{
     revealedFactIdsJson: data.revealedFactIdsJson || '[]',
     contextVersion: novel?.contextVersion || 1,
     staleReasonJson: JSON.stringify([]),
+    writebackStatusJson: JSON.stringify({
+      phase: 'idle',
+      retryCount: 0,
+      blockedGeneration: false,
+      readyForNextChapter: true,
+      contextVersion: novel?.contextVersion || 1,
+      updatedAt: new Date().toISOString(),
+    }),
   }).run()
   ensureStoryStructure(novelId)
   return Number(result.lastInsertRowid)
@@ -2682,6 +2713,7 @@ export function updateChapter(id: number, data: Partial<{
   wordCount: number
   summary: string
   nextChapterSeed: string
+  bridgePlanJson: string
   continuityStateJson: string
   reviewNotesJson: string
   status: string
@@ -2699,6 +2731,10 @@ export function updateChapter(id: number, data: Partial<{
   allowedFactIdsJson: string
   revealedFactIdsJson: string
   contractAuditJson: string
+  summaryHealthJson: string
+  expressionDedupJson: string
+  hookContinuityJson: string
+  writebackStatusJson: string
 }>, options: { skipStaleTracking?: boolean; versionSource?: ChapterVersionSource | false } = {}) {
   const db = getDb()
   const previous = db.select().from(chapters).where(eq(chapters.id, id)).all()[0]
@@ -3491,6 +3527,60 @@ export async function generateChapterContent(
     const currentArcRow = rawContext.currentArc
     const latestArcProgressNote = getLatestArcProgressNote(chapter.novelId, currentArcRow, chapter.chapterNum)
     const structuralAlertsSummary = buildStructuralAlertsSummary(chapter.novelId, chapter.chapterNum, chapter.volumeId)
+    const chapterBridgePlan = buildChapterBridgePlan(chapterId, {
+      themeVoice,
+      chapterGoal: scenePlanContext.chapterGoal,
+    })
+    const chapterBridgePlanText = formatChapterBridgePlan(chapterBridgePlan)
+    const povRotationPlan = buildPovRotationPlan(chapterId, themeVoice)
+    const formatPovRotationGuidance = (plan: PovRotationPlan) => [
+      plan.recommendedPov ? `推荐 POV：${plan.recommendedPov}` : '',
+      plan.previousPov ? `上一章 POV：${plan.previousPov}` : '',
+      plan.reason,
+      `信息差边界：${plan.infoGapGuard}`,
+      plan.warnings.length > 0 ? `风险：${plan.warnings.join('；')}` : '',
+    ].filter(Boolean).join('\n')
+    const basePacingCurve = buildStoryPacingCurve(
+      chapter.novelId,
+      chapter.chapterNum,
+      chapter.emotionTone || '平稳',
+    )
+    const formatPacingGuidance = (curve: StoryPacingCurve) => [
+      `目标节奏位：${curve.targetMarker}`,
+      curve.actualMarker ? `当前节奏线索：${curve.actualMarker}` : '',
+      curve.guidance,
+      curve.recentClimaxSpacing.length > 0 ? `近期高潮间距：${curve.recentClimaxSpacing.join(' / ')}` : '',
+      curve.warning || '',
+    ].filter(Boolean).join('\n')
+    const baseHookContinuity = buildHookContinuitySnapshot(chapterId)
+    const formatHookContinuityGuidance = (snapshotValue: HookContinuitySnapshot) => [
+      snapshotValue.hookType ? `合同钩子：${snapshotValue.hookType}` : '当前章节合同尚未定义钩子类型。',
+      snapshotValue.unresolvedHookChain.length > 0 ? `承接链：${snapshotValue.unresolvedHookChain.join('；')}` : '',
+      snapshotValue.weakHookStreak > 0 ? `连续弱钩子：${snapshotValue.weakHookStreak} 章` : '',
+      snapshotValue.warning || '',
+    ].filter(Boolean).join('\n')
+    const generationExpressionDedup = analyzeExpressionDedupForGeneration(chapter.novelId, chapter.chapterNum)
+    const previousSummaryHealth = chapterBridgePlan?.sourceChapterId
+      ? analyzeSummaryHealthForChapter(chapterBridgePlan.sourceChapterId)
+      : null
+    const formatSummaryHealthGuidance = (report: SummaryHealthReport | null | undefined) => report
+      ? [
+          `摘要健康：${report.status}`,
+          `密度 ${report.densityScore} / 实体覆盖 ${report.entityCoverageScore} / 事件覆盖 ${report.eventCoverageScore}`,
+          report.warnings.join('；'),
+        ].filter(Boolean).join('\n')
+      : ''
+    const voiceEvolutionProfiles = buildVoiceEvolutionProfiles(chapter.novelId)
+    const formatVoiceEvolutionGuidance = (profiles: VoiceEvolutionProfile[]) => profiles.length > 0
+      ? profiles
+        .slice(0, 3)
+        .map((profileItem) => [
+          `${profileItem.characterName}：${profileItem.summary}`,
+          profileItem.stableAnchors.length > 0 ? `稳定锚点：${profileItem.stableAnchors.join('；')}` : '',
+          profileItem.allowedChanges.length > 0 ? `允许变化：${profileItem.allowedChanges.join('；')}` : '',
+        ].filter(Boolean).join('\n'))
+        .join('\n\n')
+      : ''
     const buildNarrativeControlReport = (
       chapterGoal: string,
       content?: string,
@@ -3552,6 +3642,7 @@ export async function generateChapterContent(
       status: 'writing',
       scenePlanJson: '',
       reviewNotesJson: '',
+      bridgePlanJson: chapterBridgePlan ? JSON.stringify(chapterBridgePlan) : '',
     }, { versionSource: false })
     updateTaskProgress(workflowTaskId, snapshot, sender)
     setWorkflowTaskStatus('running', {
@@ -3583,6 +3674,7 @@ export async function generateChapterContent(
         previousSummaries: scenePlanContext.previousSummaries,
         previousChapterContext: scenePlanContext.previousChapterContext,
         lastChapterEnding: scenePlanContext.lastChapterEnding,
+        chapterBridgePlan: chapterBridgePlanText,
         continuitySummary: scenePlanContext.continuitySummary,
         openLoops: scenePlanContext.openLoops,
         dueForeshadows: scenePlanContext.dueForeshadows,
@@ -3594,6 +3686,12 @@ export async function generateChapterContent(
         consistencyNotes,
         activeThreads: scenePlanContext.activeThreads,
         ...plannerNarrativeFields,
+        povRotationGuidance: formatPovRotationGuidance(povRotationPlan),
+        storyPacingGuidance: formatPacingGuidance(basePacingCurve),
+        hookContinuityGuidance: formatHookContinuityGuidance(baseHookContinuity),
+        expressionDedupGuidance: formatExpressionDedupGuidance(generationExpressionDedup),
+        summaryHealthGuidance: formatSummaryHealthGuidance(previousSummaryHealth),
+        voiceEvolutionGuidance: formatVoiceEvolutionGuidance(voiceEvolutionProfiles),
         protagonistReference: profile.protagonistReference,
         protagonistRule: profile.protagonistRule,
         promptTier: complexity,
@@ -3687,6 +3785,7 @@ export async function generateChapterContent(
         previousSummaries: draftContext.previousSummaries,
         previousChapterContext: draftContext.previousChapterContext,
         lastChapterEnding: draftContext.lastChapterEnding,
+        chapterBridgePlan: chapterBridgePlanText,
         continuitySummary: draftContext.continuitySummary,
         openLoops: draftContext.openLoops,
         dueForeshadows: draftContext.dueForeshadows,
@@ -3702,6 +3801,12 @@ export async function generateChapterContent(
         reviewNotes: '',
         activeThreads: draftContext.activeThreads,
         ...draftNarrativeFields,
+        povRotationGuidance: formatPovRotationGuidance(povRotationPlan),
+        storyPacingGuidance: formatPacingGuidance(basePacingCurve),
+        hookContinuityGuidance: formatHookContinuityGuidance(baseHookContinuity),
+        expressionDedupGuidance: formatExpressionDedupGuidance(generationExpressionDedup),
+        summaryHealthGuidance: formatSummaryHealthGuidance(previousSummaryHealth),
+        voiceEvolutionGuidance: formatVoiceEvolutionGuidance(voiceEvolutionProfiles),
         protagonistReference: profile.protagonistReference,
         protagonistRule: profile.protagonistRule,
         promptTier: complexity,
@@ -3757,6 +3862,7 @@ export async function generateChapterContent(
         worldStates: reviewContext.worldStates,
         itemSummary: reviewContext.itemSummary,
         previousChapterContext: reviewContext.previousChapterContext,
+        chapterBridgePlan: chapterBridgePlanText,
         continuitySummary: reviewContext.continuitySummary,
         openLoops: reviewContext.openLoops,
         dueForeshadows: reviewContext.dueForeshadows,
@@ -3771,6 +3877,12 @@ export async function generateChapterContent(
         scenePlan: scenePlanText,
         draftContent,
         ...reviewNarrativeFields,
+        povRotationGuidance: formatPovRotationGuidance(povRotationPlan),
+        storyPacingGuidance: formatPacingGuidance(basePacingCurve),
+        hookContinuityGuidance: formatHookContinuityGuidance(baseHookContinuity),
+        expressionDedupGuidance: formatExpressionDedupGuidance(generationExpressionDedup),
+        summaryHealthGuidance: formatSummaryHealthGuidance(previousSummaryHealth),
+        voiceEvolutionGuidance: formatVoiceEvolutionGuidance(voiceEvolutionProfiles),
         protagonistReference: profile.protagonistReference,
         protagonistRule: profile.protagonistRule,
         promptTier: complexity,
@@ -3827,6 +3939,12 @@ export async function generateChapterContent(
     }))
     updateChapter(chapterId, { reviewNotesJson: JSON.stringify(reviewNotes) })
     finishRoleTask('critic', criticTaskId, 'Critic 审校完成，已生成本章修订意见。')
+    const rewritePacingCurve = buildStoryPacingCurve(
+      chapter.novelId,
+      chapter.chapterNum,
+      chapter.emotionTone || '平稳',
+      reviewNotes.chapter_function_primary || reviewNotes.pace_marker,
+    )
     const rewriteNarrativeFields = formatNarrativePromptFields(buildNarrativeControlReport(
       rewriteContext.chapterGoal,
       lockedParagraphContext.promptDraftContent,
@@ -3854,6 +3972,7 @@ export async function generateChapterContent(
         previousSummaries: rewriteContext.previousSummaries,
         previousChapterContext: rewriteContext.previousChapterContext,
         lastChapterEnding: rewriteContext.lastChapterEnding,
+        chapterBridgePlan: chapterBridgePlanText,
         continuitySummary: rewriteContext.continuitySummary,
       openLoops: rewriteContext.openLoops,
       dueForeshadows: rewriteContext.dueForeshadows,
@@ -3870,6 +3989,12 @@ export async function generateChapterContent(
       lockedParagraphs: lockedParagraphContext.lockedParagraphs,
       activeThreads: rewriteContext.activeThreads,
       ...rewriteNarrativeFields,
+      povRotationGuidance: formatPovRotationGuidance(povRotationPlan),
+      storyPacingGuidance: formatPacingGuidance(rewritePacingCurve),
+      hookContinuityGuidance: formatHookContinuityGuidance(baseHookContinuity),
+      expressionDedupGuidance: formatExpressionDedupGuidance(generationExpressionDedup),
+      summaryHealthGuidance: formatSummaryHealthGuidance(previousSummaryHealth),
+      voiceEvolutionGuidance: formatVoiceEvolutionGuidance(voiceEvolutionProfiles),
       protagonistReference: profile.protagonistReference,
       protagonistRule: profile.protagonistRule,
       promptTier: complexity,
@@ -3976,6 +4101,18 @@ export async function generateChapterContent(
     })
     hasCommittedContent = true
     const publishCheck = runChapterPublishCheck(chapterId)
+    const chapterExpressionDedup = analyzeExpressionDedupForChapter(chapterId)
+    const chapterHookContinuity = buildHookContinuitySnapshot(
+      chapterId,
+      publishCheck.scoreBreakdown.hookStrengthScore,
+    )
+    updateChapter(chapterId, {
+      expressionDedupJson: chapterExpressionDedup ? JSON.stringify(chapterExpressionDedup) : '',
+      hookContinuityJson: JSON.stringify(chapterHookContinuity),
+    }, {
+      skipStaleTracking: true,
+      versionSource: false,
+    })
     const publishCheckFailureMeta = getPublishCheckRewriteFailureMeta(publishCheck)
     syncFeedbackRecurrenceState(chapter.novelId)
     syncDialogueDriftRevisionTasks(chapter.novelId)
@@ -4026,7 +4163,7 @@ export async function generateChapterContent(
       pipelineStage: 'running',
       contractVersion,
     })
-    const canonRun = await prepareChapterWritebackRun(chapterId, 'pipeline-canonizer')
+    const canonRun = await prepareChapterWritebackRunWithRetry(chapterId, 'pipeline-canonizer', 3)
     if (canonRun.status === 'failed') {
       updateTaskStatus(canonizerTaskId, 'failed', sender, {
         pipelineStage: 'failed',

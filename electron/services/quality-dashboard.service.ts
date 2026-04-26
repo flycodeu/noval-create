@@ -4,6 +4,7 @@ import type {
   ChapterBatchAutoGenerateStatus,
   ChapterGateHistoryEntry,
   ChapterDialogueReviewData,
+  ExpressionDedupHit,
   ChapterFunctionAlert,
   ChapterFunctionRun,
   ChapterFunctionSummary,
@@ -36,10 +37,12 @@ import type {
   StoryDynamicsAlert,
   StoryDynamicsTrendPoint,
   StyleComplianceResult,
+  SummaryHealthReport,
   VolumeLanguageDriftEntry,
   VolumeChapterFunctionEntry,
   VolumeQualityMetrics,
   VolumeStoryDynamicsEntry,
+  VoiceEvolutionProfile,
   WorldStateAlert,
 } from '../../src/types'
 import { getDb } from '../database/db'
@@ -70,6 +73,7 @@ import {
   safeParseStringArray,
 } from './chapter-gate-utils'
 import { getDialogueAnalyticsSnapshot, scheduleDialogueFingerprintRefresh } from './dialogue-fingerprint.service'
+import { buildVoiceEvolutionProfiles } from './generation-integrity.service'
 import { fallbackKeywordSearch } from './embedding.service'
 import { getEndgameDebtSnapshot } from './endgame-asset.service'
 import { listChapterRecallRuntimeMap } from './chapter-recall-runtime.service'
@@ -222,6 +226,18 @@ type RecallFreshnessState = {
 
 function dedupeNumbers(values: number[]): number[] {
   return [...new Set(values)].sort((left, right) => left - right)
+}
+
+function dedupeStrings(values: string[], limit?: number): string[] {
+  const result: string[] = []
+  const seen = new Set<string>()
+  values.forEach((value) => {
+    const normalized = asText(value)
+    if (!normalized || seen.has(normalized)) return
+    seen.add(normalized)
+    result.push(normalized)
+  })
+  return typeof limit === 'number' ? result.slice(0, limit) : result
 }
 
 function sortChapterGateHistoryEntries(left: ChapterGateHistoryEntry, right: ChapterGateHistoryEntry): number {
@@ -447,6 +463,87 @@ function roundMetric(value: number): number {
 
 function asText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
+}
+
+function parseJsonObject<T extends Record<string, unknown>>(raw: string | null | undefined): T | null {
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as T : null
+  } catch {
+    return null
+  }
+}
+
+function parseSummaryHealthReport(raw: string | null | undefined): SummaryHealthReport | null {
+  const parsed = parseJsonObject<Record<string, unknown>>(raw)
+  if (!parsed) return null
+  const status = parsed.status === 'healthy' || parsed.status === 'warning' || parsed.status === 'degraded'
+    ? parsed.status
+    : 'warning'
+  return {
+    status,
+    densityScore: clampNumber(parsed.densityScore, 0, 100, 0),
+    entityCoverageScore: clampNumber(parsed.entityCoverageScore, 0, 100, 0),
+    eventCoverageScore: clampNumber(parsed.eventCoverageScore, 0, 100, 0),
+    recentWindowSize: clampNumber(parsed.recentWindowSize, 0, 100, 0),
+    warnings: safeParseStringArray(JSON.stringify(parsed.warnings ?? [])),
+    triggeredRecompression: normalizeBoolean(parsed.triggeredRecompression),
+    recompressionReason: asText(parsed.recompressionReason),
+    focusEntities: safeParseStringArray(JSON.stringify(parsed.focusEntities ?? [])),
+    summaryPreview: asText(parsed.summaryPreview),
+    updatedAt: asText(parsed.updatedAt),
+  }
+}
+
+function parseExpressionDedupJson(raw: string | null | undefined): {
+  riskLevel: 'low' | 'medium' | 'high'
+  repeatedPhrases: ExpressionDedupHit[]
+  repeatedStructuralPatterns: string[]
+  summary: string
+} | null {
+  const parsed = parseJsonObject<Record<string, unknown>>(raw)
+  if (!parsed) return null
+  const repeatedPhrases = Array.isArray(parsed.repeatedPhrases)
+    ? parsed.repeatedPhrases
+        .map((entry) => {
+          if (!entry || typeof entry !== 'object') return null
+          const record = entry as Record<string, unknown>
+          return {
+            phrase: asText(record.phrase),
+            count: clampNumber(record.count, 0, 999, 0),
+            chapterNums: Array.isArray(record.chapterNums)
+              ? record.chapterNums.map((item) => clampNumber(item, 0, 99999, 0)).filter((item) => item > 0)
+              : [],
+          }
+        })
+        .filter((entry): entry is ExpressionDedupHit => Boolean(entry?.phrase))
+    : []
+  const riskLevel = parsed.riskLevel === 'high' || parsed.riskLevel === 'medium' || parsed.riskLevel === 'low'
+    ? parsed.riskLevel
+    : 'low'
+  return {
+    riskLevel,
+    repeatedPhrases,
+    repeatedStructuralPatterns: safeParseStringArray(JSON.stringify(parsed.repeatedStructuralPatterns ?? [])),
+    summary: asText(parsed.summary),
+  }
+}
+
+function parseHookContinuityJson(raw: string | null | undefined): {
+  hookStrengthScore: number
+  weakHookStreak: number
+  recentHookTypes: string[]
+  warning: string
+} | null {
+  const parsed = parseJsonObject<Record<string, unknown>>(raw)
+  if (!parsed) return null
+  return {
+    hookStrengthScore: clampNumber(parsed.hookStrengthScore, 0, 100, 0),
+    weakHookStreak: clampNumber(parsed.weakHookStreak, 0, 99, 0),
+    recentHookTypes: safeParseStringArray(JSON.stringify(parsed.recentHookTypes ?? [])),
+    warning: asText(parsed.warning),
+  }
 }
 
 function clampNumber(value: unknown, min: number, max: number, fallback = min): number {
@@ -2141,6 +2238,9 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     volumeId: chapters.volumeId,
     aiScoreJson: chapters.aiScoreJson,
     reviewNotesJson: chapters.reviewNotesJson,
+    summaryHealthJson: chapters.summaryHealthJson,
+    expressionDedupJson: chapters.expressionDedupJson,
+    hookContinuityJson: chapters.hookContinuityJson,
   }).from(chapters).where(eq(chapters.novelId, novelId)).orderBy(asc(chapters.chapterNum)).all()
   const batchChapterNumById = new Map(rows.map((row) => [row.id, row.chapterNum] as const))
   const latestWritebackRunMap = getLatestWritebackRunMap(novelId)
@@ -3810,6 +3910,98 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     aiRecurrenceHighRiskCount: antiAiSummary.overview.highRiskRuleCount,
     feedbackPauseSuggestedCount: feedbackSummary.overview.pauseSuggestedIssueCount,
   })
+  const expressionDedupReports = rows
+    .map((row) => ({ chapterId: row.id, chapterNum: row.chapterNum, report: parseExpressionDedupJson(row.expressionDedupJson) }))
+    .filter((entry): entry is { chapterId: number; chapterNum: number; report: NonNullable<ReturnType<typeof parseExpressionDedupJson>> } => Boolean(entry.report))
+  const expressionPhraseMap = expressionDedupReports.reduce<Map<string, ExpressionDedupHit>>((result, entry) => {
+    entry.report.repeatedPhrases.forEach((phrase) => {
+      const current = result.get(phrase.phrase)
+      if (!current) {
+        result.set(phrase.phrase, {
+          phrase: phrase.phrase,
+          count: phrase.count,
+          chapterNums: dedupeChapterNums(phrase.chapterNums),
+        })
+        return
+      }
+      result.set(phrase.phrase, {
+        phrase: phrase.phrase,
+        count: Math.max(current.count, phrase.count),
+        chapterNums: dedupeChapterNums([...current.chapterNums, ...phrase.chapterNums]),
+      })
+    })
+    return result
+  }, new Map())
+  const expressionDedupSummary: QualityDashboardData['expressionDedupSummary'] = {
+    analyzedChapterCount: expressionDedupReports.length,
+    highRiskChapterCount: expressionDedupReports.filter((entry) => entry.report.riskLevel === 'high').length,
+    recentHighRiskChapterNums: dedupeChapterNums(
+      expressionDedupReports
+        .filter((entry) => entry.report.riskLevel === 'high')
+        .slice(-6)
+        .map((entry) => entry.chapterNum),
+    ),
+    topRepeatedPhrases: [...expressionPhraseMap.values()]
+      .sort((left, right) => right.count - left.count || right.chapterNums.length - left.chapterNums.length)
+      .slice(0, 6),
+    repeatedStructuralPatterns: dedupeStrings(expressionDedupReports.flatMap((entry) => entry.report.repeatedStructuralPatterns), 6),
+    summary: expressionDedupReports.length > 0
+      ? `已分析 ${expressionDedupReports.length} 章的跨章表达复用；高风险章节 ${expressionDedupReports.filter((entry) => entry.report.riskLevel === 'high').length} 章。`
+      : '当前还没有可用的跨章表达复用数据。',
+  }
+  const summaryHealthReports = rows
+    .map((row) => ({ chapterId: row.id, chapterNum: row.chapterNum, report: parseSummaryHealthReport(row.summaryHealthJson) }))
+    .filter((entry): entry is { chapterId: number; chapterNum: number; report: SummaryHealthReport } => Boolean(entry.report))
+  const summaryHealthSummary: QualityDashboardData['summaryHealthSummary'] = {
+    analyzedChapterCount: summaryHealthReports.length,
+    degradedChapterCount: summaryHealthReports.filter((entry) => entry.report.status === 'degraded').length,
+    averageDensityScore: summaryHealthReports.length > 0
+      ? roundMetric(summaryHealthReports.reduce((sum, entry) => sum + entry.report.densityScore, 0) / summaryHealthReports.length)
+      : 0,
+    averageEntityCoverageScore: summaryHealthReports.length > 0
+      ? roundMetric(summaryHealthReports.reduce((sum, entry) => sum + entry.report.entityCoverageScore, 0) / summaryHealthReports.length)
+      : 0,
+    averageEventCoverageScore: summaryHealthReports.length > 0
+      ? roundMetric(summaryHealthReports.reduce((sum, entry) => sum + entry.report.eventCoverageScore, 0) / summaryHealthReports.length)
+      : 0,
+    recentAlerts: summaryHealthReports
+      .filter((entry) => entry.report.status !== 'healthy')
+      .slice(-6)
+      .map((entry) => ({
+        chapterId: entry.chapterId,
+        chapterNum: entry.chapterNum,
+        status: entry.report.status,
+        summary: entry.report.warnings[0] || `摘要健康 ${entry.report.status}`,
+      })),
+    summary: summaryHealthReports.length > 0
+      ? `已分析 ${summaryHealthReports.length} 章摘要；退化章节 ${summaryHealthReports.filter((entry) => entry.report.status === 'degraded').length} 章。`
+      : '当前还没有摘要健康报告。',
+  }
+  const hookContinuityReports = rows
+    .map((row) => ({ chapterNum: row.chapterNum, report: parseHookContinuityJson(row.hookContinuityJson) }))
+    .filter((entry): entry is { chapterNum: number; report: NonNullable<ReturnType<typeof parseHookContinuityJson>> } => Boolean(entry.report))
+  const latestHookContinuity = hookContinuityReports.at(-1)?.report
+  const hookContinuitySummary: QualityDashboardData['hookContinuitySummary'] = {
+    analyzedChapterCount: hookContinuityReports.length,
+    weakHookChapterCount: hookContinuityReports.filter((entry) => entry.report.hookStrengthScore < 70 || Boolean(entry.report.warning)).length,
+    weakHookStreak: latestHookContinuity?.weakHookStreak || 0,
+    averageHookStrengthScore: hookContinuityReports.length > 0
+      ? roundMetric(hookContinuityReports.reduce((sum, entry) => sum + entry.report.hookStrengthScore, 0) / hookContinuityReports.length)
+      : 0,
+    recentHookTypes: dedupeStrings(hookContinuityReports.flatMap((entry) => entry.report.recentHookTypes), 6),
+    summary: hookContinuityReports.length > 0
+      ? `已分析 ${hookContinuityReports.length} 章章尾钩子；当前连续弱钩子 ${latestHookContinuity?.weakHookStreak || 0} 章。`
+      : '当前还没有钩子连续性数据。',
+  }
+  const voiceEvolutionProfiles = buildVoiceEvolutionProfiles(novelId)
+  const voiceEvolutionSummary: QualityDashboardData['voiceEvolutionSummary'] = {
+    trackedCharacterCount: dialogueSnapshot.characterDialogueSignatures.length,
+    driftingCharacterCount: dialogueSnapshot.dialogueFingerprintStats.driftingCharacterCount,
+    profiles: voiceEvolutionProfiles,
+    summary: dialogueSnapshot.dialogueFingerprintStats.analyzedCharacterCount > 0
+      ? `已追踪 ${dialogueSnapshot.dialogueFingerprintStats.analyzedCharacterCount} 名角色对白；漂移角色 ${dialogueSnapshot.dialogueFingerprintStats.driftingCharacterCount} 名。`
+      : '当前还没有足够的对白样本来分析角色声音进化。',
+  }
 
   return {
     dashboardVersion: 'v2-repair',
@@ -3896,6 +4088,10 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     worldStateTrend: worldStateLedger.trend,
     recentWorldStateAlerts,
     worldConflictEntities: worldStateLedger.conflictEntities,
+    expressionDedupSummary,
+    summaryHealthSummary,
+    hookContinuitySummary,
+    voiceEvolutionSummary,
     recallSummary,
     recentRecallAlerts,
     recentEndgameDebtAlerts,

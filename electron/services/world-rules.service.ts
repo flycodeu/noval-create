@@ -6,6 +6,7 @@ import {
   buildMapBlueprintSummary,
   buildRealityConstraintSummary,
   buildTimelineConfigSummary,
+  buildWorldDynamicsSummary,
   buildWritingStyleSummary,
 } from '../../src/shared/genre-system'
 import { normalizeWorldRulesDraft } from '../../src/shared/world-rules-draft'
@@ -129,6 +130,8 @@ function summarizeCurrentSection(sectionKey: WorldRuleSectionKey, rules: GenreWo
       return buildCharacterEcologySummary(rules)
     case 'map':
       return buildMapBlueprintSummary(rules)
+    case 'dynamics':
+      return buildWorldDynamicsSummary(rules)
     case 'timeline':
       return buildTimelineConfigSummary(rules)
     case 'language':
@@ -207,6 +210,11 @@ function buildSectionRequirement(sectionKey: WorldRuleSectionKey): string {
         '地图按层级设计，第 1 层表示国家、大区或界域，第 2 层表示每个上级下属的区域，更深层再表示地点。',
         '对 suggestedCount 的理解是“每个父节点各自拥有的直属子节点数量”，不是全局总数。',
       ])
+    case 'dynamics':
+      return joinLines([
+        '气候必须写成会改变路程、产出、战线、调查窗口或生存成本的动态规则，不要只写气氛词。',
+        '经济必须写清资源流向、控制者、稀缺触发与波动条件，并和地图层级、势力结构直接挂钩。',
+      ])
     case 'timeline':
       return joinLines([
         '写清纪元、零点、显示格式、可用精度和推荐事件类型。',
@@ -234,6 +242,8 @@ function buildOutputSchema(sectionKey: WorldRuleSectionKey): string {
       return '只输出 JSON：{"characterEcology":{"overview":"","slots":[{"label":"","entityType":"human|undead|beast|immortal|nonhuman","species":"","narrativeFunction":"","contextLink":"","preferredFactions":[""],"powerBias":[""]}]}}'
     case 'map':
       return '只输出 JSON：{"mapBlueprint":{"overview":"","levels":[{"depth":1,"label":"","nodeTypes":[""],"relationHint":"","suggestedCount":3,"examples":[""]}]}}'
+    case 'dynamics':
+      return '只输出 JSON：{"worldDynamics":{"overview":"","climateCycles":[{"region":"","pattern":"","seasonalShift":"","hazardTrigger":"","travelImpact":"","resourceImpact":""}],"economyLoops":[{"name":"","coreResource":"","circulationPath":"","controller":"","scarcityTrigger":"","volatilityTrigger":"","storyUse":""}]}}'
     case 'timeline':
       return '只输出 JSON：{"timelineConfig":{"calendarType":"gregorian|regnal|relative-disaster|custom-era|future-date","eraName":"","epochLabel":"","baseYearLabel":"","displayPattern":"","relativeZeroLabel":"","recommendedEventTypes":[""],"precisionOptions":[""]}}'
     case 'language':
@@ -330,6 +340,14 @@ function applySectionPatch(
           ...asRecord(patch.mapBlueprint),
         },
       }, genreName)
+    case 'dynamics':
+      return normalizeWorldRulesDraft({
+        ...currentRules,
+        worldDynamics: {
+          ...currentRules.worldDynamics,
+          ...asRecord(patch.worldDynamics),
+        },
+      }, genreName)
     case 'timeline':
       return normalizeWorldRulesDraft({
         ...currentRules,
@@ -396,6 +414,11 @@ function parseSectionPatch(sectionKey: WorldRuleSectionKey, text: string): Parti
       const direct = Object.keys(blueprint).length > 0 ? blueprint : parsed
       return { mapBlueprint: direct as unknown as GenreWorldRules['mapBlueprint'] }
     }
+    case 'dynamics': {
+      const dynamics = asRecord(parsed.worldDynamics)
+      const direct = Object.keys(dynamics).length > 0 ? dynamics : parsed
+      return { worldDynamics: direct as unknown as GenreWorldRules['worldDynamics'] }
+    }
     case 'timeline': {
       const config = asRecord(parsed.timelineConfig)
       const direct = Object.keys(config).length > 0 ? config : parsed
@@ -439,6 +462,11 @@ function ensurePatchHasContent(sectionKey: WorldRuleSectionKey, patch: Partial<G
     case 'map':
       if (!patch.mapBlueprint || Object.keys(asRecord(patch.mapBlueprint)).length === 0) {
         throwUserFacingError('worldRules.mapBlueprintMissing')
+      }
+      return
+    case 'dynamics':
+      if (!patch.worldDynamics || Object.keys(asRecord(patch.worldDynamics)).length === 0) {
+        throwUserFacingError('worldRules.dynamicsMissing')
       }
       return
     case 'timeline':

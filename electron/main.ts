@@ -359,6 +359,8 @@ function registerIpcHandlers() {
   handle('structure:reorderSegments', (_, chapterId, orderedIds) => storyStructureService.reorderChapterSegments(requireId(chapterId, 'chapterId'), requireIds(orderedIds, 'orderedIds')))
   handle('structure:compileChapter', (_, chapterId) => storyStructureService.compileChapterFromSegments(requireId(chapterId, 'chapterId')))
   handle('structure:refreshCheckpoints', (_, novelId) => storyMemoryService.refreshStoryMemoryCheckpoints(requireId(novelId, 'novelId')))
+  handle('structure:getLinkageSummary', (_, novelId) => storyStructureService.getStructureLinkageSummary(requireId(novelId, 'novelId')))
+  handle('structure:syncLinkage', (_, novelId) => storyStructureService.syncStructureLinkage(requireId(novelId, 'novelId')))
   handle('structure:clear', (_, novelId) => storyStructureService.clearStoryStructure(requireId(novelId, 'novelId')))
   handle('structure:applyBatchPlan', (_, novelId, plan) => storyStructureService.applyStructureBatchPlan(requireId(novelId, 'novelId'), plan))
   handle('structure:previewBatchEdit', (_, novelId, operations) => storyStructureService.previewStructureBatchEdit(requireId(novelId, 'novelId'), operations))
@@ -626,6 +628,14 @@ function registerIpcHandlers() {
   handle('item:resumeAutoGenerate', (event, taskId) =>
     batchWorkflowService.resumeBatchAutoGenerateWorkflow(taskId, event.sender))
   handle('item:regenerate', (_, id, options) => itemService.regenerateStoryItem(id, options))
+  handle('item:getLinkRecommendations', (_, itemId) => itemService.getStoryItemLinkRecommendations(requireId(itemId, 'itemId')))
+  handle('item:applyLinkRecommendations', (_, itemId, data) => itemService.applyStoryItemLinkRecommendations(
+    requireId(itemId, 'itemId'),
+    parseObjectPayload<Record<string, unknown>>(data, 'data') as {
+      eventIds?: number[]
+      segmentIds?: number[]
+    },
+  ))
   handle('item:clear', (_, novelId) => itemService.clearStoryItemsByNovel(requireId(novelId, 'novelId')))
 
   handle('outline:getArcs', (_, novelId) => {

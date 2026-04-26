@@ -14,6 +14,7 @@ import type {
   SubplotAutoGenerateStatus,
   TimelineAutoGenerateStatus,
   TimelineGenerateOptions,
+  WritebackSyncStatus,
 } from '../../src/types'
 import type { StoryThreadBatchGenerateOptions, StoryThreadBatchGenerationResult } from '../../src/shared/story-thread-generation'
 import { hasResumableWorkflowCheckpoint } from '../../src/shared/workflow-resilience'
@@ -113,6 +114,35 @@ function asNumberArray(value: unknown): number[] {
   return value
     .map((item) => (typeof item === 'number' ? item : Number(item)))
     .filter((item) => Number.isFinite(item))
+}
+
+function asWritebackSyncStatus(value: unknown): WritebackSyncStatus | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const phase = typeof record.phase === 'string' ? record.phase : ''
+  if (phase !== 'idle' && phase !== 'preparing' && phase !== 'ready' && phase !== 'applying' && phase !== 'applied' && phase !== 'failed') {
+    return undefined
+  }
+  return {
+    phase,
+    runId: typeof record.runId === 'number' ? record.runId : Number(record.runId || 0) || undefined,
+    retryCount: typeof record.retryCount === 'number' ? record.retryCount : Number(record.retryCount || 0) || 0,
+    lastError: typeof record.lastError === 'string' ? record.lastError : undefined,
+    blockedGeneration: Boolean(record.blockedGeneration),
+    readyForNextChapter: record.readyForNextChapter !== false,
+    contextVersion: typeof record.contextVersion === 'number' ? record.contextVersion : Number(record.contextVersion || 0) || undefined,
+    lastAttemptAt: typeof record.lastAttemptAt === 'string' ? record.lastAttemptAt : undefined,
+    updatedAt: typeof record.updatedAt === 'string' ? record.updatedAt : undefined,
+  }
+}
+
+function parseChapterWritebackSyncStatus(raw?: string | null): WritebackSyncStatus | undefined {
+  if (!raw) return undefined
+  try {
+    return asWritebackSyncStatus(JSON.parse(raw) as unknown)
+  } catch {
+    return undefined
+  }
 }
 
 function clampPositiveInt(value: unknown, fallback: number, min = 1, max = 50): number {
@@ -489,6 +519,7 @@ function toChapterBatchStatus(taskId: number, task: TaskRow): ChapterBatchAutoGe
       ? progress.consecutiveRecallFallbackChapters
       : 0,
     snapshotId: typeof progress.snapshotId === 'number' ? progress.snapshotId : undefined,
+    currentWritebackStatus: asWritebackSyncStatus(progress.currentWritebackStatus),
   }
 }
 
@@ -1009,6 +1040,7 @@ async function runChapterBatchGenerateWorkflow(taskId: number, sender?: WebConte
         currentBatch,
         currentChapterId: chapterId,
         currentChapterNum: chapterNum,
+        currentWritebackStatus: parseChapterWritebackSyncStatus(chapter.writebackStatusJson),
         blockedChapterId: undefined,
         blockedTaskId: undefined,
         pauseReason: undefined,
@@ -1043,6 +1075,20 @@ async function runChapterBatchGenerateWorkflow(taskId: number, sender?: WebConte
           childTaskId,
           message: `第 ${chapterNum} 章章节门阻断，章节批量任务已暂停：${publishCheck.summary}`,
           errorMessage: publishCheck.summary,
+        })
+        break
+      }
+
+      const refreshedChapter = getChapter(chapterId)
+      const writebackStatus = parseChapterWritebackSyncStatus(refreshedChapter?.writebackStatusJson)
+      if (writebackStatus?.blockedGeneration || writebackStatus?.readyForNextChapter === false) {
+        pauseChapterBatchWorkflow(taskId, sender, progress, {
+          chapterId,
+          chapterNum,
+          childTaskId,
+          message: `第 ${chapterNum} 章章后回写尚未准备好，章节批量任务已暂停：${writebackStatus.lastError || '请先处理回写同步状态。'}`,
+          errorMessage: writebackStatus.lastError || '章后回写未完成',
+          warnings: `第 ${chapterNum} 章回写状态：${writebackStatus.phase}`,
         })
         break
       }
@@ -1095,6 +1141,7 @@ async function runChapterBatchGenerateWorkflow(taskId: number, sender?: WebConte
         warnings: nextWarnings,
         currentChapterId: chapterId,
         currentChapterNum: chapterNum,
+        currentWritebackStatus: writebackStatus,
         blockedChapterId: undefined,
         blockedTaskId: undefined,
         pauseReason: undefined,

@@ -129,6 +129,7 @@ export function runMigrations(sqlite: Database.Database) {
       word_count INTEGER DEFAULT 0,
       summary TEXT,
       next_chapter_seed TEXT,
+      bridge_plan_json TEXT,
       continuity_state_json TEXT,
       review_notes_json TEXT,
       status TEXT DEFAULT 'outline',
@@ -140,6 +141,11 @@ export function runMigrations(sqlite: Database.Database) {
       segment_count INTEGER DEFAULT 0,
       allowed_fact_ids_json TEXT DEFAULT '[]',
       revealed_fact_ids_json TEXT DEFAULT '[]',
+      contract_audit_json TEXT,
+      summary_health_json TEXT,
+      expression_dedup_json TEXT,
+      hook_continuity_json TEXT,
+      writeback_status_json TEXT,
       context_version INTEGER DEFAULT 1,
       stale_reason_json TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -510,6 +516,15 @@ export function runMigrations(sqlite: Database.Database) {
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS prompt_override_audits (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      key TEXT NOT NULL,
+      action TEXT NOT NULL DEFAULT 'save',
+      protected_rule_count INTEGER NOT NULL DEFAULT 0,
+      content_preview TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS revision_tasks (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
@@ -597,6 +612,11 @@ export function runMigrations(sqlite: Database.Database) {
   ensureColumn(sqlite, 'chapters', 'segment_count', 'INTEGER DEFAULT 0')
   ensureColumn(sqlite, 'chapters', 'allowed_fact_ids_json', "TEXT DEFAULT '[]'")
   ensureColumn(sqlite, 'chapters', 'revealed_fact_ids_json', "TEXT DEFAULT '[]'")
+  ensureColumn(sqlite, 'chapters', 'bridge_plan_json', 'TEXT')
+  ensureColumn(sqlite, 'chapters', 'summary_health_json', 'TEXT')
+  ensureColumn(sqlite, 'chapters', 'expression_dedup_json', 'TEXT')
+  ensureColumn(sqlite, 'chapters', 'hook_continuity_json', 'TEXT')
+  ensureColumn(sqlite, 'chapters', 'writeback_status_json', 'TEXT')
   ensureColumn(sqlite, 'novels', 'project_brief_json', 'TEXT')
   ensureColumn(sqlite, 'novels', 'theme_voice_json', 'TEXT')
   ensureColumn(sqlite, 'novels', 'context_version', 'INTEGER DEFAULT 1')
@@ -1471,7 +1491,7 @@ export function runMigrations(sqlite: Database.Database) {
   })
 
   runMigrationStep(sqlite, '0025_chapter_contract_audit', () => {
-    ensureColumn(sqlite, 'chapters', 'contract_audit_json', 'TEXT')
+  ensureColumn(sqlite, 'chapters', 'contract_audit_json', 'TEXT')
   })
 
   runMigrationStep(sqlite, '0026_chapter_writeback_center', () => {
@@ -1483,6 +1503,9 @@ export function runMigrations(sqlite: Database.Database) {
         status TEXT NOT NULL DEFAULT 'draft',
         trigger_source TEXT NOT NULL DEFAULT 'manual',
         summary_text TEXT,
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        last_attempt_at TEXT,
+        source_chapter_version INTEGER,
         started_at TEXT DEFAULT CURRENT_TIMESTAMP,
         completed_at TEXT,
         failed_at TEXT,
@@ -1529,6 +1552,27 @@ export function runMigrations(sqlite: Database.Database) {
         ON chapter_fact_extracts(run_id, asset_type, sort_order, id);
       CREATE INDEX IF NOT EXISTS idx_chapter_writeback_diffs_run_asset
         ON chapter_writeback_diffs(run_id, asset_type, canon_decision, writeback_status, sort_order, id);
+      `)
+  })
+
+  runMigrationStep(sqlite, '0027_generation_integrity_reports', () => {
+    ensureColumn(sqlite, 'chapters', 'bridge_plan_json', 'TEXT')
+    ensureColumn(sqlite, 'chapters', 'summary_health_json', 'TEXT')
+    ensureColumn(sqlite, 'chapters', 'expression_dedup_json', 'TEXT')
+    ensureColumn(sqlite, 'chapters', 'hook_continuity_json', 'TEXT')
+    ensureColumn(sqlite, 'chapters', 'writeback_status_json', 'TEXT')
+    ensureColumn(sqlite, 'chapter_writeback_runs', 'retry_count', 'INTEGER NOT NULL DEFAULT 0')
+    ensureColumn(sqlite, 'chapter_writeback_runs', 'last_attempt_at', 'TEXT')
+    ensureColumn(sqlite, 'chapter_writeback_runs', 'source_chapter_version', 'INTEGER')
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS prompt_override_audits (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        key TEXT NOT NULL,
+        action TEXT NOT NULL DEFAULT 'save',
+        protected_rule_count INTEGER NOT NULL DEFAULT 0,
+        content_preview TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
     `)
   })
 

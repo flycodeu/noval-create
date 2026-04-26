@@ -18,6 +18,7 @@ import type {
   PagedResult,
   StoryArc,
   StoryItem,
+  StoryItemLinkRecommendationResult,
   StoryItemDetailContext,
   StoryItemFilterOptions,
   StoryItemQueryInput,
@@ -92,6 +93,7 @@ const EMPTY_DETAIL: StoryItemDetailContext = {
   relatedEvents: [],
   relatedArcs: [],
   relatedLocations: [],
+  relatedSegments: [],
   derivedInstances: [],
   siblingInstances: [],
   sourceContexts: [],
@@ -261,6 +263,10 @@ function buildEventLabel(event: TimelineEvent) {
   return `${event.timeLabel} · ${event.eventTitle}`
 }
 
+function buildSegmentLabel(segment: StoryItemDetailContext['relatedSegments'][number]) {
+  return `第 ${segment.chapterNum} 章 · 场景 ${String(segment.segmentOrder).padStart(2, '0')} · ${segment.title || segment.chapterTitle}`
+}
+
 function buildArcLabel(arc: StoryArc) {
   return arc.arcGoal || arc.arcSummary || '故事弧待补充摘要'
 }
@@ -334,6 +340,9 @@ export default function ItemsWorkspace({ novelId }: Props) {
   const [workflowStats, setWorkflowStats] = useState<WorkflowStats>(EMPTY_WORKFLOW_STATS)
   const [filters, setFilters] = useState<StoryItemFilterOptions>(EMPTY_FILTERS)
   const [detailContext, setDetailContext] = useState<StoryItemDetailContext>(EMPTY_DETAIL)
+  const [linkRecommendations, setLinkRecommendations] = useState<StoryItemLinkRecommendationResult | null>(null)
+  const [loadingRecommendations, setLoadingRecommendations] = useState(false)
+  const [applyingRecommendations, setApplyingRecommendations] = useState(false)
   const [selectedItem, setSelectedItem] = useState<StoryItem | null>(null)
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [activeEditorTab, setActiveEditorTab] = useState('overview')
@@ -414,12 +423,24 @@ export default function ItemsWorkspace({ novelId }: Props) {
     setEventOptions(mergeById(baseEvents, [...context.relatedEvents, ...extraEvents]))
   }, [novelId])
 
+  const loadLinkRecommendations = useCallback(async (itemId: number) => {
+    setLoadingRecommendations(true)
+    try {
+      const result = await window.electron.item.getLinkRecommendations(itemId)
+      setLinkRecommendations(result)
+      return result
+    } finally {
+      setLoadingRecommendations(false)
+    }
+  }, [])
+
   const loadItemDetail = useCallback(async (itemId: number) => {
     const context = await window.electron.item.getDetailContext(itemId)
     if (!context.item) {
       setSelectedId(null)
       setSelectedItem(null)
       setDetailContext(EMPTY_DETAIL)
+      setLinkRecommendations(null)
       form.resetFields()
       return
     }
@@ -429,8 +450,11 @@ export default function ItemsWorkspace({ novelId }: Props) {
     setSelectedItem(context.item)
     setDetailContext(context)
     form.setFieldsValue(toFormValues(context.item))
-    await hydrateOptions(context, context.item)
-  }, [form, hydrateOptions])
+    await Promise.all([
+      hydrateOptions(context, context.item),
+      loadLinkRecommendations(context.item.id),
+    ])
+  }, [form, hydrateOptions, loadLinkRecommendations])
 
   const buildQuery = useCallback((targetPage = page): StoryItemQueryInput => ({
     novelId,
@@ -485,6 +509,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
         setSelectedId(null)
         setSelectedItem(null)
         setDetailContext(EMPTY_DETAIL)
+        setLinkRecommendations(null)
         form.resetFields()
         await hydrateOptions()
       }
@@ -523,6 +548,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
     setSelectedId(null)
     setSelectedItem(null)
     setDetailContext(EMPTY_DETAIL)
+    setLinkRecommendations(null)
     form.resetFields()
     form.setFieldsValue(emptyValues(kind))
     void hydrateOptions()
@@ -631,6 +657,30 @@ export default function ItemsWorkspace({ novelId }: Props) {
       message.error(getErrorMessage(error, 'item.regenerateFailed'))
     } finally {
       setGenerating(false)
+    }
+  }
+
+  const handleApplyLinkRecommendations = async (input?: { eventIds?: number[]; segmentIds?: number[] }) => {
+    if (!selectedItem?.id || !linkRecommendations) return
+
+    const payload = input || {
+      eventIds: linkRecommendations.events.map((item) => item.eventId),
+      segmentIds: linkRecommendations.segments.map((item) => item.segmentId),
+    }
+
+    setApplyingRecommendations(true)
+    try {
+      const result = await window.electron.item.applyLinkRecommendations(selectedItem.id, payload)
+      await Promise.all([
+        loadItemDetail(selectedItem.id),
+        refreshListState(page),
+      ])
+      message.success(result.message)
+    } catch (error) {
+      console.error(error)
+      message.error(getErrorMessage(error, 'item.saveFailed'))
+    } finally {
+      setApplyingRecommendations(false)
     }
   }
 
@@ -1032,12 +1082,21 @@ export default function ItemsWorkspace({ novelId }: Props) {
       </WorkspaceTip>
 
       <WorkspaceTip title="关联事件与故事弧">
-        {detailContext.relatedEvents.length > 0 || detailContext.relatedArcs.length > 0 || detailContext.relatedLocations.length > 0 ? (
+        {detailContext.relatedEvents.length > 0
+          || detailContext.relatedArcs.length > 0
+          || detailContext.relatedLocations.length > 0
+          || detailContext.relatedSegments.length > 0 ? (
           <div className="novel-items__tip-list">
             {detailContext.relatedEvents.map((event) => (
               <div key={event.id} className="novel-items__tip-item">
                 <strong>{buildEventLabel(event)}</strong>
                 <span>{event.eventSummary || event.eventResult || event.eventProcess || '事件内容待补充。'}</span>
+              </div>
+            ))}
+            {detailContext.relatedSegments.map((segment) => (
+              <div key={segment.segmentId} className="novel-items__tip-item">
+                <strong>{buildSegmentLabel(segment)}</strong>
+                <span>{segment.summary || segment.purpose || segment.locationName || '场景内容待补充。'}</span>
               </div>
             ))}
             {detailContext.relatedArcs.map((arc) => (
@@ -1055,6 +1114,79 @@ export default function ItemsWorkspace({ novelId }: Props) {
           </div>
         ) : (
           <div>还没有把这条物品挂到时间线或地点上。</div>
+        )}
+      </WorkspaceTip>
+
+      <WorkspaceTip title="自动关联推荐">
+        {selectedItem ? (
+          loadingRecommendations ? (
+            <div className="novel-empty"><Spin size="small" /></div>
+          ) : (
+            <div className="novel-items__tip-list">
+              <div className="novel-items__tip-item">
+                <strong>推荐摘要</strong>
+                <span>{linkRecommendations?.summary || '还没有推荐结果。'}</span>
+              </div>
+              {linkRecommendations?.events.map((event) => (
+                <div key={`event-${event.eventId}`} className="novel-items__tip-item">
+                  <strong>{`${event.timeLabel} · ${event.eventTitle}`}</strong>
+                  <span>{`${event.reason} · 匹配分 ${event.score}`}</span>
+                  <Space size={8}>
+                    <Tag color="processing">事件</Tag>
+                    <Button
+                      size="small"
+                      type="primary"
+                      ghost
+                      loading={applyingRecommendations}
+                      onClick={() => void handleApplyLinkRecommendations({ eventIds: [event.eventId] })}
+                    >
+                      接受
+                    </Button>
+                  </Space>
+                </div>
+              ))}
+              {linkRecommendations?.segments.map((segment) => (
+                <div key={`segment-${segment.segmentId}`} className="novel-items__tip-item">
+                  <strong>{`第 ${segment.chapterNum} 章 · 场景 ${String(segment.segmentOrder).padStart(2, '0')} · ${segment.segmentTitle}`}</strong>
+                  <span>{`${segment.reason} · 匹配分 ${segment.score}`}</span>
+                  <Space size={8}>
+                    <Tag color="geekblue">场景</Tag>
+                    <Button
+                      size="small"
+                      type="primary"
+                      ghost
+                      loading={applyingRecommendations}
+                      onClick={() => void handleApplyLinkRecommendations({ segmentIds: [segment.segmentId] })}
+                    >
+                      接受
+                    </Button>
+                  </Space>
+                </div>
+              ))}
+              {!linkRecommendations || (linkRecommendations.events.length === 0 && linkRecommendations.segments.length === 0) ? (
+                <div className="novel-items__tip-item">
+                  <strong>当前状态</strong>
+                  <span>暂时没有命中推荐。优先补充名称、剧情作用、地点或持有人后再刷新。</span>
+                </div>
+              ) : null}
+              <Space wrap>
+                <Button size="small" onClick={() => void loadLinkRecommendations(selectedItem.id)}>
+                  刷新推荐
+                </Button>
+                <Button
+                  size="small"
+                  type="primary"
+                  loading={applyingRecommendations}
+                  disabled={Boolean(!linkRecommendations || (linkRecommendations.events.length === 0 && linkRecommendations.segments.length === 0))}
+                  onClick={() => void handleApplyLinkRecommendations()}
+                >
+                  接受全部推荐
+                </Button>
+              </Space>
+            </div>
+          )
+        ) : (
+          <div>先选择一条物品记录，系统再根据人物、地点、时间轴和场景文本给出关联建议。</div>
         )}
       </WorkspaceTip>
 

@@ -693,6 +693,98 @@ export default function WorldRules({ novelId }: Props) {
       ),
     },
     {
+      key: 'dynamics',
+      label: '气候与经济',
+      children: (
+        <>
+          <Form.Item name={['worldDynamics', 'overview']} label="动态总述">
+            <Input.TextArea rows={3} placeholder="概括气候、季节、补给、贸易和资源波动如何长期改变人物行动边界。" />
+          </Form.Item>
+
+          <Divider orientation="left">气候周期</Divider>
+          <Form.List name={['worldDynamics', 'climateCycles']}>
+            {(fields, { add, remove }) => (
+              <>
+                <div style={{ marginBottom: 12 }}>
+                  <Button icon={<PlusOutlined />} onClick={() => add({})}>添加气候周期</Button>
+                </div>
+                {fields.map((field, index) => (
+                  <RuleListCard
+                    key={field.key}
+                    title={`气候 ${index + 1}`}
+                    extra={<Button type="text" danger icon={<DeleteOutlined />} onClick={() => remove(field.name)} />}
+                  >
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                      <Form.Item name={[field.name, 'region']} label="作用区域" rules={[{ required: true, message: '请输入作用区域' }]}>
+                        <Input placeholder="例如：北境边关、沿江工业带、山门外坊市" />
+                      </Form.Item>
+                      <Form.Item name={[field.name, 'pattern']} label="常态气候">
+                        <Input placeholder="例如：冬长夏短、雨季漫长、灵潮不稳" />
+                      </Form.Item>
+                    </div>
+                    <Form.Item name={[field.name, 'seasonalShift']} label="季节变化">
+                      <Input.TextArea rows={2} placeholder="写清一年中哪些阶段最影响远行、作战、闭关、调查或生产。" />
+                    </Form.Item>
+                    <Form.Item name={[field.name, 'hazardTrigger']} label="灾害 / 异动触发">
+                      <Input.TextArea rows={2} placeholder="例如：汛期断桥、寒潮封山、沙暴停商、秘境潮汐暴涨。" />
+                    </Form.Item>
+                    <Form.Item name={[field.name, 'travelImpact']} label="行动影响">
+                      <Input.TextArea rows={2} placeholder="写清它如何改变路线、脚程、监控盲区、援军速度或封锁成本。" />
+                    </Form.Item>
+                    <Form.Item name={[field.name, 'resourceImpact']} label="资源影响">
+                      <Input.TextArea rows={2} placeholder="写清它如何改变粮食、药材、能源、灵石、税赋或补给效率。" />
+                    </Form.Item>
+                  </RuleListCard>
+                ))}
+              </>
+            )}
+          </Form.List>
+
+          <Divider orientation="left">经济循环</Divider>
+          <Form.List name={['worldDynamics', 'economyLoops']}>
+            {(fields, { add, remove }) => (
+              <>
+                <div style={{ marginBottom: 12 }}>
+                  <Button icon={<PlusOutlined />} onClick={() => add({})}>添加经济循环</Button>
+                </div>
+                {fields.map((field, index) => (
+                  <RuleListCard
+                    key={field.key}
+                    title={`经济 ${index + 1}`}
+                    extra={<Button type="text" danger icon={<DeleteOutlined />} onClick={() => remove(field.name)} />}
+                  >
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                      <Form.Item name={[field.name, 'name']} label="循环名称" rules={[{ required: true, message: '请输入循环名称' }]}>
+                        <Input placeholder="例如：灵石坊市链、沿江货运线、冬粮征收链" />
+                      </Form.Item>
+                      <Form.Item name={[field.name, 'coreResource']} label="核心资源">
+                        <Input placeholder="例如：灵石、药材、弹药、港口配额、粮税" />
+                      </Form.Item>
+                    </div>
+                    <Form.Item name={[field.name, 'circulationPath']} label="流通路径">
+                      <Input.TextArea rows={2} placeholder="写清资源从哪里来，经由哪些中转，最后流向谁。" />
+                    </Form.Item>
+                    <Form.Item name={[field.name, 'controller']} label="控制者">
+                      <Input.TextArea rows={2} placeholder="写清掌控产地、税赋、仓储、配给、黑市或通行证的是谁。" />
+                    </Form.Item>
+                    <Form.Item name={[field.name, 'scarcityTrigger']} label="稀缺触发">
+                      <Input.TextArea rows={2} placeholder="例如：封路、征用、欠薪、天灾、秘境关闭、围城、停电。" />
+                    </Form.Item>
+                    <Form.Item name={[field.name, 'volatilityTrigger']} label="波动触发">
+                      <Input.TextArea rows={2} placeholder="写清什么事件会让价格、配额、运输速度或市场秩序快速失衡。" />
+                    </Form.Item>
+                    <Form.Item name={[field.name, 'storyUse']} label="剧情作用">
+                      <Input.TextArea rows={2} placeholder="写清它会把人物推向什么选择、代价、冲突或联盟变化。" />
+                    </Form.Item>
+                  </RuleListCard>
+                ))}
+              </>
+            )}
+          </Form.List>
+        </>
+      ),
+    },
+    {
       key: 'timeline',
       label: '时间规则',
       children: (
@@ -798,6 +890,7 @@ export default function WorldRules({ novelId }: Props) {
           <WorkspaceMetric label="种族实体" value={liveRules.speciesSystem.length} hint="可与人物系统联动的种族 / 实体" />
           <WorkspaceMetric label="组织势力" value={liveRules.factionSystem.length} tone="cool" hint="可与地图、人物、剧情挂接的势力" />
           <WorkspaceMetric label="地图层级" value={liveRules.mapBlueprint.levels.length} hint={tokenStatusText} />
+          <WorkspaceMetric label="动态系统" value={liveRules.worldDynamics.climateCycles.length + liveRules.worldDynamics.economyLoops.length} tone="cool" hint="气候周期与经济循环" />
         </>
       )}
       contextSummary={<WorkspaceContextSummary items={[{ label: '题材', value: liveRules.genreProfile.name || currentNovel?.genreName || '未设置' }, { label: '当前分区', value: activeSectionMeta.label }, { label: '时间制度', value: calendarLabel }, { label: '文风约束', value: `${activeLanguageRules} 项硬约束 / ${liveRules.writingConstraints.forbiddenPhrases.length} 条禁用语` }]} />}

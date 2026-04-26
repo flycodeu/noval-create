@@ -33,7 +33,7 @@ import {
   StructureVolumesPanel,
 } from './StructurePanels'
 import { useStructureWorkspace } from './useStructureWorkspace'
-import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage } from '../components/WorkspaceShell'
+import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
 import { getChapterLabel, getPartLabel, getSegmentLabel, getVolumeLabel } from '../shared/workspace-utils'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import './index.css'
@@ -67,6 +67,8 @@ export default function StructurePage({ novelId }: { novelId: number }) {
   const [sceneTemplateOpen, setSceneTemplateOpen] = React.useState(false)
   const [sceneTemplateLoading, setSceneTemplateLoading] = React.useState(false)
   const [sceneTemplates, setSceneTemplates] = React.useState<SceneTemplate[]>([])
+  const [linkageSummary, setLinkageSummary] = React.useState<Awaited<ReturnType<typeof window.electron.structure.getLinkageSummary>> | null>(null)
+  const [linkageSyncing, setLinkageSyncing] = React.useState(false)
 
   const {
     chapterDetail,
@@ -189,6 +191,17 @@ export default function StructurePage({ novelId }: { novelId: number }) {
       setSceneTemplateLoading(false)
     }
   }, [currentNovel?.genreId, novelId])
+
+  const loadLinkageSummary = React.useCallback(async () => {
+    const summary = await window.electron.structure.getLinkageSummary(novelId)
+    setLinkageSummary(summary)
+    return summary
+  }, [novelId])
+
+  React.useEffect(() => {
+    if (loading) return
+    void loadLinkageSummary().catch(console.error)
+  }, [chapters.total, loadLinkageSummary, linked.total, loading, segments.total, volumes.length])
 
   const applySceneTemplate = React.useCallback((template: SceneTemplate) => {
     const beats = parseSceneTemplateStringList(template.typicalBeatsJson)
@@ -496,6 +509,24 @@ export default function StructurePage({ novelId }: { novelId: number }) {
     })
   }, [clearDraft, novelId, notifyWorkspaceMutation, refreshStructure])
 
+  const handleSyncLinkage = React.useCallback(async () => {
+    setLinkageSyncing(true)
+    try {
+      const result = await window.electron.structure.syncLinkage(novelId)
+      await Promise.all([
+        refreshStructure(),
+        loadLinkageSummary(),
+      ])
+      notifyWorkspaceMutation()
+      message.success(result.message)
+    } catch (error) {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.saveFailed'))
+    } finally {
+      setLinkageSyncing(false)
+    }
+  }, [loadLinkageSummary, novelId, notifyWorkspaceMutation, refreshStructure])
+
   React.useEffect(() => {
     registerClearHandler(() => {
       handleClear()
@@ -546,6 +577,13 @@ export default function StructurePage({ novelId }: { novelId: number }) {
             刷新结构
           </Button>
           <Button
+            icon={<LinkOutlined />}
+            loading={linkageSyncing}
+            onClick={() => void handleSyncLinkage()}
+          >
+            补齐结构联动
+          </Button>
+          <Button
             type="primary"
             icon={<LinkOutlined />}
             disabled={!selection.volumeId}
@@ -572,6 +610,7 @@ export default function StructurePage({ novelId }: { novelId: number }) {
           <WorkspaceMetric label="当前部章节" value={chapters.total} hint="当前窗口内的章节数。" />
           <WorkspaceMetric label="当前章场景" value={segments.total} tone="cool" hint="当前章节的最小结构单元。" />
           <WorkspaceMetric label="关联事件" value={linked.total} hint="当前路径上的时间轴事件。" />
+          <WorkspaceMetric label="联动缺口" value={linkageSummary?.totalGapCount ?? 0} hint="缺合同、缺时间锚点或锚点失效。" />
         </>
       )}
       contextSummary={(
@@ -587,6 +626,33 @@ export default function StructurePage({ novelId }: { novelId: number }) {
       )}
       aside={(
         <>
+          <WorkspacePanel
+            title="联动状态"
+            extra={(
+              <Button size="small" loading={linkageSyncing} onClick={() => void handleSyncLinkage()}>
+                一键补齐
+              </Button>
+            )}
+          >
+            <div className="novel-note-list">
+              <div className="novel-note-list__item">{linkageSummary?.summary || '正在统计结构联动状态。'}</div>
+              {linkageSummary?.missingChapterContractLabels.length ? (
+                <div className="novel-note-list__item">{`缺章节合同：${linkageSummary.missingChapterContractLabels.join('；')}`}</div>
+              ) : null}
+              {linkageSummary?.missingSceneContractLabels.length ? (
+                <div className="novel-note-list__item">{`缺场景合同：${linkageSummary.missingSceneContractLabels.join('；')}`}</div>
+              ) : null}
+              {linkageSummary?.uncoveredChapterLabels.length ? (
+                <div className="novel-note-list__item">{`缺章节锚点：${linkageSummary.uncoveredChapterLabels.join('；')}`}</div>
+              ) : null}
+              {linkageSummary?.uncoveredSegmentLabels.length ? (
+                <div className="novel-note-list__item">{`缺场景锚点：${linkageSummary.uncoveredSegmentLabels.join('；')}`}</div>
+              ) : null}
+              {linkageSummary?.anchorInvalidEventTitles.length ? (
+                <div className="novel-note-list__item">{`锚点失效事件：${linkageSummary.anchorInvalidEventTitles.join('；')}`}</div>
+              ) : null}
+            </div>
+          </WorkspacePanel>
           <StructureLinkedEventsPanel
             linked={linked}
             timelineFilters={timelineFilters}
@@ -602,6 +668,14 @@ export default function StructurePage({ novelId }: { novelId: number }) {
         </>
       )}
     >
+      {linkageSummary ? (
+        <div style={{ marginBottom: 16 }}>
+          <Tag color={linkageSummary.totalGapCount > 0 ? 'warning' : 'success'}>
+            {linkageSummary.totalGapCount > 0 ? `还有 ${linkageSummary.totalGapCount} 个结构联动缺口` : '结构联动已补齐'}
+          </Tag>
+          <span style={{ marginLeft: 8, color: 'var(--workspace-ink-soft)' }}>{linkageSummary.summary}</span>
+        </div>
+      ) : null}
       {draftWarnings.length > 0 ? (
         <div className="novel-note-list" style={{ marginBottom: 16 }}>
           {draftWarnings.map((warning) => <div key={warning} className="novel-note-list__item">{warning}</div>)}

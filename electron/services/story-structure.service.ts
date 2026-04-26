@@ -5,9 +5,11 @@ import {
   type ChapterSegment as ChapterSegmentRow,
   type StoryPart as StoryPartRow,
   type StoryVolume as StoryVolumeRow,
+  chapterContracts,
   chapterSegments,
   chapters,
   novels,
+  sceneContracts,
   storyMemoryCheckpoints,
   storyParts,
   storyVolumes,
@@ -15,6 +17,7 @@ import {
 } from '../database/schema'
 import { markNovelContextChanged, markStoryMemoryCheckpointsDirty } from './context-impact.service'
 import { syncTimelineStructureAnchors } from './timeline.service'
+import { syncTimelineEventItemLinks } from './link-sync.service'
 import {
   applyStructureBatchEdit as applyStructureBatchEditTransactional,
   applyStructureBatchPlan as applyStructureBatchPlanTransactional,
@@ -30,6 +33,8 @@ import {
 } from './story-structure-batch.service'
 import { throwUserFacingError } from '../utils/user-facing-error'
 import type {
+  StructureLinkageSummary,
+  StructureLinkageSyncResult,
   StructureBatchApplyResult,
   StructureBatchEditOperation,
   StructureBatchFocus,
@@ -178,6 +183,103 @@ function parseStoredStringArray(raw?: string | null): string[] {
 
 function mergeStoredReasons(raw: string | null | undefined, reasons: string[]): string {
   return stringifyStringArray([...parseStoredStringArray(raw), ...reasons])
+}
+
+function clipText(value: string, maxLength = 80): string {
+  const normalized = asText(value)
+  if (!normalized) return ''
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength)}...` : normalized
+}
+
+function getChapterLabel(row: { chapterNum: number; title?: string | null }) {
+  return row.title?.trim() ? `第${row.chapterNum}章 · ${row.title.trim()}` : `第${row.chapterNum}章`
+}
+
+function getSegmentLabelWithChapter(
+  chapter: { chapterNum: number; title?: string | null },
+  segment: { segmentOrder: number; title?: string | null },
+) {
+  const base = `第${chapter.chapterNum}章 · 场景${String(segment.segmentOrder).padStart(2, '0')}`
+  return segment.title?.trim() ? `${base} · ${segment.title.trim()}` : base
+}
+
+function summarizeStructureGapLabels(labels: string[]): string[] {
+  return labels.slice(0, 5)
+}
+
+function buildHookType(chapter: typeof chapters.$inferSelect): string {
+  const text = `${chapter.title || ''}\n${chapter.outline || ''}`
+  if (/真相|揭晓|揭露|暴露/.test(text)) return 'reveal'
+  if (/反转|转折|背叛|危机/.test(text)) return 'twist'
+  if (/追|逃|战|袭击|对决/.test(text)) return 'action'
+  if (/悬念|线索|疑点|伏笔/.test(text)) return 'suspense'
+  return 'progress'
+}
+
+function buildSceneLinkageMode(segmentType?: string | null): string {
+  switch (asText(segmentType)) {
+    case 'bridge':
+      return 'bridge'
+    case 'reveal':
+      return 'reveal'
+    case 'turn':
+      return 'turn'
+    case 'climax':
+      return 'climax'
+    default:
+      return 'scene'
+  }
+}
+
+function buildEventTypeFromSegment(segmentType?: string | null): string {
+  switch (asText(segmentType)) {
+    case 'bridge':
+      return '过渡'
+    case 'reveal':
+      return '揭示'
+    case 'turn':
+      return '转折'
+    case 'climax':
+      return '高潮'
+    default:
+      return '场景推进'
+  }
+}
+
+function buildEventSummaryFromSegment(segment: typeof chapterSegments.$inferSelect): string {
+  return clipText(segment.summary || segment.purpose || segment.outputState || segment.inputState || segment.content || '结构锚点待补充。', 90)
+}
+
+function buildEventSummaryFromChapter(chapter: typeof chapters.$inferSelect): string {
+  return clipText(chapter.outline || chapter.summary || chapter.title || '章节结构锚点待补充。', 90)
+}
+
+function eventCoversChapter(
+  event: typeof timelineEvents.$inferSelect,
+  chapter: typeof chapters.$inferSelect,
+  segmentIdSet: Set<number>,
+  chapterNumById: Map<number, number>,
+): boolean {
+  if (event.chapterStartId === chapter.id || event.chapterEndId === chapter.id) return true
+  if (typeof event.segmentId === 'number' && segmentIdSet.has(event.segmentId)) return true
+
+  const startNum = event.chapterStartId ? chapterNumById.get(event.chapterStartId) : undefined
+  const endNum = event.chapterEndId ? chapterNumById.get(event.chapterEndId) : undefined
+  if (typeof startNum === 'number' && typeof endNum === 'number') {
+    return chapter.chapterNum >= Math.min(startNum, endNum) && chapter.chapterNum <= Math.max(startNum, endNum)
+  }
+  if (typeof startNum === 'number') return chapter.chapterNum === startNum
+  if (typeof endNum === 'number') return chapter.chapterNum === endNum
+  return false
+}
+
+function reserveSortValue(usedValues: Set<number>, preferred: number): number {
+  let next = preferred
+  while (usedValues.has(next)) {
+    next += 1
+  }
+  usedValues.add(next)
+  return next
 }
 
 function getTimelineRows(novelId: number) {
@@ -335,6 +437,302 @@ function runStructureTransaction(
     syncTimelineStructureAnchors(novelId)
     markNovelContextChangedInline(novelId, reason)
   })()
+}
+
+export function getStructureLinkageSummary(novelId: number): StructureLinkageSummary {
+  ensureStoryStructure(novelId)
+  const db = getDb()
+  const chapterRows = getChapterRows(novelId)
+  const segmentRows = getSegmentRowsByNovel(novelId)
+  const eventRows = getTimelineRows(novelId)
+  const chapterContractRows = db.select().from(chapterContracts)
+    .where(eq(chapterContracts.novelId, novelId))
+    .all()
+  const sceneContractRows = db.select().from(sceneContracts)
+    .where(eq(sceneContracts.novelId, novelId))
+    .all()
+
+  const chapterNumById = new Map(chapterRows.map((row) => [row.id, row.chapterNum]))
+  const chapterById = new Map(chapterRows.map((row) => [row.id, row]))
+  const segmentIdsByChapter = new Map<number, number[]>()
+  segmentRows.forEach((segment) => {
+    const current = segmentIdsByChapter.get(segment.chapterId) || []
+    current.push(segment.id)
+    segmentIdsByChapter.set(segment.chapterId, current)
+  })
+
+  const chapterContractIds = new Set(chapterContractRows.map((row) => row.chapterId))
+  const sceneContractIds = new Set(
+    sceneContractRows
+      .map((row) => row.segmentId ?? null)
+      .filter((segmentId): segmentId is number => typeof segmentId === 'number'),
+  )
+
+  const missingChapterContractLabels = chapterRows
+    .filter((chapter) => !chapterContractIds.has(chapter.id))
+    .map((chapter) => getChapterLabel(chapter))
+
+  const missingSceneContractLabels = segmentRows
+    .filter((segment) => !sceneContractIds.has(segment.id))
+    .map((segment) => getSegmentLabelWithChapter(chapterById.get(segment.chapterId) || { chapterNum: 0 }, segment))
+
+  const uncoveredChapterLabels = chapterRows
+    .filter((chapter) => {
+      const segmentIdSet = new Set(segmentIdsByChapter.get(chapter.id) || [])
+      return !eventRows.some((event) => eventCoversChapter(event, chapter, segmentIdSet, chapterNumById))
+    })
+    .map((chapter) => getChapterLabel(chapter))
+
+  const uncoveredSegmentLabels = segmentRows
+    .filter((segment) => !eventRows.some((event) => event.segmentId === segment.id))
+    .map((segment) => getSegmentLabelWithChapter(chapterById.get(segment.chapterId) || { chapterNum: 0 }, segment))
+
+  const anchorInvalidEvents = eventRows.filter((event) => event.anchorInvalid === 1)
+  const totalGapCount = (
+    missingChapterContractLabels.length
+    + missingSceneContractLabels.length
+    + uncoveredChapterLabels.length
+    + uncoveredSegmentLabels.length
+    + anchorInvalidEvents.length
+  )
+
+  return {
+    chapterCount: chapterRows.length,
+    segmentCount: segmentRows.length,
+    timelineEventCount: eventRows.length,
+    missingChapterContractCount: missingChapterContractLabels.length,
+    missingSceneContractCount: missingSceneContractLabels.length,
+    uncoveredChapterCount: uncoveredChapterLabels.length,
+    uncoveredSegmentCount: uncoveredSegmentLabels.length,
+    anchorInvalidEventCount: anchorInvalidEvents.length,
+    totalGapCount,
+    missingChapterContractLabels: summarizeStructureGapLabels(missingChapterContractLabels),
+    missingSceneContractLabels: summarizeStructureGapLabels(missingSceneContractLabels),
+    uncoveredChapterLabels: summarizeStructureGapLabels(uncoveredChapterLabels),
+    uncoveredSegmentLabels: summarizeStructureGapLabels(uncoveredSegmentLabels),
+    anchorInvalidEventTitles: summarizeStructureGapLabels(anchorInvalidEvents.map((event) => event.eventTitle || '未命名事件')),
+    summary: totalGapCount > 0
+      ? `缺章节合同 ${missingChapterContractLabels.length}，缺场景合同 ${missingSceneContractLabels.length}，缺章节时间锚点 ${uncoveredChapterLabels.length}，缺场景时间锚点 ${uncoveredSegmentLabels.length}，锚点失效事件 ${anchorInvalidEvents.length}。`
+      : '卷、章、场景与时间轴/合同的联动已经补齐。',
+  }
+}
+
+export function syncStructureLinkage(novelId: number): StructureLinkageSyncResult {
+  ensureStoryStructure(novelId)
+  const db = getDb()
+  let createdChapterContractCount = 0
+  let createdSceneContractCount = 0
+  let createdTimelineEventCount = 0
+
+  runStructureTransaction(novelId, 'Structure linkage synced', () => {
+    const chapterRows = getChapterRows(novelId)
+    const segmentRows = getSegmentRowsByNovel(novelId)
+    const eventRows = getTimelineRows(novelId)
+    const chapterContractRows = db.select().from(chapterContracts)
+      .where(eq(chapterContracts.novelId, novelId))
+      .all()
+    const sceneContractRows = db.select().from(sceneContracts)
+      .where(eq(sceneContracts.novelId, novelId))
+      .all()
+
+    const chapterContractIds = new Set(chapterContractRows.map((row) => row.chapterId))
+    const sceneContractIds = new Set(
+      sceneContractRows
+        .map((row) => row.segmentId ?? null)
+        .filter((segmentId): segmentId is number => typeof segmentId === 'number'),
+    )
+    const chapterNumById = new Map(chapterRows.map((row) => [row.id, row.chapterNum]))
+    const chapterById = new Map(chapterRows.map((row) => [row.id, row]))
+    const segmentIdsByChapter = new Map<number, number[]>()
+    segmentRows.forEach((segment) => {
+      const current = segmentIdsByChapter.get(segment.chapterId) || []
+      current.push(segment.id)
+      segmentIdsByChapter.set(segment.chapterId, current)
+    })
+
+    chapterRows.forEach((chapter) => {
+      if (chapterContractIds.has(chapter.id)) return
+      db.insert(chapterContracts).values({
+        novelId,
+        chapterId: chapter.id,
+        chapterGoal: asText(chapter.outline) || asText(chapter.title) || `补齐 ${getChapterLabel(chapter)} 的推进目标`,
+        servedThreadIdsJson: JSON.stringify([]),
+        requiredArcProgressJson: stringifyStringArray([]),
+        requiredCharacterArcIdsJson: JSON.stringify([]),
+        requiredRelationshipArcIdsJson: JSON.stringify([]),
+        requiredResistanceTrackIdsJson: JSON.stringify([]),
+        requiredResistanceActionsJson: stringifyStringArray([]),
+        requiredAssetRefsJson: stringifyStringArray([]),
+        requiredEndgameCommitmentIdsJson: JSON.stringify([]),
+        requiredForeshadowIdsJson: JSON.stringify([]),
+        hookType: buildHookType(chapter),
+        forbiddenActionsJson: stringifyStringArray([]),
+        acceptanceNotesJson: stringifyStringArray([
+          asText(chapter.outline) || '先把本章推进目标、章尾承接和兑现标准补全。',
+        ]),
+        status: 'draft',
+      }).run()
+      chapterContractIds.add(chapter.id)
+      createdChapterContractCount += 1
+    })
+
+    segmentRows.forEach((segment) => {
+      if (sceneContractIds.has(segment.id)) return
+      db.insert(sceneContracts).values({
+        novelId,
+        chapterId: segment.chapterId,
+        segmentId: segment.id,
+        pov: '',
+        timeLocation: [asText(segment.timeAnchor), asText(segment.locationName)].filter(Boolean).join(' / '),
+        sceneGoal: asText(segment.purpose) || asText(segment.summary) || asText(segment.title) || `补齐场景 ${segment.segmentOrder} 的作用`,
+        obstacle: '',
+        conflictType: '',
+        emotionShift: '',
+        revealPayloadJson: stringifyStringArray([]),
+        resultState: asText(segment.outputState),
+        linkageMode: buildSceneLinkageMode(segment.segmentType),
+        requiredEndgameCommitmentIdsJson: JSON.stringify([]),
+        requiredForeshadowIdsJson: JSON.stringify([]),
+        status: 'draft',
+      }).run()
+      sceneContractIds.add(segment.id)
+      createdSceneContractCount += 1
+    })
+
+    const usedTimeSortValues = new Set(eventRows.map((row) => Number(row.timeSortValue || 0)))
+    let nextSortOrder = eventRows.length > 0 ? Math.max(...eventRows.map((row) => row.sortOrder || 0)) + 1 : 1
+
+    segmentRows.forEach((segment) => {
+      if (eventRows.some((event) => event.segmentId === segment.id)) return
+      const chapter = chapterById.get(segment.chapterId)
+      if (!chapter) return
+
+      const preferredSortValue = chapter.chapterNum * 100 + segment.segmentOrder
+      const timeSortValue = reserveSortValue(usedTimeSortValues, preferredSortValue)
+      const eventTitle = asText(segment.title) || getSegmentLabelWithChapter(chapter, segment)
+      const eventSummary = buildEventSummaryFromSegment(segment)
+      const eventTimeLabel = asText(segment.timeAnchor) || getSegmentLabelWithChapter(chapter, segment)
+      const eventId = Number(db.insert(timelineEvents).values({
+        novelId,
+        sortOrder: nextSortOrder,
+        eventTitle,
+        eventSummary,
+        timeMode: 'custom-era',
+        timeLabel: eventTimeLabel,
+        timeSortValue,
+        timePrecision: '章节场景',
+        isMajorEvent: segment.segmentType === 'climax' || segment.segmentType === 'turn' || segment.segmentType === 'reveal' ? 1 : 0,
+        eventType: buildEventTypeFromSegment(segment.segmentType),
+        volumeId: chapter.volumeId ?? null,
+        partId: chapter.partId ?? null,
+        chapterStartId: chapter.id,
+        chapterEndId: chapter.id,
+        segmentId: segment.id,
+        locationMapId: null,
+        presentCharacterIdsJson: segment.presentCharacterIdsJson || JSON.stringify([]),
+        affectedCharacterIdsJson: segment.presentCharacterIdsJson || JSON.stringify([]),
+        protagonistPresent: 0,
+        protagonistAction: '',
+        eventCause: asText(segment.inputState),
+        eventProcess: asText(segment.purpose) || asText(segment.summary),
+        eventResult: asText(segment.outputState),
+        linkedItemIdsJson: segment.linkedItemIdsJson || JSON.stringify([]),
+        directConsequencesJson: stringifyStringArray([]),
+        openThreadsJson: stringifyStringArray([]),
+        notes: '由结构联动自动补齐，请在时间轴页补充因果链与后果。',
+        anchorInvalid: 0,
+        status: 'planned',
+      }).run().lastInsertRowid)
+
+      eventRows.push({
+        id: eventId,
+        novelId,
+        sortOrder: nextSortOrder,
+        eventTitle,
+        eventSummary,
+        timeMode: 'custom-era',
+        timeLabel: eventTimeLabel,
+        timeSortValue,
+        timePrecision: '章节场景',
+        isMajorEvent: segment.segmentType === 'climax' || segment.segmentType === 'turn' || segment.segmentType === 'reveal' ? 1 : 0,
+        eventType: buildEventTypeFromSegment(segment.segmentType),
+        arcId: null,
+        volumeId: chapter.volumeId ?? null,
+        partId: chapter.partId ?? null,
+        chapterStartId: chapter.id,
+        chapterEndId: chapter.id,
+        segmentId: segment.id,
+        locationMapId: null,
+        presentCharacterIdsJson: segment.presentCharacterIdsJson || JSON.stringify([]),
+        affectedCharacterIdsJson: segment.presentCharacterIdsJson || JSON.stringify([]),
+        protagonistPresent: 0,
+        protagonistAction: '',
+        eventCause: asText(segment.inputState),
+        eventProcess: asText(segment.purpose) || asText(segment.summary),
+        eventResult: asText(segment.outputState),
+        linkedItemIdsJson: segment.linkedItemIdsJson || JSON.stringify([]),
+        directConsequencesJson: stringifyStringArray([]),
+        openThreadsJson: stringifyStringArray([]),
+        notes: '由结构联动自动补齐，请在时间轴页补充因果链与后果。',
+        anchorInvalid: 0,
+        status: 'planned',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      } as typeof timelineEvents.$inferSelect)
+      createdTimelineEventCount += 1
+      nextSortOrder += 1
+      syncTimelineEventItemLinks(eventId)
+    })
+
+    chapterRows.forEach((chapter) => {
+      const segmentIdSet = new Set(segmentIdsByChapter.get(chapter.id) || [])
+      if (eventRows.some((event) => eventCoversChapter(event, chapter, segmentIdSet, chapterNumById))) return
+
+      const timeSortValue = reserveSortValue(usedTimeSortValues, chapter.chapterNum * 100)
+      db.insert(timelineEvents).values({
+        novelId,
+        sortOrder: nextSortOrder,
+        eventTitle: asText(chapter.title) || getChapterLabel(chapter),
+        eventSummary: buildEventSummaryFromChapter(chapter),
+        timeMode: 'custom-era',
+        timeLabel: getChapterLabel(chapter),
+        timeSortValue,
+        timePrecision: '章节',
+        isMajorEvent: 0,
+        eventType: '章节推进',
+        volumeId: chapter.volumeId ?? null,
+        partId: chapter.partId ?? null,
+        chapterStartId: chapter.id,
+        chapterEndId: chapter.id,
+        segmentId: null,
+        locationMapId: null,
+        presentCharacterIdsJson: JSON.stringify([]),
+        affectedCharacterIdsJson: JSON.stringify([]),
+        protagonistPresent: 0,
+        protagonistAction: '',
+        eventCause: '',
+        eventProcess: asText(chapter.outline),
+        eventResult: asText(chapter.summary),
+        linkedItemIdsJson: JSON.stringify([]),
+        directConsequencesJson: stringifyStringArray([]),
+        openThreadsJson: stringifyStringArray([]),
+        notes: '由结构联动自动补齐，请在时间轴页补充章节级事件细节。',
+        anchorInvalid: 0,
+        status: 'planned',
+      }).run()
+      createdTimelineEventCount += 1
+      nextSortOrder += 1
+    })
+  })
+
+  const summary = getStructureLinkageSummary(novelId)
+  return {
+    createdChapterContractCount,
+    createdSceneContractCount,
+    createdTimelineEventCount,
+    message: `已补齐 ${createdChapterContractCount} 章章节合同、${createdSceneContractCount} 条场景合同，并新增 ${createdTimelineEventCount} 条结构时间锚点。`,
+    summary,
+  }
 }
 
 export function resolveDefaultStructure(novelId: number): { volumeId: number; partId: number } {

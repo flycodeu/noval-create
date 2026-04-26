@@ -77,6 +77,33 @@ export interface MapBlueprint {
   levels: MapBlueprintLevel[]
 }
 
+export interface ClimateCycle {
+  id: string
+  region: string
+  pattern: string
+  seasonalShift: string
+  hazardTrigger: string
+  travelImpact: string
+  resourceImpact: string
+}
+
+export interface EconomyLoop {
+  id: string
+  name: string
+  coreResource: string
+  circulationPath: string
+  controller: string
+  scarcityTrigger: string
+  volatilityTrigger: string
+  storyUse: string
+}
+
+export interface WorldDynamics {
+  overview: string
+  climateCycles: ClimateCycle[]
+  economyLoops: EconomyLoop[]
+}
+
 export type TimelineCalendarType =
   | 'gregorian'
   | 'regnal'
@@ -125,12 +152,14 @@ export interface GenreWorldRules {
   factionSystem: FactionProfile[]
   characterEcology: CharacterEcology
   mapBlueprint: MapBlueprint
+  worldDynamics: WorldDynamics
   timelineConfig: TimelineConfig
   writingConstraints: WritingConstraints
 }
 
-type GenreWorldRuleSeed = Omit<GenreWorldRules, 'timelineConfig'> & {
+type GenreWorldRuleSeed = Omit<GenreWorldRules, 'timelineConfig' | 'worldDynamics'> & {
   timelineConfig?: TimelineConfig
+  worldDynamics?: WorldDynamics
 }
 
 function clone<T>(value: T): T {
@@ -309,6 +338,240 @@ function createTimelineConfig(
     recommendedEventTypes: [],
     precisionOptions: [],
     ...overrides,
+  }
+}
+
+function createWorldDynamics(
+  overview: string,
+  climateCycles: ClimateCycle[],
+  economyLoops: EconomyLoop[],
+): WorldDynamics {
+  return {
+    overview,
+    climateCycles,
+    economyLoops,
+  }
+}
+
+function getDefaultWorldDynamics(packKey: GenreRulePackKey): WorldDynamics {
+  switch (packKey) {
+    case 'zombie':
+      return createWorldDynamics(
+        '气候变化、灾后基础设施和补给循环会直接改变生存区的秩序、移动半径和资源争夺强度。',
+        [
+          {
+            id: 'zombie-season',
+            region: '主要活动城市与外围撤离带',
+            pattern: '四季分明或冷热骤变，雨季和寒潮都会放大生存压力。',
+            seasonalShift: '暴雨、酷暑、寒潮会改变尸体腐败速度、夜间活动窗口和外出频率。',
+            hazardTrigger: '暴雨断电、严寒停摆、台风封路、夏季疫病扩散。',
+            travelImpact: '极端天气会切断撤离路线、放大噪声风险，并迫使队伍改走高风险补给线。',
+            resourceImpact: '天气变化会影响燃料、药品、净水、保暖物资和粮食保存效率。',
+          },
+        ],
+        [
+          {
+            id: 'zombie-supply',
+            name: '灾后补给链',
+            coreResource: '粮食、药品、燃料、弹药、发电与净水设备。',
+            circulationPath: '仓储点/医院/商超残余 -> 搜集队 -> 据点仓库 -> 前线与伤员。',
+            controller: '据点管理层、武装队伍、黑市团伙和运输节点守卫者。',
+            scarcityTrigger: '封路、尸潮、内斗、伤员激增或天气突变。',
+            volatilityTrigger: '路线失守、仓库暴露、配给冲突或外来势力抢夺。',
+            storyUse: '决定谁能活、谁要迁移、谁会背叛，也决定队伍是否还能维持纪律与信任。',
+          },
+        ],
+      )
+    case 'wuxia':
+      return createWorldDynamics(
+        '江湖不是静态背景，季节、河运、官道和银钱流向都会改变赶路节奏、追杀压力和门派生意。',
+        [
+          {
+            id: 'wuxia-routes',
+            region: '州府、山道、镖路与水路节点',
+            pattern: '春汛、暑热、秋收、寒冬会改变不同路线的通行难度。',
+            seasonalShift: '汛期河道危险、冬季山道封雪、夏季疫病和秋收忙闲都会影响江湖行动。',
+            hazardTrigger: '洪水、山体塌方、雪封古道、疫病流行和旱灾。',
+            travelImpact: '影响押镖、追杀、渡口停留和门派之间的支援速度。',
+            resourceImpact: '药材、粮价、马匹和兵器材料会因季节与产地变化而波动。',
+          },
+        ],
+        [
+          {
+            id: 'wuxia-silver',
+            name: '银钱与漕运链',
+            coreResource: '银两、药材、粮食、兵器材料、马匹和消息网。',
+            circulationPath: '产地/商路/渡口 -> 镖局/商号 -> 州府/门派/黑市。',
+            controller: '商号、镖局、地方豪强、漕运势力和官面关系人。',
+            scarcityTrigger: '封河、抄家、兵乱、旱涝和门派冲突。',
+            volatilityTrigger: '漕运断线、镖物失手、黑市涨价或官府突然严查。',
+            storyUse: '让势力争斗从“面子”落到“银钱、药材、脚程和人情债”这些真实压力上。',
+          },
+        ],
+      )
+    case 'xianxia':
+      return createWorldDynamics(
+        '修真世界的天象、灵气潮汐和坊市流通必须长期波动，否则资源争夺、闭关压力和宗门秩序都会失真。',
+        [
+          {
+            id: 'xianxia-aura',
+            region: '宗门山门、灵脉节点、凡俗边境与秘境入口',
+            pattern: '灵气浓淡、节令更替和天象异动会周期性改变修炼与出行条件。',
+            seasonalShift: '灵潮涨落、寒月封山、火脉躁动、秘境开合与妖兽迁徙会同步变化。',
+            hazardTrigger: '灵脉枯竭、天火、寒潮、兽潮、秘境乱流或瘴气扩散。',
+            travelImpact: '决定御器/传送成本、闭关窗口、历练路线和宗门边防压力。',
+            resourceImpact: '灵草成熟期、矿脉产出、丹药价格和坊市供给会随天象与灵潮改变。',
+          },
+        ],
+        [
+          {
+            id: 'xianxia-market',
+            name: '灵石与修行资源循环',
+            coreResource: '灵石、丹药、法器材料、秘境名额、功法与情报。',
+            circulationPath: '矿脉/秘境/宗门库房 -> 坊市/拍卖会 -> 内门/散修/家族网络。',
+            controller: '宗门执事、商盟、世家、黑市和守矿势力。',
+            scarcityTrigger: '灵脉衰竭、宗门封锁、秘境关闭、炼丹失误或大战消耗。',
+            volatilityTrigger: '秘境异变、拍卖垄断、矿脉争夺、师门配额调整或大能出手。',
+            storyUse: '把境界推进、师承压力和阵营矛盾落到持续可写的修行资源张力上。',
+          },
+        ],
+      )
+    case 'fantasy':
+      return createWorldDynamics(
+        '奇幻世界的季节、地貌和贸易线会决定军政反应、冒险窗口和资源占有，不应只剩风景描写。',
+        [
+          {
+            id: 'fantasy-frontier',
+            region: '边境、遗迹带、王国腹地与荒野通路',
+            pattern: '季节分区明显，不同气候带会周期性改变边境压力和探索成本。',
+            seasonalShift: '冬季封路、春季解冻、雨季泥泞和旱季缺水会改变行军与补给。',
+            hazardTrigger: '暴雪、沼泽外溢、旱灾、林火、兽潮或魔潮扰动。',
+            travelImpact: '影响远征、护送、边防调度和遗迹探索成功率。',
+            resourceImpact: '粮食、木材、矿石、药材和魔法材料的产出随季节波动。',
+          },
+        ],
+        [
+          {
+            id: 'fantasy-goods',
+            name: '军需与奇物流通链',
+            coreResource: '粮食、铁矿、木材、坐骑、法材、遗迹产物和雇佣兵资金。',
+            circulationPath: '产地/边境据点 -> 城镇市场/公会 -> 军团/领主/冒险者。',
+            controller: '领主、商会、公会、军团后勤与边境守备力量。',
+            scarcityTrigger: '战争征用、边境失守、盗匪袭击、魔潮和歉收。',
+            volatilityTrigger: '通路关闭、税赋调整、公会垄断或遗迹产出突增突减。',
+            storyUse: '让战争、探险和阵营争夺能持续体现后勤、税负和资源分配的现实后果。',
+          },
+        ],
+      )
+    case 'modern-mystery':
+      return createWorldDynamics(
+        '现代悬疑也需要环境和经济纹理，天气、产业景气和地方物流常常决定线索保存方式、行动窗口和遮掩成本。',
+        [
+          {
+            id: 'mystery-weather',
+            region: '城市城区、老厂区、沿江/沿海地带和郊县通路',
+            pattern: '现实天气与季节变化要能影响现场状态、出行成本和监控盲区。',
+            seasonalShift: '梅雨、寒潮、高温、台风和枯水期会改变现场保存、取证难度和人流密度。',
+            hazardTrigger: '暴雨积水、停电、厂区废气、雾天封路和河道涨落。',
+            travelImpact: '影响走访路线、值班节奏、监控可视性和夜间行动风险。',
+            resourceImpact: '影响物流速度、旧厂运转、维修成本和地方就业稳定性。',
+          },
+        ],
+        [
+          {
+            id: 'mystery-industry',
+            name: '地方产业与利益链',
+            coreResource: '现金流、旧厂资产、土地开发、货运线路、医疗与信息渠道。',
+            circulationPath: '地方企业/园区/物流站 -> 地方机构/承包商/媒体关系网 -> 当事人家庭与案发现场。',
+            controller: '企业管理层、地方关系人、物流节点和灰色承包链。',
+            scarcityTrigger: '企业转型、停工、欠薪、事故、征地和资金断裂。',
+            volatilityTrigger: '媒体曝光、项目停摆、审计追查、极端天气或政策调整。',
+            storyUse: '把旧案遮掩、证据去向、沉默成本和地方互保写成可追踪的现实利益链。',
+          },
+        ],
+      )
+    case 'urban-ability':
+      return createWorldDynamics(
+        '都市异能的动态压力不仅来自能力体系，还来自城市天气、能源消耗和地下市场的异常流通。',
+        [
+          {
+            id: 'urban-anomaly-weather',
+            region: '城市商业区、旧城区、封锁点与异常高发区',
+            pattern: '常规天气与异常波动叠加，暴雨、热浪、停电和磁暴会影响异常活动频率。',
+            seasonalShift: '台风季、酷暑、寒潮和节假日人流峰值都会改变异常暴露与封锁成本。',
+            hazardTrigger: '暴雨内涝、停电、异常能量泄漏、地铁拥堵和大面积通讯失灵。',
+            travelImpact: '影响撤离路线、监控覆盖、秘密运输和收容效率。',
+            resourceImpact: '影响电力、冷链、实验物资、黑市样本和城市物资调配。',
+          },
+        ],
+        [
+          {
+            id: 'urban-black-market',
+            name: '异常资源与地下交易链',
+            coreResource: '样本、药剂、芯片、封存器具、身份掩护和情报。',
+            circulationPath: '实验室/封存点/地下渠道 -> 中间商 -> 异能组织/资本集团/行动人员。',
+            controller: '调查机构、资本集团、地下掮客和黑市物流网络。',
+            scarcityTrigger: '封锁升级、样本损毁、监管收紧、城市停摆或供货源被清除。',
+            volatilityTrigger: '异常事件曝光、组织清洗、价格垄断或大规模停电。',
+            storyUse: '把能力争夺落到现实城市的供给、监管和生活代价上，而不是只剩数值升级。',
+          },
+        ],
+      )
+    case 'western-fantasy':
+      return createWorldDynamics(
+        '西幻秩序要靠季节、税赋、教会调度和军政后勤支撑，气候与经济必须持续改变王国与边境的力量平衡。',
+        [
+          {
+            id: 'western-harvest',
+            region: '王国腹地、山地边境、港口与教区路线',
+            pattern: '播种、收获、严冬和雨季会改变领地治理与战争节奏。',
+            seasonalShift: '冬季封山、春季泥泞、秋收与海风季会重塑行军和海运窗口。',
+            hazardTrigger: '暴雪、歉收、洪涝、疫病、山火和魔物迁徙。',
+            travelImpact: '影响边境增援、朝圣路线、商旅护送和围城补给。',
+            resourceImpact: '影响粮税、铁料、木材、仪式材料和港口周转能力。',
+          },
+        ],
+        [
+          {
+            id: 'western-levy',
+            name: '税赋与军需流通链',
+            coreResource: '粮食、税赋、铁料、马匹、神术材料和雇佣军薪金。',
+            circulationPath: '农庄/矿场/港口 -> 领主仓库/教会/公会 -> 军团/法师塔/边境要塞。',
+            controller: '领主、教会、商会、公会与边境军需官。',
+            scarcityTrigger: '歉收、封港、叛乱、围城、宗教冲突或龙灾。',
+            volatilityTrigger: '税制调整、王位争夺、海运中断、教会禁令或边防战事。',
+            storyUse: '让王国政治、教会影响和战争准备都能落实到税、粮、铁和交通线上。',
+          },
+        ],
+      )
+    case 'generic':
+    default:
+      return createWorldDynamics(
+        '环境变化和经济流通都必须能改变人物的行动边界，而不是停留在资料设定。',
+        [
+          {
+            id: 'generic-climate',
+            region: '主要活动区域',
+            pattern: '先定义常态气候、季节节律与地理差异，再决定人物默认行动成本。',
+            seasonalShift: '至少要说明哪些月份/阶段更适合远行、战争、闭关、调查或生产。',
+            hazardTrigger: '暴雨、严寒、干旱、瘴气、沙暴或地脉异动这类极端变化何时出现。',
+            travelImpact: '天气变化要影响路程、信息传递、追兵速度、补给线和现场条件。',
+            resourceImpact: '气候必须改变粮食、能源、药材、矿物或其他关键资源的产出与保存。',
+          },
+        ],
+        [
+          {
+            id: 'generic-economy',
+            name: '主要流通链',
+            coreResource: '写清本世界最关键的可流通资源、货币或身份筹码。',
+            circulationPath: '说明资源从产地/源头如何流向中转、市场、势力和主角所在场景。',
+            controller: '指出谁掌握税赋、配给、仓储、运输、黑市或情报渠道。',
+            scarcityTrigger: '说明哪些战争、天气、制度或人为事件会制造紧缺。',
+            volatilityTrigger: '说明哪些封锁、事故、政变或路线中断会快速拉高成本。',
+            storyUse: '让资源流通链能够持续制造行动门槛、阵营摩擦和剧情选择压力。',
+          },
+        ],
+      )
   }
 }
 
@@ -1649,6 +1912,10 @@ export function getBuiltinGenreRules(genreName?: string | null): GenreWorldRules
   const seed = clone(BUILTIN_GENRE_RULE_PACKS[resolvePackKey(genreName)])
   return {
     ...seed,
+    worldDynamics: normalizeWorldDynamics(
+      seed.worldDynamics,
+      getDefaultWorldDynamics(seed.genreProfile.key),
+    ),
     timelineConfig: normalizeTimelineConfig(
       seed.timelineConfig,
       getDefaultTimelineConfig(seed.genreProfile.key),
@@ -1830,6 +2097,58 @@ function normalizeMapBlueprint(value: unknown, fallback: MapBlueprint, legacy?: 
   }
 }
 
+function normalizeWorldDynamics(value: unknown, fallback: WorldDynamics): WorldDynamics {
+  const record = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+
+  return {
+    overview: asText(record.overview) || fallback.overview,
+    climateCycles: normalizeArray(record.climateCycles, fallback.climateCycles, (item, index) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return null
+      const cycle = item as Record<string, unknown>
+      const region = asText(cycle.region)
+      const pattern = asText(cycle.pattern)
+      const seasonalShift = asText(cycle.seasonalShift)
+      const hazardTrigger = asText(cycle.hazardTrigger)
+      const travelImpact = asText(cycle.travelImpact)
+      const resourceImpact = asText(cycle.resourceImpact)
+      if (!region && !pattern && !seasonalShift && !hazardTrigger && !travelImpact && !resourceImpact) return null
+      return {
+        id: asText(cycle.id) || `climate-${index + 1}`,
+        region,
+        pattern,
+        seasonalShift,
+        hazardTrigger,
+        travelImpact,
+        resourceImpact,
+      }
+    }),
+    economyLoops: normalizeArray(record.economyLoops ?? record.economicSystems, fallback.economyLoops, (item, index) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return null
+      const loop = item as Record<string, unknown>
+      const name = asText(loop.name)
+      const coreResource = asText(loop.coreResource)
+      const circulationPath = asText(loop.circulationPath)
+      const controller = asText(loop.controller)
+      const scarcityTrigger = asText(loop.scarcityTrigger)
+      const volatilityTrigger = asText(loop.volatilityTrigger)
+      const storyUse = asText(loop.storyUse)
+      if (!name && !coreResource && !circulationPath && !controller && !scarcityTrigger && !volatilityTrigger && !storyUse) return null
+      return {
+        id: asText(loop.id) || `economy-${index + 1}`,
+        name,
+        coreResource,
+        circulationPath,
+        controller,
+        scarcityTrigger,
+        volatilityTrigger,
+        storyUse,
+      }
+    }),
+  }
+}
+
 function normalizeTimelineConfig(
   value: unknown,
   fallback: TimelineConfig,
@@ -1924,6 +2243,7 @@ export function normalizeWorldRules(raw: unknown, genreName?: string | null): Ge
     factionSystem: normalizeFactions(record.factionSystem, base.factionSystem),
     characterEcology: normalizeCharacterEcology(record.characterEcology, base.characterEcology),
     mapBlueprint: normalizeMapBlueprint(record.mapBlueprint, base.mapBlueprint, record),
+    worldDynamics: normalizeWorldDynamics(record.worldDynamics, base.worldDynamics),
     timelineConfig: normalizeTimelineConfig(
       record.timelineConfig,
       getDefaultTimelineConfig(base.genreProfile.key),
@@ -2008,6 +2328,41 @@ export function buildMapBlueprintSummary(rules: GenreWorldRules): string {
   return [rules.mapBlueprint.overview, ...lines].filter(Boolean).join('\n')
 }
 
+export function buildWorldDynamicsSummary(rules: GenreWorldRules): string {
+  const climateLines = rules.worldDynamics.climateCycles.map((cycle) => {
+    const parts = [
+      cycle.region ? `区域=${cycle.region}` : '',
+      cycle.pattern ? `常态=${cycle.pattern}` : '',
+      cycle.seasonalShift ? `季节变化=${cycle.seasonalShift}` : '',
+      cycle.hazardTrigger ? `灾害触发=${cycle.hazardTrigger}` : '',
+      cycle.travelImpact ? `行动影响=${cycle.travelImpact}` : '',
+      cycle.resourceImpact ? `资源影响=${cycle.resourceImpact}` : '',
+    ].filter(Boolean)
+
+    return parts.length > 0 ? `- 气候：${parts.join('；')}` : ''
+  }).filter(Boolean)
+
+  const economyLines = rules.worldDynamics.economyLoops.map((loop) => {
+    const parts = [
+      loop.name ? `链路=${loop.name}` : '',
+      loop.coreResource ? `核心资源=${loop.coreResource}` : '',
+      loop.circulationPath ? `流通=${loop.circulationPath}` : '',
+      loop.controller ? `控制者=${loop.controller}` : '',
+      loop.scarcityTrigger ? `稀缺触发=${loop.scarcityTrigger}` : '',
+      loop.volatilityTrigger ? `波动触发=${loop.volatilityTrigger}` : '',
+      loop.storyUse ? `剧情作用=${loop.storyUse}` : '',
+    ].filter(Boolean)
+
+    return parts.length > 0 ? `- 经济：${parts.join('；')}` : ''
+  }).filter(Boolean)
+
+  return [
+    rules.worldDynamics.overview,
+    ...climateLines,
+    ...economyLines,
+  ].filter(Boolean).join('\n')
+}
+
 export function buildTimelineConfigSummary(rules: GenreWorldRules): string {
   const config = rules.timelineConfig
   const lines = [
@@ -2081,6 +2436,11 @@ export function buildWorldRulesSummary(rules: GenreWorldRules): string {
   const mapSummary = buildMapBlueprintSummary(rules)
   if (mapSummary) {
     lines.push(`地图蓝图：\n${mapSummary}`)
+  }
+
+  const dynamicsSummary = buildWorldDynamicsSummary(rules)
+  if (dynamicsSummary) {
+    lines.push(`环境经济：\n${dynamicsSummary}`)
   }
 
   const reality = buildRealityConstraintSummary(rules.writingConstraints)

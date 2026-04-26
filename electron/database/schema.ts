@@ -75,6 +75,7 @@ export const chapters = sqliteTable('chapters', {
   wordCount: integer('word_count').default(0),
   summary: text('summary'),
   nextChapterSeed: text('next_chapter_seed'),
+  bridgePlanJson: text('bridge_plan_json'),
   continuityStateJson: text('continuity_state_json'),
   reviewNotesJson: text('review_notes_json'),
   status: text('status').default('outline'),
@@ -89,6 +90,10 @@ export const chapters = sqliteTable('chapters', {
   allowedFactIdsJson: text('allowed_fact_ids_json').default('[]'),
   revealedFactIdsJson: text('revealed_fact_ids_json').default('[]'),
   contractAuditJson: text('contract_audit_json'),
+  summaryHealthJson: text('summary_health_json'),
+  expressionDedupJson: text('expression_dedup_json'),
+  hookContinuityJson: text('hook_continuity_json'),
+  writebackStatusJson: text('writeback_status_json'),
   contextVersion: integer('context_version').default(1),
   staleReasonJson: text('stale_reason_json'),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
@@ -715,6 +720,9 @@ export const chapterWritebackRuns = sqliteTable('chapter_writeback_runs', {
   status: text('status').notNull().default('draft'),
   triggerSource: text('trigger_source').notNull().default('manual'),
   summaryText: text('summary_text'),
+  retryCount: integer('retry_count').notNull().default(0),
+  lastAttemptAt: text('last_attempt_at'),
+  sourceChapterVersion: integer('source_chapter_version'),
   startedAt: text('started_at').default(sql`CURRENT_TIMESTAMP`),
   completedAt: text('completed_at'),
   failedAt: text('failed_at'),
@@ -866,6 +874,15 @@ export const promptOverrides = sqliteTable('prompt_overrides', {
   key: text('key').primaryKey(),
   content: text('content').notNull(),
   updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
+export const promptOverrideAudits = sqliteTable('prompt_override_audits', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  key: text('key').notNull(),
+  action: text('action').notNull().default('save'),
+  protectedRuleCount: integer('protected_rule_count').notNull().default(0),
+  contentPreview: text('content_preview'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
 })
 
 export const revisionTasks = sqliteTable('revision_tasks', {

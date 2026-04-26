@@ -1,4 +1,6 @@
 ﻿import {
+  type ClimateCycle,
+  type EconomyLoop,
   getBuiltinGenreRules,
   type FactionProfile,
   type GenreProfile,
@@ -65,6 +67,11 @@ export function createEmptyWorldRules(genreName?: string | null): GenreWorldRule
     mapBlueprint: {
       overview: '',
       levels: [],
+    },
+    worldDynamics: {
+      overview: '',
+      climateCycles: [],
+      economyLoops: [],
     },
     timelineConfig: {
       calendarType: '' as TimelineCalendarType,
@@ -210,6 +217,58 @@ function normalizeMapLevels(value: unknown): MapBlueprintLevel[] {
     .filter((item): item is MapBlueprintLevel => Boolean(item))
 }
 
+function normalizeClimateCycles(value: unknown): ClimateCycle[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((item, index) => {
+      const record = asRecord(item)
+      const region = asText(record.region)
+      const pattern = asText(record.pattern)
+      const seasonalShift = asText(record.seasonalShift)
+      const hazardTrigger = asText(record.hazardTrigger)
+      const travelImpact = asText(record.travelImpact)
+      const resourceImpact = asText(record.resourceImpact)
+      if (!region && !pattern && !seasonalShift && !hazardTrigger && !travelImpact && !resourceImpact) return null
+      return {
+        id: asText(record.id) || `climate-${index + 1}`,
+        region,
+        pattern,
+        seasonalShift,
+        hazardTrigger,
+        travelImpact,
+        resourceImpact,
+      }
+    })
+    .filter((item): item is ClimateCycle => Boolean(item))
+}
+
+function normalizeEconomyLoops(value: unknown): EconomyLoop[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((item, index) => {
+      const record = asRecord(item)
+      const name = asText(record.name)
+      const coreResource = asText(record.coreResource)
+      const circulationPath = asText(record.circulationPath)
+      const controller = asText(record.controller)
+      const scarcityTrigger = asText(record.scarcityTrigger)
+      const volatilityTrigger = asText(record.volatilityTrigger)
+      const storyUse = asText(record.storyUse)
+      if (!name && !coreResource && !circulationPath && !controller && !scarcityTrigger && !volatilityTrigger && !storyUse) return null
+      return {
+        id: asText(record.id) || `economy-${index + 1}`,
+        name,
+        coreResource,
+        circulationPath,
+        controller,
+        scarcityTrigger,
+        volatilityTrigger,
+        storyUse,
+      }
+    })
+    .filter((item): item is EconomyLoop => Boolean(item))
+}
+
 export function normalizeWorldRulesDraft(raw: unknown, genreName?: string | null): GenreWorldRules {
   const base = createEmptyWorldRules(genreName)
   const record = asRecord(raw)
@@ -255,6 +314,11 @@ export function normalizeWorldRulesDraft(raw: unknown, genreName?: string | null
     mapBlueprint: {
       overview: asText(asRecord(record.mapBlueprint).overview),
       levels: normalizeMapLevels(asRecord(record.mapBlueprint).levels),
+    },
+    worldDynamics: {
+      overview: asText(asRecord(record.worldDynamics).overview),
+      climateCycles: normalizeClimateCycles(asRecord(record.worldDynamics).climateCycles),
+      economyLoops: normalizeEconomyLoops(asRecord(record.worldDynamics).economyLoops ?? asRecord(record.worldDynamics).economicSystems),
     },
     timelineConfig: {
       calendarType: (asText(asRecord(record.timelineConfig).calendarType) || base.timelineConfig.calendarType) as TimelineCalendarType,

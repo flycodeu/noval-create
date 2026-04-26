@@ -181,9 +181,16 @@ export interface ChapterWritingPromptInput {
   timelineOpenThreads: string
   activeThreads?: string
   recalledMemory?: string
+  chapterBridgePlan?: string
   povGuidance?: string
+  povRotationGuidance?: string
   sensoryGuidance?: string
   narrativeRatioGuidance?: string
+  storyPacingGuidance?: string
+  hookContinuityGuidance?: string
+  expressionDedupGuidance?: string
+  summaryHealthGuidance?: string
+  voiceEvolutionGuidance?: string
   protagonistReference: string
   protagonistRule: string
   promptTier?: PromptTier
@@ -222,9 +229,16 @@ export interface ScenePlanPromptInput {
   consistencyNotes: string
   activeThreads?: string
   recalledMemory?: string
+  chapterBridgePlan?: string
   povGuidance?: string
+  povRotationGuidance?: string
   sensoryGuidance?: string
   narrativeRatioGuidance?: string
+  storyPacingGuidance?: string
+  hookContinuityGuidance?: string
+  expressionDedupGuidance?: string
+  summaryHealthGuidance?: string
+  voiceEvolutionGuidance?: string
   protagonistReference: string
   protagonistRule: string
   promptTier?: PromptTier
@@ -255,12 +269,19 @@ export interface ChapterReviewPromptInput {
   longTermMemory: string
   consistencyNotes: string
   recalledMemory?: string
+  chapterBridgePlan?: string
   arcProgress?: string
   arcProgressStatus?: string
   arcProgressCheckpoint?: string
   povGuidance?: string
+  povRotationGuidance?: string
   sensoryGuidance?: string
   narrativeRatioGuidance?: string
+  storyPacingGuidance?: string
+  hookContinuityGuidance?: string
+  expressionDedupGuidance?: string
+  summaryHealthGuidance?: string
+  voiceEvolutionGuidance?: string
   scenePlan: string
   draftContent: string
   structuralAlertsSummary?: string
@@ -305,9 +326,16 @@ export interface ChapterRewritePromptInput {
   lockedParagraphs?: string[]
   activeThreads?: string
   recalledMemory?: string
+  chapterBridgePlan?: string
   povGuidance?: string
+  povRotationGuidance?: string
   sensoryGuidance?: string
   narrativeRatioGuidance?: string
+  storyPacingGuidance?: string
+  hookContinuityGuidance?: string
+  expressionDedupGuidance?: string
+  summaryHealthGuidance?: string
+  voiceEvolutionGuidance?: string
   protagonistReference: string
   protagonistRule: string
   promptTier?: PromptTier
@@ -1307,6 +1335,7 @@ export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
     section('关键物品与去向', params.itemSummary),
     section('上一章关键先验', params.previousChapterContext),
     section('上章结尾', params.lastChapterEnding),
+    section('章节衔接桥', params.chapterBridgePlan),
     section('最近章节摘要', params.previousSummaries),
     section('连续性记忆', params.continuitySummary),
     section('必须承接', params.continuityNotes),
@@ -1316,10 +1345,16 @@ export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
     section('时间轴待回收', params.timelineOpenThreads),
     section('活跃支线与伏笔', params.activeThreads),
     section('POV 约束', params.povGuidance),
+    section('POV 轮转建议', params.povRotationGuidance),
     section('感官雷达', params.sensoryGuidance),
     section('叙事比例', params.narrativeRatioGuidance),
+    section('节奏曲线', params.storyPacingGuidance),
+    section('钩子连续性', params.hookContinuityGuidance),
     section('长文压缩记忆', params.longTermMemory),
     section('向量召回记忆', params.recalledMemory),
+    section('跨章表达去重', params.expressionDedupGuidance),
+    section('摘要健康', params.summaryHealthGuidance),
+    section('角色声音进化', params.voiceEvolutionGuidance),
     section('当前结构体检提醒', params.consistencyNotes),
     section('计划要求', [
       '拆成 4 到 7 个场景或连续段落，每一段都要能直接落成正文。',
@@ -1382,8 +1417,12 @@ export function buildChapterWritingPrompt(params: ChapterWritingPromptInput): st
     section('时间轴待回收事项', params.timelineOpenThreads),
     section('活跃支线与伏笔', params.activeThreads),
     section('POV 约束', params.povGuidance),
+    section('POV 轮转建议', params.povRotationGuidance),
     section('感官雷达', params.sensoryGuidance),
     section('叙事比例', params.narrativeRatioGuidance),
+    section('章节衔接桥', params.chapterBridgePlan),
+    section('节奏曲线', params.storyPacingGuidance),
+    section('钩子连续性', params.hookContinuityGuidance),
     section('上一章关键先验', params.previousChapterContext),
     section('上章结尾', params.lastChapterEnding),
     section('当前人物状态', params.characterStates),
@@ -1394,6 +1433,9 @@ export function buildChapterWritingPrompt(params: ChapterWritingPromptInput): st
     section('近章摘要', params.previousSummaries),
     section('连续性记忆', params.continuitySummary),
     section('向量召回记忆', params.recalledMemory),
+    section('跨章表达去重', params.expressionDedupGuidance),
+    section('摘要健康', params.summaryHealthGuidance),
+    section('角色声音进化', params.voiceEvolutionGuidance),
     section('文风参考', params.styleTemplate),
     section('写作要求', [
       '先把事件链、动作链和后果链写顺，再让情绪自然浮出来。',
@@ -1443,6 +1485,7 @@ export function buildChapterDraftPrompt(params: ChapterRewritePromptInput): stri
     section('关键物品与去向', params.itemSummary),
     section('上一章关键先验', params.previousChapterContext),
     section('上章结尾', params.lastChapterEnding),
+    section('章节衔接桥', params.chapterBridgePlan),
     section('最近章节摘要', params.previousSummaries),
     section('连续性记忆', params.continuitySummary),
     section('必须承接', params.continuityNotes),
@@ -1452,10 +1495,16 @@ export function buildChapterDraftPrompt(params: ChapterRewritePromptInput): stri
     section('时间轴待回收', params.timelineOpenThreads),
     section('活跃支线与伏笔', params.activeThreads),
     section('POV 约束', params.povGuidance),
+    section('POV 轮转建议', params.povRotationGuidance),
     section('感官雷达', params.sensoryGuidance),
     section('叙事比例', params.narrativeRatioGuidance),
+    section('节奏曲线', params.storyPacingGuidance),
+    section('钩子连续性', params.hookContinuityGuidance),
     section('长文压缩记忆', params.longTermMemory),
     section('向量召回记忆', params.recalledMemory),
+    section('跨章表达去重', params.expressionDedupGuidance),
+    section('摘要健康', params.summaryHealthGuidance),
+    section('角色声音进化', params.voiceEvolutionGuidance),
     section('结构体检提醒', params.consistencyNotes),
     section('近期结构告警', params.structuralAlertsSummary),
     section('初稿要求', [
@@ -1512,8 +1561,15 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
     section('长期记忆', params.longTermMemory),
     section('向量召回记忆', params.recalledMemory),
     section('POV 约束', params.povGuidance),
+    section('POV 轮转建议', params.povRotationGuidance),
     section('感官雷达', params.sensoryGuidance),
     section('叙事比例', params.narrativeRatioGuidance),
+    section('章节衔接桥', params.chapterBridgePlan),
+    section('节奏曲线', params.storyPacingGuidance),
+    section('钩子连续性', params.hookContinuityGuidance),
+    section('跨章表达去重', params.expressionDedupGuidance),
+    section('摘要健康', params.summaryHealthGuidance),
+    section('角色声音进化', params.voiceEvolutionGuidance),
     section('结构体检提醒', params.consistencyNotes),
     section('近期结构告警', params.structuralAlertsSummary),
     section('待审初稿', params.draftContent),
@@ -1594,6 +1650,7 @@ export function buildChapterRewritePrompt(params: ChapterRewritePromptInput): st
     section('关键物品与去向', params.itemSummary),
     section('上一章关键先验', params.previousChapterContext),
     section('上章结尾', params.lastChapterEnding),
+    section('章节衔接桥', params.chapterBridgePlan),
     section('近章摘要', params.previousSummaries),
     section('连续性记忆', params.continuitySummary),
     section('必须承接', params.continuityNotes),
@@ -1604,8 +1661,14 @@ export function buildChapterRewritePrompt(params: ChapterRewritePromptInput): st
     section('长期记忆', params.longTermMemory),
     section('向量召回记忆', params.recalledMemory),
     section('POV 约束', params.povGuidance),
+    section('POV 轮转建议', params.povRotationGuidance),
     section('感官雷达', params.sensoryGuidance),
     section('叙事比例', params.narrativeRatioGuidance),
+    section('节奏曲线', params.storyPacingGuidance),
+    section('钩子连续性', params.hookContinuityGuidance),
+    section('跨章表达去重', params.expressionDedupGuidance),
+    section('摘要健康', params.summaryHealthGuidance),
+    section('角色声音进化', params.voiceEvolutionGuidance),
     section('结构体检提醒', params.consistencyNotes),
     section('近期结构告警', params.structuralAlertsSummary),
     section('重写要求', [

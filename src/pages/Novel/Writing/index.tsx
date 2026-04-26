@@ -32,11 +32,14 @@ import {
 } from '../../../shared/story-settings'
 import type {
   Chapter,
+  ChapterBridgePlan,
   ChapterContractAudit,
   ChapterContractValidationResult,
   ChapterContextPreview,
   ChapterPublishCheck,
   ChapterSegment,
+  ExpressionDedupReport,
+  HookContinuitySnapshot,
   Task,
   ChapterVersion,
   Character,
@@ -46,6 +49,7 @@ import type {
   NovelContextStatus,
   ParallelGenerationPlan,
   QualityDashboardData,
+  SummaryHealthReport,
   StoryFact,
   StoryFactCharacterKnowledge,
   StoryItem,
@@ -257,6 +261,10 @@ const parseContinuity = (raw?: string) => { try { return raw ? JSON.parse(raw) a
 const parseScenePlan = (raw?: string) => { try { const parsed = raw ? JSON.parse(raw) : []; return Array.isArray(parsed) ? parsed as ScenePlanStep[] : [] } catch { return [] } }
 const parseReviewNotes = (raw?: string) => { try { return raw ? JSON.parse(raw) as ReviewNotes : null } catch { return null } }
 const parseContractAudit = (raw?: string) => { try { return raw ? JSON.parse(raw) as ChapterContractAudit : null } catch { return null } }
+const parseBridgePlan = (raw?: string) => { try { return raw ? JSON.parse(raw) as ChapterBridgePlan : null } catch { return null } }
+const parseSummaryHealth = (raw?: string) => { try { return raw ? JSON.parse(raw) as SummaryHealthReport : null } catch { return null } }
+const parseExpressionDedup = (raw?: string) => { try { return raw ? JSON.parse(raw) as ExpressionDedupReport : null } catch { return null } }
+const parseHookContinuity = (raw?: string) => { try { return raw ? JSON.parse(raw) as HookContinuitySnapshot : null } catch { return null } }
 const countWords = (text: string) => ((text.match(/[一-龥]/g) || []).length + (text.match(/\b[a-zA-Z]+\b/g) || []).length)
 const formatChapterNumber = (chapterNum?: number) => typeof chapterNum === 'number' ? `第${chapterNum}章` : '章节号待补'
 const getStatusLabel = (status?: Chapter['status']) => STATUS_OPTIONS.find((item) => item.value === status)?.label || '未设置'
@@ -1478,6 +1486,10 @@ export default function Writing({ novelId }: Props) {
   const continuity = useMemo(() => parseContinuity(currentChapter?.continuityStateJson), [currentChapter?.continuityStateJson])
   const scenePlan = useMemo(() => parseScenePlan(currentChapter?.scenePlanJson), [currentChapter?.scenePlanJson])
   const reviewNotes = useMemo(() => parseReviewNotes(currentChapter?.reviewNotesJson), [currentChapter?.reviewNotesJson])
+  const bridgePlan = useMemo(() => parseBridgePlan(currentChapter?.bridgePlanJson), [currentChapter?.bridgePlanJson])
+  const summaryHealth = useMemo(() => parseSummaryHealth(currentChapter?.summaryHealthJson), [currentChapter?.summaryHealthJson])
+  const expressionDedup = useMemo(() => parseExpressionDedup(currentChapter?.expressionDedupJson), [currentChapter?.expressionDedupJson])
+  const hookContinuity = useMemo(() => parseHookContinuity(currentChapter?.hookContinuityJson), [currentChapter?.hookContinuityJson])
   const currentContractAudit = useMemo(
     () => publishCheck?.contractAudit || parseContractAudit(currentChapter?.contractAuditJson),
     [currentChapter?.contractAuditJson, publishCheck],
@@ -1535,6 +1547,19 @@ export default function Writing({ novelId }: Props) {
     ...(continuity?.open_loops || []).map((item) => `未回收线索：${item}`),
     ...(continuity?.continuity_notes || []).map((item) => `承接提示：${item}`),
     continuity?.arc_progress ? `故事弧推进：${continuity.arc_progress}` : '',
+  ].filter(Boolean)
+  const bridgeItems = [
+    bridgePlan?.locationTransition ? `地点承接：${bridgePlan.locationTransition}` : '',
+    bridgePlan?.timeJump ? `时间承接：${bridgePlan.timeJump}` : '',
+    bridgePlan?.emotionCarry ? `情绪承接：${bridgePlan.emotionCarry}` : '',
+    bridgePlan?.firstSceneConstraint ? `首场景约束：${bridgePlan.firstSceneConstraint}` : '',
+  ].filter(Boolean)
+  const qualityFocusItems = [
+    summaryHealth ? `摘要健康：${summaryHealth.status} · 密度 ${summaryHealth.densityScore} / 实体 ${summaryHealth.entityCoverageScore} / 事件 ${summaryHealth.eventCoverageScore}` : '',
+    summaryHealth?.warnings?.[0] ? `摘要提醒：${summaryHealth.warnings[0]}` : '',
+    expressionDedup?.summary ? `跨章复用：${expressionDedup.summary}` : '',
+    hookContinuity?.warning ? `钩子连续性：${hookContinuity.warning}` : (hookContinuity ? `钩子强度：${hookContinuity.hookStrengthScore}` : ''),
+    qualityDashboard?.voiceEvolutionSummary?.summary || '',
   ].filter(Boolean)
 
   const relatedInsightItems = [
@@ -1695,6 +1720,8 @@ export default function Writing({ novelId }: Props) {
           summary={currentChapter?.summary}
           nextChapterSeed={currentChapter?.nextChapterSeed}
           continuityItems={continuityItems}
+          bridgeItems={bridgeItems}
+          qualityItems={qualityFocusItems}
         />
         <InsightCard title="场景拆解" eyebrow="执行顺序">
           {scenePlan.length > 0 ? <div className="novel-scene-list">{scenePlan.map((scene) => <div key={`${scene.scene_order}-${scene.scene_title}`} className="novel-scene-card"><div className="novel-scene-card__header"><span>{`场景 ${String(scene.scene_order).padStart(2, '0')}`}</span><strong>{scene.scene_title}</strong></div><div className="novel-scene-card__body"><div>{scene.purpose}</div>{scene.location ? <div>地点：{scene.location}</div> : null}{scene.time_anchor ? <div>时间：{scene.time_anchor}</div> : null}{scene.present_characters?.length ? <div>人物：{scene.present_characters.join('、')}</div> : null}{scene.key_items?.length ? <div>道具：{scene.key_items.join('、')}</div> : null}{scene.must_cover?.length ? <div>必须覆盖：{scene.must_cover.join('、')}</div> : null}</div></div>)}</div> : <div className="novel-copy-block">先运行章节流水线，系统会按合同拆出场景计划后在这里核对。</div>}
@@ -3416,22 +3443,30 @@ function ChapterFocusCard({
   summary,
   nextChapterSeed,
   continuityItems,
+  bridgeItems,
+  qualityItems,
 }: {
   summary?: string | null
   nextChapterSeed?: string | null
   continuityItems: string[]
+  bridgeItems: string[]
+  qualityItems: string[]
 }) {
   const hasSummary = Boolean(summary?.trim())
   const hasNextChapterSeed = Boolean(nextChapterSeed?.trim())
   const hasContinuity = continuityItems.length > 0
+  const hasBridge = bridgeItems.length > 0
+  const hasQuality = qualityItems.length > 0
 
   return (
     <InsightCard title="本章聚焦" eyebrow="主线锚点" tone="hero">
-      {hasSummary || hasNextChapterSeed || hasContinuity ? (
+      {hasSummary || hasNextChapterSeed || hasContinuity || hasBridge || hasQuality ? (
         <div className="novel-writing-shell__focus-card">
           {hasSummary ? <section className="novel-writing-shell__focus-block"><div className="novel-writing-shell__focus-label">一句话摘要</div><div className="novel-writing-shell__focus-copy">{summary}</div></section> : null}
           {hasNextChapterSeed ? <section className="novel-writing-shell__focus-block novel-writing-shell__focus-block--accent"><div className="novel-writing-shell__focus-label">下一章引子</div><div className="novel-writing-shell__focus-copy">{nextChapterSeed}</div></section> : null}
+          {hasBridge ? <section className="novel-writing-shell__focus-notes"><div className="novel-writing-shell__focus-label">章节衔接桥</div><div className="novel-insight-list">{bridgeItems.map((item, index) => <div key={`${item}-${index}`} className="novel-insight-list__item novel-insight-list__item--compact">{item}</div>)}</div></section> : null}
           {hasContinuity ? <section className="novel-writing-shell__focus-notes"><div className="novel-writing-shell__focus-label">连续性提醒</div><div className="novel-insight-list">{continuityItems.map((item, index) => <div key={`${item}-${index}`} className="novel-insight-list__item novel-insight-list__item--compact">{item}</div>)}</div></section> : null}
+          {hasQuality ? <section className="novel-writing-shell__focus-notes"><div className="novel-writing-shell__focus-label">健康提示</div><div className="novel-insight-list">{qualityItems.map((item, index) => <div key={`${item}-${index}`} className="novel-insight-list__item novel-insight-list__item--compact">{item}</div>)}</div></section> : null}
         </div>
       ) : <div className="novel-copy-block">章节流水线完成后，会在这里收束本章摘要、承接提醒与下一章引子。</div>}
     </InsightCard>

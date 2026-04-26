@@ -1,6 +1,6 @@
 ﻿import { eq } from 'drizzle-orm'
 import { getDb } from '../database/db'
-import { promptOverrides } from '../database/schema'
+import { promptOverrideAudits, promptOverrides } from '../database/schema'
 import { throwUserFacingError } from '../utils/user-facing-error'
 
 function normalizeText(value: string): string {
@@ -34,12 +34,56 @@ export interface PromptOverrideRecord {
   updatedAt: string
 }
 
+const CHAPTER_PROMPT_KEYS = new Set([
+  'scenePlan',
+  'chapterDraft',
+  'chapterWriting',
+  'chapterReview',
+  'chapterRewrite',
+])
+
+const PROTECTED_RULES = [
+  '不可覆盖规则：保留反 AI 味禁用表达与“动作/细节替代抽象情绪”的要求。',
+  '不可覆盖规则：保留角色差异化与 Voice Lock，不允许所有角色说成同一语气。',
+  '不可覆盖规则：保留 POV 边界，只能写当前视角已知信息，禁止段内偷切视角。',
+  '不可覆盖规则：保留锁定段落逐字不改的要求，只能调整周边衔接。',
+  '不可覆盖规则：保留章节开头承接上章结尾、章尾留下自然钩子的要求。',
+]
+
 function normalizeRecord(row: typeof promptOverrides.$inferSelect): PromptOverrideRecord {
   return {
     key: row.key,
     content: row.content,
     updatedAt: row.updatedAt || '',
   }
+}
+
+function clipPreview(value: string): string {
+  const normalized = normalizeText(value)
+  if (normalized.length <= 220) return normalized
+  return `${normalized.slice(0, 219).trim()}…`
+}
+
+function getProtectedRuleCount(key: string): number {
+  return CHAPTER_PROMPT_KEYS.has(key) ? PROTECTED_RULES.length : 0
+}
+
+function recordAudit(key: string, action: 'save' | 'delete' | 'apply', contentPreview = ''): void {
+  const db = getDb()
+  db.insert(promptOverrideAudits).values({
+    key,
+    action,
+    protectedRuleCount: getProtectedRuleCount(key),
+    contentPreview: contentPreview ? clipPreview(contentPreview) : null,
+  }).run()
+}
+
+function buildProtectedFooter(key: string): string {
+  if (!CHAPTER_PROMPT_KEYS.has(key)) return ''
+  return [
+    '【系统保留规则】',
+    ...PROTECTED_RULES.map((item) => `- ${item}`),
+  ].join('\n')
 }
 
 export function listPromptOverrides(): PromptOverrideRecord[] {
@@ -73,6 +117,7 @@ export function savePromptOverride(key: string, content: string): void {
       content: normalizedContent,
       updatedAt: now,
     }).where(eq(promptOverrides.key, normalizedKey)).run()
+    recordAudit(normalizedKey, 'save', normalizedContent)
     return
   }
 
@@ -81,11 +126,14 @@ export function savePromptOverride(key: string, content: string): void {
     content: normalizedContent,
     updatedAt: now,
   }).run()
+  recordAudit(normalizedKey, 'save', normalizedContent)
 }
 
 export function deletePromptOverride(key: string): void {
   const db = getDb()
-  db.delete(promptOverrides).where(eq(promptOverrides.key, key.trim())).run()
+  const normalizedKey = key.trim()
+  db.delete(promptOverrides).where(eq(promptOverrides.key, normalizedKey)).run()
+  recordAudit(normalizedKey, 'delete')
 }
 
 export function applyPromptOverride(
@@ -98,7 +146,13 @@ export function applyPromptOverride(
     return fallback
   }
 
-  return override.content.replace(/\{([a-zA-Z0-9_]+)\}/g, (_match, token: string) => {
+  const overridden = override.content.replace(/\{([a-zA-Z0-9_]+)\}/g, (_match, token: string) => {
     return stringifyParam(params[token])
   })
+  const protectedFooter = buildProtectedFooter(key)
+  const finalPrompt = protectedFooter
+    ? `${overridden}\n\n${protectedFooter}`
+    : overridden
+  recordAudit(key, 'apply', finalPrompt)
+  return finalPrompt
 }

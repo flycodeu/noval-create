@@ -100,6 +100,8 @@ const api = {
     reorderSegments: (chapterId: number, orderedIds: number[]) => invokeIpc('structure:reorderSegments', chapterId, orderedIds),
     compileChapter: (chapterId: number) => invokeIpc('structure:compileChapter', chapterId),
     refreshCheckpoints: (novelId: number) => invokeIpc('structure:refreshCheckpoints', novelId),
+    getLinkageSummary: (novelId: number) => invokeIpc('structure:getLinkageSummary', novelId),
+    syncLinkage: (novelId: number) => invokeIpc('structure:syncLinkage', novelId),
     clear: (novelId: number) => invokeIpc('structure:clear', novelId),
     applyBatchPlan: (novelId: number, plan: unknown) => invokeIpc('structure:applyBatchPlan', novelId, plan),
     previewBatchEdit: (novelId: number, operations: unknown[]) => invokeIpc('structure:previewBatchEdit', novelId, operations),
@@ -315,6 +317,8 @@ const api = {
     getLatestAutoGenerateTask: (novelId: number) => invokeIpc('item:getLatestAutoGenerateTask', novelId),
     resumeAutoGenerate: (taskId: number) => invokeIpc('item:resumeAutoGenerate', taskId),
     regenerate: (id: number, options?: unknown) => invokeIpc('item:regenerate', id, options),
+    getLinkRecommendations: (itemId: number) => invokeIpc('item:getLinkRecommendations', itemId),
+    applyLinkRecommendations: (itemId: number, data: unknown) => invokeIpc('item:applyLinkRecommendations', itemId, data),
     clear: (novelId: number) => invokeIpc('item:clear', novelId),
   },
 

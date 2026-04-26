@@ -174,6 +174,7 @@ export const USER_FACING_MESSAGES = {
   'worldRules.factionMissing': '未生成可用的种族或势力',
   'worldRules.ecologyMissing': '未生成可用的人物生态',
   'worldRules.mapBlueprintMissing': '未生成可用的地图蓝图',
+  'worldRules.dynamicsMissing': '未生成可用的气候或经济动态',
   'worldRules.timelineRuleMissing': '未生成可用的时间规则',
   'worldRules.styleConstraintMissing': '未生成可用的文风约束',
   'worldRules.targetSectionMissing': '缺少目标分区',
