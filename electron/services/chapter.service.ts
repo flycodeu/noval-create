@@ -121,6 +121,17 @@ import {
 import { persistChapterRecallRuntimeSnapshot } from './chapter-recall-runtime.service'
 import { persistAntiAiRuleHits } from './anti-ai-rule.service'
 import { syncFeedbackRecurrenceState } from './feedback-recurrence.service'
+import {
+  buildAdaptiveRewritePolicy,
+  buildReviewPriorityPrompt,
+  buildReviewPrioritySummary,
+  buildRewriteMiniReviewVerdict,
+} from './chapter-pipeline-policy.service'
+import { listPromptOverrides } from './prompt-override.service'
+import {
+  buildVariationDigest,
+  isCandidateTooSimilar,
+} from './variation-control.service'
 import type {
   AiContextAssemblyReport,
   AiExecutionMode,
@@ -932,6 +943,12 @@ function buildChapterAiStageReports(
   executionMode: AiExecutionMode,
   resolutionSource: 'request_override' | 'global_default' | 'fallback_default',
   modelConfigId?: number | null,
+  options: {
+    rewriteTemperatureCap?: number
+    rewriteContextStrategy?: 'balanced' | 'max_coverage'
+    rewriteReviewDepth?: 'standard' | 'deep'
+    rewriteReasons?: string[]
+  } = {},
 ): AiStageExecutionReport[] {
   const plannerRoute = buildAiModelRouteReport({
     taskKind: 'chapter_planning',
@@ -960,6 +977,10 @@ function buildChapterAiStageReports(
     executionMode,
     resolutionSource,
     modelConfigId,
+    temperatureCap: options.rewriteTemperatureCap,
+    contextStrategy: options.rewriteContextStrategy,
+    reviewDepth: options.rewriteReviewDepth,
+    extraReasons: options.rewriteReasons,
   })
   const finalizeRoute = buildAiModelRouteReport({
     taskKind: 'chapter_finalize',
@@ -1016,6 +1037,20 @@ function buildChapterAiStageReports(
       route: finalizeRoute,
     }),
   ]
+}
+
+const CHAPTER_PIPELINE_PROMPT_KEYS = new Set([
+  'scenePlan',
+  'chapterDraft',
+  'chapterWriting',
+  'chapterReview',
+  'chapterRewrite',
+])
+
+function getActiveChapterPromptOverrideKeys(): string[] {
+  return listPromptOverrides()
+    .map((record) => record.key)
+    .filter((key) => CHAPTER_PIPELINE_PROMPT_KEYS.has(key))
 }
 
 function getCompletedPipelineRoleCount(snapshot: ChapterPipelineSnapshot): number {
@@ -2315,6 +2350,8 @@ interface ChapterRepairInput {
   content: string
   lockedParagraphs: string[]
   promptTier: ChapterComplexity
+  attemptNumber?: number
+  rejectedDigests?: string[]
 }
 
 async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
@@ -2389,6 +2426,8 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
           protagonistReference: input.profile.protagonistReference,
           protagonistRule: input.profile.protagonistRule,
           promptTier: input.promptTier,
+          attemptNumber: input.attemptNumber,
+          rejectedDigests: input.rejectedDigests,
         }),
       }],
       modelConfigId: input.novel.modelConfigId || undefined,
@@ -2480,6 +2519,11 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
               protagonistReference: input.profile.protagonistReference,
               protagonistRule: input.profile.protagonistRule,
               promptTier: input.promptTier,
+              attemptNumber: (input.attemptNumber || 1) + 1,
+              rejectedDigests: [
+                ...(input.rejectedDigests || []),
+                buildVariationDigest(protectedRepaired.content),
+              ],
             }),
           }],
           modelConfigId: input.novel.modelConfigId || undefined,
@@ -3182,6 +3226,36 @@ function resolveContextBudgetForStage(
   return Math.max(7000, baseByStage[stage] + complexityOffset[complexity] + largeChapterOffset + novelScaleOffset)
 }
 
+function allocateStageContextForPipeline(
+  rawContext: Awaited<ReturnType<typeof collectChapterContextRawData>>,
+  chapter: typeof chapters.$inferSelect,
+  complexity: ChapterComplexity,
+  promptProfile: ChapterContextStage,
+  totalBudget?: number,
+): ChapterContext {
+  const novelTargetWords = rawContext.novel.targetWords || 0
+  try {
+    return allocateChapterContext(rawContext, {
+      promptProfile,
+      chapterComplexity: complexity,
+      totalBudget: totalBudget || resolveContextBudgetForStage(
+        promptProfile,
+        complexity,
+        chapter.targetWords || 3000,
+        novelTargetWords,
+      ),
+    })
+  } catch (error) {
+    if (error instanceof HardConstraintOverflowError) {
+      throw error
+    }
+    if (error instanceof ContextOverflowError) {
+      return error.context
+    }
+    throw error
+  }
+}
+
 function buildStageContextMap(
   rawContext: Awaited<ReturnType<typeof collectChapterContextRawData>>,
   chapter: typeof chapters.$inferSelect,
@@ -3196,32 +3270,14 @@ function buildStageContextMap(
     outlineMentionedCharacterCount: rawContext.outlineMentionedCharacterCount,
     activeThreadPressureCount: rawContext.activeThreadPressureCount,
   })
-  const novelTargetWords = rawContext.novel.targetWords || 0
-  const buildStageContext = (promptProfile: ChapterContextStage) => {
-    try {
-      return allocateChapterContext(rawContext, {
-        promptProfile,
-        chapterComplexity: complexity,
-        totalBudget: resolveContextBudgetForStage(promptProfile, complexity, chapter.targetWords || 3000, novelTargetWords),
-      })
-    } catch (error) {
-      if (error instanceof HardConstraintOverflowError) {
-        throw error
-      }
-      if (error instanceof ContextOverflowError) {
-        return error.context
-      }
-      throw error
-    }
-  }
 
   return {
     complexity,
     contexts: {
-      scenePlan: buildStageContext('scenePlan'),
-      draft: buildStageContext('draft'),
-      review: buildStageContext('review'),
-      rewrite: buildStageContext('rewrite'),
+      scenePlan: allocateStageContextForPipeline(rawContext, chapter, complexity, 'scenePlan'),
+      draft: allocateStageContextForPipeline(rawContext, chapter, complexity, 'draft'),
+      review: allocateStageContextForPipeline(rawContext, chapter, complexity, 'review'),
+      rewrite: allocateStageContextForPipeline(rawContext, chapter, complexity, 'rewrite'),
     },
   }
 }
@@ -3240,14 +3296,9 @@ function buildPreviewStageContextMap(
     outlineMentionedCharacterCount: rawContext.outlineMentionedCharacterCount,
     activeThreadPressureCount: rawContext.activeThreadPressureCount,
   })
-  const novelTargetWords = rawContext.novel.targetWords || 0
   const buildStageContext = (promptProfile: ChapterContextStage) => {
     try {
-      return allocateChapterContext(rawContext, {
-        promptProfile,
-        chapterComplexity: complexity,
-        totalBudget: resolveContextBudgetForStage(promptProfile, complexity, chapter.targetWords || 3000, novelTargetWords),
-      })
+      return allocateStageContextForPipeline(rawContext, chapter, complexity, promptProfile)
     } catch (error) {
       if (error instanceof ContextOverflowError || error instanceof HardConstraintOverflowError) {
         return error.context
@@ -3555,12 +3606,13 @@ export async function generateChapterContent(
     const scenePlanContext = contexts.scenePlan
     const draftContext = contexts.draft
     const reviewContext = contexts.review
-    const rewriteContext = contexts.rewrite
+    let rewriteContext = contexts.rewrite
     const linkedImpacts = listActiveImpactsForChapter(chapter.novelId, chapter.id)
     const usageSnapshot = buildWritingContextUsageSnapshot(rawContext, draftContext, linkedImpacts)
     const contextAssemblyReport = buildChapterContextAssemblyReport(draftContext, usageSnapshot)
     const authorStyleLock = buildAuthorStyleLockSummary(chapter.novelId, novel.themeVoiceJson)
-    const stageReports = buildChapterAiStageReports(
+    const activePromptOverrideKeys = getActiveChapterPromptOverrideKeys()
+    let stageReports = buildChapterAiStageReports(
       executionModeResolution.mode,
       executionModeResolution.source,
       novel.modelConfigId || undefined,
@@ -3568,8 +3620,7 @@ export async function generateChapterContent(
     const plannerChatOpts = buildChatOptionsFromRoute(stageReports[0].route)
     const writerChatOpts = buildChatOptionsFromRoute(stageReports[1].route)
     const criticChatOpts = buildChatOptionsFromRoute(stageReports[2].route)
-    const rewriterChatOpts = buildChatOptionsFromRoute(stageReports[3].route)
-    const generationExplainability = buildAiExplainabilityReport({
+    let generationExplainability = buildAiExplainabilityReport({
       taskKind: 'chapter_generation',
       executionMode: executionModeResolution.mode,
       usageSnapshot,
@@ -3581,6 +3632,7 @@ export async function generateChapterContent(
         '审校意见 JSON',
         'Canon 差异草案',
       ],
+      activePromptOverrideKeys,
     })
     logConstraintInjectionStatus('scenePlan', scenePlanContext)
     logConstraintInjectionStatus('draft', draftContext)
@@ -4023,6 +4075,53 @@ export async function generateChapterContent(
     }))
     updateChapter(chapterId, { reviewNotesJson: JSON.stringify(reviewNotes) })
     finishRoleTask('critic', criticTaskId, 'Critic 审校完成，已生成本章修订意见。')
+    const reviewPrioritySummary = buildReviewPrioritySummary(reviewNotes)
+    const rewritePolicy = buildAdaptiveRewritePolicy(reviewPrioritySummary)
+    if (rewritePolicy.contextBudgetMultiplier > 1) {
+      rewriteContext = allocateStageContextForPipeline(
+        rawContext,
+        chapter,
+        complexity,
+        'rewrite',
+        Math.round(resolveContextBudgetForStage(
+          'rewrite',
+          complexity,
+          chapter.targetWords || 3000,
+          rawContext.novel.targetWords || 0,
+        ) * rewritePolicy.contextBudgetMultiplier),
+      )
+      logConstraintInjectionStatus('rewrite', rewriteContext)
+    }
+    stageReports = buildChapterAiStageReports(
+      executionModeResolution.mode,
+      executionModeResolution.source,
+      novel.modelConfigId || undefined,
+      {
+        rewriteTemperatureCap: rewritePolicy.temperatureCap,
+        rewriteContextStrategy: rewritePolicy.contextStrategy,
+        rewriteReviewDepth: rewritePolicy.reviewDepth,
+        rewriteReasons: rewritePolicy.reasons,
+      },
+    )
+    generationExplainability = buildAiExplainabilityReport({
+      taskKind: 'chapter_generation',
+      executionMode: executionModeResolution.mode,
+      usageSnapshot,
+      stageReports,
+      contextAssemblyReport,
+      authorStyleLock,
+      structuredOutputs: [
+        '场景计划 JSON',
+        '审校意见 JSON',
+        'Canon 差异草案',
+      ],
+      activePromptOverrideKeys,
+    })
+    snapshot = {
+      ...snapshot,
+      generationExplainability,
+    }
+    syncWorkflowTask()
     const rewritePacingCurve = buildStoryPacingCurve(
       chapter.novelId,
       chapter.chapterNum,
@@ -4034,23 +4133,29 @@ export async function generateChapterContent(
       lockedParagraphContext.promptDraftContent,
       reviewNotes.chapter_function_primary || reviewNotes.pace_marker,
     ))
-
-    const prompt = buildChapterRewritePrompt({
-      novelTitle: novel.title,
-      genre: profile.genre,
-      chapterNum: chapter.chapterNum,
-      chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
-      chapterGoal: rewriteContext.chapterGoal,
-      hardConstraintContext: rewriteContext.hardConstraintContext,
-      dialogueVoiceLocks: rewriteContext.dialogueVoiceLocks,
-      emotionTone: chapter.emotionTone || '平稳',
-      targetWords: chapter.targetWords || 3000,
-      storyCore,
-      writingContractSummary: rewriteContext.writingContractSummary,
-      relationSummary: rewriteContext.relationSummary,
-      currentArc: rewriteContext.currentArc,
-      worldRules: rewriteContext.worldRules,
-      characterStates: rewriteContext.characterStates,
+    const rewriterChatOpts = buildChatOptionsFromRoute(stageReports[3].route)
+    const prioritizedReviewNotesText = [
+      buildReviewPriorityPrompt(reviewPrioritySummary),
+      formatReviewNotes(reviewNotes),
+    ].filter(Boolean).join('\n\n')
+    const buildRewriteMessages = (attemptNumber = 1, rejectedDigests: string[] = []) => ([{
+      role: 'user' as const,
+      content: buildChapterRewritePrompt({
+        novelTitle: novel.title,
+        genre: profile.genre,
+        chapterNum: chapter.chapterNum,
+        chapterTitle: chapter.title || getDefaultChapterTitle(chapter.chapterNum),
+        chapterGoal: rewriteContext.chapterGoal,
+        hardConstraintContext: rewriteContext.hardConstraintContext,
+        dialogueVoiceLocks: rewriteContext.dialogueVoiceLocks,
+        emotionTone: chapter.emotionTone || '平稳',
+        targetWords: chapter.targetWords || 3000,
+        storyCore,
+        writingContractSummary: rewriteContext.writingContractSummary,
+        relationSummary: rewriteContext.relationSummary,
+        currentArc: rewriteContext.currentArc,
+        worldRules: rewriteContext.worldRules,
+        characterStates: rewriteContext.characterStates,
         worldStates: rewriteContext.worldStates,
         itemSummary: rewriteContext.itemSummary,
         previousSummaries: rewriteContext.previousSummaries,
@@ -4058,34 +4163,39 @@ export async function generateChapterContent(
         lastChapterEnding: rewriteContext.lastChapterEnding,
         chapterBridgePlan: chapterBridgePlanText,
         continuitySummary: rewriteContext.continuitySummary,
-      openLoops: rewriteContext.openLoops,
-      dueForeshadows: rewriteContext.dueForeshadows,
-      continuityNotes: rewriteContext.continuityNotes,
-      timelineSummary: rewriteContext.timelineSummary,
-      timelineOpenThreads: rewriteContext.timelineOpenThreads,
-      longTermMemory: rewriteContext.longTermMemory,
-      recalledMemory: rewriteContext.recalledMemory,
-      consistencyNotes: rewriteWritingGuidance,
-      structuralAlertsSummary,
-      scenePlan: scenePlanText,
-      draftContent: lockedParagraphContext.promptDraftContent,
-      reviewNotes: formatReviewNotes(reviewNotes),
-      lockedParagraphs: lockedParagraphContext.lockedParagraphs,
-      activeThreads: rewriteContext.activeThreads,
-      ...rewriteNarrativeFields,
-      povRotationGuidance: formatPovRotationGuidance(povRotationPlan),
-      storyPacingGuidance: formatPacingGuidance(rewritePacingCurve),
-      hookContinuityGuidance: formatHookContinuityGuidance(baseHookContinuity),
-      expressionDedupGuidance: formatExpressionDedupGuidance(generationExpressionDedup),
-      summaryHealthGuidance: formatSummaryHealthGuidance(previousSummaryHealth),
-      voiceEvolutionGuidance: formatVoiceEvolutionGuidance(voiceEvolutionProfiles),
-      protagonistReference: profile.protagonistReference,
-      protagonistRule: profile.protagonistRule,
-      promptTier: complexity,
-    })
+        openLoops: rewriteContext.openLoops,
+        dueForeshadows: rewriteContext.dueForeshadows,
+        continuityNotes: rewriteContext.continuityNotes,
+        timelineSummary: rewriteContext.timelineSummary,
+        timelineOpenThreads: rewriteContext.timelineOpenThreads,
+        longTermMemory: rewriteContext.longTermMemory,
+        recalledMemory: rewriteContext.recalledMemory,
+        consistencyNotes: rewriteWritingGuidance,
+        structuralAlertsSummary,
+        scenePlan: scenePlanText,
+        draftContent: lockedParagraphContext.promptDraftContent,
+        reviewNotes: prioritizedReviewNotesText,
+        lockedParagraphs: lockedParagraphContext.lockedParagraphs,
+        activeThreads: rewriteContext.activeThreads,
+        ...rewriteNarrativeFields,
+        povRotationGuidance: formatPovRotationGuidance(povRotationPlan),
+        storyPacingGuidance: formatPacingGuidance(rewritePacingCurve),
+        hookContinuityGuidance: formatHookContinuityGuidance(baseHookContinuity),
+        expressionDedupGuidance: formatExpressionDedupGuidance(generationExpressionDedup),
+        summaryHealthGuidance: formatSummaryHealthGuidance(previousSummaryHealth),
+        voiceEvolutionGuidance: formatVoiceEvolutionGuidance(voiceEvolutionProfiles),
+        protagonistReference: profile.protagonistReference,
+        protagonistRule: profile.protagonistRule,
+        promptTier: complexity,
+        attemptNumber,
+        rejectedDigests,
+      }),
+    }])
 
-    const messages = [{ role: 'user' as const, content: prompt }]
-    const rewriterTaskId = await startRoleTask('rewriter', 'chapter_rewriter', 'Rewriter 正在按 Critic 结论修正文稿。', {
+    let rewriteAttemptNumber = 1
+    let rewriteRejectedDigests: string[] = []
+    let messages = buildRewriteMessages()
+    let rewriterTaskId = await startRoleTask('rewriter', 'chapter_rewriter', 'Rewriter 正在按 Critic 结论修正文稿。', {
       inputJson: JSON.stringify(messages),
       runnerType: 'stream',
     })
@@ -4099,7 +4209,7 @@ export async function generateChapterContent(
       })
       failRoleTask('rewriter', rewriterTaskId, error, { blocked: true })
     }
-    const rewriteResult = await executeStreamTask(rewriterTaskId, {
+    let rewriteResult = await executeStreamTask(rewriterTaskId, {
       type: 'chapter_rewriter',
       novelId: chapter.novelId,
       relatedEntityType: 'chapter',
@@ -4110,6 +4220,50 @@ export async function generateChapterContent(
       chatOpts: rewriterChatOpts,
       sender,
     })
+    if (
+      isCandidateTooSimilar(rewriteResult.output, [draftContent])
+      && (rewritePolicy.requiresFullRewrite || reviewPrioritySummary.counts.high > 0)
+    ) {
+      rewriteRejectedDigests = [buildVariationDigest(rewriteResult.output)]
+      updateTask(rewriterTaskId, {
+        pipelineStage: 'success',
+        outputText: '首轮重写与初稿过近，已切换变体重试。',
+        contractVersion,
+      })
+      updateTaskStatus(rewriterTaskId, 'success', sender, {
+        pipelineStage: 'success',
+        outputText: '首轮重写与初稿过近，已切换变体重试。',
+        errorMessage: null,
+      })
+      previousRoleTaskId = rewriterTaskId
+      rewriteAttemptNumber = 2
+      messages = buildRewriteMessages(rewriteAttemptNumber, rewriteRejectedDigests)
+      rewriterTaskId = await startRoleTask('rewriter', 'chapter_rewriter', 'Rewriter 首轮改写幅度不足，正在切到变体重试。', {
+        inputJson: JSON.stringify(messages),
+        runnerType: 'stream',
+      })
+      try {
+        assertContractDrivenWriterInputs('rewriter', contractVersion, rewriteContext.writingContractSummary, scenePlanText)
+      } catch (error) {
+        updateTaskStatus(rewriterTaskId, 'failed', sender, {
+          pipelineStage: 'blocked',
+          errorMessage: error instanceof Error ? error.message : 'Rewriter 缺少合同输入',
+          recoveryHintJson: serializeTaskRecoveryHint(buildChapterPipelineRecoveryHint(chapter.novelId, chapterId, 'rewriter')),
+        })
+        failRoleTask('rewriter', rewriterTaskId, error, { blocked: true })
+      }
+      rewriteResult = await executeStreamTask(rewriterTaskId, {
+        type: 'chapter_rewriter',
+        novelId: chapter.novelId,
+        relatedEntityType: 'chapter',
+        relatedEntityId: chapterId,
+        inputJson: JSON.stringify(messages),
+        messages,
+        modelConfigId: novel.modelConfigId || undefined,
+        chatOpts: rewriterChatOpts,
+        sender,
+      })
+    }
 
     const protectedOutput = enforceLockedParagraphProtection(
       rewriteResult.output,
@@ -4130,6 +4284,8 @@ export async function generateChapterContent(
       content: protectedOutput.content,
       lockedParagraphs: lockedParagraphContext.lockedParagraphs,
       promptTier: complexity,
+      attemptNumber: rewriteAttemptNumber,
+      rejectedDigests: rewriteRejectedDigests,
     })
     const repairedHumanizedReviewNotes = applyHumanizationAnalysisToReviewNotes(
       repaired.reviewNotes,
@@ -4157,6 +4313,28 @@ export async function generateChapterContent(
       content: repaired.content,
       reviewNotes: repairedStyleReviewNotes,
     }))
+    const finalReviewPrioritySummary = buildReviewPrioritySummary(finalReviewNotes)
+    const rewriteMiniReview = buildRewriteMiniReviewVerdict({
+      originalContent: draftContent,
+      rewrittenContent: repaired.content,
+      reviewPrioritySummary: finalReviewPrioritySummary,
+      reviewNotes: finalReviewNotes,
+    })
+    if (rewriteMiniReview.needsHumanReview) {
+      failRoleTask('rewriter', rewriterTaskId, new ChapterPipelineStageError(
+        'human_review_required',
+        `重写轻量复检未通过：${rewriteMiniReview.reason}`,
+        {
+          blocked: true,
+          rewriteScope: rewritePolicy.rewriteScope,
+          outputText: buildPipelineFailureOutput(
+            'human_review_required',
+            `重写轻量复检未通过：${rewriteMiniReview.reason}`,
+            { rewriteScope: rewritePolicy.rewriteScope },
+          ),
+        },
+      ), { blocked: true })
+    }
     persistAntiAiRuleHits({
       novelId: chapter.novelId,
       chapterId,
@@ -4292,7 +4470,11 @@ export async function generateChapterContent(
         .catch((err) => console.warn('[embedding] 向量生成失败（不影响主流程）:', err))
     }
 
-    const finalizeDetail = '章节已入稿，并刷新摘要、连续性与长期记忆。'
+    const finalizeDetail = [
+      '章节已入稿，并刷新摘要、连续性与长期记忆。',
+      publishCheck.summary ? `一致性快检：${publishCheck.summary}` : '',
+      result.nextChapterSeed ? `下一章开场建议：${result.nextChapterSeed}` : '',
+    ].filter(Boolean).join(' ')
     updateTaskStatus(finalizeTaskId, 'success', sender, {
       pipelineStage: 'success',
       contractVersion,
@@ -4313,7 +4495,11 @@ export async function generateChapterContent(
     }
     setWorkflowTaskStatus('success', {
       currentChildTaskId: null,
-      outputText: `第${chapter.chapterNum}章流水线完成。${result.summary ? ` 摘要：${result.summary}` : ''}`,
+      outputText: [
+        `第${chapter.chapterNum}章流水线完成。`,
+        result.summary ? `摘要：${result.summary}` : '',
+        result.nextChapterSeed ? `下一章开场建议：${result.nextChapterSeed}` : '',
+      ].filter(Boolean).join(' '),
       errorMessage: null,
       recoveryHintJson: null,
     })
@@ -4381,6 +4567,7 @@ export async function getChapterContextPreview(
   })
   const contextAssemblyReport = buildChapterContextAssemblyReport(contexts.draft, usageSnapshot)
   const authorStyleLock = buildAuthorStyleLockSummary(chapter.novelId, rawContext.novel.themeVoiceJson)
+  const activePromptOverrideKeys = getActiveChapterPromptOverrideKeys()
   const stageReports = buildChapterAiStageReports(
     executionModeResolution.mode,
     executionModeResolution.source,
@@ -4398,6 +4585,7 @@ export async function getChapterContextPreview(
       '审校意见 JSON',
       'Canon 差异草案',
     ],
+    activePromptOverrideKeys,
   })
 
   return {

@@ -195,6 +195,7 @@ export interface ChapterWritingPromptInput {
   protagonistRule: string
   promptTier?: PromptTier
   attemptNumber?: number
+  rejectedDigests?: string[]
 }
 
 export interface ScenePlanPromptInput {
@@ -243,6 +244,7 @@ export interface ScenePlanPromptInput {
   protagonistRule: string
   promptTier?: PromptTier
   attemptNumber?: number
+  rejectedDigests?: string[]
 }
 
 export interface ChapterReviewPromptInput {
@@ -288,6 +290,8 @@ export interface ChapterReviewPromptInput {
   protagonistReference: string
   protagonistRule: string
   promptTier?: PromptTier
+  attemptNumber?: number
+  rejectedDigests?: string[]
 }
 
 export interface ChapterRewritePromptInput {
@@ -339,6 +343,8 @@ export interface ChapterRewritePromptInput {
   protagonistReference: string
   protagonistRule: string
   promptTier?: PromptTier
+  attemptNumber?: number
+  rejectedDigests?: string[]
 }
 
 export interface ContinuityPromptInput {
@@ -1380,6 +1386,7 @@ export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
       '场景目标和冲突都写具体事实，不写“命运转折”“真正成长”这种空话。',
     ])),
     '只输出 JSON 数组：[{"scene_order":1,"scene_title":"场景名","purpose":"这一段必须完成什么","location":"地点或空间","time_anchor":"时间标签","present_characters":["人物A"],"key_items":["物品A"],"conflict":"这一段最直接的冲突","beat":"这一段发生的关键动作","must_cover":["必须交代1","必须交代2"],"climax_variant":"如果这一场承担高潮/爆发/反转，请写明确变体；否则留空字符串","exit_hook":"如何推到下一段"}]',
+    buildAvoidanceSection(params.rejectedDigests || []),
     params.attemptNumber && params.attemptNumber > 1 ? buildVariationHint(params.attemptNumber, 'outline') : '',
   ])
 }
@@ -1447,6 +1454,7 @@ export function buildChapterWritingPrompt(params: ChapterWritingPromptInput): st
       '遇到不准确搭配，优先改成读者最熟悉、最准确的常规说法。',
       '只输出正文，不要解释。',
     ].join('\n')),
+    buildAvoidanceSection(params.rejectedDigests || []),
     params.attemptNumber && params.attemptNumber > 1 ? buildVariationHint(params.attemptNumber, 'chapter') : '',
   ])
 }
@@ -1519,6 +1527,8 @@ export function buildChapterDraftPrompt(params: ChapterRewritePromptInput): stri
       '章节开头过渡：本章前 200 字必须自然衔接上章结尾的情境（时间、地点、情绪、未完成的动作），不能跳过不交代就进入新场景。',
       '只输出初稿正文，不要解释。',
     ].join('\n')),
+    buildAvoidanceSection(params.rejectedDigests || []),
+    params.attemptNumber && params.attemptNumber > 1 ? buildVariationHint(params.attemptNumber, 'chapter') : '',
   ])
 }
 
@@ -1610,6 +1620,8 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
       'revision_brief 用 60 到 120 字中文写清修改方向。',
     ].join('\n')),
     '只输出 JSON：{"summary":"总体判断","critical_fixes":["必改 1"],"continuity_risks":["连续性风险 1"],"arc_progress_risks":["故事弧推进风险 1"],"context_drift_risks":["漂移风险 1"],"realism_risks":["真实度风险 1"],"coherence_risks":["连贯性风险 1"],"reader_hook_risks":["追读风险 1"],"language_risks":["语言风险 1"],"human_language_repairs":["原说法 -> 更自然说法"],"genre_hollowing_risks":["体裁空心化风险 1"],"missing_payoffs":["未落地伏笔 1"],"strengths":["优点 1"],"severity":"medium","rewrite_required":true,"revision_brief":"修订方向摘要","protagonist_setback":"minor","setback_summary":"主角在关键交锋中被压制","cost_present":true,"cost_summary":"主角失去可靠盟友与补给","cost_resolution_state":"ongoing","reversal_marker":true,"reversal_summary":"看似得手后被埋伏反制","reversal_support_state":"supported","pace_marker":"reversal","reward_state":"partial","protagonist_pressure":72,"chapter_function_primary":"reversal","chapter_function_tags":["progression","reversal"],"dialogue_filler_risks":["对白空话 1"],"dialogue_info_density_risks":["信息推进不足 1"],"dialogue_voice_lock_summary":"本章需锁定林远与赵临的称呼和句长差异","required_voice_lock_character_ids":[1,2]}',
+    buildAvoidanceSection(params.rejectedDigests || []),
+    params.attemptNumber && params.attemptNumber > 1 ? buildVariationHint(params.attemptNumber, 'chapter') : '',
   ])
 }
 
@@ -1685,6 +1697,8 @@ export function buildChapterRewritePrompt(params: ChapterRewritePromptInput): st
       '作者锁定段落不得改写、删减、拆分、合并或替换措辞，只能改动周边段落来完成衔接。',
       '只输出重写后的最终正文。',
     ].join('\n')),
+    buildAvoidanceSection(params.rejectedDigests || []),
+    params.attemptNumber && params.attemptNumber > 1 ? buildVariationHint(params.attemptNumber, 'chapter') : '',
   ])
 }
 

@@ -19,6 +19,7 @@ import type {
 import {
   getDefaultModelConfigRecord,
   getModelConfigRecord,
+  getProviderTokenSafetyMarginPct,
 } from './model.service'
 import { getLatestStyleFingerprintForNovel } from './style-analysis.service'
 
@@ -148,6 +149,11 @@ export function buildAiModelRouteReport(options: {
   executionMode: AiExecutionMode
   resolutionSource: AiModeResolutionSource
   modelConfigId?: number | null
+  temperatureCap?: number
+  contextStrategy?: AiModelRouteReport['contextStrategy']
+  reviewDepth?: AiModelRouteReport['reviewDepth']
+  maxTokensFactor?: number
+  extraReasons?: string[]
 }): AiModelRouteReport {
   const modeProfile = MODE_RUNTIME_PROFILES[options.executionMode]
   const config = typeof options.modelConfigId === 'number'
@@ -155,14 +161,23 @@ export function buildAiModelRouteReport(options: {
     : getDefaultModelConfigRecord()
   const taskTokenFactor = TASK_MAX_TOKEN_FACTORS[options.taskKind] ?? 0.8
   const baseTemperature = typeof config.temperature === 'number' ? config.temperature : 0.8
-  const taskTemperatureCap = options.taskKind === 'chapter_review'
+  const taskTemperatureCap = typeof options.temperatureCap === 'number'
+    ? options.temperatureCap
+    : options.taskKind === 'chapter_review'
     ? 0.35
     : options.taskKind === 'chapter_rewrite' || options.taskKind === 'paragraph_rewrite'
       ? 0.55
       : 0.85
   const temperature = clamp(baseTemperature + modeProfile.temperatureDelta, 0, taskTemperatureCap)
   const baseMaxTokens = typeof config.maxTokens === 'number' && config.maxTokens > 0 ? Math.round(config.maxTokens) : 4096
-  const maxTokens = Math.max(256, Math.round(baseMaxTokens * modeProfile.maxTokensFactor * taskTokenFactor))
+  const tokenSafetyMarginPct = getProviderTokenSafetyMarginPct(config.provider)
+  const routeMaxTokensFactor = typeof options.maxTokensFactor === 'number'
+    ? options.maxTokensFactor
+    : 1
+  const maxTokens = Math.max(
+    256,
+    Math.round(baseMaxTokens * modeProfile.maxTokensFactor * taskTokenFactor * routeMaxTokensFactor * (1 - tokenSafetyMarginPct / 100)),
+  )
 
   return {
     taskKind: options.taskKind,
@@ -174,14 +189,17 @@ export function buildAiModelRouteReport(options: {
     provider: config.provider,
     temperature,
     maxTokens,
-    contextStrategy: modeProfile.contextStrategy,
-    reviewDepth: modeProfile.reviewDepth,
+    tokenSafetyMarginPct,
+    contextStrategy: options.contextStrategy || modeProfile.contextStrategy,
+    reviewDepth: options.reviewDepth || modeProfile.reviewDepth,
     reasons: dedupeStrings([
       ...modeProfile.reasons,
       options.resolutionSource === 'request_override' ? '本次调用采用局部覆盖模式。' : '',
       options.resolutionSource === 'global_default' ? '当前使用项目级默认 AI 模式。' : '',
       options.taskKind === 'chapter_review' ? '审校阶段主动限制采样波动，优先稳定诊断。' : '',
       options.taskKind === 'chapter_rewrite' ? '重写阶段保留较长输出预算，避免局部修复截断。' : '',
+      `按 ${config.provider} 预留 ${tokenSafetyMarginPct}% token 安全余量。`,
+      ...(options.extraReasons || []),
     ]),
   }
 }
@@ -261,6 +279,7 @@ export function buildAiExplainabilityReport(options: {
   contextAssemblyReport?: AiContextAssemblyReport
   authorStyleLock?: AuthorStyleLockSummary
   structuredOutputs?: string[]
+  activePromptOverrideKeys?: string[]
 }): AiExplainabilityReport {
   const inferredFacts: AiInferenceFact[] = [
     ...options.usageSnapshot.recentStateChanges.slice(0, 4).map((detail) => ({
@@ -292,13 +311,18 @@ export function buildAiExplainabilityReport(options: {
     routeSummary: options.stageReports.map((stage) => {
       const route = stage.route
       return `${stage.stageLabel}=${getAiExecutionModeLabel(route.executionMode)} / ${route.modelLabel} / ${route.reviewDepth}`
-    }).join(' · '),
+    }).concat(
+      options.activePromptOverrideKeys && options.activePromptOverrideKeys.length > 0
+        ? [`Prompt Override ${options.activePromptOverrideKeys.length} 项`]
+        : [],
+    ).join(' · '),
     structuredOutputs: dedupeStrings([
       ...(options.structuredOutputs || []),
       ...options.stageReports
         .filter((stage) => stage.outputShape !== 'text')
         .map((stage) => `${stage.stageLabel} 使用 ${stage.outputShape.toUpperCase()} 输出`),
     ], 8),
+    activePromptOverrideKeys: dedupeStrings(options.activePromptOverrideKeys || [], 8),
     usedAssets: options.usageSnapshot.usedAssets,
     usedContracts: options.usageSnapshot.usedContracts,
     ignoredConstraints: options.usageSnapshot.ignoredConstraints,

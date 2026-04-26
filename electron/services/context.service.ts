@@ -154,6 +154,9 @@ export interface ContextBudgetWarningSummary {
 
 export interface ContextBudgetReport {
   modelContextLimit: number
+  safeModelContextLimit?: number
+  modelProvider?: string
+  tokenSafetyMarginPct?: number
   requestedBudget: number
   effectiveBudget: number
   promptFixedOverhead: number
@@ -3155,12 +3158,18 @@ export function allocateChapterContext(
   const chapterComplexity = normalizedOptions.chapterComplexity || 'standard'
   const targetWords = Number(rawData.novel.targetWords || 0)
   const modelRuntimeBudget = resolveModelRuntimeBudget(rawData.novel.modelConfigId)
-  const modelContextLimit = modelRuntimeBudget.maxContextTokens && modelRuntimeBudget.maxContextTokens > 0
+  const rawModelContextLimit = modelRuntimeBudget.maxContextTokens && modelRuntimeBudget.maxContextTokens > 0
     ? modelRuntimeBudget.maxContextTokens
     : 32000
-  const totalBudget = Math.min(requestedBudget, modelContextLimit)
-  const modelBudgetLimited = modelContextLimit < requestedBudget
-  const effectiveBudget = Math.min(modelContextLimit, resolveChapterBudgetFloor(targetWords, totalBudget))
+  const tokenSafetyMarginPct = modelRuntimeBudget.tokenSafetyMarginPct || 0
+  const safeModelContextLimit = Math.max(
+    2048,
+    Math.floor(rawModelContextLimit * (1 - tokenSafetyMarginPct / 100)),
+  )
+  const modelContextLimit = rawModelContextLimit
+  const totalBudget = Math.min(requestedBudget, safeModelContextLimit)
+  const modelBudgetLimited = safeModelContextLimit < requestedBudget
+  const effectiveBudget = Math.min(safeModelContextLimit, resolveChapterBudgetFloor(targetWords, totalBudget))
   const promptFixedOverhead = resolvePromptFixedOverhead(promptProfile, chapterComplexity, targetWords)
   const requestedOutputReserve = resolvePromptOutputReserve(promptProfile, chapterComplexity, targetWords)
   const configuredOutputLimit = modelRuntimeBudget.maxTokens && modelRuntimeBudget.maxTokens > 0
@@ -3269,6 +3278,9 @@ export function allocateChapterContext(
       : 'none'
   const contextBudgetReport: ContextBudgetReport = {
     modelContextLimit,
+    safeModelContextLimit,
+    modelProvider: modelRuntimeBudget.provider,
+    tokenSafetyMarginPct,
     requestedBudget,
     effectiveBudget,
     promptFixedOverhead,

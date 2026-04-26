@@ -458,6 +458,27 @@ describe('allocateChapterContext', () => {
     expect(context.contextBudgetReport.reservedForOutput).toBeLessThanOrEqual(7800)
   })
 
+  it('applies provider-level token safety margin before allocating context budget', () => {
+    vi.mocked(resolveModelRuntimeBudget).mockReturnValue({
+      maxContextTokens: 32000,
+      maxTokens: 4096,
+      provider: 'openai',
+      tokenSafetyMarginPct: 10,
+    } as ReturnType<typeof resolveModelRuntimeBudget>)
+
+    const context = allocateChapterContext(createRawData(), {
+      totalBudget: 40000,
+      promptProfile: 'draft',
+      chapterComplexity: 'standard',
+    })
+
+    expect(context.contextBudgetReport.modelContextLimit).toBe(32000)
+    expect(context.contextBudgetReport.safeModelContextLimit).toBe(28800)
+    expect(context.contextBudgetReport.tokenSafetyMarginPct).toBe(10)
+    expect(context.contextBudgetReport.modelProvider).toBe('openai')
+    expect(context.contextBudgetReport.effectiveBudget).toBe(28800)
+  })
+
   it('throws ContextOverflowError when only soft context must be trimmed', () => {
     const rawData = createRawData({
       contextParts: {

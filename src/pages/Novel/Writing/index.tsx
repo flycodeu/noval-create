@@ -56,6 +56,7 @@ import type {
   StoryMemorySnapshot,
   StoryVolume,
   TimelineEvent,
+  WritebackSyncStatus,
 } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
 import { useTaskStore } from '../../../stores/task.store'
@@ -265,6 +266,7 @@ const parseBridgePlan = (raw?: string) => { try { return raw ? JSON.parse(raw) a
 const parseSummaryHealth = (raw?: string) => { try { return raw ? JSON.parse(raw) as SummaryHealthReport : null } catch { return null } }
 const parseExpressionDedup = (raw?: string) => { try { return raw ? JSON.parse(raw) as ExpressionDedupReport : null } catch { return null } }
 const parseHookContinuity = (raw?: string) => { try { return raw ? JSON.parse(raw) as HookContinuitySnapshot : null } catch { return null } }
+const parseWritebackStatus = (raw?: string) => { try { return raw ? JSON.parse(raw) as WritebackSyncStatus : null } catch { return null } }
 const countWords = (text: string) => ((text.match(/[一-龥]/g) || []).length + (text.match(/\b[a-zA-Z]+\b/g) || []).length)
 const formatChapterNumber = (chapterNum?: number) => typeof chapterNum === 'number' ? `第${chapterNum}章` : '章节号待补'
 const getStatusLabel = (status?: Chapter['status']) => STATUS_OPTIONS.find((item) => item.value === status)?.label || '未设置'
@@ -334,6 +336,14 @@ const getPublishCheckDriftTagColor = (status?: 'worsening' | 'improving' | 'stab
   if (status === 'worsening') return 'error'
   if (status === 'improving') return 'success'
   return 'default'
+}
+const getWritebackPhaseLabel = (phase?: WritebackSyncStatus['phase']) => {
+  if (phase === 'preparing') return '准备回写'
+  if (phase === 'ready') return '待确认'
+  if (phase === 'applying') return '正在应用'
+  if (phase === 'applied') return '已应用'
+  if (phase === 'failed') return '回写失败'
+  return '空闲'
 }
 const getWorldRulesSummary = (raw?: string) => {
   if (!raw) return []
@@ -1565,6 +1575,9 @@ export default function Writing({ novelId }: Props) {
     expressionDedup?.repeatedOpenings?.length ? `章首同质：${expressionDedup.repeatedOpenings.slice(0, 2).join('、')}` : '',
     expressionDedup?.repeatedClosings?.length ? `章尾同质：${expressionDedup.repeatedClosings.slice(0, 2).join('、')}` : '',
     hookContinuity?.warning ? `钩子连续性：${hookContinuity.warning}` : (hookContinuity ? `钩子强度：${hookContinuity.hookStrengthScore}` : ''),
+    reviewNotes?.dialogue_fingerprint_summary ? `章节指纹：${reviewNotes.dialogue_fingerprint_summary}` : '',
+    publishCheck?.summary ? `一致性快检：${publishCheck.summary}` : '',
+    currentChapter?.nextChapterSeed ? `下一章开场建议：${currentChapter.nextChapterSeed}` : '',
     qualityDashboard?.voiceEvolutionSummary?.summary || '',
   ].filter(Boolean)
 
@@ -1676,6 +1689,11 @@ export default function Writing({ novelId }: Props) {
     }
     return null
   }, [currentChapter, livePipelineSnapshot, persistedPipelineSnapshot])
+  const currentWritebackStatus = useMemo(
+    () => parseWritebackStatus(currentChapter?.writebackStatusJson),
+    [currentChapter?.writebackStatusJson],
+  )
+  const activePromptOverrideKeys = chapterContextPreview?.generationExplainability?.activePromptOverrideKeys || []
 
   const currentChapterGeneration = currentChapter
     ? (
@@ -1699,7 +1717,7 @@ export default function Writing({ novelId }: Props) {
     return { ...stage, index, status: failed ? 'failed' : running ? 'running' : done ? 'done' : 'pending' }
   })
   const pipelineRoleItems = useMemo(() => {
-    const order: WritingPipelineRole[] = ['planner', 'writer', 'critic', 'rewriter', 'canonizer']
+    const order: WritingPipelineRole[] = ['planner', 'writer', 'critic', 'rewriter', 'canonizer', 'finalize']
     return order.map((role) => currentPipelineSnapshot?.roles[role]).filter(Boolean) as WritingPipelineRoleState[]
   }, [currentPipelineSnapshot])
 
@@ -2364,12 +2382,30 @@ export default function Writing({ novelId }: Props) {
       value: currentPipelineSnapshot?.failureCode || '当前无失败',
     },
     {
+      label: '回写状态',
+      value: currentWritebackStatus
+        ? `${getWritebackPhaseLabel(currentWritebackStatus.phase)}${currentWritebackStatus.blockedGeneration ? ' · 已阻断后续生成' : ''}`
+        : '未记录',
+    },
+    {
+      label: '下一章就绪',
+      value: currentWritebackStatus
+        ? (currentWritebackStatus.readyForNextChapter === false ? '等待回写完成' : '已就绪')
+        : '未记录',
+    },
+    {
+      label: 'Prompt Override',
+      value: activePromptOverrideKeys.length > 0 ? activePromptOverrideKeys.join('、') : '当前未启用',
+    },
+    {
       label: '恢复提示',
-      value: currentPipelineSnapshot?.status === 'failed'
+      value: currentWritebackStatus?.readyForNextChapter === false
+        ? `等待章后回写完成${currentWritebackStatus.lastError ? `：${currentWritebackStatus.lastError}` : '。'}`
+        : currentPipelineSnapshot?.status === 'failed'
         ? '先检查合同、上下文召回与审校提示，再重试流水线。'
         : '当前无需恢复操作。',
     },
-  ]), [currentPipelineSnapshot])
+  ]), [activePromptOverrideKeys, currentPipelineSnapshot, currentWritebackStatus])
 
   return (
     <>
@@ -2593,6 +2629,15 @@ export default function Writing({ novelId }: Props) {
                       type="warning"
                       message="当前章节上下文已过期"
                       description={`受这些变更影响：${currentChapterStaleReasons.join('；')}。建议先同步后再继续写。`}
+                    />
+                  ) : null}
+
+                  {currentWritebackStatus?.readyForNextChapter === false ? (
+                    <Alert
+                      showIcon
+                      type={currentWritebackStatus.phase === 'failed' ? 'error' : 'warning'}
+                      message="等待回写完成"
+                      description={`当前处于 ${getWritebackPhaseLabel(currentWritebackStatus.phase)}。${currentWritebackStatus.lastError ? `原因：${currentWritebackStatus.lastError}` : '系统会在章后回写完成前暂停后续章节生成。'}`}
                     />
                   ) : null}
 
@@ -3404,9 +3449,10 @@ function AiExplainabilityCard({ preview }: { preview: ChapterContextPreview | nu
 
   const routeLines = explainability.stageReports.map((stage) => {
     const route = stage.route
-    return `${stage.stageLabel}：${route.modelLabel} · 温度 ${route.temperature.toFixed(2)} · 输出 ${route.maxTokens} · ${route.reviewDepth}`
+    return `${stage.stageLabel}：${route.modelLabel} · 温度 ${route.temperature.toFixed(2)} · 输出 ${route.maxTokens} · ${route.reviewDepth}${route.tokenSafetyMarginPct ? ` · 裕量 ${route.tokenSafetyMarginPct}%` : ''}`
   })
   const structuredLines = explainability.structuredOutputs
+  const overrideLines = (explainability.activePromptOverrideKeys || []).map((item) => `Prompt Override：${item}`)
   const inferredLines = explainability.inferredFacts.map((item) => `${item.label}：${item.detail}${item.needsConfirmation ? ' · 待确认' : ''}`)
   const lowConfidenceLines = explainability.lowConfidenceFacts.map((item) => `${item.label}：${item.detail}`)
   const assemblyLayers = explainability.contextAssemblyReport?.layers.map((layer) => `${layer.label} · ${layer.itemCount} 项：${layer.summary}`) || []
@@ -3429,6 +3475,7 @@ function AiExplainabilityCard({ preview }: { preview: ChapterContextPreview | nu
     <div style={{ display: 'grid', gap: 10 }}>
       <div className="novel-copy-block">{explainability.routeSummary}</div>
       <StringList items={routeLines} empty="当前还没有模型路由记录。" />
+      <StringList items={overrideLines} empty="当前没有启用章节 Prompt Override。" />
       <StringList items={structuredLines} empty="本次没有新增结构化输出节点记录。" />
       <StringList items={assemblyLayers} empty="当前还没有上下文组装层说明。" />
       <StringList items={styleLockLines} empty="还没有作者风格锁，可去主题与文风页补样本。" />

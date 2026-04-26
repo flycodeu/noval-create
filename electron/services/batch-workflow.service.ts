@@ -145,6 +145,15 @@ function parseChapterWritebackSyncStatus(raw?: string | null): WritebackSyncStat
   }
 }
 
+function getWritebackPhaseLabel(phase?: WritebackSyncStatus['phase']): string {
+  if (phase === 'preparing') return '准备回写'
+  if (phase === 'ready') return '待确认'
+  if (phase === 'applying') return '正在应用'
+  if (phase === 'applied') return '已应用'
+  if (phase === 'failed') return '回写失败'
+  return '空闲'
+}
+
 function clampPositiveInt(value: unknown, fallback: number, min = 1, max = 50): number {
   const numeric = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(numeric)) return fallback
@@ -947,6 +956,7 @@ function pauseChapterBatchWorkflow(
     childTaskId?: number
     warnings?: string | string[]
     consecutiveRecallFallbackChapters?: number
+    currentWritebackStatus?: WritebackSyncStatus
   },
 ) {
   const nextProgress: ChapterBatchAutoGenerateStatus = {
@@ -961,6 +971,7 @@ function pauseChapterBatchWorkflow(
     blockedTaskId: options.childTaskId,
     currentChapterId: options.chapterId ?? progress.currentChapterId,
     currentChapterNum: options.chapterNum ?? progress.currentChapterNum,
+    currentWritebackStatus: options.currentWritebackStatus || progress.currentWritebackStatus,
     failedChapterIds: appendUniqueNumber(progress.failedChapterIds, options.chapterId),
     warnings: appendUniqueStrings(progress.warnings, options.warnings),
     consecutiveRecallFallbackChapters: typeof options.consecutiveRecallFallbackChapters === 'number'
@@ -1086,9 +1097,10 @@ async function runChapterBatchGenerateWorkflow(taskId: number, sender?: WebConte
           chapterId,
           chapterNum,
           childTaskId,
-          message: `第 ${chapterNum} 章章后回写尚未准备好，章节批量任务已暂停：${writebackStatus.lastError || '请先处理回写同步状态。'}`,
+          message: `第 ${chapterNum} 章等待章后回写完成，章节批量任务已暂停：${writebackStatus.lastError || '请先处理当前章的回写同步状态。'}`,
           errorMessage: writebackStatus.lastError || '章后回写未完成',
-          warnings: `第 ${chapterNum} 章回写状态：${writebackStatus.phase}`,
+          warnings: `第 ${chapterNum} 章回写状态：${getWritebackPhaseLabel(writebackStatus.phase)}`,
+          currentWritebackStatus: writebackStatus,
         })
         break
       }

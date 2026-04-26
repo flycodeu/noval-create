@@ -20,6 +20,7 @@ type ChapterRow = {
   novelId: number
   chapterNum: number
   title?: string | null
+  writebackStatusJson?: string | null
 }
 
 type ChapterScenario = {
@@ -280,6 +281,37 @@ describe('chapter batch workflow', () => {
       failedChapterIds: [101],
     })
     expect(taskRows.get(3)?.errorMessage).toBe('上下文已过期，需先修复')
+  })
+
+  it('pauses when the chapter is waiting for writeback confirmation', async () => {
+    chapterRows.set(101, {
+      id: 101,
+      novelId: 1,
+      chapterNum: 8,
+      title: '第八章',
+      writebackStatusJson: JSON.stringify({
+        phase: 'ready',
+        readyForNextChapter: false,
+        blockedGeneration: true,
+        lastError: 'Canon 草案尚未确认。',
+      }),
+    })
+    setScenario(101, { status: 'success' })
+    setPublishChecks(101, { gateLevel: 'pass', ready: true, summary: '通过' })
+    createBatchTask(7, [101])
+
+    await __testing.runChapterBatchGenerateWorkflow(7)
+
+    expect(taskRows.get(7)?.status).toBe('paused')
+    expect(taskRows.get(7)?.errorMessage).toBe('Canon 草案尚未确认。')
+    expect(getProgress(7)).toMatchObject({
+      blockedChapterId: 101,
+      currentWritebackStatus: {
+        phase: 'ready',
+        readyForNextChapter: false,
+      },
+    })
+    expect((getProgress(7).pauseReason as string)).toContain('等待章后回写完成')
   })
 
   it('pauses after three consecutive degraded recall chapters', async () => {

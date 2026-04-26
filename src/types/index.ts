@@ -1780,6 +1780,7 @@ export interface AiModelRouteReport {
   provider?: string
   temperature: number
   maxTokens: number
+  tokenSafetyMarginPct?: number
   contextStrategy: 'trimmed' | 'balanced' | 'max_coverage'
   reviewDepth: 'lite' | 'standard' | 'deep'
   reasons: string[]
@@ -1835,6 +1836,7 @@ export interface AiExplainabilityReport {
   executionMode: AiExecutionMode
   routeSummary: string
   structuredOutputs: string[]
+  activePromptOverrideKeys?: string[]
   usedAssets: string[]
   usedContracts: string[]
   ignoredConstraints: string[]
@@ -1933,6 +1935,9 @@ export interface ContextBudgetWarningSummary {
 
 export interface ContextBudgetReport {
   modelContextLimit: number
+  safeModelContextLimit?: number
+  modelProvider?: string
+  tokenSafetyMarginPct?: number
   requestedBudget: number
   effectiveBudget: number
   promptFixedOverhead: number

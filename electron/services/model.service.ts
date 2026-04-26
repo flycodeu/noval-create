@@ -35,6 +35,13 @@ export function getProviderRuntimeDefaults(provider: string): { temperature: num
   return PROVIDER_RUNTIME_DEFAULTS[provider] || PROVIDER_RUNTIME_DEFAULTS.openai
 }
 
+export function getProviderTokenSafetyMarginPct(provider?: string | null): number {
+  const normalized = typeof provider === 'string' ? provider.trim().toLowerCase() : ''
+  if (normalized === 'openai') return 10
+  if (normalized === 'anthropic') return 12
+  return 15
+}
+
 export function normalizeModelTemperature(value: unknown, provider: string): number {
   const fallback = getProviderRuntimeDefaults(provider).temperature
   const numeric = typeof value === 'number' ? value : Number(value)
@@ -143,6 +150,8 @@ export function getDefaultModelConfigRecord() {
 export function resolveModelRuntimeBudget(modelConfigId?: number | null): {
   maxContextTokens: number | null
   maxTokens: number | null
+  provider?: string
+  tokenSafetyMarginPct?: number
 } {
   try {
     const config = typeof modelConfigId === 'number'
@@ -155,6 +164,8 @@ export function resolveModelRuntimeBudget(modelConfigId?: number | null): {
     return {
       maxContextTokens: adapter.maxContextTokens,
       maxTokens,
+      provider: config.provider,
+      tokenSafetyMarginPct: getProviderTokenSafetyMarginPct(config.provider),
     }
   } catch {
     return {
