@@ -1379,7 +1379,7 @@ export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
     section('语言要求', buildHumanLanguageRules([
       '场景目标和冲突都写具体事实，不写“命运转折”“真正成长”这种空话。',
     ])),
-    '只输出 JSON 数组：[{"scene_order":1,"scene_title":"场景名","purpose":"这一段必须完成什么","location":"地点或空间","time_anchor":"时间标签","present_characters":["人物A"],"key_items":["物品A"],"conflict":"这一段最直接的冲突","beat":"这一段发生的关键动作","must_cover":["必须交代1","必须交代2"],"exit_hook":"如何推到下一段"}]',
+    '只输出 JSON 数组：[{"scene_order":1,"scene_title":"场景名","purpose":"这一段必须完成什么","location":"地点或空间","time_anchor":"时间标签","present_characters":["人物A"],"key_items":["物品A"],"conflict":"这一段最直接的冲突","beat":"这一段发生的关键动作","must_cover":["必须交代1","必须交代2"],"climax_variant":"如果这一场承担高潮/爆发/反转，请写明确变体；否则留空字符串","exit_hook":"如何推到下一段"}]',
     params.attemptNumber && params.attemptNumber > 1 ? buildVariationHint(params.attemptNumber, 'outline') : '',
   ])
 }

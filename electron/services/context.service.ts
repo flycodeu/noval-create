@@ -2935,6 +2935,10 @@ export async function collectChapterContextRawData(
     extractChapterGoal(currentChapter?.outline),
   ].filter(Boolean).join('\n')
   const chapterContractRules = [
+    chapterContract?.openingStyle ? `开场方式：${chapterContract.openingStyle}` : '',
+    chapterContract?.endingStyle ? `收尾方式：${chapterContract.endingStyle}` : '',
+    chapterContract?.expositionMode ? `说明方式：${chapterContract.expositionMode}` : '',
+    chapterContract?.emotionFocus ? `情绪主基调：${chapterContract.emotionFocus}` : '',
     chapterContract?.hookType ? `本章钩子：${chapterContract.hookType}` : '',
     formatContractLine('本章禁止', chapterContract?.forbiddenActions || []),
     formatContractLine('验收要求', chapterContract?.acceptanceNotes || []),

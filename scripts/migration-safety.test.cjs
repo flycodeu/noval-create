@@ -163,6 +163,10 @@ function assertRequiredColumns(db) {
   assert.ok(getColumns(db, 'chapter_contracts').has('required_relationship_arc_ids_json'))
   assert.ok(getColumns(db, 'chapter_contracts').has('required_resistance_track_ids_json'))
   assert.ok(getColumns(db, 'chapter_contracts').has('required_resistance_actions_json'))
+  assert.ok(getColumns(db, 'chapter_contracts').has('opening_style'))
+  assert.ok(getColumns(db, 'chapter_contracts').has('ending_style'))
+  assert.ok(getColumns(db, 'chapter_contracts').has('exposition_mode'))
+  assert.ok(getColumns(db, 'chapter_contracts').has('emotion_focus'))
   assert.ok(getColumns(db, 'volume_designs').has('linked_resistance_track_ids_json'))
   assert.ok(getColumns(db, 'chapter_recall_runtime_snapshots').has('snapshot_json'))
   assert.ok(getColumns(db, 'chapter_recall_runtime_snapshots').has('diagnostics_json'))
@@ -214,9 +218,16 @@ function testFreshDbIsIdempotent() {
       '0025_chapter_contract_audit',
       '0026_chapter_writeback_center',
       '0027_chapter_gate_runs',
+      '0027_generation_integrity_reports',
       '0028_task_pipeline_metadata',
       '0029_chapter_recall_runtime_snapshots',
       '0030_anti_ai_rule_hits',
+      '0031_foreshadow_actionized_payoff_fields',
+      '0032_chapter_batch_workbench',
+      '0033_novel_launch_mode',
+      '0034_asset_change_impacts_and_writeback_verification',
+      '0035_state_anchor_and_delta',
+      '0036_chapter_contract_shape_controls',
     ])
 
     runMigrations(db)
@@ -322,9 +333,16 @@ function testPartialSchemaCanResume() {
       '0025_chapter_contract_audit',
       '0026_chapter_writeback_center',
       '0027_chapter_gate_runs',
+      '0027_generation_integrity_reports',
       '0028_task_pipeline_metadata',
       '0029_chapter_recall_runtime_snapshots',
       '0030_anti_ai_rule_hits',
+      '0031_foreshadow_actionized_payoff_fields',
+      '0032_chapter_batch_workbench',
+      '0033_novel_launch_mode',
+      '0034_asset_change_impacts_and_writeback_verification',
+      '0035_state_anchor_and_delta',
+      '0036_chapter_contract_shape_controls',
     ])
 
     const configs = db.prepare(`

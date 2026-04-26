@@ -3036,6 +3036,10 @@ export interface ChapterContractAsset {
   chapterNum: number
   chapterTitle: string
   chapterGoal: string
+  openingStyle: string
+  endingStyle: string
+  expositionMode: string
+  emotionFocus: string
   servedThreadIds: number[]
   requiredArcProgress: string[]
   requiredCharacterArcIds: number[]
@@ -3750,6 +3754,9 @@ export type FeedbackRecurrenceIssueType =
   | 'ornament_overload'
   | 'sensory_anchor_missing'
   | 'weak_stance'
+  | 'transition_density'
+  | 'emotion_monotony'
+  | 'world_exposition_dump'
   | 'pov_drift'
   | 'thread_stalled'
   | 'dialogue_homogenized'
@@ -3826,6 +3833,9 @@ export interface HumanizationSignal {
     | 'ornament_overload'
     | 'sensory_anchor_missing'
     | 'weak_stance'
+    | 'transition_density'
+    | 'emotion_monotony'
+    | 'world_exposition_dump'
   title: string
   severity: 'low' | 'medium' | 'high'
   detail: string

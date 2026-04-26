@@ -163,6 +163,27 @@ const FEEDBACK_DESCRIPTOR_MAP: Record<FeedbackRecurrenceIssueType, FeedbackDescr
     pauseRule: 'high_window',
     relatedPage: 'writing',
   },
+  transition_density: {
+    title: '过渡疏密失衡',
+    avoid: '不要把过渡段写成一整片同重量的铺陈或连续高密说明。',
+    prefer: '用 2-3 段实质推进后接一段短释压，拉开呼吸和节拍。',
+    pauseRule: 'window',
+    relatedPage: 'writing',
+  },
+  emotion_monotony: {
+    title: '情绪单色',
+    avoid: '不要让整章只剩一种情绪颜色反复覆盖所有反应。',
+    prefer: '保留主基调，但补局部温差、反向反应和次级情绪。',
+    pauseRule: 'window',
+    relatedPage: 'writing',
+  },
+  world_exposition_dump: {
+    title: '世界观说明文',
+    avoid: '不要连续用设定直述和规则讲解替代角色经历与互动。',
+    prefer: '把世界规则拆进动作、对话、误判和现实后果里。',
+    pauseRule: 'window',
+    relatedPage: 'writing',
+  },
   pov_drift: {
     title: '视角漂移',
     avoid: '不要在固定视角作品中混用 POV、越权读取他人认知或跳出当前视点。',
@@ -194,6 +215,9 @@ const HUMANIZATION_ISSUE_TYPES = new Set<FeedbackRecurrenceIssueType>([
   'ornament_overload',
   'sensory_anchor_missing',
   'weak_stance',
+  'transition_density',
+  'emotion_monotony',
+  'world_exposition_dump',
 ])
 
 const POV_KEYWORDS = ['POV', '视角', '视点', '人称', '认知', '越权', '旁白']

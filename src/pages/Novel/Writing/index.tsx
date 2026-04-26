@@ -67,7 +67,7 @@ import './index.css'
 interface Props { novelId: number }
 interface AiCheckPayload { score: number; issues: Array<{ type: string; location: string; suggestion: string }>; overall_feedback: string }
 interface ContinuityPayload { plot_progress?: string[]; character_state_changes?: string[]; world_state_changes?: string[]; open_loops?: string[]; continuity_notes?: string[]; arc_progress?: string }
-interface ScenePlanStep { scene_order: number; scene_title: string; purpose: string; location: string; time_anchor: string; present_characters: string[]; key_items: string[]; must_cover: string[] }
+interface ScenePlanStep { scene_order: number; scene_title: string; purpose: string; location: string; time_anchor: string; present_characters: string[]; key_items: string[]; must_cover: string[]; climax_variant?: string }
 interface ReviewNotes {
   summary: string
   critical_fixes: string[]
@@ -1730,7 +1730,7 @@ export default function Writing({ novelId }: Props) {
           qualityItems={qualityFocusItems}
         />
         <InsightCard title="场景拆解" eyebrow="执行顺序">
-          {scenePlan.length > 0 ? <div className="novel-scene-list">{scenePlan.map((scene) => <div key={`${scene.scene_order}-${scene.scene_title}`} className="novel-scene-card"><div className="novel-scene-card__header"><span>{`场景 ${String(scene.scene_order).padStart(2, '0')}`}</span><strong>{scene.scene_title}</strong></div><div className="novel-scene-card__body"><div>{scene.purpose}</div>{scene.location ? <div>地点：{scene.location}</div> : null}{scene.time_anchor ? <div>时间：{scene.time_anchor}</div> : null}{scene.present_characters?.length ? <div>人物：{scene.present_characters.join('、')}</div> : null}{scene.key_items?.length ? <div>道具：{scene.key_items.join('、')}</div> : null}{scene.must_cover?.length ? <div>必须覆盖：{scene.must_cover.join('、')}</div> : null}</div></div>)}</div> : <div className="novel-copy-block">先运行章节流水线，系统会按合同拆出场景计划后在这里核对。</div>}
+          {scenePlan.length > 0 ? <div className="novel-scene-list">{scenePlan.map((scene) => <div key={`${scene.scene_order}-${scene.scene_title}`} className="novel-scene-card"><div className="novel-scene-card__header"><span>{`场景 ${String(scene.scene_order).padStart(2, '0')}`}</span><strong>{scene.scene_title}</strong></div><div className="novel-scene-card__body"><div>{scene.purpose}</div>{scene.location ? <div>地点：{scene.location}</div> : null}{scene.time_anchor ? <div>时间：{scene.time_anchor}</div> : null}{scene.present_characters?.length ? <div>人物：{scene.present_characters.join('、')}</div> : null}{scene.key_items?.length ? <div>道具：{scene.key_items.join('、')}</div> : null}{scene.must_cover?.length ? <div>必须覆盖：{scene.must_cover.join('、')}</div> : null}{scene.climax_variant ? <div>高潮变体：{scene.climax_variant}</div> : null}</div></div>)}</div> : <div className="novel-copy-block">先运行章节流水线，系统会按合同拆出场景计划后在这里核对。</div>}
         </InsightCard>
       </div>
       <div className="novel-writing-shell__insight-stack">
@@ -2098,6 +2098,7 @@ export default function Writing({ novelId }: Props) {
         scene.present_characters?.length ? `人物：${scene.present_characters.join('、')}` : '',
         scene.key_items?.length ? `道具：${scene.key_items.join('、')}` : '',
         scene.must_cover?.length ? `必须覆盖：${scene.must_cover.join('、')}` : '',
+        scene.climax_variant ? `高潮变体：${scene.climax_variant}` : '',
       ].filter(Boolean),
       tone: 'soft',
     }))

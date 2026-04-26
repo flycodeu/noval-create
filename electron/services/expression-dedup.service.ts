@@ -12,6 +12,13 @@ type ExpressionDedupWindowStrategy = Pick<
 
 type ExpressionDedupReportBase = Omit<ExpressionDedupReport, 'guidance' | 'summary' | 'updatedAt'>
 
+interface ScenePlanStepSnapshot {
+  purpose: string
+  conflict: string
+  beat: string
+  climaxVariant: string
+}
+
 const LOW_SIGNAL_FRAGMENTS = [
   '什么', '怎么', '不是', '可以', '知道', '自己', '然后', '于是', '就是', '但是',
 ]
@@ -19,6 +26,18 @@ const LOW_SIGNAL_FRAGMENTS = [
 const OPENING_ROTATION_SUGGESTIONS = ['动作直入', '对话直入', '物件特写', '时间跳切']
 const CLOSING_ROTATION_SUGGESTIONS = ['行动中断', '第三人入场', '画面定格', '环境归静']
 const CLIMAX_ROTATION_SUGGESTIONS = ['平静揭露', '旁观者切入', '感官先行', '对话推进后动作爆发']
+const SEMANTIC_BEAT_RULES: Array<{ label: string; tokens: string[] }> = [
+  { label: '潜入试探', tokens: ['潜入', '摸进', '试探', '侦查', '打探', '观察', '埋伏', '跟踪'] },
+  { label: '对峙施压', tokens: ['对峙', '质问', '威胁', '逼', '压', '争', '拦', '对冲'] },
+  { label: '调查揭示', tokens: ['发现', '得知', '揭开', '证据', '真相', '暴露', '线索', '搜查'] },
+  { label: '交易谈判', tokens: ['谈判', '交换', '交易', '条件', '试价', '讲和', '妥协'] },
+  { label: '追逃转场', tokens: ['追', '逃', '突围', '撤', '转移', '躲开', '甩开'] },
+  { label: '休整回缓', tokens: ['喘口气', '休整', '包扎', '安顿', '收拾', '缓下来', '回房'] },
+  { label: '世界说明', tokens: ['规则', '制度', '体系', '法则', '位阶', '宗门', '帝国', '联邦'] },
+  { label: '高潮爆发', tokens: ['决战', '爆发', '狠狠干', '失控', '拼命', '杀', '砸开', '撞开'] },
+  { label: '反转翻盘', tokens: ['反转', '翻盘', '掉包', '原来', '却', '没想到', '反手'] },
+  { label: '收束余波', tokens: ['善后', '余波', '沉默', '收尾', '回味', '静下来', '定住'] },
+]
 
 function asText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
@@ -61,6 +80,25 @@ function splitClauses(content: string): string[] {
     .split(/[。！？；\n]/)
     .map((item) => normalizeClause(item))
     .filter((item) => item.length >= 4 && item.length <= 18)
+}
+
+function parseScenePlanSteps(raw?: string | null): ScenePlanStepSnapshot[] {
+  if (!raw?.trim()) return []
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item))
+      .map((item) => ({
+        purpose: asText(item.purpose),
+        conflict: asText(item.conflict),
+        beat: asText(item.beat),
+        climaxVariant: asText(item.climax_variant),
+      }))
+      .filter((item) => item.purpose || item.conflict || item.beat || item.climaxVariant)
+  } catch {
+    return []
+  }
 }
 
 function isLowSignal(fragment: string): boolean {
@@ -128,6 +166,27 @@ function deriveStructurePattern(content: string): string[] {
     environmentOpening ? '环境起手' : '',
     suspenseClosing ? '悬念收尾' : '',
   ].filter(Boolean)
+}
+
+function classifySemanticBeat(text: string): string {
+  const normalized = asText(text)
+  if (!normalized) return ''
+  const matched = SEMANTIC_BEAT_RULES
+    .map((rule) => [rule.label, rule.tokens.filter((token) => normalized.includes(token)).length] as const)
+    .sort((left, right) => right[1] - left[1])[0]
+  return matched?.[1] ? matched[0] : '常规推进'
+}
+
+function buildSemanticSignature(row: ChapterRow): string {
+  const sceneSteps = parseScenePlanSteps(row.scenePlanJson)
+  const categories = sceneSteps.length > 0
+    ? sceneSteps
+      .map((scene) => classifySemanticBeat([scene.purpose, scene.conflict, scene.beat].filter(Boolean).join(' ')))
+      .filter(Boolean)
+    : [classifySemanticBeat(`${asText(row.outline)} ${asText(row.content).slice(0, 220)}`)].filter(Boolean)
+  const compact = categories.filter((item, index) => index === 0 || item !== categories[index - 1]).slice(0, 4)
+  if (compact.length < 2) return ''
+  return `语义骨架：${compact.join('→')}`
 }
 
 function collectPhraseHits(rows: ChapterRow[]): ExpressionDedupHit[] {
@@ -206,15 +265,49 @@ function collectRepeatedStructures(rows: ChapterRow[]): string[] {
     .map(([pattern]) => pattern)
 }
 
+function collectRepeatedSemanticStructures(rows: ChapterRow[]): string[] {
+  const counts = new Map<string, number>()
+  rows.forEach((row) => {
+    const signature = buildSemanticSignature(row)
+    if (!signature) return
+    counts.set(signature, (counts.get(signature) || 0) + 1)
+  })
+  return [...counts.entries()]
+    .filter(([, count]) => count >= 2)
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], 'zh-Hans-CN'))
+    .slice(0, 4)
+    .map(([pattern]) => pattern)
+}
+
 function isClimaxLikeRow(row: ChapterRow): boolean {
+  const scenePlanVariants = parseScenePlanSteps(row.scenePlanJson).some((scene) => Boolean(scene.climaxVariant))
   const haystack = `${asText(row.emotionTone)} ${asText(row.outline)}`
+  if (scenePlanVariants) return true
   return /climax|reversal|高潮|决战|爆发|反转|翻盘|揭露/u.test(haystack)
 }
 
 function collectRepeatedClimaxPatterns(rows: ChapterRow[]): string[] {
   const climaxRows = rows.filter(isClimaxLikeRow)
   if (climaxRows.length < 2) return []
-  return collectRepeatedStructures(climaxRows)
+  const explicitVariants = dedupeStrings(climaxRows.flatMap((row) =>
+    parseScenePlanSteps(row.scenePlanJson)
+      .map((scene) => scene.climaxVariant)
+      .filter(Boolean),
+  ))
+  const variantCounts = new Map<string, number>()
+  explicitVariants.forEach((variant) => {
+    const count = climaxRows.filter((row) =>
+      parseScenePlanSteps(row.scenePlanJson).some((scene) => scene.climaxVariant === variant)).length
+    if (count >= 2) variantCounts.set(variant, count)
+  })
+  const repeatedVariants = [...variantCounts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], 'zh-Hans-CN'))
+    .slice(0, 3)
+    .map(([variant]) => variant)
+  return dedupeStrings([
+    ...repeatedVariants,
+    ...collectRepeatedStructures(climaxRows),
+  ], 4)
 }
 
 function buildWindowPatternSummary(
@@ -394,16 +487,34 @@ export function analyzeExpressionDedupForGeneration(
   const recentStructuralPatterns = collectRepeatedStructures(recentRows)
   const volumeStructuralPatterns = collectRepeatedStructures(volumeRows)
   const globalStructuralPatterns = collectRepeatedStructures(globalRows)
+  const recentSemanticPatterns = collectRepeatedSemanticStructures(recentRows)
+  const volumeSemanticPatterns = collectRepeatedSemanticStructures(volumeRows)
+  const globalSemanticPatterns = collectRepeatedSemanticStructures(globalRows)
   const recentClimaxPatterns = collectRepeatedClimaxPatterns(recentRows)
   const volumeClimaxPatterns = collectRepeatedClimaxPatterns(volumeRows)
   const globalClimaxPatterns = collectRepeatedClimaxPatterns(globalRows)
 
   const repeatedOpenings = dedupeStrings([...recentOpenings, ...volumeOpenings], 4)
   const repeatedClosings = dedupeStrings([...recentClosings, ...volumeClosings], 4)
-  const repeatedStructuralPatterns = dedupeStrings([...recentStructuralPatterns, ...volumeStructuralPatterns], 6)
+  const repeatedStructuralPatterns = dedupeStrings([
+    ...recentStructuralPatterns,
+    ...volumeStructuralPatterns,
+    ...recentSemanticPatterns,
+    ...volumeSemanticPatterns,
+  ], 6)
   const repeatedClimaxPatterns = dedupeStrings([...recentClimaxPatterns, ...volumeClimaxPatterns], 4)
-  const volumeRepeatedPatterns = buildWindowPatternSummary(volumeOpenings, volumeClosings, volumeStructuralPatterns, volumeClimaxPatterns)
-  const globalRepeatedPatterns = buildWindowPatternSummary(globalOpenings, globalClosings, globalStructuralPatterns, globalClimaxPatterns)
+  const volumeRepeatedPatterns = buildWindowPatternSummary(
+    volumeOpenings,
+    volumeClosings,
+    dedupeStrings([...volumeStructuralPatterns, ...volumeSemanticPatterns], 6),
+    volumeClimaxPatterns,
+  )
+  const globalRepeatedPatterns = buildWindowPatternSummary(
+    globalOpenings,
+    globalClosings,
+    dedupeStrings([...globalStructuralPatterns, ...globalSemanticPatterns], 6),
+    globalClimaxPatterns,
+  )
   const bannedExpressions = selectBannedExpressions(analysis.strategy.mode, recentPhraseHits, volumePhraseHits, globalPhraseHits)
   const riskLevel = buildRiskLevel(repeatedPhrases, repeatedStructuralPatterns, repeatedClimaxPatterns)
   const reportBase = {

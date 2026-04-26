@@ -9,6 +9,7 @@ export interface NarrativeControlSceneSnapshot {
   segmentOrder?: number
   segmentTitle?: string
   pov?: string
+  emotionShift?: string
 }
 
 export interface NarrativePromptGuidance {
@@ -69,11 +70,48 @@ export interface NarrativeRatioAnalysis {
   deviationReasons: string[]
 }
 
+export interface TransitionDensityAnalysis {
+  status: NarrativeGateStatus
+  summary: string
+  fixHint: string
+  riskRate: number
+  paragraphCount: number
+  denseParagraphCount: number
+  thinParagraphCount: number
+  maxDenseRun: number
+  releasedDenseClusters: number
+}
+
+export interface EmotionFocusAnalysis {
+  status: NarrativeGateStatus
+  summary: string
+  fixHint: string
+  riskRate: number
+  expectedFocus: string
+  dominantEmotion: string
+  dominantShare: number
+  contrastEmotionCount: number
+  matchedFocus: boolean
+}
+
+export interface ExpositionDeliveryAnalysis {
+  status: NarrativeGateStatus
+  summary: string
+  fixHint: string
+  riskRate: number
+  consecutiveBlockLength: number
+  explanatorySentenceCount: number
+  worldSentenceCount: number
+}
+
 export interface NarrativeControlReport {
   promptGuidance: NarrativePromptGuidance
   pov: PovBoundaryAnalysis
   sensory: SensoryCoverageAnalysis
   narrativeRatio: NarrativeRatioAnalysis
+  transitionDensity: TransitionDensityAnalysis
+  emotionFocus: EmotionFocusAnalysis
+  exposition: ExpositionDeliveryAnalysis
 }
 
 interface AnalyzeNarrativeControlsInput {
@@ -82,6 +120,8 @@ interface AnalyzeNarrativeControlsInput {
   content?: string | null
   chapterGoal?: string | null
   emotionTone?: string | null
+  emotionFocus?: string | null
+  expositionMode?: string | null
   chapterFunction?: string | null
   genre?: string | null
 }
@@ -116,6 +156,24 @@ const ACTION_TOKENS = ['走', '跑', '冲', '扑', '抓', '推', '拉', '撞', '
 const INTERIOR_TOKENS = ['心里', '心中', '脑海', '想着', '意识到', '明白', '知道', '猜到', '怀疑', '后悔', '希望', '害怕', '以为', '忽然懂了', '记起']
 const ENVIRONMENT_TOKENS = ['墙', '门', '窗', '风', '雨', '雪', '夜色', '空气', '走廊', '街', '屋', '仓库', '地面', '灯', '阴影', '雾']
 const EXPLANATORY_TOKENS = ['意味着', '代表着', '说明了', '体现了', '展现了', '本质上', '某种程度上', '换句话说', '其实就是', '这说明']
+const EXPLANATION_PATTERN_TOKENS = ['是', '属于', '分为', '由', '构成', '规定', '制度', '规则', '法则', '通常', '一般', '负责', '需要', '必须']
+const WORLD_EXPOSITION_TOKENS = ['体系', '制度', '规则', '法则', '位阶', '宗门', '门派', '帝国', '联邦', '学院', '派系', '军规', '法令', '历史', '传统', '边境', '血脉', '术式', '灵脉', '晶核', '资源', '配额', '教会', '祭司']
+const EMOTION_BUCKET_LABELS = {
+  pressure: '压抑/警觉',
+  fear: '惊惧',
+  anger: '愤怒/对抗',
+  sorrow: '悲伤/失落',
+  warmth: '回暖/亲近',
+  desire: '欲望/躁动',
+} as const
+const EMOTION_TOKEN_MAP: Record<keyof typeof EMOTION_BUCKET_LABELS, string[]> = {
+  pressure: ['压', '绷', '紧', '发紧', '屏息', '戒备', '警觉', '提防', '不安', '冷意', '沉着脸'],
+  fear: ['怕', '惧', '惊', '发抖', '寒意', '心慌', '胆寒', '后背发凉', '毛骨悚然'],
+  anger: ['怒', '火', '恼', '烦', '咬牙', '发狠', '憋火', '拍桌', '砸', '顶回去'],
+  sorrow: ['悲', '悲伤', '酸', '涩', '疼', '空', '失落', '难过', '哽', '鼻尖发酸', '沉下去', '发闷'],
+  warmth: ['暖', '松', '笑', '软', '安稳', '放松', '松了口气', '安心', '心口一热'],
+  desire: ['热', '渴', '躁', '心痒', '想要', '贪', '念头烧', '燥', '兴奋'],
+}
 const DIRECT_MIND_READING_PATTERNS = [
   /(他|她|他们|她们|对方|别人|守卫|队长|敌人).{0,8}(心里|心中|脑海|想着|知道|意识到|明白|后悔|希望|害怕|盘算|认定|觉得)/,
   /(心里|心中|脑海|想着|知道|意识到|明白|后悔|希望|害怕|盘算|认定|觉得).{0,8}(他|她|他们|她们|对方|别人|守卫|队长|敌人)/,
@@ -185,8 +243,39 @@ function splitSentences(text: string): string[] {
     .filter((item) => item.length >= 2)
 }
 
+function splitParagraphs(text: string): string[] {
+  return asText(text)
+    .replace(/\r\n/g, '\n')
+    .split(/\n+/)
+    .map((item) => item.trim())
+    .filter((item) => item.length >= 2)
+}
+
+function standardDeviation(values: number[]): number {
+  if (values.length <= 1) return 0
+  const average = values.reduce((sum, value) => sum + value, 0) / values.length
+  const variance = values.reduce((sum, value) => sum + ((value - average) ** 2), 0) / values.length
+  return Math.sqrt(variance)
+}
+
 function hasAnyToken(text: string, tokens: string[]): boolean {
   return tokens.some((token) => text.includes(token))
+}
+
+function detectPrimaryEmotionBucket(sentence: string): keyof typeof EMOTION_BUCKET_LABELS | null {
+  const scored = (Object.entries(EMOTION_TOKEN_MAP) as Array<[keyof typeof EMOTION_BUCKET_LABELS, string[]]>)
+    .map(([bucket, tokens]) => [bucket, tokens.filter((token) => sentence.includes(token)).length] as const)
+    .sort((left, right) => right[1] - left[1])
+  return scored[0]?.[1] ? scored[0][0] : null
+}
+
+function resolveExpectedEmotionBucket(focus: string): keyof typeof EMOTION_BUCKET_LABELS | null {
+  const normalized = asText(focus)
+  if (!normalized) return null
+  const match = (Object.entries(EMOTION_TOKEN_MAP) as Array<[keyof typeof EMOTION_BUCKET_LABELS, string[]]>)
+    .map(([bucket, tokens]) => [bucket, tokens.filter((token) => normalized.includes(token)).length] as const)
+    .sort((left, right) => right[1] - left[1])[0]
+  return match?.[1] ? match[0] : null
 }
 
 function findMatchingSentences(sentences: string[], patterns: RegExp[]): string[] {
@@ -249,6 +338,15 @@ function buildPromptGuidance(input: AnalyzeNarrativeControlsInput): NarrativePro
     : genreText.includes('惊悚')
       ? '惊悚章额外注意声音、触觉压迫和空气变化。'
       : ''
+  const transitionGuide = chapterFunction === 'breather'
+    ? '过渡/喘息章优先做出“2-3 段实质推进 + 1 段短释压”的疏密变化，不要整章平均铺陈。'
+    : ''
+  const emotionGuide = asText(input.emotionFocus)
+    ? `情绪主基调锁定为：${asText(input.emotionFocus)}。允许局部温差，但不要把整章写成单一情绪颜色。`
+    : '没有显式情绪主基调时，也要避免整章只剩一种情绪腔调。'
+  const expositionGuide = asText(input.expositionMode)
+    ? `设定/说明方式：${asText(input.expositionMode)}。禁止连续三句以上脱离人物动作与互动的纯说明。`
+    : '世界观说明尽量绑到角色经历、动作和互动里，不要连写纯解释段。'
 
   return {
     chapterFunction,
@@ -278,6 +376,9 @@ function buildPromptGuidance(input: AnalyzeNarrativeControlsInput): NarrativePro
     narrativeRatioGuidance: [
       `${functionRule.label}推荐比例：动作 ${functionRule.actionRange[0]}-${functionRule.actionRange[1]}%，对白 ${functionRule.dialogueRange[0]}-${functionRule.dialogueRange[1]}%，内心 <=${functionRule.interiorMax}%，环境 <=${functionRule.environmentMax}%，解释 <=${functionRule.expositionMax}%，环境+解释 <=${functionRule.ambientMax}%。`,
       '对白过满时要补动作和环境反应；内心过满时要把判断改回外部事件；解释过满时要删掉作者代说。',
+      transitionGuide,
+      emotionGuide,
+      expositionGuide,
     ].join('\n'),
   }
 }
@@ -498,20 +599,234 @@ function analyzeNarrativeRatio(input: AnalyzeNarrativeControlsInput, sentences: 
   }
 }
 
+function analyzeTransitionDensity(input: AnalyzeNarrativeControlsInput, paragraphs: string[]): TransitionDensityAnalysis {
+  const chapterFunction = resolveNarrativeFunctionProfile(input)
+  const lengths = paragraphs.map((paragraph) => paragraph.replace(/\s+/g, '').length)
+  const denseThreshold = chapterFunction === 'breather' ? 70 : 120
+  const thinThreshold = chapterFunction === 'breather' ? 32 : 24
+  const denseFlags = lengths.map((length) => length >= denseThreshold)
+  const thinFlags = lengths.map((length) => length <= thinThreshold)
+  const denseParagraphCount = denseFlags.filter(Boolean).length
+  const thinParagraphCount = thinFlags.filter(Boolean).length
+  const variance = standardDeviation(lengths)
+
+  let maxDenseRun = 0
+  let currentDenseRun = 0
+  let denseClusterCount = 0
+  let releasedDenseClusters = 0
+
+  denseFlags.forEach((isDense, index) => {
+    if (!isDense) {
+      if (currentDenseRun >= 2) {
+        denseClusterCount += 1
+        if (thinFlags[index] || thinFlags[index + 1]) releasedDenseClusters += 1
+      }
+      maxDenseRun = Math.max(maxDenseRun, currentDenseRun)
+      currentDenseRun = 0
+      return
+    }
+    currentDenseRun += 1
+  })
+  if (currentDenseRun >= 2) {
+    denseClusterCount += 1
+    const nextIndex = denseFlags.length
+    if (thinFlags[nextIndex] || thinFlags[nextIndex + 1]) releasedDenseClusters += 1
+  }
+  maxDenseRun = Math.max(maxDenseRun, currentDenseRun)
+
+  const transitionChapter = chapterFunction === 'breather'
+    || asText(input.emotionTone).includes('过渡')
+    || asText(input.emotionTone).includes('平缓')
+    || asText(input.emotionTone).includes('喘息')
+    || asText(input.chapterFunction).includes('breather')
+  const overlyUniform = paragraphs.length >= 4 && variance < 18 && thinParagraphCount === 0
+  const overloadedBridge = maxDenseRun >= 3 || (denseClusterCount > 0 && releasedDenseClusters === 0 && thinParagraphCount === 0)
+
+  let status: NarrativeGateStatus = 'pass'
+  if (transitionChapter && overloadedBridge) {
+    status = 'rewrite'
+  } else if ((transitionChapter && (overlyUniform || denseClusterCount > releasedDenseClusters)) || (!transitionChapter && maxDenseRun >= 4)) {
+    status = 'warning'
+  }
+
+  const riskRate = clampPercent(
+    Math.min(
+      100,
+      denseParagraphCount * 12
+      + Math.max(0, maxDenseRun - 1) * 18
+      + (overlyUniform ? 24 : 0)
+      + (releasedDenseClusters === 0 && denseClusterCount > 0 ? 18 : 0),
+    ),
+  )
+
+  const summary = status === 'rewrite'
+    ? `过渡段连续出现 ${maxDenseRun} 段高密度段落，但没有形成短释压，节奏发闷。`
+    : status === 'warning'
+      ? `段落疏密变化偏弱：高密段 ${denseParagraphCount} 段，短释压段 ${thinParagraphCount} 段，长度方差 ${clampPercent(variance)}。`
+      : transitionChapter
+        ? `过渡段疏密基本成立：高密段 ${denseParagraphCount} 段，短释压段 ${thinParagraphCount} 段。`
+        : '当前章节不是典型过渡/喘息章，段落疏密风险可控。'
+
+  return {
+    status,
+    summary,
+    fixHint: transitionChapter
+      ? '把连续解释或铺陈拆成 2-3 段实质推进后，接一段更短的动作/停顿/观察释压，拉开呼吸。'
+      : '避免连续堆叠同等重量的长段，适当插入短动作或短反馈切开节奏。',
+    riskRate,
+    paragraphCount: paragraphs.length,
+    denseParagraphCount,
+    thinParagraphCount,
+    maxDenseRun,
+    releasedDenseClusters,
+  }
+}
+
+function analyzeEmotionFocus(input: AnalyzeNarrativeControlsInput, sentences: string[]): EmotionFocusAnalysis {
+  const bucketCounts = new Map<keyof typeof EMOTION_BUCKET_LABELS, number>()
+  sentences.forEach((sentence) => {
+    const bucket = detectPrimaryEmotionBucket(sentence)
+    if (!bucket) return
+    bucketCounts.set(bucket, (bucketCounts.get(bucket) || 0) + 1)
+  })
+
+  const ranked = [...bucketCounts.entries()].sort((left, right) => right[1] - left[1])
+  const totalHits = ranked.reduce((sum, [, count]) => sum + count, 0)
+  const dominantBucket = ranked[0]?.[0] || null
+  const dominantCount = ranked[0]?.[1] || 0
+  const dominantShare = totalHits > 0 ? clampPercent((dominantCount / totalHits) * 100) : 0
+  const contrastEmotionCount = ranked.filter(([, count]) => count > 0).length
+  const expectedFocus = asText(input.emotionFocus)
+  const expectedBucket = resolveExpectedEmotionBucket(expectedFocus)
+  const expectedCount = expectedBucket ? bucketCounts.get(expectedBucket) || 0 : 0
+  const matchedFocus = !expectedBucket || expectedCount > 0
+  const monotonyThreshold = resolveNarrativeFunctionProfile(input) === 'climax' ? 88 : 78
+  const monochrome = totalHits >= 6 && dominantShare >= monotonyThreshold && contrastEmotionCount <= 1
+  const sceneShiftSignals = (input.sceneSnapshots || [])
+    .map((scene) => asText(scene.emotionShift))
+    .filter(Boolean)
+  const expectsShift = new Set(sceneShiftSignals).size >= 2
+
+  let status: NarrativeGateStatus = 'pass'
+  if (expectedFocus && !matchedFocus && totalHits >= 4) {
+    status = 'warning'
+  }
+  if (monochrome || (expectsShift && contrastEmotionCount <= 1 && totalHits >= 5)) {
+    status = status === 'warning' ? 'rewrite' : 'warning'
+  }
+
+  const dominantEmotion = dominantBucket ? EMOTION_BUCKET_LABELS[dominantBucket] : '未识别'
+  const summary = status === 'rewrite'
+    ? `当前章节情绪几乎被“${dominantEmotion}”单色占满，缺少必要的温差和回弹。`
+    : status === 'warning'
+      ? expectedFocus && !matchedFocus
+        ? `合同主基调要求“${expectedFocus}”，但正文主要落在“${dominantEmotion}”。`
+        : `当前章节主要压在“${dominantEmotion}”，情绪层次偏薄。`
+      : expectedFocus
+        ? `情绪主基调与合同基本对齐：${expectedFocus}。`
+        : dominantBucket
+          ? `当前章节主情绪以“${dominantEmotion}”为主，整体还算稳定。`
+          : '当前正文没有明显的情绪跑焦或单色情绪问题。'
+
+  return {
+    status,
+    summary,
+    fixHint: expectedFocus && !matchedFocus
+      ? `把关键反应拉回“${expectedFocus}”这条主线上，同时在局部插入一种次级情绪做温差。`
+      : '保留主基调，但至少补一层次级情绪或反向反应，不要让整章只有一种情绪颜色。',
+    riskRate: clampPercent(
+      Math.min(
+        100,
+        (expectedFocus && !matchedFocus ? 32 : 0)
+        + (monochrome ? 38 : 0)
+        + Math.max(0, dominantShare - 60) * 0.8,
+      ),
+    ),
+    expectedFocus,
+    dominantEmotion,
+    dominantShare,
+    contrastEmotionCount,
+    matchedFocus,
+  }
+}
+
+function isPureExpositionSentence(sentence: string): boolean {
+  const hasAction = hasAnyToken(sentence, ACTION_TOKENS)
+  const hasDialogue = sentence.includes('“') || sentence.includes('"')
+  const hasWorldToken = hasAnyToken(sentence, WORLD_EXPOSITION_TOKENS)
+  const hasExplanationToken = hasAnyToken(sentence, EXPLANATORY_TOKENS) || hasAnyToken(sentence, EXPLANATION_PATTERN_TOKENS)
+  return !hasAction && !hasDialogue && (hasWorldToken || hasExplanationToken)
+}
+
+function analyzeExpositionDelivery(input: AnalyzeNarrativeControlsInput, sentences: string[]): ExpositionDeliveryAnalysis {
+  const expositionMode = asText(input.expositionMode)
+  const directMode = expositionMode.includes('直述') || expositionMode.includes('direct')
+  const pureExpositionFlags = sentences.map((sentence) => isPureExpositionSentence(sentence))
+  const explanatorySentenceCount = pureExpositionFlags.filter(Boolean).length
+  const worldSentenceCount = sentences.filter((sentence) => hasAnyToken(sentence, WORLD_EXPOSITION_TOKENS)).length
+  let consecutiveBlockLength = 0
+  let currentRun = 0
+  pureExpositionFlags.forEach((isPure) => {
+    if (isPure) {
+      currentRun += 1
+      consecutiveBlockLength = Math.max(consecutiveBlockLength, currentRun)
+    } else {
+      currentRun = 0
+    }
+  })
+
+  let status: NarrativeGateStatus = 'pass'
+  if (consecutiveBlockLength >= (directMode ? 5 : 4)) {
+    status = 'rewrite'
+  } else if (consecutiveBlockLength >= 3 || worldSentenceCount >= (directMode ? 6 : 4)) {
+    status = 'warning'
+  }
+
+  const summary = status === 'rewrite'
+    ? `世界观说明连续堆了 ${consecutiveBlockLength} 句纯解释，已经接近说明书。`
+    : status === 'warning'
+      ? `当前正文有 ${worldSentenceCount} 句偏世界观/规则说明，最长连续纯解释块 ${consecutiveBlockLength} 句。`
+      : directMode
+        ? '当前世界观说明量仍在“允许短直述”的范围内。'
+        : '当前没有明显的世界观说明文堆积。'
+
+  return {
+    status,
+    summary,
+    fixHint: directMode
+      ? '即使允许短直述，也把最长解释块拆开，改成“说明一句 + 动作/互动承接一句”的交替结构。'
+      : '把设定说明拆进角色经历、对话、误判和动作结果里，避免连续纯解释。',
+    riskRate: clampPercent(
+      Math.min(100, explanatorySentenceCount * 12 + worldSentenceCount * 8 + Math.max(0, consecutiveBlockLength - 2) * 18),
+    ),
+    consecutiveBlockLength,
+    explanatorySentenceCount,
+    worldSentenceCount,
+  }
+}
+
 export function analyzeNarrativeControls(input: AnalyzeNarrativeControlsInput): NarrativeControlReport {
   const promptGuidance = buildPromptGuidance(input)
-  const sentences = splitSentences(asText(input.content))
+  const content = asText(input.content)
+  const sentences = splitSentences(content)
+  const paragraphs = splitParagraphs(content)
   const pov = analyzePovBoundary(input, sentences)
   const sensory = analyzeSensoryCoverage(input, sentences)
   const narrativeRatio = analyzeNarrativeRatio({
     ...input,
     chapterFunction: input.chapterFunction || promptGuidance.chapterFunction,
   }, sentences)
+  const transitionDensity = analyzeTransitionDensity(input, paragraphs)
+  const emotionFocus = analyzeEmotionFocus(input, sentences)
+  const exposition = analyzeExpositionDelivery(input, sentences)
 
   return {
     promptGuidance,
     pov,
     sensory,
     narrativeRatio,
+    transitionDensity,
+    emotionFocus,
+    exposition,
   }
 }

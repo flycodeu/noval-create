@@ -15,4 +15,24 @@ describe('workspace-quality.service', () => {
     expect(report.humanizationSignals.some((item) => item.issueType === 'explanatory_narration')).toBe(true)
     expect(report.humanizationDirections.length).toBeGreaterThan(0)
   })
+
+  it('surfaces transition, emotion, and exposition-specific signals when chapter context is provided', () => {
+    const report = analyzeWorkspaceAiFlavor(
+      [
+        '学院的位阶制度分为外院、内院和真传。',
+        '帝国法令规定所有术式都必须登记来源与许可。',
+        '灵脉体系由九段构成，每一段对应不同的资源配额。',
+        '教会与军府分别负责审查和执行这套规则。',
+      ].join(''),
+      undefined,
+      {
+        chapterFunction: 'breather',
+        emotionFocus: '克制悲伤',
+        expositionMode: '动作带出',
+      },
+    )
+
+    expect(report.humanizationSignals.some((item) => item.issueType === 'world_exposition_dump')).toBe(true)
+    expect(report.breakdown.some((item) => item.key === 'worldExpositionRiskRate')).toBe(true)
+  })
 })

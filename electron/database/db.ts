@@ -1161,6 +1161,10 @@ export function runMigrations(sqlite: Database.Database) {
         novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
         chapter_id INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
         chapter_goal TEXT,
+        opening_style TEXT,
+        ending_style TEXT,
+        exposition_mode TEXT,
+        emotion_focus TEXT,
         served_thread_ids_json TEXT,
         required_arc_progress_json TEXT,
         required_character_arc_ids_json TEXT,
@@ -1789,6 +1793,13 @@ export function runMigrations(sqlite: Database.Database) {
     ensureColumn(sqlite, 'world_state_versions', 'trigger_event_id', 'INTEGER REFERENCES timeline_events(id) ON DELETE SET NULL')
     ensureColumn(sqlite, 'world_state_versions', 'source_segment_id', 'INTEGER REFERENCES chapter_segments(id) ON DELETE SET NULL')
     ensureColumn(sqlite, 'world_state_versions', 'state_delta_json', 'TEXT')
+  })
+
+  runMigrationStep(sqlite, '0036_chapter_contract_shape_controls', () => {
+    ensureColumn(sqlite, 'chapter_contracts', 'opening_style', 'TEXT')
+    ensureColumn(sqlite, 'chapter_contracts', 'ending_style', 'TEXT')
+    ensureColumn(sqlite, 'chapter_contracts', 'exposition_mode', 'TEXT')
+    ensureColumn(sqlite, 'chapter_contracts', 'emotion_focus', 'TEXT')
   })
 }
 

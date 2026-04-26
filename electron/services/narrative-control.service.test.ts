@@ -59,4 +59,45 @@ describe('analyzeNarrativeControls', () => {
     expect(result.sensory.missingSenses).toContain('gustatory')
     expect(result.sensory.summary).toContain('覆盖')
   })
+
+  it('flags transition chapters whose paragraph density never releases', () => {
+    const result = analyzeNarrativeControls({
+      chapterFunction: 'breather',
+      emotionTone: '过渡',
+      content: [
+        '林远沿着空走廊一间一间确认门锁、窗缝、脚印、拖痕和潮气变化，把每个细节都压进脑子里，连墙角掉漆的形状、灯罩积灰的方向和门轴发涩的声响都不肯放过。',
+        '他又把账本、钥匙、守卫轮值、昨夜动线、仓库清点顺序和每个人说谎时的停顿重新串了一遍，试图从每一个不对劲的细节里抠出下一个危险会从哪里冒头。',
+        '他接着把仓库周围的照明盲区、岗哨轮换、备用通道和楼梯回音重新记了一轮，连哪块地板会先发响、哪扇窗会漏风都逐项压回原位，没有给自己留下半点喘息。',
+        '最后他仍旧站在原地继续推演每一种最坏结果，反复核对名单、钥匙、脚印和撤离路线，整段过渡只剩下信息堆叠，没有任何短动作或情绪释压。',
+      ].join('\n'),
+    })
+
+    expect(result.transitionDensity.status).not.toBe('pass')
+    expect(result.transitionDensity.fixHint).toContain('释压')
+  })
+
+  it('detects emotion-focus drift and monochrome chapters', () => {
+    const result = analyzeNarrativeControls({
+      emotionFocus: '克制悲伤',
+      content: '他咬牙顶了回去，火气直冲喉咙。她拍开门板，怒意压不住。两个人一句比一句硬，谁都不肯退。桌角被他一掌拍得发响，憋火越烧越狠。那股恼意一路顶到眼底，谁开口都像在点火。',
+    })
+
+    expect(result.emotionFocus.status).toBe('warning')
+    expect(result.emotionFocus.summary).toContain('克制悲伤')
+  })
+
+  it('flags consecutive worldbuilding exposition dumps', () => {
+    const result = analyzeNarrativeControls({
+      expositionMode: '动作带出',
+      content: [
+        '学院的位阶制度分为外院、内院和真传。',
+        '帝国法令规定所有术式都必须登记来源与许可。',
+        '灵脉体系由九段构成，每一段对应不同的资源配额。',
+        '教会与军府分别负责审查和执行这套规则。',
+      ].join(''),
+    })
+
+    expect(result.exposition.status).toBe('rewrite')
+    expect(result.exposition.summary).toContain('说明')
+  })
 })

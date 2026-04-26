@@ -1272,6 +1272,10 @@ function buildChapterContractView(
     chapterNum: chapter.chapterNum,
     chapterTitle: chapter.title?.trim() || `第${chapter.chapterNum}章`,
     chapterGoal: contract?.chapterGoal || '',
+    openingStyle: contract?.openingStyle || '',
+    endingStyle: contract?.endingStyle || '',
+    expositionMode: contract?.expositionMode || '',
+    emotionFocus: contract?.emotionFocus || '',
     servedThreadIds: parseJsonNumberArray(contract?.servedThreadIdsJson),
     requiredArcProgress: parseJsonStringArray(contract?.requiredArcProgressJson),
     requiredCharacterArcIds: parseJsonNumberArray(contract?.requiredCharacterArcIdsJson),
@@ -1302,6 +1306,10 @@ export function upsertChapterContract(
   chapterId: number,
   data: Partial<{
     chapterGoal: string
+    openingStyle: string
+    endingStyle: string
+    expositionMode: string
+    emotionFocus: string
     servedThreadIds: number[]
     requiredArcProgress: string[]
     requiredCharacterArcIds: number[]
@@ -1326,6 +1334,10 @@ export function upsertChapterContract(
   if (current) {
     db.update(chapterContracts).set({
       chapterGoal: data.chapterGoal !== undefined ? asText(data.chapterGoal) : current.chapterGoal,
+      openingStyle: data.openingStyle !== undefined ? asText(data.openingStyle) : current.openingStyle,
+      endingStyle: data.endingStyle !== undefined ? asText(data.endingStyle) : current.endingStyle,
+      expositionMode: data.expositionMode !== undefined ? asText(data.expositionMode) : current.expositionMode,
+      emotionFocus: data.emotionFocus !== undefined ? asText(data.emotionFocus) : current.emotionFocus,
       servedThreadIdsJson: data.servedThreadIds !== undefined ? stringifyNumberArray(data.servedThreadIds) : current.servedThreadIdsJson,
       requiredArcProgressJson: data.requiredArcProgress !== undefined ? stringifyStringArray(data.requiredArcProgress) : current.requiredArcProgressJson,
       requiredCharacterArcIdsJson: data.requiredCharacterArcIds !== undefined ? stringifyNumberArray(data.requiredCharacterArcIds) : current.requiredCharacterArcIdsJson,
@@ -1346,6 +1358,10 @@ export function upsertChapterContract(
       novelId: chapter.novelId,
       chapterId,
       chapterGoal: asText(data.chapterGoal),
+      openingStyle: asText(data.openingStyle),
+      endingStyle: asText(data.endingStyle),
+      expositionMode: asText(data.expositionMode),
+      emotionFocus: asText(data.emotionFocus),
       servedThreadIdsJson: stringifyNumberArray(data.servedThreadIds),
       requiredArcProgressJson: stringifyStringArray(data.requiredArcProgress),
       requiredCharacterArcIdsJson: stringifyNumberArray(data.requiredCharacterArcIds),

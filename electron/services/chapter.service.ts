@@ -156,6 +156,7 @@ interface ScenePlanStep {
   conflict: string
   beat: string
   must_cover: string[]
+  climax_variant: string
   exit_hook: string
 }
 
@@ -236,6 +237,9 @@ const HUMANIZATION_SIGNAL_TYPES = new Set<HumanizationSignal['issueType']>([
   'ornament_overload',
   'sensory_anchor_missing',
   'weak_stance',
+  'transition_density',
+  'emotion_monotony',
+  'world_exposition_dump',
 ])
 const HUMANIZATION_REVIEW_SIGNAL_TYPES = new Set<HumanizationSignal['issueType']>([
   'template_connector',
@@ -243,6 +247,9 @@ const HUMANIZATION_REVIEW_SIGNAL_TYPES = new Set<HumanizationSignal['issueType']
   'ornament_overload',
   'sensory_anchor_missing',
   'weak_stance',
+  'transition_density',
+  'emotion_monotony',
+  'world_exposition_dump',
 ])
 type ChapterPipelineFailureCode =
   | 'contract_blocked'
@@ -448,6 +455,7 @@ function loadNarrativeControlSceneSnapshots(chapterId: number): NarrativeControl
         segmentOrder: segment.segmentOrder,
         segmentTitle: segment.title || `场景 ${segment.segmentOrder}`,
         pov: scene?.pov || '',
+        emotionShift: scene?.emotionShift || '',
       }
     }),
     ...sceneRows
@@ -456,8 +464,21 @@ function loadNarrativeControlSceneSnapshots(chapterId: number): NarrativeControl
         segmentId: scene.segmentId ?? undefined,
         segmentTitle: `场景合同 ${scene.id}`,
         pov: scene.pov || '',
+        emotionShift: scene.emotionShift || '',
       })),
   ]
+}
+
+function loadNarrativeContractSignals(chapterId: number): {
+  emotionFocus: string
+  expositionMode: string
+} {
+  const db = getDb()
+  const contract = db.select().from(chapterContracts).where(eq(chapterContracts.chapterId, chapterId)).all()[0] || null
+  return {
+    emotionFocus: asText(contract?.emotionFocus),
+    expositionMode: asText(contract?.expositionMode),
+  }
 }
 
 function toStringArray(value: unknown): string[] {
@@ -1180,6 +1201,7 @@ function normalizeScenePlan(raw: unknown, fallback: ScenePlanStep[]): ScenePlanS
         conflict: asText(record.conflict),
         beat,
         must_cover: toStringArray(record.must_cover),
+        climax_variant: asText(record.climax_variant),
         exit_hook: asText(record.exit_hook),
       }
     })
@@ -1210,6 +1232,7 @@ function buildFallbackScenePlan(chapter: typeof chapters.$inferSelect): ScenePla
     conflict: '',
     beat: line,
     must_cover: [line],
+    climax_variant: '',
     exit_hook: index === seeds.length - 1 ? '把本章推进到自然收束点。' : '把当前冲突继续推向下一段。',
   }))
 }
@@ -1357,6 +1380,7 @@ function formatScenePlan(scenePlan: ScenePlanStep[]): string {
         step.conflict ? `冲突=${step.conflict}` : '',
         step.beat ? `动作=${step.beat}` : '',
         step.must_cover.length > 0 ? `必须交代=${step.must_cover.join('；')}` : '',
+        step.climax_variant ? `高潮变体=${step.climax_variant}` : '',
         step.exit_hook ? `收尾=${step.exit_hook}` : '',
       ].filter(Boolean)
       return `${step.scene_order}. ${step.scene_title}\n${parts.join('\n')}`
@@ -1738,9 +1762,25 @@ function appendRevisionBrief(base: string, additions: string[]): string {
 function applyHumanizationAnalysisToReviewNotes(
   reviewNotes: ChapterReviewNotes,
   content: string,
-  genre?: string,
+  options: {
+    chapterId?: number
+    genre?: string
+    chapterFunction?: string
+    emotionTone?: string
+  } = {},
 ): ChapterReviewNotes {
-  const aiFlavor = analyzeWorkspaceAiFlavor(content, genre)
+  const narrativeContractSignals = options.chapterId ? loadNarrativeContractSignals(options.chapterId) : {
+    emotionFocus: '',
+    expositionMode: '',
+  }
+  const sceneSnapshots = options.chapterId ? loadNarrativeControlSceneSnapshots(options.chapterId) : []
+  const aiFlavor = analyzeWorkspaceAiFlavor(content, options.genre, {
+    chapterFunction: options.chapterFunction,
+    emotionTone: options.emotionTone,
+    emotionFocus: narrativeContractSignals.emotionFocus,
+    expositionMode: narrativeContractSignals.expositionMode,
+    sceneSnapshots,
+  })
   const signals = aiFlavor.humanizationSignals.filter((item) => HUMANIZATION_REVIEW_SIGNAL_TYPES.has(item.issueType))
   if (signals.length === 0 && aiFlavor.humanizationDirections.length === 0) {
     return reviewNotes
@@ -1751,10 +1791,16 @@ function applyHumanizationAnalysisToReviewNotes(
     .filter((item) => item.severity === 'high')
     .map((item) => `${item.title}：${item.prefer || item.avoid}`)
   const languageRisks = signals
-    .filter((item) => item.issueType === 'template_connector' || item.issueType === 'explanatory_narration' || item.issueType === 'ornament_overload')
+    .filter((item) => item.issueType === 'template_connector' || item.issueType === 'explanatory_narration' || item.issueType === 'ornament_overload' || item.issueType === 'world_exposition_dump')
     .map((item) => item.detail)
   const coherenceRisks = signals
-    .filter((item) => item.issueType === 'sensory_anchor_missing' || item.issueType === 'weak_stance')
+    .filter((item) => item.issueType === 'sensory_anchor_missing' || item.issueType === 'weak_stance' || item.issueType === 'transition_density')
+    .map((item) => item.detail)
+  const readerHookRisks = signals
+    .filter((item) => item.issueType === 'emotion_monotony' || item.issueType === 'transition_density')
+    .map((item) => item.detail)
+  const genreHollowingRisks = signals
+    .filter((item) => item.issueType === 'world_exposition_dump')
     .map((item) => item.detail)
   const reviewSignalMap = new Map(reviewNotes.humanization_signals.map((item) => [item.issueType, item] as const))
   signals.forEach((item) => {
@@ -1769,6 +1815,8 @@ function applyHumanizationAnalysisToReviewNotes(
     critical_fixes: dedupeTextList([...reviewNotes.critical_fixes, ...criticalSignals]),
     language_risks: dedupeTextList([...reviewNotes.language_risks, ...languageRisks]),
     coherence_risks: dedupeTextList([...reviewNotes.coherence_risks, ...coherenceRisks]),
+    reader_hook_risks: dedupeTextList([...reviewNotes.reader_hook_risks, ...readerHookRisks]),
+    genre_hollowing_risks: dedupeTextList([...reviewNotes.genre_hollowing_risks, ...genreHollowingRisks]),
     human_language_repairs: dedupeTextList([...reviewNotes.human_language_repairs, ...aiFlavor.humanizationDirections]),
     summary: reviewNotes.summary || aiFlavor.summary,
     severity: signals.reduce(
@@ -2285,7 +2333,12 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
   const repairNotes = applyHumanizationAnalysisToReviewNotes(
     enhanceReviewNotesWithGuardrails(input.reviewNotes, originalContent, input.profile.genre, findings),
     originalContent,
-    input.profile.genre,
+    {
+      chapterId: input.chapter.id,
+      genre: input.profile.genre,
+      chapterFunction: input.reviewNotes.chapter_function_primary || input.reviewNotes.pace_marker,
+      emotionTone: input.chapter.emotionTone || '',
+    },
   )
 
   try {
@@ -2372,7 +2425,12 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
           finalFindings,
         ),
         protectedRepaired.content,
-        input.profile.genre,
+        {
+          chapterId: input.chapter.id,
+          genre: input.profile.genre,
+          chapterFunction: protectedRepaired.reviewNotes.chapter_function_primary || protectedRepaired.reviewNotes.pace_marker,
+          emotionTone: input.chapter.emotionTone || '',
+        },
       )
       try {
         const secondPromptDraftContent = markLockedParagraphsInContent(protectedRepaired.content, input.lockedParagraphs)
@@ -2447,9 +2505,19 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
         ? applyHumanizationAnalysisToReviewNotes(
           enhanceReviewNotesWithGuardrails(protectedRepaired.reviewNotes, protectedRepaired.content, input.profile.genre, finalFindings),
           protectedRepaired.content,
-          input.profile.genre,
+          {
+            chapterId: input.chapter.id,
+            genre: input.profile.genre,
+            chapterFunction: protectedRepaired.reviewNotes.chapter_function_primary || protectedRepaired.reviewNotes.pace_marker,
+            emotionTone: input.chapter.emotionTone || '',
+          },
         )
-        : applyHumanizationAnalysisToReviewNotes(protectedRepaired.reviewNotes, protectedRepaired.content, input.profile.genre),
+        : applyHumanizationAnalysisToReviewNotes(protectedRepaired.reviewNotes, protectedRepaired.content, {
+          chapterId: input.chapter.id,
+          genre: input.profile.genre,
+          chapterFunction: protectedRepaired.reviewNotes.chapter_function_primary || protectedRepaired.reviewNotes.pace_marker,
+          emotionTone: input.chapter.emotionTone || '',
+        }),
     }
   } catch {
     return {
@@ -3213,6 +3281,7 @@ export async function generateChapterContent(
   const profile = rawContext.profile
   const themeVoice = parseThemeVoiceDocument(novel.themeVoiceJson)
   const narrativeSceneSnapshots = loadNarrativeControlSceneSnapshots(chapterId)
+  const narrativeContractSignals = loadNarrativeContractSignals(chapterId)
   const consistencyNotes = buildConsistencyPromptSummary(buildNovelConsistencyReport(chapter.novelId))
   const previousStatus = chapter.status || 'outline'
   const fallbackScenePlan = buildFallbackScenePlan(chapter)
@@ -3593,6 +3662,8 @@ export async function generateChapterContent(
       content,
       chapterGoal,
       emotionTone: chapter.emotionTone || '平稳',
+      emotionFocus: narrativeContractSignals.emotionFocus,
+      expositionMode: narrativeContractSignals.expositionMode,
       chapterFunction,
       genre: profile.genre,
     })
@@ -3614,6 +3685,12 @@ export async function generateChapterContent(
           ? `当前偏移：${report.narrativeRatio.deviationReasons.slice(0, 3).join('；')}`
           : '',
         report.narrativeRatio.status !== 'pass' ? `修正方向：${report.narrativeRatio.fixHint}` : '',
+        contentReportLine(report.transitionDensity.summary),
+        report.transitionDensity.status !== 'pass' ? `过渡修正：${report.transitionDensity.fixHint}` : '',
+        contentReportLine(report.emotionFocus.summary),
+        report.emotionFocus.status !== 'pass' ? `情绪修正：${report.emotionFocus.fixHint}` : '',
+        contentReportLine(report.exposition.summary),
+        report.exposition.status !== 'pass' ? `说明修正：${report.exposition.fixHint}` : '',
       ].filter(Boolean).join('\n'),
     })
     const plannerNarrativeFields = formatNarrativePromptFields(buildNarrativeControlReport(scenePlanContext.chapterGoal))
@@ -3931,7 +4008,12 @@ export async function generateChapterContent(
     }
 
     reviewNotes = enhanceReviewNotesWithGuardrails(reviewNotes, draftContent, profile.genre)
-    reviewNotes = applyHumanizationAnalysisToReviewNotes(reviewNotes, draftContent, profile.genre)
+    reviewNotes = applyHumanizationAnalysisToReviewNotes(reviewNotes, draftContent, {
+      chapterId,
+      genre: profile.genre,
+      chapterFunction: reviewNotes.chapter_function_primary || reviewNotes.pace_marker,
+      emotionTone: chapter.emotionTone || '',
+    })
     reviewNotes = applyDialogueAnalysisToReviewNotes(reviewNotes, chapter.novelId, chapter.chapterNum, draftContent)
     reviewNotes = applyStyleComplianceToReviewNotes(reviewNotes, chapter.novelId, draftContent)
     reviewNotes = applyContractValidationToReviewNotes(reviewNotes, validateChapterContractDelivery({
@@ -4052,7 +4134,12 @@ export async function generateChapterContent(
     const repairedHumanizedReviewNotes = applyHumanizationAnalysisToReviewNotes(
       repaired.reviewNotes,
       repaired.content,
-      profile.genre,
+      {
+        chapterId,
+        genre: profile.genre,
+        chapterFunction: repaired.reviewNotes.chapter_function_primary || repaired.reviewNotes.pace_marker,
+        emotionTone: chapter.emotionTone || '',
+      },
     )
     const repairedReviewNotes = applyDialogueAnalysisToReviewNotes(
       repairedHumanizedReviewNotes,

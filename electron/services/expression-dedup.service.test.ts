@@ -126,4 +126,47 @@ describe('expression-dedup.service', () => {
     expect(report.bannedExpressions).toContain('空气似乎凝固了')
     expect(report.summary).toContain('最近')
   })
+
+  it('detects deeper semantic structure reuse and explicit climax variants from scene plans', () => {
+    const chapterRows = [
+      {
+        id: 1,
+        novelId: 3,
+        volumeId: 1,
+        chapterNum: 1,
+        outline: '潜入仓库后发现埋伏',
+        emotionTone: '高潮',
+        scenePlanJson: JSON.stringify([
+          { purpose: '潜入仓库查证', conflict: '守卫试探盘问', beat: '摸黑贴墙前进' },
+          { purpose: '与守卫对峙施压', conflict: '对方拒绝放行', beat: '顶回去', climax_variant: '静压揭露' },
+          { purpose: '发现真相并翻盘', conflict: '证据暴露', beat: '反手亮证' },
+        ]),
+        content: '他贴着墙往前挪。守卫堵在门口不让过。证据亮出来的那一刻，局势骤然翻了过去。',
+      },
+      {
+        id: 2,
+        novelId: 3,
+        volumeId: 1,
+        chapterNum: 2,
+        outline: '夜闯库房后逼出证据',
+        emotionTone: '高潮',
+        scenePlanJson: JSON.stringify([
+          { purpose: '夜闯库房试探动静', conflict: '暗哨试探', beat: '沿着货架潜行' },
+          { purpose: '当面对峙施压', conflict: '对方硬拦', beat: '逼近半步', climax_variant: '静压揭露' },
+          { purpose: '拿到证据揭露反转', conflict: '真相暴露', beat: '翻出账册' },
+        ]),
+        content: '他顺着货架阴影潜进去。暗哨拦住路。账册翻开的瞬间，谁都知道事情变了。',
+      },
+    ]
+
+    vi.mocked(getDb).mockReturnValue(createTableAwareDbMock(new Map<unknown, unknown[]>([
+      [novels, [{ id: 3, targetWords: 160000 }]],
+      [chapters, chapterRows],
+    ])) as never)
+
+    const report = analyzeExpressionDedupForGeneration(3, 3, { currentVolumeId: 1 })
+
+    expect(report.repeatedStructuralPatterns.some((item) => item.includes('语义骨架：潜入试探→对峙施压→调查揭示'))).toBe(true)
+    expect(report.repeatedClimaxPatterns).toContain('静压揭露')
+  })
 })

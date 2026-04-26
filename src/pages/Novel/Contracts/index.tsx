@@ -29,6 +29,10 @@ interface Props {
 
 interface ChapterContractFormValues {
   chapterGoal: string
+  openingStyle: string
+  endingStyle: string
+  expositionMode: string
+  emotionFocus: string
   servedThreadIds: number[]
   requiredArcProgressText: string
   requiredCharacterArcIds: number[]
@@ -44,6 +48,29 @@ interface ChapterContractFormValues {
   status: string
 }
 
+const OPENING_STYLE_OPTIONS = [
+  { value: 'hook', label: '钩子直入' },
+  { value: 'daily', label: '日常切入' },
+  { value: 'incident', label: '事件起手' },
+  { value: 'flashback', label: '倒叙开场' },
+]
+
+const ENDING_STYLE_OPTIONS = [
+  { value: 'hook', label: '留钩未完' },
+  { value: 'reversal', label: '反转截断' },
+  { value: 'aftershock', label: '余波未平' },
+  { value: 'stillness', label: '静止定格' },
+  { value: 'arrival', label: '第三人入场' },
+]
+
+const EXPOSITION_MODE_OPTIONS = [
+  { value: 'embedded_action', label: '动作带出' },
+  { value: 'dialogue_reveal', label: '对白带出' },
+  { value: 'experience_filter', label: '角色经历过滤' },
+  { value: 'minimal', label: '只给必要说明' },
+  { value: 'brief_direct', label: '允许短直述' },
+]
+
 function splitLines(value?: string): string[] {
   return (value || '')
     .split(/\r?\n+/)
@@ -54,6 +81,10 @@ function splitLines(value?: string): string[] {
 function buildChapterFormValues(contract?: ChapterContractAsset | null): ChapterContractFormValues {
   return {
     chapterGoal: contract?.chapterGoal || '',
+    openingStyle: contract?.openingStyle || '',
+    endingStyle: contract?.endingStyle || '',
+    expositionMode: contract?.expositionMode || '',
+    emotionFocus: contract?.emotionFocus || '',
     servedThreadIds: contract?.servedThreadIds || [],
     requiredArcProgressText: (contract?.requiredArcProgress || []).join('\n'),
     requiredCharacterArcIds: contract?.requiredCharacterArcIds || [],
@@ -171,6 +202,10 @@ export default function ContractsPage({ novelId }: Props) {
     try {
       const result = await window.electron.contract.upsertChapter(activeChapterId, {
         chapterGoal: values.chapterGoal,
+        openingStyle: values.openingStyle,
+        endingStyle: values.endingStyle,
+        expositionMode: values.expositionMode,
+        emotionFocus: values.emotionFocus,
         servedThreadIds: values.servedThreadIds,
         requiredArcProgress: splitLines(values.requiredArcProgressText),
         requiredCharacterArcIds: values.requiredCharacterArcIds,
@@ -383,6 +418,38 @@ export default function ContractsPage({ novelId }: Props) {
             <div className="guided-step__field-card guided-step__field-card--full">
               <Form.Item name="chapterGoal" label="本章目标">
                 <Input.TextArea rows={4} placeholder="写这一章写完后，主线、人物或局势必须发生什么变化。" />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card guided-step__field-card--compact">
+              <Form.Item name="openingStyle" label="开场方式">
+                <Select
+                  allowClear
+                  placeholder="选择本章起手方式"
+                  options={OPENING_STYLE_OPTIONS}
+                />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card guided-step__field-card--compact">
+              <Form.Item name="endingStyle" label="收尾方式">
+                <Select
+                  allowClear
+                  placeholder="选择本章收尾形态"
+                  options={ENDING_STYLE_OPTIONS}
+                />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card guided-step__field-card--compact">
+              <Form.Item name="expositionMode" label="说明方式">
+                <Select
+                  allowClear
+                  placeholder="选择设定/说明如何带出"
+                  options={EXPOSITION_MODE_OPTIONS}
+                />
+              </Form.Item>
+            </div>
+            <div className="guided-step__field-card">
+              <Form.Item name="emotionFocus" label="情绪主基调">
+                <Input placeholder="例如：压抑警觉 / 克制悲伤 / 疲惫喘息 / 愤怒反打" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card">

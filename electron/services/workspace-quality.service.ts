@@ -16,7 +16,10 @@ import { analyzeLanguageDrift } from '../../src/shared/language-drift'
 import { collectQualityGuardrailFindings } from '../../src/shared/content-guardrails'
 import * as taskService from './task.service'
 import { safeParseJson } from '../utils/json'
-import { analyzeNarrativeControls } from './narrative-control.service'
+import {
+  analyzeNarrativeControls,
+  type NarrativeControlSceneSnapshot,
+} from './narrative-control.service'
 
 const ISSUE_KIND_LABELS: Record<WorkspaceQualityIssueKind, string> = {
   relevance_drift: '内容跑题',
@@ -128,6 +131,29 @@ const HUMANIZATION_SIGNAL_DESCRIPTORS: Record<HumanizationSignal['issueType'], {
     avoid: '不要站在场外替人物总结处境和意义。',
     prefer: '让句子贴回 POV 角色的观察、偏见和即时判断。',
   },
+  transition_density: {
+    title: '过渡疏密失衡',
+    avoid: '不要把过渡段写成一整片同重量的铺陈或连续高密说明。',
+    prefer: '用 2-3 段实质推进后接一段短释压，拉开呼吸和节拍。',
+  },
+  emotion_monotony: {
+    title: '情绪单色',
+    avoid: '不要让整章只剩一种情绪颜色反复覆盖所有反应。',
+    prefer: '保留主基调，但补局部温差、反向反应和次级情绪。',
+  },
+  world_exposition_dump: {
+    title: '世界观说明文',
+    avoid: '不要连续用设定直述和规则讲解替代角色经历与互动。',
+    prefer: '把世界规则拆进动作、对话、误判和现实后果里。',
+  },
+}
+
+interface WorkspaceAiFlavorOptions {
+  chapterFunction?: string
+  emotionTone?: string
+  emotionFocus?: string
+  expositionMode?: string
+  sceneSnapshots?: NarrativeControlSceneSnapshot[]
 }
 
 function cleanText(value: unknown): string {
@@ -276,12 +302,19 @@ function buildHumanizationSignal(
   }
 }
 
-export function analyzeWorkspaceAiFlavor(text: string, genre?: string): WorkspaceAiFlavorReport {
+export function analyzeWorkspaceAiFlavor(text: string, genre?: string, options: WorkspaceAiFlavorOptions = {}): WorkspaceAiFlavorReport {
   const normalized = text.replace(/\r\n/g, '\n').trim()
   const drift = analyzeLanguageDrift(normalized)
   const sentences = splitSentences(normalized)
   const guardrailFindings = collectQualityGuardrailFindings(normalized, genre)
-  const narrativeControlReport = analyzeNarrativeControls({ content: normalized })
+  const narrativeControlReport = analyzeNarrativeControls({
+    content: normalized,
+    chapterFunction: options.chapterFunction,
+    emotionTone: options.emotionTone,
+    emotionFocus: options.emotionFocus,
+    expositionMode: options.expositionMode,
+    sceneSnapshots: options.sceneSnapshots,
+  })
   const templateConnectorRate = countTokenRate(sentences, TEMPLATE_CONNECTORS)
   const explanatoryNarrationRate = countTokenRate(sentences, EXPLANATORY_TOKENS)
   const sensoryAnchorWeakRate = clampPercent(
@@ -306,6 +339,9 @@ export function analyzeWorkspaceAiFlavor(text: string, genre?: string): Workspac
     { key: 'stanceWeakRate', label: '缺少人物立场', value: stanceWeakRate },
     { key: 'povBoundaryRiskRate', label: 'POV 越界风险', value: narrativeControlReport.pov.riskRate },
     { key: 'sensoryCoverageGapRate', label: '五感缺口率', value: narrativeControlReport.sensory.gapRate },
+    { key: 'transitionDensityRiskRate', label: '过渡疏密风险', value: narrativeControlReport.transitionDensity.riskRate },
+    { key: 'emotionMonotonyRiskRate', label: '情绪单色风险', value: narrativeControlReport.emotionFocus.riskRate },
+    { key: 'worldExpositionRiskRate', label: '世界说明风险', value: narrativeControlReport.exposition.riskRate },
     { key: 'dialogueRatio', label: '对白占比', value: narrativeControlReport.narrativeRatio.ratios.dialogue },
     { key: 'interiorRatio', label: '内心占比', value: narrativeControlReport.narrativeRatio.ratios.interior },
     { key: 'environmentExpositionRatio', label: '环境/解释占比', value: clampPercent(
@@ -324,6 +360,9 @@ export function analyzeWorkspaceAiFlavor(text: string, genre?: string): Workspac
     stanceWeakRate,
     narrativeControlReport.pov.riskRate,
     narrativeControlReport.sensory.gapRate,
+    narrativeControlReport.transitionDensity.riskRate,
+    narrativeControlReport.emotionFocus.riskRate,
+    narrativeControlReport.exposition.riskRate,
     narrativeControlReport.narrativeRatio.imbalanceRate,
   ]
   const averageRisk = riskBreakdown.reduce((total, item) => total + item, 0) / Math.max(riskBreakdown.length, 1)
@@ -381,9 +420,39 @@ export function analyzeWorkspaceAiFlavor(text: string, genre?: string): Workspac
     ))
   }
   if (stanceWeakRate >= 60) sampleFindings.push('人物立场不够明显，像在做平叙说明。')
+  if (narrativeControlReport.transitionDensity.status !== 'pass') {
+    humanizationSignals.push(buildHumanizationSignal(
+      'transition_density',
+      narrativeControlReport.transitionDensity.status === 'rewrite' ? 'high' : 'medium',
+      narrativeControlReport.transitionDensity.summary,
+      'transitionDensityRiskRate',
+      narrativeControlReport.transitionDensity.riskRate,
+    ))
+  }
+  if (narrativeControlReport.emotionFocus.status !== 'pass') {
+    humanizationSignals.push(buildHumanizationSignal(
+      'emotion_monotony',
+      narrativeControlReport.emotionFocus.status === 'rewrite' ? 'high' : 'medium',
+      narrativeControlReport.emotionFocus.summary,
+      'emotionMonotonyRiskRate',
+      narrativeControlReport.emotionFocus.riskRate,
+    ))
+  }
+  if (narrativeControlReport.exposition.status !== 'pass') {
+    humanizationSignals.push(buildHumanizationSignal(
+      'world_exposition_dump',
+      narrativeControlReport.exposition.status === 'rewrite' ? 'high' : 'medium',
+      narrativeControlReport.exposition.summary,
+      'worldExpositionRiskRate',
+      narrativeControlReport.exposition.riskRate,
+    ))
+  }
   if (narrativeControlReport.pov.status !== 'pass') sampleFindings.push(narrativeControlReport.pov.summary)
   if (narrativeControlReport.sensory.status !== 'pass') sampleFindings.push(narrativeControlReport.sensory.summary)
   if (narrativeControlReport.narrativeRatio.status !== 'pass') sampleFindings.push(narrativeControlReport.narrativeRatio.summary)
+  if (narrativeControlReport.transitionDensity.status !== 'pass') sampleFindings.push(narrativeControlReport.transitionDensity.summary)
+  if (narrativeControlReport.emotionFocus.status !== 'pass') sampleFindings.push(narrativeControlReport.emotionFocus.summary)
+  if (narrativeControlReport.exposition.status !== 'pass') sampleFindings.push(narrativeControlReport.exposition.summary)
   if (guardrailFindings.some((finding) => finding.code === 'ai_slogan' || finding.code === 'template_emotion')) {
     sampleFindings.push('存在口号句或模板情绪表达。')
   }
@@ -412,6 +481,9 @@ export function analyzeWorkspaceAiFlavor(text: string, genre?: string): Workspac
   if (narrativeControlReport.pov.status !== 'pass') humanizationDirections.push(narrativeControlReport.pov.fixHint)
   if (narrativeControlReport.sensory.status !== 'pass') humanizationDirections.push(narrativeControlReport.sensory.fixHint)
   if (narrativeControlReport.narrativeRatio.status !== 'pass') humanizationDirections.push(narrativeControlReport.narrativeRatio.fixHint)
+  if (narrativeControlReport.transitionDensity.status !== 'pass') humanizationDirections.push(narrativeControlReport.transitionDensity.fixHint)
+  if (narrativeControlReport.emotionFocus.status !== 'pass') humanizationDirections.push(narrativeControlReport.emotionFocus.fixHint)
+  if (narrativeControlReport.exposition.status !== 'pass') humanizationDirections.push(narrativeControlReport.exposition.fixHint)
 
   return {
     score,

@@ -486,6 +486,7 @@ interface ChapterContractAuditSceneSnapshot {
   segmentTitle: string
   status: string
   pov: string
+  emotionShift: string
   timeLocation: string
   sceneGoal: string
   obstacle: string
@@ -503,6 +504,10 @@ interface ChapterContractAuditContext {
   chapterContractRow: typeof chapterContracts.$inferSelect | null
   chapterContract: {
     chapterGoal: string
+    openingStyle: string
+    endingStyle: string
+    expositionMode: string
+    emotionFocus: string
     servedThreadIds: number[]
     requiredArcProgress: string[]
     requiredCharacterArcIds: number[]
@@ -610,6 +615,7 @@ function loadChapterContractAuditContext(chapterId: number): ChapterContractAudi
         segmentTitle: normalizeText(segment.title) || `场景 ${segment.segmentOrder}`,
         status: normalizeContractStatus(contract?.status),
         pov: normalizeText(contract?.pov),
+        emotionShift: normalizeText(contract?.emotionShift),
         timeLocation: normalizeText(contract?.timeLocation),
         sceneGoal: normalizeText(contract?.sceneGoal) || normalizeText(segment.purpose),
         obstacle: normalizeText(contract?.obstacle),
@@ -630,6 +636,7 @@ function loadChapterContractAuditContext(chapterId: number): ChapterContractAudi
         segmentTitle: `场景合同 ${row.id}`,
         status: normalizeContractStatus(row.status),
         pov: normalizeText(row.pov),
+        emotionShift: normalizeText(row.emotionShift),
         timeLocation: normalizeText(row.timeLocation),
         sceneGoal: normalizeText(row.sceneGoal),
         obstacle: normalizeText(row.obstacle),
@@ -685,6 +692,10 @@ function loadChapterContractAuditContext(chapterId: number): ChapterContractAudi
     chapterContractRow,
     chapterContract: {
       chapterGoal: normalizeText(chapterContractRow?.chapterGoal),
+      openingStyle: normalizeText(chapterContractRow?.openingStyle),
+      endingStyle: normalizeText(chapterContractRow?.endingStyle),
+      expositionMode: normalizeText(chapterContractRow?.expositionMode),
+      emotionFocus: normalizeText(chapterContractRow?.emotionFocus),
       servedThreadIds,
       requiredArcProgress,
       requiredCharacterArcIds,
@@ -2204,6 +2215,8 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
     chapterFunction: reviewState.chapterFunctionPrimary || reviewState.paceMarker,
     chapterGoal: chapterContract.chapterGoal || chapter.outline || '',
     emotionTone: chapter.emotionTone || '',
+    emotionFocus: chapterContract.emotionFocus,
+    expositionMode: chapterContract.expositionMode,
   })
   const sceneHookCount = scenePlanSnapshots.filter((item) => item.exitHook).length
   const requiredThreads = chapterContract.servedThreadIds
@@ -2268,6 +2281,9 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
   const povBoundaryStatus: ChapterGateLevel = narrativeControlReport.pov.status
   const sensoryCoverageStatus: ChapterGateLevel = narrativeControlReport.sensory.status
   const narrativeRatioStatus: ChapterGateLevel = narrativeControlReport.narrativeRatio.status
+  const transitionDensityStatus: ChapterGateLevel = narrativeControlReport.transitionDensity.status
+  const emotionFocusStatus: ChapterGateLevel = narrativeControlReport.emotionFocus.status
+  const expositionStatus: ChapterGateLevel = narrativeControlReport.exposition.status
   const hookStrengthStatus: ChapterGateLevel = !chapterContract.hookType && sceneHookCount === 0 && reviewState.readerHookRisks.length > 0 && weakFunction
     ? 'blocker'
     : (!chapterContract.hookType || sceneHookCount === 0 || reviewState.readerHookRisks.length > 0)
@@ -2294,6 +2310,9 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
     povBoundaryStatus === 'rewrite' ? narrativeControlReport.pov.summary : '',
     sensoryCoverageStatus === 'rewrite' ? narrativeControlReport.sensory.summary : '',
     narrativeRatioStatus === 'rewrite' ? narrativeControlReport.narrativeRatio.summary : '',
+    transitionDensityStatus === 'rewrite' ? narrativeControlReport.transitionDensity.summary : '',
+    emotionFocusStatus === 'rewrite' ? narrativeControlReport.emotionFocus.summary : '',
+    expositionStatus === 'rewrite' ? narrativeControlReport.exposition.summary : '',
     reviewState.rewriteRequired && (contractAudit.blockerCount > 0 || highIssues.length > 0 || lineProgressStatus === 'blocker' || threadProgressStatus === 'blocker' || volumeAlignmentStatus === 'blocker')
       ? '审校已经建议重写，且命中了合同/推进/结构类硬问题，单纯润色不足以解决。'
       : '',
@@ -2556,6 +2575,33 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
       source: 'review',
       relatedPage: 'writing',
       fixHint: narrativeControlReport.narrativeRatio.fixHint,
+    }),
+    makePublishCheckItem({
+      key: 'transition_density',
+      label: '过渡段疏密',
+      status: transitionDensityStatus,
+      detail: narrativeControlReport.transitionDensity.summary,
+      source: 'review',
+      relatedPage: 'writing',
+      fixHint: narrativeControlReport.transitionDensity.fixHint,
+    }),
+    makePublishCheckItem({
+      key: 'emotion_focus',
+      label: '情绪主基调',
+      status: emotionFocusStatus,
+      detail: narrativeControlReport.emotionFocus.summary,
+      source: 'review',
+      relatedPage: 'writing',
+      fixHint: narrativeControlReport.emotionFocus.fixHint,
+    }),
+    makePublishCheckItem({
+      key: 'world_exposition',
+      label: '世界观说明文',
+      status: expositionStatus,
+      detail: narrativeControlReport.exposition.summary,
+      source: 'review',
+      relatedPage: 'writing',
+      fixHint: narrativeControlReport.exposition.fixHint,
     }),
     makePublishCheckItem({
       key: 'hook_strength',
