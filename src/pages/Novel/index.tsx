@@ -571,6 +571,92 @@ export default function NovelRouter() {
       }}>
       <NovelWorkspaceQualityProvider value={workspaceQuality}>
       <div className="novel-route-shell novel-route-shell--single">
+      <ProjectTopbar
+        projectTitle={currentNovel?.title || '未命名小说'}
+        mode={workspaceViewMode}
+        onModeChange={setWorkspaceViewMode}
+        onBack={() => navigate('/novels')}
+        onClear={hasRegisteredClearHandler ? () => clearHandlerRef.current?.() : undefined}
+        onShortcuts={() => setShortcutHelpOpen(true)}
+        onSearch={() => setQuickSearchOpen(true)}
+        onQuality={() => setQualityBoardOpen(true)}
+        onNextStep={() => navigate(`/novels/${novelId}/${recommendedRoute}`)}
+        nextStepLabel="推荐下一步"
+        exportMenu={{
+          items: [
+            {
+              key: 'export-txt',
+              label: '导出 TXT',
+              onClick: () => void handleWorkspaceExport('txt'),
+            },
+            {
+              key: 'export-md',
+              label: '导出 Markdown',
+              onClick: () => void handleWorkspaceExport('md'),
+            },
+            {
+              key: 'export-docx',
+              label: '导出 DOCX',
+              onClick: () => void handleWorkspaceExport('docx'),
+            },
+            {
+              key: 'export-epub',
+              label: '导出 EPUB',
+              onClick: () => void handleWorkspaceExport('epub'),
+            },
+          ],
+        }}
+        showQuality={currentPage !== 'guide' && currentPage !== 'quality' && currentPage !== 'batch-workbench'}
+        showNextStep={currentPage !== workspaceSnapshot.nextStep.targetPage}
+        moreMenu={{
+          items: [
+            {
+              key: 'jump-chapter',
+              label: '跳转章节',
+              onClick: () => void ensureChapterListLoaded().then(() => setChapterJumpOpen(true)).catch(console.error),
+            },
+            {
+              key: 'undo',
+              icon: <RollbackOutlined />,
+              label: '撤销最近操作',
+              disabled: !latestUndoable,
+              onClick: () => {
+                if (!latestUndoable) return
+                void window.electron.history.undo(latestUndoable.id)
+                  .then(() => {
+                    message.success(getUserFacingMessage('common.undoSucceeded', { summary: latestUndoable.summary }))
+                    notifyWorkspaceMutation()
+                  })
+                  .catch((error: unknown) => {
+                    console.error(error)
+                    message.error(getErrorMessage(error, 'common.undoFailed'))
+                  })
+              },
+            },
+            { type: 'divider' as const },
+            {
+              key: 'settings',
+              label: '设置',
+              onClick: () => navigate(`/novels/${novelId}/overview`),
+            },
+            { type: 'divider' as const },
+            {
+              key: 'prev',
+              icon: <LeftOutlined />,
+              label: `上一步${previousPageMeta ? `：${previousPageMeta.label}` : ''}`,
+              disabled: !previousPageMeta,
+              onClick: () => previousPageMeta && navigate(`/novels/${novelId}/${previousPageMeta.route}`),
+            },
+            {
+              key: 'next',
+              icon: <RightOutlined />,
+              label: `下一步${nextPageMeta ? `：${nextPageMeta.label}` : ''}`,
+              disabled: !nextPageMeta,
+              onClick: () => nextPageMeta && navigate(`/novels/${novelId}/${nextPageMeta.route}`),
+            },
+          ].filter(Boolean) as MenuProps['items'],
+        }}
+      />
       <aside className="novel-route-shell__sidebar">
         <ProjectSidebar
           title={currentNovel?.title || '未命名小说'}
@@ -579,112 +665,12 @@ export default function NovelRouter() {
           currentTask={workspaceSnapshot.nextStep.title}
           navGroups={workspaceSnapshot.navGroups}
           activeKey={currentNavKey}
-          mode={workspaceViewMode}
-          onModeChange={setWorkspaceViewMode}
           onNavigate={(route) => navigate(`/novels/${novelId}/${route}`)}
         />
       </aside>
 
       <main className="novel-route-shell__content">
         <div className="novel-route-shell__content-frame">
-          <ProjectTopbar
-            pageTitle={currentPageMeta.label}
-            onBack={() => navigate('/novels')}
-            onSearch={() => setQuickSearchOpen(true)}
-            onQuality={() => setQualityBoardOpen(true)}
-            onNextStep={() => navigate(`/novels/${novelId}/${recommendedRoute}`)}
-            nextStepLabel="推荐下一步"
-            showQuality={currentPage !== 'guide' && currentPage !== 'quality' && currentPage !== 'batch-workbench'}
-            showNextStep={currentPage !== workspaceSnapshot.nextStep.targetPage}
-            moreMenu={{
-              items: [
-                hasRegisteredClearHandler ? {
-                  key: 'clear',
-                  icon: <DeleteOutlined />,
-                  label: '清空当前步骤',
-                  danger: true,
-                  onClick: () => clearHandlerRef.current?.(),
-                } : null,
-                {
-                  key: 'shortcuts',
-                  icon: <QuestionCircleOutlined />,
-                  label: '快捷键',
-                  onClick: () => setShortcutHelpOpen(true),
-                },
-                {
-                  key: 'jump-chapter',
-                  label: '跳转章节',
-                  onClick: () => void ensureChapterListLoaded().then(() => setChapterJumpOpen(true)).catch(console.error),
-                },
-                {
-                  key: 'undo',
-                  icon: <RollbackOutlined />,
-                  label: '撤销最近操作',
-                  disabled: !latestUndoable,
-                  onClick: () => {
-                    if (!latestUndoable) return
-                    void window.electron.history.undo(latestUndoable.id)
-                      .then(() => {
-                        message.success(getUserFacingMessage('common.undoSucceeded', { summary: latestUndoable.summary }))
-                        notifyWorkspaceMutation()
-                      })
-                      .catch((error: unknown) => {
-                        console.error(error)
-                        message.error(getErrorMessage(error, 'common.undoFailed'))
-                      })
-                  },
-                },
-                { type: 'divider' as const },
-                {
-                  key: 'export',
-                  label: '导出',
-                  children: [
-                    {
-                      key: 'export-txt',
-                      label: '导出 TXT',
-                      onClick: () => void handleWorkspaceExport('txt'),
-                    },
-                    {
-                      key: 'export-md',
-                      label: '导出 Markdown',
-                      onClick: () => void handleWorkspaceExport('md'),
-                    },
-                    {
-                      key: 'export-docx',
-                      label: '导出 DOCX',
-                      onClick: () => void handleWorkspaceExport('docx'),
-                    },
-                    {
-                      key: 'export-epub',
-                      label: '导出 EPUB',
-                      onClick: () => void handleWorkspaceExport('epub'),
-                    },
-                  ],
-                },
-                {
-                  key: 'settings',
-                  label: '设置',
-                  onClick: () => navigate(`/novels/${novelId}/overview`),
-                },
-                { type: 'divider' as const },
-                {
-                  key: 'prev',
-                  icon: <LeftOutlined />,
-                  label: `上一步${previousPageMeta ? `：${previousPageMeta.label}` : ''}`,
-                  disabled: !previousPageMeta,
-                  onClick: () => previousPageMeta && navigate(`/novels/${novelId}/${previousPageMeta.route}`),
-                },
-                {
-                  key: 'next',
-                  icon: <RightOutlined />,
-                  label: `下一步${nextPageMeta ? `：${nextPageMeta.label}` : ''}`,
-                  disabled: !nextPageMeta,
-                  onClick: () => nextPageMeta && navigate(`/novels/${novelId}/${nextPageMeta.route}`),
-                },
-              ].filter(Boolean) as MenuProps['items'],
-            }}
-          />
-
           <div className="novel-route-shell__content-body">
             <Routes>
               <Route path="basics" element={<Navigate replace to={`/novels/${novelId}/overview`} />} />

@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { CaretDownFilled, CaretRightFilled, ThunderboltOutlined } from '@ant-design/icons'
 import type { WorkspaceNavGroup } from '../../../shared/workspace-types'
-import { type WorkspaceViewMode, getWorkspaceModeOptions } from '../../../shared/novel-workspace'
 import StatusTag from '../common/StatusTag'
 import './ProjectSidebar.css'
 
@@ -12,8 +11,6 @@ interface ProjectSidebarProps {
   currentTask: string
   navGroups: WorkspaceNavGroup[]
   activeKey: string
-  mode: WorkspaceViewMode
-  onModeChange: (mode: WorkspaceViewMode) => void
   onNavigate: (route: string) => void
 }
 
@@ -24,11 +21,8 @@ export default function ProjectSidebar({
   currentTask,
   navGroups,
   activeKey,
-  mode,
-  onModeChange,
   onNavigate,
 }: ProjectSidebarProps) {
-  const modeOptions = getWorkspaceModeOptions()
   const activeGroup = useMemo(
     () => navGroups.find((group) => group.items.some((item) => item.key === activeKey))?.key || navGroups[0]?.key,
     [activeKey, navGroups],
@@ -51,26 +45,6 @@ export default function ProjectSidebar({
         <div className="project-sidebar__task">
           <span className="project-sidebar__task-label">当前主任务</span>
           <strong className="project-sidebar__task-value">{currentTask}</strong>
-        </div>
-      </div>
-
-      <div className="project-sidebar__card project-sidebar__mode">
-        <div className="project-sidebar__section-label">工作模式</div>
-        <div className="project-sidebar__mode-list">
-          {modeOptions.map((option) => {
-            const active = mode === option.value
-
-            return (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => onModeChange(option.value)}
-                className={`project-sidebar__mode-button${active ? ' is-active' : ''}`}
-              >
-                <strong className="project-sidebar__mode-button-label">{option.label}</strong>
-              </button>
-            )
-          })}
         </div>
       </div>
 

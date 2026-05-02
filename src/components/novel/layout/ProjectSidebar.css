@@ -10,7 +10,7 @@
   --project-sidebar-accent: var(--color-orange, var(--primary));
   --project-sidebar-danger: var(--color-error, var(--danger));
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   gap: var(--space-md, 16px);
   height: 100%;
   padding: var(--space-md, 16px);
@@ -81,22 +81,15 @@
   color: var(--project-sidebar-text);
 }
 
-.project-sidebar__mode {
-  gap: 8px;
-  padding: 12px;
-}
-
 .project-sidebar__section-label {
   color: var(--project-sidebar-text-muted);
 }
 
-.project-sidebar__mode-list,
 .project-sidebar__group-items {
   display: grid;
   gap: 8px;
 }
 
-.project-sidebar__mode-button,
 .project-sidebar__group-item {
   width: 100%;
   display: grid;
@@ -115,47 +108,28 @@
     box-shadow var(--transition-fast, 150ms ease);
 }
 
-.project-sidebar__mode-button:hover,
 .project-sidebar__group-item:hover,
 .project-sidebar__group-toggle:hover {
   background: var(--project-sidebar-surface-hover);
 }
 
-.project-sidebar__mode-button:focus-visible,
 .project-sidebar__group-item:focus-visible,
 .project-sidebar__group-toggle:focus-visible {
   outline: 2px solid var(--project-sidebar-accent);
   outline-offset: 2px;
 }
 
-.project-sidebar__mode-button.is-active,
 .project-sidebar__group-item.is-active {
   border-color: var(--project-sidebar-border-strong);
   background: var(--project-sidebar-surface-active);
   box-shadow: inset 3px 0 0 var(--project-sidebar-accent);
 }
 
-.project-sidebar__mode-button-label,
 .project-sidebar__group-item-label {
   font-size: 13px;
   line-height: 1.4;
   font-weight: 600;
   color: var(--project-sidebar-text);
-}
-
-.project-sidebar__mode-button.is-active .project-sidebar__mode-button-label {
-  color: var(--project-sidebar-accent);
-}
-
-.project-sidebar__mode-button-copy,
-.project-sidebar__group-item-meta {
-  font-size: 11px;
-  line-height: 1.6;
-  color: var(--project-sidebar-text-muted);
-}
-
-.project-sidebar__group-item-meta.is-danger {
-  color: var(--project-sidebar-danger);
 }
 
 .project-sidebar__groups {
