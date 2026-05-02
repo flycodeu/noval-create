@@ -8,7 +8,9 @@ import {
   EllipsisOutlined,
   ExportOutlined,
   QuestionCircleOutlined,
+  RollbackOutlined,
   SearchOutlined,
+  SwapOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons'
 import { type WorkspaceViewMode, getWorkspaceModeOptions } from '../../../shared/novel-workspace'
@@ -20,9 +22,12 @@ interface ProjectTopbarProps {
   onModeChange: (mode: WorkspaceViewMode) => void
   onBack: () => void
   onClear?: () => void
+  onJumpChapter: () => void
   onShortcuts: () => void
   onSearch: () => void
   onQuality?: () => void
+  onUndo?: () => void
+  canUndo?: boolean
   onNextStep?: () => void
   nextStepLabel?: string
   exportMenu: MenuProps
@@ -37,9 +42,12 @@ export default function ProjectTopbar({
   onModeChange,
   onBack,
   onClear,
+  onJumpChapter,
   onShortcuts,
   onSearch,
   onQuality,
+  onUndo,
+  canUndo = false,
   onNextStep,
   nextStepLabel,
   exportMenu,
@@ -94,6 +102,12 @@ export default function ProjectTopbar({
             清空步骤
           </Button>
         ) : null}
+        <Button icon={<SwapOutlined />} onClick={onJumpChapter}>
+          跳转章节
+        </Button>
+        <Button icon={<RollbackOutlined />} onClick={onUndo} disabled={!canUndo}>
+          撤销
+        </Button>
         <Button icon={<QuestionCircleOutlined />} onClick={onShortcuts}>
           快捷键
         </Button>

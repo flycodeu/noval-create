@@ -577,9 +577,24 @@ export default function NovelRouter() {
         onModeChange={setWorkspaceViewMode}
         onBack={() => navigate('/novels')}
         onClear={hasRegisteredClearHandler ? () => clearHandlerRef.current?.() : undefined}
+        onJumpChapter={() => void ensureChapterListLoaded().then(() => setChapterJumpOpen(true)).catch(console.error)}
         onShortcuts={() => setShortcutHelpOpen(true)}
         onSearch={() => setQuickSearchOpen(true)}
         onQuality={() => setQualityBoardOpen(true)}
+        onUndo={latestUndoable
+          ? () => {
+              void window.electron.history.undo(latestUndoable.id)
+                .then(() => {
+                  message.success(getUserFacingMessage('common.undoSucceeded', { summary: latestUndoable.summary }))
+                  notifyWorkspaceMutation()
+                })
+                .catch((error: unknown) => {
+                  console.error(error)
+                  message.error(getErrorMessage(error, 'common.undoFailed'))
+                })
+            }
+          : undefined}
+        canUndo={Boolean(latestUndoable)}
         onNextStep={() => navigate(`/novels/${novelId}/${recommendedRoute}`)}
         nextStepLabel="推荐下一步"
         exportMenu={{
@@ -610,30 +625,6 @@ export default function NovelRouter() {
         showNextStep={currentPage !== workspaceSnapshot.nextStep.targetPage}
         moreMenu={{
           items: [
-            {
-              key: 'jump-chapter',
-              label: '跳转章节',
-              onClick: () => void ensureChapterListLoaded().then(() => setChapterJumpOpen(true)).catch(console.error),
-            },
-            {
-              key: 'undo',
-              icon: <RollbackOutlined />,
-              label: '撤销最近操作',
-              disabled: !latestUndoable,
-              onClick: () => {
-                if (!latestUndoable) return
-                void window.electron.history.undo(latestUndoable.id)
-                  .then(() => {
-                    message.success(getUserFacingMessage('common.undoSucceeded', { summary: latestUndoable.summary }))
-                    notifyWorkspaceMutation()
-                  })
-                  .catch((error: unknown) => {
-                    console.error(error)
-                    message.error(getErrorMessage(error, 'common.undoFailed'))
-                  })
-              },
-            },
-            { type: 'divider' as const },
             {
               key: 'settings',
               label: '设置',

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, Menu, ipcMain, shell } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import { desc, eq } from 'drizzle-orm'
@@ -162,6 +162,7 @@ function createWindow() {
     minHeight: 700,
     backgroundColor: '#0f1117',
     titleBarStyle: 'hiddenInset',
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, '../preload/preload.js'),
       contextIsolation: true,
@@ -643,6 +644,12 @@ function registerIpcHandlers() {
     const db = getDb()
     return db.select().from(storyArcs).where(eq(storyArcs.novelId, novelId)).all()
   })
+
+  Menu.setApplicationMenu(null)
+  const window = mainWindow
+  if (window) {
+    window.setMenuBarVisibility(false)
+  }
   handle('outline:getArcProgressSnapshot', (_, novelId) =>
     storyArcProgressService.getStoryArcProgressSnapshot(requireId(novelId, 'novelId')))
 
