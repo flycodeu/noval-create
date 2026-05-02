@@ -447,15 +447,6 @@ export default function NovelList() {
     () => novels.filter((novel) => novel.status === 'completed').length,
     [novels],
   )
-  const totalBlockerCount = useMemo(
-    () => Object.values(workspaceSnapshots).reduce((sum, snapshot) => sum + snapshot.blockers.length, 0),
-    [workspaceSnapshots],
-  )
-  const readyToWriteCount = useMemo(
-    () => Object.values(workspaceSnapshots).filter((snapshot) => snapshot.nextStep.targetPage === 'writing').length,
-    [workspaceSnapshots],
-  )
-
   return (
     <>
       <div className="novel-list-page">
@@ -475,8 +466,6 @@ export default function NovelList() {
               { label: '项目总数', value: `${novels.length} 部`, hint: '当前库内小说项目' },
               { label: '写作中', value: `${writingCount} 部`, hint: '已经进入章节生产' },
               { label: '已完结', value: `${completedCount} 部`, hint: '已进入收尾状态' },
-              { label: '可直接开写', value: `${readyToWriteCount} 部`, hint: '下一步已指向正文写作' },
-              { label: '待清 blocker', value: `${totalBlockerCount} 个`, hint: '需要先处理的高优先风险' },
               { label: '累计字数', value: formatWordCount(totalWordCount), hint: '全部项目总字数' },
             ].map((item) => (
               <div key={item.label} className="novel-list-page__stat-card">

@@ -1,3 +1,7 @@
+.novel-map-page {
+  --map-callout-surface: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(247,241,232,0.92));
+}
+
 .novel-map-page .novel-hero__actions {
   align-items: flex-start;
 }
@@ -691,4 +695,52 @@
 [data-theme="dark"] .novel-map-page .map-graph-node--focus,
 [data-theme="dark"] .novel-map-page .map-graph-relation-item--active {
   background: linear-gradient(180deg, rgba(35, 63, 74, 0.9), rgba(28, 34, 47, 0.92));
+}
+
+[data-theme="dark"] .novel-map-page {
+  --map-callout-surface: linear-gradient(180deg, rgba(31, 38, 52, 0.96), rgba(22, 28, 39, 0.94));
+}
+
+[data-theme="dark"] .novel-map-page .map-graph-stage-brief__copy strong,
+[data-theme="dark"] .novel-map-page .map-graph-stage-pill strong,
+[data-theme="dark"] .novel-map-page .map-graph-node__title,
+[data-theme="dark"] .novel-map-page .map-graph-focus-card__title strong,
+[data-theme="dark"] .novel-map-page .map-graph-stat strong,
+[data-theme="dark"] .novel-map-page .map-graph-relation-item__title,
+[data-theme="dark"] .novel-map-page .map-graph-detail-grid__item strong,
+[data-theme="dark"] .novel-map-page .map-node-relations-inline__head strong {
+  color: var(--workspace-ink);
+}
+
+[data-theme="dark"] .novel-map-page .map-graph-stage-brief__path,
+[data-theme="dark"] .novel-map-page .map-graph-focus-card__path,
+[data-theme="dark"] .novel-map-page .map-graph-stage-brief__copy p,
+[data-theme="dark"] .novel-map-page .map-graph-stage-pill span,
+[data-theme="dark"] .novel-map-page .map-graph-empty,
+[data-theme="dark"] .novel-map-page .map-graph-node__eyebrow,
+[data-theme="dark"] .novel-map-page .map-graph-node__meta,
+[data-theme="dark"] .novel-map-page .map-graph-node__footer,
+[data-theme="dark"] .novel-map-page .map-graph-node__summary,
+[data-theme="dark"] .novel-map-page .map-graph-focus-card__summary,
+[data-theme="dark"] .novel-map-page .map-graph-stat span,
+[data-theme="dark"] .novel-map-page .map-graph-filters__hint,
+[data-theme="dark"] .novel-map-page .map-graph-switch span,
+[data-theme="dark"] .novel-map-page .map-graph-relation-item__desc,
+[data-theme="dark"] .novel-map-page .map-graph-detail-grid__item span {
+  color: var(--workspace-ink-soft);
+}
+
+[data-theme="dark"] .novel-map-page .map-graph-node__meta span {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--workspace-ink-soft);
+}
+
+[data-theme="dark"] .novel-map-page .map-graph-chip {
+  background: rgba(62, 105, 136, 0.22);
+  color: #b9d7e4;
+}
+
+[data-theme="dark"] .novel-map-page .map-graph-node__footer,
+[data-theme="dark"] .novel-map-page .map-node-relations-inline {
+  border-top-color: rgba(210, 190, 156, 0.12);
 }

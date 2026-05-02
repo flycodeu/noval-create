@@ -256,7 +256,7 @@ export default function BatchWorkbench({ novelId }: Props) {
                     textAlign: 'left',
                     border: snapshot.id === activeSnapshot.id ? '1px solid #1677ff' : '1px solid rgba(15, 23, 42, 0.08)',
                     borderRadius: 16,
-                    background: '#fff',
+                    background: snapshot.id === activeSnapshot.id ? 'var(--primary-soft)' : 'var(--bg-surface)',
                     padding: 14,
                     cursor: 'pointer',
                   }}

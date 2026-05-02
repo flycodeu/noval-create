@@ -1,3 +1,9 @@
+.novel-factions-page {
+  --faction-graph-label-bg: rgba(255, 255, 255, 0.92);
+  --faction-graph-label-text: #4a3829;
+  --faction-graph-label-text-muted: rgba(74, 56, 41, 0.45);
+}
+
 .faction-workspace {
   display: grid;
   grid-template-columns: 300px minmax(0, 1fr);
@@ -252,4 +258,32 @@
 
 [data-theme="dark"] .faction-graph-node--character {
   background: linear-gradient(180deg, rgba(37, 51, 62, 0.94), rgba(31, 38, 52, 0.96));
+}
+
+[data-theme="dark"] .novel-factions-page {
+  --faction-graph-label-bg: rgba(28, 34, 47, 0.94);
+  --faction-graph-label-text: #edf2f8;
+  --faction-graph-label-text-muted: rgba(237, 242, 248, 0.56);
+}
+
+[data-theme="dark"] .faction-list-card__desc,
+[data-theme="dark"] .faction-graph-node__eyebrow,
+[data-theme="dark"] .faction-graph-node__meta {
+  color: var(--workspace-ink-soft);
+}
+
+[data-theme="dark"] .faction-editor__relations-title,
+[data-theme="dark"] .faction-graph-node__title {
+  color: var(--workspace-ink);
+}
+
+[data-theme="dark"] .faction-graph-canvas__tool:hover {
+  border-color: rgba(209, 154, 93, 0.3);
+  background: rgba(39, 47, 63, 0.96);
+}
+
+[data-theme="dark"] .novel-factions-page {
+  --faction-graph-label-bg: rgba(18, 23, 33, 0.94);
+  --faction-graph-label-text: rgba(238, 242, 247, 0.92);
+  --faction-graph-label-text-muted: rgba(238, 242, 247, 0.48);
 }

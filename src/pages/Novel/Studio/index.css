@@ -567,6 +567,10 @@
   --studio-accent-soft: rgba(209, 154, 93, 0.14);
   --studio-border: rgba(212, 193, 161, 0.14);
   --studio-shadow: 0 20px 40px rgba(4, 8, 18, 0.32);
+  --studio-copy-muted: rgba(238, 242, 247, 0.76);
+  --studio-copy-faint: rgba(238, 242, 247, 0.6);
+  --studio-chip-bg: rgba(255, 255, 255, 0.08);
+  --studio-chip-border: rgba(212, 193, 161, 0.14);
 }
 
 [data-theme="dark"] .studio-page .novel-hero {
@@ -588,4 +592,130 @@
 [data-theme="dark"] .studio-page .studio-issue-card {
   border-color: rgba(212, 193, 161, 0.14);
   background: rgba(28, 34, 47, 0.88);
+}
+
+[data-theme="dark"] .studio-page .studio-bible-overview {
+  background:
+    radial-gradient(circle at top left, rgba(209, 154, 93, 0.16), transparent 42%),
+    rgba(28, 34, 47, 0.9);
+}
+
+[data-theme="dark"] .studio-page .studio-readiness-card--ready {
+  border-color: rgba(91, 140, 90, 0.28);
+  background: linear-gradient(180deg, rgba(24, 39, 33, 0.94) 0%, rgba(20, 32, 28, 0.92) 100%);
+}
+
+[data-theme="dark"] .studio-page .studio-action-card {
+  background:
+    radial-gradient(circle at top right, rgba(209, 154, 93, 0.14), transparent 30%),
+    rgba(28, 34, 47, 0.88);
+}
+
+[data-theme="dark"] .studio-page .studio-action-card--ready {
+  border-color: rgba(91, 140, 90, 0.28);
+  background:
+    radial-gradient(circle at top right, rgba(75, 125, 94, 0.24), transparent 30%),
+    rgba(24, 39, 33, 0.92);
+}
+
+[data-theme="dark"] .studio-page .studio-freshness-card--ok {
+  border-color: rgba(91, 140, 90, 0.28);
+  background:
+    radial-gradient(circle at top right, rgba(75, 125, 94, 0.22), transparent 34%),
+    rgba(24, 39, 33, 0.92);
+}
+
+[data-theme="dark"] .studio-page .studio-freshness-card--warn {
+  border-color: rgba(209, 154, 93, 0.24);
+  background:
+    radial-gradient(circle at top right, rgba(209, 154, 93, 0.22), transparent 34%),
+    rgba(58, 42, 26, 0.9);
+}
+
+[data-theme="dark"] .studio-page .studio-freshness-card--stale {
+  border-color: rgba(240, 138, 125, 0.24);
+  background:
+    radial-gradient(circle at top right, rgba(240, 138, 125, 0.2), transparent 34%),
+    rgba(62, 31, 31, 0.9);
+}
+
+[data-theme="dark"] .studio-page .studio-panel-pill,
+[data-theme="dark"] .studio-page .studio-bible-overview__focus,
+[data-theme="dark"] .studio-page .studio-action-card__icon,
+[data-theme="dark"] .studio-page .studio-freshness-card__tag,
+[data-theme="dark"] .studio-page .studio-health-card__stats div {
+  background: var(--studio-chip-bg);
+}
+
+[data-theme="dark"] .studio-page .studio-panel-pill--warm {
+  background: rgba(209, 154, 93, 0.16);
+  color: #f0bf7f;
+}
+
+[data-theme="dark"] .studio-page .studio-panel-pill,
+[data-theme="dark"] .studio-page .studio-action-card__icon,
+[data-theme="dark"] .studio-page .studio-freshness-card__tag {
+  color: var(--studio-ink);
+}
+
+[data-theme="dark"] .studio-page .studio-bible-overview__eyebrow,
+[data-theme="dark"] .studio-page .studio-bible-overview__focus span,
+[data-theme="dark"] .studio-page .studio-readiness-card__foot,
+[data-theme="dark"] .studio-page .studio-action-card__eyebrow,
+[data-theme="dark"] .studio-page .studio-freshness-card__title,
+[data-theme="dark"] .studio-page .studio-freshness-meta span {
+  color: var(--studio-copy-faint);
+}
+
+[data-theme="dark"] .studio-page .studio-bible-overview__copy,
+[data-theme="dark"] .studio-page .studio-bible-overview__focus small,
+[data-theme="dark"] .studio-page .studio-readiness-card__summary,
+[data-theme="dark"] .studio-page .studio-action-card p,
+[data-theme="dark"] .studio-page .studio-freshness-card__desc,
+[data-theme="dark"] .studio-page .studio-note-list__item,
+[data-theme="dark"] .studio-page .studio-empty-state,
+[data-theme="dark"] .studio-page .studio-issue-card__desc {
+  color: var(--studio-copy-muted);
+}
+
+[data-theme="dark"] .studio-page .studio-freshness-card__hint {
+  border-top-color: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="dark"] .studio-page .studio-freshness-card--ok .studio-freshness-card__title,
+[data-theme="dark"] .studio-page .studio-freshness-card--ok .studio-freshness-card__hint {
+  color: #9dd6ab;
+}
+
+[data-theme="dark"] .studio-page .studio-freshness-card--warn .studio-freshness-card__title,
+[data-theme="dark"] .studio-page .studio-freshness-card--warn .studio-freshness-card__hint,
+[data-theme="dark"] .studio-page .studio-issue-card__fix {
+  color: #f0bf7f;
+}
+
+[data-theme="dark"] .studio-page .studio-freshness-card--stale .studio-freshness-card__title,
+[data-theme="dark"] .studio-page .studio-freshness-card--stale .studio-freshness-card__hint {
+  color: #ef9a90;
+}
+
+[data-theme="dark"] .studio-page .studio-quality-strip__head,
+[data-theme="dark"] .studio-page .studio-readiness-card__head,
+[data-theme="dark"] .studio-page .studio-action-card__title-row h3,
+[data-theme="dark"] .studio-page .studio-bible-overview__score,
+[data-theme="dark"] .studio-page .studio-bible-overview__focus strong,
+[data-theme="dark"] .studio-page .studio-freshness-card__value,
+[data-theme="dark"] .studio-page .studio-link-button,
+[data-theme="dark"] .studio-page .studio-issue-card__head {
+  color: var(--studio-ink);
+}
+
+[data-theme="dark"] .studio-page .studio-health-card__stats div {
+  border: 1px solid rgba(212, 193, 161, 0.12);
+}
+
+[data-theme="dark"] .studio-page .studio-freshness-meta span,
+[data-theme="dark"] .studio-page .studio-freshness-card__tag,
+[data-theme="dark"] .studio-page .studio-note-list__item,
+[data-theme="dark"] .studio-page .studio-empty-state {
+  border-color: rgba(212, 193, 161, 0.12);
 }

@@ -30,7 +30,7 @@ export default function VersionTimeline({
         padding: 16,
         borderRadius: 'var(--radius-md)',
         border: '1px solid var(--border-light)',
-        background: '#fff',
+        background: 'var(--bg-surface)',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
@@ -56,7 +56,7 @@ export default function VersionTimeline({
                   padding: '10px 12px',
                   borderRadius: 'var(--radius-sm)',
                   border: `1px solid ${active ? 'rgba(166, 106, 43, 0.28)' : 'var(--border-light)'}`,
-                  background: active ? 'var(--primary-soft)' : '#fff',
+                  background: active ? 'var(--primary-soft)' : 'var(--bg-elevated)',
                   cursor: 'pointer',
                   textAlign: 'left',
                 }}

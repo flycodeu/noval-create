@@ -176,7 +176,10 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 0;
+  min-height: 44px;
+  padding: 10px 12px;
+  margin: -6px;
+  border-radius: var(--radius-sm, 8px);
   border: none;
   background: transparent;
   color: inherit;
@@ -186,6 +189,10 @@
 
 .project-sidebar__group-toggle.is-static {
   cursor: default;
+}
+
+.project-sidebar__group-toggle:active {
+  transform: translateY(1px);
 }
 
 .project-sidebar__group-toggle-main,
@@ -232,6 +239,8 @@
 [data-theme="dark"] .project-sidebar {
   --project-sidebar-surface-active: rgba(230, 126, 34, 0.16);
   --project-sidebar-border-strong: rgba(230, 126, 34, 0.38);
+  --project-sidebar-text-secondary: rgba(194, 203, 218, 0.84);
+  --project-sidebar-text-muted: rgba(194, 203, 218, 0.72);
 }
 
 [data-theme="soft"] .project-sidebar {

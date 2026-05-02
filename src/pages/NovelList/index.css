@@ -279,9 +279,35 @@
     linear-gradient(180deg, rgba(15, 17, 23, 0.98), rgba(20, 23, 31, 0.94));
 }
 
+[data-theme="dark"] .novel-list-page__stat-card,
+[data-theme="dark"] .novel-list-page__toolbar,
 [data-theme="dark"] .novel-list-page__launch-card,
 [data-theme="dark"] .novel-list-page__fast-note {
+  border-color: rgba(210, 190, 156, 0.14);
   background: rgba(30, 34, 53, 0.88);
+  box-shadow: 0 16px 32px rgba(4, 8, 18, 0.24);
+}
+
+[data-theme="dark"] .novel-list-page__toolbar .ant-input-affix-wrapper,
+[data-theme="dark"] .novel-list-page__toolbar .ant-select-selector {
+  background: rgba(36, 41, 58, 0.96) !important;
+  border-color: rgba(210, 190, 156, 0.14) !important;
+}
+
+[data-theme="dark"] .novel-list-page__stat-label,
+[data-theme="dark"] .novel-list-page__stat-hint {
+  color: rgba(194, 203, 218, 0.8);
+}
+
+[data-theme="dark"] .novel-list-page__stat-value {
+  color: rgba(238, 242, 247, 0.94);
+}
+
+[data-theme="dark"] .novel-list-page__subtitle,
+[data-theme="dark"] .novel-list-page__launch-card-copy,
+[data-theme="dark"] .novel-list-page__fast-note,
+[data-theme="dark"] .novel-list-page__side-caption {
+  color: rgba(194, 203, 218, 0.84);
 }
 
 @media (max-width: 1080px) {

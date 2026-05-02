@@ -1056,9 +1056,6 @@ export default function GuidePage({ novelId }: Props) {
               </Button>
             ) : null}
           </div>
-          <div className="novel-note-list">
-            <div className="novel-note-list__item">{`当前模式：${getAuthorWorkModeLabel(selectedAuthorMode)}`}</div>
-          </div>
         </div>
       </WorkspacePanel>
 
@@ -1076,7 +1073,6 @@ export default function GuidePage({ novelId }: Props) {
                 {authorWorkflow.primaryTask.actionLabel}
               </Button>
             </div>
-            <div className="guided-step__action-meta">{`完成后解锁：${authorWorkflow.primaryTask.unlocks.join('、')}`}</div>
           </div>
 
           {authorWorkflow.alternateTasks.length > 0 ? (
@@ -1086,7 +1082,6 @@ export default function GuidePage({ novelId }: Props) {
                   <div className="guided-step__action-copy">
                     <strong>{task.title}</strong>
                   </div>
-                  <div className="guided-step__action-foot">{`${task.estimatedMinutes} 分钟 · ${task.unlocks.join('、')}`}</div>
                   <Button onClick={() => navigate(resolveAuthorWorkflowHref(novelId, task.entryPage))}>
                     {task.actionLabel}
                   </Button>

@@ -126,7 +126,7 @@ function TaskStrip({
       style={{
         border: `1px solid ${palette.border}`,
         borderRadius: 24,
-        background: 'linear-gradient(180deg, rgba(255,255,255,0.96), rgba(247,241,232,0.92))',
+        background: 'var(--map-callout-surface)',
         boxShadow: `0 18px 34px ${palette.glow}`,
         backdropFilter: 'blur(10px)',
         padding: 18,

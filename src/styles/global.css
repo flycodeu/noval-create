@@ -390,12 +390,49 @@ html[data-theme="dark"] .ant-select-selection-placeholder,
 html[data-theme="dark"] .ant-select-arrow {
   color: var(--color-text-primary) !important;
 }
+html[data-theme="dark"] .ant-input::placeholder,
+html[data-theme="dark"] .ant-input-affix-wrapper input::placeholder,
+html[data-theme="dark"] .ant-select-selection-placeholder {
+  color: rgba(194, 203, 218, 0.72) !important;
+}
 html[data-theme="dark"] .ant-dropdown-menu,
 html[data-theme="dark"] .ant-dropdown-menu-item {
   background: var(--color-bg-card) !important;
 }
 html[data-theme="dark"] .ant-table-wrapper .ant-table {
   background: var(--color-bg-card) !important;
+}
+html[data-theme="dark"] .ant-btn-default,
+html[data-theme="dark"] .ant-btn-dashed {
+  background: rgba(30, 34, 53, 0.92) !important;
+  border-color: rgba(210, 190, 156, 0.14) !important;
+  color: var(--color-text-primary) !important;
+}
+html[data-theme="dark"] .ant-btn-default:hover,
+html[data-theme="dark"] .ant-btn-dashed:hover {
+  background: rgba(36, 41, 58, 0.98) !important;
+  border-color: rgba(199, 139, 79, 0.28) !important;
+  color: var(--accent) !important;
+}
+html[data-theme="dark"] .ant-alert {
+  border-color: rgba(210, 190, 156, 0.14) !important;
+  background: rgba(30, 34, 53, 0.88) !important;
+  box-shadow: 0 16px 32px rgba(4, 8, 18, 0.2);
+}
+html[data-theme="dark"] .ant-alert-message {
+  color: var(--color-text-primary) !important;
+}
+html[data-theme="dark"] .ant-alert-description,
+html[data-theme="dark"] .ant-alert .ant-alert-action {
+  color: rgba(227, 234, 244, 0.82) !important;
+}
+html[data-theme="dark"] .ant-alert-info {
+  border-color: rgba(88, 167, 212, 0.18) !important;
+  background: linear-gradient(180deg, rgba(30, 34, 53, 0.92), rgba(27, 38, 53, 0.9)) !important;
+}
+html[data-theme="dark"] .ant-alert-warning {
+  border-color: rgba(199, 139, 79, 0.2) !important;
+  background: linear-gradient(180deg, rgba(58, 42, 26, 0.9), rgba(30, 34, 53, 0.92)) !important;
 }
 html[data-theme="dark"] .ant-slider-track { background: var(--color-blue-primary) !important; }
 html[data-theme="dark"] .ant-form-item-label > label { color: var(--color-text-secondary) !important; }
@@ -901,7 +938,7 @@ html[data-theme="light"] .ant-dropdown-menu {
   --workspace-paper-soft: #242d3d;
   --workspace-paper-deep: #303a4d;
   --workspace-ink: #eef2f7;
-  --workspace-ink-soft: #a6b0c2;
+  --workspace-ink-soft: #c2cbda;
   --workspace-line: rgba(202, 181, 148, 0.18);
   --workspace-line-strong: rgba(202, 181, 148, 0.3);
   --workspace-accent: #d2a56f;
@@ -2429,6 +2466,12 @@ html[data-theme="light"] .ant-dropdown-menu {
   color: rgba(92, 101, 119, 0.72) !important;
 }
 
+[data-theme="dark"] .novel-route-shell .ant-input::placeholder,
+[data-theme="dark"] .novel-route-shell .ant-input-affix-wrapper input::placeholder,
+[data-theme="dark"] .novel-route-shell .ant-select-selection-placeholder {
+  color: rgba(194, 203, 218, 0.72) !important;
+}
+
 .novel-route-shell .ant-form-item-label > label {
   color: var(--workspace-ink-soft) !important;
   font-weight: 600;
@@ -2437,6 +2480,11 @@ html[data-theme="light"] .ant-dropdown-menu {
 .novel-route-shell .ant-form-item-extra,
 .novel-route-shell .ant-form-item-explain {
   color: rgba(92, 101, 119, 0.86);
+}
+
+[data-theme="dark"] .novel-route-shell .ant-form-item-extra,
+[data-theme="dark"] .novel-route-shell .ant-form-item-explain {
+  color: rgba(194, 203, 218, 0.82);
 }
 
 .novel-route-shell .ant-tabs-nav::before {
@@ -2509,6 +2557,11 @@ html[data-theme="light"] .ant-dropdown-menu {
   border-radius: 18px;
   border-color: rgba(122, 93, 52, 0.12);
   background: rgba(255, 255, 255, 0.62);
+}
+
+[data-theme="dark"] .novel-route-shell .ant-alert-description,
+[data-theme="dark"] .novel-route-shell .ant-alert .ant-btn {
+  color: rgba(227, 234, 244, 0.84) !important;
 }
 
 .novel-route-shell .ant-tree {
@@ -9207,6 +9260,82 @@ html[data-theme="dark"] .ant-card-actions > li {
   min-height: 112px;
 }
 
+.novel-overview-page__summary-stack,
+.novel-overview-page__entry-section {
+  display: grid;
+  gap: 12px;
+}
+
+.novel-overview-page__summary-stack {
+  gap: 20px;
+}
+
+.novel-overview-page__entry-title {
+  color: var(--workspace-ink);
+}
+
+.novel-overview-page__entry-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.novel-overview-page__entry-card {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  padding: 16px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--workspace-ink);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.novel-overview-page__entry-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(143, 99, 48, 0.18);
+  box-shadow: 0 16px 28px rgba(71, 53, 28, 0.08);
+}
+
+.novel-overview-page__entry-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 2px;
+}
+
+.novel-overview-page__entry-card-head strong {
+  color: var(--workspace-ink);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.novel-overview-page__entry-status,
+.novel-overview-page__entry-summary {
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.novel-overview-page__entry-status {
+  font-weight: 700;
+}
+
+.novel-overview-page__entry-status.is-ready {
+  color: #0f766e;
+}
+
+.novel-overview-page__entry-status.is-pending {
+  color: #b45309;
+}
+
+.novel-overview-page__entry-summary {
+  color: #64748b;
+}
+
 .novel-panel--scrollable .novel-panel__body {
   max-height: calc(100dvh - var(--novel-sticky-offset) - 28px);
   padding-right: 10px;
@@ -9296,6 +9425,400 @@ html[data-theme="dark"] .ant-card-actions > li {
   flex-wrap: wrap;
 }
 
+.novel-dashboard,
+.chapter-console-page {
+  --novel-console-surface: var(--bg-surface);
+  --novel-console-soft-surface: var(--bg-soft);
+  --novel-console-interactive-surface: var(--bg-elevated);
+  --novel-console-panel-shadow: 0 8px 24px rgba(31, 41, 55, 0.04);
+  --novel-console-task-accent: rgba(166, 106, 43, 0.08);
+  --novel-console-task-gradient: linear-gradient(180deg, #fff 0%, #fcfaf6 100%);
+  --novel-console-chapter-hero-gradient: linear-gradient(180deg, #fff 0%, #fbfaf7 100%);
+  --novel-console-warm-border: rgba(166, 106, 43, 0.16);
+  --novel-console-focus-shadow: 0 0 0 1px rgba(166, 106, 43, 0.08);
+}
+
+[data-theme="dark"] .novel-dashboard,
+[data-theme="dark"] .chapter-console-page {
+  --novel-console-surface: rgba(26, 29, 39, 0.94);
+  --novel-console-soft-surface: rgba(32, 38, 55, 0.88);
+  --novel-console-interactive-surface: rgba(30, 34, 53, 0.92);
+  --novel-console-panel-shadow: 0 12px 32px rgba(4, 8, 18, 0.24);
+  --novel-console-task-accent: rgba(199, 139, 79, 0.12);
+  --novel-console-task-gradient: linear-gradient(180deg, rgba(36, 41, 54, 0.98) 0%, rgba(24, 29, 39, 0.98) 100%);
+  --novel-console-chapter-hero-gradient: linear-gradient(180deg, rgba(37, 43, 58, 0.98) 0%, rgba(24, 30, 42, 0.98) 100%);
+  --novel-console-warm-border: rgba(199, 139, 79, 0.22);
+  --novel-console-focus-shadow: 0 0 0 1px rgba(199, 139, 79, 0.14);
+}
+
+[data-theme="dark"] .novel-workspace {
+  --workspace-surface: rgba(28, 34, 47, 0.9);
+  --workspace-surface-strong: rgba(31, 38, 52, 0.94);
+  --workspace-surface-soft: rgba(32, 38, 55, 0.88);
+  --workspace-surface-muted: rgba(255, 255, 255, 0.06);
+  --workspace-surface-accent: linear-gradient(180deg, rgba(95, 66, 31, 0.22), rgba(31, 38, 52, 0.94));
+  --workspace-surface-accent-cool: linear-gradient(180deg, rgba(35, 63, 74, 0.26), rgba(31, 38, 52, 0.94));
+  --workspace-surface-success: linear-gradient(180deg, rgba(32, 73, 48, 0.92), rgba(25, 42, 33, 0.94));
+  --workspace-text-strong: rgba(238, 242, 247, 0.92);
+  --workspace-text-soft: rgba(227, 234, 244, 0.82);
+  --workspace-border-soft: rgba(210, 190, 156, 0.14);
+}
+
+[data-theme="dark"] .novel-workspace .novel-hero {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.015)),
+    rgba(16, 21, 30, 0.92);
+}
+
+[data-theme="dark"] .novel-overview-page .novel-hero {
+  background: rgba(18, 23, 33, 0.96);
+}
+
+[data-theme="dark"] .novel-overview-page .novel-hero::before {
+  display: none;
+}
+
+[data-theme="dark"] .novel-overview-page__entry-card {
+  border-color: var(--workspace-border-soft);
+  background: rgba(28, 34, 47, 0.9);
+  box-shadow: 0 16px 32px rgba(4, 8, 18, 0.24);
+}
+
+[data-theme="dark"] .novel-overview-page__entry-card:hover {
+  border-color: rgba(209, 154, 93, 0.22);
+  background: rgba(35, 42, 57, 0.94);
+}
+
+[data-theme="dark"] .novel-overview-page__entry-card-head strong,
+[data-theme="dark"] .novel-overview-page__entry-title {
+  color: var(--workspace-text-strong);
+}
+
+[data-theme="dark"] .novel-overview-page__entry-summary {
+  color: var(--workspace-text-soft);
+}
+
+[data-theme="dark"] .novel-overview-page__entry-status.is-ready {
+  color: #9dd6ab;
+}
+
+[data-theme="dark"] .novel-overview-page__entry-status.is-pending {
+  color: #f0bf7f;
+}
+
+[data-theme="dark"] .novel-workspace .novel-context-summary__item,
+[data-theme="dark"] .novel-workspace .novel-panel,
+[data-theme="dark"] .novel-workspace .novel-empty,
+[data-theme="dark"] .novel-workspace .novel-note-list__item,
+[data-theme="dark"] .novel-workspace .novel-issue-item,
+[data-theme="dark"] .novel-workspace .novel-insight-list__item,
+[data-theme="dark"] .novel-workspace .novel-ai-issue,
+[data-theme="dark"] .novel-workspace .guided-step__fact-card,
+[data-theme="dark"] .novel-workspace .guided-step__action-card {
+  border-color: var(--workspace-border-soft);
+  background: var(--workspace-surface);
+  color: var(--workspace-text-strong);
+  box-shadow: 0 16px 32px rgba(4, 8, 18, 0.24);
+}
+
+[data-theme="dark"] .novel-workspace .novel-panel {
+  background: var(--workspace-surface-strong);
+}
+
+[data-theme="dark"] .novel-workspace .novel-context-summary__item,
+[data-theme="dark"] .novel-workspace .guided-step__fact-card,
+[data-theme="dark"] .novel-workspace .novel-note-list__item,
+[data-theme="dark"] .novel-workspace .novel-empty {
+  background: var(--workspace-surface-soft);
+}
+
+[data-theme="dark"] .novel-workspace .guided-step__action-card--done,
+[data-theme="dark"] .novel-workspace .guided-step__fact-card--done {
+  border-color: rgba(95, 190, 135, 0.24);
+  background: var(--workspace-surface-success);
+}
+
+[data-theme="dark"] .novel-workspace .novel-metric {
+  border-color: var(--workspace-border-soft);
+  background: var(--workspace-surface-soft);
+}
+
+[data-theme="dark"] .novel-workspace .novel-metric--warm {
+  border-color: rgba(199, 139, 79, 0.24);
+  background: var(--workspace-surface-accent);
+}
+
+[data-theme="dark"] .novel-workspace .novel-metric--cool {
+  border-color: rgba(88, 167, 212, 0.24);
+  background: var(--workspace-surface-accent-cool);
+}
+
+[data-theme="dark"] .novel-workspace .novel-pill {
+  background: rgba(199, 139, 79, 0.18);
+  color: #f0bf7f;
+}
+
+[data-theme="dark"] .novel-workspace .novel-context-summary__item dt,
+[data-theme="dark"] .novel-workspace .guided-step__fact-card span,
+[data-theme="dark"] .novel-workspace .guided-step__action-copy span,
+[data-theme="dark"] .novel-workspace .guided-step__action-meta,
+[data-theme="dark"] .novel-workspace .novel-panel__desc,
+[data-theme="dark"] .novel-workspace .novel-note-list__item,
+[data-theme="dark"] .novel-workspace .novel-empty,
+[data-theme="dark"] .novel-workspace .novel-issue-item__desc,
+[data-theme="dark"] .novel-workspace .novel-issue-item__suggestion,
+[data-theme="dark"] .novel-workspace .novel-ai-issue__location,
+[data-theme="dark"] .novel-workspace .novel-ai-issue__suggestion,
+[data-theme="dark"] .novel-workspace .guided-step__fact-card small {
+  color: var(--workspace-text-soft);
+}
+
+[data-theme="dark"] .novel-workspace .novel-context-summary__item dd,
+[data-theme="dark"] .novel-workspace .guided-step__fact-card strong,
+[data-theme="dark"] .novel-workspace .guided-step__action-copy strong,
+[data-theme="dark"] .novel-workspace .novel-issue-item__head strong,
+[data-theme="dark"] .novel-workspace .novel-ai-issue__type {
+  color: var(--workspace-text-strong);
+}
+
+[data-theme="dark"] .novel-workspace .novel-list-card,
+[data-theme="dark"] .novel-workspace .novel-context-summary__item,
+[data-theme="dark"] .novel-workspace .novel-metric,
+[data-theme="dark"] .novel-workspace .novel-panel,
+[data-theme="dark"] .novel-workspace .novel-tip-card,
+[data-theme="dark"] .novel-workspace .novel-empty,
+[data-theme="dark"] .novel-workspace .novel-note-list__item,
+[data-theme="dark"] .novel-workspace .guided-step__field-card,
+[data-theme="dark"] .novel-workspace .guided-step__fact-card,
+[data-theme="dark"] .novel-workspace .guided-step__action-card,
+[data-theme="dark"] .novel-workspace .novel-freshness-meta span,
+[data-theme="dark"] .novel-workspace .novel-freshness-card,
+[data-theme="dark"] .novel-workspace .novel-home-card__body,
+[data-theme="dark"] .novel-workspace .novel-filter-bar,
+[data-theme="dark"] .novel-workspace .novel-form-section,
+[data-theme="dark"] .novel-workspace .novel-support-card,
+[data-theme="dark"] .novel-workspace .novel-health-score,
+[data-theme="dark"] .novel-workspace .novel-health-breakdown > div,
+[data-theme="dark"] .novel-workspace .novel-stage-card,
+[data-theme="dark"] .novel-workspace .novel-stage-card__support,
+[data-theme="dark"] .novel-workspace .novel-overview-signal-card,
+[data-theme="dark"] .novel-workspace .novel-overview-progress-card {
+  border-color: var(--workspace-border-soft);
+  background: var(--workspace-surface-soft);
+  box-shadow: 0 12px 28px rgba(4, 8, 18, 0.2);
+}
+
+[data-theme="dark"] .novel-workspace .novel-panel {
+  background:
+    linear-gradient(180deg, rgba(31, 38, 52, 0.96), rgba(23, 29, 40, 0.94));
+}
+
+[data-theme="dark"] .novel-workspace .novel-list-card--active,
+[data-theme="dark"] .novel-workspace .novel-metric--warm,
+[data-theme="dark"] .novel-workspace .novel-metric--cool,
+[data-theme="dark"] .novel-workspace .novel-stage-card.is-active,
+[data-theme="dark"] .novel-workspace .novel-filter-bar--active {
+  background: var(--workspace-surface-accent);
+}
+
+[data-theme="dark"] .novel-workspace .guided-step__fact-card--done,
+[data-theme="dark"] .novel-workspace .guided-step__action-card--done {
+  border-color: rgba(95, 190, 135, 0.22);
+  background: linear-gradient(180deg, rgba(29, 53, 39, 0.94), rgba(23, 33, 32, 0.94));
+}
+
+[data-theme="dark"] .novel-workspace .novel-tip-card,
+[data-theme="dark"] .novel-workspace .novel-freshness-card--warn,
+[data-theme="dark"] .novel-workspace .novel-overview-progress-card--warn {
+  background: linear-gradient(180deg, rgba(95, 66, 31, 0.22), rgba(31, 38, 52, 0.94));
+}
+
+[data-theme="dark"] .novel-workspace .novel-freshness-card--ok,
+[data-theme="dark"] .novel-workspace .novel-overview-progress-card--ok {
+  background: var(--workspace-surface-success);
+}
+
+[data-theme="dark"] .novel-workspace .novel-freshness-card--stale,
+[data-theme="dark"] .novel-workspace .novel-overview-progress-card--stale {
+  background: linear-gradient(180deg, rgba(82, 39, 39, 0.92), rgba(31, 38, 52, 0.94));
+}
+
+[data-theme="dark"] .novel-route-shell,
+[data-theme="dark"] .novel-route-shell--single {
+  background:
+    radial-gradient(circle at top left, rgba(62, 105, 136, 0.12), transparent 20%),
+    radial-gradient(circle at bottom right, rgba(37, 99, 235, 0.08), transparent 24%),
+    linear-gradient(180deg, rgba(12, 15, 22, 0.98) 0%, rgba(15, 18, 26, 0.96) 56%, rgba(18, 22, 31, 0.98) 100%);
+}
+
+[data-theme="dark"] .novel-route-shell__sidebar {
+  border-right-color: rgba(210, 190, 156, 0.12);
+  background:
+    radial-gradient(circle at top left, rgba(62, 105, 136, 0.12), transparent 24%),
+    radial-gradient(circle at bottom left, rgba(37, 99, 235, 0.08), transparent 28%),
+    linear-gradient(180deg, rgba(24, 29, 40, 0.98), rgba(19, 23, 33, 0.98));
+}
+
+[data-theme="dark"] .novel-sidebar__title-block {
+  border-color: rgba(210, 190, 156, 0.14);
+  background:
+    radial-gradient(circle at top right, rgba(120, 169, 198, 0.14), transparent 34%),
+    linear-gradient(180deg, rgba(31, 38, 52, 0.96), rgba(24, 29, 40, 0.94));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 16px 34px rgba(4, 8, 18, 0.24);
+}
+
+[data-theme="dark"] .novel-route-shell__content,
+[data-theme="dark"] .novel-route-shell__content-topbar,
+[data-theme="dark"] .novel-route-shell__flowbar,
+[data-theme="dark"] .novel-writing-page .novel-writing-shell__sidebar,
+[data-theme="dark"] .novel-writing-page .novel-writing-shell__insight-card--soft,
+[data-theme="dark"] .novel-writing-page .novel-writing-shell__review-strip,
+[data-theme="dark"] .novel-writing-page .novel-writing-shell__review-strip-item,
+[data-theme="dark"] .novel-guide__flow-head,
+[data-theme="dark"] .novel-guide__flow-chip,
+[data-theme="dark"] .novel-guide .novel-stage-card,
+[data-theme="dark"] .novel-characters__roster-card,
+[data-theme="dark"] .novel-characters__editor-intro,
+[data-theme="dark"] .novel-characters__editor-stats > div,
+[data-theme="dark"] .novel-characters__batch-intro,
+[data-theme="dark"] .novel-characters__batch-section,
+[data-theme="dark"] .novel-core-settings__focus-card,
+[data-theme="dark"] .novel-core-settings__status-card,
+[data-theme="dark"] .novel-core-settings__collapse .ant-collapse-item,
+[data-theme="dark"] .story-design__anchor-card,
+[data-theme="dark"] .story-design__ratio-card,
+[data-theme="dark"] .story-design__lane,
+[data-theme="dark"] .story-design__card,
+[data-theme="dark"] .story-design__drawer-section,
+[data-theme="dark"] .story-design__inline-note,
+[data-theme="dark"] .prompt-manager-filter,
+[data-theme="dark"] .prompt-manager-lane,
+[data-theme="dark"] .prompt-manager-card,
+[data-theme="dark"] .prompt-manager-card__preview,
+[data-theme="dark"] .prompt-manager-template-preview,
+[data-theme="dark"] .prompt-manager-inspector-meta__item,
+[data-theme="dark"] .prompt-manager-callout,
+[data-theme="dark"] .prompt-manager-inspector-section,
+[data-theme="dark"] .novel-items__editor-intro,
+[data-theme="dark"] .novel-items__editor-tags .ant-tag,
+[data-theme="dark"] .novel-items__editor-stats > div,
+[data-theme="dark"] .novel-items__tip-item,
+[data-theme="dark"] .novel-items__linked-button,
+[data-theme="dark"] .novel-items__linked-card {
+  border-color: var(--workspace-border-soft) !important;
+  background: var(--workspace-surface-soft);
+  box-shadow: 0 12px 28px rgba(4, 8, 18, 0.2);
+}
+
+[data-theme="dark"] .novel-route-shell__content {
+  background:
+    radial-gradient(circle at top left, rgba(62, 105, 136, 0.08), transparent 20%),
+    linear-gradient(180deg, rgba(16, 20, 29, 0.98), rgba(19, 24, 34, 0.96));
+}
+
+[data-theme="dark"] .novel-route-shell__content-topbar,
+[data-theme="dark"] .novel-route-shell__flowbar,
+[data-theme="dark"] .novel-writing-page .novel-writing-shell__sidebar {
+  background:
+    linear-gradient(180deg, rgba(28, 34, 47, 0.96), rgba(23, 28, 39, 0.94));
+}
+
+[data-theme="dark"] .novel-writing-page .novel-writing-shell__review-strip,
+[data-theme="dark"] .novel-items__editor-intro {
+  background:
+    radial-gradient(circle at top right, rgba(62, 105, 136, 0.14), transparent 30%),
+    linear-gradient(180deg, rgba(31, 38, 52, 0.96), rgba(24, 29, 40, 0.94));
+}
+
+[data-theme="dark"] .novel-guide .novel-stage-card,
+[data-theme="dark"] .prompt-manager-card--active,
+[data-theme="dark"] .novel-items__linked-button {
+  background: var(--workspace-surface-accent);
+}
+
+[data-theme="dark"] .prompt-manager-filter--active,
+[data-theme="dark"] .prompt-manager-lane--active,
+[data-theme="dark"] .novel-mode-switch__button--active,
+[data-theme="dark"] .novel-sidebar__nav-item--active {
+  border-color: rgba(209, 154, 93, 0.28);
+  background: var(--workspace-surface-accent);
+  color: var(--workspace-text-strong);
+}
+
+[data-theme="dark"] .novel-mode-switch__button,
+[data-theme="dark"] .novel-sidebar__nav-item {
+  border-color: var(--workspace-border-soft);
+  background: rgba(31, 38, 52, 0.78);
+  color: var(--workspace-text-soft);
+}
+
+[data-theme="dark"] .novel-sidebar__nav-item:hover,
+[data-theme="dark"] .novel-mode-switch__button:hover,
+[data-theme="dark"] .prompt-manager-filter:hover,
+[data-theme="dark"] .prompt-manager-lane:hover {
+  border-color: rgba(209, 154, 93, 0.2);
+  background: rgba(39, 47, 63, 0.94);
+}
+
+[data-theme="dark"] .novel-writing-page .novel-writing-shell__review-strip-head strong,
+[data-theme="dark"] .novel-guide__flow-lead strong,
+[data-theme="dark"] .novel-characters__roster-card strong,
+[data-theme="dark"] .novel-characters__editor-intro-copy strong,
+[data-theme="dark"] .novel-core-settings__focus-card strong,
+[data-theme="dark"] .novel-core-settings__status-card strong,
+[data-theme="dark"] .story-design__lane-copy strong,
+[data-theme="dark"] .story-design__card-head strong,
+[data-theme="dark"] .story-design__drawer-section label,
+[data-theme="dark"] .prompt-manager-card__title-block strong,
+[data-theme="dark"] .prompt-manager-inspector-meta__item strong,
+[data-theme="dark"] .prompt-manager-callout strong,
+[data-theme="dark"] .prompt-manager-inspector-section__title,
+[data-theme="dark"] .novel-items__editor-intro-copy strong,
+[data-theme="dark"] .novel-items__editor-stats strong,
+[data-theme="dark"] .novel-items__tip-item strong,
+[data-theme="dark"] .novel-items__linked-card strong {
+  color: var(--workspace-text-strong);
+}
+
+[data-theme="dark"] .novel-route-shell__content-breadcrumb span,
+[data-theme="dark"] .novel-writing-page .novel-writing-shell__review-strip-item,
+[data-theme="dark"] .novel-guide__flow-note,
+[data-theme="dark"] .novel-guide__flow-subnote,
+[data-theme="dark"] .novel-guide .novel-stage-card__desc,
+[data-theme="dark"] .novel-characters__roster-card span,
+[data-theme="dark"] .novel-characters__roster-card small,
+[data-theme="dark"] .novel-characters__editor-intro-copy span,
+[data-theme="dark"] .novel-characters__editor-stats label,
+[data-theme="dark"] .novel-characters__batch-intro-copy,
+[data-theme="dark"] .novel-characters__batch-section-title,
+[data-theme="dark"] .novel-core-settings__focus-card small,
+[data-theme="dark"] .novel-core-settings__status-card span,
+[data-theme="dark"] .novel-core-settings__status-card small,
+[data-theme="dark"] .story-design__ratio-card small,
+[data-theme="dark"] .story-design__lane-copy span,
+[data-theme="dark"] .story-design__card-copy,
+[data-theme="dark"] .story-design__card-copy--soft,
+[data-theme="dark"] .story-design__inline-note,
+[data-theme="dark"] .prompt-manager-filter,
+[data-theme="dark"] .prompt-manager-lane,
+[data-theme="dark"] .prompt-manager-card__title-block span,
+[data-theme="dark"] .prompt-manager-card__goal,
+[data-theme="dark"] .prompt-manager-card__preview,
+[data-theme="dark"] .prompt-manager-template-preview,
+[data-theme="dark"] .prompt-manager-inspector-meta__item span,
+[data-theme="dark"] .prompt-manager-callout span,
+[data-theme="dark"] .prompt-manager-inspector-section__copy,
+[data-theme="dark"] .novel-items__editor-intro-copy span,
+[data-theme="dark"] .novel-items__editor-tags .ant-tag,
+[data-theme="dark"] .novel-items__editor-stats span,
+[data-theme="dark"] .novel-items__editor-stats small,
+[data-theme="dark"] .novel-items__tip-item span,
+[data-theme="dark"] .novel-items__linked-card span {
+  color: var(--workspace-text-soft);
+}
+
 .novel-dashboard__loading,
 .chapter-console-page__loading {
   min-height: 360px;
@@ -9324,14 +9847,14 @@ html[data-theme="dark"] .ant-card-actions > li {
   padding: 16px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-light);
-  background: var(--bg-panel);
-  box-shadow: 0 8px 24px rgba(31, 41, 55, 0.04);
+  background: var(--novel-console-surface);
+  box-shadow: var(--novel-console-panel-shadow);
 }
 
 .novel-dashboard__task-card {
   background:
-    linear-gradient(135deg, rgba(166, 106, 43, 0.08), transparent 32%),
-    linear-gradient(180deg, #fff 0%, #fcfaf6 100%);
+    linear-gradient(135deg, var(--novel-console-task-accent), transparent 32%),
+    var(--novel-console-task-gradient);
 }
 
 .novel-dashboard__task-meta {
@@ -9345,8 +9868,8 @@ html[data-theme="dark"] .ant-card-actions > li {
   gap: 6px;
   padding: 12px;
   border-radius: var(--radius-sm);
-  background: var(--bg-soft);
-  border: 1px solid rgba(166, 106, 43, 0.16);
+  background: var(--novel-console-soft-surface);
+  border: 1px solid var(--novel-console-warm-border);
 }
 
 .novel-dashboard__task-row span,
@@ -9393,7 +9916,7 @@ html[data-theme="dark"] .ant-card-actions > li {
   padding: 14px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-light);
-  background: #fff;
+  background: var(--novel-console-surface);
   cursor: pointer;
   text-align: left;
   transition: border-color 150ms ease, transform 150ms ease, box-shadow 150ms ease;
@@ -9482,7 +10005,7 @@ html[data-theme="dark"] .ant-card-actions > li {
 
 .novel-dashboard__panel.is-focused {
   border-color: rgba(166, 106, 43, 0.36);
-  box-shadow: 0 0 0 1px rgba(166, 106, 43, 0.08);
+  box-shadow: var(--novel-console-focus-shadow);
 }
 
 .novel-dashboard__activity-card,
@@ -9499,7 +10022,7 @@ html[data-theme="dark"] .ant-card-actions > li {
   padding: 12px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-light);
-  background: #fff;
+  background: var(--novel-console-surface);
 }
 
 .novel-dashboard__activity-card.tone-danger,
@@ -9565,7 +10088,7 @@ html[data-theme="dark"] .ant-card-actions > li {
   padding: 14px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-light);
-  background: var(--bg-soft);
+  background: var(--novel-console-soft-surface);
 }
 
 .novel-dashboard__health-head {
@@ -9596,8 +10119,8 @@ html[data-theme="dark"] .ant-card-actions > li {
 
 .chapter-console-page__hero-card {
   background:
-    linear-gradient(135deg, rgba(166, 106, 43, 0.08), transparent 34%),
-    linear-gradient(180deg, #fff 0%, #fbfaf7 100%);
+    linear-gradient(135deg, var(--novel-console-task-accent), transparent 34%),
+    var(--novel-console-chapter-hero-gradient);
 }
 
 .chapter-console-page__hero-meta {
@@ -9611,8 +10134,8 @@ html[data-theme="dark"] .ant-card-actions > li {
   gap: 4px;
   padding: 12px;
   border-radius: var(--radius-sm);
-  background: var(--bg-soft);
-  border: 1px solid rgba(166, 106, 43, 0.14);
+  background: var(--novel-console-soft-surface);
+  border: 1px solid var(--novel-console-warm-border);
 }
 
 .chapter-console-page__writability-card {
@@ -9750,7 +10273,7 @@ html[data-theme="dark"] .ant-card-actions > li {
   padding: 8px 10px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-light);
-  background: #fff;
+  background: var(--novel-console-interactive-surface);
   color: var(--text-sub);
   cursor: pointer;
 }
@@ -9764,8 +10287,8 @@ html[data-theme="dark"] .ant-card-actions > li {
 .chapter-console-page__writeback-card {
   display: grid;
   gap: 8px;
-  background: var(--bg-soft);
-  border-color: rgba(166, 106, 43, 0.16);
+  background: var(--novel-console-soft-surface);
+  border-color: var(--novel-console-warm-border);
 }
 
 .chapter-console-page__footer {

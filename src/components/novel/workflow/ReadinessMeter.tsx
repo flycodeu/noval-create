@@ -15,7 +15,7 @@ export default function ReadinessMeter({ readiness }: ReadinessMeterProps) {
         padding: 18,
         borderRadius: 'var(--radius-md)',
         border: '1px solid var(--border-light)',
-        background: '#fff',
+        background: 'var(--bg-surface)',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12 }}>

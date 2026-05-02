@@ -68,7 +68,6 @@ export default function ProjectSidebar({
                 className={`project-sidebar__mode-button${active ? ' is-active' : ''}`}
               >
                 <strong className="project-sidebar__mode-button-label">{option.label}</strong>
-                <span className="project-sidebar__mode-button-copy">{option.description}</span>
               </button>
             )
           })}
@@ -114,11 +113,6 @@ export default function ProjectSidebar({
                           <span className="project-sidebar__group-item-label">{item.label}</span>
                           <StatusTag status={item.status} size="small" />
                         </div>
-                        {item.meta ? (
-                          <span className={`project-sidebar__group-item-meta${item.hasBlocker ? ' is-danger' : ''}`}>
-                            {item.meta}
-                          </span>
-                        ) : null}
                       </button>
                     )
                   })}

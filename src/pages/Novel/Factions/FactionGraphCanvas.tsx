@@ -125,12 +125,12 @@ function buildEdges(data: FactionGraphPayload, selectedFactionId?: number | null
         opacity: connected ? 0.92 : 0.18,
       },
       labelStyle: {
-        fill: connected ? '#4a3829' : 'rgba(74,56,41,0.45)',
+        fill: connected ? 'var(--faction-graph-label-text)' : 'var(--faction-graph-label-text-muted)',
         fontSize: 12,
         fontWeight: 700,
       },
       labelBgStyle: {
-        fill: 'rgba(255,255,255,0.92)',
+        fill: 'var(--faction-graph-label-bg)',
       },
       labelBgPadding: [6, 4],
       markerEnd: {

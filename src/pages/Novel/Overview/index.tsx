@@ -89,7 +89,6 @@ export default function Overview({ novelId }: Props) {
   const draftWarningsRef = useRef<string[]>([])
   const draftObservabilityRef = useRef<{ inputSummary: string; lintWarnings: string[]; rawOutputs: string[] } | null>(null)
   const authorMode = useAuthorWorkModeStore((state) => state.mode)
-  const authorModeSource = useAuthorWorkModeStore((state) => state.source)
   const syncSuggestedAuthorMode = useAuthorWorkModeStore((state) => state.syncSuggestedMode)
 
   useEffect(() => {
@@ -566,18 +565,6 @@ export default function Overview({ novelId }: Props) {
                 </Button>
               </Space>
             </div>
-            <div className="guided-step__action-meta">{`完成后解锁：${authorWorkflow.primaryTask.unlocks.join('、')}`}</div>
-          </div>
-
-          <div className="novel-note-list">
-            <div className="novel-note-list__item">
-              {authorModeSource === 'manual'
-                ? '当前沿用你在创作向导中手动选择的模式。'
-                : '当前采用系统自动推荐模式。'}
-            </div>
-            {displayState.isZeroState ? (
-              <div className="novel-note-list__item">先按最短起步路径进入第一章，再逐步补资产，不必先理解全部模块结构。</div>
-            ) : null}
           </div>
         </div>
       </WorkspacePanel>
@@ -612,7 +599,6 @@ export default function Overview({ novelId }: Props) {
                 <div className="guided-step__action-copy">
                   <strong>{task.title}</strong>
                 </div>
-                <div className="guided-step__action-foot">{`${task.estimatedMinutes} 分钟 · ${task.unlocks.join('、')}`}</div>
                 <Button onClick={() => navigate(resolveAuthorWorkflowHref(novelId, task.entryPage))}>
                   {task.actionLabel}
                 </Button>
@@ -927,7 +913,7 @@ export default function Overview({ novelId }: Props) {
       </WorkspacePanel>
 
       <WorkspacePanel title="项目底盘概览" description="把底盘摘要和关键入口收在一个次级区，避免总览重复展示多层状态卡。">
-        <div style={{ display: 'grid', gap: 20 }}>
+        <div className="novel-overview-page__summary-stack">
           <div className="guided-step__fact-grid">
             <div className="guided-step__fact-card">
               <span>项目立项</span>
@@ -951,31 +937,24 @@ export default function Overview({ novelId }: Props) {
             </div>
           </div>
 
-          <div style={{ display: 'grid', gap: 12 }}>
-            <strong style={{ color: 'var(--workspace-ink)' }}>关键入口</strong>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+          <div className="novel-overview-page__entry-section">
+            <strong className="novel-overview-page__entry-title">关键入口</strong>
+            <div className="novel-overview-page__entry-grid">
               {readinessItems.map((item) => (
                 <button
                   key={item.key}
                   type="button"
                   onClick={item.action}
-                  style={{
-                    textAlign: 'left',
-                    border: '1px solid rgba(15, 23, 42, 0.08)',
-                    borderRadius: 16,
-                    padding: 16,
-                    background: '#fff',
-                    cursor: 'pointer',
-                  }}
+                  className="novel-overview-page__entry-card"
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                  <div className="novel-overview-page__entry-card-head">
                     <strong>{item.title}</strong>
                     <span>{item.icon}</span>
                   </div>
-                  <div style={{ fontSize: 12, color: item.ready ? '#0f766e' : '#b45309', marginBottom: 8 }}>
+                  <div className={`novel-overview-page__entry-status${item.ready ? ' is-ready' : ' is-pending'}`}>
                     {item.ready ? '已就绪' : '待补齐'}
                   </div>
-                  <div style={{ fontSize: 12, color: '#64748b' }}>{item.summary}</div>
+                  <div className="novel-overview-page__entry-summary">{item.summary}</div>
                 </button>
               ))}
             </div>

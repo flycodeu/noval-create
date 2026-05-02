@@ -424,3 +424,26 @@
 [data-theme="dark"] .novel-writing-page .writing-layout-copy-faint {
   color: var(--workspace-ink-soft);
 }
+
+[data-theme="dark"] .novel-writing-page .novel-writing-shell__segment-card-meta,
+[data-theme="dark"] .novel-writing-page .novel-writing-shell__segment-card-desc,
+[data-theme="dark"] .novel-writing-page .novel-gate-report__counts,
+[data-theme="dark"] .novel-writing-page .novel-gate-report__section-head,
+[data-theme="dark"] .novel-writing-page .novel-gate-report__item-detail,
+[data-theme="dark"] .novel-writing-page .novel-gate-report__item-hint,
+[data-theme="dark"] .novel-writing-page .novel-gate-report__meta-copy,
+[data-theme="dark"] .novel-writing-page .novel-gate-report__history-list,
+[data-theme="dark"] .novel-writing-page .novel-gate-report__score-card span,
+[data-theme="dark"] .novel-writing-page .writing-layout-parallel-meta,
+[data-theme="dark"] .novel-writing-page .writing-layout-parallel-meta--tiny {
+  color: var(--workspace-ink-soft);
+}
+
+[data-theme="dark"] .novel-writing-page .novel-writing-shell__segment-card strong,
+[data-theme="dark"] .novel-writing-page .novel-gate-report__summary strong,
+[data-theme="dark"] .novel-writing-page .novel-gate-report__item-title,
+[data-theme="dark"] .novel-writing-page .novel-gate-report__meta-head,
+[data-theme="dark"] .novel-writing-page .novel-gate-report__score-card strong,
+[data-theme="dark"] .novel-writing-page .writing-layout-parallel-section-title {
+  color: var(--workspace-ink);
+}

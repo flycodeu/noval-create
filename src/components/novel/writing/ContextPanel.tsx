@@ -22,7 +22,7 @@ export default function ContextPanel({ title, sections }: ContextPanelProps) {
         padding: 16,
         borderRadius: 'var(--radius-md)',
         border: '1px solid var(--border-light)',
-        background: '#fff',
+        background: 'var(--bg-surface)',
       }}
     >
       <strong style={{ fontSize: 14, color: 'var(--text-main)' }}>{title}</strong>
@@ -36,7 +36,7 @@ export default function ContextPanel({ title, sections }: ContextPanelProps) {
             padding: 12,
             borderRadius: 'var(--radius-sm)',
             border: `1px solid ${section.tone === 'danger' ? 'rgba(194, 65, 12, 0.18)' : 'var(--border-light)'}`,
-            background: '#fff',
+            background: 'var(--bg-elevated)',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>

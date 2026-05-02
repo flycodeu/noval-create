@@ -23,7 +23,7 @@ export default function ContractPanel({ title, subtitle, sections }: ContractPan
         padding: 16,
         borderRadius: 'var(--radius-md)',
         border: '1px solid var(--border-light)',
-        background: '#fff',
+        background: 'var(--bg-surface)',
       }}
     >
       <div style={{ display: 'grid', gap: 4 }}>
@@ -40,7 +40,7 @@ export default function ContractPanel({ title, subtitle, sections }: ContractPan
             padding: 12,
             borderRadius: 'var(--radius-sm)',
             border: `1px solid ${section.tone === 'danger' ? 'rgba(194, 65, 12, 0.18)' : 'var(--border-light)'}`,
-            background: section.tone === 'soft' ? 'var(--bg-soft)' : '#fff',
+            background: section.tone === 'soft' ? 'var(--bg-soft)' : 'var(--bg-elevated)',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
