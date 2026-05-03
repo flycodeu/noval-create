@@ -21,7 +21,7 @@ const PROVIDER_RUNTIME_DEFAULTS: Record<string, { temperature: number; maxTokens
   anthropic: { temperature: 0.75, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
   aliyun: { temperature: 0.85, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
   baidu: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
-  deepseek: { temperature: 0.7, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
+  deepseek: { temperature: 0.7, maxTokens: 384000 },
   custom: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
 }
 

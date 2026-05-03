@@ -17,7 +17,7 @@ const MAX_MODEL_MAX_TOKENS = 1000000
 const PROVIDER_OPTIONS = [
   { value: 'openai', label: 'OpenAI', models: ['gpt-4o', 'gpt-4-turbo', 'gpt-3.5-turbo', 'gpt-4o-mini'] },
   { value: 'anthropic', label: 'Anthropic Claude', models: ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'] },
-  { value: 'deepseek', label: 'DeepSeek', models: ['deepseek-chat', 'deepseek-reasoner'] },
+  { value: 'deepseek', label: 'DeepSeek', models: [] },
   { value: 'aliyun', label: '阿里通义', models: ['qwen-max', 'qwen-plus', 'qwen-turbo', 'qwen-long'] },
   { value: 'baidu', label: '百度文心', models: ['ernie-4.0-8k', 'ernie-3.5-8k', 'ernie-speed'] },
   { value: 'custom', label: '自定义（OpenAI 兼容）', models: [] },
@@ -25,11 +25,12 @@ const PROVIDER_OPTIONS = [
 const PROVIDER_DEFAULTS: Record<string, { temperature: number; maxTokens: number }> = {
   openai: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
   anthropic: { temperature: 0.75, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
-  deepseek: { temperature: 0.7, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
+  deepseek: { temperature: 0.7, maxTokens: 384000 },
   aliyun: { temperature: 0.85, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
   baidu: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
   custom: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
 }
+
 
 export default function ModelManager() {
   const [configs, setConfigs] = useState<ModelConfig[]>([])
@@ -266,7 +267,7 @@ export default function ModelManager() {
                     allowClear
                   />
                 ) : (
-                  <Input placeholder="输入模型名称，例如：llama3:latest" />
+                  <Input placeholder={selectedProvider === 'deepseek' ? '输入模型名称，例如：deepseek-v4-flash' : '输入模型名称，例如：llama3:latest'} />
                 )}
               </Form.Item>
 
@@ -274,9 +275,17 @@ export default function ModelManager() {
                 <Input.Password placeholder={selectedProvider === 'baidu' ? 'APIKey|SecretKey' : '输入 API Key'} />
               </Form.Item>
 
-              {(selectedProvider === 'openai' || selectedProvider === 'custom') && (
+              {(selectedProvider === 'openai' || selectedProvider === 'custom' || selectedProvider === 'deepseek') && (
                 <Form.Item name="baseUrl" label="Base URL">
-                  <Input placeholder={selectedProvider === 'custom' ? 'http://localhost:11434/v1' : 'https://api.openai.com/v1（留空使用默认）'} />
+                  <Input
+                    placeholder={
+                      selectedProvider === 'custom'
+                        ? 'http://localhost:11434/v1'
+                        : selectedProvider === 'deepseek'
+                          ? 'https://api.deepseek.com（留空使用默认）'
+                          : 'https://api.openai.com/v1（留空使用默认）'
+                    }
+                  />
                 </Form.Item>
               )}
 
@@ -287,7 +296,9 @@ export default function ModelManager() {
               <Form.Item
                 name="maxTokens"
                 label="Max Tokens（最大输出长度）"
-                extra="控制单次回复最多可生成多少 Token。可设置到更大的输出预算，但实际可用上限仍取决于模型提供方。"
+                extra={selectedProvider === 'deepseek'
+                  ? 'DeepSeek V4 当前最大输出长度为 384K。这里控制单次回复最多可生成多少 Token。'
+                  : '控制单次回复最多可生成多少 Token。可设置到更大的输出预算，但实际可用上限仍取决于模型提供方。'}
               >
                 <InputNumber min={512} max={MAX_MODEL_MAX_TOKENS} step={512} style={{ width: '100%' }} placeholder="例如：65536 / 128000 / 1000000" />
               </Form.Item>
@@ -295,7 +306,9 @@ export default function ModelManager() {
               <Form.Item
                 name="maxContextTokens"
                 label="上下文窗口（总上下文预算，可留空使用默认）"
-                extra="控制模型可接收的上下文总量。通常应大于等于最大输出长度。留空时使用对应适配器的默认窗口。"
+                extra={selectedProvider === 'deepseek'
+                  ? 'DeepSeek V4 当前上下文窗口为 1M。通常应大于等于最大输出长度；留空时使用 DeepSeek 默认窗口。'
+                  : '控制模型可接收的上下文总量。通常应大于等于最大输出长度。留空时使用对应适配器的默认窗口。'}
               >
                 <InputNumber min={2048} max={2000000} step={1024} style={{ width: '100%' }} placeholder="例如：200000 / 512000 / 1000000" />
               </Form.Item>
