@@ -65,10 +65,12 @@ export default function AppLayout({ children }: AppLayoutProps) {
     <Layout style={{ height: '100dvh', minHeight: 0, background: 'var(--color-bg-primary)', overflow: 'hidden' }}>
       {!hideAppSidebar ? (
       <Sider
-        width={236}
+        width={256}
         className="app-layout-sider"
         style={{
-          background: 'var(--color-bg-secondary)',
+          background: 'var(--bg-glass)',
+          backdropFilter: 'blur(20px)',
+          WebkitBackdropFilter: 'blur(20px)',
           borderRight: '1px solid var(--border-color)',
           display: 'flex',
           flexDirection: 'column',
@@ -77,18 +79,18 @@ export default function AppLayout({ children }: AppLayoutProps) {
         }}
       >
         <div style={{
-          padding: '20px 16px 16px',
+          padding: '24px 20px 16px',
           borderBottom: '1px solid var(--border-color)',
         }}>
           <div style={{
-            fontSize: 18,
+            fontSize: 20,
             fontWeight: 700,
-            color: 'var(--color-blue-primary)',
-            letterSpacing: 1,
+            color: 'var(--color-text-primary)',
+            letterSpacing: -0.5,
           }}>
-            ✦ NovelForge
+            NovelForge
           </div>
-          <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 2 }}>
+          <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 4 }}>
             AI 小说创作平台
           </div>
         </div>
@@ -103,24 +105,25 @@ export default function AppLayout({ children }: AppLayoutProps) {
             background: 'transparent',
             border: 'none',
             flex: 1,
-            marginTop: 8,
+            marginTop: 12,
+            padding: '0 12px',
           }}
         />
 
         <div style={{
-          padding: '12px 16px',
+          padding: '16px 20px',
           borderTop: '1px solid var(--border-color)',
         }}>
           <div style={{
-            fontSize: 11,
+            fontSize: 12,
             color: 'var(--color-text-muted)',
-            marginBottom: 8,
+            marginBottom: 12,
             display: 'flex',
             alignItems: 'center',
-            gap: 4,
+            gap: 6,
           }}>
-            <BulbOutlined style={{ fontSize: 11 }} />
-            主题
+            <BulbOutlined style={{ fontSize: 12 }} />
+            主题设置
           </div>
           <div style={{ display: 'grid', gap: 8 }}>
             {THEME_OPTIONS.map(opt => (
@@ -129,19 +132,19 @@ export default function AppLayout({ children }: AppLayoutProps) {
                 onClick={() => setTheme(opt.value)}
                 style={{
                   width: '100%',
-                  minHeight: 36,
-                  border: `2px solid ${theme === opt.value ? 'var(--color-blue-primary)' : 'var(--border-color)'}`,
-                  borderRadius: 8,
-                  background: theme === opt.value ? 'rgba(46,134,171,0.15)' : 'transparent',
+                  minHeight: 40,
+                  border: `1px solid ${theme === opt.value ? 'var(--color-blue-primary)' : 'transparent'}`,
+                  borderRadius: 12,
+                  background: theme === opt.value ? 'var(--color-bg-hover)' : 'transparent',
                   cursor: 'pointer',
-                  fontSize: 13,
+                  fontSize: 14,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
                   gap: 10,
-                  transition: 'border-color 0.15s',
-                  color: 'var(--color-text-primary)',
-                  padding: '0 12px',
+                  transition: 'all 0.2s',
+                  color: theme === opt.value ? 'var(--color-blue-primary)' : 'var(--color-text-primary)',
+                  padding: '0 16px',
                 }}
               >
                 <span>{opt.label}</span>
@@ -154,7 +157,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
       ) : null}
 
       <Content style={{
-        background: 'var(--color-bg-primary)',
+        background: 'transparent',
         overflowX: 'hidden',
         overflowY: 'auto',
         display: 'flex',

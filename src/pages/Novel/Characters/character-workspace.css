@@ -52,17 +52,28 @@
 
 .novel-character-studio {
   display: grid;
-  grid-template-columns: minmax(280px, 320px) minmax(420px, 1fr) minmax(360px, 460px);
-  gap: 22px;
+  grid-template-columns: minmax(260px, 300px) minmax(0, 1fr) minmax(320px, 380px);
+  gap: 18px;
   align-items: start;
 }
 
 .novel-character-studio--list {
-  grid-template-columns: minmax(280px, 320px) minmax(0, 1fr);
+  grid-template-columns: minmax(260px, 300px) minmax(0, 1fr);
 }
 
 .novel-character-studio--graph {
   grid-template-columns: minmax(0, 1fr);
+}
+
+.novel-character-graph-panel--full {
+  width: 100%;
+  max-width: none;
+  grid-column: 1 / -1;
+}
+
+.novel-character-studio--graph .novel-panel__body,
+.novel-character-graph-panel--full .novel-panel__body {
+  min-width: 0;
 }
 
 .novel-character-studio__sidebar,
@@ -160,6 +171,7 @@
 }
 
 .novel-character-graph-panel__canvas {
+  width: 100%;
   min-height: 560px;
   border: 1px solid rgba(122, 93, 52, 0.12);
   border-radius: 28px;
@@ -169,6 +181,7 @@
 
 .character-graph-shell {
   position: relative;
+  width: 100%;
   height: 100%;
   min-height: 560px;
 }
@@ -375,7 +388,7 @@
 
 @media (max-width: 1380px) {
   .novel-character-studio {
-    grid-template-columns: minmax(280px, 320px) minmax(0, 1fr);
+    grid-template-columns: minmax(260px, 300px) minmax(0, 1fr);
   }
 
   .novel-character-graph-panel {

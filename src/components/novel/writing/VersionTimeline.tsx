@@ -1,6 +1,7 @@
 import React from 'react'
 import { Button, Tag } from 'antd'
 import type { ChapterVersion } from '../../../types'
+import './WritingSidePanels.css'
 
 function sourceLabel(source: ChapterVersion['versionSource']) {
   if (source === 'ai-rewrite') return 'AI 重写'
@@ -23,23 +24,14 @@ export default function VersionTimeline({
   onRestore,
 }: VersionTimelineProps) {
   return (
-    <section
-      style={{
-        display: 'grid',
-        gap: 12,
-        padding: 16,
-        borderRadius: 'var(--radius-md)',
-        border: '1px solid var(--border-light)',
-        background: 'var(--bg-surface)',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-        <strong style={{ fontSize: 14, color: 'var(--text-main)' }}>版本历史</strong>
+    <section className="writing-side-panel">
+      <div className="writing-side-panel__section-head">
+        <strong className="writing-side-panel__title">版本历史</strong>
         {onRestore ? <Button size="small" disabled={!selectedVersionId} onClick={onRestore}>恢复所选版本</Button> : null}
       </div>
 
       {versions.length > 0 ? (
-        <div style={{ display: 'grid', gap: 8 }}>
+        <div className="writing-side-panel__version-list">
           {versions.slice(0, 6).map((version) => {
             const active = version.id === selectedVersionId
 
@@ -48,32 +40,21 @@ export default function VersionTimeline({
                 key={version.id}
                 type="button"
                 onClick={() => onSelect?.(version.id)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 12,
-                  padding: '10px 12px',
-                  borderRadius: 'var(--radius-sm)',
-                  border: `1px solid ${active ? 'rgba(166, 106, 43, 0.28)' : 'var(--border-light)'}`,
-                  background: active ? 'var(--primary-soft)' : 'var(--bg-elevated)',
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                }}
+                className={`writing-side-panel__version-button${active ? ' is-active' : ''}`}
               >
-                <div style={{ display: 'grid', gap: 4, minWidth: 0 }}>
-                  <strong style={{ fontSize: 12, color: 'var(--text-main)' }}>{sourceLabel(version.versionSource)}</strong>
-                  <span style={{ fontSize: 11, lineHeight: 1.5, color: 'var(--text-muted)' }}>
+                <div className="writing-side-panel__version-copy">
+                  <strong>{sourceLabel(version.versionSource)}</strong>
+                  <span className="writing-side-panel__meta">
                     {`${version.wordCount || 0} 字 · ${new Date(version.createdAt).toLocaleString()}`}
                   </span>
                 </div>
-                {active ? <Tag color="gold" style={{ margin: 0 }}>当前选择</Tag> : null}
+                {active ? <Tag color="gold" className="writing-side-panel__version-current">当前选择</Tag> : null}
               </button>
             )
           })}
         </div>
       ) : (
-        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>当前章节还没有可恢复的版本。</div>
+        <div className="writing-side-panel__empty">当前章节还没有可恢复的版本。</div>
       )}
     </section>
   )

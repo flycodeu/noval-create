@@ -573,6 +573,8 @@ export default function NovelRouter() {
       <div className="novel-route-shell novel-route-shell--single">
       <ProjectTopbar
         projectTitle={currentNovel?.title || '未命名小说'}
+        workspaceLabel={currentPageMeta.label}
+        workspaceSummary={currentPageMeta.summary || undefined}
         mode={workspaceViewMode}
         onModeChange={setWorkspaceViewMode}
         onBack={() => navigate('/novels')}

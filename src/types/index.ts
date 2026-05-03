@@ -4660,6 +4660,13 @@ export interface ParallelMergeResult {
 declare global {
   interface Window {
     electron: {
+      windowControls: {
+        minimize: () => Promise<void>
+        toggleMaximize: () => Promise<boolean>
+        close: () => Promise<void>
+        isMaximized: () => Promise<boolean>
+        onMaximizedStateChange: (callback: (isMaximized: boolean) => void) => () => void
+      }
       novel: {
         list: (filters?: unknown) => Promise<Novel[]>
         get: (id: number) => Promise<Novel | null>

@@ -51,6 +51,18 @@ async function invokeIpc<T = unknown>(channel: string, ...args: unknown[]): Prom
 }
 
 const api = {
+  windowControls: {
+    minimize: () => invokeIpc('window:minimize'),
+    toggleMaximize: () => invokeIpc<boolean>('window:toggleMaximize'),
+    close: () => invokeIpc('window:close'),
+    isMaximized: () => invokeIpc<boolean>('window:isMaximized'),
+    onMaximizedStateChange: (callback: (isMaximized: boolean) => void) => {
+      const subscription = (_event: Electron.IpcRendererEvent, isMaximized: boolean) => callback(isMaximized)
+      ipcRenderer.on('window:maximized-state', subscription)
+      return () => ipcRenderer.removeListener('window:maximized-state', subscription)
+    },
+  },
+
   // Novel workspace APIs
   novel: {
     list: (filters?: unknown) => invokeIpc('novel:list', filters),

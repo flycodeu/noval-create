@@ -150,6 +150,10 @@ function saveWindowState(win: BrowserWindow) {
   }
 }
 
+function sendWindowState(win: BrowserWindow) {
+  win.webContents.send('window:maximized-state', win.isMaximized())
+}
+
 function createWindow() {
   const winState = loadWindowState()
 
@@ -160,8 +164,10 @@ function createWindow() {
     height: winState.height || 900,
     minWidth: 1100,
     minHeight: 700,
+    frame: false,
     backgroundColor: '#0f1117',
-    titleBarStyle: 'hiddenInset',
+    titleBarStyle: 'hidden',
+    titleBarOverlay: false,
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, '../preload/preload.js'),
@@ -195,9 +201,24 @@ function createWindow() {
     if (mainWindow) saveWindowState(mainWindow)
   })
 
+  mainWindow.on('maximize', () => {
+    if (mainWindow) sendWindowState(mainWindow)
+  })
+
+  mainWindow.on('unmaximize', () => {
+    if (mainWindow) sendWindowState(mainWindow)
+  })
+
+  mainWindow.once('ready-to-show', () => {
+    if (mainWindow) sendWindowState(mainWindow)
+  })
+
   mainWindow.on('closed', () => {
     mainWindow = null
   })
+
+  Menu.setApplicationMenu(null)
+  mainWindow.setMenuBarVisibility(false)
 }
 
 function toStringArray(value: unknown): string[] {
@@ -254,6 +275,34 @@ function registerIpcHandlers() {
     channel: string,
     listener: Parameters<typeof ipcMain.handle>[1],
   ) => registerHandle(channel, wrapIpcHandler(channel, listener))
+
+  handle('window:minimize', (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender)
+    window?.minimize()
+    return null
+  })
+
+  handle('window:toggleMaximize', (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender)
+    if (!window) return false
+    if (window.isMaximized()) {
+      window.unmaximize()
+      return false
+    }
+    window.maximize()
+    return true
+  })
+
+  handle('window:close', (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender)
+    window?.close()
+    return null
+  })
+
+  handle('window:isMaximized', (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender)
+    return window?.isMaximized() ?? false
+  })
 
   handle('novel:list', (_, filters) => novelService.listNovels(filters))
   handle('novel:get', (_, id) => novelService.getNovel(requireId(id)))
@@ -645,11 +694,6 @@ function registerIpcHandlers() {
     return db.select().from(storyArcs).where(eq(storyArcs.novelId, novelId)).all()
   })
 
-  Menu.setApplicationMenu(null)
-  const window = mainWindow
-  if (window) {
-    window.setMenuBarVisibility(false)
-  }
   handle('outline:getArcProgressSnapshot', (_, novelId) =>
     storyArcProgressService.getStoryArcProgressSnapshot(requireId(novelId, 'novelId')))
 

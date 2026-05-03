@@ -1,38 +1,36 @@
 .novel-project-card,
 .novel-metric-card,
 .novel-blocker-card {
-  --novel-card-surface: var(--color-bg-secondary, var(--bg-panel));
-  --novel-card-border: var(--border-color, var(--border-light));
-  --novel-card-text: var(--color-text-primary, var(--text-main));
-  --novel-card-text-secondary: var(--color-text-secondary, var(--text-sub));
+  --novel-card-surface: var(--color-bg-secondary, var(--bg-surface));
+  --novel-card-border: var(--border-color, var(--border-default));
+  --novel-card-text: var(--color-text-primary, var(--text-primary));
+  --novel-card-text-secondary: var(--color-text-secondary, var(--text-secondary));
   --novel-card-text-muted: var(--color-text-muted, var(--text-muted));
-  --novel-card-accent: var(--color-orange, var(--primary));
-  --novel-card-accent-soft: var(--primary-soft, var(--bg-soft));
-  --novel-card-shadow: var(--shadow-card, 0 2px 8px rgba(0, 0, 0, 0.06));
+  --novel-card-accent: var(--color-blue-primary, var(--accent));
+  --novel-card-accent-soft: var(--color-bg-hover, var(--accent-soft));
+  --novel-card-shadow: var(--shadow-md);
 }
 
 .novel-project-card {
   display: grid;
-  gap: 14px;
+  gap: 16px;
   min-height: 0;
-  padding: 18px;
+  padding: 24px;
   border: 1px solid var(--novel-card-border);
-  border-radius: var(--radius-md, 12px);
-  background:
-    radial-gradient(circle at top right, rgba(166, 106, 43, 0.08), transparent 34%),
-    var(--novel-card-surface);
-  box-shadow: var(--novel-card-shadow);
+  border-radius: var(--radius-l, 16px);
+  background: var(--novel-card-surface);
+  box-shadow: var(--shadow-sm);
   cursor: pointer;
   transition:
-    transform var(--transition-fast, 150ms ease),
-    box-shadow var(--transition-fast, 150ms ease),
-    border-color var(--transition-fast, 150ms ease);
+    transform var(--transition-fast, 200ms cubic-bezier(0.4, 0, 0.2, 1)),
+    box-shadow var(--transition-fast, 200ms cubic-bezier(0.4, 0, 0.2, 1)),
+    border-color var(--transition-fast, 200ms cubic-bezier(0.4, 0, 0.2, 1));
 }
 
 .novel-project-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 14px 30px rgba(37, 31, 24, 0.12);
-  border-color: rgba(166, 106, 43, 0.22);
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-lg);
+  border-color: rgba(0, 102, 204, 0.15); /* Subtly highlight accent color on hover */
 }
 
 .novel-project-card__head,
@@ -60,11 +58,12 @@
 }
 
 .novel-project-card__title {
-  font-size: 16px;
+  font-size: 18px;
   line-height: 1.35;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--novel-card-text);
   word-break: break-word;
+  letter-spacing: -0.01em;
 }
 
 .novel-project-card__tag-row {
@@ -75,48 +74,50 @@
 .novel-project-card__tag,
 .novel-blocker-card__hint-tag {
   margin: 0;
+  border-radius: 6px;
+  border: none;
+  background: var(--bg-hover);
+  color: var(--text-secondary);
 }
 
 .novel-project-card__status-tag {
   margin: 0;
-  border-width: 1px;
+  border-radius: 6px;
+  border: none;
 }
 
 .novel-project-card__status-tag--draft {
-  color: #6b7280;
-  border-color: rgba(107, 114, 128, 0.22);
-  background: rgba(107, 114, 128, 0.1);
+  color: var(--text-secondary);
+  background: var(--bg-hover);
 }
 
 .novel-project-card__status-tag--writing {
-  color: #2563eb;
-  border-color: rgba(37, 99, 235, 0.22);
-  background: rgba(37, 99, 235, 0.1);
+  color: var(--info);
+  background: rgba(0, 122, 255, 0.1);
 }
 
 .novel-project-card__status-tag--completed {
-  color: #2f855a;
-  border-color: rgba(47, 133, 90, 0.22);
-  background: rgba(47, 133, 90, 0.1);
+  color: var(--success);
+  background: rgba(52, 199, 89, 0.1);
 }
 
 .novel-project-card__status-tag--archived {
-  color: #9ca3af;
-  border-color: rgba(156, 163, 175, 0.24);
-  background: rgba(156, 163, 175, 0.12);
+  color: var(--text-muted);
+  background: var(--bg-hover);
 }
 
 .novel-project-card__summary {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  font-size: 12px;
+  gap: 12px;
+  font-size: 13px;
   color: var(--novel-card-text-secondary);
 }
 
 .novel-project-card__summary strong,
 .novel-project-card__progress-value {
   color: var(--novel-card-text);
+  font-weight: 500;
 }
 
 .novel-project-card__progress {
@@ -126,7 +127,7 @@
 .novel-project-card__progress-meta {
   justify-content: space-between;
   gap: 12px;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .novel-project-card__progress-label {
@@ -139,31 +140,31 @@
 
 .novel-project-card__next-step {
   gap: 8px;
-  padding: 12px;
-  border: 1px solid rgba(166, 106, 43, 0.14);
-  border-radius: var(--radius-sm, 8px);
+  padding: 16px;
+  border: none;
+  border-radius: var(--radius-m, 12px);
   background: var(--novel-card-accent-soft);
 }
 
 .novel-project-card__next-step-label {
   font-size: 11px;
   line-height: 1.2;
-  font-weight: 700;
-  letter-spacing: 0.08em;
+  font-weight: 600;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--novel-card-accent);
 }
 
 .novel-project-card__next-step-title {
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.4;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--novel-card-text);
 }
 
 .novel-project-card__next-step-copy {
-  font-size: 12px;
-  line-height: 1.7;
+  font-size: 13px;
+  line-height: 1.6;
   color: var(--novel-card-text-secondary);
 }
 
@@ -176,42 +177,45 @@
   display: grid;
   gap: 8px;
   min-width: 0;
-  padding: 16px 18px;
+  padding: 20px;
   border: 1px solid var(--novel-card-border);
-  border-radius: var(--radius-md, 12px);
+  border-radius: var(--radius-l, 16px);
   background: var(--novel-card-surface);
+  box-shadow: var(--shadow-sm);
 }
 
 .novel-metric-card--warm {
-  border-color: rgba(166, 106, 43, 0.22);
+  border: none;
   background: var(--novel-card-accent-soft);
 }
 
 .novel-metric-card--success {
-  border-color: rgba(47, 133, 90, 0.2);
-  background: rgba(47, 133, 90, 0.08);
+  border: none;
+  background: rgba(52, 199, 89, 0.08);
 }
 
 .novel-metric-card--danger {
-  border-color: rgba(194, 65, 12, 0.22);
-  background: rgba(194, 65, 12, 0.08);
+  border: none;
+  background: rgba(255, 59, 48, 0.08);
 }
 
 .novel-metric-card__label,
 .novel-metric-card__hint {
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.6;
 }
 
 .novel-metric-card__label {
-  font-weight: 600;
+  font-weight: 500;
   color: var(--novel-card-text-secondary);
 }
 
 .novel-metric-card__value {
-  font-size: 24px;
+  font-size: 28px;
+  font-weight: 600;
   line-height: 1.1;
   color: var(--novel-card-text);
+  letter-spacing: -0.02em;
 }
 
 .novel-metric-card--warm .novel-metric-card__value {
@@ -233,27 +237,27 @@
 .novel-blocker-card {
   display: grid;
   gap: 12px;
-  padding: 16px;
-  border: 1px solid rgba(166, 106, 43, 0.14);
-  border-radius: var(--radius-md, 12px);
+  padding: 20px;
+  border: 1px solid var(--novel-card-border);
+  border-radius: var(--radius-l, 16px);
   background: var(--novel-card-surface);
-  box-shadow: var(--novel-card-shadow);
+  box-shadow: var(--shadow-sm);
 }
 
 .novel-blocker-card--fatal {
-  border-color: rgba(194, 65, 12, 0.3);
+  border-color: rgba(255, 59, 48, 0.3);
 }
 
 .novel-blocker-card--high {
-  border-color: rgba(234, 88, 12, 0.28);
+  border-color: rgba(255, 149, 0, 0.3);
 }
 
 .novel-blocker-card--medium {
-  border-color: rgba(183, 121, 31, 0.28);
+  border-color: rgba(255, 204, 0, 0.3);
 }
 
 .novel-blocker-card--low {
-  border-color: rgba(156, 163, 175, 0.28);
+  border-color: var(--novel-card-border);
 }
 
 .novel-blocker-card__head,
@@ -265,9 +269,9 @@
 }
 
 .novel-blocker-card__title {
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.45;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--novel-card-text);
 }
 
@@ -277,13 +281,13 @@
 }
 
 .novel-blocker-card__reason {
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.7;
   color: var(--novel-card-text-secondary);
 }
 
 .novel-blocker-card__meta {
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.6;
   color: var(--novel-card-text-muted);
 }
@@ -291,26 +295,16 @@
 [data-theme="dark"] .novel-project-card,
 [data-theme="dark"] .novel-metric-card,
 [data-theme="dark"] .novel-blocker-card {
-  box-shadow: 0 20px 36px rgba(0, 0, 0, 0.28);
+  box-shadow: var(--shadow-lg);
+  border-color: rgba(255, 255, 255, 0.08);
 }
 
 [data-theme="dark"] .novel-blocker-card {
-  border-color: rgba(210, 190, 156, 0.16);
-  background: rgba(28, 34, 47, 0.9);
-}
-
-[data-theme="dark"] .novel-blocker-card__title {
-  color: #eef2f8;
-}
-
-[data-theme="dark"] .novel-blocker-card__reason,
-[data-theme="dark"] .novel-blocker-card__meta {
-  color: rgba(194, 203, 218, 0.78);
+  background: rgba(28, 28, 30, 0.9);
 }
 
 [data-theme="dark"] .novel-project-card__next-step {
-  border-color: rgba(230, 126, 34, 0.24);
-  background: rgba(230, 126, 34, 0.14);
+  background: rgba(255, 255, 255, 0.05);
 }
 
 @media (max-width: 720px) {

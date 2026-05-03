@@ -4012,11 +4012,18 @@ function StoryDynamicsHealthCard({
 }
 
 function AiCheckResult({ result }: { result: AiCheckPayload }) {
-  const scoreColor = result.score >= 80 ? '#389e0d' : result.score >= 60 ? '#d48806' : '#cf1322'
+  const scoreTone = result.score >= 80 ? 'good' : result.score >= 60 ? 'warn' : 'danger'
   return (
-    <div className="novel-ai-score">
+    <div className={`novel-ai-score novel-ai-score--${scoreTone}`}>
       <div className="novel-ai-score__summary">
-        <Progress type="circle" percent={result.score} size={86} strokeColor={scoreColor} trailColor="rgba(143, 99, 48, 0.12)" format={(percent) => <span className="writing-layout-ai-score-value" style={{ color: scoreColor }}>{percent}</span>} />
+        <Progress
+          type="circle"
+          percent={result.score}
+          size={86}
+          strokeColor="var(--writing-ai-score-color)"
+          trailColor="var(--writing-ai-score-trail)"
+          format={(percent) => <span className="writing-layout-ai-score-value">{percent}</span>}
+        />
         <div className="novel-ai-score__feedback">{result.overall_feedback}</div>
       </div>
       <div className="novel-insight-list">

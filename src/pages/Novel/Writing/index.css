@@ -290,6 +290,7 @@
 }
 
 .novel-writing-page .writing-layout-ai-score-value {
+  color: var(--writing-ai-score-color);
   font-size: 18px;
   font-weight: 700;
 }
@@ -356,12 +357,23 @@
 }
 
 .novel-writing-page .chapter-console-page__grid {
-  grid-template-columns: minmax(280px, 320px) minmax(560px, 1fr) minmax(320px, 360px);
+  grid-template-columns: minmax(248px, 288px) minmax(680px, 1.35fr) minmax(280px, 316px);
+}
+
+.novel-writing-page .chapter-console-page__column--left,
+.novel-writing-page .chapter-console-page__column--center,
+.novel-writing-page .chapter-console-page__column--right,
+.novel-writing-page .chapter-console-page__editor-sheet-wrap {
+  min-width: 0;
+}
+
+.novel-writing-page .novel-writing-shell__editor-sheet {
+  width: min(980px, 100%);
 }
 
 .novel-writing-page .chapter-console-page__column--right {
   position: sticky;
-  top: 152px;
+  top: 140px;
 }
 
 .novel-writing-page .chapter-console-page__route-switch {
@@ -377,6 +389,17 @@
 
 .novel-writing-page .chapter-console-page__footer {
   gap: 0;
+}
+
+@media (max-width: 1480px) {
+  .novel-writing-page .chapter-console-page__grid {
+    grid-template-columns: minmax(240px, 280px) minmax(0, 1fr);
+  }
+
+  .novel-writing-page .chapter-console-page__column--right {
+    position: static;
+    grid-column: 1 / -1;
+  }
 }
 
 @media (max-width: 960px) {

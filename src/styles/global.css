@@ -3,33 +3,34 @@
    ============================================================ */
 :root {
   /* Canonical semantic tokens. Theme variants override these via [data-theme]. */
-  --bg-app: #F5F6F8;
+  --bg-app: #f5f5f7;
   --bg-surface: #FFFFFF;
   --bg-elevated: #FFFFFF;
-  --bg-muted: #FAF7F1;
-  --bg-hover: #EEF2F6;
-  --bg-active: #F3E7D8;
+  --bg-muted: #fbfbfd;
+  --bg-hover: #f2f2f7;
+  --bg-active: #e5e5ea;
+  --bg-glass: rgba(255, 255, 255, 0.72);
 
-  --text-primary: #1F2937;
-  --text-secondary: #6B7280;
-  --text-muted: #9CA3AF;
+  --text-primary: #1d1d1f;
+  --text-secondary: #86868b;
+  --text-muted: #d2d2d7;
 
-  --border-default: #E5E7EB;
-  --border-strong: #D1D5DB;
+  --border-default: rgba(0, 0, 0, 0.08);
+  --border-strong: rgba(0, 0, 0, 0.12);
 
-  --accent: #A66A2B;
-  --accent-hover: #8F5720;
-  --accent-soft: #F3E7D8;
+  --accent: #0066cc;
+  --accent-hover: #0077ed;
+  --accent-soft: #e5f0fa;
 
-  --success: #2F855A;
-  --warning: #B7791F;
-  --danger: #C2410C;
-  --info: #2563EB;
+  --success: #34c759;
+  --warning: #ff9f0a;
+  --danger: #ff3b30;
+  --info: #007aff;
 
-  --radius-s: 6px;
-  --radius-m: 10px;
-  --radius-l: 14px;
-  --radius-xl: 20px;
+  --radius-s: 8px;
+  --radius-m: 12px;
+  --radius-l: 16px;
+  --radius-xl: 24px;
 
   --space-xs: 4px;
   --space-s: 8px;
@@ -38,10 +39,10 @@
   --space-xl: 24px;
   --space-2xl: 32px;
 
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
-  --shadow-lg: 0 12px 24px rgba(0, 0, 0, 0.1);
-  --shadow-xl: 0 20px 40px rgba(0, 0, 0, 0.12);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.08);
+  --shadow-xl: 0 24px 56px rgba(0, 0, 0, 0.12);
 
   /* Backward-compatible aliases for existing page and component styles. */
   --bg-page: var(--bg-app);
@@ -4051,8 +4052,22 @@ html[data-theme="dark"] .ant-card-actions > li {
 }
 
 .novel-ai-score {
+  --writing-ai-score-color: var(--warning);
+  --writing-ai-score-trail: rgba(143, 99, 48, 0.12);
   display: grid;
   gap: 12px;
+}
+
+.novel-ai-score--good {
+  --writing-ai-score-color: var(--success);
+}
+
+.novel-ai-score--warn {
+  --writing-ai-score-color: var(--warning);
+}
+
+.novel-ai-score--danger {
+  --writing-ai-score-color: var(--danger);
 }
 
 .novel-ai-score__summary {
@@ -8127,8 +8142,7 @@ html[data-theme="dark"] .ant-card-actions > li {
 }
 
 /* novel-single-workspace-refresh:start */
-.novel-route-shell,
-.novel-route-shell--single {
+.novel-route-shell {
   flex: 1 1 auto;
   width: 100%;
   height: auto;
@@ -8617,8 +8631,7 @@ html[data-theme="dark"] .ant-card-actions > li {
 }
 
 @media (max-width: 1180px) {
-  .novel-route-shell,
-  .novel-route-shell--single {
+  .novel-route-shell {
     grid-template-columns: 320px minmax(0, 1fr);
   }
 
@@ -8654,8 +8667,7 @@ html[data-theme="dark"] .ant-card-actions > li {
 }
 
 @media (max-width: 960px) {
-  .novel-route-shell,
-  .novel-route-shell--single {
+  .novel-route-shell {
     flex: 0 0 auto;
     min-height: 0;
     grid-template-columns: 1fr;
@@ -9428,27 +9440,27 @@ html[data-theme="dark"] .ant-card-actions > li {
 .novel-dashboard,
 .chapter-console-page {
   --novel-console-surface: var(--bg-surface);
-  --novel-console-soft-surface: var(--bg-soft);
+  --novel-console-soft-surface: color-mix(in srgb, var(--bg-muted) 84%, var(--bg-surface) 16%);
   --novel-console-interactive-surface: var(--bg-elevated);
-  --novel-console-panel-shadow: 0 8px 24px rgba(31, 41, 55, 0.04);
-  --novel-console-task-accent: rgba(166, 106, 43, 0.08);
-  --novel-console-task-gradient: linear-gradient(180deg, #fff 0%, #fcfaf6 100%);
-  --novel-console-chapter-hero-gradient: linear-gradient(180deg, #fff 0%, #fbfaf7 100%);
-  --novel-console-warm-border: rgba(166, 106, 43, 0.16);
-  --novel-console-focus-shadow: 0 0 0 1px rgba(166, 106, 43, 0.08);
+  --novel-console-panel-shadow: var(--shadow-sm);
+  --novel-console-task-accent: color-mix(in srgb, var(--accent-soft) 74%, transparent 26%);
+  --novel-console-task-gradient: linear-gradient(180deg, var(--bg-surface) 0%, color-mix(in srgb, var(--bg-muted) 38%, var(--bg-surface) 62%) 100%);
+  --novel-console-chapter-hero-gradient: linear-gradient(180deg, var(--bg-surface) 0%, color-mix(in srgb, var(--bg-muted) 26%, var(--bg-surface) 74%) 100%);
+  --novel-console-warm-border: color-mix(in srgb, var(--accent) 18%, transparent 82%);
+  --novel-console-focus-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 10%, transparent 90%);
 }
 
 [data-theme="dark"] .novel-dashboard,
 [data-theme="dark"] .chapter-console-page {
-  --novel-console-surface: rgba(26, 29, 39, 0.94);
-  --novel-console-soft-surface: rgba(32, 38, 55, 0.88);
-  --novel-console-interactive-surface: rgba(30, 34, 53, 0.92);
-  --novel-console-panel-shadow: 0 12px 32px rgba(4, 8, 18, 0.24);
-  --novel-console-task-accent: rgba(199, 139, 79, 0.12);
-  --novel-console-task-gradient: linear-gradient(180deg, rgba(36, 41, 54, 0.98) 0%, rgba(24, 29, 39, 0.98) 100%);
-  --novel-console-chapter-hero-gradient: linear-gradient(180deg, rgba(37, 43, 58, 0.98) 0%, rgba(24, 30, 42, 0.98) 100%);
-  --novel-console-warm-border: rgba(199, 139, 79, 0.22);
-  --novel-console-focus-shadow: 0 0 0 1px rgba(199, 139, 79, 0.14);
+  --novel-console-surface: var(--workspace-surface-strong);
+  --novel-console-soft-surface: var(--workspace-surface);
+  --novel-console-interactive-surface: var(--workspace-surface-soft);
+  --novel-console-panel-shadow: 0 12px 32px rgba(4, 8, 18, 0.18);
+  --novel-console-task-accent: color-mix(in srgb, var(--accent) 12%, transparent 88%);
+  --novel-console-task-gradient: linear-gradient(180deg, var(--workspace-surface-strong) 0%, var(--workspace-surface) 100%);
+  --novel-console-chapter-hero-gradient: linear-gradient(180deg, var(--workspace-surface-soft) 0%, var(--workspace-surface) 100%);
+  --novel-console-warm-border: color-mix(in srgb, var(--accent) 20%, transparent 80%);
+  --novel-console-focus-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent 86%);
 }
 
 [data-theme="dark"] .novel-workspace {
@@ -9643,8 +9655,7 @@ html[data-theme="dark"] .ant-card-actions > li {
   background: linear-gradient(180deg, rgba(82, 39, 39, 0.92), rgba(31, 38, 52, 0.94));
 }
 
-[data-theme="dark"] .novel-route-shell,
-[data-theme="dark"] .novel-route-shell--single {
+[data-theme="dark"] .novel-route-shell {
   background:
     radial-gradient(circle at top left, rgba(62, 105, 136, 0.12), transparent 20%),
     radial-gradient(circle at bottom right, rgba(37, 99, 235, 0.08), transparent 24%),
@@ -10367,40 +10378,98 @@ html[data-theme="dark"] .ant-card-actions > li {
 
 /* novel-shell-layout-refresh:start */
 .novel-route-shell--single {
+  --novel-shell-topbar-height: 88px;
+  --novel-shell-border: var(--border-default);
+  --novel-shell-border-strong: var(--border-strong);
+  --novel-shell-chrome-surface: var(--bg-elevated);
+  --novel-shell-toolbar-surface: var(--bg-surface);
+  --novel-shell-sidebar-surface: color-mix(in srgb, var(--bg-muted) 82%, var(--bg-surface) 18%);
+  --novel-shell-sidebar-card-surface: var(--bg-surface);
+  --novel-shell-sidebar-interactive: var(--bg-hover);
+  --novel-shell-accent-soft: color-mix(in srgb, var(--accent-soft) 74%, transparent 26%);
+  --novel-shell-content-surface: var(--bg-surface);
+  --novel-shell-content-backdrop: color-mix(in srgb, var(--bg-app) 72%, var(--bg-muted) 28%);
   display: grid;
-  grid-template-columns: 332px minmax(0, 1fr);
+  grid-template-columns: 280px minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
   grid-template-areas:
     "topbar topbar"
     "sidebar content";
   min-height: 100vh;
-}
-
-.novel-route-shell--single .novel-route-shell__sidebar {
-  grid-area: sidebar;
-  top: 0;
-  height: calc(100vh - 81px);
-  max-height: calc(100vh - 81px);
-  padding-top: 18px;
-}
-
-.novel-route-shell--single .novel-route-shell__content {
-  grid-area: content;
-  min-height: 0;
+  max-height: 100vh;
+  gap: 0;
+  padding: 0;
+  background: var(--bg-app);
 }
 
 .novel-route-shell--single .project-topbar {
   grid-area: topbar;
   position: sticky;
   top: 0;
-  z-index: 20;
-  min-height: 72px;
-  padding: 14px 24px;
-  border-bottom: 1px solid rgba(122, 93, 52, 0.12);
+  z-index: 30;
+  min-height: var(--novel-shell-topbar-height);
+  padding-inline: 0;
+  border-bottom: 1px solid var(--novel-shell-border);
+}
+
+.novel-route-shell--single .novel-route-shell__sidebar {
+  grid-area: sidebar;
+  position: relative;
+  top: 0;
+  align-self: stretch;
+  height: calc(100vh - var(--novel-shell-topbar-height));
+  max-height: calc(100vh - var(--novel-shell-topbar-height));
+  min-height: 0;
+  overflow: auto;
+  padding: 10px;
+  background: var(--novel-shell-sidebar-surface);
+  border-right: 1px solid var(--novel-shell-border);
+  backdrop-filter: none;
+}
+
+.novel-route-shell--single .novel-route-shell__content {
+  grid-area: content;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--novel-shell-content-backdrop);
 }
 
 .novel-route-shell--single .novel-route-shell__content-frame {
-  display: contents;
+  display: block;
+  min-height: 100%;
+}
+
+.novel-route-shell--single .novel-route-shell__content-body {
+  height: 100%;
+  padding: 12px;
+  overflow: auto;
+}
+
+.novel-route-shell--single .novel-workspace {
+  min-height: 100%;
+  border: 1px solid var(--novel-shell-border);
+  border-radius: 16px;
+  background: var(--novel-shell-content-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+[data-theme="dark"] .novel-route-shell--single {
+  --novel-shell-border: rgba(255, 255, 255, 0.08);
+  --novel-shell-border-strong: rgba(255, 255, 255, 0.18);
+  --novel-shell-chrome-surface: var(--bg-surface);
+  --novel-shell-toolbar-surface: var(--bg-surface);
+  --novel-shell-sidebar-surface: var(--bg-surface);
+  --novel-shell-sidebar-card-surface: var(--bg-elevated);
+  --novel-shell-sidebar-interactive: var(--bg-hover);
+  --novel-shell-accent-soft: rgba(199, 139, 79, 0.16);
+  --novel-shell-content-surface: var(--bg-surface);
+  --novel-shell-content-backdrop: var(--bg-app);
+}
+
+@media (max-width: 1040px) {
+  .novel-route-shell--single {
+    --novel-shell-topbar-height: 122px;
+  }
 }
 
 @media (max-width: 960px) {
@@ -10416,84 +10485,148 @@ html[data-theme="dark"] .ant-card-actions > li {
   .novel-route-shell--single .novel-route-shell__sidebar {
     height: auto;
     max-height: none;
-    padding-top: 12px;
+    overflow: visible;
+    padding-top: 10px;
+    border-right: none;
+    border-bottom: 1px solid var(--novel-shell-border);
   }
 
-  .novel-route-shell--single .project-topbar {
-    padding: 14px 16px;
+  .novel-route-shell--single .novel-route-shell__content-body {
+    padding: 10px;
   }
 }
 
-[data-theme="dark"] .novel-route-shell--single .project-topbar {
-  border-bottom-color: rgba(210, 190, 156, 0.12);
+@media (max-width: 760px) {
+  .novel-route-shell--single {
+    --novel-shell-topbar-height: 126px;
+  }
 }
 /* novel-shell-layout-refresh:end */
 
-/* app-shell-refinement:start */
-.novel-route-shell--single {
-  gap: 0;
-  padding: 0;
-  background:
-    linear-gradient(180deg, rgba(245, 240, 232, 0.98), rgba(238, 231, 220, 0.98));
+/* ============================================================
+   APPLE DESIGN REFACTOR OVERRIDES (Phase 4)
+   ============================================================ */
+
+/* General Container Fixes */
+.task-center-page,
+.model-manager-page,
+.template-manager-page,
+.prompt-manager-page,
+.admin-page {
+  padding: 32px !important;
+  background: var(--bg-app) !important;
 }
 
-.novel-route-shell--single .project-topbar {
-  padding-inline: 18px 22px;
-  background:
-    linear-gradient(180deg, rgba(255, 252, 247, 0.96), rgba(248, 242, 233, 0.94));
-  box-shadow: inset 0 -1px 0 rgba(122, 93, 52, 0.08);
+/* Fix novel-split layout gaps */
+.novel-split {
+  gap: 24px !important;
 }
 
-.novel-route-shell--single .novel-route-shell__sidebar {
-  padding: 14px 12px 14px 14px;
-  background:
-    linear-gradient(180deg, rgba(250, 246, 239, 0.98), rgba(244, 236, 225, 0.98));
-  border-right: 1px solid rgba(122, 93, 52, 0.12);
+/* Fix Workspace Panels (Cards) */
+.novel-panel {
+  border-radius: var(--radius-l) !important;
+  border: 1px solid var(--border-default) !important;
+  background: var(--bg-surface) !important;
+  box-shadow: var(--shadow-sm) !important;
+  padding: 24px !important;
 }
 
-.novel-route-shell--single .novel-route-shell__content {
-  background:
-    linear-gradient(180deg, rgba(246, 241, 234, 0.86), rgba(240, 234, 225, 0.8));
+.novel-panel__header {
+  margin-bottom: 20px !important;
 }
 
-.novel-route-shell--single .novel-route-shell__content-body {
-  padding: 14px;
+.novel-panel__title {
+  font-size: 20px !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.01em !important;
+  color: var(--text-primary) !important;
 }
 
-.novel-route-shell--single .novel-workspace {
-  border: 1px solid rgba(122, 93, 52, 0.1);
-  border-radius: 24px;
-  background:
-    linear-gradient(180deg, rgba(255, 252, 246, 0.94), rgba(249, 244, 236, 0.92));
-  box-shadow: 0 18px 38px rgba(37, 31, 24, 0.08);
+/* Admin Sidebar List */
+.admin-sidebar-item {
+  border-radius: var(--radius-m) !important;
+  border: 2px solid transparent !important;
+  padding: 16px !important;
+  background: var(--bg-hover) !important;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
 }
 
-[data-theme="dark"] .novel-route-shell--single {
-  background:
-    linear-gradient(180deg, rgba(12, 15, 22, 0.99), rgba(16, 20, 29, 0.99));
+.admin-sidebar-item:hover {
+  transform: translateY(-2px) !important;
+  box-shadow: var(--shadow-md) !important;
 }
 
-[data-theme="dark"] .novel-route-shell--single .project-topbar {
-  background:
-    linear-gradient(180deg, rgba(25, 31, 43, 0.96), rgba(21, 27, 37, 0.95));
-  box-shadow: inset 0 -1px 0 rgba(210, 190, 156, 0.08);
+.admin-sidebar-item--active {
+  border-color: var(--accent) !important;
+  background: var(--accent-soft) !important;
+  box-shadow: none !important;
 }
 
-[data-theme="dark"] .novel-route-shell--single .novel-route-shell__sidebar {
-  background:
-    linear-gradient(180deg, rgba(22, 28, 39, 0.98), rgba(18, 23, 33, 0.98));
-  border-right-color: rgba(210, 190, 156, 0.12);
+/* Ant Design Component Overrides in Subpages */
+.ant-select-selector,
+.ant-input,
+.ant-input-affix-wrapper,
+.ant-input-number {
+  border-radius: 12px !important;
+  padding: 6px 12px !important;
 }
 
-[data-theme="dark"] .novel-route-shell--single .novel-route-shell__content {
-  background:
-    linear-gradient(180deg, rgba(18, 23, 33, 0.92), rgba(16, 20, 29, 0.88));
+.ant-btn {
+  border-radius: 12px !important;
+  font-weight: 500 !important;
 }
 
-[data-theme="dark"] .novel-route-shell--single .novel-workspace {
-  border-color: rgba(210, 190, 156, 0.1);
-  background:
-    linear-gradient(180deg, rgba(26, 32, 44, 0.94), rgba(22, 27, 37, 0.92));
-  box-shadow: 0 18px 38px rgba(4, 8, 18, 0.28);
+.prompt-manager-card,
+.task-center-card,
+.task-center-detail {
+  padding: 24px !important;
+  border-radius: var(--radius-l) !important;
+  border: 1px solid var(--border-default) !important;
+  background: var(--bg-surface) !important;
+  box-shadow: var(--shadow-sm) !important;
 }
-/* app-shell-refinement:end */
+
+.prompt-manager-card:hover {
+  transform: translateY(-4px) !important;
+  box-shadow: var(--shadow-md) !important;
+  border-color: rgba(0, 102, 204, 0.15) !important;
+}
+
+.prompt-manager-card--active {
+  border-color: var(--accent) !important;
+  background: var(--accent-soft) !important;
+}
+
+.prompt-manager-card__preview,
+.prompt-manager-template-preview {
+  border-radius: var(--radius-m) !important;
+  background: var(--bg-hover) !important;
+  border: none !important;
+  padding: 16px !important;
+}
+
+/* Dark Mode Overrides */
+[data-theme="dark"] .prompt-manager-card,
+[data-theme="dark"] .task-center-card,
+[data-theme="dark"] .novel-workspace-panel,
+[data-theme="dark"] .admin-sidebar-item {
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  background: rgba(28, 28, 30, 0.8) !important;
+}
+
+[data-theme="dark"] .admin-sidebar-item--active,
+[data-theme="dark"] .prompt-manager-card--active {
+  background: rgba(255, 255, 255, 0.1) !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+@media (max-width: 768px) {
+  .task-center-page,
+  .model-manager-page,
+  .template-manager-page,
+  .prompt-manager-page,
+  .admin-page {
+    padding: 16px !important;
+  }
+}
+

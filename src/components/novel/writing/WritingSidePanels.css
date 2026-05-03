@@ -1,0 +1,118 @@
+.writing-side-panel {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  background: var(--novel-console-surface, var(--bg-surface));
+  box-shadow: var(--shadow-sm);
+}
+
+.writing-side-panel__header {
+  display: grid;
+  gap: 4px;
+}
+
+.writing-side-panel__title {
+  color: var(--text-main);
+  font-size: 14px;
+}
+
+.writing-side-panel__subtitle,
+.writing-side-panel__empty,
+.writing-side-panel__item,
+.writing-side-panel__meta {
+  color: var(--text-sub);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.writing-side-panel__section {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  background: var(--novel-console-interactive-surface, var(--bg-elevated));
+}
+
+.writing-side-panel__section--soft {
+  background: var(--novel-console-soft-surface, var(--bg-soft));
+}
+
+.writing-side-panel__section--danger {
+  border-color: rgba(194, 65, 12, 0.18);
+}
+
+.writing-side-panel__section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.writing-side-panel__section-title {
+  color: var(--text-main);
+  font-size: 13px;
+}
+
+.writing-side-panel__count-tag {
+  margin: 0;
+}
+
+.writing-side-panel__item-list,
+.writing-side-panel__version-list {
+  display: grid;
+  gap: 6px;
+}
+
+.writing-side-panel__version-list {
+  gap: 8px;
+}
+
+.writing-side-panel__version-button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  background: var(--novel-console-interactive-surface, var(--bg-elevated));
+  cursor: pointer;
+  text-align: left;
+}
+
+.writing-side-panel__version-button.is-active {
+  border-color: rgba(166, 106, 43, 0.28);
+  background: var(--accent-soft);
+}
+
+.writing-side-panel__version-copy {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.writing-side-panel__version-copy strong {
+  color: var(--text-main);
+  font-size: 12px;
+}
+
+.writing-side-panel__version-current {
+  margin: 0;
+}
+
+.writing-side-panel__empty.ant-empty {
+  margin-block: 0;
+}
+
+.writing-side-panel__empty .ant-empty-image {
+  height: 40px;
+}
+
+.writing-side-panel__empty .ant-empty-description {
+  font-size: 12px;
+}
