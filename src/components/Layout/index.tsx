@@ -49,7 +49,6 @@ const menuItems = [
 const THEME_OPTIONS: { value: Theme; label: string; icon: string }[] = [
   { value: 'dark', label: '深色', icon: '🌙' },
   { value: 'light', label: '浅色', icon: '☀️' },
-  { value: 'soft', label: '柔和', icon: '🍵' },
 ]
 
 export default function AppLayout({ children }: AppLayoutProps) {
@@ -78,23 +77,6 @@ export default function AppLayout({ children }: AppLayoutProps) {
           minHeight: '100dvh',
         }}
       >
-        <div style={{
-          padding: '24px 20px 16px',
-          borderBottom: '1px solid var(--border-color)',
-        }}>
-          <div style={{
-            fontSize: 20,
-            fontWeight: 700,
-            color: 'var(--color-text-primary)',
-            letterSpacing: -0.5,
-          }}>
-            NovelForge
-          </div>
-          <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 4 }}>
-            AI 小说创作平台
-          </div>
-        </div>
-
         <Menu
           className="app-layout-menu"
           mode="inline"
@@ -105,7 +87,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
             background: 'transparent',
             border: 'none',
             flex: 1,
-            marginTop: 12,
+            marginTop: 16,
             padding: '0 12px',
           }}
         />

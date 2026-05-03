@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { Button, Dropdown, Tooltip } from 'antd'
 import type { MenuProps } from 'antd'
 import {
-  AppstoreOutlined,
   ArrowLeftOutlined,
   BarChartOutlined,
   BorderOutlined,
@@ -46,6 +45,7 @@ interface ProjectTopbarProps {
 export default function ProjectTopbar({
   projectTitle,
   workspaceLabel,
+  workspaceSummary,
   mode,
   onModeChange,
   onBack,
@@ -150,32 +150,8 @@ export default function ProjectTopbar({
 
   return (
     <header className="project-topbar">
-      <div className="project-topbar__drag-region" aria-hidden="true" />
-
-      <div className="project-topbar__chrome">
-        <div className="project-topbar__identity">
-          <Button
-            className="project-topbar__back project-topbar__control project-topbar__control--ghost"
-            icon={<ArrowLeftOutlined />}
-            onClick={onBack}
-          >
-            返回项目列表
-          </Button>
-          <div className="project-topbar__title-group">
-            <span className="project-topbar__app-mark" aria-hidden="true">
-              <AppstoreOutlined />
-            </span>
-            <div className="project-topbar__title-copy">
-              <div className="project-topbar__project-line">
-                <span className="project-topbar__app-name">Novel Forge</span>
-                <strong className="project-topbar__project-name" title={projectTitle}>{projectTitle}</strong>
-                <span className="project-topbar__project-separator" aria-hidden="true" />
-                <span className="project-topbar__workspace-name" title={workspaceLabel}>{workspaceLabel}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
+      <div className="project-topbar__titlebar">
+        <div className="project-topbar__drag-region" aria-hidden="true" />
         <div className="project-topbar__window-controls">
           <Tooltip title="最小化">
             <button
@@ -210,56 +186,82 @@ export default function ProjectTopbar({
         </div>
       </div>
 
-      <div className="project-topbar__toolbar">
-        <div className="project-topbar__toolbar-group project-topbar__toolbar-group--primary">
-          <div className="project-topbar__mode-meta">
-            <span className="project-topbar__mode-meta-label">工作模式</span>
-            <strong className="project-topbar__mode-meta-value">{activeMode?.label || '未设置'}</strong>
-          </div>
-          <div className="project-topbar__mode-switch" role="tablist" aria-label="工作模式切换">
-            {modeOptions.map((option) => {
-              const active = mode === option.value
-              return (
-                <button
-                  key={option.value}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  onClick={() => onModeChange(option.value)}
-                  className={`project-topbar__mode-button${active ? ' is-active' : ''}`}
-                >
-                  {option.label}
-                </button>
-              )
-            })}
+      <div className="project-topbar__main-row">
+        <div className="project-topbar__identity">
+          <Button
+            className="project-topbar__back project-topbar__control project-topbar__control--ghost"
+            icon={<ArrowLeftOutlined />}
+            onClick={onBack}
+          >
+            返回项目列表
+          </Button>
+          <div className="project-topbar__title-group">
+            <div className="project-topbar__title-copy">
+              <div className="project-topbar__project-line">
+                <strong className="project-topbar__project-name" title={projectTitle}>{projectTitle}</strong>
+                <span className="project-topbar__project-separator" aria-hidden="true" />
+                <span className="project-topbar__workspace-name" title={workspaceLabel}>{workspaceLabel}</span>
+              </div>
+              {workspaceSummary ? (
+                <div className="project-topbar__workspace-summary" title={workspaceSummary}>
+                  {workspaceSummary}
+                </div>
+              ) : null}
+            </div>
           </div>
         </div>
 
-        <div className="project-topbar__toolbar-group project-topbar__toolbar-group--secondary">
-          <div className="project-topbar__primary-actions">
-            <Button className="project-topbar__control" icon={<SearchOutlined />} onClick={onSearch}>
-              全局搜索
-            </Button>
-            <Button className="project-topbar__control" icon={<SwapOutlined />} onClick={onJumpChapter}>
-              跳转章节
-            </Button>
-            <Button className="project-topbar__control" icon={<RollbackOutlined />} onClick={onUndo} disabled={!canUndo}>
-              撤销
-            </Button>
+        <div className="project-topbar__toolbar">
+          <div className="project-topbar__toolbar-group project-topbar__toolbar-group--primary">
+            <div className="project-topbar__mode-meta">
+              <span className="project-topbar__mode-meta-label">工作模式</span>
+              <strong className="project-topbar__mode-meta-value">{activeMode?.label || '未设置'}</strong>
+            </div>
+            <div className="project-topbar__mode-switch" role="tablist" aria-label="工作模式切换">
+              {modeOptions.map((option) => {
+                const active = mode === option.value
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => onModeChange(option.value)}
+                    className={`project-topbar__mode-button${active ? ' is-active' : ''}`}
+                  >
+                    {option.label}
+                  </button>
+                )
+              })}
+            </div>
           </div>
-          {showNextStep && onNextStep ? (
-            <Button
-              className="project-topbar__control project-topbar__control--accent"
-              type="primary"
-              icon={<ThunderboltOutlined />}
-              onClick={onNextStep}
-            >
-              {nextStepLabel || '推荐下一步'}
-            </Button>
-          ) : null}
-          <Dropdown menu={overflowMenu} trigger={['click']}>
-            <Button className="project-topbar__control" icon={<EllipsisOutlined />}>更多</Button>
-          </Dropdown>
+
+          <div className="project-topbar__toolbar-group project-topbar__toolbar-group--secondary">
+            <div className="project-topbar__primary-actions">
+              <Button className="project-topbar__control" icon={<SearchOutlined />} onClick={onSearch}>
+                全局搜索
+              </Button>
+              <Button className="project-topbar__control" icon={<SwapOutlined />} onClick={onJumpChapter}>
+                跳转章节
+              </Button>
+              <Button className="project-topbar__control" icon={<RollbackOutlined />} onClick={onUndo} disabled={!canUndo}>
+                撤销
+              </Button>
+            </div>
+            {showNextStep && onNextStep ? (
+              <Button
+                className="project-topbar__control project-topbar__control--accent"
+                type="primary"
+                icon={<ThunderboltOutlined />}
+                onClick={onNextStep}
+              >
+                {nextStepLabel || '推荐下一步'}
+              </Button>
+            ) : null}
+            <Dropdown menu={overflowMenu} trigger={['click']}>
+              <Button className="project-topbar__control" icon={<EllipsisOutlined />}>更多</Button>
+            </Dropdown>
+          </div>
         </div>
       </div>
     </header>

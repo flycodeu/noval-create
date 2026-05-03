@@ -686,7 +686,7 @@ export default function NovelList() {
               extra="用你自己的话描述故事处境、冲突、氛围或关键设定，写得越具体，AI 补全背景越稳。"
             >
               <Input.TextArea
-                rows={7}
+                rows={8}
                 placeholder="例如：一座沿海城市的冷案记者，意外卷入二十年前的沉船旧案，发现幸存者名单里藏着她父亲失踪的线索。"
                 showCount
               />
@@ -703,7 +703,7 @@ export default function NovelList() {
                     rules={[{ required: true, message: '请填写主角起点' }]}
                     extra="写主角现在处于什么处境、身份或困局。"
                   >
-                    <Input.TextArea rows={4} placeholder="例如：被逐出主城的维修员，只能靠黑市零工维生。" />
+                    <Input.TextArea rows={6} placeholder="例如：被逐出主城的维修员，只能靠黑市零工维生。" />
                   </Form.Item>
                 </Col>
                 <Col span={12}>
@@ -713,7 +713,7 @@ export default function NovelList() {
                     rules={[{ required: true, message: '请填写核心钩子' }]}
                     extra="开篇立刻抓住读者的异常事件、秘密或倒计时。"
                   >
-                    <Input.TextArea rows={4} placeholder="例如：他修复的一枚芯片里，藏着主城即将熄火的真相。" />
+                    <Input.TextArea rows={6} placeholder="例如：他修复的一枚芯片里，藏着主城即将熄火的真相。" />
                   </Form.Item>
                 </Col>
               </Row>
@@ -726,7 +726,7 @@ export default function NovelList() {
                     rules={[{ required: true, message: '请填写核心冲突' }]}
                     extra="写主角必须面对的主线阻力，而不是泛泛主题。"
                   >
-                    <Input.TextArea rows={4} placeholder="例如：想救城就必须和曾经出卖他的旧同伴合作。 " />
+                    <Input.TextArea rows={6} placeholder="例如：想救城就必须和曾经出卖他的旧同伴合作。 " />
                   </Form.Item>
                 </Col>
                 <Col span={12}>
@@ -736,7 +736,7 @@ export default function NovelList() {
                     rules={[{ required: true, message: '请填写禁区' }]}
                     extra="用于自动生成文风护栏和剧情边界。"
                   >
-                    <Input.TextArea rows={4} placeholder="例如：禁止全知旁白解释；禁止一章解决主线；禁止爽点无代价。" />
+                    <Input.TextArea rows={6} placeholder="例如：禁止全知旁白解释；禁止一章解决主线；禁止爽点无代价。" />
                   </Form.Item>
                 </Col>
               </Row>
@@ -747,7 +747,7 @@ export default function NovelList() {
                 rules={[{ required: true, message: '请填写终局方向' }]}
                 extra="先给一个方向，不要求现在就写完整终局。"
               >
-                <Input.TextArea rows={4} placeholder="例如：主角救下主城，但必须放弃原本想夺回的身份和归属。" />
+                <Input.TextArea rows={6} placeholder="例如：主角救下主城，但必须放弃原本想夺回的身份和归属。" />
               </Form.Item>
 
               <div className="novel-list-page__fast-note">

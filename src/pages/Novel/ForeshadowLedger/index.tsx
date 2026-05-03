@@ -615,12 +615,12 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
             </div>
             <div className="guided-step__field-card">
               <Form.Item name="detail" label="伏笔说明">
-                <Input.TextArea rows={3} placeholder="补充伏笔内容、触发条件或误导结构。" />
+                <Input.TextArea rows={6} placeholder="补充伏笔内容、触发条件或误导结构。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card">
               <Form.Item name="plantMethod" label="埋设方式">
-                <Input.TextArea rows={3} placeholder="例如：道具特写 / 对话暗示 / 行为异常。" />
+                <Input.TextArea rows={6} placeholder="例如：道具特写 / 对话暗示 / 行为异常。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card guided-step__field-card--compact">
@@ -671,27 +671,27 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
             </div>
             <div className="guided-step__field-card">
               <Form.Item name="payoffMethod" label="回收方式">
-                <Input.TextArea rows={3} placeholder="例如：庭审反转时作为关键证据揭示。 " />
+                <Input.TextArea rows={6} placeholder="例如：庭审反转时作为关键证据揭示。 " />
               </Form.Item>
             </div>
             <div className="guided-step__field-card">
               <Form.Item name="payoffSceneAction" label="回收动作">
-                <Input.TextArea rows={3} placeholder="正文里必须发生的具体动作，例如：当众出示戒指并逼出供词。" />
+                <Input.TextArea rows={6} placeholder="正文里必须发生的具体动作，例如：当众出示戒指并逼出供词。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card">
               <Form.Item name="requiredEvidence" label="可见证据">
-                <Input.TextArea rows={3} placeholder="读者必须看到的证据，例如：戒指内圈刻字、监控残片、伤口特征。" />
+                <Input.TextArea rows={6} placeholder="读者必须看到的证据，例如：戒指内圈刻字、监控残片、伤口特征。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card">
               <Form.Item name="readerVisibleOutcome" label="读者可见结果">
-                <Input.TextArea rows={3} placeholder="本章结束后读者明确知道了什么。" />
+                <Input.TextArea rows={6} placeholder="本章结束后读者明确知道了什么。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card">
               <Form.Item name="allowedDelayReason" label="允许延期理由">
-                <Input.TextArea rows={3} placeholder="如果本章不回收，正文允许写出的延期原因。" />
+                <Input.TextArea rows={6} placeholder="如果本章不回收，正文允许写出的延期原因。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card guided-step__field-card--compact">

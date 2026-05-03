@@ -819,7 +819,7 @@ export default function StructurePage({ novelId }: { novelId: number }) {
           </Form.Item>
           <Form.Item name="focus" label="额外聚焦">
             <Input.TextArea
-              rows={4}
+              rows={6}
               placeholder="例如：前两卷重点压主角资源链和关系线，场景必须体现地点/代价/后果，避免空洞标题。"
             />
           </Form.Item>

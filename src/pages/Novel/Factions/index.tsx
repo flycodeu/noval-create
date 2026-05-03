@@ -543,10 +543,10 @@ export default function FactionsPage({ novelId }: Props) {
                 </Form.Item>
                 <Form.Item name="leaderCharacterId" label="领袖角色"><Select allowClear showSearch optionFilterProp="label" options={characterOptions.map((item) => ({ value: item.id, label: item.fullName }))} placeholder="可留空" /></Form.Item>
                 <Form.Item name="territoryMapNodeIds" label="地盘节点"><Select mode="multiple" allowClear optionFilterProp="label" options={mapOptions.map((item) => ({ value: item.id, label: item.name }))} /></Form.Item>
-                <Form.Item name="goal" label="目标"><Input.TextArea rows={3} /></Form.Item>
-                <Form.Item name="currentPhase" label="当前阶段"><Input.TextArea rows={3} /></Form.Item>
-                <Form.Item name="resources" label="资源"><Input.TextArea rows={2} /></Form.Item>
-                <Form.Item name="memberPolicy" label="成员规则"><Input.TextArea rows={2} /></Form.Item>
+                <Form.Item name="goal" label="目标"><Input.TextArea rows={6} /></Form.Item>
+                <Form.Item name="currentPhase" label="当前阶段"><Input.TextArea rows={6} /></Form.Item>
+                <Form.Item name="resources" label="资源"><Input.TextArea rows={6} /></Form.Item>
+                <Form.Item name="memberPolicy" label="成员规则"><Input.TextArea rows={6} /></Form.Item>
                 <Form.List name="externalRelations">
                   {(fields, { add, remove }) => (
                     <div className="faction-editor__relations">
@@ -583,7 +583,7 @@ export default function FactionsPage({ novelId }: Props) {
           <Form.Item name="preferredTypes" label="优先类型"><Select mode="multiple" options={FACTION_TYPE_OPTIONS} /></Form.Item>
           <Form.Item name="allowCharacterlessFactions" label="允许无人归属的隐性势力" valuePropName="checked"><Switch /></Form.Item>
           <Form.Item name="preferExistingCharacters" label="优先复用现有人物" valuePropName="checked"><Switch /></Form.Item>
-          <Form.Item name="specialRequirements" label="额外要求"><Input.TextArea rows={4} placeholder="例如：强调商路、地下秩序、宗教化治理、家族继承危机等。" /></Form.Item>
+          <Form.Item name="specialRequirements" label="额外要求"><Input.TextArea rows={6} placeholder="例如：强调商路、地下秩序、宗教化治理、家族继承危机等。" /></Form.Item>
         </Form>
       </Modal>
     </WorkspacePage>

@@ -923,14 +923,14 @@ export default function ItemsWorkspace({ novelId }: Props) {
         </div>
         <div className="novel-grid novel-grid--2">
           <Form.Item name="summary" label="一句话说明">
-            <Input.TextArea rows={3} placeholder="一句话说清它是什么" />
+            <Input.TextArea rows={6} placeholder="一句话说清它是什么" />
           </Form.Item>
           <Form.Item name="appearance" label="外观识别点">
-            <Input.TextArea rows={3} placeholder="写辨识点，不要堆砌形容词" />
+            <Input.TextArea rows={6} placeholder="写辨识点，不要堆砌形容词" />
           </Form.Item>
         </div>
         <Form.Item name="plotFunction" label="剧情作用">
-          <Input.TextArea rows={3} placeholder="说清它推动哪条冲突、哪段转折或哪次回收" />
+          <Input.TextArea rows={6} placeholder="说清它推动哪条冲突、哪段转折或哪次回收" />
         </Form.Item>
       </section>
 
@@ -941,18 +941,18 @@ export default function ItemsWorkspace({ novelId }: Props) {
         </div>
         <div className="novel-grid novel-grid--2">
           <Form.Item name="acquisitionMethod" label="获取方式">
-            <Input.TextArea rows={3} placeholder="是谁给的、在哪拿到、付出了什么" />
+            <Input.TextArea rows={6} placeholder="是谁给的、在哪拿到、付出了什么" />
           </Form.Item>
           <Form.Item name="usageMethod" label="使用方式">
-            <Input.TextArea rows={3} placeholder="如何触发、如何维护、如何消耗" />
+            <Input.TextArea rows={6} placeholder="如何触发、如何维护、如何消耗" />
           </Form.Item>
         </div>
         <div className="novel-grid novel-grid--2">
           <Form.Item name="cost" label="代价">
-            <Input.TextArea rows={3} placeholder="明确资源消耗、身份代价或行动门槛" />
+            <Input.TextArea rows={6} placeholder="明确资源消耗、身份代价或行动门槛" />
           </Form.Item>
           <Form.Item name="risk" label="风险">
-            <Input.TextArea rows={3} placeholder="明确副作用、暴露风险或后果" />
+            <Input.TextArea rows={6} placeholder="明确副作用、暴露风险或后果" />
           </Form.Item>
         </div>
       </section>
@@ -1514,7 +1514,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
             <Select options={[2, 3, 4, 5, 6].map((count) => ({ value: count, label: `${count} 条 / 批` }))} />
           </Form.Item>
           <Form.Item name="focus" label="额外聚焦">
-            <Input.TextArea rows={3} placeholder="例如：主角团装备、关键证据、宗门资源、禁用器具" />
+            <Input.TextArea rows={6} placeholder="例如：主角团装备、关键证据、宗门资源、禁用器具" />
           </Form.Item>
         </Form>
       </Modal>

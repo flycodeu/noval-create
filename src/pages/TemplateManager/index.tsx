@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react'
 import {
   Tabs, Button, Modal, Form, Input, Select, Card, Tag, message, Empty, Skeleton
 } from 'antd'
-import { PlusOutlined, DeleteOutlined, EditOutlined, LockOutlined } from '@ant-design/icons'
+import { PlusOutlined, DeleteOutlined, EditOutlined, EyeOutlined, LockOutlined } from '@ant-design/icons'
 import { Template } from '../../types'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../Novel/components/WorkspaceShell'
@@ -11,6 +11,28 @@ const TYPE_LABELS: Record<string, string> = {
   style: '文风模板',
   world: '世界观模板',
   writing_step: '步骤提示词',
+}
+
+function summarizeTemplateContent(contentJson?: string) {
+  if (!contentJson) return ''
+
+  try {
+    const parsed = JSON.parse(contentJson) as Record<string, unknown> | string | number | boolean | null
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return String(parsed ?? '').slice(0, 140)
+    }
+
+    return Object.entries(parsed)
+      .slice(0, 3)
+      .map(([key, value]) => {
+        if (Array.isArray(value)) return `${key}: ${value.slice(0, 3).join('、')}`
+        if (value && typeof value === 'object') return `${key}: ${Object.keys(value).slice(0, 3).join(' / ')}`
+        return `${key}: ${String(value ?? '').slice(0, 28)}`
+      })
+      .join(' · ')
+  } catch {
+    return contentJson.slice(0, 140)
+  }
 }
 
 export default function TemplateManager() {
@@ -111,54 +133,63 @@ export default function TemplateManager() {
       <div className="admin-card-grid">
         {loading ? (
           Array.from({ length: 6 }).map((_, index) => (
-            <Card key={index} style={{ background: 'var(--color-bg-card)', border: '1px solid var(--border-color)' }}>
+            <Card key={index} className="template-manager-card template-manager-card--skeleton">
               <Skeleton active paragraph={{ rows: 4 }} />
             </Card>
           ))
         ) : filteredTemplates.length === 0 ? (
           <Empty description="暂无模板" style={{ gridColumn: '1/-1' }} />
         ) : (
-          filteredTemplates.map(tmpl => (
-            <Card
-              key={tmpl.id}
-              style={{ background: 'var(--color-bg-card)', border: '1px solid var(--border-color)' }}
-              actions={[
-                <Button
-                  key="edit"
-                  type="text"
-                  size="small"
-                  icon={<EditOutlined />}
-                  onClick={() => handleEdit(tmpl)}
-                >
-                  {tmpl.isBuiltin ? '查看' : '编辑'}
-                </Button>,
-                !tmpl.isBuiltin && (
-                  <Button
-                    key="delete"
-                    type="text"
-                    size="small"
-                    danger
-                    icon={<DeleteOutlined />}
-                    onClick={() => handleDelete(tmpl)}
-                  >
-                    删除
-                  </Button>
-                ),
-              ].filter(Boolean)}
-            >
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 8 }}>
-                <span style={{ flex: 1, fontWeight: 600 }}>{tmpl.name}</span>
-                {tmpl.isBuiltin === 1 && (
-                  <Tag icon={<LockOutlined />} style={{ fontSize: 10 }}>内置</Tag>
-                )}
-              </div>
-              {tmpl.description && (
-                <div style={{ color: 'var(--color-text-muted)', fontSize: 12 }}>
-                  {tmpl.description}
+          filteredTemplates.map((tmpl) => {
+            const preview = summarizeTemplateContent(tmpl.contentJson)
+
+            return (
+              <Card key={tmpl.id} className="template-manager-card">
+                <div className="template-manager-card__header">
+                  <div className="template-manager-card__title-wrap">
+                    <div className="template-manager-card__title-row">
+                      <span className="template-manager-card__title">{tmpl.name}</span>
+                      {tmpl.isBuiltin === 1 ? (
+                        <Tag className="template-manager-card__tag" icon={<LockOutlined />}>内置</Tag>
+                      ) : (
+                        <Tag className="template-manager-card__tag template-manager-card__tag--custom">自定义</Tag>
+                      )}
+                    </div>
+                    <div className="template-manager-card__meta">{TYPE_LABELS[tmpl.type] || tmpl.type}</div>
+                  </div>
                 </div>
-              )}
-            </Card>
-          ))
+                <div className="template-manager-card__content">
+                  <p className="template-manager-card__desc">
+                    {tmpl.description || '未填写模板说明，建议补充用途、适用场景和关键约束。'}
+                  </p>
+                  {preview ? (
+                    <div className="template-manager-card__preview">{preview}</div>
+                  ) : null}
+                </div>
+                <div className="template-manager-card__footer">
+                  <Button
+                    className="template-manager-card__action template-manager-card__action--primary"
+                    size="small"
+                    icon={tmpl.isBuiltin ? <EyeOutlined /> : <EditOutlined />}
+                    onClick={() => handleEdit(tmpl)}
+                  >
+                    {tmpl.isBuiltin ? '查看' : '编辑'}
+                  </Button>
+                  {!tmpl.isBuiltin && (
+                    <Button
+                      className="template-manager-card__action"
+                      size="small"
+                      danger
+                      icon={<DeleteOutlined />}
+                      onClick={() => handleDelete(tmpl)}
+                    >
+                      删除
+                    </Button>
+                  )}
+                </div>
+              </Card>
+            )
+          })
         )}
       </div>
     ),

@@ -535,17 +535,17 @@ export default function ThemeVoicePage({ novelId }: Props) {
             </div>
             <div className="guided-step__field-card">
               <Form.Item name="theme" label="主题" rules={[{ required: true, message: '请写清主题' }]}>
-                <Input.TextArea rows={4} placeholder="写作品持续回答的命题，不要写成宣传口号。" />
+                <Input.TextArea rows={6} placeholder="写作品持续回答的命题，不要写成宣传口号。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card">
               <Form.Item name="emotionalCore" label="情感核心" rules={[{ required: true, message: '请写清情感核心' }]}>
-                <Input.TextArea rows={4} placeholder="写读者最稳定收到的情绪回报和压强。" />
+                <Input.TextArea rows={6} placeholder="写读者最稳定收到的情绪回报和压强。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card guided-step__field-card--full">
               <Form.Item name="motifs" label="母题 / 重复意象">
-                <Input.TextArea rows={3} placeholder="写会反复出现的母题、意象和回响，建议每行一条。" />
+                <Input.TextArea rows={6} placeholder="写会反复出现的母题、意象和回响，建议每行一条。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card guided-step__field-card--compact">
@@ -585,12 +585,12 @@ export default function ThemeVoicePage({ novelId }: Props) {
             </div>
             <div className="guided-step__field-card guided-step__field-card--full">
               <Form.Item name="narratorDistance" label="叙述距离">
-                <Input.TextArea rows={3} placeholder="写叙述者与人物之间的距离，以及解释密度。" />
+                <Input.TextArea rows={6} placeholder="写叙述者与人物之间的距离，以及解释密度。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card guided-step__field-card--full">
               <Form.Item name="voiceKeywords" label="口吻关键词">
-                <Input.TextArea rows={3} placeholder="建议 4-8 个词，每行一条，描述整体口吻而非营销词。" />
+                <Input.TextArea rows={6} placeholder="建议 4-8 个词，每行一条，描述整体口吻而非营销词。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card">
@@ -605,12 +605,12 @@ export default function ThemeVoicePage({ novelId }: Props) {
             </div>
             <div className="guided-step__field-card">
               <Form.Item name="descriptionRules" label="描写规则">
-                <Input.TextArea rows={4} placeholder="写场景、动作、心理描写的比例和取舍。" />
+                <Input.TextArea rows={6} placeholder="写场景、动作、心理描写的比例和取舍。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card">
               <Form.Item name="forbiddenPhrases" label="禁用表达">
-                <Input.TextArea rows={4} placeholder="写应避免的总结腔、模板句、空泛抒情和引号强调。" />
+                <Input.TextArea rows={6} placeholder="写应避免的总结腔、模板句、空泛抒情和引号强调。" />
               </Form.Item>
             </div>
           </div>

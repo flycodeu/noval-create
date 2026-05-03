@@ -560,7 +560,7 @@ export default function InfoGapBoardPage({ novelId }: Props) {
             </div>
             <div className="guided-step__field-card guided-step__field-card--full">
               <Form.Item name="summary" label="说明">
-                <Input.TextArea rows={3} placeholder="写清楚这条信息点如何服务谜题推进。" />
+                <Input.TextArea rows={6} placeholder="写清楚这条信息点如何服务谜题推进。" />
               </Form.Item>
             </div>
 
@@ -680,7 +680,7 @@ export default function InfoGapBoardPage({ novelId }: Props) {
 
             <div className="guided-step__field-card guided-step__field-card--full">
               <Form.Item name="notes" label="备注">
-                <Input.TextArea rows={3} placeholder="补充该信息点的风险、铺垫策略和回收规则。" />
+                <Input.TextArea rows={6} placeholder="补充该信息点的风险、铺垫策略和回收规则。" />
               </Form.Item>
             </div>
           </div>

@@ -78,6 +78,7 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
   const [searchParams, setSearchParams] = useSearchParams()
   const { currentNovel } = useNovelStore()
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [dashboard, setDashboard] = useState<CharacterArcDashboard | null>(null)
   const [tab, setTab] = useState<'protagonist' | 'characters' | 'relationships'>('protagonist')
   const [selectedCharacterId, setSelectedCharacterId] = useState<number | null>(null)
@@ -89,8 +90,12 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
   const [beatOpen, setBeatOpen] = useState(false)
   const [beatDraft, setBeatDraft] = useState<CharacterArcBeatInput>({ novelId, arcId: 0, beatType: 'progress-note', title: '', summary: '', status: 'logged' })
 
-  const refresh = async () => {
-    setLoading(true)
+  const refresh = async (showLoading = false) => {
+    if (showLoading) {
+      setLoading(true)
+    } else {
+      setRefreshing(true)
+    }
     try {
       setDashboard(await window.electron.characterArc.getArcDashboard(novelId))
     } catch (error) {
@@ -98,10 +103,11 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
       message.error(getErrorMessage(error, 'common.loadFailed'))
     } finally {
       setLoading(false)
+      setRefreshing(false)
     }
   }
 
-  useEffect(() => { void refresh() }, [novelId])
+  useEffect(() => { void refresh(true) }, [novelId])
 
   const characters = dashboard?.availableCharacters || []
   const protagonistCharacters = characters.filter((item) => item.roleType === 'protagonist')
@@ -229,11 +235,12 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
         eyebrow="角色变化维护"
         title="人物弧线中心"
         description="维护主角弧、关键角色弧和关系弧，并登记章节层面的实际推进。"
-        actions={<Space wrap><Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void saveCurrent()}>保存当前弧线</Button><Button icon={<PlusOutlined />} disabled={tab === 'relationships' || !selectedArc?.id} onClick={() => setBeatOpen(true)}>登记推进</Button><Button icon={<EditOutlined />} onClick={() => navigate(`/novels/${novelId}/contracts`)}>去章节合同</Button><Button icon={<ReloadOutlined />} onClick={() => void refresh()}>刷新</Button></Space>}
+        actions={<Space wrap><Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void saveCurrent()}>保存当前弧线</Button><Button icon={<PlusOutlined />} disabled={tab === 'relationships' || !selectedArc?.id} onClick={() => setBeatOpen(true)}>登记推进</Button><Button icon={<EditOutlined />} onClick={() => navigate(`/novels/${novelId}/contracts`)}>去章节合同</Button><Button icon={<ReloadOutlined />} loading={refreshing} onClick={() => void refresh()}>刷新</Button></Space>}
         contextSummary={<WorkspaceContextSummary items={[{ label: '书名', value: currentNovel?.title || '未命名小说' }, { label: '主角弧', value: dashboard?.protagonistArc ? '已建立' : '待建立' }, { label: '角色弧', value: `${dashboard?.characterArcs.length || 0} 条` }, { label: '关系弧', value: `${dashboard?.relationshipArcs.length || 0} 条` }]} />}
         metrics={<><WorkspaceMetric label="停滞弧线" value={(dashboard?.stalledCharacterCount || 0) + (dashboard?.stalledRelationshipCount || 0)} tone="warm" /><WorkspaceMetric label="关键角色候选" value={keyCharacters.length} /><WorkspaceMetric label="关系候选" value={relations.length} tone="cool" /><WorkspaceMetric label="最近推进" value={selectedArc?.lastProgressChapterLabel || '未记录'} /></>}
         guide={<WorkspaceStepGuide steps={[{ title: '先补主角弧', description: '主角必须有初始状态、误信和改变事件。', status: 'focus' }, { title: '再补关键角色弧', description: '至少补齐一名关键角色的变化轨迹。', status: 'todo' }, { title: '最后绑定关系弧', description: '把重要双人关系拆成阶段，并在章节合同里引用。', status: 'todo' }]} />}
       >
+        {refreshing ? <div className="novel-dashboard__refresh-indicator" style={{ marginBottom: 16 }}><Spin size="small" /><span>正在同步人物弧线数据</span></div> : null}
         {characters.length <= 0 ? <Alert type="warning" showIcon message="还没有角色资产" description="先去角色系统建立主角和关键人物，再回来补人物弧线。" /> : null}
         <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
           {[
@@ -249,32 +256,32 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
               <div className="guided-step__field-grid">
                 <div className="guided-step__field-card guided-step__field-card--compact"><div style={{ marginBottom: 8, fontWeight: 600 }}>关系称呼</div><Input value={relationshipDraft.relationLabelSnapshot} onChange={(event) => setRelationshipDraft((current) => current ? { ...current, relationLabelSnapshot: event.target.value } : current)} /></div>
                 <div className="guided-step__field-card guided-step__field-card--compact"><div style={{ marginBottom: 8, fontWeight: 600 }}>关系类型</div><Input value={relationshipDraft.relationTypeSnapshot} onChange={(event) => setRelationshipDraft((current) => current ? { ...current, relationTypeSnapshot: event.target.value } : current)} /></div>
-                <div className="guided-step__field-card"><div style={{ marginBottom: 8, fontWeight: 600 }}>初始状态</div><Input.TextArea rows={3} value={relationshipDraft.startState} onChange={(event) => setRelationshipDraft((current) => current ? { ...current, startState: event.target.value } : current)} /></div>
-                <div className="guided-step__field-card"><div style={{ marginBottom: 8, fontWeight: 600 }}>第一次裂缝</div><Input.TextArea rows={3} value={relationshipDraft.crackPoint} onChange={(event) => setRelationshipDraft((current) => current ? { ...current, crackPoint: event.target.value } : current)} /></div>
-                <div className="guided-step__field-card"><div style={{ marginBottom: 8, fontWeight: 600 }}>关键改变事件</div><Input.TextArea rows={3} value={relationshipDraft.changeEvent} onChange={(event) => setRelationshipDraft((current) => current ? { ...current, changeEvent: event.target.value } : current)} /></div>
+                <div className="guided-step__field-card"><div style={{ marginBottom: 8, fontWeight: 600 }}>初始状态</div><Input.TextArea rows={6} value={relationshipDraft.startState} onChange={(event) => setRelationshipDraft((current) => current ? { ...current, startState: event.target.value } : current)} /></div>
+                <div className="guided-step__field-card"><div style={{ marginBottom: 8, fontWeight: 600 }}>第一次裂缝</div><Input.TextArea rows={6} value={relationshipDraft.crackPoint} onChange={(event) => setRelationshipDraft((current) => current ? { ...current, crackPoint: event.target.value } : current)} /></div>
+                <div className="guided-step__field-card"><div style={{ marginBottom: 8, fontWeight: 600 }}>关键改变事件</div><Input.TextArea rows={6} value={relationshipDraft.changeEvent} onChange={(event) => setRelationshipDraft((current) => current ? { ...current, changeEvent: event.target.value } : current)} /></div>
                 <div className="guided-step__field-card guided-step__field-card--compact"><div style={{ marginBottom: 8, fontWeight: 600 }}>绑定时间轴</div><Select allowClear value={relationshipDraft.changeTimelineEventId} onChange={(value) => setRelationshipDraft((current) => current ? { ...current, changeTimelineEventId: value } : current)} options={timelineOptions} /></div>
-                <div className="guided-step__field-card"><div style={{ marginBottom: 8, fontWeight: 600 }}>最终状态</div><Input.TextArea rows={3} value={relationshipDraft.endState} onChange={(event) => setRelationshipDraft((current) => current ? { ...current, endState: event.target.value } : current)} /></div>
+                <div className="guided-step__field-card"><div style={{ marginBottom: 8, fontWeight: 600 }}>最终状态</div><Input.TextArea rows={6} value={relationshipDraft.endState} onChange={(event) => setRelationshipDraft((current) => current ? { ...current, endState: event.target.value } : current)} /></div>
                 <div className="guided-step__field-card guided-step__field-card--compact"><div style={{ marginBottom: 8, fontWeight: 600 }}>当前状态</div><Select value={relationshipDraft.currentStatus} onChange={(value) => setRelationshipDraft((current) => current ? { ...current, currentStatus: value } : current)} options={STATUS_OPTIONS} /></div>
                 <div className="guided-step__field-card guided-step__field-card--compact"><div style={{ marginBottom: 8, fontWeight: 600 }}>最近推进章节</div><Select allowClear value={relationshipDraft.lastProgressChapterId} onChange={(value) => setRelationshipDraft((current) => current ? { ...current, lastProgressChapterId: value } : current)} options={chapterOptions} /></div>
-                <div className="guided-step__field-card"><div style={{ marginBottom: 8, fontWeight: 600 }}>停滞原因</div><Input.TextArea rows={3} value={relationshipDraft.stalledReason} onChange={(event) => setRelationshipDraft((current) => current ? { ...current, stalledReason: event.target.value } : current)} /></div>
-                <div className="guided-step__field-card"><div style={{ marginBottom: 8, fontWeight: 600 }}>备注</div><Input.TextArea rows={4} value={relationshipDraft.notes} onChange={(event) => setRelationshipDraft((current) => current ? { ...current, notes: event.target.value } : current)} /></div>
+                <div className="guided-step__field-card"><div style={{ marginBottom: 8, fontWeight: 600 }}>停滞原因</div><Input.TextArea rows={6} value={relationshipDraft.stalledReason} onChange={(event) => setRelationshipDraft((current) => current ? { ...current, stalledReason: event.target.value } : current)} /></div>
+                <div className="guided-step__field-card"><div style={{ marginBottom: 8, fontWeight: 600 }}>备注</div><Input.TextArea rows={6} value={relationshipDraft.notes} onChange={(event) => setRelationshipDraft((current) => current ? { ...current, notes: event.target.value } : current)} /></div>
               </div>
             ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="先从左侧选择一对关系。" />) : (characterDraft ? (
               <>
                 <div className="guided-step__field-grid">
-                  <div className="guided-step__field-card"><div style={{ marginBottom: 8, fontWeight: 600 }}>初始状态</div><Input.TextArea rows={3} value={characterDraft.startState} onChange={(event) => setCharacterDraft((current) => current ? { ...current, startState: event.target.value } : current)} /></div>
-                  <div className="guided-step__field-card"><div style={{ marginBottom: 8, fontWeight: 600 }}>角色想要什么</div><Input.TextArea rows={3} value={characterDraft.surfaceWant} onChange={(event) => setCharacterDraft((current) => current ? { ...current, surfaceWant: event.target.value } : current)} /></div>
-                  <div className="guided-step__field-card"><div style={{ marginBottom: 8, fontWeight: 600 }}>角色真正需要什么</div><Input.TextArea rows={3} value={characterDraft.deepNeed} onChange={(event) => setCharacterDraft((current) => current ? { ...current, deepNeed: event.target.value } : current)} /></div>
-                  <div className="guided-step__field-card"><div style={{ marginBottom: 8, fontWeight: 600 }}>核心恐惧</div><Input.TextArea rows={3} value={characterDraft.coreFear} onChange={(event) => setCharacterDraft((current) => current ? { ...current, coreFear: event.target.value } : current)} /></div>
-                  <div className="guided-step__field-card"><div style={{ marginBottom: 8, fontWeight: 600 }}>误信</div><Input.TextArea rows={3} value={characterDraft.misbelief} onChange={(event) => setCharacterDraft((current) => current ? { ...current, misbelief: event.target.value } : current)} /></div>
+                  <div className="guided-step__field-card"><div style={{ marginBottom: 8, fontWeight: 600 }}>初始状态</div><Input.TextArea rows={6} value={characterDraft.startState} onChange={(event) => setCharacterDraft((current) => current ? { ...current, startState: event.target.value } : current)} /></div>
+                  <div className="guided-step__field-card"><div style={{ marginBottom: 8, fontWeight: 600 }}>角色想要什么</div><Input.TextArea rows={6} value={characterDraft.surfaceWant} onChange={(event) => setCharacterDraft((current) => current ? { ...current, surfaceWant: event.target.value } : current)} /></div>
+                  <div className="guided-step__field-card"><div style={{ marginBottom: 8, fontWeight: 600 }}>角色真正需要什么</div><Input.TextArea rows={6} value={characterDraft.deepNeed} onChange={(event) => setCharacterDraft((current) => current ? { ...current, deepNeed: event.target.value } : current)} /></div>
+                  <div className="guided-step__field-card"><div style={{ marginBottom: 8, fontWeight: 600 }}>核心恐惧</div><Input.TextArea rows={6} value={characterDraft.coreFear} onChange={(event) => setCharacterDraft((current) => current ? { ...current, coreFear: event.target.value } : current)} /></div>
+                  <div className="guided-step__field-card"><div style={{ marginBottom: 8, fontWeight: 600 }}>误信</div><Input.TextArea rows={6} value={characterDraft.misbelief} onChange={(event) => setCharacterDraft((current) => current ? { ...current, misbelief: event.target.value } : current)} /></div>
                   <div className="guided-step__field-card guided-step__field-card--compact"><div style={{ marginBottom: 8, fontWeight: 600 }}>第一次裂缝章节</div><Select allowClear value={characterDraft.firstCrackChapterId} onChange={(value) => setCharacterDraft((current) => current ? { ...current, firstCrackChapterId: value } : current)} options={chapterOptions} /></div>
-                  <div className="guided-step__field-card"><div style={{ marginBottom: 8, fontWeight: 600 }}>关键改变事件</div><Input.TextArea rows={3} value={characterDraft.changeEvent} onChange={(event) => setCharacterDraft((current) => current ? { ...current, changeEvent: event.target.value } : current)} /></div>
+                  <div className="guided-step__field-card"><div style={{ marginBottom: 8, fontWeight: 600 }}>关键改变事件</div><Input.TextArea rows={6} value={characterDraft.changeEvent} onChange={(event) => setCharacterDraft((current) => current ? { ...current, changeEvent: event.target.value } : current)} /></div>
                   <div className="guided-step__field-card guided-step__field-card--compact"><div style={{ marginBottom: 8, fontWeight: 600 }}>绑定时间轴</div><Select allowClear value={characterDraft.changeTimelineEventId} onChange={(value) => setCharacterDraft((current) => current ? { ...current, changeTimelineEventId: value } : current)} options={timelineOptions} /></div>
-                  <div className="guided-step__field-card"><div style={{ marginBottom: 8, fontWeight: 600 }}>最终状态</div><Input.TextArea rows={3} value={characterDraft.endState} onChange={(event) => setCharacterDraft((current) => current ? { ...current, endState: event.target.value } : current)} /></div>
+                  <div className="guided-step__field-card"><div style={{ marginBottom: 8, fontWeight: 600 }}>最终状态</div><Input.TextArea rows={6} value={characterDraft.endState} onChange={(event) => setCharacterDraft((current) => current ? { ...current, endState: event.target.value } : current)} /></div>
                   <div className="guided-step__field-card guided-step__field-card--compact"><div style={{ marginBottom: 8, fontWeight: 600 }}>当前状态</div><Select value={characterDraft.currentStatus} onChange={(value) => setCharacterDraft((current) => current ? { ...current, currentStatus: value } : current)} options={STATUS_OPTIONS} /></div>
                   <div className="guided-step__field-card guided-step__field-card--compact"><div style={{ marginBottom: 8, fontWeight: 600 }}>最近推进章节</div><Select allowClear value={characterDraft.lastProgressChapterId} onChange={(value) => setCharacterDraft((current) => current ? { ...current, lastProgressChapterId: value } : current)} options={chapterOptions} /></div>
-                  <div className="guided-step__field-card"><div style={{ marginBottom: 8, fontWeight: 600 }}>停滞原因</div><Input.TextArea rows={3} value={characterDraft.stalledReason} onChange={(event) => setCharacterDraft((current) => current ? { ...current, stalledReason: event.target.value } : current)} /></div>
-                  <div className="guided-step__field-card"><div style={{ marginBottom: 8, fontWeight: 600 }}>备注</div><Input.TextArea rows={4} value={characterDraft.notes} onChange={(event) => setCharacterDraft((current) => current ? { ...current, notes: event.target.value } : current)} /></div>
+                  <div className="guided-step__field-card"><div style={{ marginBottom: 8, fontWeight: 600 }}>停滞原因</div><Input.TextArea rows={6} value={characterDraft.stalledReason} onChange={(event) => setCharacterDraft((current) => current ? { ...current, stalledReason: event.target.value } : current)} /></div>
+                  <div className="guided-step__field-card"><div style={{ marginBottom: 8, fontWeight: 600 }}>备注</div><Input.TextArea rows={6} value={characterDraft.notes} onChange={(event) => setCharacterDraft((current) => current ? { ...current, notes: event.target.value } : current)} /></div>
                 </div>
                 <div style={{ marginTop: 16, display: 'grid', gap: 10 }}>
                   <strong>推进记录</strong>
@@ -313,7 +320,7 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
           <div className="guided-step__field-card guided-step__field-card--compact"><div style={{ marginBottom: 8, fontWeight: 600 }}>章节</div><Select allowClear value={beatDraft.chapterId} onChange={(value) => setBeatDraft((current) => ({ ...current, chapterId: value }))} options={chapterOptions} /></div>
           <div className="guided-step__field-card guided-step__field-card--compact"><div style={{ marginBottom: 8, fontWeight: 600 }}>时间轴事件</div><Select allowClear value={beatDraft.timelineEventId} onChange={(value) => setBeatDraft((current) => ({ ...current, timelineEventId: value }))} options={timelineOptions} /></div>
           <div className="guided-step__field-card"><div style={{ marginBottom: 8, fontWeight: 600 }}>标题</div><Input value={beatDraft.title} onChange={(event) => setBeatDraft((current) => ({ ...current, title: event.target.value }))} /></div>
-          <div className="guided-step__field-card"><div style={{ marginBottom: 8, fontWeight: 600 }}>说明</div><Input.TextArea rows={4} value={beatDraft.summary} onChange={(event) => setBeatDraft((current) => ({ ...current, summary: event.target.value }))} /></div>
+          <div className="guided-step__field-card"><div style={{ marginBottom: 8, fontWeight: 600 }}>说明</div><Input.TextArea rows={6} value={beatDraft.summary} onChange={(event) => setBeatDraft((current) => ({ ...current, summary: event.target.value }))} /></div>
         </div>
       </Modal>
     </>

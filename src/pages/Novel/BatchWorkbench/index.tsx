@@ -368,7 +368,7 @@ export default function BatchWorkbench({ novelId }: Props) {
               />
             </div>
             <Input.TextArea
-              rows={4}
+              rows={6}
               value={inspectionNote}
               onChange={(event) => setInspectionNote(event.target.value)}
               placeholder="记录本批是否能继续，哪里需要改，哪些点必须锁住。"

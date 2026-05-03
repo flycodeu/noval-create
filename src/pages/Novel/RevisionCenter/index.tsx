@@ -639,12 +639,12 @@ export default function RevisionCenterPage({ novelId }: Props) {
             </div>
             <div className="guided-step__field-card guided-step__field-card--full">
               <Form.Item name="description" label="问题描述">
-                <Input.TextArea rows={4} placeholder="写清具体问题、影响范围和现状。" />
+                <Input.TextArea rows={6} placeholder="写清具体问题、影响范围和现状。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card guided-step__field-card--full">
               <Form.Item name="fixBrief" label="修订方案 / 检查清单">
-                <Input.TextArea rows={4} placeholder="写清修订动作，例如需要回查哪些章节、人物、时间轴或线程。" />
+                <Input.TextArea rows={6} placeholder="写清修订动作，例如需要回查哪些章节、人物、时间轴或线程。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card guided-step__field-card--compact">

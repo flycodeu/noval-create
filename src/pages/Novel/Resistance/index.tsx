@@ -114,6 +114,7 @@ export default function ResistancePage({ novelId }: Props) {
   const [searchParams, setSearchParams] = useSearchParams()
   const { currentNovel } = useNovelStore()
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [dashboard, setDashboard] = useState<ResistanceDashboard | null>(null)
   const [tab, setTab] = useState<ResistanceTab>('characters')
   const [selectedCharacterId, setSelectedCharacterId] = useState<number | null>(null)
@@ -136,8 +137,12 @@ export default function ResistancePage({ novelId }: Props) {
     status: 'logged',
   })
 
-  const refresh = async () => {
-    setLoading(true)
+  const refresh = async (showLoading = false) => {
+    if (showLoading) {
+      setLoading(true)
+    } else {
+      setRefreshing(true)
+    }
     try {
       setDashboard(await window.electron.resistance.getDashboard(novelId))
     } catch (error) {
@@ -145,11 +150,12 @@ export default function ResistancePage({ novelId }: Props) {
       message.error(getErrorMessage(error, 'common.loadFailed'))
     } finally {
       setLoading(false)
+      setRefreshing(false)
     }
   }
 
   useEffect(() => {
-    void refresh()
+    void refresh(true)
   }, [novelId])
 
   const characters = dashboard?.availableCharacters || []
@@ -414,7 +420,7 @@ export default function ResistancePage({ novelId }: Props) {
             <Button icon={<EditOutlined />} onClick={() => navigate(`/novels/${novelId}/contracts`)}>
               去章节合同
             </Button>
-            <Button icon={<ReloadOutlined />} onClick={() => void refresh()}>
+            <Button icon={<ReloadOutlined />} loading={refreshing} onClick={() => void refresh()}>
               刷新
             </Button>
           </Space>
@@ -447,6 +453,7 @@ export default function ResistancePage({ novelId }: Props) {
           />
         )}
       >
+        {refreshing ? <div className="novel-dashboard__refresh-indicator" style={{ marginBottom: 16 }}><Spin size="small" /><span>正在同步阻力系统数据</span></div> : null}
         {dashboard?.tracks.length ? null : (
           <Alert
             type="info"
@@ -509,35 +516,35 @@ export default function ResistancePage({ novelId }: Props) {
                   </div>
                   <div className="guided-step__field-card">
                     <div style={{ marginBottom: 8, fontWeight: 600 }}>阻力目标</div>
-                    <Input.TextArea rows={3} value={draft.goal} onChange={(event) => setDraft((current) => current ? { ...current, goal: event.target.value } : current)} />
+                    <Input.TextArea rows={6} value={draft.goal} onChange={(event) => setDraft((current) => current ? { ...current, goal: event.target.value } : current)} />
                   </div>
                   <div className="guided-step__field-card">
                     <div style={{ marginBottom: 8, fontWeight: 600 }}>情报来源</div>
-                    <Input.TextArea rows={3} value={draft.intelSource} onChange={(event) => setDraft((current) => current ? { ...current, intelSource: event.target.value } : current)} />
+                    <Input.TextArea rows={6} value={draft.intelSource} onChange={(event) => setDraft((current) => current ? { ...current, intelSource: event.target.value } : current)} />
                   </div>
                   <div className="guided-step__field-card">
                     <div style={{ marginBottom: 8, fontWeight: 600 }}>资源池</div>
-                    <Input.TextArea rows={3} value={draft.resourcePool} onChange={(event) => setDraft((current) => current ? { ...current, resourcePool: event.target.value } : current)} />
+                    <Input.TextArea rows={6} value={draft.resourcePool} onChange={(event) => setDraft((current) => current ? { ...current, resourcePool: event.target.value } : current)} />
                   </div>
                   <div className="guided-step__field-card">
                     <div style={{ marginBottom: 8, fontWeight: 600 }}>升级策略</div>
-                    <Input.TextArea rows={3} value={draft.escalationPlan} onChange={(event) => setDraft((current) => current ? { ...current, escalationPlan: event.target.value } : current)} />
+                    <Input.TextArea rows={6} value={draft.escalationPlan} onChange={(event) => setDraft((current) => current ? { ...current, escalationPlan: event.target.value } : current)} />
                   </div>
                   <div className="guided-step__field-card">
                     <div style={{ marginBottom: 8, fontWeight: 600 }}>主角认知变化</div>
-                    <Input.TextArea rows={3} value={draft.heroKnowledgeShift} onChange={(event) => setDraft((current) => current ? { ...current, heroKnowledgeShift: event.target.value } : current)} />
+                    <Input.TextArea rows={6} value={draft.heroKnowledgeShift} onChange={(event) => setDraft((current) => current ? { ...current, heroKnowledgeShift: event.target.value } : current)} />
                   </div>
                   <div className="guided-step__field-card">
                     <div style={{ marginBottom: 8, fontWeight: 600 }}>阶段胜利点</div>
-                    <Input.TextArea rows={3} value={draft.stageVictory} onChange={(event) => setDraft((current) => current ? { ...current, stageVictory: event.target.value } : current)} />
+                    <Input.TextArea rows={6} value={draft.stageVictory} onChange={(event) => setDraft((current) => current ? { ...current, stageVictory: event.target.value } : current)} />
                   </div>
                   <div className="guided-step__field-card">
                     <div style={{ marginBottom: 8, fontWeight: 600 }}>失败后反制</div>
-                    <Input.TextArea rows={3} value={draft.counterMove} onChange={(event) => setDraft((current) => current ? { ...current, counterMove: event.target.value } : current)} />
+                    <Input.TextArea rows={6} value={draft.counterMove} onChange={(event) => setDraft((current) => current ? { ...current, counterMove: event.target.value } : current)} />
                   </div>
                   <div className="guided-step__field-card">
                     <div style={{ marginBottom: 8, fontWeight: 600 }}>当前出手方式</div>
-                    <Input.TextArea rows={3} value={draft.currentPressureMode} onChange={(event) => setDraft((current) => current ? { ...current, currentPressureMode: event.target.value } : current)} />
+                    <Input.TextArea rows={6} value={draft.currentPressureMode} onChange={(event) => setDraft((current) => current ? { ...current, currentPressureMode: event.target.value } : current)} />
                   </div>
                   <div className="guided-step__field-card guided-step__field-card--compact">
                     <div style={{ marginBottom: 8, fontWeight: 600 }}>最近出手章节</div>
@@ -553,7 +560,7 @@ export default function ResistancePage({ novelId }: Props) {
                   </div>
                   <div className="guided-step__field-card">
                     <div style={{ marginBottom: 8, fontWeight: 600 }}>备注</div>
-                    <Input.TextArea rows={4} value={draft.notes} onChange={(event) => setDraft((current) => current ? { ...current, notes: event.target.value } : current)} />
+                    <Input.TextArea rows={6} value={draft.notes} onChange={(event) => setDraft((current) => current ? { ...current, notes: event.target.value } : current)} />
                   </div>
                 </div>
 
@@ -624,11 +631,11 @@ export default function ResistancePage({ novelId }: Props) {
           </div>
           <div className="guided-step__field-card">
             <div style={{ marginBottom: 8, fontWeight: 600 }}>出手说明</div>
-            <Input.TextArea rows={4} value={beatDraft.summary} onChange={(event) => setBeatDraft((current) => ({ ...current, summary: event.target.value }))} />
+            <Input.TextArea rows={6} value={beatDraft.summary} onChange={(event) => setBeatDraft((current) => ({ ...current, summary: event.target.value }))} />
           </div>
           <div className="guided-step__field-card">
             <div style={{ marginBottom: 8, fontWeight: 600 }}>出手方式</div>
-            <Input.TextArea rows={3} value={beatDraft.actionMode} onChange={(event) => setBeatDraft((current) => ({ ...current, actionMode: event.target.value }))} />
+            <Input.TextArea rows={6} value={beatDraft.actionMode} onChange={(event) => setBeatDraft((current) => ({ ...current, actionMode: event.target.value }))} />
           </div>
           <div className="guided-step__field-card">
             <div style={{ marginBottom: 8, fontWeight: 600 }}>成功程度</div>
@@ -636,11 +643,11 @@ export default function ResistancePage({ novelId }: Props) {
           </div>
           <div className="guided-step__field-card">
             <div style={{ marginBottom: 8, fontWeight: 600 }}>后续反制</div>
-            <Input.TextArea rows={3} value={beatDraft.counterResponse} onChange={(event) => setBeatDraft((current) => ({ ...current, counterResponse: event.target.value }))} />
+            <Input.TextArea rows={6} value={beatDraft.counterResponse} onChange={(event) => setBeatDraft((current) => ({ ...current, counterResponse: event.target.value }))} />
           </div>
           <div className="guided-step__field-card">
             <div style={{ marginBottom: 8, fontWeight: 600 }}>对主角影响</div>
-            <Input.TextArea rows={3} value={beatDraft.protagonistImpact} onChange={(event) => setBeatDraft((current) => ({ ...current, protagonistImpact: event.target.value }))} />
+            <Input.TextArea rows={6} value={beatDraft.protagonistImpact} onChange={(event) => setBeatDraft((current) => ({ ...current, protagonistImpact: event.target.value }))} />
           </div>
         </div>
       </Modal>

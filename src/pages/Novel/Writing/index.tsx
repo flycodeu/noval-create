@@ -2832,7 +2832,7 @@ export default function Writing({ novelId }: Props) {
         <Input.TextArea
           className="writing-layout-note-space-top"
           value={rewriteRequirements}
-          rows={3}
+          rows={6}
           onChange={(event) => setRewriteRequirements(event.target.value)}
           placeholder="补充要求，例如：更克制、减少说明句、强化动作细节。"
         />
@@ -2934,7 +2934,7 @@ function ChapterForeshadowWritebackCard({
           />
           <Input.TextArea
             value={detail}
-            rows={2}
+            rows={6}
             onChange={(event) => setDetail(event.target.value)}
             placeholder="伏笔说明（可选）"
             disabled={saving}

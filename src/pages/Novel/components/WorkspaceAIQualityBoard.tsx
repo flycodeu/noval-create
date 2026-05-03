@@ -479,7 +479,7 @@ export default function WorkspaceAIQualityBoard({
                 </div>
                 <div className="novel-subpanel__body">
                   <Input.TextArea
-                    rows={3}
+                    rows={6}
                     value={extraRequirements}
                     onChange={(event) => setExtraRequirements(event.target.value)}
                     placeholder="可补充额外要求，例如“保留现有世界观词汇”“句子更短更利落”“增强人物立场和代价感”。"

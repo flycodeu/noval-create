@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
+import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Navigate, Route, Routes, useLocation, useNavigate, useParams, type NavigateOptions } from 'react-router-dom'
 import { Button, Dropdown, Input, Modal, Spin, message } from 'antd'
 import type { MenuProps } from 'antd'
 import { getErrorMessage, getUserFacingMessage, isUserFacingMessage } from '@/utils/user-facing-message'
@@ -145,6 +145,7 @@ export default function NovelRouter() {
   const [hasRegisteredClearHandler, setHasRegisteredClearHandler] = useState(false)
   const [qualityBoardOpen, setQualityBoardOpen] = useState(false)
   const [workspaceQualityController, setWorkspaceQualityController] = useState<RegisteredWorkspaceQualityController | null>(null)
+  const [visitedPages, setVisitedPages] = useState<ProWorkspaceKey[]>([])
   const [workspaceViewMode, setWorkspaceViewMode] = useState<WorkspaceViewMode>(() => {
     const stored = typeof localStorage !== 'undefined'
       ? localStorage.getItem(WORKSPACE_VIEW_MODE_STORAGE_KEY)
@@ -226,6 +227,14 @@ export default function NovelRouter() {
     ? resolvePageMeta(orderedPages[currentPageIndex + 1])
     : null
 
+  useEffect(() => {
+    setVisitedPages([currentPage])
+  }, [novelId])
+
+  useEffect(() => {
+    setVisitedPages((current) => (current.includes(currentPage) ? current : [...current, currentPage]))
+  }, [currentPage])
+
   const refreshWorkflowStats = useCallback(async () => {
     if (!novelId) return
 
@@ -269,6 +278,12 @@ export default function NovelRouter() {
     escapeHandlerRef.current = handler
   }, [])
 
+  const transitionNavigate = useCallback((to: string, options?: NavigateOptions) => {
+    startTransition(() => {
+      navigate(to, options)
+    })
+  }, [navigate])
+
   const notifyWorkspaceMutation = useCallback(() => {
     setWorkspaceMutationToken((current) => current + 1)
     void Promise.all([refreshWorkflowStats(), refreshUndoable()])
@@ -291,9 +306,9 @@ export default function NovelRouter() {
     const list = await ensureChapterListLoaded()
     const target = list.find((chapter) => chapter.id === chapterId)
     if (!target) return
-    navigate(`/novels/${novelId}/writing/editor?chapterId=${chapterId}`)
+    transitionNavigate(`/novels/${novelId}/writing/editor?chapterId=${chapterId}`)
     setChapterJumpOpen(false)
-  }, [ensureChapterListLoaded, navigate, novelId])
+  }, [ensureChapterListLoaded, novelId, transitionNavigate])
 
   const performQuickSearch = useCallback(async (keyword: string) => {
     const trimmed = keyword.trim()
@@ -433,11 +448,11 @@ export default function NovelRouter() {
 
   useEffect(() => {
     void refreshWorkflowStats()
-  }, [location.pathname, refreshWorkflowStats])
+  }, [refreshWorkflowStats])
 
   useEffect(() => {
     void refreshUndoable()
-  }, [location.pathname, refreshUndoable])
+  }, [refreshUndoable])
 
   useEffect(() => {
     if (!quickSearchOpen) return undefined
@@ -504,7 +519,7 @@ export default function NovelRouter() {
           const nextIndex = key === 'arrowleft' ? currentIndex - 1 : currentIndex + 1
           const nextChapter = list[nextIndex]
           if (nextChapter) {
-            navigate(`/novels/${novelId}/writing/editor?chapterId=${nextChapter.id}`)
+            transitionNavigate(`/novels/${novelId}/writing/editor?chapterId=${nextChapter.id}`)
           }
         }).catch(console.error)
         return
@@ -523,25 +538,25 @@ export default function NovelRouter() {
     currentChapterId,
     ensureChapterListLoaded,
     location.search,
-    navigate,
     novelId,
     quickSearchOpen,
     shortcutHelpOpen,
+    transitionNavigate,
   ])
 
   useEffect(() => {
     if (loading || !novelId) return
 
     if (legacyRouteTarget && pathSegment !== legacyRouteTarget) {
-      navigate(`/novels/${novelId}/${legacyRouteTarget}`, { replace: true })
+      transitionNavigate(`/novels/${novelId}/${legacyRouteTarget}`, { replace: true })
       return
     }
 
     const validPath = ALL_WORKSPACE_ROUTE_KEYS.includes(pathSegment as WorkspaceRouteKey)
     if (!validPath) {
-      navigate(`/novels/${novelId}/${recommendedRoute}`, { replace: true })
+      transitionNavigate(`/novels/${novelId}/${recommendedRoute}`, { replace: true })
     }
-  }, [legacyRouteTarget, loading, navigate, novelId, pathSegment, recommendedRoute])
+  }, [legacyRouteTarget, loading, novelId, pathSegment, recommendedRoute, transitionNavigate])
 
   useEffect(() => {
     setQualityBoardOpen(false)
@@ -552,6 +567,73 @@ export default function NovelRouter() {
     registerController: registerWorkspaceQualityController,
   }), [registerWorkspaceQualityController, workspaceQualityController])
 
+  const renderWorkspaceStage = useCallback((pageKey: ProWorkspaceKey) => {
+    switch (pageKey) {
+      case 'guide':
+        return <StudioPage novelId={novelId} />
+      case 'overview':
+        return <Overview novelId={novelId} />
+      case 'project-brief':
+        return <ProjectBriefPage novelId={novelId} />
+      case 'core-settings':
+        return <PremisePage novelId={novelId} />
+      case 'theme-voice':
+        return <ThemeVoicePage novelId={novelId} />
+      case 'world-rules':
+        return <WorldRules novelId={novelId} />
+      case 'endgame':
+        return <EndgamePage novelId={novelId} />
+      case 'map':
+        return <MapExplorer novelId={novelId} />
+      case 'factions':
+        return <Factions novelId={novelId} />
+      case 'characters':
+        return <Characters novelId={novelId} />
+      case 'arc-center':
+        return <CharacterArcCenterPage novelId={novelId} />
+      case 'resistance':
+        return <ResistancePage novelId={novelId} />
+      case 'items':
+        return <ItemsWorkspace novelId={novelId} />
+      case 'glossary':
+        return <Glossary novelId={novelId} />
+      case 'threads':
+        return <StoryThreadsPage novelId={novelId} />
+      case 'scene-templates':
+        return <SceneTemplates novelId={novelId} />
+      case 'story-design':
+        return <CoreSettings novelId={novelId} />
+      case 'outline':
+        return <Outline novelId={novelId} />
+      case 'volume-design':
+        return <VolumeDesignPage novelId={novelId} />
+      case 'contracts':
+        return <ContractsPage novelId={novelId} />
+      case 'structure':
+        return <Structure novelId={novelId} />
+      case 'timeline':
+        return <TimelinePage novelId={novelId} />
+      case 'info-gap-board':
+        return <InfoGapBoardPage novelId={novelId} />
+      case 'foreshadow-ledger':
+        return <ForeshadowLedgerPage novelId={novelId} />
+      case 'growth-system':
+        return <GrowthSystemPage novelId={novelId} />
+      case 'writing':
+        return <Writing novelId={novelId} />
+      case 'writeback':
+        return <WritebackCenterPage novelId={novelId} />
+      case 'batch-workbench':
+        return <BatchWorkbenchPage novelId={novelId} />
+      case 'revision':
+        return <RevisionCenterPage novelId={novelId} />
+      case 'quality':
+        return <QualityDashboard novelId={novelId} />
+      default:
+        return null
+    }
+  }, [novelId])
+
   if (loading) {
     return (
       <div className="novel-route-shell novel-route-shell--loading">
@@ -561,7 +643,7 @@ export default function NovelRouter() {
   }
 
   return (
-    <WorkspaceErrorBoundary resetKey={`${novelId}:${location.pathname}`}>
+    <WorkspaceErrorBoundary resetKey={String(novelId)}>
       <NovelWorkspaceActionsProvider value={{
         mutationToken: workspaceMutationToken,
         registerSaveHandler,
@@ -577,7 +659,7 @@ export default function NovelRouter() {
         workspaceSummary={currentPageMeta.summary || undefined}
         mode={workspaceViewMode}
         onModeChange={setWorkspaceViewMode}
-        onBack={() => navigate('/novels')}
+        onBack={() => transitionNavigate('/novels')}
         onClear={hasRegisteredClearHandler ? () => clearHandlerRef.current?.() : undefined}
         onJumpChapter={() => void ensureChapterListLoaded().then(() => setChapterJumpOpen(true)).catch(console.error)}
         onShortcuts={() => setShortcutHelpOpen(true)}
@@ -597,7 +679,7 @@ export default function NovelRouter() {
             }
           : undefined}
         canUndo={Boolean(latestUndoable)}
-        onNextStep={() => navigate(`/novels/${novelId}/${recommendedRoute}`)}
+        onNextStep={() => transitionNavigate(`/novels/${novelId}/${recommendedRoute}`)}
         nextStepLabel="推荐下一步"
         exportMenu={{
           items: [
@@ -630,7 +712,7 @@ export default function NovelRouter() {
             {
               key: 'settings',
               label: '设置',
-              onClick: () => navigate(`/novels/${novelId}/overview`),
+              onClick: () => transitionNavigate(`/novels/${novelId}/overview`),
             },
             { type: 'divider' as const },
             {
@@ -638,14 +720,14 @@ export default function NovelRouter() {
               icon: <LeftOutlined />,
               label: `上一步${previousPageMeta ? `：${previousPageMeta.label}` : ''}`,
               disabled: !previousPageMeta,
-              onClick: () => previousPageMeta && navigate(`/novels/${novelId}/${previousPageMeta.route}`),
+              onClick: () => previousPageMeta && transitionNavigate(`/novels/${novelId}/${previousPageMeta.route}`),
             },
             {
               key: 'next',
               icon: <RightOutlined />,
               label: `下一步${nextPageMeta ? `：${nextPageMeta.label}` : ''}`,
               disabled: !nextPageMeta,
-              onClick: () => nextPageMeta && navigate(`/novels/${novelId}/${nextPageMeta.route}`),
+              onClick: () => nextPageMeta && transitionNavigate(`/novels/${novelId}/${nextPageMeta.route}`),
             },
           ].filter(Boolean) as MenuProps['items'],
         }}
@@ -658,58 +740,23 @@ export default function NovelRouter() {
           currentTask={workspaceSnapshot.nextStep.title}
           navGroups={workspaceSnapshot.navGroups}
           activeKey={currentNavKey}
-          onNavigate={(route) => navigate(`/novels/${novelId}/${route}`)}
+          onNavigate={(route) => transitionNavigate(`/novels/${novelId}/${route}`)}
         />
       </aside>
 
       <main className="novel-route-shell__content">
         <div className="novel-route-shell__content-frame">
           <div className="novel-route-shell__content-body">
-            <Routes>
-              <Route path="basics" element={<Navigate replace to={`/novels/${novelId}/overview`} />} />
-              <Route path="story-core" element={<Navigate replace to={`/novels/${novelId}/core-settings`} />} />
-              <Route path="world-foundation" element={<Navigate replace to={`/novels/${novelId}/world-rules`} />} />
-              <Route path="endgame-design" element={<Navigate replace to={`/novels/${novelId}/endgame`} />} />
-              <Route path="map-structure" element={<Navigate replace to={`/novels/${novelId}/map`} />} />
-              <Route path="character-roster" element={<Navigate replace to={`/novels/${novelId}/characters`} />} />
-              <Route path="items-equipment" element={<Navigate replace to={`/novels/${novelId}/items`} />} />
-              <Route path="story-threads" element={<Navigate replace to={`/novels/${novelId}/threads`} />} />
-              <Route path="story-plot" element={<Navigate replace to={`/novels/${novelId}/story-design`} />} />
-              <Route path="volume-planning" element={<Navigate replace to={`/novels/${novelId}/structure`} />} />
-              <Route path="write-start" element={<Navigate replace to={`/novels/${novelId}/writing`} />} />
-
-              <Route path="guide" element={<StudioPage novelId={novelId} />} />
-              <Route path="overview" element={<Overview novelId={novelId} />} />
-              <Route path="project-brief" element={<ProjectBriefPage novelId={novelId} />} />
-              <Route path="core-settings" element={<PremisePage novelId={novelId} />} />
-              <Route path="theme-voice" element={<ThemeVoicePage novelId={novelId} />} />
-              <Route path="world-rules" element={<WorldRules novelId={novelId} />} />
-              <Route path="endgame" element={<EndgamePage novelId={novelId} />} />
-              <Route path="map" element={<MapExplorer novelId={novelId} />} />
-              <Route path="factions" element={<Factions novelId={novelId} />} />
-              <Route path="characters" element={<Characters novelId={novelId} />} />
-              <Route path="arc-center" element={<CharacterArcCenterPage novelId={novelId} />} />
-              <Route path="resistance" element={<ResistancePage novelId={novelId} />} />
-              <Route path="items" element={<ItemsWorkspace novelId={novelId} />} />
-              <Route path="glossary" element={<Glossary novelId={novelId} />} />
-              <Route path="threads" element={<StoryThreadsPage novelId={novelId} />} />
-              <Route path="scene-templates" element={<SceneTemplates novelId={novelId} />} />
-              <Route path="story-design" element={<CoreSettings novelId={novelId} />} />
-              <Route path="outline" element={<Outline novelId={novelId} />} />
-              <Route path="volume-design" element={<VolumeDesignPage novelId={novelId} />} />
-              <Route path="contracts" element={<ContractsPage novelId={novelId} />} />
-              <Route path="structure" element={<Structure novelId={novelId} />} />
-              <Route path="timeline" element={<TimelinePage novelId={novelId} />} />
-              <Route path="info-gap-board" element={<InfoGapBoardPage novelId={novelId} />} />
-              <Route path="foreshadow-ledger" element={<ForeshadowLedgerPage novelId={novelId} />} />
-              <Route path="growth-system" element={<GrowthSystemPage novelId={novelId} />} />
-              <Route path="writing/*" element={<Writing novelId={novelId} />} />
-              <Route path="writeback" element={<WritebackCenterPage novelId={novelId} />} />
-              <Route path="batch-workbench" element={<BatchWorkbenchPage novelId={novelId} />} />
-              <Route path="revision" element={<RevisionCenterPage novelId={novelId} />} />
-              <Route path="quality" element={<QualityDashboard novelId={novelId} />} />
-              <Route path="*" element={<Navigate replace to={`/novels/${novelId}/${recommendedRoute}`} />} />
-            </Routes>
+            {visitedPages.map((pageKey) => (
+              <section
+                key={pageKey}
+                className={`novel-route-shell__page-stage${pageKey === currentPage ? ' is-active' : ''}`}
+                hidden={pageKey !== currentPage}
+                aria-hidden={pageKey !== currentPage}
+              >
+                {renderWorkspaceStage(pageKey)}
+              </section>
+            ))}
           </div>
         </div>
       </main>
@@ -752,7 +799,7 @@ export default function NovelRouter() {
               className="novel-sidebar__nav-item"
               style={{ width: '100%', textAlign: 'left' }}
               onClick={() => {
-                navigate(result.route)
+                transitionNavigate(result.route)
                 setQuickSearchOpen(false)
               }}
             >

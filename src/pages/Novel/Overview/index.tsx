@@ -615,10 +615,11 @@ export default function Overview({ novelId }: Props) {
         >
           <div className="novel-issue-list">
             {authorWorkflow.blockers.slice(0, 2).map((blocker) => (
-              <div key={blocker.id} className="novel-issue-item">
-                <div className="novel-issue-item__head">
+              <div key={blocker.id} className="novel-issue-item novel-issue-item--compact">
+                <div className="novel-issue-item__head novel-issue-item__head--inline">
                   <strong>{blocker.title}</strong>
                 </div>
+                <div className="novel-issue-item__desc novel-issue-item__desc--inline">{blocker.reason}</div>
                 <Button size="small" onClick={() => navigate(resolveAuthorWorkflowHref(novelId, blocker.entryPage))}>
                   {blocker.actionLabel}
                 </Button>
@@ -760,17 +761,17 @@ export default function Overview({ novelId }: Props) {
             </div>
             <div className="guided-step__field-card guided-step__field-card--full">
               <Form.Item name="synopsis" label="一句话简介" rules={[{ required: true, message: '请填写简介' }]}>
-                <Input.TextArea rows={4} placeholder="写清主角处境、目标和最大阻碍。" />
+                <Input.TextArea rows={6} placeholder="写清主角处境、目标和最大阻碍。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card">
               <Form.Item name="userBackground" label="原始背景" rules={[{ required: true, message: '请填写原始背景' }]}>
-                <Input.TextArea rows={7} placeholder="写灵感起点、氛围和人物困局。" />
+                <Input.TextArea rows={8} placeholder="写灵感起点、氛围和人物困局。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card">
               <Form.Item name="expandedBackground" label="扩展背景" rules={[{ required: true, message: '请填写扩展背景' }]}>
-                <Input.TextArea rows={7} placeholder="补齐环境压力、制度成本和社会结构。" />
+                <Input.TextArea rows={8} placeholder="补齐环境压力、制度成本和社会结构。" />
               </Form.Item>
             </div>
           </div>
@@ -861,7 +862,7 @@ export default function Overview({ novelId }: Props) {
           <div className="guided-step__field-card guided-step__field-card--full">
             <strong style={{ display: 'block', marginBottom: 8, color: 'var(--workspace-ink)' }}>一句话钩子</strong>
             <Input.TextArea
-              rows={3}
+              rows={6}
               value={packagingDraft.oneLineHook}
               onChange={(event) => setPackagingDraft((current) => ({ ...current, oneLineHook: event.target.value }))}
               placeholder="一句话概括主角、目标和最大阻碍。"
@@ -870,7 +871,7 @@ export default function Overview({ novelId }: Props) {
           <div className="guided-step__field-card">
             <strong style={{ display: 'block', marginBottom: 8, color: 'var(--workspace-ink)' }}>起点版简介</strong>
             <Input.TextArea
-              rows={5}
+              rows={8}
               value={packagingDraft.platformBlurbs.qidian}
               onChange={(event) => setPackagingDraft((current) => ({
                 ...current,
@@ -881,7 +882,7 @@ export default function Overview({ novelId }: Props) {
           <div className="guided-step__field-card">
             <strong style={{ display: 'block', marginBottom: 8, color: 'var(--workspace-ink)' }}>番茄版简介</strong>
             <Input.TextArea
-              rows={5}
+              rows={8}
               value={packagingDraft.platformBlurbs.tomato}
               onChange={(event) => setPackagingDraft((current) => ({
                 ...current,
@@ -892,7 +893,7 @@ export default function Overview({ novelId }: Props) {
           <div className="guided-step__field-card guided-step__field-card--full">
             <strong style={{ display: 'block', marginBottom: 8, color: 'var(--workspace-ink)' }}>出版版简介</strong>
             <Input.TextArea
-              rows={4}
+              rows={6}
               value={packagingDraft.platformBlurbs.publishing}
               onChange={(event) => setPackagingDraft((current) => ({
                 ...current,
@@ -903,7 +904,7 @@ export default function Overview({ novelId }: Props) {
           <div className="guided-step__field-card guided-step__field-card--full">
             <strong style={{ display: 'block', marginBottom: 8, color: 'var(--workspace-ink)' }}>卷名风格</strong>
             <Input.TextArea
-              rows={3}
+              rows={6}
               value={packagingDraft.volumeNamingStyle}
               onChange={(event) => setPackagingDraft((current) => ({ ...current, volumeNamingStyle: event.target.value }))}
               placeholder="例如：统一采用 地点 + 局势 / 代价 + 目标 的组合。"

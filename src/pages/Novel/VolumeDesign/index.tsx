@@ -79,6 +79,7 @@ export default function VolumeDesignPage({ novelId }: Props) {
   const { currentNovel } = useNovelStore()
   const [form] = Form.useForm<VolumeDesignFormValues>()
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [volumes, setVolumes] = useState<StoryStructureVolumeSummary[]>([])
   const [designs, setDesigns] = useState<VolumeDesignAsset[]>([])
@@ -91,8 +92,12 @@ export default function VolumeDesignPage({ novelId }: Props) {
   const [lastAuditResult, setLastAuditResult] = useState<VolumeAuditResult | null>(null)
   const [lastSyncResult, setLastSyncResult] = useState<VolumeConstraintSyncResult | null>(null)
 
-  const loadData = async () => {
-    setLoading(true)
+  const loadData = async (showLoading = false) => {
+    if (showLoading) {
+      setLoading(true)
+    } else {
+      setRefreshing(true)
+    }
     try {
       const [volumeRows, designRows, commitmentRows, resistanceDashboard] = await Promise.all([
         window.electron.structure.listVolumes(novelId),
@@ -110,11 +115,12 @@ export default function VolumeDesignPage({ novelId }: Props) {
       message.error(getUserFacingMessage('volumeDesign.loadFailed'))
     } finally {
       setLoading(false)
+      setRefreshing(false)
     }
   }
 
   useEffect(() => {
-    void loadData()
+    void loadData(true)
   }, [novelId])
 
   const activeVolume = useMemo(
@@ -214,7 +220,7 @@ export default function VolumeDesignPage({ novelId }: Props) {
     }
   }
 
-  if (loading) {
+  if (loading && volumes.length === 0) {
     return (
       <WorkspacePage title="卷级设计中心">
         <WorkspacePanel title="正在加载卷级设计">
@@ -233,6 +239,9 @@ export default function VolumeDesignPage({ novelId }: Props) {
         <Space wrap>
           <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>
             保存当前卷设计
+          </Button>
+          <Button loading={refreshing} onClick={() => void loadData()}>
+            刷新卷设计
           </Button>
           <Button
             icon={<LinkOutlined />}
@@ -287,6 +296,7 @@ export default function VolumeDesignPage({ novelId }: Props) {
         />
       )}
     >
+      {refreshing ? <div className="novel-dashboard__refresh-indicator" style={{ marginBottom: 16 }}><Spin size="small" /><span>正在同步卷级设计数据</span></div> : null}
       {commitments.length <= 0 ? (
         <Alert
           type="warning"
@@ -327,32 +337,32 @@ export default function VolumeDesignPage({ novelId }: Props) {
           <div className="guided-step__field-grid">
             <div className="guided-step__field-card">
               <Form.Item name="volumeTheme" label="本卷主题">
-                <Input.TextArea rows={3} placeholder="写这一卷真正反复验证的主题命题。" />
+                <Input.TextArea rows={6} placeholder="写这一卷真正反复验证的主题命题。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card">
               <Form.Item name="volumePromise" label="本卷承诺">
-                <Input.TextArea rows={3} placeholder="写读者读完这一卷必须拿到的情绪收益或叙事兑现。" />
+                <Input.TextArea rows={6} placeholder="写读者读完这一卷必须拿到的情绪收益或叙事兑现。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card">
               <Form.Item name="mainConflict" label="本卷主冲突">
-                <Input.TextArea rows={4} placeholder="写本卷主要对手、压力结构或核心困局。" />
+                <Input.TextArea rows={6} placeholder="写本卷主要对手、压力结构或核心困局。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card">
               <Form.Item name="climaxPlan" label="本卷高潮">
-                <Input.TextArea rows={4} placeholder="写这一卷最高压的冲突爆点和兑现方式。" />
+                <Input.TextArea rows={6} placeholder="写这一卷最高压的冲突爆点和兑现方式。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card">
               <Form.Item name="endStateShift" label="卷末状态变化">
-                <Input.TextArea rows={4} placeholder="写卷末人物、局势或资源格局发生了什么不可逆变化。" />
+                <Input.TextArea rows={6} placeholder="写卷末人物、局势或资源格局发生了什么不可逆变化。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card">
               <Form.Item name="readerExpectation" label="卷末读者期待">
-                <Input.TextArea rows={4} placeholder="写读者读完本卷后，下一卷最该等待什么。" />
+                <Input.TextArea rows={6} placeholder="写读者读完本卷后，下一卷最该等待什么。" />
               </Form.Item>
             </div>
           </div>

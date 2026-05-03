@@ -693,12 +693,12 @@ export default function CoreSettings({ novelId }: Props) {
           <div className="story-design__anchor-grid">
             <div className="story-design__anchor-card">
               <Form.Item name="story_goal" label="故事核心目标" rules={[{ required: true, message: '请写清故事核心目标' }]}>
-                <Input.TextArea rows={4} placeholder="写这部书最终要抵达什么状态，不写过程流水账。" />
+                <Input.TextArea rows={6} placeholder="写这部书最终要抵达什么状态，不写过程流水账。" />
               </Form.Item>
             </div>
             <div className="story-design__anchor-card">
               <Form.Item name="core_conflict" label="核心冲突" rules={[{ required: true, message: '请写清核心冲突' }]}>
-                <Input.TextArea rows={4} placeholder="写目标为什么难实现，谁在对抗，代价落在谁身上。" />
+                <Input.TextArea rows={6} placeholder="写目标为什么难实现，谁在对抗，代价落在谁身上。" />
               </Form.Item>
             </div>
             <div className="story-design__anchor-card story-design__anchor-card--full">
@@ -713,7 +713,7 @@ export default function CoreSettings({ novelId }: Props) {
             </div>
             <div className="story-design__anchor-card story-design__anchor-card--full">
               <Form.Item name="ending" label="结局落点" rules={[{ required: true, message: '请写清结局落点' }]}>
-                <Input.TextArea rows={4} placeholder="写故事最终如何收束，主要矛盾如何落地，代价与余波如何留下。" />
+                <Input.TextArea rows={6} placeholder="写故事最终如何收束，主要矛盾如何落地，代价与余波如何留下。" />
               </Form.Item>
             </div>
           </div>

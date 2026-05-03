@@ -1001,20 +1001,20 @@ export default function CharacterWorkspace({ novelId }: Props) {
                     <Select mode="multiple" allowClear showSearch filterOption={false} options={itemLinkOptions} onFocus={() => void searchItems('')} onSearch={(value) => void searchItems(value)} placeholder="绑定争夺物、证据、信物、装备等" />
                   </Form.Item>
                 </div>
-                <Form.Item name="background" label="背景经历"><Input.TextArea rows={4} /></Form.Item>
+                <Form.Item name="background" label="背景经历"><Input.TextArea rows={6} /></Form.Item>
                 <div className="novel-grid novel-grid--2">
-                  <Form.Item name="goals" label="当前目标"><Input.TextArea rows={3} /></Form.Item>
-                  <Form.Item name="firstImpression" label="第一印象"><Input.TextArea rows={3} /></Form.Item>
+                  <Form.Item name="goals" label="当前目标"><Input.TextArea rows={6} /></Form.Item>
+                  <Form.Item name="firstImpression" label="第一印象"><Input.TextArea rows={6} /></Form.Item>
                 </div>
                 <div className="novel-grid novel-grid--2">
-                  <Form.Item name="innerConflict" label="内在矛盾"><Input.TextArea rows={3} /></Form.Item>
-                  <Form.Item name="relationshipTension" label="关系张力"><Input.TextArea rows={3} /></Form.Item>
+                  <Form.Item name="innerConflict" label="内在矛盾"><Input.TextArea rows={6} /></Form.Item>
+                  <Form.Item name="relationshipTension" label="关系张力"><Input.TextArea rows={6} /></Form.Item>
                 </div>
                 <div className="novel-grid novel-grid--2">
-                  <Form.Item name="resonancePoint" label="读者共情点"><Input.TextArea rows={3} /></Form.Item>
-                  <Form.Item name="characterArc" label="后续弧光"><Input.TextArea rows={3} /></Form.Item>
+                  <Form.Item name="resonancePoint" label="读者共情点"><Input.TextArea rows={6} /></Form.Item>
+                  <Form.Item name="characterArc" label="后续弧光"><Input.TextArea rows={6} /></Form.Item>
                 </div>
-                <Form.Item name="appearance" label="可识别外貌"><Input.TextArea rows={3} /></Form.Item>
+                <Form.Item name="appearance" label="可识别外貌"><Input.TextArea rows={6} /></Form.Item>
               </Form>
 
               {selectedCharacter ? (
@@ -1121,13 +1121,13 @@ export default function CharacterWorkspace({ novelId }: Props) {
             </Form.Item>
           </div>
           <Form.Item name="relationLabel" label="关系简称"><Input placeholder="例如：旧同桌、表面同盟、点头之交" /></Form.Item>
-          <Form.Item name="description" label="当前关系状态"><Input.TextArea rows={3} placeholder="用一句话写清这两个人目前怎么拉扯。" /></Form.Item>
+          <Form.Item name="description" label="当前关系状态"><Input.TextArea rows={6} placeholder="用一句话写清这两个人目前怎么拉扯。" /></Form.Item>
           <div className="novel-grid novel-grid--2">
             <Form.Item name="intimacyLevel" label="亲密度 1-5"><InputNumber min={1} max={5} className="novel-character-full-width-number" /></Form.Item>
             <Form.Item name="tensionLevel" label="张力度 1-5"><InputNumber min={1} max={5} className="novel-character-full-width-number" /></Form.Item>
           </div>
-          <Form.Item name="interactionStyle" label="互动方式"><Input.TextArea rows={2} placeholder="例如：嘴硬、互相打断、很少直视对方、称呼始终很客气。" /></Form.Item>
-          <Form.Item name="subtextRule" label="潜台词规则"><Input.TextArea rows={2} placeholder="例如：明明在关心，但谁都不先承认；永远不直接提旧事。" /></Form.Item>
+          <Form.Item name="interactionStyle" label="互动方式"><Input.TextArea rows={6} placeholder="例如：嘴硬、互相打断、很少直视对方、称呼始终很客气。" /></Form.Item>
+          <Form.Item name="subtextRule" label="潜台词规则"><Input.TextArea rows={6} placeholder="例如：明明在关心，但谁都不先承认；永远不直接提旧事。" /></Form.Item>
         </Form>
       </Modal>
 
@@ -1145,7 +1145,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
             <Form.Item name="factionHint" label="势力倾向"><Input placeholder="可留空" /></Form.Item>
             <Form.Item name="surnameHint" label="姓名方向"><Input placeholder="例如：姓沈、偏北方感、避免生僻字" /></Form.Item>
           </div>
-          <Form.Item name="personalitySeed" label="性格种子"><Input.TextArea rows={3} placeholder="例如：外冷内热、强控制欲、对旧债过度执着" /></Form.Item>
+          <Form.Item name="personalitySeed" label="性格种子"><Input.TextArea rows={6} placeholder="例如：外冷内热、强控制欲、对旧债过度执着" /></Form.Item>
           <Form.Item name="itemPreferenceText" label="希望绑定的物品 / 资源">
             <Select
               mode="tags"
@@ -1171,7 +1171,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
             <Form.Item name="antagonistCount" label="对立角色"><Select options={[0, 1, 2, 3].map((value) => ({ value, label: `${value} 位` }))} /></Form.Item>
             <Form.Item name="supportingCount" label="功能角色"><Select options={[0, 1, 2, 3, 4].map((value) => ({ value, label: `${value} 位` }))} /></Form.Item>
           </div>
-          <Form.Item name="genderRatio" label="性别与年龄建议"><Input.TextArea rows={3} /></Form.Item>
+          <Form.Item name="genderRatio" label="性别与年龄建议"><Input.TextArea rows={6} /></Form.Item>
           <Form.Item name="preferredSpecies" label="优先种类"><Select mode="multiple" allowClear options={availableSpecies.map((item) => ({ value: item, label: item }))} /></Form.Item>
           <Form.Item name="factionBias" label="优先势力来源"><Select mode="multiple" allowClear options={factionOptions.map((item) => ({ value: item, label: item }))} /></Form.Item>
           <Form.Item name="helperRoles" label="优先功能位"><Select mode="tags" allowClear placeholder="例如：队医、情报员、导师、卧底" /></Form.Item>
@@ -1191,7 +1191,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
             />
           </Form.Item>
           <Form.Item name="diversityConstraints" label="差异化约束"><Select mode="tags" allowClear placeholder="例如：避免同职业、避免同类成长轨迹" /></Form.Item>
-          <Form.Item name="specialRequirements" label="额外要求"><Input.TextArea rows={4} /></Form.Item>
+          <Form.Item name="specialRequirements" label="额外要求"><Input.TextArea rows={6} /></Form.Item>
         </Form>
       </Modal>
     </WorkspacePage>

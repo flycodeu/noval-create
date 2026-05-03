@@ -17,6 +17,7 @@ const FONT = "-apple-system, 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', sans-
 export default function App() {
   const { addStream, appendStreamChunk, completeStream } = useTaskStore()
   const { theme } = useThemeStore()
+  const isDarkTheme = theme === 'dark'
   const hasElectronBridge = typeof window !== 'undefined'
     && typeof window.electron?.on === 'function'
     && typeof window.electron?.novel?.list === 'function'
@@ -50,14 +51,15 @@ export default function App() {
   }, [addStream, appendStreamChunk, completeStream, hasElectronBridge])
 
   const antdThemeConfig = useMemo(() => {
-    if (theme === 'dark') {
+    if (isDarkTheme) {
       return {
         algorithm: antdTheme.darkAlgorithm,
         token: {
-          colorPrimary: '#2E86AB',
+          colorPrimary: '#0a84ff',
           fontFamily: FONT,
           borderRadius: 12,
-          colorBgBase: '#0a0a0c',
+          controlHeight: 40,
+          colorBgBase: '#000000',
           colorTextBase: '#f5f5f7',
           colorBgContainer: '#1c1c1e',
           colorBgLayout: '#000000',
@@ -66,52 +68,94 @@ export default function App() {
           colorBorder: 'rgba(255,255,255,0.1)',
           colorBorderSecondary: 'rgba(255,255,255,0.04)',
         },
-      }
-    }
-    if (theme === 'soft') {
-      return {
-        algorithm: antdTheme.defaultAlgorithm,
-        token: {
-          colorPrimary: '#6b8f71',
-          fontFamily: FONT,
-          borderRadius: 12,
-          colorBgBase: '#fdfcfb',
-          colorTextBase: '#2d2520',
-          colorBgContainer: '#ffffff',
-          colorBgLayout: '#f4f0eb',
-          colorBgElevated: '#ffffff',
-          colorBgSpotlight: '#ece8e1',
-          colorBorder: 'rgba(0,0,0,0.06)',
-          colorBorderSecondary: 'rgba(0,0,0,0.03)',
-          colorText: '#2d2520',
-          colorTextSecondary: '#6b5e52',
-          colorTextTertiary: '#9b8a7a',
+        components: {
+          Layout: {
+            bodyBg: '#000000',
+            siderBg: '#1c1c1e',
+            headerBg: '#1c1c1e',
+          },
+          Menu: {
+            darkItemBg: 'transparent',
+            darkSubMenuItemBg: 'transparent',
+            itemSelectedBg: 'rgba(10, 132, 255, 0.16)',
+            itemSelectedColor: '#f5f5f7',
+          },
+          Card: {
+            colorBgContainer: '#1c1c1e',
+          },
+          Modal: {
+            contentBg: '#1c1c1e',
+            headerBg: '#1c1c1e',
+          },
+          Input: {
+            colorBgContainer: '#2c2c2e',
+          },
+          Select: {
+            colorBgContainer: '#2c2c2e',
+          },
+          Table: {
+            colorBgContainer: '#1c1c1e',
+            headerBg: '#2c2c2e',
+          },
         },
       }
     }
-    // light (default)
+
     return {
       algorithm: antdTheme.defaultAlgorithm,
       token: {
-        colorPrimary: '#0066cc',
+        colorPrimary: '#8f6330',
         fontFamily: FONT,
         borderRadius: 12,
-        colorBgBase: '#ffffff',
-        colorTextBase: '#1d1d1f',
+        controlHeight: 40,
+        colorBgBase: '#fcfbf8',
+        colorTextBase: '#1e2738',
         colorBgContainer: '#ffffff',
-        colorBgLayout: '#f5f5f7',
+        colorBgLayout: '#f4efe6',
         colorBgElevated: '#ffffff',
-        colorBgSpotlight: '#f2f2f7',
-        colorBorder: 'rgba(0,0,0,0.08)',
-        colorBorderSecondary: 'rgba(0,0,0,0.04)',
-        colorText: '#1d1d1f',
-        colorTextSecondary: '#86868b',
-        colorTextTertiary: '#d2d2d7',
-        colorFillAlter: '#f5f5f7',
-        colorFillContent: '#f2f2f7',
+        colorBgSpotlight: '#f7f1e6',
+        colorBorder: 'rgba(122, 93, 52, 0.14)',
+        colorBorderSecondary: 'rgba(122, 93, 52, 0.08)',
+        colorText: '#1e2738',
+        colorTextSecondary: '#5c6577',
+        colorTextTertiary: '#7b8494',
+        colorFillAlter: '#f7f1e6',
+        colorFillContent: '#efe7da',
+      },
+      components: {
+        Layout: {
+          bodyBg: '#f4efe6',
+          siderBg: '#fffaf2',
+          headerBg: '#fffaf2',
+        },
+        Menu: {
+          itemSelectedBg: 'rgba(143, 99, 48, 0.12)',
+          itemSelectedColor: '#8f6330',
+          itemHoverColor: '#8f6330',
+        },
+        Button: {
+          primaryShadow: '0 10px 24px rgba(143, 99, 48, 0.16)',
+        },
+        Card: {
+          colorBgContainer: '#ffffff',
+        },
+        Modal: {
+          contentBg: '#fffdf9',
+          headerBg: '#fffdf9',
+        },
+        Input: {
+          colorBgContainer: '#fffdf9',
+        },
+        Select: {
+          colorBgContainer: '#fffdf9',
+        },
+        Table: {
+          colorBgContainer: '#ffffff',
+          headerBg: '#f7f1e6',
+        },
       },
     }
-  }, [theme])
+  }, [isDarkTheme])
 
   return (
     <ConfigProvider theme={antdThemeConfig} locale={zhCN}>

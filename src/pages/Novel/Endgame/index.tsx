@@ -393,22 +393,22 @@ export default function EndgamePage({ novelId }: Props) {
             </div>
             <div className="guided-step__field-card guided-step__field-card--full">
               <Form.Item name="finalConflict" label="最终冲突对象" rules={[{ required: true, message: '请写清最终冲突对象' }]}>
-                <Input.TextArea rows={4} placeholder="写清主角最后必须正面解决的核心对手、体制、真相或困局。" />
+                <Input.TextArea rows={6} placeholder="写清主角最后必须正面解决的核心对手、体制、真相或困局。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card">
               <Form.Item name="themeAnswer" label="主题答案" rules={[{ required: true, message: '请写清主题答案' }]}>
-                <Input.TextArea rows={4} placeholder="写这本书最后给出的答案，不要写成空泛价值口号。" />
+                <Input.TextArea rows={6} placeholder="写这本书最后给出的答案，不要写成空泛价值口号。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card">
               <Form.Item name="lastScene" label="最后一幕" rules={[{ required: true, message: '请写清最后一幕' }]}>
-                <Input.TextArea rows={4} placeholder="写终章最后停留在哪个场面、人物状态和情绪余波上。" />
+                <Input.TextArea rows={6} placeholder="写终章最后停留在哪个场面、人物状态和情绪余波上。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card guided-step__field-card--full">
               <Form.Item name="finalImage" label="终章意象">
-                <Input.TextArea rows={3} placeholder="写会在结尾被看见或回响的意象、动作或空间画面。" />
+                <Input.TextArea rows={6} placeholder="写会在结尾被看见或回响的意象、动作或空间画面。" />
               </Form.Item>
             </div>
           </div>

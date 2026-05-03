@@ -78,6 +78,7 @@ export default function StudioPage({ novelId }: Props) {
   const location = useLocation()
   const { currentNovel, setCurrentNovel } = useNovelStore()
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [stats, setStats] = useState<WorkflowStats>(EMPTY_WORKFLOW_STATS)
   const [consistencyReport, setConsistencyReport] = useState<NovelConsistencyReport | null>(null)
   const [contextStatus, setContextStatus] = useState<NovelContextStatus | null>(null)
@@ -86,41 +87,61 @@ export default function StudioPage({ novelId }: Props) {
   const [recentActivities, setRecentActivities] = useState<OperationLog[]>([])
   const [ignoredBlockerIds, setIgnoredBlockerIds] = useState<string[]>([])
 
-  const refreshConsole = useCallback(async () => {
-    setLoading(true)
-    try {
-      const [novel, workflowStats, report, nextContextStatus, qualityDashboard, revisions, activities] = await Promise.all([
-        window.electron.novel.get(novelId),
-        loadWorkflowStats(novelId),
-        window.electron.novel.runConsistencyCheck(novelId),
-        window.electron.novel.getContextStatus(novelId),
-        window.electron.quality.getDashboard(novelId).catch(() => null),
-        window.electron.revision.getSnapshot(novelId).catch(() => null),
-        window.electron.history.listRecent(novelId, 8).catch(() => []),
-      ])
+  const loadConsoleData = useCallback(async () => {
+    const [novel, workflowStats, report, nextContextStatus, qualityDashboard, revisions, activities] = await Promise.all([
+      window.electron.novel.get(novelId),
+      loadWorkflowStats(novelId),
+      window.electron.novel.runConsistencyCheck(novelId),
+      window.electron.novel.getContextStatus(novelId),
+      window.electron.quality.getDashboard(novelId).catch(() => null),
+      window.electron.revision.getSnapshot(novelId).catch(() => null),
+      window.electron.history.listRecent(novelId, 8).catch(() => []),
+    ])
 
-      if (novel) {
-        setCurrentNovel(novel)
-      }
-
-      setStats(workflowStats)
-      setConsistencyReport(report)
-      setContextStatus(nextContextStatus)
-      setRevisionSnapshot(revisions)
-      setRecentActivities(activities)
-      setQualitySummary(qualityDashboard ? {
-        productionReadiness: qualityDashboard.productionReadiness,
-        batchHealth: qualityDashboard.batchHealth,
-        continuityHealth: qualityDashboard.continuityHealth,
-      } : null)
-    } finally {
-      setLoading(false)
+    if (novel) {
+      setCurrentNovel(novel)
     }
+
+    setStats(workflowStats)
+    setConsistencyReport(report)
+    setContextStatus(nextContextStatus)
+    setRevisionSnapshot(revisions)
+    setRecentActivities(activities)
+    setQualitySummary(qualityDashboard ? {
+      productionReadiness: qualityDashboard.productionReadiness,
+      batchHealth: qualityDashboard.batchHealth,
+      continuityHealth: qualityDashboard.continuityHealth,
+    } : null)
   }, [novelId, setCurrentNovel])
 
+  const refreshConsole = useCallback(async () => {
+    setRefreshing(true)
+    try {
+      await loadConsoleData()
+    } finally {
+      setRefreshing(false)
+    }
+  }, [loadConsoleData])
+
   useEffect(() => {
-    void refreshConsole()
-  }, [refreshConsole])
+    let active = true
+    setLoading(true)
+    setRefreshing(false)
+
+    void (async () => {
+      try {
+        await loadConsoleData()
+      } finally {
+        if (!active) return
+        setLoading(false)
+        setRefreshing(false)
+      }
+    })()
+
+    return () => {
+      active = false
+    }
+  }, [loadConsoleData])
 
   const workspaceSnapshot = useMemo(
     () => getWorkspaceSnapshot(currentNovel, stats, {
@@ -212,7 +233,7 @@ export default function StudioPage({ novelId }: Props) {
     { key: 'quality', label: '质量监控', route: 'quality', hint: '检查生产健康和趋势' },
   ]), [])
 
-  if (loading) {
+  if (loading && !currentNovel) {
     return (
       <div className="novel-dashboard__loading">
         <Spin size="large" />
@@ -222,6 +243,12 @@ export default function StudioPage({ novelId }: Props) {
 
   return (
     <div className="novel-dashboard">
+      {refreshing ? (
+        <div className="novel-dashboard__refresh-indicator">
+          <Spin size="small" />
+          <span>正在同步当前工作台数据</span>
+        </div>
+      ) : null}
       <div className="novel-dashboard__hero">
         <section className="novel-dashboard__task-card">
           <SectionHeader
@@ -251,6 +278,9 @@ export default function StudioPage({ novelId }: Props) {
               onClick={() => navigate(`/novels/${novelId}/${currentTask.targetRoute}`)}
             >
               {currentTask.actionLabel}
+            </Button>
+            <Button onClick={() => void refreshConsole()}>
+              刷新面板
             </Button>
             <Button
               icon={<FileSearchOutlined />}

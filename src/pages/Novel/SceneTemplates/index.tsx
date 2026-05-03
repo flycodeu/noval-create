@@ -280,7 +280,7 @@ export default function SceneTemplatesPage({ novelId }: Props) {
               </div>
               <div className="guided-step__field-card guided-step__field-card--full">
                 <Form.Item name="description" label="模板说明" rules={[{ required: true, message: '请填写模板说明' }]}>
-                  <Input.TextArea rows={4} placeholder="写清这个模板适合解决什么问题，什么时候用，避免什么误用。" />
+                  <Input.TextArea rows={6} placeholder="写清这个模板适合解决什么问题，什么时候用，避免什么误用。" />
                 </Form.Item>
               </div>
               <div className="guided-step__field-card guided-step__field-card--full">
@@ -295,7 +295,7 @@ export default function SceneTemplatesPage({ novelId }: Props) {
               </div>
               <div className="guided-step__field-card guided-step__field-card--full">
                 <Form.Item name="emotionArc" label="情绪弧线">
-                  <Input.TextArea rows={3} placeholder="写清读者在这个场景里的情绪变化路径。" />
+                  <Input.TextArea rows={6} placeholder="写清读者在这个场景里的情绪变化路径。" />
                 </Form.Item>
               </div>
             </div>

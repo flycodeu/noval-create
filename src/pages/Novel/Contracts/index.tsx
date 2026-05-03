@@ -107,6 +107,7 @@ export default function ContractsPage({ novelId }: Props) {
   const { currentNovel } = useNovelStore()
   const [form] = Form.useForm<ChapterContractFormValues>()
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [savingChapter, setSavingChapter] = useState(false)
   const [sceneSavingId, setSceneSavingId] = useState<number | 'chapterless' | null>(null)
   const [chapters, setChapters] = useState<Chapter[]>([])
@@ -159,8 +160,12 @@ export default function ContractsPage({ novelId }: Props) {
     form.setFieldsValue(buildChapterFormValues(contract))
   }
 
-  const refreshAll = async () => {
-    setLoading(true)
+  const refreshAll = async (showLoading = false) => {
+    if (showLoading) {
+      setLoading(true)
+    } else {
+      setRefreshing(true)
+    }
     try {
       await loadBaseData()
     } catch (error) {
@@ -168,12 +173,13 @@ export default function ContractsPage({ novelId }: Props) {
       message.error(getErrorMessage(error, 'common.loadFailed'))
     } finally {
       setLoading(false)
+      setRefreshing(false)
     }
   }
 
   useEffect(() => {
-    void refreshAll()
-  }, [novelId, routeChapterId])
+    void refreshAll(true)
+  }, [novelId])
 
   useEffect(() => {
     if (!routeChapterId) return
@@ -287,7 +293,7 @@ export default function ContractsPage({ novelId }: Props) {
       setProgressModalOpen(false)
       setProgressTargetId(null)
       setProgressNote('')
-      await loadBaseData()
+      await refreshAll()
     } catch (error) {
       console.error(error)
       message.error(getErrorMessage(error, 'common.saveFailed'))
@@ -337,7 +343,7 @@ export default function ContractsPage({ novelId }: Props) {
     }
   }
 
-  if (loading) {
+  if (loading && chapters.length === 0) {
     return (
       <WorkspacePage title="章节合同与场景合同">
         <WorkspacePanel title="正在加载合同数据">
@@ -356,6 +362,9 @@ export default function ContractsPage({ novelId }: Props) {
         <Space wrap>
           <Button type="primary" icon={<SaveOutlined />} loading={savingChapter} onClick={() => void handleSaveChapterContract()}>
             保存章节合同
+          </Button>
+          <Button loading={refreshing} onClick={() => void refreshAll()}>
+            刷新合同
           </Button>
           <Button icon={<EditOutlined />} onClick={() => navigate(`/novels/${novelId}/writing`)}>
             去正文写作
@@ -390,6 +399,7 @@ export default function ContractsPage({ novelId }: Props) {
         />
       )}
     >
+      {refreshing ? <div className="novel-dashboard__refresh-indicator" style={{ marginBottom: 16 }}><Spin size="small" /><span>正在同步合同面板数据</span></div> : null}
       {commitments.length <= 0 ? (
         <Alert
           type="warning"
@@ -417,7 +427,7 @@ export default function ContractsPage({ novelId }: Props) {
           <div className="guided-step__field-grid">
             <div className="guided-step__field-card guided-step__field-card--full">
               <Form.Item name="chapterGoal" label="本章目标">
-                <Input.TextArea rows={4} placeholder="写这一章写完后，主线、人物或局势必须发生什么变化。" />
+                <Input.TextArea rows={6} placeholder="写这一章写完后，主线、人物或局势必须发生什么变化。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card guided-step__field-card--compact">
@@ -682,11 +692,11 @@ export default function ContractsPage({ novelId }: Props) {
                   </div>
                   <div className="guided-step__field-card">
                     <div style={{ marginBottom: 8, fontWeight: 600 }}>场景目标</div>
-                    <Input.TextArea rows={3} value={scene.sceneGoal} onChange={(event) => handleSceneChange(scene.segmentId, { sceneGoal: event.target.value })} placeholder="这一场要拿到什么、推进什么。" />
+                    <Input.TextArea rows={6} value={scene.sceneGoal} onChange={(event) => handleSceneChange(scene.segmentId, { sceneGoal: event.target.value })} placeholder="这一场要拿到什么、推进什么。" />
                   </div>
                   <div className="guided-step__field-card">
                     <div style={{ marginBottom: 8, fontWeight: 600 }}>障碍</div>
-                    <Input.TextArea rows={3} value={scene.obstacle} onChange={(event) => handleSceneChange(scene.segmentId, { obstacle: event.target.value })} placeholder="阻碍当前场景目标实现的压力或代价。" />
+                    <Input.TextArea rows={6} value={scene.obstacle} onChange={(event) => handleSceneChange(scene.segmentId, { obstacle: event.target.value })} placeholder="阻碍当前场景目标实现的压力或代价。" />
                   </div>
                   <div className="guided-step__field-card guided-step__field-card--compact">
                     <div style={{ marginBottom: 8, fontWeight: 600 }}>冲突类型</div>
@@ -699,7 +709,7 @@ export default function ContractsPage({ novelId }: Props) {
                   <div className="guided-step__field-card">
                     <div style={{ marginBottom: 8, fontWeight: 600 }}>信息揭示</div>
                     <Input.TextArea
-                      rows={4}
+                      rows={6}
                       value={scene.revealPayload.join('\n')}
                       onChange={(event) => handleSceneChange(scene.segmentId, { revealPayload: splitLines(event.target.value) })}
                       placeholder={'建议每行一条，例如：\n反派提前知道路线\n旧伤不是意外造成'}
@@ -707,7 +717,7 @@ export default function ContractsPage({ novelId }: Props) {
                   </div>
                   <div className="guided-step__field-card">
                     <div style={{ marginBottom: 8, fontWeight: 600 }}>结果状态</div>
-                    <Input.TextArea rows={3} value={scene.resultState} onChange={(event) => handleSceneChange(scene.segmentId, { resultState: event.target.value })} placeholder="这一场结束后人物和局势处于什么状态。" />
+                    <Input.TextArea rows={6} value={scene.resultState} onChange={(event) => handleSceneChange(scene.segmentId, { resultState: event.target.value })} placeholder="这一场结束后人物和局势处于什么状态。" />
                   </div>
                   <div className="guided-step__field-card">
                     <div style={{ marginBottom: 8, fontWeight: 600 }}>衔接方式</div>

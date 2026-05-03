@@ -88,7 +88,7 @@
 
 .novel-list-page__toolbar {
   display: flex;
-  gap: 12px;
+  gap: 16px;
   flex-wrap: wrap;
   padding: 16px;
   border: 1px solid var(--border-default);
@@ -124,13 +124,13 @@
 
 .novel-list-page__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(320px, 380px));
   gap: 24px;
   justify-content: start;
 }
 
 .novel-list-page__wizard-steps {
-  margin-bottom: 32px;
+  margin-bottom: 40px;
 }
 
 .novel-list-page__launch-grid {

@@ -22,12 +22,8 @@ export default function BlockerCard({ blocker, onOpen, onIgnore }: BlockerCardPr
       </div>
 
       <div className="novel-blocker-card__body">
-        <div className="novel-blocker-card__reason">
-          {blocker.reason}
-        </div>
-        <div className="novel-blocker-card__meta">
-          影响范围：{blocker.affectedModules.join('、')}
-        </div>
+        <span className="novel-blocker-card__reason">{blocker.reason}</span>
+        <span className="novel-blocker-card__meta">影响范围：{blocker.affectedModules.join('、')}</span>
       </div>
 
       <div className="novel-blocker-card__actions">

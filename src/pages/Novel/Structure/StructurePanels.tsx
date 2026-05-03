@@ -620,7 +620,7 @@ export function ChapterEditorPanel({
             </div>
           </div>
           <Form.Item name="outline" label="章节目标">
-            <Input.TextArea rows={4} placeholder="本章推进什么、收束什么、留下什么。" />
+            <Input.TextArea rows={6} placeholder="本章推进什么、收束什么、留下什么。" />
           </Form.Item>
         </Form>
       )}
@@ -696,17 +696,17 @@ export function SegmentEditorPanel({
             </div>
             <div className="novel-grid novel-grid--2">
               <Form.Item name="inputState" label="进入状态">
-                <Input.TextArea rows={3} />
+                <Input.TextArea rows={6} />
               </Form.Item>
               <Form.Item name="outputState" label="离开状态">
-                <Input.TextArea rows={3} />
+                <Input.TextArea rows={6} />
               </Form.Item>
             </div>
             <Form.Item name="purpose" label="场景作用">
-              <Input.TextArea rows={3} />
+              <Input.TextArea rows={6} />
             </Form.Item>
             <Form.Item name="summary" label="片段摘要">
-              <Input.TextArea rows={3} />
+              <Input.TextArea rows={6} />
             </Form.Item>
             <Form.Item name="content" label="场景正文">
               <Input.TextArea rows={10} />

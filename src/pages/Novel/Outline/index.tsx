@@ -768,10 +768,10 @@ export default function Outline({ novelId }: Props) {
             <Form.Item name="chapterStart" label="起始章节" style={{ flex: 1 }}><Input type="number" min={1} /></Form.Item>
             <Form.Item name="chapterEnd" label="结束章节" style={{ flex: 1 }}><Input type="number" min={1} /></Form.Item>
           </div>
-          <Form.Item name="arcGoal" label="本弧目标"><Input.TextArea rows={4} placeholder="写清这一弧要推进什么" /></Form.Item>
+          <Form.Item name="arcGoal" label="本弧目标"><Input.TextArea rows={6} placeholder="写清这一弧要推进什么" /></Form.Item>
           <Form.Item name="arcSummary" label="本弧概述"><Input.TextArea rows={5} placeholder="写清起点、转折和阶段收束" /></Form.Item>
-          <Form.Item name="growthLedger" label="成长账本"><Input.TextArea rows={4} placeholder="写清这一弧主角具体获得了什么变化" /></Form.Item>
-          <Form.Item name="costLedger" label="代价账本"><Input.TextArea rows={4} placeholder="写清这一弧具体付出了什么代价" /></Form.Item>
+          <Form.Item name="growthLedger" label="成长账本"><Input.TextArea rows={6} placeholder="写清这一弧主角具体获得了什么变化" /></Form.Item>
+          <Form.Item name="costLedger" label="代价账本"><Input.TextArea rows={6} placeholder="写清这一弧具体付出了什么代价" /></Form.Item>
           <div style={{ display: 'grid', gap: 12 }}>
             <div style={{ fontWeight: 600, fontSize: 13 }}>阶段目标覆盖</div>
             <div style={{ fontSize: 12, opacity: 0.72 }}>默认按章节范围自动推导 25% / 50% / 75% / 收束；只有你填写的内容才会作为覆盖配置保存。</div>

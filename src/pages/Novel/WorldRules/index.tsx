@@ -427,10 +427,10 @@ export default function WorldRules({ novelId }: Props) {
             <Input placeholder="例如：悬疑成长、宗门争斗" />
           </Form.Item>
           <Form.Item name={['genreProfile', 'worldviewTone']} label="世界观基调">
-            <Input.TextArea rows={4} placeholder="概括这个世界整体的气质、运转逻辑和主要矛盾。" />
+            <Input.TextArea rows={6} placeholder="概括这个世界整体的气质、运转逻辑和主要矛盾。" />
           </Form.Item>
           <Form.Item name={['genreProfile', 'socialFrame']} label="社会框架">
-            <Input.TextArea rows={4} placeholder="写清权力结构、阶层秩序、组织关系和资源分配方式。" />
+            <Input.TextArea rows={6} placeholder="写清权力结构、阶层秩序、组织关系和资源分配方式。" />
           </Form.Item>
           <Form.Item name={['genreProfile', 'narrativeFocus']} label="叙事焦点">
             <Select mode="tags" placeholder="输入叙事重点后回车" />
@@ -474,16 +474,16 @@ export default function WorldRules({ novelId }: Props) {
                     <Select mode="tags" placeholder="输入等级阶段后回车" />
                   </Form.Item>
                   <Form.Item name={[field.name, 'advancementRule']} label="晋升规则">
-                    <Input.TextArea rows={3} placeholder="写清如何升级、需要什么条件、由谁决定晋升。" />
+                    <Input.TextArea rows={6} placeholder="写清如何升级、需要什么条件、由谁决定晋升。" />
                   </Form.Item>
                   <Form.Item name={[field.name, 'limitations']} label="限制条件">
-                    <Input.TextArea rows={2} placeholder="写清不能做什么、会被什么卡住。" />
+                    <Input.TextArea rows={6} placeholder="写清不能做什么、会被什么卡住。" />
                   </Form.Item>
                   <Form.Item name={[field.name, 'cost']} label="代价">
-                    <Input.TextArea rows={2} placeholder="写清获得力量或资源后要付出的成本。" />
+                    <Input.TextArea rows={6} placeholder="写清获得力量或资源后要付出的成本。" />
                   </Form.Item>
                   <Form.Item name={[field.name, 'taboo']} label="禁忌">
-                    <Input.TextArea rows={2} placeholder="写清绝不能触碰的规则或后果。" />
+                    <Input.TextArea rows={6} placeholder="写清绝不能触碰的规则或后果。" />
                   </Form.Item>
                 </RuleListCard>
               ))}
@@ -519,7 +519,7 @@ export default function WorldRules({ novelId }: Props) {
                       </Form.Item>
                     </div>
                     <Form.Item name={[field.name, 'summary']} label="概述">
-                      <Input.TextArea rows={2} placeholder="写清这个实体在世界里的定位和存在方式。" />
+                      <Input.TextArea rows={6} placeholder="写清这个实体在世界里的定位和存在方式。" />
                     </Form.Item>
                     <Form.Item name={[field.name, 'traits']} label="特征">
                       <Select mode="tags" placeholder="输入特征后回车" />
@@ -528,10 +528,10 @@ export default function WorldRules({ novelId }: Props) {
                       <Select mode="tags" placeholder="输入常见身份后回车" />
                     </Form.Item>
                     <Form.Item name={[field.name, 'relationToHumans']} label="与主流社会关系">
-                      <Input.TextArea rows={2} placeholder="写清和主流秩序是合作、对立、依附还是隔绝。" />
+                      <Input.TextArea rows={6} placeholder="写清和主流秩序是合作、对立、依附还是隔绝。" />
                     </Form.Item>
                     <Form.Item name={[field.name, 'storyUse']} label="剧情作用">
-                      <Input.TextArea rows={2} placeholder="写清这个种族通常承担什么剧情功能。" />
+                      <Input.TextArea rows={6} placeholder="写清这个种族通常承担什么剧情功能。" />
                     </Form.Item>
                   </RuleListCard>
                 ))}
@@ -568,19 +568,19 @@ export default function WorldRules({ novelId }: Props) {
                       </Form.Item>
                     </div>
                     <Form.Item name={[field.name, 'summary']} label="概述">
-                      <Input.TextArea rows={2} placeholder="概括这个势力的定位、立场和影响力。" />
+                      <Input.TextArea rows={6} placeholder="概括这个势力的定位、立场和影响力。" />
                     </Form.Item>
                     <Form.Item name={[field.name, 'structure']} label="组织结构">
-                      <Input.TextArea rows={2} placeholder="写清内部层级、决策方式和执行链条。" />
+                      <Input.TextArea rows={6} placeholder="写清内部层级、决策方式和执行链条。" />
                     </Form.Item>
                     <Form.Item name={[field.name, 'resources']} label="核心资源">
-                      <Input.TextArea rows={2} placeholder="写清这个势力掌握的关键资源、情报或人手。" />
+                      <Input.TextArea rows={6} placeholder="写清这个势力掌握的关键资源、情报或人手。" />
                     </Form.Item>
                     <Form.Item name={[field.name, 'externalRelations']} label="对外关系">
-                      <Input.TextArea rows={2} placeholder="写清它与其他势力、社会和主角线的关系。" />
+                      <Input.TextArea rows={6} placeholder="写清它与其他势力、社会和主角线的关系。" />
                     </Form.Item>
                     <Form.Item name={[field.name, 'recruitFrom']} label="吸纳来源">
-                      <Input.TextArea rows={2} placeholder="写清成员主要来自哪里、通过什么路径进入。" />
+                      <Input.TextArea rows={6} placeholder="写清成员主要来自哪里、通过什么路径进入。" />
                     </Form.Item>
                     <Form.Item name={[field.name, 'notableSites']} label="重要据点">
                       <Select mode="tags" placeholder="输入重要据点后回车" />
@@ -599,7 +599,7 @@ export default function WorldRules({ novelId }: Props) {
       children: (
         <>
           <Form.Item name={['characterEcology', 'overview']} label="生态概览">
-            <Input.TextArea rows={3} placeholder="概括这个题材下的人物生态、功能分层和角色来源。" />
+            <Input.TextArea rows={6} placeholder="概括这个题材下的人物生态、功能分层和角色来源。" />
           </Form.Item>
           <Form.List name={['characterEcology', 'slots']}>
             {(fields, { add, remove }) => (
@@ -625,10 +625,10 @@ export default function WorldRules({ novelId }: Props) {
                       </Form.Item>
                     </div>
                     <Form.Item name={[field.name, 'narrativeFunction']} label="叙事功能">
-                      <Input.TextArea rows={2} placeholder="写清这个槽位在主线里承担什么作用。" />
+                      <Input.TextArea rows={6} placeholder="写清这个槽位在主线里承担什么作用。" />
                     </Form.Item>
                     <Form.Item name={[field.name, 'contextLink']} label="关联设定 / 冲突 / 场景">
-                      <Input.TextArea rows={2} placeholder="写清它通常和哪些设定、冲突或场景绑定。" />
+                      <Input.TextArea rows={6} placeholder="写清它通常和哪些设定、冲突或场景绑定。" />
                     </Form.Item>
                     <Form.Item name={[field.name, 'preferredFactions']} label="偏向势力">
                       <Select mode="tags" placeholder="输入偏向势力后回车" />
@@ -650,7 +650,7 @@ export default function WorldRules({ novelId }: Props) {
       children: (
         <>
           <Form.Item name={['mapBlueprint', 'overview']} label="蓝图概览">
-            <Input.TextArea rows={3} placeholder="概括地图层级、空间分布和主要冲突区域。" />
+            <Input.TextArea rows={6} placeholder="概括地图层级、空间分布和主要冲突区域。" />
           </Form.Item>
           <Form.List name={['mapBlueprint', 'levels']}>
             {(fields, { add, remove }) => (
@@ -679,7 +679,7 @@ export default function WorldRules({ novelId }: Props) {
                       <Select mode="tags" placeholder="输入节点类型后回车" />
                     </Form.Item>
                     <Form.Item name={[field.name, 'relationHint']} label="结构提示">
-                      <Input.TextArea rows={2} placeholder="写清这一层主要负责什么结构作用。" />
+                      <Input.TextArea rows={6} placeholder="写清这一层主要负责什么结构作用。" />
                     </Form.Item>
                     <Form.Item name={[field.name, 'examples']} label="示例">
                       <Select mode="tags" placeholder="输入示例地点后回车" />
@@ -698,7 +698,7 @@ export default function WorldRules({ novelId }: Props) {
       children: (
         <>
           <Form.Item name={['worldDynamics', 'overview']} label="动态总述">
-            <Input.TextArea rows={3} placeholder="概括气候、季节、补给、贸易和资源波动如何长期改变人物行动边界。" />
+            <Input.TextArea rows={6} placeholder="概括气候、季节、补给、贸易和资源波动如何长期改变人物行动边界。" />
           </Form.Item>
 
           <Divider orientation="left">气候周期</Divider>
@@ -723,16 +723,16 @@ export default function WorldRules({ novelId }: Props) {
                       </Form.Item>
                     </div>
                     <Form.Item name={[field.name, 'seasonalShift']} label="季节变化">
-                      <Input.TextArea rows={2} placeholder="写清一年中哪些阶段最影响远行、作战、闭关、调查或生产。" />
+                      <Input.TextArea rows={6} placeholder="写清一年中哪些阶段最影响远行、作战、闭关、调查或生产。" />
                     </Form.Item>
                     <Form.Item name={[field.name, 'hazardTrigger']} label="灾害 / 异动触发">
-                      <Input.TextArea rows={2} placeholder="例如：汛期断桥、寒潮封山、沙暴停商、秘境潮汐暴涨。" />
+                      <Input.TextArea rows={6} placeholder="例如：汛期断桥、寒潮封山、沙暴停商、秘境潮汐暴涨。" />
                     </Form.Item>
                     <Form.Item name={[field.name, 'travelImpact']} label="行动影响">
-                      <Input.TextArea rows={2} placeholder="写清它如何改变路线、脚程、监控盲区、援军速度或封锁成本。" />
+                      <Input.TextArea rows={6} placeholder="写清它如何改变路线、脚程、监控盲区、援军速度或封锁成本。" />
                     </Form.Item>
                     <Form.Item name={[field.name, 'resourceImpact']} label="资源影响">
-                      <Input.TextArea rows={2} placeholder="写清它如何改变粮食、药材、能源、灵石、税赋或补给效率。" />
+                      <Input.TextArea rows={6} placeholder="写清它如何改变粮食、药材、能源、灵石、税赋或补给效率。" />
                     </Form.Item>
                   </RuleListCard>
                 ))}
@@ -762,19 +762,19 @@ export default function WorldRules({ novelId }: Props) {
                       </Form.Item>
                     </div>
                     <Form.Item name={[field.name, 'circulationPath']} label="流通路径">
-                      <Input.TextArea rows={2} placeholder="写清资源从哪里来，经由哪些中转，最后流向谁。" />
+                      <Input.TextArea rows={6} placeholder="写清资源从哪里来，经由哪些中转，最后流向谁。" />
                     </Form.Item>
                     <Form.Item name={[field.name, 'controller']} label="控制者">
-                      <Input.TextArea rows={2} placeholder="写清掌控产地、税赋、仓储、配给、黑市或通行证的是谁。" />
+                      <Input.TextArea rows={6} placeholder="写清掌控产地、税赋、仓储、配给、黑市或通行证的是谁。" />
                     </Form.Item>
                     <Form.Item name={[field.name, 'scarcityTrigger']} label="稀缺触发">
-                      <Input.TextArea rows={2} placeholder="例如：封路、征用、欠薪、天灾、秘境关闭、围城、停电。" />
+                      <Input.TextArea rows={6} placeholder="例如：封路、征用、欠薪、天灾、秘境关闭、围城、停电。" />
                     </Form.Item>
                     <Form.Item name={[field.name, 'volatilityTrigger']} label="波动触发">
-                      <Input.TextArea rows={2} placeholder="写清什么事件会让价格、配额、运输速度或市场秩序快速失衡。" />
+                      <Input.TextArea rows={6} placeholder="写清什么事件会让价格、配额、运输速度或市场秩序快速失衡。" />
                     </Form.Item>
                     <Form.Item name={[field.name, 'storyUse']} label="剧情作用">
-                      <Input.TextArea rows={2} placeholder="写清它会把人物推向什么选择、代价、冲突或联盟变化。" />
+                      <Input.TextArea rows={6} placeholder="写清它会把人物推向什么选择、代价、冲突或联盟变化。" />
                     </Form.Item>
                   </RuleListCard>
                 ))}
@@ -809,7 +809,7 @@ export default function WorldRules({ novelId }: Props) {
             </Form.Item>
           </div>
           <Form.Item name={['timelineConfig', 'displayPattern']} label="显示格式">
-            <Input.TextArea rows={3} placeholder="例如：王历 X 年 / 雪月 / 战后第 N 周" />
+            <Input.TextArea rows={6} placeholder="例如：王历 X 年 / 雪月 / 战后第 N 周" />
           </Form.Item>
           <Form.Item name={['timelineConfig', 'precisionOptions']} label="时间精度">
             <Select mode="tags" placeholder="输入时间精度后回车" />
@@ -840,10 +840,10 @@ export default function WorldRules({ novelId }: Props) {
             <Form.Item name={['writingConstraints', 'realismLevel']} label="真实度层级"><Select options={REALISM_LEVEL_OPTIONS} placeholder="选择文本真实度基线" /></Form.Item>
             <Form.Item name={['writingConstraints', 'forbiddenPhrases']} label="禁用 AI 腔"><Select mode="tags" placeholder="输入禁用表达后回车" /></Form.Item>
           </div>
-          <Form.Item name={['writingConstraints', 'narrationStyle']} label="叙述风格"><Input.TextArea rows={3} placeholder="写清叙述应偏冷静、克制、直接还是抒情。" /></Form.Item>
-          <Form.Item name={['writingConstraints', 'dialogueStyle']} label="对话风格"><Input.TextArea rows={3} placeholder="写清人物说话的语气、节奏和用词边界。" /></Form.Item>
-          <Form.Item name={['writingConstraints', 'sciencePolicy']} label="科学边界"><Input.TextArea rows={2} placeholder="例如现代题材先守现实常识，幻想题材明确哪些超常现象成立。" /></Form.Item>
-          <Form.Item name={['writingConstraints', 'physicsPolicy']} label="物理边界"><Input.TextArea rows={2} placeholder="写清行动、伤势、破坏、移动和恢复速度的底线。" /></Form.Item>
+          <Form.Item name={['writingConstraints', 'narrationStyle']} label="叙述风格"><Input.TextArea rows={6} placeholder="写清叙述应偏冷静、克制、直接还是抒情。" /></Form.Item>
+          <Form.Item name={['writingConstraints', 'dialogueStyle']} label="对话风格"><Input.TextArea rows={6} placeholder="写清人物说话的语气、节奏和用词边界。" /></Form.Item>
+          <Form.Item name={['writingConstraints', 'sciencePolicy']} label="科学边界"><Input.TextArea rows={6} placeholder="例如现代题材先守现实常识，幻想题材明确哪些超常现象成立。" /></Form.Item>
+          <Form.Item name={['writingConstraints', 'physicsPolicy']} label="物理边界"><Input.TextArea rows={6} placeholder="写清行动、伤势、破坏、移动和恢复速度的底线。" /></Form.Item>
           <Form.Item name={['writingConstraints', 'commonSenseFocus']} label="常识重点"><Select mode="tags" placeholder="输入需要长期校验的常识重点后回车" /></Form.Item>
           <Form.Item name={['writingConstraints', 'contextAlignmentFocus']} label="上下文对齐重点"><Select mode="tags" placeholder="输入需要长期对齐的背景或规则后回车" /></Form.Item>
           <Form.Item name={['writingConstraints', 'extraRules']} label="额外规则"><Select mode="tags" placeholder="输入额外规则后回车" /></Form.Item>

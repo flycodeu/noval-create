@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Button, Empty, Modal, Progress, Skeleton, Tabs, Tag, message } from 'antd'
+import { Button, Empty, Modal, Progress, Skeleton, Spin, Tabs, Tag, message } from 'antd'
 import VirtualList from 'rc-virtual-list'
 import { useNavigate } from 'react-router-dom'
 import type { LanguageDriftMetrics, QualityDashboardData, QualityRepairAction, QualityRepairActionResult, TaskPipelineStats } from '../../../types'
@@ -288,6 +288,7 @@ function recallSnapshotSourceColor(source?: QualityDashboardData['chapterDetails
 export default function QualityDashboard({ novelId }: Props) {
   const navigate = useNavigate()
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [data, setData] = useState<QualityDashboardData | null>(null)
   const [pipelineStats, setPipelineStats] = useState<TaskPipelineStats | null>(null)
   const [selectedChapter, setSelectedChapter] = useState<QualityChapterEntry | null>(null)
@@ -295,8 +296,12 @@ export default function QualityDashboard({ novelId }: Props) {
   const [activeTab, setActiveTab] = useState('overview')
   const [repairingActionId, setRepairingActionId] = useState<string | null>(null)
 
-  const loadData = useCallback(async () => {
-    setLoading(true)
+  const loadData = useCallback(async (showLoading = false) => {
+    if (showLoading || !data) {
+      setLoading(true)
+    } else {
+      setRefreshing(true)
+    }
     try {
       try {
         await window.electron.quality.backfillRecallSnapshots(novelId)
@@ -314,10 +319,11 @@ export default function QualityDashboard({ novelId }: Props) {
       setPipelineStats(null)
     } finally {
       setLoading(false)
+      setRefreshing(false)
     }
-  }, [novelId])
+  }, [data, novelId])
 
-  useEffect(() => { void loadData() }, [loadData])
+  useEffect(() => { void loadData(true) }, [loadData])
   useEffect(() => {
     if (!data || selectedVolumeId == null) return
     if (!data.volumeQualityMetrics.some((entry) => entry.volumeId === selectedVolumeId)) {
@@ -325,7 +331,7 @@ export default function QualityDashboard({ novelId }: Props) {
     }
   }, [data, selectedVolumeId])
 
-  if (loading) {
+  if (loading && !data) {
     return (
       <WorkspacePage title="质量监控">
         <WorkspacePanel title="正在汇总质量数据">
@@ -842,6 +848,12 @@ export default function QualityDashboard({ novelId }: Props) {
         <WorkspaceMetric key="avg" label="平均总分 / 压力" value={hasScoreData ? `${data.averageOverallScore} / 10` : `${data.protagonistSetbackSummary.averagePressure}`} />,
       ]}
     >
+      {refreshing ? <div className="novel-dashboard__refresh-indicator" style={{ marginBottom: 16 }}><Spin size="small" /><span>正在同步质量监控数据</span></div> : null}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
+        <Button loading={refreshing} onClick={() => void loadData()}>
+          刷新质量数据
+        </Button>
+      </div>
       <Tabs
         activeKey={activeTab}
         onChange={setActiveTab}

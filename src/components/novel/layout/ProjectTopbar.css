@@ -1,5 +1,5 @@
 .project-topbar {
-  --project-topbar-height: 88px;
+  --project-topbar-height: 92px;
   --project-topbar-window-width: 138px;
   --project-topbar-surface: var(--novel-shell-chrome-surface, var(--bg-surface));
   --project-topbar-surface-strong: var(--novel-shell-toolbar-surface, var(--bg-elevated));
@@ -11,8 +11,8 @@
   --project-topbar-accent: var(--accent);
   --project-topbar-danger: var(--danger);
   position: relative;
-  display: grid;
-  grid-template-rows: 42px minmax(46px, auto);
+  display: flex;
+  flex-direction: column;
   min-height: var(--project-topbar-height);
   border-bottom: 1px solid var(--project-topbar-border);
   background: var(--project-topbar-surface);
@@ -26,7 +26,27 @@
   z-index: 0;
 }
 
-.project-topbar__chrome,
+.project-topbar__titlebar {
+  position: relative;
+  display: flex;
+  justify-content: flex-end;
+  height: 36px;
+  width: 100%;
+  border-bottom: 1px solid color-mix(in srgb, var(--project-topbar-border) 88%, transparent 12%);
+}
+
+.project-topbar__main-row {
+  position: relative;
+  z-index: 1;
+  -webkit-app-region: no-drag;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex: 1;
+  padding: 10px 16px 14px;
+  gap: 16px;
+}
+
 .project-topbar__identity,
 .project-topbar__toolbar,
 .project-topbar__primary-actions,
@@ -37,55 +57,24 @@
   -webkit-app-region: no-drag;
 }
 
-.project-topbar__chrome {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  min-height: 42px;
-  padding: 0 10px 0 14px;
-}
-
 .project-topbar__identity {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 16px;
   min-width: 0;
-  padding-right: calc(var(--project-topbar-window-width) + 8px);
 }
 
 .project-topbar__title-group {
   display: flex;
   align-items: center;
-  gap: 8px;
   min-width: 0;
-}
-
-.project-topbar__app-mark {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  color: var(--project-topbar-accent);
-  font-size: 13px;
-  flex: 0 0 auto;
 }
 
 .project-topbar__title-copy {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   min-width: 0;
-  gap: 0;
-}
-
-.project-topbar__app-name {
-  color: var(--project-topbar-text-soft);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  line-height: 1;
-  flex: 0 0 auto;
+  gap: 4px;
 }
 
 .project-topbar__project-line {
@@ -127,15 +116,22 @@
   text-overflow: ellipsis;
 }
 
+.project-topbar__workspace-summary {
+  max-width: min(640px, 100%);
+  color: var(--project-topbar-text-soft);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .project-topbar__toolbar {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
   align-items: center;
-  gap: 10px 12px;
+  gap: 16px;
   min-width: 0;
-  padding: 8px 14px 10px;
-  border-top: 1px solid color-mix(in srgb, var(--project-topbar-border) 65%, transparent 35%);
-  background: var(--project-topbar-toolbar);
+  flex: 0 1 auto;
 }
 
 .project-topbar__toolbar-group,
@@ -327,36 +323,32 @@
 }
 
 @media (max-width: 1040px) {
-  .project-topbar__toolbar {
-    grid-template-columns: 1fr;
-    justify-items: stretch;
+  .project-topbar__main-row {
+    flex-wrap: wrap;
+    gap: 12px;
   }
 
-  .project-topbar__toolbar-group--primary,
-  .project-topbar__toolbar-group--secondary {
-    justify-content: flex-start;
-    justify-self: stretch;
+  .project-topbar__toolbar {
     flex-wrap: wrap;
+    justify-content: flex-start;
   }
 }
 
 @media (max-width: 760px) {
   .project-topbar {
     --project-topbar-window-width: 0px;
-    --project-topbar-height: 126px;
-    padding-top: 36px;
+    --project-topbar-height: auto;
   }
 
-  .project-topbar__chrome {
+  .project-topbar__main-row {
     padding-top: 2px;
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .project-topbar__identity {
     padding-right: 0;
-  }
-
-  .project-topbar__app-name {
-    display: none;
+    align-items: flex-start;
   }
 
   .project-topbar__project-line {
@@ -370,6 +362,12 @@
   }
 
   .project-topbar__toolbar {
-    padding-inline: 10px;
+    padding-inline: 0px;
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .project-topbar__workspace-summary {
+    white-space: normal;
   }
 }

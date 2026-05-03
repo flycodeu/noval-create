@@ -772,12 +772,12 @@ export default function StoryThreadsPage({ novelId }: Props) {
             </div>
             <div className="guided-step__field-card guided-step__field-card--full">
               <Form.Item name="summary" label="线程摘要">
-                <Input.TextArea rows={3} placeholder="用 1-2 句话说明这条线程在持续推动什么。" />
+                <Input.TextArea rows={6} placeholder="用 1-2 句话说明这条线程在持续推动什么。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card guided-step__field-card--full">
               <Form.Item name="premise" label="触发前提 / 起始条件">
-                <Input.TextArea rows={3} placeholder="写这条线程从哪里开始，为什么会成立。" />
+                <Input.TextArea rows={6} placeholder="写这条线程从哪里开始，为什么会成立。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card guided-step__field-card--compact">
@@ -792,17 +792,17 @@ export default function StoryThreadsPage({ novelId }: Props) {
             </div>
             <div className="guided-step__field-card guided-step__field-card--full">
               <Form.Item name="currentState" label="当前状态描述">
-                <Input.TextArea rows={3} placeholder="写现在推进到了哪一步，阻力在哪，谁正在承受代价。" />
+                <Input.TextArea rows={6} placeholder="写现在推进到了哪一步，阻力在哪，谁正在承受代价。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card guided-step__field-card--full">
               <Form.Item name="payoffCondition" label="回收条件">
-                <Input.TextArea rows={3} placeholder="写清楚发生什么以后，这条线程才算真正回收。" />
+                <Input.TextArea rows={6} placeholder="写清楚发生什么以后，这条线程才算真正回收。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card guided-step__field-card--full">
               <Form.Item name="notes" label="补充说明">
-                <Input.TextArea rows={3} placeholder="补充风险点、伏笔位置，或与其他线程的耦合关系。" />
+                <Input.TextArea rows={6} placeholder="补充风险点、伏笔位置，或与其他线程的耦合关系。" />
               </Form.Item>
             </div>
           </div>
@@ -827,7 +827,7 @@ export default function StoryThreadsPage({ novelId }: Props) {
             <InputNumber min={1} max={6} style={{ width: '100%' }} />
           </Form.Item>
           <Form.Item name="focus" label="本轮聚焦方向">
-            <Input.TextArea rows={4} placeholder="例如：优先补悬念线和关系线；避免重复主线冲突；重点围绕第 20-40 章的中段压力。" />
+            <Input.TextArea rows={6} placeholder="例如：优先补悬念线和关系线；避免重复主线冲突；重点围绕第 20-40 章的中段压力。" />
           </Form.Item>
         </Form>
       </Modal>

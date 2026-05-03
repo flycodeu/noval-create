@@ -399,7 +399,7 @@ export function TimelineEditorPanel({
                 </div>
               </div>
               <Form.Item name="eventSummary" label={TIMELINE_TEXT.labelSummary}>
-                <Input.TextArea rows={3} placeholder={TIMELINE_TEXT.placeholderSummary} />
+                <Input.TextArea rows={6} placeholder={TIMELINE_TEXT.placeholderSummary} />
               </Form.Item>
             </div>
 
@@ -490,7 +490,7 @@ export function TimelineEditorPanel({
                   />
                 </Form.Item>
                 <Form.Item name="protagonistAction" label={TIMELINE_TEXT.labelProtagonistAction}>
-                  <Input.TextArea rows={3} placeholder={TIMELINE_TEXT.placeholderProtagonistAction} />
+                  <Input.TextArea rows={6} placeholder={TIMELINE_TEXT.placeholderProtagonistAction} />
                 </Form.Item>
               </div>
             </div>
@@ -501,13 +501,13 @@ export function TimelineEditorPanel({
               </div>
               <div className="novel-grid novel-grid--3">
                 <Form.Item name="eventCause" label={TIMELINE_TEXT.labelEventCause}>
-                  <Input.TextArea rows={4} />
+                  <Input.TextArea rows={6} />
                 </Form.Item>
                 <Form.Item name="eventProcess" label={TIMELINE_TEXT.labelEventProcess}>
-                  <Input.TextArea rows={4} />
+                  <Input.TextArea rows={6} />
                 </Form.Item>
                 <Form.Item name="eventResult" label={TIMELINE_TEXT.labelEventResult}>
-                  <Input.TextArea rows={4} />
+                  <Input.TextArea rows={6} />
                 </Form.Item>
               </div>
               <Form.Item name="directConsequences" label={TIMELINE_TEXT.labelDirectConsequences}>
@@ -517,7 +517,7 @@ export function TimelineEditorPanel({
                 <Select mode="tags" open={false} />
               </Form.Item>
               <Form.Item name="notes" label={TIMELINE_TEXT.labelNotes}>
-                <Input.TextArea rows={4} />
+                <Input.TextArea rows={6} />
               </Form.Item>
             </div>
           </Form>
@@ -565,7 +565,7 @@ export function TimelineGenerateModal({
           <Select options={[2, 3, 4, 5, 6].map((item) => ({ value: item, label: `${item} \u4e2a/\u6279` }))} />
         </Form.Item>
         <Form.Item name="focus" label={TIMELINE_TEXT.generateFocus}>
-          <Input.TextArea rows={3} placeholder={TIMELINE_TEXT.generateFocusPlaceholder} />
+          <Input.TextArea rows={6} placeholder={TIMELINE_TEXT.generateFocusPlaceholder} />
         </Form.Item>
       </Form>
     </Modal>

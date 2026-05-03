@@ -330,7 +330,7 @@ export default function GlossaryPage({ novelId }: Props) {
               </div>
               <div className="guided-step__field-card guided-step__field-card--full">
                 <Form.Item name="definition" label="定义" rules={[{ required: true, message: '请填写定义' }]}>
-                  <Input.TextArea rows={4} placeholder="写清这个词在小说里的确切含义、作用边界和常见误用。" />
+                  <Input.TextArea rows={6} placeholder="写清这个词在小说里的确切含义、作用边界和常见误用。" />
                 </Form.Item>
               </div>
               <div className="guided-step__field-card guided-step__field-card--full">

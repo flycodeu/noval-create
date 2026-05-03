@@ -396,32 +396,32 @@ export default function ProjectBriefPage({ novelId }: Props) {
             </div>
             <div className="guided-step__field-card">
               <Form.Item name="targetReader" label="目标读者" rules={[{ required: true, message: '请写清目标读者' }]}>
-                <Input.TextArea rows={4} placeholder="写读者的阅读偏好、节奏预期和情绪需求。" />
+                <Input.TextArea rows={6} placeholder="写读者的阅读偏好、节奏预期和情绪需求。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card">
               <Form.Item name="readerPromise" label="读者承诺" rules={[{ required: true, message: '请写清读者承诺' }]}>
-                <Input.TextArea rows={4} placeholder="写读者会稳定收到什么体验回报，不要写宣传口号。" />
+                <Input.TextArea rows={6} placeholder="写读者会稳定收到什么体验回报，不要写宣传口号。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card guided-step__field-card--full">
               <Form.Item name="sellingPoints" label="卖点列表" rules={[{ required: true, message: '请补充作品卖点' }]}>
-                <Input.TextArea rows={4} placeholder="建议每行一条，写 3-5 条真正能落地的卖点。" />
+                <Input.TextArea rows={6} placeholder="建议每行一条，写 3-5 条真正能落地的卖点。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card guided-step__field-card--full">
               <Form.Item name="compTitles" label="参考作品 / 对标方向" rules={[{ required: true, message: '请补充参考作品' }]}>
-                <Input.TextArea rows={3} placeholder="写 2-4 个参考作品，并点明借鉴点。" />
+                <Input.TextArea rows={6} placeholder="写 2-4 个参考作品，并点明借鉴点。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card">
               <Form.Item name="tabooRules" label="禁区 / 不可偏离项">
-                <Input.TextArea rows={4} placeholder="写必须避开的跑偏方式、雷点和失真方向。" />
+                <Input.TextArea rows={6} placeholder="写必须避开的跑偏方式、雷点和失真方向。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card">
               <Form.Item name="deliveryRhythm" label="连载 / 交付节奏">
-                <Input.TextArea rows={4} placeholder="写更新节奏、单章回报和卷末回收的基本预期。" />
+                <Input.TextArea rows={6} placeholder="写更新节奏、单章回报和卷末回收的基本预期。" />
               </Form.Item>
             </div>
           </div>

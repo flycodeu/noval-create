@@ -1038,7 +1038,7 @@ export default function MapExplorerPage({ novelId }: Props) {
         <Input />
       </Form.Item>
       <Form.Item name="plotRelevance" label="剧情作用">
-        <Input.TextArea rows={4} />
+        <Input.TextArea rows={6} />
       </Form.Item>
 
       <div className="novel-grid novel-grid--2">
@@ -1593,7 +1593,7 @@ export default function MapExplorerPage({ novelId }: Props) {
           </div>
 
           <Form.Item name="description" label="关系说明">
-            <Input.TextArea rows={4} placeholder="补充这条关系如何形成、有什么影响、是否稳定等信息。" />
+            <Input.TextArea rows={6} placeholder="补充这条关系如何形成、有什么影响、是否稳定等信息。" />
           </Form.Item>
         </Form>
       </Modal>

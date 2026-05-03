@@ -271,17 +271,17 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
               </div>
               <div className="guided-step__field-card guided-step__field-card--full">
                 <Form.Item name="synopsis" label="一句话简介" rules={[{ required: true, message: '请填写简介' }]}>
-                  <Input.TextArea rows={4} placeholder="写清主角处境、目标和最硬的冲突。" />
+                  <Input.TextArea rows={6} placeholder="写清主角处境、目标和最硬的冲突。" />
                 </Form.Item>
               </div>
               <div className="guided-step__field-card">
                 <Form.Item name="userBackground" label="原始背景" rules={[{ required: true, message: '请填写原始背景' }]}>
-                  <Input.TextArea rows={6} placeholder="把你最初想到的故事处境、氛围和困局写下来。" />
+                  <Input.TextArea rows={8} placeholder="把你最初想到的故事处境、氛围和困局写下来。" />
                 </Form.Item>
               </div>
               <div className="guided-step__field-card">
                 <Form.Item name="expandedBackground" label="扩展背景" rules={[{ required: true, message: '请填写扩展背景' }]}>
-                  <Input.TextArea rows={6} placeholder="补充环境压力、资源条件、制度成本和社会结构。" />
+                  <Input.TextArea rows={8} placeholder="补充环境压力、资源条件、制度成本和社会结构。" />
                 </Form.Item>
               </div>
             </div>

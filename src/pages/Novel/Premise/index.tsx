@@ -623,27 +623,27 @@ export default function PremisePage({ novelId }: Props) {
           <div className="guided-step__field-grid">
             <div className="guided-step__field-card">
               <Form.Item name="positioning" label="作品定位" rules={[{ required: true, message: '请写清作品定位' }]}>
-                <Input.TextArea rows={4} placeholder="写清作品的时代、环境、社会压力和整体叙事方向。" />
+                <Input.TextArea rows={8} placeholder="写清作品的时代、环境、社会压力和整体叙事方向。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card">
               <Form.Item name="coreHook" label="核心信息" rules={[{ required: true, message: '请写清核心信息' }]}>
-                <Input.TextArea rows={4} placeholder="写这部书最值得展开的核心信息，不要直接写成事件链。" />
+                <Input.TextArea rows={8} placeholder="写这部书最值得展开的核心信息，不要直接写成事件链。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card">
               <Form.Item name="protagonistStart" label="主角起点" rules={[{ required: true, message: '请写清主角起点' }]}>
-                <Input.TextArea rows={4} placeholder="写主角开局的身份、处境、资源和限制。" />
+                <Input.TextArea rows={8} placeholder="写主角开局的身份、处境、资源和限制。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card">
               <Form.Item name="constraints" label="底层约束" rules={[{ required: true, message: '请写清底层约束' }]}>
-                <Input.TextArea rows={4} placeholder="写不能违背的世界规则、社会规则、代价和常识边界。" />
+                <Input.TextArea rows={8} placeholder="写不能违背的世界规则、社会规则、代价和常识边界。" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card guided-step__field-card--full">
               <Form.Item name="languageGuardrails" label="语言边界">
-                <Input.TextArea rows={3} placeholder="写命名、称呼、语气、禁用表达和叙述口径边界。" />
+                <Input.TextArea rows={6} placeholder="写命名、称呼、语气、禁用表达和叙述口径边界。" />
               </Form.Item>
             </div>
           </div>
@@ -671,17 +671,17 @@ export default function PremisePage({ novelId }: Props) {
                   <div className="guided-step__field-grid">
                     <div className="guided-step__field-card">
                       <Form.Item name="antiAiFlavor" label="去 AI 腔规则">
-                        <Input.TextArea rows={4} placeholder="例如：禁止口号式总结、禁止万能情绪句、禁止对称排比收尾。" />
+                        <Input.TextArea rows={8} placeholder="例如：禁止口号式总结、禁止万能情绪句、禁止对称排比收尾。" />
                       </Form.Item>
                     </div>
                     <div className="guided-step__field-card">
                       <Form.Item name="commonSenseRules" label="常识约束">
-                        <Input.TextArea rows={4} placeholder="例如：人物行为必须服从信息量、伤势、资源、地图距离和制度压力。" />
+                        <Input.TextArea rows={8} placeholder="例如：人物行为必须服从信息量、伤势、资源、地图距离和制度压力。" />
                       </Form.Item>
                     </div>
                     <div className="guided-step__field-card guided-step__field-card--full">
                       <Form.Item name="bannedTerms" label="禁用表达">
-                        <Input.TextArea rows={3} placeholder="写需要尽量避免的空洞词、套话和生造词。" />
+                        <Input.TextArea rows={6} placeholder="写需要尽量避免的空洞词、套话和生造词。" />
                       </Form.Item>
                     </div>
                   </div>

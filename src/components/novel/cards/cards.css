@@ -235,13 +235,15 @@
 }
 
 .novel-blocker-card {
-  display: grid;
-  gap: 12px;
-  padding: 20px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 20px;
   border: 1px solid var(--novel-card-border);
   border-radius: var(--radius-l, 16px);
   background: var(--novel-card-surface);
   box-shadow: var(--shadow-sm);
+  min-width: 0;
 }
 
 .novel-blocker-card--fatal {
@@ -260,12 +262,21 @@
   border-color: var(--novel-card-border);
 }
 
-.novel-blocker-card__head,
+.novel-blocker-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+}
+
 .novel-blocker-card__actions {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  margin-left: auto;
+  justify-content: flex-end;
 }
 
 .novel-blocker-card__title {
@@ -273,23 +284,31 @@
   line-height: 1.45;
   font-weight: 600;
   color: var(--novel-card-text);
+  white-space: normal;
 }
 
 .novel-blocker-card__body {
-  display: grid;
-  gap: 8px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .novel-blocker-card__reason {
   font-size: 13px;
-  line-height: 1.7;
+  line-height: 1.5;
   color: var(--novel-card-text-secondary);
+  display: inline;
 }
 
 .novel-blocker-card__meta {
   font-size: 13px;
-  line-height: 1.6;
+  line-height: 1.5;
   color: var(--novel-card-text-muted);
+  display: inline;
+  white-space: nowrap;
 }
 
 [data-theme="dark"] .novel-project-card,
@@ -310,5 +329,16 @@
 @media (max-width: 720px) {
   .novel-project-card__summary {
     grid-template-columns: 1fr;
+  }
+
+  .novel-blocker-card {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .novel-blocker-card__actions {
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-start;
   }
 }
