@@ -331,6 +331,32 @@ export default function QualityDashboard({ novelId }: Props) {
     }
   }, [data, selectedVolumeId])
 
+  const handleRepairAction = useCallback(async (action: QualityRepairAction) => {
+    setRepairingActionId(action.id)
+    try {
+      const result = await window.electron.quality.executeRepairAction(novelId, action)
+      if (result.status === 'failed') {
+        message.error(result.message)
+        return
+      }
+      if (result.status === 'unsupported') {
+        message.warning(result.message)
+      } else {
+        message.success(result.message)
+      }
+
+      const targetPath = buildRepairResultTargetPath(novelId, result)
+        || buildRepairActionTargetPath(novelId, action.targetPage, action.navigationQuery)
+      if (targetPath) navigate(targetPath)
+      await loadData()
+    } catch (error) {
+      console.error(error)
+      message.error(getUserFacingMessage('qualityDashboard.repairFailed'))
+    } finally {
+      setRepairingActionId(null)
+    }
+  }, [loadData, navigate, novelId])
+
   if (loading && !data) {
     return (
       <WorkspacePage title="质量监控">
@@ -441,31 +467,6 @@ export default function QualityDashboard({ novelId }: Props) {
     const chapterNum = risk.chapterNums[0]
     if (typeof chapterNum === 'number') openChapterByNum(chapterNum)
   }
-  const handleRepairAction = useCallback(async (action: QualityRepairAction) => {
-    setRepairingActionId(action.id)
-    try {
-      const result = await window.electron.quality.executeRepairAction(novelId, action)
-      if (result.status === 'failed') {
-        message.error(result.message)
-        return
-      }
-      if (result.status === 'unsupported') {
-        message.warning(result.message)
-      } else {
-        message.success(result.message)
-      }
-
-      const targetPath = buildRepairResultTargetPath(novelId, result)
-        || buildRepairActionTargetPath(novelId, action.targetPage, action.navigationQuery)
-      if (targetPath) navigate(targetPath)
-      await loadData()
-    } catch (error) {
-      console.error(error)
-      message.error(getUserFacingMessage('qualityDashboard.repairFailed'))
-    } finally {
-      setRepairingActionId(null)
-    }
-  }, [loadData, navigate, novelId])
 
   const overviewContent = (
     <>

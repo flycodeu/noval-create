@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react'
-import { Button, Input, Modal, Spin, Tag, message } from 'antd'
-import { CopyOutlined, EditOutlined } from '@ant-design/icons'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { Button, Input, Modal, Skeleton, Spin, Tag, message } from 'antd'
+import { CopyOutlined, EditOutlined, ReloadOutlined } from '@ant-design/icons'
 import {
   PROMPT_CATALOG as BASE_PROMPT_CATALOG,
   PROMPT_CATEGORIES,
@@ -390,25 +390,33 @@ export default function PromptManager() {
   const [editingTemplate, setEditingTemplate] = useState('')
   const [editModalOpen, setEditModalOpen] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [customOverrides, setCustomOverrides] = useState<Record<string, string>>({})
+  const loadedOnceRef = useRef(false)
+
+  const loadPrompts = React.useCallback(async (showLoading = false) => {
+    if (showLoading || !loadedOnceRef.current) {
+      setLoading(true)
+    } else {
+      setRefreshing(true)
+    }
+
+    try {
+      const rows = await window.electron.prompt.list()
+      setCustomOverrides(Object.fromEntries(rows.map((row) => [row.key, normalizePromptText(row.content)])))
+      loadedOnceRef.current = true
+    } catch (error) {
+      message.error(getErrorMessage(error, 'prompt.loadFailed'))
+    } finally {
+      setLoading(false)
+      setRefreshing(false)
+    }
+  }, [])
 
   useEffect(() => {
-    let alive = true
-    void (async () => {
-      try {
-        const rows = await window.electron.prompt.list()
-        if (!alive) return
-        setCustomOverrides(Object.fromEntries(rows.map((row) => [row.key, normalizePromptText(row.content)])))
-      } catch (error) {
-        if (alive) {
-          message.error(getErrorMessage(error, 'prompt.loadFailed'))
-        }
-      } finally {
-        if (alive) setLoading(false)
-      }
-    })()
-    return () => { alive = false }
-  }, [])
+    void loadPrompts(true)
+  }, [loadPrompts])
 
   const promptRows = useMemo(() => {
     return PROMPT_CATALOG.map((prompt) => {
@@ -465,28 +473,30 @@ export default function PromptManager() {
   const handleEditSave = async () => {
     if (!selectedPromptRow) return
     const normalized = normalizePromptText(editingTemplate)
-    await window.electron.prompt.save(selectedPromptRow.prompt.key, normalized)
-    setCustomOverrides((prev) => ({ ...prev, [selectedPromptRow.prompt.key]: normalized }))
-    setEditModalOpen(false)
-    message.success(getUserFacingMessage('prompt.runtimeSaved'))
+    setSaving(true)
+    try {
+      await window.electron.prompt.save(selectedPromptRow.prompt.key, normalized)
+      setEditModalOpen(false)
+      await loadPrompts()
+      message.success(getUserFacingMessage('prompt.runtimeSaved'))
+    } catch (error) {
+      message.error(getErrorMessage(error, 'common.saveFailed'))
+    } finally {
+      setSaving(false)
+    }
   }
 
   const handleResetOverride = async (key: string) => {
-    await window.electron.prompt.delete(key)
-    setCustomOverrides((prev) => {
-      const next = { ...prev }
-      delete next[key]
-      return next
-    })
-    message.success(getUserFacingMessage('prompt.resetDefault'))
-  }
-
-  if (loading) {
-    return (
-      <div style={{ padding: 24, height: '100%', display: 'grid', placeItems: 'center' }}>
-        <Spin />
-      </div>
-    )
+    setSaving(true)
+    try {
+      await window.electron.prompt.delete(key)
+      await loadPrompts()
+      message.success(getUserFacingMessage('prompt.resetDefault'))
+    } catch (error) {
+      message.error(getErrorMessage(error, 'common.saveFailed'))
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -498,13 +508,18 @@ export default function PromptManager() {
       description="这里维护的是直接作用到生成链路的运行时提示词。左侧按生产阶段筛选，右侧检查当前模板、中文底板接入情况和服务层追加护栏。"
       heroVariant="compact"
       actions={(
-        <Input.Search
-          placeholder="搜索提示词、阶段或 key"
-          value={searchText}
-          onChange={(event) => setSearchText(event.target.value)}
-          style={{ width: 320, maxWidth: '100%' }}
-          allowClear
-        />
+        <div className="admin-toolbar__actions">
+          <Input.Search
+            placeholder="搜索提示词、阶段或 key"
+            value={searchText}
+            onChange={(event) => setSearchText(event.target.value)}
+            style={{ width: 320, maxWidth: '100%' }}
+            allowClear
+          />
+          <Button icon={<ReloadOutlined />} loading={refreshing} onClick={() => void loadPrompts()}>
+            刷新提示词
+          </Button>
+        </div>
       )}
       metrics={(
         <>
@@ -515,6 +530,12 @@ export default function PromptManager() {
         </>
       )}
     >
+      {refreshing ? (
+        <div className="novel-dashboard__refresh-indicator" style={{ marginBottom: 16 }}>
+          <Spin size="small" />
+          <span>正在同步运行时提示词</span>
+        </div>
+      ) : null}
       <div className="prompt-manager-shell">
         <WorkspacePanel
           scrollable
@@ -549,35 +570,49 @@ export default function PromptManager() {
             ))}
           </div>
 
-          <div className="prompt-manager-card-grid">
-            {filteredPrompts.map(({ prompt, meta, hasOverride, currentTemplate }) => (
-              <button
-                key={prompt.key}
-                type="button"
-                className={`prompt-manager-card ${selectedPromptRow?.prompt.key === prompt.key ? 'prompt-manager-card--active' : ''}`}
-                onClick={() => setSelectedPromptKey(prompt.key)}
-              >
-                <div className="prompt-manager-card__head">
-                  <div className="prompt-manager-card__title-block">
-                    <strong>{prompt.name}</strong>
-                    <span>{prompt.description}</span>
+          {loading ? (
+            <div className="prompt-manager-card-grid">
+              {Array.from({ length: 6 }).map((_, index) => (
+                <div key={index} className="prompt-manager-card">
+                  <Skeleton active paragraph={{ rows: 4 }} />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="prompt-manager-card-grid">
+              {filteredPrompts.length === 0 ? (
+                <div className="novel-empty">
+                  当前筛选下没有匹配的提示词，请调整阶段、分类或搜索条件。
+                </div>
+              ) : filteredPrompts.map(({ prompt, meta, hasOverride, currentTemplate }) => (
+                <button
+                  key={prompt.key}
+                  type="button"
+                  className={`prompt-manager-card ${selectedPromptRow?.prompt.key === prompt.key ? 'prompt-manager-card--active' : ''}`}
+                  onClick={() => setSelectedPromptKey(prompt.key)}
+                >
+                  <div className="prompt-manager-card__head">
+                    <div className="prompt-manager-card__title-block">
+                      <strong>{prompt.name}</strong>
+                      <span>{prompt.description}</span>
+                    </div>
+                    {hasOverride ? <Tag color="blue">覆盖中</Tag> : <Tag>默认</Tag>}
                   </div>
-                  {hasOverride ? <Tag color="blue">覆盖中</Tag> : <Tag>默认</Tag>}
-                </div>
 
-                <div className="prompt-manager-card__meta">
-                  <Tag color="gold">{meta.lane}</Tag>
-                  <Tag color="processing">{meta.stage}</Tag>
-                  <Tag>{prompt.category}</Tag>
-                  <Tag>{`${prompt.params.length} 个参数`}</Tag>
-                </div>
+                  <div className="prompt-manager-card__meta">
+                    <Tag color="gold">{meta.lane}</Tag>
+                    <Tag color="processing">{meta.stage}</Tag>
+                    <Tag>{prompt.category}</Tag>
+                    <Tag>{`${prompt.params.length} 个参数`}</Tag>
+                  </div>
 
-                <div className="prompt-manager-card__goal">{meta.goal}</div>
-                <div className="prompt-manager-card__risk">{`风险点：${meta.risk}`}</div>
-                <div className="prompt-manager-card__preview">{currentTemplate}</div>
-              </button>
-            ))}
-          </div>
+                  <div className="prompt-manager-card__goal">{meta.goal}</div>
+                  <div className="prompt-manager-card__risk">{`风险点：${meta.risk}`}</div>
+                  <div className="prompt-manager-card__preview">{currentTemplate}</div>
+                </button>
+              ))}
+            </div>
+          )}
         </WorkspacePanel>
 
         <div className="prompt-manager-inspector">
@@ -669,6 +704,7 @@ export default function PromptManager() {
         onCancel={() => setEditModalOpen(false)}
         onOk={() => void handleEditSave()}
         okText="保存并生效"
+        confirmLoading={saving}
         width={880}
         destroyOnHidden
       >

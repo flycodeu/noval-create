@@ -491,6 +491,8 @@ export default function Writing({ novelId }: Props) {
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const currentChapterIdRef = useRef<number | null>(null)
   const routeChapterFocusRef = useRef<number | null>(null)
+  const loadedOnceRef = useRef(false)
+  const initializedRef = useRef(false)
   const undoStackRef = useRef<string[]>([])
   const redoStackRef = useRef<string[]>([])
   const historyBaselineRef = useRef('')
@@ -498,6 +500,7 @@ export default function Writing({ novelId }: Props) {
   const generationBaselineRef = useRef('')
 
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [currentChapter, setCurrentChapter] = useState<Chapter | null>(null)
   const [content, setContent] = useState('')
   const [wordCount, setWordCount] = useState(0)
@@ -773,9 +776,14 @@ export default function Writing({ novelId }: Props) {
   }, [novelId, refreshChapter, refreshContextStatus, resetEditorHistory, setChapters, setCurrentChapterId])
 
   useEffect(() => {
+    if (initializedRef.current) return
+    initializedRef.current = true
+    routeChapterFocusRef.current = routeChapterId
+
     let alive = true
     void (async () => {
       setLoading(true)
+      setRefreshing(false)
       try {
         await Promise.all([
           loadChapters(routeChapterId || undefined),
@@ -785,8 +793,12 @@ export default function Writing({ novelId }: Props) {
           refreshInfoGapAssets(),
           refreshForeshadowLedger(),
         ])
+        loadedOnceRef.current = true
       } finally {
-        if (alive) setLoading(false)
+        if (alive) {
+          setLoading(false)
+          setRefreshing(false)
+        }
       }
     })()
     return () => { alive = false }
@@ -795,7 +807,12 @@ export default function Writing({ novelId }: Props) {
   useEffect(() => {
     if (!routeChapterId || routeChapterFocusRef.current === routeChapterId) return
     routeChapterFocusRef.current = routeChapterId
-    void loadChapters(routeChapterId)
+    if (loadedOnceRef.current) {
+      setRefreshing(true)
+    } else {
+      setLoading(true)
+    }
+    void loadChapters(routeChapterId).finally(() => setRefreshing(false))
   }, [loadChapters, routeChapterId])
 
   useEffect(() => {
@@ -2409,10 +2426,16 @@ export default function Writing({ novelId }: Props) {
   return (
     <>
       <div className="chapter-console-page">
-        {loading ? (
+        {loading && !currentChapter ? (
           <div className="chapter-console-page__loading"><Spin size="large" /></div>
         ) : (
           <>
+            {refreshing ? (
+              <div className="novel-dashboard__refresh-indicator" style={{ marginBottom: 16 }}>
+                <Spin size="small" />
+                <span>正在同步正文工作台数据</span>
+              </div>
+            ) : null}
             <div className="chapter-console-page__pipeline">
               <PipelineBar items={pipelineItems} />
             </div>

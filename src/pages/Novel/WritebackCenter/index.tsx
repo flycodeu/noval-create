@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Input, Modal, Select, Space, Table, Tag, message } from 'antd'
+import { Alert, Button, Input, Modal, Select, Space, Spin, Table, Tag, message } from 'antd'
 import { CheckOutlined, EditOutlined, ReloadOutlined, RobotOutlined, StopOutlined } from '@ant-design/icons'
 import { useSearchParams } from 'react-router-dom'
 import { getErrorMessage } from '@/utils/user-facing-message'
@@ -137,7 +137,8 @@ export default function WritebackCenterPage({ novelId }: Props) {
   const { currentNovel } = useNovelStore()
   const { mutationToken, notifyWorkspaceMutation } = useNovelWorkspaceActions()
   const [searchParams, setSearchParams] = useSearchParams()
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [actionLoading, setActionLoading] = useState(false)
   const [chapters, setChapters] = useState<Chapter[]>([])
   const [centerData, setCenterData] = useState<ChapterWritebackCenterData | null>(null)
@@ -148,12 +149,17 @@ export default function WritebackCenterPage({ novelId }: Props) {
   const [editingDiff, setEditingDiff] = useState<ChapterWritebackDiff | null>(null)
   const [editingAfterState, setEditingAfterState] = useState('')
   const [editingReason, setEditingReason] = useState('')
+  const [loadedOnce, setLoadedOnce] = useState(false)
 
   const selectedChapterId = parseNumber(searchParams.get('chapterId'))
   const selectedRunId = parseNumber(searchParams.get('runId'))
 
-  const refresh = useCallback(async (chapterIdArg?: number | null, runIdArg?: number | null) => {
-    setLoading(true)
+  const refresh = useCallback(async (chapterIdArg?: number | null, runIdArg?: number | null, showLoading = false) => {
+    if (showLoading || !loadedOnce) {
+      setLoading(true)
+    } else {
+      setRefreshing(true)
+    }
     try {
       const chapterRows = await window.electron.chapter.list(novelId)
       setChapters(chapterRows)
@@ -164,6 +170,7 @@ export default function WritebackCenterPage({ novelId }: Props) {
       }
       const nextData = await window.electron.writeback.getCenterData(fallbackChapterId, runIdArg || selectedRunId || undefined)
       setCenterData(nextData)
+      setLoadedOnce(true)
       const nextParams = new URLSearchParams(searchParams)
       nextParams.set('chapterId', String(fallbackChapterId))
       if (nextData.activeRun?.id) nextParams.set('runId', String(nextData.activeRun.id))
@@ -174,11 +181,12 @@ export default function WritebackCenterPage({ novelId }: Props) {
       message.error(getErrorMessage(error, 'common.loadFailed'))
     } finally {
       setLoading(false)
+      setRefreshing(false)
     }
-  }, [novelId, searchParams, selectedChapterId, selectedRunId, setSearchParams])
+  }, [loadedOnce, novelId, searchParams, selectedChapterId, selectedRunId, setSearchParams])
 
   useEffect(() => {
-    void refresh()
+    void refresh(undefined, undefined, true)
   }, [mutationToken, refresh])
 
   const activeRun = centerData?.activeRun || null
@@ -278,6 +286,16 @@ export default function WritebackCenterPage({ novelId }: Props) {
     },
   ]
 
+  if (loading && !centerData) {
+    return (
+      <WorkspacePage title="章后状态回写中心">
+        <WorkspacePanel title="正在加载回写中心">
+          <Spin />
+        </WorkspacePanel>
+      </WorkspacePage>
+    )
+  }
+
   return (
     <WorkspacePage
       className="novel-writeback-center-page"
@@ -329,6 +347,12 @@ export default function WritebackCenterPage({ novelId }: Props) {
         </>
       )}
     >
+      {refreshing ? (
+        <div className="novel-dashboard__refresh-indicator" style={{ marginBottom: 16 }}>
+          <Spin size="small" />
+          <span>正在同步章后回写数据</span>
+        </div>
+      ) : null}
       {chapters.length <= 0 ? (
         <Alert showIcon type="info" message="当前还没有章节" description="先去结构规划或正文写作创建章节，再进入章后状态回写中心。" />
       ) : null}
@@ -438,7 +462,7 @@ export default function WritebackCenterPage({ novelId }: Props) {
           <WorkspacePanel title={`回写候选 · ${filteredDiffs.length}`} description="右侧先确认或编辑，再执行统一写回。">
             <Table<ChapterWritebackDiff>
               rowKey="id"
-              loading={loading || actionLoading}
+              loading={actionLoading}
               pagination={{ pageSize: 8, showSizeChanger: false }}
               columns={diffColumns}
               dataSource={filteredDiffs}

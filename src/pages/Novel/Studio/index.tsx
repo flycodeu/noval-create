@@ -129,10 +129,14 @@ export default function StudioPage({ novelId }: Props) {
     setRefreshing(false)
 
     void (async () => {
+      let shouldCommit = true
       try {
         await loadConsoleData()
       } finally {
-        if (!active) return
+        shouldCommit = active
+      }
+
+      if (shouldCommit) {
         setLoading(false)
         setRefreshing(false)
       }

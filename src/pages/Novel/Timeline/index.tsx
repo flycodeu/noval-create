@@ -1,6 +1,6 @@
 import React from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Alert, Button, Modal, Select, Space, Tag } from 'antd'
+import { Alert, Button, Modal, Select, Space, Spin, Tag } from 'antd'
 import {
   BarsOutlined,
   DeleteOutlined,
@@ -247,6 +247,12 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
         </>
       )}
     >
+      {workspace.refreshing ? (
+        <div className="novel-dashboard__refresh-indicator" style={{ marginBottom: 16 }}>
+          <Spin size="small" />
+          <span>正在同步时间轴工作台</span>
+        </div>
+      ) : null}
       {draftWarnings.length > 0 ? (
         <Alert
           type="info"

@@ -77,12 +77,14 @@ export function useTimelineWorkspace(
   const route = useMemo(() => parseTimelineRoute(searchParams), [searchParams])
   const routeKeyRef = useRef('')
   const suppressRefreshRef = useRef(false)
+  const loadedOnceRef = useRef(false)
 
   const { currentNovel } = useNovelStore()
   const [form] = Form.useForm<TimelineFormValues>()
   const [generateForm] = Form.useForm<TimelineGenerateValues>()
 
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [regenerating, setRegenerating] = useState(false)
@@ -386,8 +388,12 @@ export function useTimelineWorkspace(
     ...(route.segmentId ? { segmentId: route.segmentId } : {}),
   }), [buildQuery, route.chapterId, route.partId, route.segmentId, route.volumeId])
 
-  const refreshPage = useCallback(async (preferredId?: number | null, routeAction?: string | null) => {
-    setLoading(true)
+  const refreshPage = useCallback(async (preferredId?: number | null, routeAction?: string | null, showLoading = false) => {
+    if (showLoading || !loadedOnceRef.current) {
+      setLoading(true)
+    } else {
+      setRefreshing(true)
+    }
 
     try {
       const query = routeAction ? buildRouteQuery() : buildQuery(page)
@@ -398,6 +404,7 @@ export function useTimelineWorkspace(
 
       setPageData(list)
       setStats(summary)
+      loadedOnceRef.current = true
 
       if (routeAction === 'new') {
         const anchor = {
@@ -436,6 +443,7 @@ export function useTimelineWorkspace(
       }
     } finally {
       setLoading(false)
+      setRefreshing(false)
     }
   }, [
     buildQuery,
@@ -452,6 +460,7 @@ export function useTimelineWorkspace(
     loadPartsFor,
     loadSegmentsFor,
     page,
+    pageData.total,
     partFilter,
     route.chapterId,
     route.eventId,
@@ -855,6 +864,7 @@ export function useTimelineWorkspace(
     page,
     pageData,
     partFilter,
+    refreshing,
     route,
     saving,
     searchCharacters,
