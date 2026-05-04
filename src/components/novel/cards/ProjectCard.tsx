@@ -95,7 +95,7 @@ export default function ProjectCard({
           <span className="novel-project-card__progress-label">总进度</span>
           <span className="novel-project-card__progress-value">{`${progress}%`}</span>
         </div>
-        <Progress percent={progress} showInfo={false} strokeColor="var(--primary)" trailColor="rgba(166, 106, 43, 0.08)" size="small" />
+        <Progress percent={progress} showInfo={false} strokeColor="var(--accent)" trailColor="rgba(166, 106, 43, 0.08)" size="small" />
       </div>
 
       <div className="novel-project-card__next-step">

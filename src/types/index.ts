@@ -1952,6 +1952,8 @@ export interface ContextBudgetReport {
   droppedLabels: string[]
   truncatedLabels: string[]
   droppedByPriority: ContextBudgetWarningSummary[]
+  preservedConstraintLabels: HardConstraintSourceLabel[]
+  droppedConstraintLabels: HardConstraintSourceLabel[]
 }
 
 export interface ConstraintInjectionStatus {
@@ -1964,6 +1966,8 @@ export interface ConstraintInjectionStatus {
   truncatedHardConstraintCount: number
   injectedLabels: HardConstraintSourceLabel[]
   truncatedLabels: HardConstraintSourceLabel[]
+  preservedLabels: HardConstraintSourceLabel[]
+  droppedLabels: HardConstraintSourceLabel[]
 }
 
 export interface RecallMemorySource {
@@ -1978,6 +1982,8 @@ export interface RecallMemorySource {
   stale: boolean
   staleReasons: string[]
   overriddenByConstraint: boolean
+  entityMatches: string[]
+  entityValidated: boolean
 }
 
 export interface RecallDiagnostics {
@@ -1990,6 +1996,11 @@ export interface RecallDiagnostics {
   recallDependencyRate: number
   overriddenHitCount: number
   fallbackHitCount: number
+  validatedHitCount: number
+  lowSimilarityRejectedCount: number
+  entityValidationRejectedCount: number
+  minVectorSimilarity: number
+  minKeywordSimilarity: number
   summaryLines: string[]
 }
 
@@ -4324,6 +4335,11 @@ export interface QualityDashboardData {
     staleRecallRate: number
     fallbackHitCount: number
     selectedHitCount: number
+    validatedHitCount: number
+    lowSimilarityRejectedCount: number
+    entityValidationRejectedCount: number
+    minVectorSimilarity: number
+    minKeywordSimilarity: number
     previousChapterFeedCoverageRate: number
     previousChapterFeedChars: number
   }
@@ -4355,6 +4371,11 @@ export interface QualityDashboardData {
     recallDependencyRate: number
     staleRecallCount: number
     staleRecallRate: number
+    validatedHitCount: number
+    lowSimilarityRejectedCount: number
+    entityValidationRejectedCount: number
+    minVectorSimilarity: number
+    minKeywordSimilarity: number
     previousChapterFeedCoverageRate: number
     previousChapterFeedChars: number
   }>
@@ -4822,8 +4843,14 @@ declare global {
         batchUpdate: (ids: number[], data: Partial<Pick<Chapter, 'status' | 'arcId'>>) => Promise<number>
         batchDelete: (ids: number[]) => Promise<number>
         batchRenumber: (ids: number[], startChapterNum: number) => Promise<number>
-        getContextPreview: (chapterId: number, options?: { executionMode?: AiExecutionMode }) => Promise<ChapterContextPreview>
-        generateContent: (chapterId: number, options?: { executionMode?: AiExecutionMode }) => Promise<number>
+        getContextPreview: (chapterId: number, options?: {
+          executionMode?: AiExecutionMode
+          preserveConstraintLabels?: HardConstraintSourceLabel[]
+        }) => Promise<ChapterContextPreview>
+        generateContent: (chapterId: number, options?: {
+          executionMode?: AiExecutionMode
+          preserveConstraintLabels?: HardConstraintSourceLabel[]
+        }) => Promise<number>
         resumeContent: (taskId: number) => Promise<number>
         generateSummary: (chapterId: number) => Promise<void>
         aiCheck: (chapterId: number) => Promise<unknown>

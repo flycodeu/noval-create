@@ -1,4 +1,29 @@
 .novel-factions-page {
+  --faction-surface: linear-gradient(180deg, rgba(255, 252, 246, 0.96), rgba(248, 242, 233, 0.96));
+  --faction-surface-elevated: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(246, 239, 230, 0.94));
+  --faction-canvas-surface:
+    radial-gradient(circle at top left, rgba(186, 156, 112, 0.1), transparent 36%),
+    linear-gradient(180deg, rgba(255, 250, 243, 0.98), rgba(243, 235, 225, 0.98));
+  --faction-tool-surface: rgba(255, 255, 255, 0.92);
+  --faction-tool-surface-hover: rgba(255, 252, 247, 0.98);
+  --faction-node-surface: rgba(255, 255, 255, 0.94);
+  --faction-node-faction-surface: linear-gradient(180deg, rgba(255, 251, 247, 0.97), rgba(248, 240, 229, 0.97));
+  --faction-node-character-surface: linear-gradient(180deg, rgba(249, 252, 255, 0.95), rgba(236, 242, 246, 0.95));
+  --faction-border: rgba(126, 97, 60, 0.15);
+  --faction-border-strong: rgba(125, 89, 38, 0.28);
+  --faction-border-active: rgba(104, 74, 31, 0.4);
+  --faction-canvas-border: rgba(132, 97, 59, 0.16);
+  --faction-node-border: rgba(137, 102, 64, 0.18);
+  --faction-node-border-active: rgba(110, 75, 28, 0.34);
+  --faction-text: #49362a;
+  --faction-text-soft: rgba(78, 61, 43, 0.82);
+  --faction-text-muted: rgba(88, 67, 46, 0.78);
+  --faction-text-faint: rgba(116, 85, 45, 0.72);
+  --faction-tool-text: #5c4330;
+  --faction-shadow: 0 12px 20px rgba(77, 55, 28, 0.08);
+  --faction-shadow-strong: 0 16px 28px rgba(82, 60, 35, 0.12);
+  --faction-node-shadow: 0 12px 24px rgba(79, 57, 30, 0.1);
+  --faction-node-shadow-active: 0 18px 30px rgba(90, 63, 28, 0.16);
   --faction-graph-label-bg: rgba(255, 255, 255, 0.92);
   --faction-graph-label-text: #4a3829;
   --faction-graph-label-text-muted: rgba(74, 56, 41, 0.45);
@@ -44,23 +69,23 @@
 
 .faction-list-card {
   cursor: pointer;
-  border: 1px solid rgba(126, 97, 60, 0.15);
+  border: 1px solid var(--faction-border);
   border-radius: 18px;
   padding: 9px 11px;
   margin-bottom: 8px;
-  background: linear-gradient(180deg, rgba(255, 252, 246, 0.96), rgba(248, 242, 233, 0.96));
+  background: var(--faction-surface);
   transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
 }
 
 .faction-list-card:hover {
   transform: translateY(-1px);
-  border-color: rgba(125, 89, 38, 0.28);
-  box-shadow: 0 12px 20px rgba(77, 55, 28, 0.08);
+  border-color: var(--faction-border-strong);
+  box-shadow: var(--faction-shadow);
 }
 
 .faction-list-card--active {
-  border-color: rgba(104, 74, 31, 0.4);
-  box-shadow: 0 16px 28px rgba(82, 60, 35, 0.12);
+  border-color: var(--faction-border-active);
+  box-shadow: var(--faction-shadow-strong);
 }
 
 .faction-list-card__title {
@@ -71,7 +96,7 @@
 }
 
 .faction-list-card__desc {
-  color: rgba(78, 61, 43, 0.82);
+  color: var(--faction-text-soft);
   font-size: 12px;
   line-height: 1.55;
   display: -webkit-box;
@@ -99,7 +124,7 @@
 
 .faction-editor__relations-title {
   font-weight: 700;
-  color: rgba(74, 55, 31, 0.9);
+  color: var(--faction-text);
 }
 
 .faction-editor__relation-row {
@@ -116,9 +141,9 @@
 }
 
 .faction-editor__meta-block {
-  border: 1px solid rgba(126, 97, 60, 0.12);
+  border: 1px solid color-mix(in srgb, var(--faction-border) 86%, transparent);
   border-radius: 18px;
-  background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(246, 239, 230, 0.94));
+  background: var(--faction-surface-elevated);
   padding: 14px;
   display: grid;
   gap: 10px;
@@ -127,12 +152,10 @@
 .faction-graph-canvas {
   position: relative;
   min-height: 560px;
-  border: 1px solid rgba(132, 97, 59, 0.16);
+  border: 1px solid var(--faction-canvas-border);
   border-radius: 24px;
   overflow: hidden;
-  background:
-    radial-gradient(circle at top left, rgba(186, 156, 112, 0.1), transparent 36%),
-    linear-gradient(180deg, rgba(255, 250, 243, 0.98), rgba(243, 235, 225, 0.98));
+  background: var(--faction-canvas-surface);
 }
 
 .faction-graph-canvas__tools {
@@ -150,41 +173,41 @@
   justify-content: center;
   width: 34px;
   height: 34px;
-  border: 1px solid rgba(126, 97, 60, 0.18);
+  border: 1px solid color-mix(in srgb, var(--faction-border-strong) 78%, transparent);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.92);
-  color: #5c4330;
+  background: var(--faction-tool-surface);
+  color: var(--faction-tool-text);
   cursor: pointer;
-  box-shadow: 0 10px 18px rgba(77, 55, 28, 0.08);
+  box-shadow: var(--faction-shadow);
 }
 
 .faction-graph-canvas__tool:hover {
-  border-color: rgba(125, 89, 38, 0.28);
-  background: rgba(255, 252, 247, 0.98);
+  border-color: var(--faction-border-strong);
+  background: var(--faction-tool-surface-hover);
 }
 
 .faction-graph-node {
   border-radius: 20px;
   padding: 13px 15px;
-  border: 1px solid rgba(137, 102, 64, 0.18);
-  box-shadow: 0 12px 24px rgba(79, 57, 30, 0.1);
-  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--faction-node-border);
+  box-shadow: var(--faction-node-shadow);
+  background: var(--faction-node-surface);
   backdrop-filter: blur(10px);
   transition: opacity 140ms ease, transform 140ms ease, box-shadow 140ms ease;
 }
 
 .faction-graph-node--faction {
-  background: linear-gradient(180deg, rgba(255, 251, 247, 0.97), rgba(248, 240, 229, 0.97));
+  background: var(--faction-node-faction-surface);
 }
 
 .faction-graph-node--character {
-  background: linear-gradient(180deg, rgba(249, 252, 255, 0.95), rgba(236, 242, 246, 0.95));
+  background: var(--faction-node-character-surface);
 }
 
 .faction-graph-node--active {
   transform: translateY(-2px);
-  box-shadow: 0 18px 30px rgba(90, 63, 28, 0.16);
-  border-color: rgba(110, 75, 28, 0.34);
+  box-shadow: var(--faction-node-shadow-active);
+  border-color: var(--faction-node-border-active);
 }
 
 .faction-graph-node--dimmed {
@@ -195,19 +218,19 @@
   font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: rgba(116, 85, 45, 0.72);
+  color: var(--faction-text-faint);
   margin-bottom: 8px;
 }
 
 .faction-graph-node__title {
   font-size: 16px;
   font-weight: 800;
-  color: #49362a;
+  color: var(--faction-text);
 }
 
 .faction-graph-node__meta {
   font-size: 12px;
-  color: rgba(88, 67, 46, 0.78);
+  color: var(--faction-text-muted);
   margin-top: 6px;
 }
 
@@ -231,59 +254,64 @@
   }
 }
 
-[data-theme="dark"] .faction-list-card,
-[data-theme="dark"] .faction-editor__meta-block,
-[data-theme="dark"] .faction-graph-canvas__tool,
-[data-theme="dark"] .faction-graph-node {
-  border-color: rgba(210, 190, 156, 0.16);
-  background: rgba(31, 38, 52, 0.9);
-  color: var(--workspace-ink);
-}
-
-[data-theme="dark"] .faction-list-card,
-[data-theme="dark"] .faction-editor__meta-block {
-  box-shadow: 0 12px 24px rgba(5, 10, 19, 0.16);
-}
-
-[data-theme="dark"] .faction-graph-canvas {
-  border-color: rgba(210, 190, 156, 0.16);
-  background:
+[data-theme="dark"] .novel-factions-page {
+  --faction-surface: linear-gradient(180deg, rgba(31, 38, 52, 0.94), rgba(24, 30, 42, 0.94));
+  --faction-surface-elevated: linear-gradient(180deg, rgba(34, 42, 57, 0.94), rgba(27, 33, 47, 0.94));
+  --faction-canvas-surface:
     radial-gradient(circle at top left, rgba(188, 108, 37, 0.18), transparent 36%),
     linear-gradient(180deg, rgba(28, 34, 47, 0.96), rgba(20, 26, 37, 0.96));
-}
-
-[data-theme="dark"] .faction-graph-node--faction {
-  background: linear-gradient(180deg, rgba(74, 56, 35, 0.94), rgba(31, 38, 52, 0.96));
-}
-
-[data-theme="dark"] .faction-graph-node--character {
-  background: linear-gradient(180deg, rgba(37, 51, 62, 0.94), rgba(31, 38, 52, 0.96));
-}
-
-[data-theme="dark"] .novel-factions-page {
-  --faction-graph-label-bg: rgba(28, 34, 47, 0.94);
-  --faction-graph-label-text: #edf2f8;
-  --faction-graph-label-text-muted: rgba(237, 242, 248, 0.56);
-}
-
-[data-theme="dark"] .faction-list-card__desc,
-[data-theme="dark"] .faction-graph-node__eyebrow,
-[data-theme="dark"] .faction-graph-node__meta {
-  color: var(--workspace-ink-soft);
-}
-
-[data-theme="dark"] .faction-editor__relations-title,
-[data-theme="dark"] .faction-graph-node__title {
-  color: var(--workspace-ink);
-}
-
-[data-theme="dark"] .faction-graph-canvas__tool:hover {
-  border-color: rgba(209, 154, 93, 0.3);
-  background: rgba(39, 47, 63, 0.96);
-}
-
-[data-theme="dark"] .novel-factions-page {
+  --faction-tool-surface: rgba(31, 38, 52, 0.92);
+  --faction-tool-surface-hover: rgba(39, 47, 63, 0.96);
+  --faction-node-surface: rgba(31, 38, 52, 0.94);
+  --faction-node-faction-surface: linear-gradient(180deg, rgba(74, 56, 35, 0.94), rgba(31, 38, 52, 0.96));
+  --faction-node-character-surface: linear-gradient(180deg, rgba(37, 51, 62, 0.94), rgba(31, 38, 52, 0.96));
+  --faction-border: rgba(210, 190, 156, 0.16);
+  --faction-border-strong: rgba(209, 154, 93, 0.3);
+  --faction-border-active: rgba(209, 154, 93, 0.38);
+  --faction-canvas-border: rgba(210, 190, 156, 0.16);
+  --faction-node-border: rgba(210, 190, 156, 0.16);
+  --faction-node-border-active: rgba(209, 154, 93, 0.34);
+  --faction-text: var(--workspace-ink);
+  --faction-text-soft: var(--workspace-ink-soft);
+  --faction-text-muted: rgba(238, 242, 247, 0.72);
+  --faction-text-faint: rgba(238, 242, 247, 0.62);
+  --faction-tool-text: var(--workspace-ink);
+  --faction-shadow: 0 12px 24px rgba(5, 10, 19, 0.16);
+  --faction-shadow-strong: 0 16px 28px rgba(4, 8, 18, 0.24);
+  --faction-node-shadow: 0 12px 24px rgba(5, 10, 19, 0.18);
+  --faction-node-shadow-active: 0 18px 30px rgba(4, 8, 18, 0.28);
   --faction-graph-label-bg: rgba(18, 23, 33, 0.94);
   --faction-graph-label-text: rgba(238, 242, 247, 0.92);
   --faction-graph-label-text-muted: rgba(238, 242, 247, 0.48);
+}
+
+[data-theme="soft"] .novel-factions-page {
+  --faction-surface: linear-gradient(180deg, rgba(250, 247, 244, 0.98), rgba(239, 232, 224, 0.98));
+  --faction-surface-elevated: linear-gradient(180deg, rgba(252, 249, 245, 0.98), rgba(236, 229, 219, 0.96));
+  --faction-canvas-surface:
+    radial-gradient(circle at top left, rgba(107, 143, 113, 0.14), transparent 36%),
+    linear-gradient(180deg, rgba(248, 244, 239, 0.98), rgba(234, 226, 216, 0.98));
+  --faction-tool-surface: rgba(250, 247, 244, 0.96);
+  --faction-tool-surface-hover: rgba(241, 235, 227, 0.98);
+  --faction-node-surface: rgba(250, 247, 244, 0.96);
+  --faction-node-faction-surface: linear-gradient(180deg, rgba(250, 247, 244, 0.98), rgba(238, 230, 220, 0.98));
+  --faction-node-character-surface: linear-gradient(180deg, rgba(245, 249, 248, 0.98), rgba(228, 237, 233, 0.98));
+  --faction-border: color-mix(in srgb, var(--border-default) 88%, rgba(107, 143, 113, 0.18));
+  --faction-border-strong: color-mix(in srgb, var(--accent) 34%, var(--border-strong));
+  --faction-border-active: color-mix(in srgb, var(--accent) 48%, var(--border-strong));
+  --faction-canvas-border: color-mix(in srgb, var(--border-default) 84%, rgba(107, 143, 113, 0.22));
+  --faction-node-border: color-mix(in srgb, var(--border-default) 84%, rgba(107, 143, 113, 0.18));
+  --faction-node-border-active: color-mix(in srgb, var(--accent) 42%, var(--border-strong));
+  --faction-text: #33281f;
+  --faction-text-soft: #625546;
+  --faction-text-muted: #766858;
+  --faction-text-faint: #8f7f6d;
+  --faction-tool-text: #4b4034;
+  --faction-shadow: 0 10px 20px rgba(68, 52, 35, 0.08);
+  --faction-shadow-strong: 0 14px 24px rgba(68, 52, 35, 0.12);
+  --faction-node-shadow: 0 12px 24px rgba(68, 52, 35, 0.1);
+  --faction-node-shadow-active: 0 16px 28px rgba(68, 52, 35, 0.14);
+  --faction-graph-label-bg: rgba(250, 247, 244, 0.96);
+  --faction-graph-label-text: #3f3428;
+  --faction-graph-label-text-muted: rgba(63, 52, 40, 0.52);
 }

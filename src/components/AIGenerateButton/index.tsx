@@ -230,11 +230,11 @@ export default function AIGenerateButton({
               type="button"
               onClick={() => setPicked(index)}
               style={{
-                border: `2px solid ${picked === index ? 'var(--color-blue-primary)' : 'var(--border-color)'}`,
+                border: `2px solid ${picked === index ? 'var(--accent)' : 'var(--border-default)'}`,
                 borderRadius: 8,
                 padding: '10px 14px',
                 cursor: 'pointer',
-                background: picked === index ? 'rgba(46,134,171,0.06)' : 'var(--color-bg-hover)',
+                background: picked === index ? 'rgba(46,134,171,0.06)' : 'var(--bg-hover)',
                 transition: 'border-color 0.15s, background 0.15s',
                 textAlign: 'left',
               }}
@@ -242,7 +242,7 @@ export default function AIGenerateButton({
               <div
                 style={{
                   fontSize: 11,
-                  color: picked === index ? 'var(--color-blue-primary)' : 'var(--color-text-muted)',
+                  color: picked === index ? 'var(--accent)' : 'var(--text-muted)',
                   marginBottom: 8,
                   fontWeight: 600,
                 }}
@@ -252,7 +252,7 @@ export default function AIGenerateButton({
               <div
                 style={{
                   fontSize: 12,
-                  color: 'var(--color-text-primary)',
+                  color: 'var(--text-primary)',
                   lineHeight: 1.8,
                   whiteSpace: 'pre-wrap',
                   maxHeight: 260,

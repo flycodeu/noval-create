@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export type Theme = 'dark' | 'light'
+export type Theme = 'dark' | 'light' | 'soft'
 
 interface ThemeStore {
   theme: Theme
@@ -8,7 +8,8 @@ interface ThemeStore {
 }
 
 function normalizeTheme(value: string | null): Theme {
-  return value === 'dark' ? 'dark' : 'light'
+  if (value === 'dark' || value === 'soft') return value
+  return 'light'
 }
 
 const savedTheme = normalizeTheme(localStorage.getItem('novelforge-theme'))

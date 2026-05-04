@@ -201,8 +201,14 @@ const api = {
     batchUpdate: (ids: number[], data: unknown) => invokeIpc('chapter:batchUpdate', ids, data),
     batchDelete: (ids: number[]) => invokeIpc('chapter:batchDelete', ids),
     batchRenumber: (ids: number[], startChapterNum: number) => invokeIpc('chapter:batchRenumber', ids, startChapterNum),
-    getContextPreview: (chapterId: number, options?: { executionMode?: import('../src/shared/ai-execution').AiExecutionMode }) => invokeIpc('chapter:getContextPreview', chapterId, options),
-    generateContent: (chapterId: number, options?: { executionMode?: import('../src/shared/ai-execution').AiExecutionMode }) => invokeIpc('chapter:generateContent', chapterId, options),
+    getContextPreview: (chapterId: number, options?: {
+      executionMode?: import('../src/shared/ai-execution').AiExecutionMode
+      preserveConstraintLabels?: import('../src/types').HardConstraintSourceLabel[]
+    }) => invokeIpc('chapter:getContextPreview', chapterId, options),
+    generateContent: (chapterId: number, options?: {
+      executionMode?: import('../src/shared/ai-execution').AiExecutionMode
+      preserveConstraintLabels?: import('../src/types').HardConstraintSourceLabel[]
+    }) => invokeIpc('chapter:generateContent', chapterId, options),
     resumeContent: (taskId: number) => invokeIpc('chapter:resumeContent', taskId),
     generateSummary: (chapterId: number) => invokeIpc('chapter:generateSummary', chapterId),
     aiCheck: (chapterId: number) => invokeIpc('chapter:aiCheck', chapterId),

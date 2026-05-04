@@ -160,7 +160,7 @@ export default function AIScorePanel({
 
   return (
     <div style={{
-      borderTop: '1px solid var(--border-color)',
+      borderTop: '1px solid var(--border-default)',
       marginTop: 10,
       paddingTop: 6,
     }}>
@@ -173,14 +173,14 @@ export default function AIScorePanel({
           loading={loading}
           onClick={handleScore}
           disabled={disabled}
-          style={{ color: 'var(--color-text-muted)', fontSize: 12, paddingLeft: 0 }}
+          style={{ color: 'var(--text-muted)', fontSize: 12, paddingLeft: 0 }}
         >
           AI 检测
         </Button>
 
         {result && (
           <>
-            <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
               综合&nbsp;
               <span style={{ color: scoreColor(result.overall_score), fontWeight: 700 }}>
                 {result.overall_score}
@@ -216,7 +216,7 @@ export default function AIScorePanel({
           items={[{
             key: 'detail',
             label: (
-              <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                 查看各维度评分 →
               </span>
             ),
@@ -227,7 +227,7 @@ export default function AIScorePanel({
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
                       <span style={{
                         width: 72, flexShrink: 0,
-                        color: d.score < 60 ? 'var(--color-error)' : 'var(--color-text-secondary)',
+                        color: d.score < 60 ? 'var(--danger)' : 'var(--text-secondary)',
                         fontWeight: d.score < 60 ? 600 : 400,
                       }}>
                         {d.name}
@@ -236,7 +236,7 @@ export default function AIScorePanel({
                         percent={d.score}
                         size="small"
                         strokeColor={scoreColor(d.score)}
-                        trailColor="var(--border-color)"
+                        trailColor="var(--border-default)"
                         style={{ flex: 1, margin: 0 }}
                         format={p => (
                           <span style={{ color: scoreColor(d.score), fontSize: 11, fontWeight: 600 }}>
@@ -245,7 +245,7 @@ export default function AIScorePanel({
                         )}
                       />
                     </div>
-                    <div style={{ marginLeft: 80, color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
+                    <div style={{ marginLeft: 80, color: 'var(--text-muted)', lineHeight: 1.6 }}>
                       {d.feedback}
                       {d.suggestion && (
                         <span style={{ color: 'var(--color-blue-light)', marginLeft: 6 }}>
@@ -259,23 +259,23 @@ export default function AIScorePanel({
                 {/* 综合评价 + 修改建议 */}
                 <div style={{
                   padding: '8px 12px',
-                  background: 'var(--color-bg-hover)',
+                  background: 'var(--bg-hover)',
                   borderRadius: 6,
                   marginTop: 4,
                   marginBottom: 6,
                 }}>
-                  <div style={{ color: 'var(--color-text-primary)', fontWeight: 600, marginBottom: 4 }}>
+                  <div style={{ color: 'var(--text-primary)', fontWeight: 600, marginBottom: 4 }}>
                     综合评价
                   </div>
-                  <div style={{ color: 'var(--color-text-secondary)', lineHeight: 1.7, marginBottom: 8 }}>
+                  <div style={{ color: 'var(--text-secondary)', lineHeight: 1.7, marginBottom: 8 }}>
                     {result.overall_feedback}
                   </div>
-                  <div style={{ color: 'var(--color-text-primary)', fontWeight: 600, marginBottom: 4 }}>
+                  <div style={{ color: 'var(--text-primary)', fontWeight: 600, marginBottom: 4 }}>
                     优先修改
                   </div>
                   {result.top_fixes.map((fix, i) => (
                     <div key={i} style={{
-                      color: 'var(--color-text-secondary)',
+                      color: 'var(--text-secondary)',
                       marginBottom: 4,
                       paddingLeft: 8,
                       borderLeft: `2px solid ${['#ff4d4f', '#faad14', '#2E86AB'][i] || '#5c6378'}`,
@@ -299,11 +299,11 @@ export default function AIScorePanel({
                   <div style={{
                     marginTop: 10,
                     paddingTop: 10,
-                    borderTop: '1px solid var(--border-color)',
+                    borderTop: '1px solid var(--border-default)',
                     display: 'grid',
                     gap: 6,
                   }}>
-                    <div style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>
+                    <div style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
                       AI 味分解
                     </div>
                     {[...languageDriftLabels]
@@ -314,13 +314,13 @@ export default function AIScorePanel({
                       .sort((left, right) => right.value - left.value)
                       .map((item) => (
                         <div key={item.key} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span style={{ width: 90, color: 'var(--color-text-secondary)' }}>{item.label}</span>
+                          <span style={{ width: 90, color: 'var(--text-secondary)' }}>{item.label}</span>
                           <Progress
                             percent={item.value}
                             size="small"
                             showInfo={false}
                             strokeColor="#fa8c16"
-                            trailColor="var(--border-color)"
+                            trailColor="var(--border-default)"
                             style={{ flex: 1, margin: 0 }}
                           />
                           <span style={{ width: 38, textAlign: 'right', color: '#fa8c16', fontWeight: 600 }}>
@@ -345,10 +345,10 @@ export default function AIScorePanel({
           border: '1px solid rgba(46,134,171,0.2)',
           borderRadius: 6,
         }}>
-          <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 8, fontWeight: 600 }}>
+          <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8, fontWeight: 600 }}>
             按检测结果修复
           </div>
-          <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 8, lineHeight: 1.6 }}>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8, lineHeight: 1.6 }}>
             AI 会结合检测反馈（主要问题 + 各维度改进建议）对原内容进行局部修复，
             生成新版本后可选择应用或放弃。
           </div>
@@ -378,7 +378,7 @@ export default function AIScorePanel({
               type="primary"
               size="small"
             />
-            <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
               {drawCount > 1 ? `将生成 ${drawCount} 个版本供选择` : '直接应用到内容'}
             </span>
           </div>

@@ -18,6 +18,7 @@ export default function App() {
   const { addStream, appendStreamChunk, completeStream } = useTaskStore()
   const { theme } = useThemeStore()
   const isDarkTheme = theme === 'dark'
+  const isSoftTheme = theme === 'soft'
   const hasElectronBridge = typeof window !== 'undefined'
     && typeof window.electron?.on === 'function'
     && typeof window.electron?.novel?.list === 'function'
@@ -55,47 +56,104 @@ export default function App() {
       return {
         algorithm: antdTheme.darkAlgorithm,
         token: {
-          colorPrimary: '#0a84ff',
+          colorPrimary: '#d4944a',
           fontFamily: FONT,
           borderRadius: 12,
           controlHeight: 40,
-          colorBgBase: '#000000',
-          colorTextBase: '#f5f5f7',
-          colorBgContainer: '#1c1c1e',
-          colorBgLayout: '#000000',
-          colorBgElevated: '#2c2c2e',
-          colorBgSpotlight: '#3a3a3c',
-          colorBorder: 'rgba(255,255,255,0.1)',
-          colorBorderSecondary: 'rgba(255,255,255,0.04)',
+          colorBgBase: '#0f1117',
+          colorTextBase: '#e8eaed',
+          colorBgContainer: '#1a1d27',
+          colorBgLayout: '#0f1117',
+          colorBgElevated: '#252840',
+          colorBgSpotlight: '#252840',
+          colorBorder: 'rgba(255,255,255,0.08)',
+          colorBorderSecondary: 'rgba(255,255,255,0.06)',
         },
         components: {
           Layout: {
-            bodyBg: '#000000',
-            siderBg: '#1c1c1e',
-            headerBg: '#1c1c1e',
+            bodyBg: '#0f1117',
+            siderBg: '#1a1d27',
+            headerBg: '#1a1d27',
           },
           Menu: {
             darkItemBg: 'transparent',
             darkSubMenuItemBg: 'transparent',
-            itemSelectedBg: 'rgba(10, 132, 255, 0.16)',
-            itemSelectedColor: '#f5f5f7',
+            itemSelectedBg: 'rgba(166, 106, 43, 0.18)',
+            itemSelectedColor: '#e8eaed',
           },
           Card: {
-            colorBgContainer: '#1c1c1e',
+            colorBgContainer: '#1a1d27',
           },
           Modal: {
-            contentBg: '#1c1c1e',
-            headerBg: '#1c1c1e',
+            contentBg: '#1a1d27',
+            headerBg: '#1a1d27',
           },
           Input: {
-            colorBgContainer: '#2c2c2e',
+            colorBgContainer: '#1e2235',
           },
           Select: {
-            colorBgContainer: '#2c2c2e',
+            colorBgContainer: '#1e2235',
           },
           Table: {
-            colorBgContainer: '#1c1c1e',
-            headerBg: '#2c2c2e',
+            colorBgContainer: '#1a1d27',
+            headerBg: '#252840',
+          },
+        },
+      }
+    }
+
+    if (isSoftTheme) {
+      return {
+        algorithm: antdTheme.defaultAlgorithm,
+        token: {
+          colorPrimary: '#6b8f71',
+          fontFamily: FONT,
+          borderRadius: 12,
+          controlHeight: 40,
+          colorBgBase: '#f4f0eb',
+          colorTextBase: '#2d2520',
+          colorBgContainer: '#faf7f4',
+          colorBgLayout: '#f4f0eb',
+          colorBgElevated: '#ece8e1',
+          colorBgSpotlight: '#ece8e1',
+          colorBorder: '#d4c9be',
+          colorBorderSecondary: '#e3d9cf',
+          colorText: '#2d2520',
+          colorTextSecondary: '#6b5e52',
+          colorTextTertiary: '#9b8a7a',
+          colorFillAlter: '#ece8e1',
+          colorFillContent: '#e4ddd4',
+        },
+        components: {
+          Layout: {
+            bodyBg: '#f4f0eb',
+            siderBg: '#faf7f4',
+            headerBg: '#faf7f4',
+          },
+          Menu: {
+            itemSelectedBg: 'rgba(107, 143, 113, 0.12)',
+            itemSelectedColor: '#4a6b50',
+            itemHoverColor: '#4a6b50',
+          },
+          Button: {
+            primaryShadow: '0 10px 24px rgba(107, 143, 113, 0.16)',
+          },
+          Card: {
+            colorBgContainer: '#faf7f4',
+          },
+          Modal: {
+            contentBg: '#faf7f4',
+            headerBg: '#faf7f4',
+          },
+          Input: {
+            colorBgContainer: '#faf7f4',
+          },
+          Select: {
+            colorBgContainer: '#faf7f4',
+          },
+          Table: {
+            colorBgContainer: '#faf7f4',
+            headerBg: '#ece8e1',
           },
         },
       }
@@ -155,7 +213,7 @@ export default function App() {
         },
       },
     }
-  }, [isDarkTheme])
+  }, [isDarkTheme, isSoftTheme])
 
   return (
     <ConfigProvider theme={antdThemeConfig} locale={zhCN}>

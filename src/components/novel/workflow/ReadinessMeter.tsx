@@ -22,7 +22,7 @@ export default function ReadinessMeter({ readiness }: ReadinessMeterProps) {
         </div>
       </div>
 
-      <Progress percent={readiness.score} showInfo={false} strokeColor="var(--primary)" trailColor="rgba(166, 106, 43, 0.08)" />
+      <Progress percent={readiness.score} showInfo={false} strokeColor="var(--accent)" trailColor="rgba(166, 106, 43, 0.08)" />
 
       <div className="workflow-panel__metrics">
         {readiness.metrics.map((metric) => (
@@ -31,7 +31,7 @@ export default function ReadinessMeter({ readiness }: ReadinessMeterProps) {
               <strong className="workflow-panel__metric-label">{metric.label}</strong>
               <span className="workflow-panel__metric-score">{`${metric.score}%`}</span>
             </div>
-            <Progress percent={metric.score} showInfo={false} size="small" strokeColor="var(--primary)" trailColor="rgba(166, 106, 43, 0.08)" />
+            <Progress percent={metric.score} showInfo={false} size="small" strokeColor="var(--accent)" trailColor="rgba(166, 106, 43, 0.08)" />
             <span className="workflow-panel__metric-summary">{metric.summary}</span>
           </div>
         ))}

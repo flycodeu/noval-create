@@ -295,7 +295,7 @@
   --project-topbar-toolbar: var(--novel-shell-toolbar-surface, #141923);
   --project-topbar-border: var(--novel-shell-border, rgba(217, 190, 151, 0.08));
   --project-topbar-border-strong: rgba(217, 190, 151, 0.16);
-  --project-topbar-text: var(--color-text-primary);
+  --project-topbar-text: var(--text-primary);
   --project-topbar-text-soft: rgba(203, 211, 224, 0.72);
   --project-topbar-accent: #b67e47;
   --project-topbar-danger: #ffb198;

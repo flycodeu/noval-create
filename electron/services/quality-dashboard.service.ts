@@ -344,6 +344,11 @@ export function buildHeuristicRecallDiagnostics(
       recallDependencyRate: 0,
       overriddenHitCount: 0,
       fallbackHitCount: 0,
+      validatedHitCount: 0,
+      lowSimilarityRejectedCount: 0,
+      entityValidationRejectedCount: 0,
+      minVectorSimilarity: 0.18,
+      minKeywordSimilarity: 0.04,
       summaryLines: ['当前章节缺少可用于召回的标题、摘要或大纲信号。'],
     }
   }
@@ -385,6 +390,11 @@ export function buildHeuristicRecallDiagnostics(
     recallDependencyRate,
     overriddenHitCount: 0,
     fallbackHitCount: totalHitCount,
+    validatedHitCount: selectedHitCount,
+    lowSimilarityRejectedCount: 0,
+    entityValidationRejectedCount: 0,
+    minVectorSimilarity: 0.18,
+    minKeywordSimilarity: 0.04,
     summaryLines: [
       '诊断页中的召回可靠性使用本地关键词回查估算，不改变生成链路里的硬约束优先级。',
       totalHitCount > 0
@@ -403,6 +413,21 @@ function buildRecallBucketCoverageRate(snapshot?: RecallSnapshot): number {
   if (buckets.length === 0) return 0
   const covered = buckets.filter((bucket) => bucket.hitCount > 0).length
   return roundMetric((covered / buckets.length) * 100)
+}
+
+function sumRecallDiagnosticMetric(
+  entries: Array<{ diagnostics: RecallDiagnostics }>,
+  key: 'validatedHitCount' | 'lowSimilarityRejectedCount' | 'entityValidationRejectedCount',
+): number {
+  return entries.reduce((sum, entry) => sum + entry.diagnostics[key], 0)
+}
+
+function resolveRecallDiagnosticThreshold(
+  entries: Array<{ diagnostics: RecallDiagnostics }>,
+  key: 'minVectorSimilarity' | 'minKeywordSimilarity',
+): number {
+  if (entries.length === 0) return 0
+  return roundMetric(entries.reduce((min, entry) => Math.min(min, entry.diagnostics[key]), entries[0].diagnostics[key]))
 }
 
 function pickLatestRecallFallbackReason(
@@ -2893,6 +2918,11 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
       : 0,
     fallbackHitCount: analyzedRecallEntries.reduce((sum, entry) => sum + entry.diagnostics.fallbackHitCount, 0),
     selectedHitCount: analyzedRecallEntries.reduce((sum, entry) => sum + entry.diagnostics.selectedHitCount, 0),
+    validatedHitCount: sumRecallDiagnosticMetric(analyzedRecallEntries, 'validatedHitCount'),
+    lowSimilarityRejectedCount: sumRecallDiagnosticMetric(analyzedRecallEntries, 'lowSimilarityRejectedCount'),
+    entityValidationRejectedCount: sumRecallDiagnosticMetric(analyzedRecallEntries, 'entityValidationRejectedCount'),
+    minVectorSimilarity: resolveRecallDiagnosticThreshold(analyzedRecallEntries, 'minVectorSimilarity'),
+    minKeywordSimilarity: resolveRecallDiagnosticThreshold(analyzedRecallEntries, 'minKeywordSimilarity'),
     previousChapterFeedCoverageRate: previousChapterFeedReports.length > 0
       ? roundMetric(previousChapterFeedReports.reduce((sum, entry) => sum + entry.coverageRate, 0) / previousChapterFeedReports.length)
       : 0,
@@ -2954,6 +2984,11 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
         recallDependencyRate: roundMetric(entries.reduce((sum, entry) => sum + entry.diagnostics.recallDependencyRate, 0) / entries.length),
         staleRecallCount: entries.reduce((sum, entry) => sum + entry.diagnostics.staleRecallCount, 0),
         staleRecallRate: roundMetric(entries.reduce((sum, entry) => sum + entry.diagnostics.staleRecallRate, 0) / entries.length),
+        validatedHitCount: sumRecallDiagnosticMetric(entries, 'validatedHitCount'),
+        lowSimilarityRejectedCount: sumRecallDiagnosticMetric(entries, 'lowSimilarityRejectedCount'),
+        entityValidationRejectedCount: sumRecallDiagnosticMetric(entries, 'entityValidationRejectedCount'),
+        minVectorSimilarity: resolveRecallDiagnosticThreshold(entries, 'minVectorSimilarity'),
+        minKeywordSimilarity: resolveRecallDiagnosticThreshold(entries, 'minKeywordSimilarity'),
         previousChapterFeedCoverageRate: (() => {
           const feedReports = entries
             .map((entry) => previousChapterFeedReportsByChapterId.get(entry.chapterId))

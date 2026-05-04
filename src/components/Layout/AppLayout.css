@@ -2,7 +2,7 @@
   height: 100dvh;
   min-height: 0;
   overflow: hidden;
-  background: var(--color-bg-primary);
+  background: var(--bg-app);
 }
 
 .app-layout__body {
@@ -18,7 +18,7 @@
   min-height: 0;
   overflow: hidden;
   background: var(--bg-glass);
-  border-right: 1px solid var(--border-color);
+  border-right: 1px solid var(--border-default);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
 }
@@ -42,7 +42,7 @@
 
 .app-layout__theme-panel {
   padding: 16px 20px;
-  border-top: 1px solid var(--border-color);
+  border-top: 1px solid var(--border-default);
 }
 
 .app-layout__theme-title {
@@ -50,7 +50,7 @@
   align-items: center;
   gap: 6px;
   margin-bottom: 12px;
-  color: var(--color-text-muted);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -67,7 +67,7 @@
   width: 100%;
   min-height: 40px;
   padding: 0 16px;
-  color: var(--color-text-primary);
+  color: var(--text-primary);
   font-size: 14px;
   cursor: pointer;
   background: transparent;
@@ -77,7 +77,7 @@
 }
 
 .app-layout__theme-option:hover {
-  background: var(--color-bg-hover);
+  background: var(--bg-hover);
 }
 
 .app-layout__theme-option.is-active {
@@ -90,7 +90,7 @@
   position: relative;
   min-height: 44px;
   background: color-mix(in srgb, var(--bg-surface) 86%, var(--bg-muted) 14%);
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-default);
   isolation: isolate;
 }
 
@@ -121,7 +121,7 @@
 }
 
 .app-shell-bar__title {
-  color: var(--color-text-primary);
+  color: var(--text-primary);
   font-size: 13px;
   font-weight: 600;
   line-height: 1;
@@ -130,7 +130,7 @@
 
 .app-shell-bar__summary {
   min-width: 0;
-  color: var(--color-text-secondary);
+  color: var(--text-secondary);
   font-size: 12px;
   line-height: 1;
   white-space: nowrap;
@@ -152,7 +152,7 @@
   justify-content: center;
   width: 42px;
   height: 30px;
-  color: var(--color-text-secondary);
+  color: var(--text-secondary);
   cursor: pointer;
   background: transparent;
   border: none;
@@ -161,13 +161,13 @@
 }
 
 .app-shell-bar__window-button:hover {
-  color: var(--color-text-primary);
+  color: var(--text-primary);
   background: color-mix(in srgb, var(--bg-hover) 74%, transparent 26%);
 }
 
 .app-shell-bar__window-button--danger:hover {
-  color: var(--color-danger);
-  background: color-mix(in srgb, var(--color-danger) 14%, transparent 86%);
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent 86%);
 }
 
 [data-theme="dark"] .app-shell-bar {

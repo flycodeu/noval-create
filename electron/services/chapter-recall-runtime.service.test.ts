@@ -107,6 +107,11 @@ function createRecallDiagnostics(overrides: Record<string, unknown> = {}) {
     recallDependencyRate: 67,
     overriddenHitCount: 0,
     fallbackHitCount: 0,
+    validatedHitCount: 2,
+    lowSimilarityRejectedCount: 0,
+    entityValidationRejectedCount: 0,
+    minVectorSimilarity: 0.18,
+    minKeywordSimilarity: 0.04,
     summaryLines: ['结构化召回快照'],
     ...overrides,
   }

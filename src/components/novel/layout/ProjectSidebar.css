@@ -1,14 +1,14 @@
 .project-sidebar {
-  --project-sidebar-surface: var(--color-bg-secondary, var(--bg-panel));
-  --project-sidebar-surface-hover: var(--color-bg-hover, #eef2f6);
+  --project-sidebar-surface: var(--bg-surface);
+  --project-sidebar-surface-hover: var(--bg-hover);
   --project-sidebar-surface-active: rgba(166, 106, 43, 0.12);
-  --project-sidebar-border: var(--border-color, var(--border-light));
+  --project-sidebar-border: var(--border-default);
   --project-sidebar-border-strong: rgba(166, 106, 43, 0.3);
-  --project-sidebar-text: var(--color-text-primary, var(--text-main));
-  --project-sidebar-text-secondary: var(--color-text-secondary, var(--text-sub));
-  --project-sidebar-text-muted: var(--color-text-muted, var(--text-muted));
-  --project-sidebar-accent: var(--color-orange, var(--primary));
-  --project-sidebar-danger: var(--color-error, var(--danger));
+  --project-sidebar-text: var(--text-primary);
+  --project-sidebar-text-secondary: var(--text-secondary);
+  --project-sidebar-text-muted: var(--text-muted);
+  --project-sidebar-accent: var(--accent);
+  --project-sidebar-danger: var(--danger);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: var(--space-md, 16px);

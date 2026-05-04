@@ -17,6 +17,7 @@ import {
   collectChapterContextRawData,
   ContinuityState,
   HardConstraintOverflowError,
+  type HardConstraintSourceLabel,
 } from './context.service'
 import {
   buildChapterDraftPrompt,
@@ -921,7 +922,7 @@ function createInitialChapterPipelineSnapshot(
 }
 
 function buildChapterContextAssemblyReport(
-  context: Pick<ChapterContext, 'recalledMemorySources' | 'recallSnapshot' | 'timelineSummary' | 'timelineOpenThreads' | 'hardConstraintEntries'>,
+  context: Pick<ChapterContext, 'recalledMemorySources' | 'recallDiagnostics' | 'recallSnapshot' | 'timelineSummary' | 'timelineOpenThreads' | 'hardConstraintEntries'>,
   usageSnapshot: import('../../src/types').WritingContextUsageSnapshot,
 ): AiContextAssemblyReport {
   const graphItems = usageSnapshot.usedAssets.length
@@ -941,7 +942,15 @@ function buildChapterContextAssemblyReport(
         label: '图谱召回',
         itemCount: graphItems,
         summary: graphItems > 0
-          ? `命中 ${graphItems} 个已使用资产，并补入 ${context.recalledMemorySources.filter((item) => !item.stale).length} 条召回片段。`
+          ? `命中 ${graphItems} 个已使用资产，并补入 ${context.recalledMemorySources.filter((item) =>
+            !item.stale
+            && !item.overriddenByConstraint
+            && item.entityValidated
+            && item.similarity >= (
+              item.searchMode === 'vector'
+                ? context.recallDiagnostics.minVectorSimilarity
+                : context.recallDiagnostics.minKeywordSimilarity
+            )).length} 条召回片段。`
           : '当前没有命中的资产图谱引用。',
       },
       {
@@ -3265,6 +3274,7 @@ function allocateStageContextForPipeline(
   complexity: ChapterComplexity,
   promptProfile: ChapterContextStage,
   totalBudget?: number,
+  preserveConstraintLabels?: HardConstraintSourceLabel[],
 ): ChapterContext {
   const novelTargetWords = rawContext.novel.targetWords || 0
   try {
@@ -3277,6 +3287,7 @@ function allocateStageContextForPipeline(
         chapter.targetWords || 3000,
         novelTargetWords,
       ),
+      preserveConstraintLabels,
     })
   } catch (error) {
     if (error instanceof HardConstraintOverflowError) {
@@ -3292,6 +3303,7 @@ function allocateStageContextForPipeline(
 function buildStageContextMap(
   rawContext: Awaited<ReturnType<typeof collectChapterContextRawData>>,
   chapter: typeof chapters.$inferSelect,
+  preserveConstraintLabels?: HardConstraintSourceLabel[],
 ): {
   complexity: ChapterComplexity
   contexts: Record<ChapterContextStage, ChapterContext>
@@ -3307,10 +3319,10 @@ function buildStageContextMap(
   return {
     complexity,
     contexts: {
-      scenePlan: allocateStageContextForPipeline(rawContext, chapter, complexity, 'scenePlan'),
-      draft: allocateStageContextForPipeline(rawContext, chapter, complexity, 'draft'),
-      review: allocateStageContextForPipeline(rawContext, chapter, complexity, 'review'),
-      rewrite: allocateStageContextForPipeline(rawContext, chapter, complexity, 'rewrite'),
+      scenePlan: allocateStageContextForPipeline(rawContext, chapter, complexity, 'scenePlan', undefined, preserveConstraintLabels),
+      draft: allocateStageContextForPipeline(rawContext, chapter, complexity, 'draft', undefined, preserveConstraintLabels),
+      review: allocateStageContextForPipeline(rawContext, chapter, complexity, 'review', undefined, preserveConstraintLabels),
+      rewrite: allocateStageContextForPipeline(rawContext, chapter, complexity, 'rewrite', undefined, preserveConstraintLabels),
     },
   }
 }
@@ -3318,6 +3330,7 @@ function buildStageContextMap(
 function buildPreviewStageContextMap(
   rawContext: Awaited<ReturnType<typeof collectChapterContextRawData>>,
   chapter: typeof chapters.$inferSelect,
+  preserveConstraintLabels?: HardConstraintSourceLabel[],
 ): {
   complexity: ChapterComplexity
   contexts: Record<ChapterContextStage, ChapterContext>
@@ -3331,7 +3344,7 @@ function buildPreviewStageContextMap(
   })
   const buildStageContext = (promptProfile: ChapterContextStage) => {
     try {
-      return allocateStageContextForPipeline(rawContext, chapter, complexity, promptProfile)
+      return allocateStageContextForPipeline(rawContext, chapter, complexity, promptProfile, undefined, preserveConstraintLabels)
     } catch (error) {
       if (error instanceof ContextOverflowError || error instanceof HardConstraintOverflowError) {
         return error.context
@@ -3628,7 +3641,7 @@ async function continueChapterContent(
 export async function generateChapterContent(
   chapterId: number,
   sender?: WebContents,
-  options: { executionMode?: AiExecutionMode } = {},
+  options: { executionMode?: AiExecutionMode; preserveConstraintLabels?: HardConstraintSourceLabel[] } = {},
 ): Promise<number> {
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
@@ -3911,7 +3924,7 @@ export async function generateChapterContent(
   }
 
   try {
-    const { complexity, contexts } = buildStageContextMap(rawContext, chapter)
+    const { complexity, contexts } = buildStageContextMap(rawContext, chapter, options.preserveConstraintLabels)
     const scenePlanContext = contexts.scenePlan
     const draftContext = contexts.draft
     const reviewContext = contexts.review
@@ -4890,14 +4903,14 @@ export async function resumeChapterPipeline(taskId: number, sender?: WebContents
 
 export async function getChapterContextPreview(
   chapterId: number,
-  options: { executionMode?: AiExecutionMode } = {},
+  options: { executionMode?: AiExecutionMode; preserveConstraintLabels?: HardConstraintSourceLabel[] } = {},
 ): Promise<import('../../src/types').ChapterContextPreview> {
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
   if (!chapter) throwUserFacingError('chapter.notFoundWithId', { id: chapterId })
 
   const rawContext = await collectChapterContextRawData(chapter.novelId, chapter.chapterNum)
-  const { complexity, contexts } = buildPreviewStageContextMap(rawContext, chapter)
+  const { complexity, contexts } = buildPreviewStageContextMap(rawContext, chapter, options.preserveConstraintLabels)
   const orderedStages: ChapterContextStage[] = ['scenePlan', 'draft', 'review', 'rewrite']
   const linkedImpacts = listActiveImpactsForChapter(chapter.novelId, chapter.id)
   const usageSnapshot = buildWritingContextUsageSnapshot(rawContext, contexts.draft, linkedImpacts)

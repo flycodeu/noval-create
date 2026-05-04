@@ -74,21 +74,6 @@ const GENRE_OPTIONS = [
   { value: 12, label: '盗墓探秘', description: '古墓机关、线索破解与冒险探索。' },
 ] as const
 
-const GENRE_GRADIENTS: Record<string, string> = {
-  现代都市: 'linear-gradient(135deg, #2E86AB, #1E3A5F)',
-  古代言情: 'linear-gradient(135deg, #E84393, #8B1A5C)',
-  玄幻修真: 'linear-gradient(135deg, #9B59B6, #4A235A)',
-  悬疑推理: 'linear-gradient(135deg, #2C3E50, #1A252F)',
-  科幻未来: 'linear-gradient(135deg, #1ABC9C, #0E6655)',
-  架空历史: 'linear-gradient(135deg, #D35400, #784212)',
-  赛博朋克: 'linear-gradient(135deg, #8E44AD, #1A5276)',
-  武侠: 'linear-gradient(135deg, #C0392B, #641E16)',
-  历史正剧: 'linear-gradient(135deg, #7D6608, #4D4004)',
-  末世求生: 'linear-gradient(135deg, #5D4037, #3E2723)',
-  丧尸末日: 'linear-gradient(135deg, #37474F, #263238)',
-  盗墓探秘: 'linear-gradient(135deg, #4E342E, #1B0000)',
-}
-
 const TARGET_WORDS_OPTIONS = [
   { label: '短篇 10 万字', value: 100000 },
   { label: '中篇 30 万字', value: 300000 },
@@ -597,7 +582,6 @@ export default function NovelList() {
                   <div className="novel-list-page__genre-grid">
                     {GENRE_OPTIONS.map((genre) => {
                       const isSelected = selectedGenreId === genre.value
-                      const gradient = GENRE_GRADIENTS[genre.label] || 'linear-gradient(135deg, #1a1d27, #252840)'
 
                       return (
                         <div
@@ -607,7 +591,7 @@ export default function NovelList() {
                             wizardForm.setFieldValue('genreId', genre.value)
                           }}
                           className={`novel-list-page__genre-card${isSelected ? ' is-selected' : ''}`}
-                          style={{ background: gradient }}
+                          data-genre={genre.label}
                         >
                           {isSelected ? <CheckOutlined className="novel-list-page__genre-check" /> : null}
                           <div className="novel-list-page__genre-title">{genre.label}</div>

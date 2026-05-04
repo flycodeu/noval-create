@@ -1330,6 +1330,31 @@ async function executeRunApply(runId: number, retryFailedOnly = false): Promise<
   const db = getDb()
   const run = getRunRow(runId)
   const chapter = getChapterRow(run.chapterId)
+  const sourceChapterVersion = run.sourceChapterVersion || 1
+  const currentContextVersion = chapter.contextVersion || 1
+  if (sourceChapterVersion !== currentContextVersion) {
+    const errorMessage = `上下文版本已从 v${sourceChapterVersion} 变为 v${currentContextVersion}，需要重新生成章后回写草案后再应用。`
+    db.update(chapterWritebackRuns).set({
+      status: 'failed',
+      retryCount: run.retryCount || 0,
+      lastAttemptAt: new Date().toISOString(),
+      failedAt: new Date().toISOString(),
+      errorMessage,
+      updatedAt: new Date().toISOString(),
+    }).where(eq(chapterWritebackRuns.id, run.id)).run()
+    updateChapterWritebackSyncStatus(chapter.id, {
+      phase: 'failed',
+      runId: run.id,
+      blockedGeneration: true,
+      readyForNextChapter: false,
+      lastError: errorMessage,
+      lastAttemptAt: new Date().toISOString(),
+      retryCount: run.retryCount || 0,
+      contextVersion: currentContextVersion,
+    })
+    refreshRunSummary(run.id)
+    return getChapterWritebackCenterData(chapter.id, run.id)
+  }
   updateChapterWritebackSyncStatus(chapter.id, {
     phase: 'applying',
     runId: run.id,

@@ -1,13 +1,13 @@
 .novel-project-card,
 .novel-metric-card,
 .novel-blocker-card {
-  --novel-card-surface: var(--color-bg-secondary, var(--bg-surface));
-  --novel-card-border: var(--border-color, var(--border-default));
-  --novel-card-text: var(--color-text-primary, var(--text-primary));
-  --novel-card-text-secondary: var(--color-text-secondary, var(--text-secondary));
-  --novel-card-text-muted: var(--color-text-muted, var(--text-muted));
-  --novel-card-accent: var(--color-blue-primary, var(--accent));
-  --novel-card-accent-soft: var(--color-bg-hover, var(--accent-soft));
+  --novel-card-surface: var(--bg-surface);
+  --novel-card-border: var(--border-default);
+  --novel-card-text: var(--text-primary);
+  --novel-card-text-secondary: var(--text-secondary);
+  --novel-card-text-muted: var(--text-muted);
+  --novel-card-accent: var(--accent);
+  --novel-card-accent-soft: var(--accent-soft);
   --novel-card-shadow: var(--shadow-md);
 }
 

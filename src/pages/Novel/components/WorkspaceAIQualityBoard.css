@@ -23,7 +23,7 @@
 }
 
 .workspace-ai-quality-board__text-secondary {
-  color: var(--color-text-secondary);
+  color: var(--text-secondary);
 }
 
 .workspace-ai-quality-board__text-secondary--relaxed {
@@ -72,7 +72,7 @@
 
 .workspace-ai-quality-board__metric-label {
   width: 120px;
-  color: var(--color-text-secondary);
+  color: var(--text-secondary);
 }
 
 .workspace-ai-quality-board__metric-progress {
@@ -107,7 +107,7 @@
 }
 
 .workspace-ai-quality-board__reason {
-  color: var(--color-text-muted);
+  color: var(--text-muted);
   margin-bottom: 4px;
 }
 

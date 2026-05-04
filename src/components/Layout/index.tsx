@@ -51,6 +51,7 @@ const menuItems = [
 const THEME_OPTIONS: { value: Theme; label: string; icon: string }[] = [
   { value: 'dark', label: '深色', icon: '🌙' },
   { value: 'light', label: '浅色', icon: '☀️' },
+  { value: 'soft', label: '柔和', icon: '◐' },
 ]
 
 export default function AppLayout({ children }: AppLayoutProps) {

@@ -34,6 +34,7 @@ import type {
   ChapterContractAudit,
   ChapterContractValidationResult,
   ChapterContextPreview,
+  HardConstraintSourceLabel,
   ChapterPublishCheck,
   ChapterSegment,
   ExpressionDedupReport,
@@ -120,6 +121,20 @@ interface ReviewNotes {
   }>
   contract_validation?: ChapterContractValidationResult
 }
+
+const HARD_CONSTRAINT_PRESERVE_OPTIONS: Array<{ value: HardConstraintSourceLabel; label: string }> = [
+  { value: 'chapterGoal', label: '章节目标' },
+  { value: 'characterStates', label: '人物状态' },
+  { value: 'worldStates', label: '世界状态' },
+  { value: 'relationSummary', label: '人物关系' },
+  { value: 'itemSummary', label: '关键物品' },
+  { value: 'openLoops', label: '回收事项' },
+  { value: 'continuityNotes', label: '必须承接' },
+  { value: 'feedbackRecurrence', label: '审校复现' },
+  { value: 'styleHardGuard', label: '文风硬约束' },
+  { value: 'antiAiRules', label: '反 AI 硬约束' },
+]
+
 interface TextSelectionSnapshot {
   start: number
   end: number
@@ -521,6 +536,7 @@ export default function Writing({ novelId }: Props) {
   const [foreshadowLedger, setForeshadowLedger] = useState<ForeshadowLedgerEntry[]>([])
   const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([])
   const [storyItems, setStoryItems] = useState<StoryItem[]>([])
+  const [preserveConstraintLabels, setPreserveConstraintLabels] = useState<HardConstraintSourceLabel[]>([])
   const [chapterSegments, setChapterSegments] = useState<ChapterSegment[]>([])
   const [storyFacts, setStoryFacts] = useState<StoryFact[]>([])
   const [storyVolumes, setStoryVolumes] = useState<StoryVolume[]>([])
@@ -733,12 +749,13 @@ export default function Writing({ novelId }: Props) {
     try {
       setChapterContextPreview(await window.electron.chapter.getContextPreview(chapter.id, {
         executionMode: effectiveAiExecutionMode,
+        preserveConstraintLabels,
       }))
     } catch (error) {
       console.error('Failed to load chapter context preview', error)
       setChapterContextPreview(null)
     }
-  }, [effectiveAiExecutionMode])
+  }, [effectiveAiExecutionMode, preserveConstraintLabels])
 
   const refreshPublishCheck = useCallback(async (chapterId: number) => {
     const nextCheck = await window.electron.chapter.runPublishCheck(chapterId)
@@ -1169,6 +1186,7 @@ export default function Writing({ novelId }: Props) {
     try {
       const taskId = await window.electron.chapter.generateContent(currentChapter.id, {
         executionMode: effectiveAiExecutionMode,
+        preserveConstraintLabels,
       })
       updateGenerationTask({ chapterId: currentChapter.id, taskId })
     } catch (error: unknown) {
@@ -1868,7 +1886,11 @@ export default function Writing({ novelId }: Props) {
           ) : <div className="novel-copy-block">当前章节还没有最近一次角色化流水线快照。</div>}
         </InsightCard>
         <InsightCard title="关键约束注入" eyebrow="本章关键约束已注入" tone="soft">
-          <ConstraintInjectionCard preview={chapterContextPreview} />
+          <ConstraintInjectionCard
+            preview={chapterContextPreview}
+            preserveConstraintLabels={preserveConstraintLabels}
+            onPreserveConstraintChange={setPreserveConstraintLabels}
+          />
         </InsightCard>
         <InsightCard title="上一章关键先验" eyebrow="承接上一章的真实输入" tone="soft">
           <PreviousChapterFeedCard preview={chapterContextPreview} />
@@ -2310,11 +2332,24 @@ export default function Writing({ novelId }: Props) {
     [chapterCharacters],
   )
 
-  const recallItems = useMemo(() => (
-    chapterContextPreview?.recalledMemorySources.slice(0, 6).map((item) => (
-      `${item.sourceLabel} · ${item.summary}${item.stale ? ' · 已过期' : ''}`
-    )) || chapterContextPreview?.recallDiagnostics.summaryLines.slice(0, 6) || []
-  ), [chapterContextPreview?.recalledMemorySources, chapterContextPreview?.recallDiagnostics.summaryLines])
+  const recallItems = useMemo(() => {
+    if (!chapterContextPreview) return []
+
+    const acceptedSources = chapterContextPreview.recalledMemorySources
+      .filter((item) => !item.stale
+        && !item.overriddenByConstraint
+        && item.entityValidated
+        && item.similarity >= (
+          item.searchMode === 'vector'
+            ? chapterContextPreview.recallDiagnostics.minVectorSimilarity
+            : chapterContextPreview.recallDiagnostics.minKeywordSimilarity
+        ))
+      .slice(0, 6)
+
+    return acceptedSources.length > 0
+      ? acceptedSources.map((item) => `${item.sourceLabel} · ${item.summary}`)
+      : chapterContextPreview.recallDiagnostics.summaryLines.slice(0, 6)
+  }, [chapterContextPreview])
 
   const qualityIssueItems = useMemo(() => ([
     ...(publishCheck?.checklist || [])
@@ -3295,13 +3330,33 @@ function InsightCard({
   )
 }
 
-function ConstraintInjectionCard({ preview }: { preview: ChapterContextPreview | null }) {
+function ConstraintInjectionCard({
+  preview,
+  preserveConstraintLabels,
+  onPreserveConstraintChange,
+}: {
+  preview: ChapterContextPreview | null
+  preserveConstraintLabels: HardConstraintSourceLabel[]
+  onPreserveConstraintChange: (labels: HardConstraintSourceLabel[]) => void
+}) {
   if (!preview || preview.stages.length === 0) {
     return <div className="novel-copy-block">先切到具体章节并生成上下文预览，再核对四个阶段的约束注入状态。</div>
   }
 
   return (
     <div className="writing-layout-stack writing-layout-stack--sm">
+      <div className="writing-layout-stack writing-layout-stack--sm">
+        <div className="novel-copy-block">手动保留后，预览与正式生成都会优先保障这些硬约束不先被踢出。</div>
+        <Select
+          mode="multiple"
+          allowClear
+          className="workspace-max-400"
+          value={preserveConstraintLabels}
+          options={HARD_CONSTRAINT_PRESERVE_OPTIONS}
+          placeholder="手动保留关键约束"
+          onChange={(values) => onPreserveConstraintChange(values as HardConstraintSourceLabel[])}
+        />
+      </div>
       {preview.stages.map((stage) => {
         const injectedTitles = stage.hardConstraintEntries.map((entry) => entry.title)
         const truncatedTitles = stage.hardConstraintEntries.filter((entry) => entry.truncated).map((entry) => entry.title)
@@ -3340,6 +3395,11 @@ function ConstraintInjectionCard({ preview }: { preview: ChapterContextPreview |
             <div className="novel-note-list__item">{stage.hardConstraintSummary}</div>
             <div className="novel-note-list__item">
               已注入：{injectedTitles.length > 0 ? injectedTitles.join('、') : '无'}
+            </div>
+            <div className="novel-note-list__item">
+              {stage.constraintInjectionStatus.preservedLabels.length > 0
+                ? `保留优先：${stage.constraintInjectionStatus.preservedLabels.join('、')}`
+                : '当前没有额外手动保留项，系统只保底默认关键约束。'}
             </div>
             <div className="novel-note-list__item">
               {truncatedTitles.length > 0
@@ -3406,7 +3466,16 @@ function RecallDiagnosticsCard({ preview }: { preview: ChapterContextPreview | n
 
   const diagnostics = preview.recallDiagnostics
   const snapshot = preview.recallSnapshot
-  const freshSources = preview.recalledMemorySources.filter((source) => !source.stale && !source.overriddenByConstraint).slice(0, 4)
+  const freshSources = preview.recalledMemorySources
+    .filter((source) => !source.stale
+      && !source.overriddenByConstraint
+      && source.entityValidated
+      && source.similarity >= (
+        source.searchMode === 'vector'
+          ? diagnostics.minVectorSimilarity
+          : diagnostics.minKeywordSimilarity
+      ))
+    .slice(0, 4)
   const staleSources = preview.recalledMemorySources.filter((source) => source.stale).slice(0, 4)
   const bucketLines = Object.entries(snapshot.bucketStats)
     .map(([bucket, stats]) => `${bucket}：命中 ${stats.hitCount} / 采用 ${stats.selectedHitCount}${stats.fallbackReason ? ` / ${stats.fallbackReason}` : ''}`)
@@ -3420,6 +3489,8 @@ function RecallDiagnosticsCard({ preview }: { preview: ChapterContextPreview | n
         <div className="novel-insight-list__item">过期召回率 {diagnostics.staleRecallRate}%</div>
         <div className="novel-insight-list__item">可用片段 {diagnostics.selectedHitCount}</div>
         <div className="novel-insight-list__item">过期拦截 {diagnostics.staleRecallCount}</div>
+        <div className="novel-insight-list__item">低相似拒绝 {diagnostics.lowSimilarityRejectedCount}</div>
+        <div className="novel-insight-list__item">实体校验拦截 {diagnostics.entityValidationRejectedCount}</div>
       </div>
       <StringList
         items={[

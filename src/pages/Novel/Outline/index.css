@@ -14,7 +14,7 @@
 }
 
 .novel-outline-page__toolbar-label {
-  color: var(--color-text-muted);
+  color: var(--text-muted);
 }
 
 .novel-outline-page__count-input--sm {

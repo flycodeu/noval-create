@@ -199,9 +199,57 @@
   padding: 16px;
   border: 2px solid transparent;
   border-radius: var(--radius-m);
-  background: var(--bg-hover); /* overridden via inline styles */
+  background: linear-gradient(135deg, #1a1d27, #252840);
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.novel-list-page__genre-card[data-genre="现代都市"] {
+  background: linear-gradient(135deg, #2e86ab, #1e3a5f);
+}
+
+.novel-list-page__genre-card[data-genre="古代言情"] {
+  background: linear-gradient(135deg, #e84393, #8b1a5c);
+}
+
+.novel-list-page__genre-card[data-genre="玄幻修真"] {
+  background: linear-gradient(135deg, #9b59b6, #4a235a);
+}
+
+.novel-list-page__genre-card[data-genre="悬疑推理"] {
+  background: linear-gradient(135deg, #2c3e50, #1a252f);
+}
+
+.novel-list-page__genre-card[data-genre="科幻未来"] {
+  background: linear-gradient(135deg, #1abc9c, #0e6655);
+}
+
+.novel-list-page__genre-card[data-genre="架空历史"] {
+  background: linear-gradient(135deg, #d35400, #784212);
+}
+
+.novel-list-page__genre-card[data-genre="赛博朋克"] {
+  background: linear-gradient(135deg, #8e44ad, #1a5276);
+}
+
+.novel-list-page__genre-card[data-genre="武侠"] {
+  background: linear-gradient(135deg, #c0392b, #641e16);
+}
+
+.novel-list-page__genre-card[data-genre="历史正剧"] {
+  background: linear-gradient(135deg, #7d6608, #4d4004);
+}
+
+.novel-list-page__genre-card[data-genre="末世求生"] {
+  background: linear-gradient(135deg, #5d4037, #3e2723);
+}
+
+.novel-list-page__genre-card[data-genre="丧尸末日"] {
+  background: linear-gradient(135deg, #37474f, #263238);
+}
+
+.novel-list-page__genre-card[data-genre="盗墓探秘"] {
+  background: linear-gradient(135deg, #4e342e, #1b0000);
 }
 
 .novel-list-page__genre-card.is-selected {
@@ -300,4 +348,49 @@
   .novel-list-page__genre-grid {
     grid-template-columns: 1fr;
   }
+}
+
+[data-theme="dark"] .novel-list-page__stat-card,
+[data-theme="dark"] .novel-list-page__toolbar,
+[data-theme="dark"] .novel-list-page__launch-card,
+[data-theme="dark"] .novel-list-page__fast-note {
+  border-color: rgba(212, 193, 161, 0.14);
+  background: rgba(28, 34, 47, 0.88);
+  box-shadow: 0 14px 30px rgba(5, 10, 19, 0.2);
+}
+
+[data-theme="dark"] .novel-list-page__launch-card.is-active {
+  border-color: rgba(209, 154, 93, 0.32);
+  background: color-mix(in srgb, var(--accent-soft) 74%, rgba(28, 34, 47, 0.88) 26%);
+}
+
+[data-theme="dark"] .novel-list-page__genre-card {
+  box-shadow: 0 14px 28px rgba(4, 8, 18, 0.22);
+}
+
+[data-theme="dark"] .novel-list-page__genre-card.is-selected {
+  border-color: #f0bf7f;
+  box-shadow: 0 18px 32px rgba(4, 8, 18, 0.28);
+}
+
+[data-theme="soft"] .novel-list-page__stat-card,
+[data-theme="soft"] .novel-list-page__toolbar {
+  background: var(--bg-elevated);
+  border-color: var(--border-strong);
+}
+
+[data-theme="soft"] .novel-list-page__launch-card,
+[data-theme="soft"] .novel-list-page__fast-note {
+  background: var(--bg-surface);
+  border-color: color-mix(in srgb, var(--border-default) 82%, transparent);
+  box-shadow: 0 10px 22px rgba(68, 52, 35, 0.08);
+}
+
+[data-theme="soft"] .novel-list-page__launch-card.is-active {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border-strong));
+  background: color-mix(in srgb, var(--accent-soft) 88%, var(--bg-surface) 12%);
+}
+
+[data-theme="soft"] .novel-list-page__genre-card.is-selected {
+  border-color: color-mix(in srgb, var(--accent) 52%, white 48%);
 }

@@ -84,9 +84,11 @@ import type {
 } from './context.service'
 import {
   allocateChapterContext,
+  buildRecallSnapshot,
   buildPreviousChapterContextFeed,
   ContextOverflowError,
   HardConstraintOverflowError,
+  selectRecentContextRows,
 } from './context.service'
 import { getDb } from '../database/db'
 import { antiAiRuleHits, chapterGateRuns, chapters } from '../database/schema'
@@ -107,6 +109,11 @@ function createRecallDiagnostics(): RecallDiagnostics {
     recallDependencyRate: 0,
     overriddenHitCount: 0,
     fallbackHitCount: 0,
+    validatedHitCount: 0,
+    lowSimilarityRejectedCount: 0,
+    entityValidationRejectedCount: 0,
+    minVectorSimilarity: 0.6,
+    minKeywordSimilarity: 0.5,
     summaryLines: [],
   }
 }
@@ -189,6 +196,9 @@ function createRawData(
     currentArc: null,
     outlineMentionedCharacterCount: 0,
     activeThreadPressureCount: 0,
+    mentionedCharacters: [],
+    mentionedItems: [],
+    mentionedLocations: [],
     contextParts,
     previousChapterSampleReport: {
       sourceChapterId: 3,
@@ -265,6 +275,19 @@ describe('allocateChapterContext', () => {
     expect(context.hardConstraintEntries.length).toBeGreaterThan(0)
     expect(context.constraintInjectionStatus.injectedLabels).toContain('chapterGoal')
     expect(context.softContextDecisions.some((entry) => entry.reason === 'covered_by_hard_constraint')).toBe(true)
+  })
+
+  it('tracks explicit preserved hard-constraint labels in allocation metadata', () => {
+    const context = allocateChapterContext(createRawData(), {
+      totalBudget: 10000,
+      promptProfile: 'draft',
+      chapterComplexity: 'standard',
+      preserveConstraintLabels: ['itemSummary'],
+    })
+
+    expect(context.hardConstraintEntries.some((entry) => entry.label === 'itemSummary')).toBe(true)
+    expect(context.constraintInjectionStatus.preservedLabels).toContain('itemSummary')
+    expect(context.contextBudgetReport.preservedConstraintLabels).toContain('itemSummary')
   })
 
   it('injects anti-ai hard constraints from settings and consecutive recurrence hits', () => {
@@ -635,6 +658,37 @@ describe('allocateChapterContext', () => {
     expect(feed.previousChapterContext.length).toBeGreaterThan(feed.previousChapterSampleReport.sampledChars)
   })
 
+  it('expands the recent context window and carries forward older key chapters when current signals require them', () => {
+    const previousRows = Array.from({ length: 16 }, (_, index) => ({
+      id: index + 1,
+      novelId: 1,
+      chapterNum: index + 1,
+      title: index === 1 ? '药箱失踪' : `第${index + 1}章`,
+      summary: index === 1 ? '药箱下落未明，副手记住了旧仓库坐标。' : '',
+      outline: '',
+      nextChapterSeed: '',
+      continuityStateJson: index === 1 ? JSON.stringify({
+        open_loops: ['药箱下落未明'],
+        continuity_notes: ['副手记得旧仓库坐标'],
+      }) : '',
+    })) as ChapterContextRawData['chapterRows']
+
+    const baselineRows = selectRecentContextRows(previousRows as never, 0, previousRows.length, {
+      maxCarryover: 0,
+    })
+    const signalAwareRows = selectRecentContextRows(previousRows as never, 0, previousRows.length, {
+      signalText: '药箱\n副手\n补给点\n回收',
+      mentionedCharacters: ['副手', '主角'],
+      mentionedItems: ['药箱'],
+      mentionedLocations: ['补给点'],
+      maxCarryover: 1,
+    })
+
+    expect(baselineRows).toHaveLength(8)
+    expect(signalAwareRows.length).toBeGreaterThan(baselineRows.length)
+    expect(signalAwareRows.some((row) => row.chapterNum === 2)).toBe(true)
+  })
+
   it('keeps previous-chapter prior ahead of summary memory under a tight draft budget', () => {
     const rawData = createRawData({
       contextParts: {
@@ -698,5 +752,80 @@ describe('allocateChapterContext', () => {
       expect(overflow.context.recallSnapshot.degraded).toBe(true)
       expect(overflow.context.recallSnapshot.fallbackReason).toBe('budget_trimmed')
     }
+  })
+
+  it('rejects low-similarity and entity-mismatched recall hits from prompt recall selection', () => {
+    const recallResult = buildRecallSnapshot([{
+      bucket: 'thread',
+      hits: [
+        {
+          chapterId: 1,
+          chapterNum: 1,
+          fragmentType: 'summary',
+          fragmentText: '药箱还留在旧仓库。',
+          similarity: 0.12,
+          searchMode: 'vector',
+          bucket: 'thread',
+          stale: false,
+          staleReasons: [],
+          overriddenByConstraint: false,
+          entityMatches: ['药箱'],
+          entityValidationRequired: true,
+          entityValidated: true,
+        },
+        {
+          chapterId: 2,
+          chapterNum: 2,
+          fragmentType: 'summary',
+          fragmentText: '药箱还留在旧仓库，副手还记得坐标。',
+          similarity: 0.66,
+          searchMode: 'vector',
+          bucket: 'thread',
+          stale: false,
+          staleReasons: [],
+          overriddenByConstraint: false,
+          entityMatches: ['药箱', '副手'],
+          entityValidationRequired: true,
+          entityValidated: true,
+        },
+        {
+          chapterId: 3,
+          chapterNum: 3,
+          fragmentType: 'summary',
+          fragmentText: '旧案线索仍未处理。',
+          similarity: 0.63,
+          searchMode: 'vector',
+          bucket: 'thread',
+          stale: false,
+          staleReasons: [],
+          overriddenByConstraint: false,
+          entityMatches: [],
+          entityValidationRequired: true,
+          entityValidated: false,
+        },
+        {
+          chapterId: 4,
+          chapterNum: 4,
+          fragmentType: 'summary',
+          fragmentText: '药箱还留在旧仓库。',
+          similarity: 0.02,
+          searchMode: 'keyword',
+          bucket: 'thread',
+          stale: false,
+          staleReasons: [],
+          overriddenByConstraint: false,
+          entityMatches: ['药箱'],
+          entityValidationRequired: true,
+          entityValidated: true,
+        },
+      ],
+    }])
+
+    expect(recallResult.recallDiagnostics.selectedHitCount).toBe(1)
+    expect(recallResult.recallDiagnostics.lowSimilarityRejectedCount).toBe(2)
+    expect(recallResult.recallDiagnostics.entityValidationRejectedCount).toBe(1)
+    expect(recallResult.recalledMemory).toContain('药箱还留在旧仓库')
+    expect(recallResult.recalledMemory).not.toContain('旧案线索仍未处理')
+    expect(recallResult.recallSnapshot.retrievalUsed).toBe(true)
   })
 })

@@ -83,14 +83,34 @@ function truncateToTokens(text: string, maxTokens: number): string {
   return `${text.slice(0, maxChars)}...`
 }
 
-function resolveRecentContextWindow(targetWords: number, chapterCount: number): number {
-  if (targetWords >= 1500000 || chapterCount >= 600) return 40
-  if (targetWords >= 1000000 || chapterCount >= 400) return 35
-  if (targetWords >= 800000 || chapterCount >= 280) return 28
-  if (targetWords >= 500000 || chapterCount >= 180) return 22
-  if (targetWords >= 350000 || chapterCount >= 80) return 15
-  if (targetWords >= 150000 || chapterCount >= 40) return 10
-  return 8
+function resolveRecentContextWindow(
+  targetWords: number,
+  chapterCount: number,
+  options: {
+    signalText?: string
+    mentionedCharacters?: string[]
+    mentionedItems?: string[]
+    mentionedLocations?: string[]
+  } = {},
+): number {
+  let baseWindow = 8
+  if (targetWords >= 1500000 || chapterCount >= 600) baseWindow = 40
+  else if (targetWords >= 1000000 || chapterCount >= 400) baseWindow = 35
+  else if (targetWords >= 800000 || chapterCount >= 280) baseWindow = 28
+  else if (targetWords >= 500000 || chapterCount >= 180) baseWindow = 22
+  else if (targetWords >= 350000 || chapterCount >= 80) baseWindow = 15
+  else if (targetWords >= 150000 || chapterCount >= 40) baseWindow = 10
+
+  const signalDensity = (
+    Math.min(splitRecallLines(options.signalText || '', 8, 24).length, 4)
+    + Math.min(options.mentionedCharacters?.length || 0, 3)
+    + Math.min(options.mentionedItems?.length || 0, 2)
+    + Math.min(options.mentionedLocations?.length || 0, 2)
+  )
+
+  if (signalDensity >= 8) return baseWindow + 4
+  if (signalDensity >= 4) return baseWindow + 2
+  return baseWindow
 }
 
 interface ContextPart {
@@ -122,6 +142,8 @@ interface HardConstraintDraft {
   label: HardConstraintSourceLabel
   title: string
   content: string
+  relevanceScore: number
+  pinned: boolean
 }
 
 export type ChapterContextPromptProfile = 'scenePlan' | 'draft' | 'review' | 'rewrite'
@@ -142,6 +164,7 @@ export interface BuildChapterContextOptions {
   totalBudget?: number
   promptProfile?: ChapterContextPromptProfile
   chapterComplexity?: ChapterContextComplexity
+  preserveConstraintLabels?: HardConstraintSourceLabel[]
 }
 
 export type ContextBudgetOverflowLevel = 'none' | 'soft_trimmed' | 'hard_failed'
@@ -171,6 +194,8 @@ export interface ContextBudgetReport {
   droppedLabels: string[]
   truncatedLabels: string[]
   droppedByPriority: ContextBudgetWarningSummary[]
+  preservedConstraintLabels: HardConstraintSourceLabel[]
+  droppedConstraintLabels: HardConstraintSourceLabel[]
 }
 
 export interface StorySubPlot {
@@ -353,6 +378,8 @@ export interface ConstraintInjectionStatus {
   truncatedHardConstraintCount: number
   injectedLabels: HardConstraintSourceLabel[]
   truncatedLabels: HardConstraintSourceLabel[]
+  preservedLabels: HardConstraintSourceLabel[]
+  droppedLabels: HardConstraintSourceLabel[]
 }
 
 export interface ChapterContext extends ChapterContextParts {
@@ -399,6 +426,9 @@ export interface ChapterContextRawData {
   currentArc: typeof storyArcs.$inferSelect | null
   outlineMentionedCharacterCount: number
   activeThreadPressureCount: number
+  mentionedCharacters: string[]
+  mentionedItems: string[]
+  mentionedLocations: string[]
   contextParts: ChapterContextParts
   previousChapterSampleReport: PreviousChapterSampleReport
   recallSnapshot: RecallSnapshot
@@ -509,6 +539,8 @@ export interface RecallMemorySource {
   stale: boolean
   staleReasons: string[]
   overriddenByConstraint: boolean
+  entityMatches: string[]
+  entityValidated: boolean
 }
 
 export interface RecallDiagnostics {
@@ -521,6 +553,11 @@ export interface RecallDiagnostics {
   recallDependencyRate: number
   overriddenHitCount: number
   fallbackHitCount: number
+  validatedHitCount: number
+  lowSimilarityRejectedCount: number
+  entityValidationRejectedCount: number
+  minVectorSimilarity: number
+  minKeywordSimilarity: number
   summaryLines: string[]
 }
 
@@ -581,6 +618,9 @@ interface RecallHit extends SimilarFragmentHit {
   stale: boolean
   staleReasons: string[]
   overriddenByConstraint: boolean
+  entityMatches: string[]
+  entityValidationRequired: boolean
+  entityValidated: boolean
 }
 
 function compactRecallLine(text: string, maxLength = 96): string {
@@ -608,6 +648,38 @@ function splitRecallLines(text: string, maxLines = 4, maxLength = 96): string[] 
 function containsAny(text: string, keywords: string[]): boolean {
   const normalized = asText(text)
   return normalized ? keywords.some((keyword) => normalized.includes(keyword)) : false
+}
+
+function resolveRecallMinimumSimilarity(searchMode: RecallSearchMode): number {
+  return searchMode === 'vector' ? MIN_VECTOR_RECALL_SIMILARITY : MIN_KEYWORD_RECALL_SIMILARITY
+}
+
+function resolveRecallPreferredSimilarity(searchMode: RecallSearchMode): number {
+  return searchMode === 'vector' ? PREFERRED_VECTOR_RECALL_SIMILARITY : PREFERRED_KEYWORD_RECALL_SIMILARITY
+}
+
+function isAcceptedRecallSource(
+  source: Pick<RecallMemorySource, 'stale' | 'overriddenByConstraint' | 'entityValidated' | 'similarity' | 'searchMode'>,
+): boolean {
+  return !source.stale
+    && !source.overriddenByConstraint
+    && source.entityValidated
+    && source.similarity >= resolveRecallMinimumSimilarity(source.searchMode)
+}
+
+function resolveRecallValidationTerms(
+  bucket: RecallBucketKey,
+  input: Pick<RecallQueryBuildInput, 'mentionedCharacters' | 'mentionedItems' | 'mentionedLocations'>,
+): string[] {
+  switch (bucket) {
+    case 'character':
+      return dedupe(input.mentionedCharacters, 6)
+    case 'rule':
+      return dedupe([...input.mentionedLocations, ...input.mentionedItems, ...input.mentionedCharacters], 6)
+    case 'thread':
+    default:
+      return dedupe([...input.mentionedCharacters, ...input.mentionedItems, ...input.mentionedLocations], 8)
+  }
 }
 
 function buildConstraintSection(title: string, lines: string[]): string {
@@ -654,6 +726,19 @@ function buildSceneContractSummaryLines(sceneContracts: Array<{
 const HARD_CONSTRAINT_SIGNAL_KEYWORDS = ['必须', '承接', '回收', '未清', '告警', '漂移', '冲突', '失效', '损坏', '伤势', '立场', '目标', '去向', '约束']
 const RELATION_CONSTRAINT_KEYWORDS = ['关系', '张力', '亲密', '敌对', '决裂', '背叛', '盟友', '称呼', '潜台词']
 const ITEM_CONSTRAINT_KEYWORDS = ['物品', '持有', '去向', '状态', '损坏', '失效', '遗失', '位置', '装备', '资源']
+const DEFAULT_PRESERVED_CONSTRAINT_LABELS: HardConstraintSourceLabel[] = [
+  'chapterGoal',
+  'characterStates',
+  'worldStates',
+  'openLoops',
+  'continuityNotes',
+]
+const MIN_HARD_CONSTRAINT_TOKENS = 28
+const MIN_PINNED_HARD_CONSTRAINT_TOKENS = 18
+const MIN_VECTOR_RECALL_SIMILARITY = 0.6
+const PREFERRED_VECTOR_RECALL_SIMILARITY = 0.72
+const MIN_KEYWORD_RECALL_SIMILARITY = 0.5
+const PREFERRED_KEYWORD_RECALL_SIMILARITY = 0.6
 
 function selectConstraintLines(
   text: string,
@@ -672,6 +757,57 @@ function selectConstraintLines(
   if (matched.length > 0) return matched.slice(0, options.maxLines || 4)
   if (options.fallbackLines && options.fallbackLines > 0) return lines.slice(0, options.fallbackLines)
   return []
+}
+
+function buildPreservedConstraintSet(labels?: HardConstraintSourceLabel[]): Set<HardConstraintSourceLabel> {
+  return new Set([
+    ...DEFAULT_PRESERVED_CONSTRAINT_LABELS,
+    ...(labels || []),
+  ])
+}
+
+function buildConstraintSignalTerms(rawData: ChapterContextRawData): string[] {
+  return dedupe([
+    ...rawData.mentionedCharacters,
+    ...rawData.mentionedItems,
+    ...rawData.mentionedLocations,
+    ...splitRecallLines(rawData.contextParts.chapterGoal, 4, 24),
+    ...splitRecallLines(rawData.currentChapter?.outline || '', 4, 24),
+    ...splitRecallLines(rawData.currentArc?.arcSummary || '', 3, 24),
+    ...splitRecallLines(rawData.currentArc?.arcGoal || '', 3, 24),
+  ], 16)
+}
+
+function computeHardConstraintRelevance(
+  label: HardConstraintSourceLabel,
+  content: string,
+  rawData: ChapterContextRawData,
+): number {
+  const baseScore: Record<HardConstraintSourceLabel, number> = {
+    chapterGoal: 120,
+    characterStates: 110,
+    worldStates: 100,
+    relationSummary: 72,
+    itemSummary: 68,
+    openLoops: 96,
+    continuityNotes: 92,
+    feedbackRecurrence: 54,
+    antiAiRules: 48,
+    styleHardGuard: 44,
+  }
+  const signalTerms = buildConstraintSignalTerms(rawData)
+  const signalScore = signalTerms.reduce((sum, term) => {
+    if (term.length < 2 || !content.includes(term)) return sum
+    return sum + (term.length >= 4 ? 6 : 3)
+  }, 0)
+  const entityBoost = (
+    (label === 'relationSummary' && rawData.mentionedCharacters.length >= 2 ? 12 : 0)
+    + (label === 'characterStates' && rawData.mentionedCharacters.length > 0 ? 10 : 0)
+    + (label === 'itemSummary' && rawData.mentionedItems.length > 0 ? 10 : 0)
+    + (label === 'worldStates' && rawData.mentionedLocations.length > 0 ? 8 : 0)
+    + (label === 'openLoops' && rawData.activeThreadPressureCount > 0 ? 8 : 0)
+  )
+  return baseScore[label] + signalScore + entityBoost
 }
 
 function resolveHardConstraintBudget(
@@ -694,7 +830,10 @@ function resolveHardConstraintBudget(
   return Math.max(800, baseByProfile[promptProfile] + complexityOffset[chapterComplexity] + largeNovelOffset)
 }
 
-function buildHardConstraintDrafts(rawData: ChapterContextRawData): HardConstraintDraft[] {
+function buildHardConstraintDrafts(
+  rawData: ChapterContextRawData,
+  preservedLabels: Set<HardConstraintSourceLabel>,
+): HardConstraintDraft[] {
   const { contextParts: parts } = rawData
   const relationLines = selectConstraintLines(parts.relationSummary, {
     keywords: RELATION_CONSTRAINT_KEYWORDS,
@@ -729,7 +868,7 @@ function buildHardConstraintDrafts(rawData: ChapterContextRawData): HardConstrai
   })
   const styleHardGuardText = buildStyleHardConstraintForNovel(rawData.novel.id)
 
-  const drafts: HardConstraintDraft[] = [
+  const draftSpecs: Array<Pick<HardConstraintDraft, 'label' | 'title' | 'content'>> = [
     {
       label: 'chapterGoal',
       title: '章节目标',
@@ -782,7 +921,17 @@ function buildHardConstraintDrafts(rawData: ChapterContextRawData): HardConstrai
     },
   ]
 
-  return drafts.filter((entry) => Boolean(entry.content))
+  return draftSpecs
+    .filter((entry) => Boolean(entry.content))
+    .map((entry) => ({
+      ...entry,
+      pinned: preservedLabels.has(entry.label),
+      relevanceScore: computeHardConstraintRelevance(entry.label, entry.content, rawData),
+    }))
+    .sort((left, right) =>
+      Number(right.pinned) - Number(left.pinned)
+      || right.relevanceScore - left.relevanceScore
+      || estimateTokens(left.content) - estimateTokens(right.content))
 }
 
 function allocateHardConstraintEntries(
@@ -792,57 +941,83 @@ function allocateHardConstraintEntries(
   entries: HardConstraintEntry[]
   text: string
   used: number
+  dropped: HardConstraintDraft[]
 } {
   if (drafts.length === 0 || budget <= 0) {
-    return { entries: [], text: '', used: 0 }
+    return { entries: [], text: '', used: 0, dropped: [...drafts] }
   }
 
-  const originals = drafts.map((draft) => estimateTokens(draft.content))
-  const totalOriginal = originals.reduce((sum, value) => sum + value, 0)
-  let remainingBudget = Math.max(budget, drafts.length)
-  let remainingOriginal = totalOriginal
-  const allocations = drafts.map((draft, index) => {
-    const originalTokens = originals[index]
-    const remainingEntries = drafts.length - index
-    const minimumForRest = Math.max(remainingEntries - 1, 0)
-    const proportional = remainingOriginal > 0
-      ? Math.max(1, Math.floor((originalTokens / remainingOriginal) * remainingBudget))
-      : 1
-    const maxAllowed = Math.max(1, remainingBudget - minimumForRest)
-    const allocatedTokens = Math.min(originalTokens, Math.max(1, Math.min(maxAllowed, proportional)))
-    remainingBudget -= allocatedTokens
-    remainingOriginal -= originalTokens
-    return allocatedTokens
-  })
+  const originals = new Map(drafts.map((draft) => [draft.label, estimateTokens(draft.content)] as const))
+  const entries: HardConstraintEntry[] = []
+  const dropped: HardConstraintDraft[] = []
+  let remainingBudget = budget
 
-  let distributable = remainingBudget
-  for (let index = 0; index < drafts.length && distributable > 0; index += 1) {
-    const originalTokens = originals[index]
-    const room = originalTokens - allocations[index]
-    if (room <= 0) continue
-    const extra = Math.min(room, distributable)
-    allocations[index] += extra
-    distributable -= extra
-  }
+  for (let index = 0; index < drafts.length; index += 1) {
+    const draft = drafts[index]
+    const originalTokens = originals.get(draft.label) || estimateTokens(draft.content)
+    if (remainingBudget <= 0) {
+      dropped.push(draft)
+      continue
+    }
 
-  const entries = drafts.map((draft, index) => {
-    const originalTokens = originals[index]
-    const allocatedTokens = Math.max(1, allocations[index] || 1)
-    const content = truncateToTokens(draft.content, allocatedTokens)
-    return {
+    const remainingPinnedReserve = drafts
+      .slice(index + 1)
+      .filter((candidate) => candidate.pinned)
+      .reduce((sum, candidate) => {
+        const candidateTokens = originals.get(candidate.label) || estimateTokens(candidate.content)
+        return sum + Math.min(candidateTokens, MIN_PINNED_HARD_CONSTRAINT_TOKENS)
+      }, 0)
+    const maxAllocatable = Math.max(draft.pinned ? 1 : 0, remainingBudget - remainingPinnedReserve)
+    if (maxAllocatable <= 0) {
+      dropped.push(draft)
+      continue
+    }
+
+    if (originalTokens <= maxAllocatable) {
+      entries.push({
+        label: draft.label,
+        title: draft.title,
+        content: draft.content,
+        originalTokens,
+        allocatedTokens: originalTokens,
+        truncated: false,
+      })
+      remainingBudget -= originalTokens
+      continue
+    }
+
+    const minimumUsefulTokens = draft.pinned ? MIN_PINNED_HARD_CONSTRAINT_TOKENS : MIN_HARD_CONSTRAINT_TOKENS
+    if (!draft.pinned && maxAllocatable < minimumUsefulTokens) {
+      dropped.push(draft)
+      continue
+    }
+
+    const targetTokens = draft.pinned
+      ? maxAllocatable
+      : Math.max(minimumUsefulTokens, Math.min(maxAllocatable, Math.floor(originalTokens * 0.72)))
+    const content = truncateToTokens(draft.content, targetTokens)
+    const allocatedTokens = estimateTokens(content)
+    if (!content.trim() || allocatedTokens <= 0) {
+      dropped.push(draft)
+      continue
+    }
+
+    entries.push({
       label: draft.label,
       title: draft.title,
       content,
       originalTokens,
-      allocatedTokens: estimateTokens(content),
-      truncated: estimateTokens(content) < originalTokens,
-    }
-  })
+      allocatedTokens,
+      truncated: allocatedTokens < originalTokens,
+    })
+    remainingBudget -= allocatedTokens
+  }
 
   return {
     entries,
     text: entries.map((entry) => entry.content).filter(Boolean).join('\n\n'),
     used: entries.reduce((sum, entry) => sum + entry.allocatedTokens, 0),
+    dropped,
   }
 }
 
@@ -853,25 +1028,32 @@ const SOFT_CONTEXT_EXCLUDED_LABELS = new Set<ChapterContextLabel>([
 
 function buildHardConstraintSummary(
   entries: HardConstraintEntry[],
-  droppedConstraintCount: number,
+  droppedDrafts: HardConstraintDraft[],
+  preservedLabels: Set<HardConstraintSourceLabel>,
 ): string {
   if (entries.length === 0) {
-    return droppedConstraintCount > 0
-      ? `关键约束注入失败，丢失 ${droppedConstraintCount} 项。`
+    return droppedDrafts.length > 0
+      ? `关键约束注入失败，丢失 ${droppedDrafts.length} 项：${droppedDrafts.map((entry) => entry.title).join('、')}`
       : '当前章节没有额外关键约束。'
   }
 
   const injectedTitles = entries.map((entry) => entry.title)
   const truncatedTitles = entries.filter((entry) => entry.truncated).map((entry) => entry.title)
+  const preservedTitles = entries
+    .filter((entry) => preservedLabels.has(entry.label))
+    .map((entry) => entry.title)
   const summaryParts = [
     `已注入 ${entries.length} 项关键约束：${injectedTitles.join('、')}`,
   ]
 
+  if (preservedTitles.length > 0) {
+    summaryParts.push(`显式保留 ${preservedTitles.length} 项：${preservedTitles.join('、')}`)
+  }
   if (truncatedTitles.length > 0) {
     summaryParts.push(`压缩 ${truncatedTitles.length} 项：${truncatedTitles.join('、')}`)
   }
-  if (droppedConstraintCount > 0) {
-    summaryParts.push(`丢失 ${droppedConstraintCount} 项`)
+  if (droppedDrafts.length > 0) {
+    summaryParts.push(`丢失 ${droppedDrafts.length} 项：${droppedDrafts.map((entry) => entry.title).join('、')}`)
   }
 
   return summaryParts.join('；')
@@ -1152,6 +1334,7 @@ function enrichRecallHits(
   currentChapterNum: number,
   entityFreshnessMap: Map<string, number>,
   constraintText: string,
+  validationTerms: string[] = [],
 ): RecallHit[] {
   const candidateNames = [...entityFreshnessMap.keys()].sort((left, right) => right.length - left.length)
 
@@ -1170,6 +1353,9 @@ function enrichRecallHits(
     const overriddenByConstraint = matchedNames.length > 0
       && matchedNames.some((name) => constraintText.includes(name))
       && staleReasons.length > 0
+    const entityMatches = validationTerms.filter((term) => term.length >= 2 && hit.fragmentText.includes(term)).slice(0, 4)
+    const entityValidationRequired = validationTerms.length > 0
+    const entityValidated = !entityValidationRequired || entityMatches.length > 0
 
     return {
       ...hit,
@@ -1177,6 +1363,9 @@ function enrichRecallHits(
       stale: staleReasons.length > 0,
       staleReasons: dedupe(staleReasons, 4),
       overriddenByConstraint,
+      entityMatches,
+      entityValidationRequired,
+      entityValidated,
     }
   })
 }
@@ -1192,6 +1381,11 @@ function buildEmptyRecallDiagnostics(summaryLines: string[] = []): RecallDiagnos
     recallDependencyRate: 0,
     overriddenHitCount: 0,
     fallbackHitCount: 0,
+    validatedHitCount: 0,
+    lowSimilarityRejectedCount: 0,
+    entityValidationRejectedCount: 0,
+    minVectorSimilarity: MIN_VECTOR_RECALL_SIMILARITY,
+    minKeywordSimilarity: MIN_KEYWORD_RECALL_SIMILARITY,
     summaryLines,
   }
 }
@@ -1254,7 +1448,7 @@ function formatRecalledMemory(sources: RecallMemorySource[]): string {
     thread: '线程/伏笔召回',
   }
   const selectedSources = sources
-    .filter((source) => !source.stale && !source.overriddenByConstraint)
+    .filter((source) => isAcceptedRecallSource(source))
     .slice(0, 6)
   if (selectedSources.length === 0) return ''
 
@@ -1266,7 +1460,29 @@ function formatRecalledMemory(sources: RecallMemorySource[]): string {
   return lines.join('\n')
 }
 
-function buildRecallSnapshot(
+function buildRecallMemorySource(
+  bucket: RecallBucketKey,
+  hit: RecallHit,
+  summary: string,
+): RecallMemorySource {
+  return {
+    bucket,
+    chapterId: hit.chapterId,
+    chapterNum: hit.chapterNum,
+    fragmentType: hit.fragmentType,
+    similarity: hit.similarity,
+    searchMode: hit.searchMode,
+    sourceLabel: `第${hit.chapterNum}章 · ${hit.fragmentType}`,
+    summary,
+    stale: hit.stale,
+    staleReasons: hit.staleReasons,
+    overriddenByConstraint: hit.overriddenByConstraint,
+    entityMatches: hit.entityMatches,
+    entityValidated: hit.entityValidated,
+  }
+}
+
+export function buildRecallSnapshot(
   bucketResults: Array<{ bucket: RecallBucketKey; hits: RecallHit[]; fallbackReason?: RecallFallbackReason }>,
 ): {
   recalledMemory: string
@@ -1277,12 +1493,27 @@ function buildRecallSnapshot(
   const sources: RecallMemorySource[] = []
   const seen = new Set<string>()
   const selectedKeys = new Set<string>()
+  const selectedSources: RecallMemorySource[] = []
   const bucketStats = createEmptyRecallBucketStats()
   let selectedBucketCount = 0
+  let lowSimilarityRejectedCount = 0
+  let entityValidationRejectedCount = 0
 
   bucketResults.forEach((result) => {
-    const significant = result.hits.filter((hit) => !hit.stale && !hit.overriddenByConstraint && hit.similarity > 0.08)
-    const fallback = result.hits.filter((hit) => !hit.stale && !hit.overriddenByConstraint && hit.similarity > 0)
+    const eligible = result.hits.filter((hit) => {
+      if (hit.stale || hit.overriddenByConstraint) return false
+      if (hit.similarity < resolveRecallMinimumSimilarity(hit.searchMode)) {
+        lowSimilarityRejectedCount += 1
+        return false
+      }
+      if (!hit.entityValidated) {
+        entityValidationRejectedCount += 1
+        return false
+      }
+      return true
+    })
+    const significant = eligible.filter((hit) => hit.similarity >= resolveRecallPreferredSimilarity(hit.searchMode))
+    const fallback = eligible.filter((hit) => hit.similarity >= resolveRecallMinimumSimilarity(hit.searchMode))
     const selected = significant.length > 0 ? significant.slice(0, 2) : fallback.slice(0, 1)
     bucketStats[result.bucket] = {
       hitCount: result.hits.length,
@@ -1297,7 +1528,10 @@ function buildRecallSnapshot(
     selected.forEach((hit) => {
       const summary = summarizeRecallHit(hit)
       if (!summary) return
-      selectedKeys.add(`${result.bucket}:${hit.chapterId}:${hit.fragmentType}:${summary}`)
+      const selectionKey = `${result.bucket}:${hit.chapterId}:${hit.fragmentType}:${summary}`
+      if (selectedKeys.has(selectionKey)) return
+      selectedKeys.add(selectionKey)
+      selectedSources.push(buildRecallMemorySource(result.bucket, hit, summary))
     })
 
     result.hits.forEach((hit) => {
@@ -1306,32 +1540,20 @@ function buildRecallSnapshot(
       const dedupeKey = `${result.bucket}:${hit.chapterId}:${hit.fragmentType}:${summary}`
       if (seen.has(dedupeKey)) return
       seen.add(dedupeKey)
-      sources.push({
-        bucket: result.bucket,
-        chapterId: hit.chapterId,
-        chapterNum: hit.chapterNum,
-        fragmentType: hit.fragmentType,
-        similarity: hit.similarity,
-        searchMode: hit.searchMode,
-        sourceLabel: `第${hit.chapterNum}章 · ${hit.fragmentType}`,
-        summary,
-        stale: hit.stale,
-        staleReasons: hit.staleReasons,
-        overriddenByConstraint: hit.overriddenByConstraint,
-      })
+      sources.push(buildRecallMemorySource(result.bucket, hit, summary))
     })
   })
 
   const searchedBucketCount = bucketResults.length
   const totalHitCount = sources.length
-  const selectedHitCount = sources.filter((source) =>
-    selectedKeys.has(`${source.bucket}:${source.chapterId}:${source.fragmentType}:${source.summary}`)).length
+  const validatedHitCount = sources.filter((source) => source.entityValidated).length
+  const selectedHitCount = selectedSources.length
   const staleRecallCount = sources.filter((source) => source.stale).length
   const overriddenHitCount = sources.filter((source) => source.overriddenByConstraint).length
   const fallbackHitCount = sources.filter((source) => source.searchMode === 'keyword').length
   const staleRecallRate = totalHitCount > 0 ? Math.round((staleRecallCount / totalHitCount) * 100) : 0
   const recallDependencyRate = totalHitCount > 0 ? Math.round((selectedHitCount / totalHitCount) * 100) : 0
-  const recalledMemory = formatRecalledMemory(sources)
+  const recalledMemory = formatRecalledMemory(selectedSources)
   const fallbackReason = pickRecallFallbackReason([
     ...bucketResults.map((result) => result.fallbackReason),
     selectedHitCount === 0 && staleRecallCount > 0 ? 'only_stale_hits' : undefined,
@@ -1347,14 +1569,26 @@ function buildRecallSnapshot(
     recallDependencyRate,
     overriddenHitCount,
     fallbackHitCount,
+    validatedHitCount,
+    lowSimilarityRejectedCount,
+    entityValidationRejectedCount,
+    minVectorSimilarity: MIN_VECTOR_RECALL_SIMILARITY,
+    minKeywordSimilarity: MIN_KEYWORD_RECALL_SIMILARITY,
     summaryLines: [
       '向量召回只作背景补充，当前事实以硬约束和结构化状态为准。',
       searchedBucketCount > 0
         ? `召回覆盖 ${selectedBucketCount}/${searchedBucketCount} 个查询桶，补充片段 ${selectedHitCount} 条。`
         : '当前章节没有可用的召回查询桶。',
+      `最低相似度门槛：向量 ${MIN_VECTOR_RECALL_SIMILARITY.toFixed(2)} / 关键词 ${MIN_KEYWORD_RECALL_SIMILARITY.toFixed(2)}。`,
       staleRecallCount > 0
         ? `拦截过期召回 ${staleRecallCount} 条，过期召回率 ${staleRecallRate}%。`
         : '最近召回片段未命中过期状态。',
+      entityValidationRejectedCount > 0
+        ? `有 ${entityValidationRejectedCount} 条命中未覆盖当前章实体信号，已排除出背景补充。`
+        : `当前实体校验通过 ${validatedHitCount} 条历史片段。`,
+      lowSimilarityRejectedCount > 0
+        ? `有 ${lowSimilarityRejectedCount} 条低相似度命中低于门槛，已直接丢弃。`
+        : '当前没有低于门槛的低质量命中进入召回结果。',
       overriddenHitCount > 0
         ? `${overriddenHitCount} 条片段已被硬约束覆盖，不再参与当前事实定义。`
         : '当前没有片段被硬约束直接覆盖。',
@@ -1479,12 +1713,24 @@ async function runRecallAugmentation(input: {
   try {
     const bucketResults = await Promise.all(recallBuckets.map(async (bucket) => {
       const searchResult = await searchSimilarFragments(input.novelId, bucket.query, bucket.topK, input.modelConfigId || undefined)
+      const validationTerms = resolveRecallValidationTerms(bucket.bucket, {
+        mentionedCharacters: input.mentionedCharacters,
+        mentionedItems: input.mentionedItems,
+        mentionedLocations: input.mentionedLocations,
+      })
       return {
         bucket: bucket.bucket,
         fallbackReason: searchResult.fallbackReason,
         hits: searchResult.hits
           .filter((hit) => hit.chapterNum < input.chapterNum)
-          .map((hit) => enrichRecallHits([hit], bucket.bucket, input.chapterNum, input.entityFreshnessMap, input.constraintText)[0]),
+          .map((hit) => enrichRecallHits(
+            [hit],
+            bucket.bucket,
+            input.chapterNum,
+            input.entityFreshnessMap,
+            input.constraintText,
+            validationTerms,
+          )[0]),
       }
     }))
     const recallSnapshot = buildRecallSnapshot(bucketResults)
@@ -2575,6 +2821,82 @@ function toChapterWithContinuity(row: typeof chapters.$inferSelect): ChapterWith
   }
 }
 
+function scoreKeyChapterRetention(
+  row: typeof chapters.$inferSelect,
+  options: {
+    signalText?: string
+    mentionedCharacters?: string[]
+    mentionedItems?: string[]
+    mentionedLocations?: string[]
+  } = {},
+): number {
+  const continuity = parseContinuityState(row.continuityStateJson)
+  const chapterText = [
+    row.title || '',
+    row.summary || '',
+    row.outline || '',
+    row.nextChapterSeed || '',
+    continuity.plotProgress.join('\n'),
+    continuity.characterStateChanges.join('\n'),
+    continuity.worldStateChanges.join('\n'),
+    continuity.openLoops.join('\n'),
+    continuity.continuityNotes.join('\n'),
+    continuity.arcProgress,
+  ].filter(Boolean).join('\n')
+
+  let score = 0
+  if (row.chapterNum <= 3) score += 10 - row.chapterNum
+  score += Math.min(continuity.openLoops.length, 3) * 4
+  score += Math.min(continuity.continuityNotes.length, 3) * 3
+  score += Math.min(continuity.characterStateChanges.length, 3) * 2
+  score += Math.min(continuity.worldStateChanges.length, 2) * 2
+  if (containsAny(chapterText, options.mentionedCharacters || [])) score += 10
+  if (containsAny(chapterText, options.mentionedItems || [])) score += 8
+  if (containsAny(chapterText, options.mentionedLocations || [])) score += 6
+  if (options.signalText) {
+    const signalMatches = splitRecallLines(options.signalText, 6, 24).filter((line) =>
+      line.length >= 2 && chapterText.includes(line))
+    score += signalMatches.length * 5
+  }
+  return score
+}
+
+export function selectRecentContextRows(
+  previousRows: Array<typeof chapters.$inferSelect>,
+  targetWords: number,
+  chapterCount: number,
+  options: {
+    signalText?: string
+    mentionedCharacters?: string[]
+    mentionedItems?: string[]
+    mentionedLocations?: string[]
+    maxCarryover?: number
+  } = {},
+): Array<typeof chapters.$inferSelect> {
+  if (previousRows.length === 0) return []
+
+  const recentWindow = resolveRecentContextWindow(targetWords, chapterCount, options)
+  const recentRows = previousRows.slice(-recentWindow)
+  const recentIds = new Set(recentRows.map((row) => row.id))
+  const defaultCarryover = targetWords >= 350000 || chapterCount >= 80 ? 4 : 2
+  const maxCarryover = Math.max(0, options.maxCarryover ?? defaultCarryover)
+  if (maxCarryover === 0) return recentRows
+
+  const keyCarryovers = previousRows
+    .filter((row) => !recentIds.has(row.id))
+    .map((row) => ({
+      row,
+      score: scoreKeyChapterRetention(row, options),
+    }))
+    .filter((entry) => entry.score >= 8)
+    .sort((left, right) => right.score - left.score || left.row.chapterNum - right.row.chapterNum)
+    .slice(0, maxCarryover)
+    .map((entry) => entry.row)
+
+  return [...keyCarryovers, ...recentRows]
+    .sort((left, right) => left.chapterNum - right.chapterNum)
+}
+
 function createEmptyPreviousChapterSampleReport(): PreviousChapterSampleReport {
   return {
     sourceChapterId: null,
@@ -2872,8 +3194,14 @@ export async function buildOutlineGenerationContext(arcId: number): Promise<Outl
     .all()
     .filter((chapter) => chapter.chapterNum < (arc.chapterStart || 1))
 
-  const recentWindow = resolveRecentContextWindow(novel?.targetWords || 0, previousRows.length)
-  const recentChapters = previousRows.slice(-recentWindow).map(toChapterWithContinuity)
+  const recentChapters = selectRecentContextRows(
+    previousRows,
+    novel?.targetWords || 0,
+    previousRows.length,
+    {
+      signalText: [arc.arcGoal || '', arc.arcSummary || ''].filter(Boolean).join('\n'),
+    },
+  ).map(toChapterWithContinuity)
   const previousSummary = recentChapters
     .filter((chapter) => chapter.summary)
     .map((chapter) => `第${chapter.chapterNum}章：${chapter.summary}`)
@@ -2915,12 +3243,47 @@ export async function collectChapterContextRawData(
   const currentArc = resolveArcForChapter(chapterNum, currentChapter?.arcId, arcs)
   const previousRows = chapterRows.filter((chapter) => chapter.chapterNum < chapterNum)
   const targetWords = Number(novel.targetWords || 0)
-  const recentWindow = resolveRecentContextWindow(targetWords, chapterRows.length)
-  const recentChapters = previousRows.slice(-recentWindow).map(toChapterWithContinuity)
-  const continuityChapters = recentChapters.filter((chapter) => hasContinuityContent(chapter.continuityState))
   const allCharacters = db.select().from(characters).where(eq(characters.novelId, novelId)).all()
   const allItems = db.select().from(storyItems).where(eq(storyItems.novelId, novelId)).all()
   const allLocations = db.select().from(worldMap).where(eq(worldMap.novelId, novelId)).all()
+  const chapterGoalPreview = [
+    extractChapterGoal(currentChapter?.outline),
+    currentArc?.arcGoal || '',
+  ].filter(Boolean).join('\n')
+  const chapterSignalText = [
+    currentChapter?.title,
+    chapterGoalPreview,
+    currentChapter?.outline,
+    currentArc?.arcSummary,
+    currentArc?.arcGoal,
+  ].filter(Boolean).join('\n')
+  const mentionedCharacterNames = new Set<string>(collectMentionedEntityNames(
+    chapterSignalText,
+    allCharacters.map((character) => character.fullName || ''),
+    8,
+  ))
+  const mentionedItemNames = collectMentionedEntityNames(
+    chapterSignalText,
+    allItems.map((item) => item.itemName || ''),
+    8,
+  )
+  const mentionedLocationNames = collectMentionedEntityNames(
+    chapterSignalText,
+    allLocations.map((location) => location.name || ''),
+    6,
+  )
+  const recentChapters = selectRecentContextRows(
+    previousRows,
+    targetWords,
+    chapterRows.length,
+    {
+      signalText: chapterSignalText,
+      mentionedCharacters: [...mentionedCharacterNames],
+      mentionedItems: mentionedItemNames,
+      mentionedLocations: mentionedLocationNames,
+    },
+  ).map(toChapterWithContinuity)
+  const continuityChapters = recentChapters.filter((chapter) => hasContinuityContent(chapter.continuityState))
   const timelineContext = buildTimelineContext(
     novelId,
     chapterNum,
@@ -2969,27 +3332,9 @@ export async function collectChapterContextRawData(
 
   // 从当前章节任务相关文本里提取实体名，用于动态召回
   const recallSignalText = [
-    currentChapter?.title,
+    chapterSignalText,
     chapterGoal,
-    currentChapter?.outline,
-    currentArc?.arcSummary,
-    currentArc?.arcGoal,
   ].filter(Boolean).join('\n')
-  const mentionedCharacterNames = new Set<string>(collectMentionedEntityNames(
-    recallSignalText,
-    allCharacters.map((character) => character.fullName || ''),
-    8,
-  ))
-  const mentionedItemNames = collectMentionedEntityNames(
-    recallSignalText,
-    allItems.map((item) => item.itemName || ''),
-    8,
-  )
-  const mentionedLocationNames = collectMentionedEntityNames(
-    recallSignalText,
-    allLocations.map((location) => location.name || ''),
-    6,
-  )
   const outlineMentionedCharacterCount = allCharacters.filter((character) => {
     if (!character.fullName) return false
     return Boolean(currentChapter?.outline && currentChapter.outline.includes(character.fullName))
@@ -3135,6 +3480,9 @@ export async function collectChapterContextRawData(
     currentArc,
     outlineMentionedCharacterCount,
     activeThreadPressureCount: activeThreadsContext.pressureCount,
+    mentionedCharacters: [...mentionedCharacterNames],
+    mentionedItems: mentionedItemNames,
+    mentionedLocations: mentionedLocationNames,
     contextParts: {
       ...baseContext.contextParts,
       recalledMemory: recallAugmentation.recalledMemory,
@@ -3186,7 +3534,8 @@ export function allocateChapterContext(
     ? Math.max(0, remainingContextBudget)
     : Math.max(3600, remainingContextBudget)
   const priorityMap = createStagePriorityMap(promptProfile, chapterComplexity, targetWords, rawData.chapterRows.length)
-  const hardConstraintDrafts = buildHardConstraintDrafts(rawData)
+  const preservedConstraintSet = buildPreservedConstraintSet(normalizedOptions.preserveConstraintLabels)
+  const hardConstraintDrafts = buildHardConstraintDrafts(rawData, preservedConstraintSet)
   const desiredHardConstraintBudget = resolveHardConstraintBudget(promptProfile, chapterComplexity, targetWords)
   const minimumSoftContextBudget = Math.min(2400, Math.max(1200, Math.floor(contextBudget * 0.28)))
   const initialHardConstraintBudget = contextBudget <= minimumSoftContextBudget
@@ -3220,10 +3569,11 @@ export function allocateChapterContext(
   const truncatedHardConstraintLabels = hardConstraintAllocation.entries
     .filter((entry) => entry.truncated)
     .map((entry) => entry.label)
-  const droppedConstraintCount = Math.max(0, hardConstraintDrafts.length - hardConstraintAllocation.entries.length)
-  const hardOverflowLabels = hardConstraintDrafts
-    .map((draft) => draft.label)
-    .filter((label) => !hardConstraintAllocation.entries.some((entry) => entry.label === label))
+  const droppedConstraintCount = hardConstraintAllocation.dropped.length
+  const hardOverflowLabels = hardConstraintAllocation.dropped.map((draft) => draft.label)
+  const preservedConstraintLabels = hardConstraintAllocation.entries
+    .map((entry) => entry.label)
+    .filter((label) => preservedConstraintSet.has(label))
   const hardConstraintFailed = droppedConstraintCount > 0
     || truncatedHardConstraintLabels.length > 0
     || softAllocation.warnings.some((warning) => warning.priority === 0)
@@ -3237,6 +3587,8 @@ export function allocateChapterContext(
     truncatedHardConstraintCount: truncatedHardConstraintLabels.length,
     injectedLabels: hardConstraintAllocation.entries.map((entry) => entry.label),
     truncatedLabels: truncatedHardConstraintLabels,
+    preservedLabels: preservedConstraintLabels,
+    droppedLabels: hardOverflowLabels,
   }
   const softContextBudgetUsage: SoftContextBudgetUsage = {
     budget: softContextBudget,
@@ -3262,7 +3614,11 @@ export function allocateChapterContext(
       sourceKind: resolveContextSourceKind(entry.label),
     }))
   const softContextDecisions = [...hardCoveredDecisions, ...softAllocation.decisions]
-  const hardConstraintSummary = buildHardConstraintSummary(hardConstraintAllocation.entries, droppedConstraintCount)
+  const hardConstraintSummary = buildHardConstraintSummary(
+    hardConstraintAllocation.entries,
+    hardConstraintAllocation.dropped,
+    preservedConstraintSet,
+  )
   const droppedLabels = [...new Set([
     ...hardOverflowLabels,
     ...softContextBudgetUsage.droppedLabels,
@@ -3295,6 +3651,8 @@ export function allocateChapterContext(
     droppedLabels,
     truncatedLabels,
     droppedByPriority: summarizeBudgetWarnings(softAllocation.warnings),
+    preservedConstraintLabels,
+    droppedConstraintLabels: hardOverflowLabels,
   }
 
   if (droppedConstraintCount > 0) {
@@ -3374,7 +3732,7 @@ export function buildWritingContextUsageSnapshot(
     context.activeThreads ? '活跃线程' : '',
     context.dueForeshadows ? '伏笔与到期回收' : '',
     ...rawData.recalledMemorySources
-      .filter((item) => !item.stale && !item.overriddenByConstraint)
+      .filter((item) => isAcceptedRecallSource(item))
       .slice(0, 4)
       .map((item) => item.sourceLabel),
   ].filter(Boolean))]
