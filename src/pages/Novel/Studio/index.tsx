@@ -242,7 +242,7 @@ export default function StudioPage({ novelId }: Props) {
 
   if (loading && !currentNovel) {
     return (
-      <div className="novel-dashboard__loading">
+      <div className="novel-dashboard__loading novel-route-shell__loading-card">
         <Spin size="large" />
       </div>
     )

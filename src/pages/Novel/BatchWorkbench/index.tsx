@@ -14,6 +14,7 @@ import type {
 } from '../../../types'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
+import './index.css'
 
 interface Props {
   novelId: number
@@ -245,41 +246,34 @@ export default function BatchWorkbench({ novelId }: Props) {
 
       {activeSnapshot ? (
         <WorkspacePanel title="批次快照" description="选择一个批次快照进行检查、预演或回滚。">
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(260px, 320px) 1fr', gap: 16 }}>
-            <div style={{ display: 'grid', gap: 10 }}>
+          <div className="novel-batch-workbench__snapshot-layout">
+            <div className="novel-batch-workbench__snapshot-list">
               {(data?.snapshots || []).map((snapshot) => (
                 <button
                   key={snapshot.id}
                   type="button"
                   onClick={() => void loadData(snapshot.id)}
-                  style={{
-                    textAlign: 'left',
-                    border: snapshot.id === activeSnapshot.id ? '1px solid #1677ff' : '1px solid rgba(15, 23, 42, 0.08)',
-                    borderRadius: 16,
-                    background: snapshot.id === activeSnapshot.id ? 'var(--primary-soft)' : 'var(--bg-surface)',
-                    padding: 14,
-                    cursor: 'pointer',
-                  }}
+                  className={`novel-batch-workbench__snapshot-button${snapshot.id === activeSnapshot.id ? ' is-active' : ''}`}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+                  <div className="novel-batch-workbench__snapshot-head">
                     <strong>{snapshot.title}</strong>
                     <Tag color={snapshotStatusColor(snapshot.status)}>{snapshot.status}</Tag>
                   </div>
-                  <div style={{ marginTop: 8, fontSize: 12, opacity: 0.78 }}>{snapshot.summary}</div>
-                  <div style={{ marginTop: 8, fontSize: 12, opacity: 0.68 }}>
+                  <div className="novel-batch-workbench__snapshot-summary">{snapshot.summary}</div>
+                  <div className="novel-batch-workbench__snapshot-meta">
                     {`范围 ${snapshot.chapterStart || '-'} - ${snapshot.chapterEnd || '-'} · 创建于 ${snapshot.createdAt}`}
                   </div>
                 </button>
               ))}
             </div>
-            <div style={{ display: 'grid', gap: 12 }}>
+            <div className="novel-batch-workbench__snapshot-detail">
               <Alert
                 type={activeSnapshot.status === 'rolled_back' ? 'warning' : 'info'}
                 showIcon
                 message={activeSnapshot.summary}
                 description={activeSnapshot.latestTaskMessage || `当前快照覆盖 ${activeSnapshot.chapterNums.length} 章。`}
               />
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <div className="novel-batch-workbench__tag-row">
                 <Tag color="blue">{`章节 ${activeSnapshot.chapterNums.join('、')}`}</Tag>
                 {activeSnapshot.workflowTaskId ? <Tag color="cyan">{`任务 #${activeSnapshot.workflowTaskId}`}</Tag> : null}
                 {activeSnapshot.latestRollbackMode ? <Tag color="gold">{rollbackModeLabel(activeSnapshot.latestRollbackMode)}</Tag> : null}
@@ -290,9 +284,9 @@ export default function BatchWorkbench({ novelId }: Props) {
       ) : null}
 
       <WorkspacePanel title="全局锁定库" description="把作者明确锁住、不能被自动重写改掉的事实、段落、风格和角色口吻写在这里。">
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
+        <div className="novel-batch-workbench__lock-grid">
           <div>
-            <strong style={{ display: 'block', marginBottom: 8 }}>锁定事实</strong>
+            <strong className="novel-batch-workbench__field-title">锁定事实</strong>
             <Input.TextArea
               rows={6}
               value={toLines(lockDraft?.lockedCanonFacts || [])}
@@ -304,7 +298,7 @@ export default function BatchWorkbench({ novelId }: Props) {
             />
           </div>
           <div>
-            <strong style={{ display: 'block', marginBottom: 8 }}>锁定段落</strong>
+            <strong className="novel-batch-workbench__field-title">锁定段落</strong>
             <Input.TextArea
               rows={6}
               value={toLines(lockDraft?.lockedParagraphs || [])}
@@ -316,7 +310,7 @@ export default function BatchWorkbench({ novelId }: Props) {
             />
           </div>
           <div>
-            <strong style={{ display: 'block', marginBottom: 8 }}>锁定风格</strong>
+            <strong className="novel-batch-workbench__field-title">锁定风格</strong>
             <Input.TextArea
               rows={6}
               value={toLines(lockDraft?.lockedStyleRules || [])}
@@ -328,7 +322,7 @@ export default function BatchWorkbench({ novelId }: Props) {
             />
           </div>
           <div>
-            <strong style={{ display: 'block', marginBottom: 8 }}>锁定角色口吻</strong>
+            <strong className="novel-batch-workbench__field-title">锁定角色口吻</strong>
             <Input.TextArea
               rows={6}
               value={toLines(lockDraft?.lockedCharacterVoice || [])}
@@ -344,23 +338,23 @@ export default function BatchWorkbench({ novelId }: Props) {
 
       {activeSnapshot ? (
         <WorkspacePanel title="批次检查" description="在继续下一批前，把本批的人工检查结论登记下来。">
-          <div style={{ display: 'grid', gap: 12 }}>
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          <div className="novel-batch-workbench__section-stack">
+            <div className="novel-batch-workbench__toolbar">
               <Select
-                style={{ minWidth: 140 }}
+                className="novel-batch-workbench__select novel-batch-workbench__select--sm"
                 value={inspectionCategory}
                 options={INSPECTION_CATEGORY_OPTIONS}
                 onChange={(value: BatchInspectionCategory) => setInspectionCategory(value)}
               />
               <Select
-                style={{ minWidth: 140 }}
+                className="novel-batch-workbench__select novel-batch-workbench__select--sm"
                 value={inspectionStatus}
                 options={INSPECTION_STATUS_OPTIONS}
                 onChange={(value: BatchInspectionStatus) => setInspectionStatus(value)}
               />
               <Select
                 allowClear
-                style={{ minWidth: 160 }}
+                className="novel-batch-workbench__select novel-batch-workbench__select--md"
                 value={inspectionChapterNum}
                 options={chapterOptions}
                 onChange={(value: number | undefined) => setInspectionChapterNum(value)}
@@ -378,15 +372,15 @@ export default function BatchWorkbench({ novelId }: Props) {
                 保存检查记录
               </Button>
             </div>
-            <div style={{ display: 'grid', gap: 10 }}>
+            <div className="novel-batch-workbench__record-list">
               {(data?.inspections || []).map((record) => (
                 <div key={record.id} className="quality-card">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+                  <div className="novel-batch-workbench__record-head">
                     <strong>{record.chapterNum ? `第 ${record.chapterNum} 章` : '整批'}</strong>
                     <Tag color={inspectionStatusColor(record.status)}>{record.status}</Tag>
                   </div>
-                  <div style={{ marginTop: 6, fontSize: 12, opacity: 0.72 }}>{`${record.category} · ${record.createdAt}`}</div>
-                  <div style={{ marginTop: 8 }}>{record.note}</div>
+                  <div className="novel-batch-workbench__record-meta">{`${record.category} · ${record.createdAt}`}</div>
+                  <div className="novel-batch-workbench__record-note">{record.note}</div>
                 </div>
               ))}
               {(data?.inspections.length || 0) === 0 ? <Empty description="当前还没有人工批次检查记录。" /> : null}
@@ -397,13 +391,13 @@ export default function BatchWorkbench({ novelId }: Props) {
 
       {activeSnapshot ? (
         <WorkspacePanel title="回滚预演与执行" description="先做影响预演，再执行单章、内容或全量回滚。">
-          <div style={{ display: 'grid', gap: 12 }}>
+          <div className="novel-batch-workbench__section-stack">
             <Select
               value={rollbackMode}
               options={ROLLBACK_MODE_OPTIONS.map((item) => ({ label: `${item.label} · ${item.detail}`, value: item.value }))}
               onChange={(value: BatchRollbackMode) => setRollbackMode(value)}
             />
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+            <div className="novel-batch-workbench__toolbar">
               <Button icon={<RollbackOutlined />} loading={previewLoading} onClick={() => void handlePreviewRollback()}>
                 生成影响预演
               </Button>
@@ -419,7 +413,7 @@ export default function BatchWorkbench({ novelId }: Props) {
               </Button>
             </div>
             {rollbackPreview ? (
-              <div style={{ display: 'grid', gap: 12 }}>
+              <div className="novel-batch-workbench__section-stack">
                 <Alert
                   type="warning"
                   showIcon
@@ -428,7 +422,7 @@ export default function BatchWorkbench({ novelId }: Props) {
                 />
                 <div className="quality-card">
                   <strong>将恢复的记录数</strong>
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+                  <div className="novel-batch-workbench__tag-row novel-batch-workbench__tag-row--spaced">
                     {Object.entries(rollbackPreview.affectedCounts).map(([key, value]) => (
                       <Tag key={key} color="blue">{`${key}: ${value}`}</Tag>
                     ))}
@@ -442,14 +436,14 @@ export default function BatchWorkbench({ novelId }: Props) {
 
       {activeSnapshot ? (
         <WorkspacePanel title="回滚历史" description="查看该批次已经执行过的回滚记录。">
-          <div style={{ display: 'grid', gap: 10 }}>
+          <div className="novel-batch-workbench__record-list">
             {(data?.rollbacks || []).map((rollback) => (
               <div key={rollback.id} className="quality-card">
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+                <div className="novel-batch-workbench__record-head">
                   <strong>{rollbackModeLabel(rollback.mode)}</strong>
                   <Tag color="gold">{rollback.createdAt}</Tag>
                 </div>
-                <div style={{ marginTop: 8 }}>{rollback.summary}</div>
+                <div className="novel-batch-workbench__record-note">{rollback.summary}</div>
               </div>
             ))}
             {(data?.rollbacks.length || 0) === 0 ? <Empty description="当前快照还没有执行过回滚。" /> : null}

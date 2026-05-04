@@ -13,6 +13,8 @@ import type {
 import { useNovelStore } from '../../../stores/novel.store'
 import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
+import './index.css'
+import './index.css'
 
 interface Props {
   novelId: number
@@ -246,9 +248,9 @@ export default function WritebackCenterPage({ novelId }: Props) {
     {
       title: '候选',
       render: (_value: unknown, row: ChapterWritebackDiff) => (
-        <div style={{ display: 'grid', gap: 4 }}>
+        <div className="novel-writeback-center-page__diff-copy">
           <strong>{resolveDiffTitle(row)}</strong>
-          <span style={{ color: '#6b7280' }}>{row.diffReason || '未填写原因'}</span>
+          <span className="novel-writeback-center-page__muted">{row.diffReason || '未填写原因'}</span>
         </div>
       ),
     },
@@ -290,7 +292,9 @@ export default function WritebackCenterPage({ novelId }: Props) {
     return (
       <WorkspacePage title="章后状态回写中心">
         <WorkspacePanel title="正在加载回写中心">
-          <Spin />
+          <div className="novel-workspace__loading-card">
+            <Spin />
+          </div>
         </WorkspacePanel>
       </WorkspacePage>
     )
@@ -348,7 +352,7 @@ export default function WritebackCenterPage({ novelId }: Props) {
       )}
     >
       {refreshing ? (
-        <div className="novel-dashboard__refresh-indicator" style={{ marginBottom: 16 }}>
+        <div className="novel-dashboard__refresh-indicator novel-writeback-center-page__refresh">
           <Spin size="small" />
           <span>正在同步章后回写数据</span>
         </div>
@@ -357,9 +361,9 @@ export default function WritebackCenterPage({ novelId }: Props) {
         <Alert showIcon type="info" message="当前还没有章节" description="先去结构规划或正文写作创建章节，再进入章后状态回写中心。" />
       ) : null}
 
-      <div style={{ display: 'grid', gap: 16 }}>
+      <div className="novel-writeback-center-page__stack">
         <WorkspacePanel title="运行与筛选" description="回写中心按章节和运行批次查看。">
-          <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+          <div className="novel-writeback-center-page__filters">
             <Select
               value={centerData?.chapter?.id}
               placeholder="选择章节"
@@ -414,21 +418,21 @@ export default function WritebackCenterPage({ novelId }: Props) {
             />
           </div>
           {activeRun ? (
-            <div style={{ marginTop: 12 }}>
+            <div className="novel-writeback-center-page__run-summary">
               <Tag color={runStatusColor(activeRun.status)}>{runStatusLabel(activeRun.status)}</Tag>
-              <span style={{ color: '#6b7280' }}>{activeRun.summaryText || '当前运行暂无摘要。'}</span>
+              <span className="novel-writeback-center-page__muted">{activeRun.summaryText || '当前运行暂无摘要。'}</span>
             </div>
           ) : (
-            <Alert style={{ marginTop: 12 }} type="info" showIcon message="当前章节还没有回写运行" description="点击“重新抽取”后，会先生成事实抽取和状态候选，再进入人工确认。" />
+            <Alert className="novel-writeback-center-page__run-empty" type="info" showIcon message="当前章节还没有回写运行" description="点击“重新抽取”后，会先生成事实抽取和状态候选，再进入人工确认。" />
           )}
         </WorkspacePanel>
 
         <WorkspacePanel title="八类资产覆盖" description="即使当前章没有命中某类资产，这里也会保持统一分组。">
-          <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
+          <div className="novel-writeback-center-page__coverage-grid">
             {ALL_ASSET_TYPES.map((assetType) => {
               const item = coverageMap.get(assetType)
               return (
-                <div key={assetType} className="novel-panel" style={{ padding: 12, display: 'grid', gap: 6 }}>
+                <div key={assetType} className="novel-panel novel-writeback-center-page__coverage-card">
                   <strong>{assetLabel(assetType)}</strong>
                   <span>{`抽取 ${item?.extractCount || 0} 条`}</span>
                   <span>{`候选 ${item?.diffCount || 0} 条`}</span>
@@ -440,20 +444,20 @@ export default function WritebackCenterPage({ novelId }: Props) {
           </div>
         </WorkspacePanel>
 
-        <div style={{ display: 'grid', gap: 16, gridTemplateColumns: 'minmax(320px, 0.95fr) minmax(520px, 1.35fr)' }}>
+        <div className="novel-writeback-center-page__content-grid">
           <WorkspacePanel title={`事实抽取 · ${filteredExtracts.length}`} description="左侧是从本章正文抽出的结构化事实草案。">
-            <div style={{ display: 'grid', gap: 10 }}>
+            <div className="novel-writeback-center-page__extract-list">
               {filteredExtracts.length > 0 ? filteredExtracts.map((extract) => (
-                <div key={extract.id} className="novel-note-list__item" style={{ display: 'grid', gap: 6 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+                <div key={extract.id} className="novel-note-list__item novel-writeback-center-page__extract-item">
+                  <div className="novel-writeback-center-page__extract-head">
                     <strong>{resolveExtractTitle(extract)}</strong>
                     <Space size={6}>
                       <Tag color="geekblue">{assetLabel(extract.assetType)}</Tag>
                       <Tag color={verificationColor(extract.verificationStatus)}>{verificationLabel(extract.verificationStatus)}</Tag>
                     </Space>
                   </div>
-                  {extract.sourceText ? <div style={{ color: '#6b7280' }}>{extract.sourceText}</div> : null}
-                  <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 12 }}>{prettyJson(extract.factJson)}</pre>
+                  {extract.sourceText ? <div className="novel-writeback-center-page__muted">{extract.sourceText}</div> : null}
+                  <pre className="novel-writeback-center-page__json-block">{prettyJson(extract.factJson)}</pre>
                 </div>
               )) : <div className="novel-copy-block">当前筛选下没有事实抽取结果。</div>}
             </div>
@@ -468,14 +472,14 @@ export default function WritebackCenterPage({ novelId }: Props) {
               dataSource={filteredDiffs}
               expandable={{
                 expandedRowRender: (row) => (
-                  <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))' }}>
+                  <div className="novel-writeback-center-page__expanded-grid">
                     <div>
                       <strong>回写前</strong>
-                      <pre style={{ margin: '8px 0 0', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 12 }}>{prettyJson(row.beforeStateJson)}</pre>
+                      <pre className="novel-writeback-center-page__json-block novel-writeback-center-page__json-block--spaced">{prettyJson(row.beforeStateJson)}</pre>
                     </div>
                     <div>
                       <strong>回写后</strong>
-                      <pre style={{ margin: '8px 0 0', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 12 }}>{prettyJson(row.afterStateJson)}</pre>
+                      <pre className="novel-writeback-center-page__json-block novel-writeback-center-page__json-block--spaced">{prettyJson(row.afterStateJson)}</pre>
                     </div>
                   </div>
                 ),
@@ -502,7 +506,7 @@ export default function WritebackCenterPage({ novelId }: Props) {
         }}
         width={860}
       >
-        <div style={{ display: 'grid', gap: 12 }}>
+        <div className="novel-writeback-center-page__modal-fields">
           <Input value={editingReason} onChange={(event) => setEditingReason(event.target.value)} placeholder="补充这条候选为什么需要回写" />
           <Input.TextArea value={editingAfterState} onChange={(event) => setEditingAfterState(event.target.value)} rows={18} placeholder="编辑 afterState JSON" />
         </div>

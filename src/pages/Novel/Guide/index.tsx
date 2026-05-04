@@ -53,6 +53,7 @@ import {
   type WorkflowRunnableStepKey,
   type WorkflowStats,
 } from '../workflow'
+import './index.css'
 
 interface Props {
   novelId: number
@@ -768,12 +769,12 @@ export default function GuidePage({ novelId }: Props) {
     return {
       key: phase.key,
       label: (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, width: '100%' }}>
-          <div style={{ display: 'grid', gap: 4 }}>
+        <div className="novel-guide-page__phase-head">
+          <div className="novel-guide-page__phase-copy">
             <strong>{phase.title}</strong>
-            <span style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>{phase.summary}</span>
+            <span className="novel-guide-page__phase-summary">{phase.summary}</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div className="novel-guide-page__phase-tags">
             <Tag color={readyCount >= phaseSteps.length ? 'success' : isCurrentPhase ? 'processing' : 'default'}>
               {readyCount >= phaseSteps.length ? '已完成' : isCurrentPhase ? '当前阶段' : '后续阶段'}
             </Tag>
@@ -791,7 +792,7 @@ export default function GuidePage({ novelId }: Props) {
                     {step.icon}
                     {step.title}
                   </div>
-                  <div style={{ marginTop: 6, fontSize: 13, color: 'var(--color-text-secondary)', lineHeight: 1.7 }}>
+                  <div className="novel-guide-page__step-desc">
                     {step.desc}
                   </div>
                 </div>
@@ -800,7 +801,7 @@ export default function GuidePage({ novelId }: Props) {
                   <Tag color="blue">{step.count}</Tag>
                 </div>
               </div>
-              <div style={{ marginBottom: 12, fontSize: 12, color: 'var(--color-text-secondary)', lineHeight: 1.7 }}>
+              <div className="novel-guide-page__step-support">
                 {step.support}
               </div>
               <div className="novel-stage-card__actions">{step.action}</div>
@@ -1038,8 +1039,8 @@ export default function GuidePage({ novelId }: Props) {
         title="作者工作模式"
         extra={<div className="novel-pill">{authorModeSource === 'manual' ? '手动选择' : '系统推荐'}</div>}
       >
-        <div style={{ display: 'grid', gap: 16 }}>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        <div className="novel-guide-page__section-stack">
+          <div className="novel-guide-page__mode-row">
             {(['quick_start', 'asset_building', 'daily_push', 'revision_closure'] as AuthorWorkMode[]).map((mode) => (
               <Button
                 key={mode}
@@ -1063,7 +1064,7 @@ export default function GuidePage({ novelId }: Props) {
         title="今天最该做什么"
         extra={<div className="novel-pill">{`${authorWorkflow.primaryTask.estimatedMinutes} 分钟`}</div>}
       >
-        <div style={{ display: 'grid', gap: 16 }}>
+        <div className="novel-guide-page__section-stack">
           <div className="guided-step__action-card">
             <div className="guided-step__action-head">
               <div className="guided-step__action-copy">

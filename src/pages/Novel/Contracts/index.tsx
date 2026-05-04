@@ -22,6 +22,7 @@ import {
   WorkspaceStepGuide,
 } from '../components/WorkspaceShell'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
+import './index.css'
 
 interface Props {
   novelId: number
@@ -399,7 +400,7 @@ export default function ContractsPage({ novelId }: Props) {
         />
       )}
     >
-      {refreshing ? <div className="novel-dashboard__refresh-indicator" style={{ marginBottom: 16 }}><Spin size="small" /><span>正在同步合同面板数据</span></div> : null}
+      {refreshing ? <div className="novel-dashboard__refresh-indicator novel-workspace__refresh"><Spin size="small" /><span>正在同步合同面板数据</span></div> : null}
       {commitments.length <= 0 ? (
         <Alert
           type="warning"
@@ -413,7 +414,7 @@ export default function ContractsPage({ novelId }: Props) {
         <Select
           value={activeChapterId ?? undefined}
           onChange={(value) => setActiveChapterId(value)}
-          style={{ minWidth: 320 }}
+          className="novel-contracts-page__chapter-select"
           options={chapters.map((item) => ({
             value: item.id,
             label: `第${item.chapterNum}章 ${item.title || ''}`.trim(),
@@ -591,7 +592,7 @@ export default function ContractsPage({ novelId }: Props) {
 
       {activeChapter ? (
         <WorkspacePanel title="本章推进回写" description="写完一章后，在这里把实际推进回写到人物弧线、关系弧和阻力线。">
-          <div style={{ display: 'grid', gap: 12 }}>
+          <div className="novel-contracts-page__section-stack">
             {(chapterContract?.requiredCharacterArcIds || []).map((arcId) => {
               const arc = characterArcs.find((item) => item.id === arcId)
               if (!arc) return null
@@ -646,23 +647,16 @@ export default function ContractsPage({ novelId }: Props) {
         {sceneContracts.length <= 0 ? (
           <Alert type="info" showIcon message="当前章节还没有场景" description="先在结构规划里拆好场景，再回来逐场景补合同。" />
         ) : (
-          <div style={{ display: 'grid', gap: 12 }}>
+          <div className="novel-contracts-page__section-stack">
             {sceneContracts.map((scene) => (
               <div
                 key={scene.segmentId || scene.id || scene.segmentTitle}
-                style={{
-                  border: '1px solid rgba(255,255,255,0.08)',
-                  borderRadius: 12,
-                  background: 'rgba(255,255,255,0.03)',
-                  padding: 16,
-                  display: 'grid',
-                  gap: 12,
-                }}
+                className="novel-contracts-page__scene-card"
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-                  <div style={{ display: 'grid', gap: 4 }}>
+                <div className="novel-contracts-page__scene-head">
+                  <div className="novel-contracts-page__scene-copy">
                     <strong>{scene.segmentTitle}</strong>
-                    <span style={{ fontSize: 12, opacity: 0.7 }}>
+                    <span className="novel-contracts-page__scene-meta">
                       {`章节 ${scene.chapterNum}${typeof scene.segmentOrder === 'number' ? ` · 场景 ${scene.segmentOrder}` : ''}`}
                     </span>
                   </div>
@@ -683,31 +677,31 @@ export default function ContractsPage({ novelId }: Props) {
 
                 <div className="guided-step__field-grid">
                   <div className="guided-step__field-card guided-step__field-card--compact">
-                    <div style={{ marginBottom: 8, fontWeight: 600 }}>POV</div>
+                    <div className="novel-contracts-page__field-label">POV</div>
                     <Input value={scene.pov} onChange={(event) => handleSceneChange(scene.segmentId, { pov: event.target.value })} placeholder="写当前场景视角人物" />
                   </div>
                   <div className="guided-step__field-card guided-step__field-card--compact">
-                    <div style={{ marginBottom: 8, fontWeight: 600 }}>时间 / 地点</div>
+                    <div className="novel-contracts-page__field-label">时间 / 地点</div>
                     <Input value={scene.timeLocation} onChange={(event) => handleSceneChange(scene.segmentId, { timeLocation: event.target.value })} placeholder="写当前场景的时间与地点" />
                   </div>
                   <div className="guided-step__field-card">
-                    <div style={{ marginBottom: 8, fontWeight: 600 }}>场景目标</div>
+                    <div className="novel-contracts-page__field-label">场景目标</div>
                     <Input.TextArea rows={6} value={scene.sceneGoal} onChange={(event) => handleSceneChange(scene.segmentId, { sceneGoal: event.target.value })} placeholder="这一场要拿到什么、推进什么。" />
                   </div>
                   <div className="guided-step__field-card">
-                    <div style={{ marginBottom: 8, fontWeight: 600 }}>障碍</div>
+                    <div className="novel-contracts-page__field-label">障碍</div>
                     <Input.TextArea rows={6} value={scene.obstacle} onChange={(event) => handleSceneChange(scene.segmentId, { obstacle: event.target.value })} placeholder="阻碍当前场景目标实现的压力或代价。" />
                   </div>
                   <div className="guided-step__field-card guided-step__field-card--compact">
-                    <div style={{ marginBottom: 8, fontWeight: 600 }}>冲突类型</div>
+                    <div className="novel-contracts-page__field-label">冲突类型</div>
                     <Input value={scene.conflictType} onChange={(event) => handleSceneChange(scene.segmentId, { conflictType: event.target.value })} placeholder="外部对撞 / 心理冲突 / 信息博弈" />
                   </div>
                   <div className="guided-step__field-card guided-step__field-card--compact">
-                    <div style={{ marginBottom: 8, fontWeight: 600 }}>情绪变化</div>
+                    <div className="novel-contracts-page__field-label">情绪变化</div>
                     <Input value={scene.emotionShift} onChange={(event) => handleSceneChange(scene.segmentId, { emotionShift: event.target.value })} placeholder="紧绷 -> 失衡 -> 硬撑" />
                   </div>
                   <div className="guided-step__field-card">
-                    <div style={{ marginBottom: 8, fontWeight: 600 }}>信息揭示</div>
+                    <div className="novel-contracts-page__field-label">信息揭示</div>
                     <Input.TextArea
                       rows={6}
                       value={scene.revealPayload.join('\n')}
@@ -716,15 +710,15 @@ export default function ContractsPage({ novelId }: Props) {
                     />
                   </div>
                   <div className="guided-step__field-card">
-                    <div style={{ marginBottom: 8, fontWeight: 600 }}>结果状态</div>
+                    <div className="novel-contracts-page__field-label">结果状态</div>
                     <Input.TextArea rows={6} value={scene.resultState} onChange={(event) => handleSceneChange(scene.segmentId, { resultState: event.target.value })} placeholder="这一场结束后人物和局势处于什么状态。" />
                   </div>
                   <div className="guided-step__field-card">
-                    <div style={{ marginBottom: 8, fontWeight: 600 }}>衔接方式</div>
+                    <div className="novel-contracts-page__field-label">衔接方式</div>
                     <Input value={scene.linkageMode} onChange={(event) => handleSceneChange(scene.segmentId, { linkageMode: event.target.value })} placeholder="悬念续接 / 情绪余波 / 行动转场" />
                   </div>
                   <div className="guided-step__field-card">
-                    <div style={{ marginBottom: 8, fontWeight: 600 }}>终局承诺绑定</div>
+                    <div className="novel-contracts-page__field-label">终局承诺绑定</div>
                     <Select
                       mode="multiple"
                       allowClear
@@ -737,7 +731,7 @@ export default function ContractsPage({ novelId }: Props) {
                     />
                   </div>
                   <div className="guided-step__field-card">
-                    <div style={{ marginBottom: 8, fontWeight: 600 }}>伏笔账本绑定</div>
+                    <div className="novel-contracts-page__field-label">伏笔账本绑定</div>
                     <Select
                       mode="multiple"
                       allowClear
@@ -754,7 +748,7 @@ export default function ContractsPage({ novelId }: Props) {
                     />
                   </div>
                   <div className="guided-step__field-card guided-step__field-card--compact">
-                    <div style={{ marginBottom: 8, fontWeight: 600 }}>状态</div>
+                    <div className="novel-contracts-page__field-label">状态</div>
                     <Select
                       value={scene.status}
                       onChange={(value) => handleSceneChange(scene.segmentId, { status: value })}

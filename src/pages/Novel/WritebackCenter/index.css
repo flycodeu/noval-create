@@ -1,0 +1,46 @@
+.novel-writeback-center__filters {
+  gap: 12px;
+}
+
+.novel-writeback-center__run-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.novel-writeback-center__run-alert {
+  margin-top: 12px;
+}
+
+.novel-writeback-center__coverage-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.novel-writeback-center__coverage-card {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+}
+
+.novel-writeback-center__extract-item {
+  display: grid;
+  gap: 6px;
+}
+
+.novel-writeback-center__diff-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.novel-writeback-center__diff-pre {
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  color: var(--workspace-ink-soft);
+}

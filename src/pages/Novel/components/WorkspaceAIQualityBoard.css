@@ -1,0 +1,130 @@
+.workspace-ai-quality-board__stack {
+  display: grid;
+  gap: 12px;
+}
+
+.workspace-ai-quality-board__stack-sm {
+  display: grid;
+  gap: 8px;
+}
+
+.workspace-ai-quality-board__tag-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.workspace-ai-quality-board__tag-row--bottom {
+  margin-bottom: 6px;
+}
+
+.workspace-ai-quality-board__tag-row--wrap {
+  flex-wrap: wrap;
+}
+
+.workspace-ai-quality-board__text-secondary {
+  color: var(--color-text-secondary);
+}
+
+.workspace-ai-quality-board__text-secondary--relaxed {
+  line-height: 1.7;
+}
+
+.workspace-ai-quality-board__text-accent {
+  color: var(--color-blue-light);
+}
+
+.workspace-ai-quality-board__grow {
+  flex: 1;
+}
+
+.workspace-ai-quality-board__followup-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.workspace-ai-quality-board__followup-alert,
+.workspace-ai-quality-board__preview-alert,
+.workspace-ai-quality-board__preview-summary,
+.workspace-ai-quality-board__preview-toolbar,
+.workspace-ai-quality-board__apply-button,
+.workspace-ai-quality-board__action-bar {
+  margin-top: 12px;
+}
+
+.workspace-ai-quality-board__ai-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.workspace-ai-quality-board__score {
+  font-weight: 700;
+}
+
+.workspace-ai-quality-board__metric-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.workspace-ai-quality-board__metric-label {
+  width: 120px;
+  color: var(--color-text-secondary);
+}
+
+.workspace-ai-quality-board__metric-progress {
+  flex: 1;
+  margin: 0;
+}
+
+.workspace-ai-quality-board__metric-value {
+  width: 40px;
+  text-align: right;
+  color: #fa8c16;
+  font-weight: 600;
+}
+
+.workspace-ai-quality-board__tip {
+  margin-top: 6px;
+}
+
+.workspace-ai-quality-board__patch-group {
+  width: 100%;
+}
+
+.workspace-ai-quality-board__patch-item {
+  display: block;
+  cursor: pointer;
+}
+
+.workspace-ai-quality-board__patch-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.workspace-ai-quality-board__reason {
+  color: var(--color-text-muted);
+  margin-bottom: 4px;
+}
+
+.workspace-ai-quality-board__patch-line {
+  margin-bottom: 4px;
+}
+
+@media (max-width: 768px) {
+  .workspace-ai-quality-board__ai-summary,
+  .workspace-ai-quality-board__metric-row,
+  .workspace-ai-quality-board__patch-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .workspace-ai-quality-board__metric-label,
+  .workspace-ai-quality-board__metric-value {
+    width: auto;
+  }
+}

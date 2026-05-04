@@ -200,9 +200,8 @@ export function TimelineListPanel({
                 <button
                   key={event.id}
                   type="button"
-                  className={`novel-list-card ${selectedId === event.id ? 'novel-list-card--active' : ''} ${selectedIds.includes(event.id) ? 'novel-list-card--selected' : ''}`}
                   onClick={(nativeEvent) => onSelect(event, nativeEvent)}
-                  style={{ textAlign: 'left', cursor: 'pointer' }}
+                  className={`novel-list-card novel-timeline-page__card-button ${selectedId === event.id ? 'novel-list-card--active' : ''} ${selectedIds.includes(event.id) ? 'novel-list-card--selected' : ''}`}
                 >
                   <div className="novel-kicker">{event.timeLabel}</div>
                   <div className="novel-list-card__title">{event.eventTitle}</div>
@@ -336,7 +335,7 @@ export function TimelineEditorPanel({
           <Form className="novel-timeline-page__editor-form" form={form} layout="vertical" onValuesChange={onValuesChange}>
             {selectedEvent?.anchorInvalid ? (
               <Alert
-                style={{ marginBottom: 16 }}
+                className="novel-timeline-page__alert-bottom"
                 showIcon
                 type="warning"
                 message={TIMELINE_TEXT.anchorWarningTitle}
@@ -348,7 +347,7 @@ export function TimelineEditorPanel({
               <div className="novel-form-section__header">
                 <div className="novel-form-section__title">{TIMELINE_TEXT.sectionTimeTitle}</div>
               </div>
-              <div className="novel-note-list" style={{ marginBottom: 14 }}>
+              <div className="novel-note-list novel-timeline-page__note-bottom">
                 <div className="novel-note-list__item">{`${modeLabel}${'\u5199\u6cd5\u5efa\u8bae\uff1a'}${timeModeHint}`}</div>
               </div>
               <div className="novel-grid novel-grid--3">
@@ -371,7 +370,7 @@ export function TimelineEditorPanel({
                   label={TIMELINE_TEXT.labelSortValue}
                   rules={[{ required: true, message: '\u8bf7\u8f93\u5165\u6392\u5e8f\u503c' }]}
                 >
-                  <InputNumber min={0} style={{ width: '100%' }} />
+                  <InputNumber min={0} className="novel-timeline-page__input-full" />
                 </Form.Item>
               </div>
               <div className="novel-grid novel-grid--3">
@@ -390,10 +389,10 @@ export function TimelineEditorPanel({
                   <Select allowClear showSearch options={filterOptions.eventTypes.map((item) => ({ value: item, label: item }))} />
                 </Form.Item>
                 <div className="novel-grid novel-grid--2 novel-timeline-page__boolean-grid">
-                  <Form.Item name="isMajorEvent" label={TIMELINE_TEXT.labelMajor} valuePropName="checked" style={{ marginBottom: 0 }}>
+                  <Form.Item name="isMajorEvent" label={TIMELINE_TEXT.labelMajor} valuePropName="checked" className="novel-timeline-page__form-item-compact">
                     <Switch />
                   </Form.Item>
-                  <Form.Item name="protagonistPresent" label={TIMELINE_TEXT.labelProtagonistPresent} valuePropName="checked" style={{ marginBottom: 0 }}>
+                  <Form.Item name="protagonistPresent" label={TIMELINE_TEXT.labelProtagonistPresent} valuePropName="checked" className="novel-timeline-page__form-item-compact">
                     <Switch />
                   </Form.Item>
                 </div>
@@ -553,7 +552,7 @@ export function TimelineGenerateModal({
       okText={TIMELINE_TEXT.modalOk}
     >
       <Form form={form} layout="vertical">
-        <div className="novel-note-list" style={{ marginBottom: 16 }}>
+        <div className="novel-note-list novel-timeline-page__modal-hints">
           <div className="novel-note-list__item">{TIMELINE_TEXT.generateHint1}</div>
           <div className="novel-note-list__item">{TIMELINE_TEXT.generateHint2}</div>
           <div className="novel-note-list__item">{TIMELINE_TEXT.generateHint3}</div>

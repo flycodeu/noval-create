@@ -278,14 +278,9 @@ export default function GlossaryPage({ novelId }: Props) {
                 <List.Item
                   className="novel-resource-workspace__list-item"
                   onClick={() => setSelectedId(item.id)}
-                  style={{
-                    cursor: 'pointer',
-                    borderRadius: 12,
-                    padding: 12,
-                    background: selectedId === item.id ? 'rgba(24, 144, 255, 0.08)' : 'transparent',
-                    border: '1px solid rgba(120, 120, 120, 0.18)',
-                    marginBottom: 8,
-                  }}
+                  style={selectedId === item.id ? {
+                    background: 'rgba(24, 144, 255, 0.08)',
+                  } : undefined}
                 >
                   <List.Item.Meta
                     title={(

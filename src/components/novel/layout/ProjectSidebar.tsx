@@ -12,6 +12,7 @@ interface ProjectSidebarProps {
   navGroups: WorkspaceNavGroup[]
   activeKey: string
   onNavigate: (route: string) => void
+  onPrefetchRoute?: (route: string) => void
 }
 
 export default function ProjectSidebar({
@@ -22,6 +23,7 @@ export default function ProjectSidebar({
   navGroups,
   activeKey,
   onNavigate,
+  onPrefetchRoute,
 }: ProjectSidebarProps) {
   const activeGroup = useMemo(
     () => navGroups.find((group) => group.items.some((item) => item.key === activeKey))?.key || navGroups[0]?.key,
@@ -77,6 +79,9 @@ export default function ProjectSidebar({
                       <button
                         key={item.key}
                         type="button"
+                        onMouseEnter={() => !active && onPrefetchRoute?.(item.route)}
+                        onFocus={() => !active && onPrefetchRoute?.(item.route)}
+                        onPointerDown={() => !active && onPrefetchRoute?.(item.route)}
                         onClick={() => onNavigate(item.route)}
                         className={`project-sidebar__group-item${active ? ' is-active' : ''}`}
                       >

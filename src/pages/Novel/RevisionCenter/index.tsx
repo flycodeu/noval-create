@@ -342,17 +342,17 @@ export default function RevisionCenterPage({ novelId }: Props) {
       key: 'title',
       render: (_, record) => (
         <div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div className="workspace-row workspace-row--wrap workspace-row-gap-8">
             <strong>{record.title}</strong>
             <Tag color={getSourceColor(record.taskSource)}>{getSourceLabel(record.taskSource)}</Tag>
             <Tag color={getRevisionSeverityColor(record.severity)}>{getRevisionSeverityLabel(record.severity)}</Tag>
             <Tag color={getStatusColor(record.status)}>{getStatusLabel(record.status)}</Tag>
           </div>
-          <div style={{ marginTop: 6, color: 'var(--color-text-muted)', fontSize: 12 }}>
+          <div className="workspace-margin-top-6 workspace-text-muted workspace-text-small">
             {record.description || record.fixBrief || '当前还没有补充说明。'}
           </div>
           {record.fixBrief ? (
-            <div style={{ marginTop: 6, fontSize: 12 }}>
+            <div className="workspace-margin-top-6 workspace-text-small">
               <strong>建议：</strong>
               {record.fixBrief}
             </div>
@@ -540,11 +540,11 @@ export default function RevisionCenterPage({ novelId }: Props) {
       ) : null}
 
       <WorkspacePanel title="修订任务板">
-        <div style={{ display: 'grid', gap: 16 }}>
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+        <div className="workspace-stack-16">
+          <div className="workspace-row workspace-row--wrap workspace-row-gap-12">
             <Select
               value={sourceFilter}
-              style={{ width: 140 }}
+              className="workspace-control-140"
               options={[
                 { value: 'all', label: '全部来源' },
                 { value: 'system', label: '系统任务' },
@@ -554,7 +554,7 @@ export default function RevisionCenterPage({ novelId }: Props) {
             />
             <Select
               value={statusFilter}
-              style={{ width: 140 }}
+              className="workspace-control-140"
               options={[
                 { value: 'all', label: '全部状态' },
                 ...STATUS_OPTIONS,
@@ -565,7 +565,7 @@ export default function RevisionCenterPage({ novelId }: Props) {
               value={keyword}
               onChange={(event) => setKeyword(event.target.value)}
               placeholder="搜索任务标题、说明或建议"
-              style={{ maxWidth: 320 }}
+              className="workspace-max-320"
             />
           </div>
 
@@ -612,7 +612,7 @@ export default function RevisionCenterPage({ novelId }: Props) {
         okText={editingTask ? '保存修改' : '创建任务'}
         width={760}
       >
-        <div style={{ marginBottom: 12 }}>
+        <div className="workspace-margin-bottom-12">
           {taskDraftButton}
         </div>
         <Form form={form} layout="vertical" initialValues={EMPTY_VALUES}>

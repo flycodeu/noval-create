@@ -37,6 +37,7 @@ import {
   type WorkspaceQualityAdapterContext,
   type WorkspaceQualityRouteKey,
 } from '../shared/workspace-quality'
+import './WorkspaceAIQualityBoard.css'
 
 interface Props {
   open: boolean
@@ -182,15 +183,15 @@ export default function WorkspaceAIQualityBoard({
         key: 'fields',
         label: `字段级问题 (${analysis.fieldResults.length})`,
         children: (
-          <div style={{ display: 'grid', gap: 8 }}>
+          <div className="workspace-ai-quality-board__stack-sm">
             {analysis.fieldResults.map((item) => (
               <div key={item.path.join('.')} className="novel-note-list__item">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <div className="workspace-ai-quality-board__tag-row workspace-ai-quality-board__tag-row--bottom">
                   <Tag color={severityTagColor(item.severity)}>{item.score}</Tag>
                   <strong>{item.label}</strong>
                 </div>
-                {item.issues.map((issue) => <div key={issue} style={{ color: 'var(--color-text-secondary)' }}>- {issue}</div>)}
-                {item.suggestions.map((tip) => <div key={tip} style={{ color: 'var(--color-blue-light)' }}>→ {tip}</div>)}
+                {item.issues.map((issue) => <div key={issue} className="workspace-ai-quality-board__text-secondary">- {issue}</div>)}
+                {item.suggestions.map((tip) => <div key={tip} className="workspace-ai-quality-board__text-accent">→ {tip}</div>)}
               </div>
             ))}
           </div>
@@ -203,16 +204,16 @@ export default function WorkspaceAIQualityBoard({
         key: 'entities',
         label: `实体级问题 (${analysis.entityResults.length})`,
         children: (
-          <div style={{ display: 'grid', gap: 8 }}>
+          <div className="workspace-ai-quality-board__stack-sm">
             {analysis.entityResults.map((item) => (
               <div key={item.path.join('.')} className="novel-note-list__item">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <div className="workspace-ai-quality-board__tag-row workspace-ai-quality-board__tag-row--bottom">
                   <Tag color={severityTagColor(item.severity)}>{item.severity === 'critical' ? '高' : item.severity === 'warning' ? '中' : '低'}</Tag>
                   <strong>{item.label}</strong>
                 </div>
-                <div style={{ color: 'var(--color-text-secondary)', lineHeight: 1.7 }}>{item.summary}</div>
-                {item.issues.map((issue) => <div key={issue} style={{ color: 'var(--color-text-secondary)' }}>- {issue}</div>)}
-                {item.suggestions.map((tip) => <div key={tip} style={{ color: 'var(--color-blue-light)' }}>→ {tip}</div>)}
+                <div className="workspace-ai-quality-board__text-secondary workspace-ai-quality-board__text-secondary--relaxed">{item.summary}</div>
+                {item.issues.map((issue) => <div key={issue} className="workspace-ai-quality-board__text-secondary">- {issue}</div>)}
+                {item.suggestions.map((tip) => <div key={tip} className="workspace-ai-quality-board__text-accent">→ {tip}</div>)}
               </div>
             ))}
           </div>
@@ -373,7 +374,7 @@ export default function WorkspaceAIQualityBoard({
       ) : null}
 
       {snapshot ? (
-        <div style={{ display: 'grid', gap: 12 }}>
+        <div className="workspace-ai-quality-board__stack">
           <Alert
             type="info"
             showIcon
@@ -391,11 +392,11 @@ export default function WorkspaceAIQualityBoard({
                   <Tag color={severityTagColor(analysis.severity)}>{analysis.severity === 'critical' ? '高风险' : analysis.severity === 'warning' ? '需修复' : '基本可用'}</Tag>
                 </div>
                 <div className="novel-subpanel__body">
-                  <div style={{ color: 'var(--color-text-secondary)', lineHeight: 1.7 }}>{analysis.summary}</div>
+                  <div className="workspace-ai-quality-board__text-secondary workspace-ai-quality-board__text-secondary--relaxed">{analysis.summary}</div>
                   {analysis.repairPriority.length > 0 ? (
-                    <div style={{ marginTop: 10, display: 'grid', gap: 6 }}>
+                    <div className="workspace-ai-quality-board__followup-list">
                       {analysis.repairPriority.map((item) => (
-                        <div key={item} style={{ color: 'var(--color-text-secondary)' }}>- {item}</div>
+                        <div key={item} className="workspace-ai-quality-board__text-secondary">- {item}</div>
                       ))}
                     </div>
                   ) : null}
@@ -408,39 +409,39 @@ export default function WorkspaceAIQualityBoard({
                   <Tag color={severityTagColor(analysis.aiFlavor.severity)}>{analysis.aiFlavor.severity === 'high' ? '高' : analysis.aiFlavor.severity === 'medium' ? '中' : '低'}</Tag>
                 </div>
                 <div className="novel-subpanel__body">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                  <div className="workspace-ai-quality-board__ai-summary">
                     <Progress
                       type="circle"
                       percent={analysis.aiFlavor.score}
                       width={84}
                       strokeColor={aiFlavorColor(analysis.aiFlavor.score)}
                       format={(value) => (
-                        <span style={{ color: aiFlavorColor(analysis.aiFlavor.score), fontWeight: 700 }}>{value}</span>
+                        <span className="workspace-ai-quality-board__score" style={{ color: aiFlavorColor(analysis.aiFlavor.score) }}>{value}</span>
                       )}
                     />
-                    <div style={{ flex: 1, color: 'var(--color-text-secondary)', lineHeight: 1.7 }}>
+                    <div className="workspace-ai-quality-board__text-secondary workspace-ai-quality-board__text-secondary--relaxed workspace-ai-quality-board__grow">
                       {analysis.aiFlavor.summary}
                     </div>
                   </div>
-                  <div style={{ display: 'grid', gap: 8 }}>
+                  <div className="workspace-ai-quality-board__stack-sm">
                     {analysis.aiFlavor.breakdown.map((item) => (
-                      <div key={item.key} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <span style={{ width: 120, color: 'var(--color-text-secondary)' }}>{item.label}</span>
-                        <Progress percent={item.value} showInfo={false} size="small" strokeColor="#fa8c16" style={{ flex: 1, margin: 0 }} />
-                        <span style={{ width: 40, textAlign: 'right', color: '#fa8c16', fontWeight: 600 }}>{item.value}</span>
+                      <div key={item.key} className="workspace-ai-quality-board__metric-row">
+                        <span className="workspace-ai-quality-board__metric-label">{item.label}</span>
+                        <Progress percent={item.value} showInfo={false} size="small" strokeColor="#fa8c16" className="workspace-ai-quality-board__metric-progress" />
+                        <span className="workspace-ai-quality-board__metric-value">{item.value}</span>
                       </div>
                     ))}
                   </div>
                   {analysis.aiFlavor.sampleFindings.length > 0 ? (
-                    <div style={{ marginTop: 12, display: 'grid', gap: 6 }}>
+                    <div className="workspace-ai-quality-board__followup-list">
                       {analysis.aiFlavor.sampleFindings.map((item) => (
-                        <div key={item} style={{ color: 'var(--color-text-secondary)' }}>- {item}</div>
+                        <div key={item} className="workspace-ai-quality-board__text-secondary">- {item}</div>
                       ))}
                     </div>
                   ) : null}
                   {analysis.aiFlavor.humanizationDirections.length > 0 ? (
                     <Alert
-                      style={{ marginTop: 12 }}
+                      className="workspace-ai-quality-board__followup-alert"
                       type="warning"
                       showIcon
                       message="去 AI 味方向"
@@ -455,17 +456,17 @@ export default function WorkspaceAIQualityBoard({
                   <div className="novel-subpanel__title">当前问题</div>
                   <Tag>{analysis.globalIssues.length}</Tag>
                 </div>
-                <div className="novel-subpanel__body" style={{ display: 'grid', gap: 8 }}>
+                <div className="novel-subpanel__body workspace-ai-quality-board__stack-sm">
                   {analysis.globalIssues.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前快照没有命中明显问题，可继续推进本页工作。" /> : null}
                   {analysis.globalIssues.map((issue) => (
                     <div key={issue.id} className="novel-note-list__item">
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+                      <div className="workspace-ai-quality-board__tag-row workspace-ai-quality-board__tag-row--wrap workspace-ai-quality-board__tag-row--bottom">
                         <Tag color={severityTagColor(issue.severity)}>{issue.severity === 'critical' ? '高' : issue.severity === 'warning' ? '中' : '低'}</Tag>
                         <Tag>{issueKindLabel(issue.kind)}</Tag>
                         <strong>{issue.title}</strong>
                       </div>
-                      <div style={{ color: 'var(--color-text-secondary)', lineHeight: 1.7 }}>{issue.description}</div>
-                      <div style={{ color: 'var(--color-blue-light)', marginTop: 6 }}>建议：{issue.suggestion}</div>
+                      <div className="workspace-ai-quality-board__text-secondary workspace-ai-quality-board__text-secondary--relaxed">{issue.description}</div>
+                      <div className="workspace-ai-quality-board__text-accent workspace-ai-quality-board__tip">建议：{issue.suggestion}</div>
                     </div>
                   ))}
                 </div>
@@ -484,7 +485,7 @@ export default function WorkspaceAIQualityBoard({
                     onChange={(event) => setExtraRequirements(event.target.value)}
                     placeholder="可补充额外要求，例如“保留现有世界观词汇”“句子更短更利落”“增强人物立场和代价感”。"
                   />
-                  <Space style={{ marginTop: 10 }}>
+                  <Space className="workspace-ai-quality-board__action-bar">
                     <Button
                       type="primary"
                       icon={<RobotOutlined />}
@@ -514,32 +515,32 @@ export default function WorkspaceAIQualityBoard({
                     showIcon
                     message="预览警告"
                     description={preview.warnings.map((item) => <div key={item}>{item}</div>)}
-                    style={{ marginBottom: 12 }}
+                    className="workspace-ai-quality-board__preview-alert"
                   />
                 ) : null}
-                <div style={{ color: 'var(--color-text-secondary)', lineHeight: 1.7, marginBottom: 12 }}>{preview.summary}</div>
-                <Space style={{ marginBottom: 12 }}>
+                <div className="workspace-ai-quality-board__text-secondary workspace-ai-quality-board__text-secondary--relaxed workspace-ai-quality-board__preview-summary">{preview.summary}</div>
+                <Space className="workspace-ai-quality-board__preview-toolbar">
                   <Button size="small" onClick={() => setSelectedPatchIds(allPatches.map((item) => item.id))}>全选</Button>
                   <Button size="small" onClick={() => setSelectedPatchIds([])}>清空</Button>
                 </Space>
                 <Checkbox.Group
                   value={selectedPatchIds}
                   onChange={(values) => setSelectedPatchIds(values as string[])}
-                  style={{ width: '100%' }}
+                  className="workspace-ai-quality-board__patch-group"
                 >
-                  <div style={{ display: 'grid', gap: 8 }}>
+                  <div className="workspace-ai-quality-board__stack-sm">
                     {allPatches.map((patch) => (
-                      <label key={patch.id} className="novel-note-list__item" style={{ display: 'block', cursor: 'pointer' }}>
-                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                      <label key={patch.id} className="novel-note-list__item workspace-ai-quality-board__patch-item">
+                        <div className="workspace-ai-quality-board__patch-row">
                           <Checkbox value={patch.id} />
-                          <div style={{ flex: 1 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+                          <div className="workspace-ai-quality-board__grow">
+                            <div className="workspace-ai-quality-board__tag-row workspace-ai-quality-board__tag-row--wrap workspace-ai-quality-board__tag-row--bottom">
                               <Tag>{patch.patchKind === 'entity' ? '实体' : '字段'}</Tag>
                               <strong>{patch.label}</strong>
                             </div>
-                            <div style={{ color: 'var(--color-text-muted)', marginBottom: 4 }}>原因：{patch.reason}</div>
-                            <div style={{ color: 'var(--color-text-secondary)', marginBottom: 4 }}>修改前：{patch.before || '空'}</div>
-                            <div style={{ color: 'var(--color-blue-light)' }}>修改后：{patch.after || '空'}</div>
+                            <div className="workspace-ai-quality-board__reason">原因：{patch.reason}</div>
+                            <div className="workspace-ai-quality-board__text-secondary workspace-ai-quality-board__patch-line">修改前：{patch.before || '空'}</div>
+                            <div className="workspace-ai-quality-board__text-accent">修改后：{patch.after || '空'}</div>
                           </div>
                         </div>
                       </label>
@@ -549,7 +550,7 @@ export default function WorkspaceAIQualityBoard({
                 <Button
                   type="primary"
                   icon={<CheckOutlined />}
-                  style={{ marginTop: 12 }}
+                  className="workspace-ai-quality-board__apply-button"
                   disabled={selectedPatchIds.length === 0}
                   onClick={() => void handleApply()}
                 >

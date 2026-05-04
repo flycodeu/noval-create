@@ -550,7 +550,7 @@ export default function Overview({ novelId }: Props) {
           : '总览页只保留当前最值钱的下一步；详细模式切换仍放在创作向导。'}
         extra={<div className="novel-pill">{getAuthorWorkModeLabel(selectedAuthorMode)}</div>}
       >
-        <div style={{ display: 'grid', gap: 16 }}>
+        <div className="workspace-stack-16">
           <div className="guided-step__action-card">
             <div className="guided-step__action-head">
               <div className="guided-step__action-copy">
@@ -644,16 +644,16 @@ export default function Overview({ novelId }: Props) {
 
       {displayState.showProgressPanel ? (
         <WorkspacePanel title="推进热度" description="进入正文后再看字数与章节进度，避免起步阶段被弱信息占住视线。">
-          <div style={{ display: 'grid', gap: 16 }}>
+          <div className="workspace-stack-16">
             <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+              <div className="workspace-row workspace-row--between workspace-margin-bottom-6">
                 <strong>字数进度</strong>
                 <span>{wordProgress}%</span>
               </div>
               <Progress percent={wordProgress} showInfo={false} />
             </div>
             <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+              <div className="workspace-row workspace-row--between workspace-margin-bottom-6">
                 <strong>章节进度</strong>
                 <span>{chapterProgress}%</span>
               </div>
@@ -668,7 +668,7 @@ export default function Overview({ novelId }: Props) {
           title={authorWorkflow.blockers.length > 0 ? '继续扩批前先看这些风险' : '百万字健康速览'}
           description="健康信息降为次级区，只在进入正文后帮助你判断能否继续扩批。"
         >
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+          <div className="workspace-grid-auto-220">
             <div className="guided-step__fact-card">
               <span>生产就绪度</span>
               <strong>{qualitySummary.productionReadiness.readyRate}%</strong>
@@ -756,7 +756,7 @@ export default function Overview({ novelId }: Props) {
             </div>
             <div className="guided-step__field-card guided-step__field-card--compact">
               <Form.Item name="targetWords" label="目标字数" rules={[{ required: true, message: '请填写目标字数' }]}>
-                <InputNumber min={1000} step={1000} style={{ width: '100%' }} />
+                <InputNumber min={1000} step={1000} className="workspace-input-number-full" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card guided-step__field-card--full">
@@ -850,7 +850,7 @@ export default function Overview({ novelId }: Props) {
       >
         <div className="guided-step__field-grid novel-overview-page__packaging-grid">
           <div className="guided-step__field-card guided-step__field-card--full">
-            <strong style={{ display: 'block', marginBottom: 8, color: 'var(--workspace-ink)' }}>书名候选</strong>
+            <strong className="workspace-card-section-title">书名候选</strong>
             <Select
               mode="tags"
               value={packagingDraft.titleCandidates}
@@ -860,7 +860,7 @@ export default function Overview({ novelId }: Props) {
             />
           </div>
           <div className="guided-step__field-card guided-step__field-card--full">
-            <strong style={{ display: 'block', marginBottom: 8, color: 'var(--workspace-ink)' }}>一句话钩子</strong>
+            <strong className="workspace-card-section-title">一句话钩子</strong>
             <Input.TextArea
               rows={6}
               value={packagingDraft.oneLineHook}
@@ -869,7 +869,7 @@ export default function Overview({ novelId }: Props) {
             />
           </div>
           <div className="guided-step__field-card">
-            <strong style={{ display: 'block', marginBottom: 8, color: 'var(--workspace-ink)' }}>起点版简介</strong>
+            <strong className="workspace-card-section-title">起点版简介</strong>
             <Input.TextArea
               rows={8}
               value={packagingDraft.platformBlurbs.qidian}
@@ -880,7 +880,7 @@ export default function Overview({ novelId }: Props) {
             />
           </div>
           <div className="guided-step__field-card">
-            <strong style={{ display: 'block', marginBottom: 8, color: 'var(--workspace-ink)' }}>番茄版简介</strong>
+            <strong className="workspace-card-section-title">番茄版简介</strong>
             <Input.TextArea
               rows={8}
               value={packagingDraft.platformBlurbs.tomato}
@@ -891,7 +891,7 @@ export default function Overview({ novelId }: Props) {
             />
           </div>
           <div className="guided-step__field-card guided-step__field-card--full">
-            <strong style={{ display: 'block', marginBottom: 8, color: 'var(--workspace-ink)' }}>出版版简介</strong>
+            <strong className="workspace-card-section-title">出版版简介</strong>
             <Input.TextArea
               rows={6}
               value={packagingDraft.platformBlurbs.publishing}
@@ -902,7 +902,7 @@ export default function Overview({ novelId }: Props) {
             />
           </div>
           <div className="guided-step__field-card guided-step__field-card--full">
-            <strong style={{ display: 'block', marginBottom: 8, color: 'var(--workspace-ink)' }}>卷名风格</strong>
+            <strong className="workspace-card-section-title">卷名风格</strong>
             <Input.TextArea
               rows={6}
               value={packagingDraft.volumeNamingStyle}

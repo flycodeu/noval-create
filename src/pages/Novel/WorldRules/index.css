@@ -1,0 +1,60 @@
+.novel-world-rules-page__section-actions {
+  margin-bottom: var(--space-m);
+}
+
+.novel-world-rules-page__grid {
+  display: grid;
+  gap: var(--space-m);
+}
+
+.novel-world-rules-page__grid--2,
+.novel-world-rules-page__grid--lang {
+  grid-template-columns: 1fr 1fr;
+}
+
+.novel-world-rules-page__grid--3 {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+.novel-world-rules-page__grid--map {
+  grid-template-columns: 120px 1fr 140px;
+}
+
+.novel-world-rules-page__full-width-input {
+  width: 100%;
+}
+
+.novel-world-rules-page__language-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  gap: var(--space-m);
+  margin-bottom: var(--space-l);
+}
+
+.novel-world-rules-page__language-card {
+  background: var(--color-bg-card);
+}
+
+.novel-world-rules-page__compact-form-item {
+  margin-bottom: 0;
+}
+
+.novel-world-rules-page__status-block,
+.novel-world-rules-page__status-pill {
+  margin-bottom: 18px;
+}
+
+.novel-world-rules-page__progress-copy {
+  display: grid;
+  gap: var(--space-m);
+}
+
+@media (max-width: 960px) {
+  .novel-world-rules-page__grid--2,
+  .novel-world-rules-page__grid--3,
+  .novel-world-rules-page__grid--map,
+  .novel-world-rules-page__grid--lang,
+  .novel-world-rules-page__language-cards {
+    grid-template-columns: 1fr;
+  }
+}

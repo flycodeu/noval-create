@@ -1,0 +1,59 @@
+.novel-foreshadow-ledger__view-select {
+  min-width: 140px;
+}
+
+.novel-foreshadow-ledger__filter-select {
+  width: 160px;
+}
+
+.novel-foreshadow-ledger__board-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.novel-foreshadow-ledger__item-stack,
+.novel-foreshadow-ledger__table-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.novel-foreshadow-ledger__item-stack {
+  gap: 6px;
+}
+
+.novel-foreshadow-ledger__item-head,
+.novel-foreshadow-ledger__item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.novel-foreshadow-ledger__muted {
+  opacity: 0.85;
+}
+
+.novel-foreshadow-ledger__muted--light {
+  opacity: 0.72;
+}
+
+.novel-foreshadow-ledger__table-meta {
+  display: grid;
+  gap: 2px;
+}
+
+.novel-foreshadow-ledger__status-select {
+  width: 92px;
+}
+
+.novel-foreshadow-ledger__full-width-input {
+  width: 100%;
+}
+
+@media (max-width: 768px) {
+  .novel-foreshadow-ledger__view-select,
+  .novel-foreshadow-ledger__filter-select {
+    width: 100%;
+  }
+}

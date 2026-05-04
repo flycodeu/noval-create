@@ -99,6 +99,8 @@ const LEGACY_ROUTE_REDIRECTS: Record<GuidedWorkflowStepKey, ProWorkspaceKey> = {
 
 const WORKSPACE_VIEW_MODE_STORAGE_KEY = 'novelforge-workbench-view-mode'
 const WORKSPACE_PAGE_META = new Map(WORKSPACE_MODULE_DEFINITIONS.map((item) => [item.key, item] as const))
+const WORKSPACE_PREWARM_DELAY_MS = 140
+const MAX_IDLE_PREWARM_ROUTES = 3
 
 function isEditableTarget(target: EventTarget | null): boolean {
   const element = target as HTMLElement | null
@@ -227,6 +229,29 @@ export default function NovelRouter() {
     ? resolvePageMeta(orderedPages[currentPageIndex + 1])
     : null
 
+  const resolveWorkspacePageKey = useCallback((routeOrPage: string | ProWorkspaceKey | null | undefined): ProWorkspaceKey | null => {
+    if (!routeOrPage) return null
+    if (routeOrPage === 'guide') return 'guide'
+    if (ALL_WORKSPACE_ROUTE_KEYS.includes(routeOrPage as WorkspaceRouteKey)) {
+      return routeOrPage as ProWorkspaceKey
+    }
+
+    const normalizedRoute = routeOrPage.replace(/^\/novels\/\d+\//, '').split('?')[0]
+    const rootSegment = normalizedRoute.split('/').filter(Boolean)[0]
+    if (!rootSegment) return null
+    if (rootSegment === 'guide') return 'guide'
+    return ALL_WORKSPACE_ROUTE_KEYS.includes(rootSegment as WorkspaceRouteKey)
+      ? rootSegment as ProWorkspaceKey
+      : null
+  }, [])
+
+  const warmWorkspacePage = useCallback((routeOrPage: string | ProWorkspaceKey | null | undefined) => {
+    const pageKey = resolveWorkspacePageKey(routeOrPage)
+    if (!pageKey) return
+
+    setVisitedPages((current) => (current.includes(pageKey) ? current : [...current, pageKey]))
+  }, [resolveWorkspacePageKey])
+
   useEffect(() => {
     setVisitedPages([currentPage])
   }, [novelId])
@@ -234,6 +259,34 @@ export default function NovelRouter() {
   useEffect(() => {
     setVisitedPages((current) => (current.includes(currentPage) ? current : [...current, currentPage]))
   }, [currentPage])
+
+  useEffect(() => {
+    if (loading) return undefined
+
+    const routesToWarm = Array.from(new Set([
+      recommendedRoute,
+      nextPageMeta?.route,
+      previousPageMeta?.route,
+    ].filter((route): route is string => Boolean(route))))
+      .filter((route) => resolveWorkspacePageKey(route) !== currentPage)
+      .slice(0, MAX_IDLE_PREWARM_ROUTES)
+
+    if (routesToWarm.length === 0) return undefined
+
+    const timer = window.setTimeout(() => {
+      routesToWarm.forEach((route) => warmWorkspacePage(route))
+    }, WORKSPACE_PREWARM_DELAY_MS)
+
+    return () => window.clearTimeout(timer)
+  }, [
+    currentPage,
+    loading,
+    nextPageMeta?.route,
+    previousPageMeta?.route,
+    recommendedRoute,
+    resolveWorkspacePageKey,
+    warmWorkspacePage,
+  ])
 
   const refreshWorkflowStats = useCallback(async () => {
     if (!novelId) return
@@ -283,6 +336,11 @@ export default function NovelRouter() {
       navigate(to, options)
     })
   }, [navigate])
+
+  const navigateWithinWorkspace = useCallback((route: string, options?: NavigateOptions) => {
+    warmWorkspacePage(route)
+    transitionNavigate(`/novels/${novelId}/${route}`, options)
+  }, [novelId, transitionNavigate, warmWorkspacePage])
 
   const notifyWorkspaceMutation = useCallback(() => {
     setWorkspaceMutationToken((current) => current + 1)
@@ -679,7 +737,7 @@ export default function NovelRouter() {
             }
           : undefined}
         canUndo={Boolean(latestUndoable)}
-        onNextStep={() => transitionNavigate(`/novels/${novelId}/${recommendedRoute}`)}
+        onNextStep={() => navigateWithinWorkspace(recommendedRoute)}
         nextStepLabel="推荐下一步"
         exportMenu={{
           items: [
@@ -713,7 +771,7 @@ export default function NovelRouter() {
             {
               key: 'settings',
               label: '设置',
-              onClick: () => transitionNavigate(`/novels/${novelId}/overview`),
+              onClick: () => navigateWithinWorkspace('overview'),
             },
             { type: 'divider' as const },
             {
@@ -721,14 +779,14 @@ export default function NovelRouter() {
               icon: <LeftOutlined />,
               label: `上一步${previousPageMeta ? `：${previousPageMeta.label}` : ''}`,
               disabled: !previousPageMeta,
-              onClick: () => previousPageMeta && transitionNavigate(`/novels/${novelId}/${previousPageMeta.route}`),
+              onClick: () => previousPageMeta && navigateWithinWorkspace(previousPageMeta.route),
             },
             {
               key: 'next',
               icon: <RightOutlined />,
               label: `下一步${nextPageMeta ? `：${nextPageMeta.label}` : ''}`,
               disabled: !nextPageMeta,
-              onClick: () => nextPageMeta && transitionNavigate(`/novels/${novelId}/${nextPageMeta.route}`),
+              onClick: () => nextPageMeta && navigateWithinWorkspace(nextPageMeta.route),
             },
           ].filter(Boolean) as MenuProps['items'],
         }}
@@ -741,7 +799,8 @@ export default function NovelRouter() {
           currentTask={workspaceSnapshot.nextStep.title}
           navGroups={workspaceSnapshot.navGroups}
           activeKey={currentNavKey}
-          onNavigate={(route) => transitionNavigate(`/novels/${novelId}/${route}`)}
+          onPrefetchRoute={warmWorkspacePage}
+          onNavigate={navigateWithinWorkspace}
         />
       </aside>
 
@@ -788,7 +847,7 @@ export default function NovelRouter() {
           onChange={(event) => setQuickSearchKeyword(event.target.value)}
           placeholder="搜索章节、线程、时间轴、角色、物品或地点"
         />
-        <div className="novel-note-list" style={{ marginTop: 16 }}>
+        <div className="novel-note-list novel-route-shell__modal-list">
           {quickSearchLoading ? <Spin size="small" /> : null}
           {!quickSearchLoading && quickSearchResults.length === 0 ? (
             <div className="novel-note-list__item">输入关键词后会在整个 Novel 工作区里搜索。</div>
@@ -797,8 +856,7 @@ export default function NovelRouter() {
             <button
               key={result.id}
               type="button"
-              className="novel-sidebar__nav-item"
-              style={{ width: '100%', textAlign: 'left' }}
+              className="novel-sidebar__nav-item novel-route-shell__modal-item"
               onClick={() => {
                 transitionNavigate(result.route)
                 setQuickSearchOpen(false)
@@ -824,13 +882,12 @@ export default function NovelRouter() {
           onChange={(event) => setChapterJumpKeyword(event.target.value)}
           placeholder="按章节号或标题筛选"
         />
-        <div className="novel-note-list" style={{ marginTop: 16 }}>
+        <div className="novel-note-list novel-route-shell__modal-list">
           {filteredChapterResults.slice(0, 20).map((chapter) => (
             <button
               key={chapter.id}
               type="button"
-              className="novel-sidebar__nav-item"
-              style={{ width: '100%', textAlign: 'left' }}
+              className="novel-sidebar__nav-item novel-route-shell__modal-item"
               onClick={() => void jumpToChapter(chapter.id)}
             >
               <span className="novel-sidebar__nav-copy">

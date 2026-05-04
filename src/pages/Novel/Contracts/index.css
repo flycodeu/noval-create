@@ -1,0 +1,47 @@
+.novel-contracts-page__chapter-select {
+  min-width: 320px;
+}
+
+.novel-contracts-page__section-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.novel-contracts-page__scene-card {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.novel-contracts-page__scene-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.novel-contracts-page__scene-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.novel-contracts-page__scene-meta {
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.novel-contracts-page__field-label {
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+@media (max-width: 768px) {
+  .novel-contracts-page__chapter-select {
+    min-width: 100%;
+    width: 100%;
+  }
+}

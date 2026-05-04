@@ -760,7 +760,7 @@ export default function CoreSettings({ novelId }: Props) {
       extra={(
         <div className="story-design__toolbar">
           <Form form={form} component={false}>
-            <Form.Item name="subplot_batch_count" style={{ marginBottom: 0 }}>
+            <Form.Item name="subplot_batch_count" className="workspace-form-item-inline">
               <InputNumber min={MIN_SUBPLOT_BATCH_COUNT} max={MAX_SUBPLOT_BATCH_COUNT} />
             </Form.Item>
           </Form>

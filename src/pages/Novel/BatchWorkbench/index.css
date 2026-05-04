@@ -1,0 +1,99 @@
+.novel-batch-workbench__snapshot-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) 1fr;
+  gap: var(--space-l);
+}
+
+.novel-batch-workbench__snapshot-list,
+.novel-batch-workbench__snapshot-detail,
+.novel-batch-workbench__section-stack,
+.novel-batch-workbench__record-list {
+  display: grid;
+  gap: var(--space-m);
+}
+
+.novel-batch-workbench__snapshot-list,
+.novel-batch-workbench__record-list {
+  gap: 10px;
+}
+
+.novel-batch-workbench__snapshot-button {
+  text-align: left;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-l);
+  background: var(--bg-surface);
+  padding: 14px;
+  cursor: pointer;
+  transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+}
+
+.novel-batch-workbench__snapshot-button:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.novel-batch-workbench__snapshot-button.is-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.novel-batch-workbench__snapshot-head,
+.novel-batch-workbench__record-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-m);
+}
+
+.novel-batch-workbench__snapshot-summary {
+  margin-top: var(--space-s);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.novel-batch-workbench__snapshot-meta,
+.novel-batch-workbench__record-meta {
+  margin-top: var(--space-s);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.novel-batch-workbench__record-note {
+  margin-top: var(--space-s);
+}
+
+.novel-batch-workbench__tag-row,
+.novel-batch-workbench__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-s);
+}
+
+.novel-batch-workbench__tag-row--spaced {
+  margin-top: 10px;
+}
+
+.novel-batch-workbench__lock-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--space-m);
+}
+
+.novel-batch-workbench__field-title {
+  display: block;
+  margin-bottom: var(--space-s);
+}
+
+.novel-batch-workbench__select--sm {
+  min-width: 140px;
+}
+
+.novel-batch-workbench__select--md {
+  min-width: 160px;
+}
+
+@media (max-width: 1080px) {
+  .novel-batch-workbench__snapshot-layout {
+    grid-template-columns: 1fr;
+  }
+}

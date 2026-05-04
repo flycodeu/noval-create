@@ -19,6 +19,7 @@ import {
   WorkspacePanel,
   WorkspaceStepGuide,
 } from '../components/WorkspaceShell'
+import './index.css'
 
 interface Props {
   novelId: number
@@ -285,15 +286,14 @@ export default function ResistancePage({ novelId }: Props) {
   }
 
   const renderCharacterList = () => (
-    <div style={{ display: 'grid', gap: 10 }}>
+    <div className="workspace-stack-10">
       {characters.map((item) => {
         const track = dashboard?.characterTracks.find((entry) => entry.sourceId === item.id)
         return (
           <button
             key={item.id}
             type="button"
-            className={`novel-list-card ${selectedCharacterId === item.id ? 'novel-list-card--active' : ''}`}
-            style={{ textAlign: 'left' }}
+            className={`novel-list-card workspace-button-card ${selectedCharacterId === item.id ? 'novel-list-card--active' : ''}`}
             onClick={() => {
               setSelectedCharacterId(item.id)
               setSearchParams((current) => {
@@ -319,15 +319,14 @@ export default function ResistancePage({ novelId }: Props) {
   )
 
   const renderFactionList = () => (
-    <div style={{ display: 'grid', gap: 10 }}>
+    <div className="workspace-stack-10">
       {factions.map((item) => {
         const track = dashboard?.factionTracks.find((entry) => entry.sourceId === item.id)
         return (
           <button
             key={item.id}
             type="button"
-            className={`novel-list-card ${selectedFactionId === item.id ? 'novel-list-card--active' : ''}`}
-            style={{ textAlign: 'left' }}
+            className={`novel-list-card workspace-button-card ${selectedFactionId === item.id ? 'novel-list-card--active' : ''}`}
             onClick={() => {
               setSelectedFactionId(item.id)
               setSearchParams((current) => {
@@ -353,13 +352,12 @@ export default function ResistancePage({ novelId }: Props) {
   )
 
   const renderStandaloneList = (items: ResistanceTrack[]) => (
-    <div style={{ display: 'grid', gap: 10 }}>
+    <div className="workspace-stack-10">
       {items.map((item) => (
         <button
           key={item.id}
           type="button"
-          className={`novel-list-card ${selectedTrackId === item.id ? 'novel-list-card--active' : ''}`}
-          style={{ textAlign: 'left' }}
+          className={`novel-list-card workspace-button-card ${selectedTrackId === item.id ? 'novel-list-card--active' : ''}`}
           onClick={() => {
             if (!item.id) return
             setSelectedTrackId(item.id)
@@ -394,7 +392,9 @@ export default function ResistancePage({ novelId }: Props) {
     return (
       <WorkspacePage title="反派与阻力系统">
         <WorkspacePanel title="正在加载">
-          <Spin />
+          <div className="novel-workspace__loading-card">
+            <Spin />
+          </div>
         </WorkspacePanel>
       </WorkspacePage>
     )
@@ -453,7 +453,7 @@ export default function ResistancePage({ novelId }: Props) {
           />
         )}
       >
-        {refreshing ? <div className="novel-dashboard__refresh-indicator" style={{ marginBottom: 16 }}><Spin size="small" /><span>正在同步阻力系统数据</span></div> : null}
+        {refreshing ? <div className="novel-dashboard__refresh-indicator novel-resistance-page__refresh"><Spin size="small" /><span>正在同步阻力系统数据</span></div> : null}
         {dashboard?.tracks.length ? null : (
           <Alert
             type="info"
@@ -463,7 +463,7 @@ export default function ResistancePage({ novelId }: Props) {
           />
         )}
 
-        <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+        <div className="novel-resistance-page__tabs">
           {[
             ['characters', '人物反派'],
             ['factions', '势力反派'],
@@ -507,64 +507,64 @@ export default function ResistancePage({ novelId }: Props) {
               <>
                 <div className="guided-step__field-grid">
                   <div className="guided-step__field-card guided-step__field-card--compact">
-                    <div style={{ marginBottom: 8, fontWeight: 600 }}>阻力标题</div>
+                    <div className="novel-resistance-page__field-label">阻力标题</div>
                     <Input value={draft.title} onChange={(event) => setDraft((current) => current ? { ...current, title: event.target.value } : current)} />
                   </div>
                   <div className="guided-step__field-card guided-step__field-card--compact">
-                    <div style={{ marginBottom: 8, fontWeight: 600 }}>当前状态</div>
+                    <div className="novel-resistance-page__field-label">当前状态</div>
                     <Select value={draft.currentStatus} onChange={(value) => setDraft((current) => current ? { ...current, currentStatus: value } : current)} options={STATUS_OPTIONS} />
                   </div>
                   <div className="guided-step__field-card">
-                    <div style={{ marginBottom: 8, fontWeight: 600 }}>阻力目标</div>
+                    <div className="novel-resistance-page__field-label">阻力目标</div>
                     <Input.TextArea rows={6} value={draft.goal} onChange={(event) => setDraft((current) => current ? { ...current, goal: event.target.value } : current)} />
                   </div>
                   <div className="guided-step__field-card">
-                    <div style={{ marginBottom: 8, fontWeight: 600 }}>情报来源</div>
+                    <div className="novel-resistance-page__field-label">情报来源</div>
                     <Input.TextArea rows={6} value={draft.intelSource} onChange={(event) => setDraft((current) => current ? { ...current, intelSource: event.target.value } : current)} />
                   </div>
                   <div className="guided-step__field-card">
-                    <div style={{ marginBottom: 8, fontWeight: 600 }}>资源池</div>
+                    <div className="novel-resistance-page__field-label">资源池</div>
                     <Input.TextArea rows={6} value={draft.resourcePool} onChange={(event) => setDraft((current) => current ? { ...current, resourcePool: event.target.value } : current)} />
                   </div>
                   <div className="guided-step__field-card">
-                    <div style={{ marginBottom: 8, fontWeight: 600 }}>升级策略</div>
+                    <div className="novel-resistance-page__field-label">升级策略</div>
                     <Input.TextArea rows={6} value={draft.escalationPlan} onChange={(event) => setDraft((current) => current ? { ...current, escalationPlan: event.target.value } : current)} />
                   </div>
                   <div className="guided-step__field-card">
-                    <div style={{ marginBottom: 8, fontWeight: 600 }}>主角认知变化</div>
+                    <div className="novel-resistance-page__field-label">主角认知变化</div>
                     <Input.TextArea rows={6} value={draft.heroKnowledgeShift} onChange={(event) => setDraft((current) => current ? { ...current, heroKnowledgeShift: event.target.value } : current)} />
                   </div>
                   <div className="guided-step__field-card">
-                    <div style={{ marginBottom: 8, fontWeight: 600 }}>阶段胜利点</div>
+                    <div className="novel-resistance-page__field-label">阶段胜利点</div>
                     <Input.TextArea rows={6} value={draft.stageVictory} onChange={(event) => setDraft((current) => current ? { ...current, stageVictory: event.target.value } : current)} />
                   </div>
                   <div className="guided-step__field-card">
-                    <div style={{ marginBottom: 8, fontWeight: 600 }}>失败后反制</div>
+                    <div className="novel-resistance-page__field-label">失败后反制</div>
                     <Input.TextArea rows={6} value={draft.counterMove} onChange={(event) => setDraft((current) => current ? { ...current, counterMove: event.target.value } : current)} />
                   </div>
                   <div className="guided-step__field-card">
-                    <div style={{ marginBottom: 8, fontWeight: 600 }}>当前出手方式</div>
+                    <div className="novel-resistance-page__field-label">当前出手方式</div>
                     <Input.TextArea rows={6} value={draft.currentPressureMode} onChange={(event) => setDraft((current) => current ? { ...current, currentPressureMode: event.target.value } : current)} />
                   </div>
                   <div className="guided-step__field-card guided-step__field-card--compact">
-                    <div style={{ marginBottom: 8, fontWeight: 600 }}>最近出手章节</div>
+                    <div className="novel-resistance-page__field-label">最近出手章节</div>
                     <Select allowClear value={draft.lastActionChapterId} onChange={(value) => setDraft((current) => current ? { ...current, lastActionChapterId: value } : current)} options={chapterOptions} />
                   </div>
                   <div className="guided-step__field-card guided-step__field-card--compact">
-                    <div style={{ marginBottom: 8, fontWeight: 600 }}>下一次升级章节</div>
+                    <div className="novel-resistance-page__field-label">下一次升级章节</div>
                     <Select allowClear value={draft.nextEscalationChapterId} onChange={(value) => setDraft((current) => current ? { ...current, nextEscalationChapterId: value } : current)} options={chapterOptions} />
                   </div>
                   <div className="guided-step__field-card guided-step__field-card--compact">
-                    <div style={{ marginBottom: 8, fontWeight: 600 }}>挂到卷级设计</div>
+                    <div className="novel-resistance-page__field-label">挂到卷级设计</div>
                     <Select allowClear value={draft.linkedVolumeId} onChange={(value) => setDraft((current) => current ? { ...current, linkedVolumeId: value } : current)} options={volumeOptions} />
                   </div>
                   <div className="guided-step__field-card">
-                    <div style={{ marginBottom: 8, fontWeight: 600 }}>备注</div>
+                    <div className="novel-resistance-page__field-label">备注</div>
                     <Input.TextArea rows={6} value={draft.notes} onChange={(event) => setDraft((current) => current ? { ...current, notes: event.target.value } : current)} />
                   </div>
                 </div>
 
-                <div style={{ marginTop: 16, display: 'grid', gap: 10 }}>
+                <div className="novel-resistance-page__beats">
                   <strong>推进记录</strong>
                   {selectedTrack?.beats.length
                     ? selectedTrack.beats.map((beat) => (
@@ -583,7 +583,7 @@ export default function ResistancePage({ novelId }: Props) {
           </WorkspacePanel>
 
           <WorkspacePanel className="novel-character-graph-panel" title="联动跳转">
-            <div style={{ display: 'grid', gap: 12 }}>
+            <div className="novel-resistance-page__links">
               {tab === 'characters' && selectedCharacterId ? (
                 <Button icon={<TeamOutlined />} onClick={() => navigate(`/novels/${novelId}/characters?characterId=${selectedCharacterId}`)}>
                   打开当前人物
@@ -614,39 +614,39 @@ export default function ResistancePage({ novelId }: Props) {
       >
         <div className="guided-step__field-grid">
           <div className="guided-step__field-card guided-step__field-card--compact">
-            <div style={{ marginBottom: 8, fontWeight: 600 }}>推进类型</div>
+            <div className="novel-resistance-page__field-label">推进类型</div>
             <Select value={beatDraft.beatType} onChange={(value) => setBeatDraft((current) => ({ ...current, beatType: value }))} options={BEAT_OPTIONS} />
           </div>
           <div className="guided-step__field-card guided-step__field-card--compact">
-            <div style={{ marginBottom: 8, fontWeight: 600 }}>章节</div>
+            <div className="novel-resistance-page__field-label">章节</div>
             <Select allowClear value={beatDraft.chapterId} onChange={(value) => setBeatDraft((current) => ({ ...current, chapterId: value }))} options={chapterOptions} />
           </div>
           <div className="guided-step__field-card guided-step__field-card--compact">
-            <div style={{ marginBottom: 8, fontWeight: 600 }}>时间轴事件</div>
+            <div className="novel-resistance-page__field-label">时间轴事件</div>
             <Select allowClear value={beatDraft.timelineEventId} onChange={(value) => setBeatDraft((current) => ({ ...current, timelineEventId: value }))} options={timelineOptions} />
           </div>
           <div className="guided-step__field-card">
-            <div style={{ marginBottom: 8, fontWeight: 600 }}>标题</div>
+            <div className="novel-resistance-page__field-label">标题</div>
             <Input value={beatDraft.title} onChange={(event) => setBeatDraft((current) => ({ ...current, title: event.target.value }))} />
           </div>
           <div className="guided-step__field-card">
-            <div style={{ marginBottom: 8, fontWeight: 600 }}>出手说明</div>
+            <div className="novel-resistance-page__field-label">出手说明</div>
             <Input.TextArea rows={6} value={beatDraft.summary} onChange={(event) => setBeatDraft((current) => ({ ...current, summary: event.target.value }))} />
           </div>
           <div className="guided-step__field-card">
-            <div style={{ marginBottom: 8, fontWeight: 600 }}>出手方式</div>
+            <div className="novel-resistance-page__field-label">出手方式</div>
             <Input.TextArea rows={6} value={beatDraft.actionMode} onChange={(event) => setBeatDraft((current) => ({ ...current, actionMode: event.target.value }))} />
           </div>
           <div className="guided-step__field-card">
-            <div style={{ marginBottom: 8, fontWeight: 600 }}>成功程度</div>
+            <div className="novel-resistance-page__field-label">成功程度</div>
             <Input value={beatDraft.successLevel} onChange={(event) => setBeatDraft((current) => ({ ...current, successLevel: event.target.value }))} />
           </div>
           <div className="guided-step__field-card">
-            <div style={{ marginBottom: 8, fontWeight: 600 }}>后续反制</div>
+            <div className="novel-resistance-page__field-label">后续反制</div>
             <Input.TextArea rows={6} value={beatDraft.counterResponse} onChange={(event) => setBeatDraft((current) => ({ ...current, counterResponse: event.target.value }))} />
           </div>
           <div className="guided-step__field-card">
-            <div style={{ marginBottom: 8, fontWeight: 600 }}>对主角影响</div>
+            <div className="novel-resistance-page__field-label">对主角影响</div>
             <Input.TextArea rows={6} value={beatDraft.protagonistImpact} onChange={(event) => setBeatDraft((current) => ({ ...current, protagonistImpact: event.target.value }))} />
           </div>
         </div>

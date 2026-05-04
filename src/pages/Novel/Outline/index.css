@@ -1,0 +1,168 @@
+.novel-outline-page__toolbar,
+.novel-outline-page__toolbar-group,
+.novel-outline-page__tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.novel-outline-page__toolbar-label,
+.novel-outline-page__muted,
+.novel-outline-page__alert-title {
+  font-size: 12px;
+}
+
+.novel-outline-page__toolbar-label {
+  color: var(--color-text-muted);
+}
+
+.novel-outline-page__count-input--sm {
+  width: 80px;
+}
+
+.novel-outline-page__count-input--md {
+  width: 92px;
+}
+
+.novel-outline-page__tag-row--top {
+  margin-top: 8px;
+}
+
+.novel-outline-page__tag-reset {
+  margin-right: 0;
+}
+
+.novel-outline-page__progress-fill {
+  height: 100%;
+  transition: width 0.3s;
+}
+
+.novel-outline-page__section-stack,
+.novel-outline-page__stack-sm,
+.novel-outline-page__stack-xs {
+  display: grid;
+  gap: 12px;
+}
+
+.novel-outline-page__stack-sm {
+  gap: 8px;
+}
+
+.novel-outline-page__stack-xs {
+  gap: 4px;
+}
+
+.novel-outline-page__section-stack--bottom {
+  margin-bottom: 16px;
+}
+
+.novel-outline-page__metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.novel-outline-page__info-panel {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.novel-outline-page__panel-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.novel-outline-page__target-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.novel-outline-page__muted {
+  opacity: 0.82;
+}
+
+.novel-outline-page__muted--light {
+  opacity: 0.72;
+}
+
+.novel-outline-page__filter-bar,
+.novel-outline-page__modal-header {
+  margin-bottom: 16px;
+}
+
+.novel-outline-page__status-select {
+  width: 140px;
+}
+
+.novel-outline-page__pagination {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+.novel-outline-page__range-row,
+.novel-outline-page__phase-fields {
+  display: flex;
+  gap: 12px;
+}
+
+.novel-outline-page__range-field,
+.novel-outline-page__phase-field--chapter {
+  flex: 1;
+}
+
+.novel-outline-page__phase-field--beat {
+  flex: 2;
+}
+
+.novel-outline-page__full-width-input {
+  width: 100%;
+}
+
+.novel-outline-page__handle-icon {
+  font-size: 12px;
+}
+
+.novel-outline-page__chapter-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.novel-outline-page__chapter-status {
+  padding: 0 4px;
+  border-width: 1px;
+  border-style: solid;
+  background: transparent;
+  font-size: 10px;
+}
+
+.novel-outline-page__chapter-summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.novel-outline-page__chapter-words {
+  margin-top: 6px;
+}
+
+@media (max-width: 768px) {
+  .novel-outline-page__range-row,
+  .novel-outline-page__phase-fields {
+    flex-direction: column;
+  }
+
+  .novel-outline-page__status-select {
+    width: 100%;
+  }
+}

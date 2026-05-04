@@ -8,6 +8,12 @@
 .novel-timeline-page__editor-form .novel-grid--2,
 .novel-timeline-page__editor-form .novel-grid--3,
 .novel-timeline-page__boolean-grid { align-items: start; }
+.novel-timeline-page__card-button { text-align: left; cursor: pointer; }
+.novel-timeline-page__alert-bottom { margin-bottom: 16px; }
+.novel-timeline-page__note-bottom { margin-bottom: 14px; }
+.novel-timeline-page__modal-hints { margin-bottom: 16px; }
+.novel-timeline-page__input-full { width: 100%; }
+.novel-timeline-page__form-item-compact { margin-bottom: 0; }
 .novel-timeline-page .rc-virtual-list-holder { padding-right: 2px; }
 
 @media (max-width: 1280px) {

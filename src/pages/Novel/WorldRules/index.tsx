@@ -49,6 +49,7 @@ import {
   useRegisterWorkspaceQualityController,
 } from '../workspace-quality-context'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
+import './index.css'
 
 interface Props {
   novelId: number
@@ -118,6 +119,20 @@ function RuleListCard({
       <div className="novel-subpanel__body">{children}</div>
     </section>
   )
+}
+
+function RuleSectionActions({ children }: { children: React.ReactNode }) {
+  return <div className="novel-world-rules-page__section-actions">{children}</div>
+}
+
+function RuleGrid({
+  columns = '2',
+  children,
+}: {
+  columns?: '2' | '3' | 'map' | 'lang'
+  children: React.ReactNode
+}) {
+  return <div className={`novel-world-rules-page__grid novel-world-rules-page__grid--${columns}`}>{children}</div>
 }
 
 function normalizeFormRules(formValues: Record<string, unknown>, genreName?: string) {
@@ -448,7 +463,7 @@ export default function WorldRules({ novelId }: Props) {
         <Form.List name="powerSystems">
           {(fields, { add, remove }) => (
             <>
-              <div style={{ marginBottom: 12 }}>
+              <RuleSectionActions>
                 <Space>
                   <Button icon={<PlusOutlined />} onClick={() => add({ appliesTo: [], levels: [] })}>添加体系</Button>
                   {isFantasyGenre && (
@@ -457,7 +472,7 @@ export default function WorldRules({ novelId }: Props) {
                     </Button>
                   )}
                 </Space>
-              </div>
+              </RuleSectionActions>
               {fields.map((field, index) => (
                 <RuleListCard
                   key={field.key}
@@ -501,23 +516,23 @@ export default function WorldRules({ novelId }: Props) {
           <Form.List name="speciesSystem">
             {(fields, { add, remove }) => (
               <>
-                <div style={{ marginBottom: 12 }}>
+                <RuleSectionActions>
                   <Button icon={<PlusOutlined />} onClick={() => add({ traits: [], commonIdentities: [] })}>添加种族</Button>
-                </div>
+                </RuleSectionActions>
                 {fields.map((field, index) => (
                   <RuleListCard
                     key={field.key}
                     title={`种族 ${index + 1}`}
                     extra={<Button type="text" danger icon={<DeleteOutlined />} onClick={() => remove(field.name)} />}
                   >
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <RuleGrid columns="2">
                       <Form.Item name={[field.name, 'name']} label="名称" rules={[{ required: true, message: '请输入名称' }]}>
                         <Input placeholder="例如：人类、夜行者、山海异种" />
                       </Form.Item>
                       <Form.Item name={[field.name, 'entityType']} label="实体类型">
                         <Select options={ENTITY_TYPE_OPTIONS} />
                       </Form.Item>
-                    </div>
+                    </RuleGrid>
                     <Form.Item name={[field.name, 'summary']} label="概述">
                       <Input.TextArea rows={6} placeholder="写清这个实体在世界里的定位和存在方式。" />
                     </Form.Item>
@@ -543,7 +558,7 @@ export default function WorldRules({ novelId }: Props) {
           <Form.List name="factionSystem">
             {(fields, { add, remove }) => (
               <>
-                <div style={{ marginBottom: 12 }}>
+                <RuleSectionActions>
                   <Space>
                     <Button icon={<PlusOutlined />} onClick={() => add({ notableSites: [] })}>添加势力</Button>
                     {isFantasyGenre && (
@@ -552,21 +567,21 @@ export default function WorldRules({ novelId }: Props) {
                       </Button>
                     )}
                   </Space>
-                </div>
+                </RuleSectionActions>
                 {fields.map((field, index) => (
                   <RuleListCard
                     key={field.key}
                     title={`势力 ${index + 1}`}
                     extra={<Button type="text" danger icon={<DeleteOutlined />} onClick={() => remove(field.name)} />}
                   >
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <RuleGrid columns="2">
                       <Form.Item name={[field.name, 'name']} label="势力名称" rules={[{ required: true, message: '请输入势力名称' }]}>
                         <Input placeholder="例如：监察司、九曜宗、北境军团" />
                       </Form.Item>
                       <Form.Item name={[field.name, 'factionType']} label="势力类型">
                         <Input placeholder="例如：宗门、官方机构、商会、军团" />
                       </Form.Item>
-                    </div>
+                    </RuleGrid>
                     <Form.Item name={[field.name, 'summary']} label="概述">
                       <Input.TextArea rows={6} placeholder="概括这个势力的定位、立场和影响力。" />
                     </Form.Item>
@@ -604,16 +619,16 @@ export default function WorldRules({ novelId }: Props) {
           <Form.List name={['characterEcology', 'slots']}>
             {(fields, { add, remove }) => (
               <>
-                <div style={{ marginBottom: 12 }}>
+                <RuleSectionActions>
                   <Button icon={<PlusOutlined />} onClick={() => add({ preferredFactions: [], powerBias: [] })}>添加槽位</Button>
-                </div>
+                </RuleSectionActions>
                 {fields.map((field, index) => (
                   <RuleListCard
                     key={field.key}
                     title={`槽位 ${index + 1}`}
                     extra={<Button type="text" danger icon={<DeleteOutlined />} onClick={() => remove(field.name)} />}
                   >
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+                    <RuleGrid columns="3">
                       <Form.Item name={[field.name, 'label']} label="槽位名称" rules={[{ required: true, message: '请输入槽位名称' }]}>
                         <Input placeholder="例如：主视角、压迫源、关系纽带" />
                       </Form.Item>
@@ -623,7 +638,7 @@ export default function WorldRules({ novelId }: Props) {
                       <Form.Item name={[field.name, 'species']} label="对应种族">
                         <Input placeholder="例如：人类、异裔、长生种" />
                       </Form.Item>
-                    </div>
+                    </RuleGrid>
                     <Form.Item name={[field.name, 'narrativeFunction']} label="叙事功能">
                       <Input.TextArea rows={6} placeholder="写清这个槽位在主线里承担什么作用。" />
                     </Form.Item>
@@ -655,26 +670,26 @@ export default function WorldRules({ novelId }: Props) {
           <Form.List name={['mapBlueprint', 'levels']}>
             {(fields, { add, remove }) => (
               <>
-                <div style={{ marginBottom: 12 }}>
+                <RuleSectionActions>
                   <Button icon={<PlusOutlined />} onClick={() => add({ nodeTypes: [], examples: [], suggestedCount: 3 })}>添加层级</Button>
-                </div>
+                </RuleSectionActions>
                 {fields.map((field, index) => (
                   <RuleListCard
                     key={field.key}
                     title={`层级 ${index + 1}`}
                     extra={<Button type="text" danger icon={<DeleteOutlined />} onClick={() => remove(field.name)} />}
                   >
-                    <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr 140px', gap: 12 }}>
+                    <RuleGrid columns="map">
                       <Form.Item name={[field.name, 'depth']} label="层级深度">
-                        <InputNumber min={1} style={{ width: '100%' }} />
+                        <InputNumber min={1} className="novel-world-rules-page__full-width-input" />
                       </Form.Item>
                       <Form.Item name={[field.name, 'label']} label="层级名称" rules={[{ required: true, message: '请输入层级名称' }]}>
                         <Input placeholder="例如：国家、区域、据点、场景" />
                       </Form.Item>
                       <Form.Item name={[field.name, 'suggestedCount']} label="建议数量">
-                        <InputNumber min={1} max={12} style={{ width: '100%' }} />
+                        <InputNumber min={1} max={12} className="novel-world-rules-page__full-width-input" />
                       </Form.Item>
-                    </div>
+                    </RuleGrid>
                     <Form.Item name={[field.name, 'nodeTypes']} label="节点类型">
                       <Select mode="tags" placeholder="输入节点类型后回车" />
                     </Form.Item>
@@ -705,23 +720,23 @@ export default function WorldRules({ novelId }: Props) {
           <Form.List name={['worldDynamics', 'climateCycles']}>
             {(fields, { add, remove }) => (
               <>
-                <div style={{ marginBottom: 12 }}>
+                <RuleSectionActions>
                   <Button icon={<PlusOutlined />} onClick={() => add({})}>添加气候周期</Button>
-                </div>
+                </RuleSectionActions>
                 {fields.map((field, index) => (
                   <RuleListCard
                     key={field.key}
                     title={`气候 ${index + 1}`}
                     extra={<Button type="text" danger icon={<DeleteOutlined />} onClick={() => remove(field.name)} />}
                   >
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <RuleGrid columns="2">
                       <Form.Item name={[field.name, 'region']} label="作用区域" rules={[{ required: true, message: '请输入作用区域' }]}>
                         <Input placeholder="例如：北境边关、沿江工业带、山门外坊市" />
                       </Form.Item>
                       <Form.Item name={[field.name, 'pattern']} label="常态气候">
                         <Input placeholder="例如：冬长夏短、雨季漫长、灵潮不稳" />
                       </Form.Item>
-                    </div>
+                    </RuleGrid>
                     <Form.Item name={[field.name, 'seasonalShift']} label="季节变化">
                       <Input.TextArea rows={6} placeholder="写清一年中哪些阶段最影响远行、作战、闭关、调查或生产。" />
                     </Form.Item>
@@ -744,23 +759,23 @@ export default function WorldRules({ novelId }: Props) {
           <Form.List name={['worldDynamics', 'economyLoops']}>
             {(fields, { add, remove }) => (
               <>
-                <div style={{ marginBottom: 12 }}>
+                <RuleSectionActions>
                   <Button icon={<PlusOutlined />} onClick={() => add({})}>添加经济循环</Button>
-                </div>
+                </RuleSectionActions>
                 {fields.map((field, index) => (
                   <RuleListCard
                     key={field.key}
                     title={`经济 ${index + 1}`}
                     extra={<Button type="text" danger icon={<DeleteOutlined />} onClick={() => remove(field.name)} />}
                   >
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <RuleGrid columns="2">
                       <Form.Item name={[field.name, 'name']} label="循环名称" rules={[{ required: true, message: '请输入循环名称' }]}>
                         <Input placeholder="例如：灵石坊市链、沿江货运线、冬粮征收链" />
                       </Form.Item>
                       <Form.Item name={[field.name, 'coreResource']} label="核心资源">
                         <Input placeholder="例如：灵石、药材、弹药、港口配额、粮税" />
                       </Form.Item>
-                    </div>
+                    </RuleGrid>
                     <Form.Item name={[field.name, 'circulationPath']} label="流通路径">
                       <Input.TextArea rows={6} placeholder="写清资源从哪里来，经由哪些中转，最后流向谁。" />
                     </Form.Item>
@@ -789,7 +804,7 @@ export default function WorldRules({ novelId }: Props) {
       label: '时间规则',
       children: (
         <>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+          <RuleGrid columns="3">
             <Form.Item name={['timelineConfig', 'calendarType']} label="时间制度">
               <Select options={CALENDAR_OPTIONS} allowClear />
             </Form.Item>
@@ -799,15 +814,15 @@ export default function WorldRules({ novelId }: Props) {
             <Form.Item name={['timelineConfig', 'epochLabel']} label="纪元标签">
               <Input placeholder="例如：灾变后、王历、玄曜纪" />
             </Form.Item>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          </RuleGrid>
+          <RuleGrid columns="2">
             <Form.Item name={['timelineConfig', 'baseYearLabel']} label="起始年份">
               <Input placeholder="例如：元年、2026、王历元年" />
             </Form.Item>
             <Form.Item name={['timelineConfig', 'relativeZeroLabel']} label="时间零点">
               <Input placeholder="例如：故事开始前、爆发当日、新王登基前" />
             </Form.Item>
-          </div>
+          </RuleGrid>
           <Form.Item name={['timelineConfig', 'displayPattern']} label="显示格式">
             <Input.TextArea rows={6} placeholder="例如：王历 X 年 / 雪月 / 战后第 N 周" />
           </Form.Item>
@@ -825,21 +840,21 @@ export default function WorldRules({ novelId }: Props) {
       label: '文风约束',
       children: (
         <>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(180px, 1fr))', gap: 12, marginBottom: 16 }}>
-            <Card size="small" style={{ background: 'var(--color-bg-card)' }}>
-              <Form.Item name={['writingConstraints', 'antiQuoteEmphasis']} label="避免引号强调" valuePropName="checked" style={{ marginBottom: 0 }}><Switch /></Form.Item>
+          <div className="novel-world-rules-page__language-cards">
+            <Card size="small" className="novel-world-rules-page__language-card">
+              <Form.Item name={['writingConstraints', 'antiQuoteEmphasis']} label="避免引号强调" valuePropName="checked" className="novel-world-rules-page__compact-form-item"><Switch /></Form.Item>
             </Card>
-            <Card size="small" style={{ background: 'var(--color-bg-card)' }}>
-              <Form.Item name={['writingConstraints', 'antiConceptSlogans']} label="避免概念口号" valuePropName="checked" style={{ marginBottom: 0 }}><Switch /></Form.Item>
+            <Card size="small" className="novel-world-rules-page__language-card">
+              <Form.Item name={['writingConstraints', 'antiConceptSlogans']} label="避免概念口号" valuePropName="checked" className="novel-world-rules-page__compact-form-item"><Switch /></Form.Item>
             </Card>
-            <Card size="small" style={{ background: 'var(--color-bg-card)' }}>
-              <Form.Item name={['writingConstraints', 'antiSymmetricLines']} label="避免对称排比" valuePropName="checked" style={{ marginBottom: 0 }}><Switch /></Form.Item>
+            <Card size="small" className="novel-world-rules-page__language-card">
+              <Form.Item name={['writingConstraints', 'antiSymmetricLines']} label="避免对称排比" valuePropName="checked" className="novel-world-rules-page__compact-form-item"><Switch /></Form.Item>
             </Card>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <RuleGrid columns="lang">
             <Form.Item name={['writingConstraints', 'realismLevel']} label="真实度层级"><Select options={REALISM_LEVEL_OPTIONS} placeholder="选择文本真实度基线" /></Form.Item>
             <Form.Item name={['writingConstraints', 'forbiddenPhrases']} label="禁用 AI 腔"><Select mode="tags" placeholder="输入禁用表达后回车" /></Form.Item>
-          </div>
+          </RuleGrid>
           <Form.Item name={['writingConstraints', 'narrationStyle']} label="叙述风格"><Input.TextArea rows={6} placeholder="写清叙述应偏冷静、克制、直接还是抒情。" /></Form.Item>
           <Form.Item name={['writingConstraints', 'dialogueStyle']} label="对话风格"><Input.TextArea rows={6} placeholder="写清人物说话的语气、节奏和用词边界。" /></Form.Item>
           <Form.Item name={['writingConstraints', 'sciencePolicy']} label="科学边界"><Input.TextArea rows={6} placeholder="例如现代题材先守现实常识，幻想题材明确哪些超常现象成立。" /></Form.Item>
@@ -897,19 +912,19 @@ export default function WorldRules({ novelId }: Props) {
     >
       {generationProgress ? (
         <Alert
+          className="novel-world-rules-page__status-block"
           type={getProgressType(generationProgress)}
           showIcon
           message={`${generationProgress.label} - ${generationProgress.status === 'failed' ? '失败' : generationProgress.status === 'success' ? '已完成' : '生成中'}`}
-          description={<div style={{ display: 'grid', gap: 12 }}><Progress percent={generationPercent} size="small" status={generationProgress.status === 'failed' ? 'exception' : generationProgress.status === 'success' && generationProgress.completed >= generationProgress.total ? 'success' : 'active'} /><div>{generationProgress.detail || '正在处理当前分区...'}</div>{generationProgress.warning ? <div>{generationProgress.warning}</div> : null}</div>}
-          style={{ marginBottom: 18 }}
+          description={<div className="novel-world-rules-page__progress-copy"><Progress percent={generationPercent} size="small" status={generationProgress.status === 'failed' ? 'exception' : generationProgress.status === 'success' && generationProgress.completed >= generationProgress.total ? 'success' : 'active'} /><div>{generationProgress.detail || '正在处理当前分区...'}</div>{generationProgress.warning ? <div>{generationProgress.warning}</div> : null}</div>}
         />
       ) : tokenCount > 1400 ? (
-        <Alert type="warning" message={`当前世界规则约 ${tokenCount} token，建议后续优先按分区生成。`} showIcon style={{ marginBottom: 18 }} />
+        <Alert className="novel-world-rules-page__status-block" type="warning" message={`当前世界规则约 ${tokenCount} token，建议后续优先按分区生成。`} showIcon />
       ) : (
-        <div className="novel-pill" style={{ marginBottom: 18 }}>{tokenCount > 0 ? `当前规则体量约 ${tokenCount} token` : '当前规则体量尚未形成'}</div>
+        <div className="novel-pill novel-world-rules-page__status-pill">{tokenCount > 0 ? `当前规则体量约 ${tokenCount} token` : '当前规则体量尚未形成'}</div>
       )}
       <WorkspacePanel title="后台连续生成" extra={autoTaskActions}>
-        <div style={{ display: 'grid', gap: 12 }}>
+        <div className="novel-world-rules-page__progress-copy">
           <Alert
             type={autoTask?.status === 'failed' ? 'error' : autoTask?.status === 'paused' ? 'warning' : autoTask?.status === 'success' ? 'success' : 'info'}
             showIcon

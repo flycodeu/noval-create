@@ -679,12 +679,12 @@ function StyleLearningPanel({ novelId }: { novelId: number }) {
     <WorkspacePanel
       title="风格学习"
     >
-      <div style={{ display: 'grid', gap: 16 }}>
+      <div className="workspace-stack-16">
         <Input
           placeholder={'风格名称，如"张三丰·冷硬派"'}
           value={fingerprintName}
           onChange={(e) => setFingerprintName(e.target.value)}
-          style={{ maxWidth: 400 }}
+          className="workspace-max-400"
         />
         <Input.TextArea
           rows={8}
@@ -702,14 +702,14 @@ function StyleLearningPanel({ novelId }: { novelId: number }) {
           >
             分析并生成风格指纹
           </Button>
-          <span style={{ marginLeft: 12, fontSize: 12, opacity: 0.6 }}>
+          <span className="workspace-text-small workspace-text-muted workspace-margin-left-12">
             {referenceText.length} 字
           </span>
         </div>
 
         {fingerprints.length > 0 ? (
           <div>
-            <div style={{ fontWeight: 500, marginBottom: 8 }}>已保存的风格指纹</div>
+            <div className="workspace-text-strong workspace-margin-bottom-8">已保存的风格指纹</div>
             <List
               size="small"
               dataSource={fingerprints}

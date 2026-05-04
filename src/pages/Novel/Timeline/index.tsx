@@ -248,7 +248,7 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
       )}
     >
       {workspace.refreshing ? (
-        <div className="novel-dashboard__refresh-indicator" style={{ marginBottom: 16 }}>
+        <div className="novel-dashboard__refresh-indicator novel-workspace__refresh">
           <Spin size="small" />
           <span>正在同步时间轴工作台</span>
         </div>
@@ -294,7 +294,7 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
               <Tag color="processing">批量工具条</Tag>
               <Select
                 value={batchStatus}
-                style={{ width: 160 }}
+                className="workspace-control-160"
                 options={[
                   { value: 'planned', label: '待规划' },
                   { value: 'seeded', label: '已埋点' },
@@ -306,7 +306,7 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
               <Button onClick={() => void handleBatchStatusUpdate()}>批量改状态</Button>
               <Select
                 value={batchMajorEvent}
-                style={{ width: 160 }}
+                className="workspace-control-160"
                 options={[
                   { value: 1, label: '标记重大事件' },
                   { value: 0, label: '标记普通事件' },

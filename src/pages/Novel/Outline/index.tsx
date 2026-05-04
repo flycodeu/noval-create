@@ -18,6 +18,7 @@ import { generateOutlineArcDraft } from '../shared/planning-ai-service'
 import { getUserFacingMessage } from '@/utils/user-facing-message'
 import { WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
+import './index.css'
 
 interface Props { novelId: number }
 interface ArcFormValues {
@@ -535,14 +536,14 @@ export default function Outline({ novelId }: Props) {
       eyebrow="故事大纲"
       title="故事大纲"
       actions={(
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="novel-outline-page__toolbar">
           <Button icon={<RobotOutlined />} loading={generating} onClick={() => void handleGenerateArcs()}>AI 生成故事弧</Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>新建故事弧</Button>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>单批</span>
-            <InputNumber min={1} max={6} value={outlineBatchSize} onChange={(value) => setOutlineBatchSize(Number(value) || 4)} style={{ width: 80 }} />
-            <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>本轮总数</span>
-            <InputNumber min={1} max={24} value={outlineTargetCount} onChange={(value) => setOutlineTargetCount(Number(value) || 8)} style={{ width: 92 }} />
+          <div className="novel-outline-page__toolbar-group">
+            <span className="novel-outline-page__toolbar-label">单批</span>
+            <InputNumber min={1} max={6} value={outlineBatchSize} onChange={(value) => setOutlineBatchSize(Number(value) || 4)} className="novel-outline-page__count-input novel-outline-page__count-input--sm" />
+            <span className="novel-outline-page__toolbar-label">本轮总数</span>
+            <InputNumber min={1} max={24} value={outlineTargetCount} onChange={(value) => setOutlineTargetCount(Number(value) || 8)} className="novel-outline-page__count-input novel-outline-page__count-input--md" />
           </div>
           <Button danger icon={<DeleteOutlined />} onClick={() => void handleClear()}>清空</Button>
         </div>
@@ -594,20 +595,20 @@ export default function Outline({ novelId }: Props) {
                       {arc.costLedger ? <div className="novel-outline-arc__desc">代价账本：{arc.costLedger}</div> : null}
                       <div className="novel-outline-arc__desc">{missingOutlineCount > 0 ? `待补细纲：${missingOutlineCount} 章` : '当前故事弧细纲已补齐'}</div>
                       {arcSummary ? (
-                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
-                          <Tag color={arcSummary.progressRate >= 40 ? 'success' : arcSummary.progressRate >= 25 ? 'warning' : 'error'} style={{ marginRight: 0 }}>
+                        <div className="novel-outline-page__tag-row novel-outline-page__tag-row--top">
+                          <Tag color={arcSummary.progressRate >= 40 ? 'success' : arcSummary.progressRate >= 25 ? 'warning' : 'error'} className="novel-outline-page__tag-reset">
                             推进率 {arcSummary.progressRate}%
                           </Tag>
-                          <Tag color={arcSummary.stallRate >= 70 ? 'error' : arcSummary.stallRate >= 50 ? 'warning' : 'default'} style={{ marginRight: 0 }}>
+                          <Tag color={arcSummary.stallRate >= 70 ? 'error' : arcSummary.stallRate >= 50 ? 'warning' : 'default'} className="novel-outline-page__tag-reset">
                             空转率 {arcSummary.stallRate}%
                           </Tag>
-                          <Tag color={arcSummary.missedPhaseCount > 0 ? 'error' : arcSummary.hitPhaseCount > 0 ? 'processing' : 'default'} style={{ marginRight: 0 }}>
+                          <Tag color={arcSummary.missedPhaseCount > 0 ? 'error' : arcSummary.hitPhaseCount > 0 ? 'processing' : 'default'} className="novel-outline-page__tag-reset">
                             阶段 {arcSummary.hitPhaseCount}/{arcSummary.phaseTargets.length}
                           </Tag>
-                          {arcSummary.alerts.length > 0 ? <Tag color="error" style={{ marginRight: 0 }}>{arcSummary.alerts.length} 条告警</Tag> : null}
+                          {arcSummary.alerts.length > 0 ? <Tag color="error" className="novel-outline-page__tag-reset">{arcSummary.alerts.length} 条告警</Tag> : null}
                         </div>
                       ) : null}
-                      <div className="novel-outline-arc__progress"><div style={{ width: `${progressPercent}%`, height: '100%', background: progressPercent === 100 ? '#4f8b64' : '#8f6330', transition: 'width 0.3s' }} /></div>
+                      <div className="novel-outline-arc__progress"><div className="novel-outline-page__progress-fill" style={{ width: `${progressPercent}%`, background: progressPercent === 100 ? '#4f8b64' : '#8f6330' }} /></div>
                       <div className="novel-outline-arc__progress-label">{completedCount}/{arcChapters.length} 章完成</div>
                       <div className="novel-outline-arc__actions" onClick={(event) => event.stopPropagation()}>
                         <Button size="small" icon={<RobotOutlined />} loading={generating} disabled={missingOutlineCount <= 0} onClick={() => void handleGenerateChapterOutlines(arc.id)}>{arcChapters.some((chapter) => chapter.outline?.trim()) ? '继续生成' : '生成细纲'}</Button>
@@ -629,8 +630,8 @@ export default function Outline({ novelId }: Props) {
             ) : (
               <>
                 {expandedArcSummary ? (
-                  <div style={{ display: 'grid', gap: 12, marginBottom: 16 }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+                  <div className="novel-outline-page__section-stack novel-outline-page__section-stack--bottom">
+                    <div className="novel-outline-page__metric-grid">
                       <div className="novel-filter-card">
                         <div className="novel-filter-card__label">已记录推进</div>
                         <div className="novel-filter-card__value">{expandedArcSummary.progressPercent}%</div>
@@ -647,32 +648,32 @@ export default function Outline({ novelId }: Props) {
                         <div className="novel-filter-card__hint">未兑现 {expandedArcSummary.missedPhaseCount} 个</div>
                       </div>
                     </div>
-                    <div style={{ display: 'grid', gap: 8, padding: '12px 14px', borderRadius: 12, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
-                      <div style={{ fontWeight: 600 }}>阶段目标</div>
-                      <div style={{ display: 'grid', gap: 8 }}>
+                    <div className="novel-outline-page__info-panel">
+                      <div className="novel-outline-page__panel-title">阶段目标</div>
+                      <div className="novel-outline-page__stack-sm">
                         {expandedArcSummary.phaseTargets.map((target) => (
-                          <div key={`${expandedArcSummary.arcId}-${target.key}`} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-                            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                              <Tag color={target.source === 'manual' ? 'processing' : 'default'} style={{ marginRight: 0 }}>{target.label}</Tag>
-                              <span style={{ fontSize: 12, opacity: 0.72 }}>目标章节：{target.targetChapterNum || '自动推导'}</span>
+                          <div key={`${expandedArcSummary.arcId}-${target.key}`} className="novel-outline-page__target-row">
+                            <div className="novel-outline-page__tag-row">
+                              <Tag color={target.source === 'manual' ? 'processing' : 'default'} className="novel-outline-page__tag-reset">{target.label}</Tag>
+                              <span className="novel-outline-page__muted novel-outline-page__muted--light">目标章节：{target.targetChapterNum || '自动推导'}</span>
                             </div>
-                            <span style={{ fontSize: 12, opacity: 0.82 }}>{target.expectedBeat || '未填写验收条件，默认按推进与兑现判断。'}</span>
+                            <span className="novel-outline-page__muted">{target.expectedBeat || '未填写验收条件，默认按推进与兑现判断。'}</span>
                           </div>
                         ))}
                       </div>
                     </div>
                     {expandedArcAlerts.length > 0 ? (
-                      <div style={{ display: 'grid', gap: 8, padding: '12px 14px', borderRadius: 12, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
-                        <div style={{ fontWeight: 600 }}>推进告警</div>
+                      <div className="novel-outline-page__info-panel">
+                        <div className="novel-outline-page__panel-title">推进告警</div>
                         {expandedArcAlerts.slice(0, 4).map((alert, index) => (
-                          <div key={`${alert.code}-${index}`} style={{ display: 'grid', gap: 4 }}>
-                            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                              <Tag color={alert.severity === 'critical' ? 'error' : alert.severity === 'warning' ? 'warning' : 'default'} style={{ marginRight: 0 }}>
+                          <div key={`${alert.code}-${index}`} className="novel-outline-page__stack-xs">
+                            <div className="novel-outline-page__tag-row">
+                              <Tag color={alert.severity === 'critical' ? 'error' : alert.severity === 'warning' ? 'warning' : 'default'} className="novel-outline-page__tag-reset">
                                 {alert.severity === 'critical' ? '高优先' : alert.severity === 'warning' ? '中优先' : '低优先'}
                               </Tag>
-                              <span style={{ fontSize: 12, fontWeight: 600 }}>{alert.title}</span>
+                              <span className="novel-outline-page__alert-title">{alert.title}</span>
                             </div>
-                            <div style={{ fontSize: 12, opacity: 0.72 }}>{alert.detail}</div>
+                            <div className="novel-outline-page__muted novel-outline-page__muted--light">{alert.detail}</div>
                           </div>
                         ))}
                       </div>
@@ -680,12 +681,12 @@ export default function Outline({ novelId }: Props) {
                   </div>
                 ) : null}
                 {selectedChapterIds.length > 0 ? (
-                  <div className="novel-filter-bar" style={{ marginBottom: 16 }}>
+                  <div className="novel-filter-bar novel-outline-page__filter-bar">
                     <div className="novel-filter-bar__row">
                       <Tag color="processing">{`已选 ${selectedChapterIds.length} 章`}</Tag>
                       <Select
                         value={batchStatus}
-                        style={{ width: 140 }}
+                        className="novel-outline-page__status-select"
                         onChange={(value: Chapter['status']) => setBatchStatus(value)}
                         options={Object.entries(STATUS_LABELS).map(([value, meta]) => ({ value, label: meta.label }))}
                       />
@@ -742,7 +743,7 @@ export default function Outline({ novelId }: Props) {
                 </div>
                 )}
                 {expandedArcChapters.length > OUTLINE_CHAPTER_PAGE_SIZE ? (
-                  <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
+                  <div className="novel-outline-page__pagination">
                     <Pagination
                       current={expandedChapterPage}
                       pageSize={OUTLINE_CHAPTER_PAGE_SIZE}
@@ -759,30 +760,30 @@ export default function Outline({ novelId }: Props) {
       )}
 
       <Modal title={editingArc ? '编辑故事弧' : '新建故事弧'} open={arcModalOpen} forceRender onCancel={() => { setArcModalOpen(false); arcForm.resetFields(); setEditingArc(null) }} onOk={() => void handleSaveArc()} okText="保存">
-        <div style={{ marginBottom: 12 }}>
+        <div className="novel-outline-page__modal-header">
           {arcDraftButton}
         </div>
         <Form form={arcForm} layout="vertical">
           <Form.Item name="arcName" label="名称" rules={[{ required: true, message: '请填写故事弧名称' }]}><Input placeholder="例如：觉醒线、南境追击线" /></Form.Item>
-          <div style={{ display: 'flex', gap: 12 }}>
-            <Form.Item name="chapterStart" label="起始章节" style={{ flex: 1 }}><Input type="number" min={1} /></Form.Item>
-            <Form.Item name="chapterEnd" label="结束章节" style={{ flex: 1 }}><Input type="number" min={1} /></Form.Item>
+          <div className="novel-outline-page__range-row">
+            <Form.Item name="chapterStart" label="起始章节" className="novel-outline-page__range-field"><Input type="number" min={1} /></Form.Item>
+            <Form.Item name="chapterEnd" label="结束章节" className="novel-outline-page__range-field"><Input type="number" min={1} /></Form.Item>
           </div>
           <Form.Item name="arcGoal" label="本弧目标"><Input.TextArea rows={6} placeholder="写清这一弧要推进什么" /></Form.Item>
           <Form.Item name="arcSummary" label="本弧概述"><Input.TextArea rows={5} placeholder="写清起点、转折和阶段收束" /></Form.Item>
           <Form.Item name="growthLedger" label="成长账本"><Input.TextArea rows={6} placeholder="写清这一弧主角具体获得了什么变化" /></Form.Item>
           <Form.Item name="costLedger" label="代价账本"><Input.TextArea rows={6} placeholder="写清这一弧具体付出了什么代价" /></Form.Item>
-          <div style={{ display: 'grid', gap: 12 }}>
-            <div style={{ fontWeight: 600, fontSize: 13 }}>阶段目标覆盖</div>
-            <div style={{ fontSize: 12, opacity: 0.72 }}>默认按章节范围自动推导 25% / 50% / 75% / 收束；只有你填写的内容才会作为覆盖配置保存。</div>
+          <div className="novel-outline-page__section-stack">
+            <div className="novel-outline-page__panel-title">阶段目标覆盖</div>
+            <div className="novel-outline-page__muted novel-outline-page__muted--light">默认按章节范围自动推导 25% / 50% / 75% / 收束；只有你填写的内容才会作为覆盖配置保存。</div>
             {PHASE_FIELD_CONFIG.map((phase) => (
-              <div key={phase.key} style={{ display: 'grid', gap: 8, padding: '12px 14px', borderRadius: 12, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
-                <div style={{ fontWeight: 600 }}>{phase.label}</div>
-                <div style={{ display: 'flex', gap: 12 }}>
-                  <Form.Item name={phase.chapterField} label="目标章节" style={{ flex: 1, marginBottom: 0 }}>
-                    <InputNumber min={1} style={{ width: '100%' }} placeholder="留空则自动推导" />
+              <div key={phase.key} className="novel-outline-page__info-panel">
+                <div className="novel-outline-page__panel-title">{phase.label}</div>
+                <div className="novel-outline-page__phase-fields">
+                  <Form.Item name={phase.chapterField} label="目标章节" className="novel-outline-page__phase-field novel-outline-page__phase-field--chapter">
+                    <InputNumber min={1} className="novel-outline-page__full-width-input" placeholder="留空则自动推导" />
                   </Form.Item>
-                  <Form.Item name={phase.beatField} label="验收条件" style={{ flex: 2, marginBottom: 0 }}>
+                  <Form.Item name={phase.beatField} label="验收条件" className="novel-outline-page__phase-field novel-outline-page__phase-field--beat">
                     <Input placeholder="例如：主线真相第一次被证实、关系彻底翻面" />
                   </Form.Item>
                 </div>
@@ -814,22 +815,22 @@ function ChapterCard({
       className={`novel-outline-chapter-card ${selected ? 'novel-outline-chapter-card--selected' : ''}`}
       onClick={onClick}
     >
-      <div {...dragHandleProps} className="novel-outline-chapter-card__handle"><HolderOutlined style={{ fontSize: 12 }} /></div>
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div {...dragHandleProps} className="novel-outline-chapter-card__handle"><HolderOutlined className="novel-outline-page__handle-icon" /></div>
+      <div className="novel-outline-page__chapter-main">
         <div className="novel-outline-chapter-card__meta">
           <span className="novel-outline-chapter-card__number">第 {chapter.chapterNum} 章</span>
-          <Tag style={{ background: 'transparent', border: `1px solid ${status.color}`, color: status.color, fontSize: 10, padding: '0 4px' }}>{status.label}</Tag>
+          <Tag className="novel-outline-page__chapter-status" style={{ borderColor: status.color, color: status.color }}>{status.label}</Tag>
         </div>
         <div className="novel-outline-chapter-card__title">{chapter.title || `第 ${chapter.chapterNum} 章`}</div>
-        {chapter.outline ? <div className="novel-outline-chapter-card__summary" style={{ overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{chapter.outline}</div> : null}
+        {chapter.outline ? <div className="novel-outline-chapter-card__summary novel-outline-page__chapter-summary">{chapter.outline}</div> : null}
         {arcPoint ? (
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
-            <Tag color={arcPoint.progressHit ? 'success' : 'default'} style={{ marginRight: 0 }}>{arcPoint.progressHit ? '推进章' : '空转章'}</Tag>
-            {arcPoint.checkpointPhaseLabels.map((label) => <Tag key={`${chapter.id}-${label}`} color={arcPoint.progressHit ? 'processing' : 'warning'} style={{ marginRight: 0 }}>{label}</Tag>)}
-            {arcPoint.alertDetails.length > 0 ? <Tag color="error" style={{ marginRight: 0 }}>{arcPoint.alertDetails.length} 条告警</Tag> : null}
+          <div className="novel-outline-page__tag-row novel-outline-page__tag-row--top">
+            <Tag color={arcPoint.progressHit ? 'success' : 'default'} className="novel-outline-page__tag-reset">{arcPoint.progressHit ? '推进章' : '空转章'}</Tag>
+            {arcPoint.checkpointPhaseLabels.map((label) => <Tag key={`${chapter.id}-${label}`} color={arcPoint.progressHit ? 'processing' : 'warning'} className="novel-outline-page__tag-reset">{label}</Tag>)}
+            {arcPoint.alertDetails.length > 0 ? <Tag color="error" className="novel-outline-page__tag-reset">{arcPoint.alertDetails.length} 条告警</Tag> : null}
           </div>
         ) : null}
-        <div className="novel-outline-chapter-card__words" style={{ marginTop: 6 }}>{chapter.wordCount ?? 0} / {chapter.targetWords ?? 0} 字</div>
+        <div className="novel-outline-chapter-card__words novel-outline-page__chapter-words">{chapter.wordCount ?? 0} / {chapter.targetWords ?? 0} 字</div>
       </div>
     </div>
   )

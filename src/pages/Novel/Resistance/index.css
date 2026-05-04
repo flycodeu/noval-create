@@ -1,0 +1,28 @@
+.novel-resistance-page__refresh {
+  margin-bottom: 16px;
+}
+
+.novel-resistance-page__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.novel-resistance-page__field-label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 600;
+  color: var(--workspace-ink, var(--text-primary));
+}
+
+.novel-resistance-page__beats {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.novel-resistance-page__links {
+  display: grid;
+  gap: 12px;
+}

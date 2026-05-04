@@ -122,31 +122,27 @@ function TaskStrip({
 
   return (
     <section
-      className={className}
+      className={`${className} map-graph-callout`}
       style={{
         border: `1px solid ${palette.border}`,
-        borderRadius: 24,
-        background: 'var(--map-callout-surface)',
         boxShadow: `0 18px 34px ${palette.glow}`,
-        backdropFilter: 'blur(10px)',
-        padding: 18,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-        <div style={{ minWidth: 0, flex: '1 1 420px', display: 'grid', gap: 10 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', padding: '5px 12px', borderRadius: 999, background: palette.pillBg, color: palette.pillText, fontSize: 12, fontWeight: 700 }}>{title}</span>
-            <div style={{ color: 'rgba(58, 45, 33, 0.86)', fontSize: 13, lineHeight: 1.7 }}>{summary}</div>
+      <div className="map-graph-callout__head">
+        <div className="map-graph-callout__copy">
+          <div className="map-graph-callout__summary-row">
+            <span className="map-graph-callout__pill" style={{ background: palette.pillBg, color: palette.pillText }}>{title}</span>
+            <div className="map-graph-callout__summary">{summary}</div>
           </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, flexWrap: 'wrap', flex: '0 1 auto' }}>
+        <div className="map-graph-callout__actions">
           {actions}
           <Button size="small" type="text" icon={resolvedExpanded ? <UpOutlined /> : <DownOutlined />} onClick={handleToggle}>
             {resolvedExpanded ? '收起详情' : '展开详情'}
           </Button>
         </div>
       </div>
-      {resolvedExpanded ? <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px dashed rgba(122, 93, 52, 0.16)' }}>{children}</div> : null}
+      {resolvedExpanded ? <div className="map-graph-callout__body">{children}</div> : null}
     </section>
   )
 }
@@ -1190,7 +1186,7 @@ export default function MapExplorerPage({ novelId }: Props) {
             {renderAutoTaskStrip('graph')}
 
             {graphLoading ? (
-              <div className="novel-empty" style={{ minHeight: 900 }}><Spin /></div>
+              <div className="novel-empty map-graph-loading"><Spin /></div>
             ) : (
               <MapGraphCanvas
                 data={graphData}
@@ -1328,7 +1324,7 @@ export default function MapExplorerPage({ novelId }: Props) {
                   ) : null}
 
                   {selectedNode ? (
-                    <div style={{ marginTop: selectedRelation ? 18 : 0 }}>
+                    <div className={selectedRelation ? 'map-graph-relations-offset' : undefined}>
                       {selectedNodeRelations.length === 0 ? (
                         <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前节点还没有显式关系。" />
                       ) : (
@@ -1349,7 +1345,7 @@ export default function MapExplorerPage({ novelId }: Props) {
                                     {getRelationLabelText(relation)}
                                   </Tag>
                                 </div>
-                                <div className="map-graph-relation-item__meta" style={{ marginTop: 8 }}>
+                                <div className="map-graph-relation-item__meta map-graph-relation-item__meta--spaced">
                                   <Tag>{relation.bilateral > 0 ? '双向' : '单向'}</Tag>
                                   {relation.intensity ? <Tag color="processing">{getRelationIntensityText(relation.intensity)}</Tag> : null}
                                 </div>
@@ -1401,10 +1397,10 @@ export default function MapExplorerPage({ novelId }: Props) {
               ) : rootData.total === 0 ? (
                 <div className="novel-empty">{isSearching ? '当前关键词下没有匹配节点。' : '还没有根节点，先创建一个。'}</div>
               ) : (
-                <div style={{ display: 'grid', gap: 12 }}>
+                <div className="map-list-panel__results">
                   <div className="map-node-stack">
                     {rootData.items.map((node: MapNodeSummary) => (
-                      <button key={node.id} type="button" className={`novel-list-card ${selectedNode?.id === node.id ? 'novel-list-card--active' : ''}`} onClick={() => void handleSelectRoot(node)} style={{ textAlign: 'left', cursor: 'pointer' }}>
+                      <button key={node.id} type="button" className={`novel-list-card workspace-button-card ${selectedNode?.id === node.id ? 'novel-list-card--active' : ''}`} onClick={() => void handleSelectRoot(node)}>
                         <div className="novel-list-card__title">{node.name}</div>
                         <div className="novel-list-card__meta">
                           <Tag color="blue">{node.nodeType || node.locationType || `L${node.level}`}</Tag>
@@ -1436,10 +1432,10 @@ export default function MapExplorerPage({ novelId }: Props) {
             ) : branchData.total === 0 ? (
               <div className="novel-empty">当前节点还没有下级，可直接在右侧新增。</div>
             ) : (
-              <div style={{ display: 'grid', gap: 12 }}>
+              <div className="map-list-panel__results">
                 <div className="map-node-stack">
                   {branchData.items.map((node: MapNodeSummary) => (
-                    <button key={node.id} type="button" className={`novel-list-card ${selectedNode?.id === node.id ? 'novel-list-card--active' : ''}`} onClick={() => selectNode(node)} style={{ textAlign: 'left', cursor: 'pointer' }}>
+                    <button key={node.id} type="button" className={`novel-list-card workspace-button-card ${selectedNode?.id === node.id ? 'novel-list-card--active' : ''}`} onClick={() => selectNode(node)}>
                       <div className="novel-list-card__title">{node.name}</div>
                       <div className="novel-list-card__meta">
                         <Tag>{node.nodeType || node.locationType || `L${node.level}`}</Tag>
@@ -1448,7 +1444,7 @@ export default function MapExplorerPage({ novelId }: Props) {
                       </div>
                       <div className="novel-list-card__desc">{node.plotRelevance || node.description || '还没有补充说明。'}</div>
                       {node.childCount > 0 ? (
-                        <div style={{ marginTop: 10 }}>
+                        <div className="map-list-panel__link">
                           <Button size="small" type="link" onClick={(event) => { event.stopPropagation(); void handleDive(node) }}>进入下级</Button>
                         </div>
                       ) : null}
@@ -1519,7 +1515,7 @@ export default function MapExplorerPage({ novelId }: Props) {
               label={level.depth === 1 ? `${level.label || '根层'}建议数量` : `第 ${level.depth} 层 · ${level.label || '节点'} 建议数量`}
               initialValue={level.suggestedCount}
             >
-              <InputNumber min={1} max={12} style={{ width: '100%' }} />
+              <InputNumber min={1} max={12} className="workspace-input-number-full" />
             </Form.Item>
           ))}
           <Form.Item name="parentBatchSize" label="每批父节点数量" initialValue={1}>
@@ -1588,7 +1584,7 @@ export default function MapExplorerPage({ novelId }: Props) {
               <Switch />
             </Form.Item>
             <Form.Item name="sortOrder" label="排序">
-              <InputNumber min={0} style={{ width: '100%' }} />
+              <InputNumber min={0} className="workspace-input-number-full" />
             </Form.Item>
           </div>
 

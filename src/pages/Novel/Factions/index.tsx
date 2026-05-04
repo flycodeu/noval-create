@@ -577,8 +577,8 @@ export default function FactionsPage({ novelId }: Props) {
 
       <Modal title="AI 生成·分批势力" open={generateOpen} onCancel={() => setGenerateOpen(false)} onOk={() => void handleStartAutoGenerate()} okText="启动后台生成" destroyOnHidden>
         <Form form={generateForm} layout="vertical">
-          <Form.Item name="count" label="目标总数" rules={[{ required: true, message: '请输入目标总数' }]}><InputNumber min={1} max={24} style={{ width: '100%' }} /></Form.Item>
-          <Form.Item name="batchSize" label="每批生成" rules={[{ required: true, message: '请输入每批数量' }]}><InputNumber min={1} max={6} style={{ width: '100%' }} /></Form.Item>
+          <Form.Item name="count" label="目标总数" rules={[{ required: true, message: '请输入目标总数' }]}><InputNumber min={1} max={24} className="workspace-input-number-full" /></Form.Item>
+          <Form.Item name="batchSize" label="每批生成" rules={[{ required: true, message: '请输入每批数量' }]}><InputNumber min={1} max={6} className="workspace-input-number-full" /></Form.Item>
           <Form.Item name="relationshipDensity" label="关系密度"><Select options={FACTION_RELATIONSHIP_DENSITY_OPTIONS} /></Form.Item>
           <Form.Item name="preferredTypes" label="优先类型"><Select mode="multiple" options={FACTION_TYPE_OPTIONS} /></Form.Item>
           <Form.Item name="allowCharacterlessFactions" label="允许无人归属的隐性势力" valuePropName="checked"><Switch /></Form.Item>

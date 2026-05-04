@@ -33,15 +33,15 @@ export default class WorkspaceErrorBoundary extends React.Component<Props, State
     if (!this.state.error) return this.props.children
 
     return (
-      <div className="novel-route-shell novel-route-shell--loading" style={{ padding: 24 }}>
-        <div style={{ width: 'min(720px, 100%)' }}>
+      <div className="novel-route-shell novel-route-shell--loading novel-route-shell--error">
+        <div className="novel-route-shell__error-card">
           <Alert
             type="error"
             showIcon
             message="当前工作区渲染失败"
             description={this.state.error.message || '页面渲染时出现异常，已阻止整个工作台白屏。'}
           />
-          <Space wrap style={{ marginTop: 16 }}>
+          <Space wrap className="novel-route-shell__error-actions">
             <Button type="primary" onClick={() => this.setState({ error: null })}>
               重试当前页面
             </Button>

@@ -266,7 +266,7 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
               </div>
               <div className="guided-step__field-card guided-step__field-card--compact">
                 <Form.Item name="targetWords" label="目标字数">
-                  <InputNumber min={1000} step={1000} style={{ width: '100%' }} />
+                  <InputNumber min={1000} step={1000} className="workspace-input-number-full" />
                 </Form.Item>
               </div>
               <div className="guided-step__field-card guided-step__field-card--full">
@@ -768,7 +768,7 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
         )}
       >
           {!isStoryPlotReady(currentNovel) ? (
-            <Alert type="warning" showIcon message="故事设计未完成" style={{ marginBottom: 16 }} />
+            <Alert type="warning" showIcon message="故事设计未完成" className="workspace-alert-spaced" />
           ) : null}
 
         <WorkspacePanel>

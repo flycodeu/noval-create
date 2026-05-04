@@ -30,6 +30,7 @@ import {
   WorkspacePanel,
 } from '../components/WorkspaceShell'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
+import './index.css'
 
 interface Props {
   novelId: number
@@ -390,7 +391,7 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
           </Button>
           <Select
             value={viewMode}
-            style={{ minWidth: 140 }}
+            className="novel-foreshadow-ledger__view-select"
             onChange={(value) => setViewMode(value as LedgerViewMode)}
             options={[
               { value: 'board', label: '看板视图' },
@@ -429,7 +430,7 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
       ) : null}
 
       {viewMode === 'board' ? (
-        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))' }}>
+        <div className="novel-foreshadow-ledger__board-grid">
           {(['pending', 'dueSoon', 'overdue', 'resolved'] as LedgerLaneKey[]).map((lane) => {
             const meta = laneMeta(lane)
             const laneRows = laneBuckets[lane]
@@ -447,18 +448,18 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
                       const chapter = entry.sourceChapterId ? chapterById.get(entry.sourceChapterId) : null
                       return (
                         <div key={entry.id} className="novel-note-list__item">
-                          <div style={{ display: 'grid', gap: 6 }}>
-                            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <div className="novel-foreshadow-ledger__item-stack">
+                            <div className="novel-foreshadow-ledger__item-head">
                               <strong>{entry.title}</strong>
                               <Tag color={getStatusTagColor(entry.status)}>{entry.status || 'draft'}</Tag>
                               {typeof entry.targetPayoffChapter === 'number' ? <Tag>{`目标第${entry.targetPayoffChapter}章`}</Tag> : null}
                             </div>
-                            <div style={{ opacity: 0.85 }}>
+                            <div className="novel-foreshadow-ledger__muted">
                               {chapter ? `埋设：第${chapter.chapterNum}章` : '埋设章节：未设置'}
                               {entry.sourceSegmentId ? ` · 场景#${entry.sourceSegmentId}` : ''}
                             </div>
                             {entry.detail ? <div>{entry.detail}</div> : null}
-                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                            <div className="novel-foreshadow-ledger__item-actions">
                               <Button size="small" onClick={() => openEditor(entry)}>编辑</Button>
                               <Button
                                 size="small"
@@ -493,7 +494,7 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
           extra={(
             <Select
               value={laneFilter}
-              style={{ width: 160 }}
+              className="novel-foreshadow-ledger__filter-select"
               onChange={(value) => setLaneFilter(value as 'all' | LedgerLaneKey)}
               options={[
                 { value: 'all', label: '全部条目' },
@@ -517,11 +518,11 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
                 key: 'title',
                 width: 320,
                 render: (_value, record) => (
-                  <div style={{ display: 'grid', gap: 4 }}>
+                  <div className="novel-foreshadow-ledger__table-copy">
                     <strong>{record.title}</strong>
-                    {record.detail ? <span style={{ opacity: 0.85 }}>{record.detail}</span> : null}
-                    {record.payoffSceneAction ? <span style={{ opacity: 0.72 }}>{`动作：${record.payoffSceneAction}`}</span> : null}
-                    {record.requiredEvidence ? <span style={{ opacity: 0.72 }}>{`证据：${record.requiredEvidence}`}</span> : null}
+                    {record.detail ? <span className="novel-foreshadow-ledger__muted">{record.detail}</span> : null}
+                    {record.payoffSceneAction ? <span className="novel-foreshadow-ledger__muted novel-foreshadow-ledger__muted--light">{`动作：${record.payoffSceneAction}`}</span> : null}
+                    {record.requiredEvidence ? <span className="novel-foreshadow-ledger__muted novel-foreshadow-ledger__muted--light">{`证据：${record.requiredEvidence}`}</span> : null}
                   </div>
                 ),
               },
@@ -532,9 +533,9 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
                 render: (_value, record) => {
                   const chapter = record.sourceChapterId ? chapterById.get(record.sourceChapterId) : null
                   return (
-                    <div style={{ display: 'grid', gap: 2 }}>
+                    <div className="novel-foreshadow-ledger__table-meta">
                       <span>{chapter ? `第${chapter.chapterNum}章` : '未设置章节'}</span>
-                      <span style={{ opacity: 0.75 }}>{record.sourceSegmentId ? `场景#${record.sourceSegmentId}` : '未设置场景'}</span>
+                      <span className="novel-foreshadow-ledger__muted novel-foreshadow-ledger__muted--light">{record.sourceSegmentId ? `场景#${record.sourceSegmentId}` : '未设置场景'}</span>
                     </div>
                   )
                 },
@@ -556,7 +557,7 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
                     <Select
                       size="small"
                       value={value || 'draft'}
-                      style={{ width: 92 }}
+                      className="novel-foreshadow-ledger__status-select"
                       loading={updatingStatusId === record.id}
                       onChange={(nextStatus) => {
                         if (nextStatus !== record.status) {
@@ -573,7 +574,7 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
                 key: 'links',
                 width: 240,
                 render: (_value, record) => (
-                  <div style={{ display: 'grid', gap: 2 }}>
+                  <div className="novel-foreshadow-ledger__table-meta">
                     <span>{record.linkedThreadId ? `线程：${threadById.get(record.linkedThreadId)?.title || `#${record.linkedThreadId}`}` : '线程：未绑定'}</span>
                     <span>{record.linkedEndgameCommitmentId ? `终局：${commitmentById.get(record.linkedEndgameCommitmentId)?.title || `#${record.linkedEndgameCommitmentId}`}` : '终局：未绑定'}</span>
                   </div>
@@ -651,7 +652,7 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
             </div>
             <div className="guided-step__field-card guided-step__field-card--compact">
               <Form.Item name="targetPayoffChapter" label="目标回收章位">
-                <InputNumber min={1} precision={0} style={{ width: '100%' }} placeholder="例如：24" />
+                <InputNumber min={1} precision={0} className="novel-foreshadow-ledger__full-width-input" placeholder="例如：24" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card guided-step__field-card--compact">

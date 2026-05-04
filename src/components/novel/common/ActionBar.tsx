@@ -9,16 +9,15 @@ export default function ActionBar({
   children,
   align = 'end',
 }: ActionBarProps) {
-  const justifyContent = align === 'between'
-    ? 'space-between'
+  const alignClass = align === 'between'
+    ? 'novel-action-bar--between'
     : align === 'start'
-      ? 'flex-start'
-      : 'flex-end'
+      ? 'novel-action-bar--start'
+      : 'novel-action-bar--end'
 
   return (
     <div
-      className="novel-action-bar"
-      style={{ justifyContent }}
+      className={`novel-action-bar ${alignClass}`}
     >
       {children}
     </div>

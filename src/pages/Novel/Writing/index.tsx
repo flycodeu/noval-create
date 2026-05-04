@@ -182,10 +182,22 @@ interface ChapterGenerationProgressEvent {
 }
 type WritingRouteKey = 'editor' | 'context' | 'review' | 'history'
 
-const WritingEditorRoute = React.lazy(() => import('./routes/EditorRoute'))
-const WritingContextRoute = React.lazy(() => import('./routes/ContextRoute'))
-const WritingReviewRoute = React.lazy(() => import('./routes/ReviewRoute'))
-const WritingHistoryRoute = React.lazy(() => import('./routes/HistoryRoute'))
+const loadWritingEditorRoute = () => import('./routes/EditorRoute')
+const loadWritingContextRoute = () => import('./routes/ContextRoute')
+const loadWritingReviewRoute = () => import('./routes/ReviewRoute')
+const loadWritingHistoryRoute = () => import('./routes/HistoryRoute')
+
+const WRITING_ROUTE_LOADERS: Record<WritingRouteKey, () => Promise<unknown>> = {
+  editor: loadWritingEditorRoute,
+  context: loadWritingContextRoute,
+  review: loadWritingReviewRoute,
+  history: loadWritingHistoryRoute,
+}
+
+const WritingEditorRoute = React.lazy(loadWritingEditorRoute)
+const WritingContextRoute = React.lazy(loadWritingContextRoute)
+const WritingReviewRoute = React.lazy(loadWritingReviewRoute)
+const WritingHistoryRoute = React.lazy(loadWritingHistoryRoute)
 
 const STATUS_OPTIONS = [
   { value: 'outline', label: '待写' },
@@ -558,6 +570,21 @@ export default function Writing({ novelId }: Props) {
       ...foreshadowSnapshot.dueSoon.map((item) => `到期 · ${item.title} · 目标 ${formatChapterNumber(item.targetPayoffChapter)}${item.payoffCondition ? ` · 条件：${item.payoffCondition}` : ''}`),
     ].slice(0, 8)
   }, [foreshadowSnapshot])
+
+  useEffect(() => {
+    void WRITING_ROUTE_LOADERS[activeWritingRoute]()
+
+    const preloadTargets = (Object.keys(WRITING_ROUTE_LOADERS) as WritingRouteKey[])
+      .filter((routeKey) => routeKey !== activeWritingRoute)
+
+    const timer = window.setTimeout(() => {
+      preloadTargets.forEach((routeKey) => {
+        void WRITING_ROUTE_LOADERS[routeKey]()
+      })
+    }, 120)
+
+    return () => window.clearTimeout(timer)
+  }, [activeWritingRoute])
 
   useEffect(() => { currentChapterIdRef.current = currentChapterId }, [currentChapterId])
 
@@ -2431,7 +2458,7 @@ export default function Writing({ novelId }: Props) {
         ) : (
           <>
             {refreshing ? (
-              <div className="novel-dashboard__refresh-indicator" style={{ marginBottom: 16 }}>
+              <div className="novel-dashboard__refresh-indicator workspace-alert-spaced">
                 <Spin size="small" />
                 <span>正在同步正文工作台数据</span>
               </div>

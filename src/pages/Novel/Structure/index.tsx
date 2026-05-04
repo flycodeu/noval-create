@@ -548,14 +548,14 @@ export default function StructurePage({ novelId }: { novelId: number }) {
           <Button icon={<RobotOutlined />} onClick={() => setPlannerOpen(true)}>
             AI 批量规划
           </Button>
-          <div className="novel-pill" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div className="novel-pill novel-structure-inline-pill">
             <span>新增数量</span>
             <InputNumber
               min={1}
               max={20}
               value={batchCreateCount}
               onChange={(value) => setBatchCreateCount(Math.max(1, Math.min(20, Number(value) || 1)))}
-              style={{ width: 88 }}
+              className="novel-structure-input-88"
             />
           </div>
           <Button icon={<PlusOutlined />} onClick={() => void addVolumes(batchCreateCount)}>
@@ -669,20 +669,20 @@ export default function StructurePage({ novelId }: { novelId: number }) {
       )}
     >
       {linkageSummary ? (
-        <div style={{ marginBottom: 16 }}>
+        <div className="novel-structure-banner">
           <Tag color={linkageSummary.totalGapCount > 0 ? 'warning' : 'success'}>
             {linkageSummary.totalGapCount > 0 ? `还有 ${linkageSummary.totalGapCount} 个结构联动缺口` : '结构联动已补齐'}
           </Tag>
-          <span style={{ marginLeft: 8, color: 'var(--workspace-ink-soft)' }}>{linkageSummary.summary}</span>
+          <span className="novel-structure-banner__summary">{linkageSummary.summary}</span>
         </div>
       ) : null}
       {draftWarnings.length > 0 ? (
-        <div className="novel-note-list" style={{ marginBottom: 16 }}>
+        <div className="novel-note-list novel-structure-banner">
           {draftWarnings.map((warning) => <div key={warning} className="novel-note-list__item">{warning}</div>)}
         </div>
       ) : null}
       {draft?.appliedAt ? (
-        <div className="novel-note-list" style={{ marginBottom: 16 }}>
+        <div className="novel-note-list novel-structure-banner">
           <div className="novel-note-list__item">最近一次已应用但未保存的结构草稿已恢复。保存章节或场景后会自动清除。</div>
         </div>
       ) : null}
@@ -806,16 +806,16 @@ export default function StructurePage({ novelId }: { novelId: number }) {
           }}
         >
           <Form.Item name="volumeCount" label="卷数" rules={[{ required: true }]}>
-            <InputNumber min={1} max={6} style={{ width: '100%' }} />
+            <InputNumber min={1} max={6} className="novel-structure-input-full" />
           </Form.Item>
           <Form.Item name="partsPerVolume" label="每卷部数" rules={[{ required: true }]}>
-            <InputNumber min={1} max={6} style={{ width: '100%' }} />
+            <InputNumber min={1} max={6} className="novel-structure-input-full" />
           </Form.Item>
           <Form.Item name="chaptersPerPart" label="每部章节数" rules={[{ required: true }]}>
-            <InputNumber min={1} max={12} style={{ width: '100%' }} />
+            <InputNumber min={1} max={12} className="novel-structure-input-full" />
           </Form.Item>
           <Form.Item name="segmentsPerChapter" label="每章场景数" rules={[{ required: true }]}>
-            <InputNumber min={1} max={8} style={{ width: '100%' }} />
+            <InputNumber min={1} max={8} className="novel-structure-input-full" />
           </Form.Item>
           <Form.Item name="focus" label="额外聚焦">
             <Input.TextArea
@@ -835,12 +835,12 @@ export default function StructurePage({ novelId }: { novelId: number }) {
         {sceneTemplateLoading ? (
           <Spin />
         ) : (
-          <div style={{ display: 'grid', gap: 12, maxHeight: 520, overflow: 'auto' }}>
+          <div className="novel-structure-scroll-list">
             {sceneTemplates.map((template) => {
               const beats = parseSceneTemplateStringList(template.typicalBeatsJson)
               return (
-                <section key={template.id} className="novel-panel" style={{ padding: 16 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
+                <section key={template.id} className="novel-panel novel-structure-template-card">
+                  <div className="novel-structure-template-card__head">
                     <Space wrap>
                       <strong>{template.name}</strong>
                       <Tag>{template.category}</Tag>
@@ -848,11 +848,11 @@ export default function StructurePage({ novelId }: { novelId: number }) {
                     </Space>
                     <Button type="primary" onClick={() => applySceneTemplate(template)}>套用</Button>
                   </div>
-                  <div style={{ color: 'var(--workspace-ink-soft)', marginBottom: 8 }}>
+                  <div className="novel-structure-template-card__desc">
                     {template.description || '还没有模板说明。'}
                   </div>
                   {beats.length > 0 ? (
-                    <div style={{ fontSize: 13, color: 'var(--workspace-ink-soft)' }}>
+                    <div className="novel-structure-template-card__beats">
                       {`典型节拍：${beats.join(' -> ')}`}
                     </div>
                   ) : null}

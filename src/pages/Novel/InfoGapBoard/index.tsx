@@ -30,6 +30,7 @@ import {
   WorkspacePanel,
 } from '../components/WorkspaceShell'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
+import './index.css'
 
 interface Props {
   novelId: number
@@ -436,15 +437,15 @@ export default function InfoGapBoardPage({ novelId }: Props) {
           type="warning"
           message={`当前有 ${overLimitCount} 卷超出真相揭示比例上限`}
           description="系统允许超限但会持续警告，请在章节揭示安排前先调整计划。"
-          style={{ marginBottom: 16 }}
+          className="novel-info-gap-board__alert"
         />
       ) : null}
 
       <WorkspacePanel title="卷级真相揭示比例">
-        <div style={{ display: 'grid', gap: 12 }}>
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+        <div className="novel-info-gap-board__section-stack">
+          <div className="novel-info-gap-board__toolbar">
             <Select
-              style={{ minWidth: 240 }}
+              className="novel-info-gap-board__volume-select"
               value={activeVolumeId || undefined}
               onChange={(value) => setActiveVolumeId(value)}
               options={sortedVolumes.map((volume) => ({
@@ -460,13 +461,13 @@ export default function InfoGapBoardPage({ novelId }: Props) {
               value={ratioDraft == null ? undefined : ratioDraft}
               onChange={(value) => setRatioDraft(typeof value === 'number' ? value : null)}
               placeholder="上限比例(0~1)"
-              style={{ width: 220 }}
+              className="novel-info-gap-board__ratio-input"
             />
             <Tag color="blue">{activeVolume ? `当前卷：${activeVolume.title || `第${activeVolume.volumeNumber}卷`}` : '未选择卷'}</Tag>
           </div>
           <div className="novel-note-list">
             {volumeMetrics.map(({ volume, metrics }) => (
-              <div key={volume.id} className="novel-note-list__item" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              <div key={volume.id} className="novel-note-list__item novel-info-gap-board__volume-row">
                 <strong>{volume.title?.trim() || `第${volume.volumeNumber}卷`}</strong>
                 <Tag>{`真相 ${metrics.plannedTruths}/${metrics.totalTruths}`}</Tag>
                 <Tag color={metrics.overLimit ? 'error' : 'processing'}>
@@ -484,40 +485,40 @@ export default function InfoGapBoardPage({ novelId }: Props) {
 
       <WorkspacePanel title="谜题板看板">
         {loading ? (
-          <div style={{ padding: 48, display: 'flex', justifyContent: 'center' }}><Spin /></div>
+          <div className="novel-info-gap-board__loading"><Spin /></div>
         ) : (
-          <div style={{ display: 'grid', gap: 14 }}>
-            <div style={{ color: 'var(--workspace-ink-soft)' }}>
+          <div className="novel-info-gap-board__board-stack">
+            <div className="novel-info-gap-board__muted">
               当前筛选：{displayedVolumeLabel}
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 12 }}>
+            <div className="novel-info-gap-board__lane-grid">
               {STATUS_LANES.map((lane) => {
                 const laneFacts = filteredFacts.filter((fact) => fact.status === lane.key)
                 return (
-                  <section key={lane.key} className="novel-panel" style={{ padding: 12, display: 'grid', gap: 10 }}>
+                  <section key={lane.key} className="novel-panel novel-info-gap-board__lane-card">
                     <div>
                       <div className="novel-kicker">{lane.label}</div>
                       <strong>{laneFacts.length} 条</strong>
-                      <div style={{ color: 'var(--workspace-ink-soft)', marginTop: 4 }}>{lane.hint}</div>
+                      <div className="novel-info-gap-board__lane-hint">{lane.hint}</div>
                     </div>
                     {laneFacts.length === 0 ? (
                       <div className="novel-empty">当前没有条目。</div>
                     ) : (
                       laneFacts.map((fact) => (
-                        <article key={fact.id} className="novel-panel" style={{ padding: 10, border: '1px solid var(--workspace-border)' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                        <article key={fact.id} className="novel-panel novel-info-gap-board__fact-card">
+                          <div className="novel-info-gap-board__fact-head">
                             <strong>{fact.title}</strong>
                             <Tag color={kindTagColor(fact.kind)}>{KIND_OPTIONS.find((item) => item.value === fact.kind)?.label || fact.kind}</Tag>
                           </div>
-                          <div style={{ marginTop: 6, color: 'var(--workspace-ink-soft)' }}>
+                          <div className="novel-info-gap-board__fact-summary">
                             {fact.summary || '暂无摘要'}
                           </div>
-                          <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          <div className="novel-info-gap-board__fact-tags">
                             {fact.plannedRevealVolume ? <Tag>{`计划揭示：第${fact.plannedRevealVolume}卷`}</Tag> : null}
                             {fact.forbiddenBeforeVolume ? <Tag color="warning">{`禁止提前到第${fact.forbiddenBeforeVolume}卷`}</Tag> : null}
                             {fact.kind === 'truth' ? <Tag color={fact.isKeyTruth ? 'gold' : 'default'}>{fact.isKeyTruth ? '计入比例' : '不计入比例'}</Tag> : null}
                           </div>
-                          <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
+                          <div className="novel-info-gap-board__fact-actions">
                             <Button size="small" onClick={() => openEditor(fact)}>编辑</Button>
                             <Button size="small" danger icon={<DeleteOutlined />} onClick={() => handleDelete(fact)}>删除</Button>
                           </div>
@@ -608,12 +609,12 @@ export default function InfoGapBoardPage({ novelId }: Props) {
 
             <div className="guided-step__field-card guided-step__field-card--compact">
               <Form.Item name="forbiddenBeforeVolume" label="禁止提前到第几卷">
-                <InputNumber min={1} style={{ width: '100%' }} placeholder="例如 2" />
+                <InputNumber min={1} className="novel-info-gap-board__full-width-input" placeholder="例如 2" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card guided-step__field-card--compact">
               <Form.Item name="plannedRevealVolume" label="计划揭示卷">
-                <InputNumber min={1} style={{ width: '100%' }} placeholder="例如 3" />
+                <InputNumber min={1} className="novel-info-gap-board__full-width-input" placeholder="例如 3" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card guided-step__field-card--compact">
@@ -636,14 +637,14 @@ export default function InfoGapBoardPage({ novelId }: Props) {
             <div className="guided-step__field-card guided-step__field-card--full">
               <Form.List name="characterKnowledgeList">
                 {(fields, { add, remove }) => (
-                  <div style={{ display: 'grid', gap: 8 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div className="novel-info-gap-board__knowledge-stack">
+                    <div className="novel-info-gap-board__knowledge-head">
                       <strong>角色已知信息</strong>
                       <Button size="small" onClick={() => add({})}>新增角色</Button>
                     </div>
                     {fields.length === 0 ? <div className="novel-empty">尚未设置角色已知信息。</div> : null}
                     {fields.map((field) => (
-                      <div key={field.key} style={{ display: 'grid', gridTemplateColumns: '2fr 2fr auto', gap: 8 }}>
+                      <div key={field.key} className="novel-info-gap-board__knowledge-row">
                         <Form.Item
                           {...field}
                           name={[field.name, 'characterId']}

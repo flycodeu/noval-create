@@ -1,0 +1,125 @@
+.novel-info-gap-board__alert {
+  margin-bottom: 16px;
+}
+
+.novel-info-gap-board__section-stack,
+.novel-info-gap-board__board-stack,
+.novel-info-gap-board__knowledge-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.novel-info-gap-board__board-stack {
+  gap: 14px;
+}
+
+.novel-info-gap-board__toolbar,
+.novel-info-gap-board__volume-row,
+.novel-info-gap-board__fact-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.novel-info-gap-board__toolbar {
+  gap: 12px;
+}
+
+.novel-info-gap-board__volume-select {
+  min-width: 240px;
+}
+
+.novel-info-gap-board__ratio-input {
+  width: 220px;
+}
+
+.novel-info-gap-board__loading {
+  display: flex;
+  justify-content: center;
+  padding: 48px;
+}
+
+.novel-info-gap-board__muted,
+.novel-info-gap-board__lane-hint,
+.novel-info-gap-board__fact-summary {
+  color: var(--workspace-ink-soft);
+}
+
+.novel-info-gap-board__lane-hint {
+  margin-top: 4px;
+}
+
+.novel-info-gap-board__lane-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.novel-info-gap-board__lane-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.novel-info-gap-board__fact-card {
+  padding: 10px;
+  border: 1px solid var(--workspace-border);
+}
+
+.novel-info-gap-board__fact-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.novel-info-gap-board__fact-summary {
+  margin-top: 6px;
+}
+
+.novel-info-gap-board__fact-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.novel-info-gap-board__fact-actions {
+  margin-top: 10px;
+  gap: 8px;
+}
+
+.novel-info-gap-board__full-width-input {
+  width: 100%;
+}
+
+.novel-info-gap-board__knowledge-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.novel-info-gap-board__knowledge-row {
+  display: grid;
+  grid-template-columns: 2fr 2fr auto;
+  gap: 8px;
+}
+
+@media (max-width: 1080px) {
+  .novel-info-gap-board__lane-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .novel-info-gap-board__lane-grid,
+  .novel-info-gap-board__knowledge-row {
+    grid-template-columns: 1fr;
+  }
+
+  .novel-info-gap-board__volume-select,
+  .novel-info-gap-board__ratio-input {
+    width: 100%;
+    min-width: 0;
+  }
+}

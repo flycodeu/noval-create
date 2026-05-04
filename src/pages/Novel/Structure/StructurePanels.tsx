@@ -409,7 +409,7 @@ export function StructureChaptersPanel({
       ) : chapters.total === 0 ? (
         <Empty description="当前部还没有章节。" />
       ) : (
-        <div style={{ display: 'grid', gap: 12 }}>
+        <div className="novel-structure-stack">
           <VirtualList data={chapters.items} height={380} itemHeight={112} itemKey="id">
             {(chapter: StoryStructureChapterSummary) => (
               <button
@@ -485,7 +485,7 @@ export function StructureSegmentsPanel({
       ) : segments.total === 0 ? (
         <Empty description="当前章节还没有场景。" />
       ) : (
-        <div style={{ display: 'grid', gap: 12 }}>
+        <div className="novel-structure-stack">
           {canReorderSegments ? (
             <DragDropContext onDragEnd={onDragEnd}>
               <Droppable droppableId="segments" type="segment">
@@ -612,7 +612,7 @@ export function ChapterEditorPanel({
           </div>
           <div className="novel-grid novel-grid--2">
             <Form.Item name="targetWords" label="目标字数">
-              <InputNumber min={1000} step={500} style={{ width: '100%' }} />
+              <InputNumber min={1000} step={500} className="novel-structure-input-full" />
             </Form.Item>
             <div className="novel-structure-inline-hint">
               <strong>正文状态</strong>
@@ -714,7 +714,7 @@ export function SegmentEditorPanel({
           </Form>
           {isSelectedSegmentOutsideWindow ? (
             <Alert
-              style={{ marginTop: 14 }}
+              className="novel-structure-alert-top"
               showIcon
               type="info"
               message="当前场景不在本页窗口中。"

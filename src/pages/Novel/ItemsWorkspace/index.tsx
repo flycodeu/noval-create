@@ -1059,7 +1059,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
   )
 
   const connectionsTabContent = (
-    <div className="novel-support-grid novel-items__support-grid" style={{ marginTop: 20 }}>
+    <div className="novel-support-grid novel-items__support-grid workspace-margin-top-16">
       <WorkspaceTip title="关联人物">
         {detailContext.ownerCharacter || detailContext.relatedCharacters.length > 0 ? (
           <div className="novel-items__tip-list">
@@ -1342,7 +1342,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
           ) : pageData.total === 0 ? (
             <div className="novel-empty">当前筛选下还没有记录。</div>
           ) : (
-            <div style={{ display: 'grid', gap: 12 }}>
+            <div className="workspace-stack-12">
               <VirtualList data={pageData.items} height={480} itemHeight={136} itemKey="id">
                 {(item: StoryItem) => {
                   const relatedCharacterCount = parseNumberArray(item.linkedCharacterIdsJson).length + (item.ownerCharacterId ? 1 : 0)
@@ -1352,9 +1352,8 @@ export default function ItemsWorkspace({ novelId }: Props) {
                     <button
                       key={item.id}
                       type="button"
-                      className={`novel-list-card ${selectedId === item.id ? 'novel-list-card--active' : ''}`}
+                      className={`novel-list-card workspace-button-card ${selectedId === item.id ? 'novel-list-card--active' : ''}`}
                       onClick={() => void loadItemDetail(item.id)}
-                      style={{ width: '100%', textAlign: 'left', cursor: 'pointer' }}
                     >
                       <div className="novel-list-card__title">
                         <span>{item.itemName}</span>

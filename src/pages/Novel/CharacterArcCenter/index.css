@@ -1,0 +1,27 @@
+.novel-character-arc-center__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.novel-character-arc-center__list {
+  display: grid;
+  gap: 10px;
+}
+
+.novel-character-arc-center__list-card {
+  text-align: left;
+}
+
+.novel-character-arc-center__field-label {
+  margin-bottom: 8px;
+  font-weight: 600;
+  color: var(--workspace-ink);
+}
+
+.novel-character-arc-center__beats {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}

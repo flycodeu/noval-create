@@ -224,7 +224,9 @@ export default function VolumeDesignPage({ novelId }: Props) {
     return (
       <WorkspacePage title="卷级设计中心">
         <WorkspacePanel title="正在加载卷级设计">
-          <Spin />
+          <div className="novel-workspace__loading-card">
+            <Spin />
+          </div>
         </WorkspacePanel>
       </WorkspacePage>
     )
@@ -253,7 +255,7 @@ export default function VolumeDesignPage({ novelId }: Props) {
           </Button>
           <Space size={4}>
             <Switch size="small" checked={createTasksOnAudit} onChange={setCreateTasksOnAudit} />
-            <span style={{ fontSize: 12, opacity: 0.75 }}>审计后自动建修订任务</span>
+            <span className="novel-ui-muted">审计后自动建修订任务</span>
           </Space>
           <Button
             danger
@@ -296,7 +298,7 @@ export default function VolumeDesignPage({ novelId }: Props) {
         />
       )}
     >
-      {refreshing ? <div className="novel-dashboard__refresh-indicator" style={{ marginBottom: 16 }}><Spin size="small" /><span>正在同步卷级设计数据</span></div> : null}
+      {refreshing ? <div className="novel-dashboard__refresh-indicator workspace-alert-spaced"><Spin size="small" /><span>正在同步卷级设计数据</span></div> : null}
       {commitments.length <= 0 ? (
         <Alert
           type="warning"
@@ -312,7 +314,7 @@ export default function VolumeDesignPage({ novelId }: Props) {
           showIcon
           message="卷后审计发现高风险（不阻止操作）"
           description={`当前卷有 ${lastAuditResult?.summary.highCount || 0} 条高风险。你仍可继续编辑和保存，但建议先处理红色问题。`}
-          style={{ marginTop: 12 }}
+          className="workspace-margin-top-12"
         />
       ) : null}
 
@@ -321,7 +323,7 @@ export default function VolumeDesignPage({ novelId }: Props) {
           <Select
             value={activeVolumeId ?? undefined}
             onChange={(value) => setActiveVolumeId(value)}
-            style={{ minWidth: 240 }}
+            className="workspace-control-240"
             options={volumes.map((item) => ({
               value: item.id,
               label: `${item.title || `第${item.volumeNumber}卷`} · ${item.chapterCount}章`,
@@ -443,7 +445,7 @@ export default function VolumeDesignPage({ novelId }: Props) {
 
       <WorkspacePanel title="卷后审计结果" description="审计会输出未回收线索、弧线停滞和推进不足清单；可选自动生成修订任务。">
         {lastAuditResult ? (
-          <Space direction="vertical" style={{ width: '100%' }} size={12}>
+          <Space direction="vertical" className="workspace-full-width" size={12}>
             <Alert
               type={lastAuditResult.summary.highCount > 0 ? 'error' : lastAuditResult.summary.mediumCount > 0 ? 'warning' : 'success'}
               showIcon
@@ -470,7 +472,7 @@ export default function VolumeDesignPage({ novelId }: Props) {
 
       <WorkspacePanel title="硬约束同步回执" description="把卷级目标同步到本卷章节合同的 requiredAssetRefs 与 acceptanceNotes。">
         {lastSyncResult ? (
-          <Space direction="vertical" style={{ width: '100%' }} size={12}>
+          <Space direction="vertical" className="workspace-full-width" size={12}>
             <Alert
               type="success"
               showIcon

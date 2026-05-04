@@ -434,7 +434,7 @@ export default function EndgamePage({ novelId }: Props) {
               </Form.Item>
             </div>
             <div className="guided-step__field-card">
-              <strong style={{ display: 'block', marginBottom: 8, color: 'var(--workspace-ink)' }}>填写建议</strong>
+              <strong className="workspace-card-section-title">填写建议</strong>
               <div className="guided-step__checklist">
                 <div className="guided-step__checkitem guided-step__checkitem--done">
                   <p>“必须兑现的承诺”写读者会明确等待的结果，不写抽象希望。</p>

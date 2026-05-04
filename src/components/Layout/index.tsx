@@ -61,6 +61,13 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const selectedKey = menuItems.find(item => location.pathname.startsWith(item.key))?.key || '/novels'
   const isNovelWorkspace = location.pathname.startsWith('/novels/') && location.pathname !== '/novels'
   const hideAppSidebar = isNovelWorkspace
+  const novelWorkspaceResetKey = React.useMemo(() => {
+    if (!isNovelWorkspace) return location.pathname
+
+    const segments = location.pathname.split('/').filter(Boolean)
+    const novelId = segments[1]
+    return novelId ? `/novels/${novelId}` : '/novels'
+  }, [isNovelWorkspace, location.pathname])
 
   return (
     <Layout className="app-layout">
@@ -100,7 +107,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
         ) : null}
 
         <Content className="app-layout__content">
-          <AppErrorBoundary resetKey={location.pathname}>
+          <AppErrorBoundary resetKey={novelWorkspaceResetKey}>
             {children}
           </AppErrorBoundary>
         </Content>

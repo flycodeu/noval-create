@@ -21,6 +21,7 @@ import {
   WorkspacePanel,
 } from '../components/WorkspaceShell'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
+import './index.css'
 
 interface Props {
   novelId: number
@@ -226,8 +227,8 @@ function ForeshadowColumn({
   items: ForeshadowSnapshot['pending']
 }) {
   return (
-    <div style={{ display: 'grid', gap: 12 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+    <div className="novel-ui-stack-md">
+      <div className="novel-ui-row novel-ui-row--between">
         <strong>{title}</strong>
         <Tag color="blue">{items.length}</Tag>
       </div>
@@ -235,17 +236,17 @@ function ForeshadowColumn({
         <div className="novel-empty">当前为空。</div>
       ) : (
         items.map((item) => (
-          <section key={item.id} className="novel-panel" style={{ padding: 14 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
+          <section key={item.id} className="novel-panel novel-ui-panel-card">
+            <div className="story-threads__foreshadow-head">
               <strong>{item.title}</strong>
               <Tag color={getForeshadowStatusColor(item.foreshadowStatus)}>
                 {getForeshadowStatusLabel(item.foreshadowStatus)}
               </Tag>
             </div>
-            <div style={{ color: 'var(--workspace-ink-soft)', marginBottom: 8 }}>
+            <div className="story-threads__foreshadow-summary">
               {item.summary || item.currentState || '这条伏笔还没有补足说明。'}
             </div>
-            <div style={{ display: 'grid', gap: 4, fontSize: 13, color: 'var(--workspace-ink-soft)' }}>
+            <div className="story-threads__foreshadow-meta">
               <div>{`埋设：${formatChapter(item.plantedChapter || item.startChapter)}`}</div>
               <div>{`目标回收：${formatChapter(item.targetPayoffChapter)}`}</div>
               {item.resolvedChapter ? <div>{`实际回收：${formatChapter(item.resolvedChapter)}`}</div> : null}
@@ -253,7 +254,7 @@ function ForeshadowColumn({
               <div>{`当前距离：${typeof item.currentDistance === 'number' ? `${item.currentDistance} 章` : '未设定'}`}</div>
               <div>{`关联角色：${item.relatedCharacterCount}`}</div>
               {item.payoffCondition ? <div>{`回收条件：${item.payoffCondition}`}</div> : null}
-              {item.warningText ? <div style={{ color: '#ad6800' }}>{item.warningText}</div> : null}
+              {item.warningText ? <div className="novel-ui-warning-text">{item.warningText}</div> : null}
             </div>
           </section>
         ))
@@ -633,7 +634,7 @@ export default function StoryThreadsPage({ novelId }: Props) {
       ) : null}
 
       <WorkspacePanel title="线程看板">
-        <div style={{ marginBottom: 16 }}>
+        <div className="story-threads__toolbar">
           <Segmented
             value={viewMode}
             onChange={(value) => setViewMode(value as 'board' | 'foreshadow')}
@@ -644,9 +645,9 @@ export default function StoryThreadsPage({ novelId }: Props) {
           />
         </div>
         {viewMode === 'foreshadow' ? (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
+          <div className="story-threads__foreshadow-grid">
             <Alert
-              style={{ gridColumn: '1 / -1' }}
+              className="story-threads__full-span"
               type="info"
               showIcon
               message={`当前正文进度：第 ${foreshadowSnapshot.currentChapterNum || 0} 章`}
@@ -659,19 +660,19 @@ export default function StoryThreadsPage({ novelId }: Props) {
         ) : (
           <>
             {selectedRowKeys.length > 0 ? (
-              <div className="novel-filter-bar" style={{ marginBottom: 16 }}>
+              <div className="novel-filter-bar novel-workspace__refresh">
                 <div className="novel-filter-bar__row">
                   <Tag color="processing">{`已选 ${selectedRowKeys.length} 条`}</Tag>
                   <Select
                     value={batchStatus}
-                    style={{ width: 160 }}
+                    className="story-threads__select-compact"
                     options={THREAD_STATUS_OPTIONS}
                     onChange={(value) => setBatchStatus(value)}
                   />
                   <Button onClick={() => void handleBatchStatusUpdate()}>批量改状态</Button>
                   <Select
                     value={batchPriority}
-                    style={{ width: 160 }}
+                    className="story-threads__select-compact"
                     options={PRIORITY_OPTIONS}
                     onChange={(value) => setBatchPriority(value)}
                   />
@@ -682,9 +683,9 @@ export default function StoryThreadsPage({ novelId }: Props) {
               </div>
             ) : null}
             {loading ? (
-              <div style={{ display: 'flex', justifyContent: 'center', padding: 48 }}><Spin /></div>
+              <div className="novel-ui-loading-state"><Spin /></div>
             ) : threads.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: 48, color: 'var(--workspace-ink-soft)' }}>暂无线程数据</div>
+              <div className="novel-ui-empty-state">暂无线程数据</div>
             ) : (
               <>
                 <div className="story-threads__row story-threads__row--header">
@@ -719,7 +720,7 @@ export default function StoryThreadsPage({ novelId }: Props) {
                   )}
                 </VirtualList>
                 {threadTotal > THREADS_PAGE_SIZE ? (
-                  <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
+                  <div className="story-threads__pagination">
                     <Pagination
                       current={page}
                       pageSize={THREADS_PAGE_SIZE}
@@ -782,12 +783,12 @@ export default function StoryThreadsPage({ novelId }: Props) {
             </div>
             <div className="guided-step__field-card guided-step__field-card--compact">
               <Form.Item name="startChapter" label="开始章位">
-                <InputNumber min={1} style={{ width: '100%' }} />
+                <InputNumber min={1} className="story-threads__full-width-input" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card guided-step__field-card--compact">
               <Form.Item name="targetPayoffChapter" label="目标回收章位">
-                <InputNumber min={1} style={{ width: '100%' }} />
+                <InputNumber min={1} className="story-threads__full-width-input" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card guided-step__field-card--full">
@@ -821,10 +822,10 @@ export default function StoryThreadsPage({ novelId }: Props) {
       >
         <Form form={generateForm} layout="vertical" initialValues={DEFAULT_GENERATE_VALUES}>
           <Form.Item name="count" label="目标数量" rules={[{ required: true, message: '请填写数量' }]}>
-            <InputNumber min={1} max={20} style={{ width: '100%' }} />
+            <InputNumber min={1} max={20} className="story-threads__full-width-input" />
           </Form.Item>
           <Form.Item name="batchSize" label="单批数量" rules={[{ required: true, message: '请填写单批数量' }]}>
-            <InputNumber min={1} max={6} style={{ width: '100%' }} />
+            <InputNumber min={1} max={6} className="story-threads__full-width-input" />
           </Form.Item>
           <Form.Item name="focus" label="本轮聚焦方向">
             <Input.TextArea rows={6} placeholder="例如：优先补悬念线和关系线；避免重复主线冲突；重点围绕第 20-40 章的中段压力。" />

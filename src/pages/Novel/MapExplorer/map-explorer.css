@@ -53,6 +53,15 @@
   gap: 18px;
 }
 
+.map-list-panel__results {
+  display: grid;
+  gap: 12px;
+}
+
+.map-list-panel__link {
+  margin-top: 10px;
+}
+
 .map-list-panel--detail {
   position: sticky;
   top: var(--novel-sticky-offset);
@@ -169,6 +178,69 @@
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
+}
+
+.map-graph-callout {
+  padding: 18px;
+  border-radius: 24px;
+  background: var(--map-callout-surface);
+  backdrop-filter: blur(10px);
+}
+
+.map-graph-callout__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.map-graph-callout__copy {
+  min-width: 0;
+  flex: 1 1 420px;
+  display: grid;
+  gap: 10px;
+}
+
+.map-graph-callout__summary-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.map-graph-callout__pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.map-graph-callout__summary {
+  color: rgba(58, 45, 33, 0.86);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.map-graph-callout__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  flex: 0 1 auto;
+}
+
+.map-graph-callout__body {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px dashed rgba(122, 93, 52, 0.16);
+}
+
+.map-graph-minimap {
+  background-color: rgba(255, 249, 240, 0.94);
 }
 
 .map-graph-toolbar__row--actions {
@@ -547,6 +619,18 @@
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 4;
+}
+
+.map-graph-relation-item__meta--spaced {
+  margin-top: 8px;
+}
+
+.map-graph-relations-offset {
+  margin-top: 18px;
+}
+
+.map-graph-loading {
+  min-height: 900px;
 }
 
 .map-graph-detail-grid {

@@ -231,16 +231,8 @@ export default function SceneTemplatesPage({ novelId }: Props) {
               locale={{ emptyText: '当前没有场景模板' }}
               renderItem={(item) => (
                 <List.Item
-                  className="novel-resource-workspace__list-item"
+                  className={`novel-resource-workspace__list-item${selectedId === item.id ? ' novel-resource-workspace__list-item--selected' : ''}`}
                   onClick={() => setSelectedId(item.id)}
-                  style={{
-                    cursor: 'pointer',
-                    borderRadius: 12,
-                    padding: 12,
-                    background: selectedId === item.id ? 'rgba(24, 144, 255, 0.08)' : 'transparent',
-                    border: '1px solid rgba(120, 120, 120, 0.18)',
-                    marginBottom: 8,
-                  }}
                 >
                   <List.Item.Meta
                     title={(

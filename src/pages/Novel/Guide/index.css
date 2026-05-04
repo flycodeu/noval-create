@@ -1,0 +1,51 @@
+.novel-guide-page__phase-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+
+.novel-guide-page__phase-copy,
+.novel-guide-page__section-stack {
+  display: grid;
+  gap: 16px;
+}
+
+.novel-guide-page__phase-copy {
+  gap: 4px;
+}
+
+.novel-guide-page__phase-summary {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.novel-guide-page__phase-tags,
+.novel-guide-page__mode-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.novel-guide-page__step-desc {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--color-text-secondary);
+}
+
+.novel-guide-page__step-support {
+  margin-bottom: 12px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--color-text-secondary);
+}
+
+@media (max-width: 768px) {
+  .novel-guide-page__phase-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
