@@ -357,7 +357,7 @@
 }
 
 .novel-writing-page .chapter-console-page__grid {
-  grid-template-columns: minmax(248px, 288px) minmax(680px, 1.35fr) minmax(280px, 316px);
+  grid-template-columns: minmax(220px, 264px) minmax(0, 1.25fr) minmax(260px, 300px);
 }
 
 .novel-writing-page .chapter-console-page__column--left,
@@ -368,12 +368,12 @@
 }
 
 .novel-writing-page .novel-writing-shell__editor-sheet {
-  width: min(980px, 100%);
+  width: min(920px, 100%);
 }
 
 .novel-writing-page .chapter-console-page__column--right {
   position: sticky;
-  top: 140px;
+  top: 128px;
 }
 
 .novel-writing-page .chapter-console-page__route-switch {
@@ -391,9 +391,9 @@
   gap: 0;
 }
 
-@media (max-width: 1480px) {
+@media (max-width: 1600px) {
   .novel-writing-page .chapter-console-page__grid {
-    grid-template-columns: minmax(240px, 280px) minmax(0, 1fr);
+    grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
   }
 
   .novel-writing-page .chapter-console-page__column--right {

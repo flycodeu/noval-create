@@ -166,6 +166,29 @@
   flex-wrap: wrap;
 }
 
+.project-topbar__mode-meta {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding-right: 4px;
+}
+
+.project-topbar__mode-meta-label {
+  color: var(--project-topbar-text-soft);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.project-topbar__mode-meta-value {
+  color: var(--project-topbar-text);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
 .project-topbar__control.ant-btn,
 .project-topbar__control {
   flex-shrink: 0;
@@ -369,6 +392,10 @@
     padding-inline: 0px;
     width: 100%;
     justify-content: space-between;
+  }
+
+  .project-topbar__mode-meta-label {
+    display: none;
   }
 
   .project-topbar__workspace-summary {
