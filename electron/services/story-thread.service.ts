@@ -26,7 +26,11 @@ import {
 } from './generation-history.service'
 import { createTask, executeChatTask, runChatTask, updateTask } from './task.service'
 import { runAssetQualityLoop, summarizeAssetQualityWarnings } from './asset-quality.service'
-import { appendVariationMessage } from './variation-control.service'
+import {
+  appendVariationMessage,
+  buildVariationDigest,
+  isRejectedDigestTooSimilar,
+} from './variation-control.service'
 import { throwUserFacingError } from '../utils/user-facing-error'
 import { listForeshadowLedger } from './endgame-asset.service'
 
@@ -1137,6 +1141,15 @@ export async function generateStoryThreadBatchChunk(
           markRejected(historyId)
           throw error
         }
+        const candidateDigest = buildVariationDigest(JSON.stringify(parsed))
+        if (isRejectedDigestTooSimilar(candidateDigest, rejectedDigests)) {
+          markRejected(historyId)
+          resultPayload = {
+            ids: [],
+            warnings: [`第 ${runtime.batchIndex || 1}/${runtime.totalBatches || 1} 批线程与近期拒绝结果过于相近，已自动跳过。`],
+          }
+          return resultPayload
+        }
 
         let acceptedInBatch = 0
         const createdIds: number[] = []
@@ -1308,6 +1321,12 @@ export async function generateStoryThreads(
         markRejected(historyId)
         throw error
       }
+      const candidateDigest = buildVariationDigest(JSON.stringify(parsed))
+      if (isRejectedDigestTooSimilar(candidateDigest, rejectedDigests)) {
+        markRejected(historyId)
+        warnings.push(`第 ${Math.floor(offset / batchSize) + 1} 批线程与近期拒绝结果过于相近，已自动跳过。`)
+        continue
+      }
       let acceptedInBatch = 0
 
       for (const item of parsed) {
@@ -1447,6 +1466,11 @@ export async function regenerateStoryThread(
   try {
     parsed = acceptedCandidate || cleanAiValue(safeParseAiJson<GeneratedStoryThread>(result, 'object'))
   } catch {
+    markRejected(historyId)
+    return current
+  }
+  const candidateDigest = buildVariationDigest(JSON.stringify(parsed))
+  if (isRejectedDigestTooSimilar(candidateDigest, rejectedDigests)) {
     markRejected(historyId)
     return current
   }

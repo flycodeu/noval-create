@@ -2,475 +2,436 @@
 
 更新时间：2026-05-03  
 角色：Agent 1（项目审计与方案设计）  
-适用对象：Agent 2 仅按本计划编码；Agent 3 按本计划验收
+适用对象：Agent 2 仅按本计划编码；Agent 3 按本计划验收  
+范围限定：仅覆盖 `docs/todo/41-功能缺陷与改进清单.md` 中以下 3 项：
+
+1. `Writing` 拆分
+2. 正文内容级断点恢复
+3. 非章节生成链路的重试去重一致性
 
 ## 修复目标
 
-本轮修复目标不是新增一套新系统，而是在现有 AI 小说工作台基础上，完成以下结果：
+本轮修复目标是把这 3 项从“部分基础存在但未闭环”推进到“可用、可验证、可回归”的状态：
 
-1. 消除小说主工作区高频页面的“整页切换 / 整页转圈 / 明显重载感”。
-2. 统一主流程页面的加载与刷新模式，确保首屏加载一次、后续刷新尽量局部进行。
-3. 修复模板系统等后台页的布局、操作区、颜色与交互，使其与当前工作区视觉和行为标准一致。
-4. 保证 AI 小说核心闭环可连续使用：
-   - 立项
-   - 世界观 / 角色 / 势力 / 地图 / 物品 / 线程 / 结构
-   - 章节合同
-   - 正文生成 / 编辑
-   - 章后回写
-   - 修订
-   - 质量检查
-5. 保持现有持久化链路可用，不因局部修复破坏已有功能。
+1. `Writing` 从超大单文件降级为“容器 + 真实子视图”结构，避免后续继续堆积。
+2. 章节正文在生成中断后，用户能看到保留下来的部分内容，并且可以明确选择“从断点继续”或“重新开始”。
+3. 非章节生成链路在重试时具备统一的变体注入、相似度后置判重和拒绝重试策略，避免“看起来重试了，实际上还是同一结果”。
 
 ## 本轮范围
 
 ### 纳入本轮
 
-- 小说主工作区高频页面体验修复
-- 模板系统体验修复
-- 提示词系统基础体验对齐
-- 主流程状态回灌与页面刷新模式统一
-- 必要的类型、错误处理、基础交互补齐
+- `src/pages/Novel/Writing` 的真实视图拆分
+- 章节写作链路的内容级恢复状态、继续入口和续写数据流
+- 非章节生成服务的去重一致性补齐
+- 与上述功能直接相关的类型、状态、保存逻辑、错误提示和基础交互
+- 必要的任务中心 / 写作页恢复提示联动
 
 ### 不纳入本轮
 
-- 删除旧 guided 页面
-- 大规模替换 Zustand 方案
-- 大范围数据库 schema 重构
-- 全局样式系统重建
-- 所有页面全面视觉重做
+- `Writing` 全量架构重写
+- 新增不必要的 `SettingsView`
+- 模型协议级“真正断点续传”
+- 所有生成服务统一抽象大重写
+- 无关页面的样式或主题整改
 
-## P0 / P1 / P2 优先级
+## P0 / P1 / P2
 
 ## P0
 
-### P0-1 工作区高频页去整页 loading
-
-目标页面：
-
-- `src/pages/Novel/Writing/index.tsx`
-- `src/pages/Novel/Contracts/index.tsx`
-- `src/pages/Novel/Studio/index.tsx`
-- `src/pages/Novel/QualityDashboard/index.tsx`
-- `src/pages/Novel/WritebackCenter/index.tsx`
-- `src/pages/Novel/Timeline/useTimelineWorkspace.ts`
+### P0-1 `Writing` 真实拆分
 
 要求：
 
-- 首屏无数据时允许显示整页 loading
-- 页面已有内容时，刷新、保存后回拉、切换子页签时不得清空整页
-- 使用轻量刷新提示、局部 loading 或按钮 loading 替代整页 spinner
+- `src/pages/Novel/Writing/index.tsx` 不再承载全部视图细节
+- `EditorRoute / ContextRoute / ReviewRoute / HistoryRoute` 变成真实 View，不再只是 `content` 包装器
+- 主文件只保留：
+  - 数据获取与派生
+  - 行为函数装配
+  - 路由切换
+  - 共享状态下发
 
-### P0-2 模板系统修复
-
-目标页面：
-
-- `src/pages/TemplateManager/index.tsx`
-
-要求：
-
-- 统一卡片布局、按钮尺寸、只读态与编辑态表现
-- 首屏加载与后续刷新分离
-- 内置模板查看与自定义模板编辑体验更清晰
-- 样式不得再出现浅色文字难辨认、按钮突兀、卡片区密度失衡
-
-### P0-3 主流程保存后状态回灌一致性
-
-重点页面：
-
-- `Overview`
-- `ProjectBrief`
-- `Premise`
-- `CoreSettings`
-- `ThemeVoice`
-- `WorldRules`
-- `Endgame`
-- `Contracts`
-- `Writing`
-- `WritebackCenter`
-- `RevisionCenter`
-- `QualityDashboard`
+### P0-2 正文内容级断点恢复
 
 要求：
 
-- 保存成功后刷新当前页面必要数据
-- 触发工作区 mutation / stats / blocker / next step 所需回灌
-- 不允许保存成功但工作区顶部/工作台仍显示旧 blocker
+- 中断后保留当前已生成正文
+- 用户能明确看到“可从断点继续”
+- 用户能区分：
+  - 从断点继续
+  - 重新开始
+- 续写链路会把现有正文作为 continuation context 注入，而不是直接重跑整章
 
 ## P1
 
-### P1-1 提示词系统体验对齐
+### P1-1 非章节生成链路的后置相似度判重补齐
 
-目标页面：
+优先补齐这些已使用 rejected digest / variation message 的服务：
 
-- `src/pages/PromptManager/index.tsx`
-
-要求：
-
-- 移除纯整页 loading
-- 对齐模板系统的布局标准
-- 明确只读 / 编辑 / 删除 / 保存反馈
-
-### P1-2 新旧页面职责收口
-
-涉及：
-
-- `src/pages/Novel/index.tsx`
-- `src/pages/Novel/workflow.ts`
-- `src/shared/novel-workspace.ts`
-- `src/pages/Novel/Guide/index.tsx`
-- `src/pages/Novel/ProjectBrief/index.tsx`
-- `src/pages/Novel/Premise/index.tsx`
-- `src/pages/Novel/CoreSettings/index.tsx`
+- `electron/services/character.service.ts`
+- `electron/services/timeline.service.ts`
+- `electron/services/story-thread.service.ts`
+- `electron/services/item.service.ts`
+- `electron/services/faction.service.ts`
 
 要求：
 
-- 不删除旧页，但明确当前主入口顺序
-- 避免继续在旧兼容页上叠加新逻辑
-- 保证 next step、导航、推荐入口都以当前工作区模块为主
+- 对最终接受候选做 `isCandidateTooSimilar()` 判定
+- 相似则标记拒绝并进入下一次尝试或返回明确 warning
 
-### P1-3 工作区公共刷新规范
+### P1-2 覆盖较弱链路纳入统一策略
 
-涉及：
+重点核对并补齐：
 
-- `src/pages/Novel/index.tsx`
-- `src/pages/Novel/workspace-shortcuts.tsx`
-- `src/pages/Novel/workspace-quality-context.tsx`
-- 页面级 `notifyWorkspaceMutation` 接入点
+- `electron/services/map.service.ts`
+- `electron/services/core-settings.service.ts`
+- `electron/services/world-rules.service.ts`
 
 要求：
 
-- 形成统一规则：
-  - 首屏加载
-  - 轻刷新
-  - 保存后回灌
-  - 错误回退
+- 至少接入统一的 rejected digest / variation prompt / similarity post-check 中的缺失部分
+- 不为此重写整套生成框架
 
 ## P2
 
-### P2-1 状态层归一化预留
+### P2-1 `Writing` 进一步 hook 化
 
-涉及：
+如果在 P0 完成后仍有余量，可继续把 `index.tsx` 中的数据装配继续抽成 hook，例如：
 
-- `src/stores/workspace.store.ts`
-- 若干页面内部状态
+- `useWritingWorkspace`
+- `useWritingGeneration`
 
-本轮只允许小幅补强，不做大重构。
-
-### P2-2 领域模型和跨模块联动增强
-
-涉及：
-
-- `src/shared/*`
-- `electron/services/*`
-
-本轮只记录，不作为通过条件。
+但这不是本轮通过的硬条件。通过条件是“真实视图拆分完成”，不是“必须引入新 hook 名称”。
 
 ## 涉及文件
 
-### 核心工作区与路由
+### 文档与状态判定
 
-- `src/App.tsx`
-- `src/pages/Novel/index.tsx`
-- `src/shared/novel-workspace.ts`
-- `src/pages/Novel/workflow.ts`
-- `src/stores/workspace.store.ts`
+- `docs/todo/41-功能缺陷与改进清单.md`
 
-### P0 页面
+### `Writing` 拆分
 
-- `src/pages/Novel/Studio/index.tsx`
 - `src/pages/Novel/Writing/index.tsx`
-- `src/pages/Novel/Contracts/index.tsx`
-- `src/pages/Novel/QualityDashboard/index.tsx`
-- `src/pages/Novel/WritebackCenter/index.tsx`
-- `src/pages/Novel/Timeline/useTimelineWorkspace.ts`
-- `src/pages/TemplateManager/index.tsx`
+- `src/pages/Novel/Writing/routes/EditorRoute.tsx`
+- `src/pages/Novel/Writing/routes/ContextRoute.tsx`
+- `src/pages/Novel/Writing/routes/ReviewRoute.tsx`
+- `src/pages/Novel/Writing/routes/HistoryRoute.tsx`
+- 允许新增：
+  - `src/pages/Novel/Writing/components/*`
+  - `src/pages/Novel/Writing/hooks/*`
+  - `src/pages/Novel/Writing/types.ts`
 
-### 可能需要同步调整的样式 / 公共组件
+### 断点恢复
 
-- `src/styles/global.css`
-- `src/pages/Novel/Writing/index.css`
-- `src/components/novel/cards/cards.css`
-- `src/components/novel/common/ActionBar.tsx`
-- `src/components/novel/common/SectionHeader.tsx`
-- `src/pages/Novel/components/WorkspaceShell.tsx`
+- `electron/services/chapter.service.ts`
+- `electron/services/task.service.ts`
+- `src/pages/Novel/Writing/index.tsx`
+- `src/pages/TaskCenter/index.tsx`
+- `src/stores/task.store.ts`
+- 如有必要：
+  - `src/types/index.ts`
+  - `electron/preload.ts`
+  - `electron/main.ts`
 
-### P1 页面
+### 非章节去重一致性
 
-- `src/pages/PromptManager/index.tsx`
-- `src/pages/Novel/Guide/index.tsx`
-- `src/pages/Novel/Overview/index.tsx`
-- `src/pages/Novel/ProjectBrief/index.tsx`
-- `src/pages/Novel/Premise/index.tsx`
-- `src/pages/Novel/CoreSettings/index.tsx`
-- `src/pages/Novel/ThemeVoice/index.tsx`
-- `src/pages/Novel/WorldRules/index.tsx`
-- `src/pages/Novel/Endgame/index.tsx`
+- `electron/services/variation-control.service.ts`
+- `electron/services/character.service.ts`
+- `electron/services/timeline.service.ts`
+- `electron/services/story-thread.service.ts`
+- `electron/services/item.service.ts`
+- `electron/services/faction.service.ts`
+- `electron/services/map.service.ts`
+- `electron/services/core-settings.service.ts`
+- `electron/services/world-rules.service.ts`
 
 ## 推荐页面结构
 
-### 1. 工作区页面统一结构
+本节只针对 `Writing`。
 
-适用于高频工作区页：
+建议结构：
 
-1. 顶部工具栏 / 标题区
-2. 顶部轻刷新提示区
-3. 主内容区域
-4. 局部操作区
-5. 错误/空态区
+1. `index.tsx`
+   - 负责加载当前小说 / 当前章节 / 当前任务 / 当前流状态
+   - 负责生成行为、保存行为、恢复行为的入口函数
+   - 负责把共享 props 下发给 4 个路由视图
 
-统一规则：
+2. `EditorRoute`
+   - 章节列表
+   - 合同区
+   - 编辑器
+   - 流式生成区
+   - 继续 / 重开入口
 
-- 首屏无数据时允许全页 loading
-- 一旦页面已有内容，刷新只更新局部数据，不得把整个主内容替换为 spinner
-- 按钮 loading 只作用于对应动作，不扩大到整页
+3. `ContextRoute`
+   - 上下文召回、世界事实、地点状态、角色状态、伏笔与质量约束
 
-### 2. 管理后台页统一结构
+4. `ReviewRoute`
+   - 发布前检查
+   - 合同兑现
+   - AI 体检
+   - 修订建议
 
-适用于模板系统、提示词系统：
+5. `HistoryRoute`
+   - 版本列表
+   - 版本预览
+   - 恢复历史版本
 
-1. `WorkspacePage`
-2. 统计 metrics
-3. 主列表/卡片区
-4. 详情或编辑弹窗/侧栏
-5. 顶部轻刷新状态
+要求：
 
-统一规则：
-
-- 分类切换不重新整页 loading
-- 新建/编辑/删除后列表轻刷新
-- 内置资源与自定义资源在视觉上明显区分
+- 4 个路由文件必须有真实 JSX 和明确 props
+- 不允许继续把完整 JSX 拼好后当作 `content` 传入空壳 route
 
 ## 推荐数据结构
 
-### 1. 页面加载状态规范
+### 1. `Writing` 共享视图模型
 
-建议每个高频页统一采用：
+建议最少抽出一个共享 props 类型，避免 4 个 route 各自重新从主文件闭包拿状态：
 
 ```ts
-type PageLoadState = {
-  loading: boolean
+type WritingRouteSharedProps = {
+  novelId: number
+  currentChapter: Chapter | null
+  chapters: Chapter[]
   refreshing: boolean
-  saving: boolean
-  loadedOnce: boolean
-  error?: string | null
+  currentChapterGenerating: boolean
+  streamContent: string
+  chapterWritability: ...
+  publishCheck: ...
+  reviewNotes: ...
+  chapterVersions: ChapterVersion[]
+  selectedVersion: ChapterVersion | null
+  onRefreshChapter: (chapterId: number) => Promise<void>
+  onGenerate: () => Promise<void>
+  onResumeFromDraft?: () => Promise<void>
+  onRestartGeneration?: () => Promise<void>
+  ...
 }
 ```
 
-最小要求：
+重点是“共享视图模型清晰”，不要求一次性把所有类型抽到最完美。
 
-- `loading`: 只用于首次且页面无内容
-- `refreshing`: 用于后续数据同步
-- `saving`: 用于提交动作
-- `loadedOnce`: 判断是否允许继续显示旧内容
+### 2. 章节内容级恢复状态
 
-### 2. 工作区回灌触发
-
-建议统一遵循：
+建议在章节流水线和前端视图之间补一个显式恢复对象：
 
 ```ts
-save -> local state update / refetch current page
-     -> notifyWorkspaceMutation()
-     -> refresh workflow stats / blocker snapshot if needed
-```
-
-不要求新增全局 store，但要求行为一致。
-
-### 3. 模板/提示词后台页列表模型
-
-建议最少拆分：
-
-```ts
-type ResourceListState<T> = {
-  rows: T[]
-  loading: boolean
-  refreshing: boolean
-  saving: boolean
-  activeType: string
-  selectedId?: number | string | null
+type ChapterDraftResumeState = {
+  chapterId: number
+  taskId: number
+  status: 'interrupted' | 'resume_available' | 'resuming' | 'unavailable'
+  partialContent: string
+  reason?: 'network' | 'timeout' | 'cancelled' | 'failed' | 'unknown'
+  updatedAt?: string
 }
 ```
+
+最小实现要求：
+
+- 能表达“当前章存在中断草稿”
+- 能带出 `partialContent`
+- 能区分恢复原因
+
+### 3. 非章节生成统一判重输入
+
+建议统一采用：
+
+```ts
+type SimilarityGuardInput = {
+  candidateText: string
+  rejectedDigests: string[]
+  acceptedDigests?: string[]
+  threshold?: number
+}
+```
+
+本轮不一定要新建公共类型文件，但服务层逻辑应统一使用同一判断模式：
+
+- 先拿 rejected digests
+- 生成候选
+- 质量审校
+- 解析候选
+- 构造候选摘要
+- 用 `isCandidateTooSimilar()` 对比
+- 相似则拒绝并记录
 
 ## 具体实现步骤
 
-## 第一步：统一工作区加载策略
+## 第一步：完成 `Writing` 真实拆分
 
-执行顺序：
+建议顺序：
 
-1. 以 `Studio` 现有实现为基线，抽取可复用模式
-2. 修 `Writing`
-3. 修 `Contracts`
-4. 修 `QualityDashboard`
-5. 修 `WritebackCenter`
-6. 修 `Timeline` 工作区 hook
+1. 读取 `Writing/index.tsx` 中 4 块核心 JSX
+2. 为 4 个 route 设计共享 props
+3. 把以下内容下沉到 route 或组件中：
+   - 编辑生产区
+   - 上下文区
+   - 审校区
+   - 历史区
+4. 主文件只保留装配与状态逻辑
 
-具体要求：
+实施限制：
 
-- 将“首次加载”和“后续刷新”分开
-- 删除或收敛以下模式：
-  - `if (loading) return <Spin />`
-  - `setLoading(true)` 直接覆盖已有内容的刷新逻辑
-- 保留现有页面内容，在顶部或局部显示：
-  - “正在同步...”
-  - 对应按钮 loading
+- 不做整页视觉重写
+- 不改变已有业务能力
+- 不引入无必要的新页面
 
-## 第二步：修复正文生产链路体验
+## 第二步：实现正文内容级断点恢复
 
-目标：
+建议顺序：
 
-- `Contracts -> Writing -> WritebackCenter -> QualityDashboard`
+1. 复用任务失败/取消时已有的 `outputText`
+2. 为章节生成链路增加“中断正文草稿”的可识别状态
+3. 在写作页或任务中心展示：
+   - 已中断
+   - 已保留多少内容
+   - 继续 / 重开
+4. 为“继续”实现新的 continuation 生成逻辑：
+   - 原始上下文仍保留
+   - 已生成正文作为“已完成部分”
+   - 明确要求模型只续写后续内容，不重写已有部分
+5. 为“重开”保留现有整章重跑逻辑
 
-要求：
+实施限制：
 
-- 从合同页进入正文页，不应感知整页重建
-- 正文页切章节、回看历史、做 AI 检查、保存后，不应反复整页清空
-- 回写执行后，应回灌当前运行状态和下一章可写性提示
-- 质量页刷新不应丢失当前面板上下文
+- 不要求底层模型 API 支持真正断点续传
+- 只做业务级续写
+- 如果当前上下文不满足续写条件，要明确提示原因
 
-## 第三步：模板系统整改
+## 第三步：补齐 5 个已接入变体控制服务的相似度后置判重
 
-目标页面：
+服务范围：
 
-- `src/pages/TemplateManager/index.tsx`
+- `character`
+- `timeline`
+- `story-thread`
+- `item`
+- `faction`
 
-具体要求：
+建议统一处理模式：
 
-1. 增加 `refreshing`
-2. 分类切换不触发整页 loading
-3. 新建、编辑、删除后列表轻刷新
-4. 查看按钮、编辑按钮、删除按钮统一尺寸与视觉层级
-5. 内置模板只读态清晰
-6. 内容预览区文字颜色、对比度、间距统一
-7. 弹窗中只读模板不应给人“像能编辑但又写不进去”的混乱感
+1. 生成原始输出
+2. 通过质量审校
+3. 解析为候选对象
+4. 为候选生成可比较摘要
+5. 与 rejected digests / 必要时 accepted candidates 比较
+6. 若过近：
+   - `markRejected(historyId)` 或等价拒绝处理
+   - 触发下一次尝试，或返回无效变体 warning
 
-## 第四步：提示词系统基础对齐
+## 第四步：补齐覆盖较弱链路
 
-目标页面：
+服务范围：
 
-- `src/pages/PromptManager/index.tsx`
+- `map.service.ts`
+- `core-settings.service.ts`
+- `world-rules.service.ts`
 
-要求：
+建议优先级：
 
-- 采用和模板页同类的加载/刷新策略
-- 保持现有持久化接口不变
-- 清理明显的整页 loading 体验
+1. 先确认每条链路是否已有重试入口
+2. 缺 variation prompt 的先补 `appendVariationMessage`
+3. 缺 rejected digest 的补历史拒绝摘要
+4. 最后加相似度 post-check
 
-## 第五步：主流程状态回灌补齐
+实施限制：
 
-重点：
+- 不重写 `map` 的 JSON 修复和质量审校框架
+- 不重写 `core-settings` 整个生成步骤编排
+- 不扩大到无关资产服务
 
-- 所有会影响 blocker / next step / readiness 的页面，在保存成功后都必须：
-  - 刷新本页关键数据
-  - 调用工作区 mutation 通知
-  - 让 `Studio` / `Guide` / 顶部推荐下一步尽快看到新状态
-
-优先页面：
-
-- `Overview`
-- `ProjectBrief`
-- `Premise`
-- `CoreSettings`
-- `ThemeVoice`
-- `WorldRules`
-- `Endgame`
-- `Contracts`
-- `Writing`
-- `WritebackCenter`
-
-## 第六步：验证与回归
+## 第五步：运行验证
 
 Agent 2 完成后必须运行：
 
 - `npm run typecheck`
 - `npm run lint`
 - `npm run test:unit`
-- `npm run build:app`
+- `npm run build`
 
-如其中某项因为仓库现有历史问题失败，必须在 `implementation-report.md` 中写清：
+如某项失败，必须在 `.agent/implementation-report.md` 明确写明：
 
-- 失败命令
-- 失败原因
+- 命令
+- 结果
 - 是否与本轮修改直接相关
 
 ## 验收标准
 
-### 功能标准
+## A. `Writing` 拆分标准
 
-- 主工作区页面能正常进入
-- 主流程核心页可编辑、可保存、可返回、可继续操作
-- 模板系统可查看、创建、编辑、删除
-- 提示词系统基本可用且无明显整页转圈
+- 4 个 route 文件不再是空壳
+- `Writing/index.tsx` 不再独占全部视图逻辑
+- 主文件主要承担装配职责
+- 原有章节编辑、生成、审校、历史恢复能力未回归
 
-### 体验标准
+## B. 正文内容级断点恢复标准
 
-- 切换小说工作区主菜单时，不应出现频繁整页 spinner
-- 页面已有内容时，刷新不得清空整页
-- 顶部刷新提示、按钮 loading、局部同步提示要清晰但不过度打断
-- 模板系统布局、按钮尺寸、文案颜色协调
+- 中断时保留部分正文
+- 用户可见中断状态
+- 用户可区分“继续”与“重开”
+- “继续”确实基于已有内容续写，而不是简单整章重跑
+- 网络错误、超时、取消至少在提示层可区分
 
-### 业务标准
+## C. 非章节去重一致性标准
 
-- 小说核心链路可走通：
-  - 设定
-  - 结构
-  - 合同
-  - 正文
-  - 回写
-  - 修订/质量
-- 保存后 blocker / next step 有同步更新能力
+- 已纳入范围的 5 个服务都具备后置相似度判重
+- `map / core-settings / world-rules` 中本轮锁定的生成链路完成缺口补齐
+- 重试结果若与拒绝候选过近，会被自动拒绝或明确返回 warning
+- 不破坏原有质量审校、JSON 解析和入库逻辑
 
-### 工程标准
+## D. 工程标准
 
-- TypeScript 无新增阻塞错误
-- lint 无新增阻塞错误
-- build 无阻塞错误
-- 不回退无关文件改动
+- 无新增 TypeScript 阻塞错误
+- 无新增 lint 阻塞错误
+- build 不阻塞
+- 不回退无关改动
 
 ## 风险控制
 
-### 风险 1：并行代理或主线程同时改业务文件
+### 风险 1：`Writing` 拆分扩大成重构工程
 
 控制：
 
-- Agent 2 修改前先读取目标文件当前状态
-- 不回退他人改动
-- 仅做最小必要编辑
+- 只拆真实视图层
+- 不追求一次性完美 hook/store 架构
+- 主文件降复杂度优先于“架构漂亮”
 
-### 风险 2：正文页/时间轴页过大，改 loading 容易引入回归
-
-控制：
-
-- 只改加载态与刷新态，不改核心业务分支
-- 保留原有 API 调用与保存逻辑
-- 先让旧内容保活，再逐步局部刷新
-
-### 风险 3：模板/提示词页样式调整影响全局
+### 风险 2：内容恢复误做成整章重跑
 
 控制：
 
-- 尽量使用页面级 class
-- 避免继续向 `global.css` 堆无边界覆盖
+- Agent 2 必须明确新增“继续”与“重开”两条路径
+- Agent 3 必须核查 continuation prompt / data flow 确实使用了已生成正文
 
-### 风险 4：工作区状态回灌引起重复请求
-
-控制：
-
-- 使用已有 `notifyWorkspaceMutation` 与明确依赖
-- 避免把 `location.pathname` 重新放回重刷依赖中
-
-### 风险 5：为了追求统一而扩大重构范围
+### 风险 3：相似度判重误伤有效候选
 
 控制：
 
-- 严格只做本计划内范围
-- P0 完成优先于 P1、P2
-- 不新增无必要抽象层
+- 先复用现有阈值 `0.72`
+- 优先比较摘要而非全量大对象
+- 只在“明显过近”时拒绝
+
+### 风险 4：服务层修改过多引发回归
+
+控制：
+
+- 先修已有 rejected-digest 的 5 个服务
+- 再补覆盖较弱链路
+- 每个服务只做最小必要修改，不做统一大抽象
+
+### 风险 5：Todo 进度更新失真
+
+控制：
+
+- 只有代码、验证、验收都完成后，才允许更新 `docs/todo/41-功能缺陷与改进清单.md`
+- 若只完成部分，必须使用“基础已修复”或“部分修复”，不得直接写“已完成”
 
 ## 本轮通过条件
 
-1. P0 全部完成
-2. P1 无重大缺口
-3. 小说主流程核心链路可用
-4. 页面能正常进入、编辑、保存、返回、继续操作
+1. `Writing` 拆分完成，空壳 route 被真实视图替换
+2. 正文内容级断点恢复可用
+3. 非章节去重一致性完成本计划范围内补齐
+4. 主流程相关操作仍可进入、编辑、保存、继续
 5. 无明显 TypeScript / lint / build 阻塞错误
-6. Agent 3 评审结论为 PASS
+6. Agent 3 评审结论为 `PASS`
 7. 平均验收评分 >= 90

@@ -133,6 +133,11 @@
   margin-bottom: 40px;
 }
 
+.novel-list-page__wizard-note {
+  margin-bottom: 16px;
+  border-radius: var(--radius-m);
+}
+
 .novel-list-page__launch-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -37,6 +37,7 @@ import {
 import { cleanupCharacterSoftReferences } from './data-cascade.service'
 import { refreshWorldStateVersionsForNovel } from './world-state.service'
 import { throwUserFacingError } from '../utils/user-facing-error'
+import { buildVariationDigest, isRejectedDigestTooSimilar } from './variation-control.service'
 
 function asText(value: unknown): string {
   return typeof value === 'string' ? cleanAiFieldText(value) : ''
@@ -1186,6 +1187,11 @@ export async function generateProtagonist(novelId: number, opts: {
     }
 
     const nextParsed = acceptedCandidate || cleanAiValue(safeParseJson<Record<string, unknown>>(result))
+    const candidateDigest = buildVariationDigest(JSON.stringify(nextParsed))
+    if (isRejectedDigestTooSimilar(candidateDigest, rejectedDigests)) {
+      markRejected(historyId)
+      continue
+    }
     const candidateName = asText(nextParsed.full_name) || asText(nextParsed.name)
     if (!hasReservedCharacterName(candidateName, reservedNames)) {
       parsed = nextParsed
@@ -1372,6 +1378,19 @@ export async function generateCharacterBatchChunk(
         } catch (error) {
           markRejected(historyId)
           throw error
+        }
+        const candidateDigest = buildVariationDigest(JSON.stringify(parsed))
+        if (isRejectedDigestTooSimilar(candidateDigest, rejectedDigests)) {
+          markRejected(historyId)
+          resultPayload = {
+            ids: [],
+            majorGenerated: 0,
+            minorGenerated: 0,
+            antagonistGenerated: 0,
+            supportingGenerated: 0,
+            warning: `第 ${runtime.batchIndex || 1}/${runtime.totalBatches || 1} 批人物与近期拒绝结果过于相近，已自动跳过。`,
+          }
+          return resultPayload
         }
 
         const createdIds: number[] = []
@@ -1586,6 +1605,19 @@ export async function batchGenerateCharacters(novelId: number, opts: {
 
     try {
       const parsed = acceptedBatch || cleanAiValue(safeParseJson<Array<Record<string, unknown>>>(result))
+      const candidateDigest = buildVariationDigest(JSON.stringify(parsed))
+      if (isRejectedDigestTooSimilar(candidateDigest, rejectedDigests)) {
+        markRejected(historyId)
+        if (sender && !sender.isDestroyed()) {
+          sender.send('character:batch-progress', {
+            batch: generatedAttempts + 1,
+            total: Math.max(1, Math.ceil(totalCount / Math.max(1, opts.batchSize))),
+            newIds,
+          })
+        }
+        generatedAttempts += 1
+        continue
+      }
       for (const char of parsed) {
         const fallbackRole = roleQueue[newIds.length] || 'minor'
         const payload = buildCharacterPayload(char, {
@@ -1759,6 +1791,11 @@ export async function regenerateCharacter(id: number): Promise<typeof characters
   }
 
   const parsed = acceptedCandidate || cleanAiValue(safeParseJson<Record<string, unknown>>(result))
+  const candidateDigest = buildVariationDigest(JSON.stringify(parsed))
+  if (isRejectedDigestTooSimilar(candidateDigest, rejectedDigests)) {
+    markRejected(historyId)
+    return current
+  }
   const payload = buildCharacterPayload(parsed, {
     novelId: current.novelId,
     existing: current,

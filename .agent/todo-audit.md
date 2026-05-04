@@ -2,473 +2,299 @@
 
 更新时间：2026-05-03  
 角色：Agent 1（项目审计与方案设计）  
-约束：本轮只审计，不修改业务代码；仅输出 `.agent/*.md`
+范围限定：仅覆盖 `docs/todo/41-功能缺陷与改进清单.md` 尚未闭环的 3 个真实开发项：
 
-## 1. 审计范围与方法
+1. `Writing` 拆分
+2. 正文内容级断点恢复
+3. 非章节生成链路的重试去重一致性
 
-本次审计基于当前仓库实际代码扫描，重点覆盖以下区域：
+约束：本轮只审计，不修改业务代码；仅更新 `.agent/*.md`
 
-- 主工作区路由与页面装配
-  - `src/App.tsx`
-  - `src/pages/Novel/index.tsx`
-  - `src/shared/novel-workspace.ts`
-  - `src/pages/Novel/workflow.ts`
-- AI 小说主流程页面
-  - 立项/概览/基础设定/主题文风/世界规则/终局
-  - 角色/势力/地图/物品/词典/场景模板
-  - 线程/大纲/卷设计/结构/时间轴/信息差/伏笔/成长/阻力
-  - 章节合同/正文写作/章后回写/修订/质量
-- 管理后台页
-  - `src/pages/TemplateManager/index.tsx`
-  - `src/pages/PromptManager/index.tsx`
-- 状态与持久化
-  - `src/stores/workspace.store.ts`
-  - `src/stores/novel.store.ts`
-  - `electron/preload.ts`
-  - 各类 `window.electron.*` 调用链
-- 风险扫描
-  - `TODO` / `FIXME` / `TBD`
-  - 占位页、未完成按钮、mock 依赖、整页 loading / spinner、样式混乱
+## 1. 审计方法与覆盖文件
 
-使用的扫描方式：
+本轮基于当前仓库代码直接扫描以下区域：
 
-- 全仓 `rg` 扫描 `TODO|FIXME|TBD|placeholder|mock|Spin|loading`
-- 扫描小说工作区相关文件树
-- 读取主路由、工作区共享定义、关键页面、模板系统、写作页和工作台页代码片段
-- 交叉核对前端是否已接入 Electron 持久化桥
+- `docs/todo/41-功能缺陷与改进清单.md`
+- `src/pages/Novel/Writing/index.tsx`
+- `src/pages/Novel/Writing/routes/EditorRoute.tsx`
+- `src/pages/Novel/Writing/routes/ContextRoute.tsx`
+- `src/pages/Novel/Writing/routes/ReviewRoute.tsx`
+- `src/pages/Novel/Writing/routes/HistoryRoute.tsx`
+- `src/stores/task.store.ts`
+- `src/pages/TaskCenter/index.tsx`
+- `electron/services/chapter.service.ts`
+- `electron/services/task.service.ts`
+- `electron/services/variation-control.service.ts`
+- `electron/services/character.service.ts`
+- `electron/services/timeline.service.ts`
+- `electron/services/story-thread.service.ts`
+- `electron/services/item.service.ts`
+- `electron/services/faction.service.ts`
+- `electron/services/map.service.ts`
+- `electron/services/core-settings.service.ts`
+- `electron/services/world-rules.service.ts`
 
-## 2. 总体结论
+本次审计不讨论其它页面、不重新扩展需求，也不把“建议优化”误判为“必须本轮开发”。
 
-当前仓库不是“缺主流程页面”的状态，而是“主流程页面基本齐全，但存在三类结构性问题”：
+## 2. 总结结论
 
-1. 工作区体验已从旧版逐步迁移到新版，但仍存在新旧工作流并存、部分页面仍采用整页 loading 的问题。
-2. 数据持久化大体已接通，大多数关键页面都直接调用 `window.electron.*` 保存；主要短板不在“完全没保存”，而在“刷新策略、状态回灌、页面切换体验、模块间闭环提示不统一”。
-3. 模板系统、提示词系统、部分生产页的 UI/交互标准没有跟小说工作区统一，导致体验断层明显。
+这 3 项里，当前仓库的真实状态不是“完全没有基础”，而是：
 
-结论上：
+1. `Writing` 页已经有完整业务能力，但结构失控，拆分只停留在懒加载壳文件层面。
+2. 章节恢复能力现在只到“任务级/流水线级重跑”，没有做到“基于已生成正文继续写”的内容级恢复。
+3. 非章节生成链路已经有部分变体控制基础，但接入程度不一致，且多个服务缺少最终输出相似度判重。
 
-- 主流程闭环基础已存在。
-- P0 不应再做“从零补页面”，而应优先修“工作区切换与刷新策略、主链路页面体验一致性、模板系统交互质量”。
-- P1 才是继续统一后台管理页、减少新旧页面并存、收拢状态流。
-- P2 适合处理结构性重构和更深层的数据模型归一。
+因此本轮的正确方向应是：
 
-## 3. 扫描结果摘要
+- 不做大架构重写。
+- 在现有能力上补齐真正缺口。
+- 优先打通业务闭环，再做有限度的结构收口。
 
-### 3.1 TODO / FIXME / TBD
+## 3. 审计项一：Writing 拆分
 
-显式 `TODO/FIXME/TBD` 非常少，未发现大量注释式待办堆积。说明当前技术债主要不是“留了 TODO 没做”，而是已经落地实现中存在：
+### 3.1 当前实现现状
 
-- 老逻辑残留
-- 页面间模式不一致
-- 状态流分散
-- 局部体验劣化
+`src/pages/Novel/Writing/index.tsx` 目前约 4097 行，单文件承载：
 
-仅扫描到少量业务文本中的 `TBD`，不构成计划依据。
+- 页面数据加载
+- 章节切换
+- 生成状态
+- 流式正文展示
+- 合同 / 上下文 / 审校 / 历史四块视图内容
+- 多种模态框、按钮交互、保存与生成逻辑
 
-### 3.2 路由与页面接入状态
+代码中虽已存在懒加载路由：
 
-顶层路由已接入：
+- `WritingEditorRoute`
+- `WritingContextRoute`
+- `WritingReviewRoute`
+- `WritingHistoryRoute`
 
-- `src/App.tsx`
-  - `/novels`
-  - `/novels/:id/*`
-  - `/templates`
-  - `/prompts`
-  - `/tasks`
-  - `/models`
+但对应文件目前都只是空壳包装：
 
-小说工作区主路由已接入：
+- `src/pages/Novel/Writing/routes/EditorRoute.tsx`
+- `src/pages/Novel/Writing/routes/ContextRoute.tsx`
+- `src/pages/Novel/Writing/routes/ReviewRoute.tsx`
+- `src/pages/Novel/Writing/routes/HistoryRoute.tsx`
 
-- `src/pages/Novel/index.tsx`
-- `src/shared/novel-workspace.ts`
+其内容仅为：
 
-工作区模块定义完整，覆盖：
+- 接收 `content: React.ReactNode`
+- 直接返回 `<>content</>`
 
-- 基础信息 / 项目立项 / 基础设定 / 主题与文风 / 世界规则 / 终局设计
-- 地图 / 角色 / 势力 / 物品 / 词典 / 场景模板
-- 故事线程 / 故事设计 / 大纲 / 卷级设计 / 结构 / 时间轴 / 信息差 / 伏笔 / 成长 / 阻力
-- 合同 / 正文 / 回写 / 修订 / 质量 / 回滚台
+这说明“拆分”现在只完成了路由占位，没有完成真实视图职责下沉。
+
+### 3.2 已有可复用切分点
+
+`Writing/index.tsx` 中已经天然形成了 4 类内容块：
+
+- 编辑生产区
+  - 章节列表
+  - 合同面板
+  - 编辑器
+  - 生成/保存/审校/定稿入口
+- 上下文区
+  - `contextSections`
+  - `chapterContextPreview`
+  - `storyMemory`
+  - `publishCheck` / `foreshadow` / `reveal` 等信息
+- 审校区
+  - `reviewInsightContent`
+  - `acceptanceCards`
+  - `qualityIssueItems`
+  - `AIScorePanel`
+- 历史区
+  - `chapterVersions`
+  - `selectedVersion`
+  - 恢复版本逻辑
+
+同时已有部分公共组件可复用：
+
+- `ContractPanel`
+- `ContextPanel`
+- `PipelineBar`
+- `VersionTimeline`
+- `SectionHeader`
+- `ActionBar`
+
+说明本轮无需重写 UI 框架，只需把 `index.tsx` 中的视图块和状态装配拆出来。
+
+### 3.3 真实缺口
+
+当前缺口主要有 4 个：
+
+1. 路由文件没有真正承载视图逻辑。
+2. `index.tsx` 同时掌握数据读取、行为函数、渲染细节，维护风险极高。
+3. 共享状态没有形成清晰边界，导致后续新增“恢复提示、重试、异常状态”会继续堆进主文件。
+4. 现有拆分目标里提到的 `SettingsView` 在当前代码中没有实际业务必要，如果强行补会扩大范围。
+
+### 3.4 审计判断
+
+本项属于真实未闭环项，应作为本轮 P0。
+
+通过标准不应是“把文件拆成很多个”，而应是：
+
+- 路由文件变成真实 View
+- 主文件降级为容器和装配层
+- 四个现有视图职责清楚
+- 不引入额外假页面
+
+## 4. 审计项二：正文内容级断点恢复
+
+### 4.1 当前实现现状
+
+当前仓库已经具备以下基础能力：
+
+1. 流式任务过程中，`task.service.ts` 会累计 `fullOutput`。
+2. 每次流式 chunk 会通过 `task:stream-chunk` 发给前端。
+3. 任务失败、取消、超限时，会把 `outputText: fullOutput || null` 写回任务记录。
+4. `TaskCenter` 已能查看 `selectedTask.outputText`，也能触发 `window.electron.chapter.resumeContent(task.id)`。
+5. `chapter.service.ts` 提供了 `resumeChapterPipeline(taskId, sender)`。
+
+### 4.2 当前恢复能力的真实边界
+
+`resumeChapterPipeline()` 当前逻辑是：
+
+- 找到根任务
+- 校验根任务必须是 `chapter_write`
+- 如果未在运行中，则直接重新调用 `generateChapterContent(rootTask.relatedEntityId, sender)`
+
+这意味着当前“恢复”本质上是：
+
+- 重新触发整章生成流水线
+- 不是从已生成正文继续写
+- 没有显式区分“从断点继续”与“从头重来”
+
+### 4.3 已保留但未闭环的基础
+
+当前已有两块可利用基础：
+
+1. 任务表里已有失败/取消时的 `outputText`
+2. 前端写作页已有流式展示能力：
+   - `activeGeneration.streamTaskId`
+   - `streams[streamTaskId]?.content`
+
+这两块能力说明：
+
+- “已生成正文丢光”的问题不是完全无解
+- 但它们还没有被组装成用户可用的“内容级续写”能力
+
+### 4.4 真实缺口
+
+当前缺口主要有 5 个：
+
+1. 没有持久化的“章节断点正文快照”概念，只有任务 `outputText`。
+2. 没有“这是中断草稿，可继续/重开”的业务状态展示。
+3. 没有显式的“从断点继续”动作入口。
+4. 没有把已生成正文作为 continuation context 注入新的写作请求。
+5. 没有针对“网络错误 / 超时 / 用户取消”做不同恢复提示。
+
+### 4.5 审计判断
+
+本项属于真实未闭环项，应列为本轮 P0。
+
+但本轮不应追求模型级真正“续传流”，而应实现：
+
+- 业务级内容恢复
+- 基于已生成正文继续生成后续内容
+- 用户可见、可选、可回退
+
+这是当前代码基础上最稳妥且可落地的实现边界。
+
+## 5. 审计项三：非章节生成链路的重试去重一致性
+
+### 5.1 当前共享能力现状
+
+`electron/services/variation-control.service.ts` 已提供：
+
+- `buildVariationDigest()`
+- `computeCandidateSimilarity()`
+- `isCandidateTooSimilar()`
+- `appendVariationMessage()`
+
+其中 `isCandidateTooSimilar(candidate, existingCandidates, threshold = 0.72)` 已是可复用的统一判重方法。
+
+### 5.2 已部分接入、但未闭环的服务
+
+以下服务已经使用：
+
+- `getRecentRejectedDigests()`
+- `appendVariationMessage()`
+
+但审计中未发现它们普遍使用 `isCandidateTooSimilar()` 对最终候选结果做后置相似度判重：
+
+- `electron/services/character.service.ts`
+- `electron/services/timeline.service.ts`
+- `electron/services/story-thread.service.ts`
+- `electron/services/item.service.ts`
+- `electron/services/faction.service.ts`
+
+这类服务的现状是：
+
+- 重试 prompt 已提示“要和之前不同”
+- 也会携带最近拒绝摘要
+- 但如果模型还是生成“结构相近、内容近似”的结果，当前多数链路不会统一拦截
+
+### 5.3 覆盖度更弱的服务
+
+以下链路未体现出与上述 5 个服务同等强度的变体控制覆盖：
+
+- `electron/services/map.service.ts`
+- `electron/services/core-settings.service.ts`
+- `electron/services/world-rules.service.ts`
 
 审计判断：
 
-- “未接入路由”不是当前主要问题。
-- 主要问题是“已接入，但体验和实现模式不一致”。
+- `map.service.ts` 已有 JSON 修复和质量审校，但没有看到统一 rejected-digest + 相似度后置判重接入。
+- `core-settings.service.ts` 的支线生成链路依赖 `generateSubplotBatch`，本轮应重点核对子链路的重试去重是否一致，而不是重写整个 Core Settings 流程。
+- `world-rules.service.ts` 存在世界规则分段生成，但当前未见统一接入本套 variation-control 的证据。
 
-### 3.3 新旧页面并存
+### 5.4 当前章节链路的对照基线
 
-检测到明显的新旧工作流并存：
+`chapter.service.ts` 已明确使用 `isCandidateTooSimilar()`，例如重写结果与初稿过近时会直接判定并切换变体重试。
 
-- `src/pages/Novel/index.tsx` 同时引入：
-  - `Guide`
-  - `ProjectBrief`
-  - `Premise`
-  - `CoreSettings`
-  - `Overview`
-  - 新工作区模块页
-- `src/pages/Novel/workflow.ts` 保留 guided workflow 逻辑
-- `src/pages/Novel/GuidedStep/index.tsx`
-- `src/pages/Novel/Premise/index.tsx`
-- `src/pages/Novel/ProjectBrief/index.tsx`
+这说明：
 
-风险：
+- 统一策略已经在章节链路证明可行
+- 本轮只是要把相同思路补齐到非章节链路
 
-- 用户认知上会出现“基础设定/立项/概览/引导页”职责重叠。
-- 代码层面会出现同一业务被多个页面维护的情况。
-- 工作区推荐下一步与实际编辑入口可能不完全一致。
+### 5.5 真实缺口
 
-结论：
+本项的真实缺口不是“没有任何变体机制”，而是 3 层不一致：
 
-- 这是 P1 级问题。
-- 本轮不建议删除旧页，但应在计划里明确“以当前工作区模块为主，旧页只保留兼容入口，不继续扩张逻辑”。
+1. 有的服务只有 variation prompt，没有相似度后置判重。
+2. 有的服务既没有 rejected digest，也没有统一变体注入。
+3. 不同服务遇到“本次结果虽然合法但过近”的处理动作不统一。
 
-## 4. 关键问题清单
+### 5.6 审计判断
 
-## 4.1 P0 级问题
+本项是本轮真实开发项，优先级为 P1，但其中一部分属于 P0 子任务：
 
-### A. 工作区仍存在局部整页 loading / 明显转圈，破坏无感切换
+- 先补齐已有 rejected-digest 服务的后置相似度判重
+- 再处理 `map / subplot / world-rules` 这类覆盖度更弱的链路
 
-证据文件：
+原因是前者改动小、收益高、风险低，适合作为主修复面。
 
-- `src/pages/Novel/Writing/index.tsx`
-  - 存在 `loading` 全页分支：`{loading ? <div className="chapter-console-page__loading"><Spin ...`
-- `src/pages/Novel/Contracts/index.tsx`
-  - 初始 loading 与 refreshing 已区分，但仍需核实后续刷新是否完全保留内容
-- `src/pages/Novel/QualityDashboard/index.tsx`
-  - 已有 `loading` / `refreshing` 双态，但需统一检查
-- `src/pages/Novel/Timeline/useTimelineWorkspace.ts`
-  - 仍以 `setLoading(true)` 驱动核心数据刷新
-- `src/pages/PromptManager/index.tsx`
-  - `if (loading) return <Spin />`
-- `src/pages/TemplateManager/index.tsx`
-  - 仅有单一 `loading`，无“首屏加载 / 后续轻刷新”分离
+## 6. 结论与实施边界建议
 
-影响：
+本轮 3 项都是真实未闭环项，且都有足够现有基础支撑继续开发。
 
-- 切换章节、切换菜单、刷新数据时，用户会感知到整个界面重新加载。
-- 与 `src/pages/Novel/index.tsx` 已经做的 visited page caching 目标不一致。
+建议 Agent 2 严格按以下边界执行：
 
-结论：
+1. `Writing` 拆分：
+   - 只拆现有 4 个真实视图
+   - 不新增无业务必要的 `SettingsView`
+   - 主文件保留容器职责
 
-- 这是当前体验类最高优先级问题。
+2. 正文内容级断点恢复：
+   - 做业务级 continuation
+   - 明确区分“从断点继续”和“重新开始”
+   - 利用已存在的 `outputText` / stream 基础
+   - 不做底层模型协议级断点续传幻想实现
 
-### B. 正文生产台仍是全屏式重载思路，和“工作区保活”目标冲突
+3. 非章节去重一致性：
+   - 优先补齐 5 个已接入 rejected-digest 的服务
+   - 再把 `map / subplot / world-rules` 纳入统一策略
+   - 不做大规模生成框架重写
 
-证据文件：
-
-- `src/pages/Novel/Writing/index.tsx`
-
-问题表现：
-
-- 正文页是核心高频页，但当前仍保留整页 `loading` 分支。
-- 该页数据量大、子路由多（editor/context/review/history），一旦整页 loading，会被用户感知为“菜单切一下整个页面都没了”。
-
-结论：
-
-- 写作页是 P0 中的第一批治理对象。
-
-### C. 模板系统已接入持久化，但交互和视觉标准与主工作区脱节
-
-证据文件：
-
-- `src/pages/TemplateManager/index.tsx`
-- 路由已接：`src/App.tsx`
-- 持久化已接：`window.electron.template.list/create/update/delete`
-
-已知问题：
-
-- 仅有单一 `loading` 状态，没有轻量刷新态。
-- 内置模板“查看”与自定义模板“编辑”共用弹窗，但只读/可编辑状态切换较生硬。
-- 卡片操作区虽已缩小，但整体标准仍偏后台 CRUD，与工作区风格不统一。
-- 与用户之前反馈一致：模板页是视觉割裂点之一。
-
-结论：
-
-- 模板系统修复应纳入 P0，不应延后。
-
-### D. “主流程闭环提示”存在，但模块间推进反馈不统一
-
-证据文件：
-
-- `src/shared/novel-workspace.ts`
-- `src/pages/Novel/workflow.ts`
-- `src/pages/Novel/Studio/index.tsx`
-- `src/pages/Novel/Guide/index.tsx`
-
-问题：
-
-- 系统已能给出 next step、blocker、readiness，但各页面不一定都在保存后及时回灌这些状态。
-- 页面间的刷新策略不同，导致 blocker 清理后，用户不一定立刻在所有相关页看到统一结果。
-
-结论：
-
-- 这是主流程可用性问题，属于 P0。
-
-## 4.2 P1 级问题
-
-### E. 工作区状态管理过薄，页面级状态过重
-
-证据文件：
-
-- `src/stores/workspace.store.ts`
-
-现状：
-
-- store 只保存 `mode`
-- 大量工作区关键状态分散在页面内部：
-  - loading / refreshing
-  - 当前选中实体
-  - 局部筛选
-  - 路由参数映射
-  - 刷新 token / mutation token
-
-风险：
-
-- 切页保活与局部刷新逻辑难统一
-- 各页面各写一套 loading 模式
-- 需要依赖局部 `useEffect` 重取，进一步放大闪烁
-
-结论：
-
-- 是重要结构问题，但本轮不应大规模改 Zustand 架构。
-- 应先用“统一页面加载规范 + 统一 mutation 回调”止血。
-
-### F. 旧页与新页职责重叠，后续维护成本高
-
-主要涉及：
-
-- `Premise`
-- `ProjectBrief`
-- `Guide`
-- `GuidedStep`
-- `Overview`
-- `CoreSettings`
-
-问题：
-
-- 不是功能不可用，而是职责边界不干净。
-- 新人维护容易误把逻辑加到旧页里。
-
-结论：
-
-- P1 需要明确页面职责、入口优先级和兼容策略。
-
-### G. 提示词系统也是独立后台页，体验未对齐
-
-证据文件：
-
-- `src/pages/PromptManager/index.tsx`
-
-问题：
-
-- 与模板系统一样，仍是独立后台风格。
-- `if (loading)` 整页 loading。
-- 与小说工作区上下文关系弱，难形成“提示词配置 -> 正文生产”直达链路感知。
-
-结论：
-
-- P1 处理，与模板系统保持同一整改方向。
-
-### H. 样式层存在主题/全局覆盖历史负担
-
-证据文件：
-
-- `src/styles/global.css`
-
-现状：
-
-- 全局样式体量较大，含大量主题覆盖、Novel 专项覆盖和 loading 样式。
-- 历史样式较多，局部修复容易继续叠补丁。
-
-结论：
-
-- 当前应谨慎局部修，不应本轮大拆。
-- 作为 P1/P2 风险点记录。
-
-## 4.3 P2 级问题
-
-### I. 数据模型有逐步完善痕迹，但跨模块共享结构尚未完全归一
-
-证据：
-
-- `src/shared/novel-workspace.ts`
-- `src/shared/workspace-types.ts`
-- `src/shared/story-settings.ts`
-- `src/shared/world-rules-draft.ts`
-- 多页面直接拼接页面内 view model
-
-表现：
-
-- 统一领域模型已有雏形
-- 但大量页面仍用本地 `useMemo` 组装自己的 UI 数据
-
-结论：
-
-- 适合后续做 view-model 层收敛，不列入本轮必须完成项。
-
-### J. 业务合理性层面仍可继续加强自动联动
-
-例如：
-
-- 世界规则变化后，是否主动提示角色/势力/地图重检
-- 章节合同变化后，是否自动刷新正文写作可写性
-- 回写完成后，是否自动刷新时间轴/角色弧/伏笔账本摘要
-
-目前已有部分联动，但不完全统一。此项作为 P2 延后。
-
-## 5. 页面与流程审计
-
-### 5.1 已基本接通的主流程
-
-以下主流程页面大多数已接入持久化，且不是空壳：
-
-- 立项与概览
-  - `src/pages/Novel/Overview/index.tsx`
-  - `src/pages/Novel/ProjectBrief/index.tsx`
-  - `src/pages/Novel/Premise/index.tsx`
-  - `src/pages/Novel/CoreSettings/index.tsx`
-  - `src/pages/Novel/ThemeVoice/index.tsx`
-  - `src/pages/Novel/WorldRules/index.tsx`
-  - `src/pages/Novel/Endgame/index.tsx`
-- 世界资产
-  - `Characters`
-  - `Factions`
-  - `MapExplorer`
-  - `ItemsWorkspace`
-  - `Glossary`
-  - `SceneTemplates`
-- 结构规划
-  - `StoryThreads`
-  - `Outline`
-  - `VolumeDesign`
-  - `Structure`
-  - `Timeline`
-  - `InfoGapBoard`
-  - `ForeshadowLedger`
-  - `GrowthSystem`
-  - `CharacterArcCenter`
-  - `Resistance`
-- 章节生产
-  - `Contracts`
-  - `Writing`
-  - `WritebackCenter`
-- 质量闭环
-  - `RevisionCenter`
-  - `QualityDashboard`
-
-审计结论：
-
-- “页面缺失”不是主问题。
-- “页面间切换、刷新和反馈标准不统一”才是主问题。
-
-### 5.2 小说主流程缺口
-
-当前仍存在的闭环缺口：
-
-1. 章节合同 -> 正文 -> 回写 -> 质量 的反馈体验不统一  
-   问题不是没接口，而是刷新与回显不一致，用户难以形成稳定心智。
-
-2. 主工作区推荐下一步已存在，但部分页面未以同样方式强化“当前阻塞 / 当前下一步 / 已保存后可继续去哪”。
-
-3. 模板/提示词作为“生产工具后台”，与主工作区关系没有形成明显桥接体验。
-
-## 6. 未完成按钮 / 空函数 / 占位实现审计结论
-
-未发现大量真正的空函数或整页占位页。当前仓库大多数按钮都已接逻辑或有合理 disabled 条件。
-
-但发现以下“软未完成态”：
-
-- 很多页面通过 `message.warning(...)` 或 disabled 保护阻断操作，但未提供足够的下一步引导。
-- 部分后台页仍是基础 CRUD 形态，功能虽接通，但体验上仍像临时管理台。
-- 部分刷新逻辑仍使用整页 loading，功能可用但交互体验未达标。
-
-## 7. 持久化与状态流审计
-
-### 7.1 持久化情况
-
-模板系统已接：
-
-- `window.electron.template.list`
-- `window.electron.template.create`
-- `window.electron.template.update`
-- `window.electron.template.delete`
-
-提示词系统已接：
-
-- `window.electron.prompt.list`
-- `window.electron.prompt.save`
-- `window.electron.prompt.delete`
-
-小说主流程大量页面已直连 Electron：
-
-- `novel`
-- `character`
-- `faction`
-- `map`
-- `item`
-- `thread`
-- `outline`
-- `structure`
-- `timeline`
-- `writeback`
-- `revision`
-- `quality`
-
-结论：
-
-- “未完成数据持久化”只在局部体验层面存在，不是大面积未接接口。
-
-### 7.2 状态流问题
-
-主要问题：
-
-- 页面级 `loading` / `refreshing` 模式未统一
-- 页面之间刷新粒度不一致
-- store 过薄，跨页共享状态依赖 props、路由和局部副作用
-
-这会直接放大用户反馈中的：
-
-- 切页转圈
-- 整页刷新感
-- 保存后状态更新不及时
-
-## 8. 本轮必须修与延后项
-
-### 本轮必须修
-
-- 小说主工作区高频页的整页 loading / 转圈问题
-- 正文写作页、章节合同页、工作台页的“首屏加载 vs 后续轻刷新”统一
-- 模板系统交互与布局对齐当前工作区标准
-- blocker / next step / 保存后状态回灌的一致性
-- 保证主链路：立项 -> 世界观/角色/结构 -> 合同 -> 正文 -> 回写 -> 修订/质量 可连续进入、编辑、保存、继续操作
-
-### 本轮明确延后
-
-- 彻底移除旧 guided 流程页面
-- 大规模重构 Zustand store
-- 全局 CSS 体系重建
-- 深层领域模型归一
-- 更激进的跨模块自动联动改造
-
-## 9. 建议给 Agent 2 的执行原则
-
-1. 不做“大重写”，优先清 P0 的用户可感知问题。
-2. 不回退已有工作区缓存切页能力，应在此基础上统一各页面刷新策略。
-3. 主链路页优先级高于后台管理页，但模板系统用户已明确点名，必须纳入本轮。
-4. 能用现有 Electron API 解决的问题，不新增不必要抽象。
-5. 任何页面修复都必须同时补：
-   - 初始加载态
-   - 后续刷新态
-   - 错误提示
-   - 保存后回灌
-   - 与工作区 blocker / next step 的联动
-
-## 10. 审计结论
-
-当前仓库具备成为完整 AI 小说创作闭环工作台的基础，问题集中在“体验与状态管理收口”而不是“缺业务页”。  
-本轮最佳策略是：
-
-- 先把工作区主链路页的整页 loading 和刷新抖动压下去
-- 统一模板/提示词后台页和工作区的交互标准
-- 用小范围、确定性的状态流修补，保障小说创作流程连续可用
-
-这将比继续新增页面或大规模重构更符合当前仓库收益。
+如果按上述边界推进，本轮有较高概率在不扩大范围的前提下把 `docs/todo/41` 中这 3 项推进到可宣告“闭环”或“基础已修复”。

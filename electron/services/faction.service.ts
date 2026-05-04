@@ -34,7 +34,11 @@ import {
 import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/utils/text'
 import { runAssetQualityLoop, summarizeAssetQualityWarnings } from './asset-quality.service'
 import { markNovelContextChanged } from './context-impact.service'
-import { appendVariationMessage } from './variation-control.service'
+import {
+  appendVariationMessage,
+  buildVariationDigest,
+  isRejectedDigestTooSimilar,
+} from './variation-control.service'
 import {
   parseFactionReferenceArray,
   stringifyFactionReferences,
@@ -864,6 +868,15 @@ export async function generateFactionBatchChunk(
         }
 
         const parsed = parseGeneratedFactions(quality.finalOutput)
+        const candidateDigest = buildVariationDigest(JSON.stringify(parsed))
+        if (isRejectedDigestTooSimilar(candidateDigest, rejectedDigests)) {
+          markRejected(historyId)
+          resultPayload = {
+            ids: [],
+            warning: `第 ${batchIndex}/${totalBatches} 批势力与近期拒绝结果过于相近，已自动跳过。`,
+          }
+          return resultPayload
+        }
         const createdIds: number[] = []
         const createdNames: string[] = []
 

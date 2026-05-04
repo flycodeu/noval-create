@@ -62,6 +62,15 @@ export function isCandidateTooSimilar(
   return existingCandidates.some((existing) => computeCandidateSimilarity(candidate, existing) >= threshold)
 }
 
+export function isRejectedDigestTooSimilar(
+  candidate: string,
+  rejectedDigests: string[],
+  threshold = 0.72,
+): boolean {
+  if (!candidate.trim() || rejectedDigests.length === 0) return false
+  return isCandidateTooSimilar(candidate, rejectedDigests, threshold)
+}
+
 export function buildVariationMessage({
   attemptNumber,
   candidateIndex,

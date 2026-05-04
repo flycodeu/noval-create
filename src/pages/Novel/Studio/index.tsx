@@ -7,6 +7,8 @@ import {
   FileSearchOutlined,
   HistoryOutlined,
   ThunderboltOutlined,
+  UpOutlined,
+  DownOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
@@ -86,6 +88,7 @@ export default function StudioPage({ novelId }: Props) {
   const [revisionSnapshot, setRevisionSnapshot] = useState<RevisionCenterSnapshot | null>(null)
   const [recentActivities, setRecentActivities] = useState<OperationLog[]>([])
   const [ignoredBlockerIds, setIgnoredBlockerIds] = useState<string[]>([])
+  const [referenceExpanded, setReferenceExpanded] = useState(false)
 
   const loadConsoleData = useCallback(async () => {
     const [novel, workflowStats, report, nextContextStatus, qualityDashboard, revisions, activities] = await Promise.all([
@@ -399,31 +402,113 @@ export default function StudioPage({ novelId }: Props) {
 
           <section className="novel-dashboard__panel">
             <SectionHeader
-              eyebrow="最近活动"
-              title="项目活动流"
-              description="最近的修改、生成、修订和回滚都会汇总在这里。"
+              eyebrow="参考层"
+              title="活动、风险与修订反推"
+              description="这里保留诊断信息和修订回流，默认折叠，避免首次进入时被次要信息打断。"
+              extra={(
+                <Button
+                  size="small"
+                  type={referenceExpanded ? 'default' : 'primary'}
+                  icon={referenceExpanded ? <UpOutlined /> : <DownOutlined />}
+                  onClick={() => setReferenceExpanded((current) => !current)}
+                >
+                  {referenceExpanded ? '收起参考层' : '展开参考层'}
+                </Button>
+              )}
             />
-            {recentActivities.length > 0 ? (
-              <div className="novel-dashboard__activity-list">
-                {recentActivities.map((activity) => (
-                  <article
-                    key={activity.id}
-                    className={`novel-dashboard__activity-card tone-${activityTone(activity)}`}
-                  >
-                    <div className="novel-dashboard__activity-head">
-                      <strong>{activity.summary}</strong>
-                      <span>{dayjs(activity.createdAt).fromNow()}</span>
-                    </div>
-                    <div className="novel-dashboard__activity-meta">
-                      <span>{activity.entityType}</span>
-                      <span>{activity.operationType}</span>
-                      <span>{new Date(activity.createdAt).toLocaleString()}</span>
-                    </div>
-                  </article>
-                ))}
+            {!referenceExpanded ? (
+              <div className="novel-dashboard__reference-preview">
+                <span>{`最近活动 ${recentActivities.length} 条`}</span>
+                <span>{`高优先风险 ${riskItems.length} 条`}</span>
+                <span>{`修订反推 ${topRevisionTasks.length} 条`}</span>
               </div>
             ) : (
-              <div className="novel-dashboard__empty-copy">当前还没有最近活动记录。</div>
+              <div className="novel-dashboard__reference-stack">
+                <section className="novel-dashboard__reference-section">
+                  <SectionHeader
+                    eyebrow="最近活动"
+                    title="项目活动流"
+                    description="最近的修改、生成、修订和回滚都会汇总在这里。"
+                  />
+                  {recentActivities.length > 0 ? (
+                    <div className="novel-dashboard__activity-list">
+                      {recentActivities.map((activity) => (
+                        <article
+                          key={activity.id}
+                          className={`novel-dashboard__activity-card tone-${activityTone(activity)}`}
+                        >
+                          <div className="novel-dashboard__activity-head">
+                            <strong>{activity.summary}</strong>
+                            <span>{dayjs(activity.createdAt).fromNow()}</span>
+                          </div>
+                          <div className="novel-dashboard__activity-meta">
+                            <span>{activity.entityType}</span>
+                            <span>{activity.operationType}</span>
+                            <span>{new Date(activity.createdAt).toLocaleString()}</span>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="novel-dashboard__empty-copy">当前还没有最近活动记录。</div>
+                  )}
+                </section>
+
+                <section className="novel-dashboard__reference-section">
+                  <SectionHeader
+                    eyebrow="风险提示"
+                    title="当前风险"
+                    description="这里汇总结构体检、上下文同步和质量监控给出的高价值信号。"
+                  />
+                  {riskItems.length > 0 ? (
+                    <div className="novel-dashboard__risk-list">
+                      {riskItems.map((item) => (
+                        <div key={item} className="novel-dashboard__risk-item">
+                          <ExclamationCircleOutlined />
+                          <span>{item}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <Alert
+                      type="success"
+                      showIcon
+                      message="当前没有新的高优先风险"
+                      description="可以直接按推荐下一步推进章节生产或修订。"
+                    />
+                  )}
+                </section>
+
+                <section className="novel-dashboard__reference-section">
+                  <SectionHeader
+                    eyebrow="修订反推"
+                    title="质量问题回推任务"
+                    description="修订中心里最该先处理的问题会直接出现在这里。"
+                  />
+                  {topRevisionTasks.length > 0 ? (
+                    <div className="novel-dashboard__revision-list">
+                      {topRevisionTasks.map((task) => (
+                        <button
+                          key={task.id}
+                          type="button"
+                          className="novel-dashboard__revision-card"
+                          onClick={() => navigate(`/novels/${novelId}/${task.relatedPage || 'revision'}`)}
+                        >
+                          <div className="novel-dashboard__revision-head">
+                            <strong>{task.title}</strong>
+                            <Tag color={task.severity === 'high' ? 'volcano' : task.severity === 'medium' ? 'gold' : 'default'}>
+                              {task.severity === 'high' ? '高优先' : task.severity === 'medium' ? '中优先' : '低优先'}
+                            </Tag>
+                          </div>
+                          <span>{task.description || task.fixBrief || '跳回对应页面处理。'}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="novel-dashboard__empty-copy">当前没有新的修订反推任务。</div>
+                  )}
+                </section>
+              </div>
             )}
           </section>
         </div>
@@ -434,61 +519,6 @@ export default function StudioPage({ novelId }: Props) {
               nextStep={workspaceSnapshot.nextStep}
               onOpen={() => navigate(`/novels/${novelId}/${resolveWorkspaceRoute(workspaceSnapshot.nextStep.targetPage)}`)}
             />
-          </section>
-
-          <section className="novel-dashboard__panel">
-            <SectionHeader
-              eyebrow="风险提示"
-              title="当前风险"
-              description="这里汇总结构体检、上下文同步和质量监控给出的高价值信号。"
-            />
-            {riskItems.length > 0 ? (
-              <div className="novel-dashboard__risk-list">
-                {riskItems.map((item) => (
-                  <div key={item} className="novel-dashboard__risk-item">
-                    <ExclamationCircleOutlined />
-                    <span>{item}</span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <Alert
-                type="success"
-                showIcon
-                message="当前没有新的高优先风险"
-                description="可以直接按推荐下一步推进章节生产或修订。"
-              />
-            )}
-          </section>
-
-          <section className="novel-dashboard__panel">
-            <SectionHeader
-              eyebrow="修订反推"
-              title="质量问题回推任务"
-              description="修订中心里最该先处理的问题会直接出现在这里。"
-            />
-            {topRevisionTasks.length > 0 ? (
-              <div className="novel-dashboard__revision-list">
-                {topRevisionTasks.map((task) => (
-                  <button
-                    key={task.id}
-                    type="button"
-                    className="novel-dashboard__revision-card"
-                    onClick={() => navigate(`/novels/${novelId}/${task.relatedPage || 'revision'}`)}
-                  >
-                    <div className="novel-dashboard__revision-head">
-                      <strong>{task.title}</strong>
-                      <Tag color={task.severity === 'high' ? 'volcano' : task.severity === 'medium' ? 'gold' : 'default'}>
-                        {task.severity === 'high' ? '高优先' : task.severity === 'medium' ? '中优先' : '低优先'}
-                      </Tag>
-                    </div>
-                    <span>{task.description || task.fixBrief || '跳回对应页面处理。'}</span>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <div className="novel-dashboard__empty-copy">当前没有新的修订反推任务。</div>
-            )}
           </section>
 
           <section className="novel-dashboard__panel">

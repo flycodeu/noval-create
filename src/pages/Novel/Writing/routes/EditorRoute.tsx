@@ -1,9 +1,21 @@
 import React from 'react'
 
 interface Props {
-  content: React.ReactNode
+  title?: string
+  subtitle?: string
+  children: React.ReactNode
 }
 
-export default function EditorRoute({ content }: Props) {
-  return <>{content}</>
+export default function EditorRoute({ title = '正文生产', subtitle = '章节合同、编辑器与执行状态', children }: Props) {
+  return (
+    <section className="writing-route-view writing-route-view--editor" data-route="editor">
+      <header className="writing-route-view__header">
+        <strong>{title}</strong>
+        <span>{subtitle}</span>
+      </header>
+      <div className="writing-route-view__body">
+        {children}
+      </div>
+    </section>
+  )
 }

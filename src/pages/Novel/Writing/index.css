@@ -470,3 +470,34 @@
 [data-theme="dark"] .novel-writing-page .writing-layout-parallel-section-title {
   color: var(--workspace-ink);
 }
+.writing-route-view {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.writing-route-view__header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-color, rgba(15, 23, 42, 0.12));
+  border-radius: 14px;
+  background: var(--panel-bg, rgba(255, 255, 255, 0.7));
+}
+
+.writing-route-view__header strong {
+  font-size: 14px;
+  color: var(--text-color, #172033);
+}
+
+.writing-route-view__header span {
+  font-size: 12px;
+  color: var(--text-secondary, #5c6577);
+}
+
+.writing-route-view__body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}

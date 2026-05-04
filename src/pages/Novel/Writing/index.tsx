@@ -3,7 +3,6 @@ import { Alert, Button, Checkbox, Empty, Input, InputNumber, Modal, Progress, Se
 import {
   ApartmentOutlined,
   BranchesOutlined,
-  BulbOutlined,
   CheckOutlined,
   DeleteOutlined,
   FileSearchOutlined,
@@ -17,7 +16,6 @@ import AIScorePanel from '../../../components/AIScorePanel'
 import ActionBar from '../../../components/novel/common/ActionBar'
 import SectionHeader from '../../../components/novel/common/SectionHeader'
 import ContractPanel, { type ContractPanelSection } from '../../../components/novel/writing/ContractPanel'
-import ContextPanel, { type ContextPanelSection } from '../../../components/novel/writing/ContextPanel'
 import PipelineBar, { type PipelineBarItem } from '../../../components/novel/writing/PipelineBar'
 import VersionTimeline from '../../../components/novel/writing/VersionTimeline'
 import {
@@ -61,7 +59,6 @@ import type {
 import { useNovelStore } from '../../../stores/novel.store'
 import { useTaskStore } from '../../../stores/task.store'
 import { useWritingViewStore, type WritingGenerationSnapshot, type WritingGenerationStage } from '../../../stores/writingView.store'
-import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspaceStepGuide } from '../components/WorkspaceShell'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import './index.css'
 
@@ -164,6 +161,9 @@ interface WritingPipelineSnapshot {
   failureCode?: string
   rewriteScope?: string
   targetSegmentId?: number | null
+  partialContent?: string
+  resumeReason?: 'failed' | 'cancelled' | 'timeout' | 'network' | 'unknown'
+  resumeSourceTaskId?: number
   roles: Record<WritingPipelineRole, WritingPipelineRoleState>
 }
 
@@ -485,7 +485,6 @@ export default function Writing({ novelId }: Props) {
     updateGenerationTask,
     updateGenerationStage,
     completeGeneration,
-    clearChapterGenerationNotice,
   } = useWritingViewStore()
   const editorRef = useRef<HTMLDivElement>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1159,6 +1158,62 @@ export default function Writing({ novelId }: Props) {
     }
   }
 
+  const persistedPipelineSnapshot = useMemo(
+    () => parsePipelineSnapshot(latestPipelineTask),
+    [latestPipelineTask],
+  )
+  const currentPipelineSnapshot = useMemo(() => {
+    if (livePipelineSnapshot && currentChapter && livePipelineSnapshot.chapterId === currentChapter.id) {
+      return livePipelineSnapshot
+    }
+    if (persistedPipelineSnapshot && currentChapter && persistedPipelineSnapshot.chapterId === currentChapter.id) {
+      return persistedPipelineSnapshot
+    }
+    return null
+  }, [currentChapter, livePipelineSnapshot, persistedPipelineSnapshot])
+  const resumablePartialContent = useMemo(
+    () => currentPipelineSnapshot?.partialContent?.trim() || '',
+    [currentPipelineSnapshot?.partialContent],
+  )
+  const hasResumablePartialContent = Boolean(
+    currentChapter
+    && resumablePartialContent
+    && (currentPipelineSnapshot?.status === 'failed' || currentPipelineSnapshot?.status === 'cancelled'),
+  )
+
+  const handleResumePartialContent = useCallback(async () => {
+    if (!currentChapter || !latestPipelineTask?.id || !hasResumablePartialContent) return
+    generationBaselineRef.current = normalizeEditorText(resumablePartialContent)
+    startGeneration({ chapterId: currentChapter.id, taskId: latestPipelineTask.id })
+    updateGenerationStage({
+      chapterId: currentChapter.id,
+      taskId: latestPipelineTask.id,
+      stage: 'drafting',
+      label: '正在从断点继续',
+      detail: '系统将基于已保留正文继续补齐本章，不会从头重写前文。',
+    })
+    try {
+      const taskId = await window.electron.chapter.resumeContent(latestPipelineTask.id)
+      updateGenerationTask({ chapterId: currentChapter.id, taskId })
+      message.success('已从中断草稿继续生成。')
+    } catch (error: unknown) {
+      const errorMessage = getErrorMessage(error, 'writing.generateFailed')
+      completeGeneration({
+        chapterId: currentChapter.id,
+        status: 'failed',
+        stage: 'drafting',
+        label: '断点续写启动失败',
+        detail: errorMessage,
+        error: errorMessage,
+      })
+      message.error(errorMessage)
+    }
+  }, [completeGeneration, currentChapter, hasResumablePartialContent, latestPipelineTask?.id, resumablePartialContent, startGeneration, updateGenerationStage, updateGenerationTask])
+
+  const handleRestartGeneration = useCallback(async () => {
+    await handleGenerateContent()
+  }, [handleGenerateContent])
+
   const handleDefaultAiModeChange = useCallback(async (mode: AiExecutionMode) => {
     if (!currentNovel) return
     setSavingAiMode(true)
@@ -1692,20 +1747,6 @@ export default function Writing({ novelId }: Props) {
       text: `${entry.createdAt ? new Date(entry.createdAt).toLocaleString() : ''} · ${entry.gateLevel === 'rewrite' ? '退回重写' : entry.gateLevel === 'blocker' ? '阻塞' : entry.gateLevel === 'warning' ? '预警' : '通过'} · 总分 ${entry.scoreBreakdown.totalScore}`,
     }))
   }, [publishCheck])
-
-  const persistedPipelineSnapshot = useMemo(
-    () => parsePipelineSnapshot(latestPipelineTask),
-    [latestPipelineTask],
-  )
-  const currentPipelineSnapshot = useMemo(() => {
-    if (livePipelineSnapshot && currentChapter && livePipelineSnapshot.chapterId === currentChapter.id) {
-      return livePipelineSnapshot
-    }
-    if (persistedPipelineSnapshot && currentChapter && persistedPipelineSnapshot.chapterId === currentChapter.id) {
-      return persistedPipelineSnapshot
-    }
-    return null
-  }, [currentChapter, livePipelineSnapshot, persistedPipelineSnapshot])
   const currentWritebackStatus = useMemo(
     () => parseWritebackStatus(currentChapter?.writebackStatusJson),
     [currentChapter?.writebackStatusJson],
@@ -2257,59 +2298,6 @@ export default function Writing({ novelId }: Props) {
     ...(aiResult?.issues || []).slice(0, 4).map((issue) => `${issue.type}：${issue.suggestion}`),
   ]), [aiResult?.issues, chapterIssues, publishCheck?.checklist])
 
-  const contextSections = useMemo<ContextPanelSection[]>(() => ([
-    {
-      key: 'recall',
-      title: '上下文召回',
-      items: recallItems,
-    },
-    {
-      key: 'characters',
-      title: '相关人物状态',
-      items: characterStateItems,
-    },
-    {
-      key: 'locations',
-      title: '地点状态',
-      items: locationStatusItems,
-    },
-    {
-      key: 'facts',
-      title: '世界事实',
-      items: worldFactItems,
-    },
-    {
-      key: 'foreshadow',
-      title: '伏笔快照',
-      items: dueForeshadowItems.slice(0, 6),
-    },
-    {
-      key: 'puzzles',
-      title: '谜题信息',
-      items: puzzleItems,
-    },
-    {
-      key: 'timeline',
-      title: '时间轴锚点',
-      items: relatedEvents.slice(0, 6).map((event) => `${event.timeLabel || '时间未标注'} · ${event.eventTitle}`),
-    },
-    {
-      key: 'quality',
-      title: '质量问题',
-      items: qualityIssueItems,
-      tone: 'danger',
-    },
-  ]), [
-    characterStateItems,
-    dueForeshadowItems,
-    locationStatusItems,
-    puzzleItems,
-    qualityIssueItems,
-    recallItems,
-    relatedEvents,
-    worldFactItems,
-  ])
-
   const pipelineItems = useMemo<PipelineBarItem[]>(() => {
     const roleKeyOrder: WritingPipelineRole[] = ['planner', 'writer', 'critic', 'rewriter', 'canonizer', 'finalize']
     const roleLabelMap: Record<WritingPipelineRole, string> = {
@@ -2422,6 +2410,18 @@ export default function Writing({ novelId }: Props) {
         : '当前无需恢复操作。',
     },
   ]), [activePromptOverrideKeys, currentPipelineSnapshot, currentWritebackStatus])
+
+  const insightRouteContent = (
+    <React.Suspense fallback={<div className="novel-copy-block">正在切换视图...</div>}>
+      <Routes>
+        <Route path="/" element={<Navigate to="editor" replace />} />
+        <Route path="editor" element={<WritingEditorRoute>{chapterInsightContent}</WritingEditorRoute>} />
+        <Route path="context" element={<WritingContextRoute>{memoryInsightContent}</WritingContextRoute>} />
+        <Route path="review" element={<WritingReviewRoute>{reviewInsightContent}</WritingReviewRoute>} />
+        <Route path="history" element={<WritingHistoryRoute>{historyInsightContent}</WritingHistoryRoute>} />
+      </Routes>
+    </React.Suspense>
+  )
 
   return (
     <>
@@ -2667,6 +2667,29 @@ export default function Writing({ novelId }: Props) {
                     />
                   ) : null}
 
+                  {hasResumablePartialContent ? (
+                    <Alert
+                      showIcon
+                      type={currentPipelineSnapshot?.status === 'cancelled' ? 'warning' : 'error'}
+                      message="检测到可恢复的中断正文"
+                      description={(
+                        <div className="novel-writing-shell__segment-alert">
+                          <div className="novel-writing-shell__segment-alert-copy">
+                            {`已保留 ${countWords(resumablePartialContent)} 字正文草稿。当前恢复模式会基于这份内容继续往后写，不会重写前文。`}
+                          </div>
+                          <div className="novel-writing-shell__segment-alert-actions">
+                            <Button size="small" type="primary" onClick={() => void handleResumePartialContent()}>
+                              从断点继续
+                            </Button>
+                            <Button size="small" onClick={() => void handleRestartGeneration()}>
+                              从头重来
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    />
+                  ) : null}
+
                   {publishCheck ? (
                     <Alert
                       showIcon
@@ -2782,31 +2805,7 @@ export default function Writing({ novelId }: Props) {
                     ))}
                   </div>
                 </section>
-
-                <ContextPanel
-                  title="上下文与 Canon"
-                  sections={contextSections}
-                />
-
-                <section className="chapter-console-page__panel">
-                  <SectionHeader
-                    eyebrow="章后回写"
-                    title="回写候选入口"
-                    description="正文定稿后，把事实、人物状态、伏笔、时间轴变化回写到资产总账。"
-                  />
-                  <div className="chapter-console-page__writeback-card">
-                    <strong>{(qualityDashboard?.productionReadiness.writebackPendingCount || 0) > 0 ? `当前有 ${qualityDashboard?.productionReadiness.writebackPendingCount || 0} 章待回写` : '当前章可随时进入回写'}</strong>
-                    <span>{qualityDashboard?.productionReadiness.summary || '回写完成后，质量监控和修订中心会基于新 Canon 继续反推任务。'}</span>
-                    <ActionBar align="start">
-                      <Button type="primary" onClick={() => navigate(`/novels/${novelId}/writeback`)}>
-                        进入章后回写
-                      </Button>
-                      <Button onClick={() => navigate(`/novels/${novelId}/revision`)}>
-                        打开修订中心
-                      </Button>
-                    </ActionBar>
-                  </div>
-                </section>
+                {insightRouteContent}
               </aside>
             </div>
 

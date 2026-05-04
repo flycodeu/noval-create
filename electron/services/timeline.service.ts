@@ -32,7 +32,11 @@ import {
 import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/utils/text'
 import { markNovelContextChanged } from './context-impact.service'
 import { runAssetQualityLoop, summarizeAssetQualityWarnings } from './asset-quality.service'
-import { appendVariationMessage } from './variation-control.service'
+import {
+  appendVariationMessage,
+  buildVariationDigest,
+  isRejectedDigestTooSimilar,
+} from './variation-control.service'
 import { buildBatchKey, createOperationLog } from './history.service'
 import { throwUserFacingError } from '../utils/user-facing-error'
 
@@ -1276,6 +1280,15 @@ export async function generateTimelineBatchChunk(
           markRejected(historyId)
           throw error
         }
+        const candidateDigest = buildVariationDigest(JSON.stringify(parsed))
+        if (isRejectedDigestTooSimilar(candidateDigest, rejectedDigests)) {
+          markRejected(historyId)
+          resultPayload = {
+            ids: [],
+            warning: `第 ${runtime.batchIndex || 1}/${runtime.totalBatches || 1} 批时间轴事件与近期拒绝结果过于相近，已自动跳过。`,
+          }
+          return resultPayload
+        }
         if (!Array.isArray(parsed)) {
           markRejected(historyId)
           throwUserFacingError('timeline.generatedArrayInvalid')
@@ -1461,6 +1474,11 @@ export async function generateTimelineEvents(
       markRejected(historyId)
       throw error
     }
+    const candidateDigest = buildVariationDigest(JSON.stringify(parsed))
+    if (isRejectedDigestTooSimilar(candidateDigest, rejectedDigests)) {
+      markRejected(historyId)
+      continue
+    }
     if (!Array.isArray(parsed)) {
       markRejected(historyId)
       throwUserFacingError('timeline.generatedArrayInvalid')
@@ -1615,6 +1633,11 @@ export async function regenerateTimelineEvent(
   try {
     parsed = acceptedCandidate || cleanAiValue(safeParseJson<GeneratedTimelineEvent>(result))
   } catch {
+    markRejected(historyId)
+    return current
+  }
+  const candidateDigest = buildVariationDigest(JSON.stringify(parsed))
+  if (isRejectedDigestTooSimilar(candidateDigest, rejectedDigests)) {
     markRejected(historyId)
     return current
   }

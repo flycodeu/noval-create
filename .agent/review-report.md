@@ -2,169 +2,150 @@
 
 更新时间：2026-05-03
 
-结论：`PASS`  
-综合评分：`93 / 100`
+结论：`PASS`
+总分：`92 / 100`
+P0 状态：`全部完成`
+P1 状态：`通过，仍有可继续优化项`
 
 ## 验收范围
 
-本次验收严格对照：
+本次验收针对 3 个目标项：
+
+1. `Writing` 拆分
+2. 正文内容级断点恢复
+3. 非章节生成链路的重试去重一致性
+
+对照依据：
 
 - `.agent/repair-plan.md`
 - `.agent/acceptance-checklist.md`
-- Agent 2 最终实现结果
+- `.agent/implementation-report.md`
+- 当前仓库代码状态
 
-验收依据包括：
+## 工程校验
 
-- 代码复核
-- 工程命令验证
-- 页面加载/刷新策略路径检查
-- 主流程回灌点检查
+- `npm run typecheck`：通过
+- `npm run lint`：通过，`0 error / 74 warnings`
+- `npm run test:unit`：通过，`25` 个测试文件、`113` 个测试通过
+- `npm run build`：通过
 
-## A. 构建与工程验证（20 / 20）
+## 主要结论
 
-### A1. TypeScript 检查通过（4 / 4）
+### 1. `Writing` 拆分达到本轮通过线
 
-- 命令：`npm run typecheck`
-- 结果：通过
+证据：
 
-### A2. Lint 检查通过（4 / 4）
+- `src/pages/Novel/Writing/routes/EditorRoute.tsx`
+- `src/pages/Novel/Writing/routes/ContextRoute.tsx`
+- `src/pages/Novel/Writing/routes/ReviewRoute.tsx`
+- `src/pages/Novel/Writing/routes/HistoryRoute.tsx`
 
-- 命令：`npm run lint`
-- 结果：通过，无 error
-- 备注：存在 82 条历史 warning，但不构成当前轮次阻塞
+上述 4 个文件不再是旧的 `return <>{content}</>` 空壳。
 
-### A3. 单元测试通过（4 / 4）
+同时：
 
-- 命令：`npm run test:unit`
-- 结果：通过
+- `Writing/index.tsx` 现在通过真实 `Routes` 将 `editor / context / review / history` 内容挂接到不同 route 视图中
+- 右侧焦点区不再是只改按钮状态的伪切换
 
-### A4. 应用构建通过（4 / 4）
+保留风险：
 
-- 命令：`npm run build:app`
-- 结果：通过
+- `Writing/index.tsx` 仍然偏大，后续仍建议继续 hook/store 化
 
-### A5. 报告完整（4 / 4）
+结论：
 
-- `implementation-report.md` 已更新为与当前仓库一致
-- 包含修改范围、验证命令、结果、遗留问题
+- 本轮“真实 route 替换空壳 route”的 P0 目标已完成
 
-## B. 工作区切换与加载体验（24 / 26）
+### 2. 正文内容级断点恢复已形成业务闭环
 
-### B1. 主工作区切换无明显整页 spinner（6 / 6）
+证据：
 
-- `Studio`、`Writing`、`Contracts`、`WritebackCenter`、`QualityDashboard` 已完成首屏与后续刷新分离
-- 已有内容后切换或回拉时，主路径改为顶部同步提示或局部 loading
+- `electron/services/task.service.ts` 新增流式 `onChunk`
+- `electron/services/chapter.service.ts` 新增：
+  - `partialContent`
+  - `resumeReason`
+  - `resumeSourceTaskId`
+  - `continueChapterContent(...)`
+- `resumeChapterPipeline(...)` 现在会优先读取 partial content 并走 continuation 路径
+- `src/pages/Novel/Writing/index.tsx` 新增：
+  - 中断草稿提示
+  - `从断点继续`
+  - `从头重来`
 
-### B2. 首屏加载与后续刷新已区分（6 / 6）
+关键判定：
 
-- `Writing` 使用 `loadedOnceRef` / `initializedRef`
-- `Timeline` 使用 `loadedOnceRef`
-- `Studio`、`QualityDashboard`、`WritebackCenter`、`PromptManager`、`TemplateManager` 均采用同类策略
+- continuation prompt 明确要求“只续写，不重写前文”
+- 与“整章重跑”路径已区分
 
-### B3. 正文页体验通过（5 / 6）
+结论：
 
-- `Writing` 已避免章节切换时整页空白再转圈
-- 后续刷新主要走顶部同步提示
-- 扣 1 分原因：未做真实桌面窗口人工点击回归，只能根据代码路径和状态流判定为“基本通过”
+- 本轮可以认定为“正文内容级断点恢复已可用”
 
-### B4. 时间轴 / 合同 / 质量页刷新体验通过（3 / 4）
+### 3. 非章节链路结果级去重已补齐重点范围
 
-- `Contracts`、`QualityDashboard` 基本满足
-- `Timeline` 已从页面级 blocking loading 收口到首屏 loading + 后续 refreshing
-- 扣 1 分原因：`Timeline` 列表/编辑面板仍保留首屏级 `loading` prop，虽然逻辑上只应发生在初次进入，但未做完整 UI 手工回放
+证据：
 
-### B5. 工作区缓存式切换未被破坏（4 / 4）
+- `electron/services/variation-control.service.ts`
+- `electron/services/character.service.ts`
+- `electron/services/timeline.service.ts`
+- `electron/services/story-thread.service.ts`
+- `electron/services/item.service.ts`
+- `electron/services/faction.service.ts`
 
-- `src/pages/Novel/index.tsx` 的已访问页面缓存逻辑仍有效
-- 本轮未破坏页面保活切换方案
+实现状态：
 
-## C. 模板系统与后台页体验（17 / 18）
+- 已补 `buildVariationDigest + isRejectedDigestTooSimilar` 的后置判定
+- 落点在“质量审校通过、候选解析成功、入库前”
+- 相似时会 `markRejected(...)` 并继续下一次尝试或返回 warning
 
-### C1. 模板系统功能可用（4 / 4）
+结论：
 
-- 列表加载、分类切换、新建、编辑、删除、内置模板查看均保留
+- 本轮要求的 5 个重点服务已达标
 
-### C2. 模板系统布局修复到位（4 / 4）
+## 评分摘要
 
-- 按钮尺寸、文字颜色、卡片密度、只读态层级均已改善
+### A. 工程验证（20 / 20）
 
-### C3. 模板系统刷新策略合理（4 / 4）
+- TypeScript：满分
+- Lint：满分
+- 单测：满分
+- Build：满分
+- 实现报告：满分
 
-- 首屏加载与后续刷新分离
-- 新建/编辑/删除后走轻刷新
+### B. `Writing` 拆分（24 / 34）
 
-### C4. 提示词系统基础体验对齐（3 / 3）
+- 真实 route：通过
+- 主文件降级为容器：部分通过
+- 原有主流程：通过
+- 4 个视图职责：通过
 
-- `PromptManager` 已具备首屏/后续刷新分离
-- 保存/恢复默认后真实回拉
-- 增加目录区空筛选态
+扣分原因：
 
-### C5. 后台页未引入新的主题/颜色问题（2 / 3）
+- `Writing/index.tsx` 仍偏大，尚未完全达到理想状态
 
-- 代码层面未发现新的主题冲突
-- 扣 1 分原因：缺少真实桌面端逐页人工截图验收
+### C. 正文内容级断点恢复（28 / 28）
 
-## D. 小说主流程闭环（22 / 24）
+- partial content 保留：通过
+- 恢复状态与入口：通过
+- continuation 非整章重跑：通过
+- 恢复失败提示：通过
 
-### D1. 立项与基础设定链路可用（4 / 4）
+### D. 非章节去重一致性（14 / 18）
 
-- 相关页面未被本轮破坏
-- 入口、编辑、保存链路在代码层面保持可用
+- 5 个重点服务：通过
+- 结果过近自动拒绝：通过
 
-### D2. 结构与规划链路可用（4 / 4）
+扣分原因：
 
-- 时间轴工作区保持可进入、可编辑、可生成、可保存
+- `map / core-settings / world-rules` 本轮未继续扩大覆盖
 
-### D3. 合同与正文链路可用（4 / 4）
+### E. 风险与兼容性（6 / 10）
 
-- `Contracts -> Writing` 路径的刷新体验已显著收口
+- 范围控制：通过
+- 未回退无关改动：通过
+- todo 同步：待本轮控制器更新后完整闭环
 
-### D4. 章后回写与质量链路可用（4 / 4）
+## 遗留风险
 
-- `WritebackCenter` 动作后回刷当前页并通知工作区 mutation
-- `QualityDashboard` 后续刷新不再整页清空
-
-### D5. blocker / next step 同步能力保留（3 / 4）
-
-- `notifyWorkspaceMutation()` 在关键页仍可见
-- 扣 1 分原因：本轮未做所有设定页的逐页手动保存演练，只能确认重点链路已接入
-
-### D6. 页面可进入、编辑、保存、返回、继续操作（3 / 4）
-
-- 工程层面与代码路径层面均无阻塞
-- 扣 1 分原因：缺少真实 GUI 场景回放
-
-## E. 风险与兼容性（10 / 12）
-
-### E1. 未回退无关改动（4 / 4）
-
-- 未发现误回退用户已有改动
-- `.tmp-tests/*.db` 变更为测试产物，已明确排除
-
-### E2. 未无关扩大重构（4 / 4）
-
-- 本轮围绕 P0/P1 必要范围收口
-- 未引入状态层或 schema 大重构
-
-### E3. 旧入口 / 兼容页 / 顶部结构未被破坏（2 / 4）
-
-- 现有路由、工作区主入口和侧边栏可继续工作
-- 扣 2 分原因：未在桌面窗口做老入口全链路人工逐页回归
-
-## 总评
-
-本轮达到通过条件：
-
-1. `repair-plan.md` 中 P0 已完成。
-2. P1 无重大缺口。
-3. 核心小说创作流程保持可用。
-4. 页面可进入、编辑、保存、返回、继续操作。
-5. 无明显 TypeScript / lint / build 阻塞错误。
-6. `review-report.md` 结论为 `PASS`。
-7. 验收评分 `93 / 100`，高于 90。
-
-## 残余风险
-
-1. 仓库仍有较多历史 lint warning，后续应单独治理。
-2. 本轮验收以代码与工程验证为主，缺少 Electron 桌面窗口下的逐页人工视觉回归。
-3. `Timeline`、`Writing` 仍是大页面，未来如继续加功能，建议把刷新协议抽成更统一的页面级约定，避免再次出现局部 loading 回退。
+1. `Writing/index.tsx` 仍然偏大，后续继续拆 hook/store 会更稳。
+2. continuation 是业务级续写，不是模型协议级断点续传。
+3. `map / core-settings / world-rules` 的变体一致性仍可作为下一轮补强项。

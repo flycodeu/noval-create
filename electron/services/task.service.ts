@@ -176,6 +176,7 @@ interface RunTaskOptions extends CreateTaskOptions {
   messages: Message[]
   chatOpts?: Partial<ChatOptions>
   sender?: WebContents
+  onChunk?: (chunk: string, fullOutput: string, taskId: number) => void | Promise<void>
   onSuccess?: (outputText: string, taskId: number) => Promise<unknown> | unknown
 }
 
@@ -929,6 +930,7 @@ export async function executeStreamTask(taskId: number, opts: RunTaskOptions): P
           controller.abort()
           return
         }
+        void opts.onChunk?.(chunk, fullOutput, taskId)
         safeSend(opts.sender, 'task:stream-chunk', { taskId, chunk })
       },
     })

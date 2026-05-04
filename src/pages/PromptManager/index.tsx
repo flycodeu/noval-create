@@ -301,6 +301,20 @@ interface PromptFlowMeta {
 }
 
 const PROMPT_LANES: PromptLane[] = ['全部', '初始化', '世界与资源', '剧情规划', '正文生产', '质量评审']
+const PROTECTED_PROMPT_KEYS = new Set([
+  'scenePlan',
+  'chapterDraft',
+  'chapterWriting',
+  'chapterReview',
+  'chapterRewrite',
+])
+const PROTECTED_PROMPT_RULES = [
+  '保留反 AI 味禁用表达与“动作/细节替代抽象情绪”的要求。',
+  '保留角色差异化与 Voice Lock，不允许所有角色说成同一语气。',
+  '保留 POV 边界，只能写当前视角已知信息，禁止段内偷切视角。',
+  '保留锁定段落逐字不改的要求，只能调整周边衔接。',
+  '保留章节开头承接上章结尾、章尾留下自然钩子的要求。',
+]
 
 const PROMPT_FLOW_META: Record<string, PromptFlowMeta> = {
   expandBackground: { lane: '初始化', stage: '开篇立项', goal: '把背景、标题和简介定成可继续推进的起稿状态。', risk: '最容易出现世界观漂移和空泛开局。' },
@@ -458,6 +472,7 @@ export default function PromptManager() {
     () => filteredPrompts.find(({ prompt }) => prompt.key === selectedPromptKey) || filteredPrompts[0] || null,
     [filteredPrompts, selectedPromptKey],
   )
+  const selectedPromptProtected = Boolean(selectedPromptRow && PROTECTED_PROMPT_KEYS.has(selectedPromptRow.prompt.key))
 
   const overrideCount = useMemo(() => Object.keys(customOverrides).length, [customOverrides])
   const qualityPromptCount = useMemo(() => promptRows.filter(({ meta }) => meta.lane === '质量评审').length, [promptRows])
@@ -658,6 +673,22 @@ export default function PromptManager() {
                   <strong>运行时说明</strong>
                   <span>这里展示的是当前运行中的模板。真正生效的链路通常由三层组成：基础模板、公共中文底板，以及 Electron 服务层追加的生产护栏。</span>
                 </div>
+
+                {selectedPromptProtected ? (
+                  <div className="prompt-manager-inspector-section">
+                    <div className="prompt-manager-inspector-section__title">系统保留规则</div>
+                    <div className="prompt-manager-inspector-section__copy">
+                      这类章节级 prompt 即使被运行时覆盖，服务层仍会追加不可覆盖规则，并写入 override 审计记录。
+                    </div>
+                    <div className="prompt-manager-param-list">
+                      {PROTECTED_PROMPT_RULES.map((rule) => (
+                        <Tag key={rule} style={{ fontSize: 11 }}>
+                          {rule}
+                        </Tag>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
 
                 <div className="prompt-manager-inspector-section">
                   <div className="prompt-manager-inspector-section__title">风险点</div>

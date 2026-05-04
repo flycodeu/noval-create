@@ -43,7 +43,11 @@ import {
 import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/utils/text'
 import { markNovelContextChanged } from './context-impact.service'
 import { runAssetQualityLoop, summarizeAssetQualityWarnings } from './asset-quality.service'
-import { appendVariationMessage } from './variation-control.service'
+import {
+  appendVariationMessage,
+  buildVariationDigest,
+  isRejectedDigestTooSimilar,
+} from './variation-control.service'
 import { resolveFactionNamesFromReferences } from './faction-reference.service'
 import { cleanupStoryItemSoftReferences } from './data-cascade.service'
 import { refreshWorldStateVersionsForNovel } from './world-state.service'
@@ -1770,6 +1774,15 @@ export async function generateStoryItemsBatchChunk(
           markRejected(historyId)
           throw error
         }
+        const candidateDigest = buildVariationDigest(JSON.stringify(parsed))
+        if (isRejectedDigestTooSimilar(candidateDigest, rejectedDigests)) {
+          markRejected(historyId)
+          resultPayload = {
+            ids: [],
+            warning: `第 ${runtime.batchIndex || 1}/${runtime.totalBatches || 1} 批物品与近期拒绝结果过于相近，已自动跳过。`,
+          }
+          return resultPayload
+        }
         if (!Array.isArray(parsed)) {
           markRejected(historyId)
           throwUserFacingError('item.generatedArrayInvalid')
@@ -1959,6 +1972,11 @@ export async function generateStoryItems(
       markRejected(historyId)
       throw error
     }
+    const candidateDigest = buildVariationDigest(JSON.stringify(parsed))
+    if (isRejectedDigestTooSimilar(candidateDigest, rejectedDigests)) {
+      markRejected(historyId)
+      continue
+    }
     if (!Array.isArray(parsed)) {
       markRejected(historyId)
       throwUserFacingError('item.generatedArrayInvalid')
@@ -2115,6 +2133,11 @@ export async function regenerateStoryItem(
   try {
     parsed = acceptedCandidate || cleanAiValue(safeParseJson<GeneratedStoryItem>(result))
   } catch {
+    markRejected(historyId)
+    return current
+  }
+  const candidateDigest = buildVariationDigest(JSON.stringify(parsed))
+  if (isRejectedDigestTooSimilar(candidateDigest, rejectedDigests)) {
     markRejected(historyId)
     return current
   }

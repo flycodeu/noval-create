@@ -1,5 +1,6 @@
 ﻿import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  Alert,
   Button,
   Col,
   Empty,
@@ -683,7 +684,7 @@ export default function NovelList() {
                 { required: true, message: '请输入故事背景' },
                 { min: 20, message: '至少写 20 个字' },
               ]}
-              extra="用你自己的话描述故事处境、冲突、氛围或关键设定，写得越具体，AI 补全背景越稳。"
+          extra="用你自己的话描述故事处境、冲突、氛围或关键设定，写得越具体，AI 补全背景越稳。"
             >
               <Input.TextArea
                 rows={8}
@@ -695,6 +696,13 @@ export default function NovelList() {
 
           {selectedLaunchMode === 'fast_launch' && wizardStep === 1 && (
             <>
+              <Alert
+                type="info"
+                showIcon
+                className="novel-list-page__wizard-note"
+                message="极速开书建议"
+                description="先用一句话写清主角处境、故事卖点、主线冲突和绝对禁区。系统会把这些字段压进前三章骨架、文风护栏和最小资产底盘。"
+              />
               <Row gutter={12}>
                 <Col span={12}>
                   <Form.Item
@@ -759,8 +767,18 @@ export default function NovelList() {
           {selectedLaunchMode === 'professional_longform' && wizardStep === 2 && (
             <div className="novel-list-page__expanded-layout">
               <div className="novel-list-page__expanded-main">
+                <Alert
+                  type="info"
+                  showIcon
+                  className="novel-list-page__wizard-note"
+                  message="AI 补全结果已生成"
+                  description="这一步请重点检查世界边界、冲突方向和叙事语气。你可以直接改写，不需要保留 AI 原文。"
+                />
                 <Form.Item name="expandedBackground" label="AI 补全背景（可编辑）">
-                  <Input.TextArea rows={10} />
+                  <Input.TextArea
+                    rows={10}
+                    placeholder="这里会生成扩写后的背景。重点检查世界规则、冲突主线、人物动机和不该出现的泛化陈词。"
+                  />
                 </Form.Item>
               </div>
               <div className="novel-list-page__expanded-side">
@@ -775,7 +793,10 @@ export default function NovelList() {
                   </Radio.Group>
                 </Form.Item>
                 <Form.Item name="synopsis" label="AI 生成·简介（可编辑）">
-                  <Input.TextArea rows={5} />
+                  <Input.TextArea
+                    rows={5}
+                    placeholder="把简介改成一句话就能讲清主角、核心冲突和读者追更点。"
+                  />
                 </Form.Item>
                 <Button
                   icon={<ReloadOutlined />}
@@ -794,10 +815,13 @@ export default function NovelList() {
           {selectedLaunchMode === 'professional_longform' && wizardStep === 3 && (
             <>
               <Form.Item name="title" label="最终标题" rules={[{ required: true, message: '请填写标题' }]}>
-                <Input placeholder="小说标题" />
+                <Input placeholder="例如：潮汐名单 / 灰港旧案 / 深海回声" />
               </Form.Item>
               <Form.Item name="synopsis" label="最终简介" rules={[{ required: true, message: '请填写简介' }]}>
-                <Input.TextArea rows={5} />
+                <Input.TextArea
+                  rows={5}
+                  placeholder="用 1-3 句话讲清主角是谁、现在被什么压住、故事真正的卖点是什么。"
+                />
               </Form.Item>
               <Form.Item name="targetWords" label="目标字数" initialValue={200000}>
                 <Select options={TARGET_WORDS_OPTIONS} />
