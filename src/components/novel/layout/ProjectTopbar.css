@@ -19,6 +19,10 @@
   isolation: isolate;
 }
 
+.project-topbar--windowless {
+  --project-topbar-height: 74px;
+}
+
 .project-topbar__drag-region {
   position: absolute;
   inset: 0;

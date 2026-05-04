@@ -11,6 +11,8 @@ import {
 } from '@ant-design/icons'
 import { useThemeStore, Theme } from '../../stores/theme.store'
 import AppErrorBoundary from './AppErrorBoundary'
+import AppShellBar from './AppShellBar'
+import './AppLayout.css'
 
 const { Sider, Content } = Layout
 
@@ -61,97 +63,48 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const hideAppSidebar = isNovelWorkspace
 
   return (
-    <Layout style={{ height: '100dvh', minHeight: 0, background: 'var(--color-bg-primary)', overflow: 'hidden' }}>
-      {!hideAppSidebar ? (
-      <Sider
-        width={256}
-        className="app-layout-sider"
-        style={{
-          background: 'var(--bg-glass)',
-          backdropFilter: 'blur(20px)',
-          WebkitBackdropFilter: 'blur(20px)',
-          borderRight: '1px solid var(--border-color)',
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-          minHeight: '100dvh',
-        }}
-      >
-        <Menu
-          className="app-layout-menu"
-          mode="inline"
-          selectedKeys={[selectedKey]}
-          items={menuItems}
-          onClick={({ key }) => navigate(key)}
-          style={{
-            background: 'transparent',
-            border: 'none',
-            flex: 1,
-            marginTop: 16,
-            padding: '0 12px',
-          }}
-        />
+    <Layout className="app-layout">
+      <AppShellBar />
 
-        <div style={{
-          padding: '16px 20px',
-          borderTop: '1px solid var(--border-color)',
-        }}>
-          <div style={{
-            fontSize: 12,
-            color: 'var(--color-text-muted)',
-            marginBottom: 12,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-          }}>
-            <BulbOutlined style={{ fontSize: 12 }} />
-            主题设置
-          </div>
-          <div style={{ display: 'grid', gap: 8 }}>
-            {THEME_OPTIONS.map(opt => (
-              <button
-                key={opt.value}
-                onClick={() => setTheme(opt.value)}
-                style={{
-                  width: '100%',
-                  minHeight: 40,
-                  border: `1px solid ${theme === opt.value ? 'var(--color-blue-primary)' : 'transparent'}`,
-                  borderRadius: 12,
-                  background: theme === opt.value ? 'var(--color-bg-hover)' : 'transparent',
-                  cursor: 'pointer',
-                  fontSize: 14,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 10,
-                  transition: 'all 0.2s',
-                  color: theme === opt.value ? 'var(--color-blue-primary)' : 'var(--color-text-primary)',
-                  padding: '0 16px',
-                }}
-              >
-                <span>{opt.label}</span>
-                <span>{opt.icon}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      </Sider>
-      ) : null}
+      <Layout className="app-layout__body">
+        {!hideAppSidebar ? (
+          <Sider width={256} className="app-layout__sider">
+            <Menu
+              className="app-layout-menu"
+              mode="inline"
+              selectedKeys={[selectedKey]}
+              items={menuItems}
+              onClick={({ key }) => navigate(key)}
+            />
 
-      <Content style={{
-        background: 'transparent',
-        overflowX: 'hidden',
-        overflowY: 'auto',
-        display: 'flex',
-        flexDirection: 'column',
-        minWidth: 0,
-        minHeight: 0,
-        height: '100%',
-      }}>
-        <AppErrorBoundary resetKey={location.pathname}>
-          {children}
-        </AppErrorBoundary>
-      </Content>
+            <div className="app-layout__theme-panel">
+              <div className="app-layout__theme-title">
+                <BulbOutlined style={{ fontSize: 12 }} />
+                主题设置
+              </div>
+              <div className="app-layout__theme-options">
+                {THEME_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setTheme(opt.value)}
+                    className={`app-layout__theme-option${theme === opt.value ? ' is-active' : ''}`}
+                  >
+                    <span>{opt.label}</span>
+                    <span>{opt.icon}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </Sider>
+        ) : null}
+
+        <Content className="app-layout__content">
+          <AppErrorBoundary resetKey={location.pathname}>
+            {children}
+          </AppErrorBoundary>
+        </Content>
+      </Layout>
     </Layout>
   )
 }

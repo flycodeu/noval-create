@@ -707,6 +707,7 @@ export default function NovelRouter() {
         }}
         showQuality={currentPage !== 'guide' && currentPage !== 'quality' && currentPage !== 'batch-workbench'}
         showNextStep={currentPage !== workspaceSnapshot.nextStep.targetPage}
+        showWindowControls={false}
         moreMenu={{
           items: [
             {

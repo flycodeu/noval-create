@@ -1,23 +1,20 @@
-import React, { useEffect, useMemo, useState } from 'react'
-import { Button, Dropdown, Tooltip } from 'antd'
+import React, { useMemo } from 'react'
+import { Button, Dropdown } from 'antd'
 import type { MenuProps } from 'antd'
 import {
   ArrowLeftOutlined,
   BarChartOutlined,
-  BorderOutlined,
-  CloseOutlined,
   DeleteOutlined,
   EllipsisOutlined,
   ExportOutlined,
-  MinusOutlined,
   QuestionCircleOutlined,
   RollbackOutlined,
   SearchOutlined,
-  ShrinkOutlined,
   SwapOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons'
 import { type WorkspaceViewMode, getWorkspaceModeOptions } from '../../../shared/novel-workspace'
+import WindowControls from '../../Layout/WindowControls'
 import './ProjectTopbar.css'
 
 interface ProjectTopbarProps {
@@ -40,6 +37,7 @@ interface ProjectTopbarProps {
   showQuality?: boolean
   showNextStep?: boolean
   moreMenu: MenuProps
+  showWindowControls?: boolean
 }
 
 export default function ProjectTopbar({
@@ -62,10 +60,10 @@ export default function ProjectTopbar({
   showQuality = true,
   showNextStep = true,
   moreMenu,
+  showWindowControls = true,
 }: ProjectTopbarProps) {
   const modeOptions = getWorkspaceModeOptions()
   const activeMode = modeOptions.find((option) => option.value === mode)
-  const [isMaximized, setIsMaximized] = useState(false)
   const overflowMenu = useMemo<MenuProps>(() => {
     const items: NonNullable<MenuProps['items']> = []
     const appendDivider = () => {
@@ -132,59 +130,18 @@ export default function ProjectTopbar({
     return { items }
   }, [exportMenu.items, moreMenu.items, onClear, onQuality, onShortcuts, showQuality])
 
-  useEffect(() => {
-    let active = true
-    void window.electron.windowControls.isMaximized().then((value) => {
-      if (active) setIsMaximized(value)
-    }).catch(() => {})
-
-    const unsubscribe = window.electron.windowControls.onMaximizedStateChange((value) => {
-      setIsMaximized(value)
-    })
-
-    return () => {
-      active = false
-      unsubscribe()
-    }
-  }, [])
-
   return (
-    <header className="project-topbar">
-      <div className="project-topbar__titlebar">
-        <div className="project-topbar__drag-region" aria-hidden="true" />
-        <div className="project-topbar__window-controls">
-          <Tooltip title="最小化">
-            <button
-              type="button"
-              className="project-topbar__window-button"
-              onClick={() => void window.electron.windowControls.minimize()}
-              aria-label="最小化窗口"
-            >
-              <MinusOutlined />
-            </button>
-          </Tooltip>
-          <Tooltip title={isMaximized ? '还原窗口' : '最大化'}>
-            <button
-              type="button"
-              className="project-topbar__window-button"
-              onClick={() => void window.electron.windowControls.toggleMaximize()}
-              aria-label={isMaximized ? '还原窗口' : '最大化窗口'}
-            >
-              {isMaximized ? <ShrinkOutlined /> : <BorderOutlined />}
-            </button>
-          </Tooltip>
-          <Tooltip title="关闭">
-            <button
-              type="button"
-              className="project-topbar__window-button project-topbar__window-button--danger"
-              onClick={() => void window.electron.windowControls.close()}
-              aria-label="关闭窗口"
-            >
-              <CloseOutlined />
-            </button>
-          </Tooltip>
+    <header className={`project-topbar${showWindowControls ? '' : ' project-topbar--windowless'}`}>
+      {showWindowControls ? (
+        <div className="project-topbar__titlebar">
+          <div className="project-topbar__drag-region" aria-hidden="true" />
+          <WindowControls
+            className="project-topbar__window-controls"
+            buttonClassName="project-topbar__window-button"
+            dangerButtonClassName="project-topbar__window-button--danger"
+          />
         </div>
-      </div>
+      ) : null}
 
       <div className="project-topbar__main-row">
         <div className="project-topbar__identity">
