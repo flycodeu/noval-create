@@ -1,4 +1,5 @@
 import type { GenreWorldRules } from '../shared/genre-system'
+import type { NovelOperatingMode } from '../shared/operating-mode'
 import type {
   SubPlotDraft,
   SubplotGenerationRequest,
@@ -96,6 +97,7 @@ export interface Novel {
   synopsis?: string
   genreId?: number
   launchMode?: NovelLaunchMode
+  operatingMode?: NovelOperatingMode
   genreName?: string
   genreColorTag?: string
   status: 'draft' | 'writing' | 'completed' | 'archived'
@@ -124,9 +126,12 @@ export interface NovelCreateInput {
   synopsis?: string
   genreId?: number
   launchMode?: NovelLaunchMode
+  operatingMode?: NovelOperatingMode
   userBackground?: string
   expandedBackground?: string
   projectBriefJson?: string
+  settingsJson?: string
+  themeVoiceJson?: string
   styleTemplateId?: number
   worldTemplateId?: number
   targetWords?: number
@@ -726,6 +731,7 @@ export interface StoryItemSourceContext {
   page?: string
   label?: string
   detectedAt?: string
+  typedRefJson?: string
 }
 
 export interface WorldMapItem {
@@ -1044,6 +1050,7 @@ export interface TimelineEvent {
   eventProcess?: string
   eventResult?: string
   linkedItemIdsJson?: string
+  typedRefsJson?: string
   directConsequencesJson?: string
   openThreadsJson?: string
   notes?: string
@@ -1077,6 +1084,7 @@ export interface StoryItem {
   factionHint?: string
   linkedCharacterIdsJson?: string
   linkedTimelineEventIdsJson?: string
+  typedRefsJson?: string
   tagsJson?: string
   sourceContextJson?: string
   sortOrder: number
@@ -1467,6 +1475,17 @@ export interface ChapterBatchAutoGenerateStatus extends BatchAutoGenerateStatusB
   consecutiveRecallFallbackChapters: number
   snapshotId?: number
   currentWritebackStatus?: WritebackSyncStatus
+  activeGuardrailReason?: string
+  runtimePolicySnapshot?: {
+    operatingMode: NovelOperatingMode
+    chapterGenerationMode: 'serial_only'
+    backgroundPrecomputeEnabled: boolean
+    requireWritebackReady: boolean
+    recallPauseThreshold: number
+    checkpointGapWarningThreshold: number
+    mainThreadPressureStrategy: 'latency_first' | 'balanced' | 'stability_first'
+    strategySummary: string
+  }
 }
 
 export type ProductionReadinessStatus = 'ready' | 'warning' | 'blocked'
@@ -2508,6 +2527,7 @@ export interface StoryThread {
   relatedCharacterIdsJson?: string
   relatedItemIdsJson?: string
   relatedTimelineEventIdsJson?: string
+  typedRefsJson?: string
   notes?: string
   sortOrder: number
   createdAt: string
@@ -3863,6 +3883,13 @@ export interface HumanizationSignal {
 
 export type QualityDashboardRiskKind =
   | 'commitment_delivery'
+  | 'typed_ref_coverage'
+  | 'source_grounding'
+  | 'operating_mode_policy'
+  | 'genre_register_drift'
+  | 'exposition_density'
+  | 'long_window_homogenization'
+  | 'dialogue_separability'
   | 'language_drift'
   | 'feedback_recurrence'
   | 'style_compliance'
@@ -3880,6 +3907,13 @@ export type QualityDashboardRiskKind =
 export type QualityDashboardRiskSeverity = 'info' | 'warning' | 'critical'
 export type QualityRepairMetricKey =
   | 'commitment_delivery'
+  | 'typed_ref_coverage'
+  | 'source_grounding'
+  | 'operating_mode_policy'
+  | 'genre_register_drift'
+  | 'exposition_density'
+  | 'long_window_homogenization'
+  | 'dialogue_separability'
   | 'voice_distinction'
   | 'growth_cost_balance'
   | 'foreshadow_debt'
@@ -4168,6 +4202,88 @@ export interface WorkspaceQualityRepairPreview {
 export interface QualityDashboardData {
   dashboardVersion?: 'v1-health' | 'v2-repair'
   dashboardNotes?: string[]
+  operatingModeObservability?: {
+    mode: NovelOperatingMode
+    label: string
+    summary: string
+    quickStartAligned: boolean
+    recommendedChapterWords?: number
+    estimatedChapterCount?: number
+    recentContextWindow?: number
+  }
+  millionRuntimeObservability?: {
+    operatingMode: NovelOperatingMode
+    label: string
+    strategySummary: string
+    chapterGenerationMode: 'serial_only'
+    serialOnly: boolean
+    backgroundPrecomputeEnabled: boolean
+    requireWritebackReady: boolean
+    recallPauseThreshold: number
+    checkpointGapWarningThreshold: number
+    mainThreadPressureStrategy: 'latency_first' | 'balanced' | 'stability_first'
+    guardrailActive: boolean
+    activeGuardrailReason?: string
+    pauseReason?: string
+    writebackPendingCount: number
+    writebackFailedCount: number
+    staleCheckpointCount: number
+    latestCheckpointChapterGap: number
+    recallDegradedChapterCount: number
+    consecutiveRecallFallbackChapters: number
+    inspectionBlockedCount: number
+    batchGateBlockedCount: number
+    precomputeQueueStatus: 'idle' | 'queued' | 'running' | 'failed'
+    precomputeLastError?: string
+    precomputeReason?: string
+    precomputeUpdatedAt?: string
+    precomputeActiveTaskSummary?: string
+    runtimePressureLevel: 'low' | 'medium' | 'high'
+    runtimePressureScore: number
+    runtimePressureSummary: string
+    summary: string
+  }
+  genreGroundingObservability?: {
+    genreName: string
+    resolvedGenreKey: string
+    historicalGenericFallback: boolean
+    historicalMode?: 'none' | 'historical_realist' | 'alternate_history' | 'pseudo_historical_fantasy'
+    sourceCoverage?: 'none' | 'partial' | 'grounded'
+    conservativeFallbackActive?: boolean
+    sourceSignalCount?: number
+    summary: string
+  }
+  typedRefObservability?: {
+    overallCoverageRate: number
+    unresolvedRefCount: number
+    buckets: Array<{
+      assetType: 'thread' | 'timeline' | 'item'
+      totalCount: number
+      typedRefCount: number
+      unresolvedCount: number
+      coverageRate: number
+    }>
+    summary: string
+  }
+  structuredMemoryObservability?: {
+    promptSummaryMode: 'structured_first'
+    activeScopeLabels: string[]
+    scopeCoverageRate: number
+    cardCoverageRate: number
+    structuredScopeCount: number
+    fallbackScopeCount: number
+    buckets: Array<{
+      scopeType: 'novel' | 'volume' | 'part'
+      label: string
+      hasCheckpoint: boolean
+      structuredFamilyCount: number
+      fallbackFamilyCount: number
+      missingFamilyCount: number
+      cardCoverageRate: number
+      usesTextFallback: boolean
+    }>
+    summary: string
+  }
   repairActionSummary: QualityRepairActionSummary
   repairMetrics: QualityRepairMetricSummary[]
   heatmapData: Array<{ chapterNum: number; dimension: string; score: number }>

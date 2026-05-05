@@ -223,6 +223,7 @@ export function runMigrations(sqlite: Database.Database) {
       related_character_ids_json TEXT,
       related_item_ids_json TEXT,
       related_timeline_event_ids_json TEXT,
+      typed_refs_json TEXT,
       notes TEXT,
       sort_order INTEGER DEFAULT 0,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -406,6 +407,7 @@ export function runMigrations(sqlite: Database.Database) {
       event_process TEXT,
       event_result TEXT,
       linked_item_ids_json TEXT,
+      typed_refs_json TEXT,
       direct_consequences_json TEXT,
       open_threads_json TEXT,
       notes TEXT,
@@ -438,6 +440,7 @@ export function runMigrations(sqlite: Database.Database) {
       faction_hint TEXT,
       linked_character_ids_json TEXT,
       linked_timeline_event_ids_json TEXT,
+      typed_refs_json TEXT,
       tags_json TEXT,
       sort_order INTEGER DEFAULT 0,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -676,6 +679,7 @@ export function runMigrations(sqlite: Database.Database) {
   ensureColumn(sqlite, 'map_relations', 'color_hint', 'TEXT')
   ensureColumn(sqlite, 'map_relations', 'sort_order', 'INTEGER DEFAULT 0')
   ensureColumn(sqlite, 'timeline_events', 'linked_item_ids_json', 'TEXT')
+  ensureColumn(sqlite, 'timeline_events', 'typed_refs_json', 'TEXT')
   ensureColumn(sqlite, 'timeline_events', 'volume_id', 'INTEGER REFERENCES story_volumes(id) ON DELETE SET NULL')
   ensureColumn(sqlite, 'timeline_events', 'part_id', 'INTEGER REFERENCES story_parts(id) ON DELETE SET NULL')
   ensureColumn(sqlite, 'timeline_events', 'chapter_start_id', 'INTEGER REFERENCES chapters(id) ON DELETE SET NULL')
@@ -701,6 +705,7 @@ export function runMigrations(sqlite: Database.Database) {
   ensureColumn(sqlite, 'story_threads', 'related_character_ids_json', 'TEXT')
   ensureColumn(sqlite, 'story_threads', 'related_item_ids_json', 'TEXT')
   ensureColumn(sqlite, 'story_threads', 'related_timeline_event_ids_json', 'TEXT')
+  ensureColumn(sqlite, 'story_threads', 'typed_refs_json', 'TEXT')
   ensureColumn(sqlite, 'story_threads', 'notes', 'TEXT')
   ensureColumn(sqlite, 'story_threads', 'sort_order', 'INTEGER DEFAULT 0')
   ensureColumn(sqlite, 'story_threads', 'created_at', 'TEXT')
@@ -709,6 +714,7 @@ export function runMigrations(sqlite: Database.Database) {
   ensureColumn(sqlite, 'characters', 'source_context_json', 'TEXT')
   ensureColumn(sqlite, 'story_items', 'record_status', "TEXT DEFAULT 'confirmed'")
   ensureColumn(sqlite, 'story_items', 'source_context_json', 'TEXT')
+  ensureColumn(sqlite, 'story_items', 'typed_refs_json', 'TEXT')
   ensureColumn(sqlite, 'revision_tasks', 'task_source', "TEXT DEFAULT 'manual'")
   ensureColumn(sqlite, 'revision_tasks', 'issue_key', 'TEXT')
   ensureColumn(sqlite, 'revision_tasks', 'task_type', "TEXT DEFAULT 'continuity'")
@@ -1801,6 +1807,28 @@ export function runMigrations(sqlite: Database.Database) {
     ensureColumn(sqlite, 'chapter_contracts', 'exposition_mode', 'TEXT')
     ensureColumn(sqlite, 'chapter_contracts', 'emotion_focus', 'TEXT')
   })
+
+  runMigrationStep(sqlite, '0037_typed_ref_overlay_backfill', () => {
+    ensureColumn(sqlite, 'timeline_events', 'typed_refs_json', 'TEXT')
+    ensureColumn(sqlite, 'story_threads', 'typed_refs_json', 'TEXT')
+    ensureColumn(sqlite, 'characters', 'record_status', "TEXT DEFAULT 'confirmed'")
+    ensureColumn(sqlite, 'characters', 'source_context_json', 'TEXT')
+    ensureColumn(sqlite, 'story_items', 'record_status', "TEXT DEFAULT 'confirmed'")
+    ensureColumn(sqlite, 'story_items', 'source_context_json', 'TEXT')
+    ensureColumn(sqlite, 'story_items', 'typed_refs_json', 'TEXT')
+
+    sqlite.exec(`
+      UPDATE characters
+      SET record_status = COALESCE(NULLIF(record_status, ''), 'confirmed')
+    `)
+
+    sqlite.exec(`
+      UPDATE story_items
+      SET record_status = COALESCE(NULLIF(record_status, ''), 'confirmed')
+    `)
+
+    validateTypedRefOverlaySchema(sqlite)
+  })
 }
 
 function ensureMigrationTable(sqlite: Database.Database) {
@@ -1878,8 +1906,21 @@ function validateRequiredSchema(sqlite: Database.Database) {
         'related_character_ids_json',
         'related_item_ids_json',
         'related_timeline_event_ids_json',
+        'typed_refs_json',
         'sort_order',
       ],
+    },
+    {
+      tableName: 'timeline_events',
+      columns: ['linked_item_ids_json', 'typed_refs_json'],
+    },
+    {
+      tableName: 'characters',
+      columns: ['record_status', 'source_context_json'],
+    },
+    {
+      tableName: 'story_items',
+      columns: ['record_status', 'source_context_json', 'typed_refs_json'],
     },
     {
       tableName: 'revision_tasks',
@@ -1936,6 +1977,35 @@ function validateRequiredSchema(sqlite: Database.Database) {
 
   if (missing.length > 0) {
     throw new Error(`数据库结构迁移未完成，缺少：${missing.join(', ')}`)
+  }
+}
+
+function validateTypedRefOverlaySchema(sqlite: Database.Database) {
+  const requirements = [
+    { tableName: 'timeline_events', columns: ['typed_refs_json'] },
+    { tableName: 'story_threads', columns: ['typed_refs_json'] },
+    { tableName: 'characters', columns: ['record_status', 'source_context_json'] },
+    { tableName: 'story_items', columns: ['record_status', 'source_context_json', 'typed_refs_json'] },
+  ]
+
+  const missing: string[] = []
+
+  requirements.forEach(({ tableName, columns }) => {
+    if (!hasTable(sqlite, tableName)) {
+      missing.push(`table ${tableName}`)
+      return
+    }
+
+    const existing = getColumnNames(sqlite, tableName)
+    columns.forEach((columnName) => {
+      if (!existing.has(columnName)) {
+        missing.push(`column ${tableName}.${columnName}`)
+      }
+    })
+  })
+
+  if (missing.length > 0) {
+    throw new Error(`typed ref overlay 迁移未完成，缺少：${missing.join(', ')}`)
   }
 }
 

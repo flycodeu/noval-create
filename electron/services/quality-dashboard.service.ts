@@ -46,6 +46,18 @@ import type {
   VoiceEvolutionProfile,
   WorldStateAlert,
 } from '../../src/types'
+import {
+  estimateChapterCountFromOperatingMode,
+  getOperatingModePolicy,
+  getOperatingModeRuntimePolicy,
+  isHistoricalGenreUsingGenericFallback,
+  resolveOperatingMode,
+} from '../../src/shared/operating-mode'
+import {
+  countUnresolvedTypedRefs,
+  hasTypedRefOverlay,
+} from '../../src/shared/typed-ref'
+import { assessHistoricalGrounding, getBuiltinGenreRules } from '../../src/shared/genre-system'
 import { getDb } from '../database/db'
 import {
   chapterBatchInspections,
@@ -55,15 +67,21 @@ import {
   chapters,
   characterStateVersions,
   characters,
+  glossary,
+  genres,
+  novels,
   revisionTasks,
   storyFacts,
   storyMemoryCheckpoints,
   storyVolumes,
   tasks,
+  storyItems,
+  storyThreads,
   timelineEvents,
   worldStateVersions,
 } from '../database/schema'
 import { buildPreviousChapterContextFeed } from './context.service'
+import { getStoryMemoryCheckpointRefreshStatus } from './story-memory.service'
 import {
   buildChapterGateDriftAlert,
   buildChapterGateDriftSummary,
@@ -81,6 +99,7 @@ import { listChapterRecallRuntimeMap } from './chapter-recall-runtime.service'
 import { getStoryArcProgressSnapshot } from './story-arc-progress.service'
 import { getForeshadowSnapshot } from './story-thread.service'
 import { getWorldStateLedgerSnapshot } from './world-state.service'
+import { buildStoryMemoryPromptPackage } from './story-memory.service'
 import { getAntiAiDashboardSummary } from './anti-ai-rule.service'
 import { getFeedbackRecurrenceDashboardSummary } from './feedback-recurrence.service'
 import { parseChapterContractValidationFromReviewNotes } from './chapter-contract-validator.service'
@@ -187,6 +206,13 @@ const CHAPTER_FUNCTION_TAGS: ChapterFunctionTag[] = ['setup', 'progression', 're
 const CHAPTER_FUNCTION_WEAK_TAGS: ChapterFunctionTag[] = ['setup', 'exposition', 'breather']
 const QUALITY_RISK_LABELS: Record<QualityDashboardRiskKind, string> = {
   commitment_delivery: '承诺兑现率',
+  typed_ref_coverage: 'Typed Ref 覆盖',
+  source_grounding: '来源 Grounding',
+  operating_mode_policy: 'OperatingMode 策略',
+  genre_register_drift: '题材语域漂移',
+  exposition_density: '解释密度 / 说明文',
+  long_window_homogenization: '累积同质化',
+  dialogue_separability: '对白可分离度',
   language_drift: 'AI味退化',
   feedback_recurrence: '审校复现',
   style_compliance: '风格硬约束',
@@ -203,6 +229,13 @@ const QUALITY_RISK_LABELS: Record<QualityDashboardRiskKind, string> = {
 }
 const QUALITY_REPAIR_METRIC_LABELS: Record<QualityRepairMetricKey, string> = {
   commitment_delivery: '承诺兑现率',
+  typed_ref_coverage: 'Typed Ref 覆盖',
+  source_grounding: '来源 Grounding',
+  operating_mode_policy: 'OperatingMode 策略',
+  genre_register_drift: '题材语域漂移',
+  exposition_density: '解释密度 / 说明文',
+  long_window_homogenization: '累积同质化',
+  dialogue_separability: '对白可分离度',
   voice_distinction: '角色声音区分度',
   growth_cost_balance: '成长-代价平衡',
   foreshadow_debt: '伏笔债务压力',
@@ -750,6 +783,34 @@ function toDashboardSeverityFromArcAlert(severity: QualityDashboardData['storyAr
 function averageNumbers(values: number[]): number {
   if (values.length === 0) return 0
   return roundMetric(values.reduce((sum, value) => sum + value, 0) / values.length)
+}
+
+function parseReviewFindingArrays(raw?: string | null): {
+  typedRefRisks: string[]
+  sourceGroundingRisks: string[]
+  operatingModeRisks: string[]
+} {
+  if (!raw) {
+    return {
+      typedRefRisks: [],
+      sourceGroundingRisks: [],
+      operatingModeRisks: [],
+    }
+  }
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    return {
+      typedRefRisks: safeParseStringArray(JSON.stringify(parsed.typed_ref_risks || [])),
+      sourceGroundingRisks: safeParseStringArray(JSON.stringify(parsed.source_grounding_risks || [])),
+      operatingModeRisks: safeParseStringArray(JSON.stringify(parsed.operating_mode_risks || [])),
+    }
+  } catch {
+    return {
+      typedRefRisks: [],
+      sourceGroundingRisks: [],
+      operatingModeRisks: [],
+    }
+  }
 }
 
 function hasThreeRuleHitsWithinFiveChapters(chapterNums: number[]): boolean {
@@ -2205,6 +2266,50 @@ function buildWeakKeyFunctionAlerts(chaptersList: ChapterFunctionChapterRecord[]
     }))
 }
 
+function buildTypedRefObservability(novelId: number): NonNullable<QualityDashboardData['typedRefObservability']> {
+  const db = getDb()
+  const buckets = [
+    {
+      assetType: 'thread' as const,
+      rows: db.select({ typedRefsJson: storyThreads.typedRefsJson }).from(storyThreads).where(eq(storyThreads.novelId, novelId)).all(),
+    },
+    {
+      assetType: 'timeline' as const,
+      rows: db.select({ typedRefsJson: timelineEvents.typedRefsJson }).from(timelineEvents).where(eq(timelineEvents.novelId, novelId)).all(),
+    },
+    {
+      assetType: 'item' as const,
+      rows: db.select({ typedRefsJson: storyItems.typedRefsJson }).from(storyItems).where(eq(storyItems.novelId, novelId)).all(),
+    },
+  ].map((bucket) => {
+    const totalCount = bucket.rows.length
+    const typedRefCount = bucket.rows.filter((row) => hasTypedRefOverlay(row.typedRefsJson)).length
+    const unresolvedCount = bucket.rows.reduce((sum, row) => sum + countUnresolvedTypedRefs(row.typedRefsJson), 0)
+    const coverageRate = totalCount > 0 ? roundMetric((typedRefCount / totalCount) * 100) : 100
+    return {
+      assetType: bucket.assetType,
+      totalCount,
+      typedRefCount,
+      unresolvedCount,
+      coverageRate,
+    }
+  })
+
+  const totalCount = buckets.reduce((sum, bucket) => sum + bucket.totalCount, 0)
+  const totalTypedRefCount = buckets.reduce((sum, bucket) => sum + bucket.typedRefCount, 0)
+  const unresolvedRefCount = buckets.reduce((sum, bucket) => sum + bucket.unresolvedCount, 0)
+  const overallCoverageRate = totalCount > 0 ? roundMetric((totalTypedRefCount / totalCount) * 100) : 100
+
+  return {
+    overallCoverageRate,
+    unresolvedRefCount,
+    buckets,
+    summary: totalCount === 0
+      ? '当前还没有可统计的线程、时间线或物品资产。'
+      : `typed ref 已覆盖 ${totalTypedRefCount}/${totalCount} 个资产，覆盖率 ${overallCoverageRate}%，未解析引用 ${unresolvedRefCount} 条。`,
+  }
+}
+
 function buildChapterFunctionSummary(
   chaptersList: ChapterFunctionChapterRecord[],
   totalChapterCount: number,
@@ -2235,6 +2340,20 @@ function buildChapterFunctionSummary(
 
 export function getQualityDashboardData(novelId: number, options: QualityDashboardOptions = {}): QualityDashboardData {
   const db = getDb()
+  const novelMeta = db.select({
+    launchMode: novels.launchMode,
+    targetWords: novels.targetWords,
+    settingsJson: novels.settingsJson,
+    worldRulesJson: novels.worldRulesJson,
+    userBackground: novels.userBackground,
+    expandedBackground: novels.expandedBackground,
+    synopsis: novels.synopsis,
+    genreName: genres.name,
+  })
+    .from(novels)
+    .leftJoin(genres, eq(novels.genreId, genres.id))
+    .where(eq(novels.id, novelId))
+    .all()[0] || null
   const includeDialogueInsights = options.includeDialogueInsights !== false
   const dialogueSnapshot = includeDialogueInsights ? getDialogueAnalyticsSnapshot(novelId) : {
     dialogueFingerprintStats: {
@@ -2286,6 +2405,38 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     expressionDedupJson: chapters.expressionDedupJson,
     hookContinuityJson: chapters.hookContinuityJson,
   }).from(chapters).where(eq(chapters.novelId, novelId)).orderBy(asc(chapters.chapterNum)).all()
+  const currentOperatingMode = resolveOperatingMode({
+    launchMode: novelMeta?.launchMode,
+    targetWords: novelMeta?.targetWords,
+    settingsJson: novelMeta?.settingsJson,
+    chapterCount: rows.length,
+  })
+  const currentOperatingModePolicy = getOperatingModePolicy({
+    launchMode: novelMeta?.launchMode,
+    targetWords: novelMeta?.targetWords,
+    settingsJson: novelMeta?.settingsJson,
+    chapterCount: rows.length,
+  })
+  const currentRuntimePolicy = getOperatingModeRuntimePolicy({
+    launchMode: novelMeta?.launchMode,
+    targetWords: novelMeta?.targetWords,
+    settingsJson: novelMeta?.settingsJson,
+    chapterCount: rows.length,
+  })
+  const resolvedGenreKey = getBuiltinGenreRules(novelMeta?.genreName).genreProfile.key
+  const historicalGenericFallback = isHistoricalGenreUsingGenericFallback(novelMeta?.genreName, resolvedGenreKey)
+  const groundingAssessment = assessHistoricalGrounding({
+    genreName: novelMeta?.genreName,
+    worldRulesJson: novelMeta?.worldRulesJson,
+    backgroundText: [novelMeta?.expandedBackground, novelMeta?.synopsis, novelMeta?.userBackground].filter(Boolean).join('\n'),
+    glossaryTerms: db.select({ term: glossary.term }).from(glossary).where(eq(glossary.novelId, novelId)).all().map((row) => row.term || '').filter(Boolean),
+  })
+  const structuredMemoryObservability = buildStoryMemoryPromptPackage(novelId, {
+    chapterId: rows.at(-1)?.id,
+    refreshMode: currentRuntimePolicy.backgroundPrecomputeEnabled ? 'schedule_only' : 'sync',
+  }).observability
+  const storyMemoryPrecomputeStatus = getStoryMemoryCheckpointRefreshStatus(novelId)
+  const typedRefObservability = buildTypedRefObservability(novelId)
   const batchChapterNumById = new Map(rows.map((row) => [row.id, row.chapterNum] as const))
   const latestWritebackRunMap = getLatestWritebackRunMap(novelId)
   const latestWritebackRuns = [...latestWritebackRunMap.values()]
@@ -2295,6 +2446,12 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
   const latestBatchProgress = latestBatchTask
     ? parseTaskProgress<Partial<ChapterBatchAutoGenerateStatus>>(latestBatchTask)
     : {}
+  const latestBatchPauseReason = typeof latestBatchProgress.pauseReason === 'string' && latestBatchProgress.pauseReason.trim()
+    ? latestBatchProgress.pauseReason
+    : (latestBatchTask?.errorMessage || undefined)
+  const latestBatchGuardrailReason = typeof latestBatchProgress.activeGuardrailReason === 'string' && latestBatchProgress.activeGuardrailReason.trim()
+    ? latestBatchProgress.activeGuardrailReason
+    : undefined
   const latestBatchSnapshot = db.select().from(chapterBatchSnapshots)
     .where(eq(chapterBatchSnapshots.novelId, novelId))
     .orderBy(desc(chapterBatchSnapshots.createdAt), desc(chapterBatchSnapshots.id))
@@ -2615,6 +2772,12 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
         : undefined,
     })
   }
+  const reviewFindingEntries = rows.map((row) => ({
+    chapterNum: row.chapterNum,
+    findings: parseReviewFindingArrays(row.reviewNotesJson),
+  }))
+  const historicalViolationCount = reviewFindingEntries.filter((entry) => entry.findings.sourceGroundingRisks.length > 0).length
+  const modePolicyViolationCount = reviewFindingEntries.filter((entry) => entry.findings.operatingModeRisks.length > 0).length
 
   const weakDimensionFrequency = [
     ...DIMENSION_NAMES.map((dimension) => ({ dimension, count: weakDimFreq.get(dimension) || 0 })),
@@ -3305,6 +3468,149 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     return Object.keys(query).length > 0 ? query : undefined
   }
 
+  const publishBlockedByProvenance = latestChapterGateEntries.filter((entry) =>
+    entry.topIssueKeys.some((key) =>
+      key === 'typed_ref_coverage'
+      || key === 'source_grounding'
+      || key === 'operating_mode_policy'))
+    .length
+
+  if (typedRefObservability.unresolvedRefCount > 0 || typedRefObservability.overallCoverageRate < 90) {
+    addRepairRisk(createDashboardRiskItem(
+      'typed_ref_coverage',
+      typedRefObservability.unresolvedRefCount >= 8 || typedRefObservability.overallCoverageRate < 60 ? 'critical' : 'warning',
+      'Typed Ref 覆盖存在缺口',
+      `typed ref 覆盖率 ${typedRefObservability.overallCoverageRate}%，未解析引用 ${typedRefObservability.unresolvedRefCount} 条。`,
+      reviewFindingEntries.filter((entry) => entry.findings.typedRefRisks.length > 0).slice(0, 4).map((entry) => entry.chapterNum),
+      undefined,
+      {
+        metricKey: 'typed_ref_coverage',
+        whyItHappened: '线程、时间线和物品的 typed ref 绑定没有跟上资产演化，导致连续性判断依赖了不完整引用。',
+        howToFix: '优先补齐 unresolved typed ref 和低覆盖资产，再继续依赖这些资产做章节审校和上下文回收。',
+        suggestedActions: [],
+      },
+    ))
+  }
+
+  if (historicalViolationCount > 0 || historicalGenericFallback || groundingAssessment.conservativeFallbackActive) {
+    addRepairRisk(createDashboardRiskItem(
+      'source_grounding',
+      groundingAssessment.mode === 'historical_realist' || groundingAssessment.conservativeFallbackActive ? 'critical' : 'warning',
+      '历史 grounding 未闭环',
+      `来源覆盖 ${groundingAssessment.coverage}，历史违规章节 ${historicalViolationCount}，publish provenance 阻断 ${publishBlockedByProvenance}。`,
+      reviewFindingEntries.filter((entry) => entry.findings.sourceGroundingRisks.length > 0).slice(0, 4).map((entry) => entry.chapterNum),
+      undefined,
+      {
+        metricKey: 'source_grounding',
+        whyItHappened: '历史题材仍有来源不足或 conservative fallback 场景，但这些缺口已经进入正文审校与发布门。',
+        howToFix: '先补来源依据或改写为保守表述，再继续历史细节写作与发布。',
+        suggestedActions: [],
+      },
+    ))
+  }
+
+  if (modePolicyViolationCount > 0) {
+    addRepairRisk(createDashboardRiskItem(
+      'operating_mode_policy',
+      modePolicyViolationCount > 0 && currentRuntimePolicy.operatingMode === 'million_longform' ? 'critical' : 'warning',
+      'OperatingMode 策略出现违规',
+      `mode 违规章节 ${modePolicyViolationCount}，publish provenance 阻断 ${publishBlockedByProvenance}。`,
+      reviewFindingEntries.filter((entry) => entry.findings.operatingModeRisks.length > 0).slice(0, 4).map((entry) => entry.chapterNum),
+      undefined,
+      {
+        metricKey: 'operating_mode_policy',
+        whyItHappened: '项目复杂度、checkpoint 新鲜度或阶段结构已经偏离当前 operatingMode 允许的运行策略。',
+        howToFix: '先清掉 checkpoint lag 或结构复杂度违规，再决定是继续当前模式还是切换 operatingMode。',
+        suggestedActions: [],
+      },
+    ))
+  }
+
+  if (
+    recentLanguageDriftAlerts.some((alert) => alert.metric === 'abstractTokenDensity' || alert.metric === 'ornamentOverloadRate' || alert.metric === 'endingSummaryRate')
+    || groundingAssessment.conservativeFallbackActive
+  ) {
+    const topRegisterAlert = recentLanguageDriftAlerts.find((alert) =>
+      alert.metric === 'abstractTokenDensity' || alert.metric === 'ornamentOverloadRate' || alert.metric === 'endingSummaryRate')
+    addRepairRisk(createDashboardRiskItem(
+      'genre_register_drift',
+      groundingAssessment.conservativeFallbackActive || (topRegisterAlert?.latestValue || 0) >= 60 ? 'critical' : 'warning',
+      '题材语域开始漂移',
+      topRegisterAlert
+        ? `${topRegisterAlert.label} 最近变化 ${topRegisterAlert.delta > 0 ? `+${topRegisterAlert.delta}` : topRegisterAlert.delta}，当前值 ${topRegisterAlert.latestValue}。`
+        : '题材语感正在被抽象升华、说明腔或辞藻堆积稀释。',
+      [],
+      undefined,
+      {
+        metricKey: 'genre_register_drift',
+        whyItHappened: '长窗口内抽象词、段尾升华和华饰化表达累积过高，题材语感没有持续落在人物行动和世界规则上。',
+        howToFix: '收回抽象升华和说明句，把题材语域重新压回动作、身份、制度、生态和冲突现场。',
+        suggestedActions: [],
+      },
+    ))
+  }
+
+  if (
+    feedbackSummary.humanizationSummary.highRiskIssueCount > 0
+    || feedbackSummary.humanizationSummary.topRepeatedIssues.some((item) => item.title.includes('说明') || item.title.includes('解释') || item.title.includes('过渡'))
+  ) {
+    const expositionIssue = feedbackSummary.humanizationSummary.topRepeatedIssues.find((item) =>
+      item.title.includes('说明') || item.title.includes('解释') || item.title.includes('过渡'))
+    addRepairRisk(createDashboardRiskItem(
+      'exposition_density',
+      feedbackSummary.humanizationSummary.highRiskIssueCount > 0 ? 'critical' : 'warning',
+      '解释密度与说明文偏高',
+      expositionIssue
+        ? `${expositionIssue.title}，近窗命中 ${expositionIssue.hitCount} 次。`
+        : `人类化高风险问题 ${feedbackSummary.humanizationSummary.highRiskIssueCount} 类，解释腔与说明文正在累积。`,
+      expositionIssue?.chapterNums || [],
+      volumeIdByChapterNum.get((expositionIssue?.chapterNums || [])[0] || 0),
+      {
+        metricKey: 'exposition_density',
+        whyItHappened: '章节越来越依赖解释腔、过渡句和世界观说明文来代替场景推进。',
+        howToFix: '优先删减说明段，把设定与转场信息改成事件、动作和结果状态。',
+        suggestedActions: [],
+      },
+    ))
+  }
+
+  if (antiAiSummary.overview.highRiskRuleCount > 0 || antiAiSummary.topRepeatedRules.some((item) => item.hitCount >= 3)) {
+    const repeatedRule = antiAiSummary.topRepeatedRules.find((item) => item.hitCount >= 3) || antiAiSummary.topRepeatedRules[0]
+    addRepairRisk(createDashboardRiskItem(
+      'long_window_homogenization',
+      antiAiSummary.overview.highRiskRuleCount > 0 ? 'critical' : 'warning',
+      repeatedRule ? `${repeatedRule.ruleTitle} 正在累积复现` : '模板化重复正在累积',
+      repeatedRule
+        ? `${repeatedRule.ruleTitle} 近窗命中 ${repeatedRule.hitCount} 次，已形成长窗口模板化压力。`
+        : `反 AI 高风险复现规则 ${antiAiSummary.overview.highRiskRuleCount} 类。`,
+      repeatedRule?.chapterNums || [],
+      volumeIdByChapterNum.get((repeatedRule?.chapterNums || [])[0] || 0),
+      {
+        metricKey: 'long_window_homogenization',
+        whyItHappened: '模板连接、模板情绪和高频重复句式在多章窗口里反复出现，开始挤压文本差异度。',
+        howToFix: '优先替换最近命中最多的模板和重复句式，再回查对应章节的结构与语气差异。',
+        suggestedActions: [],
+      },
+    ))
+  }
+
+  if (dialogueSnapshot.dialogueFingerprintStats.highSimilarityPairCount > 0 || dialogueSnapshot.dialogueFingerprintStats.driftingCharacterCount > 0 || dialogueSnapshot.requiredDialogueVoiceLocks.length > 0) {
+    addRepairRisk(createDashboardRiskItem(
+      'dialogue_separability',
+      dialogueSnapshot.dialogueFingerprintStats.highSimilarityPairCount >= 2 || dialogueSnapshot.dialogueFingerprintStats.driftingCharacterCount >= 2 ? 'critical' : 'warning',
+      '角色对白可分离度下降',
+      `高相似角色对 ${dialogueSnapshot.dialogueFingerprintStats.highSimilarityPairCount}，漂移角色 ${dialogueSnapshot.dialogueFingerprintStats.driftingCharacterCount}，待补 voice lock ${dialogueSnapshot.requiredDialogueVoiceLocks.length}。`,
+      [],
+      undefined,
+      {
+        metricKey: 'dialogue_separability',
+        whyItHappened: '角色对白在长窗口里开始同腔化，voice profile 漂移和相似对白对越来越多。',
+        howToFix: '优先处理高相似角色对和漂移角色，补 voice lock 并重写关键对白。',
+        suggestedActions: [],
+      },
+    ))
+  }
+
   const contractBlockerChapters = contractStatusEntries.filter((entry) => entry.validation.status === 'blocker')
   const firstContractBlocker = contractBlockerChapters[0]
   if (contractBlockerCount > 0 || endgameDebtSnapshot.overview.overdueCount > 0 || endgameDebtSnapshot.overview.unboundCount > 0 || contractProgressMetrics.storyThreadMentionOnlyCount > 0) {
@@ -3726,6 +4032,41 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
       `合同通过率 ${contractReadyRate}%，终局过期 ${endgameDebtSnapshot.overview.overdueCount}，线程只提及未推进 ${contractProgressMetrics.storyThreadMentionOnlyCount}。`,
     ),
     buildRepairMetricSummary(
+      'typed_ref_coverage',
+      100 - Math.min(typedRefObservability.unresolvedRefCount, 12) * 6 - Math.max(0, 90 - typedRefObservability.overallCoverageRate),
+      `typed ref 覆盖率 ${typedRefObservability.overallCoverageRate}%，未解析引用 ${typedRefObservability.unresolvedRefCount}。`,
+    ),
+    buildRepairMetricSummary(
+      'source_grounding',
+      100 - historicalViolationCount * 15 - (historicalGenericFallback ? 18 : 0) - (groundingAssessment.conservativeFallbackActive ? 12 : 0),
+      `来源覆盖 ${groundingAssessment.coverage}，历史违规章节 ${historicalViolationCount}。`,
+    ),
+    buildRepairMetricSummary(
+      'operating_mode_policy',
+      100 - modePolicyViolationCount * 14 - publishBlockedByProvenance * 6,
+      `mode 违规章节 ${modePolicyViolationCount}，publish provenance 阻断 ${publishBlockedByProvenance}。`,
+    ),
+    buildRepairMetricSummary(
+      'genre_register_drift',
+      100 - recentLanguageDriftAlerts.filter((alert) => alert.metric === 'abstractTokenDensity' || alert.metric === 'ornamentOverloadRate' || alert.metric === 'endingSummaryRate').length * 10 - (groundingAssessment.conservativeFallbackActive ? 12 : 0),
+      `语域漂移预警 ${recentLanguageDriftAlerts.filter((alert) => alert.metric === 'abstractTokenDensity' || alert.metric === 'ornamentOverloadRate' || alert.metric === 'endingSummaryRate').length} 条。`,
+    ),
+    buildRepairMetricSummary(
+      'exposition_density',
+      100 - feedbackSummary.humanizationSummary.highRiskIssueCount * 10 - feedbackSummary.humanizationSummary.pauseSuggestedIssueCount * 6,
+      `人类化高风险 ${feedbackSummary.humanizationSummary.highRiskIssueCount}，建议暂停 ${feedbackSummary.humanizationSummary.pauseSuggestedIssueCount}。`,
+    ),
+    buildRepairMetricSummary(
+      'long_window_homogenization',
+      100 - antiAiSummary.overview.highRiskRuleCount * 12 - antiAiSummary.overview.recurringRuleCount * 5,
+      `高风险复现规则 ${antiAiSummary.overview.highRiskRuleCount}，重复规则 ${antiAiSummary.overview.recurringRuleCount}。`,
+    ),
+    buildRepairMetricSummary(
+      'dialogue_separability',
+      100 - dialogueSnapshot.dialogueFingerprintStats.highSimilarityPairCount * 10 - dialogueSnapshot.dialogueFingerprintStats.driftingCharacterCount * 8 - dialogueSnapshot.requiredDialogueVoiceLocks.length * 4,
+      `高相似角色对 ${dialogueSnapshot.dialogueFingerprintStats.highSimilarityPairCount}，漂移角色 ${dialogueSnapshot.dialogueFingerprintStats.driftingCharacterCount}。`,
+    ),
+    buildRepairMetricSummary(
       'voice_distinction',
       100 - Math.round(dialogueSnapshot.dialogueFingerprintStats.averageCrossCharacterSimilarity * 0.6) - dialogueSnapshot.dialogueFingerprintStats.highSimilarityPairCount * 8 - dialogueSnapshot.dialogueFingerprintStats.driftingCharacterCount * 6 - dialogueSnapshot.requiredDialogueVoiceLocks.length * 4,
       `高相似角色对 ${dialogueSnapshot.dialogueFingerprintStats.highSimilarityPairCount}，漂移角色 ${dialogueSnapshot.dialogueFingerprintStats.driftingCharacterCount}。`,
@@ -3964,6 +4305,83 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     aiRecurrenceHighRiskCount: antiAiSummary.overview.highRiskRuleCount,
     feedbackPauseSuggestedCount: feedbackSummary.overview.pauseSuggestedIssueCount,
   })
+  const runtimePressureScore = clampHealthScore(
+    Math.min(
+      100,
+      writebackPendingCount * 10
+      + writebackFailedCount * 22
+      + staleCheckpointCount * 8
+      + Math.min(30, latestCheckpointChapterGap * 4)
+      + recallDegradedChapterCount * 6
+      + latestBatchConsecutiveRecallFallbackChapters * 12
+      + inspectionBlockedCount * 14
+      + batchGateEntries.filter((entry) => entry.gateLevel === 'blocker').length * 14,
+    ),
+  )
+  const runtimePressureLevel: NonNullable<QualityDashboardData['millionRuntimeObservability']>['runtimePressureLevel'] = runtimePressureScore >= 70
+    ? 'high'
+    : runtimePressureScore >= 35
+      ? 'medium'
+      : 'low'
+  const checkpointLagGuardrailActive = latestCheckpointChapterGap >= currentRuntimePolicy.checkpointGapWarningThreshold
+  const writebackGuardrailActive = currentRuntimePolicy.requireWritebackReady && (writebackPendingCount > 0 || writebackFailedCount > 0)
+  const recallGuardrailActive = latestBatchConsecutiveRecallFallbackChapters >= currentRuntimePolicy.recallPauseThreshold
+  const inspectionGuardrailActive = inspectionBlockedCount > 0 || batchGateEntries.filter((entry) => entry.gateLevel === 'blocker').length > 0
+  const runtimeGuardrailActive = writebackGuardrailActive || recallGuardrailActive || checkpointLagGuardrailActive || inspectionGuardrailActive || Boolean(latestBatchGuardrailReason)
+  const activeGuardrailReason = latestBatchGuardrailReason
+    || (writebackGuardrailActive
+      ? '章后回写闸门仍在阻断继续推进，当前运行时不允许跨章乱序。'
+      : recallGuardrailActive
+        ? `连续召回降级已达到阈值 ${currentRuntimePolicy.recallPauseThreshold}，需要先恢复记忆链路。`
+        : checkpointLagGuardrailActive
+          ? `检查点已落后 ${latestCheckpointChapterGap} 章，超过当前模式阈值 ${currentRuntimePolicy.checkpointGapWarningThreshold}。`
+          : inspectionGuardrailActive
+            ? '最近批次仍有检查阻断项，建议先清空阻断再继续扩批。'
+            : undefined)
+  const millionRuntimeObservability: NonNullable<QualityDashboardData['millionRuntimeObservability']> = {
+    operatingMode: currentRuntimePolicy.operatingMode,
+    label: currentRuntimePolicy.label,
+    strategySummary: currentRuntimePolicy.strategySummary,
+    chapterGenerationMode: currentRuntimePolicy.chapterGenerationMode,
+    serialOnly: currentRuntimePolicy.serialOnly,
+    backgroundPrecomputeEnabled: currentRuntimePolicy.backgroundPrecomputeEnabled,
+    requireWritebackReady: currentRuntimePolicy.requireWritebackReady,
+    recallPauseThreshold: currentRuntimePolicy.recallPauseThreshold,
+    checkpointGapWarningThreshold: currentRuntimePolicy.checkpointGapWarningThreshold,
+    mainThreadPressureStrategy: currentRuntimePolicy.mainThreadPressureStrategy,
+    guardrailActive: runtimeGuardrailActive,
+    activeGuardrailReason,
+    pauseReason: latestBatchPauseReason,
+    writebackPendingCount,
+    writebackFailedCount,
+    staleCheckpointCount,
+    latestCheckpointChapterGap,
+    recallDegradedChapterCount,
+    consecutiveRecallFallbackChapters: latestBatchConsecutiveRecallFallbackChapters,
+    inspectionBlockedCount,
+    batchGateBlockedCount: batchGateEntries.filter((entry) => entry.gateLevel === 'blocker').length,
+    precomputeQueueStatus: storyMemoryPrecomputeStatus.status,
+    precomputeLastError: storyMemoryPrecomputeStatus.lastError,
+    precomputeReason: storyMemoryPrecomputeStatus.reason || storyMemoryPrecomputeStatus.trigger,
+    precomputeUpdatedAt: storyMemoryPrecomputeStatus.finishedAt || storyMemoryPrecomputeStatus.startedAt || storyMemoryPrecomputeStatus.queuedAt,
+    precomputeActiveTaskSummary: storyMemoryPrecomputeStatus.status === 'running'
+      ? 'story-memory checkpoint refresh 正在后台预计算。'
+      : storyMemoryPrecomputeStatus.status === 'queued'
+        ? 'story-memory checkpoint refresh 已排队等待执行。'
+        : storyMemoryPrecomputeStatus.status === 'failed'
+          ? 'story-memory checkpoint refresh 最近一次后台预计算失败。'
+          : '当前没有排队中的 story-memory 后台预计算。',
+    runtimePressureLevel,
+    runtimePressureScore,
+    runtimePressureSummary: runtimePressureLevel === 'high'
+      ? '当前主线程压力代理偏高，继续扩批前应先清理回写、召回或检查点阻断。'
+      : runtimePressureLevel === 'medium'
+        ? '当前运行时压力可控但已有累积信号，建议先观察批次闭环再继续。'
+        : '当前运行时压力代理较低，串行正文与回写顺序处于可继续状态。',
+    summary: currentRuntimePolicy.operatingMode === 'million_longform'
+      ? `百万字模式已按“正文串行 + 后台预计算 + 回写前置”运行；预计算状态 ${storyMemoryPrecomputeStatus.status}，当前压力 ${runtimePressureLevel}。`
+      : `${currentRuntimePolicy.label} 当前仍按正文串行执行；预计算状态 ${storyMemoryPrecomputeStatus.status}，运行时压力 ${runtimePressureLevel}。`,
+  }
   const expressionDedupReports = rows
     .map((row) => ({ chapterId: row.id, chapterNum: row.chapterNum, report: parseExpressionDedupJson(row.expressionDedupJson) }))
     .filter((entry): entry is { chapterId: number; chapterNum: number; report: NonNullable<ReturnType<typeof parseExpressionDedupJson>> } => Boolean(entry.report))
@@ -4073,6 +4491,37 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
       '当前版本已升级为质量修复引擎：每个高价值风险都会给出原因、修法和直接动作。',
       '安全动作会直接落任务，其他动作会保留定位信息并引导到对应页面处理。',
     ],
+    operatingModeObservability: {
+      mode: currentOperatingMode,
+      label: currentOperatingModePolicy.label,
+      summary: currentOperatingModePolicy.modeSummary,
+      quickStartAligned: (novelMeta?.launchMode || '') === 'fast_launch' && currentOperatingMode === 'shortform',
+      recommendedChapterWords: currentOperatingModePolicy.chapterWords.recommended,
+      estimatedChapterCount: estimateChapterCountFromOperatingMode({
+        launchMode: novelMeta?.launchMode,
+        targetWords: novelMeta?.targetWords,
+        settingsJson: novelMeta?.settingsJson,
+        chapterCount: rows.length,
+      }),
+      recentContextWindow: currentOperatingModePolicy.recentContextWindow,
+    },
+    millionRuntimeObservability,
+    genreGroundingObservability: {
+      genreName: novelMeta?.genreName || '未设置题材',
+      resolvedGenreKey,
+      historicalGenericFallback,
+      historicalMode: groundingAssessment.mode,
+      sourceCoverage: groundingAssessment.coverage,
+      conservativeFallbackActive: groundingAssessment.conservativeFallbackActive,
+      sourceSignalCount: groundingAssessment.sourceSignals.length,
+      summary: historicalGenericFallback
+        ? '当前历史题材仍落在 generic fallback，应继续补来源层或 capability pack 约束。'
+        : groundingAssessment.mode !== 'none'
+          ? `${groundingAssessment.summary} 当前题材已命中 ${resolvedGenreKey} capability pack。`
+          : `当前题材已命中 ${resolvedGenreKey} capability pack。`,
+    },
+    typedRefObservability,
+    structuredMemoryObservability,
     repairActionSummary,
     repairMetrics,
     heatmapData,

@@ -16,10 +16,11 @@ import type {
   TimelineGenerateOptions,
   WritebackSyncStatus,
 } from '../../src/types'
+import { getOperatingModeRuntimePolicy } from '../../src/shared/operating-mode'
 import type { StoryThreadBatchGenerateOptions, StoryThreadBatchGenerationResult } from '../../src/shared/story-thread-generation'
 import { hasResumableWorkflowCheckpoint } from '../../src/shared/workflow-resilience'
 import { getDb } from '../database/db'
-import { tasks } from '../database/schema'
+import { novels, tasks } from '../database/schema'
 import { throwUserFacingError } from '../utils/user-facing-error'
 import { generateChapterContent, getChapter } from './chapter.service'
 import { generateCharacterBatchChunk } from './character.service'
@@ -46,7 +47,6 @@ import {
 } from './batch-workbench.service'
 
 const DEFAULT_MAX_RETRIES = 2
-const CHAPTER_BATCH_RECALL_PAUSE_THRESHOLD = 3
 const activeBatchWorkflows = new Set<number>()
 const ACTIVE_BATCH_WORKFLOW_RUNNING_STATUSES = new Set(['pending', 'running', 'cancel_requested'])
 
@@ -266,6 +266,29 @@ function appendUniqueStrings(values: string[], next?: string | string[] | null):
     appended.push(normalized)
   }
   return appended
+}
+
+function getChapterBatchRuntimePolicy(novelId: number) {
+  const db = getDb()
+  const novel = db.select().from(novels).where(eq(novels.id, novelId)).get()
+  return getOperatingModeRuntimePolicy({
+    launchMode: novel?.launchMode,
+    targetWords: novel?.targetWords,
+    settingsJson: novel?.settingsJson,
+  })
+}
+
+function toRuntimePolicySnapshot(runtimePolicy: ReturnType<typeof getOperatingModeRuntimePolicy>): NonNullable<ChapterBatchAutoGenerateStatus['runtimePolicySnapshot']> {
+  return {
+    operatingMode: runtimePolicy.operatingMode,
+    chapterGenerationMode: runtimePolicy.chapterGenerationMode,
+    backgroundPrecomputeEnabled: runtimePolicy.backgroundPrecomputeEnabled,
+    requireWritebackReady: runtimePolicy.requireWritebackReady,
+    recallPauseThreshold: runtimePolicy.recallPauseThreshold,
+    checkpointGapWarningThreshold: runtimePolicy.checkpointGapWarningThreshold,
+    mainThreadPressureStrategy: runtimePolicy.mainThreadPressureStrategy,
+    strategySummary: runtimePolicy.strategySummary,
+  }
 }
 
 function readChapterPipelineSignals(task: TaskRow | null | undefined): {
@@ -488,6 +511,7 @@ function toSubplotStatus(taskId: number, task: TaskRow): SubplotAutoGenerateStat
 
 function createInitialChapterBatchStatus(taskId: number, novelId: number, options: ChapterBatchGenerateOptions): ChapterBatchAutoGenerateStatus {
   const requestedCount = options.chapterIds.length
+  const runtimePolicy = getChapterBatchRuntimePolicy(novelId)
   return {
     ...createBaseStatus(taskId, novelId, requestedCount, 1, Math.max(1, requestedCount)),
     chapterIds: [...options.chapterIds],
@@ -496,6 +520,7 @@ function createInitialChapterBatchStatus(taskId: number, novelId: number, option
     warnings: [],
     consecutiveRecallFallbackChapters: 0,
     snapshotId: undefined,
+    runtimePolicySnapshot: toRuntimePolicySnapshot(runtimePolicy),
     message: requestedCount <= 0 ? '当前没有需要批量生成的章节。' : '等待开始章节批量生成。',
   }
 }
@@ -529,6 +554,10 @@ function toChapterBatchStatus(taskId: number, task: TaskRow): ChapterBatchAutoGe
       : 0,
     snapshotId: typeof progress.snapshotId === 'number' ? progress.snapshotId : undefined,
     currentWritebackStatus: asWritebackSyncStatus(progress.currentWritebackStatus),
+    activeGuardrailReason: typeof progress.activeGuardrailReason === 'string' ? progress.activeGuardrailReason : undefined,
+    runtimePolicySnapshot: progress.runtimePolicySnapshot && typeof progress.runtimePolicySnapshot === 'object' && !Array.isArray(progress.runtimePolicySnapshot)
+      ? progress.runtimePolicySnapshot as ChapterBatchAutoGenerateStatus['runtimePolicySnapshot']
+      : fallback.runtimePolicySnapshot,
   }
 }
 
@@ -957,6 +986,7 @@ function pauseChapterBatchWorkflow(
     warnings?: string | string[]
     consecutiveRecallFallbackChapters?: number
     currentWritebackStatus?: WritebackSyncStatus
+    activeGuardrailReason?: string
   },
 ) {
   const nextProgress: ChapterBatchAutoGenerateStatus = {
@@ -974,6 +1004,7 @@ function pauseChapterBatchWorkflow(
     currentWritebackStatus: options.currentWritebackStatus || progress.currentWritebackStatus,
     failedChapterIds: appendUniqueNumber(progress.failedChapterIds, options.chapterId),
     warnings: appendUniqueStrings(progress.warnings, options.warnings),
+    activeGuardrailReason: options.activeGuardrailReason || progress.activeGuardrailReason,
     consecutiveRecallFallbackChapters: typeof options.consecutiveRecallFallbackChapters === 'number'
       ? options.consecutiveRecallFallbackChapters
       : progress.consecutiveRecallFallbackChapters,
@@ -1000,11 +1031,14 @@ async function runChapterBatchGenerateWorkflow(taskId: number, sender?: WebConte
       if (!latestTask || !latestTask.novelId) break
       const control = parseTaskControl(latestTask)
       const progress = toChapterBatchStatus(taskId, latestTask)
+      const runtimePolicy = getChapterBatchRuntimePolicy(latestTask.novelId)
+      const runtimePolicySnapshot = toRuntimePolicySnapshot(runtimePolicy)
 
       if (control.cancelRequested) {
         updateTaskProgress(taskId, {
           ...progress,
           status: 'cancelled',
+          runtimePolicySnapshot,
           message: '章节批量生成已停止。',
         }, sender)
         updateTaskStatus(taskId, 'cancelled', sender, { errorMessage: '用户已取消', currentChildTaskId: null })
@@ -1019,6 +1053,8 @@ async function runChapterBatchGenerateWorkflow(taskId: number, sender?: WebConte
           ...progress,
           status: 'success',
           completed: true,
+          runtimePolicySnapshot,
+          activeGuardrailReason: undefined,
           currentChapterId: undefined,
           currentChapterNum: undefined,
           blockedChapterId: undefined,
@@ -1040,6 +1076,7 @@ async function runChapterBatchGenerateWorkflow(taskId: number, sender?: WebConte
           chapterId,
           message: `第 ${currentBatch}/${progress.totalBatches} 章缺失或不属于当前作品，任务已暂停。`,
           errorMessage: '章节不存在或归属作品不匹配',
+          activeGuardrailReason: '正文串行链路要求当前章归属明确，异常章节会立即暂停。',
         })
         break
       }
@@ -1049,6 +1086,10 @@ async function runChapterBatchGenerateWorkflow(taskId: number, sender?: WebConte
         ...progress,
         status: 'running',
         currentBatch,
+        runtimePolicySnapshot,
+        activeGuardrailReason: runtimePolicy.operatingMode === 'million_longform'
+          ? '百万字模式护栏：正文保持串行，允许后台预计算，但章后回写必须先闭环。'
+          : undefined,
         currentChapterId: chapterId,
         currentChapterNum: chapterNum,
         currentWritebackStatus: parseChapterWritebackSyncStatus(chapter.writebackStatusJson),
@@ -1092,7 +1133,7 @@ async function runChapterBatchGenerateWorkflow(taskId: number, sender?: WebConte
 
       const refreshedChapter = getChapter(chapterId)
       const writebackStatus = parseChapterWritebackSyncStatus(refreshedChapter?.writebackStatusJson)
-      if (writebackStatus?.blockedGeneration || writebackStatus?.readyForNextChapter === false) {
+      if (runtimePolicy.requireWritebackReady && (writebackStatus?.blockedGeneration || writebackStatus?.readyForNextChapter === false)) {
         pauseChapterBatchWorkflow(taskId, sender, progress, {
           chapterId,
           chapterNum,
@@ -1101,6 +1142,9 @@ async function runChapterBatchGenerateWorkflow(taskId: number, sender?: WebConte
           errorMessage: writebackStatus.lastError || '章后回写未完成',
           warnings: `第 ${chapterNum} 章回写状态：${getWritebackPhaseLabel(writebackStatus.phase)}`,
           currentWritebackStatus: writebackStatus,
+          activeGuardrailReason: runtimePolicy.operatingMode === 'million_longform'
+            ? '百万字模式护栏生效：章后回写未闭环前，不允许推进下一章，避免状态乱序。'
+            : '章后回写护栏生效：当前章状态尚未回写完成。',
         })
         break
       }
@@ -1121,27 +1165,31 @@ async function runChapterBatchGenerateWorkflow(taskId: number, sender?: WebConte
       const nextRecallStreak = childSignals.recallDegraded
         ? progress.consecutiveRecallFallbackChapters + 1
         : 0
-      if (nextRecallStreak >= CHAPTER_BATCH_RECALL_PAUSE_THRESHOLD) {
+      if (nextRecallStreak >= runtimePolicy.recallPauseThreshold) {
         pauseChapterBatchWorkflow(taskId, sender, progress, {
           chapterId,
           chapterNum,
           childTaskId,
           message: `最近已连续 ${nextRecallStreak} 章召回降级，章节批量任务已在第 ${chapterNum} 章后自动暂停。`,
           errorMessage: '连续召回降级达到暂停阈值',
-          warnings: `第 ${chapterNum} 章召回已降级，连续 ${nextRecallStreak} 章触发自动暂停。`,
+          warnings: `第 ${chapterNum} 章召回已降级，连续 ${nextRecallStreak} 章触发自动暂停（阈值 ${runtimePolicy.recallPauseThreshold}）。`,
           consecutiveRecallFallbackChapters: nextRecallStreak,
+          activeGuardrailReason: runtimePolicy.operatingMode === 'million_longform'
+            ? `百万字模式护栏生效：连续召回降级达到 ${runtimePolicy.recallPauseThreshold} 章，先恢复记忆链路再继续。`
+            : `召回护栏生效：连续召回降级达到 ${runtimePolicy.recallPauseThreshold} 章。`,
         })
         break
       }
 
       const nextWarnings = appendUniqueStrings(progress.warnings, [
         publishCheck.gateLevel === 'warning' ? `第 ${chapterNum} 章章节门告警：${publishCheck.summary}` : '',
-        childSignals.recallDegraded ? `第 ${chapterNum} 章召回已降级，但未达到自动暂停阈值。` : '',
+        childSignals.recallDegraded ? `第 ${chapterNum} 章召回已降级，但未达到自动暂停阈值 ${runtimePolicy.recallPauseThreshold}。` : '',
       ])
       const nextProgress: ChapterBatchAutoGenerateStatus = {
         ...progress,
         status: 'running',
         currentBatch,
+        runtimePolicySnapshot,
         resumeCursor: progress.resumeCursor + 1,
         generatedCount: progress.generatedCount + 1,
         retryCount: 0,
@@ -1157,6 +1205,9 @@ async function runChapterBatchGenerateWorkflow(taskId: number, sender?: WebConte
         blockedChapterId: undefined,
         blockedTaskId: undefined,
         pauseReason: undefined,
+        activeGuardrailReason: runtimePolicy.operatingMode === 'million_longform'
+          ? '百万字模式护栏已接管：正文串行执行，继续推进前必须保持回写闭环。'
+          : undefined,
         consecutiveRecallFallbackChapters: nextRecallStreak,
         batchDigest: chapter.title || `第${chapterNum}章`,
         message: `第 ${chapterNum} 章已完成，可继续处理下一章。`,

@@ -40,6 +40,12 @@ import {
   buildHumanLanguageRules,
   buildOutputQualityRules,
 } from '../../src/shared/prompt-library'
+import {
+  buildNameFallbackPointer,
+  buildTypedRefOverlay,
+  parseTypedRefOverlay,
+  stringifyTypedRefOverlay,
+} from '../../src/shared/typed-ref'
 import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/utils/text'
 import { markNovelContextChanged } from './context-impact.service'
 import { runAssetQualityLoop, summarizeAssetQualityWarnings } from './asset-quality.service'
@@ -87,6 +93,7 @@ interface GeneratedStoryItem {
   appearance?: unknown
   faction_hint?: unknown
   linked_character_names?: unknown
+  typed_refs?: unknown
   tags?: unknown
 }
 
@@ -205,6 +212,7 @@ function sanitizeStoryItemPayload(
   if (typeof data.factionHint === 'string') next.factionHint = cleanAiFieldText(data.factionHint)
   if (typeof data.linkedCharacterIdsJson === 'string') next.linkedCharacterIdsJson = data.linkedCharacterIdsJson
   if (typeof data.linkedTimelineEventIdsJson === 'string') next.linkedTimelineEventIdsJson = data.linkedTimelineEventIdsJson
+  if (typeof data.typedRefsJson === 'string') next.typedRefsJson = data.typedRefsJson
   if (typeof data.tagsJson === 'string') next.tagsJson = data.tagsJson
   if (typeof data.sourceContextJson === 'string') next.sourceContextJson = data.sourceContextJson
   if (typeof data.sortOrder === 'number') next.sortOrder = Math.round(data.sortOrder)
@@ -288,11 +296,55 @@ function parseSourceContexts(raw?: string | null): StoryItemSourceContext[] {
         page: typeof item.page === 'string' ? item.page : undefined,
         label: typeof item.label === 'string' ? item.label : undefined,
         detectedAt: typeof item.detectedAt === 'string' ? item.detectedAt : undefined,
+        typedRefJson: typeof item.typedRefJson === 'string' ? item.typedRefJson : undefined,
       }))
-      .filter((item) => item.page || item.label || item.detectedAt)
+      .filter((item) => item.page || item.label || item.detectedAt || item.typedRefJson)
   } catch {
     return []
   }
+}
+
+function deriveItemTypedRefsJson(params: {
+  typedRefsJson?: string | null
+  linkedCharacterIdsJson?: string | null
+  linkedTimelineEventIdsJson?: string | null
+  ownerCharacterId?: number | null
+}): string | undefined {
+  const explicit = parseTypedRefOverlay(params.typedRefsJson)
+  if (explicit) return stringifyTypedRefOverlay(explicit)
+
+  const characterIds = parseJsonNumberArray(params.linkedCharacterIdsJson)
+  const eventIds = parseJsonNumberArray(params.linkedTimelineEventIdsJson)
+  const overlay = buildTypedRefOverlay([
+    ...(typeof params.ownerCharacterId === 'number'
+      ? [buildNameFallbackPointer('character', { id: params.ownerCharacterId, confidence: 1 })]
+      : []),
+    ...characterIds.map((id) => buildNameFallbackPointer('character', { id, confidence: 1 })),
+    ...eventIds.map((id) => buildNameFallbackPointer('timeline_event', { id, confidence: 1 })),
+  ])
+  return stringifyTypedRefOverlay(overlay)
+}
+
+function resolveTypedRefIds<T extends { id: number }>(
+  raw: unknown,
+  assetType: 'character' | 'timeline_event',
+  rows: T[],
+  getName: (row: T) => string,
+): number[] {
+  const overlay = parseTypedRefOverlay(typeof raw === 'string' ? raw : raw == null ? undefined : JSON.stringify(raw))
+  if (!overlay) return []
+  return [...new Set(overlay.pointers
+    .filter((pointer) => pointer.assetType === assetType)
+    .map((pointer) => {
+      if (typeof pointer.id === 'number') return pointer.id
+      const candidates = [pointer.name, ...(pointer.alias || [])].filter((item): item is string => Boolean(item))
+      for (const candidate of candidates) {
+        const resolved = resolveIdByName(rows, getName, candidate)
+        if (typeof resolved === 'number') return resolved
+      }
+      return undefined
+    })
+    .filter((value): value is number => typeof value === 'number'))]
 }
 
 function mapMapNodeSummary(
@@ -343,6 +395,7 @@ function mapStoryItemEntity(row: typeof storyItems.$inferSelect): AppStoryItem {
     factionHint: row.factionHint ?? undefined,
     linkedCharacterIdsJson: row.linkedCharacterIdsJson ?? undefined,
     linkedTimelineEventIdsJson: row.linkedTimelineEventIdsJson ?? undefined,
+    typedRefsJson: row.typedRefsJson ?? undefined,
     tagsJson: row.tagsJson ?? undefined,
     sourceContextJson: row.sourceContextJson ?? undefined,
     sortOrder: row.sortOrder || 0,
@@ -897,10 +950,38 @@ function buildGeneratedPayload(
   const ownerCharacterId = resolveIdByName(context.characterRows, (row) => row.fullName, item.owner_name) ?? null
   const locationMapId = resolveIdByName(context.mapRows, (row) => row.name, item.location_name) ?? null
   const eventId = resolveIdByName(context.eventRows, (row) => row.eventTitle, item.event_title)
-  const linkedCharacterIds = resolveCharacterIds(
-    context.characterRows,
-    toStringArray(item.linked_character_names).concat(ownerCharacterId ? [] : toStringArray(item.owner_name)),
-  )
+  const typedCharacterIds = resolveTypedRefIds(item.typed_refs, 'character', context.characterRows, (row) => row.fullName)
+  const typedEventIds = resolveTypedRefIds(item.typed_refs, 'timeline_event', context.eventRows, (row) => row.eventTitle)
+  const linkedCharacterIds = typedCharacterIds.length > 0
+    ? typedCharacterIds
+    : resolveCharacterIds(
+        context.characterRows,
+        toStringArray(item.linked_character_names).concat(ownerCharacterId ? [] : toStringArray(item.owner_name)),
+      )
+  const resolvedEventIds = typedEventIds.length > 0
+    ? typedEventIds
+    : (typeof eventId === 'number' ? [eventId] : [])
+  const typedRefsJson = stringifyTypedRefOverlay(buildTypedRefOverlay([
+    ...(typeof ownerCharacterId === 'number'
+      ? [buildNameFallbackPointer('character', {
+          id: ownerCharacterId,
+          name: context.characterRows.find((row) => row.id === ownerCharacterId)?.fullName,
+          confidence: 0.95,
+        })]
+      : []),
+    ...linkedCharacterIds
+      .filter((id) => id !== ownerCharacterId)
+      .map((id) => buildNameFallbackPointer('character', {
+        id,
+        name: context.characterRows.find((row) => row.id === id)?.fullName,
+        confidence: typedCharacterIds.includes(id) ? 0.98 : 0.78,
+      })),
+    ...resolvedEventIds.map((id) => buildNameFallbackPointer('timeline_event', {
+      id,
+      name: context.eventRows.find((row) => row.id === id)?.eventTitle,
+      confidence: typedEventIds.includes(id) ? 0.98 : 0.78,
+    })),
+  ]))
 
   return {
     itemKind: 'instance',
@@ -922,7 +1003,8 @@ function buildGeneratedPayload(
     appearance: asText(item.appearance),
     factionHint: asText(item.faction_hint),
     linkedCharacterIdsJson: stringifyNumberArray(linkedCharacterIds),
-    linkedTimelineEventIdsJson: stringifyNumberArray(typeof eventId === 'number' ? [eventId] : []),
+    linkedTimelineEventIdsJson: stringifyNumberArray(resolvedEventIds),
+    ...(typedRefsJson ? { typedRefsJson } : {}),
     tagsJson: stringifyStringArray(toStringArray(item.tags)),
     sortOrder: context.sortOrder,
   }
@@ -970,6 +1052,7 @@ function mapStoryItemRecord(row: Record<string, unknown>) {
     factionHint: typeof row.faction_hint === 'string' ? row.faction_hint : undefined,
     linkedCharacterIdsJson: typeof row.linked_character_ids_json === 'string' ? row.linked_character_ids_json : undefined,
     linkedTimelineEventIdsJson: typeof row.linked_timeline_event_ids_json === 'string' ? row.linked_timeline_event_ids_json : undefined,
+    typedRefsJson: typeof row.typed_refs_json === 'string' ? row.typed_refs_json : undefined,
     tagsJson: typeof row.tags_json === 'string' ? row.tags_json : undefined,
     sourceContextJson: typeof row.source_context_json === 'string' ? row.source_context_json : undefined,
     sortOrder: Number(row.sort_order || 0),
@@ -1522,6 +1605,12 @@ export function createStoryItem(
   const db = getDb()
   const sortOrder = typeof data.sortOrder === 'number' ? data.sortOrder : getNextSortOrder(novelId)
   const payload = sanitizeStoryItemPayload(data)
+  const typedRefsJson = deriveItemTypedRefsJson({
+    typedRefsJson: typeof payload.typedRefsJson === 'string' ? payload.typedRefsJson : undefined,
+    linkedCharacterIdsJson: payload.linkedCharacterIdsJson,
+    linkedTimelineEventIdsJson: payload.linkedTimelineEventIdsJson,
+    ownerCharacterId: payload.ownerCharacterId,
+  })
   const result = db.insert(storyItems).values({
     novelId,
     itemKind: 'instance',
@@ -1530,6 +1619,7 @@ export function createStoryItem(
     status: 'available',
     linkedCharacterIdsJson: '[]',
     linkedTimelineEventIdsJson: '[]',
+    ...(typedRefsJson ? { typedRefsJson } : {}),
     tagsJson: '[]',
     sortOrder,
     ...payload,
@@ -1560,13 +1650,20 @@ export function updateStoryItem(
   options: { skipContextTracking?: boolean } = {},
 ) {
   const db = getDb()
+  const current = getStoryItem(id)
+  const typedRefsJson = deriveItemTypedRefsJson({
+    typedRefsJson: typeof data.typedRefsJson === 'string' ? data.typedRefsJson : current?.typedRefsJson,
+    linkedCharacterIdsJson: typeof data.linkedCharacterIdsJson === 'string' ? data.linkedCharacterIdsJson : current?.linkedCharacterIdsJson,
+    linkedTimelineEventIdsJson: typeof data.linkedTimelineEventIdsJson === 'string' ? data.linkedTimelineEventIdsJson : current?.linkedTimelineEventIdsJson,
+    ownerCharacterId: 'ownerCharacterId' in data ? data.ownerCharacterId ?? null : current?.ownerCharacterId,
+  })
   db.update(storyItems).set({
     ...sanitizeStoryItemPayload(data),
+    ...(typedRefsJson ? { typedRefsJson } : {}),
     updatedAt: new Date().toISOString(),
   }).where(eq(storyItems.id, id)).run()
   syncStoryItemTimelineLinks(id)
   if (!options.skipContextTracking) {
-    const current = getStoryItem(id)
     if (current) {
       markNovelContextChanged(current.novelId, 'Story items changed')
       refreshWorldStateVersionsForNovel(current.novelId)

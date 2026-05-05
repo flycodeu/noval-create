@@ -660,6 +660,48 @@ describe('runChapterPublishCheck', () => {
     expect(result.checklist.find((item) => item.key === 'recall')?.detail).toContain('召回被预算裁剪')
   })
 
+  it('routes Batch 8 long-window risks into publish gate items', () => {
+    const rows = createBaseRows()
+    Object.assign((rows.get(chapters) || [])[0], {
+      reviewNotesJson: JSON.stringify({
+        severity: 'high',
+        rewrite_required: true,
+        reader_hook_risks: [],
+        arc_progress_risks: [],
+        dialogue_homogenization_risks: [],
+        dialogue_drift_alerts: [],
+        cross_character_similarity: [],
+        chapter_function_primary: 'progression',
+        chapter_function_tags: ['progression'],
+        revision_brief: '优先回收解释腔并拉开对白差异。',
+        protagonist_setback: 'minor',
+        reward_state: 'partial',
+        cost_present: true,
+        genre_register_risks: ['题材语域开始滑向说明文/设定讲解，场景承载的题材语感被解释腔稀释。'],
+        long_window_humanization_risks: [
+          '解释密度偏高：本章说明句明显偏多。',
+          '世界观说明文占比偏高，正文在替设定做摘要，而不是让场景自己显影。',
+          '长窗模板复现：模板连接句，近期命中 4 次。',
+        ],
+        dialogue_separability_risks: [
+          '长窗对白可分离度下降：高相似角色对 2 组。',
+          '角色对白漂移 1 名，近期 voice profile 正在失稳。',
+        ],
+      }),
+    })
+
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+    vi.mocked(buildNovelConsistencyReport).mockReturnValue({ issues: [] } as never)
+
+    const result = runChapterPublishCheck(10)
+
+    expect(result.gateLevel).toBe('blocker')
+    expect(result.checklist.find((item) => item.key === 'genre_register_drift')?.status).toBe('warning')
+    expect(result.checklist.find((item) => item.key === 'exposition_density')?.status).toBe('blocker')
+    expect(result.checklist.find((item) => item.key === 'long_window_homogenization')?.status).toBe('warning')
+    expect(result.checklist.find((item) => item.key === 'dialogue_separability')?.status).toBe('blocker')
+  })
+
   it('marks style compliance as rewrite when review notes persist severe style drift', () => {
     const rows = createBaseRows()
     Object.assign((rows.get(chapters) || [])[0], {

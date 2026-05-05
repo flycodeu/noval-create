@@ -191,6 +191,12 @@ interface ReviewStateSnapshot {
   languageRisks: string[]
   humanLanguageRepairs: string[]
   genreHollowingRisks: string[]
+  typedRefRisks: string[]
+  sourceGroundingRisks: string[]
+  operatingModeRisks: string[]
+  longWindowHumanizationRisks: string[]
+  genreRegisterRisks: string[]
+  dialogueSeparabilityRisks: string[]
   missingPayoffs: string[]
   dialogueHomogenizationRisks: string[]
   dialogueDriftAlerts: string[]
@@ -227,6 +233,12 @@ function parseReviewState(raw?: string | null): {
   languageRisks: string[]
   humanLanguageRepairs: string[]
   genreHollowingRisks: string[]
+  typedRefRisks: string[]
+  sourceGroundingRisks: string[]
+  operatingModeRisks: string[]
+  longWindowHumanizationRisks: string[]
+  genreRegisterRisks: string[]
+  dialogueSeparabilityRisks: string[]
   missingPayoffs: string[]
   dialogueHomogenizationRisks: string[]
   dialogueDriftAlerts: string[]
@@ -261,6 +273,12 @@ function parseReviewState(raw?: string | null): {
     languageRisks: [],
     humanLanguageRepairs: [],
     genreHollowingRisks: [],
+    typedRefRisks: [],
+    sourceGroundingRisks: [],
+    operatingModeRisks: [],
+    longWindowHumanizationRisks: [],
+    genreRegisterRisks: [],
+    dialogueSeparabilityRisks: [],
     missingPayoffs: [],
     dialogueHomogenizationRisks: [],
     dialogueDriftAlerts: [],
@@ -309,6 +327,12 @@ function parseReviewState(raw?: string | null): {
       languageRisks: parseUnknownStringArray(parsed.language_risks),
       humanLanguageRepairs: parseUnknownStringArray(parsed.human_language_repairs),
       genreHollowingRisks: parseUnknownStringArray(parsed.genre_hollowing_risks),
+      typedRefRisks: parseUnknownStringArray(parsed.typed_ref_risks),
+      sourceGroundingRisks: parseUnknownStringArray(parsed.source_grounding_risks),
+      operatingModeRisks: parseUnknownStringArray(parsed.operating_mode_risks),
+      longWindowHumanizationRisks: parseUnknownStringArray(parsed.long_window_humanization_risks),
+      genreRegisterRisks: parseUnknownStringArray(parsed.genre_register_risks),
+      dialogueSeparabilityRisks: parseUnknownStringArray(parsed.dialogue_separability_risks),
       missingPayoffs: parseUnknownStringArray(parsed.missing_payoffs),
       dialogueHomogenizationRisks: parseUnknownStringArray(parsed.dialogue_homogenization_risks),
       dialogueFillerRisks: parseUnknownStringArray(parsed.dialogue_filler_risks),
@@ -2406,6 +2430,107 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
       source: 'review',
       relatedPage: 'revision',
       fixHint: '按文风指纹回调句长、段长、对白密度，并删除禁用表达后再验收。',
+    }),
+    makePublishCheckItem({
+      key: 'typed_ref_coverage',
+      label: 'Typed Ref 覆盖',
+      status: reviewState.typedRefRisks.length >= 3
+        ? 'blocker'
+        : reviewState.typedRefRisks.length > 0
+          ? 'warning'
+          : 'pass',
+      detail: reviewState.typedRefRisks.length > 0
+        ? reviewState.typedRefRisks.slice(0, 3).join('；')
+        : '当前没有识别到明显的 typed ref 覆盖缺口。',
+      source: 'review',
+      relatedPage: 'revision',
+      fixHint: '先补齐 thread / timeline / item 的 typed ref 绑定，再继续依赖这些资产做连续性判断。',
+    }),
+    makePublishCheckItem({
+      key: 'source_grounding',
+      label: '来源 / Grounding',
+      status: reviewState.sourceGroundingRisks.some((item) => item.includes('历史正剧') || item.includes('conservative fallback'))
+        ? 'blocker'
+        : reviewState.sourceGroundingRisks.length > 0
+          ? 'warning'
+          : 'pass',
+      detail: reviewState.sourceGroundingRisks.length > 0
+        ? reviewState.sourceGroundingRisks.slice(0, 3).join('；')
+        : '当前没有识别到需要阻断的来源/grounding 缺口。',
+      source: 'review',
+      relatedPage: 'revision',
+      fixHint: '补充来源/grounding 依据，或把高承诺细节改写为保守表述后再发布。',
+    }),
+    makePublishCheckItem({
+      key: 'operating_mode_policy',
+      label: 'OperatingMode 策略',
+      status: reviewState.operatingModeRisks.some((item) => item.includes('百万字模式'))
+        ? 'blocker'
+        : reviewState.operatingModeRisks.length > 0
+          ? 'warning'
+          : 'pass',
+      detail: reviewState.operatingModeRisks.length > 0
+        ? reviewState.operatingModeRisks.slice(0, 3).join('；')
+        : '当前没有识别到 operatingMode 策略违规。',
+      source: 'review',
+      relatedPage: 'revision',
+      fixHint: '先修正 checkpoint / 结构复杂度与 operatingMode 策略的不匹配，再继续发布。',
+    }),
+    makePublishCheckItem({
+      key: 'genre_register_drift',
+      label: '题材语域漂移',
+      status: reviewState.genreRegisterRisks.length > 0 && reviewState.sourceGroundingRisks.some((item) => item.includes('历史正剧'))
+        ? 'blocker'
+        : reviewState.genreRegisterRisks.length > 0
+          ? 'warning'
+          : 'pass',
+      detail: reviewState.genreRegisterRisks.length > 0
+        ? reviewState.genreRegisterRisks.slice(0, 3).join('；')
+        : '当前没有识别到明显的题材语域漂移。',
+      source: 'review',
+      relatedPage: 'revision',
+      fixHint: '收回抽象升华、说明腔和空泛辞藻，让题材语感重新落回动作、制度、生态和人物立场。',
+    }),
+    makePublishCheckItem({
+      key: 'exposition_density',
+      label: '解释密度 / 说明文',
+      status: reviewState.longWindowHumanizationRisks.filter((item) => item.includes('解释密度') || item.includes('世界观说明文') || item.includes('过渡句')).length >= 2
+        ? 'blocker'
+        : reviewState.longWindowHumanizationRisks.some((item) => item.includes('解释密度') || item.includes('世界观说明文') || item.includes('过渡句'))
+          ? 'warning'
+          : 'pass',
+      detail: reviewState.longWindowHumanizationRisks.filter((item) => item.includes('解释密度') || item.includes('世界观说明文') || item.includes('过渡句')).slice(0, 3).join('；') || '当前没有识别到明显的解释密度问题。',
+      source: 'review',
+      relatedPage: 'writing',
+      fixHint: '删掉替作者总结的说明句，把世界观与过渡信息改为角色行动、结果状态和场景细节。',
+    }),
+    makePublishCheckItem({
+      key: 'long_window_homogenization',
+      label: '累积同质化 / 模板重复',
+      status: reviewState.longWindowHumanizationRisks.filter((item) => item.includes('长窗模板复现') || item.includes('反 AI 高风险复现')).length >= 2
+        ? 'warning'
+        : reviewState.longWindowHumanizationRisks.some((item) => item.includes('长窗模板复现') || item.includes('反 AI 高风险复现'))
+          ? 'warning'
+          : 'pass',
+      detail: reviewState.longWindowHumanizationRisks.filter((item) => item.includes('长窗模板复现') || item.includes('反 AI 高风险复现')).slice(0, 3).join('；') || '当前没有识别到明显的累积模板化重复。',
+      source: 'review',
+      relatedPage: 'revision',
+      fixHint: '优先处理最近窗口里复现频率最高的模板连接、模板情绪和高频重复句式。',
+    }),
+    makePublishCheckItem({
+      key: 'dialogue_separability',
+      label: '角色对白可分离度',
+      status: reviewState.dialogueSeparabilityRisks.length >= 2
+        ? 'blocker'
+        : reviewState.dialogueSeparabilityRisks.length > 0
+          ? 'warning'
+          : 'pass',
+      detail: reviewState.dialogueSeparabilityRisks.length > 0
+        ? reviewState.dialogueSeparabilityRisks.slice(0, 3).join('；')
+        : '当前没有识别到明显的长窗对白可分离度风险。',
+      source: 'review',
+      relatedPage: 'revision',
+      fixHint: '为高相似/漂移角色补 voice lock，并重写关键对白段落拉开语气、句长和反应差异。',
     }),
     makePublishCheckItem({
       key: 'story_dynamics',

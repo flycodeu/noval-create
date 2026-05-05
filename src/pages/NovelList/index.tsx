@@ -28,6 +28,7 @@ import type { Novel, NovelLaunchMode, Template } from '../../types'
 import ProjectCard from '../../components/novel/cards/ProjectCard'
 import { useNovelStore } from '../../stores/novel.store'
 import { getWorkspaceSnapshot, type WorkspaceSnapshot } from '../../shared/novel-workspace'
+import { getWorkspaceViewModeForNovel } from '../../shared/operating-mode'
 import { buildThemeVoicePayload } from '../../shared/theme-voice'
 import { WRITING_CONTRACT_PRESETS, getWritingContractValidationError, normalizeWritingContractTags } from '../../shared/writing-contract'
 import { EMPTY_WORKFLOW_STATS, loadWorkflowStats } from '../Novel/workflow'
@@ -142,7 +143,7 @@ export default function NovelList() {
         return [
           novel.id,
           getWorkspaceSnapshot(novel, stats, {
-            viewMode: novel.launchMode === 'fast_launch' ? 'quick' : 'professional',
+            viewMode: getWorkspaceViewModeForNovel(novel),
           }),
         ] as const
       } catch (error) {

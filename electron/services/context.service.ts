@@ -1,7 +1,7 @@
 ﻿import { asc, eq } from 'drizzle-orm'
 import { getDb } from '../database/db'
 import { chapterWritebackDiffs, chapterWritebackRuns, chapters, characterRelations, characters, factions, genres, glossary, novels, storyArcs, storyItems, storyThreads, templates, timelineEvents, worldMap } from '../database/schema'
-import { buildWorldRulesSummary, parseWorldRulesJson } from '../../src/shared/genre-system'
+import { assessHistoricalGrounding, buildWorldRulesSummary, parseWorldRulesJson } from '../../src/shared/genre-system'
 import { buildProjectBriefSummary, parseProjectBriefDocument } from '../../src/shared/project-brief'
 import { parseFactionExternalRelations } from '../../src/shared/factions'
 import { parseGlossaryAliases } from '../../src/shared/glossary'
@@ -27,7 +27,8 @@ import {
 } from '../../src/shared/story-settings'
 import { buildThemeVoiceSummary, parseThemeVoiceDocument } from '../../src/shared/theme-voice'
 import { buildWritingContractSummary } from '../../src/shared/writing-contract'
-import { buildStoryMemoryPromptSummary } from './story-memory.service'
+import { getOperatingModePolicy, getOperatingModeRuntimePolicy } from '../../src/shared/operating-mode'
+import { buildStoryMemoryPromptPackage } from './story-memory.service'
 import { buildAntiAiHardConstraintContext, getPromotedAntiAiRulesForChapter } from './anti-ai-rule.service'
 import { buildFeedbackRecurrenceHardConstraintContext, getPromotedFeedbackIssuesForChapter } from './feedback-recurrence.service'
 import { ensureStoryStructure } from './story-structure.service'
@@ -86,6 +87,8 @@ function truncateToTokens(text: string, maxTokens: number): string {
 function resolveRecentContextWindow(
   targetWords: number,
   chapterCount: number,
+  launchMode?: string | null,
+  settingsJson?: string | null,
   options: {
     signalText?: string
     mentionedCharacters?: string[]
@@ -93,13 +96,12 @@ function resolveRecentContextWindow(
     mentionedLocations?: string[]
   } = {},
 ): number {
-  let baseWindow = 8
-  if (targetWords >= 1500000 || chapterCount >= 600) baseWindow = 40
-  else if (targetWords >= 1000000 || chapterCount >= 400) baseWindow = 35
-  else if (targetWords >= 800000 || chapterCount >= 280) baseWindow = 28
-  else if (targetWords >= 500000 || chapterCount >= 180) baseWindow = 22
-  else if (targetWords >= 350000 || chapterCount >= 80) baseWindow = 15
-  else if (targetWords >= 150000 || chapterCount >= 40) baseWindow = 10
+  const baseWindow = getOperatingModePolicy({
+    launchMode,
+    targetWords,
+    chapterCount,
+    settingsJson,
+  }).recentContextWindow
 
   const signalDensity = (
     Math.min(splitRecallLines(options.signalText || '', 8, 24).length, 4)
@@ -247,6 +249,7 @@ export interface StoryProfile {
   protagonistName: string
   protagonistReference: string
   protagonistRule: string
+  historicalGroundingSummary: string
 }
 
 export interface ContinuityState {
@@ -2332,6 +2335,30 @@ function buildBackgroundText(novel: typeof novels.$inferSelect): string {
   return novel.expandedBackground || novel.synopsis || novel.userBackground || ''
 }
 
+function buildHistoricalGroundingSummary(input: {
+  genreName?: string | null
+  worldRulesJson?: string | null
+  backgroundText?: string | null
+  glossaryTerms?: string[]
+}): string {
+  const assessment = assessHistoricalGrounding(input)
+  if (assessment.mode === 'none') return ''
+
+  const lines = [
+    `历史 grounding：${assessment.summary}`,
+    assessment.sourceSignals.length > 0 ? `已命中来源信号：${assessment.sourceSignals.join('、')}` : '',
+    assessment.conservativeFallbackActive
+      ? assessment.mode === 'historical_realist'
+        ? '硬约束：未确认官制、礼制、器物、地理与纪年时，不得编造具体细节；改用保守表达并优先触发重写。'
+        : assessment.mode === 'alternate_history'
+          ? '硬约束：允许架空分歧，但未声明分歧点或制度依据时，不得伪装成真实史实细节。'
+          : '硬约束：允许超自然元素，但制度、身份秩序、器物与措辞仍需保持历史框架，避免退化成 generic 奇幻说明文。'
+      : '当前来源覆盖足以支撑历史题材写作，但仍需保持时代一致性。',
+  ].filter(Boolean)
+
+  return lines.join('\n')
+}
+
 function getCanonicalProtagonist(
   allCharacters: Array<typeof characters.$inferSelect>,
 ): typeof characters.$inferSelect | null {
@@ -2866,6 +2893,8 @@ export function selectRecentContextRows(
   targetWords: number,
   chapterCount: number,
   options: {
+    launchMode?: string | null
+    settingsJson?: string | null
     signalText?: string
     mentionedCharacters?: string[]
     mentionedItems?: string[]
@@ -2875,10 +2904,16 @@ export function selectRecentContextRows(
 ): Array<typeof chapters.$inferSelect> {
   if (previousRows.length === 0) return []
 
-  const recentWindow = resolveRecentContextWindow(targetWords, chapterCount, options)
+  const recentWindow = resolveRecentContextWindow(
+    targetWords,
+    chapterCount,
+    options.launchMode,
+    options.settingsJson,
+    options,
+  )
   const recentRows = previousRows.slice(-recentWindow)
   const recentIds = new Set(recentRows.map((row) => row.id))
-  const defaultCarryover = targetWords >= 350000 || chapterCount >= 80 ? 4 : 2
+  const defaultCarryover = recentWindow >= 22 ? 4 : 2
   const maxCarryover = Math.max(0, options.maxCarryover ?? defaultCarryover)
   if (maxCarryover === 0) return recentRows
 
@@ -3137,6 +3172,19 @@ export async function buildStoryProfile(novelId: number): Promise<StoryProfile> 
   const themeVoice = parseThemeVoiceDocument(novel.themeVoiceJson)
   const writingContractSummary = buildWritingContractSummary(themeVoice.writingContractTags)
   const protagonistPolicy = buildProtagonistPolicy(allCharacters)
+  const glossaryTerms = db.select({ term: glossary.term }).from(glossary)
+    .where(eq(glossary.novelId, novelId))
+    .orderBy(asc(glossary.sortOrder), asc(glossary.id))
+    .all()
+    .map((row) => row.term || '')
+    .filter(Boolean)
+  const backgroundText = buildBackgroundText(novel)
+  const historicalGroundingSummary = buildHistoricalGroundingSummary({
+    genreName: genre?.name,
+    worldRulesJson: novel.worldRulesJson,
+    backgroundText,
+    glossaryTerms,
+  })
 
   return {
     novelId,
@@ -3170,12 +3218,14 @@ export async function buildStoryProfile(novelId: number): Promise<StoryProfile> 
     worldRulesSummary: [
       formatWorldRulesSummary(novel.worldRulesJson),
       formatWorldTemplateSummary(worldTemplate),
+      historicalGroundingSummary,
     ].filter(Boolean).join('\n\n'),
     styleTemplateSummary: formatStyleTemplateSummary(styleTemplate?.contentJson),
     hasProtagonist: protagonistPolicy.hasProtagonist,
     protagonistName: protagonistPolicy.protagonistName,
     protagonistReference: protagonistPolicy.protagonistReference,
     protagonistRule: protagonistPolicy.protagonistRule,
+    historicalGroundingSummary,
   }
 }
 
@@ -3199,6 +3249,8 @@ export async function buildOutlineGenerationContext(arcId: number): Promise<Outl
     novel?.targetWords || 0,
     previousRows.length,
     {
+      launchMode: novel?.launchMode,
+      settingsJson: novel?.settingsJson,
       signalText: [arc.arcGoal || '', arc.arcSummary || ''].filter(Boolean).join('\n'),
     },
   ).map(toChapterWithContinuity)
@@ -3277,6 +3329,8 @@ export async function collectChapterContextRawData(
     targetWords,
     chapterRows.length,
     {
+      launchMode: novel.launchMode,
+      settingsJson: novel.settingsJson,
       signalText: chapterSignalText,
       mentionedCharacters: [...mentionedCharacterNames],
       mentionedItems: mentionedItemNames,
@@ -3291,7 +3345,17 @@ export async function collectChapterContextRawData(
     chapterRows,
     allCharacters,
   )
-  const longTermMemory = buildStoryMemoryPromptSummary(novelId, { chapterId: currentChapter?.id })
+  const storyMemoryRuntimePolicy = getOperatingModeRuntimePolicy({
+    launchMode: novel.launchMode,
+    targetWords,
+    settingsJson: novel.settingsJson,
+    chapterCount: chapterRows.length,
+  })
+  const storyMemoryPromptPackage = buildStoryMemoryPromptPackage(novelId, {
+    chapterId: currentChapter?.id,
+    refreshMode: storyMemoryRuntimePolicy.backgroundPrecomputeEnabled ? 'schedule_only' : 'sync',
+  })
+  const longTermMemory = storyMemoryPromptPackage.summary
   const itemSummary = buildItemSummary(novelId)
   const activeThreadsContext = buildActiveThreadsContextData(novelId, chapterNum, currentArc)
   const contractContext = currentChapter ? getChapterContractContext(currentChapter.id) : null

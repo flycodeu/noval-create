@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { getDb } from '../database/db'
+
 type MockTask = {
   id: number
   novelId?: number | null
@@ -49,6 +51,32 @@ const feedbackPauseSignals = new Map<number, {
   chapterNums: number[]
 }>()
 let nextTaskId = 1000
+
+function createDbMock() {
+  return {
+    select: vi.fn(() => ({
+      from: vi.fn(() => {
+        const query: {
+          where: () => typeof query
+          orderBy: () => typeof query
+          all: () => Array<Record<string, unknown>>
+          get: () => Record<string, unknown>
+        } = {
+          where: () => query,
+          orderBy: () => query,
+          all: () => [],
+          get: () => ({
+            id: 1,
+            launchMode: 'professional_longform',
+            targetWords: 200000,
+            settingsJson: null,
+          }),
+        }
+        return query
+      }),
+    })),
+  }
+}
 
 function getProgress(taskId: number) {
   const task = taskRows.get(taskId)
@@ -221,6 +249,7 @@ describe('chapter batch workflow', () => {
     publishChecks.clear()
     feedbackPauseSignals.clear()
     nextTaskId = 1000
+    vi.mocked(getDb).mockReturnValue(createDbMock() as never)
   })
 
   it('completes chapters sequentially', async () => {

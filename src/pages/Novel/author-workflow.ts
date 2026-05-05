@@ -1,4 +1,5 @@
 import type { Novel, QualityDashboardData } from '../../types'
+import { resolveOperatingMode } from '../../shared/operating-mode'
 import {
   getAssetBloatSignal,
   getRecommendedGuidedWorkflowStep,
@@ -149,7 +150,7 @@ function resolveAssetCompressionTask(stats: WorkflowStats): AuthorWorkflowTask {
 }
 
 function resolveQuickStartPrimaryTask(
-  novel: Pick<Novel, 'title' | 'synopsis' | 'userBackground' | 'expandedBackground' | 'projectBriefJson' | 'settingsJson' | 'themeVoiceJson' | 'worldRulesJson' | 'launchMode'> | null | undefined,
+  novel: Pick<Novel, 'title' | 'synopsis' | 'userBackground' | 'expandedBackground' | 'projectBriefJson' | 'settingsJson' | 'themeVoiceJson' | 'worldRulesJson' | 'launchMode' | 'operatingMode'> | null | undefined,
   stats: WorkflowStats,
 ): AuthorWorkflowTask {
   const assetBloat = getAssetBloatSignal(stats)
@@ -382,7 +383,7 @@ function buildImpactNotices(
 }
 
 export function resolveSuggestedAuthorWorkMode(
-  novel: Pick<Novel, 'title' | 'synopsis' | 'userBackground' | 'expandedBackground' | 'projectBriefJson' | 'settingsJson' | 'themeVoiceJson' | 'worldRulesJson' | 'launchMode'> | null | undefined,
+  novel: Pick<Novel, 'title' | 'synopsis' | 'userBackground' | 'expandedBackground' | 'projectBriefJson' | 'settingsJson' | 'themeVoiceJson' | 'worldRulesJson' | 'launchMode' | 'operatingMode'> | null | undefined,
   stats: WorkflowStats,
   qualitySummary: AuthorWorkflowQualitySummary,
 ): { mode: AuthorWorkMode; reason: string } {
@@ -408,7 +409,21 @@ export function resolveSuggestedAuthorWorkMode(
     }
   }
 
-  if (novel?.launchMode === 'fast_launch') {
+  const operatingMode = resolveOperatingMode({
+    launchMode: novel?.launchMode,
+    operatingMode: novel?.operatingMode,
+    targetWords: stats.totalWords > 0 ? stats.totalWords : undefined,
+    settingsJson: novel?.settingsJson,
+    chapterCount: stats.chapterCount,
+  })
+
+  const hasNoFoundation = !isBasicsReady(novel)
+    && !isProjectBriefReady(novel)
+    && !isStoryCoreReady(novel)
+    && !isThemeVoiceReady(novel)
+    && !isWorldFoundationReady(novel)
+
+  if (novel?.launchMode === 'fast_launch' || (operatingMode === 'shortform' && hasNoFoundation)) {
     return {
       mode: 'quick_start',
       reason: '当前项目采用极速开书路径，系统会优先把最小可写底盘压成首章入口，而不是先补完整资产库。',
@@ -442,7 +457,7 @@ export function resolveSuggestedAuthorWorkMode(
 }
 
 export function buildAuthorWorkflowSummary(
-  novel: Pick<Novel, 'title' | 'synopsis' | 'userBackground' | 'expandedBackground' | 'projectBriefJson' | 'settingsJson' | 'themeVoiceJson' | 'worldRulesJson' | 'launchMode'> | null | undefined,
+  novel: Pick<Novel, 'title' | 'synopsis' | 'userBackground' | 'expandedBackground' | 'projectBriefJson' | 'settingsJson' | 'themeVoiceJson' | 'worldRulesJson' | 'launchMode' | 'operatingMode'> | null | undefined,
   stats: WorkflowStats,
   qualitySummary: AuthorWorkflowQualitySummary,
   mode?: AuthorWorkMode,

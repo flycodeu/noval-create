@@ -16,6 +16,7 @@ import type {
   CoreSettingsGenerationProgressEvent,
   CoreSettingsGenerationResult,
 } from '../../../shared/core-settings-generation'
+import { estimateChapterCountFromOperatingMode } from '../../../shared/operating-mode'
 import {
   buildStorySettingsPayload,
   parseStorySettingsSnapshot,
@@ -157,7 +158,9 @@ function splitCharacterNames(value?: string): string[] {
 }
 
 function getEstimatedChapterTotal(targetWords: number | undefined, subplots: SubPlot[]): number {
-  const byTarget = targetWords ? Math.ceil(targetWords / 3000) : 0
+  const byTarget = estimateChapterCountFromOperatingMode({
+    targetWords,
+  })
   const bySubplotEnd = subplots.reduce((maxValue, subplot) => {
     const end = parseChapterMarker(subplot.endChapter)
     return end && end > maxValue ? end : maxValue
@@ -278,8 +281,16 @@ export default function CoreSettings({ novelId }: Props) {
   const watchedBatchCount = Form.useWatch('subplot_batch_count', form) as number | undefined
   const batchCount = clampBatchCount(watchedBatchCount)
   const estimatedChapterTotal = useMemo(
-    () => getEstimatedChapterTotal(currentNovel?.targetWords, subplots),
-    [currentNovel?.targetWords, subplots],
+    () => Math.max(
+      estimateChapterCountFromOperatingMode({
+        launchMode: currentNovel?.launchMode,
+        operatingMode: currentNovel?.operatingMode,
+        targetWords: currentNovel?.targetWords,
+        settingsJson: currentNovel?.settingsJson,
+      }),
+      getEstimatedChapterTotal(currentNovel?.targetWords, subplots),
+    ),
+    [currentNovel?.launchMode, currentNovel?.operatingMode, currentNovel?.settingsJson, currentNovel?.targetWords, subplots],
   )
   const anchorReadyCount = [
     formValues.story_goal,

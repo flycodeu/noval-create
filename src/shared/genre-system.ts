@@ -2,6 +2,7 @@ export type GenreRulePackKey =
   | 'generic'
   | 'zombie'
   | 'wuxia'
+  | 'historical'
   | 'xianxia'
   | 'fantasy'
   | 'modern-mystery'
@@ -157,6 +158,25 @@ export interface GenreWorldRules {
   writingConstraints: WritingConstraints
 }
 
+export type HistoricalGroundingMode =
+  | 'none'
+  | 'historical_realist'
+  | 'alternate_history'
+  | 'pseudo_historical_fantasy'
+
+export type HistoricalGroundingStrictness = 'none' | 'high' | 'medium' | 'low'
+export type HistoricalGroundingCoverage = 'none' | 'partial' | 'grounded'
+
+export interface HistoricalGroundingAssessment {
+  mode: HistoricalGroundingMode
+  strictness: HistoricalGroundingStrictness
+  coverage: HistoricalGroundingCoverage
+  conservativeFallbackActive: boolean
+  sourceSignals: string[]
+  missingSignals: string[]
+  summary: string
+}
+
 type GenreWorldRuleSeed = Omit<GenreWorldRules, 'timelineConfig' | 'worldDynamics'> & {
   timelineConfig?: TimelineConfig
   worldDynamics?: WorldDynamics
@@ -224,6 +244,14 @@ const REALISM_LEVEL_LABELS: Record<RealismLevel, string> = {
 
 function getDefaultRealityOptions(packKey: GenreRulePackKey): WritingRealityOptions {
   switch (packKey) {
+    case 'historical':
+      return {
+        realismLevel: 'strict-realism',
+        sciencePolicy: '制度、官称、器物、交通、饮食和地理尺度默认按时代常识处理，未确认时使用保守表达。',
+        physicsPolicy: '行军、传信、伤病恢复、舟车速度和物资调度必须服从时代成本与地理条件。',
+        commonSenseFocus: ['官制礼法', '时代器物', '地理尺度', '交通脚程', '军政后勤', '身份秩序', '措辞时代感'],
+        contextAlignmentFocus: ['王朝结构', '地域差异', '分歧设定', '制度约束', '人物身份', '事件纪年'],
+      }
     case 'zombie':
       return {
         realismLevel: 'strict-realism',
@@ -355,6 +383,33 @@ function createWorldDynamics(
 
 function getDefaultWorldDynamics(packKey: GenreRulePackKey): WorldDynamics {
   switch (packKey) {
+    case 'historical':
+      return createWorldDynamics(
+        '历史叙事要让税赋、军政、礼制、地理和交通持续改变人物的行动空间，而不是只做时代装饰。',
+        [
+          {
+            id: 'historical-regions',
+            region: '州府、郡县、边镇、驿路与漕运节点',
+            pattern: '农时、汛期、战时征发与边境戒严会周期性改变地方秩序和行动成本。',
+            seasonalShift: '春耕秋收、汛期封渡、冬雪断道和灾荒迁徙会改变军政与民生压力。',
+            hazardTrigger: '饥荒、兵灾、河患、疫病、边患、征役失衡或地方豪强坐大。',
+            travelImpact: '决定官道、驿站、水路、边关和民间私路的通行效率与风险。',
+            resourceImpact: '影响粮价、盐铁、军械、马匹、布帛和地方财政调度能力。',
+          },
+        ],
+        [
+          {
+            id: 'historical-tax',
+            name: '赋税与军需循环',
+            coreResource: '粮食、盐铁、马匹、布帛、铜钱、漕运和情报文书。',
+            circulationPath: '州县田赋/作坊/商路 -> 仓储/驿站/军府 -> 官署、军营、地方豪强与边镇。',
+            controller: '朝廷中枢、州县官署、地方豪强、军镇体系与商旅网络。',
+            scarcityTrigger: '灾荒、战事、封路、贪腐、苛征或边贸中断。',
+            volatilityTrigger: '政局更替、军费暴涨、漕运失守、税制变动或分歧设定落地。',
+            storyUse: '把家国、朝局、宗族和个人命运落到真实的赋役、军需、路程与名分压力上。',
+          },
+        ],
+      )
     case 'zombie':
       return createWorldDynamics(
         '气候变化、灾后基础设施和补给循环会直接改变生存区的秩序、移动半径和资源争夺强度。',
@@ -577,6 +632,16 @@ function getDefaultWorldDynamics(packKey: GenreRulePackKey): WorldDynamics {
 
 function getDefaultTimelineConfig(packKey: GenreRulePackKey): TimelineConfig {
   switch (packKey) {
+    case 'historical':
+      return createTimelineConfig('regnal', {
+        eraName: '朝代纪年',
+        epochLabel: '年号',
+        baseYearLabel: '元年',
+        displayPattern: '某朝某年 / 某月 / 某次政变后',
+        relativeZeroLabel: '故事开篇前',
+        recommendedEventTypes: ['登基', '改制', '征调', '封赏', '失守', '迁徙', '会盟', '叛乱', '清算'],
+        precisionOptions: ['年', '季', '月'],
+      })
     case 'zombie':
       return createTimelineConfig('relative-disaster', {
         eraName: '灾变纪年',
@@ -770,6 +835,116 @@ const BUILTIN_GENRE_RULE_PACKS: Record<GenreRulePackKey, GenreWorldRuleSeed> = {
       ['所谓', '某种意义上', '命运', '这一刻', '不由得', '他说着说着'],
       ['普通概念不要加引号。', '不要把设定写成展示说明。'],
       getDefaultRealityOptions('generic'),
+    ),
+  },
+  historical: {
+    version: 2,
+    genreProfile: {
+      key: 'historical',
+      name: '历史题材',
+      subgenre: '历史正剧 / 架空历史 / 类历史',
+      worldviewTone: '制度、地理、器物与身份秩序必须能落到人物选择，不允许空泛古风包装。',
+      socialFrame: '朝廷、宗族、军镇、州县与商旅网络共同塑造人物的利益边界和行动代价。',
+      narrativeFocus: ['时代结构', '制度压力', '人物命运', '地理与军政后果'],
+      languageAvoidances: ['现代口语套壳', '悬浮古风词', '跨时代术语', '百科式历史说明'],
+    },
+    powerSystems: [
+      {
+        id: 'historical-status',
+        name: '官身与门第体系',
+        appliesTo: ['士人', '军职', '宗族成员', '市井人物'],
+        levels: ['寒微', '地方骨干', '中枢相关'],
+        advancementRule: '通过科名、军功、门第联姻、政局投靠或地方经营获得位置提升。',
+        limitations: '名分、籍贯、派系、礼法和时代资源上限会同时约束人物跃升。',
+        cost: '每次位置变化都会带来党争、宗族债务、名节损耗或生存风险。',
+        taboo: '不能让角色无来源地掌握超出时代与身份的权力、知识或器物。',
+      },
+    ],
+    speciesSystem: [
+      {
+        id: 'historical-human',
+        name: '人类',
+        entityType: 'human',
+        summary: '历史题材默认以真实社会身份的人类群体为核心。',
+        traits: ['受制度约束', '重名分', '受地理与资源制约'],
+        commonIdentities: ['士人', '军户', '宗室', '商旅', '百姓'],
+        relationToHumans: '主体社会网络。',
+        storyUse: '承接时代秩序、家国冲突和个人命运转折。',
+      },
+    ],
+    factionSystem: [
+      {
+        id: 'historical-court',
+        name: '朝廷与地方体系',
+        factionType: '政权',
+        summary: '负责财政、军政、法度和人事调配，是多数历史冲突的制度母体。',
+        structure: '中枢、州县、军镇与附属机构层层嵌套。',
+        resources: '法统、税赋、文书、军权、仓储与道路节点。',
+        externalRelations: '与宗族、豪强、边军、商路和异族势力长期博弈。',
+        recruitFrom: '科举、荐举、军功、门第与地方网络。',
+        notableSites: ['中枢官署', '州府衙门', '边镇大营'],
+      },
+    ],
+    characterEcology: {
+      overview: '历史角色要先确定身份、名分和依附关系，再决定情感与行动自由度。',
+      slots: [
+        {
+          id: 'historical-lead',
+          label: '时代夹缝中的主视角',
+          entityType: 'human',
+          species: '人类',
+          narrativeFunction: '承受制度压力并推动命运转向。',
+          contextLink: '必须同时卷入时代结构与私人代价。',
+          preferredFactions: ['朝廷与地方体系'],
+          powerBias: ['官身与门第体系'],
+        },
+        {
+          id: 'historical-power',
+          label: '制度压力源',
+          entityType: 'human',
+          species: '人类',
+          narrativeFunction: '代表法统、门第、军政或地方秩序施压。',
+          contextLink: '其选择要能体现时代结构，而不是纯反派功能位。',
+          preferredFactions: ['朝廷与地方体系'],
+          powerBias: ['官身与门第体系'],
+        },
+      ],
+    },
+    mapBlueprint: {
+      overview: '地图优先展示王朝层级、州县节点和驿路水路，而不是孤立景点。',
+      levels: [
+        {
+          depth: 1,
+          label: '朝局与区域板块',
+          nodeTypes: ['王朝', '疆域', '边境板块'],
+          relationHint: '决定法统覆盖、军政重心和大战略方向。',
+          suggestedCount: 2,
+          examples: ['京畿', '边疆'],
+        },
+        {
+          depth: 2,
+          label: '州府与军镇',
+          nodeTypes: ['州府', '郡县', '军镇', '港埠'],
+          relationHint: '承接治理、税赋、军需和地方利益网络。',
+          suggestedCount: 4,
+          examples: ['州城', '边镇', '漕运口岸'],
+        },
+        {
+          depth: 3,
+          label: '剧情行动点',
+          nodeTypes: ['衙署', '府邸', '关隘', '渡口', '营寨'],
+          relationHint: '用于审案、调兵、潜入、接头和伏笔回收。',
+          suggestedCount: 4,
+          examples: ['州衙', '家庙', '关城', '驿站'],
+        },
+      ],
+    },
+    writingConstraints: createWritingConstraints(
+      '优先写身份差序、制度摩擦、路程与现场动作，再落到情绪与评价，避免空泛古风抒情。',
+      '对白应体现身份、礼法和权力距离；不确定具体官称时使用保守表达，避免硬编。',
+      ['逆天改命', '降维打击', '血脉压制', '赛博', '顶流', '打工人'],
+      ['未确认史实时，不生成貌似准确的细节。', '架空历史也要先交代分歧点与制度变形。'],
+      getDefaultRealityOptions('historical'),
     ),
   },
   zombie: {
@@ -1889,6 +2064,7 @@ const BUILTIN_GENRE_RULE_PACKS: Record<GenreRulePackKey, GenreWorldRuleSeed> = {
 
 const GENRE_ALIAS_RULES: Array<{ pattern: RegExp; key: GenreRulePackKey }> = [
   { pattern: /\u4e27\u5c38|\u672b\u4e16|\u75c5\u6bd2|\u5c38\u6f6e/u, key: 'zombie' },
+  { pattern: /\u5386\u53f2\u6b63\u5267|\u5386\u53f2\u5c0f\u8bf4|\u67b6\u7a7a\u5386\u53f2|\u7c7b\u5386\u53f2|\u5bab\u5ef7|\u671d\u5802|\u738b\u671d|\u53f2\u8bd7\u5386\u53f2/u, key: 'historical' },
   { pattern: /\u4ed9\u4fa0|\u4fee\u771f|\u4fee\u4ed9|\u4ed9\u754c|\u5b97\u95e8/u, key: 'xianxia' },
   { pattern: /\u6b66\u4fa0|\u6c5f\u6e56|\u4fa0\u5ba2|\u6b66\u6797|\u9556\u5c40|\u5e2e\u4f1a/u, key: 'wuxia' },
   { pattern: /\u7384\u5e7b|\u6597\u7834|\u6597\u6c14|\u5347\u7ea7/u, key: 'fantasy' },
@@ -2094,6 +2270,82 @@ function normalizeMapBlueprint(value: unknown, fallback: MapBlueprint, legacy?: 
         examples: dedupe(toStringArray(layer.examples)),
       }
     }),
+  }
+}
+
+export function assessHistoricalGrounding(input: {
+  genreName?: string | null
+  worldRulesJson?: string | null
+  backgroundText?: string | null
+  glossaryTerms?: string[]
+}): HistoricalGroundingAssessment {
+  const genreName = asText(input.genreName)
+  const worldRulesText = asText(input.worldRulesJson)
+  const backgroundText = asText(input.backgroundText)
+  const glossaryTerms = dedupe((input.glossaryTerms || []).map((item) => item.trim()).filter(Boolean))
+  const aggregateText = [genreName, worldRulesText, backgroundText, glossaryTerms.join('\n')].filter(Boolean).join('\n')
+
+  const looksHistorical = /历史|王朝|朝堂|宫廷|侯爵|帝国旧制|架空历史|史诗历史|类历史/u.test(genreName)
+    || /王朝|郡县|州府|礼制|官制|宗庙|年号|分歧点|架空/u.test(aggregateText)
+  if (!looksHistorical) {
+    return {
+      mode: 'none',
+      strictness: 'none',
+      coverage: 'none',
+      conservativeFallbackActive: false,
+      sourceSignals: [],
+      missingSignals: [],
+      summary: '当前项目不属于历史 grounding 范围。',
+    }
+  }
+
+  const mode: HistoricalGroundingMode = /架空历史|分歧点|虚构王朝|自定义制度/u.test(aggregateText)
+    ? 'alternate_history'
+    : /类历史奇幻|历史奇幻|超自然|神谕|妖术|魔法/u.test(aggregateText)
+      ? 'pseudo_historical_fantasy'
+      : 'historical_realist'
+
+  const strictness: HistoricalGroundingStrictness = mode === 'historical_realist'
+    ? 'high'
+    : mode === 'alternate_history'
+      ? 'medium'
+      : 'low'
+
+  const sourceSignals: string[] = []
+  if (worldRulesText.length >= 80) sourceSignals.push('world_rules')
+  if (backgroundText.length >= 80) sourceSignals.push('project_background')
+  if (glossaryTerms.length >= 3) sourceSignals.push('glossary_terms')
+  if (/年号|纪年|时代|王朝|礼制|官制|郡县|州府|分歧点|架空/u.test(aggregateText)) sourceSignals.push('era_or_institution')
+
+  const missingSignals = [
+    sourceSignals.includes('world_rules') ? '' : 'world_rules',
+    sourceSignals.includes('project_background') ? '' : 'project_background',
+    sourceSignals.includes('glossary_terms') ? '' : 'glossary_terms',
+    sourceSignals.includes('era_or_institution') ? '' : 'era_or_institution',
+  ].filter(Boolean)
+
+  const coverage: HistoricalGroundingCoverage = sourceSignals.length >= 3
+    ? 'grounded'
+    : sourceSignals.length >= 1
+      ? 'partial'
+      : 'none'
+
+  const conservativeFallbackActive = coverage !== 'grounded'
+  const modeLabel = mode === 'historical_realist'
+    ? '历史正剧'
+    : mode === 'alternate_history'
+      ? '架空历史'
+      : '类历史奇幻'
+  const coverageLabel = coverage === 'grounded' ? '来源较完整' : coverage === 'partial' ? '来源部分覆盖' : '来源缺失'
+
+  return {
+    mode,
+    strictness,
+    coverage,
+    conservativeFallbackActive,
+    sourceSignals,
+    missingSignals,
+    summary: `${modeLabel} · ${coverageLabel}${conservativeFallbackActive ? '，已启用保守 fallback。' : '。'}`,
   }
 }
 

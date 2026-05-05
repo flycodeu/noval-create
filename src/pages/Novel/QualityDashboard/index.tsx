@@ -220,6 +220,13 @@ function chapterGateHeatmapColor(score: number): string {
 
 function qualityRiskKindLabel(kind: QualityDashboardData['novelQualityMetrics']['riskOverview'][number]['kind']): string {
   if (kind === 'commitment_delivery') return '承诺兑现率'
+  if (kind === 'typed_ref_coverage') return 'Typed Ref 覆盖'
+  if (kind === 'source_grounding') return '来源 Grounding'
+  if (kind === 'operating_mode_policy') return 'OperatingMode 策略'
+  if (kind === 'genre_register_drift') return '题材语域漂移'
+  if (kind === 'exposition_density') return '解释密度 / 说明文'
+  if (kind === 'long_window_homogenization') return '累积同质化'
+  if (kind === 'dialogue_separability') return '对白可分离度'
   if (kind === 'language_drift') return 'AI 味退化'
   if (kind === 'feedback_recurrence') return '审校复现'
   if (kind === 'style_compliance') return '风格硬约束'
@@ -237,6 +244,13 @@ function qualityRiskKindLabel(kind: QualityDashboardData['novelQualityMetrics'][
 
 function qualityRepairMetricLabel(key: QualityRepairAction['metricKey']): string {
   if (key === 'commitment_delivery') return '承诺兑现率'
+  if (key === 'typed_ref_coverage') return 'Typed Ref 覆盖'
+  if (key === 'source_grounding') return '来源 Grounding'
+  if (key === 'operating_mode_policy') return 'OperatingMode 策略'
+  if (key === 'genre_register_drift') return '题材语域漂移'
+  if (key === 'exposition_density') return '解释密度 / 说明文'
+  if (key === 'long_window_homogenization') return '累积同质化'
+  if (key === 'dialogue_separability') return '对白可分离度'
   if (key === 'voice_distinction') return '角色声音区分度'
   if (key === 'growth_cost_balance') return '成长-代价平衡'
   if (key === 'foreshadow_debt') return '伏笔债务压力'
@@ -592,6 +606,34 @@ export default function QualityDashboard({ novelId }: Props) {
         />
       </WorkspacePanel>
 
+      {data.typedRefObservability ? (
+        <WorkspacePanel title="Typed Ref 观测">
+          <TypedRefObservabilityPanel observability={data.typedRefObservability} />
+        </WorkspacePanel>
+      ) : null}
+
+      {data.operatingModeObservability ? (
+        <WorkspacePanel title="Operating Mode 观测">
+          <OperatingModeObservabilityPanel observability={data.operatingModeObservability} />
+        </WorkspacePanel>
+      ) : null}
+
+      {data.millionRuntimeObservability ? (
+        <WorkspacePanel title="百万字运行时护栏">
+          <MillionRuntimeObservabilityPanel observability={data.millionRuntimeObservability} />
+        </WorkspacePanel>
+      ) : null}
+
+      {data.structuredMemoryObservability ? (
+        <WorkspacePanel title="结构化记忆观测">
+          <StructuredMemoryObservabilityPanel
+            observability={data.structuredMemoryObservability}
+            hookContinuitySummary={data.hookContinuitySummary}
+            voiceEvolutionSummary={data.voiceEvolutionSummary}
+          />
+        </WorkspacePanel>
+      ) : null}
+
       {pipelineStats ? (
         <WorkspacePanel title="长篇写作架构">
           <div className="quality-dashboard-page__stack">
@@ -832,6 +874,12 @@ export default function QualityDashboard({ novelId }: Props) {
       title="质量监控"
       metrics={[
         <WorkspaceMetric key="ready" label="生产就绪度" value={`${data.productionReadiness.readyRate}%`} tone="warm" />,
+        <WorkspaceMetric key="mode" label="运行模式" value={data.operatingModeObservability?.label || '未推导'} hint={data.operatingModeObservability ? `约 ${data.operatingModeObservability.recommendedChapterWords || 0} 字/章 · 预计 ${data.operatingModeObservability.estimatedChapterCount || 0} 章 · 近期窗口 ${data.operatingModeObservability.recentContextWindow || 0} 章` : undefined} />,
+        <WorkspaceMetric key="runtime-guardrail" label="运行时护栏" value={data.millionRuntimeObservability?.serialOnly ? '正文串行' : '未接管'} hint={data.millionRuntimeObservability ? `${data.millionRuntimeObservability.backgroundPrecomputeEnabled ? '后台预计算已开' : '后台预计算关闭'} · 召回阈值 ${data.millionRuntimeObservability.recallPauseThreshold} · 压力 ${data.millionRuntimeObservability.runtimePressureLevel}` : undefined} tone={data.millionRuntimeObservability?.guardrailActive ? 'warm' : 'default'} />,
+        <WorkspaceMetric key="provenance" label="来源 / Ref / Mode" value={`${data.typedRefObservability?.unresolvedRefCount || 0} / ${data.genreGroundingObservability?.sourceCoverage || 'none'} / ${data.millionRuntimeObservability?.guardrailActive ? 'active' : 'idle'}`} hint={data.millionRuntimeObservability ? `typed ref ${data.typedRefObservability?.overallCoverageRate || 0}% · provenance gate ${data.millionRuntimeObservability.precomputeQueueStatus}` : undefined} tone={(data.typedRefObservability?.unresolvedRefCount || 0) > 0 || data.genreGroundingObservability?.conservativeFallbackActive || data.millionRuntimeObservability?.guardrailActive ? 'warm' : 'default'} />,
+        <WorkspaceMetric key="grounding" label="题材 grounding" value={data.genreGroundingObservability?.historicalGenericFallback ? '待修复' : (data.genreGroundingObservability?.resolvedGenreKey || '未命中')} hint={data.genreGroundingObservability?.historicalMode && data.genreGroundingObservability.historicalMode !== 'none' ? `${data.genreGroundingObservability.historicalMode} · 来源 ${data.genreGroundingObservability.sourceCoverage || 'none'} · 信号 ${data.genreGroundingObservability.sourceSignalCount || 0}` : undefined} tone={data.genreGroundingObservability?.historicalGenericFallback || data.genreGroundingObservability?.conservativeFallbackActive ? 'warm' : 'default'} />,
+        <WorkspaceMetric key="memory" label="结构化记忆" value={data.structuredMemoryObservability ? `${data.structuredMemoryObservability.cardCoverageRate}% / ${data.structuredMemoryObservability.fallbackScopeCount}` : '未统计'} hint={data.structuredMemoryObservability ? `${data.structuredMemoryObservability.activeScopeLabels.join(' / ') || '无 scope'} · ${data.structuredMemoryObservability.promptSummaryMode}` : undefined} tone={data.structuredMemoryObservability && data.structuredMemoryObservability.fallbackScopeCount > 0 ? 'warm' : 'default'} />,
+        <WorkspaceMetric key="typed-ref" label="Typed Ref 覆盖" value={data.typedRefObservability ? `${data.typedRefObservability.overallCoverageRate}% / ${data.typedRefObservability.unresolvedRefCount}` : '未统计'} tone={data.typedRefObservability && data.typedRefObservability.unresolvedRefCount > 0 ? 'warm' : 'default'} />,
         <WorkspaceMetric key="batch" label="最近批次" value={data.batchHealth.chapterIds.length > 0 ? `${data.batchHealth.chapterIds.length}章` : '空闲'} />,
         <WorkspaceMetric key="scored" label="已评分章节" value={data.totalChaptersScored} />,
         <WorkspaceMetric key="gate" label="章节门覆盖" value={data.chapterGateSummary.coveredChapterCount} />,
@@ -3103,6 +3151,192 @@ function WorldStateAlertDetails({ alerts }: { alerts?: QualityDashboardData['cha
           <div className="quality-dashboard-page__body-copy quality-dashboard-page__body-copy--muted">{alert.summary}</div>
         </div>
       ))}
+    </div>
+  )
+}
+
+function TypedRefObservabilityPanel({ observability }: { observability: NonNullable<QualityDashboardData['typedRefObservability']> }) {
+  return (
+    <div className="quality-dashboard-page__stack">
+      <div className="quality-dashboard-page__pipeline-tags">
+        <Tag color={observability.unresolvedRefCount > 0 ? 'warning' : 'success'}>
+          {`总覆盖率 ${observability.overallCoverageRate}%`}
+        </Tag>
+        <Tag color={observability.unresolvedRefCount > 0 ? 'error' : 'blue'}>
+          {`未解析引用 ${observability.unresolvedRefCount}`}
+        </Tag>
+      </div>
+      <div className="quality-dashboard-page__body-copy quality-dashboard-page__body-copy--muted">
+        {observability.summary}
+      </div>
+      <div className="quality-dashboard-page__pipeline-list">
+        {observability.buckets.map((bucket) => (
+          <div key={bucket.assetType} className="quality-card">
+            <div className="quality-dashboard-page__card-head">
+              <strong>{bucket.assetType === 'thread' ? '故事线程' : bucket.assetType === 'timeline' ? '时间线事件' : '故事物品'}</strong>
+              <Tag color={bucket.unresolvedCount > 0 ? 'warning' : 'success'}>
+                {`覆盖 ${bucket.typedRefCount}/${bucket.totalCount}`}
+              </Tag>
+            </div>
+            <div className="quality-dashboard-page__role-meta">
+              {`覆盖率 ${bucket.coverageRate}% · 未解析 ${bucket.unresolvedCount}`}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function OperatingModeObservabilityPanel({ observability }: { observability: NonNullable<QualityDashboardData['operatingModeObservability']> }) {
+  return (
+    <div className="quality-dashboard-page__stack">
+      <div className="quality-dashboard-page__pipeline-tags">
+        <Tag color="blue">{observability.label}</Tag>
+        <Tag color="cyan">{`推荐 ${observability.recommendedChapterWords || 0} 字/章`}</Tag>
+        <Tag color="geekblue">{`估算约 ${observability.estimatedChapterCount || 0} 章`}</Tag>
+        <Tag color="purple">{`近期窗口 ${observability.recentContextWindow || 0} 章`}</Tag>
+        <Tag color={observability.quickStartAligned ? 'success' : 'warning'}>
+          {observability.quickStartAligned ? '快启对齐' : '快启未对齐'}
+        </Tag>
+      </div>
+      <div className="quality-dashboard-page__body-copy quality-dashboard-page__body-copy--muted">
+        {observability.summary}
+      </div>
+    </div>
+  )
+}
+
+function MillionRuntimeObservabilityPanel({ observability }: { observability: NonNullable<QualityDashboardData['millionRuntimeObservability']> }) {
+  const pressureTagColor = observability.runtimePressureLevel === 'high'
+    ? 'error'
+    : observability.runtimePressureLevel === 'medium'
+      ? 'warning'
+      : 'success'
+  return (
+    <div className="quality-dashboard-page__stack">
+      <div className="quality-dashboard-page__pipeline-tags">
+        <Tag color="blue">{observability.label}</Tag>
+        <Tag color={observability.serialOnly ? 'success' : 'warning'}>
+          {observability.serialOnly ? '正文串行' : observability.chapterGenerationMode}
+        </Tag>
+        <Tag color={observability.backgroundPrecomputeEnabled ? 'cyan' : 'default'}>
+          {observability.backgroundPrecomputeEnabled ? '后台预计算开启' : '后台预计算关闭'}
+        </Tag>
+        <Tag color={observability.requireWritebackReady ? 'purple' : 'default'}>
+          {observability.requireWritebackReady ? '回写前置闸门' : '回写非阻断'}
+        </Tag>
+        <Tag color={observability.precomputeQueueStatus === 'running' ? 'processing' : observability.precomputeQueueStatus === 'queued' ? 'warning' : observability.precomputeQueueStatus === 'failed' ? 'error' : 'default'}>
+          {`预计算 ${observability.precomputeQueueStatus}`}
+        </Tag>
+        <Tag color="geekblue">{`召回阈值 ${observability.recallPauseThreshold}`}</Tag>
+        <Tag color={observability.latestCheckpointChapterGap >= observability.checkpointGapWarningThreshold ? 'warning' : 'success'}>
+          {`检查点落后 ${observability.latestCheckpointChapterGap}/${observability.checkpointGapWarningThreshold}`}
+        </Tag>
+        <Tag color={pressureTagColor}>{`压力 ${observability.runtimePressureLevel} · ${observability.runtimePressureScore}`}</Tag>
+      </div>
+      <div className="quality-dashboard-page__body-copy quality-dashboard-page__body-copy--muted">
+        {observability.summary}
+      </div>
+      <div className="quality-dashboard-page__grid-220">
+        <div className="quality-card">
+          <div className="quality-dashboard-page__card-head">
+            <strong>运行策略</strong>
+            <Tag color="blue">{observability.mainThreadPressureStrategy}</Tag>
+          </div>
+          <div className="quality-dashboard-page__role-meta">{observability.strategySummary}</div>
+        </div>
+        <div className="quality-card">
+          <div className="quality-dashboard-page__card-head">
+            <strong>后台预计算</strong>
+            <Tag color={observability.precomputeQueueStatus === 'running' ? 'processing' : observability.precomputeQueueStatus === 'queued' ? 'warning' : observability.precomputeQueueStatus === 'failed' ? 'error' : 'success'}>
+              {observability.precomputeQueueStatus}
+            </Tag>
+          </div>
+          <div className="quality-dashboard-page__role-meta">
+            {observability.precomputeActiveTaskSummary || '当前没有 story-memory 预计算任务。'}
+          </div>
+          <div className="quality-dashboard-page__role-meta">
+            {`原因 ${observability.precomputeReason || '无'} · 更新时间 ${observability.precomputeUpdatedAt || '无'}${observability.precomputeLastError ? ` · 最近错误 ${observability.precomputeLastError}` : ''}`}
+          </div>
+        </div>
+        <div className="quality-card">
+          <div className="quality-dashboard-page__card-head">
+            <strong>回写与检查点</strong>
+            <Tag color={observability.writebackFailedCount > 0 ? 'error' : observability.writebackPendingCount > 0 ? 'warning' : 'success'}>
+              {`pending ${observability.writebackPendingCount} / failed ${observability.writebackFailedCount}`}
+            </Tag>
+          </div>
+          <div className="quality-dashboard-page__role-meta">
+            {`stale checkpoint ${observability.staleCheckpointCount}，最新落后 ${observability.latestCheckpointChapterGap} 章。`}
+          </div>
+        </div>
+        <div className="quality-card">
+          <div className="quality-dashboard-page__card-head">
+            <strong>召回与阻断</strong>
+            <Tag color={observability.consecutiveRecallFallbackChapters >= observability.recallPauseThreshold ? 'error' : observability.recallDegradedChapterCount > 0 ? 'warning' : 'success'}>
+              {`连续降级 ${observability.consecutiveRecallFallbackChapters}`}
+            </Tag>
+          </div>
+          <div className="quality-dashboard-page__role-meta">
+            {`召回降级 ${observability.recallDegradedChapterCount} 章，inspection blocker ${observability.inspectionBlockedCount}，batch gate blocker ${observability.batchGateBlockedCount}。`}
+          </div>
+        </div>
+      </div>
+      <div className="quality-dashboard-page__note-list">
+        <div>{`当前暂停原因：${observability.pauseReason || '无'}`}</div>
+        <div>{`当前护栏原因：${observability.activeGuardrailReason || (observability.guardrailActive ? '已触发运行时护栏。' : '当前无额外护栏阻断。')}`}</div>
+        <div>{`主线程压力代理：${observability.runtimePressureSummary}`}</div>
+      </div>
+    </div>
+  )
+}
+
+function StructuredMemoryObservabilityPanel(
+  {
+    observability,
+    hookContinuitySummary,
+    voiceEvolutionSummary,
+  }: {
+    observability: NonNullable<QualityDashboardData['structuredMemoryObservability']>
+    hookContinuitySummary: QualityDashboardData['hookContinuitySummary']
+    voiceEvolutionSummary: QualityDashboardData['voiceEvolutionSummary']
+  },
+) {
+  return (
+    <div className="quality-dashboard-page__stack">
+      <div className="quality-dashboard-page__pipeline-tags">
+        <Tag color="blue">{observability.promptSummaryMode}</Tag>
+        <Tag color={observability.fallbackScopeCount > 0 ? 'warning' : 'success'}>{`fallback ${observability.fallbackScopeCount}`}</Tag>
+        <Tag color="cyan">{`scope 覆盖 ${observability.scopeCoverageRate}%`}</Tag>
+        <Tag color="geekblue">{`卡片覆盖 ${observability.cardCoverageRate}%`}</Tag>
+        <Tag color={hookContinuitySummary.weakHookStreak > 0 ? 'warning' : 'success'}>{`弱钩子连续 ${hookContinuitySummary.weakHookStreak}`}</Tag>
+        <Tag color={voiceEvolutionSummary.driftingCharacterCount > 0 ? 'warning' : 'success'}>{`漂移角色 ${voiceEvolutionSummary.driftingCharacterCount}`}</Tag>
+      </div>
+      <div className="quality-dashboard-page__body-copy quality-dashboard-page__body-copy--muted">
+        {observability.summary}
+      </div>
+      <div className="quality-dashboard-page__pipeline-list">
+        {observability.buckets.map((bucket) => (
+          <div key={`${bucket.scopeType}-${bucket.label}`} className="quality-card">
+            <div className="quality-dashboard-page__card-head">
+              <strong>{bucket.label}</strong>
+              <Tag color={!bucket.hasCheckpoint ? 'default' : bucket.usesTextFallback ? 'warning' : 'success'}>
+                {!bucket.hasCheckpoint ? '无 checkpoint' : bucket.usesTextFallback ? '含 fallback' : '结构化优先'}
+              </Tag>
+            </div>
+            <div className="quality-dashboard-page__role-meta">
+              {`structured ${bucket.structuredFamilyCount} / fallback ${bucket.fallbackFamilyCount} / missing ${bucket.missingFamilyCount} · 覆盖 ${bucket.cardCoverageRate}%`}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="quality-dashboard-page__body-copy quality-dashboard-page__body-copy--muted">
+        {hookContinuitySummary.summary}
+      </div>
+      <div className="quality-dashboard-page__body-copy quality-dashboard-page__body-copy--muted">
+        {voiceEvolutionSummary.summary}
+      </div>
     </div>
   )
 }

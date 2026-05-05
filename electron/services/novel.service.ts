@@ -1,5 +1,10 @@
 ﻿import { desc, eq } from 'drizzle-orm'
 import { getBuiltinGenreRules, stringifyWorldRules } from '../../src/shared/genre-system'
+import {
+  normalizeOperatingMode,
+  resolveOperatingMode,
+  writeOperatingModeSettings,
+} from '../../src/shared/operating-mode'
 import { normalizeWorldRulesDraft, stringifyWorldRulesDraft } from '../../src/shared/world-rules-draft'
 import { getDb } from '../database/db'
 import { chapters, characters, genres, novels } from '../database/schema'
@@ -12,6 +17,30 @@ function normalizeWorldRulesJson(raw: string, genreName?: string) {
     return stringifyWorldRulesDraft(normalizeWorldRulesDraft(JSON.parse(raw) as unknown, genreName))
   } catch {
     return raw
+  }
+}
+
+function decorateNovelRow<T extends {
+  id: number
+  launchMode?: string | null
+  targetWords?: number | null
+  settingsJson?: string | null
+}>(row: T): T & { operatingMode: ReturnType<typeof resolveOperatingMode> } {
+  const chapterCount = getDb()
+    .select()
+    .from(chapters)
+    .where(eq(chapters.novelId, row.id))
+    .all()
+    .length
+
+  return {
+    ...row,
+    operatingMode: resolveOperatingMode({
+      launchMode: row.launchMode,
+      targetWords: row.targetWords,
+      settingsJson: row.settingsJson,
+      chapterCount,
+    }),
   }
 }
 
@@ -84,6 +113,7 @@ export function listNovels(filters?: { status?: string; genreId?: number; search
     status: novels.status,
     totalWords: novels.totalWords,
     targetWords: novels.targetWords,
+    settingsJson: novels.settingsJson,
     coverImage: novels.coverImage,
     contextVersion: novels.contextVersion,
     createdAt: novels.createdAt,
@@ -94,7 +124,7 @@ export function listNovels(filters?: { status?: string; genreId?: number; search
     .from(novels)
     .leftJoin(genres, eq(novels.genreId, genres.id))
 
-  return query.orderBy(desc(novels.updatedAt)).all()
+  return query.orderBy(desc(novels.updatedAt)).all().map((row) => decorateNovelRow(row))
 }
 
 export function getNovel(id: number) {
@@ -130,7 +160,7 @@ export function getNovel(id: number) {
     .where(eq(novels.id, id))
     .all()
 
-  return rows[0] || null
+  return rows[0] ? decorateNovelRow(rows[0]) : null
 }
 
 export function createNovel(data: {
@@ -138,9 +168,12 @@ export function createNovel(data: {
   synopsis?: string
   genreId?: number
   launchMode?: string
+  operatingMode?: string
   userBackground?: string
   expandedBackground?: string
   projectBriefJson?: string
+  settingsJson?: string
+  themeVoiceJson?: string
   styleTemplateId?: number
   worldTemplateId?: number
   targetWords?: number
@@ -151,9 +184,14 @@ export function createNovel(data: {
   const genre = data.genreId
     ? db.select().from(genres).where(eq(genres.id, data.genreId)).all()[0]
     : null
+  const { operatingMode, ...dbData } = data
+  const explicitOperatingMode = normalizeOperatingMode(data.operatingMode)
 
   const result = db.insert(novels).values({
-    ...data,
+    ...dbData,
+    settingsJson: explicitOperatingMode
+      ? writeOperatingModeSettings(data.settingsJson, explicitOperatingMode, true)
+      : data.settingsJson,
     status: 'draft',
     totalWords: 0,
     worldRulesJson: stringifyWorldRules(getBuiltinGenreRules(genre?.name)),
@@ -166,20 +204,21 @@ export function updateNovel(id: number, data: Partial<{
   title: string
   synopsis: string
   genreId: number
-    launchMode: string
-    userBackground: string
-    status: string
-    totalWords: number
-    targetWords: number
-    projectBriefJson: string
-    settingsJson: string
-    themeVoiceJson: string
-    worldRulesJson: string
-    blurbJson: string
-    expandedBackground: string
-    modelConfigId: number
+  launchMode: string
+  operatingMode: string
+  userBackground: string
+  status: string
+  totalWords: number
+  targetWords: number
+  projectBriefJson: string
+  settingsJson: string
+  themeVoiceJson: string
+  worldRulesJson: string
+  blurbJson: string
+  expandedBackground: string
+  modelConfigId: number
   styleTemplateId: number
-    worldTemplateId: number
+  worldTemplateId: number
 }>) {
   const db = getDb()
   const current = db.select().from(novels).where(eq(novels.id, id)).all()[0]
@@ -204,10 +243,17 @@ export function updateNovel(id: number, data: Partial<{
     }
   }
 
+  const explicitOperatingMode = normalizeOperatingMode(data.operatingMode)
+  const normalizedSettingsJson = explicitOperatingMode
+    ? writeOperatingModeSettings(data.settingsJson ?? current.settingsJson, explicitOperatingMode, true)
+    : data.settingsJson
+  const { operatingMode, ...dbData } = data
+
   const changeReasons = deriveNovelChangeReasons(current, data)
 
   db.update(novels).set({
-    ...data,
+    ...dbData,
+    settingsJson: normalizedSettingsJson,
     worldRulesJson: normalizedWorldRules,
     updatedAt: new Date().toISOString(),
   }).where(eq(novels.id, id)).run()

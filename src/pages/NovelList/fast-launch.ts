@@ -1,4 +1,5 @@
 import { buildProjectBriefPayload } from '../../shared/project-brief'
+import { getOperatingModePolicy } from '../../shared/operating-mode'
 import { buildStorySettingsPayload } from '../../shared/story-settings'
 import { buildThemeVoicePayload } from '../../shared/theme-voice'
 import { normalizeWritingContractTags } from '../../shared/writing-contract'
@@ -196,7 +197,11 @@ export function buildFastLaunchBootstrapPlan(input: FastLaunchDraftInput): FastL
     forbiddenPhrases: tabooRules,
   })
 
-  const chapterTargetWords = Math.max(2500, Math.round(input.targetWords / 80))
+  const operatingModePolicy = getOperatingModePolicy({
+    launchMode: 'fast_launch',
+    targetWords: input.targetWords,
+  })
+  const chapterTargetWords = operatingModePolicy.chapterWords.recommended
 
   return {
     novel: {

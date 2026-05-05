@@ -5,6 +5,7 @@ import { parseProjectBriefSnapshot } from './project-brief'
 import { parseStorySettingsSnapshot } from './story-settings'
 import { parseThemeVoiceSnapshot } from './theme-voice'
 import { parseWorldRulesJson } from './genre-system'
+import { getWorkspaceViewModeForNovel } from './operating-mode'
 import {
   formatProgress,
   getModuleStatus,
@@ -596,11 +597,11 @@ function buildBaseProgressMap(
 }
 
 export function resolveWorkspaceMode(
-  novel: Pick<Novel, 'launchMode'> | null | undefined,
+  novel: Pick<Novel, 'launchMode' | 'operatingMode' | 'targetWords' | 'settingsJson'> | null | undefined,
   preferredMode?: WorkspaceViewMode,
 ): WorkspaceViewMode {
   if (preferredMode) return preferredMode
-  return novel?.launchMode === 'fast_launch' ? 'quick' : 'professional'
+  return getWorkspaceViewModeForNovel(novel)
 }
 
 export function getProjectBlockers(

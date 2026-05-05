@@ -34,6 +34,8 @@ import {
   worldMap,
 } from '../database/schema'
 import {
+  createStoryItem,
+  updateStoryItem,
   applyStoryItemLinkRecommendations,
   getStoryItemLinkRecommendations,
 } from './item.service'
@@ -57,6 +59,17 @@ function createDbMock(rowsByTable: TableRows) {
   return {
     select: vi.fn(() => ({
       from: vi.fn((table: unknown) => createQuery(rowsByTable, table)),
+    })),
+    insert: vi.fn((table: unknown) => ({
+      values: vi.fn((payload: Record<string, unknown>) => ({
+        run: vi.fn(() => {
+          const rows = rowsByTable.get(table) || []
+          const nextId = rows.reduce((max, row) => Math.max(max, Number(row.id) || 0), 0) + 1
+          rows.push({ id: nextId, ...payload })
+          rowsByTable.set(table, rows)
+          return { lastInsertRowid: nextId }
+        }),
+      })),
     })),
     update: vi.fn((table: unknown) => ({
       set: vi.fn((patch: Record<string, unknown>) => ({
@@ -211,5 +224,28 @@ describe('story item link recommendations', () => {
     expect(result.linkedSegmentCount).toBe(1)
     expect((rows.get(storyItems) || [])[0].linkedTimelineEventIdsJson).toBe(JSON.stringify([101]))
     expect((rows.get(chapterSegments) || [])[0].linkedItemIdsJson).toBe(JSON.stringify([7]))
+  })
+
+  it('fills typedRefsJson when creating and updating a story item', () => {
+    const rows = createBaseRows()
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+
+    const createdId = createStoryItem(1, {
+      itemName: '铜铃',
+      ownerCharacterId: 2,
+      linkedCharacterIdsJson: JSON.stringify([2]),
+      linkedTimelineEventIdsJson: JSON.stringify([101]),
+    }, { skipContextTracking: true })
+
+    const created = (rows.get(storyItems) || []).find((row) => Number(row.id) === createdId)
+    expect(typeof created?.typedRefsJson).toBe('string')
+    expect(String(created?.typedRefsJson)).toContain('timeline_event')
+
+    updateStoryItem(7, {
+      linkedTimelineEventIdsJson: JSON.stringify([101]),
+    }, { skipContextTracking: true })
+
+    expect(typeof (rows.get(storyItems) || [])[0].typedRefsJson).toBe('string')
+    expect(String((rows.get(storyItems) || [])[0].typedRefsJson)).toContain('character')
   })
 })

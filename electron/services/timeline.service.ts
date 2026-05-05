@@ -29,6 +29,12 @@ import {
   buildTimelineConfigSummary,
   parseWorldRulesJson,
 } from '../../src/shared/genre-system'
+import {
+  buildNameFallbackPointer,
+  buildTypedRefOverlay,
+  parseTypedRefOverlay,
+  stringifyTypedRefOverlay,
+} from '../../src/shared/typed-ref'
 import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/utils/text'
 import { markNovelContextChanged } from './context-impact.service'
 import { runAssetQualityLoop, summarizeAssetQualityWarnings } from './asset-quality.service'
@@ -69,6 +75,7 @@ interface GeneratedTimelineEvent {
   event_process?: unknown
   event_result?: unknown
   linked_items?: unknown
+  typed_refs?: unknown
   direct_consequences?: unknown
   open_threads?: unknown
   notes?: unknown
@@ -438,6 +445,7 @@ function sanitizeTimelinePayload(
   if (typeof data.eventProcess === 'string') next.eventProcess = cleanAiFieldText(data.eventProcess)
   if (typeof data.eventResult === 'string') next.eventResult = cleanAiFieldText(data.eventResult)
   if (typeof data.linkedItemIdsJson === 'string') next.linkedItemIdsJson = data.linkedItemIdsJson
+  if (typeof data.typedRefsJson === 'string') next.typedRefsJson = data.typedRefsJson
   if (typeof data.directConsequencesJson === 'string') next.directConsequencesJson = data.directConsequencesJson
   if (typeof data.openThreadsJson === 'string') next.openThreadsJson = data.openThreadsJson
   if (typeof data.notes === 'string') next.notes = cleanAiFieldText(data.notes)
@@ -513,6 +521,69 @@ function resolveTimelineAnchorState(
   return next
 }
 
+function resolveTypedPointerIds<T extends { id: number }>(
+  overlayRaw: unknown,
+  assetType: 'character' | 'item' | 'story_thread',
+  rows: T[],
+  getName: (row: T) => string,
+): number[] {
+  const raw = typeof overlayRaw === 'string'
+    ? overlayRaw
+    : overlayRaw == null
+      ? undefined
+      : JSON.stringify(overlayRaw)
+  const overlay = parseTypedRefOverlay(raw)
+  if (!overlay) return []
+  return [...new Set(overlay.pointers
+    .filter((pointer) => pointer.assetType === assetType)
+    .map((pointer) => {
+      if (typeof pointer.id === 'number') return pointer.id
+      const names = [pointer.name, ...(pointer.alias || [])].filter((item): item is string => Boolean(item))
+      for (const name of names) {
+        const resolved = resolveIdByName(rows, getName, name)
+        if (typeof resolved === 'number') return resolved
+      }
+      return undefined
+    })
+    .filter((value): value is number => typeof value === 'number'))]
+}
+
+function resolveTypedThreadNames(overlayRaw: unknown): string[] {
+  const raw = typeof overlayRaw === 'string'
+    ? overlayRaw
+    : overlayRaw == null
+      ? undefined
+      : JSON.stringify(overlayRaw)
+  const overlay = parseTypedRefOverlay(raw)
+  if (!overlay) return []
+  return [...new Set(overlay.pointers
+    .filter((pointer) => pointer.assetType === 'story_thread')
+    .map((pointer) => pointer.name || pointer.alias?.[0] || '')
+    .filter(Boolean))]
+}
+
+function deriveTimelineTypedRefsJson(params: {
+  typedRefsJson?: string | null
+  presentCharacterIdsJson?: string | null
+  affectedCharacterIdsJson?: string | null
+  linkedItemIdsJson?: string | null
+  openThreadsJson?: string | null
+}): string | undefined {
+  const explicit = parseTypedRefOverlay(params.typedRefsJson)
+  if (explicit) return stringifyTypedRefOverlay(explicit)
+
+  const presentCharacterIds = parseJsonNumberArray(params.presentCharacterIdsJson)
+  const affectedCharacterIds = parseJsonNumberArray(params.affectedCharacterIdsJson)
+  const linkedItemIds = parseJsonNumberArray(params.linkedItemIdsJson)
+  const openThreadNames = parseJsonStringArray(params.openThreadsJson)
+  const overlay = buildTypedRefOverlay([
+    ...[...new Set([...presentCharacterIds, ...affectedCharacterIds])].map((id) => buildNameFallbackPointer('character', { id, confidence: 1 })),
+    ...linkedItemIds.map((id) => buildNameFallbackPointer('item', { id, confidence: 1 })),
+    ...openThreadNames.map((name) => buildNameFallbackPointer('story_thread', { name, alias: [name], confidence: 0.45 })),
+  ])
+  return stringifyTypedRefOverlay(overlay)
+}
+
 function buildTimelineMutation(
   novelId: number,
   data: Partial<typeof timelineEvents.$inferInsert>,
@@ -580,11 +651,51 @@ function buildGeneratedPayload(
     ? context.chapterRows.find((chapter) => chapter.chapterNum === chapterEndNum)?.id
     : undefined
 
-  const presentCharacters = resolveCharacterIds(context.characterRows, toStringArray(event.present_characters))
-  const affectedCharacters = resolveCharacterIds(context.characterRows, toStringArray(event.affected_characters))
-  const linkedItems = toStringArray(event.linked_items)
-    .map((name) => resolveIdByName(context.itemRows, (item) => item.itemName, name))
-    .filter((item): item is number => typeof item === 'number')
+  const typedRefCharacters = resolveTypedPointerIds(event.typed_refs, 'character', context.characterRows, (item) => item.fullName)
+  const typedRefItems = resolveTypedPointerIds(event.typed_refs, 'item', context.itemRows, (item) => item.itemName)
+  const typedThreadNames = resolveTypedThreadNames(event.typed_refs)
+  const presentCharacters = typedRefCharacters.length > 0
+    ? typedRefCharacters
+    : resolveCharacterIds(context.characterRows, toStringArray(event.present_characters))
+  const affectedCharacters = typedRefCharacters.length > 0
+    ? [...new Set(typedRefCharacters)]
+    : resolveCharacterIds(context.characterRows, toStringArray(event.affected_characters))
+  const linkedItems = typedRefItems.length > 0
+    ? typedRefItems
+    : toStringArray(event.linked_items)
+        .map((name) => resolveIdByName(context.itemRows, (item) => item.itemName, name))
+        .filter((item): item is number => typeof item === 'number')
+  const typedRefsJson = stringifyTypedRefOverlay(buildTypedRefOverlay([
+    ...presentCharacters.map((id) => buildNameFallbackPointer('character', {
+      id,
+      name: context.characterRows.find((row) => row.id === id)?.fullName,
+      confidence: typedRefCharacters.includes(id) ? 0.98 : 0.8,
+    })),
+    ...affectedCharacters
+      .filter((id) => !presentCharacters.includes(id))
+      .map((id) => buildNameFallbackPointer('character', {
+        id,
+        name: context.characterRows.find((row) => row.id === id)?.fullName,
+        confidence: 0.78,
+      })),
+    ...linkedItems.map((id) => buildNameFallbackPointer('item', {
+      id,
+      name: context.itemRows.find((row) => row.id === id)?.itemName,
+      confidence: typedRefItems.includes(id) ? 0.98 : 0.8,
+    })),
+    ...typedThreadNames.map((name) => buildNameFallbackPointer('story_thread', {
+      name,
+      alias: [name],
+      confidence: 0.45,
+    })),
+    ...toStringArray(event.open_threads)
+      .filter((name) => !typedThreadNames.includes(name))
+      .map((name) => buildNameFallbackPointer('story_thread', {
+        name,
+        alias: [name],
+        confidence: 0.4,
+      })),
+  ]))
 
   return {
     sortOrder: context.sortOrder,
@@ -608,8 +719,9 @@ function buildGeneratedPayload(
     eventProcess: asText(event.event_process),
     eventResult: asText(event.event_result),
     linkedItemIdsJson: stringifyNumberArray([...new Set(linkedItems)]),
+    ...(typedRefsJson ? { typedRefsJson } : {}),
     directConsequencesJson: stringifyStringArray(toStringArray(event.direct_consequences)),
-    openThreadsJson: stringifyStringArray(toStringArray(event.open_threads)),
+    openThreadsJson: stringifyStringArray([...new Set([...typedThreadNames, ...toStringArray(event.open_threads)])]),
     notes: asText(event.notes),
     status: 'planned',
   }
@@ -960,6 +1072,13 @@ export function createTimelineEvent(
   const db = getDb()
   const nextSortOrder = typeof data.sortOrder === 'number' ? data.sortOrder : getNextSortOrder(novelId)
   const mutation = buildTimelineMutation(novelId, data)
+  const typedRefsJson = deriveTimelineTypedRefsJson({
+    typedRefsJson: typeof data.typedRefsJson === 'string' ? data.typedRefsJson : undefined,
+    presentCharacterIdsJson: typeof data.presentCharacterIdsJson === 'string' ? data.presentCharacterIdsJson : undefined,
+    affectedCharacterIdsJson: typeof data.affectedCharacterIdsJson === 'string' ? data.affectedCharacterIdsJson : undefined,
+    linkedItemIdsJson: typeof data.linkedItemIdsJson === 'string' ? data.linkedItemIdsJson : undefined,
+    openThreadsJson: typeof data.openThreadsJson === 'string' ? data.openThreadsJson : undefined,
+  })
   const result = db.insert(timelineEvents).values({
     novelId,
     sortOrder: nextSortOrder,
@@ -970,6 +1089,7 @@ export function createTimelineEvent(
     presentCharacterIdsJson: data.presentCharacterIdsJson || '[]',
     affectedCharacterIdsJson: data.affectedCharacterIdsJson || '[]',
     linkedItemIdsJson: data.linkedItemIdsJson || '[]',
+    ...(typedRefsJson ? { typedRefsJson } : {}),
     directConsequencesJson: data.directConsequencesJson || '[]',
     openThreadsJson: data.openThreadsJson || '[]',
     protagonistPresent: typeof data.protagonistPresent === 'number' ? data.protagonistPresent : 0,
@@ -1005,8 +1125,16 @@ export function updateTimelineEvent(
   const current = getTimelineEvent(id)
   if (!current) return
   const db = getDb()
+  const typedRefsJson = deriveTimelineTypedRefsJson({
+    typedRefsJson: typeof data.typedRefsJson === 'string' ? data.typedRefsJson : current.typedRefsJson,
+    presentCharacterIdsJson: typeof data.presentCharacterIdsJson === 'string' ? data.presentCharacterIdsJson : current.presentCharacterIdsJson,
+    affectedCharacterIdsJson: typeof data.affectedCharacterIdsJson === 'string' ? data.affectedCharacterIdsJson : current.affectedCharacterIdsJson,
+    linkedItemIdsJson: typeof data.linkedItemIdsJson === 'string' ? data.linkedItemIdsJson : current.linkedItemIdsJson,
+    openThreadsJson: typeof data.openThreadsJson === 'string' ? data.openThreadsJson : current.openThreadsJson,
+  })
   db.update(timelineEvents).set({
     ...sanitizeTimelinePayload(data),
+    ...(typedRefsJson ? { typedRefsJson } : {}),
     ...buildTimelineMutation(current.novelId, data, current),
     updatedAt: new Date().toISOString(),
   }).where(eq(timelineEvents.id, id)).run()

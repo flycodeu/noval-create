@@ -1,11 +1,14 @@
 ﻿import { WebContents } from 'electron'
 import { asc, desc, eq, inArray } from 'drizzle-orm'
 import { getDb, getSqlite } from '../database/db'
-import { chapterContracts, chapterSegments, chapterVersions, chapters, characters, novels, revisionTasks, sceneContracts, storyArcs, tasks } from '../database/schema'
+import { chapterContracts, chapterSegments, chapterVersions, chapters, characters, glossary, novels, revisionTasks, sceneContracts, storyArcs, storyItems, storyMemoryCheckpoints, storyParts, storyThreads, storyVolumes, tasks, timelineEvents } from '../database/schema'
 import { parseAiJsonResult } from '../utils/json'
 import { generateChapterEmbeddings } from './embedding.service'
 import { aiCheckPrompt, chapterSummaryPrompt } from './prompts'
 import { parseThemeVoiceDocument } from '../../src/shared/theme-voice'
+import { assessHistoricalGrounding } from '../../src/shared/genre-system'
+import { countUnresolvedTypedRefs, hasTypedRefOverlay } from '../../src/shared/typed-ref'
+import { getOperatingModeRuntimePolicy } from '../../src/shared/operating-mode'
 import type { HumanizationSignal } from '../../src/types'
 import {
   allocateChapterContext,
@@ -193,6 +196,12 @@ interface ChapterReviewNotes {
   language_risks: string[]
   human_language_repairs: string[]
   genre_hollowing_risks: string[]
+  typed_ref_risks: string[]
+  source_grounding_risks: string[]
+  operating_mode_risks: string[]
+  long_window_humanization_risks: string[]
+  genre_register_risks: string[]
+  dialogue_separability_risks: string[]
   missing_payoffs: string[]
   strengths: string[]
   severity: ReviewSeverity
@@ -1515,6 +1524,12 @@ function normalizeReviewNotes(raw: unknown): ChapterReviewNotes {
     language_risks: toStringArray(record.language_risks),
     human_language_repairs: toStringArray(record.human_language_repairs),
     genre_hollowing_risks: toStringArray(record.genre_hollowing_risks),
+    typed_ref_risks: toStringArray(record.typed_ref_risks),
+    source_grounding_risks: toStringArray(record.source_grounding_risks),
+    operating_mode_risks: toStringArray(record.operating_mode_risks),
+    long_window_humanization_risks: toStringArray(record.long_window_humanization_risks),
+    genre_register_risks: toStringArray(record.genre_register_risks),
+    dialogue_separability_risks: toStringArray(record.dialogue_separability_risks),
     missing_payoffs: toStringArray(record.missing_payoffs),
     strengths: toStringArray(record.strengths),
     severity: normalizeReviewSeverity(record.severity),
@@ -1588,6 +1603,12 @@ function hasReviewNotes(notes: ChapterReviewNotes): boolean {
     notes.language_risks.length > 0 ||
     notes.human_language_repairs.length > 0 ||
     notes.genre_hollowing_risks.length > 0 ||
+    notes.typed_ref_risks.length > 0 ||
+    notes.source_grounding_risks.length > 0 ||
+    notes.operating_mode_risks.length > 0 ||
+    notes.long_window_humanization_risks.length > 0 ||
+    notes.genre_register_risks.length > 0 ||
+    notes.dialogue_separability_risks.length > 0 ||
     notes.missing_payoffs.length > 0 ||
     notes.strengths.length > 0 ||
     notes.rewrite_required ||
@@ -1638,6 +1659,12 @@ function buildFallbackReviewNotes(consistencyNotes: string): ChapterReviewNotes 
     language_risks: ['删除抽象口号、概念化抒情和不自然搭配。'],
     human_language_repairs: [],
     genre_hollowing_risks: [],
+    typed_ref_risks: [],
+    source_grounding_risks: [],
+    operating_mode_risks: [],
+    long_window_humanization_risks: [],
+    genre_register_risks: [],
+    dialogue_separability_risks: [],
     missing_payoffs: [],
     strengths: [],
     severity: 'medium',
@@ -1683,6 +1710,12 @@ function formatReviewNotes(notes: ChapterReviewNotes): string {
     notes.language_risks.length > 0 ? `语言风险：\n- ${notes.language_risks.join('\n- ')}` : '',
     notes.human_language_repairs.length > 0 ? `语言替换建议：\n- ${notes.human_language_repairs.join('\n- ')}` : '',
     notes.genre_hollowing_risks.length > 0 ? `体裁空心化：\n- ${notes.genre_hollowing_risks.join('\n- ')}` : '',
+    notes.typed_ref_risks.length > 0 ? `Typed Ref 缺口：\n- ${notes.typed_ref_risks.join('\n- ')}` : '',
+    notes.source_grounding_risks.length > 0 ? `来源/grounding 风险：\n- ${notes.source_grounding_risks.join('\n- ')}` : '',
+    notes.operating_mode_risks.length > 0 ? `OperatingMode 违规：\n- ${notes.operating_mode_risks.join('\n- ')}` : '',
+    notes.genre_register_risks.length > 0 ? `题材语域漂移：\n- ${notes.genre_register_risks.join('\n- ')}` : '',
+    notes.long_window_humanization_risks.length > 0 ? `长窗人类化风险：\n- ${notes.long_window_humanization_risks.join('\n- ')}` : '',
+    notes.dialogue_separability_risks.length > 0 ? `对白可分离度风险：\n- ${notes.dialogue_separability_risks.join('\n- ')}` : '',
     notes.missing_payoffs.length > 0 ? `缺失回收：\n- ${notes.missing_payoffs.join('\n- ')}` : '',
     notes.strengths.length > 0 ? `可保留优点：\n- ${notes.strengths.join('\n- ')}` : '',
     notes.protagonist_setback !== 'none' || notes.setback_summary
@@ -1784,6 +1817,295 @@ function applyContractValidationToReviewNotes(
     rewrite_required: reviewNotes.rewrite_required || contractValidation.status === 'blocker',
     revision_brief: appendRevisionBrief(reviewNotes.revision_brief, contractValidation.rewriteHints),
     contract_validation: contractValidation,
+  }
+}
+
+function applyHistoricalGroundingToReviewNotes(
+  reviewNotes: ChapterReviewNotes,
+  input: {
+    genreName?: string | null
+    worldRulesJson?: string | null
+    backgroundText?: string | null
+    glossaryTerms?: string[]
+  },
+): ChapterReviewNotes {
+  const assessment = assessHistoricalGrounding(input)
+  if (assessment.mode === 'none') return reviewNotes
+
+  if (assessment.coverage === 'grounded') {
+    return {
+      ...reviewNotes,
+      realism_risks: dedupeTextList(reviewNotes.realism_risks),
+      genre_hollowing_risks: dedupeTextList(reviewNotes.genre_hollowing_risks),
+    }
+  }
+
+  const realismRisk = assessment.mode === 'historical_realist'
+    ? '历史正剧当前来源覆盖不足：未确认官制、礼制、器物、地理与纪年时，不得编造具体细节，应回退为保守表达。'
+    : assessment.mode === 'alternate_history'
+      ? '架空历史当前缺少明确分歧点/制度依据：允许偏离真实历史，但不能伪装成具体史实细节。'
+      : '类历史奇幻当前历史 grounding 不足：允许超自然元素，但制度、器物、身份秩序与措辞仍需保持历史框架。'
+  const fixHint = assessment.mode === 'historical_realist'
+    ? '将缺乏来源支撑的具体历史细节改写为低承诺、可验证的保守表述。'
+    : assessment.mode === 'alternate_history'
+      ? '补充架空分歧点/制度依据，或把具体史实断言改写为项目内设定。'
+      : '保留奇幻元素，但把制度、器物和措辞收回到历史框架内。'
+  const severity = assessment.mode === 'historical_realist' ? 'high' : assessment.mode === 'alternate_history' ? 'medium' : 'medium'
+
+  return {
+    ...reviewNotes,
+    realism_risks: dedupeTextList([realismRisk, ...reviewNotes.realism_risks]),
+    source_grounding_risks: dedupeTextList([realismRisk, ...reviewNotes.source_grounding_risks]),
+    critical_fixes: dedupeTextList([fixHint, ...reviewNotes.critical_fixes]),
+    genre_hollowing_risks: dedupeTextList([
+      assessment.conservativeFallbackActive ? '当前历史题材已启用保守 fallback，禁止 generic 历史细节脑补。' : '',
+      ...reviewNotes.genre_hollowing_risks,
+    ]),
+    summary: reviewNotes.summary || assessment.summary,
+    severity: mergeSeverity(reviewNotes.severity, severity),
+    rewrite_required: true,
+    revision_brief: appendRevisionBrief(reviewNotes.revision_brief, [fixHint]),
+  }
+}
+
+function buildTypedRefRiskSummary(novelId: number): {
+  risks: string[]
+  fixes: string[]
+  severity?: ReviewSeverity
+  rewriteRequired: boolean
+} {
+  const db = getDb()
+  const buckets = [
+    {
+      label: '故事线程',
+      rows: db.select({ typedRefsJson: storyThreads.typedRefsJson }).from(storyThreads).where(eq(storyThreads.novelId, novelId)).all(),
+    },
+    {
+      label: '时间线事件',
+      rows: db.select({ typedRefsJson: timelineEvents.typedRefsJson }).from(timelineEvents).where(eq(timelineEvents.novelId, novelId)).all(),
+    },
+    {
+      label: '故事物品',
+      rows: db.select({ typedRefsJson: storyItems.typedRefsJson }).from(storyItems).where(eq(storyItems.novelId, novelId)).all(),
+    },
+  ].map((bucket) => {
+    const totalCount = bucket.rows.length
+    const typedRefCount = bucket.rows.filter((row) => hasTypedRefOverlay(row.typedRefsJson)).length
+    const unresolvedCount = bucket.rows.reduce((sum, row) => sum + countUnresolvedTypedRefs(row.typedRefsJson), 0)
+    return {
+      ...bucket,
+      totalCount,
+      typedRefCount,
+      unresolvedCount,
+    }
+  })
+  const totalCount = buckets.reduce((sum, bucket) => sum + bucket.totalCount, 0)
+  const typedRefCount = buckets.reduce((sum, bucket) => sum + bucket.typedRefCount, 0)
+  const unresolvedCount = buckets.reduce((sum, bucket) => sum + bucket.unresolvedCount, 0)
+  if (totalCount === 0 || (unresolvedCount === 0 && typedRefCount >= totalCount)) {
+    return { risks: [], fixes: [], rewriteRequired: false }
+  }
+  const severe = unresolvedCount >= 8 || (totalCount > 0 && typedRefCount / totalCount < 0.45)
+  return {
+    risks: [
+      `当前 thread/timeline/item 的 typed ref 覆盖不足：已覆盖 ${typedRefCount}/${totalCount}，未解析引用 ${unresolvedCount} 条。`,
+      ...buckets
+        .filter((bucket) => bucket.unresolvedCount > 0)
+        .map((bucket) => `${bucket.label} 仍有 ${bucket.unresolvedCount} 条 unresolved typed ref。`),
+    ],
+    fixes: ['先补齐线程、时间线和物品的 typed ref 绑定，再继续依赖这些资产做连续性判断。'],
+    severity: severe ? 'high' : 'medium',
+    rewriteRequired: severe,
+  }
+}
+
+function applyProvenanceAndOperatingModeToReviewNotes(
+  reviewNotes: ChapterReviewNotes,
+  input: {
+    novelId: number
+    chapterNum: number
+    genreName?: string | null
+    worldRulesJson?: string | null
+    backgroundText?: string | null
+    glossaryTerms?: string[]
+    launchMode?: string | null
+    targetWords?: number | null
+    settingsJson?: string | null
+    scenePlanJson?: string | null
+  },
+): ChapterReviewNotes {
+  const db = getDb()
+  const typedRefSummary = buildTypedRefRiskSummary(input.novelId)
+  const groundingAssessment = assessHistoricalGrounding({
+    genreName: input.genreName,
+    worldRulesJson: input.worldRulesJson,
+    backgroundText: input.backgroundText,
+    glossaryTerms: input.glossaryTerms,
+  })
+  const chapterCount = db.select({ id: chapters.id }).from(chapters).where(eq(chapters.novelId, input.novelId)).all().length
+  const runtimePolicy = getOperatingModeRuntimePolicy({
+    launchMode: input.launchMode,
+    targetWords: input.targetWords,
+    settingsJson: input.settingsJson,
+    chapterCount,
+  })
+  const checkpointRows = db.select().from(storyMemoryCheckpoints).where(eq(storyMemoryCheckpoints.novelId, input.novelId)).all()
+  const latestNovelCheckpoint = checkpointRows.find((row) => row.scopeType === 'novel' && (row.scopeId ?? null) === null) || null
+  const checkpointLag = Math.max(0, input.chapterNum - (latestNovelCheckpoint?.lastRefreshedChapterNum || 0))
+  const volumeCount = db.select().from(storyVolumes).where(eq(storyVolumes.novelId, input.novelId)).all().length
+  const partCount = db.select().from(storyParts).where(eq(storyParts.novelId, input.novelId)).all().length
+  const scenePlanCount = (() => {
+    if (!input.scenePlanJson?.trim()) return 0
+    try {
+      const parsed = JSON.parse(input.scenePlanJson) as unknown
+      return Array.isArray(parsed) ? parsed.length : 0
+    } catch {
+      return 0
+    }
+  })()
+  const sourceGroundingRisks = groundingAssessment.mode !== 'none' && groundingAssessment.coverage !== 'grounded'
+    ? [
+        groundingAssessment.mode === 'historical_realist'
+          ? '历史正剧当前来源覆盖不足，具体制度/器物/纪年细节仍缺 grounding。'
+          : groundingAssessment.mode === 'alternate_history'
+            ? '架空历史当前分歧点或制度依据不足，具体设定仍像 generic 历史脑补。'
+            : '类历史奇幻当前历史 grounding 不足，历史框架与奇幻边界仍不清晰。',
+        groundingAssessment.conservativeFallbackActive ? '当前题材已触发 conservative fallback，不能继续 generic 历史细节脑补。': '',
+      ].filter(Boolean)
+    : []
+  const operatingModeRisks = [
+    runtimePolicy.operatingMode === 'million_longform' && checkpointLag > runtimePolicy.checkpointGapWarningThreshold
+      ? `百万字模式下 story-memory checkpoint 已落后 ${checkpointLag} 章，超过阈值 ${runtimePolicy.checkpointGapWarningThreshold}。`
+      : '',
+    runtimePolicy.operatingMode === 'shortform' && (volumeCount > 1 || partCount > 0 || scenePlanCount >= 6)
+      ? `短篇模式当前结构深度过高：卷 ${volumeCount} / 部 ${partCount} / 场景 ${scenePlanCount}，已偏离 shortform operatingMode。`
+      : '',
+  ].filter(Boolean)
+
+  return {
+    ...reviewNotes,
+    typed_ref_risks: dedupeTextList([...reviewNotes.typed_ref_risks, ...typedRefSummary.risks]),
+    source_grounding_risks: dedupeTextList([...reviewNotes.source_grounding_risks, ...sourceGroundingRisks]),
+    operating_mode_risks: dedupeTextList([...reviewNotes.operating_mode_risks, ...operatingModeRisks]),
+    critical_fixes: dedupeTextList([
+      ...typedRefSummary.fixes,
+      sourceGroundingRisks.length > 0 ? '补充来源/grounding 依据，或把高承诺细节改写为保守表达后再发布。' : '',
+      runtimePolicy.operatingMode === 'million_longform' && checkpointLag > runtimePolicy.checkpointGapWarningThreshold
+        ? '先刷新 story-memory checkpoint，再继续按百万字模式推进。'
+        : '',
+      runtimePolicy.operatingMode === 'shortform' && (volumeCount > 1 || partCount > 0 || scenePlanCount >= 6)
+        ? '收缩卷/部/场景复杂度，或把项目切换到更匹配的 operatingMode。'
+        : '',
+      ...reviewNotes.critical_fixes,
+    ]),
+    severity: [
+      typedRefSummary.severity,
+      sourceGroundingRisks.length > 0 ? (groundingAssessment.mode === 'historical_realist' ? 'high' : 'medium') : undefined,
+      operatingModeRisks.some((item) => item.includes('百万字模式')) ? 'high' : operatingModeRisks.length > 0 ? 'medium' : undefined,
+    ].filter(Boolean).reduce<ReviewSeverity>((current, next) => mergeSeverity(current, next as ReviewSeverity), reviewNotes.severity),
+    rewrite_required: reviewNotes.rewrite_required
+      || typedRefSummary.rewriteRequired
+      || sourceGroundingRisks.length > 0
+      || operatingModeRisks.some((item) => item.includes('百万字模式')),
+    revision_brief: appendRevisionBrief(reviewNotes.revision_brief, [
+      typedRefSummary.risks[0] || '',
+      sourceGroundingRisks[0] || '',
+      operatingModeRisks[0] || '',
+    ]),
+  }
+}
+
+function applyLongWindowQualitySignalsToReviewNotes(
+  reviewNotes: ChapterReviewNotes,
+  content: string,
+  input: {
+    novelId: number
+    chapterNum: number
+    genre?: string
+    chapterId?: number
+    chapterFunction?: string
+    emotionTone?: string
+  },
+): ChapterReviewNotes {
+  const aiFlavor = analyzeWorkspaceAiFlavor(content, input.genre, {
+    chapterFunction: input.chapterFunction,
+    emotionTone: input.emotionTone,
+  })
+  const dashboard = getQualityDashboardData(input.novelId, { includeDialogueInsights: true })
+  const topRepeatedRules = dashboard.antiAiRecurrence.topRepeatedRules
+  const recurringTemplateSignals = topRepeatedRules
+    .filter((item) =>
+      item.ruleTitle.includes('重复')
+      || item.ruleTitle.includes('模板')
+      || item.ruleTitle.includes('连接')
+      || item.ruleTitle.includes('情绪'))
+    .slice(0, 3)
+  const genreRegisterRisks = [
+    aiFlavor.humanizationSignals.some((item) => item.issueType === 'world_exposition_dump')
+      ? '题材语域开始滑向说明文/设定讲解，场景承载的题材语感被解释腔稀释。'
+      : '',
+    aiFlavor.humanizationSignals.some((item) => item.issueType === 'ornament_overload')
+      ? '题材语域出现华饰化漂移，辞藻和抽象升华正在覆盖题材固有的动作/制度/生态质感。'
+      : '',
+    aiFlavor.sampleFindings.some((item) => item.includes('解释腔') || item.includes('抽象'))
+      ? '当前章节语域偏抽象或偏说明，题材特定话语体系没有稳定落在人物、动作和环境上。'
+      : '',
+  ].filter(Boolean)
+  const expositionRisks = [
+    aiFlavor.humanizationSignals.some((item) => item.issueType === 'explanatory_narration')
+      ? `解释密度偏高：${aiFlavor.summary}`
+      : '',
+    aiFlavor.humanizationSignals.some((item) => item.issueType === 'world_exposition_dump')
+      ? '世界观说明文占比偏高，正文在替设定做摘要，而不是让场景自己显影。'
+      : '',
+    aiFlavor.humanizationSignals.some((item) => item.issueType === 'transition_density')
+      ? '过渡句/承接句密度偏高，阅读体验开始像模板化串联。'
+      : '',
+  ].filter(Boolean)
+  const longWindowHomogenizationRisks = [
+    ...recurringTemplateSignals.map((item) => `长窗模板复现：${item.ruleTitle}，近期命中 ${item.hitCount} 次。`),
+    dashboard.antiAiRecurrence.highRiskRuleCount > 0
+      ? `反 AI 高风险复现规则 ${dashboard.antiAiRecurrence.highRiskRuleCount} 类，近期已经形成累积同质化压力。`
+      : '',
+  ].filter(Boolean)
+  const dialogueSeparabilityRisks = [
+    dashboard.dialogueFingerprintStats.highSimilarityPairCount >= 2
+      ? `长窗对白可分离度下降：高相似角色对 ${dashboard.dialogueFingerprintStats.highSimilarityPairCount} 组。`
+      : '',
+    dashboard.voiceEvolutionSummary.driftingCharacterCount > 0
+      ? `角色对白漂移 ${dashboard.voiceEvolutionSummary.driftingCharacterCount} 名，近期 voice profile 正在失稳。`
+      : '',
+    dashboard.requiredDialogueVoiceLocks.length > 0
+      ? `仍有 ${dashboard.requiredDialogueVoiceLocks.length} 名角色需要补 voice lock 才能维持长窗口吻分离。`
+      : '',
+  ].filter(Boolean)
+
+  return {
+    ...reviewNotes,
+    genre_register_risks: dedupeTextList([...reviewNotes.genre_register_risks, ...genreRegisterRisks]),
+    long_window_humanization_risks: dedupeTextList([...reviewNotes.long_window_humanization_risks, ...expositionRisks, ...longWindowHomogenizationRisks]),
+    dialogue_separability_risks: dedupeTextList([...reviewNotes.dialogue_separability_risks, ...dialogueSeparabilityRisks]),
+    critical_fixes: dedupeTextList([
+      expositionRisks.length > 0 ? '删减解释腔和世界观说明文，把设定信息改写为场景动作、对白和结果状态。': '',
+      longWindowHomogenizationRisks.length > 0 ? '优先替换复现频率最高的模板连接、模板情绪和高频重复句式。': '',
+      dialogueSeparabilityRisks.length > 0 ? '为高相似/漂移角色补 voice lock，并重写关键对白段落。': '',
+      ...reviewNotes.critical_fixes,
+    ]),
+    severity: [
+      genreRegisterRisks.length > 0 ? 'medium' : undefined,
+      expositionRisks.length >= 2 ? 'high' : expositionRisks.length > 0 ? 'medium' : undefined,
+      longWindowHomogenizationRisks.length >= 2 ? 'medium' : undefined,
+      dialogueSeparabilityRisks.length >= 2 ? 'high' : dialogueSeparabilityRisks.length > 0 ? 'medium' : undefined,
+    ].filter(Boolean).reduce<ReviewSeverity>((current, next) => mergeSeverity(current, next as ReviewSeverity), reviewNotes.severity),
+    rewrite_required: reviewNotes.rewrite_required
+      || expositionRisks.length >= 2
+      || dialogueSeparabilityRisks.length >= 2,
+    revision_brief: appendRevisionBrief(reviewNotes.revision_brief, [
+      genreRegisterRisks[0] || '',
+      expositionRisks[0] || '',
+      longWindowHomogenizationRisks[0] || '',
+      dialogueSeparabilityRisks[0] || '',
+    ]),
   }
 }
 
@@ -4395,6 +4717,37 @@ export async function generateChapterContent(
       content: draftContent,
       reviewNotes,
     }))
+    const glossaryTerms = db.select({ term: glossary.term }).from(glossary)
+      .where(eq(glossary.novelId, chapter.novelId))
+      .all()
+      .map((row) => row.term || '')
+      .filter(Boolean)
+    reviewNotes = applyHistoricalGroundingToReviewNotes(reviewNotes, {
+      genreName: profile.genre,
+      worldRulesJson: novel.worldRulesJson,
+      backgroundText: [novel.expandedBackground, novel.synopsis, novel.userBackground].filter(Boolean).join('\n'),
+      glossaryTerms,
+    })
+    reviewNotes = applyProvenanceAndOperatingModeToReviewNotes(reviewNotes, {
+      novelId: chapter.novelId,
+      chapterNum: chapter.chapterNum,
+      genreName: profile.genre,
+      worldRulesJson: novel.worldRulesJson,
+      backgroundText: [novel.expandedBackground, novel.synopsis, novel.userBackground].filter(Boolean).join('\n'),
+      glossaryTerms,
+      launchMode: novel.launchMode,
+      targetWords: novel.targetWords,
+      settingsJson: novel.settingsJson,
+      scenePlanJson: chapter.scenePlanJson,
+    })
+    reviewNotes = applyLongWindowQualitySignalsToReviewNotes(reviewNotes, draftContent, {
+      novelId: chapter.novelId,
+      chapterNum: chapter.chapterNum,
+      chapterId,
+      genre: profile.genre,
+      chapterFunction: reviewNotes.chapter_function_primary || reviewNotes.pace_marker,
+      emotionTone: chapter.emotionTone || '',
+    })
     updateChapter(chapterId, { reviewNotesJson: JSON.stringify(reviewNotes) })
     finishRoleTask('critic', criticTaskId, 'Critic 审校完成，已生成本章修订意见。')
     const reviewPrioritySummary = buildReviewPrioritySummary(reviewNotes)
@@ -4648,11 +5001,37 @@ export async function generateChapterContent(
       chapter.novelId,
       repaired.content,
     )
-    const finalReviewNotes = applyContractValidationToReviewNotes(repairedStyleReviewNotes, validateChapterContractDelivery({
+    const repairedContractReviewNotes = applyContractValidationToReviewNotes(repairedStyleReviewNotes, validateChapterContractDelivery({
       chapterId,
       content: repaired.content,
       reviewNotes: repairedStyleReviewNotes,
     }))
+    const repairedGroundedReviewNotes = applyHistoricalGroundingToReviewNotes(repairedContractReviewNotes, {
+      genreName: profile.genre,
+      worldRulesJson: novel.worldRulesJson,
+      backgroundText: [novel.expandedBackground, novel.synopsis, novel.userBackground].filter(Boolean).join('\n'),
+      glossaryTerms,
+    })
+    const repairedProvenanceReviewNotes = applyProvenanceAndOperatingModeToReviewNotes(repairedGroundedReviewNotes, {
+      novelId: chapter.novelId,
+      chapterNum: chapter.chapterNum,
+      genreName: profile.genre,
+      worldRulesJson: novel.worldRulesJson,
+      backgroundText: [novel.expandedBackground, novel.synopsis, novel.userBackground].filter(Boolean).join('\n'),
+      glossaryTerms,
+      launchMode: novel.launchMode,
+      targetWords: novel.targetWords,
+      settingsJson: novel.settingsJson,
+      scenePlanJson: chapter.scenePlanJson,
+    })
+    const finalReviewNotes = applyLongWindowQualitySignalsToReviewNotes(repairedProvenanceReviewNotes, repaired.content, {
+      novelId: chapter.novelId,
+      chapterNum: chapter.chapterNum,
+      chapterId,
+      genre: profile.genre,
+      chapterFunction: repairedProvenanceReviewNotes.chapter_function_primary || repairedProvenanceReviewNotes.pace_marker,
+      emotionTone: chapter.emotionTone || '',
+    })
     const finalReviewPrioritySummary = buildReviewPrioritySummary(finalReviewNotes)
     const rewriteMiniReview = buildRewriteMiniReviewVerdict({
       originalContent: draftContent,

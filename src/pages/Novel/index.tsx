@@ -26,6 +26,7 @@ import {
   type WorkspaceRouteKey,
   type WorkspaceViewMode,
 } from '../../shared/novel-workspace'
+import { getWorkspaceViewModeForNovel } from '../../shared/operating-mode'
 import StudioPage from './Studio'
 import Overview from './Overview'
 import PremisePage from './Premise'
@@ -475,7 +476,7 @@ export default function NovelRouter() {
   useEffect(() => {
     if (!currentNovel || typeof localStorage === 'undefined') return
     if (localStorage.getItem(WORKSPACE_VIEW_MODE_STORAGE_KEY)) return
-    if (currentNovel.launchMode === 'fast_launch') {
+    if (getWorkspaceViewModeForNovel(currentNovel) === 'quick') {
       setWorkspaceViewMode('quick')
     }
   }, [currentNovel, setWorkspaceViewMode])

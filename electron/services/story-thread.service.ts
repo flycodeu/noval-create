@@ -5,6 +5,12 @@ import type {
   StoryThreadBatchGenerationResult,
 } from '../../src/shared/story-thread-generation'
 import {
+  buildNameFallbackPointer,
+  buildTypedRefOverlay,
+  parseTypedRefOverlay,
+  stringifyTypedRefOverlay,
+} from '../../src/shared/typed-ref'
+import {
   buildContextAlignmentRules,
   buildHumanLanguageRules,
   buildOutputQualityRules,
@@ -166,10 +172,26 @@ function sanitizeStoryThreadPayload(
   if ('relatedCharacterIdsJson' in data) next.relatedCharacterIdsJson = stringifyNumberArray(data.relatedCharacterIdsJson)
   if ('relatedItemIdsJson' in data) next.relatedItemIdsJson = stringifyNumberArray(data.relatedItemIdsJson)
   if ('relatedTimelineEventIdsJson' in data) next.relatedTimelineEventIdsJson = stringifyNumberArray(data.relatedTimelineEventIdsJson)
+  if (typeof data.typedRefsJson === 'string') next.typedRefsJson = data.typedRefsJson
   if (typeof data.notes === 'string') next.notes = asText(data.notes)
   if ('sortOrder' in data) next.sortOrder = asNumber(data.sortOrder) ?? 0
 
   return next
+}
+
+function deriveThreadTypedRefsJson(payload: Partial<typeof storyThreads.$inferInsert>): string | undefined {
+  const explicit = parseTypedRefOverlay(typeof payload.typedRefsJson === 'string' ? payload.typedRefsJson : undefined)
+  if (explicit) return stringifyTypedRefOverlay(explicit)
+
+  const characterIds = parseJsonNumberArray(typeof payload.relatedCharacterIdsJson === 'string' ? payload.relatedCharacterIdsJson : '')
+  const itemIds = parseJsonNumberArray(typeof payload.relatedItemIdsJson === 'string' ? payload.relatedItemIdsJson : '')
+  const eventIds = parseJsonNumberArray(typeof payload.relatedTimelineEventIdsJson === 'string' ? payload.relatedTimelineEventIdsJson : '')
+  const overlay = buildTypedRefOverlay([
+    ...characterIds.map((id) => buildNameFallbackPointer('character', { id, confidence: 1 })),
+    ...itemIds.map((id) => buildNameFallbackPointer('item', { id, confidence: 1 })),
+    ...eventIds.map((id) => buildNameFallbackPointer('timeline_event', { id, confidence: 1 })),
+  ])
+  return stringifyTypedRefOverlay(overlay)
 }
 
 function hasOwn<T extends object>(value: T, key: keyof T): boolean {
@@ -537,6 +559,7 @@ function parseGeneratedThread(
     relatedCharacterIdsJson: '[]',
     relatedItemIdsJson: '[]',
     relatedTimelineEventIdsJson: '[]',
+    typedRefsJson: stringifyTypedRefOverlay(buildTypedRefOverlay([])),
     notes: normalizeBlockText(item.notes),
   }
 }
@@ -821,6 +844,7 @@ export function createStoryThread(
   const db = getDb()
   const rows = listStoryThreads(novelId)
   const sanitized = sanitizeStoryThreadPayload(data)
+  const typedRefsJson = deriveThreadTypedRefsJson(sanitized)
   const lifecyclePatch = buildStoryThreadLifecyclePatch(novelId, null, sanitized)
   const result = db.insert(storyThreads).values({
     novelId,
@@ -831,6 +855,7 @@ export function createStoryThread(
     relatedCharacterIdsJson: '[]',
     relatedItemIdsJson: '[]',
     relatedTimelineEventIdsJson: '[]',
+    ...(typedRefsJson ? { typedRefsJson } : {}),
     sortOrder: rows.length > 0 ? Math.max(...rows.map((thread) => thread.sortOrder || 0)) + 1 : 1,
     ...sanitized,
     ...lifecyclePatch,
@@ -863,9 +888,14 @@ export function updateStoryThread(
   if (!current) return
   const db = getDb()
   const sanitized = sanitizeStoryThreadPayload(data)
+  const typedRefsJson = deriveThreadTypedRefsJson({
+    ...current,
+    ...sanitized,
+  })
   const lifecyclePatch = buildStoryThreadLifecyclePatch(current.novelId, current, sanitized)
   db.update(storyThreads).set({
     ...sanitized,
+    ...(typedRefsJson ? { typedRefsJson } : {}),
     ...lifecyclePatch,
     updatedAt: new Date().toISOString(),
   }).where(eq(storyThreads.id, id)).run()

@@ -143,6 +143,13 @@ function assertRequiredColumns(db) {
   assert.ok(getColumns(db, 'story_threads').has('last_referenced_chapter'))
   assert.ok(getColumns(db, 'story_threads').has('resolved_chapter'))
   assert.ok(getColumns(db, 'story_threads').has('reminder_interval'))
+  assert.ok(getColumns(db, 'story_threads').has('typed_refs_json'))
+  assert.ok(getColumns(db, 'timeline_events').has('typed_refs_json'))
+  assert.ok(getColumns(db, 'characters').has('record_status'))
+  assert.ok(getColumns(db, 'characters').has('source_context_json'))
+  assert.ok(getColumns(db, 'story_items').has('record_status'))
+  assert.ok(getColumns(db, 'story_items').has('source_context_json'))
+  assert.ok(getColumns(db, 'story_items').has('typed_refs_json'))
   assert.ok(getColumns(db, 'story_memory_checkpoints').has('character_cards_json'))
   assert.ok(getColumns(db, 'story_memory_checkpoints').has('relation_cards_json'))
   assert.ok(getColumns(db, 'story_memory_checkpoints').has('item_cards_json'))
@@ -228,6 +235,7 @@ function testFreshDbIsIdempotent() {
       '0034_asset_change_impacts_and_writeback_verification',
       '0035_state_anchor_and_delta',
       '0036_chapter_contract_shape_controls',
+      '0037_typed_ref_overlay_backfill',
     ])
 
     runMigrations(db)
@@ -343,6 +351,7 @@ function testPartialSchemaCanResume() {
       '0034_asset_change_impacts_and_writeback_verification',
       '0035_state_anchor_and_delta',
       '0036_chapter_contract_shape_controls',
+      '0037_typed_ref_overlay_backfill',
     ])
 
     const configs = db.prepare(`
@@ -363,10 +372,115 @@ function testPartialSchemaCanResume() {
   }
 }
 
+function testAppliedLegacyMigrationCanStillReceiveTypedRefColumns() {
+  const db = openDb('legacy-typed-ref-backfill.db')
+  try {
+    db.exec(`
+      CREATE TABLE _schema_migrations (
+        id TEXT PRIMARY KEY,
+        applied_at TEXT NOT NULL
+      );
+
+      CREATE TABLE timeline_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL,
+        linked_item_ids_json TEXT
+      );
+
+      CREATE TABLE story_threads (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        thread_type TEXT DEFAULT 'subplot',
+        status TEXT DEFAULT 'planned',
+        priority TEXT DEFAULT 'medium',
+        planted_chapter INTEGER,
+        last_referenced_chapter INTEGER,
+        resolved_chapter INTEGER,
+        reminder_interval INTEGER DEFAULT 20,
+        related_character_ids_json TEXT,
+        related_item_ids_json TEXT,
+        related_timeline_event_ids_json TEXT,
+        sort_order INTEGER DEFAULT 0
+      );
+
+      CREATE TABLE characters (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL,
+        full_name TEXT NOT NULL
+      );
+
+      CREATE TABLE story_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL,
+        item_name TEXT NOT NULL
+      );
+    `)
+
+    const legacyMigrationIds = [
+      '0001_core_schema',
+      '0002_additive_schema',
+      '0003_indexes',
+      '0004_backfills',
+      '0005_validate_schema',
+      '0006_history_recovery',
+      '0007_validate_history',
+      '0008_model_context_windows',
+      '0009_validate_model_runtime',
+      '0010_model_parameter_defaults',
+      '0011_embedding_and_style_tables',
+      '0012_story_memory_context_cards',
+      '0013_asset_modules_and_blurbs',
+      '0014_character_dialogue_fingerprints',
+      '0015_character_state_versions',
+      '0016_world_state_versions',
+      '0017_story_arc_phase_targets',
+      '0018_story_thread_foreshadow_columns',
+      '0019_endgame_assets_and_contracts',
+      '0020_backfill_endgame_assets_and_contracts',
+      '0021_character_arc_center',
+      '0022_resistance_system',
+      '0023_info_gap_and_puzzle_board',
+      '0024_growth_resource_cost_system',
+      '0025_chapter_contract_audit',
+      '0026_chapter_writeback_center',
+      '0027_chapter_gate_runs',
+      '0027_generation_integrity_reports',
+      '0028_task_pipeline_metadata',
+      '0029_chapter_recall_runtime_snapshots',
+      '0030_anti_ai_rule_hits',
+      '0031_foreshadow_actionized_payoff_fields',
+      '0032_chapter_batch_workbench',
+      '0033_novel_launch_mode',
+      '0034_asset_change_impacts_and_writeback_verification',
+      '0035_state_anchor_and_delta',
+      '0036_chapter_contract_shape_controls',
+    ]
+
+    const insertMigration = db.prepare('INSERT INTO _schema_migrations (id, applied_at) VALUES (?, ?)')
+    const timestamp = new Date().toISOString()
+    legacyMigrationIds.forEach((id) => insertMigration.run(id, timestamp))
+
+    runMigrations(db)
+
+    assert.ok(getColumns(db, 'timeline_events').has('typed_refs_json'))
+    assert.ok(getColumns(db, 'story_threads').has('typed_refs_json'))
+    assert.ok(getColumns(db, 'characters').has('record_status'))
+    assert.ok(getColumns(db, 'characters').has('source_context_json'))
+    assert.ok(getColumns(db, 'story_items').has('record_status'))
+    assert.ok(getColumns(db, 'story_items').has('source_context_json'))
+    assert.ok(getColumns(db, 'story_items').has('typed_refs_json'))
+    assert.ok(getMigrationIds(db).includes('0037_typed_ref_overlay_backfill'))
+  } finally {
+    db.close()
+  }
+}
+
 function runAllTests() {
   prepareTempDir()
   testFreshDbIsIdempotent()
   testPartialSchemaCanResume()
+  testAppliedLegacyMigrationCanStillReceiveTypedRefColumns()
   console.log('migration-safety tests passed')
 }
 

@@ -58,6 +58,16 @@ import {
 
 const CHECKPOINT_CHAPTER_REFRESH_INTERVAL = 30
 const CHECKPOINT_TIME_REFRESH_MS = 7 * 24 * 60 * 60 * 1000
+const storyMemoryRefreshPending = new Set<number>()
+const storyMemoryRefreshStatus = new Map<number, {
+  status: 'idle' | 'queued' | 'running' | 'failed'
+  queuedAt?: string
+  startedAt?: string
+  finishedAt?: string
+  lastError?: string
+  reason?: string
+  trigger?: string
+}>()
 
 type StoryMemoryMode = 'standard' | 'longform' | 'epic' | 'mega'
 type CheckpointScope = 'novel' | 'volume' | 'part'
@@ -85,6 +95,45 @@ export interface StoryMemorySnapshot {
   continuityDirectives: string[]
   timelineAnchors: string[]
   itemLedger: string[]
+}
+
+type StoryMemoryCheckpointScope = 'novel' | 'volume' | 'part'
+
+export interface StoryMemoryPromptScopeObservability {
+  scopeType: StoryMemoryCheckpointScope
+  label: string
+  hasCheckpoint: boolean
+  structuredFamilyCount: number
+  fallbackFamilyCount: number
+  missingFamilyCount: number
+  cardCoverageRate: number
+  usesTextFallback: boolean
+}
+
+export interface StoryMemoryPromptObservability {
+  promptSummaryMode: 'structured_first'
+  activeScopeLabels: string[]
+  scopeCoverageRate: number
+  cardCoverageRate: number
+  structuredScopeCount: number
+  fallbackScopeCount: number
+  buckets: StoryMemoryPromptScopeObservability[]
+  summary: string
+}
+
+export interface StoryMemoryPromptPackage {
+  summary: string
+  observability: StoryMemoryPromptObservability
+}
+
+export interface StoryMemoryCheckpointRefreshStatus {
+  status: 'idle' | 'queued' | 'running' | 'failed'
+  queuedAt?: string
+  startedAt?: string
+  finishedAt?: string
+  lastError?: string
+  reason?: string
+  trigger?: string
 }
 
 interface ContinuityStateLike {
@@ -178,6 +227,11 @@ function dedupe(values: string[], limit?: number): string[] {
 
 function stringifyStringArray(values: string[]): string {
   return JSON.stringify(dedupe(values))
+}
+
+function toPercent(numerator: number, denominator: number): number {
+  if (denominator <= 0) return 0
+  return Math.round((numerator / denominator) * 100)
 }
 
 function resolveStoryMemoryMode(targetWords: number, chapterCount: number): StoryMemoryMode {
@@ -632,6 +686,73 @@ function ensureFreshCheckpoints(novelId: number) {
   }
 }
 
+function setStoryMemoryRefreshStatus(
+  novelId: number,
+  next: Partial<StoryMemoryCheckpointRefreshStatus> & { status: StoryMemoryCheckpointRefreshStatus['status'] },
+) {
+  const current = storyMemoryRefreshStatus.get(novelId) || { status: 'idle' as const }
+  storyMemoryRefreshStatus.set(novelId, {
+    ...current,
+    ...next,
+  })
+}
+
+export function scheduleStoryMemoryCheckpointRefresh(novelId: number, reason = 'checkpoint stale', trigger = 'background_precompute') {
+  const now = new Date().toISOString()
+  if (storyMemoryRefreshPending.has(novelId)) {
+    setStoryMemoryRefreshStatus(novelId, {
+      status: 'queued',
+      queuedAt: now,
+      reason,
+      trigger,
+    })
+    return
+  }
+  storyMemoryRefreshPending.add(novelId)
+  setStoryMemoryRefreshStatus(novelId, {
+    status: 'queued',
+    queuedAt: now,
+    reason,
+    trigger,
+    lastError: undefined,
+  })
+  void (async () => {
+    const startedAt = new Date().toISOString()
+    setStoryMemoryRefreshStatus(novelId, {
+      status: 'running',
+      startedAt,
+      reason,
+      trigger,
+      lastError: undefined,
+    })
+    try {
+      await Promise.resolve(refreshStoryMemoryCheckpoints(novelId))
+      setStoryMemoryRefreshStatus(novelId, {
+        status: 'idle',
+        finishedAt: new Date().toISOString(),
+        reason,
+        trigger,
+        lastError: undefined,
+      })
+    } catch (error) {
+      setStoryMemoryRefreshStatus(novelId, {
+        status: 'failed',
+        finishedAt: new Date().toISOString(),
+        reason,
+        trigger,
+        lastError: error instanceof Error ? error.message : 'story memory checkpoint refresh failed',
+      })
+      console.warn('[story-memory] failed to refresh checkpoints in background', error)
+    } finally {
+      storyMemoryRefreshPending.delete(novelId)
+    }
+  })()
+}
+
+export function getStoryMemoryCheckpointRefreshStatus(novelId: number): StoryMemoryCheckpointRefreshStatus {
+  return storyMemoryRefreshStatus.get(novelId) || { status: 'idle' }
+}
+
 export function buildStoryMemorySnapshot(novelId: number): StoryMemorySnapshot {
   ensureFreshCheckpoints(novelId)
   const db = getDb()
@@ -736,9 +857,21 @@ export function buildStoryMemorySnapshot(novelId: number): StoryMemorySnapshot {
 
 export function buildStoryMemoryPromptSummary(
   novelId: number,
-  options: { chapterId?: number } = {},
+  options: { chapterId?: number; refreshMode?: 'sync' | 'schedule_only' } = {},
 ): string {
-  ensureFreshCheckpoints(novelId)
+  return buildStoryMemoryPromptPackage(novelId, options).summary
+}
+
+export function buildStoryMemoryPromptPackage(
+  novelId: number,
+  options: { chapterId?: number; refreshMode?: 'sync' | 'schedule_only' } = {},
+): StoryMemoryPromptPackage {
+  const refreshMode = options.refreshMode || 'sync'
+  if (refreshMode === 'sync') {
+    ensureFreshCheckpoints(novelId)
+  } else if (checkpointsNeedRefresh(novelId)) {
+    scheduleStoryMemoryCheckpointRefresh(novelId, 'checkpoint stale during story memory prompt build', 'story_memory_prompt')
+  }
   const db = getDb()
   const chapter = options.chapterId
     ? db.select().from(chapters).where(eq(chapters.id, options.chapterId)).all()[0]
@@ -754,7 +887,7 @@ export function buildStoryMemoryPromptSummary(
     : null
   const novelCheckpoint = checkpointRows.find((checkpoint) => checkpoint.scopeType === 'novel')
   const renderList = (label: string, values: string[]) => values.length > 0 ? `${label}：\n- ${values.join('\n- ')}` : ''
-
+  const scopeObservability: StoryMemoryPromptScopeObservability[] = []
   const sections = [partCheckpoint, volumeCheckpoint, novelCheckpoint]
     .filter((checkpoint): checkpoint is StoryMemoryCheckpointRow => Boolean(checkpoint))
     .map((checkpoint) => {
@@ -764,8 +897,36 @@ export function buildStoryMemoryPromptSummary(
       const relationCardsText = renderRelationCards(parseRelationCards(checkpoint.relationCardsJson))
       const itemCardsText = renderItemCards(parseItemCards(checkpoint.itemCardsJson))
       const timelineCardsText = renderTimelineCards(parseTimelineCards(checkpoint.timelineCardsJson))
-      const threadCardsText = renderThreadCards(parseThreadCards(checkpoint.threadCardsJson))
-        || renderThreadCards(buildGenericThreadCardsFromTexts(activeThreads, '待持续追踪', 12))
+      const directThreadCardsText = renderThreadCards(parseThreadCards(checkpoint.threadCardsJson))
+      const fallbackThreadCardsText = directThreadCardsText
+        ? ''
+        : renderThreadCards(buildGenericThreadCardsFromTexts(activeThreads, '待持续追踪', 12))
+      const threadCardsText = directThreadCardsText || fallbackThreadCardsText
+      const structuredFamilyCount = [
+        Boolean(characterCardsText),
+        Boolean(relationCardsText),
+        Boolean(itemCardsText),
+        Boolean(timelineCardsText),
+        Boolean(directThreadCardsText),
+      ].filter(Boolean).length
+      const fallbackFamilyCount = [
+        !characterCardsText && Boolean(checkpoint.characterStateDigest),
+        !relationCardsText && Boolean(checkpoint.relationDigest),
+        !itemCardsText && Boolean(checkpoint.itemDigest),
+        !timelineCardsText && Boolean(checkpoint.timelineDigest),
+        !directThreadCardsText && Boolean(fallbackThreadCardsText),
+      ].filter(Boolean).length
+      const missingFamilyCount = 5 - structuredFamilyCount - fallbackFamilyCount
+      scopeObservability.push({
+        scopeType: checkpoint.scopeType as StoryMemoryCheckpointScope,
+        label: checkpoint.label || checkpoint.scopeType,
+        hasCheckpoint: true,
+        structuredFamilyCount,
+        fallbackFamilyCount,
+        missingFamilyCount,
+        cardCoverageRate: toPercent(structuredFamilyCount, 5),
+        usesTextFallback: fallbackFamilyCount > 0,
+      })
       return [
         checkpoint.label ? `[${checkpoint.label}]` : '',
         checkpoint.summary ? `摘要：${checkpoint.summary}` : '',
@@ -779,31 +940,72 @@ export function buildStoryMemoryPromptSummary(
       ].filter(Boolean).join('\n')
     })
 
+  const activeScopes: StoryMemoryCheckpointScope[] = []
+  if (partCheckpoint) activeScopes.push('part')
+  if (volumeCheckpoint) activeScopes.push('volume')
+  activeScopes.push('novel')
+  for (const scopeType of activeScopes) {
+    if (scopeObservability.some((item) => item.scopeType === scopeType)) continue
+    scopeObservability.push({
+      scopeType,
+      label: scopeType === 'part' ? '当前 part' : scopeType === 'volume' ? '当前 volume' : '全书',
+      hasCheckpoint: false,
+      structuredFamilyCount: 0,
+      fallbackFamilyCount: 0,
+      missingFamilyCount: 5,
+      cardCoverageRate: 0,
+      usesTextFallback: false,
+    })
+  }
+  const structuredFamilyTotal = scopeObservability.reduce((sum, item) => sum + item.structuredFamilyCount, 0)
+  const observability: StoryMemoryPromptObservability = {
+    promptSummaryMode: 'structured_first',
+    activeScopeLabels: scopeObservability.filter((item) => item.hasCheckpoint).map((item) => item.label),
+    scopeCoverageRate: toPercent(scopeObservability.filter((item) => item.hasCheckpoint).length, scopeObservability.length || 1),
+    cardCoverageRate: toPercent(structuredFamilyTotal, Math.max(scopeObservability.length * 5, 1)),
+    structuredScopeCount: scopeObservability.filter((item) => item.structuredFamilyCount > 0).length,
+    fallbackScopeCount: scopeObservability.filter((item) => item.usesTextFallback).length,
+    buckets: scopeObservability,
+    summary: scopeObservability.length > 0
+      ? `结构化 checkpoint 命中 ${scopeObservability.filter((item) => item.hasCheckpoint).length}/${scopeObservability.length} 个 scope，卡片覆盖 ${toPercent(structuredFamilyTotal, Math.max(scopeObservability.length * 5, 1))}%，文本 fallback ${scopeObservability.filter((item) => item.usesTextFallback).length} 个 scope。`
+      : '当前还没有可用的结构化 checkpoint 观测数据。',
+  }
+
   if (sections.length > 0) {
-    return sections.join('\n\n')
+    return {
+      summary: sections.join('\n\n'),
+      observability,
+    }
   }
 
   const snapshot = buildStoryMemorySnapshot(novelId)
-  return [
-    snapshot.coverageSummary,
-    snapshot.phaseDigest.length > 0 ? `阶段摘要：\n- ${snapshot.phaseDigest.join('\n- ')}` : '',
-    snapshot.plotMilestones.length > 0 ? `剧情里程碑：\n- ${snapshot.plotMilestones.join('\n- ')}` : '',
-    snapshot.characterCurrentStates.length > 0
+  return {
+    summary: [
+      snapshot.coverageSummary,
+      snapshot.phaseDigest.length > 0 ? `阶段摘要：\n- ${snapshot.phaseDigest.join('\n- ')}` : '',
+      snapshot.plotMilestones.length > 0 ? `剧情里程碑：\n- ${snapshot.plotMilestones.join('\n- ')}` : '',
+      snapshot.characterCurrentStates.length > 0
       ? `角色当前状态：\n- ${snapshot.characterCurrentStates.map((item) => `${item.characterName}：${item.summaryText}`).join('\n- ')}`
       : '',
-    snapshot.characterStateAlerts.length > 0
+      snapshot.characterStateAlerts.length > 0
       ? `角色状态漂移告警：\n- ${snapshot.characterStateAlerts.map((item) => item.summary).join('\n- ')}`
       : '',
-    snapshot.worldCurrentStates.length > 0
-      ? `世界当前状态：\n- ${snapshot.worldCurrentStates.map((item) => `${entityLabel(item)} ${item.entityName}：${item.summaryText}`).join('\n- ')}`
+      snapshot.worldCurrentStates.length > 0
+      ? `世界当前状态：\n- ${snapshot.worldCurrentStates.map((item) => `${entityLabel(item)} ${item.entityName}：${item.summaryText}`).join('\n- ')}` 
       : '',
-    snapshot.worldStateAlerts.length > 0
+      snapshot.worldStateAlerts.length > 0
       ? `世界状态告警：\n- ${snapshot.worldStateAlerts.map((item) => item.summary).join('\n- ')}`
       : '',
-    snapshot.activeThreads.length > 0 ? `未回收线程：\n- ${snapshot.activeThreads.join('\n- ')}` : '',
-    snapshot.timelineAnchors.length > 0 ? `时间锚点：\n- ${snapshot.timelineAnchors.join('\n- ')}` : '',
-    snapshot.itemLedger.length > 0 ? `物品账本：\n- ${snapshot.itemLedger.join('\n- ')}` : '',
-  ].filter(Boolean).join('\n\n')
+      snapshot.activeThreads.length > 0 ? `未回收线程：\n- ${snapshot.activeThreads.join('\n- ')}` : '',
+      snapshot.timelineAnchors.length > 0 ? `时间锚点：\n- ${snapshot.timelineAnchors.join('\n- ')}` : '',
+      snapshot.itemLedger.length > 0 ? `物品账本：\n- ${snapshot.itemLedger.join('\n- ')}` : '',
+    ].filter(Boolean).join('\n\n'),
+    observability: {
+      ...observability,
+      fallbackScopeCount: Math.max(observability.fallbackScopeCount, 1),
+      summary: '当前 story memory prompt 已退回 snapshot 级文本摘要；结构化 checkpoint 观测仍保留供 dashboard 判断。',
+    },
+  }
 }
 
 function entityLabel(item: { entityType: WorldStateSummary['entityType'] }): string {
