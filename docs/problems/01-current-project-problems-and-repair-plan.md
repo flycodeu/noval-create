@@ -5,13 +5,28 @@
 | 批次 | 范围 | 状态 | 备注 |
 | --- | --- | --- | --- |
 | Batch 1 | `operatingMode` 共享推导与策略、novel 读写链路读穿接线、历史题材 alias/pack 修复、最小测试 | 已完成（当前轮） | 仅代表首批修复通过，不代表整篇计划完成；后续仍需继续 Stage 1-5、typed ref、结构化记忆与来源层 |
-| Batch 2 | `story thread / timeline event / story item` 的 typed ref overlay 最小落地、生成/解析双写读穿、dashboard 只读观测、最小测试 | 已完成（当前轮） | 仅代表 Batch 2 独立验收通过；更深的 context/writeback/consistency 链统一仍留待后续批次 |
+| Batch 2 | `story thread / timeline event / story item` 的 typed ref overlay 最小落地、生成/解析双写读穿、dashboard 只读观测、最小测试 | 已完成（当前轮） | 已通过本轮验收；2026-05-10 最小复验补齐了 `story-thread / timeline / story item` typed ref overlay 的 create/update/clear-link 回归证明，并修复了 `story item` 在 update 清链到空 overlay 时旧 `typedRefsJson` 可能残留的问题；更深的 context/writeback/consistency 链统一仍留待后续批次 |
 | Batch 3 | `operatingMode` 开始接管快启章节规划、CoreSettings 估章数、context recent window，并在 dashboard 暴露只读观测 | 已完成（当前轮） | 已通过本轮验收；仅代表策略接管与只读证明已落地，后续仍需继续历史 grounding、结构化记忆与来源层 |
-| Batch 4 | 历史 grounding 最小闭环：差异化约束、来源缺口保守 fallback、dashboard 只读观测 | 已完成（当前轮） | 已通过本轮验收；当前已具备历史题材分层、主链保守 fallback 与来源观测，完整 provenance/source ledger 仍留待后续批次 |
+| Batch 4 | 历史 grounding 最小闭环：差异化约束、来源缺口保守 fallback、dashboard 只读观测 | 已完成（当前轮） | 已通过本轮验收；当前已具备历史题材分层、主链保守 fallback 与来源观测。2026-05-10 已补齐 `novels` 的 `historical/source/canon` 最小数据层，并由 `chapter-writeback.service.ts` 把章级 extract/diff 回流到 `chapter_source_usage_json / fact_provenance_json / source_ledger_json / canon_source_ledger_json / canon_fact_cards_json`；同日已修复 `runMigrations()` 对这批列的 staged validate / legacy recovery 链，避免旧库在跑到 `0038_novel_source_canon_fields` 之前被早期 `validateRequiredSchema()` 提前阻断；本轮继续把这些项目级 source/canon 信号接入 `assessHistoricalGrounding()`、`context.service.ts`、`chapter.service.ts` 与 `quality-dashboard.service.ts` 的实际消费链。更深的 profile authoring、validator 强消费与更精细 ledger 结构仍留待后续批次 |
 | Batch 5 | 结构化记忆与长篇稳定性增强：checkpoint card 双写、context 优先消费结构化状态块、长周期稳定性观测 | 已完成（当前轮） | 已通过本轮验收；当前已具备 structured-first 入口、context 消费证明与长篇稳定性观测，结果型指标与更深 gate 化仍留待后续批次 |
 | Batch 6 | 百万字运行时优化：长篇批处理/预计算/主进程压力与稳定性收敛 | 已完成（当前轮） | 已通过本轮验收；当前已具备正文串行、story-memory 后台预计算、回写顺序护栏与运行时观测，完整 worker 化与更广泛长窗 gate 化仍可在后续独立批次继续深化 |
-| Batch 7 | 质量闭环扩展最小闭环：`typed ref 缺口 / 来源缺口 / operatingMode 违规` 接入 review notes、publish gate、dashboard 主链 | 已完成（当前轮） | 已通过本轮验收；当前三类 finding 已不再停留于只读观测，而是进入审校、章节验收门、repair metrics 与 provenance 阻断统计，阈值调优与更细粒度扫描仍留待后续批次 |
-| Batch 8 | 长窗 anti-AI / humanization 指标主链化：`题材语域漂移 / 解释密度 / 累积同质化 / 对白可分离度` 接入 `review / rewrite / dashboard / publish gate` | 已完成（当前轮） | 已通过本轮验收；当前四类长窗指标已进入 review、rewrite 后复审、publish gate 与 dashboard 主链，完整 source ledger / canon 数据层重构仍留待后续独立批次 |
+| Batch 7 | 质量闭环扩展最小闭环：`typed ref 缺口 / 来源缺口 / operatingMode 违规` 接入 review notes、publish gate、dashboard 主链 | 已完成（当前轮） | 已通过本轮验收；2026-05-10 最小复验再次确认 `chapter-pipeline policy` 对三类 finding 进入 rewrite-priority 与 `max_coverage` 重写策略的回归证明有效；当前三类 finding 已不再停留于只读观测，而是进入审校、章节验收门、repair metrics 与 provenance 阻断统计，阈值调优与更细粒度扫描仍留待后续批次 |
+| Batch 8 | 长窗 anti-AI / humanization 指标主链化：`题材语域漂移 / 解释密度 / 累积同质化 / 对白可分离度` 接入 `review / rewrite / dashboard / publish gate` | 已完成（当前轮） | 已通过本轮验收；2026-05-10 最小复验再次确认长窗 finding 在 `rewrite_required` 与非 `rewrite_required` 场景下都先于普通语言润色进入 rewrite-priority，并触发 `max_coverage` 策略的回归证明有效；当前四类长窗指标已进入 review、rewrite 后复审、publish gate 与 dashboard 主链。`source/canon` 最小项目级 JSON 数据层与 writeback 回流已落地，但更深的 schema 规范化、context/validator 强消费与独立 source ledger 重构仍留待后续独立批次 |
+
+## 当前已实现功能状态（按文件）
+
+下面这张表只标记“本轮已落地且已有代码/测试证明”的文件级功能状态，不把文档中的后续规划误写成已完成。
+
+| 文件 | 已实现功能 | 当前状态 | 证明/备注 |
+| --- | --- | --- | --- |
+| `electron/database/schema.ts` + `electron/database/db.ts` + `scripts/migration-safety.test.cjs` | `novels` 的 `historical/source/canon` 8 个项目级 JSON 字段、`0038_novel_source_canon_fields` 增量迁移、staged validate / legacy recovery | 已实现并复验 | 已覆盖 fresh / partial / legacy resume 三类迁移恢复链，`npm run test:migrations` 通过 |
+| `electron/services/novel.service.ts` + `src/types/index.ts` + `electron/services/novel.service.test.ts` | novel 读写链已支持 `historical/source/canon` 字段的 create / update / get 与类型声明读穿 | 已实现并复验 | `novel.service.test.ts` 已验证 schema / migration source 声明与 create-update-get 回归 |
+| `electron/services/chapter-writeback.service.ts` + `electron/services/chapter-writeback.service.test.ts` | 章后 extract/diff 已可回流到 novel 级 `sourceLedger / chapterSourceUsage / factProvenance / canonSourceLedger / canonFactCards`，且 `extracts-only` 场景不再漏回流 | 已实现并复验 | 已覆盖 applied diff 与 extracts-only 两条路径；迁移后 `test:unit` 与定向 writeback 回归通过 |
+| `src/shared/genre-system.ts` + `src/shared/genre-system.test.ts` + `electron/services/context.service.ts` + `electron/services/context.service.test.ts` | historical grounding 已开始强消费项目级 `historicalProfile / projectCanonProfile / canonConstraintSet / sourceLedger / canonFactCards`，并把其摘要编入 `worldRulesSummary` 主上下文 | 已实现并复验 | 已验证 project-level source/canon 信号会提升 grounding coverage，且 `buildStoryProfile()` 会把这些摘要编进 story profile / world rules |
+| `electron/services/story-thread.service.ts` + `electron/services/story-thread.service.test.ts` | story thread typed ref overlay 的 create / update / clear-link / 保留 unrelated update | 已实现并复验 | 已验证重建 overlay、显式清空旧指针、只更新目标行 |
+| `electron/services/timeline.service.ts` + `electron/services/timeline.service.test.ts` | timeline event typed ref overlay 的 create / update / clear-link / 保留 unrelated update | 已实现并复验 | 已验证显式重建与清空 stale pointer，不再只靠旧文本链 |
+| `electron/services/item.service.ts` + `electron/services/item.service.test.ts` | story item typed ref overlay 的 create / update / clear-link，修复清链到空 overlay 时旧 `typedRefsJson` 残留 | 已实现并复验 | 已验证创建、更新重建、显式清空后写回 `null` |
+| `electron/services/chapter-pipeline-policy.service.ts` + `electron/services/chapter-pipeline-policy.service.test.ts` | `typed_ref / source_grounding / operating_mode / long_window_humanization / dialogue_separability` finding 已接入 rewrite priority、`max_coverage` 与 mini review 阈值主链 | 已实现并复验 | 已验证新 finding 优先级先于 generic polish，并覆盖 `0.86 / 0.80` 边界阈值 |
 
 本文档面向当前仓库实现，目标不是推翻现有长篇能力，而是在现有 `workflow / context / writeback / dashboard / recurrence` 基础上，增量把系统修到三个可稳定运行的目标区间：
 
@@ -214,6 +229,8 @@
 
 并在 writeback 阶段把“本章新增的历史事实/用词/制度引用”回流到项目状态中。
 
+2026-05-10 更新：`electron/database/schema.ts`、`electron/database/db.ts`、`electron/services/novel.service.ts`、`electron/services/chapter-writeback.service.ts` 已补齐这些项目级 JSON 字段的最小存储与回流接线。当前已能在 novel 读写链路中保存/读取这些字段，并在章后回写成功时把 extract/diff 汇总沉淀到 `chapter_source_usage_json / fact_provenance_json / source_ledger_json`；同日已把 `validateRequiredSchema()` 调整为分阶段校验，并在 `0038_novel_source_canon_fields` 内补最终校验，确保旧库/部分库恢复链不会在早期 validate 步骤上提前失败；更严格的历史 profile 录入、source 结构化校验与 validator 强依赖仍是后续工作。
+
 ### 4.6 validator 行为
 
 历史 validator 不能另起第二套质量栈，应接到现有 `chapter.service.ts -> review notes -> rewrite -> writeback -> dashboard` 链里。
@@ -246,6 +263,8 @@
    - 把“已确认设定”沉淀成结构化卡片，而不是只留在长文本摘要里。
 
 这个通用底座适用于全部题材，历史题材只是其上的一个高严格度 profile。
+
+2026-05-10 更新：本轮先落了最小真实数据层，不是只改文档。`novels` 已新增 `project_canon_profile_json / canon_constraint_set_json / canon_source_ledger_json / canon_fact_cards_json`，且章后回写成功时会把 chapter-level extract/diff 回流到 `canon_source_ledger_json / canon_fact_cards_json`。尚未完成的部分是更细粒度 card schema、context 强消费、以及按题材包拆分的 validator 规则。
 
 ### 4.8 全题材统一的来源层级
 

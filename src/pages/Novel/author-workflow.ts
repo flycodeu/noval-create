@@ -5,7 +5,6 @@ import {
   getRecommendedGuidedWorkflowStep,
   isBasicsReady,
   isCharacterRosterReady,
-  isEndgameDesignReady,
   isProjectBriefReady,
   isStoryCoreReady,
   isStoryPlotReady,

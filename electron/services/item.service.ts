@@ -285,6 +285,10 @@ function uniqueNumberArray(values: Array<number | null | undefined>) {
   return [...new Set(values.filter((value): value is number => typeof value === 'number' && Number.isFinite(value)))]
 }
 
+function hasOwn<T extends object>(value: T, key: keyof T): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key)
+}
+
 function parseSourceContexts(raw?: string | null): StoryItemSourceContext[] {
   if (!raw) return []
   try {
@@ -1651,15 +1655,32 @@ export function updateStoryItem(
 ) {
   const db = getDb()
   const current = getStoryItem(id)
+  const sanitized = sanitizeStoryItemPayload(data)
+  const shouldRefreshTypedRefs = (
+    hasOwn(data, 'linkedCharacterIdsJson')
+    || hasOwn(data, 'linkedTimelineEventIdsJson')
+    || hasOwn(data, 'ownerCharacterId')
+  )
+  const shouldWriteTypedRefs = shouldRefreshTypedRefs || typeof sanitized.typedRefsJson === 'string'
   const typedRefsJson = deriveItemTypedRefsJson({
-    typedRefsJson: typeof data.typedRefsJson === 'string' ? data.typedRefsJson : current?.typedRefsJson,
-    linkedCharacterIdsJson: typeof data.linkedCharacterIdsJson === 'string' ? data.linkedCharacterIdsJson : current?.linkedCharacterIdsJson,
-    linkedTimelineEventIdsJson: typeof data.linkedTimelineEventIdsJson === 'string' ? data.linkedTimelineEventIdsJson : current?.linkedTimelineEventIdsJson,
-    ownerCharacterId: 'ownerCharacterId' in data ? data.ownerCharacterId ?? null : current?.ownerCharacterId,
+    typedRefsJson: typeof sanitized.typedRefsJson === 'string'
+      ? sanitized.typedRefsJson
+      : shouldRefreshTypedRefs
+        ? undefined
+        : current?.typedRefsJson,
+    linkedCharacterIdsJson: typeof sanitized.linkedCharacterIdsJson === 'string'
+      ? sanitized.linkedCharacterIdsJson
+      : current?.linkedCharacterIdsJson,
+    linkedTimelineEventIdsJson: typeof sanitized.linkedTimelineEventIdsJson === 'string'
+      ? sanitized.linkedTimelineEventIdsJson
+      : current?.linkedTimelineEventIdsJson,
+    ownerCharacterId: hasOwn(data, 'ownerCharacterId')
+      ? sanitized.ownerCharacterId ?? null
+      : current?.ownerCharacterId,
   })
   db.update(storyItems).set({
-    ...sanitizeStoryItemPayload(data),
-    ...(typedRefsJson ? { typedRefsJson } : {}),
+    ...sanitized,
+    ...(shouldWriteTypedRefs ? { typedRefsJson: typedRefsJson ?? null } : typedRefsJson ? { typedRefsJson } : {}),
     updatedAt: new Date().toISOString(),
   }).where(eq(storyItems.id, id)).run()
   syncStoryItemTimelineLinks(id)

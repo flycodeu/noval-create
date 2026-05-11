@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AuthorWorkMode } from '../pages/Novel/author-workflow'
 
 const STORAGE_KEY = 'novelforge-author-work-mode'
 

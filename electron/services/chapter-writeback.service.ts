@@ -107,6 +107,73 @@ interface ExistingAssetContext {
   relationshipArcByPairKey: Map<string, RelationshipArcRow>
 }
 
+interface NovelSourceLedgerEntry {
+  sourceKey: string
+  chapterId: number
+  chapterNum: number
+  runId: number
+  assetType: ChapterWritebackAssetType
+  sourceText?: string
+  factTitle?: string
+  confidence: number
+  verificationStatus: WritebackVerificationStatus
+  supportingDiffIds: number[]
+  recordedAt: string
+}
+
+interface NovelChapterSourceUsageEntry {
+  usageKey: string
+  chapterId: number
+  chapterNum: number
+  runId: number
+  extractedCount: number
+  appliedDiffCount: number
+  assetTypes: ChapterWritebackAssetType[]
+  sourceKeys: string[]
+  canonFactCardKeys: string[]
+  diffIds: number[]
+  recordedAt: string
+}
+
+interface NovelFactProvenanceEntry {
+  provenanceKey: string
+  chapterId: number
+  chapterNum: number
+  runId: number
+  diffId: number
+  assetType: ChapterWritebackAssetType
+  entityType: string
+  entityId: number | null
+  canonDecision: ChapterWritebackDecision
+  writebackStatus: AppChapterWritebackDiff['writebackStatus']
+  confidence: number
+  verificationStatus: WritebackVerificationStatus
+  diffReason?: string
+  sourceTexts: string[]
+  supportingExtractIds: number[]
+  extractedFacts: Array<Record<string, unknown>>
+  afterState: Record<string, unknown>
+  recordedAt: string
+}
+
+interface NovelCanonFactCardEntry {
+  cardKey: string
+  assetType: ChapterWritebackAssetType
+  entityType: string
+  entityId: number | null
+  title: string
+  summary?: string
+  sourceChapterId: number
+  sourceChapterNum: number
+  sourceRunId: number
+  sourceDiffId: number
+  sourceTexts: string[]
+  confidence: number
+  verificationStatus: WritebackVerificationStatus
+  canonDecision: ChapterWritebackDecision
+  updatedAt: string
+}
+
 const ALL_ASSET_TYPES: ChapterWritebackAssetType[] = [
   'character',
   'world',
@@ -188,6 +255,16 @@ function parseJsonStringArray(raw: unknown): string[] {
   return []
 }
 
+function parseJsonRecordArray(raw: string | null | undefined): Record<string, unknown>[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    return Array.isArray(parsed) ? parsed.filter((entry): entry is Record<string, unknown> => isRecord(entry)) : []
+  } catch {
+    return []
+  }
+}
+
 function parseStoryFactKnowledge(raw: unknown): Array<{ characterId: number; knownChapterId: number | null }> {
   const parsed = Array.isArray(raw)
     ? raw
@@ -234,6 +311,27 @@ function clipText(value: string, maxLength: number): string {
 
 function normalizeKey(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, '')
+}
+
+function upsertJsonRecordArray(
+  raw: string | null | undefined,
+  entries: Record<string, unknown>[],
+  keyField: string,
+  limit: number,
+): string {
+  const merged = new Map<string, Record<string, unknown>>()
+  parseJsonRecordArray(raw).forEach((entry) => {
+    const key = asText(entry[keyField])
+    if (!key) return
+    merged.set(key, entry)
+  })
+  entries.forEach((entry) => {
+    const key = asText(entry[keyField])
+    if (!key) return
+    if (merged.has(key)) merged.delete(key)
+    merged.set(key, entry)
+  })
+  return safeStringify(Array.from(merged.values()).slice(-limit))
 }
 
 function pairKey(charAId: number, charBId: number): string {
@@ -1070,6 +1168,226 @@ function applyRelationshipDiff(row: ChapterWritebackDiffRow, chapter: ChapterRow
   return result.id || row.entityId || null
 }
 
+function resolveFactTitle(state: Record<string, unknown> | null): string {
+  if (!state) return ''
+  return (
+    asText(state.title)
+    || asText(state.itemName)
+    || asText(state.eventTitle)
+    || asText(state.entityName)
+    || asText(state.fullName)
+    || asText(state.summary)
+  )
+}
+
+function resolveFactSummary(state: Record<string, unknown> | null): string {
+  if (!state) return ''
+  return (
+    asText(state.summary)
+    || asText(state.description)
+    || asText(state.currentState)
+    || asText(state.status)
+    || asText(state.notes)
+  )
+}
+
+function findSupportingExtracts(
+  diff: AppChapterWritebackDiff,
+  extracts: AppChapterFactExtract[],
+): AppChapterFactExtract[] {
+  const sameAssetExtracts = extracts.filter((entry) => entry.assetType === diff.assetType)
+  if (sameAssetExtracts.length === 0) return []
+
+  const afterState = parseJsonObject(diff.afterStateJson)
+  const targetKey = normalizeKey(resolveFactTitle(afterState))
+  if (!targetKey) return sameAssetExtracts
+
+  const exactMatches = sameAssetExtracts.filter((entry) => {
+    const fact = parseJsonObject(entry.factJson)
+    return normalizeKey(resolveFactTitle(fact)) === targetKey
+  })
+  return exactMatches.length > 0 ? exactMatches : sameAssetExtracts
+}
+
+function buildNovelSourceLedgerEntries(
+  chapter: ChapterRow,
+  run: ChapterWritebackRunRow,
+  extracts: AppChapterFactExtract[],
+  appliedDiffs: AppChapterWritebackDiff[],
+  recordedAt: string,
+): NovelSourceLedgerEntry[] {
+  return extracts.map((extract) => {
+    const fact = parseJsonObject(extract.factJson)
+    const factTitle = resolveFactTitle(fact)
+    const supportingDiffIds = appliedDiffs
+      .filter((diff) => findSupportingExtracts(diff, extracts).some((item) => item.id === extract.id))
+      .map((diff) => diff.id)
+
+    return {
+      sourceKey: [
+        `chapter:${chapter.id}`,
+        extract.assetType,
+        normalizeKey(extract.sourceText || factTitle || String(extract.id)),
+      ].join(':'),
+      chapterId: chapter.id,
+      chapterNum: chapter.chapterNum,
+      runId: run.id,
+      assetType: extract.assetType,
+      sourceText: extract.sourceText || undefined,
+      factTitle: factTitle || undefined,
+      confidence: extract.confidence || 0,
+      verificationStatus: extract.verificationStatus,
+      supportingDiffIds,
+      recordedAt,
+    }
+  })
+}
+
+function buildNovelFactProvenanceEntries(
+  chapter: ChapterRow,
+  run: ChapterWritebackRunRow,
+  extracts: AppChapterFactExtract[],
+  appliedDiffs: AppChapterWritebackDiff[],
+  recordedAt: string,
+): NovelFactProvenanceEntry[] {
+  return appliedDiffs.map((diff) => {
+    const supportingExtracts = findSupportingExtracts(diff, extracts)
+    return {
+      provenanceKey: `run:${run.id}:diff:${diff.id}`,
+      chapterId: chapter.id,
+      chapterNum: chapter.chapterNum,
+      runId: run.id,
+      diffId: diff.id,
+      assetType: diff.assetType,
+      entityType: diff.entityType,
+      entityId: diff.entityId || null,
+      canonDecision: diff.canonDecision,
+      writebackStatus: diff.writebackStatus,
+      confidence: diff.confidence || 0,
+      verificationStatus: diff.verificationStatus,
+      diffReason: diff.diffReason || undefined,
+      sourceTexts: supportingExtracts.map((entry) => asText(entry.sourceText)).filter(Boolean),
+      supportingExtractIds: supportingExtracts.map((entry) => entry.id),
+      extractedFacts: supportingExtracts
+        .map((entry) => parseJsonObject(entry.factJson))
+        .filter((entry): entry is Record<string, unknown> => Boolean(entry)),
+      afterState: parseJsonObject(diff.afterStateJson) || {},
+      recordedAt,
+    }
+  })
+}
+
+function buildNovelCanonFactCardEntries(
+  chapter: ChapterRow,
+  run: ChapterWritebackRunRow,
+  provenanceEntries: NovelFactProvenanceEntry[],
+): NovelCanonFactCardEntry[] {
+  const cards: NovelCanonFactCardEntry[] = []
+
+  provenanceEntries.forEach((entry) => {
+    const title = resolveFactTitle(entry.afterState)
+    if (!title) return
+
+    const cardKey = entry.entityId
+      ? `${entry.assetType}:${entry.entityId}`
+      : `${entry.assetType}:${normalizeKey(title)}`
+
+    cards.push({
+      cardKey,
+      assetType: entry.assetType,
+      entityType: entry.entityType,
+      entityId: entry.entityId,
+      title,
+      summary: resolveFactSummary(entry.afterState) || undefined,
+      sourceChapterId: chapter.id,
+      sourceChapterNum: chapter.chapterNum,
+      sourceRunId: run.id,
+      sourceDiffId: entry.diffId,
+      sourceTexts: entry.sourceTexts,
+      confidence: entry.confidence,
+      verificationStatus: entry.verificationStatus,
+      canonDecision: entry.canonDecision,
+      updatedAt: entry.recordedAt,
+    })
+  })
+
+  return cards
+}
+
+function syncNovelSourceCanonWriteback(chapter: ChapterRow, run: ChapterWritebackRunRow): void {
+  const db = getDb()
+  const novel = db.select().from(novels).where(eq(novels.id, chapter.novelId)).all()[0] || null
+  if (!novel) return
+
+  const extracts = loadExtractRows(run.id).map(mapExtractRow)
+  const appliedDiffs = loadDiffRows(run.id)
+    .map(mapDiffRow)
+    .filter((row) => (row.canonDecision === 'accepted' || row.canonDecision === 'edited') && row.writebackStatus === 'applied')
+
+  if (extracts.length === 0 && appliedDiffs.length === 0) return
+
+  const recordedAt = new Date().toISOString()
+  const sourceLedgerEntries = buildNovelSourceLedgerEntries(chapter, run, extracts, appliedDiffs, recordedAt)
+  const provenanceEntries = buildNovelFactProvenanceEntries(chapter, run, extracts, appliedDiffs, recordedAt)
+  const canonFactCards = buildNovelCanonFactCardEntries(chapter, run, provenanceEntries)
+  const chapterUsage: NovelChapterSourceUsageEntry = {
+    usageKey: `chapter:${chapter.id}`,
+    chapterId: chapter.id,
+    chapterNum: chapter.chapterNum,
+    runId: run.id,
+    extractedCount: extracts.length,
+    appliedDiffCount: appliedDiffs.length,
+    assetTypes: [...new Set([...extracts.map((entry) => entry.assetType), ...appliedDiffs.map((entry) => entry.assetType)])],
+    sourceKeys: sourceLedgerEntries.map((entry) => entry.sourceKey),
+    canonFactCardKeys: canonFactCards.map((entry) => entry.cardKey),
+    diffIds: appliedDiffs.map((entry) => entry.id),
+    recordedAt,
+  }
+
+  db.update(novels).set({
+    sourceLedgerJson: upsertJsonRecordArray(
+      novel.sourceLedgerJson,
+      sourceLedgerEntries as unknown as Record<string, unknown>[],
+      'sourceKey',
+      400,
+    ),
+    chapterSourceUsageJson: upsertJsonRecordArray(
+      novel.chapterSourceUsageJson,
+      [chapterUsage as unknown as Record<string, unknown>],
+      'usageKey',
+      160,
+    ),
+    factProvenanceJson: upsertJsonRecordArray(
+      novel.factProvenanceJson,
+      provenanceEntries as unknown as Record<string, unknown>[],
+      'provenanceKey',
+      600,
+    ),
+    canonSourceLedgerJson: upsertJsonRecordArray(
+      novel.canonSourceLedgerJson,
+      sourceLedgerEntries as unknown as Record<string, unknown>[],
+      'sourceKey',
+      400,
+    ),
+    canonFactCardsJson: upsertJsonRecordArray(
+      novel.canonFactCardsJson,
+      canonFactCards as unknown as Record<string, unknown>[],
+      'cardKey',
+      400,
+    ),
+    updatedAt: recordedAt,
+  }).where(eq(novels.id, chapter.novelId)).run()
+}
+
+function hasNovelSourceCanonWritebackPayload(runId: number): boolean {
+  if (loadExtractRows(runId).length > 0) return true
+  return loadDiffRows(runId).some((row) => {
+    const mapped = mapDiffRow(row)
+    return (mapped.canonDecision === 'accepted' || mapped.canonDecision === 'edited')
+      && mapped.writebackStatus === 'applied'
+  })
+}
+
 function createWritebackFailureTask(run: ChapterWritebackRunRow, diff: ChapterWritebackDiffRow, chapter: ChapterRow, error: Error): void {
   revisionTaskService.createRevisionTask(chapter.novelId, {
     taskSource: 'system',
@@ -1255,7 +1573,7 @@ export async function prepareChapterWritebackRunWithRetry(
     if (lastRun.status !== 'failed') return lastRun
   }
   if (!lastRun) {
-    throw new Error('章后回写草案生成失败')
+    throwUserFacingError('chapterWriteback.writebackDraftFailed')
   }
   return lastRun
 }
@@ -1432,6 +1750,9 @@ async function executeRunApply(runId: number, retryFailedOnly = false): Promise<
     retryCount: run.retryCount || 0,
     contextVersion: chapter.contextVersion || 1,
   })
+  if (hasNovelSourceCanonWritebackPayload(run.id)) {
+    syncNovelSourceCanonWriteback(chapter, run)
+  }
   if (appliedCount > 0) {
     resolveChapterAssetImpacts(chapter.novelId, chapter.id, 'resolved')
   }

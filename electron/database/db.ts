@@ -78,6 +78,14 @@ export function runMigrations(sqlite: Database.Database) {
       project_brief_json TEXT,
       settings_json TEXT,
       theme_voice_json TEXT,
+      historical_profile_json TEXT,
+      source_ledger_json TEXT,
+      chapter_source_usage_json TEXT,
+      fact_provenance_json TEXT,
+      project_canon_profile_json TEXT,
+      canon_constraint_set_json TEXT,
+      canon_source_ledger_json TEXT,
+      canon_fact_cards_json TEXT,
       world_rules_json TEXT,
       blurb_json TEXT,
       style_template_id INTEGER,
@@ -1829,6 +1837,22 @@ export function runMigrations(sqlite: Database.Database) {
 
     validateTypedRefOverlaySchema(sqlite)
   })
+
+  runMigrationStep(sqlite, '0038_novel_source_canon_fields', () => {
+    if (!hasTable(sqlite, 'novels')) {
+      return
+    }
+
+    ensureColumn(sqlite, 'novels', 'historical_profile_json', 'TEXT')
+    ensureColumn(sqlite, 'novels', 'source_ledger_json', 'TEXT')
+    ensureColumn(sqlite, 'novels', 'chapter_source_usage_json', 'TEXT')
+    ensureColumn(sqlite, 'novels', 'fact_provenance_json', 'TEXT')
+    ensureColumn(sqlite, 'novels', 'project_canon_profile_json', 'TEXT')
+    ensureColumn(sqlite, 'novels', 'canon_constraint_set_json', 'TEXT')
+    ensureColumn(sqlite, 'novels', 'canon_source_ledger_json', 'TEXT')
+    ensureColumn(sqlite, 'novels', 'canon_fact_cards_json', 'TEXT')
+    validateRequiredSchema(sqlite, { includeNovelSourceCanonFields: true })
+  })
 }
 
 function ensureMigrationTable(sqlite: Database.Database) {
@@ -1884,9 +1908,34 @@ function getColumnNames(sqlite: Database.Database, tableName: string): Set<strin
   return new Set(rows.map((row) => row.name))
 }
 
-function validateRequiredSchema(sqlite: Database.Database) {
+function validateRequiredSchema(
+  sqlite: Database.Database,
+  options: { includeNovelSourceCanonFields?: boolean } = {},
+) {
+  const novelColumns = [
+    'project_brief_json',
+    'theme_voice_json',
+    'blurb_json',
+  ]
+
+  if (options.includeNovelSourceCanonFields) {
+    novelColumns.splice(2, 0,
+      'historical_profile_json',
+      'source_ledger_json',
+      'chapter_source_usage_json',
+      'fact_provenance_json',
+      'project_canon_profile_json',
+      'canon_constraint_set_json',
+      'canon_source_ledger_json',
+      'canon_fact_cards_json',
+    )
+  }
+
   const requirements = [
-    { tableName: 'novels', columns: ['project_brief_json', 'theme_voice_json', 'blurb_json'] },
+    {
+      tableName: 'novels',
+      columns: novelColumns,
+    },
     {
       tableName: 'story_arcs',
       columns: ['growth_ledger', 'cost_ledger', 'progress_percent', 'stalled_chapter_count', 'last_progress_chapter_num'],

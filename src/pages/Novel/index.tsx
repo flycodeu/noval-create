@@ -1,18 +1,11 @@
 import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Navigate, Route, Routes, useLocation, useNavigate, useParams, type NavigateOptions } from 'react-router-dom'
-import { Button, Dropdown, Input, Modal, Spin, message } from 'antd'
+import { useLocation, useNavigate, useParams, type NavigateOptions } from 'react-router-dom'
+import { Input, Modal, Spin, message } from 'antd'
 import type { MenuProps } from 'antd'
 import { getErrorMessage, getUserFacingMessage, isUserFacingMessage } from '@/utils/user-facing-message'
 import {
-  BarChartOutlined,
-  DeleteOutlined,
-  EllipsisOutlined,
   LeftOutlined,
   RightOutlined,
-  RollbackOutlined,
-  SearchOutlined,
-  QuestionCircleOutlined,
-  ThunderboltOutlined,
 } from '@ant-design/icons'
 import ProjectSidebar from '../../components/novel/layout/ProjectSidebar'
 import ProjectTopbar from '../../components/novel/layout/ProjectTopbar'
@@ -254,7 +247,7 @@ export default function NovelRouter() {
   }, [resolveWorkspacePageKey])
 
   useEffect(() => {
-    setVisitedPages([currentPage])
+    setVisitedPages([])
   }, [novelId])
 
   useEffect(() => {

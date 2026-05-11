@@ -134,6 +134,14 @@ function getMigrationIds(db) {
 }
 
 function assertRequiredColumns(db) {
+  assert.ok(getColumns(db, 'novels').has('historical_profile_json'))
+  assert.ok(getColumns(db, 'novels').has('source_ledger_json'))
+  assert.ok(getColumns(db, 'novels').has('chapter_source_usage_json'))
+  assert.ok(getColumns(db, 'novels').has('fact_provenance_json'))
+  assert.ok(getColumns(db, 'novels').has('project_canon_profile_json'))
+  assert.ok(getColumns(db, 'novels').has('canon_constraint_set_json'))
+  assert.ok(getColumns(db, 'novels').has('canon_source_ledger_json'))
+  assert.ok(getColumns(db, 'novels').has('canon_fact_cards_json'))
   assert.ok(getColumns(db, 'model_configs').has('max_concurrency'))
   assert.ok(getColumns(db, 'model_configs').has('max_context_tokens'))
   assert.ok(getColumns(db, 'story_arcs').has('progress_percent'))
@@ -236,6 +244,7 @@ function testFreshDbIsIdempotent() {
       '0035_state_anchor_and_delta',
       '0036_chapter_contract_shape_controls',
       '0037_typed_ref_overlay_backfill',
+      '0038_novel_source_canon_fields',
     ])
 
     runMigrations(db)
@@ -352,6 +361,7 @@ function testPartialSchemaCanResume() {
       '0035_state_anchor_and_delta',
       '0036_chapter_contract_shape_controls',
       '0037_typed_ref_overlay_backfill',
+      '0038_novel_source_canon_fields',
     ])
 
     const configs = db.prepare(`
@@ -471,6 +481,7 @@ function testAppliedLegacyMigrationCanStillReceiveTypedRefColumns() {
     assert.ok(getColumns(db, 'story_items').has('source_context_json'))
     assert.ok(getColumns(db, 'story_items').has('typed_refs_json'))
     assert.ok(getMigrationIds(db).includes('0037_typed_ref_overlay_backfill'))
+    assert.ok(getMigrationIds(db).includes('0038_novel_source_canon_fields'))
   } finally {
     db.close()
   }

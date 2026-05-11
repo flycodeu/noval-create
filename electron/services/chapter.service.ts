@@ -1827,6 +1827,12 @@ function applyHistoricalGroundingToReviewNotes(
     worldRulesJson?: string | null
     backgroundText?: string | null
     glossaryTerms?: string[]
+    historicalProfileJson?: string | null
+    projectCanonProfileJson?: string | null
+    canonConstraintSetJson?: string | null
+    sourceLedgerJson?: string | null
+    canonSourceLedgerJson?: string | null
+    canonFactCardsJson?: string | null
   },
 ): ChapterReviewNotes {
   const assessment = assessHistoricalGrounding(input)
@@ -1928,6 +1934,12 @@ function applyProvenanceAndOperatingModeToReviewNotes(
     worldRulesJson?: string | null
     backgroundText?: string | null
     glossaryTerms?: string[]
+    historicalProfileJson?: string | null
+    projectCanonProfileJson?: string | null
+    canonConstraintSetJson?: string | null
+    sourceLedgerJson?: string | null
+    canonSourceLedgerJson?: string | null
+    canonFactCardsJson?: string | null
     launchMode?: string | null
     targetWords?: number | null
     settingsJson?: string | null
@@ -1941,6 +1953,12 @@ function applyProvenanceAndOperatingModeToReviewNotes(
     worldRulesJson: input.worldRulesJson,
     backgroundText: input.backgroundText,
     glossaryTerms: input.glossaryTerms,
+    historicalProfileJson: input.historicalProfileJson,
+    projectCanonProfileJson: input.projectCanonProfileJson,
+    canonConstraintSetJson: input.canonConstraintSetJson,
+    sourceLedgerJson: input.sourceLedgerJson,
+    canonSourceLedgerJson: input.canonSourceLedgerJson,
+    canonFactCardsJson: input.canonFactCardsJson,
   })
   const chapterCount = db.select({ id: chapters.id }).from(chapters).where(eq(chapters.novelId, input.novelId)).all().length
   const runtimePolicy = getOperatingModeRuntimePolicy({
@@ -4727,6 +4745,12 @@ export async function generateChapterContent(
       worldRulesJson: novel.worldRulesJson,
       backgroundText: [novel.expandedBackground, novel.synopsis, novel.userBackground].filter(Boolean).join('\n'),
       glossaryTerms,
+      historicalProfileJson: novel.historicalProfileJson,
+      projectCanonProfileJson: novel.projectCanonProfileJson,
+      canonConstraintSetJson: novel.canonConstraintSetJson,
+      sourceLedgerJson: novel.sourceLedgerJson,
+      canonSourceLedgerJson: novel.canonSourceLedgerJson,
+      canonFactCardsJson: novel.canonFactCardsJson,
     })
     reviewNotes = applyProvenanceAndOperatingModeToReviewNotes(reviewNotes, {
       novelId: chapter.novelId,
@@ -4735,6 +4759,12 @@ export async function generateChapterContent(
       worldRulesJson: novel.worldRulesJson,
       backgroundText: [novel.expandedBackground, novel.synopsis, novel.userBackground].filter(Boolean).join('\n'),
       glossaryTerms,
+      historicalProfileJson: novel.historicalProfileJson,
+      projectCanonProfileJson: novel.projectCanonProfileJson,
+      canonConstraintSetJson: novel.canonConstraintSetJson,
+      sourceLedgerJson: novel.sourceLedgerJson,
+      canonSourceLedgerJson: novel.canonSourceLedgerJson,
+      canonFactCardsJson: novel.canonFactCardsJson,
       launchMode: novel.launchMode,
       targetWords: novel.targetWords,
       settingsJson: novel.settingsJson,
@@ -5011,6 +5041,12 @@ export async function generateChapterContent(
       worldRulesJson: novel.worldRulesJson,
       backgroundText: [novel.expandedBackground, novel.synopsis, novel.userBackground].filter(Boolean).join('\n'),
       glossaryTerms,
+      historicalProfileJson: novel.historicalProfileJson,
+      projectCanonProfileJson: novel.projectCanonProfileJson,
+      canonConstraintSetJson: novel.canonConstraintSetJson,
+      sourceLedgerJson: novel.sourceLedgerJson,
+      canonSourceLedgerJson: novel.canonSourceLedgerJson,
+      canonFactCardsJson: novel.canonFactCardsJson,
     })
     const repairedProvenanceReviewNotes = applyProvenanceAndOperatingModeToReviewNotes(repairedGroundedReviewNotes, {
       novelId: chapter.novelId,
@@ -5019,6 +5055,12 @@ export async function generateChapterContent(
       worldRulesJson: novel.worldRulesJson,
       backgroundText: [novel.expandedBackground, novel.synopsis, novel.userBackground].filter(Boolean).join('\n'),
       glossaryTerms,
+      historicalProfileJson: novel.historicalProfileJson,
+      projectCanonProfileJson: novel.projectCanonProfileJson,
+      canonConstraintSetJson: novel.canonConstraintSetJson,
+      sourceLedgerJson: novel.sourceLedgerJson,
+      canonSourceLedgerJson: novel.canonSourceLedgerJson,
+      canonFactCardsJson: novel.canonFactCardsJson,
       launchMode: novel.launchMode,
       targetWords: novel.targetWords,
       settingsJson: novel.settingsJson,

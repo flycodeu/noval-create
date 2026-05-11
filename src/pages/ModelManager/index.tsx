@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import {
-  Button, Form, Input, Select, Slider, message, Spin,
+  Button, Form, Input, Select, Slider, message,
   Modal, InputNumber, Empty, Skeleton
 } from 'antd'
 import {

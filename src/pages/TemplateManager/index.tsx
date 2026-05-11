@@ -129,7 +129,7 @@ export default function TemplateManager() {
         try {
           await window.electron.template.delete(tmpl.id)
           await loadTemplates()
-          message.success('模板已删除')
+          message.success(getUserFacingMessage('template.deleted'))
         } catch (e: unknown) {
           message.error(getErrorMessage(e, 'template.deleteFailed'))
         }

@@ -584,6 +584,10 @@ function deriveTimelineTypedRefsJson(params: {
   return stringifyTypedRefOverlay(overlay)
 }
 
+function hasOwn<T extends object>(value: T, key: keyof T): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key)
+}
+
 function buildTimelineMutation(
   novelId: number,
   data: Partial<typeof timelineEvents.$inferInsert>,
@@ -1125,8 +1129,19 @@ export function updateTimelineEvent(
   const current = getTimelineEvent(id)
   if (!current) return
   const db = getDb()
+  const shouldRefreshTypedRefs = (
+    hasOwn(data, 'presentCharacterIdsJson')
+    || hasOwn(data, 'affectedCharacterIdsJson')
+    || hasOwn(data, 'linkedItemIdsJson')
+    || hasOwn(data, 'openThreadsJson')
+  )
+  const shouldWriteTypedRefs = shouldRefreshTypedRefs || typeof data.typedRefsJson === 'string'
   const typedRefsJson = deriveTimelineTypedRefsJson({
-    typedRefsJson: typeof data.typedRefsJson === 'string' ? data.typedRefsJson : current.typedRefsJson,
+    typedRefsJson: typeof data.typedRefsJson === 'string'
+      ? data.typedRefsJson
+      : shouldRefreshTypedRefs
+        ? undefined
+        : current.typedRefsJson,
     presentCharacterIdsJson: typeof data.presentCharacterIdsJson === 'string' ? data.presentCharacterIdsJson : current.presentCharacterIdsJson,
     affectedCharacterIdsJson: typeof data.affectedCharacterIdsJson === 'string' ? data.affectedCharacterIdsJson : current.affectedCharacterIdsJson,
     linkedItemIdsJson: typeof data.linkedItemIdsJson === 'string' ? data.linkedItemIdsJson : current.linkedItemIdsJson,
@@ -1134,7 +1149,7 @@ export function updateTimelineEvent(
   })
   db.update(timelineEvents).set({
     ...sanitizeTimelinePayload(data),
-    ...(typedRefsJson ? { typedRefsJson } : {}),
+    ...(shouldWriteTypedRefs ? { typedRefsJson: typedRefsJson ?? null } : typedRefsJson ? { typedRefsJson } : {}),
     ...buildTimelineMutation(current.novelId, data, current),
     updatedAt: new Date().toISOString(),
   }).where(eq(timelineEvents.id, id)).run()

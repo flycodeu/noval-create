@@ -11,6 +11,11 @@ export type ReviewPrioritySource =
   | 'realism_risks'
   | 'coherence_risks'
   | 'reader_hook_risks'
+  | 'typed_ref_risks'
+  | 'source_grounding_risks'
+  | 'operating_mode_risks'
+  | 'long_window_humanization_risks'
+  | 'dialogue_separability_risks'
   | 'language_risks'
   | 'human_language_repairs'
   | 'genre_hollowing_risks'
@@ -67,6 +72,11 @@ export interface ChapterReviewNotesLike {
   realism_risks: string[]
   coherence_risks: string[]
   reader_hook_risks: string[]
+  typed_ref_risks: string[]
+  source_grounding_risks: string[]
+  operating_mode_risks: string[]
+  long_window_humanization_risks: string[]
+  dialogue_separability_risks: string[]
   language_risks: string[]
   human_language_repairs: string[]
   genre_hollowing_risks: string[]
@@ -121,15 +131,20 @@ function getSourceWeight(source: ReviewPrioritySource): number {
     critical_fixes: 15,
     continuity_risks: 14,
     arc_progress_risks: 13,
-    reader_hook_risks: 12,
-    missing_payoffs: 11,
-    contract_validation: 10,
-    context_drift_risks: 9,
-    coherence_risks: 8,
-    realism_risks: 7,
+    typed_ref_risks: 12,
+    source_grounding_risks: 11,
+    operating_mode_risks: 10,
+    dialogue_separability_risks: 9,
+    reader_hook_risks: 8,
+    missing_payoffs: 7,
+    contract_validation: 6,
+    context_drift_risks: 5,
+    coherence_risks: 4,
+    realism_risks: 3,
+    long_window_humanization_risks: 7,
     language_risks: 6,
     human_language_repairs: 5,
-    genre_hollowing_risks: 4,
+    genre_hollowing_risks: 1,
     dialogue_homogenization_risks: 3,
     dialogue_info_density_risks: 2,
     dialogue_filler_risks: 1,
@@ -142,6 +157,10 @@ function normalizePriorityIssues(reviewNotes: ChapterReviewNotesLike): ReviewPri
   pushIssues(issues, reviewNotes.critical_fixes, 'critical_fixes', '关键修订', 'high')
   pushIssues(issues, reviewNotes.continuity_risks, 'continuity_risks', '连续性风险', 'high')
   pushIssues(issues, reviewNotes.arc_progress_risks, 'arc_progress_risks', '故事弧推进风险', 'high')
+  pushIssues(issues, reviewNotes.typed_ref_risks, 'typed_ref_risks', 'Typed Ref 缺口', reviewNotes.rewrite_required ? 'high' : 'medium')
+  pushIssues(issues, reviewNotes.source_grounding_risks, 'source_grounding_risks', '来源 Grounding 风险', reviewNotes.rewrite_required ? 'high' : 'medium')
+  pushIssues(issues, reviewNotes.operating_mode_risks, 'operating_mode_risks', 'OperatingMode 违规', reviewNotes.rewrite_required ? 'high' : 'medium')
+  pushIssues(issues, reviewNotes.dialogue_separability_risks, 'dialogue_separability_risks', '对白可分离度', reviewNotes.rewrite_required ? 'high' : 'medium')
   pushIssues(issues, reviewNotes.reader_hook_risks, 'reader_hook_risks', '追读风险', 'high')
   pushIssues(issues, reviewNotes.missing_payoffs, 'missing_payoffs', '伏笔未兑现', 'high')
 
@@ -158,6 +177,7 @@ function normalizePriorityIssues(reviewNotes: ChapterReviewNotesLike): ReviewPri
   pushIssues(issues, reviewNotes.context_drift_risks, 'context_drift_risks', '上下文漂移', reviewNotes.severity === 'high' ? 'high' : 'medium')
   pushIssues(issues, reviewNotes.realism_risks, 'realism_risks', '真实度风险', reviewNotes.severity === 'high' ? 'high' : 'medium')
   pushIssues(issues, reviewNotes.coherence_risks, 'coherence_risks', '连贯性风险', reviewNotes.rewrite_required ? 'high' : 'medium')
+  pushIssues(issues, reviewNotes.long_window_humanization_risks, 'long_window_humanization_risks', '长窗人类化风险', reviewNotes.rewrite_required ? 'high' : 'medium')
   pushIssues(issues, reviewNotes.language_risks, 'language_risks', '语言风险', 'medium')
   pushIssues(issues, reviewNotes.human_language_repairs, 'human_language_repairs', '语言替换', 'medium')
   pushIssues(issues, reviewNotes.genre_hollowing_risks, 'genre_hollowing_risks', '体裁空心化', 'medium')
@@ -212,6 +232,11 @@ export function buildReviewPrioritySummary(reviewNotes: ChapterReviewNotesLike):
     || issue.source === 'coherence_risks'
     || issue.source === 'missing_payoffs'
     || issue.source === 'contract_validation'
+    || issue.source === 'typed_ref_risks'
+    || issue.source === 'source_grounding_risks'
+    || issue.source === 'operating_mode_risks'
+    || issue.source === 'long_window_humanization_risks'
+    || issue.source === 'dialogue_separability_risks'
   ))
   const rewriteScope = resolveRewriteScope(topIssues, requiresFullRewrite)
 

@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { parseTypedRefOverlay } from '../../src/shared/typed-ref'
+
 vi.mock('../database/db', () => ({
   getDb: vi.fn(),
   getSqlite: vi.fn(() => ({
@@ -42,15 +44,29 @@ import {
 
 type TableRows = Map<unknown, Array<Record<string, unknown>>>
 
-function createQuery(rowsByTable: TableRows, table: unknown) {
+function toCamelCase(value: string): string {
+  return value.replace(/_([a-z])/g, (_, char: string) => char.toUpperCase())
+}
+
+function matchesWhereClause(row: Record<string, unknown>, condition: any): boolean {
+  const chunks = Array.isArray(condition?.queryChunks) ? condition.queryChunks : []
+  const columnName = typeof chunks[1]?.name === 'string' ? chunks[1].name : ''
+  const value = chunks[3]?.value
+  if (!columnName) return true
+
+  const rowKey = columnName in row ? columnName : toCamelCase(columnName)
+  return row[rowKey] === value
+}
+
+function createQuery(rowsByTable: TableRows, table: unknown, conditions: any[] = []) {
   const query: {
-    where: () => typeof query
+    where: (condition: any) => typeof query
     orderBy: () => typeof query
     all: () => Array<Record<string, unknown>>
   } = {
-    where: () => query,
+    where: (condition: any) => createQuery(rowsByTable, table, [...conditions, condition]),
     orderBy: () => query,
-    all: () => rowsByTable.get(table) || [],
+    all: () => (rowsByTable.get(table) || []).filter((row) => conditions.every((condition) => matchesWhereClause(row, condition))),
   }
   return query
 }
@@ -73,10 +89,12 @@ function createDbMock(rowsByTable: TableRows) {
     })),
     update: vi.fn((table: unknown) => ({
       set: vi.fn((patch: Record<string, unknown>) => ({
-        where: vi.fn(() => ({
+        where: vi.fn((condition: any) => ({
           run: vi.fn(() => {
-            const target = rowsByTable.get(table)?.[0]
-            if (target) Object.assign(target, patch)
+            const rows = rowsByTable.get(table) || []
+            rows
+              .filter((row) => matchesWhereClause(row, condition))
+              .forEach((row) => Object.assign(row, patch))
           }),
         })),
       })),
@@ -98,8 +116,14 @@ function createBaseRows() {
       status: 'available',
       summary: '打开旧仓暗门的铜钥。',
       plotFunction: '开启密库并触发追查升级',
-      linkedCharacterIdsJson: JSON.stringify([2]),
+      linkedCharacterIdsJson: JSON.stringify([]),
       linkedTimelineEventIdsJson: JSON.stringify([]),
+      typedRefsJson: JSON.stringify({
+        version: 1,
+        pointers: [
+          { assetType: 'character', id: 2, confidence: 1 },
+        ],
+      }),
       tagsJson: JSON.stringify(['旧仓', '暗门']),
       sortOrder: 1,
       createdAt: '2026-04-26T00:00:00.000Z',
@@ -226,26 +250,56 @@ describe('story item link recommendations', () => {
     expect((rows.get(chapterSegments) || [])[0].linkedItemIdsJson).toBe(JSON.stringify([7]))
   })
 
-  it('fills typedRefsJson when creating and updating a story item', () => {
+  it('writes typedRefsJson when creating a story item with linked refs', () => {
     const rows = createBaseRows()
     vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
 
     const createdId = createStoryItem(1, {
       itemName: '铜铃',
-      ownerCharacterId: 2,
       linkedCharacterIdsJson: JSON.stringify([2]),
       linkedTimelineEventIdsJson: JSON.stringify([101]),
     }, { skipContextTracking: true })
 
     const created = (rows.get(storyItems) || []).find((row) => Number(row.id) === createdId)
-    expect(typeof created?.typedRefsJson).toBe('string')
-    expect(String(created?.typedRefsJson)).toContain('timeline_event')
+    const overlay = parseTypedRefOverlay(String(created?.typedRefsJson || ''))
+
+    expect(overlay?.pointers).toEqual([
+      { assetType: 'character', id: 2, confidence: 1 },
+      { assetType: 'timeline_event', id: 101, confidence: 1 },
+    ])
+  })
+
+  it('rebuilds typedRefsJson when updating story item links', () => {
+    const rows = createBaseRows()
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
 
     updateStoryItem(7, {
       linkedTimelineEventIdsJson: JSON.stringify([101]),
     }, { skipContextTracking: true })
 
-    expect(typeof (rows.get(storyItems) || [])[0].typedRefsJson).toBe('string')
-    expect(String((rows.get(storyItems) || [])[0].typedRefsJson)).toContain('character')
+    const updated = (rows.get(storyItems) || []).find((row) => Number(row.id) === 7)
+    const overlay = parseTypedRefOverlay(String(updated?.typedRefsJson || ''))
+
+    expect(overlay?.pointers).toEqual([
+      { assetType: 'character', id: 2, confidence: 1 },
+      { assetType: 'timeline_event', id: 101, confidence: 1 },
+    ])
+  })
+
+  it('clears stale typedRefsJson when linked refs are explicitly reset to an empty overlay', () => {
+    const rows = createBaseRows()
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+
+    updateStoryItem(7, {
+      ownerCharacterId: null,
+      linkedCharacterIdsJson: JSON.stringify([]),
+      linkedTimelineEventIdsJson: JSON.stringify([]),
+    }, { skipContextTracking: true })
+
+    const updated = (rows.get(storyItems) || []).find((row) => Number(row.id) === 7)
+    const overlay = parseTypedRefOverlay(String(updated?.typedRefsJson || ''))
+
+    expect(updated?.typedRefsJson ?? null).toBeNull()
+    expect(overlay).toBeNull()
   })
 })

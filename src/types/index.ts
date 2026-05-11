@@ -91,7 +91,18 @@ export type {
   ThemeVoiceGenerationResult,
 } from '../shared/theme-voice-generation'
 
-export interface Novel {
+export interface NovelSourceCanonFields {
+  historicalProfileJson?: string
+  sourceLedgerJson?: string
+  chapterSourceUsageJson?: string
+  factProvenanceJson?: string
+  projectCanonProfileJson?: string
+  canonConstraintSetJson?: string
+  canonSourceLedgerJson?: string
+  canonFactCardsJson?: string
+}
+
+export interface Novel extends NovelSourceCanonFields {
   id: number
   title: string
   synopsis?: string
@@ -121,7 +132,7 @@ export interface Novel {
 
 export type NovelLaunchMode = 'professional_longform' | 'fast_launch'
 
-export interface NovelCreateInput {
+export interface NovelCreateInput extends NovelSourceCanonFields {
   title: string
   synopsis?: string
   genreId?: number

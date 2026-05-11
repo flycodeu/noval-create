@@ -888,14 +888,25 @@ export function updateStoryThread(
   if (!current) return
   const db = getDb()
   const sanitized = sanitizeStoryThreadPayload(data)
+  const shouldRefreshTypedRefs = (
+    hasOwn(data, 'relatedCharacterIdsJson')
+    || hasOwn(data, 'relatedItemIdsJson')
+    || hasOwn(data, 'relatedTimelineEventIdsJson')
+  )
+  const shouldWriteTypedRefs = shouldRefreshTypedRefs || typeof sanitized.typedRefsJson === 'string'
   const typedRefsJson = deriveThreadTypedRefsJson({
     ...current,
     ...sanitized,
+    typedRefsJson: typeof sanitized.typedRefsJson === 'string'
+      ? sanitized.typedRefsJson
+      : shouldRefreshTypedRefs
+        ? undefined
+        : current.typedRefsJson,
   })
   const lifecyclePatch = buildStoryThreadLifecyclePatch(current.novelId, current, sanitized)
   db.update(storyThreads).set({
     ...sanitized,
-    ...(typedRefsJson ? { typedRefsJson } : {}),
+    ...(shouldWriteTypedRefs ? { typedRefsJson: typedRefsJson ?? null } : typedRefsJson ? { typedRefsJson } : {}),
     ...lifecyclePatch,
     updatedAt: new Date().toISOString(),
   }).where(eq(storyThreads.id, id)).run()

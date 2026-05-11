@@ -190,6 +190,10 @@ function asText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
 function asNumber(value: unknown, fallback: number): number {
   if (typeof value === 'number' && Number.isFinite(value)) return value
   if (typeof value === 'string' && value.trim() && !Number.isNaN(Number(value))) return Number(value)
@@ -214,6 +218,44 @@ function toStringArray(value: unknown): string[] {
 
 function dedupe(values: string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))]
+}
+
+function parseJsonRecord(raw?: string | null): Record<string, unknown> {
+  if (!raw) return {}
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    return isRecord(parsed) ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function parseJsonRecordArray(raw?: string | null): Record<string, unknown>[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    return Array.isArray(parsed) ? parsed.filter(isRecord) : []
+  } catch {
+    return []
+  }
+}
+
+function collectJsonTextLeaves(value: unknown, depth = 0): string[] {
+  if (depth >= 3) return []
+  if (typeof value === 'string') {
+    const text = value.trim()
+    return text ? [text] : []
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return [String(value)]
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => collectJsonTextLeaves(item, depth + 1))
+  }
+  if (isRecord(value)) {
+    return Object.values(value).flatMap((item) => collectJsonTextLeaves(item, depth + 1))
+  }
+  return []
 }
 
 function normalizeArray<T>(
@@ -2278,12 +2320,55 @@ export function assessHistoricalGrounding(input: {
   worldRulesJson?: string | null
   backgroundText?: string | null
   glossaryTerms?: string[]
+  historicalProfileJson?: string | null
+  projectCanonProfileJson?: string | null
+  canonConstraintSetJson?: string | null
+  sourceLedgerJson?: string | null
+  canonSourceLedgerJson?: string | null
+  canonFactCardsJson?: string | null
 }): HistoricalGroundingAssessment {
   const genreName = asText(input.genreName)
   const worldRulesText = asText(input.worldRulesJson)
   const backgroundText = asText(input.backgroundText)
   const glossaryTerms = dedupe((input.glossaryTerms || []).map((item) => item.trim()).filter(Boolean))
-  const aggregateText = [genreName, worldRulesText, backgroundText, glossaryTerms.join('\n')].filter(Boolean).join('\n')
+  const historicalProfile = parseJsonRecord(input.historicalProfileJson)
+  const projectCanonProfile = parseJsonRecord(input.projectCanonProfileJson)
+  const canonConstraintSet = parseJsonRecord(input.canonConstraintSetJson)
+  const sourceLedgerEntries = [
+    ...parseJsonRecordArray(input.sourceLedgerJson),
+    ...parseJsonRecordArray(input.canonSourceLedgerJson),
+  ]
+  const canonFactCardEntries = parseJsonRecordArray(input.canonFactCardsJson)
+  const historicalProfileText = collectJsonTextLeaves(historicalProfile).join('\n')
+  const projectCanonProfileText = collectJsonTextLeaves(projectCanonProfile).join('\n')
+  const canonConstraintText = collectJsonTextLeaves(canonConstraintSet).join('\n')
+  const sourceLedgerText = sourceLedgerEntries
+    .flatMap((entry) => collectJsonTextLeaves({
+      sourceKey: entry.sourceKey,
+      factTitle: entry.factTitle,
+      sourceText: entry.sourceText,
+      assetType: entry.assetType,
+    }))
+    .join('\n')
+  const canonFactCardText = canonFactCardEntries
+    .flatMap((entry) => collectJsonTextLeaves({
+      cardKey: entry.cardKey,
+      title: entry.title,
+      summary: entry.summary,
+      assetType: entry.assetType,
+    }))
+    .join('\n')
+  const aggregateText = [
+    genreName,
+    worldRulesText,
+    backgroundText,
+    glossaryTerms.join('\n'),
+    historicalProfileText,
+    projectCanonProfileText,
+    canonConstraintText,
+    sourceLedgerText,
+    canonFactCardText,
+  ].filter(Boolean).join('\n')
 
   const looksHistorical = /历史|王朝|朝堂|宫廷|侯爵|帝国旧制|架空历史|史诗历史|类历史/u.test(genreName)
     || /王朝|郡县|州府|礼制|官制|宗庙|年号|分歧点|架空/u.test(aggregateText)
@@ -2316,15 +2401,42 @@ export function assessHistoricalGrounding(input: {
   if (backgroundText.length >= 80) sourceSignals.push('project_background')
   if (glossaryTerms.length >= 3) sourceSignals.push('glossary_terms')
   if (/年号|纪年|时代|王朝|礼制|官制|郡县|州府|分歧点|架空/u.test(aggregateText)) sourceSignals.push('era_or_institution')
+  if (historicalProfileText.length >= 12) sourceSignals.push('historical_profile')
+  if (projectCanonProfileText.length >= 12) sourceSignals.push('project_canon_profile')
+  if (canonConstraintText.length >= 24) sourceSignals.push('canon_constraints')
+  if (sourceLedgerEntries.length > 0) sourceSignals.push('source_ledger')
+  if (canonFactCardEntries.length > 0) sourceSignals.push('canon_fact_cards')
 
   const missingSignals = [
     sourceSignals.includes('world_rules') ? '' : 'world_rules',
     sourceSignals.includes('project_background') ? '' : 'project_background',
     sourceSignals.includes('glossary_terms') ? '' : 'glossary_terms',
     sourceSignals.includes('era_or_institution') ? '' : 'era_or_institution',
+    sourceSignals.includes('historical_profile') ? '' : 'historical_profile',
+    sourceSignals.includes('source_ledger') ? '' : 'source_ledger',
+    sourceSignals.includes('canon_fact_cards') ? '' : 'canon_fact_cards',
   ].filter(Boolean)
 
-  const coverage: HistoricalGroundingCoverage = sourceSignals.length >= 3
+  const strongStructuredSignals = [
+    sourceSignals.includes('historical_profile'),
+    sourceSignals.includes('project_canon_profile'),
+    sourceSignals.includes('canon_constraints'),
+    sourceSignals.includes('source_ledger'),
+    sourceSignals.includes('canon_fact_cards'),
+    sourceSignals.includes('era_or_institution'),
+  ].filter(Boolean).length
+
+  const hasStructuredGroundingCore = (
+    sourceSignals.includes('historical_profile')
+    || sourceSignals.includes('project_canon_profile')
+    || sourceSignals.includes('era_or_institution')
+  ) && (
+    sourceSignals.includes('source_ledger')
+    || sourceSignals.includes('canon_fact_cards')
+    || sourceSignals.includes('canon_constraints')
+  )
+
+  const coverage: HistoricalGroundingCoverage = sourceSignals.length >= 3 || strongStructuredSignals >= 3 || hasStructuredGroundingCore
     ? 'grounded'
     : sourceSignals.length >= 1
       ? 'partial'

@@ -12,6 +12,28 @@ import { throwUserFacingError } from '../utils/user-facing-error'
 import { recordAssetChangeEvent } from './asset-impact.service'
 import { getNovelContextStatus, markNovelContextChanged } from './context-impact.service'
 
+type NovelSourceCanonJsonFields = {
+  historicalProfileJson: string
+  sourceLedgerJson: string
+  chapterSourceUsageJson: string
+  factProvenanceJson: string
+  projectCanonProfileJson: string
+  canonConstraintSetJson: string
+  canonSourceLedgerJson: string
+  canonFactCardsJson: string
+}
+
+const NOVEL_SOURCE_CANON_FIELD_KEYS: Array<keyof NovelSourceCanonJsonFields> = [
+  'historicalProfileJson',
+  'sourceLedgerJson',
+  'chapterSourceUsageJson',
+  'factProvenanceJson',
+  'projectCanonProfileJson',
+  'canonConstraintSetJson',
+  'canonSourceLedgerJson',
+  'canonFactCardsJson',
+]
+
 function normalizeWorldRulesJson(raw: string, genreName?: string) {
   try {
     return stringifyWorldRulesDraft(normalizeWorldRulesDraft(JSON.parse(raw) as unknown, genreName))
@@ -64,7 +86,7 @@ function deriveNovelChangeReasons(
     modelConfigId: number
     styleTemplateId: number
     worldTemplateId: number
-  }>,
+  } & NovelSourceCanonJsonFields>,
 ): string[] {
   const reasons = new Set<string>()
 
@@ -86,6 +108,10 @@ function deriveNovelChangeReasons(
     || Object.prototype.hasOwnProperty.call(next, 'worldTemplateId')
   ) {
     reasons.add('World rules changed')
+  }
+
+  if (NOVEL_SOURCE_CANON_FIELD_KEYS.some((field) => Object.prototype.hasOwnProperty.call(next, field))) {
+    reasons.add('Historical/source/canon data changed')
   }
 
   if (Object.prototype.hasOwnProperty.call(next, 'styleTemplateId')) {
@@ -144,6 +170,14 @@ export function getNovel(id: number) {
     projectBriefJson: novels.projectBriefJson,
     settingsJson: novels.settingsJson,
     themeVoiceJson: novels.themeVoiceJson,
+    historicalProfileJson: novels.historicalProfileJson,
+    sourceLedgerJson: novels.sourceLedgerJson,
+    chapterSourceUsageJson: novels.chapterSourceUsageJson,
+    factProvenanceJson: novels.factProvenanceJson,
+    projectCanonProfileJson: novels.projectCanonProfileJson,
+    canonConstraintSetJson: novels.canonConstraintSetJson,
+    canonSourceLedgerJson: novels.canonSourceLedgerJson,
+    canonFactCardsJson: novels.canonFactCardsJson,
     worldRulesJson: novels.worldRulesJson,
     blurbJson: novels.blurbJson,
     styleTemplateId: novels.styleTemplateId,
@@ -179,7 +213,7 @@ export function createNovel(data: {
   targetWords?: number
   modelConfigId?: number
   blurbJson?: string
-}) {
+} & Partial<NovelSourceCanonJsonFields>) {
   const db = getDb()
   const genre = data.genreId
     ? db.select().from(genres).where(eq(genres.id, data.genreId)).all()[0]
@@ -219,7 +253,7 @@ export function updateNovel(id: number, data: Partial<{
   modelConfigId: number
   styleTemplateId: number
   worldTemplateId: number
-}>) {
+} & NovelSourceCanonJsonFields>) {
   const db = getDb()
   const current = db.select().from(novels).where(eq(novels.id, id)).all()[0]
 

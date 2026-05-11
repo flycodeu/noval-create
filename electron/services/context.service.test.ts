@@ -84,6 +84,7 @@ import type {
 } from './context.service'
 import {
   allocateChapterContext,
+  buildStoryProfile,
   buildRecallSnapshot,
   buildPreviousChapterContextFeed,
   ContextOverflowError,
@@ -91,7 +92,7 @@ import {
   selectRecentContextRows,
 } from './context.service'
 import { getDb } from '../database/db'
-import { antiAiRuleHits, chapterGateRuns, chapters } from '../database/schema'
+import { antiAiRuleHits, chapterGateRuns, chapters, characters, genres, glossary, novels } from '../database/schema'
 import { resolveModelRuntimeBudget } from './model.service'
 import {
   buildStyleHardGuardPromptSection,
@@ -827,5 +828,67 @@ describe('allocateChapterContext', () => {
     expect(recallResult.recalledMemory).toContain('药箱还留在旧仓库')
     expect(recallResult.recalledMemory).not.toContain('旧案线索仍未处理')
     expect(recallResult.recallSnapshot.retrievalUsed).toBe(true)
+  })
+})
+
+describe('buildStoryProfile source/canon grounding', () => {
+  beforeEach(() => {
+    vi.mocked(getDb).mockReset()
+  })
+
+  it('folds project-level source/canon data into world rules summary', async () => {
+    const rows = new Map<unknown, unknown[]>([
+      [novels, [
+        {
+          id: 1,
+          title: '江南旧案',
+          genreId: 11,
+          status: 'draft',
+          totalWords: 0,
+          targetWords: 180000,
+          projectBriefJson: '{}',
+          settingsJson: '{}',
+          themeVoiceJson: '{}',
+          worldRulesJson: '{}',
+          historicalProfileJson: JSON.stringify({
+            mode: 'historical_realist',
+            eraPackId: 'ming_qing',
+            regionPackId: 'jiangnan',
+          }),
+          projectCanonProfileJson: JSON.stringify({
+            namingSystem: '明代官场命名',
+          }),
+          canonConstraintSetJson: JSON.stringify({
+            travelAndCommunicationRules: ['官道驿递优先，禁止当日跨省'],
+          }),
+          sourceLedgerJson: JSON.stringify([
+            {
+              sourceKey: 'source-1',
+              factTitle: '驿递制度',
+              sourceText: '跨省公文主要依赖驿站传递。',
+            },
+          ]),
+          canonFactCardsJson: JSON.stringify([
+            {
+              cardKey: 'canon-1',
+              title: '驿递制度',
+              summary: '跨省传递依赖驿站与官道，不能当日越省。',
+            },
+          ]),
+        },
+      ]],
+      [genres, [{ id: 11, name: '历史正剧' }]],
+      [characters, []],
+      [glossary, []],
+    ])
+    vi.mocked(getDb).mockReturnValue(createTableAwareDbMock(rows as Map<unknown, unknown[]>) as never)
+
+    const profile = await buildStoryProfile(1)
+
+    expect(profile.historicalGroundingSummary).toContain('来源较完整')
+    expect(profile.worldRulesSummary).toContain('项目历史 profile')
+    expect(profile.worldRulesSummary).toContain('ming_qing')
+    expect(profile.worldRulesSummary).toContain('驿递制度')
+    expect(profile.worldRulesSummary).toContain('官道驿递优先')
   })
 })

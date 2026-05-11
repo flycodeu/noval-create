@@ -487,6 +487,18 @@ function parseJsonRecord(raw?: string | null): Record<string, unknown> {
   }
 }
 
+function parseJsonRecordArray(raw?: string | null): Record<string, unknown>[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item))
+      : []
+  } catch {
+    return []
+  }
+}
+
 function parseJsonStringArray(raw?: string | null): string[] {
   if (!raw) return []
   try {
@@ -2335,11 +2347,111 @@ function buildBackgroundText(novel: typeof novels.$inferSelect): string {
   return novel.expandedBackground || novel.synopsis || novel.userBackground || ''
 }
 
+function formatSourceCanonValue(value: unknown, maxLength = 56): string {
+  if (Array.isArray(value)) {
+    const text = value
+      .map((item) => asLooseText(item))
+      .filter(Boolean)
+      .slice(0, 2)
+      .join('、')
+    return text ? compactRecallLine(text, maxLength) : ''
+  }
+
+  if (value && typeof value === 'object') {
+    const text = Object.entries(value as Record<string, unknown>)
+      .map(([key, nestedValue]) => {
+        const nestedText = asLooseText(nestedValue)
+        return nestedText ? `${key}=${nestedText}` : ''
+      })
+      .filter(Boolean)
+      .slice(0, 2)
+      .join('；')
+    return text ? compactRecallLine(text, maxLength) : ''
+  }
+
+  const text = asLooseText(value)
+  return text ? compactRecallLine(text, maxLength) : ''
+}
+
+function buildSourceCanonGroundingSummary(input: {
+  historicalProfileJson?: string | null
+  projectCanonProfileJson?: string | null
+  canonConstraintSetJson?: string | null
+  sourceLedgerJson?: string | null
+  canonSourceLedgerJson?: string | null
+  canonFactCardsJson?: string | null
+}): string {
+  const historicalProfile = parseJsonRecord(input.historicalProfileJson)
+  const projectCanonProfile = parseJsonRecord(input.projectCanonProfileJson)
+  const canonConstraintSet = parseJsonRecord(input.canonConstraintSetJson)
+  const sourceLedgerEntries = [
+    ...parseJsonRecordArray(input.sourceLedgerJson),
+    ...parseJsonRecordArray(input.canonSourceLedgerJson),
+  ]
+  const canonFactCards = parseJsonRecordArray(input.canonFactCardsJson)
+
+  const historicalProfilePieces = [
+    asText(historicalProfile.mode) ? `mode=${asText(historicalProfile.mode)}` : '',
+    asText(historicalProfile.eraPackId) ? `era=${asText(historicalProfile.eraPackId)}` : '',
+    asText(historicalProfile.regionPackId) ? `region=${asText(historicalProfile.regionPackId)}` : '',
+    asText(historicalProfile.institutionStrictness) ? `institution=${asText(historicalProfile.institutionStrictness)}` : '',
+    asText(historicalProfile.terminologyStrictness) ? `terminology=${asText(historicalProfile.terminologyStrictness)}` : '',
+  ].filter(Boolean).slice(0, 4)
+
+  const canonProfilePieces = [
+    asText(projectCanonProfile.worldType) ? `world=${asText(projectCanonProfile.worldType)}` : '',
+    asText(projectCanonProfile.namingSystem) ? `naming=${compactRecallLine(asText(projectCanonProfile.namingSystem), 28)}` : '',
+    asText(projectCanonProfile.narrativeView) ? `view=${asText(projectCanonProfile.narrativeView)}` : '',
+    asText(projectCanonProfile.toneRegisterProfile) ? `tone=${compactRecallLine(asText(projectCanonProfile.toneRegisterProfile), 28)}` : '',
+    asText(projectCanonProfile.technologyCeiling) ? `tech=${compactRecallLine(asText(projectCanonProfile.technologyCeiling), 24)}` : '',
+    asText(projectCanonProfile.supernaturalCeiling) ? `supernatural=${compactRecallLine(asText(projectCanonProfile.supernaturalCeiling), 24)}` : '',
+  ].filter(Boolean).slice(0, 4)
+
+  const constraintPieces = Object.entries(canonConstraintSet)
+    .map(([key, value]) => {
+      const text = formatSourceCanonValue(value, 44)
+      return text ? `${key}=${text}` : ''
+    })
+    .filter(Boolean)
+    .slice(0, 3)
+
+  const sourceLedgerPieces = sourceLedgerEntries
+    .map((entry) => compactRecallLine(asText(entry.factTitle) || asText(entry.sourceText), 36))
+    .filter(Boolean)
+    .slice(-3)
+
+  const canonFactPieces = canonFactCards
+    .map((entry) => {
+      const title = asText(entry.title)
+      if (!title) return ''
+      const summary = compactRecallLine(asText(entry.summary), 32)
+      return summary ? `${title}：${summary}` : title
+    })
+    .filter(Boolean)
+    .slice(-4)
+
+  const lines = [
+    historicalProfilePieces.length > 0 ? `项目历史 profile：${historicalProfilePieces.join('；')}` : '',
+    canonProfilePieces.length > 0 ? `项目 canon profile：${canonProfilePieces.join('；')}` : '',
+    constraintPieces.length > 0 ? `项目约束：${constraintPieces.join('；')}` : '',
+    sourceLedgerPieces.length > 0 ? `已沉淀来源：${sourceLedgerPieces.join('；')}` : '',
+    canonFactPieces.length > 0 ? `已确认 canon facts：${canonFactPieces.join('；')}` : '',
+  ].filter(Boolean)
+
+  return lines.join('\n')
+}
+
 function buildHistoricalGroundingSummary(input: {
   genreName?: string | null
   worldRulesJson?: string | null
   backgroundText?: string | null
   glossaryTerms?: string[]
+  historicalProfileJson?: string | null
+  projectCanonProfileJson?: string | null
+  canonConstraintSetJson?: string | null
+  sourceLedgerJson?: string | null
+  canonSourceLedgerJson?: string | null
+  canonFactCardsJson?: string | null
 }): string {
   const assessment = assessHistoricalGrounding(input)
   if (assessment.mode === 'none') return ''
@@ -3184,6 +3296,20 @@ export async function buildStoryProfile(novelId: number): Promise<StoryProfile> 
     worldRulesJson: novel.worldRulesJson,
     backgroundText,
     glossaryTerms,
+    historicalProfileJson: novel.historicalProfileJson,
+    projectCanonProfileJson: novel.projectCanonProfileJson,
+    canonConstraintSetJson: novel.canonConstraintSetJson,
+    sourceLedgerJson: novel.sourceLedgerJson,
+    canonSourceLedgerJson: novel.canonSourceLedgerJson,
+    canonFactCardsJson: novel.canonFactCardsJson,
+  })
+  const sourceCanonGroundingSummary = buildSourceCanonGroundingSummary({
+    historicalProfileJson: novel.historicalProfileJson,
+    projectCanonProfileJson: novel.projectCanonProfileJson,
+    canonConstraintSetJson: novel.canonConstraintSetJson,
+    sourceLedgerJson: novel.sourceLedgerJson,
+    canonSourceLedgerJson: novel.canonSourceLedgerJson,
+    canonFactCardsJson: novel.canonFactCardsJson,
   })
 
   return {
@@ -3219,6 +3345,7 @@ export async function buildStoryProfile(novelId: number): Promise<StoryProfile> 
       formatWorldRulesSummary(novel.worldRulesJson),
       formatWorldTemplateSummary(worldTemplate),
       historicalGroundingSummary,
+      sourceCanonGroundingSummary,
     ].filter(Boolean).join('\n\n'),
     styleTemplateSummary: formatStyleTemplateSummary(styleTemplate?.contentJson),
     hasProtagonist: protagonistPolicy.hasProtagonist,

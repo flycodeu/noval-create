@@ -222,16 +222,6 @@ const STATUS_OPTIONS = [
   { value: 'final', label: '已完成' },
 ]
 
-const PIPELINE_STAGES = [
-  { key: 'planning', title: '场景计划', summary: '先拆出本章场景链和必须覆盖点。' },
-  { key: 'drafting', title: '正文初稿', summary: '按计划生成初稿。' },
-  { key: 'reviewing', title: '自动审校', summary: '检查连续性和语言问题。' },
-  { key: 'rewriting', title: '修订定稿', summary: '按审校意见重写入库。' },
-  { key: 'canonizing', title: 'Canon 草案', summary: '把正文转成可确认的 Canon 差异。' },
-] as const
-
-const STATUS_COLORS: Record<string, string> = { outline: '#5c6378', writing: '#2e86ab', draft: '#d48806', reviewing: '#c25f0a', final: '#389e0d' }
-
 const parseNumberArray = (raw?: string | null) => {
   if (!raw) return []
   try { const parsed = JSON.parse(raw); return Array.isArray(parsed) ? parsed.map((v) => Number(v)).filter(Number.isFinite) : [] } catch { return [] }
@@ -471,31 +461,6 @@ function getGenerationTagMeta(snapshot: WritingGenerationSnapshot) {
   if (snapshot.status === 'failed') return { color: 'error' as const, label: '失败' }
   if (snapshot.status === 'cancelled') return { color: 'default' as const, label: '已取消' }
   return { color: 'success' as const, label: '刚完成' }
-}
-
-function getGenerationAlertType(snapshot: WritingGenerationSnapshot): 'info' | 'success' | 'error' | 'warning' {
-  if (snapshot.status === 'failed') return 'error'
-  if (snapshot.status === 'cancelled') return 'warning'
-  if (snapshot.status === 'success') return 'success'
-  return 'info'
-}
-
-function getGenerationAlertMessage(snapshot: WritingGenerationSnapshot) {
-  if (snapshot.status === 'failed') return snapshot.label || '章节流水线执行失败'
-  if (snapshot.status === 'cancelled') return snapshot.label || '章节流水线已取消'
-  if (snapshot.status === 'success') {
-    return snapshot.detail?.includes('未产生新增内容')
-      ? '章节流水线已完成，但正文没有新增内容'
-      : (snapshot.label || '章节流水线已完成')
-  }
-  return snapshot.label || 'AI 正在处理当前章节'
-}
-
-function getGenerationAlertDescription(snapshot: WritingGenerationSnapshot) {
-  if (snapshot.status === 'failed') return snapshot.error || snapshot.detail || getUserFacingMessage('writing.generateFailed')
-  if (snapshot.status === 'cancelled') return snapshot.detail || getUserFacingMessage('writing.generateCancelled')
-  if (snapshot.status === 'success') return snapshot.detail || getUserFacingMessage('writing.pipelineCompleted')
-  return snapshot.detail || '正在推进当前章的流水线阶段。'
 }
 
 export default function Writing({ novelId }: Props) {
@@ -1098,12 +1063,6 @@ export default function Writing({ novelId }: Props) {
     })
   }, [navigate, novelId, searchParams])
 
-  const handleOpenVersionHistory = useCallback(async () => {
-    if (!currentChapter) return
-    navigateToWritingRoute('history')
-    await refreshVersionHistory(currentChapter.id)
-  }, [currentChapter, navigateToWritingRoute, refreshVersionHistory])
-
   const handleRestoreVersion = useCallback(async () => {
     if (!selectedVersionId || !currentChapter) return
     try {
@@ -1173,7 +1132,7 @@ export default function Writing({ novelId }: Props) {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [currentChapter?.segmentCount, handleRedoEditor, handleUndoEditor])
 
-  const handleGenerateContent = async () => {
+  const handleGenerateContent = useCallback(async () => {
     if (!currentChapter) return message.warning(getUserFacingMessage('writing.selectChapterFirst'))
     generationBaselineRef.current = normalizeEditorText(currentChapter.content || content)
     startGeneration({ chapterId: currentChapter.id })
@@ -1201,7 +1160,16 @@ export default function Writing({ novelId }: Props) {
       })
       message.error(errorMessage)
     }
-  }
+  }, [
+    completeGeneration,
+    content,
+    currentChapter,
+    effectiveAiExecutionMode,
+    preserveConstraintLabels,
+    startGeneration,
+    updateGenerationStage,
+    updateGenerationTask,
+  ])
 
   const persistedPipelineSnapshot = useMemo(
     () => parsePipelineSnapshot(latestPipelineTask),
@@ -1240,7 +1208,7 @@ export default function Writing({ novelId }: Props) {
     try {
       const taskId = await window.electron.chapter.resumeContent(latestPipelineTask.id)
       updateGenerationTask({ chapterId: currentChapter.id, taskId })
-      message.success('已从中断草稿继续生成。')
+      message.success(getUserFacingMessage('writing.resumedFromDraft'))
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error, 'writing.generateFailed')
       completeGeneration({
@@ -1296,19 +1264,6 @@ export default function Writing({ novelId }: Props) {
       label: '章节流水线已取消',
       detail: getUserFacingMessage('writing.generateCancelled'),
     })
-  }
-
-  const handleGenerateSummary = async () => {
-    if (!currentChapter) return
-    try {
-      await window.electron.chapter.generateSummary(currentChapter.id)
-      await Promise.all([loadChapters(currentChapter.id), refreshMeta(), refreshContextStatus()])
-      message.success(getUserFacingMessage('writing.summaryUpdated'))
-    } catch (error: unknown) {
-      message.error(getUserFacingMessage('writing.summaryUpdateFailed', {
-        detail: error instanceof Error ? error.message : '请稍后重试。',
-      }))
-    }
   }
 
   const handleCompileCurrentChapter = async () => {
@@ -1796,7 +1751,10 @@ export default function Writing({ novelId }: Props) {
     () => parseWritebackStatus(currentChapter?.writebackStatusJson),
     [currentChapter?.writebackStatusJson],
   )
-  const activePromptOverrideKeys = chapterContextPreview?.generationExplainability?.activePromptOverrideKeys || []
+  const activePromptOverrideKeys = useMemo(
+    () => chapterContextPreview?.generationExplainability?.activePromptOverrideKeys || [],
+    [chapterContextPreview?.generationExplainability?.activePromptOverrideKeys],
+  )
 
   const currentChapterGeneration = currentChapter
     ? (
@@ -1807,30 +1765,16 @@ export default function Writing({ novelId }: Props) {
     : null
   const currentChapterGenerating = currentChapterGeneration?.status === 'running'
     && activeGeneration.chapterId === currentChapter?.id
-  const pipelineStatus = PIPELINE_STAGES.map((stage, index) => {
-    const running = currentChapterGeneration?.status === 'running' && currentChapterGeneration.stage === stage.key
-    const failed = currentChapterGeneration?.status === 'failed' && currentChapterGeneration.stage === stage.key
-    const done = currentChapterGeneration?.status === 'success'
-      || currentChapterGeneration?.stage === 'completed'
-      || (stage.key === 'planning' && scenePlan.length > 0)
-      || (stage.key === 'drafting' && Boolean(currentChapter?.content || reviewNotes))
-      || (stage.key === 'reviewing' && Boolean(reviewNotes))
-      || (stage.key === 'rewriting' && Boolean(currentChapter?.content))
-      || (stage.key === 'canonizing' && Boolean(currentPipelineSnapshot?.canonRunId))
-    return { ...stage, index, status: failed ? 'failed' : running ? 'running' : done ? 'done' : 'pending' }
-  })
   const pipelineRoleItems = useMemo(() => {
     const order: WritingPipelineRole[] = ['planner', 'writer', 'critic', 'rewriter', 'canonizer', 'finalize']
     return order.map((role) => currentPipelineSnapshot?.roles[role]).filter(Boolean) as WritingPipelineRoleState[]
   }, [currentPipelineSnapshot])
 
   const currentStatusLabel = currentChapter ? getStatusLabel(currentChapter.status) : '未选择章节'
-  const otherStaleChapterCount = Math.max(0, (contextStatus?.staleChapterCount || 0) - (currentChapterStaleReasons.length > 0 ? 1 : 0))
   const streamContent = currentChapterGenerating && activeGeneration.streamTaskId
     ? streams[activeGeneration.streamTaskId]?.content || ''
     : ''
   const hasMultiSegments = (currentChapter?.segmentCount || 0) > 1
-  const editorEyebrow = currentChapter ? `第 ${String(currentChapter.chapterNum).padStart(2, '0')} 章` : '写作编辑器'
   const editorTitle = currentChapter ? currentChapter.title || `第${currentChapter.chapterNum}章` : '请选择一个章节'
   const editorSubtitle = currentChapter
     ? `当前状态：${currentStatusLabel} · 当前正文视为入库稿，停止输入后会自动保存。`
@@ -2297,59 +2241,6 @@ export default function Writing({ novelId }: Props) {
     sceneListItems,
     storyMemory?.activeThreads,
   ])
-
-  const locationStatusItems = useMemo(() => {
-    const values = [
-      ...scenePlan.map((scene) => scene.location || ''),
-      ...relatedEvents.map((event) => event.timeLabel && event.eventTitle ? `${event.timeLabel} · ${event.eventTitle}` : event.eventTitle),
-    ].filter(Boolean)
-    return [...new Set(values)].slice(0, 6)
-  }, [relatedEvents, scenePlan])
-
-  const worldFactItems = useMemo(() => {
-    const factPool = storyFacts.filter((fact) => (
-      allowedRevealFactIds.includes(fact.id)
-      || revealedFactIds.includes(fact.id)
-      || (fact.targetRevealChapterId != null && fact.targetRevealChapterId === currentChapter?.id)
-    ))
-    return (factPool.length > 0 ? factPool : storyFacts.filter((fact) => fact.isKeyTruth !== 0)).slice(0, 6).map((fact) => (
-      `${fact.title}${fact.summary ? ` · ${fact.summary}` : ''}`
-    ))
-  }, [allowedRevealFactIds, currentChapter?.id, revealedFactIds, storyFacts])
-
-  const puzzleItems = useMemo(
-    () => storyFacts
-      .filter((fact) => fact.relatedPuzzleId != null)
-      .slice(0, 6)
-      .map((fact) => `${fact.title}${fact.notes ? ` · ${fact.notes}` : ''}`),
-    [storyFacts],
-  )
-
-  const characterStateItems = useMemo(
-    () => chapterCharacters.slice(0, 6).map((character) => (
-      `${character.fullName} · ${character.goals || character.surfaceDesire || character.innerConflict || character.background || '已载入人物状态'}`
-    )),
-    [chapterCharacters],
-  )
-
-  const recallItems = useMemo(() => {
-    if (!chapterContextPreview) return []
-
-    const acceptedSources = chapterContextPreview.recalledMemorySources
-      .filter((item) => !item.stale
-        && !item.overriddenByConstraint
-        && item.entityValidated
-        && item.similarity >= (
-          item.searchMode === 'vector'
-            ? chapterContextPreview.recallDiagnostics.minVectorSimilarity
-            : chapterContextPreview.recallDiagnostics.minKeywordSimilarity
-        ))
-      .slice(0, 6)
-
-    return acceptedSources.length > 0
-      ? acceptedSources.map((item) => `${item.sourceLabel} · ${item.summary}`)
-      : chapterContextPreview.recallDiagnostics.summaryLines.slice(0, 6)
-  }, [chapterContextPreview])
 
   const qualityIssueItems = useMemo(() => ([
     ...(publishCheck?.checklist || [])

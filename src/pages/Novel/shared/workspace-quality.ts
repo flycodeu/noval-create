@@ -17,8 +17,6 @@ import { buildProjectBriefSummary, parseProjectBriefSnapshot } from '../../../sh
 import { parseWorldRulesDraftJson } from '../../../shared/world-rules-draft'
 import {
   buildEndgameDesignSummary,
-  buildPremiseSummary,
-  buildStoryDesignSummary,
   parseStorySettingsSnapshot,
 } from '../../../shared/story-settings'
 import { buildThemeVoiceSummary, parseThemeVoiceSnapshot } from '../../../shared/theme-voice'
@@ -368,7 +366,6 @@ export function buildWorkspaceQualityRequestBase(
   context: WorkspaceQualityAdapterContext,
 ): Omit<WorkspaceQualityAnalyzeRequest, 'contentSnapshot'> {
   const projectBrief = parseProjectBriefSnapshot(context.currentNovel?.projectBriefJson)
-  const storySettings = parseStorySettingsSnapshot(context.currentNovel?.settingsJson)
   const themeVoice = parseThemeVoiceSnapshot(context.currentNovel?.themeVoiceJson)
   const meta = getWorkspaceMeta(workspaceKey)
 
