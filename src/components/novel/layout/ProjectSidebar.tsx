@@ -11,6 +11,7 @@ interface ProjectSidebarProps {
   currentTask: string
   navGroups: WorkspaceNavGroup[]
   activeKey: string
+  pendingKey?: string | null
   onNavigate: (route: string) => void
   onPrefetchRoute?: (route: string) => void
 }
@@ -22,6 +23,7 @@ export default function ProjectSidebar({
   currentTask,
   navGroups,
   activeKey,
+  pendingKey,
   onNavigate,
   onPrefetchRoute,
 }: ProjectSidebarProps) {
@@ -74,6 +76,7 @@ export default function ProjectSidebar({
                 <div className="project-sidebar__group-items">
                   {group.items.map((item) => {
                     const active = item.key === activeKey
+                    const pending = !active && item.key === pendingKey
 
                     return (
                       <button
@@ -83,10 +86,14 @@ export default function ProjectSidebar({
                         onFocus={() => !active && onPrefetchRoute?.(item.route)}
                         onPointerDown={() => !active && onPrefetchRoute?.(item.route)}
                         onClick={() => onNavigate(item.route)}
-                        className={`project-sidebar__group-item${active ? ' is-active' : ''}`}
+                        aria-current={active ? 'page' : undefined}
+                        className={`project-sidebar__group-item${active ? ' is-active' : ''}${pending ? ' is-pending' : ''}`}
                       >
                         <div className="project-sidebar__group-item-head">
-                          <span className="project-sidebar__group-item-label">{item.label}</span>
+                          <span className="project-sidebar__group-item-copy">
+                            <span className="project-sidebar__group-item-label">{item.label}</span>
+                            {item.meta ? <span className="project-sidebar__group-item-meta">{item.meta}</span> : null}
+                          </span>
                           <StatusTag status={item.status} size="small" />
                         </div>
                       </button>

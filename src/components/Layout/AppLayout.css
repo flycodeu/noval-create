@@ -40,6 +40,10 @@
   background: transparent;
 }
 
+.app-layout__content.is-novel-workspace {
+  overflow: hidden;
+}
+
 .app-layout__theme-panel {
   padding: 16px 20px;
   border-top: 1px solid var(--border-default);

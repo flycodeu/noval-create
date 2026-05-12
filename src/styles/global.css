@@ -10597,10 +10597,52 @@ html[data-theme="dark"] .ant-card-actions > li {
   overflow-y: scroll;
   scrollbar-gutter: stable both-edges;
   contain: layout paint;
+  transition:
+    opacity 220ms ease,
+    transform 220ms ease,
+    filter 220ms ease;
+}
+
+.novel-route-shell--single .novel-route-shell__content-body.is-transitioning {
+  opacity: 0.9;
+}
+
+.novel-route-shell--single .novel-route-shell__content-body.is-transitioning::after {
+  content: '';
+  position: absolute;
+  inset: 12px;
+  border-radius: 20px;
+  background:
+    linear-gradient(115deg, rgba(255, 255, 255, 0) 14%, rgba(255, 255, 255, 0.32) 48%, rgba(255, 255, 255, 0) 84%),
+    linear-gradient(180deg, rgba(196, 167, 125, 0.06), rgba(196, 167, 125, 0.02));
+  pointer-events: none;
+  animation: novel-route-shell-sheen 520ms ease;
+  mix-blend-mode: screen;
+  z-index: 3;
 }
 
 .novel-route-shell__page-stage {
   min-height: 100%;
+  animation: novel-route-shell-page-enter 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.novel-route-shell__stage-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 180px;
+  padding: 20px 24px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.novel-route-shell__page-stage.is-active {
+  position: relative;
+  z-index: 1;
+}
+
+.novel-route-shell__page-stage.is-pending {
+  animation: novel-route-shell-page-pending 220ms ease;
 }
 
 .novel-route-shell__page-stage[hidden] {
@@ -10649,6 +10691,55 @@ html[data-theme="dark"] .ant-card-actions > li {
   --novel-shell-accent-soft: rgba(199, 139, 79, 0.16);
   --novel-shell-content-surface: var(--bg-surface);
   --novel-shell-content-backdrop: var(--bg-app);
+}
+
+[data-theme="dark"] .novel-route-shell--single .novel-route-shell__content-body.is-transitioning::after {
+  background:
+    linear-gradient(115deg, rgba(255, 255, 255, 0) 18%, rgba(108, 154, 187, 0.16) 48%, rgba(255, 255, 255, 0) 82%),
+    linear-gradient(180deg, rgba(93, 131, 162, 0.08), rgba(93, 131, 162, 0.02));
+  mix-blend-mode: normal;
+}
+
+@keyframes novel-route-shell-page-enter {
+  0% {
+    opacity: 0;
+    transform: translateY(14px) scale(0.995);
+    filter: saturate(0.92);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: saturate(1);
+  }
+}
+
+@keyframes novel-route-shell-page-pending {
+  0% {
+    opacity: 0.82;
+    transform: translateY(6px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes novel-route-shell-sheen {
+  0% {
+    opacity: 0;
+    transform: translateX(-12%) scale(0.985);
+  }
+
+  28% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateX(10%) scale(1);
+  }
 }
 
 @media (max-width: 960px) {

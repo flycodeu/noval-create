@@ -107,7 +107,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
           </Sider>
         ) : null}
 
-        <Content className="app-layout__content">
+        <Content className={`app-layout__content${hideAppSidebar ? ' is-novel-workspace' : ''}`}>
           <AppErrorBoundary resetKey={novelWorkspaceResetKey}>
             {children}
           </AppErrorBoundary>

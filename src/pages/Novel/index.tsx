@@ -20,36 +20,6 @@ import {
   type WorkspaceViewMode,
 } from '../../shared/novel-workspace'
 import { getWorkspaceViewModeForNovel } from '../../shared/operating-mode'
-import StudioPage from './Studio'
-import Overview from './Overview'
-import PremisePage from './Premise'
-import CoreSettings from './CoreSettings'
-import ProjectBriefPage from './ProjectBrief'
-import ThemeVoicePage from './ThemeVoice'
-import WorldRules from './WorldRules'
-import EndgamePage from './Endgame'
-import Factions from './Factions'
-import MapExplorer from './MapExplorer'
-import Characters from './Characters'
-import CharacterArcCenterPage from './CharacterArcCenter'
-import ResistancePage from './Resistance'
-import Glossary from './Glossary'
-import ItemsWorkspace from './ItemsWorkspace'
-import SceneTemplates from './SceneTemplates'
-import StoryThreadsPage from './StoryThreads'
-import Outline from './Outline'
-import VolumeDesignPage from './VolumeDesign'
-import ContractsPage from './Contracts'
-import Structure from './Structure'
-import TimelinePage from './Timeline'
-import Writing from './Writing'
-import WritebackCenterPage from './WritebackCenter'
-import RevisionCenterPage from './RevisionCenter'
-import QualityDashboard from './QualityDashboard'
-import BatchWorkbenchPage from './BatchWorkbench'
-import InfoGapBoardPage from './InfoGapBoard'
-import ForeshadowLedgerPage from './ForeshadowLedger'
-import GrowthSystemPage from './GrowthSystem'
 import WorkspaceErrorBoundary from './components/WorkspaceErrorBoundary'
 import WorkspaceAIQualityBoard from './components/WorkspaceAIQualityBoard'
 import {
@@ -66,6 +36,13 @@ import {
 import type { Chapter, OperationLog } from '../../types'
 
 type ProWorkspaceKey = WorkspaceRouteKey
+interface WorkspaceStageProps {
+  novelId: number
+}
+
+type WorkspaceStageModule = {
+  default: React.ComponentType<WorkspaceStageProps>
+}
 
 interface WorkspaceSearchResult {
   id: string
@@ -94,7 +71,47 @@ const LEGACY_ROUTE_REDIRECTS: Record<GuidedWorkflowStepKey, ProWorkspaceKey> = {
 const WORKSPACE_VIEW_MODE_STORAGE_KEY = 'novelforge-workbench-view-mode'
 const WORKSPACE_PAGE_META = new Map(WORKSPACE_MODULE_DEFINITIONS.map((item) => [item.key, item] as const))
 const WORKSPACE_PREWARM_DELAY_MS = 140
-const MAX_IDLE_PREWARM_ROUTES = 3
+const MAX_IDLE_PREWARM_ROUTES = 4
+
+const WORKSPACE_STAGE_LOADERS = {
+  guide: () => import('./Studio'),
+  overview: () => import('./Overview'),
+  'project-brief': () => import('./ProjectBrief'),
+  'core-settings': () => import('./Premise'),
+  'theme-voice': () => import('./ThemeVoice'),
+  'world-rules': () => import('./WorldRules'),
+  endgame: () => import('./Endgame'),
+  map: () => import('./MapExplorer'),
+  factions: () => import('./Factions'),
+  characters: () => import('./Characters'),
+  'arc-center': () => import('./CharacterArcCenter'),
+  resistance: () => import('./Resistance'),
+  items: () => import('./ItemsWorkspace'),
+  glossary: () => import('./Glossary'),
+  threads: () => import('./StoryThreads'),
+  'scene-templates': () => import('./SceneTemplates'),
+  'story-design': () => import('./CoreSettings'),
+  outline: () => import('./Outline'),
+  'volume-design': () => import('./VolumeDesign'),
+  contracts: () => import('./Contracts'),
+  structure: () => import('./Structure'),
+  timeline: () => import('./Timeline'),
+  'info-gap-board': () => import('./InfoGapBoard'),
+  'foreshadow-ledger': () => import('./ForeshadowLedger'),
+  'growth-system': () => import('./GrowthSystem'),
+  writing: () => import('./Writing'),
+  writeback: () => import('./WritebackCenter'),
+  'batch-workbench': () => import('./BatchWorkbench'),
+  revision: () => import('./RevisionCenter'),
+  quality: () => import('./QualityDashboard'),
+} satisfies Record<ProWorkspaceKey, () => Promise<WorkspaceStageModule>>
+
+const WORKSPACE_STAGE_COMPONENTS = Object.fromEntries(
+  (Object.keys(WORKSPACE_STAGE_LOADERS) as ProWorkspaceKey[]).map((key) => [
+    key,
+    React.lazy(WORKSPACE_STAGE_LOADERS[key]),
+  ]),
+) as Record<ProWorkspaceKey, React.LazyExoticComponent<React.ComponentType<WorkspaceStageProps>>>
 
 function isEditableTarget(target: EventTarget | null): boolean {
   const element = target as HTMLElement | null
@@ -110,6 +127,28 @@ function isEditableTarget(target: EventTarget | null): boolean {
     || element.closest('[contenteditable="true"]'),
   )
 }
+
+const MemoWorkspaceStage = React.memo(({
+  pageKey,
+  novelId,
+}: {
+  pageKey: ProWorkspaceKey
+  novelId: number
+}) => {
+  const WorkspaceStage = WORKSPACE_STAGE_COMPONENTS[pageKey]
+
+  return (
+    <React.Suspense fallback={(
+      <div className="novel-route-shell__stage-loading">
+        <Spin size="small" />
+        <span>正在加载模块...</span>
+      </div>
+    )}
+    >
+      <WorkspaceStage novelId={novelId} />
+    </React.Suspense>
+  )
+})
 
 export default function NovelRouter() {
   const { id } = useParams<{ id: string }>()
@@ -127,6 +166,9 @@ export default function NovelRouter() {
   const saveHandlerRef = useRef<(() => void) | null>(null)
   const clearHandlerRef = useRef<(() => void) | null>(null)
   const escapeHandlerRef = useRef<(() => void) | null>(null)
+  const contentBodyRef = useRef<HTMLDivElement | null>(null)
+  const prefetchedPagesRef = useRef<Set<ProWorkspaceKey>>(new Set())
+  const scrollPositionsRef = useRef<Partial<Record<ProWorkspaceKey, number>>>({})
   const [loading, setLoading] = useState(true)
   const [workflowStats, setWorkflowStats] = useState<WorkflowStats>(EMPTY_WORKFLOW_STATS)
   const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false)
@@ -141,7 +183,7 @@ export default function NovelRouter() {
   const [hasRegisteredClearHandler, setHasRegisteredClearHandler] = useState(false)
   const [qualityBoardOpen, setQualityBoardOpen] = useState(false)
   const [workspaceQualityController, setWorkspaceQualityController] = useState<RegisteredWorkspaceQualityController | null>(null)
-  const [visitedPages, setVisitedPages] = useState<ProWorkspaceKey[]>([])
+  const [pendingPage, setPendingPage] = useState<ProWorkspaceKey | null>(null)
   const [workspaceViewMode, setWorkspaceViewMode] = useState<WorkspaceViewMode>(() => {
     const stored = typeof localStorage !== 'undefined'
       ? localStorage.getItem(WORKSPACE_VIEW_MODE_STORAGE_KEY)
@@ -168,6 +210,8 @@ export default function NovelRouter() {
 
     return 'guide'
   }, [pathSegment])
+
+  const [visitedPages, setVisitedPages] = useState<ProWorkspaceKey[]>(() => [currentPage])
   const currentChapter = useMemo(
     () => chapters.find((chapter) => chapter.id === currentChapterId) || null,
     [chapters, currentChapterId],
@@ -186,6 +230,10 @@ export default function NovelRouter() {
     () => getWorkspaceNavKey(currentPage, location.search),
     [currentPage, location.search],
   )
+  const pendingNavKey = useMemo(() => {
+    if (!pendingPage || pendingPage === currentPage) return null
+    return pendingPage === 'guide' ? 'guide:overview' : pendingPage
+  }, [currentPage, pendingPage])
   const orderedPages = useMemo<ProWorkspaceKey[]>(
     () => ['guide', ...workspaceSnapshot.modules.map((item) => item.key)],
     [workspaceSnapshot.modules],
@@ -242,16 +290,20 @@ export default function NovelRouter() {
   const warmWorkspacePage = useCallback((routeOrPage: string | ProWorkspaceKey | null | undefined) => {
     const pageKey = resolveWorkspacePageKey(routeOrPage)
     if (!pageKey) return
-
-    setVisitedPages((current) => (current.includes(pageKey) ? current : [...current, pageKey]))
+    if (prefetchedPagesRef.current.has(pageKey)) return
+    prefetchedPagesRef.current.add(pageKey)
+    void WORKSPACE_STAGE_LOADERS[pageKey]()
   }, [resolveWorkspacePageKey])
 
   useEffect(() => {
-    setVisitedPages([])
+    setVisitedPages([currentPage])
+    setPendingPage(null)
+    scrollPositionsRef.current = {}
   }, [novelId])
 
   useEffect(() => {
     setVisitedPages((current) => (current.includes(currentPage) ? current : [...current, currentPage]))
+    setPendingPage((current) => (current === currentPage ? null : current))
   }, [currentPage])
 
   useEffect(() => {
@@ -261,6 +313,7 @@ export default function NovelRouter() {
       recommendedRoute,
       nextPageMeta?.route,
       previousPageMeta?.route,
+      currentPage === 'guide' ? workspaceSnapshot.groups[1]?.route : workspaceSnapshot.nextStep.targetPage,
     ].filter((route): route is string => Boolean(route))))
       .filter((route) => resolveWorkspacePageKey(route) !== currentPage)
       .slice(0, MAX_IDLE_PREWARM_ROUTES)
@@ -278,6 +331,8 @@ export default function NovelRouter() {
     nextPageMeta?.route,
     previousPageMeta?.route,
     recommendedRoute,
+    workspaceSnapshot.groups,
+    workspaceSnapshot.nextStep.targetPage,
     resolveWorkspacePageKey,
     warmWorkspacePage,
   ])
@@ -332,9 +387,14 @@ export default function NovelRouter() {
   }, [navigate])
 
   const navigateWithinWorkspace = useCallback((route: string, options?: NavigateOptions) => {
+    const pageKey = resolveWorkspacePageKey(route)
+    if (pageKey && pageKey !== currentPage) {
+      setPendingPage(pageKey)
+    }
     warmWorkspacePage(route)
+
     transitionNavigate(`/novels/${novelId}/${route}`, options)
-  }, [novelId, transitionNavigate, warmWorkspacePage])
+  }, [currentPage, novelId, resolveWorkspacePageKey, transitionNavigate, warmWorkspacePage])
 
   const notifyWorkspaceMutation = useCallback(() => {
     setWorkspaceMutationToken((current) => current + 1)
@@ -614,79 +674,28 @@ export default function NovelRouter() {
     setQualityBoardOpen(false)
   }, [currentPage])
 
+  useEffect(() => {
+    const contentBody = contentBodyRef.current
+    if (!contentBody) return undefined
+
+    const nextScrollTop = scrollPositionsRef.current[currentPage] ?? 0
+    const frame = window.requestAnimationFrame(() => {
+      contentBody.scrollTo({ top: nextScrollTop, behavior: 'auto' })
+    })
+
+    return () => window.cancelAnimationFrame(frame)
+  }, [currentPage])
+
+  const handleContentBodyScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
+    scrollPositionsRef.current[currentPage] = event.currentTarget.scrollTop
+  }, [currentPage])
+
   const workspaceQuality = useMemo(() => ({
     controller: workspaceQualityController,
     registerController: registerWorkspaceQualityController,
   }), [registerWorkspaceQualityController, workspaceQualityController])
 
-  const renderWorkspaceStage = useCallback((pageKey: ProWorkspaceKey) => {
-    switch (pageKey) {
-      case 'guide':
-        return <StudioPage novelId={novelId} />
-      case 'overview':
-        return <Overview novelId={novelId} />
-      case 'project-brief':
-        return <ProjectBriefPage novelId={novelId} />
-      case 'core-settings':
-        return <PremisePage novelId={novelId} />
-      case 'theme-voice':
-        return <ThemeVoicePage novelId={novelId} />
-      case 'world-rules':
-        return <WorldRules novelId={novelId} />
-      case 'endgame':
-        return <EndgamePage novelId={novelId} />
-      case 'map':
-        return <MapExplorer novelId={novelId} />
-      case 'factions':
-        return <Factions novelId={novelId} />
-      case 'characters':
-        return <Characters novelId={novelId} />
-      case 'arc-center':
-        return <CharacterArcCenterPage novelId={novelId} />
-      case 'resistance':
-        return <ResistancePage novelId={novelId} />
-      case 'items':
-        return <ItemsWorkspace novelId={novelId} />
-      case 'glossary':
-        return <Glossary novelId={novelId} />
-      case 'threads':
-        return <StoryThreadsPage novelId={novelId} />
-      case 'scene-templates':
-        return <SceneTemplates novelId={novelId} />
-      case 'story-design':
-        return <CoreSettings novelId={novelId} />
-      case 'outline':
-        return <Outline novelId={novelId} />
-      case 'volume-design':
-        return <VolumeDesignPage novelId={novelId} />
-      case 'contracts':
-        return <ContractsPage novelId={novelId} />
-      case 'structure':
-        return <Structure novelId={novelId} />
-      case 'timeline':
-        return <TimelinePage novelId={novelId} />
-      case 'info-gap-board':
-        return <InfoGapBoardPage novelId={novelId} />
-      case 'foreshadow-ledger':
-        return <ForeshadowLedgerPage novelId={novelId} />
-      case 'growth-system':
-        return <GrowthSystemPage novelId={novelId} />
-      case 'writing':
-        return <Writing novelId={novelId} />
-      case 'writeback':
-        return <WritebackCenterPage novelId={novelId} />
-      case 'batch-workbench':
-        return <BatchWorkbenchPage novelId={novelId} />
-      case 'revision':
-        return <RevisionCenterPage novelId={novelId} />
-      case 'quality':
-        return <QualityDashboard novelId={novelId} />
-      default:
-        return null
-    }
-  }, [novelId])
-
-  if (loading) {
+  if (loading || currentNovel?.id !== novelId) {
     return (
       <div className="novel-route-shell novel-route-shell--loading">
         <Spin size="large" />
@@ -793,6 +802,7 @@ export default function NovelRouter() {
           currentTask={workspaceSnapshot.nextStep.title}
           navGroups={workspaceSnapshot.navGroups}
           activeKey={currentNavKey}
+          pendingKey={pendingNavKey}
           onPrefetchRoute={warmWorkspacePage}
           onNavigate={navigateWithinWorkspace}
         />
@@ -800,15 +810,20 @@ export default function NovelRouter() {
 
       <main className="novel-route-shell__content">
         <div className="novel-route-shell__content-frame">
-          <div className="novel-route-shell__content-body">
+          <div
+            ref={contentBodyRef}
+            className={`novel-route-shell__content-body${pendingPage && pendingPage !== currentPage ? ' is-transitioning' : ''}`}
+            aria-busy={Boolean(pendingPage && pendingPage !== currentPage)}
+            onScroll={handleContentBodyScroll}
+          >
             {visitedPages.map((pageKey) => (
               <section
                 key={pageKey}
-                className={`novel-route-shell__page-stage${pageKey === currentPage ? ' is-active' : ''}`}
+                className={`novel-route-shell__page-stage${pageKey === currentPage ? ' is-active' : ''}${pageKey === pendingPage ? ' is-pending' : ''}`}
                 hidden={pageKey !== currentPage}
                 aria-hidden={pageKey !== currentPage}
               >
-                {renderWorkspaceStage(pageKey)}
+                <MemoWorkspaceStage pageKey={pageKey} novelId={novelId} />
               </section>
             ))}
           </div>

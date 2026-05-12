@@ -91,6 +91,8 @@
 }
 
 .project-sidebar__group-item {
+  position: relative;
+  isolation: isolate;
   width: 100%;
   display: grid;
   gap: 6px;
@@ -108,7 +110,23 @@
     box-shadow var(--transition-fast, 150ms ease);
 }
 
-.project-sidebar__group-item:hover,
+.project-sidebar__group-item::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    linear-gradient(120deg, transparent 0%, rgba(255, 255, 255, 0.26) 46%, transparent 100%);
+  opacity: 0;
+  transform: translateX(-130%);
+  pointer-events: none;
+}
+
+.project-sidebar__group-item:hover {
+  background: var(--project-sidebar-surface-hover);
+  transform: translateX(2px);
+}
+
 .project-sidebar__group-toggle:hover {
   background: var(--project-sidebar-surface-hover);
 }
@@ -122,7 +140,19 @@
 .project-sidebar__group-item.is-active {
   border-color: var(--project-sidebar-border-strong);
   background: var(--project-sidebar-surface-active);
-  box-shadow: inset 3px 0 0 var(--project-sidebar-accent);
+  box-shadow:
+    inset 3px 0 0 var(--project-sidebar-accent),
+    0 10px 22px rgba(166, 106, 43, 0.08);
+}
+
+.project-sidebar__group-item.is-pending {
+  border-color: color-mix(in srgb, var(--project-sidebar-border-strong) 80%, white 20%);
+  background: color-mix(in srgb, var(--project-sidebar-surface-active) 78%, var(--project-sidebar-surface) 22%);
+}
+
+.project-sidebar__group-item.is-pending::before {
+  opacity: 0.68;
+  animation: project-sidebar-pending-sheen 780ms ease;
 }
 
 .project-sidebar__group-item-label {
@@ -130,6 +160,18 @@
   line-height: 1.4;
   font-weight: 600;
   color: var(--project-sidebar-text);
+}
+
+.project-sidebar__group-item-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.project-sidebar__group-item-meta {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--project-sidebar-text-muted);
 }
 
 .project-sidebar__groups {
@@ -219,4 +261,20 @@
 
 [data-theme="soft"] .project-sidebar {
   --project-sidebar-surface-active: rgba(166, 106, 43, 0.14);
+}
+
+@keyframes project-sidebar-pending-sheen {
+  0% {
+    opacity: 0;
+    transform: translateX(-140%);
+  }
+
+  18% {
+    opacity: 0.72;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateX(140%);
+  }
 }
