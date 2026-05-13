@@ -1,29 +1,31 @@
-import React, { useMemo, useState } from 'react'
-import { CaretDownFilled, CaretRightFilled, ThunderboltOutlined } from '@ant-design/icons'
+import React, { useEffect, useMemo, useState } from 'react'
+import { CaretDownFilled, CaretRightFilled, ClockCircleOutlined } from '@ant-design/icons'
 import type { WorkspaceNavGroup } from '../../../shared/workspace-types'
 import StatusTag from '../common/StatusTag'
 import './ProjectSidebar.css'
 
 interface ProjectSidebarProps {
-  title: string
   stageLabel: string
   progressText: string
   currentTask: string
   navGroups: WorkspaceNavGroup[]
   activeKey: string
   pendingKey?: string | null
+  recentKey?: string | null
+  onDismissDrawer?: () => void
   onNavigate: (route: string) => void
   onPrefetchRoute?: (route: string) => void
 }
 
 export default function ProjectSidebar({
-  title,
   stageLabel,
   progressText,
   currentTask,
   navGroups,
   activeKey,
   pendingKey,
+  recentKey,
+  onDismissDrawer,
   onNavigate,
   onPrefetchRoute,
 }: ProjectSidebarProps) {
@@ -35,18 +37,33 @@ export default function ProjectSidebar({
     activeGroup ? { [activeGroup]: true } : {}
   ))
 
+  useEffect(() => {
+    if (!activeGroup) return
+    setOpenGroups((current) => (
+      current[activeGroup]
+        ? current
+        : { ...current, [activeGroup]: true }
+    ))
+  }, [activeGroup])
+
+  const handleNavigate = (route: string) => {
+    onNavigate(route)
+    onDismissDrawer?.()
+  }
+
   return (
     <div className="project-sidebar">
-      <div className="project-sidebar__card project-sidebar__header">
-        <div className="project-sidebar__title-block">
-          <strong className="project-sidebar__title">{title}</strong>
-          <span className="project-sidebar__meta">{`当前阶段：${stageLabel}`}</span>
-          <span className="project-sidebar__meta project-sidebar__meta--muted">{`模块完成：${progressText}`}</span>
+      <div className="project-sidebar__summary">
+        <div className="project-sidebar__summary-copy">
+          <span className="project-sidebar__eyebrow">工作区导航</span>
+          <strong className="project-sidebar__summary-title">{stageLabel}</strong>
+          <span className="project-sidebar__summary-meta">{`已完成 ${progressText}`}</span>
         </div>
-        <div className="project-sidebar__task">
-          <span className="project-sidebar__task-label">当前主任务</span>
-          <strong className="project-sidebar__task-value">{currentTask}</strong>
-        </div>
+      </div>
+
+      <div className="project-sidebar__task-strip">
+        <ClockCircleOutlined />
+        <span>{currentTask}</span>
       </div>
 
       <div className="project-sidebar__groups">
@@ -55,7 +72,7 @@ export default function ProjectSidebar({
           const canCollapse = group.items.length > 0
 
           return (
-            <section key={group.key} className="project-sidebar__card project-sidebar__group">
+            <section key={group.key} className="project-sidebar__group">
               <button
                 type="button"
                 onClick={() => canCollapse && setOpenGroups((current) => ({ ...current, [group.key]: !isOpen }))}
@@ -63,7 +80,7 @@ export default function ProjectSidebar({
               >
                 <div className="project-sidebar__group-toggle-main">
                   <span className="project-sidebar__group-toggle-icon">
-                    {canCollapse ? (isOpen ? <CaretDownFilled /> : <CaretRightFilled />) : <ThunderboltOutlined />}
+                    {canCollapse ? (isOpen ? <CaretDownFilled /> : <CaretRightFilled />) : <ClockCircleOutlined />}
                   </span>
                   <strong className="project-sidebar__group-title">{group.title}</strong>
                 </div>
@@ -77,6 +94,8 @@ export default function ProjectSidebar({
                   {group.items.map((item) => {
                     const active = item.key === activeKey
                     const pending = !active && item.key === pendingKey
+                    const recent = !active && item.key === recentKey
+                    const attention = item.hasBlocker
 
                     return (
                       <button
@@ -85,14 +104,17 @@ export default function ProjectSidebar({
                         onMouseEnter={() => !active && onPrefetchRoute?.(item.route)}
                         onFocus={() => !active && onPrefetchRoute?.(item.route)}
                         onPointerDown={() => !active && onPrefetchRoute?.(item.route)}
-                        onClick={() => onNavigate(item.route)}
+                        onClick={() => handleNavigate(item.route)}
                         aria-current={active ? 'page' : undefined}
-                        className={`project-sidebar__group-item${active ? ' is-active' : ''}${pending ? ' is-pending' : ''}`}
+                        className={`project-sidebar__group-item${active ? ' is-active' : ''}${pending ? ' is-pending' : ''}${recent ? ' is-recent' : ''}${attention ? ' has-attention' : ''}`}
                       >
+                        <span className="project-sidebar__group-item-bar" aria-hidden="true" />
                         <div className="project-sidebar__group-item-head">
                           <span className="project-sidebar__group-item-copy">
                             <span className="project-sidebar__group-item-label">{item.label}</span>
-                            {item.meta ? <span className="project-sidebar__group-item-meta">{item.meta}</span> : null}
+                            <span className="project-sidebar__group-item-meta">
+                              {recent ? '最近访问' : item.meta || '进入模块继续推进'}
+                            </span>
                           </span>
                           <StatusTag status={item.status} size="small" />
                         </div>

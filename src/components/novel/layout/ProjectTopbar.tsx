@@ -7,6 +7,8 @@ import {
   DeleteOutlined,
   EllipsisOutlined,
   ExportOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
   QuestionCircleOutlined,
   RollbackOutlined,
   SearchOutlined,
@@ -38,6 +40,10 @@ interface ProjectTopbarProps {
   showNextStep?: boolean
   moreMenu: MenuProps
   showWindowControls?: boolean
+  sidebarToggleActive?: boolean
+  onToggleSidebar?: () => void
+  statusTone?: 'default' | 'processing' | 'warning'
+  statusText?: string
 }
 
 export default function ProjectTopbar({
@@ -61,9 +67,12 @@ export default function ProjectTopbar({
   showNextStep = true,
   moreMenu,
   showWindowControls = true,
+  sidebarToggleActive = false,
+  onToggleSidebar,
+  statusTone = 'default',
+  statusText,
 }: ProjectTopbarProps) {
   const modeOptions = getWorkspaceModeOptions()
-  const activeMode = modeOptions.find((option) => option.value === mode)
   const overflowMenu = useMemo<MenuProps>(() => {
     const items: NonNullable<MenuProps['items']> = []
     const appendDivider = () => {
@@ -81,14 +90,12 @@ export default function ProjectTopbar({
       })
     }
 
-    if (onShortcuts) {
-      items.push({
-        key: 'workspace-shortcuts',
-        icon: <QuestionCircleOutlined />,
-        label: '快捷键',
-        onClick: onShortcuts,
-      })
-    }
+    items.push({
+      key: 'workspace-shortcuts',
+      icon: <QuestionCircleOutlined />,
+      label: '快捷键',
+      onClick: onShortcuts,
+    })
 
     if (exportMenu.items && exportMenu.items.length > 0) {
       appendDivider()
@@ -145,35 +152,47 @@ export default function ProjectTopbar({
 
       <div className="project-topbar__main-row">
         <div className="project-topbar__identity">
-          <Button
-            className="project-topbar__back project-topbar__control project-topbar__control--ghost"
-            icon={<ArrowLeftOutlined />}
-            onClick={onBack}
-          >
-            返回项目列表
-          </Button>
+          <div className="project-topbar__identity-actions">
+            <Button
+              className="project-topbar__control project-topbar__control--ghost"
+              icon={<ArrowLeftOutlined />}
+              onClick={onBack}
+            >
+              返回
+            </Button>
+            {onToggleSidebar ? (
+              <Button
+                className={`project-topbar__control project-topbar__control--ghost${sidebarToggleActive ? ' is-active' : ''}`}
+                icon={sidebarToggleActive ? <MenuFoldOutlined /> : <MenuUnfoldOutlined />}
+                onClick={onToggleSidebar}
+              >
+                导航
+              </Button>
+            ) : null}
+          </div>
+
           <div className="project-topbar__title-group">
             <div className="project-topbar__title-copy">
-              <div className="project-topbar__project-line">
-                <strong className="project-topbar__project-name" title={projectTitle}>{projectTitle}</strong>
-                <span className="project-topbar__project-separator" aria-hidden="true" />
-                <span className="project-topbar__workspace-name" title={workspaceLabel}>{workspaceLabel}</span>
+              <div className="project-topbar__project-name" title={projectTitle}>{projectTitle}</div>
+              <div className="project-topbar__workspace-line">
+                <strong className="project-topbar__workspace-name" title={workspaceLabel}>{workspaceLabel}</strong>
+                {workspaceSummary ? (
+                  <span className="project-topbar__workspace-summary" title={workspaceSummary}>
+                    {workspaceSummary}
+                  </span>
+                ) : null}
               </div>
-              {workspaceSummary ? (
-                <div className="project-topbar__workspace-summary" title={workspaceSummary}>
-                  {workspaceSummary}
-                </div>
-              ) : null}
             </div>
           </div>
         </div>
 
         <div className="project-topbar__toolbar">
-          <div className="project-topbar__toolbar-group project-topbar__toolbar-group--primary">
-            <div className="project-topbar__mode-meta">
-              <span className="project-topbar__mode-meta-label">工作模式</span>
-              <strong className="project-topbar__mode-meta-value">{activeMode?.label || '未设置'}</strong>
-            </div>
+          <div className={`project-topbar__status-badge project-topbar__status-badge--${statusTone}`}>
+            <span className="project-topbar__status-dot" aria-hidden="true" />
+            <span>{statusText || '工作区已就绪'}</span>
+          </div>
+
+          <div className="project-topbar__action-cluster">
             <div className="project-topbar__mode-switch" role="tablist" aria-label="工作模式切换">
               {modeOptions.map((option) => {
                 const active = mode === option.value
@@ -191,20 +210,15 @@ export default function ProjectTopbar({
                 )
               })}
             </div>
-          </div>
-
-          <div className="project-topbar__toolbar-group project-topbar__toolbar-group--secondary">
-            <div className="project-topbar__primary-actions">
-              <Button className="project-topbar__control" icon={<SearchOutlined />} onClick={onSearch}>
-                全局搜索
-              </Button>
-              <Button className="project-topbar__control" icon={<SwapOutlined />} onClick={onJumpChapter}>
-                跳转章节
-              </Button>
-              <Button className="project-topbar__control" icon={<RollbackOutlined />} onClick={onUndo} disabled={!canUndo}>
-                撤销
-              </Button>
-            </div>
+            <Button className="project-topbar__control" icon={<SearchOutlined />} onClick={onSearch}>
+              搜索
+            </Button>
+            <Button className="project-topbar__control" icon={<SwapOutlined />} onClick={onJumpChapter}>
+              章节
+            </Button>
+            <Button className="project-topbar__control" icon={<RollbackOutlined />} onClick={onUndo} disabled={!canUndo}>
+              撤销
+            </Button>
             {showNextStep && onNextStep ? (
               <Button
                 className="project-topbar__control project-topbar__control--accent"

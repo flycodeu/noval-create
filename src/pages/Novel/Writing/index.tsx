@@ -526,6 +526,7 @@ export default function Writing({ novelId }: Props) {
   const [versionHistoryLoading, setVersionHistoryLoading] = useState(false)
   const [chapterVersions, setChapterVersions] = useState<ChapterVersion[]>([])
   const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null)
+  const [insightPanelOpen, setInsightPanelOpen] = useState(true)
   const routeChapterId = useMemo(() => parseRouteId(searchParams.get('chapterId')), [searchParams])
   const activeWritingRoute = useMemo<WritingRouteKey>(() => {
     const routeKey = location.pathname.split('/').filter(Boolean)[4]
@@ -1783,6 +1784,19 @@ export default function Writing({ novelId }: Props) {
   const resolvedEditorSubtitle = hasMultiSegments
     ? `当前状态：${currentStatusLabel} · 本章已拆成 ${currentChapter?.segmentCount || 0} 个场景，请优先在结构页维护场景后再编译整章。`
     : editorSubtitle
+  const primaryStatusText = currentChapterGenerating
+    ? `AI 正在生成第 ${currentChapter?.chapterNum || '-'} 章`
+    : refreshing
+      ? '正在同步写作数据'
+      : currentChapter
+        ? `自动保存开启 · ${currentStatusLabel}`
+        : '请选择章节开始写作'
+  const utilityTabs = [
+    { key: 'editor', label: '焦点 / 合同' },
+    { key: 'context', label: '上下文' },
+    { key: 'history', label: '版本' },
+    { key: 'review', label: '审校' },
+  ] as Array<{ key: WritingRouteKey; label: string }>
 
   const chapterInsightContent = (
     <>
@@ -2396,7 +2410,7 @@ export default function Writing({ novelId }: Props) {
             <div className="chapter-console-page__hero">
               <section className="chapter-console-page__panel chapter-console-page__hero-card">
                 <SectionHeader
-                  eyebrow="章节选择区"
+                  eyebrow="当前章节"
                   title={currentChapter ? `${formatChapterNumber(currentChapter.chapterNum)} · ${currentChapter.title || '未命名章节'}` : '请选择一个章节'}
                   description={currentChapter
                     ? `当前卷：${currentVolumeTruthStats.volumeName} · 状态：${currentStatusLabel} · ${wordCount} 字`
@@ -2435,13 +2449,13 @@ export default function Writing({ novelId }: Props) {
               </section>
             </div>
 
-            <div className="chapter-console-page__grid">
+            <div className={`chapter-console-page__grid${insightPanelOpen ? ' has-assist-panel' : ' is-assist-collapsed'}`}>
               <aside className="chapter-console-page__column chapter-console-page__column--left">
                 <section className="chapter-console-page__panel">
                   <SectionHeader
                     eyebrow="章节生产"
                     title="章节列表"
-                    description={`共 ${chapters.length} 章，优先从这里切到当前正在生产的章节。`}
+                    description={`共 ${chapters.length} 章，先切到当前章，再回到中间正文主画布持续写。`}
                   />
                   <div className="chapter-console-page__chapter-list">
                     {chapters.length > 0 ? chapters.map((chapter) => {
@@ -2499,25 +2513,36 @@ export default function Writing({ novelId }: Props) {
                   </ActionBar>
                 </section>
 
-                <ContractPanel
-                  title="章节合同"
-                  subtitle="本章目标、线程、伏笔、禁越界事项和验收口径。"
-                  sections={chapterContractSections}
-                />
-
-                <ContractPanel
-                  title="场景合同"
-                  subtitle={sceneContractSections.length > 0 ? `已挂 ${sceneContractSections.length} 个场景约束。` : '当前还没有稳定的场景合同。'}
-                  sections={sceneContractSections.length > 0 ? sceneContractSections : [{
-                    key: 'empty-scene',
-                    title: '场景合同缺失',
-                    items: ['建议先补场景计划，避免正文只剩大段泛写。'],
-                    tone: 'danger',
-                  }]}
-                />
               </aside>
 
               <section className="chapter-console-page__column chapter-console-page__column--center">
+                <section className="chapter-console-page__panel chapter-console-page__editor-hero">
+                  <div className="chapter-console-page__editor-hero-main">
+                    <SectionHeader
+                      eyebrow="写作主任务"
+                      title={currentChapter ? `${formatChapterNumber(currentChapter.chapterNum)} · ${editorTitle}` : '请选择一个章节'}
+                      description={primaryStatusText}
+                    />
+                    <div className="chapter-console-page__hero-meta chapter-console-page__hero-meta--compact">
+                      <div><span>字数</span><strong>{currentChapter ? `${wordCount} 字` : '未开始'}</strong></div>
+                      <div><span>可写性</span><strong>{`${chapterWritability.score}% · ${chapterWritability.label}`}</strong></div>
+                      <div><span>版本</span><strong>{chapterVersions.length > 0 ? `${chapterVersions.length} 个` : '暂无'}</strong></div>
+                      <div><span>状态</span><strong>{currentStatusLabel}</strong></div>
+                    </div>
+                  </div>
+                  <div className="chapter-console-page__editor-hero-actions">
+                    <Button onClick={() => setInsightPanelOpen((current) => !current)}>
+                      {insightPanelOpen ? '收起辅助区' : '展开辅助区'}
+                    </Button>
+                    <Button onClick={() => navigateToWritingRoute('context')}>
+                      上下文
+                    </Button>
+                    <Button onClick={() => navigateToWritingRoute('review')}>
+                      审校
+                    </Button>
+                  </div>
+                </section>
+
                 <section className="chapter-console-page__panel chapter-console-page__editor-card">
                   <SectionHeader
                     eyebrow="正文编辑器"
@@ -2707,14 +2732,14 @@ export default function Writing({ novelId }: Props) {
                   </div>
                 </section>
 
-                <section className="chapter-console-page__panel">
+                <section className="chapter-console-page__panel chapter-console-page__review-strip">
                   <SectionHeader
-                    eyebrow="审校与验收"
-                    title="章节验收面板"
-                    description="这里统一看合同兑现、连续性、AI 味、节奏、人物一致性和世界规则一致性。"
+                    eyebrow="轻量验收反馈"
+                    title="当前章检查结果"
+                    description="把最关键的验收信号放在编辑器下方，减少频繁跳出或大段切屏。"
                   />
                   <div className="chapter-console-page__acceptance-grid">
-                    {acceptanceCards.map((item) => (
+                    {acceptanceCards.slice(0, 4).map((item) => (
                       <div key={item.label} className="chapter-console-page__acceptance-card">
                         <span>{item.label}</span>
                         <strong>{item.value}</strong>
@@ -2723,7 +2748,7 @@ export default function Writing({ novelId }: Props) {
                   </div>
                   {qualityIssueItems.length > 0 ? (
                     <div className="chapter-console-page__quality-list">
-                      {qualityIssueItems.slice(0, 8).map((item) => (
+                      {qualityIssueItems.slice(0, 4).map((item) => (
                         <div key={item} className="chapter-console-page__quality-item">{item}</div>
                       ))}
                     </div>
@@ -2733,20 +2758,15 @@ export default function Writing({ novelId }: Props) {
                 </section>
               </section>
 
-              <aside className="chapter-console-page__column chapter-console-page__column--right">
+              <aside className={`chapter-console-page__column chapter-console-page__column--right${insightPanelOpen ? '' : ' is-hidden'}`}>
                 <section className="chapter-console-page__panel">
                   <SectionHeader
-                    eyebrow="视图焦点"
-                    title="右侧焦点侧栏"
-                    description="把合同、上下文、版本和审校入口收在同一条侧栏路径里。"
+                    eyebrow="辅助区"
+                    title="合同 / 上下文 / 审校 / 版本"
+                    description="按需展开辅助内容，避免持续压缩正文编辑器。"
                   />
                   <div className="chapter-console-page__route-switch">
-                    {([
-                      { key: 'editor', label: '合同 / 生产' },
-                      { key: 'context', label: '上下文' },
-                      { key: 'history', label: '版本' },
-                      { key: 'review', label: '审校' },
-                    ] as Array<{ key: WritingRouteKey; label: string }>).map((tab) => (
+                    {utilityTabs.map((tab) => (
                       <button
                         key={tab.key}
                         type="button"
@@ -2758,7 +2778,22 @@ export default function Writing({ novelId }: Props) {
                     ))}
                   </div>
                 </section>
-                {insightRouteContent}
+                <ContractPanel
+                  title="章节合同"
+                  subtitle="本章目标、线程、伏笔、禁越界事项和验收口径。"
+                  sections={chapterContractSections}
+                />
+                <ContractPanel
+                  title="场景合同"
+                  subtitle={sceneContractSections.length > 0 ? `已挂 ${sceneContractSections.length} 个场景约束。` : '当前还没有稳定的场景合同。'}
+                  sections={sceneContractSections.length > 0 ? sceneContractSections : [{
+                    key: 'empty-scene',
+                    title: '场景合同缺失',
+                    items: ['建议先补场景计划，避免正文只剩大段泛写。'],
+                    tone: 'danger',
+                  }]}
+                />
+                {insightPanelOpen ? insightRouteContent : null}
               </aside>
             </div>
 

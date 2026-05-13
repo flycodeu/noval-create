@@ -351,13 +351,12 @@
 }
 
 .novel-writing-page .chapter-console-page__pipeline {
-  position: sticky;
-  top: 16px;
-  z-index: 5;
+  position: static;
 }
 
 .novel-writing-page .chapter-console-page__grid {
-  grid-template-columns: minmax(220px, 264px) minmax(0, 1.25fr) minmax(260px, 300px);
+  grid-template-columns: minmax(220px, 248px) minmax(0, 1.6fr) minmax(280px, 340px);
+  align-items: start;
 }
 
 .novel-writing-page .chapter-console-page__column--left,
@@ -368,18 +367,38 @@
 }
 
 .novel-writing-page .novel-writing-shell__editor-sheet {
-  width: min(920px, 100%);
+  width: min(1040px, 100%);
+  margin-inline: auto;
 }
 
 .novel-writing-page .chapter-console-page__column--right {
   position: sticky;
-  top: 128px;
+  top: 96px;
 }
 
 .novel-writing-page .chapter-console-page__route-switch {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+}
+
+.novel-writing-page .chapter-console-page__hero {
+  grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.9fr);
+  align-items: stretch;
+}
+
+.novel-writing-page .chapter-console-page__hero-card,
+.novel-writing-page .chapter-console-page__writability-card {
+  height: 100%;
+}
+
+.novel-writing-page .chapter-console-page__editor-card {
+  gap: 14px;
+}
+
+.novel-writing-page .chapter-console-page__editor-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .novel-writing-page .chapter-console-page__route-switch button {
@@ -392,8 +411,12 @@
 }
 
 @media (max-width: 1600px) {
+  .novel-writing-page .chapter-console-page__hero {
+    grid-template-columns: 1fr;
+  }
+
   .novel-writing-page .chapter-console-page__grid {
-    grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
+    grid-template-columns: minmax(220px, 248px) minmax(0, 1fr);
   }
 
   .novel-writing-page .chapter-console-page__column--right {
@@ -403,6 +426,10 @@
 }
 
 @media (max-width: 960px) {
+  .novel-writing-page .chapter-console-page__hero {
+    grid-template-columns: 1fr;
+  }
+
   .novel-writing-page .chapter-console-page__grid {
     grid-template-columns: 1fr;
   }

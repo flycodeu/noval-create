@@ -72,7 +72,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
   return (
     <Layout className="app-layout">
-      <AppShellBar />
+      {!isNovelWorkspace ? <AppShellBar /> : null}
 
       <Layout className="app-layout__body">
         {!hideAppSidebar ? (

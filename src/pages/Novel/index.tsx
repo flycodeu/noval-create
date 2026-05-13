@@ -1,6 +1,6 @@
 import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams, type NavigateOptions } from 'react-router-dom'
-import { Input, Modal, Spin, message } from 'antd'
+import { Drawer, Input, Modal, Spin, message } from 'antd'
 import type { MenuProps } from 'antd'
 import { getErrorMessage, getUserFacingMessage, isUserFacingMessage } from '@/utils/user-facing-message'
 import {
@@ -69,6 +69,8 @@ const LEGACY_ROUTE_REDIRECTS: Record<GuidedWorkflowStepKey, ProWorkspaceKey> = {
 }
 
 const WORKSPACE_VIEW_MODE_STORAGE_KEY = 'novelforge-workbench-view-mode'
+const WORKSPACE_RECENT_PAGE_STORAGE_KEY = 'novelforge-workspace-recent-page'
+const WORKSPACE_LAST_WRITING_VIEW_STORAGE_KEY = 'novelforge-workspace-last-writing-view'
 const WORKSPACE_PAGE_META = new Map(WORKSPACE_MODULE_DEFINITIONS.map((item) => [item.key, item] as const))
 const WORKSPACE_PREWARM_DELAY_MS = 140
 const MAX_IDLE_PREWARM_ROUTES = 4
@@ -182,6 +184,10 @@ export default function NovelRouter() {
   const [workspaceMutationToken, setWorkspaceMutationToken] = useState(0)
   const [hasRegisteredClearHandler, setHasRegisteredClearHandler] = useState(false)
   const [qualityBoardOpen, setQualityBoardOpen] = useState(false)
+  const [isSidebarDrawerOpen, setIsSidebarDrawerOpen] = useState(false)
+  const [isCompactShell, setIsCompactShell] = useState<boolean>(() => (
+    typeof window !== 'undefined' ? window.innerWidth < 1024 : false
+  ))
   const [workspaceQualityController, setWorkspaceQualityController] = useState<RegisteredWorkspaceQualityController | null>(null)
   const [pendingPage, setPendingPage] = useState<ProWorkspaceKey | null>(null)
   const [workspaceViewMode, setWorkspaceViewMode] = useState<WorkspaceViewMode>(() => {
@@ -234,6 +240,11 @@ export default function NovelRouter() {
     if (!pendingPage || pendingPage === currentPage) return null
     return pendingPage === 'guide' ? 'guide:overview' : pendingPage
   }, [currentPage, pendingPage])
+  const recentNavKey = useMemo(() => {
+    if (typeof localStorage === 'undefined') return null
+    const stored = localStorage.getItem(WORKSPACE_RECENT_PAGE_STORAGE_KEY)
+    return stored && stored !== currentNavKey ? stored : null
+  }, [currentNavKey])
   const orderedPages = useMemo<ProWorkspaceKey[]>(
     () => ['guide', ...workspaceSnapshot.modules.map((item) => item.key)],
     [workspaceSnapshot.modules],
@@ -527,6 +538,29 @@ export default function NovelRouter() {
   }, [workspaceViewMode])
 
   useEffect(() => {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(WORKSPACE_RECENT_PAGE_STORAGE_KEY, currentNavKey)
+      if (currentPage === 'writing') {
+        const writingView = location.pathname.split('/').filter(Boolean)[4] || 'editor'
+        localStorage.setItem(WORKSPACE_LAST_WRITING_VIEW_STORAGE_KEY, writingView)
+      }
+    }
+  }, [currentNavKey, currentPage, location.pathname])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    const mediaQuery = window.matchMedia('(max-width: 1023px)')
+    const handleChange = (event: MediaQueryListEvent | MediaQueryList) => {
+      setIsCompactShell(event.matches)
+    }
+
+    handleChange(mediaQuery)
+    const listener = (event: MediaQueryListEvent) => handleChange(event)
+    mediaQuery.addEventListener('change', listener)
+    return () => mediaQuery.removeEventListener('change', listener)
+  }, [])
+
+  useEffect(() => {
     if (!currentNovel || typeof localStorage === 'undefined') return
     if (localStorage.getItem(WORKSPACE_VIEW_MODE_STORAGE_KEY)) return
     if (getWorkspaceViewModeForNovel(currentNovel) === 'quick') {
@@ -675,6 +709,17 @@ export default function NovelRouter() {
   }, [currentPage])
 
   useEffect(() => {
+    if (!isCompactShell) return
+    setIsSidebarDrawerOpen(false)
+  }, [currentPage, isCompactShell])
+
+  useEffect(() => {
+    if (!isCompactShell && isSidebarDrawerOpen) {
+      setIsSidebarDrawerOpen(false)
+    }
+  }, [isCompactShell, isSidebarDrawerOpen])
+
+  useEffect(() => {
     const contentBody = contentBodyRef.current
     if (!contentBody) return undefined
 
@@ -694,6 +739,28 @@ export default function NovelRouter() {
     controller: workspaceQualityController,
     registerController: registerWorkspaceQualityController,
   }), [registerWorkspaceQualityController, workspaceQualityController])
+  const statusTone = pendingPage && pendingPage !== currentPage
+    ? 'processing'
+    : currentPage === 'writing'
+      ? 'warning'
+      : 'default'
+  const sidebarStatusText = pendingPage && pendingPage !== currentPage
+    ? `正在切换到 ${resolvePageMeta(pendingPage).label}`
+    : `${workspaceSnapshot.stage.label} · 模块完成 ${workspaceSnapshot.moduleDoneCount}/${workspaceSnapshot.moduleTotalCount}`
+  const sidebarContent = (
+    <ProjectSidebar
+      stageLabel={workspaceSnapshot.stage.label}
+      progressText={`${workspaceSnapshot.moduleDoneCount}/${workspaceSnapshot.moduleTotalCount}`}
+      currentTask={workspaceSnapshot.nextStep.title}
+      navGroups={workspaceSnapshot.navGroups}
+      activeKey={currentNavKey}
+      pendingKey={pendingNavKey}
+      recentKey={recentNavKey}
+      onDismissDrawer={isCompactShell ? () => setIsSidebarDrawerOpen(false) : undefined}
+      onPrefetchRoute={warmWorkspacePage}
+      onNavigate={navigateWithinWorkspace}
+    />
+  )
 
   if (loading || currentNovel?.id !== novelId) {
     return (
@@ -713,14 +780,18 @@ export default function NovelRouter() {
         notifyWorkspaceMutation,
       }}>
       <NovelWorkspaceQualityProvider value={workspaceQuality}>
-      <div className="novel-route-shell novel-route-shell--single">
+      <div className={`novel-route-shell novel-route-shell--single${isCompactShell ? ' novel-route-shell--compact' : ''}`}>
       <ProjectTopbar
         projectTitle={currentNovel?.title || '未命名小说'}
         workspaceLabel={currentPageMeta.label}
         workspaceSummary={currentPageMeta.summary || undefined}
+        statusTone={statusTone}
+        statusText={sidebarStatusText}
         mode={workspaceViewMode}
         onModeChange={setWorkspaceViewMode}
         onBack={() => transitionNavigate('/novels')}
+        onToggleSidebar={isCompactShell ? () => setIsSidebarDrawerOpen(true) : undefined}
+        sidebarToggleActive={isCompactShell ? isSidebarDrawerOpen : false}
         onClear={hasRegisteredClearHandler ? () => clearHandlerRef.current?.() : undefined}
         onJumpChapter={() => void ensureChapterListLoaded().then(() => setChapterJumpOpen(true)).catch(console.error)}
         onShortcuts={() => setShortcutHelpOpen(true)}
@@ -768,7 +839,7 @@ export default function NovelRouter() {
         }}
         showQuality={currentPage !== 'guide' && currentPage !== 'quality' && currentPage !== 'batch-workbench'}
         showNextStep={currentPage !== workspaceSnapshot.nextStep.targetPage}
-        showWindowControls={false}
+        showWindowControls={!isCompactShell}
         moreMenu={{
           items: [
             {
@@ -794,21 +865,28 @@ export default function NovelRouter() {
           ].filter(Boolean) as MenuProps['items'],
         }}
       />
-      <aside className="novel-route-shell__sidebar">
-        <ProjectSidebar
-          title={currentNovel?.title || '未命名小说'}
-          stageLabel={workspaceSnapshot.stage.label}
-          progressText={`${workspaceSnapshot.moduleDoneCount}/${workspaceSnapshot.moduleTotalCount}`}
-          currentTask={workspaceSnapshot.nextStep.title}
-          navGroups={workspaceSnapshot.navGroups}
-          activeKey={currentNavKey}
-          pendingKey={pendingNavKey}
-          onPrefetchRoute={warmWorkspacePage}
-          onNavigate={navigateWithinWorkspace}
-        />
-      </aside>
+      {!isCompactShell ? (
+        <aside className="novel-route-shell__sidebar">
+          {sidebarContent}
+        </aside>
+      ) : null}
 
       <main className="novel-route-shell__content">
+        <div className="novel-route-shell__viewport-head">
+          <div className="novel-route-shell__viewport-kicker">当前模块</div>
+          <div className="novel-route-shell__viewport-title-row">
+            <strong>{currentPageMeta.label}</strong>
+            {pendingPage && pendingPage !== currentPage ? (
+              <span className="novel-route-shell__viewport-loading">
+                <Spin size="small" />
+                正在切换
+              </span>
+            ) : null}
+          </div>
+          {currentPageMeta.summary ? (
+            <div className="novel-route-shell__viewport-summary">{currentPageMeta.summary}</div>
+          ) : null}
+        </div>
         <div className="novel-route-shell__content-frame">
           <div
             ref={contentBodyRef}
@@ -830,6 +908,18 @@ export default function NovelRouter() {
         </div>
       </main>
       </div>
+      <Drawer
+        placement="left"
+        width={320}
+        title={null}
+        open={isCompactShell && isSidebarDrawerOpen}
+        onClose={() => setIsSidebarDrawerOpen(false)}
+        className="novel-route-shell__drawer"
+        rootClassName="novel-route-shell__drawer-root"
+        closeIcon={null}
+      >
+        {sidebarContent}
+      </Drawer>
       {currentPage !== 'guide' && currentPage !== 'quality' && currentPage !== 'writeback' && currentPage !== 'batch-workbench' ? (
         <WorkspaceAIQualityBoard
           open={qualityBoardOpen}
