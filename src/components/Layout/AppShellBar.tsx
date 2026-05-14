@@ -15,21 +15,19 @@ const SECTION_LABELS = [
 export default function AppShellBar() {
   const location = useLocation()
 
-  const { title, summary } = useMemo(() => {
+  const { title } = useMemo(() => {
     if (location.pathname.startsWith('/novels/')) {
       const segments = location.pathname.split('/')
       const workspaceKey = segments[3]
       const workspace = WORKSPACE_MODULE_DEFINITIONS.find((item) => item.key === workspaceKey)
       return {
         title: workspace?.label || '小说工作区',
-        summary: workspace?.description || '当前项目创作界面',
       }
     }
 
     const section = SECTION_LABELS.find((item) => location.pathname.startsWith(item.key))
     return {
       title: section?.label || '小说工作台',
-      summary: section?.summary || '桌面应用工作界面',
     }
   }, [location.pathname])
 
@@ -39,7 +37,6 @@ export default function AppShellBar() {
       <div className="app-shell-bar__content">
         <div className="app-shell-bar__meta">
           <strong className="app-shell-bar__title">{title}</strong>
-          <span className="app-shell-bar__summary">{summary}</span>
         </div>
         <WindowControls
           className="app-shell-bar__window-controls"

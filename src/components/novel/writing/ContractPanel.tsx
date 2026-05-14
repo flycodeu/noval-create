@@ -15,12 +15,11 @@ interface ContractPanelProps {
   sections: ContractPanelSection[]
 }
 
-export default function ContractPanel({ title, subtitle, sections }: ContractPanelProps) {
+export default function ContractPanel({ title, subtitle: _subtitle, sections }: ContractPanelProps) {
   return (
     <section className="writing-side-panel">
       <div className="writing-side-panel__header">
         <strong className="writing-side-panel__title">{title}</strong>
-        {subtitle ? <span className="writing-side-panel__subtitle">{subtitle}</span> : null}
       </div>
 
       {sections.map((section) => (

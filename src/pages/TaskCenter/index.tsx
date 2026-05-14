@@ -618,6 +618,7 @@ export default function TaskCenter() {
       eyebrow="任务运行台"
       title="任务中心"
       description="把 AI 生成、重试、取消、报错和流式输出放在同一套工作台里，支持按每页 10 / 20 / 50 条查看任务历史。"
+      heroVariant="compact"
       actions={(
         <div className="task-center-toolbar">
           <Button icon={<ReloadOutlined />} loading={loading && !clearingHistory} onClick={() => void loadTasks()}>
@@ -632,7 +633,6 @@ export default function TaskCenter() {
           >
             清空历史
           </Button>
-          <div className="novel-pill">{`当前筛选共 ${pageData.total} 条，每页 ${pageData.pageSize} 条`}</div>
         </div>
       )}
       metrics={(
@@ -646,12 +646,13 @@ export default function TaskCenter() {
     >
       <div className="novel-split novel-split--sidebar">
         <WorkspacePanel
+          className="task-center-list-panel"
           scrollable
-          title="任务列表"
           extra={(
-            <div className="novel-filter-bar">
+            <div className="novel-filter-bar task-center-filter-bar">
               <div className="novel-filter-bar__row">
                 <Select
+                  className="task-center-filter-control"
                   value={statusFilter}
                   onChange={handleStatusFilterChange}
                   options={[
@@ -666,6 +667,7 @@ export default function TaskCenter() {
                   ]}
                 />
                 <Select
+                  className="task-center-filter-control"
                   value={typeFilter}
                   onChange={handleTypeFilterChange}
                   options={[
@@ -673,6 +675,9 @@ export default function TaskCenter() {
                     ...Object.entries(TYPE_LABELS).map(([value, label]) => ({ value, label })),
                   ]}
                 />
+              </div>
+              <div className="novel-filter-bar__summary task-center-filter-summary">
+                {`当前筛选 ${pageData.total} 条 · 每页 ${pageData.pageSize} 条`}
               </div>
             </div>
           )}
@@ -706,6 +711,7 @@ export default function TaskCenter() {
                 {pageData.items.map((task) => {
                   const status = STATUS_LABELS[task.status] || STATUS_LABELS.pending
                   const stream = streams[task.id]
+                  const hasError = Boolean(task.errorMessage)
                   return (
                     <button
                       key={task.id}
@@ -733,21 +739,9 @@ export default function TaskCenter() {
                           </div>
                         </div>
                         <div
-                          className="task-center-card__summary"
-                          style={
-                            task.errorMessage
-                              ? {
-                                  color: 'var(--color-error, #ff4d4f)',
-                                  borderLeft: '3px solid var(--color-error, #ff4d4f)',
-                                  paddingLeft: 10,
-                                  marginTop: 6,
-                                  whiteSpace: 'pre-wrap',
-                                  wordBreak: 'break-word',
-                                }
-                              : undefined
-                          }
+                          className={`task-center-card__summary${hasError ? ' is-error' : ''}`}
                         >
-                          {task.errorMessage ? (
+                          {hasError ? (
                             <>
                               <strong style={{ marginRight: 6 }}>失败原因：</strong>
                               {task.errorMessage}
@@ -777,6 +771,7 @@ export default function TaskCenter() {
         </WorkspacePanel>
 
         <WorkspacePanel
+          className="task-center-detail-panel"
           scrollable
           title={selectedTask ? `任务详情 · ${getTaskTypeLabel(selectedTask.type)}` : '任务详情'}
           description="集中查看状态、报错、流式输出和请求上下文。"

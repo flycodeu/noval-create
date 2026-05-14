@@ -7,7 +7,7 @@ function joinClassNames(...values: Array<string | false | null | undefined>) {
 export function WorkspacePage({
   eyebrow,
   title,
-  description,
+  description: _description,
   actions,
   metrics,
   contextSummary,
@@ -51,11 +51,10 @@ export function WorkspacePage({
       )}
     >
       <section className={joinClassNames('novel-hero', heroVariant === 'compact' && 'novel-hero--compact')}>
-        <div className="novel-hero__copy">
-          {eyebrow ? <div className="novel-hero__eyebrow">{eyebrow}</div> : null}
-          <h1 className="novel-hero__title">{title}</h1>
-          {description ? <p className="novel-hero__description">{description}</p> : null}
-        </div>
+          <div className="novel-hero__copy">
+            {eyebrow ? <div className="novel-hero__eyebrow">{eyebrow}</div> : null}
+            <h1 className="novel-hero__title">{title}</h1>
+          </div>
         {actions ? <div className="novel-hero__actions">{actions}</div> : null}
         {contextSummary ? <div className="novel-hero__context">{contextSummary}</div> : null}
         {metrics ? <div className="novel-hero__metrics">{metrics}</div> : null}
@@ -101,7 +100,7 @@ export function WorkspaceMetric({
 
 export function WorkspacePanel({
   title,
-  description,
+  description: _description,
   extra,
   scrollable = false,
   sticky = false,
@@ -132,7 +131,6 @@ export function WorkspacePanel({
           {title ? (
             <div className="novel-panel__copy">
               {title ? <h2 className="novel-panel__title">{title}</h2> : null}
-              {description ? <div className="novel-panel__desc">{description}</div> : null}
             </div>
           ) : null}
           {extra ? <div className="novel-panel__extra">{extra}</div> : null}

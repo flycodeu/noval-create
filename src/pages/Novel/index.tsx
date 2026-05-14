@@ -883,9 +883,6 @@ export default function NovelRouter() {
               </span>
             ) : null}
           </div>
-          {currentPageMeta.summary ? (
-            <div className="novel-route-shell__viewport-summary">{currentPageMeta.summary}</div>
-          ) : null}
         </div>
         <div className="novel-route-shell__content-frame">
           <div

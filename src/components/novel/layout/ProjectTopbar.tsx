@@ -49,7 +49,7 @@ interface ProjectTopbarProps {
 export default function ProjectTopbar({
   projectTitle,
   workspaceLabel,
-  workspaceSummary,
+  workspaceSummary: _workspaceSummary,
   mode,
   onModeChange,
   onBack,
@@ -176,11 +176,6 @@ export default function ProjectTopbar({
               <div className="project-topbar__project-name" title={projectTitle}>{projectTitle}</div>
               <div className="project-topbar__workspace-line">
                 <strong className="project-topbar__workspace-name" title={workspaceLabel}>{workspaceLabel}</strong>
-                {workspaceSummary ? (
-                  <span className="project-topbar__workspace-summary" title={workspaceSummary}>
-                    {workspaceSummary}
-                  </span>
-                ) : null}
               </div>
             </div>
           </div>

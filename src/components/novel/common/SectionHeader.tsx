@@ -9,7 +9,7 @@ interface SectionHeaderProps {
 
 export default function SectionHeader({
   title,
-  description,
+  description: _description,
   eyebrow,
   extra,
 }: SectionHeaderProps) {
@@ -18,9 +18,6 @@ export default function SectionHeader({
       <div className="novel-section-header__copy">
         {eyebrow ? <span className="novel-section-header__eyebrow">{eyebrow}</span> : null}
         <strong className="novel-section-header__title">{title}</strong>
-        {description ? (
-          <span className="novel-section-header__description">{description}</span>
-        ) : null}
       </div>
       {extra ? <div className="novel-section-header__extra">{extra}</div> : null}
     </div>

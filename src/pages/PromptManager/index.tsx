@@ -403,6 +403,7 @@ export default function PromptManager() {
   const [selectedPromptKey, setSelectedPromptKey] = useState<string>('')
   const [editingTemplate, setEditingTemplate] = useState('')
   const [editModalOpen, setEditModalOpen] = useState(false)
+  const [previewModalOpen, setPreviewModalOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -480,6 +481,17 @@ export default function PromptManager() {
     () => promptRows.filter(({ layers }) => layers.includes('公共中文底板')).length,
     [promptRows],
   )
+  const selectedPromptTemplateStats = useMemo(() => {
+    if (!selectedPromptRow) return null
+    const text = sanitizePromptText(selectedPromptRow.currentTemplate)
+    const lines = text ? text.split('\n').length : 0
+    const characters = text.length
+    return {
+      lines,
+      characters,
+      params: selectedPromptRow.prompt.params.length,
+    }
+  }, [selectedPromptRow])
 
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(sanitizePromptText(text)).then(() => message.success(getUserFacingMessage('common.copied')))
@@ -523,8 +535,9 @@ export default function PromptManager() {
       description="这里维护的是直接作用到生成链路的运行时提示词。左侧按生产阶段筛选，右侧检查当前模板、中文底板接入情况和服务层追加护栏。"
       heroVariant="compact"
       actions={(
-        <div className="admin-toolbar__actions">
+        <div className="prompt-manager-toolbar">
           <Input.Search
+            className="prompt-manager-toolbar__search"
             placeholder="搜索提示词、阶段或 key"
             value={searchText}
             onChange={(event) => setSearchText(event.target.value)}
@@ -632,13 +645,13 @@ export default function PromptManager() {
 
         <div className="prompt-manager-inspector">
           <WorkspacePanel
-            scrollable
             className="prompt-manager-inspector-panel"
             title={selectedPromptRow ? selectedPromptRow.prompt.name : '未选择提示词'}
             description={selectedPromptRow ? selectedPromptRow.meta.goal : '从左侧选择一条提示词后，这里会显示它的运行时模板、风险和参数。'}
             extra={selectedPromptRow ? (
               <div className="prompt-manager-inspector-actions">
                 <Button size="small" icon={<CopyOutlined />} onClick={() => handleCopy(selectedPromptRow.currentTemplate)}>复制</Button>
+                <Button size="small" onClick={() => setPreviewModalOpen(true)}>展开全文</Button>
                 <Button
                   size="small"
                   type="primary"
@@ -674,53 +687,68 @@ export default function PromptManager() {
                   <span>这里展示的是当前运行中的模板。真正生效的链路通常由三层组成：基础模板、公共中文底板，以及 Electron 服务层追加的生产护栏。</span>
                 </div>
 
-                {selectedPromptProtected ? (
-                  <div className="prompt-manager-inspector-section">
-                    <div className="prompt-manager-inspector-section__title">系统保留规则</div>
-                    <div className="prompt-manager-inspector-section__copy">
-                      这类章节级 prompt 即使被运行时覆盖，服务层仍会追加不可覆盖规则，并写入 override 审计记录。
+                <div className="prompt-manager-inspector-section prompt-manager-template-stage">
+                  <div className="prompt-manager-template-stage__head">
+                    <div className="prompt-manager-template-stage__copy">
+                      <div className="prompt-manager-inspector-section__title">当前模板</div>
+                      <div className="prompt-manager-inspector-section__copy">把长提示词前置成阅读区，先看正文，再决定是否复制或编辑。</div>
                     </div>
+                    {selectedPromptTemplateStats ? (
+                      <div className="prompt-manager-template-stage__stats">
+                        <Tag>{`${selectedPromptTemplateStats.lines} 行`}</Tag>
+                        <Tag>{`${selectedPromptTemplateStats.characters} 字符`}</Tag>
+                        <Tag>{`${selectedPromptTemplateStats.params} 个参数`}</Tag>
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="prompt-manager-template-preview prompt-manager-template-preview--featured">{selectedPromptRow.currentTemplate}</div>
+                </div>
+
+                <div className="prompt-manager-inspector-grid">
+                  <div className="prompt-manager-inspector-section">
+                    <div className="prompt-manager-inspector-section__title">风险点</div>
+                    <div className="prompt-manager-inspector-section__copy">{selectedPromptRow.meta.risk}</div>
+                  </div>
+
+                  <div className="prompt-manager-inspector-section">
+                    <div className="prompt-manager-inspector-section__title">组成层</div>
                     <div className="prompt-manager-param-list">
-                      {PROTECTED_PROMPT_RULES.map((rule) => (
-                        <Tag key={rule} style={{ fontSize: 11 }}>
-                          {rule}
+                      {selectedPromptRow.layers.map((layer) => (
+                        <Tag key={layer} style={{ fontSize: 11 }}>
+                          {layer}
                         </Tag>
                       ))}
                     </div>
                   </div>
-                ) : null}
 
-                <div className="prompt-manager-inspector-section">
-                  <div className="prompt-manager-inspector-section__title">风险点</div>
-                  <div className="prompt-manager-inspector-section__copy">{selectedPromptRow.meta.risk}</div>
-                </div>
-
-                <div className="prompt-manager-inspector-section">
-                  <div className="prompt-manager-inspector-section__title">组成层</div>
-                  <div className="prompt-manager-param-list">
-                    {selectedPromptRow.layers.map((layer) => (
-                      <Tag key={layer} style={{ fontSize: 11 }}>
-                        {layer}
-                      </Tag>
-                    ))}
+                  <div className="prompt-manager-inspector-section">
+                    <div className="prompt-manager-inspector-section__title">输入参数</div>
+                    <div className="prompt-manager-param-list">
+                      {selectedPromptRow.prompt.params.map((param) => (
+                        <Tag key={param.key} style={{ fontSize: 11 }}>
+                          {param.key} · {param.label}
+                        </Tag>
+                      ))}
+                    </div>
                   </div>
+
+                  {selectedPromptProtected ? (
+                    <div className="prompt-manager-inspector-section">
+                      <div className="prompt-manager-inspector-section__title">系统保留规则</div>
+                      <div className="prompt-manager-inspector-section__copy">
+                        这类章节级 prompt 即使被运行时覆盖，服务层仍会追加不可覆盖规则，并写入 override 审计记录。
+                      </div>
+                      <div className="prompt-manager-param-list">
+                        {PROTECTED_PROMPT_RULES.map((rule) => (
+                          <Tag key={rule} style={{ fontSize: 11 }}>
+                            {rule}
+                          </Tag>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
 
-                <div className="prompt-manager-inspector-section">
-                  <div className="prompt-manager-inspector-section__title">输入参数</div>
-                  <div className="prompt-manager-param-list">
-                    {selectedPromptRow.prompt.params.map((param) => (
-                      <Tag key={param.key} style={{ fontSize: 11 }}>
-                        {param.key} · {param.label}
-                      </Tag>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="prompt-manager-inspector-section">
-                  <div className="prompt-manager-inspector-section__title">当前模板</div>
-                  <div className="prompt-manager-template-preview">{selectedPromptRow.currentTemplate}</div>
-                </div>
               </div>
             ) : (
               <div className="novel-empty">当前筛选下没有可显示的提示词。</div>
@@ -736,7 +764,7 @@ export default function PromptManager() {
         onOk={() => void handleEditSave()}
         okText="保存并生效"
         confirmLoading={saving}
-        width={880}
+        width="min(880px, calc(100vw - 32px))"
         destroyOnHidden
       >
         <div style={{ marginBottom: 12, color: 'var(--color-text-secondary)', fontSize: 12 }}>
@@ -756,9 +784,49 @@ export default function PromptManager() {
         <Input.TextArea
           value={editingTemplate}
           onChange={(e) => setEditingTemplate(e.target.value)}
-          rows={20}
-          style={{ fontFamily: 'monospace', fontSize: 12 }}
+          autoSize={{ minRows: 22, maxRows: 36 }}
+          style={{ fontFamily: 'monospace', fontSize: 12, resize: 'vertical' }}
         />
+      </Modal>
+
+      <Modal
+        title={`模板全文 · ${selectedPromptRow?.prompt.name || ''}`}
+        open={previewModalOpen}
+        onCancel={() => setPreviewModalOpen(false)}
+        footer={selectedPromptRow ? [
+          <Button key="copy" icon={<CopyOutlined />} onClick={() => handleCopy(selectedPromptRow.currentTemplate)}>
+            复制
+          </Button>,
+          <Button
+            key="edit"
+            type="primary"
+            icon={<EditOutlined />}
+            onClick={() => {
+              setPreviewModalOpen(false)
+              setEditingTemplate(selectedPromptRow.currentTemplate)
+              setEditModalOpen(true)
+            }}
+          >
+            编辑
+          </Button>,
+        ] : null}
+        width="min(1180px, calc(100vw - 32px))"
+        destroyOnHidden
+      >
+        {selectedPromptRow ? (
+          <div className="prompt-manager-preview-modal">
+            {selectedPromptTemplateStats ? (
+              <div className="prompt-manager-template-stage__stats">
+                <Tag>{`${selectedPromptTemplateStats.lines} 行`}</Tag>
+                <Tag>{`${selectedPromptTemplateStats.characters} 字符`}</Tag>
+                <Tag>{`${selectedPromptTemplateStats.params} 个参数`}</Tag>
+              </div>
+            ) : null}
+            <div className="prompt-manager-template-preview prompt-manager-template-preview--modal">
+              {selectedPromptRow.currentTemplate}
+            </div>
+          </div>
+        ) : null}
       </Modal>
     </WorkspacePage>
   )
