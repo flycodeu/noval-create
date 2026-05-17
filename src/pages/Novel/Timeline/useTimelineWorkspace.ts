@@ -460,7 +460,6 @@ export function useTimelineWorkspace(
     loadPartsFor,
     loadSegmentsFor,
     page,
-    pageData.total,
     partFilter,
     route.chapterId,
     route.eventId,

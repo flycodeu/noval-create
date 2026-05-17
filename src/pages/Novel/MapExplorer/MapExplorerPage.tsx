@@ -674,7 +674,7 @@ export default function MapExplorerPage({ novelId }: Props) {
     message.success(getUserFacingMessage('map.childCreated'))
   }
 
-  const handleClear = async () => {
+  const handleClear = useCallback(async () => {
     Modal.confirm({
       title: '清空地图结构？',
       content: '会删除当前小说下的全部地图节点与关系，并丢弃当前未保存的编辑内容。',
@@ -697,7 +697,7 @@ export default function MapExplorerPage({ novelId }: Props) {
         message.success(getUserFacingMessage('map.cleared'))
       },
     })
-  }
+  }, [autoTask, loadAllRelations, loadBranch, loadRoots, loadStats, loadTree, novelId, notifyWorkspaceMutation, resetWorkspaceState, waitForAutoTaskToSettle])
 
   useEffect(() => {
     registerClearHandler(() => {

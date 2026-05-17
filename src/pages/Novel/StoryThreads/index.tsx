@@ -4,6 +4,7 @@ import VirtualList from 'rc-virtual-list'
 import { useRef } from 'react'
 import { ArrowRightOutlined, BarsOutlined, DeleteOutlined, PlusOutlined, RobotOutlined } from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import AIGenerateButton from '../../../components/AIGenerateButton'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import type { ForeshadowSnapshot, StoryThread } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
@@ -20,6 +21,8 @@ import {
   WorkspacePage,
   WorkspacePanel,
 } from '../components/WorkspaceShell'
+import { buildDraftMessages, parseDraftJson } from '../shared/ai-draft'
+import { buildPlanningContextSections } from '../shared/planning-context'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import './index.css'
 
@@ -172,6 +175,10 @@ function formatChapter(value?: number | null): string {
   return `第 ${value} 章`
 }
 
+function hasFilledValues(values: Array<string | undefined | null>): boolean {
+  return values.some((value) => Boolean(value && value.trim()))
+}
+
 function StoryThreadRow({
   thread,
   selected,
@@ -300,6 +307,15 @@ export default function StoryThreadsPage({ novelId }: Props) {
     () => getWorkflowBlockers('threads', currentNovel, workflowStats),
     [currentNovel, workflowStats],
   )
+  const watchedEditorValues = Form.useWatch([], editorForm) as Partial<StoryThreadFormValues> | undefined
+  const editorValues = useMemo<Partial<StoryThreadFormValues>>(
+    () => watchedEditorValues ?? {},
+    [watchedEditorValues],
+  )
+  const currentEditorValues = useMemo<StoryThreadFormValues>(() => ({
+    ...buildEditorValues(editingThread),
+    ...editorValues,
+  }), [editingThread, editorValues])
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -751,6 +767,76 @@ export default function StoryThreadsPage({ novelId }: Props) {
       >
         <Form form={editorForm} layout="vertical" initialValues={EMPTY_EDITOR_VALUES}>
           <div className="guided-step__field-grid">
+            <div className="guided-step__field-card guided-step__field-card--full">
+              <AIGenerateButton
+                novelId={novelId}
+                label={editingThread ? 'AI 补全·当前线程' : 'AI 生成·线程草稿'}
+                intent={hasFilledValues([
+                  currentEditorValues.title,
+                  currentEditorValues.summary,
+                  currentEditorValues.premise,
+                  currentEditorValues.currentState,
+                  currentEditorValues.payoffCondition,
+                  currentEditorValues.notes,
+                ]) ? 'complete' : 'generate'}
+                isJson
+                buildMessages={() => buildDraftMessages({
+                  task: editingThread ? `故事线程 · ${editingThread.title}` : '故事线程草稿',
+                  mode: hasFilledValues([
+                    currentEditorValues.title,
+                    currentEditorValues.summary,
+                    currentEditorValues.premise,
+                    currentEditorValues.currentState,
+                    currentEditorValues.payoffCondition,
+                    currentEditorValues.notes,
+                  ]) ? 'optimize' : 'replace',
+                  context: buildPlanningContextSections(currentNovel, {
+                    includeSubplots: true,
+                    extraSections: [
+                      { label: '现有线程概况', value: threads.slice(0, 12).map((item) => `${item.title} · ${item.threadType} · ${item.status}`) },
+                      { label: '伏笔追踪概况', value: [
+                        `待回收：${foreshadowSnapshot.pending.length}`,
+                        `即将到期：${foreshadowSnapshot.dueSoon.length}`,
+                        `超期未收：${foreshadowSnapshot.overdue.length}`,
+                      ].join('\n') },
+                    ],
+                  }),
+                  fields: [
+                    { key: 'threadType', label: '线程类型', value: currentEditorValues.threadType, hint: '只用 main、subplot、mystery、payoff、relationship 之一。' },
+                    { key: 'status', label: '当前状态', value: currentEditorValues.status, hint: '只用 planned、active、stalled、resolved、abandoned 之一。' },
+                    { key: 'priority', label: '优先级', value: currentEditorValues.priority, hint: '只用 high、medium、low 之一。' },
+                    { key: 'title', label: '线程标题', value: currentEditorValues.title, hint: '写成具体冲突或关系线标题。' },
+                    { key: 'summary', label: '线程摘要', value: currentEditorValues.summary, hint: '用 1-2 句话说明持续推动什么。' },
+                    { key: 'premise', label: '触发前提/起始条件', value: currentEditorValues.premise, hint: '写这条线程为何成立。' },
+                    { key: 'startChapter', label: '开始章位', type: 'number', value: currentEditorValues.startChapter, hint: '给出正整数章位。' },
+                    { key: 'targetPayoffChapter', label: '目标回收章位', type: 'number', value: currentEditorValues.targetPayoffChapter, hint: '给出正整数章位。' },
+                    { key: 'currentState', label: '当前状态描述', value: currentEditorValues.currentState, hint: '写现在推进到了哪一步。' },
+                    { key: 'payoffCondition', label: '回收条件', value: currentEditorValues.payoffCondition, hint: '写清发生什么后才算真正回收。' },
+                    { key: 'notes', label: '补充说明', value: currentEditorValues.notes, hint: '补充风险点、伏笔位置或线程耦合。' },
+                  ],
+                  requirements: [
+                    '必须与已有故事设计、终局设计、角色和阻力系统一致。',
+                    '不要复制已有线程，也不要产出空泛的“主线继续推进”类描述。',
+                  ],
+                })}
+                onResult={(raw) => {
+                  const draft = parseDraftJson<Partial<StoryThreadFormValues>>(raw)
+                  editorForm.setFieldsValue({
+                    threadType: draft.threadType,
+                    status: draft.status,
+                    priority: draft.priority,
+                    title: typeof draft.title === 'string' ? draft.title : undefined,
+                    summary: typeof draft.summary === 'string' ? draft.summary : undefined,
+                    premise: typeof draft.premise === 'string' ? draft.premise : undefined,
+                    startChapter: typeof draft.startChapter === 'number' ? draft.startChapter : undefined,
+                    targetPayoffChapter: typeof draft.targetPayoffChapter === 'number' ? draft.targetPayoffChapter : undefined,
+                    currentState: typeof draft.currentState === 'string' ? draft.currentState : undefined,
+                    payoffCondition: typeof draft.payoffCondition === 'string' ? draft.payoffCondition : undefined,
+                    notes: typeof draft.notes === 'string' ? draft.notes : undefined,
+                  })
+                }}
+              />
+            </div>
             <div className="guided-step__field-card guided-step__field-card--compact">
               <Form.Item name="threadType" label="线程类型" rules={[{ required: true, message: '请选择线程类型' }]}>
                 <Select options={THREAD_TYPE_OPTIONS} />

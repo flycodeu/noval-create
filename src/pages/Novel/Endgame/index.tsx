@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Form, Input, Modal, Select, Space, Tag, message } from 'antd'
 import { ArrowRightOutlined, ImportOutlined, SaveOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
+import AIGenerateButton from '../../../components/AIGenerateButton'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { useNovelStore } from '../../../stores/novel.store'
 import type { EndgameAssetSummary } from '../../../types'
@@ -17,10 +18,12 @@ import {
   WorkspacePage,
   WorkspacePanel,
 } from '../components/WorkspaceShell'
+import { buildDraftMessages, parseDraftJson } from '../shared/ai-draft'
+import { buildPlanningContextSections } from '../shared/planning-context'
+import type { RegisteredWorkspaceQualityController } from '../workspace-quality-context-core'
 import {
-  type RegisteredWorkspaceQualityController,
   useRegisterWorkspaceQualityController,
-} from '../workspace-quality-context'
+} from '../workspace-quality-context-core'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 
 interface Props {
@@ -117,6 +120,10 @@ function mapLegacyEndingTypeToEndgameMode(endingType?: StoryEndingType): StoryEn
   }
 }
 
+function hasFilledValues(values: Array<string | undefined | null>): boolean {
+  return values.some((value) => Boolean(value && value.trim()))
+}
+
 export default function EndgamePage({ novelId }: Props) {
   const navigate = useNavigate()
   const { currentNovel, setCurrentNovel } = useNovelStore()
@@ -173,9 +180,25 @@ export default function EndgamePage({ novelId }: Props) {
   const promiseCount = countMultilineEntries(currentValues.mustDeliverPromises)
   const payoffCount = countMultilineEntries(currentValues.payoffChecklist)
 
-  const applyDraft = (draft: Partial<EndgameFormValues>) => {
+  const applyDraft = React.useCallback((draft: Partial<EndgameFormValues>) => {
     form.setFieldsValue(buildCurrentFormValues(snapshot, draft))
-  }
+  }, [form, snapshot])
+  const applyAnchorDraft = React.useCallback((draft: Partial<EndgameFormValues>) => {
+    applyDraft({
+      endingMode: draft.endingMode,
+      finalConflict: typeof draft.finalConflict === 'string' ? draft.finalConflict : undefined,
+      themeAnswer: typeof draft.themeAnswer === 'string' ? draft.themeAnswer : undefined,
+      lastScene: typeof draft.lastScene === 'string' ? draft.lastScene : undefined,
+      finalImage: typeof draft.finalImage === 'string' ? draft.finalImage : undefined,
+    })
+  }, [applyDraft])
+  const applyPayoffDraft = React.useCallback((draft: Partial<EndgameFormValues>) => {
+    applyDraft({
+      mustDeliverPromises: typeof draft.mustDeliverPromises === 'string' ? draft.mustDeliverPromises : undefined,
+      payoffChecklist: typeof draft.payoffChecklist === 'string' ? draft.payoffChecklist : undefined,
+      deliberateUnknowns: typeof draft.deliberateUnknowns === 'string' ? draft.deliberateUnknowns : undefined,
+    })
+  }, [applyDraft])
 
   const workspaceQualityController = useMemo<RegisteredWorkspaceQualityController>(() => ({
     workspaceKey: 'endgame',
@@ -198,7 +221,34 @@ export default function EndgamePage({ novelId }: Props) {
         lastScene: typeof fields.lastScene === 'string' ? fields.lastScene : undefined,
       })
     },
-  }), [form, snapshot])
+    persistPreview: async (nextSnapshot) => {
+      const fields = nextSnapshot.fields && typeof nextSnapshot.fields === 'object'
+        ? nextSnapshot.fields as Partial<EndgameFormValues>
+        : {}
+
+      const payload = buildStorySettingsPayload({
+        endgameDesign: {
+          endingMode: (fields.endingMode ?? snapshot.endingMode) || undefined,
+          finalConflict: typeof fields.finalConflict === 'string' ? normalizeText(fields.finalConflict) : snapshot.finalConflict,
+          themeAnswer: typeof fields.themeAnswer === 'string' ? normalizeText(fields.themeAnswer) : snapshot.themeAnswer,
+          mustDeliverPromises: typeof fields.mustDeliverPromises === 'string' ? normalizeText(fields.mustDeliverPromises) : snapshot.mustDeliverPromises,
+          payoffChecklist: typeof fields.payoffChecklist === 'string' ? normalizeText(fields.payoffChecklist) : snapshot.payoffChecklist,
+          deliberateUnknowns: typeof fields.deliberateUnknowns === 'string' ? normalizeText(fields.deliberateUnknowns) : snapshot.deliberateUnknowns,
+          finalImage: typeof fields.finalImage === 'string' ? normalizeText(fields.finalImage) : snapshot.finalImage,
+          lastScene: typeof fields.lastScene === 'string' ? normalizeText(fields.lastScene) : snapshot.lastScene,
+        },
+      }, currentNovel?.settingsJson)
+
+      await window.electron.novel.update(novelId, {
+        settingsJson: JSON.stringify(payload),
+      })
+      const syncResult = await window.electron.endgameAsset.syncFromSettings(novelId, JSON.stringify(payload))
+      setAssetSummary(syncResult.summary)
+
+      const updated = await window.electron.novel.get(novelId)
+      if (updated) setCurrentNovel(updated)
+    },
+  }), [applyDraft, currentNovel?.settingsJson, form, novelId, setCurrentNovel, snapshot])
 
   useRegisterWorkspaceQualityController(workspaceQualityController)
 
@@ -257,7 +307,7 @@ export default function EndgamePage({ novelId }: Props) {
     message.success(getUserFacingMessage('endgame.importedReusableFields'))
   }
 
-  const handleClear = useMemo(() => () => {
+  const handleClear = React.useCallback(() => {
     Modal.confirm({
       title: '清空终局设计？',
       content: '会清空当前终局表单，并同步删除对应的终局承诺资产。',
@@ -383,7 +433,55 @@ export default function EndgamePage({ novelId }: Props) {
         </div>
       </WorkspacePanel>
 
-      <WorkspacePanel title="终局锚点" description="先固定最终冲突、主题答案和最后一幕。">
+      <WorkspacePanel
+        title="终局锚点"
+        description="先固定最终冲突、主题答案和最后一幕。"
+        extra={(
+          <AIGenerateButton
+            novelId={novelId}
+            label="AI 生成·终局锚点"
+            intent={hasFilledValues([
+              currentValues.finalConflict,
+              currentValues.themeAnswer,
+              currentValues.lastScene,
+              currentValues.finalImage,
+            ]) ? 'complete' : 'generate'}
+            isJson
+            buildMessages={() => buildDraftMessages({
+              task: '终局锚点',
+              mode: hasFilledValues([
+                currentValues.finalConflict,
+                currentValues.themeAnswer,
+                currentValues.lastScene,
+                currentValues.finalImage,
+              ]) ? 'optimize' : 'replace',
+              context: buildPlanningContextSections(currentNovel, {
+                includeSubplots: false,
+                extraSections: [
+                  { label: '当前终局方向', value: settings.storyDesign.ending || '' },
+                  { label: '已同步终局资产', value: assetSummary ? `${assetSummary.totalCount} 条` : '' },
+                ],
+              }),
+              fields: [
+                { key: 'endingMode', label: '结局类型', value: currentValues.endingMode, hint: '只用 victory、hard_won、costly_victory、tragic、ironic、open、multi_line 之一。' },
+                { key: 'finalConflict', label: '最终冲突对象', value: currentValues.finalConflict, hint: '写清主角最后必须正面解决的对象、体制、真相或困局。' },
+                { key: 'themeAnswer', label: '主题答案', value: currentValues.themeAnswer, hint: '给出最终答案，不要空泛说教。' },
+                { key: 'lastScene', label: '最后一幕', value: currentValues.lastScene, hint: '写清最后停留的画面、人物状态和情绪余波。' },
+                { key: 'finalImage', label: '终章意象', value: currentValues.finalImage, hint: '保留会在结尾回响的动作、空间或意象。' },
+              ],
+              requirements: [
+                '必须与已有故事设计、人物代价和世界规则一致。',
+                '不要把终局锚点写成整段剧情梗概。',
+                '最后一幕要具备可视化画面感。',
+              ],
+            })}
+            onResult={(raw) => {
+              const draft = parseDraftJson<Partial<EndgameFormValues>>(raw)
+              applyAnchorDraft(draft)
+            }}
+          />
+        )}
+      >
         <Form form={form} layout="vertical">
           <div className="guided-step__field-grid">
             <div className="guided-step__field-card guided-step__field-card--compact">
@@ -415,7 +513,56 @@ export default function EndgamePage({ novelId }: Props) {
         </Form>
       </WorkspacePanel>
 
-      <WorkspacePanel title="兑现与留白" description="把必须兑现和故意保留的内容拆开写。">
+      <WorkspacePanel
+        title="兑现与留白"
+        description="把必须兑现和故意保留的内容拆开写。"
+        extra={(
+          <AIGenerateButton
+            novelId={novelId}
+            label="AI 生成·兑现与留白"
+            intent={hasFilledValues([
+              currentValues.mustDeliverPromises,
+              currentValues.payoffChecklist,
+              currentValues.deliberateUnknowns,
+            ]) ? 'complete' : 'generate'}
+            isJson
+            buildMessages={() => buildDraftMessages({
+              task: '终局兑现与留白',
+              mode: hasFilledValues([
+                currentValues.mustDeliverPromises,
+                currentValues.payoffChecklist,
+                currentValues.deliberateUnknowns,
+              ]) ? 'optimize' : 'replace',
+              context: buildPlanningContextSections(currentNovel, {
+                includeSubplots: true,
+                extraSections: [
+                  { label: '当前终局锚点', value: [
+                    currentValues.endingMode ? `结局类型：${currentValues.endingMode}` : '',
+                    currentValues.finalConflict ? `最终冲突：${currentValues.finalConflict}` : '',
+                    currentValues.themeAnswer ? `主题答案：${currentValues.themeAnswer}` : '',
+                    currentValues.lastScene ? `最后一幕：${currentValues.lastScene}` : '',
+                    currentValues.finalImage ? `终章意象：${currentValues.finalImage}` : '',
+                  ].filter(Boolean).join('\n') },
+                ],
+              }),
+              fields: [
+                { key: 'mustDeliverPromises', label: '必须兑现的承诺', value: currentValues.mustDeliverPromises, hint: '建议每行一条，写读者会明确等待的结果。' },
+                { key: 'payoffChecklist', label: '长线回收清单', value: currentValues.payoffChecklist, hint: '建议每行一条，只写终局阶段必须爆开的点。' },
+                { key: 'deliberateUnknowns', label: '故意保留的未解释项', value: currentValues.deliberateUnknowns, hint: '只保留少量、明确、可控的留白。' },
+              ],
+              requirements: [
+                '承诺和回收要写成可核对条目，不要写抽象愿景。',
+                '故意保留的未解释项必须少而明确，不能把真正漏写包装成留白。',
+                '优先对齐主线冲突、人物代价、支线回收和终局资产。',
+              ],
+            })}
+            onResult={(raw) => {
+              const draft = parseDraftJson<Partial<EndgameFormValues>>(raw)
+              applyPayoffDraft(draft)
+            }}
+          />
+        )}
+      >
         <Form form={form} layout="vertical">
           <div className="guided-step__field-grid">
             <div className="guided-step__field-card">

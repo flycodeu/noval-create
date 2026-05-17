@@ -16,6 +16,7 @@ import type {
   CoreSettingsGenerationProgressEvent,
   CoreSettingsGenerationResult,
 } from '../../../shared/core-settings-generation'
+import AIGenerateButton from '../../../components/AIGenerateButton'
 import { estimateChapterCountFromOperatingMode } from '../../../shared/operating-mode'
 import {
   buildStorySettingsPayload,
@@ -38,10 +39,12 @@ import {
   WorkspacePage,
   WorkspacePanel,
 } from '../components/WorkspaceShell'
+import { buildDraftMessages, normalizeOptionalNumber, parseDraftJson } from '../shared/ai-draft'
+import { buildPlanningContextSections } from '../shared/planning-context'
+import type { RegisteredWorkspaceQualityController } from '../workspace-quality-context-core'
 import {
-  type RegisteredWorkspaceQualityController,
   useRegisterWorkspaceQualityController,
-} from '../workspace-quality-context'
+} from '../workspace-quality-context-core'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import { usePlanningDraft } from '../shared/planning-draft'
 
@@ -211,6 +214,10 @@ function normalizeSubplots(list: Array<Partial<SubPlot> | null | undefined>): Su
   }))
 }
 
+function hasFilledValues(values: Array<string | undefined | null>): boolean {
+  return values.some((value) => Boolean(value && value.trim()))
+}
+
 export default function CoreSettings({ novelId }: Props) {
   const navigate = useNavigate()
   const { currentNovel, setCurrentNovel } = useNovelStore()
@@ -224,11 +231,19 @@ export default function CoreSettings({ novelId }: Props) {
   const [selectedSubplotIndex, setSelectedSubplotIndex] = useState<number | null>(null)
   const [activeTab, setActiveTab] = useState('anchors')
   const [stats, setStats] = useState<WorkflowStats>(EMPTY_STATS)
+  const isMountedRef = React.useRef(true)
 
   const settings = useMemo(
     () => parseStorySettingsSnapshot(currentNovel?.settingsJson),
     [currentNovel?.settingsJson],
   )
+
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+    }
+  }, [])
 
   useEffect(() => {
     form.setFieldsValue({
@@ -301,7 +316,7 @@ export default function CoreSettings({ novelId }: Props) {
   const subplotLinkedCount = subplots.filter((subplot) => subplot.mainlineLink.trim()).length
   const subplotScheduledCount = subplots.filter((subplot) => Boolean(parseChapterMarker(subplot.endChapter))).length
   const selectedSubplot = selectedSubplotIndex === null ? null : subplots[selectedSubplotIndex] || null
-  const applyStoryDesignDraft = (draft: Partial<StoryDesignFormValues> & { subplots?: SubPlot[] }) => {
+  const applyStoryDesignDraft = React.useCallback((draft: Partial<StoryDesignFormValues> & { subplots?: SubPlot[] }) => {
     form.setFieldsValue({
       story_goal: typeof draft.story_goal === 'string' ? draft.story_goal : settings.storyDesign.storyGoal,
       core_conflict: typeof draft.core_conflict === 'string' ? draft.core_conflict : settings.storyDesign.coreConflict,
@@ -317,7 +332,7 @@ export default function CoreSettings({ novelId }: Props) {
       setSubplots(normalizeSubplots(draft.subplots))
       setSelectedSubplotIndex(null)
     }
-  }
+  }, [form, settings.storyDesign.ending, settings.storyDesign.endingType, settings.storyDesign.coreConflict, settings.storyDesign.mainPlot, settings.storyDesign.rhythmConflict, settings.storyDesign.rhythmEnding, settings.storyDesign.rhythmSetup, settings.storyDesign.storyGoal])
   const { clearDraft, finalizeDraft, saveAppliedDraft } = usePlanningDraft<StoryDesignFormValues & { subplots?: SubPlot[] }>({
     novelId,
     pageKey: 'story-design',
@@ -373,7 +388,7 @@ export default function CoreSettings({ novelId }: Props) {
         rawOutputs: [JSON.stringify(preview.patchedSnapshot)],
       })
     },
-  }), [batchCount, form, saveAppliedDraft, settings.storyDesign.rhythmConflict, settings.storyDesign.rhythmEnding, settings.storyDesign.rhythmSetup, subplots])
+  }), [applyStoryDesignDraft, batchCount, form, saveAppliedDraft, settings.storyDesign.rhythmConflict, settings.storyDesign.rhythmEnding, settings.storyDesign.rhythmSetup, subplots])
 
   useRegisterWorkspaceQualityController(workspaceQualityController)
 
@@ -444,7 +459,7 @@ export default function CoreSettings({ novelId }: Props) {
     }
   }
 
-  const clearStoryDesign = () => {
+  const clearStoryDesign = React.useCallback(() => {
     Modal.confirm({
       title: '清空当前故事设计',
       content: '会清空主线锚点、节奏、结局和支线卡片，但不会直接覆盖已经保存的小说设定。确认继续？',
@@ -468,7 +483,7 @@ export default function CoreSettings({ novelId }: Props) {
         message.success(getUserFacingMessage('coreSettings.designCleared'))
       },
     })
-  }
+  }, [form])
 
   const clearSubplots = () => {
     Modal.confirm({
@@ -488,7 +503,7 @@ export default function CoreSettings({ novelId }: Props) {
   useEffect(() => {
     registerClearHandler(clearStoryDesign)
     return () => registerClearHandler(null)
-  }, [registerClearHandler, currentNovel?.settingsJson, subplots.length])
+  }, [clearStoryDesign, registerClearHandler])
 
   const applyGeneratedResult = (result: CoreSettingsGenerationResult) => {
     form.setFieldsValue({
@@ -507,21 +522,27 @@ export default function CoreSettings({ novelId }: Props) {
 
   const waitForSubplotAutoGenerate = async (taskId: number) => {
     while (true) {
+      if (!isMountedRef.current) {
+        throw new Error(getUserFacingMessage('coreSettings.subplotBatchCancelled'))
+      }
+
       const status = await window.electron.subplot.getAutoGenerateStatus(taskId)
       if (!status) {
         throw new Error(getUserFacingMessage('coreSettings.subplotTaskMissing'))
       }
 
-      setGenerationProgress({
-        novelId,
-        step: 'sub_plots_list',
-        label: '支线布局',
-        status: status.status === 'failed' ? 'failed' : 'running',
-        completed: Math.min(status.currentBatch, status.totalBatches),
-        total: Math.max(status.totalBatches, 1),
-        detail: status.message || `正在执行第 ${Math.min(status.currentBatch + 1, Math.max(status.totalBatches, 1))} 批支线生成。`,
-        warning: status.warnings[status.warnings.length - 1],
-      })
+      if (isMountedRef.current) {
+        setGenerationProgress({
+          novelId,
+          step: 'sub_plots_list',
+          label: '支线布局',
+          status: status.status === 'failed' ? 'failed' : 'running',
+          completed: Math.min(status.currentBatch, status.totalBatches),
+          total: Math.max(status.totalBatches, 1),
+          detail: status.message || `正在执行第 ${Math.min(status.currentBatch + 1, Math.max(status.totalBatches, 1))} 批支线生成。`,
+          warning: status.warnings[status.warnings.length - 1],
+        })
+      }
 
       if (status.status === 'success') return status
       if (status.status === 'failed') {
@@ -699,7 +720,60 @@ export default function CoreSettings({ novelId }: Props) {
         </div>
       </WorkspacePanel>
 
-      <WorkspacePanel title="故事锚点" description="四个锚点先固定住，后面的结构页和时间轴页都围绕这里展开。">
+      <WorkspacePanel
+        title="故事锚点"
+        description="四个锚点先固定住，后面的结构页和时间轴页都围绕这里展开。"
+        extra={(
+          <AIGenerateButton
+            novelId={novelId}
+            label="AI 生成·故事锚点"
+            intent={hasFilledValues([
+              typeof formValues.story_goal === 'string' ? formValues.story_goal : '',
+              typeof formValues.core_conflict === 'string' ? formValues.core_conflict : '',
+              typeof formValues.main_plot === 'string' ? formValues.main_plot : '',
+              typeof formValues.ending === 'string' ? formValues.ending : '',
+            ]) ? 'complete' : 'generate'}
+            isJson
+            buildMessages={() => buildDraftMessages({
+              task: '故事设计的核心锚点',
+              mode: hasFilledValues([
+                typeof formValues.story_goal === 'string' ? formValues.story_goal : '',
+                typeof formValues.core_conflict === 'string' ? formValues.core_conflict : '',
+                typeof formValues.main_plot === 'string' ? formValues.main_plot : '',
+                typeof formValues.ending === 'string' ? formValues.ending : '',
+              ]) ? 'optimize' : 'replace',
+              context: buildPlanningContextSections(currentNovel, {
+                includeSubplots: false,
+                extraSections: [
+                  { label: '基础设定已完成', value: premiseReady ? '是' : '否' },
+                  { label: '资产就绪度', value: `${assetReadyCount}/4` },
+                ],
+              }),
+              fields: [
+                { key: 'story_goal', label: '故事核心目标', value: formValues.story_goal, hint: '写最终要抵达什么状态，不写流水账。' },
+                { key: 'core_conflict', label: '核心冲突', value: formValues.core_conflict, hint: '写目标为何难实现、谁在对抗、代价落在哪。' },
+                { key: 'main_plot', label: '主推进链', value: formValues.main_plot, hint: '写主线如何因果推进到终局。' },
+                { key: 'ending_type', label: '结局类型', value: formValues.ending_type, hint: '只用 HE、BE、open、multi、HE_BE 之一。' },
+                { key: 'ending', label: '结局落点', value: formValues.ending, hint: '写主要矛盾如何落地，代价与余波如何留下。' },
+              ],
+              requirements: [
+                '不要重写基础设定、人物设定和世界规则。',
+                '锚点必须可继续拆成结构、时间轴和章节。',
+              ],
+            })}
+            onResult={(raw) => {
+              const draft = parseDraftJson<Partial<StoryDesignFormValues>>(raw)
+              applyStoryDesignDraft({
+                story_goal: typeof draft.story_goal === 'string' ? draft.story_goal : undefined,
+                core_conflict: typeof draft.core_conflict === 'string' ? draft.core_conflict : undefined,
+                main_plot: typeof draft.main_plot === 'string' ? draft.main_plot : undefined,
+                ending_type: typeof draft.ending_type === 'string' ? draft.ending_type : undefined,
+                ending: typeof draft.ending === 'string' ? draft.ending : undefined,
+              })
+            }}
+          />
+        )}
+      >
         <Form form={form} layout="vertical">
           <div className="story-design__anchor-grid">
             <div className="story-design__anchor-card">
@@ -1004,9 +1078,67 @@ export default function CoreSettings({ novelId }: Props) {
         open={selectedSubplotIndex !== null && Boolean(selectedSubplot)}
         onClose={() => setSelectedSubplotIndex(null)}
         extra={selectedSubplotIndex !== null ? (
-          <Button danger type="text" icon={<DeleteOutlined />} onClick={() => removeSubplot(selectedSubplotIndex)}>
-            删除
-          </Button>
+          <Space wrap>
+            {selectedSubplot ? (
+              <AIGenerateButton
+                novelId={novelId}
+                label="AI 补全·当前支线"
+                intent={hasFilledValues([
+                  selectedSubplot.name,
+                  selectedSubplot.characters,
+                  selectedSubplot.conflict,
+                  selectedSubplot.mainlineLink,
+                  selectedSubplot.endChapter,
+                ]) ? 'complete' : 'generate'}
+                isJson
+                buildMessages={() => buildDraftMessages({
+                  task: '单条支线卡片',
+                  mode: hasFilledValues([
+                    selectedSubplot.name,
+                    selectedSubplot.characters,
+                    selectedSubplot.conflict,
+                    selectedSubplot.mainlineLink,
+                    selectedSubplot.endChapter,
+                  ]) ? 'optimize' : 'replace',
+                  context: buildPlanningContextSections(currentNovel, {
+                    includeSubplots: false,
+                    extraSections: [
+                      { label: '主线目标', value: typeof formValues.story_goal === 'string' ? formValues.story_goal : '' },
+                      { label: '核心冲突', value: typeof formValues.core_conflict === 'string' ? formValues.core_conflict : '' },
+                      { label: '主推进链', value: typeof formValues.main_plot === 'string' ? formValues.main_plot : '' },
+                      { label: '结局落点', value: typeof formValues.ending === 'string' ? formValues.ending : '' },
+                    ],
+                  }),
+                  fields: [
+                    { key: 'name', label: '支线名称', value: selectedSubplot.name, hint: '短、准、可识别，能直接点出这条支线的作用。' },
+                    { key: 'endChapter', label: '回收章位', value: selectedSubplot.endChapter, hint: '给出合理章位数字。' },
+                    { key: 'characters', label: '涉及人物', value: selectedSubplot.characters, hint: '使用顿号或逗号分隔。' },
+                    { key: 'conflict', label: '核心冲突', value: selectedSubplot.conflict, hint: '写这条支线真正制造的麻烦、代价与压力。' },
+                    { key: 'mainlineLink', label: '对主线的作用', value: selectedSubplot.mainlineLink, hint: '写它怎样反作用于主线、人物关系或主题压力。' },
+                  ],
+                  requirements: [
+                    '支线必须直接服务主线，不准游离成独立小故事。',
+                    '冲突和回收章位要与全书节奏和终局方向一致。',
+                  ],
+                })}
+                onResult={(raw) => {
+                  const draft = parseDraftJson<Partial<SubPlot>>(raw)
+                  updateSubplot(selectedSubplotIndex, {
+                    name: typeof draft.name === 'string' ? draft.name : selectedSubplot.name,
+                    endChapter: normalizeOptionalNumber(draft.endChapter ?? selectedSubplot.endChapter)
+                      ? String(normalizeOptionalNumber(draft.endChapter ?? selectedSubplot.endChapter))
+                      : (typeof draft.endChapter === 'string' ? draft.endChapter : selectedSubplot.endChapter),
+                    characters: typeof draft.characters === 'string' ? draft.characters : selectedSubplot.characters,
+                    conflict: typeof draft.conflict === 'string' ? draft.conflict : selectedSubplot.conflict,
+                    mainlineLink: typeof draft.mainlineLink === 'string' ? draft.mainlineLink : selectedSubplot.mainlineLink,
+                  })
+                }}
+              />
+            ) : null}
+            <Button danger type="text" icon={<DeleteOutlined />} onClick={() => removeSubplot(selectedSubplotIndex)}>
+              删除
+            </Button>
+          </Space>
         ) : null}
       >
         {selectedSubplot && selectedSubplotIndex !== null ? (

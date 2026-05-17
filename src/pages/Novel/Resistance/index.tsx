@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Alert, Button, Empty, Input, Modal, Select, Space, Spin, Tag, message } from 'antd'
 import { ApartmentOutlined, EditOutlined, PlusOutlined, ReloadOutlined, SaveOutlined, TeamOutlined } from '@ant-design/icons'
+import AIGenerateButton from '../../../components/AIGenerateButton'
 import type {
   ResistanceBeatInput,
   ResistanceDashboard,
@@ -19,6 +20,12 @@ import {
   WorkspacePanel,
   WorkspaceStepGuide,
 } from '../components/WorkspaceShell'
+import {
+  buildDraftMessages,
+  matchSelectionIdByLabels,
+  parseDraftJson,
+} from '../shared/ai-draft'
+import { buildPlanningContextSections } from '../shared/planning-context'
 import './index.css'
 
 interface Props {
@@ -110,6 +117,10 @@ function buildEnvironmentDraft(novelId: number, tab: 'environment' | 'institutio
   return buildSourceDraft(novelId, tab)
 }
 
+function hasFilledValues(values: Array<string | undefined | null>): boolean {
+  return values.some((value) => Boolean(value && value.trim()))
+}
+
 export default function ResistancePage({ novelId }: Props) {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -138,7 +149,7 @@ export default function ResistancePage({ novelId }: Props) {
     status: 'logged',
   })
 
-  const refresh = async (showLoading = false) => {
+  const refresh = useCallback(async (showLoading = false) => {
     if (showLoading) {
       setLoading(true)
     } else {
@@ -153,17 +164,17 @@ export default function ResistancePage({ novelId }: Props) {
       setLoading(false)
       setRefreshing(false)
     }
-  }
+  }, [novelId])
 
   useEffect(() => {
     void refresh(true)
-  }, [novelId])
+  }, [refresh])
 
-  const characters = dashboard?.availableCharacters || []
-  const factions = dashboard?.availableFactions || []
-  const trackList = dashboard?.tracks || []
-  const environmentTracks = dashboard?.environmentTracks || []
-  const institutionTracks = dashboard?.institutionTracks || []
+  const characters = useMemo(() => dashboard?.availableCharacters || [], [dashboard?.availableCharacters])
+  const factions = useMemo(() => dashboard?.availableFactions || [], [dashboard?.availableFactions])
+  const trackList = useMemo(() => dashboard?.tracks || [], [dashboard?.tracks])
+  const environmentTracks = useMemo(() => dashboard?.environmentTracks || [], [dashboard?.environmentTracks])
+  const institutionTracks = useMemo(() => dashboard?.institutionTracks || [], [dashboard?.institutionTracks])
   const selectedCharacterTrack = dashboard?.characterTracks.find((item) => item.sourceId === selectedCharacterId) || null
   const selectedFactionTrack = dashboard?.factionTracks.find((item) => item.sourceId === selectedFactionId) || null
   const selectedTrack = trackList.find((item) => item.id === selectedTrackId)
@@ -240,6 +251,11 @@ export default function ResistancePage({ novelId }: Props) {
     () => (dashboard?.volumes || []).map((item) => ({ value: item.id, label: item.title })),
     [dashboard],
   )
+  const volumeDraftOptions = useMemo(() => (dashboard?.volumes || []).map((item) => ({
+    id: item.id,
+    label: item.title,
+    aliases: [item.title, `第${item.volumeNumber}卷`],
+  })), [dashboard])
 
   const handleSave = async () => {
     if (!draft) return
@@ -502,7 +518,83 @@ export default function ResistancePage({ novelId }: Props) {
                 : renderStandaloneList(tab === 'environment' ? environmentTracks : institutionTracks)}
           </WorkspacePanel>
 
-          <WorkspacePanel className="novel-character-studio__editor" title="阻力线编辑" scrollable sticky>
+          <WorkspacePanel
+            className="novel-character-studio__editor"
+            title="阻力线编辑"
+            scrollable
+            sticky
+            extra={draft ? (
+              <AIGenerateButton
+                novelId={novelId}
+                label="AI 补全·当前阻力线"
+                intent={hasFilledValues([
+                  draft.goal,
+                  draft.intelSource,
+                  draft.resourcePool,
+                  draft.escalationPlan,
+                  draft.currentPressureMode,
+                ]) ? 'complete' : 'generate'}
+                isJson
+                buildMessages={() => buildDraftMessages({
+                  task: `${tab === 'characters' ? '人物反派阻力线' : tab === 'factions' ? '势力阻力线' : tab === 'environment' ? '环境阻力线' : '制度阻力线'}${selectedSourceLabel ? ` · ${selectedSourceLabel}` : ''}`,
+                  mode: hasFilledValues([
+                    draft.goal,
+                    draft.intelSource,
+                    draft.resourcePool,
+                    draft.escalationPlan,
+                    draft.currentPressureMode,
+                  ]) ? 'optimize' : 'replace',
+                  context: buildPlanningContextSections(currentNovel, {
+                    includeSubplots: true,
+                    extraSections: [
+                      { label: '阻力类别', value: tab },
+                      { label: '当前对象', value: selectedSourceLabel || '' },
+                      { label: '可绑定卷', value: (dashboard?.volumes || []).map((item) => item.title) },
+                    ],
+                  }),
+                  fields: [
+                    { key: 'title', label: '阻力标题', value: draft.title, hint: '写成可长期复用的阻力线名称。' },
+                    { key: 'goal', label: '阻力目标', value: draft.goal, hint: '写阻力方真正要拿到什么。' },
+                    { key: 'intelSource', label: '情报来源', value: draft.intelSource, hint: '写它掌握信息的来源和偏差。' },
+                    { key: 'resourcePool', label: '资源池', value: draft.resourcePool, hint: '写它能调动的人手、物资、权力或环境优势。' },
+                    { key: 'escalationPlan', label: '升级策略', value: draft.escalationPlan, hint: '写它在失手后如何继续加压。' },
+                    { key: 'heroKnowledgeShift', label: '主角认知变化', value: draft.heroKnowledgeShift, hint: '写主角在这条阻力线上会被迫知道什么。' },
+                    { key: 'stageVictory', label: '阶段胜利点', value: draft.stageVictory, hint: '写阻力方阶段性得手的节点。' },
+                    { key: 'counterMove', label: '失败后反制', value: draft.counterMove, hint: '写被破局后的二次反扑方式。' },
+                    { key: 'currentPressureMode', label: '当前出手方式', value: draft.currentPressureMode, hint: '写这一阶段实际压迫主角的方式。' },
+                    { key: 'notes', label: '备注', value: draft.notes, hint: '补充限制、误判、隐藏成本或跨页联动。' },
+                    { key: 'linkedVolumeTitle', label: '关联卷标题', value: dashboard?.volumes.find((item) => item.id === draft.linkedVolumeId)?.title || '', hint: '只能从可绑定卷里选一个卷标题。' },
+                  ],
+                  requirements: [
+                    '必须与人物、势力、世界规则和终局压力一致。',
+                    '不要把阻力线写成主角计划或章节流水账。',
+                  ],
+                })}
+                onResult={(raw) => {
+                  const result = parseDraftJson<Record<string, unknown>>(raw)
+                  setDraft((current) => {
+                    if (!current) return current
+                    return {
+                      ...current,
+                      title: typeof result.title === 'string' ? result.title : current.title,
+                      goal: typeof result.goal === 'string' ? result.goal : current.goal,
+                      intelSource: typeof result.intelSource === 'string' ? result.intelSource : current.intelSource,
+                      resourcePool: typeof result.resourcePool === 'string' ? result.resourcePool : current.resourcePool,
+                      escalationPlan: typeof result.escalationPlan === 'string' ? result.escalationPlan : current.escalationPlan,
+                      heroKnowledgeShift: typeof result.heroKnowledgeShift === 'string' ? result.heroKnowledgeShift : current.heroKnowledgeShift,
+                      stageVictory: typeof result.stageVictory === 'string' ? result.stageVictory : current.stageVictory,
+                      counterMove: typeof result.counterMove === 'string' ? result.counterMove : current.counterMove,
+                      currentPressureMode: typeof result.currentPressureMode === 'string' ? result.currentPressureMode : current.currentPressureMode,
+                      notes: typeof result.notes === 'string' ? result.notes : current.notes,
+                      linkedVolumeId: Object.prototype.hasOwnProperty.call(result, 'linkedVolumeTitle')
+                        ? matchSelectionIdByLabels(result.linkedVolumeTitle, volumeDraftOptions)
+                        : current.linkedVolumeId,
+                    }
+                  })
+                }}
+              />
+            ) : undefined}
+          >
             {draft ? (
               <>
                 <div className="guided-step__field-grid">
@@ -613,6 +705,66 @@ export default function ResistancePage({ novelId }: Props) {
         confirmLoading={beatSaving}
       >
         <div className="guided-step__field-grid">
+          <div className="guided-step__field-card guided-step__field-card--full">
+            <AIGenerateButton
+              novelId={novelId}
+              label="AI 生成·阻力推进"
+              intent={hasFilledValues([
+                beatDraft.title,
+                beatDraft.summary,
+                beatDraft.actionMode,
+                beatDraft.counterResponse,
+                beatDraft.protagonistImpact,
+              ]) ? 'complete' : 'generate'}
+              isJson
+              disabled={!selectedTrack}
+              buildMessages={() => buildDraftMessages({
+                task: selectedTrack ? `阻力推进记录 · ${selectedTrack.title}` : '阻力推进记录',
+                mode: hasFilledValues([
+                  beatDraft.title,
+                  beatDraft.summary,
+                  beatDraft.actionMode,
+                  beatDraft.counterResponse,
+                  beatDraft.protagonistImpact,
+                ]) ? 'optimize' : 'replace',
+                context: buildPlanningContextSections(currentNovel, {
+                  includeSubplots: true,
+                  extraSections: [
+                    { label: '当前阻力线', value: selectedTrack ? [
+                      `标题：${selectedTrack.title}`,
+                      selectedTrack.goal ? `目标：${selectedTrack.goal}` : '',
+                      selectedTrack.currentPressureMode ? `当前出手方式：${selectedTrack.currentPressureMode}` : '',
+                      selectedTrack.escalationPlan ? `升级策略：${selectedTrack.escalationPlan}` : '',
+                    ].filter(Boolean).join('\n') : '' },
+                  ],
+                }),
+                fields: [
+                  { key: 'title', label: '标题', value: beatDraft.title, hint: '写这一章或这一事件里的阻力动作名称。' },
+                  { key: 'summary', label: '出手说明', value: beatDraft.summary, hint: '写阻力如何出手、命中了什么。' },
+                  { key: 'actionMode', label: '出手方式', value: beatDraft.actionMode, hint: '写动作层面的实施方式。' },
+                  { key: 'successLevel', label: '成功程度', value: beatDraft.successLevel, hint: '写得手程度或反噬程度。' },
+                  { key: 'counterResponse', label: '后续反制', value: beatDraft.counterResponse, hint: '写主角或系统会如何回应。' },
+                  { key: 'protagonistImpact', label: '对主角影响', value: beatDraft.protagonistImpact, hint: '写主角付出的成本、认知变化或局势损失。' },
+                ],
+                requirements: [
+                  '必须和当前阻力线的目标、资源和升级策略一致。',
+                  '只写这一次推进，不要混入整条阻力线总纲。',
+                ],
+              })}
+              onResult={(raw) => {
+                const draftResult = parseDraftJson<Record<string, unknown>>(raw)
+                setBeatDraft((current) => ({
+                  ...current,
+                  title: typeof draftResult.title === 'string' ? draftResult.title : current.title,
+                  summary: typeof draftResult.summary === 'string' ? draftResult.summary : current.summary,
+                  actionMode: typeof draftResult.actionMode === 'string' ? draftResult.actionMode : current.actionMode,
+                  successLevel: typeof draftResult.successLevel === 'string' ? draftResult.successLevel : current.successLevel,
+                  counterResponse: typeof draftResult.counterResponse === 'string' ? draftResult.counterResponse : current.counterResponse,
+                  protagonistImpact: typeof draftResult.protagonistImpact === 'string' ? draftResult.protagonistImpact : current.protagonistImpact,
+                }))
+              }}
+            />
+          </div>
           <div className="guided-step__field-card guided-step__field-card--compact">
             <div className="novel-resistance-page__field-label">推进类型</div>
             <Select value={beatDraft.beatType} onChange={(value) => setBeatDraft((current) => ({ ...current, beatType: value }))} options={BEAT_OPTIONS} />

@@ -148,7 +148,7 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
       workspace.handleClear()
     })
     return () => registerClearHandler(null)
-  }, [registerClearHandler, workspace.handleClear])
+  }, [registerClearHandler, workspace])
 
   React.useEffect(() => {
     void refreshPage()

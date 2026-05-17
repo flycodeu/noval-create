@@ -684,7 +684,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
     }
   }
 
-  const handleClear = async () => {
+  const handleClear = useCallback(async () => {
     Modal.confirm({
       title: '清空物品系统？',
       content: '会删除当前小说下的全部模板与实例，并清空时间线里的物品链接。',
@@ -703,7 +703,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
         message.success(getUserFacingMessage('item.cleared'))
       },
     })
-  }
+  }, [form, loadPage, novelId, notifyWorkspaceMutation, setCreating, setDetailContext, setPage, setSelectedId, setSelectedItem])
 
   useEffect(() => {
     registerClearHandler(() => {

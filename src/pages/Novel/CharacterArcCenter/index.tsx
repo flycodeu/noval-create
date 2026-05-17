@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Alert, Button, Empty, Input, Modal, Select, Space, Spin, Tag, message } from 'antd'
 import { ArrowRightOutlined, EditOutlined, PlusOutlined, ReloadOutlined, SaveOutlined, TeamOutlined } from '@ant-design/icons'
+import AIGenerateButton from '../../../components/AIGenerateButton'
 import type {
   Character,
   CharacterArcBeatInput,
@@ -14,6 +15,8 @@ import type {
 import { useNovelStore } from '../../../stores/novel.store'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel, WorkspaceStepGuide } from '../components/WorkspaceShell'
+import { buildDraftMessages, parseDraftJson } from '../shared/ai-draft'
+import { buildPlanningContextSections } from '../shared/planning-context'
 import './index.css'
 
 interface Props { novelId: number }
@@ -78,6 +81,10 @@ function buildRelationshipDraft(novelId: number, relation: CharacterRelation | n
   }
 }
 
+function hasFilledValues(values: Array<string | undefined | null>): boolean {
+  return values.some((value) => Boolean(value && value.trim()))
+}
+
 export default function CharacterArcCenterPage({ novelId }: Props) {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -95,7 +102,7 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
   const [beatOpen, setBeatOpen] = useState(false)
   const [beatDraft, setBeatDraft] = useState<CharacterArcBeatInput>({ novelId, arcId: 0, beatType: 'progress-note', title: '', summary: '', status: 'logged' })
 
-  const refresh = async (showLoading = false) => {
+  const refresh = useCallback(async (showLoading = false) => {
     if (showLoading) {
       setLoading(true)
     } else {
@@ -110,14 +117,16 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
       setLoading(false)
       setRefreshing(false)
     }
-  }
+  }, [novelId])
 
-  useEffect(() => { void refresh(true) }, [novelId])
+  useEffect(() => { void refresh(true) }, [refresh])
 
-  const characters = dashboard?.availableCharacters || []
-  const protagonistCharacters = characters.filter((item) => item.roleType === 'protagonist')
-  const keyCharacters = characters.filter((item) => item.roleType !== 'protagonist' && (item.roleType !== 'minor' || dashboard?.characterArcs.some((arc) => arc.characterId === item.id)))
-  const relations = dashboard?.availableRelations || []
+  const characters = useMemo(() => dashboard?.availableCharacters || [], [dashboard?.availableCharacters])
+  const protagonistCharacters = useMemo(() => characters.filter((item) => item.roleType === 'protagonist'), [characters])
+  const keyCharacters = useMemo(() => (
+    characters.filter((item) => item.roleType !== 'protagonist' && (item.roleType !== 'minor' || dashboard?.characterArcs.some((arc) => arc.characterId === item.id)))
+  ), [characters, dashboard?.characterArcs])
+  const relations = useMemo(() => dashboard?.availableRelations || [], [dashboard?.availableRelations])
   const selectedCharacter = characters.find((item) => item.id === selectedCharacterId) || null
   const selectedArc = dashboard?.characterArcs.find((item) => item.characterId === selectedCharacterId) || null
   const selectedRelation = relations.find((item) => pairKey(item.charAId, item.charBId) === selectedRelationKey) || null
@@ -256,7 +265,139 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
         </div>
         <div className="novel-character-studio">
           <WorkspacePanel className="novel-character-studio__sidebar" title={tab === 'relationships' ? '关系对' : tab === 'protagonist' ? '主角' : '关键角色'} scrollable sticky>{tab === 'relationships' ? renderRelationList() : renderCharacterList(tab === 'protagonist' ? protagonistCharacters : keyCharacters)}</WorkspacePanel>
-          <WorkspacePanel className="novel-character-studio__editor" title={tab === 'relationships' ? '关系弧编辑' : '人物弧编辑'} scrollable sticky>
+          <WorkspacePanel
+            className="novel-character-studio__editor"
+            title={tab === 'relationships' ? '关系弧编辑' : '人物弧编辑'}
+            scrollable
+            sticky
+            extra={tab === 'relationships'
+              ? (relationshipDraft ? (
+                <AIGenerateButton
+                  novelId={novelId}
+                  label="AI 补全·当前关系弧"
+                  intent={hasFilledValues([
+                    relationshipDraft.startState,
+                    relationshipDraft.crackPoint,
+                    relationshipDraft.changeEvent,
+                    relationshipDraft.endState,
+                  ]) ? 'complete' : 'generate'}
+                  isJson
+                  buildMessages={() => buildDraftMessages({
+                    task: `关系弧${selectedRelation ? ` · ${characters.find((item) => item.id === selectedRelation.charAId)?.fullName || '角色A'} × ${characters.find((item) => item.id === selectedRelation.charBId)?.fullName || '角色B'}` : ''}`,
+                    mode: hasFilledValues([
+                      relationshipDraft.startState,
+                      relationshipDraft.crackPoint,
+                      relationshipDraft.changeEvent,
+                      relationshipDraft.endState,
+                    ]) ? 'optimize' : 'replace',
+                    context: buildPlanningContextSections(currentNovel, {
+                      includeSubplots: true,
+                      extraSections: [
+                        { label: '当前关系对象', value: selectedRelation ? `${characters.find((item) => item.id === selectedRelation.charAId)?.fullName || '角色A'} × ${characters.find((item) => item.id === selectedRelation.charBId)?.fullName || '角色B'}` : '' },
+                        { label: '已有关系描述', value: selectedRelation?.description || selectedRelation?.relationLabel || '' },
+                      ],
+                    }),
+                    fields: [
+                      { key: 'relationLabelSnapshot', label: '关系称呼', value: relationshipDraft.relationLabelSnapshot, hint: '写当前关系最准确的称呼。' },
+                      { key: 'relationTypeSnapshot', label: '关系类型', value: relationshipDraft.relationTypeSnapshot, hint: '写关系属性，例如盟友、对手、亲属。' },
+                      { key: 'startState', label: '初始状态', value: relationshipDraft.startState, hint: '写故事开始时两人的状态。' },
+                      { key: 'crackPoint', label: '第一次裂缝', value: relationshipDraft.crackPoint, hint: '写关系第一次明显失衡的节点。' },
+                      { key: 'changeEvent', label: '关键改变事件', value: relationshipDraft.changeEvent, hint: '写迫使关系改写的关键事件。' },
+                      { key: 'endState', label: '最终状态', value: relationshipDraft.endState, hint: '写关系最终落点。' },
+                      { key: 'stalledReason', label: '停滞原因', value: relationshipDraft.stalledReason, hint: '若停滞，写卡住原因。' },
+                      { key: 'notes', label: '备注', value: relationshipDraft.notes, hint: '补充误判、回收点和隐藏张力。' },
+                    ],
+                    requirements: [
+                      '必须与人物设定、章节推进和世界规则一致。',
+                      '只生成关系弧，不代替人物弧或章节剧情。'
+                    ],
+                  })}
+                  onResult={(raw) => {
+                    const draft = parseDraftJson<Partial<RelationshipArcInput>>(raw)
+                    setRelationshipDraft((current) => current ? {
+                      ...current,
+                      relationLabelSnapshot: typeof draft.relationLabelSnapshot === 'string' ? draft.relationLabelSnapshot : current.relationLabelSnapshot,
+                      relationTypeSnapshot: typeof draft.relationTypeSnapshot === 'string' ? draft.relationTypeSnapshot : current.relationTypeSnapshot,
+                      startState: typeof draft.startState === 'string' ? draft.startState : current.startState,
+                      crackPoint: typeof draft.crackPoint === 'string' ? draft.crackPoint : current.crackPoint,
+                      changeEvent: typeof draft.changeEvent === 'string' ? draft.changeEvent : current.changeEvent,
+                      endState: typeof draft.endState === 'string' ? draft.endState : current.endState,
+                      stalledReason: typeof draft.stalledReason === 'string' ? draft.stalledReason : current.stalledReason,
+                      notes: typeof draft.notes === 'string' ? draft.notes : current.notes,
+                    } : current)
+                  }}
+                />
+              ) : undefined)
+              : (characterDraft ? (
+                <AIGenerateButton
+                  novelId={novelId}
+                  label="AI 补全·当前人物弧"
+                  intent={hasFilledValues([
+                    characterDraft.startState,
+                    characterDraft.surfaceWant,
+                    characterDraft.deepNeed,
+                    characterDraft.coreFear,
+                    characterDraft.misbelief,
+                    characterDraft.changeEvent,
+                    characterDraft.endState,
+                  ]) ? 'complete' : 'generate'}
+                  isJson
+                  buildMessages={() => buildDraftMessages({
+                    task: `人物弧${selectedCharacter ? ` · ${selectedCharacter.fullName}` : ''}`,
+                    mode: hasFilledValues([
+                      characterDraft.startState,
+                      characterDraft.surfaceWant,
+                      characterDraft.deepNeed,
+                      characterDraft.coreFear,
+                      characterDraft.misbelief,
+                      characterDraft.changeEvent,
+                      characterDraft.endState,
+                    ]) ? 'optimize' : 'replace',
+                    context: buildPlanningContextSections(currentNovel, {
+                      includeSubplots: true,
+                      extraSections: [
+                        { label: '当前人物', value: selectedCharacter ? [
+                          selectedCharacter.fullName,
+                          selectedCharacter.roleType ? `角色定位：${selectedCharacter.roleType}` : '',
+                          selectedCharacter.innerConflict ? `内在冲突：${selectedCharacter.innerConflict}` : '',
+                          selectedCharacter.characterArc ? `现有人物弧：${selectedCharacter.characterArc}` : '',
+                        ].filter(Boolean).join('\n') : '' },
+                      ],
+                    }),
+                    fields: [
+                      { key: 'startState', label: '初始状态', value: characterDraft.startState, hint: '写开局心理、关系或能力状态。' },
+                      { key: 'surfaceWant', label: '角色想要什么', value: characterDraft.surfaceWant, hint: '写表层目标。' },
+                      { key: 'deepNeed', label: '角色真正需要什么', value: characterDraft.deepNeed, hint: '写深层缺口。' },
+                      { key: 'coreFear', label: '核心恐惧', value: characterDraft.coreFear, hint: '写最不愿面对的失去。' },
+                      { key: 'misbelief', label: '误信', value: characterDraft.misbelief, hint: '写错误信念。' },
+                      { key: 'changeEvent', label: '关键改变事件', value: characterDraft.changeEvent, hint: '写迫使人物真正变化的事件。' },
+                      { key: 'endState', label: '最终状态', value: characterDraft.endState, hint: '写人物最终落点。' },
+                      { key: 'stalledReason', label: '停滞原因', value: characterDraft.stalledReason, hint: '若停滞，写卡住原因。' },
+                      { key: 'notes', label: '备注', value: characterDraft.notes, hint: '补充隐藏动机、代价或回收点。' },
+                    ],
+                    requirements: [
+                      '必须和角色档案、故事设计、终局方向一致。',
+                      '不要把人物弧写成章节摘要。'
+                    ],
+                  })}
+                  onResult={(raw) => {
+                    const draft = parseDraftJson<Partial<CharacterArcInput>>(raw)
+                    setCharacterDraft((current) => current ? {
+                      ...current,
+                      startState: typeof draft.startState === 'string' ? draft.startState : current.startState,
+                      surfaceWant: typeof draft.surfaceWant === 'string' ? draft.surfaceWant : current.surfaceWant,
+                      deepNeed: typeof draft.deepNeed === 'string' ? draft.deepNeed : current.deepNeed,
+                      coreFear: typeof draft.coreFear === 'string' ? draft.coreFear : current.coreFear,
+                      misbelief: typeof draft.misbelief === 'string' ? draft.misbelief : current.misbelief,
+                      changeEvent: typeof draft.changeEvent === 'string' ? draft.changeEvent : current.changeEvent,
+                      endState: typeof draft.endState === 'string' ? draft.endState : current.endState,
+                      stalledReason: typeof draft.stalledReason === 'string' ? draft.stalledReason : current.stalledReason,
+                      notes: typeof draft.notes === 'string' ? draft.notes : current.notes,
+                    } : current)
+                  }}
+                />
+              ) : undefined)}
+          >
             {tab === 'relationships' ? (relationshipDraft ? (
               <div className="guided-step__field-grid">
                 <div className="guided-step__field-card guided-step__field-card--compact"><FieldLabel>关系称呼</FieldLabel><Input value={relationshipDraft.relationLabelSnapshot} onChange={(event) => setRelationshipDraft((current) => current ? { ...current, relationLabelSnapshot: event.target.value } : current)} /></div>
@@ -321,6 +462,45 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
       </WorkspacePage>
       <Modal title="登记推进节点" open={beatOpen} onCancel={() => setBeatOpen(false)} onOk={() => void saveBeat()} confirmLoading={beatSaving}>
         <div className="guided-step__field-grid">
+          <div className="guided-step__field-card guided-step__field-card--full">
+            <AIGenerateButton
+              novelId={novelId}
+              label="AI 生成·推进节点"
+              intent={hasFilledValues([beatDraft.title, beatDraft.summary]) ? 'complete' : 'generate'}
+              isJson
+              disabled={!selectedArc}
+              buildMessages={() => buildDraftMessages({
+                task: selectedArc ? `人物弧推进节点 · ${selectedArc.characterName}` : '人物弧推进节点',
+                mode: hasFilledValues([beatDraft.title, beatDraft.summary]) ? 'optimize' : 'replace',
+                context: buildPlanningContextSections(currentNovel, {
+                  includeSubplots: true,
+                  extraSections: [
+                    { label: '当前人物弧', value: selectedArc ? [
+                      `人物：${selectedArc.characterName}`,
+                      selectedArc.startState ? `初始状态：${selectedArc.startState}` : '',
+                      selectedArc.changeEvent ? `关键改变事件：${selectedArc.changeEvent}` : '',
+                      selectedArc.endState ? `最终状态：${selectedArc.endState}` : '',
+                    ].filter(Boolean).join('\n') : '' },
+                  ],
+                }),
+                fields: [
+                  { key: 'title', label: '标题', value: beatDraft.title, hint: '写当前推进节点名称。' },
+                  { key: 'summary', label: '说明', value: beatDraft.summary, hint: '写这一节点让人物发生了什么实质变化。' },
+                ],
+                requirements: [
+                  '只写当前推进节点，不要重写整条人物弧。',
+                ],
+              })}
+              onResult={(raw) => {
+                const draft = parseDraftJson<Partial<CharacterArcBeatInput>>(raw)
+                setBeatDraft((current) => ({
+                  ...current,
+                  title: typeof draft.title === 'string' ? draft.title : current.title,
+                  summary: typeof draft.summary === 'string' ? draft.summary : current.summary,
+                }))
+              }}
+            />
+          </div>
           <div className="guided-step__field-card guided-step__field-card--compact"><div className="novel-character-arc-center__field-label">节点类型</div><Select value={beatDraft.beatType} onChange={(value) => setBeatDraft((current) => ({ ...current, beatType: value }))} options={[{ value: 'start', label: '起点' }, { value: 'crack', label: '裂缝' }, { value: 'turn', label: '转折' }, { value: 'change', label: '改变' }, { value: 'end', label: '终点' }, { value: 'progress-note', label: '推进记录' }]} /></div>
           <div className="guided-step__field-card guided-step__field-card--compact"><div className="novel-character-arc-center__field-label">章节</div><Select allowClear value={beatDraft.chapterId} onChange={(value) => setBeatDraft((current) => ({ ...current, chapterId: value }))} options={chapterOptions} /></div>
           <div className="guided-step__field-card guided-step__field-card--compact"><div className="novel-character-arc-center__field-label">时间轴事件</div><Select allowClear value={beatDraft.timelineEventId} onChange={(value) => setBeatDraft((current) => ({ ...current, timelineEventId: value }))} options={timelineOptions} /></div>

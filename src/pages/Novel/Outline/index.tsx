@@ -278,7 +278,7 @@ export default function Outline({ novelId }: Props) {
     })
   }
 
-  const handleClear = async () => {
+  const handleClear = useCallback(async () => {
     Modal.confirm({
       title: '清空故事大纲？',
       content: '会删除全部故事弧和章节细纲归属，但不会删除正文。',
@@ -292,7 +292,7 @@ export default function Outline({ novelId }: Props) {
         message.success(getUserFacingMessage('outline.cleared'))
       },
     })
-  }
+  }, [loadData, novelId, notifyWorkspaceMutation, setExpandedArcId])
 
   const getArcChapters = useCallback((arc: StoryArc) => chapters.filter((chapter) => chapter.arcId === arc.id || (chapter.chapterNum >= (arc.chapterStart || 0) && chapter.chapterNum <= (arc.chapterEnd || 9999))).sort((a, b) => a.chapterNum - b.chapterNum), [chapters])
 

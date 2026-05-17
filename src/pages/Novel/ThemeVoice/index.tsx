@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Form, Input, List, Modal, Select, Space, Tag, message } from 'antd'
 import { ArrowRightOutlined, DeleteOutlined, RobotOutlined, SaveOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
+import AIGenerateButton from '../../../components/AIGenerateButton'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import {
   buildThemeVoicePayload,
@@ -26,6 +27,8 @@ import type {
   ThemeVoiceGenerationResult,
 } from '../../../shared/theme-voice-generation'
 import { useNovelStore } from '../../../stores/novel.store'
+import { buildDraftMessages, parseDraftJson } from '../shared/ai-draft'
+import { buildPlanningContextSections } from '../shared/planning-context'
 import { usePlanningDraft } from '../shared/planning-draft'
 import {
   WorkspaceContextSummary,
@@ -33,10 +36,10 @@ import {
   WorkspacePage,
   WorkspacePanel,
 } from '../components/WorkspaceShell'
+import type { RegisteredWorkspaceQualityController } from '../workspace-quality-context-core'
 import {
-  type RegisteredWorkspaceQualityController,
   useRegisterWorkspaceQualityController,
-} from '../workspace-quality-context'
+} from '../workspace-quality-context-core'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import { loadWorkflowStats } from '../workflow'
 
@@ -164,6 +167,10 @@ function normalizeFormValues(values: ThemeVoiceFormValues): ThemeVoiceFormValues
   }
 }
 
+function hasFilledValues(values: Array<string | undefined | null>): boolean {
+  return values.some((value) => Boolean(value && value.trim()))
+}
+
 function buildCurrentFormValues(
   snapshot: ThemeVoiceFormValues,
   formValues: Partial<ThemeVoiceFormValues>,
@@ -277,9 +284,9 @@ export default function ThemeVoicePage({ novelId }: Props) {
     currentValues.descriptionRules,
     currentValues.forbiddenPhrases,
   ].filter(isFilled).length
-  const applyThemeVoiceDraft = (draft: Partial<ThemeVoiceFormValues>) => {
+  const applyThemeVoiceDraft = useCallback((draft: Partial<ThemeVoiceFormValues>) => {
     form.setFieldsValue(buildCurrentFormValues(snapshot, draft))
-  }
+  }, [form, snapshot])
   const { clearDraft, draft, finalizeDraft, saveAppliedDraft } = usePlanningDraft<ThemeVoiceFormValues>({
     novelId,
     pageKey: 'theme-voice',
@@ -325,7 +332,7 @@ export default function ThemeVoicePage({ novelId }: Props) {
         rawOutputs: [JSON.stringify(preview.patchedSnapshot)],
       })
     },
-  }), [form, saveAppliedDraft, snapshot])
+  }), [applyThemeVoiceDraft, form, saveAppliedDraft, snapshot])
 
   useRegisterWorkspaceQualityController(workspaceQualityController)
 
@@ -508,110 +515,241 @@ export default function ThemeVoicePage({ novelId }: Props) {
 
       <WorkspacePanel extra={<Tag color={generatingMode ? 'gold' : 'blue'}>{generatingMode ? 'AI 生成中' : '手动保存生效'}</Tag>}>
         <Form form={form} layout="vertical">
-          <div className="guided-step__field-grid">
-            <div className="guided-step__field-card guided-step__field-card--full">
-              <Form.Item
-                name="writingContractTags"
-                label="写作类型"
-                extra="内置标签会触发强规则；自定义标签只作为弱提示。核心阅读预期“爽文 / 写实”只能选一个。"
-                rules={[{
-                  validator: async (_, value?: string[]) => {
-                    const error = getWritingContractValidationError(normalizeWritingContractTags(value))
-                    if (error) throw new Error(error)
-                  },
-                }]}
-              >
-                <Select
-                  mode="tags"
-                  allowClear
-                  options={WRITING_CONTRACT_PRESETS.map((preset) => ({
-                    value: preset.value,
-                    label: `${preset.label} · ${preset.group === 'core' ? '核心预期' : '内容重心'}`,
-                  }))}
-                  placeholder="例如：爽文、言情，或补充自定义短标签"
-                  tokenSeparators={[',', '，', '、']}
+          <div className="workspace-stack-16">
+            <div className="workspace-stack-10">
+              <Space wrap align="center">
+                <strong className="workspace-card-section-title">主题与叙事调度</strong>
+                <AIGenerateButton
+                  novelId={novelId}
+                  label="AI 生成·主题与调度"
+                  intent={hasFilledValues([
+                    currentValues.theme,
+                    currentValues.motifs,
+                    currentValues.emotionalCore,
+                    currentValues.narratorDistance,
+                    currentValues.voiceKeywords,
+                  ]) ? 'complete' : 'generate'}
+                  isJson
+                  buildMessages={() => buildDraftMessages({
+                    task: '主题与叙事调度',
+                    mode: hasFilledValues([
+                      currentValues.theme,
+                      currentValues.motifs,
+                      currentValues.emotionalCore,
+                      currentValues.narratorDistance,
+                      currentValues.voiceKeywords,
+                    ]) ? 'optimize' : 'replace',
+                    context: buildPlanningContextSections(currentNovel, {
+                      includeSubplots: false,
+                      extraSections: [
+                        { label: '当前写作类型', value: formatWritingContractTags(currentValues.writingContractTags) },
+                      ],
+                    }),
+                    fields: [
+                      { key: 'writingContractTags', label: '写作类型', type: 'string[]', value: currentValues.writingContractTags, hint: '可包含爽文、写实等短标签。' },
+                      { key: 'theme', label: '主题', value: currentValues.theme, hint: '写作品持续回答的命题，不要写宣传口号。' },
+                      { key: 'motifs', label: '母题 / 重复意象', value: currentValues.motifs, hint: '建议每行一条，写会反复出现的母题和意象。' },
+                      { key: 'emotionalCore', label: '情感核心', value: currentValues.emotionalCore, hint: '写读者稳定收到的情绪回报和压强。' },
+                      { key: 'pov', label: '叙事视角', value: currentValues.pov, hint: '只用 first_person、third_limited、third_omniscient、multi_pov 之一。' },
+                      { key: 'tense', label: '时态', value: currentValues.tense, hint: '只用 past、present、mixed 之一。' },
+                      { key: 'protagonistCount', label: '主角格局', value: currentValues.protagonistCount, hint: '只用 single、dual、ensemble 之一。' },
+                      { key: 'viewpointMode', label: '视角调度', value: currentValues.viewpointMode, hint: '只用 fixed、rotating、free_switch 之一。' },
+                      { key: 'parallelTimelines', label: '叙事线密度', value: currentValues.parallelTimelines, hint: '只用 none、light、heavy 之一。' },
+                      { key: 'openingStyle', label: '开篇方式', value: currentValues.openingStyle, hint: '只用 hook、daily、incident、flashback 之一。' },
+                      { key: 'flashbackPolicy', label: '插叙策略', value: currentValues.flashbackPolicy, hint: '只用 forbidden、limited、allowed 之一。' },
+                      { key: 'narratorDistance', label: '叙述距离', value: currentValues.narratorDistance, hint: '写叙述者与人物之间的距离，以及解释密度。' },
+                      { key: 'voiceKeywords', label: '口吻关键词', value: currentValues.voiceKeywords, hint: '建议 4 到 8 个词，描述整体口吻。' },
+                    ],
+                    requirements: [
+                      '不要脱离题材、世界规则和人物状态。',
+                      '标签与叙事调度要能相互支撑，不能互相打架。',
+                    ],
+                  })}
+                  onResult={(raw) => {
+                    const draft = parseDraftJson<Partial<ThemeVoiceFormValues>>(raw)
+                    applyThemeVoiceDraft({
+                      writingContractTags: Array.isArray(draft.writingContractTags) ? draft.writingContractTags : undefined,
+                      theme: typeof draft.theme === 'string' ? draft.theme : undefined,
+                      motifs: typeof draft.motifs === 'string' ? draft.motifs : undefined,
+                      emotionalCore: typeof draft.emotionalCore === 'string' ? draft.emotionalCore : undefined,
+                      pov: draft.pov,
+                      tense: draft.tense,
+                      protagonistCount: draft.protagonistCount,
+                      viewpointMode: draft.viewpointMode,
+                      parallelTimelines: draft.parallelTimelines,
+                      openingStyle: draft.openingStyle,
+                      flashbackPolicy: draft.flashbackPolicy,
+                      narratorDistance: typeof draft.narratorDistance === 'string' ? draft.narratorDistance : undefined,
+                      voiceKeywords: typeof draft.voiceKeywords === 'string' ? draft.voiceKeywords : undefined,
+                    })
+                  }}
                 />
-              </Form.Item>
+              </Space>
+              <div className="guided-step__field-grid">
+                <div className="guided-step__field-card guided-step__field-card--full">
+                  <Form.Item
+                    name="writingContractTags"
+                    label="写作类型"
+                    extra="内置标签会触发强规则；自定义标签只作为弱提示。核心阅读预期“爽文 / 写实”只能选一个。"
+                    rules={[{
+                      validator: async (_, value?: string[]) => {
+                        const error = getWritingContractValidationError(normalizeWritingContractTags(value))
+                        if (error) throw new Error(error)
+                      },
+                    }]}
+                  >
+                    <Select
+                      mode="tags"
+                      allowClear
+                      options={WRITING_CONTRACT_PRESETS.map((preset) => ({
+                        value: preset.value,
+                        label: `${preset.label} · ${preset.group === 'core' ? '核心预期' : '内容重心'}`,
+                      }))}
+                      placeholder="例如：爽文、言情，或补充自定义短标签"
+                      tokenSeparators={[',', '，', '、']}
+                    />
+                  </Form.Item>
+                </div>
+                <div className="guided-step__field-card">
+                  <Form.Item name="theme" label="主题" rules={[{ required: true, message: '请写清主题' }]}>
+                    <Input.TextArea rows={6} placeholder="写作品持续回答的命题，不要写成宣传口号。" />
+                  </Form.Item>
+                </div>
+                <div className="guided-step__field-card">
+                  <Form.Item name="emotionalCore" label="情感核心" rules={[{ required: true, message: '请写清情感核心' }]}>
+                    <Input.TextArea rows={6} placeholder="写读者最稳定收到的情绪回报和压强。" />
+                  </Form.Item>
+                </div>
+                <div className="guided-step__field-card guided-step__field-card--full">
+                  <Form.Item name="motifs" label="母题 / 重复意象">
+                    <Input.TextArea rows={6} placeholder="写会反复出现的母题、意象和回响，建议每行一条。" />
+                  </Form.Item>
+                </div>
+                <div className="guided-step__field-card guided-step__field-card--compact">
+                  <Form.Item name="pov" label="叙事视角" rules={[{ required: true, message: '请选择叙事视角' }]}>
+                    <Select options={POV_OPTIONS} placeholder="选择视角" />
+                  </Form.Item>
+                </div>
+                <div className="guided-step__field-card guided-step__field-card--compact">
+                  <Form.Item name="tense" label="时态" rules={[{ required: true, message: '请选择时态' }]}>
+                    <Select options={TENSE_OPTIONS} placeholder="选择时态" />
+                  </Form.Item>
+                </div>
+                <div className="guided-step__field-card guided-step__field-card--compact">
+                  <Form.Item name="protagonistCount" label="主角格局">
+                    <Select options={PROTAGONIST_COUNT_OPTIONS} placeholder="选择主角格局" allowClear />
+                  </Form.Item>
+                </div>
+                <div className="guided-step__field-card guided-step__field-card--compact">
+                  <Form.Item name="viewpointMode" label="视角调度">
+                    <Select options={VIEWPOINT_MODE_OPTIONS} placeholder="选择视角调度" allowClear />
+                  </Form.Item>
+                </div>
+                <div className="guided-step__field-card guided-step__field-card--compact">
+                  <Form.Item name="parallelTimelines" label="叙事线密度">
+                    <Select options={PARALLEL_TIMELINES_OPTIONS} placeholder="选择叙事线密度" allowClear />
+                  </Form.Item>
+                </div>
+                <div className="guided-step__field-card guided-step__field-card--compact">
+                  <Form.Item name="openingStyle" label="开篇方式">
+                    <Select options={OPENING_STYLE_OPTIONS} placeholder="选择开篇方式" allowClear />
+                  </Form.Item>
+                </div>
+                <div className="guided-step__field-card guided-step__field-card--compact">
+                  <Form.Item name="flashbackPolicy" label="插叙策略">
+                    <Select options={FLASHBACK_POLICY_OPTIONS} placeholder="选择插叙策略" allowClear />
+                  </Form.Item>
+                </div>
+                <div className="guided-step__field-card guided-step__field-card--full">
+                  <Form.Item name="narratorDistance" label="叙述距离">
+                    <Input.TextArea rows={6} placeholder="写叙述者与人物之间的距离，以及解释密度。" />
+                  </Form.Item>
+                </div>
+                <div className="guided-step__field-card guided-step__field-card--full">
+                  <Form.Item name="voiceKeywords" label="口吻关键词">
+                    <Input.TextArea rows={6} placeholder="建议 4-8 个词，每行一条，描述整体口吻而非营销词。" />
+                  </Form.Item>
+                </div>
+              </div>
             </div>
-            <div className="guided-step__field-card">
-              <Form.Item name="theme" label="主题" rules={[{ required: true, message: '请写清主题' }]}>
-                <Input.TextArea rows={6} placeholder="写作品持续回答的命题，不要写成宣传口号。" />
-              </Form.Item>
-            </div>
-            <div className="guided-step__field-card">
-              <Form.Item name="emotionalCore" label="情感核心" rules={[{ required: true, message: '请写清情感核心' }]}>
-                <Input.TextArea rows={6} placeholder="写读者最稳定收到的情绪回报和压强。" />
-              </Form.Item>
-            </div>
-            <div className="guided-step__field-card guided-step__field-card--full">
-              <Form.Item name="motifs" label="母题 / 重复意象">
-                <Input.TextArea rows={6} placeholder="写会反复出现的母题、意象和回响，建议每行一条。" />
-              </Form.Item>
-            </div>
-            <div className="guided-step__field-card guided-step__field-card--compact">
-              <Form.Item name="pov" label="叙事视角" rules={[{ required: true, message: '请选择叙事视角' }]}>
-                <Select options={POV_OPTIONS} placeholder="选择视角" />
-              </Form.Item>
-            </div>
-            <div className="guided-step__field-card guided-step__field-card--compact">
-              <Form.Item name="tense" label="时态" rules={[{ required: true, message: '请选择时态' }]}>
-                <Select options={TENSE_OPTIONS} placeholder="选择时态" />
-              </Form.Item>
-            </div>
-            <div className="guided-step__field-card guided-step__field-card--compact">
-              <Form.Item name="protagonistCount" label="主角格局">
-                <Select options={PROTAGONIST_COUNT_OPTIONS} placeholder="选择主角格局" allowClear />
-              </Form.Item>
-            </div>
-            <div className="guided-step__field-card guided-step__field-card--compact">
-              <Form.Item name="viewpointMode" label="视角调度">
-                <Select options={VIEWPOINT_MODE_OPTIONS} placeholder="选择视角调度" allowClear />
-              </Form.Item>
-            </div>
-            <div className="guided-step__field-card guided-step__field-card--compact">
-              <Form.Item name="parallelTimelines" label="叙事线密度">
-                <Select options={PARALLEL_TIMELINES_OPTIONS} placeholder="选择叙事线密度" allowClear />
-              </Form.Item>
-            </div>
-            <div className="guided-step__field-card guided-step__field-card--compact">
-              <Form.Item name="openingStyle" label="开篇方式">
-                <Select options={OPENING_STYLE_OPTIONS} placeholder="选择开篇方式" allowClear />
-              </Form.Item>
-            </div>
-            <div className="guided-step__field-card guided-step__field-card--compact">
-              <Form.Item name="flashbackPolicy" label="插叙策略">
-                <Select options={FLASHBACK_POLICY_OPTIONS} placeholder="选择插叙策略" allowClear />
-              </Form.Item>
-            </div>
-            <div className="guided-step__field-card guided-step__field-card--full">
-              <Form.Item name="narratorDistance" label="叙述距离">
-                <Input.TextArea rows={6} placeholder="写叙述者与人物之间的距离，以及解释密度。" />
-              </Form.Item>
-            </div>
-            <div className="guided-step__field-card guided-step__field-card--full">
-              <Form.Item name="voiceKeywords" label="口吻关键词">
-                <Input.TextArea rows={6} placeholder="建议 4-8 个词，每行一条，描述整体口吻而非营销词。" />
-              </Form.Item>
-            </div>
-            <div className="guided-step__field-card">
-              <Form.Item name="styleRules" label="风格规则" rules={[{ required: true, message: '请补充风格规则' }]}>
-                <Input.TextArea rows={5} placeholder="把句式、节奏和信息暴露方式写成规则，建议每行一条。" />
-              </Form.Item>
-            </div>
-            <div className="guided-step__field-card">
-              <Form.Item name="dialogueRules" label="对白规则" rules={[{ required: true, message: '请补充对白规则' }]}>
-                <Input.TextArea rows={5} placeholder="写潜台词密度、句长控制、留白方式和人物区分度。" />
-              </Form.Item>
-            </div>
-            <div className="guided-step__field-card">
-              <Form.Item name="descriptionRules" label="描写规则">
-                <Input.TextArea rows={6} placeholder="写场景、动作、心理描写的比例和取舍。" />
-              </Form.Item>
-            </div>
-            <div className="guided-step__field-card">
-              <Form.Item name="forbiddenPhrases" label="禁用表达">
-                <Input.TextArea rows={6} placeholder="写应避免的总结腔、模板句、空泛抒情和引号强调。" />
-              </Form.Item>
+
+            <div className="workspace-stack-10">
+              <Space wrap align="center">
+                <strong className="workspace-card-section-title">文风执行规则</strong>
+                <AIGenerateButton
+                  novelId={novelId}
+                  label="AI 生成·文风规则"
+                  intent={hasFilledValues([
+                    currentValues.styleRules,
+                    currentValues.dialogueRules,
+                    currentValues.descriptionRules,
+                    currentValues.forbiddenPhrases,
+                  ]) ? 'complete' : 'generate'}
+                  isJson
+                  buildMessages={() => buildDraftMessages({
+                    task: '文风执行规则',
+                    mode: hasFilledValues([
+                      currentValues.styleRules,
+                      currentValues.dialogueRules,
+                      currentValues.descriptionRules,
+                      currentValues.forbiddenPhrases,
+                    ]) ? 'optimize' : 'replace',
+                    context: buildPlanningContextSections(currentNovel, {
+                      includeSubplots: false,
+                      extraSections: [
+                        { label: '当前主题与调度', value: [
+                          currentValues.theme ? `主题：${currentValues.theme}` : '',
+                          currentValues.emotionalCore ? `情感核心：${currentValues.emotionalCore}` : '',
+                          currentValues.pov ? `视角：${currentValues.pov}` : '',
+                          currentValues.tense ? `时态：${currentValues.tense}` : '',
+                          currentValues.narratorDistance ? `叙述距离：${currentValues.narratorDistance}` : '',
+                        ].filter(Boolean).join('\n') },
+                      ],
+                    }),
+                    fields: [
+                      { key: 'styleRules', label: '风格规则', value: currentValues.styleRules, hint: '把句式、节奏和信息暴露方式写成规则，建议每行一条。' },
+                      { key: 'dialogueRules', label: '对白规则', value: currentValues.dialogueRules, hint: '写潜台词密度、句长控制、留白方式和人物区分度。' },
+                      { key: 'descriptionRules', label: '描写规则', value: currentValues.descriptionRules, hint: '写场景、动作、心理描写的比例和取舍。' },
+                      { key: 'forbiddenPhrases', label: '禁用表达', value: currentValues.forbiddenPhrases, hint: '写应避免的总结腔、模板句、空泛抒情和引号强调。' },
+                    ],
+                    requirements: [
+                      '规则必须可执行，可直接用于写作与审校。',
+                      '不要写抽象价值口号，也不要和当前写作类型相冲突。',
+                    ],
+                  })}
+                  onResult={(raw) => {
+                    const draft = parseDraftJson<Partial<ThemeVoiceFormValues>>(raw)
+                    applyThemeVoiceDraft({
+                      styleRules: typeof draft.styleRules === 'string' ? draft.styleRules : undefined,
+                      dialogueRules: typeof draft.dialogueRules === 'string' ? draft.dialogueRules : undefined,
+                      descriptionRules: typeof draft.descriptionRules === 'string' ? draft.descriptionRules : undefined,
+                      forbiddenPhrases: typeof draft.forbiddenPhrases === 'string' ? draft.forbiddenPhrases : undefined,
+                    })
+                  }}
+                />
+              </Space>
+              <div className="guided-step__field-grid">
+                <div className="guided-step__field-card">
+                  <Form.Item name="styleRules" label="风格规则" rules={[{ required: true, message: '请补充风格规则' }]}>
+                    <Input.TextArea rows={5} placeholder="把句式、节奏和信息暴露方式写成规则，建议每行一条。" />
+                  </Form.Item>
+                </div>
+                <div className="guided-step__field-card">
+                  <Form.Item name="dialogueRules" label="对白规则" rules={[{ required: true, message: '请补充对白规则' }]}>
+                    <Input.TextArea rows={5} placeholder="写潜台词密度、句长控制、留白方式和人物区分度。" />
+                  </Form.Item>
+                </div>
+                <div className="guided-step__field-card">
+                  <Form.Item name="descriptionRules" label="描写规则">
+                    <Input.TextArea rows={6} placeholder="写场景、动作、心理描写的比例和取舍。" />
+                  </Form.Item>
+                </div>
+                <div className="guided-step__field-card">
+                  <Form.Item name="forbiddenPhrases" label="禁用表达">
+                    <Input.TextArea rows={6} placeholder="写应避免的总结腔、模板句、空泛抒情和引号强调。" />
+                  </Form.Item>
+                </div>
+              </div>
             </div>
           </div>
         </Form>

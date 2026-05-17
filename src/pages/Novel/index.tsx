@@ -31,8 +31,8 @@ import {
 import { NovelWorkspaceActionsProvider } from './workspace-shortcuts'
 import {
   NovelWorkspaceQualityProvider,
-  type RegisteredWorkspaceQualityController,
 } from './workspace-quality-context'
+import type { RegisteredWorkspaceQualityController } from './workspace-quality-context-core'
 import type { Chapter, OperationLog } from '../../types'
 
 type ProWorkspaceKey = WorkspaceRouteKey
@@ -310,7 +310,7 @@ export default function NovelRouter() {
     setVisitedPages([currentPage])
     setPendingPage(null)
     scrollPositionsRef.current = {}
-  }, [novelId])
+  }, [currentPage, novelId])
 
   useEffect(() => {
     setVisitedPages((current) => (current.includes(currentPage) ? current : [...current, currentPage]))
@@ -414,7 +414,7 @@ export default function NovelRouter() {
   const registerWorkspaceQualityController = useCallback((controller: RegisteredWorkspaceQualityController | null) => {
     setWorkspaceQualityController(controller)
     return () => {
-      setWorkspaceQualityController((current) => (current === controller ? null : current))
+      setWorkspaceQualityController((current: RegisteredWorkspaceQualityController | null) => (current === controller ? null : current))
     }
   }, [])
 

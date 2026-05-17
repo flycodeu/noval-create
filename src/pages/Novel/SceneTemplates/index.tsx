@@ -1,11 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Form, Input, List, Select, Space, Switch, Tag, message } from 'antd'
 import { DeleteOutlined, PlusOutlined, SaveOutlined } from '@ant-design/icons'
+import AIGenerateButton from '../../../components/AIGenerateButton'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import type { SceneTemplate } from '../../../types'
 import { parseSceneTemplateStringList, stringifySceneTemplateStringList } from '../../../shared/scene-templates'
 import { useNovelStore } from '../../../stores/novel.store'
 import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
+import { buildDraftMessages, normalizeStringArray, parseDraftJson } from '../shared/ai-draft'
+import { buildPlanningContextSections } from '../shared/planning-context'
 import { loadWorkflowStats } from '../workflow'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 
@@ -55,6 +58,10 @@ function buildFormValues(item?: SceneTemplate | null): SceneTemplateFormValues {
   }
 }
 
+function hasFilledValues(values: Array<string | undefined | null>): boolean {
+  return values.some((value) => Boolean(value && value.trim()))
+}
+
 export default function SceneTemplatesPage({ novelId }: Props) {
   const { currentNovel } = useNovelStore()
   const { mutationToken, notifyWorkspaceMutation } = useNovelWorkspaceActions()
@@ -73,6 +80,18 @@ export default function SceneTemplatesPage({ novelId }: Props) {
     [items, selectedId],
   )
   const selectedIsBuiltin = selectedItem?.isBuiltin === 1
+  const watchedFormValues = Form.useWatch([], form) as Partial<SceneTemplateFormValues> | undefined
+  const formValues = useMemo<Partial<SceneTemplateFormValues>>(
+    () => watchedFormValues ?? {},
+    [watchedFormValues],
+  )
+  const currentFormValues = useMemo<SceneTemplateFormValues>(() => ({
+    ...buildFormValues(selectedItem),
+    ...formValues,
+    typicalBeats: formValues.typicalBeats ?? buildFormValues(selectedItem).typicalBeats,
+    suggestedCharacterRoles: formValues.suggestedCharacterRoles ?? buildFormValues(selectedItem).suggestedCharacterRoles,
+    genreScoped: formValues.genreScoped ?? buildFormValues(selectedItem).genreScoped,
+  }), [formValues, selectedItem])
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -255,6 +274,57 @@ export default function SceneTemplatesPage({ novelId }: Props) {
 
           <Form form={form} layout="vertical" initialValues={EMPTY_VALUES} disabled={selectedIsBuiltin} className="novel-resource-workspace__content">
             <div className="guided-step__field-grid">
+              <div className="guided-step__field-card guided-step__field-card--full">
+                <AIGenerateButton
+                  novelId={novelId}
+                  label={selectedItem ? 'AI 补全·当前模板' : 'AI 生成·模板草稿'}
+                  intent={hasFilledValues([
+                    currentFormValues.name,
+                    currentFormValues.description,
+                    currentFormValues.emotionArc,
+                  ]) || currentFormValues.typicalBeats.length > 0 || currentFormValues.suggestedCharacterRoles.length > 0 ? 'complete' : 'generate'}
+                  isJson
+                  disabled={selectedIsBuiltin}
+                  buildMessages={() => buildDraftMessages({
+                    task: selectedItem ? `场景模板 · ${selectedItem.name}` : '场景模板草稿',
+                    mode: hasFilledValues([
+                      currentFormValues.name,
+                      currentFormValues.description,
+                      currentFormValues.emotionArc,
+                    ]) || currentFormValues.typicalBeats.length > 0 || currentFormValues.suggestedCharacterRoles.length > 0 ? 'optimize' : 'replace',
+                    context: buildPlanningContextSections(currentNovel, {
+                      includeSubplots: true,
+                      extraSections: [
+                        { label: '当前题材', value: currentNovel?.genreName || '' },
+                        { label: '现有模板类型分布', value: items.slice(0, 12).map((item) => `${item.name} · ${item.category}`) },
+                      ],
+                    }),
+                    fields: [
+                      { key: 'name', label: '模板名称', value: currentFormValues.name, hint: '写清这类场景的功能。' },
+                      { key: 'category', label: '模板类型', value: currentFormValues.category, hint: '只用 conflict、transition、revelation、bonding、crisis、climax 之一。' },
+                      { key: 'description', label: '模板说明', value: currentFormValues.description, hint: '写什么时候用、解决什么问题、避免什么误用。' },
+                      { key: 'typicalBeats', label: '典型节拍', type: 'string[]', value: currentFormValues.typicalBeats, hint: '每条写一个节拍节点。' },
+                      { key: 'suggestedCharacterRoles', label: '建议角色功能位', type: 'string[]', value: currentFormValues.suggestedCharacterRoles, hint: '写适合参与该模板的角色功能位。' },
+                      { key: 'emotionArc', label: '情绪弧线', value: currentFormValues.emotionArc, hint: '写读者在这类场景里的情绪变化路径。' },
+                    ],
+                    requirements: [
+                      '必须适配当前题材和已有世界/人物/冲突风格。',
+                      '要生成可复用模板，而不是单个具体场景剧情。',
+                    ],
+                  })}
+                  onResult={(raw) => {
+                    const draft = parseDraftJson<Record<string, unknown>>(raw)
+                    form.setFieldsValue({
+                      name: typeof draft.name === 'string' ? draft.name : undefined,
+                      category: typeof draft.category === 'string' ? draft.category as SceneTemplate['category'] : undefined,
+                      description: typeof draft.description === 'string' ? draft.description : undefined,
+                      typicalBeats: Object.prototype.hasOwnProperty.call(draft, 'typicalBeats') ? normalizeStringArray(draft.typicalBeats) : undefined,
+                      suggestedCharacterRoles: Object.prototype.hasOwnProperty.call(draft, 'suggestedCharacterRoles') ? normalizeStringArray(draft.suggestedCharacterRoles) : undefined,
+                      emotionArc: typeof draft.emotionArc === 'string' ? draft.emotionArc : undefined,
+                    })
+                  }}
+                />
+              </div>
               <div className="guided-step__field-card">
                 <Form.Item name="name" label="模板名称" rules={[{ required: true, message: '请填写模板名称' }]}>
                   <Input placeholder="例如：夜间突袭 / 内部争执 / 线索反转" />

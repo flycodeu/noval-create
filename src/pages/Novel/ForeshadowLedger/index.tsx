@@ -13,6 +13,7 @@ import {
   message,
 } from 'antd'
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
+import AIGenerateButton from '../../../components/AIGenerateButton'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import type {
   Chapter,
@@ -29,6 +30,12 @@ import {
   WorkspacePage,
   WorkspacePanel,
 } from '../components/WorkspaceShell'
+import {
+  buildDraftMessages,
+  matchSelectionIdByLabels,
+  parseDraftJson,
+} from '../shared/ai-draft'
+import { buildPlanningContextSections } from '../shared/planning-context'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import './index.css'
 
@@ -163,6 +170,10 @@ function laneMeta(lane: LedgerLaneKey): { title: string; hint: string } {
   return { title: '已回收', hint: '已登记回收/归档。' }
 }
 
+function hasFilledValues(values: Array<string | undefined | null>): boolean {
+  return values.some((value) => Boolean(value && value.trim()))
+}
+
 export default function ForeshadowLedgerPage({ novelId }: Props) {
   const { currentNovel } = useNovelStore()
   const { mutationToken, notifyWorkspaceMutation, registerEscapeHandler, registerSaveHandler } = useNovelWorkspaceActions()
@@ -201,6 +212,30 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
     () => Math.max(0, ...chapters.map((chapter) => chapter.chapterNum || 0)),
     [chapters],
   )
+  const watchedFormValues = Form.useWatch([], form) as Partial<ForeshadowFormValues> | undefined
+  const formValues = useMemo<Partial<ForeshadowFormValues>>(
+    () => watchedFormValues ?? {},
+    [watchedFormValues],
+  )
+  const currentFormValues = useMemo<ForeshadowFormValues>(() => ({
+    ...toFormValues(editingEntry),
+    ...formValues,
+  }), [editingEntry, formValues])
+  const threadOptions = useMemo(() => threads.map((item) => ({
+    id: item.id,
+    label: item.title,
+    aliases: [item.title, item.summary || '', item.premise || ''],
+  })), [threads])
+  const commitmentOptions = useMemo(() => commitments.map((item) => ({
+    id: item.id,
+    label: item.title,
+    aliases: [item.title, `${item.commitmentKind === 'payoff' ? '回收' : '承诺'}${item.title}`],
+  })), [commitments])
+  const volumeOptions = useMemo(() => volumes.map((item) => ({
+    id: item.id,
+    label: item.title?.trim() || `第${item.volumeNumber}卷`,
+    aliases: [item.title?.trim() || '', `第${item.volumeNumber}卷`],
+  })), [volumes])
 
   const laneBuckets = useMemo(() => {
     const buckets: Record<LedgerLaneKey, ForeshadowLedgerEntry[]> = {
@@ -609,6 +644,82 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
       >
         <Form form={form} layout="vertical">
           <div className="guided-step__field-grid">
+            <div className="guided-step__field-card guided-step__field-card--full">
+              <AIGenerateButton
+                novelId={novelId}
+                label={editingEntry ? 'AI 补全·当前伏笔' : 'AI 生成·伏笔草稿'}
+                intent={hasFilledValues([
+                  currentFormValues.title,
+                  currentFormValues.detail,
+                  currentFormValues.plantMethod,
+                  currentFormValues.payoffMethod,
+                  currentFormValues.payoffSceneAction,
+                  currentFormValues.requiredEvidence,
+                ]) ? 'complete' : 'generate'}
+                isJson
+                buildMessages={() => buildDraftMessages({
+                  task: editingEntry ? `伏笔资产 · ${editingEntry.title}` : '伏笔资产草稿',
+                  mode: hasFilledValues([
+                    currentFormValues.title,
+                    currentFormValues.detail,
+                    currentFormValues.plantMethod,
+                    currentFormValues.payoffMethod,
+                    currentFormValues.payoffSceneAction,
+                    currentFormValues.requiredEvidence,
+                  ]) ? 'optimize' : 'replace',
+                  context: buildPlanningContextSections(currentNovel, {
+                    includeSubplots: true,
+                    extraSections: [
+                      { label: '当前章节进度', value: currentChapterNum > 0 ? `第${currentChapterNum}章` : '' },
+                      { label: '可绑定故事线程', value: threads.map((item) => item.title) },
+                      { label: '可绑定终局承诺', value: commitments.map((item) => item.title) },
+                      { label: '可绑定卷', value: volumes.map((item) => item.title?.trim() || `第${item.volumeNumber}卷`) },
+                    ],
+                  }),
+                  fields: [
+                    { key: 'title', label: '伏笔标题', value: currentFormValues.title, hint: '写成可复用、可追踪的资产名称。' },
+                    { key: 'detail', label: '伏笔说明', value: currentFormValues.detail, hint: '写清内容、误导结构或触发条件。' },
+                    { key: 'plantMethod', label: '埋设方式', value: currentFormValues.plantMethod, hint: '写正文里如何埋设。' },
+                    { key: 'targetPayoffChapter', label: '目标回收章位', type: 'number', value: currentFormValues.targetPayoffChapter, hint: '给出正整数章位。' },
+                    { key: 'payoffMethod', label: '回收方式', value: currentFormValues.payoffMethod, hint: '写如何被真正回收。' },
+                    { key: 'payoffSceneAction', label: '回收动作', value: currentFormValues.payoffSceneAction, hint: '写正文里必须发生的具体动作。' },
+                    { key: 'requiredEvidence', label: '可见证据', value: currentFormValues.requiredEvidence, hint: '写读者必须看到的证据。' },
+                    { key: 'readerVisibleOutcome', label: '读者可见结果', value: currentFormValues.readerVisibleOutcome, hint: '写回收后读者明确知道了什么。' },
+                    { key: 'allowedDelayReason', label: '允许延期理由', value: currentFormValues.allowedDelayReason, hint: '若不能按期回收，写合理延期理由。' },
+                    { key: 'linkedThreadTitle', label: '关联故事线程标题', value: threads.find((item) => item.id === currentFormValues.linkedThreadId)?.title || '', hint: '只能从可绑定故事线程中选标题。' },
+                    { key: 'linkedEndgameCommitmentTitle', label: '关联终局承诺标题', value: commitments.find((item) => item.id === currentFormValues.linkedEndgameCommitmentId)?.title || '', hint: '只能从可绑定终局承诺中选标题。' },
+                    { key: 'linkedVolumeTitle', label: '关联卷标题', value: volumes.find((item) => item.id === currentFormValues.linkedVolumeId)?.title?.trim() || '', hint: '只能从可绑定卷中选标题。' },
+                  ],
+                  requirements: [
+                    '必须与故事线程、终局承诺和当前世界规则一致。',
+                    '不要生成无法在正文里被看见和核对的空泛伏笔。',
+                  ],
+                })}
+                onResult={(raw) => {
+                  const draft = parseDraftJson<Record<string, unknown>>(raw)
+                  form.setFieldsValue({
+                    title: typeof draft.title === 'string' ? draft.title : undefined,
+                    detail: typeof draft.detail === 'string' ? draft.detail : undefined,
+                    plantMethod: typeof draft.plantMethod === 'string' ? draft.plantMethod : undefined,
+                    targetPayoffChapter: typeof draft.targetPayoffChapter === 'number' ? draft.targetPayoffChapter : undefined,
+                    payoffMethod: typeof draft.payoffMethod === 'string' ? draft.payoffMethod : undefined,
+                    payoffSceneAction: typeof draft.payoffSceneAction === 'string' ? draft.payoffSceneAction : undefined,
+                    requiredEvidence: typeof draft.requiredEvidence === 'string' ? draft.requiredEvidence : undefined,
+                    readerVisibleOutcome: typeof draft.readerVisibleOutcome === 'string' ? draft.readerVisibleOutcome : undefined,
+                    allowedDelayReason: typeof draft.allowedDelayReason === 'string' ? draft.allowedDelayReason : undefined,
+                    linkedThreadId: Object.prototype.hasOwnProperty.call(draft, 'linkedThreadTitle')
+                      ? matchSelectionIdByLabels(draft.linkedThreadTitle, threadOptions)
+                      : undefined,
+                    linkedEndgameCommitmentId: Object.prototype.hasOwnProperty.call(draft, 'linkedEndgameCommitmentTitle')
+                      ? matchSelectionIdByLabels(draft.linkedEndgameCommitmentTitle, commitmentOptions)
+                      : undefined,
+                    linkedVolumeId: Object.prototype.hasOwnProperty.call(draft, 'linkedVolumeTitle')
+                      ? matchSelectionIdByLabels(draft.linkedVolumeTitle, volumeOptions)
+                      : undefined,
+                  })
+                }}
+              />
+            </div>
             <div className="guided-step__field-card guided-step__field-card--full">
               <Form.Item name="title" label="伏笔标题" rules={[{ required: true, message: '请填写伏笔标题' }]}>
                 <Input placeholder="例如：父亲留下的无名戒指" />

@@ -40,10 +40,10 @@ import {
   OVERVIEW_ZERO_STATE_ACTIONS,
   resolveOverviewDisplayState,
 } from '../overview-presentation'
+import type { RegisteredWorkspaceQualityController } from '../workspace-quality-context-core'
 import {
-  type RegisteredWorkspaceQualityController,
   useRegisterWorkspaceQualityController,
-} from '../workspace-quality-context'
+} from '../workspace-quality-context-core'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import { EMPTY_WORKFLOW_STATS, getAssetBloatSignal, loadWorkflowStats, type WorkflowStats } from '../workflow'
 
@@ -276,7 +276,7 @@ export default function Overview({ novelId }: Props) {
     syncSuggestedAuthorMode(suggestedAuthorMode.mode)
   }, [suggestedAuthorMode.mode, syncSuggestedAuthorMode])
 
-  const applyOverviewDraft = (draft: Partial<OverviewFormValues>) => {
+  const applyOverviewDraft = useCallback((draft: Partial<OverviewFormValues>) => {
     const currentValues = form.getFieldsValue(true)
 
     form.setFieldsValue({
@@ -287,7 +287,7 @@ export default function Overview({ novelId }: Props) {
       expandedBackground: typeof draft.expandedBackground === 'string' ? draft.expandedBackground : currentValues.expandedBackground,
       targetWords: normalizeTargetWords(draft.targetWords ?? currentValues.targetWords),
     })
-  }
+  }, [form])
 
   const { clearDraft, draft, finalizeDraft, saveAppliedDraft } = usePlanningDraft<OverviewFormValues>({
     novelId,
@@ -337,7 +337,7 @@ export default function Overview({ novelId }: Props) {
         rawOutputs: [JSON.stringify(preview.patchedSnapshot)],
       })
     },
-  }), [form, saveAppliedDraft])
+  }), [applyOverviewDraft, form, saveAppliedDraft])
 
   useRegisterWorkspaceQualityController(workspaceQualityController)
 

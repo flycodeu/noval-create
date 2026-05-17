@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import { CaretDownFilled, CaretRightFilled, ClockCircleOutlined } from '@ant-design/icons'
 import type { WorkspaceNavGroup } from '../../../shared/workspace-types'
 import StatusTag from '../common/StatusTag'
@@ -33,18 +33,7 @@ export default function ProjectSidebar({
     () => navGroups.find((group) => group.items.some((item) => item.key === activeKey))?.key || navGroups[0]?.key,
     [activeKey, navGroups],
   )
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => (
-    activeGroup ? { [activeGroup]: true } : {}
-  ))
-
-  useEffect(() => {
-    if (!activeGroup) return
-    setOpenGroups((current) => (
-      current[activeGroup]
-        ? current
-        : { ...current, [activeGroup]: true }
-    ))
-  }, [activeGroup])
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
 
   const handleNavigate = (route: string) => {
     onNavigate(route)

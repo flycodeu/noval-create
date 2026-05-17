@@ -692,7 +692,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
     }
   }
 
-  const handleClear = async () => {
+  const handleClear = useCallback(async () => {
     Modal.confirm({
       title: '清空人物系统？',
       content: '会删除当前小说下全部人物与关系数据，此操作不可撤销。',
@@ -710,7 +710,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
         message.success(getUserFacingMessage('character.cleared'))
       },
     })
-  }
+  }, [form, loadGraph, loadPage, novelId, notifyWorkspaceMutation])
 
   useEffect(() => {
     registerClearHandler(() => {

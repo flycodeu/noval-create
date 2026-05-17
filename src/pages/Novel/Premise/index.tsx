@@ -13,6 +13,7 @@ import {
   TeamOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
+import AIGenerateButton from '../../../components/AIGenerateButton'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import type {
   PremiseGenerationMode,
@@ -29,6 +30,8 @@ import {
   buildAiResultKey,
   useAiResultStore,
 } from '../../../stores/ai-result.store'
+import { buildDraftMessages, parseDraftJson } from '../shared/ai-draft'
+import { buildPlanningContextSections } from '../shared/planning-context'
 import {
   isCharacterRosterReady,
   isItemsEquipmentReady,
@@ -43,10 +46,10 @@ import {
   WorkspacePage,
   WorkspacePanel,
 } from '../components/WorkspaceShell'
+import type { RegisteredWorkspaceQualityController } from '../workspace-quality-context-core'
 import {
-  type RegisteredWorkspaceQualityController,
   useRegisterWorkspaceQualityController,
-} from '../workspace-quality-context'
+} from '../workspace-quality-context-core'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 
 interface Props {
@@ -123,6 +126,10 @@ function mergeGeneratedValues(
     commonSenseRules: pick(current.commonSenseRules, result.commonSenseRules),
     bannedTerms: pick(current.bannedTerms, result.bannedTerms),
   }
+}
+
+function hasFilledValues(values: Array<string | undefined | null>): boolean {
+  return values.some((value) => Boolean(value && value.trim()))
 }
 
 export default function PremisePage({ novelId }: Props) {
@@ -246,13 +253,13 @@ export default function PremisePage({ novelId }: Props) {
     }
   }
 
-  const clearPersistedDrafts = async () => {
+  const clearPersistedDrafts = React.useCallback(async () => {
     try {
       await window.electron.premiseDraft.clearAll(novelId)
     } catch (error) {
       console.error(error)
     }
-  }
+  }, [novelId])
 
   const handleDiscardPendingResult = async () => {
     await clearPersistedDrafts()
@@ -293,7 +300,7 @@ export default function PremisePage({ novelId }: Props) {
   }
 
   const workspaceQualityController = useMemo<RegisteredWorkspaceQualityController>(() => ({
-    workspaceKey: 'core-settings',
+    workspaceKey: 'premise',
     getSnapshot: () => {
       const values = form.getFieldsValue(true)
       return {
@@ -325,7 +332,34 @@ export default function PremisePage({ novelId }: Props) {
         bannedTerms: typeof fields.bannedTerms === 'string' ? fields.bannedTerms : undefined,
       })
     },
-  }), [form])
+    persistPreview: async (nextSnapshot) => {
+      const fields = nextSnapshot.fields && typeof nextSnapshot.fields === 'object'
+        ? nextSnapshot.fields as Partial<PremiseFormValues>
+        : {}
+
+      const payload = buildStorySettingsPayload({
+        premise: {
+          positioning: typeof fields.positioning === 'string' ? normalizeText(fields.positioning) : settings.premise.positioning,
+          coreHook: typeof fields.coreHook === 'string' ? normalizeText(fields.coreHook) : settings.premise.coreHook,
+          protagonistStart: typeof fields.protagonistStart === 'string' ? normalizeText(fields.protagonistStart) : settings.premise.protagonistStart,
+          constraints: typeof fields.constraints === 'string' ? normalizeText(fields.constraints) : settings.premise.constraints,
+          languageGuardrails: typeof fields.languageGuardrails === 'string' ? normalizeText(fields.languageGuardrails) : settings.premise.languageGuardrails,
+        },
+        writingRules: {
+          antiAiFlavor: typeof fields.antiAiFlavor === 'string' ? normalizeText(fields.antiAiFlavor) : settings.writingRules.antiAiFlavor,
+          commonSenseRules: typeof fields.commonSenseRules === 'string' ? normalizeText(fields.commonSenseRules) : settings.writingRules.commonSenseRules,
+          bannedTerms: typeof fields.bannedTerms === 'string' ? normalizeText(fields.bannedTerms) : settings.writingRules.bannedTerms,
+        },
+      }, currentNovel?.settingsJson)
+
+      await window.electron.novel.update(novelId, {
+        settingsJson: JSON.stringify(payload),
+      })
+
+      const updated = await window.electron.novel.get(novelId)
+      if (updated) setCurrentNovel(updated)
+    },
+  }), [currentNovel?.settingsJson, form, novelId, setCurrentNovel, settings])
 
   useRegisterWorkspaceQualityController(workspaceQualityController)
 
@@ -443,7 +477,7 @@ export default function PremisePage({ novelId }: Props) {
     }
   }
 
-  const handleClear = () => {
+  const handleClear = React.useCallback(() => {
     Modal.confirm({
       title: '清空基础设定？',
       content: '会清空当前基础设定与写作边界字段，并直接保存为空白基线。',
@@ -488,12 +522,12 @@ export default function PremisePage({ novelId }: Props) {
         message.success(getUserFacingMessage('premise.cleared'))
       },
     })
-  }
+  }, [clearPersistedDrafts, clearPendingResult, currentNovel?.settingsJson, form, novelId, notifyWorkspaceMutation, pendingResultKey, setCurrentNovel])
 
   useEffect(() => {
     registerClearHandler(handleClear)
     return () => registerClearHandler(null)
-  }, [registerClearHandler, currentNovel?.settingsJson, pendingResultKey])
+  }, [handleClear, registerClearHandler])
 
   return (
     <WorkspacePage
@@ -618,7 +652,60 @@ export default function PremisePage({ novelId }: Props) {
         </div>
       ) : null}
 
-      <WorkspacePanel title="基础设定编辑器">
+      <WorkspacePanel
+        title="基础设定编辑器"
+        extra={(
+          <AIGenerateButton
+            novelId={novelId}
+            label="AI 生成·基础设定块"
+            intent={hasFilledValues([
+              typeof formValues.positioning === 'string' ? formValues.positioning : '',
+              typeof formValues.coreHook === 'string' ? formValues.coreHook : '',
+              typeof formValues.protagonistStart === 'string' ? formValues.protagonistStart : '',
+              typeof formValues.constraints === 'string' ? formValues.constraints : '',
+              typeof formValues.languageGuardrails === 'string' ? formValues.languageGuardrails : '',
+            ]) ? 'complete' : 'generate'}
+            isJson
+            buildMessages={() => buildDraftMessages({
+              task: '基础设定主块',
+              mode: hasFilledValues([
+                typeof formValues.positioning === 'string' ? formValues.positioning : '',
+                typeof formValues.coreHook === 'string' ? formValues.coreHook : '',
+                typeof formValues.protagonistStart === 'string' ? formValues.protagonistStart : '',
+                typeof formValues.constraints === 'string' ? formValues.constraints : '',
+                typeof formValues.languageGuardrails === 'string' ? formValues.languageGuardrails : '',
+              ]) ? 'optimize' : 'replace',
+              context: buildPlanningContextSections(currentNovel, {
+                includeSubplots: false,
+                extraSections: [
+                  { label: '世界资产就绪', value: `${assetReadiness}/4` },
+                ],
+              }),
+              fields: [
+                { key: 'positioning', label: '作品定位', value: formValues.positioning, hint: '写清时代、环境、社会压力和整体叙事方向。' },
+                { key: 'coreHook', label: '核心信息', value: formValues.coreHook, hint: '写这部书最值得展开的核心信息，不直接展开成事件链。' },
+                { key: 'protagonistStart', label: '主角起点', value: formValues.protagonistStart, hint: '写身份、处境、资源和限制。' },
+                { key: 'constraints', label: '底层约束', value: formValues.constraints, hint: '写不能违背的世界规则、社会规则、代价和常识边界。' },
+                { key: 'languageGuardrails', label: '语言边界', value: formValues.languageGuardrails, hint: '写命名、称呼、语气、禁用表达和叙述口径边界。' },
+              ],
+              requirements: [
+                '只生成基础设定，不要代替故事设计页面写主线、支线、章节和结局。',
+                '必须与现有简介、背景、题材和世界资产一致。',
+              ],
+            })}
+            onResult={(raw) => {
+              const draft = parseDraftJson<Partial<PremiseFormValues>>(raw)
+              form.setFieldsValue({
+                positioning: typeof draft.positioning === 'string' ? draft.positioning : undefined,
+                coreHook: typeof draft.coreHook === 'string' ? draft.coreHook : undefined,
+                protagonistStart: typeof draft.protagonistStart === 'string' ? draft.protagonistStart : undefined,
+                constraints: typeof draft.constraints === 'string' ? draft.constraints : undefined,
+                languageGuardrails: typeof draft.languageGuardrails === 'string' ? draft.languageGuardrails : undefined,
+              })
+            }}
+          />
+        )}
+      >
         <Form form={form} layout="vertical">
           <div className="guided-step__field-grid">
             <div className="guided-step__field-card">
@@ -650,7 +737,56 @@ export default function PremisePage({ novelId }: Props) {
         </Form>
       </WorkspacePanel>
 
-      <WorkspacePanel title="语言与写作边界">
+      <WorkspacePanel
+        title="语言与写作边界"
+        extra={(
+          <AIGenerateButton
+            novelId={novelId}
+            label="AI 生成·写作边界"
+            intent={hasFilledValues([
+              typeof formValues.antiAiFlavor === 'string' ? formValues.antiAiFlavor : '',
+              typeof formValues.commonSenseRules === 'string' ? formValues.commonSenseRules : '',
+              typeof formValues.bannedTerms === 'string' ? formValues.bannedTerms : '',
+            ]) ? 'complete' : 'generate'}
+            isJson
+            buildMessages={() => buildDraftMessages({
+              task: '写作边界与语言限制',
+              mode: hasFilledValues([
+                typeof formValues.antiAiFlavor === 'string' ? formValues.antiAiFlavor : '',
+                typeof formValues.commonSenseRules === 'string' ? formValues.commonSenseRules : '',
+                typeof formValues.bannedTerms === 'string' ? formValues.bannedTerms : '',
+              ]) ? 'optimize' : 'replace',
+              context: buildPlanningContextSections(currentNovel, {
+                includeSubplots: false,
+                extraSections: [
+                  { label: '当前基础设定', value: [
+                    typeof formValues.positioning === 'string' ? `定位：${formValues.positioning}` : '',
+                    typeof formValues.constraints === 'string' ? `约束：${formValues.constraints}` : '',
+                    typeof formValues.languageGuardrails === 'string' ? `语言边界：${formValues.languageGuardrails}` : '',
+                  ].filter(Boolean).join('\n') },
+                ],
+              }),
+              fields: [
+                { key: 'antiAiFlavor', label: '去 AI 腔规则', value: formValues.antiAiFlavor, hint: '写需要长期压制的总结腔、模板句和空泛句式。' },
+                { key: 'commonSenseRules', label: '常识约束', value: formValues.commonSenseRules, hint: '写人物行为、伤势、资源、地图距离和制度压力的底线。' },
+                { key: 'bannedTerms', label: '禁用表达', value: formValues.bannedTerms, hint: '写需要尽量避免的空洞词、套话和生造词。' },
+              ],
+              requirements: [
+                '写成可执行规则，不要写空泛价值判断。',
+                '必须服务当前题材、背景和人物生态。',
+              ],
+            })}
+            onResult={(raw) => {
+              const draft = parseDraftJson<Partial<PremiseFormValues>>(raw)
+              form.setFieldsValue({
+                antiAiFlavor: typeof draft.antiAiFlavor === 'string' ? draft.antiAiFlavor : undefined,
+                commonSenseRules: typeof draft.commonSenseRules === 'string' ? draft.commonSenseRules : undefined,
+                bannedTerms: typeof draft.bannedTerms === 'string' ? draft.bannedTerms : undefined,
+              })
+            }}
+          />
+        )}
+      >
         <Form form={form} layout="vertical">
           <Collapse
             ghost

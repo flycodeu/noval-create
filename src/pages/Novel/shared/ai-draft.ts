@@ -17,6 +17,12 @@ export interface DraftFieldDefinition {
   hint?: string
 }
 
+export interface DraftSelectionOption {
+  id?: number
+  label: string
+  aliases?: string[]
+}
+
 interface BuildDraftMessagesOptions {
   task: string
   mode?: DraftMode
@@ -149,4 +155,51 @@ export function normalizeOptionalNumber(value: unknown): number | undefined {
   }
 
   return undefined
+}
+
+function normalizeSelectionToken(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/[·•:：,，、;；'"“”‘’()（）[\]【】{}<>《》\-_/\\|]/g, '')
+}
+
+export function matchSelectionIdsByLabels(value: unknown, options: DraftSelectionOption[]): number[] {
+  const targets = normalizeStringArray(value)
+    .map(normalizeSelectionToken)
+    .filter(Boolean)
+
+  if (targets.length <= 0) return []
+
+  const matched = new Set<number>()
+
+  targets.forEach((target) => {
+    options.forEach((option) => {
+      if (typeof option.id !== 'number') return
+      const candidates = [option.label, ...(option.aliases || [])]
+        .map(normalizeSelectionToken)
+        .filter(Boolean)
+
+      if (candidates.some((candidate) => candidate === target || candidate.includes(target) || target.includes(candidate))) {
+        matched.add(option.id)
+      }
+    })
+  })
+
+  return Array.from(matched)
+}
+
+export function matchSelectionIdByLabels(value: unknown, options: DraftSelectionOption[]): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.round(value)
+  }
+
+  if (typeof value === 'string') {
+    const [first] = matchSelectionIdsByLabels([value], options)
+    return first
+  }
+
+  const [first] = matchSelectionIdsByLabels(value, options)
+  return first
 }

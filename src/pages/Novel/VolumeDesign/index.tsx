@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Alert, Button, Form, Input, Select, Space, Spin, Switch, Tag, message } from 'antd'
 import { SaveOutlined, BarsOutlined, LinkOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
+import AIGenerateButton from '../../../components/AIGenerateButton'
 import { useNovelStore } from '../../../stores/novel.store'
 import type {
   EndgameCommitment,
@@ -19,6 +20,13 @@ import {
   WorkspacePanel,
   WorkspaceStepGuide,
 } from '../components/WorkspaceShell'
+import {
+  buildDraftMessages,
+  matchSelectionIdsByLabels,
+  normalizeStringArray,
+  parseDraftJson,
+} from '../shared/ai-draft'
+import { buildPlanningContextSections } from '../shared/planning-context'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 
 interface Props {
@@ -74,6 +82,10 @@ function getFindingSeverityLabel(severity: VolumeAuditFinding['severity']): stri
   return '低'
 }
 
+function hasFilledValues(values: Array<string | undefined | null>): boolean {
+  return values.some((value) => Boolean(value && value.trim()))
+}
+
 export default function VolumeDesignPage({ novelId }: Props) {
   const navigate = useNavigate()
   const { currentNovel } = useNovelStore()
@@ -92,7 +104,7 @@ export default function VolumeDesignPage({ novelId }: Props) {
   const [lastAuditResult, setLastAuditResult] = useState<VolumeAuditResult | null>(null)
   const [lastSyncResult, setLastSyncResult] = useState<VolumeConstraintSyncResult | null>(null)
 
-  const loadData = async (showLoading = false) => {
+  const loadData = useCallback(async (showLoading = false) => {
     if (showLoading) {
       setLoading(true)
     } else {
@@ -117,11 +129,11 @@ export default function VolumeDesignPage({ novelId }: Props) {
       setLoading(false)
       setRefreshing(false)
     }
-  }
+  }, [novelId])
 
   useEffect(() => {
     void loadData(true)
-  }, [novelId])
+  }, [loadData])
 
   const activeVolume = useMemo(
     () => volumes.find((item) => item.id === activeVolumeId) || null,
@@ -149,6 +161,31 @@ export default function VolumeDesignPage({ novelId }: Props) {
     () => resistanceTracks.filter((item) => (activeDesign?.linkedResistanceTrackIds || []).includes(item.id || -1)),
     [activeDesign?.linkedResistanceTrackIds, resistanceTracks],
   )
+  const watchedFormValues = Form.useWatch([], form) as Partial<VolumeDesignFormValues> | undefined
+  const watchedValues = useMemo<Partial<VolumeDesignFormValues>>(
+    () => watchedFormValues ?? {},
+    [watchedFormValues],
+  )
+  const currentValues = useMemo<VolumeDesignFormValues>(() => ({
+    ...buildFormValues(activeDesign),
+    ...watchedValues,
+    linkedEndgameCommitmentIds: watchedValues.linkedEndgameCommitmentIds ?? activeDesign?.linkedEndgameCommitmentIds ?? [],
+    linkedResistanceTrackIds: watchedValues.linkedResistanceTrackIds ?? activeDesign?.linkedResistanceTrackIds ?? [],
+    auditStatus: watchedValues.auditStatus ?? activeDesign?.auditStatus ?? 'draft',
+  }), [activeDesign, watchedValues])
+  const commitmentOptions = useMemo(() => commitments.map((item) => ({
+    id: item.id,
+    label: item.title,
+    aliases: [
+      item.title,
+      `${item.commitmentKind === 'payoff' ? '回收' : '承诺'}${item.title}`,
+    ],
+  })), [commitments])
+  const resistanceOptions = useMemo(() => resistanceTracks.map((item) => ({
+    id: item.id,
+    label: item.title,
+    aliases: [item.title, item.sourceName, `${item.title}${item.sourceName ? ` ${item.sourceName}` : ''}`],
+  })), [resistanceTracks])
   const hasAuditBlockingRisk = (lastAuditResult?.summary.highCount || 0) > 0
 
   const handleSave = async () => {
@@ -334,7 +371,67 @@ export default function VolumeDesignPage({ novelId }: Props) {
         </Space>
       </WorkspacePanel>
 
-      <WorkspacePanel title="卷级闭环" description="写当前卷为什么值得读完，以及它怎么向终局继续施压。">
+      <WorkspacePanel
+        title="卷级闭环"
+        description="写当前卷为什么值得读完，以及它怎么向终局继续施压。"
+        extra={(
+          <AIGenerateButton
+            novelId={novelId}
+            label="AI 生成·卷级闭环"
+            intent={hasFilledValues([
+              currentValues.volumeTheme,
+              currentValues.volumePromise,
+              currentValues.mainConflict,
+              currentValues.climaxPlan,
+              currentValues.endStateShift,
+              currentValues.readerExpectation,
+            ]) ? 'complete' : 'generate'}
+            isJson
+            buildMessages={() => buildDraftMessages({
+              task: `卷级闭环${activeVolume ? ` · ${activeVolume.title || `第${activeVolume.volumeNumber}卷`}` : ''}`,
+              mode: hasFilledValues([
+                currentValues.volumeTheme,
+                currentValues.volumePromise,
+                currentValues.mainConflict,
+                currentValues.climaxPlan,
+                currentValues.endStateShift,
+                currentValues.readerExpectation,
+              ]) ? 'optimize' : 'replace',
+              context: buildPlanningContextSections(currentNovel, {
+                includeSubplots: true,
+                extraSections: [
+                  { label: '当前卷信息', value: activeVolume ? `${activeVolume.title || `第${activeVolume.volumeNumber}卷`} · ${activeVolume.chapterCount}章 · ${activeVolume.wordCount.toLocaleString()}字` : '' },
+                  { label: '本卷已绑定终局承诺', value: linkedCommitments.map((item) => item.title) },
+                  { label: '本卷已绑定主阻力', value: linkedResistanceTracks.map((item) => `${item.title} · ${item.sourceName}`) },
+                ],
+              }),
+              fields: [
+                { key: 'volumeTheme', label: '本卷主题', value: currentValues.volumeTheme, hint: '写这一卷反复验证的主题命题，不重复全书主题摘要。' },
+                { key: 'volumePromise', label: '本卷承诺', value: currentValues.volumePromise, hint: '写读者读完这一卷必须拿到的情绪收益或叙事兑现。' },
+                { key: 'mainConflict', label: '本卷主冲突', value: currentValues.mainConflict, hint: '写这一卷主要对手、压力结构或核心困局。' },
+                { key: 'climaxPlan', label: '本卷高潮', value: currentValues.climaxPlan, hint: '写这一卷最高压的冲突爆点和兑现方式。' },
+                { key: 'endStateShift', label: '卷末状态变化', value: currentValues.endStateShift, hint: '写卷末人物、局势或资源格局发生的不可逆变化。' },
+                { key: 'readerExpectation', label: '卷末读者期待', value: currentValues.readerExpectation, hint: '写读者读完本卷后下一卷最该等待什么。' },
+              ],
+              requirements: [
+                '只生成当前卷目标，不要把全书总纲和后续多卷内容混写进来。',
+                '必须与终局设计、阻力系统、故事设计和当前卷章位规模一致。',
+              ],
+            })}
+            onResult={(raw) => {
+              const draft = parseDraftJson<Partial<VolumeDesignFormValues>>(raw)
+              form.setFieldsValue({
+                volumeTheme: typeof draft.volumeTheme === 'string' ? draft.volumeTheme : undefined,
+                volumePromise: typeof draft.volumePromise === 'string' ? draft.volumePromise : undefined,
+                mainConflict: typeof draft.mainConflict === 'string' ? draft.mainConflict : undefined,
+                climaxPlan: typeof draft.climaxPlan === 'string' ? draft.climaxPlan : undefined,
+                endStateShift: typeof draft.endStateShift === 'string' ? draft.endStateShift : undefined,
+                readerExpectation: typeof draft.readerExpectation === 'string' ? draft.readerExpectation : undefined,
+              })
+            }}
+          />
+        )}
+      >
         <Form form={form} layout="vertical">
           <div className="guided-step__field-grid">
             <div className="guided-step__field-card">
@@ -371,7 +468,80 @@ export default function VolumeDesignPage({ novelId }: Props) {
         </Form>
       </WorkspacePanel>
 
-      <WorkspacePanel title="终局绑定与阻力清单" description="这一卷必须服务哪些终局承诺、主要阻力来源是什么，以及必须新增和回收哪些线索。">
+      <WorkspacePanel
+        title="终局绑定与阻力清单"
+        description="这一卷必须服务哪些终局承诺、主要阻力来源是什么，以及必须新增和回收哪些线索。"
+        extra={(
+          <AIGenerateButton
+            novelId={novelId}
+            label="AI 生成·绑定与线索"
+            intent={hasFilledValues([
+              currentValues.mustAddCluesText,
+              currentValues.mustResolveCluesText,
+            ]) || currentValues.linkedEndgameCommitmentIds.length > 0 || currentValues.linkedResistanceTrackIds.length > 0 ? 'complete' : 'generate'}
+            isJson
+            buildMessages={() => buildDraftMessages({
+              task: `卷级绑定与线索${activeVolume ? ` · ${activeVolume.title || `第${activeVolume.volumeNumber}卷`}` : ''}`,
+              mode: hasFilledValues([
+                currentValues.mustAddCluesText,
+                currentValues.mustResolveCluesText,
+              ]) || currentValues.linkedEndgameCommitmentIds.length > 0 || currentValues.linkedResistanceTrackIds.length > 0 ? 'optimize' : 'replace',
+              context: buildPlanningContextSections(currentNovel, {
+                includeSubplots: true,
+                extraSections: [
+                  { label: '当前卷闭环摘要', value: [
+                    currentValues.volumeTheme ? `主题：${currentValues.volumeTheme}` : '',
+                    currentValues.volumePromise ? `承诺：${currentValues.volumePromise}` : '',
+                    currentValues.mainConflict ? `主冲突：${currentValues.mainConflict}` : '',
+                    currentValues.climaxPlan ? `高潮：${currentValues.climaxPlan}` : '',
+                    currentValues.endStateShift ? `卷末变化：${currentValues.endStateShift}` : '',
+                  ].filter(Boolean).join('\n') },
+                  { label: '可绑定终局承诺', value: commitments.map((item) => `${item.commitmentKind === 'payoff' ? '回收' : '承诺'} · ${item.title}`) },
+                  { label: '可绑定阻力线', value: resistanceTracks.map((item) => `${item.title} · ${item.sourceName}`) },
+                ],
+              }),
+              fields: [
+                { key: 'linkedEndgameCommitmentTitles', label: '本卷绑定的终局承诺标题', type: 'string[]', value: linkedCommitments.map((item) => item.title), hint: '只能从可绑定终局承诺列表里选择标题。' },
+                { key: 'linkedResistanceTrackTitles', label: '本卷主要阻力来源标题', type: 'string[]', value: linkedResistanceTracks.map((item) => item.title), hint: '只能从可绑定阻力线列表里选择标题。' },
+                { key: 'mustAddClues', label: '本卷必须新增的线索', type: 'string[]', value: normalizeStringArray(currentValues.mustAddCluesText.split(/\r?\n+/)), hint: '建议每条都可在章节合同里落地。' },
+                { key: 'mustResolveClues', label: '本卷必须回收的线索', type: 'string[]', value: normalizeStringArray(currentValues.mustResolveCluesText.split(/\r?\n+/)), hint: '优先写需要在本卷明确兑现的旧线索。' },
+              ],
+              requirements: [
+                '终局承诺和阻力线必须引用现有标题，不要捏造不存在的资产名。',
+                '新增线索和回收线索要能直接下沉到章节合同与伏笔账本。',
+              ],
+            })}
+            onResult={(raw) => {
+              const draft = parseDraftJson<Record<string, unknown>>(raw)
+              const nextValues: Partial<VolumeDesignFormValues> = {}
+
+              if (Object.prototype.hasOwnProperty.call(draft, 'linkedEndgameCommitmentTitles')) {
+                nextValues.linkedEndgameCommitmentIds = matchSelectionIdsByLabels(
+                  draft.linkedEndgameCommitmentTitles,
+                  commitmentOptions,
+                )
+              }
+
+              if (Object.prototype.hasOwnProperty.call(draft, 'linkedResistanceTrackTitles')) {
+                nextValues.linkedResistanceTrackIds = matchSelectionIdsByLabels(
+                  draft.linkedResistanceTrackTitles,
+                  resistanceOptions,
+                )
+              }
+
+              if (Object.prototype.hasOwnProperty.call(draft, 'mustAddClues')) {
+                nextValues.mustAddCluesText = normalizeStringArray(draft.mustAddClues).join('\n')
+              }
+
+              if (Object.prototype.hasOwnProperty.call(draft, 'mustResolveClues')) {
+                nextValues.mustResolveCluesText = normalizeStringArray(draft.mustResolveClues).join('\n')
+              }
+
+              form.setFieldsValue(nextValues)
+            }}
+          />
+        )}
+      >
         <Form form={form} layout="vertical">
           <div className="guided-step__field-grid">
             <div className="guided-step__field-card guided-step__field-card--full">

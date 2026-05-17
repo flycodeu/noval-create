@@ -345,14 +345,14 @@ export default function GuidePage({ novelId }: Props) {
     await runStep(step, action, successText)
   }, [ensureStepReady, runStep])
 
-  const syncWorldRules = () => void runGuardedStep('world-rules', syncWorldRulesCore, getUserFacingMessage('guide.worldRulesSynced'))
-  const generateMap = () => void runGuardedStep('map', generateMapCore, getUserFacingMessage('guide.mapGenerated'))
-  const generateCharacters = () => void runGuardedStep('characters', generateCharactersCore, getUserFacingMessage('guide.charactersGenerated'))
-  const generateItems = () => void runGuardedStep('items', generateItemsCore, getUserFacingMessage('guide.itemsGenerated'))
-  const generateThreads = () => void runGuardedStep('threads', generateThreadsCore, getUserFacingMessage('guide.threadsGenerated'))
-  const generateOutline = () => void runGuardedStep('outline', generateOutlineCore, getUserFacingMessage('guide.outlineGenerated'))
-  const generateStoryDesign = () => void runGuardedStep('story-design', generateStoryDesignCore, getUserFacingMessage('guide.storyDesignGenerated'))
-  const generateTimeline = () => void runGuardedStep('timeline', generateTimelineCore, getUserFacingMessage('guide.timelineGenerated'))
+  const syncWorldRules = useCallback(() => void runGuardedStep('world-rules', syncWorldRulesCore, getUserFacingMessage('guide.worldRulesSynced')), [runGuardedStep, syncWorldRulesCore])
+  const generateMap = useCallback(() => void runGuardedStep('map', generateMapCore, getUserFacingMessage('guide.mapGenerated')), [generateMapCore, runGuardedStep])
+  const generateCharacters = useCallback(() => void runGuardedStep('characters', generateCharactersCore, getUserFacingMessage('guide.charactersGenerated')), [generateCharactersCore, runGuardedStep])
+  const generateItems = useCallback(() => void runGuardedStep('items', generateItemsCore, getUserFacingMessage('guide.itemsGenerated')), [generateItemsCore, runGuardedStep])
+  const generateThreads = useCallback(() => void runGuardedStep('threads', generateThreadsCore, getUserFacingMessage('guide.threadsGenerated')), [generateThreadsCore, runGuardedStep])
+  const generateOutline = useCallback(() => void runGuardedStep('outline', generateOutlineCore, getUserFacingMessage('guide.outlineGenerated')), [generateOutlineCore, runGuardedStep])
+  const generateStoryDesign = useCallback(() => void runGuardedStep('story-design', generateStoryDesignCore, getUserFacingMessage('guide.storyDesignGenerated')), [generateStoryDesignCore, runGuardedStep])
+  const generateTimeline = useCallback(() => void runGuardedStep('timeline', generateTimelineCore, getUserFacingMessage('guide.timelineGenerated')), [generateTimelineCore, runGuardedStep])
 
   const runPipeline = async () => {
     setRunningKey('pipeline')
@@ -450,7 +450,7 @@ export default function GuidePage({ novelId }: Props) {
       ]
     : []
 
-  const steps: StepConfig[] = [
+  const steps = useMemo<StepConfig[]>(() => [
     {
       key: 'project-brief',
       title: '项目立项',
@@ -712,7 +712,7 @@ export default function GuidePage({ novelId }: Props) {
         </Button>
       ),
     },
-  ]
+  ], [characterPreset.helperRoles, currentNovel, factionOptions.length, generateCharacters, generateItems, generateMap, generateOutline, generateStoryDesign, generateThreads, generateTimeline, itemProfile.title, navigate, novelId, projectBrief.readyCount, runningKey, speciesOptions.length, stats, storySettings.endgameReadyCount, storySettings.premiseReadyCount, storySettings.storyDesignReadyCount, syncWorldRules, themeVoice.readyCount])
 
   const structureReadyCount = steps.filter((step) => step.ready).length
   const nextStep = steps.find((step) => !step.ready) || null

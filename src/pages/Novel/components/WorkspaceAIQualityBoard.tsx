@@ -30,7 +30,7 @@ import type {
 } from '../../../types'
 import { getUserFacingMessage } from '@/utils/user-facing-message'
 import { useNovelStore } from '../../../stores/novel.store'
-import type { RegisteredWorkspaceQualityController } from '../workspace-quality-context'
+import type { RegisteredWorkspaceQualityController } from '../workspace-quality-context-core'
 import {
   buildWorkspaceQualityRequestBase,
   getFallbackWorkspaceQualityAdapter,

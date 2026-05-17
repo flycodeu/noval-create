@@ -13,7 +13,10 @@ import type {
   ProjectBriefGenerationMode,
   ProjectBriefGenerationResult,
 } from '../../../shared/project-brief-generation'
+import AIGenerateButton from '../../../components/AIGenerateButton'
 import { useNovelStore } from '../../../stores/novel.store'
+import { buildDraftMessages, parseDraftJson } from '../shared/ai-draft'
+import { buildPlanningContextSections } from '../shared/planning-context'
 import { usePlanningDraft } from '../shared/planning-draft'
 import {
   WorkspaceContextSummary,
@@ -21,10 +24,10 @@ import {
   WorkspacePage,
   WorkspacePanel,
 } from '../components/WorkspaceShell'
+import type { RegisteredWorkspaceQualityController } from '../workspace-quality-context-core'
 import {
-  type RegisteredWorkspaceQualityController,
   useRegisterWorkspaceQualityController,
-} from '../workspace-quality-context'
+} from '../workspace-quality-context-core'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import { loadWorkflowStats } from '../workflow'
 
@@ -85,6 +88,10 @@ function normalizeFormValues(values: ProjectBriefFormValues): ProjectBriefFormVa
     tabooRules: normalizeText(values.tabooRules),
     deliveryRhythm: normalizeText(values.deliveryRhythm),
   }
+}
+
+function hasFilledValues(values: Array<string | undefined | null>): boolean {
+  return values.some((value) => Boolean(value && value.trim()))
 }
 
 function buildCurrentFormValues(
@@ -168,9 +175,9 @@ export default function ProjectBriefPage({ novelId }: Props) {
   ].filter((value) => typeof value === 'string' ? isFilled(value) : Boolean(value)).length
   const guardrailCount = [currentValues.tabooRules, currentValues.deliveryRhythm].filter(isFilled).length
   const structureAssetCount = stats.outlineCount + stats.timelineCount + stats.chapterCount
-  const applyProjectBriefDraft = (draft: Partial<ProjectBriefFormValues>) => {
+  const applyProjectBriefDraft = React.useCallback((draft: Partial<ProjectBriefFormValues>) => {
     form.setFieldsValue(buildCurrentFormValues(snapshot, draft))
-  }
+  }, [form, snapshot])
   const { clearDraft, draft, finalizeDraft, saveAppliedDraft } = usePlanningDraft<ProjectBriefFormValues>({
     novelId,
     pageKey: 'project-brief',
@@ -207,7 +214,7 @@ export default function ProjectBriefPage({ novelId }: Props) {
         rawOutputs: [JSON.stringify(preview.patchedSnapshot)],
       })
     },
-  }), [form, saveAppliedDraft, snapshot])
+  }), [applyProjectBriefDraft, form, saveAppliedDraft, snapshot])
 
   useRegisterWorkspaceQualityController(workspaceQualityController)
 
@@ -270,7 +277,7 @@ export default function ProjectBriefPage({ novelId }: Props) {
     }
   }
 
-  const handleClear = () => {
+  const handleClear = React.useCallback(() => {
     Modal.confirm({
       title: '清空项目立项？',
       content: '会清空当前立项表单，并直接保存为空白基线。',
@@ -292,12 +299,12 @@ export default function ProjectBriefPage({ novelId }: Props) {
         message.success(getUserFacingMessage('projectBrief.cleared'))
       },
     })
-  }
+  }, [clearDraft, currentNovel?.projectBriefJson, form, novelId, notifyWorkspaceMutation, setCurrentNovel])
 
   useEffect(() => {
     registerClearHandler(handleClear)
     return () => registerClearHandler(null)
-  }, [registerClearHandler, currentNovel?.projectBriefJson])
+  }, [handleClear, registerClearHandler])
 
   return (
     <WorkspacePage
@@ -383,46 +390,150 @@ export default function ProjectBriefPage({ novelId }: Props) {
 
       <WorkspacePanel extra={<Tag color={generatingMode ? 'gold' : 'blue'}>{generatingMode ? 'AI 生成中' : '手动保存生效'}</Tag>}>
         <Form form={form} layout="vertical">
-          <div className="guided-step__field-grid">
-            <div className="guided-step__field-card guided-step__field-card--compact">
-              <Form.Item name="platformMode" label="产品形态" rules={[{ required: true, message: '请选择产品形态' }]}>
-                <Select options={PLATFORM_OPTIONS} placeholder="这本书主要面向哪种交付方式" />
-              </Form.Item>
+          <div className="workspace-stack-16">
+            <div className="workspace-stack-10">
+              <Space wrap align="center">
+                <strong className="workspace-card-section-title">赛道与读者承诺</strong>
+                <AIGenerateButton
+                  novelId={novelId}
+                  label="AI 生成·赛道与承诺"
+                  intent={hasFilledValues([
+                    currentValues.targetAudience,
+                    currentValues.targetReader,
+                    currentValues.readerPromise,
+                    currentValues.sellingPoints,
+                    currentValues.compTitles,
+                  ]) ? 'complete' : 'generate'}
+                  isJson
+                  buildMessages={() => buildDraftMessages({
+                    task: '项目立项的赛道与读者承诺',
+                    mode: hasFilledValues([
+                      currentValues.targetAudience,
+                      currentValues.targetReader,
+                      currentValues.readerPromise,
+                      currentValues.sellingPoints,
+                      currentValues.compTitles,
+                    ]) ? 'optimize' : 'replace',
+                    context: buildPlanningContextSections(currentNovel, {
+                      includeSubplots: false,
+                      extraSections: [
+                        { label: '结构资产', value: `线程 ${stats.threadCount} / 大纲 ${stats.outlineCount} / 时间轴 ${stats.timelineCount} / 章节 ${stats.chapterCount}` },
+                      ],
+                    }),
+                    fields: [
+                      { key: 'platformMode', label: '产品形态', value: currentValues.platformMode, hint: '只用 general、web_serial、publishing 之一。' },
+                      { key: 'targetAudience', label: '目标赛道', value: currentValues.targetAudience, hint: '写清题材、受众和市场位置。' },
+                      { key: 'targetReader', label: '目标读者', value: currentValues.targetReader, hint: '写读者偏好、节奏预期和情绪需求。' },
+                      { key: 'readerPromise', label: '读者承诺', value: currentValues.readerPromise, hint: '说明读者会稳定收到什么体验回报。' },
+                      { key: 'sellingPoints', label: '卖点列表', value: currentValues.sellingPoints, hint: '建议每行一条，写 3 到 5 条真正能落地的卖点。' },
+                      { key: 'compTitles', label: '参考作品 / 对标方向', value: currentValues.compTitles, hint: '写 2 到 4 个参考作品，并点明借鉴点。' },
+                    ],
+                    requirements: [
+                      '不要代替故事设计页面输出完整剧情。',
+                      '不要写宣传口号、空泛褒义词和平台套话。',
+                    ],
+                  })}
+                  onResult={(raw) => {
+                    const draft = parseDraftJson<Partial<ProjectBriefFormValues>>(raw)
+                    applyProjectBriefDraft({
+                      platformMode: draft.platformMode,
+                      targetAudience: typeof draft.targetAudience === 'string' ? draft.targetAudience : undefined,
+                      targetReader: typeof draft.targetReader === 'string' ? draft.targetReader : undefined,
+                      readerPromise: typeof draft.readerPromise === 'string' ? draft.readerPromise : undefined,
+                      sellingPoints: typeof draft.sellingPoints === 'string' ? draft.sellingPoints : undefined,
+                      compTitles: typeof draft.compTitles === 'string' ? draft.compTitles : undefined,
+                    })
+                  }}
+                />
+              </Space>
+              <div className="guided-step__field-grid">
+                <div className="guided-step__field-card guided-step__field-card--compact">
+                  <Form.Item name="platformMode" label="产品形态" rules={[{ required: true, message: '请选择产品形态' }]}>
+                    <Select options={PLATFORM_OPTIONS} placeholder="这本书主要面向哪种交付方式" />
+                  </Form.Item>
+                </div>
+                <div className="guided-step__field-card guided-step__field-card--compact">
+                  <Form.Item name="targetAudience" label="目标赛道" rules={[{ required: true, message: '请写清目标赛道' }]}>
+                    <Input placeholder="例如：女频悬疑成长 / 男频末世群像" />
+                  </Form.Item>
+                </div>
+                <div className="guided-step__field-card">
+                  <Form.Item name="targetReader" label="目标读者" rules={[{ required: true, message: '请写清目标读者' }]}>
+                    <Input.TextArea rows={6} placeholder="写读者的阅读偏好、节奏预期和情绪需求。" />
+                  </Form.Item>
+                </div>
+                <div className="guided-step__field-card">
+                  <Form.Item name="readerPromise" label="读者承诺" rules={[{ required: true, message: '请写清读者承诺' }]}>
+                    <Input.TextArea rows={6} placeholder="写读者会稳定收到什么体验回报，不要写宣传口号。" />
+                  </Form.Item>
+                </div>
+                <div className="guided-step__field-card guided-step__field-card--full">
+                  <Form.Item name="sellingPoints" label="卖点列表" rules={[{ required: true, message: '请补充作品卖点' }]}>
+                    <Input.TextArea rows={6} placeholder="建议每行一条，写 3-5 条真正能落地的卖点。" />
+                  </Form.Item>
+                </div>
+                <div className="guided-step__field-card guided-step__field-card--full">
+                  <Form.Item name="compTitles" label="参考作品 / 对标方向" rules={[{ required: true, message: '请补充参考作品' }]}>
+                    <Input.TextArea rows={6} placeholder="写 2-4 个参考作品，并点明借鉴点。" />
+                  </Form.Item>
+                </div>
+              </div>
             </div>
-            <div className="guided-step__field-card guided-step__field-card--compact">
-              <Form.Item name="targetAudience" label="目标赛道" rules={[{ required: true, message: '请写清目标赛道' }]}>
-                <Input placeholder="例如：女频悬疑成长 / 男频末世群像" />
-              </Form.Item>
-            </div>
-            <div className="guided-step__field-card">
-              <Form.Item name="targetReader" label="目标读者" rules={[{ required: true, message: '请写清目标读者' }]}>
-                <Input.TextArea rows={6} placeholder="写读者的阅读偏好、节奏预期和情绪需求。" />
-              </Form.Item>
-            </div>
-            <div className="guided-step__field-card">
-              <Form.Item name="readerPromise" label="读者承诺" rules={[{ required: true, message: '请写清读者承诺' }]}>
-                <Input.TextArea rows={6} placeholder="写读者会稳定收到什么体验回报，不要写宣传口号。" />
-              </Form.Item>
-            </div>
-            <div className="guided-step__field-card guided-step__field-card--full">
-              <Form.Item name="sellingPoints" label="卖点列表" rules={[{ required: true, message: '请补充作品卖点' }]}>
-                <Input.TextArea rows={6} placeholder="建议每行一条，写 3-5 条真正能落地的卖点。" />
-              </Form.Item>
-            </div>
-            <div className="guided-step__field-card guided-step__field-card--full">
-              <Form.Item name="compTitles" label="参考作品 / 对标方向" rules={[{ required: true, message: '请补充参考作品' }]}>
-                <Input.TextArea rows={6} placeholder="写 2-4 个参考作品，并点明借鉴点。" />
-              </Form.Item>
-            </div>
-            <div className="guided-step__field-card">
-              <Form.Item name="tabooRules" label="禁区 / 不可偏离项">
-                <Input.TextArea rows={6} placeholder="写必须避开的跑偏方式、雷点和失真方向。" />
-              </Form.Item>
-            </div>
-            <div className="guided-step__field-card">
-              <Form.Item name="deliveryRhythm" label="连载 / 交付节奏">
-                <Input.TextArea rows={6} placeholder="写更新节奏、单章回报和卷末回收的基本预期。" />
-              </Form.Item>
+
+            <div className="workspace-stack-10">
+              <Space wrap align="center">
+                <strong className="workspace-card-section-title">边界与交付</strong>
+                <AIGenerateButton
+                  novelId={novelId}
+                  label="AI 生成·边界与交付"
+                  intent={hasFilledValues([
+                    currentValues.tabooRules,
+                    currentValues.deliveryRhythm,
+                  ]) ? 'complete' : 'generate'}
+                  isJson
+                  buildMessages={() => buildDraftMessages({
+                    task: '项目立项的边界与交付节奏',
+                    mode: hasFilledValues([
+                      currentValues.tabooRules,
+                      currentValues.deliveryRhythm,
+                    ]) ? 'optimize' : 'replace',
+                    context: buildPlanningContextSections(currentNovel, {
+                      includeSubplots: false,
+                      extraSections: [
+                        { label: '当前读者承诺', value: currentValues.readerPromise },
+                        { label: '当前卖点', value: currentValues.sellingPoints },
+                      ],
+                    }),
+                    fields: [
+                      { key: 'tabooRules', label: '禁区 / 不可偏离项', value: currentValues.tabooRules, hint: '写必须避开的跑偏方向、雷点和失真方式。' },
+                      { key: 'deliveryRhythm', label: '连载 / 交付节奏', value: currentValues.deliveryRhythm, hint: '写更新节奏、单章回报、卷末闭环和追读节拍。' },
+                    ],
+                    requirements: [
+                      '不要和读者承诺自相矛盾。',
+                      '交付节奏要可执行，不要写空话式“持续高能”。',
+                    ],
+                  })}
+                  onResult={(raw) => {
+                    const draft = parseDraftJson<Partial<ProjectBriefFormValues>>(raw)
+                    applyProjectBriefDraft({
+                      tabooRules: typeof draft.tabooRules === 'string' ? draft.tabooRules : undefined,
+                      deliveryRhythm: typeof draft.deliveryRhythm === 'string' ? draft.deliveryRhythm : undefined,
+                    })
+                  }}
+                />
+              </Space>
+              <div className="guided-step__field-grid">
+                <div className="guided-step__field-card">
+                  <Form.Item name="tabooRules" label="禁区 / 不可偏离项">
+                    <Input.TextArea rows={6} placeholder="写必须避开的跑偏方式、雷点和失真方向。" />
+                  </Form.Item>
+                </div>
+                <div className="guided-step__field-card">
+                  <Form.Item name="deliveryRhythm" label="连载 / 交付节奏">
+                    <Input.TextArea rows={6} placeholder="写更新节奏、单章回报和卷末回收的基本预期。" />
+                  </Form.Item>
+                </div>
+              </div>
             </div>
           </div>
         </Form>
