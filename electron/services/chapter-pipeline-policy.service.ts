@@ -23,6 +23,8 @@ export type ReviewPrioritySource =
   | 'dialogue_homogenization_risks'
   | 'dialogue_filler_risks'
   | 'dialogue_info_density_risks'
+  | 'reading_experience'
+  | 'rewrite_delta'
   | 'contract_validation'
 
 export interface ReviewPriorityIssue {
@@ -57,6 +59,34 @@ export interface RewriteMiniReviewVerdict {
   needsHumanReview: boolean
   reason: string
   similarityToOriginal: number
+  narrativeDelta: RewriteNarrativeDeltaReport
+  readingExperience?: ChapterReadingExperienceScore
+}
+
+export interface ChapterReadingExperienceScore {
+  score: number
+  status: 'pass' | 'warning' | 'rewrite'
+  summary: string
+  risks: string[]
+  recommendations: string[]
+  metrics: {
+    avgSentenceLength: number
+    avgParagraphLength: number
+    dialogueParagraphRate: number
+    paragraphCount: number
+    sentenceCount: number
+  }
+}
+
+export interface RewriteNarrativeDeltaReport {
+  status: 'pass' | 'weak' | 'fail'
+  structuralIssueCount: number
+  similarityToOriginal: number
+  changedSentenceRate: number
+  narrativeAnchorChangeRate: number
+  actionVerbDeltaRate: number
+  findings: string[]
+  recommendation: string
 }
 
 interface ContractValidationLike {
@@ -88,8 +118,46 @@ export interface ChapterReviewNotesLike {
   rewrite_required: boolean
   cost_resolution_state?: 'new' | 'ongoing' | 'resolved' | 'evaporated'
   reversal_support_state?: 'supported' | 'weak' | 'forced'
+  reading_experience?: ChapterReadingExperienceScore
+  rewrite_delta?: RewriteNarrativeDeltaReport
   contract_validation?: ContractValidationLike
 }
+
+const STRUCTURAL_REWRITE_SOURCES = new Set<ReviewPrioritySource>([
+  'critical_fixes',
+  'continuity_risks',
+  'arc_progress_risks',
+  'context_drift_risks',
+  'realism_risks',
+  'coherence_risks',
+  'reader_hook_risks',
+  'typed_ref_risks',
+  'source_grounding_risks',
+  'operating_mode_risks',
+  'missing_payoffs',
+  'contract_validation',
+])
+
+const ACTION_TOKENS = [
+  '推', '拉', '撞', '抓', '拽', '按', '抬', '落', '走', '跑', '退', '躲', '藏',
+  '打', '砸', '踢', '杀', '救', '拦', '追', '逃', '开', '关', '拿', '放', '递',
+  '问', '答', '说', '喊', '盯', '看', '听', '站', '坐', '跪', '倒', '醒',
+]
+
+const RESULT_TOKENS = [
+  '因此', '于是', '只好', '不得不', '结果', '后果', '代价', '失去', '失败',
+  '暴露', '发现', '决定', '选择', '留下', '换来', '受伤', '死亡', '中断',
+  '承认', '拒绝', '背叛', '回收', '兑现', '推进',
+]
+
+const ABSTRACT_READING_TOKENS = [
+  '命运', '意义', '情绪', '复杂', '沉重', '不可言说', '未来', '过去',
+  '力量', '氛围', '似乎', '仿佛', '某种', '意识到', '理解', '背后',
+]
+
+const TEMPLATE_READING_CONNECTORS = [
+  '然而', '与此同时', '这一刻', '于是', '就这样', '某种程度上',
+]
 
 function dedupeStrings(values: Array<string | null | undefined>): string[] {
   const seen = new Set<string>()
@@ -101,6 +169,248 @@ function dedupeStrings(values: Array<string | null | undefined>): string[] {
     result.push(normalized)
   })
   return result
+}
+
+function clampScore(value: number): number {
+  if (!Number.isFinite(value)) return 0
+  return Math.max(0, Math.min(100, Math.round(value)))
+}
+
+function roundMetric(value: number): number {
+  if (!Number.isFinite(value)) return 0
+  return Math.round(value * 10) / 10
+}
+
+function splitParagraphs(text: string): string[] {
+  return text
+    .replace(/\r\n/g, '\n')
+    .split(/\n\s*\n+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function splitSentences(text: string): string[] {
+  return text
+    .replace(/\r\n/g, '\n')
+    .split(/[。！？!?；;\n]/)
+    .map((item) => item.trim())
+    .filter((item) => item.length >= 4)
+}
+
+function isDialogueParagraph(paragraph: string): boolean {
+  const trimmed = paragraph.trim()
+  return /^[“"「『]/.test(trimmed) || /^[^，。！？!?]{1,18}[：:]/.test(trimmed)
+}
+
+function countParagraphsWithTokens(paragraphs: string[], tokens: string[]): number {
+  return paragraphs.filter((paragraph) => tokens.some((token) => paragraph.includes(token))).length
+}
+
+function countSentencesWithTokens(sentences: string[], tokens: string[]): number {
+  return sentences.filter((sentence) => tokens.some((token) => sentence.includes(token))).length
+}
+
+function buildSentenceSet(text: string): Set<string> {
+  return new Set(splitSentences(text).map((item) => item.replace(/\s+/g, '')))
+}
+
+function calculateChangedSentenceRate(originalContent: string, rewrittenContent: string): number {
+  const original = buildSentenceSet(originalContent)
+  const rewritten = [...buildSentenceSet(rewrittenContent)]
+  if (rewritten.length === 0) return 0
+  const changed = rewritten.filter((sentence) => !original.has(sentence)).length
+  return roundMetric((changed / rewritten.length) * 100)
+}
+
+function calculateNarrativeAnchorChangeRate(originalContent: string, rewrittenContent: string): number {
+  const originalParagraphs = splitParagraphs(originalContent)
+  const rewrittenParagraphs = splitParagraphs(rewrittenContent)
+  if (rewrittenParagraphs.length === 0) return 0
+  const originalAnchorCount = countParagraphsWithTokens(originalParagraphs, [...ACTION_TOKENS, ...RESULT_TOKENS])
+  const rewrittenAnchorCount = countParagraphsWithTokens(rewrittenParagraphs, [...ACTION_TOKENS, ...RESULT_TOKENS])
+  return roundMetric(((rewrittenAnchorCount - originalAnchorCount) / Math.max(rewrittenParagraphs.length, 1)) * 100)
+}
+
+function calculateActionVerbDeltaRate(originalContent: string, rewrittenContent: string): number {
+  const originalSentences = splitSentences(originalContent)
+  const rewrittenSentences = splitSentences(rewrittenContent)
+  if (rewrittenSentences.length === 0) return 0
+  const originalRate = countSentencesWithTokens(originalSentences, ACTION_TOKENS) / Math.max(originalSentences.length, 1)
+  const rewrittenRate = countSentencesWithTokens(rewrittenSentences, ACTION_TOKENS) / Math.max(rewrittenSentences.length, 1)
+  return roundMetric((rewrittenRate - originalRate) * 100)
+}
+
+function hasStructuralRewritePressure(summary: ReviewPrioritySummary, reviewNotes: ChapterReviewNotesLike): boolean {
+  return summary.topIssues.some((issue) => STRUCTURAL_REWRITE_SOURCES.has(issue.source))
+    || summary.deferredIssues.some((issue) => STRUCTURAL_REWRITE_SOURCES.has(issue.source) && issue.priority === 'high')
+    || reviewNotes.cost_resolution_state === 'evaporated'
+    || reviewNotes.reversal_support_state === 'forced'
+}
+
+export function analyzeChapterReadingExperience(content: string): ChapterReadingExperienceScore {
+  const paragraphs = splitParagraphs(content)
+  const sentences = splitSentences(content)
+  const totalSentenceChars = sentences.reduce((sum, sentence) => sum + sentence.replace(/\s+/g, '').length, 0)
+  const totalParagraphChars = paragraphs.reduce((sum, paragraph) => sum + paragraph.replace(/\s+/g, '').length, 0)
+  const dialogueParagraphCount = paragraphs.filter(isDialogueParagraph).length
+  const avgSentenceLength = roundMetric(sentences.length > 0 ? totalSentenceChars / sentences.length : 0)
+  const avgParagraphLength = roundMetric(paragraphs.length > 0 ? totalParagraphChars / paragraphs.length : 0)
+  const dialogueParagraphRate = roundMetric((dialogueParagraphCount / Math.max(paragraphs.length, 1)) * 100)
+  const actionSentenceRate = roundMetric((countSentencesWithTokens(sentences, ACTION_TOKENS) / Math.max(sentences.length, 1)) * 100)
+  const resultSentenceRate = roundMetric((countSentencesWithTokens(sentences, RESULT_TOKENS) / Math.max(sentences.length, 1)) * 100)
+  const abstractSentenceRate = roundMetric((countSentencesWithTokens(sentences, ABSTRACT_READING_TOKENS) / Math.max(sentences.length, 1)) * 100)
+  const templateConnectorRate = roundMetric((countSentencesWithTokens(sentences, TEMPLATE_READING_CONNECTORS) / Math.max(sentences.length, 1)) * 100)
+  const veryLongSentenceRate = roundMetric((sentences.filter((sentence) => sentence.length >= 42).length / Math.max(sentences.length, 1)) * 100)
+  const risks: string[] = []
+  const recommendations: string[] = []
+  let penalty = 0
+
+  if (sentences.length < 8 && content.trim().length >= 600) {
+    penalty += 18
+    risks.push('句子切分过少，正文可能存在长句堆叠或标点异常。')
+    recommendations.push('拆开长句，把动作、判断和结果分成更清楚的句群。')
+  }
+  if (avgSentenceLength > 34) {
+    penalty += 18
+    risks.push(`平均句长 ${avgSentenceLength} 字，阅读阻力偏高。`)
+    recommendations.push('压缩解释句，改成动作句和短对白穿插。')
+  } else if (avgSentenceLength < 9 && sentences.length >= 12) {
+    penalty += 10
+    risks.push(`平均句长 ${avgSentenceLength} 字，节奏可能过碎。`)
+    recommendations.push('合并连续碎句，让关键动作和结果形成完整节拍。')
+  }
+  if (veryLongSentenceRate >= 22) {
+    penalty += 14
+    risks.push(`长句占比 ${veryLongSentenceRate}%，容易出现拖沓和信息拥堵。`)
+    recommendations.push('把超过 40 字的句子拆成动作、反应和后果。')
+  }
+  if (avgParagraphLength > 260) {
+    penalty += 16
+    risks.push(`平均段长 ${avgParagraphLength} 字，段落过厚，连载阅读不够轻。`)
+    recommendations.push('把大段说明拆成现场动作、对白和结果段。')
+  }
+  if (dialogueParagraphRate < 6 && paragraphs.length >= 8) {
+    penalty += 10
+    risks.push(`对白段占比 ${dialogueParagraphRate}%，人物互动偏少。`)
+    recommendations.push('补一到两处带立场的对白，不要只让旁白解释。')
+  }
+  if (actionSentenceRate < 30 && sentences.length >= 4) {
+    penalty += 16
+    risks.push(`动作句占比 ${actionSentenceRate}%，场景推进偏弱。`)
+    recommendations.push('每个关键段落补出人物动作、阻力和即时选择。')
+  }
+  if (resultSentenceRate < 12 && sentences.length >= 4) {
+    penalty += 14
+    risks.push(`结果/代价句占比 ${resultSentenceRate}%，剧情落点可能偏虚。`)
+    recommendations.push('补清每场冲突带来的结果、损耗或下一步压力。')
+  }
+  if (abstractSentenceRate >= 55 && sentences.length >= 4) {
+    penalty += 18
+    risks.push(`抽象解释句占比 ${abstractSentenceRate}%，现场感和人物选择被概念判断挤掉。`)
+    recommendations.push('把抽象解释改成具体动作、对白潜台词和可见后果。')
+  }
+  if (templateConnectorRate >= 35 && sentences.length >= 4) {
+    penalty += 12
+    risks.push(`模板承接句占比 ${templateConnectorRate}%，段落衔接容易像自动拼接。`)
+    recommendations.push('用时间、空间、动作反馈承接段落，少用万能转场词。')
+  }
+
+  const score = clampScore(100 - penalty)
+  const status: ChapterReadingExperienceScore['status'] = score < 62 || risks.length >= 4
+    ? 'rewrite'
+    : score < 80 || risks.length >= 2
+      ? 'warning'
+      : 'pass'
+
+  return {
+    score,
+    status,
+    summary: status === 'pass'
+      ? `读感通过，当前得分 ${score}。`
+      : status === 'rewrite'
+        ? `读感未达长篇连载门槛，当前得分 ${score}。`
+        : `读感存在可修复问题，当前得分 ${score}。`,
+    risks,
+    recommendations: dedupeStrings(recommendations).slice(0, 6),
+    metrics: {
+      avgSentenceLength,
+      avgParagraphLength,
+      dialogueParagraphRate,
+      paragraphCount: paragraphs.length,
+      sentenceCount: sentences.length,
+    },
+  }
+}
+
+export function analyzeRewriteNarrativeDelta(options: {
+  originalContent: string
+  rewrittenContent: string
+  reviewPrioritySummary: ReviewPrioritySummary
+  reviewNotes: ChapterReviewNotesLike
+  similarityToOriginal?: number
+}): RewriteNarrativeDeltaReport {
+  const similarityToOriginal = typeof options.similarityToOriginal === 'number'
+    ? options.similarityToOriginal
+    : computeCandidateSimilarity(options.originalContent, options.rewrittenContent)
+  const structuralIssueCount = [...options.reviewPrioritySummary.topIssues, ...options.reviewPrioritySummary.deferredIssues]
+    .filter((issue) => STRUCTURAL_REWRITE_SOURCES.has(issue.source))
+    .length
+  const originalSentences = splitSentences(options.originalContent)
+  const rewrittenSentences = splitSentences(options.rewrittenContent)
+  if (
+    Math.min(originalSentences.length, rewrittenSentences.length) < 4
+    || Math.min(options.originalContent.trim().length, options.rewrittenContent.trim().length) < 120
+  ) {
+    return {
+      status: 'pass',
+      structuralIssueCount,
+      similarityToOriginal: roundMetric(similarityToOriginal),
+      changedSentenceRate: calculateChangedSentenceRate(options.originalContent, options.rewrittenContent),
+      narrativeAnchorChangeRate: calculateNarrativeAnchorChangeRate(options.originalContent, options.rewrittenContent),
+      actionVerbDeltaRate: calculateActionVerbDeltaRate(options.originalContent, options.rewrittenContent),
+      findings: [],
+      recommendation: '文本过短，跳过重写差异门禁。实际章节会继续走相似度和发布门检查。',
+    }
+  }
+  const changedSentenceRate = calculateChangedSentenceRate(options.originalContent, options.rewrittenContent)
+  const narrativeAnchorChangeRate = calculateNarrativeAnchorChangeRate(options.originalContent, options.rewrittenContent)
+  const actionVerbDeltaRate = calculateActionVerbDeltaRate(options.originalContent, options.rewrittenContent)
+  const structuralPressure = hasStructuralRewritePressure(options.reviewPrioritySummary, options.reviewNotes)
+  const findings: string[] = []
+
+  if (structuralPressure && similarityToOriginal >= 0.82) {
+    findings.push('存在结构性问题，但重写后与初稿整体仍高度相似。')
+  }
+  if (structuralPressure && changedSentenceRate < 24) {
+    findings.push(`新增/改动句比例仅 ${changedSentenceRate}%，不足以证明剧情链已重排。`)
+  }
+  if (structuralPressure && narrativeAnchorChangeRate < 4) {
+    findings.push(`动作/结果锚点增量仅 ${narrativeAnchorChangeRate}%，更像语言润色而非剧情修复。`)
+  }
+  if (structuralPressure && actionVerbDeltaRate < 3) {
+    findings.push(`动作句增量仅 ${actionVerbDeltaRate}%，冲突推进证据不足。`)
+  }
+
+  const status: RewriteNarrativeDeltaReport['status'] = !structuralPressure
+    ? 'pass'
+    : findings.length >= 3
+      ? 'fail'
+      : findings.length > 0
+        ? 'weak'
+        : 'pass'
+
+  return {
+    status,
+    structuralIssueCount,
+    similarityToOriginal: roundMetric(similarityToOriginal),
+    changedSentenceRate,
+    narrativeAnchorChangeRate,
+    actionVerbDeltaRate,
+    findings,
+    recommendation: status === 'pass'
+      ? '重写差异足以进入后续门禁。'
+      : '回到审校高优先项，补真实事件变化、冲突结果、代价和伏笔推进；不要只替换词句。',
+  }
 }
 
 function pushIssues(
@@ -148,6 +458,8 @@ function getSourceWeight(source: ReviewPrioritySource): number {
     dialogue_homogenization_risks: 3,
     dialogue_info_density_risks: 2,
     dialogue_filler_risks: 1,
+    reading_experience: 6,
+    rewrite_delta: 12,
   }
   return weights[source]
 }
@@ -184,6 +496,24 @@ function normalizePriorityIssues(reviewNotes: ChapterReviewNotesLike): ReviewPri
   pushIssues(issues, reviewNotes.dialogue_homogenization_risks, 'dialogue_homogenization_risks', '对白同质化', 'medium')
   pushIssues(issues, reviewNotes.dialogue_info_density_risks, 'dialogue_info_density_risks', '对白信息密度', 'medium')
   pushIssues(issues, reviewNotes.dialogue_filler_risks, 'dialogue_filler_risks', '对白空转', 'low')
+  pushIssues(
+    issues,
+    reviewNotes.reading_experience && reviewNotes.reading_experience.status !== 'pass'
+      ? reviewNotes.reading_experience.risks
+      : [],
+    'reading_experience',
+    '章节读感',
+    reviewNotes.reading_experience?.status === 'rewrite' ? 'high' : 'medium',
+  )
+  pushIssues(
+    issues,
+    reviewNotes.rewrite_delta && reviewNotes.rewrite_delta.status !== 'pass'
+      ? reviewNotes.rewrite_delta.findings
+      : [],
+    'rewrite_delta',
+    '重写差异验证',
+    reviewNotes.rewrite_delta?.status === 'fail' ? 'high' : 'medium',
+  )
 
   return issues.sort((left, right) => {
     const byPriority = getPriorityWeight(right.priority) - getPriorityWeight(left.priority)
@@ -222,6 +552,8 @@ export function buildReviewPrioritySummary(reviewNotes: ChapterReviewNotesLike):
     reviewNotes.contract_validation?.status === 'blocker' ? '合同兑现存在 blocker。' : '',
     reviewNotes.cost_resolution_state === 'evaporated' ? '代价被快速抹平，需要回到整章重排。' : '',
     reviewNotes.reversal_support_state === 'forced' ? '反转支撑不足，需要重排因果链。' : '',
+    reviewNotes.reading_experience?.status === 'rewrite' ? '章节读感低于长篇连载门槛。' : '',
+    reviewNotes.rewrite_delta?.status === 'fail' ? '重写差异验证失败，疑似只润色语言没有修剧情。' : '',
   ])
   const requiresFullRewrite = fullRewriteReasons.length > 0
   const forceMaxCoverage = normalizedIssues.some((issue) => (
@@ -237,6 +569,8 @@ export function buildReviewPrioritySummary(reviewNotes: ChapterReviewNotesLike):
     || issue.source === 'operating_mode_risks'
     || issue.source === 'long_window_humanization_risks'
     || issue.source === 'dialogue_separability_risks'
+    || issue.source === 'reading_experience'
+    || issue.source === 'rewrite_delta'
   ))
   const rewriteScope = resolveRewriteScope(topIssues, requiresFullRewrite)
 
@@ -298,26 +632,49 @@ export function buildRewriteMiniReviewVerdict(options: {
   reviewNotes: ChapterReviewNotesLike
 }): RewriteMiniReviewVerdict {
   const similarityToOriginal = computeCandidateSimilarity(options.originalContent, options.rewrittenContent)
+  const readingExperience = analyzeChapterReadingExperience(options.rewrittenContent)
+  const narrativeDelta = analyzeRewriteNarrativeDelta({
+    originalContent: options.originalContent,
+    rewrittenContent: options.rewrittenContent,
+    reviewPrioritySummary: options.reviewPrioritySummary,
+    reviewNotes: options.reviewNotes,
+    similarityToOriginal,
+  })
   const needsHumanReview = Boolean(
     !options.rewrittenContent.trim()
     || (options.reviewPrioritySummary.requiresFullRewrite && similarityToOriginal >= 0.86)
     || (options.reviewNotes.severity === 'high' && similarityToOriginal >= 0.8)
+    || narrativeDelta.status === 'fail'
+    || (narrativeDelta.status === 'weak' && readingExperience.status === 'rewrite')
   )
-  const improved = !needsHumanReview && similarityToOriginal < 0.8
+  const improved = !needsHumanReview
+    && similarityToOriginal < 0.8
+    && narrativeDelta.status === 'pass'
+    && readingExperience.status !== 'rewrite'
   const reason = !options.rewrittenContent.trim()
     ? '重写结果为空，需要人工介入。'
     : options.reviewPrioritySummary.requiresFullRewrite && similarityToOriginal >= 0.86
       ? '整章重写后与初稿仍高度相似，关键问题大概率没有被真正消化。'
       : options.reviewNotes.severity === 'high' && similarityToOriginal >= 0.8
         ? '高风险章节重写幅度不足，建议转人工复核。'
-        : improved
-          ? '重写结果与初稿已拉开差异，可继续走后续章节门。'
-          : '重写结果有所调整，但仍建议重点复核关键问题。'
+        : narrativeDelta.status === 'fail'
+          ? `重写差异验证失败：${narrativeDelta.findings.join('；') || narrativeDelta.recommendation}`
+          : narrativeDelta.status === 'weak' && readingExperience.status === 'rewrite'
+            ? `重写差异仍偏弱，且读感未过线：${readingExperience.summary}`
+            : improved
+              ? '重写结果与初稿已拉开差异，可继续走后续章节门。'
+              : readingExperience.status === 'rewrite'
+                ? `重写结果有所调整，但章节读感仍需复核：${readingExperience.summary}`
+                : narrativeDelta.status === 'weak'
+                  ? `重写结果有所调整，但结构修复证据偏弱：${narrativeDelta.findings.join('；')}`
+                  : '重写结果有所调整，但仍建议重点复核关键问题。'
 
   return {
     improved,
     needsHumanReview,
     reason,
     similarityToOriginal,
+    narrativeDelta,
+    readingExperience,
   }
 }

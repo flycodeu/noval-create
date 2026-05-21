@@ -1862,6 +1862,9 @@ export default function Writing({ novelId }: Props) {
         <InsightCard title="AI 生成解释" eyebrow={`当前模式 · ${getAiExecutionModeLabel(effectiveAiExecutionMode)}`} tone="soft">
           <AiExplainabilityCard preview={chapterContextPreview} />
         </InsightCard>
+        <InsightCard title="Writer Tools Trace" eyebrow="按需检索 / fallback / override" tone="soft">
+          <WriterToolsTraceCard preview={chapterContextPreview} />
+        </InsightCard>
         <InsightCard title="生产摘要" eyebrow="AI 主写 / 人工定稿" tone="soft"><StringList items={productionBriefItems} empty="先完成审校或刷新摘要，再回到这里收口定稿优先级。" /></InsightCard>
         <InsightCard title="关联线索" eyebrow="时间轴 / 道具" tone="soft"><StringList items={relatedInsightItems.slice(0, 12)} empty="当前章节暂未关联时间轴事件或关键道具。" /></InsightCard>
         <InsightCard title="本章信息揭示控制" eyebrow="允许揭示 / 已揭示" tone="soft">
@@ -3537,6 +3540,47 @@ function AiExplainabilityCard({ preview }: { preview: ChapterContextPreview | nu
       ) : (
         <div className="novel-copy-block">本次没有低置信度事实或被压缩约束。</div>
       )}
+    </div>
+  )
+}
+
+function WriterToolsTraceCard({ preview }: { preview: ChapterContextPreview | null }) {
+  const resolution = preview?.writerContextResolution
+  if (!preview || !resolution) {
+    return <div className="novel-copy-block">当前章节还没有 writer orchestrator trace，先刷新上下文预览或执行一次生成。</div>
+  }
+
+  const planLines = resolution.queryPlan.map((step) => {
+    const terms = step.terms.length > 0 ? ` · ${step.terms.join('、')}` : ''
+    return `${step.enabled ? '启用' : '跳过'} · ${step.bucket} · ${step.serviceCalls.join(' / ')}${terms}`
+  })
+  const toolLines = resolution.toolCalls.map((call) => {
+    const result = typeof call.resultCount === 'number' ? ` · 命中 ${call.resultCount}` : ''
+    const issue = call.errorMessage ? ` · ${call.errorMessage}` : ''
+    return `${call.status} · ${call.target} · ${call.toolName}${result}${issue}`
+  })
+  const fallbackLines = resolution.fallbackEvents.map((event) => (
+    `${event.fallbackMode} · ${event.target} · ${event.reason} · ${event.detail}`
+  ))
+  const overrideLines = resolution.allocatorInputSummary.overrideLabels.map((label) => {
+    const text = resolution.renderedContextOverrides[label] || ''
+    const previewText = text.length > 120 ? `${text.slice(0, 117)}...` : text
+    return `${label}：${previewText || '空'}`
+  })
+
+  return (
+    <div className="writing-layout-stack writing-layout-stack--sm">
+      <div className="novel-insight-list">
+        <div className="novel-insight-list__item">{resolution.cacheHit ? '本次命中内存缓存' : '本次实时执行检索'}</div>
+        <div className="novel-insight-list__item">计划桶 {resolution.queryPlan.filter((step) => step.enabled).length}</div>
+        <div className="novel-insight-list__item">工具调用 {resolution.toolCalls.length}</div>
+        <div className="novel-insight-list__item">fallback {resolution.fallbackEvents.length}</div>
+        <div className="novel-insight-list__item">override {resolution.allocatorInputSummary.overrideLabels.length}</div>
+      </div>
+      <StringList items={planLines} empty="当前没有 writer query plan。" />
+      <StringList items={toolLines} empty="当前没有 writer tool call 记录。" />
+      <StringList items={fallbackLines} empty="本次没有触发 fallback。" />
+      <StringList items={overrideLines} empty="本次没有生成 retrieval override。" />
     </div>
   )
 }

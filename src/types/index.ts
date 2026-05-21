@@ -1879,6 +1879,40 @@ export interface AiExplainabilityReport {
 
 export type ChapterContextComplexity = 'simple' | 'standard' | 'key'
 export type ChapterContextStage = 'scenePlan' | 'draft' | 'review' | 'rewrite'
+export interface UpstreamRuntimeArtifacts {
+  scenePlanSummary?: string
+  draftTextSummary?: string
+  contractVersionSummary?: string
+  reviewRiskSummary?: string
+  reviewProofSummary?: string
+  rewriteDeltaSummary?: string
+  publishGateRiskSummary?: string
+  runtimeAssertions?: string[]
+}
+export type StageAllocatorFieldKey =
+  | 'characterStates'
+  | 'dialogueVoiceLocks'
+  | 'relationSummary'
+  | 'activeThreads'
+  | 'dueForeshadows'
+  | 'continuityNotes'
+  | 'openLoops'
+  | 'timelineSummary'
+  | 'recalledMemory'
+  | 'writingContractSummary'
+  | 'scenePlanSummary'
+  | 'draftTextSummary'
+  | 'contractVersionSummary'
+  | 'reviewRiskSummary'
+  | 'reviewProofSummary'
+  | 'rewriteDeltaSummary'
+  | 'publishGateRiskSummary'
+
+export interface StageRenderSchema {
+  stage: ChapterContextStage
+  requiredAllocatorFields: StageAllocatorFieldKey[]
+  optionalAllocatorFields: StageAllocatorFieldKey[]
+}
 export type RecallBucketKey = 'character' | 'rule' | 'thread'
 export type RecallSearchMode = 'vector' | 'keyword'
 export type HardConstraintSourceLabel =
@@ -2083,6 +2117,8 @@ export interface ChapterContextPreviewStage {
   contextBudgetReport: ContextBudgetReport
   softContextDecisions: ContextDecisionEntry[]
   droppedConstraintCount: number
+  upstreamArtifacts?: UpstreamRuntimeArtifacts
+  renderSchema?: StageRenderSchema
 }
 
 export interface ChapterContextPreview {
@@ -2101,7 +2137,302 @@ export interface ChapterContextPreview {
   recallDiagnostics: RecallDiagnostics
   recalledMemorySources: RecallMemorySource[]
   usageSnapshot: WritingContextUsageSnapshot
+  writerContextResolution?: WriterContextOrchestratorResolution
   stages: ChapterContextPreviewStage[]
+}
+
+export type WriterContextOverrideKey =
+  | 'characterStates'
+  | 'worldStates'
+  | 'itemSummary'
+  | 'continuityNotes'
+  | 'timelineSummary'
+  | 'timelineOpenThreads'
+  | 'longTermMemory'
+  | 'activeThreads'
+  | 'openLoops'
+  | 'dueForeshadows'
+  | 'relationSummary'
+  | 'dialogueVoiceLocks'
+  | 'recalledMemory'
+
+export type WriterContextRenderedOverrides = Partial<Record<WriterContextOverrideKey, string>>
+
+export interface WriterContextSignalInput {
+  chapterTitle?: string
+  chapterOutline?: string
+  chapterGoal?: string
+  arcSummary?: string
+  arcGoal?: string
+  previousSummaries?: string
+  continuityNotes?: string
+  openLoops?: string
+  dueForeshadows?: string
+  timelineSummary?: string
+  timelineOpenThreads?: string
+  activeThreads?: string
+  worldStates?: string
+  relationSummary?: string
+  dialogueVoiceLocks?: string
+  mentionedCharacters?: string[]
+  mentionedItems?: string[]
+  mentionedLocations?: string[]
+}
+
+export interface WriterContextOrchestratorInvalidationInput {
+  chapterContextVersion?: number
+  novelContextVersion?: number
+  assetFingerprint?: string
+  cacheSalt?: string
+  stage?: string
+  executionMode?: string
+  preserveConstraintLabels?: string[]
+}
+
+export interface WriterContextOrchestratorRuntimeOptions {
+  useMemoryCache?: boolean
+  forceRefresh?: boolean
+  maxCharacters?: number
+  maxItems?: number
+  maxTimelineEvents?: number
+  maxThreads?: number
+  maxRecallHitsPerBucket?: number
+}
+
+export interface WriterContextOrchestratorInput {
+  novelId: number
+  chapterId?: number
+  chapterNum: number
+  signals: WriterContextSignalInput
+  baseContextParts?: WriterContextRenderedOverrides
+  invalidation?: WriterContextOrchestratorInvalidationInput
+  runtime?: WriterContextOrchestratorRuntimeOptions
+}
+
+export interface StageToolExecutionInput {
+  novelId: number
+  chapterId?: number
+  chapterNum: number
+  stage: ChapterContextStage
+  objective: string
+  signals: Record<string, unknown>
+  upstreamArtifacts?: UpstreamRuntimeArtifacts
+  limits?: {
+    maxEntities?: number
+    maxItems?: number
+    maxEvents?: number
+    maxHits?: number
+    tokenCeiling?: number
+  }
+  invalidation?: {
+    novelContextVersion?: number
+    chapterContextVersion?: number
+    assetFingerprint?: string
+    promptOverrideHash?: string
+    cacheSalt?: string
+  }
+}
+
+export interface StageToolExecutionResult {
+  toolName: string
+  status: 'success' | 'empty' | 'failed'
+  structuredPayload?: unknown
+  summary: string
+  itemCount: number
+  charCount: number
+  fallbackUsed?: boolean
+  fallbackDetail?: string
+}
+
+export type WriterContextQueryBucket =
+  | 'story_memory'
+  | 'character'
+  | 'item'
+  | 'timeline'
+  | 'world_state'
+  | 'thread'
+  | 'recall_character'
+  | 'recall_rule'
+  | 'recall_thread'
+
+export interface WriterContextQueryPlanStep {
+  bucket: WriterContextQueryBucket
+  enabled: boolean
+  reason: string
+  terms: string[]
+  queryText?: string
+  serviceCalls: string[]
+  resultLimit?: number
+}
+
+export type WriterContextToolTarget = WriterContextQueryBucket | WriterContextOverrideKey | 'cache' | 'orchestrator'
+
+export interface WriterContextToolCall {
+  target: WriterContextToolTarget
+  toolName: string
+  status: 'success' | 'failed' | 'skipped' | 'cache_hit'
+  durationMs: number
+  argsSummary?: string
+  resultCount?: number
+  errorMessage?: string
+}
+
+export type WriterContextFallbackReason =
+  | RecallFallbackReason
+  | 'service_failed'
+  | 'empty_result'
+  | 'render_empty'
+
+export interface WriterContextFallbackEvent {
+  target: WriterContextToolTarget
+  reason: WriterContextFallbackReason
+  detail: string
+  fallbackMode: 'legacy_empty' | 'conservative'
+}
+
+export interface WriterContextRetrievalFingerprint {
+  digest: string
+  cacheKey: string
+  signalHash: string
+  planHash: string
+  invalidationHash: string
+  inputs: {
+    novelId: number
+    chapterId?: number
+    chapterNum: number
+    chapterContextVersion?: number
+    novelContextVersion?: number
+    assetFingerprint?: string
+    cacheSalt?: string
+    mentionedCharacterCount: number
+    mentionedItemCount: number
+    mentionedLocationCount: number
+    enabledBuckets: WriterContextQueryBucket[]
+  }
+}
+
+export interface WriterContextAllocatorInputBucketSummary {
+  bucket: WriterContextQueryBucket
+  renderedLabels: WriterContextOverrideKey[]
+  itemCount: number
+  charCount: number
+}
+
+export interface WriterContextAllocatorInputSummary {
+  overrideLabels: WriterContextOverrideKey[]
+  overrideCharCount: number
+  overrideLineCount: number
+  enabledBucketCount: number
+  signalCharCount: number
+  buckets: WriterContextAllocatorInputBucketSummary[]
+}
+
+export interface WriterOrchestratedStoryMemoryPack {
+  generatedAt?: string
+  coverageSummary: string
+  phaseDigest: string[]
+  plotMilestones: string[]
+  activeThreads: string[]
+  continuityDirectives: string[]
+  timelineAnchors: string[]
+  itemLedger: string[]
+}
+
+export interface WriterOrchestratedCharacterPackEntry {
+  characterId: number
+  name: string
+  roleType?: Character['roleType']
+  stateSummary: string
+  relationSummaries: string[]
+  relatedItemNames: string[]
+  voiceHints: string[]
+}
+
+export interface WriterOrchestratedItemPackEntry {
+  itemId: number
+  name: string
+  status?: StoryItem['status']
+  ownerName?: string
+  summary: string
+  relatedEventTitles: string[]
+}
+
+export interface WriterOrchestratedTimelinePackEntry {
+  eventId: number
+  title: string
+  timeLabel: string
+  status: TimelineEvent['status']
+  summary: string
+  openThreads: string[]
+}
+
+export interface WriterOrchestratedWorldStatePack {
+  stateLines: string[]
+  alertLines: string[]
+  worldStatesText?: string
+}
+
+export interface WriterOrchestratedThreadPack {
+  activeThreadLines: string[]
+  openLoopLines: string[]
+  dueForeshadowLines: string[]
+  continuityLines: string[]
+}
+
+export type WriterContextRecallBucket = 'character' | 'rule' | 'thread'
+
+export interface WriterOrchestratedRecallHit {
+  bucket: WriterContextRecallBucket
+  chapterId: number
+  chapterNum: number
+  fragmentType: string
+  summary: string
+  similarity: number
+  searchMode: 'vector' | 'keyword'
+}
+
+export interface WriterOrchestratedRecallPack {
+  hits: WriterOrchestratedRecallHit[]
+}
+
+export interface WriterContextStructuredPack {
+  storyMemory?: WriterOrchestratedStoryMemoryPack
+  characters: WriterOrchestratedCharacterPackEntry[]
+  items: WriterOrchestratedItemPackEntry[]
+  timeline: WriterOrchestratedTimelinePackEntry[]
+  worldState?: WriterOrchestratedWorldStatePack
+  threads?: WriterOrchestratedThreadPack
+  recall: WriterOrchestratedRecallPack
+}
+
+export interface WriterContextOrchestratorResolution {
+  cacheKey: string
+  cacheHit: boolean
+  queryPlan: WriterContextQueryPlanStep[]
+  retrievalFingerprint: WriterContextRetrievalFingerprint
+  structuredPack: WriterContextStructuredPack
+  renderedContextOverrides: WriterContextRenderedOverrides
+  toolCalls: WriterContextToolCall[]
+  fallbackEvents: WriterContextFallbackEvent[]
+  allocatorInputSummary: WriterContextAllocatorInputSummary
+}
+
+export interface StageContextResolution {
+  stage: ChapterContextStage
+  cacheKey: string
+  cacheHit: boolean
+  queryPlan: Array<Record<string, unknown>>
+  toolCalls: Array<Record<string, unknown>>
+  fallbackEvents: Array<Record<string, unknown>>
+  intentGraph?: Record<string, unknown>
+  structuredPacks?: Record<string, unknown>
+  renderedOverrides?: Record<string, string>
+  upstreamArtifacts?: UpstreamRuntimeArtifacts
+  renderSchema?: StageRenderSchema
+  effectiveRawContext?: Record<string, unknown>
+  allocatorCompatibleContextParts?: Record<string, unknown>
+  allocatorInputSummary?: Record<string, unknown>
+  writerContextResolution?: WriterContextOrchestratorResolution
 }
 
 export interface ChapterPublishCheckItem {

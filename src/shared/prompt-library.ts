@@ -286,6 +286,12 @@ export interface ChapterReviewPromptInput {
   voiceEvolutionGuidance?: string
   scenePlan: string
   draftContent: string
+  scenePlanSummary?: string
+  draftTextSummary?: string
+  contractVersionSummary?: string
+  reviewRiskSummary?: string
+  reviewProofSummary?: string
+  publishGateRiskSummary?: string
   structuralAlertsSummary?: string
   protagonistReference: string
   protagonistRule: string
@@ -326,6 +332,13 @@ export interface ChapterRewritePromptInput {
   scenePlan: string
   draftContent: string
   reviewNotes: string
+  scenePlanSummary?: string
+  draftTextSummary?: string
+  contractVersionSummary?: string
+  reviewRiskSummary?: string
+  reviewProofSummary?: string
+  rewriteDeltaSummary?: string
+  publishGateRiskSummary?: string
   structuralAlertsSummary?: string
   lockedParagraphs?: string[]
   activeThreads?: string
@@ -1552,8 +1565,10 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
     section('硬约束', params.hardConstraintContext),
     section('角色 Voice Lock', params.dialogueVoiceLocks),
     section('场景计划', params.scenePlan),
+    section('场景计划摘要', params.scenePlanSummary),
     section('小说核心', params.storyCore),
     section('写作类型', params.writingContractSummary),
+    section('合同版本摘要', params.contractVersionSummary),
     section('关键人物关系', params.relationSummary),
     section('当前故事弧', params.currentArc),
     section('本弧推进记录', params.arcProgress),
@@ -1582,6 +1597,10 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
     section('角色声音进化', params.voiceEvolutionGuidance),
     section('结构体检提醒', params.consistencyNotes),
     section('近期结构告警', params.structuralAlertsSummary),
+    section('当前稿件摘要', params.draftTextSummary),
+    section('审校风险摘要', params.reviewRiskSummary),
+    section('审校证据摘要', params.reviewProofSummary),
+    section('发布门风险', params.publishGateRiskSummary),
     section('待审初稿', params.draftContent),
     section('输出规则', [
       '只保留真正值得修的问题。',
@@ -1646,9 +1665,16 @@ export function buildChapterRewritePrompt(params: ChapterRewritePromptInput): st
       extraRealityLines: ['如果审校指出反应、伤势、代价、移动跳跃或能力使用不合理，必须在正文里明确修正。'],
     }),
     section('场景计划', params.scenePlan),
+    section('场景计划摘要', params.scenePlanSummary),
     section('当前稿件', params.draftContent),
+    section('当前稿件摘要', params.draftTextSummary),
     section('作者锁定段落（逐字保留）', params.lockedParagraphs?.join('\n\n')),
     section('审校意见', params.reviewNotes),
+    section('审校风险摘要', params.reviewRiskSummary),
+    section('审校证据摘要', params.reviewProofSummary),
+    section('重写差量摘要', params.rewriteDeltaSummary),
+    section('合同版本摘要', params.contractVersionSummary),
+    section('发布门风险', params.publishGateRiskSummary),
     section('本章目标', params.chapterGoal),
     section('硬约束', params.hardConstraintContext),
     section('角色 Voice Lock', params.dialogueVoiceLocks),

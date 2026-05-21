@@ -38,7 +38,7 @@ describe('novel workflow ordering', () => {
       guideSource.indexOf('const recommendedCharacterCount'),
     )
     const stepsSection = guideSource.slice(
-      guideSource.indexOf('const steps: StepConfig[] = ['),
+      guideSource.indexOf('const steps = useMemo<StepConfig[]>(() => ['),
       guideSource.indexOf('const structureReadyCount'),
     )
 

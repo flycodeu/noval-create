@@ -1,4 +1,5 @@
 ﻿import { WebContents } from 'electron'
+import { createHash } from 'node:crypto'
 import { asc, desc, eq, inArray } from 'drizzle-orm'
 import { getDb, getSqlite } from '../database/db'
 import { chapterContracts, chapterSegments, chapterVersions, chapters, characters, glossary, novels, revisionTasks, sceneContracts, storyArcs, storyItems, storyMemoryCheckpoints, storyParts, storyThreads, storyVolumes, tasks, timelineEvents } from '../database/schema'
@@ -127,16 +128,20 @@ import { persistChapterRecallRuntimeSnapshot } from './chapter-recall-runtime.se
 import { persistAntiAiRuleHits } from './anti-ai-rule.service'
 import { syncFeedbackRecurrenceState } from './feedback-recurrence.service'
 import {
+  analyzeChapterReadingExperience,
   buildAdaptiveRewritePolicy,
   buildReviewPriorityPrompt,
   buildReviewPrioritySummary,
   buildRewriteMiniReviewVerdict,
+  type ChapterReadingExperienceScore,
+  type RewriteNarrativeDeltaReport,
 } from './chapter-pipeline-policy.service'
 import { listPromptOverrides } from './prompt-override.service'
 import {
   buildVariationDigest,
   isCandidateTooSimilar,
 } from './variation-control.service'
+import { resolveWriterOrchestratedContext } from './writer-context-orchestrator.service'
 import type {
   AiContextAssemblyReport,
   AiExecutionMode,
@@ -153,7 +158,10 @@ import type {
   StyleComplianceMetricSnapshot,
   StyleComplianceResult,
   SummaryHealthReport,
+  StageRenderSchema,
+  UpstreamRuntimeArtifacts,
   VoiceEvolutionProfile,
+  WriterContextOrchestratorResolution,
 } from '../../src/types'
 
 interface ChapterSummaryData {
@@ -242,6 +250,8 @@ interface ChapterReviewNotes {
   }>
   humanization_signals: HumanizationSignal[]
   style_compliance?: StyleComplianceResult
+  reading_experience?: ChapterReadingExperienceScore
+  rewrite_delta?: RewriteNarrativeDeltaReport
   contract_validation?: ChapterContractValidationResult
 }
 
@@ -321,6 +331,7 @@ interface ChapterPipelineSnapshot {
   contextAssemblyReport?: AiContextAssemblyReport
   authorStyleLock?: AuthorStyleLockSummary
   generationExplainability?: AiExplainabilityReport
+  writerContextResolution?: WriterContextOrchestratorResolution
   recoveryHint?: TaskRecoveryHint
   failureCode?: ChapterPipelineFailureCode
   rewriteScope?: ChapterRewriteScope
@@ -550,6 +561,12 @@ function normalizeBoolean(value: unknown): boolean {
 function normalizeBoundedNumber(value: unknown, min: number, max: number, fallback = min): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return fallback
   return Math.max(min, Math.min(max, Math.round(value)))
+}
+
+function normalizeBoundedMetric(value: unknown, min: number, max: number, fallback = min): number {
+  const numeric = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(numeric)) return fallback
+  return Math.max(min, Math.min(max, Math.round(numeric * 10) / 10))
 }
 
 function normalizeProtagonistSetback(value: unknown): ProtagonistSetbackLevel {
@@ -1104,6 +1121,18 @@ function getActiveChapterPromptOverrideKeys(): string[] {
     .filter((key) => CHAPTER_PIPELINE_PROMPT_KEYS.has(key))
 }
 
+function getActiveChapterPromptOverrideFingerprint(): string {
+  const activeOverrides = listPromptOverrides()
+    .filter((record) => CHAPTER_PIPELINE_PROMPT_KEYS.has(record.key))
+    .map((record) => ({
+      key: record.key,
+      updatedAt: record.updatedAt || '',
+      content: record.content || '',
+    }))
+    .sort((a, b) => a.key.localeCompare(b.key))
+  return createHash('sha1').update(JSON.stringify(activeOverrides)).digest('hex').slice(0, 16)
+}
+
 function getCompletedPipelineRoleCount(snapshot: ChapterPipelineSnapshot): number {
   return Object.values(snapshot.roles).filter((role) => role.status === 'success').length
 }
@@ -1586,6 +1615,8 @@ function normalizeReviewNotes(raw: unknown): ChapterReviewNotes {
       : [],
     humanization_signals: humanizationSignals,
     style_compliance: normalizeStyleComplianceResult(record.style_compliance),
+    reading_experience: normalizeReadingExperience(record.reading_experience),
+    rewrite_delta: normalizeRewriteDelta(record.rewrite_delta),
     contract_validation: normalizeChapterContractValidationResult(record.contract_validation) || undefined,
   }
 }
@@ -1636,6 +1667,8 @@ function hasReviewNotes(notes: ChapterReviewNotes): boolean {
     notes.dialogue_drift_alerts.length > 0 ||
     notes.humanization_signals.length > 0 ||
     Boolean(notes.style_compliance) ||
+    Boolean(notes.reading_experience) ||
+    Boolean(notes.rewrite_delta) ||
     Boolean(notes.contract_validation && notes.contract_validation.itemResults.length > 0),
   )
 }
@@ -1693,6 +1726,8 @@ function buildFallbackReviewNotes(consistencyNotes: string): ChapterReviewNotes 
     dialogue_drift_alerts: [],
     humanization_signals: [],
     style_compliance: undefined,
+    reading_experience: undefined,
+    rewrite_delta: undefined,
     contract_validation: undefined,
   }
 }
@@ -1758,6 +1793,21 @@ function formatReviewNotes(notes: ChapterReviewNotes): string {
       : '',
     notes.style_compliance && notes.style_compliance.rewriteHints.length > 0
       ? `风格修正提示：\n- ${notes.style_compliance.rewriteHints.join('\n- ')}`
+      : '',
+    notes.reading_experience
+      ? `章节读感：${notes.reading_experience.status} · ${notes.reading_experience.score} 分${notes.reading_experience.summary ? ` · ${notes.reading_experience.summary}` : ''}`
+      : '',
+    notes.reading_experience && notes.reading_experience.risks.length > 0
+      ? `读感风险：\n- ${notes.reading_experience.risks.join('\n- ')}`
+      : '',
+    notes.reading_experience && notes.reading_experience.recommendations.length > 0
+      ? `读感修正提示：\n- ${notes.reading_experience.recommendations.join('\n- ')}`
+      : '',
+    notes.rewrite_delta
+      ? `重写差异验证：${notes.rewrite_delta.status} · 相似度 ${notes.rewrite_delta.similarityToOriginal} · 改动句 ${notes.rewrite_delta.changedSentenceRate}% · 叙事锚点增量 ${notes.rewrite_delta.narrativeAnchorChangeRate}%`
+      : '',
+    notes.rewrite_delta && notes.rewrite_delta.findings.length > 0
+      ? `重写差异风险：\n- ${notes.rewrite_delta.findings.join('\n- ')}`
       : '',
     notes.contract_validation?.summary ? `合同兑现验证：${notes.contract_validation.summary}` : '',
     notes.contract_validation && notes.contract_validation.itemResults.some((item) => item.verdict !== 'pass')
@@ -2480,6 +2530,51 @@ function normalizeStyleComplianceResult(raw: unknown): StyleComplianceResult | u
   }
 }
 
+function normalizeReadingExperience(raw: unknown): ChapterReadingExperienceScore | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const record = raw as Record<string, unknown>
+  const metrics = record.metrics && typeof record.metrics === 'object' && !Array.isArray(record.metrics)
+    ? record.metrics as Record<string, unknown>
+    : {}
+  const risks = toStringArray(record.risks)
+  const recommendations = toStringArray(record.recommendations)
+  const summary = asText(record.summary)
+  const score = normalizeBoundedNumber(record.score, 0, 100, 0)
+  if (!summary && risks.length === 0 && recommendations.length === 0 && score <= 0) return undefined
+  return {
+    score,
+    status: record.status === 'rewrite' ? 'rewrite' : record.status === 'warning' ? 'warning' : 'pass',
+    summary,
+    risks,
+    recommendations,
+    metrics: {
+      avgSentenceLength: normalizeBoundedMetric(metrics.avgSentenceLength, 0, 9999, 0),
+      avgParagraphLength: normalizeBoundedMetric(metrics.avgParagraphLength, 0, 99999, 0),
+      dialogueParagraphRate: normalizeBoundedMetric(metrics.dialogueParagraphRate, 0, 100, 0),
+      paragraphCount: normalizeBoundedNumber(metrics.paragraphCount, 0, 99999, 0),
+      sentenceCount: normalizeBoundedNumber(metrics.sentenceCount, 0, 99999, 0),
+    },
+  }
+}
+
+function normalizeRewriteDelta(raw: unknown): RewriteNarrativeDeltaReport | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const record = raw as Record<string, unknown>
+  const findings = toStringArray(record.findings)
+  const recommendation = asText(record.recommendation)
+  if (findings.length === 0 && !recommendation && !record.status) return undefined
+  return {
+    status: record.status === 'fail' ? 'fail' : record.status === 'weak' ? 'weak' : 'pass',
+    structuralIssueCount: normalizeBoundedNumber(record.structuralIssueCount, 0, 999, 0),
+    similarityToOriginal: normalizeBoundedMetric(record.similarityToOriginal, 0, 100, 0),
+    changedSentenceRate: normalizeBoundedMetric(record.changedSentenceRate, 0, 100, 0),
+    narrativeAnchorChangeRate: normalizeBoundedMetric(record.narrativeAnchorChangeRate, -100, 100, 0),
+    actionVerbDeltaRate: normalizeBoundedMetric(record.actionVerbDeltaRate, -100, 100, 0),
+    findings,
+    recommendation,
+  }
+}
+
 function replacePrefixedNotes(existing: string[], prefix: string, additions: string[]): string[] {
   const normalizedAdditions = additions
     .map((item) => item.trim())
@@ -2525,6 +2620,104 @@ function applyStyleComplianceToReviewNotes(
         : reviewNotes.severity,
     rewrite_required: reviewNotes.rewrite_required || compliance.status === 'rewrite',
     revision_brief: appendRevisionBrief(reviewNotes.revision_brief, compliance.rewriteHints),
+  }
+}
+
+function applyReadingExperienceToReviewNotes(
+  reviewNotes: ChapterReviewNotes,
+  content: string,
+): ChapterReviewNotes {
+  const readingExperience = analyzeChapterReadingExperience(content)
+  if (readingExperience.status === 'pass') {
+    return {
+      ...reviewNotes,
+      reading_experience: readingExperience,
+    }
+  }
+
+  return {
+    ...reviewNotes,
+    reading_experience: readingExperience,
+    reader_hook_risks: dedupeTextList([
+      ...reviewNotes.reader_hook_risks,
+      ...readingExperience.risks.filter((item) =>
+        item.includes('剧情落点')
+        || item.includes('人物互动')
+        || item.includes('场景推进')),
+    ]),
+    coherence_risks: dedupeTextList([
+      ...reviewNotes.coherence_risks,
+      ...readingExperience.risks.filter((item) =>
+        item.includes('阅读阻力')
+        || item.includes('信息拥堵')
+        || item.includes('段落过厚')),
+    ]),
+    language_risks: dedupeTextList([
+      ...reviewNotes.language_risks,
+      ...readingExperience.risks.filter((item) =>
+        item.includes('长句')
+        || item.includes('节奏')),
+    ]),
+    human_language_repairs: dedupeTextList([
+      ...reviewNotes.human_language_repairs,
+      ...readingExperience.recommendations,
+    ]),
+    critical_fixes: dedupeTextList([
+      readingExperience.status === 'rewrite'
+        ? '章节读感未达长篇连载门槛：必须同时修句长、段落密度、动作锚点和剧情结果，不允许只做词句润色。'
+        : '',
+      ...reviewNotes.critical_fixes,
+    ]),
+    summary: reviewNotes.summary || readingExperience.summary,
+    severity: readingExperience.status === 'rewrite'
+      ? mergeSeverity(reviewNotes.severity, 'high')
+      : mergeSeverity(reviewNotes.severity, 'medium'),
+    rewrite_required: reviewNotes.rewrite_required || readingExperience.status === 'rewrite',
+    revision_brief: appendRevisionBrief(reviewNotes.revision_brief, [
+      readingExperience.summary,
+      ...readingExperience.recommendations.slice(0, 3),
+    ]),
+  }
+}
+
+function applyRewriteDeltaToReviewNotes(
+  reviewNotes: ChapterReviewNotes,
+  rewriteDelta: RewriteNarrativeDeltaReport,
+): ChapterReviewNotes {
+  if (rewriteDelta.status === 'pass') {
+    return {
+      ...reviewNotes,
+      rewrite_delta: rewriteDelta,
+    }
+  }
+
+  return {
+    ...reviewNotes,
+    rewrite_delta: rewriteDelta,
+    critical_fixes: dedupeTextList([
+      rewriteDelta.status === 'fail'
+        ? '重写差异验证失败：当前结果疑似只润色语言，没有真正修复剧情、冲突或代价。'
+        : '重写差异验证偏弱：需要补足事件变化、结果状态和代价落点。',
+      ...reviewNotes.critical_fixes,
+    ]),
+    arc_progress_risks: dedupeTextList([
+      ...reviewNotes.arc_progress_risks,
+      ...rewriteDelta.findings.filter((item) =>
+        item.includes('剧情')
+        || item.includes('冲突')
+        || item.includes('锚点')),
+    ]),
+    coherence_risks: dedupeTextList([
+      ...reviewNotes.coherence_risks,
+      ...rewriteDelta.findings,
+    ]),
+    severity: rewriteDelta.status === 'fail'
+      ? mergeSeverity(reviewNotes.severity, 'high')
+      : mergeSeverity(reviewNotes.severity, 'medium'),
+    rewrite_required: true,
+    revision_brief: appendRevisionBrief(reviewNotes.revision_brief, [
+      rewriteDelta.recommendation,
+    ]),
   }
 }
 
@@ -3608,6 +3801,189 @@ function resolveContextBudgetForStage(
   return Math.max(7000, baseByStage[stage] + complexityOffset[complexity] + largeChapterOffset + novelScaleOffset)
 }
 
+interface StageContextResolverPayload {
+  stage: ChapterContextStage
+  context: ChapterContext
+  effectiveRawContext: Awaited<ReturnType<typeof collectChapterContextRawData>>
+  upstreamArtifacts: UpstreamRuntimeArtifacts
+  renderSchema: StageRenderSchema
+  writerContextResolution?: WriterContextOrchestratorResolution
+}
+
+function summarizeStageArtifactText(value: string, maxChars = 480): string {
+  const normalized = value.replace(/\s+/g, ' ').trim()
+  if (!normalized) return ''
+  if (normalized.length <= maxChars) return normalized
+  return `${normalized.slice(0, Math.max(maxChars - 3, 1)).trim()}...`
+}
+
+function summarizeStageArtifactLines(lines: Array<string | null | undefined>, maxLines = 4, maxChars = 480): string {
+  const normalized = [...new Set(lines
+    .map((line) => (typeof line === 'string' ? line.trim() : ''))
+    .filter(Boolean))]
+  if (normalized.length === 0) return ''
+  return summarizeStageArtifactText(normalized.slice(0, maxLines).join('\n'), maxChars)
+}
+
+function buildContractVersionArtifactSummary(contractVersion?: string): string {
+  return contractVersion ? `当前章节合同版本：${contractVersion}` : ''
+}
+
+function buildPersistedScenePlanText(scenePlanJson?: string | null): string {
+  if (!scenePlanJson?.trim()) return ''
+  try {
+    return formatScenePlan(normalizeScenePlan(JSON.parse(scenePlanJson) as unknown, []))
+  } catch {
+    return ''
+  }
+}
+
+function buildReviewRiskArtifactSummary(reviewNotes: ChapterReviewNotes): string {
+  return summarizeStageArtifactLines([
+    reviewNotes.summary,
+    ...reviewNotes.critical_fixes.slice(0, 2).map((item) => `关键修订：${item}`),
+    ...reviewNotes.coherence_risks.slice(0, 2).map((item) => `连贯性风险：${item}`),
+    ...reviewNotes.reader_hook_risks.slice(0, 2).map((item) => `追读风险：${item}`),
+    ...reviewNotes.language_risks.slice(0, 2).map((item) => `语言风险：${item}`),
+  ], 6, 640)
+}
+
+function buildReviewProofArtifactSummary(reviewNotes: ChapterReviewNotes): string {
+  return summarizeStageArtifactLines([
+    ...reviewNotes.continuity_risks.slice(0, 2).map((item) => `连续性证据：${item}`),
+    ...reviewNotes.arc_progress_risks.slice(0, 2).map((item) => `弧线推进证据：${item}`),
+    ...reviewNotes.missing_payoffs.slice(0, 2).map((item) => `伏笔兑现证据：${item}`),
+    ...reviewNotes.human_language_repairs.slice(0, 2).map((item) => `语言替换证据：${item}`),
+  ], 6, 640)
+}
+
+function buildRewriteDeltaArtifactSummary(
+  reviewNotes: ChapterReviewNotes,
+  rewriteScope: ChapterRewriteScope,
+  prioritySummaryText: string,
+): string {
+  return summarizeStageArtifactLines([
+    reviewNotes.revision_brief,
+    `重写范围：${rewriteScope}`,
+    prioritySummaryText,
+  ], 5, 640)
+}
+
+function buildStageRenderSchema(stage: ChapterContextStage): StageRenderSchema {
+  switch (stage) {
+    case 'scenePlan':
+      return {
+        stage,
+        requiredAllocatorFields: ['writingContractSummary', 'relationSummary', 'characterStates'],
+        optionalAllocatorFields: ['scenePlanSummary', 'contractVersionSummary', 'activeThreads', 'dueForeshadows'],
+      }
+    case 'review':
+      return {
+        stage,
+        requiredAllocatorFields: ['draftTextSummary', 'scenePlanSummary', 'contractVersionSummary', 'reviewRiskSummary', 'publishGateRiskSummary'],
+        optionalAllocatorFields: ['reviewProofSummary', 'continuityNotes', 'openLoops', 'timelineSummary'],
+      }
+    case 'rewrite':
+      return {
+        stage,
+        requiredAllocatorFields: ['draftTextSummary', 'scenePlanSummary', 'contractVersionSummary', 'reviewRiskSummary', 'rewriteDeltaSummary'],
+        optionalAllocatorFields: ['reviewProofSummary', 'publishGateRiskSummary', 'continuityNotes', 'timelineSummary'],
+      }
+    case 'draft':
+    default:
+      return {
+        stage,
+        requiredAllocatorFields: ['writingContractSummary', 'relationSummary', 'characterStates'],
+        optionalAllocatorFields: ['scenePlanSummary', 'contractVersionSummary', 'activeThreads', 'recalledMemory'],
+      }
+  }
+}
+
+function applyUpstreamArtifactsToRawContext(
+  rawContext: Awaited<ReturnType<typeof collectChapterContextRawData>>,
+  upstreamArtifacts: UpstreamRuntimeArtifacts,
+): Awaited<ReturnType<typeof collectChapterContextRawData>> {
+  const hasArtifacts = Object.values(upstreamArtifacts).some((value) => (
+    typeof value === 'string' ? Boolean(value.trim()) : Array.isArray(value) ? value.length > 0 : Boolean(value)
+  ))
+  if (!hasArtifacts) return rawContext
+
+  return {
+    ...rawContext,
+    contextParts: {
+      ...rawContext.contextParts,
+      scenePlanSummary: upstreamArtifacts.scenePlanSummary || rawContext.contextParts.scenePlanSummary,
+      draftTextSummary: upstreamArtifacts.draftTextSummary || rawContext.contextParts.draftTextSummary,
+      contractVersionSummary: upstreamArtifacts.contractVersionSummary || rawContext.contextParts.contractVersionSummary,
+      reviewRiskSummary: upstreamArtifacts.reviewRiskSummary || rawContext.contextParts.reviewRiskSummary,
+      reviewProofSummary: upstreamArtifacts.reviewProofSummary || rawContext.contextParts.reviewProofSummary,
+      rewriteDeltaSummary: upstreamArtifacts.rewriteDeltaSummary || rawContext.contextParts.rewriteDeltaSummary,
+      publishGateRiskSummary: upstreamArtifacts.publishGateRiskSummary || rawContext.contextParts.publishGateRiskSummary,
+    },
+  }
+}
+
+async function resolveStageContextForPipeline(
+  stage: ChapterContextStage,
+  chapter: typeof chapters.$inferSelect,
+  rawContext: Awaited<ReturnType<typeof collectChapterContextRawData>>,
+  complexity: ChapterComplexity,
+  options: {
+    executionMode?: AiExecutionMode
+    preserveConstraintLabels?: HardConstraintSourceLabel[]
+    contractVersion?: string
+    activePromptOverrideKeys?: string[]
+    totalBudget?: number
+    upstreamArtifacts?: UpstreamRuntimeArtifacts
+  } = {},
+): Promise<StageContextResolverPayload> {
+  const renderSchema = buildStageRenderSchema(stage)
+  const upstreamArtifacts = options.upstreamArtifacts || {}
+
+  if (stage === 'draft') {
+    const writerContextResolutionPayload = await resolveWriterContextForStage(
+      chapter,
+      rawContext,
+      options.executionMode,
+      options.preserveConstraintLabels,
+      options.contractVersion,
+      options.activePromptOverrideKeys,
+    )
+    const draftResolution = allocateDraftContextWithWriterFallback(
+      chapter,
+      rawContext,
+      writerContextResolutionPayload.effectiveRawContext,
+      complexity,
+      writerContextResolutionPayload.writerContextResolution,
+      options.preserveConstraintLabels,
+    )
+    return {
+      stage,
+      context: draftResolution.draftContext,
+      effectiveRawContext: draftResolution.effectiveRawContext,
+      upstreamArtifacts,
+      renderSchema,
+      writerContextResolution: draftResolution.writerContextResolution,
+    }
+  }
+
+  const effectiveRawContext = applyUpstreamArtifactsToRawContext(rawContext, upstreamArtifacts)
+  return {
+    stage,
+    context: allocateStageContextForPipeline(
+      effectiveRawContext,
+      chapter,
+      complexity,
+      stage,
+      options.totalBudget,
+      options.preserveConstraintLabels,
+    ),
+    effectiveRawContext,
+    upstreamArtifacts,
+    renderSchema,
+  }
+}
+
 function allocateStageContextForPipeline(
   rawContext: Awaited<ReturnType<typeof collectChapterContextRawData>>,
   chapter: typeof chapters.$inferSelect,
@@ -3640,10 +4016,241 @@ function allocateStageContextForPipeline(
   }
 }
 
+function applyWriterContextOverridesToRawContext(
+  rawContext: Awaited<ReturnType<typeof collectChapterContextRawData>>,
+  overrides?: Partial<ChapterContext>,
+): Awaited<ReturnType<typeof collectChapterContextRawData>> {
+  if (!overrides || Object.keys(overrides).length === 0) return rawContext
+  return {
+    ...rawContext,
+    contextParts: {
+      ...rawContext.contextParts,
+      ...Object.fromEntries(
+        Object.entries(overrides).filter(([, value]) => typeof value === 'string'),
+      ),
+    },
+  }
+}
+
+function appendWriterContextFallback(
+  writerContextResolution: WriterContextOrchestratorResolution,
+  detail: string,
+): WriterContextOrchestratorResolution {
+  return {
+    ...writerContextResolution,
+    toolCalls: [
+      ...writerContextResolution.toolCalls,
+      {
+        target: 'orchestrator',
+        toolName: 'writer_context.legacy_fallback',
+        status: 'failed',
+        durationMs: 0,
+        errorMessage: detail,
+      },
+    ],
+    fallbackEvents: [
+      ...writerContextResolution.fallbackEvents,
+      {
+        target: 'orchestrator',
+        reason: 'service_failed',
+        detail,
+        fallbackMode: 'conservative',
+      },
+    ],
+  }
+}
+
+function buildLegacyFallbackWriterContextResolution(
+  chapter: typeof chapters.$inferSelect,
+  rawContext: Awaited<ReturnType<typeof collectChapterContextRawData>>,
+  contractVersion: string | undefined,
+  activePromptOverrideKeys: string[] | undefined,
+  error: unknown,
+): WriterContextOrchestratorResolution {
+  const detail = error instanceof Error ? error.message : 'unknown error'
+  const cacheSalt = [
+    [...(activePromptOverrideKeys || [])].sort().join('|'),
+    getActiveChapterPromptOverrideFingerprint(),
+  ].filter(Boolean).join('|')
+
+  return {
+    cacheKey: 'writer-orchestrator:legacy-fallback',
+    cacheHit: false,
+    queryPlan: [],
+    retrievalFingerprint: {
+      digest: 'legacy-fallback',
+      cacheKey: 'writer-orchestrator:legacy-fallback',
+      signalHash: 'legacy-fallback',
+      planHash: 'legacy-fallback',
+      invalidationHash: 'legacy-fallback',
+      inputs: {
+        novelId: chapter.novelId,
+        chapterId: chapter.id,
+        chapterNum: chapter.chapterNum,
+        chapterContextVersion: chapter.contextVersion || 1,
+        novelContextVersion: rawContext.novel.contextVersion || 1,
+        assetFingerprint: contractVersion || '',
+        cacheSalt,
+        mentionedCharacterCount: rawContext.mentionedCharacters.length,
+        mentionedItemCount: rawContext.mentionedItems.length,
+        mentionedLocationCount: rawContext.mentionedLocations.length,
+        enabledBuckets: [],
+      },
+    },
+    structuredPack: {
+      characters: [],
+      items: [],
+      timeline: [],
+      recall: { hits: [] },
+    },
+    renderedContextOverrides: {},
+    toolCalls: [{
+      target: 'orchestrator',
+      toolName: 'writer_context.resolve',
+      status: 'failed',
+      durationMs: 0,
+      errorMessage: detail,
+    }],
+    fallbackEvents: [{
+      target: 'orchestrator',
+      reason: 'service_failed',
+      detail,
+      fallbackMode: 'conservative',
+    }],
+    allocatorInputSummary: {
+      overrideLabels: [],
+      overrideCharCount: 0,
+      overrideLineCount: 0,
+      enabledBucketCount: 0,
+      signalCharCount: 0,
+      buckets: [],
+    },
+  }
+}
+
+function allocateDraftContextWithWriterFallback(
+  chapter: typeof chapters.$inferSelect,
+  baseRawContext: Awaited<ReturnType<typeof collectChapterContextRawData>>,
+  writerRawContext: Awaited<ReturnType<typeof collectChapterContextRawData>>,
+  complexity: ChapterComplexity,
+  writerContextResolution: WriterContextOrchestratorResolution,
+  preserveConstraintLabels?: HardConstraintSourceLabel[],
+): {
+  effectiveRawContext: Awaited<ReturnType<typeof collectChapterContextRawData>>
+  draftContext: ChapterContext
+  writerContextResolution: WriterContextOrchestratorResolution
+} {
+  try {
+    return {
+      effectiveRawContext: writerRawContext,
+      draftContext: allocateStageContextForPipeline(writerRawContext, chapter, complexity, 'draft', undefined, preserveConstraintLabels),
+      writerContextResolution,
+    }
+  } catch (error) {
+    const detail = `writer draft allocator fallback: ${error instanceof Error ? error.message : 'unknown error'}`
+    return {
+      effectiveRawContext: baseRawContext,
+      draftContext: allocateStageContextForPipeline(baseRawContext, chapter, complexity, 'draft', undefined, preserveConstraintLabels),
+      writerContextResolution: appendWriterContextFallback(writerContextResolution, detail),
+    }
+  }
+}
+
+async function resolveWriterContextForStage(
+  chapter: typeof chapters.$inferSelect,
+  rawContext: Awaited<ReturnType<typeof collectChapterContextRawData>>,
+  executionMode: AiExecutionMode | undefined,
+  preserveConstraintLabels?: HardConstraintSourceLabel[],
+  contractVersion?: string,
+  activePromptOverrideKeys?: string[],
+): Promise<{
+  effectiveRawContext: Awaited<ReturnType<typeof collectChapterContextRawData>>
+  writerContextResolution: WriterContextOrchestratorResolution
+}> {
+  try {
+    const writerContextResolution = await resolveWriterOrchestratedContext({
+      novelId: chapter.novelId,
+      chapterId: chapter.id,
+      chapterNum: chapter.chapterNum,
+      signals: {
+        chapterTitle: chapter.title || '',
+        chapterOutline: chapter.outline || '',
+        chapterGoal: rawContext.contextParts.chapterGoal,
+        arcSummary: rawContext.currentArc?.arcSummary || '',
+        arcGoal: rawContext.currentArc?.arcGoal || '',
+        previousSummaries: rawContext.contextParts.previousSummaries,
+        continuityNotes: rawContext.contextParts.continuityNotes,
+        openLoops: rawContext.contextParts.openLoops,
+        dueForeshadows: rawContext.contextParts.dueForeshadows,
+        timelineSummary: rawContext.contextParts.timelineSummary,
+        timelineOpenThreads: rawContext.contextParts.timelineOpenThreads,
+        activeThreads: rawContext.contextParts.activeThreads,
+        worldStates: rawContext.contextParts.worldStates,
+        relationSummary: rawContext.contextParts.relationSummary,
+        dialogueVoiceLocks: rawContext.contextParts.dialogueVoiceLocks,
+        mentionedCharacters: rawContext.mentionedCharacters,
+        mentionedItems: rawContext.mentionedItems,
+        mentionedLocations: rawContext.mentionedLocations,
+      },
+      baseContextParts: {
+        characterStates: rawContext.contextParts.characterStates,
+        worldStates: rawContext.contextParts.worldStates,
+        itemSummary: rawContext.contextParts.itemSummary,
+        continuityNotes: rawContext.contextParts.continuityNotes,
+        timelineSummary: rawContext.contextParts.timelineSummary,
+        timelineOpenThreads: rawContext.contextParts.timelineOpenThreads,
+        longTermMemory: rawContext.contextParts.longTermMemory,
+        activeThreads: rawContext.contextParts.activeThreads,
+        openLoops: rawContext.contextParts.openLoops,
+        dueForeshadows: rawContext.contextParts.dueForeshadows,
+        relationSummary: rawContext.contextParts.relationSummary,
+        dialogueVoiceLocks: rawContext.contextParts.dialogueVoiceLocks,
+        recalledMemory: rawContext.contextParts.recalledMemory,
+      },
+      invalidation: {
+        chapterContextVersion: chapter.contextVersion || 1,
+        novelContextVersion: rawContext.novel.contextVersion || 1,
+        assetFingerprint: contractVersion || '',
+        cacheSalt: [
+          [...(activePromptOverrideKeys || [])].sort().join('|'),
+          getActiveChapterPromptOverrideFingerprint(),
+        ].filter(Boolean).join('|'),
+        stage: 'draft',
+        executionMode: executionMode || 'default',
+        preserveConstraintLabels: [...(preserveConstraintLabels || [])].sort(),
+      },
+      runtime: {
+        useMemoryCache: true,
+        forceRefresh: false,
+      },
+    })
+
+    return {
+      writerContextResolution,
+      effectiveRawContext: applyWriterContextOverridesToRawContext(
+        rawContext,
+        writerContextResolution.renderedContextOverrides as Partial<ChapterContext>,
+      ),
+    }
+  } catch (error) {
+    return {
+      effectiveRawContext: rawContext,
+      writerContextResolution: buildLegacyFallbackWriterContextResolution(
+        chapter,
+        rawContext,
+        contractVersion,
+        activePromptOverrideKeys,
+        error,
+      ),
+    }
+  }
+}
+
 function buildStageContextMap(
   rawContext: Awaited<ReturnType<typeof collectChapterContextRawData>>,
   chapter: typeof chapters.$inferSelect,
   preserveConstraintLabels?: HardConstraintSourceLabel[],
+  draftRawContext?: Awaited<ReturnType<typeof collectChapterContextRawData>>,
 ): {
   complexity: ChapterComplexity
   contexts: Record<ChapterContextStage, ChapterContext>
@@ -3660,7 +4267,7 @@ function buildStageContextMap(
     complexity,
     contexts: {
       scenePlan: allocateStageContextForPipeline(rawContext, chapter, complexity, 'scenePlan', undefined, preserveConstraintLabels),
-      draft: allocateStageContextForPipeline(rawContext, chapter, complexity, 'draft', undefined, preserveConstraintLabels),
+      draft: allocateStageContextForPipeline(draftRawContext || rawContext, chapter, complexity, 'draft', undefined, preserveConstraintLabels),
       review: allocateStageContextForPipeline(rawContext, chapter, complexity, 'review', undefined, preserveConstraintLabels),
       rewrite: allocateStageContextForPipeline(rawContext, chapter, complexity, 'rewrite', undefined, preserveConstraintLabels),
     },
@@ -3671,6 +4278,7 @@ function buildPreviewStageContextMap(
   rawContext: Awaited<ReturnType<typeof collectChapterContextRawData>>,
   chapter: typeof chapters.$inferSelect,
   preserveConstraintLabels?: HardConstraintSourceLabel[],
+  draftRawContext?: Awaited<ReturnType<typeof collectChapterContextRawData>>,
 ): {
   complexity: ChapterComplexity
   contexts: Record<ChapterContextStage, ChapterContext>
@@ -3697,7 +4305,16 @@ function buildPreviewStageContextMap(
     complexity,
     contexts: {
       scenePlan: buildStageContext('scenePlan'),
-      draft: buildStageContext('draft'),
+      draft: (() => {
+        try {
+          return allocateStageContextForPipeline(draftRawContext || rawContext, chapter, complexity, 'draft', undefined, preserveConstraintLabels)
+        } catch (error) {
+          if (error instanceof ContextOverflowError || error instanceof HardConstraintOverflowError) {
+            return error.context
+          }
+          throw error
+        }
+      })(),
       review: buildStageContext('review'),
       rewrite: buildStageContext('rewrite'),
     },
@@ -3721,8 +4338,25 @@ async function continueChapterContent(
   const rawContext = await collectChapterContextRawData(chapter.novelId, chapter.chapterNum)
   const novel = rawContext.novel
   const profile = rawContext.profile
-  const { complexity, contexts } = buildStageContextMap(rawContext, chapter)
-  const draftContext = contexts.draft
+  const activePromptOverrideKeys = getActiveChapterPromptOverrideKeys()
+  const writerContextResolutionPayload = await resolveWriterContextForStage(
+    chapter,
+    rawContext,
+    options.executionMode,
+    undefined,
+    buildChapterContractVersion(chapterId),
+    activePromptOverrideKeys,
+  )
+  const { complexity } = buildStageContextMap(rawContext, chapter)
+  const draftResolution = allocateDraftContextWithWriterFallback(
+    chapter,
+    rawContext,
+    writerContextResolutionPayload.effectiveRawContext,
+    complexity,
+    writerContextResolutionPayload.writerContextResolution,
+  )
+  const draftContext = draftResolution.draftContext
+  const writerRawContext = draftResolution.effectiveRawContext
   const consistencyNotes = buildConsistencyPromptSummary(buildNovelConsistencyReport(chapter.novelId))
   const storyCore = buildStoryCore(profile, draftContext.storyCore)
   const executionModeResolution = resolveAiExecutionMode({
@@ -3752,6 +4386,7 @@ async function continueChapterContent(
   snapshot = {
     ...snapshot,
     executionMode: executionModeResolution.mode,
+    writerContextResolution: draftResolution.writerContextResolution,
     partialContent: normalizedPartial,
     resumeReason: undefined,
     resumeSourceTaskId: options.sourceTaskId,
@@ -4264,16 +4899,77 @@ export async function generateChapterContent(
   }
 
   try {
-    const { complexity, contexts } = buildStageContextMap(rawContext, chapter, options.preserveConstraintLabels)
-    const scenePlanContext = contexts.scenePlan
-    const draftContext = contexts.draft
-    const reviewContext = contexts.review
-    let rewriteContext = contexts.rewrite
+    const activePromptOverrideKeys = getActiveChapterPromptOverrideKeys()
+    const complexity = classifyChapterComplexity({
+      chapter,
+      currentArc: rawContext.currentArc,
+      chapterRows: rawContext.chapterRows,
+      outlineMentionedCharacterCount: rawContext.outlineMentionedCharacterCount,
+      activeThreadPressureCount: rawContext.activeThreadPressureCount,
+    })
+    const scenePlanResolution = await resolveStageContextForPipeline(
+      'scenePlan',
+      chapter,
+      rawContext,
+      complexity,
+      {
+        executionMode: executionModeResolution.mode,
+        preserveConstraintLabels: options.preserveConstraintLabels,
+        contractVersion,
+        activePromptOverrideKeys,
+        upstreamArtifacts: {
+          contractVersionSummary: buildContractVersionArtifactSummary(contractVersion),
+        },
+      },
+    )
+    const draftResolution = await resolveStageContextForPipeline(
+      'draft',
+      chapter,
+      rawContext,
+      complexity,
+      {
+        executionMode: executionModeResolution.mode,
+        preserveConstraintLabels: options.preserveConstraintLabels,
+        contractVersion,
+        activePromptOverrideKeys,
+      },
+    )
+    const scenePlanContext = scenePlanResolution.context
+    const draftContext = draftResolution.context
+    let reviewContext = (await resolveStageContextForPipeline(
+      'review',
+      chapter,
+      rawContext,
+      complexity,
+      {
+        executionMode: executionModeResolution.mode,
+        preserveConstraintLabels: options.preserveConstraintLabels,
+        contractVersion,
+        activePromptOverrideKeys,
+        upstreamArtifacts: {
+          contractVersionSummary: buildContractVersionArtifactSummary(contractVersion),
+        },
+      },
+    )).context
+    let rewriteContext = (await resolveStageContextForPipeline(
+      'rewrite',
+      chapter,
+      rawContext,
+      complexity,
+      {
+        executionMode: executionModeResolution.mode,
+        preserveConstraintLabels: options.preserveConstraintLabels,
+        contractVersion,
+        activePromptOverrideKeys,
+        upstreamArtifacts: {
+          contractVersionSummary: buildContractVersionArtifactSummary(contractVersion),
+        },
+      },
+    )).context
     const linkedImpacts = listActiveImpactsForChapter(chapter.novelId, chapter.id)
-    const usageSnapshot = buildWritingContextUsageSnapshot(rawContext, draftContext, linkedImpacts)
+    const usageSnapshot = buildWritingContextUsageSnapshot(draftResolution.effectiveRawContext, draftContext, linkedImpacts)
     const contextAssemblyReport = buildChapterContextAssemblyReport(draftContext, usageSnapshot)
     const authorStyleLock = buildAuthorStyleLockSummary(chapter.novelId, novel.themeVoiceJson)
-    const activePromptOverrideKeys = getActiveChapterPromptOverrideKeys()
     let stageReports = buildChapterAiStageReports(
       executionModeResolution.mode,
       executionModeResolution.source,
@@ -4305,7 +5001,7 @@ export async function generateChapterContent(
       consistencyNotes,
     ].filter(Boolean).join('\n\n')
     const draftWritingGuidance = buildWritingGuidance(draftContext.styleTemplate)
-    const rewriteWritingGuidance = buildWritingGuidance(rewriteContext.styleTemplate)
+    let rewriteWritingGuidance = buildWritingGuidance(rewriteContext.styleTemplate)
     const storyCore = buildStoryCore(profile, rewriteContext.storyCore || draftContext.storyCore || scenePlanContext.storyCore)
     const currentArcRow = rawContext.currentArc
     const latestArcProgressNote = getLatestArcProgressNote(chapter.novelId, currentArcRow, chapter.chapterNum)
@@ -4416,6 +5112,7 @@ export async function generateChapterContent(
       contextAssemblyReport,
       authorStyleLock,
       generationExplainability,
+      writerContextResolution: draftResolution.writerContextResolution,
     }
     try {
       persistChapterRecallRuntimeSnapshot({
@@ -4632,6 +5329,29 @@ export async function generateChapterContent(
     })
     finishRoleTask('writer', writerTaskId, '正文初稿已生成，等待 Critic 审校。')
     const lockedParagraphContext = buildLockedParagraphContext(chapter, draftContent)
+    const reviewUpstreamArtifacts: UpstreamRuntimeArtifacts = {
+      scenePlanSummary: summarizeStageArtifactText(scenePlanText, 520),
+      draftTextSummary: summarizeStageArtifactText(lockedParagraphContext.promptDraftContent, 680),
+      contractVersionSummary: buildContractVersionArtifactSummary(contractVersion),
+      publishGateRiskSummary: summarizeStageArtifactLines([
+        structuralAlertsSummary,
+        consistencyNotes,
+      ], 4, 520),
+    }
+    reviewContext = (await resolveStageContextForPipeline(
+      'review',
+      chapter,
+      rawContext,
+      complexity,
+      {
+        executionMode: executionModeResolution.mode,
+        preserveConstraintLabels: options.preserveConstraintLabels,
+        contractVersion,
+        activePromptOverrideKeys,
+        upstreamArtifacts: reviewUpstreamArtifacts,
+      },
+    )).context
+    logConstraintInjectionStatus('review', reviewContext)
     const reviewNarrativeFields = formatNarrativePromptFields(buildNarrativeControlReport(reviewContext.chapterGoal, draftContent))
 
     let reviewNotes = buildFallbackReviewNotes(consistencyNotes)
@@ -4676,6 +5396,12 @@ export async function generateChapterContent(
         expressionDedupGuidance: formatExpressionDedupGuidance(generationExpressionDedup),
         summaryHealthGuidance: formatSummaryHealthGuidance(previousSummaryHealth),
         voiceEvolutionGuidance: formatVoiceEvolutionGuidance(voiceEvolutionProfiles),
+        scenePlanSummary: reviewContext.scenePlanSummary,
+        draftTextSummary: reviewContext.draftTextSummary,
+        contractVersionSummary: reviewContext.contractVersionSummary,
+        reviewRiskSummary: reviewContext.reviewRiskSummary,
+        reviewProofSummary: reviewContext.reviewProofSummary,
+        publishGateRiskSummary: reviewContext.publishGateRiskSummary,
         protagonistReference: profile.protagonistReference,
         protagonistRule: profile.protagonistRule,
         promptTier: complexity,
@@ -4730,6 +5456,7 @@ export async function generateChapterContent(
     })
     reviewNotes = applyDialogueAnalysisToReviewNotes(reviewNotes, chapter.novelId, chapter.chapterNum, draftContent)
     reviewNotes = applyStyleComplianceToReviewNotes(reviewNotes, chapter.novelId, draftContent)
+    reviewNotes = applyReadingExperienceToReviewNotes(reviewNotes, draftContent)
     reviewNotes = applyContractValidationToReviewNotes(reviewNotes, validateChapterContractDelivery({
       chapterId,
       content: draftContent,
@@ -4782,21 +5509,46 @@ export async function generateChapterContent(
     finishRoleTask('critic', criticTaskId, 'Critic 审校完成，已生成本章修订意见。')
     const reviewPrioritySummary = buildReviewPrioritySummary(reviewNotes)
     const rewritePolicy = buildAdaptiveRewritePolicy(reviewPrioritySummary)
-    if (rewritePolicy.contextBudgetMultiplier > 1) {
-      rewriteContext = allocateStageContextForPipeline(
-        rawContext,
-        chapter,
-        complexity,
-        'rewrite',
-        Math.round(resolveContextBudgetForStage(
-          'rewrite',
-          complexity,
-          chapter.targetWords || 3000,
-          rawContext.novel.targetWords || 0,
-        ) * rewritePolicy.contextBudgetMultiplier),
-      )
-      logConstraintInjectionStatus('rewrite', rewriteContext)
+    const reviewPriorityPrompt = buildReviewPriorityPrompt(reviewPrioritySummary)
+    const rewriteUpstreamArtifacts: UpstreamRuntimeArtifacts = {
+      scenePlanSummary: summarizeStageArtifactText(scenePlanText, 520),
+      draftTextSummary: summarizeStageArtifactText(lockedParagraphContext.promptDraftContent, 680),
+      contractVersionSummary: buildContractVersionArtifactSummary(contractVersion),
+      reviewRiskSummary: buildReviewRiskArtifactSummary(reviewNotes),
+      reviewProofSummary: buildReviewProofArtifactSummary(reviewNotes),
+      rewriteDeltaSummary: buildRewriteDeltaArtifactSummary(
+        reviewNotes,
+        rewritePolicy.rewriteScope,
+        reviewPriorityPrompt,
+      ),
+      publishGateRiskSummary: summarizeStageArtifactLines([
+        structuralAlertsSummary,
+        ...reviewPrioritySummary.reasons,
+      ], 5, 640),
     }
+    rewriteContext = (await resolveStageContextForPipeline(
+      'rewrite',
+      chapter,
+      rawContext,
+      complexity,
+      {
+        executionMode: executionModeResolution.mode,
+        preserveConstraintLabels: options.preserveConstraintLabels,
+        contractVersion,
+        activePromptOverrideKeys,
+        totalBudget: rewritePolicy.contextBudgetMultiplier > 1
+          ? Math.round(resolveContextBudgetForStage(
+            'rewrite',
+            complexity,
+            chapter.targetWords || 3000,
+            rawContext.novel.targetWords || 0,
+          ) * rewritePolicy.contextBudgetMultiplier)
+          : undefined,
+        upstreamArtifacts: rewriteUpstreamArtifacts,
+      },
+    )).context
+    rewriteWritingGuidance = buildWritingGuidance(rewriteContext.styleTemplate)
+    logConstraintInjectionStatus('rewrite', rewriteContext)
     stageReports = buildChapterAiStageReports(
       executionModeResolution.mode,
       executionModeResolution.source,
@@ -4840,7 +5592,7 @@ export async function generateChapterContent(
     ))
     const rewriterChatOpts = buildChatOptionsFromRoute(stageReports[3].route)
     const prioritizedReviewNotesText = [
-      buildReviewPriorityPrompt(reviewPrioritySummary),
+      reviewPriorityPrompt,
       formatReviewNotes(reviewNotes),
     ].filter(Boolean).join('\n\n')
     const buildRewriteMessages = (attemptNumber = 1, rejectedDigests: string[] = []) => ([{
@@ -5031,10 +5783,14 @@ export async function generateChapterContent(
       chapter.novelId,
       repaired.content,
     )
-    const repairedContractReviewNotes = applyContractValidationToReviewNotes(repairedStyleReviewNotes, validateChapterContractDelivery({
+    const repairedReadableReviewNotes = applyReadingExperienceToReviewNotes(
+      repairedStyleReviewNotes,
+      repaired.content,
+    )
+    const repairedContractReviewNotes = applyContractValidationToReviewNotes(repairedReadableReviewNotes, validateChapterContractDelivery({
       chapterId,
       content: repaired.content,
-      reviewNotes: repairedStyleReviewNotes,
+      reviewNotes: repairedReadableReviewNotes,
     }))
     const repairedGroundedReviewNotes = applyHistoricalGroundingToReviewNotes(repairedContractReviewNotes, {
       genreName: profile.genre,
@@ -5081,6 +5837,10 @@ export async function generateChapterContent(
       reviewPrioritySummary: finalReviewPrioritySummary,
       reviewNotes: finalReviewNotes,
     })
+    const finalReviewNotesWithRewriteDelta = applyRewriteDeltaToReviewNotes(
+      finalReviewNotes,
+      rewriteMiniReview.narrativeDelta,
+    )
     if (rewriteMiniReview.needsHumanReview) {
       failRoleTask('rewriter', rewriterTaskId, new ChapterPipelineStageError(
         'human_review_required',
@@ -5121,7 +5881,7 @@ export async function generateChapterContent(
 
     updateChapter(chapterId, {
       content: repaired.content,
-      reviewNotesJson: JSON.stringify(finalReviewNotes),
+      reviewNotesJson: JSON.stringify(finalReviewNotesWithRewriteDelta),
       status: 'draft',
     }, {
       skipStaleTracking: true,
@@ -5331,17 +6091,106 @@ export async function getChapterContextPreview(
   if (!chapter) throwUserFacingError('chapter.notFoundWithId', { id: chapterId })
 
   const rawContext = await collectChapterContextRawData(chapter.novelId, chapter.chapterNum)
-  const { complexity, contexts } = buildPreviewStageContextMap(rawContext, chapter, options.preserveConstraintLabels)
-  const orderedStages: ChapterContextStage[] = ['scenePlan', 'draft', 'review', 'rewrite']
-  const linkedImpacts = listActiveImpactsForChapter(chapter.novelId, chapter.id)
-  const usageSnapshot = buildWritingContextUsageSnapshot(rawContext, contexts.draft, linkedImpacts)
+  const contractVersion = buildChapterContractVersion(chapterId)
   const executionModeResolution = resolveAiExecutionMode({
     explicitMode: options.executionMode,
     settingsJson: rawContext.novel.settingsJson,
   })
+  const complexity = classifyChapterComplexity({
+    chapter,
+    currentArc: rawContext.currentArc,
+    chapterRows: rawContext.chapterRows,
+    outlineMentionedCharacterCount: rawContext.outlineMentionedCharacterCount,
+    activeThreadPressureCount: rawContext.activeThreadPressureCount,
+  })
+  const activePromptOverrideKeys = getActiveChapterPromptOverrideKeys()
+  const persistedScenePlanText = buildPersistedScenePlanText(chapter.scenePlanJson)
+  const persistedReviewNotes = parseStoredReviewNotes(chapter.reviewNotesJson)
+  const persistedReviewPrioritySummary = buildReviewPrioritySummary(persistedReviewNotes)
+
+  const scenePlanResolution = await resolveStageContextForPipeline(
+    'scenePlan',
+    chapter,
+    rawContext,
+    complexity,
+    {
+      executionMode: executionModeResolution.mode,
+      preserveConstraintLabels: options.preserveConstraintLabels,
+      contractVersion,
+      activePromptOverrideKeys,
+      upstreamArtifacts: {
+        contractVersionSummary: buildContractVersionArtifactSummary(contractVersion),
+      },
+    },
+  )
+  const draftResolution = await resolveStageContextForPipeline(
+    'draft',
+    chapter,
+    rawContext,
+    complexity,
+    {
+      executionMode: executionModeResolution.mode,
+      preserveConstraintLabels: options.preserveConstraintLabels,
+      contractVersion,
+      activePromptOverrideKeys,
+    },
+  )
+  const reviewResolution = await resolveStageContextForPipeline(
+    'review',
+    chapter,
+    rawContext,
+    complexity,
+    {
+      executionMode: executionModeResolution.mode,
+      preserveConstraintLabels: options.preserveConstraintLabels,
+      contractVersion,
+      activePromptOverrideKeys,
+      upstreamArtifacts: {
+        scenePlanSummary: summarizeStageArtifactText(persistedScenePlanText, 520),
+        draftTextSummary: summarizeStageArtifactText(chapter.content || '', 680),
+        contractVersionSummary: buildContractVersionArtifactSummary(contractVersion),
+        reviewRiskSummary: buildReviewRiskArtifactSummary(persistedReviewNotes),
+        reviewProofSummary: buildReviewProofArtifactSummary(persistedReviewNotes),
+        publishGateRiskSummary: summarizeStageArtifactLines(persistedReviewPrioritySummary.reasons, 4, 520),
+      },
+    },
+  )
+  const rewriteResolution = await resolveStageContextForPipeline(
+    'rewrite',
+    chapter,
+    rawContext,
+    complexity,
+    {
+      executionMode: executionModeResolution.mode,
+      preserveConstraintLabels: options.preserveConstraintLabels,
+      contractVersion,
+      activePromptOverrideKeys,
+      upstreamArtifacts: {
+        scenePlanSummary: summarizeStageArtifactText(persistedScenePlanText, 520),
+        draftTextSummary: summarizeStageArtifactText(chapter.content || '', 680),
+        contractVersionSummary: buildContractVersionArtifactSummary(contractVersion),
+        reviewRiskSummary: buildReviewRiskArtifactSummary(persistedReviewNotes),
+        reviewProofSummary: buildReviewProofArtifactSummary(persistedReviewNotes),
+        rewriteDeltaSummary: buildRewriteDeltaArtifactSummary(
+          persistedReviewNotes,
+          persistedReviewPrioritySummary.rewriteScope,
+          buildReviewPriorityPrompt(persistedReviewPrioritySummary),
+        ),
+        publishGateRiskSummary: summarizeStageArtifactLines(persistedReviewPrioritySummary.reasons, 4, 520),
+      },
+    },
+  )
+  const contexts: Record<ChapterContextStage, ChapterContext> = {
+    scenePlan: scenePlanResolution.context,
+    draft: draftResolution.context,
+    review: reviewResolution.context,
+    rewrite: rewriteResolution.context,
+  }
+  const orderedStages: ChapterContextStage[] = ['scenePlan', 'draft', 'review', 'rewrite']
+  const linkedImpacts = listActiveImpactsForChapter(chapter.novelId, chapter.id)
+  const usageSnapshot = buildWritingContextUsageSnapshot(draftResolution.effectiveRawContext, contexts.draft, linkedImpacts)
   const contextAssemblyReport = buildChapterContextAssemblyReport(contexts.draft, usageSnapshot)
   const authorStyleLock = buildAuthorStyleLockSummary(chapter.novelId, rawContext.novel.themeVoiceJson)
-  const activePromptOverrideKeys = getActiveChapterPromptOverrideKeys()
   const stageReports = buildChapterAiStageReports(
     executionModeResolution.mode,
     executionModeResolution.source,
@@ -5381,8 +6230,16 @@ export async function getChapterContextPreview(
     recallDiagnostics: contexts.draft.recallDiagnostics,
     recalledMemorySources: contexts.draft.recalledMemorySources,
     usageSnapshot,
+    writerContextResolution: draftResolution.writerContextResolution,
     stages: orderedStages.map((stage) => {
       const context = contexts[stage]
+      const resolution = stage === 'scenePlan'
+        ? scenePlanResolution
+        : stage === 'draft'
+          ? draftResolution
+          : stage === 'review'
+            ? reviewResolution
+            : rewriteResolution
       return {
         stage,
         hardConstraintContext: context.hardConstraintContext,
@@ -5393,6 +6250,8 @@ export async function getChapterContextPreview(
         contextBudgetReport: context.contextBudgetReport,
         softContextDecisions: context.softContextDecisions,
         droppedConstraintCount: context.droppedConstraintCount,
+        upstreamArtifacts: resolution.upstreamArtifacts,
+        renderSchema: resolution.renderSchema,
       }
     }),
   }

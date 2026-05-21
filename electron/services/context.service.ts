@@ -296,6 +296,13 @@ export interface ChapterContextParts {
   relationSummary: string
   dialogueVoiceLocks: string
   recalledMemory: string
+  scenePlanSummary: string
+  draftTextSummary: string
+  contractVersionSummary: string
+  reviewRiskSummary: string
+  reviewProofSummary: string
+  rewriteDeltaSummary: string
+  publishGateRiskSummary: string
 }
 
 export interface HardConstraintEntry {
@@ -1832,6 +1839,13 @@ function resolveContextLabelTitle(label: ChapterContextLabel): string {
     relationSummary: '关键人物关系',
     dialogueVoiceLocks: '角色 Voice Lock',
     recalledMemory: '向量召回记忆',
+    scenePlanSummary: '场景计划摘要',
+    draftTextSummary: '当前稿件摘要',
+    contractVersionSummary: '合同版本摘要',
+    reviewRiskSummary: '审校风险摘要',
+    reviewProofSummary: '审校证据摘要',
+    rewriteDeltaSummary: '重写差量摘要',
+    publishGateRiskSummary: '发布门风险',
   }
   return titleMap[label]
 }
@@ -2061,6 +2075,13 @@ function createStagePriorityMap(
           relationSummary: 1,
           dialogueVoiceLocks: 1,
           recalledMemory: 2,
+          scenePlanSummary: null,
+          draftTextSummary: null,
+          contractVersionSummary: 1,
+          reviewRiskSummary: null,
+          reviewProofSummary: null,
+          rewriteDeltaSummary: null,
+          publishGateRiskSummary: null,
         }
       case 'draft':
         return {
@@ -2087,6 +2108,13 @@ function createStagePriorityMap(
           relationSummary: 1,
           dialogueVoiceLocks: 1,
           recalledMemory: 2,
+          scenePlanSummary: 1,
+          draftTextSummary: null,
+          contractVersionSummary: 1,
+          reviewRiskSummary: null,
+          reviewProofSummary: null,
+          rewriteDeltaSummary: null,
+          publishGateRiskSummary: null,
         }
       case 'review':
         return {
@@ -2113,6 +2141,13 @@ function createStagePriorityMap(
           relationSummary: 1,
           dialogueVoiceLocks: 1,
           recalledMemory: 2,
+          scenePlanSummary: 0,
+          draftTextSummary: 0,
+          contractVersionSummary: 0,
+          reviewRiskSummary: 0,
+          reviewProofSummary: 1,
+          rewriteDeltaSummary: null,
+          publishGateRiskSummary: 0,
         }
       case 'rewrite':
       default:
@@ -2140,6 +2175,13 @@ function createStagePriorityMap(
           relationSummary: 1,
           dialogueVoiceLocks: 1,
           recalledMemory: 2,
+          scenePlanSummary: 1,
+          draftTextSummary: 1,
+          contractVersionSummary: 0,
+          reviewRiskSummary: 0,
+          reviewProofSummary: 0,
+          rewriteDeltaSummary: 0,
+          publishGateRiskSummary: 1,
         }
     }
   })()
@@ -3620,6 +3662,13 @@ export async function collectChapterContextRawData(
       activeThreads: activeThreadsContext.summary,
       styleTemplate: enrichStyleTemplateWithFingerprint(profile.styleTemplateSummary, novelId),
       previousSummaries,
+      scenePlanSummary: '',
+      draftTextSummary: '',
+      contractVersionSummary: '',
+      reviewRiskSummary: '',
+      reviewProofSummary: '',
+      rewriteDeltaSummary: '',
+      publishGateRiskSummary: '',
     },
     previousChapterSampleReport: previousChapterFeed.previousChapterSampleReport,
   })
@@ -3877,6 +3926,13 @@ export function allocateChapterContext(
     relationSummary: softAllocation.allocated.relationSummary || rawData.contextParts.relationSummary || '',
     dialogueVoiceLocks: softAllocation.allocated.dialogueVoiceLocks || rawData.contextParts.dialogueVoiceLocks || '',
     recalledMemory: softAllocation.allocated.recalledMemory || '',
+    scenePlanSummary: softAllocation.allocated.scenePlanSummary || rawData.contextParts.scenePlanSummary || '',
+    draftTextSummary: softAllocation.allocated.draftTextSummary || rawData.contextParts.draftTextSummary || '',
+    contractVersionSummary: softAllocation.allocated.contractVersionSummary || rawData.contextParts.contractVersionSummary || '',
+    reviewRiskSummary: softAllocation.allocated.reviewRiskSummary || rawData.contextParts.reviewRiskSummary || '',
+    reviewProofSummary: softAllocation.allocated.reviewProofSummary || rawData.contextParts.reviewProofSummary || '',
+    rewriteDeltaSummary: softAllocation.allocated.rewriteDeltaSummary || rawData.contextParts.rewriteDeltaSummary || '',
+    publishGateRiskSummary: softAllocation.allocated.publishGateRiskSummary || rawData.contextParts.publishGateRiskSummary || '',
     hardConstraintContext: hardConstraintAllocation.text,
     hardConstraintSummary,
     hardConstraintEntries: hardConstraintAllocation.entries,

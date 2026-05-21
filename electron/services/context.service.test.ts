@@ -160,6 +160,13 @@ function createBaseContextParts(): ChapterContextParts {
     relationSummary: '关系约束：主角与副手处于临界失信状态。',
     dialogueVoiceLocks: '副手：- 必保留：短句反问；- 必避免：长段解释。',
     recalledMemory: '召回片段：过去的误判仍在影响当前决策。',
+    scenePlanSummary: '',
+    draftTextSummary: '',
+    contractVersionSummary: '',
+    reviewRiskSummary: '',
+    reviewProofSummary: '',
+    rewriteDeltaSummary: '',
+    publishGateRiskSummary: '',
   }
 }
 

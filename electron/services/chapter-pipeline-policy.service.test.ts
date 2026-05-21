@@ -5,6 +5,8 @@ vi.mock('./variation-control.service', () => ({
 }))
 
 import {
+  analyzeChapterReadingExperience,
+  analyzeRewriteNarrativeDelta,
   buildAdaptiveRewritePolicy,
   buildReviewPrioritySummary,
   buildRewriteMiniReviewVerdict,
@@ -250,5 +252,82 @@ describe('chapter pipeline policy', () => {
     expect(belowThreshold.improved).toBe(true)
     expect(atThreshold.needsHumanReview).toBe(true)
     expect(atThreshold.reason).toContain('高风险章节重写幅度不足')
+  })
+
+  it('scores weak serial reading experience when prose lacks action and result anchors', () => {
+    const report = analyzeChapterReadingExperience(
+      [
+        '这一切在某种意义上都显得格外沉重，因为他们终于意识到命运正在以不可言说的方式逼近。',
+        '然而与此同时，复杂的情绪在每个人心中不断蔓延，仿佛未来已经被某种看不见的力量笼罩。',
+        '他们沉默着，思考着，理解着这一切背后的意义，却没有人真正做出选择。',
+        '于是氛围变得更加凝重，故事似乎也在这一刻抵达了新的阶段。',
+      ].join('\n\n'),
+    )
+
+    expect(report.status).toBe('rewrite')
+    expect(report.risks.join('\n')).toMatch(/抽象解释句|模板承接句/u)
+  })
+
+  it('fails rewrite delta when structural issues only receive surface-level edits', () => {
+    vi.mocked(computeCandidateSimilarity).mockReturnValue(0.83)
+    const reviewNotes = createReviewNotes({
+      continuity_risks: ['上一章的伤势在本章消失。'],
+      reader_hook_risks: ['章尾没有留下下一步压力。'],
+      rewrite_required: true,
+    })
+    const summary = buildReviewPrioritySummary(reviewNotes)
+    const report = analyzeRewriteNarrativeDelta({
+      originalContent: [
+        '林远走进屋里。他看见灯还亮着。副手说没事。事情就这样过去了。',
+        '桌上的伤药没有拆封，窗外的脚步声也没有引起任何人的注意。',
+        '他只是点点头，把上一章留下的伤势和追兵都暂时放到一边。',
+        '门外那道影子停了很久，最后也没有造成任何新的压力。',
+        '这一段仍然没有交代伤势如何影响行动，也没有让追兵逼出新的选择。',
+      ].join(''),
+      rewrittenContent: [
+        '林远走进屋里。他看见灯仍然亮着。副手低声说没事。事情就这样暂时过去了。',
+        '桌上的伤药仍旧没有拆封，窗外的脚步声也没有让任何人停下来。',
+        '他只是慢慢点头，把上一章留下的伤势和追兵都暂且放到一边。',
+        '门外那道影子停留了很久，最后同样没有带来任何新的压力。',
+        '这一段依然没有说明伤势如何影响行动，也没有让追兵逼出新的选择。',
+      ].join(''),
+      reviewPrioritySummary: summary,
+      reviewNotes,
+    })
+
+    expect(report.status).toBe('fail')
+    expect(report.findings.join('\n')).toContain('更像语言润色而非剧情修复')
+  })
+
+  it('blocks mini review when rewrite delta proves plot repair did not land', () => {
+    vi.mocked(computeCandidateSimilarity).mockReturnValue(0.83)
+    const reviewNotes = createReviewNotes({
+      continuity_risks: ['上一章的伤势在本章消失。'],
+      reader_hook_risks: ['章尾没有留下下一步压力。'],
+      rewrite_required: true,
+    })
+    const summary = buildReviewPrioritySummary(reviewNotes)
+    const verdict = buildRewriteMiniReviewVerdict({
+      originalContent: [
+        '林远走进屋里。他看见灯还亮着。副手说没事。事情就这样过去了。',
+        '桌上的伤药没有拆封，窗外的脚步声也没有引起任何人的注意。',
+        '他只是点点头，把上一章留下的伤势和追兵都暂时放到一边。',
+        '门外那道影子停了很久，最后也没有造成任何新的压力。',
+        '这一段仍然没有交代伤势如何影响行动，也没有让追兵逼出新的选择。',
+      ].join(''),
+      rewrittenContent: [
+        '林远走进屋里。他看见灯仍然亮着。副手低声说没事。事情就这样暂时过去了。',
+        '桌上的伤药仍旧没有拆封，窗外的脚步声也没有让任何人停下来。',
+        '他只是慢慢点头，把上一章留下的伤势和追兵都暂且放到一边。',
+        '门外那道影子停留了很久，最后同样没有带来任何新的压力。',
+        '这一段依然没有说明伤势如何影响行动，也没有让追兵逼出新的选择。',
+      ].join(''),
+      reviewPrioritySummary: summary,
+      reviewNotes,
+    })
+
+    expect(verdict.needsHumanReview).toBe(true)
+    expect(verdict.narrativeDelta.status).toBe('fail')
+    expect(verdict.reason).toContain('重写差异验证失败')
   })
 })
