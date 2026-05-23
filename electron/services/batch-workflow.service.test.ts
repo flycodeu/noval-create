@@ -38,12 +38,15 @@ type PublishCheck = {
   gateLevel: 'pass' | 'warning' | 'blocker' | 'rewrite'
   ready: boolean
   summary: string
+  generatedTaskCount?: number
 }
 
 const taskRows = new Map<number, MockTask>()
 const chapterRows = new Map<number, ChapterRow>()
 const chapterScenarios = new Map<number, ChapterScenario[]>()
 const publishChecks = new Map<number, PublishCheck[]>()
+const aiCheckFailures = new Map<number, string>()
+const inspectionRows: Array<Record<string, unknown>> = []
 const feedbackPauseSignals = new Map<number, {
   issueType: string
   title: string
@@ -135,6 +138,7 @@ vi.mock('./context-impact.service', () => ({
       gateLevel: 'pass',
       ready: true,
       summary: '通过',
+      generatedTaskCount: 0,
     }
   }),
 }))
@@ -145,6 +149,11 @@ vi.mock('./feedback-recurrence.service', () => ({
 
 vi.mock('./chapter.service', () => ({
   getChapter: vi.fn((chapterId: number) => chapterRows.get(chapterId) || null),
+  aiCheckChapter: vi.fn(async (chapterId: number) => {
+    const failure = aiCheckFailures.get(chapterId)
+    if (failure) throw new Error(failure)
+    return { ok: true }
+  }),
   generateChapterContent: vi.fn(async (chapterId: number) => {
     const scenarioQueue = chapterScenarios.get(chapterId) || []
     const scenario = scenarioQueue.length > 1 ? scenarioQueue.shift() : scenarioQueue[0]
@@ -171,6 +180,33 @@ vi.mock('./chapter.service', () => ({
       }),
     })
     return childTaskId
+  }),
+}))
+
+vi.mock('./batch-workbench.service', () => ({
+  createChapterBatchSnapshot: vi.fn((_novelId: number, workflowTaskId: number, chapterIds: number[]) => ({
+    id: 7000 + workflowTaskId,
+    novelId: 1,
+    workflowTaskId,
+    title: '测试批次',
+    status: 'active',
+    chapterIds,
+    chapterNums: chapterIds.map((id) => chapterRows.get(id)?.chapterNum || id),
+    summary: '测试批次',
+    createdAt: '2026-05-01T00:00:00.000Z',
+    updatedAt: '2026-05-01T00:00:00.000Z',
+  })),
+  markChapterBatchSnapshotCompleted: vi.fn(),
+  createBatchInspection: vi.fn((snapshotId: number, data: Record<string, unknown>) => {
+    const row = {
+      id: inspectionRows.length + 1,
+      snapshotId,
+      ...data,
+      createdAt: '2026-05-01T00:00:00.000Z',
+      updatedAt: '2026-05-01T00:00:00.000Z',
+    }
+    inspectionRows.push(row)
+    return row
   }),
 }))
 
@@ -241,12 +277,36 @@ function createBatchTask(taskId: number, chapterIds: number[], progressPatch: Re
   })
 }
 
+function createQualityAnalysisTask(taskId: number, chapterIds: number[], progressPatch: Record<string, unknown> = {}) {
+  const initial = __testing.createInitialChapterQualityAnalysisStatus(taskId, 1, { chapterIds })
+  const progress = {
+    ...initial,
+    taskId,
+    snapshotId: 7000 + taskId,
+    ...progressPatch,
+  }
+  taskRows.set(taskId, {
+    id: taskId,
+    novelId: 1,
+    type: 'chapter_quality_analysis',
+    runnerType: 'workflow',
+    status: 'pending',
+    inputJson: JSON.stringify({ chapterIds, includeAiCheck: true, includePublishCheck: true }),
+    controlJson: JSON.stringify({ cancelRequested: false, maxRetries: 2, retryCount: 0 }),
+    progressJson: JSON.stringify(progress),
+    errorMessage: null,
+    outputText: null,
+  })
+}
+
 describe('chapter batch workflow', () => {
   beforeEach(() => {
     taskRows.clear()
     chapterRows.clear()
     chapterScenarios.clear()
     publishChecks.clear()
+    aiCheckFailures.clear()
+    inspectionRows.length = 0
     feedbackPauseSignals.clear()
     nextTaskId = 1000
     vi.mocked(getDb).mockReturnValue(createDbMock() as never)
@@ -412,6 +472,49 @@ describe('chapter batch workflow', () => {
       resumeCursor: 3,
       generatedCount: 3,
       completedChapterIds: [101, 102, 103],
+    })
+  })
+
+  it('runs chapter quality analysis as a resumable queue without mutating chapter content', async () => {
+    chapterRows.set(101, { id: 101, novelId: 1, chapterNum: 1, title: '第一章' })
+    chapterRows.set(102, { id: 102, novelId: 1, chapterNum: 2, title: '第二章' })
+    chapterRows.set(103, { id: 103, novelId: 1, chapterNum: 3, title: '第三章' })
+    aiCheckFailures.set(102, '模型超时')
+    setPublishChecks(101, { gateLevel: 'pass', ready: true, summary: '通过' })
+    setPublishChecks(102, { gateLevel: 'pass', ready: true, summary: '通过' })
+    setPublishChecks(103, { gateLevel: 'rewrite', ready: false, summary: '需要重写章尾钩子', generatedTaskCount: 2 })
+    createQualityAnalysisTask(8, [101, 102, 103])
+
+    await __testing.runChapterQualityAnalysisWorkflow(8)
+
+    expect(taskRows.get(8)?.status).toBe('success')
+    expect(getProgress(8)).toMatchObject({
+      resumeCursor: 3,
+      generatedCount: 3,
+      completedChapterIds: [101, 103],
+      failedChapterIds: [102],
+      aiCheckFailureCount: 1,
+      publishRewriteChapterIds: [103],
+      generatedRevisionTaskCount: 2,
+      completed: true,
+    })
+    expect(inspectionRows.some((row) => row.chapterId === 102 && row.status === 'blocked')).toBe(true)
+    expect(inspectionRows.some((row) => row.chapterId === 103 && row.status === 'blocked')).toBe(true)
+  })
+
+  it('finishes chapter quality analysis cleanly when there are no chapters to inspect', async () => {
+    createQualityAnalysisTask(9, [])
+
+    await __testing.runChapterQualityAnalysisWorkflow(9)
+
+    expect(taskRows.get(9)?.status).toBe('success')
+    expect(getProgress(9)).toMatchObject({
+      requestedCount: 0,
+      resumeCursor: 0,
+      generatedCount: 0,
+      completedChapterIds: [],
+      failedChapterIds: [],
+      completed: true,
     })
   })
 })

@@ -92,6 +92,7 @@ const TYPE_LABELS: Record<string, string> = {
   story_thread_generate: 'AI 生成故事线程',
   story_thread_auto_generate: 'AI 自动生成故事线程',
   character_auto_generate: 'AI 自动生成人物',
+  chapter_quality_analysis: '逐章 AI 体检队列',
   planning_draft: 'AI 规划草稿',
 }
 

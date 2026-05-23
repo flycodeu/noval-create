@@ -499,6 +499,18 @@ function registerIpcHandlers() {
     batchWorkflowService.getLatestChapterBatchAutoGenerateTask(requireId(novelId, 'novelId')))
   handle('chapterBatch:resumeAutoGenerate', (event, taskId) =>
     batchWorkflowService.resumeBatchAutoGenerateWorkflow(requireId(taskId, 'taskId'), event.sender))
+  handle('chapterBatch:startQualityAnalysis', (event, novelId, options) =>
+    batchWorkflowService.startChapterQualityAnalysisWorkflow(
+      requireId(novelId, 'novelId'),
+      parseObjectPayload(options || {}, 'options'),
+      event.sender,
+    ))
+  handle('chapterBatch:getQualityAnalysisStatus', (_, taskId) =>
+    batchWorkflowService.getChapterQualityAnalysisStatus(requireId(taskId, 'taskId')))
+  handle('chapterBatch:getLatestQualityAnalysisTask', (_, novelId) =>
+    batchWorkflowService.getLatestChapterQualityAnalysisTask(requireId(novelId, 'novelId')))
+  handle('chapterBatch:resumeQualityAnalysis', (event, taskId) =>
+    batchWorkflowService.resumeBatchAutoGenerateWorkflow(requireId(taskId, 'taskId'), event.sender))
   handle('batchWorkbench:getData', (_, novelId, snapshotId) =>
     batchWorkbenchService.getBatchWorkbenchData(
       requireId(novelId, 'novelId'),

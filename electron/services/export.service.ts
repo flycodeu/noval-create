@@ -21,6 +21,18 @@ export interface PlatformFormatOptions {
   scope?: PlatformFormatScope
   chapterId?: number
   chapterIds?: number[]
+  batchSize?: number
+  sensitiveWords?: string[]
+}
+
+interface PlatformFormatBatch {
+  index: number
+  title: string
+  content: string
+  chapterCount: number
+  wordCount: number
+  chapterStart?: number
+  chapterEnd?: number
 }
 
 export interface PlatformFormatResult {
@@ -32,6 +44,12 @@ export interface PlatformFormatResult {
   wordCount: number
   warnings: string[]
   removedLineCount: number
+  sensitiveWordHits: Array<{
+    word: string
+    count: number
+    chapterNums: number[]
+  }>
+  batches: PlatformFormatBatch[]
 }
 
 interface ExportChunk {
@@ -134,6 +152,93 @@ function selectPlatformChapters(
     return chapterList.filter((chapter) => ids.has(chapter.id))
   }
   return chapterList
+}
+
+const DEFAULT_PLATFORM_RISK_WORDS = [
+  'AI生成',
+  '思考过程',
+  '修订建议',
+  '加群',
+  'QQ群',
+  '微信',
+  '支付宝',
+  '银行卡',
+  '身份证',
+  'http',
+  'www.',
+]
+
+function normalizePlatformBatchSize(value: unknown, fallback: number): number {
+  const numeric = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(numeric) || numeric <= 0) return Math.max(1, fallback)
+  return Math.max(1, Math.min(Math.floor(numeric), 200))
+}
+
+function countOccurrences(text: string, token: string): number {
+  if (!token) return 0
+  let count = 0
+  let index = text.indexOf(token)
+  while (index !== -1) {
+    count += 1
+    index = text.indexOf(token, index + token.length)
+  }
+  return count
+}
+
+function collectSensitiveWordHits(
+  selected: ChapterRecord[],
+  cleanedByChapterId: Map<number, string>,
+  rawWords?: string[],
+): PlatformFormatResult['sensitiveWordHits'] {
+  const words = [...new Set([
+    ...DEFAULT_PLATFORM_RISK_WORDS,
+    ...(rawWords || []),
+  ].map((item) => item.trim()).filter(Boolean))]
+
+  return words
+    .map((word) => {
+      let count = 0
+      const chapterNums: number[] = []
+      selected.forEach((chapter) => {
+        const hits = countOccurrences(cleanedByChapterId.get(chapter.id) || '', word)
+        if (hits > 0) {
+          count += hits
+          chapterNums.push(chapter.chapterNum)
+        }
+      })
+      return { word, count, chapterNums }
+    })
+    .filter((item) => item.count > 0)
+    .slice(0, 20)
+}
+
+function buildPlatformBatches(
+  selected: ChapterRecord[],
+  platform: PlatformFormat,
+  cleanedByChapterId: Map<number, string>,
+  batchSize: number,
+): PlatformFormatBatch[] {
+  const batches: PlatformFormatBatch[] = []
+  for (let offset = 0; offset < selected.length; offset += batchSize) {
+    const batchChapters = selected.slice(offset, offset + batchSize)
+    const content = batchChapters.map((chapter) => [
+      formatChapterTitle(chapter, platform),
+      '',
+      cleanedByChapterId.get(chapter.id) || '',
+    ].join('\n')).join('\n\n')
+    const chapterStart = batchChapters[0]?.chapterNum
+    const chapterEnd = batchChapters[batchChapters.length - 1]?.chapterNum
+    batches.push({
+      index: batches.length + 1,
+      title: chapterStart === chapterEnd ? `第${chapterStart}章` : `第${chapterStart}-${chapterEnd}章`,
+      content,
+      chapterCount: batchChapters.length,
+      wordCount: countTextWords(content),
+      chapterStart,
+      chapterEnd,
+    })
+  }
+  return batches
 }
 
 function parseOptionalJson(raw?: string | null): unknown {
@@ -628,9 +733,11 @@ export function formatNovelForPlatform(novelId: number, rawOptions: PlatformForm
   }
 
   let removedLineCount = 0
+  const cleanedByChapterId = new Map<number, string>()
   const blocks = selected.map((chapter) => {
     const cleaned = cleanPlatformContent(chapter.content || '')
     removedLineCount += cleaned.removedLineCount
+    cleanedByChapterId.set(chapter.id, cleaned.text)
     return [
       formatChapterTitle(chapter, platform),
       '',
@@ -640,8 +747,13 @@ export function formatNovelForPlatform(novelId: number, rawOptions: PlatformForm
   const content = blocks.join('\n\n')
   const wordCount = countTextWords(content)
   const findings = collectQualityGuardrailFindings(content)
+  const sensitiveWordHits = collectSensitiveWordHits(selected, cleanedByChapterId, rawOptions.sensitiveWords)
+  const batchSize = normalizePlatformBatchSize(rawOptions.batchSize, selected.length)
+  const batches = buildPlatformBatches(selected, platform, cleanedByChapterId, batchSize)
   const warnings = [
     removedLineCount > 0 ? `已清理 ${removedLineCount} 行 AI 过程/提示词残留。` : '',
+    sensitiveWordHits.length > 0 ? `检测到 ${sensitiveWordHits.length} 类平台风险词，复制前建议人工复核。` : '',
+    batches.length > 1 ? `已按每批 ${batchSize} 章生成 ${batches.length} 个平台分批包。` : '',
     ...findings
       .filter((finding) => finding.severity === 'high' || finding.code === 'prompt_leak' || finding.code === 'ai_process_leak')
       .slice(0, 5)
@@ -658,5 +770,7 @@ export function formatNovelForPlatform(novelId: number, rawOptions: PlatformForm
     wordCount,
     warnings,
     removedLineCount,
+    sensitiveWordHits,
+    batches,
   }
 }

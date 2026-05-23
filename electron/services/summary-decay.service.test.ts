@@ -4,11 +4,17 @@ vi.mock('../database/db', () => ({
   getDb: vi.fn(),
 }))
 
+vi.mock('./task.service', () => ({
+  runChatTask: vi.fn(),
+}))
+
 import { getDb } from '../database/db'
 import { chapters, characters } from '../database/schema'
+import { runChatTask } from './task.service'
 import {
   analyzeSummaryHealthForChapter,
   refreshSummaryHealth,
+  refreshSummaryHealthSemantic,
 } from './summary-decay.service'
 
 type TableRows = Map<unknown, Array<Record<string, unknown>>>
@@ -72,6 +78,7 @@ function createRows(summary = '他们去了。'): TableRows {
 describe('summary-decay.service', () => {
   beforeEach(() => {
     vi.mocked(getDb).mockReset()
+    vi.mocked(runChatTask).mockReset()
   })
 
   it('marks thin summaries as degraded when key entities and events are missing', () => {
@@ -102,5 +109,50 @@ describe('summary-decay.service', () => {
     expect(chapter?.summary).toContain('林远冲进旧仓库救出副手')
     expect(persistedHealth.triggeredRecompression).toBe(true)
     expect(persistedHealth.summaryPreview).toContain('林远冲进旧仓库救出副手')
+  })
+
+  it('uses semantic three-part recompression when AI returns structured summary', async () => {
+    const rows = createRows('')
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+    vi.mocked(runChatTask).mockResolvedValue(JSON.stringify({
+      chapterFacts: '林远冲进旧仓库救出副手，并带着药箱撤离。',
+      characterStates: '林远决定连夜转移补给，副手脱险但仍依赖药箱。',
+      threadForeshadow: '补给转移成为下一章承接压力。',
+    }))
+
+    const report = await refreshSummaryHealthSemantic(8)
+    const chapter = rows.get(chapters)?.[0]
+    const persistedHealth = JSON.parse(String(chapter?.summaryHealthJson))
+
+    expect(report?.triggeredRecompression).toBe(true)
+    expect(report?.recompressionMode).toBe('semantic')
+    expect(chapter?.summary).toContain('章节事实：林远冲进旧仓库救出副手')
+    expect(persistedHealth.semanticSummary.threadForeshadow).toContain('补给转移')
+  })
+
+  it('falls back to deterministic recompression when semantic JSON is invalid', async () => {
+    const rows = createRows('')
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+    vi.mocked(runChatTask).mockResolvedValue('这里不是 JSON')
+
+    const report = await refreshSummaryHealthSemantic(8)
+    const chapter = rows.get(chapters)?.[0]
+
+    expect(report?.triggeredRecompression).toBe(true)
+    expect(report?.recompressionMode).toBe('deterministic')
+    expect(chapter?.summary).toContain('林远冲进旧仓库救出副手')
+  })
+
+  it('falls back to deterministic recompression when semantic model request fails', async () => {
+    const rows = createRows('')
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+    vi.mocked(runChatTask).mockRejectedValue(new Error('模型超时'))
+
+    const report = await refreshSummaryHealthSemantic(8)
+    const chapter = rows.get(chapters)?.[0]
+
+    expect(report?.triggeredRecompression).toBe(true)
+    expect(report?.recompressionMode).toBe('deterministic')
+    expect(chapter?.summary).toContain('林远冲进旧仓库救出副手')
   })
 })

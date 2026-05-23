@@ -1,8 +1,10 @@
 import type { WebContents } from 'electron'
-import { desc, eq } from 'drizzle-orm'
+import { asc, desc, eq } from 'drizzle-orm'
 import type {
   ChapterBatchAutoGenerateStatus,
   ChapterBatchGenerateOptions,
+  ChapterQualityAnalysisOptions,
+  ChapterQualityAnalysisStatus,
   CharacterAutoGenerateStatus,
   CharacterBatchGenerationOptions,
   FactionAutoGenerateStatus,
@@ -20,9 +22,9 @@ import { getOperatingModeRuntimePolicy } from '../../src/shared/operating-mode'
 import type { StoryThreadBatchGenerateOptions, StoryThreadBatchGenerationResult } from '../../src/shared/story-thread-generation'
 import { hasResumableWorkflowCheckpoint } from '../../src/shared/workflow-resilience'
 import { getDb } from '../database/db'
-import { novels, tasks } from '../database/schema'
+import { chapters, novels, tasks } from '../database/schema'
 import { throwUserFacingError } from '../utils/user-facing-error'
-import { generateChapterContent, getChapter } from './chapter.service'
+import { aiCheckChapter, generateChapterContent, getChapter } from './chapter.service'
 import { generateCharacterBatchChunk } from './character.service'
 import { runChapterPublishCheck } from './context-impact.service'
 import { getFeedbackRecurrenceBatchPauseSignal } from './feedback-recurrence.service'
@@ -43,6 +45,7 @@ import {
 import { generateTimelineBatchChunk } from './timeline.service'
 import {
   createChapterBatchSnapshot,
+  createBatchInspection,
   markChapterBatchSnapshotCompleted,
 } from './batch-workbench.service'
 
@@ -63,6 +66,7 @@ type BatchWorkflowTaskType =
   | 'story_thread_auto_generate'
   | 'subplot_auto_generate'
   | 'chapter_batch_generate'
+  | 'chapter_quality_analysis'
 
 function isActiveBatchWorkflowStatus(status?: string | null): boolean {
   return ACTIVE_BATCH_WORKFLOW_RUNNING_STATUSES.has(status || '')
@@ -561,6 +565,95 @@ function toChapterBatchStatus(taskId: number, task: TaskRow): ChapterBatchAutoGe
   }
 }
 
+function parseChapterQualityAnalysisOptions(raw?: string | null): ChapterQualityAnalysisOptions {
+  const record = asRecord(raw)
+  return {
+    chapterIds: asNumberArray(record.chapterIds),
+    includeAiCheck: record.includeAiCheck !== false,
+    includePublishCheck: record.includePublishCheck !== false,
+  }
+}
+
+function normalizeChapterQualityAnalysisIds(value: unknown): number[] {
+  return [...new Set(
+    asNumberArray(value)
+      .map((item) => Math.round(item))
+      .filter((item) => item > 0),
+  )]
+}
+
+function normalizeChapterQualityAnalysisOptions(novelId: number, options: ChapterQualityAnalysisOptions = {}): ChapterQualityAnalysisOptions {
+  const explicitIds = normalizeChapterQualityAnalysisIds(options.chapterIds)
+  const availableChapters = getDb().select().from(chapters)
+    .where(eq(chapters.novelId, novelId))
+    .orderBy(asc(chapters.chapterNum))
+    .all()
+    .filter((chapter) => chapter.content?.trim())
+  const explicitIdSet = new Set(explicitIds)
+  const chapterIds = explicitIds.length > 0
+    ? availableChapters.filter((chapter) => explicitIdSet.has(chapter.id)).map((chapter) => chapter.id)
+    : availableChapters.map((chapter) => chapter.id)
+  return {
+    chapterIds,
+    includeAiCheck: options.includeAiCheck !== false,
+    includePublishCheck: options.includePublishCheck !== false,
+  }
+}
+
+function createInitialChapterQualityAnalysisStatus(
+  taskId: number,
+  novelId: number,
+  options: ChapterQualityAnalysisOptions,
+): ChapterQualityAnalysisStatus {
+  const chapterIds = asNumberArray(options.chapterIds)
+  const requestedCount = chapterIds.length
+  return {
+    ...createBaseStatus(taskId, novelId, requestedCount, 1, Math.max(1, requestedCount)),
+    chapterIds,
+    completedChapterIds: [],
+    failedChapterIds: [],
+    warnings: [],
+    inspectionIds: [],
+    publishBlockedChapterIds: [],
+    publishRewriteChapterIds: [],
+    generatedRevisionTaskCount: 0,
+    aiCheckFailureCount: 0,
+    publishCheckFailureCount: 0,
+    message: requestedCount <= 0 ? '当前没有可分析的章节正文。' : '等待开始逐章 AI 体检队列。',
+  }
+}
+
+function toChapterQualityAnalysisStatus(taskId: number, task: TaskRow): ChapterQualityAnalysisStatus {
+  const progress = parseTaskProgress<Partial<ChapterQualityAnalysisStatus>>(task)
+  const fallback = createInitialChapterQualityAnalysisStatus(taskId, task.novelId || 0, parseChapterQualityAnalysisOptions(task.inputJson))
+  return {
+    ...fallback,
+    status: task.status as ChapterQualityAnalysisStatus['status'],
+    currentBatch: typeof progress.currentBatch === 'number' ? progress.currentBatch : fallback.currentBatch,
+    totalBatches: typeof progress.totalBatches === 'number' ? progress.totalBatches : fallback.totalBatches,
+    resumeCursor: typeof progress.resumeCursor === 'number' ? progress.resumeCursor : fallback.resumeCursor,
+    generatedCount: typeof progress.generatedCount === 'number' ? progress.generatedCount : fallback.generatedCount,
+    retryCount: typeof progress.retryCount === 'number' ? progress.retryCount : fallback.retryCount,
+    lastError: typeof progress.lastError === 'string' ? progress.lastError : fallback.lastError,
+    completed: progress.completed === true || fallback.completed,
+    message: typeof progress.message === 'string' ? progress.message : fallback.message,
+    batchDigest: typeof progress.batchDigest === 'string' ? progress.batchDigest : fallback.batchDigest,
+    chapterIds: asNumberArray(progress.chapterIds).length > 0 ? asNumberArray(progress.chapterIds) : fallback.chapterIds,
+    completedChapterIds: asNumberArray(progress.completedChapterIds),
+    failedChapterIds: asNumberArray(progress.failedChapterIds),
+    warnings: asStringArray(progress.warnings),
+    currentChapterId: typeof progress.currentChapterId === 'number' ? progress.currentChapterId : undefined,
+    currentChapterNum: typeof progress.currentChapterNum === 'number' ? progress.currentChapterNum : undefined,
+    snapshotId: typeof progress.snapshotId === 'number' ? progress.snapshotId : undefined,
+    inspectionIds: asNumberArray(progress.inspectionIds),
+    publishBlockedChapterIds: asNumberArray(progress.publishBlockedChapterIds),
+    publishRewriteChapterIds: asNumberArray(progress.publishRewriteChapterIds),
+    generatedRevisionTaskCount: typeof progress.generatedRevisionTaskCount === 'number' ? progress.generatedRevisionTaskCount : 0,
+    aiCheckFailureCount: typeof progress.aiCheckFailureCount === 'number' ? progress.aiCheckFailureCount : 0,
+    publishCheckFailureCount: typeof progress.publishCheckFailureCount === 'number' ? progress.publishCheckFailureCount : 0,
+  }
+}
+
 function mergeWarnings(current: string[], next?: string | string[] | null): string[] {
   const values = Array.isArray(next) ? next : next ? [next] : []
   return [...current, ...values.filter((item) => item.trim())]
@@ -597,6 +690,7 @@ type BatchWorkflowProgress =
   | StoryThreadAutoGenerateStatus
   | SubplotAutoGenerateStatus
   | ChapterBatchAutoGenerateStatus
+  | ChapterQualityAnalysisStatus
 
 function getBatchWorkflowProgress(taskId: number, task: TaskRow): BatchWorkflowProgress {
   if (task.type === 'character_auto_generate') {
@@ -629,6 +723,10 @@ function getBatchWorkflowProgress(taskId: number, task: TaskRow): BatchWorkflowP
 
   if (task.type === 'chapter_batch_generate') {
     return toChapterBatchStatus(taskId, task)
+  }
+
+  if (task.type === 'chapter_quality_analysis') {
+    return toChapterQualityAnalysisStatus(taskId, task)
   }
 
   return toSubplotStatus(taskId, task)
@@ -1228,6 +1326,228 @@ async function runChapterBatchGenerateWorkflow(taskId: number, sender?: WebConte
   }
 }
 
+function createAnalysisInspection(
+  snapshotId: number | undefined,
+  params: {
+    chapterId?: number
+    chapterNum?: number
+    status: 'pass' | 'warning' | 'blocked'
+    category: 'ai' | 'continuity'
+    note: string
+  },
+): number | undefined {
+  if (typeof snapshotId !== 'number') return undefined
+  try {
+    return createBatchInspection(snapshotId, {
+      chapterId: params.chapterId,
+      chapterNum: params.chapterNum,
+      category: params.category,
+      status: params.status,
+      note: params.note,
+    }).id
+  } catch (error) {
+    console.warn('[chapter-quality-analysis] failed to create inspection:', error)
+    return undefined
+  }
+}
+
+async function runChapterQualityAnalysisWorkflow(taskId: number, sender?: WebContents) {
+  if (!tryRegisterActiveBatchWorkflow(taskId)) return
+
+  try {
+    const task = getRunningTask(taskId, sender)
+    const options = parseChapterQualityAnalysisOptions(task.inputJson)
+    if (!task.progressJson) {
+      updateTaskProgress(taskId, createInitialChapterQualityAnalysisStatus(taskId, task.novelId || 0, options), sender)
+    }
+
+    while (true) {
+      const latestTask = getTaskRecord(taskId)
+      if (!latestTask || !latestTask.novelId) break
+      const control = parseTaskControl(latestTask)
+      const progress = toChapterQualityAnalysisStatus(taskId, latestTask)
+
+      if (control.cancelRequested) {
+        updateTaskProgress(taskId, {
+          ...progress,
+          status: 'cancelled',
+          message: '逐章 AI 体检队列已停止。',
+        }, sender)
+        updateTaskStatus(taskId, 'cancelled', sender, { errorMessage: '用户已取消', currentChildTaskId: null })
+        break
+      }
+
+      if (progress.resumeCursor >= progress.chapterIds.length) {
+        const failedCount = progress.failedChapterIds.length
+        let warnings = progress.warnings
+        if (typeof progress.snapshotId === 'number') {
+          try {
+            markChapterBatchSnapshotCompleted(progress.snapshotId)
+          } catch (error) {
+            const message = error instanceof Error ? error.message : '未知错误'
+            warnings = appendUniqueStrings(warnings, `逐章分析快照完成标记失败：${message}`)
+          }
+        }
+        const done: ChapterQualityAnalysisStatus = {
+          ...progress,
+          status: 'success',
+          completed: true,
+          warnings,
+          currentChapterId: undefined,
+          currentChapterNum: undefined,
+          message: failedCount > 0
+            ? `逐章分析完成：${progress.completedChapterIds.length}/${progress.chapterIds.length} 章执行成功，${failedCount} 章失败已记录。`
+            : `逐章分析完成：${progress.completedChapterIds.length}/${progress.chapterIds.length} 章执行成功。`,
+        }
+        updateTaskProgress(taskId, done, sender)
+        updateTaskStatus(taskId, 'success', sender, {
+          outputText: done.message,
+          errorMessage: null,
+          currentChildTaskId: null,
+        })
+        break
+      }
+
+      const currentBatch = progress.resumeCursor + 1
+      const chapterId = progress.chapterIds[progress.resumeCursor]
+      const chapter = getChapter(chapterId)
+      const chapterNum = chapter?.chapterNum || currentBatch
+      updateTaskProgress(taskId, {
+        ...progress,
+        status: 'running',
+        currentBatch,
+        currentChapterId: chapterId,
+        currentChapterNum: chapterNum,
+        message: `正在分析第 ${chapterNum} 章（${currentBatch}/${progress.totalBatches}）。`,
+      }, sender)
+
+      let nextProgress = toChapterQualityAnalysisStatus(taskId, getTaskRecord(taskId) || latestTask)
+      const nextWarnings: string[] = [...nextProgress.warnings]
+      let inspectionIds = [...nextProgress.inspectionIds]
+      let failed = false
+      let generatedRevisionTaskCount = nextProgress.generatedRevisionTaskCount
+      let aiCheckFailureCount = nextProgress.aiCheckFailureCount
+      let publishCheckFailureCount = nextProgress.publishCheckFailureCount
+      let publishBlockedChapterIds = [...nextProgress.publishBlockedChapterIds]
+      let publishRewriteChapterIds = [...nextProgress.publishRewriteChapterIds]
+
+      try {
+        if (!chapter) {
+          throw new Error(`章节 ${chapterId} 不存在。`)
+        }
+
+        if (options.includeAiCheck !== false) {
+          try {
+            await aiCheckChapter(chapterId)
+          } catch (error) {
+            failed = true
+            aiCheckFailureCount += 1
+            const message = error instanceof Error ? error.message : 'AI 体检失败'
+            nextWarnings.push(`第 ${chapterNum} 章 AI 体检失败：${message}`)
+            const inspectionId = createAnalysisInspection(nextProgress.snapshotId, {
+              chapterId,
+              chapterNum,
+              category: 'ai',
+              status: 'blocked',
+              note: `AI 体检失败：${message}`,
+            })
+            if (typeof inspectionId === 'number') inspectionIds = appendUniqueNumber(inspectionIds, inspectionId)
+          }
+        }
+
+        if (options.includePublishCheck !== false) {
+          try {
+            const publishCheck = runChapterPublishCheck(chapterId)
+            generatedRevisionTaskCount += publishCheck.generatedTaskCount || 0
+            const inspectionStatus = publishCheck.gateLevel === 'blocker' || publishCheck.gateLevel === 'rewrite'
+              ? 'blocked'
+              : publishCheck.gateLevel === 'warning'
+                ? 'warning'
+                : 'pass'
+            if (publishCheck.gateLevel === 'blocker') {
+              publishBlockedChapterIds = appendUniqueNumber(publishBlockedChapterIds, chapterId)
+              nextWarnings.push(`第 ${chapterNum} 章发布门阻断：${publishCheck.summary}`)
+            } else if (publishCheck.gateLevel === 'rewrite') {
+              publishRewriteChapterIds = appendUniqueNumber(publishRewriteChapterIds, chapterId)
+              nextWarnings.push(`第 ${chapterNum} 章发布门要求重写：${publishCheck.summary}`)
+            } else if (publishCheck.gateLevel === 'warning') {
+              nextWarnings.push(`第 ${chapterNum} 章发布门告警：${publishCheck.summary}`)
+            }
+            const inspectionId = createAnalysisInspection(nextProgress.snapshotId, {
+              chapterId,
+              chapterNum,
+              category: 'continuity',
+              status: inspectionStatus,
+              note: `发布前检查：${publishCheck.summary}；重写 ${publishCheck.rewriteCount}，阻断 ${publishCheck.blockerCount}，预警 ${publishCheck.warningCount}。`,
+            })
+            if (typeof inspectionId === 'number') inspectionIds = appendUniqueNumber(inspectionIds, inspectionId)
+          } catch (error) {
+            failed = true
+            publishCheckFailureCount += 1
+            const message = error instanceof Error ? error.message : '发布前检查失败'
+            nextWarnings.push(`第 ${chapterNum} 章发布前检查失败：${message}`)
+            const inspectionId = createAnalysisInspection(nextProgress.snapshotId, {
+              chapterId,
+              chapterNum,
+              category: 'continuity',
+              status: 'blocked',
+              note: `发布前检查失败：${message}`,
+            })
+            if (typeof inspectionId === 'number') inspectionIds = appendUniqueNumber(inspectionIds, inspectionId)
+          }
+        }
+      } catch (error) {
+        failed = true
+        const message = error instanceof Error ? error.message : '逐章分析失败'
+        nextWarnings.push(`第 ${chapterNum} 章分析失败：${message}`)
+        const inspectionId = createAnalysisInspection(nextProgress.snapshotId, {
+          chapterId,
+          chapterNum,
+          category: 'continuity',
+          status: 'blocked',
+          note: `逐章分析失败：${message}`,
+        })
+        if (typeof inspectionId === 'number') inspectionIds = appendUniqueNumber(inspectionIds, inspectionId)
+      }
+
+      nextProgress = {
+        ...nextProgress,
+        status: 'running',
+        currentBatch,
+        resumeCursor: nextProgress.resumeCursor + 1,
+        generatedCount: nextProgress.generatedCount + 1,
+        retryCount: 0,
+        lastError: '',
+        completed: nextProgress.resumeCursor + 1 >= nextProgress.totalBatches,
+        completedChapterIds: failed
+          ? nextProgress.completedChapterIds
+          : appendUniqueNumber(nextProgress.completedChapterIds, chapterId),
+        failedChapterIds: failed
+          ? appendUniqueNumber(nextProgress.failedChapterIds, chapterId)
+          : nextProgress.failedChapterIds,
+        warnings: appendUniqueStrings([], nextWarnings),
+        currentChapterId: chapterId,
+        currentChapterNum: chapterNum,
+        inspectionIds,
+        publishBlockedChapterIds,
+        publishRewriteChapterIds,
+        generatedRevisionTaskCount,
+        aiCheckFailureCount,
+        publishCheckFailureCount,
+        batchDigest: chapter?.title || `第${chapterNum}章`,
+        message: failed
+          ? `第 ${chapterNum} 章分析完成但存在失败项，已记录后继续。`
+          : `第 ${chapterNum} 章分析完成。`,
+      }
+      updateTaskProgress(taskId, nextProgress, sender)
+    }
+  } catch (error) {
+    settleBatchWorkflowFatalError(taskId, sender, error)
+  } finally {
+    unregisterActiveBatchWorkflow(taskId)
+  }
+}
+
 async function runSubplotAutoGenerateWorkflow(taskId: number, sender?: WebContents) {
   if (!tryRegisterActiveBatchWorkflow(taskId)) return
 
@@ -1422,6 +1742,7 @@ export function isBatchWorkflowType(type?: string | null): type is BatchWorkflow
     || type === 'story_thread_auto_generate'
     || type === 'subplot_auto_generate'
     || type === 'chapter_batch_generate'
+    || type === 'chapter_quality_analysis'
 }
 
 export async function startFactionAutoGenerateWorkflow(novelId: number, options: FactionBatchGenerationOptions, sender?: WebContents) {
@@ -1585,6 +1906,53 @@ export async function startChapterBatchGenerateWorkflow(novelId: number, options
   return taskId
 }
 
+export async function startChapterQualityAnalysisWorkflow(novelId: number, options: ChapterQualityAnalysisOptions = {}, sender?: WebContents) {
+  const existing = reconcileStaleBatchWorkflowTask(getLatestWorkflowByType(novelId, 'chapter_quality_analysis'))
+  if (existing && ['pending', 'running', 'cancel_requested'].includes(existing.status || '')) return existing.id
+
+  const normalized = normalizeChapterQualityAnalysisOptions(novelId, options)
+  const initial = createInitialChapterQualityAnalysisStatus(0, novelId, normalized)
+  const taskId = await createTask({
+    type: 'chapter_quality_analysis',
+    novelId,
+    inputJson: JSON.stringify(normalized),
+    runnerType: 'workflow',
+    retryable: true,
+    recoveryHintJson: JSON.stringify({
+      kind: 'resume',
+      label: '继续逐章 AI 体检队列',
+      description: '从上次中断的章节继续执行 AI 体检与发布前检查。',
+      path: `/novels/${novelId}/quality`,
+    }),
+    controlJson: JSON.stringify({ cancelRequested: false, maxRetries: DEFAULT_MAX_RETRIES, retryCount: 0 }),
+    progressJson: JSON.stringify(initial),
+  })
+  let snapshotId: number | undefined
+  try {
+    if ((normalized.chapterIds || []).length > 0) {
+      snapshotId = createChapterBatchSnapshot(novelId, taskId, normalized.chapterIds || []).id
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : '逐章分析快照创建失败'
+    updateTaskProgress(taskId, {
+      ...initial,
+      taskId,
+      status: 'failed',
+      completed: true,
+      lastError: errorMessage,
+      message: `逐章分析快照创建失败，队列未启动：${errorMessage}`,
+    }, sender)
+    updateTaskStatus(taskId, 'failed', sender, {
+      errorMessage,
+      currentChildTaskId: null,
+    })
+    throw error
+  }
+  updateTaskProgress(taskId, { ...initial, taskId, snapshotId }, sender)
+  void runChapterQualityAnalysisWorkflow(taskId, sender).catch(logWorkflowError(taskId))
+  return taskId
+}
+
 export function getCharacterAutoGenerateStatus(taskId: number) {
   const task = reconcileStaleBatchWorkflowTask(getTaskRecord(taskId))
   return task?.type === 'character_auto_generate' ? toCharacterStatus(taskId, task) : null
@@ -1624,6 +1992,11 @@ export function getChapterBatchAutoGenerateStatus(taskId: number) {
   return task?.type === 'chapter_batch_generate' ? toChapterBatchStatus(taskId, task) : null
 }
 
+export function getChapterQualityAnalysisStatus(taskId: number) {
+  const task = reconcileStaleBatchWorkflowTask(getTaskRecord(taskId))
+  return task?.type === 'chapter_quality_analysis' ? toChapterQualityAnalysisStatus(taskId, task) : null
+}
+
 export function getLatestFactionAutoGenerateTask(novelId: number) {
   return reconcileStaleBatchWorkflowTask(getLatestWorkflowByType(novelId, 'faction_auto_generate'))
 }
@@ -1650,6 +2023,10 @@ export function getLatestSubplotAutoGenerateTask(novelId: number) {
 
 export function getLatestChapterBatchAutoGenerateTask(novelId: number) {
   return reconcileStaleBatchWorkflowTask(getLatestWorkflowByType(novelId, 'chapter_batch_generate'))
+}
+
+export function getLatestChapterQualityAnalysisTask(novelId: number) {
+  return reconcileStaleBatchWorkflowTask(getLatestWorkflowByType(novelId, 'chapter_quality_analysis'))
 }
 
 async function resumeBatchWorkflow(taskId: number, sender: WebContents | undefined, type: BatchWorkflowTaskType) {
@@ -1694,6 +2071,8 @@ async function resumeBatchWorkflow(taskId: number, sender: WebContents | undefin
     void runSimpleEntityWorkflow(taskId, sender, 'thread').catch(logWorkflowError(taskId))
   } else if (type === 'chapter_batch_generate') {
     void runChapterBatchGenerateWorkflow(taskId, sender).catch(logWorkflowError(taskId))
+  } else if (type === 'chapter_quality_analysis') {
+    void runChapterQualityAnalysisWorkflow(taskId, sender).catch(logWorkflowError(taskId))
   } else {
     void runSubplotAutoGenerateWorkflow(taskId, sender).catch(logWorkflowError(taskId))
   }
@@ -1764,8 +2143,12 @@ export async function generateSubplotsViaWorkflow(request: SubplotAutoGenerateRe
 
 export const __testing = {
   createInitialChapterBatchStatus,
+  createInitialChapterQualityAnalysisStatus,
   parseChapterBatchOptions,
+  parseChapterQualityAnalysisOptions,
   runChapterBatchGenerateWorkflow,
+  runChapterQualityAnalysisWorkflow,
   toChapterBatchStatus,
+  toChapterQualityAnalysisStatus,
   runSubplotAutoGenerateWorkflow,
 }

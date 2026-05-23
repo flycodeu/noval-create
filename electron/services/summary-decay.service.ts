@@ -1,7 +1,9 @@
 import { asc, eq } from 'drizzle-orm'
 import type { SummaryHealthReport } from '../../src/types'
 import { getDb } from '../database/db'
-import { chapters, characters } from '../database/schema'
+import { chapters, characters, foreshadowLedger, storyThreads } from '../database/schema'
+import { safeParseJson } from '../utils/json'
+import { runChatTask } from './task.service'
 
 type ChapterRow = typeof chapters.$inferSelect
 
@@ -61,6 +63,73 @@ function buildDeterministicSummary(content: string, focusEntities: string[]): st
   const fallback = clauses.slice(0, 2)
   const summary = (chosen.length > 0 ? chosen : fallback).join('；')
   return summary.length > 140 ? `${summary.slice(0, 139).trim()}…` : summary
+}
+
+function buildSemanticRecompressionPrompt(input: {
+  content: string
+  currentSummary: string
+  focusEntities: string[]
+  activeThreads: string[]
+  activeForeshadows: string[]
+}): string {
+  return [
+    '你是长篇小说连续性编辑。请把当前章节重新压缩成语义摘要，避免只截取正文前几句。',
+    '只输出 JSON：{"chapterFacts":"","characterStates":"","threadForeshadow":""}',
+    '',
+    '要求：',
+    '- chapterFacts：80-160字，写清本章发生了什么、因果和后果。',
+    '- characterStates：40-120字，写关键人物状态、动机、关系或资源变化。',
+    '- threadForeshadow：40-120字，写本章推进/搁置/回收的线程、伏笔和后续承接。',
+    '- 不新增正文没有的信息，不写修订建议，不解释你如何分析。',
+    input.focusEntities.length > 0 ? `重点实体：${input.focusEntities.join('、')}` : '',
+    input.activeThreads.length > 0 ? `活跃线程：${input.activeThreads.slice(0, 8).join('；')}` : '',
+    input.activeForeshadows.length > 0 ? `伏笔账本：${input.activeForeshadows.slice(0, 8).join('；')}` : '',
+    input.currentSummary ? `当前摘要：${input.currentSummary}` : '',
+    '',
+    '【章节正文】',
+    input.content.slice(0, 12000),
+  ].filter(Boolean).join('\n')
+}
+
+function normalizeSemanticSummary(raw: unknown): NonNullable<SummaryHealthReport['semanticSummary']> | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const record = raw as Record<string, unknown>
+  const chapterFacts = asText(record.chapterFacts ?? record.chapter_facts)
+  const characterStates = asText(record.characterStates ?? record.character_states)
+  const threadForeshadow = asText(record.threadForeshadow ?? record.thread_foreshadow)
+  if (!chapterFacts && !characterStates && !threadForeshadow) return null
+  return {
+    chapterFacts,
+    characterStates,
+    threadForeshadow,
+  }
+}
+
+function formatSemanticSummary(summary: NonNullable<SummaryHealthReport['semanticSummary']>): string {
+  return [
+    summary.chapterFacts ? `章节事实：${summary.chapterFacts}` : '',
+    summary.characterStates ? `人物状态：${summary.characterStates}` : '',
+    summary.threadForeshadow ? `伏笔线程：${summary.threadForeshadow}` : '',
+  ].filter(Boolean).join('\n')
+}
+
+function loadSemanticRecompressionContext(novelId: number, chapterNum: number) {
+  const db = getDb()
+  const activeThreads = db.select().from(storyThreads)
+    .where(eq(storyThreads.novelId, novelId))
+    .orderBy(asc(storyThreads.sortOrder), asc(storyThreads.id))
+    .all()
+    .filter((row) => row.status !== 'resolved' && row.status !== 'archived')
+    .map((row) => [row.title, row.currentState || row.summary || row.payoffCondition].filter(Boolean).join('：'))
+    .filter(Boolean)
+  const activeForeshadows = db.select().from(foreshadowLedger)
+    .where(eq(foreshadowLedger.novelId, novelId))
+    .all()
+    .filter((row) => row.status !== 'resolved' && row.status !== 'cancelled')
+    .filter((row) => typeof row.targetPayoffChapter !== 'number' || row.targetPayoffChapter <= chapterNum + 20)
+    .map((row) => [row.title, row.detail || row.payoffMethod || row.allowedDelayReason].filter(Boolean).join('：'))
+    .filter(Boolean)
+  return { activeThreads, activeForeshadows }
 }
 
 export function analyzeSummaryHealthForChapter(chapterId: number): SummaryHealthReport | null {
@@ -128,6 +197,7 @@ export function refreshSummaryHealth(chapterId: number): SummaryHealthReport | n
       report = {
         ...report,
         triggeredRecompression: true,
+        recompressionMode: 'deterministic',
         recompressionReason: report.recompressionReason || '摘要密度不足，已按正文重压缩',
         summaryPreview: recompressed,
         densityScore: scoreDensity(recompressed),
@@ -144,4 +214,66 @@ export function refreshSummaryHealth(chapterId: number): SummaryHealthReport | n
     updatedAt: new Date().toISOString(),
   }).where(eq(chapters.id, chapterId)).run()
   return report
+}
+
+export async function refreshSummaryHealthSemantic(chapterId: number): Promise<SummaryHealthReport | null> {
+  const db = getDb()
+  const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
+  if (!chapter) return null
+  const baseReport = analyzeSummaryHealthForChapter(chapterId)
+  if (!baseReport) return null
+  if (baseReport.status !== 'degraded' || !asText(chapter.content)) {
+    db.update(chapters).set({
+      summaryHealthJson: JSON.stringify(baseReport),
+      updatedAt: new Date().toISOString(),
+    }).where(eq(chapters.id, chapterId)).run()
+    return baseReport
+  }
+
+  try {
+    const context = loadSemanticRecompressionContext(chapter.novelId, chapter.chapterNum)
+    const raw = await runChatTask({
+      type: 'summary',
+      novelId: chapter.novelId,
+      relatedEntityType: 'chapter',
+      relatedEntityId: chapterId,
+      retryable: true,
+      messages: [{
+        role: 'user',
+        content: buildSemanticRecompressionPrompt({
+          content: asText(chapter.content),
+          currentSummary: asText(chapter.summary),
+          focusEntities: baseReport.focusEntities,
+          activeThreads: context.activeThreads,
+          activeForeshadows: context.activeForeshadows,
+        }),
+      }],
+    })
+    const semanticSummary = normalizeSemanticSummary(safeParseJson(raw))
+    if (!semanticSummary) {
+      return refreshSummaryHealth(chapterId)
+    }
+    const summaryText = formatSemanticSummary(semanticSummary)
+    const report: SummaryHealthReport = {
+      ...baseReport,
+      status: 'warning',
+      triggeredRecompression: true,
+      recompressionMode: 'semantic',
+      recompressionReason: baseReport.recompressionReason || '摘要密度不足，已按语义三段式重压缩',
+      semanticSummary,
+      summaryPreview: summaryText,
+      densityScore: scoreDensity(summaryText),
+      entityCoverageScore: scoreEntityCoverage(summaryText, baseReport.focusEntities),
+      eventCoverageScore: scoreEventCoverage(summaryText),
+      updatedAt: new Date().toISOString(),
+    }
+    db.update(chapters).set({
+      summary: summaryText,
+      summaryHealthJson: JSON.stringify(report),
+      updatedAt: new Date().toISOString(),
+    }).where(eq(chapters.id, chapterId)).run()
+    return report
+  } catch {
+    return refreshSummaryHealth(chapterId)
+  }
 }

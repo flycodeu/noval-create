@@ -242,6 +242,12 @@ const QUALITY_REPAIR_METRIC_LABELS: Record<QualityRepairMetricKey, string> = {
   exposition_density: '解释密度 / 说明文',
   long_window_homogenization: '累积同质化',
   dialogue_separability: '对白可分离度',
+  language_drift: 'AI味退化',
+  feedback_recurrence: '审校复现',
+  style_compliance: '风格硬约束',
+  recall: '召回可靠性',
+  chapter_function: '章节功能',
+  story_arc: '故事弧推进',
   voice_distinction: '角色声音区分度',
   growth_cost_balance: '成长-代价平衡',
   foreshadow_debt: '伏笔债务压力',
@@ -869,6 +875,18 @@ function defaultMetricKeyForRisk(kind: QualityDashboardRiskKind): QualityRepairM
       return 'commitment_delivery'
     case 'voice_distinction':
       return 'voice_distinction'
+    case 'style_compliance':
+      return 'style_compliance'
+    case 'language_drift':
+      return 'language_drift'
+    case 'feedback_recurrence':
+      return 'feedback_recurrence'
+    case 'recall':
+      return 'recall'
+    case 'chapter_function':
+      return 'chapter_function'
+    case 'story_arc':
+      return 'story_arc'
     case 'growth_cost_balance':
     case 'story_dynamics':
       return 'growth_cost_balance'
@@ -885,6 +903,15 @@ function defaultMetricKeyForRisk(kind: QualityDashboardRiskKind): QualityRepairM
 
 function defaultRelatedPageForRisk(kind: QualityDashboardRiskKind): string {
   switch (kind) {
+    case 'recall':
+      return 'writing'
+    case 'style_compliance':
+    case 'language_drift':
+    case 'feedback_recurrence':
+      return 'revision'
+    case 'chapter_function':
+    case 'story_arc':
+      return 'contracts'
     case 'world_state':
       return 'timeline'
     case 'foreshadow_debt':
@@ -924,6 +951,16 @@ function buildDefaultRiskWhyItHappened(kind: QualityDashboardRiskKind, detail: s
       return detail || '事实的读者知情、主角知情与计划揭示节奏发生错位，导致揭示过早或过晚。'
     case 'recall':
       return detail || '章节生成依赖的历史片段出现降级、缺失或过期，当前上下文稳定性不足。'
+    case 'language_drift':
+      return detail || '破折号、括号解释、模板短段、排比和低价值身体细节正在跨章节累积。'
+    case 'feedback_recurrence':
+      return detail || '相同审校问题在近期多章复现，说明单章修补没有进入后续硬约束。'
+    case 'style_compliance':
+      return detail || '章节与样章风格锁、禁用表达或句段比例约束发生偏移。'
+    case 'chapter_function':
+      return detail || '章节功能没有形成清晰推进、反转、回收或喘息节奏，导致连续阅读目标模糊。'
+    case 'story_arc':
+      return detail || '故事弧阶段推进和正文落点脱节，出现长段空转或阶段未兑现。'
     default:
       return detail || '当前指标已经跨过预警阈值，需要把问题定位到具体章节和修复链路。'
   }
@@ -947,6 +984,16 @@ function buildDefaultRiskHowToFix(kind: QualityDashboardRiskKind): string {
       return '把信息揭示重新绑定到目标章节，必要时补桥段或后移暴露点。'
     case 'recall':
       return '先恢复召回链路或缩窄上下文依赖，再继续基于旧片段推进后续章节。'
+    case 'language_drift':
+      return '把风险落到最近章节的语言修订任务，优先删减模板句、解释腔和低价值细节。'
+    case 'feedback_recurrence':
+      return '将复现审校项升级为修订任务和后续硬约束，先处理最近命中的章节。'
+    case 'style_compliance':
+      return '对照风格锁回调句长、段长、对白密度和禁用表达，必要时重写问题段落。'
+    case 'chapter_function':
+      return '回到章节合同确认本章功能位，并补足推进、反转、回收或喘息的可见动作。'
+    case 'story_arc':
+      return '把停滞故事弧重新绑定到章节合同和正文行动，补阶段兑现或延期说明。'
     default:
       return '把风险落成修订任务，先处理受影响最大的章节或资产，再回看指标是否恢复。'
   }
@@ -4094,14 +4141,39 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
       `高风险复现规则 ${antiAiSummary.overview.highRiskRuleCount}，重复规则 ${antiAiSummary.overview.recurringRuleCount}。`,
     ),
     buildRepairMetricSummary(
+      'language_drift',
+      100 - recentLanguageDriftAlerts.length * 9 - Math.max(0, Math.max(...recentLanguageDriftAlerts.map((alert) => alert.latestValue), 0) - 55),
+      `近期语言退化预警 ${recentLanguageDriftAlerts.length} 条。`,
+    ),
+    buildRepairMetricSummary(
+      'feedback_recurrence',
+      100 - feedbackSummary.overview.highRiskIssueCount * 12 - feedbackSummary.overview.pauseSuggestedIssueCount * 8 - feedbackSummary.overview.recurringIssueCount * 4,
+      `审校复现 ${feedbackSummary.overview.recurringIssueCount} 类，高风险 ${feedbackSummary.overview.highRiskIssueCount}。`,
+    ),
+    buildRepairMetricSummary(
       'dialogue_separability',
       100 - dialogueSnapshot.dialogueFingerprintStats.highSimilarityPairCount * 10 - dialogueSnapshot.dialogueFingerprintStats.driftingCharacterCount * 8 - dialogueSnapshot.requiredDialogueVoiceLocks.length * 4,
       `高相似角色对 ${dialogueSnapshot.dialogueFingerprintStats.highSimilarityPairCount}，漂移角色 ${dialogueSnapshot.dialogueFingerprintStats.driftingCharacterCount}。`,
     ),
     buildRepairMetricSummary(
+      'style_compliance',
+      100 - styleComplianceSummary.rewriteCount * 16 - styleComplianceSummary.warningCount * 6 - Math.max(0, 88 - styleComplianceSummary.averageScore),
+      `风格偏移 ${styleComplianceSummary.warningCount} 章，重写阈值 ${styleComplianceSummary.rewriteCount} 章。`,
+    ),
+    buildRepairMetricSummary(
       'voice_distinction',
       100 - Math.round(dialogueSnapshot.dialogueFingerprintStats.averageCrossCharacterSimilarity * 0.6) - dialogueSnapshot.dialogueFingerprintStats.highSimilarityPairCount * 8 - dialogueSnapshot.dialogueFingerprintStats.driftingCharacterCount * 6 - dialogueSnapshot.requiredDialogueVoiceLocks.length * 4,
       `高相似角色对 ${dialogueSnapshot.dialogueFingerprintStats.highSimilarityPairCount}，漂移角色 ${dialogueSnapshot.dialogueFingerprintStats.driftingCharacterCount}。`,
+    ),
+    buildRepairMetricSummary(
+      'chapter_function',
+      100 - chapterFunctionAlerts.length * 8 - chapterFunctionAlerts.filter((alert) => alert.severity === 'blocker').length * 8,
+      `章节功能告警 ${chapterFunctionAlerts.length} 条。`,
+    ),
+    buildRepairMetricSummary(
+      'story_arc',
+      100 - storyArcProgressSummary.criticalAlertCount * 14 - storyArcProgressSummary.stalledArcCount * 8,
+      `停滞故事弧 ${storyArcProgressSummary.stalledArcCount} 条，严重告警 ${storyArcProgressSummary.criticalAlertCount}。`,
     ),
     buildRepairMetricSummary(
       'growth_cost_balance',
@@ -4117,6 +4189,11 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
       'world_state_drift',
       100 - recentWorldStateAlerts.filter((alert) => alert.severity === 'critical').length * 12 - recentWorldStateAlerts.filter((alert) => alert.severity === 'warning').length * 5 - writebackPendingCount * 4 - writebackFailedCount * 10,
       `状态告警 ${recentWorldStateAlerts.length}，回写待处理 ${writebackPendingCount}，回写失败 ${writebackFailedCount}。`,
+    ),
+    buildRepairMetricSummary(
+      'recall',
+      100 - recentRecallAlerts.length * 10 - Math.min(recallSummary.consecutiveFallbackChapters, 5) * 8,
+      `召回风险 ${recentRecallAlerts.length} 章，连续降级 ${recallSummary.consecutiveFallbackChapters} 章。`,
     ),
     buildRepairMetricSummary(
       'info_reveal_pacing',

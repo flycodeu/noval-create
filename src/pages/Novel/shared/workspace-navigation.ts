@@ -138,6 +138,7 @@ const RESUMABLE_WORKFLOW_TYPES = new Set([
   'story_thread_auto_generate',
   'subplot_auto_generate',
   'chapter_batch_generate',
+  'chapter_quality_analysis',
 ])
 
 export function buildTaskRecoveryAction(task: Task): TaskRecoveryAction | null {

@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto'
 import { asc, desc, eq, inArray } from 'drizzle-orm'
 import { getDb, getSqlite } from '../database/db'
-import { chapterContracts, chapterSegments, chapterVersions, chapters, characters, glossary, novels, revisionTasks, sceneContracts, storyArcs, storyItems, storyMemoryCheckpoints, storyParts, storyThreads, storyVolumes, tasks, timelineEvents } from '../database/schema'
+import { chapterContracts, chapterSegments, chapterVersions, chapters, characters, glossary, novels, revisionTasks, sceneContracts, storyArcs, storyItems, storyMemoryCheckpoints, storyParts, storyThreads, storyVolumes, tasks, timelineEvents, worldMap } from '../database/schema'
 import { parseAiJsonResult } from '../utils/json'
 import { cleanAiFieldText } from '../../src/utils/text'
 import { generateChapterEmbeddings } from './embedding.service'
@@ -53,6 +53,7 @@ import {
   formatQualityGuardrailSummary,
   shouldForceRepair,
 } from '../../src/shared/content-guardrails'
+import { buildChapterOptimizationQualityGate } from '../../src/shared/chapter-optimization-quality'
 import {
   markChapterContextCurrent,
   markSubsequentChaptersStale,
@@ -92,7 +93,7 @@ import {
   analyzeExpressionDedupForGeneration,
   formatExpressionDedupGuidance,
 } from './expression-dedup.service'
-import { analyzeSummaryHealthForChapter, refreshSummaryHealth } from './summary-decay.service'
+import { analyzeSummaryHealthForChapter, refreshSummaryHealthSemantic } from './summary-decay.service'
 import { analyzeNovelStyleCompliance } from './style-compliance.service'
 import {
   analyzeNarrativeControls,
@@ -3332,7 +3333,7 @@ async function refreshChapterMemory(chapterId: number): Promise<{
   if (!chapter) throwUserFacingError('chapter.notFound')
   const summary = await updateChapterSummaryData(chapterId)
   const continuity = await updateChapterContinuityState(chapterId, summary)
-  const summaryHealth = refreshSummaryHealth(chapterId)
+  const summaryHealth = await refreshSummaryHealthSemantic(chapterId)
   refreshCharacterStateVersionsForChapter(chapterId)
   syncCharacterArcsFromChapterState(chapterId)
   refreshWorldStateVersionsForChapter(chapterId)
@@ -6339,6 +6340,88 @@ function normalizeOptimizedChapterContent(raw: string): string {
     .trim()
 }
 
+function uniqueNonEmpty(values: string[]): string[] {
+  return [...new Set(values.map((item) => item.trim()).filter(Boolean))]
+}
+
+function collectTrackedEntityNames(novelId: number): string[] {
+  const db = getDb()
+  const names = [
+    ...db.select({ name: characters.fullName }).from(characters).where(eq(characters.novelId, novelId)).all().map((row) => row.name),
+    ...db.select({ name: storyItems.itemName }).from(storyItems).where(eq(storyItems.novelId, novelId)).all().map((row) => row.name),
+    ...db.select({ name: worldMap.name }).from(worldMap).where(eq(worldMap.novelId, novelId)).all().map((row) => row.name),
+    ...db.select({ name: glossary.term }).from(glossary).where(eq(glossary.novelId, novelId)).all().map((row) => row.name),
+  ]
+  return uniqueNonEmpty(names)
+    .filter((name) => name.length >= 2)
+    .sort((left, right) => right.length - left.length || left.localeCompare(right))
+}
+
+function findTrackedNamesInText(names: string[], text: string): string[] {
+  return names.filter((name) => text.includes(name))
+}
+
+function extractNarrativeNumbers(text: string): string[] {
+  const arabic = text.match(/\d+(?:\.\d+)?\s*(?:年|月|日|章|岁|个|名|人|只|柄|把|枚|颗|米|丈|里|公里|天|夜|次|回|层|阶|级)?/gu) || []
+  const chinese = text.match(/[零一二三四五六七八九十百千万两]+(?:年|月|日|章|岁|个|名|人|只|柄|把|枚|颗|米|丈|里|公里|天|夜|次|回|层|阶|级)/gu) || []
+  return uniqueNonEmpty([...arabic, ...chinese]).slice(0, 80)
+}
+
+function getSymmetricDiff(left: string[], right: string[]): string[] {
+  const leftSet = new Set(left)
+  const rightSet = new Set(right)
+  return [
+    ...left.filter((item) => !rightSet.has(item)).map((item) => `缺失 ${item}`),
+    ...right.filter((item) => !leftSet.has(item)).map((item) => `新增 ${item}`),
+  ]
+}
+
+function textOverlapRatio(left: string, right: string): number {
+  const leftChars = new Set([...left.replace(/\s/g, '')])
+  const rightChars = new Set([...right.replace(/\s/g, '')])
+  if (leftChars.size === 0 || rightChars.size === 0) return 1
+  let overlap = 0
+  leftChars.forEach((char) => {
+    if (rightChars.has(char)) overlap += 1
+  })
+  return overlap / Math.max(leftChars.size, rightChars.size)
+}
+
+function buildChapterOptimizationFactGuard(novelId: number, originalContent: string, optimizedContent: string): ChapterOptimizeResult['factGuard'] {
+  const trackedNames = collectTrackedEntityNames(novelId)
+  const originalNames = findTrackedNamesInText(trackedNames, originalContent)
+  const optimizedNames = findTrackedNamesInText(trackedNames, optimizedContent)
+  const introducedTrackedEntities = optimizedNames.filter((name) => !originalNames.includes(name)).slice(0, 12)
+  const removedTrackedEntities = originalNames.filter((name) => !optimizedNames.includes(name)).slice(0, 12)
+  const changedNumbers = getSymmetricDiff(
+    extractNarrativeNumbers(originalContent),
+    extractNarrativeNumbers(optimizedContent),
+  ).slice(0, 12)
+  const originalEnding = originalContent.trim().slice(-300)
+  const optimizedEnding = optimizedContent.trim().slice(-300)
+  const endingHookChanged = originalEnding.length >= 80
+    && optimizedEnding.length >= 80
+    && textOverlapRatio(originalEnding, optimizedEnding) < 0.42
+  const optimizedFindings = collectQualityGuardrailFindings(optimizedContent)
+  const aiProcessLeakCount = optimizedFindings.filter((finding) => finding.code === 'ai_process_leak' || finding.code === 'prompt_leak').length
+  const warnings = [
+    introducedTrackedEntities.length > 0 ? `优化稿引入了原正文未出现的已登记实体：${introducedTrackedEntities.join('、')}。` : '',
+    removedTrackedEntities.length > 0 ? `优化稿移除了原正文中的已登记实体：${removedTrackedEntities.join('、')}。` : '',
+    changedNumbers.length > 0 ? `优化稿改变了关键数字或数量表达：${changedNumbers.join('、')}。` : '',
+    endingHookChanged ? '优化稿章尾钩子与原文差异过大，需要人工核对后再应用。' : '',
+    aiProcessLeakCount > 0 ? `优化稿仍含 ${aiProcessLeakCount} 处 AI 过程或提示词残留。` : '',
+  ].filter(Boolean)
+  return {
+    safeToApply: warnings.length === 0,
+    warnings,
+    introducedTrackedEntities,
+    removedTrackedEntities,
+    changedNumbers,
+    endingHookChanged,
+    aiProcessLeakCount,
+  }
+}
+
 export async function optimizeChapterContent(
   chapterId: number,
   options: { executionMode?: AiExecutionMode; extraRequirements?: string } = {},
@@ -6395,13 +6478,18 @@ export async function optimizeChapterContent(
   })
   const optimizedContent = normalizeOptimizedChapterContent(raw)
   if (!optimizedContent) throwUserFacingError('writing.rewriteNoResult')
+  const factGuard = buildChapterOptimizationFactGuard(chapter.novelId, chapter.content, optimizedContent)
+  const qualityGate = buildChapterOptimizationQualityGate(chapter.content, optimizedContent)
 
   return {
     originalContent: chapter.content,
     optimizedContent,
     issueSummary,
-    guardrailHits: guardrailFindings.map((finding) => finding.code),
+    guardrailHits: qualityGate.originalGuardrailHits,
     changed: optimizedContent.trim() !== chapter.content.trim(),
+    warnings: dedupeTextList([...factGuard.warnings, ...qualityGate.warnings]),
+    factGuard,
+    qualityGate,
   }
 }
 
@@ -6448,6 +6536,10 @@ export async function aiCheckChapter(chapterId: number): Promise<unknown> {
     scheduleDialogueFingerprintRefresh(chapter.novelId, novel?.modelConfigId || undefined)
     return enhanceAiScoreResult({}, content)
   }
+}
+
+export const __testing = {
+  buildChapterOptimizationFactGuard,
 }
 
 export { runChapterPublishCheck }

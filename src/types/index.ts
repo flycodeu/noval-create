@@ -266,6 +266,12 @@ export interface SummaryHealthReport {
   warnings: string[]
   triggeredRecompression: boolean
   recompressionReason?: string
+  recompressionMode?: 'deterministic' | 'semantic'
+  semanticSummary?: {
+    chapterFacts: string
+    characterStates: string
+    threadForeshadow: string
+  }
   focusEntities: string[]
   summaryPreview?: string
   updatedAt?: string
@@ -1497,6 +1503,28 @@ export interface ChapterBatchAutoGenerateStatus extends BatchAutoGenerateStatusB
     mainThreadPressureStrategy: 'latency_first' | 'balanced' | 'stability_first'
     strategySummary: string
   }
+}
+
+export interface ChapterQualityAnalysisOptions {
+  chapterIds?: number[]
+  includeAiCheck?: boolean
+  includePublishCheck?: boolean
+}
+
+export interface ChapterQualityAnalysisStatus extends BatchAutoGenerateStatusBase {
+  chapterIds: number[]
+  completedChapterIds: number[]
+  failedChapterIds: number[]
+  warnings: string[]
+  currentChapterId?: number
+  currentChapterNum?: number
+  snapshotId?: number
+  inspectionIds: number[]
+  publishBlockedChapterIds: number[]
+  publishRewriteChapterIds: number[]
+  generatedRevisionTaskCount: number
+  aiCheckFailureCount: number
+  publishCheckFailureCount: number
 }
 
 export type ProductionReadinessStatus = 'ready' | 'warning' | 'blocked'
@@ -4264,6 +4292,12 @@ export type QualityRepairMetricKey =
   | 'exposition_density'
   | 'long_window_homogenization'
   | 'dialogue_separability'
+  | 'language_drift'
+  | 'feedback_recurrence'
+  | 'style_compliance'
+  | 'recall'
+  | 'chapter_function'
+  | 'story_arc'
   | 'voice_distinction'
   | 'growth_cost_balance'
   | 'foreshadow_debt'
@@ -4440,6 +4474,18 @@ export interface PlatformFormatOptions {
   scope?: PlatformFormatScope
   chapterId?: number
   chapterIds?: number[]
+  batchSize?: number
+  sensitiveWords?: string[]
+}
+
+export interface PlatformFormatBatch {
+  index: number
+  title: string
+  content: string
+  chapterCount: number
+  wordCount: number
+  chapterStart?: number
+  chapterEnd?: number
 }
 
 export interface PlatformFormatResult {
@@ -4451,6 +4497,37 @@ export interface PlatformFormatResult {
   wordCount: number
   warnings: string[]
   removedLineCount: number
+  sensitiveWordHits: Array<{
+    word: string
+    count: number
+    chapterNums: number[]
+  }>
+  batches: PlatformFormatBatch[]
+}
+
+export interface ChapterOptimizationFactGuard {
+  safeToApply: boolean
+  warnings: string[]
+  introducedTrackedEntities: string[]
+  removedTrackedEntities: string[]
+  changedNumbers: string[]
+  endingHookChanged: boolean
+  aiProcessLeakCount: number
+}
+
+export interface ChapterOptimizationQualityGate {
+  safeToApply: boolean
+  warnings: string[]
+  originalGuardrailHits: string[]
+  optimizedGuardrailHits: string[]
+  originalStrongAiFlavorCount: number
+  optimizedStrongAiFlavorCount: number
+  originalHighSeverityCount: number
+  optimizedHighSeverityCount: number
+  originalDriftScore: number
+  optimizedDriftScore: number
+  languageDriftBefore: LanguageDriftMetrics
+  languageDriftAfter: LanguageDriftMetrics
 }
 
 export interface ChapterOptimizeResult {
@@ -4459,6 +4536,9 @@ export interface ChapterOptimizeResult {
   issueSummary: string[]
   guardrailHits: string[]
   changed: boolean
+  warnings: string[]
+  factGuard: ChapterOptimizationFactGuard
+  qualityGate: ChapterOptimizationQualityGate
 }
 
 export type WorkspaceQualityIssueKind =
@@ -5367,6 +5447,10 @@ declare global {
         getAutoGenerateStatus: (taskId: number) => Promise<ChapterBatchAutoGenerateStatus | null>
         getLatestAutoGenerateTask: (novelId: number) => Promise<Task | null>
         resumeAutoGenerate: (taskId: number) => Promise<number>
+        startQualityAnalysis: (novelId: number, options?: ChapterQualityAnalysisOptions) => Promise<number>
+        getQualityAnalysisStatus: (taskId: number) => Promise<ChapterQualityAnalysisStatus | null>
+        getLatestQualityAnalysisTask: (novelId: number) => Promise<Task | null>
+        resumeQualityAnalysis: (taskId: number) => Promise<number>
       }
       writeback: {
         prepareRun: (chapterId: number, triggerSource?: string) => Promise<ChapterWritebackRun>

@@ -222,6 +222,10 @@ const api = {
     getAutoGenerateStatus: (taskId: number) => invokeIpc('chapterBatch:getAutoGenerateStatus', taskId),
     getLatestAutoGenerateTask: (novelId: number) => invokeIpc('chapterBatch:getLatestAutoGenerateTask', novelId),
     resumeAutoGenerate: (taskId: number) => invokeIpc('chapterBatch:resumeAutoGenerate', taskId),
+    startQualityAnalysis: (novelId: number, options?: unknown) => invokeIpc('chapterBatch:startQualityAnalysis', novelId, options),
+    getQualityAnalysisStatus: (taskId: number) => invokeIpc('chapterBatch:getQualityAnalysisStatus', taskId),
+    getLatestQualityAnalysisTask: (novelId: number) => invokeIpc('chapterBatch:getLatestQualityAnalysisTask', novelId),
+    resumeQualityAnalysis: (taskId: number) => invokeIpc('chapterBatch:resumeQualityAnalysis', taskId),
   },
 
   batchWorkbench: {

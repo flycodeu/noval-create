@@ -1,6 +1,6 @@
 import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams, type NavigateOptions } from 'react-router-dom'
-import { Drawer, Input, Modal, Spin, message } from 'antd'
+import { Alert, Button, Drawer, Input, Modal, Spin, message } from 'antd'
 import type { MenuProps } from 'antd'
 import { getErrorMessage, getUserFacingMessage, isUserFacingMessage } from '@/utils/user-facing-message'
 import {
@@ -33,7 +33,7 @@ import {
   NovelWorkspaceQualityProvider,
 } from './workspace-quality-context'
 import type { RegisteredWorkspaceQualityController } from './workspace-quality-context-core'
-import type { Chapter, OperationLog } from '../../types'
+import type { Chapter, ChapterQualityAnalysisStatus, OperationLog, PlatformFormat, PlatformFormatResult, PlatformFormatScope } from '../../types'
 
 type ProWorkspaceKey = WorkspaceRouteKey
 interface WorkspaceStageProps {
@@ -185,6 +185,11 @@ export default function NovelRouter() {
   const [hasRegisteredClearHandler, setHasRegisteredClearHandler] = useState(false)
   const [qualityBoardOpen, setQualityBoardOpen] = useState(false)
   const [isSidebarDrawerOpen, setIsSidebarDrawerOpen] = useState(false)
+  const [platformCopyOpen, setPlatformCopyOpen] = useState(false)
+  const [platformCopyResult, setPlatformCopyResult] = useState<PlatformFormatResult | null>(null)
+  const [qualityAnalysisOpen, setQualityAnalysisOpen] = useState(false)
+  const [qualityAnalysisTaskId, setQualityAnalysisTaskId] = useState<number | null>(null)
+  const [qualityAnalysisStatus, setQualityAnalysisStatus] = useState<ChapterQualityAnalysisStatus | null>(null)
   const [isCompactShell, setIsCompactShell] = useState<boolean>(() => (
     typeof window !== 'undefined' ? window.innerWidth < 1024 : false
   ))
@@ -379,7 +384,20 @@ export default function NovelRouter() {
     }
   }, [novelId])
 
-  const handleCopyPlatformFormat = useCallback(async (scope: 'currentChapter' | 'all', platform: 'fanqie' | 'generic' = 'fanqie') => {
+  const copyPlatformText = useCallback(async (text: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      message.success(`已复制${label}。`)
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '复制平台格式失败')
+    }
+  }, [])
+
+  const handleCopyPlatformFormat = useCallback(async (
+    scope: PlatformFormatScope,
+    platform: PlatformFormat = 'fanqie',
+    options: { batchSize?: number } = {},
+  ) => {
     if (scope === 'currentChapter' && !currentChapter?.id) {
       message.warning('请先在正文页选择一个章节。')
       return
@@ -389,7 +407,14 @@ export default function NovelRouter() {
         platform,
         scope,
         chapterId: currentChapter?.id,
+        batchSize: options.batchSize,
       })
+      if (result.batches.length > 1) {
+        setPlatformCopyResult(result)
+        setPlatformCopyOpen(true)
+        message.success(`已生成 ${result.batches.length} 个平台分批包。`)
+        return
+      }
       await navigator.clipboard.writeText(result.content)
       const warningText = result.warnings.length > 0 ? `；${result.warnings[0]}` : ''
       message.success(`已复制 ${result.chapterCount} 章，约 ${result.wordCount} 字${warningText}`)
@@ -448,35 +473,64 @@ export default function NovelRouter() {
   const handleSequentialChapterAnalysis = useCallback(async () => {
     if (batchAnalyzingChapters) return
     setBatchAnalyzingChapters(true)
-    const closeLoading = message.loading('正在按章节顺序执行 AI 体检与发布前检查...', 0)
     try {
-      const list = await ensureChapterListLoaded()
-      const candidates = list.filter((chapter) => chapter.content?.trim())
-      if (candidates.length === 0) {
-        closeLoading()
-        message.warning('当前没有可分析的章节正文。')
-        return
-      }
-      let failed = 0
-      for (const chapter of candidates) {
-        try {
-          await window.electron.chapter.aiCheck(chapter.id)
-          await window.electron.chapter.runPublishCheck(chapter.id)
-        } catch (error) {
-          console.warn(`[chapter-analysis] chapter=${chapter.id}`, error)
-          failed += 1
-        }
-      }
-      closeLoading()
-      message.success(`逐章分析完成：${candidates.length - failed}/${candidates.length} 章通过执行，问题已进入对应审校/修订数据。`)
+      const taskId = await window.electron.chapterBatch.startQualityAnalysis(novelId, {
+        includeAiCheck: true,
+        includePublishCheck: true,
+      })
+      setQualityAnalysisTaskId(taskId)
+      setQualityAnalysisOpen(true)
+      message.success(`逐章 AI 体检队列已启动（任务 #${taskId}）。结果会写入批次检查和修订中心。`)
       notifyWorkspaceMutation()
     } catch (error) {
-      closeLoading()
       message.error(error instanceof Error ? error.message : '逐章分析失败。')
-    } finally {
       setBatchAnalyzingChapters(false)
     }
-  }, [batchAnalyzingChapters, ensureChapterListLoaded, notifyWorkspaceMutation])
+  }, [batchAnalyzingChapters, notifyWorkspaceMutation, novelId])
+
+  useEffect(() => {
+    if (!qualityAnalysisTaskId) return undefined
+    let disposed = false
+    const refresh = async () => {
+      try {
+        const status = await window.electron.chapterBatch.getQualityAnalysisStatus(qualityAnalysisTaskId)
+        if (disposed) return
+        setQualityAnalysisStatus(status)
+        if (!status) {
+          setBatchAnalyzingChapters(false)
+          setQualityAnalysisTaskId(null)
+          return
+        }
+        if (status && !['pending', 'running', 'cancel_requested'].includes(status.status)) {
+          setBatchAnalyzingChapters(false)
+          setQualityAnalysisTaskId(null)
+          notifyWorkspaceMutation()
+        }
+      } catch (error) {
+        if (!disposed) {
+          setBatchAnalyzingChapters(false)
+          console.error(error)
+        }
+      }
+    }
+    void refresh()
+    const timer = window.setInterval(() => void refresh(), 1500)
+    return () => {
+      disposed = true
+      window.clearInterval(timer)
+    }
+  }, [notifyWorkspaceMutation, qualityAnalysisTaskId])
+
+  const handleCancelQualityAnalysis = useCallback(async () => {
+    if (!qualityAnalysisTaskId) return
+    try {
+      await window.electron.task.cancel(qualityAnalysisTaskId)
+      setBatchAnalyzingChapters(false)
+      message.info('逐章 AI 体检队列已请求停止。')
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '停止逐章分析失败。')
+    }
+  }, [qualityAnalysisTaskId])
 
   const jumpToChapter = useCallback(async (chapterId: number) => {
     const list = await ensureChapterListLoaded()
@@ -906,6 +960,21 @@ export default function NovelRouter() {
               onClick: () => void handleCopyPlatformFormat('all', 'fanqie'),
             },
             {
+              key: 'copy-fanqie-batch',
+              label: '复制全书·番茄分批检查',
+              onClick: () => void handleCopyPlatformFormat('all', 'fanqie', { batchSize: 20 }),
+            },
+            {
+              key: 'copy-qidian-all',
+              label: '复制全书·起点格式',
+              onClick: () => void handleCopyPlatformFormat('all', 'qidian'),
+            },
+            {
+              key: 'copy-jjwxc-all',
+              label: '复制全书·晋江格式',
+              onClick: () => void handleCopyPlatformFormat('all', 'jjwxc'),
+            },
+            {
               key: 'copy-generic-all',
               label: '复制全书·通用格式',
               onClick: () => void handleCopyPlatformFormat('all', 'generic'),
@@ -1077,6 +1146,91 @@ export default function NovelRouter() {
             <div className="novel-note-list__item">当前没有匹配章节。</div>
           ) : null}
         </div>
+      </Modal>
+      <Modal
+        title="平台分批复制"
+        open={platformCopyOpen}
+        onCancel={() => setPlatformCopyOpen(false)}
+        width={760}
+        footer={platformCopyResult ? [
+          <Button key="copy-all" type="primary" onClick={() => void copyPlatformText(platformCopyResult.content, '全部平台正文')}>
+            复制全部
+          </Button>,
+        ] : null}
+      >
+        {platformCopyResult?.warnings.length ? (
+          <Alert
+            className="novel-route-shell__modal-list"
+            type="warning"
+            showIcon
+            message="平台复制提示"
+            description={platformCopyResult.warnings.slice(0, 5).join('；')}
+          />
+        ) : null}
+        {platformCopyResult?.sensitiveWordHits.length ? (
+          <div className="novel-note-list novel-route-shell__modal-list">
+            {platformCopyResult.sensitiveWordHits.slice(0, 8).map((hit) => (
+              <div key={hit.word} className="novel-note-list__item">
+                {`${hit.word} ×${hit.count}：第 ${hit.chapterNums.join('、')} 章`}
+              </div>
+            ))}
+          </div>
+        ) : null}
+        <div className="novel-note-list novel-route-shell__modal-list">
+          {platformCopyResult?.batches.map((batch) => (
+            <button
+              key={batch.index}
+              type="button"
+              className="novel-sidebar__nav-item novel-route-shell__modal-item"
+              onClick={() => void copyPlatformText(batch.content, `第 ${batch.index} 批`)}
+            >
+              <span className="novel-sidebar__nav-copy">
+                <strong>{batch.title}</strong>
+                <small>{`${batch.chapterCount} 章 · 约 ${batch.wordCount} 字`}</small>
+              </span>
+            </button>
+          ))}
+        </div>
+      </Modal>
+      <Modal
+        title="逐章 AI 体检队列"
+        open={qualityAnalysisOpen}
+        onCancel={() => setQualityAnalysisOpen(false)}
+        footer={[
+          <Button key="tasks" onClick={() => navigate('/tasks')}>打开任务中心</Button>,
+          <Button
+            key="cancel"
+            danger
+            disabled={!qualityAnalysisTaskId}
+            onClick={() => void handleCancelQualityAnalysis()}
+          >
+            停止队列
+          </Button>,
+        ]}
+      >
+        {qualityAnalysisStatus ? (
+          <div className="novel-note-list">
+            <div className="novel-note-list__item">
+              {`任务 #${qualityAnalysisStatus.taskId} · ${qualityAnalysisStatus.status} · ${qualityAnalysisStatus.generatedCount}/${qualityAnalysisStatus.requestedCount} 章`}
+            </div>
+            <div className="novel-note-list__item">
+              {qualityAnalysisStatus.currentChapterNum
+                ? `当前第 ${qualityAnalysisStatus.currentChapterNum} 章：${qualityAnalysisStatus.message}`
+                : qualityAnalysisStatus.message}
+            </div>
+            <div className="novel-note-list__item">
+              {`成功 ${qualityAnalysisStatus.completedChapterIds.length} 章，失败 ${qualityAnalysisStatus.failedChapterIds.length} 章，修订任务 ${qualityAnalysisStatus.generatedRevisionTaskCount} 个。`}
+            </div>
+            <div className="novel-note-list__item">
+              {`发布阻断 ${qualityAnalysisStatus.publishBlockedChapterIds.length} 章，需重写 ${qualityAnalysisStatus.publishRewriteChapterIds.length} 章。`}
+            </div>
+            {qualityAnalysisStatus.warnings.slice(0, 5).map((warning) => (
+              <div key={warning} className="novel-note-list__item">{warning}</div>
+            ))}
+          </div>
+        ) : (
+          <Spin size="small" />
+        )}
       </Modal>
       <Modal
         title="工作区快捷键"

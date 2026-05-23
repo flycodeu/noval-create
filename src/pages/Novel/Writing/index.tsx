@@ -525,6 +525,7 @@ export default function Writing({ novelId }: Props) {
   const [rewriteRequirements, setRewriteRequirements] = useState('')
   const [rewritingSelection, setRewritingSelection] = useState(false)
   const [optimizingChapter, setOptimizingChapter] = useState(false)
+  const [applyingOptimizedChapter, setApplyingOptimizedChapter] = useState(false)
   const [optimizeModalOpen, setOptimizeModalOpen] = useState(false)
   const [optimizeRequirements, setOptimizeRequirements] = useState('')
   const [optimizationResult, setOptimizationResult] = useState<ChapterOptimizeResult | null>(null)
@@ -1365,13 +1366,45 @@ export default function Writing({ novelId }: Props) {
     }
   }
 
-  const handleApplyOptimizedChapter = () => {
-    if (!optimizationResult?.optimizedContent.trim()) return
-    applyChapterContent(optimizationResult.optimizedContent, 'ai-rewrite')
-    setOptimizeModalOpen(false)
-    setOptimizationResult(null)
-    void refreshQualityDashboard()
-    message.success('已应用整章优化稿。')
+  const handleApplyOptimizedChapter = async () => {
+    if (!currentChapter || !optimizationResult?.optimizedContent.trim()) return
+    if (
+      (optimizationResult.factGuard && !optimizationResult.factGuard.safeToApply)
+      || (optimizationResult.qualityGate && !optimizationResult.qualityGate.safeToApply)
+    ) {
+      message.warning('优化稿仍有事实、章尾或 AI 味风险，已阻止直接应用。请调整要求后重新生成。')
+      return
+    }
+
+    const normalized = normalizeEditorText(optimizationResult.optimizedContent)
+    const nextWordCount = countWords(normalized)
+    setApplyingOptimizedChapter(true)
+    try {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current)
+        saveTimerRef.current = null
+      }
+      await saveNow(currentChapter.id, normalized, 'ai-rewrite')
+      setContent(normalized)
+      setWordCount(nextWordCount)
+      setSelectedSnippet(null)
+      if (editorRef.current) {
+        editorRef.current.innerHTML = normalized.replace(/\n/g, '<br>')
+      }
+      historyBaselineRef.current = normalized
+      lastHistoryAtRef.current = Date.now()
+      await Promise.all([
+        refreshQualityDashboard(),
+        refreshVersionHistory(currentChapter.id),
+      ])
+      setOptimizeModalOpen(false)
+      setOptimizationResult(null)
+      message.success('已保存并应用整章优化稿。')
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '应用整章优化稿失败，请稍后重试。')
+    } finally {
+      setApplyingOptimizedChapter(false)
+    }
   }
 
   const handleOpenGateIssue = useCallback((item: ChapterPublishCheck['checklist'][number]) => {
@@ -2902,16 +2935,38 @@ export default function Writing({ novelId }: Props) {
         open={optimizeModalOpen}
         onCancel={() => setOptimizeModalOpen(false)}
         onOk={handleApplyOptimizedChapter}
+        okButtonProps={{
+          disabled: Boolean(
+            applyingOptimizedChapter
+            || (optimizationResult?.factGuard && !optimizationResult.factGuard.safeToApply)
+            || (optimizationResult?.qualityGate && !optimizationResult.qualityGate.safeToApply),
+          ),
+          loading: applyingOptimizedChapter,
+        }}
         okText="应用优化稿"
         width={920}
       >
         <div className="novel-note-list writing-layout-note-space-bottom">
           <div className="novel-note-list__item">整章优化只生成候选稿，应用前不会覆盖正文。</div>
           <div className="novel-note-list__item">重点保留剧情事实，修正 AI 味、衔接、空泛细节和读感问题。</div>
+          {optimizationResult?.qualityGate ? (
+            <div className="novel-note-list__item">
+              {`后验质量门：强 AI 味 ${optimizationResult.qualityGate.originalStrongAiFlavorCount} -> ${optimizationResult.qualityGate.optimizedStrongAiFlavorCount}，漂移分 ${optimizationResult.qualityGate.originalDriftScore} -> ${optimizationResult.qualityGate.optimizedDriftScore}。`}
+            </div>
+          ) : null}
           {optimizationResult?.issueSummary.slice(0, 4).map((item) => (
             <div key={item} className="novel-note-list__item">{item}</div>
           ))}
         </div>
+        {optimizationResult?.warnings.length ? (
+          <Alert
+            className="writing-layout-note-space-bottom"
+            type="warning"
+            showIcon
+            message="优化稿需要人工核验"
+            description={optimizationResult.warnings.slice(0, 5).join('；')}
+          />
+        ) : null}
         <Input.TextArea
           value={optimizeRequirements}
           rows={3}
