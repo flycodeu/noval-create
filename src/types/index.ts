@@ -1847,6 +1847,8 @@ export interface AuthorStyleLockSummary {
   dialogueRhythmHint?: string
   narrativeDensityHint?: string
   paceHint?: string
+  targetWorkSampleGuide?: string
+  humanStyleSampleLock?: string
   toneKeywords: string[]
   preferredLexicon: string[]
   forbiddenPatterns: string[]

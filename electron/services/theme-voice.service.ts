@@ -124,6 +124,7 @@ function buildCurrentThemeVoiceSummary(document: ThemeVoiceDocument): string {
   const lines = [
     document.writingContractTags.length > 0 ? `写作类型：${formatWritingContractTags(document.writingContractTags)}` : '',
     document.theme ? `主题：${document.theme}` : '',
+    document.themeChapterTest ? `章节级主题验证：${document.themeChapterTest}` : '',
     document.motifs ? `母题：${document.motifs}` : '',
     document.emotionalCore ? `情感核心：${document.emotionalCore}` : '',
     document.pov ? `视角：${document.pov}` : '',
@@ -139,6 +140,8 @@ function buildCurrentThemeVoiceSummary(document: ThemeVoiceDocument): string {
     document.dialogueRules ? `对白规则：${document.dialogueRules}` : '',
     document.descriptionRules ? `描写规则：${document.descriptionRules}` : '',
     document.forbiddenPhrases ? `禁用表达：${document.forbiddenPhrases}` : '',
+    document.targetWorkSampleGuide ? `真实样章对照：${document.targetWorkSampleGuide}` : '',
+    document.humanStyleSampleLock ? `人工风格样本锁定：${document.humanStyleSampleLock}` : '',
   ].filter(Boolean)
 
   return lines.length > 0 ? lines.join('\n') : '当前还没有可用的主题与文风草稿。'
@@ -178,6 +181,7 @@ function buildThemeVoicePrompt(
     section('字段要求', [
       `- writingContractTags 写 1-4 个全书级写作类型标签，优先从 ${writingContractChoices} 里选；允许补少量自定义中文短标签，但 wish_fulfillment 和 realism 不能并存。`,
       '- theme 写作品持续回答的命题，不要写成宣传口号。',
+      '- themeChapterTest 写章节级验证口径：每章冲突如何回应主题命题，而不是只推进事件。',
       '- motifs 写 3-6 个会反复出现的意象、母题或回响。',
       '- emotionalCore 写读者最稳定收到的情绪回报。',
       '- pov 只能是 first_person / third_limited / third_omniscient / multi_pov。',
@@ -191,6 +195,8 @@ function buildThemeVoicePrompt(
       '- voiceKeywords 写 4-8 个口吻关键词。',
       '- styleRules / dialogueRules / descriptionRules 都要写成可执行规则，建议每行一条。',
       '- forbiddenPhrases 写应避免的总结腔、模板句、引号强调、对称排比、空泛抒情等。',
+      '- targetWorkSampleGuide 写真实样章对照评测口径：像不像目标作品时要看哪些节奏、句式、信息密度、对白比例和现场质感。',
+      '- humanStyleSampleLock 写人工风格样本锁定规则：哪些人工样本特征必须保留，哪些 AI 化偏移一出现就要退回重写。',
     ].join('\n')),
     section('上下文护栏', buildContextAlignmentRules({
       background: profile.background,
@@ -214,7 +220,7 @@ function buildThemeVoicePrompt(
       '如果需要给出禁用表达，优先写类型和模式，也可以补少量典型短句。',
     ])),
     '只输出 JSON，不要解释，不要 Markdown，不要代码块。',
-    '{"writingContractTags":["wish_fulfillment"],"theme":"","motifs":"每行一条","emotionalCore":"","pov":"third_limited","tense":"past","protagonistCount":"single","viewpointMode":"fixed","parallelTimelines":"none","openingStyle":"hook","flashbackPolicy":"limited","narratorDistance":"","voiceKeywords":"每行一条","styleRules":"每行一条","dialogueRules":"每行一条","descriptionRules":"每行一条","forbiddenPhrases":"每行一条"}',
+    '{"writingContractTags":["wish_fulfillment"],"theme":"","themeChapterTest":"","motifs":"每行一条","emotionalCore":"","pov":"third_limited","tense":"past","protagonistCount":"single","viewpointMode":"fixed","parallelTimelines":"none","openingStyle":"hook","flashbackPolicy":"limited","narratorDistance":"","voiceKeywords":"每行一条","styleRules":"每行一条","dialogueRules":"每行一条","descriptionRules":"每行一条","forbiddenPhrases":"每行一条","targetWorkSampleGuide":"","humanStyleSampleLock":""}',
   ])
 }
 
@@ -224,6 +230,7 @@ function parseGeneratedThemeVoice(text: string): ThemeVoiceDocument {
   return {
     writingContractTags: normalizeWritingContractTags(parsed.writingContractTags ?? parsed.writing_contract_tags),
     theme: normalizeBlockText(parsed.theme),
+    themeChapterTest: normalizeBlockText(parsed.themeChapterTest ?? parsed.theme_chapter_test),
     motifs: normalizeBlockText(parsed.motifs),
     emotionalCore: normalizeBlockText(parsed.emotionalCore ?? parsed.emotional_core),
     pov: normalizePov(parsed.pov),
@@ -239,6 +246,8 @@ function parseGeneratedThemeVoice(text: string): ThemeVoiceDocument {
     dialogueRules: normalizeBlockText(parsed.dialogueRules ?? parsed.dialogue_rules),
     descriptionRules: normalizeBlockText(parsed.descriptionRules ?? parsed.description_rules),
     forbiddenPhrases: normalizeBlockText(parsed.forbiddenPhrases ?? parsed.forbidden_phrases),
+    targetWorkSampleGuide: normalizeBlockText(parsed.targetWorkSampleGuide ?? parsed.target_work_sample_guide),
+    humanStyleSampleLock: normalizeBlockText(parsed.humanStyleSampleLock ?? parsed.human_style_sample_lock),
   }
 }
 
@@ -274,12 +283,15 @@ export async function generateThemeVoice(
     const warnings = [
       document.writingContractTags.length > 0 ? '' : '写作类型仍为空，建议先定整本书的阅读预期。',
       document.theme ? '' : '主题仍为空，建议补出作品持续回答的核心命题。',
+      document.themeChapterTest ? '' : '章节级主题验证仍为空，建议补出每章冲突如何回应主题命题的判断口径。',
       document.emotionalCore ? '' : '情感核心仍为空，建议补出稳定的情绪回报。',
       document.pov ? '' : '叙事视角仍为空，长篇很容易发生视角漂移。',
       document.tense ? '' : '时态仍为空，后续正文可能失去统一口径。',
       document.styleRules ? '' : '风格规则仍为空，建议至少补 4 条可执行规则。',
       document.dialogueRules ? '' : '对白规则仍为空，建议补出人物说话方式和潜台词规则。',
       document.forbiddenPhrases ? '' : '禁用表达仍为空，建议补一轮去 AI 腔规则。',
+      document.targetWorkSampleGuide ? '' : '真实样章对照口径仍为空，建议补出“像不像目标作品”的可验收标准。',
+      document.humanStyleSampleLock ? '' : '人工风格样本锁定仍为空，建议补出必须保留的人工样本特征。',
     ].filter(Boolean)
 
     if (warnings.length > 0) {

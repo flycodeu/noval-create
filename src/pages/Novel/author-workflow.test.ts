@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { buildProjectBriefPayload } from '../../shared/project-brief'
 import { buildStorySettingsPayload } from '../../shared/story-settings'
-import { buildThemeVoicePayload } from '../../shared/theme-voice'
+import { buildThemeVoicePayload, parseThemeVoiceDocument } from '../../shared/theme-voice'
 import {
   buildAuthorWorkflowSummary,
   resolveSuggestedAuthorWorkMode,
@@ -144,11 +144,14 @@ function makeNovel(flags: {
       ? buildThemeVoicePayload({
         writingContractTags: ['强剧情', '强冲突'],
         theme: '秩序的代价',
+        themeChapterTest: '每章冲突都要让角色在秩序和代价之间做选择。',
         emotionalCore: '在背叛与责任之间硬撑',
         pov: 'third_limited',
         tense: 'past',
         styleRules: '句子短，动作明确，少解释。',
         dialogueRules: '对白带压迫感，不替人物总结情绪。',
+        targetWorkSampleGuide: '对照样章的短句、压迫节奏和动作密度。',
+        humanStyleSampleLock: '保留人工样本的冷硬动作感，禁止总结腔。',
       })
       : '',
     worldRulesJson: flags.worldRules ? '{}' : '',
@@ -156,6 +159,15 @@ function makeNovel(flags: {
 }
 
 describe('author-workflow mode selection', () => {
+  it('preserves theme validation and sample lock fields in theme voice payloads', () => {
+    const novel = makeNovel({ themeVoice: true })
+    const themeVoice = parseThemeVoiceDocument(novel.themeVoiceJson)
+
+    expect(themeVoice.themeChapterTest).toContain('秩序和代价')
+    expect(themeVoice.targetWorkSampleGuide).toContain('压迫节奏')
+    expect(themeVoice.humanStyleSampleLock).toContain('冷硬动作感')
+  })
+
   it('uses quick start for unopened projects', () => {
     const result = resolveSuggestedAuthorWorkMode(makeNovel(), makeStats(), makeQualitySummary())
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { analyzeStyleCompliance } from './style-compliance.service'
+import { analyzeManualStyleLockCompliance, analyzeStyleCompliance } from './style-compliance.service'
 
 describe('style-compliance service', () => {
   const fingerprint = {
@@ -56,5 +56,22 @@ describe('style-compliance service', () => {
     expect(result.status).toBe('rewrite')
     expect(result.matchedForbiddenPatterns).toContain('命运的齿轮')
     expect(result.rewriteHints.length).toBeGreaterThan(0)
+  })
+
+  it('checks manual sample lock rules even without a stored style fingerprint', () => {
+    const result = analyzeManualStyleLockCompliance(
+      [
+        '林远在这一刻忽然意识到，所有意义、信念、尊严和未来都以不可言说的方式压在他的心口，命运的齿轮再次转动，让他不得不理解这份沉重的情绪究竟意味着什么。',
+        '这段文字继续解释他的复杂感受，却没有把证据、筹码和动作真正放回现场。',
+      ].join('\n\n'),
+      JSON.stringify({
+        target_work_sample_guide: '短句、压迫节奏、动作密度和现场质感。',
+        human_style_sample_lock: '保留人工样本的冷硬动作感，禁止命运的齿轮，禁止总结腔。',
+      }),
+    )
+
+    expect(result?.status).toBe('rewrite')
+    expect(result?.matchedForbiddenPatterns).toContain('命运的齿轮')
+    expect(result?.deviations.join('\n')).toContain('人工风格锁')
   })
 })

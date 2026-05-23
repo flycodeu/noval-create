@@ -15,7 +15,11 @@ import {
   chapterContracts,
   chapterSegments,
   chapters,
+  characterArcs,
+  characters,
   foreshadowLedger,
+  novels,
+  relationshipArcs,
   sceneContracts,
   storyThreads,
 } from '../database/schema'
@@ -54,6 +58,10 @@ function createBaseRows(content: string) {
       content,
       scenePlanJson: JSON.stringify([{ exit_hook: '门外传来急促脚步声' }]),
     }]],
+    [novels, [{
+      id: 1,
+      themeVoiceJson: '',
+    }]],
     [chapterContracts, [{
       id: 1,
       novelId: 1,
@@ -61,6 +69,8 @@ function createBaseRows(content: string) {
       chapterGoal: '让主线再向前推进一步',
       servedThreadIdsJson: JSON.stringify([100]),
       requiredForeshadowIdsJson: JSON.stringify([200]),
+      requiredCharacterArcIdsJson: JSON.stringify([]),
+      requiredRelationshipArcIdsJson: JSON.stringify([]),
       hookType: 'suspense',
     }]],
     [chapterSegments, [{
@@ -102,6 +112,9 @@ function createBaseRows(content: string) {
       readerVisibleOutcome: '药箱确实被转入旧仓',
       allowedDelayReason: '旧仓被封锁无法进入',
     }]],
+    [characters, []],
+    [characterArcs, []],
+    [relationshipArcs, []],
   ])
 }
 
@@ -218,5 +231,274 @@ describe('validateChapterContractDelivery', () => {
     expect(result.status).toBe('blocker')
     expect(result.itemResults.find((item) => item.contractItemType === 'foreshadow_delivery')?.verdict).toBe('missing')
     expect(result.itemResults.find((item) => item.contractItemType === 'foreshadow_delivery')?.semanticState).toBe('stale')
+  })
+
+  it('passes theme response, character scene payoff, and relationship arc gates when all evidence is visible', () => {
+    const rows = createBaseRows(
+      [
+        '夜晚的北门外，林远继续追查失窃药箱。守卫追查他的来路，赵临因为发现他隐瞒线索，当场质问他是不是又想一个人扛下去。',
+        '林远选择把暗门钥匙交给赵临，承认自己怕拖累同伴，却仍要守住不牺牲无辜人的底线。赵临沉默片刻，挡在他身前，说这次由两个人一起进旧仓。',
+        '两人推开旧仓暗门进入旧仓，确认药箱被转去旧仓，门后残留新脚印，药箱确实被转入旧仓，线索也随之升级，让主线再向前推进一步。这个决定让林远失去独自行动的退路，也让赵临开始重新信任他。',
+        '他正要离开，门外忽然传来急促脚步声，脚步声逼近得太快，他还没来得及关门。',
+      ].join('\n\n'),
+    )
+    Object.assign((rows.get(novels) || [])[0], {
+      themeVoiceJson: JSON.stringify({
+        theme: '权力面前是否守住底线',
+        theme_chapter_test: '每章冲突必须迫使角色在利益和底线之间做选择，并写出代价。',
+      }),
+    })
+    Object.assign((rows.get(chapterContracts) || [])[0], {
+      requiredCharacterArcIdsJson: JSON.stringify([300]),
+      requiredRelationshipArcIdsJson: JSON.stringify([400]),
+    })
+    rows.set(characters, [
+      { id: 1, novelId: 1, fullName: '林远' },
+      { id: 2, novelId: 1, fullName: '赵临' },
+    ])
+    rows.set(characterArcs, [{
+      id: 300,
+      novelId: 1,
+      characterId: 1,
+      surfaceWant: '找回药箱',
+      deepNeed: '守住底线',
+      coreFear: '拖累同伴',
+      misbelief: '只能独自行动',
+      changeEvent: '把暗门钥匙交给赵临',
+      endState: '开始信任同伴',
+    }])
+    rows.set(relationshipArcs, [{
+      id: 400,
+      novelId: 1,
+      charAId: 1,
+      charBId: 2,
+      relationLabelSnapshot: '师徒互疑',
+      startState: '彼此隐瞒',
+      crackPoint: '赵临当场质问',
+      changeEvent: '林远交出钥匙',
+      endState: '重新信任',
+    }])
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+
+    const result = validateChapterContractDelivery({
+      chapterId: 10,
+      content: String((rows.get(chapters) || [])[0].content),
+      reviewNotes: { reader_hook_risks: [] },
+    })
+
+    expect(result.itemResults.filter((item) => item.verdict !== 'pass')).toEqual([])
+    expect(result.status).toBe('pass')
+    expect(result.itemResults.find((item) => item.contractItemType === 'theme_chapter_response')?.verdict).toBe('pass')
+    expect(result.itemResults.find((item) => item.contractItemType === 'character_scene_payoff')?.verdict).toBe('pass')
+    expect(result.itemResults.find((item) => item.contractItemType === 'relationship_arc_gate')?.verdict).toBe('pass')
+  })
+
+  it('blocks relationship arc gate when a registered relationship change lacks trigger, interaction, and consequence', () => {
+    const rows = createBaseRows(
+      [
+        '夜晚的北门外，林远继续追查失窃药箱。守卫追查他的来路，两人险些动手。林远确认药箱被转去旧仓，主线因此向前推进一步，线索也随之升级。',
+        '他想起赵临，也想起两人的关系有所变化，但这一切暂时没有展开。门外忽然传来急促脚步声。',
+      ].join('\n\n'),
+    )
+    Object.assign((rows.get(chapterContracts) || [])[0], {
+      requiredRelationshipArcIdsJson: JSON.stringify([400]),
+    })
+    rows.set(characters, [
+      { id: 1, novelId: 1, fullName: '林远' },
+      { id: 2, novelId: 1, fullName: '赵临' },
+    ])
+    rows.set(relationshipArcs, [{
+      id: 400,
+      novelId: 1,
+      charAId: 1,
+      charBId: 2,
+      relationLabelSnapshot: '师徒互疑',
+      startState: '彼此隐瞒',
+      crackPoint: '赵临质问',
+      changeEvent: '交出钥匙',
+      endState: '重新信任',
+    }])
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+
+    const result = validateChapterContractDelivery({
+      chapterId: 10,
+      content: String((rows.get(chapters) || [])[0].content),
+      reviewNotes: { reader_hook_risks: [] },
+    })
+
+    expect(result.status).toBe('warning')
+    expect(result.itemResults.find((item) => item.contractItemType === 'relationship_arc_gate')?.verdict).toBe('weak')
+    expect(result.rewriteHints.some((item) => item.includes('触发事件'))).toBe(true)
+  })
+
+  it('does not count unrelated action markers as character scene payoff evidence', () => {
+    const rows = createBaseRows(
+      [
+        '林远站在北门外，账册的线索还没处理，心里只剩一个模糊念头。门外忽然传来急促脚步声。',
+        '守卫选择交出钥匙，因此开始信任旁人，但这一段和旁人的旧困境没有产生现场关系。',
+      ].join('\n\n'),
+    )
+    Object.assign((rows.get(chapterContracts) || [])[0], {
+      requiredCharacterArcIdsJson: JSON.stringify([300]),
+    })
+    rows.set(characters, [
+      { id: 1, novelId: 1, fullName: '林远' },
+    ])
+    rows.set(characterArcs, [{
+      id: 300,
+      novelId: 1,
+      characterId: 1,
+      surfaceWant: '找回账册',
+      deepNeed: '学会求助',
+      coreFear: '牵连同伴',
+      misbelief: '只能独自承担',
+      changeEvent: '向赵临求助',
+      endState: '愿意共享线索',
+    }])
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+
+    const result = validateChapterContractDelivery({
+      chapterId: 10,
+      content: String((rows.get(chapters) || [])[0].content),
+      reviewNotes: { reader_hook_risks: [] },
+    })
+
+    expect(result.itemResults.find((item) => item.contractItemType === 'character_scene_payoff')?.verdict).toBe('weak')
+  })
+
+  it('does not pass character scene payoff for abstract belief words without concrete action', () => {
+    const rows = createBaseRows(
+      [
+        '林远站在北门外，想起账册和赵临。他选择相信自己还能撑住，也开始怀疑独自承担这件事是否正确。',
+        '门外忽然传来急促脚步声，旧仓那边的守卫追了过来。',
+      ].join('\n\n'),
+    )
+    Object.assign((rows.get(chapterContracts) || [])[0], {
+      requiredCharacterArcIdsJson: JSON.stringify([300]),
+    })
+    rows.set(characters, [
+      { id: 1, novelId: 1, fullName: '林远' },
+    ])
+    rows.set(characterArcs, [{
+      id: 300,
+      novelId: 1,
+      characterId: 1,
+      surfaceWant: '找回账册',
+      deepNeed: '学会求助',
+      coreFear: '牵连同伴',
+      misbelief: '只能独自承担',
+      changeEvent: '向赵临求助',
+      endState: '愿意共享线索',
+    }])
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+
+    const result = validateChapterContractDelivery({
+      chapterId: 10,
+      content: String((rows.get(chapters) || [])[0].content),
+      reviewNotes: { reader_hook_risks: [] },
+    })
+
+    expect(result.itemResults.find((item) => item.contractItemType === 'character_scene_payoff')?.verdict).toBe('weak')
+  })
+
+  it('does not pass theme response when theme words and conflict are only scattered across the chapter', () => {
+    const rows = createBaseRows(
+      [
+        '夜晚的北门外，守卫追查林远的来路，逼他交出旧仓线索，双方僵持了很久。',
+        '林远绕开街口，确认药箱被转去旧仓，线索也随之升级，让主线再向前推进一步。',
+        '门外忽然传来急促脚步声。',
+        '他想起底线、代价和选择这些词，却没有在现场做出任何会改变局面的判断。',
+      ].join('\n\n'),
+    )
+    Object.assign((rows.get(novels) || [])[0], {
+      themeVoiceJson: JSON.stringify({
+        theme: '权力面前是否守住底线',
+        theme_chapter_test: '每章冲突必须迫使角色在利益和底线之间做选择，并写出代价。',
+      }),
+    })
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+
+    const result = validateChapterContractDelivery({
+      chapterId: 10,
+      content: String((rows.get(chapters) || [])[0].content),
+      reviewNotes: { reader_hook_risks: [] },
+    })
+
+    expect(result.itemResults.find((item) => item.contractItemType === 'theme_chapter_response')?.verdict).toBe('weak')
+  })
+
+  it('does not pass relationship arc gate when trigger, interaction, and consequence markers are scattered outside the arc evidence', () => {
+    const rows = createBaseRows(
+      [
+        '因为守卫发现暗门，林远继续追查失窃药箱，确认药箱被转去旧仓，主线因此向前推进一步，线索也随之升级。',
+        '路人说巷口开始封锁，守卫看了一眼旧仓，又问旁人是否见过药箱。',
+        '林远想起赵临和师徒互疑，但没有与赵临见面，也没有让这段关系产生新的后果。门外忽然传来急促脚步声。',
+      ].join('\n\n'),
+    )
+    Object.assign((rows.get(chapterContracts) || [])[0], {
+      requiredRelationshipArcIdsJson: JSON.stringify([400]),
+    })
+    rows.set(characters, [
+      { id: 1, novelId: 1, fullName: '林远' },
+      { id: 2, novelId: 1, fullName: '赵临' },
+    ])
+    rows.set(relationshipArcs, [{
+      id: 400,
+      novelId: 1,
+      charAId: 1,
+      charBId: 2,
+      relationLabelSnapshot: '师徒互疑',
+      startState: '彼此隐瞒',
+      crackPoint: '赵临质问',
+      changeEvent: '交出钥匙',
+      endState: '重新信任',
+    }])
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+
+    const result = validateChapterContractDelivery({
+      chapterId: 10,
+      content: String((rows.get(chapters) || [])[0].content),
+      reviewNotes: { reader_hook_risks: [] },
+    })
+
+    expect(result.itemResults.find((item) => item.contractItemType === 'relationship_arc_gate')?.verdict).toBe('weak')
+  })
+
+  it('does not pass relationship arc gate when trigger, interaction, and consequence are scattered without a shared relation event', () => {
+    const rows = createBaseRows(
+      [
+        '林远因为守卫发现暗门，只能继续追查失窃药箱，确认药箱被转去旧仓。',
+        '赵临问路人是否见过药箱，又看了一眼旧仓门口的脚印。',
+        '林远和赵临后来开始重新信任对方，但正文没有写出这次信任变化由哪次互动触发。',
+        '门外忽然传来急促脚步声。',
+      ].join('\n\n'),
+    )
+    Object.assign((rows.get(chapterContracts) || [])[0], {
+      requiredRelationshipArcIdsJson: JSON.stringify([400]),
+    })
+    rows.set(characters, [
+      { id: 1, novelId: 1, fullName: '林远' },
+      { id: 2, novelId: 1, fullName: '赵临' },
+    ])
+    rows.set(relationshipArcs, [{
+      id: 400,
+      novelId: 1,
+      charAId: 1,
+      charBId: 2,
+      relationLabelSnapshot: '师徒互疑',
+      startState: '彼此隐瞒',
+      crackPoint: '赵临质问',
+      changeEvent: '交出钥匙',
+      endState: '重新信任',
+    }])
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+
+    const result = validateChapterContractDelivery({
+      chapterId: 10,
+      content: String((rows.get(chapters) || [])[0].content),
+      reviewNotes: { reader_hook_risks: [] },
+    })
+
+    expect(result.itemResults.find((item) => item.contractItemType === 'relationship_arc_gate')?.verdict).toBe('weak')
   })
 })

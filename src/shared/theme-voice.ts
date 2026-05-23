@@ -14,6 +14,7 @@ export type ThemeVoiceFlashbackPolicy = 'forbidden' | 'limited' | 'allowed'
 export interface ThemeVoiceDocument {
   writingContractTags: string[]
   theme: string
+  themeChapterTest: string
   motifs: string
   emotionalCore: string
   pov: ThemeVoicePov | ''
@@ -29,6 +30,8 @@ export interface ThemeVoiceDocument {
   dialogueRules: string
   descriptionRules: string
   forbiddenPhrases: string
+  targetWorkSampleGuide: string
+  humanStyleSampleLock: string
 }
 
 export interface ThemeVoiceSnapshot extends ThemeVoiceDocument {
@@ -38,6 +41,7 @@ export interface ThemeVoiceSnapshot extends ThemeVoiceDocument {
 const EMPTY_THEME_VOICE: ThemeVoiceDocument = {
   writingContractTags: [],
   theme: '',
+  themeChapterTest: '',
   motifs: '',
   emotionalCore: '',
   pov: '',
@@ -53,6 +57,8 @@ const EMPTY_THEME_VOICE: ThemeVoiceDocument = {
   dialogueRules: '',
   descriptionRules: '',
   forbiddenPhrases: '',
+  targetWorkSampleGuide: '',
+  humanStyleSampleLock: '',
 }
 
 const POV_LABELS: Record<ThemeVoicePov, string> = {
@@ -131,6 +137,7 @@ export function parseThemeVoiceDocument(raw?: string | null): ThemeVoiceDocument
   return {
     writingContractTags: normalizeWritingContractTags(root.writing_contract_tags ?? root.writingContractTags),
     theme: asText(root.theme),
+    themeChapterTest: asText(root.theme_chapter_test ?? root.themeChapterTest),
     motifs: asText(root.motifs),
     emotionalCore: asText(root.emotional_core ?? root.emotionalCore),
     pov: asText(root.pov) as ThemeVoicePov | '',
@@ -146,6 +153,8 @@ export function parseThemeVoiceDocument(raw?: string | null): ThemeVoiceDocument
     dialogueRules: asText(root.dialogue_rules ?? root.dialogueRules),
     descriptionRules: asText(root.description_rules ?? root.descriptionRules),
     forbiddenPhrases: asText(root.forbidden_phrases ?? root.forbiddenPhrases),
+    targetWorkSampleGuide: asText(root.target_work_sample_guide ?? root.targetWorkSampleGuide),
+    humanStyleSampleLock: asText(root.human_style_sample_lock ?? root.humanStyleSampleLock),
   }
 }
 
@@ -154,6 +163,7 @@ export function parseThemeVoiceSnapshot(raw?: string | null): ThemeVoiceSnapshot
   const readyCount = [
     document.writingContractTags.length > 0,
     document.theme,
+    document.themeChapterTest,
     document.emotionalCore,
     document.pov,
     document.tense,
@@ -182,6 +192,7 @@ export function buildThemeVoicePayload(
   return JSON.stringify(compactObject({
     writing_contract_tags: next.writingContractTags.length > 0 ? next.writingContractTags : undefined,
     theme: next.theme,
+    theme_chapter_test: next.themeChapterTest,
     motifs: next.motifs,
     emotional_core: next.emotionalCore,
     pov: next.pov,
@@ -197,6 +208,8 @@ export function buildThemeVoicePayload(
     dialogue_rules: next.dialogueRules,
     description_rules: next.descriptionRules,
     forbidden_phrases: next.forbiddenPhrases,
+    target_work_sample_guide: next.targetWorkSampleGuide,
+    human_style_sample_lock: next.humanStyleSampleLock,
   }))
 }
 
@@ -204,6 +217,7 @@ export function buildThemeVoiceSummary(themeVoice: ThemeVoiceDocument): string {
   return [
     themeVoice.writingContractTags.length > 0 ? `写作类型：${formatWritingContractTags(themeVoice.writingContractTags)}` : '',
     themeVoice.theme ? `主题：${themeVoice.theme}` : '',
+    themeVoice.themeChapterTest ? `章节级主题验证：${themeVoice.themeChapterTest}` : '',
     themeVoice.motifs ? `母题：${themeVoice.motifs}` : '',
     themeVoice.emotionalCore ? `情感核心：${themeVoice.emotionalCore}` : '',
     themeVoice.pov ? `视角：${POV_LABELS[themeVoice.pov]}` : '',
@@ -219,5 +233,7 @@ export function buildThemeVoiceSummary(themeVoice: ThemeVoiceDocument): string {
     themeVoice.dialogueRules ? `对白规则：${themeVoice.dialogueRules}` : '',
     themeVoice.descriptionRules ? `描写规则：${themeVoice.descriptionRules}` : '',
     themeVoice.forbiddenPhrases ? `禁用表达：${themeVoice.forbiddenPhrases}` : '',
+    themeVoice.targetWorkSampleGuide ? `真实样章对照：${themeVoice.targetWorkSampleGuide}` : '',
+    themeVoice.humanStyleSampleLock ? `人工风格样本锁定：${themeVoice.humanStyleSampleLock}` : '',
   ].filter(Boolean).join('\n')
 }

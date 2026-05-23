@@ -4,6 +4,10 @@ import type {
   StyleFingerprint,
 } from '../../src/types'
 import { getLatestStyleFingerprintForNovel } from './style-analysis.service'
+import { parseThemeVoiceDocument } from '../../src/shared/theme-voice'
+import { getDb } from '../database/db'
+import { novels } from '../database/schema'
+import { eq } from 'drizzle-orm'
 
 const ABSTRACT_TOKENS = [
   '命运',
@@ -111,6 +115,143 @@ function buildReferenceMetrics(fingerprint: StyleFingerprint): StyleComplianceMe
   }
 }
 
+function mergeStatus(left: StyleComplianceResult['status'], right: StyleComplianceResult['status']): StyleComplianceResult['status'] {
+  if (left === 'rewrite' || right === 'rewrite') return 'rewrite'
+  if (left === 'warning' || right === 'warning') return 'warning'
+  return 'pass'
+}
+
+function splitStyleLockLines(value?: string | null): string[] {
+  return (value || '')
+    .split(/\r?\n+|[；;]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function hasAnyToken(text: string, tokens: string[]): boolean {
+  return tokens.some((token) => text.includes(token))
+}
+
+function buildManualReferenceMetrics(guideText: string): StyleComplianceMetricSnapshot {
+  return {
+    avgSentenceLength: hasAnyToken(guideText, ['短句', '短促', '冷硬', '利落']) ? 18 : 22,
+    avgParagraphLength: hasAnyToken(guideText, ['快节奏', '压迫', '紧凑', '短段']) ? 78 : 95,
+    dialogueLineRate: hasAnyToken(guideText, ['对白比例', '对白占比', '对白密度']) ? 32 : 24,
+    abstractTokenDensity: hasAnyToken(guideText, ['现场质感', '动作密度', '信息密度', '实感']) ? 6 : 8,
+  }
+}
+
+function extractManualForbiddenPatterns(lines: string[]): string[] {
+  const result: string[] = []
+  for (const line of lines) {
+    const matches = line.matchAll(/(?:禁止|禁用|避免|不要)\s*([^，。；;、\n]+)/gu)
+    for (const match of matches) {
+      const normalized = normalizeForbiddenPattern(match[1] || '')
+      if (normalized.length >= 2) result.push(normalized)
+    }
+    if (/禁止|禁用|避免|不要|退回/u.test(line)) {
+      const normalized = normalizeForbiddenPattern(line)
+      if (normalized.length >= 2) result.push(normalized)
+    }
+  }
+  return [...new Set(result)]
+}
+
+export function analyzeManualStyleLockCompliance(
+  content: string,
+  themeVoiceJson?: string | null,
+): StyleComplianceResult | null {
+  const themeVoice = parseThemeVoiceDocument(themeVoiceJson)
+  const guideLines = [
+    ...splitStyleLockLines(themeVoice.targetWorkSampleGuide),
+    ...splitStyleLockLines(themeVoice.humanStyleSampleLock),
+  ]
+  if (guideLines.length === 0) return null
+
+  const guideText = guideLines.join('\n')
+  const actualMetrics = buildContentMetrics(content)
+  const referenceMetrics = buildManualReferenceMetrics(guideText)
+  const deviations: string[] = []
+  const rewriteHints: string[] = []
+  const forbiddenPatterns = extractManualForbiddenPatterns(guideLines)
+  const matchedForbiddenPatterns = forbiddenPatterns.filter((pattern) => content.includes(pattern))
+
+  let penalty = 0
+  if (hasAnyToken(guideText, ['短句', '短促', '冷硬', '利落']) && actualMetrics.avgSentenceLength > 28) {
+    penalty += 18
+    deviations.push(`人工风格锁要求短句/利落节奏，当前平均句长 ${actualMetrics.avgSentenceLength} 字。`)
+    rewriteHints.push('压缩连续解释句，把判断拆回动作、对白和短反应。')
+  }
+  if (hasAnyToken(guideText, ['快节奏', '压迫', '紧凑', '短段']) && actualMetrics.avgParagraphLength > 180) {
+    penalty += 16
+    deviations.push(`目标样章口径要求紧凑段落，当前平均段长 ${actualMetrics.avgParagraphLength} 字。`)
+    rewriteHints.push('拆开大段说明，用更短的场景节拍推进。')
+  }
+  if (hasAnyToken(guideText, ['对白比例', '对白占比', '对白密度']) && (actualMetrics.dialogueLineRate < 8 || actualMetrics.dialogueLineRate > 68)) {
+    penalty += 14
+    deviations.push(`目标样章要求校准对白比例，当前对白段占比 ${actualMetrics.dialogueLineRate}%。`)
+    rewriteHints.push('按样章口径补足或压缩对白，让对白承担信息和关系变化。')
+  }
+  if (hasAnyToken(guideText, ['现场质感', '动作密度', '信息密度', '实感', '总结腔', 'AI 化']) && actualMetrics.abstractTokenDensity > 10) {
+    penalty += 18
+    deviations.push(`人工样本锁要求现场质感/信息密度，当前抽象词密度 ${actualMetrics.abstractTokenDensity}% 偏高。`)
+    rewriteHints.push('删掉总结腔和抽象判断，替换为可见动作、证据、筹码和物理后果。')
+  }
+  if (matchedForbiddenPatterns.length > 0) {
+    penalty += Math.min(30, matchedForbiddenPatterns.length * 12)
+    deviations.push(`命中人工风格锁禁用表达：${matchedForbiddenPatterns.join('、')}。`)
+    rewriteHints.push('删除命中的人工禁用表达，改成目标样章允许的叙述方式。')
+  }
+
+  const score = clampScore(100 - penalty)
+  const status: StyleComplianceResult['status'] = penalty >= 30 || matchedForbiddenPatterns.length >= 2
+    ? 'rewrite'
+    : penalty > 0
+      ? 'warning'
+      : 'pass'
+
+  return {
+    status,
+    score,
+    summary: status === 'pass'
+      ? `真实样章/人工风格锁通过，当前得分 ${score}。`
+      : status === 'rewrite'
+        ? `真实样章/人工风格锁偏离达到重写阈值，当前得分 ${score}。`
+        : `真实样章/人工风格锁出现可修复偏移，当前得分 ${score}。`,
+    deviations,
+    rewriteHints: [...new Set(rewriteHints)],
+    matchedForbiddenPatterns,
+    forbiddenPatternHitCount: matchedForbiddenPatterns.length,
+    referenceMetrics,
+    actualMetrics,
+  }
+}
+
+function mergeStyleComplianceResults(
+  base: StyleComplianceResult | null,
+  manual: StyleComplianceResult | null,
+): StyleComplianceResult | null {
+  if (!base) return manual
+  if (!manual) return base
+  const status = mergeStatus(base.status, manual.status)
+  const score = Math.min(base.score, manual.score)
+  return {
+    status,
+    score,
+    summary: status === 'pass'
+      ? `风格合规通过，当前得分 ${score}。`
+      : status === 'rewrite'
+        ? `风格偏离已达到重写阈值，当前得分 ${score}。`
+        : `风格出现可修复偏移，当前得分 ${score}。`,
+    deviations: [...new Set([...base.deviations, ...manual.deviations])],
+    rewriteHints: [...new Set([...base.rewriteHints, ...manual.rewriteHints])],
+    matchedForbiddenPatterns: [...new Set([...base.matchedForbiddenPatterns, ...manual.matchedForbiddenPatterns])],
+    forbiddenPatternHitCount: base.forbiddenPatternHitCount + manual.forbiddenPatternHitCount,
+    referenceMetrics: base.referenceMetrics,
+    actualMetrics: base.actualMetrics,
+  }
+}
+
 export function analyzeStyleCompliance(
   content: string,
   fingerprint: StyleFingerprint,
@@ -213,6 +354,14 @@ export function analyzeNovelStyleCompliance(
   content: string,
 ): StyleComplianceResult | null {
   const payload = getLatestStyleFingerprintForNovel(novelId)
-  if (!payload) return null
-  return analyzeStyleCompliance(content, payload.fingerprint)
+  const baseResult = payload ? analyzeStyleCompliance(content, payload.fingerprint) : null
+  let themeVoiceJson = ''
+  try {
+    const novel = getDb().select({ themeVoiceJson: novels.themeVoiceJson }).from(novels).where(eq(novels.id, novelId)).all()[0]
+    themeVoiceJson = novel?.themeVoiceJson || ''
+  } catch {
+    themeVoiceJson = ''
+  }
+  const manualResult = analyzeManualStyleLockCompliance(content, themeVoiceJson)
+  return mergeStyleComplianceResults(baseResult, manualResult)
 }

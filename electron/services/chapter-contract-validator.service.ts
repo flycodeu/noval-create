@@ -10,10 +10,15 @@ import {
   chapterContracts,
   chapterSegments,
   chapters,
+  characterArcs,
+  characters,
   foreshadowLedger,
+  novels,
+  relationshipArcs,
   sceneContracts,
   storyThreads,
 } from '../database/schema'
+import { parseThemeVoiceDocument } from '../../src/shared/theme-voice'
 import { throwUserFacingError } from '../utils/user-facing-error'
 import { analyzeForeshadowProgress, analyzeStoryThreadProgress } from './thread-progress.service'
 
@@ -32,7 +37,12 @@ interface ContractValidationContext {
   sceneSnapshots: ChapterContractValidationSceneSnapshot[]
   threadRows: typeof storyThreads.$inferSelect[]
   foreshadowRows: typeof foreshadowLedger.$inferSelect[]
+  characterRows: typeof characters.$inferSelect[]
+  characterArcRows: typeof characterArcs.$inferSelect[]
+  relationshipArcRows: typeof relationshipArcs.$inferSelect[]
   scenePlanHooks: string[]
+  theme: string
+  themeChapterTest: string
 }
 
 interface ParagraphEvidence {
@@ -113,6 +123,82 @@ const HOOK_MARKERS = [
   '?',
   '？',
 ]
+
+const CHARACTER_SCENE_MARKERS = [
+  '选择',
+  '决定',
+  '拒绝',
+  '承认',
+  '交出',
+  '留下',
+  '放弃',
+  '行动',
+  '追',
+  '拦',
+  '救',
+  '骗',
+  '失去',
+  '代价',
+  '受伤',
+  '破裂',
+  '和解',
+  '相信',
+  '怀疑',
+  '动摇',
+  '裂缝',
+  '误信',
+]
+
+const CHARACTER_ACTION_MARKERS = [
+  '决定',
+  '拒绝',
+  '承认',
+  '交出',
+  '留下',
+  '放弃',
+  '行动',
+  '追',
+  '拦',
+  '救',
+  '骗',
+]
+
+const CHARACTER_PAYOFF_MARKERS = [
+  '失去',
+  '代价',
+  '受伤',
+  '破裂',
+  '和解',
+  '相信',
+  '怀疑',
+  '动摇',
+  '裂缝',
+  '误信',
+  '信任',
+  '不再',
+  '开始',
+]
+
+const THEME_RESPONSE_MARKERS = [
+  '选择',
+  '代价',
+  '底线',
+  '信念',
+  '妥协',
+  '背叛',
+  '相信',
+  '怀疑',
+  '牺牲',
+  '放弃',
+  '守住',
+  '证明',
+  '反问',
+  '为什么',
+]
+
+const RELATION_TRIGGER_MARKERS = ['因为', '当', '发现', '得知', '逼', '质问', '拒绝', '背叛', '救', '交出', '暴露']
+const RELATION_INTERACTION_MARKERS = ['说', '问', '答', '看', '盯', '拉住', '推开', '挡', '递', '沉默', '握', '避开', '靠近']
+const RELATION_CONSEQUENCE_MARKERS = ['于是', '因此', '从此', '不再', '开始', '决定', '留下', '离开', '破裂', '和解', '信任', '怀疑', '欠', '代价']
 
 function normalizeText(value?: string | null): string {
   return typeof value === 'string' ? value.trim() : ''
@@ -243,6 +329,35 @@ function findBestEvidence(
   })
 }
 
+function getEvidenceParagraphs(
+  paragraphs: string[],
+  keywords: string[],
+): string[] {
+  return paragraphs.filter((paragraph) => countMatchedKeywords(paragraph, keywords) > 0)
+}
+
+function hasAllMarkerGroups(paragraph: string, groups: string[][]): boolean {
+  return groups.every((markers) => countMarkers(paragraph, markers) > 0)
+}
+
+function buildLocalEvidenceWindows(
+  paragraphs: string[],
+  keywords: string[],
+  radius = 1,
+): string[] {
+  if (paragraphs.length === 0) return []
+  const anchorIndexes = paragraphs
+    .map((paragraph, index) => ({ paragraph, index }))
+    .filter(({ paragraph }) => keywords.length === 0 || countMatchedKeywords(paragraph, keywords) > 0)
+    .map(({ index }) => index)
+
+  return [...new Set(anchorIndexes.map((index) => {
+    const start = Math.max(0, index - radius)
+    const end = Math.min(paragraphs.length, index + radius + 1)
+    return paragraphs.slice(start, end).join('\n')
+  }))]
+}
+
 function buildSummary(items: ContractValidationItem[]): string {
   const blockerCount = items.filter((item) => item.verdict === 'missing' || item.verdict === 'contradicted').length
   const warningCount = items.filter((item) => item.verdict === 'weak' || item.verdict === 'overdelivered').length
@@ -361,6 +476,7 @@ function loadValidationContext(chapterId: number): ContractValidationContext {
   if (!chapter) {
     throwUserFacingError('chapter.notFound')
   }
+  const novel = db.select().from(novels).where(eq(novels.id, chapter.novelId)).all()[0] || null
 
   const chapterContractRow = db.select().from(chapterContracts).where(eq(chapterContracts.chapterId, chapterId)).all()[0] || null
   const segmentRows = db.select().from(chapterSegments)
@@ -402,6 +518,8 @@ function loadValidationContext(chapterId: number): ContractValidationContext {
 
   const servedThreadIds = parseNumberArray(chapterContractRow?.servedThreadIdsJson)
   const requiredForeshadowIds = parseNumberArray(chapterContractRow?.requiredForeshadowIdsJson)
+  const requiredCharacterArcIds = parseNumberArray(chapterContractRow?.requiredCharacterArcIdsJson)
+  const requiredRelationshipArcIds = parseNumberArray(chapterContractRow?.requiredRelationshipArcIdsJson)
 
   const threadRows = servedThreadIds.length > 0
     ? db.select().from(storyThreads).where(eq(storyThreads.novelId, chapter.novelId)).all()
@@ -411,6 +529,19 @@ function loadValidationContext(chapterId: number): ContractValidationContext {
     ? db.select().from(foreshadowLedger).where(eq(foreshadowLedger.novelId, chapter.novelId)).all()
       .filter((row) => requiredForeshadowIds.includes(row.id))
     : []
+  const characterArcRows = requiredCharacterArcIds.length > 0
+    ? db.select().from(characterArcs).where(eq(characterArcs.novelId, chapter.novelId)).all()
+      .filter((row) => requiredCharacterArcIds.includes(row.id))
+    : []
+  const relationshipArcRows = requiredRelationshipArcIds.length > 0
+    ? db.select().from(relationshipArcs).where(eq(relationshipArcs.novelId, chapter.novelId)).all()
+      .filter((row) => requiredRelationshipArcIds.includes(row.id))
+    : []
+  const needsCharacterRows = characterArcRows.length > 0 || relationshipArcRows.length > 0
+  const characterRows = needsCharacterRows
+    ? db.select().from(characters).where(eq(characters.novelId, chapter.novelId)).all()
+    : []
+  const themeVoice = parseThemeVoiceDocument(novel?.themeVoiceJson)
 
   return {
     currentChapterNum: chapter.chapterNum,
@@ -419,7 +550,12 @@ function loadValidationContext(chapterId: number): ContractValidationContext {
     sceneSnapshots,
     threadRows,
     foreshadowRows,
+    characterRows,
+    characterArcRows,
+    relationshipArcRows,
     scenePlanHooks: parseScenePlanHooks(chapter.scenePlanJson),
+    theme: themeVoice.theme,
+    themeChapterTest: themeVoice.themeChapterTest,
   }
 }
 
@@ -442,6 +578,142 @@ function validateChapterGoal(paragraphs: string[], context: ContractValidationCo
     rewriteHint: verdict === 'pass'
       ? ''
       : '补一段能直接兑现本章目标的关键动作、结果或关系变化，不要只保留铺垫。',
+  })
+}
+
+function getCharacterNameById(rows: typeof characters.$inferSelect[]): Map<number, string> {
+  return new Map(rows.map((row) => [row.id, normalizeText(row.fullName) || `角色#${row.id}`]))
+}
+
+function validateThemeResponse(paragraphs: string[], context: ContractValidationContext): ContractValidationItem | null {
+  const expected = context.themeChapterTest || context.theme
+  if (!expected) return null
+  const themeKeywords = buildKeywordCandidates(context.theme, context.themeChapterTest)
+  const evidenceWindows = buildLocalEvidenceWindows(paragraphs, themeKeywords, 1)
+  const hasLocalThemeResponse = evidenceWindows.some((windowText) =>
+    countMarkers(windowText, CONFLICT_MARKERS) > 0
+    && countMarkers(windowText, THEME_RESPONSE_MARKERS) > 0)
+  const hasPartialThemeResponse = evidenceWindows.some((windowText) =>
+    countMarkers(windowText, CONFLICT_MARKERS) > 0
+    || countMarkers(windowText, THEME_RESPONSE_MARKERS) > 0)
+  const evidence = findBestEvidence(paragraphs, themeKeywords, [...CONFLICT_MARKERS, ...THEME_RESPONSE_MARKERS])
+  const hasThemeText = themeKeywords.length === 0 || evidence.hitCount > 0
+  const verdict: ContractValidationVerdict = hasThemeText && hasLocalThemeResponse
+    ? 'pass'
+    : hasThemeText && hasPartialThemeResponse
+      ? 'weak'
+      : 'missing'
+  return makeItem({
+    contractItemType: 'theme_chapter_response',
+    expected,
+    verdict,
+    evidenceExcerpt: evidence.excerpt,
+    rewriteHint: verdict === 'pass'
+      ? ''
+      : '补一场会迫使角色回答主题命题的冲突：让选择、底线、代价或妥协在现场发生，不要只推进事件。',
+  })
+}
+
+function validateCharacterScenePayoff(
+  row: typeof characterArcs.$inferSelect,
+  paragraphs: string[],
+  characterNameById: Map<number, string>,
+): ContractValidationItem {
+  const label = characterNameById.get(row.characterId) || `角色#${row.characterId}`
+  const keywords = buildKeywordCandidates(
+    label,
+    row.surfaceWant,
+    row.deepNeed,
+    row.coreFear,
+    row.misbelief,
+    row.changeEvent,
+    row.endState,
+  )
+  const evidence = findBestEvidence(paragraphs, keywords, CHARACTER_SCENE_MARKERS)
+  const evidenceParagraphs = getEvidenceParagraphs(paragraphs, keywords)
+  const evidenceWindows = buildLocalEvidenceWindows(paragraphs, keywords, 1)
+  const hasScenePayoff = evidenceParagraphs.some((paragraph) =>
+    countMarkers(paragraph, CHARACTER_ACTION_MARKERS) > 0
+    && countMarkers(paragraph, CHARACTER_PAYOFF_MARKERS) > 0)
+  const hasPartialPayoff = evidenceWindows.some((windowText) =>
+    countMarkers(windowText, CHARACTER_ACTION_MARKERS) > 0
+    || countMarkers(windowText, CHARACTER_PAYOFF_MARKERS) > 0
+    || countMarkers(windowText, CHARACTER_SCENE_MARKERS) >= 2)
+  const hasCharacterAnchor = evidence.hitCount > 0
+  const verdict: ContractValidationVerdict = hasCharacterAnchor && hasScenePayoff
+    ? 'pass'
+    : hasCharacterAnchor && hasPartialPayoff
+      ? 'weak'
+      : 'missing'
+  return makeItem({
+    contractItemType: 'character_scene_payoff',
+    contractItemId: row.id,
+    expected: `${label} 必须在本章完成一次选择、行动、代价、关系变化或误信念裂缝。`,
+    verdict,
+    evidenceExcerpt: evidence.excerpt,
+    rewriteHint: verdict === 'pass'
+      ? ''
+      : `补出“${label}”的场景化兑现：至少写清一次选择/行动，它带来的代价或关系变化，以及误信念是否出现裂缝。`,
+  })
+}
+
+function validateRelationshipArcGate(
+  row: typeof relationshipArcs.$inferSelect,
+  paragraphs: string[],
+  characterNameById: Map<number, string>,
+): ContractValidationItem {
+  const charAName = characterNameById.get(row.charAId) || `角色#${row.charAId}`
+  const charBName = characterNameById.get(row.charBId) || `角色#${row.charBId}`
+  const label = `${charAName} × ${charBName}`
+  const keywords = buildKeywordCandidates(
+    label,
+    charAName,
+    charBName,
+    row.relationLabelSnapshot,
+    row.startState,
+    row.crackPoint,
+    row.changeEvent,
+    row.endState,
+  )
+  const evidence = findBestEvidence(paragraphs, keywords, [
+    ...RELATION_TRIGGER_MARKERS,
+    ...RELATION_INTERACTION_MARKERS,
+    ...RELATION_CONSEQUENCE_MARKERS,
+  ])
+  const evidenceWindows = buildLocalEvidenceWindows(paragraphs, keywords, 1)
+  const relationshipWindows = evidenceWindows.filter((windowText) =>
+    countMatchedKeywords(windowText, [charAName]) > 0
+    && countMatchedKeywords(windowText, [charBName]) > 0)
+  const relationshipParagraphs = paragraphs.filter((paragraph) =>
+    countMatchedKeywords(paragraph, [charAName]) > 0
+    && countMatchedKeywords(paragraph, [charBName]) > 0
+    && (countMatchedKeywords(paragraph, keywords) > 0
+      || countMarkers(paragraph, [...RELATION_TRIGGER_MARKERS, ...RELATION_INTERACTION_MARKERS, ...RELATION_CONSEQUENCE_MARKERS]) > 0))
+  const evidenceParagraphs = relationshipWindows.length > 0 ? relationshipWindows : getEvidenceParagraphs(paragraphs, keywords)
+  const triggerHits = evidenceParagraphs.reduce((count, paragraph) => count + countMarkers(paragraph, RELATION_TRIGGER_MARKERS), 0)
+  const interactionHits = evidenceParagraphs.reduce((count, paragraph) => count + countMarkers(paragraph, RELATION_INTERACTION_MARKERS), 0)
+  const consequenceHits = evidenceParagraphs.reduce((count, paragraph) => count + countMarkers(paragraph, RELATION_CONSEQUENCE_MARKERS), 0)
+  const hasTriggerInteractionParagraph = relationshipParagraphs.some((paragraph) =>
+    countMarkers(paragraph, RELATION_TRIGGER_MARKERS) > 0
+    && countMarkers(paragraph, RELATION_INTERACTION_MARKERS) > 0)
+  const hasRelationshipConsequence = relationshipParagraphs.some((paragraph) =>
+    countMarkers(paragraph, RELATION_CONSEQUENCE_MARKERS) > 0)
+  const hasArcAnchor = evidence.hitCount > 0
+  const hasBothCharacters = relationshipWindows.length > 0
+  const verdict: ContractValidationVerdict = hasArcAnchor && hasBothCharacters && hasTriggerInteractionParagraph && hasRelationshipConsequence
+    ? 'pass'
+    : hasArcAnchor && (triggerHits > 0 || interactionHits > 0 || consequenceHits > 0)
+      ? 'weak'
+      : 'missing'
+  return makeItem({
+    contractItemType: 'relationship_arc_gate',
+    contractItemId: row.id,
+    expected: `${label} 的关系变化必须有触发事件、可见互动和后果。`,
+    verdict,
+    evidenceExcerpt: evidence.excerpt,
+    rewriteHint: verdict === 'pass'
+      ? ''
+      : `补强关系弧“${label}”：先写触发事件，再写两人可见互动，最后写清关系后果，不要只登记状态变化。`,
   })
 }
 
@@ -636,6 +908,9 @@ export function validateChapterContractDelivery(input: {
   const goalItem = validateChapterGoal(paragraphs, context)
   if (goalItem) items.push(goalItem)
 
+  const themeItem = validateThemeResponse(paragraphs, context)
+  if (themeItem) items.push(themeItem)
+
   context.sceneSnapshots.forEach((scene, index) => {
     const sceneParagraphs = sceneBuckets[index] || []
     items.push(validateSceneConflict(scene, sceneParagraphs, paragraphs))
@@ -648,6 +923,15 @@ export function validateChapterContractDelivery(input: {
 
   context.foreshadowRows.forEach((row) => {
     items.push(validateForeshadowDelivery(row, paragraphs, context.currentChapterNum))
+  })
+
+  const characterNameById = getCharacterNameById(context.characterRows)
+  context.characterArcRows.forEach((row) => {
+    items.push(validateCharacterScenePayoff(row, paragraphs, characterNameById))
+  })
+
+  context.relationshipArcRows.forEach((row) => {
+    items.push(validateRelationshipArcGate(row, paragraphs, characterNameById))
   })
 
   items.push(validateChapterHook(paragraphs, context, reviewSignals))

@@ -91,6 +91,7 @@ export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
     '- 如果“本章应回收伏笔”里已有到期或超期线索，至少安排一个可见动作、对话或结果去推进它，而不是继续悬空。',
     '- 每章同时推进的活跃支线/伏笔不超过 3-5 条，避免信息过载——优先推进标注了[即将回收]的线索。',
     '- 如果"活跃支线与伏笔"中有标注[已N章未提及]的线索，至少用一个场景的细节或对话暗示来回顾它。',
+    ...CHAPTER_DELIVERY_GATE_LINES,
     '- 每个场景必须包含：开场动作或悬念钩子、至少一个具体冲突或张力点、退出时留下未解决的问题或下一步悬念。',
     '- 不要写"角色思考了很久"或"一番讨论后"这类跳过过程的总结句——把过程展开写。',
   ])
@@ -117,6 +118,13 @@ function buildRhythmGuide(emotionTone?: string, targetWords?: number): string {
   return ''
 }
 
+const CHAPTER_DELIVERY_GATE_LINES = [
+  '- 章节合同里的必推人物弧，必须在本章让关键人物完成一次选择、行动、代价、关系变化或误信念裂缝，不能只提到人物状态。',
+  '- 主题不是装饰句：本章冲突必须回应主题命题，让角色在底线、欲望、代价或妥协之间做出可见判断。',
+  '- 关系弧变化必须同时有触发事件、可见互动和后果，不能只把关系状态从 A 改成 B。',
+  '- 如果硬约束或文风参考包含真实样章对照/人工风格样本锁定，必须按其节奏、句式、信息密度、对白比例和现场质感执行。',
+]
+
 export function buildChapterDraftPrompt(params: ChapterRewritePromptInput): string {
   const promptTier = normalizePromptTier(params.promptTier)
   const rhythmGuide = buildRhythmGuide(params.emotionTone, params.targetWords)
@@ -127,6 +135,7 @@ export function buildChapterDraftPrompt(params: ChapterRewritePromptInput): stri
     '- 当前目标是交出可审校的初稿，不是一次性追求终稿腔调。',
     '- 先把事件、状态、关系、物品去向和代价写准，后续再精修语言。',
     '- 行文必须贴中文小说语感，不要露出提示词腔、翻译腔和说明书味。',
+    ...CHAPTER_DELIVERY_GATE_LINES,
     '- 如果近期结构告警提示主角太顺、代价蒸发或反转硬塞，必须在本章正文里补出真实阻力、持续后果或铺垫兑现。',
     ...(isEnhancedTier(promptTier) && rhythmGuide ? [`- 本章节奏指导：${rhythmGuide}`] : []),
     ...(isKeyTier(promptTier)
@@ -142,6 +151,7 @@ export function buildChapterWritingPrompt(params: ChapterWritingPromptInput): st
     '- 正文必须像给真实读者看的成稿，不要保留策划腔、提示词腔或解释腔。',
     '- 如果某个转折不能提高理解度或追读欲，就不要硬加。',
     '- 避免不合中文语境的搭配、书面翻译句式和为了显高级而生造的表达。',
+    ...CHAPTER_DELIVERY_GATE_LINES,
     ...(rhythmGuide ? [`- 本章节奏指导：${rhythmGuide}`] : []),
   ])
   return applyPromptOverride('chapterWriting', fallback, params as unknown as Record<string, unknown>)
@@ -176,6 +186,11 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
       '- dialogue_info_density_risks 只写对白里该给而没给的地点、目标、证据、筹码或下一步动作。',
       '- dialogue_voice_lock_summary 用一句话说明本章生成前要锁谁的声音。',
       '- required_voice_lock_character_ids 只保留本章需要强制启用 voice lock 的角色 id。',
+      ...CHAPTER_DELIVERY_GATE_LINES,
+      '- 必须明确区分“语言修好了”和“剧情真的变紧了”：语言自然但冲突链、代价链、目标链没有变化，仍要写入 critical_fixes 或 arc_progress_risks。',
+      '- 冲突链检查：正文是否让阻力升级、交锋可见、选择被迫发生；如果只是解释冲突存在而没有现场交锋，要判为偏弱。',
+      '- 代价链检查：正文是否让行动带来损耗、失去、关系后果或后续压力；如果风险一段内被抹平，要判为代价蒸发。',
+      '- 目标链检查：正文是否让本章目标发生可确认的前进、受阻、改向或失败；如果只重复目标口号，要判为没有推进。',
       '- 关键章如果主功能仍然只是 setup / exposition / breather，要在 reader_hook_risks 或 critical_fixes 里明确指出它名义关键、实际过渡的问题。',
       ...(isEnhancedTier(promptTier)
         ? ['- 因果链检查：本章每个重大事件是否有合理的触发原因，结果是否产生了后续影响而非凭空出现凭空消失。']
@@ -204,6 +219,7 @@ export function buildChapterRewritePrompt(params: ChapterRewritePromptInput): st
     '- 对话自然度：允许打断、省略、口误、沉默、答非所问。上下级不同调、亲疏不同温度、紧张时短句、放松时废话多。',
     '- 如果近期结构告警指出顺推、代价蒸发、反转硬塞或高潮分布失衡，重写时必须在正文里真实修复，而不是只润色句子。',
     ...(rhythmGuide ? [`- 本章节奏指导：${rhythmGuide}`] : []),
+    ...CHAPTER_DELIVERY_GATE_LINES,
     '- 关键章节不允许只润色表面措辞，必须同时兑现阶段冲突、结果代价和关系变化。',
   ])
   return applyPromptOverride('chapterRewrite', fallback, params as unknown as Record<string, unknown>)

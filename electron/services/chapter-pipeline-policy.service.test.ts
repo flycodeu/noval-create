@@ -104,6 +104,23 @@ describe('chapter pipeline policy', () => {
       .toBeLessThan(summary.topIssues.findIndex((issue) => issue.source === 'language_risks'))
   })
 
+  it('routes weak theme, character, and relationship contract items into rewrite priority through arc risks', () => {
+    const summary = buildReviewPrioritySummary(createReviewNotes({
+      arc_progress_risks: [
+        '每章冲突必须回应主题命题：正文只有提及，没有形成明确推进。',
+        '林远必须完成一次选择、行动、代价或误信念裂缝：正文只有提及，没有形成明确推进。',
+        '林远 × 赵临 的关系变化必须有触发事件、可见互动和后果：正文只有提及，没有形成明确推进。',
+      ],
+      contract_validation: {
+        status: 'warning',
+        rewriteHints: ['补强人物场景化兑现、主题回应和关系弧后果。'],
+      },
+    }))
+
+    expect(summary.topIssues.some((issue) => issue.source === 'arc_progress_risks')).toBe(true)
+    expect(summary.forceMaxCoverage).toBe(true)
+  })
+
   it('keeps batch 7 provenance and mode findings ahead of generic polish without rewrite_required', () => {
     const summary = buildReviewPrioritySummary(createReviewNotes({
       typed_ref_risks: ['线程引用仍有 unresolved typed ref。'],
@@ -296,7 +313,75 @@ describe('chapter pipeline policy', () => {
     })
 
     expect(report.status).toBe('fail')
+    expect(report.conflictChain.status).not.toBe('pass')
+    expect(report.costChain.status).toBe('fail')
+    expect(report.goalChain.status).toBe('fail')
     expect(report.findings.join('\n')).toContain('更像语言润色而非剧情修复')
+  })
+
+  it('separates conflict, cost, and goal chain scores from generic language edits', () => {
+    vi.mocked(computeCandidateSimilarity).mockReturnValue(0.62)
+    const reviewNotes = createReviewNotes({
+      critical_fixes: ['本章需要补真实冲突、代价和目标推进。'],
+      rewrite_required: true,
+    })
+    const summary = buildReviewPrioritySummary(reviewNotes)
+    const report = analyzeRewriteNarrativeDelta({
+      originalContent: [
+        '林远走进屋里。他看见灯还亮着。副手说没事。事情就这样过去了。',
+        '桌上的伤药没有拆封，窗外的脚步声也没有引起任何人的注意。',
+        '他只是点点头，把上一章留下的伤势和追兵都暂时放到一边。',
+        '门外那道影子停了很久，最后也没有造成任何新的压力。',
+        '这一段仍然没有交代伤势如何影响行动，也没有让追兵逼出新的选择。',
+      ].join(''),
+      rewrittenContent: [
+        '林远推门时撞见追兵已经逼到窗下，副手压着伤口站不稳，只好把药箱先递给他。',
+        '他为了确认旧仓线索，选择从后门逃出去，却因此暴露暗号，失去继续藏身的机会。',
+        '追兵拦住巷口，林远拒绝交出钥匙，被迫打碎灯盏反制，手臂也被划伤。',
+        '这次冲突让他拿到新脚印的位置，也让目标从单纯找药箱改成阻止内应转移证据。',
+        '门外忽然传来急促脚步声，他知道下一步必须先救出副手，否则线索会彻底断掉。',
+      ].join(''),
+      reviewPrioritySummary: summary,
+      reviewNotes,
+    })
+
+    expect(report.conflictChain.status).toBe('pass')
+    expect(report.costChain.status).toBe('pass')
+    expect(report.goalChain.status).toBe('pass')
+    expect(report.findings.join('\n')).not.toContain('链证据密度仅')
+  })
+
+  it('does not require mechanical chain density growth when rewritten draft keeps an already solid plot chain', () => {
+    vi.mocked(computeCandidateSimilarity).mockReturnValue(0.58)
+    const reviewNotes = createReviewNotes({
+      critical_fixes: ['修正连续性和场景承接，不要求额外加码冲突。'],
+      rewrite_required: true,
+    })
+    const summary = buildReviewPrioritySummary(reviewNotes)
+    const original = [
+      '林远追到旧仓，被守卫拦住，只好交出假钥匙换来一息空隙。',
+      '他为了确认药箱去向，选择暴露暗号，失去继续潜伏的机会。',
+      '赵临质问他为何独自行动，两人因此开始重新信任，却也欠下新的代价。',
+      '追兵逼近巷口，他决定先救副手，再阻止内应转移证据。',
+    ].join('')
+    const rewritten = [
+      '林远赶到旧仓时，守卫已经拦在门前，他交出假钥匙，只换来短短一息。',
+      '为了确认药箱去向，他选择暴露暗号，也失去继续潜伏的机会。',
+      '赵临当面质问他为何又独自行动，两人因此开始重新信任，却欠下新的代价。',
+      '追兵逼近巷口，他改向先救副手，再阻止内应转移证据。',
+    ].join('')
+
+    const report = analyzeRewriteNarrativeDelta({
+      originalContent: original,
+      rewrittenContent: rewritten,
+      reviewPrioritySummary: summary,
+      reviewNotes,
+    })
+
+    expect(report.conflictChain.status).toBe('pass')
+    expect(report.costChain.status).toBe('pass')
+    expect(report.goalChain.status).toBe('pass')
+    expect(report.findings.join('\n')).not.toContain('更像改词句')
   })
 
   it('blocks mini review when rewrite delta proves plot repair did not land', () => {

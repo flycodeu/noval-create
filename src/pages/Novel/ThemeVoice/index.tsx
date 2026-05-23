@@ -50,6 +50,7 @@ interface Props {
 interface ThemeVoiceFormValues {
   writingContractTags: string[]
   theme: string
+  themeChapterTest: string
   motifs: string
   emotionalCore: string
   pov: ThemeVoicePov | ''
@@ -65,6 +66,8 @@ interface ThemeVoiceFormValues {
   dialogueRules: string
   descriptionRules: string
   forbiddenPhrases: string
+  targetWorkSampleGuide: string
+  humanStyleSampleLock: string
 }
 
 const POV_OPTIONS: Array<{ value: ThemeVoicePov; label: string }> = [
@@ -114,6 +117,7 @@ const FLASHBACK_POLICY_OPTIONS: Array<{ value: ThemeVoiceFlashbackPolicy; label:
 const EMPTY_THEME_VOICE_VALUES: ThemeVoiceFormValues = {
   writingContractTags: [],
   theme: '',
+  themeChapterTest: '',
   motifs: '',
   emotionalCore: '',
   pov: '',
@@ -129,6 +133,8 @@ const EMPTY_THEME_VOICE_VALUES: ThemeVoiceFormValues = {
   dialogueRules: '',
   descriptionRules: '',
   forbiddenPhrases: '',
+  targetWorkSampleGuide: '',
+  humanStyleSampleLock: '',
 }
 
 function compactText(value?: string | null, max = 44): string {
@@ -149,6 +155,7 @@ function normalizeFormValues(values: ThemeVoiceFormValues): ThemeVoiceFormValues
   return {
     writingContractTags: normalizeWritingContractTags(values.writingContractTags),
     theme: normalizeText(values.theme),
+    themeChapterTest: normalizeText(values.themeChapterTest),
     motifs: normalizeText(values.motifs),
     emotionalCore: normalizeText(values.emotionalCore),
     pov: values.pov,
@@ -164,6 +171,8 @@ function normalizeFormValues(values: ThemeVoiceFormValues): ThemeVoiceFormValues
     dialogueRules: normalizeText(values.dialogueRules),
     descriptionRules: normalizeText(values.descriptionRules),
     forbiddenPhrases: normalizeText(values.forbiddenPhrases),
+    targetWorkSampleGuide: normalizeText(values.targetWorkSampleGuide),
+    humanStyleSampleLock: normalizeText(values.humanStyleSampleLock),
   }
 }
 
@@ -210,6 +219,7 @@ function mergeGeneratedValues(
   return {
     writingContractTags: pickTags(),
     theme: pick(current.theme, result.theme),
+    themeChapterTest: pick(current.themeChapterTest, result.themeChapterTest),
     motifs: pick(current.motifs, result.motifs),
     emotionalCore: pick(current.emotionalCore, result.emotionalCore),
     pov: mode === 'fill_blanks' && current.pov ? current.pov : (result.pov || current.pov),
@@ -225,6 +235,8 @@ function mergeGeneratedValues(
     dialogueRules: pick(current.dialogueRules, result.dialogueRules),
     descriptionRules: pick(current.descriptionRules, result.descriptionRules),
     forbiddenPhrases: pick(current.forbiddenPhrases, result.forbiddenPhrases),
+    targetWorkSampleGuide: pick(current.targetWorkSampleGuide, result.targetWorkSampleGuide),
+    humanStyleSampleLock: pick(current.humanStyleSampleLock, result.humanStyleSampleLock),
   }
 }
 
@@ -266,6 +278,7 @@ export default function ThemeVoicePage({ novelId }: Props) {
   const foundationCount = [
     currentValues.writingContractTags.length > 0,
     currentValues.theme,
+    currentValues.themeChapterTest,
     currentValues.emotionalCore,
     currentValues.pov,
     currentValues.tense,
@@ -283,6 +296,8 @@ export default function ThemeVoicePage({ novelId }: Props) {
     currentValues.voiceKeywords,
     currentValues.descriptionRules,
     currentValues.forbiddenPhrases,
+    currentValues.targetWorkSampleGuide,
+    currentValues.humanStyleSampleLock,
   ].filter(isFilled).length
   const applyThemeVoiceDraft = useCallback((draft: Partial<ThemeVoiceFormValues>) => {
     form.setFieldsValue(buildCurrentFormValues(snapshot, draft))
@@ -306,6 +321,7 @@ export default function ThemeVoicePage({ novelId }: Props) {
       applyThemeVoiceDraft({
         writingContractTags: Array.isArray(fields.writingContractTags) ? fields.writingContractTags : undefined,
         theme: typeof fields.theme === 'string' ? fields.theme : undefined,
+        themeChapterTest: typeof fields.themeChapterTest === 'string' ? fields.themeChapterTest : undefined,
         motifs: typeof fields.motifs === 'string' ? fields.motifs : undefined,
         emotionalCore: typeof fields.emotionalCore === 'string' ? fields.emotionalCore : undefined,
         pov: fields.pov,
@@ -321,6 +337,8 @@ export default function ThemeVoicePage({ novelId }: Props) {
         dialogueRules: typeof fields.dialogueRules === 'string' ? fields.dialogueRules : undefined,
         descriptionRules: typeof fields.descriptionRules === 'string' ? fields.descriptionRules : undefined,
         forbiddenPhrases: typeof fields.forbiddenPhrases === 'string' ? fields.forbiddenPhrases : undefined,
+        targetWorkSampleGuide: typeof fields.targetWorkSampleGuide === 'string' ? fields.targetWorkSampleGuide : undefined,
+        humanStyleSampleLock: typeof fields.humanStyleSampleLock === 'string' ? fields.humanStyleSampleLock : undefined,
       })
     },
     persistPreview: async (nextSnapshot, preview) => {
@@ -548,6 +566,7 @@ export default function ThemeVoicePage({ novelId }: Props) {
                     fields: [
                       { key: 'writingContractTags', label: '写作类型', type: 'string[]', value: currentValues.writingContractTags, hint: '可包含爽文、写实等短标签。' },
                       { key: 'theme', label: '主题', value: currentValues.theme, hint: '写作品持续回答的命题，不要写宣传口号。' },
+                      { key: 'themeChapterTest', label: '章节级主题验证', value: currentValues.themeChapterTest, hint: '写每章冲突如何回应主题命题，而不是只推进事件。' },
                       { key: 'motifs', label: '母题 / 重复意象', value: currentValues.motifs, hint: '建议每行一条，写会反复出现的母题和意象。' },
                       { key: 'emotionalCore', label: '情感核心', value: currentValues.emotionalCore, hint: '写读者稳定收到的情绪回报和压强。' },
                       { key: 'pov', label: '叙事视角', value: currentValues.pov, hint: '只用 first_person、third_limited、third_omniscient、multi_pov 之一。' },
@@ -570,6 +589,7 @@ export default function ThemeVoicePage({ novelId }: Props) {
                     applyThemeVoiceDraft({
                       writingContractTags: Array.isArray(draft.writingContractTags) ? draft.writingContractTags : undefined,
                       theme: typeof draft.theme === 'string' ? draft.theme : undefined,
+                      themeChapterTest: typeof draft.themeChapterTest === 'string' ? draft.themeChapterTest : undefined,
                       motifs: typeof draft.motifs === 'string' ? draft.motifs : undefined,
                       emotionalCore: typeof draft.emotionalCore === 'string' ? draft.emotionalCore : undefined,
                       pov: draft.pov,
@@ -613,6 +633,11 @@ export default function ThemeVoicePage({ novelId }: Props) {
                 <div className="guided-step__field-card">
                   <Form.Item name="theme" label="主题" rules={[{ required: true, message: '请写清主题' }]}>
                     <Input.TextArea rows={6} placeholder="写作品持续回答的命题，不要写成宣传口号。" />
+                  </Form.Item>
+                </div>
+                <div className="guided-step__field-card">
+                  <Form.Item name="themeChapterTest" label="章节级主题验证">
+                    <Input.TextArea rows={6} placeholder="写每章冲突如何回应主题命题：选择、底线、代价或妥协必须如何落到现场。" />
                   </Form.Item>
                 </div>
                 <div className="guided-step__field-card">
@@ -684,6 +709,8 @@ export default function ThemeVoicePage({ novelId }: Props) {
                     currentValues.dialogueRules,
                     currentValues.descriptionRules,
                     currentValues.forbiddenPhrases,
+                    currentValues.targetWorkSampleGuide,
+                    currentValues.humanStyleSampleLock,
                   ]) ? 'complete' : 'generate'}
                   isJson
                   buildMessages={() => buildDraftMessages({
@@ -693,12 +720,15 @@ export default function ThemeVoicePage({ novelId }: Props) {
                       currentValues.dialogueRules,
                       currentValues.descriptionRules,
                       currentValues.forbiddenPhrases,
+                      currentValues.targetWorkSampleGuide,
+                      currentValues.humanStyleSampleLock,
                     ]) ? 'optimize' : 'replace',
                     context: buildPlanningContextSections(currentNovel, {
                       includeSubplots: false,
                       extraSections: [
                         { label: '当前主题与调度', value: [
                           currentValues.theme ? `主题：${currentValues.theme}` : '',
+                          currentValues.themeChapterTest ? `章节级主题验证：${currentValues.themeChapterTest}` : '',
                           currentValues.emotionalCore ? `情感核心：${currentValues.emotionalCore}` : '',
                           currentValues.pov ? `视角：${currentValues.pov}` : '',
                           currentValues.tense ? `时态：${currentValues.tense}` : '',
@@ -711,6 +741,8 @@ export default function ThemeVoicePage({ novelId }: Props) {
                       { key: 'dialogueRules', label: '对白规则', value: currentValues.dialogueRules, hint: '写潜台词密度、句长控制、留白方式和人物区分度。' },
                       { key: 'descriptionRules', label: '描写规则', value: currentValues.descriptionRules, hint: '写场景、动作、心理描写的比例和取舍。' },
                       { key: 'forbiddenPhrases', label: '禁用表达', value: currentValues.forbiddenPhrases, hint: '写应避免的总结腔、模板句、空泛抒情和引号强调。' },
+                      { key: 'targetWorkSampleGuide', label: '真实样章对照', value: currentValues.targetWorkSampleGuide, hint: '写像不像目标作品时要看哪些句式、节奏、对白比例和信息密度。' },
+                      { key: 'humanStyleSampleLock', label: '人工风格样本锁定', value: currentValues.humanStyleSampleLock, hint: '写人工样本必须保留的特征，以及出现哪些 AI 化偏移要退回。' },
                     ],
                     requirements: [
                       '规则必须可执行，可直接用于写作与审校。',
@@ -724,6 +756,8 @@ export default function ThemeVoicePage({ novelId }: Props) {
                       dialogueRules: typeof draft.dialogueRules === 'string' ? draft.dialogueRules : undefined,
                       descriptionRules: typeof draft.descriptionRules === 'string' ? draft.descriptionRules : undefined,
                       forbiddenPhrases: typeof draft.forbiddenPhrases === 'string' ? draft.forbiddenPhrases : undefined,
+                      targetWorkSampleGuide: typeof draft.targetWorkSampleGuide === 'string' ? draft.targetWorkSampleGuide : undefined,
+                      humanStyleSampleLock: typeof draft.humanStyleSampleLock === 'string' ? draft.humanStyleSampleLock : undefined,
                     })
                   }}
                 />
@@ -747,6 +781,16 @@ export default function ThemeVoicePage({ novelId }: Props) {
                 <div className="guided-step__field-card">
                   <Form.Item name="forbiddenPhrases" label="禁用表达">
                     <Input.TextArea rows={6} placeholder="写应避免的总结腔、模板句、空泛抒情和引号强调。" />
+                  </Form.Item>
+                </div>
+                <div className="guided-step__field-card">
+                  <Form.Item name="targetWorkSampleGuide" label="真实样章对照">
+                    <Input.TextArea rows={6} placeholder="写像不像目标作品时要核对的节奏、句式、对白比例、信息密度和现场质感。" />
+                  </Form.Item>
+                </div>
+                <div className="guided-step__field-card">
+                  <Form.Item name="humanStyleSampleLock" label="人工风格样本锁定">
+                    <Input.TextArea rows={6} placeholder="写人工样本必须保留的特征，以及哪些 AI 化偏移一出现就退回重写。" />
                   </Form.Item>
                 </div>
               </div>

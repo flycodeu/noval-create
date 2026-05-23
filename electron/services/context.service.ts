@@ -888,7 +888,7 @@ function buildHardConstraintDrafts(
       ? getPromotedFeedbackIssuesForChapter(rawData.novel.id, rawData.currentChapter.chapterNum)
       : [],
   })
-  const styleHardGuardText = buildStyleHardConstraintForNovel(rawData.novel.id)
+  const styleHardGuardText = buildStyleHardConstraintForNovel(rawData.novel.id, rawData.novel.themeVoiceJson)
 
   const draftSpecs: Array<Pick<HardConstraintDraft, 'label' | 'title' | 'content'>> = [
     {
@@ -2333,14 +2333,34 @@ function enrichStyleTemplateWithFingerprint(baseTemplate: string, novelId: numbe
   }
 }
 
-function buildStyleHardConstraintForNovel(novelId: number): string {
+function buildManualStyleSampleConstraint(themeVoiceJson?: string | null): string {
+  const themeVoice = parseThemeVoiceDocument(themeVoiceJson)
+  const lines = [
+    themeVoice.targetWorkSampleGuide ? `真实样章对照：${themeVoice.targetWorkSampleGuide}` : '',
+    themeVoice.humanStyleSampleLock ? `人工风格样本锁定：${themeVoice.humanStyleSampleLock}` : '',
+  ].filter(Boolean)
+  if (lines.length === 0) return ''
+
+  return [
+    '【真实样章与人工风格锁】',
+    ...lines.map((line) => `- ${line}`),
+    '- 写作、审校和重写都必须用这些标准判断“读起来像不像目标作品”。',
+    '- 如果只是语言更顺，但节奏、句式、信息密度、对白比例或现场质感偏离样章口径，应触发重写。',
+  ].join('\n')
+}
+
+function buildStyleHardConstraintForNovel(novelId: number, themeVoiceJson?: string | null): string {
+  const manualConstraint = buildManualStyleSampleConstraint(themeVoiceJson)
   try {
     const fingerprints = listStyleFingerprints(novelId)
-    if (fingerprints.length === 0) return ''
+    if (fingerprints.length === 0) return manualConstraint
     const latest = fingerprints[fingerprints.length - 1]
-    return buildStyleHardGuardPromptSection(latest.id)
+    return [
+      buildStyleHardGuardPromptSection(latest.id),
+      manualConstraint,
+    ].filter(Boolean).join('\n\n')
   } catch {
-    return ''
+    return manualConstraint
   }
 }
 

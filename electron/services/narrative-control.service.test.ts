@@ -8,6 +8,7 @@ describe('analyzeNarrativeControls', () => {
       themeVoice: {
         writingContractTags: [],
         theme: '',
+        themeChapterTest: '',
         motifs: '',
         emotionalCore: '',
         pov: 'third_limited',
@@ -23,6 +24,8 @@ describe('analyzeNarrativeControls', () => {
         dialogueRules: '',
         descriptionRules: '',
         forbiddenPhrases: '',
+        targetWorkSampleGuide: '',
+        humanStyleSampleLock: '',
       },
       sceneSnapshots: [{ segmentId: 1, segmentOrder: 1, segmentTitle: '场景一', pov: '林远' }],
       content: '林远贴着墙根往前挪。赵临心里已经认定他在撒谎。守卫心中甚至开始盘算要不要先下手。',

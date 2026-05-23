@@ -134,6 +134,7 @@ import {
   buildReviewPrioritySummary,
   buildRewriteMiniReviewVerdict,
   type ChapterReadingExperienceScore,
+  type RewriteDeltaChainScore,
   type RewriteNarrativeDeltaReport,
 } from './chapter-pipeline-policy.service'
 import { listPromptOverrides } from './prompt-override.service'
@@ -1806,6 +1807,9 @@ function formatReviewNotes(notes: ChapterReviewNotes): string {
     notes.rewrite_delta
       ? `重写差异验证：${notes.rewrite_delta.status} · 相似度 ${notes.rewrite_delta.similarityToOriginal} · 改动句 ${notes.rewrite_delta.changedSentenceRate}% · 叙事锚点增量 ${notes.rewrite_delta.narrativeAnchorChangeRate}%`
       : '',
+    notes.rewrite_delta
+      ? `剧情链修复：冲突链 ${notes.rewrite_delta.conflictChain.status}/${notes.rewrite_delta.conflictChain.score} · 代价链 ${notes.rewrite_delta.costChain.status}/${notes.rewrite_delta.costChain.score} · 目标链 ${notes.rewrite_delta.goalChain.status}/${notes.rewrite_delta.goalChain.score}`
+      : '',
     notes.rewrite_delta && notes.rewrite_delta.findings.length > 0
       ? `重写差异风险：\n- ${notes.rewrite_delta.findings.join('\n- ')}`
       : '',
@@ -1835,7 +1839,13 @@ function applyContractValidationToReviewNotes(
     .filter((item) => item.verdict === 'missing' || item.verdict === 'contradicted')
     .map((item) => item.rewriteHint)
   const arcRisks = failedItems
-    .filter((item) => item.contractItemType === 'chapter_goal' || item.contractItemType === 'story_thread_progress')
+    .filter((item) => (
+      item.contractItemType === 'chapter_goal'
+      || item.contractItemType === 'story_thread_progress'
+      || item.contractItemType === 'theme_chapter_response'
+      || item.contractItemType === 'character_scene_payoff'
+      || item.contractItemType === 'relationship_arc_gate'
+    ))
     .map((item) => `${item.expected}：${item.verdict === 'weak' ? '正文只有提及，没有形成明确推进。' : '正文还没有形成可验证的兑现证据。'}`)
   const hookRisks = failedItems
     .filter((item) => item.contractItemType === 'chapter_hook')
@@ -1844,8 +1854,10 @@ function applyContractValidationToReviewNotes(
     .filter((item) => item.contractItemType === 'foreshadow_delivery')
     .map((item) => `${item.expected}：${item.verdict === 'weak' ? '目前只有提及，没有埋设/推进/回收或延期说明。' : '正文未处理该伏笔。'}`)
   const coherenceRisks = failedItems
-    .filter((item) => item.contractItemType === 'scene_result_state')
-    .map((item) => `${item.segmentTitle || '场景'} 缺少清晰结果状态，场景结尾没有把变化落地。`)
+    .filter((item) => item.contractItemType === 'scene_result_state' || item.contractItemType === 'relationship_arc_gate')
+    .map((item) => item.contractItemType === 'relationship_arc_gate'
+      ? `${item.expected}：关系弧缺少同一场景内的触发、互动和后果链。`
+      : `${item.segmentTitle || '场景'} 缺少清晰结果状态，场景结尾没有把变化落地。`)
   const realismRisks = failedItems
     .filter((item) => item.contractItemType === 'scene_conflict')
     .map((item) => `${item.segmentTitle || '场景'} 冲突不够可见，阻力更像说明而不是事件。`)
@@ -2570,8 +2582,33 @@ function normalizeRewriteDelta(raw: unknown): RewriteNarrativeDeltaReport | unde
     changedSentenceRate: normalizeBoundedMetric(record.changedSentenceRate, 0, 100, 0),
     narrativeAnchorChangeRate: normalizeBoundedMetric(record.narrativeAnchorChangeRate, -100, 100, 0),
     actionVerbDeltaRate: normalizeBoundedMetric(record.actionVerbDeltaRate, -100, 100, 0),
+    conflictChain: normalizeRewriteDeltaChain(record.conflictChain),
+    costChain: normalizeRewriteDeltaChain(record.costChain),
+    goalChain: normalizeRewriteDeltaChain(record.goalChain),
     findings,
     recommendation,
+  }
+}
+
+function normalizeRewriteDeltaChain(raw: unknown): RewriteDeltaChainScore {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return {
+      score: 100,
+      status: 'pass',
+      originalHitRate: 0,
+      rewrittenHitRate: 0,
+      deltaRate: 0,
+      findings: [],
+    }
+  }
+  const record = raw as Record<string, unknown>
+  return {
+    score: normalizeBoundedNumber(record.score, 0, 100, 100),
+    status: record.status === 'fail' ? 'fail' : record.status === 'weak' ? 'weak' : 'pass',
+    originalHitRate: normalizeBoundedMetric(record.originalHitRate, 0, 100, 0),
+    rewrittenHitRate: normalizeBoundedMetric(record.rewrittenHitRate, 0, 100, 0),
+    deltaRate: normalizeBoundedMetric(record.deltaRate, -100, 100, 0),
+    findings: toStringArray(record.findings),
   }
 }
 
@@ -2705,7 +2742,10 @@ function applyRewriteDeltaToReviewNotes(
       ...rewriteDelta.findings.filter((item) =>
         item.includes('剧情')
         || item.includes('冲突')
-        || item.includes('锚点')),
+        || item.includes('锚点')
+        || item.includes('代价')
+        || item.includes('目标')
+        || item.includes('链')),
     ]),
     coherence_risks: dedupeTextList([
       ...reviewNotes.coherence_risks,

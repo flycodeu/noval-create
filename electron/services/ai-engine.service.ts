@@ -240,6 +240,8 @@ export function buildAuthorStyleLockSummary(novelId: number, themeVoiceJson?: st
     ...splitTextHints(themeVoice.styleRules, 4),
     ...splitTextHints(themeVoice.dialogueRules, 4),
     ...splitTextHints(themeVoice.descriptionRules, 4),
+    ...splitTextHints(themeVoice.targetWorkSampleGuide, 2),
+    ...splitTextHints(themeVoice.humanStyleSampleLock, 2),
   ], 8)
   const preferredLexicon = dedupeStrings(
     Object.values(fingerprint?.wordFrequencyProfile || {})
@@ -256,14 +258,17 @@ export function buildAuthorStyleLockSummary(novelId: number, themeVoiceJson?: st
     ...splitTextHints(themeVoice.voiceKeywords, 6),
   ], 8)
   const enabled = Boolean(latestFingerprint || themeVoice.styleRules || themeVoice.dialogueRules || themeVoice.descriptionRules || themeVoice.forbiddenPhrases)
+    || Boolean(themeVoice.targetWorkSampleGuide || themeVoice.humanStyleSampleLock)
 
   return {
     enabled,
-    sourceLabel: latestFingerprint?.record?.name || '主题与文风护栏',
+    sourceLabel: latestFingerprint?.record?.name || (themeVoice.humanStyleSampleLock ? '人工风格样本锁定' : '主题与文风护栏'),
     sentenceLengthHint: fingerprint?.avgSentenceLength ? `均句约 ${fingerprint.avgSentenceLength} 字` : undefined,
     dialogueRhythmHint: fingerprint?.dialogueLineRate ? `对白占比 ${fingerprint.dialogueLineRate}%` : themeVoice.dialogueRules || undefined,
     narrativeDensityHint: fingerprint?.descriptionDensity || (fingerprint?.abstractTokenDensity ? `抽象词密度上限 ${fingerprint.abstractTokenDensity}%` : undefined),
     paceHint: fingerprint?.paceProfile || themeVoice.styleRules || undefined,
+    targetWorkSampleGuide: themeVoice.targetWorkSampleGuide || undefined,
+    humanStyleSampleLock: themeVoice.humanStyleSampleLock || undefined,
     toneKeywords,
     preferredLexicon,
     forbiddenPatterns,

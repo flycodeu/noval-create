@@ -85,8 +85,20 @@ export interface RewriteNarrativeDeltaReport {
   changedSentenceRate: number
   narrativeAnchorChangeRate: number
   actionVerbDeltaRate: number
+  conflictChain: RewriteDeltaChainScore
+  costChain: RewriteDeltaChainScore
+  goalChain: RewriteDeltaChainScore
   findings: string[]
   recommendation: string
+}
+
+export interface RewriteDeltaChainScore {
+  score: number
+  status: 'pass' | 'weak' | 'fail'
+  originalHitRate: number
+  rewrittenHitRate: number
+  deltaRate: number
+  findings: string[]
 }
 
 interface ContractValidationLike {
@@ -150,6 +162,22 @@ const RESULT_TOKENS = [
   '承认', '拒绝', '背叛', '回收', '兑现', '推进',
 ]
 
+const CONFLICT_CHAIN_TOKENS = [
+  '拦', '追', '逼', '压', '争', '抢', '拒', '阻', '威胁', '怀疑',
+  '质问', '审问', '埋伏', '袭', '打', '伤', '逃', '躲', '骗', '失手',
+  '冲突', '反制', '暴露',
+]
+
+const COST_CHAIN_TOKENS = [
+  '代价', '失去', '失败', '受伤', '暴露', '欠', '牺牲', '放弃', '不得不',
+  '只好', '换来', '留下', '后果', '惩罚', '损失', '破裂', '背叛', '拖累',
+]
+
+const GOAL_CHAIN_TOKENS = [
+  '目标', '要', '为了', '决定', '选择', '追查', '找到', '拿到', '确认',
+  '推进', '完成', '达成', '阻止', '夺回', '交出', '救出', '揭开', '回收',
+]
+
 const ABSTRACT_READING_TOKENS = [
   '命运', '意义', '情绪', '复杂', '沉重', '不可言说', '未来', '过去',
   '力量', '氛围', '似乎', '仿佛', '某种', '意识到', '理解', '背后',
@@ -208,6 +236,60 @@ function countParagraphsWithTokens(paragraphs: string[], tokens: string[]): numb
 
 function countSentencesWithTokens(sentences: string[], tokens: string[]): number {
   return sentences.filter((sentence) => tokens.some((token) => sentence.includes(token))).length
+}
+
+function calculateSentenceTokenRate(sentences: string[], tokens: string[]): number {
+  if (sentences.length === 0) return 0
+  return roundMetric((countSentencesWithTokens(sentences, tokens) / sentences.length) * 100)
+}
+
+function buildRewriteDeltaChainScore(
+  originalSentences: string[],
+  rewrittenSentences: string[],
+  tokens: string[],
+  label: string,
+  structuralPressure: boolean,
+  surfaceRewriteSuspected: boolean,
+): RewriteDeltaChainScore {
+  const originalHitRate = calculateSentenceTokenRate(originalSentences, tokens)
+  const rewrittenHitRate = calculateSentenceTokenRate(rewrittenSentences, tokens)
+  const deltaRate = roundMetric(rewrittenHitRate - originalHitRate)
+  const hasEnoughRewrittenEvidence = rewrittenHitRate >= 18
+  const originalAlreadyDense = originalHitRate >= 18
+  const score = clampScore(
+    70
+    + Math.max(-10, deltaRate) * 1.5
+    + (rewrittenHitRate >= 24 ? 12 : rewrittenHitRate >= 18 ? 7 : rewrittenHitRate >= 14 ? 2 : -14),
+  )
+  const findings: string[] = []
+
+  if (structuralPressure && rewrittenHitRate < 14) {
+    findings.push(`${label}证据密度仅 ${rewrittenHitRate}%，重写后仍缺少可见链条。`)
+  }
+  if (structuralPressure && !hasEnoughRewrittenEvidence && !originalAlreadyDense && deltaRate < 3) {
+    findings.push(`${label}增量仅 ${deltaRate}%，更像改词句而不是修结构。`)
+  }
+  if (structuralPressure && surfaceRewriteSuspected && deltaRate < 3) {
+    findings.push(`${label}几乎没有新增结构证据，整体改动幅度也偏低。`)
+  }
+  if (structuralPressure && originalAlreadyDense && deltaRate < -6) {
+    findings.push(`${label}证据密度从 ${originalHitRate}% 降到 ${rewrittenHitRate}%，重写削弱了原有剧情链。`)
+  }
+
+  const status: RewriteDeltaChainScore['status'] = !structuralPressure || findings.length === 0
+    ? 'pass'
+    : findings.length >= 2 || score < 55
+      ? 'fail'
+      : 'weak'
+
+  return {
+    score,
+    status,
+    originalHitRate,
+    rewrittenHitRate,
+    deltaRate,
+    findings,
+  }
 }
 
 function buildSentenceSet(text: string): Set<string> {
@@ -361,6 +443,14 @@ export function analyzeRewriteNarrativeDelta(options: {
     Math.min(originalSentences.length, rewrittenSentences.length) < 4
     || Math.min(options.originalContent.trim().length, options.rewrittenContent.trim().length) < 120
   ) {
+    const passChain = (): RewriteDeltaChainScore => ({
+      score: 100,
+      status: 'pass',
+      originalHitRate: 0,
+      rewrittenHitRate: 0,
+      deltaRate: 0,
+      findings: [],
+    })
     return {
       status: 'pass',
       structuralIssueCount,
@@ -368,6 +458,9 @@ export function analyzeRewriteNarrativeDelta(options: {
       changedSentenceRate: calculateChangedSentenceRate(options.originalContent, options.rewrittenContent),
       narrativeAnchorChangeRate: calculateNarrativeAnchorChangeRate(options.originalContent, options.rewrittenContent),
       actionVerbDeltaRate: calculateActionVerbDeltaRate(options.originalContent, options.rewrittenContent),
+      conflictChain: passChain(),
+      costChain: passChain(),
+      goalChain: passChain(),
       findings: [],
       recommendation: '文本过短，跳过重写差异门禁。实际章节会继续走相似度和发布门检查。',
     }
@@ -376,6 +469,10 @@ export function analyzeRewriteNarrativeDelta(options: {
   const narrativeAnchorChangeRate = calculateNarrativeAnchorChangeRate(options.originalContent, options.rewrittenContent)
   const actionVerbDeltaRate = calculateActionVerbDeltaRate(options.originalContent, options.rewrittenContent)
   const structuralPressure = hasStructuralRewritePressure(options.reviewPrioritySummary, options.reviewNotes)
+  const surfaceRewriteSuspected = similarityToOriginal >= 0.82 || changedSentenceRate < 24
+  const conflictChain = buildRewriteDeltaChainScore(originalSentences, rewrittenSentences, CONFLICT_CHAIN_TOKENS, '冲突链', structuralPressure, surfaceRewriteSuspected)
+  const costChain = buildRewriteDeltaChainScore(originalSentences, rewrittenSentences, COST_CHAIN_TOKENS, '代价链', structuralPressure, surfaceRewriteSuspected)
+  const goalChain = buildRewriteDeltaChainScore(originalSentences, rewrittenSentences, GOAL_CHAIN_TOKENS, '目标链', structuralPressure, surfaceRewriteSuspected)
   const findings: string[] = []
 
   if (structuralPressure && similarityToOriginal >= 0.82) {
@@ -390,12 +487,13 @@ export function analyzeRewriteNarrativeDelta(options: {
   if (structuralPressure && actionVerbDeltaRate < 3) {
     findings.push(`动作句增量仅 ${actionVerbDeltaRate}%，冲突推进证据不足。`)
   }
+  findings.push(...conflictChain.findings, ...costChain.findings, ...goalChain.findings)
 
   const status: RewriteNarrativeDeltaReport['status'] = !structuralPressure
     ? 'pass'
-    : findings.length >= 3
+    : findings.length >= 3 || [conflictChain, costChain, goalChain].filter((chain) => chain.status === 'fail').length >= 2
       ? 'fail'
-      : findings.length > 0
+    : findings.length > 0
         ? 'weak'
         : 'pass'
 
@@ -406,6 +504,9 @@ export function analyzeRewriteNarrativeDelta(options: {
     changedSentenceRate,
     narrativeAnchorChangeRate,
     actionVerbDeltaRate,
+    conflictChain,
+    costChain,
+    goalChain,
     findings,
     recommendation: status === 'pass'
       ? '重写差异足以进入后续门禁。'

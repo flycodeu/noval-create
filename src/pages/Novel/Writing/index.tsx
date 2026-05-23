@@ -3515,6 +3515,8 @@ function AiExplainabilityCard({ preview }: { preview: ChapterContextPreview | nu
         styleLock.dialogueRhythmHint ? `对白：${styleLock.dialogueRhythmHint}` : '',
         styleLock.narrativeDensityHint ? `密度：${styleLock.narrativeDensityHint}` : '',
         styleLock.paceHint ? `节奏：${styleLock.paceHint}` : '',
+        styleLock.targetWorkSampleGuide ? `真实样章对照：${styleLock.targetWorkSampleGuide}` : '',
+        styleLock.humanStyleSampleLock ? `人工风格样本锁定：${styleLock.humanStyleSampleLock}` : '',
         styleLock.toneKeywords.length > 0 ? `语调：${styleLock.toneKeywords.join('、')}` : '',
         styleLock.preferredLexicon.length > 0 ? `偏好词汇：${styleLock.preferredLexicon.join('、')}` : '',
         styleLock.forbiddenPatterns.length > 0 ? `禁用表达：${styleLock.forbiddenPatterns.join('、')}` : '',
