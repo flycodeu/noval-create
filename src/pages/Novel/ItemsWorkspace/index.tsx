@@ -36,6 +36,7 @@ import {
 } from '../components/WorkspaceShell'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import { EMPTY_WORKFLOW_STATS, getWorkflowBlockers, loadWorkflowStats, type WorkflowStats } from '../workflow'
+import { getItemGenerationProfile } from '../../../shared/creation-tools'
 
 interface Props {
   novelId: number
@@ -355,6 +356,10 @@ export default function ItemsWorkspace({ novelId }: Props) {
   const routeFocusRef = useRef<number | null>(null)
   const routeItemId = useMemo(() => parseRouteId(searchParams.get('itemId')), [searchParams])
   const [generateOpen, setGenerateOpen] = useState(false)
+  const itemGenerationProfile = useMemo(
+    () => getItemGenerationProfile(currentNovel?.genreName),
+    [currentNovel?.genreName],
+  )
   const [templateOptions, setTemplateOptions] = useState<StoryItem[]>([])
   const [characterOptions, setCharacterOptions] = useState<Character[]>([])
   const [locationOptions, setLocationOptions] = useState<MapNodeSummary[]>([])
@@ -534,13 +539,13 @@ export default function ItemsWorkspace({ novelId }: Props) {
 
   useEffect(() => {
     generateForm.setFieldsValue({
-      count: 12,
+      count: itemGenerationProfile.defaultBatch,
       batchSize: 4,
       templateOnly: false,
       refreshTemplates: true,
       focus: '',
     })
-  }, [generateForm])
+  }, [generateForm, itemGenerationProfile.defaultBatch])
 
   const handleNew = (kind: 'template' | 'instance') => {
     setCreating(true)
@@ -1490,6 +1495,13 @@ export default function ItemsWorkspace({ novelId }: Props) {
         okText="开始生成"
       >
         <Form form={generateForm} layout="vertical">
+          <Alert
+            showIcon
+            type="info"
+            style={{ marginBottom: 12 }}
+            message={`题材建议：${itemGenerationProfile.title}`}
+            description={`${itemGenerationProfile.overview} 默认建议本轮生成 ${itemGenerationProfile.defaultBatch} 条，可按当前剧情密度手动调整。`}
+          />
           <Form.Item name="templateOnly" label="生成模式">
             <Select
               options={[
@@ -1507,7 +1519,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
             />
           </Form.Item>
           <Form.Item name="count" label="本轮目标数量">
-            <Select options={[8, 10, 12, 14, 18].map((count) => ({ value: count, label: `${count} 条` }))} />
+            <Select options={Array.from(new Set([itemGenerationProfile.defaultBatch, 8, 10, 12, 14, 18])).sort((left, right) => left - right).map((count) => ({ value: count, label: `${count} 条${count === itemGenerationProfile.defaultBatch ? ' · 题材推荐' : ''}` }))} />
           </Form.Item>
           <Form.Item name="batchSize" label="每批数量">
             <Select options={[2, 3, 4, 5, 6].map((count) => ({ value: count, label: `${count} 条 / 批` }))} />

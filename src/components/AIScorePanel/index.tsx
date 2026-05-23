@@ -45,7 +45,18 @@ interface Props {
 const scoreColor = (s: number) => s >= 80 ? '#52c41a' : s >= 60 ? '#faad14' : '#ff4d4f'
 const riskColor = (r: string) => r === '高' ? 'error' : r === '中' ? 'warning' : 'success'
 const aiRateColor = (r: number) => r > 50 ? '#ff4d4f' : r > 30 ? '#faad14' : '#52c41a'
-type LanguageDriftKey = 'abstractTokenDensity' | 'sentencePatternRepeatRate' | 'endingSummaryRate' | 'ornamentOverloadRate' | 'nonHumanCollocationRate'
+type LanguageDriftKey =
+  | 'abstractTokenDensity'
+  | 'sentencePatternRepeatRate'
+  | 'endingSummaryRate'
+  | 'ornamentOverloadRate'
+  | 'nonHumanCollocationRate'
+  | 'dashDensity'
+  | 'parentheticalExplanationDensity'
+  | 'metaphorStackRate'
+  | 'parallelismRate'
+  | 'bodyDetailClicheRate'
+  | 'isolatedTemplateParagraphRate'
 
 const languageDriftLabels: Array<{ key: LanguageDriftKey; label: string }> = [
   { key: 'abstractTokenDensity', label: '抽象词密度' },
@@ -53,6 +64,12 @@ const languageDriftLabels: Array<{ key: LanguageDriftKey; label: string }> = [
   { key: 'endingSummaryRate', label: '段尾升华率' },
   { key: 'ornamentOverloadRate', label: '华丽词堆砌率' },
   { key: 'nonHumanCollocationRate', label: '非人类搭配率' },
+  { key: 'dashDensity', label: '破折号密度' },
+  { key: 'parentheticalExplanationDensity', label: '括号说明密度' },
+  { key: 'metaphorStackRate', label: '比喻堆叠率' },
+  { key: 'parallelismRate', label: '排比句率' },
+  { key: 'bodyDetailClicheRate', label: '手眼声音细节密度' },
+  { key: 'isolatedTemplateParagraphRate', label: '孤立模板短段率' },
 ]
 
 export default function AIScorePanel({

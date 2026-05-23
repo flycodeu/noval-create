@@ -34,6 +34,7 @@ import type {
   ChapterContractAudit,
   ChapterContractValidationResult,
   ChapterContextPreview,
+  ChapterOptimizeResult,
   HardConstraintSourceLabel,
   ChapterPublishCheck,
   ChapterSegment,
@@ -523,6 +524,10 @@ export default function Writing({ novelId }: Props) {
   const [rewriteModalOpen, setRewriteModalOpen] = useState(false)
   const [rewriteRequirements, setRewriteRequirements] = useState('')
   const [rewritingSelection, setRewritingSelection] = useState(false)
+  const [optimizingChapter, setOptimizingChapter] = useState(false)
+  const [optimizeModalOpen, setOptimizeModalOpen] = useState(false)
+  const [optimizeRequirements, setOptimizeRequirements] = useState('')
+  const [optimizationResult, setOptimizationResult] = useState<ChapterOptimizeResult | null>(null)
   const [versionHistoryLoading, setVersionHistoryLoading] = useState(false)
   const [chapterVersions, setChapterVersions] = useState<ChapterVersion[]>([])
   const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null)
@@ -1099,6 +1104,10 @@ export default function Writing({ novelId }: Props) {
 
   useEffect(() => {
     registerEscapeHandler(() => {
+      if (optimizeModalOpen) {
+        setOptimizeModalOpen(false)
+        return
+      }
       if (rewriteModalOpen) {
         setRewriteModalOpen(false)
         return
@@ -1109,7 +1118,7 @@ export default function Writing({ novelId }: Props) {
     })
 
     return () => registerEscapeHandler(null)
-  }, [isHistoryRoute, navigateToWritingRoute, registerEscapeHandler, rewriteModalOpen])
+  }, [isHistoryRoute, navigateToWritingRoute, optimizeModalOpen, registerEscapeHandler, rewriteModalOpen])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -1334,6 +1343,35 @@ export default function Writing({ novelId }: Props) {
     } finally {
       setRewritingSelection(false)
     }
+  }
+
+  const handleOptimizeChapter = async () => {
+    if (!currentChapter || hasMultiSegments) return
+    const latestText = normalizeEditorText(editorRef.current?.innerText || content)
+    setOptimizingChapter(true)
+    try {
+      await saveNow(currentChapter.id, latestText)
+      const result = await window.electron.chapter.optimizeContent(currentChapter.id, {
+        executionMode: effectiveAiExecutionMode,
+        extraRequirements: optimizeRequirements.trim(),
+      })
+      setOptimizationResult(result)
+      setOptimizeModalOpen(true)
+      navigateToWritingRoute('review')
+    } catch (error: unknown) {
+      message.error(error instanceof Error ? error.message : '整章优化失败，请稍后重试。')
+    } finally {
+      setOptimizingChapter(false)
+    }
+  }
+
+  const handleApplyOptimizedChapter = () => {
+    if (!optimizationResult?.optimizedContent.trim()) return
+    applyChapterContent(optimizationResult.optimizedContent, 'ai-rewrite')
+    setOptimizeModalOpen(false)
+    setOptimizationResult(null)
+    void refreshQualityDashboard()
+    message.success('已应用整章优化稿。')
   }
 
   const handleOpenGateIssue = useCallback((item: ChapterPublishCheck['checklist'][number]) => {
@@ -2606,6 +2644,14 @@ export default function Writing({ novelId }: Props) {
                       >
                         重写
                       </Button>
+                      <Button
+                        icon={<RobotOutlined />}
+                        disabled={!currentChapter || hasMultiSegments || currentChapterGenerating}
+                        loading={optimizingChapter}
+                        onClick={() => void handleOptimizeChapter()}
+                      >
+                        整章优化
+                      </Button>
                       <Button icon={<FileSearchOutlined />} disabled={!currentChapter} onClick={() => void handleAiCheck()}>
                         审校
                       </Button>
@@ -2849,6 +2895,43 @@ export default function Writing({ novelId }: Props) {
           onChange={(event) => setRewriteRequirements(event.target.value)}
           placeholder="补充要求，例如：更克制、减少说明句、强化动作细节。"
         />
+      </Modal>
+
+      <Modal
+        title="整章 AI 优化候选稿"
+        open={optimizeModalOpen}
+        onCancel={() => setOptimizeModalOpen(false)}
+        onOk={handleApplyOptimizedChapter}
+        okText="应用优化稿"
+        width={920}
+      >
+        <div className="novel-note-list writing-layout-note-space-bottom">
+          <div className="novel-note-list__item">整章优化只生成候选稿，应用前不会覆盖正文。</div>
+          <div className="novel-note-list__item">重点保留剧情事实，修正 AI 味、衔接、空泛细节和读感问题。</div>
+          {optimizationResult?.issueSummary.slice(0, 4).map((item) => (
+            <div key={item} className="novel-note-list__item">{item}</div>
+          ))}
+        </div>
+        <Input.TextArea
+          value={optimizeRequirements}
+          rows={3}
+          onChange={(event) => setOptimizeRequirements(event.target.value)}
+          placeholder="下次整章优化的补充要求，例如：更克制、减少破折号、保留结尾钩子。"
+        />
+        <div className="novel-grid novel-grid--2 writing-layout-note-space-top">
+          <Input.TextArea
+            value={optimizationResult?.originalContent || ''}
+            rows={14}
+            readOnly
+            placeholder="原正文"
+          />
+          <Input.TextArea
+            value={optimizationResult?.optimizedContent || ''}
+            rows={14}
+            readOnly
+            placeholder="优化候选稿"
+          />
+        </div>
       </Modal>
 
       <ParallelGenerationModal novelId={novelId} chapters={chapters} />

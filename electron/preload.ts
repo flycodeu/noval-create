@@ -71,6 +71,7 @@ const api = {
     update: (id: number, data: unknown) => invokeIpc('novel:update', id, data),
     delete: (id: number) => invokeIpc('novel:delete', id),
     export: (id: number, format: string) => invokeIpc('novel:export', id, format),
+    formatForPlatform: (id: number, options: unknown) => invokeIpc('novel:formatForPlatform', id, options),
     stats: (id: number) => invokeIpc('novel:stats', id),
     runConsistencyCheck: (id: number) => invokeIpc('novel:runConsistencyCheck', id),
     getStoryMemory: (id: number) => invokeIpc('novel:getStoryMemory', id),
@@ -213,6 +214,7 @@ const api = {
     generateSummary: (chapterId: number) => invokeIpc('chapter:generateSummary', chapterId),
     aiCheck: (chapterId: number) => invokeIpc('chapter:aiCheck', chapterId),
     runPublishCheck: (chapterId: number) => invokeIpc('chapter:runPublishCheck', chapterId),
+    optimizeContent: (chapterId: number, options?: unknown) => invokeIpc('chapter:optimizeContent', chapterId, options),
   },
 
   chapterBatch: {

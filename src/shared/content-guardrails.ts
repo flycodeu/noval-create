@@ -53,6 +53,12 @@ const LANGUAGE_PATTERN_RULES: PatternRule[] = [
     message: '提示词内容泄露到正文中。',
     pattern: /(场景计划|必须交代|目标字数|情绪基调|连续性记忆|上下文护栏|输出质量底线|真实度护栏|must_cover|exit_hook|bridge_in|bridge_out)/u,
   },
+  {
+    code: 'ai_process_leak',
+    severity: 'high',
+    message: 'AI 生成过程、思考备注或内部工作流文字进入正文。',
+    pattern: /(AI(?:生成|思考|润色|输出|续写)中|作为AI|以下是(?:优化|改写|生成)|思考过程|我将|我会|本段需要|修订建议|改写说明|【(?:分析|计划|备注|提示)】)/u,
+  },
 
   // === 中严重度：AI味核心检测 ===
   {
@@ -122,10 +128,46 @@ const LANGUAGE_PATTERN_RULES: PatternRule[] = [
     pattern: /(?:一方面.{5,40}另一方面.{5,40}){1}|(?:既是.{3,20}也是.{3,20}更是)/u,
   },
   {
+    code: 'not_but_definition_pattern',
+    severity: 'medium',
+    message: '“不是……是/而是……”式定义句过于工整，容易暴露生成腔。',
+    pattern: /不是.{2,28}(?:，|,)?(?:而是|只是|是).{2,42}/u,
+  },
+  {
+    code: 'double_metaphor_or_simile_stack',
+    severity: 'medium',
+    message: '连续比喻或双重比喻堆叠，修辞压过了叙事信息。',
+    pattern: /(?:像|仿佛|似乎|好像|宛如).{1,18}(?:又像|又仿佛|又似乎|又好像|又宛如)|(?:像|仿佛|似乎|好像|宛如).{1,20}(?:像|仿佛|似乎|好像|宛如).{1,20}(?:像|仿佛|似乎|好像|宛如)/u,
+  },
+  {
+    code: 'parallelism_overuse',
+    severity: 'medium',
+    message: '排比或平衡句过度整齐，像在套模板而不是跟随人物思路。',
+    pattern: /(?:既.{2,18}又.{2,18}(?:还|更|也).{2,24})|(?:一边.{2,18}一边.{2,18})|(?:越.{1,10}越.{1,16})/u,
+  },
+  {
     code: 'ai_pseudo_philosophy',
     severity: 'medium',
     message: '伪哲学总结句，段落结尾硬升华。',
     pattern: /(或许，这就是|也许，这便是|这，便是|而这，正是|这一刻.{0,6}(?:他|她)(?:终于)?(?:明白|懂得|理解)|(?:他|她)第一次(?:真正)?(?:理解|明白|感受到))/u,
+  },
+  {
+    code: 'low_value_body_detail',
+    severity: 'medium',
+    message: '手部、眼部或嗓音细节过于模板化，缺少真实行动价值。',
+    pattern: /(?:手指|指节|指腹|指尖|掌心|睫毛|眼睫|瞳孔|喉咙|声音|嗓音).{0,8}(?:微微|轻轻|发紧|收缩|颤|一紧|很轻|很低|泛白|摩挲)/u,
+  },
+  {
+    code: 'soft_voice_cliche',
+    severity: 'medium',
+    message: '“声音很轻/很低”类软化表达高频模板化，人物声音缺少辨识度。',
+    pattern: /(?:声音|嗓音).{0,8}(?:很轻|很低|很淡|压得很低|轻得像|低得像)|(?:轻声|低声)说/u,
+  },
+  {
+    code: 'eye_open_close_standalone_paragraph',
+    severity: 'medium',
+    message: '睁眼、闭眼、抬头等动作被单独成段，像模板节拍而不是有效叙事。',
+    pattern: /(?:^|\n)\s*(?:他|她|我|他们|她们)?(?:睁开眼睛|睁眼|闭上眼睛|闭眼|抬起头|低下头|垂下眼|移开视线)\s*[。.!！]?\s*(?:\n|$)/u,
   },
 
   // === 低严重度：可改进 ===
@@ -246,6 +288,42 @@ const BUILTIN_ANTI_AI_PROMPT_RULES: AntiAiPromptRule[] = [
     bucket: 'sentence',
     avoid: '不要滥用“一方面…另一方面… / 既是…也是…更是…”这种刻意对称句式。',
     prefer: '让句子跟随人物思路自然偏斜，不强做排比平衡。',
+  },
+  {
+    code: 'dash_abuse',
+    bucket: 'sentence',
+    avoid: '不要高频使用破折号插解释、补设定、制造假停顿。',
+    prefer: '用动作、对白和正常句群承接补充信息。',
+  },
+  {
+    code: 'parenthetical_explanation_abuse',
+    bucket: 'sentence',
+    avoid: '不要在正文中使用括号补设定、写备注或留下生成过程说明。',
+    prefer: '把必要信息自然埋进场景证据和人物判断。',
+  },
+  {
+    code: 'not_but_definition_pattern',
+    bucket: 'sentence',
+    avoid: '不要反复使用“不是……而是/是……”式定义句。',
+    prefer: '让角色通过行动、误判和后果呈现变化。',
+  },
+  {
+    code: 'double_metaphor_or_simile_stack',
+    bucket: 'expression',
+    avoid: '不要写“像……又像……”“仿佛……又仿佛……”这类双重比喻。',
+    prefer: '每个场景只保留必要、准确、有信息量的一处修辞。',
+  },
+  {
+    code: 'low_value_body_detail',
+    bucket: 'sentence',
+    avoid: '不要堆手指、指节、指腹、瞳孔、睫毛、喉咙、声音很轻等低价值细节。',
+    prefer: '把细节改成行动阻力、关系压力或现实后果。',
+  },
+  {
+    code: 'eye_open_close_standalone_paragraph',
+    bucket: 'sentence',
+    avoid: '不要把“他睁眼/闭眼/抬头/低头”单独成段当节拍。',
+    prefer: '让动作和判断、对白或后果放在同一个有效叙事单元里。',
   },
   {
     code: 'ai_pseudo_philosophy',
@@ -386,6 +464,57 @@ function collectHighFrequencyRepetitions(text: string): TextGuardrailFinding | n
   }
 }
 
+function collectDensityGuardrailFindings(text: string): TextGuardrailFinding[] {
+  const findings: TextGuardrailFinding[] = []
+  const sentences = text.split(/[。！？!?；;\n]/).map((item) => item.trim()).filter((item) => item.length >= 4)
+  const sentenceCount = Math.max(sentences.length, 1)
+  const dashCount = (text.match(/——|--|—/gu) || []).length
+  const parentheticalCount = (text.match(/[（(][^）)]{2,80}[）)]/gu) || []).length
+  const bodyDetailCount = (text.match(/手指|指节|指腹|指尖|掌心|睫毛|眼睫|瞳孔|喉咙|声音很轻|声音很低|嗓音很轻|嗓音很低/gu) || []).length
+  const isolatedTemplateParagraphs = text
+    .split(/\n+/)
+    .map((item) => item.trim())
+    .filter((item) => /^(?:他|她|我|他们|她们)?(?:睁开眼睛|睁眼|闭上眼睛|闭眼|抬起头|低下头|垂下眼|移开视线)[。.!！]?$/.test(item))
+
+  if (dashCount >= 4 || dashCount / sentenceCount >= 0.18) {
+    findings.push({
+      code: 'dash_abuse',
+      severity: dashCount >= 8 ? 'high' : 'medium',
+      message: '破折号密度偏高，容易形成解释腔、插话腔和假停顿。',
+      excerpt: `破折号×${dashCount}`,
+    })
+  }
+
+  if (parentheticalCount >= 3 || parentheticalCount / sentenceCount >= 0.14) {
+    findings.push({
+      code: 'parenthetical_explanation_abuse',
+      severity: parentheticalCount >= 6 ? 'high' : 'medium',
+      message: '括号说明过多，正文像在补设定或写生成备注。',
+      excerpt: `括号说明×${parentheticalCount}`,
+    })
+  }
+
+  if (bodyDetailCount >= 5 || bodyDetailCount / sentenceCount >= 0.22) {
+    findings.push({
+      code: 'low_value_body_detail',
+      severity: bodyDetailCount >= 9 ? 'high' : 'medium',
+      message: '手、眼、声音等低价值细节密度偏高，需要改成行动、阻力或后果。',
+      excerpt: `手眼声音细节×${bodyDetailCount}`,
+    })
+  }
+
+  if (isolatedTemplateParagraphs.length >= 2) {
+    findings.push({
+      code: 'eye_open_close_standalone_paragraph',
+      severity: isolatedTemplateParagraphs.length >= 4 ? 'high' : 'medium',
+      message: '睁眼闭眼或抬头低头类孤立短段过多，节拍像自动生成。',
+      excerpt: isolatedTemplateParagraphs.slice(0, 3).join('、'),
+    })
+  }
+
+  return findings
+}
+
 export function getBuiltinAntiAiPromptRules(genre?: string): AntiAiPromptRule[] {
   const genreKey = getBuiltinGenreRules(genre).genreProfile.key
   const genreRules = GENRE_ANTI_AI_PROMPT_RULES[genreKey] || []
@@ -414,10 +543,12 @@ export function collectQualityGuardrailFindings(text: string, genre?: string): T
 
   const genreFinding = collectGenreHollowingFinding(content, genre)
   const repetitionFinding = collectHighFrequencyRepetitions(content)
+  const densityFindings = collectDensityGuardrailFindings(content)
   const allFindings = [
     ...patternFindings,
     ...(genreFinding ? [genreFinding] : []),
     ...(repetitionFinding ? [repetitionFinding] : []),
+    ...densityFindings,
   ]
 
   return dedupeFindings(allFindings).slice(0, 8)

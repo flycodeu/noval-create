@@ -4,6 +4,7 @@ import { asc, desc, eq, inArray } from 'drizzle-orm'
 import { getDb, getSqlite } from '../database/db'
 import { chapterContracts, chapterSegments, chapterVersions, chapters, characters, glossary, novels, revisionTasks, sceneContracts, storyArcs, storyItems, storyMemoryCheckpoints, storyParts, storyThreads, storyVolumes, tasks, timelineEvents } from '../database/schema'
 import { parseAiJsonResult } from '../utils/json'
+import { cleanAiFieldText } from '../../src/utils/text'
 import { generateChapterEmbeddings } from './embedding.service'
 import { aiCheckPrompt, chapterSummaryPrompt } from './prompts'
 import { parseThemeVoiceDocument } from '../../src/shared/theme-voice'
@@ -150,6 +151,7 @@ import type {
   AiStageExecutionReport,
   AuthorStyleLockSummary,
   ChapterBridgePlan,
+  ChapterOptimizeResult,
   ChapterRewriteScope,
   ChapterContractValidationResult,
   ExpressionDedupReport,
@@ -6294,6 +6296,112 @@ export async function getChapterContextPreview(
         renderSchema: resolution.renderSchema,
       }
     }),
+  }
+}
+
+function buildChapterOptimizationPrompt(params: {
+  chapter: typeof chapters.$inferSelect
+  novelTitle: string
+  genreName?: string | null
+  content: string
+  issueSummary: string[]
+  extraRequirements?: string
+}): string {
+  return [
+    '你是一名长篇网文精修编辑。请对当前章节做“整章语言与读感优化”，不要重写剧情。',
+    '',
+    '硬性要求：',
+    '- 保留原章节既有事实、人物、地点、道具、能力边界、事件顺序和结尾钩子。',
+    '- 不新增角色、势力、武器、物资、地名、设定规则或背景真相。',
+    '- 不改变章节核心剧情，只修语言自然度、连贯性、AI味、空泛细节和读者理解阻力。',
+    '- 删除 AI 过程文字、提示词残留、括号说明、破折号解释腔。',
+    '- 避免“不是……而是……”、双重比喻、排比堆叠、手指/指节/指腹/瞳孔/声音很轻等低价值细节。',
+    '- 避免“他睁眼/闭眼/抬头/低头”单独成段。',
+    '- 段落之间空一行，直接输出优化后的完整章节正文，不要 Markdown，不要解释。',
+    '',
+    `小说：${params.novelTitle}`,
+    params.genreName ? `题材：${params.genreName}` : '',
+    `章节：第${params.chapter.chapterNum}章 ${params.chapter.title || ''}`.trim(),
+    params.chapter.outline ? `章节大纲：${params.chapter.outline}` : '',
+    params.chapter.summary ? `现有摘要：${params.chapter.summary}` : '',
+    params.issueSummary.length > 0 ? `本轮优先修复：\n${params.issueSummary.slice(0, 10).map((item, index) => `${index + 1}. ${item}`).join('\n')}` : '',
+    params.extraRequirements ? `用户追加要求：${params.extraRequirements}` : '',
+    '',
+    '【当前完整正文】',
+    params.content,
+  ].filter(Boolean).join('\n')
+}
+
+function normalizeOptimizedChapterContent(raw: string): string {
+  return cleanAiFieldText(raw)
+    .replace(/^(?:优化后的完整章节正文|优化后的正文|正文)[:：]\s*/u, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+export async function optimizeChapterContent(
+  chapterId: number,
+  options: { executionMode?: AiExecutionMode; extraRequirements?: string } = {},
+): Promise<ChapterOptimizeResult> {
+  const db = getDb()
+  const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
+  if (!chapter || !chapter.content?.trim()) throwUserFacingError('chapter.contentEmpty')
+
+  const novel = db.select().from(novels).where(eq(novels.id, chapter.novelId)).all()[0]
+  const guardrailFindings = collectQualityGuardrailFindings(chapter.content)
+  const reviewNotes = parseStoredReviewNotes(chapter.reviewNotesJson)
+  const issueSummary = dedupeTextList([
+    ...formatQualityGuardrailSummary(guardrailFindings),
+    ...reviewNotes.critical_fixes,
+    ...reviewNotes.language_risks,
+    ...reviewNotes.human_language_repairs,
+    ...reviewNotes.coherence_risks,
+    ...reviewNotes.context_drift_risks,
+  ]).slice(0, 12)
+  const executionMode = resolveAiExecutionMode({
+    explicitMode: options.executionMode,
+    settingsJson: novel?.settingsJson,
+  })
+  const route = buildAiModelRouteReport({
+    taskKind: 'chapter_rewrite',
+    stageLabel: 'Chapter Optimize',
+    executionMode: executionMode.mode,
+    resolutionSource: executionMode.source,
+    modelConfigId: novel?.modelConfigId || undefined,
+    temperatureCap: 0.5,
+    maxTokensFactor: 1.12,
+    extraReasons: ['整章优化只生成候选稿，不直接覆盖正文。'],
+  })
+
+  const raw = await runChatTask({
+    type: 'review',
+    novelId: chapter.novelId,
+    relatedEntityType: 'chapter',
+    relatedEntityId: chapterId,
+    retryable: true,
+    messages: [{
+      role: 'user',
+      content: buildChapterOptimizationPrompt({
+        chapter,
+        novelTitle: novel?.title || '未命名小说',
+        genreName: undefined,
+        content: chapter.content,
+        issueSummary,
+        extraRequirements: options.extraRequirements?.trim(),
+      }),
+    }],
+    modelConfigId: route.modelConfigId,
+    chatOpts: buildChatOptionsFromRoute(route),
+  })
+  const optimizedContent = normalizeOptimizedChapterContent(raw)
+  if (!optimizedContent) throwUserFacingError('writing.rewriteNoResult')
+
+  return {
+    originalContent: chapter.content,
+    optimizedContent,
+    issueSummary,
+    guardrailHits: guardrailFindings.map((finding) => finding.code),
+    changed: optimizedContent.trim() !== chapter.content.trim(),
   }
 }
 

@@ -1848,6 +1848,12 @@ const LANGUAGE_DRIFT_LABELS: Array<{ key: keyof LanguageDriftMetrics; label: str
   { key: 'endingSummaryRate', label: '段尾升华率' },
   { key: 'ornamentOverloadRate', label: '华丽词堆砌率' },
   { key: 'nonHumanCollocationRate', label: '非人类搭配率' },
+  { key: 'dashDensity', label: '破折号密度' },
+  { key: 'parentheticalExplanationDensity', label: '括号说明密度' },
+  { key: 'metaphorStackRate', label: '比喻堆叠率' },
+  { key: 'parallelismRate', label: '排比句率' },
+  { key: 'bodyDetailClicheRate', label: '手眼声音细节密度' },
+  { key: 'isolatedTemplateParagraphRate', label: '孤立模板短段率' },
 ]
 
 function getTopLanguageDriftMetrics(metrics: LanguageDriftMetrics, limit = 3) {

@@ -1163,13 +1163,20 @@ export default function CharacterWorkspace({ novelId }: Props) {
 
       <Modal title="批量生成人物网络" open={batchOpen} onCancel={() => setBatchOpen(false)} onOk={() => void handleBatchGenerate()} confirmLoading={generating} okText="开始生成">
         <Form form={batchForm} layout="vertical">
+          <Alert
+            showIcon
+            type="info"
+            style={{ marginBottom: 12 }}
+            message="题材人物数量建议"
+            description={`当前题材建议主要 ${batchPreset.majorCount}、次要 ${batchPreset.minorCount}、对立 ${batchPreset.antagonistCount}、功能 ${batchPreset.supportingCount} 位；可按剧情密度手动调整。`}
+          />
           <div className="novel-grid novel-grid--2">
-            <Form.Item name="majorCount" label="主要人物"><Select options={[2, 3, 4, 5, 6].map((value) => ({ value, label: `${value} 位` }))} /></Form.Item>
-            <Form.Item name="minorCount" label="次要人物"><Select options={[3, 5, 6, 8, 10].map((value) => ({ value, label: `${value} 位` }))} /></Form.Item>
+            <Form.Item name="majorCount" label="主要人物"><Select options={Array.from(new Set([batchPreset.majorCount, 2, 3, 4, 5, 6])).sort((left, right) => left - right).map((value) => ({ value, label: `${value} 位${value === batchPreset.majorCount ? ' · 题材推荐' : ''}` }))} /></Form.Item>
+            <Form.Item name="minorCount" label="次要人物"><Select options={Array.from(new Set([batchPreset.minorCount, 3, 5, 6, 8, 10])).sort((left, right) => left - right).map((value) => ({ value, label: `${value} 位${value === batchPreset.minorCount ? ' · 题材推荐' : ''}` }))} /></Form.Item>
           </div>
           <div className="novel-grid novel-grid--2">
-            <Form.Item name="antagonistCount" label="对立角色"><Select options={[0, 1, 2, 3].map((value) => ({ value, label: `${value} 位` }))} /></Form.Item>
-            <Form.Item name="supportingCount" label="功能角色"><Select options={[0, 1, 2, 3, 4].map((value) => ({ value, label: `${value} 位` }))} /></Form.Item>
+            <Form.Item name="antagonistCount" label="对立角色"><Select options={Array.from(new Set([batchPreset.antagonistCount, 0, 1, 2, 3])).sort((left, right) => left - right).map((value) => ({ value, label: `${value} 位${value === batchPreset.antagonistCount ? ' · 题材推荐' : ''}` }))} /></Form.Item>
+            <Form.Item name="supportingCount" label="功能角色"><Select options={Array.from(new Set([batchPreset.supportingCount, 0, 1, 2, 3, 4])).sort((left, right) => left - right).map((value) => ({ value, label: `${value} 位${value === batchPreset.supportingCount ? ' · 题材推荐' : ''}` }))} /></Form.Item>
           </div>
           <Form.Item name="genderRatio" label="性别与年龄建议"><Input.TextArea rows={6} /></Form.Item>
           <Form.Item name="preferredSpecies" label="优先种类"><Select mode="multiple" allowClear options={availableSpecies.map((item) => ({ value: item, label: item }))} /></Form.Item>

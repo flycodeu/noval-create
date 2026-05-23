@@ -310,6 +310,8 @@ function registerIpcHandlers() {
   handle('novel:update', (_, id, data) => novelService.updateNovel(requireId(id), data))
   handle('novel:delete', (_, id) => novelService.deleteNovel(requireId(id)))
   handle('novel:export', (_, id, format) => exportService.exportNovel(requireId(id), format))
+  handle('novel:formatForPlatform', (_, id, options) =>
+    exportService.formatNovelForPlatform(requireId(id), parseObjectPayload<exportService.PlatformFormatOptions>(options || {}, 'options')))
   handle('novel:stats', (_, id) => novelService.getNovelStats(requireId(id)))
 
   // Quality Dashboard
@@ -484,6 +486,11 @@ function registerIpcHandlers() {
     chapterService.aiCheckChapter(chapterId))
   handle('chapter:runPublishCheck', (_, chapterId) =>
     chapterService.runChapterPublishCheck(chapterId))
+  handle('chapter:optimizeContent', (_, chapterId, options) =>
+    chapterService.optimizeChapterContent(
+      requireId(chapterId, 'chapterId'),
+      parseObjectPayload<{ executionMode?: AiExecutionMode; extraRequirements?: string }>(options || {}, 'options'),
+    ))
   handle('chapterBatch:startAutoGenerate', (event, novelId, options) =>
     batchWorkflowService.startChapterBatchGenerateWorkflow(requireId(novelId, 'novelId'), options, event.sender))
   handle('chapterBatch:getAutoGenerateStatus', (_, taskId) =>

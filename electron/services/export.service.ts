@@ -7,11 +7,32 @@ import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } fro
 import { getDb } from '../database/db'
 import { chapters, novels, storyVolumes } from '../database/schema'
 import { throwUserFacingError } from '../utils/user-facing-error'
+import { collectQualityGuardrailFindings } from '../../src/shared/content-guardrails'
 
 type ExportFormat = 'txt' | 'md' | 'json' | 'docx' | 'epub'
+type PlatformFormat = 'fanqie' | 'qidian' | 'jjwxc' | 'generic'
+type PlatformFormatScope = 'currentChapter' | 'selectedChapters' | 'all'
 type ChapterRecord = typeof chapters.$inferSelect
 type NovelRecord = typeof novels.$inferSelect
 type VolumeRecord = typeof storyVolumes.$inferSelect
+
+export interface PlatformFormatOptions {
+  platform?: PlatformFormat
+  scope?: PlatformFormatScope
+  chapterId?: number
+  chapterIds?: number[]
+}
+
+export interface PlatformFormatResult {
+  platform: PlatformFormat
+  scope: PlatformFormatScope
+  title: string
+  content: string
+  chapterCount: number
+  wordCount: number
+  warnings: string[]
+  removedLineCount: number
+}
 
 interface ExportChunk {
   id: string
@@ -42,6 +63,77 @@ function getVolumeLabel(volume: Pick<VolumeRecord, 'title' | 'volumeNumber'>): s
 function resolveChapterWordCount(chapter: ChapterRecord): number {
   if (typeof chapter.wordCount === 'number' && chapter.wordCount > 0) return chapter.wordCount
   return (chapter.content || '').length
+}
+
+function countTextWords(text: string): number {
+  const chinese = (text.match(/[\u4e00-\u9fff]/g) || []).length
+  const english = (text.match(/\b[a-zA-Z]+\b/g) || []).length
+  const numbers = (text.match(/\d+/g) || []).length
+  return chinese + english + numbers
+}
+
+function normalizePlatform(value: unknown): PlatformFormat {
+  return value === 'fanqie' || value === 'qidian' || value === 'jjwxc' || value === 'generic'
+    ? value
+    : 'generic'
+}
+
+function normalizePlatformScope(value: unknown): PlatformFormatScope {
+  return value === 'currentChapter' || value === 'selectedChapters' || value === 'all'
+    ? value
+    : 'all'
+}
+
+function shouldDropPlatformLine(line: string): boolean {
+  const trimmed = line.trim()
+  if (!trimmed) return false
+  return /^(?:```|---+$)/.test(trimmed)
+    || /^(?:以下是|下面是).{0,16}(?:正文|优化|改写|生成)/u.test(trimmed)
+    || /(AI(?:生成|思考|润色|输出|续写)中|作为AI|思考过程|修订建议|改写说明|本段需要|场景计划|must_cover|exit_hook|bridge_in|bridge_out)/u.test(trimmed)
+    || /^【(?:分析|计划|备注|提示|输出要求|修订|优化说明)】/u.test(trimmed)
+}
+
+function cleanPlatformContent(content: string): { text: string; removedLineCount: number } {
+  let removedLineCount = 0
+  const kept = content
+    .replace(/\r\n/g, '\n')
+    .replace(/\u200b/g, '')
+    .split('\n')
+    .filter((line) => {
+      if (!shouldDropPlatformLine(line)) return true
+      removedLineCount += 1
+      return false
+    })
+    .map((line) => line.trimEnd())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+  return { text: kept, removedLineCount }
+}
+
+function formatChapterTitle(chapter: ChapterRecord, platform: PlatformFormat): string {
+  const title = chapter.title?.trim()
+  const normalizedTitle = title && !/^第\s*\d+\s*章/u.test(title)
+    ? ` ${title}`
+    : title ? ` ${title.replace(/^第\s*\d+\s*章\s*/u, '').trim()}` : ''
+  if (platform === 'fanqie' || platform === 'qidian' || platform === 'generic') {
+    return `第${chapter.chapterNum}章${normalizedTitle}`.trim()
+  }
+  return `第 ${chapter.chapterNum} 章${normalizedTitle}`.trim()
+}
+
+function selectPlatformChapters(
+  chapterList: ChapterRecord[],
+  options: Required<Pick<PlatformFormatOptions, 'scope'>> & Pick<PlatformFormatOptions, 'chapterId' | 'chapterIds'>,
+): ChapterRecord[] {
+  if (options.scope === 'currentChapter') {
+    return chapterList.filter((chapter) => chapter.id === options.chapterId)
+  }
+  if (options.scope === 'selectedChapters') {
+    const ids = new Set((options.chapterIds || []).filter((id): id is number => typeof id === 'number'))
+    return chapterList.filter((chapter) => ids.has(chapter.id))
+  }
+  return chapterList
 }
 
 function parseOptionalJson(raw?: string | null): unknown {
@@ -511,4 +603,60 @@ export async function exportNovel(novelId: number, format: ExportFormat): Promis
   )
 
   return outputDir
+}
+
+export function formatNovelForPlatform(novelId: number, rawOptions: PlatformFormatOptions = {}): PlatformFormatResult {
+  const db = getDb()
+  const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
+  if (!novel) throwUserFacingError('novel.notFound')
+
+  const platform = normalizePlatform(rawOptions.platform)
+  const scope = normalizePlatformScope(rawOptions.scope)
+  const chapterList = db.select().from(chapters)
+    .where(eq(chapters.novelId, novelId))
+    .orderBy(asc(chapters.chapterNum))
+    .all()
+    .filter((chapter) => chapter.content?.trim())
+  const selected = selectPlatformChapters(chapterList, {
+    scope,
+    chapterId: rawOptions.chapterId,
+    chapterIds: rawOptions.chapterIds,
+  })
+
+  if (selected.length === 0) {
+    throwUserFacingError('chapter.contentEmpty')
+  }
+
+  let removedLineCount = 0
+  const blocks = selected.map((chapter) => {
+    const cleaned = cleanPlatformContent(chapter.content || '')
+    removedLineCount += cleaned.removedLineCount
+    return [
+      formatChapterTitle(chapter, platform),
+      '',
+      cleaned.text,
+    ].join('\n')
+  })
+  const content = blocks.join('\n\n')
+  const wordCount = countTextWords(content)
+  const findings = collectQualityGuardrailFindings(content)
+  const warnings = [
+    removedLineCount > 0 ? `已清理 ${removedLineCount} 行 AI 过程/提示词残留。` : '',
+    ...findings
+      .filter((finding) => finding.severity === 'high' || finding.code === 'prompt_leak' || finding.code === 'ai_process_leak')
+      .slice(0, 5)
+      .map((finding) => `${finding.message}${finding.excerpt ? `：${finding.excerpt}` : ''}`),
+    platform === 'fanqie' ? '番茄格式已统一为“第N章 标题 + 正文空行”。敏感词库仍需发布前人工复核。' : '',
+  ].filter(Boolean)
+
+  return {
+    platform,
+    scope,
+    title: novel.title,
+    content,
+    chapterCount: selected.length,
+    wordCount,
+    warnings,
+    removedLineCount,
+  }
 }

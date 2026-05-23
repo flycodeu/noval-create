@@ -3892,6 +3892,12 @@ export interface LanguageDriftMetrics {
   endingSummaryRate: number
   ornamentOverloadRate: number
   nonHumanCollocationRate: number
+  dashDensity: number
+  parentheticalExplanationDensity: number
+  metaphorStackRate: number
+  parallelismRate: number
+  bodyDetailClicheRate: number
+  isolatedTemplateParagraphRate: number
 }
 
 export type ProtagonistSetbackLevel = 'none' | 'minor' | 'major'
@@ -4426,6 +4432,35 @@ export interface AIScoreResult {
   language_drift_metrics?: LanguageDriftMetrics
 }
 
+export type PlatformFormat = 'fanqie' | 'qidian' | 'jjwxc' | 'generic'
+export type PlatformFormatScope = 'currentChapter' | 'selectedChapters' | 'all'
+
+export interface PlatformFormatOptions {
+  platform?: PlatformFormat
+  scope?: PlatformFormatScope
+  chapterId?: number
+  chapterIds?: number[]
+}
+
+export interface PlatformFormatResult {
+  platform: PlatformFormat
+  scope: PlatformFormatScope
+  title: string
+  content: string
+  chapterCount: number
+  wordCount: number
+  warnings: string[]
+  removedLineCount: number
+}
+
+export interface ChapterOptimizeResult {
+  originalContent: string
+  optimizedContent: string
+  issueSummary: string[]
+  guardrailHits: string[]
+  changed: boolean
+}
+
 export type WorkspaceQualityIssueKind =
   | 'relevance_drift'
   | 'workflow_misalignment'
@@ -4643,6 +4678,12 @@ export interface QualityDashboardData {
     endingSummaryRate: Array<{ chapterNum: number; value: number }>
     ornamentOverloadRate: Array<{ chapterNum: number; value: number }>
     nonHumanCollocationRate: Array<{ chapterNum: number; value: number }>
+    dashDensity: Array<{ chapterNum: number; value: number }>
+    parentheticalExplanationDensity: Array<{ chapterNum: number; value: number }>
+    metaphorStackRate: Array<{ chapterNum: number; value: number }>
+    parallelismRate: Array<{ chapterNum: number; value: number }>
+    bodyDetailClicheRate: Array<{ chapterNum: number; value: number }>
+    isolatedTemplateParagraphRate: Array<{ chapterNum: number; value: number }>
   }
   averageLanguageDrift: LanguageDriftMetrics
   recentLanguageDriftAlerts: LanguageDriftTrendSummary[]
@@ -5155,6 +5196,7 @@ declare global {
         update: (id: number, data: Partial<Novel>) => Promise<void>
         delete: (id: number) => Promise<void>
         export: (id: number, format: string) => Promise<string>
+        formatForPlatform: (id: number, options: PlatformFormatOptions) => Promise<PlatformFormatResult>
         stats: (id: number) => Promise<{ totalChapters: number; completedChapters: number; totalWords: number; characterCount: number }>
         runConsistencyCheck: (id: number) => Promise<NovelConsistencyReport>
         getStoryMemory: (id: number) => Promise<StoryMemorySnapshot>
@@ -5315,6 +5357,10 @@ declare global {
         generateSummary: (chapterId: number) => Promise<void>
         aiCheck: (chapterId: number) => Promise<unknown>
         runPublishCheck: (chapterId: number) => Promise<ChapterPublishCheck>
+        optimizeContent: (chapterId: number, options?: {
+          executionMode?: AiExecutionMode
+          extraRequirements?: string
+        }) => Promise<ChapterOptimizeResult>
       }
       chapterBatch: {
         startAutoGenerate: (novelId: number, options: ChapterBatchGenerateOptions) => Promise<number>

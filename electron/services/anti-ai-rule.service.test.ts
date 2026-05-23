@@ -39,6 +39,36 @@ describe('anti-ai-rule.service', () => {
     expect(hits.some((item) => item.ruleCode === 'ai_opener')).toBe(true)
   })
 
+  it('detects explicit strong AI-flavor patterns requested by writers', () => {
+    const text = [
+      '这不是一次失败，而是命运给他的另一种证明——至少他这样告诉自己。',
+      '他的心像被潮水卷走，又像被玻璃压住，仿佛整个世界都在低语。',
+      '他睁开眼睛。',
+      '她的指腹轻轻摩挲杯沿，声音很轻。',
+      '以下是优化后的正文：',
+    ].join('\n')
+    const hits = collectAntiAiRuntimeHits(text)
+    const codes = hits.map((item) => item.ruleCode)
+    expect(codes).toContain('not_but_definition_pattern')
+    expect(codes).toContain('double_metaphor_or_simile_stack')
+    expect(codes).toContain('eye_open_close_standalone_paragraph')
+    expect(codes).toContain('low_value_body_detail')
+    expect(codes).toContain('ai_process_leak')
+  })
+
+  it('does not flag ordinary negation or useful body action as strong AI flavor', () => {
+    const text = [
+      '他不是今天值班，所以把钥匙交给门卫。',
+      '她用指尖按住伤口，确认纱布没有继续渗血。',
+      '他说话压低了音量，避开走廊外的脚步声。',
+    ].join('\n')
+    const hits = collectAntiAiRuntimeHits(text)
+    const codes = hits.map((item) => item.ruleCode)
+    expect(codes).not.toContain('not_but_definition_pattern')
+    expect(codes).not.toContain('eye_open_close_standalone_paragraph')
+    expect(codes).not.toContain('ai_process_leak')
+  })
+
   it('summarizes recurrence, promotion, and high-risk windows', () => {
     const summary = summarizeAntiAiRuleHits([
       {

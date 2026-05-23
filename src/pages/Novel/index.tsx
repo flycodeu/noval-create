@@ -190,6 +190,7 @@ export default function NovelRouter() {
   ))
   const [workspaceQualityController, setWorkspaceQualityController] = useState<RegisteredWorkspaceQualityController | null>(null)
   const [pendingPage, setPendingPage] = useState<ProWorkspaceKey | null>(null)
+  const [batchAnalyzingChapters, setBatchAnalyzingChapters] = useState(false)
   const [workspaceViewMode, setWorkspaceViewMode] = useState<WorkspaceViewMode>(() => {
     const stored = typeof localStorage !== 'undefined'
       ? localStorage.getItem(WORKSPACE_VIEW_MODE_STORAGE_KEY)
@@ -378,6 +379,25 @@ export default function NovelRouter() {
     }
   }, [novelId])
 
+  const handleCopyPlatformFormat = useCallback(async (scope: 'currentChapter' | 'all', platform: 'fanqie' | 'generic' = 'fanqie') => {
+    if (scope === 'currentChapter' && !currentChapter?.id) {
+      message.warning('请先在正文页选择一个章节。')
+      return
+    }
+    try {
+      const result = await window.electron.novel.formatForPlatform(novelId, {
+        platform,
+        scope,
+        chapterId: currentChapter?.id,
+      })
+      await navigator.clipboard.writeText(result.content)
+      const warningText = result.warnings.length > 0 ? `；${result.warnings[0]}` : ''
+      message.success(`已复制 ${result.chapterCount} 章，约 ${result.wordCount} 字${warningText}`)
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '复制平台格式失败')
+    }
+  }, [currentChapter?.id, novelId])
+
   const registerSaveHandler = useCallback((handler: (() => void) | null) => {
     saveHandlerRef.current = handler
   }, [])
@@ -424,6 +444,39 @@ export default function NovelRouter() {
     setChapters(list)
     return list
   }, [chapters, novelId, setChapters])
+
+  const handleSequentialChapterAnalysis = useCallback(async () => {
+    if (batchAnalyzingChapters) return
+    setBatchAnalyzingChapters(true)
+    const closeLoading = message.loading('正在按章节顺序执行 AI 体检与发布前检查...', 0)
+    try {
+      const list = await ensureChapterListLoaded()
+      const candidates = list.filter((chapter) => chapter.content?.trim())
+      if (candidates.length === 0) {
+        closeLoading()
+        message.warning('当前没有可分析的章节正文。')
+        return
+      }
+      let failed = 0
+      for (const chapter of candidates) {
+        try {
+          await window.electron.chapter.aiCheck(chapter.id)
+          await window.electron.chapter.runPublishCheck(chapter.id)
+        } catch (error) {
+          console.warn(`[chapter-analysis] chapter=${chapter.id}`, error)
+          failed += 1
+        }
+      }
+      closeLoading()
+      message.success(`逐章分析完成：${candidates.length - failed}/${candidates.length} 章通过执行，问题已进入对应审校/修订数据。`)
+      notifyWorkspaceMutation()
+    } catch (error) {
+      closeLoading()
+      message.error(error instanceof Error ? error.message : '逐章分析失败。')
+    } finally {
+      setBatchAnalyzingChapters(false)
+    }
+  }, [batchAnalyzingChapters, ensureChapterListLoaded, notifyWorkspaceMutation])
 
   const jumpToChapter = useCallback(async (chapterId: number) => {
     const list = await ensureChapterListLoaded()
@@ -835,6 +888,28 @@ export default function NovelRouter() {
               label: '导出 EPUB',
               onClick: () => void handleWorkspaceExport('epub'),
             },
+            {
+              key: 'export-json',
+              label: '导出 JSON',
+              onClick: () => void handleWorkspaceExport('json'),
+            },
+            { type: 'divider' as const },
+            {
+              key: 'copy-fanqie-current',
+              label: '复制当前章·番茄格式',
+              disabled: !currentChapter,
+              onClick: () => void handleCopyPlatformFormat('currentChapter', 'fanqie'),
+            },
+            {
+              key: 'copy-fanqie-all',
+              label: '复制全书·番茄格式',
+              onClick: () => void handleCopyPlatformFormat('all', 'fanqie'),
+            },
+            {
+              key: 'copy-generic-all',
+              label: '复制全书·通用格式',
+              onClick: () => void handleCopyPlatformFormat('all', 'generic'),
+            },
           ],
         }}
         showQuality={currentPage !== 'guide' && currentPage !== 'quality' && currentPage !== 'batch-workbench'}
@@ -846,6 +921,12 @@ export default function NovelRouter() {
               key: 'settings',
               label: '设置',
               onClick: () => navigateWithinWorkspace('overview'),
+            },
+            {
+              key: 'batch-analyze-chapters',
+              label: batchAnalyzingChapters ? '逐章分析中...' : '逐章 AI 体检队列',
+              disabled: batchAnalyzingChapters,
+              onClick: () => void handleSequentialChapterAnalysis(),
             },
             { type: 'divider' as const },
             {

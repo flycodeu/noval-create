@@ -6,6 +6,12 @@ export interface LanguageDriftMetrics {
   endingSummaryRate: number
   ornamentOverloadRate: number
   nonHumanCollocationRate: number
+  dashDensity: number
+  parentheticalExplanationDensity: number
+  metaphorStackRate: number
+  parallelismRate: number
+  bodyDetailClicheRate: number
+  isolatedTemplateParagraphRate: number
 }
 
 const ABSTRACT_TOKENS = [
@@ -67,6 +73,40 @@ const NON_HUMAN_PATTERNS = [
   /(角色|地点|物品|事件|章节|场景|线程|故事弧)#\d+/u,
 ]
 
+const METAPHOR_STACK_PATTERNS = [
+  /(?:像|仿佛|似乎|好像|宛如).{1,18}(?:又像|又仿佛|又似乎|又好像|又宛如)/u,
+  /(?:像|仿佛|似乎|好像|宛如).{1,20}(?:像|仿佛|似乎|好像|宛如).{1,20}(?:像|仿佛|似乎|好像|宛如)/u,
+]
+
+const PARALLELISM_PATTERNS = [
+  /不是.{2,24}(?:而是|只是|是).{2,36}/u,
+  /既.{2,18}又.{2,18}(?:还|更|也).{2,24}/u,
+  /一边.{2,18}一边.{2,18}/u,
+  /越.{1,10}越.{1,16}/u,
+]
+
+const BODY_DETAIL_TOKENS = [
+  '手指',
+  '指节',
+  '指腹',
+  '指尖',
+  '掌心',
+  '瞳孔收缩',
+  '瞳孔骤缩',
+  '眼睫',
+  '睫毛',
+  '声音很轻',
+  '声音很低',
+  '嗓音很轻',
+  '嗓音很低',
+  '喉咙发紧',
+]
+
+const ISOLATED_TEMPLATE_PARAGRAPH_PATTERNS = [
+  /^(?:他|她|我|他们|她们)?(?:睁开眼睛|睁眼|闭上眼睛|闭眼)[。.!！]?$/u,
+  /^(?:他|她|我|他们|她们)?(?:抬起头|低下头|垂下眼|移开视线)[。.!！]?$/u,
+]
+
 function clampPercent(value: number): number {
   if (!Number.isFinite(value)) return 0
   return Math.max(0, Math.min(100, Math.round(value * 10) / 10))
@@ -81,6 +121,13 @@ function splitSentences(text: string): string[] {
     .split(/[。！？!?；\n]/)
     .map((item) => item.trim())
     .filter((item) => item.length >= 4)
+}
+
+function splitParagraphs(text: string): string[] {
+  return normalizeText(text)
+    .split(/\n+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
 }
 
 function countTokenHits(text: string, tokens: string[]): number {
@@ -145,6 +192,45 @@ function analyzeNonHumanCollocationRate(text: string, sentences: string[]): numb
   return clampPercent(((patternHits + guardrailHits) / sentences.length) * 40)
 }
 
+function analyzeDashDensity(text: string, sentences: string[]): number {
+  if (sentences.length === 0) return 0
+  const hits = (text.match(/——|--|—/gu) || []).length
+  return clampPercent((hits / sentences.length) * 24)
+}
+
+function analyzeParentheticalExplanationDensity(text: string, sentences: string[]): number {
+  if (sentences.length === 0) return 0
+  const parentheticals = text.match(/[（(][^）)]{2,80}[）)]/gu) || []
+  const explanatory = parentheticals.filter((item) => /也就是|即|说明|注|作者|设定|这里|必须|代表|意味着/u.test(item)).length
+  return clampPercent(((parentheticals.length + explanatory) / sentences.length) * 18)
+}
+
+function analyzeMetaphorStackRate(sentences: string[]): number {
+  if (sentences.length === 0) return 0
+  const hits = sentences.filter((sentence) => METAPHOR_STACK_PATTERNS.some((pattern) => pattern.test(sentence))).length
+  return clampPercent((hits / sentences.length) * 100)
+}
+
+function analyzeParallelismRate(sentences: string[]): number {
+  if (sentences.length === 0) return 0
+  const hits = sentences.filter((sentence) => PARALLELISM_PATTERNS.some((pattern) => pattern.test(sentence))).length
+  return clampPercent((hits / sentences.length) * 100)
+}
+
+function analyzeBodyDetailClicheRate(text: string, sentences: string[]): number {
+  if (sentences.length === 0) return 0
+  const tokenHits = countTokenHits(text, BODY_DETAIL_TOKENS)
+  const clicheHits = (text.match(/(?:手指|指节|指腹|指尖|掌心|睫毛|眼睫|瞳孔|喉咙|声音|嗓音).{0,8}(?:微微|轻轻|发紧|收缩|颤|一紧|很轻|很低|泛白|摩挲)/gu) || []).length
+  return clampPercent(((tokenHits + clicheHits) / sentences.length) * 16)
+}
+
+function analyzeIsolatedTemplateParagraphRate(text: string): number {
+  const paragraphs = splitParagraphs(text)
+  if (paragraphs.length === 0) return 0
+  const hits = paragraphs.filter((paragraph) => ISOLATED_TEMPLATE_PARAGRAPH_PATTERNS.some((pattern) => pattern.test(paragraph))).length
+  return clampPercent((hits / paragraphs.length) * 100)
+}
+
 export function analyzeLanguageDrift(text: string): LanguageDriftMetrics {
   const normalized = normalizeText(text)
   const sentences = splitSentences(normalized)
@@ -155,6 +241,12 @@ export function analyzeLanguageDrift(text: string): LanguageDriftMetrics {
       endingSummaryRate: 0,
       ornamentOverloadRate: 0,
       nonHumanCollocationRate: 0,
+      dashDensity: 0,
+      parentheticalExplanationDensity: 0,
+      metaphorStackRate: 0,
+      parallelismRate: 0,
+      bodyDetailClicheRate: 0,
+      isolatedTemplateParagraphRate: 0,
     }
   }
 
@@ -164,5 +256,11 @@ export function analyzeLanguageDrift(text: string): LanguageDriftMetrics {
     endingSummaryRate: analyzeEndingSummaryRate(sentences),
     ornamentOverloadRate: analyzeOrnamentOverloadRate(normalized, sentences),
     nonHumanCollocationRate: analyzeNonHumanCollocationRate(normalized, sentences),
+    dashDensity: analyzeDashDensity(normalized, sentences),
+    parentheticalExplanationDensity: analyzeParentheticalExplanationDensity(normalized, sentences),
+    metaphorStackRate: analyzeMetaphorStackRate(sentences),
+    parallelismRate: analyzeParallelismRate(sentences),
+    bodyDetailClicheRate: analyzeBodyDetailClicheRate(normalized, sentences),
+    isolatedTemplateParagraphRate: analyzeIsolatedTemplateParagraphRate(normalized),
   }
 }

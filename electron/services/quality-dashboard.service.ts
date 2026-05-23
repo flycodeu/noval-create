@@ -201,6 +201,12 @@ const LANGUAGE_DRIFT_METRICS: Array<{ key: LanguageDriftMetricKey; label: string
   { key: 'endingSummaryRate', label: '段尾升华率' },
   { key: 'ornamentOverloadRate', label: '华丽词堆砌率' },
   { key: 'nonHumanCollocationRate', label: '非人类搭配率' },
+  { key: 'dashDensity', label: '破折号密度' },
+  { key: 'parentheticalExplanationDensity', label: '括号说明密度' },
+  { key: 'metaphorStackRate', label: '比喻堆叠率' },
+  { key: 'parallelismRate', label: '排比句率' },
+  { key: 'bodyDetailClicheRate', label: '手眼声音细节密度' },
+  { key: 'isolatedTemplateParagraphRate', label: '孤立模板短段率' },
 ]
 const CHAPTER_FUNCTION_TAGS: ChapterFunctionTag[] = ['setup', 'progression', 'reversal', 'payoff', 'breather', 'climax', 'exposition', 'closure']
 const CHAPTER_FUNCTION_WEAK_TAGS: ChapterFunctionTag[] = ['setup', 'exposition', 'breather']
@@ -685,6 +691,12 @@ function emptyLanguageDrift(): LanguageDriftMetrics {
     endingSummaryRate: 0,
     ornamentOverloadRate: 0,
     nonHumanCollocationRate: 0,
+    dashDensity: 0,
+    parentheticalExplanationDensity: 0,
+    metaphorStackRate: 0,
+    parallelismRate: 0,
+    bodyDetailClicheRate: 0,
+    isolatedTemplateParagraphRate: 0,
   }
 }
 
@@ -695,6 +707,12 @@ function emptyLanguageDriftSeries(): LanguageDriftSeries {
     endingSummaryRate: [],
     ornamentOverloadRate: [],
     nonHumanCollocationRate: [],
+    dashDensity: [],
+    parentheticalExplanationDensity: [],
+    metaphorStackRate: [],
+    parallelismRate: [],
+    bodyDetailClicheRate: [],
+    isolatedTemplateParagraphRate: [],
   }
 }
 
@@ -1660,6 +1678,12 @@ function normalizeLanguageDrift(value: unknown): LanguageDriftMetrics | null {
     endingSummaryRate: read('endingSummaryRate'),
     ornamentOverloadRate: read('ornamentOverloadRate'),
     nonHumanCollocationRate: read('nonHumanCollocationRate'),
+    dashDensity: read('dashDensity'),
+    parentheticalExplanationDensity: read('parentheticalExplanationDensity'),
+    metaphorStackRate: read('metaphorStackRate'),
+    parallelismRate: read('parallelismRate'),
+    bodyDetailClicheRate: read('bodyDetailClicheRate'),
+    isolatedTemplateParagraphRate: read('isolatedTemplateParagraphRate'),
   }
 }
 
@@ -1673,19 +1697,15 @@ function averageLanguageDrift(metricsList: LanguageDriftMetrics[]): LanguageDrif
   if (metricsList.length === 0) return emptyLanguageDrift()
   const totals = emptyLanguageDrift()
   for (const metrics of metricsList) {
-    totals.abstractTokenDensity += metrics.abstractTokenDensity
-    totals.sentencePatternRepeatRate += metrics.sentencePatternRepeatRate
-    totals.endingSummaryRate += metrics.endingSummaryRate
-    totals.ornamentOverloadRate += metrics.ornamentOverloadRate
-    totals.nonHumanCollocationRate += metrics.nonHumanCollocationRate
+    for (const { key } of LANGUAGE_DRIFT_METRICS) {
+      totals[key] += metrics[key] || 0
+    }
   }
-  return {
-    abstractTokenDensity: roundMetric(totals.abstractTokenDensity / metricsList.length),
-    sentencePatternRepeatRate: roundMetric(totals.sentencePatternRepeatRate / metricsList.length),
-    endingSummaryRate: roundMetric(totals.endingSummaryRate / metricsList.length),
-    ornamentOverloadRate: roundMetric(totals.ornamentOverloadRate / metricsList.length),
-    nonHumanCollocationRate: roundMetric(totals.nonHumanCollocationRate / metricsList.length),
+  const averaged = emptyLanguageDrift()
+  for (const { key } of LANGUAGE_DRIFT_METRICS) {
+    averaged[key] = roundMetric(totals[key] / metricsList.length)
   }
+  return averaged
 }
 
 function averageTrendPoints(points: Array<{ chapterNum: number; value: number }>): number {
