@@ -171,6 +171,21 @@ function normalizeSeverity(value: unknown, fallback: WorkspaceQualitySeverity = 
     : fallback
 }
 
+function severityRank(value: WorkspaceQualitySeverity): number {
+  if (value === 'critical') return 3
+  if (value === 'warning') return 2
+  return 1
+}
+
+function mergeIssueSeverity(
+  parsedSeverity: WorkspaceQualitySeverity,
+  issues: WorkspaceQualityIssue[],
+): WorkspaceQualitySeverity {
+  return issues.reduce<WorkspaceQualitySeverity>((current, issue) => (
+    severityRank(issue.severity) > severityRank(current) ? issue.severity : current
+  ), parsedSeverity)
+}
+
 function normalizeIssueKind(value: unknown): WorkspaceQualityIssueKind {
   return value === 'relevance_drift'
     || value === 'workflow_misalignment'
@@ -275,6 +290,17 @@ function countTokenRate(sentences: string[], tokens: string[]): number {
   return clampPercent((hits / sentences.length) * 100)
 }
 
+function guardrailRiskWeight(severity: 'low' | 'medium' | 'high'): number {
+  if (severity === 'high') return 28
+  if (severity === 'medium') return 12
+  return 4
+}
+
+function summarizeGuardrailFinding(finding: { message: string; excerpt: string }): string {
+  const excerpt = cleanText(finding.excerpt)
+  return excerpt ? `${finding.message}（例：${excerpt.slice(0, 40)}）` : finding.message
+}
+
 function buildHumanizationSignal(
   issueType: HumanizationSignal['issueType'],
   severity: WorkspaceQualitySeverity | HumanizationSignal['severity'],
@@ -307,6 +333,15 @@ export function analyzeWorkspaceAiFlavor(text: string, genre?: string, options: 
   const drift = analyzeLanguageDrift(normalized)
   const sentences = splitSentences(normalized)
   const guardrailFindings = collectQualityGuardrailFindings(normalized, genre)
+  const guardrailRisk = clampPercent(guardrailFindings.reduce((total, finding) => (
+    total + guardrailRiskWeight(finding.severity)
+  ), 0))
+  const hasBlockingGuardrail = guardrailFindings.some((finding) => (
+    finding.severity === 'high'
+      || finding.code === 'prompt_leak'
+      || finding.code === 'ai_process_leak'
+      || finding.code === 'id_pollution'
+  ))
   const narrativeControlReport = analyzeNarrativeControls({
     content: normalized,
     chapterFunction: options.chapterFunction,
@@ -342,6 +377,7 @@ export function analyzeWorkspaceAiFlavor(text: string, genre?: string, options: 
     { key: 'transitionDensityRiskRate', label: '过渡疏密风险', value: narrativeControlReport.transitionDensity.riskRate },
     { key: 'emotionMonotonyRiskRate', label: '情绪单色风险', value: narrativeControlReport.emotionFocus.riskRate },
     { key: 'worldExpositionRiskRate', label: '世界说明风险', value: narrativeControlReport.exposition.riskRate },
+    { key: 'qualityGuardrailRisk', label: '质量护栏风险', value: guardrailRisk },
     { key: 'dialogueRatio', label: '对白占比', value: narrativeControlReport.narrativeRatio.ratios.dialogue },
     { key: 'interiorRatio', label: '内心占比', value: narrativeControlReport.narrativeRatio.ratios.interior },
     { key: 'environmentExpositionRatio', label: '环境/解释占比', value: clampPercent(
@@ -364,12 +400,16 @@ export function analyzeWorkspaceAiFlavor(text: string, genre?: string, options: 
     narrativeControlReport.emotionFocus.riskRate,
     narrativeControlReport.exposition.riskRate,
     narrativeControlReport.narrativeRatio.imbalanceRate,
+    guardrailRisk,
   ]
   const averageRisk = riskBreakdown.reduce((total, item) => total + item, 0) / Math.max(riskBreakdown.length, 1)
-  const score = Math.max(0, Math.round(100 - averageRisk * 0.9 - guardrailFindings.length * 4))
-  const severity = score <= 45 ? 'high' : score <= 70 ? 'medium' : 'low'
+  const score = Math.max(0, Math.round(100 - averageRisk * 0.85 - guardrailRisk))
+  const severity = hasBlockingGuardrail || score <= 45 ? 'high' : score <= 70 ? 'medium' : 'low'
   const humanizationSignals: HumanizationSignal[] = []
   const sampleFindings: string[] = []
+  guardrailFindings
+    .filter((finding) => finding.severity === 'high')
+    .forEach((finding) => sampleFindings.push(summarizeGuardrailFinding(finding)))
   if (templateConnectorRate >= 35) {
     humanizationSignals.push(buildHumanizationSignal(
       'template_connector',
@@ -478,6 +518,12 @@ export function analyzeWorkspaceAiFlavor(text: string, genre?: string, options: 
   if (sensoryAnchorWeakRate >= 60) humanizationDirections.push('补人物动作、环境反应和感官细节，让句子落地。')
   if (stanceWeakRate >= 60) humanizationDirections.push('让句子更贴人物视角，而不是站在场外总结。')
   if (drift.ornamentOverloadRate >= 35) humanizationDirections.push('压掉空转修辞，只保留能推进信息的描述。')
+  if (guardrailFindings.some((finding) => finding.code === 'prompt_leak' || finding.code === 'ai_process_leak' || finding.code === 'id_pollution')) {
+    humanizationDirections.push('删除提示词残留、AI 流程说明和内部编号，只保留读者可见文本。')
+  }
+  if (guardrailFindings.some((finding) => finding.severity === 'high' && finding.code !== 'prompt_leak' && finding.code !== 'ai_process_leak' && finding.code !== 'id_pollution')) {
+    humanizationDirections.push('先修高危质量护栏命中项，再处理普通润色问题。')
+  }
   if (narrativeControlReport.pov.status !== 'pass') humanizationDirections.push(narrativeControlReport.pov.fixHint)
   if (narrativeControlReport.sensory.status !== 'pass') humanizationDirections.push(narrativeControlReport.sensory.fixHint)
   if (narrativeControlReport.narrativeRatio.status !== 'pass') humanizationDirections.push(narrativeControlReport.narrativeRatio.fixHint)
@@ -651,9 +697,10 @@ function normalizeAnalyzeResponse(
   const globalIssues = normalizeIssues(parsed.globalIssues)
   const heuristicIssues = buildHeuristicIssues(flattenSnapshotTexts(request.contentSnapshot).join('\n'), request, aiFlavor)
   const mergedIssues = [...globalIssues, ...heuristicIssues.filter((issue) => !globalIssues.some((existing) => existing.kind === issue.kind))]
+  const parsedSeverity = normalizeSeverity(parsed.severity, mergedIssues.some((issue) => issue.severity === 'critical') ? 'critical' : 'warning')
   return {
     summary: cleanText(parsed.summary) || '已完成工作区质量分析。',
-    severity: normalizeSeverity(parsed.severity, mergedIssues.some((issue) => issue.severity === 'critical') ? 'critical' : 'warning'),
+    severity: mergeIssueSeverity(parsedSeverity, mergedIssues),
     overallScore: typeof parsed.overallScore === 'number' ? Math.max(0, Math.min(100, Math.round(parsed.overallScore))) : aiFlavor.score,
     aiFlavor: {
       ...aiFlavor,

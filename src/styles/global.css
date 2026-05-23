@@ -14,6 +14,7 @@
   --text-primary: #1d1d1f;
   --text-secondary: #5c6577;
   --text-muted: #7b8494;
+  --text-tertiary: var(--text-muted);
 
   --border-default: rgba(0, 0, 0, 0.08);
   --border-strong: rgba(0, 0, 0, 0.12);
@@ -105,6 +106,7 @@
   --text-primary: #e8eaed;
   --text-secondary: #9aa0b2;
   --text-muted: #5c6378;
+  --text-tertiary: var(--text-muted);
 
   --border-default: rgba(255, 255, 255, 0.08);
   --border-strong: rgba(255, 255, 255, 0.18);
@@ -989,6 +991,7 @@ html[data-theme="light"] .ant-dropdown-menu {
   --text-primary: #2d2520;
   --text-secondary: #6b5e52;
   --text-muted: #9b8a7a;
+  --text-tertiary: var(--text-muted);
   --border-default: #d4c9be;
   --border-strong: #b8a898;
   --accent: #6b8f71;
@@ -11083,7 +11086,7 @@ html[data-theme="dark"] .ant-card-actions > li {
   }
 }
 
-@media (max-width: 1023px) {
+@media (max-width: 1119px) {
   .novel-route-shell--single {
     grid-template-columns: 1fr;
     grid-template-rows: auto minmax(0, 1fr);

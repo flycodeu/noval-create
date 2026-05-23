@@ -8,6 +8,9 @@ import {
   ScheduleOutlined,
   MessageOutlined,
   BulbOutlined,
+  MoonOutlined,
+  SunOutlined,
+  HighlightOutlined,
 } from '@ant-design/icons'
 import { useThemeStore, Theme } from '../../stores/theme.store'
 import AppErrorBoundary from './AppErrorBoundary'
@@ -48,10 +51,10 @@ const menuItems = [
   },
 ]
 
-const THEME_OPTIONS: { value: Theme; label: string; icon: string }[] = [
-  { value: 'dark', label: '深色', icon: '🌙' },
-  { value: 'light', label: '浅色', icon: '☀️' },
-  { value: 'soft', label: '柔和', icon: '◐' },
+const THEME_OPTIONS: { value: Theme; label: string; icon: React.ReactNode }[] = [
+  { value: 'dark', label: '深色', icon: <MoonOutlined /> },
+  { value: 'light', label: '浅色', icon: <SunOutlined /> },
+  { value: 'soft', label: '柔和', icon: <HighlightOutlined /> },
 ]
 
 export default function AppLayout({ children }: AppLayoutProps) {
@@ -99,7 +102,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
                     className={`app-layout__theme-option${theme === opt.value ? ' is-active' : ''}`}
                   >
                     <span>{opt.label}</span>
-                    <span>{opt.icon}</span>
+                    <span className="app-layout__theme-option-icon">{opt.icon}</span>
                   </button>
                 ))}
               </div>

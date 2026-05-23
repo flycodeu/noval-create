@@ -369,6 +369,8 @@
 .novel-writing-page .novel-writing-shell__editor-sheet {
   width: min(1040px, 100%);
   margin-inline: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .novel-writing-page .chapter-console-page__column--right {

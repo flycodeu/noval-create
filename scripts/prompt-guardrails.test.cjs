@@ -42,6 +42,7 @@ require.extensions['.tsx'] = compileTs
 
 const promptLibraryPath = path.resolve(__dirname, '../src/shared/prompt-library.ts')
 const promptLibrarySource = fs.readFileSync(promptLibraryPath, 'utf8')
+const storyPromptsSource = fs.readFileSync(path.resolve(__dirname, '../electron/services/story-prompts.ts'), 'utf8')
 const prompt = require(promptLibraryPath)
 const genre = require(path.resolve(__dirname, '../src/shared/genre-system.ts'))
 const guardrails = require(path.resolve(__dirname, '../src/shared/content-guardrails.ts'))
@@ -153,6 +154,26 @@ const tests = [
     },
   },
   {
+    name: 'prompt schemas avoid story-specific sample entities and numbered placeholders',
+    run() {
+      const source = `${promptLibrarySource}\n${storyPromptsSource}`
+      const forbiddenSamples = [
+        '\u6797\u8fdc\u4e0e\u8d75\u4e34',
+        '"required_voice_lock_character_ids":[1,2]',
+        '\u6210\u957f\u53d8\u53161',
+        '\u4e8b\u4ef61',
+        '\u573a\u666f\u540d',
+        '\u5fc5\u987b\u4ea4\u4ee31',
+        '\u4fee\u6539\u5efa\u8bae1',
+        '\u6700\u4f4e\u5206\u7ef4\u5ea61',
+      ]
+
+      for (const sample of forbiddenSamples) {
+        assert.doesNotMatch(source, new RegExp(escapeRegExp(sample), 'u'))
+      }
+    },
+  },
+  {
     name: 'story arc and chapter outline prompts expose growth and cost ledgers',
     run() {
       const arcPrompt = prompt.buildStoryArcPlanningPrompt({
@@ -245,6 +266,12 @@ const tests = [
       assert.doesNotMatch(promptLibrarySource, /taskFocus:\s*'\?{3,}/)
       assert.doesNotMatch(promptLibrarySource, /extra(?:Context|Reality|Quality)Lines:\s*\['\?{3,}/)
       assert.match(promptLibrarySource, /\u672c\u8f6e\u4efb\u52a1\u7126\u70b9/u)
+    },
+  },
+  {
+    name: 'prompt library JSON examples avoid smart quote schemas',
+    run() {
+      assert.doesNotMatch(promptLibrarySource, /\u53ea\u8f93\u51fa JSON\uff1a\{[^\n]*[\u201c\u201d]/u)
     },
   },
   {

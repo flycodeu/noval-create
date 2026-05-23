@@ -35,4 +35,17 @@ describe('workspace-quality.service', () => {
     expect(report.humanizationSignals.some((item) => item.issueType === 'world_exposition_dump')).toBe(true)
     expect(report.breakdown.some((item) => item.key === 'worldExpositionRiskRate')).toBe(true)
   })
+
+  it('treats AI workflow and prompt leaks as blocking quality guardrails', () => {
+    const report = analyzeWorkspaceAiFlavor([
+      '以下是优化后的正文：',
+      '场景计划：必须交代目标字数和 exit_hook。',
+      '角色#12在地点#7完成转场。',
+    ].join('\n'))
+
+    expect(report.severity).toBe('high')
+    expect(report.breakdown.some((item) => item.key === 'qualityGuardrailRisk' && item.value > 0)).toBe(true)
+    expect(report.sampleFindings.join('\n')).toContain('AI 生成过程')
+    expect(report.humanizationDirections.join('\n')).toContain('AI 流程说明')
+  })
 })

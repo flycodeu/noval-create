@@ -157,6 +157,8 @@ export default function ProjectTopbar({
               className="project-topbar__control project-topbar__control--ghost"
               icon={<ArrowLeftOutlined />}
               onClick={onBack}
+              aria-label="返回项目列表"
+              title="返回项目列表"
             >
               返回
             </Button>
@@ -165,6 +167,8 @@ export default function ProjectTopbar({
                 className={`project-topbar__control project-topbar__control--ghost${sidebarToggleActive ? ' is-active' : ''}`}
                 icon={sidebarToggleActive ? <MenuFoldOutlined /> : <MenuUnfoldOutlined />}
                 onClick={onToggleSidebar}
+                aria-label="切换工作区导航"
+                title="切换工作区导航"
               >
                 导航
               </Button>
@@ -205,13 +209,13 @@ export default function ProjectTopbar({
                 )
               })}
             </div>
-            <Button className="project-topbar__control" icon={<SearchOutlined />} onClick={onSearch}>
+            <Button className="project-topbar__control" icon={<SearchOutlined />} onClick={onSearch} aria-label="搜索工作区" title="搜索工作区">
               搜索
             </Button>
-            <Button className="project-topbar__control" icon={<SwapOutlined />} onClick={onJumpChapter}>
+            <Button className="project-topbar__control" icon={<SwapOutlined />} onClick={onJumpChapter} aria-label="章节跳转" title="章节跳转">
               章节
             </Button>
-            <Button className="project-topbar__control" icon={<RollbackOutlined />} onClick={onUndo} disabled={!canUndo}>
+            <Button className="project-topbar__control" icon={<RollbackOutlined />} onClick={onUndo} disabled={!canUndo} aria-label="撤销最近操作" title="撤销最近操作">
               撤销
             </Button>
             {showNextStep && onNextStep ? (
@@ -220,12 +224,14 @@ export default function ProjectTopbar({
                 type="primary"
                 icon={<ThunderboltOutlined />}
                 onClick={onNextStep}
+                aria-label={nextStepLabel || '推荐下一步'}
+                title={nextStepLabel || '推荐下一步'}
               >
                 {nextStepLabel || '推荐下一步'}
               </Button>
             ) : null}
             <Dropdown menu={overflowMenu} trigger={['click']}>
-              <Button className="project-topbar__control" icon={<EllipsisOutlined />}>更多</Button>
+              <Button className="project-topbar__control" icon={<EllipsisOutlined />} aria-label="更多操作" title="更多操作">更多</Button>
             </Dropdown>
           </div>
         </div>

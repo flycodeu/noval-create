@@ -203,6 +203,10 @@ function appendPromptText(prompt: string, text: string): string {
   return `${prompt}\n\n${normalized}`
 }
 
+function stripTrailingJsonOutputInstruction(prompt: string): string {
+  return prompt.replace(/\n{1,2}只输出 JSON：\{[^\n]*\}\s*$/u, '').trim()
+}
+
 function appendMandatoryExpandBackgroundGuardrails(prompt: string): string {
   return appendPromptSection(prompt, '不可覆盖的硬约束', [
     '- 只允许沿用用户原始背景里已经明确出现的专有名词。',
@@ -669,12 +673,13 @@ export function subplotExpandPrompt(params: SubplotExpandPromptInput): string {
 }
 
 export function contentScoringPrompt(params: ContentScoringPromptInput): string {
+  const outputInstruction = '只输出 JSON：{"dimensions":[{"name":"文笔质量","score":0,"feedback":"","suggestion":""},{"name":"逻辑连贯","score":0,"feedback":"","suggestion":""},{"name":"节奏控制","score":0,"feedback":"","suggestion":""},{"name":"情感深度","score":0,"feedback":"","suggestion":""},{"name":"人物塑造","score":0,"feedback":"","suggestion":""},{"name":"世界一致","score":0,"feedback":"","suggestion":""},{"name":"准确度","score":0,"feedback":"","suggestion":""},{"name":"追读欲","score":0,"feedback":"","suggestion":""}],"ai_like_rate":0,"repetition_risk":"低/中/高","overall_score":0,"overall_feedback":"","top_fixes":[],"weak_dimensions":[]}'
   const fallback = appendPromptText(
-    appendPromptSection(rawContentScoringPrompt(params), '补充评分要求', [
+    appendPromptSection(stripTrailingJsonOutputInstruction(rawContentScoringPrompt(params)), '补充评分要求', [
       '- 维度里要显式覆盖连贯性、准确度和追读欲，不要把这些都塞进一个笼统的逻辑分里。',
       '- 如果存在明显人机味、硬造词、表达不通或解释腔，要在 top_fixes 里优先指出。',
     ]),
-    '只输出 JSON：{"dimensions":[{"name":"创新性","score":0,"feedback":"一句简评","suggestion":"具体改法"},{"name":"丰富度","score":0,"feedback":"一句简评","suggestion":"具体改法"},{"name":"自然度","score":0,"feedback":"一句简评","suggestion":"具体改法"},{"name":"连贯性","score":0,"feedback":"一句简评","suggestion":"具体改法"},{"name":"准确度","score":0,"feedback":"一句简评","suggestion":"具体改法"},{"name":"追读欲","score":0,"feedback":"一句简评","suggestion":"具体改法"}],"ai_like_rate":0,"repetition_risk":"低/中/高","overall_score":0,"overall_feedback":"综合评价","top_fixes":["修改建议1","修改建议2","修改建议3"]}',
+    outputInstruction,
   )
   return applyPromptOverride('contentScoring', fallback, params as unknown as Record<string, unknown>)
 }
@@ -724,7 +729,7 @@ export function assetReviewPrompt(params: AssetReviewPromptInput): string {
       : '',
     '',
     '只输出 JSON：',
-    '{"summary":"总体判断","severity":"low|medium|high","rewrite_required":false,"reject_required":false,"genre_drift_risks":["风险1"],"theme_drift_risks":["风险1"],"background_drift_risks":["风险1"],"language_risks":["风险1"],"human_language_repairs":["原说法 -> 更自然说法"],"conflict_risks":["风险1"],"top_fixes":["修改建议1","修改建议2"],"strengths":["优点1"]}',
+    '{"summary":"总体判断","severity":"low|medium|high","rewrite_required":false,"reject_required":false,"genre_drift_risks":["风险"],"theme_drift_risks":["风险"],"background_drift_risks":["风险"],"language_risks":["风险"],"human_language_repairs":["原说法 -> 更自然说法"],"conflict_risks":["风险"],"top_fixes":[],"strengths":["具体优点"]}',
   ].filter(Boolean).join('\n')
 
   return applyPromptOverride('assetReview', fallback, params as unknown as Record<string, unknown>)

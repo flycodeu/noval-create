@@ -90,6 +90,15 @@
   border-color: color-mix(in srgb, var(--accent) 42%, transparent 58%);
 }
 
+.app-layout__theme-option-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  color: currentColor;
+  font-size: 14px;
+}
+
 .app-shell-bar {
   position: relative;
   min-height: 44px;

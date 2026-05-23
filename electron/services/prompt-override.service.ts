@@ -28,6 +28,15 @@ function stringifyParam(value: unknown): string {
   }
 }
 
+export function renderPromptOverrideTemplate(content: string, params: Record<string, unknown>): string {
+  return content.replace(/\{([a-zA-Z0-9_]+)\}/g, (_match, token: string) => {
+    if (!Object.prototype.hasOwnProperty.call(params, token)) {
+      return `[MISSING_PARAM:${token}]`
+    }
+    return stringifyParam(params[token])
+  })
+}
+
 export interface PromptOverrideRecord {
   key: string
   content: string
@@ -146,9 +155,7 @@ export function applyPromptOverride(
     return fallback
   }
 
-  const overridden = override.content.replace(/\{([a-zA-Z0-9_]+)\}/g, (_match, token: string) => {
-    return stringifyParam(params[token])
-  })
+  const overridden = renderPromptOverrideTemplate(override.content, params)
   const protectedFooter = buildProtectedFooter(key)
   const finalPrompt = protectedFooter
     ? `${overridden}\n\n${protectedFooter}`

@@ -74,6 +74,8 @@ const WORKSPACE_LAST_WRITING_VIEW_STORAGE_KEY = 'novelforge-workspace-last-writi
 const WORKSPACE_PAGE_META = new Map(WORKSPACE_MODULE_DEFINITIONS.map((item) => [item.key, item] as const))
 const WORKSPACE_PREWARM_DELAY_MS = 140
 const MAX_IDLE_PREWARM_ROUTES = 4
+const COMPACT_SHELL_BREAKPOINT = 1120
+const COMPACT_SHELL_MEDIA_QUERY = `(max-width: ${COMPACT_SHELL_BREAKPOINT - 1}px)`
 
 const WORKSPACE_STAGE_LOADERS = {
   guide: () => import('./Studio'),
@@ -191,7 +193,7 @@ export default function NovelRouter() {
   const [qualityAnalysisTaskId, setQualityAnalysisTaskId] = useState<number | null>(null)
   const [qualityAnalysisStatus, setQualityAnalysisStatus] = useState<ChapterQualityAnalysisStatus | null>(null)
   const [isCompactShell, setIsCompactShell] = useState<boolean>(() => (
-    typeof window !== 'undefined' ? window.innerWidth < 1024 : false
+    typeof window !== 'undefined' ? window.innerWidth < COMPACT_SHELL_BREAKPOINT : false
   ))
   const [workspaceQualityController, setWorkspaceQualityController] = useState<RegisteredWorkspaceQualityController | null>(null)
   const [pendingPage, setPendingPage] = useState<ProWorkspaceKey | null>(null)
@@ -387,9 +389,9 @@ export default function NovelRouter() {
   const copyPlatformText = useCallback(async (text: string, label: string) => {
     try {
       await navigator.clipboard.writeText(text)
-      message.success(`已复制${label}。`)
+      message.success(getUserFacingMessage('novel.platformCopySucceeded', { label }))
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '复制平台格式失败')
+      message.error(getErrorMessage(error, 'novel.platformCopyFailed'))
     }
   }, [])
 
@@ -399,7 +401,7 @@ export default function NovelRouter() {
     options: { batchSize?: number } = {},
   ) => {
     if (scope === 'currentChapter' && !currentChapter?.id) {
-      message.warning('请先在正文页选择一个章节。')
+      message.warning(getUserFacingMessage('novel.platformCopySelectChapter'))
       return
     }
     try {
@@ -412,14 +414,18 @@ export default function NovelRouter() {
       if (result.batches.length > 1) {
         setPlatformCopyResult(result)
         setPlatformCopyOpen(true)
-        message.success(`已生成 ${result.batches.length} 个平台分批包。`)
+        message.success(getUserFacingMessage('novel.platformBatchGenerated', { count: result.batches.length }))
         return
       }
       await navigator.clipboard.writeText(result.content)
       const warningText = result.warnings.length > 0 ? `；${result.warnings[0]}` : ''
-      message.success(`已复制 ${result.chapterCount} 章，约 ${result.wordCount} 字${warningText}`)
+      message.success(getUserFacingMessage('novel.platformBookCopied', {
+        chapterCount: result.chapterCount,
+        wordCount: result.wordCount,
+        warning: warningText,
+      }))
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '复制平台格式失败')
+      message.error(getErrorMessage(error, 'novel.platformCopyFailed'))
     }
   }, [currentChapter?.id, novelId])
 
@@ -480,10 +486,10 @@ export default function NovelRouter() {
       })
       setQualityAnalysisTaskId(taskId)
       setQualityAnalysisOpen(true)
-      message.success(`逐章 AI 体检队列已启动（任务 #${taskId}）。结果会写入批次检查和修订中心。`)
+      message.success(getUserFacingMessage('novel.chapterQualityQueueStarted', { taskId }))
       notifyWorkspaceMutation()
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '逐章分析失败。')
+      message.error(getErrorMessage(error, 'novel.chapterQualityQueueStartFailed'))
       setBatchAnalyzingChapters(false)
     }
   }, [batchAnalyzingChapters, notifyWorkspaceMutation, novelId])
@@ -526,9 +532,9 @@ export default function NovelRouter() {
     try {
       await window.electron.task.cancel(qualityAnalysisTaskId)
       setBatchAnalyzingChapters(false)
-      message.info('逐章 AI 体检队列已请求停止。')
+      message.info(getUserFacingMessage('novel.chapterQualityQueueStopRequested'))
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '停止逐章分析失败。')
+      message.error(getErrorMessage(error, 'novel.chapterQualityQueueStopFailed'))
     }
   }, [qualityAnalysisTaskId])
 
@@ -656,7 +662,7 @@ export default function NovelRouter() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined
-    const mediaQuery = window.matchMedia('(max-width: 1023px)')
+    const mediaQuery = window.matchMedia(COMPACT_SHELL_MEDIA_QUERY)
     const handleChange = (event: MediaQueryListEvent | MediaQueryList) => {
       setIsCompactShell(event.matches)
     }
@@ -983,7 +989,7 @@ export default function NovelRouter() {
         }}
         showQuality={currentPage !== 'guide' && currentPage !== 'quality' && currentPage !== 'batch-workbench'}
         showNextStep={currentPage !== workspaceSnapshot.nextStep.targetPage}
-        showWindowControls={!isCompactShell}
+        showWindowControls
         moreMenu={{
           items: [
             {

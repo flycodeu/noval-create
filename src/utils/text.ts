@@ -28,6 +28,7 @@ export function stripQuoteEmphasis(text: string): string {
 const AI_FILLER_RULES: Array<[RegExp, string]> = [
   [/所谓的?/g, ''],
   [/某种意义上/g, ''],
+  [/命运的齿轮/g, ''],
   [/在这一刻/g, '这时'],
   [/不由得/g, ''],
   [/无法言说/g, '说不清'],
@@ -36,8 +37,32 @@ const AI_FILLER_RULES: Array<[RegExp, string]> = [
   [/承载着?/g, '关联'],
 ]
 
+const AI_PROCESS_PREFIX_RULES: RegExp[] = [
+  /^(?:好的|可以|当然)[，,。！!\s]+/u,
+  /^(?:以下|下面)(?:是|为)[^\n]{0,40}(?:优化|改写|润色|生成|修订)[^\n]{0,30}[：:，,。]?\s*/u,
+  /^(?:优化|改写|润色|修订|生成)(?:后)?(?:的)?(?:正文|文本|内容|结果|版本)(?:如下)?[：:，,。]?\s*/u,
+  /^(?:最终)?(?:正文|文本|内容|结果)(?:如下)?[：:，,。]\s*/u,
+  /^【(?:分析|计划|备注|提示|修订建议|改写说明)】[^\n]*(?:\n+|$)/u,
+  /^(?:修订建议|改写说明|思考过程|生成结果)[：:][^\n]*(?:\n+|$)/u,
+]
+
+function stripLeadingAiProcessText(text: string): string {
+  let cleaned = text.trim()
+
+  for (let index = 0; index < 6; index += 1) {
+    const previous = cleaned
+    for (const pattern of AI_PROCESS_PREFIX_RULES) {
+      cleaned = cleaned.replace(pattern, '')
+    }
+    cleaned = cleaned.trim()
+    if (cleaned === previous) break
+  }
+
+  return cleaned
+}
+
 export function cleanAiFieldText(text: string): string {
-  let cleaned = stripQuoteEmphasis(stripMarkdown(text))
+  let cleaned = stripLeadingAiProcessText(stripQuoteEmphasis(stripMarkdown(text)))
 
   for (const [pattern, replacement] of AI_FILLER_RULES) {
     cleaned = cleaned.replace(pattern, replacement)

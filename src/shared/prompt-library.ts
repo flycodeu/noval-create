@@ -809,7 +809,7 @@ export const GLOBAL_WRITING_RULES = `你现在写的是可直接入稿的中文�
 
 阻塞坏习惯（检测到会被强制修改）：
 - “突然””不由得””这一刻””顷刻之间”这类万能起手——改为直接写动作
-- 深吸一口气、攒紧拳头、瞪大眼睛、僵在原地——换成这个角色独有的应激反应
+- 深吸一口气、攥紧拳头、瞪大眼睛、僵在原地——换成这个角色独有的应激反应
 - “命运的齿轮””冥冥之中””也许这就是”——删掉，用事件本身说话
 - 给普通概念乱加引号——去掉引号，只有专有名词保留
 - 用破折号偷懒解释或做假揭示——改成正常叙述
@@ -1151,7 +1151,8 @@ export function buildStoryArcPlanningPrompt(params: StoryArcPromptInput): string
     section('语言要求', buildHumanLanguageRules([
       'summary、arc_goal、growth_ledger、cost_ledger 和 key_turns 都写成普通编辑能直接接手的结构说明，不要写策划黑话。',
     ])),
-    '只输出 JSON 数组：[{"arc_name":"","stage":"铺垫/升级/高潮/收束","chapter_start":1,"chapter_end":10,"arc_goal":"本弧必须完成的推进","target_words":50000,"growth_ledger":["成长变化1","成长变化2"],"cost_ledger":["代价1","代价2"],"key_turns":["具体转折1","具体转折2"],"subplot_links":["某条支线如何介入/推进/回收"],"pacing":"快/中/慢","summary":"40到80字，写清这一弧到底发生了什么"}]',
+    '只输出 JSON 数组。示例值只表示字段结构，实际输出必须写入当前故事的具体内容：',
+    '[{"arc_name":"","stage":"铺垫/升级/高潮/收束","chapter_start":1,"chapter_end":10,"arc_goal":"","target_words":50000,"growth_ledger":[],"cost_ledger":[],"key_turns":[],"subplot_links":[],"pacing":"快/中/慢","summary":""}]',
     params.attemptNumber && params.attemptNumber > 1 ? buildVariationHint(params.attemptNumber, 'outline') : '',
   ])
 }
@@ -1208,7 +1209,8 @@ export function buildChapterOutlinePlanningPrompt(params: ChapterOutlinePromptIn
     section('语言要求', buildHumanLanguageRules([
       '章节标题、目标、成长账本和代价账本都要写得清楚直接，避免抽象套话。',
     ])),
-    '只输出 JSON 数组：[{"chapter_num":' + params.chapterStart + ',"title":"","goal":"本章要完成的推进","growth_ledger":["成长变化1"],"cost_ledger":["代价1"],"plot_points":["事件1","事件2","事件3"],"characters":["登场人物A","登场人物B"],"location":"主要场景","emotion_tone":"情绪基调","bridge_in":"这章承接了什么","bridge_out":"这章给下章留下什么"}]',
+    '只输出 JSON 数组。示例值只表示字段结构，实际输出必须写入当前故事的具体内容：',
+    '[{"chapter_num":' + params.chapterStart + ',"title":"","goal":"","growth_ledger":[],"cost_ledger":[],"plot_points":[],"characters":[],"location":"","emotion_tone":"","bridge_in":"","bridge_out":""}]',
     params.attemptNumber && params.attemptNumber > 1 ? buildVariationHint(params.attemptNumber, 'outline') : '',
   ])
 }
@@ -1266,7 +1268,8 @@ export function buildVolumePlanningPrompt(params: VolumePlanningPromptInput): st
     section('语言要求', buildHumanLanguageRules([
       '卷标题和主题描述要具体，不要写成"黎明前的黑暗"这种万能标题。',
     ])),
-    '只输出 JSON 数组：[{"volume_number":1,"title":"卷标题","theme":"本卷核心主题和具体困境","target_words":' + Math.round(params.targetTotalWords / estimatedVolumes) + ',"chapter_estimate":{"start":1,"end":100},"protagonist_stage":"主角在本卷的状态和成长阶段","key_arcs":["故事弧1","故事弧2"],"major_events":["本卷关键事件1","关键事件2"],"subplot_status":{"线索名":"推进/引入/回收"},"volume_climax":"本卷高潮事件","bridge_to_next":"留给下一卷的悬念或遗留问题"}]',
+    '只输出 JSON 数组。示例值只表示字段结构，实际输出必须写入当前故事的具体内容：',
+    '[{"volume_number":1,"title":"","theme":"","target_words":' + Math.round(params.targetTotalWords / estimatedVolumes) + ',"chapter_estimate":{"start":1,"end":100},"protagonist_stage":"","key_arcs":[],"major_events":[],"subplot_status":{},"volume_climax":"","bridge_to_next":""}]',
     params.attemptNumber && params.attemptNumber > 1 ? buildVariationHint(params.attemptNumber, 'outline') : '',
   ])
 }
@@ -1398,7 +1401,8 @@ export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
     section('语言要求', buildHumanLanguageRules([
       '场景目标和冲突都写具体事实，不写“命运转折”“真正成长”这种空话。',
     ])),
-    '只输出 JSON 数组：[{"scene_order":1,"scene_title":"场景名","purpose":"这一段必须完成什么","location":"地点或空间","time_anchor":"时间标签","present_characters":["人物A"],"key_items":["物品A"],"conflict":"这一段最直接的冲突","beat":"这一段发生的关键动作","must_cover":["必须交代1","必须交代2"],"climax_variant":"如果这一场承担高潮/爆发/反转，请写明确变体；否则留空字符串","exit_hook":"如何推到下一段"}]',
+    '只输出 JSON 数组。示例值只表示字段结构，实际输出必须写入当前章节的具体内容：',
+    '[{"scene_order":1,"scene_title":"","purpose":"","location":"","time_anchor":"","present_characters":[],"key_items":[],"conflict":"","beat":"","must_cover":[],"climax_variant":"","exit_hook":""}]',
     buildAvoidanceSection(params.rejectedDigests || []),
     params.attemptNumber && params.attemptNumber > 1 ? buildVariationHint(params.attemptNumber, 'outline') : '',
   ])
@@ -1638,7 +1642,7 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
       '出现 high 级问题时 rewrite_required 必须是 true，其余情况可以是 false。',
       'revision_brief 用 60 到 120 字中文写清修改方向。',
     ].join('\n')),
-    '只输出 JSON：{"summary":"总体判断","critical_fixes":["必改 1"],"continuity_risks":["连续性风险 1"],"arc_progress_risks":["故事弧推进风险 1"],"context_drift_risks":["漂移风险 1"],"realism_risks":["真实度风险 1"],"coherence_risks":["连贯性风险 1"],"reader_hook_risks":["追读风险 1"],"language_risks":["语言风险 1"],"human_language_repairs":["原说法 -> 更自然说法"],"genre_hollowing_risks":["体裁空心化风险 1"],"missing_payoffs":["未落地伏笔 1"],"strengths":["优点 1"],"severity":"medium","rewrite_required":true,"revision_brief":"修订方向摘要","protagonist_setback":"minor","setback_summary":"主角在关键交锋中被压制","cost_present":true,"cost_summary":"主角失去可靠盟友与补给","cost_resolution_state":"ongoing","reversal_marker":true,"reversal_summary":"看似得手后被埋伏反制","reversal_support_state":"supported","pace_marker":"reversal","reward_state":"partial","protagonist_pressure":72,"chapter_function_primary":"reversal","chapter_function_tags":["progression","reversal"],"dialogue_filler_risks":["对白空话 1"],"dialogue_info_density_risks":["信息推进不足 1"],"dialogue_voice_lock_summary":"本章需锁定林远与赵临的称呼和句长差异","required_voice_lock_character_ids":[1,2]}',
+    '只输出 JSON：{"summary":"总体判断","critical_fixes":["必改项"],"continuity_risks":["连续性风险"],"arc_progress_risks":["故事弧推进风险"],"context_drift_risks":["漂移风险"],"realism_risks":["真实度风险"],"coherence_risks":["连贯性风险"],"reader_hook_risks":["追读风险"],"language_risks":["语言风险"],"human_language_repairs":["原说法 -> 更自然说法"],"genre_hollowing_risks":["体裁空心化风险"],"missing_payoffs":["未落地伏笔"],"strengths":["具体优点"],"severity":"medium","rewrite_required":true,"revision_brief":"修订方向摘要","protagonist_setback":"minor","setback_summary":"主角在关键交锋中被压制","cost_present":true,"cost_summary":"主角失去可靠盟友与补给","cost_resolution_state":"ongoing","reversal_marker":true,"reversal_summary":"看似得手后被埋伏反制","reversal_support_state":"supported","pace_marker":"reversal","reward_state":"partial","protagonist_pressure":72,"chapter_function_primary":"reversal","chapter_function_tags":["progression","reversal"],"dialogue_filler_risks":["对白空话"],"dialogue_info_density_risks":["信息推进不足"],"dialogue_voice_lock_summary":"","required_voice_lock_character_ids":[]}',
     buildAvoidanceSection(params.rejectedDigests || []),
     params.attemptNumber && params.attemptNumber > 1 ? buildVariationHint(params.attemptNumber, 'chapter') : '',
   ])
@@ -1755,7 +1759,7 @@ export function buildContinuityStatePrompt(params: ContinuityPromptInput): strin
     section('语言要求', buildHumanLanguageRules([
       '只保留清楚、可验证的事实，不写情绪化判断和抽象口号。',
     ])),
-    '只输出 JSON：{"plot_progress":["推进1","推进2"],"character_state_changes":["人物变化1","人物变化2"],"world_state_changes":["世界变化1"],"open_loops":["未回收事项1","未回收事项2"],"continuity_notes":["下章必须承接1","下章必须承接2"],"arc_progress":"本章对当前故事弧的推进情况"}',
+    '只输出 JSON。示例值只表示字段结构，实际输出必须写入当前章节的具体事实：{"plot_progress":[],"character_state_changes":[],"world_state_changes":[],"open_loops":[],"continuity_notes":[],"arc_progress":""}',
   ])
 }
 
@@ -2057,7 +2061,7 @@ export function contentScoringPrompt(params: ContentScoringPromptInput): string 
       'top_fixes 只列最值得先改的 3 处，要具体、可操作，最好直接给出更自然的替换说法。',
       'weak_dimensions 列出得分最低的 2 个维度名称，用于后续章节生成时作为重点改进方向。',
     ].join('\n')),
-    '只输出 JSON：{“dimensions”:[{“name”:”文笔质量”,”score”:0,”feedback”:”一句简评”,”suggestion”:”具体改法”},{“name”:”逻辑连贯”,”score”:0,”feedback”:””,”suggestion”:””},{“name”:”节奏控制”,”score”:0,”feedback”:””,”suggestion”:””},{“name”:”情感深度”,”score”:0,”feedback”:””,”suggestion”:””},{“name”:”人物塑造”,”score”:0,”feedback”:””,”suggestion”:””},{“name”:”世界一致”,”score”:0,”feedback”:””,”suggestion”:””},{“name”:”创新性”,”score”:0,”feedback”:””,”suggestion”:””},{“name”:”追读欲”,”score”:0,”feedback”:””,”suggestion”:””}],”ai_like_rate”:0,”repetition_risk”:”低/中/高”,”overall_score”:0,”overall_feedback”:”综合评价”,”top_fixes”:[“修改建议1”,”修改建议2”,”修改建议3”],”weak_dimensions”:[“最低分维度1”,”最低分维度2”]}',
+    '只输出 JSON：{"dimensions":[{"name":"文笔质量","score":0,"feedback":"","suggestion":""},{"name":"逻辑连贯","score":0,"feedback":"","suggestion":""},{"name":"节奏控制","score":0,"feedback":"","suggestion":""},{"name":"情感深度","score":0,"feedback":"","suggestion":""},{"name":"人物塑造","score":0,"feedback":"","suggestion":""},{"name":"世界一致","score":0,"feedback":"","suggestion":""},{"name":"创新性","score":0,"feedback":"","suggestion":""},{"name":"追读欲","score":0,"feedback":"","suggestion":""}],"ai_like_rate":0,"repetition_risk":"低/中/高","overall_score":0,"overall_feedback":"","top_fixes":[],"weak_dimensions":[]}',
   ])
 }
 

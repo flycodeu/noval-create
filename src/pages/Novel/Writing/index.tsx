@@ -424,6 +424,11 @@ function normalizeEditorText(value?: string | null): string {
   return (value || '').replace(/\r\n/g, '\n')
 }
 
+function writePlainEditorText(element: HTMLElement | null, value?: string | null) {
+  if (!element) return
+  element.textContent = normalizeEditorText(value)
+}
+
 function parseRouteId(value: string | null): number | null {
   const parsed = Number(value)
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null
@@ -763,7 +768,7 @@ export default function Writing({ novelId }: Props) {
     setWordCount(countWords(full.content || ''))
     resetEditorHistory(full.content || '')
     updateChapter(chapterId, full)
-    if (editorRef.current) editorRef.current.innerHTML = (full.content || '').replace(/\n/g, '<br>')
+    writePlainEditorText(editorRef.current, full.content)
     if (isHistoryRoute) {
       await refreshVersionHistory(chapterId)
     }
@@ -1033,9 +1038,7 @@ export default function Writing({ novelId }: Props) {
     setContent(normalized)
     setWordCount(nextWordCount)
     setSelectedSnippet(null)
-    if (editorRef.current) {
-      editorRef.current.innerHTML = normalized.replace(/\n/g, '<br>')
-    }
+    writePlainEditorText(editorRef.current, normalized)
     if (currentChapter) {
       historyBaselineRef.current = normalized
       lastHistoryAtRef.current = Date.now()
@@ -1360,7 +1363,7 @@ export default function Writing({ novelId }: Props) {
       setOptimizeModalOpen(true)
       navigateToWritingRoute('review')
     } catch (error: unknown) {
-      message.error(error instanceof Error ? error.message : '整章优化失败，请稍后重试。')
+      message.error(getErrorMessage(error, 'writing.optimizeFailed'))
     } finally {
       setOptimizingChapter(false)
     }
@@ -1372,7 +1375,7 @@ export default function Writing({ novelId }: Props) {
       (optimizationResult.factGuard && !optimizationResult.factGuard.safeToApply)
       || (optimizationResult.qualityGate && !optimizationResult.qualityGate.safeToApply)
     ) {
-      message.warning('优化稿仍有事实、章尾或 AI 味风险，已阻止直接应用。请调整要求后重新生成。')
+      message.warning(getUserFacingMessage('writing.optimizeBlockedByQuality'))
       return
     }
 
@@ -1388,9 +1391,7 @@ export default function Writing({ novelId }: Props) {
       setContent(normalized)
       setWordCount(nextWordCount)
       setSelectedSnippet(null)
-      if (editorRef.current) {
-        editorRef.current.innerHTML = normalized.replace(/\n/g, '<br>')
-      }
+      writePlainEditorText(editorRef.current, normalized)
       historyBaselineRef.current = normalized
       lastHistoryAtRef.current = Date.now()
       await Promise.all([
@@ -1399,9 +1400,9 @@ export default function Writing({ novelId }: Props) {
       ])
       setOptimizeModalOpen(false)
       setOptimizationResult(null)
-      message.success('已保存并应用整章优化稿。')
+      message.success(getUserFacingMessage('writing.optimizeApplied'))
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '应用整章优化稿失败，请稍后重试。')
+      message.error(getErrorMessage(error, 'writing.optimizeApplyFailed'))
     } finally {
       setApplyingOptimizedChapter(false)
     }
@@ -1433,8 +1434,8 @@ export default function Writing({ novelId }: Props) {
     }
     navigateToWritingRoute('editor')
     message.info(item.status === 'rewrite'
-      ? '回到正文后先处理重写项，再重新执行章节验收。'
-      : '回到正文页处理当前验收问题。')
+      ? getUserFacingMessage('writing.gateIssueRewriteOpen')
+      : getUserFacingMessage('writing.gateIssueOpen'))
   }, [currentChapter, navigate, navigateToWritingRoute, novelId])
 
   const handleStatusChange = async (status: string) => {
@@ -2793,8 +2794,9 @@ export default function Writing({ novelId }: Props) {
                           />
                           <div
                             className="novel-writing-shell__editor-sheet novel-writing-shell__editor-sheet--readonly"
-                            dangerouslySetInnerHTML={{ __html: content.replace(/\n/g, '<br>') }}
-                          />
+                          >
+                            {content}
+                          </div>
                         </div>
                       ) : (
                         <div
@@ -2805,8 +2807,9 @@ export default function Writing({ novelId }: Props) {
                           onMouseUp={syncSelectedSnippet}
                           onKeyUp={syncSelectedSnippet}
                           className="novel-writing-shell__editor-sheet"
-                          dangerouslySetInnerHTML={{ __html: content.replace(/\n/g, '<br>') }}
-                        />
+                        >
+                          {content}
+                        </div>
                       )
                     ) : (
                       <div className="novel-empty novel-empty--writing">请选择左侧章节，或先创建一个新章节开始写作。</div>
