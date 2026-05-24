@@ -54,6 +54,12 @@ describe('workflow next chapter readiness', () => {
   it('marks the project as ready for the first chapter once structure anchors exist', () => {
     const readiness = getNextChapterReadiness({
       ...EMPTY_WORKFLOW_STATS,
+      characterCount: 3,
+      hasProtagonist: true,
+      characterArcCount: 1,
+      relationshipArcCount: 1,
+      resistanceTrackCount: 2,
+      volumeCount: 1,
       outlineCount: 1,
       timelineCount: 1,
       threadCount: 1,
@@ -61,5 +67,36 @@ describe('workflow next chapter readiness', () => {
 
     expect(readiness.ready).toBe(true)
     expect(readiness.label).toBe('可写第一章')
+  })
+
+  it('blocks writing before the character network and resistance line are usable', () => {
+    const missingCharacterNetwork = getNextChapterReadiness({
+      ...EMPTY_WORKFLOW_STATS,
+      characterCount: 2,
+      hasProtagonist: true,
+      outlineCount: 1,
+      timelineCount: 1,
+      threadCount: 1,
+      volumeCount: 1,
+      resistanceTrackCount: 1,
+    })
+
+    expect(missingCharacterNetwork.ready).toBe(false)
+    expect(missingCharacterNetwork.label).toBe('缺人物网')
+
+    const missingResistance = getNextChapterReadiness({
+      ...EMPTY_WORKFLOW_STATS,
+      characterCount: 2,
+      hasProtagonist: true,
+      characterArcCount: 1,
+      relationshipArcCount: 1,
+      outlineCount: 1,
+      timelineCount: 1,
+      threadCount: 1,
+      volumeCount: 1,
+    })
+
+    expect(missingResistance.ready).toBe(false)
+    expect(missingResistance.label).toBe('缺阻力线')
   })
 })

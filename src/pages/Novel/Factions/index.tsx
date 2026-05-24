@@ -78,6 +78,23 @@ const EMPTY_AUTO_STATUS: FactionAutoGenerateStatus = {
   warnings: [],
 }
 
+const EMPTY_FACTION_GRAPH: FactionGraphPayload = { nodes: [], edges: [], unalignedCharacters: [] }
+
+function ensureArray<T>(value: T[] | null | undefined): T[] {
+  return Array.isArray(value) ? value : []
+}
+
+function normalizeFactionGraphPayload(graph: FactionGraphPayload | null | undefined): FactionGraphPayload {
+  if (!graph) return EMPTY_FACTION_GRAPH
+  return {
+    ...EMPTY_FACTION_GRAPH,
+    ...graph,
+    nodes: ensureArray(graph.nodes),
+    edges: ensureArray(graph.edges),
+    unalignedCharacters: ensureArray(graph.unalignedCharacters),
+  }
+}
+
 function parseNumberArray(raw?: string | null): number[] {
   if (!raw) return []
   try {
@@ -146,7 +163,7 @@ export default function FactionsPage({ novelId }: Props) {
   const [generateOpen, setGenerateOpen] = useState(false)
   const [characterOptions, setCharacterOptions] = useState<Character[]>([])
   const [mapOptions, setMapOptions] = useState<MapNodeSummary[]>([])
-  const [graphData, setGraphData] = useState<FactionGraphPayload>({ nodes: [], edges: [], unalignedCharacters: [] })
+  const [graphData, setGraphData] = useState<FactionGraphPayload>(EMPTY_FACTION_GRAPH)
   const [autoTask, setAutoTask] = useState<Task | null>(null)
   const [autoStatus, setAutoStatus] = useState<FactionAutoGenerateStatus>(EMPTY_AUTO_STATUS)
   const [autoStopping, setAutoStopping] = useState(false)
@@ -183,7 +200,7 @@ export default function FactionsPage({ novelId }: Props) {
         novelId,
         ...(selectedId ? { focusFactionId: selectedId } : {}),
       })
-      setGraphData(nextGraph)
+      setGraphData(normalizeFactionGraphPayload(nextGraph))
     } catch (error) {
       console.error(error)
     } finally {
@@ -321,7 +338,7 @@ export default function FactionsPage({ novelId }: Props) {
           await window.electron.faction.clear(novelId)
           setSelectedId(null)
           form.setFieldsValue(EMPTY_VALUES)
-          setGraphData({ nodes: [], edges: [], unalignedCharacters: [] })
+          setGraphData(EMPTY_FACTION_GRAPH)
           setAutoTask(null)
           setAutoStatus(EMPTY_AUTO_STATUS)
           notifyWorkspaceMutation()

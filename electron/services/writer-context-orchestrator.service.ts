@@ -150,6 +150,33 @@ function extractTerms(values: Array<string | undefined>, limit = 8): string[] {
   )), limit)
 }
 
+function buildSignalSearchText(values: Array<string | undefined>): string {
+  return values.map((value) => value || '').filter(Boolean).join('\n')
+}
+
+function expandMatchTerms(terms: string[]): string[] {
+  return dedupe(terms.flatMap((rawTerm) => {
+    const term = rawTerm.trim()
+    if (term.length < 2) return []
+    const variants = [term]
+    const chineseChunks = term.match(/[\u4e00-\u9fff]{2,}/gu) || []
+    chineseChunks.forEach((chunk) => {
+      if (chunk.length >= 3) variants.push(chunk.slice(-3))
+      if (chunk.length >= 4) variants.push(chunk.slice(-4))
+    })
+    return variants
+  }), 24)
+}
+
+function matchesAnyTerm(haystack: string, terms: string[]): boolean {
+  const normalized = haystack.trim()
+  if (!normalized) return false
+  return expandMatchTerms(terms)
+    .map((term) => term.trim())
+    .filter((term) => term.length >= 2)
+    .some((term) => normalized.includes(term))
+}
+
 function computeSignalHash(input: WriterContextOrchestratorInput): string {
   return hashOf({
     signals: input.signals,
@@ -201,7 +228,7 @@ function buildWriterQueryPlan(input: WriterContextOrchestratorInput): WriterCont
   )
   const characterEnabled = mentionedCharacters.length > 0 || Boolean(relationSummary)
   const itemEnabled = mentionedItems.length > 0
-  const worldStateEnabled = mentionedLocations.length > 0 || /\S/.test(worldStates)
+  const worldStateEnabled = mentionedLocations.length > 0
   const timelineEnabled = mentionedLocations.length > 0 || /\S/.test(timelineSummary)
   const threadEnabled = Boolean(activeThreads || openLoops || dueForeshadows)
   const recallCharacterEnabled = mentionedCharacters.length > 0
@@ -387,9 +414,30 @@ function renderCharacterEntries(
   getCharacterDetailContextImpl: typeof getCharacterDetailContext,
   maxCharacters: number,
 ): WriterOrchestratedCharacterPackEntry[] {
-  const mentioned = new Set(signals.mentionedCharacters || [])
+  const explicitNames = dedupe(signals.mentionedCharacters || [], maxCharacters)
+  const signalText = buildSignalSearchText([
+    signals.chapterTitle,
+    signals.chapterOutline,
+    signals.chapterGoal,
+    signals.arcSummary,
+    signals.arcGoal,
+    signals.relationSummary,
+    signals.dialogueVoiceLocks,
+    signals.activeThreads,
+    signals.openLoops,
+    signals.dueForeshadows,
+  ])
+  const inferredNames = explicitNames.length > 0
+    ? explicitNames
+    : characters
+      .map((character) => character.fullName || '')
+      .filter((name) => name.length >= 2 && signalText.includes(name))
+      .slice(0, maxCharacters)
+  const mentioned = new Set(inferredNames)
+  if (mentioned.size === 0) return []
+
   return characters
-    .filter((character) => mentioned.size === 0 || mentioned.has(character.fullName))
+    .filter((character) => mentioned.has(character.fullName))
     .slice(0, maxCharacters)
     .map((character) => {
       const detail = getCharacterDetailContextImpl(character.id)
@@ -422,9 +470,11 @@ function renderItemEntries(
   maxItems: number,
 ): WriterOrchestratedItemPackEntry[] {
   const mentioned = new Set(signals.mentionedItems || [])
+  if (mentioned.size === 0) return []
+
   return items
     .filter((item) => item.itemKind === 'instance')
-    .filter((item) => mentioned.size === 0 || mentioned.has(item.itemName))
+    .filter((item) => mentioned.has(item.itemName))
     .slice(0, maxItems)
     .map((item) => {
       const detail = getStoryItemDetailContextImpl(item.id)
@@ -444,15 +494,21 @@ function renderTimelineEntries(
   signals: WriterContextOrchestratorInput['signals'],
   maxTimelineEvents: number,
 ): WriterOrchestratedTimelinePackEntry[] {
-  const locationSet = new Set(signals.mentionedLocations || [])
+  const terms = dedupe([
+    ...(signals.mentionedLocations || []),
+    ...extractTerms([
+      signals.timelineSummary,
+      signals.timelineOpenThreads,
+      signals.chapterGoal,
+      signals.chapterOutline,
+    ], 8),
+  ], 10)
   const filtered = events
     .filter((event) => {
-      if (locationSet.size === 0) return true
       const haystack = [event.eventTitle, event.eventSummary, event.timeLabel, event.notes].filter(Boolean).join(' ')
-      return [...locationSet].some((location) => haystack.includes(location))
+      return matchesAnyTerm(haystack, terms)
     })
-  const effectiveEvents = filtered.length > 0 ? filtered : events
-  return effectiveEvents
+  return filtered
     .slice(0, maxTimelineEvents)
     .map((event) => ({
       eventId: event.id,
@@ -471,30 +527,64 @@ function renderTimelineEntries(
     }))
 }
 
-function renderWorldStatePack(snapshot: WorldStateContextSnapshot): WriterOrchestratedWorldStatePack {
+function renderWorldStatePack(
+  snapshot: WorldStateContextSnapshot,
+  signals: WriterContextOrchestratorInput['signals'],
+): WriterOrchestratedWorldStatePack {
+  const terms = dedupe([
+    ...(signals.mentionedLocations || []),
+    ...extractTerms([signals.worldStates, signals.chapterGoal, signals.chapterOutline], 8),
+  ], 10)
+  const currentStates = snapshot.currentStates.filter((state) => {
+    const haystack = [state.entityName, state.summaryText, ...(state.stateItems || [])].filter(Boolean).join(' ')
+    return matchesAnyTerm(haystack, terms)
+  })
+  const alerts = snapshot.alerts.filter((alert) => {
+    const haystack = [alert.entityName, alert.summary, ...(alert.reasons || [])].filter(Boolean).join(' ')
+    return matchesAnyTerm(haystack, terms)
+  })
+
   return {
-    stateLines: snapshot.currentStates
+    stateLines: currentStates
       .slice(0, 4)
       .map((state: WorldStateContextSnapshot['currentStates'][number]) => `${state.entityName}：${state.summaryText || state.stateItems.join('；') || ''}`.trim())
       .filter(Boolean),
-    alertLines: snapshot.alerts
+    alertLines: alerts
       .slice(0, 3)
       .map((alert: WorldStateContextSnapshot['alerts'][number]) => `${alert.entityName}：${alert.summary}`.trim())
       .filter(Boolean),
-    worldStatesText: snapshot.worldStatesText,
   }
 }
 
 function renderThreadPack(
   threadRows: ReturnType<typeof listStoryThreads>,
   foreshadowSnapshot: ReturnType<typeof getForeshadowSnapshot>,
+  signals: WriterContextOrchestratorInput['signals'],
 ): WriterOrchestratedThreadPack {
+  const terms = extractTerms([
+    signals.activeThreads,
+    signals.openLoops,
+    signals.dueForeshadows,
+    signals.chapterGoal,
+    signals.chapterOutline,
+  ], 10)
+  const matchedThreads = threadRows.filter((thread) => {
+    const haystack = [
+      thread.title,
+      thread.summary,
+      thread.currentState,
+      thread.payoffCondition,
+      thread.premise,
+    ].filter(Boolean).join(' ')
+    return matchesAnyTerm(haystack, terms)
+  })
+
   return {
-    activeThreadLines: threadRows
+    activeThreadLines: matchedThreads
       .filter((thread) => thread.status === 'active' || thread.status === 'planned' || thread.status === 'stalled')
       .slice(0, 4)
       .map((thread) => `${thread.title}${thread.currentState ? `：${thread.currentState}` : thread.summary ? `：${thread.summary}` : ''}`),
-    openLoopLines: threadRows
+    openLoopLines: matchedThreads
       .filter((thread) => thread.status !== 'resolved' && thread.status !== 'abandoned')
       .slice(0, 3)
       .map((thread) => thread.payoffCondition || thread.premise || thread.summary || thread.title)
@@ -535,7 +625,14 @@ function buildRenderedOverrides(
   baseContextParts?: WriterContextRenderedOverrides,
 ): WriterContextRenderedOverrides {
   const result: WriterContextRenderedOverrides = {
-    ...(baseContextParts || {}),
+    characterStates: '',
+    relationSummary: '',
+    dialogueVoiceLocks: '',
+    itemSummary: '',
+    timelineSummary: '',
+    timelineOpenThreads: '',
+    worldStates: '',
+    recalledMemory: '',
   }
   if (storyMemoryPack) {
     result.longTermMemory = compactLines([
@@ -545,9 +642,14 @@ function buildRenderedOverrides(
       ...storyMemoryPack.timelineAnchors,
       ...storyMemoryPack.itemLedger,
     ], 12, 1200)
-    result.activeThreads = compactLines(storyMemoryPack.activeThreads, 6, 600) || result.activeThreads
+    result.activeThreads = mergePreservingBase(
+      baseContextParts?.activeThreads,
+      compactLines(storyMemoryPack.activeThreads, 6, 600),
+      8,
+      760,
+    )
     result.continuityNotes = mergePreservingBase(
-      result.continuityNotes,
+      baseContextParts?.continuityNotes,
       compactLines(storyMemoryPack.continuityDirectives, 6, 600),
       8,
       760,
@@ -559,9 +661,9 @@ function buildRenderedOverrides(
       characters.flatMap((character) => character.relationSummaries.map((line) => `${character.name}：${line}`)),
       8,
       760,
-    ) || result.relationSummary
+    ) || ''
     result.dialogueVoiceLocks = mergePreservingBase(
-      result.dialogueVoiceLocks,
+      baseContextParts?.dialogueVoiceLocks,
       compactLines(
         characters.flatMap((character) => character.voiceHints.map((hint) => `${character.name}：${hint}`)),
         8,
@@ -593,16 +695,26 @@ function buildRenderedOverrides(
     ], 6, 760) || result.worldStates
   }
   if (threadPack) {
-    result.activeThreads = compactLines(threadPack.activeThreadLines, 6, 720) || result.activeThreads
-    result.openLoops = compactLines(threadPack.openLoopLines, 6, 640) || result.openLoops
+    result.activeThreads = mergePreservingBase(
+      result.activeThreads || baseContextParts?.activeThreads,
+      compactLines(threadPack.activeThreadLines, 6, 720),
+      8,
+      760,
+    )
+    result.openLoops = mergePreservingBase(
+      baseContextParts?.openLoops,
+      compactLines(threadPack.openLoopLines, 6, 640),
+      8,
+      760,
+    )
     result.dueForeshadows = mergePreservingBase(
-      result.dueForeshadows,
+      baseContextParts?.dueForeshadows,
       compactLines(threadPack.dueForeshadowLines, 6, 640),
       8,
       760,
     )
     result.continuityNotes = mergePreservingBase(
-      result.continuityNotes,
+      result.continuityNotes || baseContextParts?.continuityNotes,
       compactLines(threadPack.continuityLines, 6, 640),
       8,
       760,
@@ -800,7 +912,7 @@ function buildWriterToolRegistry(): Record<WriterContextQueryBucket, RegisteredW
           upToChapterNum: context.input.chapterNum,
           limit: context.runtimeLimits.maxTimelineEvents,
         })
-        accumulator.worldStatePack = renderWorldStatePack(snapshot)
+        accumulator.worldStatePack = renderWorldStatePack(snapshot, context.input.signals)
         const resultCount = accumulator.worldStatePack.stateLines.length + accumulator.worldStatePack.alertLines.length
         if (resultCount > 0) {
           return {
@@ -823,7 +935,7 @@ function buildWriterToolRegistry(): Record<WriterContextQueryBucket, RegisteredW
         const threadRows = context.services.listStoryThreads(context.input.novelId)
           .slice(0, Math.max(context.runtimeLimits.maxThreads, 6))
         const foreshadowSnapshot = context.services.getForeshadowSnapshot(context.input.novelId, context.input.chapterNum)
-        accumulator.threadPack = renderThreadPack(threadRows, foreshadowSnapshot)
+        accumulator.threadPack = renderThreadPack(threadRows, foreshadowSnapshot, context.input.signals)
         const resultCount = accumulator.threadPack.activeThreadLines.length
           + accumulator.threadPack.dueForeshadowLines.length
           + accumulator.threadPack.openLoopLines.length

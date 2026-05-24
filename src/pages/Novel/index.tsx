@@ -75,7 +75,7 @@ const WORKSPACE_LAST_WRITING_VIEW_STORAGE_KEY = 'novelforge-workspace-last-writi
 const WORKSPACE_PAGE_META = new Map(WORKSPACE_MODULE_DEFINITIONS.map((item) => [item.key, item] as const))
 const WORKSPACE_PREWARM_DELAY_MS = 140
 const MAX_IDLE_PREWARM_ROUTES = 4
-const COMPACT_SHELL_BREAKPOINT = 1200
+const COMPACT_SHELL_BREAKPOINT = 1024
 const COMPACT_SHELL_MEDIA_QUERY = `(max-width: ${COMPACT_SHELL_BREAKPOINT - 1}px)`
 
 const WORKSPACE_STAGE_LOADERS = {
@@ -989,7 +989,7 @@ export default function NovelRouter() {
             },
           ],
         }}
-        showQuality={currentPage !== 'guide' && currentPage !== 'quality' && currentPage !== 'batch-workbench'}
+        showQuality={currentPage !== 'guide' && currentPage !== 'quality' && currentPage !== 'writeback' && currentPage !== 'batch-workbench'}
         showNextStep={currentPage !== workspaceSnapshot.nextStep.targetPage}
         showWindowControls={showWindowControls}
         moreMenu={{

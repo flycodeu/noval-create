@@ -388,4 +388,87 @@ describe('writer context orchestrator', () => {
       'recalledMemory',
     ]))
   })
+
+  it('does not inject arbitrary entity packs when signals do not match stored assets', async () => {
+    const getWorldStateContextSnapshot = vi.fn(() => ({
+      currentStates: [{
+        entityType: 'location' as const,
+        entityId: 41,
+        entityName: '东门补给点',
+        chapterId: 90,
+        chapterNum: 12,
+        summaryText: '外层封锁正在收紧',
+        stateItems: [],
+        severity: 'warning' as const,
+      }],
+      alerts: [],
+      worldStatesText: '东门补给点：两小时后封锁升级。',
+      trendSummary: [],
+    }))
+    const resolution = await resolveWriterOrchestratedContext(createInput({
+      signals: {
+        chapterTitle: '无名夜行',
+        chapterOutline: '本章只推进路线选择，没有点名角色和地点。',
+        chapterGoal: '让队伍在压力下换路线',
+        relationSummary: '关系继续紧张，但本章没有指定出场人物。',
+        worldStates: '外部压力继续上升。',
+        timelineSummary: '夜色中继续转移。',
+        mentionedCharacters: [],
+        mentionedItems: [],
+        mentionedLocations: [],
+      },
+      baseContextParts: {
+        characterStates: '林策：旧人物状态不应在无命中时进入 writer 上下文。',
+        itemSummary: '药箱：旧物品摘要不应在无命中时进入 writer 上下文。',
+        timelineSummary: '补给点交火：旧时间线不应在无命中时进入 writer 上下文。',
+        worldStates: '东门补给点：旧世界状态不应在无命中时进入 writer 上下文。',
+      },
+    }), {
+      listCharacters: (() => [{
+        id: 11,
+        novelId: 1,
+        roleType: 'protagonist',
+        fullName: '林策',
+        goals: '守住补给点',
+        innerConflict: '不信任副手却必须依赖他',
+        relationshipTension: '对沈砚戒备',
+        characterArc: '从独断转向协作',
+        speechPattern: '短句下命令',
+        catchphrases: '先顶住',
+        vocabularyLevel: '克制直接',
+        dialectFeatures: '',
+        sortOrder: 1,
+        createdAt: '',
+        updatedAt: '',
+      }]) as never,
+      listTimelineEvents: (() => [{
+        id: 31,
+        novelId: 1,
+        sortOrder: 1,
+        eventTitle: '补给点交火',
+        eventSummary: '天亮前必须守住入口',
+        timeMode: 'relative',
+        timeLabel: '夜里',
+        timeSortValue: 100,
+        isMajorEvent: 1,
+        status: 'planned',
+        openThreadsJson: JSON.stringify(['入口火力尚未压住']),
+        createdAt: '',
+        updatedAt: '',
+      }]) as never,
+      getWorldStateContextSnapshot,
+    })
+
+    expect(resolution.renderedContextOverrides.characterStates).toBe('')
+    expect(resolution.renderedContextOverrides.itemSummary).toBe('')
+    expect(resolution.renderedContextOverrides.timelineSummary).toBe('')
+    expect(resolution.renderedContextOverrides.worldStates).toBe('')
+    expect(getWorldStateContextSnapshot).not.toHaveBeenCalled()
+    expect(resolution.toolCalls).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        target: 'world_state',
+        status: 'skipped',
+      }),
+    ]))
+  })
 })

@@ -27,6 +27,8 @@
 .novel-list-page__copy {
   display: grid;
   gap: 8px;
+  flex: 1 1 320px;
+  min-width: 0;
 }
 
 .novel-list-page__title {
@@ -36,12 +38,15 @@
   font-weight: 700;
   color: var(--text-primary);
   letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
 }
 
 .novel-list-page__subtitle {
+  display: block;
   font-size: 15px;
   line-height: 1.7;
   color: var(--text-secondary);
+  overflow-wrap: anywhere;
 }
 
 .novel-list-page__stats {
@@ -55,6 +60,7 @@
 .novel-list-page__stat-card {
   display: grid;
   gap: 6px;
+  min-width: 0;
   padding: 20px;
   border: 1px solid var(--border-default);
   border-radius: var(--radius-l);
@@ -71,6 +77,7 @@
 .novel-list-page__stat-label,
 .novel-list-page__stat-hint {
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .novel-list-page__stat-label {
@@ -84,6 +91,7 @@
   line-height: 1.1;
   color: var(--text-primary);
   letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
 }
 
 .novel-list-page__stat-hint {
@@ -105,6 +113,7 @@
 }
 
 .novel-list-page__toolbar-field {
+  max-width: 100%;
   min-width: 0;
   flex-shrink: 0;
 }
@@ -129,20 +138,45 @@
 }
 
 .novel-list-page__empty {
-  padding-top: 120px;
+  min-height: 240px;
+  padding: 72px 16px;
+  border: 1px dashed var(--border-default);
+  border-radius: var(--radius-l);
+  background: var(--bg-surface);
 }
 
 .novel-list-page__grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-rows: 1fr;
   gap: 18px;
-  align-items: start;
+  align-items: stretch;
   min-width: 0;
 }
 
 .novel-list-page .novel-project-card {
+  height: 100%;
+  min-width: 0;
+  grid-template-rows: auto auto auto minmax(108px, 1fr) auto;
+  align-content: stretch;
   padding: 18px;
   gap: 12px;
+}
+
+.novel-list-page .novel-project-card__head {
+  min-width: 0;
+}
+
+.novel-list-page .novel-project-card__title-block {
+  min-width: 0;
+}
+
+.novel-list-page .novel-project-card__tag-row {
+  min-width: 0;
+  min-height: 72px;
+  max-height: 72px;
+  overflow: hidden;
+  align-content: flex-start;
 }
 
 .novel-list-page .novel-project-card__summary {
@@ -162,7 +196,19 @@
 }
 
 .novel-list-page .novel-project-card__title {
+  display: -webkit-box;
+  min-height: 43px;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   font-size: 16px;
+}
+
+.novel-list-page .novel-project-card__progress,
+.novel-list-page .novel-project-card__next-step,
+.novel-list-page .novel-project-card__actions {
+  min-width: 0;
 }
 
 .novel-list-page .novel-project-card__next-step {
@@ -184,6 +230,10 @@
   -webkit-line-clamp: 3;
 }
 
+.novel-list-page .novel-project-card__actions .ant-btn {
+  max-width: 100%;
+}
+
 .novel-list-page__wizard-steps {
   margin-bottom: 40px;
 }
@@ -203,6 +253,7 @@
   min-height: 120px;
   display: grid;
   gap: 12px;
+  min-width: 0;
   padding: 20px;
   border: 2px solid transparent;
   border-radius: var(--radius-l);
@@ -227,17 +278,21 @@
   justify-content: space-between;
   align-items: center;
   gap: 12px;
+  min-width: 0;
 }
 
 .novel-list-page__launch-card-title {
+  min-width: 0;
   color: var(--text-primary);
   font-size: 16px;
+  overflow-wrap: anywhere;
 }
 
 .novel-list-page__launch-card-copy {
   font-size: 14px;
   line-height: 1.7;
   color: var(--text-secondary);
+  overflow-wrap: anywhere;
 }
 
 .novel-list-page__genre-grid {
@@ -251,6 +306,7 @@
   min-height: 100px;
   display: grid;
   gap: 8px;
+  min-width: 0;
   padding: 16px;
   border: 2px solid transparent;
   border-radius: var(--radius-m);
@@ -324,12 +380,14 @@
   line-height: 1.35;
   font-weight: 600;
   color: #fff;
+  overflow-wrap: anywhere;
 }
 
 .novel-list-page__genre-copy {
   font-size: 13px;
   line-height: 1.5;
   color: rgba(255, 255, 255, 0.85);
+  overflow-wrap: anywhere;
 }
 
 .novel-list-page__fast-note {
@@ -349,6 +407,7 @@
 
 .novel-list-page__expanded-main {
   flex: 1;
+  min-width: 0;
 }
 
 .novel-list-page__expanded-side {
@@ -371,13 +430,19 @@
 .novel-list-page__title-radio {
   white-space: normal;
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .novel-list-page__wizard-footer {
   display: flex;
   justify-content: flex-end;
   gap: 12px;
+  flex-wrap: wrap;
   margin-top: 32px;
+}
+
+.novel-list-page__wizard-footer .ant-btn {
+  max-width: 100%;
 }
 
 @media (max-width: 1280px) {
@@ -408,7 +473,28 @@
 
 @media (max-width: 720px) {
   .novel-list-page {
-    padding: 20px;
+    padding: 16px;
+  }
+
+  .novel-list-page__shell {
+    gap: 14px;
+  }
+
+  .novel-list-page__header {
+    gap: 10px;
+  }
+
+  .novel-list-page__copy {
+    gap: 5px;
+  }
+
+  .novel-list-page__title {
+    font-size: 25px;
+  }
+
+  .novel-list-page__subtitle {
+    font-size: 13px;
+    line-height: 1.55;
   }
 
   .novel-list-page__header,
@@ -420,13 +506,74 @@
   }
 
   .novel-list-page__stats {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .novel-list-page__stat-card {
+    gap: 4px;
+    padding: 12px;
+  }
+
+  .novel-list-page__stat-value {
+    font-size: 22px;
+  }
+
+  .novel-list-page__stat-hint {
+    display: none;
+  }
+
+  .novel-list-page__toolbar {
+    gap: 8px;
+    padding: 10px;
   }
 
   .novel-list-page__grid,
   .novel-list-page__launch-grid,
   .novel-list-page__genre-grid {
     grid-template-columns: 1fr;
+  }
+
+  .novel-list-page__grid {
+    grid-auto-rows: auto;
+  }
+
+  .novel-list-page__toolbar-field,
+  .novel-list-page__toolbar-field--search,
+  .novel-list-page__toolbar-field--status,
+  .novel-list-page__toolbar-field--sort {
+    width: 100%;
+    max-width: none;
+    flex: 1 1 100%;
+  }
+
+  .novel-list-page .novel-project-card {
+    height: auto;
+    grid-template-rows: none;
+  }
+
+  .novel-list-page .novel-project-card__title {
+    min-height: 0;
+  }
+
+  .novel-list-page .novel-project-card__tag-row {
+    min-height: 0;
+    max-height: none;
+  }
+}
+
+@media (max-width: 520px) {
+  .novel-list-page {
+    padding: 12px;
+  }
+
+  .novel-list-page__empty {
+    min-height: 200px;
+    padding: 48px 12px;
+  }
+
+  .novel-list-page__wizard-footer .ant-btn {
+    width: 100%;
   }
 }
 

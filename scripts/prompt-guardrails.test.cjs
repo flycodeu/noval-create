@@ -258,6 +258,15 @@ const tests = [
     },
   },
   {
+    name: 'quality guardrails catch markdown json and replacement noise',
+    run() {
+      const findings = guardrails.collectQualityGuardrailFindings('```json\n{"content":"body"}\n```\n\uFFFD', '\u73b0\u4ee3\u60ac\u7591')
+      const codes = findings.map((item) => item.code)
+      assert.ok(codes.includes('format_noise'))
+      assert.equal(guardrails.shouldForceRepair(findings), true)
+    },
+  },
+  {
     name: 'prompt library taskFocus and extraLines are fully unified to Chinese',
     run() {
       for (const snippet of removedEnglishGuardrailSnippets) {

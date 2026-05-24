@@ -12,8 +12,12 @@
 }
 
 .novel-project-card {
+  box-sizing: border-box;
   display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   gap: 16px;
+  width: 100%;
+  min-width: 0;
   min-height: 0;
   padding: 24px;
   border: 1px solid var(--novel-card-border);
@@ -44,12 +48,14 @@
 
 .novel-project-card__head {
   justify-content: space-between;
+  min-width: 0;
 }
 
 .novel-project-card__title-block,
 .novel-project-card__progress,
 .novel-project-card__next-step {
   display: grid;
+  min-width: 0;
 }
 
 .novel-project-card__title-block {
@@ -69,21 +75,31 @@
 .novel-project-card__tag-row {
   flex-wrap: wrap;
   gap: 6px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .novel-project-card__tag,
 .novel-blocker-card__hint-tag {
+  max-width: 100%;
   margin: 0;
   border-radius: 6px;
   border: none;
   background: var(--bg-hover);
   color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .novel-project-card__status-tag {
+  max-width: 100%;
   margin: 0;
   border-radius: 6px;
   border: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .novel-project-card__status-tag--draft {
@@ -112,6 +128,14 @@
   gap: 12px;
   font-size: 13px;
   color: var(--novel-card-text-secondary);
+  min-width: 0;
+}
+
+.novel-project-card__summary > div {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .novel-project-card__summary strong,
@@ -166,11 +190,29 @@
   font-size: 13px;
   line-height: 1.6;
   color: var(--novel-card-text-secondary);
+  overflow-wrap: anywhere;
 }
 
 .novel-project-card__actions {
+  align-self: end;
   margin-top: auto;
   gap: 8px;
+  min-width: 0;
+}
+
+.novel-project-card__actions .ant-btn {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.novel-project-card__actions .ant-btn > span:not(.ant-btn-icon) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.novel-project-card__menu {
+  flex: 0 0 auto;
 }
 
 .novel-metric-card {
@@ -327,8 +369,16 @@
 }
 
 @media (max-width: 720px) {
+  .novel-project-card {
+    grid-template-rows: none;
+  }
+
   .novel-project-card__summary {
     grid-template-columns: 1fr;
+  }
+
+  .novel-project-card__actions .ant-btn {
+    width: 100%;
   }
 
   .novel-blocker-card {

@@ -254,9 +254,20 @@ export function isMapStructureReady(stats: Pick<WorkflowStats, 'mapCount'>): boo
 }
 
 export function isCharacterRosterReady(
-  stats: Pick<WorkflowStats, 'characterCount' | 'hasProtagonist'>,
+  stats: Pick<WorkflowStats, 'characterCount' | 'hasProtagonist'> & Partial<Pick<WorkflowStats, 'characterArcCount' | 'relationshipArcCount'>>,
 ): boolean {
-  return stats.hasProtagonist && stats.characterCount > 0
+  const hasCoreCast = stats.hasProtagonist && stats.characterCount > 0
+  if (!hasCoreCast) return false
+
+  const hasCharacterArc = (stats.characterArcCount || 0) > 0
+  const hasRelationshipLayer = stats.characterCount <= 1 || (stats.relationshipArcCount || 0) > 0
+  return hasCharacterArc && hasRelationshipLayer
+}
+
+export function isResistanceSystemReady(
+  stats: Pick<WorkflowStats, 'resistanceTrackCount'>,
+): boolean {
+  return stats.resistanceTrackCount > 0
 }
 
 export function isItemsEquipmentReady(stats: Pick<WorkflowStats, 'itemCount'>): boolean {
@@ -272,9 +283,25 @@ export function isVolumePlanningReady(stats: Pick<WorkflowStats, 'volumeCount'>)
 }
 
 export function isWritingStepReady(
-  stats: Pick<WorkflowStats, 'outlineCount' | 'timelineCount' | 'threadCount' | 'chapterCount' | 'totalWords'>,
+  stats: Pick<
+    WorkflowStats,
+    | 'outlineCount'
+    | 'timelineCount'
+    | 'threadCount'
+    | 'chapterCount'
+    | 'totalWords'
+    | 'characterCount'
+    | 'hasProtagonist'
+    | 'characterArcCount'
+    | 'relationshipArcCount'
+    | 'resistanceTrackCount'
+    | 'volumeCount'
+  >,
 ): boolean {
-  return stats.outlineCount > 0
+  return isCharacterRosterReady(stats)
+    && isResistanceSystemReady(stats)
+    && stats.volumeCount > 0
+    && stats.outlineCount > 0
     && stats.timelineCount > 0
     && stats.threadCount > 0
     && (stats.chapterCount > 0 || stats.totalWords > 0)
@@ -288,6 +315,12 @@ export function getNextChapterReadiness(
   | 'threadCount'
   | 'chapterCount'
   | 'totalWords'
+  | 'characterCount'
+  | 'hasProtagonist'
+  | 'characterArcCount'
+  | 'relationshipArcCount'
+  | 'resistanceTrackCount'
+  | 'volumeCount'
   | 'revisionBlockerCount'
   | 'staleChapterCount'
   | 'staleAssetCount'
@@ -307,6 +340,30 @@ export function getNextChapterReadiness(
       ready: false,
       label: '待同步',
       reason: '上下文、章节或长期记忆仍未对齐，建议先回写和同步。',
+    }
+  }
+
+  if (!isCharacterRosterReady(stats)) {
+    return {
+      ready: false,
+      label: '缺人物网',
+      reason: '主角、人物弧或关系弧还没形成可承接网络，直接开写会让人物关系变成平铺说明。',
+    }
+  }
+
+  if (!isResistanceSystemReady(stats)) {
+    return {
+      ready: false,
+      label: '缺阻力线',
+      reason: '外部阻力、关系阻力或制度阻力还没入账，章节容易只推进事件而没有持续压力。',
+    }
+  }
+
+  if (stats.volumeCount <= 0) {
+    return {
+      ready: false,
+      label: '缺卷级闭环',
+      reason: '第一卷目标、卷末爆点和阶段代价还没固定，首章很容易开得热闹但后续失焦。',
     }
   }
 
@@ -372,8 +429,16 @@ export function getGuidedStepProgressMap(
     themeVoice.styleRules,
     themeVoice.dialogueRules,
   ].filter(Boolean).length
-  const characterProgress = [stats.hasProtagonist, stats.characterCount > 0].filter(Boolean).length
+  const characterNetworkProgress = [
+    stats.hasProtagonist,
+    stats.characterCount > 0,
+    stats.characterArcCount > 0,
+    stats.characterCount > 1 && stats.relationshipArcCount > 0,
+  ].filter(Boolean).length
   const writingProgress = [
+    isCharacterRosterReady(stats),
+    isResistanceSystemReady(stats),
+    stats.volumeCount > 0,
     stats.outlineCount > 0,
     stats.timelineCount > 0,
     stats.threadCount > 0,
@@ -414,9 +479,9 @@ export function getGuidedStepProgressMap(
       isComplete: stats.mapCount > 0,
     },
     'character-roster': {
-      completedCount: characterProgress,
-      totalCount: 2,
-      isComplete: characterProgress >= 2,
+      completedCount: characterNetworkProgress,
+      totalCount: 4,
+      isComplete: isCharacterRosterReady(stats),
     },
     'items-equipment': {
       completedCount: stats.itemCount > 0 ? 1 : 0,
@@ -440,7 +505,7 @@ export function getGuidedStepProgressMap(
     },
     'write-start': {
       completedCount: writingProgress,
-      totalCount: 5,
+      totalCount: 8,
       isComplete: isWritingStepReady(stats),
     },
   }
@@ -478,6 +543,7 @@ export function getRecommendedWorkflowStep(
   if (stats.mapCount <= 0) return 'map'
   if (stats.itemCount <= 0) return 'items'
   if (stats.characterCount <= 0) return 'characters'
+  if (stats.resistanceTrackCount <= 0) return 'resistance'
   if (stats.threadCount <= 0) return 'threads'
   if (!isStoryPlotReady(novel)) return 'story-design'
   if (stats.outlineCount <= 0) return 'outline'
@@ -530,6 +596,14 @@ export function getWorkflowBlockers(
 
   const requireCharacters = (action: string) => {
     pushIfMissing(isCharacterRosterReady(stats), `请先建立主角与人物网络，再${action}。`)
+  }
+
+  const requireResistance = (action: string) => {
+    pushIfMissing(isResistanceSystemReady(stats), `请先建立阻力线，再${action}。`)
+  }
+
+  const requireVolumePlanning = (action: string) => {
+    pushIfMissing(isVolumePlanningReady(stats), `请先完成第一卷目标、闭环和卷末爆点，再${action}。`)
   }
 
   const requireItems = (action: string) => {
@@ -601,9 +675,13 @@ export function getWorkflowBlockers(
       requireCharacters('生成故事设计')
       requireItems('生成故事设计')
       requireThreads('生成故事设计')
+      requireResistance('生成故事设计')
       break
     case 'outline':
       pushIfMissing(isStoryPlotReady(novel), '请先完成故事设计，再生成故事大纲。')
+      requireCharacters('生成故事大纲')
+      requireResistance('生成故事大纲')
+      requireVolumePlanning('生成故事大纲')
       requireFreshAssets('生成故事大纲')
       requireRevisionBlockersCleared('生成故事大纲')
       break
@@ -612,6 +690,7 @@ export function getWorkflowBlockers(
       requireMap('生成时间轴')
       requireCharacters('生成时间轴')
       requireItems('生成时间轴')
+      requireResistance('生成时间轴')
       requireFreshAssets('生成时间轴')
       pushIfMissing(
         isStoryPlotReady(novel) || stats.outlineCount > 0,
@@ -620,6 +699,9 @@ export function getWorkflowBlockers(
       requireRevisionBlockersCleared('生成时间轴')
       break
     case 'writing':
+      requireCharacters('开始正文写作')
+      requireResistance('开始正文写作')
+      requireVolumePlanning('开始正文写作')
       requireThreads('开始正文写作')
       pushIfMissing(stats.outlineCount > 0, '请先生成故事大纲，再开始正文写作。')
       pushIfMissing(stats.timelineCount > 0, '缺少时间轴，无法开始正文写作。')

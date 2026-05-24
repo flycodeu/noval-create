@@ -14,6 +14,7 @@ import {
   message,
 } from 'antd'
 import { DeleteOutlined, PlusOutlined, SaveOutlined } from '@ant-design/icons'
+import AIGenerateButton from '../../../components/AIGenerateButton'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import type {
   Chapter,
@@ -30,6 +31,7 @@ import {
   WorkspacePanel,
 } from '../components/WorkspaceShell'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
+import { buildDraftMessages, normalizeOptionalNumber, parseDraftJson } from '../shared/ai-draft'
 import './index.css'
 
 interface Props {
@@ -51,6 +53,17 @@ interface StoryFactFormValues {
   isKeyTruth: boolean
   notes: string
   characterKnowledgeList: StoryFactCharacterKnowledge[]
+}
+
+interface StoryFactAIDraft {
+  kind: StoryFact['kind']
+  title: string
+  summary: string
+  status: StoryFact['status']
+  plannedRevealVolume?: number
+  targetRevealChapterNum?: number
+  notes: string
+  isKeyTruth?: boolean | string
 }
 
 const STATUS_LANES: Array<{ key: StoryFact['status']; label: string; hint: string }> = [
@@ -187,6 +200,25 @@ function kindTagColor(kind: StoryFact['kind']) {
   if (kind === 'red_herring') return 'volcano'
   if (kind === 'puzzle') return 'blue'
   return 'processing'
+}
+
+function normalizeFactKind(value: unknown, fallback: StoryFact['kind'] = 'clue'): StoryFact['kind'] {
+  if (value === 'puzzle' || value === 'clue' || value === 'truth' || value === 'red_herring') return value
+  const text = typeof value === 'string' ? value.trim() : ''
+  if (text.includes('谜')) return 'puzzle'
+  if (text.includes('真相')) return 'truth'
+  if (text.includes('假')) return 'red_herring'
+  if (text.includes('线索')) return 'clue'
+  return fallback
+}
+
+function normalizeFactStatus(value: unknown, fallback: StoryFact['status'] = 'introduced'): StoryFact['status'] {
+  if (value === 'introduced' || value === 'partial_reveal' || value === 'pending_payoff' || value === 'explained') return value
+  const text = typeof value === 'string' ? value.trim() : ''
+  if (text.includes('半')) return 'partial_reveal'
+  if (text.includes('回收') || text.includes('待')) return 'pending_payoff'
+  if (text.includes('解释') || text.includes('已解释')) return 'explained'
+  return fallback
 }
 
 export default function InfoGapBoardPage({ novelId }: Props) {
@@ -382,6 +414,39 @@ export default function InfoGapBoardPage({ novelId }: Props) {
     }
   }, [activeVolume, notifyWorkspaceMutation, ratioDraft, refresh])
 
+  const applyAIDraft = useCallback((raw: string) => {
+    const draft = parseDraftJson<StoryFactAIDraft>(raw)
+    const targetRevealChapterNumDraft = normalizeOptionalNumber(draft.targetRevealChapterNum)
+    const targetRevealChapterNum = targetRevealChapterNumDraft && targetRevealChapterNumDraft > 0 ? targetRevealChapterNumDraft : undefined
+    const targetChapter = targetRevealChapterNum
+      ? chapters.find((chapter) => chapter.chapterNum === targetRevealChapterNum) || null
+      : null
+    const kind = normalizeFactKind(draft.kind)
+    const plannedRevealVolumeDraft = normalizeOptionalNumber(draft.plannedRevealVolume)
+    const plannedRevealVolume = plannedRevealVolumeDraft && plannedRevealVolumeDraft > 0 ? plannedRevealVolumeDraft : undefined
+    const isKeyTruth = typeof draft.isKeyTruth === 'boolean'
+      ? draft.isKeyTruth
+      : typeof draft.isKeyTruth === 'string'
+        ? /^(true|yes|1|是|关键)$/i.test(draft.isKeyTruth.trim())
+        : kind === 'truth'
+
+    setEditingFact(null)
+    form.resetFields()
+    form.setFieldsValue({
+      ...EMPTY_FACT_FORM,
+      kind,
+      title: typeof draft.title === 'string' ? draft.title.trim() : '',
+      summary: typeof draft.summary === 'string' ? draft.summary.trim() : '',
+      status: normalizeFactStatus(draft.status, kind === 'truth' ? 'pending_payoff' : 'introduced'),
+      plannedRevealVolume,
+      targetRevealChapterId: targetChapter?.id,
+      isKeyTruth,
+      notes: typeof draft.notes === 'string' ? draft.notes.trim() : '',
+      characterKnowledgeList: [],
+    })
+    setEditorOpen(true)
+  }, [chapters, form])
+
   useEffect(() => {
     registerSaveHandler(editorOpen ? () => { void handleSave() } : null)
     return () => registerSaveHandler(null)
@@ -407,6 +472,42 @@ export default function InfoGapBoardPage({ novelId }: Props) {
           <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>
             新建信息点
           </Button>
+          <AIGenerateButton
+            novelId={novelId}
+            label="AI 草拟信息差"
+            intent="generate"
+            isJson
+            buildMessages={() => buildDraftMessages({
+              task: '信息差与谜题板条目',
+              mode: 'replace',
+              context: [
+                { label: '小说名', value: currentNovel?.title || '' },
+                { label: '题材', value: currentNovel?.genreName || '' },
+                { label: '简介', value: currentNovel?.synopsis || '' },
+                { label: '当前卷', value: activeVolume ? activeVolume.title || `第${activeVolume.volumeNumber}卷` : displayedVolumeLabel },
+                { label: '已有信息点', value: facts.slice(0, 10).map((fact) => `${fact.title}(${fact.kind}/${fact.status})`).join('、') },
+                { label: '已有谜题', value: puzzleFacts.slice(0, 8).map((fact) => fact.title).join('、') },
+                { label: '可用章节', value: chapters.slice(0, 12).map((chapter) => `第${chapter.chapterNum}章:${chapter.title || '未命名'}`).join('、') },
+                { label: '主要人物', value: characters.slice(0, 10).map((character) => character.fullName).join('、') },
+              ],
+              fields: [
+                { key: 'kind', label: '信息类型', hint: '只能输出 puzzle、clue、truth、red_herring 之一。' },
+                { key: 'title', label: '标题', hint: '像小说策划里的真实谜题或线索名，不要写泛泛主题。' },
+                { key: 'summary', label: '摘要', hint: '写清它让读者知道什么、误会什么，或暂时不能知道什么。' },
+                { key: 'status', label: '状态', hint: '只能输出 introduced、partial_reveal、pending_payoff、explained 之一。' },
+                { key: 'plannedRevealVolume', label: '计划揭示卷号', type: 'number', hint: '没有明确卷号可输出 0。' },
+                { key: 'targetRevealChapterNum', label: '计划揭示章号', type: 'number', hint: '优先使用可用章节中的章号，没有明确章号可输出 0。' },
+                { key: 'isKeyTruth', label: '是否关键真相', hint: '输出 true 或 false。' },
+                { key: 'notes', label: '控制备注', hint: '说明如何避免提前泄露，以及它要服务的冲突或反转。' },
+              ],
+              requirements: [
+                '不要重复已有信息点或已有谜题。',
+                '必须服务当前小说的主线、人物选择或伏笔回收，不要生成无关设定。',
+                '真相、假线索、线索之间要有可执行的揭示顺序，避免一次性解释完。',
+              ],
+            })}
+            onResult={applyAIDraft}
+          />
           <Button icon={<SaveOutlined />} onClick={() => void handleSaveVolumeRatio()} loading={savingVolumeRatio} disabled={!activeVolume}>
             保存卷级比例
           </Button>

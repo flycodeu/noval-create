@@ -85,6 +85,22 @@ function getRelationIntensityText(value?: string) {
   return RELATION_INTENSITY_TEXT[value] || value
 }
 
+function ensureArray<T>(value: T[] | null | undefined): T[] {
+  return Array.isArray(value) ? value : []
+}
+
+function normalizeMapGraphPayload(graph: MapGraphPayload | null | undefined): MapGraphPayload {
+  if (!graph) return EMPTY_GRAPH
+  return {
+    ...EMPTY_GRAPH,
+    ...graph,
+    nodes: ensureArray(graph.nodes),
+    edges: ensureArray(graph.edges),
+    relationNodeIds: ensureArray(graph.relationNodeIds),
+    rootNodeIds: ensureArray(graph.rootNodeIds),
+  }
+}
+
 function TaskStrip({
   title,
   summary,
@@ -259,7 +275,7 @@ export default function MapExplorerPage({ novelId }: Props) {
   }, [novelId])
 
   const loadAllRelations = useCallback(async () => {
-    const relations = await window.electron.map.getRelations(novelId)
+    const relations = ensureArray(await window.electron.map.getRelations(novelId))
     setAllRelations(relations)
     setSelectedRelation((current) => (current ? relations.find((item) => item.id === current.id) || null : current))
     return relations
@@ -299,7 +315,6 @@ export default function MapExplorerPage({ novelId }: Props) {
       return current.mapAId === node.id || current.mapBId === node.id ? current : null
     })
     if (node) detailForm.setFieldsValue(toFormValues(node))
-    else detailForm.resetFields()
   }, [detailForm])
 
   const loadGraph = useCallback(async () => {
@@ -312,10 +327,11 @@ export default function MapExplorerPage({ novelId }: Props) {
         }),
         window.electron.map.getRelations(novelId),
       ])
-      setGraphData(graph)
+      const nextGraph = normalizeMapGraphPayload(graph)
+      setGraphData(nextGraph)
       setAllRelations(relations)
       setSelectedRelation((current) => (current ? relations.find((item) => item.id === current.id) || null : current))
-      return { graph, relations }
+      return { graph: nextGraph, relations }
     } finally {
       setGraphLoading(false)
     }
@@ -449,10 +465,6 @@ export default function MapExplorerPage({ novelId }: Props) {
     setRootPage(1)
     void loadRoots(1, searchKeyword)
   }, [loadRoots, searchKeyword])
-
-  useEffect(() => {
-    resetBatchForm()
-  }, [resetBatchForm])
 
   useEffect(() => {
     autoTaskRef.current = autoTask
@@ -1367,7 +1379,8 @@ export default function MapExplorerPage({ novelId }: Props) {
                   <div className="map-graph-detail-actions">{detailActions}</div>
                   {!selectedNode ? (
                     <div className="novel-empty">从图谱中选择一个节点开始编辑。</div>
-                  ) : detailFormContent}
+                  ) : null}
+                  <div hidden={!selectedNode}>{detailFormContent}</div>
                 </WorkspacePanel>
               ) : null}
             </div>
@@ -1459,10 +1472,10 @@ export default function MapExplorerPage({ novelId }: Props) {
           <WorkspacePanel className="map-list-panel map-list-panel--detail" title={selectedNode ? `节点详情 · ${selectedNode.name}` : '节点详情'} description="图谱与列表共用同一套详情表单，方便随时补充简介、上下级和关系信息。" extra={detailActions} scrollable sticky>
             {!selectedNode ? (
               <div className="novel-empty">从左侧选择一条节点记录，或先新建。</div>
-            ) : (
+            ) : null}
+            <div hidden={!selectedNode}>{detailFormContent}</div>
+            {selectedNode ? (
               <>
-                {detailFormContent}
-
                 <div className="map-node-relations-inline">
                   <div className="map-node-relations-inline__head">
                     <strong>相关关系</strong>
@@ -1492,7 +1505,7 @@ export default function MapExplorerPage({ novelId }: Props) {
                   )}
                 </div>
               </>
-            )}
+            ) : null}
           </WorkspacePanel>
         </div>
       )}

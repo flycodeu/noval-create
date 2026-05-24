@@ -59,6 +59,12 @@ const LANGUAGE_PATTERN_RULES: PatternRule[] = [
     message: 'AI 生成过程、思考备注或内部工作流文字进入正文。',
     pattern: /(AI(?:生成|思考|润色|输出|续写)中|作为AI|以下是(?:优化|改写|生成)|思考过程|我将|我会|本段需要|修订建议|改写说明|【(?:分析|计划|备注|提示)】)/u,
   },
+  {
+    code: 'format_noise',
+    severity: 'high',
+    message: '正文中混入了乱码、Markdown、HTML 或 JSON 外壳。',
+    pattern: /(\uFFFD|```|<\/?[a-z][^>]*>|^\s*#{1,6}\s|^\s*[-*]\s*(?:建议|优化|问题|说明)|\{\s*"[^"]+"\s*:)/mu,
+  },
 
   // === 中严重度：AI味核心检测 ===
   {
@@ -264,6 +270,12 @@ const BUILTIN_ANTI_AI_PROMPT_RULES: AntiAiPromptRule[] = [
     bucket: 'sentence',
     avoid: '不要让对白靠“你知道吗、说实话、事实上、坦白说”这类空话起势。',
     prefer: '让对白直接带试探、回避、压价、命令或信息交换。',
+  },
+  {
+    code: 'format_noise',
+    bucket: 'structure',
+    avoid: '不要输出 Markdown、JSON 外壳、HTML 标签、列表建议、乱码或任何非正文格式噪音。',
+    prefer: '只保留读者能直接阅读的故事正文。',
   },
   {
     code: 'abstract_emotion_packaging',

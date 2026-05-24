@@ -129,6 +129,7 @@ const RULE_SCOPE_FALLBACK: Record<string, AntiAiRuleHitScope> = {
   id_pollution: 'quality',
   prompt_leak: 'quality',
   ai_process_leak: 'quality',
+  format_noise: 'quality',
   dash_abuse: 'sentence',
   parenthetical_explanation_abuse: 'sentence',
   not_but_definition_pattern: 'sentence',
@@ -282,6 +283,12 @@ const RULE_DESCRIPTOR_MAP: Record<string, AntiAiRuleDescriptor> = {
     scope: 'quality',
     avoid: '不要把“AI生成中、思考过程、以下是优化、修订建议”等工作流文字写入正文。',
     prefer: '正文只保留读者可见的故事文本。',
+  },
+  format_noise: {
+    title: '格式噪音/乱码',
+    scope: 'quality',
+    avoid: '不要把 Markdown、JSON 外壳、HTML 标签、列表建议、乱码或替换字符写进正文。',
+    prefer: '只输出可直接发布的正文自然段。',
   },
   dash_abuse: {
     title: '破折号滥用',

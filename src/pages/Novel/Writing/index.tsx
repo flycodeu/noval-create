@@ -495,6 +495,7 @@ export default function Writing({ novelId }: Props) {
   const historyBaselineRef = useRef('')
   const lastHistoryAtRef = useRef(0)
   const generationBaselineRef = useRef('')
+  const generationPreflightRef = useRef<{ ready: boolean; messages: string[] } | null>(null)
 
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -1148,6 +1149,21 @@ export default function Writing({ novelId }: Props) {
 
   const handleGenerateContent = useCallback(async () => {
     if (!currentChapter) return message.warning(getUserFacingMessage('writing.selectChapterFirst'))
+    const preflight = generationPreflightRef.current
+    if (preflight && !preflight.ready) {
+      Modal.warning({
+        title: '当前章节暂不适合生成',
+        okText: '知道了',
+        content: (
+          <div className="novel-note-list">
+            {preflight.messages.slice(0, 6).map((item) => (
+              <div key={item} className="novel-note-list__item">{item}</div>
+            ))}
+          </div>
+        ),
+      })
+      return
+    }
     generationBaselineRef.current = normalizeEditorText(currentChapter.content || content)
     startGeneration({ chapterId: currentChapter.id })
     updateGenerationStage({
@@ -2238,6 +2254,22 @@ export default function Writing({ novelId }: Props) {
     scenePlan.length,
     storyMemory?.activeThreads.length,
   ])
+  const generationPreflight = useMemo(() => {
+    const messages = [
+      !chapterWritability.ready ? chapterWritability.summary : '',
+      ...chapterWritability.risks,
+      currentWritebackStatus?.blockedGeneration
+        ? `章后回写仍处于「${getWritebackPhaseLabel(currentWritebackStatus.phase)}」，先完成回写确认再继续生成。`
+        : '',
+    ].filter(Boolean)
+
+    return {
+      ready: Boolean(currentChapter) && messages.length === 0,
+      messages,
+    }
+  }, [chapterWritability, currentChapter, currentWritebackStatus?.blockedGeneration, currentWritebackStatus?.phase])
+
+  generationPreflightRef.current = generationPreflight
 
   const sceneListItems = useMemo(
     () => scenePlan.map((scene) => `${scene.scene_title} · ${scene.purpose}`),
@@ -2664,7 +2696,8 @@ export default function Writing({ novelId }: Props) {
                         <Button
                           type="primary"
                           icon={<RobotOutlined />}
-                          disabled={!currentChapter}
+                          disabled={!currentChapter || !generationPreflight.ready}
+                          title={generationPreflight.ready ? '生成正文' : generationPreflight.messages[0] || '当前章节暂不适合生成'}
                           onClick={() => void handleGenerateContent()}
                         >
                           生成

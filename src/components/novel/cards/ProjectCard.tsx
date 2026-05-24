@@ -74,9 +74,9 @@ export default function ProjectCard({
             ) : null}
           </div>
         </div>
-        <div onClick={(event) => event.stopPropagation()}>
+        <div className="novel-project-card__menu" onClick={(event) => event.stopPropagation()}>
           <Dropdown menu={{ items: menuItems }} trigger={['click']}>
-            <Button size="small" icon={<MoreOutlined />} />
+            <Button size="small" icon={<MoreOutlined />} aria-label="更多操作" title="更多操作" />
           </Dropdown>
         </div>
       </div>

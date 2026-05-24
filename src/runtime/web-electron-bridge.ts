@@ -1,4 +1,13 @@
-import type { Chapter, Novel, Template } from '../types'
+import type {
+  BatchRollbackMode,
+  BatchWorkbenchData,
+  Chapter,
+  ChapterWritebackCenterData,
+  ChapterWritebackRun,
+  GlobalLockLibrary,
+  Template,
+  Novel,
+} from '../types'
 
 type BridgeMethod = (...args: unknown[]) => Promise<unknown>
 type BridgeService = Record<string, BridgeMethod>
@@ -346,6 +355,57 @@ const emptyQualityDashboard = {
   volumeWorldStateStability: [],
 }
 
+function createEmptyGlobalLockLibrary(novelId: number): GlobalLockLibrary {
+  return {
+    novelId,
+    lockedCanonFacts: [],
+    lockedParagraphs: [],
+    lockedStyleRules: [],
+    lockedCharacterVoice: [],
+    updatedAt: NOW,
+  }
+}
+
+function createEmptyWritebackCenterData(chapter: Chapter | null): ChapterWritebackCenterData {
+  return {
+    chapter,
+    runs: [],
+    activeRun: null,
+    extracts: [],
+    diffs: [],
+    coverage: [],
+  }
+}
+
+function createPreviewWritebackRun(chapterId: number): ChapterWritebackRun {
+  return {
+    id: Math.floor(Date.now() / 1000),
+    novelId: 1,
+    chapterId,
+    status: 'draft',
+    triggerSource: 'web-preview',
+    summaryText: '浏览器预览环境不会实际写回资产。',
+    retryCount: 0,
+    sourceChapterVersion: 1,
+    startedAt: NOW,
+    completedAt: null,
+    failedAt: null,
+    errorMessage: null,
+    createdAt: NOW,
+    updatedAt: NOW,
+  }
+}
+
+function createEmptyBatchWorkbenchData(novelId: number): BatchWorkbenchData {
+  return {
+    snapshots: [],
+    activeSnapshot: null,
+    inspections: [],
+    rollbacks: [],
+    globalLockLibrary: createEmptyGlobalLockLibrary(novelId),
+  }
+}
+
 const emptyStructureLinkageSummary = {
   summary: '浏览器预览结构联动暂无缺口。',
   totalGapCount: 0,
@@ -645,11 +705,16 @@ export function installWebElectronBridge(): void {
       getTree: async () => [],
       queryNodes: async () => emptyPagedResult,
       getStats: async () => ({ ...emptyStats, total: 2 }),
-      getGraph: async () => ({ nodes: [], edges: [] }),
+      getNode: async () => null,
+      searchNodes: async () => [],
+      getRelations: async () => [],
+      getGraph: async () => ({ nodes: [], edges: [], relationNodeIds: [], rootNodeIds: [] }),
+      getLatestAutoGenerateTask: async () => null,
+      getAutoGenerateStatus: async () => null,
     }),
     faction: createService({
       getStats: async () => ({ ...emptyStats, total: 1 }),
-      getGraph: async () => ({ nodes: [], edges: [] }),
+      getGraph: async () => ({ nodes: [], edges: [], unalignedCharacters: [] }),
     }),
     glossary: createService({ getStats: async () => ({ ...emptyStats, total: 4 }) }),
     thread: createService({
@@ -744,7 +809,35 @@ export function installWebElectronBridge(): void {
       runPublishCheck: async (id) => createPublishCheck(Number(id)),
     }),
     chapterBatch: createService({ getLatestQualityAnalysisTask: async () => null }),
-    writeback: createService({ listRuns: async () => [] }),
+    writeback: createService({
+      listRuns: async () => [],
+      getCenterData: async (chapterId) => {
+        const chapter = demoChapters.find((item) => item.id === Number(chapterId)) ?? null
+        return createEmptyWritebackCenterData(chapter)
+      },
+      prepareRun: async (chapterId) => createPreviewWritebackRun(Number(chapterId)),
+      bulkUpdateDecisions: async () => [],
+      applyRun: async () => createEmptyWritebackCenterData(demoChapters[0] ?? null),
+      retryFailed: async () => createEmptyWritebackCenterData(demoChapters[0] ?? null),
+    }),
+    batchWorkbench: createService({
+      getData: async (novelId) => createEmptyBatchWorkbenchData(Number(novelId)),
+      getGlobalLockLibrary: async (novelId) => createEmptyGlobalLockLibrary(Number(novelId)),
+      updateGlobalLockLibrary: async (novelId, patch) => ({
+        ...createEmptyGlobalLockLibrary(Number(novelId)),
+        ...(patch && typeof patch === 'object' ? patch as Partial<GlobalLockLibrary> : {}),
+        novelId: Number(novelId),
+        updatedAt: NOW,
+      }),
+      previewRollback: async (snapshotId, mode) => ({
+        snapshotId: Number(snapshotId),
+        mode: typeof mode === 'string' ? mode as BatchRollbackMode : 'chapter_rollback',
+        chapterCount: 0,
+        affectedChapters: [],
+        affectedCounts: {},
+        warnings: ['浏览器预览环境没有可回滚的批次快照。'],
+      }),
+    }),
     worldRules: createService(),
     subplot: createService(),
     history: createService({ listRecent: async () => [] }),

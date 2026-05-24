@@ -5,6 +5,7 @@ import {
   getRecommendedGuidedWorkflowStep,
   isBasicsReady,
   isCharacterRosterReady,
+  isResistanceSystemReady,
   isProjectBriefReady,
   isStoryCoreReady,
   isStoryPlotReady,
@@ -30,6 +31,7 @@ export type AuthorWorkflowRouteKey =
   | 'map'
   | 'items'
   | 'characters'
+  | 'resistance'
   | 'threads'
   | 'story-design'
   | 'outline'
@@ -124,6 +126,7 @@ function countAssetGaps(novel: Pick<Novel, 'settingsJson' | 'worldRulesJson'> | 
     stats.mapCount <= 0,
     stats.itemCount <= 0,
     !isCharacterRosterReady(stats),
+    !isResistanceSystemReady(stats),
     stats.threadCount <= 0,
     !isStoryPlotReady(novel),
     stats.outlineCount <= 0,
@@ -157,7 +160,15 @@ function resolveQuickStartPrimaryTask(
     return resolveAssetCompressionTask(stats)
   }
 
-  switch (getRecommendedGuidedWorkflowStep(novel, stats)) {
+  const recommendedStep = getRecommendedGuidedWorkflowStep(novel, stats)
+  if (
+    !isResistanceSystemReady(stats)
+    && ['story-threads', 'story-plot', 'volume-planning', 'write-start'].includes(recommendedStep)
+  ) {
+    return createTask('resistance-lines', '补阻力线', '人物和资产已有雏形后，先把关系、环境、制度阻力压成可持续压力，后面的线程和大纲才不会变成流水账。', 'resistance', 10, ['故事线程', '章节冲突'], '打开阻力系统')
+  }
+
+  switch (recommendedStep) {
     case 'basics':
       return createTask('basics', '补齐基础信息', '先把书名、简介、背景和目标字数钉住，后面的推荐才有可靠上下文。', 'overview', 5, ['项目立项', '世界规则', '首章启动'], '打开基础信息')
     case 'project-brief':
@@ -207,6 +218,9 @@ function resolveAssetPrimaryTask(
   }
   if (!isCharacterRosterReady(stats)) {
     return createTask('asset-characters', '补关键角色网络', '人物生态还没形成稳定关系网，现在继续结构设计会缺少行为主体。', 'characters', 10, ['主线推动者', '阻力位'], '打开角色系统')
+  }
+  if (!isResistanceSystemReady(stats)) {
+    return createTask('asset-resistance', '补阻力线', '人物网络已有基础，但外部压力和关系压力还没登记，直接进大纲会让冲突靠临时补丁推进。', 'resistance', 10, ['主线压力', '章节冲突'], '打开阻力系统')
   }
   if (stats.threadCount <= 0) {
     return createTask('asset-threads', '补主线与支线线程', '没有线程层，后面的卷级设计和正文很难形成长期承接。', 'threads', 8, ['卷级推进', '伏笔回收'], '打开故事线程')

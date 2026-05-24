@@ -13101,3 +13101,113 @@ html[data-runtime="web"] .project-topbar__main-row {
   max-height: min(42vh, 420px);
 }
 
+/* Responsive workspace safeguards for web, mobile, and narrow Electron windows. */
+.novel-workspace,
+.novel-workspace__body,
+.novel-workspace__main,
+.novel-workspace__aside,
+.novel-panel,
+.novel-panel__body,
+.novel-hero,
+.novel-hero__copy,
+.novel-hero__context,
+.novel-hero__metrics,
+.guided-step__field-grid,
+.guided-step__field-card,
+.workspace-grid-auto-220,
+.workspace-grid-auto-280,
+.novel-board-lanes,
+.novel-board-lane,
+.novel-board-card {
+  min-width: 0;
+}
+
+.novel-panel__header,
+.novel-hero__actions,
+.novel-panel__extra,
+.workspace-row {
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.novel-panel__extra {
+  justify-content: flex-end;
+}
+
+.novel-context-summary,
+.novel-hero__metrics,
+.guided-step__fact-grid,
+.guided-step__action-grid,
+.guided-step__field-grid,
+.workspace-grid-auto-220,
+.workspace-grid-auto-280 {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+}
+
+.novel-panel__title,
+.novel-metric__value,
+.novel-context-summary__item dd,
+.guided-step__fact-card strong,
+.guided-step__fact-card small,
+.novel-board-card__desc {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 768px) {
+  .novel-workspace {
+    padding: 14px;
+  }
+
+  .novel-hero {
+    padding: 18px;
+    border-radius: 18px;
+  }
+
+  .novel-hero__title {
+    font-size: 26px;
+  }
+
+  .novel-panel {
+    border-radius: 16px;
+  }
+
+  .novel-panel__header,
+  .novel-hero__actions,
+  .novel-panel__extra,
+  .workspace-row {
+    align-items: stretch;
+  }
+
+  .novel-hero__actions .ant-space,
+  .novel-panel__extra .ant-space,
+  .novel-hero__actions .ant-btn,
+  .novel-panel__extra .ant-btn,
+  .novel-workspace .ant-form .ant-btn {
+    width: 100%;
+  }
+
+  .novel-workspace .ant-space {
+    width: 100%;
+  }
+
+  .novel-workspace .ant-space-item {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .ant-drawer-content-wrapper {
+    width: 100vw !important;
+  }
+
+  .ant-drawer-body {
+    padding: 14px;
+  }
+
+  .novel-workspace textarea.ant-input,
+  .ant-drawer textarea.ant-input {
+    min-height: 128px;
+    max-height: min(42vh, 320px);
+  }
+}
+

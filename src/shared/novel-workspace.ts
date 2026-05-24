@@ -323,23 +323,69 @@ function buildBaseProgressMap(
     worldRules.speciesSystem.length > 0,
     (worldRules as { powerSystem?: { name?: string } }).powerSystem?.name,
   ])
+  const hasArcCoverage = stats.characterArcCount > 0 || stats.relationshipArcCount > 0
   const chapterConstraintRequired = countTruthy([
-    stats.chapterCount > 0,
     stats.outlineCount > 0,
+    stats.volumeCount > 0,
+    stats.threadCount > 0,
+    stats.timelineCount > 0,
+    hasArcCoverage,
+    stats.resistanceTrackCount > 0,
   ])
   const chapterConstraintOptional = countTruthy([
-    stats.threadCount > 0,
-    stats.timelineCount > 0,
-    stats.volumeCount > 0,
+    stats.chapterCount > 0,
+    stats.sceneTemplateCount > 0,
   ])
+  const chapterConstraintBlockerMessages = [
+    stats.outlineCount <= 0 ? '缺少故事大纲，章节合同没有可执行骨架。' : '',
+    stats.volumeCount <= 0 ? '缺少卷级/结构规划，章节目标无法归入长篇节奏。' : '',
+    stats.threadCount <= 0 ? '缺少故事线程，章节合同无法确认必须推进的线。' : '',
+    stats.timelineCount <= 0 ? '缺少时间轴锚点，章节合同无法确认时间地点。' : '',
+    !hasArcCoverage ? '缺少人物弧线或关系弧，章节合同无法确认人物变化。' : '',
+    stats.resistanceTrackCount <= 0 ? '缺少反派与阻力轨道，章节合同无法确认外部压力。' : '',
+  ].filter(Boolean)
+  const chapterConstraintBlockers = chapterConstraintBlockerMessages.map((reason, index) => createBlocker(
+    `contract-closure-${index}`,
+    'medium',
+    '章节合同未闭环',
+    reason,
+    ['章节合同', '正文写作'],
+    'contracts',
+    '补章节合同',
+  ))
   const writingRequired = countTruthy([
+    stats.chapterCount > 0,
     stats.outlineCount > 0,
+    stats.volumeCount > 0,
     stats.threadCount > 0,
     stats.timelineCount > 0,
+    hasArcCoverage,
+    stats.resistanceTrackCount > 0,
     stats.revisionBlockerCount <= 0,
     stats.staleChapterCount <= 0,
     stats.staleAssetCount <= 0 && stats.staleCheckpointCount <= 0,
   ])
+  const writingBlockerMessages = [
+    stats.chapterCount <= 0 ? '缺少可写章节，请先完成结构拆分。' : '',
+    stats.outlineCount <= 0 ? '缺少故事大纲，正文生成没有章节承接。' : '',
+    stats.volumeCount <= 0 ? '缺少卷级规划，正文生成没有长篇节奏约束。' : '',
+    stats.threadCount <= 0 ? '缺少故事线程，正文生成无法稳定推进主线/支线。' : '',
+    stats.timelineCount <= 0 ? '缺少时间轴，正文生成无法锁定时间地点与因果。' : '',
+    !hasArcCoverage ? '缺少人物弧线或关系弧，正文生成容易变成人物平铺。' : '',
+    stats.resistanceTrackCount <= 0 ? '缺少反派与阻力轨道，正文生成缺少有效对抗。' : '',
+    stats.revisionBlockerCount > 0 ? `仍有 ${stats.revisionBlockerCount} 个高优先修订问题未处理。` : '',
+    stats.staleChapterCount > 0 ? `仍有 ${stats.staleChapterCount} 章引用旧上下文。` : '',
+    stats.staleAssetCount > 0 || stats.staleCheckpointCount > 0 ? '仍有资产或长期记忆检查点待同步。' : '',
+  ].filter(Boolean)
+  const writingBlockers = writingBlockerMessages.map((reason, index) => createBlocker(
+    `writing-closure-${index}`,
+    index <= 6 ? 'high' : 'medium',
+    '正文生成前置条件不足',
+    reason,
+    ['正文写作', '章节合同'],
+    'writing/editor',
+    '查看写作缺口',
+  ))
   const writingOptional = countTruthy([
     stats.chapterCount > 0,
     stats.totalWords > 0,
@@ -539,24 +585,24 @@ function buildBaseProgressMap(
       blockers: [],
     }),
     contracts: buildProgress('contracts', {
-      requiredTotal: 2,
+      requiredTotal: 6,
       requiredDone: chapterConstraintRequired,
-      optionalTotal: 3,
+      optionalTotal: 2,
       optionalDone: chapterConstraintOptional,
-      status: chapterConstraintRequired >= 2 ? (chapterConstraintOptional >= 2 ? 'ready' : 'draft') : chapterConstraintRequired > 0 ? 'draft' : 'not_started',
-      blockers: [],
+      status: chapterConstraintRequired >= 6 ? (chapterConstraintOptional >= 1 ? 'ready' : 'draft') : chapterConstraintRequired > 0 ? 'draft' : 'not_started',
+      blockers: chapterConstraintBlockers,
     }),
     writing: buildProgress('writing', {
-      requiredTotal: 6,
+      requiredTotal: 10,
       requiredDone: writingRequired,
       optionalTotal: 2,
       optionalDone: writingOptional,
-      status: writingRequired >= 6
+      status: writingRequired >= 10
         ? (stats.chapterCount > 0 || stats.totalWords > 0 ? 'done' : 'ready')
-        : writingRequired >= 3
+        : writingRequired >= 5
           ? 'draft'
           : 'not_started',
-      blockers: [],
+      blockers: writingBlockers,
     }),
     writeback: buildProgress('writeback', {
       requiredTotal: 1,
