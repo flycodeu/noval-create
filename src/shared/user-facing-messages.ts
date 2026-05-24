@@ -6,6 +6,7 @@ export const USER_FACING_MESSAGES = {
   'common.copied': '已复制到剪贴板',
   'common.contentJsonInvalid': '内容 JSON 格式错误',
   'common.aiJsonObjectInvalid': 'AI 输出不是有效的 JSON 对象。',
+  'common.aiDraftQualityInvalid': 'AI 草稿仍有模板化或重复项：{{detail}}。请重试生成。',
   'common.userCancelled': '用户取消',
   'common.executionFailed': '执行失败，请稍后重试。',
   'common.executionFailedCheckPrerequisites': '执行失败，请先检查前置条件后再试。',

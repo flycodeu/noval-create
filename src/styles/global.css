@@ -10779,6 +10779,33 @@ html[data-theme="dark"] .ant-card-actions > li {
   }
 }
 
+@media (min-width: 960px) and (max-width: 1360px) {
+  .app-layout .novel-dashboard__hero {
+    grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.85fr);
+    align-items: stretch;
+  }
+
+  .app-layout .novel-dashboard__hero .workflow-panel__metrics {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 148px), 1fr));
+  }
+
+  .app-layout .novel-dashboard__task-meta {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .app-layout .novel-dashboard__main-grid {
+    grid-template-columns: minmax(0, 1.45fr) minmax(300px, 0.9fr);
+  }
+
+  .app-layout .novel-dashboard__stage-grid {
+    grid-template-columns: repeat(5, minmax(132px, 1fr));
+  }
+
+  .app-layout .novel-dashboard__health-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 720px) {
   .novel-section-header,
   .novel-action-bar {
@@ -11560,6 +11587,36 @@ html[data-theme="dark"] .ant-card-actions > li {
   grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
   gap: 8px;
   margin-top: 2px;
+}
+
+.app-layout .novel-hero--inline-metrics {
+  grid-template-columns: minmax(0, 1fr) minmax(300px, min(34vw, 430px));
+  grid-template-areas:
+    "copy metrics"
+    "actions metrics";
+  align-items: stretch;
+}
+
+.app-layout .novel-hero--inline-metrics .novel-hero__copy {
+  grid-area: copy;
+}
+
+.app-layout .novel-hero--inline-metrics .novel-hero__actions {
+  grid-area: actions;
+  justify-content: flex-start;
+}
+
+.app-layout .novel-hero--inline-metrics .novel-hero__metrics {
+  grid-area: metrics;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 132px), 1fr));
+  align-self: stretch;
+  margin-top: 0;
+}
+
+.app-layout .novel-hero--inline-metrics .novel-metric {
+  display: grid;
+  min-height: 76px;
+  align-content: center;
 }
 
 .app-layout .novel-metric {
@@ -12352,6 +12409,49 @@ html[data-runtime="web"] .project-topbar__main-row {
   }
 }
 
+/* Sparse dashboard metrics: keep small data sets close to their context. */
+@media (min-width: 721px) {
+  .app-layout .novel-dashboard__metrics {
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  }
+
+  .app-layout .novel-dashboard__metrics:has(> :nth-child(1):last-child),
+  .app-layout .quality-dashboard-page__grid-220:has(> :nth-child(1):last-child),
+  .app-layout .quality-dashboard-page__grid-280:has(> :nth-child(1):last-child),
+  .app-layout .quality-dashboard-page__metric-grid-160:has(> :nth-child(1):last-child),
+  .app-layout .quality-dashboard-page__metric-grid-170:has(> :nth-child(1):last-child),
+  .app-layout .quality-dashboard-page__metric-grid-180:has(> :nth-child(1):last-child),
+  .app-layout .quality-dashboard-page__metric-grid-220:has(> :nth-child(1):last-child),
+  .app-layout .quality-dashboard-page__metric-grid-240:has(> :nth-child(1):last-child),
+  .app-layout .quality-dashboard-page__metric-grid-260:has(> :nth-child(1):last-child),
+  .app-layout .quality-dashboard-page__metric-grid-320:has(> :nth-child(1):last-child) {
+    grid-template-columns: minmax(220px, 360px);
+    justify-content: start;
+  }
+
+  .app-layout .novel-dashboard__metrics:has(> :nth-child(2):last-child),
+  .app-layout .novel-dashboard__reference-preview:has(> :nth-child(2):last-child),
+  .app-layout .quality-dashboard-page__grid-220:has(> :nth-child(2):last-child),
+  .app-layout .quality-dashboard-page__grid-280:has(> :nth-child(2):last-child),
+  .app-layout .quality-dashboard-page__metric-grid-160:has(> :nth-child(2):last-child),
+  .app-layout .quality-dashboard-page__metric-grid-170:has(> :nth-child(2):last-child),
+  .app-layout .quality-dashboard-page__metric-grid-180:has(> :nth-child(2):last-child),
+  .app-layout .quality-dashboard-page__metric-grid-220:has(> :nth-child(2):last-child),
+  .app-layout .quality-dashboard-page__metric-grid-240:has(> :nth-child(2):last-child),
+  .app-layout .quality-dashboard-page__metric-grid-260:has(> :nth-child(2):last-child),
+  .app-layout .quality-dashboard-page__metric-grid-320:has(> :nth-child(2):last-child) {
+    grid-template-columns: repeat(2, minmax(180px, 300px));
+    justify-content: start;
+  }
+
+  .app-layout .novel-dashboard__metrics:has(> :nth-child(3):last-child),
+  .app-layout .quality-dashboard-page__metric-grid-160:has(> :nth-child(3):last-child),
+  .app-layout .quality-dashboard-page__metric-grid-170:has(> :nth-child(3):last-child),
+  .app-layout .quality-dashboard-page__metric-grid-180:has(> :nth-child(3):last-child) {
+    grid-template-columns: repeat(3, minmax(150px, 1fr));
+  }
+}
+
 @media (min-width: 1200px) and (max-width: 1440px) {
   .app-layout .novel-route-shell {
     grid-template-columns: 260px minmax(0, 1fr);
@@ -12429,8 +12529,10 @@ html[data-runtime="web"] .project-topbar__main-row {
   .app-layout .novel-theme-voice-page .guided-step__field-card textarea.ant-input,
   .app-layout .novel-premise-page .guided-step__field-card textarea.ant-input,
   .app-layout .novel-world-rules-page textarea.ant-input {
-    min-height: 104px;
-    height: 104px;
+    min-height: 148px;
+    height: auto;
+    max-height: min(42vh, 360px);
+    overflow-y: auto;
     resize: vertical;
   }
 
@@ -12450,12 +12552,13 @@ html[data-runtime="web"] .project-topbar__main-row {
   }
 
   .app-layout .novel-theme-voice-page__section .guided-step__field-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    align-items: start;
     gap: 10px;
   }
 
   .app-layout .novel-theme-voice-page__section--narrative .guided-step__field-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   }
 
   .app-layout .novel-theme-voice-page__section .guided-step__field-card {
@@ -12630,5 +12733,371 @@ html[data-runtime="web"] .project-topbar__main-row {
   .app-layout .chapter-console-page__column--right {
     grid-column: auto;
   }
+}
+
+/* Long-form authoring controls: readable by default, compact only when intentional. */
+.app-layout .novel-route-shell textarea.ant-input,
+.app-layout .novel-workspace textarea.ant-input,
+.app-layout .ant-modal textarea.ant-input,
+.app-layout .ant-drawer textarea.ant-input,
+.ant-modal textarea.ant-input,
+.ant-drawer textarea.ant-input {
+  min-height: 132px;
+  max-height: min(46vh, 420px);
+  line-height: 1.68;
+  overflow-y: auto;
+  resize: vertical;
+  scrollbar-gutter: stable;
+}
+
+.app-layout textarea.ant-input[rows="5"],
+.app-layout textarea.ant-input[rows="6"],
+.ant-modal textarea.ant-input[rows="5"],
+.ant-modal textarea.ant-input[rows="6"],
+.ant-drawer textarea.ant-input[rows="5"],
+.ant-drawer textarea.ant-input[rows="6"] {
+  min-height: 156px;
+}
+
+.app-layout textarea.ant-input[rows="8"],
+.ant-modal textarea.ant-input[rows="8"],
+.ant-drawer textarea.ant-input[rows="8"] {
+  min-height: 208px;
+}
+
+.app-layout textarea.ant-input[rows="10"],
+.app-layout textarea.ant-input[rows="12"],
+.ant-modal textarea.ant-input[rows="10"],
+.ant-modal textarea.ant-input[rows="12"],
+.ant-drawer textarea.ant-input[rows="10"],
+.ant-drawer textarea.ant-input[rows="12"] {
+  min-height: 260px;
+}
+
+.app-layout textarea.ant-input[rows="14"],
+.app-layout textarea.ant-input[rows="18"],
+.ant-modal textarea.ant-input[rows="14"],
+.ant-modal textarea.ant-input[rows="18"],
+.ant-drawer textarea.ant-input[rows="14"],
+.ant-drawer textarea.ant-input[rows="18"] {
+  min-height: 340px;
+  max-height: min(64vh, 640px);
+}
+
+@supports (field-sizing: content) {
+  .app-layout .novel-route-shell textarea.ant-input,
+  .app-layout .novel-workspace textarea.ant-input,
+  .app-layout .ant-modal textarea.ant-input,
+  .app-layout .ant-drawer textarea.ant-input,
+  .ant-modal textarea.ant-input,
+  .ant-drawer textarea.ant-input {
+    field-sizing: content;
+  }
+}
+
+@media (min-width: 1200px) {
+  .app-layout .guided-step__field-card:has(textarea.ant-input),
+  .app-layout .novel-form-section:has(textarea.ant-input),
+  .app-layout .novel-subpanel:has(textarea.ant-input) {
+    align-self: stretch;
+  }
+
+  .app-layout .novel-theme-voice-page__section .guided-step__field-card textarea.ant-input,
+  .app-layout .novel-premise-page .guided-step__field-card textarea.ant-input,
+  .app-layout .novel-overview-page__packaging-grid .guided-step__field-card textarea.ant-input {
+    min-height: 168px;
+  }
+
+  .app-layout .novel-world-rules-page .novel-panel textarea.ant-input,
+  .app-layout .novel-timeline-page textarea.ant-input,
+  .app-layout .novel-contracts-page textarea.ant-input {
+    min-height: 176px;
+  }
+
+  .app-layout .novel-world-rules-page .novel-world-rules-page__grid--3 {
+    grid-template-columns: repeat(3, minmax(220px, 1fr));
+  }
+
+  .app-layout .novel-world-rules-page .novel-world-rules-page__grid--2,
+  .app-layout .novel-world-rules-page .novel-world-rules-page__grid--lang {
+    grid-template-columns: repeat(2, minmax(260px, 1fr));
+  }
+}
+
+.app-layout .novel-route-shell .ant-select-multiple .ant-select-selector,
+.app-layout .novel-workspace .ant-select-multiple .ant-select-selector,
+.app-layout .ant-modal .ant-select-multiple .ant-select-selector,
+.app-layout .ant-drawer .ant-select-multiple .ant-select-selector,
+.ant-modal .ant-select-multiple .ant-select-selector,
+.ant-drawer .ant-select-multiple .ant-select-selector {
+  min-height: 42px;
+  height: auto;
+  align-items: flex-start;
+  padding: 4px 8px;
+}
+
+.app-layout .novel-route-shell .ant-select-multiple .ant-select-selection-overflow,
+.app-layout .novel-workspace .ant-select-multiple .ant-select-selection-overflow,
+.app-layout .ant-modal .ant-select-multiple .ant-select-selection-overflow,
+.app-layout .ant-drawer .ant-select-multiple .ant-select-selection-overflow,
+.ant-modal .ant-select-multiple .ant-select-selection-overflow,
+.ant-drawer .ant-select-multiple .ant-select-selection-overflow {
+  max-height: 118px;
+  overflow-y: auto;
+  align-content: flex-start;
+  scrollbar-gutter: stable;
+}
+
+.app-layout .novel-route-shell .ant-select-multiple .ant-select-selection-item,
+.app-layout .novel-workspace .ant-select-multiple .ant-select-selection-item,
+.app-layout .ant-modal .ant-select-multiple .ant-select-selection-item,
+.app-layout .ant-drawer .ant-select-multiple .ant-select-selection-item,
+.ant-modal .ant-select-multiple .ant-select-selection-item,
+.ant-drawer .ant-select-multiple .ant-select-selection-item {
+  max-width: min(280px, 100%);
+  height: auto;
+  min-height: 26px;
+  line-height: 1.45;
+  white-space: normal;
+}
+
+.app-layout .novel-route-shell .ant-select-multiple .ant-select-selection-item-content,
+.app-layout .novel-workspace .ant-select-multiple .ant-select-selection-item-content,
+.app-layout .ant-modal .ant-select-multiple .ant-select-selection-item-content,
+.app-layout .ant-drawer .ant-select-multiple .ant-select-selection-item-content,
+.ant-modal .ant-select-multiple .ant-select-selection-item-content,
+.ant-drawer .ant-select-multiple .ant-select-selection-item-content {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.app-layout .novel-route-shell .ant-select-single .ant-select-selector,
+.app-layout .novel-workspace .ant-select-single .ant-select-selector,
+.app-layout .ant-modal .ant-select-single .ant-select-selector,
+.app-layout .ant-drawer .ant-select-single .ant-select-selector,
+.ant-modal .ant-select-single .ant-select-selector,
+.ant-drawer .ant-select-single .ant-select-selector {
+  height: auto;
+  min-height: 40px;
+}
+
+.app-layout .novel-route-shell .ant-select-single .ant-select-selector .ant-select-selection-item,
+.app-layout .novel-route-shell .ant-select-single .ant-select-selector .ant-select-selection-placeholder,
+.app-layout .novel-workspace .ant-select-single .ant-select-selector .ant-select-selection-item,
+.app-layout .novel-workspace .ant-select-single .ant-select-selector .ant-select-selection-placeholder,
+.app-layout .ant-modal .ant-select-single .ant-select-selector .ant-select-selection-item,
+.app-layout .ant-modal .ant-select-single .ant-select-selector .ant-select-selection-placeholder,
+.app-layout .ant-drawer .ant-select-single .ant-select-selector .ant-select-selection-item,
+.app-layout .ant-drawer .ant-select-single .ant-select-selector .ant-select-selection-placeholder,
+.ant-modal .ant-select-single .ant-select-selector .ant-select-selection-item,
+.ant-modal .ant-select-single .ant-select-selector .ant-select-selection-placeholder,
+.ant-drawer .ant-select-single .ant-select-selector .ant-select-selection-item,
+.ant-drawer .ant-select-single .ant-select-selector .ant-select-selection-placeholder {
+  min-height: 38px;
+  line-height: 38px;
+}
+
+.ant-select-dropdown {
+  min-width: min(360px, calc(100vw - 32px));
+  max-width: min(680px, calc(100vw - 32px));
+  max-height: min(56vh, 520px);
+}
+
+.ant-select-dropdown .ant-select-item {
+  min-height: 40px;
+  padding: 8px 12px;
+}
+
+.ant-select-dropdown .ant-select-item-option .ant-select-item-option-content {
+  display: -webkit-box !important;
+  min-width: 0;
+  overflow: hidden;
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  -webkit-box-orient: vertical !important;
+  -webkit-line-clamp: 5 !important;
+  line-clamp: 5;
+}
+
+@media (max-width: 1199px) {
+  .app-layout .novel-route-shell textarea.ant-input,
+  .app-layout .novel-workspace textarea.ant-input,
+  .app-layout .ant-modal textarea.ant-input,
+  .app-layout .ant-drawer textarea.ant-input,
+  .ant-modal textarea.ant-input,
+  .ant-drawer textarea.ant-input {
+    min-height: 148px;
+    max-height: min(48vh, 360px);
+  }
+
+  .app-layout textarea.ant-input[rows="8"],
+  .app-layout textarea.ant-input[rows="10"],
+  .app-layout textarea.ant-input[rows="12"],
+  .app-layout textarea.ant-input[rows="14"],
+  .app-layout textarea.ant-input[rows="18"],
+  .ant-modal textarea.ant-input[rows="8"],
+  .ant-modal textarea.ant-input[rows="10"],
+  .ant-modal textarea.ant-input[rows="12"],
+  .ant-modal textarea.ant-input[rows="14"],
+  .ant-modal textarea.ant-input[rows="18"],
+  .ant-drawer textarea.ant-input[rows="8"],
+  .ant-drawer textarea.ant-input[rows="10"],
+  .ant-drawer textarea.ant-input[rows="12"],
+  .ant-drawer textarea.ant-input[rows="14"],
+  .ant-drawer textarea.ant-input[rows="18"] {
+    min-height: 220px;
+  }
+
+  .app-layout .novel-route-shell .ant-select-multiple .ant-select-selection-overflow,
+  .app-layout .novel-workspace .ant-select-multiple .ant-select-selection-overflow,
+  .app-layout .ant-modal .ant-select-multiple .ant-select-selection-overflow,
+  .app-layout .ant-drawer .ant-select-multiple .ant-select-selection-overflow,
+  .ant-modal .ant-select-multiple .ant-select-selection-overflow,
+  .ant-drawer .ant-select-multiple .ant-select-selection-overflow {
+    max-height: 136px;
+  }
+}
+
+@media (min-width: 1200px) {
+  .app-layout .novel-route-shell textarea.ant-input[rows="8"],
+  .app-layout .novel-workspace textarea.ant-input[rows="8"],
+  .ant-modal textarea.ant-input[rows="8"],
+  .ant-drawer textarea.ant-input[rows="8"] {
+    min-height: 208px;
+  }
+
+  .app-layout .novel-route-shell textarea.ant-input[rows="10"],
+  .app-layout .novel-route-shell textarea.ant-input[rows="12"],
+  .app-layout .novel-workspace textarea.ant-input[rows="10"],
+  .app-layout .novel-workspace textarea.ant-input[rows="12"],
+  .ant-modal textarea.ant-input[rows="10"],
+  .ant-modal textarea.ant-input[rows="12"],
+  .ant-drawer textarea.ant-input[rows="10"],
+  .ant-drawer textarea.ant-input[rows="12"] {
+    min-height: 260px;
+  }
+
+  .app-layout .novel-route-shell textarea.ant-input[rows="14"],
+  .app-layout .novel-route-shell textarea.ant-input[rows="18"],
+  .app-layout .novel-workspace textarea.ant-input[rows="14"],
+  .app-layout .novel-workspace textarea.ant-input[rows="18"],
+  .ant-modal textarea.ant-input[rows="14"],
+  .ant-modal textarea.ant-input[rows="18"],
+  .ant-drawer textarea.ant-input[rows="14"],
+  .ant-drawer textarea.ant-input[rows="18"] {
+    min-height: 340px;
+    max-height: min(64vh, 640px);
+  }
+}
+
+/* Sparse desktop refinements: avoid orphan metric rows and over-tall modal inputs. */
+@media (min-width: 960px) {
+  .app-layout .novel-hero--inline-metrics {
+    grid-template-columns: minmax(0, 1fr) minmax(280px, min(32vw, 420px));
+    grid-template-areas:
+      "copy metrics"
+      "actions metrics";
+    align-items: stretch;
+  }
+
+  .app-layout .novel-hero--inline-metrics.novel-hero--has-context {
+    grid-template-columns: minmax(0, 1fr) minmax(260px, min(28vw, 380px));
+    grid-template-areas:
+      "copy metrics"
+      "actions metrics"
+      "context metrics";
+  }
+
+  .app-layout .novel-hero--inline-metrics .novel-hero__copy {
+    grid-area: copy;
+  }
+
+  .app-layout .novel-hero--inline-metrics .novel-hero__actions {
+    grid-area: actions;
+    justify-self: start;
+    justify-content: flex-start;
+  }
+
+  .app-layout .novel-hero--inline-metrics .novel-hero__context {
+    grid-area: context;
+    min-width: 0;
+  }
+
+  .app-layout .novel-hero--inline-metrics .novel-hero__metrics {
+    grid-area: metrics;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 132px), 1fr));
+    align-self: stretch;
+    margin-top: 0;
+  }
+
+  .app-layout .novel-dashboard__hero .workflow-panel__metrics {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 148px), 1fr));
+  }
+
+  .app-layout .quality-dashboard-page__metric-grid-160:has(> :nth-child(5):last-child),
+  .app-layout .quality-dashboard-page__metric-grid-170:has(> :nth-child(5):last-child),
+  .app-layout .quality-dashboard-page__metric-grid-180:has(> :nth-child(5):last-child) {
+    grid-template-columns: repeat(5, minmax(128px, 1fr));
+  }
+
+  .app-layout .quality-dashboard-page__metric-grid-160:has(> :nth-child(7):last-child),
+  .app-layout .quality-dashboard-page__metric-grid-170:has(> :nth-child(7):last-child),
+  .app-layout .quality-dashboard-page__metric-grid-180:has(> :nth-child(7):last-child) {
+    grid-template-columns: repeat(4, minmax(150px, 1fr));
+  }
+
+  .app-layout .quality-dashboard-page__metric-grid-160:has(> :nth-child(9):last-child),
+  .app-layout .quality-dashboard-page__metric-grid-170:has(> :nth-child(9):last-child),
+  .app-layout .quality-dashboard-page__metric-grid-180:has(> :nth-child(9):last-child),
+  .app-layout .quality-dashboard-page__grid-220:has(> :nth-child(9):last-child),
+  .app-layout .quality-dashboard-page__grid-280:has(> :nth-child(9):last-child),
+  .app-layout .quality-dashboard-page__metric-grid-240:has(> :nth-child(9):last-child),
+  .app-layout .quality-dashboard-page__metric-grid-260:has(> :nth-child(9):last-child),
+  .app-layout .quality-dashboard-page__metric-grid-320:has(> :nth-child(9):last-child) {
+    grid-template-columns: repeat(3, minmax(180px, 1fr));
+  }
+
+  .app-layout .quality-dashboard-page__grid-220:has(> :nth-child(5):last-child),
+  .app-layout .quality-dashboard-page__grid-280:has(> :nth-child(5):last-child),
+  .app-layout .quality-dashboard-page__metric-grid-240:has(> :nth-child(5):last-child),
+  .app-layout .quality-dashboard-page__metric-grid-260:has(> :nth-child(5):last-child),
+  .app-layout .quality-dashboard-page__metric-grid-320:has(> :nth-child(5):last-child) {
+    grid-template-columns: repeat(3, minmax(180px, 1fr));
+  }
+
+  .app-layout .quality-dashboard-page__grid-220:has(> :nth-child(7):last-child),
+  .app-layout .quality-dashboard-page__grid-280:has(> :nth-child(7):last-child),
+  .app-layout .quality-dashboard-page__metric-grid-240:has(> :nth-child(7):last-child),
+  .app-layout .quality-dashboard-page__metric-grid-260:has(> :nth-child(7):last-child),
+  .app-layout .quality-dashboard-page__metric-grid-320:has(> :nth-child(7):last-child) {
+    grid-template-columns: repeat(4, minmax(170px, 1fr));
+  }
+}
+
+.ant-modal textarea.ant-input {
+  min-height: 112px;
+  max-height: min(34vh, 320px);
+}
+
+.ant-modal textarea.ant-input[rows="5"],
+.ant-modal textarea.ant-input[rows="6"] {
+  min-height: 128px;
+}
+
+.ant-modal textarea.ant-input[rows="8"] {
+  min-height: 168px;
+}
+
+.ant-modal textarea.ant-input[rows="10"],
+.ant-modal textarea.ant-input[rows="12"] {
+  min-height: 200px;
+}
+
+.ant-modal textarea.ant-input[rows="14"],
+.ant-modal textarea.ant-input[rows="18"] {
+  min-height: 240px;
+  max-height: min(42vh, 420px);
 }
 

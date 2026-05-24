@@ -173,10 +173,13 @@ export default function ResistancePage({ novelId }: Props) {
   const characters = useMemo(() => dashboard?.availableCharacters || [], [dashboard?.availableCharacters])
   const factions = useMemo(() => dashboard?.availableFactions || [], [dashboard?.availableFactions])
   const trackList = useMemo(() => dashboard?.tracks || [], [dashboard?.tracks])
+  const characterTracks = useMemo(() => dashboard?.characterTracks || [], [dashboard?.characterTracks])
+  const factionTracks = useMemo(() => dashboard?.factionTracks || [], [dashboard?.factionTracks])
   const environmentTracks = useMemo(() => dashboard?.environmentTracks || [], [dashboard?.environmentTracks])
   const institutionTracks = useMemo(() => dashboard?.institutionTracks || [], [dashboard?.institutionTracks])
-  const selectedCharacterTrack = dashboard?.characterTracks.find((item) => item.sourceId === selectedCharacterId) || null
-  const selectedFactionTrack = dashboard?.factionTracks.find((item) => item.sourceId === selectedFactionId) || null
+  const volumes = useMemo(() => dashboard?.volumes || [], [dashboard?.volumes])
+  const selectedCharacterTrack = characterTracks.find((item) => item.sourceId === selectedCharacterId) || null
+  const selectedFactionTrack = factionTracks.find((item) => item.sourceId === selectedFactionId) || null
   const selectedTrack = trackList.find((item) => item.id === selectedTrackId)
     || selectedCharacterTrack
     || selectedFactionTrack
@@ -211,24 +214,24 @@ export default function ResistancePage({ novelId }: Props) {
         : nextTab === 'environment'
           ? environmentTracks[0]
           : nextTab === 'factions'
-            ? dashboard.factionTracks.find((item) => item.sourceId === (selectedFactionId || factions[0]?.id))
-            : dashboard.characterTracks.find((item) => item.sourceId === (selectedCharacterId || characters[0]?.id))
+            ? factionTracks.find((item) => item.sourceId === (selectedFactionId || factions[0]?.id))
+            : characterTracks.find((item) => item.sourceId === (selectedCharacterId || characters[0]?.id))
       setSelectedTrackId(firstTrack?.id || null)
     }
-  }, [characters, dashboard, environmentTracks, factions, institutionTracks, searchParams, selectedCharacterId, selectedFactionId, selectedTrackId, trackList])
+  }, [characterTracks, characters, dashboard, environmentTracks, factionTracks, factions, institutionTracks, searchParams, selectedCharacterId, selectedFactionId, selectedTrackId, trackList])
 
   useEffect(() => {
     if (!dashboard) return
     if (tab === 'characters') {
       const character = characters.find((item) => item.id === selectedCharacterId)
-      const track = dashboard.characterTracks.find((item) => item.sourceId === selectedCharacterId)
+      const track = characterTracks.find((item) => item.sourceId === selectedCharacterId)
       setDraft(track ? buildTrackDraft(track) : character ? buildSourceDraft(novelId, 'characters', character.id, character.fullName) : null)
       setSelectedTrackId(track?.id || null)
       return
     }
     if (tab === 'factions') {
       const faction = factions.find((item) => item.id === selectedFactionId)
-      const track = dashboard.factionTracks.find((item) => item.sourceId === selectedFactionId)
+      const track = factionTracks.find((item) => item.sourceId === selectedFactionId)
       setDraft(track ? buildTrackDraft(track) : faction ? buildSourceDraft(novelId, 'factions', faction.id, faction.name) : null)
       setSelectedTrackId(track?.id || null)
       return
@@ -237,7 +240,7 @@ export default function ResistancePage({ novelId }: Props) {
     const track = scopedTracks.find((item) => item.id === selectedTrackId) || scopedTracks[0] || null
     setDraft(track ? buildTrackDraft(track) : buildEnvironmentDraft(novelId, tab))
     setSelectedTrackId(track?.id || null)
-  }, [characters, dashboard, factions, novelId, selectedCharacterId, selectedFactionId, selectedTrackId, tab])
+  }, [characterTracks, characters, dashboard, environmentTracks, factionTracks, factions, institutionTracks, novelId, selectedCharacterId, selectedFactionId, selectedTrackId, tab])
 
   const chapterOptions = useMemo(
     () => (dashboard?.chapters || []).map((item) => ({ value: item.id, label: `第${item.chapterNum}章 ${item.title}`.trim() })),
@@ -248,14 +251,14 @@ export default function ResistancePage({ novelId }: Props) {
     [dashboard],
   )
   const volumeOptions = useMemo(
-    () => (dashboard?.volumes || []).map((item) => ({ value: item.id, label: item.title })),
-    [dashboard],
+    () => volumes.map((item) => ({ value: item.id, label: item.title })),
+    [volumes],
   )
-  const volumeDraftOptions = useMemo(() => (dashboard?.volumes || []).map((item) => ({
+  const volumeDraftOptions = useMemo(() => volumes.map((item) => ({
     id: item.id,
     label: item.title,
     aliases: [item.title, `第${item.volumeNumber}卷`],
-  })), [dashboard])
+  })), [volumes])
 
   const handleSave = async () => {
     if (!draft) return
@@ -304,7 +307,7 @@ export default function ResistancePage({ novelId }: Props) {
   const renderCharacterList = () => (
     <div className="workspace-stack-10">
       {characters.map((item) => {
-        const track = dashboard?.characterTracks.find((entry) => entry.sourceId === item.id)
+        const track = characterTracks.find((entry) => entry.sourceId === item.id)
         return (
           <button
             key={item.id}
@@ -337,7 +340,7 @@ export default function ResistancePage({ novelId }: Props) {
   const renderFactionList = () => (
     <div className="workspace-stack-10">
       {factions.map((item) => {
-        const track = dashboard?.factionTracks.find((entry) => entry.sourceId === item.id)
+        const track = factionTracks.find((entry) => entry.sourceId === item.id)
         return (
           <button
             key={item.id}
@@ -549,7 +552,7 @@ export default function ResistancePage({ novelId }: Props) {
                     extraSections: [
                       { label: '阻力类别', value: tab },
                       { label: '当前对象', value: selectedSourceLabel || '' },
-                      { label: '可绑定卷', value: (dashboard?.volumes || []).map((item) => item.title) },
+                      { label: '可绑定卷', value: volumes.map((item) => item.title) },
                     ],
                   }),
                   fields: [
@@ -563,7 +566,7 @@ export default function ResistancePage({ novelId }: Props) {
                     { key: 'counterMove', label: '失败后反制', value: draft.counterMove, hint: '写被破局后的二次反扑方式。' },
                     { key: 'currentPressureMode', label: '当前出手方式', value: draft.currentPressureMode, hint: '写这一阶段实际压迫主角的方式。' },
                     { key: 'notes', label: '备注', value: draft.notes, hint: '补充限制、误判、隐藏成本或跨页联动。' },
-                    { key: 'linkedVolumeTitle', label: '关联卷标题', value: dashboard?.volumes.find((item) => item.id === draft.linkedVolumeId)?.title || '', hint: '只能从可绑定卷里选一个卷标题。' },
+                    { key: 'linkedVolumeTitle', label: '关联卷标题', value: volumes.find((item) => item.id === draft.linkedVolumeId)?.title || '', hint: '只能从可绑定卷里选一个卷标题。' },
                   ],
                   requirements: [
                     '必须与人物、势力、世界规则和终局压力一致。',

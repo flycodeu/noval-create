@@ -4,6 +4,17 @@ function joinClassNames(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(' ')
 }
 
+function countRenderableNodes(node: React.ReactNode): number {
+  if (node === null || node === undefined || typeof node === 'boolean') return 0
+  if (Array.isArray(node)) {
+    return node.reduce((total, child) => total + countRenderableNodes(child), 0)
+  }
+  if (React.isValidElement<{ children?: React.ReactNode }>(node) && node.type === React.Fragment) {
+    return countRenderableNodes(node.props.children)
+  }
+  return 1
+}
+
 export function WorkspacePage({
   eyebrow,
   title,
@@ -40,6 +51,8 @@ export function WorkspacePage({
   children: React.ReactNode
 }) {
   const hasAside = Boolean(aside)
+  const metricCount = countRenderableNodes(metrics)
+  const inlineMetrics = metricCount > 0 && metricCount <= 2
 
   return (
     <div
@@ -57,7 +70,9 @@ export function WorkspacePage({
           Boolean(actions) && 'novel-hero--has-actions',
           Boolean(contextSummary) && 'novel-hero--has-context',
           Boolean(metrics) && 'novel-hero--has-metrics',
+          inlineMetrics && 'novel-hero--inline-metrics',
         )}
+        data-metric-count={metricCount || undefined}
       >
         <div className="novel-hero__copy">
           {eyebrow ? <div className="novel-hero__eyebrow">{eyebrow}</div> : null}

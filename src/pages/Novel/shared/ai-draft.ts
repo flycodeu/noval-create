@@ -32,6 +32,16 @@ interface BuildDraftMessagesOptions {
 }
 
 const EMPTY_VALUE = '未填写'
+const TEMPLATE_SENTENCE_PATTERNS = [
+  /通过[^，。；;\n]{2,32}(?:体现|展现|表现|凸显|推动)/g,
+  /在[^，。；;\n]{2,32}中(?:体现|展现|表现|完成|推进)/g,
+]
+const HOLLOW_PHRASE_PATTERN = /(某种无法言说|无法言说的?|命运的齿轮|真正的成长|灵魂深处|宿命般)/u
+
+interface DraftQualityIssue {
+  key: string
+  message: string
+}
 
 function formatValue(value?: string | number | string[] | null): string {
   if (Array.isArray(value)) {
@@ -67,6 +77,77 @@ function buildJsonSkeleton(fields: DraftFieldDefinition[]): string {
   return `{\n${rows.join(',\n')}\n}`
 }
 
+function normalizeDraftItem(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/[·•:：,，、;；'"“”‘’()（）[\]【】{}<>《》\-_/\\|。！？!?]/g, '')
+}
+
+function flattenDraftStrings(value: unknown, path = ''): Array<{ key: string; value: string }> {
+  if (typeof value === 'string') {
+    return value.trim() ? [{ key: path || 'root', value: value.trim() }] : []
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) => flattenDraftStrings(item, `${path}[${index}]`))
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.entries(value as Record<string, unknown>).flatMap(([key, item]) => (
+      flattenDraftStrings(item, path ? `${path}.${key}` : key)
+    ))
+  }
+
+  return []
+}
+
+export function inspectDraftQuality(value: unknown): DraftQualityIssue[] {
+  const issues: DraftQualityIssue[] = []
+
+  if (value && typeof value === 'object') {
+    Object.entries(value as Record<string, unknown>).forEach(([key, item]) => {
+      if (!Array.isArray(item)) return
+      const normalized = item
+        .filter((entry): entry is string => typeof entry === 'string')
+        .map(normalizeDraftItem)
+        .filter(Boolean)
+      if (new Set(normalized).size < normalized.length) {
+        issues.push({ key, message: '数组字段存在重复或近似重复条目' })
+      }
+    })
+  }
+
+  flattenDraftStrings(value).forEach((entry) => {
+    const templateHits = TEMPLATE_SENTENCE_PATTERNS.reduce((total, pattern) => {
+      pattern.lastIndex = 0
+      return total + [...entry.value.matchAll(pattern)].length
+    }, 0)
+
+    if (templateHits >= 2) {
+      issues.push({ key: entry.key, message: '字段里有连续模板句式' })
+    }
+
+    if (HOLLOW_PHRASE_PATTERN.test(entry.value)) {
+      issues.push({ key: entry.key, message: '字段里仍有假深刻或空泛词' })
+    }
+  })
+
+  return issues
+}
+
+function assertDraftQuality(value: unknown) {
+  const issues = inspectDraftQuality(value)
+  if (issues.length <= 0) return
+
+  const detail = issues
+    .slice(0, 3)
+    .map((issue) => `${issue.key}: ${issue.message}`)
+    .join('；')
+  throw new Error(getUserFacingMessage('common.aiDraftQualityInvalid', { detail }))
+}
+
 export function buildDraftMessages({
   task,
   mode = 'replace',
@@ -94,13 +175,22 @@ export function buildDraftMessages({
     })
     .join('\n')
 
-  const requirementBlock = [
+  const baseRequirementBlock = [
     '- 只输出 JSON 对象，不要 Markdown，不要解释。',
     '- 不要新增未要求的键。',
-    '- 语言要自然、克制、可直接回填到写作策划表单。',
-    '- 禁止空话、套话、宣传腔和自我解释。',
     `- ${describeMode(mode)}`,
     ...requirements.map((item) => `- ${item}`),
+  ].join('\n')
+
+  const hardRuleBlock = [
+    '- 以下硬约束不可被上面的补充要求覆盖。',
+    '- 语言要自然、克制、可直接回填到写作策划表单。',
+    '- 禁止空话、套话、宣传腔和自我解释。',
+    '- 先自检字段之间是否互相冲突，宁愿保守，也不要编造上下文没有支撑的人名、组织、能力或设定。',
+    '- 每个字段都要落到当前故事可执行的信息：目标、阻力、代价、验证方式、人物选择或后续影响至少命中一项。',
+    '- 不要让多个字段套用同一套句式骨架，尤其避免连续使用“通过……体现……”“在……中……”这类模板句。',
+    '- 少用“命运、灵魂、真正、某种、无法言说”等假深刻词；如果必须使用，必须有具体场景、动作或制度承载。',
+    '- 数组字段只输出互不重复、可直接使用的条目；不要用近义词凑数量。',
   ].join('\n')
 
   return [{
@@ -109,7 +199,8 @@ export function buildDraftMessages({
       `请为“${task}”生成一份可直接回填表单的草稿。`,
       contextBlock ? `已知上下文：\n${contextBlock}` : '',
       `需要回填的字段：\n${fieldBlock}`,
-      `输出要求：\n${requirementBlock}`,
+      `输出要求：\n${baseRequirementBlock}`,
+      `硬性质量规则：\n${hardRuleBlock}`,
       `请严格输出如下 JSON 结构：\n${buildJsonSkeleton(fields)}`,
     ].filter(Boolean).join('\n\n'),
   }]
@@ -132,7 +223,9 @@ function extractJsonObject(raw: string): string {
 }
 
 export function parseDraftJson<T extends object>(raw: string): Partial<T> {
-  return cleanAiValue(JSON.parse(extractJsonObject(raw))) as Partial<T>
+  const parsed = cleanAiValue(JSON.parse(extractJsonObject(raw)))
+  assertDraftQuality(parsed)
+  return parsed as Partial<T>
 }
 
 export function normalizeStringArray(value: unknown): string[] {
