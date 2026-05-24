@@ -76,6 +76,24 @@
   gap: 10px;
 }
 
+.quality-dashboard-page__command-block {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(5, 5, 5, 0.08);
+  border-radius: 8px;
+  background: rgba(5, 5, 5, 0.03);
+}
+
+.quality-dashboard-page__command-text {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .quality-dashboard-page__role-meta {
   margin-top: 6px;
   font-size: 12px;

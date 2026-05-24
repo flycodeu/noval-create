@@ -23,6 +23,7 @@ import {
   parseFactionExternalRelations,
 } from '../../../shared/factions'
 import { useNovelStore } from '../../../stores/novel.store'
+import { getFactionGenerationPreset } from '../../../shared/creation-tools'
 import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
 import { loadWorkflowStats } from '../workflow'
 import { buildDraftMessages, parseDraftJson } from '../shared/ai-draft'
@@ -411,6 +412,25 @@ export default function FactionsPage({ novelId }: Props) {
   )
   const selectedRelations = selectedValues?.externalRelations || []
   const hasRunningAutoTask = autoTask?.status === 'running' || autoTask?.status === 'cancel_requested'
+  const existingFactionCount = Math.max(items.length, stats.total)
+  const generationPreset = useMemo(() => getFactionGenerationPreset(currentNovel?.genreName, {
+    launchMode: currentNovel?.launchMode,
+    operatingMode: currentNovel?.operatingMode,
+    targetWords: currentNovel?.targetWords,
+    settingsJson: currentNovel?.settingsJson,
+    factionCount: existingFactionCount,
+  }), [
+    currentNovel?.genreName,
+    currentNovel?.launchMode,
+    currentNovel?.operatingMode,
+    currentNovel?.settingsJson,
+    currentNovel?.targetWords,
+    existingFactionCount,
+  ])
+  const recommendedGenerateCount = Math.max(
+    1,
+    Math.min(FACTION_AUTO_GENERATE_MAX_COUNT, generationPreset.count - existingFactionCount),
+  )
 
   return (
     <WorkspacePage
@@ -421,7 +441,15 @@ export default function FactionsPage({ novelId }: Props) {
       actions={(
         <Space wrap>
           <Button type="primary" icon={<RobotOutlined />} onClick={() => {
-            generateForm.setFieldsValue({ count: Math.max(1, Math.min(48, 48 - items.length)), batchSize: 4, relationshipDensity: 'balanced', allowCharacterlessFactions: true, preferExistingCharacters: true, preferredTypes: ['organization', 'sect', 'family'], specialRequirements: '势力必须像小说里的真实组织主体，服务人物归属、资源争夺或主线冲突。' })
+            generateForm.setFieldsValue({
+              count: recommendedGenerateCount,
+              batchSize: Math.max(1, Math.min(FACTION_AUTO_GENERATE_MAX_BATCH_SIZE, generationPreset.batchSize)),
+              relationshipDensity: 'balanced',
+              allowCharacterlessFactions: true,
+              preferExistingCharacters: true,
+              preferredTypes: ['organization', 'sect', 'family'],
+              specialRequirements: generationPreset.focus,
+            })
             setGenerateOpen(true)
           }}>AI 生成·分批势力</Button>
           {autoTask?.status === 'paused' ? <Button icon={<ShareAltOutlined />} onClick={() => void handleResumeAutoGenerate()}>继续任务</Button> : null}
@@ -524,8 +552,9 @@ export default function FactionsPage({ novelId }: Props) {
                       { key: 'resources', label: '资源', value: selectedValues?.resources, hint: '写出真正能形成优势的资源。' },
                       { key: 'memberPolicy', label: '成员规则', value: selectedValues?.memberPolicy, hint: '写成员来源、晋升与控制结构。' },
                       { key: 'currentPhase', label: '当前阶段', value: selectedValues?.currentPhase, hint: '写当下压力、变化和临界点。' },
+                      { key: 'notes', label: '召回别名 / 备注', value: selectedValues?.notes, hint: '用“别名：...；代号：...”记录公开称呼、隐秘代号和召回提示。' },
                     ],
-                    requirements: ['不要写成善恶二元阵营。', '要让势力之间存在真实利益关系。', '势力名称必须像组织主体，不要写成动物、种族或单体角色。', '不要改动已选中的人物和地图绑定。'],
+                    requirements: ['不要写成善恶二元阵营。', '要让势力之间存在真实利益关系。', '势力名称必须像组织主体，不要写成动物、种族或单体角色。', 'notes 必须补可用于正文召回的别名、简称、称号或代号。', '不要改动已选中的人物和地图绑定。'],
                   })}
                   onResult={(raw) => {
                     const draft = parseDraftJson<Record<string, unknown>>(raw)
@@ -540,6 +569,7 @@ export default function FactionsPage({ novelId }: Props) {
                       resources: typeof draft.resources === 'string' ? draft.resources : values.resources,
                       memberPolicy: typeof draft.memberPolicy === 'string' ? draft.memberPolicy : values.memberPolicy,
                       currentPhase: typeof draft.currentPhase === 'string' ? draft.currentPhase : values.currentPhase,
+                      notes: typeof draft.notes === 'string' ? draft.notes : values.notes,
                     })
                   }}
                 />
@@ -566,6 +596,16 @@ export default function FactionsPage({ novelId }: Props) {
                 <Form.Item name="currentPhase" label="当前阶段"><Input.TextArea rows={6} /></Form.Item>
                 <Form.Item name="resources" label="资源"><Input.TextArea rows={6} /></Form.Item>
                 <Form.Item name="memberPolicy" label="成员规则"><Input.TextArea rows={6} /></Form.Item>
+                <Form.Item
+                  name="notes"
+                  label="召回别名 / 备注"
+                  className="faction-editor__full-row"
+                >
+                  <Input.TextArea
+                    rows={4}
+                    placeholder="例如：别名：影阁、暗阁；代号：夜灯。可补充公开称呼、隐秘代号和召回提示。"
+                  />
+                </Form.Item>
                 <Form.List name="externalRelations">
                   {(fields, { add, remove }) => (
                     <div className="faction-editor__relations">
@@ -596,7 +636,14 @@ export default function FactionsPage({ novelId }: Props) {
 
       <Modal title="AI 生成·分批势力" open={generateOpen} onCancel={() => setGenerateOpen(false)} onOk={() => void handleStartAutoGenerate()} okText="启动后台生成" destroyOnHidden>
         <Form form={generateForm} layout="vertical">
-          <Form.Item name="count" label="目标总数" rules={[{ required: true, message: '请输入目标总数' }]}><InputNumber min={1} max={FACTION_AUTO_GENERATE_MAX_COUNT} className="workspace-input-number-full" /></Form.Item>
+          <Alert
+            className="faction-workspace__generate-preset"
+            type="info"
+            showIcon
+            message={`${generationPreset.scaleLabel}推荐总量：${generationPreset.count} 个；当前 ${existingFactionCount} 个，建议本次补 ${recommendedGenerateCount} 个`}
+            description={`${generationPreset.rationale || '系统会按当前题材和目标字数估算势力规模。'} 每批建议 ${generationPreset.batchSize} 个。`}
+          />
+          <Form.Item name="count" label="生成数量" rules={[{ required: true, message: '请输入生成数量' }]}><InputNumber min={1} max={FACTION_AUTO_GENERATE_MAX_COUNT} className="workspace-input-number-full" /></Form.Item>
           <Form.Item name="batchSize" label="每批生成" rules={[{ required: true, message: '请输入每批数量' }]}><InputNumber min={1} max={FACTION_AUTO_GENERATE_MAX_BATCH_SIZE} className="workspace-input-number-full" /></Form.Item>
           <Form.Item name="relationshipDensity" label="关系密度"><Select options={FACTION_RELATIONSHIP_DENSITY_OPTIONS} /></Form.Item>
           <Form.Item name="preferredTypes" label="优先类型"><Select mode="multiple" options={FACTION_TYPE_OPTIONS} /></Form.Item>

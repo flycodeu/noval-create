@@ -842,10 +842,11 @@ describe('allocateChapterContext', () => {
       locationType: '行动点',
       structureRole: '剧情节点',
       dangerLevel: index > 5 ? '高' : '中',
-      description: `地点${index + 1}用于承接本章行动。`,
+      description: index === 44 ? '别名：东门、旧城门；地点45用于承接本章行动。' : `地点${index + 1}用于承接本章行动。`,
+      atmosphere: index === 44 ? '又称东门警戒区。' : '',
       plotRelevance: `地点${index + 1}关联资源调度。`,
       sortOrder: index,
-      tagsJson: index === 44 ? JSON.stringify(['东门']) : '[]',
+      tagsJson: '[]',
     }))
     const factionRows = Array.from({ length: 12 }, (_, index) => ({
       id: index + 1,

@@ -63,6 +63,10 @@ const api = {
     },
   },
 
+  app: {
+    getDatabasePath: () => invokeIpc<string>('app:getDatabasePath'),
+  },
+
   // Novel workspace APIs
   novel: {
     list: (filters?: unknown) => invokeIpc('novel:list', filters),

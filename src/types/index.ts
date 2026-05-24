@@ -5291,6 +5291,9 @@ declare global {
         isMaximized: () => Promise<boolean>
         onMaximizedStateChange: (callback: (isMaximized: boolean) => void) => () => void
       }
+      app: {
+        getDatabasePath: () => Promise<string>
+      }
       novel: {
         list: (filters?: unknown) => Promise<Novel[]>
         get: (id: number) => Promise<Novel | null>

@@ -1388,6 +1388,9 @@ function buildLocationMentionCandidates(rows: Array<typeof worldMap.$inferSelect
     row.locationType || '',
     row.structureRole || '',
     ...parseJsonStringArray(row.tagsJson),
+    ...parseMentionAliasesFromText(row.description),
+    ...parseMentionAliasesFromText(row.atmosphere),
+    ...parseMentionAliasesFromText(row.plotRelevance),
   ])
 
   return rows.map((row) => ({

@@ -275,7 +275,14 @@ function buildWriterQueryPlan(input: WriterContextOrchestratorInput): WriterCont
   const characterEnabled = mentionedCharacters.length > 0 || Boolean(relationSummary)
   const itemEnabled = mentionedItems.length > 0
   const mapLocationEnabled = mentionedLocations.length > 0
-  const worldStateEnabled = mentionedLocations.length > 0
+  const worldStateTerms = dedupe([
+    ...mentionedCharacters,
+    ...mentionedItems,
+    ...mentionedLocations,
+    ...mentionedFactions,
+    ...extractTerms([worldStates], 4),
+  ], 12)
+  const worldStateEnabled = worldStateTerms.length > 0
   const timelineEnabled = mentionedLocations.length > 0 || /\S/.test(timelineSummary)
   const threadEnabled = Boolean(activeThreads || openLoops || dueForeshadows)
   const recallCharacterEnabled = mentionedCharacters.length > 0 || mentionedFactions.length > 0
@@ -329,10 +336,10 @@ function buildWriterQueryPlan(input: WriterContextOrchestratorInput): WriterCont
     buildQueryStep(
       'world_state',
       worldStateEnabled,
-      worldStateEnabled ? '存在地点或世界状态信号，需要世界状态切片。' : '没有显著世界状态信号。',
-      dedupe([...mentionedLocations, ...extractTerms([worldStates], 4)], 6),
+      worldStateEnabled ? '存在人物、物品、地点、势力或世界状态信号，需要世界状态切片。' : '没有显著世界状态信号。',
+      worldStateTerms,
       ['world_state.get_pack'],
-      mentionedLocations.join('、') || worldStates,
+      worldStateTerms.join('、') || worldStates,
       4,
     ),
     buildQueryStep(
@@ -613,9 +620,12 @@ function renderWorldStatePack(
   signals: WriterContextOrchestratorInput['signals'],
 ): WriterOrchestratedWorldStatePack {
   const terms = dedupe([
+    ...(signals.mentionedCharacters || []),
+    ...(signals.mentionedItems || []),
     ...(signals.mentionedLocations || []),
+    ...(signals.mentionedFactions || []),
     ...extractTerms([signals.worldStates, signals.chapterGoal, signals.chapterOutline], 8),
-  ], 10)
+  ], 16)
   const currentStates = snapshot.currentStates.filter((state) => {
     const haystack = [state.entityName, state.summaryText, ...(state.stateItems || [])].filter(Boolean).join(' ')
     return matchesAnyTerm(haystack, terms)
@@ -1199,10 +1209,8 @@ function buildWriterToolRegistry(): Record<WriterContextQueryBucket, RegisteredW
           }
         }
         return {
-          status: 'failed',
+          status: 'success',
           resultCount,
-          errorMessage: 'world state pack empty',
-          fallbackEvent: makeFallbackEvent('world_state', 'empty_result', '世界状态查询无有效结果。', 'legacy_empty'),
         }
       },
     },

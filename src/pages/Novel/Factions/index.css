@@ -122,6 +122,15 @@
   grid-column: 1 / -1;
 }
 
+.faction-editor__full-row,
+.faction-workspace__generate-preset {
+  grid-column: 1 / -1;
+}
+
+.faction-workspace__generate-preset {
+  margin-bottom: 16px;
+}
+
 .faction-editor__relations-title {
   font-weight: 700;
   color: var(--faction-text);

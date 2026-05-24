@@ -152,9 +152,10 @@ describe('writer context orchestrator', () => {
     expect(enabled.get('recall_character')).toBe(true)
     expect(enabled.get('recall_thread')).toBe(true)
     expect(enabled.get('item')).toBe(false)
-    expect(enabled.get('world_state')).toBe(false)
+    expect(enabled.get('world_state')).toBe(true)
     expect(enabled.get('timeline')).toBe(false)
     expect(enabled.get('recall_rule')).toBe(false)
+    expect(plan.find((step) => step.bucket === 'world_state')?.terms).toEqual(expect.arrayContaining(['林策', '沈砚']))
   })
 
   it('builds fingerprint from invalidation inputs', () => {
@@ -626,12 +627,14 @@ describe('writer context orchestrator', () => {
     expect(resolution.renderedContextOverrides.itemSummary).toBe('')
     expect(resolution.renderedContextOverrides.timelineSummary).toBe('')
     expect(resolution.renderedContextOverrides.worldStates).toBe('')
-    expect(getWorldStateContextSnapshot).not.toHaveBeenCalled()
+    expect(getWorldStateContextSnapshot).toHaveBeenCalledTimes(1)
     expect(resolution.toolCalls).toEqual(expect.arrayContaining([
       expect.objectContaining({
         target: 'world_state',
-        status: 'skipped',
+        status: 'success',
+        resultCount: 0,
       }),
     ]))
+    expect(resolution.fallbackEvents.some((event) => event.target === 'world_state')).toBe(false)
   })
 })

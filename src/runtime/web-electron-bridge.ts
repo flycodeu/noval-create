@@ -843,6 +843,9 @@ export function installWebElectronBridge(): void {
     history: createService({ listRecent: async () => [] }),
     premiseDraft: createService(),
     planningDraft: createService(),
+    app: createService({
+      getDatabasePath: async () => 'path/to/novelforge.db',
+    }),
     quality: createService({
       getDashboard: async () => emptyQualityDashboard,
     }),

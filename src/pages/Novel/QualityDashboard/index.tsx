@@ -290,6 +290,33 @@ function batchStatusColor(status: QualityDashboardData['batchHealth']['status'])
   return 'processing'
 }
 
+function buildSoakReportPath(novelId: number): string {
+  return `.tmp-tests/real-chapter-soak-report-${novelId}.json`
+}
+
+function quotePowerShellArg(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`
+}
+
+function buildSoakExportCommand(novelId: number, databasePath?: string): string {
+  const dbPath = databasePath?.trim() || 'path/to/novelforge.db'
+  return `npm run soak:export-chapter-report -- --db ${quotePowerShellArg(dbPath)} --novelId ${novelId} --out ${quotePowerShellArg(buildSoakReportPath(novelId))}`
+}
+
+function buildSoakValidateCommand(novelId: number): string {
+  return `npm run test:chapter-soak -- --report ${quotePowerShellArg(buildSoakReportPath(novelId))}`
+}
+
+async function copySoakCommand(command: string): Promise<void> {
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable')
+    await navigator.clipboard.writeText(command)
+    message.success('命令已复制')
+  } catch {
+    message.warning('当前环境不能写剪贴板，请手动复制命令。')
+  }
+}
+
 function recallSnapshotSourceLabel(source?: QualityDashboardData['chapterDetails'][number]['recallSnapshotSource']): string | null {
   if (source === 'runtime') return '真实运行快照'
   if (source === 'backfilled') return '历史回填快照'
@@ -623,6 +650,10 @@ export default function QualityDashboard({ novelId }: Props) {
           <MillionRuntimeObservabilityPanel observability={data.millionRuntimeObservability} />
         </WorkspacePanel>
       ) : null}
+
+      <WorkspacePanel title="长篇验收 / Soak">
+        <LongformSoakAcceptancePanel novelId={novelId} data={data} />
+      </WorkspacePanel>
 
       {data.structuredMemoryObservability ? (
         <WorkspacePanel title="结构化记忆观测">
@@ -3293,6 +3324,90 @@ function MillionRuntimeObservabilityPanel({ observability }: { observability: No
         <div>{`当前暂停原因：${observability.pauseReason || '无'}`}</div>
         <div>{`当前护栏原因：${observability.activeGuardrailReason || (observability.guardrailActive ? '已触发运行时护栏。' : '当前无额外护栏阻断。')}`}</div>
         <div>{`主线程压力代理：${observability.runtimePressureSummary}`}</div>
+      </div>
+    </div>
+  )
+}
+
+function LongformSoakAcceptancePanel({ novelId, data }: { novelId: number; data: QualityDashboardData }) {
+  const [databasePath, setDatabasePath] = useState('')
+  useEffect(() => {
+    let mounted = true
+    window.electron.app.getDatabasePath()
+      .then((pathValue) => {
+        if (mounted) setDatabasePath(pathValue)
+      })
+      .catch(() => {
+        if (mounted) setDatabasePath('')
+      })
+    return () => {
+      mounted = false
+    }
+  }, [])
+
+  const exportCommand = buildSoakExportCommand(novelId, databasePath)
+  const validateCommand = buildSoakValidateCommand(novelId)
+  const reportPath = buildSoakReportPath(novelId)
+  const runtime = data.millionRuntimeObservability
+  const typedRef = data.typedRefObservability
+  const batchRange = data.batchHealth.chapterIds.length > 0
+    ? `${data.batchHealth.chapterStart || Math.min(...data.batchHealth.chapterIds)}-${data.batchHealth.chapterEnd || Math.max(...data.batchHealth.chapterIds)}`
+    : '无样本'
+  const recallAtRisk = runtime
+    ? runtime.consecutiveRecallFallbackChapters >= runtime.recallPauseThreshold || runtime.recallDegradedChapterCount > 0
+    : data.continuityHealth.recallDegradedChapterCount > 0
+  const gateBlocked = data.batchHealth.failedChapterCount > 0
+    || data.batchHealth.pendingWritebackCount > 0
+    || Boolean(runtime?.guardrailActive)
+    || Boolean(runtime && runtime.inspectionBlockedCount + runtime.batchGateBlockedCount > 0)
+  const gateLabel = gateBlocked ? '先修复再验收' : recallAtRisk ? '建议复核召回' : '可进入验收'
+  const gateColor = gateBlocked ? 'error' : recallAtRisk ? 'warning' : 'success'
+
+  return (
+    <div className="quality-dashboard-page__stack">
+      <div className="quality-dashboard-page__pipeline-tags">
+        <Tag color={gateColor}>{gateLabel}</Tag>
+        <Tag color={batchStatusColor(data.batchHealth.status)}>{`批次 ${data.batchHealth.status}`}</Tag>
+        <Tag color="blue">{`样本章节 ${batchRange}`}</Tag>
+        <Tag color={typedRef && typedRef.unresolvedRefCount > 0 ? 'warning' : 'success'}>
+          {`Typed Ref ${typedRef ? `${typedRef.overallCoverageRate}% / 未解析 ${typedRef.unresolvedRefCount}` : '未统计'}`}
+        </Tag>
+        <Tag color={recallAtRisk ? 'warning' : 'success'}>
+          {runtime ? `召回降级 ${runtime.recallDegradedChapterCount}` : `召回降级 ${data.continuityHealth.recallDegradedChapterCount}`}
+        </Tag>
+      </div>
+      <div className="quality-dashboard-page__body-copy quality-dashboard-page__body-copy--muted">
+        真实百万字稳定性需要用已生成项目导出报告再校验；这里把验收入口放进工作台，避免只依赖 mock 单测判断生产稳定性。
+      </div>
+      <div className="quality-dashboard-page__grid-280">
+        <div className="quality-card">
+          <div className="quality-dashboard-page__card-head">
+            <strong>导出真实报告</strong>
+            <Button size="small" onClick={() => void copySoakCommand(exportCommand)}>复制</Button>
+          </div>
+          <div className="quality-dashboard-page__command-block">
+            <code className="quality-dashboard-page__command-text">{exportCommand}</code>
+          </div>
+          <div className="quality-dashboard-page__role-meta">
+            {databasePath ? `数据库 ${databasePath}；输出 ${reportPath}` : `输出 ${reportPath}；未读取到数据库路径时请把命令中的 path/to/novelforge.db 替换成真实路径。`}
+          </div>
+        </div>
+        <div className="quality-card">
+          <div className="quality-dashboard-page__card-head">
+            <strong>校验报告</strong>
+            <Button size="small" onClick={() => void copySoakCommand(validateCommand)}>复制</Button>
+          </div>
+          <div className="quality-dashboard-page__command-block">
+            <code className="quality-dashboard-page__command-text">{validateCommand}</code>
+          </div>
+          <div className="quality-dashboard-page__role-meta">
+            验收脚本会检查空正文、上下文命中、重复度、门禁失败和召回退化。
+          </div>
+        </div>
+      </div>
+      <div className="quality-dashboard-page__note-list">
+        <div>{`当前批次失败 ${data.batchHealth.failedChapterCount}，待回写 ${data.batchHealth.pendingWritebackCount}，待修订 ${data.batchHealth.pendingRevisionCount}。`}</div>
+        <div>{runtime ? `运行时阻断 inspection ${runtime.inspectionBlockedCount}，batch gate ${runtime.batchGateBlockedCount}，连续召回降级 ${runtime.consecutiveRecallFallbackChapters}/${runtime.recallPauseThreshold}。` : '运行时护栏尚未统计，先用批次健康和连续性健康判断。'}</div>
       </div>
     </div>
   )

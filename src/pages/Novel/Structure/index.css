@@ -184,6 +184,8 @@
 .novel-structure-page .novel-structure-input-88 { width: 88px; }
 .novel-structure-page .novel-structure-banner { margin-bottom: 16px; }
 .novel-structure-page .novel-structure-banner__summary { margin-left: 8px; color: var(--workspace-ink-soft); }
+.novel-structure-page .novel-structure-planner-preview { margin-bottom: 16px; }
+.novel-structure-page .novel-structure-planner-progress { display: grid; gap: 8px; margin-bottom: 16px; color: var(--workspace-ink-soft); font-size: 12px; line-height: 1.7; }
 .novel-structure-page .novel-structure-scroll-list { display: grid; gap: 12px; max-height: 520px; overflow: auto; }
 .novel-structure-page .novel-structure-template-card { padding: 16px; }
 .novel-structure-page .novel-structure-template-card__head { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 8px; }

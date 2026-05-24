@@ -122,6 +122,10 @@ function getWindowStatePath(): string {
   return path.join(app.getPath('userData'), 'window-state.json')
 }
 
+function getDatabasePath(): string {
+  return path.join(app.getPath('userData'), 'novelforge.db')
+}
+
 function loadWindowState(): WindowState {
   try {
     return JSON.parse(fs.readFileSync(getWindowStatePath(), 'utf-8')) as WindowState
@@ -303,6 +307,8 @@ function registerIpcHandlers() {
     const window = BrowserWindow.fromWebContents(event.sender)
     return window?.isMaximized() ?? false
   })
+
+  handle('app:getDatabasePath', () => getDatabasePath())
 
   handle('novel:list', (_, filters) => novelService.listNovels(filters))
   handle('novel:get', (_, id) => novelService.getNovel(requireId(id)))
