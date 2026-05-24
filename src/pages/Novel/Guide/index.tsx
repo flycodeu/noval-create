@@ -15,7 +15,13 @@ import type { NovelConsistencyReport, NovelContextStatus, QualityDashboardData }
 import { useNovelStore } from '../../../stores/novel.store'
 import { useAuthorWorkModeStore } from '../../../stores/author-work-mode.store'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
-import { getCharacterBatchPreset, getItemGenerationProfile } from '../../../shared/creation-tools'
+import {
+  getCharacterBatchPreset,
+  getItemGenerationProfile,
+  getStoryThreadGenerationPreset,
+  getTimelineGenerationPreset,
+  scaleMapLayerCounts,
+} from '../../../shared/creation-tools'
 import { parseProjectBriefSnapshot } from '../../../shared/project-brief'
 import { buildStorySettingsPayload, parseStorySettingsSnapshot } from '../../../shared/story-settings'
 import {
@@ -144,13 +150,38 @@ export default function GuidePage({ novelId }: Props) {
   )
   const speciesOptions = useMemo(() => getSpeciesNameOptions(worldRules), [worldRules])
   const factionOptions = useMemo(() => getFactionNameOptions(worldRules), [worldRules])
+  const assetScaleInput = useMemo(() => ({
+    launchMode: currentNovel?.launchMode,
+    targetWords: currentNovel?.targetWords,
+    settingsJson: currentNovel?.settingsJson,
+    mapDepth: worldRules.mapBlueprint.levels.length,
+    factionCount: worldRules.factionSystem.length,
+    speciesCount: worldRules.speciesSystem.length,
+    powerSystemCount: worldRules.powerSystems.length,
+  }), [
+    currentNovel?.launchMode,
+    currentNovel?.settingsJson,
+    currentNovel?.targetWords,
+    worldRules.factionSystem.length,
+    worldRules.mapBlueprint.levels.length,
+    worldRules.powerSystems.length,
+    worldRules.speciesSystem.length,
+  ])
   const characterPreset = useMemo(
-    () => getCharacterBatchPreset(currentNovel?.genreName, speciesOptions),
-    [currentNovel?.genreName, speciesOptions],
+    () => getCharacterBatchPreset(currentNovel?.genreName, speciesOptions, assetScaleInput),
+    [assetScaleInput, currentNovel?.genreName, speciesOptions],
   )
   const itemProfile = useMemo(
-    () => getItemGenerationProfile(currentNovel?.genreName),
-    [currentNovel?.genreName],
+    () => getItemGenerationProfile(currentNovel?.genreName, assetScaleInput),
+    [assetScaleInput, currentNovel?.genreName],
+  )
+  const timelineGenerationPreset = useMemo(
+    () => getTimelineGenerationPreset(currentNovel?.genreName, assetScaleInput),
+    [assetScaleInput, currentNovel?.genreName],
+  )
+  const threadGenerationPreset = useMemo(
+    () => getStoryThreadGenerationPreset(currentNovel?.genreName, assetScaleInput),
+    [assetScaleInput, currentNovel?.genreName],
   )
   const assetBloat = useMemo(() => getAssetBloatSignal(stats), [stats])
 
@@ -205,7 +236,11 @@ export default function GuidePage({ novelId }: Props) {
   }, [currentNovel?.genreName, currentNovel?.worldRulesJson, novelId, setCurrentNovel])
 
   const generateMapCore = useCallback(async () => {
-    const layerCounts = [...worldRules.mapBlueprint.levels]
+    const layerCounts = scaleMapLayerCounts(
+      [...worldRules.mapBlueprint.levels].sort((left, right) => left.depth - right.depth),
+      currentNovel?.genreName,
+      assetScaleInput,
+    )
       .sort((left, right) => left.depth - right.depth)
       .map((level) => level.suggestedCount)
 
@@ -213,7 +248,7 @@ export default function GuidePage({ novelId }: Props) {
       layerCounts,
       parentBatchSize: 1,
     })
-  }, [novelId, worldRules.mapBlueprint.levels])
+  }, [assetScaleInput, currentNovel?.genreName, novelId, worldRules.mapBlueprint.levels])
 
   const generateCharactersCore = useCallback(async () => {
     if (!stats.hasProtagonist) {
@@ -230,7 +265,7 @@ export default function GuidePage({ novelId }: Props) {
       factionBias: factionOptions.slice(0, 3),
       helperRoles: characterPreset.helperRoles,
       specialRequirements: '人物必须继承题材、背景、势力、地图、现有物品装备和后续事件关系，避免只补数量。',
-      batchSize: 6,
+      batchSize: characterPreset.batchSize,
     })
   }, [characterPreset, factionOptions, novelId, stats.hasProtagonist])
 
@@ -239,16 +274,16 @@ export default function GuidePage({ novelId }: Props) {
       count: itemProfile.defaultBatch,
       templateOnly: false,
       refreshTemplates: true,
-      batchSize: 4,
+      batchSize: itemProfile.batchSize || 4,
       focus: 'Prioritize practical item circulation and concrete plot hooks before adding new instances.',
     })
-  }, [itemProfile.defaultBatch, novelId])
+  }, [itemProfile.batchSize, itemProfile.defaultBatch, novelId])
 
   const generateThreadsCore = useCallback(async () => {
     const result = await window.electron.thread.generate(novelId, {
-      count: 8,
-      batchSize: 4,
-      focus: 'Prioritize mainline momentum, relationship pressure, suspense payoff, and ending callbacks.',
+      count: threadGenerationPreset.count,
+      batchSize: threadGenerationPreset.batchSize,
+      focus: threadGenerationPreset.focus,
     })
 
     if (result.createdCount <= 0) {
@@ -261,13 +296,14 @@ export default function GuidePage({ novelId }: Props) {
         warningCount: result.warnings.length,
       }))
     }
-  }, [novelId])
+  }, [novelId, threadGenerationPreset])
 
   const generateStoryDesignCore = useCallback(async () => {
+    const subplotCount = Math.max(8, Math.min(40, Math.round(threadGenerationPreset.count * 0.35)))
     const result = await window.electron.ai.generateCoreSettings({
       novelId,
-      subplotCount: 8,
-      requirements: '故事设计必须建立在已经存在的世界规则、地图、人物、物品和线程基础上，不要再把背景底盘写成剧情本身。减少口号化和同模板输出。',
+      subplotCount,
+      requirements: `故事设计必须建立在已经存在的世界规则、地图、人物、物品和线程基础上，不要再把背景底盘写成剧情本身。减少口号化和同模板输出。本轮按${threadGenerationPreset.scaleLabel}建议规划约 ${subplotCount} 条支线/副线。`,
     })
 
     const payload = buildStorySettingsPayload({
@@ -290,7 +326,7 @@ export default function GuidePage({ novelId }: Props) {
 
     const updated = await window.electron.novel.get(novelId)
     if (updated) setCurrentNovel(updated)
-  }, [currentNovel?.settingsJson, novelId, setCurrentNovel])
+  }, [currentNovel?.settingsJson, novelId, setCurrentNovel, threadGenerationPreset.count, threadGenerationPreset.scaleLabel])
 
   const generateOutlineCore = useCallback(async () => {
     await window.electron.outline.generateArcs(novelId)
@@ -298,11 +334,11 @@ export default function GuidePage({ novelId }: Props) {
 
   const generateTimelineCore = useCallback(async () => {
     await window.electron.timeline.generate(novelId, {
-      count: 12,
-      batchSize: 4,
-      focus: '优先串联主角、关键地点、关键物品和主要冲突的先后顺序与回收关系。',
+      count: timelineGenerationPreset.count,
+      batchSize: timelineGenerationPreset.batchSize,
+      focus: timelineGenerationPreset.focus,
     })
-  }, [novelId])
+  }, [novelId, timelineGenerationPreset])
 
   const runStep = useCallback(async (
     key: string,

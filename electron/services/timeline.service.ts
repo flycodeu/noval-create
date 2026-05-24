@@ -29,6 +29,7 @@ import {
   buildTimelineConfigSummary,
   parseWorldRulesJson,
 } from '../../src/shared/genre-system'
+import { getTimelineGenerationPreset } from '../../src/shared/creation-tools'
 import {
   buildNameFallbackPointer,
   buildTypedRefOverlay,
@@ -1307,7 +1308,23 @@ export async function generateTimelineBatchChunk(
   const defaultPrecision = rules.timelineConfig.precisionOptions[0] || '阶段'
   const historyEntityType = 'timeline'
   const historyTaskType = 'timeline_generate_batch'
-  const requestedCount = Math.max(1, Math.min(options.count || 10, 24))
+  const preset = getTimelineGenerationPreset(profile.genre, {
+    launchMode: novel.launchMode,
+    targetWords: novel.targetWords,
+    settingsJson: novel.settingsJson,
+    mapDepth: Math.max(
+      ...rules.mapBlueprint.levels.map((level) => level.depth),
+      ...mapRows.map((row) => Number(row.level || 0)),
+      1,
+    ),
+    factionCount: rules.factionSystem.length,
+    speciesCount: Math.max(
+      rules.speciesSystem.length,
+      new Set(characterRows.map((character) => character.species).filter(Boolean)).size,
+    ),
+    powerSystemCount: rules.powerSystems.length,
+  })
+  const requestedCount = Math.max(1, Math.min(options.count || preset.count, 200))
   let resultPayload: TimelineBatchChunkResult | null = null
 
   const existingEvents = listTimelineEvents(novelId)
@@ -1513,8 +1530,24 @@ export async function generateTimelineEvents(
   const createdIds: number[] = []
   const historyEntityType = 'timeline'
   const historyTaskType = 'timeline_generate_batch'
-  const totalCount = Math.min(Math.max(options.count || 10, 4), 24)
-  const batchSize = Math.max(1, Math.min(totalCount, options.batchSize || Math.min(totalCount, 4), 6))
+  const preset = getTimelineGenerationPreset(profile.genre, {
+    launchMode: novel.launchMode,
+    targetWords: novel.targetWords,
+    settingsJson: novel.settingsJson,
+    mapDepth: Math.max(
+      ...rules.mapBlueprint.levels.map((level) => level.depth),
+      ...mapRows.map((row) => Number(row.level || 0)),
+      1,
+    ),
+    factionCount: rules.factionSystem.length,
+    speciesCount: Math.max(
+      rules.speciesSystem.length,
+      new Set(characterRows.map((character) => character.species).filter(Boolean)).size,
+    ),
+    powerSystemCount: rules.powerSystems.length,
+  })
+  const totalCount = Math.min(Math.max(options.count || preset.count, 4), 200)
+  const batchSize = Math.max(1, Math.min(totalCount, options.batchSize || Math.min(totalCount, preset.batchSize), 12))
   const storyCoreSummary = buildStoryCoreSummary(profile)
   const timelineRulesSummary = buildTimelineConfigSummary(rules)
   const arcSummary = buildArcSummary(arcRows)

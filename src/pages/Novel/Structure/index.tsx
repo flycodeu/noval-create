@@ -20,6 +20,7 @@ import {
   generateStructureHierarchyPlan,
   generateStructureSegmentDraft,
 } from '../shared/planning-ai-service'
+import type { StructureHierarchyPlanPayload } from '../shared/planning-ai-service'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import {
   ChapterEditorPanel,
@@ -32,7 +33,7 @@ import {
   StructureSegmentsPanel,
   StructureVolumesPanel,
 } from './StructurePanels'
-import { useStructureWorkspace } from './useStructureWorkspace'
+import { STRUCTURE_BATCH_CREATE_MAX, useStructureWorkspace } from './useStructureWorkspace'
 import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
 import { getChapterLabel, getPartLabel, getSegmentLabel, getVolumeLabel } from '../shared/workspace-utils'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
@@ -53,6 +54,74 @@ interface StructurePlannerFormValues {
   focus: string
 }
 
+type StructurePlannerLimitValues = Pick<
+  StructurePlannerFormValues,
+  'volumeCount' | 'partsPerVolume' | 'chaptersPerPart' | 'segmentsPerChapter'
+>
+
+interface StructurePlannerChunk {
+  volumeIndex: number
+  partStart: number
+  partCount: number
+}
+
+function resolveStructurePlannerLimits(targetWords?: number | null): StructurePlannerLimitValues {
+  const words = Number(targetWords || 0)
+  if (words >= 1000000) {
+    return { volumeCount: 12, partsPerVolume: 8, chaptersPerPart: 24, segmentsPerChapter: 10 }
+  }
+  if (words >= 500000) {
+    return { volumeCount: 10, partsPerVolume: 8, chaptersPerPart: 20, segmentsPerChapter: 10 }
+  }
+  return { volumeCount: 6, partsPerVolume: 6, chaptersPerPart: 12, segmentsPerChapter: 8 }
+}
+
+function dedupeStrings(values: string[]): string[] {
+  const seen = new Set<string>()
+  return values.filter((value) => {
+    const key = value.trim()
+    if (!key || seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function resolvePlannerPartChunkSize(values: StructurePlannerLimitValues, targetWords?: number | null): number {
+  const words = Number(targetWords || 0)
+  const nestedSceneCount = values.chaptersPerPart * values.segmentsPerChapter
+  if (words >= 1000000 || nestedSceneCount >= 160) return 1
+  if (words >= 500000 || nestedSceneCount >= 90) return 2
+  return values.partsPerVolume
+}
+
+function buildPlannerChunks(values: StructurePlannerLimitValues, targetWords?: number | null): StructurePlannerChunk[] {
+  const partChunkSize = Math.max(1, resolvePlannerPartChunkSize(values, targetWords))
+  const chunks: StructurePlannerChunk[] = []
+  for (let volumeIndex = 0; volumeIndex < values.volumeCount; volumeIndex += 1) {
+    for (let partStart = 0; partStart < values.partsPerVolume; partStart += partChunkSize) {
+      chunks.push({
+        volumeIndex,
+        partStart,
+        partCount: Math.min(partChunkSize, values.partsPerVolume - partStart),
+      })
+    }
+  }
+  return chunks
+}
+
+function clampPlannerValues(
+  values: StructurePlannerFormValues,
+  limits: StructurePlannerLimitValues,
+): StructurePlannerFormValues {
+  return {
+    ...values,
+    volumeCount: Math.max(1, Math.min(limits.volumeCount, Number(values.volumeCount || 1))),
+    partsPerVolume: Math.max(1, Math.min(limits.partsPerVolume, Number(values.partsPerVolume || 1))),
+    chaptersPerPart: Math.max(1, Math.min(limits.chaptersPerPart, Number(values.chaptersPerPart || 1))),
+    segmentsPerChapter: Math.max(1, Math.min(limits.segmentsPerChapter, Number(values.segmentsPerChapter || 1))),
+  }
+}
+
 export default function StructurePage({ novelId }: { novelId: number }) {
   const workspace = useStructureWorkspace(novelId)
   const { currentNovel } = useNovelStore()
@@ -69,6 +138,10 @@ export default function StructurePage({ novelId }: { novelId: number }) {
   const [sceneTemplates, setSceneTemplates] = React.useState<SceneTemplate[]>([])
   const [linkageSummary, setLinkageSummary] = React.useState<Awaited<ReturnType<typeof window.electron.structure.getLinkageSummary>> | null>(null)
   const [linkageSyncing, setLinkageSyncing] = React.useState(false)
+  const plannerLimits = React.useMemo(
+    () => resolveStructurePlannerLimits(currentNovel?.targetWords),
+    [currentNovel?.targetWords],
+  )
 
   const {
     chapterDetail,
@@ -218,92 +291,145 @@ export default function StructurePage({ novelId }: { novelId: number }) {
   }, [segmentForm])
 
   const applyHierarchyPlan = React.useCallback(async (values: StructurePlannerFormValues) => {
+    const planValues = clampPlannerValues(values, plannerLimits)
     setPlannerGenerating(true)
 
     try {
-      const result = await generateStructureHierarchyPlan({
-        count: 1,
-        messages: buildDraftMessages({
-          task: '长篇结构批量规划',
-          mode: 'replace',
-          context: [
-            { label: '书名', value: currentNovel?.title || '' },
-            { label: '题材', value: currentNovel?.genreName || '' },
-            { label: '小说简介', value: currentNovel?.synopsis || '' },
-            { label: '扩展背景', value: currentNovel?.expandedBackground || '' },
-            { label: '当前卷数', value: volumes.length },
-            { label: '当前部数', value: parts.total },
-            { label: '当前章数', value: chapters.total },
-            { label: '当前场景数', value: segments.total },
-          ],
-          fields: [
-            { key: 'summary', label: '规划摘要', value: '', hint: '先用几句话概括整套卷部章场景结构。' },
-            { key: 'volumes', label: '卷结构', value: '', hint: '按卷 > 部 > 章 > 场景输出完整嵌套 JSON。' },
-          ],
-          requirements: [
-            `严格输出 ${values.volumeCount} 卷，每卷 ${values.partsPerVolume} 部，每部 ${values.chaptersPerPart} 章，每章 ${values.segmentsPerChapter} 个场景。`,
-            '所有标题必须像人类编辑写的工作标题，不要写“命运交汇”“最终抉择”这类空泛词。',
-            '章节目标和场景作用必须具体，能直接指导后续写作。',
-            '这是追加规划，不要重写已经存在的卷部章。',
-            values.focus.trim() ? `额外聚焦：${values.focus.trim()}` : '',
-            'JSON 结构必须是 { "summary": "", "volumes": [{ "title": "", "summary": "", "targetWords": 0, "parts": [{ "title": "", "summary": "", "targetWords": 0, "chapters": [{ "title": "", "outline": "", "targetWords": 0, "segments": [{ "title": "", "segmentType": "", "purpose": "", "timeAnchor": "", "locationName": "", "inputState": "", "outputState": "", "summary": "", "content": "" }] }] }] }] }。',
-          ],
-        }),
-      }, { genre: currentNovel?.genreName })
+      const chunks = buildPlannerChunks(planValues, currentNovel?.targetWords)
+      const isChunked = chunks.length > 1
+      const warnings: string[] = []
+      const lintWarnings: string[] = []
+      const rawOutputs: string[] = []
+      let firstChapterId: number | null = null
+      let createdChapterCount = 0
+      const volumeIdsByIndex = new Map<number, number>()
 
-      setDraftWarnings(result.warnings)
-      const plan = result.payloads[0]
-      if (!plan || plan.volumes.length === 0) {
-        message.warning(getUserFacingMessage('structure.batchPlanEmpty'))
-        return
+      const runPlannerChunk = async (chunk: StructurePlannerChunk) => {
+        const partEnd = chunk.partStart + chunk.partCount
+        const batchLabel = isChunked
+          ? `第 ${chunk.volumeIndex + 1} 卷 / 第 ${chunk.partStart + 1}-${partEnd} 部`
+          : '完整结构'
+        const result = await generateStructureHierarchyPlan({
+          count: 1,
+          messages: buildDraftMessages({
+            task: isChunked ? `长篇结构分块规划 · ${batchLabel}` : '长篇结构批量规划',
+            mode: 'replace',
+            context: [
+              { label: '书名', value: currentNovel?.title || '' },
+              { label: '题材', value: currentNovel?.genreName || '' },
+              { label: '小说简介', value: currentNovel?.synopsis || '' },
+              { label: '扩展背景', value: currentNovel?.expandedBackground || '' },
+              { label: '目标总字数', value: currentNovel?.targetWords || '' },
+              { label: '当前卷数', value: volumes.length },
+              { label: '当前部数', value: parts.total },
+              { label: '当前章数', value: chapters.total },
+              { label: '当前场景数', value: segments.total },
+              isChunked ? { label: '全书结构规模', value: `${planValues.volumeCount} 卷，每卷 ${planValues.partsPerVolume} 部，每部 ${planValues.chaptersPerPart} 章，每章 ${planValues.segmentsPerChapter} 场景。` } : { label: '全书结构规模', value: '' },
+              isChunked ? { label: '本次分块', value: batchLabel } : { label: '本次分块', value: '' },
+            ],
+            fields: [
+              { key: 'summary', label: '规划摘要', value: '', hint: isChunked ? '概括本分块在全书中的功能，不要概括全书全部细节。' : '先用几句话概括整套卷部章场景结构。' },
+              { key: 'volumes', label: '卷结构', value: '', hint: '按卷 > 部 > 章 > 场景输出嵌套 JSON。' },
+            ],
+            requirements: [
+              isChunked
+                ? `只输出第 ${chunk.volumeIndex + 1} 卷的第 ${chunk.partStart + 1} 至第 ${partEnd} 部；volumes 数组长度必须是 1，parts 数组长度必须是 ${chunk.partCount}。`
+                : `严格输出 ${planValues.volumeCount} 卷，每卷 ${planValues.partsPerVolume} 部，每部 ${planValues.chaptersPerPart} 章，每章 ${planValues.segmentsPerChapter} 个场景。`,
+              `每部严格输出 ${planValues.chaptersPerPart} 章，每章严格输出 ${planValues.segmentsPerChapter} 个场景。`,
+              '所有标题必须像人类编辑写的工作标题，不要写“命运交汇”“最终抉择”这类空泛词。',
+              '章节目标和场景作用必须具体，能直接指导后续写作。',
+              '这是追加规划，不要重写已经存在的卷部章。',
+              isChunked ? '本次只规划指定分块，不要补全其他卷或其他部。' : '',
+              values.focus.trim() ? `额外聚焦：${values.focus.trim()}` : '',
+              'JSON 结构必须是 { "summary": "", "volumes": [{ "title": "", "summary": "", "targetWords": 0, "parts": [{ "title": "", "summary": "", "targetWords": 0, "chapters": [{ "title": "", "outline": "", "targetWords": 0, "segments": [{ "title": "", "segmentType": "", "purpose": "", "timeAnchor": "", "locationName": "", "inputState": "", "outputState": "", "summary": "", "content": "" }] }] }] }] }。',
+            ],
+          }),
+        }, { genre: currentNovel?.genreName })
+        warnings.push(...result.warnings)
+        lintWarnings.push(...result.observability.lintWarnings)
+        rawOutputs.push(...result.observability.rawOutputs)
+        return result.payloads[0] || null
       }
 
-      let firstChapterId: number | null = null
+      const materializePlan = async (
+        plan: StructureHierarchyPlanPayload | null,
+        chunk: StructurePlannerChunk,
+      ) => {
+        if (!plan || plan.volumes.length === 0) return
+        const selectedVolumes = isChunked ? plan.volumes.slice(0, 1) : plan.volumes.slice(0, planValues.volumeCount)
 
-      for (const volume of plan.volumes.slice(0, values.volumeCount)) {
-        const volumeId = await window.electron.structure.createVolume(novelId, {
-          title: volume.title,
-          summary: volume.summary,
-          targetWords: volume.targetWords || values.partsPerVolume * values.chaptersPerPart * values.segmentsPerChapter * 3000,
-          status: 'planning',
-        })
+        for (const [offset, volume] of selectedVolumes.entries()) {
+          const volumeIndex = isChunked ? chunk.volumeIndex : offset
+          let volumeId = volumeIdsByIndex.get(volumeIndex)
+          if (!volumeId) {
+            volumeId = await window.electron.structure.createVolume(novelId, {
+              title: volume.title || `第 ${volumeIndex + 1} 卷`,
+              summary: volume.summary,
+              targetWords: volume.targetWords || planValues.partsPerVolume * planValues.chaptersPerPart * planValues.segmentsPerChapter * 3000,
+              status: 'planning',
+            })
+            volumeIdsByIndex.set(volumeIndex, volumeId)
+          }
 
-        for (const part of volume.parts.slice(0, values.partsPerVolume)) {
-          const partId = await window.electron.structure.createPart(volumeId, {
-            title: part.title,
-            summary: part.summary,
-            targetWords: part.targetWords || values.chaptersPerPart * values.segmentsPerChapter * 3000,
-            status: 'planning',
-          })
-
-          for (const chapter of part.chapters.slice(0, values.chaptersPerPart)) {
-            const chapterId = await window.electron.chapter.create(novelId, {
-              volumeId,
-              partId,
-              title: chapter.title,
-              outline: chapter.outline,
-              targetWords: chapter.targetWords || values.segmentsPerChapter * 3000,
-              status: 'outline',
+          const partsForChunk = volume.parts.slice(0, isChunked ? chunk.partCount : planValues.partsPerVolume)
+          for (const [partOffset, part] of partsForChunk.entries()) {
+            const partIndex = isChunked ? chunk.partStart + partOffset : partOffset
+            const partId = await window.electron.structure.createPart(volumeId, {
+              title: part.title || `第 ${partIndex + 1} 部`,
+              summary: part.summary,
+              targetWords: part.targetWords || planValues.chaptersPerPart * planValues.segmentsPerChapter * 3000,
+              status: 'planning',
             })
 
-            if (!firstChapterId) firstChapterId = chapterId
-
-            for (const segment of chapter.segments.slice(0, values.segmentsPerChapter)) {
-              await window.electron.structure.createSegment(chapterId, {
-                title: segment.title,
-                segmentType: segment.segmentType || 'scene',
-                purpose: segment.purpose,
-                timeAnchor: segment.timeAnchor,
-                locationName: segment.locationName,
-                inputState: segment.inputState,
-                outputState: segment.outputState,
-                summary: segment.summary,
-                content: segment.content,
-                status: 'planned',
+            for (const chapter of part.chapters.slice(0, planValues.chaptersPerPart)) {
+              const chapterId = await window.electron.chapter.create(novelId, {
+                volumeId,
+                partId,
+                title: chapter.title,
+                outline: chapter.outline,
+                targetWords: chapter.targetWords || planValues.segmentsPerChapter * 3000,
+                status: 'outline',
               })
+
+              if (!firstChapterId) firstChapterId = chapterId
+              createdChapterCount += 1
+
+              for (const segment of chapter.segments.slice(0, planValues.segmentsPerChapter)) {
+                await window.electron.structure.createSegment(chapterId, {
+                  title: segment.title,
+                  segmentType: segment.segmentType || 'scene',
+                  purpose: segment.purpose,
+                  timeAnchor: segment.timeAnchor,
+                  locationName: segment.locationName,
+                  inputState: segment.inputState,
+                  outputState: segment.outputState,
+                  summary: segment.summary,
+                  content: segment.content,
+                  status: 'planned',
+                })
+              }
             }
           }
         }
+      }
+
+      for (const chunk of chunks) {
+        const plan = await runPlannerChunk(chunk)
+        await materializePlan(plan, chunk)
+      }
+
+      const combinedWarnings = dedupeStrings(warnings)
+      draftWarningsRef.current = combinedWarnings
+      draftObservabilityRef.current = {
+        inputSummary: isChunked ? `分块结构规划：${chunks.length} 个请求` : '完整结构规划：1 个请求',
+        lintWarnings: dedupeStrings(lintWarnings),
+        rawOutputs,
+      }
+      setDraftWarnings(combinedWarnings)
+
+      if (createdChapterCount === 0) {
+        message.warning(getUserFacingMessage('structure.batchPlanEmpty'))
+        return
       }
 
       await refreshStructure()
@@ -323,9 +449,11 @@ export default function StructurePage({ novelId }: { novelId: number }) {
     currentNovel?.expandedBackground,
     currentNovel?.genreName,
     currentNovel?.synopsis,
+    currentNovel?.targetWords,
     currentNovel?.title,
     novelId,
     parts.total,
+    plannerLimits,
     refreshStructure,
     segments.total,
     selectChapter,
@@ -542,9 +670,9 @@ export default function StructurePage({ novelId }: { novelId: number }) {
             <span>新增数量</span>
             <InputNumber
               min={1}
-              max={20}
+              max={STRUCTURE_BATCH_CREATE_MAX}
               value={batchCreateCount}
-              onChange={(value) => setBatchCreateCount(Math.max(1, Math.min(20, Number(value) || 1)))}
+              onChange={(value) => setBatchCreateCount(Math.max(1, Math.min(STRUCTURE_BATCH_CREATE_MAX, Number(value) || 1)))}
               className="novel-structure-input-88"
             />
           </div>
@@ -797,16 +925,16 @@ export default function StructurePage({ novelId }: { novelId: number }) {
           }}
         >
           <Form.Item name="volumeCount" label="卷数" rules={[{ required: true }]}>
-            <InputNumber min={1} max={6} className="novel-structure-input-full" />
+            <InputNumber min={1} max={plannerLimits.volumeCount} className="novel-structure-input-full" />
           </Form.Item>
           <Form.Item name="partsPerVolume" label="每卷部数" rules={[{ required: true }]}>
-            <InputNumber min={1} max={6} className="novel-structure-input-full" />
+            <InputNumber min={1} max={plannerLimits.partsPerVolume} className="novel-structure-input-full" />
           </Form.Item>
           <Form.Item name="chaptersPerPart" label="每部章节数" rules={[{ required: true }]}>
-            <InputNumber min={1} max={12} className="novel-structure-input-full" />
+            <InputNumber min={1} max={plannerLimits.chaptersPerPart} className="novel-structure-input-full" />
           </Form.Item>
           <Form.Item name="segmentsPerChapter" label="每章场景数" rules={[{ required: true }]}>
-            <InputNumber min={1} max={8} className="novel-structure-input-full" />
+            <InputNumber min={1} max={plannerLimits.segmentsPerChapter} className="novel-structure-input-full" />
           </Form.Item>
           <Form.Item name="focus" label="额外聚焦">
             <Input.TextArea

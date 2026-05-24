@@ -165,6 +165,7 @@ import type {
   StageRenderSchema,
   UpstreamRuntimeArtifacts,
   VoiceEvolutionProfile,
+  WriterContextOrchestratorRuntimeOptions,
   WriterContextOrchestratorResolution,
 } from '../../src/types'
 
@@ -3022,6 +3023,7 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
           worldRules: input.context.worldRules,
           characterStates: input.context.characterStates,
           worldStates: input.context.worldStates,
+          mapSummary: input.context.mapSummary,
           itemSummary: input.context.itemSummary,
           previousSummaries: input.context.previousSummaries,
           previousChapterContext: input.context.previousChapterContext,
@@ -3115,6 +3117,7 @@ async function repairChapterOutputIfNeeded(input: ChapterRepairInput): Promise<{
               worldRules: input.context.worldRules,
               characterStates: input.context.characterStates,
               worldStates: input.context.worldStates,
+              mapSummary: input.context.mapSummary,
               itemSummary: input.context.itemSummary,
               previousSummaries: input.context.previousSummaries,
               previousChapterContext: input.context.previousChapterContext,
@@ -3918,7 +3921,7 @@ function buildStageRenderSchema(stage: ChapterContextStage): StageRenderSchema {
       return {
         stage,
         requiredAllocatorFields: ['writingContractSummary', 'relationSummary', 'characterStates'],
-        optionalAllocatorFields: ['scenePlanSummary', 'contractVersionSummary', 'activeThreads', 'dueForeshadows'],
+        optionalAllocatorFields: ['scenePlanSummary', 'contractVersionSummary', 'activeThreads', 'dueForeshadows', 'mapSummary'],
       }
     case 'review':
       return {
@@ -3937,7 +3940,7 @@ function buildStageRenderSchema(stage: ChapterContextStage): StageRenderSchema {
       return {
         stage,
         requiredAllocatorFields: ['writingContractSummary', 'relationSummary', 'characterStates'],
-        optionalAllocatorFields: ['scenePlanSummary', 'contractVersionSummary', 'activeThreads', 'recalledMemory'],
+        optionalAllocatorFields: ['scenePlanSummary', 'contractVersionSummary', 'activeThreads', 'recalledMemory', 'mapSummary'],
       }
   }
 }
@@ -4069,7 +4072,7 @@ function applyWriterContextOverridesToRawContext(
     contextParts: {
       ...rawContext.contextParts,
       ...Object.fromEntries(
-        Object.entries(overrides).filter(([, value]) => typeof value === 'string'),
+        Object.entries(overrides).filter(([, value]) => typeof value === 'string' && value.trim().length > 0),
       ),
     },
   }
@@ -4137,12 +4140,14 @@ function buildLegacyFallbackWriterContextResolution(
         mentionedCharacterCount: rawContext.mentionedCharacters.length,
         mentionedItemCount: rawContext.mentionedItems.length,
         mentionedLocationCount: rawContext.mentionedLocations.length,
+        mentionedFactionCount: rawContext.mentionedFactions.length,
         enabledBuckets: [],
       },
     },
     structuredPack: {
       characters: [],
       items: [],
+      mapLocations: [],
       timeline: [],
       recall: { hits: [] },
     },
@@ -4199,6 +4204,59 @@ function allocateDraftContextWithWriterFallback(
   }
 }
 
+function resolveWriterRuntimeOptions(
+  rawContext: Awaited<ReturnType<typeof collectChapterContextRawData>>,
+): WriterContextOrchestratorRuntimeOptions {
+  const policy = getOperatingModeRuntimePolicy({
+    launchMode: rawContext.novel.launchMode,
+    targetWords: rawContext.novel.targetWords,
+    settingsJson: rawContext.novel.settingsJson,
+  })
+  const scaleBoost = policy.operatingMode === 'million_longform'
+    ? 4
+    : policy.operatingMode === 'epic_longform'
+      ? 2
+      : policy.operatingMode === 'standard_longform'
+        ? 1
+        : 0
+  const mentionedCharacterCount = rawContext.mentionedCharacters.length
+  const mentionedItemCount = rawContext.mentionedItems.length
+  const mentionedLocationCount = rawContext.mentionedLocations.length
+  const threadPressure = rawContext.activeThreadPressureCount
+  const characterCeiling = policy.operatingMode === 'million_longform'
+    ? Math.max(48, Math.min(72, mentionedCharacterCount + 8))
+    : policy.operatingMode === 'epic_longform'
+      ? Math.max(28, Math.min(40, mentionedCharacterCount + 6))
+      : 20
+  const itemCeiling = policy.operatingMode === 'million_longform'
+    ? Math.max(48, Math.min(64, mentionedItemCount + 8))
+    : policy.operatingMode === 'epic_longform'
+      ? Math.max(24, Math.min(34, mentionedItemCount + 6))
+      : 16
+  const mapCeiling = policy.operatingMode === 'million_longform'
+    ? Math.max(48, Math.min(64, mentionedLocationCount + 8))
+    : policy.operatingMode === 'epic_longform'
+      ? Math.max(24, Math.min(32, mentionedLocationCount + 6))
+      : 16
+  const timelineCeiling = policy.operatingMode === 'million_longform' ? 40 : policy.operatingMode === 'epic_longform' ? 28 : 16
+  const threadCeiling = policy.operatingMode === 'million_longform' ? 40 : policy.operatingMode === 'epic_longform' ? 28 : 16
+
+  return {
+    useMemoryCache: true,
+    forceRefresh: false,
+    maxCharacters: Math.min(characterCeiling, Math.max(6 + scaleBoost, mentionedCharacterCount)),
+    maxItems: Math.min(itemCeiling, Math.max(4 + Math.ceil(scaleBoost / 2), mentionedItemCount)),
+    maxMapLocations: Math.min(mapCeiling, Math.max(4 + scaleBoost, mentionedLocationCount)),
+    maxTimelineEvents: Math.min(timelineCeiling, Math.max(4 + scaleBoost, mentionedLocationCount + (threadPressure >= 4 ? 2 : 0))),
+    maxThreads: Math.min(threadCeiling, Math.max(4 + scaleBoost, threadPressure)),
+    maxRecallHitsPerBucket: policy.operatingMode === 'million_longform'
+      ? 5
+      : policy.operatingMode === 'epic_longform'
+        ? 4
+        : 3,
+  }
+}
+
 async function resolveWriterContextForStage(
   chapter: typeof chapters.$inferSelect,
   rawContext: Awaited<ReturnType<typeof collectChapterContextRawData>>,
@@ -4234,10 +4292,12 @@ async function resolveWriterContextForStage(
         mentionedCharacters: rawContext.mentionedCharacters,
         mentionedItems: rawContext.mentionedItems,
         mentionedLocations: rawContext.mentionedLocations,
+        mentionedFactions: rawContext.mentionedFactions,
       },
       baseContextParts: {
         characterStates: rawContext.contextParts.characterStates,
         worldStates: rawContext.contextParts.worldStates,
+        mapSummary: rawContext.contextParts.mapSummary,
         itemSummary: rawContext.contextParts.itemSummary,
         continuityNotes: rawContext.contextParts.continuityNotes,
         timelineSummary: rawContext.contextParts.timelineSummary,
@@ -4262,10 +4322,7 @@ async function resolveWriterContextForStage(
         executionMode: executionMode || 'default',
         preserveConstraintLabels: [...(preserveConstraintLabels || [])].sort(),
       },
-      runtime: {
-        useMemoryCache: true,
-        forceRefresh: false,
-      },
+      runtime: resolveWriterRuntimeOptions(rawContext),
     })
 
     return {
@@ -4479,6 +4536,8 @@ async function continueChapterContent(
     worldRules: draftContext.worldRules,
     characterStates: draftContext.characterStates,
     worldStates: draftContext.worldStates,
+    mapSummary: draftContext.mapSummary,
+    itemSummary: draftContext.itemSummary,
     previousSummaries: draftContext.previousSummaries,
     previousChapterContext: draftContext.previousChapterContext,
     lastChapterEnding: draftContext.lastChapterEnding,
@@ -5203,6 +5262,7 @@ export async function generateChapterContent(
         worldRules: scenePlanContext.worldRules,
         characterStates: scenePlanContext.characterStates,
         worldStates: scenePlanContext.worldStates,
+        mapSummary: scenePlanContext.mapSummary,
         itemSummary: scenePlanContext.itemSummary,
         previousSummaries: scenePlanContext.previousSummaries,
         previousChapterContext: scenePlanContext.previousChapterContext,
@@ -5314,6 +5374,7 @@ export async function generateChapterContent(
         worldRules: draftContext.worldRules,
         characterStates: draftContext.characterStates,
         worldStates: draftContext.worldStates,
+        mapSummary: draftContext.mapSummary,
         itemSummary: draftContext.itemSummary,
         previousSummaries: draftContext.previousSummaries,
         previousChapterContext: draftContext.previousChapterContext,
@@ -5416,6 +5477,7 @@ export async function generateChapterContent(
         worldRules: reviewContext.worldRules,
         characterStates: reviewContext.characterStates,
         worldStates: reviewContext.worldStates,
+        mapSummary: reviewContext.mapSummary,
         itemSummary: reviewContext.itemSummary,
         previousChapterContext: reviewContext.previousChapterContext,
         chapterBridgePlan: chapterBridgePlanText,
@@ -5657,6 +5719,7 @@ export async function generateChapterContent(
         worldRules: rewriteContext.worldRules,
         characterStates: rewriteContext.characterStates,
         worldStates: rewriteContext.worldStates,
+        mapSummary: rewriteContext.mapSummary,
         itemSummary: rewriteContext.itemSummary,
         previousSummaries: rewriteContext.previousSummaries,
         previousChapterContext: rewriteContext.previousChapterContext,

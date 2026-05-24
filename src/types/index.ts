@@ -1928,6 +1928,7 @@ export type StageAllocatorFieldKey =
   | 'continuityNotes'
   | 'openLoops'
   | 'timelineSummary'
+  | 'mapSummary'
   | 'recalledMemory'
   | 'writingContractSummary'
   | 'scenePlanSummary'
@@ -2174,6 +2175,7 @@ export interface ChapterContextPreview {
 export type WriterContextOverrideKey =
   | 'characterStates'
   | 'worldStates'
+  | 'mapSummary'
   | 'itemSummary'
   | 'continuityNotes'
   | 'timelineSummary'
@@ -2207,6 +2209,7 @@ export interface WriterContextSignalInput {
   mentionedCharacters?: string[]
   mentionedItems?: string[]
   mentionedLocations?: string[]
+  mentionedFactions?: string[]
 }
 
 export interface WriterContextOrchestratorInvalidationInput {
@@ -2224,6 +2227,7 @@ export interface WriterContextOrchestratorRuntimeOptions {
   forceRefresh?: boolean
   maxCharacters?: number
   maxItems?: number
+  maxMapLocations?: number
   maxTimelineEvents?: number
   maxThreads?: number
   maxRecallHitsPerBucket?: number
@@ -2278,6 +2282,7 @@ export type WriterContextQueryBucket =
   | 'story_memory'
   | 'character'
   | 'item'
+  | 'map_location'
   | 'timeline'
   | 'world_state'
   | 'thread'
@@ -2337,6 +2342,7 @@ export interface WriterContextRetrievalFingerprint {
     mentionedCharacterCount: number
     mentionedItemCount: number
     mentionedLocationCount: number
+    mentionedFactionCount?: number
     enabledBuckets: WriterContextQueryBucket[]
   }
 }
@@ -2402,6 +2408,21 @@ export interface WriterOrchestratedWorldStatePack {
   worldStatesText?: string
 }
 
+export interface WriterOrchestratedMapLocationPackEntry {
+  mapId: number
+  name: string
+  level: number
+  path: string
+  nodeType?: string
+  locationType?: string
+  structureRole?: string
+  parentName?: string
+  description?: string
+  plotRelevance?: string
+  dangerLevel?: string
+  relationLines: string[]
+}
+
 export interface WriterOrchestratedThreadPack {
   activeThreadLines: string[]
   openLoopLines: string[]
@@ -2429,6 +2450,7 @@ export interface WriterContextStructuredPack {
   storyMemory?: WriterOrchestratedStoryMemoryPack
   characters: WriterOrchestratedCharacterPackEntry[]
   items: WriterOrchestratedItemPackEntry[]
+  mapLocations: WriterOrchestratedMapLocationPackEntry[]
   timeline: WriterOrchestratedTimelinePackEntry[]
   worldState?: WriterOrchestratedWorldStatePack
   threads?: WriterOrchestratedThreadPack

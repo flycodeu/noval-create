@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../database/db', () => ({
   getDb: vi.fn(),
@@ -19,6 +19,10 @@ vi.mock('./style-analysis.service', () => ({
 
 vi.mock('./story-memory.service', () => ({
   buildStoryMemoryPromptSummary: vi.fn(() => ''),
+  buildStoryMemoryPromptPackage: vi.fn(() => ({
+    summary: '',
+    diagnostics: [],
+  })),
 }))
 
 vi.mock('./story-structure.service', () => ({
@@ -76,6 +80,20 @@ vi.mock('./world-state.service', () => ({
   })),
 }))
 
+vi.mock('./endgame-asset.service', () => ({
+  getChapterContractContext: vi.fn(() => null),
+  listForeshadowLedger: vi.fn(() => []),
+}))
+
+vi.mock('./batch-workbench.service', () => ({
+  buildGlobalLockContext: vi.fn(() => ({
+    canonFactSummary: '',
+    styleRuleSummary: '',
+    lockedParagraphSummary: '',
+    characterVoiceSummary: '',
+  })),
+}))
+
 import type {
   ChapterContextParts,
   ChapterContextRawData,
@@ -87,17 +105,64 @@ import {
   buildStoryProfile,
   buildRecallSnapshot,
   buildPreviousChapterContextFeed,
+  collectChapterContextRawData,
   ContextOverflowError,
   HardConstraintOverflowError,
+  resolveMentionedEntityLimits,
   selectRecentContextRows,
 } from './context.service'
 import { getDb } from '../database/db'
-import { antiAiRuleHits, chapterGateRuns, chapters, characters, genres, glossary, novels } from '../database/schema'
+import {
+  antiAiRuleHits,
+  chapterGateRuns,
+  chapters,
+  characterRelations,
+  characters,
+  factions,
+  genres,
+  glossary,
+  novels,
+  storyArcs,
+  storyItems,
+  storyThreads,
+  templates,
+  timelineEvents,
+  worldMap,
+} from '../database/schema'
 import { resolveModelRuntimeBudget } from './model.service'
 import {
   buildStyleHardGuardPromptSection,
   listStyleFingerprints,
 } from './style-analysis.service'
+import {
+  buildCharacterContextCards,
+  buildFactionContextCards,
+  buildItemContextCards,
+  renderFactionCards,
+  renderCharacterCards,
+  renderItemCards,
+} from './context-cards'
+import { getChapterContractContext } from './endgame-asset.service'
+import { buildFactionCatalog } from './faction-reference.service'
+
+afterEach(() => {
+  vi.mocked(getChapterContractContext).mockReset()
+  vi.mocked(getChapterContractContext).mockReturnValue(null as never)
+  vi.mocked(buildCharacterContextCards).mockReset()
+  vi.mocked(buildCharacterContextCards).mockReturnValue([])
+  vi.mocked(buildFactionContextCards).mockReset()
+  vi.mocked(buildFactionContextCards).mockReturnValue([])
+  vi.mocked(renderCharacterCards).mockReset()
+  vi.mocked(renderCharacterCards).mockReturnValue('')
+  vi.mocked(renderFactionCards).mockReset()
+  vi.mocked(renderFactionCards).mockReturnValue('')
+  vi.mocked(buildItemContextCards).mockReset()
+  vi.mocked(buildItemContextCards).mockReturnValue([])
+  vi.mocked(renderItemCards).mockReset()
+  vi.mocked(renderItemCards).mockReturnValue('')
+  vi.mocked(buildFactionCatalog).mockReset()
+  vi.mocked(buildFactionCatalog).mockReturnValue({ rows: [], byId: new Map() } as never)
+})
 
 function createRecallDiagnostics(): RecallDiagnostics {
   return {
@@ -142,6 +207,7 @@ function createBaseContextParts(): ChapterContextParts {
     worldRules: '世界规则：资源有限，所有后果都必须兑现。',
     characterStates: '人物状态：主角轻伤，副手不信任他。',
     worldStates: '世界状态：补给点在封锁边缘。',
+    mapSummary: '地图地点：补给点位于东门封锁线外。',
     itemSummary: '关键物品去向：药箱在副手手里。',
     previousSummaries: '此前摘要：上一章刚刚撤离。',
     previousChapterContext: '上一章关键先验：队伍从失守点撤离，出口外仍有追兵。',
@@ -207,6 +273,7 @@ function createRawData(
     mentionedCharacters: [],
     mentionedItems: [],
     mentionedLocations: [],
+    mentionedFactions: [],
     contextParts,
     previousChapterSampleReport: {
       sourceChapterId: 3,
@@ -695,6 +762,228 @@ describe('allocateChapterContext', () => {
     expect(baselineRows).toHaveLength(8)
     expect(signalAwareRows.length).toBeGreaterThan(baselineRows.length)
     expect(signalAwareRows.some((row) => row.chapterNum === 2)).toBe(true)
+  })
+
+  it('raises mentioned entity limits for million-word longform context collection', () => {
+    const shortform = resolveMentionedEntityLimits({ targetWords: 80000, chapterCount: 12 })
+    const million = resolveMentionedEntityLimits({ targetWords: 1000000, chapterCount: 220 })
+    const mega = resolveMentionedEntityLimits({ targetWords: 1600000, chapterCount: 520 })
+
+    expect(shortform).toEqual({ characters: 8, items: 8, locations: 6 })
+    expect(million.characters).toBeGreaterThan(shortform.characters)
+    expect(million.items).toBeGreaterThan(shortform.items)
+    expect(million.locations).toBeGreaterThan(shortform.locations)
+    expect(mega.characters).toBeGreaterThan(million.characters)
+
+    const complexMega = resolveMentionedEntityLimits({
+      targetWords: 1600000,
+      chapterCount: 520,
+      mapDepth: 6,
+      factionCount: 12,
+      speciesCount: 8,
+      powerSystemCount: 5,
+    })
+    expect(complexMega.characters).toBeGreaterThan(48)
+    expect(complexMega.items).toBeGreaterThan(40)
+    expect(complexMega.locations).toBeGreaterThan(40)
+  })
+
+  it('collects expanded mentioned entities and map context for million-word chapters', async () => {
+    vi.mocked(buildCharacterContextCards).mockImplementation(((input: {
+      allCharacters: Array<{ fullName?: string | null }>
+      mentionedNames?: Set<string>
+    }) => input.allCharacters
+      .filter((character) => character.fullName && input.mentionedNames?.has(character.fullName))
+      .map((character) => ({ name: character.fullName }))) as never)
+    vi.mocked(renderCharacterCards).mockImplementation(((cards: Array<{ name?: string | null }>) =>
+      cards.map((card) => card.name).filter(Boolean).join('\n')) as never)
+    vi.mocked(buildItemContextCards).mockImplementation(((input: {
+      items: Array<{ itemName?: string | null }>
+      limit: number
+    }) => input.items
+      .slice(0, input.limit)
+      .map((item) => ({ name: item.itemName }))) as never)
+    vi.mocked(renderItemCards).mockImplementation(((cards: Array<{ name?: string | null }>) =>
+      cards.map((card) => card.name).filter(Boolean).join('\n')) as never)
+    vi.mocked(buildFactionContextCards).mockImplementation(((input: {
+      factions: Array<{ name?: string | null }>
+    }) => input.factions.map((faction) => ({ name: faction.name }))) as never)
+    vi.mocked(renderFactionCards).mockImplementation(((cards: Array<{ name?: string | null }>) =>
+      cards.map((card) => card.name).filter(Boolean).join('\n')) as never)
+
+    const entityCount = 45
+    const characterRows = Array.from({ length: entityCount }, (_, index) => ({
+      id: index + 1,
+      novelId: 1,
+      fullName: `角色${index + 1}`,
+      roleType: index === 0 ? 'protagonist' : 'supporting',
+      sortOrder: index,
+      species: `种族${(index % 8) + 1}`,
+      sourceContextJson: index === 44 ? JSON.stringify([{ aliases: ['副手'] }]) : '[]',
+    }))
+    const itemRows = Array.from({ length: entityCount }, (_, index) => ({
+      id: index + 1,
+      novelId: 1,
+      itemName: `物品${index + 1}`,
+      itemKind: 'instance',
+      category: '关键资源',
+      currentStatus: 'active',
+      sortOrder: index,
+      sourceContextJson: '[]',
+      typedRefsJson: index === 44 ? JSON.stringify({ version: 1, pointers: [{ assetType: 'item', name: '救命包' }] }) : '[]',
+    }))
+    const locationRows = Array.from({ length: entityCount }, (_, index) => ({
+      id: index + 1,
+      novelId: 1,
+      parentId: index === 0 ? null : 1,
+      name: `地点${index + 1}`,
+      level: (index % 6) + 1,
+      nodeType: index === 0 ? 'region' : 'location',
+      locationType: '行动点',
+      structureRole: '剧情节点',
+      dangerLevel: index > 5 ? '高' : '中',
+      description: `地点${index + 1}用于承接本章行动。`,
+      plotRelevance: `地点${index + 1}关联资源调度。`,
+      sortOrder: index,
+      tagsJson: index === 44 ? JSON.stringify(['东门']) : '[]',
+    }))
+    const factionRows = Array.from({ length: 12 }, (_, index) => ({
+      id: index + 1,
+      novelId: 1,
+      name: `势力${index + 1}`,
+      notes: index === 11 ? '别名：影阁、暗阁；只在关键会合节点公开施压。' : '',
+    }))
+    vi.mocked(buildFactionCatalog).mockReturnValue({
+      rows: factionRows,
+      byId: new Map(factionRows.map((row) => [row.id, row])),
+    } as never)
+    const outline = [
+      '目标：调度所有关键据点与资源，完成多线会合。',
+      characterRows.slice(0, 44).map((row) => row.fullName).join('、'),
+      itemRows.slice(0, 44).map((row) => row.itemName).join('、'),
+      locationRows.slice(0, 44).map((row) => row.name).join('、'),
+    ].join('\n')
+    vi.mocked(getChapterContractContext).mockReturnValue({
+      chapterContract: {
+        chapterGoal: '按场景合同完成资源会合。',
+        requiredAssetRefs: ['救命包'],
+        requiredArcProgress: [],
+        requiredResistanceActions: [],
+        acceptanceNotes: ['副手必须抵达东门，影阁必须在场施压。'],
+      },
+      sceneContracts: [{
+        segmentTitle: '会合',
+        pov: '',
+        timeLocation: '东门',
+        sceneGoal: '副手带着救命包抵达东门，影阁在场施压，作为最后一组资源会合节点。',
+        obstacle: '',
+        conflictType: '',
+        emotionShift: '',
+        revealPayload: [],
+        resultState: '',
+        linkageMode: '',
+      }],
+      requiredCommitments: [],
+      requiredForeshadows: [],
+    } as never)
+    vi.mocked(getDb).mockReturnValue(createTableAwareDbMock(new Map<unknown, unknown[]>([
+      [novels, [{
+        id: 1,
+        title: '百万字群像工程',
+        synopsis: '多地图、多势力、多物资线长篇。',
+        genreId: 11,
+        launchMode: 'professional_longform',
+          targetWords: 1600000,
+          modelConfigId: 9,
+        settingsJson: JSON.stringify({
+          story_design: {
+            story_goal: '跨地图完成资源重组。',
+            core_conflict: '多势力争夺关键物资。',
+            main_plot: '主角团在八个地点之间建立新秩序。',
+          },
+        }),
+        projectBriefJson: '{}',
+        themeVoiceJson: '{}',
+        worldRulesJson: JSON.stringify({
+          mapBlueprint: {
+            levels: Array.from({ length: 6 }, (_, index) => ({
+              depth: index + 1,
+              label: `层级${index + 1}`,
+              suggestedCount: 8,
+              nodeTypes: ['地点'],
+            })),
+          },
+          factionSystem: Array.from({ length: 12 }, (_, index) => ({ name: `势力${index + 1}` })),
+          speciesSystem: Array.from({ length: 8 }, (_, index) => ({ name: `种族${index + 1}`, entityType: 'human' })),
+          powerSystems: Array.from({ length: 5 }, (_, index) => ({ name: `体系${index + 1}` })),
+        }),
+      }],
+      ],
+      [genres, [{ id: 11, name: '科幻群像' }]],
+      [templates, []],
+      [chapters, [
+        ...Array.from({ length: 519 }, (_, index) => ({
+          id: index + 1,
+          novelId: 1,
+          chapterNum: index + 1,
+          title: `第${index + 1}章`,
+          outline: '',
+          summary: index === 518 ? '主角团确认资源缺口。' : '',
+          nextChapterSeed: '',
+          continuityStateJson: index === 518
+            ? JSON.stringify({
+                continuity_notes: ['资源缺口必须承接'],
+                open_loops: ['多地点补给未闭合'],
+              })
+            : '{}',
+        })),
+        {
+          id: 520,
+          novelId: 1,
+          chapterNum: 520,
+          title: '多线会合',
+          outline,
+          summary: '',
+          nextChapterSeed: '',
+          continuityStateJson: '{}',
+        },
+      ]],
+      [characters, characterRows],
+      [storyItems, itemRows],
+      [worldMap, locationRows],
+      [storyArcs, []],
+      [storyThreads, []],
+      [timelineEvents, []],
+      [characterRelations, []],
+      [factions, factionRows],
+      [glossary, []],
+      [antiAiRuleHits, []],
+      [chapterGateRuns, []],
+    ])) as never)
+
+    const raw = await collectChapterContextRawData(1, 520)
+
+    expect(raw.mentionedCharacters).toContain('角色45')
+    expect(raw.mentionedItems).toContain('物品45')
+    expect(raw.mentionedLocations).toContain('地点45')
+    expect(raw.mentionedFactions).toContain('势力12')
+    expect(raw.contextParts.characterStates).toContain('角色45')
+    expect(raw.contextParts.itemSummary).toContain('物品45')
+    expect(raw.contextParts.mapSummary).toContain('地点45')
+    expect(raw.contextParts.worldRules).toContain('势力12')
+
+    vi.mocked(buildCharacterContextCards).mockReset()
+    vi.mocked(buildCharacterContextCards).mockReturnValue([])
+    vi.mocked(buildFactionContextCards).mockReset()
+    vi.mocked(buildFactionContextCards).mockReturnValue([])
+    vi.mocked(renderCharacterCards).mockReset()
+    vi.mocked(renderCharacterCards).mockReturnValue('')
+    vi.mocked(renderFactionCards).mockReset()
+    vi.mocked(renderFactionCards).mockReturnValue('')
+    vi.mocked(buildItemContextCards).mockReset()
+    vi.mocked(buildItemContextCards).mockReturnValue([])
+    vi.mocked(renderItemCards).mockReset()
+    vi.mocked(renderItemCards).mockReturnValue('')
   })
 
   it('keeps previous-chapter prior ahead of summary memory under a tight draft budget', () => {

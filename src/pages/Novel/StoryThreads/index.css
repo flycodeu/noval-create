@@ -63,6 +63,10 @@
   width: 100%;
 }
 
+.story-threads__generation-alert {
+  margin-bottom: 16px;
+}
+
 .story-threads__toolbar .novel-filter-bar__row {
   display: flex;
   flex-wrap: wrap;

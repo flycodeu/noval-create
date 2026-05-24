@@ -7,6 +7,7 @@ import type { MapAutoGenerateStatus, MapGraphPayload, MapNodeSummary, MapRelatio
 import { useNovelStore } from '../../../stores/novel.store'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { getBlueprintLevelByDepth, getFactionNameOptions, getMapBlueprintDepth, getMapNodeTypeOptions, parseWorldRulesJson } from '../../../shared/genre-system'
+import { scaleMapLayerCounts } from '../../../shared/creation-tools'
 import { buildDraftMessages, normalizeStringArray, parseDraftJson } from '../shared/ai-draft'
 import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel, WorkspaceStepGuide } from '../components/WorkspaceShell'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
@@ -210,10 +211,28 @@ export default function MapExplorerPage({ novelId }: Props) {
 
   const worldRules = useMemo(() => parseWorldRulesJson(currentNovel?.worldRulesJson, currentNovel?.genreName), [currentNovel?.genreName, currentNovel?.worldRulesJson])
   const blueprintLevels = useMemo(() => [...worldRules.mapBlueprint.levels].sort((a, b) => a.depth - b.depth), [worldRules.mapBlueprint.levels])
+  const scaledBlueprintLevels = useMemo(() => scaleMapLayerCounts(blueprintLevels, currentNovel?.genreName, {
+    launchMode: currentNovel?.launchMode,
+    targetWords: currentNovel?.targetWords,
+    settingsJson: currentNovel?.settingsJson,
+    mapDepth: blueprintLevels.length,
+    factionCount: worldRules.factionSystem.length,
+    speciesCount: worldRules.speciesSystem.length,
+    powerSystemCount: worldRules.powerSystems.length,
+  }), [
+    blueprintLevels,
+    currentNovel?.genreName,
+    currentNovel?.launchMode,
+    currentNovel?.settingsJson,
+    currentNovel?.targetWords,
+    worldRules.factionSystem.length,
+    worldRules.powerSystems.length,
+    worldRules.speciesSystem.length,
+  ])
   const maxDepth = getMapBlueprintDepth(worldRules)
   const factionOptions = useMemo(() => getFactionNameOptions(worldRules), [worldRules])
   const nodeTypeOptions = useMemo(() => getMapNodeTypeOptions(worldRules), [worldRules])
-  const initialBatchValues = useMemo(() => buildInitialBatchFormValues(blueprintLevels), [blueprintLevels])
+  const initialBatchValues = useMemo(() => buildInitialBatchFormValues(scaledBlueprintLevels), [scaledBlueprintLevels])
   const flattenedTree = useMemo(() => flattenTree(treeData), [treeData])
   const currentParent = branchPath[branchPath.length - 1] || null
   const currentDisplayPath = useMemo(() => {
@@ -1521,16 +1540,20 @@ export default function MapExplorerPage({ novelId }: Props) {
         cancelButtonProps={{ disabled: autoLoading }}
       >
         <Form form={batchForm} layout="vertical">
-          {blueprintLevels.map((level) => (
+          {blueprintLevels.map((level) => {
+            const scaledLevel = scaledBlueprintLevels.find((item) => item.depth === level.depth)
+            const recommendedCount = scaledLevel?.suggestedCount || level.suggestedCount
+            return (
             <Form.Item
               key={level.depth}
               name={`layer_${level.depth}`}
               label={level.depth === 1 ? `${level.label || '根层'}建议数量` : `第 ${level.depth} 层 · ${level.label || '节点'} 建议数量`}
-              initialValue={level.suggestedCount}
+              initialValue={recommendedCount}
+              tooltip={scaledLevel?.rationale}
             >
-              <InputNumber min={1} max={12} className="workspace-input-number-full" />
+              <InputNumber min={1} max={Math.max(12, recommendedCount)} addonAfter={recommendedCount !== level.suggestedCount ? '规模推荐' : undefined} className="workspace-input-number-full" />
             </Form.Item>
-          ))}
+          )})}
           <Form.Item name="parentBatchSize" label="每批父节点数量" initialValue={1}>
             <Select options={[1, 2, 3].map((value) => ({ value, label: `${value} 个父节点 / 批` }))} />
           </Form.Item>

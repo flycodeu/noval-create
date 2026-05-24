@@ -21,8 +21,16 @@ import type {
 import { getOperatingModeRuntimePolicy } from '../../src/shared/operating-mode'
 import type { StoryThreadBatchGenerateOptions, StoryThreadBatchGenerationResult } from '../../src/shared/story-thread-generation'
 import { hasResumableWorkflowCheckpoint } from '../../src/shared/workflow-resilience'
+import {
+  getFactionGenerationPreset,
+  getItemGenerationProfile,
+  getStoryThreadGenerationPreset,
+  getTimelineGenerationPreset,
+  type NovelAssetScaleInput,
+} from '../../src/shared/creation-tools'
+import { parseWorldRulesJson } from '../../src/shared/genre-system'
 import { getDb } from '../database/db'
-import { chapters, novels, tasks } from '../database/schema'
+import { characters, chapters, factions, genres, novels, tasks, worldMap } from '../database/schema'
 import { throwUserFacingError } from '../utils/user-facing-error'
 import { aiCheckChapter, generateChapterContent, getChapter } from './chapter.service'
 import { generateCharacterBatchChunk } from './character.service'
@@ -50,6 +58,10 @@ import {
 } from './batch-workbench.service'
 
 const DEFAULT_MAX_RETRIES = 2
+const MAX_FACTION_GENERATION_COUNT = 200
+const MAX_ENTITY_GENERATION_COUNT = 200
+const MAX_THREAD_GENERATION_COUNT = 160
+const MAX_SUBPLOT_GENERATION_COUNT = 40
 const activeBatchWorkflows = new Set<number>()
 const ACTIVE_BATCH_WORKFLOW_RUNNING_STATUSES = new Set(['pending', 'running', 'cancel_requested'])
 
@@ -185,11 +197,20 @@ function parseCharacterOptions(raw?: string | null): CharacterBatchGenerationOpt
   }
 }
 
-function parseFactionOptions(raw?: string | null): FactionBatchGenerationOptions {
+type ParsedFactionBatchGenerationOptions = Omit<FactionBatchGenerationOptions, 'count' | 'batchSize'> & {
+  count?: number
+  batchSize?: number
+}
+
+function parseFactionOptions(raw?: string | null): ParsedFactionBatchGenerationOptions {
   const record = asRecord(raw)
   return {
-    count: clampPositiveInt(record.count, 8, 1, 24),
-    batchSize: clampPositiveInt(record.batchSize, 1, 1, 6),
+    count: typeof record.count === 'undefined'
+      ? undefined
+      : clampPositiveInt(record.count, 8, 1, MAX_FACTION_GENERATION_COUNT),
+    batchSize: typeof record.batchSize === 'undefined'
+      ? undefined
+      : clampPositiveInt(record.batchSize, 1, 1, 8),
     preferredTypes: asStringArray(record.preferredTypes) as FactionBatchGenerationOptions['preferredTypes'],
     relationshipDensity: record.relationshipDensity === 'sparse' || record.relationshipDensity === 'dense'
       ? record.relationshipDensity
@@ -203,7 +224,9 @@ function parseFactionOptions(raw?: string | null): FactionBatchGenerationOptions
 function parseItemOptions(raw?: string | null): StoryItemGenerateOptions {
   const record = asRecord(raw)
   return {
-    count: clampPositiveInt(record.count, 8, 1, 24),
+    count: typeof record.count === 'undefined'
+      ? undefined
+      : clampPositiveInt(record.count, 8, 1, MAX_ENTITY_GENERATION_COUNT),
     batchSize: clampPositiveInt(record.batchSize, 4, 1, 12),
     focus: typeof record.focus === 'string' ? record.focus : '',
     refreshTemplates: record.refreshTemplates === true,
@@ -214,7 +237,9 @@ function parseItemOptions(raw?: string | null): StoryItemGenerateOptions {
 function parseTimelineOptions(raw?: string | null): TimelineGenerateOptions {
   const record = asRecord(raw)
   return {
-    count: clampPositiveInt(record.count, 10, 1, 24),
+    count: typeof record.count === 'undefined'
+      ? undefined
+      : clampPositiveInt(record.count, 10, 1, MAX_ENTITY_GENERATION_COUNT),
     batchSize: clampPositiveInt(record.batchSize, 4, 1, 12),
     focus: typeof record.focus === 'string' ? record.focus : '',
   }
@@ -223,8 +248,10 @@ function parseTimelineOptions(raw?: string | null): TimelineGenerateOptions {
 function parseThreadOptions(raw?: string | null): StoryThreadBatchGenerateOptions {
   const record = asRecord(raw)
   return {
-    count: clampPositiveInt(record.count, 8, 1, 20),
-    batchSize: clampPositiveInt(record.batchSize, 4, 1, 6),
+    count: typeof record.count === 'undefined'
+      ? undefined
+      : clampPositiveInt(record.count, 8, 1, MAX_THREAD_GENERATION_COUNT),
+    batchSize: clampPositiveInt(record.batchSize, 4, 1, 12),
     focus: typeof record.focus === 'string' ? record.focus : '',
   }
 }
@@ -233,11 +260,90 @@ function parseSubplotRequest(raw?: string | null): SubplotAutoGenerateRequest {
   const record = asRecord(raw)
   return {
     novelId: clampPositiveInt(record.novelId, 0, 0, Number.MAX_SAFE_INTEGER),
-    subplotCount: clampPositiveInt(record.subplotCount, 8, 1, 20),
+    subplotCount: clampPositiveInt(record.subplotCount, 8, 1, MAX_SUBPLOT_GENERATION_COUNT),
     storyGoal: typeof record.storyGoal === 'string' ? record.storyGoal : '',
     coreConflict: typeof record.coreConflict === 'string' ? record.coreConflict : '',
     mainPlot: typeof record.mainPlot === 'string' ? record.mainPlot : '',
     requirements: typeof record.requirements === 'string' ? record.requirements : undefined,
+  }
+}
+
+function resolveWorkflowAssetScale(novelId: number): { genreName?: string; scaleInput: NovelAssetScaleInput } {
+  const db = getDb()
+  const novel = db.select().from(novels).where(eq(novels.id, novelId)).get()
+  if (!novel) {
+    return { scaleInput: {} }
+  }
+  const genre = novel.genreId
+    ? db.select().from(genres).where(eq(genres.id, novel.genreId)).get()
+    : null
+  const genreName = typeof genre?.name === 'string' ? genre.name : undefined
+  const rules = parseWorldRulesJson(novel.worldRulesJson, genreName)
+  const mapRows = db.select().from(worldMap).where(eq(worldMap.novelId, novelId)).all()
+  const characterRows = db.select().from(characters).where(eq(characters.novelId, novelId)).all()
+  const factionRows = db.select().from(factions).where(eq(factions.novelId, novelId)).all()
+  return {
+    genreName,
+    scaleInput: {
+      launchMode: novel.launchMode,
+      targetWords: novel.targetWords,
+      settingsJson: novel.settingsJson,
+      mapDepth: Math.max(
+        ...rules.mapBlueprint.levels.map((level) => level.depth),
+        ...mapRows.map((row) => Number(row.level || 0)),
+        1,
+      ),
+      factionCount: Math.max(rules.factionSystem.length, factionRows.length),
+      speciesCount: Math.max(
+        rules.speciesSystem.length,
+        new Set(characterRows.map((character) => character.species).filter(Boolean)).size,
+      ),
+      powerSystemCount: rules.powerSystems.length,
+    },
+  }
+}
+
+function resolveFactionWorkflowOptions(novelId: number, raw?: string | null): FactionBatchGenerationOptions {
+  const parsed = parseFactionOptions(raw)
+  if (typeof parsed.count === 'number' && typeof parsed.batchSize === 'number') {
+    return parsed as FactionBatchGenerationOptions
+  }
+  const { genreName, scaleInput } = resolveWorkflowAssetScale(novelId)
+  const preset = getFactionGenerationPreset(genreName, scaleInput)
+  return {
+    ...parsed,
+    count: parsed.count ?? preset.count,
+    batchSize: parsed.batchSize ?? preset.batchSize,
+  }
+}
+
+function resolveItemWorkflowOptions(novelId: number, raw?: string | null): StoryItemGenerateOptions {
+  const parsed = parseItemOptions(raw)
+  if (typeof parsed.count === 'number') return parsed
+  const { genreName, scaleInput } = resolveWorkflowAssetScale(novelId)
+  return {
+    ...parsed,
+    count: getItemGenerationProfile(genreName, scaleInput).defaultBatch,
+  }
+}
+
+function resolveTimelineWorkflowOptions(novelId: number, raw?: string | null): TimelineGenerateOptions {
+  const parsed = parseTimelineOptions(raw)
+  if (typeof parsed.count === 'number') return parsed
+  const { genreName, scaleInput } = resolveWorkflowAssetScale(novelId)
+  return {
+    ...parsed,
+    count: getTimelineGenerationPreset(genreName, scaleInput).count,
+  }
+}
+
+function resolveThreadWorkflowOptions(novelId: number, raw?: string | null): StoryThreadBatchGenerateOptions {
+  const parsed = parseThreadOptions(raw)
+  if (typeof parsed.count === 'number') return parsed
+  const { genreName, scaleInput } = resolveWorkflowAssetScale(novelId)
+  return {
+    ...parsed,
+    count: getStoryThreadGenerationPreset(genreName, scaleInput).count,
   }
 }
 
@@ -366,9 +472,10 @@ function createBaseStatus(taskId: number, novelId: number, requestedCount: numbe
 
 function createInitialCharacterStatus(taskId: number, novelId: number, options: CharacterBatchGenerationOptions): CharacterAutoGenerateStatus {
   const requestedCount = options.majorCount + options.minorCount + (options.antagonistCount || 0) + (options.supportingCount || 0)
-  const totalBatches = Math.max(1, Math.max(3, requestedCount))
+  const batchSize = Math.max(1, options.batchSize)
+  const totalBatches = Math.max(1, Math.ceil(requestedCount / batchSize))
   return {
-    ...createBaseStatus(taskId, novelId, requestedCount, Math.max(1, options.batchSize), totalBatches),
+    ...createBaseStatus(taskId, novelId, requestedCount, batchSize, totalBatches),
     acceptedIds: [],
     warnings: [],
     majorGenerated: 0,
@@ -382,8 +489,8 @@ function createInitialFactionStatus(taskId: number, novelId: number, options: Fa
   return createInitialEntityStatus(
     taskId,
     novelId,
-    clampPositiveInt(options.count, 8, 1, 24),
-    clampPositiveInt(options.batchSize, 1, 1, 6),
+    clampPositiveInt(options.count, 8, 1, MAX_FACTION_GENERATION_COUNT),
+    clampPositiveInt(options.batchSize, 1, 1, 8),
   )
 }
 
@@ -412,7 +519,7 @@ function toCharacterStatus(taskId: number, task: TaskRow): CharacterAutoGenerate
 }
 
 function toFactionStatus(taskId: number, task: TaskRow): FactionAutoGenerateStatus {
-  const options = parseFactionOptions(task.inputJson)
+  const options = resolveFactionWorkflowOptions(task.novelId || 0, task.inputJson)
   return toEntityStatus(taskId, task, {
     requestedCount: options.count,
     batchSize: options.batchSize,
@@ -456,8 +563,8 @@ function toEntityStatus(
 }
 
 function createInitialThreadStatus(taskId: number, novelId: number, options: StoryThreadBatchGenerateOptions): StoryThreadAutoGenerateStatus {
-  const requestedCount = clampPositiveInt(options.count, 8, 1, 20)
-  const batchSize = clampPositiveInt(options.batchSize, Math.min(requestedCount, 4), 1, 6)
+  const requestedCount = clampPositiveInt(options.count, 8, 1, MAX_THREAD_GENERATION_COUNT)
+  const batchSize = clampPositiveInt(options.batchSize, Math.min(requestedCount, 4), 1, 12)
   return {
     ...createBaseStatus(taskId, novelId, requestedCount, batchSize, Math.max(1, Math.ceil(requestedCount / Math.max(1, batchSize)))),
     acceptedIds: [],
@@ -467,7 +574,7 @@ function createInitialThreadStatus(taskId: number, novelId: number, options: Sto
 
 function toThreadStatus(taskId: number, task: TaskRow): StoryThreadAutoGenerateStatus {
   const progress = parseTaskProgress<Partial<StoryThreadAutoGenerateStatus>>(task)
-  const fallback = createInitialThreadStatus(taskId, task.novelId || 0, parseThreadOptions(task.inputJson))
+  const fallback = createInitialThreadStatus(taskId, task.novelId || 0, resolveThreadWorkflowOptions(task.novelId || 0, task.inputJson))
   return {
     ...fallback,
     status: task.status as StoryThreadAutoGenerateStatus['status'],
@@ -485,7 +592,7 @@ function toThreadStatus(taskId: number, task: TaskRow): StoryThreadAutoGenerateS
 }
 
 function createInitialSubplotStatus(taskId: number, request: SubplotAutoGenerateRequest): SubplotAutoGenerateStatus {
-  const requestedCount = clampPositiveInt(request.subplotCount, 8, 1, 20)
+  const requestedCount = clampPositiveInt(request.subplotCount, 8, 1, MAX_SUBPLOT_GENERATION_COUNT)
   const batchSize = Math.min(3, requestedCount)
   return {
     ...createBaseStatus(taskId, request.novelId, requestedCount, batchSize, Math.max(1, Math.ceil(requestedCount / Math.max(1, batchSize)))),
@@ -702,7 +809,7 @@ function getBatchWorkflowProgress(taskId: number, task: TaskRow): BatchWorkflowP
   }
 
   if (task.type === 'item_auto_generate') {
-    const options = parseItemOptions(task.inputJson)
+    const options = resolveItemWorkflowOptions(task.novelId || 0, task.inputJson)
     return toEntityStatus(taskId, task, {
       requestedCount: options.count || 8,
       batchSize: options.batchSize || 4,
@@ -710,7 +817,7 @@ function getBatchWorkflowProgress(taskId: number, task: TaskRow): BatchWorkflowP
   }
 
   if (task.type === 'timeline_auto_generate') {
-    const options = parseTimelineOptions(task.inputJson)
+    const options = resolveTimelineWorkflowOptions(task.novelId || 0, task.inputJson)
     return toEntityStatus(taskId, task, {
       requestedCount: options.count || 10,
       batchSize: options.batchSize || 4,
@@ -803,7 +910,7 @@ async function runCharacterAutoGenerateWorkflow(taskId: number, sender?: WebCont
         break
       }
 
-      if (progress.completed || progress.generatedCount >= progress.requestedCount || progress.resumeCursor >= progress.totalBatches) {
+      if (progress.requestedCount <= 0 || progress.generatedCount >= progress.requestedCount) {
         const done = {
           ...progress,
           status: 'success' as const,
@@ -815,34 +922,80 @@ async function runCharacterAutoGenerateWorkflow(taskId: number, sender?: WebCont
         break
       }
 
+      const maxAttempts = Math.max(
+        Math.ceil(progress.requestedCount / Math.max(1, progress.batchSize)) + DEFAULT_MAX_RETRIES,
+        progress.requestedCount * 2,
+      )
+      if (progress.resumeCursor >= maxAttempts) {
+        const paused = {
+          ...progress,
+          status: 'paused' as const,
+          completed: false,
+          lastError: `人物批量任务达到最大尝试次数，当前仅生成 ${progress.generatedCount}/${progress.requestedCount} 位角色。`,
+          message: '已达到最大尝试次数，仍未补齐人物配额。请调整角色要求或减少数量后继续。',
+        }
+        updateTaskProgress(taskId, paused, sender)
+        updateTaskStatus(taskId, 'paused', sender, { errorMessage: paused.lastError, currentChildTaskId: null })
+        break
+      }
+
+      const effectiveTotalBatches = Math.max(
+        progress.totalBatches,
+        progress.resumeCursor + Math.ceil(Math.max(1, progress.requestedCount - progress.generatedCount) / Math.max(1, progress.batchSize)),
+      )
       const currentBatch = progress.resumeCursor + 1
       updateTaskProgress(taskId, {
         ...progress,
         status: 'running',
+        totalBatches: effectiveTotalBatches,
         currentBatch,
-        message: `正在执行第 ${currentBatch}/${progress.totalBatches} 批人物生成。`,
+        completed: false,
+        message: `正在执行第 ${currentBatch}/${effectiveTotalBatches} 批人物生成。`,
       }, sender)
 
       try {
-        const remaining = {
-          ...options,
+        const remainingCounts = {
           majorCount: Math.max(0, options.majorCount - progress.majorGenerated),
           minorCount: Math.max(0, options.minorCount - progress.minorGenerated),
           antagonistCount: Math.max(0, (options.antagonistCount || 0) - progress.antagonistGenerated),
           supportingCount: Math.max(0, (options.supportingCount || 0) - progress.supportingGenerated),
         }
+        const remainingRoleQueue = [
+          ...Array.from({ length: remainingCounts.majorCount }, () => 'major' as const),
+          ...Array.from({ length: remainingCounts.antagonistCount }, () => 'antagonist' as const),
+          ...Array.from({ length: remainingCounts.supportingCount }, () => 'supporting' as const),
+          ...Array.from({ length: remainingCounts.minorCount }, () => 'minor' as const),
+        ]
+        const batchRoleQueue = remainingRoleQueue.slice(0, Math.max(1, Math.min(progress.batchSize, remainingRoleQueue.length)))
+        const countRole = (role: typeof batchRoleQueue[number]) => batchRoleQueue.filter((item) => item === role).length
+        const remaining = {
+          ...options,
+          majorCount: countRole('major'),
+          minorCount: countRole('minor'),
+          antagonistCount: countRole('antagonist'),
+          supportingCount: countRole('supporting'),
+          batchSize: Math.max(1, batchRoleQueue.length),
+        }
         const result = await generateCharacterBatchChunk(latestTask.novelId, remaining, {
           parentTaskId: taskId,
           sender,
           batchIndex: currentBatch,
-          totalBatches: progress.totalBatches,
+          totalBatches: effectiveTotalBatches,
         })
+        const nextGeneratedCount = progress.generatedCount + result.ids.length
+        const nextTotalBatches = nextGeneratedCount >= progress.requestedCount
+          ? effectiveTotalBatches
+          : Math.max(
+              effectiveTotalBatches,
+              progress.resumeCursor + 1 + Math.ceil((progress.requestedCount - nextGeneratedCount) / Math.max(1, progress.batchSize)),
+            )
         const nextProgress: CharacterAutoGenerateStatus = {
           ...progress,
           status: 'running',
+          totalBatches: nextTotalBatches,
           currentBatch,
           resumeCursor: progress.resumeCursor + 1,
-          generatedCount: progress.generatedCount + result.ids.length,
+          generatedCount: nextGeneratedCount,
           retryCount: 0,
           lastError: '',
           acceptedIds: [...progress.acceptedIds, ...result.ids],
@@ -852,10 +1005,10 @@ async function runCharacterAutoGenerateWorkflow(taskId: number, sender?: WebCont
           minorGenerated: progress.minorGenerated + result.minorGenerated,
           antagonistGenerated: progress.antagonistGenerated + result.antagonistGenerated,
           supportingGenerated: progress.supportingGenerated + result.supportingGenerated,
-          completed: progress.generatedCount + result.ids.length >= progress.requestedCount || progress.resumeCursor + 1 >= progress.totalBatches,
+          completed: nextGeneratedCount >= progress.requestedCount,
           message: result.ids.length > 0
-            ? `第 ${currentBatch}/${progress.totalBatches} 批已完成，新增 ${result.ids.length} 位角色。`
-            : (result.warning || `第 ${currentBatch}/${progress.totalBatches} 批未生成可用人物。`),
+            ? `第 ${currentBatch}/${nextTotalBatches} 批已完成，新增 ${result.ids.length} 位角色。`
+            : (result.warning || `第 ${currentBatch}/${nextTotalBatches} 批未生成可用人物。`),
         }
         updateTaskControl(taskId, { ...parseTaskControl(latestTask), cancelRequested: false, maxRetries: DEFAULT_MAX_RETRIES, retryCount: 0 })
         updateTaskProgress(taskId, nextProgress, sender)
@@ -904,16 +1057,16 @@ async function runSimpleEntityWorkflow(
     const task = getRunningTask(taskId, sender)
     if (!task.progressJson) {
       if (type === 'faction') {
-        const opts = parseFactionOptions(task.inputJson)
+        const opts = resolveFactionWorkflowOptions(task.novelId || 0, task.inputJson)
         updateTaskProgress(taskId, createInitialFactionStatus(taskId, task.novelId || 0, opts), sender)
       } else if (type === 'item') {
-        const opts = parseItemOptions(task.inputJson)
+        const opts = resolveItemWorkflowOptions(task.novelId || 0, task.inputJson)
         updateTaskProgress(taskId, createInitialEntityStatus(taskId, task.novelId || 0, opts.count || 8, opts.batchSize || 4), sender)
       } else if (type === 'timeline') {
-        const opts = parseTimelineOptions(task.inputJson)
+        const opts = resolveTimelineWorkflowOptions(task.novelId || 0, task.inputJson)
         updateTaskProgress(taskId, createInitialEntityStatus(taskId, task.novelId || 0, opts.count || 10, opts.batchSize || 4), sender)
       } else {
-        updateTaskProgress(taskId, createInitialThreadStatus(taskId, task.novelId || 0, parseThreadOptions(task.inputJson)), sender)
+        updateTaskProgress(taskId, createInitialThreadStatus(taskId, task.novelId || 0, resolveThreadWorkflowOptions(task.novelId || 0, task.inputJson)), sender)
       }
     }
 
@@ -927,10 +1080,10 @@ async function runSimpleEntityWorkflow(
             taskId,
             latestTask,
             type === 'faction'
-              ? { requestedCount: parseFactionOptions(latestTask.inputJson).count || 8, batchSize: parseFactionOptions(latestTask.inputJson).batchSize || 1 }
+              ? { requestedCount: resolveFactionWorkflowOptions(latestTask.novelId || 0, latestTask.inputJson).count || 8, batchSize: resolveFactionWorkflowOptions(latestTask.novelId || 0, latestTask.inputJson).batchSize || 1 }
               : type === 'item'
-              ? { requestedCount: parseItemOptions(latestTask.inputJson).count || 8, batchSize: parseItemOptions(latestTask.inputJson).batchSize || 4 }
-              : { requestedCount: parseTimelineOptions(latestTask.inputJson).count || 10, batchSize: parseTimelineOptions(latestTask.inputJson).batchSize || 4 },
+              ? { requestedCount: resolveItemWorkflowOptions(latestTask.novelId || 0, latestTask.inputJson).count || 8, batchSize: resolveItemWorkflowOptions(latestTask.novelId || 0, latestTask.inputJson).batchSize || 4 }
+              : { requestedCount: resolveTimelineWorkflowOptions(latestTask.novelId || 0, latestTask.inputJson).count || 10, batchSize: resolveTimelineWorkflowOptions(latestTask.novelId || 0, latestTask.inputJson).batchSize || 4 },
           )
 
       if (control.cancelRequested) {
@@ -939,7 +1092,7 @@ async function runSimpleEntityWorkflow(
         break
       }
 
-      if (progress.completed || progress.resumeCursor >= progress.totalBatches) {
+      if (progress.completed || progress.generatedCount >= progress.requestedCount) {
         const done = {
           ...progress,
           status: 'success' as const,
@@ -951,79 +1104,110 @@ async function runSimpleEntityWorkflow(
         break
       }
 
+      const maxAttempts = Math.max(
+        Math.ceil(progress.requestedCount / Math.max(1, progress.batchSize)) + DEFAULT_MAX_RETRIES,
+        progress.requestedCount * 2,
+      )
+      if (progress.resumeCursor >= maxAttempts) {
+        const paused = {
+          ...progress,
+          status: 'paused' as const,
+          completed: false,
+          lastError: `批量任务达到最大尝试次数，当前仅生成 ${progress.generatedCount}/${progress.requestedCount} 条。`,
+          message: `已达到最大尝试次数，仍未补齐目标数量。请调整聚焦方向或减少目标后继续。`,
+        }
+        updateTaskProgress(taskId, paused, sender)
+        updateTaskStatus(taskId, 'paused', sender, { errorMessage: paused.lastError, currentChildTaskId: null })
+        break
+      }
+
+      const effectiveTotalBatches = Math.max(
+        progress.totalBatches,
+        progress.resumeCursor + Math.ceil(Math.max(1, progress.requestedCount - progress.generatedCount) / Math.max(1, progress.batchSize)),
+      )
       const currentBatch = progress.resumeCursor + 1
       updateTaskProgress(taskId, {
         ...progress,
+        totalBatches: effectiveTotalBatches,
         status: 'running',
         currentBatch,
-        message: `正在执行第 ${currentBatch}/${progress.totalBatches} 批。`,
+        completed: false,
+        message: `正在执行第 ${currentBatch}/${effectiveTotalBatches} 批。`,
       }, sender)
 
       try {
         const batchCount = Math.min(progress.batchSize, Math.max(0, progress.requestedCount - progress.generatedCount))
         const result = type === 'faction'
           ? await generateFactionBatchChunk(latestTask.novelId, {
-              ...parseFactionOptions(latestTask.inputJson),
+              ...resolveFactionWorkflowOptions(latestTask.novelId, latestTask.inputJson),
               count: batchCount,
               batchSize: batchCount,
             }, {
               parentTaskId: taskId,
               sender,
               batchIndex: currentBatch,
-              totalBatches: progress.totalBatches,
+              totalBatches: effectiveTotalBatches,
             })
           : type === 'item'
           ? await generateStoryItemsBatchChunk(latestTask.novelId, {
-              ...parseItemOptions(latestTask.inputJson),
+              ...resolveItemWorkflowOptions(latestTask.novelId, latestTask.inputJson),
               count: batchCount,
               batchSize: batchCount,
             }, {
               parentTaskId: taskId,
               sender,
               batchIndex: currentBatch,
-              totalBatches: progress.totalBatches,
+              totalBatches: effectiveTotalBatches,
             })
           : type === 'timeline'
             ? await generateTimelineBatchChunk(latestTask.novelId, {
-                ...parseTimelineOptions(latestTask.inputJson),
+                ...resolveTimelineWorkflowOptions(latestTask.novelId, latestTask.inputJson),
                 count: batchCount,
                 batchSize: batchCount,
               }, {
                 parentTaskId: taskId,
                 sender,
                 batchIndex: currentBatch,
-                totalBatches: progress.totalBatches,
+                totalBatches: effectiveTotalBatches,
               })
             : await generateStoryThreadBatchChunk(latestTask.novelId, {
-                ...parseThreadOptions(latestTask.inputJson),
+                ...resolveThreadWorkflowOptions(latestTask.novelId, latestTask.inputJson),
                 count: batchCount,
                 batchSize: batchCount,
               }, {
                 parentTaskId: taskId,
                 sender,
                 batchIndex: currentBatch,
-                totalBatches: progress.totalBatches,
+                totalBatches: effectiveTotalBatches,
               })
 
         const chunkWarnings = 'warnings' in result ? result.warnings : result.warning
         const nextWarnings = mergeWarnings(progress.warnings, chunkWarnings)
+        const nextGeneratedCount = progress.generatedCount + result.ids.length
+        const nextTotalBatches = nextGeneratedCount >= progress.requestedCount
+          ? effectiveTotalBatches
+          : Math.max(
+              effectiveTotalBatches,
+              progress.resumeCursor + 1 + Math.ceil((progress.requestedCount - nextGeneratedCount) / Math.max(1, progress.batchSize)),
+            )
         const nextProgress = {
           ...progress,
           status: 'running' as const,
+          totalBatches: nextTotalBatches,
           currentBatch,
           resumeCursor: progress.resumeCursor + 1,
-          generatedCount: progress.generatedCount + result.ids.length,
+          generatedCount: nextGeneratedCount,
           retryCount: 0,
           lastError: '',
           acceptedIds: [...progress.acceptedIds, ...result.ids],
           warnings: nextWarnings,
           batchDigest: result.batchDigest || progress.batchDigest,
-          completed: progress.resumeCursor + 1 >= progress.totalBatches,
+          completed: nextGeneratedCount >= progress.requestedCount,
           message: result.ids.length > 0
-            ? `第 ${currentBatch}/${progress.totalBatches} 批已完成，新增 ${result.ids.length} 条。`
+            ? `第 ${currentBatch}/${nextTotalBatches} 批已完成，新增 ${result.ids.length} 条。`
             : (Array.isArray(chunkWarnings)
-              ? (chunkWarnings[0] || `第 ${currentBatch}/${progress.totalBatches} 批没有生成可用结果。`)
-              : (chunkWarnings || `第 ${currentBatch}/${progress.totalBatches} 批没有生成可用结果。`)),
+              ? (chunkWarnings[0] || `第 ${currentBatch}/${nextTotalBatches} 批没有生成可用结果。`)
+              : (chunkWarnings || `第 ${currentBatch}/${nextTotalBatches} 批没有生成可用结果。`)),
         }
         updateTaskControl(taskId, { ...parseTaskControl(latestTask), cancelRequested: false, maxRetries: DEFAULT_MAX_RETRIES, retryCount: 0 })
         updateTaskProgress(taskId, nextProgress, sender)
@@ -1036,10 +1220,10 @@ async function runSimpleEntityWorkflow(
               taskId,
               currentTask,
               type === 'faction'
-                ? { requestedCount: parseFactionOptions(currentTask.inputJson).count || 8, batchSize: parseFactionOptions(currentTask.inputJson).batchSize || 1 }
+                ? { requestedCount: resolveFactionWorkflowOptions(currentTask.novelId || 0, currentTask.inputJson).count || 8, batchSize: resolveFactionWorkflowOptions(currentTask.novelId || 0, currentTask.inputJson).batchSize || 1 }
                 : type === 'item'
-                ? { requestedCount: parseItemOptions(currentTask.inputJson).count || 8, batchSize: parseItemOptions(currentTask.inputJson).batchSize || 4 }
-                : { requestedCount: parseTimelineOptions(currentTask.inputJson).count || 10, batchSize: parseTimelineOptions(currentTask.inputJson).batchSize || 4 },
+                ? { requestedCount: resolveItemWorkflowOptions(currentTask.novelId || 0, currentTask.inputJson).count || 8, batchSize: resolveItemWorkflowOptions(currentTask.novelId || 0, currentTask.inputJson).batchSize || 4 }
+                : { requestedCount: resolveTimelineWorkflowOptions(currentTask.novelId || 0, currentTask.inputJson).count || 10, batchSize: resolveTimelineWorkflowOptions(currentTask.novelId || 0, currentTask.inputJson).batchSize || 4 },
             )
         const nextRetryCount = (currentControl.retryCount || 0) + 1
         const errorMessage = error instanceof Error ? error.message : '批量生成失败'
@@ -1572,7 +1756,7 @@ async function runSubplotAutoGenerateWorkflow(taskId: number, sender?: WebConten
       }
 
       try {
-        if (progress.resumeCursor >= progress.totalBatches) {
+        if (progress.generatedCount >= progress.requestedCount) {
           const polished = await polishGeneratedSubplots(
             context,
             request.storyGoal,
@@ -1580,7 +1764,7 @@ async function runSubplotAutoGenerateWorkflow(taskId: number, sender?: WebConten
             request.mainPlot,
             progress.subplots,
           )
-          const success = polished.subplots.length > 0
+          const success = polished.subplots.length >= progress.requestedCount
           const done: SubplotAutoGenerateStatus = {
             ...progress,
             status: success ? 'success' : 'failed',
@@ -1601,12 +1785,53 @@ async function runSubplotAutoGenerateWorkflow(taskId: number, sender?: WebConten
           break
         }
 
+        const maxAttempts = Math.max(
+          Math.ceil(progress.requestedCount / Math.max(1, progress.batchSize)) + DEFAULT_MAX_RETRIES,
+          progress.requestedCount * 2,
+        )
+        if (progress.resumeCursor >= maxAttempts) {
+          const polished = await polishGeneratedSubplots(
+            context,
+            request.storyGoal,
+            request.coreConflict,
+            request.mainPlot,
+            progress.subplots,
+          )
+          const partial = polished.subplots.length > 0
+          const message = partial
+            ? `支线批量任务达到最大尝试次数，当前仅生成 ${polished.subplots.length}/${progress.requestedCount} 条支线。请调整聚焦方向或减少目标后继续。`
+            : '支线批量任务达到最大尝试次数，未产出可用结果。'
+          const stopped: SubplotAutoGenerateStatus = {
+            ...progress,
+            status: partial ? 'paused' : 'failed',
+            completed: false,
+            subplots: polished.subplots,
+            warnings: mergeWarnings(progress.warnings, polished.warning),
+            generatedCount: polished.subplots.length,
+            lastError: message,
+            message,
+          }
+          updateTaskProgress(taskId, stopped, sender)
+          updateTaskStatus(taskId, partial ? 'paused' : 'failed', sender, {
+            outputText: partial ? undefined : stopped.message,
+            errorMessage: stopped.message,
+            currentChildTaskId: null,
+          })
+          break
+        }
+
+        const effectiveTotalBatches = Math.max(
+          progress.totalBatches,
+          progress.resumeCursor + Math.ceil(Math.max(1, progress.requestedCount - progress.generatedCount) / Math.max(1, progress.batchSize)),
+        )
         const currentBatch = progress.resumeCursor + 1
         updateTaskProgress(taskId, {
           ...progress,
           status: 'running',
+          totalBatches: effectiveTotalBatches,
           currentBatch,
-          message: `正在执行第 ${currentBatch}/${progress.totalBatches} 批支线生成。`,
+          completed: false,
+          message: `正在执行第 ${currentBatch}/${effectiveTotalBatches} 批支线生成。`,
         }, sender)
 
         const batchCount = Math.min(progress.batchSize, Math.max(0, progress.requestedCount - progress.generatedCount))
@@ -1618,7 +1843,7 @@ async function runSubplotAutoGenerateWorkflow(taskId: number, sender?: WebConten
           batchCount,
           progress.subplots,
           currentBatch,
-          progress.totalBatches,
+          effectiveTotalBatches,
           {
             parentTaskId: taskId,
             sender,
@@ -1626,6 +1851,12 @@ async function runSubplotAutoGenerateWorkflow(taskId: number, sender?: WebConten
         )
 
         const nextSubplots = batchResult ? [...progress.subplots, ...batchResult.accepted] : progress.subplots
+        const nextTotalBatches = nextSubplots.length >= progress.requestedCount
+          ? effectiveTotalBatches
+          : Math.max(
+              effectiveTotalBatches,
+              progress.resumeCursor + 1 + Math.ceil((progress.requestedCount - nextSubplots.length) / Math.max(1, progress.batchSize)),
+            )
         const nextWarnings = mergeWarnings(progress.warnings, [
           warning || '',
           batchResult?.warningMessage || '',
@@ -1633,18 +1864,19 @@ async function runSubplotAutoGenerateWorkflow(taskId: number, sender?: WebConten
         const nextProgress: SubplotAutoGenerateStatus = {
           ...progress,
           status: 'running',
+          totalBatches: nextTotalBatches,
           currentBatch,
           resumeCursor: progress.resumeCursor + 1,
           generatedCount: nextSubplots.length,
           retryCount: 0,
           lastError: '',
-          completed: progress.resumeCursor + 1 >= progress.totalBatches,
+          completed: nextSubplots.length >= progress.requestedCount,
           subplots: nextSubplots,
           warnings: nextWarnings,
           batchDigest: batchResult?.accepted.slice(0, 2).map((item) => item.name).join('、') || progress.batchDigest,
           message: batchResult
-            ? `第 ${currentBatch}/${progress.totalBatches} 批已完成，新增 ${batchResult.accepted.length} 条支线。`
-            : (warning || `第 ${currentBatch}/${progress.totalBatches} 批未生成可用支线。`),
+            ? `第 ${currentBatch}/${nextTotalBatches} 批已完成，新增 ${batchResult.accepted.length} 条支线。`
+            : (warning || `第 ${currentBatch}/${nextTotalBatches} 批未生成可用支线。`),
         }
         updateTaskControl(taskId, {
           ...parseTaskControl(latestTask),
@@ -1750,7 +1982,7 @@ export async function startFactionAutoGenerateWorkflow(novelId: number, options:
   if (existing && ['pending', 'running', 'cancel_requested'].includes(existing.status || '')) return existing.id
   if (existing?.status === 'paused') throwUserFacingError('batch.factionPausedExists')
 
-  const normalized = parseFactionOptions(JSON.stringify(options))
+  const normalized = resolveFactionWorkflowOptions(novelId, JSON.stringify(options))
   const initial = createInitialFactionStatus(0, novelId, normalized)
   const taskId = await createTask({
     type: 'faction_auto_generate',
@@ -1790,7 +2022,7 @@ export async function startItemAutoGenerateWorkflow(novelId: number, options: St
   if (existing && ['pending', 'running', 'cancel_requested'].includes(existing.status || '')) return existing.id
   if (existing?.status === 'paused') throwUserFacingError('batch.itemPausedExists')
 
-  const normalized = parseItemOptions(JSON.stringify(options))
+  const normalized = resolveItemWorkflowOptions(novelId, JSON.stringify(options))
   const initial = createInitialEntityStatus(0, novelId, normalized.count || 8, normalized.batchSize || 4)
   const taskId = await createTask({
     type: 'item_auto_generate',
@@ -1810,7 +2042,7 @@ export async function startTimelineAutoGenerateWorkflow(novelId: number, options
   if (existing && ['pending', 'running', 'cancel_requested'].includes(existing.status || '')) return existing.id
   if (existing?.status === 'paused') throwUserFacingError('batch.timelinePausedExists')
 
-  const normalized = parseTimelineOptions(JSON.stringify(options))
+  const normalized = resolveTimelineWorkflowOptions(novelId, JSON.stringify(options))
   const initial = createInitialEntityStatus(0, novelId, normalized.count || 10, normalized.batchSize || 4)
   const taskId = await createTask({
     type: 'timeline_auto_generate',
@@ -1830,7 +2062,7 @@ export async function startStoryThreadAutoGenerateWorkflow(novelId: number, opti
   if (existing && ['pending', 'running', 'cancel_requested'].includes(existing.status || '')) return existing.id
   if (existing?.status === 'paused') throwUserFacingError('batch.threadPausedExists')
 
-  const normalized = parseThreadOptions(JSON.stringify(options))
+  const normalized = resolveThreadWorkflowOptions(novelId, JSON.stringify(options))
   const initial = createInitialThreadStatus(0, novelId, normalized)
   const taskId = await createTask({
     type: 'story_thread_auto_generate',
@@ -1966,14 +2198,14 @@ export function getFactionAutoGenerateStatus(taskId: number) {
 export function getItemAutoGenerateStatus(taskId: number) {
   const task = reconcileStaleBatchWorkflowTask(getTaskRecord(taskId))
   return task?.type === 'item_auto_generate'
-    ? toEntityStatus(taskId, task, { requestedCount: parseItemOptions(task.inputJson).count || 8, batchSize: parseItemOptions(task.inputJson).batchSize || 4 })
+    ? toEntityStatus(taskId, task, { requestedCount: resolveItemWorkflowOptions(task.novelId || 0, task.inputJson).count || 8, batchSize: resolveItemWorkflowOptions(task.novelId || 0, task.inputJson).batchSize || 4 })
     : null
 }
 
 export function getTimelineAutoGenerateStatus(taskId: number) {
   const task = reconcileStaleBatchWorkflowTask(getTaskRecord(taskId))
   return task?.type === 'timeline_auto_generate'
-    ? toEntityStatus(taskId, task, { requestedCount: parseTimelineOptions(task.inputJson).count || 10, batchSize: parseTimelineOptions(task.inputJson).batchSize || 4 })
+    ? toEntityStatus(taskId, task, { requestedCount: resolveTimelineWorkflowOptions(task.novelId || 0, task.inputJson).count || 10, batchSize: resolveTimelineWorkflowOptions(task.novelId || 0, task.inputJson).batchSize || 4 })
     : null
 }
 
@@ -2128,7 +2360,7 @@ export async function generateStoryThreadsViaWorkflow(novelId: number, options: 
   const status = getStoryThreadAutoGenerateStatus(taskId)
   return {
     ids: status?.acceptedIds || [],
-    requestedCount: status?.requestedCount || clampPositiveInt(options.count, 8, 1, 20),
+    requestedCount: status?.requestedCount || clampPositiveInt(options.count, 8, 1, MAX_THREAD_GENERATION_COUNT),
     createdCount: status?.generatedCount || 0,
     warnings: status?.warnings || [],
   }
@@ -2142,12 +2374,28 @@ export async function generateSubplotsViaWorkflow(request: SubplotAutoGenerateRe
 }
 
 export const __testing = {
+  createInitialCharacterStatus,
   createInitialChapterBatchStatus,
   createInitialChapterQualityAnalysisStatus,
+  createInitialEntityStatus,
+  createInitialFactionStatus,
+  createInitialThreadStatus,
   parseChapterBatchOptions,
   parseChapterQualityAnalysisOptions,
+  parseFactionOptions,
+  parseItemOptions,
+  parseSubplotRequest,
+  parseTimelineOptions,
+  parseThreadOptions,
+  resolveFactionWorkflowOptions,
+  resolveItemWorkflowOptions,
+  resolveTimelineWorkflowOptions,
+  resolveThreadWorkflowOptions,
+  createInitialSubplotStatus,
+  runCharacterAutoGenerateWorkflow,
   runChapterBatchGenerateWorkflow,
   runChapterQualityAnalysisWorkflow,
+  runSimpleEntityWorkflow,
   toChapterBatchStatus,
   toChapterQualityAnalysisStatus,
   runSubplotAutoGenerateWorkflow,

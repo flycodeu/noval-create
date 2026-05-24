@@ -162,6 +162,15 @@ function buildRoleQueue(opts: {
   ]
 }
 
+function countRoleQueue(queue: Array<'major' | 'minor' | 'antagonist' | 'supporting'>) {
+  return {
+    majorCount: queue.filter((role) => role === 'major').length,
+    antagonistCount: queue.filter((role) => role === 'antagonist').length,
+    supportingCount: queue.filter((role) => role === 'supporting').length,
+    minorCount: queue.filter((role) => role === 'minor').length,
+  }
+}
+
 export interface CharacterBatchChunkResult {
   ids: number[]
   majorGenerated: number
@@ -1246,9 +1255,10 @@ export async function generateCharacterBatchChunk(
   const protagonist = existingChars.find((character) => character.roleType === 'protagonist')
   const protagonistSummary = protagonist ? buildCharacterSummary(protagonist) : '主角未设定'
   const existingCharacterSummaries = buildExistingCharacterDigest(existingChars)
-  const roleBlueprint = buildRoleBlueprintSummary(opts)
   const itemSummary = buildItemResourceSummary(itemRows)
-  const roleQueue = buildRoleQueue(opts)
+  const fullRoleQueue = buildRoleQueue(opts)
+  const batchSize = Math.max(1, Math.min(opts.batchSize || fullRoleQueue.length || 1, fullRoleQueue.length || 1))
+  const roleQueue = fullRoleQueue.slice(0, batchSize)
   const totalCount = roleQueue.length
   if (totalCount <= 0) {
     return {
@@ -1259,13 +1269,21 @@ export async function generateCharacterBatchChunk(
       supportingGenerated: 0,
     }
   }
+  const chunkCounts = countRoleQueue(roleQueue)
+  const chunkOptions = {
+    ...opts,
+    ...chunkCounts,
+    batchSize,
+  }
+  const roleBlueprint = buildRoleBlueprintSummary(chunkOptions)
 
   const specialRequirements = [
-    opts.specialRequirements,
-    `角色配额：主要人物 ${opts.majorCount}，反派 ${opts.antagonistCount || 0}，功能角色 ${opts.supportingCount || 0}，次要人物 ${opts.minorCount}。`,
-    opts.preferredSpecies && opts.preferredSpecies.length > 0 ? `优先种族或实体：${opts.preferredSpecies.join('、')}。` : '',
-    opts.factionBias && opts.factionBias.length > 0 ? `优先势力来源：${opts.factionBias.join('、')}。` : '',
-    opts.helperRoles && opts.helperRoles.length > 0 ? `优先补齐这些角色功能位：${opts.helperRoles.join('、')}。` : '',
+    chunkOptions.specialRequirements,
+    `本批角色配额：主要人物 ${chunkOptions.majorCount}，反派 ${chunkOptions.antagonistCount || 0}，功能角色 ${chunkOptions.supportingCount || 0}，次要人物 ${chunkOptions.minorCount}。`,
+    fullRoleQueue.length > roleQueue.length ? `全量剩余配额仍有 ${fullRoleQueue.length} 位，本批只生成 ${roleQueue.length} 位，后续批次继续补齐。` : '',
+    chunkOptions.preferredSpecies && chunkOptions.preferredSpecies.length > 0 ? `优先种族或实体：${chunkOptions.preferredSpecies.join('、')}。` : '',
+    chunkOptions.factionBias && chunkOptions.factionBias.length > 0 ? `优先势力来源：${chunkOptions.factionBias.join('、')}。` : '',
+    chunkOptions.helperRoles && chunkOptions.helperRoles.length > 0 ? `优先补齐这些角色功能位：${chunkOptions.helperRoles.join('、')}。` : '',
     itemSummary ? `优先与这些现有物品/资源发生绑定：\n${itemSummary}` : '',
     '角色必须和题材、背景、地图结构、势力关系与主线冲突直接相关。',
   ].filter(Boolean).join('\n')

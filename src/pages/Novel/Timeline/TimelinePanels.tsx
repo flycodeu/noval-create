@@ -530,6 +530,7 @@ interface TimelineGenerateModalProps {
   open: boolean
   loading: boolean
   form: FormInstance<TimelineGenerateValues>
+  preset?: TimelineGenerateValues
   onCancel: () => void
   onSubmit: () => void
 }
@@ -538,6 +539,7 @@ export function TimelineGenerateModal({
   open,
   loading,
   form,
+  preset,
   onCancel,
   onSubmit,
 }: TimelineGenerateModalProps) {
@@ -553,15 +555,16 @@ export function TimelineGenerateModal({
     >
       <Form form={form} layout="vertical">
         <div className="novel-note-list novel-timeline-page__modal-hints">
+          {preset?.rationale ? <div className="novel-note-list__item">{preset.rationale}：建议本轮生成 {preset.count} 个事件。</div> : null}
           <div className="novel-note-list__item">{TIMELINE_TEXT.generateHint1}</div>
           <div className="novel-note-list__item">{TIMELINE_TEXT.generateHint2}</div>
           <div className="novel-note-list__item">{TIMELINE_TEXT.generateHint3}</div>
         </div>
         <Form.Item name="count" label={TIMELINE_TEXT.generateCount}>
-          <Select options={[8, 10, 12, 16, 20].map((item) => ({ value: item, label: `${item} \u4e2a` }))} />
+          <Select options={Array.from(new Set([preset?.count || 12, 8, 10, 12, 16, 20, 24, 42, 64, Math.ceil((preset?.count || 12) / 10) * 10])).sort((left, right) => left - right).map((item) => ({ value: item, label: `${item} \u4e2a${item === preset?.count ? ' · 规模推荐' : ''}` }))} />
         </Form.Item>
         <Form.Item name="batchSize" label={TIMELINE_TEXT.generateBatchSize}>
-          <Select options={[2, 3, 4, 5, 6].map((item) => ({ value: item, label: `${item} \u4e2a/\u6279` }))} />
+          <Select options={Array.from(new Set([preset?.batchSize || 4, 2, 3, 4, 5, 6, 8])).sort((left, right) => left - right).map((item) => ({ value: item, label: `${item} \u4e2a/\u6279${item === preset?.batchSize ? ' · 推荐' : ''}` }))} />
         </Form.Item>
         <Form.Item name="focus" label={TIMELINE_TEXT.generateFocus}>
           <Input.TextArea rows={6} placeholder={TIMELINE_TEXT.generateFocusPlaceholder} />

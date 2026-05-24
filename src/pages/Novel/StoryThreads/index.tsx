@@ -9,6 +9,8 @@ import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-messa
 import type { ForeshadowSnapshot, StoryThread } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
 import type { StoryThreadBatchGenerateOptions } from '../../../shared/story-thread-generation'
+import { getStoryThreadGenerationPreset } from '../../../shared/creation-tools'
+import { parseWorldRulesJson } from '../../../shared/genre-system'
 import {
   EMPTY_WORKFLOW_STATS,
   getWorkflowBlockers,
@@ -86,12 +88,6 @@ const EMPTY_EDITOR_VALUES: StoryThreadFormValues = {
   notes: '',
 }
 
-const DEFAULT_GENERATE_VALUES: GenerateFormValues = {
-  count: 8,
-  batchSize: 4,
-  focus: '',
-}
-
 const THREADS_PAGE_SIZE = 50
 
 function compactText(value?: string | null, max = 44): string {
@@ -164,8 +160,8 @@ function normalizeEditorValues(values: StoryThreadFormValues): StoryThreadFormVa
 
 function normalizeGenerateValues(values: GenerateFormValues): StoryThreadBatchGenerateOptions {
   return {
-    count: Math.max(1, Math.min(20, Math.round(values.count || 8))),
-    batchSize: Math.max(1, Math.min(6, Math.round(values.batchSize || 4))),
+    count: Math.max(1, Math.min(160, Math.round(values.count || 8))),
+    batchSize: Math.max(1, Math.min(12, Math.round(values.batchSize || 4))),
     focus: values.focus.trim() || undefined,
   }
 }
@@ -307,6 +303,33 @@ export default function StoryThreadsPage({ novelId }: Props) {
     () => getWorkflowBlockers('threads', currentNovel, workflowStats),
     [currentNovel, workflowStats],
   )
+  const worldRules = useMemo(
+    () => parseWorldRulesJson(currentNovel?.worldRulesJson, currentNovel?.genreName),
+    [currentNovel?.genreName, currentNovel?.worldRulesJson],
+  )
+  const threadGenerationPreset = useMemo(() => getStoryThreadGenerationPreset(currentNovel?.genreName, {
+    launchMode: currentNovel?.launchMode,
+    targetWords: currentNovel?.targetWords,
+    settingsJson: currentNovel?.settingsJson,
+    mapDepth: worldRules.mapBlueprint.levels.length,
+    factionCount: worldRules.factionSystem.length,
+    speciesCount: worldRules.speciesSystem.length,
+    powerSystemCount: worldRules.powerSystems.length,
+  }), [
+    currentNovel?.genreName,
+    currentNovel?.launchMode,
+    currentNovel?.settingsJson,
+    currentNovel?.targetWords,
+    worldRules.factionSystem.length,
+    worldRules.mapBlueprint.levels.length,
+    worldRules.powerSystems.length,
+    worldRules.speciesSystem.length,
+  ])
+  const initialGenerateValues = useMemo<GenerateFormValues>(() => ({
+    count: threadGenerationPreset.count,
+    batchSize: threadGenerationPreset.batchSize,
+    focus: threadGenerationPreset.focus,
+  }), [threadGenerationPreset])
   const watchedEditorValues = Form.useWatch([], editorForm) as Partial<StoryThreadFormValues> | undefined
   const editorValues = useMemo<Partial<StoryThreadFormValues>>(
     () => watchedEditorValues ?? {},
@@ -365,8 +388,8 @@ export default function StoryThreadsPage({ novelId }: Props) {
   }, [openEditor, routeAction, routeThreadId, threads])
 
   useEffect(() => {
-    generateForm.setFieldsValue(DEFAULT_GENERATE_VALUES)
-  }, [generateForm])
+    generateForm.setFieldsValue(initialGenerateValues)
+  }, [generateForm, initialGenerateValues])
 
   const openGenerateModal = async () => {
     const nextWorkflowStats = await loadWorkflowStats(novelId)
@@ -378,7 +401,7 @@ export default function StoryThreadsPage({ novelId }: Props) {
     }
 
     generateForm.resetFields()
-    generateForm.setFieldsValue(DEFAULT_GENERATE_VALUES)
+    generateForm.setFieldsValue(initialGenerateValues)
     setGenerateOpen(true)
   }
 
@@ -906,12 +929,19 @@ export default function StoryThreadsPage({ novelId }: Props) {
         okText="开始生成"
         width={560}
       >
-        <Form form={generateForm} layout="vertical" initialValues={DEFAULT_GENERATE_VALUES}>
+        <Form form={generateForm} layout="vertical" initialValues={initialGenerateValues}>
+          <Alert
+            type="info"
+            showIcon
+            className="story-threads__generation-alert"
+            message={`${threadGenerationPreset.scaleLabel}推荐：${threadGenerationPreset.count} 条线程，${threadGenerationPreset.batchSize} 条/批`}
+            description={threadGenerationPreset.rationale}
+          />
           <Form.Item name="count" label="目标数量" rules={[{ required: true, message: '请填写数量' }]}>
-            <InputNumber min={1} max={20} className="story-threads__full-width-input" />
+            <InputNumber min={1} max={Math.max(60, threadGenerationPreset.count)} className="story-threads__full-width-input" />
           </Form.Item>
           <Form.Item name="batchSize" label="单批数量" rules={[{ required: true, message: '请填写单批数量' }]}>
-            <InputNumber min={1} max={6} className="story-threads__full-width-input" />
+            <InputNumber min={1} max={12} className="story-threads__full-width-input" />
           </Form.Item>
           <Form.Item name="focus" label="本轮聚焦方向">
             <Input.TextArea rows={6} placeholder="例如：优先补悬念线和关系线；避免重复主线冲突；重点围绕第 20-40 章的中段压力。" />

@@ -290,7 +290,25 @@ export default function CharacterWorkspace({ novelId }: Props) {
   const speciesOptions = useMemo(() => getSpeciesNameOptions(worldRules), [worldRules])
   const factionOptions = useMemo(() => getFactionNameOptions(worldRules), [worldRules])
   const powerSystemOptions = useMemo(() => getPowerSystemNameOptions(worldRules), [worldRules])
-  const batchPreset = useMemo(() => getCharacterBatchPreset(currentNovel?.genreName, speciesOptions), [currentNovel?.genreName, speciesOptions])
+  const batchPreset = useMemo(() => getCharacterBatchPreset(currentNovel?.genreName, speciesOptions, {
+    launchMode: currentNovel?.launchMode,
+    targetWords: currentNovel?.targetWords,
+    settingsJson: currentNovel?.settingsJson,
+    mapDepth: worldRules.mapBlueprint.levels.length,
+    factionCount: worldRules.factionSystem.length,
+    speciesCount: worldRules.speciesSystem.length,
+    powerSystemCount: worldRules.powerSystems.length,
+  }), [
+    currentNovel?.genreName,
+    currentNovel?.launchMode,
+    currentNovel?.settingsJson,
+    currentNovel?.targetWords,
+    speciesOptions,
+    worldRules.factionSystem.length,
+    worldRules.mapBlueprint.levels.length,
+    worldRules.powerSystems.length,
+    worldRules.speciesSystem.length,
+  ])
   const availableSpecies = useMemo(() => Array.from(new Set([...speciesOptions, ...filterOptions.species])).filter(Boolean), [filterOptions.species, speciesOptions])
   const availableEntityTypes = useMemo(() => Array.from(new Set([...ENTITY_TYPE_OPTIONS.map((item) => item.value), ...filterOptions.entityTypes])).filter(Boolean), [filterOptions.entityTypes])
   const itemLinkOptions = useMemo(() => itemOptions.map((item) => ({
@@ -439,7 +457,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
       preferredSpecies: batchPreset.preferredSpecies,
       factionBias: factionOptions.slice(0, 3),
       helperRoles: batchPreset.helperRoles,
-      batchSize: 6,
+      batchSize: batchPreset.batchSize,
       specialRequirements: '',
       relationSeedMode: 'balanced',
       requiredItemLinks: [],
@@ -1168,7 +1186,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
             type="info"
             style={{ marginBottom: 12 }}
             message="题材人物数量建议"
-            description={`当前题材建议主要 ${batchPreset.majorCount}、次要 ${batchPreset.minorCount}、对立 ${batchPreset.antagonistCount}、功能 ${batchPreset.supportingCount} 位；可按剧情密度手动调整。`}
+            description={`${batchPreset.rationale}：建议主要 ${batchPreset.majorCount}、次要 ${batchPreset.minorCount}、对立 ${batchPreset.antagonistCount}、功能 ${batchPreset.supportingCount} 位，共 ${batchPreset.totalCount} 位；可按剧情密度手动调整。`}
           />
           <div className="novel-grid novel-grid--2">
             <Form.Item name="majorCount" label="主要人物"><Select options={Array.from(new Set([batchPreset.majorCount, 2, 3, 4, 5, 6])).sort((left, right) => left - right).map((value) => ({ value, label: `${value} 位${value === batchPreset.majorCount ? ' · 题材推荐' : ''}` }))} /></Form.Item>
@@ -1184,7 +1202,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
           <Form.Item name="helperRoles" label="优先功能位"><Select mode="tags" allowClear placeholder="例如：队医、情报员、导师、卧底" /></Form.Item>
           <div className="novel-grid novel-grid--2">
             <Form.Item name="relationSeedMode" label="关系网络倾向"><Select options={[{ value: 'balanced', label: '均衡' }, { value: 'conflict-heavy', label: '冲突密集' }, { value: 'ally-heavy', label: '同盟密集' }]} /></Form.Item>
-            <Form.Item name="batchSize" label="每批生成数量"><Select options={[4, 6, 8].map((value) => ({ value, label: `${value} 位 / 批` }))} /></Form.Item>
+            <Form.Item name="batchSize" label="每批生成数量"><Select options={Array.from(new Set([batchPreset.batchSize, 4, 6, 8, 10])).sort((left, right) => left - right).map((value) => ({ value, label: `${value} 位 / 批${value === batchPreset.batchSize ? ' · 推荐' : ''}` }))} /></Form.Item>
           </div>
           <Form.Item name="requiredItemLinks" label="优先绑定这些物品">
             <Select

@@ -83,7 +83,7 @@ interface GeneratedFactionCandidate {
 
 const DEFAULT_BATCH_OPTIONS: FactionBatchGenerationOptions = {
   count: 8,
-  batchSize: 1,
+  batchSize: 4,
   preferredTypes: ['organization', 'sect', 'family'],
   relationshipDensity: 'balanced',
   allowCharacterlessFactions: true,
@@ -119,7 +119,7 @@ const FACTION_ORGANIZATION_HINT_RE = /(会|盟|门|宗|派|帮|团|军|府|阁|�
 
 function normalizePage(page?: number, pageSize?: number) {
   const nextPage = Math.max(1, page || 1)
-  const nextPageSize = Math.max(1, Math.min(pageSize || 24, 200))
+  const nextPageSize = Math.max(1, Math.min(pageSize || 24, 500))
   return {
     page: nextPage,
     pageSize: nextPageSize,
@@ -299,8 +299,8 @@ function clampCount(value: unknown, fallback: number, min = 1, max = 24): number
 
 function normalizeBatchOptions(options: FactionBatchGenerationOptions = DEFAULT_BATCH_OPTIONS): FactionBatchGenerationOptions {
   return {
-    count: clampCount(options.count, DEFAULT_BATCH_OPTIONS.count, 1, 24),
-    batchSize: clampCount(options.batchSize, DEFAULT_BATCH_OPTIONS.batchSize, 1, 6),
+    count: clampCount(options.count, DEFAULT_BATCH_OPTIONS.count, 1, 200),
+    batchSize: clampCount(options.batchSize, DEFAULT_BATCH_OPTIONS.batchSize, 1, 8),
     preferredTypes: Array.isArray(options.preferredTypes) && options.preferredTypes.length > 0
       ? options.preferredTypes.map((item) => normalizeFactionType(item)).slice(0, 6)
       : DEFAULT_BATCH_OPTIONS.preferredTypes,
@@ -350,16 +350,34 @@ function parseStringArray(value: unknown): string[] {
 
 function summarizeCurrentFactions(rows: AppFaction[]): string {
   if (rows.length === 0) return '暂无已保存势力。'
-  return rows.slice(0, 10).map((row) => {
+  const typeStats = [...rows.reduce((map, row) => {
+    const label = getFactionTypeLabel(row.type)
+    map.set(label, (map.get(label) || 0) + 1)
+    return map
+  }, new Map<string, number>()).entries()]
+    .map(([label, count]) => `${label}${count}`)
+    .join('、')
+  const relationLightRows = rows.filter((row) => parseFactionExternalRelations(row.externalRelationsJson).length <= 1)
+  const selectedMap = new Map<number, AppFaction>()
+  ;[
+    ...rows.slice(-12),
+    ...relationLightRows.slice(0, 10),
+    ...rows.slice(0, 10),
+  ].forEach((row) => selectedMap.set(row.id, row))
+  const selectedRows = [...selectedMap.values()].slice(0, 32)
+  return [
+    `全量统计：共 ${rows.length} 个势力；类型分布：${typeStats || '未分类'}；以下为覆盖最近、低关系度和早期基准的采样。`,
+    ...selectedRows.map((row) => {
     const relations = parseFactionExternalRelations(row.externalRelationsJson)
       .slice(0, 3)
       .map((relation) => `${relation.targetFactionName || `#${relation.targetFactionId}`}:${getFactionRelationLabel(relation.relation)}`)
       .join('、')
     return `- ${row.name}（${getFactionTypeLabel(row.type)}）目标：${row.goal || '未写'}；资源：${row.resources || '未写'}；阶段：${row.currentPhase || '未写'}${relations ? `；关系：${relations}` : ''}`
-  }).join('\n')
+    }),
+  ].join('\n')
 }
 
-function summarizeCurrentCharacters(rows: typeof characters.$inferSelect[], limit = 18): string {
+function summarizeCurrentCharacters(rows: typeof characters.$inferSelect[], limit = 36): string {
   if (rows.length === 0) return '当前还没有人物。'
   return rows.slice(0, limit).map((row) => {
     const factionRefs = parseFactionReferenceArray(row.campFactionIdsJson)
@@ -368,7 +386,7 @@ function summarizeCurrentCharacters(rows: typeof characters.$inferSelect[], limi
   }).join('\n')
 }
 
-function summarizeMapNodes(rows: typeof worldMap.$inferSelect[], limit = 16): string {
+function summarizeMapNodes(rows: typeof worldMap.$inferSelect[], limit = 32): string {
   if (rows.length === 0) return '当前还没有地图节点。'
   return rows
     .sort((left, right) => (left.level - right.level) || ((left.sortOrder || 0) - (right.sortOrder || 0)) || (left.id - right.id))

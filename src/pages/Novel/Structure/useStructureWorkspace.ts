@@ -30,6 +30,12 @@ import {
   toTimelineAnchorFilters,
 } from './helpers'
 
+export const STRUCTURE_BATCH_CREATE_MAX = 1000
+
+function normalizeBatchCreateCount(count: number) {
+  return Math.max(1, Math.min(Math.floor(count) || 1, STRUCTURE_BATCH_CREATE_MAX))
+}
+
 export function useStructureWorkspace(novelId: number) {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -401,7 +407,7 @@ export function useStructureWorkspace(novelId: number) {
   }, [clearCaches, novelId, resolveAndLoad])
 
   const addVolumes = useCallback(async (count: number) => {
-    const safeCount = Math.max(1, Math.min(Math.floor(count) || 1, 20))
+    const safeCount = normalizeBatchCreateCount(count)
     let lastVolumeId: number | null = null
 
     for (let index = 0; index < safeCount; index += 1) {
@@ -421,7 +427,7 @@ export function useStructureWorkspace(novelId: number) {
   }, [clearCaches, resolveAndLoad])
 
   const addParts = useCallback(async (volumeId: number, count: number) => {
-    const safeCount = Math.max(1, Math.min(Math.floor(count) || 1, 20))
+    const safeCount = normalizeBatchCreateCount(count)
     let lastPartId: number | null = null
 
     for (let index = 0; index < safeCount; index += 1) {
@@ -458,7 +464,7 @@ export function useStructureWorkspace(novelId: number) {
   const addChapters = useCallback(async (count: number) => {
     if (!selection.partId || !selection.volumeId) return
 
-    const safeCount = Math.max(1, Math.min(Math.floor(count) || 1, 50))
+    const safeCount = normalizeBatchCreateCount(count)
     let lastChapterId: number | null = null
 
     for (let index = 0; index < safeCount; index += 1) {
@@ -507,7 +513,7 @@ export function useStructureWorkspace(novelId: number) {
   const addSegments = useCallback(async (count: number) => {
     if (!selection.chapterId) return
 
-    const safeCount = Math.max(1, Math.min(Math.floor(count) || 1, 50))
+    const safeCount = normalizeBatchCreateCount(count)
     let lastSegmentId: number | null = null
     const baseOrder = segments.total || 0
 

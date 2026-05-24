@@ -16,6 +16,7 @@ import type {
   WriterContextToolTarget,
   WriterOrchestratedCharacterPackEntry,
   WriterOrchestratedItemPackEntry,
+  WriterOrchestratedMapLocationPackEntry,
   WriterOrchestratedRecallHit,
   WriterOrchestratedStoryMemoryPack,
   WriterOrchestratedThreadPack,
@@ -26,6 +27,7 @@ import { getCharacterDetailContext, listCharacters } from './character.service'
 import type { CharacterStateSummary as ServiceCharacterStateSummary } from './character-state.service'
 import { searchSimilarFragments } from './embedding.service'
 import { getStoryItemDetailContext, listStoryItems } from './item.service'
+import { getMapNode, getMapRelations, searchMapNodes } from './map.service'
 import { buildStoryMemorySnapshot } from './story-memory.service'
 import { getForeshadowSnapshot, listStoryThreads } from './story-thread.service'
 import { listTimelineEvents } from './timeline.service'
@@ -36,6 +38,9 @@ type ServiceOverrides = {
   getCharacterDetailContext?: typeof getCharacterDetailContext
   listStoryItems?: typeof listStoryItems
   getStoryItemDetailContext?: typeof getStoryItemDetailContext
+  searchMapNodes?: typeof searchMapNodes
+  getMapNode?: typeof getMapNode
+  getMapRelations?: typeof getMapRelations
   buildStoryMemorySnapshot?: typeof buildStoryMemorySnapshot
   listStoryThreads?: typeof listStoryThreads
   getForeshadowSnapshot?: typeof getForeshadowSnapshot
@@ -56,6 +61,7 @@ interface WriterToolAccumulator {
   storyMemoryPack?: WriterOrchestratedStoryMemoryPack
   characterEntries: WriterOrchestratedCharacterPackEntry[]
   itemEntries: WriterOrchestratedItemPackEntry[]
+  mapLocationEntries: WriterOrchestratedMapLocationPackEntry[]
   timelineEntries: WriterOrchestratedTimelinePackEntry[]
   worldStatePack?: WriterOrchestratedWorldStatePack
   threadPack?: WriterOrchestratedThreadPack
@@ -65,6 +71,7 @@ interface WriterToolAccumulator {
 interface WriterToolRuntimeLimits {
   maxCharacters: number
   maxItems: number
+  maxMapLocations: number
   maxTimelineEvents: number
   maxThreads: number
   maxRecallHits: number
@@ -177,6 +184,44 @@ function matchesAnyTerm(haystack: string, terms: string[]): boolean {
     .some((term) => normalized.includes(term))
 }
 
+function parseJsonArrayText(raw?: string | null): string[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => item.trim())
+      .filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
+function collectAliasText(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap((item) => collectAliasText(item))
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    return [
+      ...['alias', 'aliases', 'name', 'displayName', 'entityName', 'refName', 'aliasNames', 'nicknames', 'titles', 'codenames', 'mentionNames', 'addressTerms', 'relationTerms', '别名', '称号', '代号', '称谓']
+        .flatMap((key) => collectAliasText(record[key])),
+      ...['pointers', 'refs', 'references', 'entities', 'items'].flatMap((key) => collectAliasText(record[key])),
+    ]
+  }
+  const text = asText(value)
+  if (!text) return []
+  return text.split(/[\n,，、;；/|]+/u).map((item) => item.trim()).filter((item) => item.length >= 2)
+}
+
+function parseAliasTextFromJson(raw?: string | null): string[] {
+  if (!raw) return []
+  try {
+    return dedupe(collectAliasText(JSON.parse(raw) as unknown), 16)
+  } catch {
+    return []
+  }
+}
+
 function computeSignalHash(input: WriterContextOrchestratorInput): string {
   return hashOf({
     signals: input.signals,
@@ -206,9 +251,10 @@ function buildQueryStep(
 
 function buildWriterQueryPlan(input: WriterContextOrchestratorInput): WriterContextQueryPlanStep[] {
   const signals = input.signals
-  const mentionedCharacters = dedupe(signals.mentionedCharacters || [], 8)
-  const mentionedItems = dedupe(signals.mentionedItems || [], 8)
-  const mentionedLocations = dedupe(signals.mentionedLocations || [], 8)
+  const mentionedCharacters = dedupe(signals.mentionedCharacters || [], Math.max(8, input.runtime?.maxCharacters || 8))
+  const mentionedItems = dedupe(signals.mentionedItems || [], Math.max(8, input.runtime?.maxItems || 8))
+  const mentionedLocations = dedupe(signals.mentionedLocations || [], Math.max(8, input.runtime?.maxMapLocations || input.runtime?.maxTimelineEvents || 8))
+  const mentionedFactions = dedupe(signals.mentionedFactions || [], 12)
   const chapterGoal = asText(signals.chapterGoal)
   const relationSummary = asText(signals.relationSummary)
   const activeThreads = asText(signals.activeThreads)
@@ -228,11 +274,12 @@ function buildWriterQueryPlan(input: WriterContextOrchestratorInput): WriterCont
   )
   const characterEnabled = mentionedCharacters.length > 0 || Boolean(relationSummary)
   const itemEnabled = mentionedItems.length > 0
+  const mapLocationEnabled = mentionedLocations.length > 0
   const worldStateEnabled = mentionedLocations.length > 0
   const timelineEnabled = mentionedLocations.length > 0 || /\S/.test(timelineSummary)
   const threadEnabled = Boolean(activeThreads || openLoops || dueForeshadows)
-  const recallCharacterEnabled = mentionedCharacters.length > 0
-  const recallRuleEnabled = Boolean(worldStates || timelineSummary)
+  const recallCharacterEnabled = mentionedCharacters.length > 0 || mentionedFactions.length > 0
+  const recallRuleEnabled = Boolean(worldStates || timelineSummary || mentionedFactions.length > 0)
   const recallThreadEnabled = Boolean(activeThreads || openLoops || dueForeshadows)
 
   return [
@@ -260,6 +307,15 @@ function buildWriterQueryPlan(input: WriterContextOrchestratorInput): WriterCont
       ['item.get_pack'],
       mentionedItems.join('、'),
       input.runtime?.maxItems || 4,
+    ),
+    buildQueryStep(
+      'map_location',
+      mapLocationEnabled,
+      mapLocationEnabled ? '地点信号明确，需要地图节点包。' : '没有显著地图地点信号。',
+      mentionedLocations,
+      ['map.get_pack'],
+      mentionedLocations.join('、'),
+      input.runtime?.maxMapLocations || input.runtime?.maxTimelineEvents || 4,
     ),
     buildQueryStep(
       'timeline',
@@ -292,18 +348,18 @@ function buildWriterQueryPlan(input: WriterContextOrchestratorInput): WriterCont
       'recall_character',
       recallCharacterEnabled,
       recallCharacterEnabled ? '需要补充人物相关历史片段。' : '没有人物召回需求。',
-      mentionedCharacters,
+      dedupe([...mentionedCharacters, ...mentionedFactions], 12),
       ['recall.search_fragments'],
-      [chapterGoal, relationSummary, ...mentionedCharacters].filter(Boolean).join('\n'),
+      [chapterGoal, relationSummary, ...mentionedCharacters, ...mentionedFactions].filter(Boolean).join('\n'),
       input.runtime?.maxRecallHitsPerBucket || 3,
     ),
     buildQueryStep(
       'recall_rule',
       recallRuleEnabled,
       recallRuleEnabled ? '需要补充规则/状态相关历史片段。' : '没有规则召回需求。',
-      extractTerms([worldStates, timelineSummary], 6),
+      dedupe([...mentionedFactions, ...extractTerms([worldStates, timelineSummary], 6)], 12),
       ['recall.search_fragments'],
-      [chapterGoal, worldStates, timelineSummary].filter(Boolean).join('\n'),
+      [chapterGoal, worldStates, timelineSummary, ...mentionedFactions].filter(Boolean).join('\n'),
       input.runtime?.maxRecallHitsPerBucket || 3,
     ),
     buildQueryStep(
@@ -346,6 +402,7 @@ function buildRetrievalFingerprint(
     mentionedCharacterCount: (input.signals.mentionedCharacters || []).length,
     mentionedItemCount: (input.signals.mentionedItems || []).length,
     mentionedLocationCount: (input.signals.mentionedLocations || []).length,
+    mentionedFactionCount: (input.signals.mentionedFactions || []).length,
     enabledBuckets,
   }
   const digest = hashOf({
@@ -428,7 +485,24 @@ function renderCharacterEntries(
     signals.dueForeshadows,
   ])
   const inferredNames = explicitNames.length > 0
-    ? explicitNames
+    ? characters
+      .filter((character) => {
+        const candidateTerms = dedupe([
+          character.fullName || '',
+          character.surname && character.givenName ? `${character.surname}${character.givenName}` : '',
+          character.surname || '',
+          character.givenName || '',
+          character.occupation || '',
+          character.rankLevel || '',
+          character.socialIdentity || '',
+          ...parseJsonArrayText(character.contextHooksJson),
+          ...parseAliasTextFromJson(character.sourceContextJson),
+        ], 24)
+        return matchesAnyTerm(candidateTerms.join(' '), explicitNames)
+      })
+      .map((character) => character.fullName || '')
+      .filter(Boolean)
+      .slice(0, maxCharacters)
     : characters
       .map((character) => character.fullName || '')
       .filter((name) => name.length >= 2 && signalText.includes(name))
@@ -469,12 +543,19 @@ function renderItemEntries(
   getStoryItemDetailContextImpl: typeof getStoryItemDetailContext,
   maxItems: number,
 ): WriterOrchestratedItemPackEntry[] {
-  const mentioned = new Set(signals.mentionedItems || [])
-  if (mentioned.size === 0) return []
+  const mentionTerms = dedupe(signals.mentionedItems || [], maxItems)
+  if (mentionTerms.length === 0) return []
 
   return items
     .filter((item) => item.itemKind === 'instance')
-    .filter((item) => mentioned.has(item.itemName))
+    .filter((item) => matchesAnyTerm(dedupe([
+      item.itemName || '',
+      item.category || '',
+      item.subType || '',
+      ...parseJsonArrayText(item.tagsJson),
+      ...parseAliasTextFromJson(item.sourceContextJson),
+      ...parseAliasTextFromJson(item.typedRefsJson),
+    ], 24).join(' '), mentionTerms))
     .slice(0, maxItems)
     .map((item) => {
       const detail = getStoryItemDetailContextImpl(item.id)
@@ -556,11 +637,111 @@ function renderWorldStatePack(
   }
 }
 
+function buildMapNodePath(
+  node: NonNullable<ReturnType<typeof getMapNode>>,
+  getMapNodeImpl: typeof getMapNode,
+): { path: string; parentName?: string } {
+  const names = [node.name]
+  let parentName: string | undefined
+  let parentId = node.parentId
+  const seen = new Set<number>([node.id])
+  while (typeof parentId === 'number' && !seen.has(parentId) && names.length < 6) {
+    seen.add(parentId)
+    const parent = getMapNodeImpl(parentId)
+    if (!parent) break
+    parentName ||= parent.name
+    names.unshift(parent.name)
+    parentId = parent.parentId
+  }
+  return {
+    path: names.join(' -> '),
+    parentName,
+  }
+}
+
+function renderMapLocationEntries(
+  context: WriterToolExecutionContext,
+  maxMapLocations: number,
+): WriterOrchestratedMapLocationPackEntry[] {
+  const terms = dedupe(context.input.signals.mentionedLocations || [], Math.max(1, maxMapLocations))
+  if (terms.length === 0) return []
+
+  const candidateById = new Map<number, NonNullable<ReturnType<typeof getMapNode>>>()
+  for (const term of terms) {
+    const hits = context.services.searchMapNodes(context.input.novelId, term, Math.max(6, maxMapLocations * 2))
+    hits.forEach((node) => {
+      if (!candidateById.has(node.id)) {
+        candidateById.set(node.id, node)
+      }
+    })
+  }
+
+  const scoreNode = (node: NonNullable<ReturnType<typeof getMapNode>>) => {
+    const haystack = [
+      node.name,
+      node.nodeType,
+      node.locationType,
+      node.structureRole,
+      node.description,
+      node.plotRelevance,
+      node.dangerLevel,
+    ].filter(Boolean).join(' ')
+    const termScore = terms.reduce((sum, term, index) => {
+      if (node.name === term) return sum + 100 - index
+      if (node.name.includes(term) || term.includes(node.name)) return sum + 60 - index
+      return matchesAnyTerm(haystack, [term]) ? sum + 20 - index : sum
+    }, 0)
+    return termScore + Math.max(0, 8 - node.level)
+  }
+
+  const selected = [...candidateById.values()]
+    .map((node) => ({ node, score: scoreNode(node) }))
+    .filter((entry) => entry.score > 0)
+    .sort((left, right) => right.score - left.score || left.node.level - right.node.level || left.node.sortOrder - right.node.sortOrder)
+    .slice(0, maxMapLocations)
+
+  const nodeNameCache = new Map<number, string>()
+  const getNodeName = (id: number) => {
+    if (!nodeNameCache.has(id)) {
+      nodeNameCache.set(id, context.services.getMapNode(id)?.name || `地点#${id}`)
+    }
+    return nodeNameCache.get(id) || `地点#${id}`
+  }
+
+  return selected.map(({ node }) => {
+    const pathInfo = buildMapNodePath(node, context.services.getMapNode)
+    const relationLines = context.services.getMapRelations(context.input.novelId, node.id)
+      .slice(0, 3)
+      .map((relation) => {
+        const otherId = relation.mapAId === node.id ? relation.mapBId : relation.mapAId
+        const relationLabel = relation.relationLabel || relation.relationType || '关联'
+        return `${relationLabel}：${getNodeName(otherId)}${relation.description ? `（${relation.description}）` : ''}`
+      })
+      .filter(Boolean)
+    return {
+      mapId: node.id,
+      name: node.name,
+      level: node.level,
+      path: pathInfo.path,
+      parentName: pathInfo.parentName,
+      nodeType: node.nodeType,
+      locationType: node.locationType,
+      structureRole: node.structureRole,
+      description: node.description,
+      plotRelevance: node.plotRelevance,
+      dangerLevel: node.dangerLevel,
+      relationLines,
+    }
+  })
+}
+
 function renderThreadPack(
   threadRows: ReturnType<typeof listStoryThreads>,
   foreshadowSnapshot: ReturnType<typeof getForeshadowSnapshot>,
   signals: WriterContextOrchestratorInput['signals'],
+  maxThreads: number,
 ): WriterOrchestratedThreadPack {
+  const threadLimit = Math.max(1, maxThreads)
   const terms = extractTerms([
     signals.activeThreads,
     signals.openLoops,
@@ -568,7 +749,7 @@ function renderThreadPack(
     signals.chapterGoal,
     signals.chapterOutline,
   ], 10)
-  const matchedThreads = threadRows.filter((thread) => {
+  const matchedThreads = threadRows.map((thread) => {
     const haystack = [
       thread.title,
       thread.summary,
@@ -576,26 +757,37 @@ function renderThreadPack(
       thread.payoffCondition,
       thread.premise,
     ].filter(Boolean).join(' ')
-    return matchesAnyTerm(haystack, terms)
+    const score = terms.reduce((sum, term, index) => (
+      matchesAnyTerm(haystack, [term])
+        ? sum + (thread.title && matchesAnyTerm(thread.title, [term]) ? 30 : 12) - index
+        : sum
+    ), 0)
+      + (thread.status === 'active' ? 6 : thread.status === 'planned' ? 3 : thread.status === 'stalled' ? 2 : 0)
+      + (thread.priority === 'high' ? 4 : thread.priority === 'medium' ? 2 : 0)
+    return { thread, score }
   })
+    .filter((entry) => entry.score > 0)
+    .sort((left, right) => right.score - left.score || (left.thread.sortOrder || 0) - (right.thread.sortOrder || 0))
+    .slice(0, threadLimit)
+    .map((entry) => entry.thread)
 
   return {
     activeThreadLines: matchedThreads
       .filter((thread) => thread.status === 'active' || thread.status === 'planned' || thread.status === 'stalled')
-      .slice(0, 4)
+      .slice(0, threadLimit)
       .map((thread) => `${thread.title}${thread.currentState ? `：${thread.currentState}` : thread.summary ? `：${thread.summary}` : ''}`),
     openLoopLines: matchedThreads
       .filter((thread) => thread.status !== 'resolved' && thread.status !== 'abandoned')
-      .slice(0, 3)
+      .slice(0, threadLimit)
       .map((thread) => thread.payoffCondition || thread.premise || thread.summary || thread.title)
       .filter(Boolean),
     dueForeshadowLines: foreshadowSnapshot.dueSoon
-      .slice(0, 3)
+      .slice(0, threadLimit)
       .map((entry) => `${entry.title}${entry.summary ? `：${entry.summary}` : ''}`),
     continuityLines: [
-      ...foreshadowSnapshot.overdue.slice(0, 2).map((entry) => entry.warningText || entry.title),
-      ...foreshadowSnapshot.pending.slice(0, 2).map((entry) => entry.summary || entry.title),
-    ].filter(Boolean),
+      ...foreshadowSnapshot.overdue.map((entry) => entry.warningText || entry.title),
+      ...foreshadowSnapshot.pending.map((entry) => entry.summary || entry.title),
+    ].filter(Boolean).slice(0, threadLimit),
   }
 }
 
@@ -614,16 +806,56 @@ function renderRecallHits(
   }))
 }
 
+function resolveRecallTermsForBucket(
+  bucket: 'recall_character' | 'recall_rule' | 'recall_thread',
+  signals: WriterContextOrchestratorInput['signals'],
+): string[] {
+  const characterTerms = dedupe(signals.mentionedCharacters || [], 10)
+  const itemTerms = dedupe(signals.mentionedItems || [], 10)
+  const locationTerms = dedupe(signals.mentionedLocations || [], 10)
+  const factionTerms = dedupe(signals.mentionedFactions || [], 10)
+  if (bucket === 'recall_character') return dedupe([...characterTerms, ...factionTerms], 12)
+  if (bucket === 'recall_rule') return dedupe([...locationTerms, ...itemTerms, ...characterTerms, ...factionTerms], 14)
+  return dedupe([...characterTerms, ...itemTerms, ...locationTerms, ...factionTerms], 14)
+}
+
+function filterValidatedRecallHits(
+  bucket: 'recall_character' | 'recall_rule' | 'recall_thread',
+  hits: Awaited<ReturnType<typeof searchSimilarFragments>>['hits'],
+  context: WriterToolExecutionContext,
+  limit: number,
+) {
+  const minSimilarity = (searchMode: string) => (searchMode === 'keyword' ? 0.5 : 0.6)
+  const validationTerms = resolveRecallTermsForBucket(bucket, context.input.signals)
+  return hits
+    .filter((hit) => hit.chapterNum < context.input.chapterNum)
+    .filter((hit) => hit.similarity >= minSimilarity(hit.searchMode))
+    .filter((hit) => validationTerms.length === 0 || matchesAnyTerm(hit.fragmentText, validationTerms))
+    .slice(0, limit)
+}
+
 function buildRenderedOverrides(
   storyMemoryPack: WriterOrchestratedStoryMemoryPack | undefined,
   characters: WriterOrchestratedCharacterPackEntry[],
   items: WriterOrchestratedItemPackEntry[],
+  mapLocations: WriterOrchestratedMapLocationPackEntry[],
   timeline: WriterOrchestratedTimelinePackEntry[],
   worldStatePack: WriterOrchestratedWorldStatePack | undefined,
   threadPack: WriterOrchestratedThreadPack | undefined,
   recallHits: WriterOrchestratedRecallHit[],
+  runtimeLimits: WriterToolRuntimeLimits,
   baseContextParts?: WriterContextRenderedOverrides,
 ): WriterContextRenderedOverrides {
+  const characterLineLimit = Math.max(6, runtimeLimits.maxCharacters)
+  const itemLineLimit = Math.max(6, runtimeLimits.maxItems)
+  const mapLineLimit = Math.max(6, runtimeLimits.maxMapLocations)
+  const timelineLineLimit = Math.max(6, runtimeLimits.maxTimelineEvents)
+  const threadLineLimit = Math.max(6, runtimeLimits.maxThreads)
+  const characterCharLimit = Math.max(760, Math.min(3600, characterLineLimit * 150))
+  const itemCharLimit = Math.max(720, Math.min(2600, itemLineLimit * 130))
+  const mapCharLimit = Math.max(760, Math.min(3000, mapLineLimit * 140))
+  const timelineCharLimit = Math.max(760, Math.min(3000, timelineLineLimit * 140))
+  const threadCharLimit = Math.max(720, Math.min(3000, threadLineLimit * 140))
   const result: WriterContextRenderedOverrides = {
     characterStates: '',
     relationSummary: '',
@@ -632,6 +864,7 @@ function buildRenderedOverrides(
     timelineSummary: '',
     timelineOpenThreads: '',
     worldStates: '',
+    mapSummary: '',
     recalledMemory: '',
   }
   if (storyMemoryPack) {
@@ -644,87 +877,111 @@ function buildRenderedOverrides(
     ], 12, 1200)
     result.activeThreads = mergePreservingBase(
       baseContextParts?.activeThreads,
-      compactLines(storyMemoryPack.activeThreads, 6, 600),
-      8,
-      760,
+      compactLines(storyMemoryPack.activeThreads, threadLineLimit, threadCharLimit),
+      Math.max(8, threadLineLimit),
+      Math.max(760, threadCharLimit),
     )
     result.continuityNotes = mergePreservingBase(
       baseContextParts?.continuityNotes,
-      compactLines(storyMemoryPack.continuityDirectives, 6, 600),
-      8,
-      760,
+      compactLines(storyMemoryPack.continuityDirectives, threadLineLimit, threadCharLimit),
+      Math.max(8, threadLineLimit),
+      Math.max(760, threadCharLimit),
     )
   }
   if (characters.length > 0) {
-    result.characterStates = compactLines(characters.map((character) => `${character.name}：${character.stateSummary}`), 6, 760)
+    result.characterStates = compactLines(
+      characters.map((character) => `${character.name}：${character.stateSummary}`),
+      characterLineLimit,
+      characterCharLimit,
+    )
     result.relationSummary = compactLines(
       characters.flatMap((character) => character.relationSummaries.map((line) => `${character.name}：${line}`)),
-      8,
-      760,
+      Math.max(8, characterLineLimit),
+      characterCharLimit,
     ) || ''
     result.dialogueVoiceLocks = mergePreservingBase(
       baseContextParts?.dialogueVoiceLocks,
       compactLines(
         characters.flatMap((character) => character.voiceHints.map((hint) => `${character.name}：${hint}`)),
-        8,
-        760,
+        Math.max(8, characterLineLimit),
+        characterCharLimit,
       ),
-      10,
-      820,
+      Math.max(10, characterLineLimit),
+      Math.max(820, characterCharLimit),
     )
   }
   if (items.length > 0) {
-    result.itemSummary = compactLines(items.map((item) => `${item.name}：${item.summary}`), 6, 720)
+    result.itemSummary = compactLines(items.map((item) => `${item.name}：${item.summary}`), itemLineLimit, itemCharLimit)
+  }
+  if (mapLocations.length > 0) {
+    result.mapSummary = compactLines(
+      mapLocations.map((location) => {
+        const meta = [
+          `层级${location.level}`,
+          location.locationType || location.nodeType || '',
+          location.structureRole || '',
+          location.dangerLevel ? `风险=${location.dangerLevel}` : '',
+        ].filter(Boolean).join(' / ')
+        const summary = [
+          location.description,
+          location.plotRelevance ? `剧情作用=${location.plotRelevance}` : '',
+          location.relationLines.length > 0 ? `关系=${location.relationLines.join('；')}` : '',
+        ].filter(Boolean).join('；')
+        return `${location.path}${meta ? `（${meta}）` : ''}${summary ? `：${summary}` : ''}`
+      }),
+      mapLineLimit,
+      mapCharLimit,
+    )
   }
   if (timeline.length > 0) {
     result.timelineSummary = compactLines(
       timeline.map((item) => `${item.timeLabel || '时间未标注'} · ${item.title}${item.summary ? `：${item.summary}` : ''}`),
-      6,
-      760,
+      timelineLineLimit,
+      timelineCharLimit,
     )
     result.timelineOpenThreads = compactLines(
       timeline.flatMap((item) => item.openThreads.map((thread) => `${item.title}：${thread}`)),
-      6,
-      640,
+      timelineLineLimit,
+      timelineCharLimit,
     ) || result.timelineOpenThreads
   }
   if (worldStatePack) {
     result.worldStates = compactLines([
       ...worldStatePack.stateLines,
       ...worldStatePack.alertLines,
-    ], 6, 760) || result.worldStates
+    ], timelineLineLimit, timelineCharLimit) || result.worldStates
   }
   if (threadPack) {
     result.activeThreads = mergePreservingBase(
       result.activeThreads || baseContextParts?.activeThreads,
-      compactLines(threadPack.activeThreadLines, 6, 720),
-      8,
-      760,
+      compactLines(threadPack.activeThreadLines, threadLineLimit, threadCharLimit),
+      Math.max(8, threadLineLimit),
+      Math.max(760, threadCharLimit),
     )
     result.openLoops = mergePreservingBase(
       baseContextParts?.openLoops,
-      compactLines(threadPack.openLoopLines, 6, 640),
-      8,
-      760,
+      compactLines(threadPack.openLoopLines, threadLineLimit, threadCharLimit),
+      Math.max(8, threadLineLimit),
+      Math.max(760, threadCharLimit),
     )
     result.dueForeshadows = mergePreservingBase(
       baseContextParts?.dueForeshadows,
-      compactLines(threadPack.dueForeshadowLines, 6, 640),
-      8,
-      760,
+      compactLines(threadPack.dueForeshadowLines, threadLineLimit, threadCharLimit),
+      Math.max(8, threadLineLimit),
+      Math.max(760, threadCharLimit),
     )
     result.continuityNotes = mergePreservingBase(
       result.continuityNotes || baseContextParts?.continuityNotes,
-      compactLines(threadPack.continuityLines, 6, 640),
-      8,
-      760,
+      compactLines(threadPack.continuityLines, threadLineLimit, threadCharLimit),
+      Math.max(8, threadLineLimit),
+      Math.max(760, threadCharLimit),
     )
   }
   if (recallHits.length > 0) {
     result.recalledMemory = compactLines(
       recallHits.map((hit) => `[${hit.bucket}] Ch.${hit.chapterNum} ${hit.fragmentType}：${hit.summary}`),
-      6,
-      860,
+      Math.max(6, runtimeLimits.maxRecallHits),
+      Math.max(860, Math.min(1600, runtimeLimits.maxRecallHits * 180)),
     )
   }
   return result
@@ -744,6 +1001,7 @@ function buildAllocatorInputSummary(
           if (step.bucket === 'story_memory') return key === 'longTermMemory' || key === 'activeThreads' || key === 'continuityNotes'
           if (step.bucket === 'character') return key === 'characterStates' || key === 'relationSummary' || key === 'dialogueVoiceLocks'
           if (step.bucket === 'item') return key === 'itemSummary'
+          if (step.bucket === 'map_location') return key === 'mapSummary'
           if (step.bucket === 'timeline') return key === 'timelineSummary' || key === 'timelineOpenThreads'
           if (step.bucket === 'world_state') return key === 'worldStates'
           if (step.bucket === 'thread') return key === 'activeThreads' || key === 'openLoops' || key === 'dueForeshadows' || key === 'continuityNotes'
@@ -776,6 +1034,7 @@ function createWriterToolAccumulator(): WriterToolAccumulator {
   return {
     characterEntries: [],
     itemEntries: [],
+    mapLocationEntries: [],
     timelineEntries: [],
     recallHits: [],
   }
@@ -880,6 +1139,25 @@ function buildWriterToolRegistry(): Record<WriterContextQueryBucket, RegisteredW
         }
       },
     },
+    map_location: {
+      bucket: 'map_location',
+      toolName: 'map.get_pack',
+      execute: (_step, context, accumulator) => {
+        accumulator.mapLocationEntries = renderMapLocationEntries(context, context.runtimeLimits.maxMapLocations)
+        if (accumulator.mapLocationEntries.length > 0) {
+          return {
+            status: 'success',
+            resultCount: accumulator.mapLocationEntries.length,
+          }
+        }
+        return {
+          status: 'failed',
+          resultCount: 0,
+          errorMessage: 'no map location entries rendered',
+          fallbackEvent: makeFallbackEvent('map_location', 'empty_result', '地图地点查询无有效结果。', 'legacy_empty'),
+        }
+      },
+    },
     timeline: {
       bucket: 'timeline',
       toolName: 'timeline.get_pack',
@@ -933,9 +1211,13 @@ function buildWriterToolRegistry(): Record<WriterContextQueryBucket, RegisteredW
       toolName: 'thread.get_pack',
       execute: (_step, context, accumulator) => {
         const threadRows = context.services.listStoryThreads(context.input.novelId)
-          .slice(0, Math.max(context.runtimeLimits.maxThreads, 6))
         const foreshadowSnapshot = context.services.getForeshadowSnapshot(context.input.novelId, context.input.chapterNum)
-        accumulator.threadPack = renderThreadPack(threadRows, foreshadowSnapshot, context.input.signals)
+        accumulator.threadPack = renderThreadPack(
+          threadRows,
+          foreshadowSnapshot,
+          context.input.signals,
+          context.runtimeLimits.maxThreads,
+        )
         const resultCount = accumulator.threadPack.activeThreadLines.length
           + accumulator.threadPack.dueForeshadowLines.length
           + accumulator.threadPack.openLoopLines.length
@@ -962,9 +1244,12 @@ function buildWriterToolRegistry(): Record<WriterContextQueryBucket, RegisteredW
           step.queryText || step.terms.join('\n'),
           step.resultLimit || context.runtimeLimits.maxRecallHits,
         )
-        const filteredHits = result.hits
-          .filter((hit) => hit.chapterNum < context.input.chapterNum)
-          .slice(0, step.resultLimit || context.runtimeLimits.maxRecallHits)
+        const filteredHits = filterValidatedRecallHits(
+          'recall_character',
+          result.hits,
+          context,
+          step.resultLimit || context.runtimeLimits.maxRecallHits,
+        )
         accumulator.recallHits.push(...renderRecallHits('character', filteredHits))
         if (filteredHits.length > 0) {
           return {
@@ -994,9 +1279,12 @@ function buildWriterToolRegistry(): Record<WriterContextQueryBucket, RegisteredW
           step.queryText || step.terms.join('\n'),
           step.resultLimit || context.runtimeLimits.maxRecallHits,
         )
-        const filteredHits = result.hits
-          .filter((hit) => hit.chapterNum < context.input.chapterNum)
-          .slice(0, step.resultLimit || context.runtimeLimits.maxRecallHits)
+        const filteredHits = filterValidatedRecallHits(
+          'recall_rule',
+          result.hits,
+          context,
+          step.resultLimit || context.runtimeLimits.maxRecallHits,
+        )
         accumulator.recallHits.push(...renderRecallHits('rule', filteredHits))
         if (filteredHits.length > 0) {
           return {
@@ -1026,9 +1314,12 @@ function buildWriterToolRegistry(): Record<WriterContextQueryBucket, RegisteredW
           step.queryText || step.terms.join('\n'),
           step.resultLimit || context.runtimeLimits.maxRecallHits,
         )
-        const filteredHits = result.hits
-          .filter((hit) => hit.chapterNum < context.input.chapterNum)
-          .slice(0, step.resultLimit || context.runtimeLimits.maxRecallHits)
+        const filteredHits = filterValidatedRecallHits(
+          'recall_thread',
+          result.hits,
+          context,
+          step.resultLimit || context.runtimeLimits.maxRecallHits,
+        )
         accumulator.recallHits.push(...renderRecallHits('thread', filteredHits))
         if (filteredHits.length > 0) {
           return {
@@ -1058,6 +1349,9 @@ function getServiceBundle(overrides?: ServiceOverrides) {
     getCharacterDetailContext: overrides?.getCharacterDetailContext || getCharacterDetailContext,
     listStoryItems: overrides?.listStoryItems || listStoryItems,
     getStoryItemDetailContext: overrides?.getStoryItemDetailContext || getStoryItemDetailContext,
+    searchMapNodes: overrides?.searchMapNodes || searchMapNodes,
+    getMapNode: overrides?.getMapNode || getMapNode,
+    getMapRelations: overrides?.getMapRelations || getMapRelations,
     buildStoryMemorySnapshot: overrides?.buildStoryMemorySnapshot || buildStoryMemorySnapshot,
     listStoryThreads: overrides?.listStoryThreads || listStoryThreads,
     getForeshadowSnapshot: overrides?.getForeshadowSnapshot || getForeshadowSnapshot,
@@ -1123,6 +1417,7 @@ export async function resolveWriterOrchestratedContext(
   const runtimeLimits: WriterToolRuntimeLimits = {
     maxCharacters: input.runtime?.maxCharacters || 6,
     maxItems: input.runtime?.maxItems || 4,
+    maxMapLocations: input.runtime?.maxMapLocations || input.runtime?.maxTimelineEvents || 4,
     maxTimelineEvents: input.runtime?.maxTimelineEvents || 4,
     maxThreads: input.runtime?.maxThreads || 4,
     maxRecallHits: input.runtime?.maxRecallHitsPerBucket || 3,
@@ -1187,10 +1482,12 @@ export async function resolveWriterOrchestratedContext(
     accumulator.storyMemoryPack,
     accumulator.characterEntries,
     accumulator.itemEntries,
+    accumulator.mapLocationEntries,
     accumulator.timelineEntries,
     accumulator.worldStatePack,
     accumulator.threadPack,
     accumulator.recallHits,
+    runtimeLimits,
     input.baseContextParts,
   )
   const allocatorInputSummary = buildAllocatorInputSummary(renderedContextOverrides, queryPlan, input)
@@ -1203,6 +1500,7 @@ export async function resolveWriterOrchestratedContext(
       storyMemory: accumulator.storyMemoryPack,
       characters: accumulator.characterEntries,
       items: accumulator.itemEntries,
+      mapLocations: accumulator.mapLocationEntries,
       timeline: accumulator.timelineEntries,
       worldState: accumulator.worldStatePack,
       threads: accumulator.threadPack,

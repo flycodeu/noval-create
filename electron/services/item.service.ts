@@ -1762,7 +1762,6 @@ export async function generateStoryItemsBatchChunk(
 
   const profile = await buildStoryProfile(novelId)
   const rules = parseWorldRulesJson(novel.worldRulesJson, profile.genre)
-  const itemProfile = getItemGenerationProfile(profile.genre)
   const templateRows = ensureTemplateRows(novelId, {
     genreName: profile.genre,
     refreshTemplates: options.refreshTemplates,
@@ -1780,7 +1779,23 @@ export async function generateStoryItemsBatchChunk(
   const eventRows = db.select().from(timelineEvents).where(eq(timelineEvents.novelId, novelId)).all()
   const arcRows = db.select().from(storyArcs).where(eq(storyArcs.novelId, novelId)).all()
   const currentItems = db.select().from(storyItems).where(eq(storyItems.novelId, novelId)).all()
-  const requestedCount = Math.max(1, Math.min(options.count || itemProfile.defaultBatch, 24))
+  const itemProfile = getItemGenerationProfile(profile.genre, {
+    launchMode: novel.launchMode,
+    targetWords: novel.targetWords,
+    settingsJson: novel.settingsJson,
+    mapDepth: Math.max(
+      ...rules.mapBlueprint.levels.map((level) => level.depth),
+      ...mapRows.map((row) => Number(row.level || 0)),
+      1,
+    ),
+    factionCount: rules.factionSystem.length,
+    speciesCount: Math.max(
+      rules.speciesSystem.length,
+      new Set(characterRows.map((character) => character.species).filter(Boolean)).size,
+    ),
+    powerSystemCount: rules.powerSystems.length,
+  })
+  const requestedCount = Math.max(1, Math.min(options.count || itemProfile.defaultBatch, 200))
   const historyEntityType = 'item'
   const historyTaskType = 'story_item_generate_batch'
   let nextSort = getNextSortOrder(novelId)
@@ -1973,7 +1988,6 @@ export async function generateStoryItems(
 
   const profile = await buildStoryProfile(novelId)
   const rules = parseWorldRulesJson(novel.worldRulesJson, profile.genre)
-  const itemProfile = getItemGenerationProfile(profile.genre)
   const templateRows = ensureTemplateRows(novelId, {
     genreName: profile.genre,
     refreshTemplates: options.refreshTemplates,
@@ -1987,8 +2001,24 @@ export async function generateStoryItems(
   const mapRows = db.select().from(worldMap).where(eq(worldMap.novelId, novelId)).all()
   const eventRows = db.select().from(timelineEvents).where(eq(timelineEvents.novelId, novelId)).all()
   const arcRows = db.select().from(storyArcs).where(eq(storyArcs.novelId, novelId)).all()
-  const totalCount = Math.min(Math.max(options.count || itemProfile.defaultBatch, 4), 24)
-  const batchSize = Math.max(1, Math.min(totalCount, options.batchSize || Math.min(totalCount, 4)))
+  const itemProfile = getItemGenerationProfile(profile.genre, {
+    launchMode: novel.launchMode,
+    targetWords: novel.targetWords,
+    settingsJson: novel.settingsJson,
+    mapDepth: Math.max(
+      ...rules.mapBlueprint.levels.map((level) => level.depth),
+      ...mapRows.map((row) => Number(row.level || 0)),
+      1,
+    ),
+    factionCount: rules.factionSystem.length,
+    speciesCount: Math.max(
+      rules.speciesSystem.length,
+      new Set(characterRows.map((character) => character.species).filter(Boolean)).size,
+    ),
+    powerSystemCount: rules.powerSystems.length,
+  })
+  const totalCount = Math.min(Math.max(options.count || itemProfile.defaultBatch, 4), 200)
+  const batchSize = Math.max(1, Math.min(totalCount, options.batchSize || Math.min(totalCount, itemProfile.batchSize || 4), 12))
 
   const createdIds: number[] = []
   const historyEntityType = 'item'

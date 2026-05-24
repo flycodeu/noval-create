@@ -79,6 +79,8 @@ const EMPTY_AUTO_STATUS: FactionAutoGenerateStatus = {
 }
 
 const EMPTY_FACTION_GRAPH: FactionGraphPayload = { nodes: [], edges: [], unalignedCharacters: [] }
+const FACTION_AUTO_GENERATE_MAX_COUNT = 200
+const FACTION_AUTO_GENERATE_MAX_BATCH_SIZE = 8
 
 function ensureArray<T>(value: T[] | null | undefined): T[] {
   return Array.isArray(value) ? value : []
@@ -212,7 +214,7 @@ export default function FactionsPage({ novelId }: Props) {
     setLoading(true)
     try {
       const [page, nextStats, nextWorkflowStats, nextCharacters, nextMaps] = await Promise.all([
-        window.electron.faction.query({ novelId, keyword, page: 1, pageSize: 200 }),
+        window.electron.faction.query({ novelId, keyword, page: 1, pageSize: 500 }),
         window.electron.faction.getStats({ novelId }),
         loadWorkflowStats(novelId),
         window.electron.character.search(novelId, '', 120),
@@ -419,7 +421,7 @@ export default function FactionsPage({ novelId }: Props) {
       actions={(
         <Space wrap>
           <Button type="primary" icon={<RobotOutlined />} onClick={() => {
-            generateForm.setFieldsValue({ count: Math.max(1, 10 - items.length), batchSize: 1, relationshipDensity: 'balanced', allowCharacterlessFactions: true, preferExistingCharacters: true, preferredTypes: ['organization', 'sect', 'family'], specialRequirements: '势力必须像小说里的真实组织主体，服务人物归属、资源争夺或主线冲突。' })
+            generateForm.setFieldsValue({ count: Math.max(1, Math.min(48, 48 - items.length)), batchSize: 4, relationshipDensity: 'balanced', allowCharacterlessFactions: true, preferExistingCharacters: true, preferredTypes: ['organization', 'sect', 'family'], specialRequirements: '势力必须像小说里的真实组织主体，服务人物归属、资源争夺或主线冲突。' })
             setGenerateOpen(true)
           }}>AI 生成·分批势力</Button>
           {autoTask?.status === 'paused' ? <Button icon={<ShareAltOutlined />} onClick={() => void handleResumeAutoGenerate()}>继续任务</Button> : null}
@@ -594,8 +596,8 @@ export default function FactionsPage({ novelId }: Props) {
 
       <Modal title="AI 生成·分批势力" open={generateOpen} onCancel={() => setGenerateOpen(false)} onOk={() => void handleStartAutoGenerate()} okText="启动后台生成" destroyOnHidden>
         <Form form={generateForm} layout="vertical">
-          <Form.Item name="count" label="目标总数" rules={[{ required: true, message: '请输入目标总数' }]}><InputNumber min={1} max={24} className="workspace-input-number-full" /></Form.Item>
-          <Form.Item name="batchSize" label="每批生成" rules={[{ required: true, message: '请输入每批数量' }]}><InputNumber min={1} max={6} className="workspace-input-number-full" /></Form.Item>
+          <Form.Item name="count" label="目标总数" rules={[{ required: true, message: '请输入目标总数' }]}><InputNumber min={1} max={FACTION_AUTO_GENERATE_MAX_COUNT} className="workspace-input-number-full" /></Form.Item>
+          <Form.Item name="batchSize" label="每批生成" rules={[{ required: true, message: '请输入每批数量' }]}><InputNumber min={1} max={FACTION_AUTO_GENERATE_MAX_BATCH_SIZE} className="workspace-input-number-full" /></Form.Item>
           <Form.Item name="relationshipDensity" label="关系密度"><Select options={FACTION_RELATIONSHIP_DENSITY_OPTIONS} /></Form.Item>
           <Form.Item name="preferredTypes" label="优先类型"><Select mode="multiple" options={FACTION_TYPE_OPTIONS} /></Form.Item>
           <Form.Item name="allowCharacterlessFactions" label="允许无人归属的隐性势力" valuePropName="checked"><Switch /></Form.Item>

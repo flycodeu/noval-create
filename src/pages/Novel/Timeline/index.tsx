@@ -420,6 +420,7 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
         open={workspace.generateOpen}
         loading={workspace.generating}
         form={workspace.generateForm}
+        preset={workspace.timelineGenerationPreset}
         onCancel={() => workspace.setGenerateOpen(false)}
         onSubmit={() => void workspace.handleGenerate()}
       />

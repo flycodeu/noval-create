@@ -1,3 +1,10 @@
+import type { NovelLaunchMode } from '../types'
+import {
+  deriveOperatingMode,
+  estimateChapterCountFromOperatingMode,
+  type NovelOperatingMode,
+} from './operating-mode'
+
 export type StoryGenreFamily =
   | 'zombie'
   | 'wuxia'
@@ -18,6 +25,10 @@ export interface CharacterBatchPreset {
   genderRatio: string
   helperRoles: string[]
   preferredSpecies: string[]
+  batchSize: number
+  totalCount: number
+  scaleLabel: string
+  rationale: string
 }
 
 export interface ItemTemplateDefinition {
@@ -36,8 +47,55 @@ export interface ItemGenerationProfile {
   title: string
   overview: string
   defaultBatch: number
+  batchSize?: number
+  scaleLabel?: string
+  rationale?: string
   beginnerTips: string[]
   templates: ItemTemplateDefinition[]
+}
+
+export interface NovelAssetScaleInput {
+  launchMode?: NovelLaunchMode | string | null
+  operatingMode?: NovelOperatingMode | string | null
+  targetWords?: number | null
+  chapterCount?: number | null
+  settingsJson?: string | null
+  mapDepth?: number | null
+  factionCount?: number | null
+  speciesCount?: number | null
+  powerSystemCount?: number | null
+}
+
+export interface TimelineGenerationPreset {
+  count: number
+  batchSize: number
+  focus: string
+  scaleLabel: string
+  rationale: string
+}
+
+export interface StoryThreadGenerationPreset {
+  count: number
+  batchSize: number
+  focus: string
+  scaleLabel: string
+  rationale: string
+}
+
+export interface FactionGenerationPreset {
+  count: number
+  batchSize: number
+  focus: string
+  scaleLabel: string
+  rationale: string
+}
+
+export interface MapLayerCountPreset {
+  depth: number
+  suggestedCount: number
+  originalCount: number
+  scaleLabel: string
+  rationale: string
 }
 
 const GENRE_RULES: Array<{ family: StoryGenreFamily; pattern: RegExp }> = [
@@ -518,6 +576,195 @@ function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
 }
 
+function clampInt(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, Math.round(value)))
+}
+
+function normalizePositiveNumber(value?: number | null): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0
+}
+
+function resolveGenreComplexity(family: StoryGenreFamily): number {
+  switch (family) {
+    case 'xianxia':
+    case 'fantasy':
+    case 'scifi':
+      return 1.22
+    case 'mystery':
+    case 'classical':
+      return 1.12
+    case 'zombie':
+    case 'wuxia':
+      return 1.05
+    case 'romance':
+    case 'modern':
+      return 0.88
+    case 'generic':
+    default:
+      return 1
+  }
+}
+
+function resolveExtraWorldComplexity(input?: NovelAssetScaleInput): number {
+  if (!input) return 0
+  const mapDepth = normalizePositiveNumber(input.mapDepth)
+  const factionCount = normalizePositiveNumber(input.factionCount)
+  const speciesCount = normalizePositiveNumber(input.speciesCount)
+  const powerSystemCount = normalizePositiveNumber(input.powerSystemCount)
+  return (
+    Math.min(Math.max(mapDepth - 3, 0), 3) * 0.08
+    + Math.min(Math.max(factionCount - 4, 0), 8) * 0.025
+    + Math.min(Math.max(speciesCount - 2, 0), 6) * 0.025
+    + Math.min(Math.max(powerSystemCount - 1, 0), 4) * 0.035
+  )
+}
+
+function resolveAssetScaleProfile(genreName?: string | null, input?: NovelAssetScaleInput) {
+  const family = resolveGenreFamily(genreName)
+  const operatingMode = deriveOperatingMode({
+    launchMode: input?.launchMode,
+    operatingMode: input?.operatingMode,
+    targetWords: input?.targetWords,
+    chapterCount: input?.chapterCount,
+    settingsJson: input?.settingsJson,
+  })
+  const estimatedChapterCount = estimateChapterCountFromOperatingMode({
+    launchMode: input?.launchMode,
+    operatingMode: input?.operatingMode,
+    targetWords: input?.targetWords,
+    chapterCount: input?.chapterCount,
+    settingsJson: input?.settingsJson,
+  })
+  const modeMultiplier: Record<NovelOperatingMode, number> = {
+    shortform: 0.66,
+    standard_longform: 1,
+    epic_longform: 1.75,
+    million_longform: 2.65,
+  }
+  const labelMap: Record<NovelOperatingMode, string> = {
+    shortform: '短篇规模',
+    standard_longform: '标准长篇规模',
+    epic_longform: '史诗长篇规模',
+    million_longform: '百万字规模',
+  }
+  const multiplier = modeMultiplier[operatingMode] * resolveGenreComplexity(family) + resolveExtraWorldComplexity(input)
+  const targetWords = normalizePositiveNumber(input?.targetWords)
+  const rationale = [
+    labelMap[operatingMode],
+    targetWords > 0 ? `${targetWords.toLocaleString()} 字目标` : '',
+    estimatedChapterCount > 0 ? `约 ${estimatedChapterCount} 章` : '',
+    family !== 'generic' ? `${family} 题材复杂度` : '',
+  ].filter(Boolean).join(' · ')
+  return {
+    family,
+    operatingMode,
+    estimatedChapterCount,
+    targetWords,
+    multiplier,
+    scaleLabel: labelMap[operatingMode],
+    rationale,
+  }
+}
+
+function scaleCount(base: number, multiplier: number, min: number, max: number): number {
+  return clampInt(base * multiplier, min, max)
+}
+
+function resolveElasticCap(
+  scale: ReturnType<typeof resolveAssetScaleProfile>,
+  baseCap: number,
+  options: {
+    hardCap: number
+    perExtraWordBlock?: number
+    perComplexityPoint?: number
+  },
+): number {
+  const extraWordBlocks = Math.max(0, Math.ceil((scale.targetWords - 1000000) / 250000))
+  const complexityBonus = Math.max(0, Math.round((scale.multiplier - 2.65) * (options.perComplexityPoint || 10)))
+  return clampInt(baseCap + extraWordBlocks * (options.perExtraWordBlock || 6) + complexityBonus, baseCap, options.hardCap)
+}
+
+function resolveCharacterTotalCap(scale: ReturnType<typeof resolveAssetScaleProfile>): number {
+  if (scale.operatingMode === 'million_longform') {
+    return resolveElasticCap(scale, 64, { hardCap: 120, perExtraWordBlock: 8, perComplexityPoint: 14 })
+  }
+  if (scale.operatingMode === 'epic_longform') return resolveElasticCap(scale, 44, { hardCap: 72, perExtraWordBlock: 4, perComplexityPoint: 8 })
+  if (scale.operatingMode === 'standard_longform') return resolveElasticCap(scale, 24, { hardCap: 40, perExtraWordBlock: 2, perComplexityPoint: 5 })
+  return 14
+}
+
+function resolveAssetCountCap(
+  scale: ReturnType<typeof resolveAssetScaleProfile>,
+  baseCaps: Record<NovelOperatingMode, number>,
+  hardCap: number,
+): number {
+  if (scale.operatingMode === 'million_longform') {
+    return resolveElasticCap(scale, baseCaps.million_longform, { hardCap, perExtraWordBlock: 8, perComplexityPoint: 12 })
+  }
+  if (scale.operatingMode === 'epic_longform') {
+    return resolveElasticCap(scale, baseCaps.epic_longform, { hardCap: Math.min(hardCap, baseCaps.epic_longform + 36), perExtraWordBlock: 5, perComplexityPoint: 8 })
+  }
+  if (scale.operatingMode === 'standard_longform') {
+    return resolveElasticCap(scale, baseCaps.standard_longform, { hardCap: Math.min(hardCap, baseCaps.standard_longform + 20), perExtraWordBlock: 3, perComplexityPoint: 5 })
+  }
+  return baseCaps.shortform
+}
+
+function withPresetMeta(
+  preset: Omit<CharacterBatchPreset, 'batchSize' | 'totalCount' | 'scaleLabel' | 'rationale'>,
+  genreName?: string | null,
+  input?: NovelAssetScaleInput,
+): CharacterBatchPreset {
+  const scale = resolveAssetScaleProfile(genreName, input)
+  const maxTotal = resolveCharacterTotalCap(scale)
+  const minTotal = scale.operatingMode === 'million_longform'
+    ? 42
+    : scale.operatingMode === 'epic_longform'
+      ? 26
+      : scale.operatingMode === 'standard_longform'
+        ? 12
+        : 8
+  const baseTotal = preset.majorCount + preset.minorCount + preset.antagonistCount + preset.supportingCount
+  const targetTotal = clampInt(baseTotal * scale.multiplier, minTotal, maxTotal)
+  const roleWeights = {
+    major: preset.majorCount / baseTotal,
+    minor: preset.minorCount / baseTotal,
+    antagonist: preset.antagonistCount / baseTotal,
+    supporting: preset.supportingCount / baseTotal,
+  }
+
+  let majorCount = clampInt(targetTotal * roleWeights.major, scale.operatingMode === 'shortform' ? 2 : 4, Math.max(18, Math.ceil(targetTotal * 0.32)))
+  let antagonistCount = clampInt(targetTotal * roleWeights.antagonist, preset.antagonistCount > 0 ? 1 : 0, Math.max(12, Math.ceil(targetTotal * 0.18)))
+  let supportingCount = clampInt(targetTotal * roleWeights.supporting, 1, Math.max(18, Math.ceil(targetTotal * 0.28)))
+  let minorCount = Math.max(0, targetTotal - majorCount - antagonistCount - supportingCount)
+
+  if (minorCount < 3 && targetTotal >= 12) {
+    const needed = 3 - minorCount
+    supportingCount = Math.max(1, supportingCount - Math.ceil(needed / 2))
+    majorCount = Math.max(2, majorCount - Math.floor(needed / 2))
+    minorCount = targetTotal - majorCount - antagonistCount - supportingCount
+  }
+
+  const totalCount = majorCount + minorCount + antagonistCount + supportingCount
+  const batchSize = scale.operatingMode === 'million_longform'
+    ? 8
+    : scale.operatingMode === 'epic_longform'
+      ? 6
+      : 4
+
+  return {
+    ...preset,
+    majorCount,
+    minorCount,
+    antagonistCount,
+    supportingCount,
+    batchSize,
+    totalCount,
+    scaleLabel: scale.scaleLabel,
+    rationale: scale.rationale,
+  }
+}
+
 export function resolveGenreFamily(genreName?: string | null): StoryGenreFamily {
   const name = (genreName || '').trim()
   if (!name) return 'generic'
@@ -529,13 +776,17 @@ export function resolveGenreFamily(genreName?: string | null): StoryGenreFamily 
   return 'generic'
 }
 
-export function getCharacterBatchPreset(genreName?: string | null, speciesOptions: string[] = []): CharacterBatchPreset {
+export function getCharacterBatchPreset(
+  genreName?: string | null,
+  speciesOptions: string[] = [],
+  scaleInput?: NovelAssetScaleInput,
+): CharacterBatchPreset {
   const family = resolveGenreFamily(genreName)
   const firstSpecies = speciesOptions.slice(0, 3)
 
   switch (family) {
     case 'zombie':
-      return {
+      return withPresetMeta({
         majorCount: 4,
         minorCount: 6,
         antagonistCount: 2,
@@ -543,9 +794,9 @@ export function getCharacterBatchPreset(genreName?: string | null, speciesOption
         genderRatio: '男女均衡，允许少量老人和未成年幸存者',
         helperRoles: ['队医', '外勤侦察', '基地后勤', '感染风险角色'],
         preferredSpecies: firstSpecies.length > 0 ? firstSpecies : ['幸存者', '感染者'],
-      }
+      }, genreName, scaleInput)
     case 'wuxia':
-      return {
+      return withPresetMeta({
         majorCount: 4,
         minorCount: 5,
         antagonistCount: 2,
@@ -553,10 +804,10 @@ export function getCharacterBatchPreset(genreName?: string | null, speciesOption
         genderRatio: '性别均衡，保留师徒、同门、宿敌结构',
         helperRoles: ['师父', '同门对手', '黑市线人', '朝廷接口角色'],
         preferredSpecies: firstSpecies.length > 0 ? firstSpecies : ['人族'],
-      }
+      }, genreName, scaleInput)
     case 'xianxia':
     case 'fantasy':
-      return {
+      return withPresetMeta({
         majorCount: 5,
         minorCount: 6,
         antagonistCount: 2,
@@ -564,9 +815,9 @@ export function getCharacterBatchPreset(genreName?: string | null, speciesOption
         genderRatio: '不限制，注意不同势力与种族分布',
         helperRoles: ['宗门执事', '天赋型同辈', '护道人', '遗迹线角色'],
         preferredSpecies: firstSpecies.length > 0 ? firstSpecies : ['人族', '灵兽', '异族'],
-      }
+      }, genreName, scaleInput)
     case 'scifi':
-      return {
+      return withPresetMeta({
         majorCount: 4,
         minorCount: 6,
         antagonistCount: 3,
@@ -574,9 +825,9 @@ export function getCharacterBatchPreset(genreName?: string | null, speciesOption
         genderRatio: '性别均衡，职业身份优先于年龄标签',
         helperRoles: ['技术员', '公司代表', '调查员', '实验体'],
         preferredSpecies: firstSpecies.length > 0 ? firstSpecies : ['人类', '机器人', '外星种族'],
-      }
+      }, genreName, scaleInput)
     case 'mystery':
-      return {
+      return withPresetMeta({
         majorCount: 4,
         minorCount: 5,
         antagonistCount: 2,
@@ -584,9 +835,9 @@ export function getCharacterBatchPreset(genreName?: string | null, speciesOption
         genderRatio: '\u6027\u522b\u548c\u5e74\u9f84\u81ea\u7136\u5206\u5e03\uff0c\u4f18\u5148\u4fdd\u8bc1\u804c\u4e1a\u4e0e\u5229\u5bb3\u7acb\u573a\u7684\u5dee\u5f02\u3002',
         helperRoles: ['\u8c03\u67e5\u534f\u529b\u8005', '\u5b88\u95e8\u4eba', '\u5173\u952e\u8bc1\u4eba', '\u5229\u5bb3\u76f8\u5173\u4eba'],
         preferredSpecies: firstSpecies.length > 0 ? firstSpecies : ['\u4eba\u7c7b'],
-      }
+      }, genreName, scaleInput)
     case 'romance':
-      return {
+      return withPresetMeta({
         majorCount: 4,
         minorCount: 4,
         antagonistCount: 1,
@@ -594,9 +845,9 @@ export function getCharacterBatchPreset(genreName?: string | null, speciesOption
         genderRatio: '按感情线需求分配，不追求机械平均',
         helperRoles: ['闺蜜/朋友', '同事', '家人', '情感竞争者'],
         preferredSpecies: firstSpecies.length > 0 ? firstSpecies : ['人类'],
-      }
+      }, genreName, scaleInput)
     case 'classical':
-      return {
+      return withPresetMeta({
         majorCount: 4,
         minorCount: 5,
         antagonistCount: 2,
@@ -604,11 +855,11 @@ export function getCharacterBatchPreset(genreName?: string | null, speciesOption
         genderRatio: '按家族、朝堂、后宅结构分配',
         helperRoles: ['家主', '幕僚', '侍从', '旧案知情人'],
         preferredSpecies: firstSpecies.length > 0 ? firstSpecies : ['人类'],
-      }
+      }, genreName, scaleInput)
     case 'modern':
     case 'generic':
     default:
-      return {
+      return withPresetMeta({
         majorCount: 4,
         minorCount: 5,
         antagonistCount: 1,
@@ -616,12 +867,167 @@ export function getCharacterBatchPreset(genreName?: string | null, speciesOption
         genderRatio: '性别和年龄自然分布，优先考虑职业关系',
         helperRoles: ['同事', '家人', '关键证人', '情绪支点角色'],
         preferredSpecies: firstSpecies.length > 0 ? firstSpecies : ['人类'],
-      }
+      }, genreName, scaleInput)
   }
 }
 
-export function getItemGenerationProfile(genreName?: string | null): ItemGenerationProfile {
-  return clone(ITEM_PROFILES[resolveGenreFamily(genreName)])
+export function getItemGenerationProfile(genreName?: string | null, scaleInput?: NovelAssetScaleInput): ItemGenerationProfile {
+  const base = clone(ITEM_PROFILES[resolveGenreFamily(genreName)])
+  const scale = resolveAssetScaleProfile(genreName, scaleInput)
+  const maxCount = resolveAssetCountCap(scale, {
+    shortform: 12,
+    standard_longform: 24,
+    epic_longform: 34,
+    million_longform: 48,
+  }, 160)
+  const defaultBatch = scaleCount(
+    base.defaultBatch,
+    scale.operatingMode === 'shortform' ? 0.75 : scale.multiplier,
+    scale.operatingMode === 'shortform' ? 6 : 8,
+    maxCount,
+  )
+  return {
+    ...base,
+    defaultBatch,
+    batchSize: scale.operatingMode === 'million_longform' ? 6 : scale.operatingMode === 'epic_longform' ? 5 : 4,
+    scaleLabel: scale.scaleLabel,
+    rationale: scale.rationale,
+  }
+}
+
+export function getTimelineGenerationPreset(genreName?: string | null, scaleInput?: NovelAssetScaleInput): TimelineGenerationPreset {
+  const scale = resolveAssetScaleProfile(genreName, scaleInput)
+  const maxCount = resolveAssetCountCap(scale, {
+    shortform: 14,
+    standard_longform: 24,
+    epic_longform: 42,
+    million_longform: 64,
+  }, 180)
+  const familyBase: Record<StoryGenreFamily, number> = {
+    zombie: 14,
+    wuxia: 12,
+    xianxia: 16,
+    fantasy: 16,
+    scifi: 16,
+    modern: 10,
+    mystery: 16,
+    romance: 10,
+    classical: 14,
+    generic: 12,
+  }
+  const count = scaleCount(
+    familyBase[scale.family],
+    scale.operatingMode === 'shortform' ? 0.75 : scale.multiplier,
+    scale.operatingMode === 'shortform' ? 8 : 10,
+    maxCount,
+  )
+  return {
+    count,
+    batchSize: scale.operatingMode === 'million_longform' ? 6 : scale.operatingMode === 'epic_longform' ? 5 : 4,
+    focus: '围绕主线冲突、关键地点、人物选择、物品流转和待回收线索补齐可追踪事件链。',
+    scaleLabel: scale.scaleLabel,
+    rationale: scale.rationale,
+  }
+}
+
+export function getStoryThreadGenerationPreset(genreName?: string | null, scaleInput?: NovelAssetScaleInput): StoryThreadGenerationPreset {
+  const scale = resolveAssetScaleProfile(genreName, scaleInput)
+  const maxCount = resolveAssetCountCap(scale, {
+    shortform: 12,
+    standard_longform: 20,
+    epic_longform: 34,
+    million_longform: 48,
+  }, 140)
+  const familyBase: Record<StoryGenreFamily, number> = {
+    zombie: 10,
+    wuxia: 10,
+    xianxia: 12,
+    fantasy: 12,
+    scifi: 12,
+    modern: 8,
+    mystery: 14,
+    romance: 8,
+    classical: 12,
+    generic: 10,
+  }
+  const count = scaleCount(
+    familyBase[scale.family],
+    scale.operatingMode === 'shortform' ? 0.7 : scale.multiplier,
+    scale.operatingMode === 'shortform' ? 6 : 8,
+    maxCount,
+  )
+  return {
+    count,
+    batchSize: scale.operatingMode === 'million_longform' ? 6 : 4,
+    focus: '把主线承诺、人物关系、伏笔回收、资源压力和地图行动线拆成可追踪线程。',
+    scaleLabel: scale.scaleLabel,
+    rationale: scale.rationale,
+  }
+}
+
+export function getFactionGenerationPreset(genreName?: string | null, scaleInput?: NovelAssetScaleInput): FactionGenerationPreset {
+  const scale = resolveAssetScaleProfile(genreName, scaleInput)
+  const maxCount = resolveAssetCountCap(scale, {
+    shortform: 10,
+    standard_longform: 20,
+    epic_longform: 42,
+    million_longform: 72,
+  }, 200)
+  const familyBase: Record<StoryGenreFamily, number> = {
+    zombie: 10,
+    wuxia: 12,
+    xianxia: 16,
+    fantasy: 16,
+    scifi: 14,
+    modern: 8,
+    mystery: 12,
+    romance: 7,
+    classical: 14,
+    generic: 10,
+  }
+  const count = scaleCount(
+    familyBase[scale.family],
+    scale.operatingMode === 'shortform' ? 0.75 : scale.multiplier,
+    scale.operatingMode === 'shortform' ? 4 : 8,
+    maxCount,
+  )
+  return {
+    count,
+    batchSize: scale.operatingMode === 'million_longform' ? 6 : scale.operatingMode === 'epic_longform' ? 5 : 4,
+    focus: '按主线冲突、资源控制、地图地盘、人物归属和隐性组织拆分势力网络，避免固定模板和无关组织。',
+    scaleLabel: scale.scaleLabel,
+    rationale: scale.rationale,
+  }
+}
+
+export function scaleMapLayerCounts(
+  levels: Array<{ depth: number; suggestedCount: number }>,
+  genreName?: string | null,
+  scaleInput?: NovelAssetScaleInput,
+): MapLayerCountPreset[] {
+  const scale = resolveAssetScaleProfile(genreName, {
+    ...scaleInput,
+    mapDepth: scaleInput?.mapDepth ?? levels.length,
+  })
+  const rootBump = scale.operatingMode === 'million_longform' ? 2 : scale.operatingMode === 'epic_longform' ? 1 : 0
+  const childBump = scale.operatingMode === 'million_longform' ? 2 : scale.operatingMode === 'epic_longform' ? 1 : 0
+  const extraWordBlocks = Math.max(0, Math.ceil((scale.targetWords - 1000000) / 300000))
+  const complexityBump = Math.max(0, Math.round((scale.multiplier - 2.65) * 2))
+  return levels.map((level) => {
+    const base = normalizePositiveNumber(level.suggestedCount) || 1
+    const bump = (level.depth === 1 ? rootBump : childBump) + extraWordBlocks + complexityBump
+    const max = level.depth === 1
+      ? (scale.operatingMode === 'million_longform' ? 16 : scale.operatingMode === 'epic_longform' ? 10 : 8)
+      : (scale.operatingMode === 'million_longform' ? 20 : scale.operatingMode === 'epic_longform' ? 14 : 10)
+    const suggestedCount = clampInt(base + bump, 1, max)
+    return {
+      depth: level.depth,
+      originalCount: base,
+      suggestedCount,
+      scaleLabel: scale.scaleLabel,
+      rationale: scale.rationale,
+    }
+  })
 }
 
 export function buildItemTemplateSummary(profile: ItemGenerationProfile): string {

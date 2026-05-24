@@ -15,10 +15,12 @@ import {
   buildHumanLanguageRules,
   buildOutputQualityRules,
 } from '../../src/shared/prompt-library'
+import { getStoryThreadGenerationPreset } from '../../src/shared/creation-tools'
+import { parseWorldRulesJson } from '../../src/shared/genre-system'
 import type { EntityRegenerateOptions } from '../../src/types'
 import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/utils/text'
 import { getDb } from '../database/db'
-import { chapters, novels, storyThreads } from '../database/schema'
+import { chapters, novels, storyThreads, worldMap } from '../database/schema'
 import { safeParseAiJson } from '../utils/json'
 import { recordAssetChangeEvent } from './asset-impact.service'
 import { markNovelContextChanged } from './context-impact.service'
@@ -256,16 +258,16 @@ function getLatestChapterNum(novelId: number): number {
   return rows.reduce((maxValue, chapter) => Math.max(maxValue, chapter.chapterNum || 0), 0)
 }
 
-function clampGenerateCount(value: unknown): number {
+function clampGenerateCount(value: unknown, fallback = 8): number {
   const numeric = typeof value === 'number' ? value : Number(value)
-  if (!Number.isFinite(numeric)) return 8
-  return Math.max(1, Math.min(20, Math.round(numeric)))
+  if (!Number.isFinite(numeric)) return Math.max(1, Math.min(160, Math.round(fallback)))
+  return Math.max(1, Math.min(160, Math.round(numeric)))
 }
 
 function clampBatchSize(value: unknown, totalCount: number): number {
   const numeric = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(numeric)) return Math.min(totalCount, 4)
-  return Math.max(1, Math.min(totalCount, Math.round(numeric), 6))
+  return Math.max(1, Math.min(totalCount, Math.round(numeric), 12))
 }
 
 function sanitizeErrorMessage(error: unknown, fallback = '生成失败'): string {
@@ -606,11 +608,18 @@ export function queryStoryThreads(filters: StoryThreadQueryFilters) {
 }
 
 export function getStoryThreadStats(filters: StoryThreadQueryFilters) {
-  const items = queryStoryThreads({
-    ...filters,
-    page: 1,
-    pageSize: 1000,
-  }).items
+  const keyword = asText(filters.keyword).toLowerCase()
+  const items = listStoryThreads(filters.novelId)
+    .filter((thread) => !filters.threadType || thread.threadType === filters.threadType)
+    .filter((thread) => !filters.status || thread.status === filters.status)
+    .filter((thread) => {
+      if (!keyword) return true
+      const haystack = [thread.title, thread.summary, thread.premise, thread.currentState, thread.notes]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+      return haystack.includes(keyword)
+    })
   const latestChapterNum = getLatestChapterNum(filters.novelId)
 
   return items.reduce((result, thread) => {
@@ -1069,6 +1078,8 @@ export async function generateStoryThreadBatchChunk(
   if (!novel) throwUserFacingError('novel.notFound')
 
   const profile = await buildStoryProfile(novelId)
+  const rules = parseWorldRulesJson(novel.worldRulesJson, profile.genre)
+  const mapRows = db.select().from(worldMap).where(eq(worldMap.novelId, novelId)).all()
   const existingRows = listStoryThreads(novelId)
   const latestChapterNum = getLatestChapterNum(novelId)
   const estimatedChapterTotal = Math.max(
@@ -1076,7 +1087,20 @@ export async function generateStoryThreadBatchChunk(
     latestChapterNum,
     Math.ceil((novel.targetWords || 200000) / 3000),
   )
-  const requestedCount = clampGenerateCount(options.count)
+  const generationPreset = getStoryThreadGenerationPreset(profile.genre, {
+    launchMode: novel.launchMode,
+    targetWords: novel.targetWords,
+    settingsJson: novel.settingsJson,
+    mapDepth: Math.max(
+      ...rules.mapBlueprint.levels.map((level) => level.depth),
+      ...mapRows.map((row) => Number(row.level || 0)),
+      1,
+    ),
+    factionCount: rules.factionSystem.length,
+    speciesCount: rules.speciesSystem.length,
+    powerSystemCount: rules.powerSystems.length,
+  })
+  const requestedCount = clampGenerateCount(options.count, generationPreset.count)
   const historyEntityType = 'thread'
   const historyTaskType = 'story_thread_generate_batch'
   const usedTitleKeys = new Set(
@@ -1257,6 +1281,8 @@ export async function generateStoryThreads(
   if (!novel) throwUserFacingError('novel.notFound')
 
   const profile = await buildStoryProfile(novelId)
+  const rules = parseWorldRulesJson(novel.worldRulesJson, profile.genre)
+  const mapRows = db.select().from(worldMap).where(eq(worldMap.novelId, novelId)).all()
   const existingRows = listStoryThreads(novelId)
   const latestChapterNum = getLatestChapterNum(novelId)
   const estimatedChapterTotal = Math.max(
@@ -1264,8 +1290,21 @@ export async function generateStoryThreads(
     latestChapterNum,
     Math.ceil((novel.targetWords || 200000) / 3000),
   )
-  const requestedCount = clampGenerateCount(options.count)
-  const batchSize = clampBatchSize(options.batchSize, requestedCount)
+  const generationPreset = getStoryThreadGenerationPreset(profile.genre, {
+    launchMode: novel.launchMode,
+    targetWords: novel.targetWords,
+    settingsJson: novel.settingsJson,
+    mapDepth: Math.max(
+      ...rules.mapBlueprint.levels.map((level) => level.depth),
+      ...mapRows.map((row) => Number(row.level || 0)),
+      1,
+    ),
+    factionCount: rules.factionSystem.length,
+    speciesCount: rules.speciesSystem.length,
+    powerSystemCount: rules.powerSystems.length,
+  })
+  const requestedCount = clampGenerateCount(options.count, generationPreset.count)
+  const batchSize = clampBatchSize(options.batchSize ?? generationPreset.batchSize, requestedCount)
   const createdDrafts: Array<Partial<typeof storyThreads.$inferInsert>> = []
   const createdIds: number[] = []
   const warnings: string[] = []

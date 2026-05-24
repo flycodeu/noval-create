@@ -19,6 +19,7 @@ import type {
 } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
 import { parseWorldRulesJson } from '../../../shared/genre-system'
+import { getTimelineGenerationPreset } from '../../../shared/creation-tools'
 import {
   EMPTY_WORKFLOW_STATS,
   getWorkflowBlockers,
@@ -129,6 +130,24 @@ export function useTimelineWorkspace(
   const defaultMode = worldRules.timelineConfig.calendarType
   const defaultPrecision = worldRules.timelineConfig.precisionOptions[0] || '\u9636\u6bb5'
   const defaultType = worldRules.timelineConfig.recommendedEventTypes[0] || ''
+  const timelineGenerationPreset = useMemo(() => getTimelineGenerationPreset(currentNovel?.genreName, {
+    launchMode: currentNovel?.launchMode,
+    targetWords: currentNovel?.targetWords,
+    settingsJson: currentNovel?.settingsJson,
+    mapDepth: worldRules.mapBlueprint.levels.length,
+    factionCount: worldRules.factionSystem.length,
+    speciesCount: worldRules.speciesSystem.length,
+    powerSystemCount: worldRules.powerSystems.length,
+  }), [
+    currentNovel?.genreName,
+    currentNovel?.launchMode,
+    currentNovel?.settingsJson,
+    currentNovel?.targetWords,
+    worldRules.factionSystem.length,
+    worldRules.mapBlueprint.levels.length,
+    worldRules.powerSystems.length,
+    worldRules.speciesSystem.length,
+  ])
 
   const watchedVolumeId = Form.useWatch('volumeId', form)
   const watchedPartId = Form.useWatch('partId', form)
@@ -474,8 +493,8 @@ export function useTimelineWorkspace(
   useEffect(() => {
     void loadShared()
     void hydrateOptions(null)
-    generateForm.setFieldsValue(getInitialGenerateValues())
-  }, [generateForm, hydrateOptions, loadShared])
+    generateForm.setFieldsValue(getInitialGenerateValues(timelineGenerationPreset))
+  }, [generateForm, hydrateOptions, loadShared, timelineGenerationPreset])
 
   useEffect(() => {
     const key = searchParams.toString()
@@ -759,9 +778,9 @@ export function useTimelineWorkspace(
 
     try {
       await window.electron.timeline.generate(novelId, {
-        count: values.count || 12,
-        batchSize: values.batchSize || 4,
-        focus: values.focus || TIMELINE_TEXT.generateFocusDefault,
+        count: values.count || timelineGenerationPreset.count,
+        batchSize: values.batchSize || timelineGenerationPreset.batchSize,
+        focus: values.focus || timelineGenerationPreset.focus || TIMELINE_TEXT.generateFocusDefault,
       })
       setGenerateOpen(false)
       await refreshPage()
@@ -772,7 +791,7 @@ export function useTimelineWorkspace(
     } finally {
       setGenerating(false)
     }
-  }, [currentNovel, generateForm, novelId, refreshPage])
+  }, [currentNovel, generateForm, novelId, refreshPage, timelineGenerationPreset])
 
   const openGenerateModal = useCallback(async () => {
     const nextWorkflowStats = await loadWorkflowStats(novelId)
@@ -892,6 +911,7 @@ export function useTimelineWorkspace(
     volumes,
     volumeFilter,
     worldRules,
+    timelineGenerationPreset,
     refreshPage,
   }
 }

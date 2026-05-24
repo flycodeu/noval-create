@@ -69,7 +69,7 @@ type SubplotLaneKey = 'setup' | 'escalation' | 'pressure' | 'payoff' | 'unschedu
 
 const DEFAULT_SUBPLOT_BATCH_COUNT = 8
 const MIN_SUBPLOT_BATCH_COUNT = 1
-const MAX_SUBPLOT_BATCH_COUNT = 20
+const MAX_SUBPLOT_BATCH_COUNT = 40
 const EMPTY_STATS: WorkflowStats = {
   mapCount: 0,
   factionCount: 0,

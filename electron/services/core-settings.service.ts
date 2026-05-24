@@ -34,6 +34,7 @@ import { throwUserFacingError } from '../utils/user-facing-error'
 
 const SUBPLOT_GENERATION_CHUNK_SIZE = 3
 const SUBPLOT_GENERATION_RETRY_LIMIT = 1
+const MAX_SUBPLOT_GENERATION_COUNT = 40
 const DEFAULT_RHYTHM = {
   rhythm_setup: 30,
   rhythm_conflict: 50,
@@ -267,7 +268,7 @@ function mergePolishedSubplots(original: SubPlotDraft[], polished: SubPlotDraft[
 
 function clampSubplotCount(value: number): number {
   if (!Number.isFinite(value)) return 10
-  return Math.max(1, Math.min(20, Math.round(value)))
+  return Math.max(1, Math.min(MAX_SUBPLOT_GENERATION_COUNT, Math.round(value)))
 }
 
 function sendProgress(sender: WebContents | undefined, payload: CoreSettingsGenerationProgressEvent) {

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { getDb } from '../database/db'
+import { characters, factions, genres, novels, worldMap } from '../database/schema'
 
 type MockTask = {
   id: number
@@ -74,6 +75,22 @@ function createDbMock() {
             targetWords: 200000,
             settingsJson: null,
           }),
+        }
+        return query
+      }),
+    })),
+  }
+}
+
+function createTableAwareDbMock(rowsByTable: Map<unknown, unknown[]>) {
+  return {
+    select: vi.fn(() => ({
+      from: vi.fn((table: unknown) => {
+        const query = {
+          where: () => query,
+          orderBy: () => query,
+          all: () => rowsByTable.get(table) || [],
+          get: () => (rowsByTable.get(table) || [])[0] || null,
         }
         return query
       }),
@@ -255,6 +272,13 @@ vi.mock('./task.service', () => ({
 }))
 
 import { __testing } from './batch-workflow.service'
+import { generateCharacterBatchChunk } from './character.service'
+import {
+  loadSubplotAutoGenerateContext,
+  polishGeneratedSubplots,
+  tryGenerateSubplotBatch,
+} from './core-settings.service'
+import { generateStoryItemsBatchChunk } from './item.service'
 
 function createBatchTask(taskId: number, chapterIds: number[], progressPatch: Record<string, unknown> = {}) {
   const initial = __testing.createInitialChapterBatchStatus(taskId, 1, { chapterIds })
@@ -301,6 +325,7 @@ function createQualityAnalysisTask(taskId: number, chapterIds: number[], progres
 
 describe('chapter batch workflow', () => {
   beforeEach(() => {
+    vi.clearAllMocks()
     taskRows.clear()
     chapterRows.clear()
     chapterScenarios.clear()
@@ -310,6 +335,252 @@ describe('chapter batch workflow', () => {
     feedbackPauseSignals.clear()
     nextTaskId = 1000
     vi.mocked(getDb).mockReturnValue(createDbMock() as never)
+  })
+
+  it('keeps large entity workflow limits aligned with parsed options', () => {
+    const faction = __testing.resolveFactionWorkflowOptions(1, JSON.stringify({ count: 180, batchSize: 8 }))
+    const factionInitial = __testing.createInitialFactionStatus(96, 1, faction)
+    const item = __testing.parseItemOptions(JSON.stringify({ count: 200, batchSize: 12 }))
+    const itemInitial = __testing.createInitialEntityStatus(97, 1, item.count || 0, item.batchSize || 0)
+    const timeline = __testing.parseTimelineOptions(JSON.stringify({ count: 240, batchSize: 12 }))
+    const timelineInitial = __testing.createInitialEntityStatus(98, 1, timeline.count || 0, timeline.batchSize || 0)
+    const parsed = __testing.parseThreadOptions(JSON.stringify({ count: 160, batchSize: 12 }))
+    const initial = __testing.createInitialThreadStatus(99, 1, parsed)
+    const subplot = __testing.parseSubplotRequest(JSON.stringify({ novelId: 1, subplotCount: 40 }))
+    const subplotInitial = __testing.createInitialSubplotStatus(100, subplot)
+
+    expect(faction).toMatchObject({ count: 180, batchSize: 8 })
+    expect(factionInitial).toMatchObject({
+      requestedCount: 180,
+      batchSize: 8,
+      totalBatches: 23,
+      completed: false,
+    })
+    expect(item).toMatchObject({ count: 200, batchSize: 12 })
+    expect(itemInitial).toMatchObject({
+      requestedCount: 200,
+      batchSize: 12,
+      totalBatches: 17,
+      completed: false,
+    })
+    expect(timeline).toMatchObject({ count: 200, batchSize: 12 })
+    expect(timelineInitial).toMatchObject({
+      requestedCount: 200,
+      batchSize: 12,
+      totalBatches: 17,
+      completed: false,
+    })
+    expect(parsed).toMatchObject({ count: 160, batchSize: 12 })
+    expect(initial).toMatchObject({
+      requestedCount: 160,
+      batchSize: 12,
+      totalBatches: 14,
+      completed: false,
+    })
+    expect(subplot).toMatchObject({ novelId: 1, subplotCount: 40 })
+    expect(subplotInitial).toMatchObject({
+      requestedCount: 40,
+      batchSize: 3,
+      totalBatches: 14,
+      completed: false,
+    })
+  })
+
+  it('uses novel complexity to resolve backend workflow defaults when count is omitted', () => {
+    vi.mocked(getDb).mockReturnValue(createTableAwareDbMock(new Map<unknown, unknown[]>([
+      [novels, [{
+        id: 1,
+        title: '复杂百万字工程',
+        genreId: 11,
+        launchMode: 'professional_longform',
+        targetWords: 1600000,
+        settingsJson: null,
+        worldRulesJson: JSON.stringify({
+          mapBlueprint: {
+            levels: Array.from({ length: 6 }, (_, index) => ({
+              depth: index + 1,
+              label: `层级${index + 1}`,
+              suggestedCount: 8,
+              nodeTypes: ['地点'],
+            })),
+          },
+          factionSystem: Array.from({ length: 12 }, (_, index) => ({ name: `势力${index + 1}` })),
+          speciesSystem: Array.from({ length: 8 }, (_, index) => ({ name: `种族${index + 1}`, entityType: 'human' })),
+          powerSystems: Array.from({ length: 5 }, (_, index) => ({ name: `体系${index + 1}` })),
+        }),
+      }]],
+      [genres, [{ id: 11, name: '科幻' }]],
+      [worldMap, Array.from({ length: 6 }, (_, index) => ({ id: index + 1, novelId: 1, level: index + 1 }))],
+      [characters, Array.from({ length: 8 }, (_, index) => ({ id: index + 1, novelId: 1, species: `种族${index + 1}` }))],
+      [factions, Array.from({ length: 12 }, (_, index) => ({ id: index + 1, novelId: 1, name: `势力${index + 1}` }))],
+    ])) as never)
+
+    const faction = __testing.resolveFactionWorkflowOptions(1, JSON.stringify({}))
+    const item = __testing.resolveItemWorkflowOptions(1, JSON.stringify({}))
+    const timeline = __testing.resolveTimelineWorkflowOptions(1, JSON.stringify({}))
+    const thread = __testing.resolveThreadWorkflowOptions(1, JSON.stringify({}))
+
+    expect(faction.count).toBeGreaterThan(48)
+    expect(faction.batchSize).toBeGreaterThanOrEqual(4)
+    expect(item.count).toBeGreaterThan(48)
+    expect(timeline.count).toBeGreaterThan(10)
+    expect(thread.count).toBeGreaterThan(8)
+    expect(__testing.resolveItemWorkflowOptions(1, JSON.stringify({ count: 7 })).count).toBe(7)
+  })
+
+  it('pauses entity generation instead of succeeding when batches cannot reach the requested count', async () => {
+    vi.mocked(generateStoryItemsBatchChunk).mockResolvedValue({
+      ids: [],
+      warning: '没有生成可用物品',
+      batchDigest: '',
+    })
+    const inputJson = JSON.stringify({ count: 3, batchSize: 2 })
+    const options = __testing.parseItemOptions(inputJson)
+    taskRows.set(77, {
+      id: 77,
+      novelId: 1,
+      type: 'item_auto_generate',
+      runnerType: 'workflow',
+      status: 'pending',
+      inputJson,
+      controlJson: JSON.stringify({ cancelRequested: false, maxRetries: 2, retryCount: 0 }),
+      progressJson: JSON.stringify(__testing.createInitialEntityStatus(77, 1, options.count || 3, options.batchSize || 2)),
+      errorMessage: null,
+      outputText: null,
+    })
+
+    await __testing.runSimpleEntityWorkflow(77, undefined, 'item')
+
+    expect(taskRows.get(77)?.status).toBe('paused')
+    expect(getProgress(77)).toMatchObject({
+      requestedCount: 3,
+      generatedCount: 0,
+      completed: false,
+    })
+    expect(String(getProgress(77).lastError)).toContain('0/3')
+    expect(generateStoryItemsBatchChunk).toHaveBeenCalledTimes(6)
+  })
+
+  it('chunks character generation by batch size and only completes after requested characters exist', async () => {
+    vi.mocked(generateCharacterBatchChunk)
+      .mockResolvedValueOnce({
+        ids: [11, 12],
+        majorGenerated: 0,
+        minorGenerated: 2,
+        antagonistGenerated: 0,
+        supportingGenerated: 0,
+        batchDigest: '角色11、角色12',
+      })
+      .mockResolvedValueOnce({
+        ids: [13],
+        majorGenerated: 0,
+        minorGenerated: 1,
+        antagonistGenerated: 0,
+        supportingGenerated: 0,
+        batchDigest: '角色13',
+      })
+    const inputJson = JSON.stringify({
+      majorCount: 0,
+      minorCount: 3,
+      antagonistCount: 0,
+      supportingCount: 0,
+      batchSize: 2,
+    })
+    const options = {
+      majorCount: 0,
+      minorCount: 3,
+      antagonistCount: 0,
+      supportingCount: 0,
+      batchSize: 2,
+    }
+    taskRows.set(78, {
+      id: 78,
+      novelId: 1,
+      type: 'character_auto_generate',
+      runnerType: 'workflow',
+      status: 'pending',
+      inputJson,
+      controlJson: JSON.stringify({ cancelRequested: false, maxRetries: 2, retryCount: 0 }),
+      progressJson: JSON.stringify(__testing.createInitialCharacterStatus(78, 1, options)),
+      errorMessage: null,
+      outputText: null,
+    })
+
+    await __testing.runCharacterAutoGenerateWorkflow(78)
+
+    expect(taskRows.get(78)?.status).toBe('success')
+    expect(getProgress(78)).toMatchObject({
+      requestedCount: 3,
+      batchSize: 2,
+      totalBatches: 2,
+      generatedCount: 3,
+      completed: true,
+    })
+    expect(generateCharacterBatchChunk).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(generateCharacterBatchChunk).mock.calls[0][1]).toMatchObject({ minorCount: 2, batchSize: 2 })
+    expect(vi.mocked(generateCharacterBatchChunk).mock.calls[1][1]).toMatchObject({ minorCount: 1, batchSize: 1 })
+  })
+
+  it('pauses subplot generation when max attempts still do not satisfy the requested count', async () => {
+    const accepted = {
+      name: '支线A',
+      characters: '角色A',
+      conflict: '资源争夺',
+      mainlineLink: '推动主线',
+      endChapter: '第20章',
+    }
+    vi.mocked(loadSubplotAutoGenerateContext).mockResolvedValue({ novelId: 1 } as never)
+    vi.mocked(polishGeneratedSubplots).mockImplementation((async (
+      _context: unknown,
+      _storyGoal: string,
+      _coreConflict: string,
+      _mainPlot: string,
+      subplots: Array<typeof accepted>,
+    ) => ({
+      subplots,
+      status: 'success',
+    })) as never)
+    let callCount = 0
+    vi.mocked(tryGenerateSubplotBatch).mockImplementation((async () => {
+      callCount += 1
+      return {
+        batchResult: {
+          accepted: callCount === 1 ? [accepted] : [],
+          warningMessage: callCount === 1 ? '' : '无新增支线',
+        },
+        warning: callCount === 1 ? '' : '无新增支线',
+      }
+    }) as never)
+    const request = __testing.parseSubplotRequest(JSON.stringify({
+      novelId: 1,
+      subplotCount: 4,
+      storyGoal: '建立多线压力',
+      coreConflict: '资源冲突',
+      mainPlot: '主线推进',
+    }))
+    taskRows.set(79, {
+      id: 79,
+      novelId: 1,
+      type: 'subplot_auto_generate',
+      runnerType: 'workflow',
+      status: 'pending',
+      inputJson: JSON.stringify(request),
+      controlJson: JSON.stringify({ cancelRequested: false, maxRetries: 2, retryCount: 0 }),
+      progressJson: JSON.stringify(__testing.createInitialSubplotStatus(79, request)),
+      errorMessage: null,
+      outputText: null,
+    })
+
+    await __testing.runSubplotAutoGenerateWorkflow(79)
+
+    expect(taskRows.get(79)?.status).toBe('paused')
+    expect(getProgress(79)).toMatchObject({
+      requestedCount: 4,
+      generatedCount: 1,
+      completed: false,
+    })
+    expect(String(getProgress(79).lastError)).toContain('1/4')
+    expect(tryGenerateSubplotBatch).toHaveBeenCalledTimes(8)
   })
 
   it('completes chapters sequentially', async () => {

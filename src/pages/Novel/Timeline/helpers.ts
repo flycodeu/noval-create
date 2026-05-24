@@ -49,6 +49,8 @@ export interface TimelineGenerateValues {
   count: number
   batchSize: number
   focus?: string
+  scaleLabel?: string
+  rationale?: string
 }
 
 export interface TimelineRouteState {
@@ -426,11 +428,13 @@ export function buildStructureJumpParams(event: TimelineEvent): URLSearchParams 
   return params
 }
 
-export function getInitialGenerateValues(): TimelineGenerateValues {
+export function getInitialGenerateValues(overrides: Partial<TimelineGenerateValues> = {}): TimelineGenerateValues {
   return {
-    count: 12,
-    batchSize: 4,
-    focus: '',
+    count: overrides.count || 12,
+    batchSize: overrides.batchSize || 4,
+    focus: overrides.focus || '',
+    scaleLabel: overrides.scaleLabel,
+    rationale: overrides.rationale,
   }
 }
 

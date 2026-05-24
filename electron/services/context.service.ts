@@ -94,6 +94,7 @@ function resolveRecentContextWindow(
     mentionedCharacters?: string[]
     mentionedItems?: string[]
     mentionedLocations?: string[]
+    mentionedFactions?: string[]
   } = {},
 ): number {
   const baseWindow = getOperatingModePolicy({
@@ -108,6 +109,7 @@ function resolveRecentContextWindow(
     + Math.min(options.mentionedCharacters?.length || 0, 3)
     + Math.min(options.mentionedItems?.length || 0, 2)
     + Math.min(options.mentionedLocations?.length || 0, 2)
+    + Math.min(options.mentionedFactions?.length || 0, 2)
   )
 
   if (signalDensity >= 8) return baseWindow + 4
@@ -278,6 +280,7 @@ export interface ChapterContextParts {
   worldRules: string
   characterStates: string
   worldStates: string
+  mapSummary: string
   itemSummary: string
   previousSummaries: string
   previousChapterContext: string
@@ -439,6 +442,7 @@ export interface ChapterContextRawData {
   mentionedCharacters: string[]
   mentionedItems: string[]
   mentionedLocations: string[]
+  mentionedFactions: string[]
   contextParts: ChapterContextParts
   previousChapterSampleReport: PreviousChapterSampleReport
   recallSnapshot: RecallSnapshot
@@ -619,6 +623,7 @@ interface RecallQueryBuildInput {
   mainPlot: string
   themeVoiceSummary: string
   worldRules: string
+  mapSummary?: string
   relationSummary: string
   characterStates: string
   worldStates?: string
@@ -633,6 +638,11 @@ interface RecallQueryBuildInput {
   mentionedCharacters: string[]
   mentionedItems: string[]
   mentionedLocations: string[]
+  mentionedFactions?: string[]
+  mentionValidationCharacters?: string[]
+  mentionValidationItems?: string[]
+  mentionValidationLocations?: string[]
+  mentionValidationFactions?: string[]
 }
 
 interface RecallHit extends SimilarFragmentHit {
@@ -691,16 +701,32 @@ function isAcceptedRecallSource(
 
 function resolveRecallValidationTerms(
   bucket: RecallBucketKey,
-  input: Pick<RecallQueryBuildInput, 'mentionedCharacters' | 'mentionedItems' | 'mentionedLocations'>,
+  input: Pick<RecallQueryBuildInput, 'mentionedCharacters' | 'mentionedItems' | 'mentionedLocations' | 'mentionedFactions' | 'mentionValidationCharacters' | 'mentionValidationItems' | 'mentionValidationLocations' | 'mentionValidationFactions'>,
 ): string[] {
+  const characterTerms = dedupe([
+    ...input.mentionedCharacters,
+    ...(input.mentionValidationCharacters || []),
+  ], 12)
+  const itemTerms = dedupe([
+    ...input.mentionedItems,
+    ...(input.mentionValidationItems || []),
+  ], 12)
+  const locationTerms = dedupe([
+    ...input.mentionedLocations,
+    ...(input.mentionValidationLocations || []),
+  ], 12)
+  const factionTerms = dedupe([
+    ...(input.mentionedFactions || []),
+    ...(input.mentionValidationFactions || []),
+  ], 12)
   switch (bucket) {
     case 'character':
-      return dedupe(input.mentionedCharacters, 6)
+      return dedupe([...characterTerms, ...factionTerms], 12)
     case 'rule':
-      return dedupe([...input.mentionedLocations, ...input.mentionedItems, ...input.mentionedCharacters], 6)
+      return dedupe([...locationTerms, ...itemTerms, ...characterTerms, ...factionTerms], 14)
     case 'thread':
     default:
-      return dedupe([...input.mentionedCharacters, ...input.mentionedItems, ...input.mentionedLocations], 8)
+      return dedupe([...characterTerms, ...itemTerms, ...locationTerms, ...factionTerms], 16)
   }
 }
 
@@ -793,6 +819,7 @@ function buildConstraintSignalTerms(rawData: ChapterContextRawData): string[] {
     ...rawData.mentionedCharacters,
     ...rawData.mentionedItems,
     ...rawData.mentionedLocations,
+    ...rawData.mentionedFactions,
     ...splitRecallLines(rawData.contextParts.chapterGoal, 4, 24),
     ...splitRecallLines(rawData.currentChapter?.outline || '', 4, 24),
     ...splitRecallLines(rawData.currentArc?.arcSummary || '', 3, 24),
@@ -1096,6 +1123,397 @@ function collectMentionedEntityNames(
   )
 }
 
+interface EntityMentionCandidate {
+  canonicalName: string
+  aliases?: string[]
+}
+
+const ENTITY_MENTION_ALIAS_KEYS = [
+  'alias',
+  'aliases',
+  'aliasesJson',
+  'name',
+  'displayName',
+  'entityName',
+  'refName',
+  'aliasNames',
+  'nicknames',
+  'nickname',
+  'titles',
+  'title',
+  'codenames',
+  'codename',
+  'codeName',
+  'mentionNames',
+  'mentions',
+  'addressTerms',
+  'relationTerms',
+  'relationshipTitles',
+  '称号',
+  '别名',
+  '代号',
+  '称谓',
+  '关系称谓',
+]
+
+function normalizeMentionAlias(value: string): string {
+  return value
+    .trim()
+    .replace(/^[\s"'“”‘’《》<>【】[\]()（）]+|[\s"'“”‘’《》<>【】[\]()（）]+$/gu, '')
+}
+
+function normalizeMentionAliasKey(value: string): string {
+  return normalizeMentionAlias(value).replace(/\s+/g, '').toLowerCase()
+}
+
+function splitMentionAliasText(value: string): string[] {
+  return value
+    .split(/[\n,，、;；/|]+/u)
+    .map(normalizeMentionAlias)
+    .filter(Boolean)
+}
+
+function isUsefulMentionAlias(value: string): boolean {
+  const alias = normalizeMentionAlias(value)
+  if (!alias) return false
+  if (/^\d+$/u.test(alias)) return false
+  if (alias.length < 2) return false
+  if (alias.length > 32) return false
+  return true
+}
+
+function aliasValuesFromUnknown(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => aliasValuesFromUnknown(item))
+  }
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    return [
+      ...ENTITY_MENTION_ALIAS_KEYS.flatMap((key) => aliasValuesFromUnknown(record[key])),
+      ...['pointers', 'refs', 'references', 'entities', 'items'].flatMap((key) => aliasValuesFromUnknown(record[key])),
+    ]
+  }
+  const text = asText(value)
+  if (!text) return []
+  return splitMentionAliasText(text)
+}
+
+function parseMentionAliasesFromJson(raw?: string | null): string[] {
+  if (!raw) return []
+  return dedupe([
+    ...aliasValuesFromUnknown(parseJsonRecord(raw)),
+    ...parseJsonRecordArray(raw).flatMap((record) => aliasValuesFromUnknown(record)),
+  ].filter(isUsefulMentionAlias), 16)
+}
+
+function parseMentionAliasesFromText(raw?: string | null): string[] {
+  const text = asText(raw)
+  if (!text) return []
+
+  const values: string[] = []
+  const labeledPattern = /(?:别名|又称|亦称|代号|称号|简称|称谓|alias|aliases|aka)\s*[:：]\s*([^\n。；;]+)/giu
+  let labeledMatch = labeledPattern.exec(text)
+  while (labeledMatch) {
+    values.push(...splitMentionAliasText(labeledMatch[1] || ''))
+    labeledMatch = labeledPattern.exec(text)
+  }
+
+  const inlinePattern = /(?:又称|亦称|代号为|简称为)\s*([\u4e00-\u9fffA-Za-z0-9_·-]{2,32})/gu
+  let inlineMatch = inlinePattern.exec(text)
+  while (inlineMatch) {
+    values.push(inlineMatch[1] || '')
+    inlineMatch = inlinePattern.exec(text)
+  }
+
+  return dedupe(values.filter(isUsefulMentionAlias), 16)
+}
+
+function collectUniqueAliasesByOwner<T extends { id: number }>(
+  rows: T[],
+  collectAliases: (row: T) => string[],
+): Map<number, string[]> {
+  const aliasesByOwner = new Map<number, string[]>()
+  const ownersByAlias = new Map<string, Set<number>>()
+
+  rows.forEach((row) => {
+    const aliases = dedupe(collectAliases(row)
+      .map(normalizeMentionAlias)
+      .filter(isUsefulMentionAlias), 24)
+    aliasesByOwner.set(row.id, aliases)
+    aliases.forEach((alias) => {
+      const key = normalizeMentionAliasKey(alias)
+      if (!ownersByAlias.has(key)) ownersByAlias.set(key, new Set())
+      ownersByAlias.get(key)?.add(row.id)
+    })
+  })
+
+  const result = new Map<number, string[]>()
+  aliasesByOwner.forEach((aliases, ownerId) => {
+    result.set(ownerId, aliases.filter((alias) => ownersByAlias.get(normalizeMentionAliasKey(alias))?.size === 1))
+  })
+  return result
+}
+
+function isTokenChar(value?: string): boolean {
+  return Boolean(value && /[A-Za-z0-9_]/u.test(value))
+}
+
+function isDigitChar(value?: string): boolean {
+  return Boolean(value && /\d/u.test(value))
+}
+
+function sourceContainsAlias(sourceText: string, alias: string): boolean {
+  const needle = normalizeMentionAlias(alias)
+  if (!needle) return false
+
+  let start = sourceText.indexOf(needle)
+  while (start >= 0) {
+    const before = sourceText[start - 1]
+    const after = sourceText[start + needle.length]
+    const first = needle[0]
+    const last = needle[needle.length - 1]
+    const blockedByAsciiToken = (isTokenChar(before) && isTokenChar(first)) || (isTokenChar(after) && isTokenChar(last))
+    const blockedByNumberSuffix = isDigitChar(after) && isDigitChar(last)
+    if (!blockedByAsciiToken && !blockedByNumberSuffix) return true
+    start = sourceText.indexOf(needle, start + 1)
+  }
+
+  return false
+}
+
+function collectMentionedEntityMatchesFromCandidates(
+  sourceText: string,
+  candidates: EntityMentionCandidate[],
+  limit: number,
+): Array<{ canonicalName: string; matchedTerms: string[]; score: number }> {
+  if (!sourceText.trim()) return []
+
+  const ownersByAlias = new Map<string, Set<string>>()
+  candidates.forEach((candidate) => {
+    dedupe([candidate.canonicalName, ...(candidate.aliases || [])]
+      .map(normalizeMentionAlias)
+      .filter(isUsefulMentionAlias), 32)
+      .forEach((alias) => {
+        const key = normalizeMentionAliasKey(alias)
+        if (!ownersByAlias.has(key)) ownersByAlias.set(key, new Set())
+        ownersByAlias.get(key)?.add(candidate.canonicalName)
+      })
+  })
+
+  return candidates
+    .map((candidate, index) => {
+      const aliases = dedupe([candidate.canonicalName, ...(candidate.aliases || [])]
+        .map(normalizeMentionAlias)
+        .filter(isUsefulMentionAlias), 32)
+        .filter((alias) => ownersByAlias.get(normalizeMentionAliasKey(alias))?.size === 1)
+      const matchedTerms = aliases
+        .filter((alias) => sourceContainsAlias(sourceText, alias))
+        .sort((left, right) => right.length - left.length)
+      return {
+        canonicalName: candidate.canonicalName,
+        matchedTerms,
+        index,
+        score: matchedTerms[0]?.length || 0,
+      }
+    })
+    .filter((entry) => entry.canonicalName && entry.score > 0)
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .slice(0, limit)
+}
+
+function collectMentionedEntityNamesFromCandidates(
+  sourceText: string,
+  candidates: EntityMentionCandidate[],
+  limit: number,
+): string[] {
+  return collectMentionedEntityMatchesFromCandidates(sourceText, candidates, limit)
+    .map((entry) => entry.canonicalName)
+    .filter(Boolean)
+}
+
+function collectMentionedEntityValidationTermsFromCandidates(
+  sourceText: string,
+  candidates: EntityMentionCandidate[],
+  limit: number,
+): string[] {
+  return dedupe(collectMentionedEntityMatchesFromCandidates(sourceText, candidates, limit)
+    .flatMap((entry) => [entry.canonicalName, ...entry.matchedTerms])
+    .filter(isUsefulMentionAlias), Math.max(limit * 3, limit))
+}
+
+function buildCharacterMentionCandidates(rows: Array<typeof characters.$inferSelect>): EntityMentionCandidate[] {
+  const uniqueAliases = collectUniqueAliasesByOwner(rows, (row) => [
+    row.surname && row.givenName ? `${row.surname}${row.givenName}` : '',
+    row.occupation || '',
+    row.rankLevel || '',
+    row.socialIdentity || '',
+    ...parseMentionAliasesFromJson(row.sourceContextJson),
+  ])
+
+  return rows.map((row) => {
+    const roleAliases = row.roleType === 'protagonist'
+      ? [
+          '主角',
+          '主人公',
+          row.gender?.includes('男') ? '男主' : '',
+          row.gender?.includes('女') ? '女主' : '',
+        ]
+      : []
+    return {
+      canonicalName: row.fullName || '',
+      aliases: dedupe([
+        ...(uniqueAliases.get(row.id) || []),
+        ...roleAliases,
+      ], 24),
+    }
+  })
+}
+
+function buildItemMentionCandidates(rows: Array<typeof storyItems.$inferSelect>): EntityMentionCandidate[] {
+  const uniqueAliases = collectUniqueAliasesByOwner(rows, (row) => [
+    row.subType || '',
+    ...parseJsonStringArray(row.tagsJson),
+    ...parseMentionAliasesFromJson(row.sourceContextJson),
+    ...parseMentionAliasesFromJson(row.typedRefsJson),
+  ])
+
+  return rows.map((row) => ({
+    canonicalName: row.itemName || '',
+    aliases: uniqueAliases.get(row.id) || [],
+  }))
+}
+
+function buildLocationMentionCandidates(rows: Array<typeof worldMap.$inferSelect>): EntityMentionCandidate[] {
+  const uniqueAliases = collectUniqueAliasesByOwner(rows, (row) => [
+    row.locationType || '',
+    row.structureRole || '',
+    ...parseJsonStringArray(row.tagsJson),
+  ])
+
+  return rows.map((row) => ({
+    canonicalName: row.name || '',
+    aliases: uniqueAliases.get(row.id) || [],
+  }))
+}
+
+function buildFactionMentionCandidates(rows: Array<typeof factions.$inferSelect>): EntityMentionCandidate[] {
+  return rows.map((row) => ({
+    canonicalName: row.name || '',
+    aliases: dedupe([
+      ...parseMentionAliasesFromJson(row.notes),
+      ...parseMentionAliasesFromText(row.notes),
+    ], 12),
+  }))
+}
+
+function collectRelationMentionedCharacterNames(
+  sourceText: string,
+  relationRows: Array<typeof characterRelations.$inferSelect>,
+  characterNameById: Map<number, string>,
+  limit: number,
+): string[] {
+  if (!sourceText.trim() || relationRows.length === 0 || limit <= 0) return []
+  return dedupe(relationRows.flatMap((relation) => {
+    const terms = [
+      relation.relationLabel || '',
+      relation.interactionStyle || '',
+    ]
+      .map(normalizeMentionAlias)
+      .filter(isUsefulMentionAlias)
+      .filter((term) => sourceContainsAlias(sourceText, term))
+    if (terms.length === 0) return []
+    return [
+      characterNameById.get(relation.charAId) || '',
+      characterNameById.get(relation.charBId) || '',
+    ]
+  }), limit)
+}
+
+function collectRelationMentionValidationTerms(
+  sourceText: string,
+  relationRows: Array<typeof characterRelations.$inferSelect>,
+  characterNameById: Map<number, string>,
+  limit: number,
+): string[] {
+  if (!sourceText.trim() || relationRows.length === 0 || limit <= 0) return []
+  return dedupe(relationRows.flatMap((relation) => {
+    const matchedTerms = [
+      relation.relationLabel || '',
+      relation.interactionStyle || '',
+    ]
+      .map(normalizeMentionAlias)
+      .filter(isUsefulMentionAlias)
+      .filter((term) => sourceContainsAlias(sourceText, term))
+    if (matchedTerms.length === 0) return []
+    return [
+      ...matchedTerms,
+      characterNameById.get(relation.charAId) || '',
+      characterNameById.get(relation.charBId) || '',
+    ]
+  }), Math.max(limit * 3, limit))
+}
+
+export function resolveMentionedEntityLimits(input: {
+  targetWords?: number | null
+  chapterCount?: number | null
+  launchMode?: string | null
+  settingsJson?: string | null
+  mapDepth?: number | null
+  factionCount?: number | null
+  speciesCount?: number | null
+  powerSystemCount?: number | null
+}) {
+  const policy = getOperatingModePolicy({
+    targetWords: input.targetWords,
+    chapterCount: input.chapterCount,
+    launchMode: input.launchMode,
+    settingsJson: input.settingsJson,
+  })
+  const targetWords = Number(input.targetWords || 0)
+  const chapterCount = Number(input.chapterCount || 0)
+  const extraWordBlocks = Math.max(0, Math.ceil((targetWords - 1000000) / 250000))
+  const extraChapterBlocks = Math.max(0, Math.ceil((chapterCount - 300) / 100))
+  const complexityScore = (
+    Math.min(Math.max(Number(input.mapDepth || 0) - 4, 0), 4) * 2
+    + Math.min(Math.max(Number(input.factionCount || 0) - 6, 0), 10)
+    + Math.min(Math.max(Number(input.speciesCount || 0) - 3, 0), 8)
+    + Math.min(Math.max(Number(input.powerSystemCount || 0) - 2, 0), 6)
+  )
+  const complexityBonus = Math.floor(complexityScore / 4)
+  const expand = (base: number, cap: number, weight = 1) => Math.min(
+    cap,
+    base + extraWordBlocks * weight * 2 + extraChapterBlocks * weight + complexityBonus * weight,
+  )
+
+  switch (policy.mode) {
+    case 'million_longform':
+      return {
+        characters: expand(targetWords >= 1500000 ? 32 : 24, 64, 2),
+        items: expand(targetWords >= 1500000 ? 24 : 20, 56, 2),
+        locations: expand(targetWords >= 1500000 ? 20 : 16, 56, 2),
+      }
+    case 'epic_longform':
+      return {
+        characters: expand(16, 40, 1),
+        items: expand(14, 36, 1),
+        locations: expand(12, 36, 1),
+      }
+    case 'standard_longform':
+      return {
+        characters: expand(10, 20, 1),
+        items: expand(10, 18, 1),
+        locations: expand(8, 16, 1),
+      }
+    case 'shortform':
+    default:
+      return {
+        characters: 8,
+        items: 8,
+        locations: 6,
+      }
+  }
+}
+
 function buildGlossaryContextSummary(
   novelId: number,
   signalTexts: string[],
@@ -1142,17 +1560,25 @@ function buildGlossaryContextSummary(
 function buildFactionContextSummary(
   novelId: number,
   mentionedCharacters: Array<typeof characters.$inferSelect>,
+  mentionedFactionNames: string[] = [],
   limit = 6,
 ): string {
-  if (mentionedCharacters.length === 0) return ''
+  if (mentionedCharacters.length === 0 && mentionedFactionNames.length === 0) return ''
 
   const catalog = buildFactionCatalog(novelId)
   const selected = new Map<number, typeof factions.$inferSelect>()
+  const mentionedFactionSet = new Set(mentionedFactionNames)
 
   mentionedCharacters.forEach((character) => {
     resolveFactionRowsByReferences(novelId, character.campFactionIdsJson).forEach((row) => {
       selected.set(row.id, row)
     })
+  })
+
+  catalog.rows.forEach((row) => {
+    if (mentionedFactionSet.has(row.name)) {
+      selected.set(row.id, row)
+    }
   })
 
   if (selected.size === 0) return ''
@@ -1225,12 +1651,13 @@ function buildRecallQueryBuckets(input: RecallQueryBuildInput): RecallQueryBucke
       ], 4),
     },
     {
-      title: '当前涉及人物物品地点',
+      title: '当前涉及实体',
       lines: dedupe([
         input.mentionedCharacters.length > 0 ? `人物=${input.mentionedCharacters.join('、')}` : '',
         input.mentionedItems.length > 0 ? `物品=${input.mentionedItems.join('、')}` : '',
         input.mentionedLocations.length > 0 ? `地点=${input.mentionedLocations.join('、')}` : '',
-      ], 3),
+        input.mentionedFactions && input.mentionedFactions.length > 0 ? `势力=${input.mentionedFactions.join('、')}` : '',
+      ], 4),
     },
     {
       title: '关系冲突',
@@ -1262,7 +1689,10 @@ function buildRecallQueryBuckets(input: RecallQueryBuildInput): RecallQueryBucke
     },
     {
       title: '世界规则与边界',
-      lines: splitRecallLines(input.worldRules, 5, 96),
+      lines: dedupe([
+        ...splitRecallLines(input.worldRules, 5, 96),
+        ...splitRecallLines(input.mapSummary || '', 3, 96),
+      ], 6),
     },
     {
       title: '时序与物品约束',
@@ -1679,6 +2109,7 @@ async function runRecallAugmentation(input: {
   mainPlot: string
   themeVoiceSummary: string
   worldRules: string
+  mapSummary?: string
   relationSummary: string
   characterStates: string
   worldStates: string
@@ -1693,6 +2124,11 @@ async function runRecallAugmentation(input: {
   mentionedCharacters: string[]
   mentionedItems: string[]
   mentionedLocations: string[]
+  mentionedFactions?: string[]
+  mentionValidationCharacters?: string[]
+  mentionValidationItems?: string[]
+  mentionValidationLocations?: string[]
+  mentionValidationFactions?: string[]
 }): Promise<RecallAugmentationResult> {
   const recallBuckets = buildRecallQueryBuckets({
     chapterGoal: input.chapterGoal,
@@ -1704,6 +2140,7 @@ async function runRecallAugmentation(input: {
     mainPlot: input.mainPlot,
     themeVoiceSummary: input.themeVoiceSummary,
     worldRules: input.worldRules,
+    mapSummary: input.mapSummary,
     relationSummary: input.relationSummary,
     characterStates: input.characterStates,
     worldStates: input.worldStates,
@@ -1718,6 +2155,7 @@ async function runRecallAugmentation(input: {
     mentionedCharacters: input.mentionedCharacters,
     mentionedItems: input.mentionedItems,
     mentionedLocations: input.mentionedLocations,
+    mentionedFactions: input.mentionedFactions,
   })
 
   if (recallBuckets.length === 0) {
@@ -1739,6 +2177,11 @@ async function runRecallAugmentation(input: {
         mentionedCharacters: input.mentionedCharacters,
         mentionedItems: input.mentionedItems,
         mentionedLocations: input.mentionedLocations,
+        mentionedFactions: input.mentionedFactions,
+        mentionValidationCharacters: input.mentionValidationCharacters,
+        mentionValidationItems: input.mentionValidationItems,
+        mentionValidationLocations: input.mentionValidationLocations,
+        mentionValidationFactions: input.mentionValidationFactions,
       })
       return {
         bucket: bucket.bucket,
@@ -1821,6 +2264,7 @@ function resolveContextLabelTitle(label: ChapterContextLabel): string {
     worldRules: '世界规则',
     characterStates: '人物当前状态',
     worldStates: '当前世界状态',
+    mapSummary: '地图地点上下文',
     itemSummary: '关键物品与去向',
     previousSummaries: '最近章节摘要',
     previousChapterContext: '上一章关键先验',
@@ -2061,6 +2505,7 @@ function createStagePriorityMap(
           dueForeshadows: 0,
           characterStates: 0,
           worldStates: 0,
+          mapSummary: 1,
           itemSummary: 1,
           previousChapterContext: 1,
           lastChapterEnding: 1,
@@ -2094,6 +2539,7 @@ function createStagePriorityMap(
           dueForeshadows: 0,
           characterStates: 0,
           worldStates: 0,
+          mapSummary: 1,
           itemSummary: 1,
           previousChapterContext: 1,
           lastChapterEnding: 1,
@@ -2127,6 +2573,7 @@ function createStagePriorityMap(
           dueForeshadows: 0,
           characterStates: 0,
           worldStates: 0,
+          mapSummary: 1,
           itemSummary: 1,
           previousChapterContext: 1,
           lastChapterEnding: 2,
@@ -2161,6 +2608,7 @@ function createStagePriorityMap(
           dueForeshadows: 0,
           characterStates: 0,
           worldStates: 0,
+          mapSummary: 1,
           itemSummary: 1,
           previousChapterContext: 1,
           lastChapterEnding: 1,
@@ -2782,7 +3230,68 @@ function buildTimelineContext(
   return { timelineSummary, timelineOpenThreads }
 }
 
-function buildItemSummary(novelId: number): string {
+function buildMapContextSummary(
+  locationRows: Array<typeof worldMap.$inferSelect>,
+  mentionedLocationNames: string[],
+  limit = 8,
+): string {
+  if (locationRows.length === 0 || mentionedLocationNames.length === 0) return ''
+  const terms = dedupe(mentionedLocationNames, limit)
+  const rowById = new Map(locationRows.map((row) => [row.id, row]))
+  const buildPath = (row: typeof worldMap.$inferSelect): string => {
+    const names = [row.name]
+    const seen = new Set<number>([row.id])
+    let parentId = row.parentId
+    while (typeof parentId === 'number' && !seen.has(parentId) && names.length < 6) {
+      seen.add(parentId)
+      const parent = rowById.get(parentId)
+      if (!parent) break
+      names.unshift(parent.name)
+      parentId = parent.parentId
+    }
+    return names.join(' -> ')
+  }
+  const scoreRow = (row: typeof worldMap.$inferSelect): number => {
+    const haystack = [
+      row.name,
+      row.nodeType,
+      row.locationType,
+      row.structureRole,
+      row.description,
+      row.plotRelevance,
+      row.dangerLevel,
+    ].filter(Boolean).join(' ')
+    return terms.reduce((sum, term, index) => {
+      if (row.name === term) return sum + 100 - index
+      if (row.name.includes(term) || term.includes(row.name)) return sum + 60 - index
+      return haystack.includes(term) ? sum + 20 - index : sum
+    }, 0)
+  }
+
+  const selected = locationRows
+    .map((row) => ({ row, score: scoreRow(row) }))
+    .filter((entry) => entry.score > 0)
+    .sort((left, right) => right.score - left.score || left.row.level - right.row.level || (left.row.sortOrder || 0) - (right.row.sortOrder || 0))
+    .slice(0, limit)
+
+  if (selected.length === 0) return ''
+
+  return selected.map(({ row }) => {
+    const meta = [
+      `层级${row.level}`,
+      row.locationType || row.nodeType || '',
+      row.structureRole || '',
+      row.dangerLevel ? `风险=${row.dangerLevel}` : '',
+    ].filter(Boolean).join(' / ')
+    const details = [
+      row.description || '',
+      row.plotRelevance ? `剧情作用=${row.plotRelevance}` : '',
+    ].filter(Boolean).join('；')
+    return `${buildPath(row)}${meta ? `（${meta}）` : ''}${details ? `：${details}` : ''}`
+  }).join('\n')
+}
+
+function buildItemSummary(novelId: number, limit = 12, mentionedItemNames: string[] = []): string {
   const db = getDb()
   const characterNameMap = new Map(
     db.select({ id: characters.id, fullName: characters.fullName }).from(characters).all()
@@ -2799,12 +3308,19 @@ function buildItemSummary(novelId: number): string {
     .filter((item) => item.itemKind === 'instance')
 
   if (rows.length === 0) return ''
+  const mentionedSet = new Set(mentionedItemNames)
+  const orderedRows = mentionedSet.size === 0
+    ? rows
+    : [
+        ...rows.filter((item) => mentionedSet.has(item.itemName)),
+        ...rows.filter((item) => !mentionedSet.has(item.itemName)),
+      ]
 
   return renderItemCards(buildItemContextCards({
-    items: rows,
+    items: orderedRows,
     characterNameMap,
     locationNameMap,
-    limit: 12,
+    limit,
   }))
 }
 
@@ -2812,6 +3328,7 @@ function buildActiveThreadsContextData(
   novelId: number,
   chapterNum: number,
   currentArc?: typeof storyArcs.$inferSelect | null,
+  limit = 10,
 ): { summary: string; pressureCount: number } {
   const db = getDb()
   const rows = db.select().from(storyThreads)
@@ -2826,7 +3343,7 @@ function buildActiveThreadsContextData(
     threads: rows,
     chapterNum,
     currentArc,
-    limit: 10,
+    limit,
   })
 
   return {
@@ -2867,6 +3384,7 @@ function buildDueForeshadowContext(
   novelId: number,
   chapterNum: number,
   currentArc?: typeof storyArcs.$inferSelect | null,
+  limit = 2,
 ): string {
   const db = getDb()
   const threadRows = db.select().from(storyThreads)
@@ -2902,7 +3420,7 @@ function buildDueForeshadowContext(
 
       return left.id - right.id
     })
-    .slice(0, 2)
+    .slice(0, limit)
     .map((entry) => compactRecallLine([
       entry.targetPayoffChapter! < chapterNum ? '超期必处理' : '到期必处理',
       entry.title,
@@ -2947,7 +3465,7 @@ function buildDueForeshadowContext(
 
       return (left.sortOrder || 0) - (right.sortOrder || 0)
     })
-    .slice(0, Math.max(0, 2 - ledgerLines.length))
+    .slice(0, Math.max(0, limit - ledgerLines.length))
     .map((thread) => compactRecallLine([
       thread.targetPayoffChapter! < chapterNum ? '超期必处理' : '到期必处理',
       thread.title,
@@ -2959,7 +3477,7 @@ function buildDueForeshadowContext(
     .filter(Boolean)
 
   return [...ledgerLines, ...threadLines]
-    .slice(0, 2)
+    .slice(0, limit)
     .join('\n')
 }
 
@@ -2971,7 +3489,7 @@ function buildActiveThreadsContext(
   return buildActiveThreadsContextData(novelId, chapterNum, currentArc).summary
 }
 
-function buildStoryThreadsSummary(novelId: number): string {
+function buildStoryThreadsSummary(novelId: number, limit = 24): string {
   const db = getDb()
   const rows = db.select().from(storyThreads)
     .where(eq(storyThreads.novelId, novelId))
@@ -2982,7 +3500,7 @@ function buildStoryThreadsSummary(novelId: number): string {
   if (rows.length === 0) return ''
 
   return rows
-    .slice(0, 8)
+    .slice(0, limit)
     .map((thread) => {
       const parts = [
         thread.threadType || 'subplot',
@@ -2993,6 +3511,14 @@ function buildStoryThreadsSummary(novelId: number): string {
       return `${thread.title}${parts.length > 0 ? `：${parts.join(' | ')}` : ''}`
     })
     .join('\n')
+}
+
+function resolveStoryThreadSummaryLimit(novel: typeof novels.$inferSelect): number {
+  const targetWords = Number(novel.targetWords || 0)
+  if (targetWords >= 1500000) return 40
+  if (targetWords >= 800000) return 32
+  if (targetWords >= 350000) return 24
+  return 16
 }
 
 function resolveArcForChapter(
@@ -3029,6 +3555,7 @@ function scoreKeyChapterRetention(
     mentionedCharacters?: string[]
     mentionedItems?: string[]
     mentionedLocations?: string[]
+    mentionedFactions?: string[]
   } = {},
 ): number {
   const continuity = parseContinuityState(row.continuityStateJson)
@@ -3054,6 +3581,7 @@ function scoreKeyChapterRetention(
   if (containsAny(chapterText, options.mentionedCharacters || [])) score += 10
   if (containsAny(chapterText, options.mentionedItems || [])) score += 8
   if (containsAny(chapterText, options.mentionedLocations || [])) score += 6
+  if (containsAny(chapterText, options.mentionedFactions || [])) score += 8
   if (options.signalText) {
     const signalMatches = splitRecallLines(options.signalText, 6, 24).filter((line) =>
       line.length >= 2 && chapterText.includes(line))
@@ -3073,6 +3601,7 @@ export function selectRecentContextRows(
     mentionedCharacters?: string[]
     mentionedItems?: string[]
     mentionedLocations?: string[]
+    mentionedFactions?: string[]
     maxCarryover?: number
   } = {},
 ): Array<typeof chapters.$inferSelect> {
@@ -3396,7 +3925,7 @@ export async function buildStoryProfile(novelId: number): Promise<StoryProfile> 
     themeVoiceSummary: buildThemeVoiceSummary(themeVoice),
     writingContractSummary,
     writingRulesSummary: buildWritingRulesSummary(settings.writingRules),
-    storyThreadsSummary: buildStoryThreadsSummary(novelId),
+    storyThreadsSummary: buildStoryThreadsSummary(novelId, resolveStoryThreadSummaryLimit(novel)),
     storyGoal: settings.storyGoal,
     coreConflict: settings.coreConflict,
     mainPlot: settings.mainPlot,
@@ -3487,6 +4016,14 @@ export async function collectChapterContextRawData(
   const allCharacters = db.select().from(characters).where(eq(characters.novelId, novelId)).all()
   const allItems = db.select().from(storyItems).where(eq(storyItems.novelId, novelId)).all()
   const allLocations = db.select().from(worldMap).where(eq(worldMap.novelId, novelId)).all()
+  const contractContext = currentChapter ? getChapterContractContext(currentChapter.id) : null
+  const worldRules = parseWorldRulesJson(novel.worldRulesJson, profile.genre)
+  const factionRows = db.select().from(factions).where(eq(factions.novelId, novelId)).all()
+  const maxMapDepth = Math.max(
+    ...worldRules.mapBlueprint.levels.map((level) => level.depth),
+    ...allLocations.map((location) => Number(location.level || 0)),
+    1,
+  )
   const chapterGoalPreview = [
     extractChapterGoal(currentChapter?.outline),
     currentArc?.arcGoal || '',
@@ -3497,22 +4034,88 @@ export async function collectChapterContextRawData(
     currentChapter?.outline,
     currentArc?.arcSummary,
     currentArc?.arcGoal,
+    contractContext?.chapterContract.chapterGoal,
+    ...(contractContext?.chapterContract.requiredAssetRefs || []),
+    ...(contractContext?.chapterContract.requiredArcProgress || []),
+    ...(contractContext?.chapterContract.requiredResistanceActions || []),
+    ...(contractContext?.chapterContract.acceptanceNotes || []),
+    ...(contractContext?.sceneContracts || []).flatMap((scene) => [
+      scene.segmentTitle,
+      scene.pov,
+      scene.timeLocation,
+      scene.sceneGoal,
+      scene.obstacle,
+      scene.conflictType,
+      scene.emotionShift,
+      ...scene.revealPayload,
+      scene.resultState,
+      scene.linkageMode,
+    ]),
+    ...(contractContext?.requiredCommitments || []).flatMap((item) => [item.title, item.description]),
+    ...(contractContext?.requiredForeshadows || []).flatMap((item) => [
+      item.title,
+      item.detail,
+      item.payoffMethod,
+      item.payoffSceneAction,
+      item.requiredEvidence,
+      item.readerVisibleOutcome,
+    ]),
   ].filter(Boolean).join('\n')
-  const mentionedCharacterNames = new Set<string>(collectMentionedEntityNames(
+  const mentionedEntityLimits = resolveMentionedEntityLimits({
+    targetWords,
+    chapterCount: chapterRows.length,
+    launchMode: novel.launchMode,
+    settingsJson: novel.settingsJson,
+    mapDepth: maxMapDepth,
+    factionCount: Math.max(worldRules.factionSystem.length, factionRows.length),
+    speciesCount: Math.max(
+      worldRules.speciesSystem.length,
+      new Set(allCharacters.map((character) => character.species).filter(Boolean)).size,
+    ),
+    powerSystemCount: worldRules.powerSystems.length,
+  })
+  const characterMentionCandidates = buildCharacterMentionCandidates(allCharacters)
+  const itemMentionCandidates = buildItemMentionCandidates(allItems)
+  const locationMentionCandidates = buildLocationMentionCandidates(allLocations)
+  const factionMentionCandidates = buildFactionMentionCandidates(factionRows)
+  const mentionedCharacterNames = new Set<string>(collectMentionedEntityNamesFromCandidates(
     chapterSignalText,
-    allCharacters.map((character) => character.fullName || ''),
-    8,
+    characterMentionCandidates,
+    mentionedEntityLimits.characters,
   ))
-  const mentionedItemNames = collectMentionedEntityNames(
+  const characterNameById = new Map(allCharacters.map((character) => [character.id, character.fullName || '']))
+  const relationRowsForMention = db.select().from(characterRelations).where(eq(characterRelations.novelId, novelId)).all()
+  collectRelationMentionedCharacterNames(
     chapterSignalText,
-    allItems.map((item) => item.itemName || ''),
-    8,
-  )
-  const mentionedLocationNames = collectMentionedEntityNames(
+    relationRowsForMention,
+    characterNameById,
+    mentionedEntityLimits.characters,
+  ).forEach((name) => {
+    if (mentionedCharacterNames.size < mentionedEntityLimits.characters) mentionedCharacterNames.add(name)
+  })
+  const mentionedItemNames = collectMentionedEntityNamesFromCandidates(
     chapterSignalText,
-    allLocations.map((location) => location.name || ''),
-    6,
+    itemMentionCandidates,
+    mentionedEntityLimits.items,
   )
+  const mentionedLocationNames = collectMentionedEntityNamesFromCandidates(
+    chapterSignalText,
+    locationMentionCandidates,
+    mentionedEntityLimits.locations,
+  )
+  const factionMentionLimit = Math.max(8, Math.ceil(mentionedEntityLimits.characters / 2))
+  const mentionedFactionNames = collectMentionedEntityNamesFromCandidates(
+    chapterSignalText,
+    factionMentionCandidates,
+    factionMentionLimit,
+  )
+  const mentionValidationCharacters = dedupe([
+    ...collectMentionedEntityValidationTermsFromCandidates(chapterSignalText, characterMentionCandidates, mentionedEntityLimits.characters),
+    ...collectRelationMentionValidationTerms(chapterSignalText, relationRowsForMention, characterNameById, mentionedEntityLimits.characters),
+  ], mentionedEntityLimits.characters * 3)
+  const mentionValidationItems = collectMentionedEntityValidationTermsFromCandidates(chapterSignalText, itemMentionCandidates, mentionedEntityLimits.items)
+  const mentionValidationLocations = collectMentionedEntityValidationTermsFromCandidates(chapterSignalText, locationMentionCandidates, mentionedEntityLimits.locations)
+  const mentionValidationFactions = collectMentionedEntityValidationTermsFromCandidates(chapterSignalText, factionMentionCandidates, factionMentionLimit)
   const recentChapters = selectRecentContextRows(
     previousRows,
     targetWords,
@@ -3524,6 +4127,7 @@ export async function collectChapterContextRawData(
       mentionedCharacters: [...mentionedCharacterNames],
       mentionedItems: mentionedItemNames,
       mentionedLocations: mentionedLocationNames,
+      mentionedFactions: mentionedFactionNames,
     },
   ).map(toChapterWithContinuity)
   const continuityChapters = recentChapters.filter((chapter) => hasContinuityContent(chapter.continuityState))
@@ -3545,9 +4149,10 @@ export async function collectChapterContextRawData(
     refreshMode: storyMemoryRuntimePolicy.backgroundPrecomputeEnabled ? 'schedule_only' : 'sync',
   })
   const longTermMemory = storyMemoryPromptPackage.summary
-  const itemSummary = buildItemSummary(novelId)
-  const activeThreadsContext = buildActiveThreadsContextData(novelId, chapterNum, currentArc)
-  const contractContext = currentChapter ? getChapterContractContext(currentChapter.id) : null
+  const threadContextLimit = Math.max(10, Math.min(32, mentionedEntityLimits.characters))
+  const dueForeshadowLimit = Math.max(2, Math.ceil(threadContextLimit / 4))
+  const itemSummary = buildItemSummary(novelId, Math.max(12, mentionedEntityLimits.items), mentionedItemNames)
+  const activeThreadsContext = buildActiveThreadsContextData(novelId, chapterNum, currentArc, threadContextLimit)
   const chapterContract = contractContext?.chapterContract || null
   const chapterGoal = [
     chapterContract?.chapterGoal || '',
@@ -3584,14 +4189,11 @@ export async function collectChapterContextRawData(
   const sceneContractLines = buildSceneContractSummaryLines(contractContext?.sceneContracts || [])
 
   // 从当前章节任务相关文本里提取实体名，用于动态召回
-  const recallSignalText = [
-    chapterSignalText,
-    chapterGoal,
-  ].filter(Boolean).join('\n')
-  const outlineMentionedCharacterCount = allCharacters.filter((character) => {
-    if (!character.fullName) return false
-    return Boolean(currentChapter?.outline && currentChapter.outline.includes(character.fullName))
-  }).length
+  const outlineMentionedCharacterCount = collectMentionedEntityNamesFromCandidates(
+    currentChapter?.outline || '',
+    characterMentionCandidates,
+    mentionedEntityLimits.characters,
+  ).length
 
   const previousSummaries = recentChapters
     .filter((chapter) => chapter.summary)
@@ -3605,7 +4207,7 @@ export async function collectChapterContextRawData(
     currentChapter?.outline || '',
     previousSummaries,
   ])
-  const factionContextSummary = buildFactionContextSummary(novelId, matchedCharacterRows)
+  const factionContextSummary = buildFactionContextSummary(novelId, matchedCharacterRows, mentionedFactionNames)
   const worldRulesContext = [
     profile.worldRulesSummary,
     glossaryContextSummary,
@@ -3662,12 +4264,13 @@ export async function collectChapterContextRawData(
         ...promiseCommitmentLines,
       ].filter(Boolean).join('\n'),
       dueForeshadows: [
-        buildDueForeshadowContext(novelId, chapterNum, currentArc),
+        buildDueForeshadowContext(novelId, chapterNum, currentArc, dueForeshadowLimit),
         ...payoffCommitmentLines,
         ...requiredForeshadowLines,
       ].filter(Boolean).join('\n'),
       timelineOpenThreads: timelineContext.timelineOpenThreads,
       worldRules: worldRulesContext,
+      mapSummary: buildMapContextSummary(allLocations, mentionedLocationNames, mentionedEntityLimits.locations),
       itemSummary,
       longTermMemory,
       characterStates: buildCharacterStates(allCharacters, recentChapters, mentionedCharacterNames),
@@ -3716,6 +4319,7 @@ export async function collectChapterContextRawData(
     mainPlot: profile.mainPlot,
     themeVoiceSummary: profile.themeVoiceSummary,
     worldRules: baseContext.contextParts.worldRules,
+    mapSummary: baseContext.contextParts.mapSummary,
     relationSummary,
     characterStates: baseContext.contextParts.characterStates,
     worldStates: baseContext.contextParts.worldStates,
@@ -3730,6 +4334,11 @@ export async function collectChapterContextRawData(
     mentionedCharacters: [...mentionedCharacterNames],
     mentionedItems: mentionedItemNames,
     mentionedLocations: mentionedLocationNames,
+    mentionedFactions: mentionedFactionNames,
+    mentionValidationCharacters,
+    mentionValidationItems,
+    mentionValidationLocations,
+    mentionValidationFactions,
   })
 
   return {
@@ -3743,6 +4352,7 @@ export async function collectChapterContextRawData(
     mentionedCharacters: [...mentionedCharacterNames],
     mentionedItems: mentionedItemNames,
     mentionedLocations: mentionedLocationNames,
+    mentionedFactions: mentionedFactionNames,
     contextParts: {
       ...baseContext.contextParts,
       recalledMemory: recallAugmentation.recalledMemory,
@@ -3928,6 +4538,7 @@ export function allocateChapterContext(
     worldRules: softAllocation.allocated.worldRules || '',
     characterStates: softAllocation.allocated.characterStates || '',
     worldStates: softAllocation.allocated.worldStates || '',
+    mapSummary: softAllocation.allocated.mapSummary || '',
     itemSummary: softAllocation.allocated.itemSummary || '',
     previousSummaries: softAllocation.allocated.previousSummaries || '',
     previousChapterContext: softAllocation.allocated.previousChapterContext || '',

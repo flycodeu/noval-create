@@ -169,6 +169,8 @@ export interface ChapterWritingPromptInput {
   worldRules: string
   characterStates: string
   worldStates?: string
+  mapSummary?: string
+  itemSummary?: string
   previousSummaries: string
   previousChapterContext: string
   lastChapterEnding: string
@@ -216,6 +218,7 @@ export interface ScenePlanPromptInput {
   worldRules: string
   characterStates: string
   worldStates?: string
+  mapSummary?: string
   itemSummary: string
   previousSummaries: string
   previousChapterContext: string
@@ -262,6 +265,7 @@ export interface ChapterReviewPromptInput {
   worldRules: string
   characterStates: string
   worldStates?: string
+  mapSummary?: string
   itemSummary: string
   previousChapterContext: string
   continuitySummary: string
@@ -317,6 +321,7 @@ export interface ChapterRewritePromptInput {
   worldRules: string
   characterStates: string
   worldStates?: string
+  mapSummary?: string
   itemSummary: string
   previousSummaries: string
   previousChapterContext: string
@@ -1354,6 +1359,7 @@ export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
     section('世界规则', params.worldRules),
     section('人物当前状态', params.characterStates),
     section('当前世界状态', params.worldStates),
+    section('地图地点上下文', params.mapSummary),
     section('关键物品与去向', params.itemSummary),
     section('上一章关键先验', params.previousChapterContext),
     section('上章结尾', params.lastChapterEnding),
@@ -1451,6 +1457,8 @@ export function buildChapterWritingPrompt(params: ChapterWritingPromptInput): st
     section('上章结尾', params.lastChapterEnding),
     section('当前人物状态', params.characterStates),
     section('当前世界状态', params.worldStates),
+    section('地图地点上下文', params.mapSummary),
+    section('关键物品与去向', params.itemSummary),
     section('当前故事弧', params.currentArc),
     section('小说核心约束', params.storyCore),
     section('世界规则与限制', params.worldRules),
@@ -1507,6 +1515,7 @@ export function buildChapterDraftPrompt(params: ChapterRewritePromptInput): stri
     section('世界规则', params.worldRules),
     section('人物当前状态', params.characterStates),
     section('当前世界状态', params.worldStates),
+    section('地图地点上下文', params.mapSummary),
     section('关键物品与去向', params.itemSummary),
     section('上一章关键先验', params.previousChapterContext),
     section('上章结尾', params.lastChapterEnding),
@@ -1581,6 +1590,7 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
     section('世界规则', params.worldRules),
     section('人物当前状态', params.characterStates),
     section('当前世界状态', params.worldStates),
+    section('地图地点上下文', params.mapSummary),
     section('关键物品与去向', params.itemSummary),
     section('上一章关键先验', params.previousChapterContext),
     section('连续性记忆', params.continuitySummary),
@@ -1689,6 +1699,7 @@ export function buildChapterRewritePrompt(params: ChapterRewritePromptInput): st
     section('世界规则', params.worldRules),
     section('人物当前状态', params.characterStates),
     section('当前世界状态', params.worldStates),
+    section('地图地点上下文', params.mapSummary),
     section('关键物品与去向', params.itemSummary),
     section('上一章关键先验', params.previousChapterContext),
     section('上章结尾', params.lastChapterEnding),

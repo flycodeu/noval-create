@@ -33,6 +33,12 @@ vi.mock('./item.service', () => ({
   })),
 }))
 
+vi.mock('./map.service', () => ({
+  searchMapNodes: vi.fn(() => []),
+  getMapNode: vi.fn(() => null),
+  getMapRelations: vi.fn(() => []),
+}))
+
 vi.mock('./story-memory.service', () => ({
   buildStoryMemorySnapshot: vi.fn(() => ({
     generatedAt: '2026-05-17T00:00:00.000Z',
@@ -243,7 +249,7 @@ describe('writer context orchestrator', () => {
         openLoops: '掉队者生死未明。',
         dueForeshadows: '失灵通信器可能暴露位置。',
         mentionedCharacters: ['林策'],
-        mentionedItems: ['药箱'],
+        mentionedItems: ['救命包'],
         mentionedLocations: ['东门补给点'],
       },
     }), {
@@ -282,6 +288,7 @@ describe('writer context orchestrator', () => {
         plotFunction: '稳定伤员状态',
         summary: '队伍唯一完整药品',
         risk: '丢失后伤员无法撤离',
+        typedRefsJson: JSON.stringify({ version: 1, pointers: [{ assetType: 'item', name: '救命包' }] }),
         sortOrder: 1,
         createdAt: '',
         updatedAt: '',
@@ -387,6 +394,162 @@ describe('writer context orchestrator', () => {
       'activeThreads',
       'recalledMemory',
     ]))
+  })
+
+  it('honors expanded runtime limits for large-cast scenes', async () => {
+    const names = Array.from({ length: 10 }, (_, index) => `角色${index + 1}`)
+
+    const resolution = await resolveWriterOrchestratedContext(createInput({
+      signals: {
+        chapterTitle: '群像会盟',
+        chapterOutline: `十名关键人物同时出场：${names.join('、')}。`,
+        chapterGoal: '让多方阵营在同一场谈判里互相施压',
+        mentionedCharacters: names,
+        mentionedItems: [],
+        mentionedLocations: [],
+      },
+      runtime: {
+        useMemoryCache: false,
+        maxCharacters: 10,
+      },
+    }), {
+      listCharacters: (() => names.map((name, index) => ({
+        id: index + 1,
+        novelId: 1,
+        roleType: 'supporting',
+        fullName: name,
+        goals: `${name}要维护本阵营利益`,
+        innerConflict: '',
+        relationshipTension: '',
+        characterArc: '',
+        speechPattern: '',
+        catchphrases: '',
+        vocabularyLevel: '',
+        dialectFeatures: '',
+        sortOrder: index + 1,
+        createdAt: '',
+        updatedAt: '',
+      }))) as never,
+      getCharacterDetailContext: (() => ({
+        relatedItems: [],
+        relatedCharacters: [],
+        relatedRelations: [],
+      })) as never,
+    })
+
+    expect(resolution.structuredPack.characters).toHaveLength(10)
+    expect(resolution.renderedContextOverrides.characterStates).toContain('角色10')
+  })
+
+  it('matches story threads before applying the runtime limit', async () => {
+    const threadRows = Array.from({ length: 9 }, (_, index) => ({
+      id: index + 1,
+      novelId: 1,
+      threadType: 'subplot',
+      title: index === 8 ? '遗失王印归属' : `普通支线${index + 1}`,
+      status: 'active',
+      priority: index === 8 ? 'high' : 'medium',
+      summary: index === 8 ? '王印线索指向东门补给点。' : '日常压力。',
+      premise: '',
+      payoffCondition: index === 8 ? '必须决定王印由谁保管' : '',
+      currentState: index === 8 ? '王印仍在暗线中流转' : '',
+      sortOrder: index + 1,
+      createdAt: '',
+      updatedAt: '',
+    }))
+
+    const resolution = await resolveWriterOrchestratedContext(createInput({
+      signals: {
+        chapterGoal: '推进遗失王印归属',
+        activeThreads: '遗失王印归属必须在本章压到台前。',
+        openLoops: '',
+        dueForeshadows: '',
+        mentionedCharacters: [],
+        mentionedItems: [],
+        mentionedLocations: [],
+      },
+      runtime: {
+        useMemoryCache: false,
+        maxThreads: 1,
+      },
+    }), {
+      listStoryThreads: (() => threadRows) as never,
+    })
+
+    expect(resolution.structuredPack.threads?.activeThreadLines.join('\n')).toContain('遗失王印归属')
+    expect(resolution.structuredPack.threads?.activeThreadLines).toHaveLength(1)
+    expect(resolution.renderedContextOverrides.activeThreads).toContain('遗失王印归属')
+  })
+
+  it('retrieves map location packs for mentioned locations', async () => {
+    const mapNodes = new Map([
+      [1, {
+        id: 1,
+        novelId: 1,
+        level: 1,
+        name: '东境',
+        sortOrder: 1,
+        childCount: 1,
+      }],
+      [2, {
+        id: 2,
+        novelId: 1,
+        level: 2,
+        parentId: 1,
+        name: '东门补给点',
+        nodeType: '据点',
+        locationType: '补给站',
+        structureRole: '撤离瓶颈',
+        description: '东门外最后一个可补给据点。',
+        plotRelevance: '决定队伍能否撑过封锁线',
+        dangerLevel: '高',
+        sortOrder: 2,
+        childCount: 0,
+      }],
+      [3, {
+        id: 3,
+        novelId: 1,
+        level: 2,
+        parentId: 1,
+        name: '旧仓库',
+        sortOrder: 3,
+        childCount: 0,
+      }],
+    ])
+
+    const resolution = await resolveWriterOrchestratedContext(createInput({
+      signals: {
+        chapterTitle: '补给点对峙',
+        chapterOutline: '东门补给点外层封锁即将收紧。',
+        chapterGoal: '守住东门补给点',
+        mentionedCharacters: [],
+        mentionedItems: [],
+        mentionedLocations: ['东门补给点'],
+      },
+      runtime: {
+        useMemoryCache: false,
+        maxMapLocations: 4,
+      },
+    }), {
+      searchMapNodes: (() => [mapNodes.get(2)]) as never,
+      getMapNode: ((id: number) => mapNodes.get(id) || null) as never,
+      getMapRelations: (() => [{
+        id: 1,
+        novelId: 1,
+        mapAId: 2,
+        mapBId: 3,
+        relationType: 'route',
+        relationLabel: '暗道相连',
+        bilateral: 1,
+        description: '旧仓库可绕开正门封锁。',
+        sortOrder: 1,
+      }]) as never,
+    })
+
+    expect(resolution.structuredPack.mapLocations).toHaveLength(1)
+    expect(resolution.structuredPack.mapLocations[0].path).toBe('东境 -> 东门补给点')
+    expect(resolution.renderedContextOverrides.mapSummary).toContain('东门补给点')
+    expect(resolution.renderedContextOverrides.mapSummary).toContain('旧仓库')
   })
 
   it('does not inject arbitrary entity packs when signals do not match stored assets', async () => {
