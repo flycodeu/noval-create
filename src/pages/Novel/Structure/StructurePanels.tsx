@@ -598,10 +598,11 @@ export function ChapterEditorPanel({
         </Space>
       ) : null}
     >
-      {!chapterDetail ? (
-        <div className="novel-empty">先选择章节。</div>
-      ) : (
-        <Form form={chapterForm} layout="vertical">
+      <Form form={chapterForm} layout="vertical">
+        {!chapterDetail ? (
+          <div className="novel-empty">先选择章节。</div>
+        ) : (
+          <>
           <div className="novel-grid novel-grid--2">
             <Form.Item name="title" label="章节标题">
               <Input />
@@ -622,8 +623,9 @@ export function ChapterEditorPanel({
           <Form.Item name="outline" label="章节目标">
             <Input.TextArea rows={6} placeholder="本章推进什么、收束什么、留下什么。" />
           </Form.Item>
-        </Form>
-      )}
+          </>
+        )}
+      </Form>
     </WorkspacePanel>
   )
 }
@@ -670,11 +672,11 @@ export function SegmentEditorPanel({
         </Space>
       ) : null}
     >
-      {!segmentDetail ? (
-        <div className="novel-empty">先选择一个场景。</div>
-      ) : (
-        <>
-          <Form form={segmentForm} layout="vertical">
+      <Form form={segmentForm} layout="vertical">
+        {!segmentDetail ? (
+          <div className="novel-empty">先选择一个场景。</div>
+        ) : (
+          <>
             <div className="novel-grid novel-grid--2">
               <Form.Item name="title" label="场景标题">
                 <Input />
@@ -711,7 +713,11 @@ export function SegmentEditorPanel({
             <Form.Item name="content" label="场景正文">
               <Input.TextArea rows={10} />
             </Form.Item>
-          </Form>
+          </>
+        )}
+      </Form>
+      {segmentDetail ? (
+        <>
           {isSelectedSegmentOutsideWindow ? (
             <Alert
               className="novel-structure-alert-top"
@@ -722,7 +728,7 @@ export function SegmentEditorPanel({
             />
           ) : null}
         </>
-      )}
+      ) : null}
     </WorkspacePanel>
   )
 }

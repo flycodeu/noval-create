@@ -98,8 +98,16 @@
   margin-bottom: 16px;
 }
 
+.novel-outline-page__filter-bar .novel-filter-bar__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
 .novel-outline-page__status-select {
-  width: 140px;
+  width: 150px;
+  min-width: 132px;
 }
 
 .novel-outline-page__pagination {
@@ -111,16 +119,19 @@
 .novel-outline-page__range-row,
 .novel-outline-page__phase-fields {
   display: flex;
+  flex-wrap: wrap;
   gap: 12px;
 }
 
 .novel-outline-page__range-field,
 .novel-outline-page__phase-field--chapter {
-  flex: 1;
+  flex: 1 1 160px;
+  min-width: 0;
 }
 
 .novel-outline-page__phase-field--beat {
-  flex: 2;
+  flex: 2 1 260px;
+  min-width: 0;
 }
 
 .novel-outline-page__full-width-input {

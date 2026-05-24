@@ -38,6 +38,7 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
     clearSelection,
     creating,
     form,
+    handleClear,
     handleSave: saveTimelineEvent,
     refreshPage,
     selectedEvent,
@@ -131,24 +132,32 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
     await clearDraft()
   }, [clearDraft, finalizeDraft, form, saveTimelineEvent])
 
+  const saveShortcutHandler = React.useCallback(() => {
+    void handleSave()
+  }, [handleSave])
+
+  const escapeShortcutHandler = React.useCallback(() => {
+    clearSelection()
+  }, [clearSelection])
+
+  const clearShortcutHandler = React.useCallback(() => {
+    handleClear()
+  }, [handleClear])
+
   React.useEffect(() => {
-    registerSaveHandler((selectedEvent || creating) ? () => { void handleSave() } : null)
+    registerSaveHandler((selectedEvent || creating) ? saveShortcutHandler : null)
     return () => registerSaveHandler(null)
-  }, [creating, handleSave, registerSaveHandler, selectedEvent])
+  }, [creating, registerSaveHandler, saveShortcutHandler, selectedEvent])
 
   React.useEffect(() => {
-    registerEscapeHandler(() => {
-      clearSelection()
-    })
+    registerEscapeHandler(escapeShortcutHandler)
     return () => registerEscapeHandler(null)
-  }, [clearSelection, registerEscapeHandler])
+  }, [escapeShortcutHandler, registerEscapeHandler])
 
   React.useEffect(() => {
-    registerClearHandler(() => {
-      workspace.handleClear()
-    })
+    registerClearHandler(clearShortcutHandler)
     return () => registerClearHandler(null)
-  }, [registerClearHandler, workspace])
+  }, [clearShortcutHandler, registerClearHandler])
 
   React.useEffect(() => {
     void refreshPage()

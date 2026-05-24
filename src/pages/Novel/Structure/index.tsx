@@ -164,16 +164,6 @@ export default function StructurePage({ novelId }: { novelId: number }) {
     applyDraft: applyStructureDraft,
   })
 
-  React.useEffect(() => {
-    plannerForm.setFieldsValue({
-      volumeCount: 1,
-      partsPerVolume: 2,
-      chaptersPerPart: 4,
-      segmentsPerChapter: 3,
-      focus: '',
-    })
-  }, [plannerForm])
-
   const loadSceneTemplates = React.useCallback(async () => {
     setSceneTemplateLoading(true)
     try {
@@ -788,6 +778,7 @@ export default function StructurePage({ novelId }: { novelId: number }) {
       <Modal
         open={plannerOpen}
         title="AI 批量规划卷 / 部 / 章 / 场景"
+        forceRender
         okText="追加规划"
         cancelText="取消"
         confirmLoading={plannerGenerating}

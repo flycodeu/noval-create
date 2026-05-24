@@ -25,7 +25,7 @@ export default function App() {
 
   useEffect(() => {
     if (!hasElectronBridge) {
-      console.error('Electron preload bridge is unavailable. Open this app through Electron instead of a plain browser tab.')
+      console.error('Runtime bridge is unavailable. Refresh the page or start the desktop app through Electron.')
       return undefined
     }
 
@@ -222,8 +222,8 @@ export default function App() {
           <Alert
             type="error"
             showIcon
-            message="Electron 桥接未加载"
-            description="当前页面缺少 preload 注入的 window.electron。请通过 Electron 启动桌面应用，不要直接在普通浏览器里打开 Vite 地址。"
+            message="运行桥接未加载"
+            description="当前页面缺少运行桥接。请刷新浏览器页面，或通过 Electron 启动桌面应用。"
             style={{ maxWidth: 720 }}
           />
         </div>

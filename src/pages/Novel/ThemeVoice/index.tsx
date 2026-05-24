@@ -531,10 +531,13 @@ export default function ThemeVoicePage({ novelId }: Props) {
         />
       ) : null}
 
-      <WorkspacePanel extra={<Tag color={generatingMode ? 'gold' : 'blue'}>{generatingMode ? 'AI 生成中' : '手动保存生效'}</Tag>}>
+      <WorkspacePanel
+        className="novel-theme-voice-page__editor-panel"
+        extra={<Tag color={generatingMode ? 'gold' : 'blue'}>{generatingMode ? 'AI 生成中' : '手动保存生效'}</Tag>}
+      >
         <Form form={form} layout="vertical">
           <div className="workspace-stack-16">
-            <div className="workspace-stack-10">
+            <div className="workspace-stack-10 novel-theme-voice-page__section novel-theme-voice-page__section--narrative">
               <Space wrap align="center">
                 <strong className="workspace-card-section-title">主题与叙事调度</strong>
                 <AIGenerateButton
@@ -698,7 +701,7 @@ export default function ThemeVoicePage({ novelId }: Props) {
               </div>
             </div>
 
-            <div className="workspace-stack-10">
+            <div className="workspace-stack-10 novel-theme-voice-page__section novel-theme-voice-page__section--style">
               <Space wrap align="center">
                 <strong className="workspace-card-section-title">文风执行规则</strong>
                 <AIGenerateButton

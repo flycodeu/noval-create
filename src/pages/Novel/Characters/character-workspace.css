@@ -396,7 +396,7 @@
   }
 
   .novel-character-studio__editor {
-    grid-column: 1 / -1;
+    grid-column: auto;
   }
 
   .novel-character-studio--list {

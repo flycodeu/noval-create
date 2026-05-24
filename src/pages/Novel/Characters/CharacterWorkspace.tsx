@@ -1161,7 +1161,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
         </Form>
       </Modal>
 
-      <Modal title="批量生成人物网络" open={batchOpen} onCancel={() => setBatchOpen(false)} onOk={() => void handleBatchGenerate()} confirmLoading={generating} okText="开始生成">
+      <Modal title="批量生成人物网络" open={batchOpen} forceRender onCancel={() => setBatchOpen(false)} onOk={() => void handleBatchGenerate()} confirmLoading={generating} okText="开始生成">
         <Form form={batchForm} layout="vertical">
           <Alert
             showIcon

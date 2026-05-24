@@ -302,6 +302,8 @@ export function useStructureWorkspace(novelId: number) {
   }, [loadSegmentDetail, segments.items, selection.chapterId, selection.segmentId])
 
   useEffect(() => {
+    if (loading) return
+
     if (!chapterDetail) {
       chapterForm.resetFields()
       return
@@ -313,9 +315,11 @@ export function useStructureWorkspace(novelId: number) {
       targetWords: chapterDetail.targetWords || 3000,
       partId: chapterDetail.partId,
     })
-  }, [chapterDetail, chapterForm])
+  }, [chapterDetail, chapterForm, loading])
 
   useEffect(() => {
+    if (loading) return
+
     if (!segmentDetail) {
       segmentForm.resetFields()
       return
@@ -333,7 +337,7 @@ export function useStructureWorkspace(novelId: number) {
       content: segmentDetail.content || '',
       status: segmentDetail.status || 'planned',
     })
-  }, [segmentDetail, segmentForm])
+  }, [loading, segmentDetail, segmentForm])
 
   useEffect(() => {
     void loadLinked(1)

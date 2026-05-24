@@ -108,6 +108,11 @@
   min-width: 0;
 }
 
+.project-sidebar__group-item-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
 .project-sidebar__group-toggle-icon {
   color: var(--project-sidebar-accent);
   line-height: 1.2;
@@ -187,16 +192,24 @@
 }
 
 .project-sidebar__group-item-label {
+  display: -webkit-box;
+  overflow: hidden;
   color: var(--project-sidebar-text);
   font-size: 13px;
   line-height: 1.45;
   font-weight: 600;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .project-sidebar__group-item-meta {
+  overflow: hidden;
   color: var(--project-sidebar-text-muted);
   font-size: 11px;
   line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @keyframes project-sidebar-pulse {

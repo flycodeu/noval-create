@@ -568,7 +568,7 @@ export function useTimelineWorkspace(
       : watchedChapterStartId || watchedChapterEndId
 
     if (!chapterId) {
-      setFormSegments([])
+      setFormSegments((current) => (current.length > 0 ? [] : current))
       return
     }
 

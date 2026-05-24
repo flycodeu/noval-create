@@ -2064,16 +2064,21 @@ html[data-theme="light"] .ant-dropdown-menu {
   display: grid;
   gap: 10px;
   min-width: 220px;
-  padding: 14px 18px;
+  padding: 12px 16px;
   border-radius: var(--ws-radius-md);
   background: rgba(255, 255, 255, 0.5);
   border: 1px solid rgba(122, 93, 52, 0.08);
 }
 
 .novel-filter-bar__row {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
+}
+
+.novel-filter-bar__row .ant-select {
+  min-width: 110px;
 }
 
 .novel-filter-bar__summary {
@@ -5458,27 +5463,27 @@ html[data-theme="dark"] .ant-card-actions > li {
 }
 
 .novel-characters-page .novel-filter-bar {
-  gap: 14px;
+  gap: 10px;
   min-width: min(440px, 100%);
 }
 
 .novel-characters-page .novel-filter-bar__row {
-  gap: 12px;
+  gap: 10px;
 }
 
 .novel-characters-page .novel-list-card {
-  padding: 22px 24px;
+  padding: 14px 16px;
 }
 
 .novel-characters-page .novel-list-card__meta {
-  gap: 10px;
-  margin-top: 10px;
+  gap: 8px;
+  margin-top: 8px;
 }
 
 .novel-characters-page .novel-form-section {
-  margin-bottom: 24px;
-  padding: 22px 22px 10px;
-  border-radius: 24px;
+  margin-bottom: 16px;
+  padding: 16px 16px 8px;
+  border-radius: 20px;
 }
 
 .novel-characters-page .novel-form-section__header {
@@ -5621,8 +5626,7 @@ html[data-theme="dark"] .ant-card-actions > li {
 }
 
 @media (max-width: 960px) {
-  .novel-guide .novel-stage-grid,
-  .novel-characters-page .novel-filter-bar__row {
+  .novel-guide .novel-stage-grid {
     grid-template-columns: 1fr;
   }
 
@@ -7169,7 +7173,7 @@ html[data-theme="dark"] .ant-card-actions > li {
 .guided-step__field-grid {
   display: grid;
   gap: 14px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
 }
 
 .guided-step__field-card {
@@ -9618,7 +9622,7 @@ html[data-theme="dark"] .ant-card-actions > li {
 }
 
 .novel-filter-bar__row {
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -9634,9 +9638,9 @@ html[data-theme="dark"] .ant-card-actions > li {
 }
 
 .guided-step__field-grid {
-  gap: 24px;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
 }
 
 .guided-step__field-card {
@@ -9653,10 +9657,6 @@ html[data-theme="dark"] .ant-card-actions > li {
 
 .guided-step__field-card--full {
   grid-column: 1 / -1;
-}
-
-.novel-overview-page__packaging-grid {
-  /* Inherits grid-template-columns: repeat(2, minmax(0, 1fr)) from .guided-step__field-grid */
 }
 
 .novel-overview-page__packaging-grid .guided-step__field-card textarea.ant-input {
@@ -11086,7 +11086,7 @@ html[data-theme="dark"] .ant-card-actions > li {
   }
 }
 
-@media (max-width: 1119px) {
+@media (max-width: 1199px) {
   .novel-route-shell--single {
     grid-template-columns: 1fr;
     grid-template-rows: auto minmax(0, 1fr);
@@ -11477,6 +11477,1158 @@ html[data-theme="dark"] .ant-card-actions > li {
   .app-layout .novel-writing-shell__editor-sheet,
   .app-layout .novel-writing-page .novel-writing-shell__editor-sheet {
     padding: 20px;
+  }
+}
+
+/* ============================================================
+   LAYOUT GOVERNANCE OVERRIDES
+   Final pass for information density, stable panels, and dropdown legibility.
+   ============================================================ */
+
+.app-layout .novel-route-shell--single .novel-route-shell__content-body {
+  padding: 12px 14px 16px;
+}
+
+.app-layout .task-center-page,
+.app-layout .model-manager-page,
+.app-layout .template-manager-page,
+.app-layout .prompt-manager-page,
+.app-layout .admin-page {
+  padding: 20px;
+}
+
+.app-layout .novel-workspace {
+  gap: 14px;
+  padding: 16px 18px 20px;
+}
+
+.app-layout .novel-workspace > .novel-hero,
+.app-layout .novel-workspace > .novel-workspace__body,
+.app-layout .novel-workspace > .novel-workspace__footer {
+  width: min(100%, 1480px);
+}
+
+.app-layout .novel-workspace__body,
+.app-layout .novel-workspace__main,
+.app-layout .novel-workspace--wide .novel-workspace__main {
+  gap: 14px;
+}
+
+.app-layout .novel-workspace__body--with-aside {
+  grid-template-columns: minmax(0, 1.55fr) minmax(280px, 0.75fr);
+}
+
+.app-layout .novel-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 14px 18px;
+  margin-bottom: 14px;
+  padding: 16px 18px;
+  border-radius: 16px;
+}
+
+.app-layout .novel-hero__copy {
+  min-width: 0;
+  gap: 8px;
+}
+
+.app-layout .novel-hero__eyebrow {
+  margin-bottom: 2px;
+}
+
+.app-layout .novel-hero__title {
+  max-width: 980px;
+  font-size: 28px;
+  line-height: 1.18;
+}
+
+.app-layout .novel-hero__description {
+  max-width: 920px;
+  margin-top: 4px;
+  font-size: 14px;
+  line-height: 1.58;
+}
+
+.app-layout .novel-hero__actions {
+  align-items: center;
+  gap: 8px;
+}
+
+.app-layout .novel-hero__metrics {
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.app-layout .novel-metric {
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+}
+
+.app-layout .novel-metric__value {
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.app-layout .novel-metric__label,
+.app-layout .novel-metric__hint {
+  line-height: 1.35;
+}
+
+.app-layout .novel-panel {
+  overflow: hidden;
+  padding: 0;
+  border-radius: 14px;
+}
+
+.app-layout .novel-panel__header {
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 0;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
+}
+
+.app-layout .novel-panel__header > div:first-child {
+  min-width: 0;
+}
+
+.app-layout .novel-panel__title {
+  min-width: 0;
+  font-size: 16px;
+  line-height: 1.35;
+}
+
+.app-layout .novel-panel__desc,
+.app-layout .novel-panel__copy,
+.app-layout .novel-section-header__description {
+  max-width: 76ch;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.app-layout .novel-panel__body,
+.app-layout .novel-workspace--wide .novel-panel__body {
+  padding: 14px 16px 16px;
+}
+
+.app-layout .novel-panel--scrollable .novel-panel__body {
+  max-height: min(58vh, 560px);
+  overflow: auto;
+}
+
+.app-layout .novel-section-header {
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.app-layout .novel-section-header__title {
+  font-size: 18px;
+  line-height: 1.3;
+}
+
+.app-layout .novel-action-bar {
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  box-shadow: none;
+}
+
+.app-layout .novel-panel__header,
+.app-layout .novel-panel__extra {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.app-layout .novel-panel__extra {
+  flex: 1 1 360px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.app-layout .novel-filter-bar {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+}
+
+.app-layout .novel-filter-bar__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-layout .novel-filter-bar__row > * {
+  min-width: 0;
+}
+
+.app-layout .novel-filter-bar__row > .ant-select,
+.app-layout .novel-filter-bar__row > .ant-input-number {
+  flex: 1 1 140px;
+  max-width: none;
+}
+
+.app-layout .novel-filter-bar__row > .ant-btn,
+.app-layout .novel-filter-bar__row > .ant-tag {
+  flex: 0 0 auto;
+}
+
+.app-layout .novel-filter-bar__summary {
+  line-height: 1.45;
+}
+
+.app-layout .guided-step__field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 14px;
+}
+
+.app-layout .novel-grid--2 {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+}
+
+.app-layout .novel-grid--3 {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+}
+
+.app-layout .guided-step__field-card {
+  min-width: 0;
+  padding: 14px 16px;
+  border-radius: 14px;
+}
+
+.app-layout .guided-step__field-card > .ant-select {
+  width: 100%;
+}
+
+.app-layout .guided-step__field-card--compact {
+  padding-bottom: 12px;
+}
+
+.app-layout .novel-action-bar .ant-btn,
+.app-layout .novel-workspace .ant-btn:not(.ant-btn-icon-only) {
+  min-height: 34px;
+  padding-inline: 12px;
+}
+
+.app-layout .novel-route-shell .ant-form-item,
+.app-layout .novel-workspace .ant-form-vertical .ant-form-item {
+  margin-bottom: 12px;
+}
+
+.app-layout .novel-route-shell .ant-form-vertical .ant-form-item-label,
+.app-layout .novel-workspace .ant-form-vertical .ant-form-item-label {
+  padding-bottom: 4px;
+}
+
+.app-layout .novel-route-shell .ant-form-item-label > label,
+.app-layout .novel-workspace .ant-form-vertical .ant-form-item-label > label {
+  min-height: auto;
+  line-height: 1.35;
+  white-space: normal;
+}
+
+.app-layout .novel-route-shell .ant-input,
+.app-layout .novel-route-shell .ant-input-affix-wrapper,
+.app-layout .novel-route-shell .ant-input-number,
+.app-layout .novel-route-shell .ant-picker,
+.app-layout .novel-route-shell .ant-select-selector,
+.app-layout .novel-workspace .ant-input,
+.app-layout .novel-workspace .ant-input-affix-wrapper,
+.app-layout .novel-workspace .ant-input-number,
+.app-layout .novel-workspace .ant-picker,
+.app-layout .novel-workspace .ant-select-selector {
+  min-height: 38px;
+  border-radius: 10px;
+}
+
+.app-layout .novel-route-shell textarea.ant-input,
+.app-layout .novel-workspace textarea.ant-input {
+  min-height: 92px;
+  line-height: 1.58;
+}
+
+.app-layout .novel-route-shell .ant-select,
+.app-layout .novel-workspace .ant-select {
+  min-width: 0;
+}
+
+.app-layout .novel-route-shell .ant-select-single .ant-select-selector,
+.app-layout .novel-workspace .ant-select-single .ant-select-selector {
+  height: 38px;
+  padding: 0 10px;
+}
+
+.app-layout .novel-route-shell .ant-select-single .ant-select-selector .ant-select-selection-item,
+.app-layout .novel-route-shell .ant-select-single .ant-select-selector .ant-select-selection-placeholder,
+.app-layout .novel-workspace .ant-select-single .ant-select-selector .ant-select-selection-item,
+.app-layout .novel-workspace .ant-select-single .ant-select-selector .ant-select-selection-placeholder {
+  min-width: 0;
+  line-height: 36px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-layout .novel-route-shell .ant-select-multiple .ant-select-selector,
+.app-layout .novel-workspace .ant-select-multiple .ant-select-selector {
+  min-height: 38px;
+  padding: 3px 8px;
+}
+
+.app-layout .novel-route-shell .ant-select-multiple .ant-select-selection-overflow,
+.app-layout .novel-workspace .ant-select-multiple .ant-select-selection-overflow {
+  max-height: 70px;
+  overflow: auto;
+}
+
+.app-layout .novel-route-shell .ant-select-multiple .ant-select-selection-item,
+.app-layout .novel-workspace .ant-select-multiple .ant-select-selection-item {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ant-select-dropdown {
+  min-width: min(320px, calc(100vw - 32px));
+  max-width: min(560px, calc(100vw - 32px));
+}
+
+.ant-select-dropdown .ant-select-item {
+  display: flex;
+  min-height: 36px;
+  height: auto;
+  align-items: flex-start;
+  padding: 7px 10px;
+  line-height: 1.45;
+}
+
+.ant-select-dropdown .ant-select-item-option-content {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.ant-select-dropdown .ant-select-item-option-state {
+  flex: 0 0 auto;
+}
+
+.app-layout .prompt-manager-card__preview,
+.app-layout .prompt-manager-template-preview,
+.app-layout .template-manager-page .template-manager-card__preview {
+  max-height: 132px;
+  overflow: auto;
+  line-height: 1.65;
+}
+
+/* Agent review follow-up: page-specific density and overflow fixes. */
+.app-layout .novel-route-shell .ant-btn-sm,
+.app-layout .novel-workspace .ant-btn-sm {
+  min-height: 28px;
+  height: 28px;
+  padding-inline: 8px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.app-layout .novel-route-shell .ant-select-sm .ant-select-selector,
+.app-layout .novel-workspace .ant-select-sm .ant-select-selector {
+  min-height: 30px;
+  height: 30px;
+  padding-inline: 8px;
+}
+
+.app-layout .novel-route-shell .ant-select-sm .ant-select-selection-item,
+.app-layout .novel-route-shell .ant-select-sm .ant-select-selection-placeholder,
+.app-layout .novel-workspace .ant-select-sm .ant-select-selection-item,
+.app-layout .novel-workspace .ant-select-sm .ant-select-selection-placeholder {
+  line-height: 28px;
+}
+
+.app-layout .chapter-console-page .chapter-console-page__grid {
+  grid-template-columns: clamp(260px, 22vw, 320px) minmax(0, 1fr) minmax(320px, 360px);
+}
+
+.app-layout .chapter-console-page .chapter-console-page__grid.is-assist-collapsed {
+  grid-template-columns: clamp(260px, 24vw, 320px) minmax(0, 1fr);
+}
+
+.app-layout .chapter-console-page .chapter-console-page__column--right.is-hidden {
+  display: none;
+}
+
+.app-layout .chapter-console-page .chapter-console-page__grid.is-assist-collapsed .chapter-console-page__column--center {
+  min-width: 0;
+}
+
+.app-layout .prompt-manager-card__preview,
+.app-layout .template-manager-page .template-manager-card__preview {
+  display: -webkit-box;
+  max-height: none;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+
+.app-layout .prompt-manager-template-preview--featured,
+.app-layout .prompt-manager-template-preview--modal {
+  display: block;
+  overflow: auto;
+}
+
+.app-layout .prompt-manager-param-list .ant-tag {
+  max-width: 100%;
+  height: auto;
+  margin-inline-end: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+
+.app-layout .template-manager-page .template-manager-card__title-wrap,
+.app-layout .template-manager-page .template-manager-card__title-row {
+  min-width: 0;
+}
+
+.app-layout .template-manager-page .template-manager-card__title {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.app-layout .template-manager-page .template-manager-card__tag {
+  flex: 0 0 auto;
+}
+
+@media (min-width: 1201px) and (max-width: 1680px) {
+  .app-layout .prompt-manager-shell {
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 400px);
+  }
+
+  .app-layout .prompt-manager-inspector {
+    position: sticky;
+    top: 16px;
+  }
+}
+
+@media (max-width: 1360px) {
+  .app-layout .chapter-console-page .chapter-console-page__grid,
+  .app-layout .chapter-console-page .chapter-console-page__grid.has-assist-panel,
+  .app-layout .chapter-console-page .chapter-console-page__grid.is-assist-collapsed {
+    grid-template-columns: minmax(260px, 300px) minmax(0, 1fr);
+  }
+
+  .app-layout .chapter-console-page .chapter-console-page__column--right {
+    width: 100%;
+  }
+}
+
+@media (max-width: 1200px) {
+  .app-layout .prompt-manager-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .app-layout .prompt-manager-inspector {
+    position: static;
+  }
+}
+
+@media (max-width: 1080px) {
+  .app-layout .chapter-console-page .chapter-console-page__grid,
+  .app-layout .chapter-console-page .chapter-console-page__grid.has-assist-panel,
+  .app-layout .chapter-console-page .chapter-console-page__grid.is-assist-collapsed {
+    grid-template-columns: 1fr;
+  }
+
+  .app-layout .chapter-console-page .chapter-console-page__column--right {
+    grid-column: auto;
+    width: 100%;
+  }
+}
+
+@media (max-width: 1180px) {
+  .app-layout .novel-workspace__body--with-aside {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .app-layout .novel-workspace__aside {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 768px) {
+  .app-layout .novel-route-shell--single .novel-route-shell__content-body,
+  .app-layout .task-center-page,
+  .app-layout .model-manager-page,
+  .app-layout .template-manager-page,
+  .app-layout .prompt-manager-page,
+  .app-layout .admin-page {
+    padding: 12px;
+  }
+
+  .app-layout .novel-workspace {
+    padding: 12px;
+  }
+
+  .app-layout .novel-hero {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 14px;
+  }
+
+  .app-layout .novel-hero__actions,
+  .app-layout .novel-action-bar,
+  .app-layout .novel-panel__header {
+    align-items: stretch;
+  }
+
+  .app-layout .novel-hero__actions .ant-btn,
+  .app-layout .novel-action-bar .ant-btn {
+    flex: 1 1 140px;
+  }
+
+  .app-layout .novel-panel__header,
+  .app-layout .novel-panel__body,
+  .app-layout .novel-workspace--wide .novel-panel__body {
+    padding-inline: 12px;
+  }
+
+  .app-layout .novel-panel--scrollable .novel-panel__body {
+    max-height: none;
+  }
+
+  .ant-select-dropdown {
+    max-width: calc(100vw - 24px);
+  }
+}
+
+@media (max-width: 520px) {
+  .app-layout .novel-hero__title {
+    font-size: 22px;
+  }
+
+  .app-layout .novel-hero__metrics {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .app-layout .novel-action-bar {
+    flex-direction: column;
+  }
+}
+
+/* Adaptive tablet and mobile pass: below desktop width, titles own the row. */
+@media (max-width: 1199px) {
+  .app-layout .novel-route-shell--single .novel-route-shell__content-body {
+    padding: 14px;
+  }
+
+  .app-layout .novel-workspace {
+    padding: 14px;
+  }
+
+  .app-layout .novel-hero,
+  .app-layout .novel-hero--has-actions {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "copy"
+      "actions"
+      "context"
+      "metrics";
+    gap: 12px;
+    padding: 16px;
+    border-radius: 16px;
+  }
+
+  .app-layout .novel-hero__copy {
+    grid-area: copy;
+    max-width: none;
+    min-width: 0;
+  }
+
+  .app-layout .novel-hero__title {
+    max-width: 100%;
+    font-size: 26px;
+    line-height: 1.18;
+    letter-spacing: 0;
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+  }
+
+  .app-layout .novel-hero__description {
+    max-width: 72ch;
+    line-height: 1.55;
+  }
+
+  .app-layout .novel-hero__actions {
+    grid-area: actions;
+    justify-self: stretch;
+    justify-content: flex-start;
+    gap: 8px;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 2px;
+    scrollbar-width: thin;
+  }
+
+  .app-layout .novel-hero__actions .ant-btn,
+  .app-layout .novel-hero__actions .ant-input-number,
+  .app-layout .novel-hero__actions .ant-select {
+    flex: 0 0 auto;
+  }
+
+  .app-layout .novel-hero__context {
+    grid-area: context;
+  }
+
+  .app-layout .novel-hero__metrics {
+    grid-area: metrics;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+    gap: 8px;
+  }
+
+  .app-layout .novel-context-summary {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));
+    gap: 8px;
+  }
+
+  .app-layout .novel-context-summary__item,
+  .app-layout .novel-metric {
+    padding: 12px;
+    border-radius: 12px;
+  }
+
+  .app-layout .novel-workspace__body--with-aside,
+  .app-layout .novel-workspace__body--aside-side,
+  .app-layout .novel-overview-grid--primary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .app-layout .novel-panel__header {
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 767px) {
+  .app-layout .novel-route-shell--single .novel-route-shell__content-body,
+  .app-layout .novel-workspace {
+    padding: 10px;
+  }
+
+  .app-layout .novel-hero,
+  .app-layout .novel-hero--has-actions {
+    padding: 14px;
+    gap: 10px;
+    border-radius: 14px;
+  }
+
+  .app-layout .novel-hero__title {
+    font-size: 24px;
+  }
+
+  .app-layout .novel-hero__actions {
+    margin-inline: -2px;
+    padding-inline: 2px;
+  }
+
+  .app-layout .novel-hero__actions .ant-btn {
+    min-height: 38px;
+  }
+
+  .app-layout .novel-panel {
+    border-radius: 12px;
+  }
+
+  .app-layout .novel-panel__header,
+  .app-layout .novel-panel__body,
+  .app-layout .novel-workspace--wide .novel-panel__body {
+    padding-inline: 12px;
+  }
+}
+
+/* ============================================================
+   DESKTOP WEB / ELECTRON WORKSPACE FIXES
+   Wide-screen pass for real desktop use: keep chrome compact,
+   prevent hero actions from crushing titles, and use columns before scrolling.
+   ============================================================ */
+
+html[data-runtime="web"] .project-topbar {
+  --novel-shell-topbar-height: 58px;
+}
+
+html[data-runtime="web"] .project-topbar__main-row {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+@media (min-width: 1200px) {
+  .app-layout .novel-route-shell--single .novel-route-shell__content-body {
+    padding: 14px 18px 18px;
+  }
+
+  .app-layout .novel-workspace {
+    gap: 14px;
+    padding: 16px 18px 22px;
+  }
+
+  .app-layout .novel-workspace > .novel-hero,
+  .app-layout .novel-workspace > .novel-workspace__body,
+  .app-layout .novel-workspace > .novel-workspace__footer {
+    width: min(100%, 1600px);
+  }
+
+  .app-layout .novel-hero {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    margin-bottom: 14px;
+    padding: 16px 18px;
+  }
+
+  .app-layout .novel-hero--has-actions {
+    grid-template-columns: minmax(260px, 0.34fr) minmax(0, 1fr);
+    grid-template-areas:
+      "copy actions"
+      "context context"
+      "metrics metrics";
+    column-gap: 20px;
+    row-gap: 12px;
+  }
+
+  .app-layout .novel-hero__copy {
+    grid-area: copy;
+    max-width: none;
+  }
+
+  .app-layout .novel-hero__title {
+    max-width: none;
+    font-size: 26px;
+    line-height: 1.22;
+    letter-spacing: 0;
+    word-break: normal;
+    overflow-wrap: normal;
+  }
+
+  .app-layout .novel-hero__description {
+    max-width: 78ch;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+
+  .app-layout .novel-hero__actions {
+    grid-area: actions;
+    min-width: 0;
+    max-width: 100%;
+    justify-self: end;
+    justify-content: flex-end;
+    align-content: start;
+    gap: 8px;
+  }
+
+  .app-layout .novel-hero__actions .ant-btn,
+  .app-layout .novel-hero__actions .ant-input-number,
+  .app-layout .novel-hero__actions .ant-select {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  .app-layout .novel-hero__context {
+    grid-area: context;
+    min-width: 0;
+  }
+
+  .app-layout .novel-hero__metrics {
+    grid-area: metrics;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .app-layout .novel-context-summary {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 8px;
+  }
+
+  .app-layout .novel-context-summary__item,
+  .app-layout .novel-metric {
+    padding: 10px 12px;
+    border-radius: 12px;
+  }
+
+  .app-layout .novel-workspace__body--with-aside {
+    grid-template-columns: minmax(0, 1.42fr) minmax(320px, 0.68fr);
+    align-items: start;
+  }
+
+  .app-layout .novel-workspace__body--aside-below {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .app-layout .novel-workspace__body--aside-below .novel-workspace__aside {
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  }
+
+  .app-layout .novel-panel__header {
+    padding: 12px 14px 9px;
+  }
+
+  .app-layout .novel-panel__body,
+  .app-layout .novel-workspace--wide .novel-panel__body {
+    padding: 12px 14px 14px;
+  }
+
+  .app-layout .novel-grid--2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .app-layout .novel-grid--3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .app-layout .chapter-console-page {
+    gap: 14px;
+    padding: 18px;
+  }
+
+  .app-layout .chapter-console-page__hero {
+    align-items: start;
+    gap: 14px;
+  }
+
+  .app-layout .chapter-console-page__hero-card,
+  .app-layout .chapter-console-page__writability-card {
+    height: auto;
+    align-content: start;
+    gap: 14px;
+    padding: 18px 20px;
+  }
+
+  .app-layout .chapter-console-page__hero-meta {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .app-layout .chapter-console-page__hero-meta > div {
+    min-height: 88px;
+    padding: 10px 12px;
+    align-content: space-between;
+  }
+
+  .app-layout .chapter-console-page__writability-checks {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .app-layout .chapter-console-page__writability-item,
+  .app-layout .chapter-console-page__risk-note {
+    min-width: 0;
+    padding: 10px 12px;
+  }
+
+  .app-layout .chapter-console-page__grid.has-assist-panel {
+    grid-template-columns: minmax(240px, 300px) minmax(0, 1fr) minmax(300px, 360px);
+  }
+
+  .app-layout .chapter-console-page__writability-item span,
+  .app-layout .chapter-console-page__risk-note span {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+}
+
+@media (min-width: 1200px) and (max-width: 1440px) {
+  .app-layout .novel-route-shell {
+    grid-template-columns: 260px minmax(0, 1fr);
+  }
+
+  .app-layout .novel-route-shell__sidebar {
+    padding-inline: 12px;
+  }
+
+  .app-layout .novel-hero--has-actions {
+    grid-template-columns: minmax(250px, 0.31fr) minmax(0, 1fr);
+  }
+
+  .app-layout .novel-hero__actions .ant-btn:not(.ant-btn-icon-only) {
+    padding-inline: 10px;
+  }
+
+  .app-layout .chapter-console-page__grid.has-assist-panel {
+    grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  }
+
+  .app-layout .chapter-console-page__column--right {
+    grid-column: 1 / -1;
+  }
+
+  .app-layout .chapter-console-page__hero {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .app-layout .chapter-console-page__writability-checks {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+/* ============================================================
+   DESKTOP ADAPTIVE REBALANCE
+   Keep 1200-1600px web/Electron workspaces dense without collapsing
+   real desktop layouts into tablet-style single columns.
+   ============================================================ */
+
+@media (min-width: 1200px) {
+  .app-layout .novel-structure-page.novel-workspace--wide .novel-split--sidebar,
+  .app-layout .novel-timeline-page.novel-workspace--wide .novel-split--sidebar {
+    grid-template-columns: minmax(280px, 0.78fr) minmax(0, 1.22fr);
+    gap: 14px;
+    align-items: start;
+  }
+
+  .app-layout .novel-structure-page .novel-panel,
+  .app-layout .novel-timeline-page .novel-panel {
+    min-width: 0;
+  }
+
+  .app-layout .novel-overview-page .novel-workspace__main {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+
+  .app-layout .novel-overview-page__basic-panel,
+  .app-layout .novel-overview-page__packaging-panel,
+  .app-layout .novel-overview-page__summary-panel {
+    grid-column: 1 / -1;
+  }
+
+  .app-layout .novel-overview-page__packaging-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .app-layout .novel-overview-page__packaging-grid .guided-step__field-card--full {
+    grid-column: auto;
+  }
+
+  .app-layout .novel-overview-page__packaging-grid .guided-step__field-card textarea.ant-input,
+  .app-layout .novel-theme-voice-page .guided-step__field-card textarea.ant-input,
+  .app-layout .novel-premise-page .guided-step__field-card textarea.ant-input,
+  .app-layout .novel-world-rules-page textarea.ant-input {
+    min-height: 104px;
+    height: 104px;
+    resize: vertical;
+  }
+
+  .app-layout .novel-theme-voice-page__editor-panel > .novel-panel__body > .ant-form > .workspace-stack-16 {
+    display: grid;
+    grid-template-columns: minmax(0, 1.18fr) minmax(420px, 0.82fr);
+    gap: 14px;
+    align-items: start;
+  }
+
+  .app-layout .novel-theme-voice-page__section {
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--bg-surface) 86%, transparent);
+  }
+
+  .app-layout .novel-theme-voice-page__section .guided-step__field-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .app-layout .novel-theme-voice-page__section--narrative .guided-step__field-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .app-layout .novel-theme-voice-page__section .guided-step__field-card {
+    padding: 12px;
+  }
+
+  .app-layout .novel-theme-voice-page__section .guided-step__field-card--full {
+    grid-column: 1 / -1;
+  }
+
+  .app-layout .novel-theme-voice-page__section--narrative .guided-step__field-card:nth-child(5),
+  .app-layout .novel-theme-voice-page__section--narrative .guided-step__field-card:nth-child(13),
+  .app-layout .novel-theme-voice-page__section--narrative .guided-step__field-card:nth-child(14) {
+    grid-column: auto;
+  }
+
+  .app-layout .chapter-console-page {
+    gap: 12px;
+    padding: 14px 18px 18px;
+  }
+
+  .app-layout .chapter-console-page__pipeline .pipeline-bar {
+    gap: 8px;
+    padding: 10px 12px;
+    border-radius: 12px;
+  }
+
+  .app-layout .chapter-console-page__pipeline .pipeline-bar__head {
+    align-items: center;
+  }
+
+  .app-layout .chapter-console-page__pipeline .pipeline-bar__grid {
+    grid-template-columns: repeat(6, minmax(96px, 1fr));
+    gap: 8px;
+  }
+
+  .app-layout .chapter-console-page__pipeline .pipeline-bar__item {
+    gap: 5px;
+    min-height: 72px;
+    padding: 8px 10px;
+  }
+
+  .app-layout .chapter-console-page__pipeline .pipeline-bar__item-copy {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .app-layout .chapter-console-page__pipeline .pipeline-bar__item-meta {
+    display: none;
+  }
+
+  .app-layout .novel-writing-page .chapter-console-page__hero,
+  .app-layout .chapter-console-page__hero {
+    grid-template-columns: minmax(300px, 0.86fr) minmax(0, 1.14fr);
+    gap: 12px;
+  }
+
+  .app-layout .chapter-console-page__hero-card,
+  .app-layout .chapter-console-page__writability-card {
+    gap: 10px;
+    padding: 12px 14px;
+  }
+
+  .app-layout .chapter-console-page__hero-meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .app-layout .chapter-console-page__hero-meta > div {
+    min-height: 62px;
+    padding: 8px 10px;
+  }
+
+  .app-layout .chapter-console-page__writability-checks {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .app-layout .chapter-console-page__writability-item,
+  .app-layout .chapter-console-page__risk-note {
+    gap: 4px;
+    padding: 8px 10px;
+  }
+
+  .app-layout .chapter-console-page__writability-item strong,
+  .app-layout .chapter-console-page__risk-note strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .app-layout .chapter-console-page__writability-item span,
+  .app-layout .chapter-console-page__risk-note span {
+    -webkit-line-clamp: 1;
+  }
+
+  .app-layout .chapter-console-page__editor-sheet-wrap {
+    min-height: 440px;
+  }
+
+  .app-layout .chapter-console-page__editor-hero {
+    grid-template-columns: minmax(0, 1fr) minmax(150px, auto);
+    align-items: start;
+    gap: 10px 14px;
+    padding: 12px 14px;
+  }
+
+  .app-layout .chapter-console-page__editor-hero-main {
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .app-layout .chapter-console-page__editor-hero .novel-section-header {
+    margin-bottom: 0;
+  }
+
+  .app-layout .chapter-console-page__editor-hero .novel-section-header__description {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .app-layout .chapter-console-page__editor-hero .chapter-console-page__hero-meta--compact {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .app-layout .chapter-console-page__editor-hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  .app-layout .chapter-console-page__editor-hero-actions .ant-btn {
+    min-height: 30px;
+    padding-inline: 10px;
+  }
+}
+
+@media (min-width: 1200px) and (max-width: 1440px) {
+  .app-layout .novel-structure-page.novel-workspace--wide .novel-split--sidebar,
+  .app-layout .novel-timeline-page.novel-workspace--wide .novel-split--sidebar {
+    grid-template-columns: minmax(260px, 0.72fr) minmax(0, 1.28fr);
+  }
+
+  .app-layout .novel-writing-page .chapter-console-page__hero,
+  .app-layout .chapter-console-page__hero {
+    grid-template-columns: minmax(280px, 0.8fr) minmax(0, 1.2fr);
+  }
+
+  .app-layout .chapter-console-page__grid.has-assist-panel {
+    grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  }
+
+  .app-layout .chapter-console-page__column--right {
+    grid-column: 1 / -1;
+  }
+
+  .app-layout .chapter-console-page__writability-checks {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1441px) {
+  .app-layout .chapter-console-page__grid.has-assist-panel {
+    grid-template-columns: minmax(240px, 300px) minmax(0, 1fr) minmax(300px, 360px);
+  }
+
+  .app-layout .chapter-console-page__column--right {
+    grid-column: auto;
   }
 }
 

@@ -16,6 +16,19 @@
 .novel-timeline-page__form-item-compact { margin-bottom: 0; }
 .novel-timeline-page .rc-virtual-list-holder { padding-right: 2px; }
 
+.novel-timeline-page__filter-bar .novel-filter-bar__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.novel-timeline-page__filter-bar .novel-filter-bar__row .ant-select {
+  flex: 1 1 136px;
+  min-width: 136px;
+  max-width: none;
+}
+
 @media (max-width: 1280px) {
   .novel-timeline-page__filter-bar { width: 100%; }
 }

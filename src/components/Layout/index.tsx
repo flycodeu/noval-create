@@ -77,6 +77,22 @@ export default function AppLayout({ children }: AppLayoutProps) {
     <Layout className="app-layout">
       {!isNovelWorkspace ? <AppShellBar /> : null}
 
+      {!isNovelWorkspace ? (
+        <nav className="app-layout__mobile-nav" aria-label="主导航">
+          {menuItems.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              className={`app-layout__mobile-nav-item${selectedKey === item.key ? ' is-active' : ''}`}
+              onClick={() => navigate(item.key)}
+            >
+              <span className="app-layout__mobile-nav-icon">{item.icon}</span>
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </nav>
+      ) : null}
+
       <Layout className="app-layout__body">
         {!hideAppSidebar ? (
           <Sider width={256} className="app-layout__sider">

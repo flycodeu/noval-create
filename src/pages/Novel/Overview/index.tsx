@@ -544,6 +544,7 @@ export default function Overview({ novelId }: Props) {
       ) : null}
 
       <WorkspacePanel
+        className="novel-overview-page__focus-panel"
         title={displayState.isZeroState ? '首章启动' : '今天最该做什么'}
         description={displayState.isZeroState
           ? '当前处于 0 章 / 0 字阶段，先给启动动作，再给统计与管理信息。'
@@ -571,6 +572,7 @@ export default function Overview({ novelId }: Props) {
 
       {displayState.isZeroState ? (
         <WorkspacePanel
+          className="novel-overview-page__alternate-panel"
           title="首章启动路径"
           description="先给动作，再给统计；新项目优先在这里落成第一章入口。"
         >
@@ -590,6 +592,7 @@ export default function Overview({ novelId }: Props) {
         </WorkspacePanel>
       ) : authorWorkflow.alternateTasks.length > 0 ? (
         <WorkspacePanel
+          className="novel-overview-page__alternate-panel"
           title="备选路径"
           description="如果你不打算执行当前主任务，可以从这两个次优动作继续推进。"
         >
@@ -610,6 +613,7 @@ export default function Overview({ novelId }: Props) {
 
       {displayState.showBlockersPanel ? (
         <WorkspacePanel
+          className="novel-overview-page__signal-panel"
           title="当前阻塞项"
           description="这里回答为什么现在不建议继续下一步，并给出直接处理入口。"
         >
@@ -631,6 +635,7 @@ export default function Overview({ novelId }: Props) {
 
       {displayState.showImpactPanel ? (
         <WorkspacePanel
+          className="novel-overview-page__signal-panel"
           title="风险和影响"
           description="这里回答最近的变更正在波及什么，避免作者靠记忆自己回查。"
         >
@@ -643,7 +648,7 @@ export default function Overview({ novelId }: Props) {
       ) : null}
 
       {displayState.showProgressPanel ? (
-        <WorkspacePanel title="推进热度" description="进入正文后再看字数与章节进度，避免起步阶段被弱信息占住视线。">
+        <WorkspacePanel className="novel-overview-page__progress-panel" title="推进热度" description="进入正文后再看字数与章节进度，避免起步阶段被弱信息占住视线。">
           <div className="workspace-stack-16">
             <div>
               <div className="workspace-row workspace-row--between workspace-margin-bottom-6">
@@ -665,6 +670,7 @@ export default function Overview({ novelId }: Props) {
 
       {displayState.showHealthPanel && qualitySummary ? (
         <WorkspacePanel
+          className="novel-overview-page__health-panel"
           title={authorWorkflow.blockers.length > 0 ? '继续扩批前先看这些风险' : '百万字健康速览'}
           description="健康信息降为次级区，只在进入正文后帮助你判断能否继续扩批。"
         >
@@ -689,6 +695,7 @@ export default function Overview({ novelId }: Props) {
       ) : null}
 
       <WorkspacePanel
+        className="novel-overview-page__basic-panel"
         title="基础信息"
         description="基础信息已降到次级区；需要时再集中编辑，而不是一进来先管理表单。"
         extra={(
@@ -779,6 +786,7 @@ export default function Overview({ novelId }: Props) {
       </WorkspacePanel>
 
       <WorkspacePanel
+        className="novel-overview-page__packaging-panel"
         title="包装信息"
         description="生成后可单独保存，不受基础信息必填校验影响。"
         extra={(
@@ -913,7 +921,7 @@ export default function Overview({ novelId }: Props) {
         </div>
       </WorkspacePanel>
 
-      <WorkspacePanel title="项目底盘概览" description="把底盘摘要和关键入口收在一个次级区，避免总览重复展示多层状态卡。">
+      <WorkspacePanel className="novel-overview-page__summary-panel" title="项目底盘概览" description="把底盘摘要和关键入口收在一个次级区，避免总览重复展示多层状态卡。">
         <div className="novel-overview-page__summary-stack">
           <div className="guided-step__fact-grid">
             <div className="guided-step__fact-card">

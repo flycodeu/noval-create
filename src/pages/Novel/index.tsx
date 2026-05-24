@@ -3,6 +3,7 @@ import { useLocation, useNavigate, useParams, type NavigateOptions } from 'react
 import { Alert, Button, Drawer, Input, Modal, Spin, message } from 'antd'
 import type { MenuProps } from 'antd'
 import { getErrorMessage, getUserFacingMessage, isUserFacingMessage } from '@/utils/user-facing-message'
+import { isElectronRuntime } from '../../runtime/environment'
 import {
   LeftOutlined,
   RightOutlined,
@@ -74,7 +75,7 @@ const WORKSPACE_LAST_WRITING_VIEW_STORAGE_KEY = 'novelforge-workspace-last-writi
 const WORKSPACE_PAGE_META = new Map(WORKSPACE_MODULE_DEFINITIONS.map((item) => [item.key, item] as const))
 const WORKSPACE_PREWARM_DELAY_MS = 140
 const MAX_IDLE_PREWARM_ROUTES = 4
-const COMPACT_SHELL_BREAKPOINT = 1120
+const COMPACT_SHELL_BREAKPOINT = 1200
 const COMPACT_SHELL_MEDIA_QUERY = `(max-width: ${COMPACT_SHELL_BREAKPOINT - 1}px)`
 
 const WORKSPACE_STAGE_LOADERS = {
@@ -204,6 +205,7 @@ export default function NovelRouter() {
       : null
     return stored === 'quick' || stored === 'professional' ? stored : 'professional'
   })
+  const showWindowControls = isElectronRuntime()
 
   const novelId = Number.parseInt(id || '0', 10)
   const pathSegments = location.pathname.split('/').filter(Boolean)
@@ -989,7 +991,7 @@ export default function NovelRouter() {
         }}
         showQuality={currentPage !== 'guide' && currentPage !== 'quality' && currentPage !== 'batch-workbench'}
         showNextStep={currentPage !== workspaceSnapshot.nextStep.targetPage}
-        showWindowControls
+        showWindowControls={showWindowControls}
         moreMenu={{
           items: [
             {
@@ -1028,18 +1030,6 @@ export default function NovelRouter() {
       ) : null}
 
       <main className="novel-route-shell__content">
-        <div className="novel-route-shell__viewport-head">
-          <div className="novel-route-shell__viewport-kicker">当前模块</div>
-          <div className="novel-route-shell__viewport-title-row">
-            <strong>{currentPageMeta.label}</strong>
-            {pendingPage && pendingPage !== currentPage ? (
-              <span className="novel-route-shell__viewport-loading">
-                <Spin size="small" />
-                正在切换
-              </span>
-            ) : null}
-          </div>
-        </div>
         <div className="novel-route-shell__content-frame">
           <div
             ref={contentBodyRef}

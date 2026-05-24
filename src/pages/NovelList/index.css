@@ -6,10 +6,13 @@
 }
 
 .novel-list-page__shell {
+  width: min(100%, 1520px);
   max-width: 1520px;
+  min-width: 0;
   margin: 0 auto;
   display: grid;
-  gap: 24px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
 }
 
 .novel-list-page__header {
@@ -18,6 +21,7 @@
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .novel-list-page__copy {
@@ -42,9 +46,10 @@
 
 .novel-list-page__stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
-  max-width: 1120px;
+  max-width: none;
+  min-width: 0;
 }
 
 .novel-list-page__stat-card {
@@ -88,9 +93,11 @@
 
 .novel-list-page__toolbar {
   display: flex;
-  gap: 16px;
+  align-items: center;
+  gap: 12px;
   flex-wrap: wrap;
-  padding: 16px;
+  min-width: 0;
+  padding: 12px 16px;
   border: 1px solid var(--border-default);
   border-radius: var(--radius-l);
   background: var(--bg-surface);
@@ -98,19 +105,22 @@
 }
 
 .novel-list-page__toolbar-field {
-  width: 100%;
+  min-width: 0;
+  flex-shrink: 0;
 }
 
 .novel-list-page__toolbar-field--search {
-  width: 320px;
+  flex: 1 1 260px;
+  min-width: min(100%, 240px);
+  max-width: 520px;
 }
 
 .novel-list-page__toolbar-field--status {
-  width: 160px;
+  width: 140px;
 }
 
 .novel-list-page__toolbar-field--sort {
-  width: 160px;
+  width: 140px;
 }
 
 .novel-list-page__toolbar-field .ant-input-affix-wrapper,
@@ -125,8 +135,53 @@
 .novel-list-page__grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 24px;
+  gap: 18px;
   align-items: start;
+  min-width: 0;
+}
+
+.novel-list-page .novel-project-card {
+  padding: 18px;
+  gap: 12px;
+}
+
+.novel-list-page .novel-project-card__summary {
+  gap: 8px 10px;
+  font-size: 12px;
+}
+
+.novel-list-page .novel-project-card__summary > div {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.novel-list-page .novel-project-card__summary strong {
+  white-space: nowrap;
+}
+
+.novel-list-page .novel-project-card__title {
+  font-size: 16px;
+}
+
+.novel-list-page .novel-project-card__next-step {
+  padding: 12px;
+}
+
+.novel-list-page .novel-project-card__next-step-title,
+.novel-list-page .novel-project-card__next-step-copy {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+}
+
+.novel-list-page .novel-project-card__next-step-title {
+  -webkit-line-clamp: 1;
+}
+
+.novel-list-page .novel-project-card__next-step-copy {
+  -webkit-line-clamp: 3;
 }
 
 .novel-list-page__wizard-steps {
@@ -325,17 +380,19 @@
   margin-top: 32px;
 }
 
-@media (max-width: 1380px) {
+@media (max-width: 1280px) {
+  .novel-list-page__stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1180px) {
   .novel-list-page__grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 1080px) {
-  .novel-list-page__grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .novel-list-page__genre-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -352,6 +409,18 @@
 @media (max-width: 720px) {
   .novel-list-page {
     padding: 20px;
+  }
+
+  .novel-list-page__header,
+  .novel-list-page__stats,
+  .novel-list-page__toolbar,
+  .novel-list-page__grid {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .novel-list-page__stats {
+    grid-template-columns: 1fr;
   }
 
   .novel-list-page__grid,

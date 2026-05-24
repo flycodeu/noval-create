@@ -605,7 +605,7 @@ export default function NovelList() {
               </Form.Item>
 
               <Row gutter={12}>
-                <Col span={8}>
+                <Col xs={24} md={8}>
                   <Form.Item name="styleTemplateId" label="文风模板">
                     <Select
                       options={styleTemplates.map((template) => ({ value: template.id, label: template.name }))}
@@ -614,7 +614,7 @@ export default function NovelList() {
                     />
                   </Form.Item>
                 </Col>
-                <Col span={8}>
+                <Col xs={24} md={8}>
                   <Form.Item name="worldTemplateId" label="世界模板">
                     <Select
                       options={worldTemplates.map((template) => ({ value: template.id, label: template.name }))}
@@ -623,7 +623,7 @@ export default function NovelList() {
                     />
                   </Form.Item>
                 </Col>
-                <Col span={8}>
+                <Col xs={24} md={8}>
                   <Form.Item name="modelConfigId" label="使用模型">
                     <Select
                       options={modelConfigs.map((model) => ({ value: model.id, label: model.name }))}
@@ -689,7 +689,7 @@ export default function NovelList() {
                 description="先用一句话写清主角处境、故事卖点、主线冲突和绝对禁区。系统会把这些字段压进前三章骨架、文风护栏和最小资产底盘。"
               />
               <Row gutter={12}>
-                <Col span={12}>
+                <Col xs={24} md={12}>
                   <Form.Item
                     name="protagonistStart"
                     label="主角起点"
@@ -699,7 +699,7 @@ export default function NovelList() {
                     <Input.TextArea rows={6} placeholder="例如：被逐出主城的维修员，只能靠黑市零工维生。" />
                   </Form.Item>
                 </Col>
-                <Col span={12}>
+                <Col xs={24} md={12}>
                   <Form.Item
                     name="coreHook"
                     label="核心钩子"
@@ -712,7 +712,7 @@ export default function NovelList() {
               </Row>
 
               <Row gutter={12}>
-                <Col span={12}>
+                <Col xs={24} md={12}>
                   <Form.Item
                     name="coreConflict"
                     label="核心冲突"
@@ -722,7 +722,7 @@ export default function NovelList() {
                     <Input.TextArea rows={6} placeholder="例如：想救城就必须和曾经出卖他的旧同伴合作。 " />
                   </Form.Item>
                 </Col>
-                <Col span={12}>
+                <Col xs={24} md={12}>
                   <Form.Item
                     name="tabooRules"
                     label="禁区"

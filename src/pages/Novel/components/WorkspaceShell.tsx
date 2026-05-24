@@ -7,7 +7,7 @@ function joinClassNames(...values: Array<string | false | null | undefined>) {
 export function WorkspacePage({
   eyebrow,
   title,
-  description: _description,
+  description,
   actions,
   metrics,
   contextSummary,
@@ -50,11 +50,20 @@ export function WorkspacePage({
         className,
       )}
     >
-      <section className={joinClassNames('novel-hero', heroVariant === 'compact' && 'novel-hero--compact')}>
-          <div className="novel-hero__copy">
-            {eyebrow ? <div className="novel-hero__eyebrow">{eyebrow}</div> : null}
-            <h1 className="novel-hero__title">{title}</h1>
-          </div>
+      <section
+        className={joinClassNames(
+          'novel-hero',
+          heroVariant === 'compact' && 'novel-hero--compact',
+          Boolean(actions) && 'novel-hero--has-actions',
+          Boolean(contextSummary) && 'novel-hero--has-context',
+          Boolean(metrics) && 'novel-hero--has-metrics',
+        )}
+      >
+        <div className="novel-hero__copy">
+          {eyebrow ? <div className="novel-hero__eyebrow">{eyebrow}</div> : null}
+          <h1 className="novel-hero__title">{title}</h1>
+          {description ? <p className="novel-hero__description">{description}</p> : null}
+        </div>
         {actions ? <div className="novel-hero__actions">{actions}</div> : null}
         {contextSummary ? <div className="novel-hero__context">{contextSummary}</div> : null}
         {metrics ? <div className="novel-hero__metrics">{metrics}</div> : null}

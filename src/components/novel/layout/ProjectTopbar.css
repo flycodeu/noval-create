@@ -17,7 +17,7 @@
 }
 
 .project-topbar--windowless {
-  --project-topbar-height: 76px;
+  --project-topbar-height: 58px;
 }
 
 .project-topbar__drag-region {
@@ -186,6 +186,7 @@
   display: inline-flex;
   align-items: center;
   gap: 2px;
+  min-width: 0;
   padding: 3px;
   border: 1px solid var(--project-topbar-border);
   border-radius: 12px;
@@ -318,30 +319,63 @@
 
 @media (max-width: 1200px) {
   .project-topbar__main-row {
-    flex-wrap: wrap;
-    align-items: flex-start;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+    gap: 10px;
   }
 
   .project-topbar__toolbar {
     width: 100%;
-    justify-content: space-between;
+    justify-content: flex-start;
+    flex-wrap: nowrap;
+    gap: 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 2px;
+    scrollbar-width: thin;
   }
 
   .project-topbar__action-cluster {
-    justify-content: flex-end;
+    flex: 0 0 auto;
+    justify-content: flex-start;
+    flex-wrap: nowrap;
+  }
+
+  .project-topbar__status-badge {
+    flex: 0 0 auto;
+    max-width: 240px;
+  }
+
+  .project-topbar__mode-button {
+    white-space: nowrap;
   }
 }
 
 @media (max-width: 767px) {
+  .project-topbar {
+    --project-topbar-height: auto;
+  }
+
   .project-topbar__main-row {
-    padding-top: 12px;
-    gap: 12px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    padding: 10px 12px 12px;
+    gap: 8px;
   }
 
   .project-topbar__identity {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 10px;
+    align-items: center;
+    flex-direction: row;
+    gap: 8px;
+  }
+
+  .project-topbar__identity-actions {
+    gap: 6px;
+  }
+
+  .project-topbar__title-copy {
+    gap: 2px;
   }
 
   .project-topbar__workspace-line {
@@ -353,11 +387,51 @@
     white-space: normal;
   }
 
+  .project-topbar__toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+    gap: 8px;
+    overflow: visible;
+    padding-bottom: 0;
+  }
+
+  .project-topbar__mode-switch {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  .project-topbar__action-cluster {
+    width: 100%;
+    flex: 1 1 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+
+  .project-topbar__action-cluster::-webkit-scrollbar {
+    display: none;
+  }
+
   .project-topbar__control.ant-btn {
+    flex: 0 0 auto;
+    height: 38px;
     padding-inline: 10px;
+  }
+
+  .project-topbar__control--accent.ant-btn {
+    min-width: 150px;
   }
 
   .project-topbar__status-badge {
     max-width: 100%;
+    min-height: 36px;
+  }
+
+  .project-topbar__mode-button {
+    min-height: 34px;
+    padding-inline: 12px;
   }
 }

@@ -8,6 +8,8 @@
   "main": "out/main/main.js",
   "scripts": {
     "dev": "electron-vite dev",
+    "dev:web": "vite --host 127.0.0.1 --port 4175",
+    "build:web": "vite build",
     "build": "npm run build:app && npm run package:win",
     "build:app": "electron-vite build",
     "build:dir": "npm run build:app && npm run package:dir",

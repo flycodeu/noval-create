@@ -230,7 +230,7 @@ function resolveDailyPrimaryTask(
   stats: WorkflowStats,
   qualitySummary: AuthorWorkflowQualitySummary,
 ): AuthorWorkflowTask {
-  if (qualitySummary?.batchHealth.status === 'paused' && qualitySummary.batchHealth.canContinue) {
+  if (qualitySummary?.batchHealth?.status === 'paused' && qualitySummary.batchHealth.canContinue) {
     return createTask('daily-resume-batch', '恢复暂停的后台批次', '当前已有暂停的批量流程，先恢复它比重新发起新动作更直接。', 'task-center', 5, ['继续批次推进', '查看失败详情'], '打开后台任务中心')
   }
   return createTask('daily-writing', '推进当前正文', '项目已经进入正文阶段，当前最值钱的下一步是继续章节推进而不是回到页面式补充。', 'writing', 20, ['章节产出', '章后回写'], '进入正文写作')
@@ -240,7 +240,7 @@ function resolveRevisionPrimaryTask(
   stats: WorkflowStats,
   qualitySummary: AuthorWorkflowQualitySummary,
 ): AuthorWorkflowTask {
-  if ((qualitySummary?.productionReadiness.writebackFailedCount || 0) > 0 || (qualitySummary?.productionReadiness.writebackPendingCount || 0) > 0) {
+  if ((qualitySummary?.productionReadiness?.writebackFailedCount || 0) > 0 || (qualitySummary?.productionReadiness?.writebackPendingCount || 0) > 0) {
     return createTask('revision-writeback', '清理章后回写积压', '当前章后回写未闭环，继续推进正文会持续放大状态漂移。', 'writeback', 10, ['状态同步', '连续性恢复'], '打开章后回写')
   }
   if (stats.revisionBlockerCount > 0) {
@@ -276,7 +276,7 @@ function buildAlternateTasks(
       createTask('daily-revision', '清一轮修订积压', `当前仍有 ${stats.revisionTaskCount} 条修订任务待处理，适合在写作间隙清掉高价值问题。`, 'revision', 10, ['更稳的继续推进'], '打开修订中心'),
       createTask('daily-quality', '检查质量总灯', '连载推进前看一眼生产灯、批次健康和连续性，会比写完再返工更省。', 'quality', 6, ['继续批量推进判断'], '打开质量监控'),
     )
-    if (qualitySummary?.batchHealth.status === 'paused' && qualitySummary.batchHealth.canContinue) {
+    if (qualitySummary?.batchHealth?.status === 'paused' && qualitySummary.batchHealth.canContinue) {
       candidates.unshift(
         createTask('daily-task-center', '查看后台流程恢复点', '当前已有可继续的后台流程，先回到任务中心确认恢复点最直接。', 'task-center', 5, ['批次恢复'], '打开后台任务中心'),
       )
@@ -315,10 +315,10 @@ function buildBlockers(
   if (stats.staleCheckpointCount > 0) {
     blockers.push(createBlocker('stale-checkpoints', 'medium', '长期记忆检查点待刷新', `当前有 ${stats.staleCheckpointCount} 份检查点未刷新，长程记忆仍可能引用旧事实。`, 'quality', '打开质量监控'))
   }
-  if (qualitySummary?.productionReadiness.status === 'blocked') {
+  if (qualitySummary?.productionReadiness?.status === 'blocked') {
     blockers.push(createBlocker('production-blocked', 'high', '当前生产总灯不建议继续扩批', qualitySummary.productionReadiness.summary, 'quality', '查看生产总灯'))
   }
-  if (qualitySummary?.batchHealth.status === 'paused' && qualitySummary.batchHealth.canContinue) {
+  if (qualitySummary?.batchHealth?.status === 'paused' && qualitySummary.batchHealth.canContinue) {
     blockers.push(createBlocker('paused-batch', 'medium', '后台批次流程已暂停', qualitySummary.batchHealth.summary, 'task-center', '打开后台任务中心'))
   }
   if (assetBloat.risk === 'high') {
@@ -351,7 +351,7 @@ function buildImpactNotices(
       entryPage: 'quality',
     })
   }
-  if (qualitySummary?.continuityHealth.recallDegradedChapterCount && qualitySummary.continuityHealth.recallDegradedChapterCount > 0) {
+  if (qualitySummary?.continuityHealth?.recallDegradedChapterCount && qualitySummary.continuityHealth.recallDegradedChapterCount > 0) {
     notices.push({
       id: 'impact-recall',
       title: '近期召回降级正在影响连续性',
@@ -360,7 +360,7 @@ function buildImpactNotices(
       entryPage: 'quality',
     })
   }
-  if (qualitySummary?.batchHealth.chapterIds.length && qualitySummary.batchHealth.chapterIds.length > 0) {
+  if (qualitySummary?.batchHealth?.chapterIds.length && qualitySummary.batchHealth.chapterIds.length > 0) {
     notices.push({
       id: 'impact-batch',
       title: '最近批次已有明确回查范围',
@@ -392,7 +392,7 @@ export function resolveSuggestedAuthorWorkMode(
     || stats.staleChapterCount > 0
     || stats.staleAssetCount > 0
     || stats.staleCheckpointCount > 0
-    || qualitySummary?.productionReadiness.status === 'blocked'
+    || qualitySummary?.productionReadiness?.status === 'blocked'
 
   if (hasRevisionPressure) {
     return {
