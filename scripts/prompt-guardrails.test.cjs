@@ -122,6 +122,38 @@ const tests = [
     },
   },
   {
+    name: 'humanized longform design rules bind chapters to ledgers and genre substrate',
+    run() {
+      const text = prompt.buildHumanizedLongformDesignRules({
+        genre: '\u672b\u4e16',
+        taskFocus: '\u672c\u7ae0\u9700\u8981\u627f\u63a5\u836f\u54c1\u5206\u914d\u540e\u679c',
+      })
+      assert.match(text, /\u957f\u7bc7\u8d26\u672c/u)
+      assert.match(text, /\u8de8\u7ae0\u907f\u514d\u91cd\u590d/u)
+      assert.match(text, /\u65b0\u8bbe\u5b9a\u5fc5\u987b\u6709\u6765\u6e90/u)
+      assert.match(text, /\u98df\u6c34/u)
+      assert.match(text, /\u8865\u7ed9\u94fe/u)
+      assert.match(text, /\u4fdd\u7559\u5408\u89c4\u6807\u8bc6/u)
+      assert.match(text, /^- /m)
+    },
+  },
+  {
+    name: 'humanized longform design rules cover every builtin genre substrate',
+    run() {
+      const cases = [
+        ['\u5386\u53f2\u6b63\u5267', /\u519b\u653f\u540e\u52e4/u],
+        ['\u7384\u5e7b', /\u80fd\u529b\u8fb9\u754c/u],
+        ['\u90fd\u5e02\u5f02\u80fd', /\u80fd\u529b\u89e6\u53d1/u],
+        ['\u897f\u5e7b', /\u4eea\u5f0f\u6750\u6599/u],
+        ['\u5176\u4ed6', /\u672a\u7ec6\u5206\u9898\u6750/u],
+      ]
+
+      for (const [genreName, expected] of cases) {
+        assert.match(prompt.buildHumanizedLongformDesignRules({ genre: genreName }), expected)
+      }
+    },
+  },
+  {
     name: 'chapter review prompt carries guardrails and expanded JSON schema',
     run() {
       const text = prompt.buildChapterReviewPrompt({
@@ -147,6 +179,7 @@ const tests = [
       })
       assert.match(text, /\u4e0a\u4e0b\u6587\u62a4\u680f/u)
       assert.match(text, /\u771f\u5b9e\u5ea6\u62a4\u680f/u)
+      assert.match(text, /\u957f\u7bc7\u4eba\u7c7b\u5316\u53d9\u4e8b\u8bbe\u8ba1/u)
       assert.match(text, /context_drift_risks/u)
       assert.match(text, /realism_risks/u)
       assert.match(text, /genre_hollowing_risks/u)

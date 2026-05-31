@@ -1,18 +1,18 @@
-import React, { useEffect, useMemo } from 'react'
+import React, { Suspense, useEffect, useMemo } from 'react'
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Alert, ConfigProvider, theme as antdTheme } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import AppLayout from './components/Layout'
-import NovelList from './pages/NovelList'
-import ModelManager from './pages/ModelManager'
-import TemplateManager from './pages/TemplateManager'
-import TaskCenter from './pages/TaskCenter'
-import PromptManager from './pages/PromptManager'
-import NovelRouter from './pages/Novel'
 import { useTaskStore } from './stores/task.store'
 import { useThemeStore } from './stores/theme.store'
 
 const FONT = "-apple-system, 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', sans-serif"
+const NovelList = React.lazy(() => import('./pages/NovelList'))
+const ModelManager = React.lazy(() => import('./pages/ModelManager'))
+const TemplateManager = React.lazy(() => import('./pages/TemplateManager'))
+const TaskCenter = React.lazy(() => import('./pages/TaskCenter'))
+const PromptManager = React.lazy(() => import('./pages/PromptManager'))
+const NovelRouter = React.lazy(() => import('./pages/Novel'))
 
 export default function App() {
   const { addStream, appendStreamChunk, completeStream } = useTaskStore()
@@ -230,15 +230,17 @@ export default function App() {
       ) : (
       <HashRouter>
         <AppLayout>
-          <Routes>
-            <Route path="/" element={<Navigate to="/novels" replace />} />
-            <Route path="/novels" element={<NovelList />} />
-            <Route path="/novels/:id/*" element={<NovelRouter />} />
-            <Route path="/models" element={<ModelManager />} />
-            <Route path="/templates" element={<TemplateManager />} />
-            <Route path="/tasks" element={<TaskCenter />} />
-            <Route path="/prompts" element={<PromptManager />} />
-          </Routes>
+          <Suspense fallback={<div style={{ padding: 24, color: 'var(--text-muted)' }}>页面加载中...</div>}>
+            <Routes>
+              <Route path="/" element={<Navigate to="/novels" replace />} />
+              <Route path="/novels" element={<NovelList />} />
+              <Route path="/novels/:id/*" element={<NovelRouter />} />
+              <Route path="/models" element={<ModelManager />} />
+              <Route path="/templates" element={<TemplateManager />} />
+              <Route path="/tasks" element={<TaskCenter />} />
+              <Route path="/prompts" element={<PromptManager />} />
+            </Routes>
+          </Suspense>
         </AppLayout>
       </HashRouter>
       )}

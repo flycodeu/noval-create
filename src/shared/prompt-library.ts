@@ -742,6 +742,71 @@ export function buildOutputQualityRules(extraLines: string[] = [], genre?: strin
     .join('\n')
 }
 
+export function buildHumanizedLongformDesignRules(params: {
+  genre?: string
+  taskFocus?: string
+  extraLines?: string[]
+} = {}): string {
+  const genreKey = getBuiltinGenreRules(params.genre).genreProfile.key
+  const genreSubstrate: Record<string, string[]> = {
+    zombie: [
+      '末世每个推进点都要挂到食水、药品、感染、噪声、路线、体力、收容名额或信任分配中的至少一项。',
+      '不要只写尸潮和绝望，要让补给链、守夜制度、伤病隔离和队伍纪律持续改变人物选择。',
+    ],
+    xianxia: [
+      '修仙每个推进点都要挂到境界差、灵石丹药、宗门门规、师承因果、坊市交易或凡俗牵连中的至少一项。',
+      '不要只写悟道和机缘，要让资源来源、破境风险、门派权限和因果债真正限制行动。',
+    ],
+    wuxia: [
+      '武侠每个推进点都要挂到江湖规矩、师承门第、名声、盘缠、伤药、路程、官府或人情债中的至少一项。',
+      '不要只写招式和气势，要让行路成本、名声后果、门规和旧债持续进入冲突。',
+    ],
+    'modern-mystery': [
+      '现代悬疑每个推进点都要挂到证据载体、访问路径、时间线、机构阻力、地方人情或调查代价中的至少一项。',
+      '不要只写压抑和秘密，要让档案、监控、通联、口供和现实权限推动线索变化。',
+    ],
+    historical: [
+      '历史题材每个推进点都要挂到身份名分、官制礼法、地理脚程、军政后勤、赋税粮饷、宗族或地方秩序中的至少一项。',
+      '不要只写朝堂气氛和宏大判断，要让文书传递、舟车速度、时代器物、利益网络和制度成本真正限制人物。',
+    ],
+    fantasy: [
+      '玄幻每个推进点都要挂到等级差、能力边界、资源消耗、势力反应、装备来源、地图层级或身份后果中的至少一项。',
+      '不要只写威压、震撼和升级，要让能力限制、成长成本、争夺对象和阵营关系持续改变局势。',
+    ],
+    'urban-ability': [
+      '都市异能每个推进点都要挂到现实身份、职业日常、能力触发、副作用、监控痕迹、组织规程或暴露后果中的至少一项。',
+      '不要只写异能展示和打脸，要让现代社会的取证、舆论、执法、收入与生活压力持续进入冲突。',
+    ],
+    'western-fantasy': [
+      '西幻每个推进点都要挂到领地治理、阶层礼法、行军后勤、信仰秩序、施法代价、仪式材料或种族关系中的至少一项。',
+      '不要只写魔法奇观和种族标签，要让交通、税收、军需、教会权力与盟约旧债持续限制选择。',
+    ],
+    generic: [
+      '未细分题材也要让每个推进点挂到因果、资源、身份、规则、关系或行动条件中的至少一项。',
+      '不要只写气氛和设定说明，要让约束进入现场并改变人物的选择、损耗和后续压力。',
+    ],
+  }
+
+  return [
+    '把每章当成长篇账本的一次交易：新增信息、人物选择、资源变化、关系温度、风险余波和待回收事项都要有明确增减。',
+    '章节内容至少承担两类真实功能：行动推进、信息揭示、关系变形、代价延续、伏笔回收、世界规则验证、节奏喘息。',
+    '同一章内不要连续使用同一种冲突载体；在物理阻力、制度阻力、人际阻力、资源阻力、认知误差和道德取舍之间轮换。',
+    '跨章避免重复不是换词，而是更换开场入口、冲突承载物、对白权力关系、场景空间、感官焦点和章尾钩子类型。',
+    '新设定必须有来源：既有资产支持、当前场景可观察、角色合理推断三者至少满足一项；否则只能写成猜测，不得写成定论。',
+    '长期人物变化要有台阶：一次事件只能推动有限变化，不能让人物突然完成全部理解、和解、变强或转性。',
+    '每个重要选择都写出被放弃的选项和承担后果的人，避免所有困难被一句正确决定抹平。',
+    '对白优先承载立场、试探、隐瞒、命令、讨价还价或关系温度，不要让对白只负责解释设定。',
+    '场景细节只保留会改变判断、行动、关系或后果的部分；低价值身体细节和空转氛围要主动删减。',
+    '生成目标是提高成稿质量、原创性和可读性，并保留合规标识与人工确认流程，不把规则写成规避平台声明或伪装来源。',
+    params.taskFocus ? `本轮人类化重点：${params.taskFocus}` : '',
+    ...(genreSubstrate[genreKey] || []),
+    ...(params.extraLines || []),
+  ]
+    .filter(Boolean)
+    .map((line) => `- ${line}`)
+    .join('\n')
+}
+
 function buildPromptGuardrailSections(options: PromptGuardrailOptions): string[] {
   return [
     section('上下文护栏', buildContextAlignmentRules({
@@ -755,6 +820,10 @@ function buildPromptGuardrailSections(options: PromptGuardrailOptions): string[]
       genre: options.genre,
       worldSummary: options.worldSummary,
       extraLines: options.extraRealityLines,
+    })),
+    section('长篇人类化叙事设计', buildHumanizedLongformDesignRules({
+      genre: options.genre,
+      taskFocus: options.taskFocus,
     })),
     section('输出质量底线', buildOutputQualityRules(options.extraQualityLines || [], options.genre)),
   ]

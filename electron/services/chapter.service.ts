@@ -1148,6 +1148,7 @@ function sendPipelineProgress(
   snapshot: ChapterPipelineSnapshot,
   payload: Pick<ChapterGenerationProgressEvent, 'stage' | 'label' | 'detail' | 'status'> & { role?: ChapterPipelineRole },
 ) {
+  const totalRoles = Object.keys(snapshot.roles).length
   sendGenerationProgress(sender, {
     chapterId: snapshot.chapterId,
     taskId: snapshot.workflowTaskId,
@@ -1156,8 +1157,8 @@ function sendPipelineProgress(
     stage: payload.stage,
     label: payload.label,
     detail: payload.detail,
-    completed: Math.min(getCompletedPipelineRoleCount(snapshot), 5),
-    total: 5,
+    completed: Math.min(getCompletedPipelineRoleCount(snapshot), totalRoles),
+    total: totalRoles,
     status: payload.status,
     pipeline: snapshot,
   })
