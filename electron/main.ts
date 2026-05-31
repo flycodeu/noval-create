@@ -31,6 +31,7 @@ import {
   templates,
 } from './database/schema'
 import * as chapterService from './services/chapter.service'
+import * as aiPatchService from './services/ai-patch.service'
 import * as characterService from './services/character.service'
 import * as characterArcService from './services/character-arc.service'
 import * as consistencyService from './services/consistency.service'
@@ -575,6 +576,9 @@ function registerIpcHandlers() {
   handle('writeback:retryFailed', (_, runId) =>
     chapterWritebackService.retryFailedWritebackItems(requireId(runId, 'runId')))
 
+  handle('aiPatch:suggest', (_, request) => aiPatchService.suggestAiPatch(parseObjectPayload(request, 'request')))
+  handle('aiPatch:apply', (_, target, patch) => aiPatchService.applyAiPatch(parseObjectPayload(target, 'target'), patch))
+
   handle('character:list', (_, novelId) => characterService.listCharacters(novelId))
   handle('character:query', (_, filters) => characterService.queryCharacters(filters))
   handle('character:getStats', (_, filters) => characterService.getCharacterStats(filters))
@@ -587,6 +591,10 @@ function registerIpcHandlers() {
   handle('character:update', (_, id, data) => characterService.updateCharacter(requireId(id), data))
   handle('character:delete', (_, id) => characterService.deleteCharacter(requireId(id)))
   handle('character:regenerate', (_, id) => characterService.regenerateCharacter(id))
+  handle('character:suggestPatch', (_, id, instruction) =>
+    characterService.suggestCharacterPatch(requireId(id), typeof instruction === 'string' ? instruction : ''))
+  handle('character:applyPatch', (_, id, patch) =>
+    characterService.applyCharacterPatch(requireId(id), patch))
   handle('character:startAutoGenerate', (event, novelId, opts) =>
     batchWorkflowService.startCharacterAutoGenerateWorkflow(novelId, opts, event.sender))
   handle('character:getAutoGenerateStatus', (_, taskId) =>

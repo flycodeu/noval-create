@@ -33,6 +33,7 @@ import {
   StructureSegmentsPanel,
   StructureVolumesPanel,
 } from './StructurePanels'
+import AiPatchEditor from '../components/AiPatchEditor'
 import { STRUCTURE_BATCH_CREATE_MAX, useStructureWorkspace } from './useStructureWorkspace'
 import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
 import { getChapterLabel, getPartLabel, getSegmentLabel, getVolumeLabel } from '../shared/workspace-utils'
@@ -541,56 +542,71 @@ export default function StructurePage({ novelId }: { novelId: number }) {
   ])
 
   const chapterAiActions = chapterDetail ? (
-    <AIGenerateButton
-      novelId={novelId}
-      label="AI 生成章节"
-      isJson
-      runGeneration={async (input) => {
-        const result = await generateStructureChapterDraft(input, { genre: currentNovel?.genreName })
-        draftWarningsRef.current = result.warnings
-        draftObservabilityRef.current = result.observability
-        setDraftWarnings(result.warnings)
-        return result.outputs
-      }}
-      buildMessages={() => {
-        const values = chapterForm.getFieldsValue(true)
+    <Space wrap>
+      <AIGenerateButton
+        novelId={novelId}
+        label="AI 生成章节"
+        isJson
+        runGeneration={async (input) => {
+          const result = await generateStructureChapterDraft(input, { genre: currentNovel?.genreName })
+          draftWarningsRef.current = result.warnings
+          draftObservabilityRef.current = result.observability
+          setDraftWarnings(result.warnings)
+          return result.outputs
+        }}
+        buildMessages={() => {
+          const values = chapterForm.getFieldsValue(true)
 
-        return buildDraftMessages({
-          task: '章节结构草稿',
-          mode: 'replace',
-          context: [
-            { label: '书名', value: currentNovel?.title || '' },
-            { label: '题材', value: currentNovel?.genreName || '' },
-            { label: '小说简介', value: currentNovel?.synopsis || '' },
-            { label: '扩展背景', value: currentNovel?.expandedBackground || '' },
-            { label: '当前卷', value: getVolumeLabel(currentVolume) },
-            { label: '当前部', value: getPartLabel(currentPart) },
-            { label: '已有场景', value: summarizeSegments(segments.items) },
-          ],
-          fields: [
-            { key: 'title', label: '章节标题', value: values.title, hint: '短而明确，能体现本章推进。' },
-            { key: 'outline', label: '章节目标', value: values.outline, hint: '写清本章推进、转折和留下的问题。' },
-            { key: 'targetWords', label: '目标字数', type: 'number', value: values.targetWords, hint: '给出合理整数。' },
-          ],
-          requirements: [
-            '不要改动当前卷和当前部的定位。',
-            '如果已有场景列表，章节目标必须能覆盖这些场景。',
-          ],
-        })
-      }}
-      onResult={(raw) => {
-        const draftPayload = parseDraftJson<{ title?: string; outline?: string; targetWords?: number }>(raw)
-        const currentValues = chapterForm.getFieldsValue(true)
+          return buildDraftMessages({
+            task: '章节结构草稿',
+            mode: 'replace',
+            context: [
+              { label: '书名', value: currentNovel?.title || '' },
+              { label: '题材', value: currentNovel?.genreName || '' },
+              { label: '小说简介', value: currentNovel?.synopsis || '' },
+              { label: '扩展背景', value: currentNovel?.expandedBackground || '' },
+              { label: '当前卷', value: getVolumeLabel(currentVolume) },
+              { label: '当前部', value: getPartLabel(currentPart) },
+              { label: '已有场景', value: summarizeSegments(segments.items) },
+            ],
+            fields: [
+              { key: 'title', label: '章节标题', value: values.title, hint: '短而明确，能体现本章推进。' },
+              { key: 'outline', label: '章节目标', value: values.outline, hint: '写清本章推进、转折和留下的问题。' },
+              { key: 'targetWords', label: '目标字数', type: 'number', value: values.targetWords, hint: '给出合理整数。' },
+            ],
+            requirements: [
+              '不要改动当前卷和当前部的定位。',
+              '如果已有场景列表，章节目标必须能覆盖这些场景。',
+            ],
+          })
+        }}
+        onResult={(raw) => {
+          const draftPayload = parseDraftJson<{ title?: string; outline?: string; targetWords?: number }>(raw)
+          const currentValues = chapterForm.getFieldsValue(true)
 
-        const mergedDraft = {
-          ...currentValues,
-          title: typeof draftPayload.title === 'string' ? draftPayload.title : currentValues.title,
-          outline: typeof draftPayload.outline === 'string' ? draftPayload.outline : currentValues.outline,
-          targetWords: normalizeOptionalNumber(draftPayload.targetWords ?? currentValues.targetWords) || currentValues.targetWords,
-          draftKind: 'chapter',
-        }
-        applyStructureDraft(mergedDraft)
-        void saveAppliedDraft(mergedDraft, draftWarningsRef.current, 'structure', draftObservabilityRef.current || undefined).catch(console.error)
+          const mergedDraft = {
+            ...currentValues,
+            title: typeof draftPayload.title === 'string' ? draftPayload.title : currentValues.title,
+            outline: typeof draftPayload.outline === 'string' ? draftPayload.outline : currentValues.outline,
+            targetWords: normalizeOptionalNumber(draftPayload.targetWords ?? currentValues.targetWords) || currentValues.targetWords,
+            draftKind: 'chapter',
+          }
+          applyStructureDraft(mergedDraft)
+          void saveAppliedDraft(mergedDraft, draftWarningsRef.current, 'structure', draftObservabilityRef.current || undefined).catch(console.error)
+        }}
+      />
+    </Space>
+  ) : null
+
+  const chapterPatchEditor = chapterDetail ? (
+    <AiPatchEditor
+      compact
+      target={{ type: 'structure_chapter', id: chapterDetail.id, novelId }}
+      title="定向 AI 修改章节"
+      description="只改当前章节标题、目标、摘要或目标字数；确认后写入结构。"
+      placeholder="例如：保留章节位置，把本章目标改成更明确的转折：主角救下伤员但暴露补给路线。"
+      onApplied={async () => {
+        await refreshStructure()
       }}
     />
   ) : null
@@ -679,6 +695,19 @@ export default function StructurePage({ novelId }: { novelId: number }) {
         }}
       />
     </Space>
+  ) : null
+
+  const segmentPatchEditor = segmentDetail ? (
+    <AiPatchEditor
+      compact
+      target={{ type: 'structure_segment', id: segmentDetail.id, novelId }}
+      title="定向 AI 修改场景"
+      description="只改当前场景字段；确认后写入结构。"
+      placeholder="例如：把这个场景改成更有压迫感的临时救治场面，强化地点、进入状态和离开状态。"
+      onApplied={async () => {
+        await refreshStructure()
+      }}
+    />
   ) : null
 
   const handleClear = React.useCallback(() => {
@@ -964,6 +993,7 @@ export default function StructurePage({ novelId }: { novelId: number }) {
               })()}
               onDeleteChapter={() => void deleteChapter()}
               aiActions={chapterAiActions}
+              patchEditor={chapterPatchEditor}
             />
             <SegmentEditorPanel
               segmentDetail={segmentDetail}
@@ -979,6 +1009,7 @@ export default function StructurePage({ novelId }: { novelId: number }) {
               })()}
               onDeleteSegment={() => void deleteSegment()}
               aiActions={segmentAiActions}
+              patchEditor={segmentPatchEditor}
             />
           </div>
         </>

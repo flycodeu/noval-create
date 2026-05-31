@@ -148,6 +148,32 @@ function mergePreservingBase(baseValue: string | undefined, retrievedValue: stri
   return compactLines([baseValue, retrievedValue], maxLines, maxChars)
 }
 
+function resolveCharacterRoleRank(roleType?: string | null): number {
+  switch (roleType) {
+    case 'protagonist':
+      return 0
+    case 'major':
+      return 1
+    case 'antagonist':
+      return 2
+    case 'supporting':
+      return 3
+    case 'minor':
+    default:
+      return 4
+  }
+}
+
+function sortCharactersForWriterPack<T extends { roleType?: string | null; fullName?: string | null; sortOrder?: number | null; id?: number }>(rows: T[]): T[] {
+  return [...rows].sort((left, right) => {
+    const roleDelta = resolveCharacterRoleRank(left.roleType) - resolveCharacterRoleRank(right.roleType)
+    if (roleDelta !== 0) return roleDelta
+    const sortDelta = Number(left.sortOrder || 0) - Number(right.sortOrder || 0)
+    if (sortDelta !== 0) return sortDelta
+    return String(left.fullName || '').localeCompare(String(right.fullName || '')) || Number(left.id || 0) - Number(right.id || 0)
+  })
+}
+
 function extractTerms(values: Array<string | undefined>, limit = 8): string[] {
   return dedupe(values.flatMap((value) => (
     (value || '')
@@ -478,7 +504,7 @@ function renderCharacterEntries(
   getCharacterDetailContextImpl: typeof getCharacterDetailContext,
   maxCharacters: number,
 ): WriterOrchestratedCharacterPackEntry[] {
-  const explicitNames = dedupe(signals.mentionedCharacters || [], maxCharacters)
+  const explicitNames = dedupe(signals.mentionedCharacters || [], Math.max(maxCharacters * 3, 24))
   const signalText = buildSignalSearchText([
     signals.chapterTitle,
     signals.chapterOutline,
@@ -491,8 +517,9 @@ function renderCharacterEntries(
     signals.openLoops,
     signals.dueForeshadows,
   ])
+  const prioritizedCharacters = sortCharactersForWriterPack(characters)
   const inferredNames = explicitNames.length > 0
-    ? characters
+    ? prioritizedCharacters
       .filter((character) => {
         const candidateTerms = dedupe([
           character.fullName || '',
@@ -510,14 +537,14 @@ function renderCharacterEntries(
       .map((character) => character.fullName || '')
       .filter(Boolean)
       .slice(0, maxCharacters)
-    : characters
+    : prioritizedCharacters
       .map((character) => character.fullName || '')
       .filter((name) => name.length >= 2 && signalText.includes(name))
       .slice(0, maxCharacters)
   const mentioned = new Set(inferredNames)
   if (mentioned.size === 0) return []
 
-  return characters
+  return prioritizedCharacters
     .filter((character) => mentioned.has(character.fullName))
     .slice(0, maxCharacters)
     .map((character) => {

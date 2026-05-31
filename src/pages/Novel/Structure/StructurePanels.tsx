@@ -572,6 +572,7 @@ interface ChapterEditorPanelProps {
   onSaveChapter: () => void
   onDeleteChapter: () => void
   aiActions?: React.ReactNode
+  patchEditor?: React.ReactNode
 }
 
 export function ChapterEditorPanel({
@@ -582,6 +583,7 @@ export function ChapterEditorPanel({
   onSaveChapter,
   onDeleteChapter,
   aiActions,
+  patchEditor,
 }: ChapterEditorPanelProps) {
   return (
     <WorkspacePanel
@@ -603,6 +605,7 @@ export function ChapterEditorPanel({
           <div className="novel-empty">先选择章节。</div>
         ) : (
           <>
+          {patchEditor}
           <div className="novel-grid novel-grid--2">
             <Form.Item name="title" label="章节标题">
               <Input />
@@ -639,6 +642,7 @@ interface SegmentEditorPanelProps {
   onSaveSegment: () => void
   onDeleteSegment: () => void
   aiActions?: React.ReactNode
+  patchEditor?: React.ReactNode
 }
 
 export function SegmentEditorPanel({
@@ -650,6 +654,7 @@ export function SegmentEditorPanel({
   onSaveSegment,
   onDeleteSegment,
   aiActions,
+  patchEditor,
 }: SegmentEditorPanelProps) {
   const isSelectedSegmentOutsideWindow = Boolean(
     segmentDetail
@@ -677,6 +682,7 @@ export function SegmentEditorPanel({
           <div className="novel-empty">先选择一个场景。</div>
         ) : (
           <>
+            {patchEditor}
             <div className="novel-grid novel-grid--2">
               <Form.Item name="title" label="场景标题">
                 <Input />

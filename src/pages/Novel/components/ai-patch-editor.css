@@ -1,0 +1,93 @@
+.novel-ai-patch-editor {
+  border: 1px solid rgba(38, 62, 74, 0.14);
+  border-radius: 8px;
+  padding: 14px;
+  background: linear-gradient(180deg, rgba(250, 252, 251, 0.98), rgba(244, 248, 247, 0.96));
+}
+
+.novel-ai-patch-editor--compact {
+  padding: 12px;
+}
+
+.novel-ai-patch-editor__head,
+.novel-ai-patch-editor__summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.novel-ai-patch-editor__head strong,
+.novel-ai-patch-editor__summary span {
+  color: #1f343a;
+}
+
+.novel-ai-patch-editor__head span {
+  display: block;
+  margin-top: 3px;
+  color: #66777c;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.novel-ai-patch-editor__result {
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.novel-ai-patch-editor__diffs {
+  display: grid;
+  gap: 8px;
+}
+
+.novel-ai-patch-diff {
+  border: 1px solid rgba(38, 62, 74, 0.12);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.84);
+}
+
+.novel-ai-patch-diff > strong {
+  display: block;
+  margin-bottom: 8px;
+  color: #263e4a;
+}
+
+.novel-ai-patch-diff__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.novel-ai-patch-diff__body span {
+  min-height: 36px;
+  max-height: 180px;
+  overflow: auto;
+  padding: 8px;
+  border-radius: 6px;
+  background: rgba(234, 239, 238, 0.72);
+  color: #2c4046;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.novel-ai-patch-diff__body span:last-child {
+  background: rgba(224, 242, 238, 0.74);
+}
+
+.novel-ai-patch-editor__foot {
+  justify-content: flex-end;
+}
+
+@media (max-width: 760px) {
+  .novel-ai-patch-editor__head,
+  .novel-ai-patch-editor__summary,
+  .novel-ai-patch-diff__body {
+    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+}

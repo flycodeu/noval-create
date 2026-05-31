@@ -442,6 +442,43 @@ describe('writer context orchestrator', () => {
     expect(resolution.renderedContextOverrides.characterStates).toContain('角色10')
   })
 
+  it('prioritizes core characters over minor npcs when character pack budget is tight', async () => {
+    const names = ['路人甲', '普通配角', '核心反派', '主角', '主要同伴']
+
+    const resolution = await resolveWriterOrchestratedContext(createInput({
+      signals: {
+        chapterTitle: '城门混战',
+        chapterOutline: `${names.join('、')}同时出场，但本章必须稳住主线人物。`,
+        chapterGoal: '主角与主要同伴在核心反派压迫下突围',
+        relationSummary: '主角、主要同伴、核心反派构成本章主要压力三角。',
+        mentionedCharacters: names,
+        mentionedItems: [],
+        mentionedLocations: [],
+      },
+      runtime: {
+        useMemoryCache: false,
+        maxCharacters: 3,
+      },
+    }), {
+      listCharacters: (() => [
+        { id: 1, novelId: 1, roleType: 'minor', fullName: '路人甲', goals: '制造混乱', innerConflict: '', relationshipTension: '', characterArc: '', speechPattern: '', catchphrases: '', vocabularyLevel: '', dialectFeatures: '', sortOrder: 1, createdAt: '', updatedAt: '' },
+        { id: 2, novelId: 1, roleType: 'supporting', fullName: '普通配角', goals: '帮忙守门', innerConflict: '', relationshipTension: '', characterArc: '', speechPattern: '', catchphrases: '', vocabularyLevel: '', dialectFeatures: '', sortOrder: 2, createdAt: '', updatedAt: '' },
+        { id: 3, novelId: 1, roleType: 'antagonist', fullName: '核心反派', goals: '逼主角交出路线', innerConflict: '', relationshipTension: '', characterArc: '', speechPattern: '', catchphrases: '', vocabularyLevel: '', dialectFeatures: '', sortOrder: 3, createdAt: '', updatedAt: '' },
+        { id: 4, novelId: 1, roleType: 'protagonist', fullName: '主角', goals: '带队突围', innerConflict: '', relationshipTension: '', characterArc: '', speechPattern: '', catchphrases: '', vocabularyLevel: '', dialectFeatures: '', sortOrder: 4, createdAt: '', updatedAt: '' },
+        { id: 5, novelId: 1, roleType: 'major', fullName: '主要同伴', goals: '保护伤员', innerConflict: '', relationshipTension: '', characterArc: '', speechPattern: '', catchphrases: '', vocabularyLevel: '', dialectFeatures: '', sortOrder: 5, createdAt: '', updatedAt: '' },
+      ]) as never,
+      getCharacterDetailContext: (() => ({
+        relatedItems: [],
+        relatedCharacters: [],
+        relatedRelations: [],
+      })) as never,
+    })
+
+    expect(resolution.structuredPack.characters.map((item) => item.name)).toEqual(['主角', '主要同伴', '核心反派'])
+    expect(resolution.renderedContextOverrides.characterStates).toContain('主角')
+    expect(resolution.renderedContextOverrides.characterStates).not.toContain('路人甲')
+  })
+
   it('matches story threads before applying the runtime limit', async () => {
     const threadRows = Array.from({ length: 9 }, (_, index) => ({
       id: index + 1,

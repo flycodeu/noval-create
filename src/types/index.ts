@@ -744,6 +744,42 @@ export interface CharacterDetailContext {
   relatedRelations: CharacterRelation[]
 }
 
+export type AiPatchTargetType =
+  | 'character'
+  | 'world_rules_section'
+  | 'structure_chapter'
+  | 'structure_segment'
+
+export interface AiPatchTarget {
+  type: AiPatchTargetType
+  id: number
+  novelId?: number
+  sectionKey?: string
+}
+
+export interface AiPatchRequest {
+  target: AiPatchTarget
+  instruction: string
+}
+
+export interface AiPatchChange {
+  field: string
+  label: string
+  before: string
+  after: string
+}
+
+export interface AiPatchResult {
+  summary: string
+  patch: Record<string, unknown>
+  changedFields: AiPatchChange[]
+  warnings: string[]
+  target: AiPatchTarget
+}
+
+export type CharacterAiPatchChange = AiPatchChange & { field: keyof Character | string }
+export type CharacterAiPatchResult = AiPatchResult & { patch: Partial<Character> }
+
 export interface StoryItemSourceContext {
   page?: string
   label?: string
@@ -5294,6 +5330,10 @@ declare global {
       app: {
         getDatabasePath: () => Promise<string>
       }
+      aiPatch: {
+        suggest: (request: AiPatchRequest) => Promise<AiPatchResult>
+        apply: (target: AiPatchTarget, patch: Record<string, unknown>) => Promise<unknown>
+      }
       novel: {
         list: (filters?: unknown) => Promise<Novel[]>
         get: (id: number) => Promise<Novel | null>
@@ -5506,6 +5546,8 @@ declare global {
         update: (id: number, data: Partial<Character>) => Promise<void>
         delete: (id: number) => Promise<void>
         regenerate: (id: number) => Promise<Character | null>
+        suggestPatch: (id: number, instruction: string) => Promise<CharacterAiPatchResult>
+        applyPatch: (id: number, patch: Partial<Character>) => Promise<Character | null>
         batchGenerate: (novelId: number, opts: CharacterBatchGenerationOptions) => Promise<number[]>
         startAutoGenerate: (novelId: number, opts: CharacterBatchGenerationOptions) => Promise<number>
         getAutoGenerateStatus: (taskId: number) => Promise<CharacterAutoGenerateStatus | null>

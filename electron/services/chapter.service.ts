@@ -22,6 +22,7 @@ import {
   collectChapterContextRawData,
   ContinuityState,
   HardConstraintOverflowError,
+  resolveMentionedEntityLimits,
   type HardConstraintSourceLabel,
 } from './context.service'
 import {
@@ -4223,21 +4224,27 @@ function resolveWriterRuntimeOptions(
   const mentionedItemCount = rawContext.mentionedItems.length
   const mentionedLocationCount = rawContext.mentionedLocations.length
   const threadPressure = rawContext.activeThreadPressureCount
+  const entityLimits = resolveMentionedEntityLimits({
+    targetWords: rawContext.novel.targetWords,
+    chapterCount: rawContext.chapterRows.length,
+    launchMode: rawContext.novel.launchMode,
+    settingsJson: rawContext.novel.settingsJson,
+  })
   const characterCeiling = policy.operatingMode === 'million_longform'
-    ? Math.max(48, Math.min(72, mentionedCharacterCount + 8))
+    ? Math.max(entityLimits.characters, Math.min(72, mentionedCharacterCount + 8))
     : policy.operatingMode === 'epic_longform'
-      ? Math.max(28, Math.min(40, mentionedCharacterCount + 6))
-      : 20
+      ? Math.max(entityLimits.characters, Math.min(40, mentionedCharacterCount + 6))
+      : Math.max(20, entityLimits.characters)
   const itemCeiling = policy.operatingMode === 'million_longform'
-    ? Math.max(48, Math.min(64, mentionedItemCount + 8))
+    ? Math.max(entityLimits.items, Math.min(64, mentionedItemCount + 8))
     : policy.operatingMode === 'epic_longform'
-      ? Math.max(24, Math.min(34, mentionedItemCount + 6))
-      : 16
+      ? Math.max(entityLimits.items, Math.min(34, mentionedItemCount + 6))
+      : Math.max(16, entityLimits.items)
   const mapCeiling = policy.operatingMode === 'million_longform'
-    ? Math.max(48, Math.min(64, mentionedLocationCount + 8))
+    ? Math.max(entityLimits.locations, Math.min(64, mentionedLocationCount + 8))
     : policy.operatingMode === 'epic_longform'
-      ? Math.max(24, Math.min(32, mentionedLocationCount + 6))
-      : 16
+      ? Math.max(entityLimits.locations, Math.min(32, mentionedLocationCount + 6))
+      : Math.max(16, entityLimits.locations)
   const timelineCeiling = policy.operatingMode === 'million_longform' ? 40 : policy.operatingMode === 'epic_longform' ? 28 : 16
   const threadCeiling = policy.operatingMode === 'million_longform' ? 40 : policy.operatingMode === 'epic_longform' ? 28 : 16
 

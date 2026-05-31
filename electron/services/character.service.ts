@@ -2,7 +2,7 @@ import { WebContents } from 'electron'
 import { asc, eq } from 'drizzle-orm'
 import { getDb, getSqlite } from '../database/db'
 import { characters, characterRelations, novels, storyItems, timelineEvents } from '../database/schema'
-import type { CharacterBatchGenerationOptions } from '../../src/types'
+import type { CharacterAiPatchResult, CharacterBatchGenerationOptions } from '../../src/types'
 import { safeParseJson } from '../utils/json'
 import { buildStoryProfile } from './context.service'
 import {
@@ -290,6 +290,157 @@ function buildCurrentProfileSummary(character: typeof characters.$inferSelect): 
     character.characterArc ? `人物弧光：${character.characterArc}` : '',
     character.firstImpression ? `初次印象：${character.firstImpression}` : '',
     parseAppearanceDescription(character.appearanceJson) ? `外貌描述：${parseAppearanceDescription(character.appearanceJson)}` : '',
+  ].filter(Boolean).join('\n')
+}
+
+const CHARACTER_PATCH_FIELD_LABELS = {
+  entityType: '实体类型',
+  species: '种类/物种',
+  gender: '性别',
+  age: '年龄',
+  occupation: '职业/身份',
+  rankLevel: '等级/职级',
+  socialIdentity: '社会位置',
+  background: '背景经历',
+  campFactionIdsJson: '所属势力',
+  powerSystemRefsJson: '关联体系',
+  contextHooksJson: '主线挂点',
+  goals: '当前目标',
+  firstImpression: '第一印象',
+  surfaceDesire: '表层欲望',
+  deepNeed: '深层需要',
+  coreFear: '核心恐惧',
+  innerConflict: '内在矛盾',
+  hiddenSecret: '隐藏秘密',
+  moralLine: '道德底线',
+  selfDeception: '自我欺骗',
+  trauma: '旧伤/创伤',
+  contradiction: '反差点',
+  relationshipTension: '关系张力',
+  resonancePoint: '读者共情点',
+  characterArc: '后续弧光',
+  speechPattern: '说话方式',
+  catchphrases: '口头禅',
+  vocabularyLevel: '用词层级',
+  dialectFeatures: '方言/口癖',
+  appearanceJson: '可识别外貌',
+  abilitiesJson: '能力/技能',
+  appearChapter: '登场章节',
+} as const
+
+type CharacterPatchField = keyof typeof CHARACTER_PATCH_FIELD_LABELS
+
+const CHARACTER_PATCH_FIELDS = new Set<CharacterPatchField>(Object.keys(CHARACTER_PATCH_FIELD_LABELS) as CharacterPatchField[])
+
+function formatPatchValue(field: CharacterPatchField, value: unknown): string {
+  if (value == null) return ''
+  if (field === 'campFactionIdsJson') return resolveFactionNamesFromReferences(0, typeof value === 'string' ? value : JSON.stringify(value)).join('、')
+  if (field === 'powerSystemRefsJson' || field === 'contextHooksJson') {
+    return (typeof value === 'string' ? parseJsonArray(value) : toStringArray(value)).join('、')
+  }
+  if (field === 'appearanceJson') return typeof value === 'string' ? parseAppearanceDescription(value) : asText((value as Record<string, unknown>)?.description)
+  if (field === 'abilitiesJson') return typeof value === 'string' ? value : JSON.stringify(value)
+  if (typeof value === 'string') return value
+  if (typeof value === 'number') return String(value)
+  return JSON.stringify(value)
+}
+
+function normalizePatchJsonField(field: CharacterPatchField, value: unknown, novelId: number): unknown {
+  if (field === 'campFactionIdsJson') return stringifyFactionReferenceInput(novelId, value)
+  if (field === 'powerSystemRefsJson' || field === 'contextHooksJson') return jsonStringifyArray(toStringArray(value))
+  if (field === 'appearanceJson') {
+    const description = typeof value === 'string'
+      ? value
+      : asText((value as Record<string, unknown>)?.description)
+    return JSON.stringify({ description })
+  }
+  return value
+}
+
+function normalizeCharacterPatch(
+  current: typeof characters.$inferSelect,
+  rawPatch: Record<string, unknown>,
+): Partial<typeof characters.$inferInsert> {
+  const sanitized = cleanAiValue(rawPatch)
+  const patch: Partial<typeof characters.$inferInsert> = {}
+  ;(Object.keys(sanitized) as CharacterPatchField[]).forEach((field) => {
+    if (!CHARACTER_PATCH_FIELDS.has(field)) return
+    const rawValue = sanitized[field]
+    if (rawValue == null) return
+    if (field === 'age' || field === 'appearChapter') {
+      const nextNumber = asNumber(rawValue)
+      if (typeof nextNumber === 'number') {
+        ;(patch as Record<string, unknown>)[field] = nextNumber
+      }
+      return
+    }
+    if (field === 'campFactionIdsJson' || field === 'powerSystemRefsJson' || field === 'contextHooksJson' || field === 'appearanceJson') {
+      ;(patch as Record<string, unknown>)[field] = normalizePatchJsonField(field, rawValue, current.novelId)
+      return
+    }
+    if (field === 'abilitiesJson') {
+      ;(patch as Record<string, unknown>)[field] = typeof rawValue === 'string' ? rawValue : JSON.stringify(rawValue)
+      return
+    }
+    ;(patch as Record<string, unknown>)[field] = asText(rawValue)
+  })
+  return patch
+}
+
+function buildCharacterPatchChanges(
+  current: typeof characters.$inferSelect,
+  patch: Partial<typeof characters.$inferInsert>,
+): CharacterAiPatchResult['changedFields'] {
+  return (Object.keys(patch) as CharacterPatchField[]).reduce<CharacterAiPatchResult['changedFields']>((result, field) => {
+    if (!CHARACTER_PATCH_FIELDS.has(field)) return result
+    const before = formatPatchValue(field, (current as Record<string, unknown>)[field])
+    const after = formatPatchValue(field, (patch as Record<string, unknown>)[field])
+    if (before === after) return result
+    result.push({
+      field: field as CharacterAiPatchResult['changedFields'][number]['field'],
+      label: CHARACTER_PATCH_FIELD_LABELS[field],
+      before,
+      after,
+    })
+    return result
+  }, [])
+}
+
+function buildCharacterPatchPrompt(params: {
+  novelTitle: string
+  profile: Awaited<ReturnType<typeof buildStoryProfile>>
+  current: typeof characters.$inferSelect
+  currentProfile: string
+  relationSummary: string
+  itemSummary: string
+  instruction: string
+}): string {
+  return [
+    '你是一个小说人物设定编辑器。用户会给出自然语言修改要求，你只输出字段级 JSON 补丁。',
+    '',
+    '硬性规则：',
+    '- 只修改用户要求涉及的字段，不要整卡重写。',
+    '- 不要修改姓名 fullName、角色类型 roleType、novelId、id、sortOrder、createdAt、updatedAt。',
+    '- 没有必要变化的字段不要输出。',
+    '- 字段值必须具体、可进入正文上下文，避免空泛标签和 AI 腔。',
+    '- 输出必须是 JSON：{"summary":"本次修改摘要","patch":{...},"warnings":["可选风险"]}',
+    '',
+    '允许 patch 字段：',
+    Object.entries(CHARACTER_PATCH_FIELD_LABELS).map(([key, label]) => `- ${key}: ${label}`).join('\n'),
+    '',
+    `小说：${params.novelTitle}`,
+    `题材：${params.profile.genre}`,
+    params.profile.background ? `背景：${params.profile.background}` : '',
+    params.profile.storyGoal ? `故事目标：${params.profile.storyGoal}` : '',
+    params.profile.coreConflict ? `核心冲突：${params.profile.coreConflict}` : '',
+    params.profile.worldRulesSummary ? `世界规则：\n${params.profile.worldRulesSummary}` : '',
+    params.relationSummary ? `人物关系：\n${params.relationSummary}` : '',
+    params.itemSummary ? `关联资源：\n${params.itemSummary}` : '',
+    '',
+    `当前人物：${params.current.fullName}（${params.current.roleType || 'minor'}）`,
+    params.currentProfile,
+    '',
+    `用户修改要求：${params.instruction}`,
   ].filter(Boolean).join('\n')
 }
 
@@ -1827,6 +1978,84 @@ export async function regenerateCharacter(id: number): Promise<typeof characters
   markNovelContextChanged(current.novelId, 'Character profiles changed')
   refreshWorldStateVersionsForNovel(current.novelId)
   return getCharacter(current.id)
+}
+
+export async function suggestCharacterPatch(id: number, instruction: string): Promise<CharacterAiPatchResult> {
+  const trimmedInstruction = instruction.trim()
+  if (!trimmedInstruction) throwUserFacingError('ipc.invalidNonEmptyString', { name: 'instruction' })
+
+  const db = getDb()
+  const current = db.select().from(characters).where(eq(characters.id, id)).all()[0]
+  if (!current) throwUserFacingError('character.notFound')
+  const novel = db.select().from(novels).where(eq(novels.id, current.novelId)).all()[0]
+  if (!novel) throwUserFacingError('novel.notFound')
+
+  const profile = await buildStoryProfile(current.novelId)
+  const allCharacters = db.select().from(characters).where(eq(characters.novelId, current.novelId)).all()
+  const itemRows = db.select().from(storyItems).where(eq(storyItems.novelId, current.novelId)).all()
+  const relationRows = db.select().from(characterRelations).where(eq(characterRelations.novelId, current.novelId)).all()
+    .filter((relation) => relation.charAId === current.id || relation.charBId === current.id)
+  const relationSummary = relationRows
+    .map((relation) => {
+      const otherId = relation.charAId === current.id ? relation.charBId : relation.charAId
+      const other = allCharacters.find((character) => character.id === otherId)
+      return other ? buildCharacterRelationSummaryLine(current.fullName, other.fullName, relation) : ''
+    })
+    .filter(Boolean)
+    .join('\n')
+
+  const raw = await runChatTask({
+    type: 'character_gen',
+    novelId: current.novelId,
+    relatedEntityType: 'character',
+    relatedEntityId: current.id,
+    retryable: true,
+    messages: [{
+      role: 'user',
+      content: buildCharacterPatchPrompt({
+        novelTitle: novel.title,
+        profile,
+        current,
+        currentProfile: buildCurrentProfileSummary(current),
+        relationSummary,
+        itemSummary: buildItemResourceSummary(itemRows),
+        instruction: trimmedInstruction,
+      }),
+    }],
+    modelConfigId: novel.modelConfigId || undefined,
+  })
+
+  const parsed = cleanAiValue(safeParseJson<Record<string, unknown>>(raw))
+  const patchRecord = parsed.patch && typeof parsed.patch === 'object' && !Array.isArray(parsed.patch)
+    ? parsed.patch as Record<string, unknown>
+    : parsed
+  const patch = normalizeCharacterPatch(current, patchRecord)
+  const changedFields = buildCharacterPatchChanges(current, patch)
+  return {
+    summary: asText(parsed.summary) || (changedFields.length > 0 ? `建议修改 ${changedFields.length} 个字段。` : '没有生成可应用修改。'),
+    patch: patch as CharacterAiPatchResult['patch'],
+    changedFields,
+    warnings: toStringArray(parsed.warnings).slice(0, 6),
+    target: { type: 'character', id: current.id, novelId: current.novelId },
+  }
+}
+
+export function applyCharacterPatch(
+  id: number,
+  patchInput: unknown,
+): typeof characters.$inferSelect | null {
+  const db = getDb()
+  const current = db.select().from(characters).where(eq(characters.id, id)).all()[0]
+  if (!current) throwUserFacingError('character.notFound')
+  const patch = normalizeCharacterPatch(
+    current,
+    patchInput && typeof patchInput === 'object' && !Array.isArray(patchInput)
+      ? patchInput as Record<string, unknown>
+      : {},
+  )
+  if (Object.keys(patch).length === 0) return getCharacter(id)
+  updateCharacter(id, patch)
+  return getCharacter(id)
 }
 
 export async function generateCharacterRelations(novelId: number): Promise<void> {

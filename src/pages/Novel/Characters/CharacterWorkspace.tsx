@@ -33,6 +33,7 @@ import { getFactionNameOptions, getPowerSystemNameOptions, getSpeciesNameOptions
 import { CHARACTER_RELATION_PRESETS, getCharacterRelationLabel, normalizeCharacterRelationLevel } from '../../../shared/character-relations'
 import { buildDraftMessages, normalizeOptionalNumber, normalizeStringArray, parseDraftJson } from '../shared/ai-draft'
 import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel, WorkspaceTip } from '../components/WorkspaceShell'
+import AiPatchEditor from '../components/AiPatchEditor'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import { getWorkflowBlockers, loadWorkflowStats } from '../workflow'
 import '../components/boards.css'
@@ -987,6 +988,18 @@ export default function CharacterWorkspace({ novelId }: Props) {
                   description={sourceContexts.map((item, index) => (
                     <div key={`${item.label || 'source'}-${index}`}>{item.label || item.page || '未知来源'}</div>
                   ))}
+                />
+              ) : null}
+
+              {selectedCharacter ? (
+                <AiPatchEditor
+                  target={{ type: 'character', id: selectedCharacter.id, novelId }}
+                  description="面向当前人物档案的字段级补丁，确认后才写入。"
+                  placeholder="例如：把他改成更像末世里的临时医生，不要换姓名；强化他和药箱、伤员之间的责任压力。"
+                  onApplied={async (applied) => {
+                    const updated = applied as Character | null
+                    await Promise.all([loadPage(updated?.id || selectedCharacter.id, page), loadGraph()])
+                  }}
                 />
               ) : null}
 

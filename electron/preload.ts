@@ -67,6 +67,11 @@ const api = {
     getDatabasePath: () => invokeIpc<string>('app:getDatabasePath'),
   },
 
+  aiPatch: {
+    suggest: (request: unknown) => invokeIpc('aiPatch:suggest', request),
+    apply: (target: unknown, patch: unknown) => invokeIpc('aiPatch:apply', target, patch),
+  },
+
   // Novel workspace APIs
   novel: {
     list: (filters?: unknown) => invokeIpc('novel:list', filters),
@@ -265,6 +270,8 @@ const api = {
     update: (id: number, data: unknown) => invokeIpc('character:update', id, data),
     delete: (id: number) => invokeIpc('character:delete', id),
     regenerate: (id: number) => invokeIpc('character:regenerate', id),
+    suggestPatch: (id: number, instruction: string) => invokeIpc('character:suggestPatch', id, instruction),
+    applyPatch: (id: number, patch: unknown) => invokeIpc('character:applyPatch', id, patch),
     batchGenerate: (novelId: number, opts: unknown) => invokeIpc('character:batchGenerate', novelId, opts),
     startAutoGenerate: (novelId: number, opts: unknown) => invokeIpc('character:startAutoGenerate', novelId, opts),
     getAutoGenerateStatus: (taskId: number) => invokeIpc('character:getAutoGenerateStatus', taskId),
