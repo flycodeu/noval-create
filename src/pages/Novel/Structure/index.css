@@ -180,7 +180,30 @@
 .novel-structure-page .novel-structure-linked-card__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .novel-structure-page .novel-structure-linked-card__meta, .novel-structure-page .novel-structure-linked-card__desc { margin-top: 8px; color: var(--workspace-ink-soft); font-size: 12px; line-height: 1.7; display: flex; flex-wrap: wrap; gap: 8px; }
 .novel-structure-page .novel-structure-stack { display: grid; gap: 12px; }
-.novel-structure-page .novel-structure-inline-pill { display: flex; align-items: center; gap: 8px; }
+.novel-structure-page .novel-structure-batch-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--color-bg-card);
+  color: var(--color-text-secondary);
+  box-shadow: none;
+}
+
+.novel-structure-page .novel-structure-batch-control > span {
+  flex: 0 0 auto;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.novel-structure-page .novel-structure-batch-control .ant-input-number {
+  background: var(--color-bg-input);
+}
+
 .novel-structure-page .novel-structure-input-88 { width: 88px; }
 .novel-structure-page .novel-structure-banner { margin-bottom: 16px; }
 .novel-structure-page .novel-structure-banner__summary { margin-left: 8px; color: var(--workspace-ink-soft); }

@@ -775,7 +775,7 @@ export default function StructurePage({ novelId }: { novelId: number }) {
           <Button icon={<RobotOutlined />} onClick={() => setPlannerOpen(true)}>
             AI 批量规划
           </Button>
-          <div className="novel-pill novel-structure-inline-pill">
+          <div className="novel-structure-batch-control">
             <span>新增数量</span>
             <InputNumber
               min={1}

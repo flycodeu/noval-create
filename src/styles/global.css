@@ -11701,10 +11701,33 @@ html[data-theme="dark"] .ant-card-actions > li {
   max-width: 100%;
 }
 
+.app-layout .novel-panel,
+.app-layout .novel-panel__body,
+.app-layout .novel-workspace,
+.app-layout .novel-workspace__main,
+.app-layout .novel-workspace__aside,
+.app-layout .novel-grid > *,
+.app-layout .novel-split > *,
+.app-layout .guided-step__field-card,
+.app-layout .novel-list-card {
+  min-width: 0;
+}
+
 .app-layout .novel-panel__extra {
   flex: 1 1 360px;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.app-layout .novel-panel__extra > .ant-space,
+.app-layout .novel-hero__actions > .ant-space {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.app-layout .novel-panel__extra .ant-space,
+.app-layout .novel-hero__actions .ant-space {
+  row-gap: 8px;
 }
 
 .app-layout .novel-filter-bar {
@@ -11797,19 +11820,38 @@ html[data-theme="dark"] .ant-card-actions > li {
 .app-layout .novel-route-shell .ant-input-number,
 .app-layout .novel-route-shell .ant-picker,
 .app-layout .novel-route-shell .ant-select-selector,
+.app-layout .novel-route-shell .ant-select,
 .app-layout .novel-workspace .ant-input,
 .app-layout .novel-workspace .ant-input-affix-wrapper,
 .app-layout .novel-workspace .ant-input-number,
 .app-layout .novel-workspace .ant-picker,
+.app-layout .novel-workspace .ant-select,
 .app-layout .novel-workspace .ant-select-selector {
+  max-width: 100%;
   min-height: 38px;
   border-radius: 10px;
 }
 
 .app-layout .novel-route-shell textarea.ant-input,
 .app-layout .novel-workspace textarea.ant-input {
+  width: 100%;
   min-height: 92px;
   line-height: 1.58;
+  resize: vertical;
+  overflow: auto;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+.app-layout .novel-route-shell .ant-input-number,
+.app-layout .novel-workspace .ant-input-number {
+  width: 100%;
+}
+
+.app-layout .novel-route-shell .ant-form-item-control-input-content,
+.app-layout .novel-workspace .ant-form-item-control-input-content {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .app-layout .novel-route-shell .ant-select,
@@ -11852,6 +11894,24 @@ html[data-theme="dark"] .ant-card-actions > li {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.app-layout .novel-workspace .ant-tag,
+.app-layout .novel-route-shell .ant-tag {
+  max-width: 100%;
+  line-height: 1.35;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.app-layout .novel-list-card__title,
+.app-layout .novel-list-card__desc,
+.app-layout .novel-filter-card,
+.app-layout .novel-note-list__item,
+.app-layout .novel-context-summary__item dd,
+.app-layout .novel-tip-card__body {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .ant-select-dropdown {

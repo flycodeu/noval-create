@@ -7,6 +7,75 @@
   gap: 8px;
 }
 
+.novel-outline-page .novel-panel__body,
+.novel-outline-page .novel-outline-track,
+.novel-outline-page .novel-outline-arc,
+.novel-outline-page .novel-outline-chapter-card,
+.novel-outline-page__chapter-main,
+.novel-outline-page__info-panel {
+  min-width: 0;
+}
+
+.novel-outline-page .novel-outline-track {
+  align-items: stretch;
+  gap: 12px;
+  padding: 12px 4px 18px;
+}
+
+.novel-outline-page .novel-outline-link {
+  display: none;
+}
+
+.novel-outline-page .novel-outline-arc {
+  min-width: 260px;
+  max-width: 320px;
+  align-content: start;
+  overflow: visible;
+  white-space: normal;
+}
+
+.novel-outline-page .novel-outline-arc__title,
+.novel-outline-page .novel-outline-chapter-card__title,
+.novel-outline-page__alert-title,
+.novel-outline-page__target-row,
+.novel-outline-page__muted {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.novel-outline-page .novel-outline-arc__desc {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+
+.novel-outline-page .novel-outline-arc__actions {
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.novel-outline-page .novel-outline-chapter-grid {
+  align-items: start;
+  max-height: 620px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.novel-outline-page .novel-outline-chapter-card {
+  min-height: 0;
+  height: auto;
+  align-items: flex-start;
+}
+
+.novel-outline-page .novel-outline-chapter-card__meta {
+  flex-wrap: wrap;
+}
+
+.novel-outline-page .novel-outline-page__chapter-summary {
+  -webkit-line-clamp: 4;
+}
+
 .novel-outline-page__toolbar-label,
 .novel-outline-page__muted,
 .novel-outline-page__alert-title {
@@ -83,6 +152,10 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.novel-outline-page__target-row > * {
+  min-width: min(100%, 220px);
 }
 
 .novel-outline-page__muted {
@@ -175,5 +248,16 @@
 
   .novel-outline-page__status-select {
     width: 100%;
+  }
+
+  .novel-outline-page .novel-outline-track {
+    display: grid;
+    overflow: visible;
+  }
+
+  .novel-outline-page .novel-outline-arc {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
   }
 }

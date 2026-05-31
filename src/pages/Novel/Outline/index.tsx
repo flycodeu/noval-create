@@ -2,7 +2,6 @@
 import { Button, Empty, Form, Input, InputNumber, Modal, Pagination, Select, Space, Spin, Tag, message } from 'antd'
 import { DeleteOutlined, EditOutlined, HolderOutlined, PlusOutlined, RobotOutlined, SwapOutlined } from '@ant-design/icons'
 import { DragDropContext, Draggable, Droppable, type DragDropContextProps, type DraggableProvidedDragHandleProps } from '@hello-pangea/dnd'
-import VirtualList from 'rc-virtual-list'
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import type {
   Chapter,
@@ -729,17 +728,15 @@ export default function Outline({ novelId }: Props) {
                 </DragDropContext>
                 ) : (
                 <div className="novel-outline-chapter-grid">
-                  <VirtualList data={visibleExpandedArcChapters} height={520} itemHeight={100} itemKey="id">
-                    {(chapter: Chapter) => (
-                      <ChapterCard
-                        key={chapter.id}
-                        chapter={chapter}
-                        arcPoint={arcPointMap.get(`${expandedArc.id}:${chapter.id}`)}
-                        selected={selectedChapterIds.includes(chapter.id)}
-                        onClick={(event) => handleChapterSelection(event, chapter, expandedArcChapters)}
-                      />
-                    )}
-                  </VirtualList>
+                  {visibleExpandedArcChapters.map((chapter) => (
+                    <ChapterCard
+                      key={chapter.id}
+                      chapter={chapter}
+                      arcPoint={arcPointMap.get(`${expandedArc.id}:${chapter.id}`)}
+                      selected={selectedChapterIds.includes(chapter.id)}
+                      onClick={(event) => handleChapterSelection(event, chapter, expandedArcChapters)}
+                    />
+                  ))}
                 </div>
                 )}
                 {expandedArcChapters.length > OUTLINE_CHAPTER_PAGE_SIZE ? (
