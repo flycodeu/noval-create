@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Form, Input, InputNumber, Modal, Progress, Select, Space, message } from 'antd'
 import {
   BarsOutlined,
@@ -12,7 +12,6 @@ import {
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
-import AIGenerateButton from '../../../components/AIGenerateButton'
 import { buildNovelBlurbPayload, parseNovelBlurbDocument, type NovelBlurbDocument } from '../../../shared/blurb'
 import { parseWorldRulesJson } from '../../../shared/genre-system'
 import { buildProjectBriefSummary, parseProjectBriefSnapshot } from '../../../shared/project-brief'
@@ -20,15 +19,15 @@ import { buildPremiseSummary, buildStoryDesignSummary, parseStorySettingsSnapsho
 import { buildThemeVoiceSummary, parseThemeVoiceSnapshot } from '../../../shared/theme-voice'
 import { useNovelStore } from '../../../stores/novel.store'
 import { useAuthorWorkModeStore } from '../../../stores/author-work-mode.store'
-import { buildDraftMessages, normalizeOptionalNumber, parseDraftJson } from '../shared/ai-draft'
+import { normalizeOptionalNumber, parseDraftJson, type DraftFieldDefinition } from '../shared/ai-draft'
 import { usePlanningDraft } from '../shared/planning-draft'
-import { generateOverviewDraft } from '../shared/planning-ai-service'
 import {
   WorkspaceContextSummary,
   WorkspaceMetric,
   WorkspacePage,
   WorkspacePanel,
 } from '../components/WorkspaceShell'
+import StepAIAssistant, { type StepAIAssistantPatch } from '../components/StepAIAssistant'
 import type { QualityDashboardData } from '../../../types'
 import {
   buildAuthorWorkflowSummary,
@@ -59,6 +58,8 @@ interface OverviewFormValues {
   targetWords: number
 }
 
+type OverviewAssistantPatch = StepAIAssistantPatch & Partial<OverviewFormValues>
+
 type PackagingDraft = NovelBlurbDocument
 
 const EMPTY_PACKAGING_DRAFT: PackagingDraft = {
@@ -67,6 +68,37 @@ const EMPTY_PACKAGING_DRAFT: PackagingDraft = {
   platformBlurbs: {},
   volumeNamingStyle: '',
 }
+
+const OVERVIEW_AI_FIELDS: DraftFieldDefinition[] = [
+  { key: 'title', label: '书名', hint: '2-8 个中文字符优先，能体现题材记忆点，不要像营销标题。' },
+  { key: 'synopsis', label: '一句话简介', hint: '写清主角处境、目标和最硬冲突，控制在 80 字以内。' },
+  { key: 'userBackground', label: '原始背景', hint: '保留用户最初想法，补足人物处境、目标、阻力和开局压力。' },
+  { key: 'expandedBackground', label: '扩展背景', hint: '展开环境压力、资源条件、制度成本、题材生态和可持续冲突。' },
+  { key: 'targetWords', label: '目标字数', type: 'number', hint: '短篇测试不超过 50000；长篇可按项目目标建议。' },
+]
+
+const OVERVIEW_AI_TOOLS = [
+  {
+    id: 'read_project_context',
+    label: '读取项目上下文',
+    description: '读取题材、简介、项目立项、基础设定、主题文风、世界规则和终局设计摘要。',
+  },
+  {
+    id: 'draft_overview_patch',
+    label: '生成基础补丁',
+    description: '把模糊剧情转成可回填的书名、简介、背景和目标字数候选稿。',
+  },
+  {
+    id: 'targeted_field_update',
+    label: '定向字段更新',
+    description: '按用户要求只更新指定字段，其它字段保持不动。',
+  },
+  {
+    id: 'anti_ai_style_check',
+    label: '反 AI 味自检',
+    description: '检查模板句、工作流泄露、空泛套话和过度解释。',
+  },
+]
 
 function normalizeTargetWords(value: unknown): number {
   const next = normalizeOptionalNumber(value)
@@ -82,12 +114,9 @@ export default function Overview({ novelId }: Props) {
   const [saving, setSaving] = useState(false)
   const [packagingSaving, setPackagingSaving] = useState(false)
   const [stats, setStats] = useState<WorkflowStats>(EMPTY_WORKFLOW_STATS)
-  const [draftWarnings, setDraftWarnings] = useState<string[]>([])
   const [packagingDraft, setPackagingDraft] = useState<PackagingDraft>(parseNovelBlurbDocument(currentNovel?.blurbJson))
   const [packagingGenerating, setPackagingGenerating] = useState(false)
   const [qualitySummary, setQualitySummary] = useState<Pick<QualityDashboardData, 'productionReadiness' | 'batchHealth' | 'continuityHealth'> | null>(null)
-  const draftWarningsRef = useRef<string[]>([])
-  const draftObservabilityRef = useRef<{ inputSummary: string; lintWarnings: string[]; rawOutputs: string[] } | null>(null)
   const authorMode = useAuthorWorkModeStore((state) => state.mode)
   const syncSuggestedAuthorMode = useAuthorWorkModeStore((state) => state.syncSuggestedMode)
 
@@ -295,6 +324,26 @@ export default function Overview({ novelId }: Props) {
     applyDraft: applyOverviewDraft,
   })
 
+  const overviewAssistantValues = Form.useWatch([], form) as OverviewAssistantPatch | undefined
+
+  const handleApplyOverviewAssistantDraft = useCallback((patch: Partial<OverviewAssistantPatch>) => {
+    const currentValues = form.getFieldsValue(true)
+    const mergedDraft: OverviewFormValues = {
+      ...currentValues,
+      title: typeof patch.title === 'string' ? patch.title : currentValues.title,
+      synopsis: typeof patch.synopsis === 'string' ? patch.synopsis : currentValues.synopsis,
+      userBackground: typeof patch.userBackground === 'string' ? patch.userBackground : currentValues.userBackground,
+      expandedBackground: typeof patch.expandedBackground === 'string' ? patch.expandedBackground : currentValues.expandedBackground,
+      targetWords: normalizeTargetWords(patch.targetWords ?? currentValues.targetWords),
+    }
+
+    applyOverviewDraft(mergedDraft)
+    void saveAppliedDraft(mergedDraft, [], 'overview', {
+      inputSummary: '步骤 AI 助手候选补丁',
+      rawOutputs: [JSON.stringify(patch)],
+    }).catch(console.error)
+  }, [applyOverviewDraft, form, saveAppliedDraft])
+
   const workspaceQualityController = useMemo<RegisteredWorkspaceQualityController>(() => ({
     workspaceKey: 'overview',
     getSnapshot: () => {
@@ -340,22 +389,6 @@ export default function Overview({ novelId }: Props) {
   }), [applyOverviewDraft, form, saveAppliedDraft])
 
   useRegisterWorkspaceQualityController(workspaceQualityController)
-
-  const handleApplyDraft = (raw: string) => {
-    const parsedDraft = parseDraftJson<OverviewFormValues>(raw)
-    const currentValues = form.getFieldsValue(true)
-    const mergedDraft: OverviewFormValues = {
-      ...currentValues,
-      title: typeof parsedDraft.title === 'string' ? parsedDraft.title : currentValues.title,
-      synopsis: typeof parsedDraft.synopsis === 'string' ? parsedDraft.synopsis : currentValues.synopsis,
-      userBackground: typeof parsedDraft.userBackground === 'string' ? parsedDraft.userBackground : currentValues.userBackground,
-      expandedBackground: typeof parsedDraft.expandedBackground === 'string' ? parsedDraft.expandedBackground : currentValues.expandedBackground,
-      targetWords: normalizeTargetWords(parsedDraft.targetWords ?? currentValues.targetWords),
-    }
-
-    applyOverviewDraft(mergedDraft)
-    void saveAppliedDraft(mergedDraft, draftWarningsRef.current, 'overview', draftObservabilityRef.current || undefined).catch(console.error)
-  }
 
   const handleSave = async () => {
     const values = await form.validateFields()
@@ -429,9 +462,6 @@ export default function Overview({ novelId }: Props) {
           targetWords: 200000,
         })
         setPackagingDraft(EMPTY_PACKAGING_DRAFT)
-        setDraftWarnings([])
-        draftWarningsRef.current = []
-        draftObservabilityRef.current = null
         await clearDraft()
         notifyWorkspaceMutation()
         message.success(getUserFacingMessage('overview.cleared'))
@@ -512,14 +542,6 @@ export default function Overview({ novelId }: Props) {
           type="warning"
           showIcon
           message="简介或扩展背景还不完整。"
-        />
-      ) : null}
-      {draftWarnings.length > 0 ? (
-        <Alert
-          type="info"
-          showIcon
-          message="本轮 AI 草稿附带修补提示"
-          description={draftWarnings.map((warning) => <div key={warning}>{warning}</div>)}
         />
       ) : null}
       {draft?.appliedAt ? (
@@ -700,60 +722,44 @@ export default function Overview({ novelId }: Props) {
         description="基础信息已降到次级区；需要时再集中编辑，而不是一进来先管理表单。"
         extra={(
           <Space wrap>
-            <AIGenerateButton
-              novelId={novelId}
-              label="AI 生成·基础信息"
-              intent="generate"
-              isJson
-              runGeneration={async (input) => {
-                const result = await generateOverviewDraft(input, { genre: currentNovel?.genreName })
-                draftWarningsRef.current = result.warnings
-                draftObservabilityRef.current = result.observability
-                setDraftWarnings(result.warnings)
-                return result.outputs
-              }}
-              buildMessages={() => {
-                const values = form.getFieldsValue(true)
-
-                return buildDraftMessages({
-                  task: '小说基础信息',
-                  mode: 'replace',
-                  context: [
-                    { label: '题材', value: currentNovel?.genreName || '' },
-                    { label: '项目立项', value: buildProjectBriefSummary(projectBrief) },
-                    { label: '基础设定', value: buildPremiseSummary(storySettings.premise) },
-                    { label: '故事设计', value: buildStoryDesignSummary(storySettings.storyDesign) },
-                    { label: '主题与文风', value: buildThemeVoiceSummary(themeVoice) },
-                    {
-                      label: '世界规则',
-                      value: [
-                        worldRules.mapBlueprint.overview,
-                        worldRules.factionSystem.length > 0 ? `${worldRules.factionSystem.length} 个势力` : '',
-                        worldRules.speciesSystem.length > 0 ? `${worldRules.speciesSystem.length} 个种族` : '',
-                      ].filter(Boolean).join('；'),
-                    },
-                  ],
-                  fields: [
-                    { key: 'title', label: '书名', value: values.title, hint: '能体现题材和冲突，不要像占位名。' },
-                    { key: 'synopsis', label: '一句话简介', value: values.synopsis, hint: '一句话交代主角处境、目标和最大阻碍。' },
-                    { key: 'userBackground', label: '原始背景', value: values.userBackground, hint: '保留灵感来源，写清氛围和人物起点。' },
-                    { key: 'expandedBackground', label: '扩展背景', value: values.expandedBackground, hint: '补齐资源、制度、环境压力和社会结构。' },
-                    { key: 'targetWords', label: '目标字数', type: 'number', value: values.targetWords, hint: '给出适合当前题材的合理整数。' },
-                  ],
-                  requirements: [
-                    '不要另起一套故事。',
-                    '不要写口号和平台宣传语。',
-                  ],
-                })
-              }}
-              onResult={handleApplyDraft}
-            />
             <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>
               保存基础信息
             </Button>
           </Space>
         )}
       >
+        <StepAIAssistant<OverviewAssistantPatch>
+          novel={currentNovel}
+          novelId={novelId}
+          stepKey="basics"
+          stepTitle="小说基础信息"
+          fields={OVERVIEW_AI_FIELDS}
+          values={{
+            title: overviewAssistantValues?.title || currentNovel?.title || '',
+            synopsis: overviewAssistantValues?.synopsis || currentNovel?.synopsis || '',
+            userBackground: overviewAssistantValues?.userBackground || currentNovel?.userBackground || '',
+            expandedBackground: overviewAssistantValues?.expandedBackground || currentNovel?.expandedBackground || '',
+            targetWords: overviewAssistantValues?.targetWords || currentNovel?.targetWords || 200000,
+          }}
+          tools={OVERVIEW_AI_TOOLS}
+          extraContext={[
+            { label: '当前步骤', value: '创建/维护小说基础信息' },
+            { label: '项目立项摘要', value: buildProjectBriefSummary(projectBrief) },
+            { label: '基础设定摘要', value: buildPremiseSummary(storySettings.premise) },
+            { label: '故事设计摘要', value: buildStoryDesignSummary(storySettings.storyDesign) },
+            { label: '主题文风摘要', value: buildThemeVoiceSummary(themeVoice) },
+            {
+              label: '世界规则摘要',
+              value: [
+                worldRules.mapBlueprint.overview,
+                worldRules.factionSystem.length > 0 ? `${worldRules.factionSystem.length} 个势力` : '',
+                worldRules.speciesSystem.length > 0 ? `${worldRules.speciesSystem.length} 个种族` : '',
+              ].filter(Boolean).join('；'),
+            },
+            { label: '短篇测试上限', value: '临时测试可把目标字数控制在 50000 字以内' },
+          ]}
+          onApplyDraft={handleApplyOverviewAssistantDraft}
+        />
         <Form form={form} layout="vertical">
           <div className="guided-step__field-grid guided-step__field-grid--basics">
             <div className="guided-step__field-card guided-step__field-card--compact">

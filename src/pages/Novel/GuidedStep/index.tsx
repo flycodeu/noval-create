@@ -23,6 +23,8 @@ import {
   WorkspacePage,
   WorkspacePanel,
 } from '../components/WorkspaceShell'
+import StepAIAssistant, { type StepAIAssistantPatch } from '../components/StepAIAssistant'
+import type { DraftFieldDefinition } from '../shared/ai-draft'
 import {
   EMPTY_WORKFLOW_STATS,
   getGuidedStepProgressMap,
@@ -53,6 +55,8 @@ interface BasicsFormValues {
   expandedBackground: string
   targetWords: number
 }
+
+type BasicsAssistantPatch = StepAIAssistantPatch & Partial<BasicsFormValues>
 
 const STEP_META: Record<GuidedWorkflowStepKey, { eyebrow: string; title: string; description: string }> = {
   basics: {
@@ -122,6 +126,58 @@ const STEP_META: Record<GuidedWorkflowStepKey, { eyebrow: string; title: string;
   },
 }
 
+const BASICS_AI_FIELDS: DraftFieldDefinition[] = [
+  {
+    key: 'title',
+    label: '书名',
+    hint: '2-8 个中文字符优先，能体现题材记忆点，不要像营销标题。',
+  },
+  {
+    key: 'synopsis',
+    label: '一句话简介',
+    hint: '写清主角处境、目标和最硬冲突，控制在 80 字以内。',
+  },
+  {
+    key: 'userBackground',
+    label: '原始背景',
+    hint: '保留用户最初想法，补足人物处境、目标、阻力和开局压力。',
+  },
+  {
+    key: 'expandedBackground',
+    label: '扩展背景',
+    hint: '展开环境压力、资源条件、制度成本、题材生态和可持续冲突。',
+  },
+  {
+    key: 'targetWords',
+    label: '目标字数',
+    type: 'number',
+    hint: '按用户意图给出合理整数；短篇测试不超过 50000，百万字长篇可建议 1000000。',
+  },
+]
+
+const BASICS_AI_TOOLS = [
+  {
+    id: 'read_step_context',
+    label: '读取当前步骤',
+    description: '读取书名、简介、原始背景、扩展背景、目标字数和当前小说题材。',
+  },
+  {
+    id: 'draft_basics_patch',
+    label: '生成基础补丁',
+    description: '根据用户模糊剧情生成可回填的基础信息候选稿。',
+  },
+  {
+    id: 'targeted_field_update',
+    label: '定向字段更新',
+    description: '只改用户点名的字段，其它字段保持不动。',
+  },
+  {
+    id: 'anti_ai_style_check',
+    label: '反 AI 味自检',
+    description: '检查候选文本是否含模板腔、工作流泄露和空泛套话。',
+  },
+]
+
 export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
   const navigate = useNavigate()
   const { currentNovel, setCurrentNovel } = useNovelStore()
@@ -183,6 +239,19 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
   const openProPage = (page: string) => {
     setMode('pro')
     navigate(`/novels/${novelId}/${page}`)
+  }
+
+  const basicsAssistantValues = Form.useWatch([], form) as BasicsAssistantPatch | undefined
+
+  const handleApplyBasicsDraft = (patch: Partial<BasicsAssistantPatch>) => {
+    const current = form.getFieldsValue()
+    form.setFieldsValue({
+      ...current,
+      ...patch,
+      targetWords: typeof patch.targetWords === 'number'
+        ? patch.targetWords
+        : current.targetWords,
+    })
   }
 
   const handleSaveBasics = async () => {
@@ -255,6 +324,29 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
             <WorkspaceMetric label="当前字数" value={`${stats.totalWords.toLocaleString()} 字`} hint="显示当前累计字数。" />
           </>
         )}
+        aside={(
+          <StepAIAssistant<BasicsAssistantPatch>
+            novel={currentNovel}
+            novelId={novelId}
+            stepKey={stepKey}
+            stepTitle={stepMeta.title}
+            fields={BASICS_AI_FIELDS}
+            values={{
+              title: basicsAssistantValues?.title || currentNovel?.title || '',
+              synopsis: basicsAssistantValues?.synopsis || currentNovel?.synopsis || '',
+              userBackground: basicsAssistantValues?.userBackground || currentNovel?.userBackground || '',
+              expandedBackground: basicsAssistantValues?.expandedBackground || currentNovel?.expandedBackground || '',
+              targetWords: basicsAssistantValues?.targetWords || currentNovel?.targetWords || 200000,
+            }}
+            tools={BASICS_AI_TOOLS}
+            extraContext={[
+              { label: '当前步骤', value: '创建/维护小说基础信息' },
+              { label: '短篇测试上限', value: '临时测试可把目标字数控制在 50000 字以内' },
+            ]}
+            onApplyDraft={handleApplyBasicsDraft}
+          />
+        )}
+        asidePlacement="side"
       >
         <WorkspacePanel>
           <Form form={form} layout="vertical">
