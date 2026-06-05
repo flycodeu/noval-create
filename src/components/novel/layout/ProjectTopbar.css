@@ -236,6 +236,12 @@
   color: var(--project-topbar-text);
 }
 
+.project-topbar__control.ant-btn.is-active {
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--project-topbar-border));
+  background: color-mix(in srgb, var(--accent-soft) 82%, white 18%);
+  color: var(--project-topbar-text);
+}
+
 .project-topbar__control--ghost.ant-btn {
   background: transparent;
   color: var(--project-topbar-text-soft);

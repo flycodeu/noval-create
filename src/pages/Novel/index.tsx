@@ -23,6 +23,7 @@ import {
 import { getWorkspaceViewModeForNovel } from '../../shared/operating-mode'
 import WorkspaceErrorBoundary from './components/WorkspaceErrorBoundary'
 import WorkspaceAIQualityBoard from './components/WorkspaceAIQualityBoard'
+import WorkspaceChatAssistant from './components/WorkspaceChatAssistant'
 import {
   EMPTY_WORKFLOW_STATS,
   loadWorkflowStats,
@@ -72,10 +73,11 @@ const LEGACY_ROUTE_REDIRECTS: Record<GuidedWorkflowStepKey, ProWorkspaceKey> = {
 const WORKSPACE_VIEW_MODE_STORAGE_KEY = 'novelforge-workbench-view-mode'
 const WORKSPACE_RECENT_PAGE_STORAGE_KEY = 'novelforge-workspace-recent-page'
 const WORKSPACE_LAST_WRITING_VIEW_STORAGE_KEY = 'novelforge-workspace-last-writing-view'
+const WORKSPACE_ASSISTANT_OPEN_STORAGE_KEY = 'novelforge-workspace-assistant-open'
 const WORKSPACE_PAGE_META = new Map(WORKSPACE_MODULE_DEFINITIONS.map((item) => [item.key, item] as const))
 const WORKSPACE_PREWARM_DELAY_MS = 140
 const MAX_IDLE_PREWARM_ROUTES = 4
-const COMPACT_SHELL_BREAKPOINT = 1024
+const COMPACT_SHELL_BREAKPOINT = 1200
 const COMPACT_SHELL_MEDIA_QUERY = `(max-width: ${COMPACT_SHELL_BREAKPOINT - 1}px)`
 
 const WORKSPACE_STAGE_LOADERS = {
@@ -187,6 +189,11 @@ export default function NovelRouter() {
   const [workspaceMutationToken, setWorkspaceMutationToken] = useState(0)
   const [hasRegisteredClearHandler, setHasRegisteredClearHandler] = useState(false)
   const [qualityBoardOpen, setQualityBoardOpen] = useState(false)
+  const [assistantOpen, setAssistantOpen] = useState<boolean>(() => (
+    typeof localStorage !== 'undefined'
+      ? localStorage.getItem(WORKSPACE_ASSISTANT_OPEN_STORAGE_KEY) !== '0'
+      : true
+  ))
   const [isSidebarDrawerOpen, setIsSidebarDrawerOpen] = useState(false)
   const [platformCopyOpen, setPlatformCopyOpen] = useState(false)
   const [platformCopyResult, setPlatformCopyResult] = useState<PlatformFormatResult | null>(null)
@@ -540,6 +547,13 @@ export default function NovelRouter() {
     }
   }, [qualityAnalysisTaskId])
 
+  const openWorkspaceQualityBoard = useCallback(() => {
+    if (isCompactShell) {
+      setAssistantOpen(false)
+    }
+    setQualityBoardOpen(true)
+  }, [isCompactShell])
+
   const jumpToChapter = useCallback(async (chapterId: number) => {
     const list = await ensureChapterListLoaded()
     const target = list.find((chapter) => chapter.id === chapterId)
@@ -651,6 +665,12 @@ export default function NovelRouter() {
       localStorage.setItem(WORKSPACE_VIEW_MODE_STORAGE_KEY, workspaceViewMode)
     }
   }, [workspaceViewMode])
+
+  useEffect(() => {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(WORKSPACE_ASSISTANT_OPEN_STORAGE_KEY, assistantOpen ? '1' : '0')
+    }
+  }, [assistantOpen])
 
   useEffect(() => {
     if (typeof localStorage !== 'undefined') {
@@ -895,7 +915,7 @@ export default function NovelRouter() {
         notifyWorkspaceMutation,
       }}>
       <NovelWorkspaceQualityProvider value={workspaceQuality}>
-      <div className={`novel-route-shell novel-route-shell--single${isCompactShell ? ' novel-route-shell--compact' : ''}`}>
+      <div className={`novel-route-shell novel-route-shell--single${isCompactShell ? ' novel-route-shell--compact' : ''}${assistantOpen && !isCompactShell ? ' novel-route-shell--assistant-open' : ''}`}>
       <ProjectTopbar
         projectTitle={currentNovel?.title || '未命名小说'}
         workspaceLabel={currentPageMeta.label}
@@ -911,7 +931,9 @@ export default function NovelRouter() {
         onJumpChapter={() => void ensureChapterListLoaded().then(() => setChapterJumpOpen(true)).catch(console.error)}
         onShortcuts={() => setShortcutHelpOpen(true)}
         onSearch={() => setQuickSearchOpen(true)}
-        onQuality={() => setQualityBoardOpen(true)}
+        onQuality={openWorkspaceQualityBoard}
+        onToggleAssistant={() => setAssistantOpen((current) => !current)}
+        assistantToggleActive={assistantOpen}
         onUndo={latestUndoable
           ? () => {
               void window.electron.history.undo(latestUndoable.id)
@@ -1050,6 +1072,23 @@ export default function NovelRouter() {
           </div>
         </div>
       </main>
+      {!isCompactShell ? (
+        <WorkspaceChatAssistant
+          open={assistantOpen}
+          compact={false}
+          workspaceKey={currentPage}
+          workspaceLabel={currentPageMeta?.label || currentPage}
+          workspaceSummary={currentPageMeta?.summary || ''}
+          novelId={novelId}
+          currentNovel={currentNovel}
+          currentChapter={currentChapter}
+          controller={workspaceQualityController}
+          onClose={() => setAssistantOpen(false)}
+          onOpenQuality={currentPage !== 'guide' && currentPage !== 'quality' && currentPage !== 'writeback' && currentPage !== 'batch-workbench'
+            ? openWorkspaceQualityBoard
+            : undefined}
+        />
+      ) : null}
       </div>
       <Drawer
         placement="left"
@@ -1063,6 +1102,23 @@ export default function NovelRouter() {
       >
         {sidebarContent}
       </Drawer>
+      {isCompactShell ? (
+        <WorkspaceChatAssistant
+          open={assistantOpen}
+          compact
+          workspaceKey={currentPage}
+          workspaceLabel={currentPageMeta?.label || currentPage}
+          workspaceSummary={currentPageMeta?.summary || ''}
+          novelId={novelId}
+          currentNovel={currentNovel}
+          currentChapter={currentChapter}
+          controller={workspaceQualityController}
+          onClose={() => setAssistantOpen(false)}
+          onOpenQuality={currentPage !== 'guide' && currentPage !== 'quality' && currentPage !== 'writeback' && currentPage !== 'batch-workbench'
+            ? openWorkspaceQualityBoard
+            : undefined}
+        />
+      ) : null}
       {currentPage !== 'guide' && currentPage !== 'quality' && currentPage !== 'writeback' && currentPage !== 'batch-workbench' ? (
         <WorkspaceAIQualityBoard
           open={qualityBoardOpen}

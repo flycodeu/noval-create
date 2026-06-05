@@ -77,10 +77,17 @@ const GENRE_OPTIONS = [
 
 const TARGET_WORDS_OPTIONS = [
   { label: '短篇 10 万字', value: 100000 },
+  { label: '轻长篇 15 万字', value: 150000 },
   { label: '中篇 30 万字', value: 300000 },
   { label: '长篇 50 万字', value: 500000 },
   { label: '超长篇 100 万字', value: 1000000 },
+  { label: '百万以上 200 万字', value: 2000000 },
 ]
+
+const STORY_TEXTAREA_AUTO_SIZE = { minRows: 9, maxRows: 18 }
+const FAST_TEXTAREA_AUTO_SIZE = { minRows: 5, maxRows: 10 }
+const EXPANDED_TEXTAREA_AUTO_SIZE = { minRows: 11, maxRows: 20 }
+const SYNOPSIS_TEXTAREA_AUTO_SIZE = { minRows: 5, maxRows: 10 }
 
 function formatWordCount(value: number) {
   if (value >= 10000) return `${(value / 10000).toFixed(1)} 万字`
@@ -123,14 +130,15 @@ export default function NovelList() {
   const [wizardLoading, setWizardLoading] = useState(false)
   const [wizardForm] = Form.useForm<WizardFormValues>()
   const [expandedData, setExpandedData] = useState<ExpandBackgroundResult | null>(null)
+  const [selectedLaunchMode, setSelectedLaunchMode] = useState<NovelLaunchMode>('professional_longform')
   const [selectedGenreId, setSelectedGenreId] = useState<number | null>(null)
-  const selectedLaunchMode = Form.useWatch('launchMode', wizardForm) || 'professional_longform'
 
   const resetWizard = useCallback(() => {
     setWizardOpen(false)
     setWizardStep(0)
     setWizardLoading(false)
     setExpandedData(null)
+    setSelectedLaunchMode('professional_longform')
     setSelectedGenreId(null)
     wizardForm.resetFields()
     wizardForm.setFieldsValue({ launchMode: 'professional_longform', targetWords: 200000 })
@@ -178,6 +186,7 @@ export default function NovelList() {
     void window.electron.template.list('style').then(setStyleTemplates)
     void window.electron.template.list('world').then(setWorldTemplates)
     void window.electron.model.list().then(setModelConfigs)
+    setSelectedLaunchMode('professional_longform')
     wizardForm.setFieldsValue({ launchMode: 'professional_longform', targetWords: 200000 })
   }, [loadNovels, wizardForm])
 
@@ -538,29 +547,41 @@ export default function NovelList() {
         onCancel={resetWizard}
         footer={null}
         width={820}
+        className="novel-list-page__wizard-modal"
         destroyOnHidden
       >
-        <Steps
-          current={wizardStep}
-          items={wizardSteps}
-          className="novel-list-page__wizard-steps"
-        />
+        <div className="novel-list-page__wizard-layout">
+          <Steps
+            current={wizardStep}
+            items={wizardSteps}
+            className="novel-list-page__wizard-steps"
+          />
 
-        <Form form={wizardForm} layout="vertical">
+          <div className="novel-list-page__wizard-scroll">
+            <Form form={wizardForm} layout="vertical">
           {wizardStep === 0 && (
             <>
               <Form.Item
                 name="launchMode"
-                label="开书路径"
+                hidden
                 rules={[{ required: true, message: '请选择开书路径' }]}
               >
+                <Input type="hidden" />
+              </Form.Item>
+
+              <Form.Item label="开书路径">
                 <div className="novel-list-page__launch-grid">
                   {NOVEL_LAUNCH_MODE_OPTIONS.map((option) => {
                     const active = selectedLaunchMode === option.value
                     return (
-                      <div
+                      <button
+                        type="button"
                         key={option.value}
-                        onClick={() => wizardForm.setFieldValue('launchMode', option.value)}
+                        onClick={() => {
+                          setSelectedLaunchMode(option.value)
+                          wizardForm.setFieldValue('launchMode', option.value)
+                        }}
+                        aria-pressed={active}
                         className={`novel-list-page__launch-card${active ? ' is-active' : ''}`}
                       >
                         <div className="novel-list-page__launch-card-head">
@@ -568,7 +589,7 @@ export default function NovelList() {
                             <Tag color={active ? 'processing' : 'default'}>{option.badge}</Tag>
                         </div>
                         <div className="novel-list-page__launch-card-copy">{option.description}</div>
-                      </div>
+                      </button>
                     )
                   })}
                 </div>
@@ -576,28 +597,34 @@ export default function NovelList() {
 
               <Form.Item
                 name="genreId"
-                label="选择题材"
+                hidden
                 rules={[{ required: true, message: '请选择题材' }]}
               >
+                <Input type="hidden" />
+              </Form.Item>
+
+              <Form.Item label="选择题材">
                 <div>
                   <div className="novel-list-page__genre-grid">
                     {GENRE_OPTIONS.map((genre) => {
                       const isSelected = selectedGenreId === genre.value
 
                       return (
-                        <div
+                        <button
+                          type="button"
                           key={genre.value}
                           onClick={() => {
                             setSelectedGenreId(genre.value)
                             wizardForm.setFieldValue('genreId', genre.value)
                           }}
+                          aria-pressed={isSelected}
                           className={`novel-list-page__genre-card${isSelected ? ' is-selected' : ''}`}
                           data-genre={genre.label}
                         >
                           {isSelected ? <CheckOutlined className="novel-list-page__genre-check" /> : null}
                           <div className="novel-list-page__genre-title">{genre.label}</div>
                           <div className="novel-list-page__genre-copy">{genre.description}</div>
-                        </div>
+                        </button>
                       )
                     })}
                   </div>
@@ -672,7 +699,8 @@ export default function NovelList() {
           extra="用你自己的话描述故事处境、冲突、氛围或关键设定，写得越具体，AI 补全背景越稳。"
             >
               <Input.TextArea
-                rows={8}
+                autoSize={STORY_TEXTAREA_AUTO_SIZE}
+                className="novel-list-page__textarea novel-list-page__textarea--story"
                 placeholder="例如：一座沿海城市的冷案记者，意外卷入二十年前的沉船旧案，发现幸存者名单里藏着她父亲失踪的线索。"
                 showCount
               />
@@ -696,7 +724,11 @@ export default function NovelList() {
                     rules={[{ required: true, message: '请填写主角起点' }]}
                     extra="写主角现在处于什么处境、身份或困局。"
                   >
-                    <Input.TextArea rows={6} placeholder="例如：被逐出主城的维修员，只能靠黑市零工维生。" />
+                    <Input.TextArea
+                      autoSize={FAST_TEXTAREA_AUTO_SIZE}
+                      className="novel-list-page__textarea novel-list-page__textarea--fast"
+                      placeholder="例如：被逐出主城的维修员，只能靠黑市零工维生。"
+                    />
                   </Form.Item>
                 </Col>
                 <Col xs={24} md={12}>
@@ -706,7 +738,11 @@ export default function NovelList() {
                     rules={[{ required: true, message: '请填写核心钩子' }]}
                     extra="开篇立刻抓住读者的异常事件、秘密或倒计时。"
                   >
-                    <Input.TextArea rows={6} placeholder="例如：他修复的一枚芯片里，藏着主城即将熄火的真相。" />
+                    <Input.TextArea
+                      autoSize={FAST_TEXTAREA_AUTO_SIZE}
+                      className="novel-list-page__textarea novel-list-page__textarea--fast"
+                      placeholder="例如：他修复的一枚芯片里，藏着主城即将熄火的真相。"
+                    />
                   </Form.Item>
                 </Col>
               </Row>
@@ -719,7 +755,11 @@ export default function NovelList() {
                     rules={[{ required: true, message: '请填写核心冲突' }]}
                     extra="写主角必须面对的主线阻力，而不是泛泛主题。"
                   >
-                    <Input.TextArea rows={6} placeholder="例如：想救城就必须和曾经出卖他的旧同伴合作。 " />
+                    <Input.TextArea
+                      autoSize={FAST_TEXTAREA_AUTO_SIZE}
+                      className="novel-list-page__textarea novel-list-page__textarea--fast"
+                      placeholder="例如：想救城就必须和曾经出卖他的旧同伴合作。 "
+                    />
                   </Form.Item>
                 </Col>
                 <Col xs={24} md={12}>
@@ -729,7 +769,11 @@ export default function NovelList() {
                     rules={[{ required: true, message: '请填写禁区' }]}
                     extra="用于自动生成文风护栏和剧情边界。"
                   >
-                    <Input.TextArea rows={6} placeholder="例如：禁止全知旁白解释；禁止一章解决主线；禁止爽点无代价。" />
+                    <Input.TextArea
+                      autoSize={FAST_TEXTAREA_AUTO_SIZE}
+                      className="novel-list-page__textarea novel-list-page__textarea--fast"
+                      placeholder="例如：禁止全知旁白解释；禁止一章解决主线；禁止爽点无代价。"
+                    />
                   </Form.Item>
                 </Col>
               </Row>
@@ -740,7 +784,11 @@ export default function NovelList() {
                 rules={[{ required: true, message: '请填写终局方向' }]}
                 extra="先给一个方向，不要求现在就写完整终局。"
               >
-                <Input.TextArea rows={6} placeholder="例如：主角救下主城，但必须放弃原本想夺回的身份和归属。" />
+                <Input.TextArea
+                  autoSize={FAST_TEXTAREA_AUTO_SIZE}
+                  className="novel-list-page__textarea novel-list-page__textarea--fast"
+                  placeholder="例如：主角救下主城，但必须放弃原本想夺回的身份和归属。"
+                />
               </Form.Item>
 
               <div className="novel-list-page__fast-note">
@@ -761,7 +809,8 @@ export default function NovelList() {
                 />
                 <Form.Item name="expandedBackground" label="AI 补全背景（可编辑）">
                   <Input.TextArea
-                    rows={10}
+                    autoSize={EXPANDED_TEXTAREA_AUTO_SIZE}
+                    className="novel-list-page__textarea novel-list-page__textarea--expanded"
                     placeholder="这里会生成扩写后的背景。重点检查世界规则、冲突主线、人物动机和不该出现的泛化陈词。"
                   />
                 </Form.Item>
@@ -779,7 +828,8 @@ export default function NovelList() {
                 </Form.Item>
                 <Form.Item name="synopsis" label="AI 生成·简介（可编辑）">
                   <Input.TextArea
-                    rows={5}
+                    autoSize={SYNOPSIS_TEXTAREA_AUTO_SIZE}
+                    className="novel-list-page__textarea novel-list-page__textarea--synopsis"
                     placeholder="把简介改成一句话就能讲清主角、核心冲突和读者追更点。"
                   />
                 </Form.Item>
@@ -804,7 +854,8 @@ export default function NovelList() {
               </Form.Item>
               <Form.Item name="synopsis" label="最终简介" rules={[{ required: true, message: '请填写简介' }]}>
                 <Input.TextArea
-                  rows={5}
+                  autoSize={SYNOPSIS_TEXTAREA_AUTO_SIZE}
+                  className="novel-list-page__textarea novel-list-page__textarea--synopsis"
                   placeholder="用 1-3 句话讲清主角是谁、现在被什么压住、故事真正的卖点是什么。"
                 />
               </Form.Item>
@@ -813,22 +864,24 @@ export default function NovelList() {
               </Form.Item>
             </>
           )}
-        </Form>
+            </Form>
+          </div>
 
-        <div className="novel-list-page__wizard-footer">
-          {wizardStep > 0 ? (
-            <Button onClick={() => setWizardStep((step) => step - 1)}>上一步</Button>
-          ) : null}
-          <Button
-            type="primary"
-            onClick={() => void handleWizardNext()}
-            loading={wizardLoading}
-            icon={wizardLoading ? <LoadingOutlined /> : undefined}
-          >
-            {selectedLaunchMode === 'fast_launch'
-              ? (wizardStep === wizardSteps.length - 1 ? '创建并生成骨架' : '下一步')
-              : (wizardStep === 3 ? '创建小说' : wizardStep === 1 ? 'AI 补全背景' : '下一步')}
-          </Button>
+          <div className="novel-list-page__wizard-footer">
+            {wizardStep > 0 ? (
+              <Button onClick={() => setWizardStep((step) => step - 1)}>上一步</Button>
+            ) : null}
+            <Button
+              type="primary"
+              onClick={() => void handleWizardNext()}
+              loading={wizardLoading}
+              icon={wizardLoading ? <LoadingOutlined /> : undefined}
+            >
+              {selectedLaunchMode === 'fast_launch'
+                ? (wizardStep === wizardSteps.length - 1 ? '创建并生成骨架' : '下一步')
+                : (wizardStep === 3 ? '创建小说' : wizardStep === 1 ? 'AI 补全背景' : '下一步')}
+            </Button>
+          </div>
         </div>
       </Modal>
     </>

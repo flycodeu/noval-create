@@ -1,0 +1,253 @@
+.workspace-chat-assistant {
+  --assistant-surface: var(--bg-surface);
+  --assistant-surface-soft: color-mix(in srgb, var(--bg-hover) 70%, var(--bg-surface) 30%);
+  --assistant-border: var(--border-default);
+  --assistant-text: var(--text-primary);
+  --assistant-text-soft: var(--text-secondary);
+  --assistant-text-muted: var(--text-muted);
+  display: grid;
+  grid-template-rows: auto auto auto auto auto minmax(0, 1fr) auto;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  padding: 12px;
+  border-left: 1px solid var(--assistant-border);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--assistant-surface) 96%, white 4%), var(--assistant-surface)),
+    var(--assistant-surface);
+  color: var(--assistant-text);
+  overflow: hidden;
+}
+
+.workspace-chat-assistant__drawer .ant-drawer-body {
+  min-height: 0;
+  height: 100%;
+  padding: 0;
+  background: var(--bg-surface);
+  overflow: hidden;
+}
+
+.workspace-chat-assistant__drawer .workspace-chat-assistant {
+  border-left: none;
+}
+
+.workspace-chat-assistant__header,
+.workspace-chat-assistant__context-strip,
+.workspace-chat-assistant__mode-row,
+.workspace-chat-assistant__composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.workspace-chat-assistant__header {
+  justify-content: space-between;
+  padding-bottom: 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--assistant-border) 76%, transparent 24%);
+}
+
+.workspace-chat-assistant__title-block {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.workspace-chat-assistant__title-block strong {
+  color: var(--assistant-text);
+  font-size: 16px;
+  line-height: 1.3;
+}
+
+.workspace-chat-assistant__eyebrow,
+.workspace-chat-assistant__mode-row span {
+  color: var(--assistant-text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.workspace-chat-assistant__context-strip {
+  flex-wrap: wrap;
+}
+
+.workspace-chat-assistant__context-strip .ant-tag {
+  max-width: 100%;
+  margin-inline-end: 0;
+}
+
+.workspace-chat-assistant__mode-row {
+  justify-content: space-between;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--assistant-border) 72%, transparent 28%);
+  border-radius: 8px;
+  background: var(--assistant-surface-soft);
+}
+
+.workspace-chat-assistant__signal-list {
+  display: grid;
+  gap: 6px;
+  max-height: 108px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.workspace-chat-assistant__signal-item {
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--assistant-border) 76%, transparent 24%);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-elevated) 76%, transparent 24%);
+  color: var(--assistant-text-soft);
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.workspace-chat-assistant__empty-alert {
+  margin: 0;
+}
+
+.workspace-chat-assistant__intent-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.workspace-chat-assistant__intent-grid .ant-btn {
+  min-width: 0;
+}
+
+.workspace-chat-assistant__history {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
+}
+
+.workspace-chat-assistant__history .ant-empty {
+  align-self: center;
+  margin: 12px 0;
+}
+
+.workspace-chat-assistant__message {
+  display: grid;
+  gap: 6px;
+  width: min(100%, 94%);
+  padding: 10px 11px;
+  border: 1px solid color-mix(in srgb, var(--assistant-border) 76%, transparent 24%);
+  border-radius: 8px;
+  background: var(--assistant-surface-soft);
+  color: var(--assistant-text);
+  box-shadow: 0 10px 22px rgba(20, 26, 38, 0.06);
+}
+
+.workspace-chat-assistant__message--user {
+  justify-self: end;
+  background: color-mix(in srgb, var(--accent-soft) 76%, var(--assistant-surface) 24%);
+}
+
+.workspace-chat-assistant__message--assistant {
+  justify-self: start;
+}
+
+.workspace-chat-assistant__message-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--assistant-text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.workspace-chat-assistant__message-head .ant-btn {
+  width: 24px;
+  height: 24px;
+}
+
+.workspace-chat-assistant__message-body {
+  color: var(--assistant-text);
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.workspace-chat-assistant__message--assistant:has(.ant-spin) {
+  display: flex;
+  align-items: center;
+  width: auto;
+  color: var(--assistant-text-soft);
+  font-size: 13px;
+}
+
+.workspace-chat-assistant__composer {
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--assistant-border) 76%, transparent 24%);
+}
+
+.workspace-chat-assistant__composer .ant-input {
+  min-height: 104px;
+  resize: none;
+}
+
+.workspace-chat-assistant__composer-actions {
+  justify-content: space-between;
+}
+
+.workspace-chat-assistant__composer-actions .ant-btn {
+  min-width: 0;
+}
+
+[data-theme="dark"] .workspace-chat-assistant {
+  --assistant-surface: var(--bg-surface);
+  --assistant-surface-soft: rgba(255, 255, 255, 0.04);
+  --assistant-border: rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0)),
+    var(--assistant-surface);
+}
+
+[data-theme="dark"] .workspace-chat-assistant__message,
+[data-theme="dark"] .workspace-chat-assistant__signal-item {
+  box-shadow: none;
+}
+
+[data-theme="dark"] .workspace-chat-assistant__message--user {
+  background: rgba(199, 139, 79, 0.12);
+}
+
+@media (max-width: 1280px) {
+  .workspace-chat-assistant__intent-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .workspace-chat-assistant {
+    padding: 10px;
+  }
+
+  .workspace-chat-assistant__header {
+    align-items: flex-start;
+  }
+
+  .workspace-chat-assistant__mode-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .workspace-chat-assistant__message {
+    width: 100%;
+  }
+
+  .workspace-chat-assistant__composer-actions {
+    align-items: stretch;
+    flex-direction: column-reverse;
+  }
+}

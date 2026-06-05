@@ -10,6 +10,7 @@ import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   QuestionCircleOutlined,
+  RobotOutlined,
   RollbackOutlined,
   SearchOutlined,
   SwapOutlined,
@@ -42,6 +43,8 @@ interface ProjectTopbarProps {
   showWindowControls?: boolean
   sidebarToggleActive?: boolean
   onToggleSidebar?: () => void
+  onToggleAssistant?: () => void
+  assistantToggleActive?: boolean
   statusTone?: 'default' | 'processing' | 'warning'
   statusText?: string
 }
@@ -69,6 +72,8 @@ export default function ProjectTopbar({
   showWindowControls = true,
   sidebarToggleActive = false,
   onToggleSidebar,
+  onToggleAssistant,
+  assistantToggleActive = false,
   statusTone = 'default',
   statusText,
 }: ProjectTopbarProps) {
@@ -215,6 +220,18 @@ export default function ProjectTopbar({
             <Button className="project-topbar__control" icon={<SwapOutlined />} onClick={onJumpChapter} aria-label="章节跳转" title="章节跳转">
               章节
             </Button>
+            {onToggleAssistant ? (
+              <Button
+                className={`project-topbar__control${assistantToggleActive ? ' is-active' : ''}`}
+                icon={<RobotOutlined />}
+                onClick={onToggleAssistant}
+                aria-label="AI 助手"
+                aria-pressed={assistantToggleActive}
+                title="AI 助手"
+              >
+                AI 助手
+              </Button>
+            ) : null}
             <Button className="project-topbar__control" icon={<RollbackOutlined />} onClick={onUndo} disabled={!canUndo} aria-label="撤销最近操作" title="撤销最近操作">
               撤销
             </Button>
