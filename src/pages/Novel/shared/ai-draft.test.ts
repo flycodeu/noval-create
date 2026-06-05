@@ -41,4 +41,15 @@ describe('buildDraftMessages', () => {
     expect(issues.map((issue) => issue.message)).toContain('数组字段存在重复或近似重复条目')
     expect(() => parseDraftJson('{"promise":"通过雨夜追查体现信任，通过旧案回收体现成长。","sellingPoints":["错档案追查","错档案追查"]}')).toThrow('AI 草稿仍有模板化或重复项')
   })
+
+  it('flags repeated content across fields and inside long fields', () => {
+    const issues = inspectDraftQuality({
+      hook: '旧城档案被篡改后，主角必须在雨夜找回失踪证词。',
+      promise: '旧城档案被篡改后，主角必须在雨夜找回失踪证词。',
+      conflict: '他拒绝交出证词。他拒绝交出证词。',
+    })
+
+    expect(issues.map((issue) => issue.message)).toContain('与 hook 存在重复内容')
+    expect(issues.map((issue) => issue.message)).toContain('字段内存在重复句子或近似重复句意')
+  })
 })

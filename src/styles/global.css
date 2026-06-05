@@ -13291,3 +13291,114 @@ html[data-runtime="web"] .project-topbar__main-row {
   }
 }
 
+/* Workspace adaptive text safety: keep long authoring content readable. */
+.novel-route-shell--single {
+  position: relative;
+}
+
+.novel-route-shell__assistant-tab {
+  position: absolute;
+  right: 10px;
+  top: calc(var(--novel-shell-topbar-height, 88px) + 50%);
+  z-index: 20;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 0 11px;
+  border: 1px solid var(--novel-shell-border, var(--border-default));
+  border-radius: 999px 0 0 999px;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-md);
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.novel-route-shell__assistant-tab:hover {
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--border-default));
+  color: var(--accent);
+}
+
+.novel-route-shell .ant-tag,
+.novel-route-shell .ant-alert,
+.novel-route-shell .ant-alert-message,
+.novel-route-shell .ant-alert-description,
+.novel-route-shell .ant-form-item-extra,
+.novel-route-shell .ant-form-item-explain,
+.novel-route-shell .ant-descriptions-item-content,
+.novel-route-shell .ant-list-item-meta-title,
+.novel-route-shell .ant-list-item-meta-description,
+.novel-route-shell .novel-panel__desc,
+.novel-route-shell .novel-tip-card__body,
+.novel-route-shell .novel-note-list__item,
+.novel-route-shell .novel-board-card__desc,
+.novel-route-shell .novel-list-card__desc,
+.novel-route-shell .novel-sidebar__nav-copy,
+.novel-route-shell .novel-sidebar__nav-copy strong,
+.novel-route-shell .novel-sidebar__nav-copy small,
+.novel-route-shell .project-topbar__status-badge,
+.novel-route-shell .project-topbar__status-badge > span:last-child {
+  min-width: 0;
+  max-width: 100%;
+  height: auto;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.novel-route-shell .novel-note-list__item,
+.novel-route-shell .novel-board-card__desc,
+.novel-route-shell .novel-list-card__desc,
+.novel-route-shell .task-center-card__summary,
+.novel-route-shell .task-center-card__summary.is-error,
+.novel-route-shell .novel-sidebar__summary-copy {
+  display: block;
+  max-height: none;
+  overflow: visible;
+  -webkit-box-orient: initial;
+  -webkit-line-clamp: unset;
+  line-clamp: unset;
+}
+
+.novel-route-shell .ant-btn:not(.project-topbar__control) {
+  min-width: 0;
+  min-height: 34px;
+  height: auto;
+  white-space: normal;
+  line-height: 1.35;
+}
+
+.novel-route-shell .ant-btn:not(.project-topbar__control) > span:not(.anticon):not(.ant-btn-icon) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.novel-route-shell .ant-input,
+.novel-route-shell .ant-input-affix-wrapper,
+.novel-route-shell .ant-input-number,
+.novel-route-shell .ant-picker,
+.novel-route-shell .ant-select,
+.novel-route-shell .ant-select-selector {
+  max-width: 100%;
+}
+
+.novel-route-shell .ant-input,
+.novel-route-shell textarea.ant-input {
+  overflow-wrap: anywhere;
+}
+
+.novel-route-shell .ant-collapse-header,
+.novel-route-shell .ant-tabs-tab-btn,
+.novel-route-shell .ant-dropdown-menu-title-content {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1199px) {
+  .novel-route-shell__assistant-tab {
+    display: none;
+  }
+}
+

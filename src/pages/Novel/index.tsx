@@ -7,6 +7,7 @@ import { isElectronRuntime } from '../../runtime/environment'
 import {
   LeftOutlined,
   RightOutlined,
+  RobotOutlined,
 } from '@ant-design/icons'
 import ProjectSidebar from '../../components/novel/layout/ProjectSidebar'
 import ProjectTopbar from '../../components/novel/layout/ProjectTopbar'
@@ -74,11 +75,17 @@ const WORKSPACE_VIEW_MODE_STORAGE_KEY = 'novelforge-workbench-view-mode'
 const WORKSPACE_RECENT_PAGE_STORAGE_KEY = 'novelforge-workspace-recent-page'
 const WORKSPACE_LAST_WRITING_VIEW_STORAGE_KEY = 'novelforge-workspace-last-writing-view'
 const WORKSPACE_ASSISTANT_OPEN_STORAGE_KEY = 'novelforge-workspace-assistant-open'
+const WORKSPACE_ASSISTANT_WIDTH_STORAGE_KEY = 'novelforge-workspace-assistant-width'
 const WORKSPACE_PAGE_META = new Map(WORKSPACE_MODULE_DEFINITIONS.map((item) => [item.key, item] as const))
 const WORKSPACE_PREWARM_DELAY_MS = 140
 const MAX_IDLE_PREWARM_ROUTES = 4
 const COMPACT_SHELL_BREAKPOINT = 1200
 const COMPACT_SHELL_MEDIA_QUERY = `(max-width: ${COMPACT_SHELL_BREAKPOINT - 1}px)`
+const WORKSPACE_ASSISTANT_DEFAULT_WIDTH = 380
+const WORKSPACE_ASSISTANT_MIN_WIDTH = 320
+const WORKSPACE_ASSISTANT_MAX_WIDTH = 680
+const WORKSPACE_CONTENT_MIN_WIDTH = 520
+const WORKSPACE_SIDEBAR_WIDTH = 280
 
 const WORKSPACE_STAGE_LOADERS = {
   guide: () => import('./Studio'),
@@ -135,6 +142,22 @@ function isEditableTarget(target: EventTarget | null): boolean {
   )
 }
 
+function parseStoredAssistantWidth(): number {
+  if (typeof localStorage === 'undefined') return WORKSPACE_ASSISTANT_DEFAULT_WIDTH
+  const stored = Number(localStorage.getItem(WORKSPACE_ASSISTANT_WIDTH_STORAGE_KEY))
+  if (!Number.isFinite(stored)) return WORKSPACE_ASSISTANT_DEFAULT_WIDTH
+  return stored
+}
+
+function clampAssistantWidth(width: number, shellWidth = typeof window === 'undefined' ? 1400 : window.innerWidth): number {
+  const maxByViewport = Math.max(
+    WORKSPACE_ASSISTANT_MIN_WIDTH,
+    shellWidth - WORKSPACE_SIDEBAR_WIDTH - WORKSPACE_CONTENT_MIN_WIDTH,
+  )
+  const maxWidth = Math.min(WORKSPACE_ASSISTANT_MAX_WIDTH, maxByViewport)
+  return Math.round(Math.min(Math.max(width, WORKSPACE_ASSISTANT_MIN_WIDTH), maxWidth))
+}
+
 const MemoWorkspaceStage = React.memo(({
   pageKey,
   novelId,
@@ -174,6 +197,7 @@ export default function NovelRouter() {
   const clearHandlerRef = useRef<(() => void) | null>(null)
   const escapeHandlerRef = useRef<(() => void) | null>(null)
   const contentBodyRef = useRef<HTMLDivElement | null>(null)
+  const routeShellRef = useRef<HTMLDivElement | null>(null)
   const prefetchedPagesRef = useRef<Set<ProWorkspaceKey>>(new Set())
   const scrollPositionsRef = useRef<Partial<Record<ProWorkspaceKey, number>>>({})
   const [loading, setLoading] = useState(true)
@@ -194,6 +218,7 @@ export default function NovelRouter() {
       ? localStorage.getItem(WORKSPACE_ASSISTANT_OPEN_STORAGE_KEY) !== '0'
       : true
   ))
+  const [assistantWidth, setAssistantWidth] = useState<number>(() => clampAssistantWidth(parseStoredAssistantWidth()))
   const [isSidebarDrawerOpen, setIsSidebarDrawerOpen] = useState(false)
   const [platformCopyOpen, setPlatformCopyOpen] = useState(false)
   const [platformCopyResult, setPlatformCopyResult] = useState<PlatformFormatResult | null>(null)
@@ -674,6 +699,12 @@ export default function NovelRouter() {
 
   useEffect(() => {
     if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(WORKSPACE_ASSISTANT_WIDTH_STORAGE_KEY, String(assistantWidth))
+    }
+  }, [assistantWidth])
+
+  useEffect(() => {
+    if (typeof localStorage !== 'undefined') {
       localStorage.setItem(WORKSPACE_RECENT_PAGE_STORAGE_KEY, currentNavKey)
       if (currentPage === 'writing') {
         const writingView = location.pathname.split('/').filter(Boolean)[4] || 'editor'
@@ -694,6 +725,19 @@ export default function NovelRouter() {
     mediaQuery.addEventListener('change', listener)
     return () => mediaQuery.removeEventListener('change', listener)
   }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || isCompactShell) return undefined
+
+    const handleResize = () => {
+      const shellWidth = routeShellRef.current?.getBoundingClientRect().width || window.innerWidth
+      setAssistantWidth((current) => clampAssistantWidth(current, shellWidth))
+    }
+
+    window.addEventListener('resize', handleResize)
+    handleResize()
+    return () => window.removeEventListener('resize', handleResize)
+  }, [isCompactShell])
 
   useEffect(() => {
     if (!currentNovel || typeof localStorage === 'undefined') return
@@ -870,6 +914,32 @@ export default function NovelRouter() {
     scrollPositionsRef.current[currentPage] = event.currentTarget.scrollTop
   }, [currentPage])
 
+  const handleAssistantResizeStart = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    if (isCompactShell) return
+    event.preventDefault()
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+
+    const shellRect = routeShellRef.current?.getBoundingClientRect()
+    const shellRight = shellRect?.right ?? window.innerWidth
+    const shellWidth = shellRect?.width ?? window.innerWidth
+
+    document.body.classList.add('is-resizing-workspace-assistant')
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      setAssistantWidth(clampAssistantWidth(shellRight - moveEvent.clientX, shellWidth))
+    }
+    const handlePointerUp = () => {
+      document.body.classList.remove('is-resizing-workspace-assistant')
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerUp)
+      window.removeEventListener('pointercancel', handlePointerUp)
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerUp)
+    window.addEventListener('pointercancel', handlePointerUp)
+  }, [isCompactShell])
+
   const workspaceQuality = useMemo(() => ({
     controller: workspaceQualityController,
     registerController: registerWorkspaceQualityController,
@@ -915,7 +985,11 @@ export default function NovelRouter() {
         notifyWorkspaceMutation,
       }}>
       <NovelWorkspaceQualityProvider value={workspaceQuality}>
-      <div className={`novel-route-shell novel-route-shell--single${isCompactShell ? ' novel-route-shell--compact' : ''}${assistantOpen && !isCompactShell ? ' novel-route-shell--assistant-open' : ''}`}>
+      <div
+        ref={routeShellRef}
+        className={`novel-route-shell novel-route-shell--single${isCompactShell ? ' novel-route-shell--compact' : ''}${assistantOpen && !isCompactShell ? ' novel-route-shell--assistant-open' : ''}`}
+        style={{ '--novel-shell-assistant-width': `${assistantWidth}px` } as React.CSSProperties}
+      >
       <ProjectTopbar
         projectTitle={currentNovel?.title || '未命名小说'}
         workspaceLabel={currentPageMeta.label}
@@ -1076,6 +1150,8 @@ export default function NovelRouter() {
         <WorkspaceChatAssistant
           open={assistantOpen}
           compact={false}
+          resizable
+          width={assistantWidth}
           workspaceKey={currentPage}
           workspaceLabel={currentPageMeta?.label || currentPage}
           workspaceSummary={currentPageMeta?.summary || ''}
@@ -1084,10 +1160,23 @@ export default function NovelRouter() {
           currentChapter={currentChapter}
           controller={workspaceQualityController}
           onClose={() => setAssistantOpen(false)}
+          onResizeStart={handleAssistantResizeStart}
           onOpenQuality={currentPage !== 'guide' && currentPage !== 'quality' && currentPage !== 'writeback' && currentPage !== 'batch-workbench'
             ? openWorkspaceQualityBoard
             : undefined}
         />
+      ) : null}
+      {!assistantOpen && !isCompactShell ? (
+        <button
+          type="button"
+          className="novel-route-shell__assistant-tab"
+          onClick={() => setAssistantOpen(true)}
+          aria-label="展开 AI 助手"
+          title="展开 AI 助手"
+        >
+          <RobotOutlined />
+          <span>AI</span>
+        </button>
       ) : null}
       </div>
       <Drawer

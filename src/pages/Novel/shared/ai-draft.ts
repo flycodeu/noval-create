@@ -103,6 +103,39 @@ function flattenDraftStrings(value: unknown, path = ''): Array<{ key: string; va
   return []
 }
 
+function getRepeatedSentenceIssue(value: string): boolean {
+  const normalizedSentences = value
+    .split(/[。！？!?；;\n]+/u)
+    .map(normalizeDraftItem)
+    .filter((item) => item.length >= 6)
+
+  if (normalizedSentences.length < 2) return false
+  return new Set(normalizedSentences).size < normalizedSentences.length
+}
+
+function getCrossFieldRepeatIssues(entries: Array<{ key: string; value: string }>): DraftQualityIssue[] {
+  const issues: DraftQualityIssue[] = []
+  const seen = new Map<string, string>()
+
+  entries.forEach((entry) => {
+    const normalized = normalizeDraftItem(entry.value)
+    if (normalized.length < 12) return
+
+    const previousKey = seen.get(normalized)
+    if (previousKey && previousKey !== entry.key) {
+      issues.push({
+        key: entry.key,
+        message: `与 ${previousKey} 存在重复内容`,
+      })
+      return
+    }
+
+    seen.set(normalized, entry.key)
+  })
+
+  return issues
+}
+
 export function inspectDraftQuality(value: unknown): DraftQualityIssue[] {
   const issues: DraftQualityIssue[] = []
 
@@ -119,7 +152,11 @@ export function inspectDraftQuality(value: unknown): DraftQualityIssue[] {
     })
   }
 
-  flattenDraftStrings(value).forEach((entry) => {
+  const stringEntries = flattenDraftStrings(value)
+
+  issues.push(...getCrossFieldRepeatIssues(stringEntries))
+
+  stringEntries.forEach((entry) => {
     const templateHits = TEMPLATE_SENTENCE_PATTERNS.reduce((total, pattern) => {
       pattern.lastIndex = 0
       return total + [...entry.value.matchAll(pattern)].length
@@ -131,6 +168,10 @@ export function inspectDraftQuality(value: unknown): DraftQualityIssue[] {
 
     if (HOLLOW_PHRASE_PATTERN.test(entry.value)) {
       issues.push({ key: entry.key, message: '字段里仍有假深刻或空泛词' })
+    }
+
+    if (getRepeatedSentenceIssue(entry.value)) {
+      issues.push({ key: entry.key, message: '字段内存在重复句子或近似重复句意' })
     }
   })
 
@@ -188,6 +229,8 @@ export function buildDraftMessages({
     '- 禁止空话、套话、宣传腔和自我解释。',
     '- 先自检字段之间是否互相冲突，宁愿保守，也不要编造上下文没有支撑的人名、组织、能力或设定。',
     '- 每个字段都要落到当前故事可执行的信息：目标、阻力、代价、验证方式、人物选择或后续影响至少命中一项。',
+    '- 已填写字段不需要机械复述；如果没有新增信息，就保留原值或补一个具体缺口。',
+    '- 不同字段必须承担不同职责，不要把同一段结论复制到多个字段里。',
     '- 不要让多个字段套用同一套句式骨架，尤其避免连续使用“通过……体现……”“在……中……”这类模板句。',
     '- 少用“命运、灵魂、真正、某种、无法言说”等假深刻词；如果必须使用，必须有具体场景、动作或制度承载。',
     '- 数组字段只输出互不重复、可直接使用的条目；不要用近义词凑数量。',

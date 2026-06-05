@@ -34,10 +34,18 @@ interface DraftGenerationResult<T extends object> {
   observability: DraftGenerationObservability
 }
 
+function normalizeDedupeKey(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/[·•:：,，、;；'"“”‘’()（）[\]【】{}<>《》\-_/\\|。！？!?]/g, '')
+}
+
 function dedupeStrings(values: string[]): string[] {
   const seen = new Set<string>()
   return values.filter((value) => {
-    const key = value.trim()
+    const key = normalizeDedupeKey(value)
     if (!key || seen.has(key)) return false
     seen.add(key)
     return true

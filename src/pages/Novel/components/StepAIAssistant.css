@@ -1,6 +1,7 @@
 .step-ai-assistant {
   display: grid;
   gap: 14px;
+  min-width: 0;
   padding: 16px;
   border: 1px solid rgba(88, 167, 212, 0.18);
   border-radius: 18px;
@@ -21,6 +22,8 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+  min-width: 0;
+  flex-wrap: wrap;
 }
 
 .step-ai-assistant__eyebrow {
@@ -47,6 +50,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
   min-height: 30px;
   padding: 5px 9px;
   border: 1px solid rgba(88, 167, 212, 0.18);
@@ -54,6 +58,8 @@
   background: rgba(255, 255, 255, 0.64);
   color: var(--text-secondary);
   font-size: 12px;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .step-ai-assistant__history {
@@ -72,6 +78,7 @@
   font-size: 13px;
   line-height: 1.7;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .step-ai-assistant__bubble--user {
@@ -90,6 +97,7 @@
 
 .step-ai-assistant__composer .ant-input {
   min-height: 104px;
+  resize: vertical;
 }
 
 .step-ai-assistant__composer .ant-btn {
@@ -152,6 +160,9 @@
   background: rgba(88, 167, 212, 0.1);
   color: var(--text-secondary);
   font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 [data-theme="dark"] .step-ai-assistant {

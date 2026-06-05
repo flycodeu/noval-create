@@ -5,9 +5,11 @@
   --assistant-text: var(--text-primary);
   --assistant-text-soft: var(--text-secondary);
   --assistant-text-muted: var(--text-muted);
+  position: relative;
   display: grid;
   grid-template-rows: auto auto auto auto auto minmax(0, 1fr) auto;
   gap: 10px;
+  width: var(--workspace-chat-assistant-width, 100%);
   min-width: 0;
   min-height: 0;
   height: 100%;
@@ -18,6 +20,43 @@
     var(--assistant-surface);
   color: var(--assistant-text);
   overflow: hidden;
+}
+
+.workspace-chat-assistant--resizable {
+  min-width: 300px;
+}
+
+.workspace-chat-assistant__resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -6px;
+  z-index: 5;
+  width: 12px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: col-resize;
+}
+
+.workspace-chat-assistant__resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 5px;
+  width: 2px;
+  height: 56px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--assistant-border) 82%, var(--assistant-text-muted) 18%);
+  opacity: 0;
+  transform: translateY(-50%);
+  transition: opacity 140ms ease, background 140ms ease;
+}
+
+.workspace-chat-assistant__resize-handle:hover::after,
+.workspace-chat-assistant__resize-handle:focus-visible::after {
+  background: var(--accent);
+  opacity: 1;
 }
 
 .workspace-chat-assistant__drawer .ant-drawer-body {
@@ -58,6 +97,7 @@
   color: var(--assistant-text);
   font-size: 16px;
   line-height: 1.3;
+  overflow-wrap: anywhere;
 }
 
 .workspace-chat-assistant__eyebrow,
@@ -114,7 +154,10 @@
 }
 
 .workspace-chat-assistant__intent-grid .ant-btn {
+  height: auto;
+  min-height: 32px;
   min-width: 0;
+  white-space: normal;
 }
 
 .workspace-chat-assistant__history {
@@ -193,7 +236,7 @@
 
 .workspace-chat-assistant__composer .ant-input {
   min-height: 104px;
-  resize: none;
+  resize: vertical;
 }
 
 .workspace-chat-assistant__composer-actions {
@@ -220,6 +263,12 @@
 
 [data-theme="dark"] .workspace-chat-assistant__message--user {
   background: rgba(199, 139, 79, 0.12);
+}
+
+body.is-resizing-workspace-assistant,
+body.is-resizing-workspace-assistant * {
+  cursor: col-resize !important;
+  user-select: none !important;
 }
 
 @media (max-width: 1280px) {

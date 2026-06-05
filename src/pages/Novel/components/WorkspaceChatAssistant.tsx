@@ -40,6 +40,8 @@ interface AssistantIntent {
 interface Props {
   open: boolean
   compact: boolean
+  resizable?: boolean
+  width?: number
   workspaceKey: string
   workspaceLabel: string
   workspaceSummary: string
@@ -48,6 +50,7 @@ interface Props {
   currentChapter: Chapter | null
   controller: RegisteredWorkspaceQualityController | null
   onClose: () => void
+  onResizeStart?: (event: React.PointerEvent<HTMLButtonElement>) => void
   onOpenQuality?: () => void
 }
 
@@ -291,6 +294,8 @@ function buildAssistantPrompt(input: {
       '- 不要声称你已经修改数据库、表单或正文；本聊天面板只输出建议和候选文本。',
       '- 如果要真正落地修复，应提示用户使用当前页面保存、AI 质量看板或人工复制候选文本。',
       '- 给修复时优先保留作者原意，只替换问题句、缺失约束和不稳定设定。',
+      '- 如果最近聊天已经给过同类结论，不要换同义词重复；直接标出新增判断、修正判断和仍待确认的风险。',
+      '- 回答必须显式承接当前工作区的上游和下游，不要把下一步页面的内容提前写满。',
       '- 不要输出“作为 AI”“以下是”“我将”“思考过程”等会污染小说正文的工作流文字。',
       '- 中文表达要像编辑给作者的工作稿：具体、克制、有场景抓手。',
     ].join('\n'),
@@ -315,6 +320,8 @@ function buildAssistantPrompt(input: {
 export default function WorkspaceChatAssistant({
   open,
   compact,
+  resizable = false,
+  width,
   workspaceKey,
   workspaceLabel,
   workspaceSummary,
@@ -323,6 +330,7 @@ export default function WorkspaceChatAssistant({
   currentChapter,
   controller,
   onClose,
+  onResizeStart,
   onOpenQuality,
 }: Props) {
   const [messages, setMessages] = useState<AssistantMessage[]>([])
@@ -351,21 +359,29 @@ export default function WorkspaceChatAssistant({
   const canUseWorkspaceSnapshot = Boolean(activeController || fallbackAdapter)
   const contextKey = `${novelId}:${workspaceKey}`
 
+  const fetchContext = useCallback(async () => {
+    const snapshotPromise = (async () => {
+      if (activeController) return activeController.getSnapshot()
+      if (fallbackAdapter) return fallbackAdapter.fetchSnapshot(adapterContext)
+      return null
+    })()
+    const dashboardPromise = window.electron.quality.getDashboard(novelId).catch(() => null)
+    const [nextSnapshot, dashboard] = await Promise.all([snapshotPromise, dashboardPromise])
+    return {
+      snapshot: nextSnapshot,
+      qualitySignals: buildQualitySignalLines(dashboard),
+    }
+  }, [activeController, adapterContext, fallbackAdapter, novelId])
+
   const loadContext = useCallback(async (showError = false) => {
     const requestId = contextRequestRef.current + 1
     contextRequestRef.current = requestId
     setSnapshotLoading(true)
     try {
-      const snapshotPromise = (async () => {
-        if (activeController) return activeController.getSnapshot()
-        if (fallbackAdapter) return fallbackAdapter.fetchSnapshot(adapterContext)
-        return null
-      })()
-      const dashboardPromise = window.electron.quality.getDashboard(novelId).catch(() => null)
-      const [nextSnapshot, dashboard] = await Promise.all([snapshotPromise, dashboardPromise])
+      const context = await fetchContext()
       if (requestId !== contextRequestRef.current) return
-      setSnapshot(nextSnapshot)
-      setQualitySignals(buildQualitySignalLines(dashboard))
+      setSnapshot(context.snapshot)
+      setQualitySignals(context.qualitySignals)
     } catch (error) {
       console.error(error)
       if (showError) message.error('上下文读取失败，请稍后重试。')
@@ -374,7 +390,7 @@ export default function WorkspaceChatAssistant({
         setSnapshotLoading(false)
       }
     }
-  }, [activeController, adapterContext, fallbackAdapter, novelId])
+  }, [fetchContext])
 
   useEffect(() => {
     contextRequestRef.current += 1
@@ -406,6 +422,13 @@ export default function WorkspaceChatAssistant({
     setLoading(true)
 
     try {
+      const promptContext = await fetchContext()
+        .then((context) => {
+          setSnapshot(context.snapshot)
+          setQualitySignals(context.qualitySignals)
+          return context
+        })
+        .catch(() => ({ snapshot, qualitySignals }))
       const prompt = buildAssistantPrompt({
         userRequest,
         workspaceKey,
@@ -413,8 +436,8 @@ export default function WorkspaceChatAssistant({
         workspaceSummary,
         novel: currentNovel,
         chapter: currentChapter,
-        snapshot,
-        qualitySignals,
+        snapshot: promptContext.snapshot,
+        qualitySignals: promptContext.qualitySignals,
         history: messages,
         novelId,
       })
@@ -446,6 +469,7 @@ export default function WorkspaceChatAssistant({
     currentChapter,
     currentNovel,
     executionMode,
+    fetchContext,
     input,
     loading,
     messages,
@@ -467,11 +491,24 @@ export default function WorkspaceChatAssistant({
   }, [])
 
   const body = (
-    <aside className="workspace-chat-assistant" aria-label="AI 聊天助手">
+    <aside
+      className={`workspace-chat-assistant${resizable ? ' workspace-chat-assistant--resizable' : ''}`}
+      aria-label="AI 聊天助手"
+      style={width ? { '--workspace-chat-assistant-width': `${width}px` } as React.CSSProperties : undefined}
+    >
+      {resizable ? (
+        <button
+          type="button"
+          className="workspace-chat-assistant__resize-handle"
+          onPointerDown={onResizeStart}
+          aria-label="拖动调整 AI 助手宽度"
+          title="拖动调整宽度"
+        />
+      ) : null}
       <div className="workspace-chat-assistant__header">
         <div className="workspace-chat-assistant__title-block">
           <div className="workspace-chat-assistant__eyebrow">工作区 AI 评审</div>
-          <strong>只给建议，不自动回填</strong>
+          <strong>上下文协作</strong>
         </div>
         <Space size={6}>
           <Tooltip title="重新读取当前页面、章节和质量信号">
@@ -522,7 +559,7 @@ export default function WorkspaceChatAssistant({
           type="info"
           showIcon
           className="workspace-chat-assistant__empty-alert"
-          message="打开后会读取当前小说、章节和质量上下文。"
+          message="已准备读取当前小说、章节和质量上下文。"
         />
       )}
 
@@ -544,7 +581,7 @@ export default function WorkspaceChatAssistant({
         {messages.length === 0 ? (
           <Empty
             image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description="描述你想评审、修复、扩写或去 AI 味的目标；本面板只输出建议和候选文本。"
+            description="输入评审、修复、扩写或去 AI 味目标。"
           >
             {onOpenQuality ? (
               <Button size="small" icon={<BarChartOutlined />} onClick={onOpenQuality}>

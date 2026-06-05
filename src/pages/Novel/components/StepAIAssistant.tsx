@@ -8,8 +8,8 @@ import {
   ToolOutlined,
 } from '@ant-design/icons'
 import type { Novel } from '../../../types'
-import type { GuidedWorkflowStepKey } from '../workflow'
-import type { DraftContextSection, DraftFieldDefinition } from '../shared/ai-draft'
+import { GUIDED_STEP_ORDER, type GuidedWorkflowStepKey } from '../workflow'
+import { inspectDraftQuality, type DraftContextSection, type DraftFieldDefinition } from '../shared/ai-draft'
 import { buildPlanningContextSections } from '../shared/planning-context'
 import { cleanAiValue } from '../../../utils/text'
 import './StepAIAssistant.css'
@@ -52,11 +52,48 @@ interface StepAIAssistantProps<TPatch extends StepAIAssistantPatch> {
 }
 
 const DEFAULT_USER_PROMPT = '我只有一个大概想法，请补齐这一步能用的基础信息。'
+const STEP_LABELS: Record<GuidedWorkflowStepKey, string> = {
+  basics: '基础信息',
+  'project-brief': '项目立项',
+  'story-core': '基础设定',
+  'theme-voice': '主题与文风',
+  'world-foundation': '世界规则',
+  'endgame-design': '终局设计',
+  'map-structure': '地图结构',
+  'items-equipment': '物品与资源',
+  'character-roster': '人物网络',
+  'story-threads': '故事线程',
+  'story-plot': '故事设计',
+  'volume-planning': '卷级规划',
+  'write-start': '结构与写作',
+}
+
+function truncateForPrompt(value: string, maxLength = 1200) {
+  if (value.length <= maxLength) return value
+  return `${value.slice(0, maxLength)}...（已截断，保留前段上下文）`
+}
 
 function formatValue(value?: string | number | string[] | null): string {
   if (Array.isArray(value)) return value.length > 0 ? value.join('、') : '未填写'
   if (typeof value === 'number') return Number.isFinite(value) ? String(value) : '未填写'
   return value?.trim() || '未填写'
+}
+
+function formatPromptValue(value?: string | number | string[] | null): string {
+  return truncateForPrompt(formatValue(value))
+}
+
+function buildStepContinuityBlock(stepKey: GuidedWorkflowStepKey, stepTitle: string): string {
+  const index = GUIDED_STEP_ORDER.indexOf(stepKey)
+  const previousStep = index > 0 ? GUIDED_STEP_ORDER[index - 1] : null
+  const nextStep = index >= 0 && index < GUIDED_STEP_ORDER.length - 1 ? GUIDED_STEP_ORDER[index + 1] : null
+
+  return [
+    `当前步骤：${stepTitle}（${STEP_LABELS[stepKey] || stepKey}）`,
+    `上一步：${previousStep ? STEP_LABELS[previousStep] : '无，当前是起点'}`,
+    `下一步：${nextStep ? STEP_LABELS[nextStep] : '无，当前是进入写作前最后一步'}`,
+    '生成边界：只补当前步骤字段；承接上一步已经确定的事实；给下一步留下可调用锚点，但不要提前写满下一步内容。',
+  ].join('\n')
 }
 
 function extractJsonObject(raw: string): string {
@@ -93,17 +130,24 @@ function normalizeDraft(raw: string, allowedKeys: string[]): StepAIAssistantDraf
         reason: typeof item.reason === 'string' ? item.reason : '',
       }))
     : []
+  const qualityChecks = inspectDraftQuality(draftPatch)
+    .slice(0, 4)
+    .map((issue) => `${issue.key}：${issue.message}`)
 
   return {
     assistantMessage: typeof parsed.assistantMessage === 'string' ? parsed.assistantMessage.trim() : '已生成候选补丁。',
     draftPatch,
     toolCalls,
-    checks: Array.isArray(parsed.checks) ? parsed.checks.filter((item): item is string => typeof item === 'string') : [],
+    checks: [
+      ...qualityChecks,
+      ...(Array.isArray(parsed.checks) ? parsed.checks.filter((item): item is string => typeof item === 'string') : []),
+    ],
     suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions.filter((item): item is string => typeof item === 'string') : [],
   }
 }
 
 function buildAssistantPrompt(input: {
+  stepKey: GuidedWorkflowStepKey
   stepTitle: string
   userRequest: string
   fields: DraftFieldDefinition[]
@@ -112,14 +156,15 @@ function buildAssistantPrompt(input: {
   tools: StepAssistantTool[]
   history: StepAssistantMessage[]
 }) {
+  const continuityBlock = buildStepContinuityBlock(input.stepKey, input.stepTitle)
   const contextBlock = input.context
-    .filter((section) => formatValue(section.value) !== '未填写')
-    .map((section) => `- ${section.label}：${formatValue(section.value)}`)
+    .filter((section) => formatPromptValue(section.value) !== '未填写')
+    .map((section) => `- ${section.label}：${formatPromptValue(section.value)}`)
     .join('\n')
   const fieldBlock = input.fields
     .map((field) => [
       `- ${field.label}（${field.key}）`,
-      `  当前值：${formatValue(input.values[field.key])}`,
+      `  当前值：${formatPromptValue(input.values[field.key])}`,
       field.hint ? `  字段要求：${field.hint}` : '',
     ].filter(Boolean).join('\n'))
     .join('\n')
@@ -128,7 +173,7 @@ function buildAssistantPrompt(input: {
     .join('\n')
   const historyBlock = input.history
     .slice(-8)
-    .map((item) => `${item.role === 'user' ? '用户' : '助手'}：${item.content}`)
+    .map((item) => `${item.role === 'user' ? '用户' : '助手'}：${truncateForPrompt(item.content, 700)}`)
     .join('\n')
   const skeleton = `{
   "assistantMessage": "给用户看的简短回复",
@@ -143,6 +188,7 @@ ${input.fields.map((field) => `    "${field.key}": ${field.type === 'number' ? '
   return [
     `你是 NovelForge 本地写作工作区里的步骤 AI 助手，正在协助「${input.stepTitle}」。`,
     '你的目标是把用户的模糊想法转成可回填的结构化草稿，也可以按用户要求只更新指定字段。',
+    `步骤连续性：\n${continuityBlock}`,
     contextBlock ? `当前小说上下文：\n${contextBlock}` : '',
     `当前步骤字段：\n${fieldBlock}`,
     `本步骤允许使用的工具能力：\n${toolBlock}`,
@@ -153,6 +199,10 @@ ${input.fields.map((field) => `    "${field.key}": ${field.type === 'number' ? '
       '- 只输出 JSON 对象，不要 Markdown，不要解释性外壳。',
       '- draftPatch 只能包含上面列出的字段键；用户要求只改某字段时，其它字段保持当前值或留空。',
       '- 如果用户给的信息不足，可以合理补全，但要让补全落在目标、阻力、代价、环境压力和人物选择上。',
+      '- 当前值或最近对话已经有的信息不要换同义词重复；优先补缺口、修冲突或明确“不需要改”。',
+      '- 每个字段承担不同职责，不要把同一段结论复制到多个字段里。',
+      '- 当前步骤的输出必须能被下一步直接调用：至少留下目标、阻力、代价、验证方式、人物选择或后续影响中的两类信息。',
+      '- 不要把下一步页面的详细正文、完整角色档案、完整地图或完整章节提前生成到当前步骤字段里。',
       '- 避免 AI 腔：不要写命运齿轮、灵魂深处、某种无法言说、真正的成长、不是……而是……等模板表达。',
       '- 不要使用“以下是、我将、作为AI、修订建议、思考过程”等工作流文字作为字段内容。',
       '- 中文要自然克制，像给作者的策划草稿，不像广告文案。',
@@ -207,6 +257,7 @@ export default function StepAIAssistant<TPatch extends StepAIAssistantPatch>({
 
     try {
       const prompt = buildAssistantPrompt({
+        stepKey,
         stepTitle,
         userRequest,
         fields,
