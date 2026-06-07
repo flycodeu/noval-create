@@ -154,16 +154,6 @@
   white-space: nowrap;
 }
 
-.app-shell-bar__summary {
-  min-width: 0;
-  color: var(--text-secondary);
-  font-size: 12px;
-  line-height: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .app-shell-bar__window-controls {
   display: inline-flex;
   align-items: center;
@@ -209,9 +199,6 @@
     padding-left: 14px;
   }
 
-  .app-shell-bar__summary {
-    display: none;
-  }
 }
 
 @media (max-width: 720px) {

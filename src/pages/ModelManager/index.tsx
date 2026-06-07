@@ -1,18 +1,24 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import {
-  Button, Form, Input, Select, Slider, message,
+  Alert, Button, Form, Input, Select, Slider, message,
   Modal, InputNumber, Empty, Skeleton
 } from 'antd'
 import {
   PlusOutlined, DeleteOutlined, CheckCircleOutlined, CloseCircleOutlined,
   StarOutlined, StarFilled
 } from '@ant-design/icons'
-import { ModelConfig } from '../../types'
+import type {
+  ModelConfig,
+  SourceSearchSettingsUpdate,
+  SourceSearchSettingsView,
+  SourceSearchTestResult,
+} from '../../types'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../Novel/components/WorkspaceShell'
 
 const DEFAULT_MODEL_MAX_TOKENS = 65536
 const MAX_MODEL_MAX_TOKENS = 1000000
+const MASKED_KEY = '已设置'
 
 const PROVIDER_OPTIONS = [
   { value: 'openai', label: 'OpenAI', models: ['gpt-4o', 'gpt-4-turbo', 'gpt-3.5-turbo', 'gpt-4o-mini'] },
@@ -32,6 +38,12 @@ const PROVIDER_DEFAULTS: Record<string, { temperature: number; maxTokens: number
   baidu: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS, modelId: 'ernie-4.0-8k' },
   custom: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS, baseUrl: 'http://localhost:11434/v1' },
 }
+const SOURCE_PROVIDER_OPTIONS = [
+  { value: 'auto', label: '自动选择' },
+  { value: 'tavily', label: 'Tavily' },
+  { value: 'brave', label: 'Brave Search' },
+  { value: 'disabled', label: '关闭来源检索' },
+]
 
 function providerRequiresApiKey(provider?: string): boolean {
   return provider !== 'custom'
@@ -60,6 +72,22 @@ function getKimiContextWindow(modelId?: string): number | undefined {
   return undefined
 }
 
+function getProviderDefaultContextWindow(provider?: string, modelId?: string): number {
+  if (provider === 'anthropic') return 200000
+  if (provider === 'deepseek') return 1000000
+  if (provider === 'kimi') return getKimiContextWindow(modelId) || 256000
+  if (provider === 'openai') return 128000
+  if (provider === 'aliyun') return 32000
+  if (provider === 'baidu') return 8192
+  return 32000
+}
+
+function formatTokenBudget(value?: number | null) {
+  if (!value || !Number.isFinite(value)) return '默认'
+  if (value >= 10000) return `${Math.round(value / 1000)}K`
+  return String(value)
+}
+
 function buildModelSavePayload(values: Record<string, unknown>): Record<string, unknown> {
   const provider = typeof values.provider === 'string' ? values.provider : ''
   const kimiThinking = values.kimiThinking === 'enabled' || values.kimiThinking === 'disabled'
@@ -73,19 +101,32 @@ function buildModelSavePayload(values: Record<string, unknown>): Record<string, 
   }
 }
 
+function getSourceProviderLabel(provider?: string | null) {
+  if (provider === 'tavily') return 'Tavily'
+  if (provider === 'brave') return 'Brave'
+  if (provider === 'disabled') return '已关闭'
+  return '自动'
+}
+
 export default function ModelManager() {
   const [configs, setConfigs] = useState<ModelConfig[]>([])
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<ModelConfig | null>(null)
   const [form] = Form.useForm()
+  const [sourceForm] = Form.useForm<SourceSearchSettingsUpdate>()
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ success: boolean; latency: number; info: string } | null>(null)
   const [saving, setSaving] = useState(false)
   const [isNew, setIsNew] = useState(false)
+  const [sourceSettings, setSourceSettings] = useState<SourceSearchSettingsView | null>(null)
+  const [sourceSaving, setSourceSaving] = useState(false)
+  const [sourceTesting, setSourceTesting] = useState(false)
+  const [sourceTestResult, setSourceTestResult] = useState<SourceSearchTestResult | null>(null)
 
   const selectedProvider = Form.useWatch('provider', form)
   const selectedModelId = Form.useWatch('modelId', form)
   const selectedConfigProvider = selected?.provider
+  const selectedSourceProvider = Form.useWatch('provider', sourceForm)
 
   const loadConfigs = useCallback(async () => {
     setLoading(true)
@@ -94,7 +135,24 @@ export default function ModelManager() {
     setLoading(false)
   }, [])
 
-  useEffect(() => { loadConfigs() }, [loadConfigs])
+  const loadSourceSettings = useCallback(async () => {
+    try {
+      const settings = await window.electron.sourceSearch.getSettings()
+      setSourceSettings(settings)
+      sourceForm.setFieldsValue({
+        provider: settings.provider,
+        tavilyApiKey: settings.tavilyApiKeySet ? MASKED_KEY : '',
+        braveApiKey: settings.braveApiKeySet ? MASKED_KEY : '',
+      })
+    } catch (error) {
+      message.error(getErrorMessage(error, 'common.loadFailed'))
+    }
+  }, [sourceForm])
+
+  useEffect(() => {
+    void loadConfigs()
+    void loadSourceSettings()
+  }, [loadConfigs, loadSourceSettings])
 
   const applyProviderDefaults = useCallback((provider: string, resetCredentials = false) => {
     const defaults = PROVIDER_DEFAULTS[provider] || PROVIDER_DEFAULTS.openai
@@ -200,10 +258,51 @@ export default function ModelManager() {
     }
   }
 
+  const handleSourceSave = async () => {
+    const values = await sourceForm.validateFields()
+    setSourceSaving(true)
+    try {
+      const settings = await window.electron.sourceSearch.updateSettings(values)
+      setSourceSettings(settings)
+      sourceForm.setFieldsValue({
+        provider: settings.provider,
+        tavilyApiKey: settings.tavilyApiKeySet ? MASKED_KEY : '',
+        braveApiKey: settings.braveApiKeySet ? MASKED_KEY : '',
+      })
+      setSourceTestResult(null)
+      message.success('来源检索配置已保存')
+    } catch (error) {
+      message.error(getErrorMessage(error, 'common.saveFailed'))
+    } finally {
+      setSourceSaving(false)
+    }
+  }
+
+  const handleSourceTest = async () => {
+    setSourceTesting(true)
+    setSourceTestResult(null)
+    try {
+      setSourceTestResult(await window.electron.sourceSearch.test())
+    } catch (error) {
+      setSourceTestResult({
+        success: false,
+        providerName: null,
+        latency: 0,
+        info: error instanceof Error ? error.message : getErrorMessage(error, 'model.testFailed'),
+      })
+    } finally {
+      setSourceTesting(false)
+    }
+  }
+
   const currentProviderModels = PROVIDER_OPTIONS.find(p => p.value === selectedProvider)?.models || []
   const fixedTemperatureKimiModel = selectedProvider === 'kimi' && (selectedModelId === 'kimi-k2.6' || selectedModelId === 'kimi-k2.5')
+  const selectedDefaultContextWindow = getProviderDefaultContextWindow(selectedProvider, selectedModelId)
   const defaultCount = configs.filter((config) => config.isDefault === 1).length
   const providerCount = new Set(configs.map((config) => config.provider)).size
+  const activeSourceLabel = sourceSettings?.activeProvider
+    ? getSourceProviderLabel(sourceSettings.activeProvider)
+    : getSourceProviderLabel(sourceSettings?.provider)
 
   return (
     <WorkspacePage
@@ -261,9 +360,12 @@ export default function ModelManager() {
                     {config.isDefault === 1 ? <StarFilled style={{ color: '#faad14', fontSize: 12 }} /> : null}
                   </div>
                   <div className="admin-sidebar-item__meta">
-                    {PROVIDER_OPTIONS.find((item) => item.value === config.provider)?.label}
+                    {PROVIDER_OPTIONS.find((item) => item.value === config.provider)?.label || config.provider}
                     {' · '}
                     {config.modelId}
+                  </div>
+                  <div className="admin-sidebar-item__meta">
+                    {`输出 ${formatTokenBudget(config.maxTokens)} · 上下文 ${formatTokenBudget(config.maxContextTokens || getProviderDefaultContextWindow(config.provider, config.modelId))} · 并发 ${config.maxConcurrency || 1}`}
                   </div>
                 </button>
               ))}
@@ -405,9 +507,15 @@ export default function ModelManager() {
                   ? 'DeepSeek V4 当前上下文窗口为 1M。通常应大于等于最大输出长度；留空时使用 DeepSeek 默认窗口。'
                   : selectedProvider === 'kimi'
                     ? 'Kimi K2.x 默认上下文窗口按 256K 预估；Moonshot v1 按模型名使用 8K/32K/128K。'
-                  : '控制模型可接收的上下文总量。通常应大于等于最大输出长度。留空时使用对应适配器的默认窗口。'}
+                  : `控制模型可接收的上下文总量。留空时使用当前 provider 默认窗口：${formatTokenBudget(selectedDefaultContextWindow)}。`}
               >
-                <InputNumber min={2048} max={2000000} step={1024} style={{ width: '100%' }} placeholder="例如：200000 / 512000 / 1000000" />
+                <InputNumber
+                  min={2048}
+                  max={2000000}
+                  step={1024}
+                  style={{ width: '100%' }}
+                  placeholder={`留空使用默认：${selectedDefaultContextWindow}`}
+                />
               </Form.Item>
 
               <Form.Item name="maxConcurrency" label="最大并发请求数">
@@ -448,6 +556,60 @@ export default function ModelManager() {
           )}
         </WorkspacePanel>
       </div>
+
+      <WorkspacePanel
+        title="来源检索配置"
+        description="为真实资料 grounding 配置 Tavily 或 Brave Search。"
+      >
+        <div className="admin-detail-stack">
+          <Alert
+            type="info"
+            showIcon
+            message="用于真实资料 grounding"
+            description="Tavily Search API 使用 Authorization: Bearer；Brave Search 使用 X-Subscription-Token。保存后，历史、现实行业、制度和法律类内容会优先调用这里的网页检索配置。"
+          />
+          <div className="admin-toolbar">
+            <div className="novel-pill">{`当前模式：${getSourceProviderLabel(sourceSettings?.provider)}`}</div>
+            <div className="novel-pill">{`运行 provider：${activeSourceLabel}`}</div>
+            {sourceSettings?.tavilyEnvSet ? <div className="novel-pill">TAVILY_API_KEY 已从环境变量读取</div> : null}
+            {sourceSettings?.braveEnvSet ? <div className="novel-pill">BRAVE_SEARCH_API_KEY 已从环境变量读取</div> : null}
+          </div>
+          <Form form={sourceForm} layout="vertical">
+            <div className="admin-form-grid admin-form-grid--three">
+              <Form.Item name="provider" label="检索 provider" initialValue="auto">
+                <Select options={SOURCE_PROVIDER_OPTIONS} />
+              </Form.Item>
+              <Form.Item name="tavilyApiKey" label="Tavily API Key">
+                <Input.Password
+                  disabled={selectedSourceProvider === 'disabled'}
+                  placeholder={sourceSettings?.tavilyApiKeySet ? MASKED_KEY : '输入 Tavily API Key'}
+                />
+              </Form.Item>
+              <Form.Item name="braveApiKey" label="Brave Search API Key">
+                <Input.Password
+                  disabled={selectedSourceProvider === 'disabled'}
+                  placeholder={sourceSettings?.braveApiKeySet ? MASKED_KEY : '输入 Brave Search API Key'}
+                />
+              </Form.Item>
+            </div>
+          </Form>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <Button type="primary" loading={sourceSaving} onClick={() => void handleSourceSave()}>
+              保存来源检索
+            </Button>
+            <Button loading={sourceTesting} onClick={() => void handleSourceTest()}>
+              测试已保存配置
+            </Button>
+            {sourceTestResult ? (
+              <span style={{ color: sourceTestResult.success ? '#52c41a' : '#ff4d4f' }}>
+                {sourceTestResult.success
+                  ? `${getSourceProviderLabel(sourceTestResult.providerName)} 连接成功 · ${sourceTestResult.latency}ms · ${sourceTestResult.info}`
+                  : sourceTestResult.info}
+              </span>
+            ) : null}
+          </div>
+        </div>
+      </WorkspacePanel>
     </WorkspacePage>
   )
 }

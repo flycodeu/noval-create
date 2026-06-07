@@ -57,6 +57,7 @@ import {
 import { buildChapterOptimizationQualityGate } from '../../src/shared/chapter-optimization-quality'
 import {
   markChapterContextCurrent,
+  markNovelContextChanged,
   markSubsequentChaptersStale,
   runChapterPublishCheck,
   validateChapterContractsForGeneration,
@@ -150,6 +151,7 @@ import {
   isCandidateTooSimilar,
 } from './variation-control.service'
 import { resolveWriterOrchestratedContext } from './writer-context-orchestrator.service'
+import { enrichSourceGroundingFromWeb } from './source-grounding-search.service'
 import type {
   AiContextAssemblyReport,
   AiExecutionMode,
@@ -4395,7 +4397,72 @@ async function resolveWriterContextForStage(
   effectiveRawContext: Awaited<ReturnType<typeof collectChapterContextRawData>>
   writerContextResolution: WriterContextOrchestratorResolution
 }> {
+  const db = getDb()
   try {
+    const glossaryTerms = db.select({ term: glossary.term }).from(glossary)
+      .where(eq(glossary.novelId, chapter.novelId))
+      .orderBy(asc(glossary.sortOrder), asc(glossary.id))
+      .all()
+      .map((row: { term: string | null }) => row.term || '')
+      .filter(Boolean)
+    const backgroundText = [
+      rawContext.novel.expandedBackground,
+      rawContext.novel.synopsis,
+      rawContext.novel.userBackground,
+    ].filter(Boolean).join('\n')
+    const sourceGrounding = await enrichSourceGroundingFromWeb({
+      novelId: chapter.novelId,
+      chapterId: chapter.id,
+      chapterNum: chapter.chapterNum,
+      genre: rawContext.profile.genre,
+      novelTitle: rawContext.novel.title,
+      chapterTitle: chapter.title || '',
+      chapterOutline: chapter.outline || '',
+      chapterGoal: rawContext.contextParts.chapterGoal,
+      worldRules: rawContext.contextParts.worldRules,
+      backgroundText,
+      glossaryTerms,
+      historicalProfileJson: rawContext.novel.historicalProfileJson,
+      projectCanonProfileJson: rawContext.novel.projectCanonProfileJson,
+      canonConstraintSetJson: rawContext.novel.canonConstraintSetJson,
+      sourceLedgerJson: rawContext.novel.sourceLedgerJson,
+      canonSourceLedgerJson: rawContext.novel.canonSourceLedgerJson,
+      canonFactCardsJson: rawContext.novel.canonFactCardsJson,
+    })
+    let writerRawContext = rawContext
+    if (sourceGrounding.updated) {
+      const recordedAt = sourceGrounding.recordedAt || new Date().toISOString()
+      db.update(novels).set({
+        sourceLedgerJson: sourceGrounding.sourceLedgerJson,
+        canonSourceLedgerJson: sourceGrounding.canonSourceLedgerJson,
+        canonFactCardsJson: sourceGrounding.canonFactCardsJson,
+        updatedAt: recordedAt,
+      }).where(eq(novels.id, chapter.novelId)).run()
+      const nextContextVersion = markNovelContextChanged(chapter.novelId, 'External source grounding updated')
+      writerRawContext = {
+        ...rawContext,
+        novel: {
+          ...rawContext.novel,
+          sourceLedgerJson: sourceGrounding.sourceLedgerJson,
+          canonSourceLedgerJson: sourceGrounding.canonSourceLedgerJson,
+          canonFactCardsJson: sourceGrounding.canonFactCardsJson,
+          contextVersion: nextContextVersion,
+          updatedAt: recordedAt,
+        },
+      }
+    } else if (sourceGrounding.attempted && sourceGrounding.diagnostics.length > 0) {
+      writerRawContext = {
+        ...rawContext,
+        contextParts: {
+          ...rawContext.contextParts,
+          worldRules: [
+            rawContext.contextParts.worldRules,
+            `来源检索状态：${sourceGrounding.diagnostics.join('；')} 生成真实历史、政治、行业或制度细节时必须保守表达，不能把未查证内容写成确定事实。`,
+          ].filter(Boolean).join('\n'),
+        },
+      }
+    }
+
     const writerContextResolution = await resolveWriterOrchestratedContext({
       novelId: chapter.novelId,
       chapterId: chapter.id,
@@ -4403,63 +4470,75 @@ async function resolveWriterContextForStage(
       signals: {
         chapterTitle: chapter.title || '',
         chapterOutline: chapter.outline || '',
-        chapterGoal: rawContext.contextParts.chapterGoal,
-        arcSummary: rawContext.currentArc?.arcSummary || '',
-        arcGoal: rawContext.currentArc?.arcGoal || '',
-        previousSummaries: rawContext.contextParts.previousSummaries,
-        continuityNotes: rawContext.contextParts.continuityNotes,
-        openLoops: rawContext.contextParts.openLoops,
-        dueForeshadows: rawContext.contextParts.dueForeshadows,
-        chapterBridgePlan: rawContext.contextParts.chapterBridgePlan,
-        stepMemorySummary: rawContext.contextParts.stepMemorySummary,
-        timelineSummary: rawContext.contextParts.timelineSummary,
-        timelineOpenThreads: rawContext.contextParts.timelineOpenThreads,
-        activeThreads: rawContext.contextParts.activeThreads,
-        worldStates: rawContext.contextParts.worldStates,
-        relationSummary: rawContext.contextParts.relationSummary,
-        dialogueVoiceLocks: rawContext.contextParts.dialogueVoiceLocks,
-        mentionedCharacters: rawContext.mentionedCharacters,
-        mentionedItems: rawContext.mentionedItems,
-        mentionedLocations: rawContext.mentionedLocations,
-        mentionedFactions: rawContext.mentionedFactions,
+        chapterGoal: writerRawContext.contextParts.chapterGoal,
+        arcSummary: writerRawContext.currentArc?.arcSummary || '',
+        arcGoal: writerRawContext.currentArc?.arcGoal || '',
+        previousSummaries: writerRawContext.contextParts.previousSummaries,
+        continuityNotes: writerRawContext.contextParts.continuityNotes,
+        openLoops: writerRawContext.contextParts.openLoops,
+        dueForeshadows: writerRawContext.contextParts.dueForeshadows,
+        chapterBridgePlan: writerRawContext.contextParts.chapterBridgePlan,
+        stepMemorySummary: writerRawContext.contextParts.stepMemorySummary,
+        timelineSummary: writerRawContext.contextParts.timelineSummary,
+        timelineOpenThreads: writerRawContext.contextParts.timelineOpenThreads,
+        activeThreads: writerRawContext.contextParts.activeThreads,
+        worldStates: writerRawContext.contextParts.worldStates,
+        relationSummary: writerRawContext.contextParts.relationSummary,
+        dialogueVoiceLocks: writerRawContext.contextParts.dialogueVoiceLocks,
+        genre: writerRawContext.profile.genre,
+        worldRules: writerRawContext.contextParts.worldRules,
+        backgroundText,
+        glossaryTerms,
+        historicalProfileJson: writerRawContext.novel.historicalProfileJson || '',
+        projectCanonProfileJson: writerRawContext.novel.projectCanonProfileJson || '',
+        canonConstraintSetJson: writerRawContext.novel.canonConstraintSetJson || '',
+        sourceLedgerJson: writerRawContext.novel.sourceLedgerJson || '',
+        canonSourceLedgerJson: writerRawContext.novel.canonSourceLedgerJson || '',
+        canonFactCardsJson: writerRawContext.novel.canonFactCardsJson || '',
+        mentionedCharacters: writerRawContext.mentionedCharacters,
+        mentionedItems: writerRawContext.mentionedItems,
+        mentionedLocations: writerRawContext.mentionedLocations,
+        mentionedFactions: writerRawContext.mentionedFactions,
       },
       baseContextParts: {
-        characterStates: rawContext.contextParts.characterStates,
-        worldStates: rawContext.contextParts.worldStates,
-        mapSummary: rawContext.contextParts.mapSummary,
-        itemSummary: rawContext.contextParts.itemSummary,
-        continuityNotes: rawContext.contextParts.continuityNotes,
-        timelineSummary: rawContext.contextParts.timelineSummary,
-        timelineOpenThreads: rawContext.contextParts.timelineOpenThreads,
-        longTermMemory: rawContext.contextParts.longTermMemory,
-        activeThreads: rawContext.contextParts.activeThreads,
-        openLoops: rawContext.contextParts.openLoops,
-        dueForeshadows: rawContext.contextParts.dueForeshadows,
-        chapterBridgePlan: rawContext.contextParts.chapterBridgePlan,
-        stepMemorySummary: rawContext.contextParts.stepMemorySummary,
-        relationSummary: rawContext.contextParts.relationSummary,
-        dialogueVoiceLocks: rawContext.contextParts.dialogueVoiceLocks,
-        recalledMemory: rawContext.contextParts.recalledMemory,
+        characterStates: writerRawContext.contextParts.characterStates,
+        worldStates: writerRawContext.contextParts.worldStates,
+        mapSummary: writerRawContext.contextParts.mapSummary,
+        itemSummary: writerRawContext.contextParts.itemSummary,
+        continuityNotes: writerRawContext.contextParts.continuityNotes,
+        timelineSummary: writerRawContext.contextParts.timelineSummary,
+        timelineOpenThreads: writerRawContext.contextParts.timelineOpenThreads,
+        longTermMemory: writerRawContext.contextParts.longTermMemory,
+        activeThreads: writerRawContext.contextParts.activeThreads,
+        openLoops: writerRawContext.contextParts.openLoops,
+        dueForeshadows: writerRawContext.contextParts.dueForeshadows,
+        chapterBridgePlan: writerRawContext.contextParts.chapterBridgePlan,
+        stepMemorySummary: writerRawContext.contextParts.stepMemorySummary,
+        relationSummary: writerRawContext.contextParts.relationSummary,
+        dialogueVoiceLocks: writerRawContext.contextParts.dialogueVoiceLocks,
+        worldRules: writerRawContext.contextParts.worldRules,
+        recalledMemory: writerRawContext.contextParts.recalledMemory,
       },
       invalidation: {
         chapterContextVersion: chapter.contextVersion || 1,
-        novelContextVersion: rawContext.novel.contextVersion || 1,
+        novelContextVersion: writerRawContext.novel.contextVersion || 1,
         assetFingerprint: contractVersion || '',
         cacheSalt: [
           [...(activePromptOverrideKeys || [])].sort().join('|'),
           getActiveChapterPromptOverrideFingerprint(),
+          sourceGrounding.updated ? sourceGrounding.recordedAt || '' : '',
         ].filter(Boolean).join('|'),
         stage: 'draft',
         executionMode: executionMode || 'default',
         preserveConstraintLabels: [...(preserveConstraintLabels || [])].sort(),
       },
-      runtime: resolveWriterRuntimeOptions(rawContext),
+      runtime: resolveWriterRuntimeOptions(writerRawContext),
     })
 
     return {
       writerContextResolution,
       effectiveRawContext: applyWriterContextOverridesToRawContext(
-        rawContext,
+        writerRawContext,
         writerContextResolution.renderedContextOverrides as Partial<ChapterContext>,
       ),
     }

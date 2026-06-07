@@ -462,6 +462,12 @@ const api = {
     test: (id: number) => invokeIpc('model:test', id),
   },
 
+  sourceSearch: {
+    getSettings: () => invokeIpc('sourceSearch:getSettings'),
+    updateSettings: (data: unknown) => invokeIpc('sourceSearch:updateSettings', data),
+    test: () => invokeIpc('sourceSearch:test'),
+  },
+
   // Template APIs
   template: {
     list: (type?: string) => invokeIpc('template:list', type),

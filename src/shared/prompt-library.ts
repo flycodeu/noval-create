@@ -751,9 +751,41 @@ function getGenreNarrativeDiscipline(genre?: string): string[] {
         '\u73b0\u4ee3\u60ac\u7591\u8981\u5148\u7ed9\u51fa\u53ef\u8ffd\u67e5\u7684\u5f02\u5e38\u5207\u53e3\uff0c\u518d\u7528\u6863\u6848\u3001\u53e3\u4f9b\u3001\u76d1\u63a7\u3001\u65e7\u95fb\u6216\u8bbf\u95ee\u8bb0\u5f55\u628a\u7ebf\u7d22\u4e32\u8d77\u6765\u3002',
         '\u8981\u540c\u65f6\u5199\u51fa\u73b0\u5b9e\u673a\u6784\u963b\u529b\u3001\u5730\u65b9\u4eba\u60c5\u538b\u529b\u548c\u8c03\u67e5\u4ee3\u4ef7\uff0c\u4e0d\u8981\u53ea\u5806\u795e\u79d8\u6c1b\u56f4\u3002',
       ]
+    case 'historical':
+      return [
+        '历史题材要先判断是真实历史、架空历史还是类历史奇幻；真实历史缺少来源时只能保守表达，不能把编造细节写成史实。',
+        '古言、宫斗、权谋也要让礼法、门第、官制、宗族、地理脚程和物资成本进入剧情，不要只剩古风称谓和情绪拉扯。',
+      ]
+    case 'fantasy':
+      return [
+        '玄幻题材的爽点要建立在等级差、资源争夺、势力反应和能力边界上，不能只靠旁人震惊和主角突然变强。',
+        '每次升级、打脸或反杀都要有前置压迫、可见行动、代价或后续压力，避免奖励无来源。',
+      ]
+    case 'urban-ability':
+      return [
+        '都市脑洞、神豪、系统流或异能爽文要同时保留现实身份、职业/生活场景、舆论与执法风险，不能脱离现代社会成本。',
+        '爽点要按压迫-反证-行动-兑现-余波推进，避免连续堆“震惊”“后悔”“跪求”这类模板反应。',
+      ]
+    case 'western-fantasy':
+      return [
+        '西幻题材要让领地、教会、信仰、军需、阶层礼法和施法材料共同约束行动，不要只写种族标签和魔法奇观。',
+        '王国、骑士、教会和异族关系要形成利益网络，每个奇观都要有成本、来源或禁忌。',
+      ]
     default:
       return []
   }
+}
+
+function getReaderPleasureDiscipline(genre?: string): string[] {
+  const text = genre || ''
+  if (!/爽文|打脸|逆袭|神豪|系统|赘婿|重生|穿越|脑洞|男频|女频|癫文|发疯/u.test(text)) return []
+
+  return [
+    '爽文不是无代价碾压：每个爽点前要有清晰压迫、误判、反证线索或规则限制，兑现时要靠行动、信息差、资源调度或身份反转完成。',
+    '打脸段落要控制重复：不要连续写旁观者震惊、反派后悔或路人议论；每次爽点都换一个冲突载体和后续代价。',
+    '重生、穿越、系统和金手指要有触发边界、信息盲区和副作用，不能替角色自动解决全部选择。',
+    '女频强情绪、癫文或发疯感要服务角色主体性与关系重排，不能退化成无逻辑短句和表情包式重复。',
+  ]
 }
 
 function getLongFormGrowthRules(genre?: string): string[] {
@@ -812,6 +844,7 @@ export function buildGenreRealityRules(params: {
     '幻想向题材可以有超常元素，但必须落在既定体系、等级、代价、触发条件和社会规则里。',
     getGenreRealityBaseline(params.genre),
     ...getGenreNarrativeDiscipline(params.genre),
+    ...getReaderPleasureDiscipline(params.genre),
     params.worldSummary ? '如果题材默认与已给定世界摘要冲突，优先服从已给定的世界摘要，但不能与现有事实相矛盾。' : '',
     ...(params.extraLines || []),
   ]
@@ -828,6 +861,7 @@ export function buildOutputQualityRules(extraLines: string[] = [], genre?: strin
     '人物行为必须匹配身份、信息量、伤势、体力、资源、环境和利害压力。',
     '拿不准时，选择最直白、最符合常识的说法，不要硬造新奇感。',
     '如果设定里有超常能力，同时要交代触发条件、限制或代价。',
+    ...getReaderPleasureDiscipline(genre),
     ...(genre ? getLongFormGrowthRules(genre) : []),
     ...extraLines,
   ]
@@ -894,6 +928,7 @@ export function buildHumanizedLongformDesignRules(params: {
     '生成目标是提高成稿质量、原创性和可读性，并保留合规标识与人工确认流程，不把规则写成规避平台声明或伪装来源。',
     params.taskFocus ? `本轮人类化重点：${params.taskFocus}` : '',
     ...(genreSubstrate[genreKey] || []),
+    ...getReaderPleasureDiscipline(params.genre),
     ...(params.extraLines || []),
   ]
     .filter(Boolean)

@@ -219,6 +219,46 @@
   overflow-wrap: anywhere;
 }
 
+.workspace-chat-assistant__patch-card {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--assistant-border) 66%);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent-soft) 48%, var(--assistant-surface) 52%);
+}
+
+.workspace-chat-assistant__patch-summary {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.workspace-chat-assistant__patch-summary strong,
+.workspace-chat-assistant__patch-summary span,
+.workspace-chat-assistant__patch-warning {
+  overflow-wrap: anywhere;
+}
+
+.workspace-chat-assistant__patch-summary strong {
+  color: var(--assistant-text);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.workspace-chat-assistant__patch-summary span,
+.workspace-chat-assistant__patch-warning {
+  color: var(--assistant-text-soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.workspace-chat-assistant__patch-card .ant-btn {
+  justify-self: start;
+  max-width: 100%;
+}
+
 .workspace-chat-assistant__message--assistant:has(.ant-spin) {
   display: flex;
   align-items: center;

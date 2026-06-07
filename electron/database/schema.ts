@@ -874,6 +874,15 @@ export const modelConfigs = sqliteTable('model_configs', {
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
 })
 
+export const sourceSearchSettings = sqliteTable('source_search_settings', {
+  id: integer('id').primaryKey(),
+  provider: text('provider').notNull().default('auto'),
+  tavilyApiKey: text('tavily_api_key'),
+  braveApiKey: text('brave_api_key'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
 export const templates = sqliteTable('templates', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   type: text('type').notNull(),

@@ -14,6 +14,12 @@ coverage/
 .vite/
 .cache/
 .tmp-tests/
+.playwright-mcp/
+.runtime-logs/
+.tmp-test*
+*.db
+*.sqlite
+*.sqlite3
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

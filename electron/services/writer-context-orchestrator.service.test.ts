@@ -454,6 +454,66 @@ describe('writer context orchestrator', () => {
     ]))
   })
 
+  it('loads source grounding as a dedicated writer context bucket for historical projects', async () => {
+    const input = createInput({
+      signals: {
+        chapterTitle: '驿站夜报',
+        chapterOutline: '主角必须判断边镇军报是否可信。',
+        chapterGoal: '用驿递延误制造朝堂误判',
+        genre: '历史正剧',
+        worldRules: '王朝使用州府、郡县、驿站、官道与军镇体系。未确认细节必须保守表达。',
+        backgroundText: '故事发生在王朝边镇与京畿之间，军报传递受到驿路与汛期影响。',
+        historicalProfileJson: JSON.stringify({
+          mode: 'historical_realist',
+          eraPackId: 'late_imperial',
+          regionPackId: 'northwest_frontier',
+        }),
+        sourceLedgerJson: JSON.stringify([{
+          sourceKey: 'src-1',
+          factTitle: '驿递限制',
+          sourceText: '跨区域公文传递依赖驿站、官道和地方转呈，不能写成瞬时通信。',
+          sourceUrl: 'https://example.test/post-road',
+          verificationStatus: 'web_found',
+          recordedAt: '2026-06-07T00:00:00.000Z',
+        }]),
+        canonFactCardsJson: JSON.stringify([{
+          cardKey: 'fact-1',
+          title: '军报时滞',
+          summary: '边镇军报到京畿存在路程与转呈延迟。',
+        }]),
+        mentionedCharacters: [],
+        mentionedItems: [],
+        mentionedLocations: [],
+      },
+      baseContextParts: {
+        worldRules: '王朝使用州府、郡县、驿站、官道与军镇体系。',
+      },
+      runtime: {
+        useMemoryCache: false,
+      },
+    })
+    const plan = __writerOrchestratorTestUtils.buildWriterQueryPlan(input)
+
+    expect(plan.find((step) => step.bucket === 'source_grounding')).toEqual(expect.objectContaining({
+      enabled: true,
+      serviceCalls: ['source_grounding.get_pack'],
+    }))
+
+    const resolution = await resolveWriterOrchestratedContext(input)
+
+    expect(resolution.structuredPack.sourceGrounding).toEqual(expect.objectContaining({
+      mode: 'historical_realist',
+      coverage: 'grounded',
+    }))
+    expect(resolution.renderedContextOverrides.worldRules).toContain('来源摘录')
+    expect(resolution.renderedContextOverrides.worldRules).toContain('驿递限制')
+    expect(resolution.renderedContextOverrides.worldRules).toContain('https://example.test/post-road')
+    expect(resolution.renderedContextOverrides.worldRules).toContain('status=web_found')
+    expect(resolution.renderedContextOverrides.worldRules).toContain('军报时滞')
+    expect(resolution.allocatorInputSummary.buckets.some((bucket) =>
+      bucket.bucket === 'source_grounding' && bucket.renderedLabels.includes('worldRules'))).toBe(true)
+  })
+
   it('honors expanded runtime limits for large-cast scenes', async () => {
     const names = Array.from({ length: 10 }, (_, index) => `角色${index + 1}`)
 

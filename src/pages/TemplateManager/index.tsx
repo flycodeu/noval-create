@@ -10,7 +10,6 @@ import { WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../Novel/compone
 const TYPE_LABELS: Record<string, string> = {
   style: '文风模板',
   world: '世界观模板',
-  writing_step: '步骤提示词',
 }
 
 function summarizeTemplateContent(contentJson?: string) {
@@ -71,12 +70,21 @@ export default function TemplateManager() {
   const customCount = templates.length - builtinCount
 
   const handleEdit = (tmpl: Template) => {
+    let formattedContent = tmpl.contentJson || ''
+    if (tmpl.contentJson) {
+      try {
+        formattedContent = JSON.stringify(JSON.parse(tmpl.contentJson), null, 2)
+      } catch {
+        formattedContent = tmpl.contentJson
+      }
+    }
+
     setEditing(tmpl)
     form.setFieldsValue({
       name: tmpl.name,
       type: tmpl.type,
       description: tmpl.description,
-      contentJson: tmpl.contentJson ? JSON.stringify(JSON.parse(tmpl.contentJson), null, 2) : '',
+      contentJson: formattedContent,
     })
     setEditOpen(true)
   }
@@ -212,9 +220,9 @@ export default function TemplateManager() {
         className="admin-page template-manager-page"
         layout="wide"
         heroVariant="compact"
-        eyebrow="复用资产"
-        title="模板系统"
-        description="统一维护文风模板、世界观模板和运行辅助模板，区分内置模板与可编辑自定义模板。"
+        eyebrow="开书底板"
+        title="风格模板"
+        description="这里只维护新建小说时可选的文风模板和世界观模板；真正影响生成链路的运行时 prompt 在“提示词”页管理。"
         actions={(
           <div className="admin-toolbar">
             <div className="novel-pill">{`当前查看：${TYPE_LABELS[activeTab]}`}</div>
@@ -239,7 +247,7 @@ export default function TemplateManager() {
       >
         <WorkspacePanel
           title="模板目录"
-          description="内置模板只读，自定义模板可以直接编辑或删除。切换标签后会同步筛选当前卡片列表。"
+          description="内置模板只读，自定义模板可以编辑或删除。模板用于开书阶段给文风和世界底板提供可复用约束。"
         >
           {refreshing ? (
             <div className="novel-dashboard__refresh-indicator" style={{ marginBottom: 16 }}>

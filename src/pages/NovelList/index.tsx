@@ -546,8 +546,9 @@ export default function NovelList() {
         open={wizardOpen}
         onCancel={resetWizard}
         footer={null}
-        width={820}
+        width={940}
         className="novel-list-page__wizard-modal"
+        forceRender
         destroyOnHidden
       >
         <div className="novel-list-page__wizard-layout">

@@ -9225,6 +9225,22 @@ html[data-theme="dark"] .ant-card-actions > li {
   gap: 16px;
 }
 
+.admin-page .admin-form-grid {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.admin-page .admin-form-grid--three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 1080px) {
+  .admin-page .admin-form-grid--three {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .novel-outline-chapter-card--selected {
   border-color: rgba(46, 134, 171, 0.6);
   box-shadow: 0 0 0 1px rgba(46, 134, 171, 0.24);

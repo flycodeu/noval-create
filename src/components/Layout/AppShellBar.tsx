@@ -6,11 +6,11 @@ import WindowControls from './WindowControls'
 import './AppLayout.css'
 
 const SECTION_LABELS = [
-  { key: '/novels', label: '我的小说', summary: '项目列表与工作区入口' },
-  { key: '/models', label: '模型管理', summary: '模型配置与调用策略' },
-  { key: '/templates', label: '模板系统', summary: '模板组织与复用' },
-  { key: '/prompts', label: '提示词', summary: '提示词资产管理' },
-  { key: '/tasks', label: '任务中心', summary: '生成任务与执行状态' },
+  { key: '/novels', label: '我的小说' },
+  { key: '/models', label: '模型管理' },
+  { key: '/templates', label: '风格模板' },
+  { key: '/prompts', label: '提示词' },
+  { key: '/tasks', label: '任务中心' },
 ]
 
 export default function AppShellBar() {

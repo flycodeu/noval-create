@@ -18,11 +18,13 @@ import type {
   WriterOrchestratedItemPackEntry,
   WriterOrchestratedMapLocationPackEntry,
   WriterOrchestratedRecallHit,
+  WriterOrchestratedSourceGroundingPack,
   WriterOrchestratedStoryMemoryPack,
   WriterOrchestratedThreadPack,
   WriterOrchestratedTimelinePackEntry,
   WriterOrchestratedWorldStatePack,
 } from '../../src/types'
+import { assessHistoricalGrounding } from '../../src/shared/genre-system'
 import { getCharacterDetailContext, listCharacters } from './character.service'
 import type { CharacterStateSummary as ServiceCharacterStateSummary } from './character-state.service'
 import { searchSimilarFragments } from './embedding.service'
@@ -59,6 +61,7 @@ interface MemoryCacheEntry {
 
 interface WriterToolAccumulator {
   storyMemoryPack?: WriterOrchestratedStoryMemoryPack
+  sourceGroundingPack?: WriterOrchestratedSourceGroundingPack
   characterEntries: WriterOrchestratedCharacterPackEntry[]
   itemEntries: WriterOrchestratedItemPackEntry[]
   mapLocationEntries: WriterOrchestratedMapLocationPackEntry[]
@@ -224,6 +227,49 @@ function parseJsonArrayText(raw?: string | null): string[] {
   }
 }
 
+function parseJsonRecord(raw?: string | null): Record<string, unknown> {
+  if (!raw) return {}
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {}
+  } catch {
+    return {}
+  }
+}
+
+function parseJsonRecordArray(raw?: string | null): Record<string, unknown>[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item))
+      : []
+  } catch {
+    return []
+  }
+}
+
+function collectJsonTextLeaves(value: unknown, depth = 0): string[] {
+  if (depth >= 3) return []
+  if (typeof value === 'string') {
+    const text = value.trim()
+    return text ? [text] : []
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) return [String(value)]
+  if (Array.isArray(value)) return value.flatMap((item) => collectJsonTextLeaves(item, depth + 1))
+  if (value && typeof value === 'object') {
+    return Object.values(value as Record<string, unknown>).flatMap((item) => collectJsonTextLeaves(item, depth + 1))
+  }
+  return []
+}
+
+function renderJsonValueSummary(value: unknown, maxChars = 72): string {
+  const text = collectJsonTextLeaves(value).join('；')
+  return text ? summarizeText(text, maxChars) : ''
+}
+
 function collectAliasText(value: unknown): string[] {
   if (Array.isArray(value)) return value.flatMap((item) => collectAliasText(item))
   if (value && typeof value === 'object') {
@@ -291,6 +337,16 @@ function buildWriterQueryPlan(input: WriterContextOrchestratorInput): WriterCont
   const worldStates = asText(signals.worldStates)
   const timelineSummary = asText(signals.timelineSummary)
   const timelineOpenThreads = asText(signals.timelineOpenThreads)
+  const genre = asText(signals.genre)
+  const worldRules = asText(signals.worldRules || input.baseContextParts?.worldRules)
+  const sourceText = [
+    signals.historicalProfileJson,
+    signals.projectCanonProfileJson,
+    signals.canonConstraintSetJson,
+    signals.sourceLedgerJson,
+    signals.canonSourceLedgerJson,
+    signals.canonFactCardsJson,
+  ].map(asText).filter(Boolean).join('\n')
 
   const storyMemoryEnabled = Boolean(
     chapterGoal
@@ -318,6 +374,19 @@ function buildWriterQueryPlan(input: WriterContextOrchestratorInput): WriterCont
   const recallCharacterEnabled = mentionedCharacters.length > 0 || mentionedFactions.length > 0
   const recallRuleEnabled = Boolean(worldStates || timelineSummary || mentionedFactions.length > 0)
   const recallThreadEnabled = Boolean(activeThreads || openLoops || dueForeshadows || chapterBridgePlan || stepMemorySummary)
+  const groundingAssessment = assessHistoricalGrounding({
+    genreName: genre,
+    worldRulesJson: worldRules,
+    backgroundText: signals.backgroundText,
+    glossaryTerms: signals.glossaryTerms,
+    historicalProfileJson: signals.historicalProfileJson,
+    projectCanonProfileJson: signals.projectCanonProfileJson,
+    canonConstraintSetJson: signals.canonConstraintSetJson,
+    sourceLedgerJson: signals.sourceLedgerJson,
+    canonSourceLedgerJson: signals.canonSourceLedgerJson,
+    canonFactCardsJson: signals.canonFactCardsJson,
+  })
+  const sourceGroundingEnabled = groundingAssessment.mode !== 'none' || sourceText.length > 0
 
   return [
     buildQueryStep(
@@ -326,6 +395,21 @@ function buildWriterQueryPlan(input: WriterContextOrchestratorInput): WriterCont
       storyMemoryEnabled ? '当前章节存在承接或全局记忆需求。' : '当前章节不需要额外长程记忆包。',
       extractTerms([chapterGoal, activeThreads, openLoops, dueForeshadows, chapterBridgePlan, stepMemorySummary], 6),
       ['story_memory.get_pack'],
+    ),
+    buildQueryStep(
+      'source_grounding',
+      sourceGroundingEnabled,
+      sourceGroundingEnabled
+        ? '当前题材或项目来源账本需要来源 grounding 约束。'
+        : '没有真实历史或来源账本信号。',
+      dedupe([
+        genre,
+        ...extractTerms([worldRules, signals.backgroundText], 8),
+        ...(signals.glossaryTerms || []),
+      ], 12),
+      ['source_grounding.get_pack'],
+      [genre, chapterGoal, worldRules, signals.backgroundText, sourceText].filter(Boolean).join('\n'),
+      6,
     ),
     buildQueryStep(
       'character',
@@ -498,6 +582,86 @@ function renderStoryMemoryPack(snapshot: ReturnType<typeof buildStoryMemorySnaps
     continuityDirectives: snapshot.continuityDirectives.slice(0, 6),
     timelineAnchors: snapshot.timelineAnchors.slice(0, 6),
     itemLedger: snapshot.itemLedger.slice(0, 6),
+  }
+}
+
+function renderSourceGroundingPack(signals: WriterContextOrchestratorInput['signals']): WriterOrchestratedSourceGroundingPack {
+  const assessment = assessHistoricalGrounding({
+    genreName: signals.genre,
+    worldRulesJson: signals.worldRules,
+    backgroundText: signals.backgroundText,
+    glossaryTerms: signals.glossaryTerms,
+    historicalProfileJson: signals.historicalProfileJson,
+    projectCanonProfileJson: signals.projectCanonProfileJson,
+    canonConstraintSetJson: signals.canonConstraintSetJson,
+    sourceLedgerJson: signals.sourceLedgerJson,
+    canonSourceLedgerJson: signals.canonSourceLedgerJson,
+    canonFactCardsJson: signals.canonFactCardsJson,
+  })
+  const historicalProfile = parseJsonRecord(signals.historicalProfileJson)
+  const projectCanonProfile = parseJsonRecord(signals.projectCanonProfileJson)
+  const canonConstraintSet = parseJsonRecord(signals.canonConstraintSetJson)
+  const sourceLedgerEntries = [
+    ...parseJsonRecordArray(signals.sourceLedgerJson),
+    ...parseJsonRecordArray(signals.canonSourceLedgerJson),
+  ]
+  const canonFactCards = parseJsonRecordArray(signals.canonFactCardsJson)
+
+  const profileLines = [
+    historicalProfile.mode ? `历史模式：${renderJsonValueSummary(historicalProfile.mode, 40)}` : '',
+    historicalProfile.eraPackId ? `时代包：${renderJsonValueSummary(historicalProfile.eraPackId, 40)}` : '',
+    historicalProfile.regionPackId ? `地域包：${renderJsonValueSummary(historicalProfile.regionPackId, 40)}` : '',
+    projectCanonProfile.worldType ? `世界类型：${renderJsonValueSummary(projectCanonProfile.worldType, 48)}` : '',
+    projectCanonProfile.technologyCeiling ? `技术上限：${renderJsonValueSummary(projectCanonProfile.technologyCeiling, 64)}` : '',
+    projectCanonProfile.supernaturalCeiling ? `超自然上限：${renderJsonValueSummary(projectCanonProfile.supernaturalCeiling, 64)}` : '',
+  ].filter(Boolean)
+  const constraintLines = [
+    ...profileLines,
+    ...Object.entries(canonConstraintSet)
+      .map(([key, value]) => {
+        const summary = renderJsonValueSummary(value, 82)
+        return summary ? `${key}：${summary}` : ''
+      })
+      .filter(Boolean),
+  ].slice(0, 8)
+  const sourceLines = sourceLedgerEntries
+    .map((entry) => {
+      const title = asText(entry.factTitle) || asText(entry.title) || asText(entry.sourceKey)
+      const sourceText = asText(entry.sourceText) || asText(entry.summary) || collectJsonTextLeaves(entry).join('；')
+      const sourceUrl = asText(entry.sourceUrl) || asText(entry.url)
+      const verificationStatus = asText(entry.verificationStatus)
+      const sourceDate = asText(entry.publishedAt) || asText(entry.recordedAt) || asText(entry.updatedAt)
+      const meta = [
+        sourceUrl ? `url=${summarizeText(sourceUrl, 120)}` : '',
+        verificationStatus ? `status=${verificationStatus}` : '',
+        sourceDate ? `date=${sourceDate.slice(0, 10)}` : '',
+      ].filter(Boolean).join('；')
+      const body = [title, summarizeText(sourceText, 96)].filter(Boolean).join('：')
+      return meta ? `${body}（${meta}）` : body
+    })
+    .filter(Boolean)
+    .slice(-6)
+  const canonFactLines = canonFactCards
+    .map((entry) => {
+      const title = asText(entry.title) || asText(entry.cardKey)
+      const summary = asText(entry.summary) || collectJsonTextLeaves(entry).join('；')
+      return [title, summarizeText(summary, 96)].filter(Boolean).join('：')
+    })
+    .filter(Boolean)
+    .slice(-8)
+  const hasProjectSources = sourceLines.length > 0 || canonFactLines.length > 0 || constraintLines.length > 0
+
+  return {
+    assessmentSummary: assessment.mode === 'none' && hasProjectSources
+      ? '项目来源账本已加载；正文只能把来源支持的事实写成定论，缺少来源的内容必须写成推断、传闻或待确认。'
+      : assessment.summary,
+    mode: assessment.mode,
+    coverage: assessment.coverage,
+    conservativeFallbackActive: assessment.conservativeFallbackActive,
+    sourceLines,
+    canonFactLines,
+    constraintLines,
+    missingSignals: assessment.missingSignals,
   }
 }
 
@@ -880,6 +1044,7 @@ function filterValidatedRecallHits(
 
 function buildRenderedOverrides(
   storyMemoryPack: WriterOrchestratedStoryMemoryPack | undefined,
+  sourceGroundingPack: WriterOrchestratedSourceGroundingPack | undefined,
   characters: WriterOrchestratedCharacterPackEntry[],
   items: WriterOrchestratedItemPackEntry[],
   mapLocations: WriterOrchestratedMapLocationPackEntry[],
@@ -901,6 +1066,7 @@ function buildRenderedOverrides(
   const timelineCharLimit = Math.max(760, Math.min(3000, timelineLineLimit * 140))
   const threadCharLimit = Math.max(720, Math.min(3000, threadLineLimit * 140))
   const result: WriterContextRenderedOverrides = {
+    worldRules: baseContextParts?.worldRules || '',
     characterStates: '',
     relationSummary: '',
     dialogueVoiceLocks: '',
@@ -932,6 +1098,23 @@ function buildRenderedOverrides(
       compactLines(storyMemoryPack.continuityDirectives, threadLineLimit, threadCharLimit),
       Math.max(8, threadLineLimit),
       Math.max(760, threadCharLimit),
+    )
+  }
+  if (sourceGroundingPack) {
+    const groundingLines = [
+      sourceGroundingPack.assessmentSummary ? `来源状态：${sourceGroundingPack.assessmentSummary}` : '',
+      sourceGroundingPack.sourceLines.length > 0 ? `来源摘录：\n${sourceGroundingPack.sourceLines.map((line) => `- ${line}`).join('\n')}` : '',
+      sourceGroundingPack.canonFactLines.length > 0 ? `已确认事实：\n${sourceGroundingPack.canonFactLines.map((line) => `- ${line}`).join('\n')}` : '',
+      sourceGroundingPack.constraintLines.length > 0 ? `来源约束：\n${sourceGroundingPack.constraintLines.map((line) => `- ${line}`).join('\n')}` : '',
+      sourceGroundingPack.conservativeFallbackActive
+        ? '保守 fallback：缺少来源支持的真实历史、制度、官称、器物、地理和纪年细节不得写成定论；只能写成待确认、传闻或低承诺描述。'
+        : '',
+    ].filter(Boolean)
+    result.worldRules = mergePreservingBase(
+      baseContextParts?.worldRules,
+      compactLines(groundingLines, 12, 1800),
+      16,
+      3600,
     )
   }
   if (characters.length > 0) {
@@ -1045,6 +1228,7 @@ function buildAllocatorInputSummary(
       const renderedLabels = overrideEntries
         .filter(([key]) => {
           if (step.bucket === 'story_memory') return key === 'longTermMemory' || key === 'activeThreads' || key === 'continuityNotes' || key === 'chapterBridgePlan' || key === 'stepMemorySummary'
+          if (step.bucket === 'source_grounding') return key === 'worldRules'
           if (step.bucket === 'character') return key === 'characterStates' || key === 'relationSummary' || key === 'dialogueVoiceLocks'
           if (step.bucket === 'item') return key === 'itemSummary'
           if (step.bucket === 'map_location') return key === 'mapSummary'
@@ -1131,6 +1315,28 @@ function buildWriterToolRegistry(): Record<WriterContextQueryBucket, RegisteredW
         return {
           status: 'success',
           resultCount: accumulator.storyMemoryPack.phaseDigest.length + accumulator.storyMemoryPack.plotMilestones.length,
+        }
+      },
+    },
+    source_grounding: {
+      bucket: 'source_grounding',
+      toolName: 'source_grounding.get_pack',
+      execute: (_step, context, accumulator) => {
+        accumulator.sourceGroundingPack = renderSourceGroundingPack(context.input.signals)
+        const resultCount = accumulator.sourceGroundingPack.sourceLines.length
+          + accumulator.sourceGroundingPack.canonFactLines.length
+          + accumulator.sourceGroundingPack.constraintLines.length
+        if (accumulator.sourceGroundingPack.mode !== 'none' || resultCount > 0) {
+          return {
+            status: 'success',
+            resultCount,
+          }
+        }
+        return {
+          status: 'failed',
+          resultCount: 0,
+          errorMessage: 'source grounding pack empty',
+          fallbackEvent: makeFallbackEvent('source_grounding', 'empty_result', '来源 grounding 查询无有效结果。', 'legacy_empty'),
         }
       },
     },
@@ -1524,6 +1730,7 @@ export async function resolveWriterOrchestratedContext(
 
   const renderedContextOverrides = buildRenderedOverrides(
     accumulator.storyMemoryPack,
+    accumulator.sourceGroundingPack,
     accumulator.characterEntries,
     accumulator.itemEntries,
     accumulator.mapLocationEntries,
@@ -1542,6 +1749,7 @@ export async function resolveWriterOrchestratedContext(
     retrievalFingerprint,
     structuredPack: {
       storyMemory: accumulator.storyMemoryPack,
+      sourceGrounding: accumulator.sourceGroundingPack,
       characters: accumulator.characterEntries,
       items: accumulator.itemEntries,
       mapLocations: accumulator.mapLocationEntries,

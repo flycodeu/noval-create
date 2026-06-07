@@ -2105,14 +2105,14 @@ const BUILTIN_GENRE_RULE_PACKS: Record<GenreRulePackKey, GenreWorldRuleSeed> = {
 }
 
 const GENRE_ALIAS_RULES: Array<{ pattern: RegExp; key: GenreRulePackKey }> = [
-  { pattern: /\u4e27\u5c38|\u672b\u4e16|\u75c5\u6bd2|\u5c38\u6f6e/u, key: 'zombie' },
-  { pattern: /\u5386\u53f2\u6b63\u5267|\u5386\u53f2\u5c0f\u8bf4|\u67b6\u7a7a\u5386\u53f2|\u7c7b\u5386\u53f2|\u5bab\u5ef7|\u671d\u5802|\u738b\u671d|\u53f2\u8bd7\u5386\u53f2/u, key: 'historical' },
-  { pattern: /\u4ed9\u4fa0|\u4fee\u771f|\u4fee\u4ed9|\u4ed9\u754c|\u5b97\u95e8/u, key: 'xianxia' },
-  { pattern: /\u6b66\u4fa0|\u6c5f\u6e56|\u4fa0\u5ba2|\u6b66\u6797|\u9556\u5c40|\u5e2e\u4f1a/u, key: 'wuxia' },
-  { pattern: /\u7384\u5e7b|\u6597\u7834|\u6597\u6c14|\u5347\u7ea7/u, key: 'fantasy' },
-  { pattern: /\u60ac\u7591|\u63a8\u7406|\u5211\u4fa6|\u4fa6\u67e5|\u8c03\u67e5|\u793e\u4f1a\u6d3e|\u672c\u683c|\u7f6a\u6848|\u65e7\u6848/u, key: 'modern-mystery' },
-  { pattern: /\u90fd\u5e02\u5f02\u80fd|\u5f02\u80fd|\u73b0\u4ee3\u5f02\u80fd|\u8d85\u80fd\u529b|\u89c9\u9192/u, key: 'urban-ability' },
-  { pattern: /\u897f\u5e7b|\u9b54\u6cd5|\u6559\u4f1a|\u738b\u56fd/u, key: 'western-fantasy' },
+  { pattern: /丧尸|末世|病毒|尸潮|废土|灾变|生存区/u, key: 'zombie' },
+  { pattern: /历史正剧|历史小说|架空历史|类历史|宫廷|朝堂|王朝|史诗历史|古言|宫斗|宅斗|权谋|女帝|侯府|将门/u, key: 'historical' },
+  { pattern: /仙侠|修真|修仙|仙界|宗门|凡人流|灵根|飞升|渡劫/u, key: 'xianxia' },
+  { pattern: /武侠|江湖|侠客|武林|镖局|帮会|门派恩怨|刀客|剑客/u, key: 'wuxia' },
+  { pattern: /玄幻|斗破|斗气|升级|高武|异界|血脉|神话脑洞|领主争霸/u, key: 'fantasy' },
+  { pattern: /悬疑|推理|刑侦|侦查|调查|社会派|本格|罪案|旧案|探案|法医|诡案/u, key: 'modern-mystery' },
+  { pattern: /都市异能|异能|现代异能|超能力|觉醒|都市脑洞|都市玄幻|神豪|赘婿|系统流|金手指|打脸|逆袭|爽文/u, key: 'urban-ability' },
+  { pattern: /西幻|魔法|教会|王国|骑士|领地|龙族|精灵|矮人/u, key: 'western-fantasy' },
 ]
 
 function resolvePackKey(genreName?: string | null): GenreRulePackKey {

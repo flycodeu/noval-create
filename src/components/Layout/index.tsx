@@ -37,7 +37,7 @@ const menuItems = [
   {
     key: '/templates',
     icon: <AppstoreOutlined />,
-    label: '模板系统',
+    label: '风格模板',
   },
   {
     key: '/prompts',

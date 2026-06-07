@@ -56,6 +56,7 @@ import * as itemService from './services/item.service'
 import * as mapService from './services/map.service'
 import * as modelService from './services/model.service'
 import { encryptApiKey } from './services/model.service'
+import * as sourceSearchSettingsService from './services/source-search-settings.service'
 import { throwUserFacingError } from './utils/user-facing-error'
 import * as novelService from './services/novel.service'
 import * as subplotService from './services/subplot.service'
@@ -1223,6 +1224,13 @@ function registerIpcHandlers() {
   })
 
   handle('model:test', (_, id) => modelService.testAdapter(id))
+
+  handle('sourceSearch:getSettings', () => sourceSearchSettingsService.getSourceSearchSettings())
+  handle('sourceSearch:updateSettings', (_, data) => {
+    requireObject(data, 'data')
+    return sourceSearchSettingsService.updateSourceSearchSettings(data)
+  })
+  handle('sourceSearch:test', () => sourceSearchSettingsService.testSourceSearchSettings())
 
   handle('template:list', (_, type) => {
     const db = getDb()

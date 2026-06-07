@@ -494,6 +494,15 @@ export function runMigrations(sqlite: Database.Database) {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS source_search_settings (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      provider TEXT NOT NULL DEFAULT 'auto',
+      tavily_api_key TEXT,
+      brave_api_key TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS templates (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       type TEXT NOT NULL,
@@ -747,6 +756,19 @@ export function runMigrations(sqlite: Database.Database) {
   ensureColumn(sqlite, 'tasks', 'progress_json', 'TEXT')
   ensureColumn(sqlite, 'model_configs', 'max_context_tokens', 'INTEGER')
   ensureColumn(sqlite, 'model_configs', 'max_concurrency', 'INTEGER DEFAULT 2')
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS source_search_settings (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      provider TEXT NOT NULL DEFAULT 'auto',
+      tavily_api_key TEXT,
+      brave_api_key TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    INSERT OR IGNORE INTO source_search_settings (id, provider)
+    VALUES (1, 'auto');
+  `)
 
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS generation_history (

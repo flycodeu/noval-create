@@ -154,6 +154,20 @@ const tests = [
     },
   },
   {
+    name: 'reader pleasure rules keep web-serial爽点 concrete and non-repetitive',
+    run() {
+      const text = prompt.buildHumanizedLongformDesignRules({
+        genre: '都市神豪系统爽文',
+        taskFocus: '本章需要完成一次打脸兑现',
+      })
+      assert.match(text, /压迫/u)
+      assert.match(text, /反证/u)
+      assert.match(text, /旁观者震惊/u)
+      assert.match(text, /触发边界/u)
+      assert.match(text, /^- /m)
+    },
+  },
+  {
     name: 'chapter review prompt carries guardrails and expanded JSON schema',
     run() {
       const text = prompt.buildChapterReviewPrompt({
@@ -412,15 +426,23 @@ const tests = [
     },
   },
   {
-    name: 'genre hollowing guardrails catch xianxia zombie and wuxia drift',
+    name: 'genre hollowing guardrails catch core and expanded genre drift',
     run() {
       const zombieFindings = guardrails.collectQualityGuardrailFindings('末世里尸潮逼近，丧尸在街口嘶吼，所有人都在灾变中感受绝望，只会反复喊要活下去。', '末世')
       const xianxiaFindings = guardrails.collectQualityGuardrailFindings('他仰望大道，心里只剩飞升、长生与问道，仿佛仙途尽头自有造化与天道回应。', '仙侠修真')
       const wuxiaFindings = guardrails.collectQualityGuardrailFindings('刀光一闪，剑光再起，两人交手数十招，掌风四散，决战之后各自远去。', '武侠')
+      const historicalFindings = guardrails.collectQualityGuardrailFindings('朝堂风云翻涌，宫闱权谋暗生，后宫恩宠与圣心牵动天下，却没有人说清规矩。', '古言宫斗权谋')
+      const fantasyFindings = guardrails.collectQualityGuardrailFindings('威压横扫全场，天骄震动，逆天机缘降临，至尊神威让所有人立刻臣服。', '玄幻')
+      const urbanFindings = guardrails.collectQualityGuardrailFindings('系统奖励到账，全场震惊，反派当场后悔跪求，主角完成最爽打脸。', '都市神豪系统爽文')
+      const westernFindings = guardrails.collectQualityGuardrailFindings('骑士举起圣光，王国预言降临，魔法和龙在黑暗远征中铺满荣耀。', '西幻骑士领地')
 
       assert.ok(zombieFindings.some((item) => item.code === 'genre_hollowing'))
       assert.ok(xianxiaFindings.some((item) => item.code === 'genre_hollowing'))
       assert.ok(wuxiaFindings.some((item) => item.code === 'genre_hollowing'))
+      assert.ok(historicalFindings.some((item) => item.code === 'genre_hollowing'))
+      assert.ok(fantasyFindings.some((item) => item.code === 'genre_hollowing'))
+      assert.ok(urbanFindings.some((item) => item.code === 'genre_hollowing'))
+      assert.ok(westernFindings.some((item) => item.code === 'genre_hollowing'))
       assert.match(guardrails.formatQualityGuardrailSummary(xianxiaFindings).join('\n'), /体裁|修仙/u)
     },
   },  {

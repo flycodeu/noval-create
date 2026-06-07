@@ -734,7 +734,7 @@ function withPresetMeta(
   }
 
   let majorCount = clampInt(targetTotal * roleWeights.major, scale.operatingMode === 'shortform' ? 2 : 4, Math.max(18, Math.ceil(targetTotal * 0.32)))
-  let antagonistCount = clampInt(targetTotal * roleWeights.antagonist, preset.antagonistCount > 0 ? 1 : 0, Math.max(12, Math.ceil(targetTotal * 0.18)))
+  const antagonistCount = clampInt(targetTotal * roleWeights.antagonist, preset.antagonistCount > 0 ? 1 : 0, Math.max(12, Math.ceil(targetTotal * 0.18)))
   let supportingCount = clampInt(targetTotal * roleWeights.supporting, 1, Math.max(18, Math.ceil(targetTotal * 0.28)))
   let minorCount = Math.max(0, targetTotal - majorCount - antagonistCount - supportingCount)
 

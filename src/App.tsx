@@ -228,7 +228,7 @@ export default function App() {
           />
         </div>
       ) : (
-      <HashRouter>
+      <HashRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <AppLayout>
           <Suspense fallback={<div style={{ padding: 24, color: 'var(--text-muted)' }}>页面加载中...</div>}>
             <Routes>

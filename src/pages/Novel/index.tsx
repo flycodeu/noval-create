@@ -1161,6 +1161,7 @@ export default function NovelRouter() {
           controller={workspaceQualityController}
           onClose={() => setAssistantOpen(false)}
           onResizeStart={handleAssistantResizeStart}
+          onApplied={notifyWorkspaceMutation}
           onOpenQuality={currentPage !== 'guide' && currentPage !== 'quality' && currentPage !== 'writeback' && currentPage !== 'batch-workbench'
             ? openWorkspaceQualityBoard
             : undefined}
@@ -1203,6 +1204,7 @@ export default function NovelRouter() {
           currentChapter={currentChapter}
           controller={workspaceQualityController}
           onClose={() => setAssistantOpen(false)}
+          onApplied={notifyWorkspaceMutation}
           onOpenQuality={currentPage !== 'guide' && currentPage !== 'quality' && currentPage !== 'writeback' && currentPage !== 'batch-workbench'
             ? openWorkspaceQualityBoard
             : undefined}

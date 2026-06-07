@@ -232,6 +232,34 @@ const GENRE_HOLLOW_RULES: Partial<Record<string, GenreHollowRule>> = {
     minAbstractHits: 2,
     maxConcreteHits: 1,
   },
+  historical: {
+    message: '历史/古言段落只写朝堂、宫闱或权谋气氛，却缺少礼法、官制、门第、诏令、税粮、军政后勤和时代尺度。',
+    abstractTokens: ['朝堂', '宫闱', '权谋', '后宫', '恩宠', '圣心', '天下', '风云', '规矩'],
+    concreteTokens: ['礼法', '官制', '品级', '诏令', '奏疏', '门第', '宗族', '户籍', '赋税', '税粮', '粮道', '军饷', '驿站', '车马', '脚程', '衙门', '内廷', '外朝', '族规', '家法'],
+    minAbstractHits: 2,
+    maxConcreteHits: 1,
+  },
+  fantasy: {
+    message: '玄幻段落只堆威压、天骄和机缘爽点，却缺少等级差、资源争夺、势力反应、功法限制和战斗代价。',
+    abstractTokens: ['威压', '天骄', '逆天', '机缘', '至尊', '神威', '臣服', '震动', '横扫'],
+    concreteTokens: ['境界', '等级', '血脉', '功法', '法器', '灵石', '丹药', '资源', '宗门', '家族', '秘境', '遗迹', '阵法', '伤势', '反噬', '消耗', '护法', '长老', '势力'],
+    minAbstractHits: 2,
+    maxConcreteHits: 1,
+  },
+  'urban-ability': {
+    message: '都市异能/系统爽文段落只写奖励、震惊和打脸，却缺少现代身份、执法、舆论、监控、成本和能力触发规则。',
+    abstractTokens: ['系统', '奖励', '到账', '震惊', '反派', '后悔', '跪求', '打脸', '爽'],
+    concreteTokens: ['合同', '公司', '银行', '转账', '税务', '警方', '执法', '监控', '舆论', '媒体', '医院', '学校', '小区', '身份', '证据', '规则', '副作用', '冷却', '触发', '代价'],
+    minAbstractHits: 2,
+    maxConcreteHits: 1,
+  },
+  'western-fantasy': {
+    message: '西幻段落只写骑士、圣光、预言和远征氛围，却缺少领地、教会、封臣、粮草、施法材料和信仰秩序。',
+    abstractTokens: ['骑士', '圣光', '预言', '魔法', '龙', '黑暗', '远征', '荣耀', '王国'],
+    concreteTokens: ['领地', '封臣', '庄园', '教会', '教区', '什一税', '粮草', '马匹', '铠甲', '佣兵', '城堡', '要塞', '仪式', '材料', '法术位', '牧师', '修道院', '种族', '盟约', '继承'],
+    minAbstractHits: 2,
+    maxConcreteHits: 1,
+  },
 }
 
 const BUILTIN_ANTI_AI_PROMPT_RULES: AntiAiPromptRule[] = [
@@ -388,6 +416,38 @@ const GENRE_ANTI_AI_PROMPT_RULES: Partial<Record<string, AntiAiPromptRule[]>> = 
       bucket: 'structure',
       avoid: '武侠段不要只写招式和气势，不补江湖规矩、师承门第、名声与行路成本。',
       prefer: '把门规、人情、盘缠、官府和伤药写进冲突后果。',
+    },
+  ],
+  historical: [
+    {
+      code: 'genre_hollowing',
+      bucket: 'structure',
+      avoid: '历史/古言段不要只写朝堂风云、宫闱权谋和圣心恩宠，不补礼法、官制、门第、诏令、税粮和脚程。',
+      prefer: '把制度、身份秩序、时代物件和后勤成本写成角色必须面对的限制。',
+    },
+  ],
+  fantasy: [
+    {
+      code: 'genre_hollowing',
+      bucket: 'structure',
+      avoid: '玄幻段不要只写威压、天骄、机缘和臣服，不补等级差、资源消耗、势力反应和战斗代价。',
+      prefer: '把境界、功法、资源、反噬和势力秩序写进爽点兑现过程。',
+    },
+  ],
+  'urban-ability': [
+    {
+      code: 'genre_hollowing',
+      bucket: 'structure',
+      avoid: '都市异能/系统爽文不要只写奖励到账、全场震惊和反派跪求，不补现代社会规则、监控、舆论、执法和能力代价。',
+      prefer: '让爽点落在可验证的身份、资源、证据、风险和反击路径上。',
+    },
+  ],
+  'western-fantasy': [
+    {
+      code: 'genre_hollowing',
+      bucket: 'structure',
+      avoid: '西幻段不要只写骑士、圣光、预言、魔法和龙，不补领地治理、教会秩序、粮草、封臣和施法材料。',
+      prefer: '把信仰、封建义务、资源后勤和施法限制写成行动约束。',
     },
   ],
 }

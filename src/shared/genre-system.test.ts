@@ -6,6 +6,15 @@ describe('genre-system historical packs', () => {
     expect(getBuiltinGenreRules('历史正剧').genreProfile.key).toBe('historical')
     expect(getBuiltinGenreRules('架空历史').genreProfile.key).toBe('historical')
     expect(getBuiltinGenreRules('类历史奇幻').genreProfile.key).toBe('historical')
+    expect(getBuiltinGenreRules('古言权谋').genreProfile.key).toBe('historical')
+    expect(getBuiltinGenreRules('宫斗宅斗').genreProfile.key).toBe('historical')
+  })
+
+  it('maps mainstream web-serial aliases to differentiated genre packs', () => {
+    expect(getBuiltinGenreRules('都市神豪系统爽文').genreProfile.key).toBe('urban-ability')
+    expect(getBuiltinGenreRules('末世废土生存').genreProfile.key).toBe('zombie')
+    expect(getBuiltinGenreRules('凡人流修仙').genreProfile.key).toBe('xianxia')
+    expect(getBuiltinGenreRules('骑士领地西幻').genreProfile.key).toBe('western-fantasy')
   })
 
   it('keeps historical world rules when parsing empty or invalid payloads', () => {

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Drawer, Empty, Input, Segmented, Space, Spin, Tag, Tooltip, message } from 'antd'
 import {
   BarChartOutlined,
+  CheckOutlined,
   ClearOutlined,
   CloseOutlined,
   CopyOutlined,
@@ -11,7 +12,14 @@ import {
   ThunderboltOutlined,
 } from '@ant-design/icons'
 import type { AiExecutionMode } from '../../../shared/ai-execution'
-import type { Chapter, Novel, QualityDashboardData } from '../../../types'
+import type {
+  Chapter,
+  Novel,
+  QualityDashboardData,
+  WorkspaceQualityPatch,
+  WorkspaceQualityRepairPreview,
+} from '../../../types'
+import { useNovelStore } from '../../../stores/novel.store'
 import type { RegisteredWorkspaceQualityController } from '../workspace-quality-context-core'
 import {
   buildWorkspaceQualityRequestBase,
@@ -30,6 +38,9 @@ interface AssistantMessage {
   content: string
   intent?: string
   createdAt: number
+  repairPreview?: WorkspaceQualityRepairPreview
+  baseSnapshot?: Record<string, unknown>
+  appliedAt?: number
 }
 
 interface AssistantIntent {
@@ -53,6 +64,7 @@ interface Props {
   onClose: () => void
   onResizeStart?: (event: React.PointerEvent<HTMLButtonElement>) => void
   onOpenQuality?: () => void
+  onApplied?: () => void
 }
 
 const QUALITY_ROUTE_KEYS: WorkspaceQualityRouteKey[] = [
@@ -96,6 +108,11 @@ const ASSISTANT_INTENTS: AssistantIntent[] = [
     prompt: '请基于当前上下文给出可执行修复方案。按“必须修、建议修、可暂缓”分层，并尽量给出可直接替换的中文文本。',
   },
   {
+    id: 'direct_patch',
+    label: '修改当前步骤',
+    prompt: '请直接生成当前步骤可应用的修改补丁：保留作者原意，修掉空泛、重复和不连贯内容；只改当前步骤内最需要调整的字段。',
+  },
+  {
     id: 'humanize',
     label: '去 AI 味',
     prompt: '请专项检测当前内容的 AI 味，包括空泛抽象、模板句、假深刻、对称句式、解释型旁白和角色同质化，并给出更像真人作者的改写方向。',
@@ -114,6 +131,66 @@ const ASSISTANT_INTENTS: AssistantIntent[] = [
 
 function isWorkspaceQualityRouteKey(value: string): value is WorkspaceQualityRouteKey {
   return QUALITY_ROUTE_KEYS.includes(value as WorkspaceQualityRouteKey)
+}
+
+function cloneJson<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T
+}
+
+function getAtPath(target: unknown, path: string[]): unknown {
+  return path.reduce<unknown>((current, segment) => {
+    if (Array.isArray(current)) {
+      const index = Number(segment)
+      return Number.isInteger(index) ? current[index] : undefined
+    }
+    if (current && typeof current === 'object') {
+      return (current as Record<string, unknown>)[segment]
+    }
+    return undefined
+  }, target)
+}
+
+function setAtPath(target: unknown, path: string[], value: unknown) {
+  if (path.length === 0 || !target || typeof target !== 'object') return
+  let cursor: unknown = target
+  for (let index = 0; index < path.length - 1; index += 1) {
+    const segment = path[index]
+    if (Array.isArray(cursor)) {
+      const arrayIndex = Number(segment)
+      cursor = Number.isInteger(arrayIndex) ? cursor[arrayIndex] : undefined
+      continue
+    }
+    if (cursor && typeof cursor === 'object') {
+      cursor = (cursor as Record<string, unknown>)[segment]
+    }
+  }
+
+  const last = path[path.length - 1]
+  if (Array.isArray(cursor)) {
+    const arrayIndex = Number(last)
+    if (Number.isInteger(arrayIndex)) cursor[arrayIndex] = value
+    return
+  }
+  if (cursor && typeof cursor === 'object') {
+    (cursor as Record<string, unknown>)[last] = value
+  }
+}
+
+function applyAllPatches(
+  baseSnapshot: Record<string, unknown>,
+  patchedSnapshot: Record<string, unknown>,
+  patches: WorkspaceQualityPatch[],
+) {
+  const nextSnapshot = cloneJson(baseSnapshot)
+  patches.forEach((patch) => {
+    setAtPath(nextSnapshot, patch.path, getAtPath(patchedSnapshot, patch.path))
+  })
+  return nextSnapshot
+}
+
+function shouldPreparePatch(userRequest: string, intent?: string) {
+  if (intent === 'direct_patch') return true
+  return /直接(?:修改|改写|应用|更新)|帮我(?:修改|改写|更新)|把.+(?:改成|替换成)|修改.+(?:信息|内容|字段|步骤)|应用到当前步骤/u.test(userRequest)
 }
 
 function createMessageId() {
@@ -291,9 +368,9 @@ function buildAssistantPrompt(input: {
       '- 可用性 Agent：如果用户问界面或流程，只评估当前页面密度、步骤、按钮和布局，不臆造不存在的功能。',
     ].join('\n'),
     [
-      '硬性规则：',
-      '- 不要声称你已经修改数据库、表单或正文；本聊天面板只输出建议和候选文本。',
-      '- 如果要真正落地修复，应提示用户使用当前页面保存、AI 质量看板或人工复制候选文本。',
+    '硬性规则：',
+      '- 聊天回复本身不要声称已经保存数据库；如果本次生成了可应用补丁，界面会提供“应用本次修改”按钮。',
+      '- 如果用户要求直接修改，请先说明将修改哪些字段和为什么改；最终落地由当前页面补丁机制完成。',
       '- 给修复时优先保留作者原意，只替换问题句、缺失约束和不稳定设定。',
       '- 如果最近聊天已经给过同类结论，不要换同义词重复；直接标出新增判断、修正判断和仍待确认的风险。',
       '- 回答必须显式承接当前工作区的上游和下游，不要把下一步页面的内容提前写满。',
@@ -333,15 +410,18 @@ export default function WorkspaceChatAssistant({
   onClose,
   onResizeStart,
   onOpenQuality,
+  onApplied,
 }: Props) {
   const [messages, setMessages] = useState<AssistantMessage[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [applyingMessageId, setApplyingMessageId] = useState<string | null>(null)
   const [snapshotLoading, setSnapshotLoading] = useState(false)
   const [snapshot, setSnapshot] = useState<Record<string, unknown> | null>(null)
   const [qualitySignals, setQualitySignals] = useState<string[]>([])
   const [executionMode, setExecutionMode] = useState<AiExecutionMode>('review_first')
   const contextRequestRef = useRef(0)
+  const setCurrentNovel = useNovelStore((state) => state.setCurrentNovel)
 
   const qualityKey = useMemo(
     () => (isWorkspaceQualityRouteKey(workspaceKey) ? workspaceKey : null),
@@ -358,6 +438,10 @@ export default function WorkspaceChatAssistant({
     [qualityKey],
   )
   const canUseWorkspaceSnapshot = Boolean(activeController || fallbackAdapter)
+  const canApplyWorkspacePatch = Boolean(
+    (activeController && !activeController.readonly)
+    || (fallbackAdapter?.applySnapshot && !fallbackAdapter.readonly),
+  )
   const contextKey = `${novelId}:${workspaceKey}`
 
   const fetchContext = useCallback(async () => {
@@ -450,14 +534,30 @@ export default function WorkspaceChatAssistant({
         messages: [{ role: 'user', content: prompt }],
       })
       const answer = outputs[0]?.trim() || getUserFacingMessage('workspaceChat.replyEmpty')
+      let repairPreview: WorkspaceQualityRepairPreview | undefined
+      const shouldPatch = shouldPreparePatch(userRequest, intent)
+      if (shouldPatch && promptContext.snapshot && qualityKey && canApplyWorkspacePatch) {
+        repairPreview = await window.electron.ai.repairWorkspaceQuality({
+          ...buildWorkspaceQualityRequestBase(qualityKey, adapterContext),
+          workspaceLabel,
+          workspaceSummary,
+          contentSnapshot: promptContext.snapshot,
+          issues: [],
+          extraRequirements: userRequest,
+        })
+      }
       setMessages((current) => [
         ...current,
         {
           id: createMessageId(),
           role: 'assistant',
-          content: answer,
+          content: repairPreview
+            ? `${answer}\n\n已生成 ${repairPreview.fieldPatches.length + repairPreview.entityPatches.length} 项可应用修改。检查后可点击“应用本次修改”。`
+            : answer,
           intent,
           createdAt: Date.now(),
+          repairPreview,
+          baseSnapshot: repairPreview ? promptContext.snapshot || undefined : undefined,
         },
       ])
     } catch (error) {
@@ -475,11 +575,56 @@ export default function WorkspaceChatAssistant({
     loading,
     messages,
     novelId,
+    adapterContext,
+    canApplyWorkspacePatch,
     qualitySignals,
+    qualityKey,
     snapshot,
     workspaceKey,
     workspaceLabel,
     workspaceSummary,
+  ])
+
+  const handleApplyPreview = useCallback(async (item: AssistantMessage) => {
+    if (!item.repairPreview || !item.baseSnapshot) return
+    const allPatches = [...item.repairPreview.fieldPatches, ...item.repairPreview.entityPatches]
+    if (allPatches.length === 0) {
+      message.info('本次没有可应用的字段修改。')
+      return
+    }
+    const nextSnapshot = applyAllPatches(item.baseSnapshot, item.repairPreview.patchedSnapshot, allPatches)
+    setApplyingMessageId(item.id)
+    try {
+      if (activeController) {
+        await activeController.applySnapshot(nextSnapshot)
+        if (activeController.persistPreview) {
+          await activeController.persistPreview(nextSnapshot, item.repairPreview)
+        }
+      } else if (fallbackAdapter?.applySnapshot) {
+        await fallbackAdapter.applySnapshot(item.baseSnapshot, nextSnapshot, adapterContext)
+        const refreshedNovel = await window.electron.novel.get(novelId)
+        if (refreshedNovel) setCurrentNovel(refreshedNovel)
+      }
+      setMessages((current) => current.map((messageItem) => (
+        messageItem.id === item.id ? { ...messageItem, appliedAt: Date.now() } : messageItem
+      )))
+      onApplied?.()
+      message.success(getUserFacingMessage('workspaceQuality.previewApplied'))
+      void loadContext()
+    } catch (error) {
+      console.error(error)
+      message.error(getUserFacingMessage('workspaceQuality.applyFailed'))
+    } finally {
+      setApplyingMessageId(null)
+    }
+  }, [
+    activeController,
+    adapterContext,
+    fallbackAdapter,
+    loadContext,
+    novelId,
+    onApplied,
+    setCurrentNovel,
   ])
 
   const handleCopy = useCallback(async (content: string) => {
@@ -606,6 +751,29 @@ export default function WorkspaceChatAssistant({
               ) : null}
             </div>
             <div className="workspace-chat-assistant__message-body">{item.content}</div>
+            {item.role === 'assistant' && item.repairPreview ? (
+              <div className="workspace-chat-assistant__patch-card">
+                <div className="workspace-chat-assistant__patch-summary">
+                  <strong>{item.repairPreview.summary || '当前步骤修改预览'}</strong>
+                  <span>{`字段 ${item.repairPreview.fieldPatches.length} 项 · 实体 ${item.repairPreview.entityPatches.length} 项`}</span>
+                </div>
+                {item.repairPreview.warnings.length > 0 ? (
+                  <div className="workspace-chat-assistant__patch-warning">
+                    {item.repairPreview.warnings.slice(0, 2).join('；')}
+                  </div>
+                ) : null}
+                <Button
+                  size="small"
+                  type="primary"
+                  icon={<CheckOutlined />}
+                  disabled={Boolean(item.appliedAt) || !canApplyWorkspacePatch}
+                  loading={applyingMessageId === item.id}
+                  onClick={() => void handleApplyPreview(item)}
+                >
+                  {item.appliedAt ? '已应用' : '应用本次修改'}
+                </Button>
+              </div>
+            ) : null}
           </div>
         ))}
         {loading ? (

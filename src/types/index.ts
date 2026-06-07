@@ -102,6 +102,45 @@ export interface NovelSourceCanonFields {
   canonFactCardsJson?: string
 }
 
+export type SourceVerificationStatus =
+  | 'pending'
+  | 'web_found'
+  | 'user_confirmed'
+  | 'conflicted'
+  | 'rejected'
+
+export interface WebGroundingSourceEntry {
+  sourceKey: string
+  chapterId?: number
+  chapterNum?: number
+  assetType?: string
+  sourceType?: 'web_search' | 'user_document' | 'writeback' | string
+  provider?: string
+  query?: string
+  sourceUrl?: string
+  factTitle?: string
+  sourceText?: string
+  confidence?: number
+  verificationStatus?: SourceVerificationStatus | string
+  publishedAt?: string
+  recordedAt?: string
+}
+
+export interface CanonFactCardEntry {
+  cardKey: string
+  assetType?: string
+  entityType?: string
+  entityId?: number | null
+  title: string
+  summary?: string
+  sourceTexts?: string[]
+  sourceKeys?: string[]
+  confidence?: number
+  verificationStatus?: SourceVerificationStatus | string
+  canonDecision?: string
+  updatedAt?: string
+}
+
 export interface Novel extends NovelSourceCanonFields {
   id: number
   title: string
@@ -1224,6 +1263,32 @@ export interface ModelConfig {
   createdAt: string
 }
 
+export type SourceSearchProviderMode = 'auto' | 'tavily' | 'brave' | 'disabled'
+export type SourceSearchProviderName = 'tavily' | 'brave'
+
+export interface SourceSearchSettingsView {
+  provider: SourceSearchProviderMode
+  tavilyApiKeySet: boolean
+  braveApiKeySet: boolean
+  tavilyEnvSet: boolean
+  braveEnvSet: boolean
+  activeProvider: SourceSearchProviderName | null
+  updatedAt?: string | null
+}
+
+export interface SourceSearchSettingsUpdate {
+  provider?: SourceSearchProviderMode
+  tavilyApiKey?: string
+  braveApiKey?: string
+}
+
+export interface SourceSearchTestResult {
+  success: boolean
+  providerName: SourceSearchProviderName | null
+  latency: number
+  info: string
+}
+
 export interface Template {
   id: number
   type: string
@@ -2217,6 +2282,7 @@ export interface ChapterContextPreview {
 }
 
 export type WriterContextOverrideKey =
+  | 'worldRules'
   | 'characterStates'
   | 'worldStates'
   | 'mapSummary'
@@ -2254,6 +2320,16 @@ export interface WriterContextSignalInput {
   worldStates?: string
   relationSummary?: string
   dialogueVoiceLocks?: string
+  genre?: string
+  worldRules?: string
+  backgroundText?: string
+  glossaryTerms?: string[]
+  historicalProfileJson?: string
+  projectCanonProfileJson?: string
+  canonConstraintSetJson?: string
+  sourceLedgerJson?: string
+  canonSourceLedgerJson?: string
+  canonFactCardsJson?: string
   mentionedCharacters?: string[]
   mentionedItems?: string[]
   mentionedLocations?: string[]
@@ -2328,6 +2404,7 @@ export interface StageToolExecutionResult {
 
 export type WriterContextQueryBucket =
   | 'story_memory'
+  | 'source_grounding'
   | 'character'
   | 'item'
   | 'map_location'
@@ -2478,6 +2555,17 @@ export interface WriterOrchestratedThreadPack {
   continuityLines: string[]
 }
 
+export interface WriterOrchestratedSourceGroundingPack {
+  assessmentSummary: string
+  mode: string
+  coverage: string
+  conservativeFallbackActive: boolean
+  sourceLines: string[]
+  canonFactLines: string[]
+  constraintLines: string[]
+  missingSignals: string[]
+}
+
 export type WriterContextRecallBucket = 'character' | 'rule' | 'thread'
 
 export interface WriterOrchestratedRecallHit {
@@ -2502,6 +2590,7 @@ export interface WriterContextStructuredPack {
   timeline: WriterOrchestratedTimelinePackEntry[]
   worldState?: WriterOrchestratedWorldStatePack
   threads?: WriterOrchestratedThreadPack
+  sourceGrounding?: WriterOrchestratedSourceGroundingPack
   recall: WriterOrchestratedRecallPack
 }
 
@@ -5739,6 +5828,11 @@ declare global {
         delete: (id: number) => Promise<void>
         setDefault: (id: number) => Promise<void>
         test: (id: number) => Promise<{ success: boolean; latency: number; info: string }>
+      }
+      sourceSearch: {
+        getSettings: () => Promise<SourceSearchSettingsView>
+        updateSettings: (data: SourceSearchSettingsUpdate) => Promise<SourceSearchSettingsView>
+        test: () => Promise<SourceSearchTestResult>
       }
       template: {
         list: (type?: string) => Promise<Template[]>

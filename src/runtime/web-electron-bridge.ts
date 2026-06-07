@@ -650,7 +650,7 @@ export function installWebElectronBridge(): void {
         id: 1,
         name: '浏览器预览模型',
         provider: 'mock',
-        model: 'web-preview',
+        modelId: 'web-preview',
         apiKey: '',
         baseUrl: '',
         temperature: 0.7,
@@ -660,6 +660,34 @@ export function installWebElectronBridge(): void {
         isDefault: 1,
         createdAt: NOW,
       }],
+    }),
+    sourceSearch: createService({
+      getSettings: async () => ({
+        provider: 'auto',
+        tavilyApiKeySet: false,
+        braveApiKeySet: false,
+        tavilyEnvSet: false,
+        braveEnvSet: false,
+        activeProvider: null,
+        updatedAt: NOW,
+      }),
+      updateSettings: async (data?: unknown) => ({
+        provider: typeof (data as { provider?: unknown } | undefined)?.provider === 'string'
+          ? (data as { provider: 'auto' | 'tavily' | 'brave' | 'disabled' }).provider
+          : 'auto',
+        tavilyApiKeySet: Boolean((data as { tavilyApiKey?: unknown } | undefined)?.tavilyApiKey),
+        braveApiKeySet: Boolean((data as { braveApiKey?: unknown } | undefined)?.braveApiKey),
+        tavilyEnvSet: false,
+        braveEnvSet: false,
+        activeProvider: null,
+        updatedAt: NOW,
+      }),
+      test: async () => ({
+        success: false,
+        providerName: null,
+        latency: 0,
+        info: 'Web 预览未接入真实 Tavily/Brave 检索。',
+      }),
     }),
     prompt: createService({ list: async () => [] }),
     task: createService({
