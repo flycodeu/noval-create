@@ -59,6 +59,12 @@ const PROTECTED_RULES = [
   '不可覆盖规则：保留章节开头承接上章结尾、章尾留下自然钩子的要求。',
 ]
 
+const PROTECTED_RUNTIME_FIELDS = [
+  { token: 'chapterBridgePlan', label: '章节衔接桥' },
+  { token: 'stepMemorySummary', label: '步骤接力记忆' },
+  { token: 'runtimeAssertions', label: '运行时接力断言' },
+]
+
 function normalizeRecord(row: typeof promptOverrides.$inferSelect): PromptOverrideRecord {
   return {
     key: row.key,
@@ -87,11 +93,20 @@ function recordAudit(key: string, action: 'save' | 'delete' | 'apply', contentPr
   }).run()
 }
 
-function buildProtectedFooter(key: string): string {
+export function buildProtectedFooter(key: string, params: Record<string, unknown> = {}): string {
   if (!CHAPTER_PROMPT_KEYS.has(key)) return ''
+  const runtimeLines = PROTECTED_RUNTIME_FIELDS
+    .map(({ token, label }) => {
+      const rendered = stringifyParam(params[token]).trim()
+      return rendered ? `【${label}】\n${rendered}` : ''
+    })
+    .filter(Boolean)
   return [
     '【系统保留规则】',
     ...PROTECTED_RULES.map((item) => `- ${item}`),
+    runtimeLines.length > 0
+      ? `\n【系统强制接力上下文】\n${runtimeLines.join('\n\n')}`
+      : '',
   ].join('\n')
 }
 
@@ -156,7 +171,7 @@ export function applyPromptOverride(
   }
 
   const overridden = renderPromptOverrideTemplate(override.content, params)
-  const protectedFooter = buildProtectedFooter(key)
+  const protectedFooter = buildProtectedFooter(key, params)
   const finalPrompt = protectedFooter
     ? `${overridden}\n\n${protectedFooter}`
     : overridden

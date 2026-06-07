@@ -1402,12 +1402,13 @@ async function runChapterBatchGenerateWorkflow(taskId: number, sender?: WebConte
       }
 
       const publishCheck = runChapterPublishCheck(chapterId)
-      if (publishCheck.gateLevel === 'blocker') {
+      if (publishCheck.gateLevel === 'blocker' || publishCheck.gateLevel === 'rewrite') {
+        const gateLabel = publishCheck.gateLevel === 'rewrite' ? '要求重写' : '阻断'
         pauseChapterBatchWorkflow(taskId, sender, progress, {
           chapterId,
           chapterNum,
           childTaskId,
-          message: `第 ${chapterNum} 章章节门阻断，章节批量任务已暂停：${publishCheck.summary}`,
+          message: `第 ${chapterNum} 章章节门${gateLabel}，章节批量任务已暂停：${publishCheck.summary}`,
           errorMessage: publishCheck.summary,
         })
         break

@@ -160,6 +160,11 @@ interface WritingPipelineRoleState {
   targetSegmentId?: number | null
 }
 
+interface StepMemoryRuntimeState {
+  summary: string
+  runtimeAssertions: string[]
+}
+
 interface WritingPipelineSnapshot {
   kind: 'chapter_pipeline'
   chapterId: number
@@ -174,6 +179,7 @@ interface WritingPipelineSnapshot {
   canonRunId?: number
   totalTokensUsed: number
   totalDurationMs: number
+  stepMemory?: StepMemoryRuntimeState
   failureCode?: string
   rewriteScope?: string
   targetSegmentId?: number | null
@@ -1907,6 +1913,15 @@ export default function Writing({ novelId }: Props) {
               <div className="novel-copy-block">
                 {`当前阶段：${currentPipelineSnapshot.currentRole ? currentPipelineSnapshot.roles[currentPipelineSnapshot.currentRole]?.label || currentPipelineSnapshot.currentRole : '待启动'} · AI 模式 ${currentPipelineSnapshot.executionMode ? getAiExecutionModeLabel(currentPipelineSnapshot.executionMode) : '未记录'} · 合同版本 ${currentPipelineSnapshot.contractVersion || '未记录'} · 总耗时 ${currentPipelineSnapshot.totalDurationMs ? `${(currentPipelineSnapshot.totalDurationMs / 1000).toFixed(1)}s` : '-'} · 总 tokens ${currentPipelineSnapshot.totalTokensUsed || 0}${currentPipelineSnapshot.failureCode ? ` · 退出码 ${currentPipelineSnapshot.failureCode}` : ''}`}
               </div>
+              {currentPipelineSnapshot.stepMemory?.summary ? (
+                <div className="novel-copy-block writing-layout-copy-prewrap">{currentPipelineSnapshot.stepMemory.summary}</div>
+              ) : (
+                <div className="novel-copy-block">当前流水线还没有记录运行时步骤记忆。</div>
+              )}
+              <StringList
+                items={(currentPipelineSnapshot.stepMemory?.runtimeAssertions || []).map((item) => `运行时断言：${item}`)}
+                empty="当前流水线没有额外运行时断言。"
+              />
               <div className="writing-layout-stack writing-layout-stack--xs">
                 {pipelineRoleItems.map((item) => (
                   <div key={item.role} className="novel-issue-item">
@@ -1940,6 +1955,9 @@ export default function Writing({ novelId }: Props) {
         </InsightCard>
         <InsightCard title="上一章关键先验" eyebrow="承接上一章的真实输入" tone="soft">
           <PreviousChapterFeedCard preview={chapterContextPreview} />
+        </InsightCard>
+        <InsightCard title="章节衔接桥" eyebrow="时间 / 地点 / 情绪 / POV" tone="soft">
+          <ChapterBridgeMemoryCard preview={chapterContextPreview} />
         </InsightCard>
         <InsightCard title="召回补充层" eyebrow="背景补充 / 非事实源" tone="soft">
           <RecallDiagnosticsCard preview={chapterContextPreview} />
@@ -3558,6 +3576,45 @@ function PreviousChapterFeedCard({ preview }: { preview: ChapterContextPreview |
       {preview.previousChapterContext
         ? <div className="novel-copy-block writing-layout-copy-prewrap">{preview.previousChapterContext}</div>
         : <div className="novel-copy-block">当前章节前没有可注入的上一章先验。</div>}
+    </div>
+  )
+}
+
+function ChapterBridgeMemoryCard({ preview }: { preview: ChapterContextPreview | null }) {
+  if (!preview) {
+    return <div className="novel-copy-block">先生成上下文预览，再核对本章开头会怎样承接上一章的时间、地点、情绪和 POV。</div>
+  }
+
+  const bridgeLines = (preview.chapterBridgePlan || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+  const stepMemoryLines = (preview.stepMemorySummary || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+  const runtimeAssertionLines = Array.from(new Set(preview.stages.flatMap((stage) => stage.upstreamArtifacts?.runtimeAssertions || [])))
+    .map((line) => `运行时断言：${line}`)
+  const buildStageDecisionLines = (label: 'chapterBridgePlan' | 'stepMemorySummary', title: string) => preview.stages.map((stage) => {
+    const decision = stage.softContextDecisions.find((entry) => entry.label === label)
+    const upstreamInjected = label === 'stepMemorySummary' && Boolean(stage.upstreamArtifacts?.stepMemorySummary?.trim())
+    if (!decision) return `${stage.stage}：${title}${upstreamInjected ? '已作为上游步骤记忆注入，未进入软上下文分配记录' : '未进入软上下文分配'}`
+    const status = decision.status === 'kept'
+      ? '已保留'
+      : decision.status === 'truncated'
+        ? `已压缩 ${decision.originalTokens}->${decision.allocatedTokens} tokens`
+        : `已裁剪 ${decision.originalTokens} tokens`
+    return `${stage.stage}：${title}${status} · P${decision.priority}`
+  })
+  const bridgeStageLines = buildStageDecisionLines('chapterBridgePlan', '章节桥')
+  const stepMemoryStageLines = buildStageDecisionLines('stepMemorySummary', '步骤记忆')
+
+  return (
+    <div className="writing-layout-stack writing-layout-stack--sm">
+      <StringList items={bridgeLines} empty="当前章节没有可用的章节衔接桥，通常是第一章或上一章资料不足。" />
+      <StringList items={stepMemoryLines} empty="当前预览没有合成步骤接力记忆。" />
+      <StringList items={runtimeAssertionLines} empty="当前预览没有运行时接力断言。" />
+      <StringList items={[...bridgeStageLines, ...stepMemoryStageLines]} empty="当前还没有阶段分配记录。" />
     </div>
   )
 }

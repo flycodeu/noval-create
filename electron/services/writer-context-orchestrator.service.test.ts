@@ -217,6 +217,63 @@ describe('writer context orchestrator', () => {
     ]))
   })
 
+  it('uses chapter bridge and step memory as recall signals even without entity mentions', async () => {
+    const input = createInput({
+      signals: {
+        chapterTitle: '门外脚步',
+        chapterOutline: '',
+        chapterGoal: '',
+        chapterBridgePlan: '承接来源：第1章结尾门外脚步声。\n首场景约束：前 200 字必须接住门外压力。',
+        activeThreads: '',
+        openLoops: '',
+        dueForeshadows: '',
+        mentionedCharacters: [],
+        mentionedItems: [],
+        mentionedLocations: [],
+      },
+      baseContextParts: {
+        chapterBridgePlan: '承接来源：第1章结尾门外脚步声。\n首场景约束：前 200 字必须接住门外压力。',
+        stepMemorySummary: 'Planner 必须从门外脚步切入，Writer 不得重启到白天。',
+      },
+      runtime: {
+        useMemoryCache: false,
+      },
+    })
+    const plan = __writerOrchestratorTestUtils.buildWriterQueryPlan(input)
+    const enabled = new Map(plan.map((step) => [step.bucket, step.enabled] as const))
+
+    expect(enabled.get('story_memory')).toBe(true)
+    expect(enabled.get('thread')).toBe(true)
+    expect(enabled.get('recall_thread')).toBe(true)
+    expect(plan.find((step) => step.bucket === 'thread')?.queryText).toContain('Writer 不得重启到白天')
+    expect(plan.find((step) => step.bucket === 'recall_thread')?.queryText).toContain('Writer 不得重启到白天')
+
+    const resolution = await resolveWriterOrchestratedContext(input, {
+      searchSimilarFragments: async () => ({
+        hits: [],
+        fallbackReason: 'query_embedding_failed',
+      }),
+    })
+
+    expect(resolution.renderedContextOverrides.chapterBridgePlan).toContain('门外脚步声')
+    expect(resolution.renderedContextOverrides.stepMemorySummary).toContain('Writer 不得重启到白天')
+    expect(resolution.allocatorInputSummary.buckets.some((bucket) =>
+      bucket.bucket === 'story_memory' && bucket.renderedLabels.includes('chapterBridgePlan'))).toBe(true)
+    expect(resolution.allocatorInputSummary.buckets.some((bucket) =>
+      bucket.bucket === 'story_memory' && bucket.renderedLabels.includes('stepMemorySummary'))).toBe(true)
+    expect(resolution.allocatorInputSummary.buckets.some((bucket) =>
+      bucket.bucket === 'thread' && bucket.renderedLabels.includes('chapterBridgePlan'))).toBe(true)
+    expect(resolution.allocatorInputSummary.buckets.some((bucket) =>
+      bucket.bucket === 'thread' && bucket.renderedLabels.includes('stepMemorySummary'))).toBe(true)
+    expect(resolution.fallbackEvents).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        target: 'recall_thread',
+        reason: 'query_embedding_failed',
+        fallbackMode: 'conservative',
+      }),
+    ]))
+  })
+
   it('reuses story memory snapshot within a single resolution', async () => {
     const buildStoryMemorySnapshotMock = vi.mocked(buildStoryMemorySnapshot)
     buildStoryMemorySnapshotMock.mockClear()

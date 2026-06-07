@@ -11,6 +11,10 @@ export type ReviewPrioritySource =
   | 'realism_risks'
   | 'coherence_risks'
   | 'reader_hook_risks'
+  | 'step_memory_risks'
+  | 'opening_hook_risks'
+  | 'title_alignment_risks'
+  | 'hallucination_risks'
   | 'typed_ref_risks'
   | 'source_grounding_risks'
   | 'operating_mode_risks'
@@ -106,6 +110,10 @@ interface ContractValidationLike {
   rewriteHints?: string[]
 }
 
+function hasContractValidationBlocker(contractValidation?: ContractValidationLike): boolean {
+  return contractValidation?.status === 'blocker'
+}
+
 export interface ChapterReviewNotesLike {
   critical_fixes: string[]
   continuity_risks: string[]
@@ -114,6 +122,10 @@ export interface ChapterReviewNotesLike {
   realism_risks: string[]
   coherence_risks: string[]
   reader_hook_risks: string[]
+  step_memory_risks: string[]
+  opening_hook_risks: string[]
+  title_alignment_risks: string[]
+  hallucination_risks: string[]
   typed_ref_risks: string[]
   source_grounding_risks: string[]
   operating_mode_risks: string[]
@@ -143,6 +155,10 @@ const STRUCTURAL_REWRITE_SOURCES = new Set<ReviewPrioritySource>([
   'realism_risks',
   'coherence_risks',
   'reader_hook_risks',
+  'step_memory_risks',
+  'opening_hook_risks',
+  'title_alignment_risks',
+  'hallucination_risks',
   'typed_ref_risks',
   'source_grounding_risks',
   'operating_mode_risks',
@@ -546,6 +562,10 @@ function getSourceWeight(source: ReviewPrioritySource): number {
     source_grounding_risks: 11,
     operating_mode_risks: 10,
     dialogue_separability_risks: 9,
+    step_memory_risks: 9,
+    opening_hook_risks: 9,
+    title_alignment_risks: 8,
+    hallucination_risks: 8,
     reader_hook_risks: 8,
     missing_payoffs: 7,
     contract_validation: 6,
@@ -574,12 +594,16 @@ function normalizePriorityIssues(reviewNotes: ChapterReviewNotesLike): ReviewPri
   pushIssues(issues, reviewNotes.source_grounding_risks, 'source_grounding_risks', '来源 Grounding 风险', reviewNotes.rewrite_required ? 'high' : 'medium')
   pushIssues(issues, reviewNotes.operating_mode_risks, 'operating_mode_risks', 'OperatingMode 违规', reviewNotes.rewrite_required ? 'high' : 'medium')
   pushIssues(issues, reviewNotes.dialogue_separability_risks, 'dialogue_separability_risks', '对白可分离度', reviewNotes.rewrite_required ? 'high' : 'medium')
+  pushIssues(issues, reviewNotes.step_memory_risks, 'step_memory_risks', '步骤接力风险', 'high')
+  pushIssues(issues, reviewNotes.opening_hook_risks, 'opening_hook_risks', '开篇吸引力风险', 'high')
+  pushIssues(issues, reviewNotes.title_alignment_risks, 'title_alignment_risks', '标题贴合风险', reviewNotes.rewrite_required ? 'high' : 'medium')
+  pushIssues(issues, reviewNotes.hallucination_risks, 'hallucination_risks', '幻觉/无来源新增', 'high')
   pushIssues(issues, reviewNotes.reader_hook_risks, 'reader_hook_risks', '追读风险', 'high')
   pushIssues(issues, reviewNotes.missing_payoffs, 'missing_payoffs', '伏笔未兑现', 'high')
 
   pushIssues(
     issues,
-    reviewNotes.contract_validation?.status === 'blocker'
+    hasContractValidationBlocker(reviewNotes.contract_validation)
       ? reviewNotes.contract_validation?.rewriteHints || []
       : [],
     'contract_validation',
@@ -650,11 +674,14 @@ export function buildReviewPrioritySummary(reviewNotes: ChapterReviewNotesLike):
     reviewNotes.critical_fixes.length >= 3 ? '关键修订达到 3 条以上，需要整章重写消化。' : '',
     reviewNotes.severity === 'high' ? '审校严重度为 high。' : '',
     reviewNotes.rewrite_required && highIssueCount >= 3 ? '高优先问题过多，局部修补不够。' : '',
-    reviewNotes.contract_validation?.status === 'blocker' ? '合同兑现存在 blocker。' : '',
+    hasContractValidationBlocker(reviewNotes.contract_validation) ? '合同兑现存在 blocker。' : '',
     reviewNotes.cost_resolution_state === 'evaporated' ? '代价被快速抹平，需要回到整章重排。' : '',
     reviewNotes.reversal_support_state === 'forced' ? '反转支撑不足，需要重排因果链。' : '',
     reviewNotes.reading_experience?.status === 'rewrite' ? '章节读感低于长篇连载门槛。' : '',
     reviewNotes.rewrite_delta?.status === 'fail' ? '重写差异验证失败，疑似只润色语言没有修剧情。' : '',
+    reviewNotes.opening_hook_risks.length > 0 && reviewNotes.rewrite_required ? '开篇吸引力未过线，需要优先重排章首和章尾递进。' : '',
+    reviewNotes.step_memory_risks.length > 0 && reviewNotes.rewrite_required ? '步骤接力断裂，需要回到上游计划与正文执行链整体修复。' : '',
+    reviewNotes.hallucination_risks.length > 0 ? '存在无来源新增或推断升级，必须回收幻觉设定。' : '',
   ])
   const requiresFullRewrite = fullRewriteReasons.length > 0
   const forceMaxCoverage = normalizedIssues.some((issue) => (
@@ -663,6 +690,10 @@ export function buildReviewPrioritySummary(reviewNotes: ChapterReviewNotesLike):
     || issue.source === 'context_drift_risks'
     || issue.source === 'realism_risks'
     || issue.source === 'coherence_risks'
+    || issue.source === 'step_memory_risks'
+    || issue.source === 'opening_hook_risks'
+    || issue.source === 'title_alignment_risks'
+    || issue.source === 'hallucination_risks'
     || issue.source === 'missing_payoffs'
     || issue.source === 'contract_validation'
     || issue.source === 'typed_ref_risks'

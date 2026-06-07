@@ -980,6 +980,7 @@ export function runMigrations(sqlite: Database.Database) {
         WHEN provider = 'aliyun' THEN 0.85
         WHEN provider = 'baidu' THEN 0.8
         WHEN provider = 'deepseek' THEN 0.7
+        WHEN provider = 'kimi' THEN 0.75
         ELSE temperature
       END
       WHERE provider <> 'custom' AND ABS(COALESCE(temperature, 0) - 0.85) < 0.000001;

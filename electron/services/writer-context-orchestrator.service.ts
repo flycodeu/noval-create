@@ -286,6 +286,8 @@ function buildWriterQueryPlan(input: WriterContextOrchestratorInput): WriterCont
   const activeThreads = asText(signals.activeThreads)
   const openLoops = asText(signals.openLoops)
   const dueForeshadows = asText(signals.dueForeshadows)
+  const chapterBridgePlan = asText(signals.chapterBridgePlan)
+  const stepMemorySummary = asText(signals.stepMemorySummary || input.baseContextParts?.stepMemorySummary)
   const worldStates = asText(signals.worldStates)
   const timelineSummary = asText(signals.timelineSummary)
   const timelineOpenThreads = asText(signals.timelineOpenThreads)
@@ -295,6 +297,8 @@ function buildWriterQueryPlan(input: WriterContextOrchestratorInput): WriterCont
     || activeThreads
     || openLoops
     || dueForeshadows
+    || chapterBridgePlan
+    || stepMemorySummary
     || timelineSummary
     || timelineOpenThreads,
   )
@@ -310,17 +314,17 @@ function buildWriterQueryPlan(input: WriterContextOrchestratorInput): WriterCont
   ], 12)
   const worldStateEnabled = worldStateTerms.length > 0
   const timelineEnabled = mentionedLocations.length > 0 || /\S/.test(timelineSummary)
-  const threadEnabled = Boolean(activeThreads || openLoops || dueForeshadows)
+  const threadEnabled = Boolean(activeThreads || openLoops || dueForeshadows || chapterBridgePlan || stepMemorySummary)
   const recallCharacterEnabled = mentionedCharacters.length > 0 || mentionedFactions.length > 0
   const recallRuleEnabled = Boolean(worldStates || timelineSummary || mentionedFactions.length > 0)
-  const recallThreadEnabled = Boolean(activeThreads || openLoops || dueForeshadows)
+  const recallThreadEnabled = Boolean(activeThreads || openLoops || dueForeshadows || chapterBridgePlan || stepMemorySummary)
 
   return [
     buildQueryStep(
       'story_memory',
       storyMemoryEnabled,
       storyMemoryEnabled ? '当前章节存在承接或全局记忆需求。' : '当前章节不需要额外长程记忆包。',
-      extractTerms([chapterGoal, activeThreads, openLoops, dueForeshadows], 6),
+      extractTerms([chapterGoal, activeThreads, openLoops, dueForeshadows, chapterBridgePlan, stepMemorySummary], 6),
       ['story_memory.get_pack'],
     ),
     buildQueryStep(
@@ -372,9 +376,9 @@ function buildWriterQueryPlan(input: WriterContextOrchestratorInput): WriterCont
       'thread',
       threadEnabled,
       threadEnabled ? '存在活跃线程、开放问题或待回收伏笔。' : '没有显著线程压力。',
-      extractTerms([activeThreads, openLoops, dueForeshadows], 8),
+      extractTerms([activeThreads, openLoops, dueForeshadows, chapterBridgePlan, stepMemorySummary], 8),
       ['thread.get_pack'],
-      [activeThreads, openLoops, dueForeshadows].filter(Boolean).join('\n'),
+      [chapterBridgePlan, stepMemorySummary, activeThreads, openLoops, dueForeshadows].filter(Boolean).join('\n'),
       input.runtime?.maxThreads || 4,
     ),
     buildQueryStep(
@@ -399,9 +403,9 @@ function buildWriterQueryPlan(input: WriterContextOrchestratorInput): WriterCont
       'recall_thread',
       recallThreadEnabled,
       recallThreadEnabled ? '需要补充线程/伏笔相关历史片段。' : '没有线程召回需求。',
-      extractTerms([activeThreads, openLoops, dueForeshadows], 6),
+      extractTerms([activeThreads, openLoops, dueForeshadows, chapterBridgePlan, stepMemorySummary], 6),
       ['recall.search_fragments'],
-      [chapterGoal, activeThreads, openLoops, dueForeshadows].filter(Boolean).join('\n'),
+      [chapterGoal, chapterBridgePlan, stepMemorySummary, activeThreads, openLoops, dueForeshadows].filter(Boolean).join('\n'),
       input.runtime?.maxRecallHitsPerBucket || 3,
     ),
   ]
@@ -513,6 +517,7 @@ function renderCharacterEntries(
     signals.arcGoal,
     signals.relationSummary,
     signals.dialogueVoiceLocks,
+    signals.chapterBridgePlan,
     signals.activeThreads,
     signals.openLoops,
     signals.dueForeshadows,
@@ -616,6 +621,7 @@ function renderTimelineEntries(
       signals.timelineOpenThreads,
       signals.chapterGoal,
       signals.chapterOutline,
+      signals.chapterBridgePlan,
     ], 8),
   ], 10)
   const filtered = events
@@ -651,7 +657,7 @@ function renderWorldStatePack(
     ...(signals.mentionedItems || []),
     ...(signals.mentionedLocations || []),
     ...(signals.mentionedFactions || []),
-    ...extractTerms([signals.worldStates, signals.chapterGoal, signals.chapterOutline], 8),
+    ...extractTerms([signals.worldStates, signals.chapterGoal, signals.chapterOutline, signals.chapterBridgePlan], 8),
   ], 16)
   const currentStates = snapshot.currentStates.filter((state) => {
     const haystack = [state.entityName, state.summaryText, ...(state.stateItems || [])].filter(Boolean).join(' ')
@@ -783,6 +789,7 @@ function renderThreadPack(
     signals.activeThreads,
     signals.openLoops,
     signals.dueForeshadows,
+    signals.chapterBridgePlan,
     signals.chapterGoal,
     signals.chapterOutline,
   ], 10)
@@ -903,6 +910,8 @@ function buildRenderedOverrides(
     worldStates: '',
     mapSummary: '',
     recalledMemory: '',
+    chapterBridgePlan: baseContextParts?.chapterBridgePlan || '',
+    stepMemorySummary: baseContextParts?.stepMemorySummary || '',
   }
   if (storyMemoryPack) {
     result.longTermMemory = compactLines([
@@ -1035,13 +1044,13 @@ function buildAllocatorInputSummary(
     .map((step) => {
       const renderedLabels = overrideEntries
         .filter(([key]) => {
-          if (step.bucket === 'story_memory') return key === 'longTermMemory' || key === 'activeThreads' || key === 'continuityNotes'
+          if (step.bucket === 'story_memory') return key === 'longTermMemory' || key === 'activeThreads' || key === 'continuityNotes' || key === 'chapterBridgePlan' || key === 'stepMemorySummary'
           if (step.bucket === 'character') return key === 'characterStates' || key === 'relationSummary' || key === 'dialogueVoiceLocks'
           if (step.bucket === 'item') return key === 'itemSummary'
           if (step.bucket === 'map_location') return key === 'mapSummary'
           if (step.bucket === 'timeline') return key === 'timelineSummary' || key === 'timelineOpenThreads'
           if (step.bucket === 'world_state') return key === 'worldStates'
-          if (step.bucket === 'thread') return key === 'activeThreads' || key === 'openLoops' || key === 'dueForeshadows' || key === 'continuityNotes'
+          if (step.bucket === 'thread') return key === 'activeThreads' || key === 'openLoops' || key === 'dueForeshadows' || key === 'continuityNotes' || key === 'chapterBridgePlan' || key === 'stepMemorySummary'
           return key === 'recalledMemory'
         })
         .map(([key]) => key) as WriterContextAllocatorInputBucketSummary['renderedLabels']

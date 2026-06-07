@@ -184,6 +184,8 @@ export interface ChapterWritingPromptInput {
   activeThreads?: string
   recalledMemory?: string
   chapterBridgePlan?: string
+  stepMemorySummary?: string
+  runtimeAssertions?: string[]
   povGuidance?: string
   povRotationGuidance?: string
   sensoryGuidance?: string
@@ -234,6 +236,8 @@ export interface ScenePlanPromptInput {
   activeThreads?: string
   recalledMemory?: string
   chapterBridgePlan?: string
+  stepMemorySummary?: string
+  runtimeAssertions?: string[]
   povGuidance?: string
   povRotationGuidance?: string
   sensoryGuidance?: string
@@ -276,6 +280,8 @@ export interface ChapterReviewPromptInput {
   consistencyNotes: string
   recalledMemory?: string
   chapterBridgePlan?: string
+  stepMemorySummary?: string
+  runtimeAssertions?: string[]
   arcProgress?: string
   arcProgressStatus?: string
   arcProgressCheckpoint?: string
@@ -349,6 +355,8 @@ export interface ChapterRewritePromptInput {
   activeThreads?: string
   recalledMemory?: string
   chapterBridgePlan?: string
+  stepMemorySummary?: string
+  runtimeAssertions?: string[]
   povGuidance?: string
   povRotationGuidance?: string
   sensoryGuidance?: string
@@ -373,6 +381,10 @@ export interface ContinuityPromptInput {
   chapterGoal: string
   summary: string
   chapterContent: string
+  inboundOpenLoops?: string
+  inboundDueForeshadows?: string
+  inboundContinuityNotes?: string
+  chapterBridgePlan?: string
 }
 
 export interface RewriteParagraphPromptInput {
@@ -449,6 +461,88 @@ function sectionLines(title: string, lines: Array<string | undefined | null | fa
     .filter(Boolean)
     .join('\n')
   return section(title, body)
+}
+
+function isGoldenThreeChapter(chapterNum: number): boolean {
+  return chapterNum >= 1 && chapterNum <= 3
+}
+
+function buildGoldenThreeChapterGuidance(chapterNum: number, stage: 'scenePlan' | 'writing' | 'draft' | 'review' | 'rewrite'): string {
+  if (!isGoldenThreeChapter(chapterNum)) return ''
+
+  const phaseRules: Record<number, string> = {
+    1: '第 1 章职责：前 300 字内必须出现具体现场、主角动作、可感压力和一个读者能立刻追问的问题；禁止从世界观百科、天气长描写、抽象命运感或人物履历开场。',
+    2: '第 2 章职责：直接承接第 1 章造成的后果或疑问，放大阻力、关系张力或资源代价；禁止像新故事一样重启铺垫。',
+    3: '第 3 章职责：给出第一个清晰兑现、反转或承诺升级，让主角被迫做出更难退回的选择；禁止只继续解释设定。',
+  }
+  const stageRules: Record<'scenePlan' | 'writing' | 'draft' | 'review' | 'rewrite', string> = {
+    scenePlan: '场景计划必须把章首钩子、承接动作、首次阻力和章尾递进写成可落地场景，不要只写气氛。',
+    writing: '正文前 200 字必须自然承接章节衔接桥；前 800 字内要让读者看见问题、压力和主角的具体行动。',
+    draft: '初稿优先保证开篇可读性和承接准确：动作先入场，信息随冲突释放，不要先讲概念。',
+    review: '审校必须额外检查黄金三章是否吸引读者：开头是否慢热、标题是否空泛、承接是否断裂、章尾是否缺少追读理由。',
+    rewrite: '重写必须先修开篇 800 字和章尾递进，再润色语言；不要只替换词句却保留慢热结构。',
+  }
+
+  return section('黄金三章开篇约束', [
+    phaseRules[chapterNum],
+    stageRules[stage],
+    '章节标题必须具体、有场景感或冲突感，避免“开端”“觉醒”“风暴前夜”“命运齿轮”这类万能标题。',
+    '不要用夸张噱头硬吊读者；吸引力来自具体困境、人物选择、信息差和可见代价。',
+  ].join('\n'))
+}
+
+function buildGoldenThreeOutlineGuidance(chapterStart: number, chapterEnd: number): string {
+  if (chapterEnd < 1 || chapterStart > 3) return ''
+  return section('黄金三章开篇约束', [
+    '第 1 章：前 300 字内给出具体现场、主角动作、可感压力和一个明确追问点；章尾必须把问题递给第 2 章。',
+    '第 2 章：承接第 1 章的后果或疑问，放大阻力、关系张力或资源代价；章尾要把选择压力递给第 3 章。',
+    '第 3 章：给出第一个清晰兑现、反转或承诺升级，让主角进入更难退回的局面。',
+    '前三章 bridge_in / bridge_out 必须形成因果链：上章结果 -> 本章行动 -> 新代价或新问题。',
+    '前三章标题必须具体、有场景感或冲突感，避免“开端”“觉醒”“风暴前夜”“命运齿轮”这类万能标题。',
+  ].join('\n'))
+}
+
+type StepMemoryStage = 'scenePlan' | 'writing' | 'draft' | 'review' | 'rewrite'
+
+function buildStepMemoryContinuityGuidance(stage: StepMemoryStage): string {
+  const stageRules: Record<StepMemoryStage, string> = {
+    scenePlan: '场景计划要把“上一章结果 -> 本章首场动作 -> 本章退出钩子”写成连续因果链，并预留给正文可直接落地的承接动作。',
+    writing: '正文必须优先兑现章节衔接桥、连续性记忆和本章目标；如果需要补充细节，只能补“当前上下文已经暗示或允许”的细节。',
+    draft: '初稿先保上下文和事件链，后保文采；任何新增人物、地点、能力、资源都要能在已有世界规则或场景计划里找到来源。',
+    review: '审校要逐项核对上游计划是否被正文执行，并把断承接、漏伏笔、跑题、标题空泛和 AI 腔列为优先修复项。',
+    rewrite: '重写只能在既有计划、审校意见和上下文内修复，不得用删掉压力、改写目标或新增万能设定来绕开问题。',
+  }
+  return section('步骤记忆接力协议', [
+    '本步骤不是孤立生成：上一章关键先验、上章结尾、章节衔接桥、连续性记忆、未回收事项、向量召回记忆和当前故事弧都是硬上下文。',
+    stageRules[stage],
+    '若上下文之间出现轻微冲突，优先保留明确事实、已写正文、章节合同和世界规则；不确定的内容写成保守推断，不要升级为新事实。',
+    '输出必须给下一步骤留下可执行信息：明确谁行动、在哪里、因为什么、付出什么代价、留下什么后续压力。',
+  ].join('\n'))
+}
+
+function buildRuntimeAssertionSection(assertions?: string[]): string {
+  const lines = Array.isArray(assertions)
+    ? assertions.map((item) => item.trim()).filter(Boolean)
+    : []
+  if (lines.length === 0) return ''
+  return section('运行时接力断言', [
+    '以下断言来自本轮流水线上游步骤，必须优先执行；若与正文事实冲突，按已写正文、章节合同和硬约束校正。',
+    ...lines.map((line) => `- ${line.replace(/^[-*]\s*/u, '')}`),
+  ].join('\n'))
+}
+
+function buildTitleAndStructureGuidance(scope: 'volume' | 'chapterOutline' | 'scenePlan'): string {
+  const scopeRules: Record<'volume' | 'chapterOutline' | 'scenePlan', string> = {
+    volume: '卷标题要概括本卷的阶段矛盾或主角处境，能看出卷与卷之间的递进，不要只写抽象意象。',
+    chapterOutline: '章节标题必须贴合本章核心事件、场景物件、选择压力或反转点；读者看到标题应能产生具体期待。',
+    scenePlan: '场景标题只服务执行，不追求诗意；要能看出场景地点、冲突或动作焦点。',
+  }
+  return section('标题与结构吸引力', [
+    scopeRules[scope],
+    '标题避免万能词：开端、觉醒、风暴前夜、命运齿轮、暗流涌动、真相边缘、破局、归途。',
+    '卷、章、场景的划分要符合信息密度和冲突密度：一章只承担一个主推进，支线最多 3 条；卷内高潮、喘息和兑现要有节奏差。',
+    '标题吸引力来自具体困境、信息差、代价和选择，不靠夸张噱头或空泛诗化。',
+  ].join('\n'))
 }
 
 function placeholder(key: string): string {
@@ -1262,6 +1356,8 @@ export function buildChapterOutlinePlanningPrompt(params: ChapterOutlinePromptIn
       params.worldRulesSummary ? '世界规则：\n' + params.worldRulesSummary : '',
     ]),
     params.previousChapterOutlines ? section('已有章节大纲（差异化参考）', params.previousChapterOutlines) : '',
+    buildGoldenThreeOutlineGuidance(params.chapterStart, params.chapterEnd),
+    buildTitleAndStructureGuidance('chapterOutline'),
     ...buildPromptGuardrailSections({
       genre: params.genre,
       storyCore: [params.storyGoal, params.coreConflict, params.mainPlot, params.arcGoal].filter(Boolean).join('\n'),
@@ -1271,6 +1367,7 @@ export function buildChapterOutlinePlanningPrompt(params: ChapterOutlinePromptIn
     }),
     section('生成要求', [
       '每章 goal 必须服务本弧目标，合起来能看出主线持续推进。',
+      'title 必须准确对应本章核心事件或选择压力，不能为了“高级感”脱离具体内容。',
       'plot_points 按发生顺序写具体事件，不写“制造冲突”“推进剧情”这种空话。',
       'bridge_in 写清这章接住了什么，bridge_out 写清这章把什么递给下一章。',
       'growth_ledger 要写 1 到 3 条本章真正新增或兑现的成长账本，落在能力、关系、认知、责任、资源或道德选择的变化上。',
@@ -1326,6 +1423,7 @@ export function buildVolumePlanningPrompt(params: VolumePlanningPromptInput): st
     params.protagonistSummary ? section('主角概况', params.protagonistSummary) : '',
     params.worldRulesSummary ? section('世界规则', params.worldRulesSummary) : '',
     params.threadsSummary ? section('故事线索', params.threadsSummary) : '',
+    buildTitleAndStructureGuidance('volume'),
     ...buildPromptGuardrailSections({
       genre: params.genre,
       storyCore: [params.storyGoal, params.coreConflict, params.mainPlot].filter(Boolean).join('\n'),
@@ -1334,13 +1432,13 @@ export function buildVolumePlanningPrompt(params: VolumePlanningPromptInput): st
     }),
     section('规划要求', [
       '每卷的 theme 不能是空泛的"成长""蜕变"，必须写清这一卷主角面对的具体困境和要解决的具体问题。',
-      '每卷的 key_arcs 必须指向具体的故事弧名称或事件，不能只写"主线推进"。',
+      '每卷的 key_arcs 必须指向具体的故事弧名称或事件，不能只写泛化推进标签。',
       '相邻两卷之间必须有明确的承接关系：上一卷的遗留问题如何影响下一卷。',
       '字数分配要考虑节奏：开篇卷可以短一些（15-25万字），中段卷可以长一些（25-35万字），收束卷根据需要调整。',
       '每卷必须标注主角在该卷的成长阶段和实力/地位变化。',
     ].join('\n')),
     section('语言要求', buildHumanLanguageRules([
-      '卷标题和主题描述要具体，不要写成"黎明前的黑暗"这种万能标题。',
+      '卷标题和主题描述要具体，不要写成万能隐喻标题或只表达气氛的空泛卷名。',
     ])),
     '只输出 JSON 数组。示例值只表示字段结构，实际输出必须写入当前故事的具体内容：',
     '[{"volume_number":1,"title":"","theme":"","target_words":' + Math.round(params.targetTotalWords / estimatedVolumes) + ',"chapter_estimate":{"start":1,"end":100},"protagonist_stage":"","key_arcs":[],"major_events":[],"subplot_status":{},"volume_climax":"","bridge_to_next":""}]',
@@ -1433,6 +1531,11 @@ export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
     section('上一章关键先验', params.previousChapterContext),
     section('上章结尾', params.lastChapterEnding),
     section('章节衔接桥', params.chapterBridgePlan),
+    section('步骤接力记忆', params.stepMemorySummary),
+    buildRuntimeAssertionSection(params.runtimeAssertions),
+    buildGoldenThreeChapterGuidance(params.chapterNum, 'scenePlan'),
+    buildStepMemoryContinuityGuidance('scenePlan'),
+    buildTitleAndStructureGuidance('scenePlan'),
     section('最近章节摘要', params.previousSummaries),
     section('连续性记忆', params.continuitySummary),
     section('必须承接', params.continuityNotes),
@@ -1520,6 +1623,10 @@ export function buildChapterWritingPrompt(params: ChapterWritingPromptInput): st
     section('感官雷达', params.sensoryGuidance),
     section('叙事比例', params.narrativeRatioGuidance),
     section('章节衔接桥', params.chapterBridgePlan),
+    section('步骤接力记忆', params.stepMemorySummary),
+    buildRuntimeAssertionSection(params.runtimeAssertions),
+    buildGoldenThreeChapterGuidance(params.chapterNum, 'writing'),
+    buildStepMemoryContinuityGuidance('writing'),
     section('节奏曲线', params.storyPacingGuidance),
     section('钩子连续性', params.hookContinuityGuidance),
     section('上一章关键先验', params.previousChapterContext),
@@ -1589,6 +1696,10 @@ export function buildChapterDraftPrompt(params: ChapterRewritePromptInput): stri
     section('上一章关键先验', params.previousChapterContext),
     section('上章结尾', params.lastChapterEnding),
     section('章节衔接桥', params.chapterBridgePlan),
+    section('步骤接力记忆', params.stepMemorySummary),
+    buildRuntimeAssertionSection(params.runtimeAssertions),
+    buildGoldenThreeChapterGuidance(params.chapterNum, 'draft'),
+    buildStepMemoryContinuityGuidance('draft'),
     section('最近章节摘要', params.previousSummaries),
     section('连续性记忆', params.continuitySummary),
     section('必须承接', params.continuityNotes),
@@ -1673,6 +1784,10 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
     section('感官雷达', params.sensoryGuidance),
     section('叙事比例', params.narrativeRatioGuidance),
     section('章节衔接桥', params.chapterBridgePlan),
+    section('步骤接力记忆', params.stepMemorySummary),
+    buildRuntimeAssertionSection(params.runtimeAssertions),
+    buildGoldenThreeChapterGuidance(params.chapterNum, 'review'),
+    buildStepMemoryContinuityGuidance('review'),
     section('节奏曲线', params.storyPacingGuidance),
     section('钩子连续性', params.hookContinuityGuidance),
     section('跨章表达去重', params.expressionDedupGuidance),
@@ -1694,6 +1809,10 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
       'realism_risks 只写常识、科学、物理、资源、伤病、秩序或能力规则问题。',
       'coherence_risks 只写叙事链条会让读者读乱的地方，例如视角滑移、过渡断层、因果跳跃、信息顺序失衡。',
       'reader_hook_risks 只写会削弱追读欲的问题，例如冲突太轻、结果没代价、反转不成立、主角一路顺推。',
+      'step_memory_risks 只写 Planner 场景计划、章节衔接桥、运行时接力断言、Writer 初稿之间没有对上的地方。',
+      'opening_hook_risks 只写开篇吸引力问题：前 300 字无现场/动作/压力/追问点，前 800 字还在解释设定，或章尾没有递进。',
+      'title_alignment_risks 只写标题与本章核心事件、场景物件、选择压力或反转点不匹配的问题。',
+      'hallucination_risks 只写无来源新增设定、人物、能力、地点、物品、背景真相，或把推断升级成事实的问题。',
       'language_risks 只写 AI 腔、抽象化、搭配错误、空洞抒情或不自然表达。',
       'human_language_repairs 只列最值得优先替换的 1 到 3 处生硬表达，格式尽量写成“原说法 -> 更自然说法”。',
       '如果对话无视人物关系、称呼层级、亲疏温度或潜台词，也要归入 language_risks 或 context_drift_risks。',
@@ -1721,7 +1840,7 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
       '出现 high 级问题时 rewrite_required 必须是 true，其余情况可以是 false。',
       'revision_brief 用 60 到 120 字中文写清修改方向。',
     ].join('\n')),
-    '只输出 JSON：{"summary":"总体判断","critical_fixes":["必改项"],"continuity_risks":["连续性风险"],"arc_progress_risks":["故事弧推进风险"],"context_drift_risks":["漂移风险"],"realism_risks":["真实度风险"],"coherence_risks":["连贯性风险"],"reader_hook_risks":["追读风险"],"language_risks":["语言风险"],"human_language_repairs":["原说法 -> 更自然说法"],"genre_hollowing_risks":["体裁空心化风险"],"missing_payoffs":["未落地伏笔"],"strengths":["具体优点"],"severity":"medium","rewrite_required":true,"revision_brief":"修订方向摘要","protagonist_setback":"minor","setback_summary":"主角在关键交锋中被压制","cost_present":true,"cost_summary":"主角失去可靠盟友与补给","cost_resolution_state":"ongoing","reversal_marker":true,"reversal_summary":"看似得手后被埋伏反制","reversal_support_state":"supported","pace_marker":"reversal","reward_state":"partial","protagonist_pressure":72,"chapter_function_primary":"reversal","chapter_function_tags":["progression","reversal"],"dialogue_filler_risks":["对白空话"],"dialogue_info_density_risks":["信息推进不足"],"dialogue_voice_lock_summary":"","required_voice_lock_character_ids":[]}',
+    '只输出 JSON：{"summary":"总体判断","critical_fixes":["必改项"],"continuity_risks":["连续性风险"],"arc_progress_risks":["故事弧推进风险"],"context_drift_risks":["漂移风险"],"realism_risks":["真实度风险"],"coherence_risks":["连贯性风险"],"reader_hook_risks":["追读风险"],"step_memory_risks":["步骤接力风险"],"opening_hook_risks":["开篇吸引力风险"],"title_alignment_risks":["标题偏题风险"],"hallucination_risks":["无来源新增或推断升级风险"],"language_risks":["语言风险"],"human_language_repairs":["原说法 -> 更自然说法"],"genre_hollowing_risks":["体裁空心化风险"],"missing_payoffs":["未落地伏笔"],"strengths":["具体优点"],"severity":"medium","rewrite_required":true,"revision_brief":"修订方向摘要","protagonist_setback":"minor","setback_summary":"主角在关键交锋中被压制","cost_present":true,"cost_summary":"主角失去可靠盟友与补给","cost_resolution_state":"ongoing","reversal_marker":true,"reversal_summary":"看似得手后被埋伏反制","reversal_support_state":"supported","pace_marker":"reversal","reward_state":"partial","protagonist_pressure":72,"chapter_function_primary":"reversal","chapter_function_tags":["progression","reversal"],"dialogue_filler_risks":["对白空话"],"dialogue_info_density_risks":["信息推进不足"],"dialogue_voice_lock_summary":"","required_voice_lock_character_ids":[]}',
     buildAvoidanceSection(params.rejectedDigests || []),
     params.attemptNumber && params.attemptNumber > 1 ? buildVariationHint(params.attemptNumber, 'chapter') : '',
   ])
@@ -1773,6 +1892,10 @@ export function buildChapterRewritePrompt(params: ChapterRewritePromptInput): st
     section('上一章关键先验', params.previousChapterContext),
     section('上章结尾', params.lastChapterEnding),
     section('章节衔接桥', params.chapterBridgePlan),
+    section('步骤接力记忆', params.stepMemorySummary),
+    buildRuntimeAssertionSection(params.runtimeAssertions),
+    buildGoldenThreeChapterGuidance(params.chapterNum, 'rewrite'),
+    buildStepMemoryContinuityGuidance('rewrite'),
     section('近章摘要', params.previousSummaries),
     section('连续性记忆', params.continuitySummary),
     section('必须承接', params.continuityNotes),
@@ -1827,6 +1950,12 @@ export function buildContinuityStatePrompt(params: ContinuityPromptInput): strin
       taskFocus: '只保留清楚、可验证的事实，不写情绪化判断和抽象口号。',
       extraQualityLines: ['每条尽量写成短句，具体、可复用。'],
     }),
+    section('入站义务', [
+      params.chapterBridgePlan ? `章节衔接桥：\n${params.chapterBridgePlan}` : '',
+      params.inboundContinuityNotes ? `本章必须承接：\n${params.inboundContinuityNotes}` : '',
+      params.inboundOpenLoops ? `入站未回收事项：\n${params.inboundOpenLoops}` : '',
+      params.inboundDueForeshadows ? `入站应回收伏笔：\n${params.inboundDueForeshadows}` : '',
+    ].filter(Boolean).join('\n\n')),
     section('本章正文', params.chapterContent),
     section('提炼规则', [
       'plot_progress 只写真正推动了主线或支线的事实。',
@@ -1834,6 +1963,8 @@ export function buildContinuityStatePrompt(params: ContinuityPromptInput): strin
       'world_state_changes 只写局势、地点、势力、规则变化。',
       'open_loops 只保留还没回收、后面必须回应的事。',
       'continuity_notes 只写下章或后文不能漏掉的承接事项。',
+      '如果入站未回收事项或入站应回收伏笔在正文里没有明确解决、回收或说明延期原因，必须继续写入 open_loops 或 continuity_notes，不得因为正文没提到就删除。',
+      '如果章节衔接桥里的时间、地点、情绪、POV 或上章压力在正文里没有完全消化，也要保留为 continuity_notes 供后续修复。',
       '每条尽量写成短句，具体、可复用。',
     ].join('\n')),
     section('语言要求', buildHumanLanguageRules([
@@ -2334,6 +2465,9 @@ export const PROMPT_CATALOG: PromptCatalogEntry[] = [
       { key: 'previousSummaries', label: '近章摘要' },
       { key: 'previousChapterContext', label: '上一章关键先验' },
       { key: 'lastChapterEnding', label: '上章结尾' },
+      { key: 'chapterBridgePlan', label: '章节衔接桥' },
+      { key: 'stepMemorySummary', label: '步骤接力记忆' },
+      { key: 'runtimeAssertions', label: '运行时接力断言' },
       { key: 'styleTemplate', label: '文风参考' },
       { key: 'continuitySummary', label: '连续性记忆' },
       { key: 'recalledMemory', label: '向量召回记忆' },
@@ -2359,6 +2493,9 @@ export const PROMPT_CATALOG: PromptCatalogEntry[] = [
       previousSummaries: placeholder('previousSummaries'),
       previousChapterContext: placeholder('previousChapterContext'),
       lastChapterEnding: placeholder('lastChapterEnding'),
+      chapterBridgePlan: placeholder('chapterBridgePlan'),
+      stepMemorySummary: placeholder('stepMemorySummary'),
+      runtimeAssertions: [placeholder('runtimeAssertions')],
       styleTemplate: placeholder('styleTemplate'),
       continuitySummary: placeholder('continuitySummary'),
       recalledMemory: placeholder('recalledMemory'),

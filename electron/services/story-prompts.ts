@@ -70,6 +70,8 @@ export function buildChapterOutlinePlanningPrompt(params: ChapterOutlinePromptIn
     '- 章节细纲要优先保证读者能顺着看下去，再保证结构漂亮。',
     '- 每章至少明确一项推进、一项阻力和一个代价落点，避免只有概述没有事件。',
     '- 章节之间的钩子要自然，不要用空悬念硬吊读者。',
+    '- 章节标题必须准确、具体、有冲突感或场景感，不能用“开端”“觉醒”“风暴前夜”“命运齿轮”这类万能标题。',
+    '- bridge_in / bridge_out 必须形成可追踪接力：上章结果 -> 本章行动 -> 新代价或新问题。',
   ])
   return applyPromptOverride('chapterOutline', fallback, params as unknown as Record<string, unknown>)
 }
@@ -119,6 +121,9 @@ function buildRhythmGuide(emotionTone?: string, targetWords?: number): string {
 }
 
 const CHAPTER_DELIVERY_GATE_LINES = [
+  '- 章节衔接桥是高优先级记忆：开头必须承接时间、地点、情绪和 POV 边界；如果跳切，必须在正文里交代跳切依据。',
+  '- 步骤记忆接力是硬约束：Planner 输出要能被 Writer 执行，Writer 初稿要能被 Critic 核验，Rewriter 不得绕开上游约束。',
+  '- 无论使用 Kimi、Claude、GPT、DeepSeek 或自定义兼容模型，都必须保守使用上下文：不能把推断升级成事实，不能补造未授权设定。',
   '- 章节合同里的必推人物弧，必须在本章让关键人物完成一次选择、行动、代价、关系变化或误信念裂缝，不能只提到人物状态。',
   '- 主题不是装饰句：本章冲突必须回应主题命题，让角色在底线、欲望、代价或妥协之间做出可见判断。',
   '- 关系弧变化必须同时有触发事件、可见互动和后果，不能只把关系状态从 A 改成 B。',
@@ -166,6 +171,10 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
     appendPromptSection(withStructuralAlerts, '补充审校要求', [
       '- coherence_risks 只写会让读者读乱的地方，例如指代不明、信息顺序失衡、情绪跳变、动机断层。',
       '- reader_hook_risks 只写会削弱追读意愿的问题，例如冲突太虚、转折太轻、结果无代价、悬念不成立。',
+      '- step_memory_risks 只写 Planner -> Writer -> Critic -> Rewriter 之间没有接上的地方，例如场景计划未执行、接力断言被忽略、衔接桥没落到正文。',
+      '- opening_hook_risks 只写开篇吸引力问题：前 300 字无具体现场/动作/压力/追问点，前 800 字仍在解释设定，章尾没有把问题递出去。',
+      '- title_alignment_risks 只写标题与本章核心事件、场景物件、选择压力或反转点不匹配的问题。',
+      '- hallucination_risks 只写无来源新增设定、人物、能力、地点、物品、背景真相，或把推断升级成事实的问题。',
       '- human_language_repairs 只列最值得先改的 1 到 3 处生硬表达，尽量直接给出“原说法 -> 更自然说法”。',
       '- revision_brief 先讲承接和真实度，再讲语言和追读感。',
       '- 如果出现翻译腔、搭配不成立、伪文艺句或明显 AI 套话，要优先列进 language_risks 和 human_language_repairs。',
@@ -199,7 +208,7 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
         ? ['- 关键章节还要额外审查高潮是否兑现、代价是否落地、支线回收是否足够，避免只放大声量不推进结构。']
         : []),
     ]),
-    '只输出 JSON：{"summary":"总体判断","critical_fixes":["必改项"],"continuity_risks":["连续性风险"],"arc_progress_risks":["故事弧推进风险"],"context_drift_risks":["漂移风险"],"realism_risks":["真实度风险"],"coherence_risks":["连贯性风险"],"reader_hook_risks":["追读风险"],"language_risks":["语言风险"],"human_language_repairs":["原说法 -> 更自然说法"],"genre_hollowing_risks":["体裁空心化风险"],"missing_payoffs":["未落地伏笔"],"strengths":["具体优点"],"severity":"medium","rewrite_required":true,"revision_brief":"修订方向摘要","protagonist_setback":"minor","setback_summary":"主角在关键交锋里被压制","cost_present":true,"cost_summary":"主角付出人手与资源损失","cost_resolution_state":"ongoing","reversal_marker":true,"reversal_summary":"看似得手后被埋伏反制","reversal_support_state":"supported","pace_marker":"reversal","reward_state":"partial","protagonist_pressure":72,"chapter_function_primary":"reversal","chapter_function_tags":["progression","reversal"],"dialogue_filler_risks":["对白空话"],"dialogue_info_density_risks":["信息推进不足"],"dialogue_voice_lock_summary":"","required_voice_lock_character_ids":[]}',
+    '只输出 JSON：{"summary":"总体判断","critical_fixes":["必改项"],"continuity_risks":["连续性风险"],"arc_progress_risks":["故事弧推进风险"],"context_drift_risks":["漂移风险"],"realism_risks":["真实度风险"],"coherence_risks":["连贯性风险"],"reader_hook_risks":["追读风险"],"step_memory_risks":["步骤接力风险"],"opening_hook_risks":["开篇吸引力风险"],"title_alignment_risks":["标题偏题风险"],"hallucination_risks":["无来源新增或推断升级风险"],"language_risks":["语言风险"],"human_language_repairs":["原说法 -> 更自然说法"],"genre_hollowing_risks":["体裁空心化风险"],"missing_payoffs":["未落地伏笔"],"strengths":["具体优点"],"severity":"medium","rewrite_required":true,"revision_brief":"修订方向摘要","protagonist_setback":"minor","setback_summary":"主角在关键交锋里被压制","cost_present":true,"cost_summary":"主角付出人手与资源损失","cost_resolution_state":"ongoing","reversal_marker":true,"reversal_summary":"看似得手后被埋伏反制","reversal_support_state":"supported","pace_marker":"reversal","reward_state":"partial","protagonist_pressure":72,"chapter_function_primary":"reversal","chapter_function_tags":["progression","reversal"],"dialogue_filler_risks":["对白空话"],"dialogue_info_density_risks":["信息推进不足"],"dialogue_voice_lock_summary":"","required_voice_lock_character_ids":[]}',
   )
   return applyPromptOverride('chapterReview', fallback, params as unknown as Record<string, unknown>)
 }

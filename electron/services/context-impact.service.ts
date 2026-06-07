@@ -32,6 +32,12 @@ import {
   volumeDesigns,
 } from '../database/schema'
 import { parseThemeVoiceDocument } from '../../src/shared/theme-voice'
+import {
+  deriveChapterContractValidationStatus,
+  isContractValidationBlockerVerdict as isContractValidationBlockerVerdictValue,
+  isContractValidationWarningVerdict as isContractValidationWarningVerdictValue,
+  isHardContractValidationItem,
+} from '../../src/shared/contract-validation'
 import { throwUserFacingError } from '../utils/user-facing-error'
 import {
   buildChapterGateDriftSummary,
@@ -187,6 +193,10 @@ interface ReviewStateSnapshot {
   realismRisks: string[]
   coherenceRisks: string[]
   readerHookRisks: string[]
+  stepMemoryRisks: string[]
+  openingHookRisks: string[]
+  titleAlignmentRisks: string[]
+  hallucinationRisks: string[]
   arcProgressRisks: string[]
   languageRisks: string[]
   humanLanguageRepairs: string[]
@@ -229,6 +239,10 @@ function parseReviewState(raw?: string | null): {
   realismRisks: string[]
   coherenceRisks: string[]
   readerHookRisks: string[]
+  stepMemoryRisks: string[]
+  openingHookRisks: string[]
+  titleAlignmentRisks: string[]
+  hallucinationRisks: string[]
   arcProgressRisks: string[]
   languageRisks: string[]
   humanLanguageRepairs: string[]
@@ -269,6 +283,10 @@ function parseReviewState(raw?: string | null): {
     realismRisks: [],
     coherenceRisks: [],
     readerHookRisks: [],
+    stepMemoryRisks: [],
+    openingHookRisks: [],
+    titleAlignmentRisks: [],
+    hallucinationRisks: [],
     arcProgressRisks: [],
     languageRisks: [],
     humanLanguageRepairs: [],
@@ -323,6 +341,10 @@ function parseReviewState(raw?: string | null): {
       realismRisks: parseUnknownStringArray(parsed.realism_risks),
       coherenceRisks: parseUnknownStringArray(parsed.coherence_risks),
       readerHookRisks: parseUnknownStringArray(parsed.reader_hook_risks),
+      stepMemoryRisks: parseUnknownStringArray(parsed.step_memory_risks),
+      openingHookRisks: parseUnknownStringArray(parsed.opening_hook_risks),
+      titleAlignmentRisks: parseUnknownStringArray(parsed.title_alignment_risks),
+      hallucinationRisks: parseUnknownStringArray(parsed.hallucination_risks),
       arcProgressRisks: parseUnknownStringArray(parsed.arc_progress_risks),
       languageRisks: parseUnknownStringArray(parsed.language_risks),
       humanLanguageRepairs: parseUnknownStringArray(parsed.human_language_repairs),
@@ -1080,6 +1102,83 @@ function getChecklistCount(items: ChapterPublishCheckItem[], status: ChapterGate
   return items.filter((item) => item.status === status).length
 }
 
+type ContractValidationItemSnapshot = ChapterContractValidationResult['itemResults'][number]
+
+function isContractValidationBlockingVerdict(item: ContractValidationItemSnapshot): boolean {
+  return isContractValidationBlockerVerdictValue(item.verdict)
+}
+
+function isContractValidationWarningVerdict(item: ContractValidationItemSnapshot): boolean {
+  return isContractValidationWarningVerdictValue(item.verdict)
+}
+
+function isContractValidationIssue(item: ContractValidationItemSnapshot): boolean {
+  return isContractValidationBlockingVerdict(item) || isContractValidationWarningVerdict(item)
+}
+
+function isSoftContractValidationItem(item: ContractValidationItemSnapshot): boolean {
+  return !isHardContractValidationItem(item)
+}
+
+function contractValidationItemIssueLine(item: ContractValidationItemSnapshot): string {
+  return normalizeText(item.rewriteHint)
+    || normalizeText(item.semanticReason)
+    || normalizeText(item.evidenceExcerpt)
+    || normalizeText(item.expected)
+}
+
+function getContractValidationIssuesByType(
+  contractValidation: ChapterContractValidationResult | null | undefined,
+  contractItemType: string,
+): string[] {
+  return dedupeTextList((contractValidation?.itemResults || [])
+    .filter((item) => item.contractItemType === contractItemType && isContractValidationIssue(item))
+    .map(contractValidationItemIssueLine))
+}
+
+function buildHardContractValidationResult(
+  result: ChapterContractValidationResult | null,
+): ChapterContractValidationResult | null {
+  if (!result) return null
+  const hardItems = result.itemResults.filter((item) => !isSoftContractValidationItem(item))
+  const hardBlockerCount = hardItems.filter(isContractValidationBlockingVerdict).length
+  const hardWarningCount = hardItems.filter(isContractValidationWarningVerdict).length
+  const status = deriveChapterContractValidationStatus(hardItems)
+  const softIssueCount = result.itemResults
+    .filter((item) => isSoftContractValidationItem(item) && isContractValidationIssue(item))
+    .length
+  const summary = status === 'blocker'
+    ? `正文合同硬性验证命中 ${hardBlockerCount} 项阻塞，${hardWarningCount} 项预警。`
+    : status === 'warning'
+      ? `正文合同硬性验证仍有 ${hardWarningCount} 项预警。`
+      : softIssueCount > 0
+        ? `正文合同硬性验证已通过；标题贴合与黄金三章开篇由专项门禁处理。`
+        : result.summary
+
+  return {
+    ...result,
+    status,
+    summary,
+    itemResults: hardItems,
+    rewriteHints: hardItems
+      .filter(isContractValidationIssue)
+      .map((item) => item.rewriteHint)
+      .filter(Boolean),
+  }
+}
+
+function getPublishContractValidationScore(
+  result: ChapterContractValidationResult | null | undefined,
+): number | null {
+  if (!result) return null
+  const hardItems = result.itemResults.filter((item) => !isSoftContractValidationItem(item))
+  if (hardItems.length === 0) return null
+  return getContractValidationScore({
+    ...result,
+    itemResults: hardItems,
+  })
+}
+
 function buildChapterGateSummary(
   gateLevel: ChapterGateLevel,
   rewriteCount: number,
@@ -1167,7 +1266,7 @@ function buildPublishCheckScoreBreakdown(
     rewriteCount,
   } = context
   const auditContractScore = calculateContractAuditScore(contractAudit)
-  const validationContractScore = getContractValidationScore(contractValidation)
+  const validationContractScore = getPublishContractValidationScore(contractValidation)
   let contractScore = validationContractScore == null
     ? auditContractScore
     : Math.round((auditContractScore + validationContractScore) / 2)
@@ -1615,6 +1714,12 @@ function buildRewriteRecheckItems(
     case 'ai_score':
     case 'review':
       return ['ai_score', 'review']
+    case 'step_memory_handoff':
+      return ['step_memory_handoff', 'review', 'contract_delivery']
+    case 'opening_hook':
+      return ['opening_hook', 'review', 'ai_score']
+    case 'title_and_hallucination':
+      return ['title_and_hallucination', 'review']
     case 'sensory_coverage':
       return ['sensory_coverage', 'review']
     case 'narrative_ratio':
@@ -1663,6 +1768,9 @@ function getRewriteScopeForItem(
     || item.key === 'style_compliance'
     || item.key === 'review'
     || item.key === 'ai_score'
+    || item.key === 'step_memory_handoff'
+    || item.key === 'opening_hook'
+    || item.key === 'title_and_hallucination'
     || item.key === 'sensory_coverage'
     || item.key === 'narrative_ratio'
   ) {
@@ -1732,6 +1840,9 @@ function getRewritePlanPriority(plan: RewritePlan | undefined, item: ChapterPubl
   if (!plan) return 0
   if (item.key === 'rewrite_path') return 20
   if (plan.scope === 'contract_replan') return 400
+  if (item.key === 'title_and_hallucination') return 360
+  if (item.key === 'step_memory_handoff') return 340
+  if (item.key === 'opening_hook') return 320
   if (item.key === 'contract_delivery') return 160
   if (item.key === 'narrative_ratio') return 280
   if (plan.scope === 'scene_rewrite') return 300
@@ -2186,6 +2297,15 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
       reviewNotes: chapter.reviewNotesJson,
     })
     : null
+  const publishContractValidation = buildHardContractValidationResult(contractValidation)
+  const openingHookIssues = dedupeTextList([
+    ...reviewState.openingHookRisks,
+    ...getContractValidationIssuesByType(contractValidation, 'golden_three_opening'),
+  ])
+  const titleAlignmentIssues = dedupeTextList([
+    ...reviewState.titleAlignmentRisks,
+    ...getContractValidationIssuesByType(contractValidation, 'chapter_title_alignment'),
+  ])
   const contractAuditJson = JSON.stringify(contractAudit)
   if (chapter.contractAuditJson !== contractAuditJson) {
     db.update(chapters).set({
@@ -2275,8 +2395,8 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
   const strictVolumeDesign = normalizeText(currentVolumeDesign?.auditStatus) === 'locked'
     || normalizeText(currentVolumeDesign?.auditStatus) === 'ready'
 
-  const contractDeliveryStatus: ChapterGateLevel = contractValidation
-    ? contractValidation.status
+  const contractDeliveryStatus: ChapterGateLevel = publishContractValidation
+    ? publishContractValidation.status
     : contractAudit.blockerCount > 0
       ? 'blocker'
       : contractAudit.warningCount > 0
@@ -2340,7 +2460,7 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
     reviewState.rewriteRequired && (contractAudit.blockerCount > 0 || highIssues.length > 0 || lineProgressStatus === 'blocker' || threadProgressStatus === 'blocker' || volumeAlignmentStatus === 'blocker')
       ? '审校已经建议重写，且命中了合同/推进/结构类硬问题，单纯润色不足以解决。'
       : '',
-    contractValidation?.status === 'blocker'
+    publishContractValidation?.status === 'blocker'
       ? '正文合同验证仍有关键缺口，当前稿件没有兑现章节目标、场景结果或必要支线/伏笔。'
       : '',
   ].filter(Boolean)
@@ -2411,6 +2531,53 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
       source: 'review',
       relatedPage: 'writing',
       fixHint: '先消化审校结论，再决定是否进入完成态。',
+    }),
+    makePublishCheckItem({
+      key: 'step_memory_handoff',
+      label: '步骤接力未断链',
+      status: reviewState.stepMemoryRisks.length >= 2
+        ? 'blocker'
+        : reviewState.stepMemoryRisks.length > 0
+          ? 'warning'
+          : 'pass',
+      detail: reviewState.stepMemoryRisks.length > 0
+        ? reviewState.stepMemoryRisks.slice(0, 3).join('；')
+        : '当前没有识别到 Planner、Writer、Critic、Rewriter 之间的接力断链。',
+      source: 'review',
+      relatedPage: 'writing',
+      fixHint: '回到正文页按章节衔接桥、场景计划和运行时接力断言重写断链段落。',
+    }),
+    makePublishCheckItem({
+      key: 'opening_hook',
+      label: '开篇追读力',
+      status: openingHookIssues.length > 0 && chapter.chapterNum <= 3
+        ? 'rewrite'
+        : openingHookIssues.length > 0
+          ? 'warning'
+          : 'pass',
+      detail: openingHookIssues.length > 0
+        ? openingHookIssues.slice(0, 3).join('；')
+        : chapter.chapterNum <= 3
+          ? '黄金三章当前没有识别到明显的章首吸引力问题。'
+          : '当前章节没有识别到明显的章首吸引力问题。',
+      source: 'review',
+      relatedPage: 'writing',
+      fixHint: '优先重排章首 800 字：具体现场、主角动作、可感压力、追问点和章尾递进必须落地。',
+    }),
+    makePublishCheckItem({
+      key: 'title_and_hallucination',
+      label: '标题贴合 / 无幻觉新增',
+      status: reviewState.hallucinationRisks.length > 0
+        ? 'blocker'
+        : titleAlignmentIssues.length > 0
+          ? 'warning'
+          : 'pass',
+      detail: reviewState.hallucinationRisks.length > 0 || titleAlignmentIssues.length > 0
+        ? [...reviewState.hallucinationRisks, ...titleAlignmentIssues].slice(0, 3).join('；')
+        : '当前没有识别到无来源新增设定或标题偏离本章核心事件的问题。',
+      source: 'review',
+      relatedPage: 'writing',
+      fixHint: '删除无来源新增，或把标题改回本章核心事件、场景物件、选择压力或反转点。',
     }),
     makePublishCheckItem({
       key: 'style_compliance',
@@ -2607,13 +2774,13 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
       label: '合同兑现率',
       status: contractDeliveryStatus,
       detail: contractDeliveryStatus === 'pass'
-        ? (contractValidation?.summary || '章节合同与场景合同当前已对齐。')
-        : (contractValidation?.summary || contractAudit.summary),
+        ? (publishContractValidation?.summary || '章节合同与场景合同当前已对齐。')
+        : (publishContractValidation?.summary || contractAudit.summary),
       source: 'contract',
-      relatedPage: contractValidation?.itemResults.some((item) => typeof item.segmentId === 'number')
+      relatedPage: publishContractValidation?.itemResults.some((item) => typeof item.segmentId === 'number')
         ? 'structure'
         : 'contracts',
-      fixHint: contractValidation?.rewriteHints[0] || '回到章节合同与场景合同页补齐绑定、推进记录和结果状态。',
+      fixHint: publishContractValidation?.rewriteHints[0] || '回到章节合同与场景合同页补齐绑定、推进记录和结果状态。',
     }),
     makePublishCheckItem({
       key: 'dialogue_voice',
@@ -2810,7 +2977,7 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
   const rewritePlan = buildChapterRewritePlan({
     checklist: rawChecklist,
     reviewState,
-    contractValidation,
+    contractValidation: publishContractValidation,
   })
   const { taskIdByItemKey, generatedTaskCount } = syncChapterGateRevisionTasks(
     chapter.novelId,
@@ -2819,7 +2986,7 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
     rawChecklist,
     contractAudit,
     reviewState,
-    contractValidation,
+    publishContractValidation,
   )
   const checklist = rawChecklist.map((item) => {
     const taskId = taskIdByItemKey.get(item.key)
@@ -2828,18 +2995,24 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
       : item
   })
   const rewriteCount = getChecklistCount(checklist, 'rewrite')
-  const blockerCount = getChecklistCount(checklist, 'blocker') + contractAudit.blockerCount
+  const checklistBlockerCount = getChecklistCount(checklist, 'blocker')
+  const blockerCount = checklistBlockerCount + contractAudit.blockerCount
   const warningCount = getChecklistCount(checklist, 'warning') + contractAudit.warningCount
-  const gateLevel: ChapterGateLevel = rewriteCount > 0
+  const hasSpecificRewrite = checklist.some((item) => item.status === 'rewrite' && item.key !== 'rewrite_path')
+  const blockersAreRewriteDependent = contractAudit.blockerCount === 0
+    && checklist.every((item) => item.status !== 'blocker' || item.key === 'contract_delivery')
+  const gateLevel: ChapterGateLevel = rewriteCount > 0 && (blockerCount === 0 || (hasSpecificRewrite && blockersAreRewriteDependent))
     ? 'rewrite'
     : blockerCount > 0
       ? 'blocker'
+      : rewriteCount > 0
+      ? 'rewrite'
       : warningCount > 0
         ? 'warning'
         : 'pass'
   const scoreBreakdown = buildPublishCheckScoreBreakdown({
     contractAudit,
-    contractValidation,
+    contractValidation: publishContractValidation,
     checklist,
     reviewState,
     aiScore,
@@ -2865,7 +3038,7 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
     warningCount,
     generatedTaskCount,
     scoreBreakdown,
-    topIssueKeys: buildChapterGateTopIssueKeys(checklist, contractAudit, contractValidation),
+    topIssueKeys: buildChapterGateTopIssueKeys(checklist, contractAudit, publishContractValidation),
   })
 
   return {
@@ -2889,6 +3062,6 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
     generatedTaskCount,
     checklist,
     contractAudit,
-    contractValidation: contractValidation || undefined,
+    contractValidation: publishContractValidation || undefined,
   }
 }

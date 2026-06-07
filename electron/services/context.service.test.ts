@@ -104,6 +104,7 @@ import {
   allocateChapterContext,
   buildStoryProfile,
   buildRecallSnapshot,
+  buildWritingContextUsageSnapshot,
   buildPreviousChapterContextFeed,
   collectChapterContextRawData,
   ContextOverflowError,
@@ -212,6 +213,7 @@ function createBaseContextParts(): ChapterContextParts {
     previousSummaries: '此前摘要：上一章刚刚撤离。',
     previousChapterContext: '上一章关键先验：队伍从失守点撤离，出口外仍有追兵。',
     lastChapterEnding: '上一章结尾：敌人追到了出口。',
+    chapterBridgePlan: '承接来源：第3章\n地点承接：继续停留在出口外，开场先交代追兵压力。\n首场景约束：前 200 字必须先接住上章结尾。',
     styleTemplate: '风格模板：短句推进，压缩空话。',
     chapterGoal: '本章目标：守住补给点并稳定队内关系。',
     continuitySummary: '承接摘要：撤离造成了一名伤员掉队。',
@@ -233,6 +235,7 @@ function createBaseContextParts(): ChapterContextParts {
     reviewProofSummary: '',
     rewriteDeltaSummary: '',
     publishGateRiskSummary: '',
+    stepMemorySummary: '步骤接力记忆：Planner 必须接上出口追兵，Writer 不得改成新地点。',
   }
 }
 
@@ -339,7 +342,8 @@ describe('allocateChapterContext', () => {
   })
 
   it('returns context when the budget is sufficient', () => {
-    const context = allocateChapterContext(createRawData(), {
+    const rawData = createRawData()
+    const context = allocateChapterContext(rawData, {
       totalBudget: 10000,
       promptProfile: 'draft',
       chapterComplexity: 'standard',
@@ -350,6 +354,10 @@ describe('allocateChapterContext', () => {
     expect(context.hardConstraintEntries.length).toBeGreaterThan(0)
     expect(context.constraintInjectionStatus.injectedLabels).toContain('chapterGoal')
     expect(context.softContextDecisions.some((entry) => entry.reason === 'covered_by_hard_constraint')).toBe(true)
+
+    const usageSnapshot = buildWritingContextUsageSnapshot(rawData, context)
+    expect(usageSnapshot.usedAssets).toContain('步骤接力记忆')
+    expect(usageSnapshot.recentStateChanges.some((item) => item.includes('Writer 不得改成新地点'))).toBe(true)
   })
 
   it('tracks explicit preserved hard-constraint labels in allocation metadata', () => {
@@ -1012,6 +1020,36 @@ describe('allocateChapterContext', () => {
       const previousSummaryDecision = overflow.context.softContextDecisions.find((entry) => entry.label === 'previousSummaries')
       expect(overflow.context.previousChapterContext.length).toBeGreaterThan(0)
       expect(previousChapterDecision?.status).not.toBe('dropped')
+      expect(previousSummaryDecision?.status).not.toBe('kept')
+    }
+  })
+
+  it('keeps chapter bridge plan ahead of summary memory under a tight draft budget', () => {
+    const rawData = createRawData({
+      contextParts: {
+        chapterBridgePlan: '章节衔接桥：'.repeat(80),
+        previousSummaries: '摘要'.repeat(2600),
+        longTermMemory: '长期'.repeat(2400),
+        recalledMemory: '召回'.repeat(2200),
+        continuitySummary: '连续'.repeat(1800),
+      },
+    })
+
+    try {
+      allocateChapterContext(rawData, {
+        totalBudget: 10000,
+        promptProfile: 'draft',
+        chapterComplexity: 'standard',
+      })
+      throw new Error('expected ContextOverflowError')
+    } catch (error) {
+      expect(error).toBeInstanceOf(ContextOverflowError)
+      const overflow = error as ContextOverflowError
+      const bridgeDecision = overflow.context.softContextDecisions.find((entry) => entry.label === 'chapterBridgePlan')
+      const previousSummaryDecision = overflow.context.softContextDecisions.find((entry) => entry.label === 'previousSummaries')
+      expect(overflow.context.chapterBridgePlan.length).toBeGreaterThan(0)
+      expect(bridgeDecision?.sourceKind).toBe('chapter_bridge')
+      expect(bridgeDecision?.status).not.toBe('dropped')
       expect(previousSummaryDecision?.status).not.toBe('kept')
     }
   })

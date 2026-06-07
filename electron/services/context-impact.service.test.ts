@@ -513,11 +513,62 @@ describe('runChapterPublishCheck', () => {
 
     expect(result.checklist.find((item) => item.key === 'contract_delivery')?.status).toBe('blocker')
     expect(result.contractValidation?.status).toBe('blocker')
-    expect(result.contractValidation?.summary).toContain('正文合同验证命中')
+    expect(result.contractValidation?.summary).toContain('正文合同硬性验证命中')
     expect(result.rewritePlan?.scope).toBe('scene_rewrite')
     expect(result.rewritePlan?.recheckItems).toContain('contract_delivery')
     expect(taskMeta.rewritePlan?.scope).toBe('scene_rewrite')
     expect(result.history[0]?.topIssueKeys.some((item) => item.startsWith('contract_delivery:'))).toBe(true)
+  })
+
+  it('keeps soft title alignment issues out of contract delivery blockers', () => {
+    const rows = createBaseRows()
+    Object.assign((rows.get(chapters) || [])[0], {
+      title: '第十二章',
+    })
+
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+    vi.mocked(buildNovelConsistencyReport).mockReturnValue({ issues: [] } as never)
+
+    const result = runChapterPublishCheck(10)
+
+    expect(result.gateLevel).toBe('warning')
+    expect(result.ready).toBe(true)
+    expect(result.checklist.find((item) => item.key === 'contract_delivery')?.status).toBe('pass')
+    expect(result.checklist.find((item) => item.key === 'title_and_hallucination')?.status).toBe('warning')
+    expect(result.contractValidation?.status).toBe('pass')
+    expect(result.contractValidation?.itemResults.some((item) => item.contractItemType === 'chapter_title_alignment')).toBe(false)
+    expect(result.history[0]?.topIssueKeys.some((item) => item.startsWith('contract_delivery:'))).toBe(false)
+  })
+
+  it('routes golden-three opening issues to opening hook without blocking contract delivery', () => {
+    const rows = createBaseRows()
+    Object.assign((rows.get(chapters) || [])[0], {
+      chapterNum: 1,
+      title: '北门药箱',
+      content: [
+        '很多年前，世界的秩序曾经改变，每个人都在命运里寻找自己的位置。林远也知道，有些真相终究会到来。规则、命运、时代、选择、牺牲和信念像一层看不见的雾，笼在所有人头顶。那时还没有人理解这场风暴的意义，也没有人知道一只失窃药箱会怎样改写许多人的去向。过去的恩怨、未被说出的承诺、被隐藏的真相，都在更大的棋局里缓慢移动，仿佛一切早有安排，只等某个时刻到来。所有记录都指向遥远的因果，所有传闻都像历史深处的回声，人物的名字、旧案的来龙去脉、城里各方势力的格局被一层层铺开，却还没有一个人进入现场，也没有任何当下正在发生的动作或危险。',
+        '夜晚的北门外，林远假意盘问守卫，继续追查失窃药箱。守卫追查他的来路，两人几乎动手。林远趁乱确认药箱被转去旧仓，主线因此向前推进一步，线索也随之升级。',
+        '他刚转身，门外又传来急促脚步声，像是有人已经知道了他的发现。',
+      ].join('\n\n'),
+    })
+    Object.assign((rows.get(storyThreads) || [])[0], {
+      plantedChapter: 1,
+      lastReferencedChapter: 1,
+    })
+
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+    vi.mocked(buildNovelConsistencyReport).mockReturnValue({ issues: [] } as never)
+
+    const result = runChapterPublishCheck(10)
+
+    expect(result.gateLevel).toBe('rewrite')
+    expect(result.rewriteRecommended).toBe(true)
+    expect(result.checklist.find((item) => item.key === 'contract_delivery')?.status).toBe('pass')
+    expect(result.checklist.find((item) => item.key === 'opening_hook')?.status).toBe('rewrite')
+    expect(result.contractValidation?.status).toBe('pass')
+    expect(result.contractValidation?.itemResults.some((item) => item.contractItemType === 'golden_three_opening')).toBe(false)
+    expect(result.rewritePlan?.recheckItems).toContain('opening_hook')
+    expect(result.rewritePlan?.recheckItems).not.toContain('contract_delivery')
   })
 
   it('blocks publish when recall degradation has continued for three chapters', () => {

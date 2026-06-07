@@ -59,6 +59,7 @@ import { getCharacterStateContextHintMap, listLatestCharacterStates } from './ch
 import { getWorldStateContextSnapshot } from './world-state.service'
 import { getChapterContractContext, listForeshadowLedger } from './endgame-asset.service'
 import { buildGlobalLockContext } from './batch-workbench.service'
+import { buildChapterBridgePlan, formatChapterBridgePlan } from './generation-integrity.service'
 
 /**
  * 改进的 token 估算：中文字符约 1 token/字，英文约 0.25 token/word (4 chars/token)，
@@ -285,6 +286,7 @@ export interface ChapterContextParts {
   previousSummaries: string
   previousChapterContext: string
   lastChapterEnding: string
+  chapterBridgePlan: string
   styleTemplate: string
   chapterGoal: string
   continuitySummary: string
@@ -306,6 +308,7 @@ export interface ChapterContextParts {
   reviewProofSummary: string
   rewriteDeltaSummary: string
   publishGateRiskSummary: string
+  stepMemorySummary: string
 }
 
 export interface HardConstraintEntry {
@@ -360,7 +363,7 @@ export interface PreviousChapterFeedSource {
 
 export type ContextDecisionStatus = 'kept' | 'truncated' | 'dropped'
 export type ContextDecisionReason = 'budget_fit' | 'budget_insufficient' | 'covered_by_hard_constraint'
-export type ContextDecisionSourceKind = 'hard_constraint' | 'previous_chapter' | 'recent_summary' | 'vector_recall'
+export type ContextDecisionSourceKind = 'hard_constraint' | 'previous_chapter' | 'chapter_bridge' | 'recent_summary' | 'vector_recall'
 
 export interface ContextDecisionEntry {
   label: string
@@ -634,6 +637,7 @@ interface RecallQueryBuildInput {
   openLoops: string
   dueForeshadows: string
   continuityNotes: string
+  chapterBridgePlan: string
   storyThreadsSummary: string
   mentionedCharacters: string[]
   mentionedItems: string[]
@@ -1713,7 +1717,8 @@ function buildRecallQueryBuckets(input: RecallQueryBuildInput): RecallQueryBucke
         compactRecallLine(input.chapterGoal, 80),
         compactRecallLine(input.arcGoal, 80),
         compactRecallLine(input.arcSummary, 84),
-      ], 3),
+        ...splitRecallLines(input.chapterBridgePlan, 2, 84),
+      ], 5),
     },
     {
       title: '活跃线程',
@@ -1725,6 +1730,7 @@ function buildRecallQueryBuckets(input: RecallQueryBuildInput): RecallQueryBucke
     {
       title: '待回收事项',
       lines: dedupe([
+        ...splitRecallLines(input.chapterBridgePlan, 2, 90),
         ...splitRecallLines(input.openLoops, 4, 90),
         ...splitRecallLines(input.dueForeshadows, 3, 90),
         ...splitRecallLines(input.timelineOpenThreads, 3, 90),
@@ -2123,6 +2129,7 @@ async function runRecallAugmentation(input: {
   openLoops: string
   dueForeshadows: string
   continuityNotes: string
+  chapterBridgePlan: string
   storyThreadsSummary: string
   mentionedCharacters: string[]
   mentionedItems: string[]
@@ -2154,6 +2161,7 @@ async function runRecallAugmentation(input: {
     openLoops: input.openLoops,
     dueForeshadows: input.dueForeshadows,
     continuityNotes: input.continuityNotes,
+    chapterBridgePlan: input.chapterBridgePlan,
     storyThreadsSummary: input.storyThreadsSummary,
     mentionedCharacters: input.mentionedCharacters,
     mentionedItems: input.mentionedItems,
@@ -2251,6 +2259,9 @@ function resolveContextSourceKind(label: ChapterContextLabel | string): ContextD
     case 'previousChapterContext':
     case 'lastChapterEnding':
       return 'previous_chapter'
+    case 'chapterBridgePlan':
+    case 'stepMemorySummary':
+      return 'chapter_bridge'
     case 'previousSummaries':
       return 'recent_summary'
     case 'recalledMemory':
@@ -2272,6 +2283,8 @@ function resolveContextLabelTitle(label: ChapterContextLabel): string {
     previousSummaries: '最近章节摘要',
     previousChapterContext: '上一章关键先验',
     lastChapterEnding: '上章结尾',
+    chapterBridgePlan: '章节衔接桥',
+    stepMemorySummary: '步骤接力记忆',
     styleTemplate: '文风参考',
     chapterGoal: '本章目标',
     continuitySummary: '连续性记忆',
@@ -2512,6 +2525,8 @@ function createStagePriorityMap(
           itemSummary: 1,
           previousChapterContext: 1,
           lastChapterEnding: 1,
+          chapterBridgePlan: 0,
+          stepMemorySummary: 0,
           continuitySummary: 2,
           timelineSummary: 1,
           timelineOpenThreads: 1,
@@ -2546,6 +2561,8 @@ function createStagePriorityMap(
           itemSummary: 1,
           previousChapterContext: 1,
           lastChapterEnding: 1,
+          chapterBridgePlan: 0,
+          stepMemorySummary: 0,
           continuitySummary: 1,
           timelineSummary: 1,
           timelineOpenThreads: 1,
@@ -2580,6 +2597,8 @@ function createStagePriorityMap(
           itemSummary: 1,
           previousChapterContext: 1,
           lastChapterEnding: 2,
+          chapterBridgePlan: 0,
+          stepMemorySummary: 0,
           continuitySummary: 0,
           timelineSummary: 0,
           timelineOpenThreads: 2,
@@ -2615,6 +2634,8 @@ function createStagePriorityMap(
           itemSummary: 1,
           previousChapterContext: 1,
           lastChapterEnding: 1,
+          chapterBridgePlan: 0,
+          stepMemorySummary: 0,
           continuitySummary: 1,
           timelineSummary: 1,
           timelineOpenThreads: 1,
@@ -2658,6 +2679,8 @@ function createStagePriorityMap(
     promote('previousChapterContext')
     promote('previousSummaries')
     promote('lastChapterEnding')
+    promote('chapterBridgePlan')
+    promote('stepMemorySummary')
     promote('timelineSummary')
   }
 
@@ -4031,10 +4054,13 @@ export async function collectChapterContextRawData(
     extractChapterGoal(currentChapter?.outline),
     currentArc?.arcGoal || '',
   ].filter(Boolean).join('\n')
+  const previousChapterFeed = buildPreviousChapterContextFeed(previousRows[previousRows.length - 1])
   const chapterSignalText = [
     currentChapter?.title,
     chapterGoalPreview,
     currentChapter?.outline,
+    previousChapterFeed.previousChapterContext,
+    previousChapterFeed.lastChapterEnding,
     currentArc?.arcSummary,
     currentArc?.arcGoal,
     contractContext?.chapterContract.chapterGoal,
@@ -4232,7 +4258,12 @@ export async function collectChapterContextRawData(
     limit: 4,
   }))
 
-  const previousChapterFeed = buildPreviousChapterContextFeed(previousRows[previousRows.length - 1])
+  const chapterBridgePlan = currentChapter
+    ? formatChapterBridgePlan(buildChapterBridgePlan(currentChapter.id, {
+        themeVoice: parseThemeVoiceDocument(novel.themeVoiceJson),
+        chapterGoal,
+      }))
+    : ''
   const worldStateSnapshot = getWorldStateContextSnapshot(novelId, {
     upToChapterNum: recentChapters[recentChapters.length - 1]?.chapterNum,
     limit: 12,
@@ -4262,6 +4293,7 @@ export async function collectChapterContextRawData(
       ].filter(Boolean).join('\n'),
       previousChapterContext: previousChapterFeed.previousChapterContext,
       lastChapterEnding: previousChapterFeed.lastChapterEnding,
+      chapterBridgePlan,
       openLoops: [
         collectOpenLoops(continuityChapters),
         ...promiseCommitmentLines,
@@ -4295,6 +4327,7 @@ export async function collectChapterContextRawData(
       reviewProofSummary: '',
       rewriteDeltaSummary: '',
       publishGateRiskSummary: '',
+      stepMemorySummary: '',
     },
     previousChapterSampleReport: previousChapterFeed.previousChapterSampleReport,
   })
@@ -4312,6 +4345,7 @@ export async function collectChapterContextRawData(
       baseContext.contextParts.openLoops,
       baseContext.contextParts.dueForeshadows,
       baseContext.contextParts.continuityNotes,
+      baseContext.contextParts.chapterBridgePlan,
     ].filter(Boolean).join('\n'),
     chapterGoal,
     outline: currentChapter?.outline || '',
@@ -4333,6 +4367,7 @@ export async function collectChapterContextRawData(
     openLoops: baseContext.contextParts.openLoops,
     dueForeshadows: baseContext.contextParts.dueForeshadows,
     continuityNotes: baseContext.contextParts.continuityNotes,
+    chapterBridgePlan: baseContext.contextParts.chapterBridgePlan,
     storyThreadsSummary: profile.storyThreadsSummary,
     mentionedCharacters: [...mentionedCharacterNames],
     mentionedItems: mentionedItemNames,
@@ -4546,6 +4581,7 @@ export function allocateChapterContext(
     previousSummaries: softAllocation.allocated.previousSummaries || '',
     previousChapterContext: softAllocation.allocated.previousChapterContext || '',
     lastChapterEnding: softAllocation.allocated.lastChapterEnding || '',
+    chapterBridgePlan: softAllocation.allocated.chapterBridgePlan || '',
     styleTemplate: softAllocation.allocated.styleTemplate || '',
     chapterGoal: softAllocation.allocated.chapterGoal || rawData.contextParts.chapterGoal || '',
     continuitySummary: softAllocation.allocated.continuitySummary || '',
@@ -4567,6 +4603,7 @@ export function allocateChapterContext(
     reviewProofSummary: softAllocation.allocated.reviewProofSummary || rawData.contextParts.reviewProofSummary || '',
     rewriteDeltaSummary: softAllocation.allocated.rewriteDeltaSummary || rawData.contextParts.rewriteDeltaSummary || '',
     publishGateRiskSummary: softAllocation.allocated.publishGateRiskSummary || rawData.contextParts.publishGateRiskSummary || '',
+    stepMemorySummary: softAllocation.allocated.stepMemorySummary || '',
     hardConstraintContext: hardConstraintAllocation.text,
     hardConstraintSummary,
     hardConstraintEntries: hardConstraintAllocation.entries,
@@ -4612,6 +4649,8 @@ export function buildWritingContextUsageSnapshot(
     context.timelineSummary ? '时间轴锚点' : '',
     context.activeThreads ? '活跃线程' : '',
     context.dueForeshadows ? '伏笔与到期回收' : '',
+    context.chapterBridgePlan ? '章节衔接桥' : '',
+    context.stepMemorySummary ? '步骤接力记忆' : '',
     ...rawData.recalledMemorySources
       .filter((item) => isAcceptedRecallSource(item))
       .slice(0, 4)
@@ -4637,6 +4676,8 @@ export function buildWritingContextUsageSnapshot(
   const recentStateChanges = [...new Set([
     ...splitContextLines(rawData.contextParts.continuitySummary, 4),
     ...splitContextLines(rawData.contextParts.continuityNotes, 3),
+    ...splitContextLines(rawData.contextParts.chapterBridgePlan, 3),
+    ...splitContextLines(rawData.contextParts.stepMemorySummary, 3),
     ...splitContextLines(rawData.contextParts.worldStates, 2),
   ])].slice(0, 8)
 

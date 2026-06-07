@@ -83,19 +83,30 @@ export class OpenAIAdapter extends BaseAdapter {
     }
   }
 
-  private buildBody(messages: Message[], opts?: ChatOptions, stream = false) {
+  protected getCompletionTokensFieldName(): 'max_tokens' | 'max_completion_tokens' {
+    return 'max_tokens'
+  }
+
+  protected shouldIncludeTemperature(_opts?: ChatOptions): boolean {
+    return true
+  }
+
+  protected buildBody(messages: Message[], opts?: ChatOptions, stream = false) {
     const msgs = opts?.systemPrompt
       ? [{ role: 'system', content: opts.systemPrompt }, ...messages]
       : messages
 
-    return {
+    const body: Record<string, unknown> = {
       model: this.modelId,
       messages: msgs,
-      temperature: this.resolveTemperature(opts),
-      max_tokens: this.resolveMaxTokens(opts),
       stream,
       stop: opts?.stopSequences,
     }
+    if (this.shouldIncludeTemperature(opts)) {
+      body.temperature = this.resolveTemperature(opts)
+    }
+    body[this.getCompletionTokensFieldName()] = this.resolveMaxTokens(opts)
+    return body
   }
 
   async embed(texts: string[], opts?: { model?: string }): Promise<number[][]> {

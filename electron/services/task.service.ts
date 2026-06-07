@@ -8,6 +8,7 @@ import {
   createAdapter,
   getDefaultModelConfigRecord,
   getModelConfigRecord,
+  getModelProviderOptions,
   getProviderRuntimeDefaults,
 } from './model.service'
 import { appendVariationMessage, buildVariationDigest } from './variation-control.service'
@@ -187,6 +188,7 @@ interface TaskModelRuntime {
   maxConcurrency: number
   temperature: number
   maxTokens: number
+  providerOptions?: ChatOptions['providerOptions']
   adapter: BaseAdapter
 }
 
@@ -323,6 +325,7 @@ function buildTaskModelRuntime(modelConfigId?: number | null): TaskModelRuntime 
     maxTokens: typeof config.maxTokens === 'number' && config.maxTokens > 0
       ? Math.round(config.maxTokens)
       : getProviderRuntimeDefaults(config.provider).maxTokens,
+    providerOptions: getModelProviderOptions(config),
     adapter: createAdapter(config),
   }
 }
@@ -918,11 +921,16 @@ export async function executeStreamTask(taskId: number, opts: RunTaskOptions): P
     release = acquired.release
     updateTaskStatus(taskId, 'running', opts.sender)
     stopHeartbeat = startTaskHeartbeat(taskId)
+    const chatOpts = opts.chatOpts || {}
 
     await executeStreamWithRateLimitRetries(acquired.runtime.adapter, opts.messages, {
       temperature: acquired.runtime.temperature,
       maxTokens: acquired.runtime.maxTokens,
-      ...opts.chatOpts,
+      ...chatOpts,
+      providerOptions: {
+        ...acquired.runtime.providerOptions,
+        ...chatOpts.providerOptions,
+      },
       signal: controller.signal,
       onStream: (chunk) => {
         fullOutput += chunk
@@ -1025,11 +1033,16 @@ export async function executeChatTask(taskId: number, opts: RunTaskOptions): Pro
     release = acquired.release
     updateTaskStatus(taskId, 'running', opts.sender)
     stopHeartbeat = startTaskHeartbeat(taskId)
+    const chatOpts = opts.chatOpts || {}
 
     const result = await executeChatWithRateLimitRetries(acquired.runtime.adapter, opts.messages, {
       temperature: acquired.runtime.temperature,
       maxTokens: acquired.runtime.maxTokens,
-      ...opts.chatOpts,
+      ...chatOpts,
+      providerOptions: {
+        ...acquired.runtime.providerOptions,
+        ...chatOpts.providerOptions,
+      },
       signal: controller.signal,
     })
 

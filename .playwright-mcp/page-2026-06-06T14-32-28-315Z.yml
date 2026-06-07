@@ -1,0 +1,46 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - strong [ref=e7]: 小说工作台
+  - generic [ref=e8]:
+    - complementary [ref=e9]:
+      - generic [ref=e10]:
+        - menu [ref=e11]:
+          - menuitem "book 我的小说" [ref=e12] [cursor=pointer]:
+            - img "book" [ref=e13]:
+              - img [ref=e14]
+            - generic [ref=e16]: 我的小说
+          - menuitem "robot 模型管理" [ref=e17] [cursor=pointer]:
+            - img "robot" [ref=e18]:
+              - img [ref=e19]
+            - generic [ref=e21]: 模型管理
+          - menuitem "appstore 模板系统" [ref=e22] [cursor=pointer]:
+            - img "appstore" [ref=e23]:
+              - img [ref=e24]
+            - generic [ref=e26]: 模板系统
+          - menuitem "message 提示词" [ref=e27] [cursor=pointer]:
+            - img "message" [ref=e28]:
+              - img [ref=e29]
+            - generic [ref=e31]: 提示词
+          - menuitem "schedule 任务中心" [ref=e32] [cursor=pointer]:
+            - img "schedule" [ref=e33]:
+              - img [ref=e34]
+            - generic [ref=e36]: 任务中心
+        - generic [ref=e37]:
+          - generic [ref=e38]:
+            - img "bulb" [ref=e39]:
+              - img [ref=e40]
+            - text: 主题设置
+          - generic [ref=e42]:
+            - button "深色 moon" [ref=e43] [cursor=pointer]:
+              - generic [ref=e44]: 深色
+              - img "moon" [ref=e46]:
+                - img [ref=e47]
+            - button "浅色 sun" [ref=e49] [cursor=pointer]:
+              - generic [ref=e50]: 浅色
+              - img "sun" [ref=e52]:
+                - img [ref=e53]
+            - button "柔和 highlight" [ref=e55] [cursor=pointer]:
+              - generic [ref=e56]: 柔和
+              - img "highlight" [ref=e58]:
+                - img [ref=e59]
+    - main [ref=e61]

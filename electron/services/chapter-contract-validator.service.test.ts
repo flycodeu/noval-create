@@ -54,7 +54,7 @@ function createBaseRows(content: string) {
       id: 10,
       novelId: 1,
       chapterNum: 12,
-      title: '第十二章',
+      title: '旧仓药箱追查',
       content,
       scenePlanJson: JSON.stringify([{ exit_hook: '门外传来急促脚步声' }]),
     }]],
@@ -500,5 +500,50 @@ describe('validateChapterContractDelivery', () => {
     })
 
     expect(result.itemResults.find((item) => item.contractItemType === 'relationship_arc_gate')?.verdict).toBe('weak')
+  })
+
+  it('warns on generic chapter titles without turning soft attraction issues into hard blockers', () => {
+    const rows = createBaseRows(
+      '夜晚的北门外，林远继续追查失窃药箱。守卫追查他的来路，两人险些动手。林远确认药箱被转去旧仓，主线因此向前推进一步，线索也随之升级。\n\n门外忽然传来急促脚步声。',
+    )
+    Object.assign((rows.get(chapters) || [])[0], {
+      title: '第十二章',
+    })
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+
+    const result = validateChapterContractDelivery({
+      chapterId: 10,
+      content: String((rows.get(chapters) || [])[0].content),
+      reviewNotes: { reader_hook_risks: [] },
+    })
+
+    expect(result.status).toBe('warning')
+    expect(result.itemResults.find((item) => item.contractItemType === 'chapter_title_alignment')?.verdict).toBe('missing')
+    expect(result.rewriteHints.some((item) => item.includes('章节标题'))).toBe(true)
+  })
+
+  it('requires golden-three openings to start with scene action pressure and a chapter anchor', () => {
+    const rows = createBaseRows(
+      [
+        '很多年前，世界的秩序曾经改变，每个人都在命运里寻找自己的位置。林远也知道，有些真相终究会到来。规则、命运、时代、选择、牺牲和信念像一层看不见的雾，笼在所有人头顶。那时还没有人理解这场风暴的意义，也没有人知道一只失窃药箱会怎样改写许多人的去向。过去的恩怨、未被说出的承诺、被隐藏的真相，都在更大的棋局里缓慢移动，仿佛一切早有安排，只等某个时刻到来。所有记录都指向遥远的因果，所有传闻都像历史深处的回声，人物的名字、旧案的来龙去脉、城里各方势力的格局被一层层铺开，却还没有一个人进入现场，也没有任何当下正在发生的动作或危险。',
+        '夜晚的北门外，林远继续追查失窃药箱。守卫追查他的来路，两人险些动手。林远确认药箱被转去旧仓，主线因此向前推进一步，线索也随之升级。',
+        '门外忽然传来急促脚步声。',
+      ].join('\n\n'),
+    )
+    Object.assign((rows.get(chapters) || [])[0], {
+      chapterNum: 1,
+      title: '北门药箱',
+    })
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+
+    const result = validateChapterContractDelivery({
+      chapterId: 10,
+      content: String((rows.get(chapters) || [])[0].content),
+      reviewNotes: { reader_hook_risks: [] },
+    })
+
+    expect(result.status).toBe('warning')
+    expect(result.itemResults.find((item) => item.contractItemType === 'golden_three_opening')?.verdict).toBe('weak')
+    expect(result.rewriteHints.some((item) => item.includes('章首 800 字'))).toBe(true)
   })
 })

@@ -19,6 +19,12 @@ import {
   storyThreads,
 } from '../database/schema'
 import { parseThemeVoiceDocument } from '../../src/shared/theme-voice'
+import {
+  deriveChapterContractValidationStatus,
+  isContractValidationBlockerVerdict,
+  isContractValidationWarningVerdict,
+  isHardContractValidationItem,
+} from '../../src/shared/contract-validation'
 import { throwUserFacingError } from '../utils/user-facing-error'
 import { analyzeForeshadowProgress, analyzeStoryThreadProgress } from './thread-progress.service'
 
@@ -32,6 +38,7 @@ interface ChapterContractValidationSceneSnapshot {
 
 interface ContractValidationContext {
   currentChapterNum: number
+  chapterTitle: string
   chapterGoal: string
   hookType: string
   sceneSnapshots: ChapterContractValidationSceneSnapshot[]
@@ -124,6 +131,114 @@ const HOOK_MARKERS = [
   '？',
 ]
 
+const OPENING_SCENE_MARKERS = [
+  '门外',
+  '门内',
+  '窗外',
+  '街口',
+  '巷口',
+  '桥头',
+  '车厢',
+  '屋里',
+  '屋内',
+  '房间',
+  '楼梯',
+  '仓库',
+  '旧仓',
+  '店门',
+  '院门',
+  '城门',
+  '船舱',
+  '雨声',
+  '雪地',
+  '风声',
+  '夜色',
+  '晨光',
+  '灯光',
+  '血迹',
+  '烟尘',
+  '尘土',
+]
+
+const OPENING_ACTION_MARKERS = [
+  '推开',
+  '拉住',
+  '抓住',
+  '攥住',
+  '按住',
+  '敲',
+  '撞',
+  '跑',
+  '追',
+  '拦',
+  '挡',
+  '躲',
+  '递',
+  '拔',
+  '砸',
+  '翻',
+  '扯',
+  '问',
+  '答',
+  '盯',
+  '听见',
+  '喊',
+  '盘问',
+  '确认',
+  '发现',
+]
+
+const OPENING_PRESSURE_MARKERS = [
+  '忽然',
+  '突然',
+  '下一刻',
+  '门外',
+  '背后',
+  '来不及',
+  '还没',
+  '威胁',
+  '逼近',
+  '质问',
+  '审问',
+  '埋伏',
+  '失手',
+  '受伤',
+  '追上',
+  '拦住',
+  '?',
+  '？',
+]
+
+const OPENING_ABSTRACT_SETUP_MARKERS = [
+  '很多年前',
+  '很久以前',
+  '曾经',
+  '命运',
+  '时代',
+  '秩序',
+  '信念',
+  '牺牲',
+  '意义',
+  '棋局',
+  '早有安排',
+  '过去的恩怨',
+  '未被说出',
+  '被隐藏的真相',
+  '遥远的因果',
+  '历史深处',
+  '来龙去脉',
+  '格局',
+]
+
+const OPENING_SCENE_DELAY_MARKERS = [
+  '还没有一个人进入现场',
+  '没有一个人进入现场',
+  '没有任何当下正在发生',
+  '还没有任何当下正在发生',
+  '没有当下正在发生的动作',
+  '还没有当下正在发生的动作',
+]
+
 const CHARACTER_SCENE_MARKERS = [
   '选择',
   '决定',
@@ -199,6 +314,11 @@ const THEME_RESPONSE_MARKERS = [
 const RELATION_TRIGGER_MARKERS = ['因为', '当', '发现', '得知', '逼', '质问', '拒绝', '背叛', '救', '交出', '暴露']
 const RELATION_INTERACTION_MARKERS = ['说', '问', '答', '看', '盯', '拉住', '推开', '挡', '递', '沉默', '握', '避开', '靠近']
 const RELATION_CONSEQUENCE_MARKERS = ['于是', '因此', '从此', '不再', '开始', '决定', '留下', '离开', '破裂', '和解', '信任', '怀疑', '欠', '代价']
+
+const GENERIC_TITLE_PATTERNS = [
+  /^第[\d一二三四五六七八九十百千万零〇两]+[章节回卷幕集]?$/u,
+  /^(序章|楔子|引子|正文|开端|开始|新的开始|转折|危机|真相|选择|决定|尾声)$/u,
+]
 
 function normalizeText(value?: string | null): string {
   return typeof value === 'string' ? value.trim() : ''
@@ -293,6 +413,14 @@ function buildKeywordCandidates(...values: Array<string | null | undefined>): st
   ])]
 }
 
+function buildTitleKeywordCandidates(...values: Array<string | null | undefined>): string[] {
+  return buildKeywordCandidates(...values)
+    .filter((value) =>
+      value.length >= 2
+      && !/^[第章节回卷幕集\d一二三四五六七八九十百千万零〇两]+$/u.test(value)
+      && !['本章', '主线', '推进', '一步', '场景', '线索', '升级', '悬念', '真相'].includes(value))
+}
+
 function countMatchedKeywords(text: string, keywords: string[]): number {
   if (!text || keywords.length === 0) return 0
   const haystack = normalizeCompactText(text)
@@ -340,6 +468,13 @@ function hasAllMarkerGroups(paragraph: string, groups: string[][]): boolean {
   return groups.every((markers) => countMarkers(paragraph, markers) > 0)
 }
 
+function isGenericChapterTitle(title: string): boolean {
+  const normalized = normalizeCompactText(title)
+  if (!normalized) return true
+  if (GENERIC_TITLE_PATTERNS.some((pattern) => pattern.test(normalized))) return true
+  return normalized.length <= 2
+}
+
 function buildLocalEvidenceWindows(
   paragraphs: string[],
   keywords: string[],
@@ -359,17 +494,24 @@ function buildLocalEvidenceWindows(
 }
 
 function buildSummary(items: ContractValidationItem[]): string {
-  const blockerCount = items.filter((item) => item.verdict === 'missing' || item.verdict === 'contradicted').length
-  const warningCount = items.filter((item) => item.verdict === 'weak' || item.verdict === 'overdelivered').length
-  if (blockerCount > 0) return `正文合同验证命中 ${blockerCount} 项阻塞，${warningCount} 项预警。`
-  if (warningCount > 0) return `正文合同验证通过，但仍有 ${warningCount} 项预警。`
+  const hardItems = items.filter(isHardContractValidationItem)
+  const hardBlockerCount = hardItems.filter((item) => isContractValidationBlockerVerdict(item.verdict)).length
+  const hardWarningCount = hardItems.filter((item) => isContractValidationWarningVerdict(item.verdict)).length
+  const softIssueCount = items
+    .filter((item) => !isHardContractValidationItem(item) && item.verdict !== 'pass')
+    .length
+  if (hardBlockerCount > 0) {
+    return `正文合同硬性验证命中 ${hardBlockerCount} 项阻塞，${hardWarningCount} 项预警${softIssueCount > 0 ? `；另有 ${softIssueCount} 项吸引力专项问题。` : '。'}`
+  }
+  if (hardWarningCount > 0) {
+    return `正文合同硬性验证通过，但仍有 ${hardWarningCount} 项预警${softIssueCount > 0 ? `；另有 ${softIssueCount} 项吸引力专项问题。` : '。'}`
+  }
+  if (softIssueCount > 0) return `正文合同硬性验证已通过；标题贴合与黄金三章开篇由专项门禁处理，共 ${softIssueCount} 项。`
   return `正文合同验证已通过，共核对 ${items.length} 项。`
 }
 
 function buildStatus(items: ContractValidationItem[]): ChapterContractValidationResult['status'] {
-  if (items.some((item) => item.verdict === 'missing' || item.verdict === 'contradicted')) return 'blocker'
-  if (items.some((item) => item.verdict === 'weak' || item.verdict === 'overdelivered')) return 'warning'
-  return 'pass'
+  return deriveChapterContractValidationStatus(items)
 }
 
 function buildRewriteHints(items: ContractValidationItem[]): string[] {
@@ -425,15 +567,18 @@ function normalizeContractValidationItem(raw: unknown): ContractValidationItem |
 export function normalizeChapterContractValidationResult(raw: unknown): ChapterContractValidationResult | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
   const record = raw as Record<string, unknown>
-  const status = normalizeText(typeof record.status === 'string' ? record.status : '')
-  if (!['pass', 'warning', 'blocker'].includes(status)) return null
+  const rawStatus = normalizeText(typeof record.status === 'string' ? record.status : '')
+  if (!['pass', 'warning', 'blocker'].includes(rawStatus)) return null
   const itemResults = Array.isArray(record.itemResults)
     ? record.itemResults
       .map((item) => normalizeContractValidationItem(item))
       .filter((item): item is ContractValidationItem => Boolean(item))
     : []
+  const status = itemResults.length > 0
+    ? deriveChapterContractValidationStatus(itemResults)
+    : rawStatus as ChapterContractValidationResult['status']
   return {
-    status: status as ChapterContractValidationResult['status'],
+    status,
     summary: normalizeText(typeof record.summary === 'string' ? record.summary : ''),
     itemResults,
     rewriteHints: parseUnknownStringArray(record.rewriteHints),
@@ -545,6 +690,7 @@ function loadValidationContext(chapterId: number): ContractValidationContext {
 
   return {
     currentChapterNum: chapter.chapterNum,
+    chapterTitle: normalizeText(chapter.title),
     chapterGoal: normalizeText(chapterContractRow?.chapterGoal),
     hookType: normalizeText(chapterContractRow?.hookType),
     sceneSnapshots,
@@ -578,6 +724,80 @@ function validateChapterGoal(paragraphs: string[], context: ContractValidationCo
     rewriteHint: verdict === 'pass'
       ? ''
       : '补一段能直接兑现本章目标的关键动作、结果或关系变化，不要只保留铺垫。',
+  })
+}
+
+function validateChapterTitleAlignment(paragraphs: string[], context: ContractValidationContext): ContractValidationItem {
+  const expected = context.chapterGoal || context.sceneSnapshots.map((scene) => scene.resultState || scene.sceneGoal).filter(Boolean).join(' / ') || '标题需要贴合本章核心事件'
+  const title = context.chapterTitle
+  const titleKeywords = buildTitleKeywordCandidates(title)
+  const contractKeywords = buildTitleKeywordCandidates(
+    context.chapterGoal,
+    ...context.sceneSnapshots.flatMap((scene) => [scene.sceneGoal, scene.obstacle, scene.resultState]),
+    ...context.threadRows.map((row) => row.title),
+    ...context.foreshadowRows.map((row) => row.title),
+  )
+  const evidence = findBestEvidence(paragraphs, titleKeywords.length > 0 ? titleKeywords : contractKeywords, [
+    ...PROGRESS_MARKERS,
+    ...CONFLICT_MARKERS,
+  ])
+  const titleIsGeneric = isGenericChapterTitle(title)
+  const titleHitsInContent = titleKeywords.length > 0 ? evidence.hitCount : 0
+  const contractHitsInTitle = countMatchedKeywords(title, contractKeywords)
+  const hasConcreteTitle = !titleIsGeneric && titleKeywords.length > 0
+  const verdict: ContractValidationVerdict = hasConcreteTitle && (titleHitsInContent > 0 || contractHitsInTitle > 0)
+    ? 'pass'
+    : hasConcreteTitle || contractHitsInTitle > 0
+      ? 'weak'
+      : 'missing'
+
+  return makeItem({
+    contractItemType: 'chapter_title_alignment',
+    expected,
+    verdict,
+    evidenceExcerpt: evidence.excerpt || title,
+    rewriteHint: verdict === 'pass'
+      ? ''
+      : '把章节标题改成能指向本章核心事件、关键物件、选择压力或反转点的具体短句，避免“第十二章/真相/转折”这类泛标题。',
+  })
+}
+
+function validateGoldenThreeOpening(paragraphs: string[], context: ContractValidationContext): ContractValidationItem | null {
+  if (context.currentChapterNum > 3) return null
+  const openingText = paragraphs.join('\n').slice(0, 800)
+  const firstBeatText = openingText.slice(0, 300)
+  const firstParagraphStart = (paragraphs[0] || '').slice(0, 300)
+  const openingKeywords = buildKeywordCandidates(
+    context.chapterGoal,
+    ...context.sceneSnapshots.slice(0, 2).flatMap((scene) => [scene.sceneGoal, scene.obstacle, scene.resultState]),
+    ...context.threadRows.slice(0, 2).map((row) => row.title),
+  )
+  const hasConcreteScene = countMarkers(firstBeatText, OPENING_SCENE_MARKERS) > 0
+  const hasAction = countMarkers(firstBeatText, OPENING_ACTION_MARKERS) > 0
+  const hasPressure = countMarkers(firstBeatText, OPENING_PRESSURE_MARKERS) > 0
+  const hasContractAnchor = openingKeywords.length === 0 || countMatchedKeywords(openingText, openingKeywords) > 0
+  const startsWithConcreteScene = countMarkers(firstParagraphStart, OPENING_SCENE_MARKERS) > 0
+    && (countMarkers(firstParagraphStart, OPENING_ACTION_MARKERS) > 0 || countMarkers(firstParagraphStart, OPENING_PRESSURE_MARKERS) > 0)
+  const startsWithAbstractSetup = !startsWithConcreteScene && (
+    countMarkers(firstParagraphStart, OPENING_SCENE_DELAY_MARKERS) > 0
+    || countMarkers(firstParagraphStart, OPENING_ABSTRACT_SETUP_MARKERS) >= 3
+  )
+  const score = [hasConcreteScene, hasAction, hasPressure, hasContractAnchor].filter(Boolean).length
+  const effectiveScore = startsWithAbstractSetup ? Math.min(score, 3) : score
+  const verdict: ContractValidationVerdict = score >= 4
+    ? (effectiveScore >= 4 ? 'pass' : 'weak')
+    : effectiveScore >= 3
+      ? 'weak'
+      : 'missing'
+
+  return makeItem({
+    contractItemType: 'golden_three_opening',
+    expected: '前三章开篇必须尽快进入具体现场、主角动作、可感压力和本章追问点。',
+    verdict,
+    evidenceExcerpt: clipExcerpt(openingText, 120),
+    rewriteHint: verdict === 'pass'
+      ? ''
+      : '重排章首 800 字：先给具体现场和主角动作，再压入阻力/危险/追问点，不要用设定说明、抽象情绪或泛背景开场。',
   })
 }
 
@@ -907,6 +1127,11 @@ export function validateChapterContractDelivery(input: {
 
   const goalItem = validateChapterGoal(paragraphs, context)
   if (goalItem) items.push(goalItem)
+
+  items.push(validateChapterTitleAlignment(paragraphs, context))
+
+  const goldenThreeOpeningItem = validateGoldenThreeOpening(paragraphs, context)
+  if (goldenThreeOpeningItem) items.push(goldenThreeOpeningItem)
 
   const themeItem = validateThemeResponse(paragraphs, context)
   if (themeItem) items.push(themeItem)

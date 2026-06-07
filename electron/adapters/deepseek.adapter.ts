@@ -6,11 +6,12 @@ export class DeepSeekAdapter extends OpenAIAdapter {
   constructor(
     apiKey: string,
     modelId: string = 'deepseek-v4-flash',
+    baseUrl: string = 'https://api.deepseek.com',
     maxContextTokens?: number | null,
     defaultTemperature = 0.7,
     defaultMaxTokens = 384000,
   ) {
-    super(apiKey, modelId, 'https://api.deepseek.com', maxContextTokens, defaultTemperature, defaultMaxTokens)
+    super(apiKey, modelId, baseUrl, maxContextTokens, defaultTemperature, defaultMaxTokens)
     this.id = 'deepseek'
     this.name = 'DeepSeek'
     this.provider = 'deepseek'

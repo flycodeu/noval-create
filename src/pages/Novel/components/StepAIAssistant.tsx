@@ -12,6 +12,7 @@ import { GUIDED_STEP_ORDER, type GuidedWorkflowStepKey } from '../workflow'
 import { inspectDraftQuality, type DraftContextSection, type DraftFieldDefinition } from '../shared/ai-draft'
 import { buildPlanningContextSections } from '../shared/planning-context'
 import { cleanAiValue } from '../../../utils/text'
+import { getUserFacingMessage } from '@/utils/user-facing-message'
 import './StepAIAssistant.css'
 
 type ChatRole = 'user' | 'assistant'
@@ -105,7 +106,7 @@ function extractJsonObject(raw: string): string {
   const start = trimmed.indexOf('{')
   const end = trimmed.lastIndexOf('}')
   if (start < 0 || end < start) {
-    throw new Error('AI 没有返回可解析的 JSON。')
+    throw new Error(getUserFacingMessage('guidedStep.aiJsonParseFailed'))
   }
   return trimmed.slice(start, end + 1)
 }
@@ -278,7 +279,7 @@ export default function StepAIAssistant<TPatch extends StepAIAssistantPatch>({
       setSelectedKeys(fields.map((field) => field.key).filter((key) => parsed.draftPatch[key] !== undefined))
       setInput('')
     } catch (error) {
-      message.error(error instanceof Error ? error.message : 'AI 助手生成失败，请检查模型配置后重试。')
+      message.error(error instanceof Error ? error.message : getUserFacingMessage('guidedStep.aiAssistantFailed'))
     } finally {
       setLoading(false)
     }
@@ -291,7 +292,7 @@ export default function StepAIAssistant<TPatch extends StepAIAssistantPatch>({
       Object.entries(draft.draftPatch).filter(([key]) => allowed.has(key)),
     ) as Partial<TPatch>
     onApplyDraft(patch)
-    message.success('AI 草稿已回填到当前步骤，保存前仍可手动调整。')
+    message.success(getUserFacingMessage('guidedStep.aiDraftApplied'))
   }
 
   return (

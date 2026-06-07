@@ -104,6 +104,11 @@ import { getAntiAiDashboardSummary } from './anti-ai-rule.service'
 import { getFeedbackRecurrenceDashboardSummary } from './feedback-recurrence.service'
 import { parseChapterContractValidationFromReviewNotes } from './chapter-contract-validator.service'
 import { parseTaskProgress } from './task.service'
+import {
+  getHardContractValidationItems,
+  isContractValidationBlockerVerdict,
+  isContractValidationWarningVerdict,
+} from '../../src/shared/contract-validation'
 
 interface QualityDimensionScore extends AIScoreDimension {}
 
@@ -1200,6 +1205,22 @@ function collectContractProgressMetrics(rows: Array<{ reviewNotesJson?: string |
     foreshadowBlockedCount,
     foreshadowStaleCount,
   }
+}
+
+type ParsedChapterContractValidation = NonNullable<ReturnType<typeof parseChapterContractValidationFromReviewNotes>>
+
+function getDashboardContractHardStatus(
+  validation: ParsedChapterContractValidation,
+): ParsedChapterContractValidation['status'] {
+  if (validation.itemResults.length === 0) return validation.status
+  const hardItems = getHardContractValidationItems(validation.itemResults)
+  if (hardItems.some((item) => isContractValidationBlockerVerdict(item.verdict))) return 'blocker'
+  if (hardItems.some((item) => isContractValidationWarningVerdict(item.verdict))) return 'warning'
+  return 'pass'
+}
+
+function hasDashboardContractHardBlocker(validation: ParsedChapterContractValidation): boolean {
+  return getDashboardContractHardStatus(validation) === 'blocker'
 }
 
 function summarizeBatchRange(chapterNums: number[]): string {
@@ -2888,10 +2909,10 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     if (parsed) result.push(parsed)
     return result
   }, [])
-  const contractBlockerCount = contractValidationStatuses.filter((item) => item.status === 'blocker').length
-  const contractWarningCount = contractValidationStatuses.filter((item) => item.status === 'warning').length
+  const contractBlockerCount = contractValidationStatuses.filter(hasDashboardContractHardBlocker).length
+  const contractWarningCount = contractValidationStatuses.filter((item) => getDashboardContractHardStatus(item) === 'warning').length
   const contractReadyRate = contractValidationStatuses.length > 0
-    ? Math.round((contractValidationStatuses.filter((item) => item.status === 'pass').length / contractValidationStatuses.length) * 100)
+    ? Math.round((contractValidationStatuses.filter((item) => getDashboardContractHardStatus(item) === 'pass').length / contractValidationStatuses.length) * 100)
     : 0
   const contractProgressMetrics = collectContractProgressMetrics(rows)
   const contractStatusEntries = rows.reduce<Array<{
@@ -3690,7 +3711,7 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     ))
   }
 
-  const contractBlockerChapters = contractStatusEntries.filter((entry) => entry.validation.status === 'blocker')
+  const contractBlockerChapters = contractStatusEntries.filter((entry) => hasDashboardContractHardBlocker(entry.validation))
   const firstContractBlocker = contractBlockerChapters[0]
   if (contractBlockerCount > 0 || endgameDebtSnapshot.overview.overdueCount > 0 || endgameDebtSnapshot.overview.unboundCount > 0 || contractProgressMetrics.storyThreadMentionOnlyCount > 0) {
     const chapterNums = dedupeChapterNums([
@@ -4375,6 +4396,7 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
   const latestBatchConsecutiveRecallFallbackChapters = typeof latestBatchProgress.consecutiveRecallFallbackChapters === 'number'
     ? latestBatchProgress.consecutiveRecallFallbackChapters
     : trailingRecallFallbackCount
+  const batchGateBlockingEntries = batchGateEntries.filter((entry) => entry.gateLevel === 'blocker' || entry.gateLevel === 'rewrite')
   const millionWordDashboard = buildMillionWordDashboardSummary({
     latestBatchTask,
     latestBatchTaskId,
@@ -4400,7 +4422,7 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     rewrittenChapterCount: batchGateEntries.filter((entry) => entry.rewriteCount > 0 || entry.gateLevel === 'warning').length,
     inspectionBlockedCount,
     inspectionWarningCount,
-    batchGateBlockedCount: batchGateEntries.filter((entry) => entry.gateLevel === 'blocker').length,
+    batchGateBlockedCount: batchGateBlockingEntries.length,
     latestBatchFailedChapterCount: Array.isArray(latestBatchProgress.failedChapterIds) ? latestBatchProgress.failedChapterIds.length : 0,
     latestBatchInspectionsCount: latestBatchInspections.length,
     recentBatchRecallAlerts: recentRecallAlerts
@@ -4424,7 +4446,7 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
       + recallDegradedChapterCount * 6
       + latestBatchConsecutiveRecallFallbackChapters * 12
       + inspectionBlockedCount * 14
-      + batchGateEntries.filter((entry) => entry.gateLevel === 'blocker').length * 14,
+      + batchGateBlockingEntries.length * 14,
     ),
   )
   const runtimePressureLevel: NonNullable<QualityDashboardData['millionRuntimeObservability']>['runtimePressureLevel'] = runtimePressureScore >= 70
@@ -4435,7 +4457,7 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
   const checkpointLagGuardrailActive = latestCheckpointChapterGap >= currentRuntimePolicy.checkpointGapWarningThreshold
   const writebackGuardrailActive = currentRuntimePolicy.requireWritebackReady && (writebackPendingCount > 0 || writebackFailedCount > 0)
   const recallGuardrailActive = latestBatchConsecutiveRecallFallbackChapters >= currentRuntimePolicy.recallPauseThreshold
-  const inspectionGuardrailActive = inspectionBlockedCount > 0 || batchGateEntries.filter((entry) => entry.gateLevel === 'blocker').length > 0
+  const inspectionGuardrailActive = inspectionBlockedCount > 0 || batchGateBlockingEntries.length > 0
   const runtimeGuardrailActive = writebackGuardrailActive || recallGuardrailActive || checkpointLagGuardrailActive || inspectionGuardrailActive || Boolean(latestBatchGuardrailReason)
   const activeGuardrailReason = latestBatchGuardrailReason
     || (writebackGuardrailActive
@@ -4468,7 +4490,7 @@ export function getQualityDashboardData(novelId: number, options: QualityDashboa
     recallDegradedChapterCount,
     consecutiveRecallFallbackChapters: latestBatchConsecutiveRecallFallbackChapters,
     inspectionBlockedCount,
-    batchGateBlockedCount: batchGateEntries.filter((entry) => entry.gateLevel === 'blocker').length,
+    batchGateBlockedCount: batchGateBlockingEntries.length,
     precomputeQueueStatus: storyMemoryPrecomputeStatus.status,
     precomputeLastError: storyMemoryPrecomputeStatus.lastError,
     precomputeReason: storyMemoryPrecomputeStatus.reason || storyMemoryPrecomputeStatus.trigger,

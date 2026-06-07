@@ -18,19 +18,60 @@ const PROVIDER_OPTIONS = [
   { value: 'openai', label: 'OpenAI', models: ['gpt-4o', 'gpt-4-turbo', 'gpt-3.5-turbo', 'gpt-4o-mini'] },
   { value: 'anthropic', label: 'Anthropic Claude', models: ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'] },
   { value: 'deepseek', label: 'DeepSeek', models: [] },
+  { value: 'kimi', label: 'Kimi / Moonshot', models: ['kimi-k2.6', 'kimi-k2.5', 'moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k'] },
   { value: 'aliyun', label: '阿里通义', models: ['qwen-max', 'qwen-plus', 'qwen-turbo', 'qwen-long'] },
   { value: 'baidu', label: '百度文心', models: ['ernie-4.0-8k', 'ernie-3.5-8k', 'ernie-speed'] },
   { value: 'custom', label: '自定义（OpenAI 兼容）', models: [] },
 ]
-const PROVIDER_DEFAULTS: Record<string, { temperature: number; maxTokens: number }> = {
-  openai: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
-  anthropic: { temperature: 0.75, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
-  deepseek: { temperature: 0.7, maxTokens: 384000 },
-  aliyun: { temperature: 0.85, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
-  baidu: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
-  custom: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
+const PROVIDER_DEFAULTS: Record<string, { temperature: number; maxTokens: number; modelId?: string; baseUrl?: string; maxContextTokens?: number }> = {
+  openai: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS, modelId: 'gpt-4o', baseUrl: '' },
+  anthropic: { temperature: 0.75, maxTokens: DEFAULT_MODEL_MAX_TOKENS, modelId: 'claude-sonnet-4-6' },
+  deepseek: { temperature: 0.7, maxTokens: 384000, modelId: 'deepseek-v4-flash', baseUrl: '' },
+  kimi: { temperature: 0.75, maxTokens: DEFAULT_MODEL_MAX_TOKENS, modelId: 'kimi-k2.6', baseUrl: '', maxContextTokens: 256000 },
+  aliyun: { temperature: 0.85, maxTokens: DEFAULT_MODEL_MAX_TOKENS, modelId: 'qwen-max' },
+  baidu: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS, modelId: 'ernie-4.0-8k' },
+  custom: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS, baseUrl: 'http://localhost:11434/v1' },
 }
 
+function providerRequiresApiKey(provider?: string): boolean {
+  return provider !== 'custom'
+}
+
+function parseModelExtraParams(raw?: string | null): { kimiThinking?: 'enabled' | 'disabled' } {
+  if (!raw) return {}
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    const record = parsed as Record<string, unknown>
+    return record.kimiThinking === 'enabled' || record.kimiThinking === 'disabled'
+      ? { kimiThinking: record.kimiThinking }
+      : {}
+  } catch {
+    return {}
+  }
+}
+
+function getKimiContextWindow(modelId?: string): number | undefined {
+  const normalized = (modelId || '').trim().toLowerCase()
+  if (normalized === 'kimi-k2.6' || normalized === 'kimi-k2.5') return 256000
+  if (normalized === 'moonshot-v1-8k') return 8000
+  if (normalized === 'moonshot-v1-32k') return 32000
+  if (normalized === 'moonshot-v1-128k') return 128000
+  return undefined
+}
+
+function buildModelSavePayload(values: Record<string, unknown>): Record<string, unknown> {
+  const provider = typeof values.provider === 'string' ? values.provider : ''
+  const kimiThinking = values.kimiThinking === 'enabled' || values.kimiThinking === 'disabled'
+    ? values.kimiThinking
+    : 'disabled'
+  const extraParamsJson = provider === 'kimi' ? JSON.stringify({ kimiThinking }) : null
+  const { kimiThinking: _kimiThinking, ...payload } = values
+  return {
+    ...payload,
+    extraParamsJson,
+  }
+}
 
 export default function ModelManager() {
   const [configs, setConfigs] = useState<ModelConfig[]>([])
@@ -43,6 +84,8 @@ export default function ModelManager() {
   const [isNew, setIsNew] = useState(false)
 
   const selectedProvider = Form.useWatch('provider', form)
+  const selectedModelId = Form.useWatch('modelId', form)
+  const selectedConfigProvider = selected?.provider
 
   const loadConfigs = useCallback(async () => {
     setLoading(true)
@@ -53,15 +96,21 @@ export default function ModelManager() {
 
   useEffect(() => { loadConfigs() }, [loadConfigs])
 
-  const applyProviderDefaults = useCallback((provider: string) => {
+  const applyProviderDefaults = useCallback((provider: string, resetCredentials = false) => {
     const defaults = PROVIDER_DEFAULTS[provider] || PROVIDER_DEFAULTS.openai
     form.setFieldsValue({
+      modelId: defaults.modelId,
+      baseUrl: defaults.baseUrl,
       temperature: defaults.temperature,
       maxTokens: defaults.maxTokens,
+      maxContextTokens: defaults.maxContextTokens,
+      kimiThinking: provider === 'kimi' ? 'disabled' : undefined,
+      ...(resetCredentials ? { apiKey: '' } : {}),
     })
   }, [form])
 
   const handleSelect = (config: ModelConfig) => {
+    const extraParams = parseModelExtraParams(config.extraParamsJson)
     setSelected(config)
     setIsNew(false)
     setTestResult(null)
@@ -69,12 +118,13 @@ export default function ModelManager() {
       name: config.name,
       provider: config.provider,
       modelId: config.modelId,
-      apiKey: '已设置',
+      apiKey: config.apiKey ? '已设置' : '',
       baseUrl: config.baseUrl,
       temperature: config.temperature,
       maxTokens: config.maxTokens,
       maxContextTokens: config.maxContextTokens ?? undefined,
       maxConcurrency: config.maxConcurrency,
+      kimiThinking: config.provider === 'kimi' ? extraParams.kimiThinking || 'disabled' : undefined,
     })
   }
 
@@ -89,10 +139,11 @@ export default function ModelManager() {
 
   const handleSave = async () => {
     const values = await form.validateFields()
+    const payload = buildModelSavePayload(values)
     setSaving(true)
     try {
       if (isNew) {
-        const id = await window.electron.model.create(values)
+        const id = await window.electron.model.create(payload)
         message.success(getUserFacingMessage('model.created'))
         await loadConfigs()
         const newConfigs = await window.electron.model.list()
@@ -100,7 +151,7 @@ export default function ModelManager() {
         if (newConfig) handleSelect(newConfig)
         setIsNew(false)
       } else if (selected) {
-        await window.electron.model.update(selected.id, values)
+        await window.electron.model.update(selected.id, payload)
         message.success(getUserFacingMessage('model.saved'))
         await loadConfigs()
       }
@@ -150,6 +201,7 @@ export default function ModelManager() {
   }
 
   const currentProviderModels = PROVIDER_OPTIONS.find(p => p.value === selectedProvider)?.models || []
+  const fixedTemperatureKimiModel = selectedProvider === 'kimi' && (selectedModelId === 'kimi-k2.6' || selectedModelId === 'kimi-k2.5')
   const defaultCount = configs.filter((config) => config.isDefault === 1).length
   const providerCount = new Set(configs.map((config) => config.provider)).size
 
@@ -253,8 +305,8 @@ export default function ModelManager() {
                 <Select
                   options={PROVIDER_OPTIONS.map(p => ({ value: p.value, label: p.label }))}
                   onChange={(value) => {
-                    form.setFieldValue('modelId', undefined)
-                    applyProviderDefaults(value)
+                    setTestResult(null)
+                    applyProviderDefaults(value, true)
                   }}
                 />
               </Form.Item>
@@ -265,17 +317,39 @@ export default function ModelManager() {
                     options={currentProviderModels.map(m => ({ value: m, label: m }))}
                     showSearch
                     allowClear
+                    onChange={(value) => {
+                      if (selectedProvider === 'kimi') {
+                        const contextWindow = getKimiContextWindow(value)
+                        form.setFieldValue('maxContextTokens', contextWindow)
+                      }
+                    }}
                   />
                 ) : (
-                  <Input placeholder={selectedProvider === 'deepseek' ? '输入模型名称，例如：deepseek-v4-flash' : '输入模型名称，例如：llama3:latest'} />
+                  <Input placeholder={selectedProvider === 'deepseek'
+                    ? '输入模型名称，例如：deepseek-v4-flash'
+                    : selectedProvider === 'kimi'
+                      ? '输入模型 ID，例如：kimi-k2.6'
+                      : '输入模型名称，例如：llama3:latest'} />
                 )}
               </Form.Item>
 
-              <Form.Item name="apiKey" label={selectedProvider === 'baidu' ? 'API Key（格式：APIKey|SecretKey）' : 'API Key'}>
+              <Form.Item
+                name="apiKey"
+                label={selectedProvider === 'baidu' ? 'API Key（格式：APIKey|SecretKey）' : 'API Key'}
+                rules={[{
+                  validator: async (_, value) => {
+                    if (!providerRequiresApiKey(selectedProvider)) return
+                    const textValue = typeof value === 'string' ? value.trim() : ''
+                    if (textValue && textValue !== '已设置') return
+                    if (!isNew && selected?.apiKey && selectedProvider === selectedConfigProvider && textValue === '已设置') return
+                    throw new Error(getUserFacingMessage('model.apiKeyRequired'))
+                  },
+                }]}
+              >
                 <Input.Password placeholder={selectedProvider === 'baidu' ? 'APIKey|SecretKey' : '输入 API Key'} />
               </Form.Item>
 
-              {(selectedProvider === 'openai' || selectedProvider === 'custom' || selectedProvider === 'deepseek') && (
+              {(selectedProvider === 'openai' || selectedProvider === 'custom' || selectedProvider === 'deepseek' || selectedProvider === 'kimi') && (
                 <Form.Item name="baseUrl" label="Base URL">
                   <Input
                     placeholder={
@@ -283,14 +357,35 @@ export default function ModelManager() {
                         ? 'http://localhost:11434/v1'
                         : selectedProvider === 'deepseek'
                           ? 'https://api.deepseek.com（留空使用默认）'
+                          : selectedProvider === 'kimi'
+                            ? 'https://api.moonshot.ai/v1（留空使用默认）'
                           : 'https://api.openai.com/v1（留空使用默认）'
                     }
                   />
                 </Form.Item>
               )}
 
-              <Form.Item name="temperature" label="Temperature（创造性）">
-                <Slider min={0} max={1} step={0.05} marks={{ 0: '0', 0.5: '0.5', 1: '1' }} />
+              {selectedProvider === 'kimi' && (
+                <Form.Item
+                  name="kimiThinking"
+                  label="Kimi Thinking"
+                  extra="默认禁用，降低连接测试和正文生成的不确定成本；需要模型显式思考时可开启。"
+                >
+                  <Select
+                    options={[
+                      { value: 'disabled', label: 'Disabled' },
+                      { value: 'enabled', label: 'Enabled' },
+                    ]}
+                  />
+                </Form.Item>
+              )}
+
+              <Form.Item
+                name="temperature"
+                label="Temperature（创造性）"
+                extra={fixedTemperatureKimiModel ? 'Kimi K2.x 使用固定采样参数，运行时会忽略此项。' : undefined}
+              >
+                <Slider disabled={fixedTemperatureKimiModel} min={0} max={1} step={0.05} marks={{ 0: '0', 0.5: '0.5', 1: '1' }} />
               </Form.Item>
 
               <Form.Item
@@ -308,6 +403,8 @@ export default function ModelManager() {
                 label="上下文窗口（总上下文预算，可留空使用默认）"
                 extra={selectedProvider === 'deepseek'
                   ? 'DeepSeek V4 当前上下文窗口为 1M。通常应大于等于最大输出长度；留空时使用 DeepSeek 默认窗口。'
+                  : selectedProvider === 'kimi'
+                    ? 'Kimi K2.x 默认上下文窗口按 256K 预估；Moonshot v1 按模型名使用 8K/32K/128K。'
                   : '控制模型可接收的上下文总量。通常应大于等于最大输出长度。留空时使用对应适配器的默认窗口。'}
               >
                 <InputNumber min={2048} max={2000000} step={1024} style={{ width: '100%' }} placeholder="例如：200000 / 512000 / 1000000" />

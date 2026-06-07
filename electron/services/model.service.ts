@@ -3,13 +3,14 @@ import CryptoJS from 'crypto-js'
 import { getDb } from '../database/db'
 import { modelConfigs } from '../database/schema'
 import { eq } from 'drizzle-orm'
-import { BaseAdapter } from '../adapters/base.adapter'
+import { BaseAdapter, type ChatOptions } from '../adapters/base.adapter'
 import { OpenAIAdapter } from '../adapters/openai.adapter'
 import { AnthropicAdapter } from '../adapters/anthropic.adapter'
 import { BaiduAdapter } from '../adapters/baidu.adapter'
 import { AliyunAdapter } from '../adapters/aliyun.adapter'
 import { DeepSeekAdapter } from '../adapters/deepseek.adapter'
 import { CustomAdapter } from '../adapters/custom.adapter'
+import { KimiAdapter } from '../adapters/kimi.adapter'
 import { throwUserFacingError } from '../utils/user-facing-error'
 import os from 'os'
 
@@ -22,7 +23,25 @@ const PROVIDER_RUNTIME_DEFAULTS: Record<string, { temperature: number; maxTokens
   aliyun: { temperature: 0.85, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
   baidu: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
   deepseek: { temperature: 0.7, maxTokens: 384000 },
+  kimi: { temperature: 0.75, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
   custom: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS },
+}
+const SUPPORTED_MODEL_PROVIDERS = new Set(Object.keys(PROVIDER_RUNTIME_DEFAULTS))
+type KimiThinkingMode = 'enabled' | 'disabled'
+
+interface ModelExtraParams {
+  kimiThinking?: KimiThinkingMode
+}
+
+export function normalizeModelProvider(provider: unknown): string {
+  const normalized = typeof provider === 'string' ? provider.trim().toLowerCase() : ''
+  if (normalized === 'moonshot') return 'kimi'
+  if (normalized === 'claude') return 'anthropic'
+  return normalized || 'openai'
+}
+
+export function isSupportedModelProvider(provider: unknown): boolean {
+  return SUPPORTED_MODEL_PROVIDERS.has(normalizeModelProvider(provider))
 }
 
 export function normalizeModelConcurrency(value: unknown): number {
@@ -32,13 +51,14 @@ export function normalizeModelConcurrency(value: unknown): number {
 }
 
 export function getProviderRuntimeDefaults(provider: string): { temperature: number; maxTokens: number } {
-  return PROVIDER_RUNTIME_DEFAULTS[provider] || PROVIDER_RUNTIME_DEFAULTS.openai
+  return PROVIDER_RUNTIME_DEFAULTS[normalizeModelProvider(provider)] || PROVIDER_RUNTIME_DEFAULTS.openai
 }
 
 export function getProviderTokenSafetyMarginPct(provider?: string | null): number {
-  const normalized = typeof provider === 'string' ? provider.trim().toLowerCase() : ''
+  const normalized = normalizeModelProvider(provider)
   if (normalized === 'openai') return 10
   if (normalized === 'anthropic') return 12
+  if (normalized === 'kimi') return 12
   return 15
 }
 
@@ -60,6 +80,73 @@ export function normalizeModelContextTokens(value: unknown): number | null {
   const numeric = typeof value === 'number' ? Math.round(value) : Number(value)
   if (!Number.isFinite(numeric) || numeric <= 0) return null
   return Math.max(2048, Math.min(2_000_000, numeric))
+}
+
+export function getKimiModelContextWindow(modelId?: string | null): number | null {
+  const normalizedModelId = (modelId || '').trim().toLowerCase()
+  if (normalizedModelId === 'kimi-k2.6' || normalizedModelId === 'kimi-k2.5') return 256000
+  if (normalizedModelId === 'moonshot-v1-8k') return 8000
+  if (normalizedModelId === 'moonshot-v1-32k') return 32000
+  if (normalizedModelId === 'moonshot-v1-128k') return 128000
+  return null
+}
+
+export function normalizeModelContextTokensForModel(
+  value: unknown,
+  provider: string,
+  modelId?: string | null,
+): number | null {
+  const normalized = normalizeModelContextTokens(value)
+  const fixedWindow = normalizeModelProvider(provider) === 'kimi'
+    ? getKimiModelContextWindow(modelId)
+    : null
+  if (!fixedWindow) return normalized
+  return normalized ? Math.min(normalized, fixedWindow) : fixedWindow
+}
+
+export function normalizeModelBaseUrl(value: unknown, provider: string): string | null {
+  const normalizedProvider = normalizeModelProvider(provider)
+  const text = typeof value === 'string' ? value.trim() : ''
+  if (text) return text
+  return normalizedProvider === 'custom' ? 'http://localhost:11434/v1' : null
+}
+
+function parseModelExtraParams(raw: unknown): ModelExtraParams {
+  if (!raw) return {}
+  let record: unknown = raw
+  if (typeof raw === 'string') {
+    try {
+      record = JSON.parse(raw)
+    } catch {
+      return {}
+    }
+  }
+  if (!record || typeof record !== 'object' || Array.isArray(record)) return {}
+  const source = record as Record<string, unknown>
+  const kimiThinking = source.kimiThinking === 'enabled' || source.kimiThinking === 'disabled'
+    ? source.kimiThinking
+    : undefined
+  return { kimiThinking }
+}
+
+export function normalizeModelExtraParamsJson(raw: unknown, provider: string): string | null {
+  const normalizedProvider = normalizeModelProvider(provider)
+  const parsed = parseModelExtraParams(raw)
+  if (normalizedProvider !== 'kimi') return null
+  const kimiThinking: KimiThinkingMode = parsed.kimiThinking || 'disabled'
+  return JSON.stringify({ kimiThinking })
+}
+
+export function getModelProviderOptions(config: {
+  provider?: string | null
+  extraParamsJson?: string | null
+}): ChatOptions['providerOptions'] | undefined {
+  const provider = normalizeModelProvider(config.provider)
+  if (provider !== 'kimi') return undefined
+  const extraParams = parseModelExtraParams(config.extraParamsJson)
+  return {
+    kimiThinking: extraParams.kimiThinking || 'disabled',
+  }
 }
 
 export function encryptApiKey(key: string): string {
@@ -95,8 +182,9 @@ export function createAdapter(config: {
   maxTokens?: number | null
 }): BaseAdapter {
   const key = config.apiKey ? decryptApiKey(config.apiKey) : ''
-  const { provider, modelId, baseUrl } = config
-  const maxContextTokens = normalizeModelContextTokens(config.maxContextTokens)
+  const provider = normalizeModelProvider(config.provider)
+  const { modelId, baseUrl } = config
+  const maxContextTokens = normalizeModelContextTokensForModel(config.maxContextTokens, provider, modelId)
   const temperature = normalizeModelTemperature(config.temperature, provider)
   const maxTokens = normalizeModelMaxTokens(config.maxTokens, provider)
 
@@ -112,7 +200,9 @@ export function createAdapter(config: {
     case 'aliyun':
       return new AliyunAdapter(key, modelId, maxContextTokens, temperature, maxTokens)
     case 'deepseek':
-      return new DeepSeekAdapter(key, modelId, maxContextTokens, temperature, maxTokens)
+      return new DeepSeekAdapter(key, modelId, baseUrl || undefined, maxContextTokens, temperature, maxTokens)
+    case 'kimi':
+      return new KimiAdapter(key, modelId || 'kimi-k2.6', baseUrl || undefined, maxContextTokens, temperature, maxTokens)
     case 'custom':
       return new CustomAdapter(key, modelId, baseUrl || 'http://localhost:11434/v1', maxContextTokens, temperature, maxTokens)
     default:
@@ -124,12 +214,15 @@ export function getModelConfigRecord(id: number) {
   const db = getDb()
   const config = db.select().from(modelConfigs).where(eq(modelConfigs.id, id)).all()[0]
   if (!config) throwUserFacingError('model.configNotFound', { id })
+  const provider = normalizeModelProvider(config.provider)
   return {
     ...config,
-    temperature: normalizeModelTemperature(config.temperature, config.provider),
-    maxTokens: normalizeModelMaxTokens(config.maxTokens, config.provider),
+    provider,
+    temperature: normalizeModelTemperature(config.temperature, provider),
+    maxTokens: normalizeModelMaxTokens(config.maxTokens, provider),
     maxConcurrency: normalizeModelConcurrency(config.maxConcurrency),
-    maxContextTokens: normalizeModelContextTokens(config.maxContextTokens),
+    maxContextTokens: normalizeModelContextTokensForModel(config.maxContextTokens, provider, config.modelId),
+    extraParamsJson: normalizeModelExtraParamsJson(config.extraParamsJson, provider),
   }
 }
 
@@ -138,12 +231,15 @@ export function getDefaultModelConfigRecord() {
   const defaults = db.select().from(modelConfigs).where(eq(modelConfigs.isDefault, 1)).all()
   const config = defaults[0] || db.select().from(modelConfigs).all()[0]
   if (!config) throwUserFacingError('model.noneConfigured')
+  const provider = normalizeModelProvider(config.provider)
   return {
     ...config,
-    temperature: normalizeModelTemperature(config.temperature, config.provider),
-    maxTokens: normalizeModelMaxTokens(config.maxTokens, config.provider),
+    provider,
+    temperature: normalizeModelTemperature(config.temperature, provider),
+    maxTokens: normalizeModelMaxTokens(config.maxTokens, provider),
     maxConcurrency: normalizeModelConcurrency(config.maxConcurrency),
-    maxContextTokens: normalizeModelContextTokens(config.maxContextTokens),
+    maxContextTokens: normalizeModelContextTokensForModel(config.maxContextTokens, provider, config.modelId),
+    extraParamsJson: normalizeModelExtraParamsJson(config.extraParamsJson, provider),
   }
 }
 
@@ -186,10 +282,18 @@ export async function getAdapterById(id: number): Promise<BaseAdapter> {
 export async function testAdapter(configId: number): Promise<{ success: boolean; latency: number; info: string }> {
   const start = Date.now()
   try {
-    const adapter = await getAdapterById(configId)
+    const config = getModelConfigRecord(configId)
+    const adapter = createAdapter(config)
     const result = await adapter.chat(
       [{ role: 'user', content: '回复"ok"两个字即可' }],
-      { maxTokens: 10, temperature: 0 }
+      {
+        maxTokens: 10,
+        temperature: 0,
+        providerOptions: {
+          ...getModelProviderOptions(config),
+          ...(config.provider === 'kimi' ? { kimiThinking: 'disabled' as const } : {}),
+        },
+      }
     )
     return {
       success: true,

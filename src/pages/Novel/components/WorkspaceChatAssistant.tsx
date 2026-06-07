@@ -19,6 +19,7 @@ import {
   type WorkspaceQualityAdapterContext,
   type WorkspaceQualityRouteKey,
 } from '../shared/workspace-quality'
+import { getUserFacingMessage } from '@/utils/user-facing-message'
 import './WorkspaceChatAssistant.css'
 
 type ChatRole = 'user' | 'assistant'
@@ -384,7 +385,7 @@ export default function WorkspaceChatAssistant({
       setQualitySignals(context.qualitySignals)
     } catch (error) {
       console.error(error)
-      if (showError) message.error('上下文读取失败，请稍后重试。')
+      if (showError) message.error(getUserFacingMessage('workspaceChat.contextLoadFailed'))
     } finally {
       if (requestId === contextRequestRef.current) {
         setSnapshotLoading(false)
@@ -448,7 +449,7 @@ export default function WorkspaceChatAssistant({
         executionMode,
         messages: [{ role: 'user', content: prompt }],
       })
-      const answer = outputs[0]?.trim() || '这次没有拿到可用回复，请检查模型配置后重试。'
+      const answer = outputs[0]?.trim() || getUserFacingMessage('workspaceChat.replyEmpty')
       setMessages((current) => [
         ...current,
         {
@@ -461,7 +462,7 @@ export default function WorkspaceChatAssistant({
       ])
     } catch (error) {
       console.error(error)
-      message.error(error instanceof Error ? error.message : 'AI 助手回复失败，请检查模型配置。')
+      message.error(error instanceof Error ? error.message : getUserFacingMessage('workspaceChat.replyFailed'))
     } finally {
       setLoading(false)
     }
@@ -484,9 +485,9 @@ export default function WorkspaceChatAssistant({
   const handleCopy = useCallback(async (content: string) => {
     try {
       await navigator.clipboard.writeText(content)
-      message.success('已复制助手回复。')
+      message.success(getUserFacingMessage('workspaceChat.replyCopied'))
     } catch {
-      message.error('复制失败。')
+      message.error(getUserFacingMessage('workspaceChat.copyFailed'))
     }
   }, [])
 

@@ -21,6 +21,10 @@ function createReviewNotes(overrides: Partial<Parameters<typeof buildReviewPrior
     realism_risks: [],
     coherence_risks: [],
     reader_hook_risks: [],
+    step_memory_risks: [],
+    opening_hook_risks: [],
+    title_alignment_risks: [],
+    hallucination_risks: [],
     typed_ref_risks: [],
     source_grounding_risks: [],
     operating_mode_risks: [],
@@ -119,6 +123,29 @@ describe('chapter pipeline policy', () => {
 
     expect(summary.topIssues.some((issue) => issue.source === 'arc_progress_risks')).toBe(true)
     expect(summary.forceMaxCoverage).toBe(true)
+  })
+
+  it('prioritizes opening, title, step-memory, and hallucination risks ahead of polish', () => {
+    const summary = buildReviewPrioritySummary(createReviewNotes({
+      opening_hook_risks: ['前三百字仍在解释设定，没有现场压力。'],
+      step_memory_risks: ['Writer 没有执行 Planner 的章首承接动作。'],
+      title_alignment_risks: ['标题与本章核心事件不匹配。'],
+      hallucination_risks: ['新增了未在上下文出现的特殊能力。'],
+      language_risks: ['个别句子偏模板。'],
+      rewrite_required: true,
+    }))
+    const policy = buildAdaptiveRewritePolicy(summary)
+    const orderedSources = summary.topIssues.map((issue) => issue.source)
+
+    expect(orderedSources).toEqual(expect.arrayContaining([
+      'opening_hook_risks',
+      'step_memory_risks',
+      'title_alignment_risks',
+      'hallucination_risks',
+    ]))
+    expect(orderedSources.indexOf('opening_hook_risks')).toBeLessThan(orderedSources.indexOf('language_risks'))
+    expect(summary.forceMaxCoverage).toBe(true)
+    expect(policy.contextStrategy).toBe('max_coverage')
   })
 
   it('keeps batch 7 provenance and mode findings ahead of generic polish without rewrite_required', () => {

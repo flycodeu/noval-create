@@ -1872,6 +1872,9 @@ export interface AiModelRouteReport {
   modelConfigId?: number
   modelLabel: string
   provider?: string
+  providerOptions?: {
+    kimiThinking?: 'enabled' | 'disabled'
+  }
   temperature: number
   maxTokens: number
   tokenSafetyMarginPct?: number
@@ -1891,7 +1894,7 @@ export interface AiStageExecutionReport {
 }
 
 export interface AiContextAssemblyLayerReport {
-  key: 'graph_recall' | 'timeline_recall' | 'contract_recall'
+  key: 'graph_recall' | 'timeline_recall' | 'chapter_bridge' | 'contract_recall'
   label: string
   itemCount: number
   summary: string
@@ -1953,6 +1956,7 @@ export interface UpstreamRuntimeArtifacts {
   reviewProofSummary?: string
   rewriteDeltaSummary?: string
   publishGateRiskSummary?: string
+  stepMemorySummary?: string
   runtimeAssertions?: string[]
 }
 export type StageAllocatorFieldKey =
@@ -1963,6 +1967,8 @@ export type StageAllocatorFieldKey =
   | 'dueForeshadows'
   | 'continuityNotes'
   | 'openLoops'
+  | 'chapterBridgePlan'
+  | 'stepMemorySummary'
   | 'timelineSummary'
   | 'mapSummary'
   | 'recalledMemory'
@@ -2043,7 +2049,7 @@ export interface PreviousChapterSampleReport {
 
 export type ContextDecisionStatus = 'kept' | 'truncated' | 'dropped'
 export type ContextDecisionReason = 'budget_fit' | 'budget_insufficient' | 'covered_by_hard_constraint'
-export type ContextDecisionSourceKind = 'hard_constraint' | 'previous_chapter' | 'recent_summary' | 'vector_recall'
+export type ContextDecisionSourceKind = 'hard_constraint' | 'previous_chapter' | 'chapter_bridge' | 'recent_summary' | 'vector_recall'
 
 export interface ContextDecisionEntry {
   label: string
@@ -2198,6 +2204,8 @@ export interface ChapterContextPreview {
   authorStyleLock?: AuthorStyleLockSummary
   generationExplainability?: AiExplainabilityReport
   previousChapterContext: string
+  chapterBridgePlan?: string
+  stepMemorySummary?: string
   previousChapterSampleReport: PreviousChapterSampleReport
   recalledMemory: string
   recallSnapshot: RecallSnapshot
@@ -2220,6 +2228,8 @@ export type WriterContextOverrideKey =
   | 'activeThreads'
   | 'openLoops'
   | 'dueForeshadows'
+  | 'chapterBridgePlan'
+  | 'stepMemorySummary'
   | 'relationSummary'
   | 'dialogueVoiceLocks'
   | 'recalledMemory'
@@ -2236,6 +2246,8 @@ export interface WriterContextSignalInput {
   continuityNotes?: string
   openLoops?: string
   dueForeshadows?: string
+  chapterBridgePlan?: string
+  stepMemorySummary?: string
   timelineSummary?: string
   timelineOpenThreads?: string
   activeThreads?: string

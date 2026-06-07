@@ -12,6 +12,9 @@ export interface ChatOptions {
   signal?: AbortSignal
   timeoutMs?: number
   requestRetryCount?: number
+  providerOptions?: {
+    kimiThinking?: 'enabled' | 'disabled'
+  }
 }
 
 export function normalizeContextWindowTokens(value: unknown, fallback: number): number {

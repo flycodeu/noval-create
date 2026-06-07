@@ -182,6 +182,10 @@ const tests = [
       assert.match(text, /\u957f\u7bc7\u4eba\u7c7b\u5316\u53d9\u4e8b\u8bbe\u8ba1/u)
       assert.match(text, /context_drift_risks/u)
       assert.match(text, /realism_risks/u)
+      assert.match(text, /step_memory_risks/u)
+      assert.match(text, /opening_hook_risks/u)
+      assert.match(text, /title_alignment_risks/u)
+      assert.match(text, /hallucination_risks/u)
       assert.match(text, /genre_hollowing_risks/u)
       assert.match(text, /rewrite_required/u)
     },
@@ -250,6 +254,161 @@ const tests = [
       assert.match(outlinePrompt, /cost_ledger/u)
       assert.match(outlinePrompt, /成长账本/u)
       assert.match(outlinePrompt, /代价账本/u)
+    },
+  },
+  {
+    name: 'chapter opening prompts carry memory bridge golden-three and title constraints',
+    run() {
+      const outlinePrompt = prompt.buildChapterOutlinePlanningPrompt({
+        novelTitle: '旧城档案',
+        genre: '现代悬疑',
+        storyGoal: '主角查清旧城失踪案背后的记忆交易网络',
+        coreConflict: '个人记忆真实性与城市秩序稳定互相冲突',
+        mainPlot: '主角从错档案入手，逐步发现自己童年被剪入案件证据链。',
+        arcName: '旧档案开篇',
+        arcGoal: '让主角被迫接手错误档案并追到第一条现实线索',
+        arcSummary: '前三章从档案异常、委托人介入到第一处现场证据升级。',
+        chapterStart: 1,
+        chapterEnd: 3,
+        previousSummary: '',
+        characterStates: '主角对记忆修复流程熟悉，但对自己的童年缺口回避。',
+        continuitySummary: '',
+        openLoops: '',
+        worldRulesSummary: buildWorldRulesSummary('现代悬疑'),
+        protagonistReference: '主角',
+        protagonistRule: '涉及主角时只用“主角”称呼。',
+      })
+      assert.match(outlinePrompt, /黄金三章开篇约束/u)
+      assert.match(outlinePrompt, /标题与结构吸引力/u)
+      assert.match(outlinePrompt, /bridge_in \/ bridge_out/u)
+      assert.match(outlinePrompt, /第 1 章：前 300 字/u)
+      assert.match(outlinePrompt, /title 必须准确对应本章核心事件/u)
+
+      const scenePrompt = prompt.buildScenePlanPrompt({
+        novelTitle: '旧城档案',
+        genre: '现代悬疑',
+        chapterNum: 2,
+        chapterTitle: '诊所门缝里的旧照片',
+        chapterGoal: '承接第1章错档案，逼主角追到旧城诊所。',
+        plotPoints: '错档案复核；委托人拒绝说明来源；旧城诊所出现主角童年照片。',
+        emotionTone: '克制、紧张',
+        targetWords: 2800,
+        storyCore: '记忆证据只能从既有档案和现实线索中互相验证。',
+        currentArc: '旧档案开篇',
+        worldRules: buildWorldRulesSummary('现代悬疑'),
+        characterStates: '主角仍在隐瞒自己童年断片。',
+        itemSummary: '编号错误的记忆档案；旧照片。',
+        previousSummaries: '第1章主角在夜班拿到编号错误的档案。',
+        previousChapterContext: '上一章末尾，档案照片与主角童年照片重叠。',
+        lastChapterEnding: '主角看见照片背面写着旧城诊所地址。',
+        chapterBridgePlan: '承接来源：第1章\n开场动作：主角带着错档案赶往旧城诊所。',
+        continuitySummary: '错档案编号和照片背面地址必须持续追踪。',
+        openLoops: '委托人为什么知道主角童年缺口。',
+        continuityNotes: '不能忘记主角尚未公开自己的童年断片。',
+        timelineSummary: '同日凌晨',
+        timelineOpenThreads: '天亮前必须完成档案复核。',
+        longTermMemory: '旧城更新与记忆交易有关。',
+        consistencyNotes: '只用已知档案与现场线索推进。',
+        protagonistReference: '主角',
+        protagonistRule: '涉及主角时只用“主角”称呼。',
+      })
+      assert.match(scenePrompt, /章节衔接桥/u)
+      assert.match(scenePrompt, /步骤记忆接力协议/u)
+      assert.match(scenePrompt, /标题与结构吸引力/u)
+      assert.match(scenePrompt, /第 2 章职责/u)
+      assert.match(scenePrompt, /上一章结果 -> 本章首场动作 -> 本章退出钩子/u)
+
+      const writingPrompt = prompt.buildChapterWritingPrompt({
+        novelTitle: '旧城档案',
+        genre: '现代悬疑',
+        chapterNum: 1,
+        chapterTitle: '错号档案',
+        chapterGoal: '让主角在夜班发现错档案与自己童年照片重叠。',
+        plotPoints: '夜班接档；编号异常；照片重叠；章尾出现旧城诊所地址。',
+        emotionTone: '压抑、悬疑',
+        targetWords: 2800,
+        storyCore: '个人记忆真实性与城市秩序稳定互相冲突。',
+        currentArc: '旧档案开篇',
+        worldRules: buildWorldRulesSummary('现代悬疑'),
+        characterStates: '主角习惯用流程压住情绪。',
+        previousSummaries: '',
+        previousChapterContext: '',
+        lastChapterEnding: '',
+        chapterBridgePlan: '',
+        styleTemplate: '冷静、动作优先、少解释。',
+        continuitySummary: '',
+        openLoops: '',
+        continuityNotes: '',
+        timelineSummary: '故事开端夜班',
+        timelineOpenThreads: '',
+        protagonistReference: '主角',
+        protagonistRule: '涉及主角时只用“主角”称呼。',
+      })
+      assert.match(writingPrompt, /黄金三章开篇约束/u)
+      assert.match(writingPrompt, /前 300 字/u)
+      assert.match(writingPrompt, /前 800 字/u)
+      assert.match(writingPrompt, /步骤记忆接力协议/u)
+    },
+  },
+  {
+    name: 'story prompt wrapper keeps model-neutral memory gates',
+    run() {
+      assert.match(storyPromptsSource, /步骤记忆接力是硬约束/u)
+      assert.match(storyPromptsSource, /Kimi、Claude、GPT、DeepSeek/u)
+      assert.match(storyPromptsSource, /不能把推断升级成事实/u)
+      assert.match(storyPromptsSource, /bridge_in \/ bridge_out 必须形成可追踪接力/u)
+    },
+  },
+  {
+    name: 'volume planning prompt keeps title structure and volume bridges concrete',
+    run() {
+      const text = prompt.buildVolumePlanningPrompt({
+        novelTitle: '旧城档案',
+        novelSynopsis: '主角从错档案入手，追查旧城失踪案背后的记忆交易网络。',
+        genre: '现代悬疑',
+        storyGoal: '查清记忆交易网络并找回主角被剪走的童年真相。',
+        coreConflict: '个人记忆真实性与城市秩序稳定互相冲突。',
+        mainPlot: '主角从夜班错档案、旧城诊所、交易中转站一路查到城市记忆修复中心。',
+        ending: '主角公开证据，但必须承担自己记忆无法完全恢复的代价。',
+        targetTotalWords: 600000,
+        existingArcs: '旧档案开篇；诊所追查；交易网反扑；记忆修复中心终局。',
+        protagonistSummary: '主角熟悉档案流程，却回避自己的童年缺口。',
+        worldRulesSummary: buildWorldRulesSummary('现代悬疑'),
+        threadsSummary: '错号档案、旧照片地址、委托人身份、记忆交易账本。',
+      })
+
+      assert.match(text, /标题与结构吸引力/u)
+      assert.match(text, /卷标题要概括本卷的阶段矛盾或主角处境/u)
+      assert.match(text, /相邻两卷之间必须有明确的承接关系/u)
+      assert.match(text, /卷内高潮、喘息和兑现要有节奏差/u)
+      assert.match(text, /volume_number/u)
+      assert.match(text, /chapter_estimate/u)
+      assert.match(text, /volume_climax/u)
+      assert.match(text, /bridge_to_next/u)
+      assert.match(text, /万能隐喻标题/u)
+      assert.doesNotMatch(text, /黎明前的黑暗/u)
+      assert.doesNotMatch(text, /不能只写"主线推进"/u)
+    },
+  },
+  {
+    name: 'continuity extraction preserves unresolved inbound obligations',
+    run() {
+      const text = prompt.buildContinuityStatePrompt({
+        novelTitle: '旧城档案',
+        chapterNum: 4,
+        chapterTitle: '诊所门后',
+        arcName: '旧档案开篇',
+        chapterGoal: '追查旧城诊所',
+        summary: '主角抵达诊所但没有找到委托人。',
+        chapterContent: '主角推开诊所后门，只看见一张空病床。',
+        inboundOpenLoops: '委托人为什么知道主角童年缺口。',
+        inboundDueForeshadows: '旧照片背面的地址需要回收。',
+        inboundContinuityNotes: '不能忘记主角尚未公开童年断片。',
+        chapterBridgePlan: '承接上章照片地址，开场必须到诊所。',
+      })
+      assert.match(text, /入站义务/u)
+      assert.match(text, /如果入站未回收事项或入站应回收伏笔/u)
+      assert.match(text, /不得因为正文没提到就删除/u)
     },
   },
   {

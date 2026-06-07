@@ -1,0 +1,185 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - strong [ref=e7]: 模型管理
+  - generic [ref=e8]:
+    - complementary [ref=e9]:
+      - generic [ref=e10]:
+        - menu [ref=e11]:
+          - menuitem "book 我的小说" [ref=e12] [cursor=pointer]:
+            - img "book" [ref=e13]:
+              - img [ref=e14]
+            - generic [ref=e16]: 我的小说
+          - menuitem "robot 模型管理" [ref=e17] [cursor=pointer]:
+            - img "robot" [ref=e18]:
+              - img [ref=e19]
+            - generic [ref=e21]: 模型管理
+          - menuitem "appstore 模板系统" [ref=e22] [cursor=pointer]:
+            - img "appstore" [ref=e23]:
+              - img [ref=e24]
+            - generic [ref=e26]: 模板系统
+          - menuitem "message 提示词" [ref=e27] [cursor=pointer]:
+            - img "message" [ref=e28]:
+              - img [ref=e29]
+            - generic [ref=e31]: 提示词
+          - menuitem "schedule 任务中心" [ref=e32] [cursor=pointer]:
+            - img "schedule" [ref=e33]:
+              - img [ref=e34]
+            - generic [ref=e36]: 任务中心
+        - generic [ref=e37]:
+          - generic [ref=e38]:
+            - img "bulb" [ref=e39]:
+              - img [ref=e40]
+            - text: 主题设置
+          - generic [ref=e42]:
+            - button "深色 moon" [ref=e43] [cursor=pointer]:
+              - generic [ref=e44]: 深色
+              - img "moon" [ref=e46]:
+                - img [ref=e47]
+            - button "浅色 sun" [ref=e49] [cursor=pointer]:
+              - generic [ref=e50]: 浅色
+              - img "sun" [ref=e52]:
+                - img [ref=e53]
+            - button "柔和 highlight" [ref=e55] [cursor=pointer]:
+              - generic [ref=e56]: 柔和
+              - img "highlight" [ref=e58]:
+                - img [ref=e59]
+    - main [ref=e61]:
+      - generic [ref=e63]:
+        - generic [ref=e64]:
+          - generic [ref=e65]:
+            - generic [ref=e66]: 模型与连接
+            - heading "模型管理" [level=1] [ref=e67]
+            - paragraph [ref=e68]: 集中维护模型提供商、上下文窗口、默认配置和连接测试。左侧看配置清单，右侧编辑可立即生效的运行参数。
+          - generic [ref=e70]:
+            - generic [ref=e71]: 已配置 1 套模型，默认 1 套
+            - button "plus 新建配置" [ref=e73] [cursor=pointer]:
+              - img "plus" [ref=e75]:
+                - img [ref=e76]
+              - generic [ref=e79]: 新建配置
+          - generic [ref=e80]:
+            - generic [ref=e81]:
+              - generic [ref=e82]: 模型配置
+              - generic [ref=e83]: "1"
+            - generic [ref=e84]:
+              - generic [ref=e85]: 默认配置
+              - generic [ref=e86]: "1"
+            - generic [ref=e87]:
+              - generic [ref=e88]: 接入厂商
+              - generic [ref=e89]: "1"
+            - generic [ref=e90]:
+              - generic [ref=e91]: 当前状态
+              - generic [ref=e92]: 正在编辑
+        - generic [ref=e95]:
+          - generic [ref=e96]:
+            - generic [ref=e97]:
+              - heading "配置列表" [level=2] [ref=e99]
+              - button "plus 新建" [ref=e101] [cursor=pointer]:
+                - img "plus" [ref=e103]:
+                  - img [ref=e104]
+                - generic [ref=e107]: 新建
+            - button "浏览器预览模型 star ·" [ref=e110] [cursor=pointer]:
+              - generic [ref=e111]:
+                - generic [ref=e112]: 浏览器预览模型
+                - img "star" [ref=e113]:
+                  - img [ref=e114]
+              - generic [ref=e116]: ·
+          - generic [ref=e117]:
+            - generic [ref=e118]:
+              - heading "新建模型配置" [level=2] [ref=e138]
+              - button "保 存" [ref=e141] [cursor=pointer]:
+                - generic [ref=e142]: 保 存
+            - generic [ref=e143]:
+              - generic [ref=e145]:
+                - generic "配置名称" [ref=e147]: "* 配置名称"
+                - textbox "* 配置名称" [ref=e151]:
+                  - /placeholder: 例如：GPT-4o 主力模型
+              - generic [ref=e153]:
+                - generic "AI 提供商" [ref=e155]: "* AI 提供商"
+                - generic [ref=e159] [cursor=pointer]:
+                  - generic: Kimi / Moonshot
+                  - generic [ref=e161]:
+                    - combobox "* AI 提供商" [active] [ref=e163]
+                    - generic "Kimi / Moonshot" [ref=e301]
+                  - generic:
+                    - img:
+                      - img
+              - generic [ref=e166]:
+                - generic "模型 ID" [ref=e168]: "* 模型 ID"
+                - generic [ref=e172] [cursor=pointer]:
+                  - generic [ref=e174]:
+                    - combobox "* 模型 ID" [ref=e176]
+                    - generic "kimi-k2.6" [ref=e302]
+                  - generic:
+                    - img:
+                      - img
+                  - img [ref=e179]:
+                    - img [ref=e180]
+              - generic [ref=e183]:
+                - generic "API Key" [ref=e185]
+                - generic [ref=e189]:
+                  - textbox "API Key" [ref=e190]:
+                    - /placeholder: 输入 API Key
+                  - img "eye-invisible" [ref=e192] [cursor=pointer]:
+                    - img [ref=e193]
+              - generic [ref=e197]:
+                - generic "Base URL" [ref=e199]
+                - textbox "Base URL" [ref=e203]:
+                  - /placeholder: https://api.moonshot.ai/v1（留空使用默认）
+              - generic [ref=e304]:
+                - generic "Kimi Thinking" [ref=e306]
+                - generic [ref=e307]:
+                  - generic [ref=e310] [cursor=pointer]:
+                    - generic [ref=e312]:
+                      - combobox "Kimi Thinking" [ref=e314]
+                      - generic "Disabled" [ref=e315]
+                    - generic:
+                      - img:
+                        - img
+                  - generic [ref=e317]: 默认禁用，降低连接测试和正文生成的不确定成本；需要模型显式思考时可开启。
+              - generic [ref=e205]:
+                - generic "Temperature（创造性）" [ref=e207]
+                - generic [ref=e208]:
+                  - generic [ref=e211]:
+                    - slider [disabled] [ref=e217]
+                    - generic:
+                      - generic [ref=e218]: "0"
+                      - generic [ref=e219]: "0.5"
+                      - generic [ref=e220]: "1"
+                  - generic [ref=e319]: Kimi K2.x 使用固定采样参数，运行时会忽略此项。
+              - generic [ref=e222]:
+                - generic "Max Tokens（最大输出长度）" [ref=e224]
+                - generic [ref=e225]:
+                  - generic [ref=e228]:
+                    - generic:
+                      - button "Increase Value" [ref=e229] [cursor=pointer]:
+                        - img "up" [ref=e230]:
+                          - img [ref=e231]
+                      - button "Decrease Value" [ref=e233] [cursor=pointer]:
+                        - img "down" [ref=e234]:
+                          - img [ref=e235]
+                    - spinbutton "Max Tokens（最大输出长度）" [ref=e238]: "65536"
+                  - generic [ref=e240]: 控制单次回复最多可生成多少 Token。可设置到更大的输出预算，但实际可用上限仍取决于模型提供方。
+              - generic [ref=e242]:
+                - generic "上下文窗口（总上下文预算，可留空使用默认）" [ref=e244]
+                - generic [ref=e245]:
+                  - generic [ref=e248]:
+                    - generic:
+                      - button "Increase Value" [ref=e249] [cursor=pointer]:
+                        - img "up" [ref=e250]:
+                          - img [ref=e251]
+                      - button "Decrease Value" [ref=e253] [cursor=pointer]:
+                        - img "down" [ref=e254]:
+                          - img [ref=e255]
+                    - spinbutton "上下文窗口（总上下文预算，可留空使用默认）" [ref=e258]: "256000"
+                  - generic [ref=e260]: Kimi K2.x 默认上下文窗口按 256K 预估；Moonshot v1 按模型名使用 8K/32K/128K。
+              - generic [ref=e262]:
+                - generic "最大并发请求数" [ref=e264]
+                - generic [ref=e268]:
+                  - generic:
+                    - button "Increase Value" [ref=e269] [cursor=pointer]:
+                      - img "up" [ref=e270]:
+                        - img [ref=e271]
+                    - button "Decrease Value" [ref=e273] [cursor=pointer]:
+                      - img "down" [ref=e274]:
+                        - img [ref=e275]
+                  - spinbutton "最大并发请求数" [ref=e278]: "2"

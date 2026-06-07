@@ -19,6 +19,7 @@ import type {
 import {
   getDefaultModelConfigRecord,
   getModelConfigRecord,
+  getModelProviderOptions,
   getProviderTokenSafetyMarginPct,
 } from './model.service'
 import { getLatestStyleFingerprintForNovel } from './style-analysis.service'
@@ -187,6 +188,7 @@ export function buildAiModelRouteReport(options: {
     modelConfigId: config.id,
     modelLabel: `${config.provider}:${config.modelId}`,
     provider: config.provider,
+    providerOptions: getModelProviderOptions(config),
     temperature,
     maxTokens,
     tokenSafetyMarginPct,
@@ -208,6 +210,7 @@ export function buildChatOptionsFromRoute(route: AiModelRouteReport): Partial<Ch
   return {
     temperature: route.temperature,
     maxTokens: route.maxTokens,
+    providerOptions: route.providerOptions,
   }
 }
 

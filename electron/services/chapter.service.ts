@@ -65,6 +65,10 @@ import {
   normalizeChapterContractValidationResult,
   validateChapterContractDelivery,
 } from './chapter-contract-validator.service'
+import {
+  isContractValidationBlockerVerdict,
+  isHardContractValidationItem,
+} from '../../src/shared/contract-validation'
 import { refreshStoryMemoryCheckpoints } from './story-memory.service'
 import {
   ensureStoryStructure,
@@ -207,6 +211,10 @@ interface ChapterReviewNotes {
   realism_risks: string[]
   coherence_risks: string[]
   reader_hook_risks: string[]
+  step_memory_risks: string[]
+  opening_hook_risks: string[]
+  title_alignment_risks: string[]
+  hallucination_risks: string[]
   language_risks: string[]
   human_language_repairs: string[]
   genre_hollowing_risks: string[]
@@ -318,6 +326,11 @@ interface ChapterPipelineRoleState {
   targetSegmentId?: number | null
 }
 
+interface StepMemoryRuntimeState {
+  summary: string
+  runtimeAssertions: string[]
+}
+
 interface ChapterPipelineSnapshot {
   kind: 'chapter_pipeline'
   chapterId: number
@@ -338,6 +351,7 @@ interface ChapterPipelineSnapshot {
   authorStyleLock?: AuthorStyleLockSummary
   generationExplainability?: AiExplainabilityReport
   writerContextResolution?: WriterContextOrchestratorResolution
+  stepMemory?: StepMemoryRuntimeState
   recoveryHint?: TaskRecoveryHint
   failureCode?: ChapterPipelineFailureCode
   rewriteScope?: ChapterRewriteScope
@@ -942,6 +956,10 @@ function createInitialChapterPipelineSnapshot(
     contractVersion,
     totalTokensUsed: 0,
     totalDurationMs: 0,
+    stepMemory: {
+      summary: '',
+      runtimeAssertions: [],
+    },
     roles: {
       planner: createPipelineRoleState('planner'),
       writer: createPipelineRoleState('writer'),
@@ -954,7 +972,7 @@ function createInitialChapterPipelineSnapshot(
 }
 
 function buildChapterContextAssemblyReport(
-  context: Pick<ChapterContext, 'recalledMemorySources' | 'recallDiagnostics' | 'recallSnapshot' | 'timelineSummary' | 'timelineOpenThreads' | 'hardConstraintEntries'>,
+  context: Pick<ChapterContext, 'recalledMemorySources' | 'recallDiagnostics' | 'recallSnapshot' | 'timelineSummary' | 'timelineOpenThreads' | 'chapterBridgePlan' | 'hardConstraintEntries'>,
   usageSnapshot: import('../../src/types').WritingContextUsageSnapshot,
 ): AiContextAssemblyReport {
   const graphItems = usageSnapshot.usedAssets.length
@@ -963,11 +981,14 @@ function buildChapterContextAssemblyReport(
     context.timelineOpenThreads,
     ...usageSnapshot.recentStateChanges,
   ].filter(Boolean).length
+  const bridgeItems = context.chapterBridgePlan
+    ? context.chapterBridgePlan.split('\n').map((line) => line.trim()).filter(Boolean).length
+    : 0
   const contractItems = usageSnapshot.usedContracts.length + context.hardConstraintEntries.length
 
   return {
     assemblyVersion: 'v2-unified',
-    summary: `统一上下文组装器已合并资产图谱、时间线索与合同硬约束，本章共装配 ${graphItems + timelineItems + contractItems} 个有效上下文入口。`,
+    summary: `统一上下文组装器已合并资产图谱、时间线索、章节衔接与合同硬约束，本章共装配 ${graphItems + timelineItems + bridgeItems + contractItems} 个有效上下文入口。`,
     layers: [
       {
         key: 'graph_recall',
@@ -992,6 +1013,14 @@ function buildChapterContextAssemblyReport(
         summary: timelineItems > 0
           ? '已把时间轴、开放线索和近期状态变化共同纳入写作上下文。'
           : '当前章节没有额外时间召回补充。',
+      },
+      {
+        key: 'chapter_bridge',
+        label: '章节衔接',
+        itemCount: bridgeItems,
+        summary: bridgeItems > 0
+          ? '已把上章结尾、时间地点、情绪惯性和 POV 边界纳入开篇承接计划。'
+          : '当前章节没有可用的章节衔接桥，通常是第一章或前章资料不足。',
       },
       {
         key: 'contract_recall',
@@ -1557,6 +1586,10 @@ function normalizeReviewNotes(raw: unknown): ChapterReviewNotes {
     realism_risks: toStringArray(record.realism_risks),
     coherence_risks: toStringArray(record.coherence_risks),
     reader_hook_risks: toStringArray(record.reader_hook_risks),
+    step_memory_risks: toStringArray(record.step_memory_risks),
+    opening_hook_risks: toStringArray(record.opening_hook_risks),
+    title_alignment_risks: toStringArray(record.title_alignment_risks),
+    hallucination_risks: toStringArray(record.hallucination_risks),
     language_risks: toStringArray(record.language_risks),
     human_language_repairs: toStringArray(record.human_language_repairs),
     genre_hollowing_risks: toStringArray(record.genre_hollowing_risks),
@@ -1638,6 +1671,10 @@ function hasReviewNotes(notes: ChapterReviewNotes): boolean {
     notes.realism_risks.length > 0 ||
     notes.coherence_risks.length > 0 ||
     notes.reader_hook_risks.length > 0 ||
+    notes.step_memory_risks.length > 0 ||
+    notes.opening_hook_risks.length > 0 ||
+    notes.title_alignment_risks.length > 0 ||
+    notes.hallucination_risks.length > 0 ||
     notes.language_risks.length > 0 ||
     notes.human_language_repairs.length > 0 ||
     notes.genre_hollowing_risks.length > 0 ||
@@ -1696,6 +1733,10 @@ function buildFallbackReviewNotes(consistencyNotes: string): ChapterReviewNotes 
     realism_risks: [],
     coherence_risks: [],
     reader_hook_risks: [],
+    step_memory_risks: [],
+    opening_hook_risks: [],
+    title_alignment_risks: [],
+    hallucination_risks: [],
     language_risks: ['删除抽象口号、概念化抒情和不自然搭配。'],
     human_language_repairs: [],
     genre_hollowing_risks: [],
@@ -1749,6 +1790,10 @@ function formatReviewNotes(notes: ChapterReviewNotes): string {
     notes.realism_risks.length > 0 ? `常识/规则风险：\n- ${notes.realism_risks.join('\n- ')}` : '',
     notes.coherence_risks.length > 0 ? `连贯性风险：\n- ${notes.coherence_risks.join('\n- ')}` : '',
     notes.reader_hook_risks.length > 0 ? `追读风险：\n- ${notes.reader_hook_risks.join('\n- ')}` : '',
+    notes.step_memory_risks.length > 0 ? `步骤接力风险：\n- ${notes.step_memory_risks.join('\n- ')}` : '',
+    notes.opening_hook_risks.length > 0 ? `开篇吸引力风险：\n- ${notes.opening_hook_risks.join('\n- ')}` : '',
+    notes.title_alignment_risks.length > 0 ? `标题贴合风险：\n- ${notes.title_alignment_risks.join('\n- ')}` : '',
+    notes.hallucination_risks.length > 0 ? `无来源新增/推断升级风险：\n- ${notes.hallucination_risks.join('\n- ')}` : '',
     notes.language_risks.length > 0 ? `语言风险：\n- ${notes.language_risks.join('\n- ')}` : '',
     notes.human_language_repairs.length > 0 ? `语言替换建议：\n- ${notes.human_language_repairs.join('\n- ')}` : '',
     notes.genre_hollowing_risks.length > 0 ? `体裁空心化：\n- ${notes.genre_hollowing_risks.join('\n- ')}` : '',
@@ -1841,9 +1886,19 @@ function applyContractValidationToReviewNotes(
   contractValidation: ChapterContractValidationResult,
 ): ChapterReviewNotes {
   const failedItems = contractValidation.itemResults.filter((item) => item.verdict !== 'pass')
-  const criticalFixes = failedItems
-    .filter((item) => item.verdict === 'missing' || item.verdict === 'contradicted')
+  const hardFailedItems = failedItems.filter(isHardContractValidationItem)
+  const hardBlockerItems = hardFailedItems.filter((item) => isContractValidationBlockerVerdict(item.verdict))
+  const hardRewriteHints = hardFailedItems
     .map((item) => item.rewriteHint)
+    .filter(Boolean)
+  const criticalFixes = hardBlockerItems
+    .map((item) => item.rewriteHint)
+  const titleAlignmentRisks = failedItems
+    .filter((item) => item.contractItemType === 'chapter_title_alignment')
+    .map((item) => item.rewriteHint || `${item.expected}：标题与本章核心事件或压力点不够贴合。`)
+  const openingHookRisks = failedItems
+    .filter((item) => item.contractItemType === 'golden_three_opening')
+    .map((item) => item.rewriteHint || `${item.expected}：黄金三章章首吸引力不足。`)
   const arcRisks = failedItems
     .filter((item) => (
       item.contractItemType === 'chapter_goal'
@@ -1867,23 +1922,33 @@ function applyContractValidationToReviewNotes(
   const realismRisks = failedItems
     .filter((item) => item.contractItemType === 'scene_conflict')
     .map((item) => `${item.segmentTitle || '场景'} 冲突不够可见，阻力更像说明而不是事件。`)
+  const stepMemoryRisks = failedItems
+    .filter((item) => item.contractItemType === 'scene_result_state' || item.contractItemType === 'scene_conflict')
+    .map((item) => `${item.segmentTitle || '场景'} 没有把场景计划里的冲突、结果或退出压力落到正文，Planner 到 Writer 的接力偏弱。`)
 
   return {
     ...reviewNotes,
     critical_fixes: dedupeTextList([...criticalFixes, ...reviewNotes.critical_fixes]),
     arc_progress_risks: dedupeTextList([...reviewNotes.arc_progress_risks, ...arcRisks]),
     reader_hook_risks: dedupeTextList([...reviewNotes.reader_hook_risks, ...hookRisks]),
+    step_memory_risks: dedupeTextList([...reviewNotes.step_memory_risks, ...stepMemoryRisks]),
+    opening_hook_risks: dedupeTextList([
+      ...reviewNotes.opening_hook_risks,
+      ...openingHookRisks,
+      ...(hookRisks.length > 0 ? ['章节钩子兑现偏弱，需同时检查章首承接和章尾递进。'] : []),
+    ]),
+    title_alignment_risks: dedupeTextList([...reviewNotes.title_alignment_risks, ...titleAlignmentRisks]),
     missing_payoffs: dedupeTextList([...reviewNotes.missing_payoffs, ...missingPayoffs]),
     coherence_risks: dedupeTextList([...reviewNotes.coherence_risks, ...coherenceRisks]),
     realism_risks: dedupeTextList([...reviewNotes.realism_risks, ...realismRisks]),
     summary: reviewNotes.summary || contractValidation.summary,
-    severity: contractValidation.status === 'blocker'
+    severity: hardBlockerItems.length > 0
       ? mergeSeverity(reviewNotes.severity, 'high')
       : contractValidation.status === 'warning'
         ? mergeSeverity(reviewNotes.severity, 'medium')
         : reviewNotes.severity,
-    rewrite_required: reviewNotes.rewrite_required || contractValidation.status === 'blocker',
-    revision_brief: appendRevisionBrief(reviewNotes.revision_brief, contractValidation.rewriteHints),
+    rewrite_required: reviewNotes.rewrite_required || hardBlockerItems.length > 0,
+    revision_brief: appendRevisionBrief(reviewNotes.revision_brief, hardRewriteHints),
     contract_validation: contractValidation,
   }
 }
@@ -3213,6 +3278,12 @@ async function updateChapterContinuityState(
 
   const fallback = buildFallbackContinuityState(chapter, summaryData)
   let nextState = fallback
+  let inboundContext: Awaited<ReturnType<typeof collectChapterContextRawData>> | null = null
+  try {
+    inboundContext = await collectChapterContextRawData(chapter.novelId, chapter.chapterNum)
+  } catch {
+    inboundContext = null
+  }
 
   try {
     const result = await runChatTask({
@@ -3230,6 +3301,10 @@ async function updateChapterContinuityState(
           chapterGoal: extractChapterGoal(chapter.outline),
           summary: summaryData.summary,
           chapterContent: chapter.content,
+          inboundOpenLoops: inboundContext?.contextParts.openLoops,
+          inboundDueForeshadows: inboundContext?.contextParts.dueForeshadows,
+          inboundContinuityNotes: inboundContext?.contextParts.continuityNotes,
+          chapterBridgePlan: inboundContext?.contextParts.chapterBridgePlan,
         }),
       }],
       modelConfigId: novel.modelConfigId || undefined,
@@ -3892,6 +3967,10 @@ function buildReviewRiskArtifactSummary(reviewNotes: ChapterReviewNotes): string
     ...reviewNotes.critical_fixes.slice(0, 2).map((item) => `关键修订：${item}`),
     ...reviewNotes.coherence_risks.slice(0, 2).map((item) => `连贯性风险：${item}`),
     ...reviewNotes.reader_hook_risks.slice(0, 2).map((item) => `追读风险：${item}`),
+    ...reviewNotes.step_memory_risks.slice(0, 2).map((item) => `步骤接力风险：${item}`),
+    ...reviewNotes.opening_hook_risks.slice(0, 2).map((item) => `开篇风险：${item}`),
+    ...reviewNotes.title_alignment_risks.slice(0, 1).map((item) => `标题风险：${item}`),
+    ...reviewNotes.hallucination_risks.slice(0, 2).map((item) => `幻觉风险：${item}`),
     ...reviewNotes.language_risks.slice(0, 2).map((item) => `语言风险：${item}`),
   ], 6, 640)
 }
@@ -3917,32 +3996,71 @@ function buildRewriteDeltaArtifactSummary(
   ], 5, 640)
 }
 
+function buildStepMemorySummary(params: {
+  chapterBridgePlan?: string
+  scenePlanText?: string
+  draftText?: string
+  reviewNotes?: ChapterReviewNotes
+  previousSummary?: string
+}): StepMemoryRuntimeState {
+  const reviewNotes = params.reviewNotes
+  const riskLines = reviewNotes
+    ? [
+        ...reviewNotes.step_memory_risks.slice(0, 2).map((item) => `步骤接力风险：${item}`),
+        ...reviewNotes.opening_hook_risks.slice(0, 2).map((item) => `开篇风险：${item}`),
+        ...reviewNotes.title_alignment_risks.slice(0, 1).map((item) => `标题风险：${item}`),
+        ...reviewNotes.hallucination_risks.slice(0, 2).map((item) => `幻觉风险：${item}`),
+        ...reviewNotes.critical_fixes.slice(0, 2).map((item) => `必修：${item}`),
+      ]
+    : []
+  const runtimeAssertions = dedupeTextList([
+    params.chapterBridgePlan ? '正文开篇必须优先兑现章节衔接桥，不得跳过上章结尾压力。' : '',
+    params.scenePlanText ? 'Writer 必须逐场执行 Planner 的场景计划，不得漏掉 must_cover 和 exit_hook。' : '',
+    params.draftText ? 'Critic/Rewriter 必须以 Writer 初稿为事实底稿，修复问题时不得新增无来源设定。' : '',
+    reviewNotes?.opening_hook_risks.length ? '重写时先修章首 800 字和章尾递进，再处理普通润色。' : '',
+    reviewNotes?.step_memory_risks.length ? '重写必须补齐 Planner、章节衔接桥和正文执行之间的断点。' : '',
+    reviewNotes?.hallucination_risks.length ? '重写必须删除或改写无来源新增内容，所有新增细节都要能由上下文支撑。' : '',
+  ]).slice(0, 8)
+  const summary = summarizeStageArtifactLines([
+    params.previousSummary,
+    params.chapterBridgePlan ? `章节衔接桥：${summarizeStageArtifactText(params.chapterBridgePlan, 220)}` : '',
+    params.scenePlanText ? `Planner 接力：${summarizeStageArtifactText(params.scenePlanText, 260)}` : '',
+    params.draftText ? `Writer 底稿：${summarizeStageArtifactText(params.draftText, 260)}` : '',
+    ...riskLines,
+  ], 8, 900)
+
+  return {
+    summary,
+    runtimeAssertions,
+  }
+}
+
 function buildStageRenderSchema(stage: ChapterContextStage): StageRenderSchema {
   switch (stage) {
     case 'scenePlan':
       return {
         stage,
         requiredAllocatorFields: ['writingContractSummary', 'relationSummary', 'characterStates'],
-        optionalAllocatorFields: ['scenePlanSummary', 'contractVersionSummary', 'activeThreads', 'dueForeshadows', 'mapSummary'],
+        optionalAllocatorFields: ['chapterBridgePlan', 'stepMemorySummary', 'scenePlanSummary', 'contractVersionSummary', 'activeThreads', 'dueForeshadows', 'mapSummary'],
       }
     case 'review':
       return {
         stage,
         requiredAllocatorFields: ['draftTextSummary', 'scenePlanSummary', 'contractVersionSummary', 'reviewRiskSummary', 'publishGateRiskSummary'],
-        optionalAllocatorFields: ['reviewProofSummary', 'continuityNotes', 'openLoops', 'timelineSummary'],
+        optionalAllocatorFields: ['chapterBridgePlan', 'stepMemorySummary', 'reviewProofSummary', 'continuityNotes', 'openLoops', 'timelineSummary'],
       }
     case 'rewrite':
       return {
         stage,
         requiredAllocatorFields: ['draftTextSummary', 'scenePlanSummary', 'contractVersionSummary', 'reviewRiskSummary', 'rewriteDeltaSummary'],
-        optionalAllocatorFields: ['reviewProofSummary', 'publishGateRiskSummary', 'continuityNotes', 'timelineSummary'],
+        optionalAllocatorFields: ['chapterBridgePlan', 'stepMemorySummary', 'reviewProofSummary', 'publishGateRiskSummary', 'continuityNotes', 'timelineSummary'],
       }
     case 'draft':
     default:
       return {
         stage,
         requiredAllocatorFields: ['writingContractSummary', 'relationSummary', 'characterStates'],
-        optionalAllocatorFields: ['scenePlanSummary', 'contractVersionSummary', 'activeThreads', 'recalledMemory', 'mapSummary'],
+        optionalAllocatorFields: ['chapterBridgePlan', 'stepMemorySummary', 'scenePlanSummary', 'contractVersionSummary', 'activeThreads', 'recalledMemory', 'mapSummary'],
       }
   }
 }
@@ -3967,6 +4085,7 @@ function applyUpstreamArtifactsToRawContext(
       reviewProofSummary: upstreamArtifacts.reviewProofSummary || rawContext.contextParts.reviewProofSummary,
       rewriteDeltaSummary: upstreamArtifacts.rewriteDeltaSummary || rawContext.contextParts.rewriteDeltaSummary,
       publishGateRiskSummary: upstreamArtifacts.publishGateRiskSummary || rawContext.contextParts.publishGateRiskSummary,
+      stepMemorySummary: upstreamArtifacts.stepMemorySummary || rawContext.contextParts.stepMemorySummary,
     },
   }
 }
@@ -3987,11 +4106,12 @@ async function resolveStageContextForPipeline(
 ): Promise<StageContextResolverPayload> {
   const renderSchema = buildStageRenderSchema(stage)
   const upstreamArtifacts = options.upstreamArtifacts || {}
+  const effectiveRawContext = applyUpstreamArtifactsToRawContext(rawContext, upstreamArtifacts)
 
   if (stage === 'draft') {
     const writerContextResolutionPayload = await resolveWriterContextForStage(
       chapter,
-      rawContext,
+      effectiveRawContext,
       options.executionMode,
       options.preserveConstraintLabels,
       options.contractVersion,
@@ -3999,7 +4119,7 @@ async function resolveStageContextForPipeline(
     )
     const draftResolution = allocateDraftContextWithWriterFallback(
       chapter,
-      rawContext,
+      effectiveRawContext,
       writerContextResolutionPayload.effectiveRawContext,
       complexity,
       writerContextResolutionPayload.writerContextResolution,
@@ -4015,7 +4135,6 @@ async function resolveStageContextForPipeline(
     }
   }
 
-  const effectiveRawContext = applyUpstreamArtifactsToRawContext(rawContext, upstreamArtifacts)
   return {
     stage,
     context: allocateStageContextForPipeline(
@@ -4291,6 +4410,8 @@ async function resolveWriterContextForStage(
         continuityNotes: rawContext.contextParts.continuityNotes,
         openLoops: rawContext.contextParts.openLoops,
         dueForeshadows: rawContext.contextParts.dueForeshadows,
+        chapterBridgePlan: rawContext.contextParts.chapterBridgePlan,
+        stepMemorySummary: rawContext.contextParts.stepMemorySummary,
         timelineSummary: rawContext.contextParts.timelineSummary,
         timelineOpenThreads: rawContext.contextParts.timelineOpenThreads,
         activeThreads: rawContext.contextParts.activeThreads,
@@ -4314,6 +4435,8 @@ async function resolveWriterContextForStage(
         activeThreads: rawContext.contextParts.activeThreads,
         openLoops: rawContext.contextParts.openLoops,
         dueForeshadows: rawContext.contextParts.dueForeshadows,
+        chapterBridgePlan: rawContext.contextParts.chapterBridgePlan,
+        stepMemorySummary: rawContext.contextParts.stepMemorySummary,
         relationSummary: rawContext.contextParts.relationSummary,
         dialogueVoiceLocks: rawContext.contextParts.dialogueVoiceLocks,
         recalledMemory: rawContext.contextParts.recalledMemory,
@@ -4463,8 +4586,7 @@ async function continueChapterContent(
     complexity,
     writerContextResolutionPayload.writerContextResolution,
   )
-  const draftContext = draftResolution.draftContext
-  const writerRawContext = draftResolution.effectiveRawContext
+  let draftContext = draftResolution.draftContext
   const consistencyNotes = buildConsistencyPromptSummary(buildNovelConsistencyReport(chapter.novelId))
   const storyCore = buildStoryCore(profile, draftContext.storyCore)
   const executionModeResolution = resolveAiExecutionMode({
@@ -4477,6 +4599,19 @@ async function continueChapterContent(
     novel.modelConfigId || undefined,
   )
   const writerChatOpts = buildChatOptionsFromRoute(stageReports[1].route)
+  const continuationStepMemory = buildStepMemorySummary({
+    chapterBridgePlan: draftContext.chapterBridgePlan,
+    draftText: normalizedPartial,
+    previousSummary: '这是断点续写任务：必须承接已保留正文，不得重启章节或改写已完成事实。',
+  })
+  draftContext = allocateStageContextForPipeline(
+    applyUpstreamArtifactsToRawContext(draftResolution.effectiveRawContext, {
+      stepMemorySummary: continuationStepMemory.summary,
+    }),
+    chapter,
+    complexity,
+    'draft',
+  )
   const workflowTaskId = await createTask({
     type: 'chapter_write',
     novelId: chapter.novelId,
@@ -4495,6 +4630,7 @@ async function continueChapterContent(
     ...snapshot,
     executionMode: executionModeResolution.mode,
     writerContextResolution: draftResolution.writerContextResolution,
+    stepMemory: continuationStepMemory,
     partialContent: normalizedPartial,
     resumeReason: undefined,
     resumeSourceTaskId: options.sourceTaskId,
@@ -4558,10 +4694,9 @@ async function continueChapterContent(
     timelineOpenThreads: draftContext.timelineOpenThreads,
     activeThreads: draftContext.activeThreads,
     recalledMemory: draftContext.recalledMemory,
-    chapterBridgePlan: formatChapterBridgePlan(buildChapterBridgePlan(chapterId, {
-      themeVoice: parseThemeVoiceDocument(novel.themeVoiceJson),
-      chapterGoal: draftContext.chapterGoal,
-    })),
+    chapterBridgePlan: draftContext.chapterBridgePlan,
+    stepMemorySummary: draftContext.stepMemorySummary,
+    runtimeAssertions: continuationStepMemory.runtimeAssertions,
     protagonistReference: profile.protagonistReference,
     protagonistRule: profile.protagonistRule,
     promptTier: complexity,
@@ -5044,12 +5179,12 @@ export async function generateChapterContent(
         activePromptOverrideKeys,
       },
     )
-    const scenePlanContext = scenePlanResolution.context
-    const draftContext = draftResolution.context
+    let scenePlanContext = scenePlanResolution.context
+    let draftContext = draftResolution.context
     let reviewContext = (await resolveStageContextForPipeline(
       'review',
       chapter,
-      rawContext,
+      draftResolution.effectiveRawContext,
       complexity,
       {
         executionMode: executionModeResolution.mode,
@@ -5064,7 +5199,7 @@ export async function generateChapterContent(
     let rewriteContext = (await resolveStageContextForPipeline(
       'rewrite',
       chapter,
-      rawContext,
+      draftResolution.effectiveRawContext,
       complexity,
       {
         executionMode: executionModeResolution.mode,
@@ -5215,6 +5350,20 @@ export async function generateChapterContent(
     })
     const plannerNarrativeFields = formatNarrativePromptFields(buildNarrativeControlReport(scenePlanContext.chapterGoal))
     const draftNarrativeFields = formatNarrativePromptFields(buildNarrativeControlReport(draftContext.chapterGoal))
+    const initialStepMemory = buildStepMemorySummary({
+      chapterBridgePlan: chapterBridgePlanText,
+      previousSummary: buildContractVersionArtifactSummary(contractVersion),
+    })
+    scenePlanContext = allocateStageContextForPipeline(
+      applyUpstreamArtifactsToRawContext(scenePlanResolution.effectiveRawContext, {
+        stepMemorySummary: initialStepMemory.summary,
+      }),
+      chapter,
+      complexity,
+      'scenePlan',
+      undefined,
+      options.preserveConstraintLabels,
+    )
     snapshot = {
       ...snapshot,
       recallSnapshot: draftContext.recallSnapshot,
@@ -5223,6 +5372,7 @@ export async function generateChapterContent(
       authorStyleLock,
       generationExplainability,
       writerContextResolution: draftResolution.writerContextResolution,
+      stepMemory: initialStepMemory,
     }
     try {
       persistChapterRecallRuntimeSnapshot({
@@ -5275,7 +5425,9 @@ export async function generateChapterContent(
         previousSummaries: scenePlanContext.previousSummaries,
         previousChapterContext: scenePlanContext.previousChapterContext,
         lastChapterEnding: scenePlanContext.lastChapterEnding,
-        chapterBridgePlan: chapterBridgePlanText,
+        chapterBridgePlan: scenePlanContext.chapterBridgePlan,
+        stepMemorySummary: scenePlanContext.stepMemorySummary,
+        runtimeAssertions: initialStepMemory.runtimeAssertions,
         continuitySummary: scenePlanContext.continuitySummary,
         openLoops: scenePlanContext.openLoops,
         dueForeshadows: scenePlanContext.dueForeshadows,
@@ -5361,6 +5513,28 @@ export async function generateChapterContent(
 
     updateChapter(chapterId, { scenePlanJson: JSON.stringify(scenePlan) })
     const scenePlanText = formatScenePlan(scenePlan)
+    const writerStepMemory = buildStepMemorySummary({
+      chapterBridgePlan: chapterBridgePlanText,
+      scenePlanText,
+      previousSummary: 'Planner 已固化场景计划，下一步 Writer 必须逐场落正文。',
+    })
+    draftContext = allocateStageContextForPipeline(
+      applyUpstreamArtifactsToRawContext(draftResolution.effectiveRawContext, {
+        scenePlanSummary: summarizeStageArtifactText(scenePlanText, 520),
+        contractVersionSummary: buildContractVersionArtifactSummary(contractVersion),
+        stepMemorySummary: writerStepMemory.summary,
+      }),
+      chapter,
+      complexity,
+      'draft',
+      undefined,
+      options.preserveConstraintLabels,
+    )
+    snapshot = {
+      ...snapshot,
+      stepMemory: writerStepMemory,
+    }
+    syncWorkflowTask()
     finishRoleTask('planner', plannerTaskId, `场景计划已固化 ${scenePlan.length} 段。`)
 
     const writerMessages = [{
@@ -5387,7 +5561,9 @@ export async function generateChapterContent(
         previousSummaries: draftContext.previousSummaries,
         previousChapterContext: draftContext.previousChapterContext,
         lastChapterEnding: draftContext.lastChapterEnding,
-        chapterBridgePlan: chapterBridgePlanText,
+        chapterBridgePlan: draftContext.chapterBridgePlan,
+        stepMemorySummary: draftContext.stepMemorySummary,
+        runtimeAssertions: writerStepMemory.runtimeAssertions,
         continuitySummary: draftContext.continuitySummary,
         openLoops: draftContext.openLoops,
         dueForeshadows: draftContext.dueForeshadows,
@@ -5441,10 +5617,22 @@ export async function generateChapterContent(
     })
     finishRoleTask('writer', writerTaskId, '正文初稿已生成，等待 Critic 审校。')
     const lockedParagraphContext = buildLockedParagraphContext(chapter, draftContent)
+    const criticStepMemory = buildStepMemorySummary({
+      chapterBridgePlan: chapterBridgePlanText,
+      scenePlanText,
+      draftText: lockedParagraphContext.promptDraftContent,
+      previousSummary: 'Writer 已交付初稿，Critic 必须核对场景计划、接力断言、开篇追读和无来源新增。',
+    })
+    snapshot = {
+      ...snapshot,
+      stepMemory: criticStepMemory,
+    }
     const reviewUpstreamArtifacts: UpstreamRuntimeArtifacts = {
       scenePlanSummary: summarizeStageArtifactText(scenePlanText, 520),
       draftTextSummary: summarizeStageArtifactText(lockedParagraphContext.promptDraftContent, 680),
       contractVersionSummary: buildContractVersionArtifactSummary(contractVersion),
+      stepMemorySummary: criticStepMemory.summary,
+      runtimeAssertions: criticStepMemory.runtimeAssertions,
       publishGateRiskSummary: summarizeStageArtifactLines([
         structuralAlertsSummary,
         consistencyNotes,
@@ -5453,7 +5641,7 @@ export async function generateChapterContent(
     reviewContext = (await resolveStageContextForPipeline(
       'review',
       chapter,
-      rawContext,
+      draftResolution.effectiveRawContext,
       complexity,
       {
         executionMode: executionModeResolution.mode,
@@ -5488,7 +5676,9 @@ export async function generateChapterContent(
         mapSummary: reviewContext.mapSummary,
         itemSummary: reviewContext.itemSummary,
         previousChapterContext: reviewContext.previousChapterContext,
-        chapterBridgePlan: chapterBridgePlanText,
+        chapterBridgePlan: reviewContext.chapterBridgePlan,
+        stepMemorySummary: reviewContext.stepMemorySummary,
+        runtimeAssertions: reviewUpstreamArtifacts.runtimeAssertions,
         continuitySummary: reviewContext.continuitySummary,
         openLoops: reviewContext.openLoops,
         dueForeshadows: reviewContext.dueForeshadows,
@@ -5623,10 +5813,23 @@ export async function generateChapterContent(
     const reviewPrioritySummary = buildReviewPrioritySummary(reviewNotes)
     const rewritePolicy = buildAdaptiveRewritePolicy(reviewPrioritySummary)
     const reviewPriorityPrompt = buildReviewPriorityPrompt(reviewPrioritySummary)
+    const rewriterStepMemory = buildStepMemorySummary({
+      chapterBridgePlan: chapterBridgePlanText,
+      scenePlanText,
+      draftText: lockedParagraphContext.promptDraftContent,
+      reviewNotes,
+      previousSummary: 'Critic 已完成审校，Rewriter 必须按优先级修复，不得绕开上游计划。',
+    })
+    snapshot = {
+      ...snapshot,
+      stepMemory: rewriterStepMemory,
+    }
     const rewriteUpstreamArtifacts: UpstreamRuntimeArtifacts = {
       scenePlanSummary: summarizeStageArtifactText(scenePlanText, 520),
       draftTextSummary: summarizeStageArtifactText(lockedParagraphContext.promptDraftContent, 680),
       contractVersionSummary: buildContractVersionArtifactSummary(contractVersion),
+      stepMemorySummary: rewriterStepMemory.summary,
+      runtimeAssertions: rewriterStepMemory.runtimeAssertions,
       reviewRiskSummary: buildReviewRiskArtifactSummary(reviewNotes),
       reviewProofSummary: buildReviewProofArtifactSummary(reviewNotes),
       rewriteDeltaSummary: buildRewriteDeltaArtifactSummary(
@@ -5642,7 +5845,7 @@ export async function generateChapterContent(
     rewriteContext = (await resolveStageContextForPipeline(
       'rewrite',
       chapter,
-      rawContext,
+      draftResolution.effectiveRawContext,
       complexity,
       {
         executionMode: executionModeResolution.mode,
@@ -5732,7 +5935,9 @@ export async function generateChapterContent(
         previousSummaries: rewriteContext.previousSummaries,
         previousChapterContext: rewriteContext.previousChapterContext,
         lastChapterEnding: rewriteContext.lastChapterEnding,
-        chapterBridgePlan: chapterBridgePlanText,
+        chapterBridgePlan: rewriteContext.chapterBridgePlan,
+        stepMemorySummary: rewriteContext.stepMemorySummary,
+        runtimeAssertions: rewriteUpstreamArtifacts.runtimeAssertions,
         continuitySummary: rewriteContext.continuitySummary,
         openLoops: rewriteContext.openLoops,
         dueForeshadows: rewriteContext.dueForeshadows,
@@ -6221,6 +6426,17 @@ export async function getChapterContextPreview(
   const persistedScenePlanText = buildPersistedScenePlanText(chapter.scenePlanJson)
   const persistedReviewNotes = parseStoredReviewNotes(chapter.reviewNotesJson)
   const persistedReviewPrioritySummary = buildReviewPrioritySummary(persistedReviewNotes)
+  const previewStepMemory = buildStepMemorySummary({
+    chapterBridgePlan: rawContext.contextParts.chapterBridgePlan,
+    scenePlanText: persistedScenePlanText,
+    draftText: chapter.content || '',
+    reviewNotes: persistedReviewNotes,
+    previousSummary: buildContractVersionArtifactSummary(contractVersion),
+  })
+  const previewStepMemoryArtifacts = {
+    stepMemorySummary: previewStepMemory.summary,
+    runtimeAssertions: previewStepMemory.runtimeAssertions,
+  }
 
   const scenePlanResolution = await resolveStageContextForPipeline(
     'scenePlan',
@@ -6234,6 +6450,7 @@ export async function getChapterContextPreview(
       activePromptOverrideKeys,
       upstreamArtifacts: {
         contractVersionSummary: buildContractVersionArtifactSummary(contractVersion),
+        ...previewStepMemoryArtifacts,
       },
     },
   )
@@ -6247,6 +6464,7 @@ export async function getChapterContextPreview(
       preserveConstraintLabels: options.preserveConstraintLabels,
       contractVersion,
       activePromptOverrideKeys,
+      upstreamArtifacts: previewStepMemoryArtifacts,
     },
   )
   const reviewResolution = await resolveStageContextForPipeline(
@@ -6266,6 +6484,7 @@ export async function getChapterContextPreview(
         reviewRiskSummary: buildReviewRiskArtifactSummary(persistedReviewNotes),
         reviewProofSummary: buildReviewProofArtifactSummary(persistedReviewNotes),
         publishGateRiskSummary: summarizeStageArtifactLines(persistedReviewPrioritySummary.reasons, 4, 520),
+        ...previewStepMemoryArtifacts,
       },
     },
   )
@@ -6291,6 +6510,7 @@ export async function getChapterContextPreview(
           buildReviewPriorityPrompt(persistedReviewPrioritySummary),
         ),
         publishGateRiskSummary: summarizeStageArtifactLines(persistedReviewPrioritySummary.reasons, 4, 520),
+        ...previewStepMemoryArtifacts,
       },
     },
   )
@@ -6338,6 +6558,8 @@ export async function getChapterContextPreview(
     authorStyleLock,
     generationExplainability,
     previousChapterContext: rawContext.contextParts.previousChapterContext,
+    chapterBridgePlan: contexts.draft.chapterBridgePlan,
+    stepMemorySummary: contexts.draft.stepMemorySummary,
     previousChapterSampleReport: rawContext.previousChapterSampleReport,
     recalledMemory: contexts.draft.recalledMemory,
     recallSnapshot: contexts.draft.recallSnapshot,

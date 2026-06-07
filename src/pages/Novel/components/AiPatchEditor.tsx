@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Alert, Button, Input, Space, message } from 'antd'
 import { MessageOutlined } from '@ant-design/icons'
 import type { AiPatchResult, AiPatchTarget } from '../../../types'
-import { getErrorMessage } from '@/utils/user-facing-message'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import './ai-patch-editor.css'
 
 interface AiPatchEditorProps {
@@ -41,7 +41,7 @@ export default function AiPatchEditor({
       const next = await window.electron.aiPatch.suggest({ target, instruction: instruction.trim() })
       setResult(next)
       if (next.changedFields.length === 0) {
-        message.warning('AI 没有生成可应用字段修改。')
+        message.warning(getUserFacingMessage('aiPatch.noApplicableChanges'))
       }
     } catch (error) {
       console.error(error)
@@ -59,7 +59,7 @@ export default function AiPatchEditor({
       await onApplied?.(applied, result)
       setResult(null)
       setInstruction('')
-      message.success('已应用 AI 修改。')
+      message.success(getUserFacingMessage('aiPatch.applied'))
     } catch (error) {
       console.error(error)
       message.error(getErrorMessage(error, 'common.saveFailed'))

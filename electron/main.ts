@@ -1108,27 +1108,42 @@ function registerIpcHandlers() {
 
   handle('model:list', () => {
     const db = getDb()
-    return db.select().from(modelConfigs).all().map((config) => ({
-      ...config,
-      temperature: modelService.normalizeModelTemperature(config.temperature, config.provider),
-      maxTokens: modelService.normalizeModelMaxTokens(config.maxTokens, config.provider),
-      maxConcurrency: modelService.normalizeModelConcurrency(config.maxConcurrency),
-      maxContextTokens: modelService.normalizeModelContextTokens(config.maxContextTokens),
-      apiKey: config.apiKey ? '已设置' : '',
-    }))
+    return db.select().from(modelConfigs).all().map((config) => {
+      const provider = modelService.normalizeModelProvider(config.provider)
+      return {
+        ...config,
+        provider,
+        temperature: modelService.normalizeModelTemperature(config.temperature, provider),
+        maxTokens: modelService.normalizeModelMaxTokens(config.maxTokens, provider),
+        maxConcurrency: modelService.normalizeModelConcurrency(config.maxConcurrency),
+        maxContextTokens: modelService.normalizeModelContextTokensForModel(config.maxContextTokens, provider, config.modelId),
+        extraParamsJson: modelService.normalizeModelExtraParamsJson(config.extraParamsJson, provider),
+        apiKey: config.apiKey ? '已设置' : '',
+      }
+    })
   })
 
   handle('model:create', (_, data) => {
     requireObject(data, 'data')
     const db = getDb()
+    const provider = modelService.normalizeModelProvider(data.provider)
+    if (!modelService.isSupportedModelProvider(provider)) {
+      throwUserFacingError('model.unknownProvider', { provider })
+    }
+    if (provider !== 'custom' && (!data.apiKey || data.apiKey === '已设置')) {
+      throwUserFacingError('model.apiKeyRequired')
+    }
+    delete data.kimiThinking
     const encryptedKey = data.apiKey ? encryptApiKey(data.apiKey) : null
-    const provider = typeof data.provider === 'string' ? data.provider : 'openai'
     const result = db.insert(modelConfigs).values({
       ...data,
+      provider,
+      baseUrl: modelService.normalizeModelBaseUrl(data.baseUrl, provider),
       temperature: modelService.normalizeModelTemperature(data.temperature, provider),
       maxTokens: modelService.normalizeModelMaxTokens(data.maxTokens, provider),
-      maxContextTokens: modelService.normalizeModelContextTokens(data.maxContextTokens),
+      maxContextTokens: modelService.normalizeModelContextTokensForModel(data.maxContextTokens, provider, data.modelId),
       maxConcurrency: modelService.normalizeModelConcurrency(data.maxConcurrency),
+      extraParamsJson: modelService.normalizeModelExtraParamsJson(data.extraParamsJson, provider),
       apiKey: encryptedKey,
     }).run()
     return Number(result.lastInsertRowid)
@@ -1139,13 +1154,34 @@ function registerIpcHandlers() {
     requireObject(data, 'data')
     const db = getDb()
     const existing = db.select().from(modelConfigs).where(eq(modelConfigs.id, id)).all()[0]
-    const provider = typeof data.provider === 'string'
-      ? data.provider
-      : (existing?.provider || 'openai')
+    const provider = modelService.normalizeModelProvider(
+      typeof data.provider === 'string' ? data.provider : (existing?.provider || 'openai'),
+    )
+    if (!modelService.isSupportedModelProvider(provider)) {
+      throwUserFacingError('model.unknownProvider', { provider })
+    }
+    const existingProvider = modelService.normalizeModelProvider(existing?.provider || 'openai')
+    const providerChanged = Boolean(existing) && provider !== existingProvider
+    if (providerChanged && data.apiKey === '已设置') {
+      throwUserFacingError('model.providerChangeNeedsApiKey')
+    }
+    if (providerChanged && provider !== 'custom' && !data.apiKey) {
+      throwUserFacingError('model.apiKeyRequired')
+    }
+    if ('provider' in data || existing?.provider) {
+      data.provider = provider
+    }
+    if (providerChanged && !('baseUrl' in data)) {
+      data.baseUrl = modelService.normalizeModelBaseUrl(null, provider)
+    } else if ('baseUrl' in data) {
+      data.baseUrl = modelService.normalizeModelBaseUrl(data.baseUrl, provider)
+    }
     if (data.apiKey && data.apiKey !== '已设置') {
       data.apiKey = encryptApiKey(data.apiKey)
     } else if (data.apiKey === '已设置') {
       delete data.apiKey
+    } else if (data.apiKey === '') {
+      data.apiKey = null
     }
     if ('temperature' in data) {
       data.temperature = modelService.normalizeModelTemperature(data.temperature, provider)
@@ -1153,12 +1189,23 @@ function registerIpcHandlers() {
     if ('maxTokens' in data) {
       data.maxTokens = modelService.normalizeModelMaxTokens(data.maxTokens, provider)
     }
-    if ('maxContextTokens' in data) {
-      data.maxContextTokens = modelService.normalizeModelContextTokens(data.maxContextTokens)
+    if ('maxContextTokens' in data || providerChanged || 'modelId' in data) {
+      data.maxContextTokens = modelService.normalizeModelContextTokensForModel(
+        'maxContextTokens' in data ? data.maxContextTokens : existing?.maxContextTokens,
+        provider,
+        typeof data.modelId === 'string' ? data.modelId : existing?.modelId,
+      )
     }
     if ('maxConcurrency' in data) {
       data.maxConcurrency = modelService.normalizeModelConcurrency(data.maxConcurrency)
     }
+    if (providerChanged || 'extraParamsJson' in data) {
+      data.extraParamsJson = modelService.normalizeModelExtraParamsJson(
+        'extraParamsJson' in data ? data.extraParamsJson : existing?.extraParamsJson,
+        provider,
+      )
+    }
+    delete data.kimiThinking
     db.update(modelConfigs).set(data).where(eq(modelConfigs.id, id)).run()
   })
 

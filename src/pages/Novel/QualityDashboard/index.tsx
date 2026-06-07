@@ -311,9 +311,9 @@ async function copySoakCommand(command: string): Promise<void> {
   try {
     if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable')
     await navigator.clipboard.writeText(command)
-    message.success('命令已复制')
+    message.success(getUserFacingMessage('qualityDashboard.commandCopied'))
   } catch {
-    message.warning('当前环境不能写剪贴板，请手动复制命令。')
+    message.warning(getUserFacingMessage('qualityDashboard.clipboardUnavailable'))
   }
 }
 
