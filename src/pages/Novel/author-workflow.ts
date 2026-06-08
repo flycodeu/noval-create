@@ -170,13 +170,13 @@ function resolveQuickStartPrimaryTask(
 
   switch (recommendedStep) {
     case 'basics':
-      return createTask('basics', '补齐基础信息', '先把书名、简介、背景和目标字数钉住，后面的推荐才有可靠上下文。', 'overview', 5, ['项目立项', '世界规则', '首章启动'], '打开基础信息')
+      return createTask('basics', '建立项目总览', '先把书名、简介、背景和目标字数钉住，后面的推荐才有可靠上下文。', 'overview', 5, ['项目立项', '世界规则', '首章启动'], '打开项目总览')
     case 'project-brief':
-      return createTask('project-brief', '锁定项目立项', '先明确读者承诺、卖点和禁区，避免后续所有资产都往不同方向长。', 'project-brief', 8, ['基础设定', '主题与文风'], '打开项目立项')
+      return createTask('project-brief', '锁定项目 Brief', '先明确读者承诺、卖点和禁区，避免后续所有资产都往不同方向长。', 'project-brief', 8, ['故事底盘', '主题文风'], '打开项目 Brief')
     case 'story-core':
-      return createTask('story-core', '锁定基础设定', '主角起点、核心钩子和底层约束还没钉住，现在补这一步最能降低后续发散。', 'core-settings', 8, ['世界规则', '角色生成'], '打开基础设定')
+      return createTask('story-core', '锁定故事底盘', '主角起点、核心钩子和底层约束还没钉住，现在补这一步最能降低后续发散。', 'core-settings', 8, ['世界规则', '角色生成'], '打开故事底盘')
     case 'theme-voice':
-      return createTask('theme-voice', '锁定主题与文风', '先把主题、情绪核心、视角和对白边界压稳，正文和资产才不会越写越散。', 'theme-voice', 8, ['正文口径', '审校基线'], '打开主题与文风')
+      return createTask('theme-voice', '锁定主题文风', '先把主题、情绪核心、视角和对白边界压稳，正文和资产才不会越写越散。', 'theme-voice', 8, ['正文口径', '审校基线'], '打开主题文风')
     case 'world-foundation':
       return createTask('world-foundation', '同步世界规则', '当前题材规则、时间制度和世界边界还未统一，后续生成会失去底层口径。', 'world-rules', 6, ['地图结构', '物品与角色生成'], '打开世界规则')
     case 'endgame-design':
@@ -186,16 +186,22 @@ function resolveQuickStartPrimaryTask(
     case 'items-equipment':
       return createTask('items-equipment', '生成首批物品', '先把资源流通链和关键道具铺出来，后面的角色和冲突才有具体抓手。', 'items', 8, ['角色生成', '事件冲突'], '打开物品装备')
     case 'character-roster':
-      return createTask('character-roster', '生成人物网络', '当前缺少主角之外的关键人物关系，正文会很快只剩主角独走。', 'characters', 10, ['故事线程', '冲突关系'], '打开角色系统')
+      return createTask('character-roster', '建立角色网络', '当前缺少主角之外的关键人物关系，正文会很快只剩主角独走。', 'characters', 10, ['故事线程', '冲突关系'], '打开角色网络')
+    case 'resistance-system':
+      return createTask('resistance-lines', '建立阻力系统', '人物网络已有雏形后，先把关系、环境、制度阻力压成可持续压力，后面的线程和大纲才不会变成流水账。', 'resistance', 10, ['故事线程', '章节冲突'], '打开阻力系统')
     case 'story-threads':
-      return createTask('story-threads', '生成故事线程', '主线、支线和伏笔还没挂成可追踪线程，结构和正文都缺统一锚点。', 'threads', 8, ['故事设计', '伏笔回收'], '打开故事线程')
+      return createTask('story-threads', '串联故事线程', '主线、支线和伏笔还没挂成可追踪线程，结构和正文都缺统一锚点。', 'threads', 8, ['主线骨架', '伏笔回收'], '打开故事线程')
     case 'story-plot':
-      return createTask('story-plot', '生成故事设计', '现在最缺的是主线目标、核心冲突和结局方向的统一骨架。', 'story-design', 10, ['大纲', '卷级设计'], '打开故事设计')
+      return createTask('story-plot', '压出主线骨架', '现在最缺的是主线目标、核心冲突和结局方向的统一骨架。', 'story-design', 10, ['大纲', '卷级设计'], '打开故事设计')
     case 'volume-planning':
-      return createTask('volume-planning', '补第一卷设计', '卷级目标和闭环尚未成型，先补第一卷结构比继续堆资产更值钱。', 'volume-design', 12, ['结构规划', '章节合同'], '打开卷级设计')
+      return createTask('volume-planning', '设计第一卷闭环', '卷级目标和闭环尚未成型，先补第一卷结构比继续堆资产更值钱。', 'volume-design', 12, ['结构规划', '章节合同'], '打开卷级设计')
+    case 'outline-structure':
+      return createTask('outline-structure', '拆出故事大纲', '主线和卷级闭环已经有基础，下一步要把它们拆成可承接的故事弧。', 'outline', 12, ['时间轴', '正文'], '打开故事大纲')
+    case 'timeline-causality':
+      return createTask('timeline-causality', '校准事件时间轴', '大纲已有骨架，但事件先后和因果锚点还没钉住，直接写正文会增加连续性返工。', 'timeline', 10, ['正文承接', '回写闭环'], '打开时间轴')
     case 'write-start':
     default:
-      return createTask('write-start', '创建并开始第一章', '当前底盘已经具备可写条件，最有价值的下一步是尽快进入首章而不是继续补页面。', 'writing', 15, ['正文草稿', '日更推进'], '进入正文写作')
+      return createTask('write-start', '进入首章生产', '当前底盘已经具备可写条件，最有价值的下一步是尽快进入首章而不是继续补页面。', 'writing', 15, ['正文草稿', '日更推进'], '进入正文写作')
   }
 }
 

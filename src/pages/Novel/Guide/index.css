@@ -21,6 +21,13 @@
   color: var(--text-secondary);
 }
 
+.novel-guide-page__mode-reason {
+  max-width: 860px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
 .novel-guide-page__phase-tags,
 .novel-guide-page__mode-row {
   display: flex;

@@ -6,11 +6,12 @@ interface Props {
   children: React.ReactNode
 }
 
-export default function EditorRoute({ title = '正文生产', subtitle: _subtitle = '章节合同、编辑器与执行状态', children }: Props) {
+export default function EditorRoute({ title = '本章焦点', subtitle = '合同、场景、约束与承接信息', children }: Props) {
   return (
     <section className="writing-route-view writing-route-view--editor" data-route="editor">
       <header className="writing-route-view__header">
         <strong>{title}</strong>
+        {subtitle ? <span>{subtitle}</span> : null}
       </header>
       <div className="writing-route-view__body">
         {children}

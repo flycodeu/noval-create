@@ -12,6 +12,10 @@ const guideSource = fs.readFileSync(
   'utf8',
 )
 
+function findStepKeyIndex(source: string, key: string) {
+  return source.search(new RegExp(`key:\\s*['"]${key}['"]`))
+}
+
 describe('novel workflow ordering', () => {
   it('keeps items ahead of characters in the guided step order', () => {
     const guidedOrder = workflowSource.slice(
@@ -44,7 +48,11 @@ describe('novel workflow ordering', () => {
 
     expect(pipelineSection.indexOf("ensureStepReady('items')"))
       .toBeLessThan(pipelineSection.indexOf("ensureStepReady('characters')"))
-    expect(stepsSection.indexOf("key: 'items'"))
-      .toBeLessThan(stepsSection.indexOf("key: 'characters'"))
+    const itemStepIndex = findStepKeyIndex(stepsSection, 'items-equipment')
+    const characterStepIndex = findStepKeyIndex(stepsSection, 'character-roster')
+
+    expect(itemStepIndex).toBeGreaterThanOrEqual(0)
+    expect(characterStepIndex).toBeGreaterThanOrEqual(0)
+    expect(itemStepIndex).toBeLessThan(characterStepIndex)
   })
 })

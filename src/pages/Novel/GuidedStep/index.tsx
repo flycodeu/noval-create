@@ -60,67 +60,82 @@ type BasicsAssistantPatch = StepAIAssistantPatch & Partial<BasicsFormValues>
 
 const STEP_META: Record<GuidedWorkflowStepKey, { eyebrow: string; title: string; description: string }> = {
   basics: {
-    eyebrow: '第 1 步 / 13',
+    eyebrow: '第 1 步 / 16',
     title: '先把作品底盘说清楚',
     description: '维护书名、简介和背景。',
   },
   'project-brief': {
-    eyebrow: '第 2 步 / 13',
+    eyebrow: '第 2 步 / 16',
     title: '先统一这本书的产品定义',
     description: '先写清服务谁、承诺什么、靠什么被点开，以及哪些东西绝对不能写偏。',
   },
   'story-core': {
-    eyebrow: '第 3 步 / 13',
+    eyebrow: '第 3 步 / 16',
     title: '基础设定先钉住',
     description: '先写基础设定、主角起点和底层约束，不提前写剧情。',
   },
   'theme-voice': {
-    eyebrow: '第 4 步 / 13',
+    eyebrow: '第 4 步 / 16',
     title: '把主题与文风钉成硬规则',
     description: '先固定主题、情感核心、视角、时态和语言禁区，减少口吻漂移与 AI 腔。',
   },
   'world-foundation': {
-    eyebrow: '第 5 步 / 13',
+    eyebrow: '第 5 步 / 16',
     title: '统一世界规则口径',
     description: '先把时间、势力、语言边界和题材规则定稳。',
   },
   'endgame-design': {
-    eyebrow: '第 6 步 / 13',
+    eyebrow: '第 6 步 / 16',
     title: '先把终局落点锁住',
     description: '先确定最终冲突、兑现承诺和最后一幕，再让后续资产和结构往同一个终点收束。',
   },
   'map-structure': {
-    eyebrow: '第 7 步 / 13',
+    eyebrow: '第 7 步 / 16',
     title: '先搭地点骨架',
     description: '先让人物和事件有真实落点，再去细化情节。',
   },
   'character-roster': {
-    eyebrow: '第 8 步 / 13',
+    eyebrow: '第 8 步 / 16',
     title: '补齐关键角色',
     description: '主角和关键对位角色先落地，别让剧情靠空气推进。',
   },
   'items-equipment': {
-    eyebrow: '第 9 步 / 13',
+    eyebrow: '第 9 步 / 16',
     title: '补关键物品与资源',
     description: '道具、资源和装备必须服务冲突，不是事后装饰。',
   },
+  'resistance-system': {
+    eyebrow: '第 10 步 / 16',
+    title: '把阻力系统落成可验证压力',
+    description: '对手、环境、制度和关系压力要能持续制造选择成本，不能只写成背景名词。',
+  },
   'story-threads': {
-    eyebrow: '第 10 步 / 13',
+    eyebrow: '第 11 步 / 16',
     title: '把长线推进整理成线程',
     description: '主线、支线、悬念和关系线都要挂成可追踪线程，后面的结构和正文才不会失忆。',
   },
   'story-plot': {
-    eyebrow: '第 11 步 / 13',
+    eyebrow: '第 12 步 / 16',
     title: '现在再做故事设计',
     description: '资产到位之后，再统一设计主线、支线、节奏和结局。',
   },
   'volume-planning': {
-    eyebrow: '第 12 步 / 13',
+    eyebrow: '第 13 步 / 16',
     title: '拆卷规划，分配节奏',
     description: '百万字长篇必须先拆卷，每卷有独立高潮和阶段目标，才不会写到中段失控。',
   },
+  'outline-structure': {
+    eyebrow: '第 14 步 / 16',
+    title: '拆出可承接的故事大纲',
+    description: '把主线和卷级闭环拆成故事弧、章节承接和推进骨架，避免正文阶段临场拼接。',
+  },
+  'timeline-causality': {
+    eyebrow: '第 15 步 / 16',
+    title: '校准时间线和因果锚点',
+    description: '把关键事件的先后、触发条件和状态变化钉住，减少后续连续性返工。',
+  },
   'write-start': {
-    eyebrow: '第 13 步 / 13',
+    eyebrow: '第 16 步 / 16',
     title: '转入结构与写作',
     description: '有了骨架和资产后，再进入结构页、时间轴和正文页。',
   },

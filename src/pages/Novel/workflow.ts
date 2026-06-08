@@ -25,6 +25,7 @@ export type WorkflowRecommendationKey =
   | 'threads'
   | 'scene-templates'
   | 'outline'
+  | 'volume-design'
   | 'structure'
   | 'timeline'
   | 'writing'
@@ -38,11 +39,14 @@ export type GuidedWorkflowStepKey =
   | 'world-foundation'
   | 'endgame-design'
   | 'map-structure'
-  | 'character-roster'
   | 'items-equipment'
+  | 'character-roster'
+  | 'resistance-system'
   | 'story-threads'
   | 'story-plot'
   | 'volume-planning'
+  | 'outline-structure'
+  | 'timeline-causality'
   | 'write-start'
 
 export type WorkflowRunnableStepKey =
@@ -66,6 +70,13 @@ export interface GuidedStepProgress {
   completedCount: number
   totalCount: number
   isComplete: boolean
+}
+
+export interface GuidedWorkflowPhaseDefinition {
+  key: 'foundation' | 'world-cast' | 'plot-architecture' | 'chapter-production'
+  title: string
+  summary: string
+  stepKeys: GuidedWorkflowStepKey[]
 }
 
 type WorkflowNovelContext = Pick<
@@ -93,10 +104,78 @@ export const GUIDED_STEP_ORDER: GuidedWorkflowStepKey[] = [
   'map-structure',
   'items-equipment',
   'character-roster',
+  'resistance-system',
   'story-threads',
   'story-plot',
   'volume-planning',
+  'outline-structure',
+  'timeline-causality',
   'write-start',
+]
+
+export const GUIDED_STEP_LABELS: Record<GuidedWorkflowStepKey, string> = {
+  basics: '项目总览',
+  'project-brief': '项目 Brief',
+  'story-core': '故事底盘',
+  'theme-voice': '主题文风',
+  'world-foundation': '世界规则',
+  'endgame-design': '终局承诺',
+  'map-structure': '地图落点',
+  'items-equipment': '资源道具',
+  'character-roster': '角色网络',
+  'resistance-system': '阻力系统',
+  'story-threads': '故事线程',
+  'story-plot': '主线骨架',
+  'volume-planning': '卷级闭环',
+  'outline-structure': '故事大纲',
+  'timeline-causality': '事件时间轴',
+  'write-start': '首章生产',
+}
+
+export const GUIDED_STEP_TARGET_ROUTE: Record<GuidedWorkflowStepKey, string> = {
+  basics: 'overview',
+  'project-brief': 'project-brief',
+  'story-core': 'core-settings',
+  'theme-voice': 'theme-voice',
+  'world-foundation': 'world-rules',
+  'endgame-design': 'endgame',
+  'map-structure': 'map',
+  'items-equipment': 'items',
+  'character-roster': 'characters',
+  'resistance-system': 'resistance',
+  'story-threads': 'threads',
+  'story-plot': 'story-design',
+  'volume-planning': 'volume-design',
+  'outline-structure': 'outline',
+  'timeline-causality': 'timeline',
+  'write-start': 'writing/editor',
+}
+
+export const GUIDED_WORKFLOW_PHASES: GuidedWorkflowPhaseDefinition[] = [
+  {
+    key: 'foundation',
+    title: '立项定标',
+    summary: '先锁读者承诺、故事底盘、文风、世界规则和终局承诺。',
+    stepKeys: ['basics', 'project-brief', 'story-core', 'theme-voice', 'world-foundation', 'endgame-design'],
+  },
+  {
+    key: 'world-cast',
+    title: '世界与角色',
+    summary: '把地点、资源、人物和阻力线落成可被剧情调用的资产。',
+    stepKeys: ['map-structure', 'items-equipment', 'character-roster', 'resistance-system'],
+  },
+  {
+    key: 'plot-architecture',
+    title: '剧情结构',
+    summary: '把资产压进线程、主线、卷级闭环、大纲和时间因果。',
+    stepKeys: ['story-threads', 'story-plot', 'volume-planning', 'outline-structure', 'timeline-causality'],
+  },
+  {
+    key: 'chapter-production',
+    title: '卷章生产',
+    summary: '在结构可写后进入章节合同、正文和章后回写。',
+    stepKeys: ['write-start'],
+  },
 ]
 
 export async function loadWorkflowStats(novelId: number): Promise<WorkflowStats> {
@@ -483,6 +562,11 @@ export function getGuidedStepProgressMap(
       totalCount: 4,
       isComplete: isCharacterRosterReady(stats),
     },
+    'resistance-system': {
+      completedCount: stats.resistanceTrackCount > 0 ? 1 : 0,
+      totalCount: 1,
+      isComplete: isResistanceSystemReady(stats),
+    },
     'items-equipment': {
       completedCount: stats.itemCount > 0 ? 1 : 0,
       totalCount: 1,
@@ -502,6 +586,16 @@ export function getGuidedStepProgressMap(
       completedCount: stats.volumeCount > 0 ? 1 : 0,
       totalCount: 1,
       isComplete: stats.volumeCount > 0,
+    },
+    'outline-structure': {
+      completedCount: stats.outlineCount > 0 ? 1 : 0,
+      totalCount: 1,
+      isComplete: stats.outlineCount > 0,
+    },
+    'timeline-causality': {
+      completedCount: stats.timelineCount > 0 ? 1 : 0,
+      totalCount: 1,
+      isComplete: stats.timelineCount > 0,
     },
     'write-start': {
       completedCount: writingProgress,
@@ -524,9 +618,12 @@ export function getRecommendedGuidedWorkflowStep(
   if (!isMapStructureReady(stats)) return 'map-structure'
   if (!isItemsEquipmentReady(stats)) return 'items-equipment'
   if (!isCharacterRosterReady(stats)) return 'character-roster'
+  if (!isResistanceSystemReady(stats)) return 'resistance-system'
   if (!isStoryThreadsReady(stats)) return 'story-threads'
   if (!isStoryPlotReady(novel)) return 'story-plot'
   if (!isVolumePlanningReady(stats)) return 'volume-planning'
+  if (stats.outlineCount <= 0) return 'outline-structure'
+  if (stats.timelineCount <= 0) return 'timeline-causality'
   return 'write-start'
 }
 
@@ -546,6 +643,7 @@ export function getRecommendedWorkflowStep(
   if (stats.resistanceTrackCount <= 0) return 'resistance'
   if (stats.threadCount <= 0) return 'threads'
   if (!isStoryPlotReady(novel)) return 'story-design'
+  if (stats.volumeCount <= 0) return 'volume-design'
   if (stats.outlineCount <= 0) return 'outline'
   if (stats.timelineCount <= 0) return 'timeline'
   if (stats.chapterCount <= 0 && stats.totalWords <= 0) return 'writing'

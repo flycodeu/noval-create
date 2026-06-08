@@ -9,6 +9,7 @@ import {
 } from '@ant-design/icons'
 import type {
   ModelConfig,
+  SourceSearchProviderMode,
   SourceSearchSettingsUpdate,
   SourceSearchSettingsView,
   SourceSearchTestResult,
@@ -44,6 +45,24 @@ const SOURCE_PROVIDER_OPTIONS = [
   { value: 'brave', label: 'Brave Search' },
   { value: 'disabled', label: '关闭来源检索' },
 ]
+const SOURCE_PROVIDER_GUIDE: Record<SourceSearchProviderMode, { title: string; detail: string }> = {
+  auto: {
+    title: '自动选择可用检索',
+    detail: '优先使用环境变量中的 key，其次使用本页保存的 key。适合同时准备 Tavily 与 Brave，运行时按可用性选择。',
+  },
+  tavily: {
+    title: '固定使用 Tavily',
+    detail: '只调用 Tavily Search API。请求头使用 Authorization: Bearer，适合需要网页摘要和来源 grounding 的写作流程。',
+  },
+  brave: {
+    title: '固定使用 Brave Search',
+    detail: '只调用 Brave Search API。请求头使用 X-Subscription-Token，适合需要通用网页检索结果的场景。',
+  },
+  disabled: {
+    title: '关闭来源检索',
+    detail: '不会读取环境变量或已保存 key，历史、行业、制度和法律类内容不再自动补充网页资料。',
+  },
+}
 
 function providerRequiresApiKey(provider?: string): boolean {
   return provider !== 'custom'
@@ -106,6 +125,13 @@ function getSourceProviderLabel(provider?: string | null) {
   if (provider === 'brave') return 'Brave'
   if (provider === 'disabled') return '已关闭'
   return '自动'
+}
+
+function getSourceKeyStatus(saved?: boolean, env?: boolean) {
+  if (saved && env) return '已保存 + 环境变量'
+  if (saved) return '已保存'
+  if (env) return '环境变量'
+  return '未配置'
 }
 
 export default function ModelManager() {
@@ -298,6 +324,8 @@ export default function ModelManager() {
   const currentProviderModels = PROVIDER_OPTIONS.find(p => p.value === selectedProvider)?.models || []
   const fixedTemperatureKimiModel = selectedProvider === 'kimi' && (selectedModelId === 'kimi-k2.6' || selectedModelId === 'kimi-k2.5')
   const selectedDefaultContextWindow = getProviderDefaultContextWindow(selectedProvider, selectedModelId)
+  const currentSourceMode = (selectedSourceProvider || sourceSettings?.provider || 'auto') as SourceSearchProviderMode
+  const sourceGuide = SOURCE_PROVIDER_GUIDE[currentSourceMode]
   const defaultCount = configs.filter((config) => config.isDefault === 1).length
   const providerCount = new Set(configs.map((config) => config.provider)).size
   const activeSourceLabel = sourceSettings?.activeProvider
@@ -309,9 +337,9 @@ export default function ModelManager() {
       className="admin-page model-manager-page"
       layout="wide"
       heroVariant="compact"
-      eyebrow="模型与连接"
-      title="模型管理"
-      description="集中维护模型提供商、上下文窗口、默认配置和连接测试。左侧看配置清单，右侧编辑可立即生效的运行参数。"
+      eyebrow="模型 / 检索"
+      title="模型与搜索管理"
+      description="集中维护模型提供商、上下文窗口、来源检索 key 和连接测试。模型决定生成质量，来源检索决定真实资料 grounding 是否可用。"
       actions={(
         <div className="admin-toolbar">
           <div className="novel-pill">{`已配置 ${configs.length} 套模型，默认 ${defaultCount} 套`}</div>
@@ -327,7 +355,7 @@ export default function ModelManager() {
           <WorkspaceMetric label="模型配置" value={configs.length} tone="cool" />
           <WorkspaceMetric label="默认配置" value={defaultCount} />
           <WorkspaceMetric label="接入厂商" value={providerCount} tone="warm" />
-          <WorkspaceMetric label="当前状态" value={selected || isNew ? '正在编辑' : '待选择'} />
+          <WorkspaceMetric label="来源检索" value={activeSourceLabel} />
         </>
       )}
     >
@@ -558,42 +586,73 @@ export default function ModelManager() {
       </div>
 
       <WorkspacePanel
-        title="来源检索配置"
+        className="model-manager-source-panel"
+        title="来源检索与 API Key"
         description="为真实资料 grounding 配置 Tavily 或 Brave Search。"
       >
-        <div className="admin-detail-stack">
+        <div className="admin-detail-stack source-search-config">
+          <div className="source-search-config__summary">
+            <div className="source-search-config__summary-copy">
+              <span className="source-search-config__eyebrow">真实资料 grounding</span>
+              <strong>{sourceGuide.title}</strong>
+              <p>{sourceGuide.detail}</p>
+            </div>
+            <div className="source-search-config__status-grid">
+              <div className="source-search-config__status">
+                <span>当前模式</span>
+                <strong>{getSourceProviderLabel(sourceSettings?.provider)}</strong>
+              </div>
+              <div className="source-search-config__status">
+                <span>运行 provider</span>
+                <strong>{activeSourceLabel}</strong>
+              </div>
+              <div className="source-search-config__status">
+                <span>Tavily Key</span>
+                <strong>{getSourceKeyStatus(sourceSettings?.tavilyApiKeySet, sourceSettings?.tavilyEnvSet)}</strong>
+              </div>
+              <div className="source-search-config__status">
+                <span>Brave Key</span>
+                <strong>{getSourceKeyStatus(sourceSettings?.braveApiKeySet, sourceSettings?.braveEnvSet)}</strong>
+              </div>
+            </div>
+          </div>
+
           <Alert
             type="info"
             showIcon
-            message="用于真实资料 grounding"
-            description="Tavily Search API 使用 Authorization: Bearer；Brave Search 使用 X-Subscription-Token。保存后，历史、现实行业、制度和法律类内容会优先调用这里的网页检索配置。"
+            message="API Key 配置入口"
+            description="Tavily 使用 Authorization: Bearer；Brave 使用 X-Subscription-Token。输入“已设置”会保留原 key，清空输入框会删除保存的 key；环境变量只作为运行时兜底，不会被写入数据库。"
           />
-          <div className="admin-toolbar">
-            <div className="novel-pill">{`当前模式：${getSourceProviderLabel(sourceSettings?.provider)}`}</div>
-            <div className="novel-pill">{`运行 provider：${activeSourceLabel}`}</div>
-            {sourceSettings?.tavilyEnvSet ? <div className="novel-pill">TAVILY_API_KEY 已从环境变量读取</div> : null}
-            {sourceSettings?.braveEnvSet ? <div className="novel-pill">BRAVE_SEARCH_API_KEY 已从环境变量读取</div> : null}
-          </div>
-          <Form form={sourceForm} layout="vertical">
-            <div className="admin-form-grid admin-form-grid--three">
+
+          <Form form={sourceForm} layout="vertical" className="admin-source-form">
+            <div className="admin-form-grid admin-form-grid--source">
               <Form.Item name="provider" label="检索 provider" initialValue="auto">
                 <Select options={SOURCE_PROVIDER_OPTIONS} />
               </Form.Item>
-              <Form.Item name="tavilyApiKey" label="Tavily API Key">
+              <Form.Item
+                name="tavilyApiKey"
+                label="Tavily API Key"
+                extra={sourceSettings?.tavilyEnvSet ? '已检测到环境变量 TAVILY_API_KEY；保存 key 后可脱离环境变量运行。' : '用于 Tavily Search API，保存后会加密存储。'}
+              >
                 <Input.Password
-                  disabled={selectedSourceProvider === 'disabled'}
+                  disabled={currentSourceMode === 'disabled'}
                   placeholder={sourceSettings?.tavilyApiKeySet ? MASKED_KEY : '输入 Tavily API Key'}
                 />
               </Form.Item>
-              <Form.Item name="braveApiKey" label="Brave Search API Key">
+              <Form.Item
+                name="braveApiKey"
+                label="Brave Search API Key"
+                extra={sourceSettings?.braveEnvSet ? '已检测到环境变量 BRAVE_SEARCH_API_KEY；保存 key 后可脱离环境变量运行。' : '用于 Brave Web Search API，保存后会加密存储。'}
+              >
                 <Input.Password
-                  disabled={selectedSourceProvider === 'disabled'}
+                  disabled={currentSourceMode === 'disabled'}
                   placeholder={sourceSettings?.braveApiKeySet ? MASKED_KEY : '输入 Brave Search API Key'}
                 />
               </Form.Item>
             </div>
           </Form>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+
+          <div className="source-search-config__actions">
             <Button type="primary" loading={sourceSaving} onClick={() => void handleSourceSave()}>
               保存来源检索
             </Button>
@@ -601,7 +660,7 @@ export default function ModelManager() {
               测试已保存配置
             </Button>
             {sourceTestResult ? (
-              <span style={{ color: sourceTestResult.success ? '#52c41a' : '#ff4d4f' }}>
+              <span className={`source-search-config__test-result${sourceTestResult.success ? ' is-success' : ' is-error'}`}>
                 {sourceTestResult.success
                   ? `${getSourceProviderLabel(sourceTestResult.providerName)} 连接成功 · ${sourceTestResult.latency}ms · ${sourceTestResult.info}`
                   : sourceTestResult.info}

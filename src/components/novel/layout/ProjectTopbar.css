@@ -202,6 +202,7 @@
   color: var(--project-topbar-text-soft);
   font-size: 13px;
   font-weight: 600;
+  white-space: nowrap;
   cursor: pointer;
   transition: background var(--transition-fast), color var(--transition-fast);
 }
@@ -226,6 +227,7 @@
   color: var(--project-topbar-text);
   font-size: 13px;
   font-weight: 600;
+  white-space: nowrap;
   box-shadow: none;
 }
 

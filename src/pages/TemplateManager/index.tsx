@@ -3,6 +3,7 @@ import {
   Alert, Tabs, Button, Modal, Form, Input, Select, Card, Tag, message, Empty, Skeleton, Spin
 } from 'antd'
 import { PlusOutlined, DeleteOutlined, EditOutlined, EyeOutlined, LockOutlined, ReloadOutlined } from '@ant-design/icons'
+import { useNavigate } from 'react-router-dom'
 import { Template } from '../../types'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../Novel/components/WorkspaceShell'
@@ -10,6 +11,31 @@ import { WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../Novel/compone
 const TYPE_LABELS: Record<string, string> = {
   style: '文风模板',
   world: '世界观模板',
+}
+const TEMPLATE_USAGE: Record<string, {
+  entry: string
+  appliedTo: string
+  cardMeta: string
+  fieldGuide: string
+  modalDescription: string
+  placeholder: string
+}> = {
+  style: {
+    entry: '新建小说弹窗的「文风模板」下拉框',
+    appliedTo: '正文写作、章节改写和上下文组装中的「文风参考」',
+    cardMeta: '开书入口 / 正文文风参考',
+    fieldGuide: '推荐字段：perspective、sentence_style、emotion_style、dialogue_style、description_style、forbidden、example_tone。',
+    modalDescription: '文风模板会在开书时绑定到小说，后续正文生成会把它作为文风参考，而不是替代提示词页的运行 prompt。',
+    placeholder: '{\n  "perspective": "第三人称近距",\n  "sentence_style": "短句推进，少空泛总结",\n  "forbidden": ["空泛燃句", "模板化情绪"]\n}',
+  },
+  world: {
+    entry: '新建小说弹窗的「世界模板」下拉框',
+    appliedTo: '背景生成、世界摘要和章节上下文中的「世界底板」',
+    cardMeta: '开书入口 / 世界观底板',
+    fieldGuide: '推荐字段：time_period、technology_level、social_structure、common_elements、forbidden_elements。',
+    modalDescription: '世界观模板会在开书时绑定到小说，后续背景和章节上下文会读取它作为世界底板，避免设定悬浮。',
+    placeholder: '{\n  "time_period": "当代",\n  "technology_level": "现代城市基础设施",\n  "common_elements": ["职场压力", "社交媒体"]\n}',
+  },
 }
 
 function summarizeTemplateContent(contentJson?: string) {
@@ -35,6 +61,7 @@ function summarizeTemplateContent(contentJson?: string) {
 }
 
 export default function TemplateManager() {
+  const navigate = useNavigate()
   const [templates, setTemplates] = useState<Template[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -68,6 +95,9 @@ export default function TemplateManager() {
   const filteredTemplates = templates.filter(t => t.type === activeTab)
   const builtinCount = templates.filter((template) => template.isBuiltin === 1).length
   const customCount = templates.length - builtinCount
+  const activeUsage = TEMPLATE_USAGE[activeTab]
+  const editingType = Form.useWatch('type', form) || activeTab
+  const editingUsage = TEMPLATE_USAGE[editingType] || activeUsage
 
   const handleEdit = (tmpl: Template) => {
     let formattedContent = tmpl.contentJson || ''
@@ -161,6 +191,7 @@ export default function TemplateManager() {
         ) : (
           filteredTemplates.map((tmpl) => {
             const preview = summarizeTemplateContent(tmpl.contentJson)
+            const usage = TEMPLATE_USAGE[tmpl.type]
 
             return (
               <Card key={tmpl.id} className="template-manager-card">
@@ -174,7 +205,10 @@ export default function TemplateManager() {
                         <Tag className="template-manager-card__tag template-manager-card__tag--custom">自定义</Tag>
                       )}
                     </div>
-                    <div className="template-manager-card__meta">{TYPE_LABELS[tmpl.type] || tmpl.type}</div>
+                    <div className="template-manager-card__meta">
+                      {TYPE_LABELS[tmpl.type] || tmpl.type}
+                      {usage ? ` · ${usage.cardMeta}` : ''}
+                    </div>
                   </div>
                 </div>
                 <div className="template-manager-card__content">
@@ -222,11 +256,14 @@ export default function TemplateManager() {
         heroVariant="compact"
         eyebrow="开书底板"
         title="风格模板"
-        description="这里只维护新建小说时可选的文风模板和世界观模板；真正影响生成链路的运行时 prompt 在“提示词”页管理。"
+        description="维护新建小说时可选的文风与世界底板。模板先在开书弹窗绑定到小说，再进入上下文和正文写作参考；提示词页仍负责运行时 prompt。"
         actions={(
           <div className="admin-toolbar">
             <div className="novel-pill">{`当前查看：${TYPE_LABELS[activeTab]}`}</div>
             <div className="admin-toolbar__actions">
+              <Button onClick={() => navigate('/novels')}>
+                新建小说时选用
+              </Button>
               <Button icon={<ReloadOutlined />} loading={refreshing} onClick={() => void loadTemplates()}>
                 刷新模板
               </Button>
@@ -241,7 +278,7 @@ export default function TemplateManager() {
             <WorkspaceMetric label="模板总数" value={templates.length} tone="cool" />
             <WorkspaceMetric label="内置模板" value={builtinCount} />
             <WorkspaceMetric label="自定义模板" value={customCount} tone="warm" />
-            <WorkspaceMetric label="当前分类" value={TYPE_LABELS[activeTab]} />
+            <WorkspaceMetric label="应用入口" value="新建小说" />
           </>
         )}
       >
@@ -249,6 +286,20 @@ export default function TemplateManager() {
           title="模板目录"
           description="内置模板只读，自定义模板可以编辑或删除。模板用于开书阶段给文风和世界底板提供可复用约束。"
         >
+          <div className="template-usage-overview">
+            <div className="template-usage-overview__item">
+              <span>选择入口</span>
+              <strong>{activeUsage.entry}</strong>
+            </div>
+            <div className="template-usage-overview__item">
+              <span>生效位置</span>
+              <strong>{activeUsage.appliedTo}</strong>
+            </div>
+            <div className="template-usage-overview__item template-usage-overview__item--wide">
+              <span>编辑重点</span>
+              <strong>{activeUsage.fieldGuide}</strong>
+            </div>
+          </div>
           {refreshing ? (
             <div className="novel-dashboard__refresh-indicator" style={{ marginBottom: 16 }}>
               <Spin size="small" />
@@ -281,8 +332,15 @@ export default function TemplateManager() {
             description="内置模板为只读资源，可查看结构和内容，但不能直接编辑。"
           />
         ) : null}
+        <Alert
+          style={{ marginBottom: 16 }}
+          type="info"
+          showIcon
+          message={editingUsage.entry}
+          description={editingUsage.modalDescription}
+        />
         <Form form={form} layout="vertical">
-          <Form.Item name="name" label="模板名称" rules={[{ required: true }]}>
+          <Form.Item name="name" label="模板名称" rules={[{ required: true }]} extra="会显示在新建小说弹窗的模板下拉框里。">
             <Input disabled={editing?.isBuiltin === 1} />
           </Form.Item>
           <Form.Item name="type" label="模板类型">
@@ -291,14 +349,14 @@ export default function TemplateManager() {
               options={Object.entries(TYPE_LABELS).map(([k, v]) => ({ value: k, label: v }))}
             />
           </Form.Item>
-          <Form.Item name="description" label="描述">
+          <Form.Item name="description" label="描述" extra="用于列表卡片说明适用题材、节奏和约束。">
             <Input disabled={editing?.isBuiltin === 1} />
           </Form.Item>
-          <Form.Item name="contentJson" label="内容（JSON 格式）">
+          <Form.Item name="contentJson" label="内容（JSON 格式）" extra={editingUsage.fieldGuide}>
             <Input.TextArea
               rows={10}
               disabled={editing?.isBuiltin === 1}
-              placeholder='{"key": "value"}'
+              placeholder={editingUsage.placeholder}
               style={{ fontFamily: 'monospace', fontSize: 12 }}
             />
           </Form.Item>

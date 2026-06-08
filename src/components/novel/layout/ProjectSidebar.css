@@ -8,7 +8,7 @@
   --project-sidebar-text-muted: var(--text-muted);
   --project-sidebar-accent: var(--accent);
   display: grid;
-  gap: 14px;
+  gap: 12px;
   height: 100%;
   min-height: 0;
 }
@@ -17,7 +17,7 @@
 .project-sidebar__group,
 .project-sidebar__task-strip {
   border: 1px solid var(--project-sidebar-border);
-  border-radius: 18px;
+  border-radius: 12px;
   background: color-mix(in srgb, var(--project-sidebar-surface) 94%, transparent 6%);
   box-shadow: var(--shadow-card, 0 2px 8px rgba(0, 0, 0, 0.06));
 }
@@ -27,7 +27,7 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
-  padding: 16px;
+  padding: 14px;
 }
 
 .project-sidebar__summary-copy {
@@ -60,7 +60,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 12px 14px;
+  padding: 10px 12px;
   color: var(--project-sidebar-text-secondary);
   font-size: 12px;
   line-height: 1.5;
@@ -76,8 +76,8 @@
 
 .project-sidebar__group {
   display: grid;
-  gap: 8px;
-  padding: 10px;
+  gap: 6px;
+  padding: 8px;
 }
 
 .project-sidebar__group-toggle {
@@ -86,10 +86,10 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  min-height: 38px;
-  padding: 8px 10px;
+  min-height: 34px;
+  padding: 7px 8px;
   border: none;
-  border-radius: 12px;
+  border-radius: 8px;
   background: transparent;
   color: inherit;
   cursor: pointer;
@@ -103,7 +103,7 @@
 .project-sidebar__group-toggle-main,
 .project-sidebar__group-item-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
   min-width: 0;
 }
@@ -116,6 +116,20 @@
 .project-sidebar__group-toggle-icon {
   color: var(--project-sidebar-accent);
   line-height: 1.2;
+}
+
+.project-sidebar__group-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 20px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--project-sidebar-surface-hover) 78%, transparent 22%);
+  color: var(--project-sidebar-text-muted);
+  font-size: 10px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
 }
 
 .project-sidebar__group-title {
@@ -133,17 +147,17 @@
 
 .project-sidebar__group-items {
   display: grid;
-  gap: 6px;
+  gap: 4px;
 }
 
 .project-sidebar__group-item {
   position: relative;
   width: 100%;
   display: grid;
-  gap: 6px;
-  padding: 10px 12px 10px 14px;
+  gap: 4px;
+  padding: 9px 10px 9px 13px;
   border: 1px solid transparent;
-  border-radius: 14px;
+  border-radius: 8px;
   background: transparent;
   color: inherit;
   text-align: left;
@@ -196,7 +210,7 @@
   overflow: hidden;
   color: var(--project-sidebar-text);
   font-size: 13px;
-  line-height: 1.45;
+  line-height: 1.35;
   font-weight: 600;
   overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
@@ -207,7 +221,7 @@
   overflow: hidden;
   color: var(--project-sidebar-text-muted);
   font-size: 11px;
-  line-height: 1.45;
+  line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

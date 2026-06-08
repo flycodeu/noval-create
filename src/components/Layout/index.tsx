@@ -32,7 +32,7 @@ const menuItems = [
   {
     key: '/models',
     icon: <RobotOutlined />,
-    label: '模型管理',
+    label: '模型与搜索',
   },
   {
     key: '/templates',

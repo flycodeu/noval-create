@@ -28,6 +28,7 @@ import {
 } from '../shared/ai-draft'
 import { buildPlanningContextSections } from '../shared/planning-context'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
+import './index.css'
 
 interface Props {
   novelId: number
@@ -84,6 +85,24 @@ function getFindingSeverityLabel(severity: VolumeAuditFinding['severity']): stri
 
 function hasFilledValues(values: Array<string | undefined | null>): boolean {
   return values.some((value) => Boolean(value && value.trim()))
+}
+
+function getVolumeStatusLabel(status?: StoryStructureVolumeSummary['status']): string {
+  if (status === 'locked') return '已锁定'
+  if (status === 'draft') return '草稿'
+  return '规划中'
+}
+
+function getVolumeDesignCompletion(design?: VolumeDesignAsset | null): number {
+  if (!design) return 0
+  return [
+    design.volumeTheme,
+    design.volumePromise,
+    design.mainConflict,
+    design.climaxPlan,
+    design.endStateShift,
+    design.readerExpectation,
+  ].filter((item) => Boolean(item && item.trim())).length
 }
 
 export default function VolumeDesignPage({ novelId }: Props) {
@@ -274,6 +293,7 @@ export default function VolumeDesignPage({ novelId }: Props) {
       eyebrow="卷级设计中心"
       title="卷级设计中心"
       description="把终局承诺拆到各卷，让每卷都有自己的主题、闭环和必须服务的终局压力。"
+      className="volume-design-page"
       actions={(
         <Space wrap>
           <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>
@@ -355,20 +375,41 @@ export default function VolumeDesignPage({ novelId }: Props) {
         />
       ) : null}
 
-      <WorkspacePanel title="卷选择" description="每卷单独维护，避免全书级描述混入卷级目标。">
-        <Space wrap>
-          <Select
-            value={activeVolumeId ?? undefined}
-            onChange={(value) => setActiveVolumeId(value)}
-            className="workspace-control-240"
-            options={volumes.map((item) => ({
-              value: item.id,
-              label: `${item.title || `第${item.volumeNumber}卷`} · ${item.chapterCount}章`,
-            }))}
-            placeholder="选择要设计的卷"
-          />
-          {activeVolume ? <Tag color="blue">{`第${activeVolume.volumeNumber}卷 · ${activeVolume.chapterCount}章 · ${activeVolume.wordCount.toLocaleString()}字`}</Tag> : null}
-        </Space>
+      <WorkspacePanel title="卷章结构" className="volume-design-page__selector-panel">
+        {volumes.length > 0 ? (
+          <div className="volume-design-page__volume-grid">
+            {volumes.map((item) => {
+              const design = designs.find((row) => row.volumeId === item.id) || null
+              const completion = getVolumeDesignCompletion(design)
+              const isActive = item.id === activeVolumeId
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={`volume-design-page__volume-card${isActive ? ' is-active' : ''}`}
+                  onClick={() => setActiveVolumeId(item.id)}
+                >
+                  <span className="volume-design-page__volume-index">{`第 ${item.volumeNumber} 卷`}</span>
+                  <strong>{item.title || `第${item.volumeNumber}卷`}</strong>
+                  <span>{`${item.chapterCount} 章 · ${item.wordCount.toLocaleString()} 字`}</span>
+                  <div className="volume-design-page__volume-tags">
+                    <Tag color={isActive ? 'blue' : 'default'}>{getVolumeStatusLabel(item.status)}</Tag>
+                    <Tag color={completion >= 6 ? 'success' : completion >= 3 ? 'gold' : 'default'}>{`闭环 ${completion}/6`}</Tag>
+                    {design?.auditStatus ? <Tag>{design.auditStatus}</Tag> : null}
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        ) : (
+          <Alert type="info" showIcon message="还没有卷结构" description="请先到结构页创建卷、部、章，再回来维护卷级闭环。" />
+        )}
+        {activeVolume ? (
+          <div className="volume-design-page__active-strip">
+            <strong>{activeVolume.title || `第${activeVolume.volumeNumber}卷`}</strong>
+            <span>{`${activeVolume.chapterCount} 章 · ${activeVolume.wordCount.toLocaleString()} 字 · ${getVolumeStatusLabel(activeVolume.status)}`}</span>
+          </div>
+        ) : null}
       </WorkspacePanel>
 
       <WorkspacePanel
@@ -432,8 +473,8 @@ export default function VolumeDesignPage({ novelId }: Props) {
           />
         )}
       >
-        <Form form={form} layout="vertical">
-          <div className="guided-step__field-grid">
+        <Form form={form} layout="vertical" className="volume-design-page__form">
+          <div className="guided-step__field-grid volume-design-page__field-grid volume-design-page__field-grid--closure">
             <div className="guided-step__field-card">
               <Form.Item name="volumeTheme" label="本卷主题">
                 <Input.TextArea rows={6} placeholder="写这一卷真正反复验证的主题命题。" />
@@ -542,13 +583,16 @@ export default function VolumeDesignPage({ novelId }: Props) {
           />
         )}
       >
-        <Form form={form} layout="vertical">
-          <div className="guided-step__field-grid">
+        <Form form={form} layout="vertical" className="volume-design-page__form">
+          <div className="guided-step__field-grid volume-design-page__field-grid">
             <div className="guided-step__field-card guided-step__field-card--full">
               <Form.Item name="linkedEndgameCommitmentIds" label="本卷绑定的终局承诺">
                 <Select
                   mode="multiple"
                   allowClear
+                  maxTagCount="responsive"
+                  optionFilterProp="label"
+                  className="volume-design-page__wide-select"
                   placeholder="选择本卷直接服务的终局承诺"
                   options={commitments.map((item) => ({
                     value: item.id,
@@ -571,6 +615,9 @@ export default function VolumeDesignPage({ novelId }: Props) {
                 <Select
                   mode="multiple"
                   allowClear
+                  maxTagCount="responsive"
+                  optionFilterProp="label"
+                  className="volume-design-page__wide-select"
                   placeholder="选择这一卷主要承受的阻力来源"
                   options={resistanceTracks.map((item) => ({
                     value: item.id,
@@ -601,6 +648,7 @@ export default function VolumeDesignPage({ novelId }: Props) {
             <div className="guided-step__field-card guided-step__field-card--compact">
               <Form.Item name="auditStatus" label="卷后审计状态">
                 <Select
+                  className="volume-design-page__status-select"
                   options={[
                     { value: 'draft', label: '草稿' },
                     { value: 'ready', label: '待审计' },

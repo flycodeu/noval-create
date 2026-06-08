@@ -65,9 +65,12 @@ const LEGACY_ROUTE_REDIRECTS: Record<GuidedWorkflowStepKey, ProWorkspaceKey> = {
   'map-structure': 'map',
   'character-roster': 'characters',
   'items-equipment': 'items',
+  'resistance-system': 'resistance',
   'story-threads': 'threads',
   'story-plot': 'story-design',
-  'volume-planning': 'structure',
+  'volume-planning': 'volume-design',
+  'outline-structure': 'outline',
+  'timeline-causality': 'timeline',
   'write-start': 'writing',
 }
 
@@ -84,7 +87,7 @@ const COMPACT_SHELL_MEDIA_QUERY = `(max-width: ${COMPACT_SHELL_BREAKPOINT - 1}px
 const WORKSPACE_ASSISTANT_DEFAULT_WIDTH = 380
 const WORKSPACE_ASSISTANT_MIN_WIDTH = 320
 const WORKSPACE_ASSISTANT_MAX_WIDTH = 680
-const WORKSPACE_CONTENT_MIN_WIDTH = 520
+const WORKSPACE_CONTENT_MIN_WIDTH = 720
 const WORKSPACE_SIDEBAR_WIDTH = 280
 
 const WORKSPACE_STAGE_LOADERS = {
@@ -215,8 +218,8 @@ export default function NovelRouter() {
   const [qualityBoardOpen, setQualityBoardOpen] = useState(false)
   const [assistantOpen, setAssistantOpen] = useState<boolean>(() => (
     typeof localStorage !== 'undefined'
-      ? localStorage.getItem(WORKSPACE_ASSISTANT_OPEN_STORAGE_KEY) !== '0'
-      : true
+      ? localStorage.getItem(WORKSPACE_ASSISTANT_OPEN_STORAGE_KEY) === '1'
+      : false
   ))
   const [assistantWidth, setAssistantWidth] = useState<number>(() => clampAssistantWidth(parseStoredAssistantWidth()))
   const [isSidebarDrawerOpen, setIsSidebarDrawerOpen] = useState(false)
@@ -235,7 +238,7 @@ export default function NovelRouter() {
     const stored = typeof localStorage !== 'undefined'
       ? localStorage.getItem(WORKSPACE_VIEW_MODE_STORAGE_KEY)
       : null
-    return stored === 'quick' || stored === 'professional' ? stored : 'professional'
+    return stored === 'quick' || stored === 'professional' ? stored : 'quick'
   })
   const showWindowControls = isElectronRuntime()
 

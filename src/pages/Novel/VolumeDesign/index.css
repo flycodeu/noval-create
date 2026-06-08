@@ -1,0 +1,158 @@
+.volume-design-page__selector-panel .novel-panel__body {
+  display: grid;
+  gap: 12px;
+}
+
+.volume-design-page__volume-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 10px;
+}
+
+.volume-design-page__volume-card {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+
+.volume-design-page__volume-card:hover,
+.volume-design-page__volume-card.is-active {
+  border-color: rgba(166, 106, 43, 0.34);
+  background: var(--primary-soft);
+  box-shadow: var(--shadow-sm);
+}
+
+.volume-design-page__volume-card strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.volume-design-page__volume-card span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.volume-design-page__volume-index {
+  font-weight: 700;
+  color: var(--primary);
+}
+
+.volume-design-page__volume-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.volume-design-page__volume-tags .ant-tag {
+  margin-inline-end: 0;
+}
+
+.volume-design-page__active-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+}
+
+.volume-design-page__active-strip strong,
+.volume-design-page__active-strip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.volume-design-page__active-strip span {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.volume-design-page__form {
+  min-width: 0;
+}
+
+.volume-design-page__field-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  align-items: start;
+}
+
+.volume-design-page__field-grid--closure {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.volume-design-page .guided-step__field-card {
+  min-width: 0;
+  padding: 14px;
+  border-radius: 8px;
+}
+
+.volume-design-page .guided-step__field-card textarea.ant-input {
+  min-height: 176px;
+  max-height: min(48vh, 420px);
+}
+
+.volume-design-page__wide-select,
+.volume-design-page__status-select {
+  width: 100%;
+}
+
+.volume-design-page__wide-select .ant-select-selector {
+  min-height: 46px;
+}
+
+.volume-design-page__wide-select .ant-select-selection-overflow {
+  max-height: 92px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.volume-design-page__wide-select .ant-select-selection-item {
+  max-width: min(360px, 100%);
+}
+
+@media (max-width: 900px) {
+  .volume-design-page__field-grid--closure {
+    grid-template-columns: 1fr;
+  }
+
+  .volume-design-page__active-strip {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .volume-design-page__active-strip strong,
+  .volume-design-page__active-strip span {
+    white-space: normal;
+  }
+}
+
+[data-theme="dark"] .volume-design-page__volume-card,
+[data-theme="dark"] .volume-design-page__active-strip {
+  border-color: rgba(210, 190, 156, 0.14);
+  background: var(--novel-console-surface);
+}
+
+[data-theme="dark"] .volume-design-page__volume-card:hover,
+[data-theme="dark"] .volume-design-page__volume-card.is-active {
+  background: rgba(166, 106, 43, 0.14);
+}

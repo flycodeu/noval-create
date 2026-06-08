@@ -1,14 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Form, Input, InputNumber, Modal, Progress, Select, Space, message } from 'antd'
 import {
-  BarsOutlined,
-  ClockCircleOutlined,
   EditOutlined,
-  EnvironmentOutlined,
-  GlobalOutlined,
   SaveOutlined,
-  SettingOutlined,
-  TeamOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
@@ -44,7 +38,16 @@ import {
   useRegisterWorkspaceQualityController,
 } from '../workspace-quality-context-core'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
-import { EMPTY_WORKFLOW_STATS, getAssetBloatSignal, loadWorkflowStats, type WorkflowStats } from '../workflow'
+import {
+  EMPTY_WORKFLOW_STATS,
+  GUIDED_STEP_ORDER,
+  GUIDED_STEP_TARGET_ROUTE,
+  GUIDED_WORKFLOW_PHASES,
+  getAssetBloatSignal,
+  getGuidedStepProgressMap,
+  loadWorkflowStats,
+  type WorkflowStats,
+} from '../workflow'
 
 interface Props {
   novelId: number
@@ -192,80 +195,29 @@ export default function Overview({ novelId }: Props) {
     ? Math.round((stats.completedChapterCount / stats.chapterCount) * 100)
     : 0
 
-  const readinessItems = [
-    {
-      key: 'project-brief',
-      title: '项目立项',
-      ready: projectBrief.readyCount >= 4,
-      summary: `${projectBrief.readyCount}/6`,
-      icon: <EditOutlined />,
-      action: () => navigate(`/novels/${novelId}/project-brief`),
-    },
-    {
-      key: 'core-settings',
-      title: '基础设定',
-      ready: storySettings.premiseReadyCount >= 4,
-      summary: `${storySettings.premiseReadyCount}/5`,
-      icon: <SettingOutlined />,
-      action: () => navigate(`/novels/${novelId}/core-settings`),
-    },
-    {
-      key: 'theme-voice',
-      title: '主题与文风',
-      ready: themeVoice.readyCount >= 4,
-      summary: `${themeVoice.readyCount}/6`,
-      icon: <EditOutlined />,
-      action: () => navigate(`/novels/${novelId}/theme-voice`),
-    },
-    {
-      key: 'world-rules',
-      title: '世界规则',
-      ready: Boolean(currentNovel?.worldRulesJson),
-      summary: `${worldRules.factionSystem.length} 势力 / ${worldRules.speciesSystem.length} 种族`,
-      icon: <GlobalOutlined />,
-      action: () => navigate(`/novels/${novelId}/world-rules`),
-    },
-    {
-      key: 'endgame',
-      title: '终局设计',
-      ready: storySettings.endgameReadyCount >= 5,
-      summary: `${storySettings.endgameReadyCount}/8`,
-      icon: <BarsOutlined />,
-      action: () => navigate(`/novels/${novelId}/endgame`),
-    },
-    {
-      key: 'map',
-      title: '地图结构',
-      ready: stats.mapCount > 0,
-      summary: `${stats.mapCount} 个节点`,
-      icon: <EnvironmentOutlined />,
-      action: () => navigate(`/novels/${novelId}/map`),
-    },
-    {
-      key: 'characters',
-      title: '角色系统',
-      ready: stats.characterCount > 0 && stats.hasProtagonist,
-      summary: `${stats.characterCount} 位角色`,
-      icon: <TeamOutlined />,
-      action: () => navigate(`/novels/${novelId}/characters`),
-    },
-    {
-      key: 'threads',
-      title: '故事线程',
-      ready: stats.threadCount > 0,
-      summary: `${stats.threadCount} 条线程`,
-      icon: <BarsOutlined />,
-      action: () => navigate(`/novels/${novelId}/threads`),
-    },
-    {
-      key: 'timeline',
-      title: '时间轴',
-      ready: stats.timelineCount > 0,
-      summary: `${stats.timelineCount} 个事件`,
-      icon: <ClockCircleOutlined />,
-      action: () => navigate(`/novels/${novelId}/timeline`),
-    },
-  ]
+  const guidedProgressMap = useMemo(
+    () => getGuidedStepProgressMap(currentNovel, stats),
+    [currentNovel, stats],
+  )
+  const workflowStepReadyCount = GUIDED_STEP_ORDER.filter((stepKey) => guidedProgressMap[stepKey]?.isComplete).length
+  const workflowStageCards = useMemo(() => GUIDED_WORKFLOW_PHASES.map((phase, index) => {
+    const phaseProgress = phase.stepKeys.map((stepKey) => guidedProgressMap[stepKey])
+    const done = phaseProgress.filter((progress) => progress?.isComplete).length
+    const total = phase.stepKeys.length
+    const completedUnits = phaseProgress.reduce((sum, progress) => sum + (progress?.completedCount || 0), 0)
+    const totalUnits = phaseProgress.reduce((sum, progress) => sum + (progress?.totalCount || 0), 0)
+    const firstPendingStep = phase.stepKeys.find((stepKey) => !guidedProgressMap[stepKey]?.isComplete) || phase.stepKeys[0]
+
+    return {
+      key: phase.key,
+      title: `${index + 1}. ${phase.title}`,
+      summary: phase.summary,
+      ready: done >= total,
+      progressText: `${done}/${total}`,
+      detailText: totalUnits > 0 ? `${completedUnits}/${totalUnits} 项` : '待开始',
+      route: GUIDED_STEP_TARGET_ROUTE[firstPendingStep],
+    }
+  }), [guidedProgressMap])
 
   const suggestedAuthorMode = useMemo(
     () => resolveSuggestedAuthorWorkMode(currentNovel, stats, qualitySummary),
@@ -282,8 +234,7 @@ export default function Overview({ novelId }: Props) {
   )
   const assetBloat = useMemo(() => getAssetBloatSignal(stats), [stats])
   const nextFocus = authorWorkflow.primaryTask.title
-  const readyCount = readinessItems.filter((item) => item.ready).length
-  const keyGapCount = readinessItems.length - readyCount
+  const keyGapCount = GUIDED_STEP_ORDER.length - workflowStepReadyCount
   const hasContextLag = stats.staleChapterCount > 0 || stats.staleCheckpointCount > 0 || stats.staleAssetCount > 0
   const writingStageValue = displayState.isZeroState
     ? '未开写'
@@ -513,9 +464,9 @@ export default function Overview({ novelId }: Props) {
             hint={displayState.isZeroState ? '当前优先进入首章启动动作。' : `累计 ${stats.totalWords.toLocaleString()} 字`}
           />
           <WorkspaceMetric
-            label="结构承接"
-            value={`${readyCount}/${readinessItems.length}`}
-            hint={keyGapCount > 0 ? `仍有 ${keyGapCount} 个关键底盘位待补齐` : '关键底盘已基本就绪'}
+            label="流程完成"
+            value={`${workflowStepReadyCount}/${GUIDED_STEP_ORDER.length}`}
+            hint={keyGapCount > 0 ? `仍有 ${keyGapCount} 个关键步骤待补齐` : '关键创作链路已基本闭合'}
           />
           <WorkspaceMetric
             label="上下文状态"
@@ -578,6 +529,7 @@ export default function Overview({ novelId }: Props) {
             <div className="guided-step__action-head">
               <div className="guided-step__action-copy">
                 <strong>{authorWorkflow.primaryTask.title}</strong>
+                <span>{authorWorkflow.primaryTask.reason}</span>
               </div>
               <Space wrap>
                 <Button type="primary" onClick={() => navigate(resolveAuthorWorkflowHref(novelId, authorWorkflow.primaryTask.entryPage))}>
@@ -623,6 +575,7 @@ export default function Overview({ novelId }: Props) {
               <div key={task.id} className="guided-step__action-card">
                 <div className="guided-step__action-copy">
                   <strong>{task.title}</strong>
+                  <span>{task.reason}</span>
                 </div>
                 <Button onClick={() => navigate(resolveAuthorWorkflowHref(novelId, task.entryPage))}>
                   {task.actionLabel}
@@ -663,7 +616,7 @@ export default function Overview({ novelId }: Props) {
         >
           <div className="novel-note-list">
             {authorWorkflow.impactNotices.slice(0, 2).map((notice) => (
-              <div key={notice.id} className="novel-note-list__item">{notice.title}</div>
+              <div key={notice.id} className="novel-note-list__item">{`${notice.title}：${notice.reason}`}</div>
             ))}
           </div>
         </WorkspacePanel>
@@ -927,7 +880,7 @@ export default function Overview({ novelId }: Props) {
         </div>
       </WorkspacePanel>
 
-      <WorkspacePanel className="novel-overview-page__summary-panel" title="项目底盘概览" description="把底盘摘要和关键入口收在一个次级区，避免总览重复展示多层状态卡。">
+      <WorkspacePanel className="novel-overview-page__summary-panel" title="创作流程概览" description="按阶段查看当前缺口，点击进入该阶段第一个未完成步骤。">
         <div className="novel-overview-page__summary-stack">
           <div className="guided-step__fact-grid">
             <div className="guided-step__fact-card">
@@ -953,23 +906,23 @@ export default function Overview({ novelId }: Props) {
           </div>
 
           <div className="novel-overview-page__entry-section">
-            <strong className="novel-overview-page__entry-title">关键入口</strong>
+            <strong className="novel-overview-page__entry-title">阶段入口</strong>
             <div className="novel-overview-page__entry-grid">
-              {readinessItems.map((item) => (
+              {workflowStageCards.map((item) => (
                 <button
                   key={item.key}
                   type="button"
-                  onClick={item.action}
+                  onClick={() => navigate(`/novels/${novelId}/${item.route}`)}
                   className="novel-overview-page__entry-card"
                 >
                   <div className="novel-overview-page__entry-card-head">
                     <strong>{item.title}</strong>
-                    <span>{item.icon}</span>
+                    <span>{item.progressText}</span>
                   </div>
                   <div className={`novel-overview-page__entry-status${item.ready ? ' is-ready' : ' is-pending'}`}>
                     {item.ready ? '已就绪' : '待补齐'}
                   </div>
-                  <div className="novel-overview-page__entry-summary">{item.summary}</div>
+                  <div className="novel-overview-page__entry-summary">{`${item.detailText} · ${item.summary}`}</div>
                 </button>
               ))}
             </div>

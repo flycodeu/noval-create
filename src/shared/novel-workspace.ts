@@ -145,42 +145,42 @@ export interface ChapterWritabilitySummary {
 export type QualitySummary = Pick<QualityDashboardData, 'productionReadiness' | 'batchHealth' | 'continuityHealth'> | null | undefined
 
 export const WORKSPACE_MODULE_DEFINITIONS: WorkspaceModuleDefinition[] = [
-  { key: 'overview', label: '基础信息', description: '书名、简介、背景与目标字数。', groupKey: 'foundation', groupTitle: '底盘建设', quickMode: true },
-  { key: 'project-brief', label: '项目立项', description: '读者承诺、赛道和禁区。', groupKey: 'foundation', groupTitle: '底盘建设', quickMode: true },
-  { key: 'core-settings', label: '基础设定', description: '主角起点、核心钩子与底层约束。', groupKey: 'foundation', groupTitle: '底盘建设', quickMode: true },
-  { key: 'theme-voice', label: '主题与文风', description: '主题、情绪核心、文风与对白边界。', groupKey: 'foundation', groupTitle: '底盘建设', quickMode: true },
-  { key: 'world-rules', label: '世界规则', description: '时间制度、力量边界与世界口径。', groupKey: 'foundation', groupTitle: '底盘建设', quickMode: true },
-  { key: 'endgame', label: '终局设计', description: '最终冲突、兑现承诺与最后一幕。', groupKey: 'foundation', groupTitle: '底盘建设', quickMode: false },
-  { key: 'map', label: '地图结构', description: '地点层级与行动半径。', groupKey: 'world-assets', groupTitle: '世界资产', quickMode: false },
-  { key: 'characters', label: '角色系统', description: '主角、功能位和人物网络。', groupKey: 'world-assets', groupTitle: '世界资产', quickMode: true },
-  { key: 'factions', label: '势力系统', description: '组织、阵营与对立结构。', groupKey: 'world-assets', groupTitle: '世界资产', quickMode: false },
-  { key: 'items', label: '物品装备', description: '资源、道具和证据链。', groupKey: 'world-assets', groupTitle: '世界资产', quickMode: false },
-  { key: 'glossary', label: '设定词典', description: '名词、术语和标准口径。', groupKey: 'world-assets', groupTitle: '世界资产', quickMode: false },
-  { key: 'scene-templates', label: '场景模板', description: '重复场景的结构模板。', groupKey: 'world-assets', groupTitle: '世界资产', quickMode: false },
-  { key: 'threads', label: '故事线程', description: '主线、支线、伏笔与关系推进。', groupKey: 'story-structure', groupTitle: '故事结构', quickMode: false },
-  { key: 'story-design', label: '故事设计', description: '主线目标、冲突与结局方向。', groupKey: 'story-structure', groupTitle: '故事结构', quickMode: false },
-  { key: 'outline', label: '故事大纲', description: '从结构到章节承接的骨架。', groupKey: 'story-structure', groupTitle: '故事结构', quickMode: true },
-  { key: 'volume-design', label: '卷级设计', description: '每卷的目标、闭环与落点。', groupKey: 'story-structure', groupTitle: '故事结构', quickMode: false },
-  { key: 'structure', label: '结构规划', description: '段落、卷章与节奏拆分。', groupKey: 'story-structure', groupTitle: '故事结构', quickMode: false },
-  { key: 'timeline', label: '时间轴', description: '事件先后顺序与时间锚点。', groupKey: 'story-structure', groupTitle: '故事结构', quickMode: false },
-  { key: 'info-gap-board', label: '信息差谜题板', description: '真相揭示、读者信息差与谜题控制。', groupKey: 'story-structure', groupTitle: '故事结构', quickMode: false },
-  { key: 'foreshadow-ledger', label: '伏笔回收账本', description: '伏笔埋设、到期与回收。', groupKey: 'story-structure', groupTitle: '故事结构', quickMode: false },
-  { key: 'growth-system', label: '成长资源代价', description: '能力成长与资源消耗曲线。', groupKey: 'story-structure', groupTitle: '故事结构', quickMode: false },
-  { key: 'arc-center', label: '人物弧线', description: '角色变化和关系位移。', groupKey: 'story-structure', groupTitle: '故事结构', quickMode: false },
-  { key: 'resistance', label: '反派与阻力', description: '外部压力与对手动作线。', groupKey: 'story-structure', groupTitle: '故事结构', quickMode: false },
-  { key: 'contracts', label: '章节合同', description: '章节目标、场景合同与验收标准。', groupKey: 'chapter-production', groupTitle: '章节生产', quickMode: true },
-  { key: 'writing', label: '正文写作', description: '章节生产台、流水线与正文编辑。', groupKey: 'chapter-production', groupTitle: '章节生产', quickMode: true },
-  { key: 'writeback', label: '章后回写', description: '事实抽取、状态回写与 Canon 确认。', groupKey: 'chapter-production', groupTitle: '章节生产', quickMode: true },
-  { key: 'batch-workbench', label: '回滚工作台', description: '流水线失败恢复与重放。', groupKey: 'chapter-production', groupTitle: '章节生产', quickMode: false },
-  { key: 'revision', label: '修订中心', description: '质量问题、修订任务与修复入口。', groupKey: 'quality-control', groupTitle: '质量控制', quickMode: true },
-  { key: 'quality', label: '质量监控', description: '生产总灯、连续性与风险趋势。', groupKey: 'quality-control', groupTitle: '质量控制', quickMode: true },
+  { key: 'overview', label: '项目总览', description: '书名、简介、背景和目标字数。', groupKey: 'foundation', groupTitle: '1 开书底盘', quickMode: true },
+  { key: 'project-brief', label: '项目 Brief', description: '读者承诺、赛道、卖点和禁区。', groupKey: 'foundation', groupTitle: '1 开书底盘', quickMode: true },
+  { key: 'core-settings', label: '故事底盘', description: '主角起点、核心钩子与底层约束。', groupKey: 'foundation', groupTitle: '1 开书底盘', quickMode: true },
+  { key: 'theme-voice', label: '主题文风', description: '主题、情绪核心、视角和对白边界。', groupKey: 'foundation', groupTitle: '1 开书底盘', quickMode: true },
+  { key: 'world-rules', label: '世界规则', description: '时间制度、力量边界与世界口径。', groupKey: 'foundation', groupTitle: '1 开书底盘', quickMode: true },
+  { key: 'endgame', label: '终局承诺', description: '最终冲突、兑现清单与最后一幕。', groupKey: 'foundation', groupTitle: '1 开书底盘', quickMode: false },
+  { key: 'map', label: '地图落点', description: '地点层级、活动半径与事件发生地。', groupKey: 'world-assets', groupTitle: '2 世界角色', quickMode: true },
+  { key: 'items', label: '资源道具', description: '资源流通、道具证据和争夺物。', groupKey: 'world-assets', groupTitle: '2 世界角色', quickMode: true },
+  { key: 'characters', label: '角色网络', description: '主角、功能位、人物弧和关系网。', groupKey: 'world-assets', groupTitle: '2 世界角色', quickMode: true },
+  { key: 'arc-center', label: '人物弧线', description: '角色变化、关系位移和代价。', groupKey: 'world-assets', groupTitle: '2 世界角色', quickMode: false },
+  { key: 'resistance', label: '阻力系统', description: '对手、环境、制度和关系压力。', groupKey: 'world-assets', groupTitle: '2 世界角色', quickMode: true },
+  { key: 'factions', label: '势力系统', description: '组织、阵营与对立结构。', groupKey: 'world-assets', groupTitle: '2 世界角色', quickMode: false },
+  { key: 'glossary', label: '设定词典', description: '名词、术语和标准口径。', groupKey: 'world-assets', groupTitle: '2 世界角色', quickMode: false },
+  { key: 'scene-templates', label: '场景模板', description: '可复用场景结构与检查项。', groupKey: 'world-assets', groupTitle: '2 世界角色', quickMode: false },
+  { key: 'story-design', label: '主线骨架', description: '主线目标、核心冲突与结局方向。', groupKey: 'story-structure', groupTitle: '3 主线卷章', quickMode: true },
+  { key: 'threads', label: '故事线程', description: '主线、支线、伏笔与关系推进。', groupKey: 'story-structure', groupTitle: '3 主线卷章', quickMode: true },
+  { key: 'volume-design', label: '卷级闭环', description: '每卷目标、卷末爆点和阶段代价。', groupKey: 'story-structure', groupTitle: '3 主线卷章', quickMode: true },
+  { key: 'outline', label: '故事大纲', description: '故事弧、章节承接和推进骨架。', groupKey: 'story-structure', groupTitle: '3 主线卷章', quickMode: true },
+  { key: 'structure', label: '卷章结构', description: '卷、部、章与场景节奏拆分。', groupKey: 'story-structure', groupTitle: '3 主线卷章', quickMode: false },
+  { key: 'timeline', label: '事件时间轴', description: '事件先后、因果锚点与状态变化。', groupKey: 'story-structure', groupTitle: '3 主线卷章', quickMode: true },
+  { key: 'info-gap-board', label: '信息差', description: '真相揭示、读者信息差与谜题控制。', groupKey: 'story-structure', groupTitle: '3 主线卷章', quickMode: false },
+  { key: 'foreshadow-ledger', label: '伏笔账本', description: '伏笔埋设、到期与回收。', groupKey: 'story-structure', groupTitle: '3 主线卷章', quickMode: false },
+  { key: 'growth-system', label: '成长/代价', description: '能力成长与资源消耗曲线。', groupKey: 'story-structure', groupTitle: '3 主线卷章', quickMode: false },
+  { key: 'contracts', label: '章节合同', description: '章节目标、场景合同与验收标准。', groupKey: 'chapter-production', groupTitle: '4 正文生产', quickMode: true },
+  { key: 'writing', label: '正文写作', description: '章节生产台、流水线与正文编辑。', groupKey: 'chapter-production', groupTitle: '4 正文生产', quickMode: true },
+  { key: 'writeback', label: '章后回写', description: '事实抽取、状态回写与 Canon 确认。', groupKey: 'chapter-production', groupTitle: '4 正文生产', quickMode: true },
+  { key: 'batch-workbench', label: '批次回滚', description: '流水线失败恢复与重放。', groupKey: 'chapter-production', groupTitle: '4 正文生产', quickMode: false },
+  { key: 'revision', label: '修订中心', description: '质量问题、修订任务与修复入口。', groupKey: 'quality-control', groupTitle: '5 回写修订', quickMode: true },
+  { key: 'quality', label: '质量监控', description: '生产总灯、连续性与风险趋势。', groupKey: 'quality-control', groupTitle: '5 回写修订', quickMode: true },
 ]
 
 const GROUP_ROUTE_MAP: Record<WorkspaceGroupKey, string> = {
   'project-status': 'guide',
   foundation: 'overview',
-  'world-assets': 'characters',
-  'story-structure': 'outline',
+  'world-assets': 'map',
+  'story-structure': 'story-design',
   'chapter-production': 'writing/editor',
   'quality-control': 'revision',
 }
@@ -913,18 +913,51 @@ export function getNextStep(
     }
   }
 
+  if (stats.mapCount <= 0) {
+    return {
+      title: '建立地图落点',
+      reason: '地点层级和活动半径还没落地，人物、物品和事件没有可靠发生位置。',
+      targetPage: 'map',
+      priority: viewMode === 'professional' ? 'high' : 'medium',
+      estimatedMinutes: 8,
+      actionLabel: '打开地图落点',
+    }
+  }
+
+  if (stats.itemCount <= 0) {
+    return {
+      title: '建立资源道具链',
+      reason: '关键资源、道具和证据链还没铺出来，后续人物动机与冲突抓手会偏空。',
+      targetPage: 'items',
+      priority: 'medium',
+      estimatedMinutes: 8,
+      actionLabel: '打开资源道具',
+    }
+  }
+
   if (!charactersReady) {
     return {
-      title: '补角色系统',
+      title: '建立角色网络',
       reason: '当前缺少主角与关键人物状态，后续章节合同和回写都不可靠。',
       targetPage: 'characters',
       priority: 'high',
       estimatedMinutes: 10,
-      actionLabel: '打开角色系统',
+      actionLabel: '打开角色网络',
     }
   }
 
-  if (viewMode === 'professional' && stats.threadCount <= 0) {
+  if (stats.resistanceTrackCount <= 0) {
+    return {
+      title: '建立阻力系统',
+      reason: '人物网络已经有基础，但外部压力、关系压力或制度压力还没入账，后续大纲容易变成事件流水。',
+      targetPage: 'resistance',
+      priority: 'high',
+      estimatedMinutes: 10,
+      actionLabel: '打开阻力系统',
+    }
+  }
+
+  if (stats.threadCount <= 0) {
     return {
       title: '补故事线程',
       reason: '主线、支线与伏笔还没挂成可追踪线程，正文会只有局部推进。',
@@ -935,14 +968,47 @@ export function getNextStep(
     }
   }
 
+  if (storySettings.storyDesignReadyCount < 4) {
+    return {
+      title: '压出主线骨架',
+      reason: '线程和资产已经有了基础，下一步要统一主线目标、核心冲突和结局方向。',
+      targetPage: 'story-design',
+      priority: 'high',
+      estimatedMinutes: 10,
+      actionLabel: '打开故事设计',
+    }
+  }
+
+  if (stats.volumeCount <= 0) {
+    return {
+      title: '设计第一卷闭环',
+      reason: '缺少卷级目标、卷末爆点和阶段代价，章节会有开头但缺少长篇承接。',
+      targetPage: 'volume-design',
+      priority: 'high',
+      estimatedMinutes: 12,
+      actionLabel: '打开卷级闭环',
+    }
+  }
+
   if (stats.outlineCount <= 0) {
     return {
-      title: '生成故事大纲',
+      title: '拆出故事大纲',
       reason: '现有设定还没有被压成稳定的大纲骨架。',
       targetPage: 'outline',
       priority: 'high',
       estimatedMinutes: 12,
       actionLabel: '打开故事大纲',
+    }
+  }
+
+  if (stats.timelineCount <= 0) {
+    return {
+      title: '校准事件时间轴',
+      reason: '大纲已经有骨架，但事件先后、在场人物和状态变化还没形成统一时间锚点。',
+      targetPage: 'timeline',
+      priority: 'medium',
+      estimatedMinutes: 10,
+      actionLabel: '打开事件时间轴',
     }
   }
 
@@ -1084,25 +1150,25 @@ function buildReadinessSummary(
   const metrics: WorkspaceReadinessMetric[] = [
     {
       key: 'foundation',
-      label: '底盘完整度',
+      label: '项目定标完整度',
       score: findScore('overview', 'project-brief', 'core-settings', 'theme-voice', 'world-rules', 'endgame'),
-      summary: '立项、设定、文风和世界边界。',
+      summary: '项目总览、Brief、故事底盘、文风、世界规则和终局承诺。',
     },
     {
       key: 'world-assets',
-      label: '世界资产完整度',
-      score: findScore('map', 'characters', 'factions', 'items', 'glossary', 'scene-templates'),
-      summary: '地点、人物、势力与道具可回查程度。',
+      label: '世界角色完整度',
+      score: findScore('map', 'items', 'characters', 'arc-center', 'resistance', 'factions'),
+      summary: '地点、资源、角色网络、弧线和阻力系统。',
     },
     {
       key: 'story-structure',
-      label: '故事结构完整度',
-      score: findScore('threads', 'story-design', 'outline', 'volume-design', 'structure', 'timeline'),
-      summary: '线程、大纲、卷级设计与时间锚点。',
+      label: '剧情结构完整度',
+      score: findScore('story-design', 'threads', 'volume-design', 'outline', 'structure', 'timeline'),
+      summary: '主线、线程、卷级闭环、大纲和时间锚点。',
     },
     {
       key: 'chapter-constraints',
-      label: '章节约束完整度',
+      label: '卷章生产完整度',
       score: findScore('contracts', 'writing', 'writeback'),
       summary: '章节合同、正文生产与章后回写闭环。',
     },
@@ -1137,8 +1203,8 @@ function buildGroupSnapshots(
   const projectStatusModules = [
     {
       key: 'overview',
-      label: '总览',
-      description: '项目控制台总览。',
+      label: '创作向导',
+      description: '查看当前阶段、阻塞和推荐动作。',
       groupKey: 'foundation',
       groupTitle: '项目状态',
       route: 'guide',
@@ -1155,7 +1221,7 @@ function buildGroupSnapshots(
     {
       key: 'overview',
       label: '当前阻塞',
-      description: '查看 blocker 和影响范围。',
+      description: '查看阻塞原因和直接处理入口。',
       groupKey: 'foundation',
       groupTitle: '项目状态',
       route: 'guide?panel=blockers',
@@ -1171,8 +1237,8 @@ function buildGroupSnapshots(
     },
     {
       key: 'overview',
-      label: '下一步',
-      description: '查看系统推荐的当前主动作。',
+      label: '推荐下一步',
+      description: '执行当前最有价值的推进动作。',
       groupKey: 'foundation',
       groupTitle: '项目状态',
       route: 'guide?panel=next-step',
@@ -1235,7 +1301,7 @@ function buildStageSummary(
   if (blockers.some((item) => item.level === 'fatal' || item.level === 'high')) {
     return {
       key: 'quality-control',
-      label: '质量控制',
+      label: '修订质检',
       description: '当前存在高优先风险，先清 blocker 再继续推进。',
       route: 'guide?panel=blockers',
     }
@@ -1276,10 +1342,10 @@ function buildNavGroups(
         items: [
           {
             key: 'guide:overview',
-            label: '总览',
+            label: '创作向导',
             route: 'guide',
             status: 'done',
-            meta: '控制台',
+            meta: '阶段路线与推荐动作',
           },
           {
             key: 'guide:blockers',
@@ -1291,7 +1357,7 @@ function buildNavGroups(
           },
           {
             key: 'guide:next-step',
-            label: '下一步',
+            label: '推荐下一步',
             route: 'guide?panel=next-step',
             status: nextStep.priority === 'high' ? 'ready' : nextStep.priority === 'medium' ? 'warning' : 'done',
             meta: nextStep.title,
@@ -1311,7 +1377,7 @@ function buildNavGroups(
         route: item.route,
         status: item.status,
         progress: { done: item.requiredDone, total: item.requiredTotal },
-        meta: item.progressText,
+        meta: item.description,
         hasBlocker: item.blockerCount > 0,
       })),
     }
@@ -1363,12 +1429,12 @@ export function getWorkspaceModeOptions() {
   return [
     {
       value: 'quick' as WorkspaceViewMode,
-      label: '快速模式',
-      description: '只保留 8 个关键步骤，优先尽快开写。',
+      label: '快速',
+      description: '只显示关键链路，优先尽快开写。',
     },
     {
       value: 'professional' as WorkspaceViewMode,
-      label: '专业模式',
+      label: '完整',
       description: '显示完整长篇生产链路与全部模块。',
     },
   ]

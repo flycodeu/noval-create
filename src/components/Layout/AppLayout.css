@@ -31,6 +31,13 @@
   border: none;
 }
 
+.app-layout-menu .ant-menu-title-content {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .app-layout__content.ant-layout-content {
   display: flex;
   flex-direction: column;
@@ -239,11 +246,12 @@
     justify-content: center;
     gap: 6px;
     flex: 0 0 auto;
-    min-width: 96px;
+    min-width: 108px;
     height: 36px;
     padding: 0 12px;
     color: var(--text-secondary);
     font-size: 13px;
+    white-space: nowrap;
     background: transparent;
     border: 1px solid transparent;
     border-radius: 10px;

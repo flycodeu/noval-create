@@ -63,9 +63,12 @@ const STEP_LABELS: Record<GuidedWorkflowStepKey, string> = {
   'map-structure': '地图结构',
   'items-equipment': '物品与资源',
   'character-roster': '人物网络',
+  'resistance-system': '阻力系统',
   'story-threads': '故事线程',
   'story-plot': '故事设计',
   'volume-planning': '卷级规划',
+  'outline-structure': '故事大纲',
+  'timeline-causality': '事件时间轴',
   'write-start': '结构与写作',
 }
 

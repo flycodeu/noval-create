@@ -9232,7 +9232,7 @@ html[data-theme="dark"] .ant-card-actions > li {
 }
 
 .admin-page .admin-form-grid--three {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(260px, 1fr));
 }
 
 @media (max-width: 1080px) {
@@ -13415,6 +13415,415 @@ html[data-runtime="web"] .project-topbar__main-row {
 @media (max-width: 1199px) {
   .novel-route-shell__assistant-tab {
     display: none;
+  }
+}
+
+/* Admin configuration pages: keep controls readable and prevent cramped vertical text. */
+.app-layout .admin-page .admin-form-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.app-layout .admin-page .admin-form-grid--three,
+.app-layout .admin-page .admin-form-grid--source {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+}
+
+.app-layout .admin-page .admin-form-grid > *,
+.app-layout .admin-page .ant-form,
+.app-layout .admin-page .ant-form-item,
+.app-layout .admin-page .ant-form-item-control,
+.app-layout .admin-page .ant-form-item-control-input,
+.app-layout .admin-page .ant-form-item-control-input-content {
+  min-width: 0;
+}
+
+.app-layout .admin-page .ant-form-item {
+  margin-bottom: 18px;
+}
+
+.app-layout .admin-page .ant-form-item-label {
+  padding-bottom: 5px;
+}
+
+.app-layout .admin-page .ant-form-item-label > label {
+  height: auto;
+  min-height: 20px;
+  align-items: flex-start;
+  line-height: 1.42;
+  white-space: normal;
+}
+
+.app-layout .admin-page :where(.ant-input, .ant-input-affix-wrapper, .ant-input-number, .ant-picker, .ant-select) {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.app-layout .admin-page :where(.ant-input, .ant-input-affix-wrapper, .ant-input-number, .ant-select-selector) {
+  min-height: 42px;
+}
+
+.app-layout .admin-page .ant-select-single .ant-select-selector {
+  height: auto;
+  min-height: 42px;
+  align-items: center;
+  padding: 0 12px;
+}
+
+.app-layout .admin-page .ant-select-single .ant-select-selection-item,
+.app-layout .admin-page .ant-select-single .ant-select-selection-placeholder {
+  min-width: 0;
+  line-height: 40px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-layout .admin-page .ant-select-multiple .ant-select-selector {
+  min-height: 42px;
+  height: auto;
+  align-items: flex-start;
+}
+
+.app-layout .admin-page .ant-form-item-extra,
+.app-layout .admin-page .ant-form-item-explain {
+  max-width: 100%;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.app-layout .source-search-config__summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+  gap: 16px;
+  align-items: stretch;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--color-bg-hover) 62%, var(--color-bg-card) 38%);
+}
+
+.app-layout .source-search-config__summary-copy {
+  display: grid;
+  align-content: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.app-layout .source-search-config__eyebrow {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.app-layout .source-search-config__summary-copy strong {
+  color: var(--color-text-primary);
+  font-size: 16px;
+  line-height: 1.35;
+}
+
+.app-layout .source-search-config__summary-copy p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  line-height: 1.7;
+}
+
+.app-layout .source-search-config__status-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.app-layout .source-search-config__status {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 86%, transparent);
+  border-radius: 12px;
+  background: var(--color-bg-card);
+}
+
+.app-layout .source-search-config__status span {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.app-layout .source-search-config__status strong {
+  min-width: 0;
+  color: var(--color-text-primary);
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.app-layout .source-search-config__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.app-layout .source-search-config__test-result {
+  min-width: min(100%, 280px);
+  max-width: 100%;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.app-layout .source-search-config__test-result.is-success {
+  color: var(--color-success);
+}
+
+.app-layout .source-search-config__test-result.is-error {
+  color: var(--color-error);
+}
+
+.app-layout .template-usage-overview {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.9fr) minmax(280px, 1fr) minmax(340px, 1.25fr);
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--color-bg-hover) 58%, var(--color-bg-card) 42%);
+}
+
+.app-layout .template-usage-overview__item {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.app-layout .template-usage-overview__item span {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.app-layout .template-usage-overview__item strong {
+  color: var(--color-text-primary);
+  font-size: 13px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1180px) {
+  .app-layout .source-search-config__summary,
+  .app-layout .template-usage-overview {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .app-layout .source-search-config__status-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .app-layout .source-search-config__summary,
+  .app-layout .template-usage-overview {
+    padding: 12px;
+    border-radius: 14px;
+  }
+}
+
+/* Comprehensive UX pass: keep writing, forms, and search configuration legible. */
+.app-layout .chapter-console-page .chapter-console-page__hero {
+  display: none;
+}
+
+.app-layout .chapter-console-page .chapter-console-page__grid,
+.app-layout .chapter-console-page .chapter-console-page__grid.is-assist-collapsed {
+  grid-template-columns: minmax(220px, 280px) minmax(720px, 1fr);
+  align-items: start;
+}
+
+.app-layout .chapter-console-page .chapter-console-page__grid.has-assist-panel {
+  grid-template-columns: minmax(220px, 280px) minmax(640px, 1fr) minmax(300px, 340px);
+}
+
+.app-layout .chapter-console-page .chapter-console-page__column--left .chapter-console-page__panel,
+.app-layout .chapter-console-page .chapter-console-page__column--right .chapter-console-page__panel {
+  padding: 16px;
+}
+
+.app-layout .novel-writing-page .novel-writing-shell__editor-sheet {
+  max-width: min(96ch, 100%);
+  min-height: clamp(560px, 70vh, 980px);
+  padding: clamp(28px, 3.2vw, 48px);
+  font-size: 17px;
+  line-height: 1.86;
+}
+
+.app-layout .chapter-console-page__editor-sheet-wrap {
+  min-height: clamp(580px, 72vh, 1020px);
+}
+
+.app-layout .chapter-console-page__chapter-list {
+  max-height: calc(100vh - 340px);
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.app-layout .chapter-console-page__volume-group {
+  display: grid;
+  gap: 8px;
+}
+
+.app-layout .chapter-console-page__volume-head {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent-soft) 54%, transparent 46%);
+}
+
+.app-layout .chapter-console-page__volume-head strong {
+  color: var(--text-main);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.app-layout .chapter-console-page__volume-head span {
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-layout .chapter-console-page__volume-chapters {
+  display: grid;
+  gap: 6px;
+}
+
+.app-layout .chapter-console-page__chapter-card {
+  padding: 10px 12px;
+}
+
+.app-layout .chapter-console-page__chapter-copy strong,
+.app-layout .chapter-console-page__chapter-copy span,
+.app-layout .chapter-console-page__chapter-copy small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-layout .novel-writing-page .writing-layout-select-generation {
+  width: min(100%, 280px);
+}
+
+.app-layout .novel-writing-page .writing-layout-select-default,
+.app-layout .novel-writing-page .writing-layout-status-select {
+  width: min(100%, 180px);
+}
+
+.app-layout .model-manager-page .admin-form-grid--three {
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.app-layout .model-manager-page .novel-workspace__main {
+  display: grid;
+  gap: 14px;
+}
+
+.app-layout .model-manager-page .novel-panel:has(.source-search-config) {
+  order: 1;
+}
+
+.app-layout .model-manager-page .novel-split {
+  order: 2;
+}
+
+.app-layout .model-manager-page .admin-detail-stack .ant-alert-description {
+  max-width: 920px;
+}
+
+.app-layout .model-manager-page .model-manager-source-panel {
+  min-height: 0;
+}
+
+.app-layout .model-manager-page .model-manager-source-panel .novel-panel__header {
+  flex-direction: row;
+  margin-bottom: 0;
+  padding: 16px 18px 12px;
+}
+
+.app-layout .model-manager-page .model-manager-source-panel .novel-panel__copy {
+  flex: 0 1 auto;
+  width: 100%;
+  max-width: none;
+}
+
+.app-layout .model-manager-page .model-manager-source-panel .novel-panel__title {
+  overflow-wrap: normal;
+  word-break: keep-all;
+}
+
+.app-layout .model-manager-page .model-manager-source-panel .novel-panel__body,
+.app-layout .model-manager-page.novel-workspace--wide .model-manager-source-panel .novel-panel__body {
+  display: block;
+  min-height: 0;
+  padding: 16px 18px 18px;
+}
+
+.app-layout .model-manager-page .model-manager-source-panel .source-search-config {
+  align-content: start;
+  margin: 0;
+}
+
+.app-layout .ant-select-single .ant-select-selector .ant-select-selection-item,
+.app-layout .ant-select-single .ant-select-selector .ant-select-selection-placeholder,
+.ant-modal .ant-select-single .ant-select-selector .ant-select-selection-item,
+.ant-modal .ant-select-single .ant-select-selector .ant-select-selection-placeholder,
+.ant-drawer .ant-select-single .ant-select-selector .ant-select-selection-item,
+.ant-drawer .ant-select-single .ant-select-selector .ant-select-selection-placeholder {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ant-select-dropdown .ant-select-item-option-content {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+@media (max-width: 1320px) {
+  .app-layout .chapter-console-page .chapter-console-page__grid,
+  .app-layout .chapter-console-page .chapter-console-page__grid.has-assist-panel,
+  .app-layout .chapter-console-page .chapter-console-page__grid.is-assist-collapsed {
+    grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  }
+
+  .app-layout .chapter-console-page .chapter-console-page__column--right {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 900px) {
+  .app-layout .chapter-console-page .chapter-console-page__grid,
+  .app-layout .chapter-console-page .chapter-console-page__grid.has-assist-panel,
+  .app-layout .chapter-console-page .chapter-console-page__grid.is-assist-collapsed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .app-layout .chapter-console-page__chapter-list {
+    max-height: 320px;
+  }
+
+  .app-layout .novel-writing-page .novel-writing-shell__editor-sheet {
+    min-height: 520px;
+    padding: 22px;
+    font-size: 16px;
   }
 }
 

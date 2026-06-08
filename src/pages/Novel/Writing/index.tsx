@@ -9,6 +9,7 @@ import {
   LoadingOutlined,
   PlusOutlined,
   RobotOutlined,
+  UnorderedListOutlined,
 } from '@ant-design/icons'
 import { Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
@@ -392,6 +393,17 @@ function getCurrentVolumeNumber(chapter: Chapter | null, volumes: StoryVolume[])
   return currentVolume?.volumeNumber || null
 }
 
+function getVolumeDisplayName(volume?: StoryVolume | null): string {
+  if (!volume) return '未绑定卷'
+  return volume.title?.trim() || `第${volume.volumeNumber}卷`
+}
+
+function getVolumeStatusLabel(status?: StoryVolume['status']): string {
+  if (status === 'locked') return '已锁定'
+  if (status === 'draft') return '草稿'
+  return '规划中'
+}
+
 function computeVolumeTruthRevealStats(
   chapter: Chapter | null,
   volumes: StoryVolume[],
@@ -544,7 +556,7 @@ export default function Writing({ novelId }: Props) {
   const [versionHistoryLoading, setVersionHistoryLoading] = useState(false)
   const [chapterVersions, setChapterVersions] = useState<ChapterVersion[]>([])
   const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null)
-  const [insightPanelOpen, setInsightPanelOpen] = useState(true)
+  const [insightPanelOpen, setInsightPanelOpen] = useState(false)
   const routeChapterId = useMemo(() => parseRouteId(searchParams.get('chapterId')), [searchParams])
   const activeWritingRoute = useMemo<WritingRouteKey>(() => {
     const routeKey = location.pathname.split('/').filter(Boolean)[4]
@@ -1540,9 +1552,15 @@ export default function Writing({ novelId }: Props) {
     await Promise.all([loadChapters(currentChapter.id), refreshMeta(), refreshContextStatus()])
   }
 
-  const handleAddChapter = async () => {
+  const handleAddChapter = async (volumeId?: number | null) => {
     const nextNum = chapters.length > 0 ? Math.max(...chapters.map((chapter) => chapter.chapterNum)) + 1 : 1
-    const chapterId = await window.electron.chapter.create(novelId, { chapterNum: nextNum, title: `第${nextNum}章`, status: 'outline' })
+    const targetVolumeId = typeof volumeId === 'number' ? volumeId : currentChapter?.volumeId ?? storyVolumes[0]?.id
+    const chapterId = await window.electron.chapter.create(novelId, {
+      chapterNum: nextNum,
+      title: `第${nextNum}章`,
+      status: 'outline',
+      ...(targetVolumeId ? { volumeId: targetVolumeId } : {}),
+    })
     await Promise.all([loadChapters(chapterId), refreshMeta(), refreshContextStatus()])
     message.success(getUserFacingMessage('writing.chapterCreated'))
   }
@@ -1682,6 +1700,61 @@ export default function Writing({ novelId }: Props) {
   const currentVolumeTruthStats = useMemo(
     () => computeVolumeTruthRevealStats(currentChapter, storyVolumes, storyFacts),
     [currentChapter, storyFacts, storyVolumes],
+  )
+  const chapterVolumeGroups = useMemo(() => {
+    const volumeById = new Map(storyVolumes.map((volume) => [volume.id, volume]))
+    const grouped = new Map<string, {
+      key: string
+      volumeId: number | null
+      label: string
+      meta: string
+      chapters: Chapter[]
+      sort: number
+    }>()
+
+    storyVolumes.forEach((volume) => {
+      grouped.set(`volume-${volume.id}`, {
+        key: `volume-${volume.id}`,
+        volumeId: volume.id,
+        label: getVolumeDisplayName(volume),
+        meta: `${getVolumeStatusLabel(volume.status)} · 目标 ${volume.targetWords.toLocaleString()} 字`,
+        chapters: [],
+        sort: volume.volumeNumber || 9999,
+      })
+    })
+
+    chapters.forEach((chapter) => {
+      const volume = chapter.volumeId ? volumeById.get(chapter.volumeId) : null
+      const key = volume ? `volume-${volume.id}` : 'unbound'
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          key,
+          volumeId: volume?.id || null,
+          label: volume ? getVolumeDisplayName(volume) : '未绑定卷',
+          meta: volume
+            ? `${getVolumeStatusLabel(volume.status)} · 目标 ${volume.targetWords.toLocaleString()} 字`
+            : '这些章节还没有归入卷级结构',
+          chapters: [],
+          sort: volume?.volumeNumber || 9999,
+        })
+      }
+      grouped.get(key)?.chapters.push(chapter)
+    })
+
+    return Array.from(grouped.values())
+      .filter((group) => group.chapters.length > 0 || group.volumeId !== null)
+      .sort((left, right) => left.sort - right.sort || left.label.localeCompare(right.label))
+      .map((group) => ({
+        ...group,
+        chapters: group.chapters.sort((left, right) => left.chapterNum - right.chapterNum || left.id - right.id),
+      }))
+  }, [chapters, storyVolumes])
+  const currentVolumeGroupKey = currentChapter
+    ? currentChapter.volumeId ? `volume-${currentChapter.volumeId}` : 'unbound'
+    : chapterVolumeGroups.find((group) => group.chapters.length > 0)?.key || chapterVolumeGroups[0]?.key || 'unbound'
+  const currentVolumeGroup = useMemo(
+    () => chapterVolumeGroups.find((group) => group.key === currentVolumeGroupKey) || null,
+    [chapterVolumeGroups, currentVolumeGroupKey],
   )
   const currentChapterStaleReasons = useMemo(() => parseStringArray(currentChapter?.staleReasonJson), [currentChapter?.staleReasonJson])
   const worldRulesSummary = useMemo(() => getWorldRulesSummary(currentNovel?.worldRulesJson), [currentNovel?.worldRulesJson])
@@ -2517,7 +2590,7 @@ export default function Writing({ novelId }: Props) {
 
   return (
     <>
-      <div className="chapter-console-page">
+      <div className="novel-writing-console-page chapter-console-page">
         {loading && !currentChapter ? (
           <div className="chapter-console-page__loading"><Spin size="large" /></div>
         ) : (
@@ -2579,48 +2652,83 @@ export default function Writing({ novelId }: Props) {
                 <section className="chapter-console-page__panel">
                   <SectionHeader
                     eyebrow="章节生产"
-                    title="章节列表"
-                    description={`共 ${chapters.length} 章，先切到当前章，再回到中间正文主画布持续写。`}
+                    title="卷 / 章导航"
+                    description={`共 ${chapterVolumeGroups.length || 0} 卷组、${chapters.length} 章，按长篇结构选择当前要写的章节。`}
+                    extra={(
+                      <Button size="small" icon={<UnorderedListOutlined />} onClick={() => navigate(`/novels/${novelId}/structure`)}>
+                        结构
+                      </Button>
+                    )}
                   />
                   <div className="chapter-console-page__chapter-list">
-                    {chapters.length > 0 ? chapters.map((chapter) => {
-                      const chapterGeneration = activeGeneration.chapterId === chapter.id && activeGeneration.status !== 'idle'
-                        ? activeGeneration
-                        : lastGenerationByChapter[chapter.id]
-                      const chapterGenerationMeta = chapterGeneration ? getGenerationTagMeta(chapterGeneration) : null
-                      return (
-                        <div
-                          key={chapter.id}
-                          className={`chapter-console-page__chapter-card ${currentChapterId === chapter.id ? 'is-active' : ''}`}
-                          onClick={() => void refreshChapter(chapter.id).then(() => { setCurrentChapterId(chapter.id); setAiResult(null) })}
-                          onMouseEnter={() => setHoverChapterId(chapter.id)}
-                          onMouseLeave={() => setHoverChapterId(null)}
-                        >
-                          <div className="chapter-console-page__chapter-copy">
-                            <strong>{formatChapterNumber(chapter.chapterNum)}</strong>
-                            <span>{chapter.title || `第${chapter.chapterNum}章`}</span>
-                            <small>{`${chapter.wordCount} 字 · ${getStatusLabel(chapter.status)}`}</small>
-                            <div className="chapter-console-page__chapter-tags">
-                              {parseStringArray(chapter.staleReasonJson).length > 0 ? <Tag color="warning">待同步</Tag> : null}
-                              {chapterGenerationMeta ? <Tag color={chapterGenerationMeta.color}>{chapterGenerationMeta.label}</Tag> : null}
-                            </div>
+                    {chapterVolumeGroups.length > 0 ? chapterVolumeGroups.map((group) => (
+                      <section
+                        key={group.key}
+                        className={`chapter-console-page__volume-group${group.key === currentVolumeGroupKey ? ' is-active' : ''}`}
+                      >
+                        <div className="chapter-console-page__volume-head">
+                          <div className="chapter-console-page__volume-title">
+                            <strong>{group.label}</strong>
+                            <span>{`${group.chapters.length} 章 · ${group.chapters.reduce((total, chapter) => total + (chapter.wordCount || 0), 0).toLocaleString()} 字`}</span>
                           </div>
-                          {hoverChapterId === chapter.id ? (
-                            <Button
-                              type="text"
-                              size="small"
-                              danger
-                              icon={<DeleteOutlined />}
-                              onClick={(event) => handleDeleteChapter(chapter.id, event)}
-                            />
-                          ) : null}
+                          <div className="chapter-console-page__volume-tools">
+                            <span>{group.meta}</span>
+                            {group.volumeId ? (
+                              <Button
+                                type="text"
+                                size="small"
+                                icon={<PlusOutlined />}
+                                onClick={() => void handleAddChapter(group.volumeId)}
+                              >
+                                新章
+                              </Button>
+                            ) : null}
+                          </div>
                         </div>
-                      )
-                    }) : <Empty description="还没有章节，先创建一个。" image={Empty.PRESENTED_IMAGE_SIMPLE} />}
+                        <div className="chapter-console-page__volume-chapters">
+                          {group.chapters.length > 0 ? group.chapters.map((chapter) => {
+                            const chapterGeneration = activeGeneration.chapterId === chapter.id && activeGeneration.status !== 'idle'
+                              ? activeGeneration
+                              : lastGenerationByChapter[chapter.id]
+                            const chapterGenerationMeta = chapterGeneration ? getGenerationTagMeta(chapterGeneration) : null
+                            return (
+                              <div
+                                key={chapter.id}
+                                className={`chapter-console-page__chapter-card ${currentChapterId === chapter.id ? 'is-active' : ''}`}
+                                onClick={() => void refreshChapter(chapter.id).then(() => { setCurrentChapterId(chapter.id); setAiResult(null) })}
+                                onMouseEnter={() => setHoverChapterId(chapter.id)}
+                                onMouseLeave={() => setHoverChapterId(null)}
+                              >
+                                <div className="chapter-console-page__chapter-copy">
+                                  <strong>{formatChapterNumber(chapter.chapterNum)}</strong>
+                                  <span>{chapter.title || `第${chapter.chapterNum}章`}</span>
+                                  <small>{`${chapter.wordCount} 字 · ${getStatusLabel(chapter.status)}`}</small>
+                                  <div className="chapter-console-page__chapter-tags">
+                                    {parseStringArray(chapter.staleReasonJson).length > 0 ? <Tag color="warning">待同步</Tag> : null}
+                                    {chapterGenerationMeta ? <Tag color={chapterGenerationMeta.color}>{chapterGenerationMeta.label}</Tag> : null}
+                                  </div>
+                                </div>
+                                {hoverChapterId === chapter.id ? (
+                                  <Button
+                                    type="text"
+                                    size="small"
+                                    danger
+                                    icon={<DeleteOutlined />}
+                                    onClick={(event) => handleDeleteChapter(chapter.id, event)}
+                                  />
+                                ) : null}
+                              </div>
+                            )
+                          }) : (
+                            <div className="chapter-console-page__volume-empty">当前卷还没有章节。</div>
+                          )}
+                        </div>
+                      </section>
+                    )) : <Empty description="还没有章节，先创建一个。" image={Empty.PRESENTED_IMAGE_SIMPLE} />}
                   </div>
                   <ActionBar align="between">
-                    <Button type="dashed" icon={<PlusOutlined />} onClick={() => void handleAddChapter()}>
-                      新建章节
+                    <Button type="dashed" icon={<PlusOutlined />} onClick={() => void handleAddChapter(currentVolumeGroup?.volumeId)}>
+                      在当前卷新建章
                     </Button>
                     <Select
                       size="small"

@@ -56,7 +56,7 @@ export default function ProjectSidebar({
       </div>
 
       <div className="project-sidebar__groups">
-        {navGroups.map((group) => {
+        {navGroups.map((group, groupIndex) => {
           const isOpen = openGroups[group.key] ?? group.key === activeGroup
           const canCollapse = group.items.length > 0
 
@@ -71,6 +71,7 @@ export default function ProjectSidebar({
                   <span className="project-sidebar__group-toggle-icon">
                     {canCollapse ? (isOpen ? <CaretDownFilled /> : <CaretRightFilled />) : <ClockCircleOutlined />}
                   </span>
+                  <span className="project-sidebar__group-index">{String(groupIndex + 1).padStart(2, '0')}</span>
                   <strong className="project-sidebar__group-title">{group.title}</strong>
                 </div>
                 {group.progress ? (

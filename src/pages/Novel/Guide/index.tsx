@@ -47,9 +47,11 @@ import {
 } from '../author-workflow'
 import {
   EMPTY_WORKFLOW_STATS,
+  GUIDED_WORKFLOW_PHASES,
   getAssetBloatSignal,
   getNextChapterReadiness,
   getWorkflowBlockers,
+  isBasicsReady,
   isEndgameDesignReady,
   isProjectBriefReady,
   isStoryCoreReady,
@@ -485,11 +487,36 @@ export default function GuidePage({ novelId }: Props) {
         },
       ]
     : []
+  const basicsReadyCount = [
+    currentNovel?.title,
+    currentNovel?.synopsis,
+    currentNovel?.userBackground,
+    currentNovel?.expandedBackground,
+  ].filter((value) => typeof value === 'string' && value.trim().length > 0).length
+
+  const nextChapterReadiness = useMemo(() => getNextChapterReadiness(stats), [stats])
 
   const steps = useMemo<StepConfig[]>(() => [
     {
+      key: 'basics',
+      title: '项目总览',
+      desc: '先固定书名、简介、背景和目标字数，让后续 AI 生成始终有同一组项目输入。',
+      status: isBasicsReady(currentNovel) ? '已填写' : '待补全',
+      count: `${basicsReadyCount}/4`,
+      support: isBasicsReady(currentNovel)
+        ? '项目入口信息已经稳定，后续 Brief、设定和文风可以沿同一方向推进。'
+        : '如果项目总览为空，后续每个模块都会反复猜题材、目标和故事边界。',
+      ready: isBasicsReady(currentNovel),
+      icon: <EditOutlined />,
+      action: (
+        <Button type="primary" ghost icon={<EditOutlined />} onClick={() => navigate(`/novels/${novelId}/overview`)}>
+          打开总览
+        </Button>
+      ),
+    },
+    {
       key: 'project-brief',
-      title: '项目立项',
+      title: '项目 Brief',
       desc: '先统一平台模式、目标读者、读者承诺、卖点和禁区，后续所有内容都以这个 Brief 为产品基线。',
       status: isProjectBriefReady(currentNovel) ? '已填写' : '待补全',
       count: `${projectBrief.readyCount}/6`,
@@ -505,8 +532,8 @@ export default function GuidePage({ novelId }: Props) {
       ),
     },
     {
-      key: 'core-settings',
-      title: '核心设定',
+      key: 'story-core',
+      title: '故事底盘',
       desc: '先写清 premise、主角起点、底层约束和语言边界，后面所有模块都会引用这里的上下文。',
       status: isStoryCoreReady(currentNovel) ? '已填写' : '待补全',
       count: `${storySettings.premiseReadyCount}/5`,
@@ -523,7 +550,7 @@ export default function GuidePage({ novelId }: Props) {
     },
     {
       key: 'theme-voice',
-      title: '主题与文风',
+      title: '主题文风',
       desc: '维护主题、情感核心、叙事视角、时态、风格规则和对白规则。',
       status: isThemeVoiceReady(currentNovel) ? '已填写' : '待补全',
       count: `${themeVoice.readyCount}/6`,
@@ -539,7 +566,7 @@ export default function GuidePage({ novelId }: Props) {
       ),
     },
     {
-      key: 'world-rules',
+      key: 'world-foundation',
       title: '世界规则',
       desc: '同步题材对应的种族、等级、势力、地图层级、时间制度和语言约束。',
       status: currentNovel?.worldRulesJson ? '已同步' : '待生成',
@@ -561,8 +588,8 @@ export default function GuidePage({ novelId }: Props) {
       ),
     },
     {
-      key: 'endgame',
-      title: '终局设计',
+      key: 'endgame-design',
+      title: '终局承诺',
       desc: '提前锁定最终冲突、主题答案、兑现承诺和最后一幕，避免后期只会扩写不会收束。',
       status: isEndgameDesignReady(currentNovel) ? '已填写' : '待补全',
       count: `${storySettings.endgameReadyCount}/8`,
@@ -578,8 +605,8 @@ export default function GuidePage({ novelId }: Props) {
       ),
     },
     {
-      key: 'map',
-      title: '地图与势力落点',
+      key: 'map-structure',
+      title: '地图落点',
       desc: '按题材自动搭出区域、国家、门派、基地或关键场景，让人物和事件有真实发生位置。',
       status: stats.mapCount > 0 ? '已生成' : '待生成',
       count: `${stats.mapCount} 个地图节点`,
@@ -600,8 +627,8 @@ export default function GuidePage({ novelId }: Props) {
       ),
     },
     {
-      key: 'items',
-      title: '物品与装备',
+      key: 'items-equipment',
+      title: '资源道具',
       desc: '先生成符合题材的模板，再把具体物品挂到人物、地点和事件上，避免后期凭空补道具。',
       status: stats.itemCount > 0 ? '已生成' : '待生成',
       count: `${stats.itemCount} 条物品记录`,
@@ -622,8 +649,8 @@ export default function GuidePage({ novelId }: Props) {
       ),
     },
     {
-      key: 'characters',
-      title: '人物批量生成',
+      key: 'character-roster',
+      title: '角色网络',
       desc: '建立在已有物品与装备基础上，按主角、主要人物、反派、功能角色和次要人物的配额先搭人物网，再逐个细修。',
       status: stats.characterCount > 0 ? '已生成' : '待生成',
       count: `${stats.characterCount} 位角色`,
@@ -644,7 +671,24 @@ export default function GuidePage({ novelId }: Props) {
       ),
     },
     {
-      key: 'threads',
+      key: 'resistance-system',
+      title: '阻力系统',
+      desc: '把反派、环境压力、制度压力和关系阻力登记成持续动作线，让剧情推进不靠临时制造冲突。',
+      status: stats.resistanceTrackCount > 0 ? '已建立' : '待补齐',
+      count: `${stats.resistanceTrackCount} 条阻力线`,
+      support: stats.resistanceTrackCount > 0
+        ? '阻力线已经能支撑主线、卷级闭环和章节冲突。'
+        : '没有阻力系统，故事线程和大纲容易只列事件，缺少推动人物选择的压力。',
+      ready: stats.resistanceTrackCount > 0,
+      icon: <ThunderboltOutlined />,
+      action: (
+        <Button type="primary" ghost icon={<ThunderboltOutlined />} onClick={() => navigate(`/novels/${novelId}/resistance`)}>
+          打开页面
+        </Button>
+      ),
+    },
+    {
+      key: 'story-threads',
       title: '故事线程',
       desc: '把主线、支线、悬念、关系线和回收点钉成可追踪线程，后续大纲、时间轴和正文都围着这层推进。',
       status: stats.threadCount > 0 ? '已生成' : '待生成',
@@ -666,8 +710,8 @@ export default function GuidePage({ novelId }: Props) {
       ),
     },
     {
-      key: 'story-design',
-      title: '故事设计',
+      key: 'story-plot',
+      title: '主线骨架',
       desc: '等世界、地图、人物、物品和线程都到位后，再统一设计主线、支线和结局。',
       status: isStoryPlotReady(currentNovel) ? '已生成' : '待生成',
       count: `${storySettings.storyDesignReadyCount}/4`,
@@ -688,7 +732,24 @@ export default function GuidePage({ novelId }: Props) {
       ),
     },
     {
-      key: 'outline',
+      key: 'volume-planning',
+      title: '卷级闭环',
+      desc: '把第一卷目标、阶段代价、卷末爆点和承接钉住，给后续章纲和正文一个清晰落点。',
+      status: stats.volumeCount > 0 ? '已建立' : '待补齐',
+      count: `${stats.volumeCount} 卷`,
+      support: stats.volumeCount > 0
+        ? '卷级闭环已经能约束大纲和章节合同。'
+        : '缺少卷级闭环时，正文通常能写开头，但后续目标、代价和爆点会失焦。',
+      ready: stats.volumeCount > 0,
+      icon: <BarsOutlined />,
+      action: (
+        <Button type="primary" ghost icon={<BarsOutlined />} onClick={() => navigate(`/novels/${novelId}/volume-design`)}>
+          打开页面
+        </Button>
+      ),
+    },
+    {
+      key: 'outline-structure',
       title: '故事大纲',
       desc: '把主线拆成连续推进的故事弧，为章节节奏和正文推进准备稳定骨架。',
       status: stats.outlineCount > 0 ? '已生成' : '待生成',
@@ -710,7 +771,7 @@ export default function GuidePage({ novelId }: Props) {
       ),
     },
     {
-      key: 'timeline',
+      key: 'timeline-causality',
       title: '事件时间轴',
       desc: '把关键事件按先后顺序串起来，记清谁在场、拿着什么、结果如何，还有哪些线没回收。',
       status: stats.timelineCount > 0 ? '已生成' : '待生成',
@@ -732,6 +793,26 @@ export default function GuidePage({ novelId }: Props) {
       ),
     },
     {
+      key: 'write-start',
+      title: '首章生产',
+      desc: '在人物、阻力、卷级、大纲、线程和时间轴都具备后，再进入章节合同和正文写作。',
+      status: nextChapterReadiness.ready ? '可开写' : '待补前置',
+      count: nextChapterReadiness.label,
+      support: nextChapterReadiness.reason,
+      ready: nextChapterReadiness.ready,
+      icon: <EditOutlined />,
+      action: (
+        <Space wrap>
+          <Button type="primary" ghost icon={<EditOutlined />} onClick={() => navigate(`/novels/${novelId}/contracts`)}>
+            章节合同
+          </Button>
+          <Button type="link" onClick={() => navigate(`/novels/${novelId}/writing/editor`)}>
+            正文写作
+          </Button>
+        </Space>
+      ),
+    },
+    {
       key: 'revision',
       title: '修订中心',
       desc: '把一致性问题、待同步章节和人工修订任务集中到一个入口，避免问题散落在各页。',
@@ -748,13 +829,12 @@ export default function GuidePage({ novelId }: Props) {
         </Button>
       ),
     },
-  ], [characterPreset.helperRoles, currentNovel, factionOptions.length, generateCharacters, generateItems, generateMap, generateOutline, generateStoryDesign, generateThreads, generateTimeline, itemProfile.title, navigate, novelId, projectBrief.readyCount, runningKey, speciesOptions.length, stats, storySettings.endgameReadyCount, storySettings.premiseReadyCount, storySettings.storyDesignReadyCount, syncWorldRules, themeVoice.readyCount])
+  ], [basicsReadyCount, characterPreset.helperRoles, currentNovel, factionOptions.length, generateCharacters, generateItems, generateMap, generateOutline, generateStoryDesign, generateThreads, generateTimeline, itemProfile.title, navigate, nextChapterReadiness, novelId, projectBrief.readyCount, runningKey, speciesOptions.length, stats, storySettings.endgameReadyCount, storySettings.premiseReadyCount, storySettings.storyDesignReadyCount, syncWorldRules, themeVoice.readyCount])
 
   const structureReadyCount = steps.filter((step) => step.ready).length
   const nextStep = steps.find((step) => !step.ready) || null
   const pendingSteps = steps.filter((step) => !step.ready)
   const queuedSteps = pendingSteps.slice(1, 4)
-  const nextChapterReadiness = useMemo(() => getNextChapterReadiness(stats), [stats])
   const suggestedAuthorMode = useMemo(
     () => resolveSuggestedAuthorWorkMode(currentNovel, stats, qualitySummary),
     [currentNovel, qualitySummary, stats],
@@ -770,22 +850,11 @@ export default function GuidePage({ novelId }: Props) {
   }, [suggestedAuthorMode.mode, syncSuggestedAuthorMode])
 
   const workflowPhases = useMemo(() => ([
+    ...GUIDED_WORKFLOW_PHASES,
     {
-      key: 'foundation',
-      title: '底盘定标',
-      summary: '先把立项、基础设定、文风和世界规则压稳。',
-      stepKeys: ['project-brief', 'core-settings', 'theme-voice', 'world-rules'],
-    },
-    {
-      key: 'structure',
-      title: '资产承接',
-      summary: '把地图、角色、物品、线程、剧情和时间轴接到可写结构上。',
-      stepKeys: ['map', 'items', 'characters', 'threads', 'story-design', 'outline', 'timeline'],
-    },
-    {
-      key: 'closure',
-      title: '收口校准',
-      summary: '在开写前确认修订积压、同步任务和正文入口已经收口。',
+      key: 'revision-quality',
+      title: '修订质检',
+      summary: '清理阻塞、上下文同步和质量问题，再继续扩写或批量推进。',
       stepKeys: ['revision'],
     },
   ] as const), [])
@@ -854,6 +923,7 @@ export default function GuidePage({ novelId }: Props) {
       layout="wide"
       eyebrow="创作工作流"
       title="创作向导"
+      description="按项目定标、世界角色、剧情结构、卷章生产和修订质检推进。"
       actions={(
         <Space wrap>
           <Button
@@ -880,7 +950,7 @@ export default function GuidePage({ novelId }: Props) {
           items={[
             { label: '题材', value: currentNovel?.genreName || '未设置' },
             { label: '开书路径', value: currentNovel?.launchMode === 'fast_launch' ? '极速开书' : '专业长篇' },
-            { label: '结构完成度', value: `${structureReadyCount}/${steps.length} 步就绪` },
+            { label: '流程完成度', value: `${structureReadyCount}/${steps.length} 步就绪` },
             {
               label: '时间制度',
               value: TIME_MODE_LABELS[worldRules.timelineConfig.calendarType] || worldRules.timelineConfig.calendarType,
@@ -1076,6 +1146,7 @@ export default function GuidePage({ novelId }: Props) {
         extra={<div className="novel-pill">{authorModeSource === 'manual' ? '手动选择' : '系统推荐'}</div>}
       >
         <div className="novel-guide-page__section-stack">
+          <div className="novel-guide-page__mode-reason">{authorWorkflow.modeReason}</div>
           <div className="novel-guide-page__mode-row">
             {(['quick_start', 'asset_building', 'daily_push', 'revision_closure'] as AuthorWorkMode[]).map((mode) => (
               <Button
@@ -1105,6 +1176,7 @@ export default function GuidePage({ novelId }: Props) {
             <div className="guided-step__action-head">
               <div className="guided-step__action-copy">
                 <strong>{authorWorkflow.primaryTask.title}</strong>
+                <span>{authorWorkflow.primaryTask.reason}</span>
               </div>
               <Button type="primary" onClick={() => navigate(resolveAuthorWorkflowHref(novelId, authorWorkflow.primaryTask.entryPage))}>
                 {authorWorkflow.primaryTask.actionLabel}
@@ -1118,6 +1190,7 @@ export default function GuidePage({ novelId }: Props) {
                 <div key={task.id} className="guided-step__action-card">
                   <div className="guided-step__action-copy">
                     <strong>{task.title}</strong>
+                    <span>{task.reason}</span>
                   </div>
                   <Button onClick={() => navigate(resolveAuthorWorkflowHref(novelId, task.entryPage))}>
                     {task.actionLabel}
@@ -1135,6 +1208,7 @@ export default function GuidePage({ novelId }: Props) {
                     <Tag color={getSeverityColor(blocker.severity)}>{getSeverityLabel(blocker.severity)}</Tag>
                     <strong>{blocker.title}</strong>
                   </div>
+                  <div className="novel-issue-item__desc">{blocker.reason}</div>
                   <Button size="small" onClick={() => navigate(resolveAuthorWorkflowHref(novelId, blocker.entryPage))}>
                     {blocker.actionLabel}
                   </Button>
@@ -1146,7 +1220,7 @@ export default function GuidePage({ novelId }: Props) {
           {authorWorkflow.impactNotices.length > 0 ? (
             <div className="novel-note-list">
               {authorWorkflow.impactNotices.map((notice) => (
-                <div key={notice.id} className="novel-note-list__item">{notice.title}</div>
+                <div key={notice.id} className="novel-note-list__item">{`${notice.title}：${notice.reason}`}</div>
               ))}
             </div>
           ) : null}
@@ -1154,7 +1228,7 @@ export default function GuidePage({ novelId }: Props) {
       </WorkspacePanel>
 
       <WorkspacePanel
-        title="推荐推进顺序"
+        title="完整创作链路"
         extra={<div className="novel-pill">{nextChapterReadiness.label}</div>}
       >
         <div className="novel-guide__flow-head">

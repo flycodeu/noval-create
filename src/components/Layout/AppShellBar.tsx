@@ -7,7 +7,7 @@ import './AppLayout.css'
 
 const SECTION_LABELS = [
   { key: '/novels', label: '我的小说' },
-  { key: '/models', label: '模型管理' },
+  { key: '/models', label: '模型与搜索' },
   { key: '/templates', label: '风格模板' },
   { key: '/prompts', label: '提示词' },
   { key: '/tasks', label: '任务中心' },
