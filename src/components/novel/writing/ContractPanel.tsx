@@ -11,11 +11,10 @@ export interface ContractPanelSection {
 
 interface ContractPanelProps {
   title: string
-  subtitle?: string
   sections: ContractPanelSection[]
 }
 
-export default function ContractPanel({ title, subtitle: _subtitle, sections }: ContractPanelProps) {
+export default function ContractPanel({ title, sections }: ContractPanelProps) {
   return (
     <section className="writing-side-panel">
       <div className="writing-side-panel__header">

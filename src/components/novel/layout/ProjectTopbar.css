@@ -117,7 +117,7 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: nowrap;
   flex: 0 1 auto;
   min-width: 0;
@@ -127,7 +127,7 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
   flex-wrap: nowrap;
 }
@@ -137,7 +137,7 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
-  max-width: 300px;
+  max-width: 240px;
   min-height: 32px;
   padding: 0 12px;
   border-radius: 999px;
@@ -231,6 +231,12 @@
   box-shadow: none;
 }
 
+.project-topbar__control--icon.ant-btn {
+  width: 34px;
+  min-width: 34px;
+  padding-inline: 0;
+}
+
 .project-topbar__control.ant-btn:hover,
 .project-topbar__control.ant-btn:focus {
   border-color: color-mix(in srgb, var(--accent) 18%, var(--project-topbar-border));
@@ -312,7 +318,7 @@
 
 @media (max-width: 1320px) {
   .project-topbar__status-badge {
-    max-width: 220px;
+    max-width: 190px;
   }
 
   .project-topbar__control:not(.project-topbar__control--accent).ant-btn {
@@ -352,7 +358,7 @@
 
   .project-topbar__status-badge {
     flex: 0 0 auto;
-    max-width: 240px;
+    max-width: 220px;
   }
 
   .project-topbar__mode-button {
@@ -427,6 +433,12 @@
     flex: 0 0 auto;
     height: 38px;
     padding-inline: 10px;
+  }
+
+  .project-topbar__control--icon.ant-btn {
+    width: 38px;
+    min-width: 38px;
+    padding-inline: 0;
   }
 
   .project-topbar__control--accent.ant-btn {

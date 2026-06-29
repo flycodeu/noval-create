@@ -88,14 +88,14 @@ export const NOVEL_LAUNCH_MODE_OPTIONS: Array<{
   {
     value: 'professional_longform',
     label: '专业长篇路径',
-    badge: '重底盘',
-    description: '保留完整的底盘、资产、结构与一致性流程，适合重规划作者。',
+    badge: '完整规划',
+    description: '完整保留设定、人物、结构和一致性检查流程，适合想认真规划长篇的作者。',
   },
   {
     value: 'fast_launch',
     label: '极速开书路径',
     badge: '先开写',
-    description: '只填最关键的 6 个字段，自动补出第一卷、前三章骨架和关键角色卡。',
+    description: '只填最关键的 6 项，系统自动补出第一卷、开篇前三章框架和主要角色，让你尽快开写。',
   },
 ]
 

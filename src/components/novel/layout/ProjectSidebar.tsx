@@ -86,6 +86,7 @@ export default function ProjectSidebar({
                     const pending = !active && item.key === pendingKey
                     const recent = !active && item.key === recentKey
                     const attention = item.hasBlocker
+                    const metaText = recent ? '最近访问' : item.meta?.trim()
 
                     return (
                       <button
@@ -97,14 +98,13 @@ export default function ProjectSidebar({
                         onClick={() => handleNavigate(item.route)}
                         aria-current={active ? 'page' : undefined}
                         className={`project-sidebar__group-item${active ? ' is-active' : ''}${pending ? ' is-pending' : ''}${recent ? ' is-recent' : ''}${attention ? ' has-attention' : ''}`}
+                        title={item.label}
                       >
                         <span className="project-sidebar__group-item-bar" aria-hidden="true" />
                         <div className="project-sidebar__group-item-head">
                           <span className="project-sidebar__group-item-copy">
                             <span className="project-sidebar__group-item-label">{item.label}</span>
-                            <span className="project-sidebar__group-item-meta">
-                              {recent ? '最近访问' : item.meta || '进入模块继续推进'}
-                            </span>
+                            {metaText ? <span className="project-sidebar__group-item-meta">{metaText}</span> : null}
                           </span>
                           <StatusTag status={item.status} size="small" />
                         </div>

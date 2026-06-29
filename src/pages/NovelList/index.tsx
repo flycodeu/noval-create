@@ -666,8 +666,8 @@ export default function NovelList() {
                 name="writingContractTags"
                 label="写作类型"
                 extra={selectedLaunchMode === 'fast_launch'
-                  ? '极速开书会把这些标签直接压进文风护栏与前三章骨架。'
-                  : '“爽文 / 写实”只能选一个；其余标签可叠加，自定义标签只作为弱提示。'}
+                  ? '极速模式会根据这些标签来定全书的文风和开篇走向。'
+                  : '“爽文 / 写实”只能选一个；其它标签可以叠加，自己填的标签只作轻微参考。'}
                 rules={[{
                   validator: async (_, value?: string[]) => {
                     const error = getWritingContractValidationError(normalizeWritingContractTags(value))
@@ -714,8 +714,8 @@ export default function NovelList() {
                 type="info"
                 showIcon
                 className="novel-list-page__wizard-note"
-                message="极速开书建议"
-                description="先用一句话写清主角处境、故事卖点、主线冲突和绝对禁区。系统会把这些字段压进前三章骨架、文风护栏和最小资产底盘。"
+                message="填写建议"
+                description="先用一句话写清主角处境、故事卖点、主线冲突和绝对禁区。填好后，AI 会据此生成开篇前三章和基础设定，让你直接开始写。"
               />
               <Row gutter={12}>
                 <Col xs={24} md={12}>
@@ -768,7 +768,7 @@ export default function NovelList() {
                     name="tabooRules"
                     label="禁区"
                     rules={[{ required: true, message: '请填写禁区' }]}
-                    extra="用于自动生成文风护栏和剧情边界。"
+                    extra="用来约束 AI 的文风和剧情边界，避免写跑偏。"
                   >
                     <Input.TextArea
                       autoSize={FAST_TEXTAREA_AUTO_SIZE}
@@ -793,7 +793,7 @@ export default function NovelList() {
               </Form.Item>
 
               <div className="novel-list-page__fast-note">
-                系统会自动补出：基础立项、文风护栏、第一卷目标、前三章骨架、主角/反派简版卡，以及可直接进入写作的最小结构。
+                系统会自动补出：基础设定、文风规则、第一卷目标、开篇前三章框架、主角/反派简介，以及能直接开写的基本结构。
               </div>
             </>
           )}

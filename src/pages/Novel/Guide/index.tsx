@@ -588,23 +588,6 @@ export default function GuidePage({ novelId }: Props) {
       ),
     },
     {
-      key: 'endgame-design',
-      title: '终局承诺',
-      desc: '提前锁定最终冲突、主题答案、兑现承诺和最后一幕，避免后期只会扩写不会收束。',
-      status: isEndgameDesignReady(currentNovel) ? '已填写' : '待补全',
-      count: `${storySettings.endgameReadyCount}/8`,
-      support: isEndgameDesignReady(currentNovel)
-        ? '终局收束已经有了明确落点，后续地图、线程和故事设计更容易围绕同一终点推进。'
-        : '如果终局没有被提前锁死，长篇越往后越容易出现目标漂移、回收无力和结尾失焦。',
-      ready: isEndgameDesignReady(currentNovel),
-      icon: <BarsOutlined />,
-      action: (
-        <Button type="primary" ghost icon={<BarsOutlined />} onClick={() => navigate(`/novels/${novelId}/endgame`)}>
-          打开页面
-        </Button>
-      ),
-    },
-    {
       key: 'map-structure',
       title: '地图落点',
       desc: '按题材自动搭出区域、国家、门派、基地或关键场景，让人物和事件有真实发生位置。',
@@ -716,7 +699,7 @@ export default function GuidePage({ novelId }: Props) {
       status: isStoryPlotReady(currentNovel) ? '已生成' : '待生成',
       count: `${storySettings.storyDesignReadyCount}/4`,
       support: isStoryPlotReady(currentNovel)
-        ? '故事设计已经成型，接下来可以直接转去结构和时间线。'
+        ? '故事设计已经成型，接下来锁定终局，再压进卷级闭环和大纲。'
         : '这一步把主线目标、核心冲突、推进链和结局方向压成统一骨架，避免大纲从空白起步。',
       ready: isStoryPlotReady(currentNovel),
       icon: <BarsOutlined />,
@@ -729,6 +712,23 @@ export default function GuidePage({ novelId }: Props) {
             进入页面
           </Button>
         </Space>
+      ),
+    },
+    {
+      key: 'endgame-design',
+      title: '终局承诺',
+      desc: '提前锁定最终冲突、主题答案、兑现承诺和最后一幕，避免后期只会扩写不会收束。',
+      status: isEndgameDesignReady(currentNovel) ? '已填写' : '待补全',
+      count: `${storySettings.endgameReadyCount}/8`,
+      support: isEndgameDesignReady(currentNovel)
+        ? '终局收束已经有了明确落点，接下来卷级闭环和大纲可以围绕同一终点收束。'
+        : '主线骨架已经成形，趁现在锁死终局，长篇越往后越不容易出现目标漂移、回收无力和结尾失焦。',
+      ready: isEndgameDesignReady(currentNovel),
+      icon: <BarsOutlined />,
+      action: (
+        <Button type="primary" ghost icon={<BarsOutlined />} onClick={() => navigate(`/novels/${novelId}/endgame`)}>
+          打开页面
+        </Button>
       ),
     },
     {
@@ -923,7 +923,7 @@ export default function GuidePage({ novelId }: Props) {
       layout="wide"
       eyebrow="创作工作流"
       title="创作向导"
-      description="按项目定标、世界角色、剧情结构、卷章生产和修订质检推进。"
+      description="按项目底盘、世界地点、人物阵营、剧情伏笔、卷章大纲、正文生产和回写质检推进。"
       actions={(
         <Space wrap>
           <Button
@@ -1099,7 +1099,7 @@ export default function GuidePage({ novelId }: Props) {
           message={assetBloat.risk === 'high' ? '首章前资产已经开始膨胀' : '当前资产增长过快'}
           action={(
             <Button size="small" onClick={() => navigate(`/novels/${novelId}/${stats.outlineCount > 0 ? 'writing' : 'outline'}`)}>
-              {stats.outlineCount > 0 ? '直接开写' : '先压成大纲'}
+              {stats.outlineCount > 0 ? '直接开写' : '先整理成大纲'}
             </Button>
           )}
         />
@@ -1119,7 +1119,7 @@ export default function GuidePage({ novelId }: Props) {
           className="novel-guide__alert"
           type="warning"
           showIcon
-          message="整本书还没有写作类型锚点"
+          message="整本书还没有设定写作类型"
         />
       )}
 
@@ -1137,7 +1137,7 @@ export default function GuidePage({ novelId }: Props) {
           className="novel-guide__alert"
           type="info"
           showIcon
-          message="产品立项与文风底盘还没有钉稳"
+          message="项目定位和文风还没有定好"
         />
       )}
 

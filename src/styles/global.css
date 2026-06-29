@@ -13827,3 +13827,201 @@ html[data-runtime="web"] .project-topbar__main-row {
   }
 }
 
+/* Comprehensive novel workspace optimization: clearer IA, calmer density, fewer note-like blocks. */
+.app-layout .novel-route-shell--single {
+  --novel-shell-sidebar-width: 292px;
+  border-radius: 14px;
+}
+
+.app-layout .novel-route-shell--single .novel-route-shell__content-body {
+  padding: 16px 18px 20px;
+}
+
+.app-layout .novel-route-shell--single .novel-workspace {
+  gap: 18px;
+  padding: 20px 22px 24px;
+  border-radius: 14px;
+}
+
+.app-layout .novel-workspace > .novel-hero,
+.app-layout .novel-workspace > .novel-workspace__body,
+.app-layout .novel-workspace > .novel-workspace__footer {
+  width: min(100%, 1680px);
+}
+
+.app-layout .novel-workspace__body,
+.app-layout .novel-workspace__main,
+.app-layout .novel-workspace--wide .novel-workspace__main {
+  gap: 18px;
+}
+
+.app-layout .novel-hero {
+  margin-bottom: 0;
+  padding: 18px 20px;
+  border-radius: 14px;
+}
+
+.app-layout .novel-hero__title {
+  font-size: 27px;
+  line-height: 1.24;
+}
+
+.app-layout .novel-hero__description {
+  max-width: 88ch;
+  line-height: 1.68;
+}
+
+.app-layout .novel-panel {
+  border-radius: 12px;
+}
+
+.app-layout .novel-panel__header {
+  padding: 14px 18px 11px;
+}
+
+.app-layout .novel-panel__body,
+.app-layout .novel-workspace--wide .novel-panel__body {
+  padding: 16px 18px 18px;
+}
+
+.app-layout .novel-panel--scrollable .novel-panel__body {
+  max-height: min(66vh, 680px);
+}
+
+.app-layout .guided-step__field-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 16px;
+}
+
+.app-layout .novel-grid--2,
+.app-layout .novel-grid--3 {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 16px;
+}
+
+.app-layout .guided-step__field-card {
+  padding: 16px 18px;
+  border-radius: 12px;
+}
+
+.app-layout .novel-note-list {
+  gap: 8px;
+}
+
+.app-layout .novel-note-list__item {
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-muted) 76%, var(--bg-surface) 24%);
+  border-color: color-mix(in srgb, var(--border-default) 86%, transparent 14%);
+  font-size: 12px;
+  line-height: 1.62;
+}
+
+.app-layout .novel-workspace__guide {
+  margin-bottom: 0;
+}
+
+.app-layout .novel-step-guide {
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-muted) 72%, var(--bg-surface) 28%);
+  box-shadow: none;
+}
+
+.app-layout .novel-step-guide__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.app-layout .novel-step-guide__eyebrow {
+  letter-spacing: 0.08em;
+}
+
+.app-layout .novel-step-guide__head strong {
+  font-size: 14px;
+}
+
+.app-layout .novel-step-guide__grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 8px;
+}
+
+.app-layout .novel-step-guide__item {
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--bg-surface);
+}
+
+.app-layout .novel-step-guide__index {
+  min-width: 30px;
+  height: 30px;
+  font-size: 11px;
+}
+
+.app-layout .novel-step-guide__copy span {
+  line-height: 1.55;
+}
+
+@media (min-width: 1200px) {
+  .app-layout .novel-route-shell--single {
+    grid-template-columns: var(--novel-shell-sidebar-width) minmax(0, 1fr);
+  }
+
+  .app-layout .novel-route-shell--single.novel-route-shell--assistant-open {
+    grid-template-columns: var(--novel-shell-sidebar-width) minmax(0, 1fr) var(--novel-shell-assistant-width) !important;
+  }
+
+  .app-layout .novel-hero--has-actions {
+    grid-template-columns: minmax(420px, 1fr) minmax(320px, auto);
+    grid-template-areas:
+      "copy actions"
+      "context context"
+      "metrics metrics";
+  }
+
+  .app-layout .novel-hero__actions {
+    justify-self: end;
+    align-content: start;
+  }
+
+  .app-layout .novel-workspace__body--with-aside {
+    grid-template-columns: minmax(0, 1.5fr) minmax(340px, 0.72fr);
+    gap: 18px;
+  }
+}
+
+@media (min-width: 1200px) and (max-width: 1440px) {
+  .app-layout .novel-route-shell--single {
+    --novel-shell-sidebar-width: 276px;
+  }
+}
+
+@media (max-width: 1199px) {
+  .app-layout .novel-route-shell--single .novel-route-shell__content-body,
+  .app-layout .novel-route-shell--single .novel-workspace {
+    padding: 14px;
+  }
+
+  .app-layout .novel-hero {
+    padding: 16px;
+  }
+}
+
+@media (max-width: 640px) {
+  .app-layout .novel-route-shell--single .novel-route-shell__content-body,
+  .app-layout .novel-route-shell--single .novel-workspace {
+    padding: 10px;
+  }
+
+  .app-layout .novel-panel__header,
+  .app-layout .novel-panel__body,
+  .app-layout .novel-workspace--wide .novel-panel__body,
+  .app-layout .guided-step__field-card {
+    padding-inline: 12px;
+  }
+}
+

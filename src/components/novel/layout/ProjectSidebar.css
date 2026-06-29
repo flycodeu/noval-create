@@ -8,16 +8,15 @@
   --project-sidebar-text-muted: var(--text-muted);
   --project-sidebar-accent: var(--accent);
   display: grid;
-  gap: 12px;
+  gap: 10px;
   height: 100%;
   min-height: 0;
 }
 
 .project-sidebar__summary,
-.project-sidebar__group,
 .project-sidebar__task-strip {
   border: 1px solid var(--project-sidebar-border);
-  border-radius: 12px;
+  border-radius: 10px;
   background: color-mix(in srgb, var(--project-sidebar-surface) 94%, transparent 6%);
   box-shadow: var(--shadow-card, 0 2px 8px rgba(0, 0, 0, 0.06));
 }
@@ -27,7 +26,7 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
-  padding: 14px;
+  padding: 12px;
 }
 
 .project-sidebar__summary-copy {
@@ -58,26 +57,35 @@
 
 .project-sidebar__task-strip {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
-  padding: 10px 12px;
+  padding: 9px 11px;
   color: var(--project-sidebar-text-secondary);
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.45;
+}
+
+.project-sidebar__task-strip span {
+  min-width: 0;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .project-sidebar__groups {
   display: grid;
-  gap: 10px;
+  gap: 6px;
   min-height: 0;
   overflow-y: auto;
-  padding-right: 2px;
+  padding: 2px 2px 6px 0;
 }
 
 .project-sidebar__group {
   display: grid;
-  gap: 6px;
-  padding: 8px;
+  gap: 3px;
+  padding: 7px 0 8px;
+  border-top: 1px solid color-mix(in srgb, var(--project-sidebar-border) 82%, transparent 18%);
 }
 
 .project-sidebar__group-toggle {
@@ -85,11 +93,11 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  min-height: 34px;
-  padding: 7px 8px;
+  gap: 8px;
+  min-height: 30px;
+  padding: 5px 7px;
   border: none;
-  border-radius: 8px;
+  border-radius: 7px;
   background: transparent;
   color: inherit;
   cursor: pointer;
@@ -104,7 +112,7 @@
 .project-sidebar__group-item-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   min-width: 0;
 }
 
@@ -134,9 +142,9 @@
 
 .project-sidebar__group-title {
   color: var(--project-sidebar-text);
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.45;
-  font-weight: 700;
+  font-weight: 800;
 }
 
 .project-sidebar__group-progress {
@@ -147,17 +155,17 @@
 
 .project-sidebar__group-items {
   display: grid;
-  gap: 4px;
+  gap: 2px;
 }
 
 .project-sidebar__group-item {
   position: relative;
   width: 100%;
   display: grid;
-  gap: 4px;
-  padding: 9px 10px 9px 13px;
+  gap: 3px;
+  padding: 7px 8px 7px 12px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 7px;
   background: transparent;
   color: inherit;
   text-align: left;
@@ -209,7 +217,7 @@
   display: -webkit-box;
   overflow: hidden;
   color: var(--project-sidebar-text);
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.35;
   font-weight: 600;
   overflow-wrap: anywhere;
@@ -224,6 +232,11 @@
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.project-sidebar__group-item-head > .status-tag {
+  align-self: start;
+  margin-top: 1px;
 }
 
 @keyframes project-sidebar-pulse {

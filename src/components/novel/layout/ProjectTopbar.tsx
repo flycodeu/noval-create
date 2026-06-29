@@ -23,7 +23,6 @@ import './ProjectTopbar.css'
 interface ProjectTopbarProps {
   projectTitle: string
   workspaceLabel: string
-  workspaceSummary?: string
   mode: WorkspaceViewMode
   onModeChange: (mode: WorkspaceViewMode) => void
   onBack: () => void
@@ -52,7 +51,6 @@ interface ProjectTopbarProps {
 export default function ProjectTopbar({
   projectTitle,
   workspaceLabel,
-  workspaceSummary: _workspaceSummary,
   mode,
   onModeChange,
   onBack,
@@ -214,27 +212,19 @@ export default function ProjectTopbar({
                 )
               })}
             </div>
-            <Button className="project-topbar__control" icon={<SearchOutlined />} onClick={onSearch} aria-label="搜索工作区" title="搜索工作区">
-              搜索
-            </Button>
-            <Button className="project-topbar__control" icon={<SwapOutlined />} onClick={onJumpChapter} aria-label="章节跳转" title="章节跳转">
-              章节
-            </Button>
+            <Button className="project-topbar__control project-topbar__control--icon" icon={<SearchOutlined />} onClick={onSearch} aria-label="搜索工作区" title="搜索工作区" />
+            <Button className="project-topbar__control project-topbar__control--icon" icon={<SwapOutlined />} onClick={onJumpChapter} aria-label="章节跳转" title="章节跳转" />
             {onToggleAssistant ? (
               <Button
-                className={`project-topbar__control${assistantToggleActive ? ' is-active' : ''}`}
+                className={`project-topbar__control project-topbar__control--icon${assistantToggleActive ? ' is-active' : ''}`}
                 icon={<RobotOutlined />}
                 onClick={onToggleAssistant}
                 aria-label="AI 助手"
                 aria-pressed={assistantToggleActive}
                 title="AI 助手"
-              >
-                AI 助手
-              </Button>
+              />
             ) : null}
-            <Button className="project-topbar__control" icon={<RollbackOutlined />} onClick={onUndo} disabled={!canUndo} aria-label="撤销最近操作" title="撤销最近操作">
-              撤销
-            </Button>
+            <Button className="project-topbar__control project-topbar__control--icon" icon={<RollbackOutlined />} onClick={onUndo} disabled={!canUndo} aria-label="撤销最近操作" title="撤销最近操作" />
             {showNextStep && onNextStep ? (
               <Button
                 className="project-topbar__control project-topbar__control--accent"
@@ -248,7 +238,7 @@ export default function ProjectTopbar({
               </Button>
             ) : null}
             <Dropdown menu={overflowMenu} trigger={['click']}>
-              <Button className="project-topbar__control" icon={<EllipsisOutlined />} aria-label="更多操作" title="更多操作">更多</Button>
+              <Button className="project-topbar__control project-topbar__control--icon" icon={<EllipsisOutlined />} aria-label="更多操作" title="更多操作" />
             </Dropdown>
           </div>
         </div>

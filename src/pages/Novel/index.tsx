@@ -88,7 +88,7 @@ const WORKSPACE_ASSISTANT_DEFAULT_WIDTH = 380
 const WORKSPACE_ASSISTANT_MIN_WIDTH = 320
 const WORKSPACE_ASSISTANT_MAX_WIDTH = 680
 const WORKSPACE_CONTENT_MIN_WIDTH = 720
-const WORKSPACE_SIDEBAR_WIDTH = 280
+const WORKSPACE_SIDEBAR_WIDTH = 292
 
 const WORKSPACE_STAGE_LOADERS = {
   guide: () => import('./Studio'),
@@ -996,7 +996,6 @@ export default function NovelRouter() {
       <ProjectTopbar
         projectTitle={currentNovel?.title || '未命名小说'}
         workspaceLabel={currentPageMeta.label}
-        workspaceSummary={currentPageMeta.summary || undefined}
         statusTone={statusTone}
         statusText={sidebarStatusText}
         mode={workspaceViewMode}

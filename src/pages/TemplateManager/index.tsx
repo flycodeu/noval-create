@@ -21,19 +21,19 @@ const TEMPLATE_USAGE: Record<string, {
   placeholder: string
 }> = {
   style: {
-    entry: '新建小说弹窗的「文风模板」下拉框',
-    appliedTo: '正文写作、章节改写和上下文组装中的「文风参考」',
-    cardMeta: '开书入口 / 正文文风参考',
+    entry: '新建小说时的「文风模板」下拉框',
+    appliedTo: 'AI 写正文、改写章节时的文风参考',
+    cardMeta: '新建小说可选 · 文风参考',
     fieldGuide: '推荐字段：perspective、sentence_style、emotion_style、dialogue_style、description_style、forbidden、example_tone。',
-    modalDescription: '文风模板会在开书时绑定到小说，后续正文生成会把它作为文风参考，而不是替代提示词页的运行 prompt。',
+    modalDescription: '选好这个文风模板后，AI 写正文时会照着它的风格来写，让全书文风保持统一。',
     placeholder: '{\n  "perspective": "第三人称近距",\n  "sentence_style": "短句推进，少空泛总结",\n  "forbidden": ["空泛燃句", "模板化情绪"]\n}',
   },
   world: {
-    entry: '新建小说弹窗的「世界模板」下拉框',
-    appliedTo: '背景生成、世界摘要和章节上下文中的「世界底板」',
-    cardMeta: '开书入口 / 世界观底板',
+    entry: '新建小说时的「世界模板」下拉框',
+    appliedTo: 'AI 生成背景、写章节时的世界设定参考',
+    cardMeta: '新建小说可选 · 世界设定参考',
     fieldGuide: '推荐字段：time_period、technology_level、social_structure、common_elements、forbidden_elements。',
-    modalDescription: '世界观模板会在开书时绑定到小说，后续背景和章节上下文会读取它作为世界底板，避免设定悬浮。',
+    modalDescription: '选好这个世界模板后，AI 会基于它来生成背景和写章节，让世界设定前后一致。',
     placeholder: '{\n  "time_period": "当代",\n  "technology_level": "现代城市基础设施",\n  "common_elements": ["职场压力", "社交媒体"]\n}',
   },
 }
@@ -254,15 +254,15 @@ export default function TemplateManager() {
         className="admin-page template-manager-page"
         layout="wide"
         heroVariant="compact"
-        eyebrow="开书底板"
-        title="风格模板"
-        description="维护新建小说时可选的文风与世界底板。模板先在开书弹窗绑定到小说，再进入上下文和正文写作参考；提示词页仍负责运行时 prompt。"
+        eyebrow="创作模板"
+        title="文风与世界模板"
+        description="这里管理新建小说时可以选用的文风模板和世界设定模板。选好模板后，AI 写正文和生成背景时会参考它，让全书的风格和设定保持统一。"
         actions={(
           <div className="admin-toolbar">
             <div className="novel-pill">{`当前查看：${TYPE_LABELS[activeTab]}`}</div>
             <div className="admin-toolbar__actions">
               <Button onClick={() => navigate('/novels')}>
-                新建小说时选用
+                去新建小说
               </Button>
               <Button icon={<ReloadOutlined />} loading={refreshing} onClick={() => void loadTemplates()}>
                 刷新模板
@@ -284,19 +284,19 @@ export default function TemplateManager() {
       >
         <WorkspacePanel
           title="模板目录"
-          description="内置模板只读，自定义模板可以编辑或删除。模板用于开书阶段给文风和世界底板提供可复用约束。"
+          description="内置模板只能查看，自己新建的模板可以编辑或删除。模板用来在新建小说时一键套用一套固定的文风或世界设定。"
         >
           <div className="template-usage-overview">
             <div className="template-usage-overview__item">
-              <span>选择入口</span>
+              <span>在哪里选</span>
               <strong>{activeUsage.entry}</strong>
             </div>
             <div className="template-usage-overview__item">
-              <span>生效位置</span>
+              <span>用在哪里</span>
               <strong>{activeUsage.appliedTo}</strong>
             </div>
             <div className="template-usage-overview__item template-usage-overview__item--wide">
-              <span>编辑重点</span>
+              <span>编辑提示</span>
               <strong>{activeUsage.fieldGuide}</strong>
             </div>
           </div>
@@ -349,7 +349,7 @@ export default function TemplateManager() {
               options={Object.entries(TYPE_LABELS).map(([k, v]) => ({ value: k, label: v }))}
             />
           </Form.Item>
-          <Form.Item name="description" label="描述" extra="用于列表卡片说明适用题材、节奏和约束。">
+          <Form.Item name="description" label="描述" extra="一句话说明这个模板适合什么题材和风格，会显示在卡片上。">
             <Input disabled={editing?.isBuiltin === 1} />
           </Form.Item>
           <Form.Item name="contentJson" label="内容（JSON 格式）" extra={editingUsage.fieldGuide}>

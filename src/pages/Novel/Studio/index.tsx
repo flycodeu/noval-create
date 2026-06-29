@@ -61,9 +61,11 @@ function resolveWorkspaceRoute(targetPage: string) {
 }
 
 function stageDescription(groupKey: WorkspaceSnapshot['groups'][number]['key']) {
-  if (groupKey === 'foundation') return '立项、设定和文风底盘'
-  if (groupKey === 'world-assets') return '人物、地点、势力和道具资产'
-  if (groupKey === 'story-structure') return '线程、大纲、卷章结构和时间轴'
+  if (groupKey === 'foundation') return '立项、故事底盘和文风基线'
+  if (groupKey === 'world-building') return '世界规则、地点场景、物品线索和术语'
+  if (groupKey === 'cast-factions') return '人物档案、人物弧、阻力和阵营组织'
+  if (groupKey === 'plot-architecture') return '主线、支线、终局、信息差和伏笔'
+  if (groupKey === 'volume-outline') return '卷级设计、大纲、卷章结构和时间轴'
   if (groupKey === 'chapter-production') return '合同、正文和章后回写'
   if (groupKey === 'quality-control') return '修订闭环与持续质量监控'
   return '项目状态'

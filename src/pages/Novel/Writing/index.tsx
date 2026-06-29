@@ -3024,12 +3024,10 @@ export default function Writing({ novelId }: Props) {
                 </section>
                 <ContractPanel
                   title="章节合同"
-                  subtitle="本章目标、线程、伏笔、禁越界事项和验收口径。"
                   sections={chapterContractSections}
                 />
                 <ContractPanel
                   title="场景合同"
-                  subtitle={sceneContractSections.length > 0 ? `已挂 ${sceneContractSections.length} 个场景约束。` : '当前还没有稳定的场景合同。'}
                   sections={sceneContractSections.length > 0 ? sceneContractSections : [{
                     key: 'empty-scene',
                     title: '场景合同缺失',

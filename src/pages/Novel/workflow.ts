@@ -73,7 +73,13 @@ export interface GuidedStepProgress {
 }
 
 export interface GuidedWorkflowPhaseDefinition {
-  key: 'foundation' | 'world-cast' | 'plot-architecture' | 'chapter-production'
+  key:
+    | 'foundation'
+    | 'world-building'
+    | 'cast-factions'
+    | 'plot-architecture'
+    | 'volume-outline'
+    | 'chapter-production'
   title: string
   summary: string
   stepKeys: GuidedWorkflowStepKey[]
@@ -100,13 +106,13 @@ export const GUIDED_STEP_ORDER: GuidedWorkflowStepKey[] = [
   'story-core',
   'theme-voice',
   'world-foundation',
-  'endgame-design',
   'map-structure',
   'items-equipment',
   'character-roster',
   'resistance-system',
   'story-threads',
   'story-plot',
+  'endgame-design',
   'volume-planning',
   'outline-structure',
   'timeline-causality',
@@ -155,20 +161,32 @@ export const GUIDED_WORKFLOW_PHASES: GuidedWorkflowPhaseDefinition[] = [
   {
     key: 'foundation',
     title: '立项定标',
-    summary: '先锁读者承诺、故事底盘、文风、世界规则和终局承诺。',
-    stepKeys: ['basics', 'project-brief', 'story-core', 'theme-voice', 'world-foundation', 'endgame-design'],
+    summary: '先锁读者承诺、故事底盘和文风边界。',
+    stepKeys: ['basics', 'project-brief', 'story-core', 'theme-voice'],
   },
   {
-    key: 'world-cast',
-    title: '世界与角色',
-    summary: '把地点、资源、人物和阻力线落成可被剧情调用的资产。',
-    stepKeys: ['map-structure', 'items-equipment', 'character-roster', 'resistance-system'],
+    key: 'world-building',
+    title: '世界与地点',
+    summary: '把世界规则、地点场景和物品线索整理成可调用资产。',
+    stepKeys: ['world-foundation', 'map-structure', 'items-equipment'],
+  },
+  {
+    key: 'cast-factions',
+    title: '人物与阵营',
+    summary: '把人物档案、人物弧、阻力线和阵营关系拆清楚。',
+    stepKeys: ['character-roster', 'resistance-system'],
   },
   {
     key: 'plot-architecture',
-    title: '剧情结构',
-    summary: '把资产压进线程、主线、卷级闭环、大纲和时间因果。',
-    stepKeys: ['story-threads', 'story-plot', 'volume-planning', 'outline-structure', 'timeline-causality'],
+    title: '剧情与伏笔',
+    summary: '把主线、支线、终局承诺和伏笔控制形成推进链。',
+    stepKeys: ['story-threads', 'story-plot', 'endgame-design'],
+  },
+  {
+    key: 'volume-outline',
+    title: '卷章大纲',
+    summary: '把剧情压进卷、章、场景和事件时间轴。',
+    stepKeys: ['volume-planning', 'outline-structure', 'timeline-causality'],
   },
   {
     key: 'chapter-production',
@@ -614,13 +632,13 @@ export function getRecommendedGuidedWorkflowStep(
   if (!isStoryCoreReady(novel)) return 'story-core'
   if (!isThemeVoiceReady(novel)) return 'theme-voice'
   if (!isWorldFoundationReady(novel)) return 'world-foundation'
-  if (!isEndgameDesignReady(novel)) return 'endgame-design'
   if (!isMapStructureReady(stats)) return 'map-structure'
   if (!isItemsEquipmentReady(stats)) return 'items-equipment'
   if (!isCharacterRosterReady(stats)) return 'character-roster'
   if (!isResistanceSystemReady(stats)) return 'resistance-system'
   if (!isStoryThreadsReady(stats)) return 'story-threads'
   if (!isStoryPlotReady(novel)) return 'story-plot'
+  if (!isEndgameDesignReady(novel)) return 'endgame-design'
   if (!isVolumePlanningReady(stats)) return 'volume-planning'
   if (stats.outlineCount <= 0) return 'outline-structure'
   if (stats.timelineCount <= 0) return 'timeline-causality'
@@ -636,13 +654,13 @@ export function getRecommendedWorkflowStep(
   if (!isStoryCoreReady(novel)) return 'core-settings'
   if (!isThemeVoiceReady(novel)) return 'theme-voice'
   if (!novel.worldRulesJson) return 'world-rules'
-  if (!isEndgameDesignReady(novel)) return 'endgame'
   if (stats.mapCount <= 0) return 'map'
   if (stats.itemCount <= 0) return 'items'
   if (stats.characterCount <= 0) return 'characters'
   if (stats.resistanceTrackCount <= 0) return 'resistance'
   if (stats.threadCount <= 0) return 'threads'
   if (!isStoryPlotReady(novel)) return 'story-design'
+  if (!isEndgameDesignReady(novel)) return 'endgame'
   if (stats.volumeCount <= 0) return 'volume-design'
   if (stats.outlineCount <= 0) return 'outline'
   if (stats.timelineCount <= 0) return 'timeline'

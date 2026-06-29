@@ -434,7 +434,7 @@ export default function Overview({ novelId }: Props) {
       heroVariant="compact"
       eyebrow="基础总览"
       title="项目总览"
-      description="统一查看底盘、资产和下一步重点。"
+      description="统一查看基础设定、素材和下一步重点。"
       actions={(
         <Button
           type="primary"
@@ -507,10 +507,10 @@ export default function Overview({ novelId }: Props) {
         <Alert
           type={assetBloat.risk === 'high' ? 'warning' : 'info'}
           showIcon
-          message="资产膨胀提示"
+          message="素材增长过快提示"
           action={(
             <Button size="small" onClick={() => navigate(`/novels/${novelId}/${stats.outlineCount > 0 ? 'writing' : 'outline'}`)}>
-              {stats.outlineCount > 0 ? '进入正文' : '压成大纲'}
+              {stats.outlineCount > 0 ? '进入正文' : '整理成大纲'}
             </Button>
           )}
         />
