@@ -26,3 +26,4 @@ yarn-error.log*
 pnpm-debug.log*
 .local-tools/
 release/
+docs/

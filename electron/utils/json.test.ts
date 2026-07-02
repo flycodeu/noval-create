@@ -43,6 +43,17 @@ describe('json utils', () => {
     })
   })
 
+  it('preserves CJK quotes inside valid JSON string values', () => {
+    const result = parseAiJsonResult<Array<{ summary: string }>>(
+      '```json\n[{"summary":"朱赫来说“这玩意儿能用”，保尔记住了。"}]\n```',
+      'array',
+    )
+
+    expect(result.success).toBe(true)
+    expect(result.strategy).toBe('raw')
+    expect(result.data).toEqual([{ summary: '朱赫来说“这玩意儿能用”，保尔记住了。' }])
+  })
+
   it('repairs common missing-comma AI JSON mistakes', () => {
     const result = parseAiJsonResult<{ a: number; b: string }>('{"a":1 "b":"ok"}', 'object')
 

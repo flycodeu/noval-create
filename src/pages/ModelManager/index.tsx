@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import {
-  Alert, Button, Form, Input, Select, Slider, message,
+  Button, Form, Input, Select, Slider, message,
   Modal, InputNumber, Empty, Skeleton
 } from 'antd'
 import {
@@ -48,19 +48,19 @@ const SOURCE_PROVIDER_OPTIONS = [
 const SOURCE_PROVIDER_GUIDE: Record<SourceSearchProviderMode, { title: string; detail: string }> = {
   auto: {
     title: '自动选择可用检索',
-    detail: '优先使用环境变量中的 key，其次使用本页保存的 key。适合同时准备 Tavily 与 Brave，运行时按可用性选择。',
+    detail: '系统会按当前可用配置选择检索来源。',
   },
   tavily: {
     title: '固定使用 Tavily',
-    detail: '只调用 Tavily Search API。请求头使用 Authorization: Bearer，适合需要网页摘要和来源 grounding 的写作流程。',
+    detail: '用于网页摘要和来源补充。',
   },
   brave: {
     title: '固定使用 Brave Search',
-    detail: '只调用 Brave Search API。请求头使用 X-Subscription-Token，适合需要通用网页检索结果的场景。',
+    detail: '用于通用网页检索结果。',
   },
   disabled: {
     title: '关闭来源检索',
-    detail: '不会读取环境变量或已保存 key，历史、行业、制度和法律类内容不再自动补充网页资料。',
+    detail: '不会自动补充网页资料。',
   },
 }
 
@@ -339,7 +339,7 @@ export default function ModelManager() {
       heroVariant="compact"
       eyebrow="模型 / 检索"
       title="模型与搜索管理"
-      description="集中维护模型提供商、上下文窗口、来源检索 key 和连接测试。模型决定生成质量，来源检索决定真实资料 grounding 是否可用。"
+      description="维护模型、检索 Key 和连接测试。"
       actions={(
         <div className="admin-toolbar">
           <div className="novel-pill">{`已配置 ${configs.length} 套模型，默认 ${defaultCount} 套`}</div>
@@ -363,7 +363,7 @@ export default function ModelManager() {
         <WorkspacePanel
           scrollable
           title="配置列表"
-          description="默认模型会带星标，点击左侧即可切换编辑对象。"
+          description="默认模型带星标。"
           extra={<Button size="small" type="primary" icon={<PlusOutlined />} onClick={handleNew}>新建</Button>}
         >
           {loading ? (
@@ -403,7 +403,7 @@ export default function ModelManager() {
 
         <WorkspacePanel
           title={(selected || isNew) ? (isNew ? '新建模型配置' : `编辑：${selected?.name}`) : '配置详情'}
-          description={(selected || isNew) ? '修改后会直接影响运行时可用模型、默认连接与上下文预算。' : '先从左侧选择一套模型配置，或直接新建一套配置。'}
+          description={(selected || isNew) ? '保存后影响后续生成。' : '选择配置或新建配置。'}
           extra={(selected || isNew) ? (
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {!isNew && selected ? (
@@ -550,7 +550,6 @@ export default function ModelManager() {
                 <InputNumber min={1} max={8} step={1} style={{ width: '100%' }} />
               </Form.Item>
 
-              {/* 测试连接 */}
               {!isNew && selected && (
                 <div style={{
                   padding: 16,
@@ -588,12 +587,12 @@ export default function ModelManager() {
       <WorkspacePanel
         className="model-manager-source-panel"
         title="来源检索与 API Key"
-        description="为真实资料 grounding 配置 Tavily 或 Brave Search。"
+        description="配置联网检索来源。"
       >
         <div className="admin-detail-stack source-search-config">
           <div className="source-search-config__summary">
             <div className="source-search-config__summary-copy">
-              <span className="source-search-config__eyebrow">真实资料 grounding</span>
+              <span className="source-search-config__eyebrow">来源检索</span>
               <strong>{sourceGuide.title}</strong>
               <p>{sourceGuide.detail}</p>
             </div>
@@ -617,13 +616,6 @@ export default function ModelManager() {
             </div>
           </div>
 
-          <Alert
-            type="info"
-            showIcon
-            message="API Key 配置入口"
-            description="Tavily 使用 Authorization: Bearer；Brave 使用 X-Subscription-Token。输入“已设置”会保留原 key，清空输入框会删除保存的 key；环境变量只作为运行时兜底，不会被写入数据库。"
-          />
-
           <Form form={sourceForm} layout="vertical" className="admin-source-form">
             <div className="admin-form-grid admin-form-grid--source">
               <Form.Item name="provider" label="检索 provider" initialValue="auto">
@@ -632,7 +624,7 @@ export default function ModelManager() {
               <Form.Item
                 name="tavilyApiKey"
                 label="Tavily API Key"
-                extra={sourceSettings?.tavilyEnvSet ? '已检测到环境变量 TAVILY_API_KEY；保存 key 后可脱离环境变量运行。' : '用于 Tavily Search API，保存后会加密存储。'}
+                extra={sourceSettings?.tavilyEnvSet ? '已检测到备用配置。' : undefined}
               >
                 <Input.Password
                   disabled={currentSourceMode === 'disabled'}
@@ -642,7 +634,7 @@ export default function ModelManager() {
               <Form.Item
                 name="braveApiKey"
                 label="Brave Search API Key"
-                extra={sourceSettings?.braveEnvSet ? '已检测到环境变量 BRAVE_SEARCH_API_KEY；保存 key 后可脱离环境变量运行。' : '用于 Brave Web Search API，保存后会加密存储。'}
+                extra={sourceSettings?.braveEnvSet ? '已检测到备用配置。' : undefined}
               >
                 <Input.Password
                   disabled={currentSourceMode === 'disabled'}
@@ -657,7 +649,7 @@ export default function ModelManager() {
               保存来源检索
             </Button>
             <Button loading={sourceTesting} onClick={() => void handleSourceTest()}>
-              测试已保存配置
+              测试连接
             </Button>
             {sourceTestResult ? (
               <span className={`source-search-config__test-result${sourceTestResult.success ? ' is-success' : ' is-error'}`}>

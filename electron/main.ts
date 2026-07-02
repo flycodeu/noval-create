@@ -100,7 +100,7 @@ import {
   buildStoryArcPlanningPrompt,
 } from './services/story-prompts'
 import * as taskService from './services/task.service'
-import { safeParseJson } from './utils/json'
+import { parseAiJsonResult, safeParseJson } from './utils/json'
 import { getNovelContextStatus, markNovelContextChanged } from './services/context-impact.service'
 import { enhanceAiScoreResult } from './services/ai-score.service'
 import { wrapIpcHandler } from './utils/ipc-wrapper'
@@ -257,6 +257,66 @@ function formatGeneratedOutline(outline: Record<string, unknown>): string {
     typeof outline.bridge_in === 'string' && outline.bridge_in.trim() ? `承接：${outline.bridge_in.trim()}` : '',
     typeof outline.bridge_out === 'string' && outline.bridge_out.trim() ? `转出：${outline.bridge_out.trim()}` : '',
   ].filter(Boolean).join('\n')
+}
+
+function previewText(text: string, max = 220): string {
+  return text.replace(/\s+/g, ' ').trim().slice(0, max)
+}
+
+function buildOutlineJsonRepairPrompt(label: string, raw: string, schemaHint: string): string {
+  return [
+    `你现在只负责修复 ${label} 的 JSON 格式，不新增设定，不重写内容。`,
+    '',
+    '【任务目标】',
+    '把下面的原始输出整理成一个合法 JSON 数组。',
+    schemaHint,
+    '',
+    '【原始输出】',
+    raw,
+    '',
+    '【强约束】',
+    '不要补剧情，不要扩写，不要改事实方向。',
+    '如果有代码块、说明文字、注释、尾逗号或数组外包裹对象，删除它们。',
+    '如果字符串内部出现双引号，必须正确转义。',
+    '只输出合法 JSON 数组，不要解释，不要 Markdown。',
+  ].filter(Boolean).join('\n')
+}
+
+async function parseOutlineJsonArrayWithRepair<T>(
+  params: {
+    label: string
+    raw: string
+    novelId: number
+    modelConfigId?: number
+    taskType: taskService.TaskType
+    schemaHint: string
+  },
+): Promise<T[]> {
+  const parsed = parseAiJsonResult<T[]>(params.raw, 'array', {
+    channel: 'outline-json',
+    message: `${params.label} JSON 解析失败，尝试自动修复。`,
+    consoleSummary: `[outline-json:warn] ${params.label} parse failed`,
+  })
+  if (parsed.success && Array.isArray(parsed.data)) return parsed.data
+
+  const repairPrompt = buildOutlineJsonRepairPrompt(params.label, params.raw, params.schemaHint)
+  const repairedRaw = await taskService.runChatTask({
+    type: params.taskType,
+    novelId: params.novelId,
+    messages: [{ role: 'user', content: repairPrompt }],
+    modelConfigId: params.modelConfigId,
+    retryable: true,
+  })
+  const repaired = parseAiJsonResult<T[]>(repairedRaw, 'array', {
+    channel: 'outline-json',
+    message: `${params.label} JSON 自动修复后仍解析失败。`,
+    consoleSummary: `[outline-json:error] ${params.label} repair parse failed`,
+  })
+  if (repaired.success && Array.isArray(repaired.data)) return repaired.data
+
+  const firstMessage = parsed.error?.message || '首轮解析失败'
+  const secondMessage = repaired.error?.message || '修复后解析失败'
+  throw new Error(`${params.label} JSON 解析失败，自动修复一次仍未成功。首轮原因：${firstMessage}。修复后原因：${secondMessage}。原始输出片段：${previewText(params.raw)}`)
 }
 
 app.whenReady().then(() => {
@@ -824,7 +884,14 @@ function registerIpcHandlers() {
       modelConfigId: novel.modelConfigId || undefined,
     })
 
-    const arcs = safeParseJson<Record<string, unknown>[]>(result)
+    const arcs = await parseOutlineJsonArrayWithRepair<Record<string, unknown>>({
+      label: '故事弧规划',
+      raw: result,
+      novelId,
+      modelConfigId: novel.modelConfigId || undefined,
+      taskType: 'generate_arcs',
+      schemaHint: '数组元素必须保留 arc_name、stage、chapter_start、chapter_end、arc_goal、target_words、growth_ledger、cost_ledger、key_turns、subplot_links、pacing、summary 字段。',
+    })
     db.delete(storyArcs).where(eq(storyArcs.novelId, novelId)).run()
     db.update(chapters).set({
       arcId: null,
@@ -843,6 +910,7 @@ function registerIpcHandlers() {
         arcSummary: typeof arc.summary === 'string' ? arc.summary : '',
         growthLedger: toLedgerText(arc.growth_ledger),
         costLedger: toLedgerText(arc.cost_ledger),
+        targetWords: typeof arc.target_words === 'number' ? arc.target_words : 0,
       }
       const insertResult = db.insert(storyArcs).values(resultArc).run()
       const discoveryText = [resultArc.arcGoal, resultArc.arcSummary, resultArc.growthLedger, resultArc.costLedger].filter(Boolean).join('\n')
@@ -933,6 +1001,7 @@ function registerIpcHandlers() {
           arcSummary: arc.arcSummary || '',
           arcGrowthLedger: arc.growthLedger || '',
           arcCostLedger: arc.costLedger || '',
+          arcTargetWords: arc.targetWords || undefined,
           chapterStart: batchStart,
           chapterEnd: batchEnd,
           previousSummary: context.previousSummary,
@@ -948,7 +1017,14 @@ function registerIpcHandlers() {
       modelConfigId: novel.modelConfigId || undefined,
     })
 
-    const outlines = safeParseJson<Record<string, unknown>[]>(result)
+    const outlines = await parseOutlineJsonArrayWithRepair<Record<string, unknown>>({
+      label: `第${batchStart}至第${batchEnd}章章节细纲`,
+      raw: result,
+      novelId: arc.novelId,
+      modelConfigId: novel.modelConfigId || undefined,
+      taskType: 'chapter_outline',
+      schemaHint: '数组元素必须保留 chapter_num、title、goal、growth_ledger、cost_ledger、plot_points、characters、location、emotion_tone、bridge_in、bridge_out 字段。',
+    })
     let generatedCount = 0
 
     for (const outline of outlines) {

@@ -30,13 +30,11 @@ function normalizeCjkQuotes(text: string): string {
 }
 
 function trimCodeFence(text: string): string {
-  return normalizeCjkQuotes(
-    text
-      .replace(/^\uFEFF/, '')
-      .replace(/^```(?:json)?\s*/i, '')
-      .replace(/\s*```\s*$/i, '')
-      .trim()
-  )
+  return text
+    .replace(/^\uFEFF/, '')
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```\s*$/i, '')
+    .trim()
 }
 
 function buildParseError(message: string, text: string): SyntaxError {
@@ -205,7 +203,14 @@ function stripJsonComments(text: string): string {
 function normalizeAiJsonText(text: string, expectedRoot: AiJsonRoot): string {
   const cleaned = trimCodeFence(text)
   const extracted = extractBalancedJson(cleaned, expectedRoot)
-  return removeTrailingCommas(stripJsonComments(extracted))
+  const normalizedStructure = removeTrailingCommas(stripJsonComments(extracted))
+
+  try {
+    JSON.parse(normalizedStructure)
+    return normalizedStructure
+  } catch {
+    return removeTrailingCommas(stripJsonComments(normalizeCjkQuotes(extracted)))
+  }
 }
 
 type JsonRepairFrame =
