@@ -1,11 +1,29 @@
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import {
-  Button, Form, Input, Select, Slider, message,
-  Modal, InputNumber, Empty, Skeleton
+  Alert,
+  Button,
+  Empty,
+  Form,
+  Input,
+  InputNumber,
+  message,
+  Modal,
+  Select,
+  Skeleton,
+  Slider,
+  Space,
 } from 'antd'
 import {
-  PlusOutlined, DeleteOutlined, CheckCircleOutlined, CloseCircleOutlined,
-  StarOutlined, StarFilled
+  CheckCircleOutlined,
+  CloseCircleOutlined,
+  DatabaseOutlined,
+  DeleteOutlined,
+  EditOutlined,
+  PlusOutlined,
+  ReloadOutlined,
+  SearchOutlined,
+  StarFilled,
+  StarOutlined,
 } from '@ant-design/icons'
 import type {
   ModelConfig,
@@ -30,6 +48,7 @@ const PROVIDER_OPTIONS = [
   { value: 'baidu', label: '百度文心', models: ['ernie-4.0-8k', 'ernie-3.5-8k', 'ernie-speed'] },
   { value: 'custom', label: '自定义（OpenAI 兼容）', models: [] },
 ]
+
 const PROVIDER_DEFAULTS: Record<string, { temperature: number; maxTokens: number; modelId?: string; baseUrl?: string; maxContextTokens?: number }> = {
   openai: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS, modelId: 'gpt-4o', baseUrl: '' },
   anthropic: { temperature: 0.75, maxTokens: DEFAULT_MODEL_MAX_TOKENS, modelId: 'claude-sonnet-4-6' },
@@ -39,12 +58,14 @@ const PROVIDER_DEFAULTS: Record<string, { temperature: number; maxTokens: number
   baidu: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS, modelId: 'ernie-4.0-8k' },
   custom: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS, baseUrl: 'http://localhost:11434/v1' },
 }
+
 const SOURCE_PROVIDER_OPTIONS = [
   { value: 'auto', label: '自动选择' },
   { value: 'tavily', label: 'Tavily' },
   { value: 'brave', label: 'Brave Search' },
   { value: 'disabled', label: '关闭来源检索' },
 ]
+
 const SOURCE_PROVIDER_GUIDE: Record<SourceSearchProviderMode, { title: string; detail: string }> = {
   auto: {
     title: '自动选择可用检索',
@@ -134,6 +155,15 @@ function getSourceKeyStatus(saved?: boolean, env?: boolean) {
   return '未配置'
 }
 
+function formatSavedAt(value?: string | null) {
+  if (!value) return '未保存'
+  try {
+    return new Date(value).toLocaleString()
+  } catch {
+    return value
+  }
+}
+
 export default function ModelManager() {
   const [configs, setConfigs] = useState<ModelConfig[]>([])
   const [loading, setLoading] = useState(true)
@@ -144,22 +174,35 @@ export default function ModelManager() {
   const [testResult, setTestResult] = useState<{ success: boolean; latency: number; info: string } | null>(null)
   const [saving, setSaving] = useState(false)
   const [isNew, setIsNew] = useState(false)
+  const [editorOpen, setEditorOpen] = useState(false)
+  const [sourceEditorOpen, setSourceEditorOpen] = useState(false)
   const [sourceSettings, setSourceSettings] = useState<SourceSearchSettingsView | null>(null)
   const [sourceSaving, setSourceSaving] = useState(false)
   const [sourceTesting, setSourceTesting] = useState(false)
   const [sourceTestResult, setSourceTestResult] = useState<SourceSearchTestResult | null>(null)
+  const [databasePath, setDatabasePath] = useState('')
 
   const selectedProvider = Form.useWatch('provider', form)
   const selectedModelId = Form.useWatch('modelId', form)
   const selectedConfigProvider = selected?.provider
   const selectedSourceProvider = Form.useWatch('provider', sourceForm)
 
-  const loadConfigs = useCallback(async () => {
-    setLoading(true)
+  const refreshConfigs = useCallback(async () => {
     const list = await window.electron.model.list()
     setConfigs(list)
-    setLoading(false)
+    return list
   }, [])
+
+  const loadConfigs = useCallback(async () => {
+    setLoading(true)
+    try {
+      await refreshConfigs()
+    } catch (error) {
+      message.error(getErrorMessage(error, 'common.loadFailed'))
+    } finally {
+      setLoading(false)
+    }
+  }, [refreshConfigs])
 
   const loadSourceSettings = useCallback(async () => {
     try {
@@ -178,6 +221,9 @@ export default function ModelManager() {
   useEffect(() => {
     void loadConfigs()
     void loadSourceSettings()
+    void window.electron.app.getDatabasePath()
+      .then(setDatabasePath)
+      .catch(() => setDatabasePath('无法读取数据库路径'))
   }, [loadConfigs, loadSourceSettings])
 
   const applyProviderDefaults = useCallback((provider: string, resetCredentials = false) => {
@@ -193,16 +239,13 @@ export default function ModelManager() {
     })
   }, [form])
 
-  const handleSelect = (config: ModelConfig) => {
+  const hydrateModelForm = useCallback((config: ModelConfig) => {
     const extraParams = parseModelExtraParams(config.extraParamsJson)
-    setSelected(config)
-    setIsNew(false)
-    setTestResult(null)
     form.setFieldsValue({
       name: config.name,
       provider: config.provider,
       modelId: config.modelId,
-      apiKey: config.apiKey ? '已设置' : '',
+      apiKey: config.apiKey ? MASKED_KEY : '',
       baseUrl: config.baseUrl,
       temperature: config.temperature,
       maxTokens: config.maxTokens,
@@ -210,6 +253,14 @@ export default function ModelManager() {
       maxConcurrency: config.maxConcurrency,
       kimiThinking: config.provider === 'kimi' ? extraParams.kimiThinking || 'disabled' : undefined,
     })
+  }, [form])
+
+  const handleSelect = (config: ModelConfig) => {
+    setSelected(config)
+    setIsNew(false)
+    setTestResult(null)
+    hydrateModelForm(config)
+    setEditorOpen(true)
   }
 
   const handleNew = () => {
@@ -219,6 +270,7 @@ export default function ModelManager() {
     form.resetFields()
     form.setFieldsValue({ maxConcurrency: 2, provider: 'openai', maxContextTokens: undefined })
     applyProviderDefaults('openai')
+    setEditorOpen(true)
   }
 
   const handleSave = async () => {
@@ -228,16 +280,30 @@ export default function ModelManager() {
     try {
       if (isNew) {
         const id = await window.electron.model.create(payload)
+        const nextConfigs = await refreshConfigs()
+        const newConfig = nextConfigs.find((config) => config.id === id)
         message.success(getUserFacingMessage('model.created'))
-        await loadConfigs()
-        const newConfigs = await window.electron.model.list()
-        const newConfig = newConfigs.find(c => c.id === id)
-        if (newConfig) handleSelect(newConfig)
-        setIsNew(false)
-      } else if (selected) {
+        if (newConfig) {
+          setSelected(newConfig)
+          hydrateModelForm(newConfig)
+          setIsNew(false)
+          setEditorOpen(false)
+        } else {
+          message.warning(`保存返回成功，但当前列表没有读到新配置。当前数据库：${databasePath || '未知'}`)
+        }
+        return
+      }
+
+      if (selected) {
         await window.electron.model.update(selected.id, payload)
+        const nextConfigs = await refreshConfigs()
+        const updated = nextConfigs.find((config) => config.id === selected.id)
+        if (updated) {
+          setSelected(updated)
+          hydrateModelForm(updated)
+        }
         message.success(getUserFacingMessage('model.saved'))
-        await loadConfigs()
+        setEditorOpen(false)
       }
     } catch (error) {
       message.error(getErrorMessage(error, 'model.saveFailed'))
@@ -251,24 +317,41 @@ export default function ModelManager() {
       title: `确认删除「${config.name}」？`,
       okType: 'danger',
       onOk: async () => {
-        await window.electron.model.delete(config.id)
-        setSelected(null)
-        setIsNew(false)
-        loadConfigs()
+        try {
+          await window.electron.model.delete(config.id)
+          const nextConfigs = await refreshConfigs()
+          setSelected((current) => current?.id === config.id ? null : current)
+          setIsNew(false)
+          setEditorOpen(false)
+          if (nextConfigs.length === 0) {
+            setTestResult(null)
+          }
+          message.success('配置已删除')
+        } catch (error) {
+          message.error(getErrorMessage(error, 'common.deleteFailed'))
+        }
       },
     })
   }
 
   const handleSetDefault = async (config: ModelConfig) => {
-    await window.electron.model.setDefault(config.id)
-    loadConfigs()
-    message.success(getUserFacingMessage('model.defaultSet', { name: config.name }))
+    try {
+      await window.electron.model.setDefault(config.id)
+      const nextConfigs = await refreshConfigs()
+      const updated = nextConfigs.find((item) => item.id === config.id)
+      if (updated) {
+        setSelected(updated)
+        hydrateModelForm(updated)
+      }
+      message.success(getUserFacingMessage('model.defaultSet', { name: config.name }))
+    } catch (error) {
+      message.error(getErrorMessage(error, 'common.saveFailed'))
+    }
   }
 
   const handleTest = async () => {
     if (!selected && !isNew) return
     if (isNew) {
-      // 先保存再测试
       message.info(getUserFacingMessage('model.saveFirst'))
       return
     }
@@ -284,6 +367,17 @@ export default function ModelManager() {
     }
   }
 
+  const openSourceEditor = () => {
+    if (sourceSettings) {
+      sourceForm.setFieldsValue({
+        provider: sourceSettings.provider,
+        tavilyApiKey: sourceSettings.tavilyApiKeySet ? MASKED_KEY : '',
+        braveApiKey: sourceSettings.braveApiKeySet ? MASKED_KEY : '',
+      })
+    }
+    setSourceEditorOpen(true)
+  }
+
   const handleSourceSave = async () => {
     const values = await sourceForm.validateFields()
     setSourceSaving(true)
@@ -296,6 +390,7 @@ export default function ModelManager() {
         braveApiKey: settings.braveApiKeySet ? MASKED_KEY : '',
       })
       setSourceTestResult(null)
+      setSourceEditorOpen(false)
       message.success('来源检索配置已保存')
     } catch (error) {
       message.error(getErrorMessage(error, 'common.saveFailed'))
@@ -321,273 +416,448 @@ export default function ModelManager() {
     }
   }
 
-  const currentProviderModels = PROVIDER_OPTIONS.find(p => p.value === selectedProvider)?.models || []
+  const currentProviderModels = PROVIDER_OPTIONS.find((provider) => provider.value === selectedProvider)?.models || []
   const fixedTemperatureKimiModel = selectedProvider === 'kimi' && (selectedModelId === 'kimi-k2.6' || selectedModelId === 'kimi-k2.5')
   const selectedDefaultContextWindow = getProviderDefaultContextWindow(selectedProvider, selectedModelId)
   const currentSourceMode = (selectedSourceProvider || sourceSettings?.provider || 'auto') as SourceSearchProviderMode
-  const sourceGuide = SOURCE_PROVIDER_GUIDE[currentSourceMode]
+  const sourceGuide = SOURCE_PROVIDER_GUIDE[currentSourceMode] || SOURCE_PROVIDER_GUIDE.auto
   const defaultCount = configs.filter((config) => config.isDefault === 1).length
   const providerCount = new Set(configs.map((config) => config.provider)).size
   const activeSourceLabel = sourceSettings?.activeProvider
     ? getSourceProviderLabel(sourceSettings.activeProvider)
     : getSourceProviderLabel(sourceSettings?.provider)
 
-  return (
-    <WorkspacePage
-      className="admin-page model-manager-page"
-      layout="wide"
-      heroVariant="compact"
-      eyebrow="模型 / 检索"
-      title="模型与搜索管理"
-      description="维护模型、检索 Key 和连接测试。"
-      actions={(
-        <div className="admin-toolbar">
-          <div className="novel-pill">{`已配置 ${configs.length} 套模型，默认 ${defaultCount} 套`}</div>
-          <div className="admin-toolbar__actions">
-            <Button type="primary" icon={<PlusOutlined />} onClick={handleNew}>
-              新建配置
-            </Button>
-          </div>
-        </div>
-      )}
-      metrics={(
-        <>
-          <WorkspaceMetric label="模型配置" value={configs.length} tone="cool" />
-          <WorkspaceMetric label="默认配置" value={defaultCount} />
-          <WorkspaceMetric label="接入厂商" value={providerCount} tone="warm" />
-          <WorkspaceMetric label="来源检索" value={activeSourceLabel} />
-        </>
-      )}
-    >
-      <div className="novel-split novel-split--sidebar">
-        <WorkspacePanel
-          scrollable
-          title="配置列表"
-          description="默认模型带星标。"
-          extra={<Button size="small" type="primary" icon={<PlusOutlined />} onClick={handleNew}>新建</Button>}
-        >
-          {loading ? (
-            <Skeleton active paragraph={{ rows: 8 }} />
-          ) : configs.length === 0 && !isNew ? (
-            <div className="admin-empty-panel">
-              <Empty description="暂无配置" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-            </div>
-          ) : (
-            <div className="admin-sidebar-list">
-              {configs.map((config) => (
-                <button
-                  key={config.id}
-                  type="button"
-                  className={`admin-sidebar-item ${selected?.id === config.id ? 'admin-sidebar-item--active' : ''}`}
-                  onClick={() => handleSelect(config)}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ flex: 1, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {config.name}
-                    </span>
-                    {config.isDefault === 1 ? <StarFilled style={{ color: '#faad14', fontSize: 12 }} /> : null}
-                  </div>
-                  <div className="admin-sidebar-item__meta">
-                    {PROVIDER_OPTIONS.find((item) => item.value === config.provider)?.label || config.provider}
-                    {' · '}
-                    {config.modelId}
-                  </div>
-                  <div className="admin-sidebar-item__meta">
-                    {`输出 ${formatTokenBudget(config.maxTokens)} · 上下文 ${formatTokenBudget(config.maxContextTokens || getProviderDefaultContextWindow(config.provider, config.modelId))} · 并发 ${config.maxConcurrency || 1}`}
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-        </WorkspacePanel>
+  const refreshAll = () => {
+    void loadConfigs()
+    void loadSourceSettings()
+  }
 
-        <WorkspacePanel
-          title={(selected || isNew) ? (isNew ? '新建模型配置' : `编辑：${selected?.name}`) : '配置详情'}
-          description={(selected || isNew) ? '保存后影响后续生成。' : '选择配置或新建配置。'}
-          extra={(selected || isNew) ? (
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {!isNew && selected ? (
-                <>
+  return (
+    <>
+      <WorkspacePage
+        className="admin-page model-manager-page"
+        layout="wide"
+        heroVariant="compact"
+        eyebrow="模型 / 检索"
+        title="模型与搜索管理"
+        description="维护模型、检索 Key 和连接测试。"
+        actions={(
+          <div className="admin-toolbar">
+            <div className="novel-pill">{`已配置 ${configs.length} 套模型，默认 ${defaultCount} 套`}</div>
+            <div className="admin-toolbar__actions">
+              <Button icon={<SearchOutlined />} onClick={openSourceEditor}>
+                搜索 API
+              </Button>
+              <Button icon={<ReloadOutlined />} onClick={refreshAll} loading={loading}>
+                刷新
+              </Button>
+              <Button type="primary" icon={<PlusOutlined />} onClick={handleNew}>
+                新建配置
+              </Button>
+            </div>
+          </div>
+        )}
+        metrics={(
+          <>
+            <WorkspaceMetric label="模型配置" value={configs.length} tone="cool" />
+            <WorkspaceMetric label="默认配置" value={defaultCount} />
+            <WorkspaceMetric label="接入厂商" value={providerCount} tone="warm" />
+            <WorkspaceMetric label="来源检索" value={activeSourceLabel} />
+          </>
+        )}
+      >
+        <Alert
+          className="model-manager-database-alert"
+          type="info"
+          showIcon
+          icon={<DatabaseOutlined />}
+          message="当前配置写入数据库"
+          description={databasePath || '正在读取数据库路径...'}
+        />
+
+        <div className="model-manager-layout">
+          <WorkspacePanel
+            scrollable
+            className="model-manager-list-panel"
+            title="模型配置"
+            description="点击配置可编辑，默认模型带星标。"
+            extra={<Button size="small" type="primary" icon={<PlusOutlined />} onClick={handleNew}>新建</Button>}
+          >
+            {loading ? (
+              <Skeleton active paragraph={{ rows: 8 }} />
+            ) : configs.length === 0 ? (
+              <div className="admin-empty-panel">
+                <Empty description="暂无配置" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              </div>
+            ) : (
+              <div className="admin-sidebar-list model-manager-config-list">
+                {configs.map((config) => (
+                  <div
+                    key={config.id}
+                    role="button"
+                    tabIndex={0}
+                    className={`admin-sidebar-item model-manager-config-card ${selected?.id === config.id ? 'admin-sidebar-item--active' : ''}`}
+                    onClick={() => handleSelect(config)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        handleSelect(config)
+                      }
+                    }}
+                  >
+                    <div className="model-manager-config-card__main">
+                      <div className="model-manager-config-card__title">
+                        <span>{config.name}</span>
+                        {config.isDefault === 1 ? <StarFilled /> : null}
+                      </div>
+                      <div className="admin-sidebar-item__meta">
+                        {PROVIDER_OPTIONS.find((item) => item.value === config.provider)?.label || config.provider}
+                        {' · '}
+                        {config.modelId}
+                      </div>
+                      <div className="admin-sidebar-item__meta">
+                        {`输出 ${formatTokenBudget(config.maxTokens)} · 上下文 ${formatTokenBudget(config.maxContextTokens || getProviderDefaultContextWindow(config.provider, config.modelId))} · 并发 ${config.maxConcurrency || 1}`}
+                      </div>
+                    </div>
+                    <div
+                      className="model-manager-config-card__actions"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <Button size="small" icon={<EditOutlined />} onClick={() => handleSelect(config)}>
+                        编辑
+                      </Button>
+                      <Button
+                        size="small"
+                        icon={config.isDefault ? <StarFilled /> : <StarOutlined />}
+                        onClick={() => void handleSetDefault(config)}
+                      >
+                        {config.isDefault ? '默认' : '设默认'}
+                      </Button>
+                      <Button size="small" icon={<DeleteOutlined />} danger onClick={() => void handleDelete(config)} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </WorkspacePanel>
+
+          <WorkspacePanel
+            className="model-manager-overview-panel"
+            title="当前状态"
+            description="保存后会立刻从数据库刷新读取。"
+            extra={<Button icon={<SearchOutlined />} onClick={openSourceEditor}>配置搜索 API</Button>}
+          >
+            {selected ? (
+              <div className="admin-detail-stack">
+                <div className="source-search-config__status-grid model-manager-status-grid">
+                  <div className="source-search-config__status">
+                    <span>当前模型</span>
+                    <strong>{selected.name}</strong>
+                  </div>
+                  <div className="source-search-config__status">
+                    <span>Provider</span>
+                    <strong>{PROVIDER_OPTIONS.find((item) => item.value === selected.provider)?.label || selected.provider}</strong>
+                  </div>
+                  <div className="source-search-config__status">
+                    <span>模型 ID</span>
+                    <strong>{selected.modelId}</strong>
+                  </div>
+                  <div className="source-search-config__status">
+                    <span>API Key</span>
+                    <strong>{selected.apiKey ? '已保存' : '未配置'}</strong>
+                  </div>
+                  <div className="source-search-config__status">
+                    <span>输出长度</span>
+                    <strong>{formatTokenBudget(selected.maxTokens)}</strong>
+                  </div>
+                  <div className="source-search-config__status">
+                    <span>上下文</span>
+                    <strong>{formatTokenBudget(selected.maxContextTokens || getProviderDefaultContextWindow(selected.provider, selected.modelId))}</strong>
+                  </div>
+                </div>
+                <div className="model-manager-status-actions">
+                  <Button type="primary" icon={<EditOutlined />} onClick={() => handleSelect(selected)}>
+                    编辑模型
+                  </Button>
                   <Button
                     icon={selected.isDefault ? <StarFilled /> : <StarOutlined />}
-                    onClick={() => handleSetDefault(selected)}
-                    style={{ color: selected.isDefault ? '#faad14' : undefined }}
+                    onClick={() => void handleSetDefault(selected)}
                   >
                     {selected.isDefault ? '已设为默认' : '设为默认'}
                   </Button>
-                  <Button icon={<DeleteOutlined />} danger onClick={() => handleDelete(selected)}>
-                    删除
+                  <Button loading={testing} onClick={() => void handleTest()}>
+                    测试连接
                   </Button>
-                </>
-              ) : null}
-              <Button loading={saving} type="primary" onClick={handleSave}>保存</Button>
-            </div>
-          ) : null}
-        >
-          {(selected || isNew) ? (
-            <div className="admin-detail-stack">
-            <Form form={form} layout="vertical" style={{ maxWidth: 560 }}>
-              <Form.Item name="name" label="配置名称" rules={[{ required: true }]}>
-                <Input placeholder="例如：GPT-4o 主力模型" />
-              </Form.Item>
+                  {testResult ? (
+                    <span className={`source-search-config__test-result${testResult.success ? ' is-success' : ' is-error'}`}>
+                      {testResult.success ? `连接成功 · ${testResult.latency}ms` : testResult.info}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+            ) : (
+              <div className="admin-empty-panel">
+                <Empty description="选择模型后查看详情" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              </div>
+            )}
+          </WorkspacePanel>
+        </div>
 
-              <Form.Item name="provider" label="AI 提供商" rules={[{ required: true }]}>
+        <WorkspacePanel
+          className="model-manager-source-panel"
+          title="来源检索与 API Key"
+          description="联网检索来源和密钥状态。"
+          extra={<Button icon={<EditOutlined />} onClick={openSourceEditor}>编辑</Button>}
+        >
+          <div className="admin-detail-stack source-search-config">
+            <div className="source-search-config__summary">
+              <div className="source-search-config__summary-copy">
+                <span className="source-search-config__eyebrow">来源检索</span>
+                <strong>{sourceGuide.title}</strong>
+                <p>{sourceGuide.detail}</p>
+              </div>
+              <div className="source-search-config__status-grid">
+                <div className="source-search-config__status">
+                  <span>当前模式</span>
+                  <strong>{getSourceProviderLabel(sourceSettings?.provider)}</strong>
+                </div>
+                <div className="source-search-config__status">
+                  <span>运行 provider</span>
+                  <strong>{activeSourceLabel}</strong>
+                </div>
+                <div className="source-search-config__status">
+                  <span>Tavily Key</span>
+                  <strong>{getSourceKeyStatus(sourceSettings?.tavilyApiKeySet, sourceSettings?.tavilyEnvSet)}</strong>
+                </div>
+                <div className="source-search-config__status">
+                  <span>Brave Key</span>
+                  <strong>{getSourceKeyStatus(sourceSettings?.braveApiKeySet, sourceSettings?.braveEnvSet)}</strong>
+                </div>
+              </div>
+            </div>
+            <div className="source-search-config__actions">
+              <Button type="primary" icon={<EditOutlined />} onClick={openSourceEditor}>
+                编辑来源检索
+              </Button>
+              <Button loading={sourceTesting} onClick={() => void handleSourceTest()}>
+                测试连接
+              </Button>
+              <span className="source-search-config__test-result">
+                {`最近保存：${formatSavedAt(sourceSettings?.updatedAt)}`}
+              </span>
+              {sourceTestResult ? (
+                <span className={`source-search-config__test-result${sourceTestResult.success ? ' is-success' : ' is-error'}`}>
+                  {sourceTestResult.success
+                    ? `${getSourceProviderLabel(sourceTestResult.providerName)} 连接成功 · ${sourceTestResult.latency}ms · ${sourceTestResult.info}`
+                    : sourceTestResult.info}
+                </span>
+              ) : null}
+            </div>
+          </div>
+        </WorkspacePanel>
+      </WorkspacePage>
+
+      <Modal
+        title={isNew ? '新建模型配置' : `编辑模型配置${selected ? `：${selected.name}` : ''}`}
+        open={editorOpen}
+        width={760}
+        maskClosable={!saving}
+        onCancel={() => setEditorOpen(false)}
+        destroyOnClose={false}
+        footer={(
+          <Space wrap>
+            {!isNew && selected ? (
+              <>
+                <Button
+                  icon={selected.isDefault ? <StarFilled /> : <StarOutlined />}
+                  onClick={() => void handleSetDefault(selected)}
+                >
+                  {selected.isDefault ? '已设为默认' : '设为默认'}
+                </Button>
+                <Button icon={<DeleteOutlined />} danger onClick={() => void handleDelete(selected)}>
+                  删除
+                </Button>
+              </>
+            ) : null}
+            <Button onClick={() => setEditorOpen(false)}>取消</Button>
+            <Button loading={saving} type="primary" onClick={() => void handleSave()}>
+              保存
+            </Button>
+          </Space>
+        )}
+      >
+        <Form form={form} layout="vertical" className="model-manager-modal-form">
+          <div className="admin-form-grid admin-form-grid--three">
+            <Form.Item name="name" label="配置名称" rules={[{ required: true }]}>
+              <Input placeholder="例如：GPT-4o 主力模型" />
+            </Form.Item>
+
+            <Form.Item name="provider" label="AI 提供商" rules={[{ required: true }]}>
+              <Select
+                options={PROVIDER_OPTIONS.map((provider) => ({ value: provider.value, label: provider.label }))}
+                onChange={(value) => {
+                  setTestResult(null)
+                  applyProviderDefaults(value, true)
+                }}
+              />
+            </Form.Item>
+
+            <Form.Item name="modelId" label="模型 ID" rules={[{ required: true }]}>
+              {currentProviderModels.length > 0 ? (
                 <Select
-                  options={PROVIDER_OPTIONS.map(p => ({ value: p.value, label: p.label }))}
+                  options={currentProviderModels.map((model) => ({ value: model, label: model }))}
+                  showSearch
+                  allowClear
                   onChange={(value) => {
-                    setTestResult(null)
-                    applyProviderDefaults(value, true)
+                    if (selectedProvider === 'kimi') {
+                      const contextWindow = getKimiContextWindow(value)
+                      form.setFieldValue('maxContextTokens', contextWindow)
+                    }
                   }}
                 />
-              </Form.Item>
-
-              <Form.Item name="modelId" label="模型 ID" rules={[{ required: true }]}>
-                {currentProviderModels.length > 0 ? (
-                  <Select
-                    options={currentProviderModels.map(m => ({ value: m, label: m }))}
-                    showSearch
-                    allowClear
-                    onChange={(value) => {
-                      if (selectedProvider === 'kimi') {
-                        const contextWindow = getKimiContextWindow(value)
-                        form.setFieldValue('maxContextTokens', contextWindow)
-                      }
-                    }}
-                  />
-                ) : (
-                  <Input placeholder={selectedProvider === 'deepseek'
+              ) : (
+                <Input
+                  placeholder={selectedProvider === 'deepseek'
                     ? '输入模型名称，例如：deepseek-v4-flash'
                     : selectedProvider === 'kimi'
                       ? '输入模型 ID，例如：kimi-k2.6'
-                      : '输入模型名称，例如：llama3:latest'} />
-                )}
-              </Form.Item>
-
-              <Form.Item
-                name="apiKey"
-                label={selectedProvider === 'baidu' ? 'API Key（格式：APIKey|SecretKey）' : 'API Key'}
-                rules={[{
-                  validator: async (_, value) => {
-                    if (!providerRequiresApiKey(selectedProvider)) return
-                    const textValue = typeof value === 'string' ? value.trim() : ''
-                    if (textValue && textValue !== '已设置') return
-                    if (!isNew && selected?.apiKey && selectedProvider === selectedConfigProvider && textValue === '已设置') return
-                    throw new Error(getUserFacingMessage('model.apiKeyRequired'))
-                  },
-                }]}
-              >
-                <Input.Password placeholder={selectedProvider === 'baidu' ? 'APIKey|SecretKey' : '输入 API Key'} />
-              </Form.Item>
-
-              {(selectedProvider === 'openai' || selectedProvider === 'custom' || selectedProvider === 'deepseek' || selectedProvider === 'kimi') && (
-                <Form.Item name="baseUrl" label="Base URL">
-                  <Input
-                    placeholder={
-                      selectedProvider === 'custom'
-                        ? 'http://localhost:11434/v1'
-                        : selectedProvider === 'deepseek'
-                          ? 'https://api.deepseek.com（留空使用默认）'
-                          : selectedProvider === 'kimi'
-                            ? 'https://api.moonshot.ai/v1（留空使用默认）'
-                          : 'https://api.openai.com/v1（留空使用默认）'
-                    }
-                  />
-                </Form.Item>
-              )}
-
-              {selectedProvider === 'kimi' && (
-                <Form.Item
-                  name="kimiThinking"
-                  label="Kimi Thinking"
-                  extra="默认禁用，降低连接测试和正文生成的不确定成本；需要模型显式思考时可开启。"
-                >
-                  <Select
-                    options={[
-                      { value: 'disabled', label: 'Disabled' },
-                      { value: 'enabled', label: 'Enabled' },
-                    ]}
-                  />
-                </Form.Item>
-              )}
-
-              <Form.Item
-                name="temperature"
-                label="Temperature（创造性）"
-                extra={fixedTemperatureKimiModel ? 'Kimi K2.x 使用固定采样参数，运行时会忽略此项。' : undefined}
-              >
-                <Slider disabled={fixedTemperatureKimiModel} min={0} max={1} step={0.05} marks={{ 0: '0', 0.5: '0.5', 1: '1' }} />
-              </Form.Item>
-
-              <Form.Item
-                name="maxTokens"
-                label="Max Tokens（最大输出长度）"
-                extra={selectedProvider === 'deepseek'
-                  ? 'DeepSeek V4 当前最大输出长度为 384K。这里控制单次回复最多可生成多少 Token。'
-                  : '控制单次回复最多可生成多少 Token。可设置到更大的输出预算，但实际可用上限仍取决于模型提供方。'}
-              >
-                <InputNumber min={512} max={MAX_MODEL_MAX_TOKENS} step={512} style={{ width: '100%' }} placeholder="例如：65536 / 128000 / 1000000" />
-              </Form.Item>
-
-              <Form.Item
-                name="maxContextTokens"
-                label="上下文窗口（总上下文预算，可留空使用默认）"
-                extra={selectedProvider === 'deepseek'
-                  ? 'DeepSeek V4 当前上下文窗口为 1M。通常应大于等于最大输出长度；留空时使用 DeepSeek 默认窗口。'
-                  : selectedProvider === 'kimi'
-                    ? 'Kimi K2.x 默认上下文窗口按 256K 预估；Moonshot v1 按模型名使用 8K/32K/128K。'
-                  : `控制模型可接收的上下文总量。留空时使用当前 provider 默认窗口：${formatTokenBudget(selectedDefaultContextWindow)}。`}
-              >
-                <InputNumber
-                  min={2048}
-                  max={2000000}
-                  step={1024}
-                  style={{ width: '100%' }}
-                  placeholder={`留空使用默认：${selectedDefaultContextWindow}`}
+                      : '输入模型名称，例如：llama3:latest'}
                 />
-              </Form.Item>
-
-              <Form.Item name="maxConcurrency" label="最大并发请求数">
-                <InputNumber min={1} max={8} step={1} style={{ width: '100%' }} />
-              </Form.Item>
-
-              {!isNew && selected && (
-                <div style={{
-                  padding: 16,
-                  background: 'var(--color-bg-card)',
-                  borderRadius: 'var(--radius-md)',
-                  marginTop: 16,
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <Button loading={testing} onClick={handleTest}>测试连接</Button>
-                    {testResult && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        {testResult.success ? (
-                          <CheckCircleOutlined style={{ color: '#52c41a' }} />
-                        ) : (
-                          <CloseCircleOutlined style={{ color: '#ff4d4f' }} />
-                        )}
-                        <span style={{ color: testResult.success ? '#52c41a' : '#ff4d4f' }}>
-                          {testResult.success ? `连接成功 · ${testResult.latency}ms` : testResult.info}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                </div>
               )}
-            </Form>
-            </div>
-          ) : (
-            <div className="admin-empty-panel">
-              <Empty description="选择左侧配置进行编辑，或点击“新建配置”创建配置" />
-            </div>
-          )}
-        </WorkspacePanel>
-      </div>
+            </Form.Item>
+          </div>
 
-      <WorkspacePanel
-        className="model-manager-source-panel"
-        title="来源检索与 API Key"
-        description="配置联网检索来源。"
+          <Form.Item
+            name="apiKey"
+            label={selectedProvider === 'baidu' ? 'API Key（格式：APIKey|SecretKey）' : 'API Key'}
+            rules={[{
+              validator: async (_, value) => {
+                if (!providerRequiresApiKey(selectedProvider)) return
+                const textValue = typeof value === 'string' ? value.trim() : ''
+                if (textValue && textValue !== MASKED_KEY) return
+                if (!isNew && selected?.apiKey && selectedProvider === selectedConfigProvider && textValue === MASKED_KEY) return
+                throw new Error(getUserFacingMessage('model.apiKeyRequired'))
+              },
+            }]}
+          >
+            <Input.Password placeholder={selectedProvider === 'baidu' ? 'APIKey|SecretKey' : '输入 API Key'} />
+          </Form.Item>
+
+          {(selectedProvider === 'openai' || selectedProvider === 'custom' || selectedProvider === 'deepseek' || selectedProvider === 'kimi') && (
+            <Form.Item name="baseUrl" label="Base URL">
+              <Input
+                placeholder={
+                  selectedProvider === 'custom'
+                    ? 'http://localhost:11434/v1'
+                    : selectedProvider === 'deepseek'
+                      ? 'https://api.deepseek.com（留空使用默认）'
+                      : selectedProvider === 'kimi'
+                        ? 'https://api.moonshot.ai/v1（留空使用默认）'
+                        : 'https://api.openai.com/v1（留空使用默认）'
+                }
+              />
+            </Form.Item>
+          )}
+
+          {selectedProvider === 'kimi' && (
+            <Form.Item
+              name="kimiThinking"
+              label="Kimi Thinking"
+              extra="默认禁用，降低连接测试和正文生成的不确定成本；需要模型显式思考时可开启。"
+            >
+              <Select
+                options={[
+                  { value: 'disabled', label: 'Disabled' },
+                  { value: 'enabled', label: 'Enabled' },
+                ]}
+              />
+            </Form.Item>
+          )}
+
+          <div className="admin-form-grid admin-form-grid--three">
+            <Form.Item
+              name="temperature"
+              label="Temperature（创造性）"
+              extra={fixedTemperatureKimiModel ? 'Kimi K2.x 使用固定采样参数，运行时会忽略此项。' : undefined}
+            >
+              <Slider disabled={fixedTemperatureKimiModel} min={0} max={1} step={0.05} marks={{ 0: '0', 0.5: '0.5', 1: '1' }} />
+            </Form.Item>
+
+            <Form.Item
+              name="maxTokens"
+              label="Max Tokens（最大输出长度）"
+              extra={selectedProvider === 'deepseek'
+                ? 'DeepSeek V4 当前最大输出长度为 384K。这里控制单次回复最多可生成多少 Token。'
+                : '控制单次回复最多可生成多少 Token。实际可用上限仍取决于模型提供方。'}
+            >
+              <InputNumber min={512} max={MAX_MODEL_MAX_TOKENS} step={512} placeholder="例如：65536 / 128000 / 1000000" />
+            </Form.Item>
+
+            <Form.Item
+              name="maxContextTokens"
+              label="上下文窗口（可留空）"
+              extra={selectedProvider === 'deepseek'
+                ? 'DeepSeek V4 当前上下文窗口为 1M。通常应大于等于最大输出长度。'
+                : selectedProvider === 'kimi'
+                  ? 'Kimi K2.x 按 256K 预估；Moonshot v1 按模型名使用 8K/32K/128K。'
+                  : `留空时使用当前 provider 默认窗口：${formatTokenBudget(selectedDefaultContextWindow)}。`}
+            >
+              <InputNumber
+                min={2048}
+                max={2000000}
+                step={1024}
+                placeholder={`留空使用默认：${selectedDefaultContextWindow}`}
+              />
+            </Form.Item>
+          </div>
+
+          <Form.Item name="maxConcurrency" label="最大并发请求数">
+            <InputNumber min={1} max={8} step={1} />
+          </Form.Item>
+
+          {!isNew && selected ? (
+            <div className="model-manager-test-row">
+              <Button loading={testing} onClick={() => void handleTest()}>
+                测试连接
+              </Button>
+              {testResult ? (
+                <span className={`source-search-config__test-result${testResult.success ? ' is-success' : ' is-error'}`}>
+                  {testResult.success ? (
+                    <>
+                      <CheckCircleOutlined />
+                      {` 连接成功 · ${testResult.latency}ms`}
+                    </>
+                  ) : (
+                    <>
+                      <CloseCircleOutlined />
+                      {` ${testResult.info}`}
+                    </>
+                  )}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+        </Form>
+      </Modal>
+
+      <Modal
+        title="来源检索配置"
+        open={sourceEditorOpen}
+        width={720}
+        maskClosable={!sourceSaving}
+        onCancel={() => setSourceEditorOpen(false)}
+        destroyOnClose={false}
+        footer={(
+          <Space wrap>
+            <Button onClick={() => setSourceEditorOpen(false)}>取消</Button>
+            <Button loading={sourceTesting} onClick={() => void handleSourceTest()}>
+              测试连接
+            </Button>
+            <Button type="primary" loading={sourceSaving} onClick={() => void handleSourceSave()}>
+              保存
+            </Button>
+          </Space>
+        )}
       >
         <div className="admin-detail-stack source-search-config">
           <div className="source-search-config__summary">
@@ -597,14 +867,6 @@ export default function ModelManager() {
               <p>{sourceGuide.detail}</p>
             </div>
             <div className="source-search-config__status-grid">
-              <div className="source-search-config__status">
-                <span>当前模式</span>
-                <strong>{getSourceProviderLabel(sourceSettings?.provider)}</strong>
-              </div>
-              <div className="source-search-config__status">
-                <span>运行 provider</span>
-                <strong>{activeSourceLabel}</strong>
-              </div>
               <div className="source-search-config__status">
                 <span>Tavily Key</span>
                 <strong>{getSourceKeyStatus(sourceSettings?.tavilyApiKeySet, sourceSettings?.tavilyEnvSet)}</strong>
@@ -644,23 +906,15 @@ export default function ModelManager() {
             </div>
           </Form>
 
-          <div className="source-search-config__actions">
-            <Button type="primary" loading={sourceSaving} onClick={() => void handleSourceSave()}>
-              保存来源检索
-            </Button>
-            <Button loading={sourceTesting} onClick={() => void handleSourceTest()}>
-              测试连接
-            </Button>
-            {sourceTestResult ? (
-              <span className={`source-search-config__test-result${sourceTestResult.success ? ' is-success' : ' is-error'}`}>
-                {sourceTestResult.success
-                  ? `${getSourceProviderLabel(sourceTestResult.providerName)} 连接成功 · ${sourceTestResult.latency}ms · ${sourceTestResult.info}`
-                  : sourceTestResult.info}
-              </span>
-            ) : null}
-          </div>
+          {sourceTestResult ? (
+            <span className={`source-search-config__test-result${sourceTestResult.success ? ' is-success' : ' is-error'}`}>
+              {sourceTestResult.success
+                ? `${getSourceProviderLabel(sourceTestResult.providerName)} 连接成功 · ${sourceTestResult.latency}ms · ${sourceTestResult.info}`
+                : sourceTestResult.info}
+            </span>
+          ) : null}
         </div>
-      </WorkspacePanel>
-    </WorkspacePage>
+      </Modal>
+    </>
   )
 }

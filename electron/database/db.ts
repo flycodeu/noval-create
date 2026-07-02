@@ -1,11 +1,14 @@
 import Database from 'better-sqlite3'
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import { app } from 'electron'
+import fs from 'fs'
 import path from 'path'
 import * as schema from './schema'
 import { normalizeWorldRules, stringifyWorldRules, type GenreWorldRules } from '../../src/shared/genre-system'
 
 type AppDatabase = BetterSQLite3Database<typeof schema>
+
+const DATABASE_FILE_NAME = 'novelforge.db'
 
 let _db: AppDatabase | null = null
 let _sqlite: Database.Database | null = null
@@ -28,7 +31,9 @@ export function initDb(): AppDatabase {
   if (_db) return _db
 
   const userDataPath = app.getPath('userData')
-  const dbPath = path.join(userDataPath, 'novelforge.db')
+  const dbPath = path.join(userDataPath, DATABASE_FILE_NAME)
+  fs.mkdirSync(userDataPath, { recursive: true })
+  ensureLegacyElectronDatabaseCopied(userDataPath, dbPath)
 
   _sqlite = new Database(dbPath)
   _sqlite.pragma('journal_mode = WAL')
@@ -40,6 +45,26 @@ export function initDb(): AppDatabase {
   seedBuiltinData(_db)
 
   return _db
+}
+
+function ensureLegacyElectronDatabaseCopied(userDataPath: string, dbPath: string) {
+  if (fs.existsSync(dbPath)) return
+
+  const legacyDbPath = path.join(app.getPath('appData'), 'Electron', DATABASE_FILE_NAME)
+  if (path.resolve(legacyDbPath) === path.resolve(dbPath) || !fs.existsSync(legacyDbPath)) return
+
+  try {
+    fs.mkdirSync(userDataPath, { recursive: true })
+    for (const suffix of ['', '-wal', '-shm']) {
+      const sourcePath = `${legacyDbPath}${suffix}`
+      if (fs.existsSync(sourcePath)) {
+        fs.copyFileSync(sourcePath, `${dbPath}${suffix}`)
+      }
+    }
+    console.info(`[database] Migrated legacy Electron database to ${dbPath}`)
+  } catch (error) {
+    console.warn('[database] Failed to migrate legacy Electron database:', error)
+  }
 }
 
 export function closeDb() {

@@ -112,6 +112,8 @@ import {
 
 let mainWindow: BrowserWindow | null = null
 
+app.setName('NovelForge')
+
 interface WindowState {
   x?: number
   y?: number
