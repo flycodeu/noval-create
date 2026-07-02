@@ -39,6 +39,9 @@ import { refreshWorldStateVersionsForNovel } from './world-state.service'
 import { throwUserFacingError } from '../utils/user-facing-error'
 import { buildVariationDigest, isRejectedDigestTooSimilar } from './variation-control.service'
 
+const BATCH_CHARACTER_QUALITY_BUDGET_MS = 90_000
+const BATCH_CHARACTER_MAX_REWRITE_PASSES = 0
+
 function asText(value: unknown): string {
   return typeof value === 'string' ? cleanAiFieldText(value) : ''
 }
@@ -1527,6 +1530,8 @@ export async function generateCharacterBatchChunk(
             '保持角色数组长度不变。',
             '保持对象顺序和字段语义稳定，不要把批量人物卡改写成说明文。',
           ],
+          qualityBudgetMs: BATCH_CHARACTER_QUALITY_BUDGET_MS,
+          maxRewritePasses: BATCH_CHARACTER_MAX_REWRITE_PASSES,
         })
         if (quality.stage === 'rejected') {
           markRejected(historyId)
@@ -1747,6 +1752,8 @@ export async function batchGenerateCharacters(novelId: number, opts: {
             '保持角色数组长度不变。',
             '保持对象顺序和字段语义稳定，不要把人物卡改写成散文。',
           ],
+          qualityBudgetMs: BATCH_CHARACTER_QUALITY_BUDGET_MS,
+          maxRewritePasses: BATCH_CHARACTER_MAX_REWRITE_PASSES,
         })
         if (quality.stage === 'rejected') {
           rejectedByQuality = true

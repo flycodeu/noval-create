@@ -39,6 +39,7 @@ import {
   executeChatTask,
   executeStreamTask,
   getTaskRecord,
+  isTransientModelNetworkError,
   parseTaskControl,
   runChatTask,
   TaskRecoveryHint,
@@ -46,6 +47,7 @@ import {
   updateTaskProgress,
   updateTaskStatus,
 } from './task.service'
+import type { Message } from '../adapters/base.adapter'
 import { buildConsistencyPromptSummary, buildNovelConsistencyReport } from './consistency.service'
 import { syncChapterTimelineStatuses } from './link-sync.service'
 import { throwUserFacingError } from '../utils/user-facing-error'
@@ -4982,6 +4984,54 @@ export async function generateChapterContent(
   }
   let previousRoleTaskId: number | undefined
   let hasCommittedContent = false
+  let latestUsableDraft = ''
+  let latestReviewNotesJson = chapter.reviewNotesJson || ''
+
+  const buildPipelineHoldReviewNotesJson = (
+    role: ChapterPipelineRole,
+    detail: string,
+    failureCode?: ChapterPipelineFailureCode,
+  ) => {
+    const notes = parseStoredReviewNotes(latestReviewNotesJson || chapter.reviewNotesJson)
+    const holdLine = `${getPipelineRoleLabel(role)} 未完成：${detail}。当前可用稿已保存为待人工审核/可重试状态。`
+    const codeLine = failureCode ? `失败代码：${failureCode}` : ''
+    const nextNotes: ChapterReviewNotes = {
+      ...notes,
+      summary: notes.summary || holdLine,
+      critical_fixes: dedupeTextList([holdLine, codeLine, ...notes.critical_fixes]),
+      revision_brief: appendRevisionBrief(notes.revision_brief, [
+        '先人工确认当前保留稿，再按失败原因选择续跑或重新生成。',
+      ]),
+      rewrite_required: true,
+      severity: mergeSeverity(notes.severity, 'medium'),
+    }
+    return JSON.stringify(nextNotes)
+  }
+
+  const preserveUsableDraftForReview = (
+    role: ChapterPipelineRole,
+    detail: string,
+    failureCode?: ChapterPipelineFailureCode,
+  ): boolean => {
+    const usableDraft = latestUsableDraft.trim()
+    if (!usableDraft) return false
+    const resumableContent = snapshot.partialContent?.trim() || usableDraft
+    updateChapter(chapterId, {
+      content: usableDraft,
+      reviewNotesJson: buildPipelineHoldReviewNotesJson(role, detail, failureCode),
+      status: 'reviewing',
+    }, {
+      skipStaleTracking: true,
+      versionSource: false,
+    })
+    hasCommittedContent = true
+    snapshot = {
+      ...snapshot,
+      partialContent: resumableContent,
+      resumeSourceTaskId: snapshot.resumeSourceTaskId,
+    }
+    return true
+  }
 
   const getWorkflowPipelineStage = () => {
     if (snapshot.currentRole) {
@@ -5200,10 +5250,11 @@ export async function generateChapterContent(
       },
     }
 
-    if (!hasCommittedContent) {
+    const preservedDraft = !aborted && preserveUsableDraftForReview(role, detail, failure.code)
+    if (!preservedDraft && !hasCommittedContent) {
       updateChapter(chapterId, { status: previousStatus }, { versionSource: false })
-    } else {
-      updateChapter(chapterId, { status: 'draft' }, { skipStaleTracking: true, versionSource: false })
+    } else if (!preservedDraft) {
+      updateChapter(chapterId, { status: blocked ? 'reviewing' : 'draft' }, { skipStaleTracking: true, versionSource: false })
     }
 
     setWorkflowTaskStatus(aborted ? 'cancelled' : 'failed', {
@@ -5694,6 +5745,25 @@ export async function generateChapterContent(
       chatOpts: writerChatOpts,
       sender,
     })
+    latestUsableDraft = draftContent.trim()
+    if (latestUsableDraft) {
+      updateChapter(chapterId, {
+        content: latestUsableDraft,
+        status: 'reviewing',
+      }, {
+        skipStaleTracking: true,
+        versionSource: false,
+      })
+      hasCommittedContent = true
+      snapshot = {
+        ...snapshot,
+        partialContent: latestUsableDraft,
+        resumeSourceTaskId: writerTaskId,
+      }
+      syncWorkflowTask({
+        outputText: 'Writer 初稿已保存为待人工审核/可重试草稿。',
+      })
+    }
     finishRoleTask('writer', writerTaskId, '正文初稿已生成，等待 Critic 审校。')
     const lockedParagraphContext = buildLockedParagraphContext(chapter, draftContent)
     const criticStepMemory = buildStepMemorySummary({
@@ -5887,7 +5957,8 @@ export async function generateChapterContent(
       chapterFunction: reviewNotes.chapter_function_primary || reviewNotes.pace_marker,
       emotionTone: chapter.emotionTone || '',
     })
-    updateChapter(chapterId, { reviewNotesJson: JSON.stringify(reviewNotes) })
+    latestReviewNotesJson = JSON.stringify(reviewNotes)
+    updateChapter(chapterId, { reviewNotesJson: latestReviewNotesJson })
     finishRoleTask('critic', criticTaskId, 'Critic 审校完成，已生成本章修订意见。')
     const reviewPrioritySummary = buildReviewPrioritySummary(reviewNotes)
     const rewritePolicy = buildAdaptiveRewritePolicy(reviewPrioritySummary)
@@ -6047,43 +6118,87 @@ export async function generateChapterContent(
       }),
     }])
 
+    const startRewriterTaskWithAssert = async (messages: Message[], detail: string) => {
+      const taskId = await startRoleTask('rewriter', 'chapter_rewriter', detail, {
+        inputJson: JSON.stringify(messages),
+        runnerType: 'stream',
+      })
+      try {
+        assertContractDrivenWriterInputs('rewriter', contractVersion, rewriteContext.writingContractSummary, scenePlanText)
+      } catch (error) {
+        updateTaskStatus(taskId, 'failed', sender, {
+          pipelineStage: 'blocked',
+          errorMessage: error instanceof Error ? error.message : 'Rewriter 缺少合同输入',
+          recoveryHintJson: serializeTaskRecoveryHint(buildChapterPipelineRecoveryHint(chapter.novelId, chapterId, 'rewriter')),
+        })
+        failRoleTask('rewriter', taskId, error, { blocked: true })
+      }
+      return taskId
+    }
+    const runRewriterStreamAttempt = async (
+      attemptNumber: number,
+      rejectedDigests: string[],
+      detail: string,
+    ) => {
+      const attemptMessages = buildRewriteMessages(attemptNumber, rejectedDigests)
+      let currentTaskId = await startRewriterTaskWithAssert(attemptMessages, detail)
+      let networkRetryCount = 0
+
+      while (true) {
+        let receivedOutput = ''
+        try {
+          const result = await executeStreamTask(currentTaskId, {
+            type: 'chapter_rewriter',
+            novelId: chapter.novelId,
+            relatedEntityType: 'chapter',
+            relatedEntityId: chapterId,
+            inputJson: JSON.stringify(attemptMessages),
+            messages: attemptMessages,
+            modelConfigId: novel.modelConfigId || undefined,
+            chatOpts: rewriterChatOpts,
+            sender,
+            onChunk: async (_chunk, fullOutput) => {
+              receivedOutput = fullOutput
+              snapshot = {
+                ...snapshot,
+                partialContent: fullOutput,
+                resumeReason: undefined,
+                resumeSourceTaskId: currentTaskId,
+              }
+              syncWorkflowTask()
+            },
+          })
+          return { taskId: currentTaskId, result }
+        } catch (error) {
+          if (
+            isTransientModelNetworkError(error)
+            && receivedOutput.trim().length < 120
+            && networkRetryCount < 1
+          ) {
+            networkRetryCount += 1
+            updateTask(currentTaskId, {
+              outputText: '流式连接在返回可用正文前中断，已自动新建 Rewriter 任务重试一次。',
+            })
+            currentTaskId = await startRewriterTaskWithAssert(
+              attemptMessages,
+              `${detail}（网络中断自动重试 ${networkRetryCount}/1）`,
+            )
+            continue
+          }
+          throw error
+        }
+      }
+    }
+
     let rewriteAttemptNumber = 1
     let rewriteRejectedDigests: string[] = []
-    let messages = buildRewriteMessages()
-    let rewriterTaskId = await startRoleTask('rewriter', 'chapter_rewriter', 'Rewriter 正在按 Critic 结论修正文稿。', {
-      inputJson: JSON.stringify(messages),
-      runnerType: 'stream',
-    })
-    try {
-      assertContractDrivenWriterInputs('rewriter', contractVersion, rewriteContext.writingContractSummary, scenePlanText)
-    } catch (error) {
-      updateTaskStatus(rewriterTaskId, 'failed', sender, {
-        pipelineStage: 'blocked',
-        errorMessage: error instanceof Error ? error.message : 'Rewriter 缺少合同输入',
-        recoveryHintJson: serializeTaskRecoveryHint(buildChapterPipelineRecoveryHint(chapter.novelId, chapterId, 'rewriter')),
-      })
-      failRoleTask('rewriter', rewriterTaskId, error, { blocked: true })
-    }
-    let rewriteResult = await executeStreamTask(rewriterTaskId, {
-      type: 'chapter_rewriter',
-      novelId: chapter.novelId,
-      relatedEntityType: 'chapter',
-      relatedEntityId: chapterId,
-      inputJson: JSON.stringify(messages),
-      messages,
-      modelConfigId: novel.modelConfigId || undefined,
-      chatOpts: rewriterChatOpts,
-      sender,
-      onChunk: async (_chunk, fullOutput) => {
-        snapshot = {
-          ...snapshot,
-          partialContent: fullOutput,
-          resumeReason: undefined,
-          resumeSourceTaskId: rewriterTaskId,
-        }
-        syncWorkflowTask()
-      },
-    })
+    let rewriteRun = await runRewriterStreamAttempt(
+      rewriteAttemptNumber,
+      rewriteRejectedDigests,
+      'Rewriter 正在按 Critic 结论修正文稿。',
+    )
+    let rewriterTaskId = rewriteRun.taskId
+    let rewriteResult = rewriteRun.result
     if (
       isCandidateTooSimilar(rewriteResult.output, [draftContent])
       && (rewritePolicy.requiresFullRewrite || reviewPrioritySummary.counts.high > 0)
@@ -6101,41 +6216,13 @@ export async function generateChapterContent(
       })
       previousRoleTaskId = rewriterTaskId
       rewriteAttemptNumber = 2
-      messages = buildRewriteMessages(rewriteAttemptNumber, rewriteRejectedDigests)
-      rewriterTaskId = await startRoleTask('rewriter', 'chapter_rewriter', 'Rewriter 首轮改写幅度不足，正在切到变体重试。', {
-        inputJson: JSON.stringify(messages),
-        runnerType: 'stream',
-      })
-      try {
-        assertContractDrivenWriterInputs('rewriter', contractVersion, rewriteContext.writingContractSummary, scenePlanText)
-      } catch (error) {
-        updateTaskStatus(rewriterTaskId, 'failed', sender, {
-          pipelineStage: 'blocked',
-          errorMessage: error instanceof Error ? error.message : 'Rewriter 缺少合同输入',
-          recoveryHintJson: serializeTaskRecoveryHint(buildChapterPipelineRecoveryHint(chapter.novelId, chapterId, 'rewriter')),
-        })
-        failRoleTask('rewriter', rewriterTaskId, error, { blocked: true })
-      }
-      rewriteResult = await executeStreamTask(rewriterTaskId, {
-        type: 'chapter_rewriter',
-        novelId: chapter.novelId,
-        relatedEntityType: 'chapter',
-        relatedEntityId: chapterId,
-        inputJson: JSON.stringify(messages),
-        messages,
-        modelConfigId: novel.modelConfigId || undefined,
-        chatOpts: rewriterChatOpts,
-        sender,
-        onChunk: async (_chunk, fullOutput) => {
-          snapshot = {
-            ...snapshot,
-            partialContent: fullOutput,
-            resumeReason: undefined,
-            resumeSourceTaskId: rewriterTaskId,
-          }
-          syncWorkflowTask()
-        },
-      })
+      rewriteRun = await runRewriterStreamAttempt(
+        rewriteAttemptNumber,
+        rewriteRejectedDigests,
+        'Rewriter 首轮改写幅度不足，正在切到变体重试。',
+      )
+      rewriterTaskId = rewriteRun.taskId
+      rewriteResult = rewriteRun.result
     }
 
     const protectedOutput = enforceLockedParagraphProtection(
@@ -6239,6 +6326,15 @@ export async function generateChapterContent(
       finalReviewNotes,
       rewriteMiniReview.narrativeDelta,
     )
+    latestUsableDraft = repaired.content.trim()
+    latestReviewNotesJson = JSON.stringify(finalReviewNotesWithRewriteDelta)
+    if (latestUsableDraft) {
+      snapshot = {
+        ...snapshot,
+        partialContent: latestUsableDraft,
+        resumeSourceTaskId: rewriterTaskId,
+      }
+    }
     if (rewriteMiniReview.needsHumanReview) {
       failRoleTask('rewriter', rewriterTaskId, new ChapterPipelineStageError(
         'human_review_required',
@@ -6279,7 +6375,7 @@ export async function generateChapterContent(
 
     updateChapter(chapterId, {
       content: repaired.content,
-      reviewNotesJson: JSON.stringify(finalReviewNotesWithRewriteDelta),
+      reviewNotesJson: latestReviewNotesJson,
       status: 'draft',
     }, {
       skipStaleTracking: true,

@@ -902,6 +902,14 @@ export default function Writing({ novelId }: Props) {
 
       if (payload.status === 'failed' || payload.status === 'cancelled') {
         if (payload.streamTaskId) clearStream(payload.streamTaskId)
+        void (async () => {
+          await Promise.all([
+            loadChapters(payload.chapterId),
+            refreshQualityDashboard(),
+            refreshLatestPipelineTask(payload.chapterId),
+          ])
+          await refreshChapter(payload.chapterId)
+        })()
         completeGeneration({
           taskId: payload.taskId,
           chapterId: payload.chapterId,
@@ -971,10 +979,19 @@ export default function Writing({ novelId }: Props) {
       })()
     }
     if (stream.status === 'failed') {
+      const chapterId = activeGeneration.chapterId
       clearStream(stream.taskId)
+      void (async () => {
+        await Promise.all([
+          loadChapters(chapterId),
+          refreshQualityDashboard(),
+          refreshLatestPipelineTask(chapterId),
+        ])
+        await refreshChapter(chapterId)
+      })()
       completeGeneration({
         taskId: stream.taskId,
-        chapterId: activeGeneration.chapterId,
+        chapterId,
         status: 'failed',
         stage: activeGeneration.stage,
         label: '章节流水线执行失败',
@@ -984,10 +1001,18 @@ export default function Writing({ novelId }: Props) {
       message.error(getUserFacingMessage('writing.generateFailed'))
     }
     if (stream.status === 'cancelled') {
+      const chapterId = activeGeneration.chapterId
       clearStream(stream.taskId)
+      void (async () => {
+        await Promise.all([
+          loadChapters(chapterId),
+          refreshLatestPipelineTask(chapterId),
+        ])
+        await refreshChapter(chapterId)
+      })()
       completeGeneration({
         taskId: stream.taskId,
-        chapterId: activeGeneration.chapterId,
+        chapterId,
         status: 'cancelled',
         stage: activeGeneration.stage,
         label: '章节流水线已取消',
@@ -995,7 +1020,7 @@ export default function Writing({ novelId }: Props) {
       })
       message.info(getUserFacingMessage('writing.generateCancelled'))
     }
-  }, [activeGeneration, clearStream, completeGeneration, loadChapters, refreshChapter, refreshMeta, refreshQualityDashboard, streams])
+  }, [activeGeneration, clearStream, completeGeneration, loadChapters, refreshChapter, refreshLatestPipelineTask, refreshMeta, refreshQualityDashboard, streams])
 
   useEffect(() => () => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)

@@ -28,6 +28,8 @@ export interface AssetQualityLoopOptions {
   schemaHint?: string
   reviewFocus?: string[]
   rewriteConstraints?: string[]
+  qualityBudgetMs?: number
+  maxRewritePasses?: number
 }
 
 export interface AssetQualityLoopResult {
@@ -37,6 +39,9 @@ export interface AssetQualityLoopResult {
   rewrittenReview?: AssetReviewResult
   warnings: string[]
 }
+
+const DEFAULT_ASSET_QUALITY_BUDGET_MS = 240_000
+const DEFAULT_ASSET_QUALITY_MAX_REWRITE_PASSES = 1
 
 function asText(value: unknown): string {
   return typeof value === 'string' ? cleanAiFieldText(value) : ''
@@ -86,6 +91,16 @@ function fallbackReview(summary: string, warning?: string): AssetReviewResult {
     topFixes: [],
     strengths: [],
   }
+}
+
+function resolveQualityBudgetMs(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? value
+    : DEFAULT_ASSET_QUALITY_BUDGET_MS
+}
+
+function isQualityBudgetSpent(startedAt: number, budgetMs: number): boolean {
+  return Date.now() - startedAt >= budgetMs
 }
 
 function parseAssetReviewResult(raw: string): AssetReviewResult {
@@ -246,6 +261,12 @@ export async function rewriteGeneratedAsset(
 }
 
 export async function runAssetQualityLoop(options: AssetQualityLoopOptions): Promise<AssetQualityLoopResult> {
+  const startedAt = Date.now()
+  const qualityBudgetMs = resolveQualityBudgetMs(options.qualityBudgetMs)
+  const maxRewritePasses = typeof options.maxRewritePasses === 'number' && Number.isFinite(options.maxRewritePasses)
+    ? Math.max(0, Math.floor(options.maxRewritePasses))
+    : DEFAULT_ASSET_QUALITY_MAX_REWRITE_PASSES
+
   updateAssetReviewProgress(options.parentTaskId, options.sender, {
     targetType: options.targetType,
     stage: 'drafted',
@@ -329,6 +350,32 @@ export async function runAssetQualityLoop(options: AssetQualityLoopOptions): Pro
     }
   }
 
+  const skipRewriteWarning = maxRewritePasses <= 0
+    ? '资产审校建议重写，但当前任务使用快速质量预算，已保留原始输出并记录待后续复核。'
+    : isQualityBudgetSpent(startedAt, qualityBudgetMs)
+      ? `资产审校建议重写，但质量循环已达到 ${Math.round(qualityBudgetMs / 1000)} 秒预算，已保留原始输出并记录待后续复核。`
+      : ''
+  if (skipRewriteWarning) {
+    updateAssetReviewProgress(options.parentTaskId, options.sender, {
+      targetType: options.targetType,
+      stage: 'accepted',
+      reviewSummary: review.summary,
+      severity: review.severity,
+      rewriteRequired: false,
+      rejectRequired: false,
+      topFixes: review.topFixes,
+      risks: collectReviewRisks(review),
+      warnings: [skipRewriteWarning],
+      message: '资产审校已记录待复核问题，当前结果先进入落库。',
+    })
+    return {
+      stage: 'accepted',
+      finalOutput: options.generatedOutput,
+      review,
+      warnings: [skipRewriteWarning],
+    }
+  }
+
   updateAssetReviewProgress(options.parentTaskId, options.sender, {
     targetType: options.targetType,
     stage: 'rewritten',
@@ -361,6 +408,28 @@ export async function runAssetQualityLoop(options: AssetQualityLoopOptions): Pro
     return {
       stage: 'accepted',
       finalOutput: options.generatedOutput,
+      review,
+      warnings: [warning],
+    }
+  }
+
+  if (isQualityBudgetSpent(startedAt, qualityBudgetMs)) {
+    const warning = `资产已完成定向重写，但质量循环已达到 ${Math.round(qualityBudgetMs / 1000)} 秒预算，已跳过复检并采用重写结果。`
+    updateAssetReviewProgress(options.parentTaskId, options.sender, {
+      targetType: options.targetType,
+      stage: 'accepted',
+      reviewSummary: review.summary,
+      severity: review.severity,
+      rewriteRequired: false,
+      rejectRequired: false,
+      topFixes: review.topFixes,
+      risks: collectReviewRisks(review),
+      warnings: [warning],
+      message: '资产重写完成，已因预算限制跳过复检。',
+    })
+    return {
+      stage: 'rewritten',
+      finalOutput: rewrittenOutput,
       review,
       warnings: [warning],
     }

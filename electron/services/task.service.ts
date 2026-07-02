@@ -512,7 +512,7 @@ function collectErrorDetails(
   }
 }
 
-function isTransientModelNetworkError(error: unknown): boolean {
+export function isTransientModelNetworkError(error: unknown): boolean {
   if (isAbortError(error)) return false
 
   const details = collectErrorDetails(error)
