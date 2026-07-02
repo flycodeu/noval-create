@@ -298,9 +298,8 @@ function quotePowerShellArg(value: string): string {
   return `'${value.replace(/'/g, "''")}'`
 }
 
-function buildSoakExportCommand(novelId: number, databasePath?: string): string {
-  const dbPath = databasePath?.trim() || 'path/to/novelforge.db'
-  return `npm run soak:export-chapter-report -- --db ${quotePowerShellArg(dbPath)} --novelId ${novelId} --out ${quotePowerShellArg(buildSoakReportPath(novelId))}`
+function buildSoakExportCommand(novelId: number): string {
+  return `npm run soak:export-chapter-report -- --db ${quotePowerShellArg('path/to/novelforge.db')} --novelId ${novelId} --out ${quotePowerShellArg(buildSoakReportPath(novelId))}`
 }
 
 function buildSoakValidateCommand(novelId: number): string {
@@ -3330,22 +3329,7 @@ function MillionRuntimeObservabilityPanel({ observability }: { observability: No
 }
 
 function LongformSoakAcceptancePanel({ novelId, data }: { novelId: number; data: QualityDashboardData }) {
-  const [databasePath, setDatabasePath] = useState('')
-  useEffect(() => {
-    let mounted = true
-    window.electron.app.getDatabasePath()
-      .then((pathValue) => {
-        if (mounted) setDatabasePath(pathValue)
-      })
-      .catch(() => {
-        if (mounted) setDatabasePath('')
-      })
-    return () => {
-      mounted = false
-    }
-  }, [])
-
-  const exportCommand = buildSoakExportCommand(novelId, databasePath)
+  const exportCommand = buildSoakExportCommand(novelId)
   const validateCommand = buildSoakValidateCommand(novelId)
   const reportPath = buildSoakReportPath(novelId)
   const runtime = data.millionRuntimeObservability
@@ -3389,7 +3373,7 @@ function LongformSoakAcceptancePanel({ novelId, data }: { novelId: number; data:
             <code className="quality-dashboard-page__command-text">{exportCommand}</code>
           </div>
           <div className="quality-dashboard-page__role-meta">
-            {databasePath ? `数据库 ${databasePath}；输出 ${reportPath}` : `输出 ${reportPath}；未读取到数据库路径时请把命令中的 path/to/novelforge.db 替换成真实路径。`}
+            {`输出 ${reportPath}；导出时请把命令中的 path/to/novelforge.db 替换为本机数据库路径。`}
           </div>
         </div>
         <div className="quality-card">

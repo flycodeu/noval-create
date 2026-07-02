@@ -18,6 +18,10 @@ export default defineConfig({
     host: '127.0.0.1',
     port: 4175,
     strictPort: false,
+    proxy: {
+      '/rpc': { target: 'http://127.0.0.1:8787', changeOrigin: true },
+      '/health': { target: 'http://127.0.0.1:8787', changeOrigin: true },
+    },
   },
   plugins: [react()],
   resolve: {

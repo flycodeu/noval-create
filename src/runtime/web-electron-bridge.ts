@@ -17,12 +17,42 @@ type BridgeService = Record<string, BridgeMethod>
 
 const WEB_BRIDGE_MARKER = '__novalCreateWebBridgeInstalled'
 const NOW = '2026-05-24T09:00:00.000Z'
+const LOCAL_BACKEND_URL = ''
 const WEB_MODEL_CONFIGS_KEY = 'novelforge.webPreview.modelConfigs'
 const WEB_SOURCE_SEARCH_KEY = 'novelforge.webPreview.sourceSearchSettings'
 const MASKED_KEY = '已设置'
 
 type WebModelConfig = Omit<ModelConfig, 'apiKey'> & { apiKeySet?: boolean }
 type WebSourceSearchSettings = Pick<SourceSearchSettingsView, 'provider' | 'tavilyApiKeySet' | 'braveApiKeySet' | 'updatedAt'>
+
+let localBackendLastError = ''
+let backendCheckPromise: Promise<boolean> | null = null
+
+async function checkBackendHealth(): Promise<boolean> {
+  try {
+    const response = await fetch('/health', { method: 'GET' })
+    if (!response.ok) return false
+    const data = await response.json()
+    return data?.ok === true
+  } catch {
+    return false
+  }
+}
+
+async function waitForBackend(maxRetries = 3): Promise<boolean> {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    if (await checkBackendHealth()) {
+      localBackendLastError = ''
+      console.log('[local-backend] connected')
+      return true
+    }
+    if (attempt < maxRetries - 1) {
+      await new Promise(resolve => setTimeout(resolve, 500 * Math.pow(2, attempt)))
+    }
+  }
+  rememberLocalBackendError('健康检查失败，本地后端可能未启动')
+  return false
+}
 
 const projectBriefJson = JSON.stringify({
   premise: '在近未来城市的旧城区，一名修复记忆档案的调查员发现自己的童年被写进了不存在的案件。',
@@ -703,6 +733,96 @@ function resolveSavedKeyFlag(current: boolean, value: unknown): boolean {
   return typeof value === 'string' ? Boolean(value.trim()) : Boolean(value)
 }
 
+class LocalBackendUnavailableError extends Error {
+  constructor(message = 'Local backend unavailable') {
+    super(message)
+    this.name = 'LocalBackendUnavailableError'
+  }
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function rememberLocalBackendError(message: string, error?: unknown) {
+  localBackendLastError = error == null ? message : `${message}: ${describeError(error)}`
+  console.warn(`[local-backend] ${localBackendLastError}`)
+}
+
+function getLocalBackendUnavailableMessage() {
+  return localBackendLastError
+    ? `本地后端未连接：${localBackendLastError}。请确认 npm run dev:web 正在运行，并刷新页面。`
+    : '本地后端未连接，请运行 npm run dev:web 后再测试。'
+}
+
+function toBackendError(payload: { code?: unknown; message?: unknown; detail?: unknown }) {
+  const message = typeof payload.message === 'string' ? payload.message : '本地后端执行失败'
+  const error = new Error(message) as Error & { code?: string; detail?: string }
+  error.name = 'LocalBackendError'
+  if (typeof payload.code === 'string') error.code = payload.code
+  if (typeof payload.detail === 'string') error.detail = payload.detail
+  return error
+}
+
+async function callLocalBackend<T>(service: string, method: string, args: unknown[] = []): Promise<T> {
+  if (backendCheckPromise) {
+    await backendCheckPromise
+    backendCheckPromise = null
+  }
+
+  let response: Response
+  try {
+    response = await fetch(`${LOCAL_BACKEND_URL}/rpc`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ service, method, args }),
+    })
+  } catch (error) {
+    rememberLocalBackendError('无法请求 /rpc', error)
+    throw new LocalBackendUnavailableError()
+  }
+
+  if (response.status === 404) {
+    rememberLocalBackendError(`本地后端未实现接口 ${service}.${method}`)
+    throw new LocalBackendUnavailableError(`${service}.${method} is not implemented by local backend`)
+  }
+
+  let payload: unknown
+  try {
+    payload = await response.json()
+  } catch (error) {
+    rememberLocalBackendError('本地后端返回了非 JSON 响应', error)
+    throw new LocalBackendUnavailableError('Local backend returned a non-JSON response')
+  }
+
+  const record = asRecord(payload)
+  if (record.ok === true) {
+    localBackendLastError = ''
+    return record.data as T
+  }
+
+  if (record.ok === false && record.error && typeof record.error === 'object') {
+    throw toBackendError(record.error as { code?: unknown; message?: unknown; detail?: unknown })
+  }
+
+  rememberLocalBackendError('本地后端返回格式无效')
+  throw new LocalBackendUnavailableError('Local backend returned an invalid response')
+}
+
+async function withLocalBackend<T>(
+  service: string,
+  method: string,
+  args: unknown[],
+  fallback: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await callLocalBackend<T>(service, method, args)
+  } catch (error) {
+    if (error instanceof LocalBackendUnavailableError) return fallback()
+    throw error
+  }
+}
+
 function getNovelById(id: number): Novel | null {
   return demoNovels.find((novel) => novel.id === id) ?? demoNovels[0] ?? null
 }
@@ -718,6 +838,8 @@ export function installWebElectronBridge(): void {
   if (typeof window === 'undefined') return
   if (typeof window.electron?.novel?.list === 'function') return
   if (!installMarker()) return
+
+  backendCheckPromise = waitForBackend()
 
   const bridge = {
     windowControls: {
@@ -813,8 +935,8 @@ export function installWebElectronBridge(): void {
       },
     }),
     model: createService({
-      list: async () => readWebModelConfigs().map(exposeWebModelConfig),
-      create: async (data?: unknown) => {
+      list: async () => withLocalBackend('model', 'list', [], async () => readWebModelConfigs().map(exposeWebModelConfig)),
+      create: async (data?: unknown) => withLocalBackend('model', 'create', [data], async () => {
         const configs = readWebModelConfigs()
         const nextIdValue = configs.reduce((maxId, config) => Math.max(maxId, Number(config.id) || 0), 0) + 1
         const nextConfig = {
@@ -825,8 +947,8 @@ export function installWebElectronBridge(): void {
         }
         writeWebModelConfigs([...configs, nextConfig])
         return nextIdValue
-      },
-      update: async (id?: unknown, data?: unknown) => {
+      }),
+      update: async (id?: unknown, data?: unknown) => withLocalBackend('model', 'update', [id, data], async () => {
         const targetId = Number(id)
         const configs = readWebModelConfigs()
         const nextConfigs = configs.map((config) => (
@@ -835,29 +957,34 @@ export function installWebElectronBridge(): void {
             : config
         ))
         writeWebModelConfigs(nextConfigs)
-      },
-      delete: async (id?: unknown) => {
+      }),
+      delete: async (id?: unknown) => withLocalBackend('model', 'delete', [id], async () => {
         const targetId = Number(id)
         const nextConfigs = readWebModelConfigs().filter((config) => config.id !== targetId)
         writeWebModelConfigs(nextConfigs)
-      },
-      setDefault: async (id?: unknown) => {
+      }),
+      setDefault: async (id?: unknown) => withLocalBackend('model', 'setDefault', [id], async () => {
         const targetId = Number(id)
         const nextConfigs = readWebModelConfigs().map((config) => ({
           ...config,
           isDefault: config.id === targetId ? 1 : 0,
         }))
         writeWebModelConfigs(nextConfigs)
-      },
-      test: async () => ({
+      }),
+      test: async (id?: unknown) => withLocalBackend('model', 'test', [id], async () => ({
         success: false,
         latency: 0,
-        info: '浏览器预览不连接真实模型，请在 Electron 客户端测试。',
-      }),
+        info: getLocalBackendUnavailableMessage(),
+      })),
     }),
     sourceSearch: createService({
-      getSettings: async () => exposeWebSourceSearchSettings(readWebSourceSearchSettings()),
-      updateSettings: async (data?: unknown) => {
+      getSettings: async () => withLocalBackend(
+        'sourceSearch',
+        'getSettings',
+        [],
+        async () => exposeWebSourceSearchSettings(readWebSourceSearchSettings()),
+      ),
+      updateSettings: async (data?: unknown) => withLocalBackend('sourceSearch', 'updateSettings', [data], async () => {
         const current = readWebSourceSearchSettings()
         const record = asRecord(data)
         const nextSettings: WebSourceSearchSettings = {
@@ -868,12 +995,17 @@ export function installWebElectronBridge(): void {
         }
         writeJsonToStorage(WEB_SOURCE_SEARCH_KEY, nextSettings)
         return exposeWebSourceSearchSettings(nextSettings)
-      },
-      test: async () => ({
+      }),
+      test: async () => withLocalBackend('sourceSearch', 'test', [], async () => ({
         success: false,
         providerName: null,
         latency: 0,
-        info: '浏览器预览不发起真实 Tavily/Brave 检索，请在 Electron 客户端测试。',
+        info: getLocalBackendUnavailableMessage(),
+      })),
+    }),
+    ai: createService({
+      runPrompt: async (data?: unknown) => withLocalBackend('ai', 'runPrompt', [data], async () => {
+        throw new Error(getLocalBackendUnavailableMessage())
       }),
     }),
     prompt: createService({ list: async () => [] }),
@@ -1059,7 +1191,12 @@ export function installWebElectronBridge(): void {
     premiseDraft: createService(),
     planningDraft: createService(),
     app: createService({
-      getDatabasePath: async () => 'web-preview://localStorage/novelforge',
+      getDatabasePath: async () => withLocalBackend(
+        'app',
+        'getDatabasePath',
+        [],
+        async () => 'web-preview://localStorage/novelforge',
+      ),
     }),
     quality: createService({
       getDashboard: async () => emptyQualityDashboard,

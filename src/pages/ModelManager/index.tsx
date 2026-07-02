@@ -180,7 +180,6 @@ export default function ModelManager() {
   const [sourceSaving, setSourceSaving] = useState(false)
   const [sourceTesting, setSourceTesting] = useState(false)
   const [sourceTestResult, setSourceTestResult] = useState<SourceSearchTestResult | null>(null)
-  const [databasePath, setDatabasePath] = useState('')
 
   const selectedProvider = Form.useWatch('provider', form)
   const selectedModelId = Form.useWatch('modelId', form)
@@ -221,9 +220,6 @@ export default function ModelManager() {
   useEffect(() => {
     void loadConfigs()
     void loadSourceSettings()
-    void window.electron.app.getDatabasePath()
-      .then(setDatabasePath)
-      .catch(() => setDatabasePath('无法读取数据库路径'))
   }, [loadConfigs, loadSourceSettings])
 
   const applyProviderDefaults = useCallback((provider: string, resetCredentials = false) => {
@@ -255,11 +251,15 @@ export default function ModelManager() {
     })
   }, [form])
 
-  const handleSelect = (config: ModelConfig) => {
+  const selectConfig = (config: ModelConfig) => {
     setSelected(config)
     setIsNew(false)
     setTestResult(null)
     hydrateModelForm(config)
+  }
+
+  const openModelEditor = (config: ModelConfig) => {
+    selectConfig(config)
     setEditorOpen(true)
   }
 
@@ -289,7 +289,7 @@ export default function ModelManager() {
           setIsNew(false)
           setEditorOpen(false)
         } else {
-          message.warning(`保存返回成功，但当前列表没有读到新配置。当前数据库：${databasePath || '未知'}`)
+          message.warning('保存返回成功，但当前列表没有读到新配置。请刷新配置列表确认。')
         }
         return
       }
@@ -426,7 +426,6 @@ export default function ModelManager() {
   const activeSourceLabel = sourceSettings?.activeProvider
     ? getSourceProviderLabel(sourceSettings.activeProvider)
     : getSourceProviderLabel(sourceSettings?.provider)
-  const isWebPreviewDatabase = databasePath.startsWith('web-preview://')
 
   const refreshAll = () => {
     void loadConfigs()
@@ -469,11 +468,11 @@ export default function ModelManager() {
       >
         <Alert
           className="model-manager-database-alert"
-          type={isWebPreviewDatabase ? 'warning' : 'info'}
+          type="info"
           showIcon
           icon={<DatabaseOutlined />}
-          message={isWebPreviewDatabase ? '当前运行在浏览器预览' : '当前配置写入数据库'}
-          description={databasePath || '正在读取数据库路径...'}
+          message="当前配置写入数据库"
+          description="模型配置和检索 Key 已持久化保存。"
         />
 
         <div className="model-manager-layout">
@@ -481,7 +480,7 @@ export default function ModelManager() {
             scrollable
             className="model-manager-list-panel"
             title="模型配置"
-            description="点击配置可编辑，默认模型带星标。"
+            description="点击配置查看状态，默认模型带星标。"
             extra={<Button size="small" type="primary" icon={<PlusOutlined />} onClick={handleNew}>新建</Button>}
           >
             {loading ? (
@@ -498,11 +497,11 @@ export default function ModelManager() {
                     role="button"
                     tabIndex={0}
                     className={`admin-sidebar-item model-manager-config-card ${selected?.id === config.id ? 'admin-sidebar-item--active' : ''}`}
-                    onClick={() => handleSelect(config)}
+                    onClick={() => selectConfig(config)}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter' || event.key === ' ') {
                         event.preventDefault()
-                        handleSelect(config)
+                        selectConfig(config)
                       }
                     }}
                   >
@@ -524,7 +523,7 @@ export default function ModelManager() {
                       className="model-manager-config-card__actions"
                       onClick={(event) => event.stopPropagation()}
                     >
-                      <Button size="small" icon={<EditOutlined />} onClick={() => handleSelect(config)}>
+                      <Button size="small" icon={<EditOutlined />} onClick={() => openModelEditor(config)}>
                         编辑
                       </Button>
                       <Button
@@ -577,7 +576,7 @@ export default function ModelManager() {
                   </div>
                 </div>
                 <div className="model-manager-status-actions">
-                  <Button type="primary" icon={<EditOutlined />} onClick={() => handleSelect(selected)}>
+                  <Button type="primary" icon={<EditOutlined />} onClick={() => openModelEditor(selected)}>
                     编辑模型
                   </Button>
                   <Button
