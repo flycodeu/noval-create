@@ -5,8 +5,11 @@ import type {
   ChapterWritebackCenterData,
   ChapterWritebackRun,
   GlobalLockLibrary,
+  ModelConfig,
   Template,
   Novel,
+  SourceSearchProviderMode,
+  SourceSearchSettingsView,
 } from '../types'
 
 type BridgeMethod = (...args: unknown[]) => Promise<unknown>
@@ -14,6 +17,12 @@ type BridgeService = Record<string, BridgeMethod>
 
 const WEB_BRIDGE_MARKER = '__novalCreateWebBridgeInstalled'
 const NOW = '2026-05-24T09:00:00.000Z'
+const WEB_MODEL_CONFIGS_KEY = 'novelforge.webPreview.modelConfigs'
+const WEB_SOURCE_SEARCH_KEY = 'novelforge.webPreview.sourceSearchSettings'
+const MASKED_KEY = '已设置'
+
+type WebModelConfig = Omit<ModelConfig, 'apiKey'> & { apiKeySet?: boolean }
+type WebSourceSearchSettings = Pick<SourceSearchSettingsView, 'provider' | 'tavilyApiKeySet' | 'braveApiKeySet' | 'updatedAt'>
 
 const projectBriefJson = JSON.stringify({
   premise: '在近未来城市的旧城区，一名修复记忆档案的调查员发现自己的童年被写进了不存在的案件。',
@@ -536,6 +545,164 @@ function createDefaultMethod(methodName: string): BridgeMethod {
   return async () => null
 }
 
+function readJsonFromStorage<T>(key: string, fallback: T): T {
+  try {
+    const raw = window.localStorage.getItem(key)
+    if (!raw) return fallback
+    return JSON.parse(raw) as T
+  } catch {
+    return fallback
+  }
+}
+
+function writeJsonToStorage(key: string, value: unknown) {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value))
+  } catch {
+    // Browser preview storage can be unavailable in strict privacy modes.
+  }
+}
+
+function createDefaultWebModelConfig(): WebModelConfig {
+  return {
+    id: 1,
+    name: '浏览器预览模型',
+    provider: 'custom',
+    modelId: 'web-preview',
+    baseUrl: '',
+    temperature: 0.7,
+    maxTokens: 4096,
+    maxContextTokens: 32000,
+    maxConcurrency: 1,
+    isDefault: 1,
+    createdAt: NOW,
+    apiKeySet: false,
+  }
+}
+
+function readWebModelConfigs(): WebModelConfig[] {
+  const configs = readJsonFromStorage<WebModelConfig[]>(WEB_MODEL_CONFIGS_KEY, [])
+  if (!Array.isArray(configs) || configs.length === 0) return [createDefaultWebModelConfig()]
+  return configs.map((config, index) => ({
+    ...createDefaultWebModelConfig(),
+    ...config,
+    id: Number(config.id) || index + 1,
+    isDefault: config.isDefault === 1 ? 1 : 0,
+    apiKeySet: Boolean(config.apiKeySet),
+  }))
+}
+
+function writeWebModelConfigs(configs: WebModelConfig[]) {
+  const hasDefault = configs.some((item) => item.isDefault === 1)
+  const normalized = configs.map((config, index) => ({
+    ...config,
+    isDefault: hasDefault ? (config.isDefault === 1 ? 1 : 0) : (index === 0 ? 1 : 0),
+  }))
+  writeJsonToStorage(WEB_MODEL_CONFIGS_KEY, normalized)
+}
+
+function exposeWebModelConfig(config: WebModelConfig): ModelConfig {
+  const { apiKeySet: _apiKeySet, ...publicConfig } = config
+  return {
+    ...publicConfig,
+    apiKey: config.apiKeySet ? MASKED_KEY : '',
+  }
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+}
+
+function getTextField(input: Record<string, unknown>, key: string, fallback = ''): string {
+  const value = input[key]
+  return typeof value === 'string' ? value : fallback
+}
+
+function getNumberField(input: Record<string, unknown>, key: string, fallback: number): number {
+  const value = Number(input[key])
+  return Number.isFinite(value) ? value : fallback
+}
+
+function resolveApiKeySet(input: Record<string, unknown>, existing?: WebModelConfig): boolean {
+  if (!('apiKey' in input)) return Boolean(existing?.apiKeySet)
+  const value = input.apiKey
+  if (value === MASKED_KEY) return Boolean(existing?.apiKeySet)
+  return typeof value === 'string' ? Boolean(value.trim()) : Boolean(value)
+}
+
+function buildWebModelConfig(input: unknown, existing?: WebModelConfig): WebModelConfig {
+  const record = asRecord(input)
+  const fallback = existing ?? createDefaultWebModelConfig()
+  return {
+    id: fallback.id,
+    name: getTextField(record, 'name', fallback.name),
+    provider: getTextField(record, 'provider', fallback.provider),
+    modelId: getTextField(record, 'modelId', fallback.modelId),
+    baseUrl: getTextField(record, 'baseUrl', fallback.baseUrl || ''),
+    temperature: getNumberField(record, 'temperature', fallback.temperature),
+    maxTokens: getNumberField(record, 'maxTokens', fallback.maxTokens),
+    maxContextTokens: 'maxContextTokens' in record
+      ? getNumberField(record, 'maxContextTokens', fallback.maxContextTokens || 32000)
+      : fallback.maxContextTokens,
+    maxConcurrency: getNumberField(record, 'maxConcurrency', fallback.maxConcurrency),
+    isDefault: fallback.isDefault,
+    extraParamsJson: getTextField(record, 'extraParamsJson', fallback.extraParamsJson || ''),
+    createdAt: fallback.createdAt || new Date().toISOString(),
+    apiKeySet: resolveApiKeySet(record, fallback),
+  }
+}
+
+function normalizeSourceProvider(value: unknown): SourceSearchProviderMode {
+  if (value === 'tavily' || value === 'brave' || value === 'disabled') return value
+  return 'auto'
+}
+
+function readWebSourceSearchSettings(): WebSourceSearchSettings {
+  const settings = readJsonFromStorage<WebSourceSearchSettings>(WEB_SOURCE_SEARCH_KEY, {
+    provider: 'auto',
+    tavilyApiKeySet: false,
+    braveApiKeySet: false,
+    updatedAt: NOW,
+  })
+  return {
+    provider: normalizeSourceProvider(settings.provider),
+    tavilyApiKeySet: Boolean(settings.tavilyApiKeySet),
+    braveApiKeySet: Boolean(settings.braveApiKeySet),
+    updatedAt: settings.updatedAt || NOW,
+  }
+}
+
+function exposeWebSourceSearchSettings(settings: WebSourceSearchSettings): SourceSearchSettingsView {
+  const activeProvider = settings.provider === 'disabled'
+    ? null
+    : settings.provider === 'tavily'
+      ? (settings.tavilyApiKeySet ? 'tavily' : null)
+      : settings.provider === 'brave'
+        ? (settings.braveApiKeySet ? 'brave' : null)
+        : settings.tavilyApiKeySet
+          ? 'tavily'
+          : settings.braveApiKeySet
+            ? 'brave'
+            : null
+
+  return {
+    provider: settings.provider,
+    tavilyApiKeySet: settings.tavilyApiKeySet,
+    braveApiKeySet: settings.braveApiKeySet,
+    tavilyEnvSet: false,
+    braveEnvSet: false,
+    activeProvider,
+    updatedAt: settings.updatedAt,
+  }
+}
+
+function resolveSavedKeyFlag(current: boolean, value: unknown): boolean {
+  if (value === undefined || value === MASKED_KEY) return current
+  return typeof value === 'string' ? Boolean(value.trim()) : Boolean(value)
+}
+
 function getNovelById(id: number): Novel | null {
   return demoNovels.find((novel) => novel.id === id) ?? demoNovels[0] ?? null
 }
@@ -646,47 +813,67 @@ export function installWebElectronBridge(): void {
       },
     }),
     model: createService({
-      list: async () => [{
-        id: 1,
-        name: '浏览器预览模型',
-        provider: 'mock',
-        modelId: 'web-preview',
-        apiKey: '',
-        baseUrl: '',
-        temperature: 0.7,
-        maxTokens: 4096,
-        maxContextTokens: 32000,
-        maxConcurrency: 1,
-        isDefault: 1,
-        createdAt: NOW,
-      }],
+      list: async () => readWebModelConfigs().map(exposeWebModelConfig),
+      create: async (data?: unknown) => {
+        const configs = readWebModelConfigs()
+        const nextIdValue = configs.reduce((maxId, config) => Math.max(maxId, Number(config.id) || 0), 0) + 1
+        const nextConfig = {
+          ...buildWebModelConfig(data),
+          id: nextIdValue,
+          createdAt: new Date().toISOString(),
+          isDefault: configs.length === 0 ? 1 : 0,
+        }
+        writeWebModelConfigs([...configs, nextConfig])
+        return nextIdValue
+      },
+      update: async (id?: unknown, data?: unknown) => {
+        const targetId = Number(id)
+        const configs = readWebModelConfigs()
+        const nextConfigs = configs.map((config) => (
+          config.id === targetId
+            ? { ...buildWebModelConfig(data, config), id: config.id, isDefault: config.isDefault }
+            : config
+        ))
+        writeWebModelConfigs(nextConfigs)
+      },
+      delete: async (id?: unknown) => {
+        const targetId = Number(id)
+        const nextConfigs = readWebModelConfigs().filter((config) => config.id !== targetId)
+        writeWebModelConfigs(nextConfigs)
+      },
+      setDefault: async (id?: unknown) => {
+        const targetId = Number(id)
+        const nextConfigs = readWebModelConfigs().map((config) => ({
+          ...config,
+          isDefault: config.id === targetId ? 1 : 0,
+        }))
+        writeWebModelConfigs(nextConfigs)
+      },
+      test: async () => ({
+        success: false,
+        latency: 0,
+        info: '浏览器预览不连接真实模型，请在 Electron 客户端测试。',
+      }),
     }),
     sourceSearch: createService({
-      getSettings: async () => ({
-        provider: 'auto',
-        tavilyApiKeySet: false,
-        braveApiKeySet: false,
-        tavilyEnvSet: false,
-        braveEnvSet: false,
-        activeProvider: null,
-        updatedAt: NOW,
-      }),
-      updateSettings: async (data?: unknown) => ({
-        provider: typeof (data as { provider?: unknown } | undefined)?.provider === 'string'
-          ? (data as { provider: 'auto' | 'tavily' | 'brave' | 'disabled' }).provider
-          : 'auto',
-        tavilyApiKeySet: Boolean((data as { tavilyApiKey?: unknown } | undefined)?.tavilyApiKey),
-        braveApiKeySet: Boolean((data as { braveApiKey?: unknown } | undefined)?.braveApiKey),
-        tavilyEnvSet: false,
-        braveEnvSet: false,
-        activeProvider: null,
-        updatedAt: NOW,
-      }),
+      getSettings: async () => exposeWebSourceSearchSettings(readWebSourceSearchSettings()),
+      updateSettings: async (data?: unknown) => {
+        const current = readWebSourceSearchSettings()
+        const record = asRecord(data)
+        const nextSettings: WebSourceSearchSettings = {
+          provider: normalizeSourceProvider(record.provider ?? current.provider),
+          tavilyApiKeySet: resolveSavedKeyFlag(current.tavilyApiKeySet, record.tavilyApiKey),
+          braveApiKeySet: resolveSavedKeyFlag(current.braveApiKeySet, record.braveApiKey),
+          updatedAt: new Date().toISOString(),
+        }
+        writeJsonToStorage(WEB_SOURCE_SEARCH_KEY, nextSettings)
+        return exposeWebSourceSearchSettings(nextSettings)
+      },
       test: async () => ({
         success: false,
         providerName: null,
         latency: 0,
-        info: 'Web 预览未接入真实 Tavily/Brave 检索。',
+        info: '浏览器预览不发起真实 Tavily/Brave 检索，请在 Electron 客户端测试。',
       }),
     }),
     prompt: createService({ list: async () => [] }),
@@ -872,7 +1059,7 @@ export function installWebElectronBridge(): void {
     premiseDraft: createService(),
     planningDraft: createService(),
     app: createService({
-      getDatabasePath: async () => 'path/to/novelforge.db',
+      getDatabasePath: async () => 'web-preview://localStorage/novelforge',
     }),
     quality: createService({
       getDashboard: async () => emptyQualityDashboard,

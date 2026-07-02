@@ -426,6 +426,7 @@ export default function ModelManager() {
   const activeSourceLabel = sourceSettings?.activeProvider
     ? getSourceProviderLabel(sourceSettings.activeProvider)
     : getSourceProviderLabel(sourceSettings?.provider)
+  const isWebPreviewDatabase = databasePath.startsWith('web-preview://')
 
   const refreshAll = () => {
     void loadConfigs()
@@ -468,10 +469,10 @@ export default function ModelManager() {
       >
         <Alert
           className="model-manager-database-alert"
-          type="info"
+          type={isWebPreviewDatabase ? 'warning' : 'info'}
           showIcon
           icon={<DatabaseOutlined />}
-          message="当前配置写入数据库"
+          message={isWebPreviewDatabase ? '当前运行在浏览器预览' : '当前配置写入数据库'}
           description={databasePath || '正在读取数据库路径...'}
         />
 
