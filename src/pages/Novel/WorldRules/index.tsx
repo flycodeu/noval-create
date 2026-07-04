@@ -240,7 +240,7 @@ export default function WorldRules({ novelId }: Props) {
   const tokenCount = useMemo(() => estimateTokens(JSON.stringify(liveRules)), [liveRules])
   const tokenStatusText = tokenCount > 1400
     ? '规则体量较大，建议优先按分区生成'
-    : `~ ${tokenCount} token`
+    : `约 ${tokenCount}`
   const activeLanguageRules = [
     liveRules.writingConstraints.antiQuoteEmphasis,
     liveRules.writingConstraints.antiConceptSlogans,
@@ -920,9 +920,9 @@ export default function WorldRules({ novelId }: Props) {
           description={<div className="novel-world-rules-page__progress-copy"><Progress percent={generationPercent} size="small" status={generationProgress.status === 'failed' ? 'exception' : generationProgress.status === 'success' && generationProgress.completed >= generationProgress.total ? 'success' : 'active'} /><div>{generationProgress.detail || '正在处理当前分区...'}</div>{generationProgress.warning ? <div>{generationProgress.warning}</div> : null}</div>}
         />
       ) : tokenCount > 1400 ? (
-        <Alert className="novel-world-rules-page__status-block" type="warning" message={`当前世界规则约 ${tokenCount} token，建议后续优先按分区生成。`} showIcon />
+        <Alert className="novel-world-rules-page__status-block" type="warning" message={`当前世界规则体量约 ${tokenCount}，建议后续优先按分区生成。`} showIcon />
       ) : (
-        <div className="novel-pill novel-world-rules-page__status-pill">{tokenCount > 0 ? `当前规则体量约 ${tokenCount} token` : '当前规则体量尚未形成'}</div>
+        <div className="novel-pill novel-world-rules-page__status-pill">{tokenCount > 0 ? `当前规则体量约 ${tokenCount}` : '当前规则体量尚未形成'}</div>
       )}
       <WorkspacePanel title="后台连续生成" extra={autoTaskActions}>
         <div className="novel-world-rules-page__progress-copy">

@@ -450,7 +450,6 @@ export default function NovelList() {
           <div className="novel-list-page__header">
             <div className="novel-list-page__copy">
               <h1 className="novel-list-page__title">我的小说</h1>
-              <span className="novel-list-page__subtitle">面向长篇与系列小说的创作控制台。</span>
             </div>
             <Button type="primary" icon={<PlusOutlined />} onClick={() => setWizardOpen(true)}>
               新建小说
@@ -467,7 +466,6 @@ export default function NovelList() {
               <div key={item.label} className="novel-list-page__stat-card">
                 <span className="novel-list-page__stat-label">{item.label}</span>
                 <strong className="novel-list-page__stat-value">{item.value}</strong>
-                <span className="novel-list-page__stat-hint">{item.hint}</span>
               </div>
             ))}
           </div>
@@ -589,7 +587,6 @@ export default function NovelList() {
                             <strong className="novel-list-page__launch-card-title">{option.label}</strong>
                             <Tag color={active ? 'processing' : 'default'}>{option.badge}</Tag>
                         </div>
-                        <div className="novel-list-page__launch-card-copy">{option.description}</div>
                       </button>
                     )
                   })}
@@ -624,7 +621,6 @@ export default function NovelList() {
                         >
                           {isSelected ? <CheckOutlined className="novel-list-page__genre-check" /> : null}
                           <div className="novel-list-page__genre-title">{genre.label}</div>
-                          <div className="novel-list-page__genre-copy">{genre.description}</div>
                         </button>
                       )
                     })}
@@ -665,9 +661,6 @@ export default function NovelList() {
               <Form.Item
                 name="writingContractTags"
                 label="写作类型"
-                extra={selectedLaunchMode === 'fast_launch'
-                  ? '极速模式会根据这些标签来定全书的文风和开篇走向。'
-                  : '“爽文 / 写实”只能选一个；其它标签可以叠加，自己填的标签只作轻微参考。'}
                 rules={[{
                   validator: async (_, value?: string[]) => {
                     const error = getWritingContractValidationError(normalizeWritingContractTags(value))
@@ -697,7 +690,6 @@ export default function NovelList() {
                 { required: true, message: '请输入故事背景' },
                 { min: 20, message: '至少写 20 个字' },
               ]}
-          extra="用你自己的话描述故事处境、冲突、氛围或关键设定，写得越具体，AI 补全背景越稳。"
             >
               <Input.TextArea
                 autoSize={STORY_TEXTAREA_AUTO_SIZE}
@@ -714,8 +706,7 @@ export default function NovelList() {
                 type="info"
                 showIcon
                 className="novel-list-page__wizard-note"
-                message="填写建议"
-                description="先用一句话写清主角处境、故事卖点、主线冲突和绝对禁区。填好后，AI 会据此生成开篇前三章和基础设定，让你直接开始写。"
+                message="填写核心冲突后即可创建。"
               />
               <Row gutter={12}>
                 <Col xs={24} md={12}>
@@ -723,7 +714,6 @@ export default function NovelList() {
                     name="protagonistStart"
                     label="主角起点"
                     rules={[{ required: true, message: '请填写主角起点' }]}
-                    extra="写主角现在处于什么处境、身份或困局。"
                   >
                     <Input.TextArea
                       autoSize={FAST_TEXTAREA_AUTO_SIZE}
@@ -737,7 +727,6 @@ export default function NovelList() {
                     name="coreHook"
                     label="核心钩子"
                     rules={[{ required: true, message: '请填写核心钩子' }]}
-                    extra="开篇立刻抓住读者的异常事件、秘密或倒计时。"
                   >
                     <Input.TextArea
                       autoSize={FAST_TEXTAREA_AUTO_SIZE}
@@ -754,7 +743,6 @@ export default function NovelList() {
                     name="coreConflict"
                     label="核心冲突"
                     rules={[{ required: true, message: '请填写核心冲突' }]}
-                    extra="写主角必须面对的主线阻力，而不是泛泛主题。"
                   >
                     <Input.TextArea
                       autoSize={FAST_TEXTAREA_AUTO_SIZE}
@@ -768,7 +756,6 @@ export default function NovelList() {
                     name="tabooRules"
                     label="禁区"
                     rules={[{ required: true, message: '请填写禁区' }]}
-                    extra="用来约束 AI 的文风和剧情边界，避免写跑偏。"
                   >
                     <Input.TextArea
                       autoSize={FAST_TEXTAREA_AUTO_SIZE}
@@ -783,7 +770,6 @@ export default function NovelList() {
                 name="endgameDirection"
                 label="终局方向"
                 rules={[{ required: true, message: '请填写终局方向' }]}
-                extra="先给一个方向，不要求现在就写完整终局。"
               >
                 <Input.TextArea
                   autoSize={FAST_TEXTAREA_AUTO_SIZE}
@@ -791,10 +777,6 @@ export default function NovelList() {
                   placeholder="例如：主角救下主城，但必须放弃原本想夺回的身份和归属。"
                 />
               </Form.Item>
-
-              <div className="novel-list-page__fast-note">
-                系统会自动补出：基础设定、文风规则、第一卷目标、开篇前三章框架、主角/反派简介，以及能直接开写的基本结构。
-              </div>
             </>
           )}
 
@@ -806,7 +788,6 @@ export default function NovelList() {
                   showIcon
                   className="novel-list-page__wizard-note"
                   message="AI 补全结果已生成"
-                  description="这一步请重点检查世界边界、冲突方向和叙事语气。你可以直接改写，不需要保留 AI 原文。"
                 />
                 <Form.Item name="expandedBackground" label="AI 补全背景（可编辑）">
                   <Input.TextArea

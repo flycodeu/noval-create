@@ -18,7 +18,7 @@ function countRenderableNodes(node: React.ReactNode): number {
 export function WorkspacePage({
   eyebrow,
   title,
-  description,
+  description: _description,
   actions,
   metrics,
   contextSummary,
@@ -77,7 +77,6 @@ export function WorkspacePage({
         <div className="novel-hero__copy">
           {eyebrow ? <div className="novel-hero__eyebrow">{eyebrow}</div> : null}
           <h1 className="novel-hero__title">{title}</h1>
-          {description ? <p className="novel-hero__description">{description}</p> : null}
         </div>
         {actions ? <div className="novel-hero__actions">{actions}</div> : null}
         {contextSummary ? <div className="novel-hero__context">{contextSummary}</div> : null}
@@ -190,7 +189,6 @@ export function WorkspaceStepGuide({
             <div className="novel-step-guide__index">{String(index + 1).padStart(2, '0')}</div>
             <div className="novel-step-guide__copy">
               <strong>{step.title}</strong>
-              <span>{step.description}</span>
             </div>
           </article>
         ))}

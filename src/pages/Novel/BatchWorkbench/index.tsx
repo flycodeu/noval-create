@@ -58,10 +58,25 @@ function snapshotStatusColor(status?: BatchWorkbenchData['snapshots'][number]['s
   return 'processing'
 }
 
+function snapshotStatusLabel(status?: BatchWorkbenchData['snapshots'][number]['status']) {
+  if (status === 'completed') return '已完成'
+  if (status === 'rolled_back') return '已回滚'
+  if (status === 'active') return '当前批次'
+  return '未记录'
+}
+
 function inspectionStatusColor(status: BatchInspectionStatus): string {
   if (status === 'pass') return 'success'
   if (status === 'warning') return 'warning'
   return 'error'
+}
+
+function inspectionStatusLabel(status: BatchInspectionStatus): string {
+  return INSPECTION_STATUS_OPTIONS.find((item) => item.value === status)?.label || '阻断'
+}
+
+function inspectionCategoryLabel(category: BatchInspectionCategory): string {
+  return INSPECTION_CATEGORY_OPTIONS.find((item) => item.value === category)?.label || '检查'
 }
 
 function rollbackModeLabel(mode?: BatchRollbackMode): string {
@@ -257,7 +272,7 @@ export default function BatchWorkbench({ novelId }: Props) {
                 >
                   <div className="novel-batch-workbench__snapshot-head">
                     <strong>{snapshot.title}</strong>
-                    <Tag color={snapshotStatusColor(snapshot.status)}>{snapshot.status}</Tag>
+                    <Tag color={snapshotStatusColor(snapshot.status)}>{snapshotStatusLabel(snapshot.status)}</Tag>
                   </div>
                   <div className="novel-batch-workbench__snapshot-summary">{snapshot.summary}</div>
                   <div className="novel-batch-workbench__snapshot-meta">
@@ -377,9 +392,9 @@ export default function BatchWorkbench({ novelId }: Props) {
                 <div key={record.id} className="quality-card">
                   <div className="novel-batch-workbench__record-head">
                     <strong>{record.chapterNum ? `第 ${record.chapterNum} 章` : '整批'}</strong>
-                    <Tag color={inspectionStatusColor(record.status)}>{record.status}</Tag>
+                    <Tag color={inspectionStatusColor(record.status)}>{inspectionStatusLabel(record.status)}</Tag>
                   </div>
-                  <div className="novel-batch-workbench__record-meta">{`${record.category} · ${record.createdAt}`}</div>
+                  <div className="novel-batch-workbench__record-meta">{`${inspectionCategoryLabel(record.category)} · ${record.createdAt}`}</div>
                   <div className="novel-batch-workbench__record-note">{record.note}</div>
                 </div>
               ))}

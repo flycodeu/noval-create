@@ -423,6 +423,20 @@
   opacity: 0.72;
 }
 
+.quality-dashboard-page__card-summary,
+.quality-dashboard-page__role-meta,
+.quality-dashboard-page__body-copy--soft,
+.quality-dashboard-page__body-copy--soft-strong,
+.quality-dashboard-page__body-copy--tiny,
+.quality-dashboard-page__body-copy--tiny-strong,
+.quality-dashboard-page__body-copy--normal,
+.quality-dashboard-page__note-list > div {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 .quality-dashboard-page__panel-card--outlined {
   border-width: 1px;
 }

@@ -70,7 +70,7 @@ export default function ProjectCard({
             <Tag className="novel-project-card__tag">{novel.genreName || '未分类'}</Tag>
             <Tag className="novel-project-card__tag">{novel.launchMode === 'fast_launch' ? '快速模式' : '专业模式'}</Tag>
             {snapshot.blockers.length > 0 ? (
-              <Tag color="volcano" className="novel-project-card__tag">{`${snapshot.blockers.length} 个 blocker`}</Tag>
+              <Tag color="volcano" className="novel-project-card__tag">{`${snapshot.blockers.length} 个阻塞项`}</Tag>
             ) : null}
           </div>
         </div>

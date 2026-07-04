@@ -370,6 +370,75 @@ const getWritebackPhaseLabel = (phase?: WritebackSyncStatus['phase']) => {
   if (phase === 'failed') return '回写失败'
   return '空闲'
 }
+const chapterContextStageLabel = (stage: string) => {
+  if (stage === 'scenePlan') return '场景规划'
+  if (stage === 'draft') return '正文草稿'
+  if (stage === 'review') return '章节审校'
+  if (stage === 'rewrite') return '重写修订'
+  return stage
+}
+const recallBucketLabel = (bucket: string) => {
+  if (bucket === 'character' || bucket === 'recall_character') return '人物'
+  if (bucket === 'rule' || bucket === 'recall_rule') return '规则'
+  if (bucket === 'thread' || bucket === 'recall_thread' || bucket === 'activeThreads') return '线程'
+  if (bucket === 'story_memory' || bucket === 'longTermMemory') return '长程记忆'
+  if (bucket === 'source_grounding') return '来源支撑'
+  if (bucket === 'item' || bucket === 'itemSummary') return '物品'
+  if (bucket === 'map_location' || bucket === 'mapSummary') return '地点'
+  if (bucket === 'timeline' || bucket === 'timelineSummary' || bucket === 'timelineOpenThreads') return '时间线'
+  if (bucket === 'world_state' || bucket === 'worldStates') return '世界状态'
+  if (bucket === 'worldRules') return '世界规则'
+  if (bucket === 'characterStates') return '人物状态'
+  if (bucket === 'continuityNotes') return '连续性'
+  if (bucket === 'openLoops') return '未回收事项'
+  if (bucket === 'dueForeshadows') return '待回收伏笔'
+  if (bucket === 'chapterBridgePlan') return '章节衔接'
+  if (bucket === 'stepMemorySummary') return '步骤记忆'
+  if (bucket === 'relationSummary') return '人物关系'
+  if (bucket === 'dialogueVoiceLocks') return '角色声线'
+  if (bucket === 'recalledMemory') return '召回记忆'
+  if (bucket === 'cache') return '缓存'
+  if (bucket === 'orchestrator') return '调度器'
+  return bucket
+}
+const fallbackReasonLabel = (reason?: string) => {
+  if (!reason) return ''
+  if (reason === 'embedding_service_failed') return '向量服务失败'
+  if (reason === 'query_embedding_failed') return '查询向量失败'
+  if (reason === 'no_hits') return '无命中'
+  if (reason === 'only_stale_hits') return '仅命中过期片段'
+  if (reason === 'budget_trimmed') return '预算裁剪'
+  if (reason === 'disabled_by_config') return '配置关闭'
+  if (reason === 'service_failed') return '服务失败'
+  if (reason === 'empty_result') return '结果为空'
+  if (reason === 'render_empty') return '渲染为空'
+  return reason
+}
+const writerToolStatusLabel = (status: string) => {
+  if (status === 'success') return '成功'
+  if (status === 'failed') return '失败'
+  if (status === 'skipped') return '跳过'
+  if (status === 'cache_hit') return '命中缓存'
+  if (status === 'empty') return '空结果'
+  return status
+}
+const writerFallbackModeLabel = (mode: string) => {
+  if (mode === 'legacy_empty') return '旧链路空结果'
+  if (mode === 'conservative') return '保守兜底'
+  return mode
+}
+const assetImpactTargetLabel = (targetType: string) => {
+  if (targetType === 'chapter') return '章节'
+  if (targetType === 'chapter_contract') return '章节合同'
+  if (targetType === 'scene_contract') return '场景合同'
+  if (targetType === 'thread') return '线程'
+  if (targetType === 'timeline') return '时间线'
+  if (targetType === 'foreshadow') return '伏笔'
+  if (targetType === 'character_state') return '人物状态'
+  if (targetType === 'world_state') return '世界状态'
+  if (targetType === 'volume_design') return '分卷设计'
+  return targetType
+}
 const getWorldRulesSummary = (raw?: string) => {
   if (!raw) return []
   try {
@@ -893,7 +962,7 @@ export default function Writing({ novelId }: Props) {
             label: payload.label || '章节流水线已完成',
             detail: hasVisibleContentChange
               ? getUserFacingMessage('writing.pipelineCompleted')
-              : '章节流水线已完成，但正文未产生新增内容。请优先检查合同、审校意见与 Canon 草案。',
+              : '章节流水线已完成，但正文未产生新增内容。请优先检查合同、审校意见与回写草案。',
           })
           message.success(getUserFacingMessage('writing.pipelineCompleted'))
         })()
@@ -2005,11 +2074,11 @@ export default function Writing({ novelId }: Props) {
         </InsightCard>
       </div>
       <div className="novel-writing-shell__insight-stack">
-        <InsightCard title="长篇写作架构" eyebrow="Planner / Writer / Critic / Rewriter / Canonizer" tone="soft">
+        <InsightCard title="长篇写作架构" eyebrow="规划 / 写作 / 审校 / 重写 / 回写" tone="soft">
           {currentPipelineSnapshot ? (
             <div className="writing-layout-stack">
               <div className="novel-copy-block">
-                {`当前阶段：${currentPipelineSnapshot.currentRole ? currentPipelineSnapshot.roles[currentPipelineSnapshot.currentRole]?.label || currentPipelineSnapshot.currentRole : '待启动'} · AI 模式 ${currentPipelineSnapshot.executionMode ? getAiExecutionModeLabel(currentPipelineSnapshot.executionMode) : '未记录'} · 合同版本 ${currentPipelineSnapshot.contractVersion || '未记录'} · 总耗时 ${currentPipelineSnapshot.totalDurationMs ? `${(currentPipelineSnapshot.totalDurationMs / 1000).toFixed(1)}s` : '-'} · 总 tokens ${currentPipelineSnapshot.totalTokensUsed || 0}${currentPipelineSnapshot.failureCode ? ` · 退出码 ${currentPipelineSnapshot.failureCode}` : ''}`}
+                {`当前阶段：${currentPipelineSnapshot.currentRole ? currentPipelineSnapshot.roles[currentPipelineSnapshot.currentRole]?.label || currentPipelineSnapshot.currentRole : '待启动'} · AI 模式 ${currentPipelineSnapshot.executionMode ? getAiExecutionModeLabel(currentPipelineSnapshot.executionMode) : '未记录'} · 合同版本 ${currentPipelineSnapshot.contractVersion || '未记录'} · 总耗时 ${currentPipelineSnapshot.totalDurationMs ? `${(currentPipelineSnapshot.totalDurationMs / 1000).toFixed(1)}秒` : '-'} · 总用量 ${currentPipelineSnapshot.totalTokensUsed || 0}${currentPipelineSnapshot.failureCode ? ` · 退出码 ${currentPipelineSnapshot.failureCode}` : ''}`}
               </div>
               {currentPipelineSnapshot.stepMemory?.summary ? (
                 <div className="novel-copy-block writing-layout-copy-prewrap">{currentPipelineSnapshot.stepMemory.summary}</div>
@@ -2029,17 +2098,17 @@ export default function Writing({ novelId }: Props) {
                       </Tag>
                       <strong>{item.label}</strong>
                       {item.taskId ? <Tag color="blue">{`任务 #${item.taskId}`}</Tag> : null}
-                      {item.canonRunId ? <Tag color="geekblue">{`Canon #${item.canonRunId}`}</Tag> : null}
+                      {item.canonRunId ? <Tag color="geekblue">{`回写 #${item.canonRunId}`}</Tag> : null}
                     </div>
                     <div className="novel-issue-item__desc">{item.detail || item.summary}</div>
                     <div className="novel-issue-item__suggestion">
-                      {`预算：${item.durationMs ? `${(item.durationMs / 1000).toFixed(1)}s` : '-'} / ${item.tokensUsed || 0} tokens${item.failureCode ? ` · ${item.failureCode}` : ''}${item.rewriteScope ? ` · ${item.rewriteScope}` : ''}${typeof item.targetSegmentId === 'number' ? ` · scene#${item.targetSegmentId}` : ''}`}
+                      {`预算：${item.durationMs ? `${(item.durationMs / 1000).toFixed(1)}秒` : '-'} / 用量 ${item.tokensUsed || 0}${item.failureCode ? ` · ${item.failureCode}` : ''}${item.rewriteScope ? ` · ${item.rewriteScope}` : ''}${typeof item.targetSegmentId === 'number' ? ` · 场景#${item.targetSegmentId}` : ''}`}
                     </div>
                   </div>
                 ))}
               </div>
               {currentPipelineSnapshot.canonRunId ? (
-                <div className="novel-copy-block">{`Canonizer 已生成回写草案 #${currentPipelineSnapshot.canonRunId}，可直接进入章后状态回写中心确认。`}</div>
+                <div className="novel-copy-block">{`已生成回写草案 #${currentPipelineSnapshot.canonRunId}，可直接进入章后状态回写中心确认。`}</div>
               ) : null}
             </div>
           ) : <div className="novel-copy-block">当前章节还没有最近一次角色化流水线快照。</div>}
@@ -2054,7 +2123,7 @@ export default function Writing({ novelId }: Props) {
         <InsightCard title="上一章关键先验" eyebrow="承接上一章的真实输入" tone="soft">
           <PreviousChapterFeedCard preview={chapterContextPreview} />
         </InsightCard>
-        <InsightCard title="章节衔接桥" eyebrow="时间 / 地点 / 情绪 / POV" tone="soft">
+        <InsightCard title="章节衔接桥" eyebrow="时间 / 地点 / 情绪 / 视角" tone="soft">
           <ChapterBridgeMemoryCard preview={chapterContextPreview} />
         </InsightCard>
         <InsightCard title="召回补充层" eyebrow="背景补充 / 非事实源" tone="soft">
@@ -2066,7 +2135,7 @@ export default function Writing({ novelId }: Props) {
         <InsightCard title="AI 生成解释" eyebrow={`当前模式 · ${getAiExecutionModeLabel(effectiveAiExecutionMode)}`} tone="soft">
           <AiExplainabilityCard preview={chapterContextPreview} />
         </InsightCard>
-        <InsightCard title="Writer Tools Trace" eyebrow="按需检索 / fallback / override" tone="soft">
+        <InsightCard title="写作工具追踪" eyebrow="按需检索 / 降级 / 覆盖" tone="soft">
           <WriterToolsTraceCard preview={chapterContextPreview} />
         </InsightCard>
         <InsightCard title="生产摘要" eyebrow="AI 主写 / 人工定稿" tone="soft"><StringList items={productionBriefItems} empty="先完成审校或刷新摘要，再回到这里收口定稿优先级。" /></InsightCard>
@@ -2255,7 +2324,7 @@ export default function Writing({ novelId }: Props) {
             />
           ) : <div className="novel-copy-block">先生成或刷新合同对账，再看当前缺口。</div>}
         </InsightCard>
-        <InsightCard title="章后状态回写" eyebrow="Canon 确认 / 统一写回" tone="soft">
+        <InsightCard title="章后状态回写" eyebrow="正典确认 / 统一写回" tone="soft">
           {currentChapter ? (
             <div className="writing-layout-stack writing-layout-stack--sm">
               <div className="novel-copy-block">写完本章后，在这里进入独立回写中心，先确认事实抽取和状态候选，再统一写回线程、伏笔、谜题、关系、物品与时间轴。</div>
@@ -2491,12 +2560,12 @@ export default function Writing({ novelId }: Props) {
   const pipelineItems = useMemo<PipelineBarItem[]>(() => {
     const roleKeyOrder: WritingPipelineRole[] = ['planner', 'writer', 'critic', 'rewriter', 'canonizer', 'finalize']
     const roleLabelMap: Record<WritingPipelineRole, string> = {
-      planner: 'Planner',
-      writer: 'Writer',
-      critic: 'Critic',
-      rewriter: 'Rewriter',
-      canonizer: 'Canonizer',
-      finalize: 'Finalize',
+      planner: '规划',
+      writer: '写作',
+      critic: '审校',
+      rewriter: '重写',
+      canonizer: '回写',
+      finalize: '定稿',
     }
 
     return roleKeyOrder.map((role) => {
@@ -2564,8 +2633,8 @@ export default function Writing({ novelId }: Props) {
       value: currentPipelineSnapshot?.contractVersion || '未记录',
     },
     {
-      label: 'Token 消耗',
-      value: currentPipelineSnapshot?.totalTokensUsed ? `${currentPipelineSnapshot.totalTokensUsed} tok` : '0 tok',
+      label: '生成用量',
+      value: currentPipelineSnapshot?.totalTokensUsed ? `${currentPipelineSnapshot.totalTokensUsed}` : '0',
     },
     {
       label: '耗时',
@@ -3070,7 +3139,7 @@ export default function Writing({ novelId }: Props) {
                   <SectionHeader
                     eyebrow="流水线元数据"
                     title="执行记录"
-                    description="任务、合同版本、Token 消耗、耗时和恢复提示都收在这里。"
+                    description="任务、合同版本、生成用量、耗时和恢复提示都收在这里。"
                   />
                   <div className="chapter-console-page__meta-grid">
                     {pipelineMetaItems.map((item) => (
@@ -3622,16 +3691,16 @@ function ConstraintInjectionCard({
           .filter((entry) => entry.status !== 'kept' || entry.reason === 'covered_by_hard_constraint')
           .map((entry) => {
             if (entry.reason === 'covered_by_hard_constraint') {
-              return `${entry.title}：走硬约束通道${entry.status === 'truncated' ? `，已压缩到 ${entry.allocatedTokens}/${entry.originalTokens} tokens` : '，未占用软预算'}`
+              return `${entry.title}：走硬约束通道${entry.status === 'truncated' ? `，已压缩到 ${entry.allocatedTokens}/${entry.originalTokens}` : '，未占用软预算'}`
             }
             return `${entry.title}：${entry.status === 'dropped'
-              ? `被踢出（${entry.originalTokens} tokens）`
-              : `被压缩 ${entry.originalTokens}→${entry.allocatedTokens} tokens`}`
+              ? `被踢出（${entry.originalTokens}）`
+              : `被压缩 ${entry.originalTokens}→${entry.allocatedTokens}`}`
           })
         return (
           <div key={stage.stage} className="novel-note-list">
             <div className="novel-note-list__item">
-              <strong>{stage.stage}</strong>
+              <strong>{chapterContextStageLabel(stage.stage)}</strong>
               {` · 复杂度 ${preview.complexity} · 硬约束 ${stage.constraintInjectionStatus.hardConstraintUsed}/${stage.constraintInjectionStatus.hardConstraintBudget} · 软上下文 ${stage.constraintInjectionStatus.softContextUsed}/${stage.constraintInjectionStatus.softContextBudget}`}
             </div>
             <div className="novel-note-list__item">
@@ -3713,7 +3782,7 @@ function PreviousChapterFeedCard({ preview }: { preview: ChapterContextPreview |
 
 function ChapterBridgeMemoryCard({ preview }: { preview: ChapterContextPreview | null }) {
   if (!preview) {
-    return <div className="novel-copy-block">先生成上下文预览，再核对本章开头会怎样承接上一章的时间、地点、情绪和 POV。</div>
+    return <div className="novel-copy-block">先生成上下文预览，再核对本章开头会怎样承接上一章的时间、地点、情绪和视角。</div>
   }
 
   const bridgeLines = (preview.chapterBridgePlan || '')
@@ -3729,13 +3798,13 @@ function ChapterBridgeMemoryCard({ preview }: { preview: ChapterContextPreview |
   const buildStageDecisionLines = (label: 'chapterBridgePlan' | 'stepMemorySummary', title: string) => preview.stages.map((stage) => {
     const decision = stage.softContextDecisions.find((entry) => entry.label === label)
     const upstreamInjected = label === 'stepMemorySummary' && Boolean(stage.upstreamArtifacts?.stepMemorySummary?.trim())
-    if (!decision) return `${stage.stage}：${title}${upstreamInjected ? '已作为上游步骤记忆注入，未进入软上下文分配记录' : '未进入软上下文分配'}`
+    if (!decision) return `${chapterContextStageLabel(stage.stage)}：${title}${upstreamInjected ? '已作为上游步骤记忆注入，未进入软上下文分配记录' : '未进入软上下文分配'}`
     const status = decision.status === 'kept'
       ? '已保留'
       : decision.status === 'truncated'
-        ? `已压缩 ${decision.originalTokens}->${decision.allocatedTokens} tokens`
-        : `已裁剪 ${decision.originalTokens} tokens`
-    return `${stage.stage}：${title}${status} · P${decision.priority}`
+        ? `已压缩 ${decision.originalTokens}->${decision.allocatedTokens}`
+        : `已裁剪 ${decision.originalTokens}`
+    return `${chapterContextStageLabel(stage.stage)}：${title}${status} · P${decision.priority}`
   })
   const bridgeStageLines = buildStageDecisionLines('chapterBridgePlan', '章节桥')
   const stepMemoryStageLines = buildStageDecisionLines('stepMemorySummary', '步骤记忆')
@@ -3769,7 +3838,7 @@ function RecallDiagnosticsCard({ preview }: { preview: ChapterContextPreview | n
     .slice(0, 4)
   const staleSources = preview.recalledMemorySources.filter((source) => source.stale).slice(0, 4)
   const bucketLines = Object.entries(snapshot.bucketStats)
-    .map(([bucket, stats]) => `${bucket}：命中 ${stats.hitCount} / 采用 ${stats.selectedHitCount}${stats.fallbackReason ? ` / ${stats.fallbackReason}` : ''}`)
+    .map(([bucket, stats]) => `${recallBucketLabel(bucket)}：命中 ${stats.hitCount} / 采用 ${stats.selectedHitCount}${stats.fallbackReason ? ` / ${fallbackReasonLabel(stats.fallbackReason)}` : ''}`)
 
   return (
     <div className="writing-layout-stack writing-layout-stack--sm">
@@ -3785,7 +3854,7 @@ function RecallDiagnosticsCard({ preview }: { preview: ChapterContextPreview | n
       </div>
       <StringList
         items={[
-          snapshot.fallbackReason ? `降级原因：${snapshot.fallbackReason}` : '当前未记录召回降级原因。',
+          snapshot.fallbackReason ? `降级原因：${fallbackReasonLabel(snapshot.fallbackReason)}` : '当前未记录召回降级原因。',
           ...bucketLines,
         ]}
         empty="当前还没有召回桶统计。"
@@ -3842,7 +3911,7 @@ function ContextUsageImpactCard({ preview }: { preview: ChapterContextPreview | 
           <div className="novel-insight-list">
             {snapshot.linkedImpacts.map((item) => (
               <div key={item.id} className="novel-insight-list__item">
-                {item.resolutionStatus === 'pending' ? '待同步' : '已复核'} · {item.targetType}
+                {item.resolutionStatus === 'pending' ? '待同步' : '已复核'} · {assetImpactTargetLabel(item.targetType)}
               </div>
             ))}
           </div>
@@ -3865,7 +3934,7 @@ function AiExplainabilityCard({ preview }: { preview: ChapterContextPreview | nu
     return `${stage.stageLabel}：${route.modelLabel} · 温度 ${route.temperature.toFixed(2)} · 输出 ${route.maxTokens} · ${route.reviewDepth}${route.tokenSafetyMarginPct ? ` · 裕量 ${route.tokenSafetyMarginPct}%` : ''}`
   })
   const structuredLines = explainability.structuredOutputs
-  const overrideLines = (explainability.activePromptOverrideKeys || []).map((item) => `Prompt Override：${item}`)
+  const overrideLines = (explainability.activePromptOverrideKeys || []).map((item) => `提示词覆盖：${item}`)
   const inferredLines = explainability.inferredFacts.map((item) => `${item.label}：${item.detail}${item.needsConfirmation ? ' · 待确认' : ''}`)
   const lowConfidenceLines = explainability.lowConfidenceFacts.map((item) => `${item.label}：${item.detail}`)
   const assemblyLayers = explainability.contextAssemblyReport?.layers.map((layer) => `${layer.label} · ${layer.itemCount} 项：${layer.summary}`) || []
@@ -3890,7 +3959,7 @@ function AiExplainabilityCard({ preview }: { preview: ChapterContextPreview | nu
     <div className="writing-layout-stack writing-layout-stack--sm">
       <div className="novel-copy-block">{explainability.routeSummary}</div>
       <StringList items={routeLines} empty="当前还没有模型路由记录。" />
-      <StringList items={overrideLines} empty="当前没有启用章节 Prompt Override。" />
+      <StringList items={overrideLines} empty="当前没有启用章节提示词覆盖。" />
       <StringList items={structuredLines} empty="本次没有新增结构化输出节点记录。" />
       <StringList items={assemblyLayers} empty="当前还没有上下文组装层说明。" />
       <StringList items={styleLockLines} empty="还没有作者风格锁，可去主题与文风页补样本。" />
@@ -3911,20 +3980,21 @@ function AiExplainabilityCard({ preview }: { preview: ChapterContextPreview | nu
 function WriterToolsTraceCard({ preview }: { preview: ChapterContextPreview | null }) {
   const resolution = preview?.writerContextResolution
   if (!preview || !resolution) {
-    return <div className="novel-copy-block">当前章节还没有 writer orchestrator trace，先刷新上下文预览或执行一次生成。</div>
+    return <div className="novel-copy-block">当前章节还没有写作调度追踪，先刷新上下文预览或执行一次生成。</div>
   }
 
   const planLines = resolution.queryPlan.map((step) => {
     const terms = step.terms.length > 0 ? ` · ${step.terms.join('、')}` : ''
-    return `${step.enabled ? '启用' : '跳过'} · ${step.bucket} · ${step.serviceCalls.join(' / ')}${terms}`
+    const callSummary = step.serviceCalls.length > 0 ? ` · 工具 ${step.serviceCalls.length} 个` : ''
+    return `${step.enabled ? '启用' : '跳过'} · ${recallBucketLabel(step.bucket)}${callSummary}${terms}`
   })
   const toolLines = resolution.toolCalls.map((call) => {
     const result = typeof call.resultCount === 'number' ? ` · 命中 ${call.resultCount}` : ''
     const issue = call.errorMessage ? ` · ${call.errorMessage}` : ''
-    return `${call.status} · ${call.target} · ${call.toolName}${result}${issue}`
+    return `${writerToolStatusLabel(call.status)} · ${recallBucketLabel(call.target)}${result}${issue}`
   })
   const fallbackLines = resolution.fallbackEvents.map((event) => (
-    `${event.fallbackMode} · ${event.target} · ${event.reason} · ${event.detail}`
+    `${writerFallbackModeLabel(event.fallbackMode)} · ${recallBucketLabel(event.target)} · ${fallbackReasonLabel(event.reason)} · ${event.detail}`
   ))
   const overrideLines = resolution.allocatorInputSummary.overrideLabels.map((label) => {
     const text = resolution.renderedContextOverrides[label] || ''
@@ -3938,13 +4008,13 @@ function WriterToolsTraceCard({ preview }: { preview: ChapterContextPreview | nu
         <div className="novel-insight-list__item">{resolution.cacheHit ? '本次命中内存缓存' : '本次实时执行检索'}</div>
         <div className="novel-insight-list__item">计划桶 {resolution.queryPlan.filter((step) => step.enabled).length}</div>
         <div className="novel-insight-list__item">工具调用 {resolution.toolCalls.length}</div>
-        <div className="novel-insight-list__item">fallback {resolution.fallbackEvents.length}</div>
-        <div className="novel-insight-list__item">override {resolution.allocatorInputSummary.overrideLabels.length}</div>
+        <div className="novel-insight-list__item">降级 {resolution.fallbackEvents.length}</div>
+        <div className="novel-insight-list__item">覆盖 {resolution.allocatorInputSummary.overrideLabels.length}</div>
       </div>
-      <StringList items={planLines} empty="当前没有 writer query plan。" />
-      <StringList items={toolLines} empty="当前没有 writer tool call 记录。" />
-      <StringList items={fallbackLines} empty="本次没有触发 fallback。" />
-      <StringList items={overrideLines} empty="本次没有生成 retrieval override。" />
+      <StringList items={planLines} empty="当前没有写作检索计划。" />
+      <StringList items={toolLines} empty="当前没有写作工具调用记录。" />
+      <StringList items={fallbackLines} empty="本次没有触发降级。" />
+      <StringList items={overrideLines} empty="本次没有生成召回覆盖。" />
     </div>
   )
 }
@@ -4327,7 +4397,7 @@ function DialogueFingerprintHealthCard({
           ))}
           {(reviewNotes?.required_voice_lock_character_ids || []).length > 0 ? (
             <div className="novel-note-list__item">
-              需强制 Voice Lock 角色 ID：{(reviewNotes?.required_voice_lock_character_ids || []).join('、')}
+              需锁定角色声线：{(reviewNotes?.required_voice_lock_character_ids || []).join('、')}
             </div>
           ) : null}
         </div>

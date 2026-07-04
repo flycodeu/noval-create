@@ -260,7 +260,7 @@ export default function WritebackCenterPage({ novelId }: Props) {
       render: (_value: unknown, row: ChapterWritebackDiff) => <Tag color={verificationColor(row.verificationStatus)}>{verificationLabel(row.verificationStatus)}</Tag>,
     },
     {
-      title: 'Canon',
+      title: '正典',
       width: 110,
       render: (_value: unknown, row: ChapterWritebackDiff) => <Tag color={decisionColor(row.canonDecision)}>{decisionLabel(row.canonDecision)}</Tag>,
     },
@@ -305,9 +305,8 @@ export default function WritebackCenterPage({ novelId }: Props) {
       className="novel-writeback-center-page"
       layout="wide"
       heroVariant="compact"
-      eyebrow="Canonizer / 统一回写"
+      eyebrow="正典确认 / 统一回写"
       title="章后状态回写中心"
-      description="先看事实抽取，再确认 Canon 差异，最后统一写回线程、伏笔、谜题、关系、物品与时间轴。"
       actions={(
         <Space wrap>
           <Button icon={<RobotOutlined />} loading={actionLoading} disabled={!centerData?.chapter?.id} onClick={() => void runAction(async () => {

@@ -148,7 +148,7 @@ export type QualitySummary = Pick<QualityDashboardData, 'productionReadiness' | 
 
 export const WORKSPACE_MODULE_DEFINITIONS: WorkspaceModuleDefinition[] = [
   { key: 'overview', label: '项目总览', description: '书名、简介、背景和目标字数。', groupKey: 'foundation', groupTitle: '项目底盘', quickMode: true },
-  { key: 'project-brief', label: '项目 Brief', description: '读者承诺、赛道、卖点和禁区。', groupKey: 'foundation', groupTitle: '项目底盘', quickMode: true },
+  { key: 'project-brief', label: '项目简报', description: '读者承诺、赛道、卖点和禁区。', groupKey: 'foundation', groupTitle: '项目底盘', quickMode: true },
   { key: 'core-settings', label: '故事底盘', description: '主角起点、核心钩子与底层约束。', groupKey: 'foundation', groupTitle: '项目底盘', quickMode: true },
   { key: 'theme-voice', label: '主题文风', description: '主题、情绪核心、视角和对白边界。', groupKey: 'foundation', groupTitle: '项目底盘', quickMode: true },
   { key: 'world-rules', label: '世界规则', description: '时间制度、力量边界与世界口径。', groupKey: 'world-building', groupTitle: '世界与地点', quickMode: true },
@@ -172,7 +172,7 @@ export const WORKSPACE_MODULE_DEFINITIONS: WorkspaceModuleDefinition[] = [
   { key: 'timeline', label: '事件时间轴', description: '事件先后、因果锚点与状态变化。', groupKey: 'volume-outline', groupTitle: '卷章大纲', quickMode: true },
   { key: 'contracts', label: '章节合同', description: '章节目标、场景合同与验收标准。', groupKey: 'chapter-production', groupTitle: '正文生产', quickMode: true },
   { key: 'writing', label: '正文写作', description: '章节生产台、流水线与正文编辑。', groupKey: 'chapter-production', groupTitle: '正文生产', quickMode: true },
-  { key: 'writeback', label: '章后回写', description: '事实抽取、状态回写与 Canon 确认。', groupKey: 'chapter-production', groupTitle: '正文生产', quickMode: true },
+  { key: 'writeback', label: '章后回写', description: '事实抽取、状态回写与正典确认。', groupKey: 'chapter-production', groupTitle: '正文生产', quickMode: true },
   { key: 'batch-workbench', label: '批次回滚', description: '流水线失败恢复与重放。', groupKey: 'chapter-production', groupTitle: '正文生产', quickMode: false },
   { key: 'revision', label: '修订中心', description: '质量问题、修订任务与修复入口。', groupKey: 'quality-control', groupTitle: '回写质检', quickMode: true },
   { key: 'quality', label: '质量监控', description: '生产总灯、连续性与风险趋势。', groupKey: 'quality-control', groupTitle: '回写质检', quickMode: true },
@@ -667,10 +667,10 @@ export function getProjectBlockers(
       'revision-blockers',
       'fatal',
       '高优先级修订问题未清理',
-      `当前仍有 ${stats.revisionBlockerCount} 个 blocker 级修订问题，继续推进会扩大返工范围。`,
+      `当前仍有 ${stats.revisionBlockerCount} 个阻塞级修订问题，继续推进会扩大返工范围。`,
       ['修订中心', '正文写作', '章后回写'],
       'revision',
-      '处理 blocker',
+      '处理阻塞项',
     ))
   }
 
@@ -1156,7 +1156,7 @@ function buildReadinessSummary(
       key: 'foundation',
       label: '项目定标完整度',
       score: findScore('overview', 'project-brief', 'core-settings', 'theme-voice'),
-      summary: '项目总览、Brief、故事底盘和主题文风。',
+      summary: '项目总览、项目简报、故事底盘和主题文风。',
     },
     {
       key: 'world-building',
@@ -1318,7 +1318,7 @@ function buildStageSummary(
     return {
       key: 'quality-control',
       label: '修订质检',
-      description: '当前存在高优先风险，先清 blocker 再继续推进。',
+      description: '当前存在高优先风险，先清阻塞项再继续推进。',
       route: 'guide?panel=blockers',
     }
   }
@@ -1338,7 +1338,7 @@ function buildStageSummary(
   return {
     key: active.key,
     label: active.title,
-    description: active.blockerCount > 0 ? '当前阶段仍有 blocker 待清理。' : `当前阶段仍有 ${active.totalCount - active.completedCount} 个模块待补齐。`,
+    description: active.blockerCount > 0 ? '当前阶段仍有阻塞项待清理。' : `当前阶段仍有 ${active.totalCount - active.completedCount} 个模块待补齐。`,
     route: active.route,
   }
 }
@@ -1380,7 +1380,7 @@ function buildNavGroups(
             label: '当前阻塞',
             route: 'guide?panel=blockers',
             status: blockers.length > 0 ? 'blocked' : 'done',
-            meta: blockers.length > 0 ? `${blockers.length} 个 blocker` : '已清空',
+            meta: blockers.length > 0 ? `${blockers.length} 个阻塞项` : '已清空',
             hasBlocker: blockers.length > 0,
           },
           {
@@ -1522,10 +1522,10 @@ export function getChapterWritabilitySummary(input: {
     },
     {
       key: 'blockers',
-      label: '未处理 blocker',
+      label: '未处理阻塞项',
       ready: input.revisionBlockerCount <= 0 && input.staleReasonCount <= 0 && input.staleAssetCount <= 0 && input.staleCheckpointCount <= 0,
       detail: input.revisionBlockerCount > 0
-        ? `当前仍有 ${input.revisionBlockerCount} 个 blocker 级问题。`
+        ? `当前仍有 ${input.revisionBlockerCount} 个阻塞级问题。`
         : input.staleReasonCount > 0
           ? `本章存在 ${input.staleReasonCount} 条待同步原因。`
           : input.staleAssetCount > 0 || input.staleCheckpointCount > 0
@@ -1553,7 +1553,7 @@ export function getChapterWritabilitySummary(input: {
     !checks[0].ready ? '先补章节合同，再生成正文。' : '',
     !checks[1].ready ? '先补场景合同或结构片段。' : '',
     !checks[4].ready ? '先把时间轴或地点锚点挂上。' : '',
-    !checks[5].ready ? '先清当前 blocker 或同步本章上下文。' : '',
+    !checks[5].ready ? '先清当前阻塞项或同步本章上下文。' : '',
   ].filter(Boolean)
 
   if (checks[5] && !checks[5].ready) {
@@ -1561,7 +1561,7 @@ export function getChapterWritabilitySummary(input: {
       ready: false,
       score,
       label: '阻塞',
-      summary: '当前章节存在 blocker，建议先处理同步或修订问题。',
+      summary: '当前章节存在阻塞项，建议先处理同步或修订问题。',
       risks,
       suggestions,
       checks,

@@ -33,7 +33,7 @@ export default function PipelineBar({ items }: PipelineBarProps) {
     <section className="pipeline-bar">
       <div className="pipeline-bar__head">
         <strong className="pipeline-bar__title">章节流水线</strong>
-        <span className="pipeline-bar__subtitle">Planner → Writer → Critic → Rewriter → Canonizer → Finalize</span>
+        <span className="pipeline-bar__subtitle">规划 → 写作 → 审校 → 重写 → 回写 → 定稿</span>
       </div>
 
       <div className="pipeline-bar__grid">
@@ -48,7 +48,7 @@ export default function PipelineBar({ items }: PipelineBarProps) {
               </div>
               <span className="pipeline-bar__item-copy">{item.detail || '等待进入该阶段。'}</span>
               <span className="pipeline-bar__item-meta">
-                {`任务 ${item.taskId || '-'} · 合同 ${item.contractVersion || '-'} · ${item.durationMs ? `${(item.durationMs / 1000).toFixed(1)}s` : '-'} · ${item.tokensUsed || 0} tok`}
+                {`任务 ${item.taskId || '-'} · 合同 ${item.contractVersion || '-'} · ${item.durationMs ? `${(item.durationMs / 1000).toFixed(1)}秒` : '-'} · 用量 ${item.tokensUsed || 0}`}
               </span>
               {item.error ? (
                 <span className="pipeline-bar__item-error">{item.error}</span>

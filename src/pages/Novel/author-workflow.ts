@@ -172,7 +172,7 @@ function resolveQuickStartPrimaryTask(
     case 'basics':
       return createTask('basics', '建立项目总览', '先把书名、简介、背景和目标字数钉住，后面的推荐才有可靠上下文。', 'overview', 5, ['项目立项', '世界规则', '首章启动'], '打开项目总览')
     case 'project-brief':
-      return createTask('project-brief', '锁定项目 Brief', '先明确读者承诺、卖点和禁区，避免后续所有资产都往不同方向长。', 'project-brief', 8, ['故事底盘', '主题文风'], '打开项目 Brief')
+      return createTask('project-brief', '锁定项目简报', '先明确读者承诺、卖点和禁区，避免后续所有资产都往不同方向长。', 'project-brief', 8, ['故事底盘', '主题文风'], '打开项目简报')
     case 'story-core':
       return createTask('story-core', '锁定故事底盘', '主角起点、核心钩子和底层约束还没钉住，现在补这一步最能降低后续发散。', 'core-settings', 8, ['世界规则', '角色生成'], '打开故事底盘')
     case 'theme-voice':
@@ -264,7 +264,7 @@ function resolveRevisionPrimaryTask(
     return createTask('revision-writeback', '清理章后回写积压', '当前章后回写未闭环，继续推进正文会持续放大状态漂移。', 'writeback', 10, ['状态同步', '连续性恢复'], '打开章后回写')
   }
   if (stats.revisionBlockerCount > 0) {
-    return createTask('revision-blockers', '处理高优先修订问题', '系统已经给出高优先级 blocker，先清掉它们比继续推进正文更稳。', 'revision', 15, ['继续写作', '恢复批次'], '打开修订中心')
+    return createTask('revision-blockers', '处理高优先修订问题', '系统已经给出高优先级阻塞项，先清掉它们比继续推进正文更稳。', 'revision', 15, ['继续写作', '恢复批次'], '打开修订中心')
   }
   return createTask('revision-quality', '回查质量风险', '当前更适合统一看生产灯、连续性和风险趋势，再决定修订顺序。', 'quality', 12, ['修订顺序', '继续推进判断'], '打开质量监控')
 }
@@ -303,7 +303,7 @@ function buildAlternateTasks(
     }
   } else {
     candidates.push(
-      createTask('revision-center', '打开修订中心', '集中处理一致性问题、待同步章节和人工修订项。', 'revision', 12, ['清理 blocker'], '打开修订中心'),
+      createTask('revision-center', '打开修订中心', '集中处理一致性问题、待同步章节和人工修订项。', 'revision', 12, ['清理阻塞项'], '打开修订中心'),
       createTask('revision-quality-alt', '检查质量趋势', '先看风险分布和总灯，再决定先修哪个问题。', 'quality', 8, ['修订优先级'], '打开质量监控'),
       createTask('revision-writing-alt', '回到正文定位问题章节', '修订判断完成后，通常需要回正文页落局部修改。', 'writing', 10, ['局部修订'], '进入正文写作'),
     )
@@ -324,7 +324,7 @@ function buildBlockers(
   const blockers: AuthorWorkflowBlocker[] = []
   const assetBloat = getAssetBloatSignal(stats)
   if (stats.revisionBlockerCount > 0) {
-    blockers.push(createBlocker('revision-blockers', 'high', '高优先修订问题未清理', `当前有 ${stats.revisionBlockerCount} 个 blocker 级修订问题未处理，继续推进正文会放大返工。`, 'revision', '打开修订中心'))
+    blockers.push(createBlocker('revision-blockers', 'high', '高优先修订问题未清理', `当前有 ${stats.revisionBlockerCount} 个阻塞级修订问题未处理，继续推进正文会放大返工。`, 'revision', '打开修订中心'))
   }
   if (stats.staleChapterCount > 0) {
     blockers.push(createBlocker('stale-chapters', 'high', '已有章节仍在引用旧上下文', `当前有 ${stats.staleChapterCount} 章待同步，设定或结构变更还没有回补到正文。`, 'revision', '查看待同步任务'))
@@ -417,7 +417,7 @@ export function resolveSuggestedAuthorWorkMode(
   if (hasRevisionPressure) {
     return {
       mode: 'revision_closure',
-      reason: '当前存在 blocker、待同步章节、资产滞后或生产总灯阻断，最值钱的动作是先收口风险。',
+      reason: '当前存在阻塞项、待同步章节、资产滞后或生产总灯阻断，最值钱的动作是先收口风险。',
     }
   }
 

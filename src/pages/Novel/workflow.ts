@@ -121,7 +121,7 @@ export const GUIDED_STEP_ORDER: GuidedWorkflowStepKey[] = [
 
 export const GUIDED_STEP_LABELS: Record<GuidedWorkflowStepKey, string> = {
   basics: '项目总览',
-  'project-brief': '项目 Brief',
+  'project-brief': '项目简报',
   'story-core': '故事底盘',
   'theme-voice': '主题文风',
   'world-foundation': '世界规则',
@@ -427,7 +427,7 @@ export function getNextChapterReadiness(
   if (stats.revisionBlockerCount > 0) {
     return {
       ready: false,
-      label: '先清 blocker',
+      label: '先清阻塞项',
       reason: `当前有 ${stats.revisionBlockerCount} 个高优先修订问题，继续写会放大返工。`,
     }
   }

@@ -26,7 +26,7 @@
 
 .novel-list-page__copy {
   display: grid;
-  gap: 8px;
+  gap: 4px;
   flex: 1 1 320px;
   min-width: 0;
 }
@@ -59,9 +59,9 @@
 
 .novel-list-page__stat-card {
   display: grid;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
-  padding: 20px;
+  padding: 16px 18px;
   border: 1px solid var(--border-default);
   border-radius: var(--radius-l);
   background: var(--bg-surface);
@@ -86,7 +86,7 @@
 }
 
 .novel-list-page__stat-value {
-  font-size: 28px;
+  font-size: 26px;
   font-weight: 700;
   line-height: 1.1;
   color: var(--text-primary);
@@ -321,9 +321,9 @@
 }
 
 .novel-list-page__launch-card {
-  min-height: 86px;
+  min-height: 62px;
   display: grid;
-  gap: 8px;
+  gap: 6px;
   width: 100%;
   min-width: 0;
   padding: 14px;
@@ -379,9 +379,10 @@
 
 .novel-list-page__genre-card {
   position: relative;
-  min-height: 76px;
+  min-height: 58px;
   display: grid;
-  gap: 5px;
+  place-items: center start;
+  gap: 0;
   width: 100%;
   min-width: 0;
   padding: 12px;
@@ -450,8 +451,8 @@
 
 .novel-list-page__genre-check {
   position: absolute;
-  top: 12px;
-  right: 12px;
+  top: 10px;
+  right: 10px;
   color: #fff;
   font-size: 16px;
 }

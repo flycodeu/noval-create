@@ -14011,6 +14011,15 @@ html[data-runtime="web"] .project-topbar__main-row {
   line-height: 1.62;
 }
 
+.app-layout .novel-route-shell .novel-copy-block:not(.writing-layout-copy-prewrap):not(.writing-layout-copy-tall),
+.app-layout .novel-route-shell .novel-note-list__item:not(.writing-layout-stack),
+.app-layout .novel-route-shell .novel-insight-list__item {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 .app-layout .novel-workspace__guide {
   margin-bottom: 0;
 }
@@ -14057,7 +14066,22 @@ html[data-runtime="web"] .project-topbar__main-row {
 }
 
 .app-layout .novel-step-guide__copy span {
+  display: none;
+}
+
+.app-layout .novel-route-shell .ant-alert-description {
+  display: -webkit-box;
+  overflow: hidden;
   line-height: 1.55;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.app-layout .novel-route-shell .ant-alert:has(.ant-progress) .ant-alert-description,
+.app-layout .novel-route-shell .ant-alert-description:has(.ant-progress) {
+  display: block;
+  overflow: visible;
+  -webkit-line-clamp: unset;
 }
 
 @media (min-width: 1200px) {
