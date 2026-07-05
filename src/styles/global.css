@@ -3337,6 +3337,9 @@ html[data-theme="dark"] .ant-card-actions > li {
 .novel-route-shell__content-body {
   min-height: 0;
   overflow: auto;
+  /* 让页面网格按“实际可用宽度”响应（助手栏打开会挤窄内容列，视口媒体查询感知不到） */
+  container-type: inline-size;
+  container-name: novel-content;
 }
 
 .novel-route-shell__content-footer {

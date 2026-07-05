@@ -1042,13 +1042,18 @@ export function installWebElectronBridge(): void {
     }),
     character: createService({
       list: async (novelId?: unknown) => withLocalBackend('character', 'list', [novelId], async () => []),
+      query: async (filters?: unknown) => withLocalBackend('character', 'query', [filters], async () => emptyPagedResult),
+      search: async (novelId?: unknown, keyword?: unknown, limit?: unknown) => withLocalBackend('character', 'search', [novelId, keyword, limit], async () => []),
       get: async (id?: unknown) => withLocalBackend('character', 'get', [id], async () => null),
+      getDetailContext: async (characterId?: unknown) => withLocalBackend('character', 'getDetailContext', [characterId], async () => null),
+      getRelations: async (novelId?: unknown) => withLocalBackend('character', 'getRelations', [novelId], async () => []),
       getStats: async (filters?: unknown) => withLocalBackend('character', 'getStats', [filters], async () => ({ ...emptyStats, total: 3, protagonistCount: 1 })),
       getFilterOptions: async (novelId?: unknown) => withLocalBackend('character', 'getFilterOptions', [novelId], async () => ({ species: [], entityTypes: [] })),
       getGraph: async (filters?: unknown) => withLocalBackend('character', 'getGraph', [filters], async () => ({ characters: [], relations: [] })),
     }),
     item: createService({
       list: async (novelId?: unknown) => withLocalBackend('item', 'list', [novelId], async () => []),
+      search: async (novelId?: unknown, keyword?: unknown, itemKind?: unknown, limit?: unknown) => withLocalBackend('item', 'search', [novelId, keyword, itemKind, limit], async () => []),
       query: async (filters?: unknown) => withLocalBackend('item', 'query', [filters], async () => emptyPagedResult),
       get: async (id?: unknown) => withLocalBackend('item', 'get', [id], async () => null),
       getDetailContext: async (id?: unknown) => withLocalBackend('item', 'getDetailContext', [id], async () => null),
@@ -1068,12 +1073,14 @@ export function installWebElectronBridge(): void {
     }),
     faction: createService({
       list: async (novelId?: unknown) => withLocalBackend('faction', 'list', [novelId], async () => []),
+      query: async (filters?: unknown) => withLocalBackend('faction', 'query', [filters], async () => emptyPagedResult),
       getStats: async () => ({ ...emptyStats, total: 1 }),
       getGraph: async (filters?: unknown) => withLocalBackend('faction', 'getGraph', [filters], async () => ({ nodes: [], edges: [], unalignedCharacters: [] })),
     }),
     glossary: createService({ getStats: async () => ({ ...emptyStats, total: 4 }) }),
     thread: createService({
       list: async (novelId?: unknown) => withLocalBackend('thread', 'list', [novelId], async () => []),
+      query: async (filters?: unknown) => withLocalBackend('thread', 'query', [filters], async () => emptyPagedResult),
       get: async (id?: unknown) => withLocalBackend('thread', 'get', [id], async () => null),
       getStats: async (filters?: unknown) => withLocalBackend('thread', 'getStats', [filters], async () => ({ ...emptyStats, total: 3 })),
       getForeshadowSnapshot: async () => ({
@@ -1106,8 +1113,9 @@ export function installWebElectronBridge(): void {
     }),
     timeline: createService({
       list: async (novelId?: unknown) => withLocalBackend('timeline', 'list', [novelId], async () => []),
-      getStats: async () => ({ ...emptyStats, total: 5 }),
-      getFilterOptions: async () => ({ eventTypes: [], statuses: [], volumes: [], parts: [] }),
+      query: async (filters?: unknown) => withLocalBackend('timeline', 'query', [filters], async () => emptyPagedResult),
+      getStats: async (filters?: unknown) => withLocalBackend('timeline', 'getStats', [filters], async () => ({ ...emptyStats, total: 5 })),
+      getFilterOptions: async (novelId?: unknown) => withLocalBackend('timeline', 'getFilterOptions', [novelId], async () => ({ eventTypes: [], statuses: [], volumes: [], parts: [] })),
     }),
     characterArc: createService({
       getArcDashboard: async () => ({

@@ -277,7 +277,11 @@ function createRuntime() {
     },
     character: {
       list: (novelId) => characterService.listCharacters(novelId),
+      query: (filters) => characterService.queryCharacters(filters),
+      search: (novelId, keyword, limit) => characterService.searchCharacters(novelId, keyword, limit),
       get: (id) => characterService.getCharacter(id),
+      getDetailContext: (characterId) => characterService.getCharacterDetailContext(characterId),
+      getRelations: (novelId) => characterService.getCharacterRelations(novelId),
       getStats: (filters) => characterService.getCharacterStats(filters),
       getFilterOptions: (novelId) => characterService.getCharacterFilterOptions(novelId),
       getGraph: (filters) => characterService.getCharacterGraph(filters),
@@ -293,6 +297,7 @@ function createRuntime() {
     },
     item: {
       list: (novelId) => itemService.listStoryItems(novelId),
+      search: (novelId, keyword, itemKind, limit) => itemService.searchStoryItems(novelId, keyword, itemKind, limit),
       query: (filters) => itemService.queryStoryItems(filters),
       getStats: (filters) => itemService.getStoryItemStats(filters),
       getFilterOptions: (novelId) => itemService.getStoryItemFilterOptions(novelId),
@@ -301,11 +306,13 @@ function createRuntime() {
     },
     thread: {
       list: (novelId) => storyThreadService.listStoryThreads(novelId),
+      query: (filters) => storyThreadService.queryStoryThreads(filters),
       get: (id) => storyThreadService.getStoryThread(id),
       getStats: (filters) => storyThreadService.getStoryThreadStats(filters),
     },
     faction: {
       list: (novelId) => factionService.listFactions(requireId(novelId, 'novelId')),
+      query: (filters) => factionService.queryFactions(filters),
       getGraph: (filters) => factionService.getFactionGraph(filters),
     },
     structure: {
@@ -318,6 +325,9 @@ function createRuntime() {
     },
     timeline: {
       list: (novelId) => timelineService.listTimelineEvents(novelId),
+      query: (filters) => timelineService.queryTimelineEvents(filters),
+      getStats: (filters) => timelineService.getTimelineStats(filters),
+      getFilterOptions: (novelId) => timelineService.getTimelineFilterOptions(novelId),
     },
   }
 
@@ -428,6 +438,18 @@ async function start() {
     } catch (error) {
       writeJson(req, res, 200, { ok: false, error: serializeError(error) })
     }
+  })
+
+  server.on('error', (error) => {
+    if (error && error.code === 'EADDRINUSE') {
+      console.error(`[local-web-backend] 端口 ${port} 已被占用——通常是上一次的后端进程没有退出。`)
+      console.error('[local-web-backend] Windows 处理：netstat -ano | findstr :8787 找到 PID 后 taskkill /PID <pid> /F，再重新运行 npm run dev:web。')
+      console.error('[local-web-backend] 注意：旧进程运行的是旧代码，接口不全会导致网页数据看似"没同步"。')
+    } else {
+      console.error('[local-web-backend] server error:', error)
+    }
+    app.quit()
+    process.exit(1)
   })
 
   server.listen(port, host, () => {

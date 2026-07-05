@@ -42,8 +42,8 @@ const PROVIDER_OPTIONS = [
   { value: 'openai', label: 'OpenAI', models: ['gpt-4o', 'gpt-4-turbo', 'gpt-3.5-turbo', 'gpt-4o-mini'] },
   { value: 'anthropic', label: 'Anthropic Claude', models: ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'] },
   { value: 'deepseek', label: 'DeepSeek', models: [] },
-  { value: 'kimi', label: 'Kimi / Moonshot', models: ['kimi-k2.6', 'kimi-k2.5', 'moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k'] },
-  { value: 'aliyun', label: '阿里通义', models: ['qwen-max', 'qwen-plus', 'qwen-turbo', 'qwen-long'] },
+  { value: 'kimi', label: 'Kimi / Moonshot', models: ['kimi-k2.6', 'kimi-k2.5', 'moonshot-v1-128k', 'moonshot-v1-32k', 'moonshot-v1-8k'] },
+  { value: 'aliyun', label: '阿里通义 Qwen', models: ['qwen3.6-max', 'qwen3.6-plus', 'qwen3.5-plus', 'qwen-max', 'qwen-plus', 'qwen-long'] },
   { value: 'baidu', label: '百度文心', models: ['ernie-4.0-8k', 'ernie-3.5-8k', 'ernie-speed'] },
   { value: 'custom', label: '自定义（OpenAI 兼容）', models: [] },
 ]
@@ -52,8 +52,9 @@ const PROVIDER_DEFAULTS: Record<string, { temperature: number; maxTokens: number
   openai: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS, modelId: 'gpt-4o', baseUrl: '' },
   anthropic: { temperature: 0.75, maxTokens: DEFAULT_MODEL_MAX_TOKENS, modelId: 'claude-sonnet-4-6' },
   deepseek: { temperature: 0.7, maxTokens: 384000, modelId: 'deepseek-v4-flash', baseUrl: '' },
-  kimi: { temperature: 0.75, maxTokens: DEFAULT_MODEL_MAX_TOKENS, modelId: 'kimi-k2.6', baseUrl: '', maxContextTokens: 256000 },
-  aliyun: { temperature: 0.85, maxTokens: DEFAULT_MODEL_MAX_TOKENS, modelId: 'qwen-max' },
+  // 国内 key 走 api.moonshot.cn；如果用海外 key 改成 api.moonshot.ai/v1
+  kimi: { temperature: 0.75, maxTokens: DEFAULT_MODEL_MAX_TOKENS, modelId: 'kimi-k2.6', baseUrl: 'https://api.moonshot.cn/v1', maxContextTokens: 256000 },
+  aliyun: { temperature: 0.85, maxTokens: DEFAULT_MODEL_MAX_TOKENS, modelId: 'qwen3.6-max', maxContextTokens: 128000 },
   baidu: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS, modelId: 'ernie-4.0-8k' },
   custom: { temperature: 0.8, maxTokens: DEFAULT_MODEL_MAX_TOKENS, baseUrl: 'http://localhost:11434/v1' },
 }

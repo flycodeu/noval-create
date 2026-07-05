@@ -199,6 +199,12 @@ export function buildChapterBridgePlan(
     previousTone && currentTone && previousTone !== currentTone ? '情绪基调发生切换，开头不能直接跳平。' : '',
     !firstScene?.pov ? '首场景缺少 POV 标注，承接时容易出现视角断层。': '',
   ])
+  // 抽象 seed 只承接“事”，不承接上一章真实的结尾画面；强收尾意象若无人呼应，
+  // 读者会感到断链。取上一章正文尾段作为回响义务注入。
+  const previousEndingText = asText(previousChapter.content).trim()
+  const endingEcho = previousEndingText
+    ? `上一章结尾原文（收尾画面/悬念）：“${previousEndingText.slice(-160).replace(/\s+/g, ' ')}”。本章前半部分必须至少呼应一次（推进它、让人物提及或以环境细节回响）；确要延后回收时，需在正文中给出可见的挂起理由，不允许无痕丢弃。`
+    : ''
 
   return {
     sourceChapterId: previousChapter.id,
@@ -207,6 +213,7 @@ export function buildChapterBridgePlan(
     timeJump,
     emotionCarry,
     openingMove,
+    endingEcho,
     firstSceneConstraint: `前 200 字必须先接住上章结尾，再把动作落到 ${parseTimeLocation(currentLocation) || '本章首场景'}。`,
     allowedPov,
     infoGapGuard,
@@ -223,6 +230,7 @@ export function formatChapterBridgePlan(plan: ChapterBridgePlan | null | undefin
     `时间承接：${plan.timeJump}`,
     `情绪承接：${plan.emotionCarry}`,
     `开场动作：${plan.openingMove}`,
+    plan.endingEcho ? `结尾意象承接：${plan.endingEcho}` : '',
     `首场景约束：${plan.firstSceneConstraint}`,
     `POV 边界：${plan.allowedPov}`,
     `信息差保护：${plan.infoGapGuard}`,

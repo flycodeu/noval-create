@@ -231,6 +231,7 @@ export interface ChapterBridgePlan {
   timeJump: string
   emotionCarry: string
   openingMove: string
+  endingEcho?: string
   firstSceneConstraint: string
   allowedPov: string
   infoGapGuard: string

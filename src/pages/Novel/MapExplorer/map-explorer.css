@@ -39,6 +39,40 @@
   align-items: start;
 }
 
+/* 节点详情面板头部：标题和操作按钮允许整体换行，避免按钮挤压/堆叠在表单上方 */
+.map-list-panel--detail .novel-panel__header,
+.map-graph-inspector-panel .novel-panel__header {
+  flex-wrap: wrap;
+  row-gap: 10px;
+}
+
+/* 按内容区实际宽度响应：助手栏/侧栏挤窄内容列时降级为两列、单列，
+   避免三列网格向右溢出被浮层遮挡 */
+@container novel-content (max-width: 1360px) {
+  .map-list-workspace {
+    grid-template-columns: minmax(320px, 0.96fr) minmax(340px, 1fr);
+  }
+
+  .map-list-panel--detail {
+    position: static;
+    grid-column: 1 / -1;
+  }
+}
+
+@container novel-content (max-width: 1000px) {
+  .map-list-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .map-graph-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .map-graph-inspector-panel {
+    position: static;
+  }
+}
+
 .map-node-stack {
   display: grid;
   gap: 12px;
