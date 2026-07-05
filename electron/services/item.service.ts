@@ -1601,6 +1601,92 @@ export function applyStoryItemLinkRecommendations(
   }
 }
 
+export interface ItemCharacterLinkRepairResult {
+  itemsScanned: number
+  itemsLinked: number
+  ownersAssigned: number
+  details: string[]
+}
+
+/**
+ * 人物在物品之后生成时（当前引导顺序：地图 -> 物品 -> 人物），物品只能弱绑定。
+ * 人物落库后调用本函数按文本互指回填 linkedCharacterIds / ownerCharacterId：
+ * - 物品描述里出现人物姓名，或人物档案里出现物品名，才建立链接；
+ * - 只有唯一强匹配（物品文本点名该人物）时才回填 owner，避免误归属。
+ */
+export function repairItemCharacterLinks(novelId: number): ItemCharacterLinkRepairResult {
+  const db = getDb()
+  const characterRows = db.select().from(characters)
+    .where(eq(characters.novelId, novelId))
+    .all()
+    .filter((row) => (row.fullName || '').trim().length >= 2)
+  const result: ItemCharacterLinkRepairResult = { itemsScanned: 0, itemsLinked: 0, ownersAssigned: 0, details: [] }
+  if (characterRows.length === 0) return result
+
+  const itemRows = db.select().from(storyItems)
+    .where(eq(storyItems.novelId, novelId))
+    .all()
+    .filter((row) => row.itemKind !== 'template')
+  const timestamp = new Date().toISOString()
+  const characterTextById = new Map(characterRows.map((row) => [row.id, [
+    row.background,
+    row.goals,
+    row.contextHooksJson,
+    row.socialIdentity,
+    row.occupation,
+  ].filter(Boolean).join('\n')]))
+
+  for (const item of itemRows) {
+    result.itemsScanned += 1
+    const itemText = [
+      item.summary,
+      item.plotFunction,
+      item.acquisitionMethod,
+      item.usageMethod,
+      item.factionHint,
+      item.sourceContextJson,
+    ].filter(Boolean).join('\n')
+    const strongMatches: number[] = []
+    const weakMatches: number[] = []
+    for (const character of characterRows) {
+      if (itemText.includes(character.fullName)) {
+        strongMatches.push(character.id)
+      } else if ((item.itemName || '').length >= 2 && (characterTextById.get(character.id) || '').includes(item.itemName)) {
+        weakMatches.push(character.id)
+      }
+    }
+    const matched = [...new Set([...strongMatches, ...weakMatches])]
+    if (matched.length === 0) continue
+
+    const existingLinks = new Set(parseJsonNumberArray(item.linkedCharacterIdsJson))
+    const newLinks = matched.filter((id) => !existingLinks.has(id))
+    const shouldAssignOwner = !item.ownerCharacterId && strongMatches.length === 1
+    if (newLinks.length === 0 && !shouldAssignOwner) continue
+
+    newLinks.forEach((id) => existingLinks.add(id))
+    db.update(storyItems).set({
+      linkedCharacterIdsJson: stringifyNumberArray([...existingLinks]),
+      ...(shouldAssignOwner ? { ownerCharacterId: strongMatches[0] } : {}),
+      updatedAt: timestamp,
+    }).where(eq(storyItems.id, item.id)).run()
+
+    if (newLinks.length > 0) result.itemsLinked += 1
+    if (shouldAssignOwner) result.ownersAssigned += 1
+    const ownerName = shouldAssignOwner
+      ? characterRows.find((row) => row.id === strongMatches[0])?.fullName || ''
+      : ''
+    result.details.push(
+      `${item.itemName}：新增关联 ${newLinks.length} 人${ownerName ? `，归属 ${ownerName}` : ''}`,
+    )
+  }
+
+  if (result.itemsLinked > 0 || result.ownersAssigned > 0) {
+    markNovelContextChanged(novelId, 'Story item character links repaired')
+    refreshWorldStateVersionsForNovel(novelId)
+  }
+  return result
+}
+
 export function createStoryItem(
   novelId: number,
   data: Partial<typeof storyItems.$inferInsert>,

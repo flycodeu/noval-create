@@ -1087,6 +1087,13 @@ const SOFT_CONTEXT_EXCLUDED_LABELS = new Set<ChapterContextLabel>([
   'worldStates',
 ])
 
+// 这些软上下文是本章生成的最小核心；连它们都注入不了才升级为硬失败。
+const CRITICAL_SOFT_CONTEXT_LABELS = new Set<string>([
+  'chapterGoal',
+  'chapterBridgePlan',
+])
+const CRITICAL_SOFT_CONTEXT_MIN_TOKENS = 120
+
 function buildHardConstraintSummary(
   entries: HardConstraintEntry[],
   droppedDrafts: HardConstraintDraft[],
@@ -4557,9 +4564,13 @@ export function allocateChapterContext(
   const preservedConstraintLabels = hardConstraintAllocation.entries
     .map((entry) => entry.label)
     .filter((label) => preservedConstraintSet.has(label))
-  const hardConstraintFailed = droppedConstraintCount > 0
-    || truncatedHardConstraintLabels.length > 0
-    || softAllocation.warnings.some((warning) => warning.priority === 0)
+  // P0 软上下文被截断属于可降级情况（分配器已按比例压缩注入）；只有整章无法注入
+  // 最小核心（章节目标/桥接）或硬约束整段丢弃，才值得中断生成让用户拆章。
+  const criticalP0Starved = softAllocation.warnings.some((warning) =>
+    warning.priority === 0
+    && CRITICAL_SOFT_CONTEXT_LABELS.has(warning.label)
+    && warning.allocatedTokens < Math.min(CRITICAL_SOFT_CONTEXT_MIN_TOKENS, warning.originalTokens))
+  const hardConstraintFailed = droppedConstraintCount > 0 || criticalP0Starved
   const constraintInjectionStatus: ConstraintInjectionStatus = {
     promptProfile,
     hardConstraintBudget,

@@ -67,6 +67,15 @@ function createRuntime() {
   const modelService = requireProject('electron/services/model.service.ts')
   const sourceSearchSettingsService = requireProject('electron/services/source-search-settings.service.ts')
   const taskService = requireProject('electron/services/task.service.ts')
+  const novelService = requireProject('electron/services/novel.service.ts')
+  const chapterService = requireProject('electron/services/chapter.service.ts')
+  const characterService = requireProject('electron/services/character.service.ts')
+  const mapService = requireProject('electron/services/map.service.ts')
+  const itemService = requireProject('electron/services/item.service.ts')
+  const storyThreadService = requireProject('electron/services/story-thread.service.ts')
+  const factionService = requireProject('electron/services/faction.service.ts')
+  const storyStructureService = requireProject('electron/services/story-structure.service.ts')
+  const timelineService = requireProject('electron/services/timeline.service.ts')
   const { buildAiModelRouteReport, buildChatOptionsFromRoute, resolveAiExecutionMode } = requireProject('electron/services/ai-engine.service.ts')
   const { appendVariationMessage, buildVariationDigest, isCandidateTooSimilar } = requireProject('electron/services/variation-control.service.ts')
   const { requireId, requireObject } = requireProject('electron/utils/ipc-validate.ts')
@@ -255,6 +264,60 @@ function createRuntime() {
     },
     ai: {
       runPrompt,
+    },
+    // 只读数据透传：让网页端展示真实数据库内容（写操作仍留在 Electron 桌面端）。
+    novel: {
+      list: (filters) => novelService.listNovels(filters),
+      get: (id) => novelService.getNovel(requireId(id)),
+      stats: (id) => novelService.getNovelStats(requireId(id)),
+    },
+    chapter: {
+      list: (novelId) => chapterService.listChapters(requireId(novelId, 'novelId')),
+      get: (id) => chapterService.getChapter(requireId(id)),
+    },
+    character: {
+      list: (novelId) => characterService.listCharacters(novelId),
+      get: (id) => characterService.getCharacter(id),
+      getStats: (filters) => characterService.getCharacterStats(filters),
+      getFilterOptions: (novelId) => characterService.getCharacterFilterOptions(novelId),
+      getGraph: (filters) => characterService.getCharacterGraph(filters),
+    },
+    map: {
+      getTree: (novelId) => mapService.getMapTree(novelId),
+      queryNodes: (filters) => mapService.queryMapNodes(filters),
+      getGraph: (filters) => mapService.getMapGraph(filters),
+      getRelations: (novelId, focusNodeId) => mapService.getMapRelations(novelId, focusNodeId),
+      getStats: (novelId) => mapService.getMapStats(novelId),
+      getNode: (id) => mapService.getMapNode(id),
+      searchNodes: (novelId, keyword, limit) => mapService.searchMapNodes(novelId, keyword, limit),
+    },
+    item: {
+      list: (novelId) => itemService.listStoryItems(novelId),
+      query: (filters) => itemService.queryStoryItems(filters),
+      getStats: (filters) => itemService.getStoryItemStats(filters),
+      getFilterOptions: (novelId) => itemService.getStoryItemFilterOptions(novelId),
+      get: (id) => itemService.getStoryItem(id),
+      getDetailContext: (id) => itemService.getStoryItemDetailContext(id),
+    },
+    thread: {
+      list: (novelId) => storyThreadService.listStoryThreads(novelId),
+      get: (id) => storyThreadService.getStoryThread(id),
+      getStats: (filters) => storyThreadService.getStoryThreadStats(filters),
+    },
+    faction: {
+      list: (novelId) => factionService.listFactions(requireId(novelId, 'novelId')),
+      getGraph: (filters) => factionService.getFactionGraph(filters),
+    },
+    structure: {
+      getTree: (novelId) => storyStructureService.listStoryStructure(novelId),
+    },
+    outline: {
+      getArcs: (novelId) => getDb().select().from(schema.storyArcs)
+        .where(eq(schema.storyArcs.novelId, requireId(novelId, 'novelId')))
+        .all(),
+    },
+    timeline: {
+      list: (novelId) => timelineService.listTimelineEvents(novelId),
     },
   }
 

@@ -4,6 +4,7 @@ import {
   parseAiJsonResult,
   safeParseAiJson,
   safeParseJson,
+  salvageAiJsonArrayItems,
 } from './json'
 
 describe('json utils', () => {
@@ -74,5 +75,41 @@ describe('json utils', () => {
   it('keeps safeParse helpers aligned', () => {
     expect(safeParseAiJson<{ id: number }>('前文说明：{"id":7}。', 'object')).toEqual({ id: 7 })
     expect(safeParseJson<{ ok: boolean }>('{ "ok": true }')).toEqual({ ok: true })
+  })
+
+  it('repairs decimal commas in numeric values', () => {
+    const result = parseAiJsonResult<{ age: number; role: string }>(
+      '{"age": 1,5, "role": "major"}',
+      'object',
+    )
+
+    expect(result.success).toBe(true)
+    expect(result.data).toEqual({ age: 1.5, role: 'major' })
+  })
+
+  it('keeps string values followed by numeric-looking keys unaffected by decimal repair', () => {
+    const result = parseAiJsonResult<{ name: string; age: number }>(
+      '{"name": "沈砚", "age": 15}',
+      'object',
+    )
+
+    expect(result.success).toBe(true)
+    expect(result.data).toEqual({ name: '沈砚', age: 15 })
+  })
+
+  it('salvages parseable objects when the whole array is broken', () => {
+    const raw = [
+      '[',
+      '{"full_name": "沈砚", "age": 15},',
+      '{"full_name": "坏对象", "age": 1,5, "tags": [}!!,',
+      '{"full_name": "洛姑", "age": 42}',
+      ']',
+    ].join('\n')
+
+    const items = salvageAiJsonArrayItems<{ full_name: string }>(raw)
+
+    expect(items.map((item) => item.full_name)).toContain('沈砚')
+    expect(items.map((item) => item.full_name)).toContain('洛姑')
+    expect(items.length).toBeGreaterThanOrEqual(2)
   })
 })

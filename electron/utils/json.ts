@@ -368,6 +368,18 @@ function repairCommonAiJsonIssues(text: string): string {
       continue
     }
 
+    if (frame?.type === 'object' && frame.state === 'expect_key_or_end' && /[0-9]/.test(char)) {
+      // “小数点写成逗号”修复：{"age": 1,5} → {"age": 1.5}。
+      // 只有紧邻的上一个值是数字时才合并，字符串值后的逗号不受影响。
+      const joined = result.join('')
+      if (/[0-9]\s*,\s*$/.test(joined)) {
+        result.length = 0
+        result.push(joined.replace(/,(\s*)$/, '.$1'), char)
+        frame.state = 'expect_comma_or_end'
+        continue
+      }
+    }
+
     if (frame?.state === 'expect_comma_or_end' && /[0-9tfn-]/i.test(char)) {
       result.push(',')
       setFrameStateAfterInjectedComma(frame)
@@ -477,4 +489,26 @@ export function safeParseAiJson<T = unknown>(text: string, expectedRoot: AiJsonR
  */
 export function safeParseJson<T = unknown>(text: string): T {
   return safeParseAiJson<T>(text, 'any')
+}
+
+/**
+ * 数组整体解析失败时的逐对象打捞：按平衡花括号切出顶层对象逐个解析，
+ * 坏对象跳过、好对象保留。用于批量生成场景（一个成员字段损坏不应废掉整批）。
+ */
+export function salvageAiJsonArrayItems<T = Record<string, unknown>>(text: string): T[] {
+  const cleaned = trimCodeFence(text)
+  const items: T[] = []
+  let index = cleaned.indexOf('{')
+  while (index !== -1) {
+    const end = findBalancedEnd(cleaned, index, '{', '}')
+    if (end === -1) break
+    const fragment = cleaned.slice(index, end + 1)
+    try {
+      items.push(parseAiJsonInternal<T>(fragment, 'object').data)
+    } catch {
+      // 跳过无法修复的对象，继续打捞其余成员。
+    }
+    index = cleaned.indexOf('{', end + 1)
+  }
+  return items
 }

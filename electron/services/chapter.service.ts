@@ -4297,6 +4297,14 @@ function allocateStageContextForPipeline(
     })
   } catch (error) {
     if (error instanceof HardConstraintOverflowError) {
+      // review/rewrite 阶段发生在初稿已生成之后；此时上下文放不下应降级续跑，
+      // 中断只会丢掉已经花钱生成的正文。draft/scenePlan 阶段仍然中断，让用户拆章。
+      if (promptProfile === 'review' || promptProfile === 'rewrite') {
+        console.warn(
+          `[chapter:context] stage=${promptProfile} 硬约束超预算，已降级为截断注入继续执行：${error.message}`,
+        )
+        return error.context
+      }
       throw error
     }
     if (error instanceof ContextOverflowError) {

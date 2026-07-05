@@ -709,6 +709,8 @@ function registerIpcHandlers() {
   handle('map:delete', (_, id) => mapService.deleteMapItem(requireId(id)))
   handle('map:batchGenerate', (_, novelId, structure) =>
     mapService.batchGenerateMap(novelId, structure))
+  handle('map:batchGenerateToTarget', (_, novelId, structure) =>
+    mapService.batchGenerateMapToTarget(novelId, structure))
   handle('map:startAutoGenerate', (event, novelId, structure) =>
     workflowTaskService.startMapAutoGenerateWorkflow(novelId, structure, event.sender))
   handle('map:getAutoGenerateStatus', (_, taskId) =>
@@ -782,6 +784,7 @@ function registerIpcHandlers() {
       segmentIds?: number[]
     },
   ))
+  handle('item:repairCharacterLinks', (_, novelId) => itemService.repairItemCharacterLinks(requireId(novelId, 'novelId')))
   handle('item:clear', (_, novelId) => itemService.clearStoryItemsByNovel(requireId(novelId, 'novelId')))
 
   handle('outline:getArcs', (_, novelId) => {

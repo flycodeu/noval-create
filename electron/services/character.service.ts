@@ -3,7 +3,7 @@ import { asc, eq } from 'drizzle-orm'
 import { getDb, getSqlite } from '../database/db'
 import { characters, characterRelations, novels, storyItems, timelineEvents } from '../database/schema'
 import type { CharacterAiPatchResult, CharacterBatchGenerationOptions } from '../../src/types'
-import { safeParseJson } from '../utils/json'
+import { safeParseJson, salvageAiJsonArrayItems } from '../utils/json'
 import { buildStoryProfile } from './context.service'
 import {
   buildCharacterEcologySummary,
@@ -38,9 +38,25 @@ import { cleanupCharacterSoftReferences } from './data-cascade.service'
 import { refreshWorldStateVersionsForNovel } from './world-state.service'
 import { throwUserFacingError } from '../utils/user-facing-error'
 import { buildVariationDigest, isRejectedDigestTooSimilar } from './variation-control.service'
+import { repairItemCharacterLinks } from './item.service'
 
 const BATCH_CHARACTER_QUALITY_BUDGET_MS = 90_000
 const BATCH_CHARACTER_MAX_REWRITE_PASSES = 0
+
+// 引导顺序是地图 -> 物品 -> 人物：物品先落库时只能弱绑定，
+// 人物批量落库后自动做一次物品-人物链接回填。失败不阻断人物生成。
+function runItemCharacterLinkRepair(novelId: number) {
+  try {
+    const repair = repairItemCharacterLinks(novelId)
+    if (repair.itemsLinked > 0 || repair.ownersAssigned > 0) {
+      console.info(
+        `[character] 物品-人物链接修复：关联 ${repair.itemsLinked} 件物品，回填归属 ${repair.ownersAssigned} 件`,
+      )
+    }
+  } catch (error) {
+    console.warn('[character] 物品-人物链接修复失败（不影响人物生成）:', error instanceof Error ? error.message : error)
+  }
+}
 
 function asText(value: unknown): string {
   return typeof value === 'string' ? cleanAiFieldText(value) : ''
@@ -1550,8 +1566,23 @@ export async function generateCharacterBatchChunk(
         try {
           parsed = cleanAiValue(safeParseJson<Array<Record<string, unknown>>>(quality.finalOutput))
         } catch (error) {
-          markRejected(historyId)
-          throw error
+          // 整体解析失败先逐对象打捞；一个成员字段损坏不应废掉整批人物。
+          const salvaged = cleanAiValue(salvageAiJsonArrayItems<Record<string, unknown>>(quality.finalOutput))
+          if (salvaged.length === 0) {
+            markRejected(historyId)
+            console.error('批量人物 JSON 解析失败且无可打捞成员:', error)
+            resultPayload = {
+              ids: [],
+              majorGenerated: 0,
+              minorGenerated: 0,
+              antagonistGenerated: 0,
+              supportingGenerated: 0,
+              warning: `第 ${runtime.batchIndex || 1}/${runtime.totalBatches || 1} 批人物 JSON 解析失败，已跳过：${error instanceof Error ? error.message.slice(0, 160) : '未知错误'}`,
+            }
+            return resultPayload
+          }
+          console.warn(`[character] 批量人物 JSON 整体解析失败，逐对象打捞成功 ${salvaged.length} 个成员`)
+          parsed = salvaged
         }
         const candidateDigest = buildVariationDigest(JSON.stringify(parsed))
         if (isRejectedDigestTooSimilar(candidateDigest, rejectedDigests)) {
@@ -1605,6 +1636,7 @@ export async function generateCharacterBatchChunk(
         if (createdIds.length > 0) {
           markNovelContextChanged(novelId, 'Character profiles changed')
           refreshWorldStateVersionsForNovel(novelId)
+          runItemCharacterLinkRepair(novelId)
         }
 
         resultPayload = {
@@ -1759,7 +1791,19 @@ export async function batchGenerateCharacters(novelId: number, opts: {
           rejectedByQuality = true
           return quality
         }
-        acceptedBatch = cleanAiValue(safeParseJson<Array<Record<string, unknown>>>(quality.finalOutput))
+        try {
+          acceptedBatch = cleanAiValue(safeParseJson<Array<Record<string, unknown>>>(quality.finalOutput))
+        } catch (error) {
+          const salvaged = cleanAiValue(salvageAiJsonArrayItems<Record<string, unknown>>(quality.finalOutput))
+          if (salvaged.length > 0) {
+            console.warn(`[character] 批量人物 JSON 整体解析失败，逐对象打捞成功 ${salvaged.length} 个成员`)
+            acceptedBatch = salvaged
+          } else {
+            // 留给外层 while 循环按解析失败重试，不中断整个批量任务。
+            console.error('批量人物 JSON 解析失败且无可打捞成员:', error)
+            acceptedBatch = null
+          }
+        }
         return quality
       },
     })
@@ -1835,6 +1879,7 @@ export async function batchGenerateCharacters(novelId: number, opts: {
   if (newIds.length > 0) {
     markNovelContextChanged(novelId, 'Character profiles changed')
     refreshWorldStateVersionsForNovel(novelId)
+    runItemCharacterLinkRepair(novelId)
   }
 
   return newIds

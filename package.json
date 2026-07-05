@@ -49,6 +49,7 @@
     "soak:export-chapter-report": "electron scripts/export-chapter-soak-report.cjs",
     "eval:novel": "electron scripts/run-novel-ai-eval.cjs",
     "eval:novel:pipeline": "electron scripts/run-novel-ai-eval-pipeline.cjs",
+    "eval:novel:flow": "electron scripts/run-novel-flow-audit.cjs",
     "eval:novel:verify": "electron scripts/verify-novel-ai-eval.cjs",
     "typecheck:web": "tsc -p tsconfig.web.json --noEmit",
     "typecheck:node": "tsc -p tsconfig.node.json --noEmit",

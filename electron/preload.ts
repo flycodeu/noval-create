@@ -299,6 +299,7 @@ const api = {
     deleteRelation: (id: number) => invokeIpc('map:deleteRelation', id),
     delete: (id: number) => invokeIpc('map:delete', id),
     batchGenerate: (novelId: number, structure: unknown) => invokeIpc('map:batchGenerate', novelId, structure),
+    batchGenerateToTarget: (novelId: number, structure: unknown) => invokeIpc('map:batchGenerateToTarget', novelId, structure),
     startAutoGenerate: (novelId: number, structure: unknown) => invokeIpc('map:startAutoGenerate', novelId, structure),
     getAutoGenerateStatus: (taskId: number) => invokeIpc('map:getAutoGenerateStatus', taskId),
     getLatestAutoGenerateTask: (novelId: number) => invokeIpc('map:getLatestAutoGenerateTask', novelId),
@@ -354,6 +355,7 @@ const api = {
     regenerate: (id: number, options?: unknown) => invokeIpc('item:regenerate', id, options),
     getLinkRecommendations: (itemId: number) => invokeIpc('item:getLinkRecommendations', itemId),
     applyLinkRecommendations: (itemId: number, data: unknown) => invokeIpc('item:applyLinkRecommendations', itemId, data),
+    repairCharacterLinks: (novelId: number) => invokeIpc('item:repairCharacterLinks', novelId),
     clear: (novelId: number) => invokeIpc('item:clear', novelId),
   },
 

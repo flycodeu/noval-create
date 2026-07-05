@@ -1325,3 +1325,51 @@ export async function batchGenerateMap(novelId: number, structure: MapBatchGener
     nextDepth: nextState.targetDepth,
   }
 }
+
+export interface MapGenerateToTargetResult {
+  totalGeneratedNodeCount: number
+  batchesRun: number
+  completed: boolean
+  lastResult: MapBatchGenerationResult | null
+  message: string
+}
+
+/**
+ * batchGenerateMap 单次只推进一个批次；同步调用方（脚本、一次性补齐入口）
+ * 用本函数循环到蓝图补齐或无进展为止。UI 的异步版本走 workflow-task 的 map_auto_generate。
+ */
+export async function batchGenerateMapToTarget(
+  novelId: number,
+  structure: MapBatchGenerateOptions,
+  runtime: MapBatchGenerateRuntimeOptions & { maxBatches?: number } = {},
+): Promise<MapGenerateToTargetResult> {
+  const maxBatches = Math.max(1, Math.min(12, Math.round(runtime.maxBatches ?? 8)))
+  let totalGeneratedNodeCount = 0
+  let batchesRun = 0
+  let lastResult: MapBatchGenerationResult | null = null
+  while (batchesRun < maxBatches) {
+    if (runtime.shouldStop?.()) break
+    const result = await batchGenerateMap(novelId, structure, runtime)
+    lastResult = result
+    batchesRun += 1
+    totalGeneratedNodeCount += result.generatedNodeCount
+    if (result.completed || result.stage === 'completed') {
+      return {
+        totalGeneratedNodeCount,
+        batchesRun,
+        completed: true,
+        lastResult: result,
+        message: result.message,
+      }
+    }
+    // 本批没有任何推进说明生成被拒或反复失败，中断以避免无效循环烧额度。
+    if (result.generatedNodeCount <= 0) break
+  }
+  return {
+    totalGeneratedNodeCount,
+    batchesRun,
+    completed: Boolean(lastResult?.completed),
+    lastResult,
+    message: lastResult?.message || '地图批量生成没有推进任何批次。',
+  }
+}

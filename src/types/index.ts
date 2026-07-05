@@ -1115,6 +1115,21 @@ export interface MapBatchGenerationResult {
   nextDepth: number | null
 }
 
+export interface MapGenerateToTargetResult {
+  totalGeneratedNodeCount: number
+  batchesRun: number
+  completed: boolean
+  lastResult: MapBatchGenerationResult | null
+  message: string
+}
+
+export interface ItemCharacterLinkRepairResult {
+  itemsScanned: number
+  itemsLinked: number
+  ownersAssigned: number
+  details: string[]
+}
+
 export interface TimelineEvent {
   id: number
   novelId: number
@@ -5675,6 +5690,7 @@ declare global {
         deleteRelation: (id: number) => Promise<void>
         delete: (id: number) => Promise<void>
         batchGenerate: (novelId: number, structure: MapBatchGenerateOptions) => Promise<MapBatchGenerationResult>
+        batchGenerateToTarget: (novelId: number, structure: MapBatchGenerateOptions) => Promise<MapGenerateToTargetResult>
         startAutoGenerate: (novelId: number, structure: MapBatchGenerateOptions) => Promise<number>
         getAutoGenerateStatus: (taskId: number) => Promise<MapAutoGenerateStatus | null>
         getLatestAutoGenerateTask: (novelId: number) => Promise<Task | null>
@@ -5730,6 +5746,7 @@ declare global {
           eventIds?: number[]
           segmentIds?: number[]
         }) => Promise<StoryItemLinkApplyResult>
+        repairCharacterLinks: (novelId: number) => Promise<ItemCharacterLinkRepairResult>
         clear: (novelId: number) => Promise<void>
       }
       outline: {
