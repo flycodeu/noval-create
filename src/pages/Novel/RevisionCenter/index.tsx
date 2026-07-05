@@ -226,7 +226,7 @@ export default function RevisionCenterPage({ novelId }: Props) {
             { label: '诊断摘要', value: buildIssueSummary(consistencyReport) },
           ],
           fields: [
-            { key: 'taskType', label: '任务类型', value: values.taskType, hint: '例如 continuity、timeline、character、map。' },
+            { key: 'taskType', label: '任务类型', value: values.taskType, hint: '例如 continuity（连续性）、timeline（时间线）、character（人物）、map（地图）。' },
             { key: 'title', label: '任务标题', value: values.title, hint: '一句话说清要修什么。' },
             { key: 'description', label: '问题描述', value: values.description, hint: '写清问题和影响范围。' },
             { key: 'fixBrief', label: '修订方案', value: values.fixBrief, hint: '写成可执行的检查清单或修订动作。' },
@@ -619,7 +619,7 @@ export default function RevisionCenterPage({ novelId }: Props) {
           <div className="guided-step__field-grid">
             <div className="guided-step__field-card guided-step__field-card--compact">
               <Form.Item name="taskType" label="任务类型" rules={[{ required: true, message: '请填写任务类型' }]}>
-                <Input placeholder="例如：continuity / character / timeline" />
+                <Input placeholder="例如：continuity（连续性）/ character（人物）/ timeline（时间线）" />
               </Form.Item>
             </div>
             <div className="guided-step__field-card guided-step__field-card--compact">

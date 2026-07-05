@@ -507,7 +507,7 @@ export default function WritebackCenterPage({ novelId }: Props) {
       >
         <div className="novel-writeback-center-page__modal-fields">
           <Input value={editingReason} onChange={(event) => setEditingReason(event.target.value)} placeholder="补充这条候选为什么需要回写" />
-          <Input.TextArea value={editingAfterState} onChange={(event) => setEditingAfterState(event.target.value)} rows={18} placeholder="编辑 afterState JSON" />
+          <Input.TextArea value={editingAfterState} onChange={(event) => setEditingAfterState(event.target.value)} rows={18} placeholder="编辑回写后的状态数据（JSON 格式）" />
         </div>
       </Modal>
     </WorkspacePage>

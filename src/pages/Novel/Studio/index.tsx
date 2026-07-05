@@ -262,7 +262,7 @@ export default function StudioPage({ novelId }: Props) {
         <section className="novel-dashboard__task-card">
           <SectionHeader
             eyebrow="当前任务"
-            title={currentBlocker ? '当前最该处理：先清 blocker' : `当前最该处理：${currentTask.title}`}
+            title={currentBlocker ? '当前最该处理：先清阻塞项' : `当前最该处理：${currentTask.title}`}
             description={currentTask.reason}
             extra={currentBlocker ? <Tag color="volcano">阻塞中</Tag> : <Tag color="gold">可推进</Tag>}
           />
@@ -326,7 +326,7 @@ export default function StudioPage({ novelId }: Props) {
         <MetricCard
           label="高优先风险"
           value={visibleBlockers.length}
-          hint={visibleBlockers.length > 0 ? '建议先清 blocker 再推进正文' : '当前没有 blocker'}
+          hint={visibleBlockers.length > 0 ? '建议先清阻塞项再推进正文' : '当前没有阻塞项'}
           tone={visibleBlockers.length > 0 ? 'danger' : 'success'}
         />
         <MetricCard
@@ -377,8 +377,8 @@ export default function StudioPage({ novelId }: Props) {
           <section className={`novel-dashboard__panel ${queryPanel === 'blockers' ? 'is-focused' : ''}`}>
             <SectionHeader
               eyebrow="当前阻塞"
-              title="Blocker 列表"
-              description="每个 blocker 都给出原因、影响范围和处理入口。"
+              title="阻塞项列表"
+              description="每个阻塞项都给出原因、影响范围和处理入口。"
               extra={visibleBlockers.length > 0 ? <Tag color="volcano">{`${visibleBlockers.length} 个`}</Tag> : null}
             />
             {visibleBlockers.length > 0 ? (
@@ -397,7 +397,7 @@ export default function StudioPage({ novelId }: Props) {
             ) : (
               <Empty
                 image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description="当前没有 blocker，可以直接按推荐下一步推进。"
+                description="当前没有阻塞项，可以直接按推荐下一步推进。"
               />
             )}
           </section>

@@ -61,6 +61,8 @@ export interface RewriteAdaptivePolicy {
 export interface RewriteMiniReviewVerdict {
   improved: boolean
   needsHumanReview: boolean
+  /** 拦截仅由重写差异门触发（正文非空且相似度硬条件未命中），可走结构性自动重试与发布门短路 */
+  deltaDrivenOnly: boolean
   reason: string
   similarityToOriginal: number
   narrativeDelta: RewriteNarrativeDeltaReport
@@ -278,14 +280,16 @@ function buildRewriteDeltaChainScore(
     + (rewrittenHitRate >= 24 ? 12 : rewrittenHitRate >= 18 ? 7 : rewrittenHitRate >= 14 ? 2 : -14),
   )
   const findings: string[] = []
+  // 初稿与重写稿在该链上都几乎没有词面信号时（克制白描文风常见），链证据不可判定，不作为拦截依据
+  const chainSignalAvailable = originalHitRate >= 8 || rewrittenHitRate >= 8
 
-  if (structuralPressure && rewrittenHitRate < 14) {
+  if (structuralPressure && chainSignalAvailable && rewrittenHitRate < 14) {
     findings.push(`${label}证据密度仅 ${rewrittenHitRate}%，重写后仍缺少可见链条。`)
   }
-  if (structuralPressure && !hasEnoughRewrittenEvidence && !originalAlreadyDense && deltaRate < 3) {
+  if (structuralPressure && chainSignalAvailable && !hasEnoughRewrittenEvidence && !originalAlreadyDense && deltaRate < 3) {
     findings.push(`${label}增量仅 ${deltaRate}%，更像改词句而不是修结构。`)
   }
-  if (structuralPressure && surfaceRewriteSuspected && deltaRate < 3) {
+  if (structuralPressure && chainSignalAvailable && surfaceRewriteSuspected && deltaRate < 3) {
     findings.push(`${label}几乎没有新增结构证据，整体改动幅度也偏低。`)
   }
   if (structuralPressure && originalAlreadyDense && deltaRate < -6) {
@@ -339,10 +343,18 @@ function calculateActionVerbDeltaRate(originalContent: string, rewrittenContent:
 }
 
 function hasStructuralRewritePressure(summary: ReviewPrioritySummary, reviewNotes: ChapterReviewNotesLike): boolean {
-  return summary.topIssues.some((issue) => STRUCTURAL_REWRITE_SOURCES.has(issue.source))
-    || summary.deferredIssues.some((issue) => STRUCTURAL_REWRITE_SOURCES.has(issue.source) && issue.priority === 'high')
-    || reviewNotes.cost_resolution_state === 'evaporated'
-    || reviewNotes.reversal_support_state === 'forced'
+  if (reviewNotes.cost_resolution_state === 'evaporated' || reviewNotes.reversal_support_state === 'forced') {
+    return true
+  }
+  const structuralIssueCount = summary.topIssues
+    .filter((issue) => STRUCTURAL_REWRITE_SOURCES.has(issue.source))
+    .length
+    + summary.deferredIssues
+      .filter((issue) => STRUCTURAL_REWRITE_SOURCES.has(issue.source) && issue.priority === 'high')
+      .length
+  // 审校没有要求重写时，零散结构风险按润色处理，不触发强制结构差异门
+  if (!reviewNotes.rewrite_required) return structuralIssueCount >= 3
+  return structuralIssueCount >= 1
 }
 
 export function analyzeChapterReadingExperience(content: string): ChapterReadingExperienceScore {
@@ -772,13 +784,17 @@ export function buildRewriteMiniReviewVerdict(options: {
     reviewNotes: options.reviewNotes,
     similarityToOriginal,
   })
-  const needsHumanReview = Boolean(
+  const surfaceSimilarityTripped = Boolean(
     !options.rewrittenContent.trim()
     || (options.reviewPrioritySummary.requiresFullRewrite && similarityToOriginal >= 0.86)
-    || (options.reviewNotes.severity === 'high' && similarityToOriginal >= 0.8)
+    || (options.reviewNotes.severity === 'high' && similarityToOriginal >= 0.8),
+  )
+  const needsHumanReview = Boolean(
+    surfaceSimilarityTripped
     || narrativeDelta.status === 'fail'
     || (narrativeDelta.status === 'weak' && readingExperience.status === 'rewrite')
   )
+  const deltaDrivenOnly = needsHumanReview && !surfaceSimilarityTripped
   const improved = !needsHumanReview
     && similarityToOriginal < 0.8
     && narrativeDelta.status === 'pass'
@@ -804,9 +820,26 @@ export function buildRewriteMiniReviewVerdict(options: {
   return {
     improved,
     needsHumanReview,
+    deltaDrivenOnly,
     reason,
     similarityToOriginal,
     narrativeDelta,
     readingExperience,
   }
+}
+
+export function buildStructuralRepairDirective(delta: RewriteNarrativeDeltaReport): string {
+  if (delta.status === 'pass') return ''
+  return [
+    '【结构性修复指令（重写差异门未过，本轮必须改事件，不是改词句）】',
+    `上一轮重写与初稿相似度 ${delta.similarityToOriginal}，改动句比例 ${delta.changedSentenceRate}%，动作/结果锚点增量 ${delta.narrativeAnchorChangeRate}%。`,
+    delta.findings.length > 0
+      ? `差异门具体不通过项：\n${delta.findings.map((item) => `- ${item}`).join('\n')}`
+      : '',
+    '本轮硬性要求：',
+    '- 对照审校高优先项，至少改变 2 处事件走向、结果状态或代价落点（新增阻力、失败、暴露、损失或让步），并让后文自然承接这些变化。',
+    '- 冲突必须有正面交锋和明确结果，不允许停在气氛渲染和心理描写；每个主要场景以可见的状态变化收束。',
+    '- 主角每获得一次进展，同一场景内写出为此付出的代价或新增的风险。',
+    '- 不改变已确认的人物设定、世界规则和前文事实；结构修复以本章事件层为限。',
+  ].filter(Boolean).join('\n')
 }

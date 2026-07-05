@@ -48,7 +48,7 @@ describe('workflow next chapter readiness', () => {
     })
 
     expect(readiness.ready).toBe(false)
-    expect(readiness.label).toBe('先清 blocker')
+    expect(readiness.label).toBe('先清阻塞项')
   })
 
   it('marks the project as ready for the first chapter once structure anchors exist', () => {

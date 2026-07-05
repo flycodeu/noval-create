@@ -310,7 +310,8 @@ function listRelevantEvents(
   filters: { volumeId?: number; partId?: number } = {},
 ) {
   const db = getDb()
-  const chapterRows = db.select().from(chapters)
+  // 只取 id/章号做映射，避免长篇场景把全部章节正文加载进内存
+  const chapterRows = db.select({ id: chapters.id, chapterNum: chapters.chapterNum }).from(chapters)
     .where(eq(chapters.novelId, novelId))
     .orderBy(asc(chapters.chapterNum))
     .all()

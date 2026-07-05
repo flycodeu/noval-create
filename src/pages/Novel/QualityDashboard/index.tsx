@@ -3034,7 +3034,7 @@ function LanguageDriftDetails({ metrics }: { metrics?: LanguageDriftMetrics }) {
 
 function AntiAiRuleHitDetails({ hits }: { hits?: QualityDashboardData['chapterDetails'][number]['antiAiRuleHits'] }) {
   if (!hits || hits.length === 0) {
-    return <div className="quality-dashboard-page__detail-empty">本章没有持久化 AI 味命中</div>
+    return <div className="quality-dashboard-page__detail-empty">本章暂无 AI 味检测记录</div>
   }
 
   return (

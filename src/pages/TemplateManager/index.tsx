@@ -24,18 +24,37 @@ const TEMPLATE_USAGE: Record<string, {
     entry: '新建小说时的「文风模板」下拉框',
     appliedTo: 'AI 写正文、改写章节时的文风参考',
     cardMeta: '新建小说可选 · 文风参考',
-    fieldGuide: '推荐字段：perspective、sentence_style、emotion_style、dialogue_style、description_style、forbidden、example_tone。',
+    fieldGuide: '建议写清楚：叙事视角、句式风格、情绪表达、对话风格、描写风格、需要避免的写法。字段名直接用中文即可。',
     modalDescription: '选好这个文风模板后，AI 写正文时会照着它的风格来写，让全书文风保持统一。',
-    placeholder: '{\n  "perspective": "第三人称近距",\n  "sentence_style": "短句推进，少空泛总结",\n  "forbidden": ["空泛燃句", "模板化情绪"]\n}',
+    placeholder: '{\n  "叙事视角": "第三人称近距",\n  "句式风格": "短句推进，少空泛总结",\n  "避免": ["空泛燃句", "模板化情绪"]\n}',
   },
   world: {
     entry: '新建小说时的「世界模板」下拉框',
     appliedTo: 'AI 生成背景、写章节时的世界设定参考',
     cardMeta: '新建小说可选 · 世界设定参考',
-    fieldGuide: '推荐字段：time_period、technology_level、social_structure、common_elements、forbidden_elements。',
+    fieldGuide: '建议写清楚：时代背景、科技或力量水平、社会结构、常见元素、不允许出现的元素。字段名直接用中文即可。',
     modalDescription: '选好这个世界模板后，AI 会基于它来生成背景和写章节，让世界设定前后一致。',
-    placeholder: '{\n  "time_period": "当代",\n  "technology_level": "现代城市基础设施",\n  "common_elements": ["职场压力", "社交媒体"]\n}',
+    placeholder: '{\n  "时代背景": "当代",\n  "科技水平": "现代城市基础设施",\n  "常见元素": ["职场压力", "社交媒体"]\n}',
   },
+}
+
+const FIELD_KEY_LABELS: Record<string, string> = {
+  perspective: '叙事视角',
+  sentence_style: '句式风格',
+  emotion_style: '情绪表达',
+  dialogue_style: '对话风格',
+  description_style: '描写风格',
+  forbidden: '避免',
+  example_tone: '整体语气',
+  time_period: '时代背景',
+  technology_level: '科技水平',
+  social_structure: '社会结构',
+  common_elements: '常见元素',
+  forbidden_elements: '禁止元素',
+}
+
+function toFieldLabel(key: string) {
+  return FIELD_KEY_LABELS[key] || key
 }
 
 function summarizeTemplateContent(contentJson?: string) {
@@ -50,9 +69,10 @@ function summarizeTemplateContent(contentJson?: string) {
     return Object.entries(parsed)
       .slice(0, 3)
       .map(([key, value]) => {
-        if (Array.isArray(value)) return `${key}: ${value.slice(0, 3).join('、')}`
-        if (value && typeof value === 'object') return `${key}: ${Object.keys(value).slice(0, 3).join(' / ')}`
-        return `${key}: ${String(value ?? '').slice(0, 28)}`
+        const label = toFieldLabel(key)
+        if (Array.isArray(value)) return `${label}: ${value.slice(0, 3).join('、')}`
+        if (value && typeof value === 'object') return `${label}: ${Object.keys(value).map(toFieldLabel).slice(0, 3).join(' / ')}`
+        return `${label}: ${String(value ?? '').slice(0, 28)}`
       })
       .join(' · ')
   } catch {

@@ -54,6 +54,7 @@ import { throwUserFacingError } from '../utils/user-facing-error'
 import {
   collectQualityGuardrailFindings,
   formatQualityGuardrailSummary,
+  hasBlockingGuardrailFindings,
   shouldForceRepair,
 } from '../../src/shared/content-guardrails'
 import { buildChapterOptimizationQualityGate } from '../../src/shared/chapter-optimization-quality'
@@ -143,8 +144,10 @@ import {
   buildReviewPriorityPrompt,
   buildReviewPrioritySummary,
   buildRewriteMiniReviewVerdict,
+  buildStructuralRepairDirective,
   type ChapterReadingExperienceScore,
   type RewriteDeltaChainScore,
+  type RewriteMiniReviewVerdict,
   type RewriteNarrativeDeltaReport,
 } from './chapter-pipeline-policy.service'
 import { listPromptOverrides } from './prompt-override.service'
@@ -2300,8 +2303,18 @@ function buildGuardrailCriticalFixes(findings: ReturnType<typeof collectQualityG
   if (findings.some((finding) => finding.code === 'high_frequency_repetition')) {
     const repetitionFinding = findings.find((f) => f.code === 'high_frequency_repetition')
     if (repetitionFinding) {
-      fixes.push(`高频重复词组需替换：${repetitionFinding.excerpt}——用同义表达或删减来避免阅读疲劳。`)
+      fixes.push(`高频重复词组需替换：${repetitionFinding.excerpt}——重复的人名改用代词、称呼变化或动作主语省略，重复的描写词组换成不同观察角度，只在容易混淆时保留原名。`)
     }
+  }
+
+  if (findings.some((finding) => finding.code === 'paragraph_simile_stacking' || finding.code === 'double_metaphor_or_simile_stack')) {
+    const simileFinding = findings.find((f) => f.code === 'paragraph_simile_stacking' || f.code === 'double_metaphor_or_simile_stack')
+    fixes.push(`比喻连用过密${simileFinding?.excerpt ? `（${simileFinding.excerpt}）` : ''}：每段最多保留一处最有信息量的比喻，其余改成直接的动作、感官事实或后果。`)
+  }
+
+  if (findings.some((finding) => finding.code === 'ending_lonely_imagery')) {
+    const endingFinding = findings.find((f) => f.code === 'ending_lonely_imagery')
+    fixes.push(`章尾出现意象化孤独收尾模板${endingFinding?.excerpt ? `（"${endingFinding.excerpt}"）` : ''}：改成未完成的动作、新的风险或一句改变局势的对白，不要用画面抒情收章。`)
   }
 
   return fixes
@@ -2789,6 +2802,106 @@ function applyReadingExperienceToReviewNotes(
       readingExperience.summary,
       ...readingExperience.recommendations.slice(0, 3),
     ]),
+  }
+}
+
+const CHAPTER_WORD_FLOOR_RATIO = 0.8
+const CHAPTER_WORD_CEILING_RATIO = 1.5
+const CHAPTER_WORD_HARD_CEILING_RATIO = 1.8
+
+function countNarrativeWords(text: string): number {
+  const source = String(text || '')
+  return (source.match(/[一-鿿]/g) || []).length + (source.match(/\b[a-zA-Z]+\b/g) || []).length
+}
+
+/**
+ * 剥离模型输出正文开头自拟的章节标题行（如“第1章 残片”“# 标题”或与章题雷同的独立短行），
+ * 并返回检测到的自拟标题用于章题一致性校验。
+ */
+function stripChapterHeadingNoise(
+  content: string,
+  chapterNum: number,
+  chapterTitle: string,
+): { content: string; detectedTitle: string } {
+  const normalized = String(content || '').replace(/\r\n/g, '\n').trimStart()
+  const lines = normalized.split('\n')
+  let detectedTitle = ''
+  let index = 0
+  while (index < lines.length && index < 3) {
+    const line = lines[index].trim()
+    if (!line) {
+      index += 1
+      continue
+    }
+    const headingMatch = line.match(/^#{0,3}\s*第\s*[0-9一二三四五六七八九十百千]+\s*章\s*[·：:.\-—\s]*(.{0,30})$/u)
+    const markdownHeading = line.match(/^#{1,3}\s+(.{1,30})$/u)
+    const bareTitleRepeat = chapterTitle && line.length <= Math.max(chapterTitle.length + 2, 12) && line === chapterTitle
+    if (headingMatch) {
+      detectedTitle = (headingMatch[1] || '').trim() || detectedTitle
+      lines.splice(index, 1)
+      continue
+    }
+    if (markdownHeading || bareTitleRepeat) {
+      detectedTitle = detectedTitle || (markdownHeading ? markdownHeading[1].trim() : line)
+      lines.splice(index, 1)
+      continue
+    }
+    break
+  }
+  return {
+    content: lines.join('\n').trimStart(),
+    detectedTitle,
+  }
+}
+
+function buildTitleMismatchRisk(detectedTitle: string, chapterTitle: string, chapterNum: number): string {
+  if (!detectedTitle) return ''
+  const normalizedDetected = detectedTitle.replace(/\s+/g, '')
+  const normalizedTitle = String(chapterTitle || '').replace(/\s+/g, '')
+  if (!normalizedDetected || normalizedDetected === normalizedTitle) return ''
+  return `正文自拟标题“${detectedTitle}”与第${chapterNum}章章题“${chapterTitle}”不一致，已剥离；请确认章题与本章内容是否需要对齐。`
+}
+
+/**
+ * 字数带宽控制：低于 0.8x 要求补写，高于 1.5x 要求压缩（删低信息密度段落而不是删剧情），
+ * 高于 1.8x 升级为必须整改项。
+ */
+function applyWordBudgetToReviewNotes(
+  reviewNotes: ChapterReviewNotes,
+  content: string,
+  targetWords: number,
+): ChapterReviewNotes {
+  const target = Math.max(0, Math.round(targetWords || 0))
+  if (target < 300) return reviewNotes
+  const words = countNarrativeWords(content)
+  if (words === 0) return reviewNotes
+  const floor = Math.round(target * CHAPTER_WORD_FLOOR_RATIO)
+  const ceiling = Math.round(target * CHAPTER_WORD_CEILING_RATIO)
+  const hardCeiling = Math.round(target * CHAPTER_WORD_HARD_CEILING_RATIO)
+
+  if (words >= floor && words <= ceiling) return reviewNotes
+
+  if (words < floor) {
+    const directive = `正文 ${words} 字低于目标带宽下限 ${floor} 字（目标 ${target}），需要通过加深现场阻力、对白交锋和后果落点补足密度，不允许注水。`
+    return {
+      ...reviewNotes,
+      language_risks: dedupeTextList([...reviewNotes.language_risks, directive]),
+      revision_brief: appendRevisionBrief(reviewNotes.revision_brief, [directive]),
+      severity: mergeSeverity(reviewNotes.severity, 'medium'),
+    }
+  }
+
+  const overHard = words > hardCeiling
+  const directive = `正文 ${words} 字超出目标带宽上限 ${ceiling} 字（目标 ${target}），必须压缩：优先删除微动作细节堆叠、重复感官描写和无信息增量段落，保留全部事件、冲突结果与伏笔，压到 ${floor}-${ceiling} 字。`
+  return {
+    ...reviewNotes,
+    critical_fixes: overHard
+      ? dedupeTextList([directive, ...reviewNotes.critical_fixes])
+      : reviewNotes.critical_fixes,
+    language_risks: dedupeTextList([...reviewNotes.language_risks, directive]),
+    revision_brief: appendRevisionBrief(reviewNotes.revision_brief, [directive]),
+    severity: mergeSeverity(reviewNotes.severity, overHard ? 'high' : 'medium'),
+    rewrite_required: reviewNotes.rewrite_required || overHard,
   }
 }
 
@@ -5734,7 +5847,7 @@ export async function generateChapterContent(
       })
       failRoleTask('writer', writerTaskId, error, { blocked: true })
     }
-    const draftContent = await executeChatTask(writerTaskId, {
+    const draftContentRaw = await executeChatTask(writerTaskId, {
       type: 'chapter_writer',
       novelId: chapter.novelId,
       relatedEntityType: 'chapter',
@@ -5745,6 +5858,11 @@ export async function generateChapterContent(
       chatOpts: writerChatOpts,
       sender,
     })
+    const chapterTitleForCheck = chapter.title || getDefaultChapterTitle(chapter.chapterNum)
+    const draftHeading = stripChapterHeadingNoise(draftContentRaw, chapter.chapterNum, chapterTitleForCheck)
+    const draftContent = draftHeading.content
+    const draftTitleMismatchRisk = buildTitleMismatchRisk(draftHeading.detectedTitle, chapterTitleForCheck, chapter.chapterNum)
+    const chapterWordTarget = Number(chapter.targetWords) || 3000
     latestUsableDraft = draftContent.trim()
     if (latestUsableDraft) {
       updateChapter(chapterId, {
@@ -5909,6 +6027,13 @@ export async function generateChapterContent(
     reviewNotes = applyDialogueAnalysisToReviewNotes(reviewNotes, chapter.novelId, chapter.chapterNum, draftContent)
     reviewNotes = applyStyleComplianceToReviewNotes(reviewNotes, chapter.novelId, draftContent)
     reviewNotes = applyReadingExperienceToReviewNotes(reviewNotes, draftContent)
+    reviewNotes = applyWordBudgetToReviewNotes(reviewNotes, draftContent, chapterWordTarget)
+    if (draftTitleMismatchRisk) {
+      reviewNotes = {
+        ...reviewNotes,
+        title_alignment_risks: dedupeTextList([...reviewNotes.title_alignment_risks, draftTitleMismatchRisk]),
+      }
+    }
     reviewNotes = applyContractValidationToReviewNotes(reviewNotes, validateChapterContractDelivery({
       chapterId,
       content: draftContent,
@@ -6061,6 +6186,8 @@ export async function generateChapterContent(
       reviewPriorityPrompt,
       formatReviewNotes(reviewNotes),
     ].filter(Boolean).join('\n\n')
+    // 差异门失败后回灌的结构性修复指令；非空时随下一轮重写提示词下发
+    let structuralRepairDirective = ''
     const buildRewriteMessages = (attemptNumber = 1, rejectedDigests: string[] = []) => ([{
       role: 'user' as const,
       content: buildChapterRewritePrompt({
@@ -6100,7 +6227,7 @@ export async function generateChapterContent(
         structuralAlertsSummary,
         scenePlan: scenePlanText,
         draftContent: lockedParagraphContext.promptDraftContent,
-        reviewNotes: prioritizedReviewNotesText,
+        reviewNotes: [prioritizedReviewNotesText, structuralRepairDirective].filter(Boolean).join('\n\n'),
         lockedParagraphs: lockedParagraphContext.lockedParagraphs,
         activeThreads: rewriteContext.activeThreads,
         ...rewriteNarrativeFields,
@@ -6225,8 +6352,13 @@ export async function generateChapterContent(
       rewriteResult = rewriteRun.result
     }
 
+    const processRewriteOutcome = async (rewriteOutput: string): Promise<{
+      content: string
+      reviewNotes: ChapterReviewNotes
+      miniReview: RewriteMiniReviewVerdict
+    }> => {
     const protectedOutput = enforceLockedParagraphProtection(
-      rewriteResult.output,
+      rewriteOutput,
       lockedParagraphContext.lockedParagraphs,
       lockedParagraphContext.initialFallbackContent,
       reviewNotes,
@@ -6247,9 +6379,10 @@ export async function generateChapterContent(
       attemptNumber: rewriteAttemptNumber,
       rejectedDigests: rewriteRejectedDigests,
     })
+    const repairedContent = stripChapterHeadingNoise(repaired.content, chapter.chapterNum, chapterTitleForCheck).content
     const repairedHumanizedReviewNotes = applyHumanizationAnalysisToReviewNotes(
       repaired.reviewNotes,
-      repaired.content,
+      repairedContent,
       {
         chapterId,
         genre: profile.genre,
@@ -6261,20 +6394,25 @@ export async function generateChapterContent(
       repairedHumanizedReviewNotes,
       chapter.novelId,
       chapter.chapterNum,
-      repaired.content,
+      repairedContent,
     )
     const repairedStyleReviewNotes = applyStyleComplianceToReviewNotes(
       repairedReviewNotes,
       chapter.novelId,
-      repaired.content,
+      repairedContent,
     )
-    const repairedReadableReviewNotes = applyReadingExperienceToReviewNotes(
+    const repairedReadableReviewNotesBase = applyReadingExperienceToReviewNotes(
       repairedStyleReviewNotes,
-      repaired.content,
+      repairedContent,
+    )
+    const repairedReadableReviewNotes = applyWordBudgetToReviewNotes(
+      repairedReadableReviewNotesBase,
+      repairedContent,
+      chapterWordTarget,
     )
     const repairedContractReviewNotes = applyContractValidationToReviewNotes(repairedReadableReviewNotes, validateChapterContractDelivery({
       chapterId,
-      content: repaired.content,
+      content: repairedContent,
       reviewNotes: repairedReadableReviewNotes,
     }))
     const repairedGroundedReviewNotes = applyHistoricalGroundingToReviewNotes(repairedContractReviewNotes, {
@@ -6307,7 +6445,7 @@ export async function generateChapterContent(
       settingsJson: novel.settingsJson,
       scenePlanJson: chapter.scenePlanJson,
     })
-    const finalReviewNotes = applyLongWindowQualitySignalsToReviewNotes(repairedProvenanceReviewNotes, repaired.content, {
+    const finalReviewNotes = applyLongWindowQualitySignalsToReviewNotes(repairedProvenanceReviewNotes, repairedContent, {
       novelId: chapter.novelId,
       chapterNum: chapter.chapterNum,
       chapterId,
@@ -6318,7 +6456,7 @@ export async function generateChapterContent(
     const finalReviewPrioritySummary = buildReviewPrioritySummary(finalReviewNotes)
     const rewriteMiniReview = buildRewriteMiniReviewVerdict({
       originalContent: draftContent,
-      rewrittenContent: repaired.content,
+      rewrittenContent: repairedContent,
       reviewPrioritySummary: finalReviewPrioritySummary,
       reviewNotes: finalReviewNotes,
     })
@@ -6326,7 +6464,98 @@ export async function generateChapterContent(
       finalReviewNotes,
       rewriteMiniReview.narrativeDelta,
     )
-    latestUsableDraft = repaired.content.trim()
+    return {
+      content: repairedContent,
+      reviewNotes: finalReviewNotesWithRewriteDelta,
+      miniReview: rewriteMiniReview,
+    }
+    }
+
+    let rewriteOutcome = await processRewriteOutcome(rewriteResult.output)
+    // 差异门闭环：轻量复检拦截（差异门失败或相似度过高）时，把结论回灌给 Rewriter 自动做一轮结构性重写，而不是直接卡人工
+    if (rewriteOutcome.miniReview.needsHumanReview && rewriteOutcome.content.trim() && rewriteAttemptNumber < 3) {
+      structuralRepairDirective = buildStructuralRepairDirective(rewriteOutcome.miniReview.narrativeDelta)
+        || [
+          '【结构性修复指令（上一轮重写与初稿过于接近）】',
+          '本轮必须在保持事实连续性的前提下拉开与初稿的差异：重排至少一个场景的切入点，改变冲突交锋的走向或结果，补入可见代价或新增风险。',
+          '不允许仅替换措辞、调整语序或润色修辞。',
+        ].join('\n')
+      rewriteRejectedDigests = [...rewriteRejectedDigests, buildVariationDigest(rewriteResult.output)]
+      updateTask(rewriterTaskId, {
+        pipelineStage: 'success',
+        outputText: '重写差异门未通过，已带差异门结论自动发起结构性重写。',
+        contractVersion,
+      })
+      updateTaskStatus(rewriterTaskId, 'success', sender, {
+        pipelineStage: 'success',
+        outputText: '重写差异门未通过，已带差异门结论自动发起结构性重写。',
+        errorMessage: null,
+      })
+      previousRoleTaskId = rewriterTaskId
+      rewriteAttemptNumber = 3
+      rewriteRun = await runRewriterStreamAttempt(
+        rewriteAttemptNumber,
+        rewriteRejectedDigests,
+        'Rewriter 正在按差异门结论进行结构性重写。',
+      )
+      rewriterTaskId = rewriteRun.taskId
+      rewriteResult = rewriteRun.result
+      const retriedOutcome = await processRewriteOutcome(rewriteResult.output)
+      const retriedBetter = !retriedOutcome.miniReview.needsHumanReview
+        || (rewriteOutcome.miniReview.narrativeDelta.status === 'fail'
+          && retriedOutcome.miniReview.narrativeDelta.status !== 'fail')
+      if (retriedBetter) {
+        rewriteOutcome = retriedOutcome
+      }
+      structuralRepairDirective = ''
+    }
+    let repairedContent = rewriteOutcome.content
+    const finalReviewNotesWithRewriteDelta = rewriteOutcome.reviewNotes
+    const rewriteMiniReview = rewriteOutcome.miniReview
+    // 字数硬上限兜底：提示词带宽约束被忽视时，程序化触发一次压缩改写
+    const hardCeilingWords = Math.round(chapterWordTarget * CHAPTER_WORD_HARD_CEILING_RATIO)
+    if (chapterWordTarget >= 300 && countNarrativeWords(repairedContent) > hardCeilingWords) {
+      const floorWords = Math.round(chapterWordTarget * CHAPTER_WORD_FLOOR_RATIO)
+      const ceilingWords = Math.round(chapterWordTarget * CHAPTER_WORD_CEILING_RATIO)
+      console.warn(`[chapter:pipeline] 正文 ${countNarrativeWords(repairedContent)} 字超硬上限 ${hardCeilingWords}，触发压缩改写 chapter=${chapterId}`)
+      try {
+        const compressed = (await runChatTask({
+          type: 'chapter_write',
+          novelId: chapter.novelId,
+          relatedEntityType: 'chapter',
+          relatedEntityId: chapterId,
+          messages: [{
+            role: 'user',
+            content: [
+              `把下面这一章压缩到 ${floorWords}-${ceilingWords} 个汉字。`,
+              '要求：保留全部事件、冲突交锋、结果状态、伏笔与对白立场；优先删除微动作细节堆叠、重复感官描写、无信息增量的环境与心理段落。',
+              '不改变事件顺序和人物行为，不新增情节。只输出压缩后的正文，不要解释。',
+              `本章大纲：${chapter.outline || ''}`,
+              '',
+              '正文：',
+              repairedContent,
+            ].join('\n'),
+          }],
+          modelConfigId: novel.modelConfigId || undefined,
+        })).trim()
+        const strippedCompressed = stripChapterHeadingNoise(compressed, chapter.chapterNum, chapterTitleForCheck).content
+        const compressedWords = countNarrativeWords(strippedCompressed)
+        if (strippedCompressed && compressedWords >= floorWords && compressedWords < countNarrativeWords(repairedContent)) {
+          const protectedCompressed = enforceLockedParagraphProtection(
+            strippedCompressed,
+            lockedParagraphContext.lockedParagraphs,
+            repairedContent,
+            finalReviewNotesWithRewriteDelta,
+          )
+          if (!protectedCompressed.violated) {
+            repairedContent = protectedCompressed.content
+          }
+        }
+      } catch (error) {
+        console.warn(`[chapter:pipeline] 压缩改写失败，保留原稿 chapter=${chapterId}:`, error instanceof Error ? error.message : error)
+      }
+    }
+    latestUsableDraft = repairedContent.trim()
     latestReviewNotesJson = JSON.stringify(finalReviewNotesWithRewriteDelta)
     if (latestUsableDraft) {
       snapshot = {
@@ -6335,30 +6564,15 @@ export async function generateChapterContent(
         resumeSourceTaskId: rewriterTaskId,
       }
     }
-    if (rewriteMiniReview.needsHumanReview) {
-      failRoleTask('rewriter', rewriterTaskId, new ChapterPipelineStageError(
-        'human_review_required',
-        `重写轻量复检未通过：${rewriteMiniReview.reason}`,
-        {
-          blocked: true,
-          rewriteScope: rewritePolicy.rewriteScope,
-          outputText: buildPipelineFailureOutput(
-            'human_review_required',
-            `重写轻量复检未通过：${rewriteMiniReview.reason}`,
-            { rewriteScope: rewritePolicy.rewriteScope },
-          ),
-        },
-      ), { blocked: true })
-    }
     persistAntiAiRuleHits({
       novelId: chapter.novelId,
       chapterId,
       chapterNum: chapter.chapterNum,
-      content: repaired.content,
+      content: repairedContent,
       genre: profile.genre,
     })
-    const remainingGuardrailFindings = collectQualityGuardrailFindings(repaired.content, profile.genre)
-    if (remainingGuardrailFindings.length > 0 && shouldForceRepair(remainingGuardrailFindings)) {
+    const remainingGuardrailFindings = collectQualityGuardrailFindings(repairedContent, profile.genre)
+    if (remainingGuardrailFindings.length > 0 && hasBlockingGuardrailFindings(remainingGuardrailFindings)) {
       failRoleTask('rewriter', rewriterTaskId, new ChapterPipelineStageError(
         'anti_ai_failed',
         'Rewriter 二次修复后仍存在高风险 AI 味或模板化表达，需人工介入复核。',
@@ -6374,7 +6588,7 @@ export async function generateChapterContent(
     }
 
     updateChapter(chapterId, {
-      content: repaired.content,
+      content: repairedContent,
       reviewNotesJson: latestReviewNotesJson,
       status: 'draft',
     }, {
@@ -6382,7 +6596,7 @@ export async function generateChapterContent(
       versionSource: false,
     })
     hasCommittedContent = true
-    const publishCheck = runChapterPublishCheck(chapterId)
+    const publishCheck = runChapterPublishCheck(chapterId, { phase: 'pipeline' })
     const chapterExpressionDedup = analyzeExpressionDedupForChapter(chapterId)
     const chapterHookContinuity = buildHookContinuitySnapshot(
       chapterId,
@@ -6398,6 +6612,32 @@ export async function generateChapterContent(
     const publishCheckFailureMeta = getPublishCheckRewriteFailureMeta(publishCheck)
     syncFeedbackRecurrenceState(chapter.novelId)
     syncDialogueDriftRevisionTasks(chapter.novelId)
+    if (rewriteMiniReview.needsHumanReview) {
+      // 发布门短路：仅差异门触发的拦截，且发布门 ready、读感非重写级时，按误报降级为警告放行
+      const bypassRewriteDeltaBlock = rewriteMiniReview.deltaDrivenOnly
+        && publishCheck.ready
+        && publishCheck.gateLevel !== 'rewrite'
+        && rewriteMiniReview.readingExperience?.status !== 'rewrite'
+      if (bypassRewriteDeltaBlock) {
+        console.warn(
+          `[chapter:pipeline] 差异门拦截被发布门短路放行 chapter=${chapterId}：${rewriteMiniReview.reason}`,
+        )
+      } else {
+        failRoleTask('rewriter', rewriterTaskId, new ChapterPipelineStageError(
+          'human_review_required',
+          `重写轻量复检未通过：${rewriteMiniReview.reason}`,
+          {
+            blocked: true,
+            rewriteScope: rewritePolicy.rewriteScope,
+            outputText: buildPipelineFailureOutput(
+              'human_review_required',
+              `重写轻量复检未通过：${rewriteMiniReview.reason}`,
+              { rewriteScope: rewritePolicy.rewriteScope },
+            ),
+          },
+        ), { blocked: true })
+      }
+    }
     if (publishCheck.gateLevel === 'rewrite') {
       failRoleTask('rewriter', rewriterTaskId, new ChapterPipelineStageError(
         'gate_rewrite_required',
@@ -6439,7 +6679,7 @@ export async function generateChapterContent(
     finishRoleTask('rewriter', rewriterTaskId, '正文已完成重写，准备生成 Canon 差异草案。')
     snapshot = {
       ...snapshot,
-      partialContent: repaired.content,
+      partialContent: repairedContent,
       resumeReason: undefined,
       resumeSourceTaskId: rewriterTaskId,
     }
@@ -6483,7 +6723,7 @@ export async function generateChapterContent(
       contractVersion,
       canonRunId: canonRun.id,
     })
-    const result = await finalizeGeneratedChapterContent(chapterId, repaired.content)
+    const result = await finalizeGeneratedChapterContent(chapterId, repairedContent)
     scheduleDialogueFingerprintRefresh(chapter.novelId, novel?.modelConfigId || undefined)
 
     const chapterRecord = getChapter(chapterId)

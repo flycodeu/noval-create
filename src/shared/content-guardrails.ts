@@ -528,11 +528,63 @@ function collectHighFrequencyRepetitions(text: string): TextGuardrailFinding | n
 
   if (repeated.length === 0) return null
 
+  // 按千字密度分级：同一词组每千字出现 9 次以上视为必须修复
+  const perThousand = (count: number) => (count * 1000) / Math.max(text.length, 1)
+  const maxDensity = Math.max(...repeated.map(([, count]) => perThousand(count)))
+
   return {
     code: 'high_frequency_repetition',
-    severity: repeated.some(([, count]) => count >= 6) ? 'medium' : 'low',
+    severity: maxDensity >= 9 ? 'high' : maxDensity >= 5 ? 'medium' : 'low',
     message: '某些描写词组在本章中高频重复出现，建议替换为同义表达或删减。',
     excerpt: repeated.map(([phrase, count]) => `"${phrase}"×${count}`).join('、'),
+  }
+}
+
+const SIMILE_MARKER_PATTERN = /像|仿佛|宛如|好似|好像|如同|恍若|犹如/gu
+
+function collectParagraphSimileStacking(text: string): TextGuardrailFinding | null {
+  const paragraphs = text.split(/\n+/).map((item) => item.trim()).filter((item) => item.length >= 30)
+  if (paragraphs.length === 0) return null
+
+  const stackedParagraphs: Array<{ excerpt: string; count: number }> = []
+  let denseParagraphCount = 0
+  for (const paragraph of paragraphs) {
+    const count = (paragraph.match(SIMILE_MARKER_PATTERN) || []).length
+    if (count >= 3) {
+      stackedParagraphs.push({ excerpt: paragraph.slice(0, 24), count })
+    } else if (count === 2 && paragraph.length <= 120) {
+      denseParagraphCount += 1
+    }
+  }
+
+  if (stackedParagraphs.length === 0 && denseParagraphCount < 2) return null
+
+  const worst = stackedParagraphs.sort((left, right) => right.count - left.count)[0]
+  return {
+    code: 'paragraph_simile_stacking',
+    severity: stackedParagraphs.some((item) => item.count >= 4) || stackedParagraphs.length >= 2 ? 'high' : 'medium',
+    message: '同一段落里比喻连用过密，修辞在替代具体叙事信息。',
+    excerpt: worst
+      ? `"${worst.excerpt}…"段内比喻×${worst.count}`
+      : `${denseParagraphCount} 个短段各含 2 处比喻`,
+  }
+}
+
+const ENDING_LONELY_IMAGERY_PATTERN = /影子(?:被)?(?:拉得|拉长|拖得)(?:很长|细长|老长)?|(?:月光|夕阳|晨光|路灯)(?:落|洒|照|映)在|背影.{0,10}(?:消失|拉长|渐远|模糊)|(?:前方的)?路还(?:很长|长)|(?:他|她)知道.{0,14}(?:才刚刚开始|路还|还没有结束)|(?:细长|漫长)而孤独|孤独地(?:走|站|立)|夜色(?:里|中)(?:只剩|独自)/u
+
+function collectEndingLonelyImagery(text: string): TextGuardrailFinding | null {
+  const paragraphs = text.split(/\n+/).map((item) => item.trim()).filter(Boolean)
+  if (paragraphs.length < 2) return null
+
+  const tail = paragraphs.slice(-2).join('\n')
+  const match = tail.match(ENDING_LONELY_IMAGERY_PATTERN)
+  if (!match) return null
+
+  return {
+    code: 'ending_lonely_imagery',
+    severity: 'medium',
+    message: '章尾用"影子拉长/月光落在/路还很长"这类意象化孤独收尾，是高频生成模板。',
+    excerpt: match[0].slice(0, 30),
   }
 }
 
@@ -567,9 +619,11 @@ function collectDensityGuardrailFindings(text: string): TextGuardrailFinding[] {
   }
 
   if (bodyDetailCount >= 5 || bodyDetailCount / sentenceCount >= 0.22) {
+    // 按篇幅归一化：绝对次数高但密度正常的长章节不升 high（剧情功能词如“掌心”会天然高频）
+    const bodyDetailDensityPerThousand = (bodyDetailCount * 1000) / Math.max(text.length, 1)
     findings.push({
       code: 'low_value_body_detail',
-      severity: bodyDetailCount >= 9 ? 'high' : 'medium',
+      severity: bodyDetailCount >= 9 && bodyDetailDensityPerThousand >= 9 ? 'high' : 'medium',
       message: '手、眼、声音等低价值细节密度偏高，需要改成行动、阻力或后果。',
       excerpt: `手眼声音细节×${bodyDetailCount}`,
     })
@@ -599,6 +653,37 @@ export function getBuiltinAntiAiPromptRules(genre?: string): AntiAiPromptRule[] 
   return [...deduped.values()]
 }
 
+// 爽文系题材：读者以节拍兑现为核心预期，文风必须与写实系拉开
+const PACING_ESCALATION_GENRE_KEYS = new Set(['fantasy', 'xianxia', 'urban-ability', 'western-fantasy', 'wuxia'])
+
+/**
+ * 题材节拍硬约束：按题材分化叙事节奏与微动作细节预算，防止所有题材写成同一支笔。
+ * 注入 Writer/Rewriter 硬约束区。
+ */
+export function buildGenrePacingGuidance(genre?: string): string {
+  const genreKey = getBuiltinGenreRules(genre).genreProfile.key
+  const shared = [
+    '微动作细节预算：手/手指/掌心/眼/瞳孔/喉咙/声音很轻这类身体细节，每千字不超过 6 处；同一细节（如握拳、松手、抬头）一章内最多出现 2 次，重复时改写成动作阻力、关系压力或后果。',
+    '每个场景必须有信息增量：新事实、新阻力、关系变化或状态变化至少一项；一段只有气氛和微表情就删掉或合并。',
+  ]
+  if (PACING_ESCALATION_GENRE_KEYS.has(genreKey)) {
+    return [
+      '本书属于强节拍类型（升级流/爽文谱系），节奏优先于氛围：',
+      '- 事件密度：每章至少 2 个可见事件节点（冲突交锋、进展兑现、危机升级或信息揭露），不许整章只写一次内心波动。',
+      '- 爽点兑现节拍：每章至少一次读者可感的进展或反击兑现（实力、资源、信息、地位、关系任一），兑现要有在场者的即时反应，不许只写主角自我确认。',
+      '- 兑现必有代价或新钩子：每次进展同场景写出付出的代价或引来的新压力，结尾钩子必须指向下一个具体冲突。',
+      '- 叙事速度：白描和心理段单段不超过 120 字就要回到动作或对白；对峙场面用短兵相接的交锋句推进，不用长段静态观察。',
+      ...shared.map((line) => '- ' + line),
+    ].join('\n')
+  }
+  return [
+    '本书属于写实叙事类型，允许克制白描，但每章仍要有可感推进：',
+    '- 每章至少 1 处冲突交锋或不可逆的状态变化，不许整章停在情绪和环境里。',
+    '- 静态描写必须携带信息：环境、器物、身体细节要能反映人物处境或时代质感，纯氛围段落合并或删除。',
+    ...shared.map((line) => '- ' + line),
+  ].join('\n')
+}
+
 export function collectQualityGuardrailFindings(text: string, genre?: string): TextGuardrailFinding[] {
   const content = text.trim()
   if (!content) return []
@@ -616,11 +701,15 @@ export function collectQualityGuardrailFindings(text: string, genre?: string): T
   const genreFinding = collectGenreHollowingFinding(content, genre)
   const repetitionFinding = collectHighFrequencyRepetitions(content)
   const densityFindings = collectDensityGuardrailFindings(content)
+  const simileStackingFinding = collectParagraphSimileStacking(content)
+  const endingImageryFinding = collectEndingLonelyImagery(content)
   const allFindings = [
     ...patternFindings,
     ...(genreFinding ? [genreFinding] : []),
     ...(repetitionFinding ? [repetitionFinding] : []),
     ...densityFindings,
+    ...(simileStackingFinding ? [simileStackingFinding] : []),
+    ...(endingImageryFinding ? [endingImageryFinding] : []),
   ]
 
   return dedupeFindings(allFindings).slice(0, 8)
@@ -630,6 +719,27 @@ export function shouldForceRepair(findings: TextGuardrailFinding[]): boolean {
   const highCount = findings.filter((finding) => finding.severity === 'high').length
   const mediumCount = findings.filter((finding) => finding.severity === 'medium').length
   return highCount > 0 || mediumCount >= 2
+}
+
+// 风格密度类命中：应持续施加修复压力并进入审校意见，但不单独构成流水线硬阻断
+const STYLE_DENSITY_FINDING_CODES = new Set([
+  'low_value_body_detail',
+  'dash_abuse',
+  'high_frequency_repetition',
+  'parenthetical_explanation_abuse',
+  'paragraph_simile_stacking',
+  'eye_open_close_standalone_paragraph',
+])
+
+/**
+ * 修复轮次跑完后是否仍需硬阻断流水线：
+ * 只有非风格密度类的高危命中（提示词泄漏、格式噪音、ID 污染等），
+ * 或风格密度类高危命中堆积到 3 条以上，才值得停线转人工。
+ */
+export function hasBlockingGuardrailFindings(findings: TextGuardrailFinding[]): boolean {
+  const highFindings = findings.filter((finding) => finding.severity === 'high')
+  if (highFindings.some((finding) => !STYLE_DENSITY_FINDING_CODES.has(finding.code))) return true
+  return highFindings.length >= 3
 }
 
 export function formatQualityGuardrailSummary(findings: TextGuardrailFinding[]): string[] {

@@ -593,7 +593,7 @@ export default function PromptManager() {
           scrollable
           className="prompt-manager-catalog"
           title="链路目录"
-          description="先按生产阶段筛，再进具体模板。目录中的覆盖标记表示这条 prompt 已被本地改写。"
+          description="先按生产阶段筛，再进具体模板。目录中的覆盖标记表示这条提示词已被本地改写。"
           extra={(
             <div className="prompt-manager-filter-group">
               {PROMPT_CATEGORIES.map((category) => (
@@ -760,7 +760,7 @@ export default function PromptManager() {
                     <div className="prompt-manager-inspector-section">
                       <div className="prompt-manager-inspector-section__title">系统保留规则</div>
                       <div className="prompt-manager-inspector-section__copy">
-                        这类章节级 prompt 即使被运行时覆盖，服务层仍会追加不可覆盖规则，并写入 override 审计记录。
+                        这类章节级提示词即使被自定义覆盖，系统仍会自动追加不可覆盖的保底规则，并记录覆盖历史。
                       </div>
                       <div className="prompt-manager-param-list">
                         {PROTECTED_PROMPT_RULES.map((rule) => (
@@ -792,7 +792,7 @@ export default function PromptManager() {
         destroyOnHidden
       >
         <div style={{ marginBottom: 12, color: 'var(--color-text-secondary)', fontSize: 12 }}>
-          保存后会直接影响后端运行时 prompt。使用 `{`参数名`}` 可以引用上下文字段。
+          保存后新的提示词会立即在生成时生效。使用 `{`参数名`}` 可以引用上下文字段。
         </div>
         <div style={{ marginBottom: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {selectedPromptRow?.prompt.params.map((param) => (

@@ -26,6 +26,7 @@ import {
   type StoryWritingRulesSettings,
 } from '../../src/shared/story-settings'
 import { buildThemeVoiceSummary, parseThemeVoiceDocument } from '../../src/shared/theme-voice'
+import { buildGenrePacingGuidance } from '../../src/shared/content-guardrails'
 import { buildWritingContractSummary } from '../../src/shared/writing-contract'
 import { getOperatingModePolicy, getOperatingModeRuntimePolicy } from '../../src/shared/operating-mode'
 import { buildStoryMemoryPromptPackage } from './story-memory.service'
@@ -164,6 +165,7 @@ export type HardConstraintSourceLabel =
   | 'feedbackRecurrence'
   | 'antiAiRules'
   | 'styleHardGuard'
+  | 'genrePacing'
 
 export interface BuildChapterContextOptions {
   totalBudget?: number
@@ -847,6 +849,7 @@ function computeHardConstraintRelevance(
     feedbackRecurrence: 54,
     antiAiRules: 48,
     styleHardGuard: 44,
+    genrePacing: 50,
   }
   const signalTerms = buildConstraintSignalTerms(rawData)
   const signalScore = signalTerms.reduce((sum, term) => {
@@ -966,6 +969,11 @@ function buildHardConstraintDrafts(
       label: 'styleHardGuard',
       title: '文风硬约束',
       content: styleHardGuardText,
+    },
+    {
+      label: 'genrePacing',
+      title: '题材节拍硬约束',
+      content: buildGenrePacingGuidance(rawData.profile.genre),
     },
     {
       label: 'antiAiRules',
@@ -2393,10 +2401,30 @@ function allocateTokens(parts: ContextPart[], totalBudget: number): TokenAllocat
   }
 
   let budget = remaining
+  // 关键 P1 上下文保底：审校/重写高度依赖前情摘要与对白声纹锁，预算紧张时至少保留压缩版，不允许整体丢弃
+  const criticalP1Floors: Record<string, number> = {
+    previousSummaries: 320,
+    dialogueVoiceLocks: 160,
+  }
+  const floorReserves = new Map<string, number>()
+  for (const part of parts.filter((item) => item.priority === 1)) {
+    const floor = criticalP1Floors[part.label]
+    if (!floor) continue
+    const needed = estimateTokens(part.content)
+    if (needed <= 0) continue
+    const reserve = Math.min(floor, needed, Math.max(budget, 0))
+    if (reserve > 0) {
+      floorReserves.set(part.label, reserve)
+      budget -= reserve
+    }
+  }
   for (const priority of [1, 2, 3] as const) {
     for (const part of parts.filter((item) => item.priority === priority)) {
       const needed = estimateTokens(part.content)
-      if (budget <= 0) {
+      const reserve = floorReserves.get(part.label) || 0
+      if (reserve > 0) floorReserves.delete(part.label)
+      const available = budget + reserve
+      if (available <= 0) {
         result[part.label] = ''
         if (needed > 0) {
         decisions.set(part.label, {
@@ -2411,7 +2439,7 @@ function allocateTokens(parts: ContextPart[], totalBudget: number): TokenAllocat
         })
           warnings.push({ label: part.label, priority, originalTokens: needed, allocatedTokens: 0, reason: 'dropped' })
         }
-      } else if (needed <= budget) {
+      } else if (needed <= available) {
         result[part.label] = part.content
         decisions.set(part.label, {
           label: part.label,
@@ -2423,9 +2451,9 @@ function allocateTokens(parts: ContextPart[], totalBudget: number): TokenAllocat
           reason: 'budget_fit',
           sourceKind: resolveContextSourceKind(part.label),
         })
-        budget -= needed
+        budget = available - needed
       } else {
-        result[part.label] = truncateToTokens(part.content, budget)
+        result[part.label] = truncateToTokens(part.content, available)
         const allocatedTokens = estimateTokens(result[part.label])
         decisions.set(part.label, {
           label: part.label,
@@ -2769,23 +2797,49 @@ function formatStyleTemplateSummary(contentJson?: string | null): string {
   if (Object.keys(content).length === 0) return ''
 
   const lines: string[] = []
-  const fields: Array<[string, string]> = [
-    ['perspective', '视角'],
-    ['sentence_style', '句式'],
-    ['emotion_style', '情感表达'],
-    ['dialogue_style', '对话风格'],
-    ['description_style', '描写风格'],
-    ['example_tone', '整体语气'],
+  const fields: Array<[string[], string]> = [
+    [['perspective', '视角', '叙事视角'], '视角'],
+    [['sentence_style', '句式', '句式风格'], '句式'],
+    [['emotion_style', '情感表达', '情绪表达'], '情感表达'],
+    [['dialogue_style', '对话风格'], '对话风格'],
+    [['description_style', '描写风格', '描写方式'], '描写风格'],
+    [['example_tone', '整体语气', '示例语气'], '整体语气'],
   ]
 
-  for (const [key, label] of fields) {
-    const value = asText(content[key])
-    if (value) lines.push(`${label}：${value}`)
+  const usedKeys = new Set<string>()
+  for (const [aliases, label] of fields) {
+    for (const alias of aliases) {
+      const value = asText(content[alias])
+      if (value) {
+        lines.push(`${label}：${value}`)
+        usedKeys.add(alias)
+        break
+      }
+    }
   }
 
-  const forbidden = toStringArray(content.forbidden)
-  if (forbidden.length > 0) {
-    lines.push(`避免：${forbidden.slice(0, 5).join('、')}`)
+  const forbiddenAliases = ['forbidden', '避免', '禁用', '禁止出现']
+  for (const alias of forbiddenAliases) {
+    const forbidden = toStringArray(content[alias])
+    if (forbidden.length > 0) {
+      lines.push(`避免：${forbidden.slice(0, 5).join('、')}`)
+      usedKeys.add(alias)
+      break
+    }
+  }
+
+  // 用户自定义的其他字段也带入文风摘要，避免自建模板内容被静默丢弃
+  for (const [key, rawValue] of Object.entries(content)) {
+    if (usedKeys.has(key)) continue
+    const value = asText(rawValue)
+    if (value) {
+      lines.push(`${key}：${value}`)
+      continue
+    }
+    const items = toStringArray(rawValue)
+    if (items.length > 0) {
+      lines.push(`${key}：${items.slice(0, 5).join('、')}`)
+    }
   }
 
   return lines.join('\n')
@@ -3502,8 +3556,29 @@ function buildDueForeshadowContext(
     ].filter(Boolean).join(' · '), 120))
     .filter(Boolean)
 
-  return [...ledgerLines, ...threadLines]
-    .slice(0, limit)
+  // 长期悬置通道：没填目标回收章、但埋设已超过阈值的伏笔，周期性浮出提醒安排回收，
+  // 避免长篇（几十万到百万字）里"无目标章"的伏笔被永久遗忘。
+  const STALE_FORESHADOW_CHAPTER_GAP = 40
+  const staleLedgerLines = listForeshadowLedger(novelId)
+    .filter((entry) => entry.status !== 'resolved' && entry.status !== 'archived')
+    .filter((entry) => !(typeof entry.targetPayoffChapter === 'number' && entry.targetPayoffChapter > 0))
+    .filter((entry) => typeof entry.sourceChapterNum === 'number'
+      && entry.sourceChapterNum > 0
+      && chapterNum - entry.sourceChapterNum >= STALE_FORESHADOW_CHAPTER_GAP)
+    .sort((left, right) => (left.sourceChapterNum || 0) - (right.sourceChapterNum || 0))
+    .slice(0, 2)
+    .map((entry) => compactRecallLine([
+      '长期悬置待安排回收',
+      entry.title,
+      `埋设=第${entry.sourceChapterNum}章（已悬置${chapterNum - (entry.sourceChapterNum || 0)}章）`,
+      entry.payoffMethod ? `回收=${entry.payoffMethod}` : '',
+      '本章至少要给出推进线索或明确回收章位',
+    ].filter(Boolean).join(' · '), 120))
+    .filter(Boolean)
+
+  const dueLines = [...ledgerLines, ...threadLines].slice(0, limit)
+  // 悬置伏笔不挤占到期/超期名额：至多额外附加 1 条
+  return [...dueLines, ...staleLedgerLines.slice(0, Math.max(1, limit - dueLines.length))]
     .join('\n')
 }
 

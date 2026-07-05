@@ -16,7 +16,6 @@ import {
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
-  DatabaseOutlined,
   DeleteOutlined,
   EditOutlined,
   PlusOutlined,
@@ -440,7 +439,7 @@ export default function ModelManager() {
         heroVariant="compact"
         eyebrow="模型 / 检索"
         title="模型与搜索管理"
-        description="维护模型、检索 Key 和连接测试。"
+        description="管理 AI 模型接入、联网检索和连接测试。"
         actions={(
           <div className="admin-toolbar">
             <div className="novel-pill">{`已配置 ${configs.length} 套模型，默认 ${defaultCount} 套`}</div>
@@ -466,15 +465,6 @@ export default function ModelManager() {
           </>
         )}
       >
-        <Alert
-          className="model-manager-database-alert"
-          type="info"
-          showIcon
-          icon={<DatabaseOutlined />}
-          message="当前配置写入数据库"
-          description="模型配置和检索 Key 已持久化保存。"
-        />
-
         <div className="model-manager-layout">
           <WorkspacePanel
             scrollable
@@ -544,7 +534,7 @@ export default function ModelManager() {
           <WorkspacePanel
             className="model-manager-overview-panel"
             title="当前状态"
-            description="保存后会立刻从数据库刷新读取。"
+            description="查看选中模型的关键参数和连接状态。"
             extra={<Button icon={<SearchOutlined />} onClick={openSourceEditor}>配置搜索 API</Button>}
           >
             {selected ? (
@@ -555,7 +545,7 @@ export default function ModelManager() {
                     <strong>{selected.name}</strong>
                   </div>
                   <div className="source-search-config__status">
-                    <span>Provider</span>
+                    <span>提供商</span>
                     <strong>{PROVIDER_OPTIONS.find((item) => item.value === selected.provider)?.label || selected.provider}</strong>
                   </div>
                   <div className="source-search-config__status">
@@ -622,7 +612,7 @@ export default function ModelManager() {
                   <strong>{getSourceProviderLabel(sourceSettings?.provider)}</strong>
                 </div>
                 <div className="source-search-config__status">
-                  <span>运行 provider</span>
+                  <span>实际使用来源</span>
                   <strong>{activeSourceLabel}</strong>
                 </div>
                 <div className="source-search-config__status">
@@ -744,7 +734,7 @@ export default function ModelManager() {
           </Form.Item>
 
           {(selectedProvider === 'openai' || selectedProvider === 'custom' || selectedProvider === 'deepseek' || selectedProvider === 'kimi') && (
-            <Form.Item name="baseUrl" label="Base URL">
+            <Form.Item name="baseUrl" label="接口地址（Base URL）">
               <Input
                 placeholder={
                   selectedProvider === 'custom'
@@ -762,7 +752,7 @@ export default function ModelManager() {
           {selectedProvider === 'kimi' && (
             <Form.Item
               name="kimiThinking"
-              label="Kimi Thinking"
+              label="Kimi 思考模式"
               extra="默认禁用，降低连接测试和正文生成的不确定成本；需要模型显式思考时可开启。"
             >
               <Select
@@ -777,7 +767,7 @@ export default function ModelManager() {
           <div className="admin-form-grid admin-form-grid--three">
             <Form.Item
               name="temperature"
-              label="Temperature（创造性）"
+              label="创造性（Temperature）"
               extra={fixedTemperatureKimiModel ? 'Kimi K2.x 使用固定采样参数，运行时会忽略此项。' : undefined}
             >
               <Slider disabled={fixedTemperatureKimiModel} min={0} max={1} step={0.05} marks={{ 0: '0', 0.5: '0.5', 1: '1' }} />
@@ -785,7 +775,7 @@ export default function ModelManager() {
 
             <Form.Item
               name="maxTokens"
-              label="Max Tokens（最大输出长度）"
+              label="最大输出长度（Max Tokens）"
               extra={selectedProvider === 'deepseek'
                 ? 'DeepSeek V4 当前最大输出长度为 384K。这里控制单次回复最多可生成多少 Token。'
                 : '控制单次回复最多可生成多少 Token。实际可用上限仍取决于模型提供方。'}
@@ -800,7 +790,7 @@ export default function ModelManager() {
                 ? 'DeepSeek V4 当前上下文窗口为 1M。通常应大于等于最大输出长度。'
                 : selectedProvider === 'kimi'
                   ? 'Kimi K2.x 按 256K 预估；Moonshot v1 按模型名使用 8K/32K/128K。'
-                  : `留空时使用当前 provider 默认窗口：${formatTokenBudget(selectedDefaultContextWindow)}。`}
+                  : `留空时使用该提供商的默认上下文长度：${formatTokenBudget(selectedDefaultContextWindow)}。`}
             >
               <InputNumber
                 min={2048}
@@ -880,7 +870,7 @@ export default function ModelManager() {
 
           <Form form={sourceForm} layout="vertical" className="admin-source-form">
             <div className="admin-form-grid admin-form-grid--source">
-              <Form.Item name="provider" label="检索 provider" initialValue="auto">
+              <Form.Item name="provider" label="检索来源" initialValue="auto">
                 <Select options={SOURCE_PROVIDER_OPTIONS} />
               </Form.Item>
               <Form.Item

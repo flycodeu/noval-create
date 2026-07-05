@@ -841,7 +841,7 @@ export default function TaskCenter() {
                   type="info"
                   showIcon
                   message="当前任务不支持安全重试"
-                  description="这类任务会直接改动数据库状态，不能只靠重放原始 prompt 再跑一遍。请回到对应功能页重新发起。"
+                  description="这类任务会直接改动小说数据，不能在这里简单重试。请回到对应功能页重新发起。"
                 />
               ) : null}
 

@@ -688,7 +688,7 @@ export default function VolumeDesignPage({ novelId }: Props) {
         )}
       </WorkspacePanel>
 
-      <WorkspacePanel title="硬约束同步回执" description="把卷级目标同步到本卷章节合同的 requiredAssetRefs 与 acceptanceNotes。">
+      <WorkspacePanel title="硬约束同步回执" description="把卷级目标同步到本卷各章节合同的必用资产与验收要点里。">
         {lastSyncResult ? (
           <Space direction="vertical" className="workspace-full-width" size={12}>
             <Alert

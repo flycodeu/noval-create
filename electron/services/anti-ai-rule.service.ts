@@ -134,6 +134,8 @@ const RULE_SCOPE_FALLBACK: Record<string, AntiAiRuleHitScope> = {
   parenthetical_explanation_abuse: 'sentence',
   not_but_definition_pattern: 'sentence',
   double_metaphor_or_simile_stack: 'expression',
+  paragraph_simile_stacking: 'expression',
+  ending_lonely_imagery: 'structure',
   parallelism_overuse: 'sentence',
   low_value_body_detail: 'sentence',
   eye_open_close_standalone_paragraph: 'sentence',
@@ -313,6 +315,18 @@ const RULE_DESCRIPTOR_MAP: Record<string, AntiAiRuleDescriptor> = {
     scope: 'expression',
     avoid: '不要连续写“像……又像……”“仿佛……又仿佛……”等双重比喻。',
     prefer: '只保留一个真正有信息量的感官落点。',
+  },
+  paragraph_simile_stacking: {
+    title: '同段多比喻堆叠',
+    scope: 'expression',
+    avoid: '不要在同一段里连用三处以上“像/仿佛/宛如”式比喻。',
+    prefer: '每段最多保留一处最有信息量的比喻，其余改成直接的动作和感官事实。',
+  },
+  ending_lonely_imagery: {
+    title: '章尾意象化孤独收尾',
+    scope: 'structure',
+    avoid: '不要用“影子拉得细长/月光落在身上/路还很长”这类意象化孤独画面收章。',
+    prefer: '用未完成的动作、新出现的风险或一句改变局势的对白收章。',
   },
   parallelism_overuse: {
     title: '排比堆叠',

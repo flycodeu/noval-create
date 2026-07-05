@@ -2064,6 +2064,7 @@ export type HardConstraintSourceLabel =
   | 'feedbackRecurrence'
   | 'antiAiRules'
   | 'styleHardGuard'
+  | 'genrePacing'
 
 export interface HardConstraintEntryPreview {
   label: HardConstraintSourceLabel

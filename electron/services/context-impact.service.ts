@@ -180,6 +180,18 @@ function parseUnknownStringArray(value: unknown): string[] {
     .filter(Boolean))]
 }
 
+// 审校模型偶尔把“无问题”结论写进风险数组（如“无擅自新增设定…不构成幻觉风险”“标题未提供，无法评估”），
+// 这类非风险陈述不应参与 blocker 判定
+function dropNonRiskStatements(items: string[]): string[] {
+  return items.filter((item) => {
+    const head = item.slice(0, 4)
+    if (/^(无|没有|未发现|未识别|不存在)/.test(head)) return false
+    if (item.includes('不构成') && item.includes('风险')) return false
+    if (item.includes('无法评估')) return false
+    return true
+  })
+}
+
 interface ReviewStateSnapshot {
   severity?: string
   rewriteRequired: boolean
@@ -343,8 +355,8 @@ function parseReviewState(raw?: string | null): {
       readerHookRisks: parseUnknownStringArray(parsed.reader_hook_risks),
       stepMemoryRisks: parseUnknownStringArray(parsed.step_memory_risks),
       openingHookRisks: parseUnknownStringArray(parsed.opening_hook_risks),
-      titleAlignmentRisks: parseUnknownStringArray(parsed.title_alignment_risks),
-      hallucinationRisks: parseUnknownStringArray(parsed.hallucination_risks),
+      titleAlignmentRisks: dropNonRiskStatements(parseUnknownStringArray(parsed.title_alignment_risks)),
+      hallucinationRisks: dropNonRiskStatements(parseUnknownStringArray(parsed.hallucination_risks)),
       arcProgressRisks: parseUnknownStringArray(parsed.arc_progress_risks),
       languageRisks: parseUnknownStringArray(parsed.language_risks),
       humanLanguageRepairs: parseUnknownStringArray(parsed.human_language_repairs),
@@ -2259,7 +2271,11 @@ function collectChapterRelatedIssues(
     || (issue.entityType === 'item' && issue.entityId ? relatedItemIds.has(issue.entityId) : false))
 }
 
-export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
+export function runChapterPublishCheck(
+  chapterId: number,
+  options: { phase?: 'pipeline' | 'final' } = {},
+): ChapterPublishCheck {
+  const phase = options.phase || 'final'
   const db = getDb()
   const chapter = db.select().from(chapters).where(eq(chapters.id, chapterId)).all()[0]
   if (!chapter) {
@@ -2973,6 +2989,44 @@ export function runChapterPublishCheck(chapterId: number): ChapterPublishCheck {
         : '先在正文页做局部修订，再复检章节验收门。',
     }),
   ]
+
+  // 流水线阶段（finalize 之前）对时序类与初稿证据类 blocker 降级：
+  // - summary/continuity 由随后的 finalize 自动刷新，属于必然未就绪的簿记项
+  // - context 过期原因仅为“前文章节内容已更新”时，本章恰是基于最新前文生成的
+  // - step_memory/title_and_hallucination 的审校证据来自重写前初稿，未复检重写稿，转修订任务人工复核
+  if (phase === 'pipeline') {
+    for (let index = 0; index < rawChecklist.length; index += 1) {
+      const item = rawChecklist[index]
+      if (item.status !== 'blocker') continue
+      if (item.key === 'summary' || item.key === 'continuity') {
+        rawChecklist[index] = {
+          ...item,
+          status: 'warning',
+          detail: `${item.detail}（流水线入稿阶段将自动刷新，不阻断本次验收）`,
+        }
+        continue
+      }
+      if (item.key === 'context') {
+        const onlyFreshPreviousChapters = staleReasons.length > 0
+          && staleReasons.every((reason) => /第\s*\d+\s*章内容已更新/.test(reason))
+        if (onlyFreshPreviousChapters) {
+          rawChecklist[index] = {
+            ...item,
+            status: 'warning',
+            detail: `${item.detail}（本章基于最新前文生成，过期标记将随入稿回写解除）`,
+          }
+        }
+        continue
+      }
+      if (item.key === 'step_memory_handoff' || item.key === 'title_and_hallucination') {
+        rawChecklist[index] = {
+          ...item,
+          status: 'warning',
+          detail: `${item.detail}（审校证据来自重写前初稿，已转修订任务复核）`,
+        }
+      }
+    }
+  }
 
   const rewritePlan = buildChapterRewritePlan({
     checklist: rawChecklist,

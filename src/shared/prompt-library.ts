@@ -1531,6 +1531,14 @@ export function buildTimelineEventsPrompt(params: TimelineEventPromptInput): str
   ])
 }
 
+function formatTargetWordsBand(targetWords: number): string {
+  const target = Math.max(0, Math.round(targetWords || 0))
+  if (target < 300) return '目标字数：' + target + ' 字左右'
+  const floor = Math.round(target * 0.8)
+  const ceiling = Math.round(target * 1.5)
+  return '目标字数：' + target + ' 字（正文控制在 ' + floor + '-' + ceiling + ' 字之间；超过上限必须先删掉微动作堆叠、重复感官描写和无信息增量段落再交稿，不许靠加戏凑字数）'
+}
+
 export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
   return renderPrompt([
     '先为这一章做场景计划，再进入正文写作。场景计划是写作施工单，不是悬浮策划文案。',
@@ -1630,7 +1638,7 @@ export function buildChapterWritingPrompt(params: ChapterWritingPromptInput): st
       '章节：第' + params.chapterNum + '章 ' + params.chapterTitle,
       '主角称呼：' + params.protagonistReference,
       '主角命名规则：' + params.protagonistRule,
-      '目标字数：' + params.targetWords + ' 字左右',
+      formatTargetWordsBand(params.targetWords),
       params.emotionTone ? '情绪基调：' + params.emotionTone : '',
     ]),
     ...buildPromptGuardrailSections({
@@ -1688,7 +1696,7 @@ export function buildChapterWritingPrompt(params: ChapterWritingPromptInput): st
       '只写和本章任务有关的场景，不要为了凑字数平铺日常。',
       '如果给了文风参考，只借叙述气质、视角和句子密度，不模仿具体作者。',
       '遇到不准确搭配，优先改成读者最熟悉、最准确的常规说法。',
-      '只输出正文，不要解释。',
+      '只输出正文，不要解释。正文第一行直接进入叙事，不要写“第X章”、章节标题或任何标题行。',
     ].join('\n')),
     buildAvoidanceSection(params.rejectedDigests || []),
     params.attemptNumber && params.attemptNumber > 1 ? buildVariationHint(params.attemptNumber, 'chapter') : '',
@@ -1704,7 +1712,7 @@ export function buildChapterDraftPrompt(params: ChapterRewritePromptInput): stri
       '章节：第' + params.chapterNum + '章 ' + params.chapterTitle,
       '主角称呼：' + params.protagonistReference,
       '主角命名规则：' + params.protagonistRule,
-      '目标字数：' + params.targetWords + ' 字左右',
+      formatTargetWordsBand(params.targetWords),
       params.emotionTone ? '情绪基调：' + params.emotionTone : '',
     ]),
     ...buildPromptGuardrailSections({
@@ -1770,7 +1778,7 @@ export function buildChapterDraftPrompt(params: ChapterRewritePromptInput): stri
       '如果近期结构告警提示主角太顺、代价蒸发、反转硬塞或高潮分布异常，必须在本章补出真实阻力、持续后果、铺垫兑现或节奏缓冲。',
       '叙事视角一致性：全篇保持同一叙事人称和视角限制。如果是第三人称限制视角，只能写视角角色能看到、听到、感受到的内容，不能偷跑到其他角色的内心。如果是第一人称，不能突然出现"他想着"这种第三人称描写。',
       '章节开头过渡：本章前 200 字必须自然衔接上章结尾的情境（时间、地点、情绪、未完成的动作），不能跳过不交代就进入新场景。',
-      '只输出初稿正文，不要解释。',
+      '只输出初稿正文，不要解释。正文第一行直接进入叙事，不要写“第X章”、章节标题或任何标题行。',
     ].join('\n')),
     buildAvoidanceSection(params.rejectedDigests || []),
     params.attemptNumber && params.attemptNumber > 1 ? buildVariationHint(params.attemptNumber, 'chapter') : '',
@@ -1894,7 +1902,7 @@ export function buildChapterRewritePrompt(params: ChapterRewritePromptInput): st
       '章节：第' + params.chapterNum + '章 ' + params.chapterTitle,
       '主角称呼：' + params.protagonistReference,
       '主角命名规则：' + params.protagonistRule,
-      '目标字数：' + params.targetWords,
+      formatTargetWordsBand(params.targetWords),
       params.emotionTone ? '情绪基调：' + params.emotionTone : '',
     ]),
     ...buildPromptGuardrailSections({
@@ -1970,7 +1978,8 @@ export function buildChapterRewritePrompt(params: ChapterRewritePromptInput): st
       '叙事视角一致性：检查并修正任何视角跳跃——限制视角不能写不在场角色的心理活动，第一人称不能突然变第三人称。如果初稿中有视角滑移，重写时修正为一致的视角。',
       '章节过渡：确保开头自然衔接上章结尾（参考"上章结尾"段），时间/地点/情绪过渡平滑，不能跳过未交代就进入新场景。',
       '作者锁定段落不得改写、删减、拆分、合并或替换措辞，只能改动周边段落来完成衔接。',
-      '只输出重写后的最终正文。',
+      '如果审校意见里有字数带宽或压缩要求，删减时优先砍微动作细节堆叠和重复描写，保留全部事件、冲突结果与伏笔。',
+      '只输出重写后的最终正文。正文第一行直接进入叙事，不要写“第X章”、章节标题或任何标题行。',
     ].join('\n')),
     buildAvoidanceSection(params.rejectedDigests || []),
     params.attemptNumber && params.attemptNumber > 1 ? buildVariationHint(params.attemptNumber, 'chapter') : '',
