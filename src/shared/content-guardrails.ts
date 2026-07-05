@@ -383,6 +383,31 @@ const BUILTIN_ANTI_AI_PROMPT_RULES: AntiAiPromptRule[] = [
     avoid: '不要用“而这一切才刚刚开始、故事远没有结束、新的篇章即将开始”这类总结式段尾。',
     prefer: '用未完成动作、风险余波或下一步选择收尾。',
   },
+  // 人类节律组：词句套路之外，均匀节奏和过度洁净本身就是最强的机器签名。
+  {
+    code: 'uniform_sentence_rhythm',
+    bucket: 'sentence',
+    avoid: '不要整章用长度相近的短句连排，节奏像节拍器一样均匀。',
+    prefer: '长短句交错：偶尔用一个四五十字的长句一口气写完一串动作或一段心绪，紧跟一两个极短句；允许句子随人物思路走偏。',
+  },
+  {
+    code: 'clean_paragraph_beat',
+    bucket: 'structure',
+    avoid: '不要让每个段落都收在干净利落的动作点或短句点题上，段段如此即是模板。',
+    prefer: '允许段落停在未完成处：话说一半、动作被打断、注意力被岔开；段落长短参差，别追求段段等重。',
+  },
+  {
+    code: 'dialogue_too_efficient',
+    bucket: 'sentence',
+    avoid: '不要让对白句句高效、句句只推进信息，问一句答一句像笔录。',
+    prefer: '对白允许答非所问、重复对方的词、迟疑改口、被动作或环境打断；关键信息可以藏在错位的应答里。',
+  },
+  {
+    code: 'no_verbal_impurity',
+    bucket: 'expression',
+    avoid: '不要把叙述打磨得毫无冗余，完全无赘字的洁净文本反而暴露机器痕迹。',
+    prefer: '按人物口吻保留少量顿挫和偏口语的小词（倒是、竟、偏偏、横竖之类），一章三五处即可，不堆砌。',
+  },
 ]
 
 const GENRE_ANTI_AI_PROMPT_RULES: Partial<Record<string, AntiAiPromptRule[]>> = {

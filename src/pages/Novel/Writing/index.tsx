@@ -626,6 +626,8 @@ export default function Writing({ novelId }: Props) {
   const [chapterVersions, setChapterVersions] = useState<ChapterVersion[]>([])
   const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null)
   const [insightPanelOpen, setInsightPanelOpen] = useState(false)
+  // 正文优先：修订建议/验收提示默认折叠在编辑器下方，避免把正文挤出首屏。
+  const [advisoryPanelOpen, setAdvisoryPanelOpen] = useState(false)
   const routeChapterId = useMemo(() => parseRouteId(searchParams.get('chapterId')), [searchParams])
   const activeWritingRoute = useMemo<WritingRouteKey>(() => {
     const routeKey = location.pathname.split('/').filter(Boolean)[4]
@@ -2037,6 +2039,11 @@ export default function Writing({ novelId }: Props) {
     ? streams[activeGeneration.streamTaskId]?.content || ''
     : ''
   const hasMultiSegments = (currentChapter?.segmentCount || 0) > 1
+  const editorAdvisoryCount = productionBriefItems.length
+    + (currentChapterStaleReasons.length > 0 ? 1 : 0)
+    + (currentWritebackStatus?.readyForNextChapter === false ? 1 : 0)
+    + (publishCheck ? 1 : 0)
+    + (hasMultiSegments ? 1 : 0)
   const editorTitle = currentChapter ? currentChapter.title || `第${currentChapter.chapterNum}章` : '请选择一个章节'
   const editorSubtitle = currentChapter
     ? `当前状态：${currentStatusLabel} · 当前正文视为入库稿，停止输入后会自动保存。`
@@ -2955,32 +2962,6 @@ export default function Writing({ novelId }: Props) {
                     </div>
                   ) : null}
 
-                  {productionBriefItems.length > 0 ? (
-                    <div className="chapter-console-page__brief-strip">
-                      {productionBriefItems.slice(0, 4).map((item) => (
-                        <div key={item} className="chapter-console-page__brief-chip">{item}</div>
-                      ))}
-                    </div>
-                  ) : null}
-
-                  {currentChapterStaleReasons.length > 0 ? (
-                    <Alert
-                      showIcon
-                      type="warning"
-                      message="当前章节上下文已过期"
-                      description={`受这些变更影响：${currentChapterStaleReasons.join('；')}。建议先同步后再继续写。`}
-                    />
-                  ) : null}
-
-                  {currentWritebackStatus?.readyForNextChapter === false ? (
-                    <Alert
-                      showIcon
-                      type={currentWritebackStatus.phase === 'failed' ? 'error' : 'warning'}
-                      message="等待回写完成"
-                      description={`当前处于 ${getWritebackPhaseLabel(currentWritebackStatus.phase)}。${currentWritebackStatus.lastError ? `原因：${currentWritebackStatus.lastError}` : '系统会在章后回写完成前暂停后续章节生成。'}`}
-                    />
-                  ) : null}
-
                   {hasResumablePartialContent ? (
                     <Alert
                       showIcon
@@ -3004,52 +2985,20 @@ export default function Writing({ novelId }: Props) {
                     />
                   ) : null}
 
-                  {publishCheck ? (
-                    <Alert
-                      showIcon
-                      type={getPublishCheckAlertType(publishCheck)}
-                      message={`章节验收：${publishCheck.summary}`}
-                      description={`重写 ${publishCheck.rewriteCount} 项，阻塞 ${publishCheck.blockerCount} 项，预警 ${publishCheck.warningCount} 项。`}
-                    />
-                  ) : null}
-
-                  {hasMultiSegments ? (
-                    <Alert
-                      showIcon
-                      type="info"
-                      message="当前章节处于多场景结构模式"
-                      description={(
-                        <div className="novel-writing-shell__segment-alert">
-                          <div className="novel-writing-shell__segment-alert-copy">
-                            该章节已经拆成多个场景。请优先维护场景合同，再重新编译整章。
-                          </div>
-                          <div className="novel-writing-shell__segment-alert-actions">
-                            <Button size="small" icon={<ApartmentOutlined />} onClick={() => navigate(`/novels/${novelId}/structure`)}>
-                              去结构页
-                            </Button>
-                            <Button size="small" icon={<BranchesOutlined />} onClick={() => void handleCompileCurrentChapter()}>
-                              重新编译
-                            </Button>
-                          </div>
-                        </div>
-                      )}
-                    />
-                  ) : null}
-
                   <div className="chapter-console-page__editor-sheet-wrap">
                     {currentChapter ? (
                       hasMultiSegments ? (
                         <div className="novel-writing-shell__segment-preview">
-                          <SegmentBoardPreview
-                            segments={chapterSegments}
-                            onOpenStructure={() => navigate(`/novels/${novelId}/structure`)}
-                            onCompile={() => void handleCompileCurrentChapter()}
-                          />
                           <div
                             className="novel-writing-shell__editor-sheet novel-writing-shell__editor-sheet--readonly"
                           >
                             {content}
                           </div>
+                          <SegmentBoardPreview
+                            segments={chapterSegments}
+                            onOpenStructure={() => navigate(`/novels/${novelId}/structure`)}
+                            onCompile={() => void handleCompileCurrentChapter()}
+                          />
                         </div>
                       ) : (
                         <div
@@ -3068,6 +3017,75 @@ export default function Writing({ novelId }: Props) {
                       <div className="novel-empty novel-empty--writing">请选择左侧章节，或先创建一个新章节开始写作。</div>
                     )}
                   </div>
+
+                  {editorAdvisoryCount > 0 ? (
+                    <div className="chapter-console-page__advisory">
+                      <button
+                        type="button"
+                        className="chapter-console-page__advisory-toggle"
+                        onClick={() => setAdvisoryPanelOpen((current) => !current)}
+                      >
+                        {advisoryPanelOpen ? '收起' : '展开'}修订建议与验收（{editorAdvisoryCount}）
+                      </button>
+                      {advisoryPanelOpen ? (
+                        <div className="chapter-console-page__advisory-body">
+                          {productionBriefItems.length > 0 ? (
+                            <div className="chapter-console-page__brief-strip">
+                              {productionBriefItems.map((item) => (
+                                <div key={item} className="chapter-console-page__brief-chip">{item}</div>
+                              ))}
+                            </div>
+                          ) : null}
+                          {currentChapterStaleReasons.length > 0 ? (
+                            <Alert
+                              showIcon
+                              type="warning"
+                              message="当前章节上下文已过期"
+                              description={`受这些变更影响：${currentChapterStaleReasons.join('；')}。建议先同步后再继续写。`}
+                            />
+                          ) : null}
+                          {currentWritebackStatus?.readyForNextChapter === false ? (
+                            <Alert
+                              showIcon
+                              type={currentWritebackStatus.phase === 'failed' ? 'error' : 'warning'}
+                              message="等待回写完成"
+                              description={`当前处于 ${getWritebackPhaseLabel(currentWritebackStatus.phase)}。${currentWritebackStatus.lastError ? `原因：${currentWritebackStatus.lastError}` : '系统会在章后回写完成前暂停后续章节生成。'}`}
+                            />
+                          ) : null}
+                          {publishCheck ? (
+                            <Alert
+                              showIcon
+                              type={getPublishCheckAlertType(publishCheck)}
+                              message={`章节验收：${publishCheck.summary}`}
+                              description={`重写 ${publishCheck.rewriteCount} 项，阻塞 ${publishCheck.blockerCount} 项，预警 ${publishCheck.warningCount} 项。`}
+                            />
+                          ) : null}
+                          {hasMultiSegments ? (
+                            <Alert
+                              showIcon
+                              type="info"
+                              message="当前章节处于多场景结构模式"
+                              description={(
+                                <div className="novel-writing-shell__segment-alert">
+                                  <div className="novel-writing-shell__segment-alert-copy">
+                                    该章节已经拆成多个场景。请优先维护场景合同，再重新编译整章。
+                                  </div>
+                                  <div className="novel-writing-shell__segment-alert-actions">
+                                    <Button size="small" icon={<ApartmentOutlined />} onClick={() => navigate(`/novels/${novelId}/structure`)}>
+                                      去结构页
+                                    </Button>
+                                    <Button size="small" icon={<BranchesOutlined />} onClick={() => void handleCompileCurrentChapter()}>
+                                      重新编译
+                                    </Button>
+                                  </div>
+                                </div>
+                              )}
+                            />
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </section>
 
                 <section className="chapter-console-page__panel chapter-console-page__review-strip">

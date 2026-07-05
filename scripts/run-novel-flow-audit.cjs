@@ -404,7 +404,11 @@ function buildInitialSettings(project, buildStorySettingsPayload) {
       ending: project.input.ending,
     },
     writingRules: {
-      antiAiFlavor: '少写抽象升华、命运感和模板式顿悟；用行动、代价、具体物件和选择推进。',
+      antiAiFlavor: [
+        '少写抽象升华、命运感和模板式顿悟；用行动、代价、具体物件和选择推进。',
+        '句子节奏要有人味：长短句交错、段落长短参差，偶尔一个长句一口气写完动作链；不要每段都收在干净的动作点上。',
+        '对白允许答非所问、重复对方的词、迟疑改口、被打断；按人物口吻保留少量口语顿挫。',
+      ].join('\n'),
       commonSenseRules: project.input.tabooRules,
       bannedTerms: project.forbiddenTerms.join('、'),
     },
@@ -537,7 +541,7 @@ async function generateMapToTarget(novelId, project, mapService) {
     parentBatchSize: 3,
     namedPlaces: project.input.mapFocus,
     maxRetries: 1,
-  }, { maxBatches: 4 })
+  }, { maxBatches: 4, targetNodeCount: MAP_TARGET_COUNT })
   return {
     generatedNodeCount: result.totalGeneratedNodeCount,
     completed: result.completed,

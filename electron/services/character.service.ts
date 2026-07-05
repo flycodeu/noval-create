@@ -43,6 +43,25 @@ import { repairItemCharacterLinks } from './item.service'
 const BATCH_CHARACTER_QUALITY_BUDGET_MS = 90_000
 const BATCH_CHARACTER_MAX_REWRITE_PASSES = 0
 
+// 单张人物卡解析：本地修复失败后再按“文本中的对象”打捞一次；
+// 仍失败则落盘完整 payload 供诊断并返回 null，让调用方走重试循环而不是中断。
+function parseCharacterCardWithFallback(raw: string, source: string): Record<string, unknown> | null {
+  try {
+    return cleanAiValue(safeParseJson<Record<string, unknown>>(raw))
+  } catch (error) {
+    const salvaged = salvageAiJsonArrayItems<Record<string, unknown>>(raw)
+    const candidate = salvaged.find((item) => typeof item.full_name === 'string' || typeof item.name === 'string')
+    if (candidate) {
+      console.warn(`[character] 人物卡整体解析失败（${source}），已按对象打捞恢复`)
+      return cleanAiValue(candidate)
+    }
+    console.error(
+      `[character] 人物卡 JSON 解析失败（${source}）：${error instanceof Error ? error.message : error}\n--- payload start ---\n${String(raw || '').slice(0, 4000)}\n--- payload end ---`,
+    )
+    return null
+  }
+}
+
 // 引导顺序是地图 -> 物品 -> 人物：物品先落库时只能弱绑定，
 // 人物批量落库后自动做一次物品-人物链接回填。失败不阻断人物生成。
 function runItemCharacterLinkRepair(novelId: number) {
@@ -1354,7 +1373,7 @@ export async function generateProtagonist(novelId: number, opts: {
           rejectedByQuality = true
           return quality
         }
-        acceptedCandidate = cleanAiValue(safeParseJson<Record<string, unknown>>(quality.finalOutput))
+        acceptedCandidate = parseCharacterCardWithFallback(quality.finalOutput, 'protagonist-quality')
         return quality
       },
     })
@@ -1365,7 +1384,12 @@ export async function generateProtagonist(novelId: number, opts: {
       continue
     }
 
-    const nextParsed = acceptedCandidate || cleanAiValue(safeParseJson<Record<string, unknown>>(result))
+    const nextParsed = acceptedCandidate || parseCharacterCardWithFallback(result, 'protagonist-raw')
+    if (!nextParsed) {
+      // 单对象解析失败走循环重试（新一次生成），不让异常终止整个主角生成。
+      markRejected(historyId)
+      continue
+    }
     const candidateDigest = buildVariationDigest(JSON.stringify(nextParsed))
     if (isRejectedDigestTooSimilar(candidateDigest, rejectedDigests)) {
       markRejected(historyId)

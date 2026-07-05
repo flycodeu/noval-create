@@ -17,7 +17,7 @@ import type {
 } from '../../src/types'
 import { getDb, getSqlite } from '../database/db'
 import { chapterSegments, chapters, characters, novels, storyArcs, storyItems, timelineEvents, worldMap } from '../database/schema'
-import { safeParseJson } from '../utils/json'
+import { safeParseJson, salvageAiJsonArrayItems } from '../utils/json'
 import { buildStoryProfile } from './context.service'
 import {
   getAttemptCount,
@@ -1832,6 +1832,37 @@ export function clearStoryItemsByNovel(novelId: number, options: { skipContextTr
   }
 }
 
+// 批量物品输出的容错归一：对象根解包常见数组字段、单对象视为长度 1 的数组、
+// 整体解析失败时逐对象打捞；仍失败落盘 payload 并返回 null 让调用方按拒收重试。
+function normalizeGeneratedItemArray(raw: string, source: string): GeneratedStoryItem[] | null {
+  let parsed: unknown
+  try {
+    parsed = cleanAiValue(safeParseJson<unknown>(raw))
+  } catch (error) {
+    const salvaged = cleanAiValue(salvageAiJsonArrayItems<GeneratedStoryItem>(raw))
+    if (salvaged.length > 0) {
+      console.warn(`[item] 批量物品 JSON 整体解析失败（${source}），逐对象打捞成功 ${salvaged.length} 个成员`)
+      return salvaged
+    }
+    console.error(
+      `[item] 批量物品 JSON 解析失败（${source}）：${error instanceof Error ? error.message : error}\n--- payload start ---\n${String(raw || '').slice(0, 4000)}\n--- payload end ---`,
+    )
+    return null
+  }
+  if (Array.isArray(parsed)) return parsed as GeneratedStoryItem[]
+  if (parsed && typeof parsed === 'object') {
+    const record = parsed as Record<string, unknown>
+    for (const key of ['items', 'story_items', 'list', 'data']) {
+      if (Array.isArray(record[key])) return record[key] as GeneratedStoryItem[]
+    }
+    if (typeof record.item_name === 'string' || typeof record.itemName === 'string' || typeof record.name === 'string') {
+      return [record as unknown as GeneratedStoryItem]
+    }
+  }
+  console.error(`[item] 批量物品输出不是数组且无法归一（${source}）：${String(raw || '').replace(/\s+/g, ' ').slice(0, 300)}`)
+  return null
+}
+
 export async function generateStoryItemsBatchChunk(
   novelId: number,
   options: StoryItemGenerateOptions = {},
@@ -1986,12 +2017,14 @@ export async function generateStoryItemsBatchChunk(
           }
           return resultPayload
         }
-        let parsed: GeneratedStoryItem[]
-        try {
-          parsed = cleanAiValue(safeParseJson<GeneratedStoryItem[]>(quality.finalOutput))
-        } catch (error) {
+        const parsed = normalizeGeneratedItemArray(quality.finalOutput, 'chunk-quality')
+        if (!parsed || parsed.length === 0) {
           markRejected(historyId)
-          throw error
+          resultPayload = {
+            ids: [],
+            warning: `第 ${runtime.batchIndex || 1}/${runtime.totalBatches || 1} 批物品 JSON 无法归一为数组，已跳过。`,
+          }
+          return resultPayload
         }
         const candidateDigest = buildVariationDigest(JSON.stringify(parsed))
         if (isRejectedDigestTooSimilar(candidateDigest, rejectedDigests)) {
@@ -2001,10 +2034,6 @@ export async function generateStoryItemsBatchChunk(
             warning: `第 ${runtime.batchIndex || 1}/${runtime.totalBatches || 1} 批物品与近期拒绝结果过于相近，已自动跳过。`,
           }
           return resultPayload
-        }
-        if (!Array.isArray(parsed)) {
-          markRejected(historyId)
-          throwUserFacingError('item.generatedArrayInvalid')
         }
 
         const usedSignatures = new Set(
@@ -2190,7 +2219,7 @@ export async function generateStoryItems(
           rejectedByQuality = true
           return quality
         }
-        acceptedBatch = cleanAiValue(safeParseJson<GeneratedStoryItem[]>(quality.finalOutput))
+        acceptedBatch = normalizeGeneratedItemArray(quality.finalOutput, 'batch-quality')
         return quality
       },
     })
@@ -2199,21 +2228,16 @@ export async function generateStoryItems(
       markRejected(historyId)
       continue
     }
-    let parsed: GeneratedStoryItem[]
-    try {
-      parsed = acceptedBatch || cleanAiValue(safeParseJson<GeneratedStoryItem[]>(result))
-    } catch (error) {
+    const parsed = acceptedBatch || normalizeGeneratedItemArray(result, 'batch-raw')
+    if (!parsed || parsed.length === 0) {
+      // 归一失败按拒收处理，让外层 while 循环带着新的 rejectedDigests 重试。
       markRejected(historyId)
-      throw error
+      continue
     }
     const candidateDigest = buildVariationDigest(JSON.stringify(parsed))
     if (isRejectedDigestTooSimilar(candidateDigest, rejectedDigests)) {
       markRejected(historyId)
       continue
-    }
-    if (!Array.isArray(parsed)) {
-      markRejected(historyId)
-      throwUserFacingError('item.generatedArrayInvalid')
     }
 
     const usedSignatures = new Set(

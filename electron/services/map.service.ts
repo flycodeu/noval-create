@@ -1341,14 +1341,27 @@ export interface MapGenerateToTargetResult {
 export async function batchGenerateMapToTarget(
   novelId: number,
   structure: MapBatchGenerateOptions,
-  runtime: MapBatchGenerateRuntimeOptions & { maxBatches?: number } = {},
+  runtime: MapBatchGenerateRuntimeOptions & { maxBatches?: number; targetNodeCount?: number } = {},
 ): Promise<MapGenerateToTargetResult> {
   const maxBatches = Math.max(1, Math.min(12, Math.round(runtime.maxBatches ?? 8)))
+  // targetNodeCount：调用方只要求“够 N 个节点”时提前停，不必按蓝图层级钻到底（省时省钱）。
+  const targetNodeCount = runtime.targetNodeCount && runtime.targetNodeCount > 0
+    ? Math.round(runtime.targetNodeCount)
+    : 0
   let totalGeneratedNodeCount = 0
   let batchesRun = 0
   let lastResult: MapBatchGenerationResult | null = null
   while (batchesRun < maxBatches) {
     if (runtime.shouldStop?.()) break
+    if (targetNodeCount > 0 && listMapRows(novelId).length >= targetNodeCount) {
+      return {
+        totalGeneratedNodeCount,
+        batchesRun,
+        completed: true,
+        lastResult,
+        message: `已达到目标节点数量 ${targetNodeCount}，提前结束地图批量生成。`,
+      }
+    }
     const result = await batchGenerateMap(novelId, structure, runtime)
     lastResult = result
     batchesRun += 1

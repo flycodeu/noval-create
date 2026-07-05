@@ -10698,6 +10698,34 @@ html[data-theme="dark"] .ant-card-actions > li {
   flex-wrap: wrap;
 }
 
+/* 正文优先：修订建议与验收信息折叠在编辑器下方 */
+.chapter-console-page__advisory {
+  margin-top: 10px;
+  border-top: 1px dashed var(--border-soft, rgba(128, 128, 128, 0.25));
+  padding-top: 8px;
+}
+
+.chapter-console-page__advisory-toggle {
+  appearance: none;
+  border: none;
+  background: transparent;
+  padding: 2px 0;
+  font-size: 12.5px;
+  color: var(--text-weak, var(--text-main));
+  cursor: pointer;
+}
+
+.chapter-console-page__advisory-toggle:hover {
+  color: var(--primary, #7c5cff);
+}
+
+.chapter-console-page__advisory-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+
 .chapter-console-page__brief-chip {
   font-size: 12px;
   line-height: 1.6;
