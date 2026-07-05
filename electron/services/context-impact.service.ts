@@ -236,6 +236,7 @@ interface ReviewStateSnapshot {
   styleComplianceSummary: string
   styleComplianceDeviations: string[]
   styleComplianceForbiddenPatterns: string[]
+  rewriteRecheckPerformed: boolean
 }
 
 function parseReviewState(raw?: string | null): {
@@ -282,6 +283,7 @@ function parseReviewState(raw?: string | null): {
   styleComplianceSummary: string
   styleComplianceDeviations: string[]
   styleComplianceForbiddenPatterns: string[]
+  rewriteRecheckPerformed: boolean
 } {
   const fallback: ReviewStateSnapshot = {
     rewriteRequired: false,
@@ -326,6 +328,7 @@ function parseReviewState(raw?: string | null): {
     styleComplianceSummary: '',
     styleComplianceDeviations: [],
     styleComplianceForbiddenPatterns: [],
+    rewriteRecheckPerformed: false,
   }
   if (!raw) {
     return fallback
@@ -400,6 +403,11 @@ function parseReviewState(raw?: string | null): {
       styleComplianceSummary: normalizeText(typeof styleCompliance?.summary === 'string' ? styleCompliance.summary : undefined),
       styleComplianceDeviations: parseUnknownStringArray(styleCompliance?.deviations),
       styleComplianceForbiddenPatterns: parseUnknownStringArray(styleCompliance?.matchedForbiddenPatterns),
+      rewriteRecheckPerformed: Boolean(
+        parsed.rewrite_recheck
+        && typeof parsed.rewrite_recheck === 'object'
+        && (parsed.rewrite_recheck as Record<string, unknown>).performed === true,
+      ),
     }
   } catch {
     return fallback
@@ -3019,10 +3027,12 @@ export function runChapterPublishCheck(
         continue
       }
       if (item.key === 'step_memory_handoff' || item.key === 'title_and_hallucination') {
+        // 已做重写稿轻量复检的章节，风险清单是针对最终稿核对过的新证据，blocker 判定有效，不再降级
+        if (reviewState.rewriteRecheckPerformed) continue
         rawChecklist[index] = {
           ...item,
           status: 'warning',
-          detail: `${item.detail}（审校证据来自重写前初稿，已转修订任务复核）`,
+          detail: `${item.detail}（审校证据来自重写前初稿且未复检，已转修订任务复核）`,
         }
       }
     }

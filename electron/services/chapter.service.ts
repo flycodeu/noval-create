@@ -274,6 +274,12 @@ interface ChapterReviewNotes {
   reading_experience?: ChapterReadingExperienceScore
   rewrite_delta?: RewriteNarrativeDeltaReport
   contract_validation?: ChapterContractValidationResult
+  /** 重写稿轻量复检结果：LLM 审校证据已在最终稿上核对过（发布门据此不再降级初稿证据类项） */
+  rewrite_recheck?: {
+    performed: boolean
+    checkedAt: string
+    resolved: string[]
+  }
 }
 
 type ChapterPipelineRole = 'planner' | 'writer' | 'critic' | 'rewriter' | 'canonizer' | 'finalize'
@@ -6266,6 +6272,7 @@ export async function generateChapterContent(
       attemptNumber: number,
       rejectedDigests: string[],
       detail: string,
+      chatOptsOverride?: typeof rewriterChatOpts,
     ) => {
       const attemptMessages = buildRewriteMessages(attemptNumber, rejectedDigests)
       let currentTaskId = await startRewriterTaskWithAssert(attemptMessages, detail)
@@ -6282,7 +6289,7 @@ export async function generateChapterContent(
             inputJson: JSON.stringify(attemptMessages),
             messages: attemptMessages,
             modelConfigId: novel.modelConfigId || undefined,
-            chatOpts: rewriterChatOpts,
+            chatOpts: chatOptsOverride || rewriterChatOpts,
             sender,
             onChunk: async (_chunk, fullOutput) => {
               receivedOutput = fullOutput
@@ -6493,10 +6500,34 @@ export async function generateChapterContent(
       })
       previousRoleTaskId = rewriterTaskId
       rewriteAttemptNumber = 3
+      // cost_saver/fast 模式下模型常拒绝改结构：第三轮升级到 premium 档路由重试
+      let escalatedChatOpts: typeof rewriterChatOpts | undefined
+      if (executionModeResolution.mode === 'cost_saver' || executionModeResolution.mode === 'fast') {
+        try {
+          const escalatedStageReports = buildChapterAiStageReports(
+            'premium',
+            executionModeResolution.source,
+            novel.modelConfigId || undefined,
+            {
+              rewriteTemperatureCap: Math.max(rewritePolicy.temperatureCap, 0.7),
+              rewriteContextStrategy: rewritePolicy.contextStrategy,
+              rewriteReviewDepth: 'deep',
+              rewriteReasons: [...rewritePolicy.reasons, '差异门重试：升级 premium 路由执行结构性重写。'],
+            },
+          )
+          escalatedChatOpts = buildChatOptionsFromRoute(escalatedStageReports[3].route)
+          console.warn(`[chapter:pipeline] 差异门重试升级 premium 路由 chapter=${chapterId}（原模式 ${executionModeResolution.mode}）`)
+        } catch (error) {
+          console.warn(`[chapter:pipeline] premium 路由升级失败，沿用原路由重试 chapter=${chapterId}:`, error instanceof Error ? error.message : error)
+        }
+      }
       rewriteRun = await runRewriterStreamAttempt(
         rewriteAttemptNumber,
         rewriteRejectedDigests,
-        'Rewriter 正在按差异门结论进行结构性重写。',
+        escalatedChatOpts
+          ? 'Rewriter 正在按差异门结论以 premium 路由进行结构性重写。'
+          : 'Rewriter 正在按差异门结论进行结构性重写。',
+        escalatedChatOpts,
       )
       rewriterTaskId = rewriteRun.taskId
       rewriteResult = rewriteRun.result
@@ -6510,49 +6541,138 @@ export async function generateChapterContent(
       structuralRepairDirective = ''
     }
     let repairedContent = rewriteOutcome.content
-    const finalReviewNotesWithRewriteDelta = rewriteOutcome.reviewNotes
+    let finalReviewNotesWithRewriteDelta = rewriteOutcome.reviewNotes
     const rewriteMiniReview = rewriteOutcome.miniReview
-    // 字数硬上限兜底：提示词带宽约束被忽视时，程序化触发一次压缩改写
+    // 字数硬上限兜底：提示词带宽约束被忽视时，程序化触发压缩改写（最多 2 轮，一轮压不够继续压）
     const hardCeilingWords = Math.round(chapterWordTarget * CHAPTER_WORD_HARD_CEILING_RATIO)
-    if (chapterWordTarget >= 300 && countNarrativeWords(repairedContent) > hardCeilingWords) {
+    if (chapterWordTarget >= 300) {
       const floorWords = Math.round(chapterWordTarget * CHAPTER_WORD_FLOOR_RATIO)
       const ceilingWords = Math.round(chapterWordTarget * CHAPTER_WORD_CEILING_RATIO)
-      console.warn(`[chapter:pipeline] 正文 ${countNarrativeWords(repairedContent)} 字超硬上限 ${hardCeilingWords}，触发压缩改写 chapter=${chapterId}`)
+      for (let compressAttempt = 1; compressAttempt <= 2 && countNarrativeWords(repairedContent) > hardCeilingWords; compressAttempt += 1) {
+        const currentWords = countNarrativeWords(repairedContent)
+        console.warn(`[chapter:pipeline] 正文 ${currentWords} 字超硬上限 ${hardCeilingWords}，触发压缩改写（第 ${compressAttempt}/2 轮） chapter=${chapterId}`)
+        try {
+          const compressed = (await runChatTask({
+            type: 'chapter_write',
+            novelId: chapter.novelId,
+            relatedEntityType: 'chapter',
+            relatedEntityId: chapterId,
+            messages: [{
+              role: 'user',
+              content: [
+                `下面这一章当前 ${currentWords} 个汉字，严重超出上限。把它压缩到 ${floorWords}-${ceilingWords} 个汉字。`,
+                `硬性要求：压缩后正文不得超过 ${ceilingWords} 个汉字，需要删掉约 ${Math.max(currentWords - ceilingWords, 0)} 字，这不是润色任务，是删减任务。`,
+                '删减优先级（从先到后）：1) 微动作细节堆叠（握拳/松手/抬头/指尖类）；2) 重复的感官与环境描写；3) 解释性旁白和心理复述；4) 不推进事件的过渡段。',
+                '必须保留：全部事件与顺序、冲突交锋与结果状态、伏笔、对白立场；不新增情节。',
+                '只输出压缩后的正文，不要解释，不要标题行。',
+                `本章大纲：${chapter.outline || ''}`,
+                '',
+                '正文：',
+                repairedContent,
+              ].join('\n'),
+            }],
+            modelConfigId: novel.modelConfigId || undefined,
+          })).trim()
+          const strippedCompressed = stripChapterHeadingNoise(compressed, chapter.chapterNum, chapterTitleForCheck).content
+          const compressedWords = countNarrativeWords(strippedCompressed)
+          if (strippedCompressed && compressedWords >= floorWords && compressedWords < currentWords) {
+            const protectedCompressed = enforceLockedParagraphProtection(
+              strippedCompressed,
+              lockedParagraphContext.lockedParagraphs,
+              repairedContent,
+              finalReviewNotesWithRewriteDelta,
+            )
+            if (!protectedCompressed.violated) {
+              repairedContent = protectedCompressed.content
+              console.log(`[chapter:pipeline] 压缩改写完成 ${currentWords}→${countNarrativeWords(repairedContent)} 字 chapter=${chapterId}`)
+              continue
+            }
+          }
+          console.warn(`[chapter:pipeline] 第 ${compressAttempt} 轮压缩结果不可用（${compressedWords} 字），保留当前稿 chapter=${chapterId}`)
+          break
+        } catch (error) {
+          console.warn(`[chapter:pipeline] 压缩改写失败，保留当前稿 chapter=${chapterId}:`, error instanceof Error ? error.message : error)
+          break
+        }
+      }
+    }
+    // 重写稿轻量复检：初稿时代的 LLM 审校证据（接力/开篇/幻觉/标题）在最终稿上逐条核对，
+    // 发布门据新证据判定，不再依赖 pipeline 阶段降级兜底
+    const staleLlmRiskCount = finalReviewNotesWithRewriteDelta.step_memory_risks.length
+      + finalReviewNotesWithRewriteDelta.opening_hook_risks.length
+      + finalReviewNotesWithRewriteDelta.hallucination_risks.length
+      + finalReviewNotesWithRewriteDelta.title_alignment_risks.length
+    if (staleLlmRiskCount > 0 && repairedContent.trim()) {
       try {
-        const compressed = (await runChatTask({
-          type: 'chapter_write',
+        const recheckRaw = await runChatTask({
+          type: 'chapter_critic',
           novelId: chapter.novelId,
           relatedEntityType: 'chapter',
           relatedEntityId: chapterId,
           messages: [{
             role: 'user',
             content: [
-              `把下面这一章压缩到 ${floorWords}-${ceilingWords} 个汉字。`,
-              '要求：保留全部事件、冲突交锋、结果状态、伏笔与对白立场；优先删除微动作细节堆叠、重复感官描写、无信息增量的环境与心理段落。',
-              '不改变事件顺序和人物行为，不新增情节。只输出压缩后的正文，不要解释。',
-              `本章大纲：${chapter.outline || ''}`,
+              '你是小说审校复核员。下列风险是此前针对"重写前初稿"提出的；正文已经重写。请逐条核对每个风险在"当前正文"里是否仍然成立。',
+              '仍成立的条目保留（可改写成针对当前正文的准确表述），已被重写修复的移入 resolved_risks。不要新增清单之外的问题，不要输出解释。',
+              '只输出一个 JSON 对象：{"step_memory_risks":[],"opening_hook_risks":[],"hallucination_risks":[],"title_alignment_risks":[],"resolved_risks":[]}',
+              `【章节】第${chapter.chapterNum}章 ${chapterTitleForCheck}`,
+              scenePlanText ? `【场景计划】\n${scenePlanText}` : '',
+              finalReviewNotesWithRewriteDelta.step_memory_risks.length > 0
+                ? `【原接力断链风险】\n${finalReviewNotesWithRewriteDelta.step_memory_risks.join('\n')}`
+                : '',
+              finalReviewNotesWithRewriteDelta.opening_hook_risks.length > 0
+                ? `【原开篇追读风险】\n${finalReviewNotesWithRewriteDelta.opening_hook_risks.join('\n')}`
+                : '',
+              finalReviewNotesWithRewriteDelta.hallucination_risks.length > 0
+                ? `【原无来源新增风险】\n${finalReviewNotesWithRewriteDelta.hallucination_risks.join('\n')}`
+                : '',
+              finalReviewNotesWithRewriteDelta.title_alignment_risks.length > 0
+                ? `【原标题贴合风险】\n${finalReviewNotesWithRewriteDelta.title_alignment_risks.join('\n')}`
+                : '',
               '',
-              '正文：',
+              '【当前正文】',
               repairedContent,
-            ].join('\n'),
+            ].filter(Boolean).join('\n'),
           }],
           modelConfigId: novel.modelConfigId || undefined,
-        })).trim()
-        const strippedCompressed = stripChapterHeadingNoise(compressed, chapter.chapterNum, chapterTitleForCheck).content
-        const compressedWords = countNarrativeWords(strippedCompressed)
-        if (strippedCompressed && compressedWords >= floorWords && compressedWords < countNarrativeWords(repairedContent)) {
-          const protectedCompressed = enforceLockedParagraphProtection(
-            strippedCompressed,
-            lockedParagraphContext.lockedParagraphs,
-            repairedContent,
-            finalReviewNotesWithRewriteDelta,
-          )
-          if (!protectedCompressed.violated) {
-            repairedContent = protectedCompressed.content
+        })
+        const recheckParse = parseAiJsonResult<Record<string, unknown>>(recheckRaw, 'object', {
+          channel: 'chapter',
+          message: '重写稿复检 JSON 解析失败，保留初稿审校证据并沿用流水线降级兜底。',
+          consoleSummary: `[chapter:warn] rewrite-recheck-json-fallback chapter=${chapterId}`,
+          context: { chapterId, novelId: chapter.novelId, stage: 'rewrite_recheck' },
+        })
+        if (recheckParse.success) {
+          const parsedRecheck = recheckParse.data as Record<string, unknown>
+          const toRiskList = (value: unknown): string[] => Array.isArray(value)
+            ? [...new Set(value
+              .filter((item): item is string => typeof item === 'string')
+              .map((item) => item.trim())
+              .filter(Boolean))]
+            : []
+          finalReviewNotesWithRewriteDelta = {
+            ...finalReviewNotesWithRewriteDelta,
+            step_memory_risks: toRiskList(parsedRecheck.step_memory_risks),
+            opening_hook_risks: toRiskList(parsedRecheck.opening_hook_risks),
+            hallucination_risks: toRiskList(parsedRecheck.hallucination_risks),
+            title_alignment_risks: toRiskList(parsedRecheck.title_alignment_risks),
+            rewrite_recheck: {
+              performed: true,
+              checkedAt: new Date().toISOString(),
+              resolved: toRiskList(parsedRecheck.resolved_risks),
+            },
           }
+          console.log(
+            `[chapter:pipeline] 重写稿轻量复检完成 chapter=${chapterId}：`
+            + `接力${finalReviewNotesWithRewriteDelta.step_memory_risks.length}条 `
+            + `开篇${finalReviewNotesWithRewriteDelta.opening_hook_risks.length}条 `
+            + `幻觉${finalReviewNotesWithRewriteDelta.hallucination_risks.length}条 `
+            + `标题${finalReviewNotesWithRewriteDelta.title_alignment_risks.length}条仍成立，`
+            + `已修复${finalReviewNotesWithRewriteDelta.rewrite_recheck?.resolved.length ?? 0}条`,
+          )
         }
       } catch (error) {
-        console.warn(`[chapter:pipeline] 压缩改写失败，保留原稿 chapter=${chapterId}:`, error instanceof Error ? error.message : error)
+        console.warn(`[chapter:pipeline] 重写稿复检失败，保留初稿审校证据 chapter=${chapterId}:`, error instanceof Error ? error.message : error)
       }
     }
     latestUsableDraft = repairedContent.trim()

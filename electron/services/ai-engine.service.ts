@@ -175,9 +175,13 @@ export function buildAiModelRouteReport(options: {
   const routeMaxTokensFactor = typeof options.maxTokensFactor === 'number'
     ? options.maxTokensFactor
     : 1
+  // 模式/任务因子相乘可能 >1（如 premium ×1.18），钳制在模型配置上限内，避免超出服务商 max_tokens 合法区间
   const maxTokens = Math.max(
     256,
-    Math.round(baseMaxTokens * modeProfile.maxTokensFactor * taskTokenFactor * routeMaxTokensFactor * (1 - tokenSafetyMarginPct / 100)),
+    Math.min(
+      baseMaxTokens,
+      Math.round(baseMaxTokens * modeProfile.maxTokensFactor * taskTokenFactor * routeMaxTokensFactor * (1 - tokenSafetyMarginPct / 100)),
+    ),
   )
 
   return {
