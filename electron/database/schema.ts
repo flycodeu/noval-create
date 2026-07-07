@@ -463,6 +463,7 @@ export const characters = sqliteTable('characters', {
   contradiction: text('contradiction'),
   relationshipTension: text('relationship_tension'),
   resonancePoint: text('resonance_point'),
+  dramaticEngine: text('dramatic_engine'),
   characterArc: text('character_arc'),
   speechPattern: text('speech_pattern'),
   catchphrases: text('catchphrases'),

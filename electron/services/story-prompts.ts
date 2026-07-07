@@ -127,6 +127,7 @@ const CHAPTER_DELIVERY_GATE_LINES = [
   '- 章节合同里的必推人物弧，必须在本章让关键人物完成一次选择、行动、代价、关系变化或误信念裂缝，不能只提到人物状态。',
   '- 主题不是装饰句：本章冲突必须回应主题命题，让角色在底线、欲望、代价或妥协之间做出可见判断。',
   '- 关系弧变化必须同时有触发事件、可见互动和后果，不能只把关系状态从 A 改成 B。',
+  '- 如果场景计划给了“各方心思/信息差/演给谁看”，正文必须把它们落进对白潜台词、留白和分寸里：让在场各方带着各自的算盘说话，读者比某个角色多知道一层，而不是让角色互相直白通报信息。',
   '- 如果硬约束或文风参考包含真实样章对照/人工风格样本锁定，必须按其节奏、句式、信息密度、对白比例和现场质感执行。',
 ]
 
@@ -201,6 +202,7 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
       '- 代价链检查：正文是否让行动带来损耗、失去、关系后果或后续压力；如果风险一段内被抹平，要判为代价蒸发。',
       '- 目标链检查：正文是否让本章目标发生可确认的前进、受阻、改向或失败；如果只重复目标口号，要判为没有推进。',
       '- 关键章如果主功能仍然只是 setup / exposition / breather，要在 reader_hook_risks 或 critical_fixes 里明确指出它名义关键、实际过渡的问题。',
+      '- design_flatness_risks（设计感专项，只提示不阻塞）：判断本章是不是“只把事件/史实写顺了”，却缺少戏剧设计。命中信号：全章只有单向量冲突（一方有诉求、其余人只是接话）、对白只在互相通报信息而无潜台词、没有任何戏剧反讽（读者并不比角色多知道什么）、场景内没有发生局势转折（进场和退场时的力量/信息格局一样）、章节像史实/大事记的顺序复述而非有设计的情节。逐条写清是哪一处扁平、可以往哪个方向加设计；如果本章设计感足够，就留空数组。',
       ...(isEnhancedTier(promptTier)
         ? ['- 因果链检查：本章每个重大事件是否有合理的触发原因，结果是否产生了后续影响而非凭空出现凭空消失。']
         : []),
@@ -208,7 +210,7 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
         ? ['- 关键章节还要额外审查高潮是否兑现、代价是否落地、支线回收是否足够，避免只放大声量不推进结构。']
         : []),
     ]),
-    '只输出 JSON：{"summary":"总体判断","critical_fixes":["必改项"],"continuity_risks":["连续性风险"],"arc_progress_risks":["故事弧推进风险"],"context_drift_risks":["漂移风险"],"realism_risks":["真实度风险"],"coherence_risks":["连贯性风险"],"reader_hook_risks":["追读风险"],"step_memory_risks":["步骤接力风险"],"opening_hook_risks":["开篇吸引力风险"],"title_alignment_risks":["标题偏题风险"],"hallucination_risks":["无来源新增或推断升级风险"],"language_risks":["语言风险"],"human_language_repairs":["原说法 -> 更自然说法"],"genre_hollowing_risks":["体裁空心化风险"],"missing_payoffs":["未落地伏笔"],"strengths":["具体优点"],"severity":"medium","rewrite_required":true,"revision_brief":"修订方向摘要","protagonist_setback":"minor","setback_summary":"主角在关键交锋里被压制","cost_present":true,"cost_summary":"主角付出人手与资源损失","cost_resolution_state":"ongoing","reversal_marker":true,"reversal_summary":"看似得手后被埋伏反制","reversal_support_state":"supported","pace_marker":"reversal","reward_state":"partial","protagonist_pressure":72,"chapter_function_primary":"reversal","chapter_function_tags":["progression","reversal"],"dialogue_filler_risks":["对白空话"],"dialogue_info_density_risks":["信息推进不足"],"dialogue_voice_lock_summary":"","required_voice_lock_character_ids":[]}',
+    '只输出 JSON：{"summary":"总体判断","critical_fixes":["必改项"],"continuity_risks":["连续性风险"],"arc_progress_risks":["故事弧推进风险"],"context_drift_risks":["漂移风险"],"realism_risks":["真实度风险"],"coherence_risks":["连贯性风险"],"reader_hook_risks":["追读风险"],"step_memory_risks":["步骤接力风险"],"opening_hook_risks":["开篇吸引力风险"],"title_alignment_risks":["标题偏题风险"],"hallucination_risks":["无来源新增或推断升级风险"],"language_risks":["语言风险"],"human_language_repairs":["原说法 -> 更自然说法"],"genre_hollowing_risks":["体裁空心化风险"],"design_flatness_risks":["设计扁平风险：只把事件写顺、缺潜台词/博弈/反讽/场景内转折"],"missing_payoffs":["未落地伏笔"],"strengths":["具体优点"],"severity":"medium","rewrite_required":true,"revision_brief":"修订方向摘要","protagonist_setback":"minor","setback_summary":"主角在关键交锋里被压制","cost_present":true,"cost_summary":"主角付出人手与资源损失","cost_resolution_state":"ongoing","reversal_marker":true,"reversal_summary":"看似得手后被埋伏反制","reversal_support_state":"supported","pace_marker":"reversal","reward_state":"partial","protagonist_pressure":72,"chapter_function_primary":"reversal","chapter_function_tags":["progression","reversal"],"dialogue_filler_risks":["对白空话"],"dialogue_info_density_risks":["信息推进不足"],"dialogue_voice_lock_summary":"","required_voice_lock_character_ids":[]}',
   )
   return applyPromptOverride('chapterReview', fallback, params as unknown as Record<string, unknown>)
 }

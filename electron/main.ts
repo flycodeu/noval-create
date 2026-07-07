@@ -109,6 +109,10 @@ import {
   buildVariationDigest,
   isCandidateTooSimilar,
 } from './services/variation-control.service'
+import {
+  analyzeOutlineDesignAlignment,
+  type OutlineDesignGateChapter,
+} from './services/outline-design-gate.service'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -990,46 +994,84 @@ function registerIpcHandlers() {
       .map((chapter) => `第${chapter.chapterNum}章《${chapter.title || '无标题'}》：${(chapter.outline || '').split('\n')[0].slice(0, 60)}`)
       .join('\n')
 
-    const result = await taskService.runChatTask({
-      type: 'chapter_outline',
-      novelId: arc.novelId,
-      messages: [{
-        role: 'user',
-        content: buildChapterOutlinePlanningPrompt({
-          novelTitle: context.profile.novelTitle,
-          genre: context.profile.genre,
-          storyGoal: context.profile.storyGoal,
-          coreConflict: context.profile.coreConflict,
-          mainPlot: context.profile.mainPlot,
-          arcName: arc.arcName,
-          arcGoal: arc.arcGoal || '',
-          arcSummary: arc.arcSummary || '',
-          arcGrowthLedger: arc.growthLedger || '',
-          arcCostLedger: arc.costLedger || '',
-          arcTargetWords: arc.targetWords || undefined,
-          chapterStart: batchStart,
-          chapterEnd: batchEnd,
-          previousSummary: context.previousSummary,
-          characterStates: context.characterStates,
-          continuitySummary: context.continuitySummary,
-          openLoops: context.openLoops,
-          worldRulesSummary: context.worldRulesSummary,
-          previousChapterOutlines: existingOutlines || undefined,
-          protagonistReference: context.profile.protagonistReference,
-          protagonistRule: context.profile.protagonistRule,
-        }),
-      }],
-      modelConfigId: novel.modelConfigId || undefined,
-    })
+    const generateOutlineBatch = async (designGateDirective?: string): Promise<Record<string, unknown>[]> => {
+      const raw = await taskService.runChatTask({
+        type: 'chapter_outline',
+        novelId: arc.novelId,
+        messages: [{
+          role: 'user',
+          content: buildChapterOutlinePlanningPrompt({
+            novelTitle: context.profile.novelTitle,
+            genre: context.profile.genre,
+            storyGoal: context.profile.storyGoal,
+            coreConflict: context.profile.coreConflict,
+            mainPlot: context.profile.mainPlot,
+            arcName: arc.arcName,
+            arcGoal: arc.arcGoal || '',
+            arcSummary: arc.arcSummary || '',
+            arcGrowthLedger: arc.growthLedger || '',
+            arcCostLedger: arc.costLedger || '',
+            arcTargetWords: arc.targetWords || undefined,
+            chapterStart: batchStart,
+            chapterEnd: batchEnd,
+            previousSummary: context.previousSummary,
+            characterStates: context.characterStates,
+            continuitySummary: context.continuitySummary,
+            openLoops: context.openLoops,
+            worldRulesSummary: context.worldRulesSummary,
+            previousChapterOutlines: existingOutlines || undefined,
+            protagonistReference: context.profile.protagonistReference,
+            protagonistRule: context.profile.protagonistRule,
+            designGateDirective,
+          }),
+        }],
+        modelConfigId: novel.modelConfigId || undefined,
+      })
+      return parseOutlineJsonArrayWithRepair<Record<string, unknown>>({
+        label: `第${batchStart}至第${batchEnd}章章节细纲`,
+        raw,
+        novelId: arc.novelId,
+        modelConfigId: novel.modelConfigId || undefined,
+        taskType: 'chapter_outline',
+        schemaHint: '数组元素必须保留 chapter_num、title、goal、growth_ledger、cost_ledger、plot_points、characters、location、emotion_tone、bridge_in、bridge_out 字段。',
+      })
+    }
 
-    const outlines = await parseOutlineJsonArrayWithRepair<Record<string, unknown>>({
-      label: `第${batchStart}至第${batchEnd}章章节细纲`,
-      raw: result,
-      novelId: arc.novelId,
-      modelConfigId: novel.modelConfigId || undefined,
-      taskType: 'chapter_outline',
-      schemaHint: '数组元素必须保留 chapter_num、title、goal、growth_ledger、cost_ledger、plot_points、characters、location、emotion_tone、bridge_in、bridge_out 字段。',
-    })
+    const toGateChapters = (rows: Record<string, unknown>[]): OutlineDesignGateChapter[] =>
+      rows.map((row) => ({
+        chapterNum: typeof row.chapter_num === 'number' ? row.chapter_num : typeof row.num === 'number' ? row.num : 0,
+        title: typeof row.title === 'string' ? row.title : '',
+        goal: typeof row.goal === 'string' ? row.goal : '',
+        plotPoints: toStringArray(row.plot_points).join('\n'),
+        growthLedger: toLedgerText(row.growth_ledger),
+        costLedger: toLedgerText(row.cost_ledger),
+      }))
+
+    const gateArc = {
+      arcName: arc.arcName,
+      arcGoal: arc.arcGoal || '',
+      arcSummary: arc.arcSummary || '',
+      growthLedger: arc.growthLedger || '',
+      costLedger: arc.costLedger || '',
+    }
+
+    // 弧 → 章 设计校验 gate（P0）：命中“纯史实节点、零弧推进”就带矫正指令重生成一次。
+    let outlines = await generateOutlineBatch()
+    let designGate = analyzeOutlineDesignAlignment(gateArc, toGateChapters(outlines))
+    if (!designGate.passed) {
+      console.warn(`[outline-design-gate] arc=${arc.arcName} ${designGate.summary} 触发重生成。`)
+      try {
+        const retryOutlines = await generateOutlineBatch(designGate.correctiveDirective)
+        const retryGate = analyzeOutlineDesignAlignment(gateArc, toGateChapters(retryOutlines))
+        if (retryGate.flaggedChapters.length <= designGate.flaggedChapters.length) {
+          outlines = retryOutlines
+          designGate = retryGate
+        }
+        console.warn(`[outline-design-gate] arc=${arc.arcName} 重生成后：${designGate.summary}`)
+      } catch (retryError) {
+        console.error('[outline-design-gate] 重生成失败，沿用首轮结果。', retryError)
+      }
+    }
     let generatedCount = 0
 
     for (const outline of outlines) {
@@ -1099,6 +1141,13 @@ function registerIpcHandlers() {
       completed,
       batchStart,
       batchEnd,
+      designGate: {
+        judgeable: designGate.judgeable,
+        passed: designGate.passed,
+        summary: designGate.summary,
+        designTerms: designGate.designTerms,
+        flaggedChapters: designGate.flaggedChapters,
+      },
       message: completed
         ? `第${batchStart}至第${batchEnd}章细纲已生成，当前故事弧已补齐。`
         : `第${batchStart}至第${batchEnd}章细纲已生成，可继续生成下一批。`,

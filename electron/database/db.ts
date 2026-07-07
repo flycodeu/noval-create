@@ -299,6 +299,7 @@ export function runMigrations(sqlite: Database.Database) {
       contradiction TEXT,
       relationship_tension TEXT,
       resonance_point TEXT,
+      dramatic_engine TEXT,
       character_arc TEXT,
       parent_ids_json TEXT,
       appearance_json TEXT,
@@ -697,6 +698,7 @@ export function runMigrations(sqlite: Database.Database) {
   ensureColumn(sqlite, 'characters', 'contradiction', 'TEXT')
   ensureColumn(sqlite, 'characters', 'relationship_tension', 'TEXT')
   ensureColumn(sqlite, 'characters', 'resonance_point', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'dramatic_engine', 'TEXT')
   ensureColumn(sqlite, 'characters', 'character_arc', 'TEXT')
   ensureColumn(sqlite, 'characters', 'rank_level', 'TEXT')
   ensureColumn(sqlite, 'characters', 'social_identity', 'TEXT')

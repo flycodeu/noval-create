@@ -126,6 +126,7 @@ export interface ChapterOutlinePromptInput {
   protagonistReference: string
   protagonistRule: string
   attemptNumber?: number
+  designGateDirective?: string
 }
 
 export interface TimelineEventPromptInput {
@@ -1188,12 +1189,13 @@ export function protagonistPrompt(params: ProtagonistPromptInput): string {
       '优点、缺点、秘密、软肋和关系张力都要能互相咬合，别把角色写成完美设定包。',
       '实体类型、种族、身份、势力归属和力量体系必须贴合现有规则，不默认只有普通人模板。',
       '心理维度之间必须互相咬合形成因果链：core_fear 必须直接解释 self_deception 为什么成立，trauma 必须影响 inner_conflict 的具体内容，surface_desire 和 deep_need 之间必须存在具体矛盾而非抽象对立。不允许每个字段独立编一套说辞。',
+      'dramatic_engine（主角戏剧引擎）是这个人物最关键的一栏：用一句话点出贯穿全书、能持续制造戏的核心装置——错位、反讽、隐藏身份、双重立场、致命秘密或某种别人不知道的知识/视角落差。它必须能解释主角在几乎每一场戏里的独特选择和张力来源，让读者始终比某些角色多知道一层。避免写成普通的“性格”或“目标”，要写成“引擎”：一旦启动就能反复产出戏剧火花。举例形态（不要照抄）：现代灵魂困在古代身份里、卧底身在敌营、背负着足以颠覆自身阵营的秘密、明面弱势暗中掌握关键筹码。',
     ].join('\n')),
     section('语言要求', buildHumanLanguageRules([
       '档案要像编辑可直接交给作者继续写戏的人物卡，不要写悬浮鸡汤和伪深刻结论。',
       '贴近当前题材常见角色写法，但不要模仿具体作者。',
     ])),
-    '只输出 JSON：{"surname":"","given_name":"","full_name":"","entity_type":"human/undead/beast/immortal/nonhuman","species":"角色种族","gender":"","age":0,"occupation":"","rank_level":"当前等级/境界/身份阶位","social_identity":"社会身份或阵营位置","faction_names":["势力1"],"power_system_names":["体系1"],"context_hooks":["与主线/背景/主题的关联"],"appearance":"外貌3到4句，只写能认出来的细节","background":"180字以内，写关键经历以及它留下的影响","personality_traits":["特点1","特点2","特点3"],"flaws":["缺点1","缺点2"],"habits":["习惯1"],"goals":"当前追求","surface_desire":"表层最想得到的东西","deep_need":"真正缺失却不愿承认的需要","core_fear":"最怕失去或面对的东西","inner_conflict":"最核心的内在拉扯","hidden_secret":"不愿公开的秘密","moral_line":"轻易不会跨过的底线","self_deception":"一直拿来自我说服的谎话","trauma":"仍在影响现在的旧伤","contradiction":"最能体现复杂度的反差点","relationship_tension":"在亲密或权力关系里的张力来源","resonance_point":"读者最容易共情的一点","character_arc":"后续可能的变化方向","first_impression":"第一次出场最抓人的地方"}',
+    '只输出 JSON：{"surname":"","given_name":"","full_name":"","entity_type":"human/undead/beast/immortal/nonhuman","species":"角色种族","gender":"","age":0,"occupation":"","rank_level":"当前等级/境界/身份阶位","social_identity":"社会身份或阵营位置","faction_names":["势力1"],"power_system_names":["体系1"],"context_hooks":["与主线/背景/主题的关联"],"appearance":"外貌3到4句，只写能认出来的细节","background":"180字以内，写关键经历以及它留下的影响","personality_traits":["特点1","特点2","特点3"],"flaws":["缺点1","缺点2"],"habits":["习惯1"],"goals":"当前追求","surface_desire":"表层最想得到的东西","deep_need":"真正缺失却不愿承认的需要","core_fear":"最怕失去或面对的东西","inner_conflict":"最核心的内在拉扯","hidden_secret":"不愿公开的秘密","moral_line":"轻易不会跨过的底线","self_deception":"一直拿来自我说服的谎话","trauma":"仍在影响现在的旧伤","contradiction":"最能体现复杂度的反差点","relationship_tension":"在亲密或权力关系里的张力来源","resonance_point":"读者最容易共情的一点","dramatic_engine":"贯穿全书、能反复制造戏的核心装置（错位/反讽/隐藏身份/双重立场/致命秘密/知识落差），要能解释主角几乎每场戏的独特选择","character_arc":"后续可能的变化方向","first_impression":"第一次出场最抓人的地方"}',
     params.attemptNumber && params.attemptNumber > 1 ? buildVariationHint(params.attemptNumber, 'character') : '',
   ])
 }
@@ -1281,7 +1283,7 @@ export function regenerateCharacterPrompt(params: RegenerateCharacterPromptInput
       '所有字段都要写成清楚、可落地的人物信息，不要写成总结式空话。',
       '减少概念包装，优先写行为依据、关系拉扯和代价。',
     ])),
-    '只输出 JSON：{"full_name":"' + params.lockedName + '","role_type":"' + params.lockedRoleType + '","entity_type":"human/undead/beast/immortal/nonhuman","species":"角色种族","gender":"","age":0,"occupation":"","rank_level":"当前等级/阶位","social_identity":"社会身份","faction_names":["势力1"],"power_system_names":["体系1"],"context_hooks":["与主线或主题的关联"],"appearance":"外貌3到4句，突出辨识度","background":"180字以内，写关键经历和留下的影响","personality_traits":["特点1","特点2","特点3"],"flaws":["缺点1","缺点2"],"habits":["习惯1"],"goals":"当前追求","surface_desire":"表层欲望","deep_need":"深层需要","core_fear":"核心恐惧","inner_conflict":"内在矛盾","hidden_secret":"隐藏秘密","moral_line":"道德底线","self_deception":"自我欺骗","trauma":"旧伤或创伤","contradiction":"最能体现复杂度的反差点","relationship_tension":"与关键人物关系里的张力","resonance_point":"读者最容易共情的一点","character_arc":"后续变化方向","first_impression":"第一次出场印象","appear_chapter":1}',
+    '只输出 JSON：{"full_name":"' + params.lockedName + '","role_type":"' + params.lockedRoleType + '","entity_type":"human/undead/beast/immortal/nonhuman","species":"角色种族","gender":"","age":0,"occupation":"","rank_level":"当前等级/阶位","social_identity":"社会身份","faction_names":["势力1"],"power_system_names":["体系1"],"context_hooks":["与主线或主题的关联"],"appearance":"外貌3到4句，突出辨识度","background":"180字以内，写关键经历和留下的影响","personality_traits":["特点1","特点2","特点3"],"flaws":["缺点1","缺点2"],"habits":["习惯1"],"goals":"当前追求","surface_desire":"表层欲望","deep_need":"深层需要","core_fear":"核心恐惧","inner_conflict":"内在矛盾","hidden_secret":"隐藏秘密","moral_line":"道德底线","self_deception":"自我欺骗","trauma":"旧伤或创伤","contradiction":"最能体现复杂度的反差点","relationship_tension":"与关键人物关系里的张力","resonance_point":"读者最容易共情的一点","dramatic_engine":"贯穿全书、能反复制造戏的核心装置，解释主角每场戏的独特选择","character_arc":"后续变化方向","first_impression":"第一次出场印象","appear_chapter":1}',
   ])
 }
 
@@ -1393,6 +1395,7 @@ export function buildStoryArcPlanningPrompt(params: StoryArcPromptInput): string
       'key_turns 只写会改变量势的具体事件或决定，不写“矛盾升级”“命运转折”这种空话。',
       'subplot_links 要明确哪条支线在这里进入、发酵、反咬或回收。',
       '先保证主线因果顺，再安排支线落位；不要为了平均分配章节硬拆结构。',
+      '每个弧要显式安排 1 到 2 处“质感/关系/喘息”节拍（在 pacing 标“慢”或在 key_turns 里点明），用来落地人物关系、日常质感和伏笔发酵；整弧不能全是高强度推进，张弛结合才耐读。',
       '最后一个故事弧必须负责主线收束，并给主要支线留出回扣空间。',
     ].join('\n')),
     section('语言要求', buildHumanLanguageRules([
@@ -1444,6 +1447,13 @@ export function buildChapterOutlinePlanningPrompt(params: ChapterOutlinePromptIn
       taskFocus: '每章 目标 必须服务本弧目标，合起来能看出主线持续推进。',
       extraQualityLines: ['章节之间要有轻重起伏，不能每章都像同一个节奏模板。'],
     }),
+    section('禁止编年体（硬约束）', [
+      '禁止把章节大纲写成史实/大事记时间线。历史或既定事件只是底料，本弧的原创设计（arc_goal / 概述 / 成长账本 / 代价账本里点名的独有目标、组织、地点、人物、筹码）才是章节的骨架。',
+      '每一章的 goal 和 plot_points 必须显式承载至少一项本弧原创设计元素的推进，而不是只复述“某年发生了某场战役/某个历史事件”。',
+      '如果一个大事件（如一场大战役、一次大朝会）戏剧含量高，必须跨 2 到 4 章拆解，中间穿插朝堂博弈、人物关系、支线发酵或后方治理的场景，不能一章从头到尾把它办完。',
+      '不允许出现“一章 = 一个历史节点”的一一对应排列；相邻章节要有推进节奏差（设置、交锋、反转、兑现、喘息），而不是等重的事件平铺。',
+      '检验方法：如果把本弧的原创设计元素全部抹掉，章节大纲还能照原样成立（纯靠史实顺序即可复原），说明本章没有设计，必须重写。',
+    ].join('\n')),
     section('生成要求', [
       '每章 goal 必须服务本弧目标，合起来能看出主线持续推进。',
       'title 必须准确对应本章核心事件或选择压力，不能为了“高级感”脱离具体内容。',
@@ -1456,6 +1466,7 @@ export function buildChapterOutlinePlanningPrompt(params: ChapterOutlinePromptIn
       '新生成的章节开头方式、情绪基调、登场人物组合不得与已有章节大纲连续重复超过两章。',
       '优先安排真正需要上场的人物和地点，别把所有线索都塞进每一章。',
     ].join('\n')),
+    params.designGateDirective ? section('上一轮设计校验反馈（必须修正）', params.designGateDirective) : '',
     section('语言要求', buildHumanLanguageRules([
       '章节标题、目标、成长账本和代价账本都要写得清楚直接，避免抽象套话。',
     ])),
@@ -1515,6 +1526,7 @@ export function buildVolumePlanningPrompt(params: VolumePlanningPromptInput): st
       '相邻两卷之间必须有明确的承接关系：上一卷的遗留问题如何影响下一卷。',
       '字数分配要考虑节奏：开篇卷可以短一些（15-25万字），中段卷可以长一些（25-35万字），收束卷根据需要调整。',
       '每卷必须标注主角在该卷的成长阶段和实力/地位变化。',
+      '每卷除了阶段高潮，还要显式规划质感/关系/喘息段落（可写进 subplot_status 或 key_arcs），让读者在高强度推进之间有呼吸，人物在非战斗场合显出性格。',
     ].join('\n')),
     section('语言要求', buildHumanLanguageRules([
       '卷标题和主题描述要具体，不要写成万能隐喻标题或只表达气氛的空泛卷名。',
@@ -1657,23 +1669,30 @@ export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
       '优先处理章节任务和因果推进，不要为了花样强行加戏。',
       'exit_hook 只写最自然的收尾钩子，不要故作玄虚。',
       '',
+      '设计维度（把场景从“陈述事件”升级成“设计的戏”，至少给有分量的场景填全）：',
+      '- hidden_agendas：在场每一方此刻真正想要什么（可能和嘴上说的不一样），逐方写。一场戏若只有一方有诉求、其余人只是接话，就是单向量陈述，必须补出对方的算盘。',
+      '- irony_gap：读者已经知道、但场上某个角色还不知道的事（戏剧反讽）。没有就写“无”，但优先设计一处，让读者比角色多知道一点。',
+      '- audience：这场戏其实是演给谁看的——在场的第三方、场外的势力、还是角色在给自己一个交代。对白和动作要考虑“被谁听见/看见”。',
+      '',
       '可执行性检查（每个场景必须同时满足）：',
       '1. 开场钩子：场景开头 50 字内必须有一个动作、悬念或感官冲击，不能以描写天气/环境/心理活动开头。',
       '2. 具体冲突：conflict 字段必须写出「谁 vs 谁/什么」以及冲突的具体表现，不能写"矛盾升级""关系紧张"这种抽象词。',
       '3. 退出悬念：exit_hook 必须包含一个未解决的问题或即将发生的动作，让读者必须翻页。',
       '4. 因果链：每个场景的 purpose 必须承接上一个场景的 exit_hook 或结果。',
+      '5. 博弈感：多人同场时，hidden_agendas 里至少有两方诉求不完全一致，让对白承载潜台词而不是互相通报信息。',
       '',
       '负面示例（以下写法会被打回重写）：',
       '× purpose: "推进剧情发展" → ✓ "林远发现仓库存粮被偷，追踪脚印到三号楼"',
       '× conflict: "矛盾进一步激化" → ✓ "林远要求搜查三号楼，赵队长以安全为由拒绝放行"',
       '× exit_hook: "事情变得更加复杂" → ✓ "林远在三号楼门缝里闻到血腥味"',
       '× beat: "众人讨论后达成一致" → ✓ "投票 4:3 通过搜查，赵队长摔门离开"',
+      '× hidden_agendas: "大家各有心思" → ✓ "林远想借搜查立威；赵队长在护着侄子；书记员只想不担责"',
     ].join('\n')),
     section('语言要求', buildHumanLanguageRules([
       '场景目标和冲突都写具体事实，不写“命运转折”“真正成长”这种空话。',
     ])),
     '只输出 JSON 数组。示例值只表示字段结构，实际输出必须写入当前章节的具体内容：',
-    '[{"scene_order":1,"scene_title":"","purpose":"","location":"","time_anchor":"","present_characters":[],"key_items":[],"conflict":"","beat":"","must_cover":[],"climax_variant":"","exit_hook":""}]',
+    '[{"scene_order":1,"scene_title":"","purpose":"","location":"","time_anchor":"","present_characters":[],"key_items":[],"conflict":"","hidden_agendas":[],"irony_gap":"","audience":"","beat":"","must_cover":[],"climax_variant":"","exit_hook":""}]',
     buildAvoidanceSection(params.rejectedDigests || []),
     params.attemptNumber && params.attemptNumber > 1 ? buildVariationHint(params.attemptNumber, 'outline') : '',
   ])
@@ -1696,7 +1715,7 @@ export function buildChapterWritingPrompt(params: ChapterWritingPromptInput): st
       storyCore: params.storyCore,
       worldSummary: params.worldRules,
       taskFocus: '先把事件链、动作链和后果链写顺，再让情绪自然浮出来。',
-      extraContextLines: ['只写和本章任务有关的场景，不要为了凑字数平铺日常。'],
+      extraContextLines: ['每个场景要么推进本章任务，要么承担关系、伏笔、质感或喘息的次级功能；允许有节制的闲笔和日常，但每一段都要有存在理由，不写无信息增量的注水段落。'],
       extraRealityLines: ['遇到不准确搭配，优先改成读者最熟悉、最准确的常规说法。'],
     }),
     section('本章必须完成', params.chapterGoal || '按已定大纲执行'),
@@ -1749,7 +1768,7 @@ export function buildChapterWritingPrompt(params: ChapterWritingPromptInput): st
       '人物说话要像这个人当下会说的话，别让所有角色一个语气。',
       '如果上下文给了关系摘要，就把亲疏、权力差、潜台词和说话习惯写进对白。',
       '主角在本章里可以害怕、迟疑、失望、心软或犯错，但这些反应必须推动后续选择。',
-      '只写和本章任务有关的场景，不要为了凑字数平铺日常。',
+      '每个场景要么推进本章任务，要么承担关系、伏笔、质感或喘息的次级功能；允许有节制的闲笔与日常，但不写无信息增量的注水段落。',
       '如果给了文风参考，只借叙述气质、视角和句子密度，不模仿具体作者。',
       '遇到不准确搭配，优先改成读者最熟悉、最准确的常规说法。',
       '只输出正文，不要解释。正文第一行直接进入叙事，不要写“第X章”、章节标题或任何标题行。',

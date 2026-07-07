@@ -199,6 +199,10 @@ interface ScenePlanStep {
   must_cover: string[]
   climax_variant: string
   exit_hook: string
+  // 设计维度（P1）：把场景从“陈述事件”推向“设计博弈”。
+  hidden_agendas: string[]
+  irony_gap: string
+  audience: string
 }
 
 type ReviewSeverity = 'low' | 'medium' | 'high'
@@ -225,6 +229,8 @@ interface ChapterReviewNotes {
   language_risks: string[]
   human_language_repairs: string[]
   genre_hollowing_risks: string[]
+  // P3 设计感专项（warning 级，仅提示不阻塞）：本章是否只是把事件/史实写顺，缺戏剧设计。
+  design_flatness_risks?: string[]
   typed_ref_risks: string[]
   source_grounding_risks: string[]
   operating_mode_risks: string[]
@@ -1367,6 +1373,9 @@ function normalizeScenePlan(raw: unknown, fallback: ScenePlanStep[]): ScenePlanS
         must_cover: toStringArray(record.must_cover),
         climax_variant: asText(record.climax_variant),
         exit_hook: asText(record.exit_hook),
+        hidden_agendas: toStringArray(record.hidden_agendas),
+        irony_gap: asText(record.irony_gap),
+        audience: asText(record.audience),
       }
     })
     .filter((item): item is ScenePlanStep => Boolean(item))
@@ -1398,6 +1407,9 @@ function buildFallbackScenePlan(chapter: typeof chapters.$inferSelect): ScenePla
     must_cover: [line],
     climax_variant: '',
     exit_hook: index === seeds.length - 1 ? '把本章推进到自然收束点。' : '把当前冲突继续推向下一段。',
+    hidden_agendas: [],
+    irony_gap: '',
+    audience: '',
   }))
 }
 
@@ -1542,6 +1554,9 @@ function formatScenePlan(scenePlan: ScenePlanStep[]): string {
         step.present_characters.length > 0 ? `人物=${step.present_characters.join('、')}` : '',
         step.key_items.length > 0 ? `物品=${step.key_items.join('、')}` : '',
         step.conflict ? `冲突=${step.conflict}` : '',
+        step.hidden_agendas.length > 0 ? `各方心思=${step.hidden_agendas.join('；')}` : '',
+        step.irony_gap ? `信息差(读者知/角色不知)=${step.irony_gap}` : '',
+        step.audience ? `这场戏演给谁看=${step.audience}` : '',
         step.beat ? `动作=${step.beat}` : '',
         step.must_cover.length > 0 ? `必须交代=${step.must_cover.join('；')}` : '',
         step.climax_variant ? `高潮变体=${step.climax_variant}` : '',
@@ -1606,6 +1621,7 @@ function normalizeReviewNotes(raw: unknown): ChapterReviewNotes {
     language_risks: toStringArray(record.language_risks),
     human_language_repairs: toStringArray(record.human_language_repairs),
     genre_hollowing_risks: toStringArray(record.genre_hollowing_risks),
+    design_flatness_risks: toStringArray(record.design_flatness_risks),
     typed_ref_risks: toStringArray(record.typed_ref_risks),
     source_grounding_risks: toStringArray(record.source_grounding_risks),
     operating_mode_risks: toStringArray(record.operating_mode_risks),
@@ -1810,6 +1826,7 @@ function formatReviewNotes(notes: ChapterReviewNotes): string {
     notes.language_risks.length > 0 ? `语言风险：\n- ${notes.language_risks.join('\n- ')}` : '',
     notes.human_language_repairs.length > 0 ? `语言替换建议：\n- ${notes.human_language_repairs.join('\n- ')}` : '',
     notes.genre_hollowing_risks.length > 0 ? `体裁空心化：\n- ${notes.genre_hollowing_risks.join('\n- ')}` : '',
+    notes.design_flatness_risks && notes.design_flatness_risks.length > 0 ? `设计扁平（仅提示，不阻塞）：\n- ${notes.design_flatness_risks.join('\n- ')}` : '',
     notes.typed_ref_risks.length > 0 ? `Typed Ref 缺口：\n- ${notes.typed_ref_risks.join('\n- ')}` : '',
     notes.source_grounding_risks.length > 0 ? `来源/grounding 风险：\n- ${notes.source_grounding_risks.join('\n- ')}` : '',
     notes.operating_mode_risks.length > 0 ? `OperatingMode 违规：\n- ${notes.operating_mode_risks.join('\n- ')}` : '',
