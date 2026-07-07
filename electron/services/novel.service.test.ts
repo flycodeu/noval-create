@@ -7,6 +7,7 @@ vi.mock('../database/db', async () => {
   return {
     ...actual,
     getDb: vi.fn(),
+    getSqlite: vi.fn(),
   }
 })
 
@@ -19,11 +20,11 @@ vi.mock('./context-impact.service', () => ({
   markNovelContextChanged: vi.fn(),
 }))
 
-import { getDb } from '../database/db'
+import { getDb, getSqlite } from '../database/db'
 import { chapters, genres, novels } from '../database/schema'
 import { recordAssetChangeEvent } from './asset-impact.service'
 import { markNovelContextChanged } from './context-impact.service'
-import { createNovel, getNovel, updateNovel } from './novel.service'
+import { createNovel, deleteNovel, getNovel, updateNovel } from './novel.service'
 
 type TableRows = Map<unknown, Array<Record<string, unknown>>>
 
@@ -118,6 +119,67 @@ function createRows(): TableRows {
   ])
 }
 
+function createSqliteDeleteMock(tables: Record<string, Array<Record<string, unknown>>>) {
+  const tableInfoCalls: string[] = []
+  const deleteCalls: string[] = []
+
+  const sqlite = {
+    prepare: vi.fn((sql: string) => {
+      if (sql.includes('sqlite_master')) {
+        return {
+          all: vi.fn(() => Object.keys(tables).map((name) => ({ name }))),
+        }
+      }
+
+      if (sql.startsWith('PRAGMA table_info')) {
+        const tableName = sql.match(/"([^"]+)"/)?.[1] || ''
+        tableInfoCalls.push(tableName)
+        return {
+          all: vi.fn(() => Object.keys(tables[tableName]?.[0] || {}).map((name) => ({ name }))),
+        }
+      }
+
+      if (sql.startsWith('DELETE FROM')) {
+        deleteCalls.push(sql)
+        return {
+          run: vi.fn((novelId: number) => {
+            const tableName = sql.match(/DELETE FROM "([^"]+)"/)?.[1] || sql.match(/DELETE FROM ([^ ]+)/)?.[1] || ''
+            const rows = tables[tableName] || []
+            const before = rows.length
+
+            if (sql.includes('run_id IN') && tables.chapter_writeback_runs) {
+              const runIds = new Set(tables.chapter_writeback_runs
+                .filter((row) => row.novel_id === novelId)
+                .map((row) => row.id))
+              tables[tableName] = rows.filter((row) => !runIds.has(row.run_id))
+            } else if (sql.includes('snapshot_id IN') && tables.chapter_batch_snapshots) {
+              const snapshotIds = new Set(tables.chapter_batch_snapshots
+                .filter((row) => row.novel_id === novelId)
+                .map((row) => row.id))
+              tables[tableName] = rows.filter((row) => !snapshotIds.has(row.snapshot_id))
+            } else if (sql.includes('WHERE novel_id = ?')) {
+              tables[tableName] = rows.filter((row) => row.novel_id !== novelId)
+            } else if (sql.includes('WHERE id = ?')) {
+              tables[tableName] = rows.filter((row) => row.id !== novelId)
+            }
+
+            return { changes: before - (tables[tableName] || []).length }
+          }),
+        }
+      }
+
+      throw new Error(`Unexpected SQL in sqlite mock: ${sql}`)
+    }),
+    transaction: vi.fn((callback: () => void) => {
+      return () => callback()
+    }),
+    __tableInfoCalls: tableInfoCalls,
+    __deleteCalls: deleteCalls,
+  }
+
+  return sqlite
+}
+
 describe('novel source/canon fields', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -125,6 +187,7 @@ describe('novel source/canon fields', () => {
 
   afterEach(() => {
     vi.mocked(getDb).mockReset()
+    vi.mocked(getSqlite).mockReset()
   })
 
   it('declares the new source/canon columns in schema and migration sources', () => {
@@ -199,5 +262,33 @@ describe('novel source/canon fields', () => {
       assetType: 'novel',
       operation: 'update',
     }))
+  })
+
+  it('deletes a novel together with novel-scoped rows that are not guaranteed by foreign keys', () => {
+    const rows = {
+      novels: [{ id: 7, title: '待删除' }, { id: 8, title: '保留' }],
+      tasks: [{ id: 1, novel_id: 7 }, { id: 2, novel_id: 8 }],
+      character_relations: [{ id: 3, novel_id: 7 }, { id: 4, novel_id: 8 }],
+      chapter_writeback_runs: [{ id: 5, novel_id: 7 }, { id: 6, novel_id: 8 }],
+      chapter_fact_extracts: [{ id: 7, run_id: 5 }, { id: 8, run_id: 6 }],
+      chapter_writeback_diffs: [{ id: 9, run_id: 5 }, { id: 10, run_id: 6 }],
+      chapter_batch_snapshots: [{ id: 11, novel_id: 7 }, { id: 12, novel_id: 8 }],
+      chapter_batch_inspections: [{ id: 13, snapshot_id: 11 }, { id: 14, snapshot_id: 12 }],
+      chapter_batch_rollbacks: [{ id: 15, snapshot_id: 11 }, { id: 16, snapshot_id: 12 }],
+    }
+    const sqlite = createSqliteDeleteMock(rows)
+    vi.mocked(getSqlite).mockReturnValue(sqlite as never)
+
+    deleteNovel(7)
+
+    expect(sqlite.transaction).toHaveBeenCalledTimes(1)
+    expect(rows.novels).toEqual([{ id: 8, title: '保留' }])
+    expect(rows.tasks).toEqual([{ id: 2, novel_id: 8 }])
+    expect(rows.character_relations).toEqual([{ id: 4, novel_id: 8 }])
+    expect(rows.chapter_fact_extracts).toEqual([{ id: 8, run_id: 6 }])
+    expect(rows.chapter_writeback_diffs).toEqual([{ id: 10, run_id: 6 }])
+    expect(rows.chapter_batch_inspections).toEqual([{ id: 14, snapshot_id: 12 }])
+    expect(rows.chapter_batch_rollbacks).toEqual([{ id: 16, snapshot_id: 12 }])
+    expect(sqlite.__deleteCalls.at(-1)).toBe('DELETE FROM novels WHERE id = ?')
   })
 })

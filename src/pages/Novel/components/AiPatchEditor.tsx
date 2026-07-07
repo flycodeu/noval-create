@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Alert, Button, Input, Space, message } from 'antd'
+import { Alert, Button, Input, Modal, Space, message } from 'antd'
 import { MessageOutlined } from '@ant-design/icons'
 import type { AiPatchResult, AiPatchTarget } from '../../../types'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
@@ -24,12 +24,14 @@ export default function AiPatchEditor({
   compact,
   onApplied,
 }: AiPatchEditorProps) {
+  const [open, setOpen] = useState(false)
   const [instruction, setInstruction] = useState('')
   const [loading, setLoading] = useState(false)
   const [applying, setApplying] = useState(false)
   const [result, setResult] = useState<AiPatchResult | null>(null)
 
   useEffect(() => {
+    setOpen(false)
     setInstruction('')
     setResult(null)
   }, [target?.type, target?.id, target?.sectionKey])
@@ -59,6 +61,7 @@ export default function AiPatchEditor({
       await onApplied?.(applied, result)
       setResult(null)
       setInstruction('')
+      setOpen(false)
       message.success(getUserFacingMessage('aiPatch.applied'))
     } catch (error) {
       console.error(error)
@@ -69,68 +72,85 @@ export default function AiPatchEditor({
   }
 
   return (
-    <div className={`novel-ai-patch-editor${compact ? ' novel-ai-patch-editor--compact' : ''}`}>
-      <div className="novel-ai-patch-editor__head">
-        <div>
-          <strong>{title}</strong>
-          {description ? <span>{description}</span> : null}
-        </div>
-        <Button
-          icon={<MessageOutlined />}
-          loading={loading}
-          disabled={disabled || !target || !instruction.trim()}
-          onClick={() => void suggestPatch()}
-        >
-          生成修改建议
-        </Button>
-      </div>
-      <Input.TextArea
-        rows={compact ? 2 : 3}
-        value={instruction}
+    <>
+      <Button
+        icon={<MessageOutlined />}
         disabled={disabled || !target}
-        onChange={(event) => setInstruction(event.target.value)}
-        placeholder={placeholder}
-      />
-      {result ? (
-        <div className="novel-ai-patch-editor__result">
-          <div className="novel-ai-patch-editor__summary">
-            <span>{result.summary}</span>
+        size={compact ? 'small' : 'middle'}
+        onClick={() => setOpen(true)}
+      >
+        {title}
+      </Button>
+      <Modal
+        title={title}
+        open={open}
+        width={760}
+        footer={null}
+        onCancel={() => setOpen(false)}
+      >
+        <div className={`novel-ai-patch-editor${compact ? ' novel-ai-patch-editor--compact' : ''}`}>
+          <div className="novel-ai-patch-editor__head">
+            <div>
+              {description ? <span>{description}</span> : null}
+            </div>
             <Button
-              type="primary"
-              size="small"
-              loading={applying}
-              disabled={disabled || result.changedFields.length === 0}
-              onClick={() => void applyPatch()}
+              icon={<MessageOutlined />}
+              loading={loading}
+              disabled={disabled || !target || !instruction.trim()}
+              onClick={() => void suggestPatch()}
             >
-              应用修改
+              生成修改建议
             </Button>
           </div>
-          {result.warnings.length > 0 ? (
-            <Alert
-              type="warning"
-              showIcon
-              message="应用前注意"
-              description={result.warnings.join('；')}
-            />
-          ) : null}
-          <div className="novel-ai-patch-editor__diffs">
-            {result.changedFields.length === 0 ? (
-              <div className="novel-empty">没有字段变化。</div>
-            ) : result.changedFields.map((change) => (
-              <div key={`${change.field}-${change.label}`} className="novel-ai-patch-diff">
-                <strong>{change.label}</strong>
-                <div className="novel-ai-patch-diff__body">
-                  <span>{change.before || '空'}</span>
-                  <span>{change.after || '空'}</span>
-                </div>
+          <Input.TextArea
+            rows={compact ? 2 : 3}
+            value={instruction}
+            disabled={disabled || !target}
+            onChange={(event) => setInstruction(event.target.value)}
+            placeholder={placeholder}
+          />
+          {result ? (
+            <div className="novel-ai-patch-editor__result">
+              <div className="novel-ai-patch-editor__summary">
+                <span>{result.summary}</span>
+                <Button
+                  type="primary"
+                  size="small"
+                  loading={applying}
+                  disabled={disabled || result.changedFields.length === 0}
+                  onClick={() => void applyPatch()}
+                >
+                  应用修改
+                </Button>
               </div>
-            ))}
-          </div>
-          <Space className="novel-ai-patch-editor__foot">
-            <Button size="small" onClick={() => setResult(null)}>丢弃建议</Button>
-          </Space>
+              {result.warnings.length > 0 ? (
+                <Alert
+                  type="warning"
+                  showIcon
+                  message="应用前注意"
+                  description={result.warnings.join('；')}
+                />
+              ) : null}
+              <div className="novel-ai-patch-editor__diffs">
+                {result.changedFields.length === 0 ? (
+                  <div className="novel-empty">没有字段变化。</div>
+                ) : result.changedFields.map((change) => (
+                  <div key={`${change.field}-${change.label}`} className="novel-ai-patch-diff">
+                    <strong>{change.label}</strong>
+                    <div className="novel-ai-patch-diff__body">
+                      <span>{change.before || '空'}</span>
+                      <span>{change.after || '空'}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <Space className="novel-ai-patch-editor__foot">
+                <Button size="small" onClick={() => setResult(null)}>丢弃建议</Button>
+              </Space>
+            </div>
+          ) : null}
         </div>
-      ) : null}
-    </div>
+      </Modal>
+    </>
   )
 }

@@ -6,7 +6,7 @@ import {
   writeOperatingModeSettings,
 } from '../../src/shared/operating-mode'
 import { normalizeWorldRulesDraft, stringifyWorldRulesDraft } from '../../src/shared/world-rules-draft'
-import { getDb } from '../database/db'
+import { getDb, getSqlite } from '../database/db'
 import { chapters, characters, genres, novels } from '../database/schema'
 import { throwUserFacingError } from '../utils/user-facing-error'
 import { recordAssetChangeEvent } from './asset-impact.service'
@@ -33,6 +33,96 @@ const NOVEL_SOURCE_CANON_FIELD_KEYS: Array<keyof NovelSourceCanonJsonFields> = [
   'canonSourceLedgerJson',
   'canonFactCardsJson',
 ]
+
+const NOVEL_CHILD_TABLES_DELETE_FIRST = [
+  'chapter_fact_extracts',
+  'chapter_writeback_diffs',
+  'chapter_batch_inspections',
+  'chapter_batch_rollbacks',
+]
+
+const NOVEL_SCOPED_TABLES_DELETE_LAST = [
+  'story_volumes',
+  'story_parts',
+  'chapters',
+  'characters',
+  'world_map',
+  'story_arcs',
+  'story_threads',
+  'story_items',
+  'story_facts',
+  'timeline_events',
+  'novels',
+]
+
+function quoteIdentifier(identifier: string) {
+  return `"${identifier.replace(/"/g, '""')}"`
+}
+
+function listExistingTables() {
+  const sqlite = getSqlite()
+  return sqlite.prepare(`
+    SELECT name
+    FROM sqlite_master
+    WHERE type = 'table'
+      AND name NOT LIKE 'sqlite_%'
+  `).all().map((row) => String((row as { name: string }).name))
+}
+
+function tableHasColumn(tableName: string, columnName: string) {
+  return getSqlite()
+    .prepare(`PRAGMA table_info(${quoteIdentifier(tableName)})`)
+    .all()
+    .some((row) => String((row as { name: string }).name) === columnName)
+}
+
+function deleteRowsIfTableExists(tableNames: Set<string>, tableName: string, whereSql: string, novelId: number) {
+  if (!tableNames.has(tableName)) return
+  getSqlite().prepare(`DELETE FROM ${quoteIdentifier(tableName)} WHERE ${whereSql}`).run(novelId)
+}
+
+function deleteNovelScopedRows(tableNames: Set<string>, novelId: number) {
+  deleteRowsIfTableExists(
+    tableNames,
+    'chapter_fact_extracts',
+    'run_id IN (SELECT id FROM chapter_writeback_runs WHERE novel_id = ?)',
+    novelId,
+  )
+  deleteRowsIfTableExists(
+    tableNames,
+    'chapter_writeback_diffs',
+    'run_id IN (SELECT id FROM chapter_writeback_runs WHERE novel_id = ?)',
+    novelId,
+  )
+  deleteRowsIfTableExists(
+    tableNames,
+    'chapter_batch_inspections',
+    'snapshot_id IN (SELECT id FROM chapter_batch_snapshots WHERE novel_id = ?)',
+    novelId,
+  )
+  deleteRowsIfTableExists(
+    tableNames,
+    'chapter_batch_rollbacks',
+    'snapshot_id IN (SELECT id FROM chapter_batch_snapshots WHERE novel_id = ?)',
+    novelId,
+  )
+
+  const scopedTables = listExistingTables()
+    .filter((tableName) => tableName !== 'novels' && tableHasColumn(tableName, 'novel_id'))
+    .filter((tableName) => !NOVEL_CHILD_TABLES_DELETE_FIRST.includes(tableName))
+    .sort((left, right) => {
+      const leftOrder = NOVEL_SCOPED_TABLES_DELETE_LAST.indexOf(left)
+      const rightOrder = NOVEL_SCOPED_TABLES_DELETE_LAST.indexOf(right)
+      if (leftOrder === -1 && rightOrder === -1) return left.localeCompare(right)
+      if (leftOrder === -1) return -1
+      if (rightOrder === -1) return 1
+      return leftOrder - rightOrder
+    })
+
+  for (const tableName of scopedTables) {
+    getSqlite().prepare(`DELETE FROM ${quoteIdentifier(tableName)} WHERE novel_id = ?`).run(novelId)
+  }
+}
 
 function normalizeWorldRulesJson(raw: string, genreName?: string) {
   try {
@@ -309,8 +399,12 @@ export function updateNovel(id: number, data: Partial<{
 }
 
 export function deleteNovel(id: number) {
-  const db = getDb()
-  db.delete(novels).where(eq(novels.id, id)).run()
+  const sqlite = getSqlite()
+  sqlite.transaction(() => {
+    const tableNames = new Set(listExistingTables())
+    deleteNovelScopedRows(tableNames, id)
+    sqlite.prepare('DELETE FROM novels WHERE id = ?').run(id)
+  })()
 }
 
 export function getNovelStats(id: number) {

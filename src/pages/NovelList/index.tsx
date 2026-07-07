@@ -218,9 +218,15 @@ export default function NovelList() {
       okType: 'danger',
       cancelText: '取消',
       onOk: async () => {
-        await window.electron.novel.delete(id)
-        await loadNovels()
-        message.success(getUserFacingMessage('novel.deleted'))
+        try {
+          await window.electron.novel.delete(id)
+          await loadNovels()
+          message.success(getUserFacingMessage('novel.deleted'))
+        } catch (error) {
+          console.error(error)
+          message.error(getErrorMessage(error, 'common.deleteFailed'))
+          throw error
+        }
       },
     })
   }
