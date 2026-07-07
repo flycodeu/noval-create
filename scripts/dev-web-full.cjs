@@ -102,6 +102,16 @@ function fetchBackendHealth() {
   })
 }
 
+async function waitForBackendReady() {
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    const health = await fetchBackendHealth()
+    const version = health && health.ok && health.data ? Number(health.data.version) : 0
+    if (version === expectedBackendVersion) return true
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  }
+  return false
+}
+
 async function waitForPortClosed(port) {
   for (let attempt = 0; attempt < 20; attempt += 1) {
     if (!(await isPortListening(port))) return true
@@ -137,6 +147,7 @@ function shutdown(code = 0) {
 }
 
 async function main() {
+  let startedBackend = false
   if (await isPortListening(backendPort)) {
     const health = await fetchBackendHealth()
     const version = health && health.ok && health.data ? Number(health.data.version) : 0
@@ -145,11 +156,20 @@ async function main() {
     } else if (stopProcessOnPort(backendPort) && await waitForPortClosed(backendPort)) {
       console.log(`[dev:web] restarted outdated backend on http://127.0.0.1:${backendPort}`)
       children.push(startProcess('backend', electronCommand, ['scripts/local-web-backend.cjs']))
+      startedBackend = true
     } else {
       console.log(`[dev:web] backend is listening on http://127.0.0.1:${backendPort}, but version is unknown; reuse it`)
     }
   } else {
     children.push(startProcess('backend', electronCommand, ['scripts/local-web-backend.cjs']))
+    startedBackend = true
+  }
+
+  if (startedBackend) {
+    console.log(`[dev:web] waiting for backend http://127.0.0.1:${backendPort}/health`)
+    if (!(await waitForBackendReady())) {
+      throw new Error(`backend did not become ready on http://127.0.0.1:${backendPort}/health`)
+    }
   }
 
   if (await isPortListening(frontendPort)) {

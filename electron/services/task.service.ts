@@ -13,6 +13,7 @@ import {
 } from './model.service'
 import { appendVariationMessage, buildVariationDigest } from './variation-control.service'
 import { throwUserFacingError } from '../utils/user-facing-error'
+import { logWarn } from '../utils/runtime-log'
 
 export type TaskType =
   | 'init'
@@ -214,6 +215,9 @@ const TASK_HEARTBEAT_INTERVAL_MS = 15_000
 const RATE_LIMIT_RETRY_LIMIT = 3
 const RATE_LIMIT_BASE_DELAY_MS = 1_500
 const RATE_LIMIT_MAX_DELAY_MS = 12_000
+const TRANSIENT_MODEL_TASK_RETRY_LIMIT = 2
+const TRANSIENT_MODEL_TASK_RETRY_BASE_DELAY_MS = 2_000
+const TRANSIENT_MODEL_TASK_RETRY_MAX_DELAY_MS = 8_000
 const ENDED_TASK_STATUSES: TaskStatus[] = ['success', 'failed', 'cancelled']
 const MAX_STREAM_OUTPUT_LENGTH = 524_288 // ~512K 字符安全上限
 const CHAPTER_PIPELINE_ROLES: TaskPipelineRole[] = ['planner', 'writer', 'critic', 'rewriter', 'canonizer', 'finalize']
@@ -595,6 +599,36 @@ function getRateLimitDelayMs(attempt: number, error: unknown): number {
   return Math.min(RATE_LIMIT_MAX_DELAY_MS, RATE_LIMIT_BASE_DELAY_MS * (2 ** attempt))
 }
 
+function getTransientModelTaskRetryDelayMs(attempt: number): number {
+  return Math.min(TRANSIENT_MODEL_TASK_RETRY_MAX_DELAY_MS, TRANSIENT_MODEL_TASK_RETRY_BASE_DELAY_MS * (2 ** attempt))
+}
+
+export function shouldRetryTransientModelTaskError(error: unknown, options: {
+  retryable?: boolean
+  attemptNumber: number
+  receivedOutput?: boolean
+}): boolean {
+  if (!options.retryable || options.receivedOutput) return false
+  if (options.attemptNumber >= TRANSIENT_MODEL_TASK_RETRY_LIMIT) return false
+  return isTransientModelNetworkError(error)
+}
+
+async function waitBeforeTransientModelRetry(taskId: number, attemptNumber: number, error: unknown, signal?: AbortSignal) {
+  const retryDelayMs = getTransientModelTaskRetryDelayMs(attemptNumber)
+  logWarn('model', '模型任务遇到瞬时网络异常，准备重新执行。', {
+    consoleSummary: `[model:warn] task=${taskId} transient retry=${attemptNumber + 1}/${TRANSIENT_MODEL_TASK_RETRY_LIMIT}`,
+    context: {
+      taskId,
+      retryAttempt: attemptNumber + 1,
+      maxRetries: TRANSIENT_MODEL_TASK_RETRY_LIMIT,
+      delayMs: retryDelayMs,
+      detail: describeTransientNetworkError(error),
+    },
+    error,
+  })
+  await delay(retryDelayMs, signal)
+}
+
 async function delay(ms: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) throw buildAbortError()
 
@@ -923,26 +957,40 @@ export async function executeStreamTask(taskId: number, opts: RunTaskOptions): P
     stopHeartbeat = startTaskHeartbeat(taskId)
     const chatOpts = opts.chatOpts || {}
 
-    await executeStreamWithRateLimitRetries(acquired.runtime.adapter, opts.messages, {
-      temperature: acquired.runtime.temperature,
-      maxTokens: acquired.runtime.maxTokens,
-      ...chatOpts,
-      providerOptions: {
-        ...acquired.runtime.providerOptions,
-        ...chatOpts.providerOptions,
-      },
-      signal: controller.signal,
-      onStream: (chunk) => {
-        fullOutput += chunk
-        if (fullOutput.length > MAX_STREAM_OUTPUT_LENGTH) {
-          outputLimitExceeded = true
-          controller.abort()
-          return
+    for (let attemptNumber = 0; ; attemptNumber += 1) {
+      try {
+        await executeStreamWithRateLimitRetries(acquired.runtime.adapter, opts.messages, {
+          temperature: acquired.runtime.temperature,
+          maxTokens: acquired.runtime.maxTokens,
+          ...chatOpts,
+          providerOptions: {
+            ...acquired.runtime.providerOptions,
+            ...chatOpts.providerOptions,
+          },
+          signal: controller.signal,
+          onStream: (chunk) => {
+            fullOutput += chunk
+            if (fullOutput.length > MAX_STREAM_OUTPUT_LENGTH) {
+              outputLimitExceeded = true
+              controller.abort()
+              return
+            }
+            void opts.onChunk?.(chunk, fullOutput, taskId)
+            safeSend(opts.sender, 'task:stream-chunk', { taskId, chunk })
+          },
+        })
+        break
+      } catch (error) {
+        if (!shouldRetryTransientModelTaskError(error, {
+          retryable: opts.retryable,
+          attemptNumber,
+          receivedOutput: Boolean(fullOutput),
+        })) {
+          throw error
         }
-        void opts.onChunk?.(chunk, fullOutput, taskId)
-        safeSend(opts.sender, 'task:stream-chunk', { taskId, chunk })
-      },
-    })
+        await waitBeforeTransientModelRetry(taskId, attemptNumber, error, controller.signal)
+      }
+    }
 
     const result = opts.onSuccess ? await opts.onSuccess(fullOutput, taskId) : undefined
     const durationMs = Date.now() - startTime
@@ -1035,16 +1083,30 @@ export async function executeChatTask(taskId: number, opts: RunTaskOptions): Pro
     stopHeartbeat = startTaskHeartbeat(taskId)
     const chatOpts = opts.chatOpts || {}
 
-    const result = await executeChatWithRateLimitRetries(acquired.runtime.adapter, opts.messages, {
-      temperature: acquired.runtime.temperature,
-      maxTokens: acquired.runtime.maxTokens,
-      ...chatOpts,
-      providerOptions: {
-        ...acquired.runtime.providerOptions,
-        ...chatOpts.providerOptions,
-      },
-      signal: controller.signal,
-    })
+    let result = ''
+    for (let attemptNumber = 0; ; attemptNumber += 1) {
+      try {
+        result = await executeChatWithRateLimitRetries(acquired.runtime.adapter, opts.messages, {
+          temperature: acquired.runtime.temperature,
+          maxTokens: acquired.runtime.maxTokens,
+          ...chatOpts,
+          providerOptions: {
+            ...acquired.runtime.providerOptions,
+            ...chatOpts.providerOptions,
+          },
+          signal: controller.signal,
+        })
+        break
+      } catch (error) {
+        if (!shouldRetryTransientModelTaskError(error, {
+          retryable: opts.retryable,
+          attemptNumber,
+        })) {
+          throw error
+        }
+        await waitBeforeTransientModelRetry(taskId, attemptNumber, error, controller.signal)
+      }
+    }
 
     const finalResult = opts.onSuccess ? await opts.onSuccess(result, taskId) : undefined
 
