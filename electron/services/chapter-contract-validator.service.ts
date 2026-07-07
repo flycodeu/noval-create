@@ -158,6 +158,23 @@ const OPENING_SCENE_MARKERS = [
   '血迹',
   '烟尘',
   '尘土',
+  '船底',
+  '船板',
+  '船舷',
+  '船舱',
+  '舱口',
+  '水下',
+  '水道',
+  '桅灯',
+  '炉前',
+  '炉膛',
+  '风压表',
+  '表盘',
+  '操作台',
+  '出渣口',
+  '工册股',
+  '誊录室',
+  '档案架',
 ]
 
 const OPENING_ACTION_MARKERS = [
@@ -186,6 +203,24 @@ const OPENING_ACTION_MARKERS = [
   '盘问',
   '确认',
   '发现',
+  '攥',
+  '扳',
+  '盯',
+  '合上',
+  '掀开',
+  '取出',
+  '伸手',
+  '缩回',
+  '滑进',
+  '游',
+  '沉',
+  '刺',
+  '拔',
+  '倒',
+  '誊',
+  '抄',
+  '写',
+  '翻',
 ]
 
 const OPENING_PRESSURE_MARKERS = [
@@ -207,6 +242,19 @@ const OPENING_PRESSURE_MARKERS = [
   '拦住',
   '?',
   '？',
+  '哭声',
+  '发冷',
+  '白烟',
+  '烫',
+  '压差',
+  '红线',
+  '过三格',
+  '骤降',
+  '喘',
+  '裂',
+  '痉挛',
+  '扣',
+  '收走',
 ]
 
 const OPENING_ABSTRACT_SETUP_MARKERS = [
@@ -309,6 +357,21 @@ const THEME_RESPONSE_MARKERS = [
   '证明',
   '反问',
   '为什么',
+]
+
+const HISTORICAL_EXECUTION_CHAIN_MARKERS = [
+  ['炉', '风压', '工册', '誊', '工', '班', '操作', '闸', '档案', '劳动'],
+  ['值长', '班组', '调令', '规程', '纪律', '组织', '夜校', '抚恤', '粮饷', '记录', '条例'],
+  ['扣', '调离', '失去', '顶嘴', '撕', '作废', '羞', '不识字', '停工', '损失', '搡开'],
+  ['夜校', '识字', '补录', '意识', '规程', '责任', '追问', '不对', '问题', '学'],
+]
+
+const ZHIGUAI_EXECUTION_CHAIN_MARKERS = [
+  ['妖', '鳃', '病帖', '哭声', '病', '疹', '瘘', '症'],
+  ['人间', '亏欠', '规矩', '食言', '许', '诺', '欠', '忘', '误解', '船家', '老周'],
+  ['诊', '针', '药', '治', '取出', '刺', '拔', '只诊', '判断', '病根', '银'],
+  ['代价', '剩', '裂纹', '记忆', '药引', '耗', '痛', '苦', '麻'],
+  ['余味', '账本', '别问', '病簿', '旧页', '继续走', '没再', '灯下', '微光'],
 ]
 
 const RELATION_TRIGGER_MARKERS = ['因为', '当', '发现', '得知', '逼', '质问', '拒绝', '背叛', '救', '交出', '暴露']
@@ -801,6 +864,38 @@ function validateGoldenThreeOpening(paragraphs: string[], context: ContractValid
   })
 }
 
+function matchExecutionChainSteps(text: string, stepMarkers: string[][]): boolean[] {
+  return stepMarkers.map((markers) => countMarkers(text, markers) > 0)
+}
+
+function validateCoreExecutionThemeResponse(paragraphs: string[], expected: string): ContractValidationItem | null {
+  if (!expected.includes('->')) return null
+  const text = paragraphs.join('\n')
+  const normalized = normalizeText(expected)
+  const isZhiguai = /妖病|妖医|治妖|病帖|诊疗/.test(normalized)
+  const isHistorical = /具体劳动|制度现场|组织关系|纪律反馈|工矿|炉前/.test(normalized)
+  if (!isZhiguai && !isHistorical) return null
+
+  const stepMarkers = isZhiguai ? ZHIGUAI_EXECUTION_CHAIN_MARKERS : HISTORICAL_EXECUTION_CHAIN_MARKERS
+  const matchedSteps = matchExecutionChainSteps(text, stepMarkers)
+  const matchedCount = matchedSteps.filter(Boolean).length
+  const verdict: ContractValidationVerdict = matchedCount >= stepMarkers.length
+    ? 'pass'
+    : matchedCount >= Math.max(3, stepMarkers.length - 1)
+      ? 'weak'
+      : 'missing'
+
+  return makeItem({
+    contractItemType: 'theme_chapter_response',
+    expected,
+    verdict,
+    evidenceExcerpt: clipExcerpt(text, 120),
+    rewriteHint: verdict === 'pass'
+      ? ''
+      : '补齐题材核心执行链，让正文同时出现病例/劳动现场、人的亏欠或制度反馈、主角判断受挫、具体代价与病后/事后余味。',
+  })
+}
+
 function getCharacterNameById(rows: typeof characters.$inferSelect[]): Map<number, string> {
   return new Map(rows.map((row) => [row.id, normalizeText(row.fullName) || `角色#${row.id}`]))
 }
@@ -808,6 +903,9 @@ function getCharacterNameById(rows: typeof characters.$inferSelect[]): Map<numbe
 function validateThemeResponse(paragraphs: string[], context: ContractValidationContext): ContractValidationItem | null {
   const expected = context.themeChapterTest || context.theme
   if (!expected) return null
+  const coreExecutionThemeResponse = validateCoreExecutionThemeResponse(paragraphs, expected)
+  if (coreExecutionThemeResponse) return coreExecutionThemeResponse
+
   const themeKeywords = buildKeywordCandidates(context.theme, context.themeChapterTest)
   const evidenceWindows = buildLocalEvidenceWindows(paragraphs, themeKeywords, 1)
   const hasLocalThemeResponse = evidenceWindows.some((windowText) =>

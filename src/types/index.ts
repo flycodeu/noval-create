@@ -2073,6 +2073,7 @@ export type HardConstraintSourceLabel =
   | 'chapterGoal'
   | 'characterStates'
   | 'worldStates'
+  | 'writingContractSummary'
   | 'relationSummary'
   | 'itemSummary'
   | 'openLoops'

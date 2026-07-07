@@ -546,4 +546,60 @@ describe('validateChapterContractDelivery', () => {
     expect(result.itemResults.find((item) => item.contractItemType === 'golden_three_opening')?.verdict).toBe('weak')
     expect(result.rewriteHints.some((item) => item.includes('章首 800 字'))).toBe(true)
   })
+
+  it('accepts concrete genre openings without requiring generic city-action markers', () => {
+    const rows = createBaseRows(
+      [
+        '风压表指针在二格和三格之间晃了快半刻钟。铁水旺盯着那道红线，拇指推了推腰间的学徒铜牌。翟广禄敲着表盘说，压差过三格不许自己动手。',
+        '指针跳过红线，他攥住进风闸门手轮猛地扳过半圈，炉膛里焦炭塌下去，火焰从亮白闷成暗红。',
+        '翟广禄冲回操作台，把他一把搡开，调令通知单随后压在木桌上。',
+      ].join('\n\n'),
+    )
+    Object.assign((rows.get(chapters) || [])[0], {
+      chapterNum: 1,
+      title: '三号炉的半个白班',
+    })
+    Object.assign((rows.get(chapterContracts) || [])[0], {
+      chapterGoal: '铁水旺在三号炉风压表旁误扳进风闸门并被调离炉前',
+    })
+    Object.assign((rows.get(sceneContracts) || [])[0], {
+      sceneGoal: '铁水旺独立盯三号炉风压表',
+      obstacle: '压差跳过红线',
+      resultState: '调令通知单压在木桌上',
+    })
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+
+    const result = validateChapterContractDelivery({
+      chapterId: 10,
+      content: String((rows.get(chapters) || [])[0].content),
+      reviewNotes: { reader_hook_risks: [] },
+    })
+
+    expect(result.itemResults.find((item) => item.contractItemType === 'golden_three_opening')?.verdict).toBe('pass')
+  })
+
+  it('passes theme response when a concrete genre execution chain is delivered', () => {
+    const rows = createBaseRows(
+      [
+        '风压表指针跳过红线，铁水旺攥住进风闸门手轮，炉膛里焦炭塌了下去。',
+        '值长把调令通知单压在木桌上，班组半日停工的损失写进事故记录。',
+        '翟广禄收走学徒铜牌，他顶嘴的话还没落地，就被调离炉前，送去工册股补录。',
+        '夜校识字班的课本摊在东跨院桌上，他第一次觉得规程不是嘴上背的条文。',
+      ].join('\n\n'),
+    )
+    Object.assign((rows.get(novels) || [])[0], {
+      themeVoiceJson: JSON.stringify({
+        themeChapterTest: '每章必须完成“具体劳动/制度现场 -> 组织关系或纪律反馈 -> 主角缺陷受挫 -> 能力或信念被重塑”的链条。',
+      }),
+    })
+    vi.mocked(getDb).mockReturnValue(createDbMock(rows) as never)
+
+    const result = validateChapterContractDelivery({
+      chapterId: 10,
+      content: String((rows.get(chapters) || [])[0].content),
+      reviewNotes: { reader_hook_risks: [] },
+    })
+
+    expect(result.itemResults.find((item) => item.contractItemType === 'theme_chapter_response')?.verdict).toBe('pass')
+  })
 })

@@ -353,6 +353,9 @@ describe('allocateChapterContext', () => {
     expect(context.chapterGoal).toContain('本章目标')
     expect(context.hardConstraintEntries.length).toBeGreaterThan(0)
     expect(context.constraintInjectionStatus.injectedLabels).toContain('chapterGoal')
+    expect(context.constraintInjectionStatus.injectedLabels).toContain('writingContractSummary')
+    expect(context.hardConstraintContext).toContain('写作合同/章节合同:')
+    expect(context.hardConstraintContext).toContain('动作先行')
     expect(context.softContextDecisions.some((entry) => entry.reason === 'covered_by_hard_constraint')).toBe(true)
 
     const usageSnapshot = buildWritingContextUsageSnapshot(rawData, context)

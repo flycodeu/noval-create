@@ -109,6 +109,77 @@ describe('story-prompts narrative control guidance', () => {
     expect(prompt).toContain('hallucination_risks')
   })
 
+  it('injects genre-core execution chains for zhiguai and historical drama', () => {
+    const zhiguaiPrompt = buildScenePlanPrompt({
+      novelTitle: '百妖谱对照',
+      genre: '单元志怪',
+      chapterNum: 3,
+      chapterTitle: '井底枯鳞',
+      chapterGoal: '完成一个妖病病例并留下人情余味',
+      hardConstraintContext: '',
+      dialogueVoiceLocks: '',
+      plotPoints: '发现妖病；诊断人间亏欠；治疗后留下选择',
+      emotionTone: '清冷温柔',
+      targetWords: 3000,
+      storyCore: '鬼医治妖，病帖牵出人类困局。',
+      writingContractSummary: '每章必须是病例闭环',
+      relationSummary: '医者与同行互相试探',
+      currentArc: '行旅病例',
+      worldRules: '妖病会映照人间亏欠',
+      characterStates: '主角正在压住旧债',
+      worldStates: '水井村入夜封井',
+      itemSummary: '病帖与药箱',
+      previousSummaries: '上一章治完客栈妖病',
+      previousChapterContext: '',
+      lastChapterEnding: '新的病帖落入药箱',
+      continuitySummary: '',
+      openLoops: '病簿旧债',
+      continuityNotes: '',
+      timelineSummary: '傍晚到夜里',
+      timelineOpenThreads: '',
+      longTermMemory: '',
+      consistencyNotes: '',
+      protagonistReference: '沈夜来',
+      protagonistRule: '保持主角称呼一致',
+    })
+
+    expect(zhiguaiPrompt).toContain('【题材核心执行链】')
+    expect(zhiguaiPrompt).toContain('妖病 -> 人间亏欠/规矩/误解 -> 诊疗选择 -> 病后余味')
+    expect(zhiguaiPrompt).toContain('长线谜团只能从病例里长出来')
+
+    const historicalPrompt = buildChapterReviewPrompt({
+      novelTitle: '钢铁是怎样炼成的对照',
+      genre: '历史正剧',
+      chapterNum: 1,
+      chapterTitle: '工册上的名字',
+      chapterGoal: '让主角在工矿纪律中第一次受挫',
+      hardConstraintContext: '',
+      dialogueVoiceLocks: '',
+      storyCore: '青年在劳动、组织和伤病中被锻造。',
+      writingContractSummary: '成长必须落在制度反馈里',
+      relationSummary: '师徒和组织关系给主角压力',
+      currentArc: '初入工矿',
+      worldRules: '工时、考核、粮饷和伤病都要兑现',
+      characterStates: '主角冲动，尚未理解集体纪律',
+      worldStates: '铁路抢修进入雨季',
+      itemSummary: '工册、钳子、夜校教材',
+      previousChapterContext: '',
+      continuitySummary: '',
+      openLoops: '',
+      timelineSummary: '清晨到夜校',
+      longTermMemory: '',
+      consistencyNotes: '',
+      scenePlan: '主角误判工序，被师傅批评，夜校复盘。',
+      draftContent: '他在雨里抢修铁路，却因冲动误工，被组织谈话。',
+      protagonistReference: '周砺',
+      protagonistRule: '保持主角称呼一致',
+    })
+
+    expect(historicalPrompt).toContain('具体劳动/制度场景 -> 组织关系或纪律反馈 -> 主角缺陷受挫 -> 能力或信念被重塑')
+    expect(historicalPrompt).toContain('genre_hollowing_risks')
+    expect(historicalPrompt).toContain('劳动/制度-组织反馈-受挫-重塑')
+  })
+
   it('injects retry avoidance guidance into chapter rewrite prompts', () => {
     const prompt = buildChapterRewritePrompt({
       novelTitle: '测试小说',

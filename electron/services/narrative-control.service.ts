@@ -152,9 +152,89 @@ const SENSE_TOKEN_MAP: Record<NarrativeSenseKey, string[]> = {
   gustatory: ['尝', '苦', '甜', '咸', '涩', '辣', '铁锈味', '入口', '舌尖'],
 }
 
-const ACTION_TOKENS = ['走', '跑', '冲', '扑', '抓', '推', '拉', '撞', '抬', '落', '站', '坐', '转身', '挥', '砸', '踢', '追', '拽', '压', '摸']
+const ACTION_TOKENS = [
+  '走',
+  '跑',
+  '冲',
+  '扑',
+  '抓',
+  '推',
+  '拉',
+  '撞',
+  '抬',
+  '落',
+  '站',
+  '坐',
+  '转身',
+  '挥',
+  '砸',
+  '踢',
+  '追',
+  '拽',
+  '压',
+  '摸',
+  '攥',
+  '扳',
+  '敲',
+  '盯',
+  '看',
+  '听',
+  '问',
+  '说',
+  '写',
+  '誊',
+  '抄',
+  '翻',
+  '合',
+  '掀',
+  '取',
+  '塞',
+  '递',
+  '拿',
+  '铲',
+  '清',
+  '扣',
+  '游',
+  '沉',
+  '刺',
+  '拔',
+  '倒',
+  '跪',
+  '搁',
+]
 const INTERIOR_TOKENS = ['心里', '心中', '脑海', '想着', '意识到', '明白', '知道', '猜到', '怀疑', '后悔', '希望', '害怕', '以为', '忽然懂了', '记起']
-const ENVIRONMENT_TOKENS = ['墙', '门', '窗', '风', '雨', '雪', '夜色', '空气', '走廊', '街', '屋', '仓库', '地面', '灯', '阴影', '雾']
+const ENVIRONMENT_TOKENS = [
+  '墙',
+  '门',
+  '窗',
+  '风',
+  '雨',
+  '雪',
+  '夜色',
+  '空气',
+  '走廊',
+  '街',
+  '屋',
+  '仓库',
+  '地面',
+  '灯',
+  '阴影',
+  '雾',
+  '船',
+  '水',
+  '河',
+  '舱',
+  '桨',
+  '炉',
+  '表',
+  '闸',
+  '纸',
+  '药箱',
+  '针',
+  '砖',
+  '档案',
+  '工册',
+]
 const EXPLANATORY_TOKENS = ['意味着', '代表着', '说明了', '体现了', '展现了', '本质上', '某种程度上', '换句话说', '其实就是', '这说明']
 const EXPLANATION_PATTERN_TOKENS = ['是', '属于', '分为', '由', '构成', '规定', '制度', '规则', '法则', '通常', '一般', '负责', '需要', '必须']
 const WORLD_EXPOSITION_TOKENS = ['体系', '制度', '规则', '法则', '位阶', '宗门', '门派', '帝国', '联邦', '学院', '派系', '军规', '法令', '历史', '传统', '边境', '血脉', '术式', '灵脉', '晶核', '资源', '配额', '教会', '祭司']
@@ -310,6 +390,22 @@ function resolveNarrativeFunctionProfile(input: AnalyzeNarrativeControlsInput): 
     return 'breather'
   }
   return 'payoff'
+}
+
+function isTextureHeavyGenre(input: AnalyzeNarrativeControlsInput): boolean {
+  const themeVoice = input.themeVoice || null
+  const haystack = [
+    input.genre,
+    input.chapterGoal,
+    input.expositionMode,
+    themeVoice?.theme,
+    themeVoice?.themeChapterTest,
+    themeVoice?.styleRules,
+    themeVoice?.descriptionRules,
+    themeVoice?.targetWorkSampleGuide,
+    ...(Array.isArray(themeVoice?.writingContractTags) ? themeVoice.writingContractTags : []),
+  ].map((item) => asText(item)).join('\n')
+  return /历史正剧|工矿|工业|劳动|组织|纪律|炉前|钢铁|志怪|妖医|治妖|妖病|病帖|诊疗|水道/.test(haystack)
 }
 
 function buildPromptGuidance(input: AnalyzeNarrativeControlsInput): NarrativePromptGuidance {
@@ -533,6 +629,7 @@ function roundRatio(count: number, total: number): number {
 function analyzeNarrativeRatio(input: AnalyzeNarrativeControlsInput, sentences: string[]): NarrativeRatioAnalysis {
   const chapterFunction = resolveNarrativeFunctionProfile(input)
   const rule = FUNCTION_RULES[chapterFunction]
+  const textureHeavyGenre = isTextureHeavyGenre(input)
   const categoryCounts: Record<keyof NarrativeRatioSnapshot, number> = {
     action: 0,
     dialogue: 0,
@@ -566,14 +663,17 @@ function analyzeNarrativeRatio(input: AnalyzeNarrativeControlsInput, sentences: 
 
   const severeDeviation = ratios.dialogue >= 75
     || ratios.interior >= 45
-    || ratios.exposition >= 35
+    || ratios.exposition >= (textureHeavyGenre ? 45 : 35)
     || (chapterFunction === 'climax' && ratios.action < 20)
+  const tooManyDeviations = textureHeavyGenre
+    ? deviationReasons.length >= 5 && ratios.exposition >= 25
+    : deviationReasons.length >= 4
   const imbalanceRate = clampPercent(
     Math.min(100, deviationReasons.length * 18 + Math.max(0, ratios.dialogue - rule.dialogueRange[1]) + Math.max(0, ratios.interior - rule.interiorMax)),
   )
 
   let status: NarrativeGateStatus = 'pass'
-  if (sentences.length >= 6 && (severeDeviation || deviationReasons.length >= 4)) {
+  if (sentences.length >= 6 && (severeDeviation || tooManyDeviations)) {
     status = 'rewrite'
   } else if (deviationReasons.length > 0) {
     status = 'warning'

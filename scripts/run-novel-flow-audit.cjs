@@ -65,7 +65,8 @@ function requireProject(relativePath) {
 
 const OUT_ROOT = path.resolve(workspaceRoot, 'out', 'novel-flow-audit')
 const CONTENT_CHAPTER_COUNT = Math.max(1, Math.min(10, Number(process.env.NOVELFORGE_FLOW_CONTENT_CHAPTERS) || 2))
-const CHAPTER_TARGET_WORDS = 1200
+const CHAPTER_TARGET_WORDS = Math.max(1200, Math.min(3600, Number(process.env.NOVELFORGE_FLOW_CHAPTER_TARGET_WORDS) || 1800))
+const CHAPTER_EXECUTION_MODE = process.env.NOVELFORGE_FLOW_EXECUTION_MODE || 'balanced'
 const WORD_FLOOR_RATIO = 0.8
 const FULL_STORY_DESIGN = process.env.NOVELFORGE_FLOW_FULL_STORY_DESIGN === '1'
 const MAP_TARGET_COUNT = 5
@@ -83,8 +84,8 @@ const PROJECT_FILTER = new Set(
 const PROJECTS = [
   {
     key: 'steel',
-    baseTitle: '钢铁是怎么炼成的',
-    savedTitlePrefix: 'AI流程审计｜钢铁是怎么炼成的',
+    baseTitle: '钢铁是怎样炼成的',
+    savedTitlePrefix: 'AI流程审计｜钢铁是怎样炼成的',
     genreName: '历史正剧',
     targetWords: 180000,
     benchmarkSources: [
@@ -103,14 +104,21 @@ const PROJECTS = [
     ],
     input: {
       theme: '苦难中的自我锻造、集体信念、劳动与时代责任',
-      protagonistStart: '一个来自边缘工矿家庭的年轻维修学徒，冲动、自尊强，但缺乏稳定方向。',
-      coreHook: '主角在一次事故后失去继续当一线工人的资格，却被迫转向记录、组织和技术教育工作。',
-      coreConflict: '个人伤病、失去和时代任务之间不断冲突；主角必须证明价值不只来自体力和战场。',
-      mainPlot: '主角从工矿少年转入公共工程、基层组织和技术教育岗位，在伤病与任务之间重建自我价值。',
-      ending: '主角不以战功证明自己，而以记录、教育和组织能力继续参与时代建设。',
-      tabooRules: '不得复刻原著人物姓名、具体战役、经典台词、译文和抢修铁路等标志性场景；不得写成口号堆砌。',
-      mapFocus: '工矿区、铁路节点、工程指挥点、疗养地、基层学校等现实空间。',
-      itemFocus: '工作证件、维修工具、工程记录、医疗证明、学习笔记等可追踪物品。',
+      protagonistStart: '一个来自工矿家属院的年轻炉前学徒，嘴硬、好胜、识字断续，习惯用蛮劲和冲动维护自尊，还没真正理解纪律和集体任务。',
+      coreHook: '一次检修误判让班组停工半日，主角被临时调去工册股补录事故记录，并被要求参加夜校补课；他以为这是惩罚，却第一次看见工册、粮饷、伤病和组织责任怎样落到具体的人身上。',
+      coreConflict: '主角想靠个人蛮劲证明自己，但劳动纪律、工友伤病、工册抚恤、夜校学习和基层组织反馈持续纠正他，让他从被动受罚走向主动承担。',
+      mainPlot: '主角从炉前学徒开始，经历误判、处分、夜校、工册补录、公共工程任务和伤病恢复，在具体劳动和组织关系里一点点重建能力、信念与责任。',
+      ending: '主角不以一句豪言证明成长，而是在长期病痛和学习压力中继续承担公共工作，把个人命运接入更大的建设任务。',
+      tabooRules: '不得复刻原著人物姓名、具体战役、经典台词、译文和博亚尔卡筑路等标志性场景；不得写成口号堆砌，也不得让主角一开始就成熟正确。',
+      mapFocus: '锅炉房、机修棚、工册股、工会办公室、夜校教室、公共工程现场、医务室和疗养地等现实空间。',
+      itemFocus: '工牌、检修钳、锅炉检修单、工册页、夜校教材、伤情记录、粮饷条和组织谈话记录等可追踪物品。',
+      writingContractTags: ['realism', 'growth', '劳动组织受挫重塑', '反口号化成长'],
+      coreExecution: [
+        '每章必须完成“具体劳动/制度现场 -> 组织关系或纪律反馈 -> 主角缺陷受挫 -> 能力或信念被重塑”的链条。',
+        '苦难必须落在工种、工具、工时、工资/粮饷、伤病、考核、夜校、工会或基层组织谈话这些可验证材料上。',
+        '主角开局必须有冲动、误判、嘴硬、逃避学习或不懂纪律的具体表现，并被事件后果教育；不得一出场就像完成的英雄。',
+        '章尾不许用“他终于懂了”式总结替代成长，必须留下下一次行动中的新差异。',
+      ],
     },
   },
   {
@@ -184,7 +192,7 @@ const PROJECTS = [
     key: 'baiyao',
     baseTitle: '百妖谱',
     savedTitlePrefix: 'AI流程审计｜百妖谱',
-    genreName: '神话脑洞志怪',
+    genreName: '单元志怪治妖',
     targetWords: 160000,
     benchmarkSources: [
       '微信读书《百妖谱》：https://weread.qq.com/web/bookDetail/cd4322b071ef469bcd4a639',
@@ -201,14 +209,21 @@ const PROJECTS = [
     ],
     input: {
       theme: '治妖也是照见人心，离奇病症背后藏着温柔和亏欠',
-      protagonistStart: '一个半吊子游方医师带着欠债小徒和一只失语妖灵赶路，专治非人病症却总被人事牵连。',
-      coreHook: '每到一地，主角都会收到一封只有妖物能写出的病帖；治病会换来一段被人类误读的旧事。',
-      coreConflict: '主角想只管病不管人情，但每个妖病都牵出人间亏欠、地方规矩和同行秘密。',
-      mainPlot: '主角一行沿水路和驿路行走，以单元病例串起同伴身世、妖灵债务和一册失落病簿的线索。',
-      ending: '主角接受医术不能替别人免债，只能让真相和选择重新回到当事者手中。',
+      protagonistStart: '一个年轻女游方妖医背着旧药箱赶路，嘴上说只诊妖病、不评人心，身边跟着一个怕欠人情的小徒和一只会写病帖却说不出话的妖灵。',
+      coreHook: '每到一地，先出现一个可见、怪异又带痛感的妖病；女妖医接诊后才发现病灶连着人类的误解、亏欠或地方规矩。',
+      coreConflict: '女妖医想把医术和人情分开，但每个病例都逼她在“照规矩治好病”和“让当事者重新选择”之间做判断。',
+      mainPlot: '主角一行沿水路、驿路和集市行走，每章一个地方一例妖病，病后余味推动同行关系和旧病簿线索；长线谜团只从病例收束处露出一点，不压过单元故事。',
+      ending: '女妖医承认医术不能替别人免债，也不能替妖和人选择原谅；她能做的是把病治到足够清醒，让当事者自己面对亏欠。',
       tabooRules: '不得使用桃夭、磨牙、滚滚、柳公子、桃都、百妖谱、鬼医等专名；不得复刻原作单元妖怪、病例和主角团关系。',
       mapFocus: '水边客栈、旧庙集市、山路驿站、河港药铺、妖物禁行村等行旅单元空间。',
       itemFocus: '病帖、药囊、妖骨针、行路符、旧病簿残页等病例线索物。',
+      writingContractTags: ['growth', '单元病例闭环', '妖病人事情债余味', '长线只从病例生长'],
+      coreExecution: [
+        '每章必须完成“妖病可见症状 -> 人间亏欠/规矩/误解 -> 女妖医诊疗判断 -> 治疗代价 -> 病后余味”的闭环。',
+        '开篇 500 字内必须进入病例现场或病帖求救，不能先讲学院、封印、债主组织或宏大设定。',
+        '长线病簿/旧债/同行秘密只能在病例收束后露一线，不能把病例写成主线阴谋的线索采集任务。',
+        '同行关系要轻巧、有温度、有互相试探或遮掩；对白短一点，允许调侃、沉默和答非所问，不用设定说明书代替人物相处。',
+      ],
     },
   },
 ]
@@ -232,6 +247,16 @@ function requiredString(value, fallback = '') {
 
 function uniqueStrings(values) {
   return [...new Set(values.map((item) => String(item || '').trim()).filter(Boolean))]
+}
+
+function coreExecutionText(project) {
+  return asArray(project.input.coreExecution).join('\n')
+}
+
+function coreExecutionRules(project) {
+  return asArray(project.input.coreExecution)
+    .map((line) => String(line || '').trim())
+    .filter(Boolean)
 }
 
 function safeJson(value, fallback = {}) {
@@ -364,6 +389,26 @@ function scanTaboo(text, tabooPatterns) {
   return hits
 }
 
+function countPattern(text, pattern) {
+  try {
+    return (String(text || '').match(new RegExp(pattern, 'giu')) || []).length
+  } catch {
+    return 0
+  }
+}
+
+function hasPattern(text, pattern) {
+  try {
+    return new RegExp(pattern, 'iu').test(String(text || ''))
+  } catch {
+    return false
+  }
+}
+
+function pushMissingPatternIssue(issues, text, pattern, message) {
+  if (!hasPattern(text, pattern)) issues.push(message)
+}
+
 function getDefaultModelConfig(db, schema) {
   return db.select().from(schema.modelConfigs).all()
     .sort((left, right) => (right.isDefault || 0) - (left.isDefault || 0))[0]
@@ -383,13 +428,14 @@ function getOrCreateGenreId(db, schema, genreName) {
 }
 
 function buildInitialSettings(project, buildStorySettingsPayload) {
+  const executionText = coreExecutionText(project)
   return buildStorySettingsPayload({
     premise: {
       positioning: `${project.baseTitle} 类型压力下的原创对照测试`,
       coreHook: project.input.coreHook,
       protagonistStart: project.input.protagonistStart,
-      constraints: project.input.coreConflict,
-      languageGuardrails: project.input.tabooRules,
+      constraints: [project.input.coreConflict, executionText].filter(Boolean).join('\n'),
+      languageGuardrails: [project.input.tabooRules, executionText].filter(Boolean).join('\n'),
     },
     storyDesign: {
       storyGoal: project.input.theme,
@@ -408,8 +454,9 @@ function buildInitialSettings(project, buildStorySettingsPayload) {
         '少写抽象升华、命运感和模板式顿悟；用行动、代价、具体物件和选择推进。',
         '句子节奏要有人味：长短句交错、段落长短参差，偶尔一个长句一口气写完动作链；不要每段都收在干净的动作点上。',
         '对白允许答非所问、重复对方的词、迟疑改口、被打断；按人物口吻保留少量口语顿挫。',
+        executionText,
       ].join('\n'),
-      commonSenseRules: project.input.tabooRules,
+      commonSenseRules: [project.input.tabooRules, executionText].filter(Boolean).join('\n'),
       bannedTerms: project.forbiddenTerms.join('、'),
     },
     aiEngine: {
@@ -431,20 +478,62 @@ function buildProjectBrief(project) {
     constraints: [
       project.input.tabooRules,
       '只做原创对照测试，不续写、不改写、不复刻对照作品。',
+      ...coreExecutionRules(project),
     ],
     readyCount: 6,
   }
 }
 
 function buildThemeVoice(project) {
+  const executionRules = coreExecutionRules(project)
   return {
+    writingContractTags: project.input.writingContractTags || ['growth'],
     theme: project.input.theme,
+    themeChapterTest: executionRules[0] || project.input.coreConflict,
+    motifs: project.key === 'baiyao'
+      ? '病帖\n药箱\n行路雨声\n病后留白'
+      : project.key === 'steel'
+        ? '工牌\n工册\n炉火\n夜校灯光\n伤病记录'
+        : '',
     emotionalCore: project.input.coreConflict,
-    pov: '第三人称有限视角',
-    tense: '过去时',
-    styleRules: '叙事落在场景、物件、代价和选择上，避免套话式概念总结。',
-    dialogueRules: '对白服务人物立场和关系压力，不用解释性长台词代替行动。',
-    writingContractTags: ['原创对照测试', project.key, '流程审计'],
+    pov: 'third_limited',
+    tense: 'past',
+    protagonistCount: 'single',
+    viewpointMode: 'fixed',
+    parallelTimelines: 'none',
+    openingStyle: 'incident',
+    flashbackPolicy: 'limited',
+    narratorDistance: '贴近主角当下感知，不提前替角色总结主题。',
+    voiceKeywords: project.key === 'baiyao'
+      ? '清淡\n有锋利处\n诊断感\n轻微调侃\n病后留白'
+      : project.key === 'steel'
+        ? '朴素\n具体\n有工地材料感\n克制\n不喊口号'
+        : '',
+    styleRules: [
+      '叙事落在场景、物件、代价和选择上，避免套话式概念总结。',
+      ...executionRules,
+    ].join('\n'),
+    dialogueRules: project.key === 'baiyao'
+      ? '对白要短、有试探和遮掩；女妖医可以冷一点，小徒可以怕欠人情，但不能用长台词解释设定。'
+      : project.key === 'steel'
+        ? '对白要像工友、师傅、股长和夜校教师在现场说话；少口号，多批评、追问、报数和具体安排。'
+        : '对白服务人物立场和关系压力，不用解释性长台词代替行动。',
+    descriptionRules: project.key === 'baiyao'
+      ? '优先写病症、药味、水汽、路途和病后关系变化；少写宏大组织。'
+      : project.key === 'steel'
+        ? '优先写工具、工序、纸册、工时、伤痛和公共空间；少写抽象信念。'
+        : '',
+    forbiddenPhrases: [
+      '命运的齿轮',
+      '这一刻他终于明白',
+      '某种说不清的力量',
+      ...project.forbiddenTerms,
+    ].join('\n'),
+    targetWorkSampleGuide: [
+      '只学习对照作品的结构功能，不模仿原文句式、专名、桥段或译文。',
+      ...executionRules,
+    ].join('\n'),
+    humanStyleSampleLock: '',
   }
 }
 
@@ -469,6 +558,7 @@ function buildWorldRules(project, currentRaw, parseWorldRulesJson, stringifyWorl
     ...asArray(rules.writingConstraints?.extraRules),
     project.input.tabooRules,
     '所有生成内容必须是原创对照测试，不复刻原著人物、专名、原文、章节桥段或标志性场景。',
+    ...coreExecutionRules(project),
   ]).slice(0, 16)
   rules.writingConstraints.forbiddenPhrases = uniqueStrings([
     ...asArray(rules.writingConstraints?.forbiddenPhrases),
@@ -555,8 +645,9 @@ async function generateCharactersToTarget(novelId, project, characterService, ra
   const ids = []
   if (existing <= 0) {
     const protagonistId = await characterService.generateProtagonist(novelId, {
+      gender: project.key === 'baiyao' ? '女' : project.key === 'steel' ? '男' : undefined,
       occupationHint: project.input.protagonistStart,
-      personalitySeed: project.input.coreConflict,
+      personalitySeed: [project.input.coreConflict, coreExecutionText(project)].filter(Boolean).join('\n'),
       itemPreferences: project.input.itemFocus.split(/[、,，]/).slice(0, 3),
       forbiddenNames: project.forbiddenTerms,
       forceDifferentFromExisting: true,
@@ -581,6 +672,7 @@ async function generateCharactersToTarget(novelId, project, characterService, ra
       specialRequirements: [
         project.input.tabooRules,
         `角色必须围绕：${project.input.coreConflict}`,
+        coreExecutionText(project),
         `优先和现有物品/地图/线程绑定：${project.input.itemFocus}`,
       ].join('\n'),
       diversityConstraints: project.forbiddenTerms.map((term) => `不得使用或影射原著专名：${term}`),
@@ -602,6 +694,7 @@ function buildCompactStoryDesignPrompt(project, rows) {
     `主角起点：${project.input.protagonistStart}`,
     `核心钩子：${project.input.coreHook}`,
     `核心冲突：${project.input.coreConflict}`,
+    `题材核心执行链：\n${coreExecutionText(project)}`,
     `违禁约束：${project.input.tabooRules}`,
     '',
     `地图：${rows.mapRows.slice(0, 8).map((row) => row.name).join('、') || '无'}`,
@@ -614,6 +707,7 @@ function buildCompactStoryDesignPrompt(project, rows) {
     '- sub_plots_list 输出 5 条，保持 name / characters / conflict / mainlineLink / endChapter 字段。',
     '- rhythm_setup、rhythm_conflict、rhythm_ending 三项相加约等于 100。',
     '- ending 只写方向，不写完整结局。',
+    '- 每章规划都必须能执行“题材核心执行链”，不能只把它写成主题标签。',
     '- 不得使用任何原著专名、原文或标志性桥段。',
     '',
     '输出格式：{"story_goal":"","core_conflict":"","main_plot":"","sub_plots_list":[{"name":"","characters":"","conflict":"","mainlineLink":"","endChapter":"第10章前"}],"rhythm_setup":30,"rhythm_conflict":50,"rhythm_ending":20,"ending_type":"open","ending":""}',
@@ -668,6 +762,7 @@ async function generateStoryDesign(novelId, project, services, buildStorySetting
     requirements: [
       '故事设计必须建立在已生成的地图、物品、人物和故事线程上。',
       project.input.tabooRules,
+      coreExecutionText(project),
       '本次只规划前十章验证段，不要扩成完整长篇细纲。',
     ].join('\n'),
   })
@@ -745,9 +840,16 @@ async function generateChapterOutlines(novelId, project, context, services, mode
           mainPlot: context.mainPlot,
           arcName: '前十章流程验证弧',
           arcGoal: `用前十章验证 ${project.baseTitle} 的类型压力，不复刻原著。`,
-          arcSummary: context.arcSummary,
-          arcGrowthLedger: '每章必须有目标、冲突、转折、退出钩子。',
-          arcCostLedger: '每次推进都要带来关系、资源或身体/心理代价。',
+          arcSummary: [context.arcSummary, coreExecutionText(project)].filter(Boolean).join('\n'),
+          arcGrowthLedger: [
+            '每章必须有目标、冲突、转折、退出钩子。',
+            ...coreExecutionRules(project),
+          ].join('\n'),
+          arcCostLedger: [
+            '每次推进都要带来关系、资源或身体/心理代价。',
+            project.key === 'baiyao' ? '每个病例必须有治疗代价和病后关系变化；长线线索只能在病例闭环后出现。' : '',
+            project.key === 'steel' ? '每次成长必须有劳动、纪律、学习或伤病成本，不能只用口号完成。' : '',
+          ].filter(Boolean).join('\n'),
           chapterStart: batch.start,
           chapterEnd: batch.end,
           previousSummary: batch.previousSummary || all.slice(-2).map((item) => `第${item.chapterNum}章：${item.outline}`).join('\n'),
@@ -952,8 +1054,14 @@ function insertChapterStructure(rawDb, novelId, project, chapters, modelConfigId
       '少解释，多用行动和选择展示设定',
       chapter.emotionTone || '',
       chapter.chapterNum <= CONTENT_CHAPTER_COUNT ? '强钩子' : '推进钩子',
-      JSON.stringify([project.input.tabooRules, '不得复刻对照作品具体桥段']),
-      JSON.stringify(['目标清晰', '冲突可见', '转折明确', '结尾有推进钩子']),
+      JSON.stringify([project.input.tabooRules, '不得复刻对照作品具体桥段', ...coreExecutionRules(project)]),
+      JSON.stringify([
+        '目标清晰',
+        '冲突可见',
+        '转折明确',
+        '结尾有推进钩子',
+        ...coreExecutionRules(project),
+      ]),
       tsNow,
       tsNow,
     )
@@ -983,7 +1091,7 @@ async function generateChapterDrafts(novelId, project, savedStructure, services)
       tabooHits: [],
     }
     try {
-      await services.chapterService.generateChapterContent(chapterId, undefined, { executionMode: 'cost_saver' })
+      await services.chapterService.generateChapterContent(chapterId, undefined, { executionMode: CHAPTER_EXECUTION_MODE })
     } catch (error) {
       const message = String(error && error.message || error)
       const committed = services.chapterService.getChapter(chapterId)
@@ -1012,6 +1120,7 @@ async function generateChapterDrafts(novelId, project, savedStructure, services)
               content: [
                 `把下面这一章扩写到 ${CHAPTER_TARGET_WORDS} 到 ${Math.round(CHAPTER_TARGET_WORDS * 1.2)} 个汉字。`,
                 '要求：不改变已有事件顺序、人物行为和对白立场；通过现场细节、对白来回、动作阻力和感官事实增加密度；不加新的重大情节。',
+                `题材核心执行链：\n${coreExecutionText(project)}`,
                 `违禁约束：${project.input.tabooRules}`,
                 '',
                 '当前正文：',
@@ -1047,6 +1156,7 @@ async function generateChapterDrafts(novelId, project, savedStructure, services)
                 '下面的正文存在明显 AI 生成痕迹，请针对性修复，其他内容尽量保持不动：',
                 ...highHits.slice(0, 8).map((hit) => `- ${hit.ruleTitle || hit.ruleCode}：${hit.detail || ''} 命中片段：${hit.excerpt || ''}`),
                 '高频重复的人名改用代词、称呼变化或动作主语省略；模板句式改成贴合场景的自然表达。',
+                `题材核心执行链：\n${coreExecutionText(project)}`,
                 `字数保持在 ${Math.round(countHanzi(content) * 0.9)} 字以上。`,
                 '',
                 '正文：',
@@ -1085,11 +1195,17 @@ function buildComparison(project, rows, chapterReports) {
   const text = `${allOutlineText}\n${allContentText}`
   const issues = []
   const strengths = []
+  const failedOrUnreviewed = chapterReports.filter((report) => report.pipelineStatus !== 'success')
+  if (failedOrUnreviewed.length > 0) {
+    issues.push(`正文流水线有 ${failedOrUnreviewed.length} 章未通过成稿门：${failedOrUnreviewed.map((report) => `第${report.chapterNum}章 ${report.pipelineStatus}`).join('、')}。`)
+  }
 
   if (project.key === 'steel') {
     if (/组织|集体|劳动|工程|伤病|学习|纪律/u.test(text)) strengths.push('已经触及组织、劳动、伤病或学习等精神锻造元素。')
     else issues.push('开局没有稳定落到组织生活、劳动纪律和伤病代价，容易退成泛励志成长。')
-    if (!/工|矿|铁路|工程|车间|学校|疗养/u.test(text)) issues.push('空间与职业纹理不足，历史正剧的现实物质压力偏弱。')
+    pushMissingPatternIssue(issues, text, '工|矿|铁路|工程|车间|学校|夜校|档案|工册|疗养', '空间与职业纹理不足，历史正剧的现实物质压力偏弱。')
+    pushMissingPatternIssue(issues, text, '组织|纪律|考核|工会|共青|基层|集体|师徒|股长|粮饷|抚恤', '缺少组织关系、纪律反馈或公共责任，精神锻造容易变成个人励志。')
+    pushMissingPatternIssue(issues, text, '冲动|误判|被迫|受伤|失去|降薪|批评|考核|挫败|回绝', '主角早期缺陷、受挫和被教育过程不够可见，成长链容易提前完成。')
   } else if (project.key === 'doupo') {
     if (/等级|境界|阶|修炼|资源|考核|试炼/u.test(text)) strengths.push('已经出现等级、资源、考核或试炼等升级机制。')
     else issues.push('升级体系不够量化，爽文的阶段目标和兑现压力偏弱。')
@@ -1097,7 +1213,14 @@ function buildComparison(project, rows, chapterReports) {
   } else if (project.key === 'baiyao') {
     if (/妖|病|药|帖|治|行|客栈|驿|庙|村/u.test(text)) strengths.push('已经触及妖病、行旅和地方空间，接近单元志怪结构。')
     else issues.push('单元志怪的“妖病-人事-余味”结构不够明显。')
-    if (!/一地|每到|病帖|病例|人情|亏欠/u.test(text)) issues.push('病例驱动和寓言式人情债线索偏弱，容易写成普通玄幻小队冒险。')
+    pushMissingPatternIssue(issues, text, '妖病|病症|诊断|治|药|针|病帖|病例', '缺少稳定可见的妖病/病例驱动。')
+    pushMissingPatternIssue(issues, text, '人情|亏欠|承诺|误读|规矩|人类|悔婚|排忧解难|债', '妖病背后的人类困局和人情债不够强，单元寓言感会变薄。')
+    pushMissingPatternIssue(issues, text, '余味|安宁|平静|温柔|离愁|欢喜|选择|后遗症|沉井|回味', '病后余味与关系变化不够明确，治完后缺少“为什么值得读”的落点。')
+    const serializedMysteryHits = countPattern(text, '病簿|残页|原本|学院|封印|执行者|债主|白契')
+    const unitCaseHits = countPattern(text, '妖病|病症|诊断|治|药|针|病帖|病例|患者')
+    if (serializedMysteryHits >= 18 && serializedMysteryHits >= Math.round(unitCaseHits * 0.65)) {
+      issues.push('长线“病簿/学院/封印/债主”密度过高，容易吞掉单元志怪的病例闭环，读感会变成普通玄幻追谜。')
+    }
   } else if (project.key === 'daogui') {
     if (/代价|污染|疯|错位|边界|香火|债|邪/u.test(text)) strengths.push('已经出现代价、污染、错位或香火债等诡异修仙压力元素。')
     else issues.push('“清醒即痛苦、力量即污染”的压迫感不足，容易退成普通升级修仙。')
@@ -1154,6 +1277,7 @@ function buildVerification(runInfo) {
       && project.counts.sceneContracts >= 10
       && project.chapterReports.length === CONTENT_CHAPTER_COUNT
       && chapterPipelineFailures.length === 0
+      && chapterNeedsReview.length === 0
       && chapterWordFailures.length === 0
       && tabooFailures.length === 0
       && project.steps.every((step) => step.status === 'ok')
@@ -1471,6 +1595,18 @@ async function runProject(project, context) {
     },
   }, null, 2), 'utf8')
 
+  const chapterMarkdown = rows.chapterRows
+    .filter((row) => countHanzi(row.content || '') > 0)
+    .map((row) => [
+      `# 第 ${row.chapter_num} 章 ${row.title}`,
+      '',
+      row.content || '',
+    ].join('\n'))
+    .join('\n\n---\n\n')
+  if (chapterMarkdown.trim()) {
+    fs.writeFileSync(path.join(outDir, `${project.key}.chapters.md`), chapterMarkdown, 'utf8')
+  }
+
   return report
 }
 
@@ -1517,6 +1653,9 @@ async function main() {
     databasePath: path.join(app.getPath('userData'), 'novelforge.db'),
     modelLabel: `${modelConfig.provider}:${modelConfig.modelId}#${modelConfig.id}`,
     runStamp,
+    contentChapterCount: CONTENT_CHAPTER_COUNT,
+    chapterTargetWords: CHAPTER_TARGET_WORDS,
+    chapterExecutionMode: CHAPTER_EXECUTION_MODE,
     projects: [],
   }
 

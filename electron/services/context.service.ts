@@ -158,6 +158,7 @@ export type HardConstraintSourceLabel =
   | 'chapterGoal'
   | 'characterStates'
   | 'worldStates'
+  | 'writingContractSummary'
   | 'relationSummary'
   | 'itemSummary'
   | 'openLoops'
@@ -784,6 +785,7 @@ const DEFAULT_PRESERVED_CONSTRAINT_LABELS: HardConstraintSourceLabel[] = [
   'chapterGoal',
   'characterStates',
   'worldStates',
+  'writingContractSummary',
   'openLoops',
   'continuityNotes',
 ]
@@ -842,6 +844,7 @@ function computeHardConstraintRelevance(
     chapterGoal: 120,
     characterStates: 110,
     worldStates: 100,
+    writingContractSummary: 88,
     relationSummary: 72,
     itemSummary: 68,
     openLoops: 96,
@@ -861,6 +864,7 @@ function computeHardConstraintRelevance(
     + (label === 'characterStates' && rawData.mentionedCharacters.length > 0 ? 10 : 0)
     + (label === 'itemSummary' && rawData.mentionedItems.length > 0 ? 10 : 0)
     + (label === 'worldStates' && rawData.mentionedLocations.length > 0 ? 8 : 0)
+    + (label === 'writingContractSummary' ? 8 : 0)
     + (label === 'openLoops' && rawData.activeThreadPressureCount > 0 ? 8 : 0)
   )
   return baseScore[label] + signalScore + entityBoost
@@ -901,6 +905,11 @@ function buildHardConstraintDrafts(
     fallbackLines: 1,
     maxLines: 2,
   })
+  const writingContractLines = selectConstraintLines(parts.writingContractSummary, {
+    keywords: HARD_CONSTRAINT_SIGNAL_KEYWORDS,
+    fallbackLines: 3,
+    maxLines: 5,
+  })
   const openLoopLines = selectConstraintLines(parts.openLoops, {
     keywords: HARD_CONSTRAINT_SIGNAL_KEYWORDS,
     maxLines: 3,
@@ -939,6 +948,11 @@ function buildHardConstraintDrafts(
       label: 'worldStates',
       title: '当前世界状态',
       content: buildConstraintSection('当前世界状态', selectConstraintLines(parts.worldStates, { fallbackLines: 4, maxLines: 4 })),
+    },
+    {
+      label: 'writingContractSummary',
+      title: '写作合同/章节合同',
+      content: buildConstraintSection('写作合同/章节合同', writingContractLines),
     },
     {
       label: 'relationSummary',
@@ -2410,8 +2424,13 @@ function allocateTokens(parts: ContextPart[], totalBudget: number): TokenAllocat
   let budget = remaining
   // 关键 P1 上下文保底：审校/重写高度依赖前情摘要与对白声纹锁，预算紧张时至少保留压缩版，不允许整体丢弃
   const criticalP1Floors: Record<string, number> = {
+    writingContractSummary: 260,
+    mapSummary: 220,
+    itemSummary: 220,
     previousSummaries: 320,
     dialogueVoiceLocks: 160,
+    scenePlanSummary: 220,
+    reviewRiskSummary: 220,
   }
   const floorReserves = new Map<string, number>()
   for (const part of parts.filter((item) => item.priority === 1)) {
@@ -2569,7 +2588,7 @@ function createStagePriorityMap(
           activeThreads: 1,
           previousSummaries: 2,
           styleTemplate: 3,
-          writingContractSummary: 1,
+          writingContractSummary: 0,
           relationSummary: 1,
           dialogueVoiceLocks: 1,
           recalledMemory: 2,
@@ -2605,7 +2624,7 @@ function createStagePriorityMap(
           activeThreads: 1,
           previousSummaries: 2,
           styleTemplate: 2,
-          writingContractSummary: 1,
+          writingContractSummary: 0,
           relationSummary: 1,
           dialogueVoiceLocks: 1,
           recalledMemory: 2,
@@ -2641,7 +2660,7 @@ function createStagePriorityMap(
           activeThreads: 1,
           previousSummaries: 2,
           styleTemplate: null,
-          writingContractSummary: 1,
+          writingContractSummary: 0,
           relationSummary: 1,
           dialogueVoiceLocks: 1,
           recalledMemory: 2,
@@ -2678,7 +2697,7 @@ function createStagePriorityMap(
           activeThreads: 1,
           previousSummaries: 2,
           styleTemplate: 2,
-          writingContractSummary: 1,
+          writingContractSummary: 0,
           relationSummary: 1,
           dialogueVoiceLocks: 1,
           recalledMemory: 2,

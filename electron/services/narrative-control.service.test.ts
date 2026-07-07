@@ -51,6 +51,47 @@ describe('analyzeNarrativeControls', () => {
     expect(result.narrativeRatio.deviationReasons.some((item) => item.includes('对白占比'))).toBe(true)
   })
 
+  it('does not treat concrete labor and diagnosis beats as exposition dumps', () => {
+    const result = analyzeNarrativeControls({
+      themeVoice: {
+        writingContractTags: ['历史正剧', '单元志怪治妖'],
+        theme: '',
+        themeChapterTest: '',
+        motifs: '',
+        emotionalCore: '',
+        pov: 'third_limited',
+        tense: 'past',
+        protagonistCount: 'single',
+        viewpointMode: 'fixed',
+        parallelTimelines: 'none',
+        openingStyle: 'hook',
+        flashbackPolicy: 'limited',
+        narratorDistance: '',
+        voiceKeywords: '',
+        styleRules: '',
+        dialogueRules: '',
+        descriptionRules: '',
+        forbiddenPhrases: '',
+        targetWorkSampleGuide: '',
+        humanStyleSampleLock: '',
+      },
+      content: [
+        '风压表指针越过红线，铁水旺攥住进风闸门手轮，肩胛骨一沉，把铸铁轮缘猛地扳过半圈。',
+        '炉膛里焦炭呼噜噜塌下去，火焰从亮白闷成暗红，翟广禄冲回操作台，一把把他搡开。',
+        '值长把调令通知单压在木桌上，铅笔尖在事故记录本里戳出一个小坑。',
+        '他解下学徒铜牌递过去，铜牌边角还沾着炉前的汗。',
+        '水下哭声贴着船底往上顶，女妖医取出银封妖骨针，沉到鳃裂边上，把针尖刺进闭合肌。',
+        '鳃裂一合一张，水压撞在她胸口，萤石只照出五尺外的浑水。',
+        '老周扶着船桨要跪，她侧身让开，只把剩下的酒倒进水里，让船继续往前走。',
+      ].join('\n'),
+      chapterGoal: '以具体劳动和诊疗动作推进代价',
+      chapterFunction: 'payoff',
+    })
+
+    expect(result.narrativeRatio.status).not.toBe('rewrite')
+    expect(result.narrativeRatio.ratios.exposition).toBeLessThan(35)
+  })
+
   it('tracks sensory coverage gaps and missing senses', () => {
     const result = analyzeNarrativeControls({
       content: '他看见仓库门半掩着，手掌贴上去时一阵发凉。脚步声从走廊尽头逼近，空气里却没有半点药味。',

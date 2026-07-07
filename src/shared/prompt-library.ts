@@ -503,6 +503,7 @@ function buildGoldenThreeOutlineGuidance(chapterStart: number, chapterEnd: numbe
 }
 
 type StepMemoryStage = 'scenePlan' | 'writing' | 'draft' | 'review' | 'rewrite'
+type GenreExecutionStage = StepMemoryStage
 
 function buildStepMemoryContinuityGuidance(stage: StepMemoryStage): string {
   const stageRules: Record<StepMemoryStage, string> = {
@@ -517,6 +518,49 @@ function buildStepMemoryContinuityGuidance(stage: StepMemoryStage): string {
     stageRules[stage],
     '若上下文之间出现轻微冲突，优先保留明确事实、已写正文、章节合同和世界规则；不确定的内容写成保守推断，不要升级为新事实。',
     '输出必须给下一步骤留下可执行信息：明确谁行动、在哪里、因为什么、付出什么代价、留下什么后续压力。',
+  ].join('\n'))
+}
+
+function buildGenreCoreExecutionGuidance(params: {
+  genre?: string | null
+  novelTitle?: string | null
+  storyCore?: string | null
+  stage: GenreExecutionStage
+}): string {
+  const signal = [params.genre, params.novelTitle, params.storyCore].map((item) => item || '').join('\n')
+  const isZhiguai = /志怪|民俗|神话|妖|鬼医|治妖|病帖|病例/u.test(signal)
+  const isHistoricalDrama = /历史|正剧|革命|工矿|铁路|劳动|组织|纪律|钢铁|保尔/u.test(signal)
+  const lines: string[] = []
+
+  if (isZhiguai) {
+    lines.push(
+      '志怪治妖题材必须每章保留“妖病 -> 人间亏欠/规矩/误解 -> 诊疗选择 -> 病后余味”的闭环；只写妖术、债务或大阴谋不算完成。',
+      '每个单元病例要有可见病症、具体患者、牵连的人类困局、主角的医道判断、治疗代价，以及一个治完后仍值得回味的关系变化。',
+      '长线谜团只能从病例里长出来，不能把病例压成主线阴谋的线索采集任务；同行关系要轻巧、有温度、有互相遮掩或试探。',
+    )
+  }
+
+  if (isHistoricalDrama) {
+    lines.push(
+      '历史正剧/精神锻造题材必须每章保留“具体劳动/制度场景 -> 组织关系或纪律反馈 -> 主角缺陷受挫 -> 能力或信念被重塑”的链条。',
+      '苦难不能只写成励志口号；要落在工种、工具、工时、伤病、考核、粮饷、学习、组织谈话或同伴评价这些可验证材料上。',
+      '主角成长必须经历冲动、误判、被教育、承担后果和继续工作的过程，不能一开始就像已经完成的英雄。',
+    )
+  }
+
+  if (lines.length === 0) return ''
+
+  const stageLines: Record<GenreExecutionStage, string> = {
+    scenePlan: '场景计划阶段要把上述题材闭环拆进每个 scene 的 purpose / conflict / must_cover / exit_hook，不要只写成主题标签。',
+    writing: '正文阶段要把上述题材闭环写在现场动作、对白、物件和结果里，不要靠段尾总结说明主题。',
+    draft: '初稿阶段先保证题材闭环完整，再处理文采；缺任一环都视为未完成场景。',
+    review: '审校阶段必须逐项检查题材闭环是否落地，并把缺病例闭环、缺劳动组织链、成长口号化写入 genre_hollowing_risks 或 critical_fixes。',
+    rewrite: '重写阶段必须补事件和结果，不要只替换词句；优先补缺失的题材闭环环节。',
+  }
+
+  return section('题材核心执行链', [
+    ...lines,
+    stageLines[params.stage],
   ].join('\n'))
 }
 
@@ -1578,6 +1622,12 @@ export function buildScenePlanPrompt(params: ScenePlanPromptInput): string {
     buildRuntimeAssertionSection(params.runtimeAssertions),
     buildGoldenThreeChapterGuidance(params.chapterNum, 'scenePlan'),
     buildStepMemoryContinuityGuidance('scenePlan'),
+    buildGenreCoreExecutionGuidance({
+      genre: params.genre,
+      novelTitle: params.novelTitle,
+      storyCore: params.storyCore,
+      stage: 'scenePlan',
+    }),
     buildTitleAndStructureGuidance('scenePlan'),
     section('最近章节摘要', params.previousSummaries),
     section('连续性记忆', params.continuitySummary),
@@ -1670,6 +1720,12 @@ export function buildChapterWritingPrompt(params: ChapterWritingPromptInput): st
     buildRuntimeAssertionSection(params.runtimeAssertions),
     buildGoldenThreeChapterGuidance(params.chapterNum, 'writing'),
     buildStepMemoryContinuityGuidance('writing'),
+    buildGenreCoreExecutionGuidance({
+      genre: params.genre,
+      novelTitle: params.novelTitle,
+      storyCore: params.storyCore,
+      stage: 'writing',
+    }),
     section('节奏曲线', params.storyPacingGuidance),
     section('钩子连续性', params.hookContinuityGuidance),
     section('上一章关键先验', params.previousChapterContext),
@@ -1743,6 +1799,12 @@ export function buildChapterDraftPrompt(params: ChapterRewritePromptInput): stri
     buildRuntimeAssertionSection(params.runtimeAssertions),
     buildGoldenThreeChapterGuidance(params.chapterNum, 'draft'),
     buildStepMemoryContinuityGuidance('draft'),
+    buildGenreCoreExecutionGuidance({
+      genre: params.genre,
+      novelTitle: params.novelTitle,
+      storyCore: params.storyCore,
+      stage: 'draft',
+    }),
     section('最近章节摘要', params.previousSummaries),
     section('连续性记忆', params.continuitySummary),
     section('必须承接', params.continuityNotes),
@@ -1835,6 +1897,12 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
     buildRuntimeAssertionSection(params.runtimeAssertions),
     buildGoldenThreeChapterGuidance(params.chapterNum, 'review'),
     buildStepMemoryContinuityGuidance('review'),
+    buildGenreCoreExecutionGuidance({
+      genre: params.genre,
+      novelTitle: params.novelTitle,
+      storyCore: params.storyCore,
+      stage: 'review',
+    }),
     section('节奏曲线', params.storyPacingGuidance),
     section('钩子连续性', params.hookContinuityGuidance),
     section('跨章表达去重', params.expressionDedupGuidance),
@@ -1869,6 +1937,7 @@ export function buildChapterReviewPrompt(params: ChapterReviewPromptInput): stri
       'required_voice_lock_character_ids 只保留本章生成前必须启用 voice lock 的角色 id。',
       '必须结合当前故事弧、本章目标、场景计划、待审初稿和本弧进度状态，判断本章是否真的在服务当前弧目标。',
       'genre_hollowing_risks 只写体裁生态被写空的问题，例如修仙只喊大道却没有境界资源和宗门秩序，末世只有丧尸却没有生存链，武侠只有打斗却没有江湖秩序。',
+      '志怪治妖如果没有“妖病-人事-诊疗选择-病后余味”的闭环，历史正剧如果没有“劳动/制度-组织反馈-受挫-重塑”的链条，都必须写进 genre_hollowing_risks 或 critical_fixes。',
       '如果主角像功能人、体裁生态被写空，或成长只剩口号，也要明确指出。',
       '主角受挫判断 protagonist_setback 只能是 none / minor / major，并给出 setback_summary 概括本章主角到底输了什么、失去了什么或被压制了什么。',
       'cost_present 表示本章是否出现明确代价；cost_present=true 时必须同时给出 cost_summary 和 cost_resolution_state。cost_resolution_state 只能是 new / ongoing / resolved / evaporated。',
@@ -1943,6 +2012,12 @@ export function buildChapterRewritePrompt(params: ChapterRewritePromptInput): st
     buildRuntimeAssertionSection(params.runtimeAssertions),
     buildGoldenThreeChapterGuidance(params.chapterNum, 'rewrite'),
     buildStepMemoryContinuityGuidance('rewrite'),
+    buildGenreCoreExecutionGuidance({
+      genre: params.genre,
+      novelTitle: params.novelTitle,
+      storyCore: params.storyCore,
+      stage: 'rewrite',
+    }),
     section('近章摘要', params.previousSummaries),
     section('连续性记忆', params.continuitySummary),
     section('必须承接', params.continuityNotes),
