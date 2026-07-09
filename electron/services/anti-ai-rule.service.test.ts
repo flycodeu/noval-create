@@ -56,6 +56,16 @@ describe('anti-ai-rule.service', () => {
     expect(codes).toContain('ai_process_leak')
   })
 
+  it('detects atmospheric imagery overload and uniform paragraph rhythm', () => {
+    const paragraph = '雨声压在廊外，雾从江面推到阶前，船板潮得发黑。赵构看完粮册，把暂缓二字刮去，令吏重新誊写，旁边的内侍只把灯芯挑低了一寸。'
+    const text = Array.from({ length: 30 }, () => paragraph).join('\n')
+    const hits = collectAntiAiRuntimeHits(text, '历史正剧')
+    const codes = hits.map((item) => item.ruleCode)
+
+    expect(codes).toContain('atmospheric_imagery_overuse')
+    expect(codes).toContain('uniform_paragraph_rhythm')
+  })
+
   it('does not flag ordinary negation or useful body action as strong AI flavor', () => {
     const text = [
       '他不是今天值班，所以把钥匙交给门卫。',

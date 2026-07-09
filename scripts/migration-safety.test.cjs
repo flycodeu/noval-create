@@ -153,8 +153,14 @@ function assertRequiredColumns(db) {
   assert.ok(getColumns(db, 'story_threads').has('reminder_interval'))
   assert.ok(getColumns(db, 'story_threads').has('typed_refs_json'))
   assert.ok(getColumns(db, 'timeline_events').has('typed_refs_json'))
+  assert.ok(getColumns(db, 'characters').has('dramatic_engine'))
+  assert.ok(getColumns(db, 'characters').has('character_arc'))
   assert.ok(getColumns(db, 'characters').has('record_status'))
   assert.ok(getColumns(db, 'characters').has('source_context_json'))
+  assert.ok(getColumns(db, 'characters').has('speech_pattern'))
+  assert.ok(getColumns(db, 'characters').has('catchphrases'))
+  assert.ok(getColumns(db, 'characters').has('vocabulary_level'))
+  assert.ok(getColumns(db, 'characters').has('dialect_features'))
   assert.ok(getColumns(db, 'story_items').has('record_status'))
   assert.ok(getColumns(db, 'story_items').has('source_context_json'))
   assert.ok(getColumns(db, 'story_items').has('typed_refs_json'))
@@ -245,6 +251,7 @@ function testFreshDbIsIdempotent() {
       '0036_chapter_contract_shape_controls',
       '0037_typed_ref_overlay_backfill',
       '0038_novel_source_canon_fields',
+      '0039_character_design_columns',
     ])
 
     runMigrations(db)
@@ -362,6 +369,7 @@ function testPartialSchemaCanResume() {
       '0036_chapter_contract_shape_controls',
       '0037_typed_ref_overlay_backfill',
       '0038_novel_source_canon_fields',
+      '0039_character_design_columns',
     ])
 
     const configs = db.prepare(`
@@ -475,13 +483,106 @@ function testAppliedLegacyMigrationCanStillReceiveTypedRefColumns() {
 
     assert.ok(getColumns(db, 'timeline_events').has('typed_refs_json'))
     assert.ok(getColumns(db, 'story_threads').has('typed_refs_json'))
+    assert.ok(getColumns(db, 'characters').has('dramatic_engine'))
+    assert.ok(getColumns(db, 'characters').has('character_arc'))
     assert.ok(getColumns(db, 'characters').has('record_status'))
     assert.ok(getColumns(db, 'characters').has('source_context_json'))
+    assert.ok(getColumns(db, 'characters').has('speech_pattern'))
+    assert.ok(getColumns(db, 'characters').has('catchphrases'))
+    assert.ok(getColumns(db, 'characters').has('vocabulary_level'))
+    assert.ok(getColumns(db, 'characters').has('dialect_features'))
     assert.ok(getColumns(db, 'story_items').has('record_status'))
     assert.ok(getColumns(db, 'story_items').has('source_context_json'))
     assert.ok(getColumns(db, 'story_items').has('typed_refs_json'))
     assert.ok(getMigrationIds(db).includes('0037_typed_ref_overlay_backfill'))
     assert.ok(getMigrationIds(db).includes('0038_novel_source_canon_fields'))
+    assert.ok(getMigrationIds(db).includes('0039_character_design_columns'))
+  } finally {
+    db.close()
+  }
+}
+
+function testAppliedLegacyMigrationCanStillReceiveCharacterDesignColumns() {
+  const db = openDb('legacy-character-design-backfill.db')
+  try {
+    db.exec(`
+      CREATE TABLE _schema_migrations (
+        id TEXT PRIMARY KEY,
+        applied_at TEXT NOT NULL
+      );
+
+      CREATE TABLE characters (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL,
+        role_type TEXT DEFAULT 'minor',
+        full_name TEXT NOT NULL,
+        record_status TEXT DEFAULT 'confirmed',
+        source_context_json TEXT
+      );
+    `)
+
+    const appliedMigrationIds = [
+      '0001_core_schema',
+      '0002_additive_schema',
+      '0003_indexes',
+      '0004_backfills',
+      '0005_validate_schema',
+      '0006_history_recovery',
+      '0007_validate_history',
+      '0008_model_context_windows',
+      '0009_validate_model_runtime',
+      '0010_model_parameter_defaults',
+      '0011_embedding_and_style_tables',
+      '0012_story_memory_context_cards',
+      '0013_asset_modules_and_blurbs',
+      '0014_character_dialogue_fingerprints',
+      '0015_character_state_versions',
+      '0016_world_state_versions',
+      '0017_story_arc_phase_targets',
+      '0018_story_thread_foreshadow_columns',
+      '0019_endgame_assets_and_contracts',
+      '0020_backfill_endgame_assets_and_contracts',
+      '0021_character_arc_center',
+      '0022_resistance_system',
+      '0023_info_gap_and_puzzle_board',
+      '0024_growth_resource_cost_system',
+      '0025_chapter_contract_audit',
+      '0026_chapter_writeback_center',
+      '0027_chapter_gate_runs',
+      '0027_generation_integrity_reports',
+      '0028_task_pipeline_metadata',
+      '0029_chapter_recall_runtime_snapshots',
+      '0030_anti_ai_rule_hits',
+      '0031_foreshadow_actionized_payoff_fields',
+      '0032_chapter_batch_workbench',
+      '0033_novel_launch_mode',
+      '0034_asset_change_impacts_and_writeback_verification',
+      '0035_state_anchor_and_delta',
+      '0036_chapter_contract_shape_controls',
+      '0037_typed_ref_overlay_backfill',
+      '0038_novel_source_canon_fields',
+    ]
+
+    const insertMigration = db.prepare('INSERT INTO _schema_migrations (id, applied_at) VALUES (?, ?)')
+    const timestamp = new Date().toISOString()
+    appliedMigrationIds.forEach((id) => insertMigration.run(id, timestamp))
+
+    runMigrations(db)
+
+    assert.ok(getColumns(db, 'characters').has('entity_type'))
+    assert.ok(getColumns(db, 'characters').has('surface_desire'))
+    assert.ok(getColumns(db, 'characters').has('deep_need'))
+    assert.ok(getColumns(db, 'characters').has('core_fear'))
+    assert.ok(getColumns(db, 'characters').has('inner_conflict'))
+    assert.ok(getColumns(db, 'characters').has('relationship_tension'))
+    assert.ok(getColumns(db, 'characters').has('resonance_point'))
+    assert.ok(getColumns(db, 'characters').has('dramatic_engine'))
+    assert.ok(getColumns(db, 'characters').has('character_arc'))
+    assert.ok(getColumns(db, 'characters').has('speech_pattern'))
+    assert.ok(getColumns(db, 'characters').has('catchphrases'))
+    assert.ok(getColumns(db, 'characters').has('vocabulary_level'))
+    assert.ok(getColumns(db, 'characters').has('dialect_features'))
+    assert.ok(getMigrationIds(db).includes('0039_character_design_columns'))
   } finally {
     db.close()
   }
@@ -492,6 +593,7 @@ function runAllTests() {
   testFreshDbIsIdempotent()
   testPartialSchemaCanResume()
   testAppliedLegacyMigrationCanStillReceiveTypedRefColumns()
+  testAppliedLegacyMigrationCanStillReceiveCharacterDesignColumns()
   console.log('migration-safety tests passed')
 }
 

@@ -1903,6 +1903,15 @@ export function runMigrations(sqlite: Database.Database) {
     ensureColumn(sqlite, 'novels', 'canon_fact_cards_json', 'TEXT')
     validateRequiredSchema(sqlite, { includeNovelSourceCanonFields: true })
   })
+
+  runMigrationStep(sqlite, '0039_character_design_columns', () => {
+    if (!hasTable(sqlite, 'characters')) {
+      return
+    }
+
+    ensureCharacterDesignColumns(sqlite)
+    validateCharacterDesignSchema(sqlite)
+  })
 }
 
 function ensureMigrationTable(sqlite: Database.Database) {
@@ -1942,6 +1951,35 @@ function ensureColumn(
   if (columns.some((column) => column.name === columnName)) return
 
   sqlite.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnDefinition};`)
+}
+
+function ensureCharacterDesignColumns(sqlite: Database.Database) {
+  ensureColumn(sqlite, 'characters', 'entity_type', "TEXT DEFAULT 'human'")
+  ensureColumn(sqlite, 'characters', 'species', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'rank_level', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'social_identity', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'camp_faction_ids_json', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'power_system_refs_json', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'context_hooks_json', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'surface_desire', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'deep_need', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'core_fear', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'inner_conflict', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'hidden_secret', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'moral_line', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'self_deception', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'trauma', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'contradiction', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'relationship_tension', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'resonance_point', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'dramatic_engine', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'character_arc', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'record_status', "TEXT DEFAULT 'confirmed'")
+  ensureColumn(sqlite, 'characters', 'source_context_json', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'speech_pattern', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'catchphrases', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'vocabulary_level', 'TEXT')
+  ensureColumn(sqlite, 'characters', 'dialect_features', 'TEXT')
 }
 
 function hasTable(sqlite: Database.Database, tableName: string): boolean {
@@ -2105,6 +2143,32 @@ function validateTypedRefOverlaySchema(sqlite: Database.Database) {
 
   if (missing.length > 0) {
     throw new Error(`typed ref overlay 迁移未完成，缺少：${missing.join(', ')}`)
+  }
+}
+
+function validateCharacterDesignSchema(sqlite: Database.Database) {
+  const requiredColumns = [
+    'entity_type',
+    'surface_desire',
+    'deep_need',
+    'core_fear',
+    'inner_conflict',
+    'relationship_tension',
+    'resonance_point',
+    'dramatic_engine',
+    'character_arc',
+    'record_status',
+    'source_context_json',
+    'speech_pattern',
+    'catchphrases',
+    'vocabulary_level',
+    'dialect_features',
+  ]
+  const existing = getColumnNames(sqlite, 'characters')
+  const missing = requiredColumns.filter((columnName) => !existing.has(columnName))
+
+  if (missing.length > 0) {
+    throw new Error(`数据库角色结构迁移未完成，缺少：${missing.map((columnName) => `characters.${columnName}`).join(', ')}`)
   }
 }
 

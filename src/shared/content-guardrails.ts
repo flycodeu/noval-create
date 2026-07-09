@@ -613,6 +613,68 @@ function collectEndingLonelyImagery(text: string): TextGuardrailFinding | null {
   }
 }
 
+const ATMOSPHERIC_IMAGERY_TOKENS = [
+  '雨',
+  '雾',
+  '江风',
+  '风声',
+  '水声',
+  '湿',
+  '潮',
+  '铁声',
+  '船板',
+  '旧木',
+  '刀',
+  '烛火',
+  '阴影',
+]
+
+function collectAtmosphericImageryOveruse(text: string): TextGuardrailFinding | null {
+  if (text.length < 1200) return null
+
+  const hits = ATMOSPHERIC_IMAGERY_TOKENS
+    .map((token) => {
+      const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const count = (text.match(new RegExp(escaped, 'gu')) || []).length
+      return { token, count }
+    })
+    .filter((item) => item.count >= 4)
+    .sort((left, right) => right.count - left.count)
+
+  if (hits.length === 0) return null
+
+  const total = hits.reduce((sum, item) => sum + item.count, 0)
+  if (total < 10) return null
+
+  return {
+    code: 'atmospheric_imagery_overuse',
+    severity: total >= 18 || hits.some((item) => item.count >= 8) ? 'medium' : 'low',
+    message: '同类气氛意象重复偏高，容易形成漂亮但可删的生成腔。',
+    excerpt: hits.slice(0, 4).map((item) => `${item.token}×${item.count}`).join('、'),
+  }
+}
+
+function collectUniformParagraphRhythm(text: string): TextGuardrailFinding | null {
+  const paragraphs = text.split(/\n+/).map((item) => item.trim()).filter((item) => item.length >= 24)
+  if (paragraphs.length < 10) return null
+
+  const lengths = paragraphs.map((item) => item.length)
+  const avg = lengths.reduce((sum, item) => sum + item, 0) / lengths.length
+  const variance = lengths.reduce((sum, item) => sum + Math.pow(item - avg, 2), 0) / lengths.length
+  const coefficient = Math.sqrt(variance) / Math.max(avg, 1)
+  const midBandCount = lengths.filter((length) => length >= 55 && length <= 180).length
+  const midBandRate = midBandCount / lengths.length
+
+  if (coefficient > 0.58 || midBandRate < 0.72) return null
+
+  return {
+    code: 'uniform_paragraph_rhythm',
+    severity: coefficient < 0.38 && midBandRate > 0.82 ? 'medium' : 'low',
+    message: '段落长度和收束节奏过于整齐，文本容易显得被统一模板清洗过。',
+    excerpt: `平均段长${Math.round(avg)}字，均匀度${coefficient.toFixed(2)}`,
+  }
+}
+
 function collectDensityGuardrailFindings(text: string): TextGuardrailFinding[] {
   const findings: TextGuardrailFinding[] = []
   const sentences = text.split(/[。！？!?；;\n]/).map((item) => item.trim()).filter((item) => item.length >= 4)
@@ -728,6 +790,8 @@ export function collectQualityGuardrailFindings(text: string, genre?: string): T
   const densityFindings = collectDensityGuardrailFindings(content)
   const simileStackingFinding = collectParagraphSimileStacking(content)
   const endingImageryFinding = collectEndingLonelyImagery(content)
+  const atmosphericImageryFinding = collectAtmosphericImageryOveruse(content)
+  const uniformParagraphFinding = collectUniformParagraphRhythm(content)
   const allFindings = [
     ...patternFindings,
     ...(genreFinding ? [genreFinding] : []),
@@ -735,6 +799,8 @@ export function collectQualityGuardrailFindings(text: string, genre?: string): T
     ...densityFindings,
     ...(simileStackingFinding ? [simileStackingFinding] : []),
     ...(endingImageryFinding ? [endingImageryFinding] : []),
+    ...(atmosphericImageryFinding ? [atmosphericImageryFinding] : []),
+    ...(uniformParagraphFinding ? [uniformParagraphFinding] : []),
   ]
 
   return dedupeFindings(allFindings).slice(0, 8)
@@ -754,6 +820,8 @@ const STYLE_DENSITY_FINDING_CODES = new Set([
   'parenthetical_explanation_abuse',
   'paragraph_simile_stacking',
   'eye_open_close_standalone_paragraph',
+  'atmospheric_imagery_overuse',
+  'uniform_paragraph_rhythm',
 ])
 
 /**

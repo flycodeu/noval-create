@@ -151,6 +151,8 @@ const RULE_SCOPE_FALLBACK: Record<string, AntiAiRuleHitScope> = {
   parallelism_rate_high: 'drift',
   body_detail_cliche_rate_high: 'drift',
   isolated_template_paragraph_rate_high: 'drift',
+  atmospheric_imagery_overuse: 'expression',
+  uniform_paragraph_rhythm: 'structure',
 }
 
 const RULE_DESCRIPTOR_MAP: Record<string, AntiAiRuleDescriptor> = {
@@ -417,6 +419,18 @@ const RULE_DESCRIPTOR_MAP: Record<string, AntiAiRuleDescriptor> = {
     scope: 'drift',
     avoid: '不要让“睁眼、闭眼、抬头、低头”单独成段反复出现。',
     prefer: '用完整场景节拍承接动作和后果。',
+  },
+  atmospheric_imagery_overuse: {
+    title: '气氛意象重复',
+    scope: 'expression',
+    avoid: '不要反复堆雨、雾、江风、铁声、船板、旧木、烛火等同类气氛意象。',
+    prefer: '只保留能改变行动或判断的意象，其余改成账册、路线、官职程序、物件去向或人物站位。',
+  },
+  uniform_paragraph_rhythm: {
+    title: '段落节奏过整齐',
+    scope: 'structure',
+    avoid: '不要让段落长度和收束方式过于一致，像被模板统一清洗。',
+    prefer: '用长短段、未完成动作、答非所问、具体数字和持续代价打破过度工整。',
   },
 }
 
