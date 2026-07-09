@@ -26,6 +26,7 @@ type WebModelConfig = Omit<ModelConfig, 'apiKey'> & { apiKeySet?: boolean }
 type WebSourceSearchSettings = Pick<SourceSearchSettingsView, 'provider' | 'tavilyApiKeySet' | 'braveApiKeySet' | 'updatedAt'>
 
 let localBackendLastError = ''
+let localBackendStatus: 'checking' | 'connected' | 'unavailable' = 'checking'
 let backendCheckPromise: Promise<boolean> | null = null
 
 async function checkBackendHealth(): Promise<boolean> {
@@ -43,6 +44,7 @@ async function waitForBackend(maxRetries = 3): Promise<boolean> {
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     if (await checkBackendHealth()) {
       localBackendLastError = ''
+      localBackendStatus = 'connected'
       console.log('[local-backend] connected')
       return true
     }
@@ -746,6 +748,7 @@ function describeError(error: unknown): string {
 
 function rememberLocalBackendError(message: string, error?: unknown) {
   localBackendLastError = error == null ? message : `${message}: ${describeError(error)}`
+  localBackendStatus = 'unavailable'
   console.warn(`[local-backend] ${localBackendLastError}`)
 }
 
@@ -753,6 +756,24 @@ function getLocalBackendUnavailableMessage() {
   return localBackendLastError
     ? `本地后端未连接：${localBackendLastError}。请确认 npm run dev:web 正在运行，并刷新页面。`
     : '本地后端未连接，请运行 npm run dev:web 后再测试。'
+}
+
+async function getLocalBackendStatus() {
+  if (backendCheckPromise) {
+    await backendCheckPromise
+    backendCheckPromise = null
+  } else if (localBackendStatus !== 'connected' && await checkBackendHealth()) {
+    localBackendLastError = ''
+    localBackendStatus = 'connected'
+  }
+
+  return {
+    isWebPreview: true,
+    status: localBackendStatus,
+    connected: localBackendStatus === 'connected',
+    lastError: localBackendLastError,
+    message: localBackendStatus === 'unavailable' ? getLocalBackendUnavailableMessage() : '',
+  }
 }
 
 function toBackendError(payload: { code?: unknown; message?: unknown; detail?: unknown }) {
@@ -798,6 +819,7 @@ async function callLocalBackend<T>(service: string, method: string, args: unknow
   const record = asRecord(payload)
   if (record.ok === true) {
     localBackendLastError = ''
+    localBackendStatus = 'connected'
     return record.data as T
   }
 
@@ -1074,10 +1096,18 @@ export function installWebElectronBridge(): void {
     faction: createService({
       list: async (novelId?: unknown) => withLocalBackend('faction', 'list', [novelId], async () => []),
       query: async (filters?: unknown) => withLocalBackend('faction', 'query', [filters], async () => emptyPagedResult),
-      getStats: async () => ({ ...emptyStats, total: 1 }),
+      getStats: async (filters?: unknown) => withLocalBackend('faction', 'getStats', [filters], async () => ({ ...emptyStats, total: 1 })),
+      get: async (id?: unknown) => withLocalBackend('faction', 'get', [id], async () => null),
+      search: async (novelId?: unknown, keyword?: unknown, limit?: unknown) => withLocalBackend('faction', 'search', [novelId, keyword, limit], async () => []),
       getGraph: async (filters?: unknown) => withLocalBackend('faction', 'getGraph', [filters], async () => ({ nodes: [], edges: [], unalignedCharacters: [] })),
     }),
-    glossary: createService({ getStats: async () => ({ ...emptyStats, total: 4 }) }),
+    glossary: createService({
+      list: async (novelId?: unknown) => withLocalBackend('glossary', 'list', [novelId], async () => []),
+      query: async (filters?: unknown) => withLocalBackend('glossary', 'query', [filters], async () => emptyPagedResult),
+      getStats: async (filters?: unknown) => withLocalBackend('glossary', 'getStats', [filters], async () => ({ ...emptyStats, total: 4 })),
+      get: async (id?: unknown) => withLocalBackend('glossary', 'get', [id], async () => null),
+      search: async (novelId?: unknown, keyword?: unknown, limit?: unknown) => withLocalBackend('glossary', 'search', [novelId, keyword, limit], async () => []),
+    }),
     thread: createService({
       list: async (novelId?: unknown) => withLocalBackend('thread', 'list', [novelId], async () => []),
       query: async (filters?: unknown) => withLocalBackend('thread', 'query', [filters], async () => emptyPagedResult),
@@ -1091,7 +1121,13 @@ export function installWebElectronBridge(): void {
         overdue: [],
       }),
     }),
-    sceneTemplate: createService({ getStats: async () => ({ ...emptyStats, total: 2 }) }),
+    sceneTemplate: createService({
+      list: async (filters?: unknown) => withLocalBackend('sceneTemplate', 'list', [filters], async () => []),
+      query: async (filters?: unknown) => withLocalBackend('sceneTemplate', 'query', [filters], async () => emptyPagedResult),
+      getStats: async (filters?: unknown) => withLocalBackend('sceneTemplate', 'getStats', [filters], async () => ({ ...emptyStats, total: 2 })),
+      get: async (id?: unknown) => withLocalBackend('sceneTemplate', 'get', [id], async () => null),
+      search: async (novelId?: unknown, genreId?: unknown, keyword?: unknown, limit?: unknown) => withLocalBackend('sceneTemplate', 'search', [novelId, genreId, keyword, limit], async () => []),
+    }),
     revision: createService({
       getStats: async () => ({ ...emptyStats, openCount: 0, inProgressCount: 0, blockerCount: 0 }),
       getSnapshot: async () => ({ tasks: [], blockers: [] }),
@@ -1118,13 +1154,18 @@ export function installWebElectronBridge(): void {
       getFilterOptions: async (novelId?: unknown) => withLocalBackend('timeline', 'getFilterOptions', [novelId], async () => ({ eventTypes: [], statuses: [], volumes: [], parts: [] })),
     }),
     characterArc: createService({
-      getArcDashboard: async () => ({
+      listCharacterArcs: async (novelId?: unknown) => withLocalBackend('characterArc', 'listCharacterArcs', [novelId], async () => []),
+      getCharacterArc: async (arcId?: unknown) => withLocalBackend('characterArc', 'getCharacterArc', [arcId], async () => null),
+      listRelationshipArcs: async (novelId?: unknown) => withLocalBackend('characterArc', 'listRelationshipArcs', [novelId], async () => []),
+      getArcDashboard: async (novelId?: unknown) => withLocalBackend('characterArc', 'getArcDashboard', [novelId], async () => ({
         characterArcs: [{ id: 1, characterId: 1, title: '从逃避到承担' }],
         relationshipArcs: [],
-      }),
+      })),
     }),
     resistance: createService({
-      getDashboard: async () => ({
+      listTracks: async (novelId?: unknown) => withLocalBackend('resistance', 'listTracks', [novelId], async () => []),
+      getTrack: async (trackId?: unknown) => withLocalBackend('resistance', 'getTrack', [trackId], async () => null),
+      getDashboard: async (novelId?: unknown) => withLocalBackend('resistance', 'getDashboard', [novelId], async () => ({
         tracks: [],
         characterTracks: [],
         factionTracks: [],
@@ -1138,18 +1179,29 @@ export function installWebElectronBridge(): void {
         activeTrackCount: 0,
         stalledTrackCount: 0,
         resolvedTrackCount: 0,
-      }),
+      })),
     }),
     endgameAsset: createService({
-      listCommitments: async () => [],
-      getSummary: async () => ({ total: 0, fulfilled: 0, pending: 0 }),
+      listCommitments: async (novelId?: unknown) => withLocalBackend('endgameAsset', 'listCommitments', [novelId], async () => []),
+      getSummary: async (novelId?: unknown) => withLocalBackend('endgameAsset', 'getSummary', [novelId], async () => ({ total: 0, fulfilled: 0, pending: 0 })),
     }),
-    foreshadow: createService({ listLedger: async () => [] }),
-    volumeDesign: createService({ list: async () => [] }),
-    contract: createService({ listScenes: async () => [] }),
-    storyFact: createService({ list: async () => [] }),
+    foreshadow: createService({
+      listLedger: async (novelId?: unknown) => withLocalBackend('foreshadow', 'listLedger', [novelId], async () => []),
+    }),
+    volumeDesign: createService({
+      list: async (novelId?: unknown) => withLocalBackend('volumeDesign', 'list', [novelId], async () => []),
+      getByVolume: async (volumeId?: unknown) => withLocalBackend('volumeDesign', 'getByVolume', [volumeId], async () => null),
+    }),
+    contract: createService({
+      getChapter: async (chapterId?: unknown) => withLocalBackend('contract', 'getChapter', [chapterId], async () => null),
+      listScenes: async (chapterId?: unknown) => withLocalBackend('contract', 'listScenes', [chapterId], async () => []),
+    }),
+    storyFact: createService({
+      list: async (novelId?: unknown) => withLocalBackend('storyFact', 'list', [novelId], async () => []),
+      get: async (id?: unknown) => withLocalBackend('storyFact', 'get', [id], async () => null),
+    }),
     growthSystem: createService({
-      getDashboard: async () => ({
+      getDashboard: async (novelId?: unknown) => withLocalBackend('growthSystem', 'getDashboard', [novelId], async () => ({
         tracks: [],
         pools: [],
         events: [],
@@ -1164,10 +1216,10 @@ export function installWebElectronBridge(): void {
           unresolvedCostCount: 0,
           chapterWritebackCoverage: 0,
         },
-      }),
-      listTracks: async () => [],
-      listPools: async () => [],
-      listEvents: async () => [],
+      })),
+      listTracks: async (novelId?: unknown) => withLocalBackend('growthSystem', 'listTracks', [novelId], async () => []),
+      listPools: async (novelId?: unknown) => withLocalBackend('growthSystem', 'listPools', [novelId], async () => []),
+      listEvents: async (novelId?: unknown) => withLocalBackend('growthSystem', 'listEvents', [novelId], async () => []),
     }),
     chapter: createService({
       list: async (novelId?: unknown) => withLocalBackend('chapter', 'list', [novelId], async () => demoChapters),
@@ -1221,6 +1273,7 @@ export function installWebElectronBridge(): void {
         [],
         async () => 'web-preview://localStorage/novelforge',
       ),
+      getLocalBackendStatus,
     }),
     quality: createService({
       getDashboard: async () => emptyQualityDashboard,

@@ -449,7 +449,7 @@ export default function PremisePage({ novelId }: Props) {
           duration: 6,
           placement: 'bottomRight',
           onClick: () => {
-            window.location.hash = `#/novels/${novelId}/core-settings`
+            navigate(`/novels/${novelId}/core-settings`)
           },
         })
       }
@@ -465,7 +465,7 @@ export default function PremisePage({ novelId }: Props) {
           duration: 6,
           placement: 'bottomRight',
           onClick: () => {
-            window.location.hash = `#/novels/${novelId}/core-settings`
+            navigate(`/novels/${novelId}/core-settings`)
           },
         })
       }

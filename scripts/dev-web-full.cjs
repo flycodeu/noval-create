@@ -7,7 +7,7 @@ const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm'
 const electronCommand = process.platform === 'win32' ? 'electron.cmd' : 'electron'
 const backendPort = Number(process.env.NOVELFORGE_WEB_BACKEND_PORT || 8787)
 const frontendPort = Number(process.env.NOVELFORGE_WEB_FRONTEND_PORT || 4175)
-const expectedBackendVersion = 2
+const expectedBackendVersion = 3
 
 function quoteWindowsArg(value) {
   const text = String(value)

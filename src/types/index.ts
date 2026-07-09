@@ -5448,6 +5448,13 @@ declare global {
       }
       app: {
         getDatabasePath: () => Promise<string>
+        getLocalBackendStatus?: () => Promise<{
+          isWebPreview: boolean
+          status: 'checking' | 'connected' | 'unavailable'
+          connected: boolean
+          lastError: string
+          message: string
+        }>
       }
       aiPatch: {
         suggest: (request: AiPatchRequest) => Promise<AiPatchResult>

@@ -9,7 +9,7 @@ const workspaceRoot = path.resolve(__dirname, '..')
 const host = process.env.NOVELFORGE_WEB_BACKEND_HOST || '127.0.0.1'
 const port = Number(process.env.NOVELFORGE_WEB_BACKEND_PORT || 8787)
 const MASKED_KEY = '已设置'
-const BACKEND_VERSION = 2
+const BACKEND_VERSION = 3
 
 app.setName('NovelForge')
 
@@ -74,6 +74,13 @@ function createRuntime() {
   const itemService = requireProject('electron/services/item.service.ts')
   const storyThreadService = requireProject('electron/services/story-thread.service.ts')
   const factionService = requireProject('electron/services/faction.service.ts')
+  const glossaryService = requireProject('electron/services/glossary.service.ts')
+  const sceneTemplateService = requireProject('electron/services/scene-template.service.ts')
+  const endgameAssetService = requireProject('electron/services/endgame-asset.service.ts')
+  const storyFactService = requireProject('electron/services/story-fact.service.ts')
+  const growthSystemService = requireProject('electron/services/growth-system.service.ts')
+  const resistanceService = requireProject('electron/services/resistance.service.ts')
+  const characterArcService = requireProject('electron/services/character-arc.service.ts')
   const storyStructureService = requireProject('electron/services/story-structure.service.ts')
   const timelineService = requireProject('electron/services/timeline.service.ts')
   const { buildAiModelRouteReport, buildChatOptionsFromRoute, resolveAiExecutionMode } = requireProject('electron/services/ai-engine.service.ts')
@@ -313,7 +320,29 @@ function createRuntime() {
     faction: {
       list: (novelId) => factionService.listFactions(requireId(novelId, 'novelId')),
       query: (filters) => factionService.queryFactions(filters),
+      getStats: (filters) => factionService.getFactionStats(filters),
+      get: (id) => factionService.getFaction(requireId(id)),
+      search: (novelId, keyword, limit) => factionService.searchFactions(requireId(novelId, 'novelId'), keyword, limit),
       getGraph: (filters) => factionService.getFactionGraph(filters),
+    },
+    glossary: {
+      list: (novelId) => glossaryService.listGlossary(requireId(novelId, 'novelId')),
+      query: (filters) => glossaryService.queryGlossary(filters),
+      getStats: (filters) => glossaryService.getGlossaryStats(filters),
+      get: (id) => glossaryService.getGlossaryEntry(requireId(id)),
+      search: (novelId, keyword, limit) => glossaryService.searchGlossary(requireId(novelId, 'novelId'), keyword, limit),
+    },
+    sceneTemplate: {
+      list: (filters) => sceneTemplateService.listSceneTemplates(filters || {}),
+      query: (filters) => sceneTemplateService.querySceneTemplates(filters || {}),
+      getStats: (filters) => sceneTemplateService.getSceneTemplateStats(filters || {}),
+      get: (id) => sceneTemplateService.getSceneTemplate(requireId(id)),
+      search: (novelId, genreId, keyword, limit) => sceneTemplateService.searchSceneTemplates(
+        requireId(novelId, 'novelId'),
+        typeof genreId === 'number' ? genreId : undefined,
+        keyword,
+        limit,
+      ),
     },
     structure: {
       getTree: (novelId) => storyStructureService.listStoryStructure(novelId),
@@ -328,6 +357,42 @@ function createRuntime() {
       query: (filters) => timelineService.queryTimelineEvents(filters),
       getStats: (filters) => timelineService.getTimelineStats(filters),
       getFilterOptions: (novelId) => timelineService.getTimelineFilterOptions(novelId),
+    },
+    characterArc: {
+      listCharacterArcs: (novelId) => characterArcService.listCharacterArcs(requireId(novelId, 'novelId')),
+      getCharacterArc: (arcId) => characterArcService.getCharacterArc(requireId(arcId, 'arcId')),
+      listRelationshipArcs: (novelId) => characterArcService.listRelationshipArcs(requireId(novelId, 'novelId')),
+      getArcDashboard: (novelId) => characterArcService.getArcDashboard(requireId(novelId, 'novelId')),
+    },
+    resistance: {
+      listTracks: (novelId) => resistanceService.listTracks(requireId(novelId, 'novelId')),
+      getTrack: (trackId) => resistanceService.getTrack(requireId(trackId, 'trackId')),
+      getDashboard: (novelId) => resistanceService.getDashboard(requireId(novelId, 'novelId')),
+    },
+    endgameAsset: {
+      listCommitments: (novelId) => endgameAssetService.listEndgameCommitments(requireId(novelId, 'novelId')),
+      getSummary: (novelId) => endgameAssetService.getEndgameAssetSummary(requireId(novelId, 'novelId')),
+    },
+    foreshadow: {
+      listLedger: (novelId) => endgameAssetService.listForeshadowLedger(requireId(novelId, 'novelId')),
+    },
+    volumeDesign: {
+      list: (novelId) => endgameAssetService.listVolumeDesigns(requireId(novelId, 'novelId')),
+      getByVolume: (volumeId) => endgameAssetService.getVolumeDesignByVolumeId(requireId(volumeId, 'volumeId')),
+    },
+    contract: {
+      getChapter: (chapterId) => endgameAssetService.getChapterContract(requireId(chapterId, 'chapterId')),
+      listScenes: (chapterId) => endgameAssetService.listSceneContracts(requireId(chapterId, 'chapterId')),
+    },
+    storyFact: {
+      list: (novelId) => storyFactService.listStoryFacts(requireId(novelId, 'novelId')),
+      get: (id) => storyFactService.getStoryFact(requireId(id)),
+    },
+    growthSystem: {
+      getDashboard: (novelId) => growthSystemService.getGrowthSystemDashboard(requireId(novelId, 'novelId')),
+      listTracks: (novelId) => growthSystemService.listGrowthTracks(requireId(novelId, 'novelId')),
+      listPools: (novelId) => growthSystemService.listResourcePools(requireId(novelId, 'novelId')),
+      listEvents: (novelId) => growthSystemService.listRewardCostEvents(requireId(novelId, 'novelId')),
     },
   }
 

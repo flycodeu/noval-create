@@ -1,4 +1,4 @@
-import React, { Suspense, useEffect, useMemo } from 'react'
+import React, { Suspense, useEffect, useMemo, useState } from 'react'
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Alert, ConfigProvider, theme as antdTheme } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
@@ -14,9 +14,18 @@ const TaskCenter = React.lazy(() => import('./pages/TaskCenter'))
 const PromptManager = React.lazy(() => import('./pages/PromptManager'))
 const NovelRouter = React.lazy(() => import('./pages/Novel'))
 
+type LocalBackendStatus = {
+  isWebPreview: boolean
+  status: 'checking' | 'connected' | 'unavailable'
+  connected: boolean
+  lastError: string
+  message: string
+}
+
 export default function App() {
   const { addStream, appendStreamChunk, completeStream } = useTaskStore()
   const { theme } = useThemeStore()
+  const [localBackendStatus, setLocalBackendStatus] = useState<LocalBackendStatus | null>(null)
   const isDarkTheme = theme === 'dark'
   const isSoftTheme = theme === 'soft'
   const hasElectronBridge = typeof window !== 'undefined'
@@ -50,6 +59,30 @@ export default function App() {
     })
     return () => { unsubChunk(); unsubComplete(); unsubStatus() }
   }, [addStream, appendStreamChunk, completeStream, hasElectronBridge])
+
+  useEffect(() => {
+    if (!hasElectronBridge || typeof window.electron.app?.getLocalBackendStatus !== 'function') return undefined
+
+    let disposed = false
+    const refreshStatus = async () => {
+      try {
+        const status = await window.electron.app.getLocalBackendStatus?.()
+        if (!disposed && status) setLocalBackendStatus(status)
+      } catch {
+        if (!disposed) setLocalBackendStatus(null)
+      }
+    }
+
+    void refreshStatus()
+    const timer = window.setInterval(() => {
+      void refreshStatus()
+    }, 2500)
+
+    return () => {
+      disposed = true
+      window.clearInterval(timer)
+    }
+  }, [hasElectronBridge])
 
   const antdThemeConfig = useMemo(() => {
     if (isDarkTheme) {
@@ -230,6 +263,15 @@ export default function App() {
       ) : (
       <HashRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <AppLayout>
+          {localBackendStatus?.isWebPreview && localBackendStatus.status === 'unavailable' ? (
+            <Alert
+              type="warning"
+              showIcon
+              banner
+              message="网页预览正在使用演示/空数据"
+              description={localBackendStatus.message || '本地后端未连接，请运行 npm run dev:web 后刷新页面。'}
+            />
+          ) : null}
           <Suspense fallback={<div style={{ padding: 24, color: 'var(--text-muted)' }}>页面加载中...</div>}>
             <Routes>
               <Route path="/" element={<Navigate to="/novels" replace />} />
