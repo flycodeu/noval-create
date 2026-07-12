@@ -71,4 +71,15 @@ describe('generic asset quality gate', () => {
     expect(result).toMatchObject({ status: 'passed', score: 100, readyForHumanApply: true })
     expect(result.modelReview).not.toHaveProperty('finalOutput')
   })
+
+  it('keeps an asset in human review when the project context advanced during generation', () => {
+    const result = assess({ artifactContextVersion: 4, currentContextVersion: 5 })
+
+    expect(result.status).toBe('needs_revision')
+    expect(result.readyForHumanApply).toBe(false)
+    expect(result.checks).toContainEqual(expect.objectContaining({
+      code: 'context_freshness',
+      status: 'warn',
+    }))
+  })
 })

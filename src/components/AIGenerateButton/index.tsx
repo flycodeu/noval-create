@@ -161,7 +161,16 @@ export default function AIGenerateButton({
         max: totalAttempts,
         status: 'succeeded',
       })
-      const outputs = isJson ? rawOutputs : rawOutputs.map(cleanOutput)
+      const outputs = rawOutputs
+        .map((output) => {
+          const normalized = String(output || '').trim()
+          return isJson ? normalized : cleanOutput(normalized)
+        })
+        .filter(Boolean)
+
+      if (outputs.length === 0) {
+        throw new Error(getUserFacingMessage('aiGenerate.empty'))
+      }
 
       if (count === 1 || outputs.length <= 1) {
         onResult(outputs[0])
@@ -184,7 +193,12 @@ export default function AIGenerateButton({
   }
 
   const handleConfirmPick = () => {
-    onResult(results[picked])
+    const selected = results[picked]
+    if (!selected) {
+      message.error(getUserFacingMessage('aiGenerate.empty'))
+      return
+    }
+    onResult(selected)
     setPickOpen(false)
     setResults([])
     message.success(getUserFacingMessage('aiGenerate.picked'))

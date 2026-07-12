@@ -106,13 +106,13 @@ export const GUIDED_STEP_ORDER: GuidedWorkflowStepKey[] = [
   'story-core',
   'theme-voice',
   'world-foundation',
+  'endgame-design',
   'map-structure',
   'items-equipment',
   'character-roster',
   'resistance-system',
   'story-threads',
   'story-plot',
-  'endgame-design',
   'volume-planning',
   'outline-structure',
   'timeline-causality',
@@ -166,9 +166,9 @@ export const GUIDED_WORKFLOW_PHASES: GuidedWorkflowPhaseDefinition[] = [
   },
   {
     key: 'world-building',
-    title: '世界与地点',
-    summary: '把世界规则、地点场景和物品线索整理成可调用资产。',
-    stepKeys: ['world-foundation', 'map-structure', 'items-equipment'],
+    title: '世界与终局',
+    summary: '先统一世界边界和终点承诺，再把设定落到地点与物品。',
+    stepKeys: ['world-foundation', 'endgame-design', 'map-structure', 'items-equipment'],
   },
   {
     key: 'cast-factions',
@@ -179,8 +179,8 @@ export const GUIDED_WORKFLOW_PHASES: GuidedWorkflowPhaseDefinition[] = [
   {
     key: 'plot-architecture',
     title: '剧情与伏笔',
-    summary: '把主线、支线、终局承诺和伏笔控制形成推进链。',
-    stepKeys: ['story-threads', 'story-plot', 'endgame-design'],
+    summary: '把主线、支线和伏笔控制形成推进链，并回查终局承诺。',
+    stepKeys: ['story-threads', 'story-plot'],
   },
   {
     key: 'volume-outline',
@@ -632,13 +632,13 @@ export function getRecommendedGuidedWorkflowStep(
   if (!isStoryCoreReady(novel)) return 'story-core'
   if (!isThemeVoiceReady(novel)) return 'theme-voice'
   if (!isWorldFoundationReady(novel)) return 'world-foundation'
+  if (!isEndgameDesignReady(novel)) return 'endgame-design'
   if (!isMapStructureReady(stats)) return 'map-structure'
   if (!isItemsEquipmentReady(stats)) return 'items-equipment'
   if (!isCharacterRosterReady(stats)) return 'character-roster'
   if (!isResistanceSystemReady(stats)) return 'resistance-system'
   if (!isStoryThreadsReady(stats)) return 'story-threads'
   if (!isStoryPlotReady(novel)) return 'story-plot'
-  if (!isEndgameDesignReady(novel)) return 'endgame-design'
   if (!isVolumePlanningReady(stats)) return 'volume-planning'
   if (stats.outlineCount <= 0) return 'outline-structure'
   if (stats.timelineCount <= 0) return 'timeline-causality'
@@ -654,13 +654,13 @@ export function getRecommendedWorkflowStep(
   if (!isStoryCoreReady(novel)) return 'core-settings'
   if (!isThemeVoiceReady(novel)) return 'theme-voice'
   if (!novel.worldRulesJson) return 'world-rules'
+  if (!isEndgameDesignReady(novel)) return 'endgame'
   if (stats.mapCount <= 0) return 'map'
   if (stats.itemCount <= 0) return 'items'
   if (stats.characterCount <= 0) return 'characters'
   if (stats.resistanceTrackCount <= 0) return 'resistance'
   if (stats.threadCount <= 0) return 'threads'
   if (!isStoryPlotReady(novel)) return 'story-design'
-  if (!isEndgameDesignReady(novel)) return 'endgame'
   if (stats.volumeCount <= 0) return 'volume-design'
   if (stats.outlineCount <= 0) return 'outline'
   if (stats.timelineCount <= 0) return 'timeline'
@@ -704,6 +704,10 @@ export function getWorkflowBlockers(
 
   const requireWorldRules = (action: string) => {
     pushIfMissing(isWorldFoundationReady(novel), `缺少世界规则，无法${action}。`)
+  }
+
+  const requireEndgame = (action: string) => {
+    pushIfMissing(isEndgameDesignReady(novel), `请先锁定终局承诺，再${action}。`)
   }
 
   const requireMap = (action: string) => {
@@ -767,17 +771,21 @@ export function getWorkflowBlockers(
       break
     case 'map':
       requireWorldRules('生成地图')
+      requireEndgame('生成地图')
       break
     case 'characters':
       requireWorldRules('生成人物')
+      requireEndgame('生成人物')
       requireMap('生成人物')
       requireItems('生成人物')
       break
     case 'items':
       requireWorldRules('生成物品')
+      requireEndgame('生成物品')
       requireMap('生成物品')
       break
     case 'threads':
+      requireEndgame('生成故事线程')
       if (!isStoryPlotReady(novel)) {
         requireWorldRules('生成故事线程')
         requireMap('生成故事线程')
@@ -787,6 +795,7 @@ export function getWorkflowBlockers(
       break
     case 'story-design':
       requireWorldRules('生成故事设计')
+      requireEndgame('生成故事设计')
       requireMap('生成故事设计')
       requireCharacters('生成故事设计')
       requireItems('生成故事设计')
@@ -794,6 +803,7 @@ export function getWorkflowBlockers(
       requireResistance('生成故事设计')
       break
     case 'outline':
+      requireEndgame('生成故事大纲')
       pushIfMissing(isStoryPlotReady(novel), '请先完成故事设计，再生成故事大纲。')
       requireCharacters('生成故事大纲')
       requireResistance('生成故事大纲')
@@ -803,6 +813,7 @@ export function getWorkflowBlockers(
       break
     case 'timeline':
       requireWorldRules('生成时间轴')
+      requireEndgame('生成时间轴')
       requireMap('生成时间轴')
       requireCharacters('生成时间轴')
       requireItems('生成时间轴')
@@ -815,6 +826,7 @@ export function getWorkflowBlockers(
       requireRevisionBlockersCleared('生成时间轴')
       break
     case 'writing':
+      requireEndgame('开始正文写作')
       requireCharacters('开始正文写作')
       requireResistance('开始正文写作')
       requireVolumePlanning('开始正文写作')

@@ -248,7 +248,7 @@ describe('author-workflow primary task selection', () => {
     expect(summary.primaryTask.entryPage).toBe('overview')
   })
 
-  it('routes asset-building projects to map when world rules exist but the map is empty', () => {
+  it('routes asset-building projects to endgame before map generation', () => {
     const summary = buildAuthorWorkflowSummary(
       makeNovel({
         basics: true,
@@ -262,8 +262,8 @@ describe('author-workflow primary task selection', () => {
       'asset_building',
     )
 
-    expect(summary.primaryTask.id).toBe('asset-map')
-    expect(summary.primaryTask.entryPage).toBe('map')
+    expect(summary.primaryTask.id).toBe('asset-endgame')
+    expect(summary.primaryTask.entryPage).toBe('endgame')
   })
 
   it('routes daily push to the backend task center when a paused batch can resume', () => {
@@ -302,7 +302,7 @@ describe('author-workflow primary task selection', () => {
     expect(summary.primaryTask.entryPage).toBe('writeback')
   })
 
-  it('stops pre-writing asset bloat by routing back to outline or writing', () => {
+  it('stops pre-writing asset bloat while still honoring the endgame gate', () => {
     const summary = buildAuthorWorkflowSummary(
       makeNovel({
         basics: true,
@@ -323,7 +323,7 @@ describe('author-workflow primary task selection', () => {
       'asset_building',
     )
 
-    expect(summary.primaryTask.id).toBe('asset-compress-volume')
+    expect(summary.primaryTask.id).toBe('asset-endgame')
     expect(summary.impactNotices.some((notice) => notice.id === 'impact-asset-bloat')).toBe(true)
   })
 })

@@ -111,11 +111,42 @@ function extractJsonObject(raw: string): string {
   if (start < 0 || end < start) {
     throw new Error(getUserFacingMessage('guidedStep.aiJsonParseFailed'))
   }
-  return trimmed.slice(start, end + 1)
+
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let index = start; index < trimmed.length; index += 1) {
+    const character = trimmed[index]
+    if (inString) {
+      if (escaped) {
+        escaped = false
+      } else if (character === '\\') {
+        escaped = true
+      } else if (character === '"') {
+        inString = false
+      }
+      continue
+    }
+    if (character === '"') {
+      inString = true
+    } else if (character === '{') {
+      depth += 1
+    } else if (character === '}') {
+      depth -= 1
+      if (depth === 0) return trimmed.slice(start, index + 1)
+    }
+  }
+
+  throw new Error(getUserFacingMessage('guidedStep.aiJsonParseFailed'))
 }
 
 function normalizeDraft(raw: string, allowedKeys: string[]): StepAIAssistantDraft {
-  const parsed = cleanAiValue(JSON.parse(extractJsonObject(raw))) as Record<string, unknown>
+  let parsed: Record<string, unknown>
+  try {
+    parsed = cleanAiValue(JSON.parse(extractJsonObject(raw))) as Record<string, unknown>
+  } catch {
+    throw new Error(getUserFacingMessage('guidedStep.aiJsonParseFailed'))
+  }
   const rawPatch = parsed.draftPatch && typeof parsed.draftPatch === 'object'
     ? parsed.draftPatch as Record<string, unknown>
     : {}

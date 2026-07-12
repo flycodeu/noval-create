@@ -530,7 +530,19 @@ function createPublishCheck(chapterId: number) {
 }
 
 const noop = async () => undefined
-const nextId = async () => Math.floor(Date.now() / 1000)
+
+class WebPreviewReadOnlyError extends Error {
+  code = 'WEB_PREVIEW_READ_ONLY'
+
+  constructor(methodName: string) {
+    super(`浏览器预览不支持写入操作：${methodName}。请在 NovelForge 桌面端执行。`)
+    this.name = 'WebPreviewReadOnlyError'
+  }
+}
+
+const readOnlyMutation = async (methodName: string): Promise<never> => {
+  throw new WebPreviewReadOnlyError(methodName)
+}
 
 function createService(overrides: Partial<BridgeService> = {}): BridgeService {
   return new Proxy(overrides as BridgeService, {
@@ -569,9 +581,7 @@ function createDefaultMethod(methodName: string): BridgeMethod {
   }
 
   if (/^(create|update|delete|clear|save|setDefault|markApplied|resume|cancel|retry|generate|start|batch|upsert|apply|sync|refresh|restore|prepare|run|format)/i.test(methodName)) {
-    return methodName.startsWith('create') || methodName.startsWith('start') || methodName.startsWith('resume')
-      ? nextId
-      : noop
+    return () => readOnlyMutation(methodName)
   }
 
   return async () => null
@@ -876,9 +886,9 @@ export function installWebElectronBridge(): void {
       // 读取优先走本地后端（真实数据库），后端未启动时回退到浏览器演示数据。
       list: async (filters?: unknown) => withLocalBackend('novel', 'list', [filters], async () => demoNovels),
       get: async (id) => withLocalBackend('novel', 'get', [id], async () => getNovelById(Number(id))),
-      create: nextId,
-      update: noop,
-      delete: noop,
+      create: () => readOnlyMutation('novel.create'),
+      update: () => readOnlyMutation('novel.update'),
+      delete: () => readOnlyMutation('novel.delete'),
       export: async () => '',
       stats: async (id) => withLocalBackend('novel', 'stats', [id], async () => {
         const novel = getNovelById(Number(id))
@@ -1054,19 +1064,8 @@ export function installWebElectronBridge(): void {
       listLinkedTimelineEventsPage: async (filters?: unknown, page?: unknown, pageSize?: unknown) => withLocalBackend('structure', 'listLinkedTimelineEventsPage', [filters, page, pageSize], async () => emptyPagedResult),
       resolvePath: async (filters?: unknown) => withLocalBackend('structure', 'resolvePath', [filters], async () => null),
       getLinkageSummary: async (novelId?: unknown) => withLocalBackend('structure', 'getLinkageSummary', [novelId], async () => emptyStructureLinkageSummary),
-      syncLinkage: async () => ({
-        ...emptyStructureLinkageSummary,
-        createdChapterContractCount: 0,
-        createdSceneContractCount: 0,
-        createdTimelineAnchorCount: 0,
-      }),
-      clear: async () => ({
-        volumesCleared: 0,
-        partsCleared: 0,
-        chaptersCleared: 0,
-        segmentsCleared: 0,
-        checkpointsCleared: 0,
-      }),
+      syncLinkage: () => readOnlyMutation('structure.syncLinkage'),
+      clear: () => readOnlyMutation('structure.clear'),
     }),
     character: createService({
       list: async (novelId?: unknown) => withLocalBackend('character', 'list', [novelId], async () => []),

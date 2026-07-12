@@ -26,6 +26,11 @@ type IpcBridgeResult<T> =
   | { ok: true; data: T }
   | { ok: false; error: IpcBridgeErrorPayload }
 
+type EventCallback = (...args: unknown[]) => void
+type EventSubscription = (_event: Electron.IpcRendererEvent, ...args: unknown[]) => void
+
+const eventSubscriptions = new Map<string, Map<EventCallback, Set<EventSubscription>>>()
+
 function isIpcBridgeResult(value: unknown): value is IpcBridgeResult<unknown> {
   if (!value || typeof value !== 'object') return false
   if (!('ok' in value) || typeof (value as { ok?: unknown }).ok !== 'boolean') return false
@@ -605,7 +610,7 @@ const api = {
   },
 
   // Event listeners
-  on: (channel: string, callback: (...args: unknown[]) => void) => {
+  on: (channel: string, callback: EventCallback) => {
     const validChannels = [
       'task:stream-chunk',
       'task:status-change',
@@ -618,15 +623,32 @@ const api = {
       'chapter:generation-progress',
     ]
     if (validChannels.includes(channel)) {
-      const subscription = (_event: Electron.IpcRendererEvent, ...args: unknown[]) => callback(...args)
+      const subscription: EventSubscription = (_event, ...args) => callback(...args)
       ipcRenderer.on(channel, subscription)
-      return () => ipcRenderer.removeListener(channel, subscription)
+      const callbacks = eventSubscriptions.get(channel) || new Map<EventCallback, Set<EventSubscription>>()
+      const subscriptions = callbacks.get(callback) || new Set<EventSubscription>()
+      subscriptions.add(subscription)
+      callbacks.set(callback, subscriptions)
+      eventSubscriptions.set(channel, callbacks)
+      return () => {
+        ipcRenderer.removeListener(channel, subscription)
+        subscriptions.delete(subscription)
+        if (subscriptions.size === 0) callbacks.delete(callback)
+        if (callbacks.size === 0) eventSubscriptions.delete(channel)
+      }
     }
     return () => {}
   },
 
-  off: (channel: string, callback: (...args: unknown[]) => void) => {
-    ipcRenderer.removeListener(channel, callback as never)
+  off: (channel: string, callback: EventCallback) => {
+    const callbacks = eventSubscriptions.get(channel)
+    const subscriptions = callbacks?.get(callback)
+    if (!subscriptions) return
+    for (const subscription of subscriptions) {
+      ipcRenderer.removeListener(channel, subscription)
+    }
+    callbacks?.delete(callback)
+    if (callbacks?.size === 0) eventSubscriptions.delete(channel)
   },
 }
 

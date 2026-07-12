@@ -3980,9 +3980,21 @@ export function buildPreviousChapterContextFeed(previousChapter?: PreviousChapte
   }
 }
 
-export async function buildStoryProfile(novelId: number): Promise<StoryProfile> {
+export interface StoryProfileBuildOptions {
+  /**
+   * Structure initialization is an explicit write-side concern. Callers that
+   * are about to write chapter/outline data can opt in; context reads and
+   * draft/agent workflows stay side-effect free by default.
+   */
+  ensureStructure?: boolean
+}
+
+export async function buildStoryProfile(
+  novelId: number,
+  options: StoryProfileBuildOptions = {},
+): Promise<StoryProfile> {
   const db = getDb()
-  ensureStoryStructure(novelId)
+  if (options.ensureStructure === true) ensureStoryStructure(novelId)
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
   if (!novel) throwUserFacingError('novel.notFound')
 

@@ -1,4 +1,3 @@
-import type { StoryProfile } from './context.service'
 import type {
   GenerateGenericAssetDraftInput,
   GenerateGenericAssetDraftResult,
@@ -10,6 +9,7 @@ import type {
   ReviewGenericAssetDraftInput,
   ReviewGenericAssetDraftResult,
 } from '../../src/shared/generic-asset-workflow'
+import { asc, desc, eq } from 'drizzle-orm'
 import { GenericAssetWorkflowError } from '../application/generic-asset-workflow-error'
 import { safeParseJson } from '../utils/json'
 import {
@@ -26,7 +26,21 @@ import {
   buildChatOptionsFromRoute,
   resolveAiExecutionMode,
 } from './ai-engine.service'
-import { buildStoryProfile } from './context.service'
+import { buildStoryProfile, type StoryProfile } from './context.service'
+import { getDb } from '../database/db'
+import {
+  chapters,
+  characters,
+  factions,
+  resistanceTracks,
+  storyArcs,
+  storyItems,
+  storyThreads,
+  storyVolumes,
+  timelineEvents,
+  volumeDesigns,
+  worldMap,
+} from '../database/schema'
 import * as novelService from './novel.service'
 import { runChatTask } from './task.service'
 
@@ -41,6 +55,121 @@ function clip(value: string | null | undefined, limit = CONTEXT_SECTION_LIMIT): 
 
 function uniqueLines(values: Array<string | null | undefined>, limit = 20): string[] {
   return [...new Set(values.map((value) => (value || '').trim()).filter(Boolean))].slice(0, limit)
+}
+
+function inline(value: unknown): string {
+  return typeof value === 'string' ? value.trim().replace(/\s+/gu, ' ') : ''
+}
+
+function formatContextCatalogSection(
+  label: string,
+  lines: string[],
+  limit = 1_800,
+): string {
+  const content = clip(lines.filter(Boolean).join('\n'), limit) || '（当前没有已登记记录）'
+  return `<existing_${label}>\n${content}\n</existing_${label}>`
+}
+
+/**
+ * The compact StoryProfile is intentionally stable for the rest of the app,
+ * but external coding agents need the concrete records that their draft must
+ * inherit. Read a bounded catalog here without calling ensureStoryStructure.
+ */
+function buildExistingAssetCatalog(novelId: number): string {
+  const db = getDb()
+  const characterRows = db.select().from(characters)
+    .where(eq(characters.novelId, novelId))
+    .orderBy(asc(characters.sortOrder), asc(characters.id))
+    .all()
+    .slice(0, 12)
+  const factionRows = db.select().from(factions)
+    .where(eq(factions.novelId, novelId))
+    .orderBy(asc(factions.sortOrder), asc(factions.id))
+    .all()
+    .slice(0, 8)
+  const locationRows = db.select().from(worldMap)
+    .where(eq(worldMap.novelId, novelId))
+    .orderBy(asc(worldMap.level), asc(worldMap.sortOrder), asc(worldMap.id))
+    .all()
+    .slice(0, 12)
+  const itemRows = db.select().from(storyItems)
+    .where(eq(storyItems.novelId, novelId))
+    .orderBy(asc(storyItems.sortOrder), asc(storyItems.id))
+    .all()
+    .slice(0, 12)
+  const resistanceRows = db.select().from(resistanceTracks)
+    .where(eq(resistanceTracks.novelId, novelId))
+    .orderBy(asc(resistanceTracks.id))
+    .all()
+    .slice(0, 8)
+  const threadRows = db.select().from(storyThreads)
+    .where(eq(storyThreads.novelId, novelId))
+    .orderBy(asc(storyThreads.sortOrder), asc(storyThreads.id))
+    .all()
+    .slice(0, 12)
+  const timelineRows = db.select().from(timelineEvents)
+    .where(eq(timelineEvents.novelId, novelId))
+    .orderBy(asc(timelineEvents.timeSortValue), asc(timelineEvents.sortOrder), asc(timelineEvents.id))
+    .all()
+    .slice(0, 16)
+  const arcRows = db.select().from(storyArcs)
+    .where(eq(storyArcs.novelId, novelId))
+    .orderBy(asc(storyArcs.arcOrder), asc(storyArcs.id))
+    .all()
+    .slice(0, 8)
+  const volumeRows = db.select().from(storyVolumes)
+    .where(eq(storyVolumes.novelId, novelId))
+    .orderBy(asc(storyVolumes.volumeNumber), asc(storyVolumes.id))
+    .all()
+    .slice(0, 6)
+  const volumeDesignRows = db.select().from(volumeDesigns)
+    .where(eq(volumeDesigns.novelId, novelId))
+    .orderBy(asc(volumeDesigns.id))
+    .all()
+    .slice(0, 6)
+  const chapterRows = db.select().from(chapters)
+    .where(eq(chapters.novelId, novelId))
+    .orderBy(desc(chapters.chapterNum), desc(chapters.id))
+    .all()
+    .slice(0, 8)
+
+  return [
+    formatContextCatalogSection('characters', characterRows.map((row) => (
+      `- #${row.id} ${inline(row.fullName)} | ${inline(row.roleType)} | 目标：${inline(row.goals)} | 戏剧引擎：${inline(row.dramaticEngine)} | 状态：${inline(row.characterArc)}`
+    ))),
+    formatContextCatalogSection('factions', factionRows.map((row) => (
+      `- #${row.id} ${inline(row.name)} | 目标：${inline(row.goal)} | 资源：${inline(row.resources)} | 阶段：${inline(row.currentPhase)}`
+    ))),
+    formatContextCatalogSection('locations', locationRows.map((row) => (
+      `- #${row.id} ${inline(row.name)} | 层级：${row.level} | 类型：${inline(row.locationType || row.nodeType)} | 作用：${inline(row.plotRelevance)} | 描述：${inline(row.description)}`
+    ))),
+    formatContextCatalogSection('items', itemRows.map((row) => (
+      `- #${row.id} ${inline(row.itemName)} | 类型：${inline(row.itemKind)} | 状态：${inline(row.status)} | 剧情功能：${inline(row.plotFunction)} | 限制：${inline(row.limitations)} | 摘要：${inline(row.summary)}`
+    ))),
+    formatContextCatalogSection('resistance_tracks', resistanceRows.map((row) => (
+      `- #${row.id} ${inline(row.title)} | 类型：${inline(row.resistanceKind)} | 目标：${inline(row.goal)} | 当前压力：${inline(row.currentPressureMode)} | 升级：${inline(row.escalationPlan)} | 状态：${inline(row.currentStatus)}`
+    ))),
+    formatContextCatalogSection('story_threads', threadRows.map((row) => (
+      `- #${row.id} ${inline(row.title)} | 类型：${inline(row.threadType)} | 状态：${inline(row.status)} | 当前状态：${inline(row.currentState)} | 回收条件：${inline(row.payoffCondition)} | 目标回收章：${row.targetPayoffChapter ?? '未定'}`
+    ))),
+    formatContextCatalogSection('timeline_events', timelineRows.map((row) => (
+      `- #${row.id} ${inline(row.timeLabel)} ${inline(row.eventTitle)} | ${inline(row.eventType)} | 原因：${inline(row.eventCause)} | 结果：${inline(row.eventResult)} | 摘要：${inline(row.eventSummary)}`
+    ))),
+    formatContextCatalogSection('story_arcs', arcRows.map((row) => (
+      `- #${row.id} ${inline(row.arcName)} | 第${row.chapterStart ?? '?'}-${row.chapterEnd ?? '?'}章 | 目标：${inline(row.arcGoal)} | 摘要：${inline(row.arcSummary)}`
+    ))),
+    formatContextCatalogSection('volume_plan', [
+      ...volumeRows.map((row) => (
+        `- 卷${row.volumeNumber} #${row.id} ${inline(row.title)} | 状态：${inline(row.status)} | 摘要：${inline(row.summary)}`
+      )),
+      ...volumeDesignRows.map((row) => (
+        `- 卷设计 #${row.volumeId} | 主题：${inline(row.volumeTheme)} | 承诺：${inline(row.volumePromise)} | 主冲突：${inline(row.mainConflict)} | 爆点：${inline(row.climaxPlan)} | 末状态：${inline(row.endStateShift)}`
+      )),
+    ]),
+    formatContextCatalogSection('recent_chapters', chapterRows.map((row) => (
+      `- 第${row.chapterNum}章 ${inline(row.title)} | 状态：${inline(row.status)} | 大纲：${inline(row.outline)} | 摘要：${inline(row.summary)} | 下一章种子：${inline(row.nextChapterSeed)}`
+    ))),
+  ].join('\n\n')
 }
 
 function mapArtifactError(error: unknown): never {
@@ -71,7 +200,7 @@ function requireNovel(novelId: number) {
   return novel
 }
 
-function buildContextSummary(profile: StoryProfile): string {
+function buildContextSummary(profile: StoryProfile, existingAssetCatalog = ''): string {
   return [
     `项目：${profile.novelTitle}`,
     `题材：${profile.genre}`,
@@ -83,6 +212,7 @@ function buildContextSummary(profile: StoryProfile): string {
     `\n<active_threads>\n${clip(profile.storyThreadsSummary)}\n</active_threads>`,
     `\n<theme_voice>\n${clip(profile.themeVoiceSummary)}\n</theme_voice>`,
     `\n<writing_contract>\n${clip(profile.writingContractSummary)}\n</writing_contract>`,
+    existingAssetCatalog ? `\n${existingAssetCatalog}` : '',
   ].join('\n')
 }
 
@@ -259,8 +389,8 @@ export async function generateGenericAssetDraft(
     return mapArtifactError(error)
   }
 
-  const profile = await buildStoryProfile(input.novelId)
-  const contextSummary = buildContextSummary(profile)
+  const profile = await buildStoryProfile(input.novelId, { ensureStructure: false })
+  const contextSummary = buildContextSummary(profile, buildExistingAssetCatalog(input.novelId))
   const contextVersion = novel.contextVersion || 1
   const mode = resolveAiExecutionMode({ explicitMode: input.executionMode, settingsJson: novel.settingsJson })
   const route = buildAiModelRouteReport({
@@ -321,6 +451,7 @@ export async function generateGenericAssetDraft(
     ]),
     onQualityTaskCreated: (qualityTaskId) => qualityTaskIds.push(qualityTaskId),
   })
+  const currentContextVersion = requireNovel(input.novelId).contextVersion || 1
   const content: GenericAssetDraftContent = {
     schemaVersion: 'generic-asset-draft-v1',
     requestFingerprint: fingerprint,
@@ -363,7 +494,7 @@ export async function generateGenericAssetDraft(
     outputFormat: content.outputFormat,
     quality,
     artifactContextVersion: contextVersion,
-    currentContextVersion: contextVersion,
+    currentContextVersion,
   })
   const reviewArtifact = createArtifact({
     novelId: input.novelId,
@@ -371,7 +502,7 @@ export async function generateGenericAssetDraft(
     status: review.status === 'blocked' ? 'rejected' : 'reviewed',
     parentArtifactId: draftArtifact.id,
     content: review,
-    contextVersion,
+    contextVersion: currentContextVersion,
     producerType: 'system',
     producerId: 'generic-asset-reviewer-v1',
     producerClient: 'novelforge-generic-asset-workflow',
@@ -428,9 +559,9 @@ export async function reviewGenericAssetDraft(
     throw new GenericAssetWorkflowError('ARTIFACT_KIND_MISMATCH', '指定工件不是当前项目的通用资产草稿。')
   }
 
-  const profile = await buildStoryProfile(input.novelId)
-  const contextSummary = buildContextSummary(profile)
-  const currentContextVersion = novel.contextVersion || 1
+  const profile = await buildStoryProfile(input.novelId, { ensureStructure: false })
+  const contextSummary = buildContextSummary(profile, buildExistingAssetCatalog(input.novelId))
+  let currentContextVersion = novel.contextVersion || 1
   const mode = resolveAiExecutionMode({ explicitMode: input.executionMode, settingsJson: novel.settingsJson })
   const route = buildAiModelRouteReport({
     taskKind: 'generic_prompt',
@@ -461,6 +592,7 @@ export async function reviewGenericAssetDraft(
     ],
     onQualityTaskCreated: (qualityTaskId) => qualityTaskIds.push(qualityTaskId),
   })
+  currentContextVersion = requireNovel(input.novelId).contextVersion || 1
 
   let effectiveArtifact = sourceArtifact
   if (quality.finalOutput.trim() !== sourceArtifact.content.output.trim()) {

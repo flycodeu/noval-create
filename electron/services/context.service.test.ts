@@ -145,6 +145,7 @@ import {
 } from './context-cards'
 import { getChapterContractContext } from './endgame-asset.service'
 import { buildFactionCatalog } from './faction-reference.service'
+import { ensureStoryStructure } from './story-structure.service'
 
 afterEach(() => {
   vi.mocked(getChapterContractContext).mockReset()
@@ -1172,6 +1173,7 @@ describe('allocateChapterContext', () => {
 describe('buildStoryProfile source/canon grounding', () => {
   beforeEach(() => {
     vi.mocked(getDb).mockReset()
+    vi.mocked(ensureStoryStructure).mockReset()
   })
 
   it('folds project-level source/canon data into world rules summary', async () => {
@@ -1228,5 +1230,27 @@ describe('buildStoryProfile source/canon grounding', () => {
     expect(profile.worldRulesSummary).toContain('ming_qing')
     expect(profile.worldRulesSummary).toContain('驿递制度')
     expect(profile.worldRulesSummary).toContain('官道驿递优先')
+  })
+
+  it('can build a read-only profile without bootstrapping canonical structure rows', async () => {
+    const rows = new Map<unknown, unknown[]>([
+      [novels, [{
+        id: 1,
+        title: '只读草稿项目',
+        genreId: null,
+        status: 'draft',
+        projectBriefJson: '{}',
+        settingsJson: '{}',
+        themeVoiceJson: '{}',
+        worldRulesJson: '{}',
+      }]],
+      [characters, []],
+      [glossary, []],
+    ])
+    vi.mocked(getDb).mockReturnValue(createTableAwareDbMock(rows as Map<unknown, unknown[]>) as never)
+
+    await buildStoryProfile(1, { ensureStructure: false })
+
+    expect(ensureStoryStructure).not.toHaveBeenCalled()
   })
 })

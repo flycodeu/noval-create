@@ -256,17 +256,45 @@ function extractJsonObject(raw: string): string {
     .replace(/\s*```$/i, '')
 
   const start = trimmed.indexOf('{')
-  const end = trimmed.lastIndexOf('}')
-
-  if (start === -1 || end === -1 || end < start) {
+  if (start === -1) {
     throw new Error(getUserFacingMessage('common.aiJsonObjectInvalid'))
   }
 
-  return trimmed.slice(start, end + 1)
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let index = start; index < trimmed.length; index += 1) {
+    const character = trimmed[index]
+    if (inString) {
+      if (escaped) {
+        escaped = false
+      } else if (character === '\\') {
+        escaped = true
+      } else if (character === '"') {
+        inString = false
+      }
+      continue
+    }
+    if (character === '"') {
+      inString = true
+    } else if (character === '{') {
+      depth += 1
+    } else if (character === '}') {
+      depth -= 1
+      if (depth === 0) return trimmed.slice(start, index + 1)
+    }
+  }
+
+  throw new Error(getUserFacingMessage('common.aiJsonObjectInvalid'))
 }
 
 export function parseDraftJson<T extends object>(raw: string): Partial<T> {
-  const parsed = cleanAiValue(JSON.parse(extractJsonObject(raw)))
+  let parsed: unknown
+  try {
+    parsed = cleanAiValue(JSON.parse(extractJsonObject(raw)))
+  } catch {
+    throw new Error(getUserFacingMessage('common.aiJsonObjectInvalid'))
+  }
   assertDraftQuality(parsed)
   return parsed as Partial<T>
 }

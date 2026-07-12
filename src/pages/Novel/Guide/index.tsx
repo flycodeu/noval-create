@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Collapse, Space, Tag, message, type CollapseProps } from 'antd'
 import {
   BarsOutlined,
@@ -53,10 +53,12 @@ import {
   getWorkflowBlockers,
   isBasicsReady,
   isEndgameDesignReady,
+  isResistanceSystemReady,
   isProjectBriefReady,
   isStoryCoreReady,
   isStoryPlotReady,
   isThemeVoiceReady,
+  isVolumePlanningReady,
   loadWorkflowStats,
   type WorkflowRunnableStepKey,
   type WorkflowStats,
@@ -128,6 +130,7 @@ export default function GuidePage({ novelId }: Props) {
   const [contextStatus, setContextStatus] = useState<NovelContextStatus | null>(null)
   const [qualitySummary, setQualitySummary] = useState<Pick<QualityDashboardData, 'productionReadiness' | 'batchHealth' | 'continuityHealth'> | null>(null)
   const [runningKey, setRunningKey] = useState<string | null>(null)
+  const runningActionRef = useRef(false)
   const authorMode = useAuthorWorkModeStore((state) => state.mode)
   const authorModeSource = useAuthorWorkModeStore((state) => state.source)
   const setManualAuthorMode = useAuthorWorkModeStore((state) => state.setManualMode)
@@ -345,25 +348,6 @@ export default function GuidePage({ novelId }: Props) {
     })
   }, [novelId, timelineGenerationPreset])
 
-  const runStep = useCallback(async (
-    key: string,
-    action: () => Promise<void>,
-    successText: string,
-  ) => {
-    setRunningKey(key)
-
-    try {
-      await action()
-      await Promise.all([refreshWorkflowContext(), refreshDiagnostics()])
-      message.success(successText)
-    } catch (error) {
-      console.error(error)
-      message.error(getErrorMessage(error, 'guide.runFailed'))
-    } finally {
-      setRunningKey(null)
-    }
-  }, [refreshDiagnostics, refreshWorkflowContext])
-
   const ensureStepReady = useCallback(async (step: WorkflowRunnableStepKey) => {
     const workflowContext = await refreshWorkflowContext()
     const blockers = getWorkflowBlockers(step, workflowContext.novel, workflowContext.stats)
@@ -381,10 +365,27 @@ export default function GuidePage({ novelId }: Props) {
     action: () => Promise<void>,
     successText: string,
   ) => {
-    const ready = await ensureStepReady(step)
-    if (!ready) return
-    await runStep(step, action, successText)
-  }, [ensureStepReady, runStep])
+    if (runningActionRef.current) {
+      message.info(getUserFacingMessage('guide.actionInProgress'))
+      return
+    }
+
+    runningActionRef.current = true
+    setRunningKey(step)
+    try {
+      const ready = await ensureStepReady(step)
+      if (!ready) return
+      await action()
+      await Promise.all([refreshWorkflowContext(), refreshDiagnostics()])
+      message.success(successText)
+    } catch (error) {
+      console.error(error)
+      message.error(getErrorMessage(error, 'guide.runFailed'))
+    } finally {
+      runningActionRef.current = false
+      setRunningKey(null)
+    }
+  }, [ensureStepReady, refreshDiagnostics, refreshWorkflowContext])
 
   const syncWorldRules = useCallback(() => void runGuardedStep('world-rules', syncWorldRulesCore, getUserFacingMessage('guide.worldRulesSynced')), [runGuardedStep, syncWorldRulesCore])
   const generateMap = useCallback(() => void runGuardedStep('map', generateMapCore, getUserFacingMessage('guide.mapGenerated')), [generateMapCore, runGuardedStep])
@@ -396,38 +397,89 @@ export default function GuidePage({ novelId }: Props) {
   const generateTimeline = useCallback(() => void runGuardedStep('timeline', generateTimelineCore, getUserFacingMessage('guide.timelineGenerated')), [generateTimelineCore, runGuardedStep])
 
   const runPipeline = async () => {
+    if (runningActionRef.current) {
+      message.info(getUserFacingMessage('guide.actionInProgress'))
+      return
+    }
+
+    const pipeline: Array<{
+      label: string
+      step?: WorkflowRunnableStepKey
+      action?: () => Promise<void>
+      gate?: () => Promise<boolean>
+    }> = [
+      { step: 'world-rules' as const, label: '世界规则', action: syncWorldRulesCore },
+      {
+        label: '终局承诺',
+        gate: async () => {
+          const workflowContext = await refreshWorkflowContext()
+          const ready = isEndgameDesignReady(workflowContext.novel)
+          if (!ready) message.warning(getUserFacingMessage('guide.pipelineEndgameRequired'))
+          return ready
+        },
+      },
+      { step: 'map' as const, label: '地图骨架', action: generateMapCore },
+      { step: 'items' as const, label: '物品资产', action: generateItemsCore },
+      { step: 'characters' as const, label: '人物网络', action: generateCharactersCore },
+      {
+        label: '阻力系统',
+        gate: async () => {
+          const workflowContext = await refreshWorkflowContext()
+          const ready = isResistanceSystemReady(workflowContext.stats)
+          if (!ready) message.warning(getUserFacingMessage('guide.pipelineResistanceRequired'))
+          return ready
+        },
+      },
+      { step: 'threads' as const, label: '故事线程', action: generateThreadsCore },
+      { step: 'story-design' as const, label: '故事设计', action: generateStoryDesignCore },
+      {
+        label: '卷级闭环',
+        gate: async () => {
+          const workflowContext = await refreshWorkflowContext()
+          const ready = isVolumePlanningReady(workflowContext.stats)
+          if (!ready) message.warning(getUserFacingMessage('guide.pipelineVolumeRequired'))
+          return ready
+        },
+      },
+      { step: 'outline' as const, label: '故事大纲', action: generateOutlineCore },
+      { step: 'timeline' as const, label: '事件时间轴', action: generateTimelineCore },
+    ]
+
+    runningActionRef.current = true
     setRunningKey('pipeline')
+    let completedCount = 0
+    const totalCount = pipeline.filter((item) => item.action).length
 
     try {
-      if (!(await ensureStepReady('world-rules'))) return
-      await syncWorldRulesCore()
-      await refreshWorkflowContext()
-      if (!(await ensureStepReady('map'))) return
-      await generateMapCore()
-      await refreshWorkflowContext()
-      if (!(await ensureStepReady('items'))) return
-      await generateItemsCore()
-      await refreshWorkflowContext()
-      if (!(await ensureStepReady('characters'))) return
-      await generateCharactersCore()
-      await refreshWorkflowContext()
-      if (!(await ensureStepReady('threads'))) return
-      await generateThreadsCore()
-      await refreshWorkflowContext()
-      if (!(await ensureStepReady('story-design'))) return
-      await generateStoryDesignCore()
-      await refreshWorkflowContext()
-      if (!(await ensureStepReady('outline'))) return
-      await generateOutlineCore()
-      await refreshWorkflowContext()
-      if (!(await ensureStepReady('timeline'))) return
-      await generateTimelineCore()
+      for (const item of pipeline) {
+        if (item.gate && !(await item.gate())) {
+          message.info(getUserFacingMessage('guide.pipelinePartial', {
+            completedCount,
+            totalCount,
+            stepLabel: item.label,
+          }))
+          return
+        }
+        if (item.step && !(await ensureStepReady(item.step))) {
+          message.info(getUserFacingMessage('guide.pipelinePartial', {
+            completedCount,
+            totalCount,
+            stepLabel: item.label,
+          }))
+          return
+        }
+        if (!item.action) continue
+        await item.action()
+        completedCount += 1
+        if (completedCount < totalCount) await refreshWorkflowContext()
+      }
       await Promise.all([refreshWorkflowContext(), refreshDiagnostics()])
       message.success(getUserFacingMessage('guide.pipelineSucceeded'))
     } catch (error) {
       console.error(error)
       message.error(getErrorMessage(error, 'guide.pipelineFailed'))
     } finally {
+      runningActionRef.current = false
       setRunningKey(null)
     }
   }
@@ -581,7 +633,7 @@ export default function GuidePage({ novelId }: Props) {
       icon: <GlobalOutlined />,
       action: (
         <Space wrap>
-          <Button loading={runningKey === 'world-rules'} icon={<ThunderboltOutlined />} onClick={syncWorldRules}>
+          <Button loading={runningKey === 'world-rules'} disabled={Boolean(runningKey)} icon={<ThunderboltOutlined />} onClick={syncWorldRules}>
             同步规则
           </Button>
           <Button type="link" onClick={() => navigate(`/novels/${novelId}/world-rules`)}>
@@ -603,7 +655,7 @@ export default function GuidePage({ novelId }: Props) {
       icon: <CompassOutlined />,
       action: (
         <Space wrap>
-          <Button loading={runningKey === 'map'} icon={<CompassOutlined />} onClick={generateMap}>
+          <Button loading={runningKey === 'map'} disabled={Boolean(runningKey)} icon={<CompassOutlined />} onClick={generateMap}>
             AI 生成首批
           </Button>
           <Button type="link" onClick={() => navigate(`/novels/${novelId}/map`)}>
@@ -625,7 +677,7 @@ export default function GuidePage({ novelId }: Props) {
       icon: <ShoppingOutlined />,
       action: (
         <Space wrap>
-          <Button loading={runningKey === 'items'} icon={<ShoppingOutlined />} onClick={generateItems}>
+          <Button loading={runningKey === 'items'} disabled={Boolean(runningKey)} icon={<ShoppingOutlined />} onClick={generateItems}>
             AI 生成·首批物品
           </Button>
           <Button type="link" onClick={() => navigate(`/novels/${novelId}/items`)}>
@@ -647,7 +699,7 @@ export default function GuidePage({ novelId }: Props) {
       icon: <TeamOutlined />,
       action: (
         <Space wrap>
-          <Button loading={runningKey === 'characters'} icon={<TeamOutlined />} onClick={generateCharacters}>
+          <Button loading={runningKey === 'characters'} disabled={Boolean(runningKey)} icon={<TeamOutlined />} onClick={generateCharacters}>
             AI 生成·批量角色
           </Button>
           <Button type="link" onClick={() => navigate(`/novels/${novelId}/characters`)}>
@@ -686,7 +738,7 @@ export default function GuidePage({ novelId }: Props) {
       icon: <BarsOutlined />,
       action: (
         <Space wrap>
-          <Button loading={runningKey === 'threads'} icon={<BarsOutlined />} onClick={generateThreads}>
+          <Button loading={runningKey === 'threads'} disabled={Boolean(runningKey)} icon={<BarsOutlined />} onClick={generateThreads}>
             AI 生成·首批线程
           </Button>
           <Button type="link" onClick={() => navigate(`/novels/${novelId}/threads`)}>
@@ -708,7 +760,7 @@ export default function GuidePage({ novelId }: Props) {
       icon: <BarsOutlined />,
       action: (
         <Space wrap>
-          <Button loading={runningKey === 'story-design'} icon={<BarsOutlined />} onClick={generateStoryDesign}>
+          <Button loading={runningKey === 'story-design'} disabled={Boolean(runningKey)} icon={<BarsOutlined />} onClick={generateStoryDesign}>
             AI 生成·首版设计
           </Button>
           <Button type="link" onClick={() => navigate(`/novels/${novelId}/story-design`)}>
@@ -764,7 +816,7 @@ export default function GuidePage({ novelId }: Props) {
       icon: <BarsOutlined />,
       action: (
         <Space wrap>
-          <Button loading={runningKey === 'outline'} icon={<BarsOutlined />} onClick={generateOutline}>
+          <Button loading={runningKey === 'outline'} disabled={Boolean(runningKey)} icon={<BarsOutlined />} onClick={generateOutline}>
             AI 生成·首批故事弧
           </Button>
           <Button type="link" onClick={() => navigate(`/novels/${novelId}/outline`)}>
@@ -786,7 +838,7 @@ export default function GuidePage({ novelId }: Props) {
       icon: <ClockCircleOutlined />,
       action: (
         <Space wrap>
-          <Button loading={runningKey === 'timeline'} icon={<ClockCircleOutlined />} onClick={generateTimeline}>
+          <Button loading={runningKey === 'timeline'} disabled={Boolean(runningKey)} icon={<ClockCircleOutlined />} onClick={generateTimeline}>
             AI 生成·首批事件
           </Button>
           <Button type="link" onClick={() => navigate(`/novels/${novelId}/timeline`)}>
@@ -939,9 +991,10 @@ export default function GuidePage({ novelId }: Props) {
           <Button
             icon={<ThunderboltOutlined />}
             loading={Boolean(runningKey)}
+            disabled={Boolean(runningKey)}
             onClick={runPipeline}
           >
-            AI 铺设首批骨架
+            AI 铺设可自动骨架
           </Button>
           <Button icon={<EditOutlined />} onClick={() => navigate(`/novels/${novelId}/${stats.revisionTaskCount > 0 ? 'revision' : 'writing'}`)}>
             {stats.revisionTaskCount > 0 ? '打开修订中心' : '进入正文写作'}

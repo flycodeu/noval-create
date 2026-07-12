@@ -5,6 +5,7 @@ import {
   getRecommendedGuidedWorkflowStep,
   isBasicsReady,
   isCharacterRosterReady,
+  isEndgameDesignReady,
   isResistanceSystemReady,
   isProjectBriefReady,
   isStoryCoreReady,
@@ -123,6 +124,7 @@ function createBlocker(
 function countAssetGaps(novel: Pick<Novel, 'settingsJson' | 'worldRulesJson'> | null | undefined, stats: WorkflowStats) {
   return [
     !isWorldFoundationReady(novel),
+    !isEndgameDesignReady(novel),
     stats.mapCount <= 0,
     stats.itemCount <= 0,
     !isCharacterRosterReady(stats),
@@ -212,6 +214,9 @@ function resolveAssetPrimaryTask(
   const assetBloat = getAssetBloatSignal(stats)
   if (!isWorldFoundationReady(novel)) {
     return createTask('asset-world-rules', '补世界规则底盘', '资产建设前先统一题材规则和时间制度，避免后面资产口径冲突。', 'world-rules', 6, ['地图', '人物', '物品'], '打开世界规则')
+  }
+  if (!isEndgameDesignReady(novel)) {
+    return createTask('asset-endgame', '先锁定终局承诺', '资产建设前先确定最终冲突、兑现清单和最后一幕，地图、人物和线程才会围着同一个终点长。', 'endgame', 10, ['地图', '阻力线', '卷级闭环'], '打开终局设计')
   }
   if (assetBloat.risk !== 'none') {
     return resolveAssetCompressionTask(stats)

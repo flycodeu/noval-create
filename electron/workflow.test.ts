@@ -46,8 +46,8 @@ describe('novel workflow ordering', () => {
       guideSource.indexOf('const structureReadyCount'),
     )
 
-    expect(pipelineSection.indexOf("ensureStepReady('items')"))
-      .toBeLessThan(pipelineSection.indexOf("ensureStepReady('characters')"))
+    expect(pipelineSection.indexOf("step: 'items'"))
+      .toBeLessThan(pipelineSection.indexOf("step: 'characters'"))
     const itemStepIndex = findStepKeyIndex(stepsSection, 'items-equipment')
     const characterStepIndex = findStepKeyIndex(stepsSection, 'character-roster')
 

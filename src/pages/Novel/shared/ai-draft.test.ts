@@ -52,4 +52,12 @@ describe('buildDraftMessages', () => {
     expect(issues.map((issue) => issue.message)).toContain('与 hook 存在重复内容')
     expect(issues.map((issue) => issue.message)).toContain('字段内存在重复句子或近似重复句意')
   })
+
+  it('parses JSON when a field contains braces and the model adds a code fence', () => {
+    const parsed = parseDraftJson<{ hook: string }>(
+      '```json\n{"hook":"线索格式为 {旧档案-07}，必须在终章回收。"}\n```',
+    )
+
+    expect(parsed.hook).toContain('{旧档案-07}')
+  })
 })
