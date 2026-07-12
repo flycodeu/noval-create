@@ -899,14 +899,21 @@ export function installWebElectronBridge(): void {
           characterCount: novel ? 3 : 0,
         }
       }),
-      getContextStatus: async () => ({
+      getContextStatus: async (id) => withLocalBackend('novel', 'getContextStatus', [id], async () => ({
+        novelId: Number(id),
+        totalChapterCount: demoChapters.length,
         staleChapterCount: 0,
-        contextVersion: 1,
+        staleChapterIds: [],
+        contextVersion: getNovelById(Number(id))?.contextVersion || 1,
         staleCheckpointCount: 0,
         staleAssetCount: 0,
+        staleAssetKeys: [],
         staleAssetLabels: [],
-      }),
-      runConsistencyCheck: async () => ({
+        pendingImpactCount: 0,
+        pendingManualConfirmationCount: 0,
+        latestImpactEventAt: null,
+      })),
+      runConsistencyCheck: async (id) => withLocalBackend('novel', 'runConsistencyCheck', [id], async () => ({
         generatedAt: NOW,
         readinessScore: 82,
         overview: '浏览器预览数据未发现一致性问题。',
@@ -933,8 +940,8 @@ export function installWebElectronBridge(): void {
           worldStateConflictAlertCount: 0,
         },
         issues: [],
-      }),
-      getStoryMemory: async () => ({
+      })),
+      getStoryMemory: async (id) => withLocalBackend('novel', 'getStoryMemory', [id], async () => ({
         generatedAt: NOW,
         chapterCount: demoChapters.length,
         lastChapterNum: 1,
@@ -957,9 +964,9 @@ export function installWebElectronBridge(): void {
         continuityDirectives: [],
         timelineAnchors: ['雨夜档案馆'],
         itemLedger: ['编号错误的档案袋'],
-      }),
-      getImpactSummary: async () => ({ totalEvents: 0, affectedAssets: [] }),
-      listImpactEvents: async () => [],
+      })),
+      getImpactSummary: async (id) => withLocalBackend('novel', 'getImpactSummary', [id], async () => ({ totalEvents: 0, affectedAssets: [] })),
+      listImpactEvents: async (id) => withLocalBackend('novel', 'listImpactEvents', [id], async () => []),
     }),
     template: createService({
       list: async (type?: unknown) => {
@@ -1043,13 +1050,18 @@ export function installWebElectronBridge(): void {
     }),
     prompt: createService({ list: async () => [] }),
     task: createService({
-      list: async () => [],
-      query: async () => emptyPagedResult,
-      getStats: async () => emptyStats,
-      getPipelineStats: async () => emptyPipelineStats,
-      cancel: async () => true,
+      list: async (novelId?: unknown) => withLocalBackend('task', 'list', [novelId], async () => []),
+      query: async (filters?: unknown) => withLocalBackend('task', 'query', [filters], async () => emptyPagedResult),
+      getStats: async (novelId?: unknown) => withLocalBackend('task', 'getStats', [novelId], async () => emptyStats),
+      getPipelineStats: async (novelId?: unknown) => withLocalBackend('task', 'getPipelineStats', [novelId], async () => emptyPipelineStats),
+      getLatestChapterPipeline: async (chapterId?: unknown) => withLocalBackend('task', 'getLatestChapterPipeline', [chapterId], async () => null),
+      get: async (id?: unknown) => withLocalBackend('task', 'get', [id], async () => null),
+      cancel: () => readOnlyMutation('task.cancel'),
     }),
-    workflow: createService({ list: async () => [] }),
+    workflow: createService({
+      list: async (novelId?: unknown) => withLocalBackend('workflow', 'list', [novelId], async () => []),
+      get: async (id?: unknown) => withLocalBackend('workflow', 'get', [id], async () => null),
+    }),
     structure: createService({
       getTree: async (novelId?: unknown) => withLocalBackend('structure', 'getTree', [novelId], async () => ({ volumes: [] })),
       listVolumes: async (novelId?: unknown) => withLocalBackend('structure', 'listVolumes', [novelId], async () => []),
@@ -1291,7 +1303,7 @@ export function installWebElectronBridge(): void {
       }),
     }),
     quality: createService({
-      getDashboard: async () => emptyQualityDashboard,
+      getDashboard: async (novelId?: unknown) => withLocalBackend('quality', 'getDashboard', [novelId], async () => emptyQualityDashboard),
     }),
   }
 

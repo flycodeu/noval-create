@@ -35,6 +35,8 @@ export interface GenericAssetReviewCheck {
 
 export interface GenericAssetReviewContent {
   schemaVersion: 'generic-asset-review-v1'
+  /** Fingerprint of the resolved review mode and model route. */
+  requestFingerprint?: string
   draftArtifactId: string
   draftContentHash: string
   effectiveArtifactId: string

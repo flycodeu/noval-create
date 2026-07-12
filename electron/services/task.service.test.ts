@@ -14,10 +14,38 @@ vi.mock('./model.service', () => ({
   getProviderRuntimeDefaults: vi.fn(() => ({ temperature: 0.85, maxTokens: 4096 })),
 }))
 
+import { getDb } from '../database/db'
 import {
+  cancelTask,
   isTransientModelNetworkError,
+  recoverOrphanedTasks,
   shouldRetryTransientModelTaskError,
 } from './task.service'
+
+function buildFakeDb(rows: unknown[], whereResults: unknown[][] = []) {
+  let whereCall = 0
+  const updates: Array<Record<string, unknown>> = []
+  const db = {
+    select: () => ({
+      from: () => ({
+        all: () => rows,
+        where: () => ({
+          all: () => whereResults[whereCall++] || [],
+        }),
+      }),
+    }),
+    update: () => ({
+      set: (data: Record<string, unknown>) => ({
+        where: () => ({
+          run: () => {
+            updates.push(data)
+          },
+        }),
+      }),
+    }),
+  }
+  return { db, updates }
+}
 
 function buildError(message: string, code?: string, cause?: unknown): Error {
   const error = new Error(message) as Error & { code?: string; cause?: unknown }
@@ -74,5 +102,68 @@ describe('task service transient retry policy', () => {
       retryable: true,
       attemptNumber: 0,
     })).toBe(false)
+  })
+})
+
+describe('task service recovery and cancellation', () => {
+  it('pauses resumable workflow checkpoints instead of failing them on restart', () => {
+    const workflow = {
+      id: 11,
+      runnerType: 'workflow',
+      type: 'timeline_auto_generate',
+      status: 'running',
+      controlJson: JSON.stringify({ cancelRequested: false }),
+      progressJson: JSON.stringify({
+        status: 'running',
+        resumeCursor: 1,
+        totalBatches: 3,
+        requestedCount: 6,
+        generatedCount: 2,
+        completed: false,
+      }),
+    }
+    const pendingWorkflow = {
+      ...workflow,
+      id: 12,
+      status: 'pending',
+    }
+    const cancelledWorkflow = {
+      ...workflow,
+      id: 13,
+      status: 'cancel_requested',
+      controlJson: JSON.stringify({ cancelRequested: true }),
+    }
+    const fake = buildFakeDb([workflow, pendingWorkflow, cancelledWorkflow])
+    vi.mocked(getDb).mockReturnValue(fake.db as never)
+
+    expect(recoverOrphanedTasks()).toBe(3)
+    expect(fake.updates.map((update) => update.status)).toEqual(['paused', 'paused', 'cancelled'])
+    expect(fake.updates[0].progressJson).toContain('"status":"paused"')
+    expect(fake.updates[1].progressJson).toContain('"status":"paused"')
+    expect(fake.updates[2].progressJson).toContain('"status":"cancelled"')
+  })
+
+  it('cascades cancellation from a chat parent to a pending child task', () => {
+    const parent = {
+      id: 21,
+      runnerType: 'chat',
+      status: 'running',
+      currentChildTaskId: 22,
+      controlJson: JSON.stringify({ cancelRequested: false }),
+    }
+    const child = {
+      id: 22,
+      runnerType: 'chat',
+      status: 'pending',
+      currentChildTaskId: null,
+      controlJson: JSON.stringify({ cancelRequested: false }),
+    }
+    const fake = buildFakeDb([], [[parent], [child]])
+    vi.mocked(getDb).mockReturnValue(fake.db as never)
+
+    expect(cancelTask(parent.id)).toBe(true)
+    expect(fake.updates.map((update) => update.status)).toEqual(['cancel_requested', 'cancelled'])
+    expect(fake.updates[0].controlJson).toContain('"cancelRequested":true')
+    expect(fake.updates[1].errorMessage).toBe('用户已取消')
   })
 })

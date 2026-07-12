@@ -69,6 +69,12 @@ function createRuntime() {
   const sourceSearchSettingsService = requireProject('electron/services/source-search-settings.service.ts')
   const taskService = requireProject('electron/services/task.service.ts')
   const novelService = requireProject('electron/services/novel.service.ts')
+  const consistencyService = requireProject('electron/services/consistency.service.ts')
+  const storyMemoryService = requireProject('electron/services/story-memory.service.ts')
+  const contextImpactService = requireProject('electron/services/context-impact.service.ts')
+  const assetImpactService = requireProject('electron/services/asset-impact.service.ts')
+  const qualityDashboardService = requireProject('electron/services/quality-dashboard.service.ts')
+  const workflowTaskService = requireProject('electron/services/workflow-task.service.ts')
   const chapterService = requireProject('electron/services/chapter.service.ts')
   const characterService = requireProject('electron/services/character.service.ts')
   const mapService = requireProject('electron/services/map.service.ts')
@@ -92,6 +98,7 @@ function createRuntime() {
   const { WEB_PREVIEW_AGENT_TOOL_SCOPES } = requireProject('src/shared/tool-contracts/index.ts')
 
   initDb()
+  taskService.recoverOrphanedTasks()
 
   function getDatabasePath() {
     return path.join(app.getPath('userData'), 'novelforge.db')
@@ -294,6 +301,11 @@ function createRuntime() {
       list: (filters) => novelService.listNovels(filters),
       get: (id) => novelService.getNovel(requireId(id)),
       stats: (id) => novelService.getNovelStats(requireId(id)),
+      getContextStatus: (id) => contextImpactService.getNovelContextStatus(requireId(id)),
+      runConsistencyCheck: (id) => consistencyService.buildNovelConsistencyReport(requireId(id)),
+      getStoryMemory: (id) => storyMemoryService.buildStoryMemorySnapshot(requireId(id)),
+      getImpactSummary: (id) => assetImpactService.getNovelAssetImpactSummary(requireId(id)),
+      listImpactEvents: (id) => assetImpactService.listAssetChangeEvents(requireId(id)),
     },
     chapter: {
       list: (novelId) => chapterService.listChapters(requireId(novelId, 'novelId')),
@@ -422,6 +434,21 @@ function createRuntime() {
       listTracks: (novelId) => growthSystemService.listGrowthTracks(requireId(novelId, 'novelId')),
       listPools: (novelId) => growthSystemService.listResourcePools(requireId(novelId, 'novelId')),
       listEvents: (novelId) => growthSystemService.listRewardCostEvents(requireId(novelId, 'novelId')),
+    },
+    task: {
+      list: (novelId) => taskService.listTasks(novelId),
+      query: (filters) => taskService.queryTasks(filters || {}),
+      getStats: (novelId) => taskService.getTaskStats(novelId),
+      getPipelineStats: (novelId) => taskService.getTaskPipelineStats(novelId),
+      getLatestChapterPipeline: (chapterId) => taskService.getLatestChapterPipelineTask(requireId(chapterId, 'chapterId')),
+      get: (id) => taskService.getTaskRecord(requireId(id)),
+    },
+    workflow: {
+      list: (novelId) => workflowTaskService.listWorkflowTasks(novelId),
+      get: (id) => workflowTaskService.getWorkflowTask(requireId(id)),
+    },
+    quality: {
+      getDashboard: (novelId) => qualityDashboardService.getQualityDashboardData(requireId(novelId, 'novelId')),
     },
   }
 

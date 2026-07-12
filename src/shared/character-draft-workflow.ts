@@ -44,6 +44,8 @@ export interface CharacterDraftCard {
 
 export interface CharacterDraftContent {
   schemaVersion: 'character-draft-v1'
+  /** Fingerprint of every input that affects generation/replay safety. */
+  requestFingerprint?: string
   planId: string
   planContentHash: string
   plan: CharacterNeedsAnalysisResult

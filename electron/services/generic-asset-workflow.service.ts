@@ -345,6 +345,20 @@ function requestFingerprint(input: GenerateGenericAssetDraftInput): string {
   })
 }
 
+function reviewRequestFingerprint(input: {
+  novelId: number
+  draftArtifactId: string
+  executionMode?: string | null
+  modelConfigId?: number | null
+}): string {
+  return hashArtifactContent({
+    novelId: input.novelId,
+    draftArtifactId: input.draftArtifactId,
+    executionMode: input.executionMode || null,
+    modelConfigId: typeof input.modelConfigId === 'number' ? input.modelConfigId : null,
+  })
+}
+
 function outputPreview(output: string): string {
   const normalized = output.trim()
   return normalized.length <= OUTPUT_PREVIEW_LIMIT ? normalized : `${normalized.slice(0, OUTPUT_PREVIEW_LIMIT)}…`
@@ -496,6 +510,12 @@ export async function generateGenericAssetDraft(
     artifactContextVersion: contextVersion,
     currentContextVersion,
   })
+  review.requestFingerprint = reviewRequestFingerprint({
+    novelId: input.novelId,
+    draftArtifactId: draftArtifact.id,
+    executionMode: mode.mode,
+    modelConfigId: qualityRoute.modelConfigId,
+  })
   const reviewArtifact = createArtifact({
     novelId: input.novelId,
     kind: 'quality_report',
@@ -531,23 +551,6 @@ export async function reviewGenericAssetDraft(
   requireMeaningfulText(input.draftArtifactId, 'VALIDATION_FAILED', '草稿工件 ID 不能为空。')
   requireMeaningfulText(input.idempotencyKey, 'VALIDATION_FAILED', '幂等键不能为空。')
   const novel = requireNovel(input.novelId)
-  const replay = findArtifactByIdempotency<GenericAssetReviewContent>(input.novelId, 'quality_report', input.idempotencyKey)
-  if (replay) {
-    if (replay.content.schemaVersion !== 'generic-asset-review-v1' || replay.content.draftArtifactId !== input.draftArtifactId) {
-      throw new GenericAssetWorkflowError('IDEMPOTENCY_KEY_CONFLICT', '该幂等键已用于另一份资产审校请求。')
-    }
-    const sourceArtifact = requireArtifact<GenericAssetDraftContent>(input.draftArtifactId)
-    const effectiveArtifact = requireArtifact<GenericAssetDraftContent>(replay.content.effectiveArtifactId)
-    return {
-      sourceArtifact,
-      effectiveArtifact,
-      reviewArtifact: replay,
-      outputPreview: outputPreview(effectiveArtifact.content.output),
-      review: replay.content,
-      idempotentReplay: true,
-    }
-  }
-
   let sourceArtifact
   try {
     sourceArtifact = requireArtifact<GenericAssetDraftContent>(input.draftArtifactId)
@@ -559,9 +562,6 @@ export async function reviewGenericAssetDraft(
     throw new GenericAssetWorkflowError('ARTIFACT_KIND_MISMATCH', '指定工件不是当前项目的通用资产草稿。')
   }
 
-  const profile = await buildStoryProfile(input.novelId, { ensureStructure: false })
-  const contextSummary = buildContextSummary(profile, buildExistingAssetCatalog(input.novelId))
-  let currentContextVersion = novel.contextVersion || 1
   const mode = resolveAiExecutionMode({ explicitMode: input.executionMode, settingsJson: novel.settingsJson })
   const route = buildAiModelRouteReport({
     taskKind: 'generic_prompt',
@@ -574,6 +574,33 @@ export async function reviewGenericAssetDraft(
     maxTokensFactor: 1.25,
     extraReasons: ['复核既有版本化草稿；如果需要优化，生成子版本而不修改原工件。'],
   })
+  const fingerprint = reviewRequestFingerprint({
+    novelId: input.novelId,
+    draftArtifactId: input.draftArtifactId,
+    executionMode: mode.mode,
+    modelConfigId: route.modelConfigId,
+  })
+  const replay = findArtifactByIdempotency<GenericAssetReviewContent>(input.novelId, 'quality_report', input.idempotencyKey)
+  if (replay) {
+    if (replay.content.schemaVersion !== 'generic-asset-review-v1'
+      || replay.content.draftArtifactId !== input.draftArtifactId
+      || replay.content.requestFingerprint !== fingerprint) {
+      throw new GenericAssetWorkflowError('IDEMPOTENCY_KEY_CONFLICT', '该幂等键已用于另一份资产审校请求。')
+    }
+    const effectiveArtifact = requireArtifact<GenericAssetDraftContent>(replay.content.effectiveArtifactId)
+    return {
+      sourceArtifact,
+      effectiveArtifact,
+      reviewArtifact: replay,
+      outputPreview: outputPreview(effectiveArtifact.content.output),
+      review: replay.content,
+      idempotentReplay: true,
+    }
+  }
+
+  const profile = await buildStoryProfile(input.novelId, { ensureStructure: false })
+  const contextSummary = buildContextSummary(profile, buildExistingAssetCatalog(input.novelId))
+  let currentContextVersion = novel.contextVersion || 1
   const qualityTaskIds: number[] = []
   const quality = await runAssetQualityLoop({
     targetType: sourceArtifact.content.assetType,
@@ -630,6 +657,7 @@ export async function reviewGenericAssetDraft(
     artifactContextVersion: effectiveArtifact.contextVersion,
     currentContextVersion,
   })
+  review.requestFingerprint = fingerprint
   const reviewArtifact = createArtifact({
     novelId: input.novelId,
     kind: 'quality_report',

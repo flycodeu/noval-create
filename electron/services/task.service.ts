@@ -3,7 +3,10 @@ import { and, desc, eq, inArray } from 'drizzle-orm'
 import { getDb } from '../database/db'
 import { modelConfigs, tasks } from '../database/schema'
 import { BaseAdapter, Message, ChatOptions } from '../adapters/base.adapter'
-import { RESUMABLE_WORKFLOW_TYPES as SHARED_RESUMABLE_WORKFLOW_TYPES } from '../../src/shared/workflow-resilience'
+import {
+  hasResumableWorkflowCheckpoint,
+  RESUMABLE_WORKFLOW_TYPES as SHARED_RESUMABLE_WORKFLOW_TYPES,
+} from '../../src/shared/workflow-resilience'
 import {
   createAdapter,
   getDefaultModelConfigRecord,
@@ -312,6 +315,18 @@ function buildAbortError(message = '用户已取消'): Error {
   const error = new Error(message)
   error.name = 'AbortError'
   return error
+}
+
+function isTaskCancellationRequested(taskId: number): boolean {
+  const task = getTaskRecord(taskId)
+  if (!task) return false
+  return task.status === 'cancel_requested'
+    || task.status === 'cancelled'
+    || parseTaskControl(task).cancelRequested === true
+}
+
+function throwIfTaskCancellationRequested(taskId: number): void {
+  if (isTaskCancellationRequested(taskId)) throw buildAbortError()
 }
 
 function resolveTaskModelConfig(modelConfigId?: number | null): typeof modelConfigs.$inferSelect {
@@ -955,6 +970,7 @@ export async function executeStreamTask(taskId: number, opts: RunTaskOptions): P
   try {
     const acquired = await acquireModelSlot(taskId, opts.modelConfigId, controller.signal)
     release = acquired.release
+    throwIfTaskCancellationRequested(taskId)
     updateTaskStatus(taskId, 'running', opts.sender)
     stopHeartbeat = startTaskHeartbeat(taskId)
     const chatOpts = opts.chatOpts || {}
@@ -994,7 +1010,9 @@ export async function executeStreamTask(taskId: number, opts: RunTaskOptions): P
       }
     }
 
+    throwIfTaskCancellationRequested(taskId)
     const result = opts.onSuccess ? await opts.onSuccess(fullOutput, taskId) : undefined
+    throwIfTaskCancellationRequested(taskId)
     const durationMs = Date.now() - startTime
     const tokensUsed = acquired.runtime.adapter.countTokens(fullOutput)
 
@@ -1081,6 +1099,7 @@ export async function executeChatTask(taskId: number, opts: RunTaskOptions): Pro
   try {
     const acquired = await acquireModelSlot(taskId, opts.modelConfigId, controller.signal)
     release = acquired.release
+    throwIfTaskCancellationRequested(taskId)
     updateTaskStatus(taskId, 'running', opts.sender)
     stopHeartbeat = startTaskHeartbeat(taskId)
     const chatOpts = opts.chatOpts || {}
@@ -1110,7 +1129,9 @@ export async function executeChatTask(taskId: number, opts: RunTaskOptions): Pro
       }
     }
 
+    throwIfTaskCancellationRequested(taskId)
     const finalResult = opts.onSuccess ? await opts.onSuccess(result, taskId) : undefined
+    throwIfTaskCancellationRequested(taskId)
 
     updateTask(taskId, {
       status: 'success',
@@ -1189,7 +1210,10 @@ export async function runChatTask(opts: RunTaskOptions): Promise<string> {
   })
 }
 
-export function cancelTask(taskId: number, sender?: WebContents): boolean {
+export function cancelTask(taskId: number, sender?: WebContents, visited = new Set<number>()): boolean {
+  if (visited.has(taskId)) return false
+  visited.add(taskId)
+
   const task = getTaskRecord(taskId)
   if (!task) return false
 
@@ -1213,7 +1237,7 @@ export function cancelTask(taskId: number, sender?: WebContents): boolean {
     updateTaskStatus(taskId, 'cancel_requested', sender, {
       controlJson: nextControlJson,
     })
-    cancelTask(task.currentChildTaskId, sender)
+    cancelTask(task.currentChildTaskId, sender, visited)
     return true
   }
 
@@ -1233,13 +1257,32 @@ export function cancelTask(taskId: number, sender?: WebContents): boolean {
     return true
   }
 
-  if (!controller) return false
+  const nextControl = JSON.stringify({
+    ...parseTaskControl(task),
+    cancelRequested: true,
+  })
+
+  if (typeof task.currentChildTaskId === 'number') {
+    updateTaskStatus(taskId, 'cancel_requested', sender, {
+      controlJson: nextControl,
+    })
+    cancelTask(task.currentChildTaskId, sender, visited)
+    controller?.abort()
+    return true
+  }
+
+  if (!controller) {
+    if (task.status !== 'pending') return false
+    updateTaskStatus(taskId, 'cancelled', sender, {
+      controlJson: nextControl,
+      errorMessage: '用户已取消',
+      currentChildTaskId: null,
+    })
+    return true
+  }
 
   updateTaskStatus(taskId, 'cancel_requested', sender, {
-    controlJson: JSON.stringify({
-      ...parseTaskControl(task),
-      cancelRequested: true,
-    }),
+    controlJson: nextControl,
   })
   controller.abort()
   return true
@@ -1250,11 +1293,50 @@ export function recoverOrphanedTasks(): number {
   const recoveryTimestamp = new Date().toISOString()
   const orphanedTasks = db.select().from(tasks).all()
     .filter((task) => {
+      if (task.runnerType === 'workflow') {
+        return task.status === 'pending'
+          || task.status === 'running'
+          || task.status === 'cancel_requested'
+      }
       if (task.status === 'running' || task.status === 'cancel_requested') return true
       return task.runnerType !== 'workflow' && task.status === 'pending'
     })
 
   orphanedTasks.forEach((task) => {
+    if (task.runnerType === 'workflow') {
+      const control = parseTaskControl(task)
+      const cancellationRequested = task.status === 'cancel_requested' || control.cancelRequested === true
+      const resumable = !cancellationRequested && hasResumableWorkflowCheckpoint(task)
+      const recoveredStatus: TaskStatus = cancellationRequested
+        ? 'cancelled'
+        : resumable
+          ? 'paused'
+          : 'failed'
+      const message = cancellationRequested
+        ? '任务在应用重启前已收到取消请求，已自动收尾。'
+        : resumable
+          ? '应用重启后后台流程已暂停，已保留 checkpoint，可继续执行。'
+          : '应用重启时工作流没有可验证的 checkpoint，已停止以避免悬挂。'
+      const progress = parseTaskProgress<Record<string, unknown>>(task)
+
+      updateTask(task.id, {
+        status: recoveredStatus,
+        currentChildTaskId: null,
+        controlJson: JSON.stringify({
+          ...control,
+          cancelRequested: false,
+        }),
+        progressJson: JSON.stringify({
+          ...progress,
+          status: recoveredStatus,
+          message,
+        }),
+        errorMessage: recoveredStatus === 'paused' ? '应用重启后后台流程已暂停' : message,
+        updatedAt: recoveryTimestamp,
+      })
+      return
+    }
+
     const recoveredStatus: TaskStatus = task.status === 'cancel_requested' ? 'cancelled' : 'failed'
     updateTask(task.id, {
       status: recoveredStatus,

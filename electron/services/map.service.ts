@@ -103,6 +103,39 @@ interface MapBatchGenerateRuntimeOptions {
   shouldStop?: () => boolean
 }
 
+type MapContextVersionConflict = Error & {
+  code?: string
+  expectedContextVersion?: number
+  currentContextVersion?: number
+}
+
+function getNovelContextVersion(novelId: number): number {
+  const row = getDb().select({ contextVersion: novels.contextVersion })
+    .from(novels)
+    .where(eq(novels.id, novelId))
+    .all()[0]
+  if (!row) throwUserFacingError('novel.notFound')
+  return row.contextVersion || 1
+}
+
+function assertMapContextVersion(novelId: number, expectedContextVersion: number): void {
+  const currentContextVersion = getNovelContextVersion(novelId)
+  if (currentContextVersion === expectedContextVersion) return
+
+  const error = new Error(
+    `地图生成期间项目上下文已从 v${expectedContextVersion} 变为 v${currentContextVersion}，本批结果未写入，请重新生成。`,
+  ) as MapContextVersionConflict
+  error.name = 'MapContextVersionConflictError'
+  error.code = 'CONTEXT_VERSION_CONFLICT'
+  error.expectedContextVersion = expectedContextVersion
+  error.currentContextVersion = currentContextVersion
+  throw error
+}
+
+function isMapContextVersionConflict(error: unknown): error is MapContextVersionConflict {
+  return error instanceof Error && (error as MapContextVersionConflict).code === 'CONTEXT_VERSION_CONFLICT'
+}
+
 interface MapNodeQueryFilters {
   novelId: number
   parentId?: number | null
@@ -1074,6 +1107,7 @@ async function runBatchWithRetries<T>(
       return await execute()
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') throw error
+      if (isMapContextVersionConflict(error)) throw error
       lastError = error
       if (attempt >= retryLimit) break
       logWarn('map', '地图批次执行失败，准备重试。', {
@@ -1137,6 +1171,7 @@ export async function batchGenerateMap(novelId: number, structure: MapBatchGener
   const db = getDb()
   const novel = db.select().from(novels).where(eq(novels.id, novelId)).all()[0]
   if (!novel) throwUserFacingError('novel.notFound')
+  const expectedContextVersion = novel.contextVersion || 1
   const profile = await buildStoryProfile(novelId)
   const rules = parseWorldRulesJson(novel.worldRulesJson, profile.genre)
   const layerPlans = getLayerPlans(structure, rules)
@@ -1215,6 +1250,7 @@ export async function batchGenerateMap(novelId: number, structure: MapBatchGener
         validateGeneratedNodes(parsed, batchCount, '根层', existingRootNames)
         return parsed
       }, inlineBatchRetryLimit, 'map root batch')
+      assertMapContextVersion(novelId, expectedContextVersion)
       generatedNodeCount += createNodesAtDepth(novelId, nodes, 1, undefined, rules)
       processedParentNames.push(...nodes.map((node) => asText(node.name)).filter(Boolean))
     } else {
@@ -1296,12 +1332,13 @@ export async function batchGenerateMap(novelId: number, structure: MapBatchGener
           validateGeneratedNodes(parsed, missingCount, `${currentParent.name}下的${targetPlan.label}`, existingChildren.map((row) => row.name).filter(Boolean))
           return parsed
         }, inlineBatchRetryLimit, `map child batch ${currentParent.id}`)
+        assertMapContextVersion(novelId, expectedContextVersion)
         generatedNodeCount += createNodesAtDepth(novelId, nodes, targetDepth, currentParent, rules)
         processedParentNames.push(currentParent.name)
       }
     }
   } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') throw error
+    if ((error instanceof Error && error.name === 'AbortError') || isMapContextVersionConflict(error)) throw error
     logError('map', '地图分批生成失败。', {
       consoleSummary: '[map:error] batch-generation-failed',
       error,
@@ -1309,6 +1346,7 @@ export async function batchGenerateMap(novelId: number, structure: MapBatchGener
     throw new Error(sanitizeMapErrorMessage(error, '地图生成结果解析失败，请重试'))
   }
   if (generatedNodeCount > 0) {
+    assertMapContextVersion(novelId, expectedContextVersion)
     markNovelContextChanged(novelId, 'Map structure changed')
     refreshWorldStateVersionsForNovel(novelId)
   }

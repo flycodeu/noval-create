@@ -15,6 +15,7 @@ import { getSqlite } from '../database/db'
 import {
   createArtifact,
   findArtifactByIdempotency,
+  hashArtifactContent,
   requireArtifact,
   updateArtifactLifecycle,
   ArtifactServiceError,
@@ -47,6 +48,15 @@ function normalizeRole(value: string): GeneratedCharacterRole {
     || value === 'minor'
     ? value
     : 'supporting'
+}
+
+function requestFingerprint(input: GenerateCharacterDraftInput): string {
+  return hashArtifactContent({
+    novelId: input.novelId,
+    planId: input.planId,
+    maxCharacters: typeof input.maxCharacters === 'number' ? input.maxCharacters : null,
+    specialRequirements: input.specialRequirements?.trim() || '',
+  })
 }
 
 function roleCounts(roles: GeneratedCharacterRole[]) {
@@ -192,10 +202,11 @@ function requireNovel(novelId: number) {
 
 export async function generateCharacterDraft(input: GenerateCharacterDraftInput): Promise<GenerateCharacterDraftResult> {
   const novel = requireNovel(input.novelId)
+  const fingerprint = requestFingerprint(input)
   const replay = findArtifactByIdempotency<CharacterDraftContent>(input.novelId, 'character_draft', input.idempotencyKey)
   if (replay) {
-    if (replay.content.planId !== input.planId) {
-      throw new CharacterDraftWorkflowError('IDEMPOTENCY_KEY_CONFLICT', '该幂等键已用于另一个人物计划。')
+    if (replay.content.planId !== input.planId || replay.content.requestFingerprint !== fingerprint) {
+      throw new CharacterDraftWorkflowError('IDEMPOTENCY_KEY_CONFLICT', '该幂等键已用于另一组人物草稿参数。')
     }
     if (!replay.reviewArtifactId) {
       throw new CharacterDraftWorkflowError('QUALITY_GATE_BLOCKED', '幂等重放命中的草稿缺少审校工件。')
@@ -272,6 +283,7 @@ export async function generateCharacterDraft(input: GenerateCharacterDraftInput)
   }
   const content: CharacterDraftContent = {
     schemaVersion: 'character-draft-v1',
+    requestFingerprint: fingerprint,
     planId: planArtifact.id,
     planContentHash: planArtifact.contentHash,
     plan: planArtifact.content,
