@@ -3,14 +3,19 @@ import { Alert, Button, Form, Input, InputNumber, Modal, Pagination, Select, Spa
 import {
   ApartmentOutlined,
   AppstoreOutlined,
+  CheckCircleOutlined,
   DeleteOutlined,
   EditOutlined,
   ReloadOutlined,
   RobotOutlined,
   SaveOutlined,
+  SafetyCertificateOutlined,
   TeamOutlined,
   UserAddOutlined,
 } from '@ant-design/icons'
+import type { CharacterNeedsAnalysisResult } from '../../../shared/character-cast-planning'
+import type { CharacterDraftReviewContent } from '../../../shared/character-draft-workflow'
+import type { AgentToolCallRequest, AgentToolCallResult } from '../../../shared/tool-contracts'
 import AIGenerateButton from '../../../components/AIGenerateButton'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import type {
@@ -84,6 +89,53 @@ interface RelationFormValues {
   tensionLevel?: number
   interactionStyle?: string
   subtextRule?: string
+}
+
+interface CharacterWorkflowArtifactRef {
+  id: string
+  kind: string
+  status: string
+  contentHash: string
+  contextVersion: number
+  reviewArtifactId: string | null
+}
+
+interface CharacterWorkflowDraftResult {
+  draftArtifact: CharacterWorkflowArtifactRef
+  reviewArtifact: CharacterWorkflowArtifactRef
+  taskId: number
+  characterCount: number
+  characterNames: string[]
+  diffSummary: {
+    createCount: number
+    updateSuggestionCount: number
+    mergeSuggestionCount: number
+    archiveSuggestionCount: number
+  }
+  review: CharacterDraftReviewContent
+  idempotentReplay: boolean
+}
+
+interface CharacterWorkflowCommitResult {
+  createdCharacterIds: number[]
+  createdCharacterNames: string[]
+  contextVersionBefore: number
+  contextVersionAfter: number
+  idempotentReplay: boolean
+  warnings: string[]
+}
+
+function unwrapAgentToolResult<T>(result: AgentToolCallResult): T {
+  if (result.ok) return result.data as T
+  const error = new Error(result.error.message) as Error & { code?: string; detail?: string }
+  error.code = result.error.code
+  error.detail = result.error.detail
+  throw error
+}
+
+function createWorkflowKey(prefix: string): string {
+  const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  return `ui-${prefix}-${suffix}`
 }
 
 const PAGE_SIZE = 24
@@ -270,6 +322,14 @@ export default function CharacterWorkspace({ novelId }: Props) {
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [creating, setCreating] = useState(false)
   const [batchOpen, setBatchOpen] = useState(false)
+  const [agentWorkflowOpen, setAgentWorkflowOpen] = useState(false)
+  const [agentWorkflowLoading, setAgentWorkflowLoading] = useState(false)
+  const [agentWorkflowStage, setAgentWorkflowStage] = useState<'idle' | 'planning' | 'drafting' | 'reviewed' | 'committing' | 'committed' | 'blocked'>('idle')
+  const [agentPlan, setAgentPlan] = useState<CharacterNeedsAnalysisResult | null>(null)
+  const [agentDraft, setAgentDraft] = useState<CharacterWorkflowDraftResult | null>(null)
+  const [agentCommit, setAgentCommit] = useState<CharacterWorkflowCommitResult | null>(null)
+  const [agentCommitKey, setAgentCommitKey] = useState('')
+  const [agentWorkflowError, setAgentWorkflowError] = useState('')
   const [protagonistOpen, setProtagonistOpen] = useState(false)
   const [relationModalOpen, setRelationModalOpen] = useState(false)
   const routeFocusRef = useRef<number | null>(null)
@@ -632,6 +692,117 @@ export default function CharacterWorkspace({ novelId }: Props) {
     }
   }
 
+  const handleAgentWorkflowStart = async () => {
+    const ready = await ensureCharacterGenerationReady()
+    if (!ready) return
+
+    setAgentWorkflowOpen(true)
+    setAgentWorkflowLoading(true)
+    setGenerating(true)
+    setAgentWorkflowStage('planning')
+    setAgentWorkflowError('')
+    setAgentPlan(null)
+    setAgentDraft(null)
+    setAgentCommit(null)
+    setAgentCommitKey('')
+    try {
+      const plan = unwrapAgentToolResult<CharacterNeedsAnalysisResult>(await window.electron.agentTools.call({
+        toolId: 'novelforge.characters.analyze_needs',
+        input: {
+          novelId,
+          scope: { type: 'novel', lookaheadChapters: 30 },
+          goals: ['补足叙事功能缺口', '降低同质角色与认知负担', '让新增人物能直接进入未来章节'],
+          constraints: {
+            maxNewCharacters: 12,
+            allowMergeExisting: true,
+            allowArchiveExisting: false,
+          },
+          executionMode: 'review_first',
+        },
+      }))
+      setAgentPlan(plan)
+      if (plan.review.status === 'blocked') {
+        setAgentWorkflowStage('blocked')
+        setAgentWorkflowError(plan.review.hardBlockers.join('；') || '人物计划未通过审校。')
+        return
+      }
+      if (plan.recommended.create === 0) {
+        setAgentWorkflowStage('reviewed')
+        message.info('分析完成：当前人物生态无需新增角色，请先处理更新或合并建议。')
+        return
+      }
+
+      setAgentWorkflowStage('drafting')
+      const draft = unwrapAgentToolResult<CharacterWorkflowDraftResult>(await window.electron.agentTools.call({
+        toolId: 'novelforge.characters.generate_draft',
+        input: {
+          novelId,
+          planId: plan.planId,
+          idempotencyKey: createWorkflowKey('character-draft'),
+          maxCharacters: 12,
+          specialRequirements: '保持人物姓名自然可读；优先形成能被章节合同直接引用的行动、资源与关系钩子。',
+        },
+      }))
+      setAgentDraft(draft)
+      setAgentCommitKey(createWorkflowKey('character-commit'))
+      setAgentWorkflowStage(draft.review.status === 'blocked' ? 'blocked' : 'reviewed')
+      if (draft.review.status === 'blocked') {
+        setAgentWorkflowError(draft.review.hardBlockers.join('；') || draft.review.summary)
+      }
+    } catch (error) {
+      console.error(error)
+      setAgentWorkflowStage('blocked')
+      setAgentWorkflowError(getErrorMessage(error, 'character.batchGenerateFailed'))
+    } finally {
+      setAgentWorkflowLoading(false)
+      setGenerating(false)
+    }
+  }
+
+  const handleAgentDraftCommit = async () => {
+    if (!agentDraft || !agentDraft.review.committable) return
+    const commitKey = agentCommitKey || createWorkflowKey('character-commit')
+    if (!agentCommitKey) setAgentCommitKey(commitKey)
+    const request: AgentToolCallRequest = {
+      toolId: 'novelforge.characters.commit_draft',
+      input: {
+        novelId,
+        draftArtifactId: agentDraft.draftArtifact.id,
+        expectedContextVersion: agentDraft.draftArtifact.contextVersion,
+        expectedContentHash: agentDraft.draftArtifact.contentHash,
+        idempotencyKey: commitKey,
+      },
+    }
+    setAgentWorkflowLoading(true)
+    setGenerating(true)
+    setAgentWorkflowStage('committing')
+    setAgentWorkflowError('')
+    try {
+      const approval = await window.electron.agentTools.approve({ request })
+      if (!approval.approved || !approval.approvalId) {
+        setAgentWorkflowStage('reviewed')
+        if (approval.reason && approval.reason !== '用户取消。') message.info(approval.reason)
+        return
+      }
+      const committed = unwrapAgentToolResult<CharacterWorkflowCommitResult>(await window.electron.agentTools.call({
+        ...request,
+        approvalId: approval.approvalId,
+      }))
+      setAgentCommit(committed)
+      setAgentWorkflowStage('committed')
+      await Promise.all([loadPage(committed.createdCharacterIds[0] || null, 1), loadGraph()])
+      notifyWorkspaceMutation()
+      message.success(`已提交 ${committed.createdCharacterIds.length} 位审校通过的人物。`)
+    } catch (error) {
+      console.error(error)
+      setAgentWorkflowStage('blocked')
+      setAgentWorkflowError(getErrorMessage(error, 'character.batchGenerateFailed'))
+    } finally {
+      setAgentWorkflowLoading(false)
+      setGenerating(false)
+    }
+  }
+
   const handleGenerateRelations = async () => {
     setGenerating(true)
     try {
@@ -751,7 +922,10 @@ export default function CharacterWorkspace({ novelId }: Props) {
       actions={(
         <Space wrap>
           <Button type="primary" icon={<RobotOutlined />} loading={generating} onClick={() => setProtagonistOpen(true)}>AI 生成·主角</Button>
-          <Button icon={<TeamOutlined />} loading={generating} onClick={() => { void searchItems(''); setBatchOpen(true) }}>AI 生成·人物网络</Button>
+          <Button className="character-agent-workflow-trigger" icon={<SafetyCertificateOutlined />} loading={agentWorkflowLoading} onClick={() => void handleAgentWorkflowStart()}>
+            智能规划·审校后生成
+          </Button>
+          <Button icon={<TeamOutlined />} loading={generating} onClick={() => { void searchItems(''); setBatchOpen(true) }}>按数量生成</Button>
           <Button icon={<ApartmentOutlined />} loading={generating} onClick={() => { setWorkspaceView('graph'); void handleGenerateRelations() }}>AI 修复·关系网络</Button>
           <Button icon={<EditOutlined />} onClick={() => navigate(selectedCharacter ? `/novels/${novelId}/arc-center?tab=characters&characterId=${selectedCharacter.id}` : `/novels/${novelId}/arc-center`)}>
             去人物弧线
@@ -1192,7 +1366,161 @@ export default function CharacterWorkspace({ novelId }: Props) {
         </Form>
       </Modal>
 
-      <Modal title="批量生成人物网络" open={batchOpen} forceRender onCancel={() => setBatchOpen(false)} onOk={() => void handleBatchGenerate()} confirmLoading={generating} okText="开始生成">
+      <Modal
+        className="character-agent-workflow-modal"
+        width={920}
+        title={(
+          <div className="character-agent-workflow__modal-title">
+            <SafetyCertificateOutlined />
+            <div>
+              <strong>人物生态编排台</strong>
+              <span>功能位分析 → 版本化草稿 → 独立审校 → 单次批准</span>
+            </div>
+          </div>
+        )}
+        open={agentWorkflowOpen}
+        maskClosable={!agentWorkflowLoading}
+        closable={!agentWorkflowLoading}
+        onCancel={() => setAgentWorkflowOpen(false)}
+        footer={(
+          <div className="character-agent-workflow__footer">
+            <Button disabled={agentWorkflowLoading} onClick={() => setAgentWorkflowOpen(false)}>
+              {agentWorkflowStage === 'committed' ? '完成' : '稍后处理'}
+            </Button>
+            <Space wrap>
+              <Button disabled={agentWorkflowLoading} icon={<ReloadOutlined />} onClick={() => void handleAgentWorkflowStart()}>
+                重新分析
+              </Button>
+              {agentDraft && agentWorkflowStage !== 'committed' ? (
+                <Button
+                  type="primary"
+                  icon={<CheckCircleOutlined />}
+                  loading={agentWorkflowStage === 'committing'}
+                  disabled={!agentDraft.review.committable || agentWorkflowLoading}
+                  onClick={() => void handleAgentDraftCommit()}
+                >
+                  查看原生确认并提交
+                </Button>
+              ) : null}
+            </Space>
+          </div>
+        )}
+      >
+        <div className="character-agent-workflow">
+          <div className="character-agent-workflow__rail" aria-label="人物生成工作流阶段">
+            {[
+              { key: 'planning', label: '功能位分析', note: '不按题材常量凑人数' },
+              { key: 'drafting', label: '草稿生成', note: '正式人物库零写入' },
+              { key: 'reviewed', label: '独立审校', note: '规则与模型双证据' },
+              { key: 'committed', label: '批准提交', note: '哈希与版本双校验' },
+            ].map((step, index) => {
+              const order = ['idle', 'planning', 'drafting', 'reviewed', 'committing', 'committed']
+              const currentIndex = order.indexOf(agentWorkflowStage)
+              const stepIndex = order.indexOf(step.key)
+              const completed = agentWorkflowStage === 'committed' || currentIndex > stepIndex
+              const active = agentWorkflowStage === step.key || (step.key === 'reviewed' && agentWorkflowStage === 'blocked') || (step.key === 'reviewed' && agentWorkflowStage === 'committing')
+              return (
+                <div key={step.key} className={`character-agent-workflow__step${completed ? ' is-complete' : ''}${active ? ' is-active' : ''}`}>
+                  <span className="character-agent-workflow__step-index">{completed ? <CheckCircleOutlined /> : index + 1}</span>
+                  <span><strong>{step.label}</strong><small>{step.note}</small></span>
+                </div>
+              )
+            })}
+          </div>
+
+          {agentWorkflowError ? (
+            <Alert
+              className="character-agent-workflow__alert"
+              type="error"
+              showIcon
+              message="工作流在安全门前停止"
+              description={agentWorkflowError}
+            />
+          ) : null}
+
+          <Spin spinning={agentWorkflowLoading} tip={agentWorkflowStage === 'planning' ? '正在分析人物功能位…' : agentWorkflowStage === 'drafting' ? '正在生成并审校人物草稿…' : agentWorkflowStage === 'committing' ? '正在提交不可变草稿…' : '处理中…'}>
+            <div className="character-agent-workflow__content">
+              {!agentPlan ? (
+                <div className="character-agent-workflow__empty">
+                  <SafetyCertificateOutlined />
+                  <strong>正在读取项目上下文</strong>
+                  <span>系统会综合主线、线程、终局承诺、势力、物品和现有人物，再决定是否需要新增角色。</span>
+                </div>
+              ) : (
+                <>
+                  <section className="character-agent-workflow__section">
+                    <div className="character-agent-workflow__section-head">
+                      <div><span>01 / CAST PLAN</span><strong>人数来自叙事缺口</strong></div>
+                      <Tag color={agentPlan.review.status === 'passed' ? 'success' : agentPlan.review.status === 'blocked' ? 'error' : 'warning'}>
+                        计划审校 {agentPlan.review.score} 分
+                      </Tag>
+                    </div>
+                    <div className="character-agent-workflow__score-grid">
+                      <div><span>保留</span><strong>{agentPlan.recommended.keep}</strong></div>
+                      <div><span>更新</span><strong>{agentPlan.recommended.update}</strong></div>
+                      <div className="is-accent"><span>新增</span><strong>{agentPlan.recommended.create}</strong></div>
+                      <div><span>合并组</span><strong>{agentPlan.recommended.mergeGroups}</strong></div>
+                      <div><span>提交后活跃</span><strong>{agentPlan.recommended.activeCastAfterCommit}</strong></div>
+                    </div>
+                    <p className="character-agent-workflow__summary">{agentPlan.review.summary}</p>
+                    <div className="character-agent-workflow__slots">
+                      {agentPlan.roleSlots.slice(0, 10).map((slot) => (
+                        <div key={slot.slotId} className={`character-agent-workflow__slot is-${slot.coverage}`}>
+                          <div><strong>{slot.function}</strong><Tag>{slot.proposedAction}</Tag></div>
+                          <span>{slot.independenceReason || `由角色 #${slot.coveredByCharacterIds.join('、') || '待定'} 承担`}</span>
+                          <small>{slot.evidenceRefs.slice(0, 3).join(' · ') || '暂无证据引用'}</small>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+
+                  {agentDraft ? (
+                    <section className="character-agent-workflow__section character-agent-workflow__section--review">
+                      <div className="character-agent-workflow__section-head">
+                        <div><span>02 / REVIEWED DRAFT</span><strong>草稿已冻结，尚未写入正式库</strong></div>
+                        <Tag color={agentDraft.review.status === 'passed' ? 'success' : agentDraft.review.status === 'blocked' ? 'error' : 'warning'}>
+                          {agentDraft.review.status === 'passed' ? '可提交' : agentDraft.review.status === 'blocked' ? '已阻塞' : '带警告可提交'}
+                        </Tag>
+                      </div>
+                      <div className="character-agent-workflow__roster">
+                        {agentDraft.characterNames.map((name, index) => (
+                          <span key={`${name}-${index}`}><b>{String(index + 1).padStart(2, '0')}</b>{name}</span>
+                        ))}
+                      </div>
+                      <div className="character-agent-workflow__review-copy">
+                        <strong>{agentDraft.review.summary}</strong>
+                        <span>草稿哈希：{agentDraft.draftArtifact.contentHash}</span>
+                        <span>上下文版本：v{agentDraft.draftArtifact.contextVersion} · 任务 #{agentDraft.taskId}</span>
+                      </div>
+                      <div className="character-agent-workflow__checks">
+                        {agentDraft.review.checks.map((check) => (
+                          <div key={check.code} className={`is-${check.status}`}>
+                            <span>{check.status === 'pass' ? '✓' : check.status === 'warn' ? '!' : '×'}</span>
+                            <p><strong>{check.message}</strong>{check.characterNames.length ? <small>{check.characterNames.join('、')}</small> : null}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  ) : null}
+
+                  {agentCommit ? (
+                    <section className="character-agent-workflow__commit-card">
+                      <CheckCircleOutlined />
+                      <div>
+                        <span>CANONICAL COMMIT</span>
+                        <strong>已把 {agentCommit.createdCharacterIds.length} 位人物写入正式人物库</strong>
+                        <p>{agentCommit.createdCharacterNames.join('、')} · 上下文 v{agentCommit.contextVersionBefore} → v{agentCommit.contextVersionAfter}</p>
+                      </div>
+                    </section>
+                  ) : null}
+                </>
+              )}
+            </div>
+          </Spin>
+        </div>
+      </Modal>
+
+      <Modal title="按数量批量生成人物网络" open={batchOpen} forceRender onCancel={() => setBatchOpen(false)} onOk={() => void handleBatchGenerate()} confirmLoading={generating} okText="开始生成">
         <Form form={batchForm} layout="vertical">
           <Alert
             showIcon

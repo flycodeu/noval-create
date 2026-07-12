@@ -1042,12 +1042,18 @@ export function installWebElectronBridge(): void {
     workflow: createService({ list: async () => [] }),
     structure: createService({
       getTree: async (novelId?: unknown) => withLocalBackend('structure', 'getTree', [novelId], async () => ({ volumes: [] })),
-      listVolumes: async () => [],
-      listPartsPage: async () => emptyPagedResult,
-      listChaptersPage: async () => emptyPagedResult,
-      listSegmentsPage: async () => emptyPagedResult,
-      listLinkedTimelineEventsPage: async () => emptyPagedResult,
-      getLinkageSummary: async () => emptyStructureLinkageSummary,
+      listVolumes: async (novelId?: unknown) => withLocalBackend('structure', 'listVolumes', [novelId], async () => []),
+      listPartsPage: async (volumeId?: unknown, page?: unknown, pageSize?: unknown) => withLocalBackend('structure', 'listPartsPage', [volumeId, page, pageSize], async () => emptyPagedResult),
+      listChaptersPage: async (partId?: unknown, page?: unknown, pageSize?: unknown) => withLocalBackend('structure', 'listChaptersPage', [partId, page, pageSize], async () => emptyPagedResult),
+      listSegments: async (chapterId?: unknown) => withLocalBackend('structure', 'listSegments', [chapterId], async () => []),
+      getSegment: async (id?: unknown) => withLocalBackend('structure', 'getSegment', [id], async () => null),
+      listSegmentsPage: async (chapterId?: unknown, page?: unknown, pageSize?: unknown) => withLocalBackend('structure', 'listSegmentsPage', [chapterId, page, pageSize], async () => emptyPagedResult),
+      listCheckpoints: async (novelId?: unknown) => withLocalBackend('structure', 'listCheckpoints', [novelId], async () => []),
+      listCheckpointsPage: async (filters?: unknown, page?: unknown, pageSize?: unknown) => withLocalBackend('structure', 'listCheckpointsPage', [filters, page, pageSize], async () => emptyPagedResult),
+      listLinkedTimelineEvents: async (filters?: unknown) => withLocalBackend('structure', 'listLinkedTimelineEvents', [filters], async () => []),
+      listLinkedTimelineEventsPage: async (filters?: unknown, page?: unknown, pageSize?: unknown) => withLocalBackend('structure', 'listLinkedTimelineEventsPage', [filters, page, pageSize], async () => emptyPagedResult),
+      resolvePath: async (filters?: unknown) => withLocalBackend('structure', 'resolvePath', [filters], async () => null),
+      getLinkageSummary: async (novelId?: unknown) => withLocalBackend('structure', 'getLinkageSummary', [novelId], async () => emptyStructureLinkageSummary),
       syncLinkage: async () => ({
         ...emptyStructureLinkageSummary,
         createdChapterContractCount: 0,
@@ -1274,6 +1280,16 @@ export function installWebElectronBridge(): void {
         async () => 'web-preview://localStorage/novelforge',
       ),
       getLocalBackendStatus,
+    }),
+    agentTools: createService({
+      list: async (query?: unknown) => withLocalBackend('agentTools', 'list', [query], async () => []),
+      call: async (request?: unknown) => withLocalBackend('agentTools', 'call', [request], async () => {
+        throw new Error(getLocalBackendUnavailableMessage())
+      }),
+      approve: async () => ({
+        approved: false,
+        reason: 'Web preview does not grant canonical-write approvals. Use the desktop app.',
+      }),
     }),
     quality: createService({
       getDashboard: async () => emptyQualityDashboard,

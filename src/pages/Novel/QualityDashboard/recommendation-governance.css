@@ -1,0 +1,353 @@
+.recommendation-governance {
+  overflow: hidden;
+  border: 1px solid rgba(44, 91, 87, 0.2);
+  border-radius: 18px;
+  background:
+    linear-gradient(90deg, rgba(27, 84, 80, 0.035) 1px, transparent 1px) 0 0 / 28px 28px,
+    radial-gradient(circle at 94% 4%, rgba(47, 125, 117, 0.16), transparent 28%),
+    linear-gradient(145deg, rgba(255, 254, 249, 0.98), rgba(244, 240, 227, 0.96));
+  box-shadow: 0 18px 44px rgba(53, 44, 31, 0.12);
+}
+
+.recommendation-governance--loading {
+  display: grid;
+  min-height: 220px;
+  place-items: center;
+}
+
+.recommendation-governance__masthead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid rgba(62, 82, 70, 0.12);
+}
+
+.recommendation-governance__title {
+  display: flex;
+  gap: 14px;
+}
+
+.recommendation-governance__title > .anticon {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  place-items: center;
+  border-radius: 13px;
+  background: #1e615e;
+  color: #f7f1dc;
+  font-size: 20px;
+  box-shadow: 0 9px 20px rgba(25, 91, 86, 0.22);
+}
+
+.recommendation-governance__title div,
+.recommendation-governance__card-head > div {
+  display: grid;
+  gap: 3px;
+}
+
+.recommendation-governance__title span,
+.recommendation-governance__card-head span {
+  color: #35706c;
+  font: 700 10px/1.3 ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: 0.14em;
+}
+
+.recommendation-governance__title strong {
+  color: #2e271e;
+  font-family: "Noto Serif SC", "Source Han Serif SC", serif;
+  font-size: 21px;
+}
+
+.recommendation-governance__title p {
+  max-width: 680px;
+  margin: 1px 0 0;
+  color: rgba(67, 56, 43, 0.7);
+  line-height: 1.65;
+}
+
+.recommendation-governance__body {
+  display: grid;
+  grid-template-columns: 1.08fr 1.35fr 1fr;
+  gap: 1px;
+  background: rgba(62, 82, 70, 0.12);
+}
+
+.recommendation-governance__attempt-card,
+.recommendation-governance__preflight-card,
+.recommendation-governance__candidate-card {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: 14px;
+  padding: 20px;
+  background: rgba(255, 254, 250, 0.82);
+}
+
+.recommendation-governance__attempt-head,
+.recommendation-governance__card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.recommendation-governance__attempt-head > div {
+  display: grid;
+  gap: 3px;
+}
+
+.recommendation-governance__attempt-head span,
+.recommendation-governance__attempt-head small {
+  color: rgba(67, 56, 43, 0.62);
+  font-size: 11px;
+}
+
+.recommendation-governance__attempt-head strong {
+  color: #235b58;
+  font: 700 30px/1 Georgia, "Times New Roman", serif;
+}
+
+.recommendation-governance__card-head strong {
+  color: #342c21;
+  font-family: "Noto Serif SC", "Source Han Serif SC", serif;
+  font-size: 15px;
+}
+
+.recommendation-governance__attempt-track {
+  display: grid;
+  gap: 7px;
+}
+
+.recommendation-governance__attempt-slot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 1px dashed rgba(72, 72, 60, 0.18);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.recommendation-governance__attempt-slot > span {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(79, 79, 66, 0.09);
+  color: rgba(67, 56, 43, 0.58);
+  font: 700 12px/1 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.recommendation-governance__attempt-slot > div {
+  display: grid;
+  gap: 1px;
+}
+
+.recommendation-governance__attempt-slot small {
+  color: rgba(67, 56, 43, 0.58);
+  font-size: 10px;
+}
+
+.recommendation-governance__attempt-slot.is-passed {
+  border-style: solid;
+  border-color: rgba(47, 133, 103, 0.22);
+  background: rgba(226, 244, 235, 0.76);
+}
+
+.recommendation-governance__attempt-slot.is-passed > span {
+  background: #2b8065;
+  color: white;
+}
+
+.recommendation-governance__attempt-slot.is-failed {
+  border-style: solid;
+  border-color: rgba(166, 76, 61, 0.22);
+  background: rgba(248, 230, 224, 0.78);
+}
+
+.recommendation-governance__attempt-slot.is-failed > span {
+  background: #a75345;
+  color: white;
+}
+
+.recommendation-governance__policy-note,
+.recommendation-governance__no-auto,
+.recommendation-governance__empty {
+  margin: 0;
+  color: rgba(67, 56, 43, 0.62);
+  font-size: 11px;
+  line-height: 1.65;
+}
+
+.recommendation-governance__scores {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.recommendation-governance__scores > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  padding: 11px 12px;
+  border: 1px solid rgba(47, 111, 106, 0.13);
+  border-radius: 11px;
+  background: rgba(234, 246, 241, 0.64);
+}
+
+.recommendation-governance__scores span,
+.recommendation-governance__scores small {
+  overflow: hidden;
+  color: rgba(49, 80, 74, 0.66);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recommendation-governance__scores strong {
+  color: #225d59;
+  font: 700 23px/1.2 Georgia, "Times New Roman", serif;
+}
+
+.recommendation-governance__preflight-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.recommendation-governance__preflight-meta span {
+  color: rgba(67, 56, 43, 0.68);
+  font-size: 10px;
+}
+
+.recommendation-governance code {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: #35706c;
+  font: 9px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recommendation-governance__issues {
+  display: grid;
+  gap: 5px;
+  max-height: 142px;
+  overflow-y: auto;
+  color: #8d463a;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.recommendation-governance__ready-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(222, 242, 232, 0.8);
+  color: #286b58;
+  font-weight: 600;
+}
+
+.recommendation-governance__candidate-manifest {
+  display: flex;
+  min-width: 0;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(47, 111, 106, 0.16);
+  border-radius: 12px;
+  background: rgba(234, 246, 241, 0.68);
+}
+
+.recommendation-governance__candidate-manifest > .anticon {
+  color: #2a726d;
+  font-size: 24px;
+}
+
+.recommendation-governance__candidate-manifest > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.recommendation-governance__candidate-manifest span {
+  color: rgba(49, 80, 74, 0.66);
+  font-size: 10px;
+}
+
+@media (max-width: 1280px) {
+  .recommendation-governance__body {
+    grid-template-columns: 1fr 1.2fr;
+  }
+
+  .recommendation-governance__candidate-card {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 760px) {
+  .recommendation-governance__masthead,
+  .recommendation-governance__attempt-head,
+  .recommendation-governance__card-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .recommendation-governance__body,
+  .recommendation-governance__scores {
+    grid-template-columns: 1fr;
+  }
+
+  .recommendation-governance__candidate-card {
+    grid-column: auto;
+  }
+}
+
+[data-theme="dark"] .recommendation-governance {
+  border-color: rgba(128, 179, 168, 0.18);
+  background:
+    linear-gradient(90deg, rgba(150, 202, 190, 0.025) 1px, transparent 1px) 0 0 / 28px 28px,
+    radial-gradient(circle at 94% 4%, rgba(72, 150, 141, 0.14), transparent 28%),
+    linear-gradient(145deg, rgba(28, 35, 47, 0.98), rgba(20, 26, 37, 0.98));
+}
+
+[data-theme="dark"] .recommendation-governance__body {
+  background: rgba(203, 231, 222, 0.08);
+}
+
+[data-theme="dark"] .recommendation-governance__attempt-card,
+[data-theme="dark"] .recommendation-governance__preflight-card,
+[data-theme="dark"] .recommendation-governance__candidate-card,
+[data-theme="dark"] .recommendation-governance__attempt-slot {
+  background: rgba(29, 36, 49, 0.88);
+}
+
+[data-theme="dark"] .recommendation-governance__title strong,
+[data-theme="dark"] .recommendation-governance__card-head strong,
+[data-theme="dark"] .recommendation-governance__attempt-slot strong {
+  color: rgba(244, 239, 229, 0.94);
+}
+
+[data-theme="dark"] .recommendation-governance__title p,
+[data-theme="dark"] .recommendation-governance__policy-note,
+[data-theme="dark"] .recommendation-governance__no-auto,
+[data-theme="dark"] .recommendation-governance__empty,
+[data-theme="dark"] .recommendation-governance__attempt-head span,
+[data-theme="dark"] .recommendation-governance__attempt-head small {
+  color: rgba(227, 218, 204, 0.68);
+}
+
+[data-theme="dark"] .recommendation-governance__scores > div,
+[data-theme="dark"] .recommendation-governance__candidate-manifest {
+  border-color: rgba(128, 179, 168, 0.18);
+  background: rgba(35, 65, 63, 0.58);
+}

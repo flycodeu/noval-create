@@ -1024,6 +1024,120 @@ export const operationLogs = sqliteTable('operation_logs', {
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
 })
 
+export const recommendationPreflightRuns = sqliteTable('recommendation_preflight_runs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  profileVersion: text('profile_version').notNull(),
+  status: text('status').notNull(),
+  score: integer('score').notNull(),
+  confidenceLowerBound: integer('confidence_lower_bound').notNull(),
+  coverageRate: integer('coverage_rate').notNull(),
+  blockersJson: text('blockers_json').notNull().default('[]'),
+  warningsJson: text('warnings_json').notNull().default('[]'),
+  evidenceJson: text('evidence_json').notNull().default('[]'),
+  contextVersion: integer('context_version').notNull(),
+  contentHash: text('content_hash').notNull(),
+  countedExternalAttempt: integer('counted_external_attempt').notNull().default(0),
+  taskId: integer('task_id').references(() => tasks.id, { onDelete: 'set null' }),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
+export const recommendationCandidates = sqliteTable('recommendation_candidates', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  preflightRunId: integer('preflight_run_id').notNull().references(() => recommendationPreflightRuns.id, { onDelete: 'restrict' }),
+  status: text('status').notNull().default('locked'),
+  contextVersion: integer('context_version').notNull(),
+  contentHash: text('content_hash').notNull(),
+  snapshotJson: text('snapshot_json').notNull(),
+  actorType: text('actor_type').notNull(),
+  actorId: text('actor_id').notNull(),
+  clientId: text('client_id').notNull(),
+  approvalId: text('approval_id').notNull(),
+  lockedAt: text('locked_at').notNull(),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
+export const externalEvaluationAttempts = sqliteTable('external_evaluation_attempts', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  candidateId: integer('candidate_id').notNull().references(() => recommendationCandidates.id, { onDelete: 'restrict' }),
+  source: text('source').notNull(),
+  outcome: text('outcome').notNull(),
+  workStateAtEvaluation: text('work_state_at_evaluation').notNull().default('serializing'),
+  failureReason: text('failure_reason'),
+  evidenceCompleteness: text('evidence_completeness').notNull().default('complete'),
+  evidenceJson: text('evidence_json').notNull().default('{}'),
+  policyId: text('policy_id').notNull(),
+  policySnapshotJson: text('policy_snapshot_json').notNull(),
+  actorType: text('actor_type').notNull(),
+  actorId: text('actor_id').notNull(),
+  clientId: text('client_id').notNull(),
+  approvalId: text('approval_id').notNull(),
+  confirmedBy: text('confirmed_by').notNull(),
+  idempotencyKey: text('idempotency_key').notNull(),
+  occurredAt: text('occurred_at').notNull(),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
+export const artifacts = sqliteTable('artifacts', {
+  id: text('id').primaryKey(),
+  novelId: integer('novel_id').notNull().references(() => novels.id, { onDelete: 'cascade' }),
+  kind: text('kind').notNull(),
+  status: text('status').notNull().default('draft'),
+  version: integer('version').notNull().default(1),
+  parentArtifactId: text('parent_artifact_id'),
+  contentJson: text('content_json').notNull(),
+  contentHash: text('content_hash').notNull(),
+  contextVersion: integer('context_version').notNull(),
+  producerType: text('producer_type').notNull(),
+  producerId: text('producer_id').notNull(),
+  producerClient: text('producer_client').notNull(),
+  modelConfigId: integer('model_config_id').references(() => modelConfigs.id, { onDelete: 'set null' }),
+  taskId: integer('task_id').references(() => tasks.id, { onDelete: 'set null' }),
+  reviewArtifactId: text('review_artifact_id'),
+  committedEntityIdsJson: text('committed_entity_ids_json').notNull().default('[]'),
+  idempotencyKey: text('idempotency_key'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
+export const approvalGrants = sqliteTable('approval_grants', {
+  id: text('id').primaryKey(),
+  novelId: integer('novel_id').references(() => novels.id, { onDelete: 'cascade' }),
+  toolId: text('tool_id').notNull(),
+  inputHash: text('input_hash').notNull(),
+  actorType: text('actor_type').notNull(),
+  actorId: text('actor_id').notNull(),
+  clientId: text('client_id').notNull(),
+  sessionId: text('session_id'),
+  status: text('status').notNull().default('approved'),
+  expiresAt: text('expires_at').notNull(),
+  consumedAt: text('consumed_at'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+})
+
+export const toolInvocations = sqliteTable('tool_invocations', {
+  id: text('id').primaryKey(),
+  novelId: integer('novel_id').references(() => novels.id, { onDelete: 'set null' }),
+  runId: text('run_id').notNull(),
+  toolId: text('tool_id').notNull(),
+  toolVersion: text('tool_version').notNull(),
+  inputHash: text('input_hash').notNull(),
+  redactedInputJson: text('redacted_input_json').notNull(),
+  effect: text('effect').notNull(),
+  approvalId: text('approval_id'),
+  actorType: text('actor_type').notNull(),
+  actorId: text('actor_id').notNull(),
+  clientId: text('client_id').notNull(),
+  status: text('status').notNull(),
+  durationMs: integer('duration_ms').notNull().default(0),
+  errorCode: text('error_code'),
+  outputHash: text('output_hash'),
+  createdAt: text('created_at').notNull(),
+  completedAt: text('completed_at').notNull(),
+})
+
 export type Novel = typeof novels.$inferSelect
 export type NewNovel = typeof novels.$inferInsert
 export type StoryVolume = typeof storyVolumes.$inferSelect
@@ -1099,6 +1213,18 @@ export type GlobalLockLibraryRow = typeof globalLockLibraries.$inferSelect
 export type NewGlobalLockLibraryRow = typeof globalLockLibraries.$inferInsert
 export type OperationLog = typeof operationLogs.$inferSelect
 export type NewOperationLog = typeof operationLogs.$inferInsert
+export type RecommendationPreflightRun = typeof recommendationPreflightRuns.$inferSelect
+export type NewRecommendationPreflightRun = typeof recommendationPreflightRuns.$inferInsert
+export type RecommendationCandidateRow = typeof recommendationCandidates.$inferSelect
+export type NewRecommendationCandidateRow = typeof recommendationCandidates.$inferInsert
+export type ExternalEvaluationAttemptRow = typeof externalEvaluationAttempts.$inferSelect
+export type NewExternalEvaluationAttemptRow = typeof externalEvaluationAttempts.$inferInsert
+export type ArtifactRow = typeof artifacts.$inferSelect
+export type NewArtifactRow = typeof artifacts.$inferInsert
+export type ApprovalGrantRow = typeof approvalGrants.$inferSelect
+export type NewApprovalGrantRow = typeof approvalGrants.$inferInsert
+export type ToolInvocationRow = typeof toolInvocations.$inferSelect
+export type NewToolInvocationRow = typeof toolInvocations.$inferInsert
 export type Genre = typeof genres.$inferSelect
 export type StoryArc = typeof storyArcs.$inferSelect
 

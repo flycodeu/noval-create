@@ -1,0 +1,5 @@
+const LOCAL_WEB_BACKEND_VERSION = 5
+
+module.exports = {
+  LOCAL_WEB_BACKEND_VERSION,
+}

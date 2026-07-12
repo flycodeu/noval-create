@@ -6,6 +6,14 @@ import type { StoryThreadBatchGenerateOptions } from '../src/shared/story-thread
 import type { WorldRulesGenerationRequest } from '../src/shared/world-rules-generation'
 import type { SubplotGenerationRequest } from '../src/shared/subplot-framework'
 import type { ThemeVoiceGenerationRequest } from '../src/shared/theme-voice-generation'
+import type {
+  AgentToolCallRequest,
+  AgentToolCallResult,
+  AgentToolApprovalRequest,
+  AgentToolApprovalResult,
+  AgentToolDescriptor,
+  AgentToolListQuery,
+} from '../src/shared/tool-contracts'
 import type { CharacterRelationInput, MapRelationInput, NovelCreateInput } from '../src/types'
 
 interface IpcBridgeErrorPayload {
@@ -65,6 +73,15 @@ const api = {
 
   app: {
     getDatabasePath: () => invokeIpc<string>('app:getDatabasePath'),
+  },
+
+  agentTools: {
+    list: (query?: AgentToolListQuery) =>
+      invokeIpc<AgentToolDescriptor[]>('agentTool:list', query),
+    call: (request: AgentToolCallRequest) =>
+      invokeIpc<AgentToolCallResult>('agentTool:call', request),
+    approve: (request: AgentToolApprovalRequest) =>
+      invokeIpc<AgentToolApprovalResult>('agentTool:approve', request),
   },
 
   aiPatch: {

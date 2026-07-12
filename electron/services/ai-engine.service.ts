@@ -85,6 +85,8 @@ const TASK_MAX_TOKEN_FACTORS: Partial<Record<AiTaskKind, number>> = {
   timeline_generation: 0.75,
   thread_generation: 0.75,
   revision_planning: 0.72,
+  character_planning: 0.78,
+  character_review: 0.58,
   paragraph_rewrite: 0.38,
   workspace_repair: 0.82,
   generic_prompt: 0.8,

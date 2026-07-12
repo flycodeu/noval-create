@@ -1,0 +1,12 @@
+interface:
+  display_name: "NovelForge Agent"
+  short_description: "Plan, review, and govern NovelForge assets"
+  default_prompt: "Use $novelforge-agent to analyze the current novel cast needs before generating characters."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "novelforge"
+      description: "NovelForge local MCP server for novel assets and recorded AI workflows"
+      transport: "stdio"
+policy:
+  allow_implicit_invocation: true

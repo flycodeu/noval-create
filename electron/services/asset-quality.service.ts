@@ -1,4 +1,5 @@
 import type { WebContents } from 'electron'
+import type { ChatOptions } from '../adapters/base.adapter'
 import type { AssetReviewObservability, AssetReviewResult, AssetReviewTarget } from '../../src/types'
 import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/utils/text'
 import { safeParseJson } from '../utils/json'
@@ -30,6 +31,8 @@ export interface AssetQualityLoopOptions {
   rewriteConstraints?: string[]
   qualityBudgetMs?: number
   maxRewritePasses?: number
+  chatOpts?: Partial<ChatOptions>
+  onQualityTaskCreated?: (taskId: number, stage: 'review' | 'rewrite') => void
 }
 
 export interface AssetQualityLoopResult {
@@ -172,6 +175,9 @@ async function runNestedReviewTask(params: {
   relatedEntityType?: string
   relatedEntityId?: number
   prompt: string
+  chatOpts?: Partial<ChatOptions>
+  stage: 'review' | 'rewrite'
+  onTaskCreated?: (taskId: number, stage: 'review' | 'rewrite') => void
 }): Promise<string> {
   const messages = [{ role: 'user' as const, content: params.prompt }]
 
@@ -184,6 +190,8 @@ async function runNestedReviewTask(params: {
       relatedEntityId: params.relatedEntityId,
       messages,
       sender: params.sender,
+      chatOpts: params.chatOpts,
+      onSuccess: (_output, taskId) => params.onTaskCreated?.(taskId, params.stage),
     })
   }
 
@@ -197,6 +205,7 @@ async function runNestedReviewTask(params: {
     runnerType: 'chat',
     parentTaskId: params.parentTaskId,
   })
+  params.onTaskCreated?.(childTaskId, params.stage)
 
   updateTask(params.parentTaskId, { currentChildTaskId: childTaskId })
 
@@ -209,6 +218,7 @@ async function runNestedReviewTask(params: {
       relatedEntityId: params.relatedEntityId,
       inputJson: JSON.stringify(messages),
       messages,
+      chatOpts: params.chatOpts,
       sender: params.sender,
     })
   } finally {
@@ -231,6 +241,9 @@ export async function reviewGeneratedAsset(options: AssetQualityLoopOptions): Pr
       schemaHint: options.schemaHint,
       reviewFocus: options.reviewFocus,
     }),
+    chatOpts: options.chatOpts,
+    stage: 'review',
+    onTaskCreated: options.onQualityTaskCreated,
   })
 
   return parseAssetReviewResult(raw)
@@ -257,6 +270,9 @@ export async function rewriteGeneratedAsset(
       schemaHint: options.schemaHint,
       rewriteConstraints: options.rewriteConstraints,
     }),
+    chatOpts: options.chatOpts,
+    stage: 'rewrite',
+    onTaskCreated: options.onQualityTaskCreated,
   })
 }
 

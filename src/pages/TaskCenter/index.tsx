@@ -55,6 +55,8 @@ const STATUS_LABELS: Record<string, { label: string; color: string; icon: React.
 const TYPE_LABELS: Record<string, string> = {
   init: '初始化',
   character_gen: 'AI 生成人物',
+  character_cast_plan: 'AI 分析人物需求',
+  character_cast_review: 'AI 审校人物计划',
   faction_generate: 'AI 生成势力',
   chapter_planner: 'Planner · 合同规划',
   chapter_writer: 'Writer · 正文初稿',

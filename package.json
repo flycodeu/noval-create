@@ -38,12 +38,15 @@
     "test": "npm run test:unit && npm run test:smoke",
     "test:unit": "vitest run",
     "test:watch": "vitest",
-    "test:smoke": "npm run test:prompt-guardrails && npm run test:workflow-resilience && npm run test:workspace-routing && npm run test:migrations",
+    "test:smoke": "npm run test:prompt-guardrails && npm run test:workflow-resilience && npm run test:workspace-routing && npm run test:interface-contracts && npm run test:mcp && npm run test:migrations && npm run test:agent-workflow",
     "test:subplot": "node scripts/subplot-framework.test.cjs",
     "test:migrations": "electron scripts/migration-safety.test.cjs",
     "test:prompt-guardrails": "node scripts/prompt-guardrails.test.cjs",
     "test:workflow-resilience": "node scripts/workflow-resilience.test.cjs",
     "test:workspace-routing": "node scripts/workspace-routing.test.cjs",
+    "test:interface-contracts": "node scripts/interface-inventory.test.cjs",
+    "test:mcp": "node scripts/mcp-server.test.cjs",
+    "test:agent-workflow": "electron scripts/agent-workflow-integration.test.cjs",
     "test:longform-soak": "node scripts/longform-soak.cjs",
     "test:chapter-soak": "node scripts/chapter-soak.cjs",
     "soak:export-chapter-report": "electron scripts/export-chapter-soak-report.cjs",
@@ -57,11 +60,15 @@
     "typecheck:node": "tsc -p tsconfig.node.json --noEmit",
     "typecheck": "npm run typecheck:web && npm run typecheck:node",
     "check:encoding": "node scripts/check-encoding.cjs",
-    "check:user-messages": "node scripts/check-user-facing-messages.cjs"
+    "check:user-messages": "node scripts/check-user-facing-messages.cjs",
+    "audit:interfaces": "node scripts/interface-inventory.cjs --check",
+    "mcp": "node scripts/run-novelforge-mcp.cjs",
+    "mcp:install:codex": "node scripts/install-codex-mcp.cjs"
   },
   "dependencies": {
     "@ant-design/icons": "^5.3.0",
     "@hello-pangea/dnd": "^18.0.1",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "antd": "^5.15.0",
     "better-sqlite3": "^9.4.3",
     "crypto-js": "^4.2.0",
@@ -73,6 +80,7 @@
     "react-dom": "^18.3.0",
     "react-router-dom": "^6.22.0",
     "reactflow": "^11.11.3",
+    "zod": "^4.4.3",
     "zustand": "^4.5.2"
   },
   "devDependencies": {

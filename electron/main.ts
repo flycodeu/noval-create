@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, Menu, dialog, ipcMain, shell } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import { desc, eq } from 'drizzle-orm'
@@ -9,6 +9,12 @@ import type { ThemeVoiceGenerationRequest } from '../src/shared/theme-voice-gene
 import type { WorldRulesGenerationRequest } from '../src/shared/world-rules-generation'
 import type { SubplotGenerationRequest } from '../src/shared/subplot-framework'
 import type { AiExecutionMode } from '../src/shared/ai-execution'
+import type {
+  AgentToolCallRequest,
+  AgentToolApprovalRequest,
+  AgentToolListQuery,
+} from '../src/shared/tool-contracts'
+import { DESKTOP_AGENT_TOOL_SCOPES } from '../src/shared/tool-contracts'
 import type {
   CharacterArcBeatInput,
   CharacterArcInput,
@@ -104,6 +110,8 @@ import { parseAiJsonResult, safeParseJson } from './utils/json'
 import { getNovelContextStatus, markNovelContextChanged } from './services/context-impact.service'
 import { enhanceAiScoreResult } from './services/ai-score.service'
 import { wrapIpcHandler } from './utils/ipc-wrapper'
+import { novelForgeToolRegistry } from './application/novelforge-tool-registry'
+import { consumeApprovalGrant, createApprovalGrant } from './services/approval.service'
 import {
   appendVariationMessage,
   buildVariationDigest,
@@ -377,6 +385,86 @@ function registerIpcHandlers() {
   })
 
   handle('app:getDatabasePath', () => getDatabasePath())
+
+  // Stable agent-tool surface. Caller identity and scopes are supplied here,
+  // never accepted from renderer input.
+  handle('agentTool:list', (_, query) =>
+    novelForgeToolRegistry.list(
+      query == null
+        ? {}
+        : parseObjectPayload<AgentToolListQuery>(query, 'query'),
+    ))
+  handle('agentTool:approve', async (event, payload) => {
+    const approvalRequest = parseObjectPayload<AgentToolApprovalRequest>(payload, 'approvalRequest')
+    const request = parseObjectPayload<AgentToolCallRequest>(approvalRequest.request, 'approvalRequest.request')
+    const descriptor = novelForgeToolRegistry.get(request.toolId)
+    if (!descriptor) return { approved: false, reason: `未知工具：${request.toolId}` }
+    if (descriptor.approval !== 'always') return { approved: false, reason: '该工具不需要逐次批准。' }
+    const actor = {
+      type: 'human' as const,
+      actorId: 'desktop-user',
+      clientId: 'novelforge-desktop',
+      sessionId: `web-contents-${event.sender.id}`,
+    }
+    const input = request.input || {}
+    const summary = [
+      typeof input.novelId === 'number' ? `项目 ID：${input.novelId}` : '',
+      typeof input.draftArtifactId === 'string' ? `草稿：${input.draftArtifactId}` : '',
+      typeof input.preflightRunId === 'number' ? `预检记录 ID：${input.preflightRunId}` : '',
+      typeof input.candidateId === 'number' ? `候选稿 ID：${input.candidateId}` : '',
+      typeof input.source === 'string'
+        ? `评估来源：${input.source === 'author_requested' ? '作者主动' : input.source === 'platform_auto' ? '平台自动' : input.source}`
+        : '',
+      typeof input.outcome === 'string'
+        ? `评估结果：${input.outcome === 'passed' ? '通过' : input.outcome === 'failed' ? '未通过' : input.outcome}`
+        : '',
+      typeof input.confirmedBy === 'string' ? `结果确认者：${input.confirmedBy}` : '',
+      typeof input.failureReason === 'string' ? `失败原因：${input.failureReason.slice(0, 600)}` : '',
+      typeof input.expectedContextVersion === 'number' ? `上下文版本：v${input.expectedContextVersion}` : '',
+      typeof input.expectedContentHash === 'string' ? `内容哈希：${input.expectedContentHash}` : '',
+      `影响级别：${descriptor.effect}`,
+      '批准仅绑定本次工具与当前参数，2 分钟内有效且只能使用一次。',
+    ].filter(Boolean).join('\n')
+    const window = BrowserWindow.fromWebContents(event.sender) || mainWindow
+    const options = {
+      type: 'warning' as const,
+      title: '批准 NovelForge 正式操作',
+      message: descriptor.title,
+      detail: summary,
+      buttons: ['批准一次', '取消'],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+    }
+    const choice = window
+      ? await dialog.showMessageBox(window, options)
+      : await dialog.showMessageBox(options)
+    if (choice.response !== 0) return { approved: false, reason: '用户取消。' }
+    return createApprovalGrant({ request, actor })
+  })
+  handle('agentTool:call', (event, rawRequest) => {
+    const request = parseObjectPayload<AgentToolCallRequest>(rawRequest, 'request')
+    const actor = {
+      type: 'human' as const,
+      actorId: 'desktop-user',
+      clientId: 'novelforge-desktop',
+      sessionId: `web-contents-${event.sender.id}`,
+    }
+    const trustedApprovalId = request.approvalId && consumeApprovalGrant({
+      approvalId: request.approvalId,
+      request,
+      actor,
+    })
+      ? request.approvalId
+      : undefined
+    return novelForgeToolRegistry.invoke(request, {
+        actor,
+        scopes: [...DESKTOP_AGENT_TOOL_SCOPES],
+        requestId: `ipc-${event.sender.id}-${Date.now()}`,
+        approvalId: trustedApprovalId,
+        locale: app.getLocale() || 'zh-CN',
+      })
+  })
 
   handle('novel:list', (_, filters) => novelService.listNovels(filters))
   handle('novel:get', (_, id) => novelService.getNovel(requireId(id)))

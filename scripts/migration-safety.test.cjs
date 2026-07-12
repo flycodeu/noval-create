@@ -134,6 +134,17 @@ function getMigrationIds(db) {
 }
 
 function assertRequiredColumns(db) {
+  assert.ok(getColumns(db, 'recommendation_preflight_runs').has('counted_external_attempt'))
+  assert.ok(getColumns(db, 'recommendation_preflight_runs').has('content_hash'))
+  assert.ok(getColumns(db, 'recommendation_candidates').has('preflight_run_id'))
+  assert.ok(getColumns(db, 'recommendation_candidates').has('approval_id'))
+  assert.ok(getColumns(db, 'external_evaluation_attempts').has('idempotency_key'))
+  assert.ok(getColumns(db, 'external_evaluation_attempts').has('policy_snapshot_json'))
+  assert.ok(getColumns(db, 'external_evaluation_attempts').has('work_state_at_evaluation'))
+  assert.ok(getColumns(db, 'artifacts').has('content_hash'))
+  assert.ok(getColumns(db, 'artifacts').has('context_version'))
+  assert.ok(getColumns(db, 'approval_grants').has('input_hash'))
+  assert.ok(getColumns(db, 'tool_invocations').has('redacted_input_json'))
   assert.ok(getColumns(db, 'novels').has('historical_profile_json'))
   assert.ok(getColumns(db, 'novels').has('source_ledger_json'))
   assert.ok(getColumns(db, 'novels').has('chapter_source_usage_json'))
@@ -252,6 +263,9 @@ function testFreshDbIsIdempotent() {
       '0037_typed_ref_overlay_backfill',
       '0038_novel_source_canon_fields',
       '0039_character_design_columns',
+      '0040_recommendation_evaluation_governance',
+      '0041_agent_artifacts_approvals_and_audit',
+      '0042_recommendation_work_state_lock_history',
     ])
 
     runMigrations(db)
@@ -370,6 +384,9 @@ function testPartialSchemaCanResume() {
       '0037_typed_ref_overlay_backfill',
       '0038_novel_source_canon_fields',
       '0039_character_design_columns',
+      '0040_recommendation_evaluation_governance',
+      '0041_agent_artifacts_approvals_and_audit',
+      '0042_recommendation_work_state_lock_history',
     ])
 
     const configs = db.prepare(`
@@ -497,6 +514,9 @@ function testAppliedLegacyMigrationCanStillReceiveTypedRefColumns() {
     assert.ok(getMigrationIds(db).includes('0037_typed_ref_overlay_backfill'))
     assert.ok(getMigrationIds(db).includes('0038_novel_source_canon_fields'))
     assert.ok(getMigrationIds(db).includes('0039_character_design_columns'))
+    assert.ok(getMigrationIds(db).includes('0040_recommendation_evaluation_governance'))
+    assert.ok(getMigrationIds(db).includes('0041_agent_artifacts_approvals_and_audit'))
+    assert.ok(getMigrationIds(db).includes('0042_recommendation_work_state_lock_history'))
   } finally {
     db.close()
   }
@@ -583,6 +603,78 @@ function testAppliedLegacyMigrationCanStillReceiveCharacterDesignColumns() {
     assert.ok(getColumns(db, 'characters').has('vocabulary_level'))
     assert.ok(getColumns(db, 'characters').has('dialect_features'))
     assert.ok(getMigrationIds(db).includes('0039_character_design_columns'))
+    assert.ok(getMigrationIds(db).includes('0040_recommendation_evaluation_governance'))
+    assert.ok(getMigrationIds(db).includes('0041_agent_artifacts_approvals_and_audit'))
+    assert.ok(getMigrationIds(db).includes('0042_recommendation_work_state_lock_history'))
+  } finally {
+    db.close()
+  }
+}
+
+function testRecommendationGovernanceTriggers() {
+  const db = openDb('recommendation-governance.db')
+  try {
+    runMigrations(db)
+    const createCandidate = (title, status) => {
+      const novel = db.prepare(`
+        INSERT INTO novels (title, status, target_words, context_version)
+        VALUES (?, ?, 200000, 1)
+      `).run(title, status)
+      const novelId = Number(novel.lastInsertRowid)
+      const preflight = db.prepare(`
+        INSERT INTO recommendation_preflight_runs (
+          novel_id, profile_version, status, score, confidence_lower_bound,
+          coverage_rate, context_version, content_hash, counted_external_attempt
+        ) VALUES (?, 'test-v1', 'ready', 90, 85, 100, 1, ?, 0)
+      `).run(novelId, `sha256:${'a'.repeat(64)}`)
+      const preflightId = Number(preflight.lastInsertRowid)
+      const candidate = db.prepare(`
+        INSERT INTO recommendation_candidates (
+          novel_id, preflight_run_id, status, context_version, content_hash,
+          snapshot_json, actor_type, actor_id, client_id, approval_id, locked_at
+        ) VALUES (?, ?, 'locked', 1, ?, '{}', 'human', 'tester', 'migration-test', 'approval', ?)
+      `).run(novelId, preflightId, `sha256:${'a'.repeat(64)}`, new Date().toISOString())
+      return { novelId, candidateId: Number(candidate.lastInsertRowid) }
+    }
+    const insertAttempt = (novelId, candidateId, outcome, key, workState = 'serializing') => db.prepare(`
+      INSERT INTO external_evaluation_attempts (
+        novel_id, candidate_id, source, outcome, work_state_at_evaluation, failure_reason,
+        evidence_completeness, evidence_json, policy_id, policy_snapshot_json,
+        actor_type, actor_id, client_id, approval_id, confirmed_by,
+        idempotency_key, occurred_at
+      ) VALUES (?, ?, 'author_requested', ?, ?, ?, 'complete', '{}', 'test-policy', '{}',
+        'human', 'tester', 'migration-test', 'approval', 'tester', ?, ?)
+    `).run(novelId, candidateId, outcome, workState, outcome === 'failed' ? 'test failure' : null, key, new Date().toISOString())
+
+    const serializing = createCandidate('serializing', 'serializing')
+    insertAttempt(serializing.novelId, serializing.candidateId, 'failed', 'serial-fail-1')
+    insertAttempt(serializing.novelId, serializing.candidateId, 'failed', 'serial-fail-2')
+    insertAttempt(serializing.novelId, serializing.candidateId, 'failed', 'serial-fail-3')
+    assert.throws(
+      () => insertAttempt(serializing.novelId, serializing.candidateId, 'failed', 'serial-fail-4'),
+      /RECOMMENDATION_ATTEMPTS_EXHAUSTED/,
+    )
+
+    const completed = createCandidate('completed', 'completed')
+    insertAttempt(completed.novelId, completed.candidateId, 'failed', 'completed-fail-1', 'completed')
+    db.prepare(`UPDATE novels SET status = 'serializing' WHERE id = ?`).run(completed.novelId)
+    assert.throws(
+      () => insertAttempt(completed.novelId, completed.candidateId, 'failed', 'completed-fail-2'),
+      /RECOMMENDATION_COMPLETED_WORK_LOCKED/,
+    )
+
+    const passed = createCandidate('passed', 'serializing')
+    insertAttempt(passed.novelId, passed.candidateId, 'passed', 'passed-1')
+    assert.throws(
+      () => insertAttempt(passed.novelId, passed.candidateId, 'failed', 'passed-2'),
+      /RECOMMENDATION_ALREADY_PASSED/,
+    )
+
+    const internalCount = db.prepare(`
+      SELECT SUM(counted_external_attempt) AS count
+      FROM recommendation_preflight_runs
+    `).get().count
+    assert.equal(internalCount, 0)
   } finally {
     db.close()
   }
@@ -594,6 +686,7 @@ function runAllTests() {
   testPartialSchemaCanResume()
   testAppliedLegacyMigrationCanStillReceiveTypedRefColumns()
   testAppliedLegacyMigrationCanStillReceiveCharacterDesignColumns()
+  testRecommendationGovernanceTriggers()
   console.log('migration-safety tests passed')
 }
 

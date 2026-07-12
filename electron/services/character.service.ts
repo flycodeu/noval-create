@@ -29,7 +29,11 @@ import { cleanAiFieldText, cleanAiStringArray, cleanAiValue } from '../../src/ut
 import { buildCharacterRelationSummaryLine, normalizeCharacterRelationLevel } from '../../src/shared/character-relations'
 import { recordAssetChangeEvent } from './asset-impact.service'
 import { markNovelContextChanged } from './context-impact.service'
-import { runAssetQualityLoop, summarizeAssetQualityWarnings } from './asset-quality.service'
+import {
+  runAssetQualityLoop,
+  summarizeAssetQualityWarnings,
+  type AssetQualityLoopResult,
+} from './asset-quality.service'
 import {
   resolveFactionNamesFromReferences,
   stringifyFactionReferences,
@@ -181,8 +185,10 @@ function roleOrder(roleType?: string | null): number {
   return index === -1 ? priority.length : index
 }
 
-function normalizeRoleType(value: string): 'major' | 'minor' | 'antagonist' | 'supporting' {
-  if (value === 'major' || value === 'antagonist' || value === 'supporting') return value
+export type GeneratedCharacterRole = 'protagonist' | 'major' | 'minor' | 'antagonist' | 'supporting'
+
+function normalizeRoleType(value: string): GeneratedCharacterRole {
+  if (value === 'protagonist' || value === 'major' || value === 'antagonist' || value === 'supporting') return value
   return 'minor'
 }
 
@@ -191,7 +197,7 @@ function buildRoleQueue(opts: {
   minorCount: number
   antagonistCount?: number
   supportingCount?: number
-}): Array<'major' | 'minor' | 'antagonist' | 'supporting'> {
+}): GeneratedCharacterRole[] {
   return [
     ...Array.from({ length: Math.max(0, opts.majorCount) }, () => 'major' as const),
     ...Array.from({ length: Math.max(0, opts.antagonistCount || 0) }, () => 'antagonist' as const),
@@ -200,8 +206,9 @@ function buildRoleQueue(opts: {
   ]
 }
 
-function countRoleQueue(queue: Array<'major' | 'minor' | 'antagonist' | 'supporting'>) {
+function countRoleQueue(queue: GeneratedCharacterRole[]) {
   return {
+    protagonistCount: queue.filter((role) => role === 'protagonist').length,
     majorCount: queue.filter((role) => role === 'major').length,
     antagonistCount: queue.filter((role) => role === 'antagonist').length,
     supportingCount: queue.filter((role) => role === 'supporting').length,
@@ -211,12 +218,22 @@ function countRoleQueue(queue: Array<'major' | 'minor' | 'antagonist' | 'support
 
 export interface CharacterBatchChunkResult {
   ids: number[]
+  taskId?: number
+  draftCharacters?: CharacterDraftPayload[]
+  qualityReview?: Omit<AssetQualityLoopResult, 'finalOutput'>
+  protagonistGenerated?: number
   majorGenerated: number
   minorGenerated: number
   antagonistGenerated: number
   supportingGenerated: number
   batchDigest?: string
   warning?: string
+}
+
+export type CharacterDraftPayload = Partial<typeof characters.$inferInsert> & {
+  fullName: string
+  roleType: string
+  recordStatus: 'draft'
 }
 
 function buildStoryCoreSummary(profile: Awaited<ReturnType<typeof buildStoryProfile>>): string {
@@ -1440,6 +1457,8 @@ export async function generateCharacterBatchChunk(
     sender?: WebContents
     batchIndex?: number
     totalBatches?: number
+    commit?: boolean
+    roleQueue?: GeneratedCharacterRole[]
   } = {},
 ): Promise<CharacterBatchChunkResult> {
   const db = getDb()
@@ -1455,7 +1474,9 @@ export async function generateCharacterBatchChunk(
   const protagonistSummary = protagonist ? buildCharacterSummary(protagonist) : '主角未设定'
   const existingCharacterSummaries = buildExistingCharacterDigest(existingChars)
   const itemSummary = buildItemResourceSummary(itemRows)
-  const fullRoleQueue = buildRoleQueue(opts)
+  const fullRoleQueue = runtime.roleQueue && runtime.roleQueue.length > 0
+    ? runtime.roleQueue
+    : buildRoleQueue(opts)
   const batchSize = Math.max(1, Math.min(opts.batchSize || fullRoleQueue.length || 1, fullRoleQueue.length || 1))
   const roleQueue = fullRoleQueue.slice(0, batchSize)
   const totalCount = roleQueue.length
@@ -1479,6 +1500,8 @@ export async function generateCharacterBatchChunk(
   const specialRequirements = [
     chunkOptions.specialRequirements,
     `本批角色配额：主要人物 ${chunkOptions.majorCount}，反派 ${chunkOptions.antagonistCount || 0}，功能角色 ${chunkOptions.supportingCount || 0}，次要人物 ${chunkOptions.minorCount}。`,
+    chunkCounts.protagonistCount > 0 ? `本批还必须生成 ${chunkCounts.protagonistCount} 位主角/POV 锚点，role_type 必须为 protagonist。` : '',
+    runtime.roleQueue && runtime.roleQueue.length > 0 ? `角色对象顺序必须严格对应：${roleQueue.join(' -> ')}。` : '',
     fullRoleQueue.length > roleQueue.length ? `全量剩余配额仍有 ${fullRoleQueue.length} 位，本批只生成 ${roleQueue.length} 位，后续批次继续补齐。` : '',
     chunkOptions.preferredSpecies && chunkOptions.preferredSpecies.length > 0 ? `优先种族或实体：${chunkOptions.preferredSpecies.join('、')}。` : '',
     chunkOptions.factionBias && chunkOptions.factionBias.length > 0 ? `优先势力来源：${chunkOptions.factionBias.join('、')}。` : '',
@@ -1582,6 +1605,13 @@ export async function generateCharacterBatchChunk(
           markRejected(historyId)
           resultPayload = {
             ids: [],
+            taskId,
+            qualityReview: {
+              stage: quality.stage,
+              review: quality.review,
+              rewrittenReview: quality.rewrittenReview,
+              warnings: quality.warnings,
+            },
             majorGenerated: 0,
             minorGenerated: 0,
             antagonistGenerated: 0,
@@ -1628,18 +1658,23 @@ export async function generateCharacterBatchChunk(
         }
 
         const createdIds: number[] = []
+        const preparedDrafts: CharacterDraftPayload[] = []
         const createdNames: string[] = []
+        let protagonistGenerated = 0
         let majorGenerated = 0
         let minorGenerated = 0
         let antagonistGenerated = 0
         let supportingGenerated = 0
 
         for (const char of parsed) {
-          const fallbackRole = roleQueue[createdIds.length] || 'minor'
+          const fallbackRole = roleQueue[preparedDrafts.length] || 'minor'
+          const assignedRole = runtime.roleQueue && runtime.roleQueue.length > 0
+            ? fallbackRole
+            : normalizeRoleType(asText(char.role_type) || fallbackRole)
           const payload = buildCharacterPayload(char, {
             novelId,
-            roleType: normalizeRoleType(asText(char.role_type) || fallbackRole),
-            recordStatus: 'confirmed',
+            roleType: assignedRole,
+            recordStatus: runtime.commit === false ? 'draft' : 'confirmed',
           })
           const candidateName = typeof payload.fullName === 'string' ? payload.fullName : ''
           if (!candidateName || hasReservedCharacterName(candidateName, reservedNames)) {
@@ -1648,21 +1683,30 @@ export async function generateCharacterBatchChunk(
           if (itemRows.length > 0 && !payload.contextHooksJson) {
             payload.contextHooksJson = jsonStringifyArray(itemRows.slice(0, 2).map((item) => `${item.itemName}相关`))
           }
-          const id = createCharacter(novelId, payload, { skipContextTracking: true })
+          preparedDrafts.push({
+            ...payload,
+            fullName: candidateName,
+            roleType: String(payload.roleType || fallbackRole),
+            recordStatus: 'draft',
+          })
+          if (runtime.commit !== false) {
+            const id = createCharacter(novelId, payload, { skipContextTracking: true })
+            createdIds.push(id)
+          }
           reservedNames.push(candidateName)
-          createdIds.push(id)
           createdNames.push(candidateName)
-          if (payload.roleType === 'major') majorGenerated += 1
+          if (payload.roleType === 'protagonist') protagonistGenerated += 1
+          else if (payload.roleType === 'major') majorGenerated += 1
           else if (payload.roleType === 'antagonist') antagonistGenerated += 1
           else if (payload.roleType === 'supporting') supportingGenerated += 1
           else minorGenerated += 1
-          if (createdIds.length >= totalCount) break
+          if (preparedDrafts.length >= totalCount) break
         }
 
-        if (createdIds.length === 0) {
+        if (preparedDrafts.length === 0) {
           markRejected(historyId)
         }
-        if (createdIds.length > 0) {
+        if (createdIds.length > 0 && runtime.commit !== false) {
           markNovelContextChanged(novelId, 'Character profiles changed')
           refreshWorldStateVersionsForNovel(novelId)
           runItemCharacterLinkRepair(novelId)
@@ -1670,12 +1714,21 @@ export async function generateCharacterBatchChunk(
 
         resultPayload = {
           ids: createdIds,
+          taskId,
+          ...(runtime.commit === false ? { draftCharacters: preparedDrafts } : {}),
+          qualityReview: {
+            stage: quality.stage,
+            review: quality.review,
+            rewrittenReview: quality.rewrittenReview,
+            warnings: quality.warnings,
+          },
+          protagonistGenerated,
           majorGenerated,
           minorGenerated,
           antagonistGenerated,
           supportingGenerated,
           batchDigest: createdNames.slice(0, 4).join('、'),
-          warning: createdIds.length > 0
+          warning: preparedDrafts.length > 0
             ? summarizeAssetQualityWarnings(quality)
             : (summarizeAssetQualityWarnings(quality) || `第 ${runtime.batchIndex || 1}/${runtime.totalBatches || 1} 批没有生成可用人物。`),
         }
@@ -1690,6 +1743,7 @@ export async function generateCharacterBatchChunk(
 
   return resultPayload || {
     ids: [],
+    taskId,
     majorGenerated: 0,
     minorGenerated: 0,
     antagonistGenerated: 0,

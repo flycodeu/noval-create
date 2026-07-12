@@ -39,6 +39,14 @@ import type {
   AiExecutionMode,
   AiTaskKind,
 } from '../shared/ai-execution'
+import type {
+  AgentToolCallRequest,
+  AgentToolCallResult,
+  AgentToolApprovalRequest,
+  AgentToolApprovalResult,
+  AgentToolDescriptor,
+  AgentToolListQuery,
+} from '../shared/tool-contracts'
 
 export type {
   CoreSettingsGenerationProgressEvent,
@@ -86,6 +94,16 @@ export type {
   AiExecutionMode,
   AiTaskKind,
 } from '../shared/ai-execution'
+export type {
+  AgentToolCallContext,
+  AgentToolCallMeta,
+  AgentToolCallRequest,
+  AgentToolCallResult,
+  AgentToolDescriptor,
+  AgentToolEffect,
+  AgentToolErrorPayload,
+  AgentToolListQuery,
+} from '../shared/tool-contracts'
 export type {
   ThemeVoiceGenerationRequest,
   ThemeVoiceGenerationResult,
@@ -1399,6 +1417,10 @@ export type AssetReviewTarget =
   | 'subplot'
   | 'map'
   | 'world_rules'
+  | 'outline'
+  | 'chapter'
+  | 'project_brief'
+  | 'theme_voice'
 
 export interface AssetReviewResult {
   summary: string
@@ -4716,6 +4738,7 @@ export interface ChapterOptimizeResult {
   warnings: string[]
   factGuard: ChapterOptimizationFactGuard
   qualityGate: ChapterOptimizationQualityGate
+  taskId?: number
 }
 
 export type WorkspaceQualityIssueKind =
@@ -5455,6 +5478,11 @@ declare global {
           lastError: string
           message: string
         }>
+      }
+      agentTools: {
+        list: (query?: AgentToolListQuery) => Promise<AgentToolDescriptor[]>
+        call: (request: AgentToolCallRequest) => Promise<AgentToolCallResult>
+        approve: (request: AgentToolApprovalRequest) => Promise<AgentToolApprovalResult>
       }
       aiPatch: {
         suggest: (request: AiPatchRequest) => Promise<AiPatchResult>

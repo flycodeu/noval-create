@@ -6,6 +6,7 @@ import type { LanguageDriftMetrics, QualityDashboardData, QualityRepairAction, Q
 import { WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
 import { getUserFacingMessage } from '@/utils/user-facing-message'
 import './index.css'
+import RecommendationGovernancePanel from './RecommendationGovernancePanel'
 import {
   getQualityRiskSeverityColor,
   getQualityRiskSeverityLabel,
@@ -531,6 +532,7 @@ export default function QualityDashboard({ novelId }: Props) {
   if (!data || (!hasScoreData && !hasChapterGateData && !hasStoryDynamicsData && !hasArcProgressData && !hasDialogueData && !hasStateData && !hasRecallData && !hasChapterFunctionData && !hasEndgameDebtData && !hasPipelineData)) {
     return (
       <WorkspacePage title="质量监控">
+        <RecommendationGovernancePanel novelId={novelId} />
         <WorkspacePanel title="先产出首轮检测">
           <Empty description="先在正文页运行章节审校、AI 体检或写作流水线，质量页才会开始累计趋势、风险和修复动作。">
             <Button type="primary" onClick={() => navigate(`/novels/${novelId}/writing`)}>
@@ -620,6 +622,7 @@ export default function QualityDashboard({ novelId }: Props) {
 
   const overviewContent = (
     <>
+      <RecommendationGovernancePanel novelId={novelId} />
       <WorkspacePanel title="百万字健康指标" description="把继续扩批前最关键的生产、连续性、合同和批次回查信号收在一起。">
         <div className="quality-dashboard-page__stack">
           <div className="quality-dashboard-page__grid-220">

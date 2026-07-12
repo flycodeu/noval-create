@@ -18,6 +18,8 @@ import { logWarn } from '../utils/runtime-log'
 export type TaskType =
   | 'init'
   | 'character_gen'
+  | 'character_cast_plan'
+  | 'character_cast_review'
   | 'chapter_planner'
   | 'chapter_writer'
   | 'chapter_critic'

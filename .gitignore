@@ -27,3 +27,4 @@ pnpm-debug.log*
 .local-tools/
 release/
 docs/
+todo/**

@@ -7309,6 +7309,7 @@ export async function optimizeChapterContent(
     extraReasons: ['整章优化只生成候选稿，不直接覆盖正文。'],
   })
 
+  let optimizationTaskId: number | undefined
   const raw = await runChatTask({
     type: 'review',
     novelId: chapter.novelId,
@@ -7328,6 +7329,7 @@ export async function optimizeChapterContent(
     }],
     modelConfigId: route.modelConfigId,
     chatOpts: buildChatOptionsFromRoute(route),
+    onSuccess: (_output, taskId) => { optimizationTaskId = taskId },
   })
   const optimizedContent = normalizeOptimizedChapterContent(raw)
   if (!optimizedContent) throwUserFacingError('writing.rewriteNoResult')
@@ -7343,6 +7345,7 @@ export async function optimizeChapterContent(
     warnings: dedupeTextList([...factGuard.warnings, ...qualityGate.warnings]),
     factGuard,
     qualityGate,
+    ...(optimizationTaskId ? { taskId: optimizationTaskId } : {}),
   }
 }
 

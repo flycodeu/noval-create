@@ -702,6 +702,14 @@ function assetTargetLabel(targetType: AssetReviewTarget): string {
       return '地图资产'
     case 'world_rules':
       return '世界规则分区'
+    case 'outline':
+      return '故事大纲'
+    case 'chapter':
+      return '章节草稿'
+    case 'project_brief':
+      return '项目定位与读者承诺'
+    case 'theme_voice':
+      return '主题与叙事声音'
     default:
       return '故事资产'
   }

@@ -1,13 +1,14 @@
 const { spawn, spawnSync } = require('node:child_process')
 const net = require('node:net')
 const path = require('node:path')
+const { LOCAL_WEB_BACKEND_VERSION } = require('./local-web-contract.cjs')
 
 const workspaceRoot = path.resolve(__dirname, '..')
 const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm'
 const electronCommand = process.platform === 'win32' ? 'electron.cmd' : 'electron'
 const backendPort = Number(process.env.NOVELFORGE_WEB_BACKEND_PORT || 8787)
 const frontendPort = Number(process.env.NOVELFORGE_WEB_FRONTEND_PORT || 4175)
-const expectedBackendVersion = 3
+const expectedBackendVersion = LOCAL_WEB_BACKEND_VERSION
 
 function quoteWindowsArg(value) {
   const text = String(value)
@@ -103,13 +104,15 @@ function fetchBackendHealth() {
 }
 
 async function waitForBackendReady() {
+  let lastHealth = null
   for (let attempt = 0; attempt < 60; attempt += 1) {
     const health = await fetchBackendHealth()
+    lastHealth = health
     const version = health && health.ok && health.data ? Number(health.data.version) : 0
-    if (version === expectedBackendVersion) return true
+    if (version === expectedBackendVersion) return { ready: true, health }
     await new Promise((resolve) => setTimeout(resolve, 250))
   }
-  return false
+  return { ready: false, health: lastHealth }
 }
 
 async function waitForPortClosed(port) {
@@ -151,14 +154,22 @@ async function main() {
   if (await isPortListening(backendPort)) {
     const health = await fetchBackendHealth()
     const version = health && health.ok && health.data ? Number(health.data.version) : 0
+    const isNovelForgeBackend = health?.data?.app === 'NovelForge local web backend'
     if (version === expectedBackendVersion) {
       console.log(`[dev:web] backend already listening on http://127.0.0.1:${backendPort}`)
-    } else if (stopProcessOnPort(backendPort) && await waitForPortClosed(backendPort)) {
-      console.log(`[dev:web] restarted outdated backend on http://127.0.0.1:${backendPort}`)
+    } else if (isNovelForgeBackend) {
+      if (!stopProcessOnPort(backendPort) || !(await waitForPortClosed(backendPort))) {
+        throw new Error(`outdated NovelForge backend on port ${backendPort} could not be stopped`)
+      }
+      console.log(`[dev:web] restarting NovelForge backend version ${version || 'unknown'} on http://127.0.0.1:${backendPort}`)
       children.push(startProcess('backend', electronCommand, ['scripts/local-web-backend.cjs']))
       startedBackend = true
     } else {
-      console.log(`[dev:web] backend is listening on http://127.0.0.1:${backendPort}, but version is unknown; reuse it`)
+      const ownerPid = getWindowsPidOnPort(backendPort)
+      throw new Error(
+        `port ${backendPort} is occupied by a process that is not a recognized NovelForge backend`
+        + (ownerPid ? ` (PID ${ownerPid})` : ''),
+      )
     }
   } else {
     children.push(startProcess('backend', electronCommand, ['scripts/local-web-backend.cjs']))
@@ -167,8 +178,13 @@ async function main() {
 
   if (startedBackend) {
     console.log(`[dev:web] waiting for backend http://127.0.0.1:${backendPort}/health`)
-    if (!(await waitForBackendReady())) {
-      throw new Error(`backend did not become ready on http://127.0.0.1:${backendPort}/health`)
+    const readiness = await waitForBackendReady()
+    if (!readiness.ready) {
+      const observed = readiness.health == null ? 'no valid JSON response' : JSON.stringify(readiness.health)
+      throw new Error(
+        `backend did not become ready on http://127.0.0.1:${backendPort}/health `
+        + `(expected version ${expectedBackendVersion}; last response: ${observed})`,
+      )
     }
   }
 

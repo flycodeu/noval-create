@@ -14,6 +14,8 @@ export type AiTaskKind =
   | 'timeline_generation'
   | 'thread_generation'
   | 'revision_planning'
+  | 'character_planning'
+  | 'character_review'
   | 'character_generation'
   | 'faction_generation'
   | 'item_generation'

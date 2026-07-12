@@ -49,6 +49,7 @@ export function initDb(): AppDatabase {
 
 function ensureLegacyElectronDatabaseCopied(userDataPath: string, dbPath: string) {
   if (fs.existsSync(dbPath)) return
+  if (process.env.NOVELFORGE_DISABLE_LEGACY_DB_COPY === '1') return
 
   const legacyDbPath = path.join(app.getPath('appData'), 'Electron', DATABASE_FILE_NAME)
   if (path.resolve(legacyDbPath) === path.resolve(dbPath) || !fs.existsSync(legacyDbPath)) return
@@ -1911,6 +1912,269 @@ export function runMigrations(sqlite: Database.Database) {
 
     ensureCharacterDesignColumns(sqlite)
     validateCharacterDesignSchema(sqlite)
+  })
+
+  runMigrationStep(sqlite, '0040_recommendation_evaluation_governance', () => {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS recommendation_preflight_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        profile_version TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('ready', 'blocked')),
+        score INTEGER NOT NULL CHECK (score BETWEEN 0 AND 100),
+        confidence_lower_bound INTEGER NOT NULL CHECK (confidence_lower_bound BETWEEN 0 AND 100),
+        coverage_rate INTEGER NOT NULL CHECK (coverage_rate BETWEEN 0 AND 100),
+        blockers_json TEXT NOT NULL DEFAULT '[]',
+        warnings_json TEXT NOT NULL DEFAULT '[]',
+        evidence_json TEXT NOT NULL DEFAULT '[]',
+        context_version INTEGER NOT NULL,
+        content_hash TEXT NOT NULL,
+        counted_external_attempt INTEGER NOT NULL DEFAULT 0 CHECK (counted_external_attempt = 0),
+        task_id INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS recommendation_candidates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        preflight_run_id INTEGER NOT NULL REFERENCES recommendation_preflight_runs(id) ON DELETE RESTRICT,
+        status TEXT NOT NULL DEFAULT 'locked' CHECK (status = 'locked'),
+        context_version INTEGER NOT NULL,
+        content_hash TEXT NOT NULL,
+        snapshot_json TEXT NOT NULL,
+        actor_type TEXT NOT NULL,
+        actor_id TEXT NOT NULL,
+        client_id TEXT NOT NULL,
+        approval_id TEXT NOT NULL,
+        locked_at TEXT NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS external_evaluation_attempts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        candidate_id INTEGER NOT NULL REFERENCES recommendation_candidates(id) ON DELETE RESTRICT,
+        source TEXT NOT NULL CHECK (source IN ('author_requested', 'platform_auto')),
+        outcome TEXT NOT NULL CHECK (outcome IN ('passed', 'failed')),
+        work_state_at_evaluation TEXT NOT NULL DEFAULT 'serializing' CHECK (work_state_at_evaluation IN ('serializing', 'completed')),
+        failure_reason TEXT,
+        evidence_completeness TEXT NOT NULL DEFAULT 'complete' CHECK (evidence_completeness IN ('complete', 'partial')),
+        evidence_json TEXT NOT NULL DEFAULT '{}',
+        policy_id TEXT NOT NULL,
+        policy_snapshot_json TEXT NOT NULL,
+        actor_type TEXT NOT NULL,
+        actor_id TEXT NOT NULL,
+        client_id TEXT NOT NULL,
+        approval_id TEXT NOT NULL,
+        confirmed_by TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL,
+        occurred_at TEXT NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_recommendation_preflight_novel_created
+        ON recommendation_preflight_runs(novel_id, created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_recommendation_candidates_novel_created
+        ON recommendation_candidates(novel_id, created_at DESC, id DESC);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_recommendation_candidates_preflight
+        ON recommendation_candidates(preflight_run_id);
+      CREATE INDEX IF NOT EXISTS idx_external_evaluation_attempts_novel_created
+        ON external_evaluation_attempts(novel_id, occurred_at DESC, id DESC);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_external_evaluation_attempts_idempotency
+        ON external_evaluation_attempts(novel_id, idempotency_key);
+
+      CREATE TRIGGER IF NOT EXISTS trg_external_evaluation_candidate_guard
+      BEFORE INSERT ON external_evaluation_attempts
+      BEGIN
+        SELECT CASE WHEN NOT EXISTS (
+          SELECT 1 FROM recommendation_candidates candidate
+          WHERE candidate.id = NEW.candidate_id
+            AND candidate.novel_id = NEW.novel_id
+            AND candidate.status = 'locked'
+        ) THEN RAISE(ABORT, 'RECOMMENDATION_CANDIDATE_INVALID') END;
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS trg_external_evaluation_policy_guard
+      BEFORE INSERT ON external_evaluation_attempts
+      BEGIN
+        SELECT CASE WHEN (
+          SELECT COUNT(*) FROM external_evaluation_attempts attempt
+          WHERE attempt.novel_id = NEW.novel_id
+        ) >= 3 THEN RAISE(ABORT, 'RECOMMENDATION_ATTEMPTS_EXHAUSTED') END;
+
+        SELECT CASE WHEN EXISTS (
+          SELECT 1 FROM external_evaluation_attempts attempt
+          WHERE attempt.novel_id = NEW.novel_id AND attempt.outcome = 'passed'
+        ) THEN RAISE(ABORT, 'RECOMMENDATION_ALREADY_PASSED') END;
+
+        SELECT CASE WHEN (
+          SELECT LOWER(COALESCE(status, 'draft')) FROM novels WHERE id = NEW.novel_id
+        ) = 'completed' AND EXISTS (
+          SELECT 1 FROM external_evaluation_attempts attempt
+          WHERE attempt.novel_id = NEW.novel_id AND attempt.outcome = 'failed'
+        ) THEN RAISE(ABORT, 'RECOMMENDATION_COMPLETED_WORK_LOCKED') END;
+
+        SELECT CASE WHEN (
+          SELECT LOWER(COALESCE(status, 'draft')) FROM novels WHERE id = NEW.novel_id
+        ) <> 'completed' AND (
+          SELECT COUNT(*) FROM external_evaluation_attempts attempt
+          WHERE attempt.novel_id = NEW.novel_id AND attempt.outcome = 'failed'
+        ) >= 3 THEN RAISE(ABORT, 'RECOMMENDATION_SERIALIZING_WORK_LOCKED') END;
+      END;
+    `)
+  })
+
+  runMigrationStep(sqlite, '0041_agent_artifacts_approvals_and_audit', () => {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS artifacts (
+        id TEXT PRIMARY KEY,
+        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'reviewed', 'approved', 'committed', 'rejected', 'superseded')),
+        version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+        parent_artifact_id TEXT REFERENCES artifacts(id) ON DELETE SET NULL,
+        content_json TEXT NOT NULL,
+        content_hash TEXT NOT NULL,
+        context_version INTEGER NOT NULL,
+        producer_type TEXT NOT NULL,
+        producer_id TEXT NOT NULL,
+        producer_client TEXT NOT NULL,
+        model_config_id INTEGER REFERENCES model_configs(id) ON DELETE SET NULL,
+        task_id INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+        review_artifact_id TEXT REFERENCES artifacts(id) ON DELETE SET NULL,
+        committed_entity_ids_json TEXT NOT NULL DEFAULT '[]',
+        idempotency_key TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS approval_grants (
+        id TEXT PRIMARY KEY,
+        novel_id INTEGER REFERENCES novels(id) ON DELETE CASCADE,
+        tool_id TEXT NOT NULL,
+        input_hash TEXT NOT NULL,
+        actor_type TEXT NOT NULL,
+        actor_id TEXT NOT NULL,
+        client_id TEXT NOT NULL,
+        session_id TEXT,
+        status TEXT NOT NULL DEFAULT 'approved' CHECK (status IN ('approved', 'consumed', 'rejected', 'expired')),
+        expires_at TEXT NOT NULL,
+        consumed_at TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS tool_invocations (
+        id TEXT PRIMARY KEY,
+        novel_id INTEGER REFERENCES novels(id) ON DELETE SET NULL,
+        run_id TEXT NOT NULL,
+        tool_id TEXT NOT NULL,
+        tool_version TEXT NOT NULL,
+        input_hash TEXT NOT NULL,
+        redacted_input_json TEXT NOT NULL,
+        effect TEXT NOT NULL CHECK (effect IN ('read', 'draft_write', 'canonical_write', 'external_effect')),
+        approval_id TEXT,
+        actor_type TEXT NOT NULL,
+        actor_id TEXT NOT NULL,
+        client_id TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('success', 'error', 'denied')),
+        duration_ms INTEGER NOT NULL DEFAULT 0,
+        error_code TEXT,
+        output_hash TEXT,
+        created_at TEXT NOT NULL,
+        completed_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_artifacts_novel_kind_created
+        ON artifacts(novel_id, kind, created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_artifacts_parent
+        ON artifacts(parent_artifact_id, version DESC);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_artifacts_idempotency
+        ON artifacts(novel_id, kind, idempotency_key)
+        WHERE idempotency_key IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_approval_grants_lookup
+        ON approval_grants(id, tool_id, status, expires_at);
+      CREATE INDEX IF NOT EXISTS idx_tool_invocations_novel_created
+        ON tool_invocations(novel_id, created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_tool_invocations_run
+        ON tool_invocations(run_id, id);
+
+      CREATE TRIGGER IF NOT EXISTS trg_artifact_content_immutable
+      BEFORE UPDATE OF novel_id, kind, version, parent_artifact_id, content_json, content_hash, context_version,
+        producer_type, producer_id, producer_client, model_config_id, task_id, idempotency_key
+      ON artifacts
+      BEGIN
+        SELECT RAISE(ABORT, 'ARTIFACT_CONTENT_IMMUTABLE');
+      END;
+    `)
+  })
+
+  runMigrationStep(sqlite, '0042_recommendation_work_state_lock_history', () => {
+    if (!hasTable(sqlite, 'external_evaluation_attempts')) {
+      return
+    }
+
+    ensureColumn(
+      sqlite,
+      'external_evaluation_attempts',
+      'work_state_at_evaluation',
+      "TEXT NOT NULL DEFAULT 'serializing' CHECK (work_state_at_evaluation IN ('serializing', 'completed'))",
+    )
+
+    // Recovery tests can legitimately resume from a partial legacy schema. The
+    // column is safe to add immediately; the data backfill and policy trigger
+    // require the two referenced core tables to exist.
+    if (!hasTable(sqlite, 'novels') || !hasTable(sqlite, 'recommendation_candidates')) {
+      return
+    }
+
+    sqlite.exec(`
+      UPDATE external_evaluation_attempts
+      SET work_state_at_evaluation = CASE
+        WHEN EXISTS (
+          SELECT 1
+          FROM recommendation_candidates candidate
+          WHERE candidate.id = external_evaluation_attempts.candidate_id
+            AND JSON_VALID(candidate.snapshot_json)
+            AND LOWER(COALESCE(JSON_EXTRACT(candidate.snapshot_json, '$.novelStatus'), '')) = 'completed'
+        ) THEN 'completed'
+        WHEN LOWER(COALESCE((
+          SELECT status FROM novels WHERE id = external_evaluation_attempts.novel_id
+        ), 'draft')) = 'completed' THEN 'completed'
+        ELSE 'serializing'
+      END;
+
+      DROP TRIGGER IF EXISTS trg_external_evaluation_policy_guard;
+      CREATE TRIGGER trg_external_evaluation_policy_guard
+      BEFORE INSERT ON external_evaluation_attempts
+      BEGIN
+        SELECT CASE WHEN (
+          SELECT COUNT(*) FROM external_evaluation_attempts attempt
+          WHERE attempt.novel_id = NEW.novel_id
+        ) >= 3 THEN RAISE(ABORT, 'RECOMMENDATION_ATTEMPTS_EXHAUSTED') END;
+
+        SELECT CASE WHEN EXISTS (
+          SELECT 1 FROM external_evaluation_attempts attempt
+          WHERE attempt.novel_id = NEW.novel_id AND attempt.outcome = 'passed'
+        ) THEN RAISE(ABORT, 'RECOMMENDATION_ALREADY_PASSED') END;
+
+        SELECT CASE WHEN EXISTS (
+          SELECT 1 FROM external_evaluation_attempts attempt
+          WHERE attempt.novel_id = NEW.novel_id
+            AND attempt.outcome = 'failed'
+            AND (
+              attempt.work_state_at_evaluation = 'completed'
+              OR LOWER(COALESCE((SELECT status FROM novels WHERE id = NEW.novel_id), 'draft')) = 'completed'
+            )
+        ) THEN RAISE(ABORT, 'RECOMMENDATION_COMPLETED_WORK_LOCKED') END;
+
+        SELECT CASE WHEN LOWER(COALESCE((
+          SELECT status FROM novels WHERE id = NEW.novel_id
+        ), 'draft')) <> 'completed' AND (
+          SELECT COUNT(*) FROM external_evaluation_attempts attempt
+          WHERE attempt.novel_id = NEW.novel_id AND attempt.outcome = 'failed'
+        ) >= 3 THEN RAISE(ABORT, 'RECOMMENDATION_SERIALIZING_WORK_LOCKED') END;
+      END;
+    `)
   })
 }
 

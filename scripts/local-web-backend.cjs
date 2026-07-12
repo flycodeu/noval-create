@@ -1,6 +1,7 @@
 const fs = require('node:fs')
 const http = require('node:http')
 const path = require('node:path')
+const { LOCAL_WEB_BACKEND_VERSION } = require('./local-web-contract.cjs')
 const Module = require('node:module')
 const ts = require('typescript')
 const { app } = require('electron')
@@ -9,7 +10,7 @@ const workspaceRoot = path.resolve(__dirname, '..')
 const host = process.env.NOVELFORGE_WEB_BACKEND_HOST || '127.0.0.1'
 const port = Number(process.env.NOVELFORGE_WEB_BACKEND_PORT || 8787)
 const MASKED_KEY = '已设置'
-const BACKEND_VERSION = 3
+const BACKEND_VERSION = LOCAL_WEB_BACKEND_VERSION
 
 app.setName('NovelForge')
 
@@ -87,6 +88,8 @@ function createRuntime() {
   const { appendVariationMessage, buildVariationDigest, isCandidateTooSimilar } = requireProject('electron/services/variation-control.service.ts')
   const { requireId, requireObject } = requireProject('electron/utils/ipc-validate.ts')
   const { throwUserFacingError } = requireProject('electron/utils/user-facing-error.ts')
+  const { novelForgeToolRegistry } = requireProject('electron/application/novelforge-tool-registry.ts')
+  const { WEB_PREVIEW_AGENT_TOOL_SCOPES } = requireProject('src/shared/tool-contracts/index.ts')
 
   initDb()
 
@@ -252,6 +255,20 @@ function createRuntime() {
     app: {
       getDatabasePath,
     },
+    agentTools: {
+      list: (query) => novelForgeToolRegistry.list(query == null ? {} : requireObject(query, 'query')),
+      call: (request) => novelForgeToolRegistry.invoke(requireObject(request, 'request'), {
+        actor: {
+          type: 'human',
+          actorId: 'web-preview-user',
+          clientId: 'novelforge-local-web',
+          sessionId: 'local-web-preview',
+        },
+        scopes: [...WEB_PREVIEW_AGENT_TOOL_SCOPES],
+        requestId: `web-rpc-${Date.now()}`,
+        locale: 'zh-CN',
+      }),
+    },
     model: {
       list: listModels,
       create: createModel,
@@ -346,6 +363,18 @@ function createRuntime() {
     },
     structure: {
       getTree: (novelId) => storyStructureService.listStoryStructure(novelId),
+      listVolumes: (novelId) => storyStructureService.listStructureVolumes(requireId(novelId, 'novelId')),
+      listPartsPage: (volumeId, page, pageSize) => storyStructureService.listStructurePartsPage(requireId(volumeId, 'volumeId'), page, pageSize),
+      listChaptersPage: (partId, page, pageSize) => storyStructureService.listStructureChaptersPage(requireId(partId, 'partId'), page, pageSize),
+      listSegments: (chapterId) => storyStructureService.listChapterSegments(requireId(chapterId, 'chapterId')),
+      getSegment: (id) => storyStructureService.getChapterSegment(requireId(id, 'segmentId')),
+      listSegmentsPage: (chapterId, page, pageSize) => storyStructureService.listChapterSegmentsPage(requireId(chapterId, 'chapterId'), page, pageSize),
+      listCheckpoints: (novelId) => storyStructureService.listStoryCheckpoints(requireId(novelId, 'novelId')),
+      listCheckpointsPage: (filters, page, pageSize) => storyStructureService.listStoryCheckpointsPage(filters, page, pageSize),
+      listLinkedTimelineEvents: (filters) => timelineService.listLinkedTimelineEvents(filters),
+      listLinkedTimelineEventsPage: (filters, page, pageSize) => timelineService.listLinkedTimelineEventsPage(filters, page, pageSize),
+      resolvePath: (filters) => storyStructureService.resolveStructurePath(filters),
+      getLinkageSummary: (novelId) => storyStructureService.getStructureLinkageSummary(requireId(novelId, 'novelId')),
     },
     outline: {
       getArcs: (novelId) => getDb().select().from(schema.storyArcs)

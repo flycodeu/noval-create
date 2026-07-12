@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "novelforge": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "${CLAUDE_PROJECT_DIR}/scripts/run-novelforge-mcp.cjs"
+      ],
+      "env": {}
+    }
+  }
+}
+
