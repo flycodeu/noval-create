@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Empty, Spin, Tag } from 'antd'
+import { Alert, Button, Empty, Spin, Tag, message } from 'antd'
 import {
   ArrowRightOutlined,
   ClockCircleOutlined,
@@ -35,6 +35,7 @@ import {
 } from '../../../shared/novel-workspace'
 import type { ProjectBlocker } from '../../../shared/workspace-types'
 import { EMPTY_WORKFLOW_STATS, loadWorkflowStats, type WorkflowStats } from '../workflow'
+import { getErrorMessage } from '@/utils/user-facing-message'
 
 dayjs.extend(relativeTime)
 dayjs.locale('zh-cn')
@@ -91,8 +92,10 @@ export default function StudioPage({ novelId }: Props) {
   const [recentActivities, setRecentActivities] = useState<OperationLog[]>([])
   const [ignoredBlockerIds, setIgnoredBlockerIds] = useState<string[]>([])
   const [referenceExpanded, setReferenceExpanded] = useState(false)
+  const loadRequestRef = React.useRef(0)
 
   const loadConsoleData = useCallback(async () => {
+    const requestId = ++loadRequestRef.current
     const [novel, workflowStats, report, nextContextStatus, qualityDashboard, revisions, activities] = await Promise.all([
       window.electron.novel.get(novelId),
       loadWorkflowStats(novelId),
@@ -102,6 +105,7 @@ export default function StudioPage({ novelId }: Props) {
       window.electron.revision.getSnapshot(novelId).catch(() => null),
       window.electron.history.listRecent(novelId, 8).catch(() => []),
     ])
+    if (loadRequestRef.current !== requestId) return
 
     if (novel) {
       setCurrentNovel(novel)
@@ -120,11 +124,17 @@ export default function StudioPage({ novelId }: Props) {
   }, [novelId, setCurrentNovel])
 
   const refreshConsole = useCallback(async () => {
+    const requestId = loadRequestRef.current + 1
     setRefreshing(true)
     try {
       await loadConsoleData()
+    } catch (error) {
+      if (loadRequestRef.current === requestId) {
+        console.error(error)
+        message.error(getErrorMessage(error, 'common.loadFailed'))
+      }
     } finally {
-      setRefreshing(false)
+      if (loadRequestRef.current === requestId) setRefreshing(false)
     }
   }, [loadConsoleData])
 
@@ -134,16 +144,18 @@ export default function StudioPage({ novelId }: Props) {
     setRefreshing(false)
 
     void (async () => {
-      let shouldCommit = true
       try {
         await loadConsoleData()
+      } catch (error) {
+        if (active) {
+          console.error(error)
+          message.error(getErrorMessage(error, 'common.loadFailed'))
+        }
       } finally {
-        shouldCommit = active
-      }
-
-      if (shouldCommit) {
-        setLoading(false)
-        setRefreshing(false)
+        if (active) {
+          setLoading(false)
+          setRefreshing(false)
+        }
       }
     })()
 

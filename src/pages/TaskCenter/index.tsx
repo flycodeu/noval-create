@@ -250,6 +250,8 @@ function getFreshnessTags(labels: string[], visibleCount = 2) {
 export default function TaskCenter() {
   const navigate = useNavigate()
   const loadVersionRef = useRef(0)
+  const foregroundLoadRef = useRef(false)
+  const pollingLoadRef = useRef(false)
   const [pageData, setPageData] = useState<PagedResult<Task>>(EMPTY_TASK_PAGE)
   const [stats, setStats] = useState<TaskStats>(EMPTY_TASK_STATS)
   const [loading, setLoading] = useState(true)
@@ -279,6 +281,9 @@ export default function TaskCenter() {
   )
 
   const loadTasks = useCallback(async (options: { silent?: boolean; overrides?: Partial<TaskQueryInput> } = {}) => {
+    if (options.silent && (foregroundLoadRef.current || pollingLoadRef.current)) return null
+    if (options.silent) pollingLoadRef.current = true
+    else foregroundLoadRef.current = true
     const requestId = ++loadVersionRef.current
     if (!options.silent) setLoading(true)
 
@@ -295,7 +300,10 @@ export default function TaskCenter() {
       }
       return null
     } finally {
-      if (requestId === loadVersionRef.current && !options.silent) {
+      if (options.silent) {
+        pollingLoadRef.current = false
+      } else if (requestId === loadVersionRef.current) {
+        foregroundLoadRef.current = false
         setLoading(false)
       }
     }

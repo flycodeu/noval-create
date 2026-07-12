@@ -267,7 +267,7 @@ export default function ThemeVoicePage({ novelId }: Props) {
         totalWords: workflowStats.totalWords,
         revisionTaskCount: workflowStats.revisionTaskCount,
       })
-    })
+    }).catch(console.error)
     return () => {
       active = false
     }
@@ -355,7 +355,9 @@ export default function ThemeVoicePage({ novelId }: Props) {
   useRegisterWorkspaceQualityController(workspaceQualityController)
 
   const handleSave = async () => {
-    const values = normalizeFormValues(await form.validateFields())
+    const rawValues = await form.validateFields().catch(() => null)
+    if (!rawValues) return
+    const values = normalizeFormValues(rawValues)
     const contractError = getWritingContractValidationError(values.writingContractTags)
     if (contractError) {
       message.warning(contractError)

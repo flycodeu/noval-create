@@ -6,6 +6,7 @@ import AIGenerateButton from '../../../components/AIGenerateButton'
 import type { MapAutoGenerateStatus, MapGraphPayload, MapNodeSummary, MapRelation, MapRelationInput, Task, WorldMapItem } from '../../../types'
 import { useNovelStore } from '../../../stores/novel.store'
 import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
+import { parseTaskEventId, parseTaskStatusEvent } from '../../../shared/task-stream-events'
 import { getBlueprintLevelByDepth, getFactionNameOptions, getMapBlueprintDepth, getMapNodeTypeOptions, parseWorldRulesJson } from '../../../shared/genre-system'
 import { scaleMapLayerCounts } from '../../../shared/creation-tools'
 import { buildDraftMessages, normalizeStringArray, parseDraftJson } from '../shared/ai-draft'
@@ -53,7 +54,7 @@ const RELATION_TYPE_TEXT: Record<string, string> = {
 
 function parseRouteId(value: string | null): number | null {
   const parsed = Number(value)
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null
 }
 
 const RELATION_INTENSITY_TEXT: Record<string, string> = {
@@ -208,6 +209,17 @@ export default function MapExplorerPage({ novelId }: Props) {
   const [autoTaskCardExpanded, setAutoTaskCardExpanded] = useState(false)
   const routeNodeFocusRef = useRef<number | null>(null)
   const initialRefreshDoneRef = useRef(false)
+  const rootsRequestRef = useRef(0)
+  const branchRequestRef = useRef(0)
+  const statsRequestRef = useRef(0)
+  const treeRequestRef = useRef(0)
+  const relationsRequestRef = useRef(0)
+  const graphRequestRef = useRef(0)
+  const autoStatusRequestRef = useRef(0)
+  const visibleRequestRef = useRef(0)
+  const focusRequestRef = useRef(0)
+  const selectionIntentRef = useRef(0)
+  const autoActionRef = useRef(false)
 
   const worldRules = useMemo(() => parseWorldRulesJson(currentNovel?.worldRulesJson, currentNovel?.genreName), [currentNovel?.genreName, currentNovel?.worldRulesJson])
   const blueprintLevels = useMemo(() => [...worldRules.mapBlueprint.levels].sort((a, b) => a.depth - b.depth), [worldRules.mapBlueprint.levels])
@@ -268,44 +280,55 @@ export default function MapExplorerPage({ novelId }: Props) {
   const routeNodeId = useMemo(() => parseRouteId(searchParams.get('nodeId')), [searchParams])
 
   const loadRoots = useCallback(async (targetPage = rootPage, keyword = searchKeyword) => {
+    const requestId = ++rootsRequestRef.current
     const trimmedKeyword = keyword.trim()
     const list = await window.electron.map.queryNodes(trimmedKeyword
       ? { novelId, keyword: trimmedKeyword, page: targetPage, pageSize: PAGE_SIZE }
       : { novelId, parentId: null, page: targetPage, pageSize: PAGE_SIZE })
-    setRootData(list)
+    if (rootsRequestRef.current === requestId) setRootData(list)
   }, [novelId, rootPage, searchKeyword])
 
   const loadBranch = useCallback(async (parent: MapNodeSummary | null, targetPage = branchPage) => {
+    const requestId = ++branchRequestRef.current
     if (!parent) {
-      setBranchData(EMPTY_PAGE)
+      if (branchRequestRef.current === requestId) setBranchData(EMPTY_PAGE)
       return
     }
-    setBranchData(await window.electron.map.queryNodes({ novelId, parentId: parent.id, page: targetPage, pageSize: PAGE_SIZE }))
+    const list = await window.electron.map.queryNodes({ novelId, parentId: parent.id, page: targetPage, pageSize: PAGE_SIZE })
+    if (branchRequestRef.current === requestId) setBranchData(list)
   }, [branchPage, novelId])
 
   const loadStats = useCallback(async () => {
-    setStats(await window.electron.map.getStats(novelId))
+    const requestId = ++statsRequestRef.current
+    const nextStats = await window.electron.map.getStats(novelId)
+    if (statsRequestRef.current === requestId) setStats(nextStats)
   }, [novelId])
 
   const loadTree = useCallback(async () => {
+    const requestId = ++treeRequestRef.current
     const nextTree = await window.electron.map.getTree(novelId)
-    setTreeData(nextTree)
+    if (treeRequestRef.current === requestId) setTreeData(nextTree)
     return nextTree
   }, [novelId])
 
   const loadAllRelations = useCallback(async () => {
+    const requestId = ++relationsRequestRef.current
     const relations = ensureArray(await window.electron.map.getRelations(novelId))
+    if (relationsRequestRef.current !== requestId) return relations
     setAllRelations(relations)
     setSelectedRelation((current) => (current ? relations.find((item) => item.id === current.id) || null : current))
     return relations
   }, [novelId])
 
   const loadAutoStatus = useCallback(async () => {
+    const requestId = ++autoStatusRequestRef.current
     const latestTask = await window.electron.map.getLatestAutoGenerateTask(novelId)
+    if (autoStatusRequestRef.current !== requestId) return null
     if (latestTask) {
       autoTaskRef.current = latestTask
       setAutoTask(latestTask)
       const latestStatus = await window.electron.map.getAutoGenerateStatus(latestTask.id) || EMPTY_AUTO_STATUS
+      if (autoStatusRequestRef.current !== requestId) return null
       autoStatusRef.current = latestStatus
       setAutoStatus(latestStatus)
       return latestTask
@@ -325,7 +348,8 @@ export default function MapExplorerPage({ novelId }: Props) {
     return null
   }, [novelId])
 
-  const selectNode = useCallback((node: MapNodeSummary | null) => {
+  const selectNode = useCallback((node: MapNodeSummary | null, markIntent = true) => {
+    if (markIntent) selectionIntentRef.current += 1
     selectedNodeRef.current = node
     setSelectedNode(node)
     setSelectedRelation((current) => {
@@ -337,6 +361,7 @@ export default function MapExplorerPage({ novelId }: Props) {
   }, [detailForm])
 
   const loadGraph = useCallback(async () => {
+    const requestId = ++graphRequestRef.current
     setGraphLoading(true)
     try {
       const [graph, relations] = await Promise.all([
@@ -346,13 +371,14 @@ export default function MapExplorerPage({ novelId }: Props) {
         }),
         window.electron.map.getRelations(novelId),
       ])
+      if (graphRequestRef.current !== requestId) return { graph: EMPTY_GRAPH, relations: [] }
       const nextGraph = normalizeMapGraphPayload(graph)
       setGraphData(nextGraph)
       setAllRelations(relations)
       setSelectedRelation((current) => (current ? relations.find((item) => item.id === current.id) || null : current))
       return { graph: nextGraph, relations }
     } finally {
-      setGraphLoading(false)
+      if (graphRequestRef.current === requestId) setGraphLoading(false)
     }
   }, [graphFilters.includeRelationEdges, novelId])
 
@@ -387,6 +413,8 @@ export default function MapExplorerPage({ novelId }: Props) {
   }, [resetBatchForm, selectNode])
 
   const refreshVisible = useCallback(async (options: RefreshVisibleOptions = {}) => {
+    const requestId = ++visibleRequestRef.current
+    const selectionIntentAtStart = selectionIntentRef.current
     const nextParent = options.parent !== undefined ? options.parent : currentParent
     const nextRootPage = options.rootPage ?? rootPage
     const nextBranchPage = options.branchPage ?? branchPage
@@ -402,14 +430,17 @@ export default function MapExplorerPage({ novelId }: Props) {
         loadAllRelations(),
         loadAutoStatus(),
       ])
+      if (visibleRequestRef.current !== requestId) return
 
       const currentId = options.preferredId !== undefined ? options.preferredId : selectedNodeRef.current?.id
       const nextSelected = currentId ? await window.electron.map.getNode(currentId) : null
-      if (nextSelected) selectNode(nextSelected)
-      else selectNode(null)
+      if (visibleRequestRef.current !== requestId) return
+      if (options.preferredId === undefined && selectionIntentRef.current !== selectionIntentAtStart) return
+      if (nextSelected) selectNode(nextSelected, false)
+      else selectNode(null, false)
       if (workspaceMode === 'graph') await loadGraph()
     } finally {
-      setLoading(false)
+      if (visibleRequestRef.current === requestId) setLoading(false)
     }
   }, [branchPage, currentParent, loadAllRelations, loadAutoStatus, loadBranch, loadGraph, loadRoots, loadStats, loadTree, rootPage, searchKeyword, selectNode, workspaceMode])
 
@@ -431,8 +462,8 @@ export default function MapExplorerPage({ novelId }: Props) {
       ])
 
       const nextSelected = preferredId ? await window.electron.map.getNode(preferredId) : null
-      if (nextSelected) selectNode(nextSelected)
-      else if (preferredId != null && selectedNodeRef.current?.id === preferredId) selectNode(null)
+      if (nextSelected) selectNode(nextSelected, false)
+      else if (preferredId != null && selectedNodeRef.current?.id === preferredId) selectNode(null, false)
     } finally {
       autoRefreshInFlightRef.current = false
 
@@ -444,6 +475,8 @@ export default function MapExplorerPage({ novelId }: Props) {
   }, [branchPage, currentParent, loadAllRelations, loadBranch, loadGraph, loadRoots, loadStats, loadTree, rootPage, searchKeyword, selectNode, workspaceMode])
 
   const focusNodeById = useCallback(async (nodeId?: number | null) => {
+    const requestId = ++focusRequestRef.current
+    const selectionIntentAtStart = selectionIntentRef.current
     if (!nodeId) {
       setBranchPath([])
       setBranchPage(1)
@@ -454,7 +487,7 @@ export default function MapExplorerPage({ novelId }: Props) {
     }
 
     const node = await window.electron.map.getNode(nodeId) || flattenedTree.byId.get(nodeId) || null
-    if (!node) return
+    if (focusRequestRef.current !== requestId || selectionIntentRef.current !== selectionIntentAtStart || !node) return
 
     const nextPath = flattenedTree.pathById.get(nodeId) || [node]
     setBranchPath(nextPath)
@@ -466,23 +499,32 @@ export default function MapExplorerPage({ novelId }: Props) {
   useEffect(() => {
     if (initialRefreshDoneRef.current) return
     initialRefreshDoneRef.current = true
-    void refreshVisible()
+    void refreshVisible().catch((error) => {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.loadFailed'))
+    })
   }, [refreshVisible])
   useEffect(() => {
     if (!routeNodeId || routeNodeFocusRef.current === routeNodeId) return
     routeNodeFocusRef.current = routeNodeId
-    void focusNodeById(routeNodeId)
+    void focusNodeById(routeNodeId).catch((error) => {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.loadFailed'))
+    })
   }, [focusNodeById, routeNodeId])
 
   useEffect(() => {
     if (rootPage === 1 && branchPage === 1) return
-    void loadRoots(rootPage)
-    void loadBranch(currentParent, branchPage)
+    void loadRoots(rootPage).catch(console.error)
+    void loadBranch(currentParent, branchPage).catch(console.error)
   }, [branchPage, currentParent, loadBranch, loadRoots, rootPage])
 
   useEffect(() => {
     setRootPage(1)
-    void loadRoots(1, searchKeyword)
+    void loadRoots(1, searchKeyword).catch((error) => {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.loadFailed'))
+    })
   }, [loadRoots, searchKeyword])
 
   useEffect(() => {
@@ -495,7 +537,10 @@ export default function MapExplorerPage({ novelId }: Props) {
 
   useEffect(() => {
     if (workspaceMode !== 'graph') return
-    void loadGraph()
+    void loadGraph().catch((error) => {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.loadFailed'))
+    })
   }, [loadGraph, workspaceMode])
 
   useEffect(() => {
@@ -523,38 +568,37 @@ export default function MapExplorerPage({ novelId }: Props) {
         || ['paused', 'success'].includes(nextProgress.status || '')
 
       if (batchAdvanced) {
-        void refreshGeneratedContent(selectedNodeRef.current?.id || null)
+        void refreshGeneratedContent(selectedNodeRef.current?.id || null).catch(console.error)
       }
     }
 
     const reload = () => {
-      void loadAutoStatus()
-      void refreshGeneratedContent(selectedNodeRef.current?.id || null)
+      void loadAutoStatus().catch(console.error)
+      void refreshGeneratedContent(selectedNodeRef.current?.id || null).catch(console.error)
     }
 
     const unsubProgress = window.electron.on('task:progress', (data: unknown) => {
-      const payload = data as { taskId: number; progress?: MapAutoGenerateStatus }
-      if (payload?.taskId !== autoTask.id) return
-      if (payload.progress && typeof payload.progress === 'object') {
-        syncProgress(payload.progress)
+      if (parseTaskEventId(data) !== autoTask.id) return
+      const progress = (data as { progress?: unknown }).progress
+      if (progress && typeof progress === 'object') {
+        syncProgress(progress as MapAutoGenerateStatus)
         return
       }
-      void loadAutoStatus()
+      void loadAutoStatus().catch(console.error)
     })
 
     const unsubStatus = window.electron.on('task:status-change', (data: unknown) => {
-      const payload = data as { taskId: number; status?: Task['status'] }
-      if (payload?.taskId !== autoTask.id) return
-      updateAutoTaskStatus(payload.status)
-      if (['paused', 'success', 'failed', 'cancelled'].includes(payload.status || '')) {
-        void refreshGeneratedContent(selectedNodeRef.current?.id || null)
+      const event = parseTaskStatusEvent(data)
+      if (!event || event.taskId !== autoTask.id) return
+      updateAutoTaskStatus(event.status)
+      if (['paused', 'success', 'failed', 'cancelled'].includes(event.status)) {
+        void refreshGeneratedContent(selectedNodeRef.current?.id || null).catch(console.error)
       }
-      void loadAutoStatus()
+      void loadAutoStatus().catch(console.error)
     })
 
     const unsubComplete = window.electron.on('task:complete', (data: unknown) => {
-      const payload = data as { taskId: number }
-      if (payload?.taskId === autoTask.id) {
+      if (parseTaskEventId(data) === autoTask.id) {
         reload()
       }
     })
@@ -738,6 +782,8 @@ export default function MapExplorerPage({ novelId }: Props) {
   }, [handleClear, registerClearHandler])
 
   const handleStartAutoGenerate = async () => {
+    if (autoActionRef.current) return
+    autoActionRef.current = true
     setAutoLoading(true)
     try {
       const values = batchForm.getFieldsValue()
@@ -749,25 +795,32 @@ export default function MapExplorerPage({ novelId }: Props) {
     } catch (error: unknown) {
       message.error(getErrorMessage(error, 'map.autoGenerateStartFailed'))
     } finally {
+      autoActionRef.current = false
       setAutoLoading(false)
     }
   }
 
   const handleStopAutoGenerate = async () => {
-    if (!autoTask?.id) return
+    if (!autoTask?.id || autoActionRef.current) return
+    autoActionRef.current = true
     setAutoStopping(true)
     try {
       await window.electron.workflow.cancel(autoTask.id)
       await loadAutoStatus()
       setAutoTaskCardExpanded(true)
       message.info(getUserFacingMessage('map.autoGeneratePauseRequested'))
+    } catch (error: unknown) {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.executionFailed'))
     } finally {
+      autoActionRef.current = false
       setAutoStopping(false)
     }
   }
 
   const handleResumeAutoGenerate = async () => {
-    if (!autoTask?.id) return
+    if (!autoTask?.id || autoActionRef.current) return
+    autoActionRef.current = true
     setAutoLoading(true)
     try {
       await window.electron.map.resumeAutoGenerate(autoTask.id)
@@ -777,6 +830,7 @@ export default function MapExplorerPage({ novelId }: Props) {
     } catch (error: unknown) {
       message.error(getErrorMessage(error, 'map.autoGenerateResumeFailed'))
     } finally {
+      autoActionRef.current = false
       setAutoLoading(false)
     }
   }
@@ -800,7 +854,8 @@ export default function MapExplorerPage({ novelId }: Props) {
 
   const handleSaveRelation = async () => {
     try {
-      const values = await relationForm.validateFields()
+      const values = await relationForm.validateFields().catch(() => null)
+      if (!values) return
       if (!values.mapAId || !values.mapBId) {
         message.warning(getUserFacingMessage('map.relation.selectEndpoints'))
         return

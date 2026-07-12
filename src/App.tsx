@@ -5,6 +5,7 @@ import zhCN from 'antd/locale/zh_CN'
 import AppLayout from './components/Layout'
 import { useTaskStore } from './stores/task.store'
 import { useThemeStore } from './stores/theme.store'
+import { parseTaskChunkEvent, parseTaskStatusEvent } from './shared/task-stream-events'
 
 const FONT = "-apple-system, 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', sans-serif"
 const NovelList = React.lazy(() => import('./pages/NovelList'))
@@ -39,23 +40,24 @@ export default function App() {
     }
 
     const unsubChunk = window.electron.on('task:stream-chunk', (data: unknown) => {
-      const { taskId, chunk } = data as { taskId: number; chunk: string }
-      appendStreamChunk(taskId, chunk)
+      const event = parseTaskChunkEvent(data)
+      if (event) appendStreamChunk(event.taskId, event.chunk)
     })
     const unsubComplete = window.electron.on('task:complete', (data: unknown) => {
-      const { taskId, status } = data as { taskId: number; status: string }
+      const event = parseTaskStatusEvent(data)
+      if (!event || !['success', 'failed', 'cancelled'].includes(event.status)) return
       completeStream(
-        taskId,
-        status === 'success'
+        event.taskId,
+        event.status === 'success'
           ? 'completed'
-          : status === 'cancelled'
+          : event.status === 'cancelled'
             ? 'cancelled'
             : 'failed',
       )
     })
     const unsubStatus = window.electron.on('task:status-change', (data: unknown) => {
-      const { taskId, status } = data as { taskId: number; status: string }
-      if (status === 'running') addStream(taskId)
+      const event = parseTaskStatusEvent(data)
+      if (event?.status === 'running') addStream(event.taskId)
     })
     return () => { unsubChunk(); unsubComplete(); unsubStatus() }
   }, [addStream, appendStreamChunk, completeStream, hasElectronBridge])
@@ -64,12 +66,17 @@ export default function App() {
     if (!hasElectronBridge || typeof window.electron.app?.getLocalBackendStatus !== 'function') return undefined
 
     let disposed = false
+    let requestInFlight = false
     const refreshStatus = async () => {
+      if (requestInFlight) return
+      requestInFlight = true
       try {
         const status = await window.electron.app.getLocalBackendStatus?.()
         if (!disposed && status) setLocalBackendStatus(status)
       } catch {
         if (!disposed) setLocalBackendStatus(null)
+      } finally {
+        requestInFlight = false
       }
     }
 

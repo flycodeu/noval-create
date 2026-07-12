@@ -421,6 +421,8 @@ export default function WorkspaceChatAssistant({
   const [qualitySignals, setQualitySignals] = useState<string[]>([])
   const [executionMode, setExecutionMode] = useState<AiExecutionMode>('review_first')
   const contextRequestRef = useRef(0)
+  const conversationVersionRef = useRef(0)
+  const askInFlightRef = useRef(false)
   const setCurrentNovel = useNovelStore((state) => state.setCurrentNovel)
 
   const qualityKey = useMemo(
@@ -442,7 +444,7 @@ export default function WorkspaceChatAssistant({
     (activeController && !activeController.readonly)
     || (fallbackAdapter?.applySnapshot && !fallbackAdapter.readonly),
   )
-  const contextKey = `${novelId}:${workspaceKey}`
+  const contextKey = `${novelId}:${workspaceKey}:${currentChapter?.id ?? ''}`
 
   const fetchContext = useCallback(async () => {
     const snapshotPromise = (async () => {
@@ -479,12 +481,25 @@ export default function WorkspaceChatAssistant({
 
   useEffect(() => {
     contextRequestRef.current += 1
+    conversationVersionRef.current += 1
+    askInFlightRef.current = false
     setMessages([])
     setInput('')
     setSnapshot(null)
     setQualitySignals([])
     setSnapshotLoading(false)
+    setLoading(false)
+    setApplyingMessageId(null)
   }, [contextKey])
+
+  useEffect(() => {
+    if (open) return
+    contextRequestRef.current += 1
+    conversationVersionRef.current += 1
+    askInFlightRef.current = false
+    setSnapshotLoading(false)
+    setLoading(false)
+  }, [open])
 
   useEffect(() => {
     if (!open) return
@@ -493,7 +508,9 @@ export default function WorkspaceChatAssistant({
 
   const handleAsk = useCallback(async (request?: string, intent?: string) => {
     const userRequest = (request ?? input).trim()
-    if (!userRequest || loading) return
+    if (!userRequest || askInFlightRef.current) return
+    const conversationVersion = conversationVersionRef.current
+    askInFlightRef.current = true
 
     const userMessage: AssistantMessage = {
       id: createMessageId(),
@@ -509,11 +526,13 @@ export default function WorkspaceChatAssistant({
     try {
       const promptContext = await fetchContext()
         .then((context) => {
+          if (conversationVersionRef.current !== conversationVersion) return { snapshot, qualitySignals }
           setSnapshot(context.snapshot)
           setQualitySignals(context.qualitySignals)
           return context
         })
         .catch(() => ({ snapshot, qualitySignals }))
+      if (conversationVersionRef.current !== conversationVersion) return
       const prompt = buildAssistantPrompt({
         userRequest,
         workspaceKey,
@@ -533,6 +552,7 @@ export default function WorkspaceChatAssistant({
         executionMode,
         messages: [{ role: 'user', content: prompt }],
       })
+      if (conversationVersionRef.current !== conversationVersion) return
       const answer = outputs[0]?.trim() || getUserFacingMessage('workspaceChat.replyEmpty')
       let repairPreview: WorkspaceQualityRepairPreview | undefined
       const shouldPatch = shouldPreparePatch(userRequest, intent)
@@ -545,6 +565,7 @@ export default function WorkspaceChatAssistant({
           issues: [],
           extraRequirements: userRequest,
         })
+        if (conversationVersionRef.current !== conversationVersion) return
       }
       setMessages((current) => [
         ...current,
@@ -561,10 +582,14 @@ export default function WorkspaceChatAssistant({
         },
       ])
     } catch (error) {
+      if (conversationVersionRef.current !== conversationVersion) return
       console.error(error)
       message.error(error instanceof Error ? error.message : getUserFacingMessage('workspaceChat.replyFailed'))
     } finally {
-      setLoading(false)
+      if (conversationVersionRef.current === conversationVersion) {
+        askInFlightRef.current = false
+        setLoading(false)
+      }
     }
   }, [
     currentChapter,
@@ -572,7 +597,6 @@ export default function WorkspaceChatAssistant({
     executionMode,
     fetchContext,
     input,
-    loading,
     messages,
     novelId,
     adapterContext,

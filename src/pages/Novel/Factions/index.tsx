@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Form, Input, InputNumber, List, Modal, Select, Space, Spin, Switch, Tag, message } from 'antd'
 import { DeleteOutlined, PlusOutlined, ReloadOutlined, RobotOutlined, SaveOutlined, ShareAltOutlined, StopOutlined } from '@ant-design/icons'
 import AIGenerateButton from '../../../components/AIGenerateButton'
@@ -24,6 +24,7 @@ import {
 } from '../../../shared/factions'
 import { useNovelStore } from '../../../stores/novel.store'
 import { getFactionGenerationPreset } from '../../../shared/creation-tools'
+import { parseTaskEventId } from '../../../shared/task-stream-events'
 import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
 import { loadWorkflowStats } from '../workflow'
 import { buildDraftMessages, parseDraftJson } from '../shared/ai-draft'
@@ -170,6 +171,11 @@ export default function FactionsPage({ novelId }: Props) {
   const [autoTask, setAutoTask] = useState<Task | null>(null)
   const [autoStatus, setAutoStatus] = useState<FactionAutoGenerateStatus>(EMPTY_AUTO_STATUS)
   const [autoStopping, setAutoStopping] = useState(false)
+  const refreshRequestRef = useRef(0)
+  const graphRequestRef = useRef(0)
+  const autoStatusRequestRef = useRef(0)
+  const creatingRef = useRef(false)
+  const autoActionRef = useRef(false)
 
   const selectedItem = useMemo(() => items.find((item) => item.id === selectedId) || null, [items, selectedId])
   const selectedValues = Form.useWatch([], form) as FactionFormValues | undefined
@@ -186,32 +192,37 @@ export default function FactionsPage({ novelId }: Props) {
   }, [characterOptions, selectedItem])
 
   const refreshAutoStatus = useCallback(async () => {
+    const requestId = ++autoStatusRequestRef.current
     const latestTask = await window.electron.faction.getLatestAutoGenerateTask(novelId)
+    if (autoStatusRequestRef.current !== requestId) return
     setAutoTask(latestTask)
     if (!latestTask) {
       setAutoStatus(EMPTY_AUTO_STATUS)
       return
     }
     const status = await window.electron.faction.getAutoGenerateStatus(latestTask.id)
+    if (autoStatusRequestRef.current !== requestId) return
     setAutoStatus(status || EMPTY_AUTO_STATUS)
   }, [novelId])
 
   const refreshGraph = useCallback(async () => {
+    const requestId = ++graphRequestRef.current
     setGraphLoading(true)
     try {
       const nextGraph = await window.electron.faction.getGraph({
         novelId,
         ...(selectedId ? { focusFactionId: selectedId } : {}),
       })
-      setGraphData(normalizeFactionGraphPayload(nextGraph))
+      if (graphRequestRef.current === requestId) setGraphData(normalizeFactionGraphPayload(nextGraph))
     } catch (error) {
-      console.error(error)
+      if (graphRequestRef.current === requestId) console.error(error)
     } finally {
-      setGraphLoading(false)
+      if (graphRequestRef.current === requestId) setGraphLoading(false)
     }
   }, [novelId, selectedId])
 
   const refresh = useCallback(async () => {
+    const requestId = ++refreshRequestRef.current
     setLoading(true)
     try {
       const [page, nextStats, nextWorkflowStats, nextCharacters, nextMaps] = await Promise.all([
@@ -221,29 +232,37 @@ export default function FactionsPage({ novelId }: Props) {
         window.electron.character.search(novelId, '', 120),
         window.electron.map.searchNodes(novelId, '', 120),
       ])
+      if (refreshRequestRef.current !== requestId) return
       setItems(page.items)
       setStats(nextStats)
       setWorkflowStats({ characterCount: nextWorkflowStats.characterCount, mapCount: nextWorkflowStats.mapCount })
       setCharacterOptions(nextCharacters)
       setMapOptions(nextMaps)
       setSelectedId((current) => {
+        if (creatingRef.current) return null
         if (current && page.items.some((item) => item.id === current)) return current
         return page.items[0]?.id || null
       })
     } catch (error) {
+      if (refreshRequestRef.current !== requestId) return
       console.error(error)
       message.error(getErrorMessage(error, 'common.loadFailed'))
     } finally {
-      setLoading(false)
+      if (refreshRequestRef.current === requestId) setLoading(false)
     }
   }, [keyword, novelId])
 
   useEffect(() => { void refresh() }, [mutationToken, refresh])
   useEffect(() => { void refreshGraph() }, [refreshGraph])
-  useEffect(() => { void refreshAutoStatus() }, [refreshAutoStatus])
+  useEffect(() => {
+    void refreshAutoStatus().catch((error) => {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.loadFailed'))
+    })
+  }, [refreshAutoStatus])
   useEffect(() => { form.setFieldsValue(buildFormValues(selectedItem)) }, [form, selectedItem])
   useEffect(() => {
-    registerSaveHandler(selectedId ? () => { void handleSave() } : null)
+    registerSaveHandler(() => { void handleSave() })
     return () => registerSaveHandler(null)
   })
 
@@ -251,19 +270,16 @@ export default function FactionsPage({ novelId }: Props) {
     const reload = () => {
       void refresh()
       void refreshGraph()
-      void refreshAutoStatus()
+      void refreshAutoStatus().catch(console.error)
     }
     const unsubProgress = window.electron.on('task:progress', (payload: unknown) => {
-      const data = payload as { taskId?: number }
-      if (data?.taskId === autoTask?.id) reload()
+      if (parseTaskEventId(payload) === autoTask?.id) reload()
     })
     const unsubStatus = window.electron.on('task:status-change', (payload: unknown) => {
-      const data = payload as { taskId?: number }
-      if (data?.taskId === autoTask?.id) reload()
+      if (parseTaskEventId(payload) === autoTask?.id) reload()
     })
     const unsubComplete = window.electron.on('task:complete', (payload: unknown) => {
-      const data = payload as { taskId?: number }
-      if (data?.taskId === autoTask?.id) reload()
+      if (parseTaskEventId(payload) === autoTask?.id) reload()
     })
     return () => {
       unsubProgress()
@@ -273,12 +289,14 @@ export default function FactionsPage({ novelId }: Props) {
   }, [autoTask?.id, refresh, refreshAutoStatus, refreshGraph])
 
   const handleCreate = () => {
+    creatingRef.current = true
     setSelectedId(null)
     form.setFieldsValue(EMPTY_VALUES)
   }
 
   const handleSave = async () => {
-    const values = await form.validateFields()
+    const values = await form.validateFields().catch(() => null)
+    if (!values) return
     setSaving(true)
     try {
       const payload: Partial<Faction> = {
@@ -300,6 +318,7 @@ export default function FactionsPage({ novelId }: Props) {
         const id = await window.electron.faction.create(novelId, payload)
         setSelectedId(id)
       }
+      creatingRef.current = false
       notifyWorkspaceMutation()
       await Promise.all([refresh(), refreshGraph()])
       message.success(getUserFacingMessage('faction.saved'))
@@ -315,6 +334,7 @@ export default function FactionsPage({ novelId }: Props) {
     if (!selectedItem) return
     try {
       await window.electron.faction.delete(selectedItem.id)
+      creatingRef.current = false
       setSelectedId(null)
       form.setFieldsValue(EMPTY_VALUES)
       notifyWorkspaceMutation()
@@ -339,6 +359,7 @@ export default function FactionsPage({ novelId }: Props) {
             await window.electron.workflow.cancel(autoTask.id)
           }
           await window.electron.faction.clear(novelId)
+          creatingRef.current = false
           setSelectedId(null)
           form.setFieldsValue(EMPTY_VALUES)
           setGraphData(EMPTY_FACTION_GRAPH)
@@ -363,8 +384,11 @@ export default function FactionsPage({ novelId }: Props) {
   }, [handleClear, registerClearHandler])
 
   const handleStartAutoGenerate = async () => {
+    if (autoActionRef.current) return
+    autoActionRef.current = true
     try {
-      const values = await generateForm.validateFields()
+      const values = await generateForm.validateFields().catch(() => null)
+      if (!values) return
       await window.electron.faction.startAutoGenerate(novelId, values)
       setGenerateOpen(false)
       await refreshAutoStatus()
@@ -372,11 +396,14 @@ export default function FactionsPage({ novelId }: Props) {
     } catch (error) {
       console.error(error)
       message.error(getErrorMessage(error, 'faction.autoStartFailed'))
+    } finally {
+      autoActionRef.current = false
     }
   }
 
   const handleResumeAutoGenerate = async () => {
-    if (!autoTask?.id) return
+    if (!autoTask?.id || autoActionRef.current) return
+    autoActionRef.current = true
     try {
       await window.electron.faction.resumeAutoGenerate(autoTask.id)
       await refreshAutoStatus()
@@ -384,11 +411,14 @@ export default function FactionsPage({ novelId }: Props) {
     } catch (error) {
       console.error(error)
       message.error(getErrorMessage(error, 'faction.autoResumeFailed'))
+    } finally {
+      autoActionRef.current = false
     }
   }
 
   const handleStopAutoGenerate = async () => {
-    if (!autoTask?.id) return
+    if (!autoTask?.id || autoActionRef.current) return
+    autoActionRef.current = true
     setAutoStopping(true)
     try {
       await window.electron.workflow.cancel(autoTask.id)
@@ -398,6 +428,7 @@ export default function FactionsPage({ novelId }: Props) {
       console.error(error)
       message.error(getUserFacingMessage('faction.autoStopFailed'))
     } finally {
+      autoActionRef.current = false
       setAutoStopping(false)
     }
   }
@@ -457,7 +488,14 @@ export default function FactionsPage({ novelId }: Props) {
           <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>保存势力</Button>
           <Button icon={<ShareAltOutlined />} onClick={() => navigate(selectedItem ? `/novels/${novelId}/resistance?tab=factions&factionId=${selectedItem.id}` : `/novels/${novelId}/resistance?tab=factions`)}>去反派与阻力</Button>
           <Button icon={<PlusOutlined />} onClick={handleCreate}>新建势力</Button>
-          <Button icon={<ReloadOutlined />} onClick={() => { void refresh(); void refreshGraph(); void refreshAutoStatus() }}>刷新</Button>
+          <Button icon={<ReloadOutlined />} onClick={() => {
+            void refresh()
+            void refreshGraph()
+            void refreshAutoStatus().catch((error) => {
+              console.error(error)
+              message.error(getErrorMessage(error, 'common.loadFailed'))
+            })
+          }}>刷新</Button>
           <Button danger icon={<DeleteOutlined />} disabled={!selectedItem} onClick={() => void handleDelete()}>删除势力</Button>
         </Space>
       )}
@@ -499,7 +537,7 @@ export default function FactionsPage({ novelId }: Props) {
             dataSource={items}
             locale={{ emptyText: '当前没有势力记录' }}
             renderItem={(item) => (
-              <List.Item className={`faction-list-card ${selectedId === item.id ? 'faction-list-card--active' : ''}`} onClick={() => setSelectedId(item.id)}>
+              <List.Item className={`faction-list-card ${selectedId === item.id ? 'faction-list-card--active' : ''}`} onClick={() => { creatingRef.current = false; setSelectedId(item.id) }}>
                 <List.Item.Meta
                   title={<div className="faction-list-card__title"><strong>{item.name}</strong><Tag>{getFactionTypeLabel(item.type)}</Tag></div>}
                   description={<div className="faction-list-card__desc">{buildFactionListSummary(item, typeof item.leaderCharacterId === 'number' ? leaderNameMap.get(item.leaderCharacterId) : undefined)}</div>}
@@ -514,7 +552,7 @@ export default function FactionsPage({ novelId }: Props) {
             title="势力关系图谱"
             extra={<Tag color="processing">{selectedId ? '当前聚焦已收窄' : '当前显示全局网络'}</Tag>}
           >
-            {graphLoading ? <div className="faction-workspace__empty"><Spin /></div> : <FactionGraphCanvas data={graphData} selectedFactionId={selectedId} onFactionSelect={setSelectedId} />}
+            {graphLoading ? <div className="faction-workspace__empty"><Spin /></div> : <FactionGraphCanvas data={graphData} selectedFactionId={selectedId} onFactionSelect={(id) => { creatingRef.current = false; setSelectedId(id) }} />}
             {graphData.unalignedCharacters.length > 0 ? (
               <div className="faction-workspace__orphans">
                 <strong>当前无固定势力的人物</strong>

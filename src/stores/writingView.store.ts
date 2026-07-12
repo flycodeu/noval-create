@@ -69,15 +69,16 @@ function buildRunningSnapshot(
   previous: WritingGenerationSnapshot,
   input: StartGenerationInput,
 ): WritingGenerationSnapshot {
+  const canReusePrevious = previous.status === 'running' && previous.chapterId === input.chapterId
   return {
     chapterId: input.chapterId,
-    taskId: input.taskId ?? previous.taskId ?? null,
-    streamTaskId: previous.status === 'running' ? previous.streamTaskId : null,
-    stage: previous.stage && previous.status === 'running' ? previous.stage : null,
+    taskId: input.taskId ?? (canReusePrevious ? previous.taskId : null),
+    streamTaskId: canReusePrevious ? previous.streamTaskId : null,
+    stage: canReusePrevious ? previous.stage : null,
     status: 'running',
     error: null,
-    label: previous.status === 'running' ? previous.label : null,
-    detail: previous.status === 'running' ? previous.detail : null,
+    label: canReusePrevious ? previous.label : null,
+    detail: canReusePrevious ? previous.detail : null,
     startedAt: Date.now(),
     finishedAt: null,
   }

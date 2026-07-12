@@ -14,7 +14,7 @@ import { useNovelStore } from '../../../stores/novel.store'
 import { buildDraftMessages, normalizeOptionalNumber, parseDraftJson } from '../shared/ai-draft'
 import { usePlanningDraft } from '../shared/planning-draft'
 import { generateOutlineArcDraft } from '../shared/planning-ai-service'
-import { getUserFacingMessage } from '@/utils/user-facing-message'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import { WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
 import './index.css'
@@ -130,6 +130,7 @@ export default function Outline({ novelId }: Props) {
   const [arcs, setArcs] = useState<StoryArc[]>([])
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
+  const [arcSaving, setArcSaving] = useState(false)
   const [arcProgressSnapshot, setArcProgressSnapshot] = useState<StoryArcProgressSnapshot | null>(null)
   const [arcForm] = Form.useForm<ArcFormValues>()
   const [arcModalOpen, setArcModalOpen] = useState(false)
@@ -146,8 +147,11 @@ export default function Outline({ novelId }: Props) {
   const [draftWarnings, setDraftWarnings] = useState<string[]>([])
   const draftWarningsRef = React.useRef<string[]>([])
   const draftObservabilityRef = React.useRef<{ inputSummary: string; lintWarnings: string[]; rawOutputs: string[] } | null>(null)
+  const loadRequestRef = React.useRef(0)
+  const arcSaveActionRef = React.useRef(false)
 
   const loadData = useCallback(async () => {
+    const requestId = ++loadRequestRef.current
     setLoading(true)
     try {
       const [arcList, chapterList, arcProgress] = await Promise.all([
@@ -155,11 +159,17 @@ export default function Outline({ novelId }: Props) {
         window.electron.chapter.list(novelId),
         window.electron.outline.getArcProgressSnapshot(novelId),
       ])
+      if (loadRequestRef.current !== requestId) return
       setArcs(arcList.sort((a, b) => a.arcOrder - b.arcOrder))
       setChapters(chapterList)
       setArcProgressSnapshot(arcProgress)
+    } catch (error) {
+      if (loadRequestRef.current === requestId) {
+        console.error(error)
+        message.error(getUserFacingMessage('common.loadFailed'))
+      }
     } finally {
-      setLoading(false)
+      if (loadRequestRef.current === requestId) setLoading(false)
     }
   }, [novelId, setChapters])
 
@@ -273,7 +283,17 @@ export default function Outline({ novelId }: Props) {
     Modal.confirm({
       title: `删除“${arc.arcName}”？`,
       okType: 'danger',
-      onOk: async () => { await window.electron.outline.deleteArc(arc.id); await loadData() },
+      onOk: async () => {
+        try {
+          await window.electron.outline.deleteArc(arc.id)
+          await loadData()
+          notifyWorkspaceMutation()
+          message.success('故事弧已删除。')
+        } catch (error) {
+          console.error(error)
+          message.error(getErrorMessage(error, 'common.deleteFailed'))
+        }
+      },
     })
   }
 
@@ -446,29 +466,43 @@ export default function Outline({ novelId }: Props) {
     applyDraft: applyOutlineDraft,
   })
   const handleSaveArc = useCallback(async () => {
-    const values = await arcForm.validateFields()
-    const payload = {
-      arcName: values.arcName,
-      chapterStart: normalizeOptionalNumber(values.chapterStart),
-      chapterEnd: normalizeOptionalNumber(values.chapterEnd),
-      arcGoal: values.arcGoal,
-      arcSummary: values.arcSummary,
-      growthLedger: values.growthLedger,
-      costLedger: values.costLedger,
-      phaseTargetsJson: buildPhaseTargetsOverrideJson(values),
+    if (arcSaveActionRef.current) return
+    arcSaveActionRef.current = true
+    try {
+      const values = await arcForm.validateFields().catch(() => null)
+      if (!values) return
+      setArcSaving(true)
+      const payload = {
+        arcName: values.arcName,
+        chapterStart: normalizeOptionalNumber(values.chapterStart),
+        chapterEnd: normalizeOptionalNumber(values.chapterEnd),
+        arcGoal: values.arcGoal,
+        arcSummary: values.arcSummary,
+        growthLedger: values.growthLedger,
+        costLedger: values.costLedger,
+        phaseTargetsJson: buildPhaseTargetsOverrideJson(values),
+      }
+      if (editingArc) {
+        await window.electron.outline.updateArc(editingArc.id, payload)
+      } else {
+        await window.electron.outline.createArc(novelId, { ...payload, arcOrder: arcs.length + 1 })
+      }
+      await finalizeDraft(values)
+      await clearDraft()
+      setArcModalOpen(false)
+      setEditingArc(null)
+      arcForm.resetFields()
+      await loadData()
+      notifyWorkspaceMutation()
+      message.success(editingArc ? '故事弧已更新。' : '故事弧已创建。')
+    } catch (error) {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.saveFailed'))
+    } finally {
+      arcSaveActionRef.current = false
+      setArcSaving(false)
     }
-    if (editingArc) {
-      await window.electron.outline.updateArc(editingArc.id, payload)
-    } else {
-      await window.electron.outline.createArc(novelId, { ...payload, arcOrder: arcs.length + 1 })
-    }
-    await finalizeDraft(values)
-    await clearDraft()
-    setArcModalOpen(false)
-    setEditingArc(null)
-    arcForm.resetFields()
-    await loadData()
-  }, [arcForm, arcs.length, clearDraft, editingArc, finalizeDraft, loadData, novelId])
+  }, [arcForm, arcs.length, clearDraft, editingArc, finalizeDraft, loadData, novelId, notifyWorkspaceMutation])
 
   useEffect(() => {
     registerSaveHandler(arcModalOpen ? () => { void handleSaveArc() } : null)
@@ -756,7 +790,7 @@ export default function Outline({ novelId }: Props) {
         </>
       )}
 
-      <Modal title={editingArc ? '编辑故事弧' : '新建故事弧'} open={arcModalOpen} forceRender onCancel={() => { setArcModalOpen(false); arcForm.resetFields(); setEditingArc(null) }} onOk={() => void handleSaveArc()} okText="保存">
+      <Modal title={editingArc ? '编辑故事弧' : '新建故事弧'} open={arcModalOpen} forceRender onCancel={() => { if (arcSaving) return; setArcModalOpen(false); arcForm.resetFields(); setEditingArc(null) }} onOk={() => void handleSaveArc()} okText="保存" confirmLoading={arcSaving} cancelButtonProps={{ disabled: arcSaving }} maskClosable={!arcSaving}>
         <div className="novel-outline-page__modal-header">
           {arcDraftButton}
         </div>

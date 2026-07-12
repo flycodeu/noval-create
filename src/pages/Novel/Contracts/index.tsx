@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Alert, Button, Form, Input, Modal, Select, Space, Spin, Tag, message } from 'antd'
 import { SaveOutlined, EditOutlined } from '@ant-design/icons'
@@ -116,7 +116,7 @@ function buildChapterFormValues(contract?: ChapterContractAsset | null): Chapter
 
 export default function ContractsPage({ novelId }: Props) {
   const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { currentNovel } = useNovelStore()
   const [form] = Form.useForm<ChapterContractFormValues>()
   const [loading, setLoading] = useState(true)
@@ -138,12 +138,15 @@ export default function ContractsPage({ novelId }: Props) {
   const [progressTargetId, setProgressTargetId] = useState<number | null>(null)
   const [progressNote, setProgressNote] = useState('')
   const [progressSaving, setProgressSaving] = useState(false)
+  const baseRequestRef = useRef(0)
+  const chapterRequestRef = useRef(0)
   const routeChapterId = useMemo(() => {
     const parsed = Number(searchParams.get('chapterId'))
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null
   }, [searchParams])
 
   const loadBaseData = useCallback(async () => {
+    const requestId = ++baseRequestRef.current
     const [chapterRows, threadRows, characterArcRows, relationshipArcRows, commitmentRows, foreshadowRows, resistanceDashboard] = await Promise.all([
       window.electron.chapter.list(novelId),
       window.electron.thread.list(novelId),
@@ -153,6 +156,7 @@ export default function ContractsPage({ novelId }: Props) {
       window.electron.foreshadow.listLedger(novelId),
       window.electron.resistance.getDashboard(novelId),
     ])
+    if (baseRequestRef.current !== requestId) return
     setChapters(chapterRows)
     setThreads(threadRows)
     setCharacterArcs(characterArcRows)
@@ -160,20 +164,28 @@ export default function ContractsPage({ novelId }: Props) {
     setResistanceTracks(resistanceDashboard.tracks)
     setCommitments(commitmentRows.filter((item) => item.derivedStatus !== 'waived'))
     setForeshadows(foreshadowRows)
-    setActiveChapterId((current) => current ?? chapterRows.find((item) => item.id === routeChapterId)?.id ?? chapterRows[0]?.id ?? null)
+    setActiveChapterId((current) => {
+      const routeTarget = chapterRows.find((item) => item.id === routeChapterId)?.id
+      if (routeTarget) return routeTarget
+      if (current && chapterRows.some((item) => item.id === current)) return current
+      return chapterRows[0]?.id ?? null
+    })
   }, [novelId, routeChapterId])
 
   const loadChapterData = useCallback(async (chapterId: number) => {
+    const requestId = ++chapterRequestRef.current
     const [contract, scenes] = await Promise.all([
       window.electron.contract.getChapter(chapterId),
       window.electron.contract.listScenes(chapterId),
     ])
+    if (chapterRequestRef.current !== requestId) return
     setChapterContract(contract)
     setSceneContracts(scenes)
     form.setFieldsValue(buildChapterFormValues(contract))
   }, [form])
 
   const refreshAll = useCallback(async (showLoading = false) => {
+    const requestId = baseRequestRef.current + 1
     if (showLoading) {
       setLoading(true)
     } else {
@@ -182,11 +194,15 @@ export default function ContractsPage({ novelId }: Props) {
     try {
       await loadBaseData()
     } catch (error) {
-      console.error(error)
-      message.error(getErrorMessage(error, 'common.loadFailed'))
+      if (baseRequestRef.current === requestId) {
+        console.error(error)
+        message.error(getErrorMessage(error, 'common.loadFailed'))
+      }
     } finally {
-      setLoading(false)
-      setRefreshing(false)
+      if (baseRequestRef.current === requestId) {
+        setLoading(false)
+        setRefreshing(false)
+      }
     }
   }, [loadBaseData])
 
@@ -202,17 +218,29 @@ export default function ContractsPage({ novelId }: Props) {
   }, [activeChapterId, chapters, routeChapterId])
 
   useEffect(() => {
-    if (!activeChapterId) return
+    if (!activeChapterId) {
+      chapterRequestRef.current += 1
+      setChapterContract(null)
+      setSceneContracts([])
+      form.resetFields()
+      return
+    }
     void loadChapterData(activeChapterId).catch((error: unknown) => {
       console.error(error)
       message.error(getErrorMessage(error, 'common.loadFailed'))
     })
-  }, [activeChapterId, loadChapterData])
+  }, [activeChapterId, form, loadChapterData])
 
   const activeChapter = useMemo(
     () => chapters.find((item) => item.id === activeChapterId) || null,
     [activeChapterId, chapters],
   )
+  const handleChapterChange = useCallback((chapterId: number) => {
+    setActiveChapterId(chapterId)
+    const nextParams = new URLSearchParams(searchParams)
+    nextParams.set('chapterId', String(chapterId))
+    setSearchParams(nextParams, { replace: true })
+  }, [searchParams, setSearchParams])
   const watchedContractValues = Form.useWatch([], form) as Partial<ChapterContractFormValues> | undefined
   const contractValues = useMemo<Partial<ChapterContractFormValues>>(
     () => watchedContractValues ?? {},
@@ -272,7 +300,8 @@ export default function ContractsPage({ novelId }: Props) {
 
   const handleSaveChapterContract = async () => {
     if (!activeChapterId) return
-    const values = await form.validateFields()
+    const values = await form.validateFields().catch(() => null)
+    if (!values) return
     setSavingChapter(true)
     try {
       const result = await window.electron.contract.upsertChapter(activeChapterId, {
@@ -481,7 +510,7 @@ export default function ContractsPage({ novelId }: Props) {
       <WorkspacePanel title="章节选择" description="合同按章维护。写作前先把当前章的显式约束补齐。">
         <Select
           value={activeChapterId ?? undefined}
-          onChange={(value) => setActiveChapterId(value)}
+          onChange={handleChapterChange}
           className="novel-contracts-page__chapter-select"
           options={chapters.map((item) => ({
             value: item.id,

@@ -433,8 +433,10 @@ export default function PromptManager() {
   const [saving, setSaving] = useState(false)
   const [customOverrides, setCustomOverrides] = useState<Record<string, string>>({})
   const loadedOnceRef = useRef(false)
+  const loadRequestRef = useRef(0)
 
   const loadPrompts = React.useCallback(async (showLoading = false) => {
+    const requestId = ++loadRequestRef.current
     if (showLoading || !loadedOnceRef.current) {
       setLoading(true)
     } else {
@@ -443,13 +445,16 @@ export default function PromptManager() {
 
     try {
       const rows = await window.electron.prompt.list()
+      if (loadRequestRef.current !== requestId) return
       setCustomOverrides(Object.fromEntries(rows.map((row) => [row.key, normalizePromptText(row.content)])))
       loadedOnceRef.current = true
     } catch (error) {
-      message.error(getErrorMessage(error, 'prompt.loadFailed'))
+      if (loadRequestRef.current === requestId) message.error(getErrorMessage(error, 'prompt.loadFailed'))
     } finally {
-      setLoading(false)
-      setRefreshing(false)
+      if (loadRequestRef.current === requestId) {
+        setLoading(false)
+        setRefreshing(false)
+      }
     }
   }, [])
 
@@ -517,8 +522,14 @@ export default function PromptManager() {
     }
   }, [selectedPromptRow])
 
-  const handleCopy = (text: string) => {
-    navigator.clipboard.writeText(sanitizePromptText(text)).then(() => message.success(getUserFacingMessage('common.copied')))
+  const handleCopy = async (text: string) => {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable')
+      await navigator.clipboard.writeText(sanitizePromptText(text))
+      message.success(getUserFacingMessage('common.copied'))
+    } catch (error) {
+      message.error(getErrorMessage(error, 'common.executionFailed'))
+    }
   }
 
   const handleEditSave = async () => {

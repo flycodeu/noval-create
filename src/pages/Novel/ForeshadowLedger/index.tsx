@@ -193,6 +193,8 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
   const [segmentsLoading, setSegmentsLoading] = useState(false)
   const [editorOpen, setEditorOpen] = useState(false)
   const [editingEntry, setEditingEntry] = useState<ForeshadowLedgerEntry | null>(null)
+  const refreshRequestRef = React.useRef(0)
+  const segmentsRequestRef = React.useRef(0)
 
   const sourceChapterId = Form.useWatch('sourceChapterId', form)
 
@@ -257,6 +259,7 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
   }, [currentChapterNum, entries, laneFilter])
 
   const refresh = useCallback(async () => {
+    const requestId = ++refreshRequestRef.current
     setLoading(true)
     try {
       const [ledgerRows, chapterRows, volumeRows, threadRows, commitmentRows] = await Promise.all([
@@ -266,33 +269,36 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
         window.electron.thread.list(novelId),
         window.electron.endgameAsset.listCommitments(novelId),
       ])
+      if (refreshRequestRef.current !== requestId) return
       setEntries(ledgerRows)
       setChapters(chapterRows)
       setVolumes(volumeRows)
       setThreads(threadRows)
       setCommitments(commitmentRows)
     } catch (error) {
+      if (refreshRequestRef.current !== requestId) return
       console.error(error)
       message.error(getErrorMessage(error, 'common.loadFailed'))
     } finally {
-      setLoading(false)
+      if (refreshRequestRef.current === requestId) setLoading(false)
     }
   }, [novelId])
 
   const loadSegments = useCallback(async (chapterId?: number) => {
+    const requestId = ++segmentsRequestRef.current
     if (!chapterId) {
-      setSegments([])
+      if (segmentsRequestRef.current === requestId) setSegments([])
       return
     }
     setSegmentsLoading(true)
     try {
       const rows = await window.electron.structure.listSegments(chapterId)
-      setSegments(rows)
+      if (segmentsRequestRef.current === requestId) setSegments(rows)
     } catch (error) {
       console.error(error)
-      setSegments([])
+      if (segmentsRequestRef.current === requestId) setSegments([])
     } finally {
-      setSegmentsLoading(false)
+      if (segmentsRequestRef.current === requestId) setSegmentsLoading(false)
     }
   }, [])
 
@@ -320,7 +326,8 @@ export default function ForeshadowLedgerPage({ novelId }: Props) {
   }, [])
 
   const handleSave = useCallback(async () => {
-    const rawValues = await form.validateFields()
+    const rawValues = await form.validateFields().catch(() => null)
+    if (!rawValues) return
     const values = normalizeFormValues(rawValues)
     if (!values.title) {
       message.warning(getUserFacingMessage('foreshadow.titleRequired'))

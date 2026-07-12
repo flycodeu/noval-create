@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import {
-  Alert,
   Button,
   Empty,
   Form,
@@ -274,7 +273,8 @@ export default function ModelManager() {
   }
 
   const handleSave = async () => {
-    const values = await form.validateFields()
+    const values = await form.validateFields().catch(() => null)
+    if (!values) return
     const payload = buildModelSavePayload(values)
     setSaving(true)
     try {
@@ -379,7 +379,8 @@ export default function ModelManager() {
   }
 
   const handleSourceSave = async () => {
-    const values = await sourceForm.validateFields()
+    const values = await sourceForm.validateFields().catch(() => null)
+    if (!values) return
     setSourceSaving(true)
     try {
       const settings = await window.electron.sourceSearch.updateSettings(values)

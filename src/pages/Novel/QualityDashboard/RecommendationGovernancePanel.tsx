@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Form, Input, Modal, Select, Space, Spin, Tag, message } from 'antd'
 import { CheckCircleOutlined, FileProtectOutlined, LockOutlined, ReloadOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
 import type { RecommendationWorkspaceSnapshot, RecordRecommendationEvaluationInput } from '../../../shared/recommendation-governance'
@@ -40,23 +40,31 @@ export default function RecommendationGovernancePanel({ novelId }: Props) {
   const [running, setRunning] = useState<'preflight' | 'lock' | 'record' | null>(null)
   const [recordOpen, setRecordOpen] = useState(false)
   const [recordIdempotencyKey, setRecordIdempotencyKey] = useState('')
+  const loadRequestRef = useRef(0)
+  const actionInFlightRef = useRef(false)
 
   const load = useCallback(async () => {
+    const requestId = ++loadRequestRef.current
     setLoading(true)
     try {
-      setSnapshot(unwrap<RecommendationWorkspaceSnapshot>(await window.electron.agentTools.call({
+      const nextSnapshot = unwrap<RecommendationWorkspaceSnapshot>(await window.electron.agentTools.call({
         toolId: 'novelforge.recommendation.get_workspace',
         input: { novelId },
-      })))
+      }))
+      if (loadRequestRef.current === requestId) setSnapshot(nextSnapshot)
     } catch (error) {
+      if (loadRequestRef.current !== requestId) return
       console.error(error)
       message.error(error instanceof Error ? error.message : '推荐治理状态读取失败。')
     } finally {
-      setLoading(false)
+      if (loadRequestRef.current === requestId) setLoading(false)
     }
   }, [novelId])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    void load()
+    return () => { loadRequestRef.current += 1 }
+  }, [load])
 
   const matchingCandidate = useMemo(() => {
     if (!snapshot?.latestCandidate || !snapshot.latestPreflight) return null
@@ -65,6 +73,8 @@ export default function RecommendationGovernancePanel({ novelId }: Props) {
   const recordCandidate = matchingCandidate || snapshot?.latestCandidate || null
 
   const runPreflight = async () => {
+    if (actionInFlightRef.current) return
+    actionInFlightRef.current = true
     setRunning('preflight')
     try {
       unwrap(await window.electron.agentTools.call({
@@ -77,13 +87,15 @@ export default function RecommendationGovernancePanel({ novelId }: Props) {
       console.error(error)
       message.error(error instanceof Error ? error.message : '推荐预检失败。')
     } finally {
+      actionInFlightRef.current = false
       setRunning(null)
     }
   }
 
   const lockCandidate = async () => {
     const preflight = snapshot?.latestPreflight
-    if (!preflight || preflight.status !== 'ready') return
+    if (!preflight || preflight.status !== 'ready' || actionInFlightRef.current) return
+    actionInFlightRef.current = true
     const request: AgentToolCallRequest = {
       toolId: 'novelforge.recommendation.lock_candidate',
       input: {
@@ -107,33 +119,35 @@ export default function RecommendationGovernancePanel({ novelId }: Props) {
       console.error(error)
       message.error(error instanceof Error ? error.message : '候选稿锁定失败。')
     } finally {
+      actionInFlightRef.current = false
       setRunning(null)
     }
   }
 
   const recordEvaluation = async () => {
     const candidate = recordCandidate
-    if (!candidate) return
-    const values = await form.validateFields().catch(() => null)
-    if (!values) return
-    const idempotencyKey = recordIdempotencyKey || createKey('recommendation-result')
-    if (!recordIdempotencyKey) setRecordIdempotencyKey(idempotencyKey)
-    const request: AgentToolCallRequest = {
-      toolId: 'novelforge.recommendation.record_result',
-      input: {
-        novelId,
-        candidateId: candidate.id,
-        source: values.source,
-        outcome: values.outcome,
-        confirmedBy: values.confirmedBy.trim(),
-        idempotencyKey,
-        ...(values.outcome === 'failed' ? { failureReason: values.failureReason?.trim() } : {}),
-        evidenceCompleteness: values.evidenceNote?.trim() ? 'complete' : 'partial',
-        evidence: values.evidenceNote?.trim() ? { note: values.evidenceNote.trim() } : {},
-      },
-    }
-    setRunning('record')
+    if (!candidate || actionInFlightRef.current) return
+    actionInFlightRef.current = true
     try {
+      const values = await form.validateFields().catch(() => null)
+      if (!values) return
+      const idempotencyKey = recordIdempotencyKey || createKey('recommendation-result')
+      if (!recordIdempotencyKey) setRecordIdempotencyKey(idempotencyKey)
+      const request: AgentToolCallRequest = {
+        toolId: 'novelforge.recommendation.record_result',
+        input: {
+          novelId,
+          candidateId: candidate.id,
+          source: values.source,
+          outcome: values.outcome,
+          confirmedBy: values.confirmedBy.trim(),
+          idempotencyKey,
+          ...(values.outcome === 'failed' ? { failureReason: values.failureReason?.trim() } : {}),
+          evidenceCompleteness: values.evidenceNote?.trim() ? 'complete' : 'partial',
+          evidence: values.evidenceNote?.trim() ? { note: values.evidenceNote.trim() } : {},
+        },
+      }
+      setRunning('record')
       const approval = await window.electron.agentTools.approve({ request })
       if (!approval.approved || !approval.approvalId) {
         if (approval.reason && approval.reason !== '用户取消。') message.info(approval.reason)
@@ -149,6 +163,7 @@ export default function RecommendationGovernancePanel({ novelId }: Props) {
       console.error(error)
       message.error(error instanceof Error ? error.message : '外部评估结果记录失败。')
     } finally {
+      actionInFlightRef.current = false
       setRunning(null)
     }
   }
@@ -200,7 +215,7 @@ export default function RecommendationGovernancePanel({ novelId }: Props) {
         <div className="recommendation-governance__preflight-card">
           <div className="recommendation-governance__card-head">
             <div><span>INTERNAL PREFLIGHT</span><strong>内部预检 · 明确不计次</strong></div>
-            <Button type="primary" loading={running === 'preflight'} onClick={() => void runPreflight()}>运行预检</Button>
+            <Button type="primary" loading={running === 'preflight'} disabled={running !== null && running !== 'preflight'} onClick={() => void runPreflight()}>运行预检</Button>
           </div>
           {latestPreflight ? (
             <>
@@ -237,10 +252,10 @@ export default function RecommendationGovernancePanel({ novelId }: Props) {
             </div>
           ) : <p className="recommendation-governance__empty">预检通过后，人工确认精确哈希并锁定候选。锁定不会增加评估次数。</p>}
           <Space wrap>
-            <Button icon={<LockOutlined />} loading={running === 'lock'} disabled={!latestPreflight || latestPreflight.status !== 'ready' || !state.canRecordExternalEvaluation || Boolean(matchingCandidate)} onClick={() => void lockCandidate()}>
+            <Button icon={<LockOutlined />} loading={running === 'lock'} disabled={running !== null || !latestPreflight || latestPreflight.status !== 'ready' || !state.canRecordExternalEvaluation || Boolean(matchingCandidate)} onClick={() => void lockCandidate()}>
               锁定当前候选
             </Button>
-            <Button type="primary" disabled={!recordCandidate || !state.canRecordExternalEvaluation} onClick={() => {
+            <Button type="primary" disabled={running !== null || !recordCandidate || !state.canRecordExternalEvaluation} onClick={() => {
               form.resetFields()
               form.setFieldsValue({ source: 'author_requested', confirmedBy: '', evidenceNote: '' })
               setRecordIdempotencyKey((current) => current || createKey('recommendation-result'))
@@ -253,7 +268,7 @@ export default function RecommendationGovernancePanel({ novelId }: Props) {
         </div>
       </div>
 
-      <Modal title="追加记录真实外部评估" open={recordOpen} onCancel={() => setRecordOpen(false)} onOk={() => void recordEvaluation()} okText="原生确认后记录" confirmLoading={running === 'record'}>
+      <Modal title="追加记录真实外部评估" open={recordOpen} onCancel={() => { if (running !== 'record') setRecordOpen(false) }} onOk={() => void recordEvaluation()} okText="原生确认后记录" confirmLoading={running === 'record'} cancelButtonProps={{ disabled: running === 'record' }} maskClosable={running !== 'record'}>
         <Alert type="warning" showIcon style={{ marginBottom: 16 }} message="这会消耗一次真实评估额度" description="仅在作者主动评估或平台自动评估已经真实发生、结果已经人工核对后记录。内部模型审校、重试和预检不能填在这里。" />
         <Form form={form} layout="vertical">
           <Form.Item name="source" label="评估来源" rules={[{ required: true }]}><Select options={[{ value: 'author_requested', label: '作者主动发起' }, { value: 'platform_auto', label: '平台自动评估' }]} /></Form.Item>

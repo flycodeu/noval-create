@@ -1,5 +1,5 @@
 import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useLocation, useNavigate, useParams, type NavigateOptions } from 'react-router-dom'
+import { Navigate, useLocation, useNavigate, useParams, type NavigateOptions } from 'react-router-dom'
 import { Alert, Button, Drawer, Input, Modal, Spin, message } from 'antd'
 import type { MenuProps } from 'antd'
 import { getErrorMessage, getUserFacingMessage, isUserFacingMessage } from '@/utils/user-facing-message'
@@ -37,6 +37,7 @@ import {
 } from './workspace-quality-context'
 import type { RegisteredWorkspaceQualityController } from './workspace-quality-context-core'
 import type { Chapter, ChapterQualityAnalysisStatus, OperationLog, PlatformFormat, PlatformFormatResult, PlatformFormatScope } from '../../types'
+import { readBrowserStorage, writeBrowserStorage } from '../../utils/browser-storage'
 
 type ProWorkspaceKey = WorkspaceRouteKey
 interface WorkspaceStageProps {
@@ -146,8 +147,7 @@ function isEditableTarget(target: EventTarget | null): boolean {
 }
 
 function parseStoredAssistantWidth(): number {
-  if (typeof localStorage === 'undefined') return WORKSPACE_ASSISTANT_DEFAULT_WIDTH
-  const stored = Number(localStorage.getItem(WORKSPACE_ASSISTANT_WIDTH_STORAGE_KEY))
+  const stored = Number(readBrowserStorage(WORKSPACE_ASSISTANT_WIDTH_STORAGE_KEY))
   if (!Number.isFinite(stored)) return WORKSPACE_ASSISTANT_DEFAULT_WIDTH
   return stored
 }
@@ -201,6 +201,9 @@ export default function NovelRouter() {
   const escapeHandlerRef = useRef<(() => void) | null>(null)
   const contentBodyRef = useRef<HTMLDivElement | null>(null)
   const routeShellRef = useRef<HTMLDivElement | null>(null)
+  const quickSearchRequestRef = useRef(0)
+  const batchAnalysisStartingRef = useRef(false)
+  const assistantResizeCleanupRef = useRef<(() => void) | null>(null)
   const prefetchedPagesRef = useRef<Set<ProWorkspaceKey>>(new Set())
   const scrollPositionsRef = useRef<Partial<Record<ProWorkspaceKey, number>>>({})
   const [loading, setLoading] = useState(true)
@@ -217,9 +220,7 @@ export default function NovelRouter() {
   const [hasRegisteredClearHandler, setHasRegisteredClearHandler] = useState(false)
   const [qualityBoardOpen, setQualityBoardOpen] = useState(false)
   const [assistantOpen, setAssistantOpen] = useState<boolean>(() => (
-    typeof localStorage !== 'undefined'
-      ? localStorage.getItem(WORKSPACE_ASSISTANT_OPEN_STORAGE_KEY) === '1'
-      : false
+    readBrowserStorage(WORKSPACE_ASSISTANT_OPEN_STORAGE_KEY) === '1'
   ))
   const [assistantWidth, setAssistantWidth] = useState<number>(() => clampAssistantWidth(parseStoredAssistantWidth()))
   const [isSidebarDrawerOpen, setIsSidebarDrawerOpen] = useState(false)
@@ -235,14 +236,13 @@ export default function NovelRouter() {
   const [pendingPage, setPendingPage] = useState<ProWorkspaceKey | null>(null)
   const [batchAnalyzingChapters, setBatchAnalyzingChapters] = useState(false)
   const [workspaceViewMode, setWorkspaceViewMode] = useState<WorkspaceViewMode>(() => {
-    const stored = typeof localStorage !== 'undefined'
-      ? localStorage.getItem(WORKSPACE_VIEW_MODE_STORAGE_KEY)
-      : null
+    const stored = readBrowserStorage(WORKSPACE_VIEW_MODE_STORAGE_KEY)
     return stored === 'quick' || stored === 'professional' ? stored : 'quick'
   })
   const showWindowControls = isElectronRuntime()
 
-  const novelId = Number.parseInt(id || '0', 10)
+  const novelId = Number(id || 0)
+  const hasValidNovelId = Number.isSafeInteger(novelId) && novelId > 0
   const pathSegments = location.pathname.split('/').filter(Boolean)
   const pathSegment = pathSegments[2] || ''
   const legacyRouteTarget = useMemo(
@@ -262,7 +262,6 @@ export default function NovelRouter() {
     return 'guide'
   }, [pathSegment])
 
-  const [visitedPages, setVisitedPages] = useState<ProWorkspaceKey[]>(() => [currentPage])
   const currentChapter = useMemo(
     () => chapters.find((chapter) => chapter.id === currentChapterId) || null,
     [chapters, currentChapterId],
@@ -286,8 +285,7 @@ export default function NovelRouter() {
     return pendingPage === 'guide' ? 'guide:overview' : pendingPage
   }, [currentPage, pendingPage])
   const recentNavKey = useMemo(() => {
-    if (typeof localStorage === 'undefined') return null
-    const stored = localStorage.getItem(WORKSPACE_RECENT_PAGE_STORAGE_KEY)
+    const stored = readBrowserStorage(WORKSPACE_RECENT_PAGE_STORAGE_KEY)
     return stored && stored !== currentNavKey ? stored : null
   }, [currentNavKey])
   const orderedPages = useMemo<ProWorkspaceKey[]>(
@@ -348,19 +346,20 @@ export default function NovelRouter() {
     if (!pageKey) return
     if (prefetchedPagesRef.current.has(pageKey)) return
     prefetchedPagesRef.current.add(pageKey)
-    void WORKSPACE_STAGE_LOADERS[pageKey]()
+    void WORKSPACE_STAGE_LOADERS[pageKey]().catch((error) => {
+      prefetchedPagesRef.current.delete(pageKey)
+      console.error(error)
+    })
   }, [resolveWorkspacePageKey])
 
   useEffect(() => {
-    setVisitedPages([currentPage])
-    setPendingPage(null)
-    scrollPositionsRef.current = {}
-  }, [currentPage, novelId])
-
-  useEffect(() => {
-    setVisitedPages((current) => (current.includes(currentPage) ? current : [...current, currentPage]))
     setPendingPage((current) => (current === currentPage ? null : current))
   }, [currentPage])
+
+  useEffect(() => {
+    setPendingPage(null)
+    scrollPositionsRef.current = {}
+  }, [novelId])
 
   useEffect(() => {
     if (loading) return undefined
@@ -394,23 +393,23 @@ export default function NovelRouter() {
   ])
 
   const refreshWorkflowStats = useCallback(async () => {
-    if (!novelId) return
+    if (!hasValidNovelId) return
 
     try {
       setWorkflowStats(await loadWorkflowStats(novelId))
     } catch (error) {
       console.error(error)
     }
-  }, [novelId])
+  }, [hasValidNovelId, novelId])
 
   const refreshUndoable = useCallback(async () => {
-    if (!novelId) return
+    if (!hasValidNovelId) return
     try {
       setLatestUndoable(await window.electron.history.getLatestUndoable(novelId))
     } catch (error) {
       console.error(error)
     }
-  }, [novelId])
+  }, [hasValidNovelId, novelId])
 
   const handleWorkspaceExport = useCallback(async (format: string) => {
     try {
@@ -425,6 +424,7 @@ export default function NovelRouter() {
 
   const copyPlatformText = useCallback(async (text: string, label: string) => {
     try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable')
       await navigator.clipboard.writeText(text)
       message.success(getUserFacingMessage('novel.platformCopySucceeded', { label }))
     } catch (error) {
@@ -454,6 +454,7 @@ export default function NovelRouter() {
         message.success(getUserFacingMessage('novel.platformBatchGenerated', { count: result.batches.length }))
         return
       }
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable')
       await navigator.clipboard.writeText(result.content)
       const warningText = result.warnings.length > 0 ? `；${result.warnings[0]}` : ''
       message.success(getUserFacingMessage('novel.platformBookCopied', {
@@ -514,7 +515,8 @@ export default function NovelRouter() {
   }, [chapters, novelId, setChapters])
 
   const handleSequentialChapterAnalysis = useCallback(async () => {
-    if (batchAnalyzingChapters) return
+    if (batchAnalyzingChapters || batchAnalysisStartingRef.current) return
+    batchAnalysisStartingRef.current = true
     setBatchAnalyzingChapters(true)
     try {
       const taskId = await window.electron.chapterBatch.startQualityAnalysis(novelId, {
@@ -527,6 +529,7 @@ export default function NovelRouter() {
       notifyWorkspaceMutation()
     } catch (error) {
       message.error(getErrorMessage(error, 'novel.chapterQualityQueueStartFailed'))
+      batchAnalysisStartingRef.current = false
       setBatchAnalyzingChapters(false)
     }
   }, [batchAnalyzingChapters, notifyWorkspaceMutation, novelId])
@@ -534,26 +537,32 @@ export default function NovelRouter() {
   useEffect(() => {
     if (!qualityAnalysisTaskId) return undefined
     let disposed = false
+    let requestInFlight = false
     const refresh = async () => {
+      if (requestInFlight) return
+      requestInFlight = true
       try {
         const status = await window.electron.chapterBatch.getQualityAnalysisStatus(qualityAnalysisTaskId)
         if (disposed) return
         setQualityAnalysisStatus(status)
         if (!status) {
+          batchAnalysisStartingRef.current = false
           setBatchAnalyzingChapters(false)
           setQualityAnalysisTaskId(null)
           return
         }
         if (status && !['pending', 'running', 'cancel_requested'].includes(status.status)) {
+          batchAnalysisStartingRef.current = false
           setBatchAnalyzingChapters(false)
           setQualityAnalysisTaskId(null)
           notifyWorkspaceMutation()
         }
       } catch (error) {
         if (!disposed) {
-          setBatchAnalyzingChapters(false)
           console.error(error)
         }
+      } finally {
+        requestInFlight = false
       }
     }
     void refresh()
@@ -568,7 +577,6 @@ export default function NovelRouter() {
     if (!qualityAnalysisTaskId) return
     try {
       await window.electron.task.cancel(qualityAnalysisTaskId)
-      setBatchAnalyzingChapters(false)
       message.info(getUserFacingMessage('novel.chapterQualityQueueStopRequested'))
     } catch (error) {
       message.error(getErrorMessage(error, 'novel.chapterQualityQueueStopFailed'))
@@ -590,14 +598,17 @@ export default function NovelRouter() {
     setChapterJumpOpen(false)
   }, [ensureChapterListLoaded, novelId, transitionNavigate])
 
-  const performQuickSearch = useCallback(async (keyword: string) => {
+  const performQuickSearch = useCallback(async (keyword: string, requestId: number) => {
     const trimmed = keyword.trim()
     if (!trimmed) {
-      setQuickSearchResults([])
+      if (requestId === quickSearchRequestRef.current) {
+        setQuickSearchResults([])
+        setQuickSearchLoading(false)
+      }
       return
     }
 
-    setQuickSearchLoading(true)
+    if (requestId === quickSearchRequestRef.current) setQuickSearchLoading(true)
     try {
       const chapterList = await ensureChapterListLoaded()
       const [threadPage, timelineRows, characterRows, itemRows, mapRows] = await Promise.all([
@@ -665,9 +676,17 @@ export default function NovelRouter() {
         })),
       ]
 
-      setQuickSearchResults(results.slice(0, 24))
+      if (requestId === quickSearchRequestRef.current) {
+        setQuickSearchResults(results.slice(0, 24))
+      }
+    } catch (error) {
+      if (requestId === quickSearchRequestRef.current) {
+        console.error(error)
+        setQuickSearchResults([])
+        message.error(getErrorMessage(error, 'common.loadFailed'))
+      }
     } finally {
-      setQuickSearchLoading(false)
+      if (requestId === quickSearchRequestRef.current) setQuickSearchLoading(false)
     }
   }, [ensureChapterListLoaded, novelId])
 
@@ -689,30 +708,22 @@ export default function NovelRouter() {
   }, [mode, setMode])
 
   useEffect(() => {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(WORKSPACE_VIEW_MODE_STORAGE_KEY, workspaceViewMode)
-    }
+    writeBrowserStorage(WORKSPACE_VIEW_MODE_STORAGE_KEY, workspaceViewMode)
   }, [workspaceViewMode])
 
   useEffect(() => {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(WORKSPACE_ASSISTANT_OPEN_STORAGE_KEY, assistantOpen ? '1' : '0')
-    }
+    writeBrowserStorage(WORKSPACE_ASSISTANT_OPEN_STORAGE_KEY, assistantOpen ? '1' : '0')
   }, [assistantOpen])
 
   useEffect(() => {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(WORKSPACE_ASSISTANT_WIDTH_STORAGE_KEY, String(assistantWidth))
-    }
+    writeBrowserStorage(WORKSPACE_ASSISTANT_WIDTH_STORAGE_KEY, String(assistantWidth))
   }, [assistantWidth])
 
   useEffect(() => {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(WORKSPACE_RECENT_PAGE_STORAGE_KEY, currentNavKey)
-      if (currentPage === 'writing') {
-        const writingView = location.pathname.split('/').filter(Boolean)[4] || 'editor'
-        localStorage.setItem(WORKSPACE_LAST_WRITING_VIEW_STORAGE_KEY, writingView)
-      }
+    writeBrowserStorage(WORKSPACE_RECENT_PAGE_STORAGE_KEY, currentNavKey)
+    if (currentPage === 'writing') {
+      const writingView = location.pathname.split('/').filter(Boolean)[4] || 'editor'
+      writeBrowserStorage(WORKSPACE_LAST_WRITING_VIEW_STORAGE_KEY, writingView)
     }
   }, [currentNavKey, currentPage, location.pathname])
 
@@ -743,20 +754,23 @@ export default function NovelRouter() {
   }, [isCompactShell])
 
   useEffect(() => {
-    if (!currentNovel || typeof localStorage === 'undefined') return
-    if (localStorage.getItem(WORKSPACE_VIEW_MODE_STORAGE_KEY)) return
+    if (!currentNovel) return
+    if (readBrowserStorage(WORKSPACE_VIEW_MODE_STORAGE_KEY)) return
     if (getWorkspaceViewModeForNovel(currentNovel) === 'quick') {
       setWorkspaceViewMode('quick')
     }
   }, [currentNovel, setWorkspaceViewMode])
 
   useEffect(() => {
-    if (!novelId) return
+    if (!hasValidNovelId) {
+      setLoading(false)
+      return
+    }
 
     let alive = true
     setLoading(true)
 
-    window.electron.novel.get(novelId).then((novel) => {
+    void window.electron.novel.get(novelId).then((novel) => {
       if (!alive) return
 
       if (novel) {
@@ -766,13 +780,19 @@ export default function NovelRouter() {
       }
 
       setLoading(false)
+    }).catch((error: unknown) => {
+      if (!alive) return
+      console.error(error)
+      setLoading(false)
+      message.error(getErrorMessage(error, 'common.loadFailed'))
+      navigate('/novels', { replace: true })
     })
 
     return () => {
       alive = false
       resetWorkspace()
     }
-  }, [navigate, novelId, resetWorkspace, setCurrentNovel])
+  }, [hasValidNovelId, navigate, novelId, resetWorkspace, setCurrentNovel])
 
   useEffect(() => {
     void refreshWorkflowStats()
@@ -783,9 +803,13 @@ export default function NovelRouter() {
   }, [refreshUndoable])
 
   useEffect(() => {
-    if (!quickSearchOpen) return undefined
+    const requestId = ++quickSearchRequestRef.current
+    if (!quickSearchOpen) {
+      setQuickSearchLoading(false)
+      return undefined
+    }
     const timer = window.setTimeout(() => {
-      void performQuickSearch(quickSearchKeyword)
+      void performQuickSearch(quickSearchKeyword, requestId)
     }, 220)
     return () => window.clearTimeout(timer)
   }, [performQuickSearch, quickSearchKeyword, quickSearchOpen])
@@ -919,6 +943,7 @@ export default function NovelRouter() {
 
   const handleAssistantResizeStart = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
     if (isCompactShell) return
+    assistantResizeCleanupRef.current?.()
     event.preventDefault()
     event.currentTarget.setPointerCapture?.(event.pointerId)
 
@@ -931,17 +956,24 @@ export default function NovelRouter() {
     const handlePointerMove = (moveEvent: PointerEvent) => {
       setAssistantWidth(clampAssistantWidth(shellRight - moveEvent.clientX, shellWidth))
     }
-    const handlePointerUp = () => {
+    const cleanup = () => {
       document.body.classList.remove('is-resizing-workspace-assistant')
       window.removeEventListener('pointermove', handlePointerMove)
       window.removeEventListener('pointerup', handlePointerUp)
       window.removeEventListener('pointercancel', handlePointerUp)
+      if (assistantResizeCleanupRef.current === cleanup) assistantResizeCleanupRef.current = null
     }
+    const handlePointerUp = () => cleanup()
 
+    assistantResizeCleanupRef.current = cleanup
     window.addEventListener('pointermove', handlePointerMove)
     window.addEventListener('pointerup', handlePointerUp)
     window.addEventListener('pointercancel', handlePointerUp)
   }, [isCompactShell])
+
+  useEffect(() => () => {
+    assistantResizeCleanupRef.current?.()
+  }, [])
 
   const workspaceQuality = useMemo(() => ({
     controller: workspaceQualityController,
@@ -952,6 +984,7 @@ export default function NovelRouter() {
     : currentPage === 'writing'
       ? 'warning'
       : 'default'
+  const contextualChapter = currentPage === 'writing' ? currentChapter : null
   const sidebarStatusText = pendingPage && pendingPage !== currentPage
     ? `正在切换到 ${resolvePageMeta(pendingPage).label}`
     : `${workspaceSnapshot.stage.label} · 模块完成 ${workspaceSnapshot.moduleDoneCount}/${workspaceSnapshot.moduleTotalCount}`
@@ -969,6 +1002,10 @@ export default function NovelRouter() {
       onNavigate={navigateWithinWorkspace}
     />
   )
+
+  if (!hasValidNovelId) {
+    return <Navigate to="/novels" replace />
+  }
 
   if (loading || currentNovel?.id !== novelId) {
     return (
@@ -1135,16 +1172,12 @@ export default function NovelRouter() {
             aria-busy={Boolean(pendingPage && pendingPage !== currentPage)}
             onScroll={handleContentBodyScroll}
           >
-            {visitedPages.map((pageKey) => (
-              <section
-                key={pageKey}
-                className={`novel-route-shell__page-stage${pageKey === currentPage ? ' is-active' : ''}${pageKey === pendingPage ? ' is-pending' : ''}`}
-                hidden={pageKey !== currentPage}
-                aria-hidden={pageKey !== currentPage}
-              >
-                <MemoWorkspaceStage pageKey={pageKey} novelId={novelId} />
-              </section>
-            ))}
+            <section
+              key={`${novelId}:${currentPage}`}
+              className={`novel-route-shell__page-stage is-active${currentPage === pendingPage ? ' is-pending' : ''}`}
+            >
+              <MemoWorkspaceStage pageKey={currentPage} novelId={novelId} />
+            </section>
           </div>
         </div>
       </main>
@@ -1159,7 +1192,7 @@ export default function NovelRouter() {
           workspaceSummary={currentPageMeta?.summary || ''}
           novelId={novelId}
           currentNovel={currentNovel}
-          currentChapter={currentChapter}
+          currentChapter={contextualChapter}
           controller={workspaceQualityController}
           onClose={() => setAssistantOpen(false)}
           onResizeStart={handleAssistantResizeStart}
@@ -1203,7 +1236,7 @@ export default function NovelRouter() {
           workspaceSummary={currentPageMeta?.summary || ''}
           novelId={novelId}
           currentNovel={currentNovel}
-          currentChapter={currentChapter}
+          currentChapter={contextualChapter}
           controller={workspaceQualityController}
           onClose={() => setAssistantOpen(false)}
           onApplied={notifyWorkspaceMutation}
@@ -1221,7 +1254,7 @@ export default function NovelRouter() {
           workspaceSummary={currentPageMeta?.summary || ''}
           novelId={novelId}
           currentNovel={currentNovel}
-          currentChapter={currentChapter}
+          currentChapter={contextualChapter}
           controller={workspaceQualityController}
           onApplied={notifyWorkspaceMutation}
         />

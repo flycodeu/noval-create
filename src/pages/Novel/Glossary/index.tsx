@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Form, Input, List, Select, Space, Switch, Tag, message } from 'antd'
 import { DeleteOutlined, PlusOutlined, SaveOutlined } from '@ant-design/icons'
 import AIGenerateButton from '../../../components/AIGenerateButton'
@@ -82,6 +82,8 @@ export default function GlossaryPage({ novelId }: Props) {
   const [loading, setLoading] = useState(false)
   const [keyword, setKeyword] = useState('')
   const [canonicalFilter, setCanonicalFilter] = useState<'all' | 'active' | 'deprecated'>('all')
+  const refreshRequestRef = useRef(0)
+  const creatingRef = useRef(false)
 
   const selectedItem = useMemo(
     () => items.find((item) => item.id === selectedId) || null,
@@ -89,6 +91,7 @@ export default function GlossaryPage({ novelId }: Props) {
   )
 
   const refresh = useCallback(async () => {
+    const requestId = ++refreshRequestRef.current
     setLoading(true)
     try {
       const [page, nextStats, nextWorkflowStats] = await Promise.all([
@@ -96,18 +99,21 @@ export default function GlossaryPage({ novelId }: Props) {
         window.electron.glossary.getStats({ novelId }),
         loadWorkflowStats(novelId),
       ])
+      if (refreshRequestRef.current !== requestId) return
       setItems(page.items)
       setStats(nextStats)
       setWorkflowStats({ threadCount: nextWorkflowStats.threadCount, chapterCount: nextWorkflowStats.chapterCount })
       setSelectedId((current) => {
+        if (creatingRef.current) return null
         if (current && page.items.some((item) => item.id === current)) return current
         return page.items[0]?.id || null
       })
     } catch (error) {
+      if (refreshRequestRef.current !== requestId) return
       console.error(error)
       message.error(getErrorMessage(error, 'common.loadFailed'))
     } finally {
-      setLoading(false)
+      if (refreshRequestRef.current === requestId) setLoading(false)
     }
   }, [canonicalFilter, keyword, novelId])
 
@@ -120,7 +126,8 @@ export default function GlossaryPage({ novelId }: Props) {
   }, [form, selectedItem])
 
   const handleSave = async () => {
-    const values = await form.validateFields()
+    const values = await form.validateFields().catch(() => null)
+    if (!values) return
     setSaving(true)
     try {
       const relatedEntityIds = values.relatedEntityIds
@@ -144,6 +151,7 @@ export default function GlossaryPage({ novelId }: Props) {
         setSelectedId(id)
         message.success(getUserFacingMessage('glossary.created'))
       }
+      creatingRef.current = false
       notifyWorkspaceMutation()
       await refresh()
     } catch (error) {
@@ -158,6 +166,7 @@ export default function GlossaryPage({ novelId }: Props) {
     if (!selectedItem) return
     try {
       await window.electron.glossary.delete(selectedItem.id)
+      creatingRef.current = false
       message.success(getUserFacingMessage('glossary.deleted'))
       setSelectedId(null)
       form.setFieldsValue(EMPTY_VALUES)
@@ -170,6 +179,7 @@ export default function GlossaryPage({ novelId }: Props) {
   }
 
   const handleCreate = () => {
+    creatingRef.current = true
     setSelectedId(null)
     form.setFieldsValue(EMPTY_VALUES)
   }
@@ -277,7 +287,7 @@ export default function GlossaryPage({ novelId }: Props) {
               renderItem={(item) => (
                 <List.Item
                   className="novel-resource-workspace__list-item"
-                  onClick={() => setSelectedId(item.id)}
+                  onClick={() => { creatingRef.current = false; setSelectedId(item.id) }}
                   style={selectedId === item.id ? {
                     background: 'rgba(24, 144, 255, 0.08)',
                   } : undefined}

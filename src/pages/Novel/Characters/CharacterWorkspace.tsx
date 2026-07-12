@@ -333,6 +333,10 @@ export default function CharacterWorkspace({ novelId }: Props) {
   const [protagonistOpen, setProtagonistOpen] = useState(false)
   const [relationModalOpen, setRelationModalOpen] = useState(false)
   const routeFocusRef = useRef<number | null>(null)
+  const selectedIdRef = useRef<number | null>(null)
+  const creatingRef = useRef(false)
+  const pageRequestRef = useRef(0)
+  const detailRequestRef = useRef(0)
   const routeCharacterId = useMemo(() => parseRouteId(searchParams.get('characterId')), [searchParams])
   const [editingRelation, setEditingRelation] = useState<CharacterRelation | null>(null)
   const [relationSaving, setRelationSaving] = useState(false)
@@ -401,7 +405,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
     return [...counts.entries()].sort((left, right) => right[1] - left[1])
   }, [graphData.relations])
 
-  const buildQuery = useCallback((targetPage = page): CharacterQueryInput => ({
+  const buildQuery = useCallback((targetPage: number): CharacterQueryInput => ({
     novelId,
     page: targetPage,
     pageSize: PAGE_SIZE,
@@ -410,7 +414,7 @@ export default function CharacterWorkspace({ novelId }: Props) {
     ...(entityTypeFilter !== 'all' ? { entityType: entityTypeFilter } : {}),
     ...(speciesFilter !== 'all' ? { species: speciesFilter } : {}),
     ...(keyword.trim() ? { keyword: keyword.trim() } : {}),
-  }), [entityTypeFilter, keyword, novelId, page, recordStatusFilter, roleFilter, speciesFilter])
+  }), [entityTypeFilter, keyword, novelId, recordStatusFilter, roleFilter, speciesFilter])
 
   const searchItems = useCallback(async (value = '') => {
     const rows = await window.electron.item.search(novelId, value, 'instance', 24)
@@ -432,23 +436,29 @@ export default function CharacterWorkspace({ novelId }: Props) {
   }, [detailContext.relatedCharacters, novelId, pageData.items, selectedCharacter?.id])
 
   const loadCharacterDetail = useCallback(async (characterId: number) => {
-    const [character, context] = await Promise.all([
+    const requestId = ++detailRequestRef.current
+    selectedIdRef.current = characterId
+    const [character, context, baseItems] = await Promise.all([
       window.electron.character.get(characterId),
       window.electron.character.getDetailContext(characterId),
+      window.electron.item.search(novelId, '', 'instance', 24),
     ])
+    if (detailRequestRef.current !== requestId) return
     if (!character) {
+      selectedIdRef.current = null
       setSelectedId(null)
       setSelectedCharacter(null)
       setDetailContext(EMPTY_DETAIL)
       form.resetFields()
       return
     }
+    creatingRef.current = false
     setSelectedId(character.id)
     setSelectedCharacter(character)
     setDetailContext(context)
     form.setFieldsValue(buildFormValues(character, context))
-    await hydrateItemOptions(context)
-  }, [form, hydrateItemOptions])
+    setItemOptions(mergeById(baseItems, context.relatedItems))
+  }, [form, novelId])
 
   const loadGraph = useCallback(async () => {
     setGraphLoading(true)
@@ -467,7 +477,13 @@ export default function CharacterWorkspace({ novelId }: Props) {
     }
   }, [graphRelationFilter, graphScope, novelId, recordStatusFilter, roleFilter, selectedId])
 
-  const loadPage = useCallback(async (preferredId?: number | null, targetPage = page) => {
+  const loadPage = useCallback(async (
+    preferredId: number | null | undefined,
+    targetPage: number,
+    options: { preserveCreating?: boolean } = {},
+  ) => {
+    const requestId = ++pageRequestRef.current
+    const detailRequestAtStart = detailRequestRef.current
     setLoading(true)
     try {
       const query = buildQuery(targetPage)
@@ -476,16 +492,29 @@ export default function CharacterWorkspace({ novelId }: Props) {
         window.electron.character.getStats(query),
         window.electron.character.getFilterOptions(novelId),
       ])
+      if (pageRequestRef.current !== requestId) return
       setPageData(list)
       setStats(summary)
       setFilterOptions(nextFilters)
       setCharacters(list.items)
 
-      const nextId = preferredId ?? (list.items.some((item) => item.id === selectedId) ? selectedId : list.items[0]?.id ?? null)
-      if (nextId) {
+      if (typeof preferredId !== 'number' && detailRequestRef.current !== detailRequestAtStart) return
+      if (typeof preferredId !== 'number' && options.preserveCreating && creatingRef.current) return
+
+      const currentSelectedId = selectedIdRef.current
+      const nextId = typeof preferredId === 'number'
+        ? preferredId
+        : list.items.some((item) => item.id === currentSelectedId)
+          ? currentSelectedId
+          : list.items[0]?.id ?? null
+      if (nextId !== null) {
+        creatingRef.current = false
         setCreating(false)
         await loadCharacterDetail(nextId)
       } else {
+        detailRequestRef.current += 1
+        selectedIdRef.current = null
+        creatingRef.current = false
         setSelectedId(null)
         setSelectedCharacter(null)
         setDetailContext(EMPTY_DETAIL)
@@ -494,18 +523,28 @@ export default function CharacterWorkspace({ novelId }: Props) {
         await hydrateItemOptions(undefined)
       }
     } finally {
-      setLoading(false)
+      if (pageRequestRef.current === requestId) setLoading(false)
     }
-  }, [buildQuery, form, hydrateItemOptions, loadCharacterDetail, novelId, page, selectedId, setCharacters])
+  }, [buildQuery, form, hydrateItemOptions, loadCharacterDetail, novelId, setCharacters])
 
-  useEffect(() => { void loadPage(selectedId, page) }, [loadPage, page, selectedId])
+  useEffect(() => { selectedIdRef.current = selectedId }, [selectedId])
+  useEffect(() => { creatingRef.current = creating }, [creating])
+  useEffect(() => {
+    void loadPage(undefined, page, { preserveCreating: true }).catch((error) => {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.loadFailed'))
+    })
+  }, [loadPage, page])
   useEffect(() => { setPage(1) }, [entityTypeFilter, keyword, recordStatusFilter, roleFilter, speciesFilter])
   useEffect(() => { void loadGraph() }, [loadGraph])
   useEffect(() => {
     if (!routeCharacterId || routeFocusRef.current === routeCharacterId) return
     routeFocusRef.current = routeCharacterId
     setPage(1)
-    void loadPage(routeCharacterId, 1)
+    void loadPage(routeCharacterId, 1).catch((error) => {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.loadFailed'))
+    })
   }, [loadPage, routeCharacterId])
 
   useEffect(() => {
@@ -527,6 +566,9 @@ export default function CharacterWorkspace({ novelId }: Props) {
   }, [batchForm, batchPreset, factionOptions])
 
   const handleNew = () => {
+    detailRequestRef.current += 1
+    selectedIdRef.current = null
+    creatingRef.current = true
     setCreating(true)
     setSelectedId(null)
     setSelectedCharacter(null)
@@ -589,7 +631,8 @@ export default function CharacterWorkspace({ novelId }: Props) {
   }, [detailContext.relatedItems])
 
   const handleSave = async () => {
-    const values = await form.validateFields()
+    const values = await form.validateFields().catch(() => null)
+    if (!values) return
     setSaving(true)
     try {
       if (selectedCharacter?.id) {
@@ -852,7 +895,8 @@ export default function CharacterWorkspace({ novelId }: Props) {
 
   const handleSaveRelation = async () => {
     if (!selectedCharacter?.id) return
-    const values = await relationForm.validateFields()
+    const values = await relationForm.validateFields().catch(() => null)
+    if (!values) return
     setRelationSaving(true)
     try {
       await window.electron.character.upsertRelation({

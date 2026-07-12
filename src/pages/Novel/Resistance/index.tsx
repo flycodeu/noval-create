@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Alert, Button, Empty, Input, Modal, Select, Space, Spin, Tag, message } from 'antd'
 import { ApartmentOutlined, EditOutlined, PlusOutlined, ReloadOutlined, SaveOutlined, TeamOutlined } from '@ant-design/icons'
@@ -148,21 +148,27 @@ export default function ResistancePage({ novelId }: Props) {
     protagonistImpact: '',
     status: 'logged',
   })
+  const refreshRequestRef = useRef(0)
 
   const refresh = useCallback(async (showLoading = false) => {
+    const requestId = ++refreshRequestRef.current
     if (showLoading) {
       setLoading(true)
     } else {
       setRefreshing(true)
     }
     try {
-      setDashboard(await window.electron.resistance.getDashboard(novelId))
+      const nextDashboard = await window.electron.resistance.getDashboard(novelId)
+      if (refreshRequestRef.current === requestId) setDashboard(nextDashboard)
     } catch (error) {
+      if (refreshRequestRef.current !== requestId) return
       console.error(error)
       message.error(getErrorMessage(error, 'common.loadFailed'))
     } finally {
-      setLoading(false)
-      setRefreshing(false)
+      if (refreshRequestRef.current === requestId) {
+        setLoading(false)
+        setRefreshing(false)
+      }
     }
   }, [novelId])
 
@@ -196,19 +202,19 @@ export default function ResistancePage({ novelId }: Props) {
     const characterId = Number(searchParams.get('characterId') || '')
     if (Number.isFinite(characterId) && characters.some((item) => item.id === characterId)) {
       setSelectedCharacterId(characterId)
-    } else if (!selectedCharacterId) {
+    } else if (!selectedCharacterId || !characters.some((item) => item.id === selectedCharacterId)) {
       setSelectedCharacterId(characters[0]?.id || null)
     }
     const factionId = Number(searchParams.get('factionId') || '')
     if (Number.isFinite(factionId) && factions.some((item) => item.id === factionId)) {
       setSelectedFactionId(factionId)
-    } else if (!selectedFactionId) {
+    } else if (!selectedFactionId || !factions.some((item) => item.id === selectedFactionId)) {
       setSelectedFactionId(factions[0]?.id || null)
     }
     const trackId = Number(searchParams.get('trackId') || '')
     if (Number.isFinite(trackId) && trackList.some((item) => item.id === trackId)) {
       setSelectedTrackId(trackId)
-    } else if (!selectedTrackId) {
+    } else if (!selectedTrackId || !trackList.some((item) => item.id === selectedTrackId)) {
       const firstTrack = nextTab === 'institution'
         ? institutionTracks[0]
         : nextTab === 'environment'

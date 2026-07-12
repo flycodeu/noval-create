@@ -234,7 +234,7 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
     let active = true
     void loadWorkflowStats(novelId).then((workflowStats) => {
       if (active) setStats(workflowStats)
-    })
+    }).catch(console.error)
     return () => {
       active = false
     }
@@ -270,7 +270,8 @@ export default function GuidedWorkspaceStep({ novelId, stepKey }: Props) {
   }
 
   const handleSaveBasics = async () => {
-    const values = await form.validateFields()
+    const values = await form.validateFields().catch(() => null)
+    if (!values) return
     setSavingBasics(true)
 
     try {

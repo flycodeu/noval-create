@@ -90,7 +90,6 @@ export default function BatchWorkbench({ novelId }: Props) {
   const [previewLoading, setPreviewLoading] = useState(false)
   const [rollbackLoading, setRollbackLoading] = useState(false)
   const [data, setData] = useState<BatchWorkbenchData | null>(null)
-  const [selectedSnapshotId, setSelectedSnapshotId] = useState<number | undefined>(undefined)
   const [inspectionCategory, setInspectionCategory] = useState<BatchInspectionCategory>('continuity')
   const [inspectionStatus, setInspectionStatus] = useState<BatchInspectionStatus>('warning')
   const [inspectionChapterNum, setInspectionChapterNum] = useState<number | undefined>(undefined)
@@ -98,22 +97,25 @@ export default function BatchWorkbench({ novelId }: Props) {
   const [rollbackMode, setRollbackMode] = useState<BatchRollbackMode>('chapter_rollback')
   const [rollbackPreview, setRollbackPreview] = useState<Awaited<ReturnType<typeof window.electron.batchWorkbench.previewRollback>> | null>(null)
   const [lockDraft, setLockDraft] = useState<GlobalLockLibrary | null>(null)
+  const loadRequestRef = React.useRef(0)
 
-  const loadData = useCallback(async (snapshotId = selectedSnapshotId) => {
+  const loadData = useCallback(async (snapshotId?: number) => {
+    const requestId = ++loadRequestRef.current
     setLoading(true)
     try {
       const result = await window.electron.batchWorkbench.getData(novelId, snapshotId)
+      if (loadRequestRef.current !== requestId) return
       setData(result)
-      setSelectedSnapshotId(result.activeSnapshot?.id)
       setRollbackPreview(null)
       setLockDraft(result.globalLockLibrary)
     } catch (error) {
+      if (loadRequestRef.current !== requestId) return
       console.error(error)
       message.error(getErrorMessage(error, 'common.loadFailed'))
     } finally {
-      setLoading(false)
+      if (loadRequestRef.current === requestId) setLoading(false)
     }
-  }, [novelId, selectedSnapshotId])
+  }, [novelId])
 
   useEffect(() => {
     void loadData()

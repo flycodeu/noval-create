@@ -224,7 +224,10 @@ export default function GuidePage({ novelId }: Props) {
   }, [novelId])
 
   useEffect(() => {
-    void Promise.all([refreshWorkflowContext(), refreshDiagnostics()])
+    void Promise.all([refreshWorkflowContext(), refreshDiagnostics()]).catch((error) => {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.loadFailed'))
+    })
   }, [refreshDiagnostics, refreshWorkflowContext])
 
   const syncWorldRulesCore = useCallback(async () => {

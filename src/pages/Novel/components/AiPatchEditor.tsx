@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Alert, Button, Input, Modal, Space, message } from 'antd'
 import { MessageOutlined } from '@ant-design/icons'
 import type { AiPatchResult, AiPatchTarget } from '../../../types'
@@ -29,45 +29,56 @@ export default function AiPatchEditor({
   const [loading, setLoading] = useState(false)
   const [applying, setApplying] = useState(false)
   const [result, setResult] = useState<AiPatchResult | null>(null)
+  const operationRequestRef = useRef(0)
 
   useEffect(() => {
+    operationRequestRef.current += 1
     setOpen(false)
     setInstruction('')
     setResult(null)
+    setLoading(false)
+    setApplying(false)
   }, [target?.type, target?.id, target?.sectionKey])
 
   const suggestPatch = async () => {
     if (!target || !instruction.trim()) return
+    const requestId = ++operationRequestRef.current
     setLoading(true)
     try {
       const next = await window.electron.aiPatch.suggest({ target, instruction: instruction.trim() })
+      if (operationRequestRef.current !== requestId) return
       setResult(next)
       if (next.changedFields.length === 0) {
         message.warning(getUserFacingMessage('aiPatch.noApplicableChanges'))
       }
     } catch (error) {
+      if (operationRequestRef.current !== requestId) return
       console.error(error)
       message.error(getErrorMessage(error, 'common.loadFailed'))
     } finally {
-      setLoading(false)
+      if (operationRequestRef.current === requestId) setLoading(false)
     }
   }
 
   const applyPatch = async () => {
     if (!target || !result || result.changedFields.length === 0) return
+    const requestId = ++operationRequestRef.current
     setApplying(true)
     try {
       const applied = await window.electron.aiPatch.apply(result.target || target, result.patch)
+      if (operationRequestRef.current !== requestId) return
       await onApplied?.(applied, result)
+      if (operationRequestRef.current !== requestId) return
       setResult(null)
       setInstruction('')
       setOpen(false)
       message.success(getUserFacingMessage('aiPatch.applied'))
     } catch (error) {
+      if (operationRequestRef.current !== requestId) return
       console.error(error)
       message.error(getErrorMessage(error, 'common.saveFailed'))
     } finally {
-      setApplying(false)
+      if (operationRequestRef.current === requestId) setApplying(false)
     }
   }
 
@@ -86,7 +97,14 @@ export default function AiPatchEditor({
         open={open}
         width={760}
         footer={null}
-        onCancel={() => setOpen(false)}
+        maskClosable={!applying}
+        closable={!applying}
+        onCancel={() => {
+          if (applying) return
+          operationRequestRef.current += 1
+          setLoading(false)
+          setOpen(false)
+        }}
       >
         <div className={`novel-ai-patch-editor${compact ? ' novel-ai-patch-editor--compact' : ''}`}>
           <div className="novel-ai-patch-editor__head">

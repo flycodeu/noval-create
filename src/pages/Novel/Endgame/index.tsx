@@ -253,7 +253,9 @@ export default function EndgamePage({ novelId }: Props) {
   useRegisterWorkspaceQualityController(workspaceQualityController)
 
   const handleSave = async () => {
-    const values = normalizeFormValues(await form.validateFields())
+    const rawValues = await form.validateFields().catch(() => null)
+    if (!rawValues) return
+    const values = normalizeFormValues(rawValues)
     setSaving(true)
 
     try {

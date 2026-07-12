@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Alert, Button, Form, Input, Select, Space, Spin, Switch, Tag, message } from 'antd'
 import { SaveOutlined, BarsOutlined, LinkOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
@@ -122,8 +122,10 @@ export default function VolumeDesignPage({ novelId }: Props) {
   const [createTasksOnAudit, setCreateTasksOnAudit] = useState(true)
   const [lastAuditResult, setLastAuditResult] = useState<VolumeAuditResult | null>(null)
   const [lastSyncResult, setLastSyncResult] = useState<VolumeConstraintSyncResult | null>(null)
+  const loadRequestRef = useRef(0)
 
   const loadData = useCallback(async (showLoading = false) => {
+    const requestId = ++loadRequestRef.current
     if (showLoading) {
       setLoading(true)
     } else {
@@ -136,17 +138,23 @@ export default function VolumeDesignPage({ novelId }: Props) {
         window.electron.endgameAsset.listCommitments(novelId),
         window.electron.resistance.getDashboard(novelId),
       ])
+      if (loadRequestRef.current !== requestId) return
       setVolumes(volumeRows)
       setDesigns(designRows)
       setCommitments(commitmentRows.filter((item) => item.derivedStatus !== 'waived'))
       setResistanceTracks(resistanceDashboard.tracks)
-      setActiveVolumeId((current) => current ?? volumeRows[0]?.id ?? null)
+      setActiveVolumeId((current) => current && volumeRows.some((item) => item.id === current)
+        ? current
+        : volumeRows[0]?.id ?? null)
     } catch (error) {
+      if (loadRequestRef.current !== requestId) return
       console.error(error)
       message.error(getUserFacingMessage('volumeDesign.loadFailed'))
     } finally {
-      setLoading(false)
-      setRefreshing(false)
+      if (loadRequestRef.current === requestId) {
+        setLoading(false)
+        setRefreshing(false)
+      }
     }
   }, [novelId])
 
@@ -209,7 +217,8 @@ export default function VolumeDesignPage({ novelId }: Props) {
 
   const handleSave = async () => {
     if (!activeVolumeId) return
-    const values = await form.validateFields()
+    const values = await form.validateFields().catch(() => null)
+    if (!values) return
     setSaving(true)
     try {
       await window.electron.volumeDesign.upsert(activeVolumeId, {

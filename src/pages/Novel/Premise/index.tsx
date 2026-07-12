@@ -179,7 +179,7 @@ export default function PremisePage({ novelId }: Props) {
     let active = true
     void loadWorkflowStats(novelId).then((workflowStats) => {
       if (active) setStats(workflowStats)
-    })
+    }).catch(console.error)
     return () => {
       active = false
     }
@@ -364,7 +364,8 @@ export default function PremisePage({ novelId }: Props) {
   useRegisterWorkspaceQualityController(workspaceQualityController)
 
   const handleSave = async () => {
-    const values = await form.validateFields()
+    const values = await form.validateFields().catch(() => null)
+    if (!values) return
     setSaving(true)
 
     try {

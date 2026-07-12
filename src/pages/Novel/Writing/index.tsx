@@ -63,6 +63,7 @@ import { useNovelStore } from '../../../stores/novel.store'
 import { useTaskStore } from '../../../stores/task.store'
 import { useWritingViewStore, type WritingGenerationSnapshot, type WritingGenerationStage } from '../../../stores/writingView.store'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
+import { createChapterSaveCoordinator } from './chapter-save-coordinator'
 import './index.css'
 
 interface Props { novelId: number }
@@ -572,9 +573,15 @@ export default function Writing({ novelId }: Props) {
     completeGeneration,
   } = useWritingViewStore()
   const editorRef = useRef<HTMLDivElement>(null)
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const saveCoordinatorRef = useRef(createChapterSaveCoordinator())
   const currentChapterIdRef = useRef<number | null>(null)
+  const chapterIdsRef = useRef(new Set<number>())
+  const chapterListRequestRef = useRef(0)
+  const chapterSelectionRequestRef = useRef(0)
+  const chapterDetailRequestRef = useRef(0)
+  const versionHistoryRequestRef = useRef(0)
   const routeChapterFocusRef = useRef<number | null>(null)
+  const routeChapterRequestRef = useRef(0)
   const loadedOnceRef = useRef(false)
   const initializedRef = useRef(false)
   const undoStackRef = useRef<string[]>([])
@@ -583,6 +590,7 @@ export default function Writing({ novelId }: Props) {
   const lastHistoryAtRef = useRef(0)
   const generationBaselineRef = useRef('')
   const generationPreflightRef = useRef<{ ready: boolean; messages: string[] } | null>(null)
+  const generationStartingRef = useRef(false)
 
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -655,14 +663,14 @@ export default function Writing({ novelId }: Props) {
   }, [foreshadowSnapshot])
 
   useEffect(() => {
-    void WRITING_ROUTE_LOADERS[activeWritingRoute]()
+    void WRITING_ROUTE_LOADERS[activeWritingRoute]().catch(console.error)
 
     const preloadTargets = (Object.keys(WRITING_ROUTE_LOADERS) as WritingRouteKey[])
       .filter((routeKey) => routeKey !== activeWritingRoute)
 
     const timer = window.setTimeout(() => {
       preloadTargets.forEach((routeKey) => {
-        void WRITING_ROUTE_LOADERS[routeKey]()
+        void WRITING_ROUTE_LOADERS[routeKey]().catch(console.error)
       })
     }, 120)
 
@@ -670,6 +678,7 @@ export default function Writing({ novelId }: Props) {
   }, [activeWritingRoute])
 
   useEffect(() => { currentChapterIdRef.current = currentChapterId }, [currentChapterId])
+  useEffect(() => { chapterIdsRef.current = new Set(chapters.map((chapter) => chapter.id)) }, [chapters])
 
   useEffect(() => {
     if (!publishCheck) return
@@ -716,16 +725,21 @@ export default function Writing({ novelId }: Props) {
     redoStackRef.current = []
   }, [])
 
-  const refreshVersionHistory = useCallback(async (chapterId: number) => {
+  const refreshVersionHistory = useCallback(async (
+    chapterId: number,
+    isCurrent: () => boolean = () => true,
+  ) => {
+    const requestId = ++versionHistoryRequestRef.current
     setVersionHistoryLoading(true)
     try {
       const versions = await window.electron.chapter.listVersions(chapterId)
+      if (versionHistoryRequestRef.current !== requestId || !isCurrent()) return
       setChapterVersions(versions)
       setSelectedVersionId((current) => current && versions.some((item) => item.id === current)
         ? current
         : versions[0]?.id || null)
     } finally {
-      setVersionHistoryLoading(false)
+      if (versionHistoryRequestRef.current === requestId && isCurrent()) setVersionHistoryLoading(false)
     }
   }, [])
 
@@ -760,16 +774,20 @@ export default function Writing({ novelId }: Props) {
     }
   }, [novelId])
 
-  const refreshForeshadowSnapshot = useCallback(async (chapter?: Chapter | null) => {
+  const refreshForeshadowSnapshot = useCallback(async (
+    chapter?: Chapter | null,
+    isCurrent: () => boolean = () => true,
+  ) => {
     if (!chapter) {
-      setForeshadowSnapshot(null)
+      if (isCurrent()) setForeshadowSnapshot(null)
       return
     }
     try {
-      setForeshadowSnapshot(await window.electron.thread.getForeshadowSnapshot(novelId, chapter.chapterNum))
+      const snapshot = await window.electron.thread.getForeshadowSnapshot(novelId, chapter.chapterNum)
+      if (isCurrent()) setForeshadowSnapshot(snapshot)
     } catch (error) {
       console.error('Failed to load foreshadow snapshot', error)
-      setForeshadowSnapshot(null)
+      if (isCurrent()) setForeshadowSnapshot(null)
     }
   }, [novelId])
 
@@ -782,10 +800,15 @@ export default function Writing({ novelId }: Props) {
     }
   }, [novelId])
 
-  const refreshChapterLinks = useCallback(async (chapter?: Chapter | null) => {
+  const refreshChapterLinks = useCallback(async (
+    chapter?: Chapter | null,
+    isCurrent: () => boolean = () => true,
+  ) => {
     if (!chapter) {
-      setTimelineEvents([])
-      setStoryItems([])
+      if (isCurrent()) {
+        setTimelineEvents([])
+        setStoryItems([])
+      }
       return
     }
 
@@ -800,6 +823,7 @@ export default function Writing({ novelId }: Props) {
     const linkedItemIds = [...new Set(eventPage.items.flatMap((event) => parseNumberArray(event.linkedItemIdsJson)))]
     const itemRows = await Promise.all(linkedItemIds.map((id) => window.electron.item.get(id)))
 
+    if (!isCurrent()) return
     setTimelineEvents(eventPage.items)
     setStoryItems(itemRows.filter((item): item is StoryItem => Boolean(item)))
   }, [novelId])
@@ -808,50 +832,65 @@ export default function Writing({ novelId }: Props) {
     setContextStatus(await window.electron.novel.getContextStatus(novelId))
   }, [novelId])
 
-  const refreshChapterContextPreview = useCallback(async (chapter?: Chapter | null) => {
+  const refreshChapterContextPreview = useCallback(async (
+    chapter?: Chapter | null,
+    isCurrent: () => boolean = () => true,
+  ) => {
     if (!chapter) {
-      setChapterContextPreview(null)
+      if (isCurrent()) setChapterContextPreview(null)
       return
     }
     try {
-      setChapterContextPreview(await window.electron.chapter.getContextPreview(chapter.id, {
+      const preview = await window.electron.chapter.getContextPreview(chapter.id, {
         executionMode: effectiveAiExecutionMode,
         preserveConstraintLabels,
-      }))
+      })
+      if (isCurrent()) setChapterContextPreview(preview)
     } catch (error) {
       console.error('Failed to load chapter context preview', error)
-      setChapterContextPreview(null)
+      if (isCurrent()) setChapterContextPreview(null)
     }
   }, [effectiveAiExecutionMode, preserveConstraintLabels])
 
-  const refreshPublishCheck = useCallback(async (chapterId: number) => {
+  const refreshPublishCheck = useCallback(async (
+    chapterId: number,
+    isCurrent: () => boolean = () => true,
+  ) => {
     const nextCheck = await window.electron.chapter.runPublishCheck(chapterId)
+    if (!isCurrent()) return
     setPublishCheck(nextCheck)
     setCurrentChapter((current) => current && current.id === chapterId
       ? { ...current, contractAuditJson: JSON.stringify(nextCheck.contractAudit) }
       : current)
   }, [])
 
-  const refreshLatestPipelineTask = useCallback(async (chapterId?: number) => {
+  const refreshLatestPipelineTask = useCallback(async (
+    chapterId?: number,
+    isCurrent: () => boolean = () => true,
+  ) => {
     if (!chapterId) {
-      setLatestPipelineTask(null)
+      if (isCurrent()) setLatestPipelineTask(null)
       return
     }
     try {
-      setLatestPipelineTask(await window.electron.task.getLatestChapterPipeline(chapterId))
+      const task = await window.electron.task.getLatestChapterPipeline(chapterId)
+      if (isCurrent()) setLatestPipelineTask(task)
     } catch {
-      setLatestPipelineTask(null)
+      if (isCurrent()) setLatestPipelineTask(null)
     }
   }, [])
 
   const refreshChapter = useCallback(async (chapterId: number) => {
+    const requestId = ++chapterDetailRequestRef.current
+    const isCurrent = () => chapterDetailRequestRef.current === requestId
+      && currentChapterIdRef.current === chapterId
     clearChapterArtifacts()
     setLivePipelineSnapshot(null)
     const [full, segments] = await Promise.all([
       window.electron.chapter.get(chapterId),
       window.electron.structure.listSegments(chapterId),
     ])
-    if (!full) return
+    if (!full || !isCurrent()) return
     setChapterSegments(segments)
     setCurrentChapter(full)
     setContent(full.content || '')
@@ -859,31 +898,56 @@ export default function Writing({ novelId }: Props) {
     resetEditorHistory(full.content || '')
     updateChapter(chapterId, full)
     writePlainEditorText(editorRef.current, full.content)
-    if (isHistoryRoute) {
-      await refreshVersionHistory(chapterId)
-    }
     await Promise.all([
-      refreshPublishCheck(chapterId),
+      refreshPublishCheck(chapterId, isCurrent),
       refreshContextStatus(),
-      refreshChapterLinks(full),
-      refreshForeshadowSnapshot(full),
+      refreshChapterLinks(full, isCurrent),
+      refreshForeshadowSnapshot(full, isCurrent),
       refreshForeshadowLedger(),
-      refreshChapterContextPreview(full),
-      refreshLatestPipelineTask(chapterId),
+      refreshLatestPipelineTask(chapterId, isCurrent),
     ])
-  }, [clearChapterArtifacts, isHistoryRoute, refreshChapterContextPreview, refreshChapterLinks, refreshContextStatus, refreshForeshadowLedger, refreshForeshadowSnapshot, refreshLatestPipelineTask, refreshPublishCheck, refreshVersionHistory, resetEditorHistory, updateChapter])
+  }, [clearChapterArtifacts, refreshChapterLinks, refreshContextStatus, refreshForeshadowLedger, refreshForeshadowSnapshot, refreshLatestPipelineTask, refreshPublishCheck, resetEditorHistory, updateChapter])
 
-  const loadChapters = useCallback(async (preferredChapterId?: number) => {
+  const loadChapters = useCallback(async (
+    preferredChapterId?: number,
+    options: { selectChapter?: boolean } = {},
+  ) => {
+    const selectChapter = options.selectChapter !== false
+    const listRequestId = ++chapterListRequestRef.current
+    const selectionRequestId = selectChapter ? ++chapterSelectionRequestRef.current : null
     const list = await window.electron.chapter.list(novelId)
-    setChapters(list)
+    if (chapterListRequestRef.current === listRequestId) setChapters(list)
+    if (!selectChapter || chapterSelectionRequestRef.current !== selectionRequestId) return
     if (list.length === 0) {
+      currentChapterIdRef.current = null
+      chapterDetailRequestRef.current += 1
       resetEditorHistory('')
       setCurrentChapter(null); setCurrentChapterId(null); setContent(''); setWordCount(0); setPublishCheck(null); setLatestPipelineTask(null); setLivePipelineSnapshot(null); setChapterSegments([]); setTimelineEvents([]); setStoryItems([]); setForeshadowSnapshot(null); await refreshContextStatus(); return
     }
     const target = list.find((chapter) => chapter.id === (preferredChapterId ?? currentChapterIdRef.current)) || list[0]
+    currentChapterIdRef.current = target.id
     setCurrentChapterId(target.id)
     await refreshChapter(target.id)
   }, [novelId, refreshChapter, refreshContextStatus, resetEditorHistory, setChapters, setCurrentChapterId])
+
+  const refreshBackgroundChapter = useCallback(async (chapterId: number) => {
+    await loadChapters(undefined, { selectChapter: false })
+    if (currentChapterIdRef.current === chapterId) await refreshChapter(chapterId)
+  }, [loadChapters, refreshChapter])
+
+  const handleSelectChapter = useCallback(async (chapterId: number) => {
+    chapterSelectionRequestRef.current += 1
+    currentChapterIdRef.current = chapterId
+    setCurrentChapterId(chapterId)
+    setAiResult(null)
+    try {
+      await refreshChapter(chapterId)
+    } catch (error) {
+      if (currentChapterIdRef.current !== chapterId) return
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.loadFailed'))
+    }
+  }, [refreshChapter, setCurrentChapterId])
 
   useEffect(() => {
     if (initializedRef.current) return
@@ -904,6 +968,11 @@ export default function Writing({ novelId }: Props) {
           refreshForeshadowLedger(),
         ])
         loadedOnceRef.current = true
+      } catch (error) {
+        if (alive) {
+          console.error(error)
+          message.error(getErrorMessage(error, 'common.loadFailed'))
+        }
       } finally {
         if (alive) {
           setLoading(false)
@@ -916,20 +985,30 @@ export default function Writing({ novelId }: Props) {
 
   useEffect(() => {
     if (!routeChapterId || routeChapterFocusRef.current === routeChapterId) return
+    const requestId = ++routeChapterRequestRef.current
     routeChapterFocusRef.current = routeChapterId
     if (loadedOnceRef.current) {
       setRefreshing(true)
     } else {
       setLoading(true)
     }
-    void loadChapters(routeChapterId).finally(() => setRefreshing(false))
+    void loadChapters(routeChapterId).catch((error) => {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.loadFailed'))
+    }).finally(() => {
+      if (routeChapterRequestRef.current === requestId) {
+        setLoading(false)
+        setRefreshing(false)
+      }
+    })
   }, [loadChapters, routeChapterId])
 
   useEffect(() => {
     const unsubscribe = window.electron.on('chapter:generation-progress', (data: unknown) => {
       const payload = data as ChapterGenerationProgressEvent
-      if (!payload?.chapterId) return
-      if (payload.pipeline) setLivePipelineSnapshot(payload.pipeline)
+      if (!Number.isSafeInteger(payload?.chapterId) || !chapterIdsRef.current.has(payload.chapterId)) return
+      if (!['running', 'success', 'failed', 'cancelled'].includes(payload.status)) return
+      if (payload.pipeline && currentChapterIdRef.current === payload.chapterId) setLivePipelineSnapshot(payload.pipeline)
       if (payload.taskId) {
         updateGenerationTask({ chapterId: payload.chapterId, taskId: payload.taskId })
       }
@@ -947,12 +1026,10 @@ export default function Writing({ novelId }: Props) {
         if (payload.streamTaskId) clearStream(payload.streamTaskId)
         void (async () => {
           await Promise.all([
-            loadChapters(payload.chapterId),
+            refreshBackgroundChapter(payload.chapterId),
             refreshMeta(),
             refreshQualityDashboard(),
-            refreshLatestPipelineTask(payload.chapterId),
           ])
-          await refreshChapter(payload.chapterId)
           const latestChapter = await window.electron.chapter.get(payload.chapterId)
           const latestContent = normalizeEditorText(latestChapter?.content || '')
           const hasVisibleContentChange = latestContent !== generationBaselineRef.current
@@ -967,7 +1044,18 @@ export default function Writing({ novelId }: Props) {
               : '章节流水线已完成，但正文未产生新增内容。请优先检查合同、审校意见与回写草案。',
           })
           message.success(getUserFacingMessage('writing.pipelineCompleted'))
-        })()
+        })().catch((error) => {
+          console.error('Failed to refresh completed chapter generation', error)
+          completeGeneration({
+            taskId: payload.taskId,
+            chapterId: payload.chapterId,
+            status: 'success',
+            stage: 'completed',
+            label: payload.label || '章节流水线已完成',
+            detail: getUserFacingMessage('writing.pipelineCompleted'),
+          })
+          message.success(getUserFacingMessage('writing.pipelineCompleted'))
+        })
         return
       }
 
@@ -975,12 +1063,12 @@ export default function Writing({ novelId }: Props) {
         if (payload.streamTaskId) clearStream(payload.streamTaskId)
         void (async () => {
           await Promise.all([
-            loadChapters(payload.chapterId),
+            refreshBackgroundChapter(payload.chapterId),
             refreshQualityDashboard(),
-            refreshLatestPipelineTask(payload.chapterId),
           ])
-          await refreshChapter(payload.chapterId)
-        })()
+        })().catch((error) => {
+          console.error('Failed to refresh failed chapter generation', error)
+        })
         completeGeneration({
           taskId: payload.taskId,
           chapterId: payload.chapterId,
@@ -1002,37 +1090,42 @@ export default function Writing({ novelId }: Props) {
       }
     })
     return unsubscribe
-  }, [clearStream, completeGeneration, loadChapters, refreshChapter, refreshLatestPipelineTask, refreshMeta, refreshQualityDashboard, updateGenerationStage, updateGenerationTask])
+  }, [clearStream, completeGeneration, refreshBackgroundChapter, refreshMeta, refreshQualityDashboard, updateGenerationStage, updateGenerationTask])
 
   useEffect(() => {
     if (!isHistoryRoute || !currentChapter) return
-    void refreshVersionHistory(currentChapter.id)
+    const chapterId = currentChapter.id
+    const isCurrent = () => currentChapterIdRef.current === chapterId && isHistoryRoute
+    void refreshVersionHistory(chapterId, isCurrent).catch((error) => {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.loadFailed'))
+    })
   }, [currentChapter, isHistoryRoute, refreshVersionHistory])
 
   useEffect(() => {
-    if (!currentChapter) {
-      setChapterVersions([])
-      setSelectedVersionId(null)
-      return
-    }
-    void refreshVersionHistory(currentChapter.id)
-  }, [currentChapter, refreshVersionHistory])
+    if (isHistoryRoute && currentChapter) return
+    versionHistoryRequestRef.current += 1
+    setVersionHistoryLoading(false)
+    setChapterVersions([])
+    setSelectedVersionId(null)
+  }, [currentChapter, isHistoryRoute])
 
   useEffect(() => {
     if (!currentChapter) return
-    void refreshChapterContextPreview(currentChapter)
+    const chapterId = currentChapter.id
+    const isCurrent = () => currentChapterIdRef.current === chapterId
+    void refreshChapterContextPreview(currentChapter, isCurrent)
   }, [currentChapter, effectiveAiExecutionMode, refreshChapterContextPreview])
 
   useEffect(() => {
-    if (!activeGeneration.taskId || !activeGeneration.chapterId) return
+    if (activeGeneration.status !== 'running' || !activeGeneration.taskId || !activeGeneration.chapterId) return
     const stream = streams[activeGeneration.taskId]
     if (!stream) return
     if (stream.status === 'completed') {
       const chapterId = activeGeneration.chapterId
       clearStream(stream.taskId)
       void (async () => {
-        await Promise.all([loadChapters(chapterId), refreshMeta(), refreshQualityDashboard()])
-        if (chapterId) await refreshChapter(chapterId)
+        await Promise.all([refreshBackgroundChapter(chapterId), refreshMeta(), refreshQualityDashboard()])
         const latestChapter = await window.electron.chapter.get(chapterId)
         const latestContent = normalizeEditorText(latestChapter?.content || '')
         const hasVisibleContentChange = latestContent !== generationBaselineRef.current
@@ -1047,19 +1140,30 @@ export default function Writing({ novelId }: Props) {
             : '章节流水线已完成，但正文未产生新增内容。请优先检查场景计划与审校建议。',
         })
         message.success(getUserFacingMessage('writing.pipelineCompleted'))
-      })()
+      })().catch((error) => {
+        console.error('Failed to refresh completed chapter stream', error)
+        completeGeneration({
+          taskId: stream.taskId,
+          chapterId,
+          status: 'success',
+          stage: 'completed',
+          label: '章节流水线已完成',
+          detail: getUserFacingMessage('writing.pipelineCompleted'),
+        })
+        message.success(getUserFacingMessage('writing.pipelineCompleted'))
+      })
     }
     if (stream.status === 'failed') {
       const chapterId = activeGeneration.chapterId
       clearStream(stream.taskId)
       void (async () => {
         await Promise.all([
-          loadChapters(chapterId),
+          refreshBackgroundChapter(chapterId),
           refreshQualityDashboard(),
-          refreshLatestPipelineTask(chapterId),
         ])
-        await refreshChapter(chapterId)
-      })()
+      })().catch((error) => {
+        console.error('Failed to refresh failed chapter stream', error)
+      })
       completeGeneration({
         taskId: stream.taskId,
         chapterId,
@@ -1075,12 +1179,10 @@ export default function Writing({ novelId }: Props) {
       const chapterId = activeGeneration.chapterId
       clearStream(stream.taskId)
       void (async () => {
-        await Promise.all([
-          loadChapters(chapterId),
-          refreshLatestPipelineTask(chapterId),
-        ])
-        await refreshChapter(chapterId)
-      })()
+        await refreshBackgroundChapter(chapterId)
+      })().catch((error) => {
+        console.error('Failed to refresh cancelled chapter stream', error)
+      })
       completeGeneration({
         taskId: stream.taskId,
         chapterId,
@@ -1091,14 +1193,9 @@ export default function Writing({ novelId }: Props) {
       })
       message.info(getUserFacingMessage('writing.generateCancelled'))
     }
-  }, [activeGeneration, clearStream, completeGeneration, loadChapters, refreshChapter, refreshLatestPipelineTask, refreshMeta, refreshQualityDashboard, streams])
+  }, [activeGeneration, clearStream, completeGeneration, refreshBackgroundChapter, refreshMeta, refreshQualityDashboard, streams])
 
-  useEffect(() => () => {
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    clearChapterArtifacts()
-  }, [clearChapterArtifacts])
-
-  const saveNow = useCallback(async (
+  const persistChapter = useCallback(async (
     chapterId: number,
     text: string,
     versionSource: 'manual-save' | 'ai-rewrite' = 'manual-save',
@@ -1117,16 +1214,32 @@ export default function Writing({ novelId }: Props) {
     updateChapter(chapterId, { content: text, wordCount: nextWordCount })
   }, [refreshContextStatus, refreshPublishCheck, updateChapter])
 
+  const saveNow = useCallback((
+    chapterId: number,
+    text: string,
+    versionSource: 'manual-save' | 'ai-rewrite' = 'manual-save',
+  ) => saveCoordinatorRef.current.runNow(
+    chapterId,
+    () => persistChapter(chapterId, text, versionSource),
+  ), [persistChapter])
+
   const queueSave = useCallback((
     chapterId: number,
     text: string,
     versionSource: 'manual-save' | 'ai-rewrite' = 'manual-save',
   ) => {
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    saveTimerRef.current = setTimeout(() => {
-      void saveNow(chapterId, text, versionSource).catch(console.error)
-    }, 1500)
-  }, [saveNow])
+    saveCoordinatorRef.current.schedule(
+      chapterId,
+      () => persistChapter(chapterId, text, versionSource),
+    )
+  }, [persistChapter])
+
+  useEffect(() => () => {
+    void saveCoordinatorRef.current.flushAll().catch((error) => {
+      console.error('Failed to flush pending chapter saves', error)
+    })
+    clearChapterArtifacts()
+  }, [clearChapterArtifacts])
 
   const handleContentChange = (event: React.FormEvent<HTMLDivElement>) => {
     if ((currentChapter?.segmentCount || 0) > 1) return
@@ -1209,7 +1322,6 @@ export default function Writing({ novelId }: Props) {
     registerSaveHandler(() => {
       if (!currentChapter || (currentChapter.segmentCount || 0) > 1) return
       const latestText = normalizeEditorText(editorRef.current?.innerText || content)
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
       void saveNow(currentChapter.id, latestText).then(() => {
         message.success(getUserFacingMessage('writing.saved'))
       }).catch((error) => {
@@ -1263,6 +1375,7 @@ export default function Writing({ novelId }: Props) {
 
   const handleGenerateContent = useCallback(async () => {
     if (!currentChapter) return message.warning(getUserFacingMessage('writing.selectChapterFirst'))
+    if (generationStartingRef.current || activeGeneration.status === 'running') return
     const preflight = generationPreflightRef.current
     if (preflight && !preflight.ready) {
       Modal.warning({
@@ -1278,6 +1391,7 @@ export default function Writing({ novelId }: Props) {
       })
       return
     }
+    generationStartingRef.current = true
     generationBaselineRef.current = normalizeEditorText(currentChapter.content || content)
     startGeneration({ chapterId: currentChapter.id })
     updateGenerationStage({
@@ -1303,8 +1417,11 @@ export default function Writing({ novelId }: Props) {
         error: errorMessage,
       })
       message.error(errorMessage)
+    } finally {
+      generationStartingRef.current = false
     }
   }, [
+    activeGeneration.status,
     completeGeneration,
     content,
     currentChapter,
@@ -1340,6 +1457,8 @@ export default function Writing({ novelId }: Props) {
 
   const handleResumePartialContent = useCallback(async () => {
     if (!currentChapter || !latestPipelineTask?.id || !hasResumablePartialContent) return
+    if (generationStartingRef.current || activeGeneration.status === 'running') return
+    generationStartingRef.current = true
     generationBaselineRef.current = normalizeEditorText(resumablePartialContent)
     startGeneration({ chapterId: currentChapter.id, taskId: latestPipelineTask.id })
     updateGenerationStage({
@@ -1364,8 +1483,10 @@ export default function Writing({ novelId }: Props) {
         error: errorMessage,
       })
       message.error(errorMessage)
+    } finally {
+      generationStartingRef.current = false
     }
-  }, [completeGeneration, currentChapter, hasResumablePartialContent, latestPipelineTask?.id, resumablePartialContent, startGeneration, updateGenerationStage, updateGenerationTask])
+  }, [activeGeneration.status, completeGeneration, currentChapter, hasResumablePartialContent, latestPipelineTask?.id, resumablePartialContent, startGeneration, updateGenerationStage, updateGenerationTask])
 
   const handleRestartGeneration = useCallback(async () => {
     await handleGenerateContent()
@@ -1513,10 +1634,6 @@ export default function Writing({ novelId }: Props) {
     const nextWordCount = countWords(normalized)
     setApplyingOptimizedChapter(true)
     try {
-      if (saveTimerRef.current) {
-        clearTimeout(saveTimerRef.current)
-        saveTimerRef.current = null
-      }
       await saveNow(currentChapter.id, normalized, 'ai-rewrite')
       setContent(normalized)
       setWordCount(nextWordCount)
@@ -1668,7 +1785,12 @@ export default function Writing({ novelId }: Props) {
       content: '删除后章节内容无法恢复。',
       okType: 'danger',
       okText: '删除',
-      onOk: async () => { await window.electron.chapter.delete(chapterId); await Promise.all([loadChapters(), refreshMeta(), refreshContextStatus()]) },
+      onOk: async () => {
+        saveCoordinatorRef.current.cancelScheduled(chapterId)
+        await saveCoordinatorRef.current.waitForChapter(chapterId)
+        await window.electron.chapter.delete(chapterId)
+        await Promise.all([loadChapters(), refreshMeta(), refreshContextStatus()])
+      },
     })
   }
 
@@ -2796,7 +2918,7 @@ export default function Writing({ novelId }: Props) {
                               <div
                                 key={chapter.id}
                                 className={`chapter-console-page__chapter-card ${currentChapterId === chapter.id ? 'is-active' : ''}`}
-                                onClick={() => void refreshChapter(chapter.id).then(() => { setCurrentChapterId(chapter.id); setAiResult(null) })}
+                                onClick={() => void handleSelectChapter(chapter.id)}
                                 onMouseEnter={() => setHoverChapterId(chapter.id)}
                                 onMouseLeave={() => setHoverChapterId(null)}
                               >

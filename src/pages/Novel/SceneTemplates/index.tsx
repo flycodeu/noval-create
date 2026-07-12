@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Form, Input, List, Select, Space, Switch, Tag, message } from 'antd'
 import { DeleteOutlined, PlusOutlined, SaveOutlined } from '@ant-design/icons'
 import AIGenerateButton from '../../../components/AIGenerateButton'
@@ -74,6 +74,8 @@ export default function SceneTemplatesPage({ novelId }: Props) {
   const [scope, setScope] = useState<'all' | 'builtin' | 'custom'>('all')
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(false)
+  const refreshRequestRef = useRef(0)
+  const creatingRef = useRef(false)
 
   const selectedItem = useMemo(
     () => items.find((item) => item.id === selectedId) || null,
@@ -94,6 +96,7 @@ export default function SceneTemplatesPage({ novelId }: Props) {
   }), [formValues, selectedItem])
 
   const refresh = useCallback(async () => {
+    const requestId = ++refreshRequestRef.current
     setLoading(true)
     try {
       const [page, nextStats, nextWorkflowStats] = await Promise.all([
@@ -108,18 +111,21 @@ export default function SceneTemplatesPage({ novelId }: Props) {
         window.electron.sceneTemplate.getStats({ novelId, genreId: currentNovel?.genreId }),
         loadWorkflowStats(novelId),
       ])
+      if (refreshRequestRef.current !== requestId) return
       setItems(page.items)
       setStats(nextStats)
       setWorkflowStats({ outlineCount: nextWorkflowStats.outlineCount, chapterCount: nextWorkflowStats.chapterCount })
       setSelectedId((current) => {
+        if (creatingRef.current) return null
         if (current && page.items.some((item) => item.id === current)) return current
         return page.items[0]?.id || null
       })
     } catch (error) {
+      if (refreshRequestRef.current !== requestId) return
       console.error(error)
       message.error(getErrorMessage(error, 'common.loadFailed'))
     } finally {
-      setLoading(false)
+      if (refreshRequestRef.current === requestId) setLoading(false)
     }
   }, [currentNovel?.genreId, keyword, novelId, scope])
 
@@ -132,6 +138,7 @@ export default function SceneTemplatesPage({ novelId }: Props) {
   }, [form, selectedItem])
 
   const handleCreate = () => {
+    creatingRef.current = true
     setSelectedId(null)
     form.setFieldsValue(EMPTY_VALUES)
   }
@@ -141,7 +148,8 @@ export default function SceneTemplatesPage({ novelId }: Props) {
       message.warning(getUserFacingMessage('sceneTemplate.readonlyBuiltin'))
       return
     }
-    const values = await form.validateFields()
+    const values = await form.validateFields().catch(() => null)
+    if (!values) return
     setSaving(true)
     try {
       const payload: Partial<SceneTemplate> = {
@@ -163,6 +171,7 @@ export default function SceneTemplatesPage({ novelId }: Props) {
         setSelectedId(id)
         message.success(getUserFacingMessage('sceneTemplate.created'))
       }
+      creatingRef.current = false
       notifyWorkspaceMutation()
       await refresh()
     } catch (error) {
@@ -177,6 +186,7 @@ export default function SceneTemplatesPage({ novelId }: Props) {
     if (!selectedItem || selectedIsBuiltin) return
     try {
       await window.electron.sceneTemplate.delete(selectedItem.id)
+      creatingRef.current = false
       message.success(getUserFacingMessage('sceneTemplate.deleted'))
       setSelectedId(null)
       form.setFieldsValue(EMPTY_VALUES)
@@ -251,7 +261,7 @@ export default function SceneTemplatesPage({ novelId }: Props) {
               renderItem={(item) => (
                 <List.Item
                   className={`novel-resource-workspace__list-item${selectedId === item.id ? ' novel-resource-workspace__list-item--selected' : ''}`}
-                  onClick={() => setSelectedId(item.id)}
+                  onClick={() => { creatingRef.current = false; setSelectedId(item.id) }}
                 >
                   <List.Item.Meta
                     title={(

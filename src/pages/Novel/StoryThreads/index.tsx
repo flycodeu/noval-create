@@ -267,7 +267,7 @@ function ForeshadowColumn({
 }
 
 export default function StoryThreadsPage({ novelId }: Props) {
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
   const { mutationToken, notifyWorkspaceMutation, registerClearHandler, registerEscapeHandler, registerSaveHandler } = useNovelWorkspaceActions()
   const { currentNovel } = useNovelStore()
@@ -297,6 +297,10 @@ export default function StoryThreadsPage({ novelId }: Props) {
   const [page, setPage] = useState(1)
   const [viewMode, setViewMode] = useState<'board' | 'foreshadow'>('board')
   const routeEditorRef = useRef<number | null>(null)
+  const routeEditorRequestRef = useRef(0)
+  const refreshRequestRef = useRef(0)
+  const generationActionRef = useRef(false)
+  const saveActionRef = useRef(false)
   const routeThreadId = useMemo(() => parseRouteId(searchParams.get('threadId')), [searchParams])
   const routeAction = useMemo(() => searchParams.get('action'), [searchParams])
   const generationBlockers = useMemo(
@@ -340,25 +344,28 @@ export default function StoryThreadsPage({ novelId }: Props) {
     ...editorValues,
   }), [editingThread, editorValues])
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (targetPage = page) => {
+    const requestId = ++refreshRequestRef.current
     setLoading(true)
     try {
       const [queryResult, nextStats, nextForeshadowSnapshot, nextWorkflowStats] = await Promise.all([
-        window.electron.thread.query({ novelId, page, pageSize: THREADS_PAGE_SIZE }),
+        window.electron.thread.query({ novelId, page: targetPage, pageSize: THREADS_PAGE_SIZE }),
         window.electron.thread.getStats({ novelId, page: 1, pageSize: 1 }),
         window.electron.thread.getForeshadowSnapshot(novelId),
         loadWorkflowStats(novelId),
       ])
+      if (refreshRequestRef.current !== requestId) return
       setThreads(queryResult.items)
       setThreadTotal(queryResult.total)
       setStats(nextStats)
       setForeshadowSnapshot(nextForeshadowSnapshot)
       setWorkflowStats(nextWorkflowStats)
     } catch (error) {
+      if (refreshRequestRef.current !== requestId) return
       console.error(error)
       message.error(getErrorMessage(error, 'storyThread.loadFailed'))
     } finally {
-      setLoading(false)
+      if (refreshRequestRef.current === requestId) setLoading(false)
     }
   }, [novelId, page])
 
@@ -372,7 +379,21 @@ export default function StoryThreadsPage({ novelId }: Props) {
     setEditorOpen(true)
   }, [editorForm])
 
+  const closeEditor = useCallback(() => {
+    routeEditorRequestRef.current += 1
+    routeEditorRef.current = null
+    setEditorOpen(false)
+    setEditingThread(null)
+    const nextParams = new URLSearchParams(searchParams)
+    nextParams.delete('threadId')
+    nextParams.delete('action')
+    if (nextParams.toString() !== searchParams.toString()) {
+      setSearchParams(nextParams, { replace: true })
+    }
+  }, [searchParams, setSearchParams])
+
   useEffect(() => {
+    const requestId = ++routeEditorRequestRef.current
     if (!routeThreadId || routeAction !== 'edit' || routeEditorRef.current === routeThreadId) return
     const target = threads.find((thread) => thread.id === routeThreadId)
     if (target) {
@@ -381,9 +402,13 @@ export default function StoryThreadsPage({ novelId }: Props) {
       return
     }
     void window.electron.thread.get(routeThreadId).then((thread) => {
-      if (!thread) return
+      if (routeEditorRequestRef.current !== requestId || !thread) return
       routeEditorRef.current = routeThreadId
       openEditor(thread)
+    }).catch((error) => {
+      if (routeEditorRequestRef.current !== requestId) return
+      console.error(error)
+      message.error(getErrorMessage(error, 'storyThread.loadFailed'))
     })
   }, [openEditor, routeAction, routeThreadId, threads])
 
@@ -392,17 +417,22 @@ export default function StoryThreadsPage({ novelId }: Props) {
   }, [generateForm, initialGenerateValues])
 
   const openGenerateModal = async () => {
-    const nextWorkflowStats = await loadWorkflowStats(novelId)
-    setWorkflowStats(nextWorkflowStats)
-    const blockers = getWorkflowBlockers('threads', currentNovel, nextWorkflowStats)
-    if (blockers.length > 0) {
-      message.warning(blockers.join('\n'))
-      return
-    }
+    try {
+      const nextWorkflowStats = await loadWorkflowStats(novelId)
+      setWorkflowStats(nextWorkflowStats)
+      const blockers = getWorkflowBlockers('threads', currentNovel, nextWorkflowStats)
+      if (blockers.length > 0) {
+        message.warning(blockers.join('\n'))
+        return
+      }
 
-    generateForm.resetFields()
-    generateForm.setFieldsValue(initialGenerateValues)
-    setGenerateOpen(true)
+      generateForm.resetFields()
+      generateForm.setFieldsValue(initialGenerateValues)
+      setGenerateOpen(true)
+    } catch (error) {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.loadFailed'))
+    }
   }
 
   const handleDelete = (thread: StoryThread) => {
@@ -427,10 +457,13 @@ export default function StoryThreadsPage({ novelId }: Props) {
   }
 
   const handleSave = useCallback(async () => {
-    const values = normalizeEditorValues(await editorForm.validateFields())
-    setSaving(true)
-
+    if (saveActionRef.current) return
+    saveActionRef.current = true
     try {
+      const rawValues = await editorForm.validateFields().catch(() => null)
+      if (!rawValues) return
+      const values = normalizeEditorValues(rawValues)
+      setSaving(true)
       if (editingThread) {
         await window.electron.thread.update(editingThread.id, values)
         message.success(getUserFacingMessage('storyThread.updated'))
@@ -439,17 +472,17 @@ export default function StoryThreadsPage({ novelId }: Props) {
         message.success(getUserFacingMessage('storyThread.created'))
       }
 
-      setEditorOpen(false)
-      setEditingThread(null)
+      closeEditor()
       await refresh()
       notifyWorkspaceMutation()
     } catch (error) {
       console.error(error)
       message.error(getErrorMessage(error, 'storyThread.saveFailed'))
     } finally {
+      saveActionRef.current = false
       setSaving(false)
     }
-  }, [editingThread, editorForm, novelId, notifyWorkspaceMutation, refresh])
+  }, [closeEditor, editingThread, editorForm, novelId, notifyWorkspaceMutation, refresh])
 
   useEffect(() => {
     registerSaveHandler(editorOpen ? () => { void handleSave() } : null)
@@ -475,10 +508,9 @@ export default function StoryThreadsPage({ novelId }: Props) {
           await window.electron.thread.clear(novelId)
           setSelectedRowKeys([])
           setPage(1)
-          setEditorOpen(false)
-          setEditingThread(null)
+          closeEditor()
           editorForm.resetFields()
-          await refresh()
+          await refresh(1)
           notifyWorkspaceMutation()
           message.success(getUserFacingMessage('storyThread.cleared'))
         } catch (error) {
@@ -487,7 +519,7 @@ export default function StoryThreadsPage({ novelId }: Props) {
         }
       },
     })
-  }, [editorForm, novelId, notifyWorkspaceMutation, refresh])
+  }, [closeEditor, editorForm, novelId, notifyWorkspaceMutation, refresh])
 
   useEffect(() => {
     registerClearHandler(() => {
@@ -541,15 +573,31 @@ export default function StoryThreadsPage({ novelId }: Props) {
   }
 
   const handleGenerate = async () => {
-    const nextWorkflowStats = await loadWorkflowStats(novelId)
+    if (generationActionRef.current) return
+    generationActionRef.current = true
+    const nextWorkflowStats = await loadWorkflowStats(novelId).catch((error) => {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.loadFailed'))
+      return null
+    })
+    if (!nextWorkflowStats) {
+      generationActionRef.current = false
+      return
+    }
     setWorkflowStats(nextWorkflowStats)
     const blockers = getWorkflowBlockers('threads', currentNovel, nextWorkflowStats)
     if (blockers.length > 0) {
       message.warning(blockers.join('\n'))
+      generationActionRef.current = false
       return
     }
 
-    const values = normalizeGenerateValues(await generateForm.validateFields())
+    const rawValues = await generateForm.validateFields().catch(() => null)
+    if (!rawValues) {
+      generationActionRef.current = false
+      return
+    }
+    const values = normalizeGenerateValues(rawValues)
     setGenerating(true)
     setGenerationWarnings([])
 
@@ -573,11 +621,14 @@ export default function StoryThreadsPage({ novelId }: Props) {
       console.error(error)
       message.error(getErrorMessage(error, 'storyThread.generateFailed'))
     } finally {
+      generationActionRef.current = false
       setGenerating(false)
     }
   }
 
   const handleRegenerate = async (thread: StoryThread) => {
+    if (generationActionRef.current) return
+    generationActionRef.current = true
     setGenerating(true)
     try {
       await window.electron.thread.regenerate(thread.id)
@@ -588,6 +639,7 @@ export default function StoryThreadsPage({ novelId }: Props) {
       console.error(error)
       message.error(getErrorMessage(error, 'storyThread.regenerateFailed'))
     } finally {
+      generationActionRef.current = false
       setGenerating(false)
     }
   }
@@ -779,10 +831,7 @@ export default function StoryThreadsPage({ novelId }: Props) {
         title={editingThread ? '编辑故事线程' : '新建故事线程'}
         open={editorOpen}
         forceRender
-        onCancel={() => {
-          setEditorOpen(false)
-          setEditingThread(null)
-        }}
+        onCancel={closeEditor}
         onOk={() => void handleSave()}
         confirmLoading={saving}
         okText={editingThread ? '保存修改' : '创建线程'}

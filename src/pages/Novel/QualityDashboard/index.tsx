@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Empty, Modal, Progress, Skeleton, Spin, Tabs, Tag, message } from 'antd'
 import VirtualList from 'rc-virtual-list'
 import { useNavigate } from 'react-router-dom'
@@ -446,9 +446,12 @@ export default function QualityDashboard({ novelId }: Props) {
   const [selectedVolumeId, setSelectedVolumeId] = useState<number | null>(null)
   const [activeTab, setActiveTab] = useState('overview')
   const [repairingActionId, setRepairingActionId] = useState<string | null>(null)
+  const loadedOnceRef = useRef(false)
+  const loadRequestRef = useRef(0)
 
   const loadData = useCallback(async (showLoading = false) => {
-    if (showLoading || !data) {
+    const requestId = ++loadRequestRef.current
+    if (showLoading || !loadedOnceRef.current) {
       setLoading(true)
     } else {
       setRefreshing(true)
@@ -463,16 +466,24 @@ export default function QualityDashboard({ novelId }: Props) {
         window.electron.quality.getDashboard(novelId),
         window.electron.task.getPipelineStats(novelId),
       ])
+      if (loadRequestRef.current !== requestId) return
       setData(result)
       setPipelineStats(nextPipelineStats)
+      setSelectedChapter((current) => current
+        ? result.chapterDetails.find((entry) => entry.chapterNum === current.chapterNum && entry.volumeId === current.volumeId) || null
+        : null)
+      loadedOnceRef.current = true
     } catch (error) {
+      if (loadRequestRef.current !== requestId) return
       console.error('Failed to load quality dashboard', error)
       setPipelineStats(null)
     } finally {
-      setLoading(false)
-      setRefreshing(false)
+      if (loadRequestRef.current === requestId) {
+        setLoading(false)
+        setRefreshing(false)
+      }
     }
-  }, [data, novelId])
+  }, [novelId])
 
   useEffect(() => { void loadData(true) }, [loadData])
   useEffect(() => {

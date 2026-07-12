@@ -142,7 +142,7 @@ export default function Overview({ novelId }: Props) {
 
     void loadWorkflowStats(novelId).then((workflowStats) => {
       if (active) setStats(workflowStats)
-    })
+    }).catch(console.error)
 
     void window.electron.quality.getDashboard(novelId)
       .then((result) => {
@@ -342,7 +342,8 @@ export default function Overview({ novelId }: Props) {
   useRegisterWorkspaceQualityController(workspaceQualityController)
 
   const handleSave = async () => {
-    const values = await form.validateFields()
+    const values = await form.validateFields().catch(() => null)
+    if (!values) return
     setSaving(true)
 
     try {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Alert, Button, Empty, Input, Modal, Select, Space, Spin, Tag, message } from 'antd'
 import { ArrowRightOutlined, EditOutlined, PlusOutlined, ReloadOutlined, SaveOutlined, TeamOutlined } from '@ant-design/icons'
@@ -101,21 +101,27 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
   const [beatSaving, setBeatSaving] = useState(false)
   const [beatOpen, setBeatOpen] = useState(false)
   const [beatDraft, setBeatDraft] = useState<CharacterArcBeatInput>({ novelId, arcId: 0, beatType: 'progress-note', title: '', summary: '', status: 'logged' })
+  const refreshRequestRef = useRef(0)
 
   const refresh = useCallback(async (showLoading = false) => {
+    const requestId = ++refreshRequestRef.current
     if (showLoading) {
       setLoading(true)
     } else {
       setRefreshing(true)
     }
     try {
-      setDashboard(await window.electron.characterArc.getArcDashboard(novelId))
+      const nextDashboard = await window.electron.characterArc.getArcDashboard(novelId)
+      if (refreshRequestRef.current === requestId) setDashboard(nextDashboard)
     } catch (error) {
+      if (refreshRequestRef.current !== requestId) return
       console.error(error)
       message.error(getErrorMessage(error, 'common.loadFailed'))
     } finally {
-      setLoading(false)
-      setRefreshing(false)
+      if (refreshRequestRef.current === requestId) {
+        setLoading(false)
+        setRefreshing(false)
+      }
     }
   }, [novelId])
 
@@ -138,13 +144,13 @@ export default function CharacterArcCenterPage({ novelId }: Props) {
     const characterId = Number(searchParams.get('characterId') || '')
     if (Number.isFinite(characterId) && characters.some((item) => item.id === characterId)) {
       setSelectedCharacterId(characterId)
-    } else if (!selectedCharacterId) {
+    } else if (!selectedCharacterId || !characters.some((item) => item.id === selectedCharacterId)) {
       setSelectedCharacterId(dashboard.protagonistArc?.characterId || protagonistCharacters[0]?.id || dashboard.characterArcs[0]?.characterId || keyCharacters[0]?.id || null)
     }
     const relationParam = searchParams.get('pair')
     if (relationParam && relations.some((item) => pairKey(item.charAId, item.charBId) === relationParam)) {
       setSelectedRelationKey(relationParam)
-    } else if (!selectedRelationKey) {
+    } else if (!selectedRelationKey || !relations.some((item) => pairKey(item.charAId, item.charBId) === selectedRelationKey)) {
       const firstArc = dashboard.relationshipArcs[0]
       setSelectedRelationKey(firstArc ? pairKey(firstArc.charAId, firstArc.charBId) : (relations[0] ? pairKey(relations[0].charAId, relations[0].charBId) : null))
     }

@@ -1,7 +1,7 @@
 import { Form, Modal, message } from 'antd'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { getUserFacingMessage } from '@/utils/user-facing-message'
+import { getErrorMessage, getUserFacingMessage } from '@/utils/user-facing-message'
 import type {
   Chapter,
   ChapterSegment,
@@ -64,7 +64,16 @@ export function useStructureWorkspace(novelId: number) {
   const [editingPartId, setEditingPartId] = useState<number | null>(null)
   const [editingTitle, setEditingTitle] = useState('')
 
-  const routeApplyingRef = useRef(false)
+  const internalRouteKeyRef = useRef<string | null>(null)
+  const resolveRequestRef = useRef(0)
+  const volumesRequestRef = useRef(0)
+  const partsRequestRef = useRef(0)
+  const chaptersRequestRef = useRef(0)
+  const segmentsRequestRef = useRef(0)
+  const linkedRequestRef = useRef(0)
+  const checkpointsRequestRef = useRef(0)
+  const chapterDetailRequestRef = useRef(0)
+  const segmentDetailRequestRef = useRef(0)
   const partsCache = useRef(new Map<string, PagedResult<StoryStructurePartSummary>>())
   const chapterCache = useRef(new Map<string, PagedResult<StoryStructureChapterSummary>>())
   const segmentCache = useRef(new Map<string, PagedResult<StoryStructureSegmentSummary>>())
@@ -102,67 +111,87 @@ export function useStructureWorkspace(novelId: number) {
     checkpointCache.current.clear()
   }, [])
 
-  const loadVolumes = useCallback(async () => {
+  const loadVolumes = useCallback(async (isCurrent: () => boolean = () => true) => {
+    const requestId = ++volumesRequestRef.current
     const rows = await window.electron.structure.listVolumes(novelId)
-    setVolumes(rows)
+    if (volumesRequestRef.current === requestId && isCurrent()) setVolumes(rows)
     return rows
   }, [novelId])
 
-  const loadParts = useCallback(async (volumeId: number, page: number, force = false) => {
+  const loadParts = useCallback(async (
+    volumeId: number,
+    page: number,
+    force = false,
+    isCurrent: () => boolean = () => true,
+  ) => {
+    const requestId = ++partsRequestRef.current
     const key = `${volumeId}:${page}`
 
     if (!force && partsCache.current.has(key)) {
       const cached = partsCache.current.get(key)!
-      setParts(cached)
+      if (partsRequestRef.current === requestId && isCurrent()) setParts(cached)
       return cached
     }
 
     const next = await window.electron.structure.listPartsPage(volumeId, page, PART_PAGE_SIZE)
     partsCache.current.set(key, next)
-    setParts(next)
+    if (partsRequestRef.current === requestId && isCurrent()) setParts(next)
     return next
   }, [])
 
-  const loadChapters = useCallback(async (partId: number, page: number, force = false) => {
+  const loadChapters = useCallback(async (
+    partId: number,
+    page: number,
+    force = false,
+    isCurrent: () => boolean = () => true,
+  ) => {
+    const requestId = ++chaptersRequestRef.current
     const key = `${partId}:${page}`
 
     if (!force && chapterCache.current.has(key)) {
       const cached = chapterCache.current.get(key)!
-      setChapters(cached)
+      if (chaptersRequestRef.current === requestId && isCurrent()) setChapters(cached)
       return cached
     }
 
     const next = await window.electron.structure.listChaptersPage(partId, page, CHAPTER_PAGE_SIZE)
     chapterCache.current.set(key, next)
-    setChapters(next)
+    if (chaptersRequestRef.current === requestId && isCurrent()) setChapters(next)
     return next
   }, [])
 
-  const loadSegments = useCallback(async (chapterId: number, page: number, force = false) => {
+  const loadSegments = useCallback(async (
+    chapterId: number,
+    page: number,
+    force = false,
+    isCurrent: () => boolean = () => true,
+  ) => {
+    const requestId = ++segmentsRequestRef.current
     const key = `${chapterId}:${page}`
 
     if (!force && segmentCache.current.has(key)) {
       const cached = segmentCache.current.get(key)!
-      setSegments(cached)
+      if (segmentsRequestRef.current === requestId && isCurrent()) setSegments(cached)
       return cached
     }
 
     const next = await window.electron.structure.listSegmentsPage(chapterId, page, SEGMENT_PAGE_SIZE)
     segmentCache.current.set(key, next)
-    setSegments(next)
+    if (segmentsRequestRef.current === requestId && isCurrent()) setSegments(next)
     return next
   }, [])
 
   const loadLinked = useCallback(async (page: number, force = false) => {
+    const requestId = ++linkedRequestRef.current
     if (!timelineFilters) {
-      setLinked(createEmptyPage(LINKED_PAGE_SIZE))
+      if (linkedRequestRef.current === requestId) setLinked(createEmptyPage(LINKED_PAGE_SIZE))
       return createEmptyPage<TimelineEvent>(LINKED_PAGE_SIZE)
     }
 
     const key = JSON.stringify({ ...timelineFilters, page })
     if (!force && linkedCache.current.has(key)) {
       const cached = linkedCache.current.get(key)!
-      setLinked(cached)
+      if (linkedRequestRef.current === requestId) setLinked(cached)
       return cached
     }
 
@@ -172,16 +201,17 @@ export function useStructureWorkspace(novelId: number) {
       LINKED_PAGE_SIZE,
     )
     linkedCache.current.set(key, next)
-    setLinked(next)
+    if (linkedRequestRef.current === requestId) setLinked(next)
     return next
   }, [timelineFilters])
 
   const loadCheckpoints = useCallback(async (page: number, force = false) => {
+    const requestId = ++checkpointsRequestRef.current
     const key = JSON.stringify({ ...checkpointFilters, page })
 
     if (!force && checkpointCache.current.has(key)) {
       const cached = checkpointCache.current.get(key)!
-      setCheckpoints(cached)
+      if (checkpointsRequestRef.current === requestId) setCheckpoints(cached)
       return cached
     }
 
@@ -191,36 +221,47 @@ export function useStructureWorkspace(novelId: number) {
       CHECKPOINT_PAGE_SIZE,
     )
     checkpointCache.current.set(key, next)
-    setCheckpoints(next)
+    if (checkpointsRequestRef.current === requestId) setCheckpoints(next)
     return next
   }, [checkpointFilters])
 
-  const loadChapterDetail = useCallback(async (chapterId: number) => {
+  const loadChapterDetail = useCallback(async (
+    chapterId: number,
+    isCurrent: () => boolean = () => true,
+  ) => {
+    const requestId = ++chapterDetailRequestRef.current
     const chapter = await window.electron.chapter.get(chapterId)
-    setChapterDetail(chapter)
+    if (chapterDetailRequestRef.current === requestId && isCurrent()) setChapterDetail(chapter)
     return chapter
   }, [])
 
-  const loadSegmentDetail = useCallback(async (segmentId: number | null) => {
+  const loadSegmentDetail = useCallback(async (
+    segmentId: number | null,
+    isCurrent: () => boolean = () => true,
+  ) => {
+    const requestId = ++segmentDetailRequestRef.current
     if (!segmentId) {
-      setSegmentDetail(null)
+      if (isCurrent()) setSegmentDetail(null)
       return null
     }
 
     const segment = await window.electron.structure.getSegment(segmentId)
-    setSegmentDetail(segment)
+    if (segmentDetailRequestRef.current === requestId && isCurrent()) setSegmentDetail(segment)
     return segment
   }, [])
 
   const resolveAndLoad = useCallback(async (preferred: Partial<StructureSelection>, force = false) => {
-    routeApplyingRef.current = true
+    const requestId = ++resolveRequestRef.current
+    const isCurrent = () => resolveRequestRef.current === requestId
     setLoading(true)
 
     try {
-      const volumeRows = await loadVolumes()
+      const volumeRows = await loadVolumes(isCurrent)
+      if (!isCurrent()) return
 
       if (volumeRows.length === 0) {
-        setSelection(createStructureSelection())
+        const emptySelection = createStructureSelection()
+        setSelection(emptySelection)
         setParts(createEmptyPage(PART_PAGE_SIZE))
         setChapters(createEmptyPage(CHAPTER_PAGE_SIZE))
         setSegments(createEmptyPage(SEGMENT_PAGE_SIZE))
@@ -228,12 +269,18 @@ export function useStructureWorkspace(novelId: number) {
         setCheckpoints(createEmptyPage(CHECKPOINT_PAGE_SIZE))
         setChapterDetail(null)
         setSegmentDetail(null)
+        const currentRouteKey = searchParams.toString()
+        if (currentRouteKey) {
+          internalRouteKeyRef.current = ''
+          navigate(`/novels/${novelId}/structure`, { replace: true })
+        }
         return
       }
 
       const resolved = await window.electron.structure.resolvePath(
         toTimelineAnchorFilters({ novelId, ...preferred }),
       )
+      if (!isCurrent()) return
 
       const nextSelection: StructureSelection = {
         volumeId: resolved.volumeId,
@@ -243,49 +290,58 @@ export function useStructureWorkspace(novelId: number) {
       }
 
       setSelection(nextSelection)
+      const nextRouteKey = buildStructureParams(nextSelection).toString()
+      if (nextRouteKey !== searchParams.toString()) {
+        internalRouteKeyRef.current = nextRouteKey
+        navigate(`/novels/${novelId}/structure${nextRouteKey ? `?${nextRouteKey}` : ''}`, { replace: true })
+      }
 
       if (resolved.volumeId) {
-        await loadParts(resolved.volumeId, resolved.partPage, force)
+        await loadParts(resolved.volumeId, resolved.partPage, force, isCurrent)
       } else {
         setParts(createEmptyPage(PART_PAGE_SIZE))
       }
+      if (!isCurrent()) return
 
       if (resolved.partId) {
-        await loadChapters(resolved.partId, resolved.chapterPage, force)
+        await loadChapters(resolved.partId, resolved.chapterPage, force, isCurrent)
       } else {
         setChapters(createEmptyPage(CHAPTER_PAGE_SIZE))
       }
+      if (!isCurrent()) return
 
       if (resolved.chapterId) {
-        await Promise.all([
-          loadSegments(resolved.chapterId, resolved.segmentPage, force),
-          loadChapterDetail(resolved.chapterId),
+        const [segmentPage] = await Promise.all([
+          loadSegments(resolved.chapterId, resolved.segmentPage, force, isCurrent),
+          loadChapterDetail(resolved.chapterId, isCurrent),
         ])
+        if (!isCurrent()) return
+        await loadSegmentDetail(resolved.segmentId ?? segmentPage.items[0]?.id ?? null, isCurrent)
       } else {
         setSegments(createEmptyPage(SEGMENT_PAGE_SIZE))
         setChapterDetail(null)
         setSegmentDetail(null)
       }
+    } catch (error) {
+      if (isCurrent()) {
+        console.error(error)
+        message.error(getErrorMessage(error, 'common.loadFailed'))
+      }
     } finally {
-      setLoading(false)
-      routeApplyingRef.current = false
+      if (isCurrent()) {
+        setLoading(false)
+      }
     }
-  }, [loadChapterDetail, loadChapters, loadParts, loadSegments, loadVolumes, novelId])
+  }, [loadChapterDetail, loadChapters, loadParts, loadSegmentDetail, loadSegments, loadVolumes, navigate, novelId, searchParams])
 
   useEffect(() => {
+    const routeKey = searchParams.toString()
+    if (internalRouteKeyRef.current === routeKey) {
+      internalRouteKeyRef.current = null
+      return
+    }
     void resolveAndLoad(route, true)
-  }, [resolveAndLoad, route])
-
-  useEffect(() => {
-    if (routeApplyingRef.current) return
-
-    const next = buildStructureParams(selection).toString()
-    const current = searchParams.toString()
-
-    if (next !== current) {
-      navigate(`/novels/${novelId}/structure${next ? `?${next}` : ''}`, { replace: true })
-    }
-  }, [navigate, novelId, searchParams, selection])
+  }, [resolveAndLoad, route, searchParams])
 
   useEffect(() => {
     if (!selection.chapterId) {
@@ -294,7 +350,10 @@ export function useStructureWorkspace(novelId: number) {
       return
     }
 
-    void loadChapterDetail(selection.chapterId)
+    void loadChapterDetail(selection.chapterId).catch((error) => {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.loadFailed'))
+    })
   }, [loadChapterDetail, selection.chapterId])
 
   useEffect(() => {
@@ -304,7 +363,10 @@ export function useStructureWorkspace(novelId: number) {
     }
 
     const activeSegmentId = selection.segmentId ?? segments.items[0]?.id ?? null
-    void loadSegmentDetail(activeSegmentId)
+    void loadSegmentDetail(activeSegmentId).catch((error) => {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.loadFailed'))
+    })
   }, [loadSegmentDetail, segments.items, selection.chapterId, selection.segmentId])
 
   useEffect(() => {
@@ -346,11 +408,17 @@ export function useStructureWorkspace(novelId: number) {
   }, [loading, segmentDetail, segmentForm])
 
   useEffect(() => {
-    void loadLinked(1)
+    void loadLinked(1).catch((error) => {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.loadFailed'))
+    })
   }, [loadLinked])
 
   useEffect(() => {
-    void loadCheckpoints(1)
+    void loadCheckpoints(1).catch((error) => {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.loadFailed'))
+    })
   }, [loadCheckpoints])
 
   const refreshStructure = useCallback(async () => {
@@ -634,9 +702,10 @@ export function useStructureWorkspace(novelId: number) {
   }, [clearCaches, resolveAndLoad, segmentDetail, selection.chapterId, selection.partId, selection.volumeId])
 
   const saveChapter = useCallback(async () => {
-    if (!chapterDetail) return
+    if (!chapterDetail) return false
 
-    const values = await chapterForm.validateFields()
+    const values = await chapterForm.validateFields().catch(() => null)
+    if (!values) return false
     setSavingChapter(true)
 
     try {
@@ -653,15 +722,21 @@ export function useStructureWorkspace(novelId: number) {
       clearCaches()
       await resolveAndLoad(selection, true)
       message.success(getUserFacingMessage('structure.chapterSaved'))
+      return true
+    } catch (error) {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.saveFailed'))
+      return false
     } finally {
       setSavingChapter(false)
     }
   }, [chapterDetail, chapterForm, clearCaches, resolveAndLoad, selection])
 
   const saveSegment = useCallback(async () => {
-    if (!segmentDetail) return
+    if (!segmentDetail) return false
 
-    const values = await segmentForm.validateFields()
+    const values = await segmentForm.validateFields().catch(() => null)
+    if (!values) return false
     setSavingSegment(true)
 
     try {
@@ -669,6 +744,11 @@ export function useStructureWorkspace(novelId: number) {
       clearCaches()
       await resolveAndLoad(selection, true)
       message.success(getUserFacingMessage('structure.segmentSaved'))
+      return true
+    } catch (error) {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.saveFailed'))
+      return false
     } finally {
       setSavingSegment(false)
     }

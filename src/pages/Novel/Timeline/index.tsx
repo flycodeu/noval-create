@@ -1,6 +1,6 @@
 import React from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Alert, Button, Modal, Select, Space, Spin, Tag } from 'antd'
+import { Alert, Button, Modal, Select, Space, Spin, Tag, message } from 'antd'
 import {
   BarsOutlined,
   DeleteOutlined,
@@ -25,12 +25,13 @@ import {
 } from './TimelinePanels'
 import { useTimelineWorkspace } from './useTimelineWorkspace'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
+import { getErrorMessage } from '@/utils/user-facing-message'
 import '../components/boards.css'
 import './index.css'
 
 export default function TimelinePage({ novelId }: TimelinePageProps) {
   const navigate = useNavigate()
-  const { mutationToken, notifyWorkspaceMutation, registerClearHandler, registerEscapeHandler, registerSaveHandler } = useNovelWorkspaceActions()
+  const { notifyWorkspaceMutation, registerClearHandler, registerEscapeHandler, registerSaveHandler } = useNovelWorkspaceActions()
   const workspace = useTimelineWorkspace(novelId, {
     onCleared: notifyWorkspaceMutation,
   })
@@ -40,7 +41,6 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
     form,
     handleClear,
     handleSave: saveTimelineEvent,
-    refreshPage,
     selectedEvent,
   } = workspace
   const [draftWarnings, setDraftWarnings] = React.useState<string[]>([])
@@ -127,9 +127,15 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
 
   const handleSave = React.useCallback(async () => {
     const finalData = form.getFieldsValue(true) as Record<string, unknown>
-    await saveTimelineEvent()
-    await finalizeDraft(finalData)
-    await clearDraft()
+    const saved = await saveTimelineEvent()
+    if (!saved) return
+    try {
+      await finalizeDraft(finalData)
+      await clearDraft()
+    } catch (error) {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.saveFailed'))
+    }
   }, [clearDraft, finalizeDraft, form, saveTimelineEvent])
 
   const saveShortcutHandler = React.useCallback(() => {
@@ -158,10 +164,6 @@ export default function TimelinePage({ novelId }: TimelinePageProps) {
     registerClearHandler(clearShortcutHandler)
     return () => registerClearHandler(null)
   }, [clearShortcutHandler, registerClearHandler])
-
-  React.useEffect(() => {
-    void refreshPage()
-  }, [mutationToken, refreshPage])
 
   const handleBatchStatusUpdate = React.useCallback(async () => {
     if (workspace.selectedIds.length === 0) return

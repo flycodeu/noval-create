@@ -99,6 +99,8 @@ export default function GrowthSystemPage({ novelId }: Props) {
   const [eventOpen, setEventOpen] = useState(false)
   const [editingTrack, setEditingTrack] = useState<GrowthTrack | null>(null)
   const [editingPool, setEditingPool] = useState<ResourcePool | null>(null)
+  const refreshRequestRef = React.useRef(0)
+  const saveActionRef = React.useRef(false)
   const [editingEvent, setEditingEvent] = useState<RewardCostEvent | null>(null)
   const [bindChapterId, setBindChapterId] = useState<number | null>(null)
   const [bindVolumeId, setBindVolumeId] = useState<number | null>(null)
@@ -127,19 +129,34 @@ export default function GrowthSystemPage({ novelId }: Props) {
   }, [dashboard, summary])
 
   const refresh = useCallback(async () => {
+    const requestId = ++refreshRequestRef.current
     setLoading(true)
     try {
       const result = await window.electron.growthSystem.getDashboard(novelId)
+      if (refreshRequestRef.current !== requestId) return
       setDashboard(result)
-      if (!bindChapterId && (result.chapters || []).length > 0) setBindChapterId(result.chapters[0].id)
-      if (!bindVolumeId && (result.volumes || []).length > 0) setBindVolumeId(result.volumes[0].id)
+      const nextChapters = result.chapters || []
+      const nextVolumes = result.volumes || []
+      const nextTrackIds = new Set((result.tracks || []).map((item) => item.id))
+      const nextPoolIds = new Set((result.pools || []).map((item) => item.id))
+      const nextEventIds = new Set((result.events || []).map((item) => item.id))
+      setBindChapterId((current) => current && nextChapters.some((item) => item.id === current)
+        ? current
+        : nextChapters[0]?.id || null)
+      setBindVolumeId((current) => current && nextVolumes.some((item) => item.id === current)
+        ? current
+        : nextVolumes[0]?.id || null)
+      setBindTrackIds((current) => current.filter((id) => nextTrackIds.has(id)))
+      setBindPoolIds((current) => current.filter((id) => nextPoolIds.has(id)))
+      setBindEventIds((current) => current.filter((id) => nextEventIds.has(id)))
     } catch (error) {
+      if (refreshRequestRef.current !== requestId) return
       console.error(error)
       message.error(getErrorMessage(error, 'common.loadFailed'))
     } finally {
-      setLoading(false)
+      if (refreshRequestRef.current === requestId) setLoading(false)
     }
-  }, [bindChapterId, bindVolumeId, novelId])
+  }, [novelId])
 
   useEffect(() => { void refresh() }, [mutationToken, refresh])
 
@@ -234,36 +251,72 @@ export default function GrowthSystemPage({ novelId }: Props) {
   }
 
   const saveTrack = useCallback(async () => {
-    const values = await trackForm.validateFields()
-    if (!text(values.title)) return message.warning(getUserFacingMessage('growthSystem.trackTitleRequired'))
-    setSaving(true)
+    if (saveActionRef.current) return
+    saveActionRef.current = true
     try {
+      const values = await trackForm.validateFields().catch(() => null)
+      if (!values) return
+      if (!text(values.title)) {
+        message.warning(getUserFacingMessage('growthSystem.trackTitleRequired'))
+        return
+      }
+      setSaving(true)
       await window.electron.growthSystem.upsertTrack(novelId, { ...values, id: editingTrack?.id, title: text(values.title) })
       setTrackOpen(false)
       await refresh(); notifyWorkspaceMutation()
-    } finally { setSaving(false) }
+    } catch (error) {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.saveFailed'))
+    } finally {
+      saveActionRef.current = false
+      setSaving(false)
+    }
   }, [editingTrack?.id, notifyWorkspaceMutation, refresh, trackForm, novelId])
 
   const savePool = useCallback(async () => {
-    const values = await poolForm.validateFields()
-    if (!text(values.name)) return message.warning(getUserFacingMessage('growthSystem.poolNameRequired'))
-    setSaving(true)
+    if (saveActionRef.current) return
+    saveActionRef.current = true
     try {
+      const values = await poolForm.validateFields().catch(() => null)
+      if (!values) return
+      if (!text(values.name)) {
+        message.warning(getUserFacingMessage('growthSystem.poolNameRequired'))
+        return
+      }
+      setSaving(true)
       await window.electron.growthSystem.upsertPool(novelId, { ...values, id: editingPool?.id, name: text(values.name) })
       setPoolOpen(false)
       await refresh(); notifyWorkspaceMutation()
-    } finally { setSaving(false) }
+    } catch (error) {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.saveFailed'))
+    } finally {
+      saveActionRef.current = false
+      setSaving(false)
+    }
   }, [editingPool?.id, notifyWorkspaceMutation, poolForm, refresh, novelId])
 
   const saveEvent = useCallback(async () => {
-    const values = await eventForm.validateFields()
-    if (!text(values.title)) return message.warning(getUserFacingMessage('growthSystem.writebackTitleRequired'))
-    setSaving(true)
+    if (saveActionRef.current) return
+    saveActionRef.current = true
     try {
+      const values = await eventForm.validateFields().catch(() => null)
+      if (!values) return
+      if (!text(values.title)) {
+        message.warning(getUserFacingMessage('growthSystem.writebackTitleRequired'))
+        return
+      }
+      setSaving(true)
       await window.electron.growthSystem.upsertEvent(novelId, { ...values, id: editingEvent?.id, title: text(values.title) })
       setEventOpen(false)
       await refresh(); notifyWorkspaceMutation()
-    } finally { setSaving(false) }
+    } catch (error) {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.saveFailed'))
+    } finally {
+      saveActionRef.current = false
+      setSaving(false)
+    }
   }, [editingEvent?.id, eventForm, notifyWorkspaceMutation, novelId, refresh])
 
   const saveHandler = useCallback(() => {
@@ -306,13 +359,13 @@ export default function GrowthSystemPage({ novelId }: Props) {
       metrics={<><WorkspaceMetric label="收益循环健康度" value={`${health}/100`} tone={health < 60 ? 'warm' : 'cool'} /><WorkspaceMetric label="成长轨道" value={summary.trackCount} /><WorkspaceMetric label="临界资源池" value={summary.criticalPoolCount} tone={summary.criticalPoolCount > 0 ? 'warm' : 'default'} /><WorkspaceMetric label="未解代价链" value={summary.unresolvedCostCount} tone={summary.unresolvedCostCount > 0 ? 'warm' : 'default'} /></>}
     >
       {summary.criticalPoolCount > 0 ? <Alert showIcon type="warning" message="存在稀缺/临界资源池" description="建议优先绑定到卷级节奏和章节合同，避免正文资源无限化。" /> : null}
-      <WorkspacePanel title="统一推进引擎" description="人物/组织/关系成长共用同一轨道面板。"><Table<GrowthTrack> rowKey="id" loading={loading} pagination={{ pageSize: 8, showSizeChanger: false }} dataSource={tracks} columns={[{ title: '轨道', dataIndex: 'title', width: 220 }, { title: '类型', dataIndex: 'trackType', width: 110, render: (v) => <Tag color={v === 'organization' ? 'purple' : v === 'relationship' ? 'cyan' : 'blue'}>{trackLabel(v)}</Tag> }, { title: '阶段目标', dataIndex: 'stageGoal', render: (v) => v || '未设置' }, { title: '瓶颈', dataIndex: 'bottleneck', render: (v) => v || '未设置' }, { title: '操作', width: 140, render: (_v, r) => <Space><Button size="small" onClick={() => openTrack(r)}>编辑</Button><Button size="small" danger icon={<DeleteOutlined />} onClick={() => void window.electron.growthSystem.deleteTrack(novelId, r.id).then(async () => { await refresh(); notifyWorkspaceMutation() })}>删除</Button></Space> }]} /></WorkspacePanel>
-      <WorkspacePanel title="跨章资源池与稀缺度管理"><Table<ResourcePool> rowKey="id" loading={loading} pagination={{ pageSize: 8, showSizeChanger: false }} dataSource={pools} columns={[{ title: '资源池', dataIndex: 'name', width: 220 }, { title: '类型', dataIndex: 'poolType', width: 110 }, { title: '稀缺度', dataIndex: 'scarcityLevel', width: 110, render: (v) => <Tag color={scarcityTone(v)}>{v}</Tag> }, { title: '补给路径', dataIndex: 'replenishPath', render: (v) => v || '未设置' }, { title: '消耗机制', dataIndex: 'consumptionRule', render: (v) => v || '未设置' }, { title: '操作', width: 140, render: (_v, r) => <Space><Button size="small" onClick={() => openPool(r)}>编辑</Button><Button size="small" danger icon={<DeleteOutlined />} onClick={() => void window.electron.growthSystem.deletePool(novelId, r.id).then(async () => { await refresh(); notifyWorkspaceMutation() })}>删除</Button></Space> }]} /></WorkspacePanel>
-      <WorkspacePanel title="章节回写（获得/失去/下一阶段卡点）"><Table<RewardCostEvent> rowKey="id" loading={loading} pagination={{ pageSize: 8, showSizeChanger: false }} dataSource={events} columns={[{ title: '章节', width: 110, render: (_v, r) => `第${r.chapterNumSnapshot || '?'}章` }, { title: '类型', dataIndex: 'eventType', width: 90, render: (v) => <Tag color={v === 'cost' ? 'volcano' : v === 'bottleneck' ? 'orange' : 'green'}>{v}</Tag> }, { title: '标题', dataIndex: 'title', width: 220 }, { title: '说明', dataIndex: 'summary', render: (v) => v || '无' }, { title: '操作', width: 140, render: (_v, r) => <Space><Button size="small" onClick={() => openEvent(r)}>编辑</Button><Button size="small" danger icon={<DeleteOutlined />} onClick={() => void window.electron.growthSystem.deleteEvent(novelId, r.id).then(async () => { await refresh(); notifyWorkspaceMutation() })}>删除</Button></Space> }]} /></WorkspacePanel>
+      <WorkspacePanel title="统一推进引擎" description="人物/组织/关系成长共用同一轨道面板。"><Table<GrowthTrack> rowKey="id" loading={loading} pagination={{ pageSize: 8, showSizeChanger: false }} dataSource={tracks} columns={[{ title: '轨道', dataIndex: 'title', width: 220 }, { title: '类型', dataIndex: 'trackType', width: 110, render: (v) => <Tag color={v === 'organization' ? 'purple' : v === 'relationship' ? 'cyan' : 'blue'}>{trackLabel(v)}</Tag> }, { title: '阶段目标', dataIndex: 'stageGoal', render: (v) => v || '未设置' }, { title: '瓶颈', dataIndex: 'bottleneck', render: (v) => v || '未设置' }, { title: '操作', width: 140, render: (_v, r) => <Space><Button size="small" onClick={() => openTrack(r)}>编辑</Button><Button size="small" danger icon={<DeleteOutlined />} onClick={() => void window.electron.growthSystem.deleteTrack(novelId, r.id).then(async () => { await refresh(); notifyWorkspaceMutation() }).catch((error) => { console.error(error); message.error(getErrorMessage(error, 'common.deleteFailed')) })}>删除</Button></Space> }]} /></WorkspacePanel>
+      <WorkspacePanel title="跨章资源池与稀缺度管理"><Table<ResourcePool> rowKey="id" loading={loading} pagination={{ pageSize: 8, showSizeChanger: false }} dataSource={pools} columns={[{ title: '资源池', dataIndex: 'name', width: 220 }, { title: '类型', dataIndex: 'poolType', width: 110 }, { title: '稀缺度', dataIndex: 'scarcityLevel', width: 110, render: (v) => <Tag color={scarcityTone(v)}>{v}</Tag> }, { title: '补给路径', dataIndex: 'replenishPath', render: (v) => v || '未设置' }, { title: '消耗机制', dataIndex: 'consumptionRule', render: (v) => v || '未设置' }, { title: '操作', width: 140, render: (_v, r) => <Space><Button size="small" onClick={() => openPool(r)}>编辑</Button><Button size="small" danger icon={<DeleteOutlined />} onClick={() => void window.electron.growthSystem.deletePool(novelId, r.id).then(async () => { await refresh(); notifyWorkspaceMutation() }).catch((error) => { console.error(error); message.error(getErrorMessage(error, 'common.deleteFailed')) })}>删除</Button></Space> }]} /></WorkspacePanel>
+      <WorkspacePanel title="章节回写（获得/失去/下一阶段卡点）"><Table<RewardCostEvent> rowKey="id" loading={loading} pagination={{ pageSize: 8, showSizeChanger: false }} dataSource={events} columns={[{ title: '章节', width: 110, render: (_v, r) => `第${r.chapterNumSnapshot || '?'}章` }, { title: '类型', dataIndex: 'eventType', width: 90, render: (v) => <Tag color={v === 'cost' ? 'volcano' : v === 'bottleneck' ? 'orange' : 'green'}>{v}</Tag> }, { title: '标题', dataIndex: 'title', width: 220 }, { title: '说明', dataIndex: 'summary', render: (v) => v || '无' }, { title: '操作', width: 140, render: (_v, r) => <Space><Button size="small" onClick={() => openEvent(r)}>编辑</Button><Button size="small" danger icon={<DeleteOutlined />} onClick={() => void window.electron.growthSystem.deleteEvent(novelId, r.id).then(async () => { await refresh(); notifyWorkspaceMutation() }).catch((error) => { console.error(error); message.error(getErrorMessage(error, 'common.deleteFailed')) })}>删除</Button></Space> }]} /></WorkspacePanel>
       <WorkspacePanel title="合同与卷级绑定" description="直接把奖励/代价约束挂到章节合同和卷级节奏。">
         <div className="guided-step__field-grid">
-          <div className="guided-step__field-card"><div className="workspace-field-heading">绑定章节合同</div><Space direction="vertical" className="workspace-full-width"><Select value={bindChapterId || undefined} onChange={(v) => setBindChapterId(v || null)} options={chapters.map((c) => ({ value: c.id, label: `第${c.chapterNum}章 · ${c.title || '未命名章节'}` }))} /><Select mode="multiple" value={bindTrackIds} onChange={(v) => setBindTrackIds(v as number[])} options={tracks.map((t) => ({ value: t.id, label: t.title }))} placeholder="成长轨道" /><Select mode="multiple" value={bindPoolIds} onChange={(v) => setBindPoolIds(v as number[])} options={pools.map((p) => ({ value: p.id, label: `${p.name}[${p.scarcityLevel}]` }))} placeholder="资源池" /><Select mode="multiple" value={bindEventIds} onChange={(v) => setBindEventIds(v as number[])} options={events.map((e) => ({ value: e.id, label: `第${e.chapterNumSnapshot || '?'}章·${e.title}` }))} placeholder="回写事件" /><Button type="primary" icon={<SaveOutlined />} onClick={() => void window.electron.growthSystem.bindChapterContract(novelId, { chapterId: bindChapterId || 0, trackIds: bindTrackIds, poolIds: bindPoolIds, eventIds: bindEventIds }).then(() => message.success(getUserFacingMessage('growthSystem.chapterBound'))).catch((error) => message.error(getErrorMessage(error, 'common.saveFailed')))}>绑定章节合同</Button></Space></div>
-          <div className="guided-step__field-card"><div className="workspace-field-heading">绑定卷级节奏</div><Space direction="vertical" className="workspace-full-width"><Select value={bindVolumeId || undefined} onChange={(v) => setBindVolumeId(v || null)} options={volumes.map((v) => ({ value: v.id, label: v.title?.trim() || `第${v.volumeNumber}卷` }))} /><Select mode="multiple" value={bindTrackIds} onChange={(v) => setBindTrackIds(v as number[])} options={tracks.map((t) => ({ value: t.id, label: t.title }))} placeholder="卷级轨道" /><Select mode="multiple" value={bindPoolIds} onChange={(v) => setBindPoolIds(v as number[])} options={pools.map((p) => ({ value: p.id, label: `${p.name}[${p.scarcityLevel}]` }))} placeholder="卷级资源池" /><Input.TextArea rows={6} value={bindCadence} onChange={(e) => setBindCadence(e.target.value)} placeholder="卷级奖励节奏约束说明" /><Button type="primary" icon={<SaveOutlined />} onClick={() => void window.electron.growthSystem.bindVolumeDesign(novelId, { volumeId: bindVolumeId || 0, trackIds: bindTrackIds, poolIds: bindPoolIds, rewardCadence: text(bindCadence) || undefined }).then(() => message.success(getUserFacingMessage('growthSystem.volumeBound'))).catch((error) => message.error(getErrorMessage(error, 'common.saveFailed')))}>绑定卷级节奏</Button></Space></div>
+          <div className="guided-step__field-card"><div className="workspace-field-heading">绑定章节合同</div><Space direction="vertical" className="workspace-full-width"><Select value={bindChapterId || undefined} onChange={(v) => setBindChapterId(v || null)} options={chapters.map((c) => ({ value: c.id, label: `第${c.chapterNum}章 · ${c.title || '未命名章节'}` }))} /><Select mode="multiple" value={bindTrackIds} onChange={(v) => setBindTrackIds(v as number[])} options={tracks.map((t) => ({ value: t.id, label: t.title }))} placeholder="成长轨道" /><Select mode="multiple" value={bindPoolIds} onChange={(v) => setBindPoolIds(v as number[])} options={pools.map((p) => ({ value: p.id, label: `${p.name}[${p.scarcityLevel}]` }))} placeholder="资源池" /><Select mode="multiple" value={bindEventIds} onChange={(v) => setBindEventIds(v as number[])} options={events.map((e) => ({ value: e.id, label: `第${e.chapterNumSnapshot || '?'}章·${e.title}` }))} placeholder="回写事件" /><Button type="primary" icon={<SaveOutlined />} disabled={!bindChapterId} onClick={() => bindChapterId && void window.electron.growthSystem.bindChapterContract(novelId, { chapterId: bindChapterId, trackIds: bindTrackIds, poolIds: bindPoolIds, eventIds: bindEventIds }).then(() => message.success(getUserFacingMessage('growthSystem.chapterBound'))).catch((error) => message.error(getErrorMessage(error, 'common.saveFailed')))}>绑定章节合同</Button></Space></div>
+          <div className="guided-step__field-card"><div className="workspace-field-heading">绑定卷级节奏</div><Space direction="vertical" className="workspace-full-width"><Select value={bindVolumeId || undefined} onChange={(v) => setBindVolumeId(v || null)} options={volumes.map((v) => ({ value: v.id, label: v.title?.trim() || `第${v.volumeNumber}卷` }))} /><Select mode="multiple" value={bindTrackIds} onChange={(v) => setBindTrackIds(v as number[])} options={tracks.map((t) => ({ value: t.id, label: t.title }))} placeholder="卷级轨道" /><Select mode="multiple" value={bindPoolIds} onChange={(v) => setBindPoolIds(v as number[])} options={pools.map((p) => ({ value: p.id, label: `${p.name}[${p.scarcityLevel}]` }))} placeholder="卷级资源池" /><Input.TextArea rows={6} value={bindCadence} onChange={(e) => setBindCadence(e.target.value)} placeholder="卷级奖励节奏约束说明" /><Button type="primary" icon={<SaveOutlined />} disabled={!bindVolumeId} onClick={() => bindVolumeId && void window.electron.growthSystem.bindVolumeDesign(novelId, { volumeId: bindVolumeId, trackIds: bindTrackIds, poolIds: bindPoolIds, rewardCadence: text(bindCadence) || undefined }).then(() => message.success(getUserFacingMessage('growthSystem.volumeBound'))).catch((error) => message.error(getErrorMessage(error, 'common.saveFailed')))}>绑定卷级节奏</Button></Space></div>
         </div>
       </WorkspacePanel>
       <Modal width={860} title={editingTrack ? `编辑成长轨道 #${editingTrack.id}` : '新建成长轨道'} open={trackOpen} onCancel={() => setTrackOpen(false)} onOk={() => void saveTrack()} confirmLoading={saving}><Form form={trackForm} layout="vertical"><div className="guided-step__field-grid"><div className="guided-step__field-card guided-step__field-card--full"><AIGenerateButton novelId={novelId} label={editingTrack ? 'AI 补全·当前轨道' : 'AI 生成·成长轨道'} intent={hasFilledValues([trackValues.title, trackValues.stageGoal, trackValues.bottleneck, trackValues.acquirePath, trackValues.failureCost]) ? 'complete' : 'generate'} isJson buildMessages={() => buildDraftMessages({ task: editingTrack ? `成长轨道 · ${editingTrack.title}` : '成长轨道草稿', mode: hasFilledValues([trackValues.title, trackValues.stageGoal, trackValues.bottleneck, trackValues.acquirePath, trackValues.failureCost]) ? 'optimize' : 'replace', context: buildPlanningContextSections(currentNovel, { includeSubplots: true, extraSections: [{ label: '当前成长系统概况', value: [`轨道数：${tracks.length}`, `资源池：${pools.length}`, `回写事件：${events.length}`].join('\n') }] }), fields: [{ key: 'trackType', label: '轨道类型', value: trackValues.trackType, hint: '只用 character、organization、relationship 之一。' }, { key: 'title', label: '轨道标题', value: trackValues.title, hint: '写成持续成长主题。' }, { key: 'stageGoal', label: '阶段目标', value: trackValues.stageGoal, hint: '写当前阶段必须拿到的成长结果。' }, { key: 'bottleneck', label: '当前瓶颈', value: trackValues.bottleneck, hint: '写卡点。' }, { key: 'acquirePath', label: '获取路径', value: trackValues.acquirePath, hint: '写成长资源如何获得。' }, { key: 'consumptionRule', label: '消耗机制', value: trackValues.consumptionRule, hint: '写使用和消耗方式。' }, { key: 'failureCost', label: '失败代价', value: trackValues.failureCost, hint: '写失败会失去什么。' }, { key: 'rewardCadence', label: '奖励节奏', value: trackValues.rewardCadence, hint: '写奖励释放节奏。' }, { key: 'currentTier', label: '当前层级', value: trackValues.currentTier, hint: '简写当前层级。' }, { key: 'nextGoal', label: '下一目标', value: trackValues.nextGoal, hint: '简写下个目标。' }, { key: 'scarceResource', label: '稀缺资源', value: trackValues.scarceResource, hint: '写受限资源。' }], requirements: ['必须与角色、关系、卷级节奏和正文代价体系一致。'] })} onResult={(raw) => { const draft = parseDraftJson<Partial<TrackValues>>(raw); trackForm.setFieldsValue({ trackType: draft.trackType, title: typeof draft.title === 'string' ? draft.title : undefined, stageGoal: typeof draft.stageGoal === 'string' ? draft.stageGoal : undefined, bottleneck: typeof draft.bottleneck === 'string' ? draft.bottleneck : undefined, acquirePath: typeof draft.acquirePath === 'string' ? draft.acquirePath : undefined, consumptionRule: typeof draft.consumptionRule === 'string' ? draft.consumptionRule : undefined, failureCost: typeof draft.failureCost === 'string' ? draft.failureCost : undefined, rewardCadence: typeof draft.rewardCadence === 'string' ? draft.rewardCadence : undefined, currentTier: typeof draft.currentTier === 'string' ? draft.currentTier : undefined, nextGoal: typeof draft.nextGoal === 'string' ? draft.nextGoal : undefined, scarceResource: typeof draft.scarceResource === 'string' ? draft.scarceResource : undefined }) }} /></div><div className="guided-step__field-card guided-step__field-card--compact"><Form.Item name="trackType" label="轨道类型"><Select options={[{ value: 'character', label: '人物成长' }, { value: 'organization', label: '组织成长' }, { value: 'relationship', label: '关系成长' }]} /></Form.Item></div><div className="guided-step__field-card guided-step__field-card--full"><Form.Item name="title" label="轨道标题" rules={[{ required: true, message: '请填写轨道标题' }]}><Input /></Form.Item></div><div className="guided-step__field-card"><Form.Item name="stageGoal" label="阶段目标"><Input.TextArea rows={6} /></Form.Item></div><div className="guided-step__field-card"><Form.Item name="bottleneck" label="当前瓶颈"><Input.TextArea rows={6} /></Form.Item></div><div className="guided-step__field-card"><Form.Item name="acquirePath" label="获取路径"><Input.TextArea rows={6} /></Form.Item></div><div className="guided-step__field-card"><Form.Item name="consumptionRule" label="消耗机制"><Input.TextArea rows={6} /></Form.Item></div><div className="guided-step__field-card"><Form.Item name="failureCost" label="失败代价"><Input.TextArea rows={6} /></Form.Item></div><div className="guided-step__field-card"><Form.Item name="rewardCadence" label="奖励节奏"><Input.TextArea rows={6} /></Form.Item></div><div className="guided-step__field-card guided-step__field-card--compact"><Form.Item name="currentTier" label="当前层级"><Input /></Form.Item></div><div className="guided-step__field-card guided-step__field-card--compact"><Form.Item name="nextGoal" label="下一目标"><Input /></Form.Item></div><div className="guided-step__field-card guided-step__field-card--compact"><Form.Item name="scarceResource" label="稀缺资源"><Input /></Form.Item></div><div className="guided-step__field-card guided-step__field-card--compact"><Form.Item name="linkedVolumeId" label="关联卷"><Select allowClear options={volumes.map((v) => ({ value: v.id, label: v.title?.trim() || `第${v.volumeNumber}卷` }))} /></Form.Item></div><div className="guided-step__field-card guided-step__field-card--compact"><Form.Item name="linkedChapterId" label="关联章节"><Select allowClear options={chapters.map((c) => ({ value: c.id, label: `第${c.chapterNum}章` }))} /></Form.Item></div></div></Form></Modal>

@@ -987,10 +987,14 @@ export default function StructurePage({ novelId }: { novelId: number }) {
               savingChapter={savingChapter}
               onSaveChapter={() => void (async () => {
                 const finalData = chapterForm.getFieldsValue(true) as Record<string, unknown>
-                await saveChapter()
+                const saved = await saveChapter()
+                if (!saved) return
                 await finalizeDraft(finalData)
                 await clearDraft()
-              })()}
+              })().catch((error) => {
+                console.error(error)
+                message.error(getErrorMessage(error, 'common.saveFailed'))
+              })}
               onDeleteChapter={() => void deleteChapter()}
               aiActions={chapterAiActions}
               patchEditor={chapterPatchEditor}
@@ -1003,10 +1007,14 @@ export default function StructurePage({ novelId }: { novelId: number }) {
               savingSegment={savingSegment}
               onSaveSegment={() => void (async () => {
                 const finalData = segmentForm.getFieldsValue(true) as Record<string, unknown>
-                await saveSegment()
+                const saved = await saveSegment()
+                if (!saved) return
                 await finalizeDraft(finalData)
                 await clearDraft()
-              })()}
+              })().catch((error) => {
+                console.error(error)
+                message.error(getErrorMessage(error, 'common.saveFailed'))
+              })}
               onDeleteSegment={() => void deleteSegment()}
               aiActions={segmentAiActions}
               patchEditor={segmentPatchEditor}

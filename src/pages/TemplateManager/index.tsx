@@ -91,8 +91,10 @@ export default function TemplateManager() {
   const [form] = Form.useForm()
   const [saving, setSaving] = useState(false)
   const loadedOnceRef = useRef(false)
+  const loadRequestRef = useRef(0)
 
   const loadTemplates = useCallback(async (showLoading = false) => {
+    const requestId = ++loadRequestRef.current
     if (showLoading || !loadedOnceRef.current) {
       setLoading(true)
     } else {
@@ -100,13 +102,16 @@ export default function TemplateManager() {
     }
     try {
       const list = await window.electron.template.list()
+      if (loadRequestRef.current !== requestId) return
       setTemplates(list)
       loadedOnceRef.current = true
     } catch (error) {
-      message.error(getErrorMessage(error, 'common.loadFailed'))
+      if (loadRequestRef.current === requestId) message.error(getErrorMessage(error, 'common.loadFailed'))
     } finally {
-      setLoading(false)
-      setRefreshing(false)
+      if (loadRequestRef.current === requestId) {
+        setLoading(false)
+        setRefreshing(false)
+      }
     }
   }, [])
 
@@ -147,7 +152,8 @@ export default function TemplateManager() {
   }
 
   const handleSave = async () => {
-    const values = await form.validateFields()
+    const values = await form.validateFields().catch(() => null)
+    if (!values) return
     setSaving(true)
     try {
       // 验证 JSON

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { AuthorWorkMode } from '../pages/Novel/author-workflow'
+import { readBrowserStorage, writeBrowserStorage } from '../utils/browser-storage'
 
 type AuthorWorkModeSource = 'auto' | 'manual'
 
@@ -13,29 +14,22 @@ interface AuthorWorkModeStore {
 
 const STORAGE_KEY = 'novelforge-author-work-mode'
 
-const memoryStorage = new Map<string, string>()
-
-function readStorage(key: string): string | null {
-  if (typeof localStorage !== 'undefined') return localStorage.getItem(key)
-  return memoryStorage.get(key) ?? null
-}
-
-function writeStorage(key: string, value: string) {
-  if (typeof localStorage !== 'undefined') {
-    localStorage.setItem(key, value)
-    return
-  }
-  memoryStorage.set(key, value)
+function isAuthorWorkMode(value: unknown): value is AuthorWorkMode {
+  return value === 'quick_start'
+    || value === 'asset_building'
+    || value === 'daily_push'
+    || value === 'revision_closure'
 }
 
 function loadStoredState(): { mode: AuthorWorkMode | null; source: AuthorWorkModeSource } {
-  const raw = readStorage(STORAGE_KEY)
+  const raw = readBrowserStorage(STORAGE_KEY)
   if (!raw) return { mode: null, source: 'auto' }
   try {
     const parsed = JSON.parse(raw) as { mode?: AuthorWorkMode | null; source?: AuthorWorkModeSource }
+    const mode = isAuthorWorkMode(parsed.mode) ? parsed.mode : null
     return {
-      mode: parsed.mode || null,
-      source: parsed.source === 'manual' ? 'manual' : 'auto',
+      mode,
+      source: mode && parsed.source === 'manual' ? 'manual' : 'auto',
     }
   } catch {
     return { mode: null, source: 'auto' }
@@ -43,7 +37,7 @@ function loadStoredState(): { mode: AuthorWorkMode | null; source: AuthorWorkMod
 }
 
 function persistState(mode: AuthorWorkMode | null, source: AuthorWorkModeSource) {
-  writeStorage(STORAGE_KEY, JSON.stringify({ mode, source }))
+  writeBrowserStorage(STORAGE_KEY, JSON.stringify({ mode, source }))
 }
 
 const stored = loadStoredState()

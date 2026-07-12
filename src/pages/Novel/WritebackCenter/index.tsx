@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Input, Modal, Select, Space, Spin, Table, Tag, message } from 'antd'
 import { CheckOutlined, EditOutlined, ReloadOutlined, RobotOutlined, StopOutlined } from '@ant-design/icons'
 import { useSearchParams } from 'react-router-dom'
@@ -13,7 +13,6 @@ import type {
 import { useNovelStore } from '../../../stores/novel.store'
 import { WorkspaceContextSummary, WorkspaceMetric, WorkspacePage, WorkspacePanel } from '../components/WorkspaceShell'
 import { useNovelWorkspaceActions } from '../workspace-shortcuts-context'
-import './index.css'
 import './index.css'
 
 interface Props {
@@ -34,7 +33,7 @@ const ALL_ASSET_TYPES: ChapterWritebackAssetType[] = [
 function parseNumber(value?: string | null): number | null {
   if (!value) return null
   const numeric = Number(value)
-  return Number.isFinite(numeric) && numeric > 0 ? numeric : null
+  return Number.isSafeInteger(numeric) && numeric > 0 ? numeric : null
 }
 
 function parseJson(raw?: string | null): Record<string, unknown> | null {
@@ -151,45 +150,80 @@ export default function WritebackCenterPage({ novelId }: Props) {
   const [editingDiff, setEditingDiff] = useState<ChapterWritebackDiff | null>(null)
   const [editingAfterState, setEditingAfterState] = useState('')
   const [editingReason, setEditingReason] = useState('')
-  const [loadedOnce, setLoadedOnce] = useState(false)
+  const loadedOnceRef = useRef(false)
+  const refreshRequestRef = useRef(0)
+  const routeValuesRef = useRef<{ chapterId: number | null; runId: number | null }>({ chapterId: null, runId: null })
+  const searchParamsRef = useRef(searchParams)
+  const internalRouteKeyRef = useRef<string | null>(null)
+  const actionInFlightRef = useRef(false)
 
   const selectedChapterId = parseNumber(searchParams.get('chapterId'))
   const selectedRunId = parseNumber(searchParams.get('runId'))
+  routeValuesRef.current = { chapterId: selectedChapterId, runId: selectedRunId }
+  searchParamsRef.current = searchParams
 
   const refresh = useCallback(async (chapterIdArg?: number | null, runIdArg?: number | null, showLoading = false) => {
-    if (showLoading || !loadedOnce) {
+    const requestId = ++refreshRequestRef.current
+    if (showLoading || !loadedOnceRef.current) {
       setLoading(true)
     } else {
       setRefreshing(true)
     }
     try {
       const chapterRows = await window.electron.chapter.list(novelId)
+      if (refreshRequestRef.current !== requestId) return
       setChapters(chapterRows)
-      const fallbackChapterId = chapterIdArg || selectedChapterId || chapterRows.at(-1)?.id || null
+      const requestedChapterId = chapterIdArg === undefined ? routeValuesRef.current.chapterId : chapterIdArg
+      const requestedRunId = runIdArg === undefined ? routeValuesRef.current.runId : runIdArg
+      const fallbackChapterId = requestedChapterId && chapterRows.some((chapter) => chapter.id === requestedChapterId)
+        ? requestedChapterId
+        : chapterRows.at(-1)?.id ?? null
       if (!fallbackChapterId) {
         setCenterData(null)
+        loadedOnceRef.current = true
+        const nextParams = new URLSearchParams(searchParamsRef.current)
+        nextParams.delete('chapterId')
+        nextParams.delete('runId')
+        const nextRouteKey = nextParams.toString()
+        if (nextRouteKey !== searchParamsRef.current.toString()) {
+          internalRouteKeyRef.current = nextRouteKey
+          setSearchParams(nextParams, { replace: true })
+        }
         return
       }
-      const nextData = await window.electron.writeback.getCenterData(fallbackChapterId, runIdArg || selectedRunId || undefined)
+      const nextData = await window.electron.writeback.getCenterData(fallbackChapterId, requestedRunId ?? undefined)
+      if (refreshRequestRef.current !== requestId) return
       setCenterData(nextData)
-      setLoadedOnce(true)
-      const nextParams = new URLSearchParams(searchParams)
+      loadedOnceRef.current = true
+      const nextParams = new URLSearchParams(searchParamsRef.current)
       nextParams.set('chapterId', String(fallbackChapterId))
       if (nextData.activeRun?.id) nextParams.set('runId', String(nextData.activeRun.id))
       else nextParams.delete('runId')
-      setSearchParams(nextParams, { replace: true })
+      const nextRouteKey = nextParams.toString()
+      if (nextRouteKey !== searchParamsRef.current.toString()) {
+        internalRouteKeyRef.current = nextRouteKey
+        setSearchParams(nextParams, { replace: true })
+      }
     } catch (error) {
+      if (refreshRequestRef.current !== requestId) return
       console.error(error)
       message.error(getErrorMessage(error, 'common.loadFailed'))
     } finally {
-      setLoading(false)
-      setRefreshing(false)
+      if (refreshRequestRef.current === requestId) {
+        setLoading(false)
+        setRefreshing(false)
+      }
     }
-  }, [loadedOnce, novelId, searchParams, selectedChapterId, selectedRunId, setSearchParams])
+  }, [novelId, setSearchParams])
 
   useEffect(() => {
-    void refresh(undefined, undefined, true)
-  }, [mutationToken, refresh])
+    const routeKey = searchParams.toString()
+    if (internalRouteKeyRef.current === routeKey) {
+      internalRouteKeyRef.current = null
+      return
+    }
+    void refresh(selectedChapterId, selectedRunId, true)
+  }, [mutationToken, refresh, searchParams, selectedChapterId, selectedRunId])
 
   const activeRun = centerData?.activeRun || null
   const filteredDiffs = useMemo(() => {
@@ -225,16 +259,21 @@ export default function WritebackCenterPage({ novelId }: Props) {
   }, [])
 
   const runAction = useCallback(async (task: () => Promise<unknown>, successText: string, runIdToReload?: number | null) => {
+    if (actionInFlightRef.current) return false
+    actionInFlightRef.current = true
     setActionLoading(true)
     try {
       await task()
-      await refresh(centerData?.chapter?.id, runIdToReload || activeRun?.id || null)
+      await refresh(centerData?.chapter?.id, runIdToReload ?? activeRun?.id ?? null)
       notifyWorkspaceMutation()
       message.success(successText)
+      return true
     } catch (error) {
       console.error(error)
       message.error(getErrorMessage(error, 'common.saveFailed'))
+      return false
     } finally {
+      actionInFlightRef.current = false
       setActionLoading(false)
     }
   }, [activeRun?.id, centerData?.chapter?.id, notifyWorkspaceMutation, refresh])
@@ -491,7 +530,7 @@ export default function WritebackCenterPage({ novelId }: Props) {
       <Modal
         title={editingDiff ? `编辑候选 · ${resolveDiffTitle(editingDiff)}` : '编辑候选'}
         open={Boolean(editingDiff)}
-        onCancel={closeEditModal}
+        onCancel={() => { if (!actionLoading) closeEditModal() }}
         onOk={() => {
           if (!editingDiff) return
           void runAction(
@@ -501,8 +540,12 @@ export default function WritebackCenterPage({ novelId }: Props) {
               diffReason: editingReason,
             }),
             '候选已更新。',
-          ).then(closeEditModal)
+          ).then((succeeded) => {
+            if (succeeded) closeEditModal()
+          })
         }}
+        cancelButtonProps={{ disabled: actionLoading }}
+        maskClosable={!actionLoading}
         width={860}
       >
         <div className="novel-writeback-center-page__modal-fields">

@@ -89,4 +89,13 @@ describe('author-work-mode.store', () => {
     expect(readStorage().getItem(STORAGE_KEY)).toContain('"mode":"quick_start"')
     expect(readStorage().getItem(STORAGE_KEY)).toContain('"source":"auto"')
   })
+
+  it('rejects an unknown persisted mode instead of leaking it into the UI', async () => {
+    readStorage().setItem(STORAGE_KEY, JSON.stringify({ mode: 'unknown-mode', source: 'manual' }))
+
+    const store = await loadStore()
+
+    expect(store.getState().mode).toBeNull()
+    expect(store.getState().source).toBe('auto')
+  })
 })

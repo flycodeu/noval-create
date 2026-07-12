@@ -157,10 +157,17 @@ export default function WorkspaceAIQualityBoard({
   const [snapshot, setSnapshot] = React.useState<Record<string, unknown> | null>(null)
   const [analysisLoading, setAnalysisLoading] = React.useState(false)
   const [repairLoading, setRepairLoading] = React.useState(false)
+  const [applyLoading, setApplyLoading] = React.useState(false)
   const [analysis, setAnalysis] = React.useState<WorkspaceQualityAnalyzeResult | null>(null)
   const [preview, setPreview] = React.useState<WorkspaceQualityRepairPreview | null>(null)
   const [selectedPatchIds, setSelectedPatchIds] = React.useState<string[]>([])
   const [extraRequirements, setExtraRequirements] = React.useState('')
+  const snapshotRequestRef = React.useRef(0)
+  const analysisRequestRef = React.useRef(0)
+  const repairRequestRef = React.useRef(0)
+  const contextVersionRef = React.useRef(0)
+  const applyInFlightRef = React.useRef(false)
+  const contextIdentity = `${novelId}:${workspaceKey}:${currentChapter?.id ?? ''}`
 
   const adapterContext = React.useMemo<WorkspaceQualityAdapterContext>(() => ({
     novelId,
@@ -226,30 +233,46 @@ export default function WorkspaceAIQualityBoard({
 
   const loadSnapshot = React.useCallback(async () => {
     if (!canFetch) return
+    const requestId = ++snapshotRequestRef.current
+    const contextVersion = contextVersionRef.current
     setSnapshotLoading(true)
     try {
       const nextSnapshot = activeController
         ? await activeController.getSnapshot()
         : await fallbackAdapter?.fetchSnapshot(adapterContext)
+      if (snapshotRequestRef.current !== requestId || contextVersionRef.current !== contextVersion) return
       setSnapshot(nextSnapshot || null)
       setAnalysis(null)
       setPreview(null)
       setSelectedPatchIds([])
     } catch (error) {
+      if (snapshotRequestRef.current !== requestId || contextVersionRef.current !== contextVersion) return
       console.error(error)
       message.error(getUserFacingMessage('workspaceQuality.snapshotLoadFailed'))
     } finally {
-      setSnapshotLoading(false)
+      if (snapshotRequestRef.current === requestId && contextVersionRef.current === contextVersion) setSnapshotLoading(false)
     }
   }, [activeController, adapterContext, canFetch, fallbackAdapter])
 
   React.useEffect(() => {
+    contextVersionRef.current += 1
+    snapshotRequestRef.current += 1
+    analysisRequestRef.current += 1
+    repairRequestRef.current += 1
+    setSnapshotLoading(false)
+    setAnalysisLoading(false)
+    setRepairLoading(false)
+    setAnalysis(null)
+    setPreview(null)
+    setSelectedPatchIds([])
     if (!open) return
     void loadSnapshot()
-  }, [loadSnapshot, open])
+  }, [contextIdentity, loadSnapshot, open])
 
   const handleAnalyze = React.useCallback(async () => {
     if (!snapshot) return
+    const requestId = ++analysisRequestRef.current
+    const contextVersion = contextVersionRef.current
     setAnalysisLoading(true)
     try {
       const result = await window.electron.ai.analyzeWorkspaceQuality({
@@ -258,19 +281,23 @@ export default function WorkspaceAIQualityBoard({
         workspaceSummary,
         contentSnapshot: snapshot,
       })
+      if (analysisRequestRef.current !== requestId || contextVersionRef.current !== contextVersion) return
       setAnalysis(result)
       setPreview(null)
       setSelectedPatchIds([])
     } catch (error) {
+      if (analysisRequestRef.current !== requestId || contextVersionRef.current !== contextVersion) return
       console.error(error)
       message.error(getUserFacingMessage('workspaceQuality.analysisFailed'))
     } finally {
-      setAnalysisLoading(false)
+      if (analysisRequestRef.current === requestId && contextVersionRef.current === contextVersion) setAnalysisLoading(false)
     }
   }, [adapterContext, snapshot, workspaceKey, workspaceLabel, workspaceSummary])
 
   const handleRepair = React.useCallback(async () => {
     if (!snapshot) return
+    const requestId = ++repairRequestRef.current
+    const contextVersion = contextVersionRef.current
     setRepairLoading(true)
     try {
       const result = await window.electron.ai.repairWorkspaceQuality({
@@ -281,19 +308,23 @@ export default function WorkspaceAIQualityBoard({
         issues: analysis?.globalIssues || [],
         extraRequirements,
       })
+      if (repairRequestRef.current !== requestId || contextVersionRef.current !== contextVersion) return
       const allPatchIds = [...result.fieldPatches, ...result.entityPatches].map((item) => item.id)
       setPreview(result)
       setSelectedPatchIds(allPatchIds)
     } catch (error) {
+      if (repairRequestRef.current !== requestId || contextVersionRef.current !== contextVersion) return
       console.error(error)
       message.error(getUserFacingMessage('workspaceQuality.previewFailed'))
     } finally {
-      setRepairLoading(false)
+      if (repairRequestRef.current === requestId && contextVersionRef.current === contextVersion) setRepairLoading(false)
     }
   }, [adapterContext, analysis?.globalIssues, extraRequirements, snapshot, workspaceKey, workspaceLabel, workspaceSummary])
 
   const handleApply = React.useCallback(async () => {
-    if (!snapshot || !preview) return
+    if (!snapshot || !preview || applyInFlightRef.current) return
+    applyInFlightRef.current = true
+    setApplyLoading(true)
     const selectedIds = new Set(selectedPatchIds)
     const allPatches = [...preview.fieldPatches, ...preview.entityPatches]
     const nextSnapshot = applySelectedPatches(snapshot, preview.patchedSnapshot, allPatches, selectedIds)
@@ -316,6 +347,9 @@ export default function WorkspaceAIQualityBoard({
     } catch (error) {
       console.error(error)
       message.error(getUserFacingMessage('workspaceQuality.applyFailed'))
+    } finally {
+      applyInFlightRef.current = false
+      setApplyLoading(false)
     }
   }, [
     activeController,
@@ -551,7 +585,8 @@ export default function WorkspaceAIQualityBoard({
                   type="primary"
                   icon={<CheckOutlined />}
                   className="workspace-ai-quality-board__apply-button"
-                  disabled={selectedPatchIds.length === 0}
+                  loading={applyLoading}
+                  disabled={selectedPatchIds.length === 0 || applyLoading}
                   onClick={() => void handleApply()}
                 >
                   应用已选修复

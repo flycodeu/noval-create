@@ -76,9 +76,18 @@ export function useTimelineWorkspace(
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const route = useMemo(() => parseTimelineRoute(searchParams), [searchParams])
-  const routeKeyRef = useRef('')
+  const routeKeyRef = useRef<string | null>(null)
   const suppressRefreshRef = useRef(false)
   const loadedOnceRef = useRef(false)
+  const refreshRequestRef = useRef(0)
+  const detailRequestRef = useRef(0)
+  const sharedRequestRef = useRef(0)
+  const selectedIdRef = useRef<number | null>(null)
+  const creatingRef = useRef(false)
+  const partsRequestRef = useRef({ filter: 0, form: 0 })
+  const chaptersRequestRef = useRef({ filter: 0, form: 0 })
+  const segmentsRequestRef = useRef(0)
+  const saveActionRef = useRef(false)
 
   const { currentNovel } = useNovelStore()
   const [form] = Form.useForm<TimelineFormValues>()
@@ -243,6 +252,7 @@ export function useTimelineWorkspace(
   )
 
   const loadShared = useCallback(async () => {
+    const requestId = ++sharedRequestRef.current
     const [volumeRows, arcRows, nextFilters, nextWorkflowStats] = await Promise.all([
       window.electron.structure.listVolumes(novelId),
       window.electron.outline.getArcs(novelId),
@@ -250,6 +260,7 @@ export function useTimelineWorkspace(
       loadWorkflowStats(novelId),
     ])
 
+    if (sharedRequestRef.current !== requestId) return
     setVolumes(volumeRows)
     setArcs(arcRows)
     setFilterOptions(nextFilters)
@@ -271,7 +282,10 @@ export function useTimelineWorkspace(
     setItemOptions((prev) => mergeEntitiesById(rows, prev))
   }, [novelId])
 
-  const hydrateOptions = useCallback(async (event?: TimelineEvent | null) => {
+  const hydrateOptions = useCallback(async (
+    event?: TimelineEvent | null,
+    isCurrent: () => boolean = () => true,
+  ) => {
     const locationId = event?.locationMapId
     const characterIds = [
       ...parseNumberArray(event?.presentCharacterIdsJson),
@@ -295,13 +309,20 @@ export function useTimelineWorkspace(
       Promise.all(itemIds.map((id) => window.electron.item.get(id))),
     ])
 
+    if (!isCurrent()) return
     setCharacterOptions(mergeEntitiesById(baseCharacters, extraCharacters))
     setLocationOptions(mergeEntitiesById(baseLocations, [extraLocation]))
     setItemOptions(mergeEntitiesById(baseItems, extraItems))
   }, [novelId])
 
-  const loadPartsFor = useCallback(async (volumeId?: number, target: 'filter' | 'form' = 'filter') => {
+  const loadPartsFor = useCallback(async (
+    volumeId?: number,
+    target: 'filter' | 'form' = 'filter',
+    isCurrent: () => boolean = () => true,
+  ) => {
+    const requestId = ++partsRequestRef.current[target]
     if (!volumeId) {
+      if (!isCurrent()) return []
       if (target === 'filter') {
         setFilterParts([])
       } else {
@@ -311,6 +332,7 @@ export function useTimelineWorkspace(
     }
 
     const result = await window.electron.structure.listPartsPage(volumeId, 1, 200)
+    if (partsRequestRef.current[target] !== requestId || !isCurrent()) return []
 
     if (target === 'filter') {
       setFilterParts(result.items)
@@ -321,8 +343,14 @@ export function useTimelineWorkspace(
     return result.items
   }, [])
 
-  const loadChaptersFor = useCallback(async (partId?: number, target: 'filter' | 'form' = 'filter') => {
+  const loadChaptersFor = useCallback(async (
+    partId?: number,
+    target: 'filter' | 'form' = 'filter',
+    isCurrent: () => boolean = () => true,
+  ) => {
+    const requestId = ++chaptersRequestRef.current[target]
     if (!partId) {
+      if (!isCurrent()) return []
       if (target === 'filter') {
         setFilterChapters([])
       } else {
@@ -332,6 +360,7 @@ export function useTimelineWorkspace(
     }
 
     const result = await window.electron.structure.listChaptersPage(partId, 1, 200)
+    if (chaptersRequestRef.current[target] !== requestId || !isCurrent()) return []
 
     if (target === 'filter') {
       setFilterChapters(result.items)
@@ -342,45 +371,60 @@ export function useTimelineWorkspace(
     return result.items
   }, [])
 
-  const loadSegmentsFor = useCallback(async (chapterId?: number) => {
+  const loadSegmentsFor = useCallback(async (
+    chapterId?: number,
+    isCurrent: () => boolean = () => true,
+  ) => {
+    const requestId = ++segmentsRequestRef.current
     if (!chapterId) {
+      if (!isCurrent()) return []
       setFormSegments([])
       return []
     }
 
     const result = await window.electron.structure.listSegmentsPage(chapterId, 1, 200)
+    if (segmentsRequestRef.current !== requestId || !isCurrent()) return []
     setFormSegments(result.items)
     return result.items
   }, [])
 
   const loadEventDetail = useCallback(async (id: number) => {
+    const requestId = ++detailRequestRef.current
+    selectedIdRef.current = id
+    const isCurrent = () => detailRequestRef.current === requestId
     const row = await window.electron.timeline.get(id)
+    if (!isCurrent()) return null
     setSelectedEvent(row)
     setSelectedId(row?.id || null)
 
     if (row) {
+      selectedIdRef.current = row.id
+      creatingRef.current = false
       setCreating(false)
       form.setFieldsValue(toTimelineFormValues(row, defaultMode, defaultPrecision, defaultType))
 
-      if (row.volumeId) await loadPartsFor(row.volumeId, 'form')
-      if (row.partId) await loadChaptersFor(row.partId, 'form')
+      if (row.volumeId) await loadPartsFor(row.volumeId, 'form', isCurrent)
+      if (row.partId) await loadChaptersFor(row.partId, 'form', isCurrent)
+      if (!isCurrent()) return null
 
       let segmentChapterId = row.chapterStartId || row.chapterEndId
       if (!segmentChapterId && row.segmentId) {
         const segment = await window.electron.structure.getSegment(row.segmentId)
+        if (!isCurrent()) return null
         segmentChapterId = segment?.chapterId
       }
 
-      await loadSegmentsFor(segmentChapterId)
-      await hydrateOptions(row)
+      await loadSegmentsFor(segmentChapterId, isCurrent)
+      await hydrateOptions(row, isCurrent)
     } else {
-      await hydrateOptions(null)
+      selectedIdRef.current = null
+      await hydrateOptions(null, isCurrent)
     }
 
-    return row
+    return isCurrent() ? row : null
   }, [defaultMode, defaultPrecision, defaultType, form, hydrateOptions, loadChaptersFor, loadPartsFor, loadSegmentsFor])
 
-  const buildQuery = useCallback((pageValue = page): TimelineQueryInput => ({
+  const buildQuery = useCallback((pageValue: number): TimelineQueryInput => ({
     novelId,
     page: pageValue,
     pageSize: 100,
@@ -392,7 +436,7 @@ export function useTimelineWorkspace(
     ...(partFilter !== 'all' ? { partId: partFilter } : {}),
     ...(chapterFilter !== 'all' ? { chapterId: chapterFilter } : {}),
     ...(segmentFilter !== 'all' ? { segmentId: segmentFilter } : {}),
-  }), [chapterFilter, novelId, page, partFilter, segmentFilter, statusFilter, typeFilter, volumeFilter])
+  }), [chapterFilter, novelId, partFilter, segmentFilter, statusFilter, typeFilter, volumeFilter])
 
   const buildStatsQuery = useCallback((query: TimelineQueryInput) => {
     const { page: _page, pageSize: _pageSize, ...rest } = query
@@ -400,14 +444,23 @@ export function useTimelineWorkspace(
   }, [])
 
   const buildRouteQuery = useCallback((): TimelineQueryInput => ({
-    ...buildQuery(1),
+    novelId,
+    page: 1,
+    pageSize: 100,
+    sortBy: 'timeSortValue',
+    sortDirection: 'asc',
+    ...(statusFilter !== 'all' ? { status: statusFilter } : {}),
+    ...(typeFilter !== 'all' ? { eventType: typeFilter } : {}),
     ...(route.volumeId ? { volumeId: route.volumeId } : {}),
     ...(route.partId ? { partId: route.partId } : {}),
     ...(route.chapterId ? { chapterId: route.chapterId } : {}),
     ...(route.segmentId ? { segmentId: route.segmentId } : {}),
-  }), [buildQuery, route.chapterId, route.partId, route.segmentId, route.volumeId])
+  }), [novelId, route.chapterId, route.partId, route.segmentId, route.volumeId, statusFilter, typeFilter])
 
   const refreshPage = useCallback(async (preferredId?: number | null, routeAction?: string | null, showLoading = false) => {
+    const requestId = ++refreshRequestRef.current
+    const detailRequestAtStart = detailRequestRef.current
+    const isCurrent = () => refreshRequestRef.current === requestId
     if (showLoading || !loadedOnceRef.current) {
       setLoading(true)
     } else {
@@ -420,12 +473,16 @@ export function useTimelineWorkspace(
         window.electron.timeline.query(query),
         window.electron.timeline.getStats(buildStatsQuery(query)),
       ])
+      if (!isCurrent()) return
 
       setPageData(list)
       setStats(summary)
       loadedOnceRef.current = true
 
       if (routeAction === 'new') {
+        detailRequestRef.current += 1
+        selectedIdRef.current = null
+        creatingRef.current = true
         const anchor = {
           volumeId: route.volumeId ?? (volumeFilter === 'all' ? undefined : volumeFilter),
           partId: route.partId ?? (partFilter === 'all' ? undefined : partFilter),
@@ -439,18 +496,29 @@ export function useTimelineWorkspace(
         setSelectedEvent(null)
         form.setFieldsValue(buildDefaultTimelineValues(defaultMode, defaultPrecision, defaultType, anchor, list.total + 1))
 
-        if (anchor.volumeId) await loadPartsFor(anchor.volumeId, 'form')
-        if (anchor.partId) await loadChaptersFor(anchor.partId, 'form')
-        if (anchor.chapterStartId) await loadSegmentsFor(anchor.chapterStartId)
+        if (anchor.volumeId) await loadPartsFor(anchor.volumeId, 'form', isCurrent)
+        if (anchor.partId) await loadChaptersFor(anchor.partId, 'form', isCurrent)
+        if (anchor.chapterStartId) await loadSegmentsFor(anchor.chapterStartId, isCurrent)
 
-        await hydrateOptions(null)
+        await hydrateOptions(null, isCurrent)
         return
       }
 
-      const nextId = preferredId ?? route.eventId ?? selectedId ?? list.items[0]?.id ?? null
+      const hasExplicitId = typeof preferredId === 'number' || typeof route.eventId === 'number'
+      const explicitId = typeof preferredId === 'number' ? preferredId : route.eventId
+      if (!hasExplicitId && detailRequestRef.current !== detailRequestAtStart) return
+      if (!hasExplicitId && creatingRef.current) return
+      const currentSelectedId = selectedIdRef.current
+      const nextId = explicitId
+        ?? (list.items.some((item) => item.id === currentSelectedId) ? currentSelectedId : null)
+        ?? list.items[0]?.id
+        ?? null
       if (nextId) {
         await loadEventDetail(nextId)
       } else {
+        detailRequestRef.current += 1
+        selectedIdRef.current = null
+        creatingRef.current = false
         setSelectedId(null)
         setSelectedEvent(null)
         setCreating(false)
@@ -458,11 +526,18 @@ export function useTimelineWorkspace(
         setFormParts([])
         setFormChapters([])
         setFormSegments([])
-        await hydrateOptions(null)
+        await hydrateOptions(null, isCurrent)
+      }
+    } catch (error) {
+      if (isCurrent()) {
+        console.error(error)
+        message.error(getErrorMessage(error, 'common.loadFailed'))
       }
     } finally {
-      setLoading(false)
-      setRefreshing(false)
+      if (isCurrent()) {
+        setLoading(false)
+        setRefreshing(false)
+      }
     }
   }, [
     buildQuery,
@@ -485,14 +560,15 @@ export function useTimelineWorkspace(
     route.partId,
     route.segmentId,
     route.volumeId,
-    selectedId,
     segmentFilter,
     volumeFilter,
   ])
 
   useEffect(() => {
-    void loadShared()
-    void hydrateOptions(null)
+    void Promise.all([loadShared(), hydrateOptions(null)]).catch((error) => {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.loadFailed'))
+    })
     generateForm.setFieldsValue(getInitialGenerateValues(timelineGenerationPreset))
   }, [generateForm, hydrateOptions, loadShared, timelineGenerationPreset])
 
@@ -527,7 +603,7 @@ export function useTimelineWorkspace(
   ])
 
   useEffect(() => {
-    if (!routeKeyRef.current) return
+    if (routeKeyRef.current === null) return
     if (suppressRefreshRef.current) {
       suppressRefreshRef.current = false
       return
@@ -631,6 +707,9 @@ export function useTimelineWorkspace(
   }, [lastSelectedListId, loadEventDetail, pageData.items])
 
   const handleNew = useCallback(() => {
+    detailRequestRef.current += 1
+    selectedIdRef.current = null
+    creatingRef.current = true
     setCreating(true)
     setSelectedId(null)
     setSelectedEvent(null)
@@ -650,6 +729,9 @@ export function useTimelineWorkspace(
     ))
     void hydrateOptions(null)
   }, [chapterFilter, clearSelection, defaultMode, defaultPrecision, defaultType, form, hydrateOptions, pageData.total, partFilter, segmentFilter, volumeFilter])
+
+  useEffect(() => { selectedIdRef.current = selectedId }, [selectedId])
+  useEffect(() => { creatingRef.current = creating }, [creating])
 
   const handleFormValuesChange = useCallback((changed: Partial<TimelineFormValues>, values: TimelineFormValues) => {
     if ('volumeId' in changed) {
@@ -712,10 +794,12 @@ export function useTimelineWorkspace(
   }, [chapterById, form, partById, segmentById])
 
   const handleSave = useCallback(async () => {
-    const values = await form.validateFields()
-    setSaving(true)
-
+    if (saveActionRef.current) return false
+    saveActionRef.current = true
     try {
+      const values = await form.validateFields().catch(() => null)
+      if (!values) return false
+      setSaving(true)
       if (selectedEvent?.id) {
         await window.electron.timeline.update(selectedEvent.id, serializeTimelineValues(values))
         await refreshPage(selectedEvent.id)
@@ -726,10 +810,13 @@ export function useTimelineWorkspace(
 
       setCreating(false)
       message.success(getUserFacingMessage('timeline.saved'))
+      return true
     } catch (error) {
       console.error(error)
       message.error(getErrorMessage(error, 'timeline.saveFailed'))
+      return false
     } finally {
+      saveActionRef.current = false
       setSaving(false)
     }
   }, [form, novelId, refreshPage, selectedEvent?.id])

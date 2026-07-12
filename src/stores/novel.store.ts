@@ -78,10 +78,16 @@ export const useNovelStore = create<NovelStore>((set) => ({
       __version: state.__version + 1,
     }
   }),
-  setChapters: (chapters) => set((state) => ({
-    chapters: cloneChapters(chapters),
-    __version: state.__version + 1,
-  })),
+  setChapters: (chapters) => set((state) => {
+    const nextChapters = cloneChapters(chapters)
+    const currentChapterStillExists = state.currentChapterId === null
+      || nextChapters.some((chapter) => chapter.id === state.currentChapterId)
+    return {
+      chapters: nextChapters,
+      currentChapterId: currentChapterStillExists ? state.currentChapterId : null,
+      __version: state.__version + 1,
+    }
+  }),
   setCurrentChapterId: (id) => set((state) => ({
     currentChapterId: id,
     __version: state.__version + 1,

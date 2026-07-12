@@ -355,6 +355,10 @@ export default function ItemsWorkspace({ novelId }: Props) {
   const [page, setPage] = useState(1)
   const [creating, setCreating] = useState(false)
   const routeFocusRef = useRef<number | null>(null)
+  const selectedIdRef = useRef<number | null>(null)
+  const creatingRef = useRef(false)
+  const pageRequestRef = useRef(0)
+  const detailRequestRef = useRef(0)
   const routeItemId = useMemo(() => parseRouteId(searchParams.get('itemId')), [searchParams])
   const [generateOpen, setGenerateOpen] = useState(false)
   const worldRules = useMemo(
@@ -416,6 +420,7 @@ export default function ItemsWorkspace({ novelId }: Props) {
   const hydrateOptions = useCallback(async (
     context: StoryItemDetailContext = EMPTY_DETAIL,
     item?: StoryItem | null,
+    isCurrent: () => boolean = () => true,
   ) => {
     const activeItem = item || context.item || null
     const parentId = context.parentTemplate?.id ?? activeItem?.parentItemId
@@ -444,46 +449,60 @@ export default function ItemsWorkspace({ novelId }: Props) {
       ),
     ])
 
+    if (!isCurrent()) return
     setTemplateOptions(mergeById(baseTemplates, [context.parentTemplate, extraTemplate]))
     setCharacterOptions(mergeById(baseCharacters, [context.ownerCharacter, ...context.relatedCharacters, extraOwner, ...extraCharacters]))
     setLocationOptions(mergeById(baseLocations, [context.location, ...context.relatedLocations, extraLocation]))
     setEventOptions(mergeById(baseEvents, [...context.relatedEvents, ...extraEvents]))
   }, [novelId])
 
-  const loadLinkRecommendations = useCallback(async (itemId: number) => {
+  const loadLinkRecommendations = useCallback(async (
+    itemId: number,
+    isCurrent: () => boolean = () => true,
+  ) => {
+    if (!isCurrent()) return null
     setLoadingRecommendations(true)
     try {
       const result = await window.electron.item.getLinkRecommendations(itemId)
+      if (!isCurrent()) return null
       setLinkRecommendations(result)
       return result
     } finally {
-      setLoadingRecommendations(false)
+      if (isCurrent()) setLoadingRecommendations(false)
     }
   }, [])
 
   const loadItemDetail = useCallback(async (itemId: number) => {
+    const requestId = ++detailRequestRef.current
+    selectedIdRef.current = itemId
+    creatingRef.current = false
+    setCreating(false)
     const context = await window.electron.item.getDetailContext(itemId)
+    if (detailRequestRef.current !== requestId) return null
     if (!context.item) {
+      selectedIdRef.current = null
       setSelectedId(null)
       setSelectedItem(null)
       setDetailContext(EMPTY_DETAIL)
       setLinkRecommendations(null)
       form.resetFields()
-      return
+      return null
     }
 
-    setCreating(false)
     setSelectedId(context.item.id)
     setSelectedItem(context.item)
     setDetailContext(context)
+    setListMode(context.item.itemKind)
     form.setFieldsValue(toFormValues(context.item))
+    const isCurrent = () => detailRequestRef.current === requestId
     await Promise.all([
-      hydrateOptions(context, context.item),
-      loadLinkRecommendations(context.item.id),
+      hydrateOptions(context, context.item, isCurrent),
+      loadLinkRecommendations(context.item.id, isCurrent),
     ])
+    return isCurrent() ? context.item : null
   }, [form, hydrateOptions, loadLinkRecommendations])
 
-  const buildQuery = useCallback((targetPage = page): StoryItemQueryInput => ({
+  const buildQuery = useCallback((targetPage: number): StoryItemQueryInput => ({
     novelId,
     itemKind: listMode,
     page: targetPage,
@@ -491,9 +510,12 @@ export default function ItemsWorkspace({ novelId }: Props) {
     recordStatus: recordStatusFilter,
     ...(categoryFilter !== 'all' ? { category: categoryFilter } : {}),
     ...(keyword.trim() ? { keyword: keyword.trim() } : {}),
-  }), [categoryFilter, keyword, listMode, novelId, page, recordStatusFilter])
+  }), [categoryFilter, keyword, listMode, novelId, recordStatusFilter])
 
-  const refreshListState = useCallback(async (targetPage = page) => {
+  const refreshListState = useCallback(async (
+    targetPage: number,
+    isCurrent: () => boolean = () => true,
+  ) => {
     const query = buildQuery(targetPage)
     const [list, summary, nextFilters, nextWorkflowStats] = await Promise.all([
       window.electron.item.query(query),
@@ -501,38 +523,45 @@ export default function ItemsWorkspace({ novelId }: Props) {
       window.electron.item.getFilterOptions(novelId),
       loadWorkflowStats(novelId),
     ])
+    if (!isCurrent()) return list
     setPageData(list)
     setStats(summary)
     setFilters(nextFilters)
     setWorkflowStats(nextWorkflowStats)
     return list
-  }, [buildQuery, novelId, page])
+  }, [buildQuery, novelId])
 
   const loadPage = useCallback(async (
     preferredId?: number | null,
-    targetPage = page,
+    targetPage = 1,
     options: { preserveCreating?: boolean } = {},
   ) => {
+    const requestId = ++pageRequestRef.current
+    const detailRequestAtStart = detailRequestRef.current
+    const isCurrent = () => pageRequestRef.current === requestId
     setLoading(true)
     try {
-      const list = await refreshListState(targetPage)
-      const matchedId = typeof preferredId === 'number' && list.items.some((item) => item.id === preferredId)
-        ? preferredId
-        : null
+      const list = await refreshListState(targetPage, isCurrent)
+      if (!isCurrent()) return
 
-      if (matchedId !== null) {
-        await loadItemDetail(matchedId)
-        return
+      if (typeof preferredId === 'number') {
+        const loadedItem = await loadItemDetail(preferredId)
+        if (!isCurrent() || loadedItem) return
       }
 
-      if (options.preserveCreating) {
-        return
-      }
+      if (detailRequestRef.current !== detailRequestAtStart) return
+      if (options.preserveCreating && creatingRef.current) return
 
-      const fallbackId = list.items[0]?.id ?? null
+      const currentSelectedId = selectedIdRef.current
+      const fallbackId = list.items.some((item) => item.id === currentSelectedId)
+        ? currentSelectedId
+        : list.items[0]?.id ?? null
       if (fallbackId !== null) {
         await loadItemDetail(fallbackId)
       } else {
+        detailRequestRef.current += 1
+        selectedIdRef.current = null
+        creatingRef.current = false
         setSelectedId(null)
         setSelectedItem(null)
         setDetailContext(EMPTY_DETAIL)
@@ -541,18 +570,26 @@ export default function ItemsWorkspace({ novelId }: Props) {
         await hydrateOptions()
       }
     } finally {
-      setLoading(false)
+      if (isCurrent()) setLoading(false)
     }
-  }, [form, hydrateOptions, loadItemDetail, page, refreshListState])
+  }, [form, hydrateOptions, loadItemDetail, refreshListState])
 
+  useEffect(() => { selectedIdRef.current = selectedId }, [selectedId])
+  useEffect(() => { creatingRef.current = creating }, [creating])
   useEffect(() => {
-    void loadPage(selectedId, page, { preserveCreating: creating })
-  }, [categoryFilter, creating, keyword, listMode, loadPage, novelId, page, recordStatusFilter, selectedId])
+    void loadPage(undefined, page, { preserveCreating: true }).catch((error) => {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.loadFailed'))
+    })
+  }, [loadPage, page])
   useEffect(() => {
     if (!routeItemId || routeFocusRef.current === routeItemId) return
     routeFocusRef.current = routeItemId
     setPage(1)
-    void loadPage(routeItemId, 1, { preserveCreating: false })
+    void loadPage(routeItemId, 1, { preserveCreating: false }).catch((error) => {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.loadFailed'))
+    })
   }, [loadPage, routeItemId])
 
   useEffect(() => {
@@ -570,6 +607,9 @@ export default function ItemsWorkspace({ novelId }: Props) {
   }, [generateForm, itemGenerationProfile.batchSize, itemGenerationProfile.defaultBatch])
 
   const handleNew = (kind: 'template' | 'instance') => {
+    detailRequestRef.current += 1
+    selectedIdRef.current = null
+    creatingRef.current = true
     setCreating(true)
     setListMode(kind)
     setSelectedId(null)
@@ -597,7 +637,8 @@ export default function ItemsWorkspace({ novelId }: Props) {
   }
 
   const handleSave = async () => {
-    const values = await form.validateFields()
+    const values = await form.validateFields().catch(() => null)
+    if (!values) return
     setSaving(true)
     try {
       if (selectedItem?.id) {
@@ -656,7 +697,8 @@ export default function ItemsWorkspace({ novelId }: Props) {
       return
     }
 
-    const values = await generateForm.validateFields()
+    const values = await generateForm.validateFields().catch(() => null)
+    if (!values) return
     setGenerating(true)
     try {
       await window.electron.item.generate(novelId, values)

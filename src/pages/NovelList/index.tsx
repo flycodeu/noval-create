@@ -117,6 +117,7 @@ function getWizardStepItems(launchMode: NovelLaunchMode) {
 export default function NovelList() {
   const navigate = useNavigate()
   const { novels, setNovels } = useNovelStore()
+  const loadVersionRef = React.useRef(0)
   const [loading, setLoading] = useState(true)
   const [workspaceSnapshots, setWorkspaceSnapshots] = useState<Record<number, WorkspaceSnapshot>>({})
   const [search, setSearch] = useState('')
@@ -165,29 +166,50 @@ export default function NovelList() {
       }
     }))
 
-    setWorkspaceSnapshots(Object.fromEntries(entries))
+    return Object.fromEntries(entries)
   }, [])
 
   const loadNovels = useCallback(async () => {
+    const requestId = ++loadVersionRef.current
     setLoading(true)
     try {
       const list = await window.electron.novel.list()
+      if (requestId !== loadVersionRef.current) return
       setNovels(list)
-      await loadWorkspaceSnapshots(list)
+      const snapshots = await loadWorkspaceSnapshots(list)
+      if (requestId !== loadVersionRef.current) return
+      setWorkspaceSnapshots(snapshots)
     } catch (error) {
-      message.error(getErrorMessage(error, 'novel.listLoadFailed'))
+      if (requestId === loadVersionRef.current) {
+        message.error(getErrorMessage(error, 'novel.listLoadFailed'))
+      }
     } finally {
-      setLoading(false)
+      if (requestId === loadVersionRef.current) setLoading(false)
     }
   }, [loadWorkspaceSnapshots, setNovels])
 
   useEffect(() => {
+    let active = true
     void loadNovels()
-    void window.electron.template.list('style').then(setStyleTemplates)
-    void window.electron.template.list('world').then(setWorldTemplates)
-    void window.electron.model.list().then(setModelConfigs)
+    void Promise.allSettled([
+      window.electron.template.list('style'),
+      window.electron.template.list('world'),
+      window.electron.model.list(),
+    ]).then(([styles, worlds, models]) => {
+      if (!active) return
+      if (styles.status === 'fulfilled') setStyleTemplates(styles.value)
+      if (worlds.status === 'fulfilled') setWorldTemplates(worlds.value)
+      if (models.status === 'fulfilled') setModelConfigs(models.value)
+      if ([styles, worlds, models].some((result) => result.status === 'rejected')) {
+        message.error(getUserFacingMessage('common.loadFailed'))
+      }
+    })
     setSelectedLaunchMode('professional_longform')
     wizardForm.setFieldsValue({ launchMode: 'professional_longform', targetWords: 200000 })
+    return () => {
+      active = false
+      loadVersionRef.current += 1
+    }
   }, [loadNovels, wizardForm])
 
   const filteredNovels = useMemo(() => {
@@ -250,7 +272,8 @@ export default function NovelList() {
       'coreConflict',
       'tabooRules',
       'endgameDirection',
-    ])
+    ]).catch(() => null)
+    if (!values) return
     const allValues = wizardForm.getFieldsValue(true) as Partial<WizardFormValues>
     const writingContractTags = normalizeWritingContractTags(allValues.writingContractTags)
     const writingContractError = getWritingContractValidationError(writingContractTags)
@@ -338,7 +361,7 @@ export default function NovelList() {
       await loadNovels()
       resetWizard()
       navigate(`/novels/${novelId}/overview`)
-        message.success(getUserFacingMessage('novel.fastLaunchCreated'))
+      message.success(getUserFacingMessage('novel.fastLaunchCreated'))
     } catch (error) {
       console.error(error)
       message.error(getErrorMessage(error, 'novel.createFailed'))
@@ -350,7 +373,8 @@ export default function NovelList() {
   const handleWizardNext = async () => {
     if (selectedLaunchMode === 'fast_launch') {
       if (wizardStep === 0) {
-        await wizardForm.validateFields(['genreId', 'writingContractTags'])
+        const values = await wizardForm.validateFields(['genreId', 'writingContractTags']).catch(() => null)
+        if (!values) return
         setWizardStep(1)
         return
       }
@@ -360,13 +384,15 @@ export default function NovelList() {
     }
 
     if (wizardStep === 0) {
-      await wizardForm.validateFields(['genreId', 'writingContractTags'])
+      const values = await wizardForm.validateFields(['genreId', 'writingContractTags']).catch(() => null)
+      if (!values) return
       setWizardStep(1)
       return
     }
 
     if (wizardStep === 1) {
-      const values = await wizardForm.validateFields(['userBackground'])
+      const values = await wizardForm.validateFields(['userBackground']).catch(() => null)
+      if (!values) return
       setWizardLoading(true)
       try {
         const allValues = wizardForm.getFieldsValue(true) as Partial<WizardFormValues>
@@ -398,7 +424,8 @@ export default function NovelList() {
       return
     }
 
-    const values = await wizardForm.validateFields(['title', 'synopsis', 'targetWords'])
+    const values = await wizardForm.validateFields(['title', 'synopsis', 'targetWords']).catch(() => null)
+    if (!values) return
     const allValues = wizardForm.getFieldsValue(true) as Partial<WizardFormValues>
     const writingContractTags = normalizeWritingContractTags(allValues.writingContractTags)
     const writingContractError = getWritingContractValidationError(writingContractTags)

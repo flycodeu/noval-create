@@ -24,6 +24,7 @@ import {
   StopOutlined,
 } from '@ant-design/icons'
 import type { Task, WorldRulesAutoGenerateStatus } from '../../../types'
+import { parseTaskEventId } from '../../../shared/task-stream-events'
 import { useNovelStore } from '../../../stores/novel.store'
 import type { GenreWorldRules } from '../../../shared/genre-system'
 import {
@@ -169,13 +170,18 @@ export default function WorldRules({ novelId }: Props) {
     [currentNovel?.genreName],
   )
   const watchedValues = Form.useWatch([], form) as GenreWorldRules | undefined
+  const autoStatusRequestRef = React.useRef(0)
+  const autoActionRef = React.useRef(false)
+  const manualGenerationRef = React.useRef(false)
   const liveRules = useMemo(
     () => normalizeFormRules((watchedValues || parsedRules) as unknown as Record<string, unknown>, currentNovel?.genreName),
     [currentNovel?.genreName, parsedRules, watchedValues],
   )
 
   const loadAutoStatus = useCallback(async (applyDraft = false) => {
+    const requestId = ++autoStatusRequestRef.current
     const latestTask = await window.electron.worldRules.getLatestAutoGenerateTask(novelId)
+    if (autoStatusRequestRef.current !== requestId) return null
     setAutoTask(latestTask)
 
     if (!latestTask) {
@@ -184,6 +190,7 @@ export default function WorldRules({ novelId }: Props) {
     }
 
     const latestStatus = await window.electron.worldRules.getAutoGenerateStatus(latestTask.id) || EMPTY_AUTO_STATUS
+    if (autoStatusRequestRef.current !== requestId) return null
     setAutoStatus(latestStatus)
     if (applyDraft && latestStatus.workingRules) {
       form.setFieldsValue(latestStatus.workingRules)
@@ -196,7 +203,10 @@ export default function WorldRules({ novelId }: Props) {
   }, [form, parsedRules])
 
   useEffect(() => {
-    void loadAutoStatus(true)
+    void loadAutoStatus(true).catch((error) => {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.loadFailed'))
+    })
   }, [loadAutoStatus])
 
   useEffect(() => {
@@ -213,19 +223,16 @@ export default function WorldRules({ novelId }: Props) {
     if (!['running', 'cancel_requested'].includes(autoTask.status || '')) return
 
     const reload = () => {
-      void loadAutoStatus(true)
+      void loadAutoStatus(true).catch(console.error)
     }
     const unsubProgress = window.electron.on('task:progress', (data: unknown) => {
-      const payload = data as { taskId: number }
-      if (payload?.taskId === autoTask.id) reload()
+      if (parseTaskEventId(data) === autoTask.id) reload()
     })
     const unsubStatus = window.electron.on('task:status-change', (data: unknown) => {
-      const payload = data as { taskId: number }
-      if (payload?.taskId === autoTask.id) reload()
+      if (parseTaskEventId(data) === autoTask.id) reload()
     })
     const unsubComplete = window.electron.on('task:complete', (data: unknown) => {
-      const payload = data as { taskId: number }
-      if (payload?.taskId === autoTask.id) reload()
+      if (parseTaskEventId(data) === autoTask.id) reload()
     })
     const timer = setInterval(reload, 5000)
 
@@ -330,10 +337,12 @@ export default function WorldRules({ novelId }: Props) {
   }, [handleClearCurrentFlow, registerClearHandler])
 
   const handleGenerateWorldRules = useCallback(async (mode: 'all' | 'section', action: 'generate' | 'expand') => {
+    if (manualGenerationRef.current) return
     if (hasRunningAutoTask) {
       message.warning(getUserFacingMessage('worldRules.stopAutoBeforeManual'))
       return
     }
+    manualGenerationRef.current = true
 
     const nextAction: RunningAction = mode === 'all'
       ? 'all-generate'
@@ -376,12 +385,14 @@ export default function WorldRules({ novelId }: Props) {
         detail: error instanceof Error ? error.message : '请稍后重试',
       }))
     } finally {
+      manualGenerationRef.current = false
       setRunningAction(null)
     }
   }, [activeSectionMeta.label, activeTab, form, hasRunningAutoTask, liveRules, novelId])
 
   const handleStartAutoGenerate = useCallback(async () => {
-    if (isGenerating) return
+    if (isGenerating || autoActionRef.current) return
+    autoActionRef.current = true
 
     setAutoLoading(true)
     setGenerationProgress(null)
@@ -395,25 +406,32 @@ export default function WorldRules({ novelId }: Props) {
     } catch (error) {
       message.error(getErrorMessage(error, 'worldRules.autoStartFailed'))
     } finally {
+      autoActionRef.current = false
       setAutoLoading(false)
     }
   }, [isGenerating, liveRules, loadAutoStatus, novelId])
 
   const handleStopAutoGenerate = useCallback(async () => {
-    if (!autoTask?.id) return
+    if (!autoTask?.id || autoActionRef.current) return
+    autoActionRef.current = true
 
     setAutoStopping(true)
     try {
       await window.electron.workflow.cancel(autoTask.id)
       await loadAutoStatus(true)
       message.info(getUserFacingMessage('worldRules.autoStopRequested'))
+    } catch (error) {
+      console.error(error)
+      message.error(getErrorMessage(error, 'common.executionFailed'))
     } finally {
+      autoActionRef.current = false
       setAutoStopping(false)
     }
   }, [autoTask?.id, loadAutoStatus])
 
   const handleResumeAutoGenerate = useCallback(async () => {
-    if (!autoTask?.id) return
+    if (!autoTask?.id || autoActionRef.current) return
+    autoActionRef.current = true
 
     setAutoLoading(true)
     try {
@@ -423,6 +441,7 @@ export default function WorldRules({ novelId }: Props) {
     } catch (error) {
       message.error(getErrorMessage(error, 'worldRules.autoResumeFailed'))
     } finally {
+      autoActionRef.current = false
       setAutoLoading(false)
     }
   }, [autoTask?.id, liveRules, loadAutoStatus])

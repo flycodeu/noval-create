@@ -125,19 +125,21 @@ export default function RevisionCenterPage({ novelId }: Props) {
   const [draftWarnings, setDraftWarnings] = useState<string[]>([])
   const draftWarningsRef = React.useRef<string[]>([])
   const draftObservabilityRef = React.useRef<{ inputSummary: string; lintWarnings: string[]; rawOutputs: string[] } | null>(null)
+  const refreshRequestRef = React.useRef(0)
   const relatedPageFilter = searchParams.get('relatedPage')?.trim() || undefined
   const entityTypeFilter = searchParams.get('entityType')?.trim() || undefined
   const entityIdFilter = (() => {
     const raw = searchParams.get('entityId')
     if (!raw) return undefined
     const numeric = Number(raw)
-    return Number.isFinite(numeric) && numeric > 0 ? Math.round(numeric) : undefined
+    return Number.isSafeInteger(numeric) && numeric > 0 ? numeric : undefined
   })()
   const scopedFilterSummary = [relatedPageFilter ? `页面=${relatedPageFilter}` : '', entityTypeFilter ? `实体=${entityTypeFilter}${entityIdFilter ? `#${entityIdFilter}` : ''}` : '']
     .filter(Boolean)
     .join('，')
 
   const refresh = useCallback(async () => {
+    const requestId = ++refreshRequestRef.current
     setLoading(true)
     try {
       const [queryResult, nextStats, nextContextStatus, report] = await Promise.all([
@@ -156,16 +158,18 @@ export default function RevisionCenterPage({ novelId }: Props) {
         window.electron.novel.getContextStatus(novelId),
         window.electron.novel.runConsistencyCheck(novelId),
       ])
+      if (refreshRequestRef.current !== requestId) return
       setTasks(queryResult.items)
       setTaskTotal(queryResult.total)
       setStats(nextStats)
       setContextStatus(nextContextStatus)
       setConsistencyReport(report)
     } catch (error) {
+      if (refreshRequestRef.current !== requestId) return
       console.error(error)
       message.error(getErrorMessage(error, 'revisionCenter.loadFailed'))
     } finally {
-      setLoading(false)
+      if (refreshRequestRef.current === requestId) setLoading(false)
     }
   }, [entityIdFilter, entityTypeFilter, keyword, novelId, page, relatedPageFilter, sourceFilter, statusFilter])
 
@@ -263,7 +267,8 @@ export default function RevisionCenterPage({ novelId }: Props) {
   }, [form])
 
   const handleSave = async () => {
-    const values = await form.validateFields()
+    const values = await form.validateFields().catch(() => null)
+    if (!values) return
     setSaving(true)
 
     try {

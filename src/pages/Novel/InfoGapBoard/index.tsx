@@ -236,6 +236,7 @@ export default function InfoGapBoardPage({ novelId }: Props) {
   const [editingFact, setEditingFact] = useState<StoryFact | null>(null)
   const [activeVolumeId, setActiveVolumeId] = useState<number | null>(null)
   const [ratioDraft, setRatioDraft] = useState<number | null>(null)
+  const refreshRequestRef = React.useRef(0)
 
   const sortedVolumes = useMemo(
     () => [...volumes].sort((left, right) => (left.volumeNumber || 0) - (right.volumeNumber || 0)),
@@ -289,6 +290,7 @@ export default function InfoGapBoardPage({ novelId }: Props) {
   )
 
   const refresh = useCallback(async () => {
+    const requestId = ++refreshRequestRef.current
     setLoading(true)
     try {
       const [factRows, volumeRows, chapterRows, characterRows] = await Promise.all([
@@ -297,23 +299,24 @@ export default function InfoGapBoardPage({ novelId }: Props) {
         window.electron.chapter.list(novelId),
         window.electron.character.list(novelId),
       ])
+      if (refreshRequestRef.current !== requestId) return
       setFacts(factRows)
       setVolumes(volumeRows)
       setChapters(chapterRows)
       setCharacters(characterRows)
-      if (!activeVolumeId && volumeRows.length > 0) {
+      setActiveVolumeId((current) => {
+        if (current && volumeRows.some((volume) => volume.id === current)) return current
         const firstVolume = [...volumeRows].sort((left, right) => left.volumeNumber - right.volumeNumber)[0]
-        setActiveVolumeId(firstVolume?.id || null)
-      } else if (activeVolumeId && !volumeRows.some((volume) => volume.id === activeVolumeId)) {
-        setActiveVolumeId(volumeRows[0]?.id || null)
-      }
+        return firstVolume?.id || null
+      })
     } catch (error) {
+      if (refreshRequestRef.current !== requestId) return
       console.error(error)
       message.error(getErrorMessage(error, 'common.loadFailed'))
     } finally {
-      setLoading(false)
+      if (refreshRequestRef.current === requestId) setLoading(false)
     }
-  }, [activeVolumeId, novelId])
+  }, [novelId])
 
   useEffect(() => {
     void refresh()
@@ -350,7 +353,8 @@ export default function InfoGapBoardPage({ novelId }: Props) {
   }, [notifyWorkspaceMutation, refresh])
 
   const handleSave = useCallback(async () => {
-    const rawValues = await form.validateFields()
+    const rawValues = await form.validateFields().catch(() => null)
+    if (!rawValues) return
     const values = normalizeValues(rawValues)
     if (!values.title) {
       message.warning(getUserFacingMessage('infoGapBoard.titleRequired'))
